@@ -107,25 +107,40 @@ class Mamba():
       vocab_size=config_data["vocab_size"]
     )
 
+
     model = Mamba(args)
     state_dict = load_state_dict_hf(pretrained_model_name)
-    for k in state_dict.keys():
-      if "backbone" not in k:
-        print(k)
+    # for k in state_dict.keys():
+    #   if "backbone" not in k:
+    #     print(k)
+    # TODO: why are the conv1d dimensions not the same?
+    # WHAT is get_state_dict doing to my weights!??
     new_state_dict = {}
     for key in state_dict:
+      #TODO: why is removing backbone messing the shapes up?
       new_key = key.replace("backbone.", "")
       new_state_dict[new_key] = state_dict[key]
+      if new_state_dict[new_key].shape != state_dict[key].shape:
+        print(f"old shape: {state_dict[key].shape}")
+        print(f"new shape: {new_state_dict[new_key].shape}")
+    #   if new_state_dict[new_key].shape == (2048, 1, 4):
+    #     print(f"(2048, 1, 4): {new_key}")
+    #   if new_state_dict[new_key].shape == (2048, 512, 4):
+    #     print(f"(2048, 512, 4): {new_key}")
+    
 
-    for k, v in new_state_dict.items():
-      if k != "lm_head.weight":
-        if v.shape != state_dict["backbone."+k].shape:
-          print(k)
+    # NOTE: shape should be (2048, 1, 4)
+    
+    
+    # for k, v in new_state_dict.items():
+    #   if k != "lm_head.weight":
+    #     if v.shape != state_dict["backbone."+k].shape:
+    #       print(f"K is: {k}")
 
-    print(f"len state_dict: {len(state_dict)}")
-    print(f"len model.get_parameters: {len(nn.state.get_parameters(model))}")
+    # print(f"len state_dict: {len(state_dict)}")
+    # print(f"len model.get_parameters: {len(nn.state.get_parameters(model))}")
     nn.state.load_state_dict(model, new_state_dict)
-    print(f"len model.get_parameters after load: {len(nn.state.get_parameters(model))}")
+    # print(f"len model.get_parameters after load: {len(nn.state.get_parameters(model))}")
     return model
 
 
@@ -157,7 +172,7 @@ class ResidualBlock():
     output = self.mixer(self.norm(x)) + x
     return output
             
-
+# conv1d weight = (2048, 512, 5) actual weight = (2048, 1, 4)
 class MambaBlock():
   def __init__(self, args: ModelArgs):
     # Figure 3, Section 3.4, [1]
@@ -168,7 +183,7 @@ class MambaBlock():
       out_channels=args.d_inner,
       bias=args.conv_bias,
       kernel_size=args.d_conv,
-      groups=args.d_conv,
+      groups=args.d_inner,
       padding=args.d_conv - 1
     )
     # x_proj takes in `x` and outputs the input-specific Δ, B, C
@@ -298,23 +313,25 @@ class RMSNorm():
     output = x * (x.pow(2).mean(axis=-1, keepdim=True) + self.eps).rsqrt() * self.weight
     return output
 
-# TODO: compare my probs to torch probs
 def generate(model, tokenizer, prompt: str, gen_length: int = 20, sample: bool = True, top_k: int = 40):
   inp = Tensor(tokenizer(prompt, max_length=gen_length, truncation=True, return_tensors="np")["input_ids"])
-  for tok in trange(gen_length):
+  for tok in range(5):
     indices = inp
-    next_logits = model(indices)[:, -1]   
+    next_logits = model(indices)[:, -1]
+    # print(next_logits.numpy())   
     probs = next_logits.softmax(axis=-1)   
     if top_k is not None:
       # TODO: do not convert to np - Tensor probably has something that can do this
       probs = probs.numpy()
       target_indices = np.argpartition(probs, -top_k, axis=1)[:, -top_k:]
+      # print(target_indices.shape)
       values = np.take_along_axis(probs, target_indices, axis=1)
+      # print(values.shape)
       probs[probs < values[:, -1: None]] = 0
       probs = Tensor(probs)
       probs /= probs.sum(axis=1, keepdim=True)
-
     nxt = probs.multinomial(num_samples=1) if sample else probs.argmax(axis=-1)[:, None] 
+    # print(inp.numpy())
     # print(nxt.shape)
     # print(nxt.numpy())
 
@@ -325,7 +342,6 @@ def generate(model, tokenizer, prompt: str, gen_length: int = 20, sample: bool =
     # print("Selected token indices:", nxt.numpy())
     inp = inp.cat(nxt, dim=1)
     # print(inp.shape)
-
   out = [tokenizer.decode(output.numpy().tolist()) for output in inp][0]
 #   print(f"len output {len(out)}")
   return out
@@ -346,10 +362,25 @@ def main():
     pretrained_model_name = "state-spaces/mamba-370m"
 
     model = Mamba.from_pretrained(pretrained_model_name)
-    # normf does not have correct weights
-    print(model.norm_f.weight[:10].numpy())
-    # tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b")
-    # print(generate(model, tokenizer, "What is 2 + 2?"))
+    # print(model.norm_f.weight[:10].numpy())
+    # print(model.layers[0].mixer.conv1d.weight[0][0].numpy())
+    tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b")
+    print(generate(model, tokenizer, "Mamba is the"))
+    print(generate(model, tokenizer, "Mamba is the"))
+    print(generate(model, tokenizer, "Mamba is the"))
+
+    # NOTE: weights should be good
+    """
+    from mambaTest import MambaTest
+    test_model = MambaTest.from_pretrained("state-spaces/mamba-370m")
+    test_weights = test_model.state_dict()
+    cnt = 0
+    for k, v in nn.state.get_state_dict(model).items():
+      cnt += 1
+      if not np.allclose(v.numpy(), test_weights[k]):
+        print(v.dtype, test_weights[k].dtype)
+        print(k)
+    """
 
 if __name__ == "__main__":
   main()
