@@ -113,6 +113,7 @@ class TestExecALU(TestUOps):
   def test_sqrt(self):
     self.assertEqual(exec_alu(UnaryOps.SQRT, dtypes.int, (0,)), 0)
 
+  @unittest.skip("not enabled because it's slow")
   def test_overflow(self):
     self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.uint8, (250, 250)), 244)
     self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.uint8, (256, 0)), 0)

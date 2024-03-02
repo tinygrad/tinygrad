@@ -43,10 +43,11 @@ def exec_alu(arg, dtype, p):
   elif arg == BinaryOps.CMPLT: ret = p[0] < p[1]
   elif arg == BinaryOps.DIV: ret = p[0]//p[1] if dtypes.is_int(dtype) else (p[0]/p[1] if p[1] != 0 else math.nan)
   elif arg == BinaryOps.MOD: ret = p[0]%p[1]
-  else: raise NotImplementedError(f"no support for {arg}")
-  if not dtypes.is_int(dtype): return ret
-  adjusted = 0 if dtypes.is_unsigned(dtype) else 2 ** (dtype.itemsize * 8 - 1)
-  return (ret + adjusted) % 2 ** (dtype.itemsize * 8) - adjusted
+  return ret
+  #else: raise NotImplementedError(f"no support for {arg}")
+  #if not dtypes.is_int(dtype): return ret
+  #adjusted = 0 if dtypes.is_unsigned(dtype) else 2 ** (dtype.itemsize * 8 - 1)
+  #return (ret + adjusted) % 2 ** (dtype.itemsize * 8) - adjusted
 
 def uop_alu_resolve(u:UOp) -> sint:
   if u.uop == UOps.CONST: return u.arg
