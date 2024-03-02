@@ -1,5 +1,5 @@
 from __future__ import annotations
-import functools
+import functools, math
 from typing import List, Set, Optional, Tuple, Any, Dict, DefaultDict
 from collections import defaultdict
 from tinygrad.helpers import DEBUG, flatten, all_same
@@ -24,6 +24,30 @@ class UOp:
   arg: Any
   def __repr__(self):
     return f"{str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.uop for x in self.vin]):32s} {self.arg}"
+
+def exec_alu(arg, dtype, p):
+  if arg == TernaryOps.WHERE: ret = p[1] if p[0] else p[2]
+  elif arg == UnaryOps.LOG2: ret = math.log2(p[0]) if p[0] > 0 else -math.inf if p[0] == 0 else math.nan
+  elif arg == UnaryOps.EXP2:
+    try: ret = math.exp(p[0]*math.log(2))
+    except OverflowError: ret = math.inf
+  elif arg == UnaryOps.SQRT: ret = math.sqrt(p[0]) if p[0] >= 0 else math.nan
+  elif arg == UnaryOps.SIN: ret = math.sin(p[0])
+  elif arg == UnaryOps.NEG: ret = -p[0]
+  elif arg == BinaryOps.MUL: ret = p[0]*p[1]
+  elif arg == BinaryOps.ADD: ret = p[0]+p[1]
+  elif arg == BinaryOps.SUB: ret = p[0]-p[1]
+  elif arg == BinaryOps.XOR: ret = p[0]^p[1]
+  elif arg == BinaryOps.MAX: ret = max(p[0], p[1])
+  elif arg == BinaryOps.CMPEQ: ret = p[0] == p[1]
+  elif arg == BinaryOps.CMPLT: ret = p[0] < p[1]
+  elif arg == BinaryOps.DIV: ret = p[0]//p[1] if dtypes.is_int(dtype) else (p[0]/p[1] if p[1] != 0 else math.nan)
+  elif arg == BinaryOps.MOD: ret = p[0]%p[1]
+  return ret
+  #else: raise NotImplementedError(f"no support for {arg}")
+  #if not dtypes.is_int(dtype): return ret
+  #adjusted = 0 if dtypes.is_unsigned(dtype) else 2 ** (dtype.itemsize * 8 - 1)
+  #return (ret + adjusted) % 2 ** (dtype.itemsize * 8) - adjusted
 
 def uop_alu_resolve(u:UOp) -> sint:
   if u.uop == UOps.CONST: return u.arg
@@ -68,6 +92,7 @@ class UOpGraph:
         # constant folding
         if arg is UnaryOps.NEG and vin[0].uop is UOps.CONST: return self.add(UOps.CONST, dtype, arg=-vin[0].arg, insert_before=insert_before)
         if arg is TernaryOps.WHERE and vin[1] == vin[2]: return vin[1] # a conditional with the same results either way is a noop
+        if arg is TernaryOps.WHERE and vin[0].uop is UOps.CONST: return vin[1] if vin[0].arg else vin[2]
         if arg is BinaryOps.MUL and vin[0].uop is UOps.CONST and vin[1].uop is UOps.CONST and dtype is not None and dtypes.is_float(dtype):
           return self.add(UOps.CONST, dtype, arg=vin[0].arg * vin[1].arg, insert_before=insert_before)
         # zero folding
