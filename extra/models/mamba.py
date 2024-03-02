@@ -55,7 +55,6 @@ class Mamba():
   def __init__(self, args: ModelArgs):
     self.args = args
     self.embedding = nn.Embedding(args.vocab_size, args.d_model)
-    # TODO: does nn.state.get_parameters catch these?
     self.layers: List[ResidualBlock] = [ResidualBlock(args) for _ in range(args.n_layer)]
     self.norm_f = RMSNorm(args.d_model)
     self.lm_head = nn.Linear(args.d_model, args.vocab_size, bias=False)
@@ -97,6 +96,7 @@ class Mamba():
       return json.load(open(resolved_archive_file))
     
     def load_state_dict_hf(model_name: str) -> Dict[str, Tensor]:
+      # TODO: remove cached_file use gpt2 like loading function instead
       resolved_archive_file = cached_file(model_name, "pytorch_model.bin", _raise_exceptions_for_missing_entries=False)
       return nn.state.torch_load(resolved_archive_file)
     
@@ -106,12 +106,26 @@ class Mamba():
       n_layer=config_data["n_layer"],
       vocab_size=config_data["vocab_size"]
     )
-    
+
     model = Mamba(args)
     state_dict = load_state_dict_hf(pretrained_model_name)
-    # print(f"len state_dict: {len(state_dict)}")
-    # print(f"len model.get_parameters: {len(nn.state.get_parameters(model))}")
-    nn.state.load_state_dict(model, state_dict, strict=False)
+    for k in state_dict.keys():
+      if "backbone" not in k:
+        print(k)
+    new_state_dict = {}
+    for key in state_dict:
+      new_key = key.replace("backbone.", "")
+      new_state_dict[new_key] = state_dict[key]
+
+    for k, v in new_state_dict.items():
+      if k != "lm_head.weight":
+        if v.shape != state_dict["backbone."+k].shape:
+          print(k)
+
+    print(f"len state_dict: {len(state_dict)}")
+    print(f"len model.get_parameters: {len(nn.state.get_parameters(model))}")
+    nn.state.load_state_dict(model, new_state_dict)
+    print(f"len model.get_parameters after load: {len(nn.state.get_parameters(model))}")
     return model
 
 
@@ -284,7 +298,7 @@ class RMSNorm():
     output = x * (x.pow(2).mean(axis=-1, keepdim=True) + self.eps).rsqrt() * self.weight
     return output
 
-
+# TODO: compare my probs to torch probs
 def generate(model, tokenizer, prompt: str, gen_length: int = 20, sample: bool = True, top_k: int = 40):
   inp = Tensor(tokenizer(prompt, max_length=gen_length, truncation=True, return_tensors="np")["input_ids"])
   for tok in trange(gen_length):
@@ -332,8 +346,10 @@ def main():
     pretrained_model_name = "state-spaces/mamba-370m"
 
     model = Mamba.from_pretrained(pretrained_model_name)
-    tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b")
-    print(generate(model, tokenizer, "What is 2 + 2?"))
+    # normf does not have correct weights
+    print(model.norm_f.weight[:10].numpy())
+    # tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b")
+    # print(generate(model, tokenizer, "What is 2 + 2?"))
 
 if __name__ == "__main__":
   main()
