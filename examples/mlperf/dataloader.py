@@ -33,7 +33,7 @@ def shuffled_indices(n, seed=None):
     yield indices[i]
     del indices[i]
 
-def loader_process(q_in, q_out, X:Tensor):
+def loader_process(q_in, q_out, X:Tensor, seed):
   import signal
   from extra.datasets.imagenet import center_crop, preprocess_train
 
@@ -41,7 +41,7 @@ def loader_process(q_in, q_out, X:Tensor):
 
   with Context(DEBUG=0):
     while (_recv := q_in.get()) is not None:
-      idx, fn, seed, val = _recv
+      idx, fn, val = _recv
       img = Image.open(fn)
       img = img.convert('RGB') if img.mode != "RGB" else img
 
@@ -54,8 +54,8 @@ def loader_process(q_in, q_out, X:Tensor):
       else:
         # reseed rng for determinism
         if seed is not None:
-          np.random.seed(seed)
-          random.seed(seed)
+          np.random.seed(seed * 2 ** 20 + idx)
+          random.seed(seed * 2 ** 20 + idx)
         img = preprocess_train(img)
 
       # broken out
@@ -90,7 +90,7 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None):
 
   procs = []
   for _ in range(cpu_count()):
-    p = Process(target=loader_process, args=(q_in, q_out, X))
+    p = Process(target=loader_process, args=(q_in, q_out, X, seed))
     p.daemon = True
     p.start()
     procs.append(p)
@@ -98,9 +98,8 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None):
   gen = shuffled_indices(len(files), seed=seed) if shuffle else iter(range(len(files)))
   def enqueue_batch(num):
     for idx in range(num*batch_size, (num+1)*batch_size):
-      fidx = next(gen)
-      fn = files[fidx]
-      q_in.put((idx, fn, (seed+1) * len(files) + fidx if seed is not None else None, val))
+      fn = files[next(gen)]
+      q_in.put((idx, fn, val))
       Y[idx] = cir[fn.split("/")[-2]]
   for bn in range(BATCH_COUNT): enqueue_batch(bn)
 
