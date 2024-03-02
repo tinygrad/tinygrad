@@ -130,7 +130,6 @@ def train_resnet():
     i, proc = 0, data_get(it)
     st = time.perf_counter()
     while proc is not None:
-      if getenv("TESTEVAL"): break
 
       GlobalCounters.reset()
       (loss, top_1_acc), proc = train_step(proc[0], proc[1]), proc[2]
@@ -189,7 +188,7 @@ def train_resnet():
         except StopIteration:
           next_proc = None
 
-        loss, top_1_acc = loss.numpy(), top_1_acc.numpy().item() / EVAL_BS
+        loss, top_1_acc = loss.numpy().item(), top_1_acc.numpy().item() / EVAL_BS
         eval_loss.append(loss)
         eval_top_1_acc.append(top_1_acc)
         proc, next_proc = next_proc, None  # return old cookie
@@ -217,7 +216,7 @@ def train_resnet():
         achieved = True
 
       # checkpoint every time we eval
-      if not getenv("TESTEVAL") and getenv("CKPT"):
+      if getenv("CKPT"):
         if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
         if WANDB and wandb.run is not None:
           fn = f"./ckpts/{time.strftime('%Y%m%d_%H%M%S')}_{wandb.run.id}_e{e}.safe"
