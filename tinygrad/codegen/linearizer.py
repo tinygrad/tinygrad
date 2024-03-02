@@ -7,7 +7,7 @@ from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.helpers import colored, DEBUG, prod, getenv, to_function_name
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ConstBuffer, MemBuffer, BufferOps, get_lazyop_info
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, MaxNode, LtNode, AndNode, RedNode, factor_exprs
+from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, MaxNode, LtNode, AndNode
 from tinygrad.codegen.kernel import LocalBuffer, Kernel
 from tinygrad.features.image import to_image_idx
 
@@ -48,7 +48,7 @@ class Linearizer(Kernel):
 
   # NOTE: the consts have to be cached for deduping of downstream uops to work
   def const(self, b:Union[int,float], dtype=None, insert_before=None) -> UOp:
-    return self.uops.add(UOps.CONST, dtype or (dtypes.float32 if isinstance(b, float) else dtypes.int32), tuple(), b, insert_before=insert_before)
+    return self.uops.add(UOps.CONST, dtype or (dtypes.default_float if isinstance(b, float) else dtypes.default_int), tuple(), b, insert_before=insert_before)
 
   def cast(self, val: UOp, dtype) -> UOp: return self.uops.add(UOps.CAST, dtype, (val,)) if val.dtype != dtype else val
 

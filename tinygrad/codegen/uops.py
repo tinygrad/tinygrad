@@ -224,7 +224,7 @@ class UOpGraph:
         if (phi_op is None or not dtypes.is_int(phi_op.dtype)
           or (any([op.uop not in [UOps.LOOP, UOps.ALU, UOps.PHI, UOps.ENDLOOP] for op in loop_ops]))
           or not (any([op.uop == UOps.ALU and op.arg == BinaryOps.CMPLT for op in loop_ops])) #non-cmplt not supported
-          or loop_exponent(phi_op) > 1
+          or loop_exponent(phi_op) != 1
           or (any([op.uop not in [UOps.CONST, UOps.SPECIAL, UOps.LOOP, UOps.DEFINE_ACC, UOps.ALU] for op in get_recursive_parents(phi_op)]))):
           break
         if DEBUG >= 4: print(f"removing loop")
