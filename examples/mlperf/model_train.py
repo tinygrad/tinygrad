@@ -1,13 +1,9 @@
-from tinygrad import GlobalCounters, Device, TinyJit
-from tinygrad.dtype import dtypes
-from tinygrad.helpers import getenv
-from tinygrad.tensor import Tensor
-from tinygrad.nn.state import get_parameters, get_state_dict
-from tinygrad.nn import state
-from tqdm import tqdm
-import wandb
-import time
 import os
+import time
+from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
+from tinygrad.helpers import getenv
+from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_save
+from tqdm import tqdm
 
 def train_resnet():
   from extra.models.resnet import ResNet50, ResNet18, UnsyncedBatchNorm
@@ -65,13 +61,14 @@ def train_resnet():
 
   start_epoch = 0
   if ckpt:=getenv("RESUME", ""):
-    load_training_state(model, optimizer, scheduler, state.safe_load(ckpt))
+    load_training_state(model, optimizer, scheduler, safe_load(ckpt))
     start_epoch = int(scheduler.epoch_counter.numpy().item() / steps_in_train_epoch)
     print(f"resuming from {ckpt} at epoch {start_epoch}")
 
   # ** init wandb **
   WANDB = getenv("WANDB")
   if WANDB:
+    import wandb
     wandb_config = {
       "BS": BS,
       "EVAL_BS": EVAL_BS,
@@ -215,7 +212,7 @@ def train_resnet():
       # save model if achieved target
       if not achieved and total_top_1 >= target:
         fn = f"./ckpts/{model_name}_cats{num_classes}.safe"
-        state.safe_save(state.get_state_dict(model), fn)
+        safe_save(get_state_dict(model), fn)
         print(f" *** Model saved to {fn} ***")
         achieved = True
 
@@ -227,7 +224,7 @@ def train_resnet():
         else:
           fn = f"./ckpts/{time.strftime('%Y%m%d_%H%M%S')}_e{e}.safe"
         print(f"saving ckpt to {fn}")
-        state.safe_save(get_training_state(model, optimizer, scheduler), fn)
+        safe_save(get_training_state(model, optimizer, scheduler), fn)
 
 def train_retinanet():
   # TODO: Retinanet
