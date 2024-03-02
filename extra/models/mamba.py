@@ -1,32 +1,17 @@
-# https://github.com/johnma2006/mamba-minimal/tree/master
+# [1] Mamba: Linear-Time Sequence Modeling with Selective State Spaces (Albert Gu and Tri Dao): 
+# https://arxiv.org/abs/2312.00752
 
-"""
-[1] Mamba: Linear-Time Sequence Modeling with Selective State Spaces (Albert Gu and Tri Dao): 
-https://arxiv.org/abs/2312.00752
+# [2] The Annotated S4 (Sasha Rush and Sidd Karamcheti): 
+# https://srush.github.io/annotated-s4
 
-[2] The Annotated S4 (Sasha Rush and Sidd Karamcheti): 
-https://srush.github.io/annotated-s4
-
-
-b: batch size                       (`B` in Mamba paper [1] Algorithm 2)
-l: sequence length                  (`L` in [1] Algorithm 2)
-d or d_model: hidden dim
-n or d_state: latent state dim      (`N` in [1] Algorithm 2)
-expand: expansion factor            (`E` in [1] Section 3.4)
-d_in or d_inner: d * expand         (`D` in [1] Algorithm 2)
-A, B, C, D: state space parameters  (See any state space representation formula)
-                                    (B, C are input-dependent (aka selective, a key innovation in Mamba); A, D are not)
-Δ or delta: input-dependent step size
-dt_rank: rank of Δ                  (See [1] Section 3.6 "Parameterization of ∆")
-
-"""
+# [3] https://github.com/johnma2006/mamba-minimal/tree/master
 
 from transformers.utils.hub import cached_file
 from tinygrad import Tensor, Device, nn, dtypes
+from einops import rearrange
 from transformers import AutoTokenizer
 from typing import Union, Dict, List
 from dataclasses import dataclass
-from tqdm import trange
 import numpy as np
 import math
 import json
@@ -70,8 +55,12 @@ class Mamba():
     class MambaLMHeadModel: 
     https://github.com/state-spaces/mamba/blob/main/mamba_ssm/models/mixer_seq_simple.py#L173
     """
+    # print(f"my incoming mamba forward shape: {input_ids.shape}")
     x = self.embedding(input_ids)
-    for layer in self.layers: x = layer(x)    
+    # print(f"my embed mamba forward shape: {x.shape}")
+
+    for layer in self.layers: x = layer(x)  
+
     x = self.norm_f(x)
     logits = self.lm_head(x)
     return logits
@@ -96,7 +85,7 @@ class Mamba():
       return json.load(open(resolved_archive_file))
     
     def load_state_dict_hf(model_name: str) -> Dict[str, Tensor]:
-      # TODO: remove cached_file use gpt2 like loading function instead
+      # TODO: remove cached_file use gpt2 file loading function instead
       resolved_archive_file = cached_file(model_name, "pytorch_model.bin", _raise_exceptions_for_missing_entries=False)
       return nn.state.torch_load(resolved_archive_file)
     
@@ -107,40 +96,15 @@ class Mamba():
       vocab_size=config_data["vocab_size"]
     )
 
-
     model = Mamba(args)
     state_dict = load_state_dict_hf(pretrained_model_name)
-    # for k in state_dict.keys():
-    #   if "backbone" not in k:
-    #     print(k)
-    # TODO: why are the conv1d dimensions not the same?
-    # WHAT is get_state_dict doing to my weights!??
+    
     new_state_dict = {}
     for key in state_dict:
-      #TODO: why is removing backbone messing the shapes up?
       new_key = key.replace("backbone.", "")
       new_state_dict[new_key] = state_dict[key]
-      if new_state_dict[new_key].shape != state_dict[key].shape:
-        print(f"old shape: {state_dict[key].shape}")
-        print(f"new shape: {new_state_dict[new_key].shape}")
-    #   if new_state_dict[new_key].shape == (2048, 1, 4):
-    #     print(f"(2048, 1, 4): {new_key}")
-    #   if new_state_dict[new_key].shape == (2048, 512, 4):
-    #     print(f"(2048, 512, 4): {new_key}")
     
-
-    # NOTE: shape should be (2048, 1, 4)
-    
-    
-    # for k, v in new_state_dict.items():
-    #   if k != "lm_head.weight":
-    #     if v.shape != state_dict["backbone."+k].shape:
-    #       print(f"K is: {k}")
-
-    # print(f"len state_dict: {len(state_dict)}")
-    # print(f"len model.get_parameters: {len(nn.state.get_parameters(model))}")
     nn.state.load_state_dict(model, new_state_dict)
-    # print(f"len model.get_parameters after load: {len(nn.state.get_parameters(model))}")
     return model
 
 
@@ -169,7 +133,10 @@ class ResidualBlock():
         [Norm -> Mamba -> Add] -> [Norm -> Mamba -> Add] -> [Norm -> Mamba -> Add] -> ....
     
     """
+
+    # mixer (Mamba Block) is bugged
     output = self.mixer(self.norm(x)) + x
+    
     return output
             
 # conv1d weight = (2048, 512, 5) actual weight = (2048, 1, 4)
@@ -211,12 +178,16 @@ class MambaBlock():
     https://github.com/state-spaces/mamba/blob/main/mamba_ssm/ops/selective_scan_interface.py#L311
         
     """
+    
     (b, l, d) = x.shape
     x_and_res = self.in_proj(x)  # shape (b, l, 2 * d_in)
-    (x, res) = x_and_res.split(sizes=[self.args.d_inner, self.args.d_inner], dim=-1)
-    x = x.reshape((x.shape[0], x.shape[2], x.shape[1]))
+    (x, res) = x_and_res.split(sizes=[self.args.d_inner, self.args.d_inner], dim=-1) 
+    # TODO: replace einops rearrange with tinygrad functions everywhere
+    # x = x.reshape((x.shape[0], x.shape[2], x.shape[1]))
+    x = Tensor(rearrange(x.numpy(), "b l d_in -> b d_in l"))   
     x = self.conv1d(x)[:, :, :l]
-    x = x.reshape((x.shape[0], x.shape[2], x.shape[1]))
+    # x = x.reshape((x.shape[0], x.shape[2], x.shape[1]))
+    x = Tensor(rearrange(x.numpy(), "b d_in l -> b l d_in"))
     x = x.silu()
     y = self.ssm(x)
     y = y * res.silu()
@@ -244,12 +215,12 @@ class MambaBlock():
     #     ∆, B, C are input-dependent (this is a key difference between Mamba and the linear time invariant S4,
     #                                  and is why Mamba is called **selective** state spaces)
     
-    A = -self.A_log.float().exp() # shape (d_in, n)
+    A = -self.A_log.float().exp() 
     D = self.D.float()
-    x_dbl = self.x_proj(x)  # (b, l, dt_rank + 2*n)
+    x_dbl = self.x_proj(x) 
     (delta, B, C) = x_dbl.split(sizes=[self.args.dt_rank, n, n], dim=-1)  # delta: (b, l, dt_rank). B, C: (b, l, n)
     delta = self.dt_proj(delta).softplus()  # (b, l, d_in)
-    y = self.selective_scan(x, delta, A, B, C, D)  # This is similar to run_SSM(A, B, C, u) in The Annotated S4 [2]
+    y = self.selective_scan(x, delta, A, B, C, D)  #  run_SSM(A, B, C, u) in The Annotated S4 [2]
     return y
 
     
@@ -283,11 +254,7 @@ class MambaBlock():
     """
     (b, l, d_in) = u.shape
     n = A.shape[1]
-    
-    # Discretize continuous parameters (A, B)
-    # - A is discretized using zero-order hold (ZOH) discretization (see Section 2 Equation 4 in the Mamba paper [1])
-    # - B is discretized using a simplified Euler discretization instead of ZOH. From a discussion with authors:
-    #   "A is the more important term and the performance doesn"t change much with the simplification on B"
+    # Section 2 Equation 4 in the Mamba paper [1])
     deltaA = Tensor.einsum("bld,dn->bldn", delta, A).exp()
     deltaB_u = Tensor.einsum("bld,bln,bld->bldn", delta, B, u)
     # Perform selective scan (see scan_SSM() in The Annotated S4 [2])
@@ -313,42 +280,28 @@ class RMSNorm():
     output = x * (x.pow(2).mean(axis=-1, keepdim=True) + self.eps).rsqrt() * self.weight
     return output
 
+
 def generate(model, tokenizer, prompt: str, gen_length: int = 20, sample: bool = True, top_k: int = 40):
-  inp = Tensor(tokenizer(prompt, max_length=gen_length, truncation=True, return_tensors="np")["input_ids"])
-  for tok in range(5):
+  inp = Tensor(tokenizer(prompt, return_tensors="np")["input_ids"])
+  for tok in range(gen_length):
+    Tensor.no_grad = True
     indices = inp
-    next_logits = model(indices)[:, -1]
-    # print(next_logits.numpy())   
+    next_logits = model(indices)[:, -1] 
+    Tensor.no_grad = False
     probs = next_logits.softmax(axis=-1)   
     if top_k is not None:
       # TODO: do not convert to np - Tensor probably has something that can do this
       probs = probs.numpy()
       target_indices = np.argpartition(probs, -top_k, axis=1)[:, -top_k:]
-      # print(target_indices.shape)
       values = np.take_along_axis(probs, target_indices, axis=1)
-      # print(values.shape)
       probs[probs < values[:, -1: None]] = 0
       probs = Tensor(probs)
       probs /= probs.sum(axis=1, keepdim=True)
     nxt = probs.multinomial(num_samples=1) if sample else probs.argmax(axis=-1)[:, None] 
-    # print(inp.numpy())
-    # print(nxt.shape)
-    # print(nxt.numpy())
-
-    # print(f"Token {tok + 1}:")
-    # print("Input indices:", indices.numpy())
-    # print("Next logits:", next_logits)
-    # print("Generated probabilities:", probs.numpy())
-    # print("Selected token indices:", nxt.numpy())
     inp = inp.cat(nxt, dim=1)
-    # print(inp.shape)
   out = [tokenizer.decode(output.numpy().tolist()) for output in inp][0]
-#   print(f"len output {len(out)}")
   return out
 
-# TODO: it seems like the model is not remembering context
-# the model just repeats the last seen token
-# maybe the layers are not "linked" together
 
 def main():
     # TODO: add device=device support
@@ -362,25 +315,12 @@ def main():
     pretrained_model_name = "state-spaces/mamba-370m"
 
     model = Mamba.from_pretrained(pretrained_model_name)
-    # print(model.norm_f.weight[:10].numpy())
-    # print(model.layers[0].mixer.conv1d.weight[0][0].numpy())
     tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b")
-    print(generate(model, tokenizer, "Mamba is the"))
-    print(generate(model, tokenizer, "Mamba is the"))
-    print(generate(model, tokenizer, "Mamba is the"))
+    
+    print(generate(model, tokenizer, "Mamba is the", gen_length=5))
+    print(generate(model, tokenizer, "Mamba is the", gen_length=5))
+    print(generate(model, tokenizer, "Mamba is the", gen_length=5))
 
-    # NOTE: weights should be good
-    """
-    from mambaTest import MambaTest
-    test_model = MambaTest.from_pretrained("state-spaces/mamba-370m")
-    test_weights = test_model.state_dict()
-    cnt = 0
-    for k, v in nn.state.get_state_dict(model).items():
-      cnt += 1
-      if not np.allclose(v.numpy(), test_weights[k]):
-        print(v.dtype, test_weights[k].dtype)
-        print(k)
-    """
-
+    
 if __name__ == "__main__":
   main()
