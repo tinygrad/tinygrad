@@ -1,7 +1,7 @@
 import os
 import time
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, BEAM, WINO
 from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_save
 from tqdm import tqdm
 
@@ -11,20 +11,18 @@ def train_resnet():
   from extra.datasets.imagenet import get_train_files, get_val_files
   from extra.lr_scheduler import PolynomialLR
 
-  seed = getenv("SEED", 42)
+  config = {}
+  seed = config["seed"] = getenv("SEED", 42)
   Tensor.manual_seed(seed)  # seed for weight initialization
 
-  GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
+  GPUS = config["GPUS"] = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
   UnsyncedBatchNorm.devices = len(GPUS)
   print(f"Training on {GPUS}")
   for x in GPUS: Device[x]
 
   # ** model definition **
   num_classes = 1000
-  if getenv("SMALL"):
-    model, model_name = ResNet18(num_classes), "resnet18"
-  else:
-    model, model_name = ResNet50(num_classes), "resnet50"
+  model = ResNet50(num_classes)
 
   for k, x in get_state_dict(model).items():
     if not getenv("SYNCBN") and ("running_mean" in k or "running_var" in k):
@@ -34,18 +32,23 @@ def train_resnet():
   parameters = get_parameters(model)
 
   # ** hyperparameters **
-  epochs = getenv("EPOCHS", 45)
-  BS = getenv("BS", 104 * len(GPUS))  # fp32 GPUS<=6 7900xtx can fit BS=112
-  EVAL_BS = getenv("EVAL_BS", BS)
-  base_lr = getenv("LR", 8.4 * (BS/2048))
-  lr_warmup_epochs = 5
-  decay = getenv("DECAY", 2e-4)
+  epochs            = config["epochs"]            = getenv("EPOCHS", 45)
+  BS                = config["BS"]                = getenv("BS", 104 * len(GPUS))  # fp32 GPUS<=6 7900xtx can fit BS=112
+  EVAL_BS           = config["EVAL_BS"]           = getenv("EVAL_BS", BS)
+  base_lr           = config["base_lr"]           = getenv("LR", 8.4 * (BS/2048))
+  lr_warmup_epochs  = config["lr_warmup_epochs"]  = 5
+  decay             = config["decay"]             = getenv("DECAY", 2e-4)
+
   target, achieved = getenv("TARGET", 0.759), False
   eval_start_epoch = getenv("EVAL_START_EPOCH", 2)
   eval_epochs = getenv("EVAL_EPOCHS", 4)
 
-  steps_in_train_epoch = (len(get_train_files()) // BS)
-  steps_in_val_epoch = (len(get_val_files()) // EVAL_BS)
+  steps_in_train_epoch  = config["steps_in_train_epoch"]  = (len(get_train_files()) // BS)
+  steps_in_val_epoch    = config["steps_in_val_epoch"]    = (len(get_val_files()) // EVAL_BS)
+
+  config["BEAM"]    = BEAM.value
+  config["WINO"]    = WINO.value
+  config["SYNCBN"]  = getenv("SYNCBN")
 
   # ** Optimizer **
   from examples.mlperf.optimizers import LARS
@@ -69,28 +72,8 @@ def train_resnet():
   WANDB = getenv("WANDB")
   if WANDB:
     import wandb
-    wandb_config = {
-      "BS": BS,
-      "EVAL_BS": EVAL_BS,
-      "base_lr": base_lr,
-      "epochs": epochs,
-      "classes": num_classes,
-      "decay": decay,
-      "train_files": len(get_train_files()),
-      "eval_files": len(get_val_files()),
-      "steps_in_train_epoch": steps_in_train_epoch,
-      "GPUS": GPUS,
-      "BEAM": getenv("BEAM"),
-      "WINO": getenv("WINO"),
-      "SYNCBN": getenv("SYNCBN"),
-      "model": model_name,
-      "optimizer": optimizer.__class__.__name__,
-      "scheduler": scheduler.__class__.__name__,
-    }
-    if getenv("WANDB_RESUME", ""):
-      wandb.init(id=getenv("WANDB_RESUME", ""), resume="must", config=wandb_config)
-    else:
-      wandb.init(config=wandb_config)
+    wandb_args = {"id": wandb_id, "resume": "must"} if (wandb_id := getenv("WANDB_RESUME", "")) else {}
+    wandb.init(config=config, **wandb_args)
 
   # ** jitted steps **
   input_mean = Tensor([123.68, 116.78, 103.94], device=GPUS, dtype=dtypes.float32).reshape(1, -1, 1, 1)
