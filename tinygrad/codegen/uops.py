@@ -250,4 +250,3 @@ class UOpGraph:
         elif u.arg == "__cuda_mma_m16n8k16_f16_f32": flops += 2*(8*16*16)//32 * mults
         else: raise Exception("not implemented")
     return flops, mem
-
