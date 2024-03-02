@@ -98,21 +98,18 @@ def train_resnet():
     loss = out.sparse_categorical_crossentropy(Y, label_smoothing=0.1)
     top_1 = (out.argmax(-1) == Y).sum()
     return loss.realize(), top_1.realize()
+  def data_get(it):
+    x, y, cookie = next(it)
+    return x.shard(GPUS, axis=0).realize(), Tensor(y).shard(GPUS, axis=0), cookie
 
   # ** epoch loop **
   for e in range(start_epoch, epochs):
-    Tensor.training = True
-
-    it = iter(tqdm(t := batch_load_resnet(batch_size=BS, val=False, shuffle=True, seed=seed*epochs + e), total=steps_in_train_epoch))
-    def data_get(it):
-      x, y, cookie = next(it)
-      return x.shard(GPUS, axis=0).realize(), Tensor(y).shard(GPUS, axis=0), cookie
-
     # ** train loop **
+    Tensor.training = True
+    it = iter(tqdm(t := batch_load_resnet(batch_size=BS, val=False, shuffle=True, seed=seed*epochs + e), total=steps_in_train_epoch))
     i, proc = 0, data_get(it)
     st = time.perf_counter()
     while proc is not None:
-
       GlobalCounters.reset()
       (loss, top_1_acc), proc = train_step(proc[0], proc[1]), proc[2]
 
@@ -134,16 +131,8 @@ def train_resnet():
         f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(pt - st) * 1000.0:7.2f} ms python, {(dt - pt) * 1000.0:6.2f} ms fetch data, {(cl - dt) * 1000.0:7.2f} ms {device_str},"
         f" {loss:5.2f} loss, {top_1_acc:3.2f} acc, {optimizer.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS")
       if WANDB:
-        wandb.log({"lr": optimizer.lr.numpy(),
-                   "train/loss": loss,
-                   "train/top_1_acc": top_1_acc,
-                   "train/step_time": cl - st,
-                   "train/python_time": pt - st,
-                   "train/data_time": dt - pt,
-                   "train/cl_time": cl - dt,
-                   "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st),
-                   "epoch": e + (i + 1) / steps_in_train_epoch,
-                   })
+        wandb.log({"lr": optimizer.lr.numpy(), "train/loss": loss, "train/top_1_acc": top_1_acc, "train/step_time": cl - st, "train/python_time": pt - st, "train/data_time": dt - pt,
+                   "train/cl_time": cl - dt, "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": e + (i + 1) / steps_in_train_epoch})
 
       st = cl
       proc, next_proc = next_proc, None  # return old cookie
@@ -184,15 +173,11 @@ def train_resnet():
       total_fw_time = sum(eval_times) / len(eval_times)
       tqdm.write(f"eval loss: {total_loss:.2f}, eval time: {total_fw_time:.2f}, eval top 1 acc: {total_top_1:.3f}")
       if WANDB:
-        wandb.log({"eval/loss": total_loss,
-                   "eval/top_1_acc": total_top_1,
-                   "eval/forward_time": total_fw_time,
-                   "epoch": e + 1,
-        })
+        wandb.log({"eval/loss": total_loss, "eval/top_1_acc": total_top_1, "eval/forward_time": total_fw_time, "epoch": e + 1})
 
       # save model if achieved target
       if not achieved and total_top_1 >= target:
-        fn = f"./ckpts/{model_name}_cats{num_classes}.safe"
+        fn = f"./ckpts/resnet50.safe"
         safe_save(get_state_dict(model), fn)
         print(f" *** Model saved to {fn} ***")
         achieved = True
