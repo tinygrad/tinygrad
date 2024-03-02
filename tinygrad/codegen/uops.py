@@ -37,7 +37,7 @@ python_alu = {
   UnaryOps.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan, UnaryOps.SIN: lambda x: math.sin(x), UnaryOps.NEG: lambda x: -x,
   BinaryOps.MUL: lambda x,y: x*y, BinaryOps.ADD: lambda x,y: x+y, BinaryOps.SUB: lambda x,y: x-y, BinaryOps.XOR: lambda x,y: x^y,
   BinaryOps.MAX: lambda x,y: max(x, y), BinaryOps.CMPEQ: lambda x,y: x==y, BinaryOps.CMPLT: lambda x,y: x<y,
-  BinaryOps.DIV: lambda x,y: x//y if isinstance(x, int) else (x/y if x != 0 else math.nan), BinaryOps.MOD: lambda x,y: x%y,
+  BinaryOps.DIV: lambda x,y: x//y if isinstance(x, int) else (x/y if y != 0 else math.nan), BinaryOps.MOD: lambda x,y: x%y,
   TernaryOps.WHERE: lambda x,y,z: y if x else z}
 
 def exec_alu(arg, dtype, p):
