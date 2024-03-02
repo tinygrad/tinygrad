@@ -20,18 +20,16 @@ Glossary:
 
 """
 
+from transformers.utils.hub import cached_file
+from tinygrad import Tensor, Device, nn, dtypes
+from transformers import AutoTokenizer
+from typing import Union, Dict, List
+from dataclasses import dataclass
+from tqdm import trange
+import numpy as np
 import math
 import json
-# import torch
-# import torch.nn as nn
-# import torch.nn.functional as F
-from dataclasses import dataclass
-# from einops import rearrange, repeat, einsum
-from typing import Union, Dict, List
-from tinygrad import Tensor, Device, nn, dtypes
-from tinygrad.helpers import Timing
-from transformers.utils.hub import cached_file
-import numpy as np
+
 
 @dataclass
 class ModelArgs:
@@ -117,14 +115,37 @@ class Mamba():
     
     model = Mamba(args)
     state_dict = load_state_dict_hf(pretrained_model_name)
-    # new_state_dict = {}
+    # print(f"len state_dict: {len(state_dict)}")
+    # print(list(state_dict.values())[0].shape)
+    # new_state_dict: Dict[str, Tensor] = {}
+    # to_save = ""
+    # # .0-47.
+    # options = ["." + str(i) + "." for i in range(48)]
+    # cnt = 0
+    # layers = []
+    # for k in nn.state.get_state_dict(model).keys():
+    #   for o in options:
+    #     if o in k:
+    #     #   print(k)
+    #       layers.append(k)
+    #       cnt += 1
+    # print(cnt)
     # for key in state_dict:
-    #   new_key = key.replace("backbone.", "")
+    #   # new_key = key.replace("backbone.", "")
+    #   new_key = key
+    #   # if new_k < 10: print(f"{new_key} --- {key}")
+    #   to_save = new_key
     #   new_state_dict[new_key] = state_dict[key]
-    with Timing("weights -> model: "):
-      # nn.state.load_state_dict(model, fix_bf16(convert_from_huggingface(part1, model, 32, 8)), strict=False)
-      nn.state.load_state_dict(model, state_dict, strict=False)
-
+    # # with Timing("weights -> model: "):
+    #   # nn.state.load_state_dict(model, fix_bf16(convert_from_huggingface(part1, model, 32, 8)), strict=False)
+    # print(f"len new_dict: {len(new_state_dict)}")
+    # print(new_state_dict[to_save].shape)
+    # # print("\n\n\n")
+    # not_in_model_state_dict = dict()
+    # for k in new_state_dict.keys():
+    #   if k not in layers: not_in_model_state_dict[k] = new_state_dict[k]    
+    # # for k in not_in_model_state_dict.keys(): del new_state_dict[k]
+    nn.state.load_state_dict(model, state_dict, strict=False)
     return model
 
 
@@ -299,9 +320,9 @@ class RMSNorm():
     return output
 
 
-def generate(model, tokenizer, prompt: str, gen_length: int = 50, sample: bool = True, top_k: int = 40):
+def generate(model, tokenizer, prompt: str, gen_length: int = 20, sample: bool = True, top_k: int = 40):
   inp = Tensor(tokenizer(prompt, max_length=gen_length, truncation=True, return_tensors="np")["input_ids"])
-  for tok in range(gen_length):
+  for tok in trange(gen_length):
     indices = inp
     next_logits = model(indices)[:, -1]   
     probs = next_logits.softmax(axis=-1)
@@ -316,15 +337,18 @@ def generate(model, tokenizer, prompt: str, gen_length: int = 50, sample: bool =
       probs /= probs.sum(axis=1, keepdim=True)
 
     nxt = probs.multinomial(num_samples=1) if sample else probs.argmax(axis=-1)[:, None] 
+    # print(nxt.shape)
+    # print(nxt.numpy())
     inp = inp.cat(nxt, dim=1)
+    # print(inp.shape)
 
-    out = [tokenizer.decode(output.numpy().tolist()) for output in inp][0]
-    return out
+  out = [tokenizer.decode(output.numpy().tolist()) for output in inp][0]
+#   print(f"len output {len(out)}")
+  return out
 
 
 def main():
     # TODO: add device=device support
-    from transformers import AutoTokenizer
     # One of:
     #     "state-spaces/mamba-2.8b-slimpj"
     #     "state-spaces/mamba-2.8b"
@@ -336,7 +360,7 @@ def main():
 
     model = Mamba.from_pretrained(pretrained_model_name)
     tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b")
-    print(generate(model, tokenizer, "Mamba is the:"))
+    print(generate(model, tokenizer, "Mamba is the"))
 
 if __name__ == "__main__":
   main()
