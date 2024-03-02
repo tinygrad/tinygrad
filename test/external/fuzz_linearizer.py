@@ -103,7 +103,7 @@ def fuzz_linearizer(lin: Linearizer):
         if not FUZZ_BEAM and test_lin.applied_opts: print(f"applied opts: {test_lin.applied_opts}")
 
         # stop if kernel uops repeat
-        tuops = tuplize_uops(test_lin.linearize().uops)
+        tuops = tuplize_uops(test_lin.linearize().uops.uops)
         if tuops in seen_uops:
           continue
         seen_uops[tuops] = tuple(test_lin.applied_opts)
