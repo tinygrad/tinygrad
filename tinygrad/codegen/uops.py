@@ -1,6 +1,6 @@
 from __future__ import annotations
 import functools, math
-from typing import List, Set, Optional, Tuple, Any, Dict, DefaultDict
+from typing import List, Set, Optional, Tuple, Any, Dict, DefaultDict, cast
 from collections import defaultdict
 from tinygrad.helpers import DEBUG, flatten, all_same
 from tinygrad.dtype import dtypes, DType
@@ -55,6 +55,10 @@ def uop_alu_resolve(u:UOp) -> sint:
     return uop_alu_resolve(u.vin[0]) + uop_alu_resolve(u.vin[1])
   else:
     raise RuntimeError(f"ALU resolve fail @ {u.uop}")
+
+def phi_resolve_acc(u:UOp) -> UOp:
+  if u.uop == UOps.DEFINE_ACC: return u
+  return phi_resolve_acc(u.vin[0])
 
 class UOpGraph:
   def __init__(self):
@@ -216,6 +220,17 @@ class UOpGraph:
     # (recursively) remove childless uops
     self.remove_childless()
 
+    # store float4 upcasts directly if possible
+    replaced_stores: Dict[UOp,UOp] = {}
+    for u in self.uops:
+      if u.uop is not UOps.STORE or (val:=u.vin[-1]).uop is not UOps.CAST or cast(DType,val.dtype).count == 1: continue
+      if u.vin[0].uop is UOps.DEFINE_LOCAL: continue # TODO add support for local store
+      if all(el.uop is UOps.GEP for el in val.vin): replaced_stores[u] = val.vin[0].vin[0]
+      elif all(el.uop is UOps.PHI for el in val.vin): replaced_stores[u] = phi_resolve_acc(val)
+    for prev,new in replaced_stores.items():
+      self.add(UOps.STORE, prev.dtype, (prev.vin[0],prev.vin[1],new), insert_before=self.uops.index(prev))
+      self.uops.remove(prev)
+
     # add UOps.END*
     self.add_ends()
 
@@ -247,4 +262,3 @@ class UOpGraph:
         elif u.arg == "__cuda_mma_m16n8k16_f16_f32": flops += 2*(8*16*16)//32 * mults
         else: raise Exception("not implemented")
     return flops, mem
-
