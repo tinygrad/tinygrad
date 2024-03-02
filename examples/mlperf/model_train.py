@@ -1,3 +1,4 @@
+import functools
 import os
 import time
 from tqdm import tqdm
@@ -9,23 +10,24 @@ from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_sa
 from examples.mlperf.helpers import get_training_state, load_training_state
 
 def train_resnet():
-  from extra.models.resnet import ResNet50, ResNet18, UnsyncedBatchNorm
+  from extra.models import resnet
   from examples.mlperf.dataloader import batch_load_resnet
   from extra.datasets.imagenet import get_train_files, get_val_files
   from extra.lr_scheduler import PolynomialLR
+  from examples.hlb_cifar10 import UnsyncedBatchNorm
 
   config = {}
   seed = config["seed"] = getenv("SEED", 42)
   Tensor.manual_seed(seed)  # seed for weight initialization
 
   GPUS = config["GPUS"] = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
-  UnsyncedBatchNorm.devices = len(GPUS)
+  resnet.BatchNorm = functools.partial(UnsyncedBatchNorm, num_devices=len(GPUS))
   print(f"Training on {GPUS}")
   for x in GPUS: Device[x]
 
   # ** model definition **
   num_classes = 1000
-  model = ResNet50(num_classes)
+  model = resnet.ResNet50(num_classes)
 
   for k, x in get_state_dict(model).items():
     if not getenv("SYNCBN") and ("running_mean" in k or "running_var" in k):

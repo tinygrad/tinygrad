@@ -3,17 +3,9 @@ from typing import List
 import tinygrad.nn as nn
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import torch_load
-from tinygrad.helpers import fetch, get_child, getenv, prod, argfix
-from tinygrad.dtype import dtypes
-from tinygrad.features.multi import MultiLazyBuffer
-from examples.hlb_cifar10 import UnsyncedBatchNorm as UnsyncedBatchNorm_
+from tinygrad.helpers import fetch, get_child, prod, argfix
 
-class UnsyncedBatchNorm(UnsyncedBatchNorm_):
-  devices = 1
-  def __init__(self, *args, **kwargs):
-    super().__init__(*args, kwargs, UnsyncedBatchNorm.devices)
-
-BatchNorm = nn.BatchNorm2d if getenv("SYNCBN", 0) else UnsyncedBatchNorm
+BatchNorm = nn.BatchNorm2d  # allow monkeypatching :S
 
 # rejection sampling truncated randn
 def rand_truncn(*shape, dtype=None, truncstds=2, **kwargs) -> Tensor:
