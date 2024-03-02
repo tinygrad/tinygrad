@@ -16,10 +16,12 @@ class TestNN(unittest.TestCase):
     torch_input = torch.tensor(input.numpy())
     torch_target = torch.tensor(target.numpy(), dtype=torch.long)
 
-    for smoothing in [0.0, 0.1, 0.5, 1.0]:
-      loss = input.sparse_categorical_crossentropy(target, label_smoothing=smoothing)
-      torch_loss = torch.nn.CrossEntropyLoss(reduction='mean', label_smoothing=smoothing)(torch_input, torch_target)
-      np.testing.assert_allclose(loss.numpy(), torch_loss.detach().numpy(), atol=1e-5, rtol=1e-6)
+    for smoothing in [0, 0.1, 0.3, 1.0]:
+      for ignore_index in [-1, 0, 1, 2, 3]:
+        loss = input.sparse_categorical_crossentropy(target, ignore_index=ignore_index, label_smoothing=smoothing)
+        torch_loss = torch.nn.functional.cross_entropy(torch_input, torch_target, reduction='mean',
+                                                       ignore_index=ignore_index, label_smoothing=smoothing)
+        np.testing.assert_allclose(loss.numpy(), torch_loss.detach().numpy(), atol=1e-5, rtol=1e-6)
 
   def test_batchnorm2d(self, training=False):
     with Tensor.train(training):
