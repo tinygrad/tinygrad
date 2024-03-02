@@ -423,5 +423,11 @@ class TestSchedule(unittest.TestCase):
     out = x + y
     check_schedule(out, 2)  # TODO: this should be 1
 
+  def test_const_no_recompute(self):
+    x = Tensor(2) + Tensor(2)
+    y = Tensor(2) + Tensor(2)
+    out = x.contiguous() + y.contiguous()
+    check_schedule(out, 2)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
