@@ -3,7 +3,6 @@ from collections import defaultdict
 from typing import TYPE_CHECKING, Any, List, Optional, Dict, Tuple, ClassVar
 import importlib, inspect, functools, pathlib, time, ctypes
 from tinygrad.dtype import DType, ImageDType
-from tinygrad.codegen.uops import UOps
 from tinygrad.helpers import ansilen, DEBUG, getenv, colored, BEAM, NOOPT, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put
 from tinygrad.helpers import prod
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
@@ -236,13 +235,11 @@ class Compiled:
     assert self.compiler is not None, "compiler is required to run AST"
     k.linearize()
     info = get_lazyop_info(k.ast)
-    from tinygrad.codegen.uops import uops_flops_mem
-    ops, mem = uops_flops_mem(k.uops)
+    ops, mem = k.uops.flops_mem()
     run_count = prod((k.global_size if k.global_size else []) + (k.local_size if k.local_size else []))
     # NOTE: we use min here to ignore the indexing FLOPS
-    ret = CompiledASTRunner(k.name, self.compiler.render(to_function_name(k.name), k.uops), self, k.global_size, k.local_size,
-                            [x.arg for x in k.uops if x.uop is UOps.DEFINE_VAR],
-                            min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))
+    ret = CompiledASTRunner(k.name, self.compiler.render(to_function_name(k.name), k.uops.uops), self, k.global_size, k.local_size,
+                            k.uops.vars(), min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))
     return ret
 
   def get_linearizer(self, ast:LazyOp) -> Linearizer:
