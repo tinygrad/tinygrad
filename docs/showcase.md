@@ -47,7 +47,7 @@ python3 examples/stable_diffusion.py
 
 ![a horse sized cat eating a bagel](/docs/showcase/stable_diffusion_by_tinygrad.jpg)
 
-*"a horse sized cat eating a bagel"*
+*"a horse sized cat with ears that look like drowning rats, eating a bagel"* 
 
 ### LLaMA
 
