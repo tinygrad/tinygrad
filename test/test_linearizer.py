@@ -27,6 +27,14 @@ class TestLinearizer(unittest.TestCase):
     np_c = (np_a[:2] - np_a[2:]) - (np_b[:2] - np_b[2:])
     np.testing.assert_allclose(np_c, c.numpy(), atol=1e-4, rtol=1e-4)
 
+  def test_load_removed(self):
+    a = Tensor.rand(1).realize()
+    b = Tensor.rand(1).realize()
+    ta = Tensor.where(Tensor(True), a, b).numpy()
+    tb = Tensor.where(Tensor(False), a, b).numpy()
+    np.testing.assert_equal(a.numpy(), ta)
+    np.testing.assert_equal(b.numpy(), tb)
+
   def test_load_dedup(self):
     # for different leaves in the AST, the same loads may occur.
 
