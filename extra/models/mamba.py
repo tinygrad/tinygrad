@@ -53,7 +53,6 @@ class ModelArgs:
 
 class Mamba():
   def __init__(self, args: ModelArgs):
-    """Full Mamba model."""
     self.args = args
     self.embedding = nn.Embedding(args.vocab_size, args.d_model)
     # TODO: does nn.state.get_parameters catch these?
@@ -101,7 +100,6 @@ class Mamba():
       resolved_archive_file = cached_file(model_name, "config.json", _raise_exceptions_for_missing_entries=False)
       return json.load(open(resolved_archive_file))
     
-    
     def load_state_dict_hf(model_name: str) -> Dict[str, Tensor]:
       resolved_archive_file = cached_file(model_name, "pytorch_model.bin", _raise_exceptions_for_missing_entries=False)
       return nn.state.torch_load(resolved_archive_file)
@@ -116,35 +114,7 @@ class Mamba():
     model = Mamba(args)
     state_dict = load_state_dict_hf(pretrained_model_name)
     # print(f"len state_dict: {len(state_dict)}")
-    # print(list(state_dict.values())[0].shape)
-    # new_state_dict: Dict[str, Tensor] = {}
-    # to_save = ""
-    # # .0-47.
-    # options = ["." + str(i) + "." for i in range(48)]
-    # cnt = 0
-    # layers = []
-    # for k in nn.state.get_state_dict(model).keys():
-    #   for o in options:
-    #     if o in k:
-    #     #   print(k)
-    #       layers.append(k)
-    #       cnt += 1
-    # print(cnt)
-    # for key in state_dict:
-    #   # new_key = key.replace("backbone.", "")
-    #   new_key = key
-    #   # if new_k < 10: print(f"{new_key} --- {key}")
-    #   to_save = new_key
-    #   new_state_dict[new_key] = state_dict[key]
-    # # with Timing("weights -> model: "):
-    #   # nn.state.load_state_dict(model, fix_bf16(convert_from_huggingface(part1, model, 32, 8)), strict=False)
-    # print(f"len new_dict: {len(new_state_dict)}")
-    # print(new_state_dict[to_save].shape)
-    # # print("\n\n\n")
-    # not_in_model_state_dict = dict()
-    # for k in new_state_dict.keys():
-    #   if k not in layers: not_in_model_state_dict[k] = new_state_dict[k]    
-    # # for k in not_in_model_state_dict.keys(): del new_state_dict[k]
+    # print(f"len model.get_parameters: {len(nn.state.get_parameters(model))}")
     nn.state.load_state_dict(model, state_dict, strict=False)
     return model
 
