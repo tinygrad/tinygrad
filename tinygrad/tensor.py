@@ -829,7 +829,7 @@ class Tensor:
 
   def _to_const_val(self, x:Union[Tensor, Scalar]) -> Union[Tensor, Scalar]:
     # TODO: update with multi
-    return x.lazydata.base.arg if isinstance(x, Tensor) and isinstance(x.lazydata, LazyBuffer) and x.lazydata.is_unrealized_contiguous_const() \
+    return x.lazydata.base.arg if isinstance(x, Tensor) and isinstance(x.lazydata, LazyBuffer) and x.lazydata.is_unrealized_unmasked_const() \
       and not x.requires_grad and self._broadcasted(x)[0].shape == self.shape else x
 
   def add(self, x:Union[Tensor, Scalar], reverse=False) -> Tensor:

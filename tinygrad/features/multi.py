@@ -54,7 +54,7 @@ class MultiLazyBuffer:
     return functools.reduce(lambda x,y: x.e(BinaryOps.ADD, y), llbs)
 
   # TODO: fix this
-  def is_unrealized_contiguous_const(self): return False
+  def is_unrealized_unmasked_const(self): return False
 
   # passthroughs
   def cast(self, dtype:DType, bitcast:bool=False): return MultiLazyBuffer([x.cast(dtype, bitcast) for x in self.lbs], self.axis, self.real)

@@ -2,7 +2,7 @@ from __future__ import annotations
 import math
 from typing import Union, Optional, Any, Tuple, List, Dict, cast
 from tinygrad.dtype import cast_scalar, dtypes, DType, Scalar
-from tinygrad.helpers import prod, getenv, all_int, all_same
+from tinygrad.helpers import prod, getenv, all_int, all_same, partition
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op
 from tinygrad.shape.symbolic import sint
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -72,7 +72,7 @@ class LazyBuffer:
     return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), dtype, UnaryOps.CAST, (dtype, bitcast), (self,))
 
   def is_unrealized_const(self): return not self.base.realized and self.base.op is LoadOps.CONST
-  def is_unrealized_contiguous_const(self): return self.base == self and not self.base.realized and self.op is LoadOps.CONST
+  def is_unrealized_unmasked_const(self): return self.is_unrealized_const() and all(x.mask is None for x in self.st.views)
 
   def _copy(self, device:str) -> LazyBuffer:
     sync_size = 1 if self.device.startswith("HIP") else 0
@@ -108,6 +108,10 @@ class LazyBuffer:
         srcs.append(root._view(s.base.contiguous_child[1]))
       else:
         srcs.append(s)
+    # NOTE: on the backward pass, sometimes these aren't removed by tensor.py
+    consts, non_consts = partition(srcs, lambda x: x.is_unrealized_unmasked_const())
+    if len(consts) == 1 and ((op == BinaryOps.MUL and consts[0].base.arg == 1.0) or (op == BinaryOps.ADD and consts[0].base.arg == 0.0)):
+      return non_consts[0]
     assert all_same(dts:=[x.dtype.scalar() for x in (srcs[1:] if op is TernaryOps.WHERE else srcs)]), f"all dtypes must match {dts} on {op}"
     assert all_same([x.shape for x in srcs]), f"all shapes must be the same {[x.shape for x in srcs]}"
     if op is TernaryOps.WHERE: assert srcs[0].dtype == dtypes.bool, "TernaryOps.WHERE must have the first arg be bool"
