@@ -27,6 +27,14 @@ class TestLinearizer(unittest.TestCase):
     np_c = (np_a[:2] - np_a[2:]) - (np_b[:2] - np_b[2:])
     np.testing.assert_allclose(np_c, c.numpy(), atol=1e-4, rtol=1e-4)
 
+  def test_load_removed(self):
+    a = Tensor.rand(1).realize()
+    b = Tensor.rand(1).realize()
+    ta = Tensor.where(Tensor(True), a, b).numpy()
+    tb = Tensor.where(Tensor(False), a, b).numpy()
+    np.testing.assert_equal(a.numpy(), ta)
+    np.testing.assert_equal(b.numpy(), tb)
+
   def test_load_dedup(self):
     # for different leaves in the AST, the same loads may occur.
 
@@ -209,7 +217,7 @@ class TestLinearizer(unittest.TestCase):
     c0 = UOp(UOps.CONST, dtypes.float, vin=(), arg=0.0)
     c1 = UOp(UOps.CONST, dtypes.float, vin=(), arg=1.0)
     assert helper_test_simplify(UOps.ALU, dtypes.float, vin=(UOp(UOps.CONST, dtypes.bool, vin=(), arg=True), c0, c1),
-                                arg=TernaryOps.WHERE).uop == UOps.ALU
+                                arg=TernaryOps.WHERE).uop == UOps.CONST
 
 def helper_realized_ast(r:Tensor):
   s = create_schedule([r.lazydata])
