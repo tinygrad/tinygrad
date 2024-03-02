@@ -13,6 +13,7 @@ from tinygrad.features.jit import CacheCollector
 from tinygrad.realize import create_schedule, run_schedule
 from tinygrad.helpers import prod, Context
 from tinygrad.dtype import DType, dtypes
+from tinygrad.codegen.uops import UOpGraph
 
 @unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "linearizer is only for compiled backends")
 class TestLinearizer(unittest.TestCase):
@@ -25,6 +26,14 @@ class TestLinearizer(unittest.TestCase):
     assert len(rawbufs) == 3 and set(rawbufs[1:]) == {a.lazydata.base.realized, b.lazydata.base.realized}
     np_c = (np_a[:2] - np_a[2:]) - (np_b[:2] - np_b[2:])
     np.testing.assert_allclose(np_c, c.numpy(), atol=1e-4, rtol=1e-4)
+
+  def test_load_removed(self):
+    a = Tensor.rand(1).realize()
+    b = Tensor.rand(1).realize()
+    ta = Tensor.where(Tensor(True), a, b).numpy()
+    tb = Tensor.where(Tensor(False), a, b).numpy()
+    np.testing.assert_equal(a.numpy(), ta)
+    np.testing.assert_equal(b.numpy(), tb)
 
   def test_load_dedup(self):
     # for different leaves in the AST, the same loads may occur.
@@ -54,8 +63,8 @@ class TestLinearizer(unittest.TestCase):
     lin = Linearizer(ast)
     lin.linearize()
 
-    a_bufs = [u.uop for u in lin.uops[-2].vin[0].vin]
-    b_bufs = [u.uop for u in lin.uops[-2].vin[1].vin]
+    a_bufs = [u.uop for u in lin.uops.uops[-2].vin[0].vin]
+    b_bufs = [u.uop for u in lin.uops.uops[-2].vin[1].vin]
 
     assert a_bufs == [UOps.LOAD, UOps.CONST]
     assert b_bufs == [UOps.CONST, UOps.CONST]
@@ -199,8 +208,8 @@ class TestLinearizer(unittest.TestCase):
                    MemBuffer(0, dtypes.float, ShapeTracker(views=(View(shape=(), strides=(), offset=0, mask=None, contiguous=True),))))
       lin = Linearizer(ast=ast) # this is a dummy ast
 
-      lin.uops = []
-      return lin.uop(uop, dtype, vin, arg, cachable=False)
+      lin.uops = UOpGraph()
+      return lin.uops.add(uop, dtype, vin, arg, cachable=False)
 
     c0 = UOp(UOps.CONST, dtypes.float, vin=(), arg=0.0)
     assert helper_test_simplify(UOps.ALU, dtypes.float, vin=(UOp(UOps.CONST, dtypes.bool, vin=(), arg=True), c0, c0), arg=TernaryOps.WHERE) == c0
@@ -208,7 +217,7 @@ class TestLinearizer(unittest.TestCase):
     c0 = UOp(UOps.CONST, dtypes.float, vin=(), arg=0.0)
     c1 = UOp(UOps.CONST, dtypes.float, vin=(), arg=1.0)
     assert helper_test_simplify(UOps.ALU, dtypes.float, vin=(UOp(UOps.CONST, dtypes.bool, vin=(), arg=True), c0, c1),
-                                arg=TernaryOps.WHERE).uop == UOps.ALU
+                                arg=TernaryOps.WHERE).uop == UOps.CONST
 
 def helper_realized_ast(r:Tensor):
   s = create_schedule([r.lazydata])
