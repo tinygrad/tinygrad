@@ -416,9 +416,11 @@ class Linearizer(Kernel):
     elif u.uop == UOps.ALU and u.arg == BinaryOps.CMPLT:
       left, right = resolve(u.vin[0]), resolve(u.vin[1])
       loop_var = state["_loopidx"]
-      right, sign_flipped = factor_exprs(left, right, loop_var)
+      factored, sign_flipped = factor_exprs(left, right, loop_var, round_up=True)
+      if sign_flipped:
+        factored, sign_flipped = factor_exprs(left, right, loop_var, round_up=False)
       min_clamp, max_clamp = NumNode(0), NumNode(loop_var.max - loop_var.min + 1)
-      raw_val = loop_var.max - (right // 1) if sign_flipped else (right // 1) + 1 - loop_var.min
+      raw_val = (loop_var.max - factored) if sign_flipped else (factored - loop_var.min)
       clamped = MaxNode(MaxNode(raw_val, min_clamp) * -1, max_clamp * -1) * -1
       return clamped
     elif u.uop == UOps.ALU and u.arg == TernaryOps.WHERE:

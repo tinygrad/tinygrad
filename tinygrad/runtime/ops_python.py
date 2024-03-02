@@ -28,7 +28,7 @@ def exec_alu(arg, dtype, p):
   if arg == BinaryOps.MAX: return max(p[0], p[1])
   if arg == BinaryOps.CMPEQ: return p[0] == p[1]
   if arg == BinaryOps.CMPLT: return p[0] < p[1]
-  if arg == BinaryOps.DIV: return p[0]//p[1] if dtypes.is_int(dtype) else (p[0]/p[1] if p[1] != 0 else math.nan)
+  if arg == BinaryOps.DIV: return int(p[0]/p[1]) if dtypes.is_int(dtype) else (p[0]/p[1] if p[1] != 0 else math.nan) # python // rounds towards negative infinity, c integer division rounds towards 0, use int in python instead of //
   if arg == BinaryOps.MOD: return p[0]%p[1]
   raise NotImplementedError(f"no support for {arg}")
 
