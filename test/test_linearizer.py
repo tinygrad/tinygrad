@@ -757,6 +757,7 @@ class TestLinearizerHelper(unittest.TestCase):
     assert expand_idxs(idxs) == (uidx0, NumNode(0), uidx1)
 
 class TestLinearizerUOptimize(unittest.TestCase):
+  @unittest.skipUnless(Device[Device.DEFAULT].compiler.linearizer_opts.supports_float4, "device doesn't support float4")
   def test_grouped_store_phis(self):
     x, y = Tensor.randn(64,64), Tensor.randn(64,64)
     out = x.matmul(y)
@@ -766,11 +767,21 @@ class TestLinearizerUOptimize(unittest.TestCase):
     k.linearize()
 
     # check that the float4 cast collapses
-    #print(Device[Device.DEFAULT].compiler.render(k.name, k.uops))
     store_vals = [u.vin[-1] for u in k.uops if u.uop is UOps.STORE]
     for val in store_vals:
       assert val.dtype == dtypes.float.vec(4) and val.uop != UOps.CAST
 
+  @unittest.skipUnless(Device[Device.DEFAULT].compiler.linearizer_opts.supports_float4, "device doesn't support float4")
+  def test_grouped_store_values(self):
+    x = Tensor.randn((4,3,6,6)).realize()
+    out = x.flip((0,1)).contiguous()
+
+    k = Linearizer(create_schedule([out.lazydata])[-1].ast)
+    k.hand_coded_optimizations()
+    k.linearize()
+
+    store_val = [u.vin[-1] for u in k.uops if u.uop is UOps.STORE][0]
+    assert store_val.dtype == dtypes.float.vec(4) and store_val.uop != UOps.CAST
 
   @unittest.skip("TODO: support locals replacement across the uop graph")
   def test_grouped_store_locals_and_globals(self):
@@ -793,19 +804,8 @@ class TestLinearizerUOptimize(unittest.TestCase):
     # check that the float4 cast collapses for all stores
     for store in local_stores+global_stores:
       assert store.vin[-1].dtype == dtypes.float.vec(2) and store.vin[-1].uop != UOps.CAST
+    # check that the barrier uses the new stores
     assert barrier.vin == tuple(local_stores)
-
-  @unittest.skip("TODO: support locals replacement across the uop graph")
-  def test_grouped_store_vals(self):
-    x = Tensor.randn((4,3,6,6)).realize()
-    out = x.flip((0,1)).contiguous()
-
-    k = Linearizer(create_schedule([out.lazydata])[-1].ast)
-    k.hand_coded_optimizations()
-    k.linearize()
-
-    store_val = [u.vin[-1] for u in k.uops if u.uop is UOps.STORE][0]
-    assert store_val.dtype == dtypes.float.vec(4) and store_val.uop != UOps.CAST
 
 if __name__ == '__main__':
   unittest.main()
