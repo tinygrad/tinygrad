@@ -13,6 +13,7 @@ from tinygrad.features.jit import CacheCollector
 from tinygrad.realize import create_schedule, run_schedule
 from tinygrad.helpers import prod, Context
 from tinygrad.dtype import DType, dtypes
+from tinygrad.codegen.uops import UOpGraph
 
 @unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "linearizer is only for compiled backends")
 class TestLinearizer(unittest.TestCase):
@@ -54,8 +55,8 @@ class TestLinearizer(unittest.TestCase):
     lin = Linearizer(ast)
     lin.linearize()
 
-    a_bufs = [u.uop for u in lin.uops[-2].vin[0].vin]
-    b_bufs = [u.uop for u in lin.uops[-2].vin[1].vin]
+    a_bufs = [u.uop for u in lin.uops.uops[-2].vin[0].vin]
+    b_bufs = [u.uop for u in lin.uops.uops[-2].vin[1].vin]
 
     assert a_bufs == [UOps.LOAD, UOps.CONST]
     assert b_bufs == [UOps.CONST, UOps.CONST]
@@ -199,8 +200,8 @@ class TestLinearizer(unittest.TestCase):
                    MemBuffer(0, dtypes.float, ShapeTracker(views=(View(shape=(), strides=(), offset=0, mask=None, contiguous=True),))))
       lin = Linearizer(ast=ast) # this is a dummy ast
 
-      lin.uops = []
-      return lin.uop(uop, dtype, vin, arg, cachable=False)
+      lin.uops = UOpGraph()
+      return lin.uops.add(uop, dtype, vin, arg, cachable=False)
 
     c0 = UOp(UOps.CONST, dtypes.float, vin=(), arg=0.0)
     assert helper_test_simplify(UOps.ALU, dtypes.float, vin=(UOp(UOps.CONST, dtypes.bool, vin=(), arg=True), c0, c0), arg=TernaryOps.WHERE) == c0

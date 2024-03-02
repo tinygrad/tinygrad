@@ -306,7 +306,7 @@ def train_cifar():
 
   if len(GPUS) > 1:
     for k, x in get_state_dict(model).items():
-      if not getenv('SYNCBN') and ('running_mean' in k or 'running_bias' in k):
+      if not getenv('SYNCBN') and ('running_mean' in k or 'running_var' in k):
         x.shard_(GPUS, axis=0)
       else:
         x.to_(GPUS)
