@@ -191,6 +191,11 @@ class PythonProgram:
               return a_elem(x, j, i, goff)
             def c_map(lane, elem): return (lane%16, lane//16+elem*2) # (i, j), C, D (8 elements on 32 threads): row major
             ul[i] = wmma_helper(32, 16, 16, 16, 8, a_elem, b_elem, c_map)
+          elif arg == '__cuda_mma_m16n8k16_f16_f32':
+            def a_elem(x, i, j, goff): return x[(i%2)+(j//8)*2+(i//8)*4][goff+((i//2)%4)+(j%8)*4] # A (8 elements on 32 threads)
+            def b_elem(x, i, j, goff): return x[(j%2)+(j//8)*2][goff+(j//2)%4+(i)*4] # B (4 elements on 32 threads)
+            def c_map(lane, elem): return ((elem%2)+(lane%4)*2, (lane//4)+(elem//2)*8) # (i, j), C, D (4 elements on 32 threads)
+            ul[i] = wmma_helper(32, 16, 8, 4, 4, a_elem, b_elem, c_map)
           else:
             raise Exception(f"unimplemented tensor core {arg}")
         elif uop is UOps.ALU:
@@ -203,7 +208,8 @@ class PythonProgram:
 
 class PythonCompiler(Compiler):
   linearizer_opts = LinearizerOptions("METAL", has_tensor_cores=True) if getenv("EMULATE_METAL") else \
-    (LinearizerOptions("HIP", has_tensor_cores=True) if getenv("EMULATE_HIP") else LinearizerOptions("PYTHON"))
+    (LinearizerOptions("HIP", has_tensor_cores=True) if getenv("EMULATE_HIP") else \
+    (LinearizerOptions("CUDA", has_tensor_cores=True) if getenv("EMULATE_CUDA") else LinearizerOptions("PYTHON")))
   def render(self, name:str, uops:List[UOp]) -> str:
     lops = [(u.uop, u.dtype, [uops.index(v) for v in u.vin], u.arg) for u in uops]
     return base64.b64encode(pickle.dumps(lops)).decode()
