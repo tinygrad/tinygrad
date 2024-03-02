@@ -1,22 +1,23 @@
-"""Simple, minimal implementation of Mamba in one file of PyTorch.
+# https://github.com/johnma2006/mamba-minimal/tree/master
 
-Suggest reading the following before/while reading the code:
-    [1] Mamba: Linear-Time Sequence Modeling with Selective State Spaces (Albert Gu and Tri Dao)
-        https://arxiv.org/abs/2312.00752
-    [2] The Annotated S4 (Sasha Rush and Sidd Karamcheti)
-        https://srush.github.io/annotated-s4
+"""
+[1] Mamba: Linear-Time Sequence Modeling with Selective State Spaces (Albert Gu and Tri Dao): 
+https://arxiv.org/abs/2312.00752
 
-Glossary:
-    b: batch size                       (`B` in Mamba paper [1] Algorithm 2)
-    l: sequence length                  (`L` in [1] Algorithm 2)
-    d or d_model: hidden dim
-    n or d_state: latent state dim      (`N` in [1] Algorithm 2)
-    expand: expansion factor            (`E` in [1] Section 3.4)
-    d_in or d_inner: d * expand         (`D` in [1] Algorithm 2)
-    A, B, C, D: state space parameters  (See any state space representation formula)
-                                        (B, C are input-dependent (aka selective, a key innovation in Mamba); A, D are not)
-    Δ or delta: input-dependent step size
-    dt_rank: rank of Δ                  (See [1] Section 3.6 "Parameterization of ∆")
+[2] The Annotated S4 (Sasha Rush and Sidd Karamcheti): 
+https://srush.github.io/annotated-s4
+
+
+b: batch size                       (`B` in Mamba paper [1] Algorithm 2)
+l: sequence length                  (`L` in [1] Algorithm 2)
+d or d_model: hidden dim
+n or d_state: latent state dim      (`N` in [1] Algorithm 2)
+expand: expansion factor            (`E` in [1] Section 3.4)
+d_in or d_inner: d * expand         (`D` in [1] Algorithm 2)
+A, B, C, D: state space parameters  (See any state space representation formula)
+                                    (B, C are input-dependent (aka selective, a key innovation in Mamba); A, D are not)
+Δ or delta: input-dependent step size
+dt_rank: rank of Δ                  (See [1] Section 3.6 "Parameterization of ∆")
 
 """
 
@@ -29,7 +30,6 @@ from tqdm import trange
 import numpy as np
 import math
 import json
-
 
 @dataclass
 class ModelArgs:
@@ -63,15 +63,13 @@ class Mamba():
 
   def __call__(self, input_ids):
     """
-    Args:
-        input_ids (long tensor): shape (b, l)    (See Glossary at top for definitions of b, l, d_in, n...)
+    Args: 
+      input_ids (long tensor): shape (b, l) 
+    Returns: 
+      logits: shape (b, l, vocab_size)
 
-    Returns:
-        logits: shape (b, l, vocab_size)
-
-    Official Implementation:
-        class MambaLMHeadModel, https://github.com/state-spaces/mamba/blob/main/mamba_ssm/models/mixer_seq_simple.py#L173
-
+    class MambaLMHeadModel: 
+    https://github.com/state-spaces/mamba/blob/main/mamba_ssm/models/mixer_seq_simple.py#L173
     """
     x = self.embedding(input_ids)
     for layer in self.layers: x = layer(x)    
@@ -81,19 +79,17 @@ class Mamba():
   
   @staticmethod
   def from_pretrained(pretrained_model_name: str):
-    """Load pretrained weights from HuggingFace into model.
+    """
     Args:
-        pretrained_model_name: One of
-            * "state-spaces/mamba-2.8b-slimpj"
-            * "state-spaces/mamba-2.8b"
-            * "state-spaces/mamba-1.4b"
-            * "state-spaces/mamba-790m"
-            * "state-spaces/mamba-370m"
-            * "state-spaces/mamba-130m"
-                        
+      pretrained_model_name: One of
+        * "state-spaces/mamba-2.8b-slimpj"
+        * "state-spaces/mamba-2.8b"
+        * "state-spaces/mamba-1.4b"
+        * "state-spaces/mamba-790m"
+        * "state-spaces/mamba-370m"
+        * "state-spaces/mamba-130m"                
     Returns:
-        model: Mamba model with weights loaded
-
+      model: Mamba model with weights loaded
     """
 
     def load_config_hf(model_name: str):
@@ -121,8 +117,6 @@ class Mamba():
 
 class ResidualBlock():
   def __init__(self, args: ModelArgs):
-    """Simple block wrapping Mamba block with normalization and residual connection."""
-
     self.args = args
     self.mixer = MambaBlock(args)
     self.norm = RMSNorm(args.d_model)
@@ -130,22 +124,21 @@ class ResidualBlock():
   def __call__(self, x):
     """
     Args:
-        x: shape (b, l, d)    (See Glossary at top for definitions of b, l, d_in, n...)
-
+      x: shape (b, l, d) 
     Returns:
-        output: shape (b, l, d)
+      output: shape (b, l, d)
 
-    Official Implementation:
-        Block.forward(), https://github.com/state-spaces/mamba/blob/main/mamba_ssm/modules/mamba_simple.py#L297
+    Block.forward():
+    https://github.com/state-spaces/mamba/blob/main/mamba_ssm/modules/mamba_simple.py#L297
         
-        Note: the official repo chains residual blocks that look like
-            [Add -> Norm -> Mamba] -> [Add -> Norm -> Mamba] -> [Add -> Norm -> Mamba] -> ...
-        where the first Add is a no-op. This is purely for performance reasons as this
-        allows them to fuse the Add->Norm.
+    Note: the official repo chains residual blocks that look like
+        [Add -> Norm -> Mamba] -> [Add -> Norm -> Mamba] -> [Add -> Norm -> Mamba] -> ...
+    where the first Add is a no-op. This is purely for performance reasons as this
+    allows them to fuse the Add->Norm.
 
-        We instead implement our blocks as the more familiar, simpler, and numerically equivalent
-            [Norm -> Mamba -> Add] -> [Norm -> Mamba -> Add] -> [Norm -> Mamba -> Add] -> ....
-        
+    We instead implement our blocks as the more familiar, simpler, and numerically equivalent
+        [Norm -> Mamba -> Add] -> [Norm -> Mamba -> Add] -> [Norm -> Mamba -> Add] -> ....
+    
     """
     output = self.mixer(self.norm(x)) + x
     return output
@@ -153,7 +146,7 @@ class ResidualBlock():
 
 class MambaBlock():
   def __init__(self, args: ModelArgs):
-    """A single Mamba block, as described in Figure 3 in Section 3.4 in the Mamba paper [1]."""
+    # Figure 3, Section 3.4, [1]
     self.args = args
     self.in_proj = nn.Linear(args.d_model, args.d_inner * 2, bias=args.bias)
     self.conv1d = nn.Conv1d(
@@ -174,17 +167,19 @@ class MambaBlock():
     self.out_proj = nn.Linear(args.d_inner, args.d_model, bias=args.bias)
     
   def __call__(self, x: Tensor):
-    """Mamba block forward. This looks the same as Figure 3 in Section 3.4 in the Mamba paper [1].
+    """
+    Figure 3, Section 3.4, [1].
 
     Args:
-        x: shape (b, l, d)    (See Glossary at top for definitions of b, l, d_in, n...)
-
+      x: shape (b, l, d) 
     Returns:
-        output: shape (b, l, d)
+      output: shape (b, l, d)
     
-    Official Implementation:
-        class Mamba, https://github.com/state-spaces/mamba/blob/main/mamba_ssm/modules/mamba_simple.py#L119
-        mamba_inner_ref(), https://github.com/state-spaces/mamba/blob/main/mamba_ssm/ops/selective_scan_interface.py#L311
+    class Mamba:
+    https://github.com/state-spaces/mamba/blob/main/mamba_ssm/modules/mamba_simple.py#L119
+    
+    mamba_inner_ref():
+    https://github.com/state-spaces/mamba/blob/main/mamba_ssm/ops/selective_scan_interface.py#L311
         
     """
     (b, l, d) = x.shape
@@ -201,17 +196,16 @@ class MambaBlock():
   
   def ssm(self, x):
     """Runs the SSM. See:
-        - Algorithm 2 in Section 3.2 in the Mamba paper [1]
-        - run_SSM(A, B, C, u) in The Annotated S4 [2]
+        - Algorithm 2, Section 3.2, [1]
+        - run_SSM(A, B, C, u)  - [2]
 
     Args:
-        x: shape (b, l, d_in)    (See Glossary at top for definitions of b, l, d_in, n...)
-
+      x: shape (b, l, d_in)   
     Returns:
-        output: shape (b, l, d_in)
+      output: shape (b, l, d_in)
 
-    Official Implementation:
-        mamba_inner_ref(), https://github.com/state-spaces/mamba/blob/main/mamba_ssm/ops/selective_scan_interface.py#L311
+    mamba_inner_ref():
+    https://github.com/state-spaces/mamba/blob/main/mamba_ssm/ops/selective_scan_interface.py#L311
         
     """
     (d_in, n) = self.A_log.shape
@@ -242,19 +236,20 @@ class MambaBlock():
     except B and C (and the step size delta, which is used for discretization) are dependent on the input x(t).
 
     Args:
-        u: shape (b, l, d_in)    (See Glossary at top for definitions of b, l, d_in, n...)
-        delta: shape (b, l, d_in)
-        A: shape (d_in, n)
-        B: shape (b, l, n)
-        C: shape (b, l, n)
-        D: shape (d_in,)
+      u: shape (b, l, d_in)    (See Glossary at top for definitions of b, l, d_in, n...)
+      delta: shape (b, l, d_in)
+      A: shape (d_in, n)
+      B: shape (b, l, n)
+      C: shape (b, l, n)
+      D: shape (d_in,)
 
     Returns:
-        output: shape (b, l, d_in)
+      output: shape (b, l, d_in)
 
-    Official Implementation:
-        selective_scan_ref(), https://github.com/state-spaces/mamba/blob/main/mamba_ssm/ops/selective_scan_interface.py#L86
-        Note: I refactored some parts out of `selective_scan_ref` out, so the functionality doesn"t match exactly.
+    selective_scan_ref():
+    https://github.com/state-spaces/mamba/blob/main/mamba_ssm/ops/selective_scan_interface.py#L86
+    
+    Note: I refactored some parts out of `selective_scan_ref` out, so the functionality doesn"t match exactly.
         
     """
     (b, l, d_in) = u.shape
@@ -295,8 +290,7 @@ def generate(model, tokenizer, prompt: str, gen_length: int = 20, sample: bool =
   for tok in trange(gen_length):
     indices = inp
     next_logits = model(indices)[:, -1]   
-    probs = next_logits.softmax(axis=-1)
-    (batch, vocab_size) = probs.shape     
+    probs = next_logits.softmax(axis=-1)   
     if top_k is not None:
       # TODO: do not convert to np - Tensor probably has something that can do this
       probs = probs.numpy()
@@ -309,6 +303,12 @@ def generate(model, tokenizer, prompt: str, gen_length: int = 20, sample: bool =
     nxt = probs.multinomial(num_samples=1) if sample else probs.argmax(axis=-1)[:, None] 
     # print(nxt.shape)
     # print(nxt.numpy())
+
+    # print(f"Token {tok + 1}:")
+    # print("Input indices:", indices.numpy())
+    # print("Next logits:", next_logits)
+    # print("Generated probabilities:", probs.numpy())
+    # print("Selected token indices:", nxt.numpy())
     inp = inp.cat(nxt, dim=1)
     # print(inp.shape)
 
@@ -316,6 +316,9 @@ def generate(model, tokenizer, prompt: str, gen_length: int = 20, sample: bool =
 #   print(f"len output {len(out)}")
   return out
 
+# TODO: it seems like the model is not remembering context
+# the model just repeats the last seen token
+# maybe the layers are not "linked" together
 
 def main():
     # TODO: add device=device support
@@ -330,7 +333,7 @@ def main():
 
     model = Mamba.from_pretrained(pretrained_model_name)
     tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b")
-    print(generate(model, tokenizer, "Mamba is the"))
+    print(generate(model, tokenizer, "What is 2 + 2?"))
 
 if __name__ == "__main__":
   main()
