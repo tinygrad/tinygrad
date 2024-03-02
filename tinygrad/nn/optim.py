@@ -21,6 +21,8 @@ class Optimizer:
   def realize(self, extra=None):
     # NOTE: in extra is too late for most of the params due to issues with assign
     Tensor.corealize(extra + self.params + self.buffers if extra is not None else self.params + self.buffers)
+    
+  def step(self) -> None: raise NotImplementedError
 
 class SGD(Optimizer):
   def __init__(self, params: List[Tensor], lr=0.001, momentum=0, weight_decay=0.0, nesterov=False):
