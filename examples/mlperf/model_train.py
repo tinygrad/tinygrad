@@ -1,9 +1,12 @@
 import os
 import time
+from tqdm import tqdm
+
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
 from tinygrad.helpers import getenv, BEAM, WINO
 from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_save
-from tqdm import tqdm
+
+from examples.mlperf.helpers import get_training_state, load_training_state
 
 def train_resnet():
   from extra.models.resnet import ResNet50, ResNet18, UnsyncedBatchNorm
@@ -59,9 +62,7 @@ def train_resnet():
   scheduler = PolynomialLR(optimizer, base_lr, 1e-4, epochs=epochs * steps_in_train_epoch, warmup=lr_warmup_epochs * steps_in_train_epoch)
   print(f"training with batch size {BS} for {epochs} epochs")
 
-  # ** checkpointing **
-  from examples.mlperf.helpers import get_training_state, load_training_state
-
+  # ** resume from checkpointing **
   start_epoch = 0
   if ckpt:=getenv("RESUME", ""):
     load_training_state(model, optimizer, scheduler, safe_load(ckpt))
@@ -128,11 +129,13 @@ def train_resnet():
       cl = time.perf_counter()
 
       tqdm.write(
-        f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(pt - st) * 1000.0:7.2f} ms python, {(dt - pt) * 1000.0:6.2f} ms fetch data, {(cl - dt) * 1000.0:7.2f} ms {device_str},"
-        f" {loss:5.2f} loss, {top_1_acc:3.2f} acc, {optimizer.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS")
+        f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(pt - st) * 1000.0:7.2f} ms python, {(dt - pt) * 1000.0:6.2f} ms fetch data, "
+        f"{(cl - dt) * 1000.0:7.2f} ms {device_str}, {loss:5.2f} loss, {top_1_acc:3.2f} acc, {optimizer.lr.numpy()[0]:.6f} LR, "
+        f"{GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS")
       if WANDB:
-        wandb.log({"lr": optimizer.lr.numpy(), "train/loss": loss, "train/top_1_acc": top_1_acc, "train/step_time": cl - st, "train/python_time": pt - st, "train/data_time": dt - pt,
-                   "train/cl_time": cl - dt, "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": e + (i + 1) / steps_in_train_epoch})
+        wandb.log({"lr": optimizer.lr.numpy(), "train/loss": loss, "train/top_1_acc": top_1_acc, "train/step_time": cl - st,
+                   "train/python_time": pt - st, "train/data_time": dt - pt, "train/cl_time": cl - dt,
+                   "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": e + (i + 1) / steps_in_train_epoch})
 
       st = cl
       proc, next_proc = next_proc, None  # return old cookie
