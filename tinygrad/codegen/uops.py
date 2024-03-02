@@ -5,7 +5,7 @@ from collections import defaultdict
 from tinygrad.helpers import DEBUG, flatten, all_same
 from tinygrad.dtype import dtypes, DType
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
-from tinygrad.shape.symbolic import sint, Variable, factor_exprs, MaxNode, NumNode
+from tinygrad.shape.symbolic import sint, Variable, factor_exprs, Node, MaxNode, NumNode
 from enum import Enum, auto
 from dataclasses import dataclass
 
@@ -50,14 +50,13 @@ def exec_alu(arg, dtype, p):
   #return (ret + adjusted) % 2 ** (dtype.itemsize * 8) - adjusted
 
 def uop_alu_resolve(u:UOp, alt_resolve:Optional[Callable[[UOp], Optional[sint]]]=None) -> sint:
-  if u.uop == UOps.CONST: return u.arg
+  if alt_resolve is not None and ((alt_resolved := alt_resolve(u)) is not None): return alt_resolved
+  elif u.uop == UOps.CONST: return u.arg
   elif u.uop == UOps.DEFINE_VAR: return u.arg
   elif u.uop == UOps.ALU and u.arg == BinaryOps.MUL:
     return uop_alu_resolve(u.vin[0], alt_resolve) * uop_alu_resolve(u.vin[1], alt_resolve)
   elif u.uop == UOps.ALU and u.arg == BinaryOps.ADD:
     return uop_alu_resolve(u.vin[0], alt_resolve) + uop_alu_resolve(u.vin[1], alt_resolve)
-  elif alt_resolve is not None and ((alt_resolved := alt_resolve(u)) is not None):
-    return alt_resolved
   else:
     raise RuntimeError(f"ALU resolve fail @ {u.uop}")
 
@@ -183,7 +182,8 @@ class UOpGraph:
 
   def loop_fold_resolve(self, u: UOp, state:Dict[str, Variable]):
     resolve = lambda uop: uop_alu_resolve(uop, lambda u: self.loop_fold_resolve(u, state))
-    if u.uop == UOps.LOOP:
+    if u.uop == UOps.CONST: return NumNode(u.arg)
+    elif u.uop == UOps.LOOP:
       state["_loopidx"] = Variable("_loopidx", resolve(u.vin[0]), resolve(u.vin[1]) - 1)
       return state["_loopidx"]
     elif u.uop == UOps.SPECIAL: return state[u.arg[1]]
@@ -195,7 +195,7 @@ class UOpGraph:
       factored, sign_flipped = factor_exprs(left, right, loop_var, round_up=True)
       if sign_flipped:
         factored, sign_flipped = factor_exprs(left, right, loop_var, round_up=False)
-      min_clamp, max_clamp = NumNode(0), NumNode(loop_var.max - loop_var.min + 1)
+      min_clamp, max_clamp = NumNode(0), loop_var.max - loop_var.min + 1
       raw_val = (loop_var.max - factored) if sign_flipped else (factored - loop_var.min)
       clamped = MaxNode(MaxNode(raw_val, min_clamp) * -1, max_clamp * -1) * -1
       return clamped
@@ -222,7 +222,7 @@ class UOpGraph:
         loop_start_idx = self.uops.index(op.vin[0])
         loop_ops = self.uops[loop_start_idx:loop_end_idx+1]
         after_loop_ops = self.uops[loop_end_idx+1:]
-        phi_to_simplified_op = {}
+        phi_replacement = {}
         self.uops = self.uops[:loop_start_idx]
         for phi_op in (phi_ops:=[op for op in loop_ops if op.uop == UOps.PHI]):
           if (phi_op is None or not dtypes.is_int(phi_op.dtype)
@@ -234,10 +234,10 @@ class UOpGraph:
           if DEBUG >= 4: print(f"removing loop")
           vars = {op.arg[1]: Variable(op.arg[1], 0, op.arg[2] - 1) for op in self.uops if op.uop is UOps.SPECIAL}
           rendered = self.loop_fold_resolve(phi_op, vars).render(render_ops, ctx)
-          phi_to_simplified_op[phi_op] = rendered
+          phi_replacement[phi_op] = rendered
         for op in after_loop_ops:
-          op.vin = tuple([phi_to_simplified_op[op] if op in phi_to_simplified_op else op for op in list(op.vin)])
-        self.uops = self.uops + ([] if (simplified_something:=len(phi_to_simplified_op) == len(phi_ops)) else loop_ops) + after_loop_ops
+          op.vin = tuple([phi_replacement[op] if op in phi_replacement else op for op in list(op.vin)])
+        self.uops = self.uops + (loop_ops[1:-1] if (simplified_something:=len(phi_replacement) == len(phi_ops)) else loop_ops) + after_loop_ops
         self.remove_childless({UOps.ENDIF, UOps.ENDLOOP})
         keep_removing_loops = simplified_something
         break
