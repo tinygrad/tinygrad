@@ -32,7 +32,7 @@ class Node:
     if not isinstance(other, Node): return NotImplemented
     return self.key == other.key
   def __neg__(self): return self*-1
-  def __add__(self, b:Union[Node,int]): return Node.sum([self, NumNode(b) if (isinstance(b, int) or isinstance(b, float)) else b])
+  def __add__(self, b:Union[Node,int]): return Node.sum([self, NumNode(b) if isinstance(b, int) else b])
   def __radd__(self, b:int): return self+b
   def __sub__(self, b:Union[Node,int]): return self+-b
   def __rsub__(self, b:int): return -self+b
@@ -56,13 +56,14 @@ class Node:
       if (b - self).min > 0 and self.min >= 0: return NumNode(0) # b - self simplifies the node
       raise RuntimeError(f"not supported: {self} // {b}")
     assert b != 0
-    if b < 0: return (self*-1)//-b
+    if b < 0: return (self*-1//-b)
     if b == 1: return self
 
-    # if self.min < 0:
-    #   offset = self.min//b
-    #   # factor out an "offset" to make the numerator positive. don't allowing factoring again
-    #   return (self + -offset*b).__floordiv__(b, factoring_allowed=False) + offset
+    # the numerator of div is not allowed to be negative
+    if self.min < 0:
+      offset = self.min//b
+      # factor out an "offset" to make the numerator positive. don't allowing factoring again
+      return (self + -offset*b).__floordiv__(b, factoring_allowed=False) + offset
     return create_node(DivNode(self, b))
 
   def __rmod__(self, b:int): return NumNode(b) % self
@@ -136,13 +137,13 @@ class Variable(Node):
 
 class NumNode(Node):
   def __init__(self, num:int):
-    assert isinstance(num, int) or isinstance(num, float), f"{num} is not number-like"
+    assert isinstance(num, int), f"{num} is not an int"
     self.b:int = num
     self.min, self.max = num, num
   def bind(self, val):
     assert self.b == val, f"cannot bind {val} to {self}"
     return self
-  def __mul__(self, b:Union[Node,int]): return NumNode(self.b*b) if (isinstance(b, int) or isinstance(b, float)) else b*self.b
+  def __mul__(self, b:Union[Node,int]): return NumNode(self.b*b) if isinstance(b, int) else b*self.b
   def __eq__(self, other): return self.b == other
   def __hash__(self): return hash(self.b)  # needed with __eq__ override
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node: return self
@@ -179,19 +180,16 @@ class MulNode(OpNode):
     return Node.__floordiv__(self, b, factoring_allowed)
   def __mod__(self, b: Union[Node, int]): return Node.__mod__(self.a * (self.b%b), b)
   def get_bounds(self) -> Tuple[int, sint]:
-    if (isinstance(self.b, int) or isinstance(self.b, float)): return (self.a.min*self.b, self.a.max*self.b) if self.b >= 0 else (self.a.max*self.b, self.a.min*self.b)
+    if isinstance(self.b, int): return (self.a.min*self.b, self.a.max*self.b) if self.b >= 0 else (self.a.max*self.b, self.a.min*self.b)
     return (self.a.min*self.b.min, self.a.max*self.b.max) if self.b.min >= 0 else (self.a.max*self.b.min, self.a.min*self.b.max)
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node:
     return self.a.substitute(var_vals) * (self.b if isinstance(self.b, int) else self.b.substitute(var_vals))
 
 class DivNode(OpNode):
-  def __floordiv__(self, b: Union[Node,int,float], _=False): return self.a//(self.b*b) # two divs is one div
+  def __floordiv__(self, b: Union[Node, int], _=False): return self.a//(self.b*b) # two divs is one div
   def get_bounds(self) -> Tuple[int, sint]:
-    assert isinstance(self.b, int)
-    if self.b > 0:
-      return self.a.min//self.b, self.a.max//self.b
-    return self.a.max//self.b, self.a.min//self.b
-
+    assert self.a.min >= 0 and isinstance(self.b, int)
+    return self.a.min//self.b, self.a.max//self.b
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node: return self.a.substitute(var_vals) // self.b
 
 class MaxNode(OpNode):
@@ -201,7 +199,7 @@ class MaxNode(OpNode):
 
 class ModNode(OpNode):
   def __mod__(self, b: Union[Node, int]):
-    if (isinstance(b, int) or isinstance(b, float)) and isinstance(self.b, int) and self.b % b == 0: return self.a % b
+    if isinstance(b, int) and isinstance(self.b, int) and self.b % b == 0: return self.a % b
     return Node.__mod__(self, b)
   def __floordiv__(self, b: Union[Node, int], factoring_allowed=True):
     return (self.a//b) % (self.b//b) if self.b % b == 0 else Node.__floordiv__(self, b, factoring_allowed)
@@ -263,7 +261,7 @@ class SumNode(RedNode):
 
   def __lt__(self, b:Union[Node,int]):
     lhs: Node = self
-    if (isinstance(b, int) or isinstance(b, float)):
+    if isinstance(b, int):
       new_sum = []
       for x in self.nodes:
         # TODO: should we just force the last one to always be the number
@@ -341,8 +339,8 @@ render_python: Dict[Type, Callable[..., str]] = {
   NumNode: lambda self,ops,ctx: f"NumNode({self.b})" if ctx == "REPR" else f"{self.b}",
   MulNode: render_mulnode,
   DivNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}//{self.b})",
+  MaxNode: lambda self,ops,ctx: f"max({self.a.render(ops,ctx)},{self.b})",
   ModNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}%{self.b})",
-  MaxNode: lambda self,ops,ctx: f"max({self.a.render(ops,ctx)}, {self.b})",
   LtNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}<{sym_render(self.b,ops,ctx)})",
   SumNode: lambda self,ops,ctx: f"({'+'.join(sorted([x.render(ops,ctx) for x in self.nodes]))})",
   AndNode: lambda self,ops,ctx: f"({' and '.join(sorted([x.render(ops,ctx) for x in self.nodes]))})",
