@@ -217,7 +217,7 @@ class TestLinearizer(unittest.TestCase):
     c0 = UOp(UOps.CONST, dtypes.float, vin=(), arg=0.0)
     c1 = UOp(UOps.CONST, dtypes.float, vin=(), arg=1.0)
     assert helper_test_simplify(UOps.ALU, dtypes.float, vin=(UOp(UOps.CONST, dtypes.bool, vin=(), arg=True), c0, c1),
-                                arg=TernaryOps.WHERE).uop == UOps.ALU
+                                arg=TernaryOps.WHERE).uop == UOps.CONST
 
 def helper_realized_ast(r:Tensor):
   s = create_schedule([r.lazydata])
