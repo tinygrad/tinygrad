@@ -188,6 +188,7 @@ class UOpGraph:
       return state["_loopidx"]
     elif u.uop == UOps.SPECIAL: return state[u.arg[1]]
     elif u.uop == UOps.DEFINE_ACC: return u.arg
+    elif u.uop == UOps.GEP: return u.vin[0]
     elif u.uop == UOps.ALU and u.arg == BinaryOps.CMPLT:
       left, right = resolve(u.vin[0]), resolve(u.vin[1])
       loop_var = state["_loopidx"]
@@ -219,24 +220,26 @@ class UOpGraph:
       for loop_end_idx, op in enumerate(self.uops):
         if op.uop is not UOps.ENDLOOP: continue
         loop_start_idx = self.uops.index(op.vin[0])
-        loop_ops = self.uops[loop_start_idx:loop_end_idx]
-        phi_op = next((op for op in loop_ops if op.uop == UOps.PHI), None)
-        if (phi_op is None or not dtypes.is_int(phi_op.dtype)
-          or (any([op.uop not in [UOps.LOOP, UOps.ALU, UOps.PHI, UOps.ENDLOOP] for op in loop_ops]))
-          or not (any([op.uop == UOps.ALU and op.arg == BinaryOps.CMPLT for op in loop_ops])) #non-cmplt not supported
-          or loop_exponent(phi_op) != 1
-          or (any([op.uop not in [UOps.CONST, UOps.SPECIAL, UOps.LOOP, UOps.DEFINE_ACC, UOps.ALU] for op in get_recursive_parents(phi_op)]))):
-          break
-        if DEBUG >= 4: print(f"removing loop")
-        vars = {op.arg[1]: Variable(op.arg[1], 0, op.arg[2] - 1) for op in self.uops if op.uop is UOps.SPECIAL}
+        loop_ops = self.uops[loop_start_idx:loop_end_idx+1]
         after_loop_ops = self.uops[loop_end_idx+1:]
+        phi_to_simplified_op = {}
         self.uops = self.uops[:loop_start_idx]
-        rendered = self.loop_fold_resolve(phi_op, vars).render(render_ops, ctx)
+        for phi_op in (phi_ops:=[op for op in loop_ops if op.uop == UOps.PHI]):
+          if (phi_op is None or not dtypes.is_int(phi_op.dtype)
+            or (any([op.uop not in [UOps.LOOP, UOps.ALU, UOps.GEP, UOps.PHI, UOps.ENDLOOP] for op in loop_ops]))
+            or not (any([op.uop == UOps.ALU and op.arg == BinaryOps.CMPLT for op in loop_ops])) #non-cmplt not supported
+            or loop_exponent(phi_op) != 1
+            or (any([op.uop not in [UOps.CONST, UOps.SPECIAL, UOps.LOOP, UOps.DEFINE_ACC, UOps.ALU] for op in get_recursive_parents(phi_op)]))):
+            continue
+          if DEBUG >= 4: print(f"removing loop")
+          vars = {op.arg[1]: Variable(op.arg[1], 0, op.arg[2] - 1) for op in self.uops if op.uop is UOps.SPECIAL}
+          rendered = self.loop_fold_resolve(phi_op, vars).render(render_ops, ctx)
+          phi_to_simplified_op[phi_op] = rendered
         for op in after_loop_ops:
-          op.vin = tuple([rendered if op == phi_op else op for op in list(op.vin)])
-        self.uops = self.uops + after_loop_ops
+          op.vin = tuple([phi_to_simplified_op[op] if op in phi_to_simplified_op else op for op in list(op.vin)])
+        self.uops = self.uops + ([] if (simplified_something:=len(phi_to_simplified_op) == len(phi_ops)) else loop_ops) + after_loop_ops
         self.remove_childless({UOps.ENDIF, UOps.ENDLOOP})
-        keep_removing_loops = True
+        keep_removing_loops = simplified_something
         break
 
 
