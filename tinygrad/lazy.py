@@ -49,6 +49,7 @@ class LazyBuffer:
 
   @staticmethod
   def loadop(op, shape:Tuple[sint,...], dtype:DType, device:str, arg=None, src:Optional[LazyBuffer]=None, enable_cache=False) -> LazyBuffer:
+    if op == LoadOps.CONST: enable_cache = True
     return create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype, op, arg, (src,) if src is not None else (), enable_cache=enable_cache)
 
   def const(self, val:Scalar, shape:Optional[Tuple[sint,...]]=None) -> LazyBuffer:
