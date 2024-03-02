@@ -7,7 +7,7 @@ from tinygrad.device import Buffer, Device
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.device import CompiledASTRunner, Compiled
 from tinygrad.codegen.linearizer import UOps, UOp
-from tinygrad.runtime.ops_python import exec_alu
+from tinygrad.codegen.uops import exec_alu
 from test.test_dtype import is_dtype_supported
 
 def _uops_to_prg(uops):
@@ -112,6 +112,22 @@ class TestNonFloatUOps(TestUOps):
 class TestExecALU(TestUOps):
   def test_sqrt(self):
     self.assertEqual(exec_alu(UnaryOps.SQRT, dtypes.int, (0,)), 0)
+
+  @unittest.skip("not enabled because it's slow")
+  def test_overflow(self):
+    self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.uint8, (250, 250)), 244)
+    self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.uint8, (256, 0)), 0)
+    self.assertEqual(exec_alu(BinaryOps.SUB, dtypes.uint8, (0, 1)), 255)
+    self.assertEqual(exec_alu(BinaryOps.SUB, dtypes.uint8, (0, 1000)), 24)
+
+    self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.int8, (127, 0)), 127)
+    self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.int8, (-128, 0)), -128)
+    self.assertEqual(exec_alu(BinaryOps.SUB, dtypes.int8, (-100, 100)), 56)
+    self.assertEqual(exec_alu(BinaryOps.SUB, dtypes.int8, (-1000, 0)), 24)
+    self.assertEqual(exec_alu(BinaryOps.SUB, dtypes.int8, (-130, 0)), 126)
+
+    self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.int8, (1.0, 1.0)), 2)
+    self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.int8, (-math.exp2(7), 0)), -128)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
