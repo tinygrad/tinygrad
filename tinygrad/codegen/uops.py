@@ -5,7 +5,7 @@ from collections import defaultdict
 from tinygrad.helpers import DEBUG, flatten, all_same
 from tinygrad.dtype import dtypes, DType
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
-from tinygrad.shape.symbolic import sint, Variable, factor_exprs, Node, MaxNode, NumNode
+from tinygrad.shape.symbolic import sint, Variable, factor_exprs, MaxNode, NumNode
 from enum import Enum, auto
 from dataclasses import dataclass
 
@@ -181,8 +181,8 @@ class UOpGraph:
               break
     self.uops = flatten(loop_stack)
 
-  def loop_fold_resolve(self, u: UOp, loop_op_to_name:Dict[UOp: str], current_loop:UOp, vars:Dict[UOp, Variable]={}):
-    resolve = lambda uop: uop_alu_resolve(uop, lambda u: self.loop_fold_resolve(u, loop_op_to_name, current_loop, vars))
+  def loop_fold_resolve(self, u: UOp, loop_op_to_name:Dict[UOp,str], current_loop:UOp, vars:Dict[UOp,Variable]={}):
+    def resolve(uop:UOp): return uop_alu_resolve(uop, lambda u: self.loop_fold_resolve(u, loop_op_to_name, current_loop, vars))
     if u.uop == UOps.CONST: return NumNode(u.arg)
     elif u.uop == UOps.LOOP:
       vars[u] = Variable(loop_op_to_name[u], resolve(u.vin[0]), resolve(u.vin[1]) - 1)
@@ -196,8 +196,7 @@ class UOpGraph:
       left, right = resolve(u.vin[0]), resolve(u.vin[1])
       loop_var = vars[current_loop]
       factored, sign_flipped = factor_exprs(left, right, loop_var, round_up=True)
-      if sign_flipped:
-        factored, sign_flipped = factor_exprs(left, right, loop_var, round_up=False)
+      if sign_flipped: factored, sign_flipped = factor_exprs(left, right, loop_var, round_up=False)
       min_clamp, max_clamp = NumNode(0), loop_var.max - loop_var.min + 1
       raw_val = (loop_var.max - factored) if sign_flipped else (factored - loop_var.min)
       clamped = MaxNode(MaxNode(raw_val, min_clamp) * -1, max_clamp * -1) * -1
@@ -223,26 +222,24 @@ class UOpGraph:
       for loop_end_idx, op in enumerate(self.uops):
         if op.uop is not UOps.ENDLOOP: continue
         loop_start_idx = self.uops.index(loop_start:=op.vin[0])
-        loop_ops = self.uops[loop_start_idx:loop_end_idx+1]
-        after_loop_ops = self.uops[loop_end_idx+1:]
-        phi_replacement = {}
+        loop_ops, after_loop_ops = self.uops[loop_start_idx:loop_end_idx+1], self.uops[loop_end_idx+1:]
+        phi_replace = {}
         if (any([op.uop not in [UOps.LOOP, UOps.ALU, UOps.GEP, UOps.PHI, UOps.ENDLOOP] for op in loop_ops])
           or not (any([op.uop == UOps.ALU and op.arg == BinaryOps.CMPLT for op in loop_ops]))): continue
         self.uops = self.uops[:loop_start_idx]
         for phi_op in (phi_ops:=[op for op in loop_ops if op.uop == UOps.PHI]):
-          if (phi_op is None or not dtypes.is_int(phi_op.dtype)
-            or loop_exponent(phi_op) != 1
+          if (phi_op.dtype is None or not dtypes.is_int(phi_op.dtype) or loop_exponent(phi_op) != 1
             or (any([op.uop not in [UOps.CONST, UOps.SPECIAL, UOps.LOOP, UOps.DEFINE_ACC, UOps.ALU] for op in get_recursive_parents(phi_op)]))):
             continue
-          if DEBUG >= 4: print(f"removing loop")
+          if DEBUG >= 4: print("removing loop")
           loop_op_to_name = {op: name for name, op in ctx.loop_uops.items()}
           rendered = self.loop_fold_resolve(phi_op, loop_op_to_name, loop_start).render(render_ops, ctx)
-          phi_replacement[phi_op] = rendered
+          phi_replace[phi_op] = rendered
         for op in after_loop_ops:
-          op.vin = tuple([phi_replacement[op] if op in phi_replacement else op for op in list(op.vin)])
-        self.uops = self.uops + ([op for op in loop_ops[1:-1] if op not in phi_replacement] if (len(phi_replacement) == len(phi_ops)) else loop_ops) + after_loop_ops
+          op.vin = tuple([phi_replace[op] if op in phi_replace else op for op in list(op.vin)])
+        self.uops += ([op for op in loop_ops[1:-1] if op not in phi_replace] if (len(phi_replace) == len(phi_ops)) else loop_ops) + after_loop_ops
         self.remove_childless({UOps.ENDIF, UOps.ENDLOOP})
-        keep_removing_loops = len(phi_replacement) > 0
+        keep_removing_loops = len(phi_replace) > 0
         break
 
 

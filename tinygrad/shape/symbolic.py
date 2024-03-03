@@ -193,7 +193,7 @@ class DivNode(OpNode):
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node: return self.a.substitute(var_vals) // self.b
 
 class MaxNode(OpNode):
-  def get_bounds(self) -> Tuple[int, int]:
+  def get_bounds(self) -> Tuple[int, sint]:
     if isinstance(self.b, int): return max(self.a.min, self.b), max(self.a.max, self.b)
     return max(self.a.min, self.b.min), max(self.a.max, self.b.min)
 
@@ -314,20 +314,20 @@ def render_mulnode(node:MulNode, ops, ctx):
   return f"({node.a.render(ops,ctx)}*{sym_render(node.b,ops,ctx)})"
 
 def factor_exprs(left: Node, right: Node, var: Variable, sign_flipped=False, round_up=False):
-  if isinstance(left, Node) and var in left.vars() and isinstance(right, Node) and var in right.vars(): raise RuntimeError("can't handle variable on both sides currently")
-  if isinstance(right, Node) and var in right.vars(): return factor_exprs(right, left, var, sign_flipped=not sign_flipped, round_up=round_up)
+  if var in left.vars() and var in right.vars(): raise RuntimeError("can't handle variable on both sides currently")
+  if var in right.vars(): return factor_exprs(right, left, var, sign_flipped=not sign_flipped, round_up=round_up)
   if isinstance(left, SumNode):
     for node in [node for node in left.nodes if var not in node.vars()]:
       left, right = left - node, right - node
     return factor_exprs(left, right, var, sign_flipped=sign_flipped, round_up=round_up)
   if isinstance(left, MulNode):
     multiplier = left.b
-    assert (isinstance(multiplier, int) or isinstance(multiplier, float)), "factoring multiplication with non-number not supported"
+    assert (isinstance(multiplier, int)), "factoring multiplication with non-number not supported"
     round_up_offset = abs(multiplier) - 1 if round_up else 0
-    return factor_exprs(left.__floordiv__(multiplier, factoring_allowed=False),
-                        (right+round_up_offset).__floordiv__(multiplier, factoring_allowed=False),
+    return factor_exprs(left.__floordiv__(multiplier, False),
+                        (right+round_up_offset).__floordiv__(multiplier, False),
                         var,
-                        sign_flipped=sign_flipped ^ (multiplier < 0), # xor
+                        sign_flipped=sign_flipped ^ (multiplier < 0),
                         round_up=round_up)
   assert left == var
   return right, sign_flipped
