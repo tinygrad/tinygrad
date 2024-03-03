@@ -783,7 +783,6 @@ class TestLinearizerUOptimize(unittest.TestCase):
     store_val = [u.vin[-1] for u in k.uops if u.uop is UOps.STORE][0]
     assert store_val.dtype == dtypes.float.vec(4) and store_val.uop != UOps.CAST
 
-  @unittest.skip("TODO: support locals replacement across the uop graph")
   def test_grouped_store_locals_and_globals(self):
     if not Device[Device.DEFAULT].compiler.linearizer_opts.has_local or not Device[Device.DEFAULT].compiler.linearizer_opts.has_shared:
       self.skipTest("Only Compiled uses linearizer with locals and shared")
@@ -804,8 +803,9 @@ class TestLinearizerUOptimize(unittest.TestCase):
     # check that the float4 cast collapses for all stores
     for store in local_stores+global_stores:
       assert store.vin[-1].dtype == dtypes.float.vec(2) and store.vin[-1].uop != UOps.CAST
-    # check that the barrier uses the new stores
+    # check children
     assert barrier.vin == tuple(local_stores)
+    assert len([u for u in k.uops if u.uop is UOps.IF and u.vin[-1] == barrier]) == 1
 
 if __name__ == '__main__':
   unittest.main()
