@@ -48,12 +48,7 @@ class HSAGraph(MultiDeviceJITGraph):
     kernargs_size: Dict[HSADevice, int] = collections.defaultdict(int)
     for ji in self.jit_cache:
       if isinstance(ji.prg, CompiledASTRunner): kernargs_size[cast(HSADevice, ji.prg.device)] += (ctypes.sizeof(ji.prg.clprg.args_struct_t)+15) & ~15
-
-    kernargs_ptrs: Dict[Compiled, int] = {}
-    for dev,sz in kernargs_size.items():
-      check(hsa.hsa_amd_memory_pool_allocate(dev.gpu_mempool, sz, 0, ctypes.byref(buf := ctypes.c_void_p())))
-      check(hsa.hsa_amd_agents_allow_access(2, (hsa.hsa_agent_t*2)(HSADevice.cpu_agent, dev.agent), None, buf))
-      kernargs_ptrs[dev] = buf.value
+    kernargs_ptrs: Dict[Compiled, int] = {dev:dev.allocator._alloc(sz) for dev,sz in kernargs_size.items()}
 
     # Fill initial arguments.
     self.ji_kargs_structs: Dict[int, ctypes.Structure] = {}
