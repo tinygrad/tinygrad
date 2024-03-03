@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import unittest, pickle
-from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, LtNode, ModNode, Node, sym_render, sym_infer
+from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, LtNode, ModNode, Node, sym_render, sym_infer, create_lt_node, create_ge_node
 
 class TestSymbolicPickle(unittest.TestCase):
   def _test_pickle_unpickle(self, x): self.assertEqual(x, pickle.loads(pickle.dumps(x)))
@@ -30,15 +30,15 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 3, 8)<2, 0, 0, "0")
 
   def test_ge_divides(self):
-    expr = (Variable("idx", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3)) < 512
+    expr = create_lt_node(Variable("idx", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3), 512)
     self.helper_test_variable(expr, 0, 1, "(idx<128)")
 
   def test_ge_divides_and(self):
-    expr = Node.ands([(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3)) < 512,
-                      (Variable("idx2", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3)) < 512])
+    expr = Node.ands([create_lt_node(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3), 512),
+                      create_lt_node(Variable("idx2", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3), 512)])
     self.helper_test_variable(expr, 0, 1, "((idx1<128) and (idx2<128))")
-    expr = Node.ands([(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3)) < 512,
-                      (Variable("idx2", 0, 511)*4 + Variable("FLOAT8_INDEX", 0, 7)) < 512])
+    expr = Node.ands([create_lt_node(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3), 512),
+                      create_lt_node(Variable("idx2", 0, 511)*4 + Variable("FLOAT8_INDEX", 0, 7), 512)])
     self.helper_test_variable(expr//4, 0, 0, "0")
 
   def test_lt_factors(self):
@@ -155,9 +155,9 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)*4, NumNode(3)]) // 16, 0, 1, "(a//4)")
 
   def test_sum_lt_fold(self):
-    self.helper_test_variable(Node.sum([Variable("a", 0, 7) * 4, Variable("b", 0, 3)]) < 16, 0, 1, "(a<4)")
-    self.helper_test_variable(Node.sum([Variable("a", 0, 7) * 4, Variable("b", 0, 4)]) < 16, 0, 1, "(((a*4)+b)<16)")
-    self.helper_test_variable(Node.sum([Variable("uidx", 0, 3), Variable("a", 0, 1529) * 12]) < (4 * 67), 0, 1, "(a<23)")
+    self.helper_test_variable(create_lt_node(Node.sum([Variable("a", 0, 7) * 4, Variable("b", 0, 3)]), 16), 0, 1, "(a<4)")
+    self.helper_test_variable(create_lt_node(Node.sum([Variable("a", 0, 7) * 4, Variable("b", 0, 4)]), 16), 0, 1, "(((a*4)+b)<16)")
+    self.helper_test_variable(create_lt_node(Node.sum([Variable("uidx", 0, 3), Variable("a", 0, 1529) * 12]), (4 * 67)), 0, 1, "(a<23)")
 
   def test_mod_mul(self):
     self.helper_test_variable((Variable("a", 0, 5)*10)%9, 0, 5, "a")
@@ -171,10 +171,10 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((Variable("a", 0, 5)*10)*9, 0, 5*10*9, "(a*90)")
 
   def test_mul_lt(self):
-    self.helper_test_variable((Variable("a", 0, 5)*4)<13, 0, 1, "(a<4)")
-    self.helper_test_variable((Variable("a", 0, 5)*4)<16, 0, 1, "(a<4)")
-    self.helper_test_variable((Variable("a", 0, 5)*4)>11, 0, 1, "((a*-1)<-2)")
-    self.helper_test_variable((Variable("a", 0, 5)*4)>12, 0, 1, "((a*-1)<-3)")
+    self.helper_test_variable(create_lt_node(Variable("a", 0, 5)*4,13), 0, 1, "(a<4)")
+    self.helper_test_variable(create_lt_node(Variable("a", 0, 5)*4,16), 0, 1, "(a<4)")
+    self.helper_test_variable(create_ge_node(Variable("a", 0, 5)*4,12), 0, 1, "((a*-1)<-2)")
+    self.helper_test_variable(create_ge_node(Variable("a", 0, 5)*4,13), 0, 1, "((a*-1)<-3)")
 
   def test_div_div(self):
     self.helper_test_variable((Variable("a", 0, 1800)//10)//9, 0, 20, "(a//90)")
@@ -208,7 +208,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 0, 6) < 8, 1, 1, "1")
 
   def test_lt_sum_remove(self):
-    self.helper_test_variable((Variable("a", 0, 6) + 2) < 3, 0, 1, "(a<1)")
+    self.helper_test_variable(create_lt_node(Variable("a", 0, 6) + 2, 3), 0, 1, "(a<1)")
 
   def test_and_fold(self):
     self.helper_test_variable(Node.ands([NumNode(0), Variable("a", 0, 1)]), 0, 0, "0")
@@ -420,7 +420,7 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     c = Variable("c", 1, 2)
     x = SumNode([MulNode(a, b), c])
     with self.assertRaises(AssertionError):
-      (x < 3)
+      create_lt_node(x, 3)
 
   def test_nested_variable_mod(self):
     i = Variable("i", 1, 5)
