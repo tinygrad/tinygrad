@@ -217,16 +217,18 @@ class UOpGraph:
             self.uops.remove(u)
             changed_something = True
 
-    # store float4 upcasts directly if possible
-    replaced_stores: Dict[UOp,Tuple[UOp,...]] = {}
-    for u in self.uops:
-      if u.uop is not UOps.STORE or (val:=u.vin[-1]).uop is not UOps.CAST or cast(DType,val.dtype).count == 1: continue
-      if all(el.uop is UOps.GEP for el in val.vin) or all(el.uop is UOps.PHI for el in val.vin): replaced_stores[u] = val.vin
-    for prev,new in replaced_stores.items():
-      self.uops[self.uops.index(prev)].vin = (prev.vin[0],prev.vin[1],*new) # replace with the float4 elements
-
     # (recursively) remove childless uops
     self.remove_childless()
+
+    # store float4 upcasts directly if possible
+    replaced_stores: Dict[UOp,UOp] = {}
+    for u in self.uops:
+      if u.uop is not UOps.STORE or (val:=u.vin[-1]).uop is not UOps.CAST or cast(DType,val.dtype).count == 1: continue
+      if all(el.uop is UOps.GEP for el in val.vin): replaced_stores[u] = val.vin[0].vin[0]
+      elif all(el.uop is UOps.PHI for el in val.vin): replaced_stores[u] = phi_resolve_acc(val)
+    for prev,new in replaced_stores.items():
+      self.uops.remove(prev.vin[-1]) # remove the old upcast
+      self.uops[self.uops.index(prev)].vin = (prev.vin[0],prev.vin[1],new) # replace with the float4 value
 
     # add UOps.END*
     self.add_ends()
