@@ -417,7 +417,7 @@ class Kernel:
 
     if opt.op == OptOps.TC:
       assert len(self.applied_opts) == 0, "tensor core opts must be first" # TODO: things like PADTO might be fine
-      assert opt.axis is not None, "tensor core opts must have an axis"
+      assert opt.axis is not None and opt.amt is not None, "tensor core opts must have an axis and amt"
       assert (use_tensor_cores:=getenv("TC", 1)) == 2 or self.opts.has_tensor_cores, "must have tensor cores or TC=2"
       assert self._apply_tc_opt(use_tensor_cores, opt.axis, opt.amt), "no tensor core available"
       self.applied_opts.append(opt)
