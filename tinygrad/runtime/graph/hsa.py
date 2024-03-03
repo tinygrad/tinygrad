@@ -51,9 +51,9 @@ class HSAGraph(MultiDeviceJITGraph):
 
     kernargs_ptrs: Dict[Compiled, int] = {}
     for dev,sz in kernargs_size.items():
-      kernargs_ptrs[dev] = init_c_var(ctypes.c_void_p(),
-                                      lambda x: check(hsa.hsa_amd_memory_pool_allocate(dev.kernargs_pool, sz, 0, ctypes.byref(x)))).value
-      check(hsa.hsa_amd_agents_allow_access(1, ctypes.byref(dev.agent), None, kernargs_ptrs[dev]))
+      check(hsa.hsa_amd_memory_pool_allocate(dev.gpu_mempool, sz, 0, ctypes.byref(buf := ctypes.c_void_p())))
+      check(hsa.hsa_amd_agents_allow_access(2, (hsa.hsa_agent_t*2)(HSADevice.cpu_agent, dev.agent), None, buf))
+      kernargs_ptrs[dev] = buf.value
 
     # Fill initial arguments.
     self.ji_kargs_structs: Dict[int, ctypes.Structure] = {}
@@ -138,6 +138,7 @@ class HSAGraph(MultiDeviceJITGraph):
       self.packets[j].grid_size_z = gl[2] * lc[2]
 
     for dev in self.devices:
+      dev.flush_hdp()
       dev.hw_queue.blit_packets(self.virt_aql_queues[dev].queue_base, self.virt_aql_queues[dev].packets_count)
 
     for transfer_data in self.transfers:

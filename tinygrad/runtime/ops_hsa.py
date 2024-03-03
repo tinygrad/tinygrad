@@ -46,6 +46,7 @@ class HSAProgram:
       args_st = self.args_struct_t.from_address(kernargs)
       for i in range(len(args)): args_st.__setattr__(f'f{i}', args[i])
       for i in range(len(vals)): args_st.__setattr__(f'v{i}', vals[i])
+      self.device.flush_hdp()
 
     signal = self.device.hw_queue.submit_kernel(self, global_size, local_size, kernargs, need_signal=wait)
     if wait:
@@ -159,7 +160,6 @@ class HSADevice(Compiled):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
     self.agent = HSADevice.agents[hsa.HSA_DEVICE_TYPE_GPU][self.device_id]
     self.gpu_mempool = find_memory_pool(self.agent, segtyp=hsa.HSA_AMD_SEGMENT_GLOBAL, location=hsa.HSA_AMD_MEMORY_POOL_LOCATION_GPU)
-    self.kernargs_pool = find_memory_pool(self.agent, segtyp=hsa.HSA_AMD_SEGMENT_GLOBAL, flags=hsa.HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT)
     self.hw_queue = AQLQueue(self)
     HSADevice.devices.append(self)
 
@@ -169,16 +169,15 @@ class HSADevice(Compiled):
     check(hsa.hsa_system_get_info(hsa.HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, ctypes.byref(gpu_freq := ctypes.c_uint64())))
     self.clocks_to_time: float = 1 / gpu_freq.value
 
-    self.kernarg_pool_sz = 16 << 20
-    self.kernarg_start_addr = init_c_var(ctypes.c_void_p(), lambda x: check(hsa.hsa_amd_memory_pool_allocate(self.kernargs_pool, self.kernarg_pool_sz, 0, ctypes.byref(x)))).value # noqa: E501
-    self.kernarg_next_addr = self.kernarg_start_addr
+    check(hsa.hsa_agent_get_info(self.agent, hsa.HSA_AMD_AGENT_INFO_HDP_FLUSH, ctypes.byref(hdp_flush := hsa.hsa_amd_hdp_flush_t())))
+    self.hdp_flush = hdp_flush
+
+    # Preallocate some signals + space for kernargs
+    self._new_kernargs_region(16 << 20) # initial region size is 16mb
+    self.signal_pool = [init_c_var(hsa.hsa_signal_t(), lambda x: check(hsa.hsa_signal_create(1, 0, None, ctypes.byref(x)))) for _ in range(4096)]
 
     self.delayed_free: List[ctypes.c_void_p] = []
-    self.signal_pool: List[hsa.hsa_signal_t] = []
     self.reusable_signals: List[hsa.hsa_signal_t] = []
-    for _ in range(4096):
-      check(hsa.hsa_amd_signal_create(1, 0, None, 0, ctypes.byref(signal := hsa.hsa_signal_t())))
-      self.signal_pool.append(signal)
 
     from tinygrad.runtime.graph.hsa import HSAGraph
     super().__init__(device, HSAAllocator(self), HSACompiler(self.arch), functools.partial(HSAProgram, self), HSAGraph)
@@ -208,12 +207,16 @@ class HSADevice(Compiled):
     return signal
 
   def alloc_kernargs(self, sz):
-    if self.kernarg_next_addr + sz >= self.kernarg_start_addr + self.kernarg_pool_sz:
-      self.delayed_free.append(self.kernarg_start_addr)
-      self.kernarg_pool_sz = int(self.kernarg_pool_sz * 2)
-      self.kernarg_start_addr = init_c_var(ctypes.c_void_p(), lambda x: check(hsa.hsa_amd_memory_pool_allocate(self.kernargs_pool, self.kernarg_pool_sz, 0, ctypes.byref(x)))).value # noqa: E501
-      self.kernarg_next_addr = self.kernarg_start_addr
-
+    if self.kernarg_next_addr + sz >= self.kernarg_start_addr + self.kernarg_pool_sz: self._new_kernargs_region(int(self.kernarg_pool_sz * 2))
     result = self.kernarg_next_addr
     self.kernarg_next_addr = (self.kernarg_next_addr + sz + 15) & (~15) # align to 16 bytes
     return result
+
+  def _new_kernargs_region(self, sz):
+    if hasattr(self, 'kernarg_start_addr'): self.delayed_free.append(self.kernarg_start_addr)
+    check(hsa.hsa_amd_memory_pool_allocate(self.gpu_mempool, sz, 0, ctypes.byref(buf := ctypes.c_void_p())))
+    check(hsa.hsa_amd_agents_allow_access(2, (hsa.hsa_agent_t*2)(HSADevice.cpu_agent, self.agent), None, buf))
+    self.kernarg_next_addr = self.kernarg_start_addr = buf.value
+    self.kernarg_pool_sz = sz
+
+  def flush_hdp(self): self.hdp_flush.HDP_MEM_FLUSH_CNTL[0] = 1
