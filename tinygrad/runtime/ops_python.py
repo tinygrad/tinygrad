@@ -44,7 +44,7 @@ class PythonProgram:
         dtp = [dl[v] for v in idp if self.uops[v][0] not in void_ops]
         if getenv("TRACE"): print(i, uop, dtype, arg, inp, dtp)
         if uop is UOps.STORE:
-          assert len(inp) <= 3, "gated stores not supported yet"
+          assert len(inp) != 4, "gated stores not supported yet"
           if isinstance(dtp[0], ImageDType):
             # image store
             assert dtp[2].count == 4
