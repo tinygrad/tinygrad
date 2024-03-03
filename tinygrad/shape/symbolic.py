@@ -153,6 +153,34 @@ def create_node(ret:Node):
   if ret.min == ret.max: return NumNode(ret.min)
   return ret
 
+def create_lt_node(lhs:Node, b:Union[Node, int]):
+  if isinstance(lhs, SumNode):
+    if isinstance(b, int):
+      new_sum = []
+      for x in lhs.nodes:
+        # TODO: should we just force the last one to always be the number
+        if isinstance(x, NumNode): b -= x.b
+        else: new_sum.append(x)
+      lhs = Node.sum(new_sum)
+      nodes = lhs.nodes if isinstance(lhs, SumNode) else [lhs]
+      assert all(not isinstance(node, MulNode) or isinstance(node.b, int) for node in nodes), "not supported"
+      muls, others = partition(nodes, lambda x: isinstance(x, MulNode) and x.b > 0 and x.max >= b)
+      if muls:
+        # NOTE: gcd in python 3.8 takes exactly 2 args
+        mul_gcd = b
+        for x in muls: mul_gcd = gcd(mul_gcd, x.b)  # type: ignore  # mypy cannot tell that x.b is int here due to assert above
+        all_others = Node.sum(others)
+        if all_others.min >= 0 and all_others.max < mul_gcd:
+          lhs, b = Node.sum([mul//mul_gcd for mul in muls]), b//mul_gcd
+    return create_node(LtNode(lhs, b)) if isinstance(lhs, SumNode) else create_lt_node(lhs, b)
+  if isinstance(lhs, MulNode):
+    if isinstance(b, Node) or isinstance(lhs.b, Node) or lhs.b == -1: return create_node(LtNode(lhs, b))
+    sgn = 1 if lhs.b > 0 else -1
+    return create_node(LtNode(lhs.a*sgn, (b + abs(lhs.b) - 1)//abs(lhs.b)))
+  return create_node(LtNode(lhs, b))
+
+def create_ge_node(lhs:Node, b:Union[Node, int]): return create_lt_node(-lhs, -b+1)
+
 class OpNode(Node):
   def __init__(self, a:Node, b:Union[Node, int]):
     self.a, self.b = a, b
@@ -166,13 +194,9 @@ class LtNode(OpNode):
     if isinstance(self.b, int): return (1, 1) if self.a.max < self.b else (0, 0) if self.a.min >= self.b else (0, 1)
     return (1, 1) if self.a.max < self.b.min else (0, 0) if self.a.min >= self.b.max else (0, 1)
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node:
-    return self.a.substitute(var_vals) < (self.b if isinstance(self.b, int) else self.b.substitute(var_vals))
+    return create_lt_node(self.a.substitute(var_vals), (self.b if isinstance(self.b, int) else self.b.substitute(var_vals)))
 
 class MulNode(OpNode):
-  def __lt__(self, b: Union[Node, int]):
-    if isinstance(b, Node) or isinstance(self.b, Node) or self.b == -1: return Node.__lt__(self, b)
-    sgn = 1 if self.b > 0 else -1
-    return Node.__lt__(self.a*sgn, (b + abs(self.b) - 1)//abs(self.b))
   def __mul__(self, b: Union[Node, int]): return self.a*(self.b*b) # two muls in one mul
   def __floordiv__(self, b: Union[Node, int], factoring_allowed=False): # NOTE: mod negative isn't handled right
     if self.b % b == 0: return self.a*(self.b//b)
@@ -254,27 +278,6 @@ class SumNode(RedNode):
     if isinstance(b, Node) and (b - self).min > 0: return self # b - self simplifies the node
     new_sum = Node.sum([node%b if node.__class__ in (NumNode, MulNode) else node for node in self.nodes])
     return Node.__mod__(new_sum, b)
-
-  def __lt__(self, b:Union[Node,int]):
-    lhs: Node = self
-    if isinstance(b, int):
-      new_sum = []
-      for x in self.nodes:
-        # TODO: should we just force the last one to always be the number
-        if isinstance(x, NumNode): b -= x.b
-        else: new_sum.append(x)
-      lhs = Node.sum(new_sum)
-      nodes = lhs.nodes if isinstance(lhs, SumNode) else [lhs]
-      assert all(not isinstance(node, MulNode) or isinstance(node.b, int) for node in nodes), "not supported"
-      muls, others = partition(nodes, lambda x: isinstance(x, MulNode) and x.b > 0 and x.max >= b)
-      if muls:
-        # NOTE: gcd in python 3.8 takes exactly 2 args
-        mul_gcd = b
-        for x in muls: mul_gcd = gcd(mul_gcd, x.b)  # type: ignore  # mypy cannot tell that x.b is int here due to assert above
-        all_others = Node.sum(others)
-        if all_others.min >= 0 and all_others.max < mul_gcd:
-          lhs, b = Node.sum([mul//mul_gcd for mul in muls]), b//mul_gcd
-    return Node.__lt__(lhs, b) if isinstance(lhs, SumNode) else lhs < b
 
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node:
     return Node.sum([node.substitute(var_vals) for node in self.nodes])
