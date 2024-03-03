@@ -339,6 +339,19 @@ class TestMoveTensor(unittest.TestCase):
     assert s.dtype == t.dtype
     assert s.requires_grad == t.requires_grad
 
+  @given(strat.sampled_from([d0, d1]))
+  def test_same_dev(self, dev):
+    x = Tensor([1,2,3], device=dev)
+    y = x.to(dev)
+    assert x is y
+
+  def test_to_grad(self):
+    x = Tensor.eye(3, requires_grad=True, device=self.d0)
+    y = Tensor([[2.0,0,-2.0]], requires_grad=True, device=self.d0)
+    z = y.matmul(x).to(self.d1).sum()
+    z.backward()
+    np.testing.assert_equal(x.grad.numpy(), [[2,2,2],[0,0,0],[-2,-2,-2]])
+
 class TestZeroShapeTensor(unittest.TestCase):
   def test_shape_stride(self):
     t = Tensor.rand(3, 2, 0)
