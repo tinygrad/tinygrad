@@ -188,7 +188,7 @@ class UOpGraph:
       return vars[u]
     elif u.uop == UOps.SPECIAL:
       vars[u] = Variable(u.arg[1], 0, u.arg[2] - 1)
-      return vars[u.arg[1]]
+      return vars[u]
     elif u.uop == UOps.DEFINE_ACC: return u.arg
     elif u.uop == UOps.GEP: return u.vin[0]
     elif u.uop == UOps.ALU and u.arg == BinaryOps.CMPLT:
