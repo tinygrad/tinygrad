@@ -195,7 +195,7 @@ class DivNode(OpNode):
 class MaxNode(OpNode):
   def get_bounds(self) -> Tuple[int, sint]:
     if isinstance(self.b, int): return max(self.a.min, self.b), max(self.a.max, self.b)
-    return max(self.a.min, self.b.min), max(self.a.max, self.b.min)
+    return max(self.a.min, self.b.min), max(self.a.max, self.b.max)
 
 class ModNode(OpNode):
   def __mod__(self, b: Union[Node, int]):
