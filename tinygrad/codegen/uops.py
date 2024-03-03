@@ -1,6 +1,6 @@
 from __future__ import annotations
-import functools, math
-from typing import List, Set, Optional, Tuple, Any, Dict, DefaultDict
+import functools, math, operator
+from typing import List, Set, Optional, Tuple, Any, Dict, DefaultDict, cast
 from collections import defaultdict
 from tinygrad.helpers import DEBUG, flatten, all_same
 from tinygrad.dtype import dtypes, DType
@@ -25,26 +25,23 @@ class UOp:
   def __repr__(self):
     return f"{str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.uop for x in self.vin]):32s} {self.arg}"
 
+def hook_overflow(dv, fxn):
+  def wfxn(*args):
+    try: return fxn(*args)
+    except OverflowError: return dv
+  return wfxn
+
+python_alu = {
+  UnaryOps.LOG2: lambda x: math.log2(x) if x > 0 else -math.inf if x == 0 else math.nan,
+  UnaryOps.EXP2: hook_overflow(math.inf, lambda x: math.exp(x*math.log(2))),
+  UnaryOps.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan, UnaryOps.SIN: math.sin, UnaryOps.NEG: operator.neg,
+  BinaryOps.MUL: operator.mul, BinaryOps.ADD: operator.add, BinaryOps.SUB: operator.sub, BinaryOps.XOR: operator.xor,
+  BinaryOps.MAX: max, BinaryOps.CMPEQ: operator.eq, BinaryOps.CMPLT: operator.lt, BinaryOps.MOD: operator.mod,
+  BinaryOps.DIV: lambda x,y: x//y if isinstance(x, int) else (x/y if y != 0 else math.nan),
+  TernaryOps.WHERE: lambda x,y,z: y if x else z}
+
 def exec_alu(arg, dtype, p):
-  if arg == TernaryOps.WHERE: ret = p[1] if p[0] else p[2]
-  elif arg == UnaryOps.LOG2: ret = math.log2(p[0]) if p[0] > 0 else -math.inf if p[0] == 0 else math.nan
-  elif arg == UnaryOps.EXP2:
-    try: ret = math.exp(p[0]*math.log(2))
-    except OverflowError: ret = math.inf
-  elif arg == UnaryOps.SQRT: ret = math.sqrt(p[0]) if p[0] >= 0 else math.nan
-  elif arg == UnaryOps.SIN: ret = math.sin(p[0])
-  elif arg == UnaryOps.NEG: ret = -p[0]
-  elif arg == BinaryOps.MUL: ret = p[0]*p[1]
-  elif arg == BinaryOps.ADD: ret = p[0]+p[1]
-  elif arg == BinaryOps.SUB: ret = p[0]-p[1]
-  elif arg == BinaryOps.XOR: ret = p[0]^p[1]
-  elif arg == BinaryOps.MAX: ret = max(p[0], p[1])
-  elif arg == BinaryOps.CMPEQ: ret = p[0] == p[1]
-  elif arg == BinaryOps.CMPLT: ret = p[0] < p[1]
-  elif arg == BinaryOps.DIV: ret = p[0]//p[1] if dtypes.is_int(dtype) else (p[0]/p[1] if p[1] != 0 else math.nan)
-  elif arg == BinaryOps.MOD: ret = p[0]%p[1]
-  return ret
-  #else: raise NotImplementedError(f"no support for {arg}")
+  return python_alu[arg](*p)
   #if not dtypes.is_int(dtype): return ret
   #adjusted = 0 if dtypes.is_unsigned(dtype) else 2 ** (dtype.itemsize * 8 - 1)
   #return (ret + adjusted) % 2 ** (dtype.itemsize * 8) - adjusted
@@ -58,6 +55,10 @@ def uop_alu_resolve(u:UOp) -> sint:
     return uop_alu_resolve(u.vin[0]) + uop_alu_resolve(u.vin[1])
   else:
     raise RuntimeError(f"ALU resolve fail @ {u.uop}")
+
+def phi_resolve_acc(u:UOp) -> UOp:
+  if u.uop == UOps.DEFINE_ACC: return u
+  return phi_resolve_acc(u.vin[0])
 
 class UOpGraph:
   def __init__(self):
@@ -219,6 +220,17 @@ class UOpGraph:
     # (recursively) remove childless uops
     self.remove_childless()
 
+    # store float4 upcasts directly if possible
+    replaced_stores: Dict[UOp,UOp] = {}
+    for u in self.uops:
+      if u.uop is not UOps.STORE or (val:=u.vin[-1]).uop is not UOps.CAST or cast(DType,val.dtype).count == 1: continue
+      if u.vin[0].uop is UOps.DEFINE_LOCAL: continue # TODO add support for local store
+      if all(el.uop is UOps.GEP for el in val.vin): replaced_stores[u] = val.vin[0].vin[0]
+      elif all(el.uop is UOps.PHI for el in val.vin): replaced_stores[u] = phi_resolve_acc(val)
+    for prev,new in replaced_stores.items():
+      self.add(UOps.STORE, prev.dtype, (prev.vin[0],prev.vin[1],new), insert_before=self.uops.index(prev))
+      self.uops.remove(prev)
+
     # add UOps.END*
     self.add_ends()
 
@@ -250,4 +262,3 @@ class UOpGraph:
         elif u.arg == "__cuda_mma_m16n8k16_f16_f32": flops += 2*(8*16*16)//32 * mults
         else: raise Exception("not implemented")
     return flops, mem
-
