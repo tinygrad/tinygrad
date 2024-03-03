@@ -224,7 +224,7 @@ class UOpGraph:
         after_loop_ops = self.uops[loop_end_idx+1:]
         phi_replacement = {}
         self.uops = self.uops[:loop_start_idx]
-        for phi_op in (phi_ops:=[op for op in loop_ops if op.uop == UOps.PHI]):
+        for phi_op in [op for op in loop_ops if op.uop == UOps.PHI]:
           if (phi_op is None or not dtypes.is_int(phi_op.dtype)
             or (any([op.uop not in [UOps.LOOP, UOps.ALU, UOps.GEP, UOps.PHI, UOps.ENDLOOP] for op in loop_ops]))
             or not (any([op.uop == UOps.ALU and op.arg == BinaryOps.CMPLT for op in loop_ops])) #non-cmplt not supported
@@ -237,7 +237,7 @@ class UOpGraph:
           phi_replacement[phi_op] = rendered
         for op in after_loop_ops:
           op.vin = tuple([phi_replacement[op] if op in phi_replacement else op for op in list(op.vin)])
-        self.uops = self.uops + (loop_ops[1:-1] if (simplified_something:=len(phi_replacement) == len(phi_ops)) else loop_ops) + after_loop_ops
+        self.uops = self.uops + ([] if (simplified_something:=len(phi_replacement) > 0) else loop_ops) + after_loop_ops
         self.remove_childless({UOps.ENDIF, UOps.ENDLOOP})
         keep_removing_loops = simplified_something
         break
