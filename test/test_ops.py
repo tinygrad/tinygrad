@@ -1,7 +1,6 @@
 import time, math, unittest
 import numpy as np
 import torch
-import time
 from tinygrad.helpers import getenv, IMAGE, DEBUG, CI
 from tinygrad import Tensor, Device, dtypes
 
@@ -168,13 +167,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: torch.arange(5.5, 175.5, 2.5), lambda: Tensor.arange(5.5, 175.5, 2.5), forward_only=True)
     helper_test_op([], lambda: torch.arange(-30.2, -0.3, 0.75), lambda: Tensor.arange(-30.2, -0.3, 0.75), forward_only=True)
     helper_test_op([], lambda: torch.arange(-50.3, -80.2, -2.25), lambda: Tensor.arange(-50.3, -80.2, -2.25), forward_only=True)
-
-  def test_arange_o_n_performance(self):
-    for size in [100, 300, 500]:
-      start = time.perf_counter()
-      for _ in range(100):
-        a = Tensor.arange(size).realize()
-      print("size {} - {:.5f}".format(size, time.perf_counter() - start))
 
   def test_arange_big(self):
     helper_test_op([], lambda: torch.arange(256), lambda: Tensor.arange(256), forward_only=True)
