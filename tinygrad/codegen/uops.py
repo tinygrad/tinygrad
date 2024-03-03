@@ -208,19 +208,22 @@ class UOpGraph:
     elif u.uop == UOps.PHI: return resolve(u.vin[1])
     else: return None
 
+  def replace_and_remove_op(self, old, new):
+    for v in self.uops: v.vin = tuple(new if x is old else x for x in v.vin)
+    self.uops.remove(old)
 
   def remove_loops(self, get_recursive_parents, render_ops, ctx):
-    def loop_exponent(op):
-      if op.uop == UOps.ALU and op.arg == BinaryOps.MUL: return sum([loop_exponent(child) for child in op.vin])
-      elif op.uop == UOps.ALU or op.uop == UOps.PHI: return max([loop_exponent(child) for child in op.vin])
-      elif op.uop == UOps.LOOP: return 1
+    def loop_exponent(op, loop_start):
+      if op.uop == UOps.ALU and op.arg == BinaryOps.MUL: return sum([loop_exponent(child, loop_start) for child in op.vin])
+      elif op.uop == UOps.ALU or op.uop == UOps.PHI: return max([loop_exponent(child, loop_start) for child in op.vin])
+      elif op.uop == UOps.PHI: return loop_exponent(op.vin[1], loop_start)
+      elif op == loop_start: return 1
       else: return 0
 
     keep_removing_loops = True
     while keep_removing_loops:
       keep_removing_loops = False
-      for loop_end_idx, op in enumerate(self.uops):
-        if op.uop is not UOps.ENDLOOP: continue
+      for loop_end_idx, op in [(idx, op) for idx, op in enumerate(self.uops) if op.uop is UOps.ENDLOOP]:
         loop_start_idx = self.uops.index(loop_start:=op.vin[0])
         loop_ops, after_loop_ops = self.uops[loop_start_idx:loop_end_idx+1], self.uops[loop_end_idx+1:]
         phi_replace = {}
@@ -228,16 +231,16 @@ class UOpGraph:
           or not (any([op.uop == UOps.ALU and op.arg == BinaryOps.CMPLT for op in loop_ops]))): continue
         self.uops = self.uops[:loop_start_idx]
         for phi_op in (phi_ops:=[op for op in loop_ops if op.uop == UOps.PHI]):
-          if (phi_op.dtype is None or not dtypes.is_int(phi_op.dtype) or loop_exponent(phi_op) != 1
+          if (phi_op.dtype is None or not dtypes.is_int(phi_op.dtype) or loop_exponent(phi_op, loop_start) != 1
             or (any([op.uop not in [UOps.CONST, UOps.SPECIAL, UOps.LOOP, UOps.DEFINE_ACC, UOps.ALU] for op in get_recursive_parents(phi_op)]))):
             continue
           if DEBUG >= 4: print("removing loop")
           loop_op_to_name = {op: name for name, op in ctx.loop_uops.items()}
           rendered = self.loop_fold_resolve(phi_op, loop_op_to_name, loop_start).render(render_ops, ctx)
           phi_replace[phi_op] = rendered
-        for op in after_loop_ops:
-          op.vin = tuple([phi_replace[op] if op in phi_replace else op for op in list(op.vin)])
-        self.uops += ([op for op in loop_ops[1:-1] if op not in phi_replace] if (len(phi_replace) == len(phi_ops)) else loop_ops) + after_loop_ops
+        self.uops += ([op for op in loop_ops[1:-1]] if (len(phi_replace) == len(phi_ops)) else loop_ops) + after_loop_ops
+        for old, new in phi_replace.items():
+          self.replace_and_remove_op(old, new)
         self.remove_childless({UOps.ENDIF, UOps.ENDLOOP})
         keep_removing_loops = len(phi_replace) > 0
         break
@@ -276,8 +279,7 @@ class UOpGraph:
             if loop_len.dtype != u.dtype: loop_len = self.add(UOps.CAST, u.dtype, (loop_len,), insert_before=self.uops.index(u))
             new = self.add(UOps.ALU, u.dtype, (u.vin[1], loop_len,), BinaryOps.MUL, insert_before=self.uops.index(u))
             # replace u with new
-            for v in self.uops: v.vin = tuple(new if x is u else x for x in v.vin)
-            self.uops.remove(u)
+            self.replace_and_remove_op(u, new)
             changed_something = True
 
     # (recursively) remove childless uops
