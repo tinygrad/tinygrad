@@ -780,8 +780,8 @@ class TestLinearizerUOptimize(unittest.TestCase):
     k.hand_coded_optimizations()
     k.linearize()
 
-    store_val = [u.vin[-1] for u in k.uops if u.uop is UOps.STORE][0]
-    assert store_val.dtype == dtypes.float.vec(4) and store_val.uop != UOps.CAST
+    store_els = [u for u in k.uops if u.uop is UOps.STORE][0].vin[2:]
+    assert len(store_els) == 4 and all(el.dtype is dtypes.float for el in store_els)
 
   def test_grouped_store_locals_and_globals(self):
     if not Device[Device.DEFAULT].compiler.linearizer_opts.has_local or not Device[Device.DEFAULT].compiler.linearizer_opts.has_shared:

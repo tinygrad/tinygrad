@@ -2,6 +2,7 @@ from typing import Dict, List, Optional, NamedTuple, Tuple, Union, DefaultDict, 
 import math, functools
 from collections import defaultdict, Counter
 from tinygrad.codegen.linearizer import UOps, UOp
+from tinygrad.codegen.uops import phi_resolve_acc
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import prod, strip_parens, getenv
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
@@ -118,9 +119,14 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
       kk("}")
     elif uop is UOps.STORE:
       assert vin[0].dtype is not None and vin[2].dtype is not None
-      if len(vin) > 3: kk(f"if ({r[vin[3]]}) {{")
-      kk(lang.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, strip_parens(r[vin[1]]), vin[0].uop is UOps.DEFINE_LOCAL))
-      if len(vin) > 3: kk("}")
+      if len(vin) > 3 and len(set(u.uop for u in vin[2:])) == 1:
+         # find the vector's definition
+         val = r[phi_resolve_acc(vin[2])] if vin[2].uop is UOps.PHI else r[vin[2].vin[0]]
+         kk(lang.render_store(r[vin[0]], vin[0].dtype, val, vin[2].dtype.vec(len(vin[2:])), strip_parens(r[vin[1]]), vin[0].uop is UOps.DEFINE_LOCAL))
+      else:
+        if len(vin) > 3: kk(f"if ({r[vin[3]]}) {{")
+        kk(lang.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, strip_parens(r[vin[1]]), vin[0].uop is UOps.DEFINE_LOCAL))
+        if len(vin) > 3: kk("}")
     else:
       assert dtype is not None, f"None dtype for uop {uop}"
       if uop is UOps.LOOP:
