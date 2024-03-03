@@ -36,7 +36,7 @@ def test(impl, devs: List[str], N: int, iters:int = 10):
       continue
     i_secs = end-start
     i_gflops = GlobalCounters.global_ops/i_secs/10**9
-    i_gbs = GlobalCounters.global_mem/i_secs/10**9
+    i_gbs = (N*4)/i_secs/10**9
     print(f"{impl.__name__} iter {i+1}/{iters}: {i_secs:.6f} sec {i_gflops:.2f} GFLOP/s {i_gbs:.2f} GB/s")
     secs += i_secs
     gflops += i_gflops
