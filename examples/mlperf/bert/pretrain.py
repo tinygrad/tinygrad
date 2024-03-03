@@ -31,10 +31,10 @@ if getenv('WANDB', 0):
 })
 
 if getenv('HALF', 0):
-  Tensor.default_type = dtypes.float16
+  dtypes.default_float = dtypes.float16
   np_dtype = np.float16
 else:
-  Tensor.default_type = dtypes.float32
+  dtypes.default_float = dtypes.float32
   np_dtype = np.float32
 
 class BertMLperf:
