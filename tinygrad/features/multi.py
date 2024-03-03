@@ -3,7 +3,7 @@ from typing import Optional, Union, Any, Tuple, List
 import functools, itertools, operator
 from tinygrad.helpers import all_same, all_int, dedup, round_up, prod, DEBUG
 from tinygrad.dtype import DType, Scalar
-from tinygrad.ops import BinaryOps, LoadOps, UnaryOps, TernaryOps, ReduceOps
+from tinygrad.ops import BinaryOps, LoadOps, UnaryOps, TernaryOps, ReduceOps, ScheduleBarrier
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import sint
 
@@ -21,15 +21,17 @@ def ring_allreduce(op: ReduceOps, lbs: List[LazyBuffer]):
 
   # Scatter-reduce step
   for step in range(n_lbs - 1):
+    b = ScheduleBarrier(len(chunks))
     for i in range(len(chunks)):
       s, r = (i+step)%n_lbs, (i+step+1)%n_lbs
-      chunked[r][i] = chunked[r][i].e(bop, chunked[s][i].copy_to_device(chunked[r][i].device))
+      chunked[r][i] = chunked[r][i].e(bop, chunked[s][i].copy_to_device(chunked[r][i].device, b, False))
 
   # Allgather step
   for step in range(n_lbs - 1):
+    b = ScheduleBarrier(len(chunks))
     for i in range(len(chunks)):
       s, r = (i+step-1)%n_lbs, (i+step)%n_lbs
-      chunked[r][i] = chunked[s][i].copy_to_device(chunked[r][i].device)
+      chunked[r][i] = chunked[s][i].copy_to_device(chunked[r][i].device, b, False)
 
   # Assemble chunks back
   pads = [((s,dim-e),) for s,e in chunks]

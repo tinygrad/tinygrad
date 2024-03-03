@@ -172,6 +172,31 @@ def _is_padding_okay(buf:LazyBuffer, realizes:Set[LazyBuffer]) -> bool:
   if buf.op in UNSAFE_PAD_OPS: return False
   return all(_is_padding_okay(x.base, realizes) for x in buf.srcs)
 
+def graph_opt(items: List[ScheduleItem]) -> List[ScheduleItem]:
+  import graphlib
+  sis = []
+
+  # Group ScheduleBarriers
+  for i,si in enumerate(items):
+    if si in flatten(sis): continue
+    if si.out._barrier:
+      sis.append([x for x in items[i:] if x.out._barrier == si.out._barrier])
+    else:
+      sis.append([si])
+
+  assert len(flatten(sis)) == len(items)
+
+  # Toposort
+  graph = {}
+  for i,si in enumerate(sis):
+    graph[i] = set()
+    for j,sj in enumerate(sis):
+      if any(flatten([[_sj.out in _si.inputs for _sj in sj] for _si in si])):
+        graph[i].add(j)
+  ts = graphlib.TopologicalSorter(graph)
+
+  return flatten([sis[x] for x in ts.static_order()]) # return ungrouped
+
 def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> List[ScheduleItem]:
   if seen is None: seen = set()
 
@@ -241,4 +266,4 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
       assert len(realized_children) == 1
       reduce_for_op[next(iter(realized_children.keys()))] = r
 
-  return flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in outs)
+  return graph_opt(flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in outs))

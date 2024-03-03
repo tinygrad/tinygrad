@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Dict, Callable, ClassVar
+from typing import TYPE_CHECKING, Union, Type, Tuple, Optional, Any, List, Dict, Callable, ClassVar
 import functools, hashlib
 from enum import Enum, auto
 from tinygrad.helpers import prod, dedup
@@ -44,6 +44,10 @@ class ScheduleItem:
   out: LazyBuffer
   inputs: Tuple[LazyBuffer, ...]
   var_vals: Dict[Variable, int]
+
+class ScheduleBarrier:
+  def __init__(self, expected: Optional[int] = None):
+    self.expected = expected
 
 @dataclass(frozen=True, eq=False)
 class LazyOp:
