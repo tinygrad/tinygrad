@@ -803,9 +803,28 @@ class TestLinearizerUOptimize(unittest.TestCase):
     # check that the float4 cast collapses for all stores
     for store in local_stores+global_stores:
       assert store.vin[-1].dtype == dtypes.float.vec(2) and store.vin[-1].uop != UOps.CAST
-    # check children
+    # check the children's vins
     assert barrier.vin == tuple(local_stores)
     assert len([u for u in k.uops if u.uop is UOps.IF and u.vin[-1] == barrier]) == 1
+
+  def test_grouped_store_local_only(self):
+    if not Device[Device.DEFAULT].compiler.linearizer_opts.has_local or not Device[Device.DEFAULT].compiler.linearizer_opts.has_shared:
+      self.skipTest("Only Compiled uses linearizer with locals and shared")
+
+    x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
+    r = (x@y).relu()
+    k = Linearizer(create_schedule([r.lazydata])[-1].ast)
+    k.hand_coded_optimizations()
+    k.linearize()
+
+    stores = [u for u in k.uops if u.uop == UOps.STORE]
+
+    # the float4 value stores directly in lds and we skip upcast
+    assert stores[0].vin[-1].dtype == dtypes.float.vec(4)
+    assert stores[0].vin[-1].uop != UOps.CAST
+
+    # the global store doesn't change
+    assert stores[1].vin[-1].dtype == dtypes.float
 
 if __name__ == '__main__':
   unittest.main()
