@@ -240,7 +240,7 @@ class UOpGraph:
           phi_replacement[phi_op] = rendered
         for op in after_loop_ops:
           op.vin = tuple([phi_replacement[op] if op in phi_replacement else op for op in list(op.vin)])
-        self.uops = self.uops + ([] if (len(phi_replacement) == len(phi_ops)) else loop_ops) + after_loop_ops
+        self.uops = self.uops + ([op for op in loop_ops[1:-1] if op not in phi_replacement] if (len(phi_replacement) == len(phi_ops)) else loop_ops) + after_loop_ops
         self.remove_childless({UOps.ENDIF, UOps.ENDLOOP})
         keep_removing_loops = len(phi_replacement) > 0
         break
