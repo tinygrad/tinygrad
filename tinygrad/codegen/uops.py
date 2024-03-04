@@ -224,12 +224,11 @@ class UOpGraph:
     replaced_stores: Dict[UOp,UOp] = {}
     for u in self.uops:
       if u.uop is not UOps.STORE or (val:=u.vin[-1]).uop is not UOps.CAST or cast(DType,val.dtype).count == 1: continue
-      if u.vin[0].uop is UOps.DEFINE_LOCAL: continue # TODO add support for local store
       if all(el.uop is UOps.GEP for el in val.vin): replaced_stores[u] = val.vin[0].vin[0]
       elif all(el.uop is UOps.PHI for el in val.vin): replaced_stores[u] = phi_resolve_acc(val)
     for prev,new in replaced_stores.items():
-      self.add(UOps.STORE, prev.dtype, (prev.vin[0],prev.vin[1],new), insert_before=self.uops.index(prev))
-      self.uops.remove(prev)
+      self.uops.remove(prev.vin[-1]) # remove the old upcast NOTE: the upcast's vins become childless now
+      self.uops[self.uops.index(prev)].vin = (prev.vin[0],prev.vin[1],new) # replace with the float4 value
 
     # add UOps.END*
     self.add_ends()
