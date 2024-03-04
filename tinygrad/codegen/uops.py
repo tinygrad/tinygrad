@@ -217,6 +217,9 @@ class UOpGraph:
             self.uops.remove(u)
             changed_something = True
 
+    # (recursively) remove childless uops
+    self.remove_childless()
+
     # store float4 upcasts directly if possible
     replaced_stores: Dict[UOp,UOp] = {}
     for u in self.uops:
@@ -224,10 +227,8 @@ class UOpGraph:
       if all(el.uop is UOps.GEP for el in val.vin): replaced_stores[u] = val.vin[0].vin[0]
       elif all(el.uop is UOps.PHI for el in val.vin): replaced_stores[u] = phi_resolve_acc(val)
     for prev,new in replaced_stores.items():
-      self.uops[self.uops.index(prev)].vin = (prev.vin[0],prev.vin[1],new,*prev.vin[-1].vin) # use the float4 value as input
-
-    # (recursively) remove childless uops
-    self.remove_childless()
+      self.uops.remove(prev.vin[-1]) # remove the old upcast
+      self.uops[self.uops.index(prev)].vin = (prev.vin[0],prev.vin[1],new) # replace with the float4 value
 
     # add UOps.END*
     self.add_ends()

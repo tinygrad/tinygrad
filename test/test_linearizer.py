@@ -111,10 +111,10 @@ class TestLinearizer(unittest.TestCase):
     stores = [u for u in k.uops if u.uop == UOps.STORE]
 
     # the first store is to lds and can be upcasted
-    assert accs[0].dtype == stores[0].vin[2].dtype == dtypes.float.vec(4)
+    assert accs[0].dtype == stores[0].vin[-1].dtype == dtypes.float.vec(4)
     assert stores[0].vin[0].uop == UOps.DEFINE_LOCAL
     # the second store is to gds with no upcasts
-    assert accs[1].dtype == stores[1].vin[2].dtype == dtypes.float
+    assert accs[1].dtype == stores[1].vin[-1].dtype == dtypes.float
     assert stores[1].vin[0].uop == UOps.DEFINE_GLOBAL
 
   def test_zero_fold(self):
@@ -767,7 +767,7 @@ class TestLinearizerUOptimize(unittest.TestCase):
     k.linearize()
 
     # check that the float4 cast collapses
-    store_vals = [u.vin[2] for u in k.uops if u.uop is UOps.STORE]
+    store_vals = [u.vin[-1] for u in k.uops if u.uop is UOps.STORE]
     for val in store_vals:
       assert val.dtype == dtypes.float.vec(4) and val.uop != UOps.CAST
 
@@ -780,7 +780,7 @@ class TestLinearizerUOptimize(unittest.TestCase):
     k.hand_coded_optimizations()
     k.linearize()
 
-    store_val = [u.vin[2] for u in k.uops if u.uop is UOps.STORE][0]
+    store_val = [u.vin[-1] for u in k.uops if u.uop is UOps.STORE][0]
     assert store_val.dtype == dtypes.float.vec(4) and store_val.uop != UOps.CAST
 
   def test_grouped_store_locals_and_globals(self):
@@ -802,7 +802,7 @@ class TestLinearizerUOptimize(unittest.TestCase):
 
     # check that the float4 cast collapses for all stores
     for store in local_stores+global_stores:
-      assert store.vin[2].dtype == dtypes.float.vec(2) and store.vin[-1].uop != UOps.CAST
+      assert store.vin[-1].dtype == dtypes.float.vec(2) and store.vin[-1].uop != UOps.CAST
     # check the children's vins
     assert barrier.vin == tuple(local_stores)
     assert len([u for u in k.uops if u.uop is UOps.IF and u.vin[-1] == barrier]) == 1
@@ -820,11 +820,11 @@ class TestLinearizerUOptimize(unittest.TestCase):
     stores = [u for u in k.uops if u.uop == UOps.STORE]
 
     # the float4 value stores directly in lds and we skip upcast
-    assert stores[0].vin[2].dtype == dtypes.float.vec(4)
-    assert stores[0].vin[2].uop != UOps.CAST
+    assert stores[0].vin[-1].dtype == dtypes.float.vec(4)
+    assert stores[0].vin[-1].uop != UOps.CAST
 
     # the global store doesn't change
-    assert stores[1].vin[2].dtype == dtypes.float
+    assert stores[1].vin[-1].dtype == dtypes.float
 
 if __name__ == '__main__':
   unittest.main()
