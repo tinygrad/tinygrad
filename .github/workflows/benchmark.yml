@@ -46,6 +46,10 @@ jobs:
       run: |
         JIT=0 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_unjitted.txt
         JIT=1 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_jitted.txt
+    - name: Run GPT2 w HALF
+      run: JIT=1 HALF=1 python3 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half.txt
+    - name: Run GPT2 w HALF/BEAM
+      run: JIT=1 HALF=1 BEAM=2 CACHELEVEL=0 CAST_BEFORE_VIEW=0 python3 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half_beam.txt
     - name: Run 10 CIFAR training steps
       run: STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
     # TODO: this is flaky too
@@ -63,6 +67,8 @@ jobs:
           llama_jitted.txt
           gpt2_unjitted.txt
           gpt2_jitted.txt
+          gpt2_half.txt
+          gpt2_half_beam.txt
           matmul.txt
           matmul_half.txt
           sd.txt
@@ -79,16 +85,20 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
+    - name: Print nvidia-smi
+      run: nvidia-smi
     - name: Run model inference benchmark
       run: CUDA=1 python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
       run: CUDA=1 BIG=2 TORCHCUDA=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
+    - name: Run Tensor Core GEMM
+      run: CUDA=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
     - name: Run GPT2
       run: |
         CUDA=1 JIT=0 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_unjitted.txt
         CUDA=1 JIT=1 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_jitted.txt
     - name: Run GPT2 w HALF
-      run: CUDA=1 JIT=1 HALF=1 python3 examples/gpt2.py --count 10 --temperature 0 --timing
+      run: CUDA=1 JIT=1 HALF=1 python3 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half.txt
     - name: Run GPT2 w HALF/BEAM
       run: CUDA=1 JIT=1 HALF=1 BEAM=2 CACHELEVEL=0 CAST_BEFORE_VIEW=0 python3 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half_beam.txt
     - uses: actions/upload-artifact@v4
@@ -97,8 +107,10 @@ jobs:
         path: |
           onnx_inference_speed.csv
           torch_speed.txt
+          matmul.txt
           gpt2_unjitted.txt
           gpt2_jitted.txt
+          gpt2_half.txt
           gpt2_half_beam.txt
 
   testamdbenchmark:

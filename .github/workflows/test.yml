@@ -45,10 +45,15 @@ jobs:
       run: |
         DEBUG=2 EMULATE_METAL=1 FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
         DEBUG=2 EMULATE_HIP=1 FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
+        DEBUG=2 EMULATE_CUDA=1 FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
     - name: Test dtype with Python emulator
       run: DEBUG=2 PYTHON=1 python3 test/test_dtype.py
     - name: Test ops with Python emulator
-      run: DEBUG=2 PYTHON=1 python3 -m pytest test/test_ops.py -k "not (test_split or test_simple_cumsum or test_cumsum or test_einsum or test_dot_1d or test_big_gemm or test_broadcastdot or test_multidot or test_var_axis or test_std_axis or test_broadcast_full or test_broadcast_partial or test_simple_conv3d or test_dilated_conv_transpose2d or test_simple_conv_transpose3d or test_large_input_conv2d or test_maxpool2d_simple or test_maxpool2d_bigger_stride or test_avgpool2d or test_cat or test_scaled_product_attention or test_scaled_product_attention_causal)"
+      run: DEBUG=2 PYTHON=1 python3 -m pytest test/test_ops.py -k "not (test_split or test_simple_cumsum or test_cumsum or test_einsum or test_dot or test_dot_1d or test_big_gemm or test_broadcastdot or test_multidot or test_var_axis or test_std_axis or test_broadcast_full or test_broadcast_partial or test_simple_conv3d or test_dilated_conv_transpose2d or test_simple_conv_transpose3d or test_large_input_conv2d or test_maxpool2d or test_maxpool2d_simple or test_maxpool2d_bigger_stride or test_avgpool2d or test_cat or test_scaled_product_attention or test_scaled_product_attention_causal)" --durations=20
+    - name: Test symbolic with Python emulator
+      run: PYTHONPATH=. PYTHON=1 python3 test/test_symbolic_ops.py
+    - name: test_linearizer_failures with Python emulator
+      run: PYTHONPATH=. PYTHON=1 python3 -m pytest -rA test/test_linearizer_failures.py::TestLinearizerFailures::test_failure_1
 
   linter:
     name: Linters
@@ -292,10 +297,15 @@ jobs:
       run: JIT=2 METAL=1 python -m pytest -n=auto test/ --ignore=test/external --ignore=test/models --durations=20
     - name: Run ONNX
       run: JIT=2 METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
+    - name: Test tensor core ops (fake)
+      run: TC=2 METAL=1 DEBUG=3 python test/test_ops.py TestOps.test_gemm
     - name: Test tensor core ops (real)
       run: METAL=1 DEBUG=3 python test/test_ops.py TestOps.test_big_gemm
     - name: Test LLaMA compile speed
       run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
+    - name: Fuzz Test linearizer
+      run: PYTHONPATH="." METAL=1 CACHELEVEL=0 FUZZ_BEAM=1 DEPTH=2 FUZZ_N=48 FUZZ_MAX_SIZE=10000000 python test/external/fuzz_linearizer.py
+
 
 #  testwebgl:
 #    name: WebGL Tests
@@ -384,7 +394,7 @@ jobs:
           cache-name: cache-gpuocelot-build
         with:
           path: ${{ github.workspace }}/gpuocelot/ocelot
-          key: ubuntu22.04-gpuocelot-18401f4245b27ca4b3af433196583cc81ef84480-rebuild-3
+          key: ubuntu22.04-gpuocelot-18401f4245b27ca4b3af433196583cc81ef84480-rebuild-4
       - name: Clone/compile gpuocelot
         if: (matrix.backend == 'cuda' || matrix.backend == 'ptx' || matrix.backend == 'triton') && steps.cache-build.outputs.cache-hit != 'true'
         run: |
