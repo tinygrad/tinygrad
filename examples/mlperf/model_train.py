@@ -21,7 +21,8 @@ def train_resnet():
   Tensor.manual_seed(seed)  # seed for weight initialization
 
   GPUS = config["GPUS"] = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
-  resnet.BatchNorm = functools.partial(UnsyncedBatchNorm, num_devices=len(GPUS))
+  if not getenv("SYNCBN"):
+    resnet.BatchNorm = functools.partial(UnsyncedBatchNorm, num_devices=len(GPUS))
   print(f"Training on {GPUS}")
   for x in GPUS: Device[x]
 
