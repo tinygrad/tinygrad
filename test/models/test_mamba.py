@@ -1,6 +1,5 @@
 import unittest
 from tinygrad.helpers import CI
-from tinygrad import Device
 from examples.mamba import Mamba, generate
 from transformers import AutoTokenizer
 
