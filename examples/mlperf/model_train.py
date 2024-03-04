@@ -46,8 +46,8 @@ def train_resnet():
   decay             = config["decay"]             = getenv("DECAY", 2e-4)
 
   target, achieved  = getenv("TARGET", 0.759), False
-  eval_start_epoch  = getenv("EVAL_START_EPOCH", 2)
-  eval_epochs       = getenv("EVAL_EPOCHS", 4)
+  eval_start_epoch  = getenv("EVAL_START_EPOCH", 0)
+  eval_epochs       = getenv("EVAL_EPOCHS", 1)
 
   steps_in_train_epoch  = config["steps_in_train_epoch"]  = (len(get_train_files()) // BS)
   steps_in_val_epoch    = config["steps_in_val_epoch"]    = (len(get_val_files()) // EVAL_BS)
