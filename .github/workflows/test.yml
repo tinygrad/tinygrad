@@ -340,6 +340,33 @@ jobs:
 #    - name: Build WebGL Efficientnet
 #      run: WEBGL=1 python -m examples.compile_efficientnet
 
+  testhsa:
+    name: HSA Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.11
+      - name: Cache python packages
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
+          key: testing-packages-${{ hashFiles('**/setup.py') }}
+      - name: Cache downloads
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/tinygrad/downloads/
+          key: downloads-cache-hsa-${{ env.DOWNLOAD_CACHE_VERSION }}
+      - name: Install Dependencies
+        run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      - name: Test HSA Backend
+        run: HSA=1 python -m pytest -n=auto test/external/external_test_hsa_backend.py --durations=20
+
   tests:
     strategy:
       fail-fast: false
@@ -487,30 +514,3 @@ jobs:
   #      run: pip install -e '.[testing,arm]' --extra-index-url https://download.pytorch.org/whl/cpu
   #    - name: Test arm
   #      run: CI=1 ARM64=1 CLANG=1 python -m pytest -n=auto test/ -k 'not (test_nn.py and (test_conv_transpose2d or test_conv2d))' --ignore=test/models --ignore=test/test_speed_v_torch.py --ignore=test/test_net_speed.py --ignore=test/test_specific_conv.py  --ignore=test/unit/test_disk_tensor.py
-
-  testhsa:
-    name: HSA Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: 3.11
-      - name: Cache python packages
-        uses: actions/cache@v3
-        with:
-          path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
-          key: testing-packages-${{ hashFiles('**/setup.py') }}
-      - name: Cache downloads
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/tinygrad/downloads/
-          key: downloads-cache-hsa-${{ env.DOWNLOAD_CACHE_VERSION }}
-      - name: Install Dependencies
-        run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-      - name: Run HSA specific test
-        run: HSA=1 python -m pytest -n=auto test/externa/external_test_hsa_backend.py --durations=20

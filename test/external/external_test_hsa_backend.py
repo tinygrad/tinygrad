@@ -1,6 +1,5 @@
 import unittest
 import subprocess
-import os
 
 
 class TestHSABackend(unittest.TestCase):
@@ -30,4 +29,4 @@ class TestHSABackend(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+  unittest.main()
