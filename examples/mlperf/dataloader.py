@@ -52,7 +52,10 @@ def loader_process(q_in, q_out, X:Tensor, seed):
         img = center_crop(img)
         img = np.array(img)
       else:
-        # todo: reseed rng for determinism
+        # reseed rng for determinism
+        if seed is not None:
+          np.random.seed(seed * 2 ** 20 + idx)
+          random.seed(seed * 2 ** 20 + idx)
         img = preprocess_train(img)
 
       # broken out
