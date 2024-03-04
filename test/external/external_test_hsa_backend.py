@@ -31,11 +31,11 @@ class TestHSABackend(unittest.TestCase):
   #   # self.assertIn("expected output", result.stdout)
 
 
-def test_float16_to_bfloat16_conversion(self):
-  original_tensor = Tensor([1.0, 2.0, 3.0], dtype=dtypes.float16)
-  converted_tensor = original_tensor.cast(dtypes.bfloat16)
-  assert converted_tensor.dtype == dtypes.bfloat16
-  assert all(original_tensor.numpy() == converted_tensor.numpy())
+  def test_float16_to_bfloat16_conversion(self):
+    original_tensor = Tensor([1.0, 2.0, 3.0], dtype=dtypes.float16)
+    converted_tensor = original_tensor.cast(dtypes.bfloat16)
+    assert converted_tensor.dtype == dtypes.bfloat16
+    assert all(original_tensor.numpy() == converted_tensor.numpy())
 
 
 if __name__ == "__main__":
