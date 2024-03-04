@@ -22,6 +22,8 @@ class TestHSABackend(unittest.TestCase):
       capture_output=True,
       text=True,
     )
+    print("STDOUT:", result.stdout)
+    print("STDERR:", result.stderr)
     self.assertEqual(result.returncode, 0)
 
     # Optional: Check output for expected values
