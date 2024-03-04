@@ -1,5 +1,6 @@
+import os
 import unittest
-import subprocess
+# import subprocess
 from tinygrad.tensor import Tensor, dtypes
 
 
@@ -30,8 +31,8 @@ class TestHSABackend(unittest.TestCase):
   #   # Optional: Check output for expected values
   #   # self.assertIn("expected output", result.stdout)
 
-
   def test_float16_to_bfloat16_conversion(self):
+    # os.environ["HSA"] = "1"
     original_tensor = Tensor([1.0, 2.0, 3.0], dtype=dtypes.float16)
     converted_tensor = original_tensor.cast(dtypes.bfloat16)
     assert converted_tensor.dtype == dtypes.bfloat16
