@@ -428,7 +428,7 @@ def generate(model,
   for i in tqdm(range(n_tokens_to_gen), desc="Speed Gen"):
     logits = model(Tensor([tks[start_pos:]]), inference_params, start_pos, jit=False)
     inference_params.seqlen_offset = len(tks)
-    tok = (logits[:, -1, :]).softmax().realize().argmax(axis=-1).item()
+    tok = (logits[:, -1, :]).softmax().argmax(axis=-1).item()
     start_pos = len(tks)
     tks.append(tok)
   output_completions = ''.join([tokenizer.decode(output) for output in tks])
