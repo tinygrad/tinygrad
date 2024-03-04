@@ -86,7 +86,7 @@ class OneCycleLR(LR_Scheduler):
     self.pct_start = pct_start
     assert anneal_strategy == 'linear', 'only linear annealing supported'
     assert not cycle_momentum, 'cycle momentum not supported'
-    self.optimizer.lr.assign(self.get_lr()).realize() # update the initial LR
+    self.optimizer.lr.assign(self.get_lr().cast(self.optimizer.lr.dtype)).realize() # update the initial LR
 
   @staticmethod
   def _annealing_linear(start: float, end: float, pct: Tensor) -> Tensor: return (pct*(end-start)+start)
