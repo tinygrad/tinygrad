@@ -365,7 +365,7 @@ jobs:
       - name: Install Dependencies
         run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Test HSA Backend
-        run: HSA=1 python -m pytest -n=auto test/external/external_test_hsa_backend.py --durations=20
+        run: PYTHONPATH="." HSA=1 python -m pytest -n=auto test/external/external_test_hsa_backend.py --durations=20
 
   tests:
     strategy:
