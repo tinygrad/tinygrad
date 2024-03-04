@@ -56,7 +56,7 @@ class Node:
       if (b - self).min > 0 and self.min >= 0: return NumNode(0) # b - self simplifies the node
       raise RuntimeError(f"not supported: {self} // {b}")
     assert b != 0
-    if b < 0: return (self//-b)*-1
+    if b < 0: return (self*-1)//-b
     if b == 1: return self
 
     # the numerator of div is not allowed to be negative
