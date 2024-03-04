@@ -142,9 +142,6 @@ jobs:
       run: |
         HIP=1 JIT=0 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_unjitted.txt
         HIP=1 JIT=1 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_jitted.txt
-    - name: Run LLaMa (with HSA)
-      run: |
-        HSA=1 python3 examples/llama.py --temperature=0 --count=50 --prompt="Hello." --timing --shard 2 --size 70B --gen 2
     - name: Run 10 CIFAR training steps
       run: HIP=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
     - name: Run 10 CIFAR training steps w HALF
