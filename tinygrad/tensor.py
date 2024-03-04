@@ -595,11 +595,12 @@ class Tensor:
     return m - ss.log()
 
   def argmax(self, axis=None, keepdim=False):
+    def _eq(a:Tensor, b:Tensor): return (a - b).abs() < 1e-6 if a.is_floating_point() else a == b
     if axis is None:
-      idx = (self == self.max(axis)) * Tensor.arange(prod(self.shape)-1,-1,-1, requires_grad=False, device=self.device).reshape(self.shape)
+      idx = _eq(self, self.max(axis)) * Tensor.arange(prod(self.shape)-1,-1,-1, requires_grad=False, device=self.device).reshape(self.shape)
       return (prod(self.shape) - idx.max() - 1).cast(dtypes.default_int)
     axis = axis + len(self.shape) if axis < 0 else axis
-    m = self == self.max(axis=axis, keepdim=True)
+    m = _eq(self, self.max(axis, keepdim=True))
     idx = m * Tensor.arange(self.shape[axis]-1,-1,-1, requires_grad=False, device=self.device).reshape(self.shape[axis], *[1]*(self.ndim-axis-1))
     return (self.shape[axis]-idx.max(axis=axis, keepdim=keepdim)-1).cast(dtypes.default_int)
   def argmin(self, axis=None, keepdim=False): return (-self).argmax(axis=axis, keepdim=keepdim)
