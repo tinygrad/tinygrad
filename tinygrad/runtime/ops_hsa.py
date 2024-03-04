@@ -4,10 +4,12 @@ from typing import Tuple, TypeVar, List, Dict
 import tinygrad.runtime.autogen.hsa as hsa
 from tinygrad.helpers import DEBUG, init_c_var, from_mv, round_up, to_mv, init_c_struct_t
 from tinygrad.device import Compiled, LRUAllocator, BufferOptions
+from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.runtime.ops_hip import HIPCompiler
 from tinygrad.runtime.driver.hsa import check, scan_agents, find_memory_pool, AQLQueue
 
-HSACompiler = HIPCompiler
+class HSACompiler(HIPCompiler):
+  linearizer_opts = LinearizerOptions("HSA", has_tensor_cores=True)
 
 class HSAProgram:
   def __init__(self, device:HSADevice, name:str, lib:bytes):
