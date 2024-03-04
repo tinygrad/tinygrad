@@ -58,7 +58,7 @@ def train_resnet():
 
   # ** Optimizer **
   from examples.mlperf.optimizers import LARS
-  skip_list = {v for k, v in get_state_dict(model).items() if "bn" in k or "bias" in k}
+  skip_list = {v for k, v in get_state_dict(model).items() if "bn" in k or "bias" in k or "downsample.1" in k}
   optimizer = LARS(parameters, base_lr, momentum=.9, weight_decay=decay, skip_list=skip_list)
 
   # ** LR scheduler **
