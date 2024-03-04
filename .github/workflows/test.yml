@@ -55,11 +55,10 @@ jobs:
   #   - name: test_linearizer_failures with Python emulator
   #     run: PYTHONPATH=. PYTHON=1 python3 -m pytest -rA test/test_linearizer_failures.py::TestLinearizerFailures::test_failure_1
 
-  # linter:
-  #   name: Linters
-  #   runs-on: ubuntu-latest
-  #   timeout-minutes: 20
-
+  linter:
+    name: Linters
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     # TODO: run the pre-commit hook to replace a lot of this
     steps:
