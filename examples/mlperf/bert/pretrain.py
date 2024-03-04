@@ -96,6 +96,11 @@ def load_model(model:BertMLperf, path:str = "/tmp/model"): get_state_dict(model,
 # ************ Actual training ************
 def pretrain():
   model = get_model(Path(__file__).parent.parents[2] / "extra" / "datasets" / "wiki" / "bert_config.json")
+
+  if len(GPUS) > 1:
+    for x in get_parameters(model):
+      x.to_(GPUS)
+
   optimizer = optim.LAMB(get_parameters(model), 1 / WARMUP_STEPS, eps=1e-6, wd=0.01, adam=True) # TODO: Keep in FP32?, Exclude LayerNorm, and bias from weight decay
   lr_scheduler = OneCycleLR(optimizer, MAX_LR, MAX_LR * WARMUP_STEPS, MAX_LR * 1e12, STEPS, WARMUP_STEPS / STEPS)
 
@@ -122,10 +127,6 @@ def pretrain():
   
   train_batcher = iterate(bs=BS, val=False)
   eval_batcher = iterate(bs=EVAL_BS, val=True)
-
-  if len(GPUS) > 1:
-    for x in get_parameters(model):
-      x.to_(GPUS)
 
   epoch = 1
   wallclock_start = time.monotonic()
