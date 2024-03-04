@@ -98,7 +98,7 @@ class TestMultiTensor(unittest.TestCase):
       return [functools.reduce(lambda x,y: x.e(BinaryOps.ADD, y), [x.copy_to_device(lb.device) for x in lbs]) for lb in lbs]
 
     random.seed(41)
-    for _ in range(100):
+    for it in range(100):
       for n in range(2, 4+1):
         Tensor.manual_seed(random.randint(0, 1337))
         t = Tensor.rand(tuple([(n if i == 0 else 1) * randint(1, 10) for i in range(randint(1, 4))])).shard_(tuple([d0, d1, d2, d3][:n]), 0)
@@ -107,8 +107,8 @@ class TestMultiTensor(unittest.TestCase):
         diff = a - b
         mean_err = diff.reshape((prod(diff.shape),)).abs().mean().numpy()
         max_err = diff.reshape((prod(diff.shape),)).abs().max().numpy()
-        assert mean_err < 1e-6, "big mean error"
-        assert max_err < 1e-5, "big max error"
+        assert mean_err < 1e-6, f"big mean error, iteration {it}_{n}"
+        assert max_err < 1e-5, f"big max error, iteration {it}_{n}"
 
 
   def _test_matmul_shard_axis(self, shard_x, shard_w, device):

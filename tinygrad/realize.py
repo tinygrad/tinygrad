@@ -1,4 +1,4 @@
-import sys
+import sys, graphlib
 from collections import defaultdict
 from typing import List, Dict, Optional, cast, Set, DefaultDict
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters, LazyOp, ReduceOps, ConstBuffer, MemBuffer, BinaryOps, UnaryOps
@@ -172,9 +172,8 @@ def _is_padding_okay(buf:LazyBuffer, realizes:Set[LazyBuffer]) -> bool:
   if buf.op in UNSAFE_PAD_OPS: return False
   return all(_is_padding_okay(x.base, realizes) for x in buf.srcs)
 
-def graph_opt(items: List[ScheduleItem]) -> List[ScheduleItem]:
-  import graphlib
-  sis = []
+def group_barriers(items: List[ScheduleItem]) -> List[ScheduleItem]:
+  sis: List[List[ScheduleItem]] = []
 
   # Group ScheduleBarriers
   for i,si in enumerate(items):
@@ -184,14 +183,12 @@ def graph_opt(items: List[ScheduleItem]) -> List[ScheduleItem]:
     else:
       sis.append([si])
 
-  assert len(flatten(sis)) == len(items)
-
-  # Toposort
-  graph = {}
-  for i,si in enumerate(sis):
+  # Toposort FIXME: this part is cringe
+  graph: Dict[int, Set[int]] = {}
+  for i,sil in enumerate(sis):
     graph[i] = set()
-    for j,sj in enumerate(sis):
-      if any(flatten([[_sj.out in _si.inputs for _sj in sj] for _si in si])):
+    for j,sjl in enumerate(sis):
+      if any(flatten([[sj.out in si.inputs for sj in sjl] for si in sil])):
         graph[i].add(j)
   ts = graphlib.TopologicalSorter(graph)
 
@@ -266,4 +263,4 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
       assert len(realized_children) == 1
       reduce_for_op[next(iter(realized_children.keys()))] = r
 
-  return graph_opt(flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in outs))
+  return group_barriers(flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in outs))

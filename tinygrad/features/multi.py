@@ -21,17 +21,17 @@ def ring_allreduce(op: ReduceOps, lbs: List[LazyBuffer]):
 
   # Scatter-reduce step
   for step in range(n_lbs - 1):
-    b = ScheduleBarrier(len(chunks))
+    b = ScheduleBarrier()
     for i in range(len(chunks)):
       s, r = (i+step)%n_lbs, (i+step+1)%n_lbs
-      chunked[r][i] = chunked[r][i].e(bop, chunked[s][i].copy_to_device(chunked[r][i].device, b, False))
+      chunked[r][i] = chunked[r][i].e(bop, chunked[s][i].copy_to_device(chunked[r][i].device, b))
 
   # Allgather step
   for step in range(n_lbs - 1):
-    b = ScheduleBarrier(len(chunks))
+    b = ScheduleBarrier()
     for i in range(len(chunks)):
       s, r = (i+step-1)%n_lbs, (i+step)%n_lbs
-      chunked[r][i] = chunked[s][i].copy_to_device(chunked[r][i].device, b, False)
+      chunked[r][i] = chunked[s][i].copy_to_device(chunked[r][i].device, b)
 
   # Assemble chunks back
   pads = [((s,dim-e),) for s,e in chunks]

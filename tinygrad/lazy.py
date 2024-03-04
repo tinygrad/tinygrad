@@ -82,15 +82,16 @@ class LazyBuffer:
       return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, None, (self,), enable_cache=False)
     sync = LazyBuffer.loadop(LoadOps.SYNC, (sync_size,), dtypes.uint32, self.device, src=self, enable_cache=True)
     wait = LazyBuffer.loadop(LoadOps.WAIT, (0,), dtypes.uint32, device, src=sync, enable_cache=True)
-    return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, None, (self, wait), enable_cache=False, barrier=barrier)
+    return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, None, (self, wait), enable_cache=False,
+                             barrier=barrier)
 
-  def copy_to_device(self, device:str, barrier: Optional[ScheduleBarrier] = None, opt: bool = True) -> LazyBuffer:
+  def copy_to_device(self, device:str, barrier: Optional[ScheduleBarrier] = None) -> LazyBuffer:
     # no COPY
     if self.device == device: return self
 
     # double COPY = one COPY
-    if opt and self.st.contiguous and self.size == self.base.size and not self.base.realized and self.base.op is LoadOps.COPY:
-      return self.base.srcs[0].copy_to_device(device, barrier).reshape(self.st.shape)
+    if not barrier and self.st.contiguous and self.size == self.base.size and not self.base.realized and self.base.op is LoadOps.COPY:
+      return self.base.srcs[0].copy_to_device(device).reshape(self.st.shape)
 
     # const doesn't have to be copied (issues with disk tensor)
     if self.is_unrealized_const():
