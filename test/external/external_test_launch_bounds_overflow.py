@@ -14,7 +14,9 @@ def test_overflow(ast, opts):
   lin = Linearizer(ast)
   for opt in opts: lin.apply_opt(opt)
   lin.linearize()
-  time_linearizer(lin, bufs_from_lin(lin))
+  bufs = bufs_from_lin(lin)
+  print(bufs)
+  time_linearizer(lin, bufs)
 
 # NOTE: if you want these to trigger, set launch bounds on HIP kernels
 
@@ -61,6 +63,14 @@ class TestLinearizerOverflow(unittest.TestCase):
     opts = [Opt(op=OptOps.UPCAST, axis=3, amt=4), Opt(op=OptOps.LOCAL, axis=3, amt=16), Opt(op=OptOps.UPCAST, axis=1, amt=4), Opt(op=OptOps.LOCAL, axis=2, amt=8), Opt(op=OptOps.UPCAST, axis=1, amt=2), Opt(op=OptOps.UPCAST, axis=2, amt=4)]
     test_overflow(ast, opts)
 
+class TestLinearizerOverflowAlt(unittest.TestCase):
+  def test_overflow_1(self):
+    in_1 = MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 104, 1, 3, 8, 230, 8, 230), strides=(0, 150528, 0, 50176, 0, 224, 0, 1), offset=-675, mask=((0, 1), (0, 104), (0, 1), (0, 3), (0, 8), (3, 227), (0, 8), (3, 227)), contiguous=False), View(shape=(104, 1, 64, 112, 112, 3, 7, 7), strides=(10156800, 0, 0, 3680, 2, 3385600, 425040, 231), offset=0, mask=None, contiguous=False))))
+    in_2 = MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(104, 1, 64, 112, 112, 3, 7, 7), strides=(0, 0, 147, 0, 0, 49, 7, 1), offset=0, mask=None, contiguous=False),)))
+    out_0 = MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(104, 1, 64, 112, 112, 1, 1, 1), strides=(802816, 0, 12544, 112, 1, 0, 0, 0), offset=0, mask=None, contiguous=True),)))
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BufferOps.LOAD, arg=in_1), LazyOp(op=BufferOps.LOAD, arg=in_2))),), arg=(7, 6, 5)),), arg=out_0)
+    opts = [Opt(op=OptOps.LOCAL, axis=3, amt=16), Opt(op=OptOps.LOCAL, axis=2, amt=2), Opt(op=OptOps.UPCAST, axis=0, amt=2)]
+    test_overflow(ast, opts)
 
 if __name__ == '__main__':
   unittest.main()
