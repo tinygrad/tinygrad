@@ -363,7 +363,7 @@ class TestMultiTensor(unittest.TestCase):
     with self.assertRaises(AssertionError):
       # don't allow assigns that change axes
       t_none.assign(t_zero)
-  
+
   def test_dropout_on_shard(self):
     Tensor.training = True
     X = Tensor.ones(256).to(devices_2)
