@@ -2,35 +2,26 @@
 from tinygrad import Device, dtypes
 from tinygrad.device import Buffer, CompiledASTRunner
 
-code = """
-#include <hip/hip_common.h>
-#define INFINITY (__builtin_inff())
-#define NAN (__builtin_nanf(""))
-  typedef long unsigned int size_t;
-  #define half _Float16
-  struct hip_bfloat16 { unsigned short data; };
+import ctypes
+import gpuctypes.hip as hip
+from tinygrad.helpers import to_char_p_p, init_c_var
+def get_bytes(arg, get_sz, get_str, check) -> bytes: return (sz := init_c_var(ctypes.c_size_t(), lambda x: check(get_sz(arg, ctypes.byref(x)))), ctypes.string_at(init_c_var(ctypes.create_string_buffer(sz.value), lambda x: check(get_str(arg, x))), size=sz.value))[1]  # noqa: E501
+def check(status):
+  if status != 0: raise RuntimeError(f"HIP Error {status}, {ctypes.string_at(hip.hipGetErrorString(status)).decode()}")
+def compile_hip(prg:str, arch="gfx1100") -> bytes:
+  check(hip.hiprtcCreateProgram(ctypes.byref(prog := hip.hiprtcProgram()), prg.encode(), "<null>".encode(), 0, None, None))
+  compile_options = [f'--offload-arch={arch}', '-I/opt/rocm/include']
+  status = hip.hiprtcCompileProgram(prog, len(compile_options), to_char_p_p([o.encode() for o in compile_options]))
+  if status != 0: raise RuntimeError(f"compile failed: {get_bytes(prog, hip.hiprtcGetProgramLogSize, hip.hiprtcGetProgramLog, check).decode()}")
+  return get_bytes(prog, hip.hiprtcGetCodeSize, hip.hiprtcGetCode, check)
 
-  extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_local_id(unsigned int);
-  extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_group_id(unsigned int);
-  extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_local_size(unsigned int);
+prefix = """
+typedef long unsigned int size_t;
 
-  extern "C" {
-  __attribute__((device)) __attribute__((const)) float __ocml_fmax_f32(float, float);
-  __attribute__((device)) __attribute__((pure)) float __ocml_exp2_f32(float);
-  __attribute__((device)) __attribute__((pure)) float __ocml_log2_f32(float);
-  __attribute__((device)) float __ocml_sin_f32(float);
-  __attribute__((device)) __attribute__((const)) float __ocml_sqrt_f32(float);
-  __attribute__((device)) __attribute__((const)) double __ocml_fmax_f64(double, double);
-  __attribute__((device)) __attribute__((pure)) double __ocml_exp2_f64(double);
-  __attribute__((device)) __attribute__((pure)) double __ocml_log2_f64(double);
-  __attribute__((device)) double __ocml_sin_f64(double);
-  __attribute__((device)) __attribute__((const)) double __ocml_sqrt_f64(double);
-  __attribute__((device)) __attribute__((const)) _Float16 __ocml_fmax_f16(_Float16, _Float16);
-  __attribute__((device)) __attribute__((pure)) _Float16 __ocml_exp2_f16(_Float16);
-  __attribute__((device)) __attribute__((pure)) _Float16 __ocml_log2_f16(_Float16);
-  __attribute__((device)) _Float16 __ocml_sin_f16(_Float16);
-  __attribute__((device)) __attribute__((const)) _Float16 __ocml_sqrt_f16(_Float16);
-  }
+extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_local_id(unsigned int);
+extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_group_id(unsigned int);
+extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_local_size(unsigned int);
+
 typedef signed int int2 __attribute__((ext_vector_type(2)));
 static inline __attribute__((device)) int2 make_int2(signed int x, signed int y) { return {x, y}; }
 typedef signed int int4 __attribute__((ext_vector_type(4)));
@@ -49,11 +40,9 @@ typedef float float4 __attribute__((ext_vector_type(4)));
 static inline __attribute__((device)) float4 make_float4(float x, float y, float z, float w) { return {x, y, z, w}; }
 typedef float float8 __attribute__((ext_vector_type(8)));
 static inline __attribute__((device)) float8 make_float8(float x, float y, float z, float w, float a, float b, float c, float d) { return {x, y, z, w, a, b, c, d}; }
-  static __attribute__((device)) half8 __hip_wmma_f16_f16(half16 a, half16 b, half8 c) {
-    half16 c_frag = {}; half8 d; for (int n = 0; n < 8; n++) { c_frag[n*2] = c[n]; }
-    c_frag = __builtin_amdgcn_wmma_f16_16x16x16_f16_w32(a, b, c_frag, false);
-    for (int n = 0; n < 8; n++) { d[n] = c_frag[n*2]; } return d;
-  }
+"""
+
+code = """
 extern "C" __attribute__((global))void r_2_8_7_7_4_8_3_7_7_4_4_2_2(float* data0, const float* data1, const float* data2) {
   int gidx0 = __ockl_get_group_id(2); /* 2 */
   int gidx1 = __ockl_get_group_id(1); /* 8 */
@@ -245,11 +234,15 @@ extern "C" __attribute__((global))void r_2_8_7_7_4_8_3_7_7_4_4_2_2(float* data0,
 """
 
 dev = "HIP"
-lib = Device[dev].compiler.compile(code)
+#lib = Device[dev].compiler.compile(prefix+code)
+lib = compile_hip(code)
 b0 = Buffer(dev, 1605632, dtypes.float)
 b1 = Buffer(dev, 301506, dtypes.float)
 b2 = Buffer(dev, 9408, dtypes.float)
+print(hex(b0._buf.value), hex(b0._buf.value+1605632*4))
 print(hex(b1._buf.value))
+print(hex(b2._buf.value))
+#prg = CompiledASTRunner("r_2_8_7_7_4_8_3_7_7_4_4_2_2", "", Device[dev], [7, 1, 1], [8, 4, 1], precompiled=lib)
 prg = CompiledASTRunner("r_2_8_7_7_4_8_3_7_7_4_4_2_2", "", Device[dev], [49, 8, 2], [8, 4, 1], precompiled=lib)
 print("compiled")
 prg([b0, b1, b2], {})
