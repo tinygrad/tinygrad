@@ -530,5 +530,11 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([1, 2], dtype=dtypes.float16) / 2).dtype == dtypes.float16
     assert (Tensor([1, 2], dtype=dtypes.float16) / 2.0).dtype == dtypes.float16
 
+  @unittest.skipIf(getenv("METAL", 0)== 0, "only run on METAL backend")
+  @unittest.expectedFailure
+  def test_bfloat16_metal(self):
+    x = Tensor.uniform(10, dtype=dtypes.bfloat16)
+    x.realize()
+
 if __name__ == '__main__':
   unittest.main()
