@@ -61,7 +61,7 @@ class CStyleLanguage(NamedTuple):
       out_val = f"*({buf_name}+{idx})" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}]"
     return self.render_cast([out_val], output_dtype) if output_dtype != buf_dtype else out_val
 
-  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], uops:List[UOp], prefix=None) -> str:
+  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], uops:List[UOp], prefix=None) -> str:
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,dtype in bufs) else ""  # noqa: E501
     buftypes = [(name,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if dtype.name.startswith('image') else
                 ("const " if i > 0 else "")+self.buffer_prefix+self.render_dtype(dtype)+"*"+self.buffer_suffix if isinstance(dtype, PtrDType) else
@@ -87,7 +87,6 @@ class CStyleLanguage(NamedTuple):
   def render_dtype(self, var_dtype:DType) -> str: return self.type_map[var_dtype] if var_dtype in self.type_map else var_dtype.name
 
 def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> str:
-  local_size: List[int] = []
   kernel = []
   bufs: List[Tuple[str, DType]] = []
   #pend_close = None
@@ -137,7 +136,6 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
         else: kk(f"{dtype.name} {ssa(u,'alu')} = {val};")
       elif uop is UOps.SPECIAL:
         kk(f"int {args[1]} = {lang.code_for_workitem[args[1][0]](args[0])}; /* {args[2]} */")
-        if args[1].startswith("l"): local_size.append(args[2])
         r[u] = args[1]
       elif uop is UOps.LOAD:
         val = lang.render_load(dtype, r[vin[0]], vin[0].dtype, strip_parens(r[vin[1]]), vin[0].uop is UOps.DEFINE_LOCAL)
@@ -173,7 +171,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
       elif uop is UOps.GEP: r[u] = f"({r[vin[0]]})[{args}]" if cast(DType, vin[0].dtype).count > 4 else f"({r[vin[0]]}).{'xyzw'[args]}"
       else: raise RuntimeError(f"failed to render {uop}")
 
-  return lang.render_kernel(function_name, kernel, bufs, local_size, uops)
+  return lang.render_kernel(function_name, kernel, bufs, uops)
 
 class OpenCLLanguage(CStyleLanguage):
   kernel_prefix = "__kernel "
@@ -188,9 +186,9 @@ class OpenCLLanguage(CStyleLanguage):
   def render_cast(self, x, var_dtype, bitcast=False) -> str:
     return f"as_{self.type_map.get(var_dtype) or var_dtype.name}({x[0]})" if bitcast else super().render_cast(x, var_dtype)
 
-  def render_kernel(self, function_name, kernel, bufs, local_size, uops, prefix=None) -> str:
+  def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     if any(uop.dtype == dtypes.half for uop in uops): prefix = ["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"]
-    return super().render_kernel(function_name, kernel, bufs, local_size, uops, prefix)
+    return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 OpenCLRenderer = functools.partial(uops_to_cstyle, OpenCLLanguage())
 
 class MetalLanguage(CStyleLanguage):
@@ -206,13 +204,13 @@ class MetalLanguage(CStyleLanguage):
   def render_cast(self, x: List[str], var_dtype: DType, bitcast=False) -> str:
     return f"as_type<{var_dtype.name}>({x[0]})" if bitcast else super().render_cast(x, var_dtype)
 
-  def render_kernel(self, function_name, kernel, bufs, local_size, uops, prefix=None):
+  def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
     prefix = ["#include <metal_stdlib>","using namespace metal;"]
     if any(uop.uop == UOps.WMMA for uop in uops): prefix.append("""template<typename T, typename S, typename U> U __metal_wmma(T m, T n, U o) {
     S a,b,c; a.thread_elements()[0] = m.x; a.thread_elements()[1] = m.y; b.thread_elements()[0] = n.x; b.thread_elements()[1] = n.y;
     c.thread_elements()[0] = o.x; c.thread_elements()[1] = o.y; simdgroup_multiply_accumulate(c, a, b, c);
     return U(c.thread_elements()[0], c.thread_elements()[1]);\n}""")
-    return super().render_kernel(function_name, kernel, bufs, local_size, uops, prefix)
+    return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 MetalRenderer = functools.partial(uops_to_cstyle, MetalLanguage())
 
 code_for_op_half = {
@@ -234,7 +232,7 @@ class CUDALanguage(CStyleLanguage):
   code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_half}
   type_map = {dtypes.bfloat16: "nv_bfloat16"}
 
-  def render_kernel(self, function_name, kernel, bufs, local_size, uops, prefix=None):
+  def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
     prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))"]
     if any(uop.dtype == dtypes.half for uop in uops):
       prefix += ["#include <cuda_fp16.h>", "struct half4 { half x, y, z, w; };", "struct half8 { half x, y, z, w, a, b, c, d; };",
@@ -246,7 +244,7 @@ class CUDALanguage(CStyleLanguage):
   return c;}""",
       ]
     if any(uop.dtype == dtypes.bfloat16 for uop in uops): prefix.append("#include <cuda_bf16.h>")
-    return super().render_kernel(function_name, kernel, bufs, local_size, uops, prefix=prefix)
+    return super().render_kernel(function_name, kernel, bufs, uops, prefix=prefix)
 CUDARenderer = functools.partial(uops_to_cstyle, CUDALanguage())
 
 code_for_op_hip = {

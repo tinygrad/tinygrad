@@ -16,6 +16,8 @@ def test_overflow(ast, opts):
   lin.linearize()
   time_linearizer(lin, bufs_from_lin(lin))
 
+# NOTE: if you want these to trigger, set launch bounds on HIP kernels
+
 #@unittest.skipIf(Device.DEFAULT!="PYTHON", "only python backend")
 class TestLinearizerOverflow(unittest.TestCase):
   def test_overflow_1(self):
