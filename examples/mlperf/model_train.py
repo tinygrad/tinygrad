@@ -24,7 +24,7 @@ def train_unet3d():
 
   TARGET_METRIC = 0.908
   NUM_EPOCHS = getenv("NUM_EPOCHS", 4000)
-  BS = getenv("BS", 2)
+  BS = getenv("BS", 1)
   LR = getenv("LR", 0.8)
   MOMENTUM = getenv("MOMENTUM", 0.9)
   LR_WARMUP_EPOCHS = getenv("LR_WARMUP_EPOCHS", 200)
@@ -37,8 +37,7 @@ def train_unet3d():
   SIZE = (64, 64, 64) if getenv("SMALL") else (128, 128, 128)
   SEED = getenv("SEED")
 
-  if getenv("FLOAT16"):
-    dtypes.default_float = dtypes.float16
+  if getenv("HALF"): dtypes.default_float = dtypes.half
 
   if SEED:
     assert 1 <= SEED <= 9, "seed must be between 1-9"
