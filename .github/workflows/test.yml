@@ -342,18 +342,18 @@ jobs:
 #    - name: Build WebGL Efficientnet
 #      run: WEBGL=1 python -m examples.compile_efficientnet
 
-  # testhsa:
-  #   name: HSA Tests
-  #   runs-on: [self-hosted, Linux, tinybox]
-  #   timeout-minutes: 20
-  #   defaults:
-  #     run:
-  #       shell: bash -o pipefail {0}
-  #   steps:
-  #     - name: Checkout Code
-  #       uses: actions/checkout@v4
-  #     - name: Test HSA Backend
-  #       run: PYTHONPATH=. HSA=1 python -m pytest -n=auto test/external/external_test_hsa_backend.py --durations=50
+  testhsa:
+    name: HSA Tests
+    runs-on: [self-hosted, Linux, tinybox]
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash -o pipefail {0}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Test HSA Backend
+        run: PYTHONPATH=. HSA=1 python -m pytest -n=auto test/external/external_test_hsa_backend.py --durations=50
 
   tests:
     strategy:
