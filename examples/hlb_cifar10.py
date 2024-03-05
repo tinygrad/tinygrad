@@ -43,12 +43,12 @@ class UnsyncedBatchNorm:
     if isinstance(x.lazydata, MultiLazyBuffer): assert x.lazydata.axis is None or x.lazydata.axis == 0 and len(x.lazydata.lbs) == self.num_devices
 
     rshape, x = x.shape, x.reshape(self.num_devices, -1, *x.shape[1:])
-    batch_mean, batch_invstd = self.calc_stats(x)
+    batch_mean, batch_invstd = self.calc_stats(x.cast(dtypes.float32))
     ret = x.batchnorm(
       self.weight.reshape(1, -1).expand((self.num_devices, -1)),
       self.bias.reshape(1, -1).expand((self.num_devices, -1)),
       batch_mean, batch_invstd, axis=(0, 2))
-    return ret.reshape(rshape)
+    return ret.reshape(rshape).cast(x.dtype)
 
   def calc_stats(self, x:Tensor):
     if Tensor.training:
