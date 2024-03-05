@@ -42,6 +42,8 @@ jobs:
       run: |
         JIT=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
         JIT=1 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
+    - name: Run LLaMA with BEAM
+      run: JIT=1 BEAM=2 CACHELEVEL=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_beam.txt
     - name: Run GPT2
       run: |
         JIT=0 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_unjitted.txt
@@ -65,6 +67,7 @@ jobs:
           train_cifar_wino.txt
           llama_unjitted.txt
           llama_jitted.txt
+          llama_beam.txt
           gpt2_unjitted.txt
           gpt2_jitted.txt
           gpt2_half.txt
@@ -101,6 +104,8 @@ jobs:
       run: CUDA=1 JIT=1 HALF=1 python3 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half.txt
     - name: Run GPT2 w HALF/BEAM
       run: CUDA=1 JIT=1 HALF=1 BEAM=2 CACHELEVEL=0 CAST_BEFORE_VIEW=0 python3 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half_beam.txt
+    - name: Run full CIFAR training
+      run: time CUDA=1 HALF=1 LATEWINO=1 STEPS=1000 TARGET_EVAL_ACC_PCT=93 python3 examples/hlb_cifar10.py | tee train_cifar_one_gpu.txt
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (NVIDIA)
@@ -112,6 +117,7 @@ jobs:
           gpt2_jitted.txt
           gpt2_half.txt
           gpt2_half_beam.txt
+          train_cifar_one_gpu.txt
 
   testamdbenchmark:
     name: tinybox Benchmark
