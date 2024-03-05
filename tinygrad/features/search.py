@@ -49,6 +49,7 @@ def _compile_linearizer(compiler:Compiler, lin:Linearizer, name:Optional[str]=No
                                                                                              List[Variable]]:
   lin.linearize()
   src = compiler.render(name if name is not None else to_function_name(lin.name), lin.uops.uops)   # NOTE: these all have the same name for deduping
+  if DEBUG >= 4: print(src)
   return compiler.compile(src), lin.global_size, lin.local_size, lin.uops.vars()
 
 def _try_compile_linearized_w_idx(x, compiler:Compiler):
