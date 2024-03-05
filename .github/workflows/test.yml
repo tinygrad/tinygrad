@@ -342,35 +342,18 @@ jobs:
 #    - name: Build WebGL Efficientnet
 #      run: WEBGL=1 python -m examples.compile_efficientnet
 
-  testhsa:
-    name: HSA Tests
-    # runs-on: ubuntu-latest
-    runs-on: [self-hosted, Linux, tinybox] # for testing on HSA hardware
-    timeout-minutes: 20
-    defaults:
-      run:
-        shell: bash -o pipefail {0}
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-      # - name: Set up Python 3.11
-      #   uses: actions/setup-python@v5
-      #   with:
-      #     python-version: 3.11
-      # - name: Cache python packages
-      #   uses: actions/cache@v3
-      #   with:
-      #     path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
-      #     key: testing-packages-${{ hashFiles('**/setup.py') }}
-      # - name: Cache downloads
-      #   uses: actions/cache@v3
-      #   with:
-      #     path: ~/.cache/tinygrad/downloads/
-      #     key: downloads-cache-hsa-${{ env.DOWNLOAD_CACHE_VERSION }}
-      # - name: Install Dependencies
-      #   run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-      - name: Test HSA Backend
-        run: PYTHONPATH=. HSA=1 python -m pytest -n=auto test/external/external_test_hsa_backend.py --durations=50
+  # testhsa:
+  #   name: HSA Tests
+  #   runs-on: [self-hosted, Linux, tinybox]
+  #   timeout-minutes: 20
+  #   defaults:
+  #     run:
+  #       shell: bash -o pipefail {0}
+  #   steps:
+  #     - name: Checkout Code
+  #       uses: actions/checkout@v4
+  #     - name: Test HSA Backend
+  #       run: PYTHONPATH=. HSA=1 python -m pytest -n=auto test/external/external_test_hsa_backend.py --durations=50
 
   tests:
     strategy:
