@@ -158,8 +158,9 @@ class TestTinygrad(unittest.TestCase):
 
   def test_randn_fp16(self):
     # low precision can result in inf from randn
-    old_default_float, dtypes.default_float = dtypes.default_float, dtypes.float16
+    old_default_float = dtypes.default_float
     try:
+      dtypes.default_float = dtypes.float16
       assert Tensor.randn((2, 128, 128)).abs().max().numpy().item() != float('inf')
     finally:
       dtypes.default_float = old_default_float
