@@ -259,7 +259,7 @@ def _make_hip_dtype(base_type, name, cnt):
          ") { return {" + ', '.join(nms) + "}; }"
 
 class HIPLanguage(CStyleLanguage):
-  kernel_prefix = "#include <hip/hip_common.h>\n#include <hip/amd_detail/amd_hip_bf16.h>\n" + """
+  kernel_prefix = "#include <stddef.h>\n #include <hip/hip_common.h>\n#include <hip/amd_detail/amd_hip_bf16.h>\n" + """
   #define INFINITY (__builtin_inff())\n#define NAN (__builtin_nanf(\"\"))
   #define launch_bounds_impl0(requiredMaxThreadsPerBlock)                                       \
     __attribute__((amdgpu_flat_work_group_size(1, requiredMaxThreadsPerBlock)))
@@ -269,7 +269,6 @@ class HIPLanguage(CStyleLanguage):
   #define __launch_bounds__(...) select_impl_(__VA_ARGS__, launch_bounds_impl1, launch_bounds_impl0)(__VA_ARGS__)
   typedef long unsigned int size_t;
   #define half _Float16
-  struct hip_bfloat16 { unsigned short data; };
 
   extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_local_id(unsigned int);
   extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_group_id(unsigned int);
@@ -310,5 +309,5 @@ class HIPLanguage(CStyleLanguage):
   uses_ptr_arithmetic = True
   type_map = {dtypes.bfloat16: "hip_bfloat16"}
   def render_cast(self, x: List[str], var_dtype: DType, bitcast=False) -> str:
-    return (f"__float2half_rn({x[0]})" if var_dtype == dtypes.bfloat16 else super().render_cast(x, var_dtype, bitcast))
+    return (f"__float2bfloat16({x[0]})" if var_dtype == dtypes.bfloat16 else super().render_cast(x, var_dtype, bitcast))
 HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())
