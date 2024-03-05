@@ -136,14 +136,11 @@ def scan_agents():
   hsa.hsa_iterate_agents(__scan_agents, None)
   return agents
 
-def find_memory_pool(agent, segtyp=-1, flags=-1, location=-1):
+def find_memory_pool(agent, segtyp=-1, location=-1):
   @ctypes.CFUNCTYPE(hsa.hsa_status_t, hsa.hsa_amd_memory_pool_t, ctypes.c_void_p)
   def __filter_amd_memory_pools(mem_pool, data):
     check(hsa.hsa_amd_memory_pool_get_info(mem_pool, hsa.HSA_AMD_MEMORY_POOL_INFO_SEGMENT, ctypes.byref(segment := hsa.hsa_amd_segment_t())))
     if segtyp >= 0 and segment.value != segtyp: return hsa.HSA_STATUS_SUCCESS
-
-    check(hsa.hsa_amd_memory_pool_get_info(mem_pool, hsa.HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, ctypes.byref(fgs := hsa.hsa_amd_memory_pool_global_flag_t()))) # noqa: E501
-    if flags >= 0 and (fgs.value & flags) == flags: return hsa.HSA_STATUS_SUCCESS
 
     check(hsa.hsa_amd_memory_pool_get_info(mem_pool, hsa.HSA_AMD_MEMORY_POOL_INFO_LOCATION, ctypes.byref(loc:=hsa.hsa_amd_memory_pool_location_t())))
     if location >= 0 and loc.value != location: return hsa.HSA_STATUS_SUCCESS
