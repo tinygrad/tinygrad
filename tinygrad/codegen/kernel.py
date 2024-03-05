@@ -435,7 +435,7 @@ class Kernel:
     else:
       amt = -1
     if opt.op == OptOps.LOCAL:    # cyan
-      #assert self.opts.has_local, "target does not support local"
+      assert self.opts.has_local, "target does not support local"
       assert axis < self.global_dims, "local is for globals"
       self.shift_to(axis, amt, insert_before=self.first_reduce-self.local_dims)
       self.local_dims += 1

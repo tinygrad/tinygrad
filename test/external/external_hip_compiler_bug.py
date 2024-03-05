@@ -17,29 +17,11 @@ def compile_hip(prg:str, arch="gfx1100") -> bytes:
 
 prefix = """
 typedef long unsigned int size_t;
-
 extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_local_id(unsigned int);
 extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_group_id(unsigned int);
 extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_local_size(unsigned int);
-
-typedef signed int int2 __attribute__((ext_vector_type(2)));
-static inline __attribute__((device)) int2 make_int2(signed int x, signed int y) { return {x, y}; }
-typedef signed int int4 __attribute__((ext_vector_type(4)));
-static inline __attribute__((device)) int4 make_int4(signed int x, signed int y, signed int z, signed int w) { return {x, y, z, w}; }
-typedef _Float16 half2 __attribute__((ext_vector_type(2)));
-static inline __attribute__((device)) half2 make_half2(_Float16 x, _Float16 y) { return {x, y}; }
-typedef _Float16 half4 __attribute__((ext_vector_type(4)));
-static inline __attribute__((device)) half4 make_half4(_Float16 x, _Float16 y, _Float16 z, _Float16 w) { return {x, y, z, w}; }
-typedef _Float16 half8 __attribute__((ext_vector_type(8)));
-static inline __attribute__((device)) half8 make_half8(_Float16 x, _Float16 y, _Float16 z, _Float16 w, _Float16 a, _Float16 b, _Float16 c, _Float16 d) { return {x, y, z, w, a, b, c, d}; }
-typedef _Float16 half16 __attribute__((ext_vector_type(16)));
-static inline __attribute__((device)) half16 make_half16(_Float16 x, _Float16 y, _Float16 z, _Float16 w, _Float16 a, _Float16 b, _Float16 c, _Float16 d, _Float16 e, _Float16 f, _Float16 g, _Float16 h, _Float16 i, _Float16 j, _Float16 k, _Float16 l) { return {x, y, z, w, a, b, c, d, e, f, g, h, i, j, k, l}; }
 typedef float float2 __attribute__((ext_vector_type(2)));
 static inline __attribute__((device)) float2 make_float2(float x, float y) { return {x, y}; }
-typedef float float4 __attribute__((ext_vector_type(4)));
-static inline __attribute__((device)) float4 make_float4(float x, float y, float z, float w) { return {x, y, z, w}; }
-typedef float float8 __attribute__((ext_vector_type(8)));
-static inline __attribute__((device)) float8 make_float8(float x, float y, float z, float w, float a, float b, float c, float d) { return {x, y, z, w, a, b, c, d}; }
 """
 
 code = """
@@ -115,22 +97,14 @@ extern "C" __attribute__((global))void r_2_8_7_7_4_8_3_7_7_4_4_2_2(float* data0,
         float val7 = 0.0f;
         if ((alu8*alu12*alu13)) { val7 = data1[alu9+671]; }
         int alu14 = ((gidx1*1176)+(ridx0*49)+(ridx1*7)+ridx2);
-        float val8 = 0.0;
-        val8 = data2[alu14];
-        float val9 = 0.0;
-        val9 = data2[alu14+147];
-        float val10 = 0.0;
-        val10 = data2[alu14+294];
-        float val11 = 0.0;
-        val11 = data2[alu14+441];
-        float val12 = 0.0;
-        val12 = data2[alu14+588];
-        float val13 = 0.0;
-        val13 = data2[alu14+735];
-        float val14 = 0.0;
-        val14 = data2[alu14+882];
-        float val15 = 0.0;
-        val15 = data2[alu14+1029];
+        float val8 = data2[alu14];
+        float val9 = data2[alu14+147];
+        float val10 = data2[alu14+294];
+        float val11 = data2[alu14+441];
+        float val12 = data2[alu14+588];
+        float val13 = data2[alu14+735];
+        float val14 = data2[alu14+882];
+        float val15 = data2[alu14+1029];
         (acc0).x = ((val0*val8)+(acc0).x);
         (acc1).x = ((val0*val9)+(acc1).x);
         (acc2).x = ((val0*val10)+(acc2).x);
@@ -234,8 +208,8 @@ extern "C" __attribute__((global))void r_2_8_7_7_4_8_3_7_7_4_4_2_2(float* data0,
 """
 
 dev = "HIP"
-#lib = Device[dev].compiler.compile(prefix+code)
-lib = compile_hip(code)
+lib = Device[dev].compiler.compile(prefix+code)
+#lib = compile_hip(code)
 b0 = Buffer(dev, 1605632, dtypes.float)
 b1 = Buffer(dev, 301506, dtypes.float)
 b2 = Buffer(dev, 9408, dtypes.float)
