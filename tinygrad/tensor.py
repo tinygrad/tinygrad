@@ -205,8 +205,7 @@ class Tensor:
     device, dtype, src = device if device else Device.canonicalize(device), dtype or dtypes.default_float, kwargs.get("src", None)
     if isinstance(device, tuple):
       return Tensor(MultiLazyBuffer([LazyBuffer.loadop(op, shape, dtype, d, arg, src) for d in device], None), device, dtype, **kwargs)
-    else:
-      return Tensor(LazyBuffer.loadop(op, shape, dtype, device, arg, src), device, dtype, **kwargs)
+    return Tensor(LazyBuffer.loadop(op, shape, dtype, device, arg, src), device, dtype, **kwargs)
 
   @staticmethod
   def empty(*shape, **kwargs): return Tensor._loadop(LoadOps.EMPTY, argfix(*shape), **kwargs)
