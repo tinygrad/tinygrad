@@ -232,6 +232,7 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
           st_childs = dedup([s for s in tr_next.srcs if s.base == tr])
           if len(st_childs) > 1: break
           if st.size != st_childs[0].st.size: break
+          if len(st_childs) > 0 and tr.dtype.itemsize < tr_next.dtype.itemsize: break
           st = st + st_childs[0].st
           if not st.contiguous or tr_next.op in ReduceOps: break
           tr = tr_next
