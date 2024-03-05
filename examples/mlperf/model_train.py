@@ -75,13 +75,13 @@ def train_unet3d():
   @TinyJit
   def _train_step(model, x, y):
     y_hat = model(x)
-    loss = dice_ce_loss(y_hat, y, gpus=GPUS).realize()
+    loss = dice_ce_loss(y_hat, y)
 
     optim.zero_grad()
     loss.backward()
     optim.step()
 
-    return loss
+    return loss.realize()
   
   def _eval_step(model, x, y):
     y_hat, y = sliding_window_inference(model, x, y)

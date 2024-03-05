@@ -29,37 +29,23 @@ def word_error_rate(x, y):
     scores += levenshtein(h_list, r_list)
   return float(scores) / words, float(scores), words
 
-def one_hot(x, gpus=[]):
-  if len(gpus) > 1:
-    x = x.to(Device.DEFAULT)
-
+def one_hot(x):
   x = x.one_hot(3) 
-  x = x.squeeze(1).permute(0, 4, 1, 2, 3)
+  return x.squeeze(1).permute(0, 4, 1, 2, 3)
 
-  if len(gpus) > 1:
-    return x.shard(gpus, axis=0)
-
-  return x
-
-def dice_score(prediction, target, channel_axis=1, smooth_nr=1e-6, smooth_dr=1e-6, argmax=True, to_one_hot_x=True, gpus=[]):
+def dice_score(prediction, target, channel_axis=1, smooth_nr=1e-6, smooth_dr=1e-6, argmax=True, to_one_hot_x=True):
   channel_axis, reduce_axis = 1, tuple(range(2, len(prediction.shape)))
   if argmax: prediction = prediction.argmax(axis=channel_axis)
   else: prediction = prediction.softmax(axis=channel_axis)
-  if to_one_hot_x: prediction = one_hot(prediction, gpus=gpus)
-  target = one_hot(target, gpus=gpus)
+  if to_one_hot_x: prediction = one_hot(prediction)
+  target = one_hot(target)
   prediction, target = prediction[:, 1:], target[:, 1:]
   assert prediction.shape == target.shape, f"prediction ({prediction.shape}) and target ({target.shape}) shapes do not match"
   intersection = (prediction * target).sum(axis=reduce_axis)
   target_sum = target.sum(axis=reduce_axis)
   prediction_sum = prediction.sum(axis=reduce_axis)
   result = (2.0 * intersection + smooth_nr) / (target_sum + prediction_sum + smooth_dr)
-  if len(gpus) > 1:
-    result.to_(Device.DEFAULT)
-    result = result[0]
-    result.shard_(gpus, axis=0)
-  else:
-    result = result[0]
-  return result
+  return result[0]
 
 def normalize_string(s):
   s = "".join(c for c in s.lower() if c not in string.punctuation)
