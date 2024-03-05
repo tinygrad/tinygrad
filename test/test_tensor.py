@@ -181,11 +181,14 @@ class TestTinygrad(unittest.TestCase):
     assert a.shape == b.shape, f"shape mismatch {a.shape} != {b.shape}"
 
   def test_backward_has_same_dtype(self):
-    for datatype in [dtypes.float16, dtypes.float32]:
-      a = Tensor([1, 2, 3], dtype=datatype, requires_grad=True)
-      b = (a * 5).sum()
-      b.backward()
-      np.testing.assert_allclose(a.grad.numpy(), Tensor([5, 5, 5], dtype=datatype).numpy())
+    for default_dtype in [dtypes.float16, dtypes.float32]:
+      old_default_float, dtypes.default_float = dtypes.default_float, default_dtype
+      for datatype in [dtypes.float16, dtypes.float32]:
+        a = Tensor([1, 2, 3], dtype=datatype, requires_grad=True)
+        b = (a * 5).sum()
+        b.backward()
+        np.testing.assert_allclose(a.grad.numpy(), Tensor([5, 5, 5], dtype=datatype).numpy())
+      dtypes.default_float = old_default_float
 
   def test_ndim(self):
     assert Tensor(1).ndim == 0
