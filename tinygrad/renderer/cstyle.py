@@ -3,7 +3,7 @@ import math, functools
 from collections import defaultdict, Counter
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
-from tinygrad.helpers import prod, strip_parens, getenv
+from tinygrad.helpers import strip_parens, getenv
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 
 class CStyleLanguage(NamedTuple):
@@ -22,7 +22,6 @@ class CStyleLanguage(NamedTuple):
   float4: Optional[str] = None
   uses_vload: bool = False
   uses_ptr_arithmetic: bool = False
-  launch_bounds: bool = False
   type_map: Dict[DType, str] = {}
   code_for_op: Dict = {
     UnaryOps.NEG: lambda x,dtype: f"(-{x})", UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
@@ -62,13 +61,12 @@ class CStyleLanguage(NamedTuple):
       out_val = f"*({buf_name}+{idx})" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}]"
     return self.render_cast([out_val], output_dtype) if output_dtype != buf_dtype else out_val
 
-  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]],
-                    local_size:List[int], uops:List[UOp], prefix=None) -> str:
+  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,(dtype,_) in bufs) else ""  # noqa: E501
     buftypes = [(name,f"{'write_only' if mutable else 'read_only'} image2d_t" if dtype.name.startswith('image') else
                 ("" if mutable else "const ")+self.buffer_prefix+self.render_dtype(dtype)+"*"+self.buffer_suffix if isinstance(dtype, PtrDType) else
                 self.arg_int_prefix if dtype == dtypes.int else None) for name,(dtype,mutable) in bufs]
-    prg = ''.join([f"{self.kernel_prefix}void {f'__launch_bounds__ ({prod(local_size)}, 1) ' if self.launch_bounds else ''}{function_name}(",] +
+    prg = ''.join([f"{self.kernel_prefix}void {function_name}(",] +
     [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
     [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])
     return prg if prefix is None else "\n".join(prefix)+f"\n{prg}"
@@ -89,7 +87,6 @@ class CStyleLanguage(NamedTuple):
   def render_dtype(self, var_dtype:DType) -> str: return self.type_map[var_dtype] if var_dtype in self.type_map else var_dtype.name
 
 def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> str:
-  local_size: List[int] = []
   kernel = []
   bufs: List[Tuple[str, Tuple[DType, bool]]] = []
   #pend_close = None
@@ -139,7 +136,6 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
         else: kk(f"{dtype.name} {ssa(u,'alu')} = {val};")
       elif uop is UOps.SPECIAL:
         kk(f"int {args[1]} = {lang.code_for_workitem[args[1][0]](args[0])}; /* {args[2]} */")
-        if args[1].startswith("l"): local_size.append(args[2])
         r[u] = args[1]
       elif uop is UOps.LOAD:
         val = lang.render_load(dtype, r[vin[0]], vin[0].dtype, strip_parens(r[vin[1]]), vin[0].uop is UOps.DEFINE_LOCAL)
@@ -175,7 +171,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
       elif uop is UOps.GEP: r[u] = f"({r[vin[0]]})[{args}]" if cast(DType, vin[0].dtype).count > 4 else f"({r[vin[0]]}).{'xyzw'[args]}"
       else: raise RuntimeError(f"failed to render {uop}")
 
-  return lang.render_kernel(function_name, kernel, bufs, local_size, uops)
+  return lang.render_kernel(function_name, kernel, bufs, uops)
 
 class OpenCLLanguage(CStyleLanguage):
   kernel_prefix = "__kernel "
@@ -190,9 +186,9 @@ class OpenCLLanguage(CStyleLanguage):
   def render_cast(self, x, var_dtype, bitcast=False) -> str:
     return f"as_{self.type_map.get(var_dtype) or var_dtype.name}({x[0]})" if bitcast else super().render_cast(x, var_dtype)
 
-  def render_kernel(self, function_name, kernel, bufs, local_size, uops, prefix=None) -> str:
+  def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     if any(uop.dtype == dtypes.half for uop in uops): prefix = ["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"]
-    return super().render_kernel(function_name, kernel, bufs, local_size, uops, prefix)
+    return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 OpenCLRenderer = functools.partial(uops_to_cstyle, OpenCLLanguage())
 
 class MetalLanguage(CStyleLanguage):
@@ -208,13 +204,13 @@ class MetalLanguage(CStyleLanguage):
   def render_cast(self, x: List[str], var_dtype: DType, bitcast=False) -> str:
     return f"as_type<{var_dtype.name}>({x[0]})" if bitcast else super().render_cast(x, var_dtype)
 
-  def render_kernel(self, function_name, kernel, bufs, local_size, uops, prefix=None):
+  def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
     prefix = ["#include <metal_stdlib>","using namespace metal;"]
     if any(uop.uop == UOps.WMMA for uop in uops): prefix.append("""template<typename T, typename S, typename U> U __metal_wmma(T m, T n, U o) {
     S a,b,c; a.thread_elements()[0] = m.x; a.thread_elements()[1] = m.y; b.thread_elements()[0] = n.x; b.thread_elements()[1] = n.y;
     c.thread_elements()[0] = o.x; c.thread_elements()[1] = o.y; simdgroup_multiply_accumulate(c, a, b, c);
     return U(c.thread_elements()[0], c.thread_elements()[1]);\n}""")
-    return super().render_kernel(function_name, kernel, bufs, local_size, uops, prefix)
+    return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 MetalRenderer = functools.partial(uops_to_cstyle, MetalLanguage())
 
 code_for_op_half = {
@@ -236,7 +232,7 @@ class CUDALanguage(CStyleLanguage):
   code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_half}
   type_map = {dtypes.bfloat16: "nv_bfloat16"}
 
-  def render_kernel(self, function_name, kernel, bufs, local_size, uops, prefix=None):
+  def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
     prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))"]
     if any(uop.dtype == dtypes.half for uop in uops):
       prefix += ["#include <cuda_fp16.h>", "struct half4 { half x, y, z, w; };", "struct half8 { half x, y, z, w, a, b, c, d; };",
@@ -248,7 +244,7 @@ class CUDALanguage(CStyleLanguage):
   return c;}""",
       ]
     if any(uop.dtype == dtypes.bfloat16 for uop in uops): prefix.append("#include <cuda_bf16.h>")
-    return super().render_kernel(function_name, kernel, bufs, local_size, uops, prefix=prefix)
+    return super().render_kernel(function_name, kernel, bufs, uops, prefix=prefix)
 CUDARenderer = functools.partial(uops_to_cstyle, CUDALanguage())
 
 code_for_op_hip = {
@@ -268,12 +264,6 @@ def _make_hip_dtype(base_type, name, cnt):
 
 class HIPLanguage(CStyleLanguage):
   kernel_prefix = "#include <hip/hip_common.h>\n#define INFINITY (__builtin_inff())\n#define NAN (__builtin_nanf(\"\"))" + """
-  #define launch_bounds_impl0(requiredMaxThreadsPerBlock)                                       \
-    __attribute__((amdgpu_flat_work_group_size(1, requiredMaxThreadsPerBlock)))
-  #define launch_bounds_impl1(requiredMaxThreadsPerBlock, minBlocksPerMultiprocessor)           \
-    __attribute__((amdgpu_flat_work_group_size(1, requiredMaxThreadsPerBlock), amdgpu_waves_per_eu(minBlocksPerMultiprocessor)))
-  #define select_impl_(_1, _2, impl_, ...) impl_
-  #define __launch_bounds__(...) select_impl_(__VA_ARGS__, launch_bounds_impl1, launch_bounds_impl0)(__VA_ARGS__)
   typedef long unsigned int size_t;
   #define half _Float16
   struct hip_bfloat16 { unsigned short data; };
@@ -313,7 +303,6 @@ class HIPLanguage(CStyleLanguage):
   barrier = '__builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");' + '__builtin_amdgcn_s_barrier();' + \
             '__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");'
   float4 = "make_float4"
-  launch_bounds = True
   uses_ptr_arithmetic = True
   type_map = {dtypes.bfloat16: "hip_bfloat16"}
 HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())
