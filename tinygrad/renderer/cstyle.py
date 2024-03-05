@@ -304,7 +304,7 @@ class HIPLanguage(CStyleLanguage):
   barrier = '__builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");' + '__builtin_amdgcn_s_barrier();' + \
             '__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");'
   float4 = "make_float4"
-  uses_ptr_arithmetic = True
+  uses_ptr_arithmetic = False  # NOTE: this fixes TestLinearizerOverflowAlt
   type_map = {dtypes.bfloat16: "__hip_bfloat16"}
   def render_cast(self, x: List[str], var_dtype: DType, bitcast=False) -> str:
     return (f"__float2bfloat16({x[0]})" if var_dtype == dtypes.bfloat16 else super().render_cast(x, var_dtype, bitcast))
