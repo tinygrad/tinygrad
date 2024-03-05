@@ -156,6 +156,14 @@ class TestTinygrad(unittest.TestCase):
     except: raise
     finally: Tensor.rand = original_rand
 
+  def test_randn_fp16(self):
+    # low precision can result in inf from randn
+    old_default_float, dtypes.default_float = dtypes.default_float, dtypes.float16
+    try:
+      assert Tensor.randn((2, 128, 128)).abs().max().numpy().item() != float('inf')
+    finally:
+      dtypes.default_float = old_default_float
+
   def test_zeros_like_has_same_dtype_and_shape(self):
     for datatype in [dtypes.float16, dtypes.float32, dtypes.int8, dtypes.int32, dtypes.int64, dtypes.uint8]:
       a = Tensor([1, 2, 3], dtype=datatype)
