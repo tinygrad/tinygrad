@@ -351,12 +351,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: x/2)
     helper_test_op([()], lambda x: 2/x)
 
-  @unittest.skipIf(Device.DEFAULT in ["METAL", "WEBGPU"], "METAL has issues with -inf")
   def test_mul_naninf(self):
     helper_test_op([(45,65)], lambda x: x*math.inf)
     helper_test_op([(45,65)], lambda x: x*-math.inf)
     helper_test_op([(45,65)], lambda x: x*math.nan)
-  @unittest.skipIf(Device.DEFAULT in ["METAL", "WEBGPU"], "METAL has issues with -inf")
   def test_div_naninf(self):
     helper_test_op([(45,65)], lambda x: x/math.inf)
     helper_test_op([(45,65)], lambda x: x/-math.inf)
@@ -474,8 +472,7 @@ class TestOps(unittest.TestCase):
 
   def test_gelu(self):
     helper_test_op([(45,65)], lambda x: torch.nn.functional.gelu(x, approximate="tanh"), Tensor.gelu)
-    if not (CI and Device.DEFAULT == "METAL"):
-      helper_test_op([(45,65)], lambda x: torch.nn.functional.gelu(x, approximate="tanh"), Tensor.gelu, low=300, high=303)
+    helper_test_op([(45,65)], lambda x: torch.nn.functional.gelu(x, approximate="tanh"), Tensor.gelu, low=300, high=303)
     helper_test_op([(45,65)], lambda x: torch.nn.functional.gelu(x, approximate="tanh"), Tensor.gelu, low=-300, high=-297)
   def test_quick_gelu(self):
     helper_test_op([(45,65)], lambda x: x * torch.sigmoid(1.702 * x), Tensor.quick_gelu)
@@ -755,7 +752,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(10,10,10)], lambda x: x.softmax(0), atol=1e-7, grad_atol=1e-7)
     helper_test_op([(10,10,10)], lambda x: x.softmax(1), atol=1e-7, grad_atol=1e-7)
     helper_test_op([(10,10,10)], lambda x: x.softmax(2), atol=1e-7, grad_atol=1e-7)
-
+  @unittest.skipIf(CI and Device.DEFAULT in ["CLANG", "PYTHON"], "Broken ISSUE #3552")
+  def test_softmax_argmax(self):
+    helper_test_op([(45,65)], lambda x: x.softmax(0).argmax(), forward_only=True, atol=1e-7, grad_atol=1e-7)
+    helper_test_op([(45,65)], lambda x: x.softmax(1).argmax(), forward_only=True, atol=1e-7, grad_atol=1e-7)
   def test_log_softmax(self):
     helper_test_op([(45,65)], torch.nn.LogSoftmax(dim=1), Tensor.log_softmax, atol=1e-7, grad_atol=1e-7)
     helper_test_op([(45)], torch.nn.LogSoftmax(dim=0), Tensor.log_softmax, atol=1e-7, grad_atol=1e-7)
@@ -1085,7 +1085,7 @@ class TestOps(unittest.TestCase):
 
   @unittest.skipIf(IMAGE>0, "no conv3d on images")
   def test_padded_conv3d(self):
-    helper_test_op([(1,4,9,9,9), (4,4,3,3,3)],
+    helper_test_op([(1,4,5,5,5), (4,4,3,3,3)],
       lambda x,w: torch.nn.functional.conv3d(x,w,padding=1).relu(),
       lambda x,w: Tensor.conv2d(x,w,padding=[1,1,1,1,1,1]).relu(), atol=1e-4, grad_rtol=1e-5)
 

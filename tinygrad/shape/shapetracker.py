@@ -2,9 +2,9 @@
 from __future__ import annotations
 import functools, math
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, Dict, Set, cast, Iterable, Union
+from typing import Tuple, List, Optional, Dict, Set, Iterable, cast
 from tinygrad.helpers import merge_dicts, getenv
-from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, NumNode, sint
+from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, NumNode, create_lt_node, create_ge_node, sint
 from tinygrad.shape.view import View, strides_for_shape
 
 def un1d(shape:Tuple[sint, ...], offs:sint) -> List[sint]:
@@ -89,7 +89,7 @@ def _expr_view(view:View, idxs:List[Node], valid:Optional[Node]=None) -> Tuple[N
   vexpr: List[Node] = [valid] if valid is not None else []
   for idx,sh,st,m in zip(idxs, view.shape, view.strides, view.mask if view.mask is not None else [None]*len(view.shape)):
     if sh != 1 and st != 0: iexpr.append(idx*st)
-    if m is not None: vexpr += [idx >= m[0], idx < m[1]]
+    if m is not None: vexpr += [create_ge_node(idx, m[0]), create_lt_node(idx, m[1])]  # idx >= m[0], idx < m[1]
   return Node.sum(iexpr), Node.ands(vexpr)
 
 @dataclass(frozen=True)
@@ -119,8 +119,8 @@ class ShapeTracker:
 
   def real_size(self) -> int:
     if 0 in self.shape: return 0
-    ret = cast(Union[int, Node], self.expr_idxs()[0].max)   # TODO: this is due to typing issues in symbolic!
-    while not isinstance(ret, int): ret = ret.max    # TODO: this is a while loop?!? it should be more clear what max does
+    ret = self.expr_idxs()[0].max
+    if not isinstance(ret, int): ret = ret.max  # might be represent by symbolic shape, take one more max for int max
     assert isinstance(ret, int), f"ret must be integer, {ret=} isn't"
     return ret+1
 

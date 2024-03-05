@@ -10,7 +10,7 @@ from typing import List, Dict, Callable, Tuple, Type, Union, Optional, Any, Set,
 class Node:
   b: Union[Node, int]
   min: int
-  max: int
+  max: sint
   def render(self, ops=None, ctx=None) -> Any:
     if ops is None: ops = render_python
     assert self.__class__ in (Variable, NumNode) or self.min != self.max
@@ -56,7 +56,7 @@ class Node:
       if (b - self).min > 0 and self.min >= 0: return NumNode(0) # b - self simplifies the node
       raise RuntimeError(f"not supported: {self} // {b}")
     assert b != 0
-    if b < 0: return (self//-b)*-1
+    if b < 0: return (self*-1)//-b
     if b == 1: return self
 
     # the numerator of div is not allowed to be negative
@@ -118,7 +118,7 @@ class Variable(Node):
 
   def __getnewargs__(self): return (self.expr, self.min, self.max)  # args passed to __new__ when unpickling
 
-  def __init__(self, expr:str, nmin:int, nmax:int):
+  def __init__(self, expr:str, nmin:int, nmax:sint):
     self.expr, self.min, self.max = expr, nmin, nmax
     self._val: Optional[int] = None
   @property
@@ -153,12 +153,40 @@ def create_node(ret:Node):
   if ret.min == ret.max: return NumNode(ret.min)
   return ret
 
+def create_lt_node(lhs:Node, b:Union[Node, int]):
+  if isinstance(lhs, SumNode):
+    if isinstance(b, int):
+      new_sum = []
+      for x in lhs.nodes:
+        # TODO: should we just force the last one to always be the number
+        if isinstance(x, NumNode): b -= x.b
+        else: new_sum.append(x)
+      lhs = Node.sum(new_sum)
+      nodes = lhs.nodes if isinstance(lhs, SumNode) else [lhs]
+      assert all(not isinstance(node, MulNode) or isinstance(node.b, int) for node in nodes), "not supported"
+      muls, others = partition(nodes, lambda x: isinstance(x, MulNode) and x.b > 0 and x.max >= b)
+      if muls:
+        # NOTE: gcd in python 3.8 takes exactly 2 args
+        mul_gcd = b
+        for x in muls: mul_gcd = gcd(mul_gcd, x.b)  # type: ignore  # mypy cannot tell that x.b is int here due to assert above
+        all_others = Node.sum(others)
+        if all_others.min >= 0 and all_others.max < mul_gcd:
+          lhs, b = Node.sum([mul//mul_gcd for mul in muls]), b//mul_gcd
+    return create_node(LtNode(lhs, b)) if isinstance(lhs, SumNode) else create_lt_node(lhs, b)
+  if isinstance(lhs, MulNode):
+    if isinstance(b, Node) or isinstance(lhs.b, Node) or lhs.b == -1: return create_node(LtNode(lhs, b))
+    sgn = 1 if lhs.b > 0 else -1
+    return create_node(LtNode(lhs.a*sgn, (b + abs(lhs.b) - 1)//abs(lhs.b)))
+  return create_node(LtNode(lhs, b))
+
+def create_ge_node(lhs:Node, b:Union[Node, int]): return create_lt_node(-lhs, -b+1)
+
 class OpNode(Node):
   def __init__(self, a:Node, b:Union[Node, int]):
     self.a, self.b = a, b
     self.min, self.max = self.get_bounds()
   def vars(self): return self.a.vars() | (self.b.vars() if isinstance(self.b, Node) else set())
-  def get_bounds(self) -> Tuple[int, int]: raise NotImplementedError("must be implemented")
+  def get_bounds(self) -> Tuple[int, sint]: raise NotImplementedError("must be implemented")
 
 class LtNode(OpNode):
   def get_bounds(self) -> Tuple[int, int]:
@@ -166,26 +194,25 @@ class LtNode(OpNode):
     if isinstance(self.b, int): return (1, 1) if self.a.max < self.b else (0, 0) if self.a.min >= self.b else (0, 1)
     return (1, 1) if self.a.max < self.b.min else (0, 0) if self.a.min >= self.b.max else (0, 1)
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node:
-    return self.a.substitute(var_vals) < (self.b if isinstance(self.b, int) else self.b.substitute(var_vals))
+    return create_lt_node(self.a.substitute(var_vals), (self.b if isinstance(self.b, int) else self.b.substitute(var_vals)))
 
 class MulNode(OpNode):
-  def __lt__(self, b: Union[Node, int]):
-    if isinstance(b, Node) or isinstance(self.b, Node) or self.b == -1: return Node.__lt__(self, b)
-    sgn = 1 if self.b > 0 else -1
-    return Node.__lt__(self.a*sgn, (b + abs(self.b) - 1)//abs(self.b))
   def __mul__(self, b: Union[Node, int]): return self.a*(self.b*b) # two muls in one mul
   def __floordiv__(self, b: Union[Node, int], factoring_allowed=False): # NOTE: mod negative isn't handled right
     if self.b % b == 0: return self.a*(self.b//b)
     if b % self.b == 0 and self.b > 0: return self.a//(b//self.b)
     return Node.__floordiv__(self, b, factoring_allowed)
   def __mod__(self, b: Union[Node, int]): return Node.__mod__(self.a * (self.b%b), b)
-  def get_bounds(self) -> Tuple[int, int]: return (self.a.min*self.b, self.a.max*self.b) if self.b >= 0 else (self.a.max*self.b, self.a.min*self.b)
+  def get_bounds(self) -> Tuple[int, sint]:
+    assert self.a.min >= 0
+    if isinstance(self.b, int): return (self.a.min*self.b, self.a.max*self.b) if self.b >= 0 else (self.a.max*self.b, self.a.min*self.b)
+    return (self.a.min*self.b.min, self.a.max*self.b.max) if self.b.min >= 0 else (self.a.max*self.b.min, self.a.min*self.b.max)
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node:
     return self.a.substitute(var_vals) * (self.b if isinstance(self.b, int) else self.b.substitute(var_vals))
 
 class DivNode(OpNode):
   def __floordiv__(self, b: Union[Node, int], _=False): return self.a//(self.b*b) # two divs is one div
-  def get_bounds(self) -> Tuple[int, int]:
+  def get_bounds(self) -> Tuple[int, sint]:
     assert self.a.min >= 0 and isinstance(self.b, int)
     return self.a.min//self.b, self.a.max//self.b
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node: return self.a.substitute(var_vals) // self.b
@@ -196,7 +223,7 @@ class ModNode(OpNode):
     return Node.__mod__(self, b)
   def __floordiv__(self, b: Union[Node, int], factoring_allowed=True):
     return (self.a//b) % (self.b//b) if self.b % b == 0 else Node.__floordiv__(self, b, factoring_allowed)
-  def get_bounds(self) -> Tuple[int, int]:
+  def get_bounds(self) -> Tuple[int, sint]:
     assert self.a.min >= 0 and isinstance(self.b, int)
     if self.a.max - self.a.min >= self.b or (self.a.min != self.a.max and self.a.min%self.b >= self.a.max%self.b): return (0, self.b-1)
     return (self.a.min%self.b, self.a.max%self.b)
@@ -207,14 +234,14 @@ class RedNode(Node):
     self.nodes = nodes
     self.min, self.max = self.get_bounds()
   def vars(self) -> Set[Variable]: return set.union(*[x.vars() for x in self.nodes], set())
-  def get_bounds(self) -> Tuple[int, int]: raise NotImplementedError("must be implemented")
+  def get_bounds(self) -> Tuple[int, sint]: raise NotImplementedError("must be implemented")
 
 class SumNode(RedNode):
-  def get_bounds(self) -> Tuple[int, int]: return sum([x.min for x in self.nodes]), sum([x.max for x in self.nodes])
+  def get_bounds(self) -> Tuple[int, sint]: return sum([x.min for x in self.nodes]), sum([x.max for x in self.nodes])
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def __mul__(self, b: Union[Node, int]): return Node.sum([x*b for x in self.nodes]) # distribute mul into sum
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
-  def __floordiv__(self, b: Union[Node, int], factoring_allowed=True):
+  def __floordiv__(self, b: Union[Node, sint], factoring_allowed=True):
     if self == b: return NumNode(1)
     fully_divided: List[Node] = []
     rest: List[Node] = []
@@ -252,27 +279,6 @@ class SumNode(RedNode):
     new_sum = Node.sum([node%b if node.__class__ in (NumNode, MulNode) else node for node in self.nodes])
     return Node.__mod__(new_sum, b)
 
-  def __lt__(self, b:Union[Node,int]):
-    lhs: Node = self
-    if isinstance(b, int):
-      new_sum = []
-      for x in self.nodes:
-        # TODO: should we just force the last one to always be the number
-        if isinstance(x, NumNode): b -= x.b
-        else: new_sum.append(x)
-      lhs = Node.sum(new_sum)
-      nodes = lhs.nodes if isinstance(lhs, SumNode) else [lhs]
-      assert all(not isinstance(node, MulNode) or isinstance(node.b, int) for node in nodes), "not supported"
-      muls, others = partition(nodes, lambda x: isinstance(x, MulNode) and x.b > 0 and x.max >= b)
-      if muls:
-        # NOTE: gcd in python 3.8 takes exactly 2 args
-        mul_gcd = b
-        for x in muls: mul_gcd = gcd(mul_gcd, x.b)  # type: ignore  # mypy cannot tell that x.b is int here due to assert above
-        all_others = Node.sum(others)
-        if all_others.min >= 0 and all_others.max < mul_gcd:
-          lhs, b = Node.sum([mul//mul_gcd for mul in muls]), b//mul_gcd
-    return Node.__lt__(lhs, b) if isinstance(lhs, SumNode) else lhs < b
-
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node:
     return Node.sum([node.substitute(var_vals) for node in self.nodes])
 
@@ -282,7 +288,7 @@ class SumNode(RedNode):
   def flat_components(self): return [y for x in self.nodes for y in (x.flat_components if isinstance(x, SumNode) else [x])]
 
 class AndNode(RedNode):
-  def get_bounds(self) -> Tuple[int, int]: return min([x.min for x in self.nodes]), max([x.max for x in self.nodes])
+  def get_bounds(self) -> Tuple[int, sint]: return min([x.min for x in self.nodes]), max([x.max for x in self.nodes])
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node:
     subed = []
     for node in self.nodes:

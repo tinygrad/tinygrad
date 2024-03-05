@@ -4,7 +4,7 @@ import functools, itertools, operator
 from tinygrad.nn.state import get_parameters
 from tinygrad.dtype import DType
 from tinygrad.helpers import DEBUG, merge_dicts, getenv, all_int, Context, GRAPH, flatten, GraphException
-from tinygrad.device import Compiled, JITRunner, CompiledASTRunner, Buffer
+from tinygrad.device import Compiled, JITRunner, CompiledASTRunner, Buffer, BufferXfer, MultiDeviceJITGraph
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
 from tinygrad.features.multi import MultiLazyBuffer
@@ -55,9 +55,11 @@ def apply_graph_to_jit(jit_cache: List[JitItem], input_rawbuffers: List[Buffer],
   for ji in jit_cache:
     ji_graph_dev: Optional[Compiled] = None # device on which the ji will be graphed. Not graphed if None.
     if isinstance(ji.prg, CompiledASTRunner): ji_graph_dev = ji.prg.device
+    elif isinstance(ji.prg, BufferXfer) and ji.rawbufs[0] and ji.rawbufs[0].d.dname.startswith("HSA"): ji_graph_dev = ji.rawbufs[0].d
 
     can_be_graphed = ji_graph_dev and ji_graph_dev.graph
-    can_extend_graph_batch = can_be_graphed and len(current_batch) < getenv("JIT_BATCH_SIZE", 64) and ji_graph_dev == current_device
+    can_extend_graph_batch = can_be_graphed and len(current_batch) < getenv("JIT_BATCH_SIZE", 64) and (ji_graph_dev == current_device or
+      (isinstance(ji_graph_dev.graph, type) and issubclass(ji_graph_dev.graph, MultiDeviceJITGraph) and type(ji_graph_dev) == type(current_device))) #type:ignore
     if not can_extend_graph_batch and len(current_batch) > 0: flush_batch()
 
     if can_be_graphed: current_batch.append(ji)
