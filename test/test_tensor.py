@@ -218,6 +218,8 @@ class TestTinygrad(unittest.TestCase):
       Tensor.zeros((2, 2), 2, 2)
     with self.assertRaises(ValueError):
       Tensor.zeros((2, 2), (2, 2))
+    with self.assertRaises(ValueError):
+      Tensor.randn((128, 128), 0.0, 0.01)
 
   def test_numel(self):
     assert Tensor.randn(10, 10).numel() == 100
