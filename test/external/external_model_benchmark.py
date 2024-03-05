@@ -84,12 +84,10 @@ def benchmark_model(m, devices, validate_outs=False):
     except Exception as e: print(f"{m:16s}torch_cpu {type(e).__name__:>25}")
 
     torch_device = "mps" if OSX else "cuda"
-    try:
-      torch_dev_model = torch_model.to(torch_device)
-      torch_dev_inputs = [x.to(torch_device) for x in torch_inputs]
-      benchmark(m, f"torch_{torch_device}", lambda: torch_dev_model(*torch_dev_inputs))
-    except Exception as e:
-      print(f"{m:16s}torch_{torch_device} {type(e).__name__:>25}")
+    torch_mps_model = torch_model.to(torch_device)
+    torch_mps_inputs = [x.to(torch_device) for x in torch_inputs]
+    try: benchmark(m, f"torch_{torch_device}", lambda: torch_mps_model(*torch_mps_inputs))
+    except Exception as e: print(f"{m:16s}torch_{torch_device} {type(e).__name__:>25}")
 
   # bench onnxruntime
   ort_options = ort.SessionOptions()
