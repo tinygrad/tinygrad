@@ -138,10 +138,22 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
         kk(f"int {args[1]} = {lang.code_for_workitem[args[1][0]](args[0])}; /* {args[2]} */")
         r[u] = args[1]
       elif uop is UOps.LOAD:
-        val = lang.render_load(dtype, r[vin[0]], vin[0].dtype, strip_parens(r[vin[1]]), vin[0].uop is UOps.DEFINE_LOCAL)
+        idx = strip_parens(r[vin[1]])
+        #kk(f"assert({idx} >= 0 || !({r[vin[2]]}));" if len(vin) > 3 else f"assert({idx} >= 0);")
+        val = lang.render_load(dtype, r[vin[0]], vin[0].dtype, idx, vin[0].uop is UOps.DEFINE_LOCAL)
+        sval = ssa(u,'val')
+        if len(vin) > 3:
+          kk(f"{lang.render_dtype(dtype)} {sval} = {r[vin[3]]};")
+          kk(f"if ({r[vin[2]]}) {{ {sval} = {val}; }}")
+        else:
+          kk(f"{lang.render_dtype(dtype)} {sval} = 0.0;")
+          #kk(f"if ({idx} >= 0) {{ {sval} = {val}; }}")
+          kk(f"{sval} = {val};")
+          #kk(f"if ({idx} < 0) {{ ; }}")
+          #kk(f"{lang.render_dtype(dtype)} {ssa(u,'val')} = {val};")
         # NOTE: this relies on the load not happening if it's in the unselected branch
-        if len(vin) > 3: val = lang.code_for_op[TernaryOps.WHERE](r[vin[2]], val, r[vin[3]], dtype)
-        kk(f"{lang.render_dtype(dtype)} {ssa(u,'val')} = {val};")
+        #if len(vin) > 3: val = lang.code_for_op[TernaryOps.WHERE](r[vin[2]], val, r[vin[3]], dtype)
+        #kk(f"{lang.render_dtype(dtype)} {ssa(u,'val')} = {val};")
       elif uop is UOps.PHI:
         kk(f"{r[vin[0]]} = {r[vin[1]]};")
         r[u] = r[vin[0]]
