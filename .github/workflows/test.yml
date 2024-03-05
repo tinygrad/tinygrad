@@ -369,8 +369,6 @@ jobs:
       #     key: downloads-cache-hsa-${{ env.DOWNLOAD_CACHE_VERSION }}
       # - name: Install Dependencies
       #   run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-      - name: Test CPU Backend
-        run: PYTHONPATH=. CPU=1 python -m pytest -n=auto test/external/external_test_hsa_backend.py --durations=20
       - name: Test HIP Backend
         run: PYTHONPATH=. HIP=1 python -m pytest -n=auto test/external/external_test_hsa_backend.py --durations=20
       - name: Test HSA Backend
