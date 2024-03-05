@@ -256,11 +256,12 @@ code_for_op_hip = {
   UnaryOps.EXP2: lambda x,dtype: f"__ocml_exp2_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
 }
 
-def _make_hip_dtype(base_type, name, cnt):
-  nms = "xyzwabcdefghijkl"[:cnt]
-  return f"typedef {base_type} {name}{cnt} __attribute__((ext_vector_type({cnt})));\n" + \
-         f"static inline __attribute__((device)) {name}{cnt} make_{name}{cnt}(" + ', '.join([f"{base_type} {x}" for x in nms]) + \
-         ") { return {" + ', '.join(nms) + "}; }"
+# TODO: the hip library has built in functions for this
+# def _make_hip_dtype(base_type, name, cnt):
+#   nms = "xyzwabcdefghijkl"[:cnt]
+#   return f"typedef {base_type} {name}{cnt} __attribute__((ext_vector_type({cnt})));\n" + \
+#          f"static inline __attribute__((device)) {name}{cnt} make_{name}{cnt}(" + ', '.join([f"{base_type} {x}" for x in nms]) + \
+#          ") { return {" + ', '.join(nms) + "}; }"
 
 class HIPLanguage(CStyleLanguage):
   kernel_prefix = "#include <stdint.h>\n#include <stddef.h>\n#include <hip/hip_common.h>\n#include <hip/amd_detail/amd_hip_bf16.h>" + """
@@ -289,14 +290,7 @@ class HIPLanguage(CStyleLanguage):
   __attribute__((device)) __attribute__((pure)) _Float16 __ocml_log2_f16(_Float16);
   __attribute__((device)) _Float16 __ocml_sin_f16(_Float16);
   __attribute__((device)) __attribute__((const)) _Float16 __ocml_sqrt_f16(_Float16);
-  }\n""" + '\n'.join([_make_hip_dtype(*x) for x in [("signed int", "int", 2), ("signed int", "int", 4),
-                     ("_Float16", "half", 2), ("_Float16", "half", 4), ("_Float16", "half", 8), ("_Float16", "half", 16),
-                     ("float", "float", 2), ("float", "float", 4), ("float", "float", 8)]]) + """
-  static __attribute__((device)) half8 __hip_wmma_f16_f16(half16 a, half16 b, half8 c) {
-    half16 c_frag = {}; half8 d; for (int n = 0; n < 8; n++) { c_frag[n*2] = c[n]; }
-    c_frag = __builtin_amdgcn_wmma_f16_16x16x16_f16_w32(a, b, c_frag, false);
-    for (int n = 0; n < 8; n++) { d[n] = c_frag[n*2]; } return d;
-  }\nextern "C" __attribute__((global))"""
+  }\n"""
   code_for_workitem = {"g": lambda x: f"__ockl_get_group_id({x})", "l": lambda x: f"__ockl_get_local_id({x})",
                        "i": lambda x: f"(__ockl_get_group_id({x})*__ockl_get_local_size({x})+__ockl_get_local_id({x}))"}
   code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_hip}
