@@ -259,7 +259,7 @@ def _make_hip_dtype(base_type, name, cnt):
          ") { return {" + ', '.join(nms) + "}; }"
 
 class HIPLanguage(CStyleLanguage):
-  kernel_prefix = "#include <stddef.h>\n#include <hip/hip_common.h>\n#include <hip/hip_runtime.h>\n#include <hip/hip_bfloat16.h>\n#define INFINITY (__builtin_inff())\n#define NAN (__builtin_nanf(\"\"))" + """
+  kernel_prefix = "#include <hip/hip_common.h>\n#include <hip/hip_runtime.h>\n#include <hip/amd_detail/amd_hip_bfloat16.h>\n#define INFINITY (__builtin_inff())\n#define NAN (__builtin_nanf(\"\"))" + """
   #define launch_bounds_impl0(requiredMaxThreadsPerBlock)                                       \
     __attribute__((amdgpu_flat_work_group_size(1, requiredMaxThreadsPerBlock)))
   #define launch_bounds_impl1(requiredMaxThreadsPerBlock, minBlocksPerMultiprocessor)           \
