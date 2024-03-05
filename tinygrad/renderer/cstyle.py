@@ -298,18 +298,13 @@ class HIPLanguage(CStyleLanguage):
   #   c_frag = __builtin_amdgcn_wmma_f16_16x16x16_f16_w32(a, b, c_frag, false);
   #   for (int n = 0; n < 8; n++) { d[n] = c_frag[n*2]; } return d;
   # }\nextern "C" __attribute__((global))"""
-  # code_for_workitem = {"g": lambda x: f"__ockl_get_group_id({x})", "l": lambda x: f"__ockl_get_local_id({x})",
-  #                      "i": lambda x: f"(__ockl_get_group_id({x})*__ockl_get_local_size({x})+__ockl_get_local_id({x}))"}
-  code_for_workitem = { "g": lambda x: f"hipBlockIdx_{['x', 'y', 'z'][x]}", "l": lambda x: f"hipThreadIdx_{['x', 'y', 'z'][x]}",
-                        "i": lambda x: f"(hipBlockIdx_{['x', 'y', 'z'][x]} * hipBlockDim_{['x', 'y', 'z'][x]} + hipThreadIdx_{['x', 'y', 'z'][x]})"}
+  code_for_workitem = {"g": lambda x: f"__ockl_get_group_id({x})", "l": lambda x: f"__ockl_get_local_id({x})",
+                       "i": lambda x: f"(__ockl_get_group_id({x})*__ockl_get_local_size({x})+__ockl_get_local_id({x}))"}
   code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_hip}
-  # smem_prefix = "__attribute__((shared))"
-  smem_prefix = "__shared__ "
-  # barrier = '__builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");' + '__builtin_amdgcn_s_barrier();' + \
-  #           '__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");'
-  barrier = "__syncthreads();"
-  # float4 = "make_float4"
-  float4 = "float4"  # Assuming float4 and similar types are directly usable without redefinition
+  smem_prefix = "__attribute__((shared))"
+  barrier = '__builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");' + '__builtin_amdgcn_s_barrier();' + \
+            '__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");'
+  float4 = "make_float4"
   launch_bounds = True
   uses_ptr_arithmetic = False  # NOTE: this fixes TestLinearizerOverflowAlt
   type_map = {dtypes.bfloat16: "__hip_bfloat16"}
@@ -317,14 +312,12 @@ class HIPLanguage(CStyleLanguage):
     return (f"__float2bfloat16({x[0]})" if var_dtype == dtypes.bfloat16 else super().render_cast(x, var_dtype, bitcast))
 
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
-    tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(
-        isinstance(dtype, ImageDType) for _, (dtype, _) in bufs) else ""
-    buftypes = [
-        (name, f"{'write_only' if mutable else 'read_only'} image2d_t" if dtype.name.startswith('image') else
-          ("" if mutable else "const ") + self.buffer_prefix + self.render_dtype(dtype) + "*" + self.buffer_suffix if isinstance(dtype, PtrDType) else
-          self.arg_int_prefix if dtype == dtypes.int else None) for name, (dtype, mutable) in bufs]
-    prg = ''.join([f"{self.kernel_prefix}void {function_name}(", ] +
-                  [', '.join([f'{t} {name}' for name, t in buftypes] + self.extra_args)] +
-                  [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])
-    return prg if prefix is None else "\n".join(prefix) + f"\n{prg}"
+    tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,(dtype,_) in bufs) else ""
+    buftypes = [(name,f"{'write_only' if mutable else 'read_only'} image2d_t" if dtype.name.startswith('image') else
+                ("" if mutable else "const ")+self.buffer_prefix+self.render_dtype(dtype)+"*"+self.buffer_suffix if isinstance(dtype, PtrDType) else
+                self.arg_int_prefix if dtype == dtypes.int else None) for name,(dtype,mutable) in bufs]
+    prg = ''.join([f"{self.kernel_prefix}void {function_name}(",] +
+    [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
+    [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])
+    return prg if prefix is None else "\n".join(prefix)+f"\n{prg}"
 HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())
