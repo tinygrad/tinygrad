@@ -62,10 +62,10 @@ class CStyleLanguage(NamedTuple):
     return self.render_cast([out_val], output_dtype) if output_dtype != buf_dtype else out_val
 
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], uops:List[UOp], prefix=None) -> str:
-    tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,dtype in bufs) else ""  # noqa: E501
-    buftypes = [(name,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if dtype.name.startswith('image') else
-                ("const " if i > 0 else "")+self.buffer_prefix+self.render_dtype(dtype)+"*"+self.buffer_suffix if isinstance(dtype, PtrDType) else
-                self.arg_int_prefix if dtype == dtypes.int else None) for i,(name,dtype) in enumerate(bufs)]
+    tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,(dtype,_) in bufs) else ""  # noqa: E501
+    buftypes = [(name,f"{'write_only' if mutable else 'read_only'} image2d_t" if dtype.name.startswith('image') else
+                ("" if mutable else "const ")+self.buffer_prefix+self.render_dtype(dtype)+"*"+self.buffer_suffix if isinstance(dtype, PtrDType) else
+                self.arg_int_prefix if dtype == dtypes.int else None) for name,(dtype,mutable) in bufs]
     prg = ''.join([f"{self.kernel_prefix}void {function_name}(",] +
     [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
     [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])
@@ -88,7 +88,7 @@ class CStyleLanguage(NamedTuple):
 
 def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> str:
   kernel = []
-  bufs: List[Tuple[str, DType]] = []
+  bufs: List[Tuple[str, Tuple[DType, bool]]] = []
   #pend_close = None
   depth = 1
   def kk(s): kernel.append("  "*depth+s)
@@ -159,11 +159,11 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
         kk(lang.render_local(args[0], dtype, args[1]))
         r[u] = args[0]
       elif uop is UOps.DEFINE_VAR:
-        bufs.append((args.expr, dtype))
+        bufs.append((args.expr, (dtype,False)))
         r[u] = args.expr
       elif uop is UOps.DEFINE_GLOBAL:
         assert len(bufs) == args[0], f"missed a global buffer {len(bufs)} {args}"
-        bufs.append((args[1], dtype))
+        bufs.append((args[1], (dtype,args[2])))
         r[u] = args[1]
       elif uop is UOps.WMMA: kk(f"{dtype.name} {ssa(u, 'wmma')} = {args}({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")
       elif uop is UOps.DEFINE_ACC: kk(f"{dtype.name} {ssa(u,'acc')} = {lang.render_const(args, dtype)};")
