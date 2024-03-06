@@ -364,6 +364,13 @@ class TestMultiTensor(unittest.TestCase):
       # don't allow assigns that change axes
       t_none.assign(t_zero)
 
+  def test_dropout_on_shard(self):
+    Tensor.training = True
+    X = Tensor.ones(256).to(devices_2)
+    output = X.dropout(0.5)
+    output.numpy()
+    Tensor.training = False
+
 @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
 class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
   # shrink a multitensor on sharded axis
