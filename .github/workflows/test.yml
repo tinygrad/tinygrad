@@ -147,8 +147,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        task: [optimage, openpilot, onnx, mlperf]
-    name: ${{ matrix.task=='optimage'&&'GPU OPT and IMAGE Tests' || matrix.task=='openpilot'&&'openpilot (OpenCL) Tests' || matrix.task=='onnx'&&'ONNX+Optimization Tests' || matrix.task=='mlperf'&&'MLPerf Component Tests' }}
+        task: [optimage, openpilot, onnx]
+    name: ${{ matrix.task=='optimage'&&'GPU OPT and IMAGE Tests' || matrix.task=='openpilot'&&'openpilot (OpenCL) Tests' || matrix.task=='onnx'&&'ONNX+Optimization Tests' }}
     runs-on: ubuntu-20.04
     timeout-minutes: 20
 
@@ -225,7 +225,7 @@ jobs:
       - if: ${{ matrix.task == 'onnx' }}
         name: Test Beam Search
         run: PYTHONPATH="." GPU=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
-      - if: ${{ matrix.task == 'mlperf' }}
+      - if: ${{ matrix.task == 'onnx' }}
         name: Test MLPerf optimizers
         run: GPU=1 python -m pytest -n=auto test/external/external_test_optim.py --durations=20
 
