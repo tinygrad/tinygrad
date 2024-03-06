@@ -59,7 +59,7 @@ class BertEmbeddings:
     input_shape = input_ids.shape
     seq_length = input_shape[1]
 
-    position_ids = Tensor.arange(seq_length, requires_grad=False).unsqueeze(0).expand(*input_shape)
+    position_ids = Tensor.arange(seq_length, requires_grad=False, device=input_ids.device).unsqueeze(0).expand(*input_shape)
     words_embeddings = self.word_embeddings(input_ids)
     position_embeddings = self.position_embeddings(position_ids)
     token_type_embeddings = self.token_type_embeddings(token_type_ids)

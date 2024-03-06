@@ -16,8 +16,8 @@ actions += [Opt(op=OptOps.LOCAL, axis=axis, amt=amt) for amt in [2,3,4,8,13,16,2
 actions += [Opt(op=OptOps.GROUPTOP, axis=axis, amt=amt) for amt in [13,16,29,32,256] for axis in range(3)]
 actions += [Opt(op=OptOps.GROUP, axis=axis, amt=amt) for amt in [0,4,8,16] for axis in range(3)]
 actions += [Opt(op=OptOps.PADTO, axis=axis, amt=amt) for amt in [32] for axis in range(7)]
-actions += [Opt(op=OptOps.LOCAL, axis=0, amt=32), Opt(op=OptOps.UPCASTMID, axis=1, amt=4)]
-actions += [Opt(op=OptOps.TC, axis=axis, amt=0) for axis in range(4)]
+actions += [Opt(op=OptOps.LOCAL, axis=0, amt=32), Opt(op=OptOps.UPCASTMID, axis=1, amt=4), Opt(op=OptOps.TC, axis=0, amt=0)]
+actions += [Opt(op=OptOps.TC, axis=axis, amt=1) for axis in range(4)]
 if getenv("NOLOCALS"): actions += [Opt(op=OptOps.NOLOCALS)]
 
 def _get_test_global_size(global_size, max_global_size, var_vals):
@@ -49,6 +49,7 @@ def _compile_linearizer(compiler:Compiler, lin:Linearizer, name:Optional[str]=No
                                                                                              List[Variable]]:
   lin.linearize()
   src = compiler.render(name if name is not None else to_function_name(lin.name), lin.uops.uops)   # NOTE: these all have the same name for deduping
+  if DEBUG >= 5: print(src)
   return compiler.compile(src), lin.global_size, lin.local_size, lin.uops.vars()
 
 def _try_compile_linearized_w_idx(x, compiler:Compiler):
@@ -104,7 +105,7 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
   beam: List[Tuple[Linearizer, float]] = []
   seen_libs = set()
 
-  default_parallel, min_progress_micros = 1 if lin.opts.device in {"CUDA", "HIP"} else 0, getenv("BEAM_MIN_PROGRESS",0)
+  default_parallel, min_progress_micros = 1 if lin.opts.device in {"CUDA", "HIP", "HSA"} else 0, getenv("BEAM_MIN_PROGRESS",0)
   if beam_pool is None and getenv("PARALLEL", default_parallel): beam_pool = multiprocessing.Pool(multiprocessing.cpu_count(), _init_worker)
 
   try:
@@ -113,13 +114,14 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
     dev = Device[lin.opts.device]
     assert isinstance(dev, Compiled)
     while not exiting:
-      acted_lins = flatten([get_linearizer_actions(lin, include_0=False).values() for lin,_ in beam]) if len(beam) else [lin]
+      acted_lins: List[Linearizer] = flatten([get_linearizer_actions(lin, include_0=False).values() for lin,_ in beam]) if len(beam) else [lin]
       timed_lins: List[Tuple[Linearizer, float]] = []
-      _compile_fn = functools.partial(_try_compile_linearized_w_idx, compiler=Device[lin.opts.device].compiler)
+      _compile_fn = functools.partial(_try_compile_linearized_w_idx, compiler=dev.compiler)
       for i,proc in (map(_compile_fn, enumerate(acted_lins)) if beam_pool is None else beam_pool.imap_unordered(_compile_fn, enumerate(acted_lins))):
         if proc is None: continue
         lib, global_size, local_size, vars = proc
         if lib in seen_libs: continue
+        #print(acted_lins[i].colored_shape(), acted_lins[i].applied_opts)  # for debugging BEAMs that segfault
         seen_libs.add(lib)
         tms = _time_program(vars, dev, lib, global_size, local_size, var_vals, rawbufs, early_stop=beam[0][1]*3 if len(beam) else 1.0)
         timed_lins.append((acted_lins[i], min(tms)))
