@@ -246,7 +246,7 @@ class Tensor:
   @staticmethod
   def randn(*shape, dtype:Optional[DType]=None, **kwargs) -> Tensor:
     # https://en.wikipedia.org/wiki/Box%E2%80%93Muller_transform
-    src = Tensor.rand((2, *argfix(*shape)), dtype=least_upper_dtype(dtype or dtypes.default_float, dtypes.float32), **kwargs)
+    src = Tensor.rand((2, *argfix(*shape)), dtype=least_upper_float(dtype or dtypes.default_float), **kwargs)
     return src[0].mul(2*math.pi).cos().mul((1 - src[1]).log().mul(-2).sqrt()).cast(dtype or dtypes.default_float)
 
   @staticmethod
