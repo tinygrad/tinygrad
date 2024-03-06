@@ -130,7 +130,12 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> str
         assert vin[0].dtype is not None
         cast(r[vin[0]], dtype, vin[0].dtype, bitcast=isinstance(args, tuple) and args[1], u=u)
       elif uop == UOps.DEFINE_LOCAL: kk(*lang.render_local(ssa(u, 'local', lang.types[dtypes.ulong]), args[0], args[1], dtype))
-      elif uop == UOps.DEFINE_GLOBAL:
+      elif uop is UOps.DEFINE_VAR:
+        bufs.append((args.expr, dtype))
+        r[u] = f"%{args.expr}"
+        if lang.load_global:
+          kk(*lang.render_load(args.expr, ssa(u, 'dat', dtype=lang.types[dtype]), dtype, ss=".param"))
+      elif uop is UOps.DEFINE_GLOBAL:
         bufs.append((args[1], dtype))
         r[u] = f"%{args[1]}"
         if lang.load_global:
