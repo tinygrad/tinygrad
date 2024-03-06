@@ -2,12 +2,10 @@ import unittest
 
 from test.helpers import assert_jit_cache_len
 from tinygrad.features.jit import TinyJit
-from tinygrad.helpers import getenv
 from tinygrad.shape.symbolic import Variable
 from tinygrad.tensor import Tensor
 import numpy as np
 
-@unittest.skipIf(getenv("ARM64") or getenv("PTX"), "ARM64 and PTX are not supported")
 class TestSymbolicJit(unittest.TestCase):
   def test_plus1(self):
     def f(a): return (a+1).realize()
