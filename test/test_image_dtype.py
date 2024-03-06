@@ -38,7 +38,7 @@ class TestImageDType(unittest.TestCase):
   def test_shrink_to_float(self):
     it = Tensor.randn(4, 4).cast(dtypes.imagef((1,4,4))).realize()
     imgv = it.numpy()
-    np.testing.assert_equal(np.maximum(imgv[:, 0], 0), it[:, 0].relu().realize())
+    np.testing.assert_equal(np.maximum(imgv[:, 0], 0), it[:, 0].relu().numpy())
 
   def test_lru_alloc(self):
     data = Tensor.randn(9*27*4).realize()
