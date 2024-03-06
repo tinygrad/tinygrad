@@ -7,7 +7,7 @@ from tinygrad.helpers import DEBUG, getenv, from_mv, to_char_p_p, init_c_var, co
 from tinygrad.device import Compiled, LRUAllocator, MallocAllocator, Compiler
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import CUDARenderer
-from tinygrad.renderer.ptx import PTXRenderer
+from tinygrad.renderer.assembly import PTXRenderer
 
 def pretty_ptx(s):
   # all expressions match `<valid_before><expr><valid_after>` and replace it with `<valid_before>color(<expr>)<valid_after>`
@@ -40,7 +40,7 @@ class PTXCompiler(Compiler):
     self.arch = arch
     PTXCompiler.linearizer_opts = PTXCompiler.linearizer_opts._replace(has_tensor_cores=int(arch[3:]) >= 80)
     super().__init__(f"compile_ptx_{self.arch}")
-  def render(self, name:str, uops) -> str: return PTXRenderer(name, uops)
+  def render(self, name:str, uops) -> str: return PTXRenderer(name, uops).replace("TARGET", self.arch)
   def compile(self, src:str) -> bytes: return src.encode()
 
 class CUDACompiler(Compiler):
