@@ -216,11 +216,6 @@ class DivNode(OpNode):
     return self.a.min//self.b, self.a.max//self.b
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node: return self.a.substitute(var_vals) // self.b
 
-class MaxNode(OpNode):
-  def get_bounds(self) -> Tuple[int, sint]:
-    if isinstance(self.b, int): return max(self.a.min, self.b), max(self.a.max, self.b)
-    return max(self.a.min, self.b.min), max(self.a.max, self.b.max)
-
 class ModNode(OpNode):
   def __mod__(self, b: Union[Node, int]):
     if isinstance(b, int) and isinstance(self.b, int) and self.b % b == 0: return self.a % b
@@ -316,25 +311,6 @@ def render_mulnode(node:MulNode, ops, ctx):
     return f"({sym_render(node.b,ops,ctx)}*{node.a.render(ops,ctx)})"
   return f"({node.a.render(ops,ctx)}*{sym_render(node.b,ops,ctx)})"
 
-def factor_exprs(left: Node, right: Node, var: Variable, sign_flipped=False, round_up=False):
-  if var in left.vars() and var in right.vars(): raise RuntimeError("can't handle variable on both sides currently")
-  if var in right.vars(): return factor_exprs(right, left, var, sign_flipped=not sign_flipped, round_up=round_up)
-  if isinstance(left, SumNode):
-    for node in [node for node in left.nodes if var not in node.vars()]:
-      left, right = left - node, right - node
-    return factor_exprs(left, right, var, sign_flipped=sign_flipped, round_up=round_up)
-  if isinstance(left, MulNode):
-    multiplier = left.b
-    assert (isinstance(multiplier, int)), "factoring multiplication with non-number not supported"
-    round_up_offset = abs(multiplier) - 1 if round_up else 0
-    return factor_exprs(left.__floordiv__(multiplier, False),
-                        (right+round_up_offset).__floordiv__(multiplier, False),
-                        var,
-                        sign_flipped=sign_flipped ^ (multiplier < 0),
-                        round_up=round_up)
-  assert left == var
-  return right, sign_flipped
-
 render_python: Dict[Type, Callable[..., str]] = {
   Variable: lambda self,ops,ctx: f"{self.expr}[{self.min}-{self.max}{'='+str(self.val) if self._val is not None else ''}]" if ctx == "DEBUG" \
     else (f"Variable('{self.expr}', {self.min}, {self.max})"+(f".bind({self.val})" if self._val is not None else '') if ctx == "REPR" \
@@ -342,7 +318,6 @@ render_python: Dict[Type, Callable[..., str]] = {
   NumNode: lambda self,ops,ctx: f"NumNode({self.b})" if ctx == "REPR" else f"{self.b}",
   MulNode: render_mulnode,
   DivNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}//{self.b})",
-  MaxNode: lambda self,ops,ctx: f"max({self.a.render(ops,ctx)},{self.b})",
   ModNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}%{self.b})",
   LtNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}<{sym_render(self.b,ops,ctx)})",
   SumNode: lambda self,ops,ctx: f"({'+'.join(sorted([x.render(ops,ctx) for x in self.nodes]))})",
