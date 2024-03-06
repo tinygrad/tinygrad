@@ -1,11 +1,13 @@
 from __future__ import annotations
-import os, subprocess, pathlib, ctypes, tempfile, functools
-import Metal, libdispatch
+import os, subprocess, atexit, multiprocessing, pathlib, ctypes, tempfile, functools
+import Metal, Foundation, libdispatch
 from typing import List, Any, Tuple, Optional
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.helpers import prod, getenv, DEBUG, unwrap2
 from tinygrad.device import Compiled, LRUAllocator, Compiler
 from tinygrad.renderer.cstyle import MetalRenderer
+
+MTL_CAPTURE_ENABLED = bool(getenv("MTL_CAPTURE_ENABLED", 0))
 
 def wait_check(cbuf: Any):
   cbuf.waitUntilCompleted()
@@ -16,12 +18,13 @@ class MetalCompiler(Compiler):
   linearizer_opts = LinearizerOptions("METAL", has_tensor_cores=os.uname().machine == "arm64")
   def __init__(self, device:Optional[MetalDevice]):
     self.device = device
-    super().__init__("compile_metal")
+    super().__init__("compile_metal" if not MTL_CAPTURE_ENABLED else "compile_metal_debug")
   def render(self, name:str, uops) -> str: return MetalRenderer(name, uops)
   def compile(self, src:str) -> bytes:
-    if self.device is None:
+    if self.device is None or MTL_CAPTURE_ENABLED:
       # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
-      air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=src.encode('utf-8'))
+      dbg = ['-frecord-sources'] if MTL_CAPTURE_ENABLED else []
+      air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'] + dbg, input=src.encode('utf-8'))
       return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
     else:
       options = Metal.MTLCompileOptions.new()
@@ -84,14 +87,34 @@ class MetalAllocator(LRUAllocator):
   def copyout(self, dest:memoryview, src:Any): dest[:] = self.as_buffer(src)
 
 class MetalDevice(Compiled):
+  captureManager = None
+
   def __init__(self, device:str):
     self.device = Metal.MTLCreateSystemDefaultDevice()
+
+    if MTL_CAPTURE_ENABLED and not MetalDevice.captureManager:
+      MetalDevice.captureManager = Metal.MTLCaptureManager.sharedCaptureManager()
+      captureDescriptor = Metal.MTLCaptureDescriptor.alloc().init()
+      captureDescriptor.setDestination_(Metal.MTLCaptureDestination(Metal.MTLCaptureDestinationGPUTraceDocument))
+      captureDescriptor.setOutputURL_(Foundation.NSURL.URLWithString_(f"file:/tmp/tinygrad_{multiprocessing.current_process().name}.gputrace"))
+      captureDescriptor.setCaptureObject_(self.device)
+      success, error = MetalDevice.captureManager.startCaptureWithDescriptor_error_(captureDescriptor, None)
+      assert success, error
+      atexit.register(MetalDevice.stopCapture)
+
     self.mtl_queue = self.device.newCommandQueueWithMaxCommandBufferCount_(1024)
     self.mtl_buffers_in_flight: List[Any] = []
     self.mv_in_metal: List[memoryview] = []
     from tinygrad.runtime.graph.metal import MetalGraph
     super().__init__(device, MetalAllocator(self), MetalCompiler(None if getenv("METAL_XCODE") else self),
                      functools.partial(MetalProgram, self), functools.partial(MetalGraph, self))
+
+  @staticmethod
+  def stopCapture():
+    if MetalDevice.captureManager:
+      MetalDevice.captureManager.stopCapture()
+      print(f"Saved GPU trace to /tmp/tinygrad_{multiprocessing.current_process().name}.gputrace")
+
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight: wait_check(cbuf)
     self.mv_in_metal.clear()
