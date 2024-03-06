@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Set
 
 from tinygrad import Tensor
 from tinygrad.nn.optim import Optimizer
@@ -9,7 +9,7 @@ class LARS(Optimizer):
     super().__init__(params, lr)
     self.momentum, self.weight_decay, self.eta, self.eps, self.nesterov, self.track_gnorm = momentum, weight_decay, eta, eps, nesterov, track_gnorm
     self.b = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params]
-    self.skip_list = skip_list or set()
+    self.skip_list = [id(t) for t in (skip_list or [])]
 
   def step(self):
     for i, t in enumerate(self.params):
@@ -17,7 +17,7 @@ class LARS(Optimizer):
       g = t.grad.realize()
       w = t.detach()
 
-      if not any(t is skipt for skipt in self.skip_list):
+      if not id(t) in self.skip_list:
         g_norm = (g * g).sum().sqrt()
         w_norm = (w * w).sum().sqrt()
         trust_ratio = (w_norm > 0).where((g_norm > 0).where(
