@@ -479,7 +479,7 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
 
     c = a.pad(((2, 4), None)) + b.pad(((6, 0), None))
     expected = np.concatenate([np.zeros_like(t.numpy()[0:2]), na, np.zeros_like(t.numpy()[4:6]), nb])
-    np.testing.assert_equal(c, expected)
+    np.testing.assert_equal(c.numpy(), expected)
 
   def test_add_different_tensors(self):
     devices = [f"{Device.DEFAULT}:{i}" for i in range(4)]
