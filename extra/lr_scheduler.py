@@ -25,6 +25,7 @@ class MultiStepLR(LR_Scheduler):
       return self.optimizer.lr
     return self.optimizer.lr * self.gamma
 
+# https://github.com/mlcommons/training/blob/e3769c8dcf88cd21e1001dd2f894b40a1513ec5d/image_classification/tensorflow2/lars_util.py#L53
 class PolynomialLR(LR_Scheduler):
   def __init__(self, optimizer: Optimizer, end_lr, epochs, warmup=0, power=2):
     super().__init__(optimizer)
