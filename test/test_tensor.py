@@ -326,6 +326,14 @@ class TestTinygrad(unittest.TestCase):
       assert type(reshaped_item) == type(a), a
       np.testing.assert_allclose(reshaped_item, a), a
 
+  def test_no_bool(self):
+    with self.assertRaises(TypeError):
+      if Tensor(["3"]):
+        print("hi")
+
+    with self.assertRaises(TypeError):
+      _a = Tensor([3]) in [Tensor([3]), Tensor([4]), Tensor([5])]
+
 @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
 class TestMoveTensor(unittest.TestCase):
   d0, d1 = f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"
