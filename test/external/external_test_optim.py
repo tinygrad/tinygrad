@@ -60,8 +60,7 @@ def step_tf(optim, steps=1, kwargs={}):
   return net.x.numpy(), net.W.numpy()
 
 # skip_list=True -> skip W
-def create_tiny_lars(params, lr, skip_list=False):
-  return LARS(params, lr, skip_list=[params[1]] if skip_list else None)
+def create_tiny_lars(params, lr, skip_list=False): return LARS(params, lr, skip_list=[params[1]] if skip_list else None)
 def create_tf_lars(lr, skip_list=False): return LARSOptimizer(lambda: lr, skip_list="W" if skip_list else None)
 
 class ExternalTestOptim(unittest.TestCase):
