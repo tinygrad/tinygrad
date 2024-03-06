@@ -1,7 +1,6 @@
 import numpy as np
 import torch
 import unittest
-import functools
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import get_parameters
 from tinygrad.nn.optim import Adam
