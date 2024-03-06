@@ -7,6 +7,7 @@ from tinygrad.nn.optim import Optimizer
 class LARS(Optimizer):
   def __init__(self, params: List[Tensor], lr, momentum=0.9, weight_decay=1e-4, eta=0.001, eps=0.0, skip_list=None, nesterov=False):
     super().__init__(params, lr)
+    assert momentum >= 0.0 and weight_decay >= 0.0
     self.momentum, self.weight_decay, self.eta, self.eps, self.nesterov = momentum, weight_decay, eta, eps, nesterov
     self.b = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params]
     self.skip_list = set(skip_list or [])
