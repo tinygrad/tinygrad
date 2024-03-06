@@ -64,7 +64,7 @@ def train_resnet():
   optimizer = LARS(parameters, base_lr, momentum=.9, weight_decay=decay, skip_list=skip_list)
 
   # ** LR scheduler **
-  scheduler = PolynomialLR(optimizer, base_lr, 1e-4, epochs=epochs * steps_in_train_epoch, warmup=lr_warmup_epochs * steps_in_train_epoch)
+  scheduler = PolynomialLR(optimizer, 1e-4, epochs=epochs * steps_in_train_epoch, warmup=lr_warmup_epochs * steps_in_train_epoch)
   print(f"training with batch size {BS} for {epochs} epochs")
 
   # ** resume from checkpointing **
