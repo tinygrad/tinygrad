@@ -7,7 +7,7 @@ from tinygrad.device import Buffer, Device
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.device import CompiledASTRunner, Compiled
 from tinygrad.codegen.linearizer import UOps, UOp
-from tinygrad.codegen.uops import exec_alu
+from tinygrad.codegen.uops import exec_alu, UOpGraph
 from test.test_dtype import is_dtype_supported
 
 def _uops_to_prg(uops):
@@ -29,7 +29,7 @@ def _test_single_value(vals, op, dts):
   uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
   buf = Buffer(Device.DEFAULT, 1, output_dtype)
   buf2 = [Buffer(Device.DEFAULT, 1, dtype).copyin(np.array([a], dtype=dtype.np).data) for a,dtype in zip(vals, dts)]
-  prg = _uops_to_prg(uops)
+  prg = _uops_to_prg(UOpGraph(uops))
   prg.exec([buf]+buf2)
   ret = np.empty(1, output_dtype.np)
   buf.copyout(ret.data)
@@ -43,7 +43,7 @@ def _test_single_value_const(vals, op, dts):
   alu = uop(uops, UOps.ALU, output_dtype, loads, op)
   uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
   buf = Buffer(Device.DEFAULT, 1, output_dtype)
-  prg = _uops_to_prg(uops)
+  prg = _uops_to_prg(UOpGraph(uops))
   prg.exec([buf])
   ret = np.empty(1, output_dtype.np)
   buf.copyout(ret.data)
@@ -90,8 +90,6 @@ class TestFloatUOps(TestUOps):
   def test_where(self):
     self._test_top_fxn(TernaryOps.WHERE, lambda a,b,c: b if a!=0 else c, (PtrDType(dtypes.bool), PtrDType(dtypes.float), PtrDType(dtypes.float)))
 
-# TODO: fix this on all the backends
-@unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled) or getenv('ARM64', False), "only test for compiled backends, broken on some")
 class TestNonFloatUOps(TestUOps):
   def test_neg_int32(self): self._test_uop_fxn(UnaryOps.NEG, lambda a: -a, (PtrDType(dtypes.int32), ))
   def test_add_int32(self): self._test_bop_fxn(BinaryOps.ADD, lambda a,b: int(a)+int(b), (PtrDType(dtypes.int32), PtrDType(dtypes.int32)))
@@ -108,6 +106,33 @@ class TestNonFloatUOps(TestUOps):
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "dtype not supported")
   def test_where_float16(self):
     self._test_top_fxn(TernaryOps.WHERE, lambda a,b,c: b if a!=0 else c, (PtrDType(dtypes.bool), PtrDType(dtypes.float16), PtrDType(dtypes.float16)))
+
+class TestBoolUOps(TestUOps):
+  def _test_uop_bool_fxn(self, op, fxn):
+    for f in [_test_single_value, _test_single_value_const]:
+      for a in [False, True]:
+        self._equal(f([a], op, (dtypes.bool, )*1), fxn(a))
+
+  def _test_bop_bool_fxn(self, op, fxn):
+    for f in [_test_single_value, _test_single_value_const]:
+      for a in [False, True]:
+        for b in [False, True]:
+          self._equal(f([a,b], op, (dtypes.bool, )*2), fxn(a,b))
+
+  def _test_top_bool_fxn(self, op, fxn):
+    for f in [_test_single_value, _test_single_value_const]:
+      for a in [False, True]:
+        for b in [False, True]:
+          for c in [False, True]:
+            self._equal(f([a,b,c], op, (dtypes.bool, )*3), fxn(a,b,c))
+
+  def test_not_bool(self): self._test_uop_bool_fxn(UnaryOps.NEG, lambda a: not a)
+  def test_add_bool(self): self._test_bop_bool_fxn(BinaryOps.ADD, lambda a,b: a or b)
+  def test_mul_bool(self): self._test_bop_bool_fxn(BinaryOps.MUL, lambda a,b: a and b)
+  def test_xor_bool(self): self._test_bop_bool_fxn(BinaryOps.XOR, lambda a,b: a != b)
+  def test_cmpeq_bool(self): self._test_bop_bool_fxn(BinaryOps.CMPEQ, lambda a,b: a == b)
+  def test_cmplt_bool(self): self._test_bop_bool_fxn(BinaryOps.CMPLT, lambda a,b: a < b)
+  def test_where_bool(self): self._test_top_bool_fxn(TernaryOps.WHERE, lambda a,b,c: b if a else c)
 
 class TestExecALU(TestUOps):
   def test_sqrt(self):

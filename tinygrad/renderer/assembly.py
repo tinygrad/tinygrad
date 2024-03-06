@@ -4,6 +4,7 @@ from collections import defaultdict
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op
 from tinygrad.dtype import dtypes, DType, PtrDType, INVERSE_DTYPES_DICT
+from tinygrad.codegen.uops import UOpGraph
 
 def float_to_hex(x): return "%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
 def double_to_hex(x): return "%02X%02X%02X%02X%02X%02X%02X%02X" % tuple(struct.pack("d",x)[::-1])
@@ -35,10 +36,29 @@ class AssemblyLanguage(NamedTuple):
 
   def render_kernel(self, kernel, function_name, bufs, regs) -> str: raise NotImplementedError()
 
-def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> str:
+def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
   local_size: List[int] = []
   kernel:List[str] = []
   bufs = []
+
+  # here we do a pretransform on UOps to fix some shortcomings of PTX
+  # all uops must be a register
+  # TODO: uops class should make these rewrites easier
+  replace = {}
+  for u in uops:
+    for o,n in replace.items():
+      if o in u.vin and u is not new:
+        u.vin = tuple(n if x == o else x for x in u.vin)
+    if u.uop is UOps.ALU and u.arg in {BinaryOps.CMPEQ, BinaryOps.CMPLT} and u.vin[0].dtype is dtypes.bool:
+      if u.arg == BinaryOps.CMPEQ:
+        u.arg = BinaryOps.XOR
+        new = uops.add(UOps.ALU, dtypes.bool, (u,), arg=UnaryOps.NEG, insert_before=uops.uops.index(u)+1)
+        replace[u] = new
+      if u.arg == BinaryOps.CMPLT:
+        new = uops.add(UOps.ALU, dtypes.bool, (u.vin[0],), arg=UnaryOps.NEG, insert_before=uops.uops.index(u))
+        u.vin = (new, u.vin[1])
+        u.arg = BinaryOps.MUL
+  #uops.print()
 
   def kk(*s: str): kernel.append("\n".join(s))
 
@@ -97,10 +117,10 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> str
       elif uop == UOps.ALU:
         assert vin[0].dtype is not None
         if args == BinaryOps.CMPLT or args == BinaryOps.CMPEQ:
-          regs = [cast(r[x], dtypes.int16, dtypes.bool) if x.dtype == dtypes.bool else r[x] for x in vin]
-          dt = dtypes.int16 if vin[0].dtype == dtypes.bool else vin[0].dtype
-          kk(lang.asm_for_op[args](pred:=ssa(u,'lt','pred'), *regs, dt, lang.types[dt]))
-        else: kk(lang.asm_for_op[args](ssa(u, "alu"), *[r[x] for x in vin], dtype, lang.types[dtype]))
+          # pass in the other dtype here
+          kk(lang.asm_for_op[args](ssa(u, "alu"), *[r[x] for x in vin], vin[0].dtype, lang.types[vin[0].dtype]))
+        else:
+          kk(lang.asm_for_op[args](ssa(u, "alu"), *[r[x] for x in vin], dtype, lang.types[dtype]))
       elif uop == UOps.DEFINE_ACC: kk(f"mov.b{lang.types[dtype][1:]} {ssa(u, 'acc')}, {const(args, dtype)};")
       elif uop == UOps.SPECIAL:
         if args[1][0] == "i": kk(f"mov.u32 %{args[1]}, {lang.gid[args[0]]};", f"mov.u32 {(gdim:=ssa(None,'tmp','u32'))}, {lang.gdim[args[0]]};",
@@ -158,14 +178,14 @@ class PTXLanguage(AssemblyLanguage):
   gdim = [f'%nctaid.{chr(120+i)}' for i in range(3)]
   lid = [f'%tid.{chr(120+i)}' for i in range(3)]
   asm_for_op = {
-    UnaryOps.NEG: lambda d,a,dt,name: f"neg.{name} {d}, {a};",
+    UnaryOps.NEG: lambda d,a,dt,name: f"not.pred {d}, {a};" if name == "pred" else f"neg.{name} {d}, {a};",
     UnaryOps.EXP2: lambda d,a,dt,name: f"ex2.approx.{name} {d}, {a};", UnaryOps.LOG2: lambda d,a,dt,name: f"lg2.approx.{name} {d}, {a};",
     UnaryOps.SIN: lambda d,a,dt,name: f"sin.approx.{name} {d}, {a};",
     UnaryOps.SQRT: lambda d,a,dt,name: f"sqrt.approx.{name} {d}, {a};",
     BinaryOps.ADD: lambda d,a,b,dt,name: f"{'or' if name == 'pred' else 'add'}.{name} {d}, {a}, {b};",
     BinaryOps.SUB: lambda d,a,b,dt,name: f"sub.{name} {d}, {a}, {b};",
     BinaryOps.MUL: lambda d,a,b,dt,name: ('and' if dt == dtypes.bool else 'mul') + f"{'.lo' if dtypes.is_int(dt) else ''}.{name} {d}, {a}, {b};",
-    BinaryOps.XOR: lambda d,a,b,dt,name: f"xor.b{name[1:]} {d}, {a}, {b};",
+    BinaryOps.XOR: lambda d,a,b,dt,name: f"xor.pred {d}, {a}, {b};" if name == "pred" else f"xor.b{name[1:]} {d}, {a}, {b};",
     BinaryOps.DIV: lambda d,a,b,dt,name: f"div{'.approx' if dtypes.is_float(dt) else ''}.{name} {d}, {a}, {b};",
     BinaryOps.MAX: lambda d,a,b,dt,name: f"max.{name} {d}, {a}, {b};", BinaryOps.MOD: lambda d,a,b,dt,name: f"rem.{name} {d}, {a}, {b};",
     BinaryOps.CMPLT: lambda d,a,b,dt,name: f"setp.lt.{name} {d}, {a}, {b};",
