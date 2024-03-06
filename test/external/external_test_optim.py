@@ -27,8 +27,8 @@ class TinyNet:
 
 class TinyNetTF:
   def __init__(self):
-    self.x = tf.Variable(x_init.copy(), trainable=True)
-    self.W = tf.Variable(W_init.copy(), trainable=True)
+    self.x = tf.Variable(x_init.copy(), trainable=True, name="x")
+    self.W = tf.Variable(W_init.copy(), trainable=True, name="W")
     self.m = tf.constant(m_init.copy())
 
   def forward(self):
@@ -59,7 +59,10 @@ def step_tf(optim, steps=1, kwargs={}):
     optim.apply_gradients(zip(grads, [net.x, net.W]))
   return net.x.numpy(), net.W.numpy()
 
-def create_tf_lars(lr): return LARSOptimizer(lambda: lr)
+# skip_list=True -> skip W
+def create_tiny_lars(params, lr, skip_list=False):
+  return LARS(params, lr, skip_list=[params[1]] if skip_list else None)
+def create_tf_lars(lr, skip_list=False): return LARSOptimizer(lambda: lr, skip_list="W" if skip_list else None)
 
 class ExternalTestOptim(unittest.TestCase):
   def _test_optim(self, tinygrad_optim, tensorflow_optim, steps, opts, atol, rtol):
@@ -68,7 +71,7 @@ class ExternalTestOptim(unittest.TestCase):
       np.testing.assert_allclose(x, y, atol=atol, rtol=rtol)
 
   def _test_lamb(self, steps, opts, atol, rtol): self._test_optim(LAMB, tfa.optimizers.LAMB, steps, opts, atol, rtol)
-  def _test_lars(self, steps, opts, atol, rtol): self._test_optim(LARS, create_tf_lars, steps, opts, atol, rtol)
+  def _test_lars(self, steps, opts, atol, rtol): self._test_optim(create_tiny_lars, create_tf_lars, steps, opts, atol, rtol)
 
   def test_lamb(self): self._test_lamb(1, {'lr': 0.001}, 1e-5, 0)
   def test_lamb_high_lr(self): self._test_lamb(1, {'lr': 10}, 1e-5, 1e-5)
@@ -80,6 +83,7 @@ class ExternalTestOptim(unittest.TestCase):
   def test_lars_high_lr(self): self._test_lars(1, {'lr': 10}, 1e-5, 1e-5)
   def test_multistep_lars(self): self._test_lamb(10, {'lr': 0.001}, 1e-5, 0)
   def test_multistep_lars_high_lr(self): self._test_lamb(10, {'lr': 10}, 1e-5, 3e-4)
+  def test_lars_skip_list(self): self._test_lars(1, {'lr': 0.01, 'skip_list': True}, 1e-5, 0)
 
 if __name__ == '__main__':
   unittest.main()

@@ -17,7 +17,7 @@ class LARS(Optimizer):
       g = t.grad.realize()
       w = t.detach()
 
-      if t not in self.skip_list:
+      if not any(t is skipt for skipt in self.skip_list):
         g_norm = (g * g).sum().sqrt()
         w_norm = (w * w).sum().sqrt()
         trust_ratio = (w_norm > 0).where((g_norm > 0).where(
