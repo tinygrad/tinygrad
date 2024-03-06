@@ -784,8 +784,9 @@ class TestLinearizerUOptimize(unittest.TestCase):
     assert store_val.dtype == dtypes.float.vec(4) and store_val.uop != UOps.CAST
 
   def test_grouped_store_locals_and_globals(self):
-    if not Device[Device.DEFAULT].compiler.linearizer_opts.has_local or not Device[Device.DEFAULT].compiler.linearizer_opts.has_shared:
-      self.skipTest("Only Compiled uses linearizer with locals and shared")
+    if not Device[Device.DEFAULT].compiler.linearizer_opts.has_local or not Device[Device.DEFAULT].compiler.linearizer_opts.has_shared or \
+       not Device[Device.DEFAULT].compiler.linearizer_opts.supports_float4:
+      self.skipTest("Only Compiled uses linearizer with locals, shared, and float4")
 
     x, y = Tensor.rand(128, 128), Tensor.rand(128, 128)
     out = x@y
