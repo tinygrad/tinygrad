@@ -179,7 +179,7 @@ jobs:
           path: ~/.cache/tinygrad/downloads/
           key: downloads-cache-${{ matrix.task }}-${{ env.DOWNLOAD_CACHE_VERSION }}
       - name: Install Dependencies
-        run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+        run: pip install -e '.[testing,testing_tf]' --extra-index-url https://download.pytorch.org/whl/cpu
       - if: ${{ matrix.task == 'optimage' }}
         name: Run Optimizer Test (OPT 2 and 3)
         run: |
@@ -225,6 +225,9 @@ jobs:
       - if: ${{ matrix.task == 'onnx' }}
         name: Test Beam Search
         run: PYTHONPATH="." GPU=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
+      - if: ${{ matrix.task == 'onnx' }}
+        name: Test MLPerf optimizers
+        run: GPU=1 python -m pytest -n=auto test/external/external_test_optim.py --durations=20
 
   #testwebgpu:
   #  name: WebGPU Tests
