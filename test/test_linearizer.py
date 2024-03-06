@@ -2,17 +2,18 @@ import numpy as np
 import unittest
 
 from tinygrad.codegen.kernel import Opt, OptOps, tensor_cores
-from tinygrad.codegen.linearizer import Linearizer, UOp, UOps, expand_node
+from tinygrad.codegen.linearizer import Linearizer, UOp, UOps, expand_node, expand_idxs
 from tinygrad.device import Compiled, Device, Buffer
-from tinygrad.ops import BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, TernaryOps
+from tinygrad.ops import BinaryOps, BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, TernaryOps
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, Node, create_rednode
+from tinygrad.shape.symbolic import MulNode, Variable, NumNode, Node
 from tinygrad.tensor import Tensor
 from tinygrad.features.jit import CacheCollector
 from tinygrad.realize import create_schedule, run_schedule
 from tinygrad.helpers import prod, Context
 from tinygrad.dtype import DType, dtypes
+from tinygrad.codegen.uops import UOpGraph
 
 @unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "linearizer is only for compiled backends")
 class TestLinearizer(unittest.TestCase):
@@ -25,6 +26,14 @@ class TestLinearizer(unittest.TestCase):
     assert len(rawbufs) == 3 and set(rawbufs[1:]) == {a.lazydata.base.realized, b.lazydata.base.realized}
     np_c = (np_a[:2] - np_a[2:]) - (np_b[:2] - np_b[2:])
     np.testing.assert_allclose(np_c, c.numpy(), atol=1e-4, rtol=1e-4)
+
+  def test_load_removed(self):
+    a = Tensor.rand(1).realize()
+    b = Tensor.rand(1).realize()
+    ta = Tensor.where(Tensor(True), a, b).numpy()
+    tb = Tensor.where(Tensor(False), a, b).numpy()
+    np.testing.assert_equal(a.numpy(), ta)
+    np.testing.assert_equal(b.numpy(), tb)
 
   def test_load_dedup(self):
     # for different leaves in the AST, the same loads may occur.
@@ -42,16 +51,23 @@ class TestLinearizer(unittest.TestCase):
 
   def test_load_cache_const_bufs(self):
     # make sure const buffers are differentiated from local and mem buffers
-    a = Tensor([1,2,3,4])
-    out = a[2] + 2 + a[3] + 3 + 2 + a[0]
-    si = create_schedule([out.lazydata])[-1]
-    lin = Linearizer(si.ast)
+    ST, DT = ShapeTracker(views=(View(shape=((1,)), strides=(0, 0), offset=0, mask=None, contiguous=False),)), dtypes.int
+    VAL = LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=2, dtype=DT, st=ST))
+
+    # data1[0] + VAL
+    a = LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=DT, st=ST)), VAL))
+    # (literal const 1) + VAL
+    b = LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=1, dtype=DT, st=ST)), VAL))
+
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BinaryOps.ADD, src=(a,b)),), arg=MemBuffer(idx=0, dtype=DT, st=ST))
+    lin = Linearizer(ast)
     lin.linearize()
 
-    cache_keys = lin.load_cache.keys()
-    assert len(cache_keys) == 5
-    assert len([k for k in cache_keys if "CONST" in k]) == 2
-    assert len([k for k in cache_keys if "CONST" not in k]) == 3
+    a_bufs = [u.uop for u in lin.uops.uops[-2].vin[0].vin]
+    b_bufs = [u.uop for u in lin.uops.uops[-2].vin[1].vin]
+
+    assert a_bufs == [UOps.LOAD, UOps.CONST]
+    assert b_bufs == [UOps.CONST, UOps.CONST]
 
   def test_upcast_cse(self):
     # when upcasting, within a subtree, there may be common expressions.
@@ -64,6 +80,42 @@ class TestLinearizer(unittest.TestCase):
     k.linearize()
     num_ops = len([uop for uop in k.uops if uop.uop == UOps.ALU])
     assert num_ops <= 1, "more alu uops than needed"
+
+  def test_reduce_upcast(self):
+    if not Device[Device.DEFAULT].compiler.linearizer_opts.supports_float4:
+      self.skipTest("device does not support upcast")
+    x, w = Tensor.randn((1,1,3)).realize(), Tensor.randn((1,1,2)).realize()
+    r = Tensor.conv2d(x,w,padding=1).relu()
+
+    k = Linearizer(create_schedule([r.lazydata])[-1].ast)
+    k.upcast()
+    k.upcast()
+    k.linearize()
+    accs = [u for u in k.uops if u.uop == UOps.DEFINE_ACC]
+    stores = [u for u in k.uops if u.uop == UOps.STORE]
+    assert len(accs) == 1
+    assert len(stores) == 1
+    assert stores[0].vin[-1].dtype == accs[0].dtype == dtypes.float.vec(4)
+
+  def test_upcast_with_locals(self):
+    if not (opts:=Device[Device.DEFAULT].compiler.linearizer_opts).has_local or not opts.has_shared or not opts.supports_float4:
+      self.skipTest("device does not support upcasted reduce with locals")
+
+    x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
+    r = (x@y).relu()
+    k = Linearizer(create_schedule([r.lazydata])[-1].ast)
+    k.hand_coded_optimizations()
+    k.linearize()
+
+    accs = [u for u in k.uops if u.uop == UOps.DEFINE_ACC]
+    stores = [u for u in k.uops if u.uop == UOps.STORE]
+
+    # the first store is to lds and can be upcasted
+    assert accs[0].dtype == stores[0].vin[-1].dtype == dtypes.float.vec(4)
+    assert stores[0].vin[0].uop == UOps.DEFINE_LOCAL
+    # the second store is to gds with no upcasts
+    assert accs[1].dtype == stores[1].vin[-1].dtype == dtypes.float
+    assert stores[1].vin[0].uop == UOps.DEFINE_GLOBAL
 
   def test_zero_fold(self):
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
@@ -128,6 +180,7 @@ class TestLinearizer(unittest.TestCase):
       k.apply_tensor_cores(1)
       k.linearize()
       assert len([uop for uop in k.uops if uop.uop == UOps.WMMA]) == 1, "tensor core not triggered"
+      assert len([x for x in k.applied_opts if x.op == OptOps.TC]) == 1, "tensor core opt not included"
       np_c = np_a @ np_b
       (tc_atol, tc_rtol) = (1e-2, 1e-3) if tc.dtype_out == dtypes.half else (5e-3, 1e-4)
       np.testing.assert_allclose(np_c, r.numpy(), atol=tc_atol, rtol=tc_rtol)
@@ -155,8 +208,8 @@ class TestLinearizer(unittest.TestCase):
                    MemBuffer(0, dtypes.float, ShapeTracker(views=(View(shape=(), strides=(), offset=0, mask=None, contiguous=True),))))
       lin = Linearizer(ast=ast) # this is a dummy ast
 
-      lin.uops = []
-      return lin.uop(uop, dtype, vin, arg, cachable=False)
+      lin.uops = UOpGraph()
+      return lin.uops.add(uop, dtype, vin, arg, cachable=False)
 
     c0 = UOp(UOps.CONST, dtypes.float, vin=(), arg=0.0)
     assert helper_test_simplify(UOps.ALU, dtypes.float, vin=(UOp(UOps.CONST, dtypes.bool, vin=(), arg=True), c0, c0), arg=TernaryOps.WHERE) == c0
@@ -164,7 +217,7 @@ class TestLinearizer(unittest.TestCase):
     c0 = UOp(UOps.CONST, dtypes.float, vin=(), arg=0.0)
     c1 = UOp(UOps.CONST, dtypes.float, vin=(), arg=1.0)
     assert helper_test_simplify(UOps.ALU, dtypes.float, vin=(UOp(UOps.CONST, dtypes.bool, vin=(), arg=True), c0, c1),
-                                arg=TernaryOps.WHERE).uop == UOps.ALU
+                                arg=TernaryOps.WHERE).uop == UOps.CONST
 
 def helper_realized_ast(r:Tensor):
   s = create_schedule([r.lazydata])
@@ -681,17 +734,97 @@ class TestLinearizerHelper(unittest.TestCase):
   def test_sum_node_expand(self):
     a = Variable("_uidx0", 1, 3)
     b = Variable("b", 5, 7)
-
-    s1 = create_rednode(SumNode, [a, b])
+    s1 = a + b
     assert expand_node(s1) == [Node.sum([NumNode(i),b]) for i in range(1,4)]
 
   def test_multi_expand(self):
     a = Variable("a", 1, 3)
     b = Variable("b", 14, 17)
-    s1 = create_rednode(SumNode, [a, b])
+    s1 = a + b
     # expand increments earlier variables faster than later variables (as specified in the argument)
     # this behavior was just copied from before, no idea why this should be true
     assert expand_node(s1, (a, b)) == [NumNode(x + y) for x in range(b.min, b.max + 1) for y in range(a.min, a.max + 1)]
+
+  def test_expand_nonpresent_var(self):
+    a = Variable("a", 1, 3)
+    n = NumNode(3) * Variable("b", 1, 3)
+    assert expand_node(n, (a,)) == [n, n, n]
+
+  def test_expand_idxs(self):
+    uidx0 = Variable("_uidx0", 0, 6)
+    uidx1 = Variable("_uidx1", 0, 1)
+    idxs = (uidx0 // 5, uidx0 * 5, uidx1)
+    assert expand_idxs(idxs) == (uidx0, NumNode(0), uidx1)
+
+class TestLinearizerUOptimize(unittest.TestCase):
+  @unittest.skipUnless(Device[Device.DEFAULT].compiler.linearizer_opts.supports_float4, "device doesn't support float4")
+  def test_grouped_store_phis(self):
+    x, y = Tensor.randn(64,64), Tensor.randn(64,64)
+    out = x.matmul(y)
+
+    k = Linearizer(create_schedule([out.lazydata])[-1].ast)
+    k.hand_coded_optimizations()
+    k.linearize()
+
+    # check that the float4 cast collapses
+    store_vals = [u.vin[-1] for u in k.uops if u.uop is UOps.STORE]
+    for val in store_vals:
+      assert val.dtype == dtypes.float.vec(4) and val.uop != UOps.CAST
+
+  @unittest.skipUnless(Device[Device.DEFAULT].compiler.linearizer_opts.supports_float4, "device doesn't support float4")
+  def test_grouped_store_values(self):
+    x = Tensor.randn((4,3,6,6)).realize()
+    out = x.flip((0,1)).contiguous()
+
+    k = Linearizer(create_schedule([out.lazydata])[-1].ast)
+    k.hand_coded_optimizations()
+    k.linearize()
+
+    store_val = [u.vin[-1] for u in k.uops if u.uop is UOps.STORE][0]
+    assert store_val.dtype == dtypes.float.vec(4) and store_val.uop != UOps.CAST
+
+  def test_grouped_store_locals_and_globals(self):
+    if not Device[Device.DEFAULT].compiler.linearizer_opts.has_local or not Device[Device.DEFAULT].compiler.linearizer_opts.has_shared:
+      self.skipTest("Only Compiled uses linearizer with locals and shared")
+
+    x, y = Tensor.rand(128, 128), Tensor.rand(128, 128)
+    out = x@y
+
+    opts = [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUPTOP, 0, 8),
+            Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 2)] # upcast accs in both reduces
+    k = Linearizer(create_schedule([out.lazydata])[-1].ast)
+    for opt in opts: k.apply_opt(opt)
+    k.linearize()
+
+    local_stores = [u for u in k.uops if u.uop is UOps.STORE and u.vin[0].uop is UOps.DEFINE_LOCAL]
+    barrier = [u for u in k.uops if u.uop is UOps.BARRIER][0]
+    global_stores = [u for u in k.uops if u.uop is UOps.STORE and u.vin[0].uop is UOps.DEFINE_GLOBAL]
+
+    # check that the float4 cast collapses for all stores
+    for store in local_stores+global_stores:
+      assert store.vin[-1].dtype == dtypes.float.vec(2) and store.vin[-1].uop != UOps.CAST
+    # check the children's vins
+    assert barrier.vin == tuple(local_stores)
+    assert len([u for u in k.uops if u.uop is UOps.IF and u.vin[-1] == barrier]) == 1
+
+  def test_grouped_store_local_only(self):
+    if not Device[Device.DEFAULT].compiler.linearizer_opts.has_local or not Device[Device.DEFAULT].compiler.linearizer_opts.has_shared:
+      self.skipTest("Only Compiled uses linearizer with locals and shared")
+
+    x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
+    r = (x@y).relu()
+    k = Linearizer(create_schedule([r.lazydata])[-1].ast)
+    k.hand_coded_optimizations()
+    k.linearize()
+
+    stores = [u for u in k.uops if u.uop == UOps.STORE]
+
+    # the float4 value stores directly in lds and we skip upcast
+    assert stores[0].vin[-1].dtype == dtypes.float.vec(4)
+    assert stores[0].vin[-1].uop != UOps.CAST
+
+    # the global store doesn't change
+    assert stores[1].vin[-1].dtype == dtypes.float
 
 if __name__ == '__main__':
   unittest.main()

@@ -83,23 +83,30 @@ class MultiLazyBuffer:
   def _shape_to_single_shard(self, shape:Tuple[sint, ...], lb:LazyBuffer) -> Tuple[sint, ...]:
     return tuple(lb.shape[self.axis] if a == self.axis else s for a,s in enumerate(shape))
 
-  def r(self, op:ReduceOps, new_shape:Tuple[sint, ...]) -> MultiLazyBuffer:
-    if self.axis is not None and new_shape[self.axis] == 1:
+  def r(self, op:ReduceOps, axis:Tuple[int, ...]) -> MultiLazyBuffer:
+    if self.axis is not None and self.axis in axis:
       # all-reduce on sharded axes
-      reduced_parts = [x.r(op, new_shape) if r else x.const(0, shape=new_shape) for x,r in zip(self.lbs, self.real)]
+      new_shape = tuple(1 if i in axis else s for i,s in enumerate(self.shape))
+      reduced_parts = [x.r(op, axis) if r else x.const(0, shape=new_shape) for x,r in zip(self.lbs, self.real)]
       if all(self.real): return MultiLazyBuffer(all_reduce(op, reduced_parts), None)
       return MultiLazyBuffer(reduced_parts, None, self.real)
     # reduce on non sharded axes, piecewise is fine. if axis is None this is also correct
-    return MultiLazyBuffer([x.r(op, self._shape_to_single_shard(new_shape, x)) for x in self.lbs], self.axis, self.real)
+    return MultiLazyBuffer([x.r(op, axis) for x in self.lbs], self.axis, self.real)
 
   # *** movement ops ***
 
   def reshape(self, arg:Tuple[sint, ...]):
     if self.axis is None: return MultiLazyBuffer([x.reshape(arg) for x in self.lbs], None, self.real)
     arg_acc:List[sint] = list(itertools.accumulate(arg, operator.mul, initial=1))
-    # new_axis is the one that preserves prod(prior to new_axis) and prod(post to new_axis)
-    new_axis = [tuple(p) for p in zip(arg_acc, arg_acc[1:])].index((prod(self.shape[:self.axis]), prod(self.shape[:self.axis+1])))
-    return MultiLazyBuffer([x.reshape(tuple(x.shape[self.axis] if a == new_axis else s for a,s in enumerate(arg))) for x in self.lbs],
+    # new_axis is the last one that preserves prod(prior to new_axis) and must not move items between shards
+    # todo: what to do about shrinking to self.shape[self.axis]==1 len(self.real_lbs)==1?
+    new_axis = len(arg_acc) - arg_acc[::-1].index(prod(self.shape[:self.axis])) - 1
+    if arg[new_axis] != self.shape[self.axis]:
+      assert self.shape[self.axis] % len(self.real_lbs) == 0, f"cannot reshape on-axis for uneven shard {self.axis} {self.shape} {len(self.real_lbs)}"
+      assert arg[new_axis] % len(self.real_lbs) == 0, f"new on-axis shape must divide evenly between devices {new_axis} {arg} {len(self.real_lbs)}"
+    return MultiLazyBuffer([x.reshape(tuple(s if a != new_axis else
+                              x.shape[self.axis] if s == self.shape[self.axis] else
+                              s // len(self.real_lbs) for a,s in enumerate(arg))) for x in self.lbs],
                            new_axis, self.real)
 
   def pad(self, arg:Tuple[Tuple[sint, sint], ...]):

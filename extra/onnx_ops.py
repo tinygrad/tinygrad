@@ -7,7 +7,7 @@ from extra.onnx import safe_numpy, DTYPE_MAP
 import numpy as np
 
 tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu", "Sigmoid", "MatMul",
-                  "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Div", "Sinh", "Cosh", "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",
+                  "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",
                   "Elu", "Celu", "Xor", "Round"}
 
 # **************** Free Ops ****************
@@ -30,6 +30,9 @@ def Cast(x: Tensor, to: int, saturate=1): return x.cast(DTYPE_MAP[to])
 def CastLike(x: Tensor, target_type: Tensor, saturate=1): return x.cast(target_type.dtype)
 
 # **************** Simple Ops ****************
+
+# https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_div.py
+def Div(x: Tensor, other: Tensor): return (x/other).cast(x.dtype)
 
 def Constant(value: Tensor=None, value_float=None, value_floats=None, value_int=None, value_ints=None, value_string=None, value_strings=None):
   if value is not None: return value

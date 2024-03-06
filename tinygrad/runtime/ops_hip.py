@@ -7,8 +7,7 @@ from tinygrad.helpers import from_mv, round_up, to_mv, colored, init_c_struct_t
 from tinygrad.device import Compiled, LRUAllocator, BufferOptions, JITRunner, Device, Buffer, MallocAllocator, update_stats, Compiler
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.codegen.kernel import LinearizerOptions
-from tinygrad.runtime.compiler.hip_comgr import compile_hip
-
+from tinygrad.runtime.driver.hip_comgr import compile_hip
 
 class HIPCompiler(Compiler):
   linearizer_opts = LinearizerOptions("HIP", has_tensor_cores=True)

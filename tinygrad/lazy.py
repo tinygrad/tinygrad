@@ -13,6 +13,7 @@ lazycache: Dict[Any, ReferenceType[LazyBuffer]] = {}
 def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
                       base:Optional[LazyBuffer]=None, enable_cache=bool(getenv("LAZYCACHE", 1))):
   if st.size == 0 and op not in {LoadOps.SYNC, LoadOps.WAIT}: op, arg, srcs, base = LoadOps.CONST, 0, (), None
+  if op == LoadOps.CONST: enable_cache = True
 
   cache_key = (device, st, dtype, op, arg, tuple(ref(x) for x in srcs)) if base is None else (st, ref(base))
   if (rret := lazycache.get(cache_key, None)): return cast(LazyBuffer, rret())  # NOTE: this should always be a live reference
@@ -65,7 +66,9 @@ class LazyBuffer:
 
   def cast(self, dtype:DType, bitcast:bool=False):
     if self.dtype == dtype: return self
-    if dtype.itemsize <= self.dtype.itemsize and self != self.base: return self.base.cast(dtype, bitcast)._view(self.st)
+    # TODO: applying this makes gpt2 slower
+    if getenv("CAST_BEFORE_VIEW", 1) and dtype.itemsize <= self.dtype.itemsize and self != self.base:
+      return self.base.cast(dtype, bitcast)._view(self.st)
     return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), dtype, UnaryOps.CAST, (dtype, bitcast), (self,))
 
   def is_unrealized_const(self): return not self.base.realized and self.base.op is LoadOps.CONST
@@ -73,8 +76,8 @@ class LazyBuffer:
 
   def _copy(self, device:str) -> LazyBuffer:
     sync_size = 1 if self.device.startswith("HIP") else 0
-    if self.device.startswith("EXT"):
-      # EXT doesn't sync
+    if self.device.startswith("EXT") or self.device.startswith("DISK"):
+      # DISK/EXT don't sync
       return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, None, (self,), enable_cache=False)
     sync = LazyBuffer.loadop(LoadOps.SYNC, (sync_size,), dtypes.uint32, self.device, src=self, enable_cache=True)
     wait = LazyBuffer.loadop(LoadOps.WAIT, (0,), dtypes.uint32, device, src=sync, enable_cache=True)
@@ -114,29 +117,33 @@ class LazyBuffer:
 
   # *** reduce ops ***
 
-  def _reduce_op(self, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
-    if self.shape == new_shape: return self
-    unbound_new_shape = tuple(s.unbind()[0] if not isinstance(s, int) else s for s in new_shape)
-    return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), self.dtype, op, unbound_new_shape, (self,))
+  def _reduce_op(self, op:ReduceOps, axis:Tuple[int, ...]) -> LazyBuffer:
+    assert all(0 <= x < len(self.shape) for x in axis), f"axis args {axis} out of range for shape {self.shape}"
+    axis = tuple(x for x in axis if self.shape[x] != 1)
+    if len(axis) == 0: return self
+    new_shape = tuple(1 if i in axis else s for i,s in enumerate(self.shape))
+    return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), self.dtype, op, axis, (self,))
 
-  def r(self, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
+  def r(self, op:ReduceOps, axis:Tuple[int, ...]) -> LazyBuffer:
+    new_shape = tuple(1 if i in axis else s for i,s in enumerate(self.shape))
     # TODO: this logic should move to the scheduler
     if self.size == 0 and 0 not in new_shape: return self.const({ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[op], new_shape)
-    assert len(self.shape)==len(new_shape) and all(ns in (1,s) for s,ns in zip(self.shape,new_shape)), f"not a contraction {self.shape=} {new_shape=}"
     # TODO: can we split symbolic shape if the reduce axis is not symbolic?
     if not all_int(self.shape) or (0 in self.shape) or prod(self.shape) // prod(new_shape) < getenv("REDUCEOP_SPLIT_THRESHOLD", 32768):
-      return self._reduce_op(op, new_shape)
-    heuristic, divisor, dim_to_split = max(((divisor := math.gcd(256, old))/(stride or math.inf), divisor, i) for i, (old, new, stride) in enumerate(zip(self.shape, new_shape, self.st.real_strides())) if old != new) # type: ignore  # noqa: E501
-    if divisor < 16 or heuristic < 0.1: return self._reduce_op(op, new_shape)
+      return self._reduce_op(op, axis)
+    heuristic, divisor, dim_to_split = max(((divisor := math.gcd(256, s))/(st or math.inf), divisor, i) for i,(s,st) in \
+                                           enumerate(zip(self.shape, self.st.real_strides())) if i in axis and (st is None or isinstance(st, int)))
+    if divisor < 16 or heuristic < 0.1: return self._reduce_op(op, axis)
     # choose largest divisor (>=16) to split on, penalize large strides
     def splitted_shape(dim_aft_div):
       return self.shape[:dim_to_split] + (self.shape[dim_to_split]//divisor,) + dim_aft_div + self.shape[dim_to_split+1:]
-    return self.reshape(splitted_shape((divisor,)))._reduce_op(op, splitted_shape((1,))).reshape(splitted_shape(()))._reduce_op(op, new_shape)
+    return self.reshape(splitted_shape((divisor,)))._reduce_op(op, (dim_to_split+1,)).reshape(splitted_shape(()))._reduce_op(op, axis)
 
   # *** movement ops ***
 
   def _view(self, new_st:ShapeTracker) -> LazyBuffer:
-    if self.st.size == 0: return self.const(0, new_st.shape)
+    if self.st.size == 0 or (new_st.views[-1].mask is not None and all((x[1]-x[0]) == 0 for x in new_st.views[-1].mask)):
+      return self.const(0, new_st.shape)
     if new_st.contiguous and self.base.shape == new_st.shape: return self.base
     return create_lazybuffer(self.device, new_st, self.dtype, base=self.base)
 
