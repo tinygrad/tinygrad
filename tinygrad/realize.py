@@ -1,4 +1,4 @@
-import sys
+import sys, heapq
 from collections import defaultdict
 from typing import List, Dict, Optional, cast, Set, DefaultDict
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters, LazyOp, ReduceOps, ConstBuffer, MemBuffer, BinaryOps, UnaryOps
@@ -182,6 +182,60 @@ def _is_padding_okay(buf:LazyBuffer, realizes:Set[LazyBuffer]) -> bool:
   if buf.op in UNSAFE_PAD_OPS: return False
   return all(_is_padding_okay(x.base, realizes) for x in buf.srcs)
 
+def optimize_schedule(schedule:List[ScheduleItem]) -> List[ScheduleItem]:
+  # Building dep graph
+  r_dep, w_dep = defaultdict(list), {}
+  graph = defaultdict(list) # children for a node
+  for i,si in enumerate(schedule):
+    for lb in si.inputs:
+      if lb in w_dep: graph[w_dep[lb]].append(i)
+      r_dep[lb].append(i)
+    if si.out in r_dep: 
+      for j in r_dep.pop(si.out): graph[j].append(i)
+    if si.out in w_dep: graph[w_dep[lb]].append(i)
+    w_dep[si.out] = i
+
+  prios = {} # prio for each node. the less prio, the closer to the beggining.
+  def _dfs(v, transfers_before=0) -> int: # weight
+    if v in prios: return prios[v]
+    children_prio = 0
+    transfers_on_node = 1 if schedule[v].ast.op == LoadOps.COPY else 0
+    for ch in graph[v]: children_prio += _dfs(ch, transfers_before=transfers_before+transfers_on_node)
+    prios[v] = children_prio - transfers_before - transfers_on_node
+    return prios[v]
+
+  for v in range(len(schedule)):
+    if v not in prios: _dfs(v)
+
+  def _toposort(graph, key=None):
+    in_degree = {i:0 for i in range(len(schedule))}
+    for adjacents in graph.values():
+      for node in adjacents: in_degree[node] += 1
+
+    heap = [(key(node), node) for node, degree in in_degree.items() if degree == 0]
+    heapq.heapify(heap)
+
+    top_order = []
+    while heap:
+      _, node = heapq.heappop(heap)
+      top_order.append(node)
+      for adjacent in graph.get(node, []):
+        in_degree[adjacent] -= 1
+        if in_degree[adjacent] == 0:
+          heapq.heappush(heap, (key(adjacent), adjacent))
+    return top_order
+
+  del r_dep
+  del w_dep
+  # return schedule
+  
+  order = _toposort(graph, prios.get)
+  assert len(order) == len(schedule)
+  new_schedule = []
+  for i in range(len(schedule)): new_schedule.append(schedule[order[i]])
+  del schedule
+  return new_schedule
+
 def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> List[ScheduleItem]:
   if seen is None: seen = set()
 
@@ -251,4 +305,4 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
       assert len(realized_children) == 1
       reduce_for_op[next(iter(realized_children.keys()))] = r
 
-  return flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in outs)
+  return optimize_schedule(flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in outs))
