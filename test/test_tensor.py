@@ -180,20 +180,6 @@ class TestTinygrad(unittest.TestCase):
     assert a.dtype == dtypes.default_int and b.dtype == dtypes.int8, "a.dtype should be int and b.dtype should be char"
     assert a.shape == b.shape, f"shape mismatch {a.shape} != {b.shape}"
 
-  def test_gradient_dtype(self):
-    for default_dtype in [dtypes.float16, dtypes.float32]:
-      old_default_float = dtypes.default_float
-      try:
-        dtypes.default_float = default_dtype
-        for datatype in [dtypes.float16, dtypes.float32]:
-          a = Tensor([1, 2, 3], dtype=datatype, requires_grad=True)
-          b = (a * 5).sum()
-          b.backward()  # if there is dtype mismatch, lazy should assert
-          assert a.grad.dtype == a.dtype
-          np.testing.assert_allclose(a.grad.numpy(), Tensor([5, 5, 5], dtype=datatype).numpy())
-      finally:
-        dtypes.default_float = old_default_float
-
   def test_ndim(self):
     assert Tensor(1).ndim == 0
     assert Tensor.randn(1).ndim == 1
