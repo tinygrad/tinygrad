@@ -102,7 +102,7 @@ class LazyOp:
 class UnaryOps(Enum):    EXP2 = auto(); LOG2 = auto(); CAST = auto(); SIN = auto();   SQRT = auto()
 class BinaryOps(Enum):   ADD = auto();  SUB = auto();  MUL = auto();  DIV = auto();  CMPLT = auto(); MAX = auto()
 class ReduceOps(Enum):   SUM = auto();  MAX = auto()
-class TernaryOps(Enum):  MULACC = auto(); WHERE = auto()
+class TernaryOps(Enum):  WHERE = auto()
 class LoadOps(Enum):     EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); CUSTOM = auto()
 Op = Union[UnaryOps, BinaryOps, ReduceOps, TernaryOps, LoadOps]
 

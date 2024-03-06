@@ -12,7 +12,6 @@ reduce_op (SUM, MAX)                                         # A -> B (smaller s
 binary_op (ADD, SUB, MUL, DIV, CMPEQ, MAX)                   # A + A -> A (all the same size)
 load_op   (EMPTY, CONST, FROM, CONTIGUOUS, CUSTOM)           # -> A   (initialize data on device)
 ternary_op (WHERE)                                           # A, A, A -> A
-ternary_op [[optional]] (MULACC)                             # A * A -> B
 ```
 
 ## mlops
