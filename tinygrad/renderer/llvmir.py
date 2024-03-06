@@ -3,6 +3,7 @@ from llvmlite import ir
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.dtype import DType, PtrDType, dtypes
 from tinygrad.ops import Op, UnaryOps, BinaryOps, TernaryOps
+from tinygrad.codegen.uops import UOpGraph
 
 MFLAGS = ('nsz', 'arcp', 'contract', 'afn', 'reassoc') # All from fast math, but nnan and ninf
 
@@ -65,7 +66,7 @@ def const(args, dtype):
   # TODO: remove int from int(args) once const args conform with dtype
   return ir.Constant(dtype_to_llvm_dtype[dtype], int(args) if dtypes.is_int(dtype) else bool(args) if dtype == dtypes.bool else args)
 
-def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> str:
+def uops_to_llvm_ir(function_name:str, uops:UOpGraph) -> str:
   # all llvm stuff goes into a module
   module = ir.Module(name=__file__)
 

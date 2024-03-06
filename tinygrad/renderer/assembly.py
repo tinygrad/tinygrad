@@ -44,11 +44,19 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
   # here we do a pretransform on UOps to fix some shortcomings of PTX
   # all uops must be a register
   # TODO: uops class should make these rewrites easier
-  replace = {}
+  replace: Dict[UOp, UOp] = {}
   for u in uops:
     for o,n in replace.items():
-      if o in u.vin and u is not new:
+      if o in u.vin and u is not n:
         u.vin = tuple(n if x == o else x for x in u.vin)
+    if u.uop is UOps.LOAD and u.dtype is dtypes.bool:
+      # rewrite load bool
+      if len(u.vin) == 4:
+        new = uops.add(UOps.CAST, dtypes.uint8, (u.vin[3],), insert_before=uops.uops.index(u))
+        u.vin = u.vin[0:3] + (new,)
+      u.dtype = dtypes.uint8
+      new = uops.add(UOps.CAST, dtypes.bool, (u,), insert_before=uops.uops.index(u)+1)
+      replace[u] = new
     if u.uop is UOps.ALU and u.arg in {BinaryOps.CMPEQ, BinaryOps.CMPLT} and u.vin[0].dtype is dtypes.bool:
       if u.arg == BinaryOps.CMPEQ:
         u.arg = BinaryOps.XOR
@@ -226,14 +234,11 @@ class PTXLanguage(AssemblyLanguage):
   def mem_type(self, dtype): return 's8' if dtype.itemsize == 1 else 'b16' if dtype == dtypes.float16 else self.types[dtype]
 
   def render_load(self, loc, dest, dtype, gate=None, alt=None, ss="") -> List[str]:
+    assert dtype is not dtypes.bool
     ret = []
-    if (byte:=dtype.itemsize == 1): ret.append(f".reg .s8 {dest}_tmp;")
-    if (isbool:= dtype == dtypes.bool): ret.append(f".reg .s16 {dest}_bool;")
-    if gate: ret.extend([f"@{gate} ld{ss}.{self.mem_type(dtype)} {dest + ('_tmp' if byte else '')}, [{loc}];",
-                         f"@!{gate} mov.b{'8' if byte else self.types[dtype][1:]} {dest + ('_tmp' if byte else '')}, {alt};"])
-    else: ret.append(f"ld{ss}.{'s8' if byte else 'b16' if dtype==dtypes.float16 else self.types[dtype]} {dest + ('_tmp' if byte else '')}, [{loc}];")
-    if byte: ret.append(f"cvt.{'s16' if isbool else self.types[dtype]}.s8 {dest + ('_bool' if isbool else '')}, {dest}_tmp;")
-    if isbool: ret.append(f"setp.ne.s16 {dest}, {dest}_bool, {self.render_const(0, dtypes.int16)};")
+    if gate: ret.extend([f"@{gate} ld{ss}.{self.mem_type(dtype)} {dest}, [{loc}];",
+                         f"@!{gate} mov.b{self.types[dtype][1:]} {dest}, {alt};"])
+    else: ret.append(f"ld{ss}.{self.mem_type(dtype)} {dest}, [{loc}];")
     return ret
 
   def render_store(self, loc, val, dtype, gate=None, ss="") -> List[str]:
