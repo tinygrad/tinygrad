@@ -68,7 +68,8 @@ class TestLrScheduler(unittest.TestCase):
   def _test_multisteplr(self, epochs, opts, atol, rtol):
     self._test_lr_scheduler(MultiStepLR, torch.optim.lr_scheduler.MultiStepLR, epochs, opts, atol, rtol)
   def _test_polynomiallr(self, epochs, opts, atol, rtol):
-    self._test_lr_scheduler(functools.partial(PolynomialLR, end_lr=0.0, epochs=epochs),
+    opts['total_iters'] = epochs
+    self._test_lr_scheduler(functools.partial(PolynomialLR, end_lr=0.0), torch.optim.lr_scheduler.PolynomialLR, epochs, opts, atol, rtol)
   def _test_reducelronplateau(self, epochs, opts, atol, rtol):
     opts['accs'] = np.random.randn(epochs)
     self._test_lr_scheduler(ReduceLROnPlateau, torch.optim.lr_scheduler.ReduceLROnPlateau, epochs, opts, atol, rtol)
