@@ -27,16 +27,13 @@ class MultiStepLR(LR_Scheduler):
 
 # https://github.com/mlcommons/training/blob/e3769c8dcf88cd21e1001dd2f894b40a1513ec5d/image_classification/tensorflow2/lars_util.py#L53
 class PolynomialLR(LR_Scheduler):
-  def __init__(self, optimizer: Optimizer, end_lr, total_iters, warmup=0, power=2):
+  def __init__(self, optimizer: Optimizer, total_iters, end_lr=0.0, power=1):
     super().__init__(optimizer)
-    warmup = min(warmup, total_iters)
     self.start_lr = self.optimizer.lr.numpy().item() if isinstance(self.optimizer.lr, Tensor) else self.optimizer.lr
-    self.end_lr, self.total_iters, self.power, self.warmup = end_lr, total_iters, power, warmup
+    self.end_lr, self.total_iters, self.power = end_lr, total_iters, power
 
   def get_lr(self):
-    warmup_lr = ((self.epoch_counter + 1) * (1.0 / (self.warmup + 1))) * self.start_lr
-    x = (1 - (self.epoch_counter - self.warmup) / (self.total_iters - self.warmup))
-    return (self.epoch_counter < self.warmup).where(warmup_lr, (self.start_lr - self.end_lr) * x ** self.power + self.end_lr)
+    return (self.start_lr - self.end_lr) * (1 - self.epoch_counter / self.total_iters) ** self.power + self.end_lr
 
 class ReduceLROnPlateau(LR_Scheduler):
   def __init__(self, optimizer: Optimizer, mode="min", factor=0.1, patience=10, threshold=1e-4, threshold_mode="rel"):
