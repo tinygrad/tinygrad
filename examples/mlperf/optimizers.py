@@ -5,9 +5,9 @@ from tinygrad.nn.optim import Optimizer
 
 # https://github.com/mlcommons/training/blob/master/image_classification/tensorflow2/lars_optimizer.py
 class LARS(Optimizer):
-  def __init__(self, params: List[Tensor], lr, momentum=0.9, weight_decay=1e-4, eta=0.001, eps=0.0, skip_list=None, nesterov=False, track_gnorm=False):
+  def __init__(self, params: List[Tensor], lr, momentum=0.9, weight_decay=1e-4, eta=0.001, eps=0.0, skip_list=None, nesterov=False):
     super().__init__(params, lr)
-    self.momentum, self.weight_decay, self.eta, self.eps, self.nesterov, self.track_gnorm = momentum, weight_decay, eta, eps, nesterov, track_gnorm
+    self.momentum, self.weight_decay, self.eta, self.eps, self.nesterov = momentum, weight_decay, eta, eps, nesterov
     self.b = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params]
     self.skip_list = set(skip_list or [])
 
