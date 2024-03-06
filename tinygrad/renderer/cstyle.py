@@ -290,6 +290,7 @@ class HIPLanguage(CStyleLanguage):
   __attribute__((device)) __attribute__((const)) _Float16 __ocml_sqrt_f16(_Float16);
   }\n""" + '\n'.join([
     _make_hip_dtype(*x) for x in [("_Float16", "half", 2), ("_Float16", "half", 4), ("_Float16", "half", 8), ("_Float16", "half", 16),
+                                  ("float", "float", 8)
                     ]]) + """
   static __attribute__((device)) half8 __hip_wmma_f16_f16(half16 a, half16 b, half8 c) {
     half16 c_frag = {}; half8 d; for (int n = 0; n < 8; n++) { c_frag[n*2] = c[n]; }
