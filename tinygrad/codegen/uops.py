@@ -5,7 +5,7 @@ from collections import defaultdict
 from tinygrad.helpers import DEBUG, flatten, all_same
 from tinygrad.dtype import dtypes, DType
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
-from tinygrad.shape.symbolic import sint, Variable
+from tinygrad.shape.symbolic import sint, Variable, Node, NumNode
 from enum import Enum, auto
 from dataclasses import dataclass
 
@@ -201,54 +201,48 @@ class UOpGraph:
           if loop_len.dtype != u.dtype: loop_len = self.add(UOps.CAST, u.dtype, (loop_len,),
                                                             insert_before=self.uops.index(u))
           new = self.add(UOps.ALU, u.dtype, (u.vin[1], loop_len,), BinaryOps.MUL, insert_before=self.uops.index(u))
-          # replace u with new
           self.replace_and_remove_op(u, new)
           return True
 
-
-  def loop_factor(self, get_recursive_parents, with_loop, factored, loop_op, lt_op=False):
-    def const(arg): return self.add(UOps.CONST, with_loop.dtype, tuple(), arg, insert_before=self.uops.index(loop_op))
-    def multiply_neg_1(x): return self.add(UOps.ALU, with_loop.dtype, (x, const(-1)), BinaryOps.MUL, insert_before=self.uops.index(loop_op))
-
-    alu_opposite = {BinaryOps.ADD: BinaryOps.SUB, BinaryOps.SUB: BinaryOps.ADD, BinaryOps.DIV: BinaryOps.MUL, BinaryOps.MUL: BinaryOps.DIV}
-    if with_loop == loop_op:
-      if lt_op:
-        result = self.add(UOps.ALU, with_loop.dtype, (loop_op.vin[1], factored), BinaryOps.SUB, insert_before=self.uops.index(loop_op))
-      else:
-        result = self.add(UOps.ALU, with_loop.dtype, (factored, loop_op.vin[0]), BinaryOps.SUB, insert_before=self.uops.index(loop_op))
-      min_clamped = self.add(UOps.ALU, with_loop.dtype, (result, const(0)), BinaryOps.MAX, insert_before=self.uops.index(loop_op))
-      clamped = multiply_neg_1(self.add(UOps.ALU,
-                                        with_loop.dtype,
-                                        (multiply_neg_1(min_clamped), const(-1*(loop_op.vin[1].arg-loop_op.vin[0].arg+1))),
-                                        BinaryOps.MAX,
-                                        insert_before=self.uops.index(loop_op)))
-      return clamped
+  def loop_factor(self, get_recursive_parents, with_loop: UOp, factored: Node, loop_op):
+    def alu_opposite(arg, x, y):
+      if arg == BinaryOps.ADD: return x - y
+      elif arg == BinaryOps.MUL: return Node.__floordiv__(x, y, False)
+    def to_symbolic(u):
+      if u.uop == UOps.CONST: return NumNode(u.arg)
+      elif u.uop == UOps.LOOP: return Variable("ridx0", loop_op.vin[0].arg, loop_op.vin[1].arg)
+      elif u.uop == UOps.SPECIAL: return Variable(u.arg[1], 0, u.arg[2])
+      elif u.uop == UOps.ALU and u.arg == BinaryOps.ADD: return to_symbolic(u.vin[0]) + to_symbolic(u.vin[1])
+      elif u.uop == UOps.ALU and u.arg == BinaryOps.MUL: return to_symbolic(u.vin[0]) * to_symbolic(u.vin[1])
+    if with_loop == loop_op: return factored
     elif with_loop.uop is UOps.ALU:
-      next_u = next(v for v in with_loop.vin if loop_op == v or loop_op in get_recursive_parents(v))
-      non_loop = next(v for v in with_loop.vin if v != next_u)
-      if with_loop.arg in {BinaryOps.MUL, BinaryOps.DIV} and non_loop.uop is UOps.CONST and non_loop.arg < 0:
-        lt_op = not lt_op
-      return self.loop_factor(get_recursive_parents, next_u, self.add(UOps.ALU, with_loop.dtype, (factored, non_loop), alu_opposite[with_loop.arg], insert_before=self.uops.index(loop_op)), loop_op, lt_op=lt_op)
+      next_with_loop = next(v for v in with_loop.vin if loop_op == v or loop_op in get_recursive_parents(v))
+      non_loop = next(v for v in with_loop.vin if v != next_with_loop and loop_op not in get_recursive_parents(v))
+      non_loop = to_symbolic(non_loop)
+      return self.loop_factor(get_recursive_parents, next_with_loop, alu_opposite(with_loop.arg, factored, non_loop), loop_op)
 
-  def remove_loops(self, get_recursive_parents):
+  def remove_loops(self, get_recursive_parents, render_ops, ctx):
     for endloop in [op for op in self.uops if op.uop == UOps.ENDLOOP]:
       loop_op = endloop.vin[0]
-      for where in [op for op in self.uops[self.uops.index(loop_op):self.uops.index(endloop)+1] if op.uop == UOps.ALU and op.arg == TernaryOps.WHERE]:
+      loop_start = self.uops.index(loop_op)
+      loop_end = self.uops.index(endloop)+1
+      for where in [op for op in self.uops[loop_start:loop_end] if op.uop == UOps.ALU and op.arg == TernaryOps.WHERE]:
         comparison = where.vin[0]
-        factored = self.loop_factor(get_recursive_parents, comparison.vin[0], comparison.vin[1], loop_op, lt_op=((comparison.arg is BinaryOps.CMPLT) ^ (loop_op in get_recursive_parents(comparison.vin[0]))))
-        final = self.add(UOps.ALU, where.dtype, (factored, where.vin[1]), BinaryOps.MUL, insert_before=self.uops.index(loop_op)) # TODO other side of the WHERE
+        factored = self.loop_factor(get_recursive_parents, comparison.vin[0], NumNode(comparison.vin[1].arg), loop_op)
+        final_value = NumNode(loop_op.vin[1].arg-1) - factored
+        after_where_ops = self.uops[(where_index:=self.uops.index(where)):]
+        self.uops = self.uops[:where_index]
+        rendered = final_value.render(render_ops, ctx)
+        self.uops = self.uops + after_where_ops
+        final = self.add(UOps.ALU, where.dtype, (rendered, where.vin[1]), BinaryOps.MUL, insert_before=self.uops.index(where)) # TODO other side of the WHERE
         self.replace_and_remove_op(where, final)
       for phi in [op for op in self.uops[self.uops.index(loop_op):self.uops.index(endloop)] if op.uop == UOps.PHI]:
-        if loop_op not in get_recursive_parents(phi.vin[1]): self.replace_and_remove_op(phi, phi.vin[1])
+        if loop_op not in get_recursive_parents(phi.vin[1]):
+          self.replace_and_remove_op(phi, phi.vin[1])
+      if all([u.uop is not UOps.PHI for u in self.uops[self.uops.index(loop_op):self.uops.index(endloop)]]):
+        self.uops.remove(loop_op)
+        self.uops.remove(endloop)
       self.remove_childless({UOps.ENDIF, UOps.ENDLOOP})
-      self.fix_loop_scope(get_recursive_parents)
-
-    # for phi in [op for op in self.uops if op.uop == UOps.PHI]:
-    #   this_loop = next(v for v in phi.vin[1].vin if v.uop is not UOps.DEFINE_ACC)
-    #
-    #   phi_parents = get_recursive_parents(phi, with_phi=False)
-    #   for idx, op in enumerate(phi_parents):
-    #     print(idx, op)
 
   def uoptimize(self, render_ops, ctx):
     # get PHI node loop scope, link anything using a DEFINE_ACC to the loop as a "parent"
@@ -283,7 +277,7 @@ class UOpGraph:
     # add UOps.END*
     self.add_ends()
 
-    keep_doing_if_did_something(lambda: self.remove_loops(get_recursive_parents))
+    keep_doing_if_did_something(lambda: self.remove_loops(get_recursive_parents, render_ops, ctx))
     # self.remove_childless({UOps.ENDIF, UOps.ENDLOOP})
     # self.fix_loop_scope(get_recursive_parents)
 
