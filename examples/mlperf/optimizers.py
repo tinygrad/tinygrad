@@ -20,9 +20,9 @@ class LARS(Optimizer):
       if t not in self.skip_list:
         g_norm = (g * g).sum().sqrt()
         w_norm = (w * w).sum().sqrt()
-        trust_ratio = (w_norm > 0).where((g_norm > 0).where(
+        trust_ratio = ((w_norm > 0) * (g_norm > 0)).where(
             self.eta * w_norm / (g_norm + self.weight_decay * w_norm + self.eps),
-          1.0), 1.0)
+          1.0)
 
         scaled_lr = self.lr * trust_ratio
         g = g + self.weight_decay * t.detach()
