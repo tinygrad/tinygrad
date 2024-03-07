@@ -169,6 +169,7 @@ class TestMultiTensor(unittest.TestCase):
     out.mean().backward()
     #for p in get_parameters(conv): p.grad.realize()
     optim.step()
+    out.numpy()
 
   def test_lr_scheduler_OneCycleLR(self):
     from extra.lr_scheduler import OneCycleLR
@@ -385,6 +386,13 @@ class TestMultiTensor(unittest.TestCase):
       # don't allow assigns that change axes
       t_none.assign(t_zero)
 
+  def test_dropout_on_shard(self):
+    Tensor.training = True
+    X = Tensor.ones(256).to(devices_2)
+    output = X.dropout(0.5)
+    output.numpy()
+    Tensor.training = False
+
 @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
 class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
   # shrink a multitensor on sharded axis
@@ -493,7 +501,7 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
 
     c = a.pad(((2, 4), None)) + b.pad(((6, 0), None))
     expected = np.concatenate([np.zeros_like(t.numpy()[0:2]), na, np.zeros_like(t.numpy()[4:6]), nb])
-    np.testing.assert_equal(c, expected)
+    np.testing.assert_equal(c.numpy(), expected)
 
   def test_add_different_tensors(self):
     devices = [f"{Device.DEFAULT}:{i}" for i in range(4)]
@@ -534,6 +542,7 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
     optim.zero_grad()
     out.mean().backward()
     optim.step()
+    out.numpy()
 
   def test_unsynced_backprop_standalone_bn(self):
     from extra.lr_scheduler import OneCycleLR

@@ -6,7 +6,7 @@ import pickle, base64, itertools, time, struct
 from tinygrad.dtype import DType, dtypes, ImageDType
 from tinygrad.helpers import all_same, getenv, flatten
 from tinygrad.device import Compiled, Allocator, Compiler
-from tinygrad.codegen.uops import UOp, UOps, exec_alu
+from tinygrad.codegen.uops import UOpGraph, UOps, exec_alu
 from tinygrad.ops import BinaryOps, TernaryOps
 from tinygrad.codegen.kernel import LinearizerOptions
 
@@ -188,8 +188,8 @@ class PythonCompiler(Compiler):
   linearizer_opts = LinearizerOptions("METAL", has_tensor_cores=True) if getenv("EMULATE_METAL") else \
     (LinearizerOptions("HIP", has_tensor_cores=True) if getenv("EMULATE_HIP") else \
     (LinearizerOptions("CUDA", has_tensor_cores=True) if getenv("EMULATE_CUDA") else LinearizerOptions("PYTHON")))
-  def render(self, name:str, uops:List[UOp]) -> str:
-    lops = [(u.uop, u.dtype, [uops.index(v) for v in u.vin], u.arg) for u in uops]
+  def render(self, name:str, uops:UOpGraph) -> str:
+    lops = [(u.uop, u.dtype, [uops.uops.index(v) for v in u.vin], u.arg) for u in uops]
     return base64.b64encode(pickle.dumps(lops)).decode()
   def compile(self, src:str) -> bytes: return base64.b64decode(src)
 
