@@ -180,7 +180,7 @@ class Tensor:
     if device is None or device == self.device: return self
     if not isinstance(device, str): return self.shard(device)
     ret = Tensor(self.lazydata, device, requires_grad=self.requires_grad)
-    if self.grad: ret.grad = self.grad.to(device)
+    if self.grad is not None: ret.grad = self.grad.to(device)
     if hasattr(self, '_ctx'): ret._ctx = self._ctx
     return ret
 
