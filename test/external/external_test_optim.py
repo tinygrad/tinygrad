@@ -130,7 +130,7 @@ class ExternalTestOptim(unittest.TestCase):
       'train_steps': 100,
       'warmup': 43
     }, 1e-5, 1e-5, do_optim=False)
-  @unittest.skip("very slow")
+  @unittest.skip("slow, but you can run this locally to check")
   def test_lars_polylr_resnet(self):
     steps_per_epoch = 2053
     epochs = 45
