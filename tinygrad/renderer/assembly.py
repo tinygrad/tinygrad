@@ -152,7 +152,10 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
       elif uop == UOps.CAST:
         assert vin[0].dtype is not None
         cast(r[vin[0]], dtype, vin[0].dtype, bitcast=isinstance(args, tuple) and args[1], u=u)
-      elif uop == UOps.DEFINE_LOCAL: kk(*lang.render_local(ssa(u, 'local', lang.types[dtypes.ulong]), args[0], args[1], dtype))
+      elif uop == UOps.DEFINE_LOCAL:
+        # TODO: we should sum these, and fetch 0xC000 from somewhere
+        assert args[1]*dtype.itemsize <= 0xC000, "too large local"
+        kk(*lang.render_local(ssa(u, 'local', lang.types[dtypes.ulong]), args[0], args[1], dtype))
       elif uop is UOps.DEFINE_VAR:
         bufs.append((args.expr, dtype))
         r[u] = f"%{args.expr}"
