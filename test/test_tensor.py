@@ -214,6 +214,13 @@ class TestTinygrad(unittest.TestCase):
     self.assertEqual(Tensor.empty(1,10,20).shape, (1,10,20))
     self.assertEqual(Tensor.empty((10,20,40)).shape, (10,20,40))
 
+    with self.assertRaises(ValueError):
+      Tensor.zeros((2, 2), 2, 2)
+    with self.assertRaises(ValueError):
+      Tensor.zeros((2, 2), (2, 2))
+    with self.assertRaises(ValueError):
+      Tensor.randn((128, 128), 0.0, 0.01)
+
   def test_numel(self):
     assert Tensor.randn(10, 10).numel() == 100
     assert Tensor.randn(1,2,5).numel() == 10
@@ -319,6 +326,14 @@ class TestTinygrad(unittest.TestCase):
       assert type(reshaped_item) == type(a), a
       np.testing.assert_allclose(reshaped_item, a), a
 
+  def test_no_bool(self):
+    with self.assertRaises(TypeError):
+      if Tensor(["3"]):
+        print("hi")
+
+    with self.assertRaises(TypeError):
+      _a = Tensor([3]) in [Tensor([3]), Tensor([4]), Tensor([5])]
+
 @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
 class TestMoveTensor(unittest.TestCase):
   d0, d1 = f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"
@@ -326,10 +341,13 @@ class TestMoveTensor(unittest.TestCase):
          strat.sampled_from([dtypes.float16, dtypes.float32]), strat.sampled_from([True, False, None]))
   def test_to_preserves(self, src, dest, dtype, requires_grad):
     s = Tensor([1, 2, 3], device=src, dtype=dtype, requires_grad=requires_grad)
+    if requires_grad: s.sum().backward()
     t = s.to(dest)
     np.testing.assert_equal(s.numpy(), t.numpy())
     assert s.dtype == t.dtype
     assert s.requires_grad == t.requires_grad
+    if requires_grad:
+      np.testing.assert_equal(s.grad.numpy(), t.grad.numpy())
 
   @given(strat.sampled_from([dtypes.float16, dtypes.float32]), strat.sampled_from([True, False, None]))
   def test_shard_preserves(self, dtype, requires_grad):
@@ -338,6 +356,19 @@ class TestMoveTensor(unittest.TestCase):
     np.testing.assert_equal(s.numpy(), t.numpy())
     assert s.dtype == t.dtype
     assert s.requires_grad == t.requires_grad
+
+  @given(strat.sampled_from([d0, d1]))
+  def test_same_dev(self, dev):
+    x = Tensor([1,2,3], device=dev)
+    y = x.to(dev)
+    assert x is y
+
+  def test_to_grad(self):
+    x = Tensor.eye(3, requires_grad=True, device=self.d0)
+    y = Tensor([[2.0,0,-2.0]], requires_grad=True, device=self.d0)
+    z = y.matmul(x).to(self.d1).sum()
+    z.backward()
+    np.testing.assert_equal(x.grad.numpy(), [[2,2,2],[0,0,0],[-2,-2,-2]])
 
 class TestZeroShapeTensor(unittest.TestCase):
   def test_shape_stride(self):

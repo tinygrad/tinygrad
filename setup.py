@@ -52,6 +52,10 @@ setup(name='tinygrad',
             "librosa",
             "networkx",
             "hypothesis",
+        ],
+        'testing_tf': [
+            "tensorflow",
+            "tensorflow_addons",
         ]
       },
       include_package_data=True)
