@@ -138,6 +138,7 @@ class TestBFloat16DType(unittest.TestCase):
 
   # torch.tensor([10000, -1, -1000, -10000, 20]).type(torch.bfloat16)
 
+  @unittest.skipIf(getenv("HIPCPU"), "no real HIP device exists in CI")
   def test_f16_to_bf16_conversion(self):
     original_tensor = Tensor([1.0, 2.0, 3.0], dtype=dtypes.float16)
     converted_tensor = original_tensor.cast(dtypes.bfloat16)
@@ -146,11 +147,13 @@ class TestBFloat16DType(unittest.TestCase):
     original_to_float32 = original_tensor.cast(dtypes.float32)
     np.testing.assert_allclose(back_to_float32.numpy(), original_to_float32.numpy(), rtol=1e-2, atol=1e-3)
 
+  @unittest.skipIf(getenv("HIPCPU"), "no real HIP device exists in CI")
   def test_f16_to_bf16_edge_cases(self):
     edge_cases = Tensor([0.0, -0.0, float('inf'), float('-inf'), float('nan')], dtype=dtypes.float16)
     converted = edge_cases.cast(dtypes.bfloat16).cast(dtypes.float32)
     np.testing.assert_equal(converted.numpy(), edge_cases.cast(dtypes.float32).numpy())
 
+  @unittest.skipIf(getenv("HIPCPU"), "no real HIP device exists in CI")
   def test_f16_to_bf16_range_precision(self):
     large_value = Tensor([65504.0], dtype=dtypes.float16)  # Max representable in float16
     small_value = Tensor([6.1035e-5], dtype=dtypes.float16)  # Smallest positive normal float16
