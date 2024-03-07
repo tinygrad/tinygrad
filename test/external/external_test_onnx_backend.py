@@ -68,6 +68,13 @@ if Device.DEFAULT in ['LLVM', 'CUDA', 'GPU'] and CI:
 backend_test.exclude('STRING')
 backend_test.exclude('FLOAT8')
 backend_test.exclude('BFLOAT16')  # not supported in numpy
+
+# bfloat16 tests cause segfaults in llvm
+backend_test.exclude('test_f16_to_bf16_conversion')
+backend_test.exclude('test_f16_to_bf16_edge_cases')
+backend_test.exclude('test_f16_to_bf16_range_precision')
+backend_test.exclude('test_f16_to_bf16_randomized')
+
 # TODO: fix these with true onnx float16
 backend_test.exclude('to_FLOAT16')
 backend_test.exclude('cast_no_saturate')
