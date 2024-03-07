@@ -1,5 +1,5 @@
 # https://github.com/mlcommons/training/blob/e3769c8dcf88cd21e1001dd2f894b40a1513ec5d/image_classification/tensorflow2/lars_optimizer.py
-# changes: don't call lr_t if it's not a schedule
+# changes: hack _prepare_local to work with latest tf; don't call lr_t if it's not a schedule
 
 # Copyright 2018 The TensorFlow Authors. All Rights Reserved.
 #
@@ -116,7 +116,7 @@ class LARSOptimizer(optimizer_v2.OptimizerV2):
   def _prepare_local(self, var_device, var_dtype, apply_state):
     lr_t = self._get_hyper("learning_rate", var_dtype)
     local_step = math_ops.cast(self.iterations, var_dtype)
-    if hasattr(lr_t, "__call__"): lr_t = math_ops.cast(lr_t(local_step), var_dtype)
+    if callable(lr_t): lr_t = math_ops.cast(lr_t(local_step), var_dtype)
     learning_rate_t = array_ops.identity(lr_t)
 
     apply_state[(var_device, var_dtype)].update(

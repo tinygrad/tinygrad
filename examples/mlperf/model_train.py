@@ -13,7 +13,7 @@ def train_resnet():
   from extra.models import resnet
   from examples.mlperf.dataloader import batch_load_resnet
   from extra.datasets.imagenet import get_train_files, get_val_files
-  from examples.mlperf.lr_schedulers import PolynomialLR
+  from examples.mlperf.lr_schedulers import PolynomialDecayWithWarmup
   from examples.hlb_cifar10 import UnsyncedBatchNorm
 
   config = {}
@@ -64,7 +64,9 @@ def train_resnet():
   optimizer = LARS(parameters, base_lr, momentum=.9, weight_decay=decay, skip_list=skip_list)
 
   # ** LR scheduler **
-  scheduler = PolynomialLR(optimizer, 1e-4, epochs=epochs * steps_in_train_epoch, warmup=lr_warmup_epochs * steps_in_train_epoch)
+  scheduler = PolynomialDecayWithWarmup(optimizer, train_steps=epochs * steps_in_train_epoch,
+                                        initial_learning_rate=base_lr, end_learning_rate=1e-4,
+                                        warmup_steps=lr_warmup_epochs * steps_in_train_epoch)
   print(f"training with batch size {BS} for {epochs} epochs")
 
   # ** resume from checkpointing **
@@ -93,9 +95,9 @@ def train_resnet():
     out = model.forward(X)
     loss = out.cast(dtypes.float32).sparse_categorical_crossentropy(Y, label_smoothing=0.1)
     top_1 = (out.argmax(-1) == Y).sum()
-    scheduler.step()
     loss.backward()
     optimizer.step()
+    scheduler.step()
     return loss.realize(), top_1.realize()
   @TinyJit
   def eval_step(X, Y):
