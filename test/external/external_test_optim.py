@@ -45,37 +45,42 @@ class TinyNetTF:
     out = tf.reduce_sum(out)
     return out
 
-def step(optim, steps=1, kwargs={}, scheduler=None, schedopts=None):
+def step(optim, steps=1, kwargs={}, scheduler=None, schedopts=None, do_optim=True):
   net = TinyNet()
   optim = optim([net.x, net.W], **kwargs)
   if scheduler is not None: scheduler = scheduler(optim, **schedopts)
   lrs = []
   for _ in range(steps):
-    out = net.forward()
-    optim.zero_grad()
-    out.backward()
+    if do_optim:
+      out = net.forward()
+      optim.zero_grad()
+      out.backward()
     lrs.append(optim.lr.numpy().item())
-    optim.step()
+    if do_optim: optim.step()
     if scheduler is not None: scheduler.step()
   return lrs, net.x.detach().numpy(), net.W.detach().numpy()
 
-def step_tf(optim, steps=1, kwargs={}, scheduler=None, schedopts=None):
+def step_tf(optim, steps=1, kwargs={}, scheduler=None, schedopts=None, do_optim=True):
   net = TinyNetTF()
   if scheduler is not None: kwargs['lr'] = scheduler(**schedopts)
   optim = optim(**kwargs)
   lrs = []
   for _ in range(steps):
-    with tf.GradientTape() as tape:
-      out = net.forward()
+    if do_optim:
+      with tf.GradientTape() as tape:
+        out = net.forward()
 
     lr_t = optim.learning_rate
     # refer to test/external/mlperf_resnet/lars_optimizer.py:_prepare_local
     if callable(lr_t): lr_t = lr_t(math_ops.cast(optim.iterations, tf.float32))
     lrs.append(lr_t)
 
-    grads = tape.gradient(out, [net.x, net.W])
-    optim.apply_gradients(zip(grads, [net.x, net.W]))
-    # optim calls scheduler in tf
+    if do_optim:
+      grads = tape.gradient(out, [net.x, net.W])
+      optim.apply_gradients(zip(grads, [net.x, net.W]))
+      # optim calls scheduler in tf
+    else:
+      optim._iterations.assign_add(1)
   return lrs, net.x.numpy(), net.W.numpy()
 
 # skip_list=True -> skip W
@@ -88,16 +93,16 @@ def create_tf_polylr(initial_lr, end_lr, train_steps, warmup, power=2):
                                       initial_learning_rate=initial_lr, end_learning_rate=end_lr, warmup_epochs=warmup)
 
 class ExternalTestOptim(unittest.TestCase):
-  def _test_optim(self, tinygrad_optim, tensorflow_optim, steps, opts, atol, rtol, tiny_sched=None, tf_sched=None, schedopts=None):
-    for x,y in zip(step(tinygrad_optim, steps=steps, kwargs=opts, scheduler=tiny_sched, schedopts=schedopts),
-                   step_tf(tensorflow_optim, steps=steps, kwargs=opts, scheduler=tf_sched, schedopts=schedopts)):
+  def _test_optim(self, tinygrad_optim, tensorflow_optim, steps, opts, atol, rtol, tiny_sched=None, tf_sched=None, schedopts=None, do_optim=True):
+    for x,y in zip(step(tinygrad_optim, steps=steps, kwargs=opts, scheduler=tiny_sched, schedopts=schedopts, do_optim=True),
+                   step_tf(tensorflow_optim, steps=steps, kwargs=opts, scheduler=tf_sched, schedopts=schedopts, do_optim=True)):
       np.testing.assert_allclose(x, y, atol=atol, rtol=rtol)
 
   def _test_lamb(self, steps, opts, atol, rtol): self._test_optim(LAMB, tfa.optimizers.LAMB, steps, opts, atol, rtol)
   def _test_lars(self, steps, opts, atol, rtol): self._test_optim(create_tiny_lars, create_tf_lars, steps, opts, atol, rtol)
-  def _test_lars_polylr(self, steps, opts, schedopts, atol, rtol):
+  def _test_lars_polylr(self, steps, opts, schedopts, atol, rtol, do_optim=True):
     self._test_optim(create_tiny_lars, create_tf_lars, steps, opts, atol, rtol,
-                     tiny_sched=PolynomialDecayWithWarmup, tf_sched=create_tf_polylr, schedopts=schedopts)
+                     tiny_sched=PolynomialDecayWithWarmup, tf_sched=create_tf_polylr, schedopts=schedopts, do_optim=do_optim)
 
   def test_lamb(self): self._test_lamb(1, {'lr': 0.001}, 1e-5, 0)
   def test_lamb_high_lr(self): self._test_lamb(1, {'lr': 10}, 1e-5, 1e-5)
@@ -118,6 +123,13 @@ class ExternalTestOptim(unittest.TestCase):
       'train_steps': 10,
       'warmup': 3
     }, 1e-5, 1e-5)
+  def test_lars_polylr_aggressive(self):
+    self._test_lars_polylr(10, {'lr': 10.4}, {
+      'initial_lr': 10.4,
+      'end_lr': 1e-4,
+      'train_steps': 2053 * 45,
+      'warmup': 2053 * 5,
+    }, 1e-5, 1e-5, do_optim=False)
 
 if __name__ == '__main__':
   unittest.main()
