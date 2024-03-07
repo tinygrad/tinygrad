@@ -88,9 +88,9 @@ class dtypes:
 
 def ident(_, x): return x
 def trunc_int(itemsize, x):
-  adjust = 1 << ((itemsize << 3) - 1)
-  return ((x + adjust) & ((adjust << 1) - 1)) - adjust
-def trunc_uint(itemsize, x): return x & ((1 << (itemsize << 3)) - 1)
+  adjust = 2 ** (itemsize * 8 - 1)
+  return (x + adjust) % 2 ** (itemsize * 8) - adjust
+def trunc_uint(itemsize, x): return x % 2 ** (itemsize * 8)
 
 trunc_lut = {
   dtypes.int8: trunc_int, dtypes.int16: trunc_int, dtypes.int32: trunc_int, dtypes.int64: trunc_int,

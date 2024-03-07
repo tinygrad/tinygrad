@@ -3,7 +3,7 @@ import functools, math, operator
 from typing import List, Set, Optional, Tuple, Any, Dict, DefaultDict, Callable, cast
 from collections import defaultdict
 from tinygrad.helpers import DEBUG, flatten, all_same
-from tinygrad.dtype import dtypes, DType, trunc_lut, cast_scalar
+from tinygrad.dtype import dtypes, DType, trunc_lut
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.shape.symbolic import sint, Variable
 from enum import Enum, auto
@@ -40,7 +40,7 @@ python_alu = {
   BinaryOps.DIV: lambda x,y: int(x/y) if isinstance(x, int) else (x/y if y != 0 else math.nan),
   TernaryOps.WHERE: lambda x,y,z: y if x else z}
 
-def exec_alu(arg, dtype, p): return trunc_lut[dtype](dtype.itemsize, cast_scalar(python_alu[arg](*p), dtype))
+def exec_alu(arg, dtype, p): return trunc_lut[dtype](dtype.itemsize, python_alu[arg](*p))
 
 def uop_alu_resolve(u:UOp) -> sint:
   if u.uop is UOps.CONST: return u.arg
