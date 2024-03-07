@@ -1,6 +1,6 @@
 # https://github.com/mlcommons/training/blob/e237206991d10449d9675d95606459a3cb6c21ad/image_classification/tensorflow2/lars_util.py
 # changes: commented out logging
-# changes: deleted batch size, steps_per_epoch parameters; use warmup_steps instead of warmup_epochs, all parameters are not optional
+# changes: convert_to_tensor_v2 -> convert_to_tensor
 # changes: extend from tf.python.keras.optimizer_v2.learning_rate_schedule.LearningRateScheduler
 
 # Copyright 2018 The TensorFlow Authors. All Rights Reserved.
@@ -61,46 +61,46 @@ class PolynomialDecayWithWarmup(learning_rate_schedule.LearningRateSchedule):
 
   def __init__(
       self,
-      # batch_size,
-      # steps_per_epoch,
+      batch_size,
+      steps_per_epoch,
       train_steps,
-      initial_learning_rate,
-      end_learning_rate,
-      warmup_steps,
+      initial_learning_rate=None,
+      end_learning_rate=None,
+      warmup_epochs=None,
       compute_lr_on_cpu=False,
       name=None):
     """Applies a polynomial decay to the learning rate with warmup."""
     super(PolynomialDecayWithWarmup, self).__init__()
 
-    # self.batch_size = batch_size
-    # self.steps_per_epoch = steps_per_epoch
+    self.batch_size = batch_size
+    self.steps_per_epoch = steps_per_epoch
     self.train_steps = train_steps
     self.name = name
     self.learning_rate_ops_cache = {}
     self.compute_lr_on_cpu = compute_lr_on_cpu
 
-    # if batch_size < 16384:
-    #   self.initial_learning_rate = 10.0
-    #   warmup_epochs_ = 5
-    # elif batch_size < 32768:
-    #   self.initial_learning_rate = 25.0
-    #   warmup_epochs_ = 5
-    # else:
-    #   self.initial_learning_rate = 31.2
-    #   warmup_epochs_ = 25
+    if batch_size < 16384:
+      self.initial_learning_rate = 10.0
+      warmup_epochs_ = 5
+    elif batch_size < 32768:
+      self.initial_learning_rate = 25.0
+      warmup_epochs_ = 5
+    else:
+      self.initial_learning_rate = 31.2
+      warmup_epochs_ = 25
 
     # Override default poly learning rate and warmup epochs
-    # if initial_learning_rate:
-    #   self.initial_learning_rate = initial_learning_rate
+    if initial_learning_rate:
+      self.initial_learning_rate = initial_learning_rate
 
-    # if end_learning_rate:
-    #   self.end_learning_rate = end_learning_rate
-    # else:
-    #   self.end_learning_rate = 0.0001
+    if end_learning_rate:
+      self.end_learning_rate = end_learning_rate
+    else:
+      self.end_learning_rate = 0.0001
 
-    # if warmup_epochs is not None:
-    #   warmup_epochs_ = warmup_epochs
-    # self.warmup_epochs = warmup_epochs_
+    if warmup_epochs is not None:
+      warmup_epochs_ = warmup_epochs
+    self.warmup_epochs = warmup_epochs_
 
     """
     opt_name = FLAGS.optimizer.lower()
@@ -115,20 +115,17 @@ class PolynomialDecayWithWarmup(learning_rate_schedule.LearningRateSchedule):
                          warmup_epochs_)
     mlp_log.mlperf_print('{}_opt_end_learning_rate'.format(opt_name),
                          self.end_learning_rate)
+    """
     warmup_steps = warmup_epochs_ * steps_per_epoch
     self.warmup_steps = tf.cast(warmup_steps, tf.float32)
     self.decay_steps = train_steps - warmup_steps + 1
+    """
     mlp_log.mlperf_print('{}_opt_learning_rate_decay_steps'.format(opt_name),
                          int(self.decay_steps))
     mlp_log.mlperf_print(
         '{}_opt_learning_rate_decay_poly_power'.format(opt_name), 2.0)
     mlp_log.mlperf_print('{}_opt_momentum'.format(opt_name), FLAGS.momentum)
     """
-
-    self.initial_learning_rate = initial_learning_rate
-    self.end_learning_rate = end_learning_rate
-    self.warmup_steps = tf.cast(warmup_steps, tf.float32)
-    self.decay_steps = train_steps - warmup_steps + 1
 
     self.poly_rate_scheduler = tf.keras.optimizers.schedules.PolynomialDecay(
         initial_learning_rate=self.initial_learning_rate,
@@ -177,6 +174,6 @@ class PolynomialDecayWithWarmup(learning_rate_schedule.LearningRateSchedule):
         'train_steps': self.train_steps,
         'initial_learning_rate': self.initial_learning_rate,
         'end_learning_rate': self.end_learning_rate,
-        'warmup_steps': self.warmup_steps,
+        'warmup_epochs': self.warmup_epochs,
         'name': self.name,
     }
