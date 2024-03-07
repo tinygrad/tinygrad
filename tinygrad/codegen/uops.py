@@ -59,9 +59,9 @@ def keep_doing_if_did_something(fn):
   while fn(): pass
 
 class UOpGraph:
-  def __init__(self):
+  def __init__(self, start_uops:Optional[List[UOp]]=None):
     # list of uops
-    self.uops: List[UOp] = []
+    self.uops: List[UOp] = [] if start_uops is None else start_uops
 
     # global uop cache
     self.saved_exprs: Dict[Tuple, UOp] = dict()
@@ -91,7 +91,8 @@ class UOpGraph:
         if arg is BinaryOps.ADD and vin[1].uop is UOps.ALU and vin[1].arg is UnaryOps.NEG:
           return self.add(UOps.ALU, dtype, (vin[0], vin[1].vin[0]), BinaryOps.SUB, cachable, insert_before)
         # constant folding
-        if arg is UnaryOps.NEG and vin[0].uop is UOps.CONST: return self.add(UOps.CONST, dtype, arg=-vin[0].arg, insert_before=insert_before)
+        if arg is UnaryOps.NEG and vin[0].uop is UOps.CONST:
+          return self.add(UOps.CONST, dtype, arg=-vin[0].arg if dtype != dtypes.bool else not vin[0].arg, insert_before=insert_before)
         if arg is TernaryOps.WHERE and vin[1] == vin[2]: return vin[1] # a conditional with the same results either way is a noop
         if arg is TernaryOps.WHERE and vin[0].uop is UOps.CONST: return vin[1] if vin[0].arg else vin[2]
         if arg is BinaryOps.MUL and vin[0].uop is UOps.CONST and vin[1].uop is UOps.CONST and dtype is not None and dtypes.is_float(dtype):
