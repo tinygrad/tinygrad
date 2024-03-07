@@ -138,6 +138,29 @@ class TestBFloat16DType(unittest.TestCase):
 
   # torch.tensor([10000, -1, -1000, -10000, 20]).type(torch.bfloat16)
 
+  def test_bf16(self):
+    t = Tensor([10000, -1, -1000, -10000, 20]).cast(dtypes.bfloat16)
+    t.realize()
+    back = t.cast(dtypes.float32)
+    assert tuple(back.numpy().tolist()) == (9984., -1, -1000, -9984, 20)
+
+  @unittest.skipIf(getenv("HIPCPU"), "no real HIP device exists in CI")
+  def test_bf16_disk_write_read(self):
+    t = Tensor([10000, -1, -1000, -10000, 20]).cast(dtypes.float32)
+    t.to(f"disk:{temp('f32')}").realize()
+
+    # hack to "cast" f32 -> bf16
+    with open(temp('f32'), "rb") as f: dat = f.read()
+    adat = b''.join([dat[i+2:i+4] for i in range(0, len(dat), 4)])
+    with open(temp('bf16'), "wb") as f: f.write(adat)
+
+    t = Tensor.empty(5, dtype=dtypes.bfloat16, device=f"disk:{temp('bf16')}").llvm().realize()
+    back = t.cast(dtypes.float32)
+    assert tuple(back.numpy().tolist()) == (9984., -1, -1000, -9984, 20)
+
+
+@unittest.skipUnless(Device.DEFAULT in ["HIP"], "bfloat16 not supported")
+class TestBFloat16DTypeCast(unittest.TestCase):
   def test_f16_to_bf16_conversion(self):
     original_tensor = Tensor([1.0, 2.0, 3.0], dtype=dtypes.float16)
     converted_tensor = original_tensor.cast(dtypes.bfloat16)
@@ -164,26 +187,6 @@ class TestBFloat16DType(unittest.TestCase):
     random_values = Tensor(np.random.uniform(-65504, 65504, 1000), dtype=dtypes.float16)
     converted = random_values.cast(dtypes.bfloat16).cast(dtypes.float32)
     np.testing.assert_allclose(converted.numpy(), random_values.cast(dtypes.float32).numpy(), rtol=1e-2, atol=1e-3)
-
-  def test_bf16(self):
-    t = Tensor([10000, -1, -1000, -10000, 20]).cast(dtypes.bfloat16)
-    t.realize()
-    back = t.cast(dtypes.float32)
-    assert tuple(back.numpy().tolist()) == (9984., -1, -1000, -9984, 20)
-
-  @unittest.skipIf(getenv("HIPCPU"), "no real HIP device exists in CI")
-  def test_bf16_disk_write_read(self):
-    t = Tensor([10000, -1, -1000, -10000, 20]).cast(dtypes.float32)
-    t.to(f"disk:{temp('f32')}").realize()
-
-    # hack to "cast" f32 -> bf16
-    with open(temp('f32'), "rb") as f: dat = f.read()
-    adat = b''.join([dat[i+2:i+4] for i in range(0, len(dat), 4)])
-    with open(temp('bf16'), "wb") as f: f.write(adat)
-
-    t = Tensor.empty(5, dtype=dtypes.bfloat16, device=f"disk:{temp('bf16')}").llvm().realize()
-    back = t.cast(dtypes.float32)
-    assert tuple(back.numpy().tolist()) == (9984., -1, -1000, -9984, 20)
 
 class TestHalfDtype(TestDType): DTYPE = dtypes.half
 
