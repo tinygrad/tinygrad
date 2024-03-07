@@ -235,7 +235,7 @@ class UOpGraph:
       for where in [op for op in self.uops[self.uops.index(loop_op):self.uops.index(phi)+1] if op.uop == UOps.ALU and op.arg == TernaryOps.WHERE]:
         comparison = where.vin[0]
         phi_parent = next((u for u in self.get_recursive_children(where) if u.uop is UOps.PHI), None)
-        if not dtypes.is_int(where.dtype) or phi_parent is None or where.vin[1].arg != 1 or where.vin[2].arg != 0: break
+        if where.dtype is None or not dtypes.is_int(where.dtype) or phi_parent is None or where.vin[1].arg != 1 or where.vin[2].arg != 0: break
         try: factored = loop_factor(get_recursive_parents, loop_to_name, comparison.vin[0], NumNode(comparison.vin[1].arg), loop_op)
         except (RuntimeError, StopIteration, AssertionError): break
         final_value = NumNode(loop_op.vin[1].arg-1) - factored
