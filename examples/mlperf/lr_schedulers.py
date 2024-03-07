@@ -12,7 +12,7 @@ class PolynomialDecayWithWarmup(LR_Scheduler):
     self.initial_lr, self.end_lr, self.epochs, self.power = initial_lr, end_lr, train_steps, power
 
     # set lr for first warmup step
-    self.optimizer.lr.assign(lr.cast(self.optimizer.lr.dtype) if isinstance(lr := self.get_lr(), Tensor) else lr).realize()
+    self.optimizer.lr.assign(self.get_lr()).realize()
 
   def get_lr(self):
     # LR is 0 on the first step, matching the reference.
