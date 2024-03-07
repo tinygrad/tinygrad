@@ -224,7 +224,7 @@ class TestLinearizer(unittest.TestCase):
     sched = [si for si in create_schedule([t.lazydata]) if si.ast.op not in LoadOps]
     assert len(sched) == 1
     lin = Linearizer(sched[0].ast)
-    assert len([u for u in lin.linearize().uops if u.uop in {UOps.LOOP, UOps.SPECIAL}]) == 1, "either a special or a loop exists"
+    assert len([u for u in lin.linearize().uops if u.uop in {UOps.LOOP, UOps.SPECIAL}]) == 1, "either a special or a loop exists, but not both"
 
 def helper_realized_ast(r:Tensor):
   s = create_schedule([r.lazydata])
