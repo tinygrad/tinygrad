@@ -127,10 +127,9 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str
         depth += 1
       elif uop is UOps.ALU:
         # remove parens if ALU types are the same. TODO: can do more here
-        if vin[0].uop is UOps.ALU and vin[0].arg == args and args in {BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL, BinaryOps.XOR}:
-          val = lang.code_for_op[args](strip_parens(r[vin[0]]), *[r[x] for x in vin[1:]], dtype)
-        else:
-          val = lang.code_for_op[args](*[r[x] for x in vin] + [dtype])
+        if args in {BinaryOps.ADD,BinaryOps.MUL,BinaryOps.XOR}: operands = [strip_parens(r[v]) if v.arg == args else r[v]for v in vin]
+        else: operands = [r[v] for v in vin]
+        val = lang.code_for_op[args](*operands, dtype)
         assert child_count[u] != 0, f"childless ALU op found {u}"
         # TODO: fix index rendering issue. fix clang nested max macro issue
         if child_count[u] <= 1 and args != BinaryOps.MAX and not getenv("EXPAND_SSA"): r[u] = val
