@@ -1,21 +1,66 @@
+from typing import Dict, Set
 import yaml
-from tinygrad.codegen.uops import UOpGraph, UOps
-
+from tinygrad.codegen.uops import UOpGraph, UOps, UOp
+from tinygrad.ops import BinaryOps
+from tinygrad.dtype import dtypes
 
 def uops_to_rdna(function_name:str, uops:UOpGraph) -> str:
-  print(function_name)
-  args = []
-
-  #uops.print()
-
+  replace: Dict[UOp, UOp] = {}
+  seen: Set[UOp] = set()
   for u in uops:
-    if u.uop == UOps.DEFINE_GLOBAL:
+    if u in seen: continue
+    seen.add(u)
+    for o,n in replace.items():
+      if o in u.vin and u is not n:
+        u.vin = tuple(n if x == o else x for x in u.vin)
+    # pointer indexing
+    if u.uop in {UOps.LOAD, UOps.STORE} and u.vin[0].dtype.itemsize > 1:
+      val = uops.add(UOps.CONST, dtypes.int, tuple(), arg=u.vin[0].dtype.itemsize, insert_before=uops.uops.index(u))
+      ptr = uops.add(UOps.ALU, dtypes.int, (u.vin[1], val), arg=BinaryOps.MUL, insert_before=uops.uops.index(u))
+      u.vin = (u.vin[0], ptr) + u.vin[2:]
+  uops.print()
+
+  args = []
+  ins = []
+
+  v_cnt, s_cnt = 3, 2
+
+  r: Dict[UOp, str] = {}
+  for u in uops:
+    if u.uop == UOps.SPECIAL:
+      if u.arg[1] == "lidx0":
+        r[u] = 'v0'
+    elif u.uop == UOps.CONST:
+      #r[u] = u.arg
+      r[u] = f"s{s_cnt}"
+      s_cnt += 1
+      ins.append(f"s_mov_b32 {r[u]}, {u.arg}")
+    elif u.uop == UOps.ALU:
+      if u.arg == BinaryOps.ADD:
+        r[u] = f"v{v_cnt}"
+        v_cnt += 1
+        ins.append(f"v_add_f32_e32 {r[u]}, {r[u.vin[0]]}, {r[u.vin[1]]}")
+      if u.arg == BinaryOps.MUL:
+        r[u] = f"v{v_cnt}"
+        v_cnt += 1
+        ins.append(f"v_mul_u32_u24 {r[u]}, {r[u.vin[0]]}, {r[u.vin[1]]}")
+    elif u.uop == UOps.LOAD:
+      r[u] = f"v{v_cnt}"
+      v_cnt += 1
+      ins.append(f"global_load_b32 {r[u]}, {r[u.vin[1]]}, {r[u.vin[0]]}")
+      ins.append("s_waitcnt vmcnt(0)")
+    elif u.uop == UOps.STORE:
+      ins.append(f"global_store_b32 {r[u.vin[1]]}, {r[u.vin[2]]}, {r[u.vin[0]]}")
+    elif u.uop == UOps.DEFINE_GLOBAL:
       i = u.arg[0]
       args.append({'.address_space': 'global', '.name': f'buf_{i}', '.offset': i*8, '.size': 8,
                    '.type_name': u.dtype.name+"*", '.value_kind': 'global_buffer'})
-
-  v_cnt, s_cnt = 8, 8
-
+      r[u] = f"s[{s_cnt}:{s_cnt+1}]"
+      s_cnt += 2
+      ins.append(f"s_load_b64 {r[u]}, s[0:1], {i*8}")
+      ins.append("s_waitcnt lgkmcnt(0)")
+    else:
+      raise NotImplementedError(f"can't render {u.uop}")
 
   # *** boilerplate rendering ***
 
@@ -59,7 +104,6 @@ def uops_to_rdna(function_name:str, uops:UOpGraph) -> str:
 {function_name}:
 """
 
-  ins = []
   ins += ['s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)', 's_endpgm', 's_code_end']
   return ".amdgpu_metadata\n" + yaml.dump(metadata) + ".end_amdgpu_metadata" + \
          boilerplate_start + "\n" + '\n'.join("%s %d" % x for x in kernel_desc.items()) + "\n" + code_start + \
