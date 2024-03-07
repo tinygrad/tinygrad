@@ -232,7 +232,7 @@ class UOpGraph:
         phi_parent = next((u for u in self.get_recursive_children(where) if u.uop is UOps.PHI), None)
         if not dtypes.is_int(where.dtype) or phi_parent is None or where.vin[1].arg != 1 or where.vin[2].arg != 0: break
         try: factored = self.loop_factor(get_recursive_parents, loop_to_name, comparison.vin[0], NumNode(comparison.vin[1].arg), loop_op)
-        except (RuntimeError, StopIteration): break
+        except (RuntimeError, StopIteration, AssertionError): break
         final_value = NumNode(loop_op.vin[1].arg-1) - factored
         self.uops, after_where_ops = self.uops[:(where_index:=self.uops.index(where))], self.uops[where_index:]
         rendered = final_value.render(render_ops, ctx)
@@ -242,14 +242,14 @@ class UOpGraph:
       get_recursive_parents.cache_clear()
       for phi in [op for op in self.uops[self.uops.index(loop_op):self.uops.index(endloop)] if op.uop == UOps.PHI]:
         if loop_op not in get_recursive_parents(phi.vin[1]):
-          if DEBUG >= 5: print(f"replacing phi")
+          if DEBUG >= 5: print("replacing phi")
           self.replace_and_remove_op(phi, phi.vin[1])
           self.uops.remove((accumulator:=phi.vin[0]))
           for alu_with_accum in [op for op in self.uops if accumulator in op.vin]:
             self.replace_and_remove_op(alu_with_accum, next(op for op in alu_with_accum.vin if op != accumulator))
       self.remove_childless({UOps.ENDIF, UOps.ENDLOOP})
       if all([loop_op not in u.vin for u in self.uops[self.uops.index(loop_op):self.uops.index(endloop)]]):
-        if DEBUG >= 5: print(f"removing loop")
+        if DEBUG >= 5: print("removing loop")
         self.uops.remove(loop_op)
         self.uops.remove(endloop)
 
