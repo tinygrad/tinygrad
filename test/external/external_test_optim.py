@@ -123,7 +123,7 @@ class ExternalTestOptim(unittest.TestCase):
       'train_steps': 10,
       'warmup': 3
     }, 1e-5, 1e-5)
-  def test_lars_polylr_aggressive(self):
+  def test_lars_polylr_resnet(self):
     self._test_lars_polylr(10, {'lr': 10.4}, {
       'initial_lr': 10.4,
       'end_lr': 1e-4,
