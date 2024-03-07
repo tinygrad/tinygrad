@@ -148,6 +148,7 @@ class TestMultiTensor(unittest.TestCase):
     out.mean().backward()
     #for p in get_parameters(conv): p.grad.realize()
     optim.step()
+    out.numpy()
 
   def test_lr_scheduler_OneCycleLR(self):
     from extra.lr_scheduler import OneCycleLR
@@ -520,6 +521,7 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
     optim.zero_grad()
     out.mean().backward()
     optim.step()
+    out.numpy()
 
   def test_unsynced_backprop_standalone_bn(self):
     from extra.lr_scheduler import OneCycleLR
