@@ -8,7 +8,7 @@ Despite being a tiny library, tinygrad is capable of doing a lot of things. From
 
 You can either pass in the URL of a picture to discover what it is:
 ```sh
-python3 examples/efficientnet.py https://media.istockphoto.com/photos/hen-picture-id831791190
+python3 examples/efficientnet.py ./test/models/efficientnet/Chicken.jpg
 ```
 Or, if you have a camera and OpenCV installed, you can detect what is in front of you:
 ```sh

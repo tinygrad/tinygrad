@@ -124,7 +124,7 @@ class TestSafetensors(unittest.TestCase):
       path = temp(f"ones.{dtype}.safetensors")
       ones = Tensor.rand((10,10), dtype=dtype)
       safe_save(get_state_dict(ones), path)
-      assert ones == list(safe_load(path).values())[0]
+      np.testing.assert_equal(ones.numpy(), list(safe_load(path).values())[0].numpy())
 
   def test_load_supported_types(self):
     import torch
