@@ -78,7 +78,13 @@ def step_tf(optim, steps=1, kwargs={}, scheduler=None, schedopts=None):
 
 # skip_list=True -> skip W
 def create_tiny_lars(params, lr, skip_list=False): return LARS(params, lr, skip_list=[params[1]] if skip_list else None)
-def create_tf_lars(lr, skip_list=False): return LARSOptimizer(lr, skip_list="W" if skip_list else None)
+def create_tf_lars(lr, skip_list=False): return LARSOptimizer(lr, skip_list=["W"] if skip_list else None)
+
+def create_tf_polylr(initial_lr, end_lr, train_steps, warmup, power=2):
+  assert power == 2
+  return PolynomialDecayWithWarmup_tf(1, 1, train_steps,
+                                      initial_learning_rate=initial_lr, end_learning_rate=end_lr,
+                                      warmup_epochs=warmup)
 
 class ExternalTestOptim(unittest.TestCase):
   def _test_optim(self, tinygrad_optim, tensorflow_optim, steps, opts, atol, rtol, tiny_sched=None, tf_sched=None, schedopts=None):
@@ -90,7 +96,7 @@ class ExternalTestOptim(unittest.TestCase):
   def _test_lars(self, steps, opts, atol, rtol): self._test_optim(create_tiny_lars, create_tf_lars, steps, opts, atol, rtol)
   def _test_lars_polylr(self, steps, opts, schedopts, atol, rtol):
     self._test_optim(create_tiny_lars, create_tf_lars, steps, opts, atol, rtol,
-                     tiny_sched=PolynomialDecayWithWarmup, tf_sched=PolynomialDecayWithWarmup_tf, schedopts=schedopts)
+                     tiny_sched=PolynomialDecayWithWarmup, tf_sched=create_tf_polylr, schedopts=schedopts)
 
   def test_lamb(self): self._test_lamb(1, {'lr': 0.001}, 1e-5, 0)
   def test_lamb_high_lr(self): self._test_lamb(1, {'lr': 10}, 1e-5, 1e-5)
@@ -106,10 +112,10 @@ class ExternalTestOptim(unittest.TestCase):
 
   def test_lars_polylr(self):
     self._test_lars_polylr(10, {'lr': 1.0}, {
+      'initial_lr': 1.0,
+      'end_lr': 1e-4,
       'train_steps': 10,
-      'initial_learning_rate': 1.0,
-      'end_learning_rate': 1e-4,
-      'warmup_steps': 3
+      'warmup': 3
     }, 1e-5, 1e-5)
 
 if __name__ == '__main__':
