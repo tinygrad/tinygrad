@@ -119,7 +119,7 @@ class MetalDevice(Compiled):
   def stopCapture():
     if MetalDevice.captureManager:
       MetalDevice.captureManager.stopCapture()
-      print(f"Saved GPU trace to /tmp/tinygrad_{multiprocessing.current_process().name}.gputrace")
+      print(f"Saved GPU trace to /tmp/tinygrad_{multiprocessing.current_process().name}.gputrace\nYou can open it in Xcode.")
 
   def synchronize(self):
     if len(self.mtl_buffers_in_flight) > 0:
