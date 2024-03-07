@@ -183,7 +183,7 @@ def group_barriers(items: List[ScheduleItem]) -> List[ScheduleItem]:
     else:
       sis.append([si])
 
-  # Toposort FIXME: this part is cringe
+  # Toposort
   graph: Dict[int, Set[int]] = {}
   for i,sil in enumerate(sis):
     graph[i] = set()

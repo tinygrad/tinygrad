@@ -13,6 +13,9 @@ def ring_allreduce(op: ReduceOps, lbs: List[LazyBuffer]):
   bop = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[op]
 
   n_lbs, dim = len(lbs), prod(lbs[0].shape)
+  # Ring allreduce doesn't provide a benefit with only 2 nodes or where number of elements is less than number of nodes (can't chunk)
+  # so just fallback to naive allreduce to save on kernel dispatch, chunking and reassembling chunks.
+  if n_lbs < 3 or dim < n_lbs: return [functools.reduce(lambda x,y: x.e(bop, y), [x.copy_to_device(lb.device) for x in lbs]) for lb in lbs]
   base, left = dim // n_lbs, dim % n_lbs
   c_lens = [base + 1 if left - i > 0 else base for i in range(n_lbs)]
   acc = 0

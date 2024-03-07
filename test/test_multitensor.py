@@ -100,7 +100,6 @@ class TestMultiTensor(unittest.TestCase):
     random.seed(41)
     for it in range(100):
       for n in range(2, 4+1):
-        Tensor.manual_seed(random.randint(0, 1337))
         t = Tensor.rand(tuple([(n if i == 0 else 1) * randint(1, 10) for i in range(randint(1, 4))])).shard_(tuple([d0, d1, d2, d3][:n]), 0)
         a = Tensor(MultiLazyBuffer(naive_allreduce(t.lazydata.lbs), 0))
         b = Tensor(MultiLazyBuffer(ring_allreduce(ReduceOps.SUM, t.lazydata.lbs), 0))
@@ -108,7 +107,7 @@ class TestMultiTensor(unittest.TestCase):
         mean_err = diff.reshape((prod(diff.shape),)).abs().mean().numpy()
         max_err = diff.reshape((prod(diff.shape),)).abs().max().numpy()
         assert mean_err < 1e-6, f"big mean error, iteration {it}_{n}"
-        assert max_err < 1e-5, f"big max error, iteration {it}_{n}"
+        assert max_err < 1e-6, f"big max error, iteration {it}_{n}"
 
 
   def _test_matmul_shard_axis(self, shard_x, shard_w, device):
@@ -232,7 +231,7 @@ class TestMultiTensor(unittest.TestCase):
     assert shard_output.lazydata.lbs[0].shape == (1, 1000)
     assert shard_output.lazydata.lbs[1].shape == (1, 1000)
     shard_output_np = shard_output.numpy()
-    np.testing.assert_allclose(real_output, shard_output_np, atol=1e-5, rtol=1e-5)
+    np.testing.assert_allclose(real_output, shard_output_np, atol=1e-6, rtol=1e-6)
 
   def test_multi_tensor_jit_param(self):
     @TinyJit
