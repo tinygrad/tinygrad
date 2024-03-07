@@ -94,8 +94,8 @@ def create_tf_polylr(initial_lr, end_lr, train_steps, warmup, power=2):
 
 class ExternalTestOptim(unittest.TestCase):
   def _test_optim(self, tinygrad_optim, tensorflow_optim, steps, opts, atol, rtol, tiny_sched=None, tf_sched=None, schedopts=None, do_optim=True):
-    for x,y in zip(step(tinygrad_optim, steps=steps, kwargs=opts, scheduler=tiny_sched, schedopts=schedopts, do_optim=True),
-                   step_tf(tensorflow_optim, steps=steps, kwargs=opts, scheduler=tf_sched, schedopts=schedopts, do_optim=True)):
+    for x,y in zip(step(tinygrad_optim, steps=steps, kwargs=opts, scheduler=tiny_sched, schedopts=schedopts, do_optim=do_optim),
+                   step_tf(tensorflow_optim, steps=steps, kwargs=opts, scheduler=tf_sched, schedopts=schedopts, do_optim=do_optim)):
       np.testing.assert_allclose(x, y, atol=atol, rtol=rtol)
 
   def _test_lamb(self, steps, opts, atol, rtol): self._test_optim(LAMB, tfa.optimizers.LAMB, steps, opts, atol, rtol)
@@ -123,13 +123,24 @@ class ExternalTestOptim(unittest.TestCase):
       'train_steps': 10,
       'warmup': 3
     }, 1e-5, 1e-5)
+  def test_lars_polylr_large(self):
+    self._test_lars_polylr(100, {'lr': 10.0}, {
+      'initial_lr': 10.0,
+      'end_lr': 1e-5,
+      'train_steps': 100,
+      'warmup': 43
+    }, 1e-5, 1e-5, do_optim=False)
+  @unittest.skip("very slow")
   def test_lars_polylr_resnet(self):
-    self._test_lars_polylr(10, {'lr': 10.4}, {
+    steps_per_epoch = 2053
+    epochs = 45
+    warmup_epochs = 5
+    self._test_lars_polylr(steps_per_epoch * epochs, {'lr': 10.4}, {
       'initial_lr': 10.4,
       'end_lr': 1e-4,
       # step counts for BS=624 EPOCHS=45 resnet
-      'train_steps': 2053 * 45,
-      'warmup': 2053 * 5,
+      'train_steps': steps_per_epoch * epochs,
+      'warmup': steps_per_epoch * warmup_epochs,
     }, 1e-5, 1e-5, do_optim=False)
 
 if __name__ == '__main__':
