@@ -67,10 +67,12 @@ def step_tf(optim, steps=1, kwargs={}, scheduler=None, schedopts=None):
   for _ in range(steps):
     with tf.GradientTape() as tape:
       out = net.forward()
+
     lr_t = optim.learning_rate
     # refer to test/external/mlperf_resnet/lars_optimizer.py:_prepare_local
     if callable(lr_t): lr_t = lr_t(math_ops.cast(optim.iterations, tf.float32))
     lrs.append(lr_t)
+
     grads = tape.gradient(out, [net.x, net.W])
     optim.apply_gradients(zip(grads, [net.x, net.W]))
     # optim calls scheduler in tf
