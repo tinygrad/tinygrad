@@ -48,6 +48,7 @@ class MetalProgram:
   def __call__(self, *bufs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
     assert prod(local_size) <= self.pipeline_state.maxTotalThreadsPerThreadgroup(),f"local size {local_size} bigger than {self.pipeline_state.maxTotalThreadsPerThreadgroup()} with exec width {self.pipeline_state.threadExecutionWidth()} memory length {self.pipeline_state.staticThreadgroupMemoryLength()}"  # noqa: E501
     command_buffer = self.device.mtl_queue.commandBuffer()
+    command_buffer.setLabel_(f"{self.device.dname} {self.fxn.name()}")
     encoder = command_buffer.computeCommandEncoder()
     encoder.setComputePipelineState_(self.pipeline_state)
     for i,a in enumerate(bufs): encoder.setBuffer_offset_atIndex_(a, 0, i)
@@ -63,13 +64,17 @@ class MetalProgram:
 class MetalAllocator(LRUAllocator):
   def __init__(self, device:MetalDevice):
     self.device:MetalDevice = device
+    self.i = 0
     super().__init__()
   def _alloc(self, size:int) -> Any:
     ret = self.device.device.newBufferWithLength_options_(size, Metal.MTLResourceStorageModeShared)
     if ret is None: raise MemoryError(f"Metal OOM while allocating {size=}")
+    ret.setLabel_(f"{self.device.dname} buf {(self.i)}")
+    self.i += 1
     return ret
   def transfer(self, dest:Any, src:Any, sz:int, **kwargs):
     command_buffer = self.device.mtl_queue.commandBuffer()
+    command_buffer.setLabel_(f"Transfer")
     encoder = command_buffer.blitCommandEncoder()
     encoder.copyFromBuffer_sourceOffset_toBuffer_destinationOffset_size_(src, 0, dest, 0, sz)
     encoder.endEncoding()
@@ -91,6 +96,7 @@ class MetalDevice(Compiled):
 
   def __init__(self, device:str):
     self.device = Metal.MTLCreateSystemDefaultDevice()
+    self.dname = device
 
     if MTL_CAPTURE_ENABLED and not MetalDevice.captureManager:
       MetalDevice.captureManager = Metal.MTLCaptureManager.sharedCaptureManager()
@@ -98,11 +104,11 @@ class MetalDevice(Compiled):
       captureDescriptor.setDestination_(Metal.MTLCaptureDestination(Metal.MTLCaptureDestinationGPUTraceDocument))
       captureDescriptor.setOutputURL_(Foundation.NSURL.URLWithString_(f"file:/tmp/tinygrad_{multiprocessing.current_process().name}.gputrace"))
       captureDescriptor.setCaptureObject_(self.device)
-      success, error = MetalDevice.captureManager.startCaptureWithDescriptor_error_(captureDescriptor, None)
-      assert success, error
+      unwrap2(MetalDevice.captureManager.startCaptureWithDescriptor_error_(captureDescriptor, None))
       atexit.register(MetalDevice.stopCapture)
 
     self.mtl_queue = self.device.newCommandQueueWithMaxCommandBufferCount_(1024)
+    self.mtl_queue.setLabel_(self.dname)
     self.mtl_buffers_in_flight: List[Any] = []
     self.mv_in_metal: List[memoryview] = []
     from tinygrad.runtime.graph.metal import MetalGraph
@@ -116,6 +122,10 @@ class MetalDevice(Compiled):
       print(f"Saved GPU trace to /tmp/tinygrad_{multiprocessing.current_process().name}.gputrace")
 
   def synchronize(self):
-    for cbuf in self.mtl_buffers_in_flight: wait_check(cbuf)
+    if len(self.mtl_buffers_in_flight) > 0:
+      self.mtl_buffers_in_flight[-1].waitUntilCompleted()
+      for cbuf in self.mtl_buffers_in_flight:
+        if (error := cbuf.error()) is not None:
+          raise RuntimeError(error)
+      self.mtl_buffers_in_flight.clear()
     self.mv_in_metal.clear()
-    self.mtl_buffers_in_flight.clear()
