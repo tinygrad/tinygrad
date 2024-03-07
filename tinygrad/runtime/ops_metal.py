@@ -74,7 +74,7 @@ class MetalAllocator(LRUAllocator):
     return ret
   def transfer(self, dest:Any, src:Any, sz:int, **kwargs):
     command_buffer = self.device.mtl_queue.commandBuffer()
-    command_buffer.setLabel_(f"Transfer")
+    command_buffer.setLabel_("Transfer")
     encoder = command_buffer.blitCommandEncoder()
     encoder.copyFromBuffer_sourceOffset_toBuffer_destinationOffset_size_(src, 0, dest, 0, sz)
     encoder.endEncoding()
