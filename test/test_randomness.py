@@ -57,6 +57,13 @@ class TestRandomness(unittest.TestCase):
   def test_rand(self):
     self.assertFalse(normal_test(Tensor.rand))
     self.assertTrue(equal_distribution(Tensor.rand, torch.rand, lambda x: np.random.rand(*x)))
+    
+  def test_rand_half(self):
+    # note: this has to be large enough to encounter rounding errors due to lost precision
+    N = 128
+    x = Tensor.rand((2, N, N), dtype=dtypes.half)
+    ones = np.take(x.realize().numpy(), np.where(x.realize().numpy() == 1))
+    self.assertTrue(ones.size == 0)
 
   def test_randn(self):
     self.assertTrue(normal_test(Tensor.randn))
