@@ -3,7 +3,7 @@ import functools, math, operator
 from typing import List, Set, Optional, Tuple, Any, Dict, DefaultDict, Callable, cast
 from collections import defaultdict
 from tinygrad.helpers import DEBUG, flatten, all_same
-from tinygrad.dtype import dtypes, DType
+from tinygrad.dtype import dtypes, DType, trunc_lut, cast_scalar
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.shape.symbolic import sint, Variable
 from enum import Enum, auto
@@ -40,11 +40,7 @@ python_alu = {
   BinaryOps.DIV: lambda x,y: int(x/y) if isinstance(x, int) else (x/y if y != 0 else math.nan),
   TernaryOps.WHERE: lambda x,y,z: y if x else z}
 
-def exec_alu(arg, dtype, p):
-  return python_alu[arg](*p)
-  #if not dtypes.is_int(dtype): return ret
-  #adjusted = 0 if dtypes.is_unsigned(dtype) else 2 ** (dtype.itemsize * 8 - 1)
-  #return (ret + adjusted) % 2 ** (dtype.itemsize * 8) - adjusted
+def exec_alu(arg, dtype, p): return trunc_lut[dtype](dtype.itemsize, cast_scalar(python_alu[arg](*p), dtype))
 
 def uop_alu_resolve(u:UOp) -> sint:
   if u.uop is UOps.CONST: return u.arg
@@ -87,13 +83,11 @@ class UOpGraph:
         # rewrites. NOTE: the rewritten NEG op is still around...
         if arg is BinaryOps.ADD and vin[1].uop is UOps.ALU and vin[1].arg is UnaryOps.NEG:
           return self.add(UOps.ALU, dtype, (vin[0], vin[1].vin[0]), BinaryOps.SUB, cachable, insert_before)
-        # constant folding
-        if arg is UnaryOps.NEG and vin[0].uop is UOps.CONST:
-          return self.add(UOps.CONST, dtype, arg=-vin[0].arg if dtype != dtypes.bool else not vin[0].arg, insert_before=insert_before)
         if arg is TernaryOps.WHERE and vin[1] == vin[2]: return vin[1] # a conditional with the same results either way is a noop
+        # constant folding
         if arg is TernaryOps.WHERE and vin[0].uop is UOps.CONST: return vin[1] if vin[0].arg else vin[2]
-        if arg is BinaryOps.MUL and vin[0].uop is UOps.CONST and vin[1].uop is UOps.CONST and dtype is not None and dtypes.is_float(dtype):
-          return self.add(UOps.CONST, dtype, arg=vin[0].arg * vin[1].arg, insert_before=insert_before)
+        if all(x.uop is UOps.CONST for x in vin):
+          return self.add(UOps.CONST, dtype, arg=exec_alu(arg, dtype, [x.arg for x in vin]), insert_before=insert_before)
         # zero folding
         for x in [0,1]:
           if arg is BinaryOps.ADD and vin[x].uop is UOps.CONST and vin[x].arg == 0.0: return vin[1-x]

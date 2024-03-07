@@ -43,11 +43,14 @@ def cast_scalar(scalar: Scalar, dtype:DType):
 
 class dtypes:
   @staticmethod
-  def is_float(x: DType) -> bool: return x.scalar() in (dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64)
-  @staticmethod # static methds on top, or bool in the type info will refer to dtypes.bool
-  def is_int(x: DType) -> bool: return x.scalar() in (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64) or dtypes.is_unsigned(x)
+  @functools.lru_cache(None)
+  def is_float(x: DType) -> bool: return x.scalar() in set((dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64))
+  @staticmethod # static methods on top, or bool in the type info will refer to dtypes.bool
+  @functools.lru_cache(None)
+  def is_int(x: DType) -> bool: return x.scalar() in set((dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64)) or dtypes.is_unsigned(x)
   @staticmethod
-  def is_unsigned(x: DType) -> bool: return x.scalar() in (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
+  @functools.lru_cache(None)
+  def is_unsigned(x: DType) -> bool: return x.scalar() in set((dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64))
   @staticmethod
   def from_np(x: type) -> DType: return DTYPES_DICT[np.dtype(x).name]
   @staticmethod  # NOTE: isinstance(True, int) is True in python
@@ -82,6 +85,18 @@ class dtypes:
 
   default_float: ClassVar[DType] = float32
   default_int: ClassVar[DType] = int32
+
+def ident(_, x): return x
+def trunc_int(itemsize, x):
+  adjust = 1 << ((itemsize << 3) - 1)
+  return ((x + adjust) & ((adjust << 1) - 1)) - adjust
+def trunc_uint(itemsize, x): return x & ((1 << (itemsize << 3)) - 1)
+
+trunc_lut = {
+  dtypes.int8: trunc_int, dtypes.int16: trunc_int, dtypes.int32: trunc_int, dtypes.int64: trunc_int,
+  dtypes.uint8: trunc_uint, dtypes.uint16: trunc_uint, dtypes.uint32: trunc_uint, dtypes.uint64: trunc_uint,
+  dtypes.bool: ident, dtypes.float16: ident, dtypes.bfloat16: ident, dtypes.float32: ident, dtypes.float64: ident,
+}
 
 # https://jax.readthedocs.io/en/latest/jep/9407-type-promotion.html
 # we don't support weak type and complex type
