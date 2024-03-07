@@ -18,9 +18,7 @@ class RDNACompiler(Compiler):
   def render(self, name:str, uops) -> str: return uops_to_rdna(name, uops)
   def compile(self, src:str) -> bytes:
     ret = compile_hip(src, self.arch, True)
-    with open("/tmp/out.so", "wb") as f:
-      f.write(ret)
-    #exit(0)
+    #with open("/tmp/out.so", "wb") as f: f.write(ret)
     return ret
 
 class HIPCompiler(Compiler):
