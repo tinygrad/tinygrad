@@ -13,7 +13,7 @@ def train_resnet():
   from extra.models import resnet
   from examples.mlperf.dataloader import batch_load_resnet
   from extra.datasets.imagenet import get_train_files, get_val_files
-  from extra.lr_scheduler import PolynomialLR
+  from examples.mlperf.lr_schedulers import PolynomialLR
   from examples.hlb_cifar10 import UnsyncedBatchNorm
 
   config = {}

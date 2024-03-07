@@ -5,7 +5,7 @@ import functools
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import get_parameters
 from tinygrad.nn.optim import Adam
-from extra.lr_scheduler import MultiStepLR, PolynomialLR, ReduceLROnPlateau, CosineAnnealingLR, OneCycleLR
+from extra.lr_scheduler import MultiStepLR, ReduceLROnPlateau, CosineAnnealingLR, OneCycleLR
 from extra.training import train, evaluate
 from extra.datasets import fetch_mnist
 
@@ -81,9 +81,6 @@ class TestLrScheduler(unittest.TestCase):
 
   def test_multisteplr(self): self._test_multisteplr(10, {'milestones': [1, 2, 7]}, 1e-6, 1e-6)
   def test_multisteplr_gamma(self): self._test_multisteplr(10, {'milestones': [1, 2, 7], 'gamma': 0.1337}, 1e-6, 1e-6)
-
-  def test_polynomiallr(self): self._test_polynomiallr(10, {'power': 2}, 1e-6, 1e-6)
-  def test_polynomiallr_power1(self): self._test_polynomiallr(10, {'power': 1}, 1e-6, 1e-6)
 
   def test_reducelronplateau(self): self._test_reducelronplateau(100, {}, 1e-6, 1e-6)
   def test_reducelronplateau_max(self): self._test_reducelronplateau(100, {'mode': 'max'}, 1e-6, 1e-6)
