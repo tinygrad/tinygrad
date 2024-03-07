@@ -7,6 +7,7 @@ from tinygrad.helpers import DEBUG, getenv, from_mv, to_char_p_p, init_c_var, co
 from tinygrad.device import Compiled, LRUAllocator, MallocAllocator, Compiler
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import CUDARenderer
+from tinygrad.renderer.assembly import PTXRenderer
 
 def pretty_ptx(s):
   # all expressions match `<valid_before><expr><valid_after>` and replace it with `<valid_before>color(<expr>)<valid_after>`
@@ -32,6 +33,15 @@ def cu_time_execution(cb, enable=False) -> Optional[float]: return time_executio
 def _get_bytes(arg, get_str, get_sz, check) -> bytes:
   sz = init_c_var(ctypes.c_size_t(), lambda x: check(get_sz(arg, ctypes.byref(x))))
   return ctypes.string_at(init_c_var(ctypes.create_string_buffer(sz.value), lambda x: check(get_str(arg, x))), size=sz.value)
+
+class PTXCompiler(Compiler):
+  linearizer_opts = LinearizerOptions("CUDA", global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024], supports_float4=False)
+  def __init__(self, arch:str):
+    self.arch = arch
+    PTXCompiler.linearizer_opts = PTXCompiler.linearizer_opts._replace(has_tensor_cores=int(arch[3:]) >= 80)
+    super().__init__(f"compile_ptx_{self.arch}")
+  def render(self, name:str, uops) -> str: return PTXRenderer(name, uops).replace("TARGET", self.arch)
+  def compile(self, src:str) -> bytes: return src.encode()
 
 class CUDACompiler(Compiler):
   linearizer_opts = LinearizerOptions("CUDA", global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024])
@@ -100,7 +110,8 @@ class CUDADevice(Compiled):
     self.arch = f"sm_{major.value}{minor.value}" if not CUDACPU else "sm_35"
 
     from tinygrad.runtime.graph.cuda import CUDAGraph
-    super().__init__(device, CUDAAllocator(self) if not CUDACPU else MallocAllocator, CUDACompiler(self.arch),
+    super().__init__(device, CUDAAllocator(self) if not CUDACPU else MallocAllocator,
+                     PTXCompiler(self.arch) if getenv("PTX") else CUDACompiler(self.arch),
                      functools.partial(CUDAProgram, self), graph=CUDAGraph if not CUDACPU else None)
   def synchronize(self):
     if not CUDACPU:
