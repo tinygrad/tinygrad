@@ -49,6 +49,7 @@ def _compile_linearizer(compiler:Compiler, lin:Linearizer, name:Optional[str]=No
                                                                                              List[Variable]]:
   lin.linearize()
   src = compiler.render(name if name is not None else to_function_name(lin.name), lin.uops.uops)   # NOTE: these all have the same name for deduping
+  if DEBUG >= 5: print(src)
   return compiler.compile(src), lin.global_size, lin.local_size, lin.uops.vars()
 
 def _try_compile_linearized_w_idx(x, compiler:Compiler):
@@ -113,13 +114,14 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
     dev = Device[lin.opts.device]
     assert isinstance(dev, Compiled)
     while not exiting:
-      acted_lins = flatten([get_linearizer_actions(lin, include_0=False).values() for lin,_ in beam]) if len(beam) else [lin]
+      acted_lins: List[Linearizer] = flatten([get_linearizer_actions(lin, include_0=False).values() for lin,_ in beam]) if len(beam) else [lin]
       timed_lins: List[Tuple[Linearizer, float]] = []
       _compile_fn = functools.partial(_try_compile_linearized_w_idx, compiler=dev.compiler)
       for i,proc in (map(_compile_fn, enumerate(acted_lins)) if beam_pool is None else beam_pool.imap_unordered(_compile_fn, enumerate(acted_lins))):
         if proc is None: continue
         lib, global_size, local_size, vars = proc
         if lib in seen_libs: continue
+        #print(acted_lins[i].colored_shape(), acted_lins[i].applied_opts)  # for debugging BEAMs that segfault
         seen_libs.add(lib)
         tms = _time_program(vars, dev, lib, global_size, local_size, var_vals, rawbufs, early_stop=beam[0][1]*3 if len(beam) else 1.0)
         timed_lins.append((acted_lins[i], min(tms)))

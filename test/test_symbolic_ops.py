@@ -5,7 +5,6 @@ from tinygrad.tensor import Tensor
 from examples.gpt2 import Attention
 import numpy as np
 
-@unittest.skipIf(getenv("ARM64") or getenv("PTX"), "ARM64 and PTX are not supported")
 class TestSymbolicOps(unittest.TestCase):
   def test_plus1(self):
     def f(a): return (a+1).realize()
