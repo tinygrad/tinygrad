@@ -30,8 +30,7 @@ def word_error_rate(x, y):
   return float(scores) / words, float(scores), words
 
 def one_hot(x):
-  x = x.one_hot(3) 
-  return x.squeeze(1).permute(0, 4, 1, 2, 3)
+  return x.one_hot(3).squeeze(1).permute(0, 4, 1, 2, 3)
 
 def dice_score(prediction, target, channel_axis=1, smooth_nr=1e-6, smooth_dr=1e-6, argmax=True, to_one_hot_x=True):
   channel_axis, reduce_axis = 1, tuple(range(2, len(prediction.shape)))

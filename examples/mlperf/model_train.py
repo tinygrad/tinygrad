@@ -51,9 +51,13 @@ def train_unet3d():
     except ImportError:
       raise "Need to install wandb to use it"
 
-  GPUS = tuple([Device.canonicalize(f'{Device.DEFAULT}:{i}') for i in range(getenv("GPUS", 1))])
-  assert BS % len(GPUS) == 0, f"{BS=} is not a multiple of {len(GPUS)=}"
-  for x in GPUS: Device[x]
+  if ((num_gpus := getenv("GPUS")) > 1):
+    if DEBUG >= 1: print(f"Using {num_gpus} GPUS for training")
+    GPUS = tuple([Device.canonicalize(f'{Device.DEFAULT}:{i}') for i in range(num_gpus)])
+    assert BS % len(GPUS) == 0, f"{BS=} is not a multiple of {len(GPUS)=}"
+    for x in GPUS: Device[x]
+  else:
+    GPUS = tuple()
 
   model = UNet3D()
 
@@ -62,8 +66,10 @@ def train_unet3d():
     load_state_dict(model, state_dict)
     if DEBUG >= 1: print(f"Loaded checkpoint {CHECKPOINT_FN} into model")
 
+  params = get_parameters(model)
+
   if len(GPUS) > 1:
-    for p in get_parameters(model):
+    for p in params:
       p.to_(GPUS)
 
   optim = SGD(get_parameters(model), lr=LR, momentum=MOMENTUM, nesterov=True)
@@ -81,7 +87,7 @@ def train_unet3d():
     loss.backward()
     optim.step()
 
-    return loss.realize()
+    return loss
   
   def _eval_step(model, x, y):
     y_hat, y = sliding_window_inference(model, x, y)
