@@ -127,6 +127,7 @@ class ExternalTestOptim(unittest.TestCase):
     self._test_lars_polylr(10, {'lr': 10.4}, {
       'initial_lr': 10.4,
       'end_lr': 1e-4,
+      # step counts for BS=624 EPOCHS=45 resnet
       'train_steps': 2053 * 45,
       'warmup': 2053 * 5,
     }, 1e-5, 1e-5, do_optim=False)
