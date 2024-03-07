@@ -256,7 +256,6 @@ class UOpGraph:
           for alu_with_accum in [op for op in self.uops if accumulator in op.vin]:
             self.replace_and_remove_op(alu_with_accum, next(op for op in alu_with_accum.vin if op != accumulator))
         if len(self.get_recursive_children(loop_op)) == 0:
-        # if all([loop_op not in u.vin for u in self.uops[self.uops.index(loop_op):self.uops.index(phi.vin[1])]]):
           if DEBUG >= 5: print("removing loop")
           self.uops.remove(loop_op)
         return True
