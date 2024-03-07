@@ -37,7 +37,6 @@ class AssemblyLanguage(NamedTuple):
   def render_kernel(self, kernel, function_name, bufs, regs) -> str: raise NotImplementedError()
 
 def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
-  local_size: List[int] = []
   kernel:List[str] = []
   bufs = []
 
@@ -131,12 +130,8 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
           kk(lang.asm_for_op[args](ssa(u, "alu"), *[r[x] for x in vin], dtype, lang.types[dtype]))
       elif uop == UOps.DEFINE_ACC: kk(f"mov.b{lang.types[dtype][1:]} {ssa(u, 'acc')}, {const(args, dtype)};")
       elif uop == UOps.SPECIAL:
-        if args[1][0] == "i": kk(f"mov.u32 %{args[1]}, {lang.gid[args[0]]};", f"mov.u32 {(gdim:=ssa(None,'tmp','u32'))}, {lang.gdim[args[0]]};",
-                                f"mov.u32 {(lid:=ssa(None,'tmp','u32'))}, {lang.lid[args[0]]};",
-                                f"mad.lo.u32 {(tmp:=ssa(None, 'tmp', 'u32'))}, %{args[1]}, {gdim}, {lid};")
-        else: kk(f"mov.u32 {(tmp:=ssa(None, 'tmp', 'u32'))}, {(lang.gid if args[1][0] == 'g' else lang.lid)[args[0]]};")
-        kk(*lang.render_cast(f"%{args[1]}", tmp, dtypes.uint, dtypes.int))
-        if args[1][0] == "l": local_size.append(args[2])
+        assert args[1][0] != "i", "idx not supported"
+        kk(f"mov.u32 %{args[1]}, {(lang.gid if args[1][0] == 'g' else lang.lid)[args[0]]};")
         r[u] = "%" + args[1]
         kernel = [f".reg .u32 %{args[1]};"] + kernel
       elif uop == UOps.CONST: r[u] = const(args, dtype, mov=True)
