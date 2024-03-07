@@ -224,21 +224,26 @@ class UOpGraph:
 
   def simplify_phi_loop(self, get_recursive_parents, loop_to_name, render_ops, ctx):
     for endloop in [op for op in self.uops if op.uop == UOps.ENDLOOP]:
+      replaced_ops = {}
       loop_op = endloop.vin[0]
-      loop_start = self.uops.index(loop_op)
-      loop_end = self.uops.index(endloop)+1
-      for where in [op for op in self.uops[loop_start:loop_end] if op.uop == UOps.ALU and op.arg == TernaryOps.WHERE]:
+      for where in [op for op in self.uops[self.uops.index(loop_op):self.uops.index(endloop)+1] if op.uop == UOps.ALU and op.arg == TernaryOps.WHERE]:
         comparison = where.vin[0]
         phi_parent = next((u for u in self.get_recursive_children(where) if u.uop is UOps.PHI), None)
-        if not dtypes.is_int(where.dtype) or phi_parent is None or where.vin[1].arg != 1 or where.vin[2].arg != 0: break
+        if not dtypes.is_int(where.dtype) or phi_parent is None or where.vin[1].arg != 1 or where.vin[2].arg != 0 or comparison.vin[1].arg > 0 : break
         try: factored = self.loop_factor(get_recursive_parents, loop_to_name, comparison.vin[0], NumNode(comparison.vin[1].arg), loop_op)
         except (RuntimeError, StopIteration, AssertionError): break
+        def const(x): return self.add(UOps.CONST, where.dtype, tuple(), x)
+        def mult_neg_1(x): return self.add(UOps.ALU, where.dtype, (x, const(-1)), BinaryOps.MUL)
+        def max(x, y): return self.add(UOps.ALU, where.dtype, (x, y), BinaryOps.MAX)
         final_value = NumNode(loop_op.vin[1].arg-1) - factored
         self.uops, after_where_ops = self.uops[:(where_index:=self.uops.index(where))], self.uops[where_index:]
         rendered = final_value.render(render_ops, ctx)
+        clamped = mult_neg_1(max(mult_neg_1(max(rendered, const(0))),
+                                 const(-1*(loop_op.vin[1].arg - loop_op.vin[0].arg))))
         self.uops = self.uops + after_where_ops
-        final = self.add(UOps.ALU, where.dtype, (rendered, where.vin[1]), BinaryOps.MUL, insert_before=self.uops.index(where)) # TODO other side of the WHERE
+        final = self.add(UOps.ALU, where.dtype, (clamped, where.vin[1]), BinaryOps.MUL, insert_before=self.uops.index(where))
         self.replace_and_remove_op(where, final)
+        replaced_ops[where] = final
       get_recursive_parents.cache_clear()
       for phi in [op for op in self.uops[self.uops.index(loop_op):self.uops.index(endloop)] if op.uop == UOps.PHI]:
         if loop_op not in get_recursive_parents(phi.vin[1]):
@@ -252,6 +257,7 @@ class UOpGraph:
         if DEBUG >= 5: print("removing loop")
         self.uops.remove(loop_op)
         self.uops.remove(endloop)
+      if len(replaced_ops) > 0: return True
 
   def uoptimize(self, loop_to_name, render_ops, ctx):
     # get PHI node loop scope, link anything using a DEFINE_ACC to the loop as a "parent"
