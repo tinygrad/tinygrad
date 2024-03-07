@@ -229,10 +229,10 @@ class UOpGraph:
     def mult_neg_1(x): return self.add(UOps.ALU, where.dtype, (x, const(-1)), BinaryOps.MUL)
     def max(x, y): return self.add(UOps.ALU, where.dtype, (x, y), BinaryOps.MAX)
 
-    for endloop in [op for op in self.uops if op.uop == UOps.ENDLOOP]:
+    for phi in [op for op in self.uops if op.uop == UOps.PHI]:
       replaced_ops = {}
-      loop_op = endloop.vin[0]
-      for where in [op for op in self.uops[self.uops.index(loop_op):self.uops.index(endloop)+1] if op.uop == UOps.ALU and op.arg == TernaryOps.WHERE]:
+      loop_op = phi.vin[2]
+      for where in [op for op in self.uops[self.uops.index(loop_op):self.uops.index(phi)+1] if op.uop == UOps.ALU and op.arg == TernaryOps.WHERE]:
         comparison = where.vin[0]
         phi_parent = next((u for u in self.get_recursive_children(where) if u.uop is UOps.PHI), None)
         if not dtypes.is_int(where.dtype) or phi_parent is None or where.vin[1].arg != 1 or where.vin[2].arg != 0: break
@@ -249,18 +249,16 @@ class UOpGraph:
         replaced_ops[where] = final
       get_recursive_parents.cache_clear()
       if len(replaced_ops) > 0:
-        for phi in [op for op in self.uops[self.uops.index(loop_op):self.uops.index(endloop)] if op.uop == UOps.PHI]:
-          if loop_op not in get_recursive_parents(phi.vin[1]):
-            if DEBUG >= 5: print("replacing phi")
-            self.replace_and_remove_op(phi, phi.vin[1])
-            self.uops.remove((accumulator:=phi.vin[0]))
-            for alu_with_accum in [op for op in self.uops if accumulator in op.vin]:
-              self.replace_and_remove_op(alu_with_accum, next(op for op in alu_with_accum.vin if op != accumulator))
-        self.remove_childless({UOps.ENDIF, UOps.ENDLOOP})
-        if all([loop_op not in u.vin for u in self.uops[self.uops.index(loop_op):self.uops.index(endloop)]]):
+        if loop_op not in get_recursive_parents(phi.vin[1]):
+          if DEBUG >= 5: print("replacing phi")
+          self.replace_and_remove_op(phi, phi.vin[1])
+          self.uops.remove((accumulator:=phi.vin[0]))
+          for alu_with_accum in [op for op in self.uops if accumulator in op.vin]:
+            self.replace_and_remove_op(alu_with_accum, next(op for op in alu_with_accum.vin if op != accumulator))
+        if len(self.get_recursive_children(loop_op)) == 0:
+        # if all([loop_op not in u.vin for u in self.uops[self.uops.index(loop_op):self.uops.index(phi.vin[1])]]):
           if DEBUG >= 5: print("removing loop")
           self.uops.remove(loop_op)
-          self.uops.remove(endloop)
         return True
 
   def uoptimize(self, loop_to_name, render_ops, ctx):
@@ -277,15 +275,12 @@ class UOpGraph:
     # fix loop scope, push uops upward out of loop if it does not depend on the loop
     self.fix_loop_scope(get_recursive_parents)
 
-    # add UOps.END*
-    self.add_ends()
-
     # uops optimization
     keep_doing_if_did_something(lambda: self.uops_optimization(get_recursive_parents))
     keep_doing_if_did_something(lambda: self.simplify_phi_loop(get_recursive_parents, loop_to_name, render_ops, ctx))
 
     # (recursively) remove childless uops
-    self.remove_childless({UOps.ENDIF, UOps.ENDLOOP})
+    self.remove_childless()
 
     # store float4 upcasts directly if possible
     replaced_stores: Dict[UOp,UOp] = {}
@@ -296,6 +291,9 @@ class UOpGraph:
     for prev,new in replaced_stores.items():
       self.uops.remove(prev.vin[-1]) # remove the old upcast NOTE: the upcast's vins become childless now
       self.uops[self.uops.index(prev)].vin = (prev.vin[0],prev.vin[1],new) # replace with the float4 value
+
+    # add UOps.END*
+    self.add_ends()
 
     # verify the uop types
     self.type_verify()

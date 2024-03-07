@@ -60,7 +60,6 @@ class Node:
     if b == 1: return self
 
     # the numerator of div is not allowed to be negative
-
     if self.min < 0:
       offset = self.min//b
       # factor out an "offset" to make the numerator positive. don't allowing factoring again
