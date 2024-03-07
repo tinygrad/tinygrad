@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 import unittest
-
 import numpy as np
 import tensorflow as tf
 import tensorflow_addons as tfa
@@ -90,8 +89,8 @@ def create_tf_polylr(initial_lr, end_lr, train_steps, warmup, power=2):
 
 class ExternalTestOptim(unittest.TestCase):
   def _test_optim(self, tinygrad_optim, tensorflow_optim, steps, opts, atol, rtol, tiny_sched=None, tf_sched=None, schedopts=None):
-    for x,y in zip(step(tinygrad_optim, scheduler=tiny_sched, steps=steps, kwargs=opts, schedopts=schedopts),
-                   step_tf(tensorflow_optim, scheduler=tf_sched, steps=steps, kwargs=opts, schedopts=schedopts)):
+    for x,y in zip(step(tinygrad_optim, steps=steps, kwargs=opts, scheduler=tiny_sched, schedopts=schedopts),
+                   step_tf(tensorflow_optim, steps=steps, kwargs=opts, scheduler=tf_sched, schedopts=schedopts)):
       np.testing.assert_allclose(x, y, atol=atol, rtol=rtol)
 
   def _test_lamb(self, steps, opts, atol, rtol): self._test_optim(LAMB, tfa.optimizers.LAMB, steps, opts, atol, rtol)
