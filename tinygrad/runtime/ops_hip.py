@@ -8,6 +8,20 @@ from tinygrad.device import Compiled, LRUAllocator, BufferOptions, JITRunner, De
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.runtime.driver.hip_comgr import compile_hip
+from tinygrad.renderer.rdna import uops_to_rdna
+
+class RDNACompiler(Compiler):
+  linearizer_opts = LinearizerOptions("HIP", has_tensor_cores=True)
+  def __init__(self, arch:str):
+    self.arch = arch
+    super().__init__(f"compile_rdna_{self.arch}")
+  def render(self, name:str, uops) -> str: return uops_to_rdna(name, uops)
+  def compile(self, src:str) -> bytes:
+    ret = compile_hip(src, self.arch, True)
+    with open("/tmp/out.so", "wb") as f:
+      f.write(ret)
+    #exit(0)
+    return ret
 
 class HIPCompiler(Compiler):
   linearizer_opts = LinearizerOptions("HIP", has_tensor_cores=True)
@@ -170,8 +184,8 @@ class HIPDevice(Compiled):
     else:
       self.arch = init_c_var(hip.hipDeviceProp_t(), lambda x: check(hip.hipGetDeviceProperties(x, self.device))).gcnArchName.decode()
       from tinygrad.runtime.graph.hip import HIPGraph
-      super().__init__(device, HIPAllocator(self), HIPCompiler(self.arch),
-                      functools.partial(HIPProgram, self.device), HIPGraph)
+      super().__init__(device, HIPAllocator(self), RDNACompiler(self.arch) if getenv("RDNA") else HIPCompiler(self.arch),
+                       functools.partial(HIPProgram, self.device), HIPGraph)
   def synchronize(self):
     if getenv("HIPCPU"): return
     hip_set_device(self.device)
