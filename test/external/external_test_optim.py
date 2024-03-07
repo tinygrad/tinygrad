@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 import unittest
 
-import nodeenv
 import numpy as np
 import tensorflow as tf
 import tensorflow_addons as tfa
@@ -9,9 +8,11 @@ from tensorflow.python.ops import math_ops
 
 from tinygrad.tensor import Tensor
 from tinygrad.nn.optim import LAMB
+
 from examples.mlperf.optimizers import LARS
-from examples.mlperf.lr_schedulers import PolynomialDecayWithWarmup
 from test.external.mlperf_resnet.lars_optimizer import LARSOptimizer
+
+from examples.mlperf.lr_schedulers import PolynomialDecayWithWarmup
 from test.external.mlperf_resnet.lars_util import PolynomialDecayWithWarmup as PolynomialDecayWithWarmup_tf
 
 np.random.seed(1337)
@@ -54,7 +55,7 @@ def step(optim, steps=1, kwargs={}, scheduler=None, schedopts=None):
     out = net.forward()
     optim.zero_grad()
     out.backward()
-    lrs.append(optim.lr.numpy().item() if isinstance(optim.lr, Tensor) else optim.lr)
+    lrs.append(optim.lr.numpy().item())
     optim.step()
     if scheduler is not None: scheduler.step()
   return lrs, net.x.detach().numpy(), net.W.detach().numpy()
@@ -85,8 +86,7 @@ def create_tf_lars(lr, skip_list=False): return LARSOptimizer(lr, skip_list=["W"
 def create_tf_polylr(initial_lr, end_lr, train_steps, warmup, power=2):
   assert power == 2
   return PolynomialDecayWithWarmup_tf(1, 1, train_steps,
-                                      initial_learning_rate=initial_lr, end_learning_rate=end_lr,
-                                      warmup_epochs=warmup)
+                                      initial_learning_rate=initial_lr, end_learning_rate=end_lr, warmup_epochs=warmup)
 
 class ExternalTestOptim(unittest.TestCase):
   def _test_optim(self, tinygrad_optim, tensorflow_optim, steps, opts, atol, rtol, tiny_sched=None, tf_sched=None, schedopts=None):
