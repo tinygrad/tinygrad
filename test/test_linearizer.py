@@ -219,6 +219,13 @@ class TestLinearizer(unittest.TestCase):
     assert helper_test_simplify(UOps.ALU, dtypes.float, vin=(UOp(UOps.CONST, dtypes.bool, vin=(), arg=True), c0, c1),
                                 arg=TernaryOps.WHERE).uop == UOps.CONST
 
+  def test_arange_simplification(self):
+    t = Tensor.arange(5.5, 250.3, 3.5)
+    sched = [si for si in create_schedule([t.lazydata]) if si.ast.op not in LoadOps]
+    assert len(sched) == 1
+    lin = Linearizer(sched[0].ast)
+    assert not any(u for u in lin.linearize().uops if u.uop == UOps.LOOP), "no loops should exist"
+
 def helper_realized_ast(r:Tensor):
   s = create_schedule([r.lazydata])
   run_schedule(s[:-1])  # run all kernels except the last one
