@@ -7,6 +7,7 @@ from extra.lr_scheduler import LR_Scheduler
 class PolynomialDecayWithWarmup(LR_Scheduler):
   def __init__(self, optimizer: Optimizer, initial_lr, end_lr, train_steps, warmup, power=2):
     super().__init__(optimizer)
+    assert train_steps > 0 and warmup > 0
     self.warmup = min(warmup, train_steps)
     self.initial_lr, self.end_lr, self.epochs, self.power = initial_lr, end_lr, train_steps, power
 
