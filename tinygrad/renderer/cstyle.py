@@ -310,8 +310,9 @@ class HIPLanguage(CStyleLanguage):
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     prefix = ["#include <hip/hip_common.h>\n#define INFINITY (__builtin_inff())\n#define NAN (__builtin_nanf(\"\"))",
               "typedef long unsigned int size_t;"]
-    if any(uop.dtype == dtypes.bfloat16 for uop in uops): prefix.append("#include <hip/hip_bfloat16.h>")
+    if any(uop.dtype == dtypes.bfloat16 for uop in uops): prefix.append("#include <hip/amd_detail/amd_hip_bfloat16.h>")
     else: prefix.append('\n'.join(_make_hip_dtype(*x) for x in [("float", "float", 2), ("float", "float", 4),
                                                              ("signed int", "int", 4), ("signed int", "int", 2)]))
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
+
 HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())
