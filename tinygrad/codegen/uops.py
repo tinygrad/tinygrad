@@ -227,7 +227,7 @@ class UOpGraph:
         self.replace_op(where, final_op)
         modified_loops[loop_op] = phi
         get_recursive_parents.cache_clear()
-      if loop_op not in get_recursive_parents(phi.vin[1]):
+      if modified_loops.get(loop_op, None) == phi:
         if DEBUG >= 5: print("replacing phi")
         self.replace_op(phi, phi.vin[1])
         self.uops.remove((accumulator:=phi.vin[0]))
