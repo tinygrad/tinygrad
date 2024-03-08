@@ -165,7 +165,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: torch.arange(1, 78, 2), lambda: Tensor.arange(1, 78, 2), forward_only=True)
     helper_test_op([], lambda: torch.arange(5.5, 175.5, 2.5), lambda: Tensor.arange(5.5, 175.5, 2.5), forward_only=True)
     helper_test_op([], lambda: torch.arange(-30.2, -0.3, 0.75), lambda: Tensor.arange(-30.2, -0.3, 0.75), forward_only=True)
-    helper_test_op([], lambda: torch.arange(-50.3, -80.2, -2.25), lambda: Tensor.arange(-50.3, -80.2, -2.25), forward_only=True)
+    helper_test_op([], lambda: torch.arange(-50.3, -380.2, -2.25), lambda: Tensor.arange(-50.3, -380.2, -2.25), forward_only=True)
 
   def test_arange_big(self):
     helper_test_op([], lambda: torch.arange(256), lambda: Tensor.arange(256), forward_only=True)
