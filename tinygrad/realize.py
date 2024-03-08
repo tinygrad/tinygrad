@@ -174,8 +174,6 @@ def _is_padding_okay(buf:LazyBuffer, realizes:Set[LazyBuffer]) -> bool:
   return all(_is_padding_okay(x.base, realizes) for x in buf.srcs)
 
 def group_barriers(items: List[ScheduleItem]) -> List[ScheduleItem]:
-  import random
-  random.shuffle(items)
   grouped: List[List[ScheduleItem]] = []
   graph: Dict[int, Set[int]] = {}
   barriers: Dict[ScheduleBarrier, int] = {}
@@ -217,7 +215,7 @@ def group_barriers(items: List[ScheduleItem]) -> List[ScheduleItem]:
       in_degrees[dep] -= 1
       if in_degrees[dep] == 0: free.append(dep)
 
-  assert len(ordered) == len(grouped), "toposort failed"
+  assert len(ordered) == len(grouped), "cyclic dependency"
 
   return flatten([grouped[i] for i in reversed(ordered)])
 
