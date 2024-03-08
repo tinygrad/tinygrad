@@ -486,6 +486,11 @@ class Kernel:
           padded = True
       assert padded, "nothing was padded"
 
+    # final size of threadgroup buffer for GROUP
+    temp_shape = self.full_shape[self.global_dims:self.global_dims+self.local_dims+self.group_for_reduces]+tuple(x[0] for x in self.upcasted_axis(0))
+    # TODO: how big can this be? is it backend dependant
+    assert prod(temp_shape) <= 4096
+
     if append_opt: self.applied_opts.append(opt)
     if self.simplify_ones() and self.tensor_core_opts:
       self.tensor_core_opts.fix_axes(axis) # fix up axes in TC opts if required after simplify_ones()
