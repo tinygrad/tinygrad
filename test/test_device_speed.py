@@ -1,9 +1,7 @@
 import unittest
 from tinygrad import Device
 from tinygrad.helpers import Timing, Profiling
-from tinygrad.device import Compiled
 
-@unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "only for compiled backend")
 class TestDeviceSpeed(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
