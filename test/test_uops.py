@@ -4,7 +4,7 @@ import numpy as np
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.device import Buffer, Device
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
-from tinygrad.device import CompiledASTRunner, Compiled
+from tinygrad.device import CompiledASTRunner
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.codegen.uops import exec_alu, UOpGraph
 from test.test_dtype import is_dtype_supported
@@ -70,7 +70,6 @@ class TestUOps(unittest.TestCase):
           for c in [-4.0, 4.0]:
             self._equal(f([a,b,c], op, dts), fxn(a,b,c))
 
-@unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "only test for compiled backends")
 class TestFloatUOps(TestUOps):
   def test_neg(self): self._test_uop_fxn(UnaryOps.NEG, lambda a: -a)
   def test_exp2(self): self._test_uop_fxn(UnaryOps.EXP2, lambda a: np.exp2(a))
