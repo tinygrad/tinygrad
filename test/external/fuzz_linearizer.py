@@ -119,7 +119,6 @@ def fuzz_linearizer(lin: Linearizer):
         if not FUZZ_BEAM: print(test_lin.colored_shape())
         # get a new output buffer
         rawbufs[0] = get_fuzz_rawbuf_like(rawbufs[0], zero=True)
-        var_vals = {v: random.randint(v.min, v.max) for v in test_lin.ast.vars()}
         if (msg := run_linearizer(test_lin, rawbufs, var_vals)) != "PASS":
           failures[msg].append((test_lin.ast, test_lin.applied_opts))
           continue
