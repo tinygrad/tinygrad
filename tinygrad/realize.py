@@ -1,7 +1,8 @@
 import sys
 from collections import defaultdict
 from typing import List, Dict, Optional, cast, Set, DefaultDict
-from tinygrad.ops import LoadOps, ScheduleItem, ScheduleBarrier, BufferOps, GlobalCounters, LazyOp, ReduceOps, ConstBuffer, MemBuffer, BinaryOps, UnaryOps
+from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters, LazyOp, ReduceOps, ConstBuffer, MemBuffer, BinaryOps, UnaryOps, \
+  ScheduleBarrier
 from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats, Compiled, BufferOptions
 from tinygrad.features.graph import print_tree, realized_lazybuffer, log_lazybuffer
 from tinygrad.helpers import colored, getenv, GRAPH, cpu_time_execution, DEBUG, flatten, prod, dedup, all_int
@@ -173,6 +174,8 @@ def _is_padding_okay(buf:LazyBuffer, realizes:Set[LazyBuffer]) -> bool:
   return all(_is_padding_okay(x.base, realizes) for x in buf.srcs)
 
 def group_barriers(items: List[ScheduleItem]) -> List[ScheduleItem]:
+  import random
+  random.shuffle(items)
   grouped: List[List[ScheduleItem]] = []
   graph: Dict[int, Set[int]] = {}
   barriers: Dict[ScheduleBarrier, int] = {}
@@ -203,11 +206,20 @@ def group_barriers(items: List[ScheduleItem]) -> List[ScheduleItem]:
         fw_deps[inp].add(spos)
   del barriers, positions, fw_deps
 
-  import graphlib
-  ts = graphlib.TopologicalSorter(graph)
-  top_order = ts.static_order()
+  ordered: List[int] = []
+  in_degrees: Dict[int, int] = {k:0 for k in graph.keys()}
+  for n in flatten(graph.values()): in_degrees[n] += 1
+  free = [node for node, degree in in_degrees.items() if degree == 0]
+  while len(free) > 0:
+    node = free.pop(0)
+    ordered.append(node)
+    for dep in graph[node]:
+      in_degrees[dep] -= 1
+      if in_degrees[dep] == 0: free.append(dep)
 
-  return flatten([grouped[i] for i in top_order])
+  assert len(ordered) == len(grouped), "toposort failed"
+
+  return flatten([grouped[i] for i in reversed(ordered)])
 
 def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> List[ScheduleItem]:
   if seen is None: seen = set()
