@@ -228,6 +228,7 @@ class UOpGraph:
     def max(x, y): return self.add(UOps.ALU, where.dtype, (x, y), BinaryOps.MAX)
 
     for phi in [op for op in self.uops if op.uop == UOps.PHI]:
+      replaced_ops = {}
       loop_op, all_loop_ops = phi.vin[2], self.uops[self.uops.index(phi.vin[2]):self.uops.index(phi)]
       for where in [op for op in all_loop_ops if op.arg == TernaryOps.WHERE and op.dtype is not None and dtypes.is_int(op.dtype)]:
         try:
@@ -243,7 +244,9 @@ class UOpGraph:
         self.uops = self.uops + after_where_ops
         final_op = self.add(UOps.ALU, where.dtype, (clamped, where.vin[1]), BinaryOps.MUL, insert_before=self.uops.index(where))
         self.replace_op(where, final_op)
+        replaced_ops[where] = final_op
         get_recursive_parents.cache_clear()
+      if len(replaced_ops) > 0:
         if loop_op not in get_recursive_parents(phi.vin[1]):
           if DEBUG >= 5: print("replacing phi")
           self.replace_op(phi, phi.vin[1])
