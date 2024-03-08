@@ -186,25 +186,6 @@ class UOpGraph:
     for v in self.uops: v.vin = tuple(new if x is old else x for x in v.vin)
     self.uops.remove(old)
 
-  def uops_optimization(self, get_recursive_parents):
-    for u in self.uops:
-      if u.uop is UOps.PHI and len(u.vin) == 3:
-        # if the parents of the PHI node don't have the LOOP in their parents, it can be folded
-        # TODO: ADD becomes a MUL, MAX can just become nothing
-        # NOTE: ADD -> MUL does not fold, this maintains original MULACC code path
-        if all(x.uop is not UOps.LOOP for x in get_recursive_parents(UOp(u.uop, u.dtype, u.vin[0:2], u.arg))) \
-          and u.vin[1].arg is BinaryOps.ADD and u.vin[1].vin[0].arg is not BinaryOps.MUL:
-          if DEBUG >= 4: print(f"removing PHI node {u}")
-          del self.saved_exprs[(u.uop, u.dtype, u.vin, u.arg)]
-          # NOTE: assuming u.vin[2].vin[1] and u.vin[2].vin[0] have the same dtype
-          loop_len = self.add(UOps.ALU, u.vin[2].vin[1].dtype, (u.vin[2].vin[1], u.vin[2].vin[0]), BinaryOps.SUB,
-                              insert_before=self.uops.index(u))
-          if loop_len.dtype != u.dtype: loop_len = self.add(UOps.CAST, u.dtype, (loop_len,),
-                                                            insert_before=self.uops.index(u))
-          new = self.add(UOps.ALU, u.dtype, (u.vin[1], loop_len,), BinaryOps.MUL, insert_before=self.uops.index(u))
-          self.replace_op(u, new)
-          return True
-
   def simplify_phi_loop(self, get_recursive_parents, loop_to_name, render_ops, ctx):
     def alu_opposite(arg, x, y):
       if arg == BinaryOps.ADD: return x - y
@@ -256,6 +237,26 @@ class UOpGraph:
         if len(self.get_recursive_children(loop_op)) == 0:
           if DEBUG >= 5: print("removing loop")
           self.uops.remove(loop_op)
+        return True
+
+  def uops_optimization(self, get_recursive_parents):
+    for u in self.uops:
+      if u.uop is UOps.PHI and len(u.vin) == 3:
+        # if the parents of the PHI node don't have the LOOP in their parents, it can be folded
+        # TODO: ADD becomes a MUL, MAX can just become nothing
+        # NOTE: ADD -> MUL does not fold, this maintains original MULACC code path
+        if all(x.uop is not UOps.LOOP for x in get_recursive_parents(UOp(u.uop, u.dtype, u.vin[0:2], u.arg))) \
+          and u.vin[1].arg is BinaryOps.ADD and u.vin[1].vin[0].arg is not BinaryOps.MUL:
+          if DEBUG >= 4: print(f"removing PHI node {u}")
+          del self.saved_exprs[(u.uop, u.dtype, u.vin, u.arg)]
+          # NOTE: assuming u.vin[2].vin[1] and u.vin[2].vin[0] have the same dtype
+          loop_len = self.add(UOps.ALU, u.vin[2].vin[1].dtype, (u.vin[2].vin[1], u.vin[2].vin[0]), BinaryOps.SUB,
+                              insert_before=self.uops.index(u))
+          if loop_len.dtype != u.dtype: loop_len = self.add(UOps.CAST, u.dtype, (loop_len,),
+                                                            insert_before=self.uops.index(u))
+          new = self.add(UOps.ALU, u.dtype, (u.vin[1], loop_len,), BinaryOps.MUL, insert_before=self.uops.index(u))
+          self.replace_op(u, new)
+          return True
 
   def uoptimize(self, loop_to_name, render_ops, ctx):
     # get PHI node loop scope, link anything using a DEFINE_ACC to the loop as a "parent"
