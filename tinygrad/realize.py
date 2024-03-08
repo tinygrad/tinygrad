@@ -1,7 +1,7 @@
-import sys, graphlib
+import sys
 from collections import defaultdict
 from typing import List, Dict, Optional, cast, Set, DefaultDict
-from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters, LazyOp, ReduceOps, ConstBuffer, MemBuffer, BinaryOps, UnaryOps
+from tinygrad.ops import LoadOps, ScheduleItem, ScheduleBarrier, BufferOps, GlobalCounters, LazyOp, ReduceOps, ConstBuffer, MemBuffer, BinaryOps, UnaryOps
 from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats, Compiled, BufferOptions
 from tinygrad.features.graph import print_tree, realized_lazybuffer, log_lazybuffer
 from tinygrad.helpers import colored, getenv, GRAPH, cpu_time_execution, DEBUG, flatten, prod, dedup, all_int
@@ -173,26 +173,41 @@ def _is_padding_okay(buf:LazyBuffer, realizes:Set[LazyBuffer]) -> bool:
   return all(_is_padding_okay(x.base, realizes) for x in buf.srcs)
 
 def group_barriers(items: List[ScheduleItem]) -> List[ScheduleItem]:
-  sis: List[List[ScheduleItem]] = []
-
-  # Group ScheduleBarriers
-  for i,si in enumerate(items):
-    if si in flatten(sis): continue
-    if si.out._barrier:
-      sis.append([x for x in items[i:] if x.out._barrier == si.out._barrier])
-    else:
-      sis.append([si])
-
-  # Toposort
+  grouped: List[List[ScheduleItem]] = []
   graph: Dict[int, Set[int]] = {}
-  for i,sil in enumerate(sis):
-    graph[i] = set()
-    for j,sjl in enumerate(sis):
-      if any(flatten([[sj.out in si.inputs for sj in sjl] for si in sil])):
-        graph[i].add(j)
-  ts = graphlib.TopologicalSorter(graph)
+  barriers: Dict[ScheduleBarrier, int] = {}
+  positions: Dict[LazyBuffer, int] = {}
+  fw_deps: Dict[LazyBuffer, Set[int]] = defaultdict(set)
 
-  return flatten([sis[x] for x in ts.static_order()]) # return ungrouped
+  for si in items:
+    if not si.out._barrier:
+      grouped.append([si])
+      positions[si.out] = len(grouped)-1
+      graph[len(grouped) - 1] = set()
+    else:
+      if (i := barriers.get(si.out._barrier)) is not None:
+        grouped[i].append(si)
+        positions[si.out] = i
+      else:
+        grouped.append([si])
+        positions[si.out] = len(grouped)-1
+        barriers[si.out._barrier] = len(grouped)-1
+        graph[len(grouped) - 1] = set()
+    spos = positions[si.out]
+    for d in fw_deps.pop(si.out, set()): graph[d].add(spos)
+    for inp in si.inputs:
+      if inp.realized: continue
+      if (p := positions.get(inp)) is not None:
+        graph[spos].add(p)
+      else:
+        fw_deps[inp].add(spos)
+  del barriers, positions, fw_deps
+
+  import graphlib
+  ts = graphlib.TopologicalSorter(graph)
+  top_order = ts.static_order()
+
+  return flatten([grouped[i] for i in top_order])
 
 def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> List[ScheduleItem]:
   if seen is None: seen = set()
