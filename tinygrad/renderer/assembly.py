@@ -1,6 +1,7 @@
 from typing import Callable, DefaultDict, Dict, List, Union, NamedTuple, Set
 import functools, struct
 from collections import defaultdict
+from tinygrad.helpers import partition
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op
 from tinygrad.dtype import dtypes, DType, PtrDType, INVERSE_DTYPES_DICT
@@ -61,7 +62,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
       u.dtype = dtypes.uint8
       new = uops.add(UOps.CAST, dtypes.bool, (u,), insert_before=uops.uops.index(u)+1)
       replace[u] = new
-    if u.uop is UOps.ALU and u.arg is BinaryOps.DIV and u.dtype is dtypes.float:
+    if u.uop is UOps.ALU and u.arg is BinaryOps.DIV and dtypes.is_float(u.dtype):
       # TODO: move this out to recip higher level?
       if u.vin[0].uop == UOps.CONST and u.vin[0].arg == 1:
         u.arg = UnaryOps.RECIP
@@ -75,6 +76,12 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
         new = uops.add(UOps.ALU, dtypes.bool, (u.vin[0],), arg=UnaryOps.NEG, insert_before=uops.uops.index(u))
         u.vin = (new, u.vin[1])
         u.arg = BinaryOps.MUL
+    # FMA
+    if u.uop is UOps.ALU and u.arg is BinaryOps.ADD and dtypes.is_float(u.dtype):
+      muls, non_muls = partition(u.vin, lambda x: x.uop is UOps.ALU and x.arg is BinaryOps.MUL)
+      if len(muls) == 1:
+        u.arg = TernaryOps.MULACC
+        u.vin = muls[0].vin + tuple(non_muls)
     # pointer indexing (similar to RDNA3)
     if u.uop in {UOps.LOAD, UOps.STORE}:
       u.arg = '.shared' if u.vin[0].uop == UOps.DEFINE_LOCAL else '.global'  # move this to the arg
@@ -91,6 +98,8 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
         fptr = uops.add(UOps.ALU, dtypes.uint64, (u.vin[0], bptr), arg=BinaryOps.ADD, insert_before=uops.uops.index(u))
         u.vin = (fptr, zero) + u.vin[2:]
   #uops.print()
+  #uops.remove_childless()
+  #uops.add_ends()
 
   def kk(*s: str): kernel.append("\n".join(s))
 
@@ -234,6 +243,7 @@ class PTXLanguage(AssemblyLanguage):
     BinaryOps.MAX: lambda d,a,b,dt,name: f"max.{name} {d}, {a}, {b};", BinaryOps.MOD: lambda d,a,b,dt,name: f"rem.{name} {d}, {a}, {b};",
     BinaryOps.CMPLT: lambda d,a,b,dt,name: f"setp.lt.{name} {d}, {a}, {b};",
     BinaryOps.CMPEQ: lambda d,a,b,dt,name: f"setp.eq.{name} {d}, {a}, {b};",
+    TernaryOps.MULACC: lambda d,a,b,c,dt,name: f"fma.rn.{name} {d}, {a}, {b}, {c};",
     TernaryOps.WHERE: lambda d,a,b,c,dt,name:
       f"@{a} mov.{name} {d}, {b};\n@!{a} mov.{name} {d}, {c};" if name == "pred" else f"selp.{'b16' if name == 'f16' else name} {d}, {b}, {c}, {a};"
   }

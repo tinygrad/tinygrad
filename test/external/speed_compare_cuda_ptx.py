@@ -1,10 +1,17 @@
 import itertools
 from tinygrad import Device
 from tinygrad.device import CompiledASTRunner
-from tinygrad.helpers import to_function_name, getenv
+from tinygrad.helpers import to_function_name, getenv, colored
 from extra.optimization.helpers import load_worlds, ast_str_to_lin
 from tinygrad.features.search import bufs_from_lin
 from tinygrad.runtime.ops_cuda import PTXCompiler
+
+# move to helpers?
+def colorize_float(x):
+  ret = f"{x:7.2f}x"
+  if x < 0.75: return colored(ret, 'green')
+  elif x > 1.15: return colored(ret, 'red')
+  else: return colored(ret, 'yellow')
 
 if __name__ == "__main__":
   ast_strs = load_worlds(filter_reduce=False, filter_novariable=True)
@@ -16,6 +23,7 @@ if __name__ == "__main__":
   single = getenv("NUM", -1)
   if single != -1: ast_strs = ast_strs[single:single+1]
 
+  average_tm_cuda, average_tm_ptx = 0, 0
   for num,ast in enumerate(ast_strs):
     # cuda compile
     lin = ast_str_to_lin(ast, opts=dev.compiler.linearizer_opts)
@@ -36,14 +44,17 @@ if __name__ == "__main__":
       continue
     # warmup
     cuda_prg(bufs, {}, wait=True)
+    ptx_prg(bufs, {}, wait=True)
 
     tm_cuda, tm_ptx = [], []
     for i in range(5):
       tm_cuda.append(cuda_prg(bufs, {}, wait=True))
       tm_ptx.append(ptx_prg(bufs, {}, wait=True))
+    average_tm_cuda += min(tm_cuda)
+    average_tm_ptx += min(tm_ptx)
     ratio = min(tm_ptx)/min(tm_cuda)
-    print(f"{num:4d} {ratio:6.2f}x", lin.name)
-    if ratio > 2:
+    print(f"{average_tm_ptx/average_tm_cuda:5.2f}x -- {num:4d} {colorize_float(ratio)}  {min(tm_ptx)*1e6:7.2f} us", lin.name)
+    if ratio > 1.5:
       def fix(x): return x.replace('\t', ' ').strip()
       ll1, ll2 = cuda_prg.lib.decode().split('\n'), ptx_src.split('\n')
       if single != -1:
