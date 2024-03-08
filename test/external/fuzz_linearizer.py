@@ -119,7 +119,6 @@ def fuzz_linearizer(lin: Linearizer):
         if not FUZZ_BEAM: print(test_lin.colored_shape())
         # get a new output buffer
         rawbufs[0] = get_fuzz_rawbuf_like(rawbufs[0], zero=True)
-        var_vals = {v: random.randint(v.min, v.max) for v in test_lin.ast.vars()}
         if (msg := run_linearizer(test_lin, rawbufs, var_vals)) != "PASS":
           failures[msg].append((test_lin.ast, test_lin.applied_opts))
           continue
@@ -145,21 +144,29 @@ if __name__ == "__main__":
   ast_strs = load_worlds(filter_reduce=False, filter_novariable=False)
   print(f"{len(ast_strs)=}")
   tested = 0
+  failed_ids = []
   failures = defaultdict(list)
   for i, ast in enumerate(ast_strs[:getenv("FUZZ_N", len(ast_strs))]):
+    if (nth := getenv("FUZZ_NTH", -1)) != -1 and i != nth: continue
     if "dtypes.image" in ast and Device.DEFAULT != "GPU": continue  # IMAGE is only for GPU
     print(f"testing ast {i}")
     tested += 1
     lin = ast_str_to_lin(ast)
-    for k, v in fuzz_linearizer(lin).items():
+
+    fuzz_failures = fuzz_linearizer(lin)
+    if fuzz_failures: failed_ids.append(i)
+    for k, v in fuzz_failures.items():
       for f in v:
         failures[k].append(f)
+
   for msg, errors in failures.items():
     for i, (ast, opts) in enumerate(errors):
       print(f"{msg} {i} AST: {ast}")
       print(f"{msg} {i} OPTS: {opts}\n")
+
   print(f"{tested=}")
   if failures:
+    print(f"{failed_ids=}")
     for msg, errors in failures.items():
       print(f"{msg}: {len(errors)}")
   else:
