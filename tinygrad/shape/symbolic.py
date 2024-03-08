@@ -204,6 +204,7 @@ class MulNode(OpNode):
     return Node.__floordiv__(self, b, factoring_allowed)
   def __mod__(self, b: Union[Node, int]): return Node.__mod__(self.a * (self.b%b), b)
   def get_bounds(self) -> Tuple[int, sint]:
+    assert self.a.min >= 0
     if isinstance(self.b, int): return (self.a.min*self.b, self.a.max*self.b) if self.b >= 0 else (self.a.max*self.b, self.a.min*self.b)
     return (self.a.min*self.b.min, self.a.max*self.b.max) if self.b.min >= 0 else (self.a.max*self.b.min, self.a.min*self.b.max)
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node:
