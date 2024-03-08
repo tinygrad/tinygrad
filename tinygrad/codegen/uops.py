@@ -208,8 +208,8 @@ class UOpGraph:
     def mult_neg_1(x): return self.add(UOps.ALU, where.dtype, (x, const(-1)), BinaryOps.MUL)
     def max(x, y): return self.add(UOps.ALU, where.dtype, (x, y), BinaryOps.MAX)
 
+    modified_loops = {}
     for phi in [op for op in self.uops if op.uop == UOps.PHI]:
-      replaced_ops = {}
       loop_op, all_loop_ops = phi.vin[2], self.uops[self.uops.index(phi.vin[2]):self.uops.index(phi)]
       for where in [op for op in all_loop_ops if op.arg == TernaryOps.WHERE and op.dtype is not None and dtypes.is_int(op.dtype)]:
         try:
@@ -225,19 +225,19 @@ class UOpGraph:
         self.uops = self.uops + after_where_ops
         final_op = self.add(UOps.ALU, where.dtype, (clamped, where.vin[1]), BinaryOps.MUL, insert_before=self.uops.index(where))
         self.replace_op(where, final_op)
-        replaced_ops[where] = final_op
+        modified_loops[loop_op] = phi
         get_recursive_parents.cache_clear()
-      if len(replaced_ops) > 0:
-        if loop_op not in get_recursive_parents(phi.vin[1]):
-          if DEBUG >= 5: print("replacing phi")
-          self.replace_op(phi, phi.vin[1])
-          self.uops.remove((accumulator:=phi.vin[0]))
-          for alu_with_accum in [op for op in self.uops if accumulator in op.vin]:
-            self.replace_op(alu_with_accum, next(op for op in alu_with_accum.vin if op != accumulator))
-        if len(self.get_recursive_children(loop_op)) == 0:
-          if DEBUG >= 5: print("removing loop")
-          self.uops.remove(loop_op)
-        return True
+      if loop_op not in get_recursive_parents(phi.vin[1]):
+        if DEBUG >= 5: print("replacing phi")
+        self.replace_op(phi, phi.vin[1])
+        self.uops.remove((accumulator:=phi.vin[0]))
+        for alu_with_accum in [op for op in self.uops if accumulator in op.vin]:
+          self.replace_op(alu_with_accum, next(op for op in alu_with_accum.vin if op != accumulator))
+    for loop_op in modified_loops.keys():
+      if len(self.get_recursive_children(loop_op)) == 0:
+        if DEBUG >= 5: print("removing loop")
+        self.uops.remove(loop_op)
+    return len(modified_loops) > 0
 
   def uops_optimization(self, get_recursive_parents):
     for u in self.uops:
