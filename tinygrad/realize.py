@@ -1,5 +1,5 @@
 import sys
-from collections import defaultdict
+from collections import defaultdict, deque
 from typing import List, Dict, Optional, cast, Set, DefaultDict
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters, LazyOp, ReduceOps, ConstBuffer, MemBuffer, BinaryOps, UnaryOps, \
   ScheduleBarrier
@@ -207,13 +207,14 @@ def group_barriers(items: List[ScheduleItem]) -> List[ScheduleItem]:
   ordered: List[int] = []
   in_degrees: Dict[int, int] = {k:0 for k in graph.keys()}
   for n in flatten(graph.values()): in_degrees[n] += 1
-  free = [node for node, degree in in_degrees.items() if degree == 0]
+  free = deque([node for node, degree in in_degrees.items() if degree == 0])
   while len(free) > 0:
-    node = free.pop(0)
+    node = free.popleft()
     ordered.append(node)
     for dep in graph[node]:
       in_degrees[dep] -= 1
       if in_degrees[dep] == 0: free.append(dep)
+  del in_degrees, free
 
   assert len(ordered) == len(grouped), "cyclic dependency"
 
