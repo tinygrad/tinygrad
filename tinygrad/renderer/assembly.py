@@ -24,6 +24,8 @@ class AssemblyLanguage(NamedTuple):
   asm_for_op: Dict[Op, Callable[...,str]] = {}
   types: Dict[DType, str] = INVERSE_DTYPES_DICT
 
+  def mem_type(self, dtype): raise NotImplementedError()
+
   def render_const(self, x:Union[float,int,bool], dtype, mov=None) -> Union[List[str], str]: raise NotImplementedError()
   def render_local(self, dest, name, size, dtype) -> List[str]: raise NotImplementedError()
 
@@ -59,6 +61,11 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
       u.dtype = dtypes.uint8
       new = uops.add(UOps.CAST, dtypes.bool, (u,), insert_before=uops.uops.index(u)+1)
       replace[u] = new
+    if u.uop is UOps.ALU and u.arg is BinaryOps.DIV and u.dtype is dtypes.float:
+      # TODO: move this out to recip higher level?
+      if u.vin[0].uop == UOps.CONST and u.vin[0].arg == 1:
+        u.arg = UnaryOps.RECIP
+        u.vin = (u.vin[1],)
     if u.uop is UOps.ALU and u.arg in {BinaryOps.CMPEQ, BinaryOps.CMPLT} and u.vin[0].dtype is dtypes.bool:
       if u.arg == BinaryOps.CMPEQ:
         u.arg = BinaryOps.XOR
@@ -70,7 +77,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
         u.arg = BinaryOps.MUL
     # pointer indexing (similar to RDNA3)
     if u.uop in {UOps.LOAD, UOps.STORE}:
-      u.arg = '.shared' if u.vin[0].uop == UOps.DEFINE_LOCAL else ''  # move this to the arg
+      u.arg = '.shared' if u.vin[0].uop == UOps.DEFINE_LOCAL else '.global'  # move this to the arg
       if u.vin[0].dtype.itemsize > 1:
         val = uops.add(UOps.CONST, dtypes.int, tuple(), arg=u.vin[0].dtype.itemsize, insert_before=uops.uops.index(u))
         ptr = uops.add(UOps.ALU, dtypes.int, (u.vin[1], val), arg=BinaryOps.MUL, insert_before=uops.uops.index(u))
@@ -88,7 +95,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
   def kk(*s: str): kernel.append("\n".join(s))
 
   c: DefaultDict[str, int] = defaultdict(int)
-  r: Dict[UOp, str] = {}
+  r: Dict[UOp, Union[List[str], str]] = {}
   def ssa(u, prefix="t", dtype=None) -> str:
     nonlocal c, r
     prefix += f"_{dtype if dtype else lang.types[u.dtype]}_"
@@ -131,7 +138,11 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
       kk(f"{r_label[vin[0]]}:")
     elif uop == UOps.STORE:
       assert vin[0].dtype is not None and vin[1].dtype is not None and vin[2].dtype is not None
-      kk(*lang.render_store(r[vin[0]], r[vin[2]], vin[2].dtype, gate=r[vin[3]] if len(vin)>3 else None, ss=u.arg, off=vin[1].arg))
+      if vin[2].dtype.count > 1:
+        kk((f"@{r[vin[3]]} " if len(vin)>3 else "") + \
+            f"st{u.arg}.v{vin[2].dtype.count}.{lang.mem_type(vin[2].dtype.scalar())} [{r[vin[0]]}+{vin[1].arg}], {{{', '.join(r[vin[2]])}}};")
+      else:
+        kk(*lang.render_store(r[vin[0]], r[vin[2]], vin[2].dtype, gate=r[vin[3]] if len(vin)>3 else None, ss=u.arg, off=vin[1].arg))
     else:
       assert dtype is not None, f"None dtype for uop {uop}"
       if uop == UOps.LOOP: kk(*lang.render_loop(ssa(u, 'ridx'), r[vin[0]], ssa_label(u, 'loop')))
@@ -142,23 +153,42 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
           kk(lang.asm_for_op[args](ssa(u, "alu"), *[r[x] for x in vin], vin[0].dtype, lang.types[vin[0].dtype]))
         else:
           kk(lang.asm_for_op[args](ssa(u, "alu"), *[r[x] for x in vin], dtype, lang.types[dtype]))
-      elif uop == UOps.DEFINE_ACC: kk(f"mov.b{lang.types[dtype][1:]} {ssa(u, 'acc')}, {const(args, dtype)};")
+      elif uop == UOps.DEFINE_ACC:
+        if dtype.count > 1:
+          r[u] = [ssa(None, 'acc', lang.types[dtype.scalar()]) for _ in range(dtype.count)]
+          for uu in r[u]:
+            kk(f"mov.b{lang.types[dtype.scalar()][1:]} {uu}, {const(args, dtype.scalar())};")
+        else:
+          kk(f"mov.b{lang.types[dtype][1:]} {ssa(u, 'acc')}, {const(args, dtype)};")
       elif uop == UOps.SPECIAL:
         assert args[1][0] != "i", "idx not supported"
         kk(f"mov.u32 %{args[1]}, {(lang.gid if args[1][0] == 'g' else lang.lid)[args[0]]};")
         r[u] = "%" + args[1]
         kernel = [f".reg .u32 %{args[1]};"] + kernel
-      elif uop == UOps.CONST: r[u] = const(args, dtype, mov=True)
+      elif uop == UOps.CONST:
+        if dtype.count > 1:
+          r[u] = [const(args, dtype.scalar(), mov=True) for _ in range(dtype.count)]
+        else:
+          r[u] = const(args, dtype, mov=True)
+      elif uop == UOps.GEP:
+        r[u] = r[vin[0]][u.arg]
       elif uop == UOps.LOAD:
         assert vin[1].dtype is not None
-        kk(*lang.render_load(r[vin[0]], ssa(u, 'val'), dtype, gate=r[vin[2]] if len(vin) > 3 else None,
-                             alt=r[vin[3]] if len(vin) > 3 else None, ss=u.arg, off=vin[1].arg))
+        if dtype.count > 1:
+          r[u] = [ssa(None, 'val', lang.types[dtype.scalar()]) for _ in range(dtype.count)]
+          kk(f"ld{u.arg}.v{dtype.count}.{lang.mem_type(dtype.scalar())} {{{', '.join(r[u])}}}, [{r[vin[0]]}+{vin[1].arg}];")
+        else:
+          kk(*lang.render_load(r[vin[0]], ssa(u, 'val'), dtype, gate=r[vin[2]] if len(vin) > 3 else None,
+                              alt=r[vin[3]] if len(vin) > 3 else None, ss=u.arg, off=vin[1].arg))
       elif uop == UOps.PHI:
         kk(f"mov.b{lang.types[dtype][1:]} {r[vin[0]]}, {r[vin[1]]};")
         r[u] = r[vin[0]]
       elif uop == UOps.CAST:
         assert vin[0].dtype is not None
-        cast(r[vin[0]], dtype, vin[0].dtype, bitcast=isinstance(args, tuple) and args[1], u=u)
+        if dtype.count > 1:
+          r[u] = [r[x] for x in vin]
+        else:
+          cast(r[vin[0]], dtype, vin[0].dtype, bitcast=isinstance(args, tuple) and args[1], u=u)
       elif uop == UOps.DEFINE_LOCAL:
         # TODO: we should sum these, and fetch 0xC000 from somewhere
         assert args[1]*dtype.itemsize <= 0xC000, "too large local"
@@ -195,6 +225,7 @@ class PTXLanguage(AssemblyLanguage):
     UnaryOps.EXP2: lambda d,a,dt,name: f"ex2.approx.{name} {d}, {a};", UnaryOps.LOG2: lambda d,a,dt,name: f"lg2.approx.{name} {d}, {a};",
     UnaryOps.SIN: lambda d,a,dt,name: f"sin.approx.{name} {d}, {a};",
     UnaryOps.SQRT: lambda d,a,dt,name: f"sqrt.approx.{name} {d}, {a};",
+    UnaryOps.RECIP: lambda d,a,dt,name: f"rcp.rn.{name} {d}, {a};",
     BinaryOps.ADD: lambda d,a,b,dt,name: f"{'or' if name == 'pred' else 'add'}.{name} {d}, {a}, {b};",
     BinaryOps.SUB: lambda d,a,b,dt,name: f"sub.{name} {d}, {a}, {b};",
     BinaryOps.MUL: lambda d,a,b,dt,name: ('and' if dt == dtypes.bool else 'mul') + f"{'.lo' if dtypes.is_int(dt) else ''}.{name} {d}, {a}, {b};",
