@@ -44,13 +44,13 @@ def cast_scalar(scalar: Scalar, dtype:DType):
 class dtypes:
   @staticmethod
   @functools.lru_cache(None)
-  def is_float(x: DType) -> bool: return x.scalar() in set((dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64))
+  def is_float(x: DType) -> bool: return x.scalar() in (dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64)
   @staticmethod # static methods on top, or bool in the type info will refer to dtypes.bool
   @functools.lru_cache(None)
-  def is_int(x: DType) -> bool: return x.scalar() in set((dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64)) or dtypes.is_unsigned(x)
+  def is_int(x: DType) -> bool: return x.scalar() in (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64) or dtypes.is_unsigned(x)
   @staticmethod
   @functools.lru_cache(None)
-  def is_unsigned(x: DType) -> bool: return x.scalar() in set((dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64))
+  def is_unsigned(x: DType) -> bool: return x.scalar() in (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
   @staticmethod
   def from_np(x: type) -> DType: return DTYPES_DICT[np.dtype(x).name]
   @staticmethod  # NOTE: isinstance(True, int) is True in python
