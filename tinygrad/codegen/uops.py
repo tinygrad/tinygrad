@@ -218,12 +218,10 @@ class UOpGraph:
       elif u.uop == UOps.ALU and u.arg == BinaryOps.MUL: return to_symbolic(u.vin[0]) * to_symbolic(u.vin[1])
       else: raise RuntimeError("unhandled op: " + u)
     def loop_factor(get_recursive_parents, loop_to_name, with_loop: UOp, factored: Node, loop_op):
-      if with_loop == loop_op:
-        return factored
+      if with_loop == loop_op: return factored
       elif with_loop.uop is UOps.ALU:
         next_with_loop = next(v for v in with_loop.vin if v == loop_op or loop_op in get_recursive_parents(v))
-        non_loop = to_symbolic(
-          next(v for v in with_loop.vin if v != next_with_loop and loop_op not in get_recursive_parents(v)))
+        non_loop = to_symbolic(next(v for v in with_loop.vin if v != next_with_loop and loop_op not in get_recursive_parents(v)))
         return loop_factor(get_recursive_parents, loop_to_name, next_with_loop, alu_opposite(with_loop.arg, factored, non_loop), loop_op)
     def const(x): return self.add(UOps.CONST, where.dtype, tuple(), x)
     def mult_neg_1(x): return self.add(UOps.ALU, where.dtype, (x, const(-1)), BinaryOps.MUL)
@@ -232,10 +230,10 @@ class UOpGraph:
     for phi in [op for op in self.uops if op.uop == UOps.PHI]:
       replaced_ops = {}
       loop_op = phi.vin[2]
-      for where in [op for op in self.uops[self.uops.index(loop_op):self.uops.index(phi)+1] if op.uop == UOps.ALU and op.arg == TernaryOps.WHERE]:
+      for where in [op for op in get_recursive_parents(phi) if op.uop == UOps.ALU and op.arg == TernaryOps.WHERE]:
         comparison = where.vin[0]
         phi_parent = next((u for u in self.get_recursive_children(where) if u.uop is UOps.PHI), None)
-        if where.dtype is None or not dtypes.is_int(where.dtype) or phi_parent is None or where.vin[1].arg != 1 or where.vin[2].arg != 0: break
+        if where.dtype is None or not dtypes.is_int(where.dtype) or phi_parent is None or where.vin[2].arg != 0: break
         try: factored = loop_factor(get_recursive_parents, loop_to_name, comparison.vin[0], NumNode(comparison.vin[1].arg), loop_op)
         except (RuntimeError, StopIteration, AssertionError): break
         final_value = NumNode(loop_op.vin[1].arg-1) - factored
@@ -244,10 +242,10 @@ class UOpGraph:
         clamped = mult_neg_1(max(mult_neg_1(max(rendered, const(0))),
                                  const(-1*(loop_op.vin[1].arg - loop_op.vin[0].arg))))
         self.uops = self.uops + after_where_ops
-        final = self.add(UOps.ALU, where.dtype, (clamped, where.vin[1]), BinaryOps.MUL, insert_before=self.uops.index(where))
-        self.replace_and_remove_op(where, final)
-        replaced_ops[where] = final
-      get_recursive_parents.cache_clear()
+        final_op = self.add(UOps.ALU, where.dtype, (clamped, where.vin[1]), BinaryOps.MUL, insert_before=self.uops.index(where))
+        self.replace_and_remove_op(where, final_op)
+        replaced_ops[where] = final_op
+        get_recursive_parents.cache_clear()
       if len(replaced_ops) > 0:
         if loop_op not in get_recursive_parents(phi.vin[1]):
           if DEBUG >= 5: print("replacing phi")
