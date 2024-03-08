@@ -210,8 +210,8 @@ class UOpGraph:
 
     modified_phis = set()
     for phi in [op for op in self.uops if op.uop is UOps.PHI]:
-      for where in sorted([op for op in get_recursive_parents(phi) if op.arg == TernaryOps.WHERE and op.dtype is not None and dtypes.is_int(op.dtype)],
-                          key=lambda x: self.uops.index(x)):
+      where_ops = [op for op in get_recursive_parents(phi) if op.arg == TernaryOps.WHERE and op.dtype is not None and dtypes.is_int(op.dtype)]
+      for where in sorted(where_ops, key=lambda x: self.uops.index(x)):
         try:
           loop_op = phi.vin[2]
           comp, comp_lt, comp_gt = where.vin[0], where.vin[0].vin[0], where.vin[0].vin[1]
