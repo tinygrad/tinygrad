@@ -182,7 +182,7 @@ class UOpGraph:
               break
     self.uops = flatten(loop_stack)
 
-  def replace_and_remove_op(self, old, new):
+  def replace_op(self, old, new):
     for v in self.uops: v.vin = tuple(new if x is old else x for x in v.vin)
     self.uops.remove(old)
 
@@ -202,7 +202,7 @@ class UOpGraph:
           if loop_len.dtype != u.dtype: loop_len = self.add(UOps.CAST, u.dtype, (loop_len,),
                                                             insert_before=self.uops.index(u))
           new = self.add(UOps.ALU, u.dtype, (u.vin[1], loop_len,), BinaryOps.MUL, insert_before=self.uops.index(u))
-          self.replace_and_remove_op(u, new)
+          self.replace_op(u, new)
           return True
 
   def simplify_phi_loop(self, get_recursive_parents, loop_to_name, render_ops, ctx):
@@ -228,35 +228,31 @@ class UOpGraph:
     def max(x, y): return self.add(UOps.ALU, where.dtype, (x, y), BinaryOps.MAX)
 
     for phi in [op for op in self.uops if op.uop == UOps.PHI]:
-      replaced_ops = {}
-      loop_op = phi.vin[2]
-      for where in [op for op in get_recursive_parents(phi) if op.uop == UOps.ALU and op.arg == TernaryOps.WHERE]:
-        comparison = where.vin[0]
-        phi_parent = next((u for u in self.get_recursive_children(where) if u.uop is UOps.PHI), None)
-        if where.dtype is None or not dtypes.is_int(where.dtype) or phi_parent is None or where.vin[2].arg != 0: break
-        try: factored = loop_factor(get_recursive_parents, loop_to_name, comparison.vin[0], NumNode(comparison.vin[1].arg), loop_op)
-        except (RuntimeError, StopIteration, AssertionError): break
+      loop_op, all_loop_ops = phi.vin[2], self.uops[self.uops.index(phi.vin[2]):self.uops.index(phi)]
+      for where in [op for op in all_loop_ops if op.uop == UOps.ALU and op.arg == TernaryOps.WHERE and dtypes.is_int(op.dtype)]:
+        try:
+          comp, comp_lt, comp_gt = where.vin[0], where.vin[0].vin[0], where.vin[0].vin[1]
+          if where.vin[2].arg != 0 or comp_gt.uop is not UOps.CONST or comp_gt.arg > 0: continue
+          factored = loop_factor(get_recursive_parents, loop_to_name, comp_lt, NumNode(comp_gt.arg), loop_op)
+        except (RuntimeError, StopIteration, IndexError): continue
         final_value = NumNode(loop_op.vin[1].arg-1) - factored
         self.uops, after_where_ops = self.uops[:(where_index:=self.uops.index(where))], self.uops[where_index:]
         rendered = final_value.render(render_ops, ctx)
-        clamped = mult_neg_1(max(mult_neg_1(max(rendered, const(0))),
-                                 const(-1*(loop_op.vin[1].arg - loop_op.vin[0].arg))))
+        loop_length = loop_op.vin[1].arg - loop_op.vin[0].arg
+        clamped = mult_neg_1(max(const(-1*loop_length), mult_neg_1(max(rendered, const(0)))))
         self.uops = self.uops + after_where_ops
         final_op = self.add(UOps.ALU, where.dtype, (clamped, where.vin[1]), BinaryOps.MUL, insert_before=self.uops.index(where))
-        self.replace_and_remove_op(where, final_op)
-        replaced_ops[where] = final_op
+        self.replace_op(where, final_op)
         get_recursive_parents.cache_clear()
-      if len(replaced_ops) > 0:
         if loop_op not in get_recursive_parents(phi.vin[1]):
           if DEBUG >= 5: print("replacing phi")
-          self.replace_and_remove_op(phi, phi.vin[1])
+          self.replace_op(phi, phi.vin[1])
           self.uops.remove((accumulator:=phi.vin[0]))
           for alu_with_accum in [op for op in self.uops if accumulator in op.vin]:
-            self.replace_and_remove_op(alu_with_accum, next(op for op in alu_with_accum.vin if op != accumulator))
+            self.replace_op(alu_with_accum, next(op for op in alu_with_accum.vin if op != accumulator))
         if len(self.get_recursive_children(loop_op)) == 0:
           if DEBUG >= 5: print("removing loop")
           self.uops.remove(loop_op)
-        return True
 
   def uoptimize(self, loop_to_name, render_ops, ctx):
     # get PHI node loop scope, link anything using a DEFINE_ACC to the loop as a "parent"
