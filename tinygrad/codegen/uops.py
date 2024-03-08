@@ -234,7 +234,7 @@ class UOpGraph:
           comp, comp_lt, comp_gt = where.vin[0], where.vin[0].vin[0], where.vin[0].vin[1]
           if where.vin[2].arg != 0 or comp.arg != BinaryOps.CMPLT or comp_gt.uop is not UOps.CONST or comp_gt.arg > 0: continue
           factored = loop_factor(get_recursive_parents, loop_to_name, comp_lt, NumNode(comp_gt.arg), loop_op)
-        except (RuntimeError, StopIteration, IndexError): continue
+        except (RuntimeError, StopIteration, IndexError, AssertionError): continue
         final_value = NumNode(loop_op.vin[1].arg-1) - factored
         self.uops, after_where_ops = self.uops[:(where_index:=self.uops.index(where))], self.uops[where_index:]
         rendered = final_value.render(render_ops, ctx)
