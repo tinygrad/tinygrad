@@ -6,7 +6,6 @@ import unittest
 from typing import List, Optional
 from tinygrad.tensor import Tensor
 from tinygrad.ops import LoadOps
-from tinygrad.device import Device, Compiled
 from tinygrad.helpers import DEBUG, GRAPH
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.graph import print_tree, realized_lazybuffer
@@ -79,7 +78,6 @@ class TestSchedule(unittest.TestCase):
     d = (a+b).permute(1,0)+c
     check_schedule(d, 1)
 
-  @unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled) or Device.DEFAULT == "LLVM", "only test for compiled backends")
   def test_constants_are_embedded(self):
     a = Tensor.empty(3,3) * 2
     check_schedule(a, 2, filter_loadops=False)

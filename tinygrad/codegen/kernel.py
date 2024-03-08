@@ -70,6 +70,7 @@ class LocalBuffer(NamedTuple):
 
 class LinearizerOptions(NamedTuple):
   device: str = ""
+  suffix: str = ""
   # TODO: make this generic with a list of supported types
   supports_float4: bool = True
   has_local: bool = True
