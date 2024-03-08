@@ -229,10 +229,10 @@ class UOpGraph:
 
     for phi in [op for op in self.uops if op.uop == UOps.PHI]:
       loop_op, all_loop_ops = phi.vin[2], self.uops[self.uops.index(phi.vin[2]):self.uops.index(phi)]
-      for where in [op for op in all_loop_ops if op.uop == UOps.ALU and op.arg == TernaryOps.WHERE and dtypes.is_int(op.dtype)]:
+      for where in [op for op in all_loop_ops if op.arg == TernaryOps.WHERE and op.dtype is not None and dtypes.is_int(op.dtype)]:
         try:
           comp, comp_lt, comp_gt = where.vin[0], where.vin[0].vin[0], where.vin[0].vin[1]
-          if where.vin[2].arg != 0 or comp_gt.uop is not UOps.CONST or comp_gt.arg > 0: continue
+          if where.vin[2].arg != 0 or comp.arg != BinaryOps.CMPLT or comp_gt.uop is not UOps.CONST or comp_gt.arg > 0: continue
           factored = loop_factor(get_recursive_parents, loop_to_name, comp_lt, NumNode(comp_gt.arg), loop_op)
         except (RuntimeError, StopIteration, IndexError): continue
         final_value = NumNode(loop_op.vin[1].arg-1) - factored
