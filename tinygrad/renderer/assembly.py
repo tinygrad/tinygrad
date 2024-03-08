@@ -1,4 +1,4 @@
-from typing import Callable, DefaultDict, Dict, List, Union, NamedTuple
+from typing import Callable, DefaultDict, Dict, List, Union, NamedTuple, Set
 import functools, struct
 from collections import defaultdict
 from tinygrad.codegen.linearizer import UOps, UOp
@@ -30,8 +30,8 @@ class AssemblyLanguage(NamedTuple):
   def render_loop(self, idx, start, label, acc=None) -> List[str]: raise NotImplementedError()
   def render_bra(self, b1, pred=None, b2=None) -> List[str]: raise NotImplementedError()
   def render_gep(self, loc, base, offset, dtype, gate=None) -> List[str]: raise NotImplementedError()
-  def render_load(self, loc, dest, dtype, gate=None, alt=None, ss="") -> List[str]: raise NotImplementedError()
-  def render_store(self, loc, val, dtype, gate=None, ss="") -> List[str]: raise NotImplementedError()
+  def render_load(self, loc, dest, dtype, gate=None, alt=None, ss="", off=0) -> List[str]: raise NotImplementedError()
+  def render_store(self, loc, val, dtype, gate=None, ss="", off=0) -> List[str]: raise NotImplementedError()
   def render_cast(self, d:str, a:str, dtype:DType, atype:DType, bitcast=False, pred=False) -> List[str]: raise NotImplementedError()
 
   def render_kernel(self, kernel, function_name, bufs, regs) -> str: raise NotImplementedError()
@@ -44,7 +44,10 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
   # all uops must be a register
   # TODO: uops class should make these rewrites easier
   replace: Dict[UOp, UOp] = {}
+  seen: Set[UOp] = set()
   for u in uops:
+    if u in seen: continue
+    seen.add(u)
     for o,n in replace.items():
       if o in u.vin and u is not n:
         u.vin = tuple(n if x == o else x for x in u.vin)
@@ -65,6 +68,21 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
         new = uops.add(UOps.ALU, dtypes.bool, (u.vin[0],), arg=UnaryOps.NEG, insert_before=uops.uops.index(u))
         u.vin = (new, u.vin[1])
         u.arg = BinaryOps.MUL
+    # pointer indexing (similar to RDNA3)
+    if u.uop in {UOps.LOAD, UOps.STORE}:
+      u.arg = '.shared' if u.vin[0].uop == UOps.DEFINE_LOCAL else ''  # move this to the arg
+      if u.vin[0].dtype.itemsize > 1:
+        val = uops.add(UOps.CONST, dtypes.int, tuple(), arg=u.vin[0].dtype.itemsize, insert_before=uops.uops.index(u))
+        ptr = uops.add(UOps.ALU, dtypes.int, (u.vin[1], val), arg=BinaryOps.MUL, insert_before=uops.uops.index(u))
+      else:
+        ptr = u.vin[1]
+      if ptr.uop == UOps.CONST:
+        u.vin = (u.vin[0], ptr) + u.vin[2:]
+      else:
+        zero = uops.add(UOps.CONST, dtypes.int, tuple(), arg=0, insert_before=uops.uops.index(u))
+        bptr = uops.add(UOps.CAST, dtypes.uint64, (ptr,), insert_before=uops.uops.index(u))
+        fptr = uops.add(UOps.ALU, dtypes.uint64, (u.vin[0], bptr), arg=BinaryOps.ADD, insert_before=uops.uops.index(u))
+        u.vin = (fptr, zero) + u.vin[2:]
   #uops.print()
 
   def kk(*s: str): kernel.append("\n".join(s))
@@ -113,11 +131,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
       kk(f"{r_label[vin[0]]}:")
     elif uop == UOps.STORE:
       assert vin[0].dtype is not None and vin[1].dtype is not None and vin[2].dtype is not None
-      kk(*lang.render_gep(loc:=ssa(None,'loc','u64'), r[vin[0]], r[vin[1]], vin[0].dtype))
-      if len(vin) > 3:
-        assert vin[3].dtype is not None
-        pred = cast(r[vin[3]], dtypes.bool, vin[3].dtype, pred=True)
-      kk(*lang.render_store(loc, r[vin[2]], vin[0].dtype, gate=pred if len(vin)>3 else None, ss='.shared' if vin[0].uop == UOps.DEFINE_LOCAL else ''))
+      kk(*lang.render_store(r[vin[0]], r[vin[2]], vin[2].dtype, gate=r[vin[3]] if len(vin)>3 else None, ss=u.arg, off=vin[1].arg))
     else:
       assert dtype is not None, f"None dtype for uop {uop}"
       if uop == UOps.LOOP: kk(*lang.render_loop(ssa(u, 'ridx'), r[vin[0]], ssa_label(u, 'loop')))
@@ -137,15 +151,8 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
       elif uop == UOps.CONST: r[u] = const(args, dtype, mov=True)
       elif uop == UOps.LOAD:
         assert vin[1].dtype is not None
-        val = ssa(u, 'val')
-        if len(vin) > 3:
-          assert vin[2].dtype is not None
-          pred = cast(r[vin[2]], dtypes.bool, vin[2].dtype, pred=True)
-          off = cast(r[vin[1]], dtypes.uint, vin[1].dtype)
-        kk(*lang.render_gep(loc:=ssa(None,'loc',lang.types[dtypes.ulong]), r[vin[0]], off if len(vin)>3 else cast(r[vin[1]],
-                                                                                                                  dtypes.uint, vin[1].dtype), dtype),
-          *lang.render_load(loc, val, dtype, gate=pred if len(vin) > 3 else None,
-                            alt=r[vin[3]] if len(vin) > 3 else None, ss='.shared' if vin[0].uop == UOps.DEFINE_LOCAL else ''))
+        kk(*lang.render_load(r[vin[0]], ssa(u, 'val'), dtype, gate=r[vin[2]] if len(vin) > 3 else None,
+                             alt=r[vin[3]] if len(vin) > 3 else None, ss=u.arg, off=vin[1].arg))
       elif uop == UOps.PHI:
         kk(f"mov.b{lang.types[dtype][1:]} {r[vin[0]]}, {r[vin[1]]};")
         r[u] = r[vin[0]]
@@ -223,26 +230,20 @@ class PTXLanguage(AssemblyLanguage):
 
   def render_bra(self, b1, pred=None, b2=None) -> List[str]: return [f"@{pred} bra {b1};", f"@!{pred} bra {b2};"] if pred else [f"bra {b1};"]
 
-  def render_gep(self, loc, base, offset, dtype, gate=None) -> List[str]:
-    # this cast is only required because of ocelot
-    if "s32" in offset:
-      return [f".reg .u32 {offset}_cast;", f"cvt.u32.s32 {offset}_cast, {offset};", f"mad.wide.u32 {loc}, {offset}_cast, {dtype.itemsize}, {base};"]
-    else: return [f"mad.wide.u32 {loc}, {offset}, {dtype.itemsize}, {base};"]
-
   def mem_type(self, dtype): return 's8' if dtype.itemsize == 1 else 'b16' if dtype == dtypes.float16 else self.types[dtype]
 
-  def render_load(self, loc, dest, dtype, gate=None, alt=None, ss="") -> List[str]:
+  def render_load(self, loc, dest, dtype, gate=None, alt=None, ss="", off=0) -> List[str]:
     assert dtype is not dtypes.bool
     ret = []
-    if gate: ret.extend([f"@{gate} ld{ss}.{self.mem_type(dtype)} {dest}, [{loc}];",
+    if gate: ret.extend([f"@{gate} ld{ss}.{self.mem_type(dtype)} {dest}, [{loc}+{off}];",
                          f"@!{gate} mov.b{self.types[dtype][1:]} {dest}, {alt};"])
-    else: ret.append(f"ld{ss}.{self.mem_type(dtype)} {dest}, [{loc}];")
+    else: ret.append(f"ld{ss}.{self.mem_type(dtype)} {dest}, [{loc}+{off}];")
     return ret
 
-  def render_store(self, loc, val, dtype, gate=None, ss="") -> List[str]:
+  def render_store(self, loc, val, dtype, gate=None, ss="", off=0) -> List[str]:
     if dtype == dtypes.bool: return [f".reg .s16 {val}_cast;", *self.render_cast(f"{val}_cast", val, dtypes.int16, dtype),
-                                     (f"@{gate} " if gate else "") + f"st{ss}.{self.mem_type(dtype)} [{loc}], {val}_cast;"]
-    return [(f"@{gate} " if gate else "") + f"st{ss}.{self.mem_type(dtype)} [{loc}], {val};"]
+                                     (f"@{gate} " if gate else "") + f"st{ss}.{self.mem_type(dtype)} [{loc}+{off}], {val}_cast;"]
+    return [(f"@{gate} " if gate else "") + f"st{ss}.{self.mem_type(dtype)} [{loc}+{off}], {val};"]
 
   def render_cast(self, d:str, a:str, dtype:DType, atype:DType, bitcast=False, pred=False) -> List[str]:
     if bitcast: return [f"mov.b{self.types[dtype][1:]} {d}, {a};"]

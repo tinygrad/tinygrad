@@ -41,8 +41,8 @@ if __name__ == "__main__":
     ratio = sum(tm_ptx)/sum(tm_cuda)
     print(f"{num:4d} {ratio:6.2f}x", lin.name)
     if ratio > 2:
-      for l1, l2 in zip(cuda_prg.lib.decode(), ptx_src):
-        print(f"{l1:40s} | {l2:40s}")
-
-
-
+      def fix(x): return x.replace('\t', ' ').strip()
+      ll1, ll2 = cuda_prg.lib.decode().split('\n'), ptx_src.split('\n')
+      for ln, (l1, l2) in enumerate(zip(ll1, ll2)):
+        print(f"{ln:5d} | {fix(l1):80s} | {fix(l2):80s}")
+      print(len(ll1), len(ll2), "RATIO", ratio)
