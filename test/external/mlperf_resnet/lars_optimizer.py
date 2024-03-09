@@ -1,5 +1,5 @@
 # https://github.com/mlcommons/training/blob/e3769c8dcf88cd21e1001dd2f894b40a1513ec5d/image_classification/tensorflow2/lars_optimizer.py
-# changes: hack _prepare_local to work with latest tf; don't call lr_t if it's not a schedule
+# changes: don't call lr_t if it's not a schedule
 
 # Copyright 2018 The TensorFlow Authors. All Rights Reserved.
 #
