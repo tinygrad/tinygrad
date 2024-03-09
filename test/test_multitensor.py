@@ -237,7 +237,7 @@ class TestMultiTensor(unittest.TestCase):
     GlobalCounters.reset()
     optimizer.zero_grad()
     shard_output = m(fake_image_sharded).sparse_categorical_crossentropy(labels_sharded, label_smoothing=0.1)
-    assert shard_output.lazydata.axis == None
+    assert shard_output.lazydata.axis is None
     shard_output.backward()
     shard_grad = m.conv1.weight.grad.numpy()
     # sometimes there is zeros in these grads... why?
