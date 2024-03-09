@@ -29,8 +29,6 @@ def _expr_view(view:View, idxs:List[Node], valid:Optional[Node]=None) -> Tuple[N
 class ShapeTracker:
   views: Tuple[View, ...]
 
-  # TODO: Make ShapeTracker independent of symbolic.
-  # First step, __add__ needs to move from ShapeTracker to View, but currently it uses ShapeTracker.real_strides.
   @functools.lru_cache(maxsize=None)
   def __add__(self, vm2:View, vm1:View) -> Optional[View]:
     if vm2.contiguous: return vm1
