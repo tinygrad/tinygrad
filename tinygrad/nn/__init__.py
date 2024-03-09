@@ -72,18 +72,12 @@ class ConvTranspose2d(Conv2d):
 class Linear:
   def __init__(self, in_features, out_features, bias=True):
     # TODO: is this init good? torch inits to uniform(-1/sqrt(in_features), 1/sqrt(in_features))
-    self.weight = self.initialize_weight(in_features, out_features)
-    self.bias = self.initialize_bias(in_features, out_features) if bias else None
+    self.weight = Tensor.kaiming_uniform(out_features, in_features, a=math.sqrt(5))
+    bound = 1 / math.sqrt(in_features)
+    self.bias = Tensor.uniform(out_features, low=-bound, high=bound) if bias else None
 
   def __call__(self, x:Tensor):
     return x.linear(self.weight.transpose(), self.bias)
-
-  def initialize_weight(self, in_features, out_features):
-    return Tensor.kaiming_uniform(out_features, in_features, a=math.sqrt(5))
-
-  def initialize_bias(self, in_features, out_features):
-    bound = 1 / math.sqrt(in_features)
-    return Tensor.uniform(out_features, low=-bound, high=bound)
 
 class GroupNorm:
   def __init__(self, num_groups:int, num_channels:int, eps:float=1e-5, affine:bool=True):

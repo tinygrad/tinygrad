@@ -25,10 +25,10 @@ class Conv2dHeNormal(nn.Conv2d):
     return he_normal(out_channels, in_channels//groups, *self.kernel_size, a=0.0)
 
 class Linear(nn.Linear):
-  def initialize_weight(self, in_features, out_features):
-    return Tensor.normal((out_features, in_features), mean=0.0, std=0.01)
-  def initialize_bias(self, in_features, out_features):
-    return Tensor.zeros(out_features)
+  def __init__(self, in_features, out_features, bias=True):
+    super().__init__(in_features, out_features, bias=bias)
+    self.weight = Tensor.normal((out_features, in_features), mean=0.0, std=0.01)
+    if bias: self.bias = Tensor.zeros(out_features)
 
 class BasicBlock:
   expansion = 1
