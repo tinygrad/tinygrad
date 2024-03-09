@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, subprocess, atexit, multiprocessing, pathlib, ctypes, tempfile, functools
+import os, subprocess, atexit, pathlib, ctypes, tempfile, functools
 import Metal, Foundation, libdispatch
 from typing import List, Any, Tuple, Optional
 from tinygrad.codegen.kernel import LinearizerOptions
@@ -102,7 +102,7 @@ class MetalDevice(Compiled):
       MetalDevice.captureManager = Metal.MTLCaptureManager.sharedCaptureManager()
       captureDescriptor = Metal.MTLCaptureDescriptor.alloc().init()
       captureDescriptor.setDestination_(Metal.MTLCaptureDestination(Metal.MTLCaptureDestinationGPUTraceDocument))
-      captureDescriptor.setOutputURL_(Foundation.NSURL.URLWithString_(f"file:/tmp/tinygrad_{multiprocessing.current_process().name}.gputrace"))
+      captureDescriptor.setOutputURL_(Foundation.NSURL.URLWithString_("file:/tmp/tinygrad.gputrace"))
       captureDescriptor.setCaptureObject_(self.device)
       unwrap2(MetalDevice.captureManager.startCaptureWithDescriptor_error_(captureDescriptor, None))
       atexit.register(MetalDevice.stopCapture)
@@ -119,7 +119,7 @@ class MetalDevice(Compiled):
   def stopCapture():
     if MetalDevice.captureManager:
       MetalDevice.captureManager.stopCapture()
-      print(f"Saved GPU trace to /tmp/tinygrad_{multiprocessing.current_process().name}.gputrace")
+      print("Saved GPU trace to /tmp/tinygrad.gputrace")
       print("For information on how to replay a .gputrace file - https://developer.apple.com/documentation/xcode/replaying-a-gpu-trace-file")
       print("Make sure to check \"Profile GPU Trace\" to see contents of buffers, performance data and timelinte.")
 
