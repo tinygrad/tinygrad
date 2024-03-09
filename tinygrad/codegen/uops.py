@@ -201,13 +201,13 @@ class UOpGraph:
         next_with_loop = next(v for v in with_loop.vin if v == loop_op or loop_op in get_recursive_parents(v))
         non_loop = to_symbolic(next(v for v in with_loop.vin if v != next_with_loop and loop_op not in get_recursive_parents(v)))
         return loop_factor(get_recursive_parents, loop_to_name, next_with_loop, alu_opposite(with_loop.arg, factored, non_loop), loop_op)
-    def const(x): return self.add(UOps.CONST, where.dtype, tuple(), x)
-    def mult_neg_1(x): return self.add(UOps.ALU, where.dtype, (x, const(-1)), BinaryOps.MUL)
-    def max(x, y): return self.add(UOps.ALU, where.dtype, (x, y), BinaryOps.MAX)
+    def const(x): return self.add(UOps.CONST, dtypes.default_int, tuple(), x)
+    def mult_neg_1(x): return self.add(UOps.ALU, dtypes.default_int, (x, const(-1)), BinaryOps.MUL)
+    def max(x, y): return self.add(UOps.ALU, dtypes.default_int, (x, y), BinaryOps.MAX)
 
     modified_phis = set()
     for phi in [op for op in self.uops if op.uop is UOps.PHI]:
-      where_ops = [op for op in get_recursive_parents(phi) if op.arg == TernaryOps.WHERE and op.dtype is not None and dtypes.is_int(op.dtype)]
+      where_ops = [op for op in get_recursive_parents(phi) if op.arg == TernaryOps.WHERE]
       for where in sorted(where_ops, key=lambda x: self.uops.index(x)):
         try:
           loop_op = phi.vin[2]
@@ -221,8 +221,9 @@ class UOpGraph:
         loop_length = loop_op.vin[1].arg - loop_op.vin[0].arg
         min_clamped = max(rendered, const(0)) if (final_value.min < 0) else rendered
         max_clamped = mult_neg_1(max(const(-1*loop_length), mult_neg_1(min_clamped))) if (final_value.max > loop_length) else min_clamped
+        maybe_cast = self.add(UOps.CAST, where.dtype, (max_clamped,)) if where.dtype != dtypes.default_int else max_clamped
+        final_op = self.add(UOps.ALU, where.dtype, (maybe_cast, where.vin[1]), BinaryOps.MUL)
         self.uops = self.uops + after_split_ops
-        final_op = self.add(UOps.ALU, where.dtype, (max_clamped, where.vin[1]), BinaryOps.MUL, insert_before=where_index)
         self.replace_op(where, final_op)
         modified_phis.add(phi)
         get_recursive_parents.cache_clear()
