@@ -1,11 +1,12 @@
 from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable
 import itertools, functools, random, math, time, multiprocessing, traceback, signal
+from collections import defaultdict
 from tinygrad.device import Device, Compiled, Buffer, CompiledASTRunner, Compiler
 from tinygrad.ops import MemBuffer
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, to_function_name
 from tinygrad.dtype import ImageDType
 from tinygrad.codegen.linearizer import Linearizer
-from collections import defaultdict
+from tinygrad.codegen.kernel import KernelOptError
 from tinygrad.tensor import Tensor
 from tinygrad.shape.symbolic import sym_infer, Variable
 
@@ -89,7 +90,7 @@ def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Lineariz
         if c in {"cyan", "green", "white"}: lcl *= s
       if up > max_up or lcl > max_lcl or ("green" in lin2.colors() and up*lcl > 2 ** 15): continue
       acted_lins[i+1] = lin2
-    except Exception:
+    except KernelOptError:
       pass
   return acted_lins
 
