@@ -55,9 +55,6 @@ def uop_alu_resolve(u:UOp) -> sint:
 
 def phi_resolve_acc(u:UOp) -> UOp: return u if u.uop is UOps.DEFINE_ACC else phi_resolve_acc(u.vin[0])
 
-def keep_doing_if_did_something(fn):
-  while fn(): pass
-
 class UOpGraph:
   def __init__(self, start_uops:Optional[List[UOp]]=None):
     # list of uops
@@ -274,8 +271,8 @@ class UOpGraph:
     self.fix_loop_scope(get_recursive_parents)
 
     # uops optimization
-    keep_doing_if_did_something(lambda: self.uops_optimization(get_recursive_parents))
-    keep_doing_if_did_something(lambda: self.simplify_phi_loop(get_recursive_parents, loop_to_name, render_ops, ctx))
+    while self.uops_optimization(get_recursive_parents): pass
+    while self.simplify_phi_loop(get_recursive_parents, loop_to_name, render_ops, ctx): pass
 
     # (recursively) remove childless uops
     self.remove_childless()
