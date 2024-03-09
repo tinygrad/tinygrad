@@ -1,9 +1,7 @@
-import math
-from typing import List
 import tinygrad.nn as nn
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import torch_load
-from tinygrad.helpers import fetch, get_child, prod, argfix
+from tinygrad.helpers import fetch, get_child
 
 # allow monkeypatching in layer implementations
 BatchNorm = nn.BatchNorm2d
