@@ -42,8 +42,8 @@ class BasicBlock:
     self.downsample = []
     if stride != 1 or in_planes != self.expansion*planes:
       self.downsample = [
-        Conv2dHeNormal(in_planes, self.expansion * planes, kernel_size=1, stride=stride, bias=False),
-        BatchNorm(self.expansion * planes)
+        Conv2dHeNormal(in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False),
+        BatchNorm(self.expansion*planes)
       ]
 
   def __call__(self, x):
@@ -70,8 +70,8 @@ class Bottleneck:
     self.downsample = []
     if stride != 1 or in_planes != self.expansion*planes:
       self.downsample = [
-        Conv2dHeNormal(in_planes, self.expansion * planes, kernel_size=1, stride=stride, bias=False),
-        BatchNorm(self.expansion * planes)
+        Conv2dHeNormal(in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False),
+        BatchNorm(self.expansion*planes)
       ]
 
   def __call__(self, x):
