@@ -19,8 +19,6 @@ def train_resnet():
   config = {}
   seed = config["seed"] = getenv("SEED", 42)
   Tensor.manual_seed(seed)  # seed for weight initialization
-  FP16 = getenv("HALF")
-  if FP16: dtypes.default_float = dtypes.float16
 
   GPUS = config["GPUS"] = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
   if not getenv("SYNCBN"):
@@ -87,13 +85,13 @@ def train_resnet():
   input_mean = Tensor([123.68, 116.78, 103.94], device=GPUS, dtype=dtypes.float32).reshape(1, -1, 1, 1)
   # mlperf reference resnet does not divide by input_std for some reason
   input_std = Tensor([0.229, 0.224, 0.225], device=GPUS, dtype=dtypes.float32).reshape(1, -1, 1, 1)
-  def normalize(x): return ((x.permute([0, 3, 1, 2]).cast(dtypes.float32) - input_mean)/input_std).cast(dtypes.default_float)
+  def normalize(x): return (x.permute([0, 3, 1, 2]) - input_mean)/input_std
   @TinyJit
   def train_step(X, Y):
     optimizer.zero_grad()
     X = normalize(X)
     out = model.forward(X)
-    loss = out.cast(dtypes.float32).sparse_categorical_crossentropy(Y, label_smoothing=0.1)
+    loss = out.sparse_categorical_crossentropy(Y, label_smoothing=0.1)
     top_1 = (out.argmax(-1) == Y).sum()
     loss.backward()
     optimizer.step()
@@ -103,7 +101,7 @@ def train_resnet():
   def eval_step(X, Y):
     X = normalize(X)
     out = model.forward(X)
-    loss = out.cast(dtypes.float32).sparse_categorical_crossentropy(Y, label_smoothing=0.1)
+    loss = out.sparse_categorical_crossentropy(Y, label_smoothing=0.1)
     top_1 = (out.argmax(-1) == Y).sum()
     return loss.realize(), top_1.realize()
   def data_get(it):
