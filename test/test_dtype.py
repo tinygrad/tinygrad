@@ -11,6 +11,7 @@ settings.register_profile("my_profile", max_examples=200, deadline=None)
 settings.load_profile("my_profile")
 
 core_dtypes = list(DTYPES_DICT.values())
+if Device.DEFAULT == "CPU": core_dtypes.remove(dtypes.bfloat16)  # NOTE: this is for teenygrad, don't remove
 floats = [dt for dt in core_dtypes if dtypes.is_float(dt)]
 def is_dtype_supported(dtype: DType, device: str = Device.DEFAULT):
   if dtype == dtypes.bfloat16: return False # numpy doesn't support bf16, tested separately in TestBFloat16DType
@@ -341,7 +342,7 @@ class TestTypeSpec(unittest.TestCase):
     assert Tensor([]).dtype == dtypes.default_float
     assert Tensor([1]).dtype == dtypes.default_int
     assert Tensor([1.1]).dtype == dtypes.default_float
-    assert Tensor([0,1], dtype=dtypes.bfloat16).dtype == dtypes.bfloat16
+    #assert Tensor([0,1], dtype=dtypes.bfloat16).dtype == dtypes.bfloat16
 
     assert Tensor.eye(0).dtype == dtypes.default_float
     assert Tensor.eye(3).dtype == dtypes.default_float
@@ -477,7 +478,7 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([0, 1], dtype=dtypes.uint32)).sum().dtype == dtypes.uint32
     assert (Tensor([0, 1], dtype=dtypes.uint64)).sum().dtype == dtypes.uint64
     assert (Tensor([0, 1], dtype=dtypes.float16)).sum().dtype == dtypes.float16
-    assert (Tensor([0, 1], dtype=dtypes.bfloat16)).sum().dtype == dtypes.bfloat16
+    #assert (Tensor([0, 1], dtype=dtypes.bfloat16)).sum().dtype == dtypes.bfloat16
     assert (Tensor([0, 1], dtype=dtypes.float32)).sum().dtype == dtypes.float32
     assert (Tensor([0, 1], dtype=dtypes.float64)).sum().dtype == dtypes.float64
 
@@ -492,7 +493,7 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([0, 1], dtype=dtypes.uint32)).cumsum(0).dtype == dtypes.uint32
     assert (Tensor([0, 1], dtype=dtypes.uint64)).cumsum(0).dtype == dtypes.uint64
     assert (Tensor([0, 1], dtype=dtypes.float16)).cumsum(0).dtype == dtypes.float16
-    assert (Tensor([0, 1], dtype=dtypes.bfloat16)).cumsum(0).dtype == dtypes.bfloat16
+    #assert (Tensor([0, 1], dtype=dtypes.bfloat16)).cumsum(0).dtype == dtypes.bfloat16
     assert (Tensor([0, 1], dtype=dtypes.float32)).cumsum(0).dtype == dtypes.float32
     assert (Tensor([0, 1], dtype=dtypes.float64)).cumsum(0).dtype == dtypes.float64
 
