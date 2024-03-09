@@ -14,6 +14,7 @@ def train_resnet():
   from examples.mlperf.dataloader import batch_load_resnet
   from extra.datasets.imagenet import get_train_files, get_val_files
   from examples.mlperf.lr_schedulers import PolynomialDecayWithWarmup
+  from examples.mlperf.initializers import Conv2dHeNormal, Linear
   from examples.hlb_cifar10 import UnsyncedBatchNorm
 
   config = {}
@@ -21,13 +22,14 @@ def train_resnet():
   Tensor.manual_seed(seed)  # seed for weight initialization
 
   GPUS = config["GPUS"] = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
-  if not getenv("SYNCBN"):
-    resnet.BatchNorm = functools.partial(UnsyncedBatchNorm, num_devices=len(GPUS))
   print(f"Training on {GPUS}")
   for x in GPUS: Device[x]
 
-  # ** model definition **
+  # ** model definition and initializers **
   num_classes = 1000
+  resnet.Conv2d = Conv2dHeNormal
+  resnet.Linear = Linear
+  if not getenv("SYNCBN"): resnet.BatchNorm = functools.partial(UnsyncedBatchNorm, num_devices=len(GPUS))
   model = resnet.ResNet50(num_classes)
 
   for k, x in get_state_dict(model).items():

@@ -5,44 +5,25 @@ from tinygrad.tensor import Tensor
 from tinygrad.nn.state import torch_load
 from tinygrad.helpers import fetch, get_child, prod, argfix
 
-BatchNorm = nn.BatchNorm2d  # allow monkeypatching :S
+# allow monkeypatching in layer implementations
+BatchNorm = nn.BatchNorm2d
+Conv2d = nn.Conv2d
+Linear = nn.Linear
 
-# rejection sampling truncated randn
-def rand_truncn(*shape, dtype=None, truncstds=2, **kwargs) -> Tensor:
-  CNT=8
-  x = Tensor.randn(*(*shape, CNT), dtype=dtype, **kwargs)
-  ctr = Tensor.arange(CNT).reshape((1,) * len(x.shape[:-1]) + (CNT,)).expand(x.shape)
-  take = (x.abs() <= truncstds).where(ctr, CNT).min(axis=-1, keepdim=True)  # set to 0 if no good samples
-  return (ctr == take).where(x, 0).sum(axis=-1)
-
-# https://github.com/keras-team/keras/blob/v2.15.0/keras/initializers/initializers.py#L1026-L1065
-def he_normal(*shape, a: float = 0.00, **kwargs) -> Tensor:
-  std = math.sqrt(2.0 / (1 + a ** 2)) / math.sqrt(prod(argfix(*shape)[1:])) / 0.87962566103423978
-  return std * rand_truncn(*shape, **kwargs)
-
-class Conv2dHeNormal(nn.Conv2d):
-  def initialize_weight(self, out_channels, in_channels, groups):
-    return he_normal(out_channels, in_channels//groups, *self.kernel_size, a=0.0)
-
-class Linear(nn.Linear):
-  def __init__(self, in_features, out_features, bias=True):
-    super().__init__(in_features, out_features, bias=bias)
-    self.weight = Tensor.normal((out_features, in_features), mean=0.0, std=0.01)
-    if bias: self.bias = Tensor.zeros(out_features)
 
 class BasicBlock:
   expansion = 1
 
   def __init__(self, in_planes, planes, stride=1, groups=1, base_width=64):
     assert groups == 1 and base_width == 64, "BasicBlock only supports groups=1 and base_width=64"
-    self.conv1 = Conv2dHeNormal(in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
+    self.conv1 = Conv2d(in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
     self.bn1 = BatchNorm(planes)
-    self.conv2 = Conv2dHeNormal(planes, planes, kernel_size=3, padding=1, stride=1, bias=False)
+    self.conv2 = Conv2d(planes, planes, kernel_size=3, padding=1, stride=1, bias=False)
     self.bn2 = BatchNorm(planes)
     self.downsample = []
     if stride != 1 or in_planes != self.expansion*planes:
       self.downsample = [
-        Conv2dHeNormal(in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False),
+        Conv2d(in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False),
         BatchNorm(self.expansion*planes)
       ]
 
@@ -61,16 +42,16 @@ class Bottleneck:
   def __init__(self, in_planes, planes, stride=1, stride_in_1x1=False, groups=1, base_width=64):
     width = int(planes * (base_width / 64.0)) * groups
     # NOTE: the original implementation places stride at the first convolution (self.conv1), control with stride_in_1x1
-    self.conv1 = Conv2dHeNormal(in_planes, width, kernel_size=1, stride=stride if stride_in_1x1 else 1, bias=False)
+    self.conv1 = Conv2d(in_planes, width, kernel_size=1, stride=stride if stride_in_1x1 else 1, bias=False)
     self.bn1 = BatchNorm(width)
-    self.conv2 = Conv2dHeNormal(width, width, kernel_size=3, padding=1, stride=1 if stride_in_1x1 else stride, groups=groups, bias=False)
+    self.conv2 = Conv2d(width, width, kernel_size=3, padding=1, stride=1 if stride_in_1x1 else stride, groups=groups, bias=False)
     self.bn2 = BatchNorm(width)
-    self.conv3 = Conv2dHeNormal(width, self.expansion*planes, kernel_size=1, bias=False)
+    self.conv3 = Conv2d(width, self.expansion*planes, kernel_size=1, bias=False)
     self.bn3 = BatchNorm(self.expansion*planes)
     self.downsample = []
     if stride != 1 or in_planes != self.expansion*planes:
       self.downsample = [
-        Conv2dHeNormal(in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False),
+        Conv2d(in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False),
         BatchNorm(self.expansion*planes)
       ]
 
@@ -105,7 +86,7 @@ class ResNet:
 
     self.groups = groups
     self.base_width = width_per_group
-    self.conv1 = Conv2dHeNormal(3, 64, kernel_size=7, stride=2, bias=False, padding=3)
+    self.conv1 = Conv2d(3, 64, kernel_size=7, stride=2, bias=False, padding=3)
     self.bn1 = BatchNorm(64)
     self.layer1 = self._make_layer(self.block, 64, self.num_blocks[0], stride=1, stride_in_1x1=stride_in_1x1)
     self.layer2 = self._make_layer(self.block, 128, self.num_blocks[1], stride=2, stride_in_1x1=stride_in_1x1)
