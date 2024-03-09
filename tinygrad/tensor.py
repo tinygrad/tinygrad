@@ -43,12 +43,9 @@ def _loadop(op, shape:Tuple[sint,...], dtype:DType, device:Union[str, Tuple[str,
   return MultiLazyBuffer([LazyBuffer.loadop(op, shape, dtype, d, arg, src) for d in device], None)
 
 def _fromcpu(x: np.ndarray) -> LazyBuffer:
-  ret = LazyBuffer.loadop(LoadOps.EMPTY, x.shape, dtypes.from_np(x.dtype), "EXT")
-  if x.size == 0:
-    ret.realized = Buffer("EXT", 0, dtypes.from_np(x.dtype), (memoryview(bytearray()), None))
-  else:
-    ret.realized = Buffer("EXT", prod(x.shape), dtypes.from_np(x.dtype), (flat_mv(np.require(x, requirements='C').data), x))
-  return ret
+  return LazyBuffer.loadop(LoadOps.EMPTY, x.shape, dtypes.from_np(x.dtype), "EXT",
+                           _buf=Buffer("EXT", 0, dtypes.from_np(x.dtype), (memoryview(bytearray()), None)) if x.size == 0 else \
+                                Buffer("EXT", prod(x.shape), dtypes.from_np(x.dtype), (flat_mv(np.require(x, requirements='C').data), x)))
 
 def _get_winograd_matcols(mat, dims:int, shp:Tuple[sint, ...], device:Union[str, Tuple[str, ...]]) -> List[List[Tensor]]:
   return [[Tensor.cat(*[Tensor.full(shp[:dim] + (1,) + shp[dim+1:], float(m[k]), device=device) for m in mat], dim=dim)
@@ -689,7 +686,7 @@ class Tensor:
     # conv2d is a pooling op (with padding)
     x = self.pad2d(padding_)._pool(HW, stride, dilation)   # (bs, groups*cin, oy, ox, H, W)
     rcout, oyx = cout//groups, x.shape[2:-len(HW)]
-    if not all(x == 3 for x in HW) or stride != 1 or dilation != 1 or not WINO.value:
+    if not all(x == 3 for x in HW) or stride != 1 or dilation != 1 or not WINO:
       # normal conv
       x = x.reshape(bs, groups, cin, 1, *oyx, *HW).expand(bs, groups, cin, rcout, *oyx, *HW).permute(0,1,3,*[4+i for i in range(len(oyx))],2,*[4+len(oyx)+i for i in range(len(HW))])  # noqa: E501
 
@@ -847,18 +844,18 @@ class Tensor:
 
   def add(self, x:Union[Tensor, Scalar], reverse=False) -> Tensor:
     x = self._to_const_val(x)
-    return mlops.Add.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or x else self
+    return mlops.Add.apply(*self._broadcasted(x, reverse)) if isinstance(x, Tensor) or x else self
   def sub(self, x:Union[Tensor, Scalar], reverse=False) -> Tensor:
     x = self._to_const_val(x)
-    return mlops.Sub.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or x else (-self if reverse else self)
+    return mlops.Sub.apply(*self._broadcasted(x, reverse)) if isinstance(x, Tensor) or x else (-self if reverse else self)
   def mul(self, x:Union[Tensor, Scalar], reverse=False) -> Tensor:
     x = self._to_const_val(x)
-    if x.__class__ is not Tensor and x == 0.0: return mlops.Zero.apply(self)
-    if x.__class__ is not Tensor and x == -1.0: return -self
-    return mlops.Mul.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or x != 1.0 else self
+    if not isinstance(x, Tensor) and x == 0.0: return mlops.Zero.apply(self)
+    if not isinstance(x, Tensor) and x == -1.0: return -self
+    return mlops.Mul.apply(*self._broadcasted(x, reverse)) if isinstance(x, Tensor) or x != 1.0 else self
   def div(self, x:Union[Tensor, Scalar], reverse=False) -> Tensor:
     x = self._to_const_val(x)
-    if x.__class__ is not Tensor and not reverse and x != 0: return self.mul(1/x)
+    if not isinstance(x, Tensor) and not reverse and x != 0: return self.mul(1/x)
     if isinstance(x, Tensor) and dtypes.is_float(x.dtype): return mlops.Div.apply(*self._broadcasted(x, reverse))
     return mlops.Div.apply(*self.cast(least_upper_float(self.dtype))._broadcasted(x, reverse))
   def xor(self, x:Tensor, reverse=False) -> Tensor: return mlops.Xor.apply(*self._broadcasted(x, reverse))
