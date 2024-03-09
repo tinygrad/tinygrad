@@ -119,6 +119,8 @@ class Tensor:
   # Python has a non moving GC, so this should be okay
   def __hash__(self): return id(self)
 
+  def __bool__(self): raise TypeError("__bool__ on Tensor is not defined")
+
   @property
   def device(self) -> Union[str, Tuple[str, ...]]: return self.lazydata.device
 
@@ -183,7 +185,7 @@ class Tensor:
     if device is None or device == self.device: return self
     if not isinstance(device, str): return self.shard(device)
     ret = Tensor(self.lazydata, device, requires_grad=self.requires_grad)
-    if self.grad: ret.grad = self.grad.to(device)
+    if self.grad is not None: ret.grad = self.grad.to(device)
     if hasattr(self, '_ctx'): ret._ctx = self._ctx
     return ret
 
@@ -206,8 +208,11 @@ class Tensor:
   # ***** creation llop entrypoint *****
 
   @staticmethod
-  def _loadop(op, shape, device:Optional[str]=None, dtype:Optional[DType]=None, arg=None, **kwargs):
-    return Tensor(LazyBuffer.loadop(op, shape, dtype or dtypes.default_float, Device.canonicalize(device), arg), dtype=dtype, device=device, **kwargs)
+  def _loadop(op, shape, device:Optional[Union[Tuple[str], str]]=None, dtype:Optional[DType]=None, arg=None, **kwargs):
+    if isinstance(device, tuple):
+      return Tensor(MultiLazyBuffer([LazyBuffer.loadop(op, shape, dtype or dtypes.default_float, Device.canonicalize(d), arg) \
+                                      for d in device], None), device, dtype, **kwargs)
+    return Tensor(LazyBuffer.loadop(op, shape, dtype or dtypes.default_float, Device.canonicalize(device), arg), device, dtype, **kwargs)
 
   @staticmethod
   def empty(*shape, **kwargs): return Tensor._loadop(LoadOps.EMPTY, argfix(*shape), **kwargs)
@@ -940,9 +945,9 @@ class Tensor:
     axis_ = argfix(axis)
     shape = tuple(s if ax in axis_ else 1 for ax, s in enumerate(self.shape))
     x = self - mean.reshape(shape)
-    if weight: x = x * weight.reshape(shape)
+    if weight is not None: x = x * weight.reshape(shape)
     ret = x.mul(invstd.reshape(shape) if len(invstd.shape) == len(axis_) else invstd)
-    return (ret + bias.reshape(shape)) if bias else ret
+    return (ret + bias.reshape(shape)) if bias is not None else ret
 
   def dropout(self, p=0.5) -> Tensor:
     if not Tensor.training or p == 0: return self

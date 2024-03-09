@@ -5,6 +5,7 @@ from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import strip_parens, getenv
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
+from tinygrad.codegen.uops import UOpGraph
 
 class CStyleLanguage(NamedTuple):
   kernel_prefix: str = ""
@@ -24,7 +25,7 @@ class CStyleLanguage(NamedTuple):
   uses_ptr_arithmetic: bool = False
   type_map: Dict[DType, str] = {}
   code_for_op: Dict = {
-    UnaryOps.NEG: lambda x,dtype: f"(-{x})", UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
+    UnaryOps.NEG: lambda x,dtype: f"(!{x})" if dtype is dtypes.bool else f"(-{x})", UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
     UnaryOps.EXP2: lambda x,dtype: f"exp2({x})", UnaryOps.LOG2: lambda x,dtype: f"log2({x})", UnaryOps.SIN: lambda x,dtype: f"sin({x})",
     BinaryOps.ADD: lambda a,b,dtype: f"({a}+{b})", BinaryOps.SUB: lambda a,b,dtype: f"({a}-{b})", BinaryOps.MUL: lambda a,b,dtype: f"({a}*{b})",
     BinaryOps.DIV: lambda a,b,dtype: f"({a}/{b})", BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})", BinaryOps.MOD: lambda a,b,dtype: f"({a}%{b})",
@@ -61,7 +62,7 @@ class CStyleLanguage(NamedTuple):
       out_val = f"*({buf_name}+{idx})" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}]"
     return self.render_cast([out_val], output_dtype) if output_dtype != buf_dtype else out_val
 
-  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
+  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:UOpGraph, prefix=None) -> str:
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,(dtype,_) in bufs) else ""  # noqa: E501
     buftypes = [(name,f"{'write_only' if mutable else 'read_only'} image2d_t" if dtype.name.startswith('image') else
                 ("" if mutable else "const ")+self.buffer_prefix+self.render_dtype(dtype)+"*"+self.buffer_suffix if isinstance(dtype, PtrDType) else
@@ -86,7 +87,7 @@ class CStyleLanguage(NamedTuple):
   def render_local(self, name:str, dtype:DType, size:int): return self.smem_align + self.smem_prefix + f"{dtype.name} {name}[{size}];"
   def render_dtype(self, var_dtype:DType) -> str: return self.type_map[var_dtype] if var_dtype in self.type_map else var_dtype.name
 
-def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> str:
+def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str:
   kernel = []
   bufs: List[Tuple[str, Tuple[DType, bool]]] = []
   #pend_close = None
@@ -126,10 +127,9 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
         depth += 1
       elif uop is UOps.ALU:
         # remove parens if ALU types are the same. TODO: can do more here
-        if vin[0].uop is UOps.ALU and vin[0].arg == args and args in {BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL, BinaryOps.XOR}:
-          val = lang.code_for_op[args](strip_parens(r[vin[0]]), *[r[x] for x in vin[1:]], dtype)
-        else:
-          val = lang.code_for_op[args](*[r[x] for x in vin] + [dtype])
+        if args in {BinaryOps.ADD,BinaryOps.MUL,BinaryOps.XOR}: operands = [strip_parens(r[v]) if v.arg == args else r[v]for v in vin]
+        else: operands = [r[v] for v in vin]
+        val = lang.code_for_op[args](*operands, dtype)
         assert child_count[u] != 0, f"childless ALU op found {u}"
         # TODO: fix index rendering issue. fix clang nested max macro issue
         if child_count[u] <= 1 and args != BinaryOps.MAX and not getenv("EXPAND_SSA"): r[u] = val
@@ -168,7 +168,10 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
       elif uop is UOps.WMMA: kk(f"{dtype.name} {ssa(u, 'wmma')} = {args}({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")
       elif uop is UOps.DEFINE_ACC: kk(f"{dtype.name} {ssa(u,'acc')} = {lang.render_const(args, dtype)};")
       elif uop is UOps.CONST: r[u] = lang.render_const(args, dtype) if args >= 0 else f"({lang.render_const(args, dtype)})"
-      elif uop is UOps.GEP: r[u] = f"({r[vin[0]]})[{args}]" if cast(DType, vin[0].dtype).count > 4 else f"({r[vin[0]]}).{'xyzw'[args]}"
+      elif uop is UOps.GEP:
+        assert vin[0].dtype is not None
+        from_ssa = vin[0].uop in {UOps.LOAD, UOps.WMMA, UOps.DEFINE_ACC}
+        r[u] = (r[vin[0]] if from_ssa else f"{(r[vin[0]])}") + (f"[{args}]" if vin[0].dtype.count > 4 else f".{'xyzw'[args]}")
       else: raise RuntimeError(f"failed to render {uop}")
 
   return lang.render_kernel(function_name, kernel, bufs, uops)
@@ -263,10 +266,8 @@ def _make_hip_dtype(base_type, name, cnt):
          ") { return {" + ', '.join(nms) + "}; }"
 
 class HIPLanguage(CStyleLanguage):
-  kernel_prefix = "#include <hip/hip_common.h>\n#define INFINITY (__builtin_inff())\n#define NAN (__builtin_nanf(\"\"))" + """
-  typedef long unsigned int size_t;
+  kernel_prefix = """
   #define half _Float16
-  struct hip_bfloat16 { unsigned short data; };
 
   extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_local_id(unsigned int);
   extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_group_id(unsigned int);
@@ -288,9 +289,9 @@ class HIPLanguage(CStyleLanguage):
   __attribute__((device)) __attribute__((pure)) _Float16 __ocml_log2_f16(_Float16);
   __attribute__((device)) _Float16 __ocml_sin_f16(_Float16);
   __attribute__((device)) __attribute__((const)) _Float16 __ocml_sqrt_f16(_Float16);
-  }\n""" + '\n'.join([_make_hip_dtype(*x) for x in [("signed int", "int", 2), ("signed int", "int", 4),
+    }\n""" + '\n'.join([_make_hip_dtype(*x) for x in [
                      ("_Float16", "half", 2), ("_Float16", "half", 4), ("_Float16", "half", 8), ("_Float16", "half", 16),
-                     ("float", "float", 2), ("float", "float", 4), ("float", "float", 8)]]) + """
+                     ("float", "float", 8)]]) + """
   static __attribute__((device)) half8 __hip_wmma_f16_f16(half16 a, half16 b, half8 c) {
     half16 c_frag = {}; half8 d; for (int n = 0; n < 8; n++) { c_frag[n*2] = c[n]; }
     c_frag = __builtin_amdgcn_wmma_f16_16x16x16_f16_w32(a, b, c_frag, false);
@@ -305,4 +306,13 @@ class HIPLanguage(CStyleLanguage):
   float4 = "make_float4"
   uses_ptr_arithmetic = False  # NOTE: this fixes TestLinearizerOverflowAlt
   type_map = {dtypes.bfloat16: "hip_bfloat16"}
+
+  def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
+    prefix = ["#include <hip/hip_common.h>\n#define INFINITY (__builtin_inff())\n#define NAN (__builtin_nanf(\"\"))",
+              "typedef long unsigned int size_t;"]
+    if any(uop.dtype == dtypes.bfloat16 for uop in uops): prefix.append("#include <hip/amd_detail/amd_hip_bfloat16.h>")
+    else: prefix.append('\n'.join(_make_hip_dtype(*x) for x in [("float", "float", 2), ("float", "float", 4),
+                                                             ("signed int", "int", 4), ("signed int", "int", 2)]))
+    return super().render_kernel(function_name, kernel, bufs, uops, prefix)
+
 HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())

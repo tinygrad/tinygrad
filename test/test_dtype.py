@@ -126,7 +126,7 @@ def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype=None):
   _assert_eq(Tensor([[1,2],[3,4]], dtype=a_dtype)@Tensor.eye(2, dtype=b_dtype), target_dtype, [[1,2],[3,4]])
   _assert_eq(Tensor([1,1,1,1], dtype=a_dtype)+Tensor.ones((4,4), dtype=b_dtype), target_dtype, 2*Tensor.ones(4,4).numpy())
 
-@unittest.skipUnless(Device.DEFAULT == "LLVM", "bfloat16 not supported")
+@unittest.skipUnless(Device.DEFAULT in ["LLVM", "HIP"], "bfloat16 not supported")
 class TestBFloat16DType(unittest.TestCase):
   def test_bf16_to_float(self):
     with self.assertRaises(AssertionError):
@@ -144,6 +144,7 @@ class TestBFloat16DType(unittest.TestCase):
     back = t.cast(dtypes.float32)
     assert tuple(back.numpy().tolist()) == (9984., -1, -1000, -9984, 20)
 
+  @unittest.skipIf(getenv("HIPCPU"), "no real HIP device exists in CI")
   def test_bf16_disk_write_read(self):
     t = Tensor([10000, -1, -1000, -10000, 20]).cast(dtypes.float32)
     t.to(f"disk:{temp('f32')}").realize()
@@ -156,6 +157,36 @@ class TestBFloat16DType(unittest.TestCase):
     t = Tensor.empty(5, dtype=dtypes.bfloat16, device=f"disk:{temp('bf16')}").llvm().realize()
     back = t.cast(dtypes.float32)
     assert tuple(back.numpy().tolist()) == (9984., -1, -1000, -9984, 20)
+
+
+@unittest.skipUnless(Device.DEFAULT in ["HIP"], "bfloat16 not supported")
+class TestBFloat16DTypeCast(unittest.TestCase):
+  def test_f16_to_bf16_conversion(self):
+    original_tensor = Tensor([1.0, 2.0, 3.0], dtype=dtypes.float16)
+    converted_tensor = original_tensor.cast(dtypes.bfloat16)
+    self.assertEqual(converted_tensor.dtype, dtypes.bfloat16)
+    back_to_float32 = converted_tensor.cast(dtypes.float32)
+    original_to_float32 = original_tensor.cast(dtypes.float32)
+    np.testing.assert_allclose(back_to_float32.numpy(), original_to_float32.numpy(), rtol=1e-2, atol=1e-3)
+
+  def test_f16_to_bf16_edge_cases(self):
+    edge_cases = Tensor([0.0, -0.0, float('inf'), float('-inf'), float('nan')], dtype=dtypes.float16)
+    converted = edge_cases.cast(dtypes.bfloat16).cast(dtypes.float32)
+    np.testing.assert_equal(converted.numpy(), edge_cases.cast(dtypes.float32).numpy())
+
+  def test_f16_to_bf16_range_precision(self):
+    large_value = Tensor([65504.0], dtype=dtypes.float16)  # Max representable in float16
+    small_value = Tensor([6.1035e-5], dtype=dtypes.float16)  # Smallest positive normal float16
+    large_converted = large_value.cast(dtypes.bfloat16).cast(dtypes.float32)
+    small_converted = small_value.cast(dtypes.bfloat16).cast(dtypes.float32)
+    np.testing.assert_allclose(large_converted.numpy(), large_value.cast(dtypes.float32).numpy(), rtol=1e-2, atol=1e-3)
+    np.testing.assert_equal(small_converted.numpy(), small_value.cast(dtypes.float32).numpy())
+
+  def test_f16_to_bf16_randomized(self):
+    np.random.seed(42)  # For reproducibility
+    random_values = Tensor(np.random.uniform(-65504, 65504, 1000), dtype=dtypes.float16)
+    converted = random_values.cast(dtypes.bfloat16).cast(dtypes.float32)
+    np.testing.assert_allclose(converted.numpy(), random_values.cast(dtypes.float32).numpy(), rtol=1e-2, atol=1e-3)
 
 class TestHalfDtype(TestDType): DTYPE = dtypes.half
 
@@ -529,6 +560,27 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([1, 2], dtype=dtypes.int32) / 2.0).dtype == dtypes.default_float
     assert (Tensor([1, 2], dtype=dtypes.float16) / 2).dtype == dtypes.float16
     assert (Tensor([1, 2], dtype=dtypes.float16) / 2.0).dtype == dtypes.float16
+
+class TestImplicitFunctionTypeChange(unittest.TestCase):
+  def test_functions(self):
+    result = []
+    for func in [
+      lambda t: t.exp(),
+      lambda t: t.exp2(),
+      lambda t: t.log(),
+      lambda t: t.log2(),
+      lambda t: t.sqrt(),
+      lambda t: t.sin(),
+    ]:
+      t = func(Tensor([4.0, 3.0])).max() == func(Tensor([4.0, 3.0]))
+      result.append(t.numpy().sum())
+
+    if Device.DEFAULT not in ["PYTHON", "CLANG"]:
+      assert all(result)
+    else:
+      # CLANG and PYTHON function default returns in double, and comparison to float can fail
+      # TODO: fix this
+      assert not all(result)
 
 if __name__ == '__main__':
   unittest.main()

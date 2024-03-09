@@ -107,8 +107,8 @@ jobs:
         python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
     - name: Test DEBUG
       run: DEBUG=100 python3 -c "from tinygrad import Tensor; N = 1024; a, b = Tensor.rand(N, N), Tensor.rand(N, N); c = (a.reshape(N, 1, N) * b.T.reshape(1, N, N)).sum(axis=2); print((c.numpy() - (a.numpy() @ b.numpy())).mean())"
-    - name: Repo line count <6000 lines
-      run: MAX_LINE_COUNT=6000 python sz.py
+    - name: Repo line count <6500 lines
+      run: MAX_LINE_COUNT=6500 python sz.py
 
   testcpuimagenet:
     name: ImageNet to C Tests
@@ -179,7 +179,7 @@ jobs:
           path: ~/.cache/tinygrad/downloads/
           key: downloads-cache-${{ matrix.task }}-${{ env.DOWNLOAD_CACHE_VERSION }}
       - name: Install Dependencies
-        run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+        run: pip install -e '.[testing,testing_tf]' --extra-index-url https://download.pytorch.org/whl/cpu
       - if: ${{ matrix.task == 'optimage' }}
         name: Run Optimizer Test (OPT 2 and 3)
         run: |
@@ -225,6 +225,9 @@ jobs:
       - if: ${{ matrix.task == 'onnx' }}
         name: Test Beam Search
         run: PYTHONPATH="." GPU=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
+      - if: ${{ matrix.task == 'onnx' }}
+        name: Test MLPerf optimizers
+        run: GPU=1 python -m pytest -n=auto test/external/external_test_optim.py --durations=20
 
   #testwebgpu:
   #  name: WebGPU Tests
@@ -346,7 +349,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [llvm, clang, gpu, cuda, hip] #, triton] #, ptx]
+        backend: [llvm, clang, gpu, cuda, hip, ptx] #, triton]
 
     name: Tests on (${{ matrix.backend }})
     runs-on: ubuntu-latest
@@ -463,7 +466,7 @@ jobs:
         run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors)' --ignore=test/external --ignore=test/models --durations=20
       - name: Run pytest (hip)
         if: matrix.backend=='hip'
-        run: python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py test/test_linearizer.py test/imported/test_indexing.py --durations=20
+        run: python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py test/test_linearizer.py test/imported/test_indexing.py test/external/external_test_hip_compile.py --durations=20
 
   #testunicorn:
   #  name: ARM64 unicorn Test

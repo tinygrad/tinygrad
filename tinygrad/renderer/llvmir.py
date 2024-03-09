@@ -3,13 +3,15 @@ from llvmlite import ir
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.dtype import DType, PtrDType, dtypes
 from tinygrad.ops import Op, UnaryOps, BinaryOps, TernaryOps
+from tinygrad.codegen.uops import UOpGraph
 
 MFLAGS = ('nsz', 'arcp', 'contract', 'afn', 'reassoc') # All from fast math, but nnan and ninf
 
 def is_bool_or_unsigned(dtype: DType): return dtype == dtypes.bool or dtypes.is_unsigned(dtype)
 
 code_for_op: Final[Dict[Op, Callable]] = {
-  UnaryOps.NEG: lambda builder, x, var_dtype: builder.neg(x) if dtypes.is_int(var_dtype) else builder.fneg(x, flags=MFLAGS),
+  UnaryOps.NEG: lambda builder, x, var_dtype: builder.neg(x) if dtypes.is_int(var_dtype) else \
+    (builder.not_(x) if var_dtype is dtypes.bool else builder.fneg(x, flags=MFLAGS)),
   UnaryOps.EXP2: lambda builder, x, var_dtype: builder.call(builder._block.module.declare_intrinsic('llvm.exp2', [x.type]), [x], fastmath=MFLAGS),
   UnaryOps.LOG2: lambda builder, x, var_dtype: builder.call(builder._block.module.declare_intrinsic('llvm.log2', [x.type]), [x], fastmath=MFLAGS),
   UnaryOps.SIN: lambda builder, x, var_dtype: builder.call(builder._block.module.declare_intrinsic('llvm.sin', [x.type]), [x], fastmath=MFLAGS),
@@ -65,7 +67,7 @@ def const(args, dtype):
   # TODO: remove int from int(args) once const args conform with dtype
   return ir.Constant(dtype_to_llvm_dtype[dtype], int(args) if dtypes.is_int(dtype) else bool(args) if dtype == dtypes.bool else args)
 
-def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> str:
+def uops_to_llvm_ir(function_name:str, uops:UOpGraph) -> str:
   # all llvm stuff goes into a module
   module = ir.Module(name=__file__)
 
