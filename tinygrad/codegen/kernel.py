@@ -16,6 +16,11 @@ class OptOps(Enum):
   GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto() # noqa: E702
   def __lt__(self, x:OptOps): return self.value < x.value
 
+class KernelOptError(Exception): pass
+
+def check(cond:bool, msg:str=""):
+  if not cond: raise KernelOptError(msg)
+
 @dataclass(frozen=True, order=True)
 class Opt:
   op: OptOps
@@ -236,7 +241,7 @@ class Kernel:
 
   # drops the final dimension
   def upcast(self):
-    assert self.full_shape[-1] != 1, "can't upcast a dimension with size 1"
+    check(self.full_shape[-1] != 1, "can't upcast a dimension with size 1")
     self.upcasted += 1
 
   # axis : the axis to pull from
@@ -411,44 +416,45 @@ class Kernel:
                 break
 
       return True
-    except AssertionError: pass
-    return False
+    except KernelOptError:
+      return False
 
   def apply_opt(self, opt:Opt, append_opt:bool=True):
-    assert not self.dont_use_locals or opt.op not in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP, OptOps.UPCASTMID}, "not using locals"
+    check(not self.dont_use_locals or opt.op not in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP, OptOps.UPCASTMID}, "not using locals")
 
     if opt.op == OptOps.TC:
-      assert len(self.applied_opts) == 0, "tensor core opts must be first" # TODO: things like PADTO might be fine
-      assert opt.axis is not None and opt.amt is not None, "tensor core opts must have an axis and amt"
-      assert (use_tensor_cores:=getenv("TC", 1)) == 2 or self.opts.has_tensor_cores, "must have tensor cores or TC=2"
-      assert self._apply_tc_opt(use_tensor_cores, opt.axis, opt.amt), "no tensor core available"
+      check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: things like PADTO might be fine
+      check(opt.axis is not None and opt.amt is not None, "tensor core opts must have an axis and amt")
+      check((use_tensor_cores:=getenv("TC", 1)) == 2 or self.opts.has_tensor_cores, "must have tensor cores or TC=2")
+      check(self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), cast(int, opt.amt)), "no tensor core available")
       self.applied_opts.append(opt)
       return
 
     if opt.axis is not None:
       axis = opt.axis + (self.first_reduce if opt.op == OptOps.UNROLL else (self.first_reduce+self.group_for_reduces if opt.op in [OptOps.GROUP, OptOps.GROUPTOP] else 0))  # noqa: E501
-    else:
-      axis = -1
+    else: axis = -1
+    check(axis < len(self.full_shape), "invalid axis")
+
     if opt.amt is not None:
       amt = opt.amt if opt.amt != 0 else self.full_shape[axis]
-      assert isinstance(amt, int) and amt != 1, "shift/padto of amt 1 or Node is meaningless"
-      if opt.op != OptOps.PADTO: assert self.full_shape[axis] % amt == 0, "no longer valid shift"
-    else:
-      amt = -1
+      check(isinstance(amt, int) and amt != 1, "shift/padto of amt 1 or Node is meaningless")
+      if opt.op != OptOps.PADTO: check(self.full_shape[axis] % amt == 0, "no longer valid shift")
+    else: amt = -1
+
     if opt.op == OptOps.LOCAL:    # cyan
-      assert self.opts.has_local, "target does not support local"
-      assert axis < self.global_dims, "local is for globals"
+      check(self.opts.has_local, "target does not support local")
+      check(axis < self.global_dims, "local is for globals")
       self.shift_to(axis, amt, insert_before=self.first_reduce-self.local_dims)
       self.local_dims += 1
     elif opt.op in [OptOps.GROUP, OptOps.GROUPTOP]:   # green
-      assert self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem"
-      assert axis >= self.first_reduce + self.group_for_reduces and axis < self.shape_len-self.upcasted, "must be reduce axis to group"
-      assert not self.tensor_core, "can't group with tensor cores"
+      check(self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem")
+      check(axis >= self.first_reduce + self.group_for_reduces and axis < self.shape_len-self.upcasted, "must be reduce axis to group")
+      check(not self.tensor_core, "can't group with tensor cores")
       self.shift_to(axis, amt, top=(opt.op==OptOps.GROUPTOP), insert_before=self.first_reduce + self.group_for_reduces)
       self.group_for_reduces += 1
     elif opt.op == OptOps.UNROLL:                     # purple
-      assert axis < self.shape_len-self.upcasted, "can't upcasted already upcasted"
-      assert amt <= 32, "don't unroll more than 32"
+      check(axis < self.shape_len-self.upcasted, "can't upcasted already upcasted")
+      check(amt <= 32, "don't unroll more than 32")
       # TODO: fix upcast_count to put purples before yellows. broken because of METAL tensor cores
       #upcast_count = sum(x == y for x,y in zip(self.full_shape[-self.upcasted:], self.output_shape[-self.upcasted:])) if self.upcasted else 0
       #self.shift_to(axis, amt, insert_before=None if upcast_count == 0 else self.shape_len-upcast_count)
@@ -457,34 +463,34 @@ class Kernel:
       self.shift_to(axis, amt, insert_before=None)
       self.upcast()
     elif opt.op == OptOps.UPCAST:                     # yellow
-      assert axis < self.first_reduce, "upcast is for non-reduce"
-      assert not(self.tensor_core and axis >= self.first_reduce-len(self.tensor_core.threads)), "can't upcast TC locals"
-      assert amt <= 8, "don't upcast more than 8"
+      check(axis < self.first_reduce, "upcast is for non-reduce")
+      check(not(self.tensor_core and axis >= self.first_reduce-len(self.tensor_core.threads)), "can't upcast TC locals")
+      check(amt <= 8, "don't upcast more than 8")
       self.shift_to(axis, amt, insert_before=None)
       self.upcast()
     elif opt.op == OptOps.UPCASTMID:                  # white
-      assert self.bufs[0].dtype.name.startswith('image') and not self.float4_axis(0) and self.group_for_reduces and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1, "invalid upcast mid reduce"  # noqa: E501
+      check(self.bufs[0].dtype.name.startswith('image') and not self.float4_axis(0) and self.group_for_reduces != 0 and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1, "invalid upcast mid reduce")  # noqa: E501
       axes = self.sts[0].unit_stride_axes()
-      assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
-      assert axes[0] == axis, "wrong axis"
-      assert amt == 4, "don't upcast mid anything but 4"
+      check(len(axes) == 1, f"wrong number of stride 1 axis : {axes}")
+      check(axes[0] == axis, "wrong axis")
+      check(amt == 4, "don't upcast mid anything but 4")
       self.shift_to(axis, amt, insert_before=self.first_reduce + self.group_for_reduces)
       self.group_for_reduces += 1
     elif opt.op == OptOps.NOLOCALS:
-      assert self.opts.has_local and not self.dont_use_locals, "NOLOCALS is meaningless if target does not support local or already not using locals"
-      assert self.local_dims == 0 and self.group_for_reduces == 0, "can't have no locals with locals"
+      check(self.opts.has_local and not self.dont_use_locals, "NOLOCALS is meaningless if target does not support local or already not using locals")
+      check(self.local_dims == 0 and self.group_for_reduces == 0, "can't have no locals with locals")
       self.dont_use_locals = True
     elif opt.op == OptOps.PADTO:
-      assert not self.ast.vars(), "does not work with symbolic shape"
-      assert axis < self.first_reduce, "cannot pad a reduce axis"
+      check(not self.ast.vars(), "does not work with symbolic shape")
+      check(axis < self.first_reduce, "cannot pad a reduce axis")
       padded = False
       for i,st in enumerate(self.sts):
-        assert self.sts[i].shape[axis] > amt//2, "pad adds more than double the work"
-        if (ru := round_up(self.sts[i].shape[axis], amt) - self.sts[i].shape[axis]):
+        check(self.sts[i].shape[axis] > amt//2, "pad adds more than double the work")
+        if (ru := round_up(cast(int, self.sts[i].shape[axis]), cast(int, amt)) - self.sts[i].shape[axis]):
           # pad right seems to be faster
           self.sts[i] = st.pad(((0,0),) * axis + ((0,ru),) + ((0,0),) * (len(st.shape)-axis-1))
           padded = True
-      assert padded, "nothing was padded"
+      check(padded, "nothing was padded")
 
     if append_opt: self.applied_opts.append(opt)
     if self.simplify_ones() and self.tensor_core_opts:
