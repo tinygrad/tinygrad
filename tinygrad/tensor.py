@@ -735,7 +735,8 @@ class Tensor:
     return x.dot(self, acc_dtype=acc_dtype) if reverse else self.dot(x, acc_dtype=acc_dtype)
 
   def _cumsum(self, axis:int=0, _first_zero=False) -> Tensor:
-    return self.transpose(axis,-1).pad2d((self.shape[axis]-int(not _first_zero),0))._pool((self.shape[axis],)).sum(-1).transpose(axis,-1)
+    pl_sz = self.shape[axis] - int(not _first_zero and self.shape[axis] != 0)
+    return self.transpose(axis,-1).pad2d((pl_sz,0))._pool((self.shape[axis] or 1,)).sum(-1).transpose(axis,-1)
   def cumsum(self, axis:int=0) -> Tensor:
     # TODO: someday the optimizer will find this on it's own
     # for now this is a two stage cumsum
