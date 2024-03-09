@@ -1,7 +1,7 @@
 import numpy as np
 import unittest
 
-from tinygrad.codegen.kernel import Opt, OptOps, tensor_cores
+from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError, tensor_cores
 from tinygrad.codegen.linearizer import Linearizer, UOp, UOps, expand_node, expand_idxs
 from tinygrad.device import Device, Buffer
 from tinygrad.ops import BinaryOps, BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, TernaryOps
@@ -669,9 +669,9 @@ class TestLinearizerOpts(unittest.TestCase):
     ])
 
     # cannot pad a reduce axis
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(KernelOptError):
       helper_linearizer_opt(a.max(), [[Opt(OptOps.PADTO, 0, 32)],])
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(KernelOptError):
       helper_linearizer_opt(a.max(0), [[Opt(OptOps.PADTO, 1, 32)],])
 
   def test_padto_where(self):
