@@ -30,15 +30,7 @@ class ShapeTracker:
   views: Tuple[View, ...]
 
   # TODO: Make ShapeTracker independent of symbolic.
-  # First step, __add__ needs to move from ShapeTracker to View, but currently it uses ShapeTracker.real_strides
-  """
-  def __add__(self, st:ShapeTracker) -> ShapeTracker:
-    ret = self
-    for v in st.views:
-      ret = ShapeTracker(ret.views + (v,)).simplify() # one view at a time = better simplification
-    return ret
-  """
-
+  # First step, __add__ needs to move from ShapeTracker to View, but currently it uses ShapeTracker.real_strides.
   @functools.lru_cache(maxsize=None)
   def __add__(self, vm2:View, vm1:View) -> Optional[View]:
     if vm2.contiguous: return vm1
