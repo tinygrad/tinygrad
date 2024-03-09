@@ -235,7 +235,7 @@ class Tensor:
   def arange(start, stop=None, step=1, **kwargs):
     if stop is None: stop, start = start, 0
     dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
-    return ((Tensor.ones((math.ceil((stop-start)/step),), dtype=dtypes.default_int, **kwargs).cumsum() - 1)*step + start).cast(dtype)
+    return ((Tensor.ones((math.ceil((stop-start)/step),), dtype=dtypes.default_int, **kwargs)._cumsum() - 1)*step + start).cast(dtype)
 
   @staticmethod
   def eye(dim:int, **kwargs):
@@ -734,8 +734,20 @@ class Tensor:
   def matmul(self, x:Tensor, reverse=False, acc_dtype:Optional[DType]=None) -> Tensor:
     return x.dot(self, acc_dtype=acc_dtype) if reverse else self.dot(x, acc_dtype=acc_dtype)
 
+  def _cumsum(self, axis:int=0, _first_zero=False) -> Tensor:
+    pl_sz = self.shape[axis] - int(not _first_zero and self.shape[axis] != 0)
+    return self.transpose(axis,-1).pad2d((pl_sz,0))._pool((self.shape[axis] or 1,)).sum(-1).transpose(axis,-1)
   def cumsum(self, axis:int=0) -> Tensor:
-    return self.transpose(axis,-1).pad2d((self.shape[axis]-1,0))._pool((self.shape[axis],)).sum(-1).transpose(axis,-1)
+    # TODO: someday the optimizer will find this on it's own
+    # for now this is a two stage cumsum
+    SPLIT = 256
+    if self.shape[axis] <= SPLIT*2: return self._cumsum(axis)
+    ret = self.transpose(axis,-1).pad2d((round_up(self.shape[axis], SPLIT)-self.shape[axis], 0))
+    ret = ret.unflatten(-1, (-1, SPLIT))._cumsum(-1)
+    base_add = ret[..., -1]._cumsum(-1, _first_zero=True)[..., :-1]
+    base_add = base_add.unsqueeze(-1).expand(*base_add.shape, ret.shape[-1])
+    def fix(x:Tensor): return x.flatten(start_dim=-2)[..., -self.shape[axis]:].transpose(axis,-1)
+    return fix(ret) + fix(base_add)
 
   @staticmethod
   def _tri(r:sint, c:sint, k:int=0, **kwargs) -> Tensor:
