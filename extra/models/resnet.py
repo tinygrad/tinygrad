@@ -49,8 +49,7 @@ class BasicBlock:
   def __call__(self, x):
     out = self.bn1(self.conv1(x)).relu()
     out = self.bn2(self.conv2(out))
-    if self.conv_downsample is not None:
-      out = out + x.sequential(self.downsample)
+    out = out + x.sequential(self.downsample)
     out = out.relu()
     return out
 
