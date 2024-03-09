@@ -84,8 +84,8 @@ def train_resnet():
   # ** jitted steps **
   input_mean = Tensor([123.68, 116.78, 103.94], device=GPUS, dtype=dtypes.float32).reshape(1, -1, 1, 1)
   # mlperf reference resnet does not divide by input_std for some reason
-  input_std = Tensor([0.229, 0.224, 0.225], device=GPUS, dtype=dtypes.float32).reshape(1, -1, 1, 1)
-  def normalize(x): return (x.permute([0, 3, 1, 2]) - input_mean)/input_std
+  # input_std = Tensor([0.229, 0.224, 0.225], device=GPUS, dtype=dtypes.float32).reshape(1, -1, 1, 1)
+  def normalize(x): return x.permute([0, 3, 1, 2]) - input_mean
   @TinyJit
   def train_step(X, Y):
     optimizer.zero_grad()
