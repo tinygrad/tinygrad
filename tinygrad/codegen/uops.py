@@ -206,7 +206,8 @@ class UOpGraph:
     def max(x, y): return self.add(UOps.ALU, dtypes.default_int, (x, y), BinaryOps.MAX)
 
     modified_phis = set()
-    for phi in [op for op in self.uops if op.uop is UOps.PHI]:
+    allowed_phi_parents = {UOps.CONST, UOps.SPECIAL, UOps.ALU, UOps.LOOP, UOps.DEFINE_ACC}
+    for phi in [op for op in self.uops if op.uop is UOps.PHI and all([u.uop in allowed_phi_parents for u in get_recursive_parents(op)])]:
       where_ops = [op for op in get_recursive_parents(phi) if op.arg == TernaryOps.WHERE]
       for where in sorted(where_ops, key=lambda x: self.uops.index(x)):
         try:
