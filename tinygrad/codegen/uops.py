@@ -219,9 +219,10 @@ class UOpGraph:
         self.uops, after_split_ops = self.uops[:(where_index:=self.uops.index(where))], self.uops[where_index:]
         rendered = final_value.render(render_ops, ctx)
         loop_length = loop_op.vin[1].arg - loop_op.vin[0].arg
-        clamped = mult_neg_1(max(const(-1*loop_length), mult_neg_1(max(rendered, const(0)))))
+        min_clamped = max(rendered, const(0)) if (final_value.min < 0) else rendered
+        max_clamped = mult_neg_1(max(const(-1*loop_length), mult_neg_1(min_clamped))) if (final_value.max > loop_length) else min_clamped
         self.uops = self.uops + after_split_ops
-        final_op = self.add(UOps.ALU, where.dtype, (clamped, where.vin[1]), BinaryOps.MUL, insert_before=where_index)
+        final_op = self.add(UOps.ALU, where.dtype, (max_clamped, where.vin[1]), BinaryOps.MUL, insert_before=where_index)
         self.replace_op(where, final_op)
         modified_phis.add(phi)
         get_recursive_parents.cache_clear()
