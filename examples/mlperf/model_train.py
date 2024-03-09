@@ -32,12 +32,12 @@ def train_resnet():
   if not getenv("SYNCBN"): resnet.BatchNorm = functools.partial(UnsyncedBatchNorm, num_devices=len(GPUS))
   model = resnet.ResNet50(num_classes)
 
-  # shard weights and initialize
+  # shard weights and initialize in order
   for k, x in get_state_dict(model).items():
     if not getenv("SYNCBN") and ("running_mean" in k or "running_var" in k):
-      x.shard_(GPUS, axis=0)
+      x.realize().shard_(GPUS, axis=0)
     else:
-      x.to_(GPUS)
+      x.realize().to_(GPUS)
   parameters = get_parameters(model)
 
   # ** hyperparameters **
