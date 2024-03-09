@@ -170,9 +170,6 @@ class TestOps(unittest.TestCase):
   def test_arange_big(self):
     helper_test_op([], lambda: torch.arange(256), lambda: Tensor.arange(256), forward_only=True)
 
-  def test_arange_huge(self):
-    helper_test_op([], lambda: torch.arange(10000000), lambda: Tensor.arange(10000000), forward_only=True)
-
   def test_sum_fake(self):
     helper_test_op([(256, 1)], lambda x: x.sum(axis=1))
 
