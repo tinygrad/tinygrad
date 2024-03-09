@@ -46,15 +46,17 @@ def _fromcpu(x: np.ndarray) -> LazyBuffer:
                            _buf=Buffer("EXT", 0, dtypes.from_np(x.dtype), (memoryview(bytearray()), None)) if x.size == 0 else \
                                 Buffer("EXT", prod(x.shape), dtypes.from_np(x.dtype), (flat_mv(np.require(x, requirements='C').data), x)))
 
+def _get_winograd_matcols(mat, dims:int, shp:Tuple[sint, ...], device:Union[str, Tuple[str, ...]]) -> List[List[Tensor]]:
+  return [[Tensor.cat(*[Tensor.full(shp[:dim] + (1,) + shp[dim+1:], float(m[k]), device=device) for m in mat], dim=dim)
+           for k in range(len(mat[0]))] for dim in range(dims)]
+
 # winograd conv 3 kernel f(4x4,3x3) see: http://arxiv.org/abs/1509.09308
 def _apply_winograd_matrix(mat, t:Tensor, dims:int) -> Tensor:
   # multiply mat_1 @ mat_2 @ t with foldable constants, where mat_i acts on vector t along dimension i; roughly kron(mat, mat) @ t
   # due to realize-before-expand rule in lazy.py, we must operate in this order: reshape -> expand -> arithmetic
   t_ = t.reshape(t.shape[:dims] + (1,) * dims + t.shape[dims:]).expand(t.shape[:dims] + (len(mat),) * dims + t.shape[dims:])  # add output dims
   # precalculate mat columns for each dim; prod(itertools.product(matcols)) gives the columns of kron(mat, mat, ...)
-  subshape = t_.shape[dims:]
-  matcols = [[Tensor.cat(*[Tensor.full(subshape[:dim] + (1,) + subshape[dim+1:], float(m[k]), device=t_.device) for m in mat], dim=dim)
-              for k in range(len(mat[0]))] for dim in range(dims)]
+  matcols = _get_winograd_matcols(mat, dims, t_.shape[dims:], t_.device)
   # multiply each element of t_ by the corresponding stacked column of kron(mat, mat), producing only one view for each element of t
   ret = sum(prod(col[idx] for col, idx in zip(matcols, mat_is)) * t_[mat_is] for mat_is in itertools.product(range(len(mat[0])), repeat=dims))
   assert isinstance(ret, Tensor), "sum didn't return a Tensor"
