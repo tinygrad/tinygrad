@@ -18,32 +18,48 @@ def uops_to_rdna(function_name:str, uops:UOpGraph) -> str:
       val = uops.add(UOps.CONST, dtypes.int, tuple(), arg=u.vin[0].dtype.itemsize, insert_before=uops.uops.index(u))
       ptr = uops.add(UOps.ALU, dtypes.int, (u.vin[1], val), arg=BinaryOps.MUL, insert_before=uops.uops.index(u))
       u.vin = (u.vin[0], ptr) + u.vin[2:]
-  uops.print()
+  #uops.print()
 
   args = []
   ins = []
 
-  v_cnt, s_cnt = 3, 2
+  v_cnt = 3  # v[0:2] is local_xyz
+  s_cnt = 5  # s[0:1] is the address, s[2:4] is global_xyz
 
   r: Dict[UOp, str] = {}
   for u in uops:
     if u.uop == UOps.SPECIAL:
-      if u.arg[1] == "lidx0":
-        r[u] = 'v0'
+      if u.arg[1].startswith("lidx"):
+        r[u] = f'v{u.arg[0]}'
+      elif u.arg[1].startswith("gidx"):
+        r[u] = f's{2+u.arg[0]}'
+      else:
+        raise NotImplementedError
     elif u.uop == UOps.CONST:
       #r[u] = u.arg
-      r[u] = f"s{s_cnt}"
-      s_cnt += 1
-      ins.append(f"s_mov_b32 {r[u]}, {u.arg}")
+
+      # TODO: sometimes we can use s
+      #r[u] = f"s{s_cnt}"
+      #s_cnt += 1
+      #ins.append(f"s_mov_b32 {r[u]}, {u.arg}")
+
+      r[u] = f"v{v_cnt}"
+      v_cnt += 1
+      ins.append(f"v_mov_b32 {r[u]}, {u.arg}")
     elif u.uop == UOps.ALU:
       if u.arg == BinaryOps.ADD:
         r[u] = f"v{v_cnt}"
         v_cnt += 1
         ins.append(f"v_add_f32_e32 {r[u]}, {r[u.vin[0]]}, {r[u.vin[1]]}")
-      if u.arg == BinaryOps.MUL:
+      elif u.arg == BinaryOps.MUL:
         r[u] = f"v{v_cnt}"
         v_cnt += 1
-        ins.append(f"v_mul_u32_u24 {r[u]}, {r[u.vin[0]]}, {r[u.vin[1]]}")
+        if dtypes.is_float(u.dtype):
+          ins.append(f"v_mul_f32_e32 {r[u]}, {r[u.vin[0]]}, {r[u.vin[1]]}")
+        else:
+          ins.append(f"v_mul_u32_u24 {r[u]}, {r[u.vin[0]]}, {r[u.vin[1]]}")
+      else:
+        raise NotImplementedError
     elif u.uop == UOps.LOAD:
       r[u] = f"v{v_cnt}"
       v_cnt += 1
@@ -55,6 +71,7 @@ def uops_to_rdna(function_name:str, uops:UOpGraph) -> str:
       i = u.arg[0]
       args.append({'.address_space': 'global', '.name': f'buf_{i}', '.offset': i*8, '.size': 8,
                    '.type_name': u.dtype.name+"*", '.value_kind': 'global_buffer'})
+      s_cnt += s_cnt%2  # skip
       r[u] = f"s[{s_cnt}:{s_cnt+1}]"
       s_cnt += 2
       ins.append(f"s_load_b64 {r[u]}, s[0:1], {i*8}")
