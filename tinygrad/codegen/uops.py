@@ -195,29 +195,29 @@ class UOpGraph:
       elif u.uop == UOps.ALU and u.arg == BinaryOps.ADD: return to_symbolic(u.vin[0]) + to_symbolic(u.vin[1])
       elif u.uop == UOps.ALU and u.arg == BinaryOps.MUL: return to_symbolic(u.vin[0]) * to_symbolic(u.vin[1])
       else: raise RuntimeError("unhandled op: {}".format(u))
-    def loop_factor(get_recursive_parents, loop_to_name, with_loop: UOp, factored: Node, loop_op, round_up=False):
+    def loop_factor(with_loop: UOp, factored: Node, loop_op, round_up=False):
       if with_loop == loop_op: return factored
       elif with_loop.uop is UOps.ALU:
         next_with_loop = next(v for v in with_loop.vin if v == loop_op or loop_op in get_recursive_parents(v))
         non_loop = to_symbolic(next(v for v in with_loop.vin if v != next_with_loop and loop_op not in get_recursive_parents(v)))
         if round_up and with_loop.arg is BinaryOps.MUL: factored = factored + (non_loop - 1)
-        return loop_factor(get_recursive_parents, loop_to_name, next_with_loop, alu_opposite(with_loop.arg, factored, non_loop), loop_op)
+        return loop_factor(next_with_loop, alu_opposite(with_loop.arg, factored, non_loop), loop_op)
     def const(x): return self.add(UOps.CONST, dtypes.default_int, tuple(), x)
     def neg(x): return self.add(UOps.ALU, dtypes.default_int, (x,), UnaryOps.NEG)
     def max(x, y): return self.add(UOps.ALU, dtypes.default_int, (x, y), BinaryOps.MAX)
 
-    allowed_phi_parents = {UOps.CONST, UOps.SPECIAL, UOps.ALU, UOps.LOOP, UOps.DEFINE_ACC}
+    allowed_ops = {UOps.CONST, UOps.SPECIAL, UOps.ALU, UOps.LOOP, UOps.DEFINE_ACC}
     allowed_alus = {BinaryOps.MUL, BinaryOps.ADD, BinaryOps.CMPLT, TernaryOps.WHERE}
     for loop_op in reversed([op for op in self.uops if op.uop is UOps.LOOP]):
-      phi_ops = set([op for op in self.get_recursive_children(loop_op) if op.uop is UOps.PHI])
-      where_ops = set([op for phi in phi_ops for op in get_recursive_parents(phi) if op.arg == TernaryOps.WHERE])
-      if (any([op for phi in phi_ops for op in get_recursive_parents(phi) if op.uop not in allowed_phi_parents or (op.uop is UOps.ALU and op.arg not in allowed_alus)])
-        or any([where.vin[2].arg != 0 or where.vin[0].vin[1].uop is not UOps.CONST for where in where_ops])
-        or any(len([op for op in get_recursive_parents(where) if op.uop is UOps.LOOP]) == 0 for where in where_ops)): continue
-      if DEBUG >= 5: print("simplifying {} phis in loop".format(len(phi_ops)))
-      for where in sorted(where_ops, key=lambda x: self.uops.index(x)):
+      phis = set([u for u in self.get_recursive_children(loop_op) if u.uop is UOps.PHI])
+      wheres = set([u for phi in phis for u in get_recursive_parents(phi) if u.arg == TernaryOps.WHERE])
+      if (any([u.uop not in allowed_ops or (u.uop is UOps.ALU and u.arg not in allowed_alus) for phi in phis for u in get_recursive_parents(phi)])
+        or any([where.vin[2].arg != 0 for where in wheres])
+        or any(len([op for op in get_recursive_parents(where) if op.uop is UOps.LOOP]) == 0 for where in wheres)): continue
+      if DEBUG >= 5: print("simplifying {} phis in loop".format(len(phis)))
+      for where in sorted(wheres, key=lambda x: self.uops.index(x)):
         comp_lt, comp_gt = where.vin[0].vin[0], where.vin[0].vin[1]
-        factored = loop_factor(get_recursive_parents, loop_to_name, comp_lt, NumNode(int(comp_gt.arg)), loop_op, round_up=(comp_gt.arg > 0))
+        factored = loop_factor(comp_lt, NumNode(int(comp_gt.arg)), loop_op, round_up=(comp_gt.arg > 0))
         final_value = factored - NumNode(loop_op.vin[0].arg) if (comp_gt.arg > 0) else NumNode(loop_op.vin[1].arg-1) - factored
         self.uops, after_split_ops = self.uops[:(where_index:=self.uops.index(where))], self.uops[where_index:]
         rendered = final_value.render(render_ops, ctx)
@@ -229,7 +229,7 @@ class UOpGraph:
         self.uops = self.uops + after_split_ops
         self.replace_op(where, final_op)
         get_recursive_parents.cache_clear()
-      for phi in phi_ops:
+      for phi in phis:
         self.replace_op(phi, phi.vin[1])
         self.uops.remove((accumulator:=phi.vin[0]))
         for alu_with_accum in [op for op in self.uops if accumulator in op.vin]:
