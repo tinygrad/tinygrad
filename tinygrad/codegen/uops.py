@@ -212,9 +212,9 @@ class UOpGraph:
       phis = set([u for u in self.get_recursive_children(loop_op) if u.uop is UOps.PHI])
       wheres = set([u for phi in phis for u in get_recursive_parents(phi) if u.arg == TernaryOps.WHERE])
       if (any([u.uop not in allowed_ops or (u.uop is UOps.ALU and u.arg not in allowed_alus) for phi in phis for u in get_recursive_parents(phi)])
-        or any([where.vin[2].arg != 0 for where in wheres])
+        or any([where.vin[2].arg != 0 or where.vin[0].vin[1].uop is not UOps.CONST for where in wheres])
         or any(len([op for op in get_recursive_parents(where) if op.uop is UOps.LOOP]) == 0 for where in wheres)): continue
-      if DEBUG >= 5: print("simplifying {} phis in loop".format(len(phis)))
+      if DEBUG >= 4: print("simplifying {} phis in loop".format(len(phis)))
       for where in sorted(wheres, key=lambda x: self.uops.index(x)):
         comp_lt, comp_gt = where.vin[0].vin[0], where.vin[0].vin[1]
         factored = loop_factor(comp_lt, NumNode(int(comp_gt.arg)), loop_op, round_up=(comp_gt.arg > 0))
