@@ -1,4 +1,4 @@
-import sys, heapq
+import sys
 from collections import defaultdict, deque
 from typing import List, Dict, Optional, cast, Set, DefaultDict
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters, LazyOp, ReduceOps, ConstBuffer, MemBuffer, BinaryOps, UnaryOps
