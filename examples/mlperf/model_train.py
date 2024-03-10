@@ -37,6 +37,7 @@ def train_unet3d():
   PROJ_NAME = getenv("PROJ_NAME", "tinygrad_unet3d_mlperf")
   SIZE = (64, 64, 64) if getenv("SMALL") else (128, 128, 128)
   SEED = getenv("SEED")
+  GA_STEPS = getenv("GA_STEPS", 1)
 
   if getenv("HALF"): dtypes.default_float = dtypes.half
 
@@ -80,13 +81,16 @@ def train_unet3d():
     optim.lr.assign(Tensor([init_lr + (lr - init_lr) * scale], device=GPUS if len(GPUS) > 1 else None))
 
   @TinyJit
-  def _train_step(model, x, y):
+  def _train_step(model, x, y, i):
     y_hat = model(x)
     loss = dice_ce_loss(y_hat, y)
+    loss = loss / GA_STEPS
 
-    optim.zero_grad()
     loss.backward()
-    optim.step()
+
+    if (i) % GA_STEPS == 0:
+      optim.step()
+      optim.zero_grad()
 
     return loss
   
@@ -101,14 +105,14 @@ def train_unet3d():
     if epoch <= LR_WARMUP_EPOCHS and LR_WARMUP_EPOCHS > 0:
       _lr_warm_up(optim, LR_WARMUP_INIT_LR, LR, epoch, LR_WARMUP_EPOCHS)
 
-    for x, y in (t:=tqdm(iterate(val=False, shuffle=True, bs=BS, size=SIZE), desc=f"[Training][Epoch: {epoch}/{NUM_EPOCHS}]", total=len(get_train_files()) // BS)):
+    for i, (x, y) in enumerate((t:=tqdm(iterate(val=False, shuffle=True, bs=BS, size=SIZE), desc=f"[Training][Epoch: {epoch}/{NUM_EPOCHS}]", total=len(get_train_files()) // BS)), start=1):
       x, y = Tensor(x, requires_grad=False), Tensor(y, requires_grad=False)
 
       if len(GPUS) > 1:
         x.shard_(GPUS, axis=0)
         y.shard_(GPUS, axis=0)
 
-      loss = _train_step(model, x, y)
+      loss = _train_step(model, x, y, i)
       t.set_description(f"[Training][Epoch: {epoch}/{NUM_EPOCHS}][Loss: {loss.item():.3f}][RAM used: {GlobalCounters.mem_used/1e9:5.2f} GB]")
       if WANDB: wandb.log({"train_loss": loss.item()})
 
