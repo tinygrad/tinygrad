@@ -1,6 +1,6 @@
 import sys
 from collections import defaultdict, deque
-from typing import List, Dict, Optional, cast, Set, DefaultDict
+from typing import List, Deque, Dict, Optional, cast, Set, DefaultDict
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters, LazyOp, ReduceOps, ConstBuffer, MemBuffer, BinaryOps, UnaryOps
 from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats, Compiled, BufferOptions
 from tinygrad.features.graph import print_tree, realized_lazybuffer, log_lazybuffer
@@ -193,7 +193,7 @@ def optimize(schedule: List[ScheduleItem]) -> List[ScheduleItem]:
   top_order: List[int] = []
   in_degrees: Dict[int, int] = {k:0 for k in graph.keys()}
   for n in flatten(graph.values()): in_degrees[n] += 1
-  free: deque[int] = deque([idx for idx,deg in in_degrees.items() if deg == 0])
+  free: Deque[int] = deque([idx for idx,deg in in_degrees.items() if deg == 0])
 
   while free:
     node = free.popleft()
