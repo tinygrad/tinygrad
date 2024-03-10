@@ -34,17 +34,20 @@ def hook_overflow(dv, fxn):
 python_alu = {
   UnaryOps.LOG2: lambda x: math.log2(x) if x > 0 else -math.inf if x == 0 else math.nan,
   UnaryOps.EXP2: hook_overflow(math.inf, lambda x: math.exp(x*math.log(2))),
-  UnaryOps.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan, UnaryOps.SIN: math.sin, UnaryOps.NEG: operator.neg,
+  UnaryOps.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan, UnaryOps.SIN: math.sin,
+  UnaryOps.NEG: lambda x: (not x) if isinstance(x, bool) else -x,
   BinaryOps.MUL: operator.mul, BinaryOps.ADD: operator.add, BinaryOps.SUB: operator.sub, BinaryOps.XOR: operator.xor,
   BinaryOps.MAX: max, BinaryOps.CMPEQ: operator.eq, BinaryOps.CMPLT: operator.lt, BinaryOps.MOD: operator.mod,
   BinaryOps.DIV: lambda x,y: int(x/y) if isinstance(x, int) else (x/y if y != 0 else math.nan),
   TernaryOps.WHERE: lambda x,y,z: y if x else z}
 
-def exec_alu(arg, dtype, p):
-  return python_alu[arg](*p)
-  #if not dtypes.is_int(dtype): return ret
-  #adjusted = 0 if dtypes.is_unsigned(dtype) else 2 ** (dtype.itemsize * 8 - 1)
-  #return (ret + adjusted) % 2 ** (dtype.itemsize * 8) - adjusted
+truncate: Dict[DType, Callable] = {
+  dtypes.bool: lambda x: bool(x),
+  **{dt:lambda x: x for dt in dtypes.fields().values() if dtypes.is_float(dt)},
+  **{dt:functools.partial(lambda vv,x: x&vv, (1 << (dt.itemsize*8))-1) for dt in dtypes.fields().values() if dtypes.is_unsigned(dt)},
+  **{dt:functools.partial(lambda vv,aa,x: ((x+aa)&vv)-aa, (1 << (dt.itemsize*8))-1, 1 << (dt.itemsize*8-1)) \
+     for dt in dtypes.fields().values() if dtypes.is_int(dt) and not dtypes.is_unsigned(dt)}}
+def exec_alu(arg, dtype, p): return truncate[dtype](python_alu[arg](*p))
 
 def uop_alu_resolve(u:UOp) -> sint:
   if u.uop is UOps.CONST: return u.arg
@@ -88,12 +91,10 @@ class UOpGraph:
         if arg is BinaryOps.ADD and vin[1].uop is UOps.ALU and vin[1].arg is UnaryOps.NEG:
           return self.add(UOps.ALU, dtype, (vin[0], vin[1].vin[0]), BinaryOps.SUB, cachable, insert_before)
         # constant folding
-        if arg is UnaryOps.NEG and vin[0].uop is UOps.CONST:
-          return self.add(UOps.CONST, dtype, arg=-vin[0].arg if dtype != dtypes.bool else not vin[0].arg, insert_before=insert_before)
         if arg is TernaryOps.WHERE and vin[1] == vin[2]: return vin[1] # a conditional with the same results either way is a noop
         if arg is TernaryOps.WHERE and vin[0].uop is UOps.CONST: return vin[1] if vin[0].arg else vin[2]
-        if arg is BinaryOps.MUL and vin[0].uop is UOps.CONST and vin[1].uop is UOps.CONST and dtype is not None and dtypes.is_float(dtype):
-          return self.add(UOps.CONST, dtype, arg=vin[0].arg * vin[1].arg, insert_before=insert_before)
+        if all(x.uop is UOps.CONST for x in vin):
+          return self.add(UOps.CONST, dtype, arg=exec_alu(arg, dtype, [x.arg for x in vin]), insert_before=insert_before)
         # zero folding
         for x in [0,1]:
           if arg is BinaryOps.ADD and vin[x].uop is UOps.CONST and vin[x].arg == 0.0: return vin[1-x]
