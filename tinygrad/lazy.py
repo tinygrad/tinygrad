@@ -49,8 +49,11 @@ class LazyBuffer:
   def base(self) -> LazyBuffer: return self._base if self._base is not None else self
 
   @staticmethod
-  def loadop(op, shape:Tuple[sint,...], dtype:DType, device:str, arg=None, src:Optional[LazyBuffer]=None, enable_cache=False) -> LazyBuffer:
-    return create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype, op, arg, (src,) if src is not None else (), enable_cache=enable_cache)
+  def loadop(op, shape:Tuple[sint,...], dtype:DType, device:str, arg=None,
+             src:Optional[LazyBuffer]=None, enable_cache=False, _buf:Optional[Buffer]=None) -> LazyBuffer:
+    ret = create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype, op, arg, (src,) if src is not None else (), enable_cache=enable_cache)
+    if _buf is not None: ret.realized = _buf
+    return ret
 
   def const(self, val:Scalar, shape:Optional[Tuple[sint,...]]=None) -> LazyBuffer:
     shape = self.shape if shape is None else shape

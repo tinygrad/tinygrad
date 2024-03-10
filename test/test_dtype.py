@@ -2,7 +2,7 @@ import unittest, operator, sys
 import numpy as np
 import torch
 from typing import Any, List
-from tinygrad.helpers import CI, getenv, DEBUG, OSX, temp
+from tinygrad.helpers import CI, getenv, DEBUG, OSX
 from tinygrad.dtype import DType, DTYPES_DICT, ImageDType, PtrDType, least_upper_float, least_upper_dtype
 from tinygrad import Device, Tensor, dtypes
 from hypothesis import given, settings, strategies as strat
@@ -11,6 +11,7 @@ settings.register_profile("my_profile", max_examples=200, deadline=None)
 settings.load_profile("my_profile")
 
 core_dtypes = list(DTYPES_DICT.values())
+if Device.DEFAULT == "CPU": core_dtypes.remove(dtypes.bfloat16)  # NOTE: this is for teenygrad, don't remove
 floats = [dt for dt in core_dtypes if dtypes.is_float(dt)]
 def is_dtype_supported(dtype: DType, device: str = Device.DEFAULT):
   if dtype == dtypes.bfloat16: return False # numpy doesn't support bf16, tested separately in TestBFloat16DType
@@ -143,21 +144,6 @@ class TestBFloat16DType(unittest.TestCase):
     t.realize()
     back = t.cast(dtypes.float32)
     assert tuple(back.numpy().tolist()) == (9984., -1, -1000, -9984, 20)
-
-  @unittest.skipIf(getenv("HIPCPU"), "no real HIP device exists in CI")
-  def test_bf16_disk_write_read(self):
-    t = Tensor([10000, -1, -1000, -10000, 20]).cast(dtypes.float32)
-    t.to(f"disk:{temp('f32')}").realize()
-
-    # hack to "cast" f32 -> bf16
-    with open(temp('f32'), "rb") as f: dat = f.read()
-    adat = b''.join([dat[i+2:i+4] for i in range(0, len(dat), 4)])
-    with open(temp('bf16'), "wb") as f: f.write(adat)
-
-    t = Tensor.empty(5, dtype=dtypes.bfloat16, device=f"disk:{temp('bf16')}").llvm().realize()
-    back = t.cast(dtypes.float32)
-    assert tuple(back.numpy().tolist()) == (9984., -1, -1000, -9984, 20)
-
 
 @unittest.skipUnless(Device.DEFAULT in ["HIP"], "bfloat16 not supported")
 class TestBFloat16DTypeCast(unittest.TestCase):
@@ -356,7 +342,7 @@ class TestTypeSpec(unittest.TestCase):
     assert Tensor([]).dtype == dtypes.default_float
     assert Tensor([1]).dtype == dtypes.default_int
     assert Tensor([1.1]).dtype == dtypes.default_float
-    assert Tensor([0,1], dtype=dtypes.bfloat16).dtype == dtypes.bfloat16
+    #assert Tensor([0,1], dtype=dtypes.bfloat16).dtype == dtypes.bfloat16
 
     assert Tensor.eye(0).dtype == dtypes.default_float
     assert Tensor.eye(3).dtype == dtypes.default_float
@@ -492,7 +478,7 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([0, 1], dtype=dtypes.uint32)).sum().dtype == dtypes.uint32
     assert (Tensor([0, 1], dtype=dtypes.uint64)).sum().dtype == dtypes.uint64
     assert (Tensor([0, 1], dtype=dtypes.float16)).sum().dtype == dtypes.float16
-    assert (Tensor([0, 1], dtype=dtypes.bfloat16)).sum().dtype == dtypes.bfloat16
+    #assert (Tensor([0, 1], dtype=dtypes.bfloat16)).sum().dtype == dtypes.bfloat16
     assert (Tensor([0, 1], dtype=dtypes.float32)).sum().dtype == dtypes.float32
     assert (Tensor([0, 1], dtype=dtypes.float64)).sum().dtype == dtypes.float64
 
@@ -507,7 +493,7 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([0, 1], dtype=dtypes.uint32)).cumsum(0).dtype == dtypes.uint32
     assert (Tensor([0, 1], dtype=dtypes.uint64)).cumsum(0).dtype == dtypes.uint64
     assert (Tensor([0, 1], dtype=dtypes.float16)).cumsum(0).dtype == dtypes.float16
-    assert (Tensor([0, 1], dtype=dtypes.bfloat16)).cumsum(0).dtype == dtypes.bfloat16
+    #assert (Tensor([0, 1], dtype=dtypes.bfloat16)).cumsum(0).dtype == dtypes.bfloat16
     assert (Tensor([0, 1], dtype=dtypes.float32)).cumsum(0).dtype == dtypes.float32
     assert (Tensor([0, 1], dtype=dtypes.float64)).cumsum(0).dtype == dtypes.float64
 

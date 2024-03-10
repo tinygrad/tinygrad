@@ -1,6 +1,7 @@
 # ruff: noqa: E501
 import unittest, random
 import numpy as np
+from tinygrad.codegen.kernel import KernelOptError
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.search import Opt, OptOps
 from tinygrad import Device, dtypes, Tensor
@@ -25,7 +26,7 @@ def helper_test_lin(lin: Linearizer, opts, failed_platforms):
   for opt in opts:
     try:
       lin.apply_opt(opt)
-    except AssertionError:
+    except KernelOptError:
       # it's considered fixed if we invalidated the opts
       assert Device.DEFAULT not in failed_platforms
 

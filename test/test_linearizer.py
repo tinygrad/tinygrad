@@ -1,7 +1,7 @@
 import numpy as np
 import unittest
 
-from tinygrad.codegen.kernel import Opt, OptOps, tensor_cores
+from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError, tensor_cores
 from tinygrad.codegen.linearizer import Linearizer, UOp, UOps, expand_node, expand_idxs
 from tinygrad.device import Device, Buffer
 from tinygrad.ops import BinaryOps, BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, TernaryOps
@@ -66,7 +66,7 @@ class TestLinearizer(unittest.TestCase):
     b_bufs = [u.uop for u in lin.uops.uops[-2].vin[1].vin]
 
     assert a_bufs == [UOps.LOAD, UOps.CONST]
-    assert b_bufs == [UOps.CONST, UOps.CONST]
+    assert b_bufs == [] # [UOps.CONST, UOps.CONST] will be folded
 
   def test_upcast_cse(self):
     # when upcasting, within a subtree, there may be common expressions.
@@ -126,7 +126,6 @@ class TestLinearizer(unittest.TestCase):
     num_ops = len([uop for uop in k.uops if uop.uop == UOps.ALU])
     assert num_ops == 0, "more alu uops than needed"
 
-  @unittest.skip("constant folding not supported yet")
   def test_constant_fold(self):
     a, b = Tensor(2), Tensor(3)
     r = a * b
@@ -216,7 +215,7 @@ class TestLinearizer(unittest.TestCase):
     c0 = UOp(UOps.CONST, dtypes.float, vin=(), arg=0.0)
     c1 = UOp(UOps.CONST, dtypes.float, vin=(), arg=1.0)
     assert helper_test_simplify(UOps.ALU, dtypes.float, vin=(UOp(UOps.CONST, dtypes.bool, vin=(), arg=True), c0, c1),
-                                arg=TernaryOps.WHERE).uop == UOps.CONST
+                                arg=TernaryOps.WHERE).arg == c0.arg
 
 def helper_realized_ast(r:Tensor):
   s = create_schedule([r.lazydata])
@@ -669,9 +668,9 @@ class TestLinearizerOpts(unittest.TestCase):
     ])
 
     # cannot pad a reduce axis
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(KernelOptError):
       helper_linearizer_opt(a.max(), [[Opt(OptOps.PADTO, 0, 32)],])
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(KernelOptError):
       helper_linearizer_opt(a.max(0), [[Opt(OptOps.PADTO, 1, 32)],])
 
   def test_padto_where(self):
