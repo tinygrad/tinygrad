@@ -40,11 +40,12 @@ python_alu = {
   BinaryOps.DIV: lambda x,y: int(x/y) if isinstance(x, int) else (x/y if y != 0 else math.nan),
   TernaryOps.WHERE: lambda x,y,z: y if x else z}
 
-def exec_alu(arg, dtype, p):
-  return python_alu[arg](*p)
-  #if not dtypes.is_int(dtype): return ret
-  #adjusted = 0 if dtypes.is_unsigned(dtype) else 2 ** (dtype.itemsize * 8 - 1)
-  #return (ret + adjusted) % 2 ** (dtype.itemsize * 8) - adjusted
+truncate: Dict[DType, Callable] = {
+  **{dt:lambda x: x for dt in dtypes.fields().values() if dt == dtypes.bool or dtypes.is_float(dt)},
+  **{dt:functools.partial(lambda vv,x: x&vv, (1 << (dt.itemsize*8))-1) for dt in dtypes.fields().values() if dtypes.is_unsigned(dt)},
+  **{dt:functools.partial(lambda vv,aa,x: ((x+aa)&vv)-aa, (1 << (dt.itemsize*8))-1, 1 << (dt.itemsize*8-1)) \
+     for dt in dtypes.fields().values() if dtypes.is_int(dt) and not dtypes.is_unsigned(dt)}}
+def exec_alu(arg, dtype, p): return truncate[dtype](python_alu[arg](*p))
 
 def uop_alu_resolve(u:UOp) -> sint:
   if u.uop is UOps.CONST: return u.arg
