@@ -113,7 +113,7 @@ class View:
   def calculate_real_strides(view1: View, view2: View, ignore_valid=False) -> Tuple[Optional[sint], ...]:
     shape = view2.shape
     views = (view1, view2) if view1 is not None else (view2,)
-    idxs: Tuple[Node] = (Variable(f"idx{i}", 0, s-1) for i,s in enumerate(shape))
+    idxs: Tuple[Variable, ...] = tuple(Variable(f"idx{i}", 0, s-1) for i,s in enumerate(shape))
     idx, valid = View.expr_idxs(views, idxs)
     ret: List[Optional[sint]] = [None] * len(shape)
     bad_idx_vars: Set[Variable] = set()
@@ -121,7 +121,8 @@ class View:
       idx_maybe, stride_maybe = (this_dim.a, this_dim.b) if isinstance(this_dim, MulNode) else (this_dim, 1)
       idx_maybe_index = next((i for i, idx in enumerate(idxs) if idx == idx_maybe), None)
       try:
-        ret[idx_maybe_index] = cast(sint, stride_maybe)
+        if idx_maybe_index is None: raise TypeError
+        else: ret[idx_maybe_index] = cast(sint, stride_maybe)
       except TypeError:
         bad_idx_vars = bad_idx_vars.union(idx_maybe.vars())
     idx_vars, valid_vars = idx.vars(), valid.vars()
