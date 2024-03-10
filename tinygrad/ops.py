@@ -45,9 +45,6 @@ class ScheduleItem:
   inputs: Tuple[LazyBuffer, ...]
   var_vals: Dict[Variable, int]
 
-class ScheduleBarrier:
-  def __init__(self): pass
-
 @dataclass(frozen=True, eq=False)
 class LazyOp:
   op: Op

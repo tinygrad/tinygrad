@@ -3,7 +3,7 @@ import math
 from typing import Union, Optional, Any, Tuple, List, Dict, cast
 from tinygrad.dtype import cast_scalar, dtypes, DType, Scalar
 from tinygrad.helpers import prod, getenv, all_int, all_same
-from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ScheduleBarrier, Op
+from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op
 from tinygrad.shape.symbolic import sint
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
@@ -11,22 +11,21 @@ from weakref import ref, ReferenceType
 
 lazycache: Dict[Any, ReferenceType[LazyBuffer]] = {}
 def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
-                      base:Optional[LazyBuffer]=None, enable_cache=bool(getenv("LAZYCACHE", 1)), barrier:Optional[ScheduleBarrier] = None):
+                      base:Optional[LazyBuffer]=None, enable_cache=bool(getenv("LAZYCACHE", 1))):
   if st.size == 0 and op not in {LoadOps.SYNC, LoadOps.WAIT}: op, arg, srcs, base = LoadOps.CONST, 0, (), None
   if op == LoadOps.CONST: enable_cache = True
 
   cache_key = (device, st, dtype, op, arg, tuple(ref(x) for x in srcs)) if base is None else (st, ref(base))
   if (rret := lazycache.get(cache_key, None)): return cast(LazyBuffer, rret())  # NOTE: this should always be a live reference
 
-  return LazyBuffer(device, st, dtype, op, arg, srcs, base=base, cache_key=cache_key if enable_cache else None, barrier=barrier)
+  return LazyBuffer(device, st, dtype, op, arg, srcs, base=base, cache_key=cache_key if enable_cache else None)
 
 class LazyBuffer:
   def __init__(self, device:str, st:ShapeTracker, dtype:DType,
                op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
-               base:Optional[LazyBuffer]=None, cache_key=None, barrier: Optional[ScheduleBarrier] = None):
+               base:Optional[LazyBuffer]=None, cache_key=None):
     self.device, self.st, self.dtype, self.shape, self.size, self.cache_key = device, st, dtype, st.shape, st.size, cache_key
     self._base: Optional[LazyBuffer] = None
-    self._barrier: Optional[ScheduleBarrier] = barrier
     if base is None:
       # properties on base
       self.op, self.arg, self.srcs = op, arg, srcs  # this is a LazyOp, except the src is LazyBuffers and not LazyOps
@@ -75,22 +74,21 @@ class LazyBuffer:
   def is_unrealized_const(self): return not self.base.realized and self.base.op is LoadOps.CONST
   def is_unrealized_contiguous_const(self): return self.base == self and not self.base.realized and self.op is LoadOps.CONST
 
-  def _copy(self, device:str, barrier: Optional[ScheduleBarrier] = None) -> LazyBuffer:
+  def _copy(self, device:str) -> LazyBuffer:
     sync_size = 1 if self.device.startswith("HIP") else 0
     if self.device.startswith("EXT") or self.device.startswith("DISK"):
       # DISK/EXT don't sync
       return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, None, (self,), enable_cache=False)
     sync = LazyBuffer.loadop(LoadOps.SYNC, (sync_size,), dtypes.uint32, self.device, src=self, enable_cache=True)
     wait = LazyBuffer.loadop(LoadOps.WAIT, (0,), dtypes.uint32, device, src=sync, enable_cache=True)
-    return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, None, (self, wait), enable_cache=False,
-                             barrier=barrier)
+    return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, None, (self, wait), enable_cache=False)
 
-  def copy_to_device(self, device:str, barrier: Optional[ScheduleBarrier] = None) -> LazyBuffer:
+  def copy_to_device(self, device:str, force: bool = False) -> LazyBuffer:
     # no COPY
     if self.device == device: return self
 
     # double COPY = one COPY
-    if not barrier and self.st.contiguous and self.size == self.base.size and not self.base.realized and self.base.op is LoadOps.COPY:
+    if not force and self.st.contiguous and self.size == self.base.size and not self.base.realized and self.base.op is LoadOps.COPY:
       return self.base.srcs[0].copy_to_device(device).reshape(self.st.shape)
 
     # const doesn't have to be copied (issues with disk tensor)
@@ -98,10 +96,10 @@ class LazyBuffer:
       return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, device, arg=self.base.arg)._view(self.st)
 
     # if it's a shrink, do the shrink before the copy with CONTIGUOUS
-    if prod(self.st.shape) < prod(self.base.st.shape): return self.contiguous()._copy(device, barrier)
+    if prod(self.st.shape) < prod(self.base.st.shape): return self.contiguous()._copy(device)
 
     # copy the base and apply the shapetracker on the new device
-    return self.base._copy(device, barrier)._view(self.st)
+    return self.base._copy(device)._view(self.st)
 
   def e(self, op:Union[LoadOps, UnaryOps, BinaryOps, TernaryOps], *in_srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
     srcs: List[LazyBuffer] = []

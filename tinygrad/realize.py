@@ -1,8 +1,7 @@
-import sys
+import sys, heapq
 from collections import defaultdict, deque
 from typing import List, Dict, Optional, cast, Set, DefaultDict
-from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters, LazyOp, ReduceOps, ConstBuffer, MemBuffer, BinaryOps, UnaryOps, \
-  ScheduleBarrier
+from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters, LazyOp, ReduceOps, ConstBuffer, MemBuffer, BinaryOps, UnaryOps
 from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats, Compiled, BufferOptions
 from tinygrad.features.graph import print_tree, realized_lazybuffer, log_lazybuffer
 from tinygrad.helpers import colored, getenv, GRAPH, cpu_time_execution, DEBUG, flatten, prod, dedup, all_int
@@ -173,52 +172,39 @@ def _is_padding_okay(buf:LazyBuffer, realizes:Set[LazyBuffer]) -> bool:
   if buf.op in UNSAFE_PAD_OPS: return False
   return all(_is_padding_okay(x.base, realizes) for x in buf.srcs)
 
-def group_barriers(items: List[ScheduleItem]) -> List[ScheduleItem]:
-  grouped: List[List[ScheduleItem]] = []
-  graph: Dict[int, Set[int]] = {}
-  barriers: Dict[ScheduleBarrier, int] = {}
+def optimize(schedule: List[ScheduleItem]) -> List[ScheduleItem]:
+  # find assigns, map positions of output LazyBuffers, enumerate devices
+  assigns: Dict[Buffer, int] = {}
   positions: Dict[LazyBuffer, int] = {}
-  fw_deps: Dict[LazyBuffer, Set[int]] = defaultdict(set)
-
-  for si in items:
-    if not si.out._barrier:
-      grouped.append([si])
-      positions[si.out] = len(grouped)-1
-      graph[len(grouped) - 1] = set()
-    else:
-      if (i := barriers.get(si.out._barrier)) is not None:
-        grouped[i].append(si)
-        positions[si.out] = i
-      else:
-        grouped.append([si])
-        positions[si.out] = len(grouped)-1
-        barriers[si.out._barrier] = len(grouped)-1
-        graph[len(grouped) - 1] = set()
-    spos = positions[si.out]
-    for d in fw_deps.pop(si.out, set()): graph[d].add(spos)
+  graph: Dict[int, Set[int]] = {}
+  for i,si in enumerate(schedule):
+    graph[i] = set()
+    positions[si.out] = i
+    if si.out.output_buffer: assigns[si.out.output_buffer] = i
+  # Figure out dependencies
+  for i,si in enumerate(schedule):
     for inp in si.inputs:
-      if inp.realized: continue
-      if (p := positions.get(inp)) is not None:
-        graph[spos].add(p)
-      else:
-        fw_deps[inp].add(spos)
-  del barriers, positions, fw_deps
+      if (pos := positions.get(inp)) is not None:
+        graph[pos].add(i)
+      if inp.realized and (pos := assigns.get(inp.realized)) is not None and pos != i:
+        graph[i].add(pos)
+  del assigns, positions
 
-  ordered: List[int] = []
+  top_order: List[int] = []
   in_degrees: Dict[int, int] = {k:0 for k in graph.keys()}
   for n in flatten(graph.values()): in_degrees[n] += 1
-  free = deque([node for node, degree in in_degrees.items() if degree == 0])
-  while len(free) > 0:
+  free: deque[int] = deque([idx for idx,deg in in_degrees.items() if deg == 0])
+
+  while free:
     node = free.popleft()
-    ordered.append(node)
-    for dep in graph[node]:
-      in_degrees[dep] -= 1
-      if in_degrees[dep] == 0: free.append(dep)
-  del in_degrees, free
+    top_order.append(node)
+    for adj in graph[node]:
+      in_degrees[adj] -= 1
+      if in_degrees[adj] == 0: free.append(adj)
 
-  assert len(ordered) == len(grouped), "cyclic dependency"
+  assert len(top_order) == len(schedule), "cycle detected"
 
-  return flatten([grouped[i] for i in reversed(ordered)])
+  return [schedule[i] for i in top_order]
 
 def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> List[ScheduleItem]:
   if seen is None: seen = set()
@@ -289,4 +275,4 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
       assert len(realized_children) == 1
       reduce_for_op[next(iter(realized_children.keys()))] = r
 
-  return group_barriers(flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in outs))
+  return optimize(flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in outs))
