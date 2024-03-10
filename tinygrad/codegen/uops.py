@@ -208,13 +208,14 @@ class UOpGraph:
     modified_phis = set()
     allowed_phi_parents = {UOps.CONST, UOps.SPECIAL, UOps.ALU, UOps.LOOP, UOps.DEFINE_ACC}
     for phi in [op for op in self.uops if op.uop is UOps.PHI and all([u.uop in allowed_phi_parents for u in get_recursive_parents(op)])]:
-      where_ops = [op for op in get_recursive_parents(phi) if op.arg == TernaryOps.WHERE]
+      where_ops = [op for op in get_recursive_parents(phi) if op.arg == TernaryOps.WHERE and len([op for op in self.get_recursive_children(op) if op.uop is UOps.PHI]) == 1]
       for where in sorted(where_ops, key=lambda x: self.uops.index(x)):
         try:
           loop_op = phi.vin[2]
           comp, comp_lt, comp_gt = where.vin[0], where.vin[0].vin[0], where.vin[0].vin[1]
           if where.vin[2].arg != 0 or comp.arg != BinaryOps.CMPLT or comp_gt.uop is not UOps.CONST or comp_gt.arg > 0: continue
           factored = loop_factor(get_recursive_parents, loop_to_name, comp_lt, NumNode(comp_gt.arg), loop_op)
+          print("factored", factored)
         except (RuntimeError, StopIteration, IndexError, AssertionError): continue
         final_value = NumNode(loop_op.vin[1].arg-1) - factored
         self.uops, after_split_ops = self.uops[:(where_index:=self.uops.index(where))], self.uops[where_index:]
@@ -224,6 +225,7 @@ class UOpGraph:
         max_clamped = mult_neg_1(max(const(-1*loop_length), mult_neg_1(min_clamped))) if (final_value.max > loop_length) else min_clamped
         maybe_cast = self.add(UOps.CAST, where.dtype, (max_clamped,)) if where.dtype != dtypes.default_int else max_clamped
         final_op = self.add(UOps.ALU, where.dtype, (maybe_cast, where.vin[1]), BinaryOps.MUL)
+        print("final op", final_op)
         self.uops = self.uops + after_split_ops
         self.replace_op(where, final_op)
         modified_phis.add(phi)
