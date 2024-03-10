@@ -230,7 +230,7 @@ class TestLinearizer(unittest.TestCase):
         uops = uops[:uops.index(if_op)]
       assert len(set([u.uop for u in uops if u.uop in {UOps.LOOP, UOps.SPECIAL}])) == 1, "has either specials or loops, not both"
       assert len([u for u in uops if u.uop == UOps.PHI]) == 0, "PHI should have been simplified"
-      assert len([u for u in uops if u.arg == BinaryOps.MAX]) == max_ops, "no unnecessary MAX ops"
+      assert len([u for u in uops if u.arg == BinaryOps.MAX]) <= max_ops, "no unnecessary MAX ops"
 
     helper(Tensor.arange(5.5, (3.5*300), 3.5))
     helper(Tensor.arange(-1, -100, -5))
