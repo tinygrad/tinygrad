@@ -207,11 +207,11 @@ class UOpGraph:
     def max(x, y): return self.add(UOps.ALU, dtypes.default_int, (x, y), BinaryOps.MAX)
 
     allowed_phi_parents = {UOps.CONST, UOps.SPECIAL, UOps.ALU, UOps.LOOP, UOps.DEFINE_ACC}
-    allowed_alus = {BinaryOps.MUL, BinaryOps.ADD}
+    allowed_alus = {BinaryOps.MUL, BinaryOps.ADD, BinaryOps.CMPLT, TernaryOps.WHERE}
     for loop_op in reversed([op for op in self.uops if op.uop is UOps.LOOP]):
       phi_ops = set([op for op in self.get_recursive_children(loop_op) if op.uop is UOps.PHI])
       where_ops = set([op for phi in phi_ops for op in get_recursive_parents(phi) if op.arg == TernaryOps.WHERE])
-      if (any([op for phi in phi_ops for op in get_recursive_parents(phi) if op.uop not in allowed_phi_parents or op.arg not in allowed_alus])
+      if (any([op for phi in phi_ops for op in get_recursive_parents(phi) if op.uop not in allowed_phi_parents or (op.uop is UOps.ALU and op.arg not in allowed_alus)])
         or any([where.vin[2].arg != 0 or where.vin[0].vin[1].uop is not UOps.CONST for where in where_ops])
         or any(len([op for op in get_recursive_parents(where) if op.uop is UOps.LOOP]) == 0 for where in where_ops)): continue
       if DEBUG >= 5: print("simplifying {} phis in loop".format(len(phi_ops)))
