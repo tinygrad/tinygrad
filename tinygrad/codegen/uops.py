@@ -206,7 +206,7 @@ class UOpGraph:
     def max(x, y): return self.add(UOps.ALU, dtypes.default_int, (x, y), BinaryOps.MAX)
 
     allowed_phi_parents = {UOps.CONST, UOps.SPECIAL, UOps.ALU, UOps.LOOP, UOps.DEFINE_ACC}
-    for loop_op in [op for op in self.uops if op.uop is UOps.LOOP]:
+    for loop_op in reversed([op for op in self.uops if op.uop is UOps.LOOP]):
       phi_ops = set([op for op in self.get_recursive_children(loop_op) if op.uop is UOps.PHI])
       if any([op for phi in phi_ops for op in get_recursive_parents(phi) if op.uop not in allowed_phi_parents]): continue
       where_ops = set([op for phi in phi_ops for op in get_recursive_parents(phi) if op.arg == TernaryOps.WHERE])
@@ -231,7 +231,6 @@ class UOpGraph:
         self.uops.remove((accumulator:=phi.vin[0]))
         for alu_with_accum in [op for op in self.uops if accumulator in op.vin]:
           self.replace_op(alu_with_accum, next(op for op in alu_with_accum.vin if op != accumulator))
-      if DEBUG >= 5: print("removing loop")
 
   def uops_optimization(self, get_recursive_parents):
     for u in self.uops:
