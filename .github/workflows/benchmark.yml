@@ -164,10 +164,10 @@ jobs:
       run: HSA=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
     - name: Run 10 CIFAR training steps w HALF
       run: HSA=1 STEPS=10 HALF=1 python3 examples/hlb_cifar10.py | tee train_cifar_half.txt
-    - name: Run 10 CIFAR training steps w 6 GPUS
-      run: time HSA=1 HALF=1 STEPS=350 BS=1536 GPUS=6 python3 examples/hlb_cifar10.py | tee train_cifar_six_gpu.txt
-    - name: Run full CIFAR training
+    - name: Run full CIFAR training w 1 GPU
       run: time HSA=1 HALF=1 LATEWINO=1 STEPS=1000 TARGET_EVAL_ACC_PCT=93 python3 examples/hlb_cifar10.py | tee train_cifar_one_gpu.txt
+    - name: Run full CIFAR training steps w 6 GPUS
+      run: time HSA=1 HALF=1 STEPS=350 BS=1536 GPUS=6 TARGET_EVAL_ACC_PCT=93 python3 examples/hlb_cifar10.py | tee train_cifar_six_gpu.txt
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (AMD)
