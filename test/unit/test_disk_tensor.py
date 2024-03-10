@@ -2,7 +2,7 @@ import pathlib, unittest
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load
-from tinygrad.helpers import Timing, CI, fetch, temp
+from tinygrad.helpers import Timing, CI, fetch, temp, getenv
 
 def compare_weights_both(url):
   import torch
@@ -215,6 +215,20 @@ class TestDiskTensor(unittest.TestCase):
       t[idx:idx+2].assign(data)
 
     np.testing.assert_array_equal(t.numpy(), np.array([3] * 10))
+
+  @unittest.skipIf(getenv("HIPCPU"), "no real HIP device exists in CI")
+  def test_bf16_disk_write_read(self):
+    t = Tensor([10000, -1, -1000, -10000, 20]).cast(dtypes.float32)
+    t.to(f"disk:{temp('f32')}").realize()
+
+    # hack to "cast" f32 -> bf16
+    with open(temp('f32'), "rb") as f: dat = f.read()
+    adat = b''.join([dat[i+2:i+4] for i in range(0, len(dat), 4)])
+    with open(temp('bf16'), "wb") as f: f.write(adat)
+
+    t = Tensor.empty(5, dtype=dtypes.bfloat16, device=f"disk:{temp('bf16')}").llvm().realize()
+    back = t.cast(dtypes.float32)
+    assert tuple(back.numpy().tolist()) == (9984., -1, -1000, -9984, 20)
 
 if __name__ == "__main__":
   unittest.main()
