@@ -202,33 +202,35 @@ class UOpGraph:
         non_loop = to_symbolic(next(v for v in with_loop.vin if v != next_with_loop and loop_op not in get_recursive_parents(v)))
         return loop_factor(get_recursive_parents, loop_to_name, next_with_loop, alu_opposite(with_loop.arg, factored, non_loop), loop_op)
     def const(x): return self.add(UOps.CONST, dtypes.default_int, tuple(), x)
-    def mult_neg_1(x): return self.add(UOps.ALU, dtypes.default_int, (x, const(-1)), BinaryOps.MUL)
+    def mult_neg_1(x): return self.add(UOps.ALU, dtypes.default_int, (x,), UnaryOps.NEG)
     def max(x, y): return self.add(UOps.ALU, dtypes.default_int, (x, y), BinaryOps.MAX)
 
     modified_phis = set()
     allowed_phi_parents = {UOps.CONST, UOps.SPECIAL, UOps.ALU, UOps.LOOP, UOps.DEFINE_ACC}
-    where_ops = [op for op in self.uops if op.arg == TernaryOps.WHERE and len([op for op in self.get_recursive_children(op) if op.uop is UOps.PHI]) == 1]
-    for where in sorted(where_ops, key=lambda x: self.uops.index(x)):
-      phis = [op for op in self.get_recursive_children(where) if op.uop is UOps.PHI]
-      if not(len(phis) == 1 and all([op.uop in allowed_phi_parents for op in get_recursive_parents(phis[0])])): continue
-      try:
-        phi, loop_op = phis[0], phis[0].vin[2]
-        comp, comp_lt, comp_gt = where.vin[0], where.vin[0].vin[0], where.vin[0].vin[1]
-        if where.vin[2].arg != 0 or comp.arg != BinaryOps.CMPLT or comp_gt.uop is not UOps.CONST or comp_gt.arg > 0: continue
-        factored = loop_factor(get_recursive_parents, loop_to_name, comp_lt, NumNode(comp_gt.arg), loop_op)
-      except (RuntimeError, StopIteration, IndexError, AssertionError): continue
-      final_value = NumNode(loop_op.vin[1].arg-1) - factored
-      self.uops, after_split_ops = self.uops[:(where_index:=self.uops.index(where))], self.uops[where_index:]
-      rendered = final_value.render(render_ops, ctx)
-      loop_length = loop_op.vin[1].arg - loop_op.vin[0].arg
-      min_clamped = max(rendered, const(0)) if (final_value.min < 0) else rendered
-      max_clamped = mult_neg_1(max(const(-1*loop_length), mult_neg_1(min_clamped))) if (final_value.max > loop_length) else min_clamped
-      maybe_cast = self.add(UOps.CAST, where.dtype, (max_clamped,)) if where.dtype != dtypes.default_int else max_clamped
-      final_op = self.add(UOps.ALU, where.dtype, (maybe_cast, where.vin[1]), BinaryOps.MUL)
-      self.uops = self.uops + after_split_ops
-      self.replace_op(where, final_op)
-      modified_phis.add(phi)
-      get_recursive_parents.cache_clear()
+    for phi in [op for op in self.uops if op.uop is UOps.PHI]:
+      where_ops = [op for op in get_recursive_parents(phi) if op.arg == TernaryOps.WHERE]
+      if (any([op for op in where_ops if len([op for op in self.get_recursive_children(op) if op.uop is UOps.PHI]) != 1])
+        or any([op for op in get_recursive_parents(phi) if op.uop not in allowed_phi_parents])): continue
+      for where in sorted(where_ops, key=lambda x: self.uops.index(x)):
+        try:
+          loop_op = phi.vin[2]
+          comp, comp_lt, comp_gt = where.vin[0], where.vin[0].vin[0], where.vin[0].vin[1]
+          if where.vin[2].arg != 0 or comp.arg != BinaryOps.CMPLT or comp_gt.uop is not UOps.CONST or comp_gt.arg > 0: continue
+          factored = loop_factor(get_recursive_parents, loop_to_name, comp_lt, NumNode(comp_gt.arg), loop_op)
+        except (RuntimeError, StopIteration, IndexError, AssertionError): continue
+        final_value = NumNode(loop_op.vin[1].arg-1) - factored
+        print("where index", self.uops.index(where))
+        self.uops, after_split_ops = self.uops[:(where_index:=self.uops.index(where))], self.uops[where_index:]
+        rendered = final_value.render(render_ops, ctx)
+        loop_length = loop_op.vin[1].arg - loop_op.vin[0].arg
+        min_clamped = max(rendered, const(0)) if (final_value.min < 0) else rendered
+        max_clamped = mult_neg_1(max(const(-1*loop_length), mult_neg_1(min_clamped))) if (final_value.max > loop_length) else min_clamped
+        maybe_cast = self.add(UOps.CAST, where.dtype, (max_clamped,)) if where.dtype != dtypes.default_int else max_clamped
+        final_op = self.add(UOps.ALU, where.dtype, (maybe_cast, where.vin[1]), BinaryOps.MUL)
+        self.uops = self.uops + after_split_ops
+        self.replace_op(where, final_op)
+        modified_phis.add(phi)
+        get_recursive_parents.cache_clear()
     for phi in modified_phis:
       if DEBUG >= 5: print("simplifying phi")
       self.replace_op(phi, phi.vin[1])
