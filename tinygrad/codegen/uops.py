@@ -105,12 +105,15 @@ class UOpGraph:
         if arg is BinaryOps.DIV and vin[1].uop is UOps.CONST and vin[1].arg == 1.0: return vin[0]
         # depth 2 constant folding
         for x in [0,1]:
-          if arg is BinaryOps.ADD and vin[x].uop is UOps.CONST and vin[1-x].uop is UOps.ALU and vin[1-x].arg is BinaryOps.ADD:
-            for y in [0,1]:
-              if vin[1-x].vin[y].uop is UOps.CONST:
-                computed_val = exec_alu(BinaryOps.ADD, dtype, [vin[x].arg, vin[1-x].vin[y].arg])
-                const = self.add(UOps.CONST, dtype, arg=computed_val, insert_before=insert_before)
-                return self.add(UOps.ALU, dtype, (vin[1-x].vin[1-y], const), BinaryOps.ADD, insert_before=insert_before)
+          # (x+c0)+c1 = x + (c0+c1)
+          # (x*c0)*c1 = x * (c0*c1)
+          for ops in {BinaryOps.ADD, BinaryOps.MUL}:
+            if arg is ops and vin[x].uop is UOps.CONST and vin[1-x].uop is UOps.ALU and vin[1-x].arg is ops:
+              for y in [0,1]:
+                if vin[1-x].vin[y].uop is UOps.CONST:
+                  computed_val = exec_alu(ops, dtype, [vin[x].arg, vin[1-x].vin[y].arg])
+                  const = self.add(UOps.CONST, dtype, arg=computed_val, insert_before=insert_before)
+                  return self.add(UOps.ALU, dtype, (vin[1-x].vin[1-y], const), ops, insert_before=insert_before)
 
     key = (uop, dtype, vin, arg)
     if insert_before is None: insert_before = len(self.uops)
