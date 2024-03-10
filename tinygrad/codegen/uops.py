@@ -188,13 +188,13 @@ class UOpGraph:
       if arg == BinaryOps.ADD: return x - y
       elif arg == BinaryOps.MUL: return Node.__floordiv__(x, y, False)
       else: raise RuntimeError("unhandled alu")
-    def to_symbolic(u):
+    def to_symbolic(u: UOp):
       if u.uop == UOps.CONST: return NumNode(int(u.arg))
       elif u.uop == UOps.LOOP: return Variable(loop_to_name[u], u.vin[0].arg, u.vin[1].arg)
       elif u.uop == UOps.SPECIAL: return Variable(u.arg[1], 0, u.arg[2])
       elif u.uop == UOps.ALU and u.arg == BinaryOps.ADD: return to_symbolic(u.vin[0]) + to_symbolic(u.vin[1])
       elif u.uop == UOps.ALU and u.arg == BinaryOps.MUL: return to_symbolic(u.vin[0]) * to_symbolic(u.vin[1])
-      else: raise RuntimeError("unhandled op: " + u)
+      else: raise RuntimeError("unhandled op: {}".format(u))
     def loop_factor(get_recursive_parents, loop_to_name, with_loop: UOp, factored: Node, loop_op):
       if with_loop == loop_op: return factored
       elif with_loop.uop is UOps.ALU:
@@ -202,7 +202,7 @@ class UOpGraph:
         non_loop = to_symbolic(next(v for v in with_loop.vin if v != next_with_loop and loop_op not in get_recursive_parents(v)))
         return loop_factor(get_recursive_parents, loop_to_name, next_with_loop, alu_opposite(with_loop.arg, factored, non_loop), loop_op)
     def const(x): return self.add(UOps.CONST, dtypes.default_int, tuple(), x)
-    def neg(x): return self.add(UOps.ALU, dtypes.default_int, (x,), UnaryOps.NEG)
+    def neg(x): return self.add(UOps.ALU, dtypes.default_int, (x,const(-1)), BinaryOps.MUL)
     def max(x, y): return self.add(UOps.ALU, dtypes.default_int, (x, y), BinaryOps.MAX)
 
     modified_phis = set()
