@@ -183,7 +183,7 @@ class UOpGraph:
     for v in self.uops: v.vin = tuple(new if x is old else x for x in v.vin)
     self.uops.remove(old)
 
-  def simplify_phi_loop(self, get_recursive_parents, loop_to_name, render_ops, ctx):
+  def simplify_phi_loops(self, get_recursive_parents, loop_to_name, render_ops, ctx):
     def alu_opposite(arg, x, y):
       if arg == BinaryOps.ADD: return x - y
       elif arg == BinaryOps.MUL: return Node.__floordiv__(x, y, False)
@@ -205,15 +205,14 @@ class UOpGraph:
     def neg(x): return self.add(UOps.ALU, dtypes.default_int, (x,const(-1)), BinaryOps.MUL)
     def max(x, y): return self.add(UOps.ALU, dtypes.default_int, (x, y), BinaryOps.MAX)
 
-    modified_phis = set()
     allowed_phi_parents = {UOps.CONST, UOps.SPECIAL, UOps.ALU, UOps.LOOP, UOps.DEFINE_ACC}
-    for phi in [op for op in self.uops if op.uop is UOps.PHI]:
-      if (any([op for op in get_recursive_parents(phi) if op.uop not in allowed_phi_parents])
-        or len([op for op in get_recursive_parents(phi) if op.uop is UOps.DEFINE_ACC]) > 1): continue
-      for where in sorted([op for op in get_recursive_parents(phi) if op.arg == TernaryOps.WHERE], key=lambda x: self.uops.index(x)):
-        loop_op = phi.vin[2]
+    for loop_op in [op for op in self.uops if op.uop is UOps.LOOP]:
+      phi_ops = set([op for op in self.get_recursive_children(loop_op) if op.uop is UOps.PHI])
+      if any([op for phi in phi_ops for op in get_recursive_parents(phi) if op.uop not in allowed_phi_parents]): continue
+      where_ops = set([op for phi in phi_ops for op in get_recursive_parents(phi) if op.arg == TernaryOps.WHERE])
+      if any([where.vin[2].arg != 0 or where.vin[0].vin[1].uop is not UOps.CONST or (where.vin[0].vin[1].arg > 0) for where in where_ops]): continue
+      for where in sorted(where_ops, key=lambda x: self.uops.index(x)):
         comp, comp_lt, comp_gt = where.vin[0], where.vin[0].vin[0], where.vin[0].vin[1]
-        if where.vin[2].arg != 0 or comp.arg != BinaryOps.CMPLT or comp_gt.uop is not UOps.CONST or comp_gt.arg > 0: continue
         factored = loop_factor(get_recursive_parents, loop_to_name, comp_lt, NumNode(int(comp_gt.arg)), loop_op)
         final_value = NumNode(loop_op.vin[1].arg-1) - factored
         self.uops, after_split_ops = self.uops[:(where_index:=self.uops.index(where))], self.uops[where_index:]
@@ -225,19 +224,15 @@ class UOpGraph:
         final_op = self.add(UOps.ALU, where.dtype, (maybe_cast, where.vin[1]), BinaryOps.MUL)
         self.uops = self.uops + after_split_ops
         self.replace_op(where, final_op)
-        modified_phis.add(phi)
         get_recursive_parents.cache_clear()
-    for phi in modified_phis:
-      if DEBUG >= 5: print("simplifying phi")
-      self.replace_op(phi, phi.vin[1])
-      self.uops.remove((accumulator:=phi.vin[0]))
-      for alu_with_accum in [op for op in self.uops if accumulator in op.vin]:
-        self.replace_op(alu_with_accum, next(op for op in alu_with_accum.vin if op != accumulator))
-    for loop_op in set([phi.vin[2] for phi in modified_phis]):
-      if len(self.get_recursive_children(loop_op)) == 0:
-        if DEBUG >= 5: print("removing loop")
-        self.uops.remove(loop_op)
-    return len(modified_phis) > 0
+      for phi in phi_ops:
+        if DEBUG >= 5: print("simplifying phi")
+        self.replace_op(phi, phi.vin[1])
+        self.uops.remove((accumulator:=phi.vin[0]))
+        for alu_with_accum in [op for op in self.uops if accumulator in op.vin]:
+          self.replace_op(alu_with_accum, next(op for op in alu_with_accum.vin if op != accumulator))
+      if DEBUG >= 5: print("removing loop")
+      self.uops.remove(loop_op)
 
   def uops_optimization(self, get_recursive_parents):
     for u in self.uops:
@@ -274,7 +269,7 @@ class UOpGraph:
 
     # uops optimization
     while self.uops_optimization(get_recursive_parents): pass
-    while self.simplify_phi_loop(get_recursive_parents, loop_to_name, render_ops, ctx): pass
+    self.simplify_phi_loops(get_recursive_parents, loop_to_name, render_ops, ctx)
 
     # (recursively) remove childless uops
     self.remove_childless()
