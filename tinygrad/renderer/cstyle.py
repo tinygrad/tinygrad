@@ -62,7 +62,7 @@ class CStyleLanguage(NamedTuple):
       out_val = f"*({buf_name}+{idx})" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}]"
     return self.render_cast([out_val], output_dtype) if output_dtype != buf_dtype else out_val
 
-  def get_kernel_modifier(uops:UOpGraph) -> str: return ""
+  def get_kernel_modifier(self, uops:UOpGraph) -> str: return ""
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:UOpGraph, prefix=None) -> str:
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,(dtype,_) in bufs) else ""  # noqa: E501
     buftypes = [(name,f"{'write_only' if mutable else 'read_only'} image2d_t" if dtype.name.startswith('image') else
@@ -316,8 +316,10 @@ class HIPLanguage(CStyleLanguage):
                                                              ("signed int", "int", 4), ("signed int", "int", 2)]))
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
-  def get_kernel_modifier(uops:UOpGraph) -> str:
-    requiredMaxThreadsPerBlock, minBlocksPerMultiprocessor = prod(u.args[2] for u in uops if u.uop == UOps.SPECIAL and u.args[1][0] == "l"), 1
+  def get_kernel_modifier(self, uops:UOpGraph) -> str:
+    requiredMaxThreadsPerBlock, minBlocksPerMultiprocessor = prod(u.arg[2] for u in uops if u.uop == UOps.SPECIAL and u.arg[1][0] == "l"), 1
+    # https://clang.llvm.org/docs/AttributeReference.html#amdgpu-flat-work-group-size
+    # NOTE: this makes hlb_cifar10 twice as fast, there may be more gains in tweaking this
     return f"__attribute__((amdgpu_flat_work_group_size(1, {requiredMaxThreadsPerBlock}), amdgpu_waves_per_eu({minBlocksPerMultiprocessor}))) "
 
 HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())
