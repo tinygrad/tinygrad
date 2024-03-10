@@ -173,7 +173,7 @@ def _is_padding_okay(buf:LazyBuffer, realizes:Set[LazyBuffer]) -> bool:
   return all(_is_padding_okay(x.base, realizes) for x in buf.srcs)
 
 def optimize(schedule: List[ScheduleItem]) -> List[ScheduleItem]:
-  # find assigns, map positions of output LazyBuffers, enumerate devices
+  # find assigns, map positions of output LazyBuffers, init graph
   assigns: Dict[Buffer, int] = {}
   positions: Dict[LazyBuffer, int] = {}
   graph: Dict[int, Set[int]] = {}
