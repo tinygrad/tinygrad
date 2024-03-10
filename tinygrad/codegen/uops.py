@@ -212,7 +212,7 @@ class UOpGraph:
       where_ops = set([op for phi in phi_ops for op in get_recursive_parents(phi) if op.arg == TernaryOps.WHERE])
       if any([where.vin[2].arg != 0 or where.vin[0].vin[1].uop is not UOps.CONST or (where.vin[0].vin[1].arg > 0) for where in where_ops]): continue
       for where in sorted(where_ops, key=lambda x: self.uops.index(x)):
-        comp, comp_lt, comp_gt = where.vin[0], where.vin[0].vin[0], where.vin[0].vin[1]
+        comp_lt, comp_gt = where.vin[0].vin[0], where.vin[0].vin[1]
         factored = loop_factor(get_recursive_parents, loop_to_name, comp_lt, NumNode(int(comp_gt.arg)), loop_op)
         final_value = NumNode(loop_op.vin[1].arg-1) - factored
         self.uops, after_split_ops = self.uops[:(where_index:=self.uops.index(where))], self.uops[where_index:]
