@@ -195,11 +195,12 @@ class UOpGraph:
       elif u.uop == UOps.ALU and u.arg == BinaryOps.ADD: return to_symbolic(u.vin[0]) + to_symbolic(u.vin[1])
       elif u.uop == UOps.ALU and u.arg == BinaryOps.MUL: return to_symbolic(u.vin[0]) * to_symbolic(u.vin[1])
       else: raise RuntimeError("unhandled op: {}".format(u))
-    def loop_factor(get_recursive_parents, loop_to_name, with_loop: UOp, factored: Node, loop_op):
+    def loop_factor(get_recursive_parents, loop_to_name, with_loop: UOp, factored: Node, loop_op, round_up=False):
       if with_loop == loop_op: return factored
       elif with_loop.uop is UOps.ALU:
         next_with_loop = next(v for v in with_loop.vin if v == loop_op or loop_op in get_recursive_parents(v))
         non_loop = to_symbolic(next(v for v in with_loop.vin if v != next_with_loop and loop_op not in get_recursive_parents(v)))
+        if round_up and with_loop.arg is BinaryOps.MUL: factored = factored + (non_loop - 1)
         return loop_factor(get_recursive_parents, loop_to_name, next_with_loop, alu_opposite(with_loop.arg, factored, non_loop), loop_op)
     def const(x): return self.add(UOps.CONST, dtypes.default_int, tuple(), x)
     def neg(x): return self.add(UOps.ALU, dtypes.default_int, (x,), UnaryOps.NEG)
@@ -210,11 +211,11 @@ class UOpGraph:
       phi_ops = set([op for op in self.get_recursive_children(loop_op) if op.uop is UOps.PHI])
       if any([op for phi in phi_ops for op in get_recursive_parents(phi) if op.uop not in allowed_phi_parents]): continue
       where_ops = set([op for phi in phi_ops for op in get_recursive_parents(phi) if op.arg == TernaryOps.WHERE])
-      if any([where.vin[2].arg != 0 or where.vin[0].vin[1].uop is not UOps.CONST or (where.vin[0].vin[1].arg > 0) for where in where_ops]): continue
+      if any([where.vin[2].arg != 0 or where.vin[0].vin[1].uop is not UOps.CONST for where in where_ops]): continue
       for where in sorted(where_ops, key=lambda x: self.uops.index(x)):
         comp_lt, comp_gt = where.vin[0].vin[0], where.vin[0].vin[1]
-        factored = loop_factor(get_recursive_parents, loop_to_name, comp_lt, NumNode(int(comp_gt.arg)), loop_op)
-        final_value = NumNode(loop_op.vin[1].arg-1) - factored
+        factored = loop_factor(get_recursive_parents, loop_to_name, comp_lt, NumNode(int(comp_gt.arg)), loop_op, round_up=(comp_gt.arg > 0))
+        final_value = factored - NumNode(loop_op.vin[0].arg) if (comp_gt.arg > 0) else NumNode(loop_op.vin[1].arg-1) - factored
         self.uops, after_split_ops = self.uops[:(where_index:=self.uops.index(where))], self.uops[where_index:]
         rendered = final_value.render(render_ops, ctx)
         loop_length = loop_op.vin[1].arg - loop_op.vin[0].arg
