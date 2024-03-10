@@ -219,11 +219,17 @@ class TestLinearizer(unittest.TestCase):
                                 arg=TernaryOps.WHERE).uop == UOps.CONST
 
   def test_phi_simplification(self):
-    t = Tensor.arange(5.5, (3.5*300), 3.5)
-    sched = [si for si in create_schedule([t.lazydata]) if si.ast.op not in LoadOps]
-    assert len(sched) == 1
-    lin = Linearizer(sched[0].ast)
-    assert len([u for u in lin.linearize().uops if u.uop in {UOps.LOOP, UOps.SPECIAL}]) == 1, "either a special or a loop exists, but not both"
+    def helper(t):
+      sched = [si for si in create_schedule([t.lazydata]) if si.ast.op not in LoadOps]
+      assert len(sched) == 1
+      uops = Linearizer(sched[0].ast).linearize().uops
+      assert len([u for u in uops if u.uop in {UOps.LOOP, UOps.SPECIAL}]) == 1, "either a special or a loop exists, but not both"
+      assert len([u for u in uops if u.arg == TernaryOps.WHERE]) == 0, "WHERE should have been simplified"
+      assert len([u for u in uops if u.uop == UOps.PHI]) == 0, "PHI should have been simplified"
+
+    helper(Tensor.arange(5.5, (3.5*300), 3.5))
+    helper(Tensor.arange(-1, -100, -5))
+    helper(Tensor.arange(-3.2, 6.7, 0.64))
 
 def helper_realized_ast(r:Tensor):
   s = create_schedule([r.lazydata])
