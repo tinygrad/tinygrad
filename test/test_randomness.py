@@ -65,7 +65,7 @@ class TestRandomness(unittest.TestCase):
     zeros = np.take(x, np.where(x == 0))
     self.assertTrue(ones.size == 0)
     self.assertTrue(zeros.size > 0)
-    equal_distribution(lambda *x: Tensor.rand(*x, dtype=dtypes.float16), torch.rand, lambda x: np.random.rand(*x))
+    equal_distribution(lambda *x: Tensor.rand(*x, dtype=dtypes.float16), torch.rand, lambda x: np.random.rand(*x), shape=(2, N, N))
 
   def test_randn(self):
     self.assertTrue(normal_test(Tensor.randn))
