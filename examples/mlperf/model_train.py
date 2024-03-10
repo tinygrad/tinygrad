@@ -17,6 +17,7 @@ def train_unet3d():
   from tinygrad import dtypes, Device, TinyJit, Tensor
   from tinygrad.nn.optim import SGD
   from tinygrad.nn.state import get_parameters, get_state_dict, safe_save, safe_load, load_state_dict
+  from tinygrad.ops import GlobalCounters
   from tqdm import tqdm
 
   import numpy as np
@@ -104,7 +105,7 @@ def train_unet3d():
       x, y = Tensor(x, requires_grad=False), Tensor(y, requires_grad=False)
       if len(GPUS) > 1: x, y = x.shard(GPUS, axis=0), y.shard(GPUS, axis=0)
       loss = _train_step(model, x, y)
-      t.set_description(f"[Training][Epoch: {epoch}/{NUM_EPOCHS}][Loss: {loss.item():.3f}]")
+      t.set_description(f"[Training][Epoch: {epoch}/{NUM_EPOCHS}][Loss: {loss.item():.3f}][RAM used: {GlobalCounters.mem_used/1e9:5.2f} GB]")
       if WANDB: wandb.log({"train_loss": loss.item()})
 
     if epoch % CHECKPOINT_EVERY == 0:
