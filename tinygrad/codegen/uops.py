@@ -208,7 +208,8 @@ class UOpGraph:
     modified_phis = set()
     allowed_phi_parents = {UOps.CONST, UOps.SPECIAL, UOps.ALU, UOps.LOOP, UOps.DEFINE_ACC}
     for phi in [op for op in self.uops if op.uop is UOps.PHI]:
-      if any([op for op in get_recursive_parents(phi) if op.uop not in allowed_phi_parents]) or len([op for op in get_recursive_parents(phi) if op.uop is UOps.DEFINE_ACC]) > 1: continue
+      if (any([op for op in get_recursive_parents(phi) if op.uop not in allowed_phi_parents])
+        or len([op for op in get_recursive_parents(phi) if op.uop is UOps.DEFINE_ACC]) > 1): continue
       for where in sorted([op for op in get_recursive_parents(phi) if op.arg == TernaryOps.WHERE], key=lambda x: self.uops.index(x)):
         loop_op = phi.vin[2]
         comp, comp_lt, comp_gt = where.vin[0], where.vin[0].vin[0], where.vin[0].vin[1]
