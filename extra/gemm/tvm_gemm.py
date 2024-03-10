@@ -18,13 +18,23 @@ try:
 
   # Default schedule
   s = te.create_schedule(C.op)
-  #print(tvm.lower(s, [A, B, C], simple_mode=True))
 
-  # Output C code
-  func = tvm.build(s, [A, B, C], target=target, name="mmult")
-  print(func.get_source())
+  factor = 4
+  outer, inner = s[C].split(C.op.axis[0], factor=factor)
+  print(s[C], outer, inner)
+  #s[C].parallel(outer)
+  #s[C].vectorize(inner)
+
+  # this is uops
+  print(tvm.lower(s, [A, B, C], simple_mode=True))
+
+  # this is renderer
+  #func = tvm.build(s, [A, B, C], target=target, name="mmult")
+  #print(func.get_source())
 except ImportError:
   print("** please install TVM for TVM output")
+
+exit(0)
 
 # tinygrad version
 
