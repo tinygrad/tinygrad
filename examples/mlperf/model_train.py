@@ -149,7 +149,7 @@ def train_resnet():
       proc, next_proc = next_proc, None  # return old cookie
       i += 1
 
-      if i == getenv("BENCHMARK"): break
+      if i == getenv("BENCHMARK"): return
 
     # ** eval loop **
     if (e + 1 - eval_start_epoch) % eval_epochs == 0:
