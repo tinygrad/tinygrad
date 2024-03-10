@@ -232,7 +232,6 @@ class UOpGraph:
         for alu_with_accum in [op for op in self.uops if accumulator in op.vin]:
           self.replace_op(alu_with_accum, next(op for op in alu_with_accum.vin if op != accumulator))
       if DEBUG >= 5: print("removing loop")
-      self.uops.remove(loop_op)
 
   def uops_optimization(self, get_recursive_parents):
     for u in self.uops:
