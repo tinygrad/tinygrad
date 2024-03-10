@@ -422,6 +422,7 @@ def generate(model,
              sample: bool = False,
              top_k: int = None):
   tks = tokenizer(prompt)["input_ids"]
+  while(len(tks)<4):tks = [50279] + tks
   temperature = 0.5
   start_pos = 0
   inference_params = InferenceParams(max_seqlen=1, max_batch_size=1, seqlen_offset=0)
