@@ -114,6 +114,15 @@ class UOpGraph:
                   computed_val = exec_alu(ops, dtype, [vin[x].arg, vin[1-x].vin[y].arg])
                   const = self.add(UOps.CONST, dtype, arg=computed_val, insert_before=insert_before)
                   return self.add(UOps.ALU, dtype, (vin[1-x].vin[1-y], const), ops, insert_before=insert_before)
+          # (x+c0)*c1 = x*c1 + (c0*c1)
+          if arg is BinaryOps.MUL and vin[x].uop is UOps.CONST and vin[1-x].uop is UOps.ALU and vin[1-x].arg is BinaryOps.ADD:
+            for y in [0,1]:
+              if vin[1-x].vin[y].uop is UOps.CONST:
+                computed_val = exec_alu(BinaryOps.MUL, dtype, [vin[x].arg, vin[1-x].vin[y].arg])
+                const = self.add(UOps.CONST, dtype, arg=computed_val, insert_before=insert_before)
+                mul = self.add(UOps.ALU, dtype, (vin[1-x].vin[1-y], vin[x]), BinaryOps.MUL,
+                               insert_before=insert_before+1 if insert_before is not None else None)
+                return self.add(UOps.ALU, dtype, (mul, const), BinaryOps.ADD, insert_before=insert_before+2 if insert_before is not None else None)
 
     key = (uop, dtype, vin, arg)
     if insert_before is None: insert_before = len(self.uops)
