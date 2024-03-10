@@ -4,7 +4,7 @@ import functools, hashlib
 from enum import Enum, auto
 from tinygrad.helpers import prod, dedup
 from tinygrad.dtype import dtypes, DType
-from tinygrad.shape.symbolic import Variable
+from tinygrad.shape.symbolic import Variable, sint
 from dataclasses import dataclass
 
 # these are the llops your accelerator must implement, along with toCpu
@@ -75,7 +75,7 @@ class LazyOp:
 class FlopCounter:
   shape: Tuple[int, ...]
   dtype: DType
-  flops: int
+  flops: sint
   mem: Dict[int, int]
   @property
   def mem_estimate(self): return sum(self.mem.values())
