@@ -212,6 +212,7 @@ class UOpGraph:
       if any([op for phi in phi_ops for op in get_recursive_parents(phi) if op.uop not in allowed_phi_parents]): continue
       where_ops = set([op for phi in phi_ops for op in get_recursive_parents(phi) if op.arg == TernaryOps.WHERE])
       if any([where.vin[2].arg != 0 or where.vin[0].vin[1].uop is not UOps.CONST for where in where_ops]): continue
+      if DEBUG >= 5: print("simplifying {} phis in loop".format(len(phi_ops)))
       for where in sorted(where_ops, key=lambda x: self.uops.index(x)):
         comp_lt, comp_gt = where.vin[0].vin[0], where.vin[0].vin[1]
         factored = loop_factor(get_recursive_parents, loop_to_name, comp_lt, NumNode(int(comp_gt.arg)), loop_op, round_up=(comp_gt.arg > 0))
@@ -227,7 +228,6 @@ class UOpGraph:
         self.replace_op(where, final_op)
         get_recursive_parents.cache_clear()
       for phi in phi_ops:
-        if DEBUG >= 5: print("simplifying phi")
         self.replace_op(phi, phi.vin[1])
         self.uops.remove((accumulator:=phi.vin[0]))
         for alu_with_accum in [op for op in self.uops if accumulator in op.vin]:
