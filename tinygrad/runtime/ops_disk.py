@@ -31,7 +31,7 @@ class DiskAllocator(Allocator):
       except OSError: fd = os.open(self.device, os.O_RDWR|os.O_CREAT)
       if os.fstat(fd).st_size < size: os.ftruncate(fd, size)
       mem = mmap.mmap(fd, size)
-    if (hp := getattr(mmap, "MADV_HUGEPAGE", None)) is not None: mem.madvise(hp) # type: ignore
+    if (hp := getattr(mmap, "MADV_HUGEPAGE", None)) is not None and hp!=14: mem.madvise(hp) # type: ignore
     return DiskBuffer(UnderlyingDiskBuffer(fd, mem), size)
   def as_buffer(self, src:DiskBuffer): return src._buf()
   def copyin(self, dest:DiskBuffer, src:memoryview): dest._buf()[:] = src
