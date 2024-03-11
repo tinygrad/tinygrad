@@ -512,9 +512,16 @@ class ClipTokenizer:
       bpe_tokens = bpe_tokens[:75]
     return [49406] + bpe_tokens + [49407] * (77 - len(bpe_tokens) - 1)
 
+
+def get_alphas_cumprod(beta_start=0.00085, beta_end=0.0120, n_training_steps=1000):
+  betas = np.linspace(beta_start ** 0.5, beta_end ** 0.5, n_training_steps, dtype=np.float32) ** 2
+  alphas = 1.0 - betas
+  alphas_cumprod = np.cumprod(alphas, axis=0)
+  return Tensor(alphas_cumprod)
+
 class StableDiffusion:
   def __init__(self):
-    self.alphas_cumprod = Tensor.empty(1000)
+    self.alphas_cumprod = get_alphas_cumprod()
     self.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel())
     self.first_stage_model = AutoencoderKL()
     self.cond_stage_model = namedtuple("CondStageModel", ["transformer"])(transformer = namedtuple("Transformer", ["text_model"])(text_model = CLIPTextTransformer()))
