@@ -5,7 +5,7 @@ from collections import defaultdict
 from tinygrad.helpers import DEBUG, flatten, all_same
 from tinygrad.dtype import dtypes, DType
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
-from tinygrad.shape.symbolic import sint, Variable, Node, NumNode
+from tinygrad.shape.symbolic import sint, Variable, Node, NumNode, MulNode, DivNode, SumNode
 from enum import Enum, auto
 from dataclasses import dataclass
 
@@ -184,16 +184,20 @@ class UOpGraph:
     for v in self.uops: v.vin = tuple(new if x is old else x for x in v.vin)
     self.uops.remove(old)
 
-  def simplify_phi_loops(self, get_recursive_parents, loop_uops, render_ops, ctx):
-    loop_to_name = {op: name for name, op in loop_uops.items()}
+  def simplify_phi_loops(self, get_recursive_parents):
+    seen_vars: Dict[str, op] = {}
     def alu_opposite(arg, x, y):
       if arg == BinaryOps.ADD: return x - y
       elif arg == BinaryOps.MUL: return Node.__floordiv__(x, y, False)
       else: raise RuntimeError("unhandled alu")
     def to_symbolic(u: UOp):
       if u.uop == UOps.CONST: return NumNode(int(u.arg))
-      elif u.uop == UOps.LOOP: return Variable(loop_to_name[u], u.vin[0].arg, u.vin[1].arg - 1)
-      elif u.uop == UOps.SPECIAL: return Variable(u.arg[1], 0, u.arg[2]-1)
+      elif u.uop == UOps.LOOP:
+        seen_vars[name:="loop{}".format(len(seen_vars))] = u
+        return Variable(name, u.vin[0].arg, u.vin[1].arg - 1)
+      elif u.uop == UOps.SPECIAL:
+        seen_vars[name:="loop{}".format(len(seen_vars))] = u
+        return Variable(name, 0, u.arg[2]-1)
       elif u.uop == UOps.ALU and u.arg == BinaryOps.ADD: return to_symbolic(u.vin[0]) + to_symbolic(u.vin[1])
       elif u.uop == UOps.ALU and u.arg == BinaryOps.MUL: return to_symbolic(u.vin[0]) * to_symbolic(u.vin[1])
       else: raise RuntimeError("unhandled op: {}".format(u))
@@ -207,6 +211,13 @@ class UOpGraph:
     def const(x): return self.add(UOps.CONST, dtypes.default_int, tuple(), x)
     def neg(x): return self.add(UOps.ALU, dtypes.default_int, (x,), UnaryOps.NEG)
     def max(x, y): return self.add(UOps.ALU, dtypes.default_int, (x, y), BinaryOps.MAX)
+    def uop_alu_idx(a: UOp, b, op, dtype=dtypes.int32):
+      render_b: UOp = cast(UOp, (NumNode(b) if not isinstance(b, Node) else b).render(render_ops))
+      return self.add(UOps.ALU, dtype, (a, render_b), op)
+    render_ops = {Variable: lambda self, ops, _: seen_vars[self.expr], NumNode: lambda self, ops, _: const(self.b),
+                  MulNode: lambda self, ops, _: uop_alu_idx(self.a.render(ops, self), self.b, BinaryOps.MUL),
+                  DivNode: lambda self, ops, _: uop_alu_idx(self.a.render(ops, self), self.b, BinaryOps.DIV),
+                  SumNode: lambda self, ops, _: functools.reduce(lambda a, b: uop_alu_idx(a, b, BinaryOps.ADD), self.nodes[1:], self.nodes[0].render(ops, self))}
 
     allowed_ops = {UOps.CONST, UOps.SPECIAL, UOps.ALU, UOps.LOOP, UOps.DEFINE_ACC}
     allowed_alus = {BinaryOps.MUL, BinaryOps.ADD, BinaryOps.CMPLT, TernaryOps.WHERE}
@@ -222,7 +233,7 @@ class UOpGraph:
         factored = loop_factor(comp_lt, NumNode(int(comp_gt.arg)), loop_op, round_up=(comp_gt.arg > 0))
         final_value = factored - NumNode(loop_op.vin[0].arg) if (comp_gt.arg > 0) else NumNode(loop_op.vin[1].arg-1) - factored
         self.uops, after_split_ops = self.uops[:(where_index:=self.uops.index(where))], self.uops[where_index:]
-        rendered = final_value.render(render_ops, ctx)
+        rendered = final_value.render(render_ops)
         loop_length = loop_op.vin[1].arg - loop_op.vin[0].arg
         min_clamped = max(rendered, const(0)) if (final_value.min < 0) else rendered
         max_clamped = neg(max(const(-1*loop_length), neg(min_clamped))) if (final_value.max > loop_length) else min_clamped
@@ -256,7 +267,7 @@ class UOpGraph:
           self.replace_op(u, new)
           return True
 
-  def uoptimize(self, loop_uops, render_ops, ctx):
+  def uoptimize(self):
     # get PHI node loop scope, link anything using a DEFINE_ACC to the loop as a "parent"
     acc_scope: DefaultDict[UOp, List[UOp]] = defaultdict(list)
     for u in self.uops:
@@ -272,7 +283,7 @@ class UOpGraph:
 
     # uops optimization
     while self.uops_optimization(get_recursive_parents): pass
-    self.simplify_phi_loops(get_recursive_parents, loop_uops, render_ops, ctx)
+    self.simplify_phi_loops(get_recursive_parents)
 
     # (recursively) remove childless uops
     self.remove_childless()

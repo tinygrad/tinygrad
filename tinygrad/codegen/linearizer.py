@@ -391,7 +391,7 @@ class Linearizer(Kernel):
     self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val)
 
     # optimize the uops
-    self.uops.uoptimize(self.loop_uops, self.render_ops, self)
+    self.uops.uoptimize()
 
     # maybe graph the uops
     if DEBUG >= 5: self.uops.print()
