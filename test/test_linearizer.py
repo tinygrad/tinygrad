@@ -204,7 +204,7 @@ class TestLinearizer(unittest.TestCase):
                    ConstBuffer(42, dtypes.float, ShapeTracker(views=(View(shape=(), strides=(), offset=0, mask=None, contiguous=True),))))
       ast = LazyOp(BufferOps.STORE, (ast,),
                    MemBuffer(0, dtypes.float, ShapeTracker(views=(View(shape=(), strides=(), offset=0, mask=None, contiguous=True),))))
-      lin = Linearizer(ast=ast) # this is a dummy ast
+      lin = Linearizer(ast) # this is a dummy ast
 
       lin.uops = UOpGraph()
       return lin.uops.add(uop, dtype, vin, arg, cachable=False)
