@@ -3,7 +3,7 @@ import functools, math, operator
 from typing import List, Set, Optional, Tuple, Any, Dict, DefaultDict, Callable, cast
 from collections import defaultdict
 from tinygrad.helpers import DEBUG, flatten, all_same
-from tinygrad.dtype import dtypes, DType, cast_scalar
+from tinygrad.dtype import dtypes, DType
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.shape.symbolic import sint, Variable, Node, NumNode
 from enum import Enum, auto
@@ -94,7 +94,7 @@ class UOpGraph:
         if arg is TernaryOps.WHERE and vin[1] == vin[2]: return vin[1] # a conditional with the same results either way is a noop
         if arg is TernaryOps.WHERE and vin[0].uop is UOps.CONST: return vin[1] if vin[0].arg else vin[2]
         if all(x.uop is UOps.CONST for x in vin):
-          return self.add(UOps.CONST, dtype, arg=exec_alu(arg, dtype, [cast_scalar(x.arg, dtype) for x in vin]), insert_before=insert_before)
+          return self.add(UOps.CONST, dtype, arg=exec_alu(arg, dtype, [x.arg for x in vin]), insert_before=insert_before)
         # zero folding
         for x in [0,1]:
           if arg is BinaryOps.ADD and vin[x].uop is UOps.CONST and vin[x].arg == 0.0: return vin[1-x]
