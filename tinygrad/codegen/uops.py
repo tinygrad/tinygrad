@@ -192,12 +192,9 @@ class UOpGraph:
       else: raise RuntimeError("unhandled alu")
     def to_symbolic(u: UOp):
       if u.uop == UOps.CONST: return NumNode(int(u.arg))
-      elif u.uop == UOps.LOOP:
-        seen_vars[name:="loop{}".format(len(seen_vars))] = u
-        return Variable(name, u.vin[0].arg, u.vin[1].arg - 1)
-      elif u.uop == UOps.SPECIAL:
-        seen_vars[name:="loop{}".format(len(seen_vars))] = u
-        return Variable(name, 0, u.arg[2]-1)
+      elif u.uop in {UOps.LOOP, UOps.SPECIAL}:
+        seen_vars[name:=("loop{}".format(len(seen_vars)))] = u
+        return Variable(name, u.vin[0].arg, u.vin[1].arg-1) if u.uop is UOps.LOOP else Variable(name, 0, u.arg[2]-1)
       elif u.uop == UOps.ALU and u.arg == BinaryOps.ADD: return to_symbolic(u.vin[0]) + to_symbolic(u.vin[1])
       elif u.uop == UOps.ALU and u.arg == BinaryOps.MUL: return to_symbolic(u.vin[0]) * to_symbolic(u.vin[1])
       else: raise RuntimeError("unhandled op: {}".format(u))
@@ -211,13 +208,13 @@ class UOpGraph:
     def const(x): return self.add(UOps.CONST, dtypes.default_int, tuple(), x)
     def neg(x): return self.add(UOps.ALU, dtypes.default_int, (x,), UnaryOps.NEG)
     def max(x, y): return self.add(UOps.ALU, dtypes.default_int, (x, y), BinaryOps.MAX)
-    def uop_alu_idx(a: UOp, b, op, dtype=dtypes.int32):
-      render_b: UOp = cast(UOp, (NumNode(b) if not isinstance(b, Node) else b).render(render_ops))
-      return self.add(UOps.ALU, dtype, (a, render_b), op)
     render_ops = {Variable: lambda self, ops, _: seen_vars[self.expr], NumNode: lambda self, ops, _: const(self.b),
                   MulNode: lambda self, ops, _: uop_alu_idx(self.a.render(ops, self), self.b, BinaryOps.MUL),
                   DivNode: lambda self, ops, _: uop_alu_idx(self.a.render(ops, self), self.b, BinaryOps.DIV),
                   SumNode: lambda self, ops, _: functools.reduce(lambda a, b: uop_alu_idx(a, b, BinaryOps.ADD), self.nodes[1:], self.nodes[0].render(ops, self))}
+    def uop_alu_idx(a: UOp, b, op, dtype=dtypes.default_int):
+      render_b: UOp = cast(UOp, (NumNode(b) if not isinstance(b, Node) else b).render(render_ops))
+      return self.add(UOps.ALU, dtype, (a, render_b), op)
 
     allowed_ops = {UOps.CONST, UOps.SPECIAL, UOps.ALU, UOps.LOOP, UOps.DEFINE_ACC}
     allowed_alus = {BinaryOps.MUL, BinaryOps.ADD, BinaryOps.CMPLT, TernaryOps.WHERE}
