@@ -193,7 +193,8 @@ class UOpGraph:
     def to_symbolic(u: UOp):
       if u.uop == UOps.CONST: return NumNode(int(u.arg))
       elif u.uop in {UOps.LOOP, UOps.SPECIAL}:
-        seen_vars[name:=("loop{}".format(len(seen_vars)))] = u
+        name = "loop{}".format(len(seen_vars))
+        seen_vars[name] = u
         return Variable(name, u.vin[0].arg, u.vin[1].arg-1) if u.uop is UOps.LOOP else Variable(name, 0, u.arg[2]-1)
       elif u.uop == UOps.ALU and u.arg == BinaryOps.ADD: return to_symbolic(u.vin[0]) + to_symbolic(u.vin[1])
       elif u.uop == UOps.ALU and u.arg == BinaryOps.MUL: return to_symbolic(u.vin[0]) * to_symbolic(u.vin[1])
