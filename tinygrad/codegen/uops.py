@@ -107,7 +107,11 @@ class UOpGraph:
     key = (uop, dtype, vin, arg)
     if insert_before is None: insert_before = len(self.uops)
     # check if the cached expr is valid with the given insert place.
-    if cachable and (expr:=self.saved_exprs.get(key, None)) is not None and self.uops.index(expr) <= insert_before: return expr
+    try:
+      if cachable and (expr:=self.saved_exprs.get(key, None)) is not None and self.uops.index(expr) <= insert_before: return expr
+    except ValueError:
+      # this happens if self.uops.index because the UOp was deleted
+      pass
     ret = UOp(uop, dtype, vin, arg)
     self.uops.insert(insert_before, ret)
     if cachable: self.saved_exprs[key] = ret
