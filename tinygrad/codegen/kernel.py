@@ -72,6 +72,7 @@ class Kernel:
                          LinearizerOptions(Device.DEFAULT))
     assert all(op.op is BufferOps.STORE for op in ast), f"kernels must have stores as the output, got {ast}"
     assert len(set(op.arg.st.size for op in ast)) == 1, f"all outbufs should have the same size, got {[op.arg.st for op in ast]}"
+    assert len(ast) == 1, "max one output per kernel"
     self.ast = ast[0]
 
     # fetch lazyop info
