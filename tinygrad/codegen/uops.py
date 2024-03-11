@@ -185,7 +185,7 @@ class UOpGraph:
     self.uops.remove(old)
 
   def simplify_phi_loops(self, get_recursive_parents):
-    seen_vars: Dict[str, op] = {}
+    seen_vars: Dict[str,UOp] = {}
     def alu_opposite(arg, x, y):
       if arg == BinaryOps.ADD: return x - y
       elif arg == BinaryOps.MUL: return Node.__floordiv__(x, y, False)
@@ -211,7 +211,8 @@ class UOpGraph:
     render_ops = {Variable: lambda self, ops, _: seen_vars[self.expr], NumNode: lambda self, ops, _: const(self.b),
                   MulNode: lambda self, ops, _: uop_alu_idx(self.a.render(ops, self), self.b, BinaryOps.MUL),
                   DivNode: lambda self, ops, _: uop_alu_idx(self.a.render(ops, self), self.b, BinaryOps.DIV),
-                  SumNode: lambda self, ops, _: functools.reduce(lambda a, b: uop_alu_idx(a, b, BinaryOps.ADD), self.nodes[1:], self.nodes[0].render(ops, self))}
+                  SumNode: lambda self, ops, _:
+                  functools.reduce(lambda a, b: uop_alu_idx(a, b, BinaryOps.ADD), self.nodes[1:], self.nodes[0].render(ops, self))}
     def uop_alu_idx(a: UOp, b, op, dtype=dtypes.default_int):
       render_b: UOp = cast(UOp, (NumNode(b) if not isinstance(b, Node) else b).render(render_ops))
       return self.add(UOps.ALU, dtype, (a, render_b), op)
