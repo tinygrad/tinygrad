@@ -238,7 +238,7 @@ class Compiled:
     ops, mem = k.uops.flops_mem()
     run_count = prod((k.global_size if k.global_size else []) + (k.local_size if k.local_size else []))
     # NOTE: we use min here to ignore the indexing FLOPS
-    ret = CompiledASTRunner(k.name, self.compiler.render(to_function_name(k.name), k.uops.uops), self, k.global_size, k.local_size,
+    ret = CompiledASTRunner(k.name, self.compiler.render(to_function_name(k.name), k.uops), self, k.global_size, k.local_size,
                             k.uops.vars(), min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))
     return ret
 
@@ -248,16 +248,16 @@ class Compiled:
       from tinygrad.features.graph import print_tree
       print_tree(ast)
     from tinygrad.codegen.linearizer import Linearizer
-    k = Linearizer(ast, self.compiler.linearizer_opts)
+    k = Linearizer(ast, opts=self.compiler.linearizer_opts)
     k.required_optimizations()
     if not NOOPT:
       if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
       if BEAM >= 1:
         lins = [(("tc" if used_tensor_cores else "hc"), k)]
         if used_tensor_cores:
-          lins.append(("hc", Linearizer(ast, self.compiler.linearizer_opts)))
+          lins.append(("hc", Linearizer(ast, opts=self.compiler.linearizer_opts)))
           lins[-1][1].hand_coded_optimizations()
-        kb = Linearizer(ast, self.compiler.linearizer_opts)
+        kb = Linearizer(ast, opts=self.compiler.linearizer_opts)
         kb.required_optimizations()
         from tinygrad.features.search import beam_search, time_linearizer, bufs_from_lin
         test_rawbuffers = bufs_from_lin(kb)    # allocate scratch buffers for optimization

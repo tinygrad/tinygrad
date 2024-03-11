@@ -4,6 +4,7 @@ from collections import defaultdict
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op
 from tinygrad.dtype import dtypes, DType, PtrDType, INVERSE_DTYPES_DICT
+from tinygrad.codegen.uops import UOpGraph
 
 def float_to_hex(x): return "%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
 def double_to_hex(x): return "%02X%02X%02X%02X%02X%02X%02X%02X" % tuple(struct.pack("d",x)[::-1])
@@ -35,10 +36,36 @@ class AssemblyLanguage(NamedTuple):
 
   def render_kernel(self, kernel, function_name, bufs, regs) -> str: raise NotImplementedError()
 
-def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> str:
-  local_size: List[int] = []
+def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
   kernel:List[str] = []
   bufs = []
+
+  # here we do a pretransform on UOps to fix some shortcomings of PTX
+  # all uops must be a register
+  # TODO: uops class should make these rewrites easier
+  replace: Dict[UOp, UOp] = {}
+  for u in uops:
+    for o,n in replace.items():
+      if o in u.vin and u is not n:
+        u.vin = tuple(n if x == o else x for x in u.vin)
+    if u.uop is UOps.LOAD and u.dtype is dtypes.bool:
+      # rewrite load bool
+      if len(u.vin) == 4:
+        new = uops.add(UOps.CAST, dtypes.uint8, (u.vin[3],), insert_before=uops.uops.index(u))
+        u.vin = u.vin[0:3] + (new,)
+      u.dtype = dtypes.uint8
+      new = uops.add(UOps.CAST, dtypes.bool, (u,), insert_before=uops.uops.index(u)+1)
+      replace[u] = new
+    if u.uop is UOps.ALU and u.arg in {BinaryOps.CMPEQ, BinaryOps.CMPLT} and u.vin[0].dtype is dtypes.bool:
+      if u.arg == BinaryOps.CMPEQ:
+        u.arg = BinaryOps.XOR
+        new = uops.add(UOps.ALU, dtypes.bool, (u,), arg=UnaryOps.NEG, insert_before=uops.uops.index(u)+1)
+        replace[u] = new
+      if u.arg == BinaryOps.CMPLT:
+        new = uops.add(UOps.ALU, dtypes.bool, (u.vin[0],), arg=UnaryOps.NEG, insert_before=uops.uops.index(u))
+        u.vin = (new, u.vin[1])
+        u.arg = BinaryOps.MUL
+  #uops.print()
 
   def kk(*s: str): kernel.append("\n".join(s))
 
@@ -78,12 +105,12 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> str
       assert vin[0].dtype is not None
       kk(*lang.render_bra(lb:=ssa_label(u, 'if'), cast(r[vin[0]], dtypes.bool, vin[0].dtype, u=u, pred=True), f"{lb}_true"), f"{lb}_true:")
     elif uop == UOps.BARRIER and lang.barrier: kk(lang.barrier)
-    elif uop == UOps.END:
-      if vin[0].uop == UOps.LOOP:
-        kk(lang.asm_for_op[BinaryOps.ADD](r[vin[0]], r[vin[0]], "1", dtypes.int, lang.types[dtypes.int]),
-           lang.asm_for_op[BinaryOps.CMPLT](pred:=ssa(None, "pred", "pred"), r[vin[0]], r[vin[0].vin[1]], dtypes.int, lang.types[dtypes.int]))
-        kk(*lang.render_bra(r_label[vin[0]], pred, f"{r_label[vin[0]]}_exit"), f"{r_label[vin[0]]}_exit:")
-      else: kk(f"{r_label[vin[0]]}:")
+    elif uop == UOps.ENDLOOP:
+      kk(lang.asm_for_op[BinaryOps.ADD](r[vin[0]], r[vin[0]], "1", dtypes.int, lang.types[dtypes.int]),
+          lang.asm_for_op[BinaryOps.CMPLT](pred:=ssa(None, "pred", "pred"), r[vin[0]], r[vin[0].vin[1]], dtypes.int, lang.types[dtypes.int]))
+      kk(*lang.render_bra(r_label[vin[0]], pred, f"{r_label[vin[0]]}_exit"), f"{r_label[vin[0]]}_exit:")
+    elif uop == UOps.ENDIF:
+      kk(f"{r_label[vin[0]]}:")
     elif uop == UOps.STORE:
       assert vin[0].dtype is not None and vin[1].dtype is not None and vin[2].dtype is not None
       kk(*lang.render_gep(loc:=ssa(None,'loc','u64'), r[vin[0]], r[vin[1]], vin[0].dtype))
@@ -97,21 +124,14 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> str
       elif uop == UOps.ALU:
         assert vin[0].dtype is not None
         if args == BinaryOps.CMPLT or args == BinaryOps.CMPEQ:
-          regs = [cast(r[x], dtypes.int16, dtypes.bool) if x.dtype == dtypes.bool else r[x] for x in vin]
-          dt = dtypes.int16 if vin[0].dtype == dtypes.bool else vin[0].dtype
-          kk(lang.asm_for_op[args](pred:=ssa(u,'lt','pred'), *regs, dt, lang.types[dt]))
-        elif args == TernaryOps.MULACC:
-          assert vin[1].dtype is not None
-          kk(lang.asm_for_op[args](ssa(u, 'alu'), *[r[x] for x in vin], dtype, lang.types[vin[1].dtype]))
-        else: kk(lang.asm_for_op[args](ssa(u, "alu"), *[r[x] for x in vin], dtype, lang.types[dtype]))
+          # pass in the other dtype here
+          kk(lang.asm_for_op[args](ssa(u, "alu"), *[r[x] for x in vin], vin[0].dtype, lang.types[vin[0].dtype]))
+        else:
+          kk(lang.asm_for_op[args](ssa(u, "alu"), *[r[x] for x in vin], dtype, lang.types[dtype]))
       elif uop == UOps.DEFINE_ACC: kk(f"mov.b{lang.types[dtype][1:]} {ssa(u, 'acc')}, {const(args, dtype)};")
       elif uop == UOps.SPECIAL:
-        if args[1][0] == "i": kk(f"mov.u32 %{args[1]}, {lang.gid[args[0]]};", f"mov.u32 {(gdim:=ssa(None,'tmp','u32'))}, {lang.gdim[args[0]]};",
-                                f"mov.u32 {(lid:=ssa(None,'tmp','u32'))}, {lang.lid[args[0]]};",
-                                f"mad.lo.u32 {(tmp:=ssa(None, 'tmp', 'u32'))}, %{args[1]}, {gdim}, {lid};")
-        else: kk(f"mov.u32 {(tmp:=ssa(None, 'tmp', 'u32'))}, {(lang.gid if args[1][0] == 'g' else lang.lid)[args[0]]};")
-        kk(*lang.render_cast(f"%{args[1]}", tmp, dtypes.uint, dtypes.int))
-        if args[1][0] == "l": local_size.append(args[2])
+        assert args[1][0] != "i", "idx not supported"
+        kk(f"mov.u32 %{args[1]}, {(lang.gid if args[1][0] == 'g' else lang.lid)[args[0]]};")
         r[u] = "%" + args[1]
         kernel = [f".reg .u32 %{args[1]};"] + kernel
       elif uop == UOps.CONST: r[u] = const(args, dtype, mov=True)
@@ -132,13 +152,21 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> str
       elif uop == UOps.CAST:
         assert vin[0].dtype is not None
         cast(r[vin[0]], dtype, vin[0].dtype, bitcast=isinstance(args, tuple) and args[1], u=u)
-      elif uop == UOps.DEFINE_LOCAL: kk(*lang.render_local(ssa(u, 'local', lang.types[dtypes.ulong]), args[0], args[1], dtype))
-      elif uop == UOps.DEFINE_GLOBAL:
-        bufs.append((args, dtype))
-        r[u] = f"%{args}"
+      elif uop == UOps.DEFINE_LOCAL:
+        # TODO: we should sum these, and fetch 0xC000 from somewhere
+        assert args[1]*dtype.itemsize <= 0xC000, "too large local"
+        kk(*lang.render_local(ssa(u, 'local', lang.types[dtypes.ulong]), args[0], args[1], dtype))
+      elif uop is UOps.DEFINE_VAR:
+        bufs.append((args.expr, dtype))
+        r[u] = f"%{args.expr}"
+        if lang.load_global:
+          kk(*lang.render_load(args.expr, ssa(u, 'dat', dtype=lang.types[dtype]), dtype, ss=".param"))
+      elif uop is UOps.DEFINE_GLOBAL:
+        bufs.append((args[1], dtype))
+        r[u] = f"%{args[1]}"
         if lang.load_global:
           dt = dtypes.ulong if dtype.__class__ == PtrDType else dtype
-          kk(*lang.render_load(args, ssa(u, 'dat', dtype=lang.types[dt]), dt, ss=".param"))
+          kk(*lang.render_load(args[1], ssa(u, 'dat', dtype=lang.types[dt]), dt, ss=".param"))
       else: raise NotImplementedError(f"no code for {uop}")
 
   return lang.render_kernel(kernel, function_name, bufs, c.items())
@@ -156,24 +184,22 @@ class PTXLanguage(AssemblyLanguage):
   gdim = [f'%nctaid.{chr(120+i)}' for i in range(3)]
   lid = [f'%tid.{chr(120+i)}' for i in range(3)]
   asm_for_op = {
-    UnaryOps.NEG: lambda d,a,dt,name: f"neg.{name} {d}, {a};",
+    UnaryOps.NEG: lambda d,a,dt,name: f"not.pred {d}, {a};" if name == "pred" else f"neg.{name} {d}, {a};",
     UnaryOps.EXP2: lambda d,a,dt,name: f"ex2.approx.{name} {d}, {a};", UnaryOps.LOG2: lambda d,a,dt,name: f"lg2.approx.{name} {d}, {a};",
     UnaryOps.SIN: lambda d,a,dt,name: f"sin.approx.{name} {d}, {a};",
     UnaryOps.SQRT: lambda d,a,dt,name: f"sqrt.approx.{name} {d}, {a};",
     BinaryOps.ADD: lambda d,a,b,dt,name: f"{'or' if name == 'pred' else 'add'}.{name} {d}, {a}, {b};",
     BinaryOps.SUB: lambda d,a,b,dt,name: f"sub.{name} {d}, {a}, {b};",
     BinaryOps.MUL: lambda d,a,b,dt,name: ('and' if dt == dtypes.bool else 'mul') + f"{'.lo' if dtypes.is_int(dt) else ''}.{name} {d}, {a}, {b};",
-    BinaryOps.XOR: lambda d,a,b,dt,name: f"xor.b{name[1:]} {d}, {a}, {b};",
+    BinaryOps.XOR: lambda d,a,b,dt,name: f"xor.pred {d}, {a}, {b};" if name == "pred" else f"xor.b{name[1:]} {d}, {a}, {b};",
     BinaryOps.DIV: lambda d,a,b,dt,name: f"div{'.approx' if dtypes.is_float(dt) else ''}.{name} {d}, {a}, {b};",
     BinaryOps.MAX: lambda d,a,b,dt,name: f"max.{name} {d}, {a}, {b};", BinaryOps.MOD: lambda d,a,b,dt,name: f"rem.{name} {d}, {a}, {b};",
     BinaryOps.CMPLT: lambda d,a,b,dt,name: f"setp.lt.{name} {d}, {a}, {b};",
     BinaryOps.CMPEQ: lambda d,a,b,dt,name: f"setp.eq.{name} {d}, {a}, {b};",
-    TernaryOps.MULACC: lambda d,a,b,c,dt,name: (('fma.rn' if dtypes.is_float(dt) else 'mad.lo' if a.split('_')[1]==c.split('_')[1] else 'mad.wide') +
-                                                f".{name} {d}, {a}, {b}, {c};"),
-    TernaryOps.WHERE: lambda d,a,b,c,dt,name: f"selp.{name} {d}, {b}, {c}, {a};"
+    TernaryOps.WHERE: lambda d,a,b,c,dt,name:
+      f"@{a} mov.{name} {d}, {b};\n@!{a} mov.{name} {d}, {c};" if name == "pred" else f"selp.{'b16' if name == 'f16' else name} {d}, {b}, {c}, {a};"
   }
-  supports_half = [UnaryOps.NEG, UnaryOps.EXP2, BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPLT,
-                   TernaryOps.MULACC, TernaryOps.WHERE]
+  supports_half = [UnaryOps.NEG, UnaryOps.EXP2, BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPLT, TernaryOps.WHERE]
   types = {
     dtypes.int8: "s16", dtypes.int16: "s16", dtypes.int32: "s32", dtypes.int64: "s64",
     dtypes.uint8: "u16", dtypes.uint16: "u16", dtypes.uint32: "u32", dtypes.uint64: "u64",
@@ -206,14 +232,11 @@ class PTXLanguage(AssemblyLanguage):
   def mem_type(self, dtype): return 's8' if dtype.itemsize == 1 else 'b16' if dtype == dtypes.float16 else self.types[dtype]
 
   def render_load(self, loc, dest, dtype, gate=None, alt=None, ss="") -> List[str]:
+    assert dtype is not dtypes.bool
     ret = []
-    if (byte:=dtype.itemsize == 1): ret.append(f".reg .s8 {dest}_tmp;")
-    if (isbool:= dtype == dtypes.bool): ret.append(f".reg .s16 {dest}_bool;")
     if gate: ret.extend([f"@{gate} ld{ss}.{self.mem_type(dtype)} {dest}, [{loc}];",
-                         f"@!{gate} mov.b{'8' if byte else self.types[dtype][1:]} {dest + ('_tmp' if byte else '')}, {alt};"])
-    else: ret.append(f"ld{ss}.{'s8' if byte else 'b16' if dtype==dtypes.float16 else self.types[dtype]} {dest + ('_tmp' if byte else '')}, [{loc}];")
-    if byte: ret.append(f"cvt.{'s16' if isbool else self.types[dtype]}.s8 {dest + ('_bool' if isbool else '')}, {dest}_tmp;")
-    if isbool: ret.append(f"setp.ne.s16 {dest}, {dest}_bool, {self.render_const(0, dtypes.int16)};")
+                         f"@!{gate} mov.b{self.types[dtype][1:]} {dest}, {alt};"])
+    else: ret.append(f"ld{ss}.{self.mem_type(dtype)} {dest}, [{loc}];")
     return ret
 
   def render_store(self, loc, val, dtype, gate=None, ss="") -> List[str]:

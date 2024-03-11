@@ -35,7 +35,7 @@ class MBConvBlock:
 
   def __call__(self, inputs):
     x = inputs
-    if self._expand_conv:
+    if self._expand_conv is not None:
       x = self._bn0(x.conv2d(self._expand_conv)).swish()
     x = x.conv2d(self._depthwise_conv, padding=self.pad, stride=self.strides, groups=self._depthwise_conv.shape[0])
     x = self._bn1(x).swish()

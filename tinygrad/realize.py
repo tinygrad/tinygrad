@@ -50,7 +50,7 @@ logops = open(getenv("LOGOPS", ""), "a") if getenv("LOGOPS", "") else None
 def run_schedule(schedule:List[ScheduleItem]):
   while len(schedule):
     si = schedule.pop(0)
-    if logops and si.ast.op not in LoadOps: logops.write(str(si.ast)+"\n")
+    if logops and si.ast.op not in LoadOps and not any(i.device.startswith("DISK:") for i in si.inputs): logops.write(str(si.ast)+"\n")
 
     # get the program
     prg = lower_schedule_item(si)
