@@ -217,6 +217,26 @@ class TestLinearizer(unittest.TestCase):
     assert helper_test_simplify(UOps.ALU, dtypes.float, vin=(UOp(UOps.CONST, dtypes.bool, vin=(), arg=True), c0, c1),
                                 arg=TernaryOps.WHERE).arg == c0.arg
 
+  def test_phi_simplification(self):
+    def helper(t, max_ops=0):
+      sched = create_schedule([t.lazydata])
+      assert len(sched) == 1
+      k = Linearizer(sched[0].ast)
+      k.hand_coded_optimizations()
+      uops = list(k.linearize().uops)
+      # ignore kernel optimized IF/LOOP statements for now
+      if if_op:=next((u for u in uops if u.uop is UOps.IF), None):
+        uops = uops[:uops.index(if_op)]
+      assert len(set([u.uop for u in uops if u.uop in {UOps.LOOP, UOps.SPECIAL}])) == 1, "has either specials or loops, not both"
+      assert len([u for u in uops if u.uop == UOps.PHI]) == 0, "PHI should have been simplified"
+      assert len([u for u in uops if u.arg == BinaryOps.MAX]) <= max_ops, "no unnecessary MAX ops"
+
+    helper(Tensor.arange(5.5, (3.5*300), 3.5))
+    helper(Tensor.arange(-1, -100, -5))
+    helper(Tensor.arange(-3.2, 6.7, 0.64))
+    helper(Tensor.arange(256), max_ops=2)
+    helper(Tensor.arange(255), max_ops=0)
+
 def helper_realized_ast(r:Tensor):
   s = create_schedule([r.lazydata])
   run_schedule(s[:-1])  # run all kernels except the last one

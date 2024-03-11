@@ -5,7 +5,7 @@ from collections import defaultdict
 from tinygrad.helpers import DEBUG, flatten, all_same
 from tinygrad.dtype import dtypes, DType
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
-from tinygrad.shape.symbolic import sint, Variable
+from tinygrad.shape.symbolic import sint, Variable, Node, NumNode, MulNode, DivNode, SumNode
 from enum import Enum, auto
 from dataclasses import dataclass
 
@@ -180,6 +180,92 @@ class UOpGraph:
               break
     self.uops = flatten(loop_stack)
 
+  def replace_op(self, old, new):
+    for v in self.uops: v.vin = tuple(new if x is old else x for x in v.vin)
+    self.uops.remove(old)
+
+  def simplify_phi_loops(self, get_recursive_parents):
+    def alu_opposite(arg, x, y):
+      if arg == BinaryOps.ADD: return x - y
+      elif arg == BinaryOps.MUL: return Node.__floordiv__(x, y, False)
+      else: raise RuntimeError("unhandled alu")
+    def to_symbolic(u: UOp):
+      if u.uop == UOps.CONST: return NumNode(int(u.arg))
+      elif u.uop in {UOps.LOOP, UOps.SPECIAL}:
+        if u not in seen_vars: seen_vars[u] = u.arg[1] if u.uop is UOps.SPECIAL else "loop{}".format(len(seen_vars))
+        return Variable(seen_vars[u], u.vin[0].arg, u.vin[1].arg-1) if u.uop is UOps.LOOP else Variable(seen_vars[u], 0, u.arg[2]-1)
+      elif u.uop == UOps.ALU and u.arg == BinaryOps.ADD: return to_symbolic(u.vin[0]) + to_symbolic(u.vin[1])
+      elif u.uop == UOps.ALU and u.arg == BinaryOps.MUL: return to_symbolic(u.vin[0]) * to_symbolic(u.vin[1])
+      else: raise RuntimeError("unhandled op: {}".format(u))
+    def loop_factor(with_loop: UOp, factored: Node, loop_op, round_up=False):
+      if with_loop == loop_op: return factored
+      elif with_loop.uop is UOps.ALU:
+        next_with_loop = next(v for v in with_loop.vin if v == loop_op or loop_op in get_recursive_parents(v))
+        non_loop = to_symbolic(next(v for v in with_loop.vin if v != next_with_loop and loop_op not in get_recursive_parents(v)))
+        if round_up and with_loop.arg is BinaryOps.MUL: factored = factored + (non_loop - 1)
+        return loop_factor(next_with_loop, alu_opposite(with_loop.arg, factored, non_loop), loop_op)
+    def const(x): return self.add(UOps.CONST, dtypes.default_int, tuple(), x)
+    def neg(x): return self.add(UOps.ALU, dtypes.default_int, (x,), UnaryOps.NEG)
+    def max(x, y): return self.add(UOps.ALU, dtypes.default_int, (x, y), BinaryOps.MAX)
+    def uop_alu_idx(a: UOp, b, op, dtype=dtypes.default_int):
+      render_b: UOp = cast(UOp, (NumNode(b) if not isinstance(b, Node) else b).render(render_ops))
+      return self.add(UOps.ALU, dtype, (a, render_b), op)
+    seen_vars: Dict[UOp,str] = {}
+    render_ops = {Variable: lambda self, ops, _: next(op for op, name in seen_vars.items() if name == self.expr),
+                  NumNode: lambda self, ops, _: const(self.b),
+                  MulNode: lambda self, ops, _: uop_alu_idx(self.a.render(ops, self), self.b, BinaryOps.MUL),
+                  DivNode: lambda self, ops, _: uop_alu_idx(self.a.render(ops, self), self.b, BinaryOps.DIV),
+                  SumNode: lambda self, ops, _:
+                  functools.reduce(lambda a, b: uop_alu_idx(a, b, BinaryOps.ADD), self.nodes[1:], self.nodes[0].render(ops, self))}
+
+    allowed_ops = {UOps.CONST, UOps.SPECIAL, UOps.ALU, UOps.LOOP, UOps.DEFINE_ACC}
+    allowed_alus = {BinaryOps.MUL, BinaryOps.ADD, BinaryOps.CMPLT, TernaryOps.WHERE}
+    for loop_op in reversed([op for op in self.uops if op.uop is UOps.LOOP]):
+      phis = set([u for u in self.get_recursive_children(loop_op) if u.uop is UOps.PHI])
+      wheres = set([u for phi in phis for u in get_recursive_parents(phi) if u.arg == TernaryOps.WHERE])
+      if (any([u.uop not in allowed_ops or (u.uop is UOps.ALU and u.arg not in allowed_alus) for phi in phis for u in get_recursive_parents(phi)])
+        or any([where.vin[2].arg != 0 or where.vin[0].vin[1].uop is not UOps.CONST for where in wheres])
+        or any(len([op for op in get_recursive_parents(where) if op.uop is UOps.LOOP]) == 0 for where in wheres)): continue
+      if DEBUG >= 4 and (len(phis) > 0 or len(wheres) > 0): print("simplified {} PHI and {} WHERE in loop".format(len(phis), len(wheres)))
+      for where in sorted(wheres, key=lambda x: self.uops.index(x)):
+        comp_lt, comp_gt = where.vin[0].vin[0], where.vin[0].vin[1]
+        factored = loop_factor(comp_lt, NumNode(int(comp_gt.arg)), loop_op, round_up=(comp_gt.arg > 0))
+        final_value = factored - NumNode(loop_op.vin[0].arg) if (comp_gt.arg > 0) else NumNode(loop_op.vin[1].arg-1) - factored
+        self.uops, after_split_ops = self.uops[:(where_index:=self.uops.index(where))], self.uops[where_index:]
+        rendered = final_value.render(render_ops)
+        loop_length = loop_op.vin[1].arg - loop_op.vin[0].arg
+        min_clamped = max(rendered, const(0)) if (final_value.min < 0) else rendered
+        max_clamped = neg(max(const(-1*loop_length), neg(min_clamped))) if (final_value.max > loop_length) else min_clamped
+        maybe_cast = self.add(UOps.CAST, where.dtype, (max_clamped,)) if where.dtype != dtypes.default_int else max_clamped
+        final_op = self.add(UOps.ALU, where.dtype, (maybe_cast, where.vin[1]), BinaryOps.MUL)
+        self.uops = self.uops + after_split_ops
+        self.replace_op(where, final_op)
+        get_recursive_parents.cache_clear()
+      for phi in phis:
+        self.replace_op(phi, phi.vin[1])
+        self.uops.remove((accumulator:=phi.vin[0]))
+        for alu_with_accum in [op for op in self.uops if accumulator in op.vin]:
+          self.replace_op(alu_with_accum, next(op for op in alu_with_accum.vin if op != accumulator))
+
+  def uops_optimization(self, get_recursive_parents):
+    for u in self.uops:
+      if u.uop is UOps.PHI and len(u.vin) == 3:
+        # if the parents of the PHI node don't have the LOOP in their parents, it can be folded
+        # TODO: ADD becomes a MUL, MAX can just become nothing
+        # NOTE: ADD -> MUL does not fold, this maintains original MULACC code path
+        if all(x.uop is not UOps.LOOP for x in get_recursive_parents(UOp(u.uop, u.dtype, u.vin[0:2], u.arg))) \
+          and u.vin[1].arg is BinaryOps.ADD and u.vin[1].vin[0].arg is not BinaryOps.MUL:
+          if DEBUG >= 4: print(f"removing PHI node {u}")
+          del self.saved_exprs[(u.uop, u.dtype, u.vin, u.arg)]
+          # NOTE: assuming u.vin[2].vin[1] and u.vin[2].vin[0] have the same dtype
+          loop_len = self.add(UOps.ALU, u.vin[2].vin[1].dtype, (u.vin[2].vin[1], u.vin[2].vin[0]), BinaryOps.SUB,
+                              insert_before=self.uops.index(u))
+          if loop_len.dtype != u.dtype: loop_len = self.add(UOps.CAST, u.dtype, (loop_len,),
+                                                            insert_before=self.uops.index(u))
+          new = self.add(UOps.ALU, u.dtype, (u.vin[1], loop_len,), BinaryOps.MUL, insert_before=self.uops.index(u))
+          self.replace_op(u, new)
+          return True
+
   def uoptimize(self):
     # get PHI node loop scope, link anything using a DEFINE_ACC to the loop as a "parent"
     acc_scope: DefaultDict[UOp, List[UOp]] = defaultdict(list)
@@ -195,26 +281,8 @@ class UOpGraph:
     self.fix_loop_scope(get_recursive_parents)
 
     # uops optimization
-    changed_something = True
-    while changed_something:
-      changed_something = False
-      for u in self.uops:
-        if u.uop is UOps.PHI and len(u.vin) == 3:
-          # if the parents of the PHI node don't have the LOOP in their parents, it can be folded
-          # TODO: ADD becomes a MUL, MAX can just become nothing
-          # NOTE: ADD -> MUL does not fold, this maintains original MULACC code path
-          if all(x.uop is not UOps.LOOP for x in get_recursive_parents(UOp(u.uop, u.dtype, u.vin[0:2], u.arg))) \
-          and u.vin[1].arg is BinaryOps.ADD and u.vin[1].vin[0].arg is not BinaryOps.MUL:
-            if DEBUG >= 4: print(f"removing PHI node {u}")
-            del self.saved_exprs[(u.uop, u.dtype, u.vin, u.arg)]
-            # NOTE: assuming u.vin[2].vin[1] and u.vin[2].vin[0] have the same dtype
-            loop_len = self.add(UOps.ALU, u.vin[2].vin[1].dtype, (u.vin[2].vin[1], u.vin[2].vin[0]), BinaryOps.SUB, insert_before=self.uops.index(u))
-            if loop_len.dtype != u.dtype: loop_len = self.add(UOps.CAST, u.dtype, (loop_len,), insert_before=self.uops.index(u))
-            new = self.add(UOps.ALU, u.dtype, (u.vin[1], loop_len,), BinaryOps.MUL, insert_before=self.uops.index(u))
-            # replace u with new
-            for v in self.uops: v.vin = tuple(new if x is u else x for x in v.vin)
-            self.uops.remove(u)
-            changed_something = True
+    while self.uops_optimization(get_recursive_parents): pass
+    self.simplify_phi_loops(get_recursive_parents)
 
     # (recursively) remove childless uops
     self.remove_childless()
