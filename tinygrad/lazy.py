@@ -13,6 +13,7 @@ lazycache: Dict[Any, ReferenceType[LazyBuffer]] = {}
 def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
                       base:Optional[LazyBuffer]=None, enable_cache=bool(getenv("LAZYCACHE", 1))):
   if st.size == 0 and op not in {LoadOps.SYNC, LoadOps.WAIT}: op, arg, srcs, base = LoadOps.CONST, 0, (), None
+  if op == LoadOps.CONST: enable_cache = True
 
   cache_key = (device, st, dtype, op, arg, tuple(ref(x) for x in srcs)) if base is None else (st, ref(base))
   if (rret := lazycache.get(cache_key, None)): return cast(LazyBuffer, rret())  # NOTE: this should always be a live reference
@@ -48,8 +49,11 @@ class LazyBuffer:
   def base(self) -> LazyBuffer: return self._base if self._base is not None else self
 
   @staticmethod
-  def loadop(op, shape:Tuple[sint,...], dtype:DType, device:str, arg=None, src:Optional[LazyBuffer]=None, enable_cache=False) -> LazyBuffer:
-    return create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype, op, arg, (src,) if src is not None else (), enable_cache=enable_cache)
+  def loadop(op, shape:Tuple[sint,...], dtype:DType, device:str, arg=None,
+             src:Optional[LazyBuffer]=None, enable_cache=False, _buf:Optional[Buffer]=None) -> LazyBuffer:
+    ret = create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype, op, arg, (src,) if src is not None else (), enable_cache=enable_cache)
+    if _buf is not None: ret.realized = _buf
+    return ret
 
   def const(self, val:Scalar, shape:Optional[Tuple[sint,...]]=None) -> LazyBuffer:
     shape = self.shape if shape is None else shape
@@ -120,22 +124,18 @@ class LazyBuffer:
     assert all(0 <= x < len(self.shape) for x in axis), f"axis args {axis} out of range for shape {self.shape}"
     axis = tuple(x for x in axis if self.shape[x] != 1)
     if len(axis) == 0: return self
-    # move all reduces to the end
     new_shape = tuple(1 if i in axis else s for i,s in enumerate(self.shape))
-    permute_order = tuple(x for x in range(len(self.shape)) if x not in axis) + axis
-    return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape).permute(permute_order),
-                             self.dtype, op, tuple(range(len(self.shape)-len(axis), len(self.shape))),
-                             (self.permute(permute_order),)).reshape(new_shape)
+    return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), self.dtype, op, axis, (self,))
 
   def r(self, op:ReduceOps, axis:Tuple[int, ...]) -> LazyBuffer:
     new_shape = tuple(1 if i in axis else s for i,s in enumerate(self.shape))
     # TODO: this logic should move to the scheduler
     if self.size == 0 and 0 not in new_shape: return self.const({ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[op], new_shape)
-    assert len(self.shape)==len(new_shape) and all(ns in (1,s) for s,ns in zip(self.shape,new_shape)), f"not a contraction {self.shape=} {new_shape=}"
     # TODO: can we split symbolic shape if the reduce axis is not symbolic?
     if not all_int(self.shape) or (0 in self.shape) or prod(self.shape) // prod(new_shape) < getenv("REDUCEOP_SPLIT_THRESHOLD", 32768):
       return self._reduce_op(op, axis)
-    heuristic, divisor, dim_to_split = max(((divisor := math.gcd(256, old))/(stride or math.inf), divisor, i) for i, (old, new, stride) in enumerate(zip(self.shape, new_shape, self.st.real_strides())) if old != new) # type: ignore  # noqa: E501
+    heuristic, divisor, dim_to_split = max(((divisor := math.gcd(256, s))/(st or math.inf), divisor, i) for i,(s,st) in \
+                                           enumerate(zip(self.shape, self.st.real_strides())) if i in axis and (st is None or isinstance(st, int)))
     if divisor < 16 or heuristic < 0.1: return self._reduce_op(op, axis)
     # choose largest divisor (>=16) to split on, penalize large strides
     def splitted_shape(dim_aft_div):
@@ -145,7 +145,8 @@ class LazyBuffer:
   # *** movement ops ***
 
   def _view(self, new_st:ShapeTracker) -> LazyBuffer:
-    if self.st.size == 0: return self.const(0, new_st.shape)
+    if self.st.size == 0 or (new_st.views[-1].mask is not None and all((x[1]-x[0]) == 0 for x in new_st.views[-1].mask)):
+      return self.const(0, new_st.shape)
     if new_st.contiguous and self.base.shape == new_st.shape: return self.base
     return create_lazybuffer(self.device, new_st, self.dtype, base=self.base)
 

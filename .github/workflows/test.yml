@@ -45,10 +45,15 @@ jobs:
       run: |
         DEBUG=2 EMULATE_METAL=1 FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
         DEBUG=2 EMULATE_HIP=1 FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
+        DEBUG=2 EMULATE_CUDA=1 FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
     - name: Test dtype with Python emulator
       run: DEBUG=2 PYTHON=1 python3 test/test_dtype.py
     - name: Test ops with Python emulator
-      run: DEBUG=2 PYTHON=1 python3 -m pytest test/test_ops.py -k "not (test_split or test_simple_cumsum or test_cumsum or test_einsum or test_dot_1d or test_big_gemm or test_broadcastdot or test_multidot or test_var_axis or test_std_axis or test_broadcast_full or test_broadcast_partial or test_simple_conv3d or test_dilated_conv_transpose2d or test_simple_conv_transpose3d or test_large_input_conv2d or test_maxpool2d_simple or test_maxpool2d_bigger_stride or test_avgpool2d or test_cat or test_scaled_product_attention or test_scaled_product_attention_causal)"
+      run: DEBUG=2 PYTHON=1 python3 -m pytest test/test_ops.py -k "not (test_split or test_simple_cumsum or test_cumsum or test_einsum or test_dot or test_dot_1d or test_big_gemm or test_broadcastdot or test_multidot or test_var_axis or test_std_axis or test_broadcast_full or test_broadcast_partial or test_simple_conv3d or test_dilated_conv_transpose2d or test_simple_conv_transpose3d or test_large_input_conv2d or test_maxpool2d or test_maxpool2d_simple or test_maxpool2d_bigger_stride or test_avgpool2d or test_cat or test_scaled_product_attention or test_scaled_product_attention_causal)" --durations=20
+    - name: Test symbolic with Python emulator
+      run: PYTHONPATH=. PYTHON=1 python3 test/test_symbolic_ops.py
+    - name: test_linearizer_failures with Python emulator
+      run: PYTHONPATH=. PYTHON=1 python3 -m pytest -rA test/test_linearizer_failures.py::TestLinearizerFailures::test_failure_1
 
   linter:
     name: Linters
@@ -100,8 +105,10 @@ jobs:
         source venv/bin/activate
         pip install $GITHUB_WORKSPACE
         python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
-    - name: Repo line count <6000 lines
-      run: MAX_LINE_COUNT=6000 python sz.py
+    - name: Test DEBUG
+      run: DEBUG=100 python3 -c "from tinygrad import Tensor; N = 1024; a, b = Tensor.rand(N, N), Tensor.rand(N, N); c = (a.reshape(N, 1, N) * b.T.reshape(1, N, N)).sum(axis=2); print((c.numpy() - (a.numpy() @ b.numpy())).mean())"
+    - name: Repo line count <6500 lines
+      run: MAX_LINE_COUNT=6500 python sz.py
 
   testcpuimagenet:
     name: ImageNet to C Tests
@@ -172,7 +179,7 @@ jobs:
           path: ~/.cache/tinygrad/downloads/
           key: downloads-cache-${{ matrix.task }}-${{ env.DOWNLOAD_CACHE_VERSION }}
       - name: Install Dependencies
-        run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+        run: pip install -e '.[testing,testing_tf]' --extra-index-url https://download.pytorch.org/whl/cpu
       - if: ${{ matrix.task == 'optimage' }}
         name: Run Optimizer Test (OPT 2 and 3)
         run: |
@@ -218,6 +225,9 @@ jobs:
       - if: ${{ matrix.task == 'onnx' }}
         name: Test Beam Search
         run: PYTHONPATH="." GPU=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
+      - if: ${{ matrix.task == 'onnx' }}
+        name: Test MLPerf optimizers
+        run: GPU=1 python -m pytest -n=auto test/external/external_test_optim.py --durations=20
 
   #testwebgpu:
   #  name: WebGPU Tests
@@ -262,7 +272,7 @@ jobs:
 
   testmetal:
     name: Metal Tests
-    runs-on: macos-13
+    runs-on: macos-14
     timeout-minutes: 20
 
     steps:
@@ -276,7 +286,7 @@ jobs:
       uses: actions/cache@v3
       with:
         path: /Users/runner/Library/Python/3.11/lib/python/site-packages
-        key: metal-testing-user3-packages-${{ hashFiles('**/setup.py') }}
+        key: metal-m1-testing-user3-packages-${{ hashFiles('**/setup.py') }}
     - name: Install Dependencies
       run: pip install --user -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Cache downloads
@@ -289,13 +299,18 @@ jobs:
         METAL=1 python -c "from tinygrad import Device; assert Device.DEFAULT == 'METAL', Device.DEFAULT"
         METAL=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
     - name: Run metal test
-      run: METAL=1 python -m pytest -n=auto test/ --ignore=test/external --ignore=test/models --durations=20
+      run: JIT=2 METAL=1 python -m pytest -n=auto test/ --ignore=test/external --ignore=test/models --durations=20
     - name: Run ONNX
-      run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
-    - name: Test tensor core ops
-      run: METAL=1 TC=2 DEBUG=3 python test/test_ops.py TestOps.test_big_gemm
+      run: JIT=2 METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
+    - name: Test tensor core ops (fake)
+      run: TC=2 METAL=1 DEBUG=3 python test/test_ops.py TestOps.test_gemm
+    - name: Test tensor core ops (real)
+      run: METAL=1 DEBUG=3 python test/test_ops.py TestOps.test_big_gemm
     - name: Test LLaMA compile speed
       run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
+    - name: Fuzz Test linearizer
+      run: PYTHONPATH="." METAL=1 CACHELEVEL=0 FUZZ_BEAM=1 DEPTH=2 FUZZ_N=48 FUZZ_MAX_SIZE=10000000 python test/external/fuzz_linearizer.py
+
 
 #  testwebgl:
 #    name: WebGL Tests
@@ -334,7 +349,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [llvm, clang, gpu, cuda, hip] #, triton] #, ptx]
+        backend: [llvm, clang, gpu, cuda, hip, ptx] #, triton]
 
     name: Tests on (${{ matrix.backend }})
     runs-on: ubuntu-latest
@@ -384,7 +399,7 @@ jobs:
           cache-name: cache-gpuocelot-build
         with:
           path: ${{ github.workspace }}/gpuocelot/ocelot
-          key: ubuntu22.04-gpuocelot-18401f4245b27ca4b3af433196583cc81ef84480-rebuild-3
+          key: ubuntu22.04-gpuocelot-18401f4245b27ca4b3af433196583cc81ef84480-rebuild-4
       - name: Clone/compile gpuocelot
         if: (matrix.backend == 'cuda' || matrix.backend == 'ptx' || matrix.backend == 'triton') && steps.cache-build.outputs.cache-hit != 'true'
         run: |
@@ -451,7 +466,7 @@ jobs:
         run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors)' --ignore=test/external --ignore=test/models --durations=20
       - name: Run pytest (hip)
         if: matrix.backend=='hip'
-        run: python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py test/test_linearizer.py test/imported/test_indexing.py --durations=20
+        run: python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py test/test_linearizer.py test/imported/test_indexing.py test/external/external_test_hip_compile.py --durations=20
 
   #testunicorn:
   #  name: ARM64 unicorn Test

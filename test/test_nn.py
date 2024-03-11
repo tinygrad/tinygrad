@@ -11,15 +11,16 @@ class TestNN(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "no int64 on WebGPU")
   def test_sparse_cat_cross_entropy(self):
     # create in tinygrad
-    input = Tensor.randn(3, 5)
-    target = Tensor.randint((3,), low=0, high=4)
-    loss = input.sparse_categorical_crossentropy(target)
-
+    input = Tensor.randn(5, 5)
+    target = Tensor([0, 0, 0, 1, 2])  # torch doesn't support target=-1
     torch_input = torch.tensor(input.numpy())
     torch_target = torch.tensor(target.numpy(), dtype=torch.long)
-    torch_loss = torch.nn.CrossEntropyLoss(reduction='mean')(torch_input, torch_target)
 
-    np.testing.assert_allclose(loss.numpy(), torch_loss.detach().numpy(), atol=1e-5, rtol=1e-6)
+    for smoothing in [0.0, 0.1, 0.5, 1.0]:
+      for ignore_index in [-1, 0, 2]:
+        loss = input.sparse_categorical_crossentropy(target, label_smoothing=smoothing, ignore_index=ignore_index)
+        torch_loss = torch.nn.CrossEntropyLoss(reduction='mean', label_smoothing=smoothing, ignore_index=ignore_index)(torch_input, torch_target)
+        np.testing.assert_allclose(loss.numpy(), torch_loss.detach().numpy(), atol=1e-5, rtol=1e-6)
 
   def test_batchnorm2d(self, training=False):
     with Tensor.train(training):
@@ -61,6 +62,24 @@ class TestNN(unittest.TestCase):
 
   def test_batchnorm2d_training(self):
     self.test_batchnorm2d(True)
+
+  def test_batchnorm_axis(self):
+    sz = (2, 4, 3, 2, 2)
+    x = Tensor.randn(sz)
+    weight = Tensor.randn(2, 3)
+    bias = Tensor.randn(2, 3)
+    mean = Tensor.randn(2, 3)
+    invstd = Tensor.randn(2, 3)
+    a = (x.batchnorm(weight, bias, mean, invstd, axis=(0, 2))
+         .permute(1, 0, 2, 3, 4).reshape(4, 6, 2, 2))
+    b = (x.permute(1, 0, 2, 3, 4).reshape(4, 6, 2, 2)
+         .batchnorm(weight.flatten(), bias.flatten(), mean.flatten(), invstd.flatten()))
+    t_x = torch.tensor(x.permute(1, 0, 2, 3, 4).reshape(4, 6, 2, 2).numpy())
+    t_weight, t_bias = torch.tensor(weight.flatten().numpy()), torch.tensor(bias.flatten().numpy())
+    t_mean, t_invstd = torch.tensor(mean.flatten().numpy()), torch.tensor(invstd.flatten().numpy())
+    torch.nn.functional.batch_norm(t_x, t_mean, 1.0 / t_invstd**2, t_weight, t_bias)
+
+    np.testing.assert_allclose(a.numpy(), b.numpy())
 
   def test_linear(self):
     def _test_linear(x, in_dim, out_dim):

@@ -1,4 +1,4 @@
-import ctypes
+import ctypes, collections
 import tinygrad.runtime.autogen.hsa as hsa
 from tinygrad.helpers import init_c_var
 
@@ -22,10 +22,9 @@ BARRIER_HEADER |= hsa.HSA_FENCE_SCOPE_SYSTEM << hsa.HSA_PACKET_HEADER_SCACQUIRE_
 BARRIER_HEADER |= hsa.HSA_FENCE_SCOPE_SYSTEM << hsa.HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE
 BARRIER_HEADER |= hsa.HSA_PACKET_TYPE_BARRIER_AND << hsa.HSA_PACKET_HEADER_TYPE
 
-class HWQueue:
+class AQLQueue:
   def __init__(self, device, sz=-1):
     self.device = device
-    self.wait_signals = []
 
     check(hsa.hsa_agent_get_info(self.device.agent, hsa.HSA_AGENT_INFO_QUEUE_MAX_SIZE, ctypes.byref(max_queue_size := ctypes.c_uint32())))
     queue_size = min(max_queue_size.value, sz) if sz != -1 else max_queue_size.value
@@ -48,7 +47,7 @@ class HWQueue:
 
   def submit_kernel(self, prg, global_size, local_size, kernargs, need_signal=False):
     if self.available_packet_slots == 0: self._wait_queue()
-    signal = self.device.alloc_signal(reusable=True) if need_signal else EMPTY_SIGNAL
+    signal = self._alloc_signal(reusable=True) if need_signal else EMPTY_SIGNAL
 
     packet = hsa.hsa_kernel_dispatch_packet_t.from_address(self.write_addr)
     packet.workgroup_size_x = local_size[0]
@@ -70,10 +69,10 @@ class HWQueue:
 
     return signal
 
-  def submit_barrier(self, wait_signals=None, need_signal=False):
-    assert wait_signals is None or len(wait_signals) < 5
+  def submit_barrier(self, wait_signals=None, need_signal=False, completion_signal=None):
+    assert wait_signals is None or len(wait_signals) <= 5
     if self.available_packet_slots == 0: self._wait_queue()
-    signal = self.device.alloc_signal(reusable=True) if need_signal else EMPTY_SIGNAL
+    signal = (completion_signal or self._alloc_signal(reusable=True)) if need_signal else EMPTY_SIGNAL
 
     packet = hsa.hsa_barrier_and_packet_t.from_address(self.write_addr)
     packet.reserved0 = 0
@@ -87,13 +86,29 @@ class HWQueue:
 
     return signal
 
+  def blit_packets(self, packet_addr, packet_cnt):
+    if self.available_packet_slots < packet_cnt: self._wait_queue(packet_cnt)
+
+    tail_blit_packets = min(((self.write_addr_end + 1) - self.write_addr) // AQL_PACKET_SIZE, packet_cnt)
+    rem_packet_cnt = packet_cnt - tail_blit_packets
+    ctypes.memmove(self.write_addr, packet_addr, AQL_PACKET_SIZE * tail_blit_packets)
+    self.write_addr += AQL_PACKET_SIZE * tail_blit_packets
+    if self.write_addr > self.write_addr_end: self.write_addr = self.hw_queue.contents.base_address
+    if tail_blit_packets > 0:
+      ctypes.memmove(self.write_addr, packet_addr + AQL_PACKET_SIZE * tail_blit_packets, AQL_PACKET_SIZE * rem_packet_cnt)
+      self.write_addr += AQL_PACKET_SIZE * rem_packet_cnt
+
+    self.next_doorbell_index += packet_cnt
+    hsa.hsa_queue_store_write_index_screlease(self.hw_queue, self.next_doorbell_index + 1)
+    hsa.hsa_signal_store_screlease(self.hw_queue.contents.doorbell_signal, self.next_doorbell_index)
+
   def wait(self):
     signal = self.submit_barrier(need_signal=True)
     hsa.hsa_signal_wait_scacquire(signal, hsa.HSA_SIGNAL_CONDITION_LT, 1, (1 << 64) - 1, hsa.HSA_WAIT_STATE_ACTIVE)
     self.available_packet_slots = self.queue_size
 
-  def _wait_queue(self):
-    while self.available_packet_slots == 0:
+  def _wait_queue(self, need_packets=1):
+    while self.available_packet_slots < need_packets:
       rindex = hsa.hsa_queue_load_read_index_relaxed(self.hw_queue)
       self.available_packet_slots = self.queue_size - (self.next_doorbell_index - rindex)
 
@@ -106,30 +121,25 @@ class HWQueue:
     self.next_doorbell_index += 1
     self.available_packet_slots -= 1
 
+  def _alloc_signal(self, reusable=False): return self.device.alloc_signal(reusable=reusable)
 
-def find_agent(typ, device_id):
+def scan_agents():
+  agents = collections.defaultdict(list)
+
   @ctypes.CFUNCTYPE(hsa.hsa_status_t, hsa.hsa_agent_t, ctypes.c_void_p)
-  def __filter_agents(agent, data):
+  def __scan_agents(agent, data):
     status = hsa.hsa_agent_get_info(agent, hsa.HSA_AGENT_INFO_DEVICE, ctypes.byref(device_type := hsa.hsa_device_type_t()))
-    if status == 0 and device_type.value == typ:
-      ret = ctypes.cast(data, ctypes.POINTER(hsa.hsa_agent_t))
-      if ret[0].handle == device_id:
-        ret[0] = agent
-        return hsa.HSA_STATUS_INFO_BREAK
-      ret[0].handle = ret[0].handle + 1
+    if status == 0: agents[device_type.value].append(agent)
     return hsa.HSA_STATUS_SUCCESS
 
-  hsa.hsa_iterate_agents(__filter_agents, ctypes.byref(agent := hsa.hsa_agent_t()))
-  return agent
+  hsa.hsa_iterate_agents(__scan_agents, None)
+  return agents
 
-def find_memory_pool(agent, segtyp=-1, flags=-1, location=-1):
+def find_memory_pool(agent, segtyp=-1, location=-1):
   @ctypes.CFUNCTYPE(hsa.hsa_status_t, hsa.hsa_amd_memory_pool_t, ctypes.c_void_p)
   def __filter_amd_memory_pools(mem_pool, data):
     check(hsa.hsa_amd_memory_pool_get_info(mem_pool, hsa.HSA_AMD_MEMORY_POOL_INFO_SEGMENT, ctypes.byref(segment := hsa.hsa_amd_segment_t())))
     if segtyp >= 0 and segment.value != segtyp: return hsa.HSA_STATUS_SUCCESS
-
-    check(hsa.hsa_amd_memory_pool_get_info(mem_pool, hsa.HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, ctypes.byref(fgs := hsa.hsa_amd_memory_pool_global_flag_t()))) # noqa: E501
-    if flags >= 0 and (fgs.value & flags) == flags: return hsa.HSA_STATUS_SUCCESS
 
     check(hsa.hsa_amd_memory_pool_get_info(mem_pool, hsa.HSA_AMD_MEMORY_POOL_INFO_LOCATION, ctypes.byref(loc:=hsa.hsa_amd_memory_pool_location_t())))
     if location >= 0 and loc.value != location: return hsa.HSA_STATUS_SUCCESS

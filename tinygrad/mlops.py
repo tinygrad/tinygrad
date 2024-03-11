@@ -32,6 +32,13 @@ class Neg(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer: return x.e(UnaryOps.NEG)
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.e(UnaryOps.NEG)
 
+class Reciprocal(Function):
+  def forward(self, x:LazyBuffer) -> LazyBuffer:
+    self.ret = x.e(UnaryOps.RECIP)
+    return self.ret
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
+    return grad_output.e(UnaryOps.NEG).e(BinaryOps.MUL, self.ret).e(BinaryOps.MUL, self.ret)
+
 class Sin(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
@@ -76,7 +83,7 @@ class Sqrt(Function):
 # TODO: have the backend automatically find this
 class Sigmoid(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = x.const(1).e(BinaryOps.DIV, x.const(1).e(BinaryOps.ADD, x.e(BinaryOps.MUL, x.const(-1/math.log(2))).e(UnaryOps.EXP2)))
+    self.ret = x.const(1).e(BinaryOps.ADD, x.e(BinaryOps.MUL, x.const(-1/math.log(2))).e(UnaryOps.EXP2)).e(UnaryOps.RECIP)
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:

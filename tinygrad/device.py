@@ -40,7 +40,9 @@ Device = _Device()
 # **************** base Runner + helpers ****************
 
 class JITRunner:
-  def __init__(self): self.op_estimate, self.mem_estimate = 0, 0
+  def __init__(self):
+    self.op_estimate:sint = 0
+    self.mem_estimate:sint = 0
   def exec(self, rawbufs:List[Buffer], var_vals:Optional[Dict[Variable, int]]=None) -> Optional[float]:
     var_vals = var_vals if var_vals is not None else {}
     from tinygrad.features.jit import CacheCollector
@@ -185,7 +187,8 @@ class Compiler:
     return lib
 
 class CompiledASTRunner(JITRunner):
-  def __init__(self, ast:Optional[LazyOp], name:str, prg:str, device:Compiled, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, precompiled:Optional[bytes]=None):  # noqa: E501
+  def __init__(self, name:str, prg:str, device:Compiled, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None,
+               variables:Optional[List[Variable]]=None, op_estimate:sint=0, mem_estimate:sint=0, precompiled:Optional[bytes]=None):
     super().__init__()
     if DEBUG >= 4: print(prg)
     if global_size is not None: global_size = global_size + [1]*(3-len(global_size))
@@ -195,12 +198,8 @@ class CompiledASTRunner(JITRunner):
     assert self.device.compiler is not None, "compiler is reuired to make an AST kernel"
     lib:bytes = precompiled if precompiled is not None else self.device.compiler.compile_cached(prg)
     self.lib, self.clprg = lib, self.device.runtime(self.name, lib)
-    self.vars: List[Variable] = []
-    if ast:
-      info = get_lazyop_info(ast)
-      self.op_estimate, self.mem_estimate = info.flops, info.mem_estimate
-      self.vars = ast.vars()
-      assert all(v._val is None for v in self.vars), f"ASTRunner contains bound Variable {self.vars}"
+    self.vars: List[Variable] = [] if variables is None else variables
+    self.op_estimate, self.mem_estimate = op_estimate, mem_estimate
 
   def launch_dims(self, var_vals):
     global_size = [sym_infer(sz, var_vals) for sz in self.global_size] if self.global_size is not None else self.global_size
@@ -223,6 +222,10 @@ class CompiledASTRunner(JITRunner):
     self.first_run = False
     return et
 
+class MultiDeviceJITGraph(JITRunner):
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
+    raise NotImplementedError("override this")
+
 class Compiled:
   def __init__(self, device:str, allocator:Allocator, compiler:Optional[Compiler], runtime, graph=None):
     self.dname, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler, runtime, graph
@@ -231,13 +234,12 @@ class Compiled:
   def to_program(self, k:Linearizer) -> CompiledASTRunner:
     assert self.compiler is not None, "compiler is required to run AST"
     k.linearize()
-    ret = CompiledASTRunner(k.ast, k.name, self.compiler.render(to_function_name(k.name), k.uops), self, k.global_size, k.local_size)
-    from tinygrad.codegen.uops import uops_flops_mem
+    info = get_lazyop_info(k.ast)
+    ops, mem = k.uops.flops_mem()
     run_count = prod((k.global_size if k.global_size else []) + (k.local_size if k.local_size else []))
-    ops, mem = uops_flops_mem(k.uops, {x.expr:x for x in ret.vars})
     # NOTE: we use min here to ignore the indexing FLOPS
-    ret.op_estimate = min(ret.op_estimate, ops * run_count)
-    ret.mem_estimate = min(ret.mem_estimate, mem * run_count)
+    ret = CompiledASTRunner(k.name, self.compiler.render(to_function_name(k.name), k.uops), self, k.global_size, k.local_size,
+                            k.uops.vars(), min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))
     return ret
 
   def get_linearizer(self, ast:LazyOp) -> Linearizer:

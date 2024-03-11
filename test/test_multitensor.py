@@ -4,7 +4,7 @@ from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit
 from tinygrad.device import BufferCopy
 from tinygrad.ops import LoadOps, ReduceOps
 from tinygrad.helpers import CI
-from tinygrad.nn.state import get_parameters
+from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.realize import create_schedule
 import numpy as np
 from hypothesis import given, strategies as strat, settings
@@ -148,6 +148,7 @@ class TestMultiTensor(unittest.TestCase):
     out.mean().backward()
     #for p in get_parameters(conv): p.grad.realize()
     optim.step()
+    out.numpy()
 
   def test_lr_scheduler_OneCycleLR(self):
     from extra.lr_scheduler import OneCycleLR
@@ -355,6 +356,22 @@ class TestMultiTensor(unittest.TestCase):
     np.testing.assert_allclose(t0.numpy().flatten(), t1.numpy().flatten())
     assert t1.lazydata.axis == 2
 
+  def test_mlb_assign_change_axis(self):
+    devices = (d0, d1)
+
+    t_none = Tensor.zeros((16, 16)).shard(devices).contiguous().realize()
+    t_zero = Tensor.ones((16, 16)).shard(devices, axis=0)
+    with self.assertRaises(AssertionError):
+      # don't allow assigns that change axes
+      t_none.assign(t_zero)
+
+  def test_dropout_on_shard(self):
+    Tensor.training = True
+    X = Tensor.ones(256).to(devices_2)
+    output = X.dropout(0.5)
+    output.numpy()
+    Tensor.training = False
+
 @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
 class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
   # shrink a multitensor on sharded axis
@@ -463,7 +480,7 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
 
     c = a.pad(((2, 4), None)) + b.pad(((6, 0), None))
     expected = np.concatenate([np.zeros_like(t.numpy()[0:2]), na, np.zeros_like(t.numpy()[4:6]), nb])
-    np.testing.assert_equal(c, expected)
+    np.testing.assert_equal(c.numpy(), expected)
 
   def test_add_different_tensors(self):
     devices = [f"{Device.DEFAULT}:{i}" for i in range(4)]
@@ -504,6 +521,7 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
     optim.zero_grad()
     out.mean().backward()
     optim.step()
+    out.numpy()
 
   def test_unsynced_backprop_standalone_bn(self):
     from extra.lr_scheduler import OneCycleLR
@@ -541,6 +559,31 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
       out.mean().backward()
       optim.step()
 
+  def test_unsynced_backprop_sync_weights(self):
+    from extra.lr_scheduler import OneCycleLR
+    from examples.hlb_cifar10 import UnsyncedBatchNorm
+    GPUS = (d1, d2)
+
+    with Tensor.train():
+      conv = nn.Conv2d(3, 16, 3)
+      bn = UnsyncedBatchNorm(16, num_devices=len(GPUS))
+
+      for k, p in get_state_dict([conv, bn]).items():
+        if 'running_mean' in k or 'running_var' in k:
+          p.shard_(GPUS, axis=0)
+        else:
+          p.to_(GPUS)
+      optim = nn.optim.Adam(get_parameters([conv, bn]))
+      lr_sched = OneCycleLR(optim, max_lr=0.1, pct_start=0.1, div_factor=100, final_div_factor=0.1, total_steps=10)
+      lr_sched.step()
+
+      fake_image = Tensor.rand((8, 3, 32, 32)).shard(GPUS, axis=0)
+
+      out = bn(conv(fake_image))
+      optim.zero_grad()
+      out.mean().backward()
+      optim.step()
+
   @given(strat.sampled_from((False, True)))
   def test_batchnorm(self, is_training):
     devices = [f"{Device.DEFAULT}:{i}" for i in range(4)]
@@ -564,16 +607,22 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
       bn_ts[0].cat(*bn_ts[1:]).numpy()
 
   def test_synced_vs_unsynced_bn(self):
-    from examples.hlb_cifar10 import BatchNorm, UnsyncedBatchNorm
+    from examples.hlb_cifar10 import UnsyncedBatchNorm
+    from tinygrad.nn import BatchNorm2d
     devices = [f"{Device.DEFAULT}:{i}" for i in range(4)]
     x = Tensor.ones(8, 8, 8, 8).contiguous().realize().shard(devices, axis=0)
 
     with Tensor.train():
-      synced_bn = BatchNorm(8)
-      unsynced_bn = UnsyncedBatchNorm(8)
+      synced_bn = BatchNorm2d(8)
+      unsynced_bn = UnsyncedBatchNorm(8, num_devices=len(devices))
 
-      for p in get_parameters([synced_bn, unsynced_bn]):
+      for p in get_parameters(synced_bn):
         p.shard_(devices)
+      for k, p in get_state_dict(unsynced_bn).items():
+        if 'running_mean' in k or 'running_var' in k:
+          p.shard_(devices, axis=0)
+        else:
+          p.to_(devices)
 
       synced_out = synced_bn(x)
       synced_si = [si for si in create_schedule(synced_out.lazydata.lbs)]

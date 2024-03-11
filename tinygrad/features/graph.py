@@ -49,6 +49,7 @@ top_colors = {LoadOps: '#FFFFa0', UnaryOps: "#c0c0c0", ReduceOps: "#FFA0A0", Bin
               TernaryOps: "#c0c0c0", BufferOps: '#a0a0ff'}
 def log_lazybuffer(lb:'LazyBuffer', scheduled=False):
   init_graph()
+  if lb.base.realized is None and lb.base.op == LoadOps.CONST: return
   if lb.base != lb:
     offset = lb.st.expr_idxs([NumNode(0)] * len(lb.st.shape))[0]
     label = f"{lb.st.shape}\n{lb.st.real_strides()}" + (f"\n{offset}" if offset != 0 else "")
@@ -56,13 +57,17 @@ def log_lazybuffer(lb:'LazyBuffer', scheduled=False):
     G.add_edge(nm(lb.base), nm(lb), color='#00000060')
     lb = lb.base
   if lb.realized is None:
-    for x in lb.srcs:
+    label_append = []
+    for idx,x in enumerate(lb.srcs):
       if nm(x) not in G.nodes: log_lazybuffer(x)
-      G.add_edge(nm(x), nm(lb), color='#a0a0a0')
+      if x.base.realized is None and x.base.op == LoadOps.CONST:
+        label_append.append(f"\nCONST{idx} {x.base.arg}")
+      else:
+        G.add_edge(nm(x), nm(lb), color='#a0a0a0')
     label = '"' + \
       (str(set(x.shape for x in lb.srcs))+"\n"+str(lb.shape) if lb.op in ReduceOps else str(lb.shape)) + \
       (f"\n{lb.dtype.name}" if lb.dtype.name != "float" else "")+f"\n{lb.op}"+(f"\n{lb.arg}" if lb.op in {LoadOps.CONST, UnaryOps.CAST} else "") + \
-      (f"\n{lb.device}" if lb.device != Device.DEFAULT else "") + '"'
+      (f"\n{lb.device}" if lb.device != Device.DEFAULT else "") + ''.join(label_append) + '"'
     G.add_node(nm(lb), style='"filled,dashed"', fillcolor=[v for k,v in top_colors.items() if lb.op in k][0] + "80", color="black", label=label)
     if scheduled: G.nodes[nm(lb)]['shape'] = 'box'
   else:
