@@ -3,7 +3,7 @@ import functools, math, operator
 from typing import List, Set, Optional, Tuple, Any, Dict, DefaultDict, Callable, cast
 from collections import defaultdict
 from tinygrad.helpers import DEBUG, flatten, all_same
-from tinygrad.dtype import dtypes, DType
+from tinygrad.dtype import dtypes, DType, cast_scalar
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.shape.symbolic import sint, Variable, Node, NumNode
 from enum import Enum, auto
