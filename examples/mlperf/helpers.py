@@ -9,7 +9,7 @@ from tinygrad.nn import state
 #
 
 def invert_dict(d): return {v: k for k, v in reversed(d.items())}
-def dedup_dict(d): invert_dict(invert_dict(d))
+def dedup_dict(d): return invert_dict(invert_dict(d))
 # store each tensor into the first key it appears in
 def get_training_state(model, optimizer, scheduler):
   # hack: let get_state_dict walk the tree starting with model, so that the checkpoint keys are
