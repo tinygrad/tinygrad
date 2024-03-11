@@ -185,7 +185,7 @@ class UOpGraph:
     self.uops.remove(old)
 
   def simplify_phi_loops(self, get_recursive_parents):
-    seen_vars: Dict[str,UOp] = {}
+    seen_vars: Dict[UOp,str] = {}
     def alu_opposite(arg, x, y):
       if arg == BinaryOps.ADD: return x - y
       elif arg == BinaryOps.MUL: return Node.__floordiv__(x, y, False)
@@ -193,9 +193,8 @@ class UOpGraph:
     def to_symbolic(u: UOp):
       if u.uop == UOps.CONST: return NumNode(int(u.arg))
       elif u.uop in {UOps.LOOP, UOps.SPECIAL}:
-        name = "loop{}".format(len(seen_vars))
-        seen_vars[name] = u
-        return Variable(name, u.vin[0].arg, u.vin[1].arg-1) if u.uop is UOps.LOOP else Variable(name, 0, u.arg[2]-1)
+        if u not in seen_vars: seen_vars[u] = "var{}".format(len(seen_vars))
+        return Variable(seen_vars[u], u.vin[0].arg, u.vin[1].arg-1) if u.uop is UOps.LOOP else Variable(seen_vars[u], 0, u.arg[2]-1)
       elif u.uop == UOps.ALU and u.arg == BinaryOps.ADD: return to_symbolic(u.vin[0]) + to_symbolic(u.vin[1])
       elif u.uop == UOps.ALU and u.arg == BinaryOps.MUL: return to_symbolic(u.vin[0]) * to_symbolic(u.vin[1])
       else: raise RuntimeError("unhandled op: {}".format(u))
@@ -209,7 +208,8 @@ class UOpGraph:
     def const(x): return self.add(UOps.CONST, dtypes.default_int, tuple(), x)
     def neg(x): return self.add(UOps.ALU, dtypes.default_int, (x,), UnaryOps.NEG)
     def max(x, y): return self.add(UOps.ALU, dtypes.default_int, (x, y), BinaryOps.MAX)
-    render_ops = {Variable: lambda self, ops, _: seen_vars[self.expr], NumNode: lambda self, ops, _: const(self.b),
+    render_ops = {Variable: lambda self, ops, _: next(op for op, name in seen_vars.items() if name == self.expr),
+                  NumNode: lambda self, ops, _: const(self.b),
                   MulNode: lambda self, ops, _: uop_alu_idx(self.a.render(ops, self), self.b, BinaryOps.MUL),
                   DivNode: lambda self, ops, _: uop_alu_idx(self.a.render(ops, self), self.b, BinaryOps.DIV),
                   SumNode: lambda self, ops, _:
