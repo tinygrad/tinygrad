@@ -1,15 +1,18 @@
 import ctypes
 from typing import Tuple
-import gpuctypes.hip as hip
-from tinygrad.helpers import init_c_var
-from tinygrad.runtime.ops_hip import check, hip_time_execution
+import tinygrad.runtime.autogen.hip as hip
+from tinygrad.helpers import init_c_var, time_execution_cuda_style
+from tinygrad.runtime.ops_hip import check, hip_set_device
 from tinygrad.runtime.graph.cuda import CUDAGraph
+
+# TODO: this is only used in graph
+def hip_time_execution(cb, enable=False): return time_execution_cuda_style(cb, hip.hipEvent_t, hip.hipEventCreate, hip.hipEventRecord, hip.hipEventSynchronize, hip.hipEventDestroy, hip.hipEventElapsedTime, enable=enable)  # noqa: E501
 
 class HIPGraph(CUDAGraph):
   def __del__(self):
-    check(hip.hipGraphDestroy(self.graph))
-    check(hip.hipGraphExecDestroy(self.instance))
-
+    if hasattr(self, 'graph'): check(hip.hipGraphDestroy(self.graph))
+    if hasattr(self, 'instance'): check(hip.hipGraphExecDestroy(self.instance))
+  def set_device(self): hip_set_device(self.device)
   def encode_args_info(self): return (hip.hipDeviceptr_t, (1,2,3))
   def graph_create(self): return init_c_var(hip.hipGraph_t(), lambda x: check(hip.hipGraphCreate(ctypes.byref(x), 0)))
   def graph_instantiate(self, graph):

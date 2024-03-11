@@ -6,21 +6,22 @@ import unittest
 from typing import List, Optional
 from tinygrad.tensor import Tensor
 from tinygrad.ops import LoadOps
-from tinygrad.device import Device, Compiled
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG, GRAPH
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.graph import print_tree, realized_lazybuffer
+from tinygrad.features.graph import print_tree, realized_lazybuffer
+from tinygrad.realize import create_schedule
 from tinygrad import nn, dtypes
 
 def check_schedule(t:Tensor, allowed:int, to_prerealize:Optional[List[Tensor]]=None, filter_loadops=True):
   seen = set()
   if to_prerealize:
     for pre in to_prerealize:
-      for s in pre.lazydata.schedule(seen.copy()):
-        realized_lazybuffer(s.out, 0)
+      for s in create_schedule([pre.lazydata], seen.copy()):
+        if GRAPH: realized_lazybuffer(s.out, 0)
         seen.add(s.out)
-  sched = t.lazydata.schedule(seen)
-  for i,s in enumerate(sched): realized_lazybuffer(s.out, i+1)
+  sched = create_schedule([t.lazydata], seen)
+  if GRAPH:
+    for i,s in enumerate(sched): realized_lazybuffer(s.out, i+1)
   if filter_loadops: sched = [s for s in sched if s.ast.op not in LoadOps]
   if len(sched) != allowed: print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
   if len(sched) != allowed or DEBUG >= 3:
@@ -77,7 +78,6 @@ class TestSchedule(unittest.TestCase):
     d = (a+b).permute(1,0)+c
     check_schedule(d, 1)
 
-  @unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled) or Device.DEFAULT == "LLVM", "only test for compiled backends")
   def test_constants_are_embedded(self):
     a = Tensor.empty(3,3) * 2
     check_schedule(a, 2, filter_loadops=False)
@@ -348,7 +348,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_double_from(self):
     x = Tensor([1,2,3,4])
-    out = x.to('cpu')
+    out = x.to('ext')
     check_schedule(out, 0, filter_loadops=False)
 
   def test_pow_const_tensor_simplified(self):
@@ -420,6 +420,12 @@ class TestSchedule(unittest.TestCase):
     x = x[:16]
     out = x + y
     check_schedule(out, 2)  # TODO: this should be 1
+
+  def test_const_no_recompute(self):
+    x = Tensor(2) + Tensor(2)
+    y = Tensor(2) + Tensor(2)
+    out = x.contiguous() + y.contiguous()
+    check_schedule(out, 2)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

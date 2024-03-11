@@ -16,13 +16,13 @@ class MultiShapeTracker:
   def stride(self, arg): self.sts = [x.stride(arg) for x in self.sts]
   def pad(self, arg): self.sts = [x.pad(arg) for x in self.sts]
 
-def st_equal(st1, st2) -> bool:
+def st_equal(st1:ShapeTracker, st2:ShapeTracker) -> bool:
   if st1.shape != st2.shape: return False
   if st1 == st2: return True
   idx = Variable("idx", 0, prod(st1.shape)-1)
-  st1_idx, st1_valid = st1.expr_node(idx)
-  st2_idx, st2_valid = st2.expr_node(idx)
-  for i in range(idx.min, idx.max):
+  st1_idx, st1_valid = st1.reshape((st1.size,)).expr_idxs([idx])
+  st2_idx, st2_valid = st2.reshape((st2.size,)).expr_idxs([idx])
+  for i in range(idx.min, idx.max + 1):
     st1_off = sym_infer(st1_idx, {idx: i})
     st2_off = sym_infer(st2_idx, {idx: i})
     st1_v = sym_infer(st1_valid, {idx: i})
@@ -83,6 +83,13 @@ class TestShapeTrackerAdd(unittest.TestCase):
     st.stride( (4,) )
     st.reshape( (4, 3) )
     assert st_equal(backup + st.sts[1], st.sts[0])
+
+  def test_off_by_one(self):
+    st1 = ShapeTracker(views=(View(shape=(5,), strides=(1,), offset=0, mask=None, contiguous=True),
+                              View(shape=(5,), strides=(1,), offset=0, mask=None, contiguous=True)))
+    st2 = ShapeTracker(views=(View(shape=(4,), strides=(1,), offset=0, mask=None, contiguous=True),
+                              View(shape=(5,), strides=(1,), offset=0, mask=None, contiguous=True)))
+    assert not (st_equal(st1, st2))
 
 class TestShapeTrackerAddVariable(unittest.TestCase):
   def test_self_add(self):

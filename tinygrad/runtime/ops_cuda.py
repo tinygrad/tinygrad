@@ -2,11 +2,12 @@ from __future__ import annotations
 import subprocess, hashlib, tempfile, ctypes, ctypes.util, functools, re
 from pathlib import Path
 from typing import Tuple, Optional
-import gpuctypes.cuda as cuda
-from tinygrad.helpers import DEBUG, getenv, from_mv, init_c_var, colored, cpu_time_execution, compile_cuda_style, encode_args_cuda_style, time_execution_cuda_style  # noqa: E501
-from tinygrad.device import Compiled, LRUAllocator, MallocAllocator
+import tinygrad.runtime.autogen.cuda as cuda
+from tinygrad.helpers import DEBUG, getenv, from_mv, to_char_p_p, init_c_var, colored, cpu_time_execution, encode_args_cuda_style, time_execution_cuda_style # noqa: E501
+from tinygrad.device import Compiled, LRUAllocator, MallocAllocator, Compiler
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import CUDARenderer
+from tinygrad.renderer.assembly import PTXRenderer
 
 def pretty_ptx(s):
   # all expressions match `<valid_before><expr><valid_after>` and replace it with `<valid_before>color(<expr>)<valid_after>`
@@ -22,37 +23,70 @@ CUDACPU = getenv("CUDACPU") == 1
 if CUDACPU:
   gpuocelot_lib = ctypes.CDLL(ctypes.util.find_library("gpuocelot"))
   gpuocelot_lib.ptx_run.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]  # noqa: E501
-  cuda.cuLaunchKernel = lambda src, gx, gy, gz, lx, ly, lz, shared, stream, unused_extra, args: gpuocelot_lib.ptx_run(src, len(args), (ctypes.c_void_p * len(args))(*[ctypes.cast(x, ctypes.c_void_p) for x in args]), lx, ly, lz, gx, gy, gz, shared)  # noqa: E501
+  cuda.cuLaunchKernel = lambda src, gx, gy, gz, lx, ly, lz, shared, stream, unused_extra, args: gpuocelot_lib.ptx_run(src, len(args), (ctypes.c_void_p * len(args))(*[ctypes.cast(x, ctypes.c_void_p) for x in args]), lx, ly, lz, gx, gy, gz, shared)  # type: ignore  # noqa: E501
 
 def check(status):
   if status != 0: raise RuntimeError(f"CUDA Error {status}, {ctypes.string_at(init_c_var(ctypes.POINTER(ctypes.c_char)(), lambda x: cuda.cuGetErrorString(status, ctypes.byref(x)))).decode()}")  # noqa: E501
 
 def cu_time_execution(cb, enable=False) -> Optional[float]: return time_execution_cuda_style(cb, cuda.CUevent, cuda.cuEventCreate, cuda.cuEventRecord, cuda.cuEventSynchronize, cuda.cuEventDestroy_v2, cuda.cuEventElapsedTime, enable=enable) if not CUDACPU else cpu_time_execution(cb, enable=enable)  # noqa: E501
 
-def compile_cuda(prg) -> bytes: return compile_cuda_style(prg, [f'--gpu-architecture={CUDADevice.default_arch_name}', "-I/usr/local/cuda/include", "-I/usr/include", "-I/opt/cuda/include/"], cuda.nvrtcProgram, cuda.nvrtcCreateProgram, cuda.nvrtcCompileProgram, cuda.nvrtcGetPTX, cuda.nvrtcGetPTXSize, cuda.nvrtcGetProgramLog, cuda.nvrtcGetProgramLogSize, check)  # noqa: E501
+def _get_bytes(arg, get_str, get_sz, check) -> bytes:
+  sz = init_c_var(ctypes.c_size_t(), lambda x: check(get_sz(arg, ctypes.byref(x))))
+  return ctypes.string_at(init_c_var(ctypes.create_string_buffer(sz.value), lambda x: check(get_str(arg, x))), size=sz.value)
+
+class PTXCompiler(Compiler):
+  linearizer_opts = LinearizerOptions("CUDA", suffix="PTX", global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024], supports_float4=False)
+  def __init__(self, arch:str):
+    self.arch = arch
+    PTXCompiler.linearizer_opts = PTXCompiler.linearizer_opts._replace(has_tensor_cores=int(arch[3:]) >= 80)
+    super().__init__(f"compile_ptx_{self.arch}")
+  def render(self, name:str, uops) -> str: return PTXRenderer(name, uops).replace("TARGET", self.arch)
+  def compile(self, src:str) -> bytes: return src.encode()
+
+class CUDACompiler(Compiler):
+  linearizer_opts = LinearizerOptions("CUDA", global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024])
+  def __init__(self, arch:str):
+    self.arch = arch
+    CUDACompiler.linearizer_opts = CUDACompiler.linearizer_opts._replace(has_tensor_cores=int(arch[3:]) >= 80)
+    super().__init__(f"compile_cuda_{self.arch}")
+  def render(self, name:str, uops) -> str: return CUDARenderer(name, uops)
+  def compile(self, src:str) -> bytes:
+    compile_options = [f'--gpu-architecture={self.arch}', "-I/usr/local/cuda/include", "-I/usr/include", "-I/opt/cuda/include/"]
+    check(cuda.nvrtcCreateProgram(ctypes.byref(prog := cuda.nvrtcProgram()), src.encode(), "<null>".encode(), 0, None, None))
+    status = cuda.nvrtcCompileProgram(prog, len(compile_options), to_char_p_p([o.encode() for o in compile_options]))
+
+    if status != 0: raise RuntimeError(f"compile failed: {_get_bytes(prog, cuda.nvrtcGetProgramLog, cuda.nvrtcGetProgramLogSize, check).decode()}")
+    return _get_bytes(prog, cuda.nvrtcGetPTX, cuda.nvrtcGetPTXSize, check)
+
+def cuda_disassemble(lib, arch):
+  try:
+    fn = (Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(lib).hexdigest()}").as_posix()
+    with open(fn + ".ptx", "wb") as f: f.write(lib)
+    subprocess.run(["ptxas", f"-arch={arch}", "-o", fn, fn+".ptx"], check=True)
+    print(subprocess.check_output(['nvdisasm', fn]).decode('utf-8'))
+  except Exception as e: print("failed to generate SASS", str(e))
 
 class CUDAProgram:
   def __init__(self, device:CUDADevice, name:str, lib:bytes):
     self.device, self.name, self.lib = device, name, lib
-    if DEBUG >= 5: print(pretty_ptx(lib.decode('utf-8')))
-    if DEBUG >= 6:
-      try:
-        fn = (Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(lib).hexdigest()}").as_posix()
-        with open(fn + ".ptx", "wb") as f: f.write(lib)
-        subprocess.run(["ptxas", f"-arch={CUDADevice.default_arch_name}", "-o", fn, fn+".ptx"], check=True)
-        print(subprocess.check_output(['nvdisasm', fn]).decode('utf-8'))
-      except Exception as e: print("failed to generate SASS", str(e))
+    if DEBUG >= 5: print("\n".join([f"{i+1:>3} {line}" for i, line in enumerate(pretty_ptx(lib.decode('utf-8')).split("\n"))]))
+    if DEBUG >= 6: cuda_disassemble(lib, device.arch)
 
     if not CUDACPU:
       check(cuda.cuCtxSetCurrent(self.device.context))
-      self.module = init_c_var(cuda.CUmodule(), lambda x: check(cuda.cuModuleLoadData(ctypes.byref(x), lib)))
+      self.module = cuda.CUmodule()
+      status = cuda.cuModuleLoadData(ctypes.byref(self.module), lib)
+      if status != 0:
+        del self.module
+        cuda_disassemble(lib, device.arch)
+        raise RuntimeError("module load failed")
       check(cuda.cuModuleGetFunction(ctypes.byref(prg := cuda.CUfunction()), self.module, name.encode("utf-8")))
     self.prg = prg if not CUDACPU else lib
 
   def __del__(self):
-    if not CUDACPU: check(cuda.cuModuleUnload(self.module))
+    if hasattr(self, 'module'): check(cuda.cuModuleUnload(self.module))
 
-  def __call__(self, *bufs, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int], vals:Tuple[int, ...]=(), wait=False):
+  def __call__(self, *bufs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
     if not CUDACPU: check(cuda.cuCtxSetCurrent(self.device.context))
     c_kernel_input_config = encode_args_cuda_style(bufs, vals, cuda.CUdeviceptr_v2, (1,2,0))[0] if not CUDACPU else (bufs+tuple(vals))
     return cu_time_execution(lambda: check(cuda.cuLaunchKernel(self.prg, *global_size, *local_size, 0, None, None, c_kernel_input_config)), enable=wait)  # noqa: E501
@@ -73,20 +107,19 @@ class CUDAAllocator(LRUAllocator):
     check(cuda.cuMemcpyDtoH_v2(from_mv(dest), src, len(dest)))
 
 class CUDADevice(Compiled):
-  default_arch_name = "sm_35"
   def __init__(self, device:str):
     device_id = int(device.split(":")[1]) if ":" in device else 0
     if not CUDACPU:
       check(cuda.cuInit(0))
-      check(cuda.cuDeviceGet(ctypes.byref(device := cuda.CUdevice()), device_id))
-      self.context = init_c_var(cuda.CUcontext(), lambda x: check(cuda.cuCtxCreate_v2(ctypes.byref(x), 0, device)))
+      check(cuda.cuDeviceGet(ctypes.byref(cu_device := cuda.CUdevice()), device_id))
+      self.context = init_c_var(cuda.CUcontext(), lambda x: check(cuda.cuCtxCreate_v2(ctypes.byref(x), 0, cu_device)))
       check(cuda.cuDeviceComputeCapability(ctypes.byref(major := ctypes.c_int()), ctypes.byref(minor := ctypes.c_int()), device_id))
-      if device_id == 0: CUDADevice.default_arch_name = f"sm_{major.value}{minor.value}"
+    self.arch = f"sm_{major.value}{minor.value}" if not CUDACPU else "sm_35"
 
     from tinygrad.runtime.graph.cuda import CUDAGraph
-    super().__init__(CUDAAllocator(self) if not CUDACPU else MallocAllocator,
-                     LinearizerOptions(supports_float4_alu=False, global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024]),
-                     CUDARenderer, compile_cuda, functools.partial(CUDAProgram, self), graph=CUDAGraph if not CUDACPU else None)
+    super().__init__(device, CUDAAllocator(self) if not CUDACPU else MallocAllocator,
+                     PTXCompiler(self.arch) if getenv("PTX") else CUDACompiler(self.arch),
+                     functools.partial(CUDAProgram, self), graph=CUDAGraph if not CUDACPU else None)
   def synchronize(self):
     if not CUDACPU:
       check(cuda.cuCtxSetCurrent(self.context))

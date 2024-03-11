@@ -6,7 +6,7 @@ import base64
 import multiprocessing
 import numpy as np
 from typing import Optional, Union, Literal, List
-from tinygrad.jit import TinyJit
+from tinygrad.features.jit import TinyJit
 from tinygrad.nn.state import torch_load, load_state_dict
 from tinygrad.helpers import getenv, DEBUG, CI, fetch
 import tinygrad.nn as nn

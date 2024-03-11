@@ -5,11 +5,11 @@ from tinygrad.helpers import DEBUG, colored, getenv
 from tinygrad.lazy import LazyBuffer
 from tinygrad.runtime.lib import RawBuffer, RawBufferCopyInOut
 try:
-  import gpuctypes.hip as hip
+  import tinygrad.runtime.autogen.hip as hip
   from tinygrad.runtime.ops_hip import RawHIPBuffer, check
 except: RawHIPBuffer = None
 from tinygrad.runtime.ops_disk import RawDiskBuffer
-from tinygrad.jit import CacheCollector
+from tinygrad.features.jit import CacheCollector
 from tinygrad.tensor import Tensor, Function
 import numpy as np
 

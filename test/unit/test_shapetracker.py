@@ -1,17 +1,16 @@
 #!/usr/bin/env python
-# ruff: noqa: E501
 import unittest
 import numpy as np
 from tinygrad.helpers import prod, DEBUG
-from tinygrad.shape.shapetracker import ShapeTracker, View, get_contraction
+from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.shape.symbolic import Variable, NumNode
 from itertools import product
 
 def shapetracker_getitem(st, val):
-  locals = {"idx": val, "valid": 1}
-  idx, valid = st.expr_node()
-  exec(f"valid={valid.render()};idx={idx.render()}", None, locals)
-  return locals["idx"] if locals["valid"] else -1
+  locals = {"idx0": val, "valid": 1}
+  idx, valid = st.reshape((st.size,)).expr_idxs()
+  exec(f"valid={valid.render()};idx0={idx.render()}", None, locals)
+  return locals["idx0"] if locals["valid"] else -1
 
 class CheckingShapeTracker:
   def __init__(self, shape):
@@ -73,7 +72,7 @@ class CheckingShapeTracker:
   def assert_same(self):
     x = [shapetracker_getitem(self.st, i) for i in range(prod(self.st.shape))]
     y = [self[i] for i in range(prod(self.shape))]
-    idx, valid = self.st.expr_node()
+    idx, valid = self.st.expr_idxs()
     if DEBUG >= 1: print(x, y, self.st.shape, self.shape, idx.render(), valid.render(), self.st)
     assert self.st.shape == self.shape
     assert x == y, f"mismatch shapetracker:{x} real:{y}"
@@ -144,35 +143,32 @@ class TestRealSimplifies(unittest.TestCase):
       View.create((8, 3, 3, 11, 2, 28), (924, 308, 0, 28, 0, 1), 0, None),
       View.create((8, 1, 6, 10, 28, 3, 2, 1), (5544, 0, 0, 56, 1, 1848, 672, 0), 0, None)))
 
+class TestViewMinify(unittest.TestCase):
+  def test_minifies(self):
+    assert len(View.create((10,10)).minify().shape) == 1
+    assert len(View.create((10,10)).permute((1,0)).minify().shape) == 2
+    assert len(View.create((10,10,10,10)).permute((1,0,2,3)).minify().shape) == 3
+
 class TestIndexExpressions2d(unittest.TestCase):
 
   def setUp(self):
     shapes = [(30, 5), (15, 10), (15, 1), (5, 10), (5, 1)] # Make sure dim0 is a multiple of 5, one of the tests divides this dimension by 5
     offsets = [0, 1, 15, 28, 10000]
-    self.sts = [ShapeTracker.from_shape((prod(base_shape)+offset,)).shrink(((offset, offset+prod(base_shape)),)).reshape(base_shape) for base_shape in shapes for offset in offsets]
+    self.sts = [ShapeTracker.from_shape((prod(base_shape)+offset,)).shrink(((offset, offset+prod(base_shape)),)).\
+                reshape(base_shape) for base_shape in shapes for offset in offsets]
     self.offset = [NumNode(offset) for base_shape in shapes for offset in offsets]
     self.shapes = [shape for shape in shapes for offset in offsets]
-    self.node_exprs = []
     self.idxs_exprs = []
 
   def tearDown(self):
-    for st, offset, shape, node_expr, idxs_expr in zip(self.sts, self.offset, self.shapes, self.node_exprs, self.idxs_exprs):
+    for st, offset, shape, idxs_expr in zip(self.sts, self.offset, self.shapes, self.idxs_exprs):
       numel = prod(shape)
-      assert node_expr(self.default_idx(st.shape)) == st.expr_node()[0]
-      assert node_expr(self.default_idx(st.shape)) == st.expr_node(None)[0]
-      assert node_expr(self.default_idx(st.shape)) == st.expr_node('idx')[0]
-      self.check_bounds(node_expr(self.default_idx(st.shape)), offset, numel)
-      for idx in [(0, numel-1), (7, 203), (2, 5), (0, 0), (numel, numel), (0, numel), (0, numel+1), (numel+100, numel+100)]:
-        idx = Variable("idx", idx[0], idx[1])
-        assert node_expr(idx) == st.expr_node(idx)[0]
-        self.check_bounds(node_expr(idx), offset, numel)
-
-      assert idxs_expr(self.default_idxs(st.shape)) == st.expr_idxs()[0]
       assert idxs_expr(self.default_idxs(st.shape)) == st.expr_idxs(None)[0]
       self.check_bounds(idxs_expr(self.default_idxs(st.shape)), offset, numel)
       idx0s = [(0,0), (0, min(1, st.shape[0]-1)), (0, st.shape[0]-1), (min(3, st.shape[0]-1), min(6, st.shape[0]-1)), (st.shape[0]-1, st.shape[0]-1)]
       idx1s = [(0,0), (0, min(1, st.shape[1]-1)), (0, st.shape[1]-1), (min(3, st.shape[1]-1), min(6, st.shape[1]-1)), (st.shape[1]-1, st.shape[1]-1)]
-      idx2s = [(0,0), (0, min(1, st.shape[2]-1)), (0, st.shape[2]-1), (min(3, st.shape[2]-1), min(6, st.shape[2]-1)), (st.shape[2]-1, st.shape[2]-1)] if len(st.shape) == 3 else [None for _ in idx0s]
+      idx2s = [(0,0), (0, min(1, st.shape[2]-1)), (0, st.shape[2]-1), (min(3, st.shape[2]-1), min(6, st.shape[2]-1)),
+               (st.shape[2]-1, st.shape[2]-1)] if len(st.shape) == 3 else [None for _ in idx0s]
       for idx0, idx1, idx2 in product(idx0s, idx1s, idx2s):
         idxs = [Variable(f"idx{i}", idx[0], idx[1]) for i, idx in enumerate((idx0, idx1, idx2)) if idx is not None]
         assert idxs_expr(idxs) == st.expr_idxs(idxs)[0]
@@ -190,14 +186,12 @@ class TestIndexExpressions2d(unittest.TestCase):
 
   def test_noop(self):
     for st, base_shape, offset in zip(self.sts, self.shapes, self.offset):
-      self.node_exprs.append(lambda idx, base_shape=base_shape, offset=offset: idx%prod(base_shape) + offset)
       self.idxs_exprs.append(lambda idxs, base_shape=base_shape, offset=offset: idxs[0]*base_shape[1] + idxs[1] + offset)
 
   def test_permute(self):
     new_st = []
     for st, base_shape, offset in zip(self.sts, self.shapes, self.offset):
       st = st.permute((1, 0))
-      self.node_exprs.append(lambda idx, base_shape=base_shape, offset=offset: idx%base_shape[0]*base_shape[1] + idx//base_shape[0]%base_shape[1] + offset)
       self.idxs_exprs.append(lambda idxs, base_shape=base_shape, offset=offset: idxs[0] + idxs[1]*base_shape[1] + offset)
       new_st.append(st)
     self.sts = new_st
@@ -206,7 +200,6 @@ class TestIndexExpressions2d(unittest.TestCase):
     new_st = []
     for st, base_shape, offset in zip(self.sts, self.shapes, self.offset):
       st = st.reshape((base_shape[0], 1, base_shape[1]))
-      self.node_exprs.append(lambda idx, base_shape=base_shape, offset=offset: idx%prod(base_shape)  + offset)
       self.idxs_exprs.append(lambda idxs, base_shape=base_shape, offset=offset: idxs[0]*base_shape[1] + idxs[2] + offset)
       new_st.append(st)
     self.sts = new_st
@@ -216,7 +209,6 @@ class TestIndexExpressions2d(unittest.TestCase):
     for st, base_shape, offset in zip(self.sts, self.shapes, self.offset):
       st = st.reshape((base_shape[0], 1, base_shape[1]))
       st = st.expand((base_shape[0], base_shape[1], base_shape[1]))
-      self.node_exprs.append(lambda idx, base_shape=base_shape, offset=offset: idx//(base_shape[1]*base_shape[1])%base_shape[0]*base_shape[1] + idx%base_shape[1] + offset)
       self.idxs_exprs.append(lambda idxs, base_shape=base_shape, offset=offset: idxs[0]*base_shape[1] + idxs[2] + offset)
       new_st.append(st)
     self.sts = new_st
@@ -226,8 +218,8 @@ class TestIndexExpressions2d(unittest.TestCase):
     for st, base_shape, offset in zip(self.sts, self.shapes, self.offset):
       st = st.permute((1, 0))
       st = st.reshape((base_shape[0]//5, 1, base_shape[1]*5))
-      self.node_exprs.append(lambda idx, base_shape=base_shape, offset=offset: idx%prod(base_shape)%base_shape[0]*base_shape[1] + idx//base_shape[0]%base_shape[1] + offset)
-      self.idxs_exprs.append(lambda idxs, base_shape=base_shape, offset=offset: (idxs[0]*(base_shape[1]*5)+idxs[2])%base_shape[0]*base_shape[1] + (idxs[0]*(base_shape[1]*5)+idxs[2])//base_shape[0] + offset)
+      self.idxs_exprs.append(lambda idxs, base_shape=base_shape, offset=offset: (idxs[0]*(base_shape[1]*5)+idxs[2])%base_shape[0]*base_shape[1] + \
+                             (idxs[0]*(base_shape[1]*5)+idxs[2])//base_shape[0] + offset)
       new_st.append(st)
     self.sts = new_st
 
@@ -236,8 +228,8 @@ class TestIndexExpressions2d(unittest.TestCase):
     for st, base_shape, offset in zip(self.sts, self.shapes, self.offset):
       st = st.permute((1, 0))
       st = st.reshape((1, base_shape[0]//5, base_shape[1]*5))
-      self.node_exprs.append(lambda idx, base_shape=base_shape, offset=offset: idx%prod(base_shape)%base_shape[0]*base_shape[1] + idx//base_shape[0]%base_shape[1] + offset)
-      self.idxs_exprs.append(lambda idxs, base_shape=base_shape, offset=offset: (idxs[1]*(base_shape[1]*5)+idxs[2])%base_shape[0]*base_shape[1] + (idxs[1]*(base_shape[1]*5)+idxs[2])//base_shape[0] + offset)
+      self.idxs_exprs.append(lambda idxs, base_shape=base_shape, offset=offset: (idxs[1]*(base_shape[1]*5)+idxs[2])%base_shape[0]*base_shape[1] + \
+                             (idxs[1]*(base_shape[1]*5)+idxs[2])//base_shape[0] + offset)
       new_st.append(st)
     self.sts = new_st
 
@@ -724,75 +716,6 @@ class TestShapeTracker(unittest.TestCase):
     self.test_slice_1()
     self.test_expand()
     self.test_permute()
-
-class TestGetContraction(unittest.TestCase):
-  def test_contraction(self):
-    r = get_contraction((1,2,3,4), (2,3,4))
-    self.assertEqual(r, [[0, 1], [2], [3]])
-
-    r = get_contraction((2,1,3,4), (2,3,4))
-    self.assertEqual(r, [[0], [1, 2], [3]])
-
-    r = get_contraction((1,2,3,1,4), (1,2,3,4))
-    self.assertEqual(r, [[], [0, 1], [2], [3, 4]])
-
-    r = get_contraction((1,2,3,1,4,1,1), (2,3,4))
-    self.assertEqual(r, [[0, 1], [2], [3, 4, 5, 6]])
-
-    r = get_contraction((1,2,3,4), (1,2,3*4))
-    self.assertEqual(r, [[], [0, 1], [2, 3]])
-
-    r = get_contraction((1,2,3,4), (2,1,3,4))
-    self.assertEqual(r, [[0, 1], [], [2], [3]])
-
-    r = get_contraction((1,2,3,4), (1,1,2*3*4,1))
-    self.assertEqual(r, [[], [], [0,1,2,3], []])
-
-    r = get_contraction((2,1,3,4), (1,2,3,4))
-    self.assertEqual(r, [[], [0], [1, 2], [3]])
-
-    r = get_contraction((1,2,3,4), (2*3*4,1,1,1))
-    self.assertEqual(r, [[0, 1, 2, 3], [], [], []])
-
-    r = get_contraction((4,4,4,4), (16,1,16))
-    self.assertEqual(r, [[0, 1], [], [2, 3]])
-
-    r = get_contraction((1,2,3,4,1,1,1), (2,3,4))
-    self.assertEqual(r, [[0, 1], [2], [3, 4, 5, 6]])
-
-    r = get_contraction((1,2,3,4), (1,2,3,4,1))
-    self.assertEqual(r, [[], [0, 1], [2], [3], []])
-
-    r = get_contraction((14,1,384,14,1,1,1,1), (1,14,384,14))
-    self.assertEqual(r, [[], [0], [1,2], [3,4,5,6,7]])
-
-    r = get_contraction((14,1,384,1,14,1,1,1,1), (1,14,384,14))
-    self.assertEqual(r, [[], [0], [1,2], [3,4,5,6,7,8]])
-
-    r = get_contraction((512, 512), (1, 1, 512, 1, 1, 1, 1, 512))
-    self.assertEqual(r, [[], [], [0], [], [], [], [], [1]])
-
-    r = get_contraction((1,2,3,4), (1,2,6,2))
-    self.assertEqual(r, None)
-
-  def test_contraction_ones(self):
-    r = get_contraction((1,), (1,1,1))
-    self.assertEqual(r, [[], [], [0]])
-
-    r = get_contraction((1,1), (1,1,1))
-    self.assertEqual(r, [[], [], [0, 1]])
-
-    r = get_contraction((1,1,1,1), (1,))
-    self.assertEqual(r, [[0,1,2,3]])
-
-    r = get_contraction((1,1,1,1), (1,1))
-    self.assertEqual(r, [[], [0,1,2,3]])
-
-    r = get_contraction((1,1,1,1), (1,1,1))
-    self.assertEqual(r, [[], [], [0,1,2,3]])
-
-    r = get_contraction((1,1,1,1), (1,1,1,1))
-    self.assertEqual(r, [[], [], [], [0,1,2,3]])
 
 class TestShapeTrackerSize(unittest.TestCase):
   def test_simple_size(self):

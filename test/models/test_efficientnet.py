@@ -46,7 +46,7 @@ def _infer(model: EfficientNet, img, bs=1):
   img = preprocess(img)
   # run the net
   if bs > 1: img = img.repeat(bs, axis=0)
-  out = model.forward(Tensor(img)).cpu()
+  out = model.forward(Tensor(img))
   return _LABELS[np.argmax(out.numpy()[0])]
 
 chicken_img = Image.open(pathlib.Path(__file__).parent / 'efficientnet/Chicken.jpg')

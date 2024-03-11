@@ -1,22 +1,27 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string, ctypes
-from urllib import request  # NOTE: this has to be imported specifically
+import itertools, urllib.request
 from tqdm import tqdm
 from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Sequence
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
+  from tinygrad.shape.shapetracker import sint
 
 T = TypeVar("T")
 U = TypeVar("U")
 # NOTE: it returns int 1 if x is empty regardless of the type of x
-def prod(x:Iterable[T]) -> Union[T,int]: return functools.reduce(operator.__mul__, x, 1)
+def prod(x:Iterable[T]) -> Union[T,int]: return functools.reduce(operator.mul, x, 1)
 
 # NOTE: helpers is not allowed to import from anything else in tinygrad
 OSX = platform.system() == "Darwin"
 CI = os.getenv("CI", "") != ""
 
 def dedup(x:Iterable[T]): return list(dict.fromkeys(x))   # retains list order
-def argfix(*x): return tuple(x[0]) if x and x[0].__class__ in (tuple, list) else x
+def argfix(*x):
+  if x and x[0].__class__ in (tuple, list):
+    if len(x) != 1: raise ValueError(f"bad arg {x}")
+    return tuple(x[0])
+  return x
 def argsort(x): return type(x)(sorted(range(len(x)), key=x.__getitem__)) # https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
 def all_same(items:List[T]): return all(x == items[0] for x in items)
 def all_int(t: Sequence[Any]) -> TypeGuard[Tuple[int, ...]]: return all(isinstance(s, int) for s in t)
@@ -51,11 +56,20 @@ def get_child(obj, key):
     else: obj = getattr(obj, k)
   return obj
 
+# returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
+def get_contraction(old_shape:Tuple[sint, ...], new_shape:Tuple[sint, ...]) -> Optional[List[List[int]]]:
+  acc_old, acc_new = list(itertools.accumulate(old_shape, operator.mul)), list(itertools.accumulate(new_shape, operator.mul))
+  try: split = [acc_old.index(acc)+1 if acc != 1 else 0 for acc in acc_new]
+  except ValueError: return None
+  return [list(range(st,ed)) for st,ed in zip([0]+split[:-1], split[:-1]+[len(old_shape)])]
+
 @functools.lru_cache(maxsize=None)
 def to_function_name(s:str): return ''.join([c if c in (string.ascii_letters+string.digits+'_') else f'{ord(c):02X}' for c in ansistrip(s)])
 @functools.lru_cache(maxsize=None)
 def getenv(key:str, default=0): return type(default)(os.getenv(key, default))
 def temp(x:str) -> str: return (pathlib.Path(tempfile.gettempdir()) / x).as_posix()
+
+class GraphException(Exception): pass
 
 class Context(contextlib.ContextDecorator):
   stack: ClassVar[List[dict[str, int]]] = [{}]
@@ -80,7 +94,7 @@ class ContextVar:
   def __gt__(self, x): return self.value > x
   def __lt__(self, x): return self.value < x
 
-DEBUG, IMAGE, BEAM, NOOPT = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0)
+DEBUG, IMAGE, WINO, BEAM, NOOPT = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0), ContextVar("WINO", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0)
 GRAPH, GRAPHPATH = ContextVar("GRAPH", 0), getenv("GRAPHPATH", "/tmp/net")
 
 class Timing(contextlib.ContextDecorator):
@@ -90,16 +104,24 @@ class Timing(contextlib.ContextDecorator):
     self.et = time.perf_counter_ns() - self.st
     if self.enabled: print(f"{self.prefix}{self.et*1e-6:6.2f} ms"+(self.on_exit(self.et) if self.on_exit else ""))
 
+def _format_fcn(fcn): return f"{fcn[0]}:{fcn[1]}:{fcn[2]}"
 class Profiling(contextlib.ContextDecorator):
-  def __init__(self, enabled=True, sort='cumtime', frac=0.2, fn=None): self.enabled, self.sort, self.frac, self.fn = enabled, sort, frac, fn
+  def __init__(self, enabled=True, sort='cumtime', frac=0.2, fn=None, ts=1):
+    self.enabled, self.sort, self.frac, self.fn, self.time_scale = enabled, sort, frac, fn, 1e3/ts
   def __enter__(self):
-    self.pr = cProfile.Profile(timer=lambda: int(time.time()*1e9), timeunit=1e-6)
+    self.pr = cProfile.Profile()
     if self.enabled: self.pr.enable()
   def __exit__(self, *exc):
     if self.enabled:
       self.pr.disable()
       if self.fn: self.pr.dump_stats(self.fn)
-      pstats.Stats(self.pr).strip_dirs().sort_stats(self.sort).print_stats(self.frac)
+      stats = pstats.Stats(self.pr).strip_dirs().sort_stats(self.sort)
+      for fcn in stats.fcn_list[0:int(len(stats.fcn_list)*self.frac)]:    # type: ignore[attr-defined]
+        (_primitive_calls, num_calls, tottime, cumtime, callers) = stats.stats[fcn]    # type: ignore[attr-defined]
+        scallers = sorted(callers.items(), key=lambda x: -x[1][2])
+        print(f"n:{num_calls:8d}  tm:{tottime*self.time_scale:7.2f}ms  tot:{cumtime*self.time_scale:7.2f}ms",
+              colored(_format_fcn(fcn), "yellow") + " "*(50-len(_format_fcn(fcn))),
+              colored(f"<- {(scallers[0][1][2]/tottime)*100:3.0f}% {_format_fcn(scallers[0][0])}", "BLACK") if len(scallers) else '')
 
 # *** universal database cache ***
 
@@ -107,7 +129,7 @@ _cache_dir: str = getenv("XDG_CACHE_HOME", os.path.expanduser("~/Library/Caches"
 CACHEDB: str = getenv("CACHEDB", os.path.abspath(os.path.join(_cache_dir, "tinygrad", "cache.db")))
 CACHELEVEL = getenv("CACHELEVEL", 2)
 
-VERSION = 10
+VERSION = 13
 _db_connection = None
 def db_connection():
   global _db_connection
@@ -123,7 +145,7 @@ def diskcache_get(table:str, key:Union[Dict, str, int]) -> Any:
   conn = db_connection()
   cur = conn.cursor()
   try:
-    res = cur.execute(f"SELECT val FROM {table}_{VERSION} WHERE {' AND '.join([f'{x}=?' for x in key.keys()])}", tuple(key.values()))
+    res = cur.execute(f"SELECT val FROM '{table}_{VERSION}' WHERE {' AND '.join([f'{x}=?' for x in key.keys()])}", tuple(key.values()))
   except sqlite3.OperationalError:
     return None  # table doesn't exist
   if (val:=res.fetchone()) is not None: return pickle.loads(val[0])
@@ -138,12 +160,19 @@ def diskcache_put(table:str, key:Union[Dict, str, int], val:Any):
   if table not in _db_tables:
     TYPES = {str: "text", bool: "integer", int: "integer", float: "numeric", bytes: "blob"}
     ltypes = ', '.join(f"{k} {TYPES[type(key[k])]}" for k in key.keys())
-    cur.execute(f"CREATE TABLE IF NOT EXISTS {table}_{VERSION} ({ltypes}, val blob, PRIMARY KEY ({', '.join(key.keys())}))")
+    cur.execute(f"CREATE TABLE IF NOT EXISTS '{table}_{VERSION}' ({ltypes}, val blob, PRIMARY KEY ({', '.join(key.keys())}))")
     _db_tables.add(table)
-  cur.execute(f"REPLACE INTO {table}_{VERSION} ({', '.join(key.keys())}, val) VALUES ({', '.join(['?']*len(key.keys()))}, ?)", tuple(key.values()) + (pickle.dumps(val), ))  # noqa: E501
+  cur.execute(f"REPLACE INTO '{table}_{VERSION}' ({', '.join(key.keys())}, val) VALUES ({', '.join(['?']*len(key.keys()))}, ?)", tuple(key.values()) + (pickle.dumps(val), ))  # noqa: E501
   conn.commit()
   cur.close()
   return val
+
+def diskcache(func):
+  def wrapper(*args, **kwargs) -> bytes:
+    table, key = f"cache_{func.__name__}", hashlib.sha256(pickle.dumps((args, kwargs))).hexdigest()
+    if (ret:=diskcache_get(table, key)): return ret
+    return diskcache_put(table, key, func(*args, **kwargs))
+  return wrapper
 
 # *** http support ***
 
@@ -151,7 +180,7 @@ def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, allow_caching=n
   if url.startswith(("/", ".")): return pathlib.Path(url)
   fp = pathlib.Path(name) if name is not None and (isinstance(name, pathlib.Path) or '/' in name) else pathlib.Path(_cache_dir) / "tinygrad" / "downloads" / (name if name else hashlib.md5(url.encode('utf-8')).hexdigest())  # noqa: E501
   if not fp.is_file() or not allow_caching:
-    with request.urlopen(url, timeout=10) as r:
+    with urllib.request.urlopen(url, timeout=10) as r:
       assert r.status == 200
       total_length = int(r.headers.get('content-length', 0))
       progress_bar = tqdm(total=total_length, unit='B', unit_scale=True, desc=url)
@@ -182,19 +211,9 @@ def init_c_struct_t(fields: Tuple[Tuple[str, ctypes._SimpleCData], ...]):
     _pack_, _fields_ = 1, fields
   return CStruct
 def init_c_var(ctypes_var, creat_cb): return (creat_cb(ctypes_var), ctypes_var)[1]
-def get_bytes(arg, get_sz, get_str, check) -> bytes: return (sz := init_c_var(ctypes.c_size_t(), lambda x: check(get_sz(arg, ctypes.byref(x)))), ctypes.string_at(init_c_var(ctypes.create_string_buffer(sz.value), lambda x: check(get_str(arg, x))), size=sz.value))[1]  # noqa: E501
-def flat_mv(mv:memoryview):
-  if len(mv) == 0: return mv
-  return mv.cast("B", shape=(mv.nbytes,))
+def flat_mv(mv:memoryview): return mv if len(mv) == 0 else mv.cast("B", shape=(mv.nbytes,))
 
 # *** Helpers for CUDA-like APIs.
-
-def compile_cuda_style(prg, compile_options, prog_t, create_prog, compile_prog, get_code, get_code_size, get_log, get_log_size, check) -> bytes:
-  check(create_prog(ctypes.byref(prog := prog_t()), prg.encode(), "<null>".encode(), 0, None, None))
-  status = compile_prog(prog, len(compile_options), to_char_p_p([o.encode() for o in compile_options]))
-
-  if status != 0: raise RuntimeError(f"compile failed: {get_bytes(prog, get_log_size, get_log, check).decode()}")
-  return get_bytes(prog, get_code_size, get_code, check)
 
 def encode_args_cuda_style(bufs, vals, device_ptr_t, marks) -> Tuple[ctypes.Array, ctypes.Structure]:
   c_args = init_c_struct_t(tuple([(f'f{i}', device_ptr_t) for i in range(len(bufs))] + [(f'f{i}', ctypes.c_int) for i in range(len(bufs), len(bufs)+len(vals))]))(*bufs, *vals)  # noqa: E501

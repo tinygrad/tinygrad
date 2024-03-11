@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 
-from tinygrad.helpers import BEAM, Timing
+from tinygrad.helpers import BEAM, Timing, CI
 from tinygrad.shape.symbolic import Variable
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
@@ -57,11 +57,19 @@ class TestBeamSearch(unittest.TestCase):
     actual = a.numpy()
     np.testing.assert_allclose(actual, desired)
 
+  @unittest.skipIf(CI, "flaky. CL_OUT_OF_RESOURCES")
   def test_conv_beam(self):
     c = Conv2d(3, 16, (3,3))
     x = Tensor.rand(1,3,32,32)
     with Timing():
       c(x).realize()
+
+  def test_large_ast(self):
+    a = Tensor.rand(3, 3)
+    for _ in range(5):
+      for _ in range(4):
+        a = (a + a) * a
+    a.realize()
 
 if __name__ == '__main__':
   unittest.main()

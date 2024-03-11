@@ -8,8 +8,7 @@ import onnxruntime as ort
 from onnx2torch import convert
 from extra.onnx import get_run_onnx
 from tinygrad.helpers import OSX, DEBUG, fetch
-from tinygrad.tensor import Tensor
-from tinygrad import Device
+from tinygrad import Tensor, Device
 
 MODELS = {
   "resnet50": "https://github.com/onnx/models/raw/main/validated/vision/classification/resnet/model/resnet50-caffe2-v1-9.onnx",
@@ -67,22 +66,28 @@ def benchmark_model(m, devices, validate_outs=False):
     tinygrad_model = get_run_onnx(onnx_model)
     benchmark(m, f"tinygrad_{device.lower()}_jitless", lambda: {k:v.numpy() for k,v in tinygrad_model(inputs).items()})
 
-    from tinygrad.jit import TinyJit
+    from tinygrad.features.jit import TinyJit
     tinygrad_jitted_model = TinyJit(lambda **kwargs: {k:v.realize() for k,v in tinygrad_model(kwargs).items()})
     for _ in range(3): {k:v.numpy() for k,v in tinygrad_jitted_model(**inputs).items()}
     benchmark(m, f"tinygrad_{device.lower()}_jit", lambda: {k:v.numpy() for k,v in tinygrad_jitted_model(**inputs).items()}) # noqa: F821
     del inputs, tinygrad_model, tinygrad_jitted_model
 
+  # convert model to torch
   try:
     torch_model = convert(onnx_model)
+  except Exception as e:
+    # model conversion failed
+    print(f"{m:16s}onnx2torch {type(e).__name__:>25}")
+  else:
     torch_inputs = [torch.tensor(x) for x in np_inputs.values()]
-    benchmark(m, "torch_cpu", lambda: torch_model(*torch_inputs))
+    try: benchmark(m, "torch_cpu", lambda: torch_model(*torch_inputs))
+    except Exception as e: print(f"{m:16s}torch_cpu {type(e).__name__:>25}")
 
     torch_device = "mps" if OSX else "cuda"
     torch_mps_model = torch_model.to(torch_device)
     torch_mps_inputs = [x.to(torch_device) for x in torch_inputs]
-    benchmark(m, f"torch_{torch_device}", lambda: torch_mps_model(*torch_mps_inputs))
-  except Exception as e: print(f"{m:16s}onnx2torch {type(e).__name__:>25}")
+    try: benchmark(m, f"torch_{torch_device}", lambda: torch_mps_model(*torch_mps_inputs))
+    except Exception as e: print(f"{m:16s}torch_{torch_device} {type(e).__name__:>25}")
 
   # bench onnxruntime
   ort_options = ort.SessionOptions()

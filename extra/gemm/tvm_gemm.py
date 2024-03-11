@@ -30,13 +30,14 @@ except ImportError:
 
 import os
 from tinygrad.tensor import Tensor
+from tinygrad.realize import create_schedule
 
 # define the compute
 A = Tensor.rand(M, K, device="clang")
 B = Tensor.rand(K, N, device="clang")
 C = (A.reshape(M, 1, K) * B.permute(1,0).reshape(1, N, K)).sum(axis=2)
 
-sched = C.lazydata.schedule()
+sched = create_schedule([C.lazydata])
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.codegen.kernel import LinearizerOptions
 lin = Linearizer(sched[-1].ast, LinearizerOptions(has_local=False, supports_float4=False))

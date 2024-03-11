@@ -6,15 +6,16 @@ from tinygrad.ops import GlobalCounters
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap
 from tinygrad.shape.view import strides_for_shape
+from tinygrad.features.multi import MultiLazyBuffer
 
-safe_dtypes = {"F16": dtypes.float16, "F32": dtypes.float32, "U8": dtypes.uint8, "I8": dtypes.int8, "I32": dtypes.int32, "I64": dtypes.int64,
-               "F64": dtypes.double, "B": dtypes.bool, "I16": dtypes.short, "U16": dtypes.ushort, "UI": dtypes.uint, "UL": dtypes.ulong}
+safe_dtypes = {"BOOL":dtypes.bool, "I8":dtypes.int8, "U8":dtypes.uint8, "I16":dtypes.int16, "U16":dtypes.uint16, "I32":dtypes.int, "U32":dtypes.uint,
+               "I64":dtypes.int64, "U64":dtypes.uint64, "F16":dtypes.float16, "BF16":dtypes.bfloat16, "F32":dtypes.float32, "F64":dtypes.float64}
 inverse_safe_dtypes = {v:k for k,v in safe_dtypes.items()}
 
 def safe_load_metadata(fn:Union[Tensor,str]) -> Tuple[Tensor, int, Any]:
   t = fn if isinstance(fn, Tensor) else Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}")
-  json_len = t[0:1].cast(dtypes.int64).numpy()[0]
-  return (t, json_len, json.loads(t[8:8+json_len].numpy().tobytes()))
+  json_len = t[0:1].cast(dtypes.int64).item()
+  return t, json_len, json.loads(t[8:8+json_len].numpy().tobytes())
 
 def safe_load(fn:Union[Tensor,str]) -> Dict[str, Tensor]:
   t, json_len, metadata = safe_load_metadata(fn)
@@ -37,7 +38,7 @@ def safe_save(tensors:Dict[str, Tensor], fn:str, metadata:Optional[Dict[str, Any
   pathlib.Path(fn).unlink(missing_ok=True)
   t = Tensor.empty(8+len(j)+offset, dtype=dtypes.uint8, device=f"disk:{fn}")
   t[0:1].cast(dtypes.int64).assign([len(j)])
-  t[8:8+len(j)].assign(Tensor(list(j.encode('utf-8')), dtype=dtypes.uint8, device="cpu"))
+  t[8:8+len(j)].assign(list(j.encode('utf-8')))
   for k,v in safe_load(t).items(): v.assign(tensors[k])
 
 # state dict
@@ -56,7 +57,7 @@ def get_state_dict(obj, prefix:str='', tensor_type=Tensor) -> Dict[str, Tensor]:
   return state_dict
 def get_parameters(obj) -> List[Tensor]: return list(get_state_dict(obj).values())
 
-def load_state_dict(model, state_dict, strict=True, verbose=True):
+def load_state_dict(model, state_dict:Dict[str, Tensor], strict=True, verbose=True, consume=False):
   start_mem_used = GlobalCounters.mem_used
   with Timing("loaded weights in ", lambda et_ns: f", {(GlobalCounters.mem_used-start_mem_used)/1e9:.2f} GB loaded at {(GlobalCounters.mem_used-start_mem_used)/et_ns:.2f} GB/s"):  # noqa: E501
     model_state_dict = get_state_dict(model)
@@ -67,7 +68,8 @@ def load_state_dict(model, state_dict, strict=True, verbose=True):
       if k not in state_dict and not strict:
         if DEBUG >= 1: print(f"WARNING: not loading {k}")
         continue
-      v.assign(state_dict[k].to(v.device)).realize()
+      v.assign(state_dict[k].shard(mlb.device, mlb.axis) if isinstance((mlb:=v.lazydata), MultiLazyBuffer) else state_dict[k].to(v.device)).realize()
+      if consume: del state_dict[k]
 
 # torch support!
 
@@ -92,7 +94,8 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
       if DEBUG >= 3: print(f"WARNING: this torch load is slow. CPU to permute {intermediate_shape} with {permute_indexes}")
       assert storage[1] != dtypes.bfloat16, "can't CPU permute BF16"
       # TODO: find a nice way to support all shapetracker on disktensors
-      ret = ret.cpu().reshape(intermediate_shape).permute(permute_indexes)
+      # TODO: BUG: a ".realize()" is needed here for 'GPU=1 python3 test/models/test_efficientnet.py TestEfficientNet.test_car'
+      ret = ret.clang().reshape(intermediate_shape).permute(permute_indexes).realize()
 
     return ret.reshape(size)
 
