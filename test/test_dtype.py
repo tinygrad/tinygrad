@@ -581,4 +581,6 @@ class TestAutoCastType(unittest.TestCase):
       # CLANG and PYTHON function default returns in double, and comparison to float can fail
       # TODO: fix this
       assert not all(result)
+
+if __name__ == '__main__':
   unittest.main()
