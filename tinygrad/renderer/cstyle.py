@@ -99,7 +99,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str
   # RECIP is annoying with the type of the const, so we transform it into DIV
   for u in uops:
     if u.uop is UOps.ALU and u.arg is UnaryOps.RECIP:
-      const_1 = uops.add(UOps.CONST, u.dtype, arg=1, insert_before=uops.uops.index(u))
+      const_1 = uops.add(UOps.CONST, u.dtype, arg=1.0, insert_before=uops.uops.index(u))
       u.arg = BinaryOps.DIV
       u.vin = (const_1, u.vin[0])
 
