@@ -184,14 +184,15 @@ class UOpGraph:
     for v in self.uops: v.vin = tuple(new if x is old else x for x in v.vin)
     self.uops.remove(old)
 
-  def simplify_phi_loops(self, get_recursive_parents, loop_to_name, render_ops, ctx):
+  def simplify_phi_loops(self, get_recursive_parents, loop_uops, render_ops, ctx):
+    loop_to_name = {op: name for name, op in loop_uops.items()}
     def alu_opposite(arg, x, y):
       if arg == BinaryOps.ADD: return x - y
       elif arg == BinaryOps.MUL: return Node.__floordiv__(x, y, False)
       else: raise RuntimeError("unhandled alu")
     def to_symbolic(u: UOp):
       if u.uop == UOps.CONST: return NumNode(int(u.arg))
-      elif u.uop == UOps.LOOP: return Variable(loop_to_name[u], u.vin[0].arg, u.vin[1].arg-1)
+      elif u.uop == UOps.LOOP: return Variable(loop_to_name[u], u.vin[0].arg, u.vin[1].arg - 1)
       elif u.uop == UOps.SPECIAL: return Variable(u.arg[1], 0, u.arg[2]-1)
       elif u.uop == UOps.ALU and u.arg == BinaryOps.ADD: return to_symbolic(u.vin[0]) + to_symbolic(u.vin[1])
       elif u.uop == UOps.ALU and u.arg == BinaryOps.MUL: return to_symbolic(u.vin[0]) * to_symbolic(u.vin[1])
@@ -255,7 +256,7 @@ class UOpGraph:
           self.replace_op(u, new)
           return True
 
-  def uoptimize(self, loop_to_name, render_ops, ctx):
+  def uoptimize(self, loop_uops, render_ops, ctx):
     # get PHI node loop scope, link anything using a DEFINE_ACC to the loop as a "parent"
     acc_scope: DefaultDict[UOp, List[UOp]] = defaultdict(list)
     for u in self.uops:
@@ -271,7 +272,7 @@ class UOpGraph:
 
     # uops optimization
     while self.uops_optimization(get_recursive_parents): pass
-    self.simplify_phi_loops(get_recursive_parents, loop_to_name, render_ops, ctx)
+    self.simplify_phi_loops(get_recursive_parents, loop_uops, render_ops, ctx)
 
     # (recursively) remove childless uops
     self.remove_childless()
