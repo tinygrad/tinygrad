@@ -6,7 +6,7 @@
 # POINTER_SIZE is: 8
 # LONGDOUBLE_SIZE is: 16
 #
-import ctypes
+import ctypes, os
 
 
 def string_cast(char_pointer, encoding='utf-8', errors='strict'):
@@ -29,7 +29,7 @@ def char_pointer_cast(string, encoding='utf-8'):
 
 
 _libraries = {}
-_libraries['libamd_comgr.so'] = ctypes.CDLL('/opt/rocm/lib/libamd_comgr.so')
+_libraries['libamd_comgr.so'] = ctypes.CDLL(os.getenv('ROCM_PATH', '/opt/rocm/')+'/lib/libamd_comgr.so')
 c_int128 = ctypes.c_ubyte*16
 c_uint128 = c_int128
 void = None
