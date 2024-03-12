@@ -257,7 +257,7 @@ class Compiled:
         if used_tensor_cores:
           lins.append(("hc", Linearizer(*ast, opts=self.compiler.linearizer_opts)))
           lins[-1][1].hand_coded_optimizations()
-        kb = Linearizer(ast, opts=self.compiler.linearizer_opts)
+        kb = Linearizer(*ast, opts=self.compiler.linearizer_opts)
         kb.required_optimizations()
         from tinygrad.features.search import beam_search, time_linearizer, bufs_from_lin
         test_rawbuffers = bufs_from_lin(kb)    # allocate scratch buffers for optimization
