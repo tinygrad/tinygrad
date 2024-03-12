@@ -9,7 +9,7 @@ from tinygrad.runtime.ops_hip import HIPCompiler
 from tinygrad.runtime.driver.hsa import check, scan_agents, find_memory_pool, AQLQueue
 
 class HSACompiler(HIPCompiler):
-  linearizer_opts = LinearizerOptions("HSA", has_tensor_cores=True)
+  linearizer_opts = LinearizerOptions("HSA", has_tensor_cores=True, shared_max=65536)
 
 class HSAProgram:
   def __init__(self, device:HSADevice, name:str, lib:bytes):
