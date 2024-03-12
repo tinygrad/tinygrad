@@ -1,5 +1,5 @@
 from __future__ import annotations
-import functools, math, operator
+import functools, math, operator, itertools
 from typing import List, Set, Optional, Tuple, Any, Dict, DefaultDict, Callable, cast
 from collections import defaultdict
 from tinygrad.helpers import DEBUG, flatten, all_same
@@ -58,6 +58,28 @@ def uop_alu_resolve(u:UOp) -> sint:
 
 def phi_resolve_acc(u:UOp) -> UOp: return u if u.uop is UOps.DEFINE_ACC else phi_resolve_acc(u.vin[0])
 
+def _match(uop:UOp, pattern:Dict[str, Any], store):
+  for k,v in pattern.items():
+    if k == "__name__":
+      store[v] = uop
+    elif k == "vin":
+      if isinstance(v, tuple):
+        if all(_match(uu, vv, store) for uu, vv in zip(uop.vin, v)): return True
+      elif isinstance(v, list):
+        # try all permutations
+        for vp in itertools.permutations(v):
+          if all(_match(uu, vv, store) for uu, vv in zip(uop.vin, vp)): return True
+      else:
+        return False
+    else:
+      if uop.__getattribute__(k) != v: return False
+  return True
+
+def rewrite(uop:UOp, patterns:List[Tuple[Dict[str, Any], Callable]]) -> Optional[UOp]:
+  for p,fxn in patterns:
+    if _match(uop, p, store:={}):
+      return fxn(**store)
+
 class UOpGraph:
   def __init__(self, start_uops:Optional[List[UOp]]=None):
     # list of uops
@@ -86,6 +108,7 @@ class UOpGraph:
       if uop is UOps.GEP and vin[0].uop is UOps.CONST: return self.add(UOps.CONST, dtype, arg=vin[0].arg, insert_before=insert_before)
       if uop is UOps.CAST and all(x.uop is UOps.CONST for x in vin) and all_same([x.arg for x in vin]):
         return self.add(UOps.CONST, dtype, arg=vin[0].arg, insert_before=insert_before)
+      """
       if uop is UOps.ALU:
         # rewrites. NOTE: the rewritten NEG op is still around...
         if arg is BinaryOps.ADD and vin[1].uop is UOps.ALU and vin[1].arg is UnaryOps.NEG:
@@ -102,12 +125,27 @@ class UOpGraph:
           if arg is BinaryOps.MUL and vin[x].uop is UOps.CONST and vin[x].arg == 0.0: return vin[x]
         if arg is BinaryOps.SUB and vin[1].uop is UOps.CONST and vin[1].arg == 0.0: return vin[0]
         if arg is BinaryOps.DIV and vin[1].uop is UOps.CONST and vin[1].arg == 1.0: return vin[0]
+      """
+    constant_fold_patterns = [
+      # x+-y -> x-y
+      ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": ({"__name__": "x"}, {"__name__": "y", "uop": UOps.ALU, "arg": UnaryOps.NEG})},
+        lambda x, y: UOp(UOps.ALU, dtype, (x, y), BinaryOps.SUB)),
+      # x+0 -> x or 0+x -> x
+      ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"__name__": "x"}, {"uop": UOps.CONST, "arg": 0}]}, lambda x: x),
+      # x*1 -> x or 1*x -> x
+      ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{"__name__": "x"}, {"uop": UOps.CONST, "arg": 1}]}, lambda x: x),
+      # x*0 -> 0 or 0*x -> 0
+      ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{}, {"__name__": "c", "uop": UOps.CONST, "arg": 0}]}, lambda c: c),
+      # x-0 -> x
+      ({"uop": UOps.ALU, "arg": BinaryOps.SUB, "vin": ({"__name__": "x"}, {"uop": UOps.CONST, "arg": 0})}, lambda x: x),
+    ]
+    ret = UOp(uop, dtype, vin, arg)
+    if simplify and (rewritten:=rewrite(ret, constant_fold_patterns)) is not None: ret = rewritten
 
-    key = (uop, dtype, vin, arg)
+    key = (ret.uop, ret.dtype, ret.vin, ret.arg)
     if insert_before is None: insert_before = len(self.uops)
     # check if the cached expr is valid with the given insert place.
     if cachable and (expr:=self.saved_exprs.get(key, None)) is not None and self.uops.index(expr) <= insert_before: return expr
-    ret = UOp(uop, dtype, vin, arg)
     self.uops.insert(insert_before, ret)
     if cachable: self.saved_exprs[key] = ret
     return ret
