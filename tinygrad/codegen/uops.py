@@ -119,16 +119,16 @@ constant_folder = PatternMatcher([
   ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{}, {"__name__": "c", "uop": UOps.CONST, "arg": 0}]}, lambda c: c), # x*0 -> 0 or 0*x -> 0
   ({"uop": UOps.ALU, "arg": BinaryOps.SUB, "vin": ({"__name__": "x"}, {"__name__": "x"})}, lambda x: UOp.const(x.dtype, 0)),   # x-x -> 0
   # (x+c0)+c1 -> x + (c0+c1)
-  ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"__name__": "c0", "uop": UOps.CONST},
-   {"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"__name__": "c1", "uop": UOps.CONST}, {"__name__": "x"}]}]},
+  ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"__name__": "c1", "uop": UOps.CONST},
+   {"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"__name__": "c0", "uop": UOps.CONST}, {"__name__": "x"}]}]},
     lambda c0, c1, x: UOp(UOps.ALU, x.dtype, (x, UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, (c0.arg, c1.arg)))), BinaryOps.ADD)),
   # (x*c0)*c1 -> x * (c0*c1)
-  ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{"__name__": "c0", "uop": UOps.CONST},
-   {"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{"__name__": "c1", "uop": UOps.CONST}, {"__name__": "x"}]}]},
+  ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{"__name__": "c1", "uop": UOps.CONST},
+   {"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{"__name__": "c0", "uop": UOps.CONST}, {"__name__": "x"}]}]},
     lambda c0, c1, x: UOp(UOps.ALU, x.dtype, (x, UOp.const(x.dtype, exec_alu(BinaryOps.MUL, x.dtype, (c0.arg, c1.arg)))), BinaryOps.MUL)),
   # (x+c0)*c1 -> x*c1 + (c0*c1)
-  ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{"__name__": "c0", "uop": UOps.CONST},
-   {"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"__name__": "c1", "uop": UOps.CONST}, {"__name__": "x"}]}]},
+  ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{"__name__": "c1", "uop": UOps.CONST},
+   {"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"__name__": "c0", "uop": UOps.CONST}, {"__name__": "x"}]}]},
     lambda c0, c1, x: UOp(UOps.ALU, x.dtype, (UOp(UOps.ALU, x.dtype, (x, c1), BinaryOps.MUL),
                                               UOp.const(x.dtype, exec_alu(BinaryOps.MUL, x.dtype, (c0.arg, c1.arg)))), BinaryOps.ADD)),
 ])
