@@ -88,7 +88,7 @@ def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Lineariz
       for s,c in zip(lin2.full_shape, lin2.colors()):
         if c in {"magenta", "yellow"}: up *= s
         if c in {"cyan", "green", "white"}: lcl *= s
-      if up > max_up or lcl > max_lcl or ("green" in lin2.colors() and up*lcl > 2 ** 15): continue
+      if up > max_up or lcl > max_lcl: continue
       acted_lins[i+1] = lin2
     except KernelOptError:
       pass
