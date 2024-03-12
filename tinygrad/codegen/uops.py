@@ -93,8 +93,8 @@ constant_fold_patterns = [
   # a phi without loops (len(vin)==2) is a noop
   ({"uop": UOps.PHI, "vin": ({}, {"__name__": "x"})}, lambda x: x),
   # x+-y -> x-y
-  ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": ({"__name__": "x"}, {"__name__": "y", "uop": UOps.ALU, "arg": UnaryOps.NEG})},
-    lambda x, y: UOp(UOps.ALU, x.dtype, (x, y), BinaryOps.SUB)),
+  ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": ({"__name__": "x"}, {"__name__": "my", "uop": UOps.ALU, "arg": UnaryOps.NEG})},
+    lambda x, my: UOp(UOps.ALU, x.dtype, (x, my.vin[0]), BinaryOps.SUB)),
   # a conditional with the same results either way is a noop, also fold const conditionals
   ({"uop": UOps.ALU, "arg": TernaryOps.WHERE, "vin": ({}, {"__name__": "val"}, {"__name__": "val"})}, lambda val: val),
   ({"uop": UOps.ALU, "arg": TernaryOps.WHERE, "vin": ({"__name__": "gate", "uop": UOps.CONST}, {"__name__": "c0"}, {"__name__": "c1"})},
