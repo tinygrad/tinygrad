@@ -89,7 +89,7 @@ class PatternMatcher:
     for p,fxn in self.patterns: self.pdict[(p.get("uop"), p.get("arg", None))].append((p, fxn))
 
   def rewrite(self, uop:UOp) -> Optional[UOp]:
-    for p,fxn in self.pdict[(uop.uop, uop.arg)] + self.pdict[(uop.uop, None)]:
+    for p,fxn in itertools.chain(self.pdict[(uop.uop, uop.arg)], self.pdict[(uop.uop, None)]):
       store: Dict[str, UOp] = {}
       if _match(uop, p, store): return fxn(**store)
     return None
