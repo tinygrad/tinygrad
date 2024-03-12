@@ -240,7 +240,7 @@ result = Tensor(2.0).realize() + Tensor(3.0).realize()
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.realize import create_schedule
 sched = create_schedule([result.lazydata])
-linearizer = Linearizer(sched[-1].ast, ClangCompiler.linearizer_opts)
+linearizer = Linearizer(sched[-1].ast, opts=ClangCompiler.linearizer_opts)
 linearizer.linearize()
 
 # print the uops

@@ -86,11 +86,13 @@ class LinearizerOptions(NamedTuple):
   local_max: Optional[List[int]] = None
 
 class Kernel:
-  def __init__(self, ast:LazyOp, opts:Optional[LinearizerOptions]=None):
+  def __init__(self, *ast:LazyOp, opts:Optional[LinearizerOptions]=None):
     self.opts = opts or (device.compiler.linearizer_opts if isinstance(device:=Device[Device.DEFAULT], Compiled) and device.compiler is not None else
                          LinearizerOptions(Device.DEFAULT))
-    self.ast = ast
-    assert ast.op == BufferOps.STORE, f"kernels must have a store as the output, got {ast.op}"
+    assert all(op.op is BufferOps.STORE for op in ast), f"kernels must have stores as the output, got {ast}"
+    assert len(set(op.arg.st.size for op in ast)) == 1, f"all outbufs should have the same size, got {[op.arg.st for op in ast]}"
+    assert len(ast) == 1, "max one output per kernel"
+    self.ast = ast[0]
 
     # fetch lazyop info
     self.info: FlopCounter = get_lazyop_info(self.ast)
