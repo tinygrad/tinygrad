@@ -88,7 +88,7 @@ def test_vs_onnx(onnx_data, schedule:Optional[List[ScheduleItem]], inputs:Dict[s
 
   # run code (all buffers have been allocated)
   GlobalCounters.reset()
-  for si in schedule: lower_schedule_item(si)([x.realized for x in si.output+si.inputs], {})
+  for si in schedule: lower_schedule_item(si)([x.realized for x in si.outputs+si.inputs], {})
 
   new_tinygrad_out = Tensor(schedule[-1].outputs[0]).numpy()
   np.testing.assert_allclose(new_torch_out, new_tinygrad_out, atol=1e-4, rtol=1e-2)
