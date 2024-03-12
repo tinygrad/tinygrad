@@ -81,14 +81,19 @@ def _match(uop:UOp, pattern:Dict[str, Any], store:Dict[str, UOp]) -> bool:
       if uop.__getattribute__(k) != v: return False
   return True
 
-def rewrite(uop:UOp, patterns:List[Tuple[Dict[str, Any], Any]]) -> Optional[UOp]:
-  for p,fxn in patterns:
-    store: Dict[str, UOp] = {}
-    if _match(uop, p, store):
-      return fxn(**store)
-  return None
+class PatternMatcher:
+  def __init__(self, patterns):
+    self.patterns = patterns
 
-constant_fold_patterns = [
+  def rewrite(self, uop:UOp) -> Optional[UOp]:
+    # TODO: write a universal data structure to not have to loop this
+    for p,fxn in self.patterns:
+      store: Dict[str, UOp] = {}
+      if _match(uop, p, store):
+        return fxn(**store)
+    return None
+
+constant_folder = PatternMatcher([
   # const rules
   ({"__name__": "root", "uop": UOps.GEP, "vin": ({"__name__": "c", "uop": UOps.CONST},)}, lambda root, c: UOp.const(root.dtype, c.arg)),
   ({"__name__": "root", "uop": UOps.CAST, "vin": {"__name__": "c", "uop": UOps.CONST}}, lambda root,c: UOp.const(root.dtype, c.arg)),
@@ -112,7 +117,7 @@ constant_fold_patterns = [
   # ** zero folding **
   ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{}, {"__name__": "c", "uop": UOps.CONST, "arg": 0}]}, lambda c: c), # x*0 -> 0 or 0*x -> 0
   ({"uop": UOps.ALU, "arg": BinaryOps.SUB, "vin": ({"__name__": "x"}, {"__name__": "x"})}, lambda x: UOp.const(x.dtype, 0)),   # x-x -> 0
-]
+])
 
 class UOpGraph:
   def __init__(self, start_uops:Optional[List[UOp]]=None):
@@ -138,7 +143,7 @@ class UOpGraph:
   def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None, cachable=True, insert_before=None,
           simplify=True) -> UOp:
     ret = UOp(uop, dtype, vin, arg)
-    if simplify and (rewritten:=rewrite(ret, constant_fold_patterns)) is not None:
+    if simplify and (rewritten:=constant_folder.rewrite(ret)) is not None:
       if rewritten in self.uops: return rewritten  # ignore cachable
       ret = rewritten
     key = (ret.uop, ret.dtype, ret.vin, ret.arg)
