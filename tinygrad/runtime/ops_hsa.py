@@ -155,7 +155,7 @@ class HSADevice(Compiled):
   def __init__(self, device:str=""):
     if not HSADevice.agents:
       check(hsa.hsa_init())
-      atexit.register(lambda: hsa.hsa_shut_down())
+      atexit.register(hsa_terminate)
       HSADevice.agents = scan_agents()
       HSADevice.cpu_agent = HSADevice.agents[hsa.HSA_DEVICE_TYPE_CPU][0]
       HSADevice.cpu_mempool = find_memory_pool(HSADevice.cpu_agent, segtyp=hsa.HSA_AMD_SEGMENT_GLOBAL, location=hsa.HSA_AMD_MEMORY_POOL_LOCATION_CPU)
@@ -222,3 +222,10 @@ class HSADevice(Compiled):
     self.kernarg_pool_sz: int = sz
 
   def flush_hdp(self): self.hdp_flush.HDP_MEM_FLUSH_CNTL[0] = 1
+
+def hsa_terminate():
+  # Need to stop/delete aql queue before hsa shut down, this leads to gpu hangs.
+  for dev in HSADevice.devices:
+    setattr(dev, 'synchronize', lambda: None) # some destructors might require to sync, but hw_queue is removed.
+    del dev.hw_queue
+  hsa.hsa_shut_down()
