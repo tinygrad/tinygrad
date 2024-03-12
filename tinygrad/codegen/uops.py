@@ -20,8 +20,8 @@ class UOps(Enum):
 class UOp:
   uop: UOps
   dtype: Optional[DType]
-  vin: Tuple[UOp, ...]
-  arg: Any
+  vin: Tuple[UOp, ...] = tuple()
+  arg: Any = None
   def __repr__(self):
     return f"{str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.uop for x in self.vin]):32s} {self.arg}"
 
@@ -58,19 +58,22 @@ def uop_alu_resolve(u:UOp) -> sint:
 
 def phi_resolve_acc(u:UOp) -> UOp: return u if u.uop is UOps.DEFINE_ACC else phi_resolve_acc(u.vin[0])
 
-def _match(uop:UOp, pattern:Dict[str, Any], store):
+def _match(uop:UOp, pattern:Dict[str, Any], store:Dict[str, UOp]) -> bool:
   for k,v in pattern.items():
     if k == "__name__":
+      if v in store and store[v] != uop: return False
       store[v] = uop
     elif k == "vin":
-      if isinstance(v, tuple):
-        if all(_match(uu, vv, store) for uu, vv in zip(uop.vin, v)): return True
-      elif isinstance(v, list):
-        # try all permutations
-        for vp in itertools.permutations(v):
-          if all(_match(uu, vv, store) for uu, vv in zip(uop.vin, vp)): return True
-      else:
-        return False
+      # only one if it's a tuple
+      # try all permutations if it's a list
+      # repeat if it's a dict
+      for vp in itertools.permutations(v) if isinstance(v, list) else ([v] if isinstance(v, tuple) else [(v,)*len(uop.vin)]):
+        if len(uop.vin) != len(vp): return False
+        new_store = store.copy()
+        if all(_match(uu, vv, new_store) for uu, vv in zip(uop.vin, vp)):
+          for k,v in new_store.items(): store[k] = v
+          return True
+      return False
     else:
       if uop.__getattribute__(k) != v: return False
   return True
@@ -79,6 +82,25 @@ def rewrite(uop:UOp, patterns:List[Tuple[Dict[str, Any], Callable]]) -> Optional
   for p,fxn in patterns:
     if _match(uop, p, store:={}):
       return fxn(**store)
+
+constant_fold_patterns = [
+  # x+-y -> x-y
+  ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": ({"__name__": "x"}, {"__name__": "y", "uop": UOps.ALU, "arg": UnaryOps.NEG})},
+    lambda x, y: UOp(UOps.ALU, x.dtype, (x, y), BinaryOps.SUB)),
+  # a conditional with the same results either way is a noop, also fold const conditionals
+  ({"uop": UOps.ALU, "arg": TernaryOps.WHERE, "vin": ({}, {"__name__": "val"}, {"__name__": "val"})}, lambda val: val),
+  ({"uop": UOps.ALU, "arg": TernaryOps.WHERE, "vin": ({"__name__": "gate", "uop": UOps.CONST}, {"__name__": "c0"}, {"__name__": "c1"})},
+    lambda gate, c0, c1: c0 if gate.arg else c1),
+  # ** constant folding **
+  ({"__name__": "root", "uop": UOps.ALU, "vin": {"uop": UOps.CONST}},
+    lambda root: UOp(UOps.CONST, root.dtype, arg=exec_alu(root.arg, root.dtype, [x.arg for x in root.vin]))),
+  # ** zero folding **
+  ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"__name__": "x"}, {"uop": UOps.CONST, "arg": 0}]}, lambda x: x),   # x+0 -> x or 0+x -> x
+  ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{"__name__": "x"}, {"uop": UOps.CONST, "arg": 1}]}, lambda x: x),   # x*1 -> x or 1*x -> x
+  ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{}, {"__name__": "c", "uop": UOps.CONST, "arg": 0}]}, lambda c: c), # x*0 -> 0 or 0*x -> 0
+  ({"uop": UOps.ALU, "arg": BinaryOps.SUB, "vin": ({"__name__": "x"}, {"uop": UOps.CONST, "arg": 0})}, lambda x: x),   # x-0 -> x
+  ({"uop": UOps.ALU, "arg": BinaryOps.DIV, "vin": ({"__name__": "x"}, {"uop": UOps.CONST, "arg": 1})}, lambda x: x),   # x/1 -> x
+]
 
 class UOpGraph:
   def __init__(self, start_uops:Optional[List[UOp]]=None):
@@ -126,19 +148,6 @@ class UOpGraph:
         if arg is BinaryOps.SUB and vin[1].uop is UOps.CONST and vin[1].arg == 0.0: return vin[0]
         if arg is BinaryOps.DIV and vin[1].uop is UOps.CONST and vin[1].arg == 1.0: return vin[0]
       """
-    constant_fold_patterns = [
-      # x+-y -> x-y
-      ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": ({"__name__": "x"}, {"__name__": "y", "uop": UOps.ALU, "arg": UnaryOps.NEG})},
-        lambda x, y: UOp(UOps.ALU, dtype, (x, y), BinaryOps.SUB)),
-      # x+0 -> x or 0+x -> x
-      ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"__name__": "x"}, {"uop": UOps.CONST, "arg": 0}]}, lambda x: x),
-      # x*1 -> x or 1*x -> x
-      ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{"__name__": "x"}, {"uop": UOps.CONST, "arg": 1}]}, lambda x: x),
-      # x*0 -> 0 or 0*x -> 0
-      ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{}, {"__name__": "c", "uop": UOps.CONST, "arg": 0}]}, lambda c: c),
-      # x-0 -> x
-      ({"uop": UOps.ALU, "arg": BinaryOps.SUB, "vin": ({"__name__": "x"}, {"uop": UOps.CONST, "arg": 0})}, lambda x: x),
-    ]
     ret = UOp(uop, dtype, vin, arg)
     if simplify and (rewritten:=rewrite(ret, constant_fold_patterns)) is not None: ret = rewritten
 
