@@ -40,7 +40,8 @@ class HSAProgram:
     if not hasattr(self, "args_struct_t"):
       self.args_struct_t = init_c_struct_t(tuple([(f'f{i}', ctypes.c_void_p) for i in range(len(args))] +
                                                  [(f'v{i}', ctypes.c_int) for i in range(len(vals))]))
-      assert ctypes.sizeof(self.args_struct_t) == self.kernargs_segment_size, f"{ctypes.sizeof(self.args_struct_t)} != {self.kernargs_segment_size}"
+      if ctypes.sizeof(self.args_struct_t) != self.kernargs_segment_size:
+        raise RuntimeError(f"HSAProgram.__call__: incorrect args struct size {ctypes.sizeof(self.args_struct_t)} != {self.kernargs_segment_size}")
 
     kernargs = None
     if self.kernargs_segment_size > 0:

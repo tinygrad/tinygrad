@@ -139,6 +139,8 @@ jobs:
         ln -s ~/tinygrad/weights/bpe_simple_vocab_16e6.txt.gz weights/bpe_simple_vocab_16e6.txt.gz
         ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
         ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
+        ln -s /raid/weights/mixtral-8x7b-32kseqlen weights/mixtral-8x7b-32kseqlen
+        ln -s /raid/weights/LLaMA-2 weights/LLaMA-2
     - name: Run model inference benchmark
       run: LD_PRELOAD="/opt/rocm/lib/libhsa-runtime64.so" HSA=1 NOCLANG=1 python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
@@ -153,6 +155,12 @@ jobs:
       run: |
         HSA=1 JIT=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
         HSA=1 JIT=1 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
+    - name: Run LLaMA with BEAM
+      run: HSA=1 JIT=1 BEAM=2 CACHELEVEL=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_beam.txt
+    - name: Run LLaMA-2 70B
+      run: HSA=1 python3 examples/llama.py --gen 2 --size 70B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_2_70B.txt
+    - name: Run Mixtral 8x7B
+      run: time HSA=1 python3 examples/mixtral.py --temperature 0 --count 10 --timing | tee mixtral.txt
     - name: Run GPT2
       run: |
         HSA=1 JIT=0 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_unjitted.txt
@@ -161,11 +169,10 @@ jobs:
       run: HSA=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
     - name: Run 10 CIFAR training steps w HALF
       run: HSA=1 STEPS=10 HALF=1 python3 examples/hlb_cifar10.py | tee train_cifar_half.txt
-    # # TODO: enable this. it took 3 minutes in CI and made the full training one more than 5 minutes
-    # - name: Run 10 CIFAR training steps w 6 GPUS
-    #   run: time HALF=1 STEPS=10 BS=1536 GPUS=6 python3 examples/hlb_cifar10.py
-    - name: Run full CIFAR training
+    - name: Run full CIFAR training w 1 GPU
       run: time HSA=1 HALF=1 LATEWINO=1 STEPS=1000 TARGET_EVAL_ACC_PCT=93 python3 examples/hlb_cifar10.py | tee train_cifar_one_gpu.txt
+    - name: Run full CIFAR training steps w 6 GPUS
+      run: time HSA=1 HALF=1 STEPS=350 BS=1536 GPUS=6 TARGET_EVAL_ACC_PCT=93 python3 examples/hlb_cifar10.py | tee train_cifar_six_gpu.txt
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (AMD)
@@ -176,9 +183,13 @@ jobs:
           train_cifar_half.txt
           train_cifar_wino.txt
           train_cifar_one_gpu.txt
+          train_cifar_six_gpu.txt
           llama_unjitted.txt
           llama_jitted.txt
+          llama_beam.txt
+          llama_2_70B.txt
           gpt2_unjitted.txt
           gpt2_jitted.txt
           matmul.txt
           sd.txt
+          mixtral.txt

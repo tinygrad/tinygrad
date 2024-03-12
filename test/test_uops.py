@@ -134,7 +134,7 @@ class TestBoolUOps(TestUOps):
 
 class TestExecALU(TestUOps):
   def test_sqrt(self):
-    self.assertEqual(exec_alu(UnaryOps.SQRT, dtypes.int, (0,)), 0)
+    self.assertEqual(exec_alu(UnaryOps.SQRT, dtypes.float, (0.0,)), 0.0)
 
   def test_div(self):
     self.assertEqual(exec_alu(BinaryOps.DIV, dtypes.int8, (8, 2)), 4)
@@ -146,7 +146,16 @@ class TestExecALU(TestUOps):
     self.assertEqual(exec_alu(BinaryOps.DIV, dtypes.float32, (7.0, 3.0)), 2+(1.0/3.0))
     self.assertEqual(exec_alu(BinaryOps.DIV, dtypes.float32, (7.0, -3.0)), -2-(1.0/3.0))
 
-  @unittest.skip("not enabled because it's slow")
+  def test_bool_neg(self):
+    self.assertEqual(exec_alu(UnaryOps.NEG, dtypes.bool, (False,)), True)
+    self.assertEqual(exec_alu(UnaryOps.NEG, dtypes.bool, (True,)), False)
+
+  def test_bool_cmplt(self):
+    self.assertEqual(exec_alu(BinaryOps.CMPLT, dtypes.bool, (False, False)), False)
+    self.assertEqual(exec_alu(BinaryOps.CMPLT, dtypes.bool, (False, True)), True)
+    self.assertEqual(exec_alu(BinaryOps.CMPLT, dtypes.bool, (True, False)), False)
+    self.assertEqual(exec_alu(BinaryOps.CMPLT, dtypes.bool, (True, True)), False)
+
   def test_overflow(self):
     self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.uint8, (250, 250)), 244)
     self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.uint8, (256, 0)), 0)
@@ -159,8 +168,8 @@ class TestExecALU(TestUOps):
     self.assertEqual(exec_alu(BinaryOps.SUB, dtypes.int8, (-1000, 0)), 24)
     self.assertEqual(exec_alu(BinaryOps.SUB, dtypes.int8, (-130, 0)), 126)
 
-    self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.int8, (1.0, 1.0)), 2)
-    self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.int8, (-math.exp2(7), 0)), -128)
+    self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.int8, (1, 1)), 2)
+    self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.int8, (-128, 0)), -128)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
