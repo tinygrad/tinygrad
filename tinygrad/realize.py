@@ -31,7 +31,6 @@ def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
   if si.ast[0].op is BufferOps.STORE: return Device[si.outputs[0].device].get_runner(*si.ast)
   assert len(si.ast) == 1 and len(si.outputs) == 1, "only ASTRunner supports multioutput"
   out, ast = si.outputs[0], si.ast[0]
-  if ast.op is LoadOps.EMPTY: return None
   if ast.op in {LoadOps.SYNC, LoadOps.WAIT, LoadOps.COPY} and out.device.startswith("HIP") and si.inputs[0].device.startswith("HIP"):
     from tinygrad.runtime.ops_hip import HIPSyncEvent, HIPWaitEvent
     if ast.op is LoadOps.SYNC: return HIPSyncEvent(out)
@@ -45,8 +44,7 @@ def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
     return BufferCopy()
   if ast.op is LoadOps.CUSTOM: return CustomOp(ast.arg)
   if ast.op is LoadOps.SYNC: return SyncOp(out.device) if isinstance(Device[out.device], Compiled) else None
-  if ast.op is LoadOps.WAIT: return None
-  return Device[out.device].get_runner(ast)
+  return None
 
 logops = open(getenv("LOGOPS", ""), "a") if getenv("LOGOPS", "") else None
 def run_schedule(schedule:List[ScheduleItem]):
