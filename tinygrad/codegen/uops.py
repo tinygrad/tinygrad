@@ -2,7 +2,7 @@ from __future__ import annotations
 import functools, math, operator, itertools
 from typing import List, Set, Optional, Tuple, Any, Dict, DefaultDict, Callable, cast
 from collections import defaultdict
-from tinygrad.helpers import DEBUG, flatten, all_same
+from tinygrad.helpers import DEBUG, flatten
 from tinygrad.dtype import dtypes, DType
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.shape.symbolic import sint, Variable, Node, NumNode, MulNode, DivNode, SumNode
@@ -78,12 +78,20 @@ def _match(uop:UOp, pattern:Dict[str, Any], store:Dict[str, UOp]) -> bool:
       if uop.__getattribute__(k) != v: return False
   return True
 
-def rewrite(uop:UOp, patterns:List[Tuple[Dict[str, Any], Callable]]) -> Optional[UOp]:
+def rewrite(uop:UOp, patterns:List[Tuple[Dict[str, Any], Any]]) -> Optional[UOp]:
   for p,fxn in patterns:
-    if _match(uop, p, store:={}):
+    store: Dict[str, UOp] = {}
+    if _match(uop, p, store):
       return fxn(**store)
+  return None
 
 constant_fold_patterns = [
+  # const rules
+  ({"__name__": "root", "uop": UOps.GEP, "vin": ({"__name__": "c", "uop": UOps.CONST},)}, lambda root, c: UOp(UOps.CONST, root.dtype, arg=c.arg)),
+  # TODO: this might have to change the python type of the arg based on root.dtype
+  ({"__name__": "root", "uop": UOps.CAST, "vin": {"__name__": "c", "uop": UOps.CONST}}, lambda root,c: UOp(UOps.CONST, root.dtype, arg=c.arg)),
+  # a phi without loops (len(vin)==2) is a noop
+  ({"uop": UOps.PHI, "vin": ({}, {"__name__": "x"})}, lambda x: x),
   # x+-y -> x-y
   ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": ({"__name__": "x"}, {"__name__": "y", "uop": UOps.ALU, "arg": UnaryOps.NEG})},
     lambda x, y: UOp(UOps.ALU, x.dtype, (x, y), BinaryOps.SUB)),
@@ -125,31 +133,31 @@ class UOpGraph:
 
   def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None, cachable=True, insert_before=None,
           simplify=True) -> UOp:
-    if simplify:
-      if uop is UOps.PHI and len(vin) == 2: return vin[1]   # a phi without loops is a noop
-      if uop is UOps.GEP and vin[0].uop is UOps.CONST: return self.add(UOps.CONST, dtype, arg=vin[0].arg, insert_before=insert_before)
-      if uop is UOps.CAST and all(x.uop is UOps.CONST for x in vin) and all_same([x.arg for x in vin]):
-        return self.add(UOps.CONST, dtype, arg=vin[0].arg, insert_before=insert_before)
-      """
-      if uop is UOps.ALU:
-        # rewrites. NOTE: the rewritten NEG op is still around...
-        if arg is BinaryOps.ADD and vin[1].uop is UOps.ALU and vin[1].arg is UnaryOps.NEG:
-          return self.add(UOps.ALU, dtype, (vin[0], vin[1].vin[0]), BinaryOps.SUB, cachable, insert_before)
-        # constant folding
-        if arg is TernaryOps.WHERE and vin[1] == vin[2]: return vin[1] # a conditional with the same results either way is a noop
-        if arg is TernaryOps.WHERE and vin[0].uop is UOps.CONST: return vin[1] if vin[0].arg else vin[2]
-        if all(x.uop is UOps.CONST for x in vin):
-          return self.add(UOps.CONST, dtype, arg=exec_alu(arg, dtype, [x.arg for x in vin]), insert_before=insert_before)
-        # zero folding
-        for x in [0,1]:
-          if arg is BinaryOps.ADD and vin[x].uop is UOps.CONST and vin[x].arg == 0.0: return vin[1-x]
-          if arg is BinaryOps.MUL and vin[x].uop is UOps.CONST and vin[x].arg == 1.0: return vin[1-x]
-          if arg is BinaryOps.MUL and vin[x].uop is UOps.CONST and vin[x].arg == 0.0: return vin[x]
-        if arg is BinaryOps.SUB and vin[1].uop is UOps.CONST and vin[1].arg == 0.0: return vin[0]
-        if arg is BinaryOps.DIV and vin[1].uop is UOps.CONST and vin[1].arg == 1.0: return vin[0]
-      """
+    #if simplify:
+    #  if uop is UOps.GEP and vin[0].uop is UOps.CONST: return self.add(UOps.CONST, dtype, arg=vin[0].arg, insert_before=insert_before)
+    #  if uop is UOps.CAST and all(x.uop is UOps.CONST for x in vin) and all_same([x.arg for x in vin]):
+    #    return self.add(UOps.CONST, dtype, arg=vin[0].arg, insert_before=insert_before)
+    #  if uop is UOps.PHI and len(vin) == 2: return vin[1]   # a phi without loops is a noop
+    #  if uop is UOps.ALU:
+    #    # rewrites. NOTE: the rewritten NEG op is still around...
+    #    if arg is BinaryOps.ADD and vin[1].uop is UOps.ALU and vin[1].arg is UnaryOps.NEG:
+    #      return self.add(UOps.ALU, dtype, (vin[0], vin[1].vin[0]), BinaryOps.SUB, cachable, insert_before)
+    #    # constant folding
+    #    if arg is TernaryOps.WHERE and vin[1] == vin[2]: return vin[1] # a conditional with the same results either way is a noop
+    #    if arg is TernaryOps.WHERE and vin[0].uop is UOps.CONST: return vin[1] if vin[0].arg else vin[2]
+    #    if all(x.uop is UOps.CONST for x in vin):
+    #      return self.add(UOps.CONST, dtype, arg=exec_alu(arg, dtype, [x.arg for x in vin]), insert_before=insert_before)
+    #    # zero folding
+    #    for x in [0,1]:
+    #      if arg is BinaryOps.ADD and vin[x].uop is UOps.CONST and vin[x].arg == 0.0: return vin[1-x]
+    #      if arg is BinaryOps.MUL and vin[x].uop is UOps.CONST and vin[x].arg == 1.0: return vin[1-x]
+    #      if arg is BinaryOps.MUL and vin[x].uop is UOps.CONST and vin[x].arg == 0.0: return vin[x]
+    #    if arg is BinaryOps.SUB and vin[1].uop is UOps.CONST and vin[1].arg == 0.0: return vin[0]
+    #    if arg is BinaryOps.DIV and vin[1].uop is UOps.CONST and vin[1].arg == 1.0: return vin[0]
     ret = UOp(uop, dtype, vin, arg)
-    if simplify and (rewritten:=rewrite(ret, constant_fold_patterns)) is not None: ret = rewritten
+    if simplify and (rewritten:=rewrite(ret, constant_fold_patterns)) is not None:
+      if rewritten in self.uops: return rewritten  # ignore cachable
+      ret = rewritten
 
     key = (ret.uop, ret.dtype, ret.vin, ret.arg)
     if insert_before is None: insert_before = len(self.uops)
