@@ -37,5 +37,14 @@ class TestUOpGraph(unittest.TestCase):
     self.assertEqual(out.uop, UOps.CONST)
     self.assertEqual(out.arg, 2.0)
 
+  def test_const_cast(self):
+    g = UOpGraph()
+    bf = g.add(UOps.CONST, dtypes.bool, arg=False)
+    out = g.add(UOps.CAST, dtypes.int, (bf,))
+    g.remove_childless({out})
+    self.assertEqual(len(g.uops), 1)
+    self.assertEqual(out.uop, UOps.CONST)
+    self.assertEqual(out.arg, 0)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
