@@ -81,17 +81,23 @@ def _match(uop:UOp, pattern:Dict[str, Any], store:Dict[str, UOp]) -> bool:
       if uop.__getattribute__(k) != v: return False
   return True
 
-def rewrite(uop:UOp, patterns:List[Tuple[Dict[str, Any], Any]]) -> Optional[UOp]:
-  for p,fxn in patterns:
-    store: Dict[str, UOp] = {}
-    if _match(uop, p, store):
-      return fxn(**store)
-  return None
+class PatternMatcher:
+  def __init__(self, patterns:List[Tuple[Dict[str, Any], Any]]):
+    self.patterns = patterns
+    self.pdict = defaultdict(list)
+    # uop is required, arg is optional
+    for p,fxn in self.patterns: self.pdict[(p.get("uop"), p.get("arg", None))].append((p, fxn))
 
-constant_fold_patterns = [
+  def rewrite(self, uop:UOp) -> Optional[UOp]:
+    for p,fxn in itertools.chain(self.pdict[(uop.uop, uop.arg)], self.pdict[(uop.uop, None)]):
+      store: Dict[str, UOp] = {}
+      if _match(uop, p, store): return fxn(**store)
+    return None
+
+constant_folder = PatternMatcher([
   # const rules
   ({"__name__": "root", "uop": UOps.GEP, "vin": ({"__name__": "c", "uop": UOps.CONST},)}, lambda root, c: UOp.const(root.dtype, c.arg)),
-  ({"__name__": "root", "uop": UOps.CAST, "vin": {"__name__": "c", "uop": UOps.CONST}}, lambda root,c: UOp.const(root.dtype, c.arg)),
+  ({"__name__": "root", "uop": UOps.CAST, "vin": {"__name__": "c", "uop": UOps.CONST}}, lambda root, c: UOp.const(root.dtype, c.arg)),
   # a phi without loops (len(vin)==2) is a noop
   ({"uop": UOps.PHI, "vin": ({}, {"__name__": "x"})}, lambda x: x),
   # x+-y -> x-y
@@ -103,7 +109,7 @@ constant_fold_patterns = [
     lambda gate, c0, c1: c0 if gate.arg else c1),
   # ** constant folding **
   ({"__name__": "root", "uop": UOps.ALU, "vin": {"uop": UOps.CONST}},
-    lambda root: UOp(UOps.CONST, root.dtype, arg=exec_alu(root.arg, root.dtype, [x.arg for x in root.vin]))),
+    lambda root: UOp.const(root.dtype, exec_alu(root.arg, root.dtype, [x.arg for x in root.vin]))),
   # ** self folding **
   ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"__name__": "x"}, {"uop": UOps.CONST, "arg": 0}]}, lambda x: x),   # x+0 -> x or 0+x -> x
   ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{"__name__": "x"}, {"uop": UOps.CONST, "arg": 1}]}, lambda x: x),   # x*1 -> x or 1*x -> x
@@ -112,7 +118,7 @@ constant_fold_patterns = [
   # ** zero folding **
   ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{}, {"__name__": "c", "uop": UOps.CONST, "arg": 0}]}, lambda c: c), # x*0 -> 0 or 0*x -> 0
   ({"uop": UOps.ALU, "arg": BinaryOps.SUB, "vin": ({"__name__": "x"}, {"__name__": "x"})}, lambda x: UOp.const(x.dtype, 0)),   # x-x -> 0
-]
+])
 
 class UOpGraph:
   def __init__(self, start_uops:Optional[List[UOp]]=None):
@@ -138,7 +144,7 @@ class UOpGraph:
   def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None, cachable=True, insert_before=None,
           simplify=True) -> UOp:
     ret = UOp(uop, dtype, vin, arg)
-    if simplify and (rewritten:=rewrite(ret, constant_fold_patterns)) is not None:
+    if simplify and (rewritten:=constant_folder.rewrite(ret)) is not None:
       if rewritten in self.uops: return rewritten  # ignore cachable
       ret = rewritten
     key = (ret.uop, ret.dtype, ret.vin, ret.arg)
@@ -149,15 +155,13 @@ class UOpGraph:
     if cachable: self.saved_exprs[key] = ret
     return ret
 
-  def remove_childless(self):
-    UOPS_W_SIDE_EFFECTS = {UOps.DEFINE_GLOBAL, UOps.STORE}
-
+  def remove_childless(self, keep:Set[UOp]):
     while 1:
       has_child: Set[UOp] = set()
       for ru in self.uops:
         for vu in ru.vin:
           has_child.add(vu)
-      nu: List[UOp] = [x for x in self.uops if x in has_child or x.uop in UOPS_W_SIDE_EFFECTS]
+      nu: List[UOp] = [x for x in self.uops if x in has_child or x in keep]
       if len(nu) == len(self.uops): break
       if DEBUG >= 4: print(f"reduced UOp count from {len(self.uops)} to {len(nu)}")
       self.uops = nu
@@ -322,7 +326,8 @@ class UOpGraph:
     self.simplify_phi_loops(get_recursive_parents)
 
     # (recursively) remove childless uops
-    self.remove_childless()
+    # TODO: remove DEFINE_GLOBAL from here
+    self.remove_childless(set(x for x in self.uops if x.uop in {UOps.DEFINE_GLOBAL, UOps.STORE}))
 
     # store float4 upcasts directly if possible
     replaced_stores: Dict[UOp,UOp] = {}
