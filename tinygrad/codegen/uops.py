@@ -89,7 +89,7 @@ class PatternMatcher:
     for p,fxn in self.patterns: self.pdict[(p.get("uop"), p.get("arg", None))].append((p, fxn))
 
   def rewrite(self, uop:UOp) -> Optional[UOp]:
-    for p,fxn in self.pdict[(uop.uop, None)] + self.pdict[(uop.uop, uop.arg)]:
+    for p,fxn in self.pdict[(uop.uop, uop.arg)] + self.pdict[(uop.uop, None)]:
       store: Dict[str, UOp] = {}
       if _match(uop, p, store): return fxn(**store)
     return None
@@ -109,7 +109,7 @@ constant_folder = PatternMatcher([
     lambda gate, c0, c1: c0 if gate.arg else c1),
   # ** constant folding **
   ({"__name__": "root", "uop": UOps.ALU, "vin": {"uop": UOps.CONST}},
-    lambda root: UOp(UOps.CONST, root.dtype, arg=exec_alu(root.arg, root.dtype, [x.arg for x in root.vin]))),
+    lambda root: UOp.const(root.dtype, exec_alu(root.arg, root.dtype, [x.arg for x in root.vin]))),
   # ** self folding **
   ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"__name__": "x"}, {"uop": UOps.CONST, "arg": 0}]}, lambda x: x),   # x+0 -> x or 0+x -> x
   ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{"__name__": "x"}, {"uop": UOps.CONST, "arg": 1}]}, lambda x: x),   # x*1 -> x or 1*x -> x
