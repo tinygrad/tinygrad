@@ -149,15 +149,13 @@ class UOpGraph:
     if cachable: self.saved_exprs[key] = ret
     return ret
 
-  def remove_childless(self):
-    UOPS_W_SIDE_EFFECTS = {UOps.DEFINE_GLOBAL, UOps.STORE}
-
+  def remove_childless(self, keep:Set[UOp]):
     while 1:
       has_child: Set[UOp] = set()
       for ru in self.uops:
         for vu in ru.vin:
           has_child.add(vu)
-      nu: List[UOp] = [x for x in self.uops if x in has_child or x.uop in UOPS_W_SIDE_EFFECTS]
+      nu: List[UOp] = [x for x in self.uops if x in has_child or x in keep]
       if len(nu) == len(self.uops): break
       if DEBUG >= 4: print(f"reduced UOp count from {len(self.uops)} to {len(nu)}")
       self.uops = nu
@@ -322,7 +320,8 @@ class UOpGraph:
     self.simplify_phi_loops(get_recursive_parents)
 
     # (recursively) remove childless uops
-    self.remove_childless()
+    # TODO: remove DEFINE_GLOBAL from here
+    self.remove_childless(set(x for x in self.uops if x.uop in {UOps.DEFINE_GLOBAL, UOps.STORE}))
 
     # store float4 upcasts directly if possible
     replaced_stores: Dict[UOp,UOp] = {}
