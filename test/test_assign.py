@@ -27,12 +27,14 @@ class TestAssign(unittest.TestCase):
     b.realize()
     ba1 = a.lazydata.base.realized
     bb1 = b.lazydata.base.realized
-    a = a.permute(1,0)
-    a += b
-    a.realize()
-    ba2 = a.lazydata.base.realized
-    assert ba1 != ba2 and ba1 != bb1
-    np.testing.assert_allclose(a.numpy(), np.arange(N*N).reshape((N,N)) + np.arange(N*N).reshape((N,N)).transpose(1,0))
+    assert ba1 != bb1
+    with self.assertRaises(RuntimeError):
+      a = a.permute(1,0)
+      a += b
+      a.realize()
+      #ba2 = a.lazydata.base.realized
+      #assert ba1 != ba2
+      np.testing.assert_allclose(a.numpy(), np.arange(N*N).reshape((N,N)) + np.arange(N*N).reshape((N,N)).transpose(1,0))
 
   def test_post_permuted_assignment(self):
     a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
@@ -42,15 +44,17 @@ class TestAssign(unittest.TestCase):
     #GlobalCounters.cache = []
     ba1 = a.lazydata.base.realized # noqa: F841
     bb1 = b.lazydata.base.realized # noqa: F841
-    a.assign(a.permute(1,0) + b)   # this should not work!
-    a.realize()
-    ba2 = a.lazydata.base.realized # noqa: F841
-    # NOTE: don't test that it's assigned
-    #assert ba1 == ba2 and ba1 != bb1
-    np.testing.assert_allclose(a.numpy(), np.arange(N*N).reshape((N,N)) + np.arange(N*N).reshape((N,N)).transpose(1,0))
+    with self.assertRaises(RuntimeError):
+      a.assign(a.permute(1,0) + b)   # this should not work!
+      a.realize()
+      ba2 = a.lazydata.base.realized # noqa: F841
+      # NOTE: don't test that it's assigned
+      #assert ba1 == ba2 and ba1 != bb1
+      np.testing.assert_allclose(a.numpy(), np.arange(N*N).reshape((N,N)) + np.arange(N*N).reshape((N,N)).transpose(1,0))
 
   # TODO: is there a way to sneak in a permute such that it returns the wrong answer?
 
+  @unittest.skip("output_buffer no longer exists")
   def test_cast_assignment(self):
     a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
     a.realize()
