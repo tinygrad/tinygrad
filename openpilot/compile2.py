@@ -39,15 +39,15 @@ def get_schedule(onnx_data) -> Tuple[List[ScheduleItem], List[ScheduleItem]]:
   depends = set(input_lb)
   for si in schedule:
     if any(b in depends for b in si.inputs):
-      depends.add(si.out)
+      for out in si.outputs: depends.add(out)
 
   # run all kernels that don't depend on the inputs
   # NOTE: there's two extra kernels due to fusions that now happen since the weights aren't realized
-  schedule, schedule_independent = partition(schedule, lambda si: si.out in depends)
+  schedule, schedule_independent = partition(schedule, lambda si: any(out in depends for out in si.outputs))
   print(f"{len(schedule)} schedule items depend on the input, {len(schedule_independent)} don't")
 
   # confirm no loadops in the (non independent) schedule except for the ones that load the input buffers
-  assert all(si.ast.op not in LoadOps or si.out in input_lb for si in schedule), "has loadops, can't compile to Thneed"
+  assert all(si.ast[0].op not in LoadOps or out in input_lb for si in schedule for out in si.outputs), "has loadops, can't compile to Thneed"
   return schedule, schedule_independent, inputs
 
 def test_vs_onnx(onnx_data, schedule:Optional[List[ScheduleItem]], inputs:Dict[str, Tensor]):
@@ -88,9 +88,9 @@ def test_vs_onnx(onnx_data, schedule:Optional[List[ScheduleItem]], inputs:Dict[s
 
   # run code (all buffers have been allocated)
   GlobalCounters.reset()
-  for si in schedule: lower_schedule_item(si)([si.out.realized] + [x.realized for x in si.inputs], {})
+  for si in schedule: lower_schedule_item(si)([x.realized for x in si.outputs+si.inputs], {})
 
-  new_tinygrad_out = Tensor(schedule[-1].out).numpy()
+  new_tinygrad_out = Tensor(schedule[-1].outputs[0]).numpy()
   np.testing.assert_allclose(new_torch_out, new_tinygrad_out, atol=1e-4, rtol=1e-2)
   print("semi-thneed self-test passed!")
 
@@ -102,13 +102,13 @@ if __name__ == "__main__":
   #exit(0)
 
   schedule, schedule_independent, inputs = get_schedule(onnx_data)
-  schedule, schedule_input = partition(schedule, lambda x: x.ast.op not in LoadOps)
+  schedule, schedule_input = partition(schedule, lambda x: x.ast[0].op not in LoadOps)
   print(f"{len(schedule_input)} inputs")
 
   run_schedule(schedule_independent)
   run_schedule(schedule_input)
   with Context(DEBUG=max(DEBUG.value, 2), BEAM=getenv("LATEBEAM")):
-    image_count = sum(isinstance(si.out.dtype, ImageDType) for si in schedule)
+    image_count = sum(isinstance(out.dtype, ImageDType) for si in schedule for out in si.outputs)
     print(f"**** running real kernels {image_count}/{len(schedule)} images ****")
 
     GlobalCounters.reset()

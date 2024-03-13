@@ -392,7 +392,7 @@ After you are done speaking, output [EOS]. You are not Chad.
 
     print(f"Preparing KV cache for chatbot with personality {args.personality}...")
     with Timing():
-      llama.model(Tensor([toks]), 0, args.temperature).realize()  # NOTE: outputs are not used
+      llama.model(Tensor([toks], device=device), 0, args.temperature).realize()  # NOTE: outputs are not used
     start_pos = len(toks)
   else:
     # non chat bot mode
