@@ -60,12 +60,26 @@ class TestRandomness(unittest.TestCase):
 
   def test_rand_half(self):
     N = 128
-    x = Tensor.rand((2, N, N), dtype=dtypes.half).realize().numpy()
+    x = Tensor.rand((2, N, N), dtype=dtypes.half)
+    assert x.dtype == dtypes.half
+    x = x.realize().numpy()
     ones = np.take(x, np.where(x == 1))
     zeros = np.take(x, np.where(x == 0))
     self.assertTrue(ones.size == 0)
     self.assertTrue(zeros.size > 0)
     equal_distribution(lambda *x: Tensor.rand(*x, dtype=dtypes.float16), torch.rand, lambda x: np.random.rand(*x), shape=(2, N, N))
+
+  def test_rand_bfloat16(self):
+    N = 128
+    x = Tensor.rand((2, N, N), dtype=dtypes.bfloat16)
+    assert x.dtype == dtypes.bfloat16
+    # TODO: fix this property for bfloat16 random
+    # x = x.realize().float().numpy()
+    # ones = np.take(x, np.where(x == 1))
+    # zeros = np.take(x, np.where(x == 0))
+    # self.assertTrue(ones.size == 0)
+    # self.assertTrue(zeros.size > 0)
+    equal_distribution(lambda *x: Tensor.rand(*x, dtype=dtypes.bfloat16).float(), torch.rand, lambda x: np.random.rand(*x), shape=(2, N, N))
 
   def test_randn(self):
     self.assertTrue(normal_test(Tensor.randn))
