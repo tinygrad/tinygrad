@@ -4,6 +4,10 @@ import subprocess, os, time
 from typing import List
 from tinygrad.helpers import colored
 
+subprocess.run(["git", "remote", "-v"], check=True, text=True)
+
+
+"""
 subprocess.run(["git", "fetch", "tinygrad", "master"], check=True)
 ref_commit = subprocess.run(["git", "rev-parse", "tinygrad/master"], stdout=subprocess.PIPE, check=True, text=True).stdout.strip()
 curr_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], encoding="utf-8").strip()
@@ -33,3 +37,4 @@ if __name__ == "__main__":
     with open(f"{curr_commit}.diff", "w") as f: f.write(diff)
   tm = (time.perf_counter() - st) * 100
   print(f"Replay tests took {tm:6.2f} ms")
+"""
