@@ -8,7 +8,7 @@ from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.runtime.ops_hip import HIPCompiler
 from tinygrad.runtime.driver.hsa import check, scan_agents, find_memory_pool, AQLQueue
 
-PROFILER = getenv("PROFILER", 0)
+PROFILE = getenv("PROFILE", 0)
 
 class HSAProfiler:
   def __init__(self):
@@ -80,8 +80,8 @@ class HSAProgram:
       for i in range(len(vals)): args_st.__setattr__(f'v{i}', vals[i])
       self.device.flush_hdp()
 
-    signal = self.device.hw_queue.submit_kernel(self, global_size, local_size, kernargs, need_signal=(wait or PROFILER))
-    if PROFILER: Profiler.track(signal, self.device, self.name)
+    signal = self.device.hw_queue.submit_kernel(self, global_size, local_size, kernargs, need_signal=(wait or PROFILE))
+    if PROFILE: Profiler.track(signal, self.device, self.name)
     if wait:
       hsa.hsa_signal_wait_scacquire(signal, hsa.HSA_SIGNAL_CONDITION_LT, 1, (1 << 64) - 1, hsa.HSA_WAIT_STATE_ACTIVE)
       check(hsa.hsa_amd_profiling_get_dispatch_time(self.device.agent, signal, ctypes.byref(timings := hsa.hsa_amd_profiling_dispatch_time_t())))
@@ -121,7 +121,7 @@ class HSAAllocator(LRUAllocator):
                                                   1, ctypes.byref(sync_signal), copy_signal, hsa.HSA_AMD_SDMA_ENGINE_0, True))
     self.device.hw_queue.submit_barrier(wait_signals=[copy_signal])
     self.device.delayed_free.append(mem)
-    if PROFILER: Profiler.track(copy_signal, self.device, f"copyin: CPU -> HSA:{self.device.device_id}", copy=True)
+    if PROFILE: Profiler.track(copy_signal, self.device, f"copyin: CPU -> HSA:{self.device.device_id}", copy=True)
 
   def copy_from_fd(self, dest, fd, offset, size):
     sync_signal = self.device.hw_queue.submit_barrier(need_signal=True)
@@ -168,7 +168,7 @@ class HSAAllocator(LRUAllocator):
     check(hsa.hsa_amd_memory_async_copy(addr, HSADevice.cpu_agent, src, self.device.agent, dest.nbytes, 0, None, copy_signal))
     hsa.hsa_signal_wait_scacquire(copy_signal, hsa.HSA_SIGNAL_CONDITION_LT, 1, (1 << 64) - 1, hsa.HSA_WAIT_STATE_ACTIVE)
     check(hsa.hsa_amd_memory_unlock(from_mv(dest)))
-    if PROFILER: Profiler.track(copy_signal, self.device, f"copyout: HSA:{self.device.device_id} -> CPU", copy=True)
+    if PROFILE: Profiler.track(copy_signal, self.device, f"copyout: HSA:{self.device.device_id} -> CPU", copy=True)
 
   def transfer(self, dest:T, src:T, sz:int, src_dev=None, dest_dev=None):
     copy_signal = dest_dev.alloc_signal(reusable=False)
@@ -178,7 +178,7 @@ class HSAAllocator(LRUAllocator):
     check(hsa.hsa_amd_memory_async_copy_on_engine(dest, dest_dev.agent, src, src_dev.agent, sz, 2, c_wait_signal, copy_signal, hsa.HSA_AMD_SDMA_ENGINE_0, True)) # noqa: E501
     src_dev.hw_queue.submit_barrier(wait_signals=[copy_signal])
     dest_dev.hw_queue.submit_barrier(wait_signals=[copy_signal])
-    if PROFILER: Profiler.track(copy_signal, src_dev, f"transfer: HSA:{src_dev.device_id} -> HSA:{dest_dev.device_id}", copy=True)
+    if PROFILE: Profiler.track(copy_signal, src_dev, f"transfer: HSA:{src_dev.device_id} -> HSA:{dest_dev.device_id}", copy=True)
 
 class HSADevice(Compiled):
   devices: List[HSADevice] = []
@@ -192,7 +192,7 @@ class HSADevice(Compiled):
       HSADevice.agents = scan_agents()
       HSADevice.cpu_agent = HSADevice.agents[hsa.HSA_DEVICE_TYPE_CPU][0]
       HSADevice.cpu_mempool = find_memory_pool(HSADevice.cpu_agent, segtyp=hsa.HSA_AMD_SEGMENT_GLOBAL, location=hsa.HSA_AMD_MEMORY_POOL_LOCATION_CPU)
-      if PROFILER: check(hsa.hsa_amd_profiling_async_copy_enable(1))
+      if PROFILE: check(hsa.hsa_amd_profiling_async_copy_enable(1))
 
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
     self.agent = HSADevice.agents[hsa.HSA_DEVICE_TYPE_GPU][self.device_id]
@@ -222,8 +222,6 @@ class HSADevice(Compiled):
   def synchronize(self):
     self.hw_queue.wait()
 
-    if PROFILER: Profiler.process(self)
-
     for sig in self.reusable_signals: hsa.hsa_signal_silent_store_relaxed(sig, 1)
     self.signal_pool.extend(self.reusable_signals)
     self.reusable_signals.clear()
@@ -232,6 +230,7 @@ class HSADevice(Compiled):
     self.delayed_free.clear()
 
     self.kernarg_next_addr = self.kernarg_start_addr
+    Profiler.process(self)
 
   @staticmethod
   def synchronize_system():
@@ -262,8 +261,9 @@ class HSADevice(Compiled):
 def hsa_terminate():
   # Need to stop/delete aql queue before hsa shut down, this leads to gpu hangs.
   for dev in HSADevice.devices:
+    Profiler.process(dev)
     setattr(dev, 'synchronize', lambda: None) # some destructors might require to sync, but hw_queue is removed.
     del dev.hw_queue
-    Profiler.process(dev)
-  if Profiler.collected_events: Profiler.save("/tmp/events.json")
+
   hsa.hsa_shut_down()
+  if Profiler.collected_events: Profiler.save("/tmp/events.json")

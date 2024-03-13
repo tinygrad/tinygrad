@@ -3,7 +3,7 @@ from typing import List, Any, Dict, cast, Optional, Union
 from tinygrad.helpers import GraphException, init_c_var
 from tinygrad.device import Compiled, Buffer, CompiledASTRunner, BufferXfer, MultiDeviceJITGraph, update_stats
 from tinygrad.shape.symbolic import Variable
-from tinygrad.runtime.ops_hsa import HSADevice, PROFILER, Profiler
+from tinygrad.runtime.ops_hsa import HSADevice, PROFILE, Profiler
 from tinygrad.features.jit import JitItem, get_input_replace, get_jit_stats, \
                                   get_jc_idxs_with_updatable_launch_dims, get_jc_idxs_with_updatable_var_vals
 import tinygrad.runtime.autogen.hsa as hsa
@@ -81,8 +81,8 @@ class HSAGraph(MultiDeviceJITGraph):
           self.virt_aql_queues[ji.prg.device].submit_barrier(wait_signals=wait_signals[i:i+5])
         self.packets[j] = hsa.hsa_kernel_dispatch_packet_t.from_address(self.virt_aql_queues[ji.prg.device].write_addr)
         sync_signal = self.virt_aql_queues[ji.prg.device].submit_kernel(ji.prg.clprg, *ji.prg.launch_dims(var_vals), #type:ignore
-                                                                        ctypes.addressof(self.ji_kargs_structs[j]), need_signal=PROFILER)
-        if PROFILER:
+                                                                        ctypes.addressof(self.ji_kargs_structs[j]), need_signal=PROFILE)
+        if PROFILE:
           self.profile_info.append((sync_signal, ji.prg.device, ji.prg.clprg.name, False))
           self.signals_to_reset.append(sync_signal)
       elif isinstance(ji.prg, BufferXfer):
@@ -95,7 +95,7 @@ class HSAGraph(MultiDeviceJITGraph):
         wait_signals = self.access_resources(read=[src], write=[dest], new_dependency=sync_signal, sync_with_aql_packets=True)
         self.transfers.append((dest._buf, dest_dev.agent, src._buf, src_dev.agent, dest.nbytes, len(wait_signals),
                               (hsa.hsa_signal_t*len(wait_signals))(*wait_signals), sync_signal, hsa.HSA_AMD_SDMA_ENGINE_0, True))
-        if PROFILER: self.profile_info.append((sync_signal, src_dev, f"transfer: HSA:{src_dev.device_id} -> HSA:{dest_dev.device_id}", True))
+        if PROFILE: self.profile_info.append((sync_signal, src_dev, f"transfer: HSA:{src_dev.device_id} -> HSA:{dest_dev.device_id}", True))
 
     # Wait for all active signals to finish the graph
     wait_signals_to_finish: Dict[HSADevice, List[hsa.hsa_signal_t]] = collections.defaultdict(list)
