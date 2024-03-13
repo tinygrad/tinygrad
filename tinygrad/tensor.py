@@ -148,13 +148,13 @@ class Tensor:
     if self.lazydata is x.lazydata: return self  # a self assign is a NOOP
     # NOTE: we allow cross device assign / cross dtype assign with this hack. is this correct?
     # it's not a real assign, and we may want to disallow it
+    assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
+    assert not isinstance(self.lazydata, MultiLazyBuffer) or self.lazydata.axis == x.lazydata.axis, "axis must match on MultiLazyBuffer"
+    assert not x.requires_grad  # self requires_grad is okay?
     if self.device != x.device or self.dtype != x.dtype or \
         (self.lazydata.lbs[0].base.realized if isinstance(self.lazydata, MultiLazyBuffer) else self.lazydata.base.realized is None):
       self.lazydata = x.lazydata
       return self
-    assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
-    assert not isinstance(self.lazydata, MultiLazyBuffer) or self.lazydata.axis == x.lazydata.axis, "axis must match on MultiLazyBuffer"
-    assert not x.requires_grad  # self requires_grad is okay?
     if isinstance(self.lazydata, MultiLazyBuffer):
       # TODO: should real be set on this MLB?
       self.lazydata = MultiLazyBuffer([LazyBuffer.loadop(LoadOps.ASSIGN, s.shape, s.dtype, s.device, src=(d,s))
