@@ -136,8 +136,10 @@ def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyB
     output_st = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape)
     op = _recursive_lazyop(out, inputs, var_vals, output_st, realizes, cache={})
     op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_st.simplify().unbind()[0]))
-
-  return flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in inputs) + [ScheduleItem((op,), (out,), tuple(inputs), var_vals)]
+  si = ScheduleItem((op,), (out,), tuple(inputs), var_vals)
+  # even though what's assigned to is not an input in the LazyOp, it still needs to be scheduled
+  if out.op is LoadOps.ASSIGN and out.srcs[1].base not in inputs: inputs.append(out.srcs[1].base)
+  return flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in inputs) + [si]
 
 # recursively search the entire graph for all LazyBuffers, insert realizes after expands
 def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffer, None],
