@@ -4,17 +4,6 @@ import subprocess, os, time
 from typing import List
 from tinygrad.helpers import colored
 
-subprocess.run(["git", "fetch", "origin", "master"], check=True, text=True)
-try:
-  ref_commit = subprocess.run(["git", "rev-parse", "origin/master"], stdout=subprocess.PIPE, check=True, text=True).stdout.strip()
-  print(ref_commit)
-except: pass
-
-
-"""
-subprocess.run(["git", "fetch", "tinygrad", "master"], check=True)
-ref_commit = subprocess.run(["git", "rev-parse", "tinygrad/master"], stdout=subprocess.PIPE, check=True, text=True).stdout.strip()
-curr_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], encoding="utf-8").strip()
 
 def replay_kernels(commit: str) -> List[str]:
   subprocess.run(['git', 'checkout', commit], check=True)
@@ -29,6 +18,10 @@ def replay_kernels(commit: str) -> List[str]:
   return ret
 
 if __name__ == "__main__":
+  subprocess.run(["git", "fetch", "origin", "master"], check=True, text=True)
+  ref_commit = subprocess.run(["git", "rev-parse", "origin/master"], stdout=subprocess.PIPE, check=True, text=True).stdout.strip()
+  curr_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], encoding="utf-8").strip()
+
   st = time.perf_counter()
   curr = replay_kernels(curr_commit)
   ref = replay_kernels(ref_commit)
@@ -41,4 +34,3 @@ if __name__ == "__main__":
     with open(f"{curr_commit}.diff", "w") as f: f.write(diff)
   tm = (time.perf_counter() - st) * 100
   print(f"Replay tests took {tm:6.2f} ms")
-"""
