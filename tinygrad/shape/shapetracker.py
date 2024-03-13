@@ -42,7 +42,10 @@ class ShapeTracker:
 
   def real_size(self) -> int:
     if 0 in self.shape: return 0
-    ret = self.expr_idxs()[0].max
+    idx, valid = self.expr_idxs()
+    if not valid: return 0
+    # TODO: it's possible that the real_size is smaller condition on valid being true
+    ret = idx.max
     if not isinstance(ret, int): ret = ret.max  # might be represent by symbolic shape, take one more max for int max
     assert isinstance(ret, int), f"ret must be integer, {ret=} isn't"
     return ret+1
