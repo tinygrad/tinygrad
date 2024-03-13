@@ -248,16 +248,16 @@ class Compiled:
       from tinygrad.features.graph import print_tree
       print_tree(ast)
     from tinygrad.codegen.linearizer import Linearizer
-    k = Linearizer(ast, self.compiler.linearizer_opts)
+    k = Linearizer(ast, opts=self.compiler.linearizer_opts)
     k.required_optimizations()
     if not NOOPT:
       if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
       if BEAM >= 1:
         lins = [(("tc" if used_tensor_cores else "hc"), k)]
         if used_tensor_cores:
-          lins.append(("hc", Linearizer(ast, self.compiler.linearizer_opts)))
+          lins.append(("hc", Linearizer(ast, opts=self.compiler.linearizer_opts)))
           lins[-1][1].hand_coded_optimizations()
-        kb = Linearizer(ast, self.compiler.linearizer_opts)
+        kb = Linearizer(ast, opts=self.compiler.linearizer_opts)
         kb.required_optimizations()
         from tinygrad.features.search import beam_search, time_linearizer, bufs_from_lin
         test_rawbuffers = bufs_from_lin(kb)    # allocate scratch buffers for optimization

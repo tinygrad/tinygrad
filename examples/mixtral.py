@@ -16,8 +16,9 @@ class MixtureFeedForward:
     top = sorted(enumerate(choice), key=lambda x: -x[1])
     norm = top[0][1] + top[1][1]
     e1, e2 = self.experts[top[0][0]], self.experts[top[1][0]]
-    ret = e1(x.to(e1.w1.weight.device)).to(x.device) * Tensor([top[0][1]/norm]) + \
-          e2(x.to(e2.w1.weight.device)).to(x.device) * Tensor([top[1][1]/norm])
+    scale = Tensor([top[0][1]/norm, top[1][1]/norm])
+    ret = e1(x.to(e1.w1.weight.device)).to(x.device) * scale[0] + \
+          e2(x.to(e2.w1.weight.device)).to(x.device) * scale[1]
     return ret
 
 if __name__ == "__main__":
