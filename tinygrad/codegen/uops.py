@@ -336,6 +336,7 @@ class UOpGraph:
       if all(el.uop is UOps.GEP for el in val.vin): replaced_stores[u] = val.vin[0].vin[0]
       elif all(el.uop is UOps.PHI for el in val.vin): replaced_stores[u] = phi_resolve_acc(val)
     for prev,new in replaced_stores.items():
+      if prev.vin[-1].dtype != new.dtype: continue
       try: self.uops.remove(prev.vin[-1])  # remove the old upcast NOTE: the upcast's vins become childless now
       except ValueError: pass  # already removed
       self.uops[self.uops.index(prev)].vin = (prev.vin[0],prev.vin[1],new) # replace with the float4 value
