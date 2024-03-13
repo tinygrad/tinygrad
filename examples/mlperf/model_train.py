@@ -45,7 +45,7 @@ def train_resnet():
   BS                = config["BS"]                = getenv("BS", 104 * len(GPUS))  # fp32 GPUS<=6 7900xtx can fit BS=112
   EVAL_BS           = config["EVAL_BS"]           = getenv("EVAL_BS", BS)
   base_lr           = config["base_lr"]           = getenv("LR", 8.4 * (BS/2048))
-  lr_warmup_epochs  = config["lr_warmup_epochs"]  = 5
+  lr_warmup_epochs  = config["lr_warmup_epochs"]  = getenv("WARMUP_EPOCHS", 5)
   decay             = config["decay"]             = getenv("DECAY", 2e-4)
 
   target, achieved  = getenv("TARGET", 0.759), False
