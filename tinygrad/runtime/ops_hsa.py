@@ -14,14 +14,16 @@ class HSAProfiler:
   def __init__(self):
     self.tracked_signals = collections.defaultdict(list)
     self.collected_events: List[Tuple[Any, ...]] = []
+    self.copy_timings = hsa.hsa_amd_profiling_async_copy_time_t()
+    self.disp_timings = hsa.hsa_amd_profiling_dispatch_time_t()
 
   def track(self, signal, device, name, is_copy=False): self.tracked_signals[device].append((signal, name, is_copy))
   def process(self, device):
     # Process all tracked signals, should be called before any of tracked signals are reused.
     for sig,name,is_copy in self.tracked_signals[device]:
-      if is_copy: check(hsa.hsa_amd_profiling_get_async_copy_time(sig, ctypes.byref(timings := hsa.hsa_amd_profiling_async_copy_time_t())))
-      else: check(hsa.hsa_amd_profiling_get_dispatch_time(device.agent, sig, ctypes.byref(timings := hsa.hsa_amd_profiling_dispatch_time_t()))) #type:ignore
-      self.collected_events.append((device.device_id, 1 if is_copy else 0, name, timings.start, timings.end))
+      if is_copy: check(hsa.hsa_amd_profiling_get_async_copy_time(sig, ctypes.byref(timings :=  self.copy_timings)))
+      else: check(hsa.hsa_amd_profiling_get_dispatch_time(device.agent, sig, ctypes.byref(timings := self.disp_timings))) #type:ignore
+      self.collected_events.append((device.device_id, is_copy, name, timings.start, timings.end))
     self.tracked_signals.pop(device)
 
   def save(self, path):
