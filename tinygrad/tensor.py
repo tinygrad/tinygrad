@@ -148,7 +148,8 @@ class Tensor:
     if self.lazydata is x.lazydata: return self  # a self assign is a NOOP
     # NOTE: we allow cross device assign / cross dtype assign with this hack. is this correct?
     # it's not a real assign, and we may want to disallow it
-    if self.device != x.device or self.dtype != x.dtype:
+    if self.device != x.device or self.dtype != x.dtype or \
+        (self.lazydata.lbs[0].base.realized if isinstance(self.lazydata, MultiLazyBuffer) else self.lazydata.base.realized is None):
       self.lazydata = x.lazydata
       return self
     assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
