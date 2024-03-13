@@ -154,15 +154,8 @@ class Tensor:
       self.lazydata = MultiLazyBuffer([LazyBuffer.loadop(LoadOps.ASSIGN, s.shape, s.dtype, s.device, src=(d,s))
                                        for d,s in zip(x.lazydata.lbs, self.lazydata.lbs)], self.lazydata.axis)
     else:
+      assert isinstance(self.device, str), "non MLB is str device"
       self.lazydata = LazyBuffer.loadop(LoadOps.ASSIGN, self.shape, self.dtype, self.device, src=(x.lazydata, self.lazydata))
-    """
-    if self.dtype == x.dtype and not getenv("DISALLOW_ASSIGN"):
-      if isinstance(self.lazydata, MultiLazyBuffer):
-        for d,s in zip(x.lazydata.lbs, self.lazydata.lbs): d.output_buffer = s.base.realized
-      else:
-        if self.lazydata.base.realized is not None: x.lazydata.output_buffer = self.lazydata.base.realized
-    self.lazydata = x.lazydata
-    """
     return self
   def detach(self) -> Tensor: return Tensor(self.lazydata, device=self.device, requires_grad=False)
 
