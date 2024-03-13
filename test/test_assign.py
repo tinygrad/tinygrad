@@ -28,6 +28,16 @@ class TestAssign(unittest.TestCase):
     f(x)
     assert x.item() == 1
 
+  def test_assign_add_twice(self):
+    # NOTE: this has two kernels
+    def f(x):
+      x += 1
+      x += 1
+      x.realize()
+    x = Tensor([0])
+    f(x)
+    assert x.item() == 2
+
   def test_assign_add_double(self):
     def f(x):
       x += 1
