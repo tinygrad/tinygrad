@@ -13,27 +13,21 @@ PROFILER = getenv("PROFILER", 0)
 class HSAProfiler:
   def __init__(self):
     self.tracked_signals = collections.defaultdict(list)
-    self.updated_signals = set()
     self.collected_events: List[Tuple[Any, ...]] = []
 
-  def track(self, signal, device, name, copy=False, updated=True):
-    self.tracked_signals[device].append((signal, name, copy))
-    if updated: self.updated_signals.add(signal.handle)
-
-  def updated(self, signals): self.updated_signals.update(signal.handle for signal in signals)
-
-  def collect(self, device):
+  def track(self, signal, device, name, copy=False): self.tracked_signals[device].append((signal, name, copy))
+  def process(self, device):
+    # Process all tracked signals, should be called before any of tracked signals are reused.
     for sig,name,copy in self.tracked_signals[device]:
-      if sig.handle not in self.updated_signals: continue
       if copy: check(hsa.hsa_amd_profiling_get_async_copy_time(sig, ctypes.byref(timings := hsa.hsa_amd_profiling_async_copy_time_t())))
-      else: check(hsa.hsa_amd_profiling_get_dispatch_time(device.agent, sig, ctypes.byref(timings := hsa.hsa_amd_profiling_dispatch_time_t())))
+      else: check(hsa.hsa_amd_profiling_get_dispatch_time(device.agent, sig, ctypes.byref(timings := hsa.hsa_amd_profiling_dispatch_time_t()))) #type:ignore
       self.collected_events.append((device.device_id, 1 if copy else 0, name, timings.start, timings.end))
-      self.updated_signals.remove(sig.handle)
+    self.tracked_signals.pop(device)
 
   def save(self, path):
     mjson = []
     for i in range(len(HSADevice.devices)):
-      mjson.append({"name": "process_name", "ph": "M", "pid": i, "args": {"name": f"HSA"}})
+      mjson.append({"name": "process_name", "ph": "M", "pid": i, "args": {"name": "HSA"}})
       mjson.append({"name": "thread_name", "ph": "M", "pid": i, "tid": 0, "args": {"name": "AQL"}})
       mjson.append({"name": "thread_name", "ph": "M", "pid": i, "tid": 1, "args": {"name": "SDMA"}})
 
@@ -41,8 +35,7 @@ class HSAProfiler:
       mjson.append({"name": name, "ph": "B", "pid": dev_id, "tid": queue_id, "ts": st*1e-3})
       mjson.append({"name": name, "ph": "E", "pid": dev_id, "tid": queue_id, "ts": et*1e-3})
     with open(path, "w") as f: f.write(json.dumps({"traceEvents": mjson}))
-
-Profiler = HSAProfiler() if PROFILER else None
+Profiler = HSAProfiler()
 
 class HSACompiler(HIPCompiler):
   linearizer_opts = LinearizerOptions("HSA", has_tensor_cores=True, shared_max=65536)
@@ -229,7 +222,7 @@ class HSADevice(Compiled):
   def synchronize(self):
     self.hw_queue.wait()
 
-    if PROFILER: Profiler.collect(self)
+    if PROFILER: Profiler.process(self)
 
     for sig in self.reusable_signals: hsa.hsa_signal_silent_store_relaxed(sig, 1)
     self.signal_pool.extend(self.reusable_signals)
@@ -267,10 +260,10 @@ class HSADevice(Compiled):
   def flush_hdp(self): self.hdp_flush.HDP_MEM_FLUSH_CNTL[0] = 1
 
 def hsa_terminate():
-  if PROFILER: Profiler.save("/tmp/events.json")
-
   # Need to stop/delete aql queue before hsa shut down, this leads to gpu hangs.
   for dev in HSADevice.devices:
     setattr(dev, 'synchronize', lambda: None) # some destructors might require to sync, but hw_queue is removed.
     del dev.hw_queue
+    Profiler.process(dev)
+  if Profiler.collected_events: Profiler.save("/tmp/events.json")
   hsa.hsa_shut_down()
