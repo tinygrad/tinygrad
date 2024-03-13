@@ -144,18 +144,21 @@ class Tensor:
       self.contiguous().realize().lazydata.base.realized.copyin(x.numpy().data)
       return self
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
+    if DEBUG >= 4: print(f"assign {self.lazydata} <- {x.lazydata}")
     if self.lazydata is x.lazydata: return self  # a self assign is a NOOP
-    # NOTE: we allow cross device assign
+    # NOTE: we allow cross device assign with this hack. is this correct?
+    if self.device != x.device:
+      self.lazydata = x.lazydata
+      return self
     assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
     assert not isinstance(self.lazydata, MultiLazyBuffer) or self.lazydata.axis == x.lazydata.axis, "axis must match on MultiLazyBuffer"
     assert not x.requires_grad  # self requires_grad is okay?
-    if DEBUG >= 4: print(f"assign {self.lazydata} <- {x.lazydata}")
     if isinstance(self.lazydata, MultiLazyBuffer):
       # TODO: should real be set on this MLB?
       self.lazydata = MultiLazyBuffer([LazyBuffer.loadop(LoadOps.ASSIGN, s.shape, s.dtype, s.device, src=(d,s))
                                        for d,s in zip(x.lazydata.lbs, self.lazydata.lbs)], self.lazydata.axis)
     else:
-      assert isinstance(self.device, str), "non MLB is str device"
+      assert isinstance(self.device, str) and not isinstance(x.lazydata, MultiLazyBuffer), f"can't assign multi to single {self} {x}"
       self.lazydata = LazyBuffer.loadop(LoadOps.ASSIGN, self.shape, self.dtype, self.device, src=(x.lazydata, self.lazydata))
     return self
   def detach(self) -> Tensor: return Tensor(self.lazydata, device=self.device, requires_grad=False)
