@@ -103,6 +103,7 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None):
   q_in, q_out = Queue(), Queue()
 
   sz = (batch_size*BATCH_COUNT, 224, 224, 3)
+  if os.path.exists("/dev/shm/resnet_X"): os.unlink("/dev/shm/resnet_X")
   shm = shared_memory.SharedMemory(name="resnet_X", create=True, size=prod(sz))
   procs = []
 
