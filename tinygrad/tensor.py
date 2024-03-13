@@ -152,7 +152,7 @@ class Tensor:
     assert not isinstance(self.lazydata, MultiLazyBuffer) or self.lazydata.axis == x.lazydata.axis, "axis must match on MultiLazyBuffer"
     assert not x.requires_grad  # self requires_grad is okay?
     if self.device != x.device or self.dtype != x.dtype or \
-        (self.lazydata.lbs[0].base.realized if isinstance(self.lazydata, MultiLazyBuffer) else self.lazydata.base.realized is None):
+        (self.lazydata.lbs[0].base.realized is None if isinstance(self.lazydata, MultiLazyBuffer) else self.lazydata.base.realized is None):
       self.lazydata = x.lazydata
       return self
     if isinstance(self.lazydata, MultiLazyBuffer):
