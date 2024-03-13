@@ -7,7 +7,7 @@ from collections import defaultdict
 import numpy as np
 
 from tinygrad.dtype import DType, dtypes, ImageDType, Scalar, least_upper_float, least_upper_dtype, cast_scalar
-from tinygrad.helpers import argfix, make_pair, getenv, IMAGE, DEBUG, WINO, flatten, prod, all_int, round_up, merge_dicts, fully_flatten, flat_mv
+from tinygrad.helpers import argfix, make_pair, IMAGE, DEBUG, WINO, flatten, prod, all_int, round_up, merge_dicts, fully_flatten, flat_mv
 from tinygrad.lazy import LazyBuffer
 from tinygrad.features.multi import MultiLazyBuffer
 from tinygrad.ops import LoadOps
@@ -37,7 +37,7 @@ class Function:
 
 import tinygrad.mlops as mlops
 
-def _loadop(op, shape:Tuple[sint,...], dtype:DType, device:Union[str, Tuple[str, ...]], arg=None, src:Optional[LazyBuffer]=None):
+def _loadop(op, shape:Tuple[sint,...], dtype:DType, device:Union[str, Tuple[str, ...]], arg=None, src:Tuple[LazyBuffer,...]=()):
   if isinstance(device, str): return LazyBuffer.loadop(op, shape, dtype, device, arg, src)
   return MultiLazyBuffer([LazyBuffer.loadop(op, shape, dtype, d, arg, src) for d in device], None)
 
@@ -149,12 +149,20 @@ class Tensor:
     assert not isinstance(self.lazydata, MultiLazyBuffer) or self.lazydata.axis == x.lazydata.axis, "axis must match on MultiLazyBuffer"
     assert not x.requires_grad  # self requires_grad is okay?
     if DEBUG >= 4: print(f"assign {self.lazydata} <- {x.lazydata}")
+    if isinstance(self.lazydata, MultiLazyBuffer):
+      # TODO: should real be set on this MLB?
+      self.lazydata = MultiLazyBuffer([LazyBuffer.loadop(LoadOps.ASSIGN, s.shape, s.dtype, s.device, src=(d,s))
+                                       for d,s in zip(x.lazydata.lbs, self.lazydata.lbs)], self.lazydata.axis)
+    else:
+      self.lazydata = LazyBuffer.loadop(LoadOps.ASSIGN, self.shape, self.dtype, self.device, src=(x.lazydata, self.lazydata))
+    """
     if self.dtype == x.dtype and not getenv("DISALLOW_ASSIGN"):
       if isinstance(self.lazydata, MultiLazyBuffer):
         for d,s in zip(x.lazydata.lbs, self.lazydata.lbs): d.output_buffer = s.base.realized
       else:
         if self.lazydata.base.realized is not None: x.lazydata.output_buffer = self.lazydata.base.realized
     self.lazydata = x.lazydata
+    """
     return self
   def detach(self) -> Tensor: return Tensor(self.lazydata, device=self.device, requires_grad=False)
 

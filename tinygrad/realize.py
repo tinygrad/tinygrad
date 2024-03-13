@@ -105,8 +105,8 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
     var_vals.update(st_var_vals)
     return LazyOp(BufferOps.LOAD, (), MemBuffer(inputs.index(buf)+1, buf.dtype, unbound_st))
 
-  # if a CONTIGUOUS made it all the way here, just skip it
-  if buf.op is LoadOps.CONTIGUOUS:
+  # if a CONTIGUOUS or ASSIGN made it all the way here, just skip it
+  if buf.op in {LoadOps.CONTIGUOUS, LoadOps.ASSIGN}:
     assert first
     return _recursive_lazyop(buf.srcs[0], inputs, var_vals, st, realizes, cache, False)
 
