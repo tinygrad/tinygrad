@@ -112,7 +112,7 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None):
     X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:/dev/shm/resnet_X")
     Y = [None] * (batch_size*BATCH_COUNT)
 
-    for _ in range(64):
+    for _ in range(cpu_count()):
       p = Process(target=loader_process, args=(q_in, q_out, X, seed))
       p.daemon = True
       p.start()
