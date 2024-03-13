@@ -55,18 +55,10 @@ def run_schedule(schedule:List[ScheduleItem]):
     # get the program
     prg = lower_schedule_item(si)
 
-    # invalidate the output buffer if there's a non contig usage of it in inputs
-    if si.out.output_buffer is not None:
-      for i,a in enumerate(si.inputs):
-        if a.realized == si.out.output_buffer:
-          if any(not x.arg.st.contiguous for x in si.ast.lazyops if x.op is BufferOps.LOAD and x.arg.idx == i+1):
-            si.out.output_buffer = None
-            break
-
     # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
     if si.out.size > 0:
       options = BufferOptions(host=True, signal=True) if si.ast.op is LoadOps.SYNC else None
-      si.out.realized = si.out.output_buffer if si.out.output_buffer is not None else \
+      si.out.realized = si.out.output_lazybuffer.realized if si.out.output_lazybuffer is not None else \
         Buffer(si.out.device, si.out.size, si.out.dtype, "PLACEHOLDER" if getattr(prg, "skip_allocation", False) else None, options=options)
       del si.out.srcs
 
@@ -84,7 +76,7 @@ sys.setrecursionlimit(10000)
 
 # recursively create a lazyop
 def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Variable, int], st:ShapeTracker,
-                      realizes:Set[LazyBuffer], cache, first=True) -> LazyOp:
+                      realizes:Set[LazyBuffer], cache, first=True, assign_to=None) -> LazyOp:
   if (buf, st) in cache: return cache[(buf, st)]
   if buf != buf.base:
     st = buf.st + st
@@ -100,15 +92,20 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
 
   # if we aren't fusing it, it's a load and we add it to the inputs
   if buf.realized or (buf in realizes and not first):
-    if buf not in inputs: inputs.append(buf)
     unbound_st, st_var_vals = st.simplify().unbind()
     var_vals.update(st_var_vals)
+    if buf is assign_to:
+      # TODO: add this restriction back, but properly
+      #assert unbound_st.contiguous, f"must be contiguous for assign {unbound_st}"
+      return LazyOp(BufferOps.LOAD, (), MemBuffer(0, buf.dtype, unbound_st))
+    if buf not in inputs: inputs.append(buf)
     return LazyOp(BufferOps.LOAD, (), MemBuffer(inputs.index(buf)+1, buf.dtype, unbound_st))
 
   # if a CONTIGUOUS or ASSIGN made it all the way here, just skip it
   if buf.op in {LoadOps.CONTIGUOUS, LoadOps.ASSIGN}:
     assert first
-    return _recursive_lazyop(buf.srcs[0], inputs, var_vals, st, realizes, cache, False)
+    buf.srcs[1].output_lazybuffer = buf.srcs[0]
+    return _recursive_lazyop(buf.srcs[0], inputs, var_vals, st, realizes, cache, False, assign_to=buf.srcs[1] if buf.op is LoadOps.ASSIGN else None)
 
   # if it's a reduce, we have to change the shapetracker
   if buf.op in ReduceOps:
@@ -116,7 +113,8 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
     st = ShapeTracker.from_shape(buf.srcs[0].shape)
 
   # otherwise we fuse it like normal
-  cache[(buf, st)] = ret = LazyOp(buf.op, tuple(_recursive_lazyop(x, inputs, var_vals, st, realizes, cache, False) for x in buf.srcs), buf.arg)
+  cache[(buf, st)] = ret = \
+    LazyOp(buf.op, tuple(_recursive_lazyop(x, inputs, var_vals, st, realizes, cache, False, assign_to) for x in buf.srcs), buf.arg)
   return ret
 
 # recursively walk back in the graph to create the schedule
