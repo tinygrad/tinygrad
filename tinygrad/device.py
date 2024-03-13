@@ -30,7 +30,7 @@ class _Device:
   def DEFAULT(self) -> str:
     device_from_env: Optional[str] = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._devices, None)   # type: ignore
     if device_from_env: return device_from_env
-    for device in ["METAL", "HIP", "CUDA", "GPU", "LLVM", "CLANG"]:
+    for device in ["METAL", "HSA", "CUDA", "GPU", "LLVM", "CLANG"]:
       try:
         if self[device]: return device
       except Exception: pass
