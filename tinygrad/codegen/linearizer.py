@@ -195,7 +195,7 @@ class Linearizer(Kernel):
       if isinstance(buf, MemBuffer):
         self.buf_uops[i] = self.uops.add(UOps.DEFINE_GLOBAL,
                                          buf.dtype if isinstance(buf.dtype, ImageDType) else PtrDType(buf.dtype), (),
-                                         (buf.idx, f"data{buf.idx}", i == 0))
+                                         (buf.idx, f"data{buf.idx}", buf.idx == 0))
     # add var vals
     for i,var in enumerate(self.ast.vars()):
       assert var.expr is not None
@@ -327,7 +327,8 @@ class Linearizer(Kernel):
         assert not locals_to_store, "storing locals isn't supported here"
 
         # load earlybufs
-        loaded_buffers.update({b:self.global_load(self.bufs.index(self.local_alias[i]) if i in self.local_alias else i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs[1:], start=1) if b in self.earlybufs})  # noqa: E501
+        loaded_buffers.update({b:self.global_load(self.bufs.index(self.local_alias[i]) if i in self.local_alias else i,
+          global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs})
 
         # run early AST (with reduce)
         self.ast_parse(self.reduceop, acc, self.acc_offsets(self.full_buf_index), loaded_buffers, do_reduce=True, loop_ctx=loop_ctx)
@@ -382,7 +383,8 @@ class Linearizer(Kernel):
         local_idxs = local_idxs[:self.local_dims] + [NumNode(0) for i in range(self.group_for_reduces)]
 
     # load latebufs
-    loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0 and b.__class__ is not LocalBuffer})  # noqa: E501
+    loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs) \
+                           for i,b in enumerate(self.bufs) if b not in self.earlybufs and b.__class__ is not LocalBuffer})
 
     # run late AST (without the store)
     val = self.ast_parse(self.ast.src[0], acc, None, loaded_buffers)
