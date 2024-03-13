@@ -94,7 +94,7 @@ class Buffer:
     # zero copy with as_buffer (disabled by default due to use after free)
     if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, 'as_buffer'): return self.allocator.as_buffer(self._buf)
     assert not force_zero_copy, "force zero copy was passed, but copy is required"
-    return self.copyout(memoryview(bytearray(self.size*self.dtype.itemsize)))
+    return self.copyout(memoryview(bytearray(self.nbytes)))
   def copyin(self, mv:memoryview):
     mv = flat_mv(mv)
     assert len(mv) == self.nbytes, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
