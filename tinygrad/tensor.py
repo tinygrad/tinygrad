@@ -97,8 +97,8 @@ class Tensor:
       if (d := fully_flatten(data)) and all(isinstance(s, bool) for s in d): dtype = dtype or dtypes.bool
       elif d and all_int(d): dtype = dtype or dtypes.default_int
       else: dtype = dtype or dtypes.default_float
-      # NOTE: cast at the end for the dtypes that do not have a numpy dtype
-      data = _fromcpu(np.array(data, dtype.np)).cast(dtype)
+      if dtype == dtypes.bfloat16: data = Tensor(_fromcpu(np.array(data, np.float32)), device=device).cast(dtypes.bfloat16).lazydata
+      else: data = _fromcpu(np.array(data, dtype.np))
     elif isinstance(data, np.ndarray):
       if data.shape == (): data = _loadop(LoadOps.CONST, tuple(), dtype or dtypes.from_np(data.dtype), device, data.item())
       else: data = _fromcpu(data.astype(dtype.np) if dtype is not None and dtype.np is not None else data)
@@ -172,6 +172,7 @@ class Tensor:
     assert self.numel() == 1, "must have one element for item"
     return self._data().cast(self.dtype.fmt)[0]
   def numpy(self) -> np.ndarray:
+    if self.dtype == dtypes.bfloat16: return self.float().numpy()
     assert self.dtype.np is not None, f"no np dtype for {self.dtype}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
     return np.frombuffer(self._data(), dtype=self.dtype.np).reshape(self.shape)
