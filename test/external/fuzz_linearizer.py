@@ -66,8 +66,9 @@ def run_linearizer(lin: Linearizer, rawbufs=None, var_vals=None):
 
 
 def fuzz_linearizer(lin: Linearizer):
-  random.seed(42)
-  np.random.seed(42)
+  SEED = getenv("SEED", 42)
+  random.seed(SEED)
+  np.random.seed(SEED)
   print_tree(lin.ast)
   print(lin.colored_shape())
   seen_uops = {}

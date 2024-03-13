@@ -40,8 +40,8 @@ class ConstBuffer:
 
 @dataclass(frozen=True)
 class ScheduleItem:
-  ast: LazyOp
-  out: LazyBuffer
+  ast: Tuple[LazyOp, ...]
+  outputs: Tuple[LazyBuffer, ...]
   inputs: Tuple[LazyBuffer, ...]
   var_vals: Dict[Variable, int]
 

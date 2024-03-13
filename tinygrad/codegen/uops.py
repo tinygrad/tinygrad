@@ -19,7 +19,7 @@ class UOps(Enum):
 @dataclass(eq=False)
 class UOp:
   uop: UOps
-  dtype: Optional[DType]
+  dtype: Optional[DType] = None
   vin: Tuple[UOp, ...] = tuple()
   arg: Any = None
   def __repr__(self):
