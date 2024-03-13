@@ -15,13 +15,13 @@ class HSAProfiler:
     self.tracked_signals = collections.defaultdict(list)
     self.collected_events: List[Tuple[Any, ...]] = []
 
-  def track(self, signal, device, name, copy=False): self.tracked_signals[device].append((signal, name, copy))
+  def track(self, signal, device, name, is_copy=False): self.tracked_signals[device].append((signal, name, is_copy))
   def process(self, device):
     # Process all tracked signals, should be called before any of tracked signals are reused.
-    for sig,name,copy in self.tracked_signals[device]:
-      if copy: check(hsa.hsa_amd_profiling_get_async_copy_time(sig, ctypes.byref(timings := hsa.hsa_amd_profiling_async_copy_time_t())))
+    for sig,name,is_copy in self.tracked_signals[device]:
+      if is_copy: check(hsa.hsa_amd_profiling_get_async_copy_time(sig, ctypes.byref(timings := hsa.hsa_amd_profiling_async_copy_time_t())))
       else: check(hsa.hsa_amd_profiling_get_dispatch_time(device.agent, sig, ctypes.byref(timings := hsa.hsa_amd_profiling_dispatch_time_t()))) #type:ignore
-      self.collected_events.append((device.device_id, 1 if copy else 0, name, timings.start, timings.end))
+      self.collected_events.append((device.device_id, 1 if is_copy else 0, name, timings.start, timings.end))
     self.tracked_signals.pop(device)
 
   def save(self, path):
@@ -121,7 +121,7 @@ class HSAAllocator(LRUAllocator):
                                                   1, ctypes.byref(sync_signal), copy_signal, hsa.HSA_AMD_SDMA_ENGINE_0, True))
     self.device.hw_queue.submit_barrier(wait_signals=[copy_signal])
     self.device.delayed_free.append(mem)
-    if PROFILE: Profiler.track(copy_signal, self.device, f"copyin: CPU -> HSA:{self.device.device_id}", copy=True)
+    if PROFILE: Profiler.track(copy_signal, self.device, f"copyin: CPU -> HSA:{self.device.device_id}", is_copy=True)
 
   def copy_from_fd(self, dest, fd, offset, size):
     sync_signal = self.device.hw_queue.submit_barrier(need_signal=True)
@@ -168,7 +168,7 @@ class HSAAllocator(LRUAllocator):
     check(hsa.hsa_amd_memory_async_copy(addr, HSADevice.cpu_agent, src, self.device.agent, dest.nbytes, 0, None, copy_signal))
     hsa.hsa_signal_wait_scacquire(copy_signal, hsa.HSA_SIGNAL_CONDITION_LT, 1, (1 << 64) - 1, hsa.HSA_WAIT_STATE_ACTIVE)
     check(hsa.hsa_amd_memory_unlock(from_mv(dest)))
-    if PROFILE: Profiler.track(copy_signal, self.device, f"copyout: HSA:{self.device.device_id} -> CPU", copy=True)
+    if PROFILE: Profiler.track(copy_signal, self.device, f"copyout: HSA:{self.device.device_id} -> CPU", is_copy=True)
 
   def transfer(self, dest:T, src:T, sz:int, src_dev=None, dest_dev=None):
     copy_signal = dest_dev.alloc_signal(reusable=False)
@@ -178,7 +178,7 @@ class HSAAllocator(LRUAllocator):
     check(hsa.hsa_amd_memory_async_copy_on_engine(dest, dest_dev.agent, src, src_dev.agent, sz, 2, c_wait_signal, copy_signal, hsa.HSA_AMD_SDMA_ENGINE_0, True)) # noqa: E501
     src_dev.hw_queue.submit_barrier(wait_signals=[copy_signal])
     dest_dev.hw_queue.submit_barrier(wait_signals=[copy_signal])
-    if PROFILE: Profiler.track(copy_signal, src_dev, f"transfer: HSA:{src_dev.device_id} -> HSA:{dest_dev.device_id}", copy=True)
+    if PROFILE: Profiler.track(copy_signal, src_dev, f"transfer: HSA:{src_dev.device_id} -> HSA:{dest_dev.device_id}", is_copy=True)
 
 class HSADevice(Compiled):
   devices: List[HSADevice] = []
