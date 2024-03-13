@@ -4,7 +4,9 @@ import subprocess, os, time
 from typing import List
 from tinygrad.helpers import colored
 
-subprocess.run(["git", "remote", "-v"], check=True, text=True)
+subprocess.run(["git", "fetch", "origin", "master"], check=True)
+ref_commit = subprocess.run(["git", "rev-parse", "tinygrad/master"], stdout=subprocess.PIPE, check=True, text=True).stdout.strip()
+print(ref_commit)
 
 
 """
