@@ -141,6 +141,8 @@ jobs:
         ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
         ln -s /raid/weights/mixtral-8x7b-32kseqlen weights/mixtral-8x7b-32kseqlen
         ln -s /raid/weights/LLaMA-2 weights/LLaMA-2
+        mkdir -p extra/datasets
+        ln -s /raid/datasets/imagenet extra/datasets/imagenet
     - name: Run model inference benchmark
       run: LD_PRELOAD="/opt/rocm/lib/libhsa-runtime64.so" HSA=1 NOCLANG=1 python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
@@ -173,6 +175,8 @@ jobs:
       run: time HSA=1 HALF=1 LATEWINO=1 STEPS=1000 TARGET_EVAL_ACC_PCT=93 python3 examples/hlb_cifar10.py | tee train_cifar_one_gpu.txt
     - name: Run full CIFAR training steps w 6 GPUS
       run: time HSA=1 HALF=1 STEPS=350 BS=1536 GPUS=6 TARGET_EVAL_ACC_PCT=93 python3 examples/hlb_cifar10.py | tee train_cifar_six_gpu.txt
+    - name: Run MLPerf resnet eval on training data
+      run: time HSA=1 MODEL=resnet python3 examples/mlperf/model_eval.py
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (AMD)
