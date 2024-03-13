@@ -115,7 +115,8 @@ def train_resnet():
   for e in range(start_epoch, epochs):
     # ** train loop **
     Tensor.training = True
-    it = iter(tqdm(batch_load_resnet(batch_size=BS, val=False, shuffle=True, seed=seed*epochs + e), total=steps_in_train_epoch, desc=f"epoch {e}"))
+    it = iter(tqdm(batch_load_resnet(batch_size=BS, val=False, shuffle=True, seed=seed*epochs + e),
+                   total=steps_in_train_epoch, desc=f"epoch {e}", disable=getenv("BENCHMARK")))
     i, proc = 0, data_get(it)
     st = time.perf_counter()
     while proc is not None:
