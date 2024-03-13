@@ -146,8 +146,9 @@ class Tensor:
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
     if DEBUG >= 4: print(f"assign {self.lazydata} <- {x.lazydata}")
     if self.lazydata is x.lazydata: return self  # a self assign is a NOOP
-    # NOTE: we allow cross device assign with this hack. is this correct?
-    if self.device != x.device:
+    # NOTE: we allow cross device assign / cross dtype assign with this hack. is this correct?
+    # it's not a real assign, and we may want to disallow it
+    if self.device != x.device or self.dtype != x.dtype:
       self.lazydata = x.lazydata
       return self
     assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
