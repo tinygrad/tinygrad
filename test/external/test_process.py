@@ -4,17 +4,17 @@ import subprocess, os, time
 from typing import List
 from tinygrad.helpers import colored
 
-
 def replay_kernels(commit: str) -> List[str]:
   subprocess.run(['git', 'checkout', commit], check=True)
   env = os.environ.copy()
   env["DEBUG"] = "4"
   env["CI"] = "1"
-  result = subprocess.run(["python3", "-m", "pytest", "test/test_ops.py", "-s"], env=env, text=True, capture_output=True)
+  result = subprocess.run(["python3", "-m", "pytest", "test/", "-s"], env=env, text=True, capture_output=True)
   ret = []
   for log in result.stdout.splitlines()[6:-4]: # ignore pytest logs
     if "***" in log: continue # filter out device stats
     ret.append(log)
+  print(len(ret))
   return ret
 
 if __name__ == "__main__":
