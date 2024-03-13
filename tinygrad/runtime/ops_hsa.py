@@ -35,6 +35,7 @@ class HSAProfiler:
       mjson.append({"name": name, "ph": "B", "pid": dev_id, "tid": queue_id, "ts": st*1e-3})
       mjson.append({"name": name, "ph": "E", "pid": dev_id, "tid": queue_id, "ts": et*1e-3})
     with open(path, "w") as f: f.write(json.dumps({"traceEvents": mjson}))
+    print(f"Saved HSA profile to {path}")
 Profiler = HSAProfiler()
 
 class HSACompiler(HIPCompiler):
@@ -266,4 +267,4 @@ def hsa_terminate():
     del dev.hw_queue
 
   hsa.hsa_shut_down()
-  if Profiler.collected_events: Profiler.save("/tmp/events.json")
+  if Profiler.collected_events: Profiler.save("/tmp/profile.json")
