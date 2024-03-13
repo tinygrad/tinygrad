@@ -104,7 +104,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
   # if a CONTIGUOUS or ASSIGN made it all the way here, just skip it
   if buf.op in {LoadOps.CONTIGUOUS, LoadOps.ASSIGN}:
     assert first
-    buf.srcs[1].output_lazybuffer = buf.srcs[0]
+    if buf.op is LoadOps.ASSIGN: buf.srcs[1].output_lazybuffer = buf.srcs[0]
     return _recursive_lazyop(buf.srcs[0], inputs, var_vals, st, realizes, cache, False, assign_to=buf.srcs[1] if buf.op is LoadOps.ASSIGN else None)
 
   # if it's a reduce, we have to change the shapetracker
