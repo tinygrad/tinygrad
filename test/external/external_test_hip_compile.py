@@ -10,7 +10,7 @@ class TestHIPCompileSpeed(unittest.TestCase):
   def test_hip_compile(self):
     a, b = Tensor([1,2,3,4,5]), Tensor([1,2,3,4,5])
     out = a + b
-    lin = Linearizer(create_schedule([out.lazydata])[-1].ast)
+    lin = Linearizer(create_schedule([out.lazydata])[-1].ast[0])
     lin.linearize()
 
     reference = """
