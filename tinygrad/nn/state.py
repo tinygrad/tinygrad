@@ -68,7 +68,7 @@ def load_state_dict(model, state_dict:Dict[str, Tensor], prefix:str='', strict=T
       if f"{prefix}{k}" not in state_dict and not strict:
         if DEBUG >= 1: print(f"WARNING: not loading {k}")
         continue
-      v.assign(state_dict[f"{prefix}{k}"].shard(mlb.device, mlb.axis) if isinstance((mlb:=v.lazydata), MultiLazyBuffer) else state_dict[f"{prefix}{k}"].to(v.device)).realize()
+      v.assign(state_dict[f"{prefix}{k}"].shard(mlb.device, mlb.axis) if isinstance((mlb:=v.lazydata), MultiLazyBuffer) else state_dict[f"{prefix}{k}"].to(v.device)).realize() # noqa: E501
       if consume: del state_dict[f"{prefix}{k}"]
 
 # torch support!
