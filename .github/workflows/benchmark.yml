@@ -177,6 +177,10 @@ jobs:
       run: time HSA=1 HALF=1 STEPS=350 BS=1536 GPUS=6 TARGET_EVAL_ACC_PCT=93 python3 examples/hlb_cifar10.py | tee train_cifar_six_gpu.txt
     - name: Run MLPerf resnet eval on training data
       run: time HSA=1 MODEL=resnet python3 examples/mlperf/model_eval.py
+    - name: Run 10 MLPerf ResNet50 training steps (1 gpu)
+      run: HIP=1 BENCHMARK=10 BS=104 GPUS=1 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet_one_gpu.txt
+    - name: Run 10 MLPerf ResNet50 training steps (6 gpu)
+      run: HIP=1 BENCHMARK=10 BS=624 GPUS=6 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet.txt
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (AMD)
@@ -187,6 +191,8 @@ jobs:
           train_cifar_half.txt
           train_cifar_wino.txt
           train_cifar_one_gpu.txt
+          train_resnet.txt
+          train_resnet_one_gpu.txt
           train_cifar_six_gpu.txt
           llama_unjitted.txt
           llama_jitted.txt
