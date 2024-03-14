@@ -298,8 +298,8 @@ class TestMultiTensor(unittest.TestCase):
     for p in get_parameters(bn): p.shard_(devices).realize()
 
     out = bn(t)
-    scheds = [sched for sched in create_schedule(out.lazydata.lbs) if sched.out.device in devices and sched.ast.op is not LoadOps.COPY]
-    assert set(sched.out.device for sched in scheds) == set(devices), "should have ast on each shard device"
+    scheds = [sched for sched in create_schedule(out.lazydata.lbs) if sched.outputs[0].device in devices and sched.ast[0].op is not LoadOps.COPY]
+    assert set(out.device for sched in scheds for out in sched.outputs) == set(devices), "should have ast on each shard device"
     asts = [sched.ast for sched in scheds]
     assert len(asts) == 8, len(asts)
     # test case to show that ast can be different on devices

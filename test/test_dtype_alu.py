@@ -65,7 +65,7 @@ def universal_test(a, b, dtype, op):
 def universal_test_unary(a, dtype, op):
   if not isinstance(op, tuple): op = (op, op)
   out: Tensor = op[0](Tensor([a], dtype=dtype))
-  ast = create_schedule([out.lazydata])[-1].ast
+  ast = create_schedule([out.lazydata])[-1].ast[0]
   tensor_value = out.numpy()
   numpy_value = op[1](np.array([a]).astype(dtype.np))
   if dtype in dtypes_float:

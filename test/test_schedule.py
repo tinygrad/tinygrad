@@ -17,22 +17,24 @@ def check_schedule(t:Tensor, allowed:int, to_prerealize:Optional[List[Tensor]]=N
   if to_prerealize:
     for pre in to_prerealize:
       for s in create_schedule([pre.lazydata], seen.copy()):
-        if GRAPH: realized_lazybuffer(s.out, 0)
-        seen.add(s.out)
+        for i,out in enumerate(s.outputs):
+          if GRAPH: realized_lazybuffer(out, 0)
+          seen.add(out)
   sched = create_schedule([t.lazydata], seen)
   if GRAPH:
-    for i,s in enumerate(sched): realized_lazybuffer(s.out, i+1)
-  if filter_loadops: sched = [s for s in sched if s.ast.op not in LoadOps]
+    for i,s in enumerate(sched):
+      for out in s.outputs: realized_lazybuffer(out, i+1)
+  if filter_loadops: sched = [s for s in sched if s.ast[0].op not in LoadOps]
   if len(sched) != allowed: print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
   if len(sched) != allowed or DEBUG >= 3:
     for i, s in enumerate(sched):
       print("kernel", i+1)
-      print_tree(s.ast)
+      for op in s.ast: print_tree(op)
   assert len(sched) == allowed
   # test the (non loadops) ops linearize
   for s in sched:
-    if s.ast.op in LoadOps: continue
-    l = Linearizer(s.ast)
+    if s.ast[0].op in LoadOps: continue
+    l = Linearizer(*s.ast)
     l.hand_coded_optimizations()
     l.linearize()
 

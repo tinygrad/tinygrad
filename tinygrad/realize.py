@@ -3,7 +3,7 @@ from collections import defaultdict
 from typing import List, Dict, Optional, cast, Set, DefaultDict
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters, LazyOp, ReduceOps, ConstBuffer, MemBuffer, BinaryOps, UnaryOps
 from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats, Compiled, BufferOptions
-from tinygrad.features.graph import print_tree, realized_lazybuffer, log_lazybuffer
+from tinygrad.features.graph import realized_lazybuffer, log_lazybuffer
 from tinygrad.helpers import colored, getenv, GRAPH, cpu_time_execution, DEBUG, flatten, prod, dedup, all_int
 from tinygrad.shape.symbolic import Variable
 from tinygrad.dtype import ImageDType, dtypes
@@ -27,55 +27,58 @@ class SyncOp(JITRunner):
     update_stats(colored("synchronize", "RED"), 0, 0, {}, et, 1, device=self.dname)
 
 def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
-  assert all(si.out.device == x.device for x in si.inputs) or si.ast.op in {LoadOps.COPY, LoadOps.WAIT}, \
-    f"all devices must be the same, {si.out.device} != {[x.device for x in si.inputs]} {print_tree(si.ast) or ''}"
-  if si.ast.op is LoadOps.EMPTY: return None
-  if si.ast.op in {LoadOps.SYNC, LoadOps.WAIT, LoadOps.COPY} and si.out.device.startswith("HIP") and si.inputs[0].device.startswith("HIP"):
+  if si.ast[0].op not in {LoadOps.COPY, LoadOps.WAIT}: assert len(set(x.device for x in si.outputs+si.inputs)) == 1
+  if si.ast[0].op is BufferOps.STORE: return Device[si.outputs[0].device].get_runner(*si.ast)
+  assert len(si.ast) == 1 and len(si.outputs) == 1, "only ASTRunner supports multioutput"
+  out, ast = si.outputs[0], si.ast[0]
+  if ast.op in {LoadOps.SYNC, LoadOps.WAIT, LoadOps.COPY} and out.device.startswith("HIP") and si.inputs[0].device.startswith("HIP"):
     from tinygrad.runtime.ops_hip import HIPSyncEvent, HIPWaitEvent
-    if si.ast.op is LoadOps.SYNC: return HIPSyncEvent(si.out)
-    if si.ast.op is LoadOps.WAIT: return HIPWaitEvent(si.out.device)
-  if si.ast.op in {LoadOps.SYNC, LoadOps.WAIT} and si.out.device.startswith("HSA") and si.inputs[0].device.startswith("HSA"):
+    if ast.op is LoadOps.SYNC: return HIPSyncEvent(out)
+    if ast.op is LoadOps.WAIT: return HIPWaitEvent(out.device)
+  if ast.op in {LoadOps.SYNC, LoadOps.WAIT} and out.device.startswith("HSA") and si.inputs[0].device.startswith("HSA"):
     # Our HSA runtime handles synchronization
-    if si.ast.op is LoadOps.SYNC: return None
-  if si.ast.op is LoadOps.COPY:
-    if hasattr(Device[si.out.device].allocator, 'transfer') and type(Device[si.out.device]) is type(Device[si.inputs[0].device]): return BufferXfer()
+    if ast.op is LoadOps.SYNC: return None
+  if ast.op is LoadOps.COPY:
+    if hasattr(Device[out.device].allocator, 'transfer') and type(Device[out.device]) is type(Device[si.inputs[0].device]): return BufferXfer()
     if si.inputs[0].device.startswith("DISK"): return BufferRead()
     return BufferCopy()
-  if si.ast.op is LoadOps.CUSTOM: return CustomOp(si.ast.arg)
-  if si.ast.op is LoadOps.SYNC: return SyncOp(si.out.device) if isinstance(Device[si.out.device], Compiled) else None
-  if si.ast.op is LoadOps.WAIT: return None
-  return Device[si.out.device].get_runner(si.ast)
+  if ast.op is LoadOps.CUSTOM: return CustomOp(ast.arg)
+  if ast.op is LoadOps.SYNC: return SyncOp(out.device) if isinstance(Device[out.device], Compiled) else None
+  return None
 
 logops = open(getenv("LOGOPS", ""), "a") if getenv("LOGOPS", "") else None
 def run_schedule(schedule:List[ScheduleItem]):
   while len(schedule):
     si = schedule.pop(0)
-    if logops and si.ast.op not in LoadOps and not any(i.device.startswith("DISK:") for i in si.inputs): logops.write(str(si.ast)+"\n")
+    if logops and si.ast[0].op not in LoadOps and not any(i.device.startswith("DISK:") for i in si.inputs): logops.write(str(si.ast)+"\n")
 
     # get the program
     prg = lower_schedule_item(si)
 
-    # invalidate the output buffer if there's a non contig usage of it in inputs
-    if si.out.output_buffer is not None:
-      for i,a in enumerate(si.inputs):
-        if a.realized == si.out.output_buffer:
-          if any(not x.arg.st.contiguous for x in si.ast.lazyops if x.op is BufferOps.LOAD and x.arg.idx == i+1):
-            si.out.output_buffer = None
-            break
+    for out_op, out in zip(si.ast, si.outputs):
+      # invalidate the output buffer if there's a non contig usage of it in inputs
+      if out.output_buffer is not None:
+        for i,a in enumerate(si.inputs):
+          if a.realized == out.output_buffer:
+            if any(not x.arg.st.contiguous for x in out_op.lazyops if x.op is BufferOps.LOAD and x.arg.idx == i+1):
+              out.output_buffer = None
+              break
 
-    # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
-    if si.out.size > 0:
-      options = BufferOptions(host=True, signal=True) if si.ast.op is LoadOps.SYNC else None
-      si.out.realized = si.out.output_buffer if si.out.output_buffer is not None else \
-        Buffer(si.out.device, si.out.size, si.out.dtype, "PLACEHOLDER" if getattr(prg, "skip_allocation", False) else None, options=options)
-      del si.out.srcs
+    for out in si.outputs:
+      # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
+      if out.size > 0:
+        options = BufferOptions(host=True, signal=True) if si.ast[0].op is LoadOps.SYNC else None
+        out.realized = out.output_buffer if out.output_buffer is not None else \
+          Buffer(out.device, out.size, out.dtype, "PLACEHOLDER" if getattr(prg, "skip_allocation", False) else None, options=options)
+        del out.srcs
 
     # run the function (put it in JIT)
-    real_buffers = [x.realized for x in (si.out,)+si.inputs if x.size != 0]
+    real_buffers = [x.realized for x in si.outputs+si.inputs if x.size != 0]
     assert all(x is not None for x in real_buffers), f"can't run, some inputs aren't realized {real_buffers}"
     if prg: prg.exec(cast(List[Buffer], real_buffers), si.var_vals)
-    elif si.out.size > 0: update_stats(colored(f"empty {si.out.st.size:10d} {si.out.dtype}", "yellow"), 0, 0, {}, None, 1, device=si.out.device)
-    if GRAPH: realized_lazybuffer(si.out, GlobalCounters.kernel_count)
+    elif (out:=si.outputs[0]).size > 0: update_stats(colored(f"empty {out.st.size:10d} {out.dtype}", "yellow"), 0, 0, {}, None, 1, device=out.device)
+    if GRAPH:
+      for out in si.outputs: realized_lazybuffer(out, GlobalCounters.kernel_count)
 
 # *** schedule creation ***
 
@@ -135,7 +138,7 @@ def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyB
     op = _recursive_lazyop(out, inputs, var_vals, output_st, realizes, cache={})
     op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_st.simplify().unbind()[0]))
 
-  return flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in inputs) + [ScheduleItem(op, out, tuple(inputs), var_vals)]
+  return flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in inputs) + [ScheduleItem((op,), (out,), tuple(inputs), var_vals)]
 
 # recursively search the entire graph for all LazyBuffers, insert realizes after expands
 def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffer, None],

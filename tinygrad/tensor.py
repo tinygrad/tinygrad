@@ -38,7 +38,7 @@ class Function:
 
 import tinygrad.mlops as mlops
 
-def _loadop(op, shape:Tuple[sint,...], dtype:DType, device:Union[str, Tuple[str, ...]], arg=None, src:Optional[LazyBuffer]=None):
+def _loadop(op, shape:Tuple[sint,...], dtype:DType, device:Union[str, Tuple[str, ...]], arg=None, src:Tuple[LazyBuffer, ...]=()):
   if isinstance(device, str): return LazyBuffer.loadop(op, shape, dtype, device, arg, src)
   return MultiLazyBuffer([LazyBuffer.loadop(op, shape, dtype, d, arg, src) for d in device], None)
 
@@ -98,8 +98,8 @@ class Tensor:
       if (d := fully_flatten(data)) and all(isinstance(s, bool) for s in d): dtype = dtype or dtypes.bool
       elif d and all_int(d): dtype = dtype or dtypes.default_int
       else: dtype = dtype or dtypes.default_float
-      # NOTE: cast at the end for the dtypes that do not have a numpy dtype
-      data = _fromcpu(np.array(data, dtype.np)).cast(dtype)
+      if dtype == dtypes.bfloat16: data = Tensor(_fromcpu(np.array(data, np.float32)), device=device).cast(dtypes.bfloat16).lazydata
+      else: data = _fromcpu(np.array(data, dtype.np))
     elif isinstance(data, np.ndarray):
       if data.shape == (): data = _loadop(LoadOps.CONST, tuple(), dtype or dtypes.from_np(data.dtype), device, data.item())
       else: data = _fromcpu(data.astype(dtype.np) if dtype is not None and dtype.np is not None else data)
@@ -145,11 +145,12 @@ class Tensor:
       self.contiguous().realize().lazydata.base.realized.copyin(x.numpy().data)
       return self
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
+    if DEBUG >= 4: print(f"assign {self.lazydata} <- {x.lazydata}")
+    if self.lazydata is x.lazydata: return self  # a self assign is a NOOP
     # NOTE: we allow cross device assign
     assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
     assert not isinstance(self.lazydata, MultiLazyBuffer) or self.lazydata.axis == x.lazydata.axis, "axis must match on MultiLazyBuffer"
     assert not x.requires_grad  # self requires_grad is okay?
-    if DEBUG >= 4: print(f"assign {self.lazydata} <- {x.lazydata}")
     if self.dtype == x.dtype and not getenv("DISALLOW_ASSIGN"):
       if isinstance(self.lazydata, MultiLazyBuffer):
         for d,s in zip(x.lazydata.lbs, self.lazydata.lbs): d.output_buffer = s.base.realized
@@ -173,6 +174,7 @@ class Tensor:
     assert self.numel() == 1, "must have one element for item"
     return self._data().cast(self.dtype.fmt)[0]
   def numpy(self) -> np.ndarray:
+    if self.dtype == dtypes.bfloat16: return self.float().numpy()
     assert self.dtype.np is not None, f"no np dtype for {self.dtype}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
     return np.frombuffer(self._data(), dtype=self.dtype.np).reshape(self.shape)
