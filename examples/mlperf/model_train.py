@@ -217,9 +217,8 @@ def train_unet3d():
   from extra.datasets.kits19 import iterate, get_train_files, get_val_files, sliding_window_inference
   from tinygrad import dtypes, Device, TinyJit, Tensor
   from tinygrad.nn.optim import SGD
-  from tinygrad.nn.state import get_parameters, get_state_dict, safe_save, safe_load, load_state_dict
+  from tinygrad.nn.state import load_state_dict
   from tinygrad.ops import GlobalCounters
-  from tqdm import tqdm
 
   import numpy as np
   import random
@@ -255,7 +254,7 @@ def train_unet3d():
       raise "Need to install wandb to use it"
 
   if ((num_gpus := getenv("GPUS")) > 1):
-    if DEBUG >= 1: print(f"Using {num_gpus} GPUS for training")
+    print(f"Using {num_gpus} GPUS for training")
     GPUS = tuple([Device.canonicalize(f'{Device.DEFAULT}:{i}') for i in range(num_gpus)])
     assert BS % len(GPUS) == 0, f"{BS=} is not a multiple of {len(GPUS)=}"
     for x in GPUS: Device[x]
@@ -267,7 +266,7 @@ def train_unet3d():
   if CHECKPOINT_FN:
     state_dict = safe_load(CHECKPOINT_FN)
     load_state_dict(model, state_dict)
-    if DEBUG >= 1: print(f"Loaded checkpoint {CHECKPOINT_FN} into model")
+    print(f"Loaded checkpoint {CHECKPOINT_FN} into model")
 
   params = get_parameters(model)
 
