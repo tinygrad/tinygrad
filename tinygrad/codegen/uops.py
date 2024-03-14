@@ -291,12 +291,12 @@ class UOpGraph:
     for u in self.uops:
       if u.uop is not UOps.STORE or (val:=u.vin[-1]).uop is not UOps.CAST or cast(DType,val.dtype).count == 1: continue
 
-      children = val.vin
-      if all(el.uop is UOps.PHI for el in val.vin): children = tuple([el.vin[0] for el in val.vin])
-      if all(el.uop is UOps.GEP for el in children) and len(set(el.vin[0] for el in children)) == 1 and val.dtype == children[0].vin[0].dtype:
-        # Check that accesses elements are in order.
-        if all(i==el.arg for i,el in enumerate(children)):
-          replaced_stores[u] = children[0].vin[0]
+      vins = val.vin
+      if all(el.uop is UOps.PHI for el in val.vin): vins = tuple([el.vin[0] for el in val.vin])
+      if all(el.uop is UOps.GEP for el in vins) and len(set(el.vin[0] for el in vins)) == 1 and val.dtype == vins[0].vin[0].dtype:
+        # Check that accesses are in order.
+        if all(i==el.arg for i,el in enumerate(vins)):
+          replaced_stores[u] = vins[0].vin[0]
 
     for prev,new in replaced_stores.items():
       try: self.uops.remove(prev.vin[-1])  # remove the old upcast NOTE: the upcast's vins become childless now
