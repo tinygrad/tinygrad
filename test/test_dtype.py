@@ -96,11 +96,10 @@ class TestDType(unittest.TestCase):
   def test_bitcast(self):
     if Device.DEFAULT == "WEBGL": raise unittest.SkipTest("no bitcast in WebGL GLSL")
     if self.DTYPE == dtypes.bool: raise unittest.SkipTest("no bools in bitcast")
-    list(map(
-      lambda dtype:
-        _test_bitcast(Tensor(self.DATA, dtype=self.DTYPE), dtype) if dtype.itemsize <= self.DTYPE.itemsize and dtype != dtypes.bool else None,
-     get_available_cast_dtypes(self.DTYPE)
-    ))
+    for dtype in get_available_cast_dtypes(self.DTYPE):
+      if dtype != dtypes.bool:
+        _test_bitcast(Tensor(np.random.uniform(0, 1, size=10*(dtype.itemsize // self.DTYPE.itemsize)), dtype=self.DTYPE)\
+                      if self.DTYPE.itemsize < dtype.itemsize else Tensor(self.DATA, dtype=self.DTYPE), dtype)
 
   def test_dtypes_fields(self):
     fields = dtypes.fields()
