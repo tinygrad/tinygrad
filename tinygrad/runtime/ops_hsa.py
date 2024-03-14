@@ -23,7 +23,7 @@ class HSAProfiler:
     for sig,name,is_copy in self.tracked_signals[device]:
       if is_copy: check(hsa.hsa_amd_profiling_get_async_copy_time(sig, ctypes.byref(timings :=  self.copy_timings)))
       else: check(hsa.hsa_amd_profiling_get_dispatch_time(device.agent, sig, ctypes.byref(timings := self.disp_timings))) #type:ignore
-      self.collected_events.append((device.device_id, is_copy, name, timings.start, timings.end))
+      self.collected_events.append((device.device_id, 1 if is_copy else 0, name, timings.start, timings.end))
     self.tracked_signals.pop(device)
 
   def save(self, path):
