@@ -237,9 +237,9 @@ class TestJit(unittest.TestCase):
     np.testing.assert_equal([0], cache.good_cache.numpy())
     np.testing.assert_equal([0], cache.bad_cache.numpy())
 
-    zero = Tensor([0])
-    one = Tensor([1])
-    two = Tensor([2])
+    zero = Tensor([0.])
+    one = Tensor([1.])
+    two = Tensor([2.])
 
     # save [1] in the caches
     cache.good(zero, one)
@@ -248,7 +248,7 @@ class TestJit(unittest.TestCase):
     np.testing.assert_equal([1], cache.bad_cache.numpy())
 
     for i in range(5):
-      x = Tensor([i]) # NOTE: if this doesn't change, it just hits the lazybuffer cache
+      x = Tensor([i*1.]) # NOTE: if this doesn't change, it just hits the lazybuffer cache
       cache.good_jitted(x)
       cache.bad_jitted(x)
 
