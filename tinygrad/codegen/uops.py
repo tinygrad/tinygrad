@@ -59,8 +59,6 @@ def uop_alu_resolve(u:UOp) -> sint:
   elif u.uop is UOps.ALU and u.arg == BinaryOps.ADD: return uop_alu_resolve(u.vin[0]) + uop_alu_resolve(u.vin[1])
   else: raise RuntimeError(f"ALU resolve fail @ {u.uop}")
 
-def phi_resolve_acc(u:UOp) -> UOp: return u if u.uop is UOps.DEFINE_ACC else phi_resolve_acc(u.vin[0])
-
 def _match(uop:UOp, pattern:Dict[str, Any], store:Dict[str, UOp]) -> bool:
   for k,v in pattern.items():
     if k == "__name__":
