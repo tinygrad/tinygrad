@@ -162,7 +162,7 @@ class UOpGraph:
         for vu in ru.vin:
           has_child.add(vu)
       nu: List[UOp] = [x for x in self.uops if x in has_child or x in keep]
-      self.saved_exprs = {k:v for k,v in self.saved_exprs.items() if k in nu}
+      self.saved_exprs = {k:v for k,v in self.saved_exprs.items() if v in nu}
       if len(nu) == len(self.uops): break
       if DEBUG >= 4: print(f"reduced UOp count from {len(self.uops)} to {len(nu)}")
       self.uops = nu
