@@ -334,7 +334,7 @@ class UOpGraph:
     for u in self.uops:
       if u.uop is not UOps.STORE or (val:=u.vin[-1]).uop is not UOps.CAST or cast(DType,val.dtype).count == 1: continue
       if all(el.uop is UOps.GEP for el in val.vin):
-        # Check that elements which are accesses are the same and they are accessed in order.
+        # Check that accesses elements are the same and in order.
         if len(set(el.vin[0] for el in val.vin)) == 1 and all(i==el.arg for i,el in enumerate(val.vin)):
           replaced_stores[u] = val.vin[0].vin[0]
       elif all(el.uop is UOps.PHI for el in val.vin): replaced_stores[u] = phi_resolve_acc(val)
