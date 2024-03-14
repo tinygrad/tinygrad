@@ -292,7 +292,7 @@ class UOpGraph:
       if u.uop is not UOps.STORE or (val:=u.vin[-1]).uop is not UOps.CAST or cast(DType,val.dtype).count == 1: continue
 
       vins = val.vin
-      if all(el.uop is UOps.PHI for el in val.vin): vins = tuple([el.vin[0] for el in val.vin])
+      while all(el.uop is UOps.PHI for el in vins): vins = tuple([el.vin[0] for el in vins])
       if all(el.uop is UOps.GEP for el in vins) and len(set(el.vin[0] for el in vins)) == 1 and val.dtype == vins[0].vin[0].dtype:
         # Check that accesses are in order.
         if all(i==el.arg for i,el in enumerate(vins)):
