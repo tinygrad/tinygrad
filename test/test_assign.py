@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad import dtypes
+from tinygrad import dtypes, TinyJit, GlobalCounters
 
 N = 200  # has to be bigger than the cache to fail
 
@@ -19,6 +19,69 @@ class TestAssign(unittest.TestCase):
     ba2 = a.lazydata.base.realized
     assert ba1 == ba2 and ba1 != bb1
     np.testing.assert_allclose(a.numpy(), (np.arange(N*N)*2).reshape((N,N)))
+
+  def test_assign_add(self):
+    def f(x):
+      x += 1
+      x.realize()
+    x = Tensor([0])
+    f(x)
+    assert x.item() == 1
+
+  def test_assign_add_twice(self):
+    # NOTE: this has two kernels
+    def f(x):
+      x += 1
+      x += 1
+      x.realize()
+    x = Tensor([0])
+    f(x)
+    assert x.item() == 2
+
+  def test_assign_add_double(self):
+    def f(x):
+      x += 1
+      x.realize()
+    x = Tensor([0])
+    f(x)
+    assert (out:=x.item()) == 1, f"expected 1, got {out}"
+    x = Tensor([0])
+    f(x)
+    assert (out:=x.item()) == 1, f"expected 1, got {out}"
+
+  def test_assign_add_jit(self):
+    @TinyJit
+    def f(x):
+      x += 1
+      x.realize()
+    x = Tensor([0])
+    for _ in range(5): f(x)
+    assert x.item() == 5
+
+  def test_assign_add_jit_other(self):
+    @TinyJit
+    def f(x):
+      x += 1
+      x.realize()
+    x = Tensor([0])
+    for _ in range(5): f(x)
+    y = Tensor([0])
+    for _ in range(4): f(y)
+    assert y.item() == 4
+
+  def test_assign_contiguous(self):
+    b = Tensor.rand(4,4).realize()
+    a = (Tensor.rand(4,4).realize() + 1)
+    kc = GlobalCounters.kernel_count
+    b.assign(a.contiguous()).realize()
+    assert GlobalCounters.kernel_count - kc == 1
+
+  def test_assign_contiguous_permute(self):
+    b = Tensor.rand(4,4).realize()
+    a = (Tensor.rand(4,4).realize() + 1).permute((1,0))
+    kc = GlobalCounters.kernel_count
+    b.assign(a.contiguous()).realize()
+    assert GlobalCounters.kernel_count - kc == 1
 
   def test_permuted_assignment(self):
     a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)

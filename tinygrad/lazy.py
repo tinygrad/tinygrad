@@ -50,8 +50,9 @@ class LazyBuffer:
 
   @staticmethod
   def loadop(op, shape:Tuple[sint,...], dtype:DType, device:str, arg=None,
-             src:Optional[LazyBuffer]=None, enable_cache=False, _buf:Optional[Buffer]=None) -> LazyBuffer:
-    ret = create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype, op, arg, (src,) if src is not None else (), enable_cache=enable_cache)
+             src:Tuple[LazyBuffer, ...]=(), enable_cache=False, _buf:Optional[Buffer]=None) -> LazyBuffer:
+    assert isinstance(src, tuple)
+    ret = create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype, op, arg, src, enable_cache=enable_cache)
     if _buf is not None: ret.realized = _buf
     return ret
 
@@ -82,8 +83,8 @@ class LazyBuffer:
     if self.device.startswith("EXT") or self.device.startswith("DISK"):
       # DISK/EXT don't sync
       return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, None, (self,), enable_cache=False)
-    sync = LazyBuffer.loadop(LoadOps.SYNC, (sync_size,), dtypes.uint32, self.device, src=self, enable_cache=True)
-    wait = LazyBuffer.loadop(LoadOps.WAIT, (0,), dtypes.uint32, device, src=sync, enable_cache=True)
+    sync = LazyBuffer.loadop(LoadOps.SYNC, (sync_size,), dtypes.uint32, self.device, src=(self,), enable_cache=True)
+    wait = LazyBuffer.loadop(LoadOps.WAIT, (0,), dtypes.uint32, device, src=(sync,), enable_cache=True)
     return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, None, (self, wait), enable_cache=False)
 
   def copy_to_device(self, device:str) -> LazyBuffer:

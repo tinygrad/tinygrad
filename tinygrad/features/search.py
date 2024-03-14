@@ -71,6 +71,7 @@ def bufs_from_lin(lin:Linearizer) -> List[Buffer]:
   rawbufs:List[Optional[Buffer]] = [None]*len(bufsts)
   for k,lx in bufsts.items():
     buf_size = prod(lx[0].dtype.shape) if isinstance(lx[0].dtype, ImageDType) else max(y.st.real_size() for y in lx)
+    if buf_size == 0: buf_size = 1  # create a size 1 buffer if no cell is accessed in kernel. # TODO: remove from kernel input in this case.
     rawbufs[k] = Buffer(lin.opts.device, buf_size, lx[0].dtype)
   assert all(r is not None for r in rawbufs)
   return cast(List[Buffer], rawbufs)
@@ -88,7 +89,7 @@ def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Lineariz
       for s,c in zip(lin2.full_shape, lin2.colors()):
         if c in {"magenta", "yellow"}: up *= s
         if c in {"cyan", "green", "white"}: lcl *= s
-      if up > max_up or lcl > max_lcl or ("green" in lin2.colors() and up*lcl > 2 ** 15): continue
+      if up > max_up or lcl > max_lcl: continue
       acted_lins[i+1] = lin2
     except KernelOptError:
       pass
@@ -124,7 +125,8 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
         if lib in seen_libs: continue
         #print(acted_lins[i].colored_shape(), acted_lins[i].applied_opts)  # for debugging BEAMs that segfault
         seen_libs.add(lib)
-        tms = _time_program(vars, dev, lib, global_size, local_size, var_vals, rawbufs, early_stop=beam[0][1]*3 if len(beam) else 1.0)
+        try: tms = _time_program(vars, dev, lib, global_size, local_size, var_vals, rawbufs, early_stop=beam[0][1]*3 if len(beam) else 1.0)
+        except RuntimeError: continue # for runtime issues
         timed_lins.append((acted_lins[i], min(tms)))
         if DEBUG >= 2: print(f"\r{time.perf_counter() - st:7.2f}s: {timed_lins[-1][1]*1e6:12.2f} us       {len(timed_lins):4d}/{len(acted_lins):4d}         {timed_lins[-1][0].colored_shape()}\033[K", end="")  # noqa: E501
 

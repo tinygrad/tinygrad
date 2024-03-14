@@ -30,7 +30,7 @@ class _Device:
   def DEFAULT(self) -> str:
     device_from_env: Optional[str] = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._devices, None)   # type: ignore
     if device_from_env: return device_from_env
-    for device in ["METAL", "HIP", "CUDA", "GPU", "LLVM", "CLANG"]:
+    for device in ["METAL", "HSA", "CUDA", "GPU", "LLVM", "CLANG"]:
       try:
         if self[device]: return device
       except Exception: pass
@@ -242,22 +242,22 @@ class Compiled:
                             k.uops.vars(), min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))
     return ret
 
-  def get_linearizer(self, ast:LazyOp) -> Linearizer:
+  def get_linearizer(self, *ast:LazyOp) -> Linearizer:
     assert self.compiler is not None, "compiler is required to build AST"
     if DEBUG >= 3:
       from tinygrad.features.graph import print_tree
-      print_tree(ast)
+      for op in ast: print_tree(op)
     from tinygrad.codegen.linearizer import Linearizer
-    k = Linearizer(ast, self.compiler.linearizer_opts)
+    k = Linearizer(*ast, opts=self.compiler.linearizer_opts)
     k.required_optimizations()
     if not NOOPT:
       if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
       if BEAM >= 1:
         lins = [(("tc" if used_tensor_cores else "hc"), k)]
         if used_tensor_cores:
-          lins.append(("hc", Linearizer(ast, self.compiler.linearizer_opts)))
+          lins.append(("hc", Linearizer(*ast, opts=self.compiler.linearizer_opts)))
           lins[-1][1].hand_coded_optimizations()
-        kb = Linearizer(ast, self.compiler.linearizer_opts)
+        kb = Linearizer(*ast, opts=self.compiler.linearizer_opts)
         kb.required_optimizations()
         from tinygrad.features.search import beam_search, time_linearizer, bufs_from_lin
         test_rawbuffers = bufs_from_lin(kb)    # allocate scratch buffers for optimization
@@ -268,4 +268,4 @@ class Compiled:
     return k
 
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
-  def get_runner(self, ast:LazyOp) -> CompiledASTRunner: return self.to_program(self.get_linearizer(ast))
+  def get_runner(self, *ast:LazyOp) -> CompiledASTRunner: return self.to_program(self.get_linearizer(*ast))
