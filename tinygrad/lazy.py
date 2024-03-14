@@ -64,9 +64,8 @@ class LazyBuffer:
 
   def assign(self, x:LazyBuffer) -> LazyBuffer:
     # LoadOps.ASSIGN implies contiguous
-    assert x is x.base, "contiguous must be base"
     if getattr(x, "op", None) is LoadOps.CONTIGUOUS and getattr(x, "srcs", None) is not None: x = x.srcs[0]
-    x.forced_realize = False
+    if x is x.base: x.forced_realize = False
     return LazyBuffer.loadop(LoadOps.ASSIGN, self.shape, self.dtype, self.device, src=(x, self))
 
   def contiguous(self) -> LazyBuffer:
