@@ -38,6 +38,7 @@ class AssemblyLanguage(NamedTuple):
   def render_cast(self, d:str, a:str, dtype:DType, atype:DType, bitcast=False, pred=False) -> List[str]: raise NotImplementedError()
 
   def render_kernel(self, kernel, function_name, bufs, regs) -> str: raise NotImplementedError()
+  def mem_type(self, dtype) -> str: raise NotImplementedError()
 
 def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
   kernel:List[str] = []
@@ -90,7 +91,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
   def kk(*s: str): kernel.append("\n".join(s))
 
   c: DefaultDict[str, int] = defaultdict(int)
-  r: Dict[UOp, str] = {}
+  r: Dict[UOp, Union[List[str], str]] = {}
   def ssa(u, prefix="t", dtype=None) -> str:
     nonlocal c, r
     prefix += f"_{dtype if dtype else lang.types[u.dtype]}_"
@@ -112,7 +113,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
       return out
     return lang.render_const(x, dtype)
 
-  def cast(a:str, dtype:DType, atype:DType, bitcast=False, u=None, pred=False):
+  def cast(a, dtype:DType, atype:DType, bitcast=False, u=None, pred=False):
     if atype == dtype:
       if u: r[u] = a
       return a
@@ -182,7 +183,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
       elif uop == UOps.CAST:
         assert vin[0].dtype is not None
         if dtype.count>1:
-          r[u] = [r[x] for x in vin]
+          r[u] = [r[x] for x in vin] # type: ignore
         else:
           cast(r[vin[0]], dtype, vin[0].dtype, bitcast=isinstance(args, tuple) and args[1], u=u)
       elif uop == UOps.DEFINE_LOCAL:
