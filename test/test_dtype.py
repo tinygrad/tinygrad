@@ -256,6 +256,10 @@ class TestBitCast(unittest.TestCase):
     b = a.bitcast(dtypes.int32)
     assert b.numpy()[0] == 0x3f800000
 
+  def test_bitcast_const(self):
+    a = Tensor(1, dtype=dtypes.float32).bitcast(dtypes.uint32)
+    np.testing.assert_equal(a.numpy(), np.array(1, dtype=np.float32).view(np.uint32))
+
   def test_bitcast_upcasted(self):
     a = Tensor.zeros(100, 4, dtype=dtypes.int32).contiguous() + 0x3f800000
     b = a.bitcast(dtypes.float32)
