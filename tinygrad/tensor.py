@@ -988,7 +988,25 @@ class Tensor:
     if self.dtype == dtypes.bfloat16: return self.bitcast(dtypes.uint16).cast(dtypes.uint32).mul(1<<16).bitcast(dtypes.float32).cast(dtype)
     return mlops.Cast.apply(self, dtype=dtype)
   def bitcast(self, dtype:DType) -> Tensor:
-    assert self.dtype.itemsize == dtype.itemsize, "can't bitcast mismatched dtype itemsizes"
+    if self.dtype.itemsize != dtype.itemsize:
+      assert self.shape != (), "bitcasting between types of different sizes is not allowed for scalar tensors"
+      if self.dtype.itemsize > dtype.itemsize:
+        repeat = self.dtype.itemsize // dtype.itemsize
+        to_uint = {1: dtypes.uint8, 2: dtypes.uint16, 4: dtypes.uint32, 8: dtypes.uint64}
+        as_repeated_uint = self.repeat([1] * (self.ndim - 1) + [repeat]).reshape(self.shape[:-1] + (repeat, -1))\
+          .transpose(-2, -1).flatten(-2).bitcast(input_unint_dtype := to_uint[self.dtype.itemsize])
+        idxs = Tensor.arange(repeat).repeat([self.shape[-1]])
+        bits = 8 * dtype.itemsize
+        shift = (2 ** (bits * idxs)).cast(input_unint_dtype)
+        div = lambda t1, t2: mlops.Div.apply(t1, t2)
+        mod = lambda t1, t2: t1 - (div(t1, t2) * t2)
+        shifted = div(*as_repeated_uint._broadcasted(shift))
+        out_as_uint = mod(*shifted._broadcasted(2 ** bits))
+        return out_as_uint.cast(to_uint[dtype.itemsize]).bitcast(dtype)
+      if self.dtype.itemsize < dtype.itemsize:
+        assert self.shape[-1] % (m := dtype.itemsize // self.dtype.itemsize) == 0,\
+          f"bitcasting to a larger data type requires the last dimension to be a multiple of {m}"
+        return # ..
     return mlops.Cast.apply(self, dtype=dtype, bitcast=True) if self.dtype != dtype else self
   def float(self) -> Tensor: return self.cast(dtypes.float32)
   def half(self) -> Tensor: return self.cast(dtypes.float16)
