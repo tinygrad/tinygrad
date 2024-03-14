@@ -2,6 +2,34 @@ from collections import OrderedDict
 import unicodedata
 import numpy as np
 from scipy import signal
+from tinygrad.nn import state
+
+#
+# checkpointing utils
+#
+
+def invert_dict(d): return {v: k for k, v in reversed(d.items())}
+def dedup_dict(d): return invert_dict(invert_dict(d))
+# store each tensor into the first key it appears in
+def get_training_state(model, optimizer, scheduler):
+  # hack: let get_state_dict walk the tree starting with model, so that the checkpoint keys are
+  # readable and can be loaded as a model for eval
+  train_state = {'model': model, 'optimizer': optimizer, 'scheduler': scheduler}
+  return dedup_dict(state.get_state_dict(train_state))
+def load_training_state(model, optimizer, scheduler, state_dict):
+  # use fresh model to restore duplicate keys
+  train_state = {'model': model, 'optimizer': optimizer, 'scheduler': scheduler}
+  big_dict = state.get_state_dict(train_state)
+  # hack: put back the dupes
+  dupe_names = {}
+  for k, v in big_dict.items():
+    if v not in dupe_names:
+      dupe_names[v] = k
+      assert k in state_dict
+    state_dict[k] = state_dict[dupe_names[v]]
+  # scheduler contains optimizer and all params, load each weight only once
+  scheduler_state = {'scheduler': scheduler}
+  state.load_state_dict(scheduler_state, state_dict)
 
 def gaussian_kernel(n, std):
   gaussian_1d = signal.gaussian(n, std)

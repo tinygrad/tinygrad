@@ -7,7 +7,7 @@ from collections import defaultdict
 import numpy as np
 
 from tinygrad.dtype import DType, dtypes, ImageDType, Scalar, least_upper_float, least_upper_dtype, cast_scalar
-from tinygrad.helpers import argfix, make_pair, getenv, IMAGE, DEBUG, WINO, flatten, prod, all_int, round_up, merge_dicts, fully_flatten, flat_mv
+from tinygrad.helpers import argfix, make_pair, IMAGE, DEBUG, WINO, flatten, prod, all_int, round_up, merge_dicts, fully_flatten, flat_mv
 from tinygrad.lazy import LazyBuffer
 from tinygrad.features.multi import MultiLazyBuffer
 from tinygrad.ops import LoadOps
@@ -137,6 +137,13 @@ class Tensor:
     Tensor.corealize([self])
     return self
 
+  def replace(self, x:Tensor) -> Tensor:
+    # used for replacing a Tensor with a new version of it (potentially with a different device and dtype)
+    assert not x.requires_grad and getattr(self, '_ctx', None) is None
+    assert self.shape == x.shape, f"replace shape mismatch {self.shape} != {x.shape}"
+    self.lazydata = x.lazydata
+    return self
+
   def assign(self, x) -> Tensor:
     # TODO: this is a hack for writing to DISK. remove with working assign
     if isinstance(self.device, str) and self.device.startswith("DISK"):
@@ -148,13 +155,14 @@ class Tensor:
     if self.lazydata is x.lazydata: return self  # a self assign is a NOOP
     # NOTE: we allow cross device assign
     assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
+    assert self.device == x.device, f"assign device mismatch {self.device} != {x.device}"
+    assert self.dtype == x.dtype, f"assign dtype mismatch {self.dtype} != {x.dtype}"
     assert not isinstance(self.lazydata, MultiLazyBuffer) or self.lazydata.axis == x.lazydata.axis, "axis must match on MultiLazyBuffer"
     assert not x.requires_grad  # self requires_grad is okay?
-    if self.dtype == x.dtype and not getenv("DISALLOW_ASSIGN"):
-      if isinstance(self.lazydata, MultiLazyBuffer):
-        for d,s in zip(x.lazydata.lbs, self.lazydata.lbs): d.output_buffer = s.base.realized
-      else:
-        if self.lazydata.base.realized is not None: x.lazydata.output_buffer = self.lazydata.base.realized
+    if isinstance(self.lazydata, MultiLazyBuffer):
+      for d,s in zip(x.lazydata.lbs, self.lazydata.lbs): d.output_buffer = s.base.realized
+    else:
+      if self.lazydata.base.realized is not None: x.lazydata.output_buffer = self.lazydata.base.realized
     self.lazydata = x.lazydata
     return self
   def detach(self) -> Tensor: return Tensor(self.lazydata, device=self.device, requires_grad=False)

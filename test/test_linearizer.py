@@ -4,7 +4,7 @@ import unittest
 from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError, tensor_cores
 from tinygrad.codegen.linearizer import Linearizer, UOp, UOps, expand_node, expand_idxs
 from tinygrad.device import Device, Buffer
-from tinygrad.ops import BinaryOps, BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, TernaryOps
+from tinygrad.ops import BinaryOps, BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, TernaryOps, ReduceOps, UnaryOps
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.shape.symbolic import MulNode, Variable, NumNode, Node
@@ -628,6 +628,17 @@ class TestLinearizerOpts(unittest.TestCase):
       with self.assertRaises(AssertionError):
         assert k.apply_tensor_cores(use_tensor_cores=1, extra_opts=x), "no valid tensor core" # for METAL in runners
 
+  def test_buf_index_not_found_tensor_core(self):
+    if not Device[Device.DEFAULT].compiler.linearizer_opts.has_tensor_cores:
+      self.skipTest("device doesn't have tensor cores")
+    if Device.DEFAULT not in tensor_cores:
+      self.skipTest("No tensor cores for device")
+
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BinaryOps.CMPEQ, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1243, 256), strides=(0, 1), offset=0, mask=None, contiguous=False),)))), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1243, 256), strides=(1, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=(dtypes.float, False)), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=3, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1243, 256), strides=(1, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=(0,)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 256), strides=(0, 1), offset=0, mask=None, contiguous=True),))))  # noqa: E501
+    k = Linearizer(ast, opts=Device[Device.DEFAULT].compiler.linearizer_opts)
+    with self.assertRaises(KernelOptError):
+      k.apply_opt(Opt(OptOps.TC, 0, 1))
+
   def test_tensor_core_opts(self):
     if not Device[Device.DEFAULT].compiler.linearizer_opts.has_tensor_cores:
       self.skipTest("device doesn't have tensor cores")
@@ -842,6 +853,38 @@ class TestLinearizerUOptimize(unittest.TestCase):
 
     # the global store doesn't change
     assert stores[1].vin[-1].dtype == dtypes.float
+
+  def test_skip_unmatching_upcasts(self):
+    if not Device[Device.DEFAULT].compiler.linearizer_opts.has_local or not Device[Device.DEFAULT].compiler.linearizer_opts.supports_float4:
+      self.skipTest("Needs locals and float4")
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(240, 40, 1, 1), strides=(1, 240, 0, 0), offset=0, mask=None, contiguous=False),)))),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(240, 40, 1, 1), strides=(40, 1, 0, 0), offset=0, mask=None, contiguous=True),)))) # noqa: E501
+    opts = [
+        Opt(op=OptOps.UPCAST, axis=1, amt=4), Opt(op=OptOps.LOCAL, axis=0, amt=16),
+        Opt(op=OptOps.LOCAL, axis=1, amt=2), Opt(op=OptOps.UPCAST, axis=3, amt=2)
+    ]
+
+    k = Linearizer(ast)
+    for opt in opts: k.apply_opt(opt)
+    k.linearize()
+
+    out = [u for u in k.uops if u.uop == UOps.STORE][0]
+    assert out.vin[-1].uop is UOps.CAST and out.vin[-1].dtype == dtypes.float.vec(4)
+
+  def test_skip_unmatching_upcasts_with_gep(self):
+    if not Device[Device.DEFAULT].compiler.linearizer_opts.has_local or not Device[Device.DEFAULT].compiler.linearizer_opts.supports_float4:
+      self.skipTest("Needs locals and float4")
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(8, 32, 1, 1), strides=(1, 8, 0, 0), offset=0, mask=None, contiguous=False),)))),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(8, 32, 1, 1), strides=(32, 1, 0, 0), offset=0, mask=None, contiguous=True),)))) # noqa: E501
+    opts = [Opt(op=OptOps.LOCAL, axis=1, amt=4), Opt(op=OptOps.UPCAST, axis=2, amt=2), Opt(op=OptOps.LOCAL, axis=1, amt=8),
+            Opt(op=OptOps.UPCAST, axis=2, amt=0), Opt(op=OptOps.UPCAST, axis=1, amt=4), Opt(op=OptOps.LOCAL, axis=0, amt=8),
+            Opt(op=OptOps.UPCAST, axis=1, amt=0), Opt(op=OptOps.UPCAST, axis=0, amt=2)]
+
+    k = Linearizer(ast)
+    for opt in opts: k.apply_opt(opt)
+    k.linearize()
+
+    out = [u for u in k.uops if u.uop == UOps.STORE][0]
+    assert out.vin[-1].uop is UOps.CAST and out.vin[-1].dtype == dtypes.float.vec(2)
+
 
 if __name__ == '__main__':
   unittest.main()
