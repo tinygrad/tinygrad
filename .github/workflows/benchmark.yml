@@ -131,8 +131,6 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
-    - name: Show off tinybox
-      run: /opt/rocm/bin/rocm-bandwidth-test
     - name: Symlink models and datasets
       run: |
         mkdir -p weights
@@ -143,6 +141,8 @@ jobs:
         ln -s /raid/weights/LLaMA-2 weights/LLaMA-2
         mkdir -p extra/datasets
         ln -s /raid/datasets/imagenet extra/datasets/imagenet
+    - name: Show off tinybox
+      run: /opt/rocm/bin/rocm-bandwidth-test
     - name: Run model inference benchmark
       run: LD_PRELOAD="/opt/rocm/lib/libhsa-runtime64.so" HSA=1 NOCLANG=1 python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
@@ -195,6 +195,16 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
+    - name: Symlink models and datasets
+      run: |
+        mkdir -p weights
+        ln -s ~/tinygrad/weights/bpe_simple_vocab_16e6.txt.gz weights/bpe_simple_vocab_16e6.txt.gz
+        ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
+        ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
+        ln -s /raid/weights/mixtral-8x7b-32kseqlen weights/mixtral-8x7b-32kseqlen
+        ln -s /raid/weights/LLaMA-2 weights/LLaMA-2
+        mkdir -p extra/datasets
+        ln -s /raid/datasets/imagenet extra/datasets/imagenet
     - name: Run 10 CIFAR training steps
       run: HSA=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
     - name: Run 10 CIFAR training steps w HALF
