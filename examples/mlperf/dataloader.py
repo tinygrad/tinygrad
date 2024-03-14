@@ -126,7 +126,7 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None):
   finally:
     # shutdown processes
     for _ in procs: q_in.put(None)
-    for p in procs: p.join()
+    for p in procs: p.terminate()
     shm.close()
     shm.unlink()
 
