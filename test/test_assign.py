@@ -114,6 +114,7 @@ class TestAssign(unittest.TestCase):
 
   # TODO: is there a way to sneak in a permute such that it returns the wrong answer?
 
+  @unittest.skip("don't use output buffer, and mismatch dtype no longer supported")
   def test_cast_assignment(self):
     a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
     a.realize()

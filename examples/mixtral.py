@@ -43,7 +43,7 @@ if __name__ == "__main__":
       device = Device.DEFAULT
     t.set_description(f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB, loading {k} to {device}")
     # NOTE: we have to copy through CLANG to avoid the HIP hang bug when copying directly from the DISK
-    model_state_dict[k].assign(state[k].to("CLANG").contiguous().to(device).half()).realize()
+    model_state_dict[k].replace(state[k].to("CLANG").contiguous().to(device).half()).realize()
   if CI: print(f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB")
 
   from sentencepiece import SentencePieceProcessor
