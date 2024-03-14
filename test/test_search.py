@@ -6,6 +6,7 @@ from tinygrad.features.search import time_linearizer, bufs_from_lin
 from tinygrad.device import Device, Buffer
 from tinygrad.ops import LoadOps
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import getenv
 
 class TestTimeLinearizer(unittest.TestCase):
   def test_reasonable_time(self):
