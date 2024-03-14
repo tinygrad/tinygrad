@@ -70,26 +70,28 @@ class TestAssign(unittest.TestCase):
     assert y.item() == 4
 
   def test_assign_kv_cache(self):
-    bsz, max_context, seqlen = 2, 8, 1
+    bsz, max_context = 2, 8
 
     class Attn:
       @TinyJit
       def __call__(self, xk:Tensor, start_pos:Variable):
+        seqlen = xk.shape[1]
         if not hasattr(self, "cache_k"):
           self.cache_k = Tensor.zeros(bsz, max_context, 1, 1).contiguous()
         keys = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1).contiguous() if start_pos > 0 else xk
         self.cache_k.assign(keys.pad((None,(0,max_context-start_pos-seqlen),None,None)).contiguous()).realize()
 
     attn = Attn()
-    for i in range(6):
+    xk = Tensor.ones(bsz, 3, 1, 1).contiguous()
+    attn(xk, 0)
+    for i in range(3,6):
       # copied from LLaMA
-      start_pos = Variable("start_pos", 1, max_context).bind(i) if i > 0 else 0
-      xk = Tensor.ones(bsz, seqlen, 1, 1).contiguous()
+      start_pos = Variable("start_pos", 1, max_context).bind(i)
+      xk = Tensor.ones(bsz, 1, 1, 1).contiguous()
       attn(xk, start_pos)
 
     out = attn.cache_k.flatten().numpy()
     np.testing.assert_allclose(out, [1.,1.,1.,1.,1.,1.,0.,0.,1.,1.,1.,1.,1.,1.,0.,0.])
-    #print(out)
 
   @unittest.skip("contiguous means contiguous now")
   def test_assign_contiguous(self):
