@@ -294,7 +294,7 @@ class UOpGraph:
       if u.uop is not UOps.STORE or (val:=u.vin[-1]).uop is not UOps.CAST or cast(DType,val.dtype).count == 1: continue
 
       children = val.vin
-      if all(el.uop is UOps.PHI for el in val.vin): children = [el.vin[0] for el in val.vin]
+      if all(el.uop is UOps.PHI for el in val.vin): children = tuple([el.vin[0] for el in val.vin])
       if all(el.uop is UOps.GEP for el in children) and len(set(el.vin[0] for el in children)) == 1 and val.dtype == children[0].vin[0].dtype:
         # Check that accesses elements are in order.
         if all(i==el.arg for i,el in enumerate(children)):
