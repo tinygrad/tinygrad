@@ -288,6 +288,24 @@ class UOpGraph:
         for alu_with_accum in [op for op in self.uops if accumulator in op.vin]:
           self.replace_op(alu_with_accum, next(op for op in alu_with_accum.vin if op != accumulator))
 
+  def fix_to_store_directly(self):
+    replaced_stores: Dict[UOp,UOp] = {}
+    for u in self.uops:
+      if u.uop is not UOps.STORE or (val:=u.vin[-1]).uop is not UOps.CAST or cast(DType,val.dtype).count == 1: continue
+
+      children = val.vin
+      if all(el.uop is UOps.PHI for el in val.vin): children = [el.vin[0] for el in val.vin]
+      if all(el.uop is UOps.GEP for el in children) and len(set(el.vin[0] for el in children)) == 1:
+        # Check that accesses elements are in order.
+        if all(i==el.arg for i,el in enumerate(children)):
+          replaced_stores[u] = children[0].vin[0]
+
+    for prev,new in replaced_stores.items():
+      if prev.vin[-1].dtype != new.dtype: continue
+      try: self.uops.remove(prev.vin[-1])  # remove the old upcast NOTE: the upcast's vins become childless now
+      except ValueError: pass  # already removed
+      self.uops[self.uops.index(prev)].vin = (prev.vin[0],prev.vin[1],new) # replace with the float4 value
+
   def uops_optimization(self, get_recursive_parents):
     for u in self.uops:
       if u.uop is UOps.PHI and len(u.vin) == 3:
@@ -330,19 +348,7 @@ class UOpGraph:
     self.remove_childless(set(x for x in self.uops if x.uop in {UOps.DEFINE_GLOBAL, UOps.STORE}))
 
     # store float4 upcasts directly if possible
-    replaced_stores: Dict[UOp,UOp] = {}
-    for u in self.uops:
-      if u.uop is not UOps.STORE or (val:=u.vin[-1]).uop is not UOps.CAST or cast(DType,val.dtype).count == 1: continue
-      if all(el.uop is UOps.GEP for el in val.vin):
-        # Check that accesses elements are the same and in order.
-        if len(set(el.vin[0] for el in val.vin)) == 1 and all(i==el.arg for i,el in enumerate(val.vin)):
-          replaced_stores[u] = val.vin[0].vin[0]
-      elif all(el.uop is UOps.PHI for el in val.vin): replaced_stores[u] = phi_resolve_acc(val)
-    for prev,new in replaced_stores.items():
-      if prev.vin[-1].dtype != new.dtype: continue
-      try: self.uops.remove(prev.vin[-1])  # remove the old upcast NOTE: the upcast's vins become childless now
-      except ValueError: pass  # already removed
-      self.uops[self.uops.index(prev)].vin = (prev.vin[0],prev.vin[1],new) # replace with the float4 value
+    self.fix_to_store_directly()
 
     # add UOps.END*
     self.add_ends()
