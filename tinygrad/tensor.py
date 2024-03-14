@@ -138,8 +138,10 @@ class Tensor:
     return self
 
   # this replaces old uses of assign, and just directly sets the lazydata
+  # different dtypes and devices are fine here
   def set(self, x:Tensor) -> Tensor:
     assert not x.requires_grad and getattr(self, '_ctx', None) is None
+    assert self.shape == x.shape, f"set shape mismatch {self.shape} != {x.shape}"
     self.lazydata = x.lazydata
     return self
 
