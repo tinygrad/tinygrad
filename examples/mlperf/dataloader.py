@@ -69,6 +69,7 @@ def loader_process(q_in, q_out, X:Tensor, seed):
       # ideal
       #X[idx].assign(img.tobytes())   # NOTE: this is slow!
       q_out.put(idx)
+    q_out.put(None)
 
 def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None):
   from extra.datasets.imagenet import get_train_files, get_val_files
@@ -84,11 +85,13 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None):
       q_in.put((idx, fn, val))
       Y[idx] = cir[fn.split("/")[-2]]
 
+  shutdown = False
   class Cookie:
     def __init__(self, num): self.num = num
     def __del__(self):
-      try: enqueue_batch(self.num)
-      except StopIteration: pass
+      if not shutdown:
+        try: enqueue_batch(self.num)
+        except StopIteration: pass
 
   gotten = [0]*BATCH_COUNT
   def receive_batch():
@@ -124,9 +127,15 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None):
     # NOTE: this is batch aligned, last ones are ignored
     for _ in range(0, len(files)//batch_size): yield receive_batch()
   finally:
-    # shutdown processes
+    shutdown = True
+    # empty queues
     for _ in procs: q_in.put(None)
-    for p in procs: p.terminate()
+    q_in.close()
+    for _ in procs:
+      while q_out.get() is not None: pass
+    q_out.close()
+    # shutdown processes
+    for p in procs: p.join()
     shm.close()
     shm.unlink()
 
