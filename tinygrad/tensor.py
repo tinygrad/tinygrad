@@ -137,6 +137,12 @@ class Tensor:
     Tensor.corealize([self])
     return self
 
+  # this replaces old uses of assign, and just directly sets the lazydata
+  def set(self, x:Tensor) -> Tensor:
+    assert not x.requires_grad and getattr(self, '_ctx', None) is None
+    self.lazydata = x.lazydata
+    return self
+
   def assign(self, x) -> Tensor:
     # TODO: this is a hack for writing to DISK. remove with working assign
     if isinstance(self.device, str) and self.device.startswith("DISK"):
@@ -149,13 +155,11 @@ class Tensor:
     # NOTE: we allow cross device assign / cross dtype assign with this hack. is this correct?
     # it's not a real assign, and we may want to disallow it
     assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
+    assert self.device == x.device, f"assign device mismatch {self.device} != {x.device}"
+    assert self.dtype == x.dtype, f"assign dtype mismatch {self.dtype} != {x.dtype}"
     assert not isinstance(self.lazydata, MultiLazyBuffer) or self.lazydata.axis == x.lazydata.axis, "axis must match on MultiLazyBuffer"
     assert not x.requires_grad  # self requires_grad is okay?
-    #    (self.lazydata.lbs[0].base.realized is None if isinstance(self.lazydata, MultiLazyBuffer) else self.lazydata.base.realized is None):
-    if self.device != x.device or self.dtype != x.dtype:
-      self.lazydata = x.lazydata
-    else:
-      self.lazydata = self.lazydata.assign(x.lazydata)
+    self.lazydata = self.lazydata.assign(x.lazydata)
     return self
   def detach(self) -> Tensor: return Tensor(self.lazydata, device=self.device, requires_grad=False)
 
