@@ -31,11 +31,10 @@ dtype_to_llvm_dtype = { dtypes.bool:ir.IntType(1), dtypes.int8:ir.IntType(8), dt
   dtypes.uint16:ir.IntType(16), dtypes.int32:ir.IntType(32), dtypes.uint32:ir.IntType(32), dtypes.int64:ir.IntType(64), dtypes.uint64:ir.IntType(64),
   dtypes.float16:ir.HalfType(), dtypes.bfloat16:ir.IntType(16), dtypes.float32:ir.FloatType(), dtypes.float64:ir.DoubleType() }
 
-def bitcast(bb, val, input_type, output_type): return val if input_type == output_type else bb[-1].bitcast(val, dtype_to_llvm_dtype[output_type])
-
-def cast(bb, val, input_type, output_type):
+def cast(bb, val, input_type, output_type, bitcast=False):
   if input_type == output_type: return val
   llvm_type = dtype_to_llvm_dtype[output_type]
+  if bitcast: return bb[-1].bitcast(val, llvm_type)
 
   if input_type == dtypes.bfloat16:
     val = bb[-1].bitcast(bb[-1].shl(bb[-1].sext(val, ir.IntType(32)), ir.Constant(ir.IntType(32), 16)),val, ir.FloatType())
@@ -145,8 +144,7 @@ def uops_to_llvm_ir(function_name:str, uops:UOpGraph) -> str:
         lvars[backward] = lvars[u]
       elif uop is UOps.ALU:
         lvars[u] = code_for_op[args](bb[-1], *[lvars[x] for x in vin], dtype if args not in (BinaryOps.CMPLT, BinaryOps.CMPEQ) else vin[0].dtype)
-      elif uop is UOps.BITCAST: lvars[u] = bitcast(bb, lvars[vin[0]], vin[0].dtype, dtype)
-      elif uop is UOps.CAST: lvars[u] = cast(bb, lvars[vin[0]], vin[0].dtype, dtype)
+      elif uop in {UOps.CAST, UOps.BITCAST}: lvars[u] = cast(bb, lvars[vin[0]], vin[0].dtype, dtype, bitcast=uop is UOps.BITCAST)
       elif uop in {UOps.DEFINE_GLOBAL, UOps.DEFINE_VAR}: lvars[u] = func.args[buf_index[args]]
       elif uop is UOps.SPECIAL: lvars[u] = lvars[args.expr]
       elif uop is UOps.CONST: lvars[u] = const(args, dtype)
