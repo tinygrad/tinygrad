@@ -226,7 +226,12 @@ class Tensor:
   def manual_seed(seed=0): Tensor._seed = seed
 
   @staticmethod
-  def rand(*shape, **kwargs): return Tensor._loadop(LoadOps.CUSTOM, argfix(*shape), arg=custom_random, **kwargs)
+  def rand(*shape, **kwargs):
+    if kwargs.get("dtype") == dtypes.bfloat16:
+      # TODO: remove this once we use threefry for rand.
+      kwargs.pop("dtype")
+      return Tensor.rand(*shape, **kwargs, dtype=dtypes.float).cast(dtypes.bfloat16)
+    return Tensor._loadop(LoadOps.CUSTOM, argfix(*shape), arg=custom_random, **kwargs)
 
   # ***** creation helper functions *****
 
