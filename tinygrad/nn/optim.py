@@ -25,7 +25,8 @@ class Optimizer:
   def step(self) -> None: raise NotImplementedError
 
 # LARS is essentially just trust ratio to SGD so if we just set the trust coeff 0.0 its just standard SGD.
-def SGD(params: List[Tensor], lr=0.001, momentum=0, weight_decay=0.0, nesterov=False): return LARS(params, lr, momentum, weight_decay, nesterov, tcoef=0.0)
+def SGD(params: List[Tensor], lr=0.001, momentum=0, weight_decay=0.0, nesterov=False):
+  return LARS(params, lr, momentum, weight_decay, nesterov, tcoef=0.0)
 
 class LARS(Optimizer):
   def __init__(self, params:List[Tensor], lr=0.001, momentum=0.9, weight_decay=1e-4, nesterov=False, tcoef=0.001):
