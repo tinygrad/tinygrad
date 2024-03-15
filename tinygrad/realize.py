@@ -261,9 +261,12 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
       in_degrees[inp] += 1
 
   q = [x.base for x in outs]
-  sis_ordered = []
+  sis_ordered: List[ScheduleItem] = []
   while len(q):
-    si = sis.get(q.pop(0), None)
+    lb = q.pop(0)
+    if lb in seen: continue
+    seen.add(lb)
+    si = sis.get(lb, None)
     if si is None: continue
     sis_ordered.append(si)
     for inp in si.inputs:
