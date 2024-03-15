@@ -38,17 +38,17 @@ class LARS(Optimizer):
       assert t.grad is not None
       # this realize is needed since the grads can form a "diamond"
       # TODO: fix this in lazy.py
-      up = t.grad.realize() + self.wd * t.detach()
+      g = t.grad.realize() + self.wd * t.detach()
       if self.tcoef != 0:
         r1 = t.detach().square().sum().sqrt()
-        r2 = up.square().sum().sqrt()
+        r2 = g.square().sum().sqrt()
         r = (r1 > 0).where((r2 > 0).where(self.tcoef * r1 / r2, 1.0), 1.0)
-        up = up * r * self.lr
+        g = g * r * self.lr
       if self.momentum:
-        self.b[i].assign(self.momentum * self.b[i] + up)  # NOTE: self.b[i] is zero on the first run, no if required
-        up = (up + self.momentum * self.b[i]) if self.nesterov else self.b[i]
-      if self.tcoef == 0: up = up * self.lr
-      t.assign(t.detach() - up)
+        self.b[i].assign(self.momentum * self.b[i] + g)  # NOTE: self.b[i] is zero on the first run, no if required
+        g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
+      if self.tcoef == 0: g = g * self.lr
+      t.assign(t.detach() - g)
     self.realize(self.b)
 
 # LAMB is essentially just the trust ratio part of LARS applied to Adam/W so if we just set the trust ratio to 1.0 its just Adam/W.
