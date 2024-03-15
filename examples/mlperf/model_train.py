@@ -6,6 +6,7 @@ from tqdm import tqdm
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
 from tinygrad.helpers import getenv, BEAM, WINO
 from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_save
+from tinygrad.nn.optim import LARS, SGD
 
 from examples.mlperf.helpers import get_training_state, load_training_state
 
@@ -60,20 +61,23 @@ def train_resnet():
   config["SYNCBN"]  = getenv("SYNCBN")
 
   # ** Optimizer **
-  from examples.mlperf.optimizers import LARS
-  skip_list = {v for k, v in get_state_dict(model).items() if "bn" in k or "bias" in k or "downsample.1" in k}
-  optimizer = LARS(parameters, base_lr, momentum=.9, weight_decay=decay, skip_list=skip_list)
+  skip_list = [v for k, v in get_state_dict(model).items() if "bn" in k or "bias" in k or "downsample.1" in k]
+  optimizer = LARS(parameters, base_lr, momentum=.9, weight_decay=decay)
+  optimizer_skip = SGD(skip_list, base_lr, momentum=.9, weight_decay=decay)
 
   # ** LR scheduler **
   scheduler = PolynomialDecayWithWarmup(optimizer, initial_lr=base_lr, end_lr=1e-4,
                                         train_steps=epochs * steps_in_train_epoch,
                                         warmup=lr_warmup_epochs * steps_in_train_epoch)
+  scheduler_skip = PolynomialDecayWithWarmup(optimizer_skip, initial_lr=base_lr, end_lr=1e-4,
+                                             train_steps=epochs * steps_in_train_epoch,
+                                             warmup=lr_warmup_epochs * steps_in_train_epoch)
   print(f"training with batch size {BS} for {epochs} epochs")
 
   # ** resume from checkpointing **
   start_epoch = 0
   if ckpt:=getenv("RESUME", ""):
-    load_training_state(model, optimizer, scheduler, safe_load(ckpt))
+    load_training_state(model, {"main": optimizer, "skip": optimizer_skip}, scheduler, safe_load(ckpt))
     start_epoch = int(scheduler.epoch_counter.numpy().item() / steps_in_train_epoch)
     print(f"resuming from {ckpt} at epoch {start_epoch}")
 
@@ -92,13 +96,16 @@ def train_resnet():
   @TinyJit
   def train_step(X, Y):
     optimizer.zero_grad()
+    optimizer_skip.zero_grad()
     X = normalize(X)
     out = model.forward(X)
     loss = out.sparse_categorical_crossentropy(Y, label_smoothing=0.1)
     top_1 = (out.argmax(-1) == Y).sum()
     loss.backward()
     optimizer.step()
+    optimizer_skip.step()
     scheduler.step()
+    scheduler_skip.step()
     return loss.realize(), top_1.realize()
   @TinyJit
   def eval_step(X, Y):
@@ -204,7 +211,7 @@ def train_resnet():
         else:
           fn = f"./ckpts/{time.strftime('%Y%m%d_%H%M%S')}_e{e}.safe"
         print(f"saving ckpt to {fn}")
-        safe_save(get_training_state(model, optimizer, scheduler), fn)
+        safe_save(get_training_state(model, {"main": optimizer, "skip": optimizer_skip}, scheduler), fn)
 
 def train_retinanet():
   # TODO: Retinanet

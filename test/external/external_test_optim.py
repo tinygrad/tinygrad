@@ -8,7 +8,6 @@ from tensorflow.python.ops import math_ops
 from tinygrad.tensor import Tensor
 from tinygrad.nn.optim import LAMB, LARS
 
-from examples.mlperf.optimizers import LARS as LARSmlperf
 from test.external.mlperf_resnet.lars_optimizer import LARSOptimizer
 
 from examples.mlperf.lr_schedulers import PolynomialDecayWithWarmup
@@ -85,8 +84,7 @@ def step_tf(optim, steps=1, kwargs={}, scheduler=None, schedopts=None, do_optim=
 
 # skip_list=True -> skip W
 def create_tiny_lars(params, lr): return LARS(params, lr)
-def create_tiny_mlperf_lars(params, lr, skip_list=False): return LARSmlperf(params, lr, skip_list=[params[1]] if skip_list else None)
-def create_tf_lars(lr, skip_list=False): return LARSOptimizer(lr, skip_list=["W"] if skip_list else None)
+def create_tf_lars(lr): return LARSOptimizer(lr)
 
 def create_tf_polylr(initial_lr, end_lr, train_steps, warmup, power=2):
   assert power == 2
@@ -104,11 +102,6 @@ class ExternalTestOptim(unittest.TestCase):
   def _test_lars_polylr(self, steps, opts, schedopts, atol, rtol, do_optim=True):
     self._test_optim(create_tiny_lars, create_tf_lars, steps, opts, atol, rtol,
                      tiny_sched=PolynomialDecayWithWarmup, tf_sched=create_tf_polylr, schedopts=schedopts, do_optim=do_optim)
-  def _test_lars_mlperf(self, steps, opts, atol, rtol):
-    self._test_optim(create_tiny_mlperf_lars, create_tf_lars, steps, opts, atol, rtol)
-  def _test_lars_mlperf_polylr(self, steps, opts, schedopts, atol, rtol, do_optim=True):
-    self._test_optim(create_tiny_mlperf_lars, create_tf_lars, steps, opts, atol, rtol,
-                     tiny_sched=PolynomialDecayWithWarmup, tf_sched=create_tf_polylr, schedopts=schedopts, do_optim=do_optim)
 
   def test_lamb(self): self._test_lamb(1, {'lr': 0.001}, 1e-5, 0)
   def test_lamb_high_lr(self): self._test_lamb(1, {'lr': 10}, 1e-5, 1e-5)
@@ -120,12 +113,6 @@ class ExternalTestOptim(unittest.TestCase):
   def test_lars_high_lr(self): self._test_lars(1, {'lr': 10}, 1e-5, 1e-5)
   def test_multistep_lars(self): self._test_lamb(10, {'lr': 0.001}, 1e-5, 0)
   def test_multistep_lars_high_lr(self): self._test_lamb(10, {'lr': 10}, 1e-5, 3e-4)
-
-  def test_lars_mlperf(self): self._test_lars_mlperf(1, {'lr': 0.01}, 1e-5, 0)
-  def test_lars_mlperf_high_lr(self): self._test_lars_mlperf(1, {'lr': 10}, 1e-5, 1e-5)
-  def test_multistep_lars_mlperf(self): self._test_lars_mlperf(10, {'lr': 0.001}, 1e-5, 0)
-  def test_multistep_lars_mlperf_high_lr(self): self._test_lars_mlperf(10, {'lr': 10}, 1e-5, 3e-4)
-  def test_lars_mlperf_skip_list(self): self._test_lars_mlperf(1, {'lr': 0.01, 'skip_list': True}, 1e-5, 0)
 
   def test_lars_polylr(self):
     self._test_lars_polylr(10, {'lr': 1.0}, {
@@ -143,35 +130,6 @@ class ExternalTestOptim(unittest.TestCase):
     }, 1e-5, 1e-5, do_optim=False)
   @unittest.skip("slow, but you can run this locally to check")
   def test_lars_polylr_resnet(self):
-    train_files = 1_281_167
-    BS = 624
-    steps_per_epoch = train_files // BS
-    epochs = 45
-    warmup_epochs = 5
-    self._test_lars_polylr(steps_per_epoch * epochs, {'lr': 10.4}, {
-      'initial_lr': 10.4,
-      'end_lr': 1e-4,
-      # step counts for BS=624 EPOCHS=45 resnet
-      'train_steps': steps_per_epoch * epochs,
-      'warmup': steps_per_epoch * warmup_epochs,
-    }, 1e-5, 1e-5, do_optim=False)
-
-  def test_lars_mlperf_polylr(self):
-    self._test_lars_mlperf_polylr(10, {'lr': 1.0}, {
-      'initial_lr': 1.0,
-      'end_lr': 1e-4,
-      'train_steps': 10,
-      'warmup': 3
-    }, 1e-5, 1e-5)
-  def test_lars_mlperf_polylr_large(self):
-    self._test_lars_mlperf_polylr(100, {'lr': 10.0}, {
-      'initial_lr': 10.0,
-      'end_lr': 1e-5,
-      'train_steps': 100,
-      'warmup': 43
-    }, 1e-5, 1e-5, do_optim=False)
-  @unittest.skip("slow, but you can run this locally to check")
-  def test_lars_mlperf_polylr_resnet(self):
     train_files = 1_281_167
     BS = 624
     steps_per_epoch = train_files // BS
