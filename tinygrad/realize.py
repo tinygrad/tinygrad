@@ -1,6 +1,6 @@
 import sys
-from collections import defaultdict
-from typing import List, Dict, Optional, cast, Set, DefaultDict
+from collections import defaultdict, deque
+from typing import Deque, List, Dict, Optional, Tuple, cast, Set, DefaultDict
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters, LazyOp, ReduceOps, ConstBuffer, MemBuffer, BinaryOps, UnaryOps
 from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats, Compiled, BufferOptions
 from tinygrad.features.graph import realized_lazybuffer, log_lazybuffer
@@ -251,4 +251,26 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
       assert len(realized_children) == 1
       reduce_for_op[next(iter(realized_children.keys()))] = r
 
-  return flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in outs)
+  graph: DefaultDict[LazyBuffer,List[LazyBuffer]] = defaultdict(list)
+  in_degree: DefaultDict[LazyBuffer,int] = defaultdict(int)
+  queue: Deque[LazyBuffer] = deque()
+  for buf in allbufs:
+    if buf.realized: continue
+    for x in buf.srcs:
+      if x.base.realized: continue
+      graph[x.base].append(buf)
+      in_degree[buf] += 1
+    if in_degree[buf] == 0: queue.append(buf)
+
+  sorted_realizes: List[LazyBuffer] = []
+  while queue:
+    buf = queue.popleft()
+    if buf.op != LoadOps.CONST and buf in realizes and buf not in seen: sorted_realizes.append(buf)
+    for x in graph[buf]:
+      in_degree[x] -= 1
+      if in_degree[x] == 0: queue.append(x)
+
+  sched:List[ScheduleItem] = []
+  for x in sorted_realizes:
+    sched += _recursive_schedule(x, seen, realizes, reduce_for_op)
+  return sched
