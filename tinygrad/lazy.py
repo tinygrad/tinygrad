@@ -61,8 +61,8 @@ class LazyBuffer:
     return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, self.device, arg=cast_scalar(val, self.dtype)).reshape((1,)*len(shape)).expand(shape)
 
   def assign(self, x:LazyBuffer) -> LazyBuffer:
-    new_self = create_lazybuffer(self.device, self.st, self.dtype, self.op, self.arg, self.srcs, enable_cache=False) \
-      if self.base.realized is None else self
+    if self.base.realized is not None or self is not self.base: new_self = self
+    else: new_self = create_lazybuffer(self.device, self.st, self.dtype, self.op, self.arg, self.srcs, enable_cache=False)
     return LazyBuffer.loadop(LoadOps.ASSIGN, self.shape, self.dtype, self.device, src=(x, new_self))
   def contiguous(self):
     if not self.st.contiguous or self.size != self.base.size or self.is_unrealized_const():
