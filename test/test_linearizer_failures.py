@@ -7,7 +7,7 @@ from tinygrad.features.search import Opt, OptOps
 from tinygrad import Device, dtypes, Tensor
 from tinygrad.helpers import CI
 from test.external.fuzz_linearizer import run_linearizer, get_fuzz_rawbufs, get_fuzz_rawbuf_like
-from test.test_dtype import is_dtype_supported
+from test.helpers import is_dtype_supported
 
 from tinygrad.ops import LazyOp, BinaryOps, UnaryOps, ReduceOps, BufferOps, MemBuffer, ConstBuffer, get_lazyop_info
 from tinygrad.shape.shapetracker import ShapeTracker
