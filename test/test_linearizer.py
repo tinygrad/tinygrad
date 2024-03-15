@@ -206,7 +206,7 @@ class TestLinearizer(unittest.TestCase):
     np.testing.assert_equal(a.flatten().numpy(), [1.,1.,1.,1.,2.,2.,2.,2.,1.,1.,1.,1.,1.,1.,1.,1.])
 
   def test_where_fold(self):
-    a = Tensor.rand(4, 4).realize()
+    a = Tensor.ones(4, 4).contiguous().realize()
     b = a.shrink(((1, 2), None)).pad(((1, 2), None))
     a.assign(b.where(2, a))
     sched = create_schedule([a.lazydata])
@@ -215,7 +215,7 @@ class TestLinearizer(unittest.TestCase):
     lin.hand_coded_optimizations()
     lin.linearize()
     assert not any(u.arg == TernaryOps.WHERE for u in lin.uops), "found where where where should be folded"
-    a.realize()
+    np.testing.assert_equal(a.flatten().numpy(), [1.,1.,1.,1.,2.,2.,2.,2.,1.,1.,1.,1.,1.,1.,1.,1.])
 
   def test_simplify_uop(self):
     def helper_test_simplify(uop, dtype, vin, arg=None):
