@@ -1,10 +1,10 @@
 import sys
 from collections import defaultdict, deque
-from typing import Deque, List, Dict, Optional, Tuple, cast, Set, DefaultDict
+from typing import Deque, List, Dict, Optional, cast, Set, DefaultDict
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters, LazyOp, ReduceOps, ConstBuffer, MemBuffer, BinaryOps, UnaryOps
 from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats, Compiled, BufferOptions
 from tinygrad.features.graph import realized_lazybuffer, log_lazybuffer
-from tinygrad.helpers import colored, getenv, GRAPH, cpu_time_execution, DEBUG, flatten, prod, dedup, all_int
+from tinygrad.helpers import colored, getenv, GRAPH, cpu_time_execution, DEBUG, prod, dedup, all_int
 from tinygrad.shape.symbolic import Variable
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.lazy import LazyBuffer
@@ -137,16 +137,6 @@ def _schedule_one(out:LazyBuffer, realizes:Set[LazyBuffer], reduce_for_op: Dict[
     op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_st.simplify().unbind()[0]))
   return ScheduleItem((op,), (out,), tuple(inputs), var_vals)
 
-# recursively walk back in the graph to create the schedule
-def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyBuffer],
-                        reduce_for_op: Dict[LazyBuffer, LazyBuffer]) -> List[ScheduleItem]:
-  if out in seen or out.realized or out.op == LoadOps.CONST: return []
-  assert out.base == out
-  assert out in realizes
-  seen.add(out)
-  si = _schedule_one(out, realizes, reduce_for_op)
-  return flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in si.inputs) + [si]
-
 # recursively search the entire graph for all LazyBuffers, insert realizes after expands
 def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffer, None],
                 simple_pads:Set[LazyBuffer], children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], scheduled=False):
@@ -272,5 +262,7 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
 
   sched:List[ScheduleItem] = []
   for x in sorted_realizes:
-    sched += _recursive_schedule(x, seen, realizes, reduce_for_op)
+    if x in seen: continue
+    sched.append(_schedule_one(x, realizes, reduce_for_op))
+    seen.add(x)
   return sched
