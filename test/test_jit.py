@@ -96,6 +96,21 @@ class TestJit(unittest.TestCase):
       np.testing.assert_allclose(c.numpy(), a.numpy()+b.numpy(), atol=1e-4, rtol=1e-5)
     assert_jit_cache_len(add_kwargs, 1)
 
+  def test_reorder_kwargs_jit(self):
+    @TinyJit
+    def add_kwargs(first, second): return (first/second).realize()
+    for _ in range(2):
+      a = Tensor.randn(10, 10)
+      b = Tensor.randn(10, 10)
+      c = add_kwargs(second=b, first=a)
+      np.testing.assert_allclose(c.numpy(), a.numpy()/b.numpy(), atol=1e-4, rtol=1e-5)
+    for _ in range(2):
+      a = Tensor.randn(10, 10)
+      b = Tensor.randn(10, 10)
+      c = add_kwargs(first=a, second=b)
+      np.testing.assert_allclose(c.numpy(), a.numpy()/b.numpy(), atol=1e-4, rtol=1e-5)
+    assert_jit_cache_len(add_kwargs, 1)
+
   def test_array_jit(self):
     @TinyJit
     def add_array(a, arr): return (a+arr[0]).realize()
