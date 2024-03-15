@@ -101,7 +101,11 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
     unbound_st, st_var_vals = st.simplify().unbind()
     var_vals.update(st_var_vals)
     if assign_to is not None and buf is assign_to:
-      if not unbound_st.contiguous: raise RuntimeError(f"must be contiguous for assign {unbound_st}")
+      if not unbound_st.contiguous:
+        # we also allow masked views. if it has a single view and it's equal when you shrink a contig, it's fine
+        if not (len(unbound_st.views) == 1 and unbound_st.views[0].mask is not None and
+            ShapeTracker.from_shape(unbound_st.shape).shrink(unbound_st.views[0].mask) == unbound_st.shrink(unbound_st.views[0].mask)):
+          raise RuntimeError(f"must be contiguous for assign {unbound_st}")
       return LazyOp(BufferOps.LOAD, (), MemBuffer(0, buf.dtype, unbound_st))
     if buf not in inputs: inputs.append(buf)
     return LazyOp(BufferOps.LOAD, (), MemBuffer(inputs.index(buf)+1, buf.dtype, unbound_st))
