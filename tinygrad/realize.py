@@ -184,56 +184,43 @@ def _is_padding_okay(buf:LazyBuffer, realizes:Set[LazyBuffer]) -> bool:
 
 def optimize_schedule(schedule:List[ScheduleItem]) -> List[ScheduleItem]:
   # Building dep graph
-  r_dep, w_dep = defaultdict(list), {}
+  dep_owner = {}
   graph = defaultdict(list) # children for a node
+
+  def dep_key(lb): return (lb.realized or lb.output_buffer or lb) # account for realized or output_buffers assigned
   for i,si in enumerate(schedule):
-    for lb in si.inputs:
-      if lb in w_dep: graph[w_dep[lb]].append(i)
-      r_dep[lb].append(i)
-    if si.out in r_dep: 
-      for j in r_dep.pop(si.out): graph[j].append(i)
-    if si.out in w_dep: graph[w_dep[lb]].append(i)
-    w_dep[si.out] = i
+    for lb in si.inputs + si.outputs:
+      if dep_key(lb) in dep_owner: graph[dep_owner[dep_key(lb)]].append(i)
+    for lb in si.outputs: dep_owner[dep_key(lb)] = i
 
   prios = {} # prio for each node. the less prio, the closer to the beggining.
   def _dfs(v, transfers_before=0) -> int: # weight
     if v in prios: return prios[v]
     children_prio = 0
-    transfers_on_node = 1 if schedule[v].ast.op == LoadOps.COPY else 0
+    transfers_on_node = 1 if schedule[v].ast[0].op == LoadOps.COPY else 0
     for ch in graph[v]: children_prio += _dfs(ch, transfers_before=transfers_before+transfers_on_node)
     prios[v] = children_prio - transfers_before - transfers_on_node
     return prios[v]
 
+  in_degree = {i:0 for i in range(len(schedule))}
+  for adjacents in graph.values():
+    for node in adjacents: in_degree[node] += 1
+
   for v in range(len(schedule)):
-    if v not in prios: _dfs(v)
+    if in_degree[v] == 0: _dfs(v)
 
-  def _toposort(graph, key=None):
-    in_degree = {i:0 for i in range(len(schedule))}
-    for adjacents in graph.values():
-      for node in adjacents: in_degree[node] += 1
-
-    heap = [(key(node), node) for node, degree in in_degree.items() if degree == 0]
-    heapq.heapify(heap)
-
-    top_order = []
-    while heap:
-      _, node = heapq.heappop(heap)
-      top_order.append(node)
-      for adjacent in graph.get(node, []):
-        in_degree[adjacent] -= 1
-        if in_degree[adjacent] == 0:
-          heapq.heappush(heap, (key(adjacent), adjacent))
-    return top_order
-
-  del r_dep
-  del w_dep
-  # return schedule
-  
-  order = _toposort(graph, prios.get)
-  assert len(order) == len(schedule)
   new_schedule = []
-  for i in range(len(schedule)): new_schedule.append(schedule[order[i]])
-  del schedule
+  heap = [(prios[node], node) for node, degree in in_degree.items() if degree == 0]
+  heapq.heapify(heap)
+
+  while heap:
+    _, node = heapq.heappop(heap)
+    new_schedule.append(schedule[node])
+    for adjacent in graph.get(node, []):
+      in_degree[adjacent] -= 1
+      if in_degree[adjacent] == 0: heapq.heappush(heap, (prios[adjacent], adjacent))
+
+  del dep_owner, schedule
   return new_schedule
 
 def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> List[ScheduleItem]:
