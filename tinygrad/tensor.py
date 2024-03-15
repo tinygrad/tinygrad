@@ -159,11 +159,7 @@ class Tensor:
     assert self.dtype == x.dtype, f"assign dtype mismatch {self.dtype} != {x.dtype}"
     assert not isinstance(self.lazydata, MultiLazyBuffer) or self.lazydata.axis == x.lazydata.axis, "axis must match on MultiLazyBuffer"
     assert not x.requires_grad  # self requires_grad is okay?
-    if isinstance(self.lazydata, MultiLazyBuffer):
-      for d,s in zip(x.lazydata.lbs, self.lazydata.lbs): d.output_buffer = s.base.realized
-    else:
-      if self.lazydata.base.realized is not None: x.lazydata.output_buffer = self.lazydata.base.realized
-    self.lazydata = x.lazydata
+    self.lazydata = self.lazydata.assign(x.lazydata)
     return self
   def detach(self) -> Tensor: return Tensor(self.lazydata, device=self.device, requires_grad=False)
 
