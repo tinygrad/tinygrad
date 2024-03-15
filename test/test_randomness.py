@@ -64,7 +64,7 @@ class TestRandomness(unittest.TestCase):
     N = 128
     x = Tensor.rand((2, N, N), dtype=dtypes.half)
     assert x.dtype == dtypes.half
-    x = x.realize().numpy()
+    x = x.numpy()
     ones = np.take(x, np.where(x == 1))
     zeros = np.take(x, np.where(x == 0))
     self.assertTrue(ones.size == 0)
@@ -77,7 +77,7 @@ class TestRandomness(unittest.TestCase):
     x = Tensor.rand((2, N, N), dtype=dtypes.bfloat16)
     assert x.dtype == dtypes.bfloat16
     # TODO: fix this property for bfloat16 random
-    # x = x.realize().float().numpy()
+    # x = x.numpy()
     # ones = np.take(x, np.where(x == 1))
     # zeros = np.take(x, np.where(x == 0))
     # self.assertTrue(ones.size == 0)
