@@ -4,6 +4,7 @@ import numpy as np
 import torch
 from tinygrad import nn, dtypes, Tensor
 from functools import partial
+from test.test_dtype import is_dtype_supported
 
 # https://gist.github.com/devries/11405101
 def ksprob(a):
@@ -58,6 +59,7 @@ class TestRandomness(unittest.TestCase):
     self.assertFalse(normal_test(Tensor.rand))
     self.assertTrue(equal_distribution(Tensor.rand, torch.rand, lambda x: np.random.rand(*x)))
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.half))
   def test_rand_half(self):
     N = 128
     x = Tensor.rand((2, N, N), dtype=dtypes.half)
