@@ -1,6 +1,6 @@
 import sys
 from collections import defaultdict
-from typing import List, Dict, Optional, cast, Set, DefaultDict
+from typing import List, Dict, Optional, cast, Set, DefaultDict, Tuple
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters, LazyOp, ReduceOps, ConstBuffer, MemBuffer, BinaryOps, UnaryOps
 from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats, Compiled, BufferOptions
 from tinygrad.features.graph import realized_lazybuffer, log_lazybuffer
@@ -69,7 +69,7 @@ def run_schedule(schedule:List[ScheduleItem]):
 
     # run the function (put it in JIT)
     real_buffers = [x.realized for x in si.outputs+si.inputs if x.size != 0]
-    assert all(x is not None for x in real_buffers), f"can't run, some inputs aren't realized {real_buffers}"
+    assert all(x is not None for x in real_buffers), f"can't run, some inputs aren't realized {real_buffers} for {si.outputs}"
     if prg: prg.exec(cast(List[Buffer], real_buffers), si.var_vals)
     elif (out:=si.outputs[0]).size > 0: update_stats(colored(f"empty {out.st.size:10d} {out.dtype}", "yellow"), 0, 0, {}, None, 1, device=out.device)
     if GRAPH:
@@ -126,11 +126,11 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
     LazyOp(buf.op, tuple(_recursive_lazyop(x, inputs, var_vals, st, realizes, cache, False, assign_to) for x in buf.srcs), buf.arg)
   return ret
 
-# recursively walk back in the graph to create the schedule
-def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyBuffer],
-                        reduce_for_op: Dict[LazyBuffer, LazyBuffer]) -> List[ScheduleItem]:
-  if out in seen or out.realized or out.op == LoadOps.CONST: return []
+def _schedule_one(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyBuffer],
+                  reduce_for_op: Dict[LazyBuffer, LazyBuffer]) -> Tuple[Optional[ScheduleItem], List[LazyBuffer]]:
+  if out in seen or out.realized or out.op == LoadOps.CONST: return (None, [])
   assert out.base == out
+  assert out in realizes
   seen.add(out)
 
   inputs: List[LazyBuffer] = []
@@ -145,7 +145,13 @@ def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyB
   si = ScheduleItem((op,), (out,), tuple(inputs), var_vals)
   # even though what's assigned to is not an input in the LazyOp, it still needs to be scheduled if it realizes
   if out.op is LoadOps.ASSIGN and out.srcs[1].base not in inputs and out.srcs[1].base in realizes: inputs.append(out.srcs[1].base)
-  return flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in inputs) + [si]
+  return (si, inputs)
+
+# recursively walk back in the graph to create the schedule
+def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyBuffer],
+                        reduce_for_op: Dict[LazyBuffer, LazyBuffer]) -> List[ScheduleItem]:
+  si, inputs = _schedule_one(out, seen, realizes, reduce_for_op)
+  return flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in inputs) + ([si] if si is not None else [])
 
 # recursively search the entire graph for all LazyBuffers, insert realizes after expands
 def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffer, None],
@@ -252,3 +258,46 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
       reduce_for_op[next(iter(realized_children.keys()))] = r
 
   return flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in outs)
+
+  """
+  # filter realizes by consts and realized
+  realizes = set(x for x in realizes if x.op is not LoadOps.CONST and x.realized is None)
+
+  # convert all the nodes to ScheduleItems
+  sis = []
+  for out in realizes:
+    inputs: List[LazyBuffer] = []
+    var_vals: Dict[Variable, int] = out.st.var_vals.copy()
+    if out.op in {LoadOps.CUSTOM, LoadOps.SYNC, LoadOps.WAIT, LoadOps.COPY, LoadOps.EMPTY}:
+      op, inputs = LazyOp(out.op, (), out.arg), list(out.srcs)
+    else:
+      output_st = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape)
+      op = _recursive_lazyop(out, inputs, var_vals, output_st, realizes, cache={})
+      op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_st.simplify().unbind()[0]))
+    sis.append(ScheduleItem((op,), (out,), tuple(inputs), var_vals))
+
+  # depth first schedule
+  print(len(realizes))
+  sis = flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in outs)
+  print(len(sis))
+  return sis
+  """
+
+  # breadth first schedule
+
+
+  to_schedule = outs[:]
+  sis = []
+  while len(to_schedule):
+    x = to_schedule.pop(0)
+    si, more = _schedule_one(x.base, seen, realizes, reduce_for_op)
+    if si is not None: sis.append(si)
+
+    to_schedule.extend(more)
+  #print(len(sis), len(outs))
+
+  for x in sis: print(x.outputs)
+
+
+  return sis[::-1]
+
