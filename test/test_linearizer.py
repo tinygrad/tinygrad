@@ -198,6 +198,13 @@ class TestLinearizer(unittest.TestCase):
     lin = Linearizer(*sched[0].ast)
     assert not any(u.uop == UOps.LOOP for u in lin.linearize().uops), "found loop in sum collapse"
 
+  def test_assign_fold(self):
+    a = Tensor.ones(4, 4).contiguous().realize()
+    m = Tensor.ones(4, 4).shrink(((1, 2), None)).pad(((1, 2), None))
+    a.assign(a+m)
+    a.realize()
+    np.testing.assert_equal(a.flatten().numpy(), [1.,1.,1.,1.,2.,2.,2.,2.,1.,1.,1.,1.,1.,1.,1.,1.])
+
   @unittest.skip("this assign needs the shapetracker check fixed")
   def test_where_fold(self):
     a = Tensor.rand(4, 4).realize()
