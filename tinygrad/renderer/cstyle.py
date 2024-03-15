@@ -145,8 +145,8 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str
       elif uop is UOps.PHI:
         kk(f"{r[vin[0]]} = {r[vin[1]]};")
         r[u] = r[vin[0]]
-      elif uop is UOps.CAST:
-        if isinstance(args, tuple) and args[1]:  # bitcast
+      elif uop in {UOps.CAST, UOps.BITCAST}:
+        if uop is UOps.BITCAST:
           assert len(vin) == 1
           precast = ssa(None,'precast')
           kk(f"{lang.render_dtype(cast(DType, vin[0].dtype))} {precast} = {r[vin[0]]};")
