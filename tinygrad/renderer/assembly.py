@@ -149,9 +149,9 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
       elif uop == UOps.PHI:
         kk(f"mov.b{lang.types[dtype][1:]} {r[vin[0]]}, {r[vin[1]]};")
         r[u] = r[vin[0]]
-      elif uop == UOps.CAST:
+      elif uop in {UOps.CAST, UOps.BITCAST}:
         assert vin[0].dtype is not None
-        cast(r[vin[0]], dtype, vin[0].dtype, bitcast=isinstance(args, tuple) and args[1], u=u)
+        cast(r[vin[0]], dtype, vin[0].dtype, bitcast=uop is UOps.BITCAST, u=u)
       elif uop == UOps.DEFINE_LOCAL:
         # TODO: we should sum these, and fetch 0xC000 from somewhere
         assert args[1]*dtype.itemsize <= 0xC000, "too large local"
