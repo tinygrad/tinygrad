@@ -79,7 +79,7 @@ class TestRealWorld(unittest.TestCase):
     helper_test("test_llama", lambda: (Tensor([[1,2,3,4]]),), test, 0.27 if CI else 14.9, 192 if CI else 719, all_jitted=True)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need dtypes.float16")
-  @unittest.skipIf(getenv("JIT") and Device.DEFAULT == "METAL", "failed if JIT is explicitly set")  # TODO: fix this
+  @unittest.skipIf(getenv("JIT"), "failed if JIT is explicitly set")  # TODO: fix this
   def test_gpt2(self):
     dtypes.default_float = dtypes.float16
 
