@@ -3,6 +3,7 @@ import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load
 from tinygrad.helpers import Timing, CI, fetch, temp, getenv
+from test.test_dtype import is_dtype_supported
 
 def compare_weights_both(url):
   import torch
@@ -120,11 +121,13 @@ class TestSafetensors(unittest.TestCase):
 
   def test_save_all_dtypes(self):
     for dtype in dtypes.fields().values():
+      if not is_dtype_supported(dtype): continue
+      # TODO: verify saving bfloat16 once bfloat16 rand works
       if dtype in [dtypes.bfloat16]: continue # not supported in numpy
       path = temp(f"ones.{dtype}.safetensors")
-      ones = Tensor.rand((10,10), dtype=dtype)
-      safe_save(get_state_dict(ones), path)
-      np.testing.assert_equal(ones.numpy(), list(safe_load(path).values())[0].numpy())
+      data = Tensor.rand((10,10), dtype=dtype)
+      safe_save(get_state_dict(data), path)
+      np.testing.assert_equal(data.numpy(), list(safe_load(path).values())[0].numpy())
 
   def test_load_supported_types(self):
     import torch
