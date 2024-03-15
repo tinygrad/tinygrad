@@ -18,7 +18,7 @@ def helper_test_lin(lin: Linearizer, opts, failed_platforms):
     return
 
   rawbufs = get_fuzz_rawbufs(lin)
-  var_vals = {v: random.randint(v.min, v.max) for v in lin.ast.vars()}
+  var_vals = {v: random.randint(v.min, v.max) for v in lin.ast[0].vars()}
 
   assert run_linearizer(lin, rawbufs, var_vals) == "PASS" or Device.DEFAULT in failed_platforms, "Failed running non-optimized ast"
   ground_truth = np.frombuffer(rawbufs[0].as_buffer(), rawbufs[0].dtype.np)
