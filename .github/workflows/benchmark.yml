@@ -216,9 +216,9 @@ jobs:
     - name: Run MLPerf resnet eval on training data
       run: time HSA=1 MODEL=resnet python3 examples/mlperf/model_eval.py
     - name: Run 10 MLPerf ResNet50 training steps (1 gpu)
-      run: HIP=1 BENCHMARK=10 BS=104 GPUS=1 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet_one_gpu.txt
+      run: HSA=1 BENCHMARK=10 BS=104 GPUS=1 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet_one_gpu.txt
     - name: Run 10 MLPerf ResNet50 training steps (6 gpu)
-      run: HIP=1 BENCHMARK=10 BS=624 GPUS=6 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet.txt
+      run: HSA=1 BENCHMARK=10 BS=624 GPUS=6 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet.txt
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (AMD Training)

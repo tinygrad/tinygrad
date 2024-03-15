@@ -250,7 +250,7 @@ class HSADevice(Compiled):
   def alloc_kernargs(self, sz):
     if self.kernarg_next_addr + sz >= self.kernarg_start_addr + self.kernarg_pool_sz: self._new_kernargs_region(int(self.kernarg_pool_sz * 2))
     result = self.kernarg_next_addr
-    self.kernarg_next_addr = (self.kernarg_next_addr + sz + 15) & (~15) # align to 16 bytes
+    self.kernarg_next_addr = round_up(self.kernarg_next_addr + sz, 16)
     return result
 
   def _new_kernargs_region(self, sz:int):
