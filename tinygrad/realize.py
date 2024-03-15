@@ -101,7 +101,11 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
     unbound_st, st_var_vals = st.simplify().unbind()
     var_vals.update(st_var_vals)
     if assign_to is not None and buf is assign_to:
-      if not unbound_st.contiguous: raise RuntimeError(f"must be contiguous for assign {unbound_st}")
+      if not unbound_st.contiguous:
+        # we also allow masked views. if it has a single view and it's equal when you shrink a contig, it's fine
+        if not (len(unbound_st.views) == 1 and unbound_st.views[0].mask is not None and
+            ShapeTracker.from_shape(unbound_st.shape).shrink(unbound_st.views[0].mask) == unbound_st.shrink(unbound_st.views[0].mask)):
+          raise RuntimeError(f"must be contiguous for assign {unbound_st}")
       return LazyOp(BufferOps.LOAD, (), MemBuffer(0, buf.dtype, unbound_st))
     if buf not in inputs: inputs.append(buf)
     return LazyOp(BufferOps.LOAD, (), MemBuffer(inputs.index(buf)+1, buf.dtype, unbound_st))
@@ -122,13 +126,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
     LazyOp(buf.op, tuple(_recursive_lazyop(x, inputs, var_vals, st, realizes, cache, False, assign_to) for x in buf.srcs), buf.arg)
   return ret
 
-# recursively walk back in the graph to create the schedule
-def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyBuffer],
-                        reduce_for_op: Dict[LazyBuffer, LazyBuffer]) -> List[ScheduleItem]:
-  if out in seen or out.realized or out.op == LoadOps.CONST: return []
-  assert out.base == out
-  seen.add(out)
-
+def _schedule_one(out:LazyBuffer, realizes:Set[LazyBuffer], reduce_for_op: Dict[LazyBuffer, LazyBuffer]) -> ScheduleItem:
   inputs: List[LazyBuffer] = []
   var_vals: Dict[Variable, int] = out.st.var_vals.copy()
   if out.op in {LoadOps.CUSTOM, LoadOps.SYNC, LoadOps.WAIT, LoadOps.COPY, LoadOps.EMPTY}:
@@ -137,11 +135,17 @@ def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyB
     output_st = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape)
     op = _recursive_lazyop(out, inputs, var_vals, output_st, realizes, cache={})
     op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_st.simplify().unbind()[0]))
+  return ScheduleItem((op,), (out,), tuple(inputs), var_vals)
 
-  si = ScheduleItem((op,), (out,), tuple(inputs), var_vals)
-  # even though what's assigned to is not an input in the LazyOp, it still needs to be scheduled if it realizes
-  if out.op is LoadOps.ASSIGN and out.srcs[1].base not in inputs and out.srcs[1].base in realizes: inputs.append(out.srcs[1].base)
-  return flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in inputs) + [si]
+# recursively walk back in the graph to create the schedule
+def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyBuffer],
+                        reduce_for_op: Dict[LazyBuffer, LazyBuffer]) -> List[ScheduleItem]:
+  if out in seen or out.realized or out.op == LoadOps.CONST: return []
+  assert out.base == out
+  assert out in realizes
+  seen.add(out)
+  si = _schedule_one(out, realizes, reduce_for_op)
+  return flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in si.inputs) + [si]
 
 # recursively search the entire graph for all LazyBuffers, insert realizes after expands
 def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffer, None],
