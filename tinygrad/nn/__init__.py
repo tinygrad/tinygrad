@@ -128,4 +128,4 @@ class Embedding:
   def __call__(self, idx:Tensor) -> Tensor:
     batch_size, seqlen = idx.shape
     if seqlen == 0: return Tensor.empty(batch_size, 0, self.embed_size, device=self.weight.device)
-    return self.weight.unsqueeze(0).expand(idx.numel(), -1, -1).gather(idx.flatten().unsqueeze(-1).unsqueeze(-1).expand(-1, -1, self.embed_size), 1).reshape(batch_size, seqlen, self.embed_size)
+    return self.weight.unsqueeze(0).expand(idx.numel(), -1, -1).gather(idx.reshape(-1, 1, 1).expand(-1, -1, self.embed_size), 1).reshape(batch_size, seqlen, self.embed_size)
