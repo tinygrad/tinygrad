@@ -205,7 +205,6 @@ class TestLinearizer(unittest.TestCase):
     a.realize()
     np.testing.assert_equal(a.flatten().numpy(), [1.,1.,1.,1.,2.,2.,2.,2.,1.,1.,1.,1.,1.,1.,1.,1.])
 
-  @unittest.skip("this assign needs the shapetracker check fixed")
   def test_where_fold(self):
     a = Tensor.rand(4, 4).realize()
     b = a.shrink(((1, 2), None)).pad(((1, 2), None))
