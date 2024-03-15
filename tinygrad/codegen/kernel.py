@@ -364,8 +364,11 @@ class Kernel:
         if mul_op.op != BinaryOps.MUL: continue
 
         def buf_index(src: LazyOp) -> Optional[int]:
+          # TODO: apply tc even if the sources are not from LOAD
           if src.op == BufferOps.LOAD and src.arg.dtype == tc.dtype_in: return self.bufs.index(cast(MemBuffer, src.arg))
-          if opt_level >= 1 and src.op == UnaryOps.CAST and src.arg[0] == tc.dtype_in: return self.bufs.index(cast(MemBuffer, src.src[0].arg))
+          try:
+            if opt_level >= 1 and src.op == UnaryOps.CAST and src.arg[0] == tc.dtype_in: return self.bufs.index(cast(MemBuffer, src.src[0].arg))
+          except ValueError: return None
           return None
         if (buf0:=buf_index(mul_op.src[0])) is None or (buf1:=buf_index(mul_op.src[1])) is None: continue
 

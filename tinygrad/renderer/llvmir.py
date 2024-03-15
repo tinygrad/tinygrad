@@ -144,7 +144,7 @@ def uops_to_llvm_ir(function_name:str, uops:UOpGraph) -> str:
         lvars[backward] = lvars[u]
       elif uop is UOps.ALU:
         lvars[u] = code_for_op[args](bb[-1], *[lvars[x] for x in vin], dtype if args not in (BinaryOps.CMPLT, BinaryOps.CMPEQ) else vin[0].dtype)
-      elif uop is UOps.CAST: lvars[u] = cast(bb, lvars[vin[0]], vin[0].dtype, dtype, bitcast=isinstance(args, tuple) and args[1])
+      elif uop in {UOps.CAST, UOps.BITCAST}: lvars[u] = cast(bb, lvars[vin[0]], vin[0].dtype, dtype, bitcast=uop is UOps.BITCAST)
       elif uop in {UOps.DEFINE_GLOBAL, UOps.DEFINE_VAR}: lvars[u] = func.args[buf_index[args]]
       elif uop is UOps.SPECIAL: lvars[u] = lvars[args.expr]
       elif uop is UOps.CONST: lvars[u] = const(args, dtype)

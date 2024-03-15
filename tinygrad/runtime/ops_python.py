@@ -104,13 +104,13 @@ class PythonProgram:
               del ul[i]
               i = loop_ends[i] + 1
               continue
-        elif uop is UOps.CAST:
+        elif uop in {UOps.CAST, UOps.BITCAST}:
           if dtype.count > 1:
             ul[i] = inp
           else:
             assert dtp[0].fmt and dtype.fmt
             pack_format, unpack_format = str(warp_size) + dtp[0].fmt, str(warp_size) + dtype.fmt
-            if isinstance(arg, tuple) and arg[1]:
+            if uop is UOps.BITCAST:
               ul[i] = list(struct.unpack(unpack_format, struct.pack(pack_format, *inp[0])))
             else:
               casted = [float(x) if dtypes.is_float(dtype) else int(x) if dtypes.is_int(dtype) else x for x in inp[0]]

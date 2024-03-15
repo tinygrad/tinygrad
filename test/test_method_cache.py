@@ -30,6 +30,7 @@ class TestMethodCache(unittest.TestCase):
     Device[Device.DEFAULT].compiler = None
     ((c+d)+(a+b)).realize()
 
+  @unittest.skip("incorrect use of transformer")
   def test_small_transformer(self):
     args_tiny = {"dim": 16, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-05, "vocab_size": 10}
     model = Transformer(**args_tiny)
