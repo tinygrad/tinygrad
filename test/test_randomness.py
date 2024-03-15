@@ -60,7 +60,9 @@ class TestRandomness(unittest.TestCase):
 
   def test_rand_half(self):
     N = 128
-    x = Tensor.rand((2, N, N), dtype=dtypes.half).realize().numpy()
+    x = Tensor.rand((2, N, N), dtype=dtypes.half)
+    assert x.dtype == dtypes.half
+    x = x.numpy()
     ones = np.take(x, np.where(x == 1))
     zeros = np.take(x, np.where(x == 0))
     self.assertTrue(ones.size == 0)

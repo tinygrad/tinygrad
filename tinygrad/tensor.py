@@ -224,7 +224,12 @@ class Tensor:
   def manual_seed(seed=0): Tensor._seed = seed
 
   @staticmethod
-  def rand(*shape, **kwargs): return Tensor._loadop(LoadOps.CUSTOM, argfix(*shape), arg=custom_random, **kwargs)
+  def rand(*shape, **kwargs):
+    if kwargs.get("dtype") == dtypes.float16:
+      kwargs.pop("dtype")
+      # ensure the output range is in [0, 1)
+      return (Tensor.randint(*shape, low=0, high=2047, **kwargs) / 2048.0).half()
+    return Tensor._loadop(LoadOps.CUSTOM, argfix(*shape), arg=custom_random, **kwargs)
 
   # ***** creation helper functions *****
 
@@ -269,7 +274,7 @@ class Tensor:
 
   @staticmethod
   def uniform(*shape, low=0.0, high=1.0, **kwargs) -> Tensor:
-    dtype = kwargs.pop("dtype", dtypes.default_float)
+    dtype = kwargs.pop("dtype", dtypes.float32)
     return ((high-low) * Tensor.rand(*shape, **kwargs)).cast(dtype) + low
 
   @staticmethod
@@ -1019,7 +1024,5 @@ if IMAGE:
 def custom_random(out:Buffer):
   Tensor._seed += 1
   if DEBUG >= 2: print(f"*** {out.device}   rand  seed {Tensor._seed} size {out.size:<15d} dtype {out.dtype}")
-  rng = np.random.default_rng(Tensor._seed)
-  if out.dtype == dtypes.half: rng_np_buffer = (rng.integers(low=0, high=2047, size=out.size) / 2048).astype(np.half, copy=False)
-  else: rng_np_buffer = rng.random(size=out.size, dtype=np.float32).astype(dtype=out.dtype.np, copy=False)
+  rng_np_buffer = np.random.default_rng(Tensor._seed).random(size=out.size, dtype=np.float32).astype(dtype=out.dtype.np, copy=False)
   out.copyin(rng_np_buffer.data)
