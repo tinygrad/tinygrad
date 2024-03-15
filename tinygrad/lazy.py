@@ -18,7 +18,9 @@ def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Op]=
   if op is LoadOps.ASSIGN: assign_cache_invalidate.add(srcs[1].base)
 
   cache_key = (device, st, dtype, op, arg, tuple(ref(x) for x in srcs)) if base is None else (st, ref(base))
-  if (rret := lazycache.get(cache_key, None)) and (rrret := rret()) is not None and rrret.base not in assign_cache_invalidate: return rrret
+  if (rret := lazycache.get(cache_key, None)) and (rrret := rret()) is not None and rrret.base not in assign_cache_invalidate:
+    rrret.base.cache_usage_count += 1
+    return rrret
 
   return LazyBuffer(device, st, dtype, op, arg, srcs, base=base, cache_key=cache_key if enable_cache else None)
 
@@ -35,6 +37,7 @@ class LazyBuffer:
       self.output_buffer: Optional[Buffer] = None
       self.contiguous_child: Optional[Tuple[ReferenceType[LazyBuffer], ShapeTracker]] = None
       self.forced_realize = False
+      self.cache_usage_count = 0
     else:
       # properties on view
       assert base.base == base, "base must be a base itself"
@@ -62,7 +65,9 @@ class LazyBuffer:
     shape = self.shape if shape is None else shape
     return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, self.device, arg=cast_scalar(val, self.dtype)).reshape((1,)*len(shape)).expand(shape)
 
-  def assign(self, x:LazyBuffer) -> LazyBuffer: return LazyBuffer.loadop(LoadOps.ASSIGN, self.shape, self.dtype, self.device, src=(x, self))
+  def assign(self, x:LazyBuffer) -> LazyBuffer:
+    if self.base.cache_usage_count != 0: raise RuntimeError(f"can't assign because cache was used {self.base.cache_usage_count} times")
+    return LazyBuffer.loadop(LoadOps.ASSIGN, self.shape, self.dtype, self.device, src=(x, self))
   def contiguous(self):
     if not self.st.contiguous or self.size != self.base.size or self.is_unrealized_const():
       ret = self.e(LoadOps.CONTIGUOUS)

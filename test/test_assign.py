@@ -20,6 +20,21 @@ class TestAssign(unittest.TestCase):
     assert ba1 == ba2 and ba1 != bb1
     np.testing.assert_allclose(a.numpy(), (np.arange(N*N)*2).reshape((N,N)))
 
+  def test_assign_zeros_good(self):
+    a = Tensor.zeros(10,10).contiguous()
+    a.assign(Tensor.ones(10,10))
+    b = Tensor.zeros(10,10).contiguous()
+    a.realize()
+    np.testing.assert_allclose(b.numpy(), 0)
+
+  def test_assign_zeros(self):
+    a = Tensor.zeros(10,10).contiguous()
+    b = Tensor.zeros(10,10).contiguous()
+    with self.assertRaises(RuntimeError):
+      a.assign(Tensor.ones(10,10))
+      a.realize()
+      np.testing.assert_allclose(b.numpy(), 0)
+
   def test_assign_add(self):
     def f(x):
       x += 1
