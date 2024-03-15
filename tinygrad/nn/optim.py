@@ -24,24 +24,29 @@ class Optimizer:
 
   def step(self) -> None: raise NotImplementedError
 
-class SGD(Optimizer):
-  def __init__(self, params: List[Tensor], lr=0.001, momentum=0, weight_decay=0.0, nesterov=False):
+# LARS is essentially just trust ratio to SGD so if we just set the trust coeff 0.0 its just standard SGD.
+def SGD(params: List[Tensor], lr=0.001, momentum=0, weight_decay=0.0, nesterov=False): return LARS(params, lr, momentum, weight_decay, nesterov, tcoef=0.0)
+
+class LARS(Optimizer):
+  def __init__(self, params:List[Tensor], lr=0.001, momentum=0.9, weight_decay=1e-4, nesterov=False, tcoef=0.001):
     super().__init__(params, lr)
-    self.momentum, self.wd, self.nesterov = momentum, weight_decay, nesterov
+    self.momentum, self.wd, self.nesterov, self.tcoef = momentum, weight_decay, nesterov, tcoef
     self.b = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params] if self.momentum else []
 
-  # https://pytorch.org/docs/stable/generated/torch.optim.SGD.html
   def step(self) -> None:
     for i, t in enumerate(self.params):
       assert t.grad is not None
-      # this is needed since the grads can form a "diamond"
-      # TODO: fix this in lazy.py
-      t.grad.realize()
-      g = t.grad + self.wd * t.detach()
+      up = t.grad.realize() + self.wd * t.detach()
+      if self.tcoef != 0:
+        r1 = t.detach().square().sum().sqrt()
+        r2 = up.square().sum().sqrt()
+        r = (r1 > 0).where((r2 > 0).where(self.tcoef * r1 / r2, 1.0), 1.0)
+        up = up * r * self.lr
       if self.momentum:
-        self.b[i].assign(self.momentum * self.b[i] + g)  # NOTE: self.b[i] is zero on the first run, no if required
-        g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
-      t.assign(t.detach() - g * self.lr)
+        self.b[i].assign(self.momentum * self.b[i] + up)  # NOTE: self.b[i] is zero on the first run, no if required
+        up = (up + self.momentum * self.b[i]) if self.nesterov else self.b[i]
+      if self.tcoef == 0: up = up * self.lr
+      t.assign(t.detach() - up)
     self.realize(self.b)
 
 # LAMB is essentially just the trust ratio part of LARS applied to Adam/W so if we just set the trust ratio to 1.0 its just Adam/W.
