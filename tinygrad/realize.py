@@ -251,4 +251,37 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
       assert len(realized_children) == 1
       reduce_for_op[next(iter(realized_children.keys()))] = r
 
-  return flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in outs)
+  # preschedule all items
+  sis = {x:_schedule_one(x, realizes, reduce_for_op) for x in realizes if x.op is not LoadOps.CONST and x.realized is None and x not in seen}
+
+  # breadth first ordering
+  in_degrees = defaultdict(int)
+  for si in sis.values():
+    for inp in si.inputs:
+      in_degrees[inp] += 1
+
+  q = [x.base for x in outs]
+  sis_ordered = []
+  while len(q):
+    si = sis.get(q.pop(0), None)
+    if si is None: continue
+    sis_ordered.append(si)
+    for inp in si.inputs:
+      in_degrees[inp] -= 1
+      if in_degrees[inp] == 0:
+        q.append(inp)
+  return sis_ordered[::-1]
+
+  """
+  # depth first ordering
+  def depth_first_schedule(out:LazyBuffer) -> List[ScheduleItem]:
+    if out in seen or out.realized or out.op == LoadOps.CONST: return []
+    assert out.base == out
+    assert out in realizes
+    seen.add(out)
+    si = sis[out]
+    return flatten(depth_first_schedule(x) for x in si.inputs) + [si]
+  ret = flatten(depth_first_schedule(x.base) for x in outs)
+  print(len(ret))
+  return ret
+  """
