@@ -131,6 +131,7 @@ def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyB
                         reduce_for_op: Dict[LazyBuffer, LazyBuffer]) -> List[ScheduleItem]:
   if out in seen or out.realized or out.op == LoadOps.CONST: return []
   assert out.base == out
+  assert out in realizes
   seen.add(out)
 
   inputs: List[LazyBuffer] = []
