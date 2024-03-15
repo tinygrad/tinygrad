@@ -7,8 +7,7 @@ from tinygrad import Tensor, Device, GlobalCounters, dtypes
 from tinygrad.helpers import CI, getenv
 from tinygrad.shape.symbolic import Variable
 from extra.lr_scheduler import OneCycleLR
-from test.helpers import derandomize_model
-from test.test_dtype import is_dtype_supported
+from test.helpers import derandomize_model, is_dtype_supported
 
 from examples.gpt2 import Transformer as GPT2Transformer, MODEL_PARAMS as GPT2_MODEL_PARAMS
 from examples.hlb_cifar10 import SpeedyResNet, hyp
