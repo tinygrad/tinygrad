@@ -8,7 +8,7 @@ from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.realize import create_schedule
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.codegen.uops import exec_alu, UOpGraph
-from test.test_dtype import is_dtype_supported
+from test.helpers import is_dtype_supported
 
 def _uops_to_prg(uops):
   src = Device[Device.DEFAULT].compiler.render("test", uops)
