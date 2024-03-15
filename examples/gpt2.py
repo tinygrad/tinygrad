@@ -33,7 +33,7 @@ class Attention:
 
     # create kv cache
     if not hasattr(self, "cache_kv"):
-      self.cache_kv = Tensor.zeros(2, bsz, MAX_CONTEXT, self.n_heads, self.head_dim, dtype=x.dtype)
+      self.cache_kv = Tensor.zeros(2, bsz, MAX_CONTEXT, self.n_heads, self.head_dim, dtype=x.dtype).contiguous().realize()
 
     if start_pos > 0:
       keys = self.cache_kv[0].shrink((None, (0, start_pos), None, None)).cat(xk, dim=1)

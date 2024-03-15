@@ -1,26 +1,22 @@
 from __future__ import annotations
 import math
-from typing import Union, Optional, Any, Tuple, List, Dict
+from typing import Union, Optional, Any, Tuple, List, Dict, cast
 from tinygrad.dtype import cast_scalar, dtypes, DType, Scalar
 from tinygrad.helpers import prod, getenv, all_int, all_same
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op
 from tinygrad.shape.symbolic import sint
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
-from weakref import ref, ReferenceType, WeakSet
+from weakref import ref, ReferenceType
 
 lazycache: Dict[Any, ReferenceType[LazyBuffer]] = {}
-assign_cache_invalidate: WeakSet[LazyBuffer] = WeakSet()
 def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
                       base:Optional[LazyBuffer]=None, enable_cache=bool(getenv("LAZYCACHE", 1))):
   if st.size == 0 and op not in {LoadOps.SYNC, LoadOps.WAIT}: op, arg, srcs, base = LoadOps.CONST, 0, (), None
   if op is LoadOps.CONST: enable_cache = True
-  if op is LoadOps.ASSIGN: assign_cache_invalidate.add(srcs[1].base)
 
   cache_key = (device, st, dtype, op, arg, tuple(ref(x) for x in srcs)) if base is None else (st, ref(base))
-  if (rret := lazycache.get(cache_key, None)) and (rrret := rret()) is not None and rrret.base not in assign_cache_invalidate:
-    rrret.base.cache_usage_count += 1
-    return rrret
+  if enable_cache and (rret := lazycache.get(cache_key, None)): return cast(LazyBuffer, rret())  # NOTE: this should always be a live reference
 
   return LazyBuffer(device, st, dtype, op, arg, srcs, base=base, cache_key=cache_key if enable_cache else None)
 
@@ -37,7 +33,6 @@ class LazyBuffer:
       self.output_buffer: Optional[Buffer] = None
       self.contiguous_child: Optional[Tuple[ReferenceType[LazyBuffer], ShapeTracker]] = None
       self.forced_realize = False
-      self.cache_usage_count = 0
     else:
       # properties on view
       assert base.base == base, "base must be a base itself"
@@ -66,8 +61,9 @@ class LazyBuffer:
     return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, self.device, arg=cast_scalar(val, self.dtype)).reshape((1,)*len(shape)).expand(shape)
 
   def assign(self, x:LazyBuffer) -> LazyBuffer:
-    if self.base.cache_usage_count != 0: raise RuntimeError(f"can't assign because cache was used {self.base.cache_usage_count} times")
-    return LazyBuffer.loadop(LoadOps.ASSIGN, self.shape, self.dtype, self.device, src=(x, self))
+    new_self = create_lazybuffer(self.device, self.st, self.dtype, self.op, self.arg, self.srcs, enable_cache=False) \
+      if self.base.realized is None else self
+    return LazyBuffer.loadop(LoadOps.ASSIGN, self.shape, self.dtype, self.device, src=(x, new_self))
   def contiguous(self):
     if not self.st.contiguous or self.size != self.base.size or self.is_unrealized_const():
       ret = self.e(LoadOps.CONTIGUOUS)

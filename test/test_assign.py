@@ -30,10 +30,10 @@ class TestAssign(unittest.TestCase):
   def test_assign_zeros(self):
     a = Tensor.zeros(10,10).contiguous()
     b = Tensor.zeros(10,10).contiguous()
-    with self.assertRaises(RuntimeError):
-      a.assign(Tensor.ones(10,10))
-      a.realize()
-      np.testing.assert_allclose(b.numpy(), 0)
+    #with self.assertRaises(RuntimeError):
+    a.assign(Tensor.ones(10,10))
+    a.realize()
+    np.testing.assert_allclose(b.numpy(), 0)
 
   def test_assign_add(self):
     def f(x):
