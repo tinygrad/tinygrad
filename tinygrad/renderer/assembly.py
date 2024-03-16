@@ -183,7 +183,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
         assert vin[1].dtype is not None
         if dtype.count > 1:
           r[u] = [ssa(None, 'val', lang.types[dtype.scalar()]) for _ in range(dtype.count)]
-          if(len(vin)>3): 
+          if(len(vin)>3):
             for v in r[u]: kk(f"mov.{lang.mem_type(dtype.scalar())} {v}, {render_val(0, dtype.scalar())};")
           kk((f"@{r[vin[2]]}"if len(vin) > 3 else "")
             + f" ld{u.arg}.v{dtype.count}.{lang.mem_type(dtype.scalar())} {{{', '.join(r[u])}}}, [{r[vin[0]]}+{vin[1].arg}];")
