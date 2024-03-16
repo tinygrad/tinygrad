@@ -26,6 +26,7 @@ class AssemblyLanguage(NamedTuple):
   const_requires_mov: List[DType] = [] # list of dtypes for which creating a const requires a move
   asm_for_op: Dict[Op, Callable[...,str]] = {}
   types: Dict[DType, str] = INVERSE_DTYPES_DICT
+  supports_half: List[Op] = []
 
   def render_const(self, x:Union[float,int,bool], dtype, mov=None) -> Union[List[str], str]: raise NotImplementedError()
   def render_local(self, dest, name, size, dtype) -> List[str]: raise NotImplementedError()
@@ -144,11 +145,21 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
       if uop == UOps.LOOP: kk(*lang.render_loop(ssa(u, 'ridx'), r[vin[0]], ssa_label(u, 'loop')))
       elif uop == UOps.ALU:
         assert vin[0].dtype is not None
+        operands = [r[x] for x in vin]
+        lab = ssa(u, "alu")
+        if needs_upcast := dtype == dtypes.half and args not in lang.supports_half:
+          dtype = dtypes.float32
+          out_lab, lab = lab, ssa(None, "alu_cast", lang.types[dtype])
+          for i, op in enumerate(operands):
+            operands[i] = ssa(None, "alu_cast", lang.types[dtype])
+            kk(*lang.render_cast(operands[i], op, dtype, dtypes.half))
         if args == BinaryOps.CMPLT or args == BinaryOps.CMPEQ:
           # pass in the other dtype here
-          kk(lang.asm_for_op[args](ssa(u, "alu"), *[r[x] for x in vin], vin[0].dtype, lang.types[vin[0].dtype]))
+          kk(lang.asm_for_op[args](lab, *operands, vin[0].dtype, lang.types[vin[0].dtype]))
         else:
-          kk(lang.asm_for_op[args](ssa(u, "alu"), *[r[x] for x in vin], dtype, lang.types[dtype]))
+          kk(lang.asm_for_op[args](lab, *operands, dtype, lang.types[dtype]))
+        if needs_upcast:
+          kk(*lang.render_cast(out_lab, lab, dtypes.half, dtype))
       elif uop == UOps.DEFINE_ACC:
         if dtype.count > 1:
           r[u] = [ssa(None, 'acc', lang.types[dtype.scalar()]) for _ in range(dtype.count)]
