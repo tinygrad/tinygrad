@@ -82,7 +82,6 @@ def step_tf(optim, steps=1, kwargs={}, scheduler=None, schedopts=None, do_optim=
       optim._iterations.assign_add(1)
   return lrs, net.x.numpy(), net.W.numpy()
 
-# skip_list=True -> skip W
 def create_tiny_lars(params, lr): return LARS(params, lr)
 def create_tf_lars(lr): return LARSOptimizer(lr)
 
