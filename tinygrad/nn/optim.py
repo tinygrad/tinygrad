@@ -26,7 +26,7 @@ class Optimizer:
   def _step(self) -> List[Tensor]: raise NotImplementedError
 
 class OptimizerGroup(Optimizer):
-  def __init__(self, *optimizers: Optimizer): self.optimizers, self.params, self.buffers = optimizers, [], []
+  def __init__(self, *optimizers: Optimizer): self.optimizers, self.params, self.buffers = optimizers, [], [] # pylint: disable=super-init-not-called
   def zero_grad(self): [o.zero_grad() for o in self.optimizers]
   def _step(self) -> List[Tensor]: return [x for o in self.optimizers for x in o._step()]
 
