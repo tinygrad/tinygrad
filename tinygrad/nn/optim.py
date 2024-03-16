@@ -1,5 +1,5 @@
 # sorted in order of increasing complexity
-from typing import List
+from typing import List, Optional
 from tinygrad.helpers import dedup, getenv
 from tinygrad.tensor import Tensor
 
@@ -22,22 +22,22 @@ class Optimizer:
     # NOTE: in extra is too late for most of the params due to issues with assign
     Tensor.corealize(extra + self.params + self.buffers if extra is not None else self.params + self.buffers)
 
-  def step(self): self.realize(self._step())
+  def step(self, extra:Optional[List[Tensor]]=None): self.realize(self._step() + (extra if extra is not None else []))
   def _step(self) -> List[Tensor]: raise NotImplementedError
 
 class OptimizerGroup(Optimizer):
-  def __init__(self, *optimizers: Optimizer): self.optimizers = optimizers
+  def __init__(self, *optimizers: Optimizer): self.optimizers, self.params, self.buffers = optimizers, [], []
   def zero_grad(self): [o.zero_grad() for o in self.optimizers]
-  def step(self): self.realize([x for o in self.optimizers for x in o._step()])
+  def _step(self) -> List[Tensor]: return [x for o in self.optimizers for x in o._step()]
 
 # LARS is essentially just trust ratio to SGD so if we just set the trust coeff 0.0 its just standard SGD.
-def SGD(params: List[Tensor], lr=0.001, momentum=0.0, weight_decay=0.0, nesterov=False):
-  return LARS(params, lr, momentum, weight_decay, nesterov, tcoef=0.0)
+def SGD(params: List[Tensor], lr=0.001, momentum=0.0, weight_decay=0.0, nesterov=False, classic=False):
+  return LARS(params, lr, momentum, weight_decay, nesterov, classic, tcoef=0.0)
 
 class LARS(Optimizer):
-  def __init__(self, params:List[Tensor], lr=0.001, momentum=0.9, weight_decay=1e-4, nesterov=False, tcoef=0.001):
+  def __init__(self, params:List[Tensor], lr=0.001, momentum=0.9, weight_decay=1e-4, nesterov=False, classic=True, tcoef=0.001):
     super().__init__(params, lr)
-    self.momentum, self.wd, self.nesterov, self.tcoef = momentum, weight_decay, nesterov, tcoef
+    self.momentum, self.wd, self.nesterov, self.classic, self.tcoef = momentum, weight_decay, nesterov, classic, tcoef
     self.b = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params] if self.momentum else []
 
   def _step(self) -> List[Tensor]:
@@ -48,11 +48,14 @@ class LARS(Optimizer):
         r1 = t.detach().square().sum().sqrt()
         r2 = g.square().sum().sqrt()
         r = (r1 > 0).where((r2 > 0).where(self.tcoef * r1 / r2, 1.0), 1.0)
-        g = g * r * self.lr
+      else: r = 1.0
+      # classic momentum does post learning rate update
+      # popular momentum does pre learning rate update
+      if self.classic: g = g * r * self.lr
       if self.momentum:
         self.b[i].assign(self.momentum * self.b[i] + g)  # NOTE: self.b[i] is zero on the first run, no if required
         g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
-      if self.tcoef == 0: g = g * self.lr
+      if not self.classic: g = g * r * self.lr
       t.assign(t.detach() - g)
     return self.b
 
