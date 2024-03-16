@@ -22,7 +22,13 @@ class Optimizer:
     # NOTE: in extra is too late for most of the params due to issues with assign
     Tensor.corealize(extra + self.params + self.buffers if extra is not None else self.params + self.buffers)
 
-  def step(self) -> None: raise NotImplementedError
+  def step(self): self.realize(self._step())
+  def _step(self) -> List[Tensor]: raise NotImplementedError
+
+class OptimizerGroup(Optimizer):
+  def __init__(self, *optimizers: Optimizer): self.optimizers = optimizers
+  def zero_grad(self): [o.zero_grad() for o in self.optimizers]
+  def step(self): self.realize([x for o in self.optimizers for x in o._step()])
 
 # LARS is essentially just trust ratio to SGD so if we just set the trust coeff 0.0 its just standard SGD.
 def SGD(params: List[Tensor], lr=0.001, momentum=0.0, weight_decay=0.0, nesterov=False):
@@ -34,7 +40,7 @@ class LARS(Optimizer):
     self.momentum, self.wd, self.nesterov, self.tcoef = momentum, weight_decay, nesterov, tcoef
     self.b = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params] if self.momentum else []
 
-  def step(self) -> None:
+  def _step(self) -> List[Tensor]:
     for i, t in enumerate(self.params):
       assert t.grad is not None
       g = t.grad.contiguous() + self.wd * t.detach()
@@ -48,7 +54,7 @@ class LARS(Optimizer):
         g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
       if self.tcoef == 0: g = g * self.lr
       t.assign(t.detach() - g)
-    self.realize(self.b)
+    return self.b
 
 # LAMB is essentially just the trust ratio part of LARS applied to Adam/W so if we just set the trust ratio to 1.0 its just Adam/W.
 def AdamW(params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8, wd=0.01): return LAMB(params, lr, b1, b2, eps, wd, adam=True)
@@ -61,7 +67,7 @@ class LAMB(Optimizer):
     self.m = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params]
     self.v = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params]
 
-  def step(self) -> None:
+  def _step(self) -> List[Tensor]:
     self.t.assign(self.t + 1)
     for i, t in enumerate(self.params):
       assert t.grad is not None
@@ -77,4 +83,4 @@ class LAMB(Optimizer):
       else:
         r = 1.0
       t.assign(t.detach() - self.lr * r * up)
-    self.realize([self.t] + self.m + self.v)
+    return [self.t] + self.m + self.v
