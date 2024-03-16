@@ -36,4 +36,3 @@ def is_dtype_supported(dtype: DType, device: str = Device.DEFAULT):
     if device == "PYTHON": return sys.version_info >= (3, 12)
   if dtype == dtypes.float64: return device != "METAL" and not (OSX and device == "GPU")
   return True
->>>>>>> upstream/master
