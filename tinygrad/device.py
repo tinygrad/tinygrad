@@ -234,7 +234,7 @@ class Compiled:
   def to_program(self, k:Linearizer) -> CompiledASTRunner:
     assert self.compiler is not None, "compiler is required to run AST"
     k.linearize()
-    info = get_lazyop_info(k.ast)
+    info = get_lazyop_info(k.ast[0])
     ops, mem = k.uops.flops_mem()
     run_count = prod((k.global_size if k.global_size else []) + (k.local_size if k.local_size else []))
     # NOTE: we use min here to ignore the indexing FLOPS
