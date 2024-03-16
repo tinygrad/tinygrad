@@ -118,9 +118,8 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str
       kk("}")
     elif uop is UOps.STORE:
       assert vin[0].dtype is not None and vin[2].dtype is not None
-      if len(vin) > 3: kk(f"if ({r[vin[3]]}) {{")
-      kk(lang.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, strip_parens(r[vin[1]]), vin[0].uop is UOps.DEFINE_LOCAL))
-      if len(vin) > 3: kk("}")
+      rendered_store = lang.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, strip_parens(r[vin[1]]), vin[0].uop is UOps.DEFINE_LOCAL)
+      kk(f"if ({r[vin[3]]}) {{ {rendered_store} }}" if len(vin) > 3 else rendered_store)
     else:
       assert dtype is not None, f"None dtype for uop {uop}"
       if uop is UOps.LOOP:
@@ -146,8 +145,8 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str
       elif uop is UOps.PHI:
         kk(f"{r[vin[0]]} = {r[vin[1]]};")
         r[u] = r[vin[0]]
-      elif uop is UOps.CAST:
-        if isinstance(args, tuple) and args[1]:  # bitcast
+      elif uop in {UOps.CAST, UOps.BITCAST}:
+        if uop is UOps.BITCAST:
           assert len(vin) == 1
           precast = ssa(None,'precast')
           kk(f"{lang.render_dtype(cast(DType, vin[0].dtype))} {precast} = {r[vin[0]]};")

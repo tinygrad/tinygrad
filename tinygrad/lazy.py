@@ -13,10 +13,10 @@ lazycache: Dict[Any, ReferenceType[LazyBuffer]] = {}
 def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
                       base:Optional[LazyBuffer]=None, enable_cache=bool(getenv("LAZYCACHE", 1))):
   if st.size == 0 and op not in {LoadOps.SYNC, LoadOps.WAIT}: op, arg, srcs, base = LoadOps.CONST, 0, (), None
-  if op == LoadOps.CONST: enable_cache = True
+  if op is LoadOps.CONST: enable_cache = True
 
   cache_key = (device, st, dtype, op, arg, tuple(ref(x) for x in srcs)) if base is None else (st, ref(base))
-  if (rret := lazycache.get(cache_key, None)): return cast(LazyBuffer, rret())  # NOTE: this should always be a live reference
+  if enable_cache and (rret := lazycache.get(cache_key, None)): return cast(LazyBuffer, rret())  # NOTE: this should always be a live reference
 
   return LazyBuffer(device, st, dtype, op, arg, srcs, base=base, cache_key=cache_key if enable_cache else None)
 
@@ -50,8 +50,9 @@ class LazyBuffer:
 
   @staticmethod
   def loadop(op, shape:Tuple[sint,...], dtype:DType, device:str, arg=None,
-             src:Optional[LazyBuffer]=None, enable_cache=False, _buf:Optional[Buffer]=None) -> LazyBuffer:
-    ret = create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype, op, arg, (src,) if src is not None else (), enable_cache=enable_cache)
+             src:Tuple[LazyBuffer, ...]=(), enable_cache=False, _buf:Optional[Buffer]=None) -> LazyBuffer:
+    assert isinstance(src, tuple)
+    ret = create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype, op, arg, src, enable_cache=enable_cache)
     if _buf is not None: ret.realized = _buf
     return ret
 
@@ -59,6 +60,10 @@ class LazyBuffer:
     shape = self.shape if shape is None else shape
     return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, self.device, arg=cast_scalar(val, self.dtype)).reshape((1,)*len(shape)).expand(shape)
 
+  def assign(self, x:LazyBuffer) -> LazyBuffer:
+    if self.base.realized is not None or self is not self.base: new_self = self
+    else: new_self = create_lazybuffer(self.device, self.st, self.dtype, self.op, self.arg, self.srcs, enable_cache=False)
+    return LazyBuffer.loadop(LoadOps.ASSIGN, self.shape, self.dtype, self.device, src=(x, new_self))
   def contiguous(self):
     if not self.st.contiguous or self.size != self.base.size or self.is_unrealized_const():
       ret = self.e(LoadOps.CONTIGUOUS)
@@ -82,8 +87,8 @@ class LazyBuffer:
     if self.device.startswith("EXT") or self.device.startswith("DISK"):
       # DISK/EXT don't sync
       return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, None, (self,), enable_cache=False)
-    sync = LazyBuffer.loadop(LoadOps.SYNC, (sync_size,), dtypes.uint32, self.device, src=self, enable_cache=True)
-    wait = LazyBuffer.loadop(LoadOps.WAIT, (0,), dtypes.uint32, device, src=sync, enable_cache=True)
+    sync = LazyBuffer.loadop(LoadOps.SYNC, (sync_size,), dtypes.uint32, self.device, src=(self,), enable_cache=True)
+    wait = LazyBuffer.loadop(LoadOps.WAIT, (0,), dtypes.uint32, device, src=(sync,), enable_cache=True)
     return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, None, (self, wait), enable_cache=False)
 
   def copy_to_device(self, device:str, force: bool = False) -> LazyBuffer:

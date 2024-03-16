@@ -73,4 +73,6 @@ class DiskRunner(JITRunner):
 class DiskDevice(Compiled):
   def __init__(self, device:str): super().__init__(device, DiskAllocator(device[len("disk:"):]), None, None)
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
-  def get_runner(self, ast:LazyOp): return DiskRunner(ast)
+  def get_runner(self, *ast:LazyOp):
+    assert len(ast) == 1, "DiskRunner doesn't support multioutput kernels."
+    return DiskRunner(ast[0])

@@ -1,11 +1,12 @@
-import unittest, operator, sys
+import unittest, operator
 import numpy as np
 import torch
 from typing import Any, List
-from tinygrad.helpers import CI, getenv, DEBUG, OSX
+from tinygrad.helpers import getenv, DEBUG
 from tinygrad.dtype import DType, DTYPES_DICT, ImageDType, PtrDType, least_upper_float, least_upper_dtype
 from tinygrad import Device, Tensor, dtypes
 from hypothesis import given, settings, strategies as strat
+from test.helpers import is_dtype_supported
 
 settings.register_profile("my_profile", max_examples=200, deadline=None)
 settings.load_profile("my_profile")
@@ -13,18 +14,6 @@ settings.load_profile("my_profile")
 core_dtypes = list(DTYPES_DICT.values())
 if Device.DEFAULT == "CPU": core_dtypes.remove(dtypes.bfloat16)  # NOTE: this is for teenygrad, don't remove
 floats = [dt for dt in core_dtypes if dtypes.is_float(dt)]
-def is_dtype_supported(dtype: DType, device: str = Device.DEFAULT):
-  if dtype == dtypes.bfloat16: return False # numpy doesn't support bf16, tested separately in TestBFloat16DType
-  if device in ["WEBGPU", "WEBGL"]: return dtype in [dtypes.float, dtypes.int32, dtypes.uint32]
-  # for CI GPU, cl_khr_fp16 isn't supported
-  # for CI LLVM, it segfaults because it can't link to the casting function
-  # CUDA in CI uses CUDACPU that does not support half
-  # PYTHON supports half memoryview in 3.12+ https://github.com/python/cpython/issues/90751
-  if dtype == dtypes.half:
-    if device in ["GPU", "LLVM", "CUDA"]: return not CI
-    if device == "PYTHON": return sys.version_info >= (3, 12)
-  if dtype == dtypes.float64: return device != "METAL" and not (OSX and device == "GPU")
-  return True
 
 def get_available_cast_dtypes(dtype: DType) -> List[DType]:
   if not is_dtype_supported(dtype): return []
@@ -44,7 +33,7 @@ def _assert_eq(tensor:Tensor, target_dtype:DType, target):
   if DEBUG >= 2: print(tensor.numpy())
   try:
     assert tensor.dtype == target_dtype
-    np.testing.assert_allclose(tensor.numpy(), target, rtol=1e-3 if target_dtype == dtypes.float16 else 1e-7)
+    np.testing.assert_allclose(tensor.numpy(), target, rtol={dtypes.float16:1e-3, dtypes.bfloat16:1e-2}.get(target_dtype, 1e-7))
   except AssertionError as e:
     raise AssertionError(f"\ntensor {tensor.numpy()} dtype {tensor.dtype} does not match target {target} with dtype {target_dtype}") from e
 
@@ -53,6 +42,7 @@ def _test_op(fxn, target_dtype:DType, target):
 def _test_cast(a:Tensor, target_dtype:DType):
   _test_op(lambda: a.cast(target_dtype), target_dtype, list(a.numpy().astype(target_dtype.np)))
 def _test_bitcast(a:Tensor, target_dtype:DType, target=None):
+  if target_dtype == dtypes.bfloat16: raise unittest.SkipTest("no test for bf16 bitcast yet")
   _test_op(lambda: a.bitcast(target_dtype), target_dtype, target or a.numpy().view(target_dtype.np).tolist())
 
 class TestDType(unittest.TestCase):
@@ -127,15 +117,37 @@ def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype=None):
   _assert_eq(Tensor([[1,2],[3,4]], dtype=a_dtype)@Tensor.eye(2, dtype=b_dtype), target_dtype, [[1,2],[3,4]])
   _assert_eq(Tensor([1,1,1,1], dtype=a_dtype)+Tensor.ones((4,4), dtype=b_dtype), target_dtype, 2*Tensor.ones(4,4).numpy())
 
+@unittest.skipUnless(Device.DEFAULT in ["LLVM", "HIP", "METAL"], "bfloat16 not supported")
+class TestBFloat16(unittest.TestCase):
+  def test_bf16_creation_numpy(self):
+    data = [-1, 1, 2]
+    t = Tensor(data, dtype=dtypes.bfloat16)
+    assert t.dtype == dtypes.bfloat16
+    tnp = t.numpy()
+    assert tnp.dtype == np.float32
+    np.testing.assert_allclose(tnp, np.array(data))
+
+  @unittest.skipIf(Device.DEFAULT=="LLVM", "no LLVM bf16 buffer")
+  def test_bf16_ones(self):
+    # TODO: fix this with correct bfloat16 cast
+    t = Tensor.ones(3, 5, dtype=dtypes.bfloat16)
+    assert t.dtype == dtypes.bfloat16
+    np.testing.assert_allclose(t.numpy(), np.ones((3, 5)))
+
+  @unittest.skipIf(Device.DEFAULT=="LLVM", "no LLVM bf16 buffer")
+  def test_bf16_eye(self):
+    # TODO: fix this with correct bfloat16 cast
+    t = Tensor.eye(3, dtype=dtypes.bfloat16)
+    assert t.dtype == dtypes.bfloat16
+    np.testing.assert_allclose(t.numpy(), np.eye(3))
+
 @unittest.skipUnless(Device.DEFAULT in ["LLVM", "HIP"], "bfloat16 not supported")
 class TestBFloat16DType(unittest.TestCase):
   def test_bf16_to_float(self):
-    with self.assertRaises(AssertionError):
-      _test_cast(Tensor([100000], dtype=dtypes.bfloat16), dtypes.float32)
+    _test_cast(Tensor([100000], dtype=dtypes.bfloat16), dtypes.float32)
 
   def test_float_to_bf16(self):
-    with self.assertRaises(AssertionError):
-      _test_cast(Tensor([100000], dtype=dtypes.float32), dtypes.bfloat16)
+    _test_cast(Tensor([100000], dtype=dtypes.float32), dtypes.bfloat16)
 
   # torch.tensor([10000, -1, -1000, -10000, 20]).type(torch.bfloat16)
 

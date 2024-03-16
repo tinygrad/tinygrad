@@ -392,7 +392,7 @@ After you are done speaking, output [EOS]. You are not Chad.
 
     print(f"Preparing KV cache for chatbot with personality {args.personality}...")
     with Timing():
-      llama.model(Tensor([toks]), 0, args.temperature).realize()  # NOTE: outputs are not used
+      llama.model(Tensor([toks], device=device), 0, args.temperature).realize()  # NOTE: outputs are not used
     start_pos = len(toks)
   else:
     # non chat bot mode
@@ -453,9 +453,10 @@ After you are done speaking, output [EOS]. You are not Chad.
     expected = {
       ("1", "7B"): "Hello. I'm a 20 year old male",
       ("2", "7B"): "Hello. I'm a 20 year old girl",
+      ("2", "70B"): "Hello. I am a 20 year old female.",
     }
     try:
-      assert text == expected[key], "invalid output: " + colored(text, "red")
+      assert text == expected[key], f"invalid output: `{colored(text, 'red')}` != `{expected[key]}`"
       print("\n" + colored("output validated", "green"))  # NOTE: "\n" iside colored does not render the color in github action
     except KeyError:
       pass

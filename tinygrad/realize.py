@@ -1,10 +1,10 @@
 import sys
 from collections import defaultdict, deque
-from typing import List, Deque, Dict, Optional, cast, Set, DefaultDict
+from typing import Deque, List, Dict, Optional, cast, Set, DefaultDict
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters, LazyOp, ReduceOps, ConstBuffer, MemBuffer, BinaryOps, UnaryOps
 from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats, Compiled, BufferOptions
-from tinygrad.features.graph import print_tree, realized_lazybuffer, log_lazybuffer
-from tinygrad.helpers import colored, getenv, GRAPH, cpu_time_execution, DEBUG, flatten, prod, dedup, all_int
+from tinygrad.features.graph import realized_lazybuffer, log_lazybuffer
+from tinygrad.helpers import colored, getenv, GRAPH, cpu_time_execution, DEBUG, prod, dedup, all_int
 from tinygrad.shape.symbolic import Variable
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.lazy import LazyBuffer
@@ -27,55 +27,53 @@ class SyncOp(JITRunner):
     update_stats(colored("synchronize", "RED"), 0, 0, {}, et, 1, device=self.dname)
 
 def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
-  assert all(si.out.device == x.device for x in si.inputs) or si.ast.op in {LoadOps.COPY, LoadOps.WAIT}, \
-    f"all devices must be the same, {si.out.device} != {[x.device for x in si.inputs]} {print_tree(si.ast) or ''}"
-  if si.ast.op is LoadOps.EMPTY: return None
-  if si.ast.op in {LoadOps.SYNC, LoadOps.WAIT, LoadOps.COPY} and si.out.device.startswith("HIP") and si.inputs[0].device.startswith("HIP"):
+  if si.ast[0].op not in {LoadOps.COPY, LoadOps.WAIT}: assert len(set(x.device for x in si.outputs+si.inputs)) == 1
+  if si.ast[0].op is BufferOps.STORE: return Device[si.outputs[0].device].get_runner(*si.ast)
+  assert len(si.ast) == 1 and len(si.outputs) == 1, "only ASTRunner supports multioutput"
+  out, ast = si.outputs[0], si.ast[0]
+  if ast.op in {LoadOps.SYNC, LoadOps.WAIT, LoadOps.COPY} and out.device.startswith("HIP") and si.inputs[0].device.startswith("HIP"):
     from tinygrad.runtime.ops_hip import HIPSyncEvent, HIPWaitEvent
-    if si.ast.op is LoadOps.SYNC: return HIPSyncEvent(si.out)
-    if si.ast.op is LoadOps.WAIT: return HIPWaitEvent(si.out.device)
-  if si.ast.op in {LoadOps.SYNC, LoadOps.WAIT} and si.out.device.startswith("HSA") and si.inputs[0].device.startswith("HSA"):
+    if ast.op is LoadOps.SYNC: return HIPSyncEvent(out)
+    if ast.op is LoadOps.WAIT: return HIPWaitEvent(out.device)
+  if ast.op in {LoadOps.SYNC, LoadOps.WAIT} and out.device.startswith("HSA") and si.inputs[0].device.startswith("HSA"):
     # Our HSA runtime handles synchronization
-    if si.ast.op is LoadOps.SYNC: return None
-  if si.ast.op is LoadOps.COPY:
-    if hasattr(Device[si.out.device].allocator, 'transfer') and type(Device[si.out.device]) is type(Device[si.inputs[0].device]): return BufferXfer()
+    if ast.op is LoadOps.SYNC: return None
+  if ast.op is LoadOps.COPY:
+    if hasattr(Device[out.device].allocator, 'transfer') and type(Device[out.device]) is type(Device[si.inputs[0].device]): return BufferXfer()
     if si.inputs[0].device.startswith("DISK"): return BufferRead()
     return BufferCopy()
-  if si.ast.op is LoadOps.CUSTOM: return CustomOp(si.ast.arg)
-  if si.ast.op is LoadOps.SYNC: return SyncOp(si.out.device) if isinstance(Device[si.out.device], Compiled) else None
-  if si.ast.op is LoadOps.WAIT: return None
-  return Device[si.out.device].get_runner(si.ast)
+  if ast.op is LoadOps.CUSTOM: return CustomOp(ast.arg)
+  if ast.op is LoadOps.SYNC: return SyncOp(out.device) if isinstance(Device[out.device], Compiled) else None
+  return None
 
 logops = open(getenv("LOGOPS", ""), "a") if getenv("LOGOPS", "") else None
 def run_schedule(schedule:List[ScheduleItem]):
   while len(schedule):
     si = schedule.pop(0)
-    if logops and si.ast.op not in LoadOps and not any(i.device.startswith("DISK:") for i in si.inputs): logops.write(str(si.ast)+"\n")
+    if logops and si.ast[0].op not in LoadOps and not any(i.device.startswith("DISK:") for i in si.inputs): logops.write(str(si.ast)+"\n")
 
     # get the program
     prg = lower_schedule_item(si)
 
-    # invalidate the output buffer if there's a non contig usage of it in inputs
-    if si.out.output_buffer is not None:
-      for i,a in enumerate(si.inputs):
-        if a.realized == si.out.output_buffer:
-          if any(not x.arg.st.contiguous for x in si.ast.lazyops if x.op is BufferOps.LOAD and x.arg.idx == i+1):
-            si.out.output_buffer = None
-            break
-
-    # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
-    if si.out.size > 0:
-      options = BufferOptions(host=True, signal=True) if si.ast.op is LoadOps.SYNC else None
-      si.out.realized = si.out.output_buffer if si.out.output_buffer is not None else \
-        Buffer(si.out.device, si.out.size, si.out.dtype, "PLACEHOLDER" if getattr(prg, "skip_allocation", False) else None, options=options)
-      del si.out.srcs
+    for out in si.outputs:
+      # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
+      if out.size > 0:
+        options = BufferOptions(host=True, signal=True) if si.ast[0].op is LoadOps.SYNC else None
+        if out.op is LoadOps.ASSIGN and out.srcs[1].base.realized is not None:
+          # if the buffer isn't realized, it might be a const or something. this is fine
+          out.realized = out.srcs[1].base.realized
+        else:
+          out.realized = out.output_buffer if out.output_buffer is not None else \
+            Buffer(out.device, out.size, out.dtype, "PLACEHOLDER" if getattr(prg, "skip_allocation", False) else None, options=options)
+        del out.srcs
 
     # run the function (put it in JIT)
-    real_buffers = [x.realized for x in (si.out,)+si.inputs if x.size != 0]
+    real_buffers = [x.realized for x in si.outputs+si.inputs if x.size != 0]
     assert all(x is not None for x in real_buffers), f"can't run, some inputs aren't realized {real_buffers}"
     if prg: prg.exec(cast(List[Buffer], real_buffers), si.var_vals)
-    elif si.out.size > 0: update_stats(colored(f"empty {si.out.st.size:10d} {si.out.dtype}", "yellow"), 0, 0, {}, None, 1, device=si.out.device)
-    if GRAPH: realized_lazybuffer(si.out, GlobalCounters.kernel_count)
+    elif (out:=si.outputs[0]).size > 0: update_stats(colored(f"empty {out.st.size:10d} {out.dtype}", "yellow"), 0, 0, {}, None, 1, device=out.device)
+    if GRAPH:
+      for out in si.outputs: realized_lazybuffer(out, GlobalCounters.kernel_count)
 
 # *** schedule creation ***
 
@@ -84,7 +82,7 @@ sys.setrecursionlimit(10000)
 
 # recursively create a lazyop
 def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Variable, int], st:ShapeTracker,
-                      realizes:Set[LazyBuffer], cache, first=True) -> LazyOp:
+                      realizes:Set[LazyBuffer], cache, first=True, assign_to:Optional[LazyBuffer]=None) -> LazyOp:
   if (buf, st) in cache: return cache[(buf, st)]
   if buf != buf.base:
     st = buf.st + st
@@ -100,15 +98,23 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
 
   # if we aren't fusing it, it's a load and we add it to the inputs
   if buf.realized or (buf in realizes and not first):
-    if buf not in inputs: inputs.append(buf)
     unbound_st, st_var_vals = st.simplify().unbind()
     var_vals.update(st_var_vals)
+    if assign_to is not None and buf is assign_to:
+      if not unbound_st.contiguous:
+        # we also allow masked views. if it has a single view and it's equal when you shrink a contig, it's fine
+        if not (len(unbound_st.views) == 1 and unbound_st.views[0].mask is not None and
+            ShapeTracker.from_shape(unbound_st.shape).shrink(unbound_st.views[0].mask) == unbound_st.shrink(unbound_st.views[0].mask)):
+          raise RuntimeError(f"must be contiguous for assign {unbound_st}")
+      return LazyOp(BufferOps.LOAD, (), MemBuffer(0, buf.dtype, unbound_st))
+    if buf not in inputs: inputs.append(buf)
     return LazyOp(BufferOps.LOAD, (), MemBuffer(inputs.index(buf)+1, buf.dtype, unbound_st))
 
-  # if a CONTIGUOUS made it all the way here, just skip it
-  if buf.op is LoadOps.CONTIGUOUS:
+  # if a CONTIGUOUS or ASSIGN made it all the way here, just skip it
+  if buf.op in {LoadOps.CONTIGUOUS, LoadOps.ASSIGN}:
     assert first
-    return _recursive_lazyop(buf.srcs[0], inputs, var_vals, st, realizes, cache, False)
+    return _recursive_lazyop(buf.srcs[0], inputs, var_vals, st, realizes, cache, False,
+                             assign_to=buf.srcs[1].base if buf.op is LoadOps.ASSIGN else None)
 
   # if it's a reduce, we have to change the shapetracker
   if buf.op in ReduceOps:
@@ -116,16 +122,11 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
     st = ShapeTracker.from_shape(buf.srcs[0].shape)
 
   # otherwise we fuse it like normal
-  cache[(buf, st)] = ret = LazyOp(buf.op, tuple(_recursive_lazyop(x, inputs, var_vals, st, realizes, cache, False) for x in buf.srcs), buf.arg)
+  cache[(buf, st)] = ret = \
+    LazyOp(buf.op, tuple(_recursive_lazyop(x, inputs, var_vals, st, realizes, cache, False, assign_to) for x in buf.srcs), buf.arg)
   return ret
 
-# recursively walk back in the graph to create the schedule
-def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyBuffer],
-                        reduce_for_op: Dict[LazyBuffer, LazyBuffer]) -> List[ScheduleItem]:
-  if out in seen or out.realized or out.op == LoadOps.CONST: return []
-  assert out.base == out
-  seen.add(out)
-
+def _schedule_one(out:LazyBuffer, realizes:Set[LazyBuffer], reduce_for_op: Dict[LazyBuffer, LazyBuffer]) -> ScheduleItem:
   inputs: List[LazyBuffer] = []
   var_vals: Dict[Variable, int] = out.st.var_vals.copy()
   if out.op in {LoadOps.CUSTOM, LoadOps.SYNC, LoadOps.WAIT, LoadOps.COPY, LoadOps.EMPTY}:
@@ -134,8 +135,7 @@ def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyB
     output_st = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape)
     op = _recursive_lazyop(out, inputs, var_vals, output_st, realizes, cache={})
     op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_st.simplify().unbind()[0]))
-
-  return flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in inputs) + [ScheduleItem(op, out, tuple(inputs), var_vals)]
+  return ScheduleItem((op,), (out,), tuple(inputs), var_vals)
 
 # recursively search the entire graph for all LazyBuffers, insert realizes after expands
 def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffer, None],
@@ -171,40 +171,6 @@ def _is_padding_okay(buf:LazyBuffer, realizes:Set[LazyBuffer]) -> bool:
   # NOTE: this broke to_image_idx and coder with JIT
   if buf.op in UNSAFE_PAD_OPS: return False
   return all(_is_padding_okay(x.base, realizes) for x in buf.srcs)
-
-def optimize(schedule: List[ScheduleItem]) -> List[ScheduleItem]:
-  # find assigns, map positions of output LazyBuffers, init graph
-  assigns: Dict[Buffer, int] = {}
-  positions: Dict[LazyBuffer, int] = {}
-  graph: Dict[int, Set[int]] = {}
-  for i,si in enumerate(schedule):
-    graph[i] = set()
-    positions[si.out] = i
-    if si.out.output_buffer: assigns[si.out.output_buffer] = i
-  # Figure out dependencies
-  for i,si in enumerate(schedule):
-    for inp in si.inputs:
-      if (pos := positions.get(inp)) is not None:
-        graph[pos].add(i)
-      if inp.realized and (pos := assigns.get(inp.realized)) is not None and pos != i:
-        graph[i].add(pos)
-  del assigns, positions
-
-  top_order: List[int] = []
-  in_degrees: Dict[int, int] = {k:0 for k in graph.keys()}
-  for n in flatten(graph.values()): in_degrees[n] += 1
-  free: Deque[int] = deque([idx for idx,deg in in_degrees.items() if deg == 0])
-
-  while free:
-    node = free.popleft()
-    top_order.append(node)
-    for adj in graph[node]:
-      in_degrees[adj] -= 1
-      if in_degrees[adj] == 0: free.append(adj)
-
-  assert len(top_order) == len(schedule), "cycle detected"
-
-  return [schedule[i] for i in top_order]
 
 def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> List[ScheduleItem]:
   if seen is None: seen = set()
@@ -275,4 +241,28 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
       assert len(realized_children) == 1
       reduce_for_op[next(iter(realized_children.keys()))] = r
 
-  return optimize(flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in outs))
+  graph: DefaultDict[LazyBuffer,List[LazyBuffer]] = defaultdict(list)
+  in_degree: DefaultDict[LazyBuffer,int] = defaultdict(int)
+  queue: Deque[LazyBuffer] = deque()
+  for buf in allbufs:
+    if buf.realized: continue
+    for x in buf.srcs:
+      if x.base.realized: continue
+      graph[x.base].append(buf)
+      in_degree[buf] += 1
+    if in_degree[buf] == 0: queue.append(buf)
+
+  sorted_realizes: List[LazyBuffer] = []
+  while queue:
+    buf = queue.popleft()
+    if buf.op != LoadOps.CONST and buf in realizes and buf not in seen: sorted_realizes.append(buf)
+    for x in graph[buf]:
+      in_degree[x] -= 1
+      if in_degree[x] == 0: queue.append(x)
+
+  sched:List[ScheduleItem] = []
+  for x in sorted_realizes:
+    if x in seen: continue
+    sched.append(_schedule_one(x, realizes, reduce_for_op))
+    seen.add(x)
+  return sched

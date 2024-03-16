@@ -1,13 +1,14 @@
 from typing import Optional, Tuple, Any, List
 import unittest, math
 import numpy as np
+from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes, DType, PtrDType
-from tinygrad.device import Buffer, Device
+from tinygrad.device import Buffer, Device, CompiledASTRunner
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
-from tinygrad.device import CompiledASTRunner
+from tinygrad.realize import create_schedule
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.codegen.uops import exec_alu, UOpGraph
-from test.test_dtype import is_dtype_supported
+from test.helpers import is_dtype_supported
 
 def _uops_to_prg(uops):
   src = Device[Device.DEFAULT].compiler.render("test", uops)
@@ -156,6 +157,11 @@ class TestExecALU(TestUOps):
     self.assertEqual(exec_alu(BinaryOps.CMPLT, dtypes.bool, (True, False)), False)
     self.assertEqual(exec_alu(BinaryOps.CMPLT, dtypes.bool, (True, True)), False)
 
+  def test_bool_where(self):
+    self.assertIs(exec_alu(TernaryOps.WHERE, dtypes.bool, (False, False, False)), False)
+    self.assertIs(exec_alu(TernaryOps.WHERE, dtypes.int, (False, 2, 4)), 4)
+    self.assertIs(exec_alu(TernaryOps.WHERE, dtypes.float, (False, 2.2, 4.5)), 4.5)
+
   def test_overflow(self):
     self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.uint8, (250, 250)), 244)
     self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.uint8, (256, 0)), 0)
@@ -170,6 +176,23 @@ class TestExecALU(TestUOps):
 
     self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.int8, (1, 1)), 2)
     self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.int8, (-128, 0)), -128)
+
+class TestConstantFolding(unittest.TestCase):
+  def test_cast_const(self):
+    t = Tensor(1, dtype=dtypes.float).cast(dtypes.int)
+    si = create_schedule([t.lazydata])
+    assert len(si) == 1
+    si = si[0]
+    lin = Device[Device.DEFAULT].get_linearizer(si.ast[0]).linearize()
+    assert all(uop.uop is not UOps.CAST for uop in lin.uops.uops), f"{[uop.uop for uop in lin.uops.uops]} contains non-folded constant cast"
+
+  def test_bitcast_const(self):
+    t = Tensor(1, dtype=dtypes.float).bitcast(dtypes.int)
+    si = create_schedule([t.lazydata])
+    assert len(si) == 1
+    si = si[0]
+    lin = Device[Device.DEFAULT].get_linearizer(si.ast[0]).linearize()
+    assert any(uop.uop is UOps.BITCAST for uop in lin.uops.uops), f"{[uop.uop for uop in lin.uops.uops]} does not contain bitcast"
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

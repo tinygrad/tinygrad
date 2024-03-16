@@ -10,7 +10,7 @@ from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.runtime.driver.hip_comgr import compile_hip
 
 class HIPCompiler(Compiler):
-  linearizer_opts = LinearizerOptions("HIP", has_tensor_cores=True)
+  linearizer_opts = LinearizerOptions("HIP", has_tensor_cores=True, shared_max=65536)
   def __init__(self, arch:str):
     self.arch = arch
     super().__init__(f"compile_hip_{self.arch}")
