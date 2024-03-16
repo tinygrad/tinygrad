@@ -193,6 +193,9 @@ class HSADevice(Compiled):
       check(hsa.hsa_init())
       atexit.register(hsa_terminate)
       HSADevice.agents = scan_agents()
+      if (hvd := getenv("HSA_VISIBLE_DEVICES", "")):
+        HSADevice.agents[hsa.HSA_DEVICE_TYPE_GPU] = \
+          [agent for i, agent in enumerate(HSADevice.agents[hsa.HSA_DEVICE_TYPE_GPU]) if i in [int(x) for x in hvd.split(",")]]
       HSADevice.cpu_agent = HSADevice.agents[hsa.HSA_DEVICE_TYPE_CPU][0]
       HSADevice.cpu_mempool = find_memory_pool(HSADevice.cpu_agent, segtyp=hsa.HSA_AMD_SEGMENT_GLOBAL, location=hsa.HSA_AMD_MEMORY_POOL_LOCATION_CPU)
       if PROFILE: check(hsa.hsa_amd_profiling_async_copy_enable(1))
