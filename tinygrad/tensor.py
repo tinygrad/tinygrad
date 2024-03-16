@@ -231,9 +231,8 @@ class Tensor:
   def rand(*shape, device:Optional[Union[Tuple[str, ...], str]]=None, dtype:Optional[DType]=None, **kwargs):
     if Tensor._rng_counter is None: Tensor._rng_counter = Tensor([0], dtype=dtypes.uint32, requires_grad=False)
     if not THREEFRY.value:
-      if kwargs.get("dtype") == dtypes.bfloat16:
-        kwargs.pop("dtype")
-        return Tensor.rand(*shape, **kwargs, dtype=dtypes.float).cast(dtypes.bfloat16)
+      if dtype == dtypes.bfloat16:
+        return Tensor.rand(*shape, **kwargs, device=device, dtype=dtypes.float).cast(dtypes.bfloat16)
       return Tensor._loadop(LoadOps.CUSTOM, argfix(*shape), arg=custom_random, device=device, dtype=dtype, **kwargs)
 
     # threefry
