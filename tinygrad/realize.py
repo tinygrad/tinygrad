@@ -1,10 +1,10 @@
 import sys
-from collections import defaultdict
-from typing import List, Dict, Optional, cast, Set, DefaultDict
+from collections import defaultdict, deque
+from typing import Deque, List, Dict, Optional, cast, Set, DefaultDict
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters, LazyOp, ReduceOps, ConstBuffer, MemBuffer, BinaryOps, UnaryOps
 from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats, Compiled, BufferOptions
 from tinygrad.features.graph import realized_lazybuffer, log_lazybuffer
-from tinygrad.helpers import colored, getenv, GRAPH, cpu_time_execution, DEBUG, flatten, prod, dedup, all_int
+from tinygrad.helpers import colored, getenv, GRAPH, cpu_time_execution, DEBUG, prod, dedup, all_int
 from tinygrad.shape.symbolic import Variable
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.lazy import LazyBuffer
@@ -137,16 +137,6 @@ def _schedule_one(out:LazyBuffer, realizes:Set[LazyBuffer], reduce_for_op: Dict[
     op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_st.simplify().unbind()[0]))
   return ScheduleItem((op,), (out,), tuple(inputs), var_vals)
 
-# recursively walk back in the graph to create the schedule
-def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyBuffer],
-                        reduce_for_op: Dict[LazyBuffer, LazyBuffer]) -> List[ScheduleItem]:
-  if out in seen or out.realized or out.op == LoadOps.CONST: return []
-  assert out.base == out
-  assert out in realizes
-  seen.add(out)
-  si = _schedule_one(out, realizes, reduce_for_op)
-  return flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in si.inputs) + [si]
-
 # recursively search the entire graph for all LazyBuffers, insert realizes after expands
 def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffer, None],
                 simple_pads:Set[LazyBuffer], children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], scheduled=False):
@@ -251,4 +241,28 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
       assert len(realized_children) == 1
       reduce_for_op[next(iter(realized_children.keys()))] = r
 
-  return flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in outs)
+  graph: DefaultDict[LazyBuffer,List[LazyBuffer]] = defaultdict(list)
+  in_degree: DefaultDict[LazyBuffer,int] = defaultdict(int)
+  queue: Deque[LazyBuffer] = deque()
+  for buf in allbufs:
+    if buf.realized: continue
+    for x in buf.srcs:
+      if x.base.realized: continue
+      graph[x.base].append(buf)
+      in_degree[buf] += 1
+    if in_degree[buf] == 0: queue.append(buf)
+
+  sorted_realizes: List[LazyBuffer] = []
+  while queue:
+    buf = queue.popleft()
+    if buf.op != LoadOps.CONST and buf in realizes and buf not in seen: sorted_realizes.append(buf)
+    for x in graph[buf]:
+      in_degree[x] -= 1
+      if in_degree[x] == 0: queue.append(x)
+
+  sched:List[ScheduleItem] = []
+  for x in sorted_realizes:
+    if x in seen: continue
+    sched.append(_schedule_one(x, realizes, reduce_for_op))
+    seen.add(x)
+  return sched

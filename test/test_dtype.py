@@ -1,11 +1,12 @@
-import unittest, operator, sys
+import unittest, operator
 import numpy as np
 import torch
 from typing import Any, List
-from tinygrad.helpers import CI, getenv, DEBUG, OSX
+from tinygrad.helpers import getenv, DEBUG
 from tinygrad.dtype import DType, DTYPES_DICT, ImageDType, PtrDType, least_upper_float, least_upper_dtype
 from tinygrad import Device, Tensor, dtypes
 from hypothesis import given, settings, strategies as strat
+from test.helpers import is_dtype_supported
 
 settings.register_profile("my_profile", max_examples=200, deadline=None)
 settings.load_profile("my_profile")
@@ -13,20 +14,6 @@ settings.load_profile("my_profile")
 core_dtypes = list(DTYPES_DICT.values())
 if Device.DEFAULT == "CPU": core_dtypes.remove(dtypes.bfloat16)  # NOTE: this is for teenygrad, don't remove
 floats = [dt for dt in core_dtypes if dtypes.is_float(dt)]
-def is_dtype_supported(dtype: DType, device: str = Device.DEFAULT):
-  if dtype == dtypes.bfloat16:
-    # NOTE: this requires bf16 buffer support
-    return device in ["HIP"]
-  if device in ["WEBGPU", "WEBGL"]: return dtype in [dtypes.float, dtypes.int32, dtypes.uint32]
-  # for CI GPU, cl_khr_fp16 isn't supported
-  # for CI LLVM, it segfaults because it can't link to the casting function
-  # CUDA in CI uses CUDACPU that does not support half
-  # PYTHON supports half memoryview in 3.12+ https://github.com/python/cpython/issues/90751
-  if dtype == dtypes.half:
-    if device in ["GPU", "LLVM", "CUDA"]: return not CI
-    if device == "PYTHON": return sys.version_info >= (3, 12)
-  if dtype == dtypes.float64: return device != "METAL" and not (OSX and device == "GPU")
-  return True
 
 def get_available_cast_dtypes(dtype: DType) -> List[DType]:
   if not is_dtype_supported(dtype): return []

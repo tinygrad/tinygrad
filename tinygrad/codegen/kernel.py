@@ -4,7 +4,7 @@ from typing import NamedTuple, Optional, List, Tuple, cast, Dict, Union
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps
 from tinygrad.device import Device, Compiled
 from tinygrad.dtype import dtypes, ImageDType, DType
-from tinygrad.helpers import dedup, colored, ansilen, getenv, prod, DEBUG, round_up, all_int, get_contraction
+from tinygrad.helpers import colored, ansilen, dedup, flatten, getenv, prod, DEBUG, round_up, all_int, get_contraction
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import sint
 from tinygrad.shape.view import View, strides_for_shape
@@ -92,19 +92,20 @@ class Kernel:
                          LinearizerOptions(Device.DEFAULT))
     assert all(op.op is BufferOps.STORE for op in ast), f"kernels must have stores as the output, got {ast}"
     assert len(set(op.arg.st.size for op in ast)) == 1, f"all outbufs should have the same size, got {[op.arg.st for op in ast]}"
-    assert len(ast) == 1, "max one output per kernel"
-    self.ast = ast[0]
+    self.ast = ast
+    self.lazyops = flatten([op.lazyops for op in self.ast])
 
     # fetch lazyop info
-    self.info: FlopCounter = get_lazyop_info(self.ast)
+    self.info: FlopCounter = get_lazyop_info(self.ast[0]) # TODO list[info]
 
     # there's only allowed to be one reduceop
-    reduceops = [x for x in self.ast.lazyops if x.op in ReduceOps]
+    reduceops = [x for x in self.lazyops if x.op in ReduceOps]
     assert len(dedup(reduceops)) <= 1, "max one reduce op in an ast"
     self.reduceop = reduceops[0] if reduceops else None
 
-    self.bufs: List[Union[MemBuffer, ConstBuffer, LocalBuffer]] = dedup([x.arg for x in self.ast.lazyops if x.op in BufferOps])
-    assert isinstance(self.bufs[0], MemBuffer) and self.bufs[0].idx == 0, f"buffer 0 is not the store buffer {self.bufs[0]}"
+    self.outbufs, self.vars = [x.arg for x in self.ast], flatten([x.vars() for x in self.ast])
+    loadops = [BufferOps.LOAD, BufferOps.CONST]
+    self.bufs: List[Union[MemBuffer, ConstBuffer, LocalBuffer]] = self.outbufs + dedup([x.arg for x in self.lazyops if x.op in loadops])
 
     # get earlybufs, before the one reduce op
     self.earlybufs = [x.arg for x in self.reduceop.lazyops if x.op in BufferOps] if self.reduceop else []
@@ -142,8 +143,8 @@ class Kernel:
     ret.opts, ret.ast = self.opts, self.ast
 
     # things downstream of the AST
-    ret.info, ret.reduceop, ret.bufs, ret.earlybufs, ret.full_buf_index = \
-      self.info, self.reduceop, [x for x in self.bufs if not isinstance(x, LocalBuffer)], self.earlybufs, self.full_buf_index
+    ret.info, ret.reduceop, ret.outbufs, ret.vars, ret.bufs, ret.earlybufs, ret.full_buf_index = \
+      self.info, self.reduceop, self.outbufs, self.vars, [x for x in self.bufs if not isinstance(x, LocalBuffer)], self.earlybufs, self.full_buf_index
     ret.sts = self.sts[:len(ret.bufs)] # NOTE: must redo the local buffers with TC in beam
 
     # parameters for optimizations
@@ -493,7 +494,7 @@ class Kernel:
       check(self.local_dims == 0 and self.group_for_reduces == 0, "can't have no locals with locals")
       self.dont_use_locals = True
     elif opt.op == OptOps.PADTO:
-      check(not self.ast.vars(), "does not work with symbolic shape")
+      check(not self.vars, "does not work with symbolic shape")
       check(axis < self.first_reduce, "cannot pad a reduce axis")
       padded = False
       for i,st in enumerate(self.sts):
