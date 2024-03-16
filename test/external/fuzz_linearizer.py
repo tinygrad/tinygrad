@@ -69,7 +69,7 @@ def fuzz_linearizer(lin: Linearizer):
   SEED = getenv("SEED", 42)
   random.seed(SEED)
   np.random.seed(SEED)
-  print_tree(lin.ast)
+  for op in lin.ast: print_tree(op)
   print(lin.colored_shape())
   seen_uops = {}
   last_lins = [lin]
@@ -82,8 +82,8 @@ def fuzz_linearizer(lin: Linearizer):
     return failures
 
   # get baseline unoptimized output
-  unoptimized = Linearizer(lin.ast)
-  var_vals = {v: random.randint(v.min, v.max) for v in lin.ast.vars()}
+  unoptimized = Linearizer(*lin.ast)
+  var_vals = {v: random.randint(v.min, v.max) for v in lin.ast[0].vars()}
 
   try:
     rawbufs = get_fuzz_rawbufs(lin)

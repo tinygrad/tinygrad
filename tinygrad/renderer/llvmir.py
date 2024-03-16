@@ -103,12 +103,12 @@ def uops_to_llvm_ir(function_name:str, uops:UOpGraph) -> str:
         with bb[-1].if_then(lvars[vin[3]]): store_op()
       else: store_op()
     elif uop is UOps.ENDLOOP:
-      block, phis = loop_blocks.pop()
+      loop_entry_bb, phis = loop_blocks.pop()
       idx_p1 = bb[-1].add(lvars[vin[0]], ir.Constant(ir.IntType(32), 1))
       lvars[vin[0]].add_incoming(idx_p1, bb[-1].block)
       for n,phi in phis: phi.add_incoming(lvars[n], bb[-1].block)
       bb.append(ir.IRBuilder(func.append_basic_block(f"loop_exit_{len(loop_blocks)}")))
-      bb[-2].cbranch(bb[-2].icmp_unsigned("<", idx_p1, lvars[vin[0].vin[1]]), block.block, bb[-1].block)
+      bb[-2].cbranch(bb[-2].icmp_unsigned("<", idx_p1, lvars[vin[0].vin[1]]), loop_entry_bb, bb[-1].block)
     else:
       assert dtype is not None, f"None dtype for uop {uop}"
       if uop == UOps.LOOP:
@@ -124,7 +124,7 @@ def uops_to_llvm_ir(function_name:str, uops:UOpGraph) -> str:
 
         lvars[u] = bb[-1].phi(ir.IntType(32), name=f"loop{len(loop_blocks)}")
         lvars[u].add_incoming(lvars[vin[0]], bb[-2].block)
-        loop_blocks.append((bb[-1], phis))
+        loop_blocks.append((bb[-1].block, phis))
       elif uop is UOps.DEFINE_ACC:
         lvars[u] = const(args, dtype)
         reduce_phis.append(u)
@@ -144,7 +144,7 @@ def uops_to_llvm_ir(function_name:str, uops:UOpGraph) -> str:
         lvars[backward] = lvars[u]
       elif uop is UOps.ALU:
         lvars[u] = code_for_op[args](bb[-1], *[lvars[x] for x in vin], dtype if args not in (BinaryOps.CMPLT, BinaryOps.CMPEQ) else vin[0].dtype)
-      elif uop is UOps.CAST: lvars[u] = cast(bb, lvars[vin[0]], vin[0].dtype, dtype, bitcast=isinstance(args, tuple) and args[1])
+      elif uop in {UOps.CAST, UOps.BITCAST}: lvars[u] = cast(bb, lvars[vin[0]], vin[0].dtype, dtype, bitcast=uop is UOps.BITCAST)
       elif uop in {UOps.DEFINE_GLOBAL, UOps.DEFINE_VAR}: lvars[u] = func.args[buf_index[args]]
       elif uop is UOps.SPECIAL: lvars[u] = lvars[args.expr]
       elif uop is UOps.CONST: lvars[u] = const(args, dtype)
