@@ -36,7 +36,7 @@ class SGD(Optimizer):
       assert t.grad is not None
       # contiguous is needed since the grads can allegedly form a "diamond"
       # TODO: fix this in lazy.py
-      g = t.grad + self.wd * t.detach()
+      g = t.grad.contiguous() + self.wd * t.detach()
       if self.momentum:
         self.b[i].assign(self.momentum * self.b[i] + g)  # NOTE: self.b[i] is zero on the first run, no if required
         g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
