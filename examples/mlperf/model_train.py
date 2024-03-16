@@ -63,7 +63,7 @@ def train_resnet():
   # ** Optimizer **
   skip_list = [v for k, v in get_state_dict(model).items() if "bn" in k or "bias" in k or "downsample.1" in k]
   optimizer = LARS(parameters, base_lr, momentum=.9, weight_decay=decay)
-  optimizer_skip = SGD(skip_list, base_lr, momentum=.9, weight_decay=decay)
+  optimizer_skip = SGD(skip_list, base_lr, momentum=.9, weight_decay=0.0)
 
   # ** LR scheduler **
   scheduler = PolynomialDecayWithWarmup(optimizer, initial_lr=base_lr, end_lr=1e-4,
