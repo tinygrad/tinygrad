@@ -8,7 +8,7 @@ from tinygrad.dtype import DType
 from tinygrad.helpers import CI, getenv
 from tinygrad.realize import create_schedule
 from tinygrad.ops import UnaryOps, get_lazyop_info
-from test.test_dtype import is_dtype_supported
+from test.helpers import is_dtype_supported
 
 settings.register_profile("my_profile", max_examples=200, deadline=None)
 settings.load_profile("my_profile")

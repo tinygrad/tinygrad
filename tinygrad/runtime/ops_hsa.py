@@ -23,7 +23,7 @@ class HSAProfiler:
     for sig,name,is_copy in self.tracked_signals[device]:
       if is_copy: check(hsa.hsa_amd_profiling_get_async_copy_time(sig, ctypes.byref(timings :=  self.copy_timings)))
       else: check(hsa.hsa_amd_profiling_get_dispatch_time(device.agent, sig, ctypes.byref(timings := self.disp_timings))) #type:ignore
-      self.collected_events.append((device.device_id, is_copy, name, timings.start, timings.end))
+      self.collected_events.append((device.device_id, 1 if is_copy else 0, name, timings.start, timings.end))
     self.tracked_signals.pop(device)
 
   def save(self, path):
@@ -250,7 +250,7 @@ class HSADevice(Compiled):
   def alloc_kernargs(self, sz):
     if self.kernarg_next_addr + sz >= self.kernarg_start_addr + self.kernarg_pool_sz: self._new_kernargs_region(int(self.kernarg_pool_sz * 2))
     result = self.kernarg_next_addr
-    self.kernarg_next_addr = (self.kernarg_next_addr + sz + 15) & (~15) # align to 16 bytes
+    self.kernarg_next_addr = round_up(self.kernarg_next_addr + sz, 16)
     return result
 
   def _new_kernargs_region(self, sz:int):
