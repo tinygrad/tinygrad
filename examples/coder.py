@@ -34,7 +34,7 @@ if __name__ == "__main__":
     part2 = nn.state.torch_load(fetch("https://huggingface.co/teknium/OpenHermes-2.5-Mistral-7B/resolve/main/pytorch_model-00002-of-00002.bin?download=true"))
 
   # fix bf16, TODO: check if device supports bf16
-  def fix_bf16(weights): return {k:v.to(Device.DEFAULT).cast(dtypes.float16) if v.dtype == dtypes.bfloat16 else v for k,v in weights.items()}
+  def fix_bf16(weights): return {k:v.llvm().cast(dtypes.float16).to(Device.DEFAULT) if v.dtype == dtypes.bfloat16 else v for k,v in weights.items()}
 
   with Timing("weights -> model: "):
     nn.state.load_state_dict(model, fix_bf16(convert_from_huggingface(part1, model, 32, 8)), strict=False)
