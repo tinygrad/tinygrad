@@ -34,7 +34,7 @@ class SGD(Optimizer):
   def step(self) -> None:
     for i, t in enumerate(self.params):
       assert t.grad is not None
-      # this is needed since the grads can form a "diamond"
+      # contiguous is needed since the grads can allegedly form a "diamond"
       # TODO: fix this in lazy.py
       g = t.grad.contiguous() + self.wd * t.detach()
       if self.momentum:
