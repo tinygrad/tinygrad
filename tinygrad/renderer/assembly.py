@@ -87,7 +87,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
         bptr = uops.add(UOps.CAST, dtypes.uint64, (ptr,), insert_before=uops.uops.index(u))
         fptr = uops.add(UOps.ALU, dtypes.uint64, (u.vin[0], bptr), arg=BinaryOps.ADD, insert_before=uops.uops.index(u))
         u.vin = (fptr, zero) + u.vin[2:]
-  #uops.print()
+  # uops.print()
 
   def kk(*s: str): kernel.append("\n".join(s))
 
@@ -274,7 +274,7 @@ class PTXLanguage(AssemblyLanguage):
   def render_load(self, loc, dest, dtype, gate=None, alt=None, ss="", offset=0) -> List[str]:
     assert dtype is not dtypes.bool
     ret = []
-    if gate: ret.extend([f"@{gate} ld{ss}.{self.mem_type(dtype)} {dest}, [{loc}];",
+    if gate: ret.extend([f"@{gate} ld{ss}.{self.mem_type(dtype)} {dest}, [{loc}+{offset}];",
                          f"@!{gate} mov.b{self.types[dtype][1:]} {dest}, {alt};"])
     else: ret.append(f"ld{ss}.{self.mem_type(dtype)} {dest}, [{loc}+{offset}];")
     return ret
