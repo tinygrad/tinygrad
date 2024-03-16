@@ -6,7 +6,6 @@ import numpy as np
 import torch
 from tinygrad import nn, dtypes, Tensor
 from tinygrad.helpers import THREEFRY
-from functools import partial
 from test.helpers import is_dtype_supported
 
 # https://gist.github.com/devries/11405101
