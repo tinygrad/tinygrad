@@ -1,10 +1,8 @@
 import unittest
 from tinygrad import Tensor, Device, Variable
-from tinygrad.device import Compiled
 from examples.gpt2 import Transformer
 from tinygrad.nn.state import get_state_dict
 
-@unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "only test for compiled backends")
 class TestMethodCache(unittest.TestCase):
   def setUp(self):
     self.backup_compiler = Device[Device.DEFAULT].compiler
@@ -32,6 +30,7 @@ class TestMethodCache(unittest.TestCase):
     Device[Device.DEFAULT].compiler = None
     ((c+d)+(a+b)).realize()
 
+  @unittest.skip("incorrect use of transformer")
   def test_small_transformer(self):
     args_tiny = {"dim": 16, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-05, "vocab_size": 10}
     model = Transformer(**args_tiny)
