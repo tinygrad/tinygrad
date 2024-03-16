@@ -336,7 +336,7 @@ class TestSchedule(unittest.TestCase):
     out = bn1(conv1(x)).relu()
     out = bn2(conv2(out))
     out = (out + x).relu()
-    check_schedule(out, 4)
+    check_schedule(out, 3)
 
   def test_contiguous_while_contiguous(self):
     x = Tensor.empty(1, 64, 32, 32)

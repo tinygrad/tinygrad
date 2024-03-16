@@ -1,6 +1,6 @@
 import sys
 from collections import defaultdict, deque
-from typing import Deque, List, Dict, Optional, cast, Set, DefaultDict
+from typing import Deque, List, Dict, Optional, Tuple, cast, Set, DefaultDict
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters, LazyOp, ReduceOps, ConstBuffer, MemBuffer, BinaryOps, UnaryOps
 from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats, Compiled, BufferOptions
 from tinygrad.features.graph import realized_lazybuffer, log_lazybuffer
@@ -70,7 +70,7 @@ def run_schedule(schedule:List[ScheduleItem]):
     # run the function (put it in JIT)
     real_buffers = [x.realized for x in si.outputs+si.inputs if x.size != 0]
     assert all(x is not None for x in real_buffers), f"can't run, some inputs aren't realized {real_buffers}"
-    if prg: prg.exec(cast(List[Buffer], real_buffers), si.var_vals)
+    if prg: prg.exec(cast(List[Buffer], real_buffers), si.var_vals, [cast(Buffer,x.realized) for x in si.outputs])
     elif (out:=si.outputs[0]).size > 0: update_stats(colored(f"empty {out.st.size:10d} {out.dtype}", "yellow"), 0, 0, {}, None, 1, device=out.device)
     if GRAPH:
       for out in si.outputs: realized_lazybuffer(out, GlobalCounters.kernel_count)
@@ -108,7 +108,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
           raise RuntimeError(f"must be contiguous for assign {unbound_st}")
       return LazyOp(BufferOps.LOAD, (), MemBuffer(0, buf.dtype, unbound_st))
     if buf not in inputs: inputs.append(buf)
-    return LazyOp(BufferOps.LOAD, (), MemBuffer(inputs.index(buf)+1, buf.dtype, unbound_st))
+    return LazyOp(BufferOps.LOAD, (), MemBuffer(inputs.index(buf), buf.dtype, unbound_st))
 
   # if a CONTIGUOUS or ASSIGN made it all the way here, just skip it
   if buf.op in {LoadOps.CONTIGUOUS, LoadOps.ASSIGN}:
@@ -126,16 +126,21 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
     LazyOp(buf.op, tuple(_recursive_lazyop(x, inputs, var_vals, st, realizes, cache, False, assign_to) for x in buf.srcs), buf.arg)
   return ret
 
-def _schedule_one(out:LazyBuffer, realizes:Set[LazyBuffer], reduce_for_op: Dict[LazyBuffer, LazyBuffer]) -> ScheduleItem:
-  inputs: List[LazyBuffer] = []
-  var_vals: Dict[Variable, int] = out.st.var_vals.copy()
-  if out.op in {LoadOps.CUSTOM, LoadOps.SYNC, LoadOps.WAIT, LoadOps.COPY, LoadOps.EMPTY}:
-    op, inputs = LazyOp(out.op, (), out.arg), list(out.srcs)
-  else:
-    output_st = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape)
-    op = _recursive_lazyop(out, inputs, var_vals, output_st, realizes, cache={})
-    op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_st.simplify().unbind()[0]))
-  return ScheduleItem((op,), (out,), tuple(inputs), var_vals)
+def _schedule_group(outs:Tuple[LazyBuffer,...], realizes:Set[LazyBuffer],
+                    reduce_for_op: Dict[LazyBuffer, LazyBuffer], seen:Set[LazyBuffer]) -> ScheduleItem:
+  if outs[0].op in {LoadOps.CUSTOM, LoadOps.SYNC, LoadOps.WAIT, LoadOps.COPY, LoadOps.EMPTY}:
+    assert len(outs) == 1, "LoadOps runner can't process groups"
+    seen.add(outs[0])
+    return ScheduleItem((LazyOp(outs[0].op, (), (out:=outs[0]).arg),), (out,), out.srcs, out.st.var_vals.copy())
+
+  membufs, var_vals = [*outs], outs[0].st.var_vals.copy()
+  store_ops: List[LazyOp] = []
+  for out in outs:
+    output_st = ShapeTracker.from_shape(reduce_for_op[outs[0]].shape if outs[0] in reduce_for_op else outs[0].shape)
+    op = _recursive_lazyop(out, membufs, var_vals, output_st, realizes, cache={})
+    store_ops.append(LazyOp(BufferOps.STORE, (op, ), MemBuffer(membufs.index(out), outs[0].dtype, output_st.simplify().unbind()[0])))
+    seen.add(out)
+  return ScheduleItem(tuple(store_ops), outs, tuple([x for x in membufs if x not in outs]), var_vals)
 
 # recursively search the entire graph for all LazyBuffers, insert realizes after expands
 def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffer, None],
@@ -243,26 +248,27 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
 
   graph: DefaultDict[LazyBuffer,List[LazyBuffer]] = defaultdict(list)
   in_degree: DefaultDict[LazyBuffer,int] = defaultdict(int)
-  queue: Deque[LazyBuffer] = deque()
+  queue: Deque[Tuple[int,LazyBuffer]] = deque()
   for buf in allbufs:
     if buf.realized: continue
     for x in buf.srcs:
       if x.base.realized: continue
       graph[x.base].append(buf)
       in_degree[buf] += 1
-    if in_degree[buf] == 0: queue.append(buf)
+    if in_degree[buf] == 0: queue.append((0,buf))
 
-  sorted_realizes: List[LazyBuffer] = []
+  sorted_realizes: DefaultDict[Tuple,List[LazyBuffer]] = defaultdict(list)
   while queue:
-    buf = queue.popleft()
-    if buf.op != LoadOps.CONST and buf in realizes and buf not in seen: sorted_realizes.append(buf)
+    level, buf = queue.popleft()
+    if buf.op != LoadOps.CONST and buf in realizes and buf not in seen:
+      key: Tuple = (level,buf.shape,buf.device)
+      if buf.op in LoadOps or buf.op in ReduceOps or buf.forced_realize or buf in reduce_for_op \
+          or buf.device.startswith("DISK") or buf.device == "PTX": key = (buf,)
+      sorted_realizes[key].append(buf)
     for x in graph[buf]:
       in_degree[x] -= 1
-      if in_degree[x] == 0: queue.append(x)
+      if in_degree[x] == 0: queue.append((level+1,x))
 
   sched:List[ScheduleItem] = []
-  for x in sorted_realizes:
-    if x in seen: continue
-    sched.append(_schedule_one(x, realizes, reduce_for_op))
-    seen.add(x)
+  for outbufs in sorted_realizes.values(): sched.append(_schedule_group(tuple(outbufs), realizes, reduce_for_op, seen))
   return sched

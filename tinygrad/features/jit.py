@@ -117,7 +117,7 @@ class TinyJit(Generic[ReturnType]):
       CacheCollector.start(var_vals)
       with Context(GRAPH=getenv("JITGRAPH", GRAPH.value)):
         self.ret = self.fxn(*args, **kwargs)
-        for p in get_parameters(self.ret): p.realize()
+        Tensor.corealize(get_parameters(self.ret))
       self.jit_cache = CacheCollector.finish()
       assert len(self.jit_cache) != 0, "didn't JIT anything!"
       if DEBUG >= 1 and len(set(get_input_replace(self.jit_cache, input_rawbuffers).values())) != len(input_rawbuffers):
@@ -131,7 +131,7 @@ class TinyJit(Generic[ReturnType]):
     elif self.cnt == 0:
       # jit ignore
       self.ret = self.fxn(*args, **kwargs)
-      for p in get_parameters(self.ret): p.realize()
+      Tensor.corealize(get_parameters(self.ret))
 
     # clear jit inputs
     for (j,i) in self.input_replace.keys(): self.jit_cache[j].rawbufs[i] = None
@@ -160,15 +160,16 @@ class _CacheCollector:
     self.placeholders: WeakKeyDictionary[Buffer, PlaceHolder] = WeakKeyDictionary()
     self.var_vals = var_vals if var_vals is not None else {}
 
-  def add(self, prg, rawbufs, var_vals):
+  def add(self, prg, rawbufs, var_vals, outbufs:Optional[List[Buffer]]=None):
     if self.cache is None: return
     for k,v in var_vals.items(): assert k in self.var_vals and self.var_vals[k] == v, f"var_vals {k} mismatch {v} != {self.var_vals.get(k)}"
 
     # Buffer optimization is allowed only for kernel operations. Avoids for copies (prevents parallelism) and syncs (incorrect buffer reuse).
     allow_buffer_optimization = isinstance(prg, CompiledASTRunner)
 
-    # NOTE: this is making an assumption that 0 is special
-    if len(rawbufs): self.placeholders[rawbufs[0]] = PlaceHolder(rawbufs[0])
+    if allow_buffer_optimization:
+      assert outbufs is not None
+      for out in outbufs: self.placeholders[out] = PlaceHolder(out)
     self.cache.append((prg, [self.placeholders.get(x, x) if isinstance(x, Buffer) and allow_buffer_optimization else x for x in rawbufs]))
 
   def finish(self) -> List[JitItem]:

@@ -43,11 +43,11 @@ class JITRunner:
   def __init__(self):
     self.op_estimate:sint = 0
     self.mem_estimate:sint = 0
-  def exec(self, rawbufs:List[Buffer], var_vals:Optional[Dict[Variable, int]]=None) -> Optional[float]:
+  def exec(self, rawbufs:List[Buffer], var_vals:Optional[Dict[Variable, int]]=None, outbufs:Optional[List[Buffer]]=None) -> Optional[float]:
     var_vals = var_vals if var_vals is not None else {}
     from tinygrad.features.jit import CacheCollector
     et = self(rawbufs, var_vals)
-    CacheCollector.add(self, rawbufs, var_vals)
+    CacheCollector.add(self, rawbufs, var_vals, outbufs)
     return et
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     raise NotImplementedError("override this")
