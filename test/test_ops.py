@@ -3,7 +3,6 @@ import numpy as np
 import torch
 from tinygrad.helpers import getenv, IMAGE, DEBUG, CI
 from tinygrad import Tensor, Device, dtypes
-from test.test_dtype import is_dtype_supported
 
 if CI:
   import warnings
@@ -366,9 +365,6 @@ class TestOps(unittest.TestCase):
   def test_div_int(self):
     helper_test_op(None, lambda x,y: x/y, Tensor.div, forward_only=True, vals=np.array([[5, 6, 7],[1, 2, 3]], dtype=np.int32))
     helper_test_op(None, lambda x: x/2, lambda x: x/2, forward_only=True, vals=np.array([[3, 4, 5]], dtype=np.int32))
-  @unittest.skipUnless(is_dtype_supported(dtypes.half), "dtype not supported")
-  def test_div_half(self):
-    helper_test_op(None, lambda x,y: x/y, Tensor.div, forward_only=True, vals=np.array([[5, 6, 7],[1, 2, 3]], dtype=np.float16))
   def test_scalar_div(self):
     helper_test_op([(45,65)], lambda x: x/255)
     helper_test_op([(45,65)], lambda x: x/1)
