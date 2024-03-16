@@ -50,3 +50,4 @@ quickstart.py
 .hypothesis
 weights
 *.lprof
+comgr_*
