@@ -167,10 +167,11 @@ class _CacheCollector:
     for k,v in var_vals.items(): assert k in self.var_vals and self.var_vals[k] == v, f"var_vals {k} mismatch {v} != {self.var_vals.get(k)}"
 
     # Buffer optimization is allowed only for kernel operations. Avoids for copies (prevents parallelism) and syncs (incorrect buffer reuse).
-    if isinstance(prg, CompiledASTRunner):
-      for i in range(prg.outcount): self.placeholders[rawbufs[i]] = PlaceHolder(rawbufs[i])
+    allow_buffer_optimization = isinstance(prg, CompiledASTRunner)
 
-    self.cache.append((prg, [self.placeholders.get(x, x) if isinstance(x, Buffer) else x for x in rawbufs]))
+    # NOTE: this is making an assumption that 0 is special
+    if len(rawbufs): self.placeholders[rawbufs[0]] = PlaceHolder(rawbufs[0])
+    self.cache.append((prg, [self.placeholders.get(x, x) if isinstance(x, Buffer) and allow_buffer_optimization else x for x in rawbufs]))
 
   def finish(self) -> List[JitItem]:
     if self.cache is None: return []
