@@ -2,7 +2,7 @@ import pathlib, unittest
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load
-from tinygrad.helpers import Timing, fetch, temp, getenv
+from tinygrad.helpers import Timing, fetch, temp
 from test.helpers import is_dtype_supported
 
 def compare_weights_both(url):
@@ -120,7 +120,7 @@ class TestSafetensors(unittest.TestCase):
     for dtype in dtypes.fields().values():
       if dtype in [dtypes.bfloat16]: continue # not supported in numpy
       path = temp(f"ones.{dtype}.safetensors")
-      ones = Tensor.rand((10,10), dtype=dtype)
+      ones = Tensor(np.random.rand(10,10), dtype=dtype)
       safe_save(get_state_dict(ones), path)
       np.testing.assert_equal(ones.numpy(), list(safe_load(path).values())[0].numpy())
 
@@ -214,7 +214,7 @@ class TestDiskTensor(unittest.TestCase):
 
     np.testing.assert_array_equal(t.numpy(), np.array([3] * 10))
 
-  @unittest.skipIf(getenv("HIPCPU"), "no real HIP device exists in CI")
+  @unittest.skipIf(Device.DEFAULT == "RHIP", "no real HIP device exists in CI")
   def test_bf16_disk_write_read(self):
     t = Tensor([10000, -1, -1000, -10000, 20]).cast(dtypes.float32)
     t.to(f"disk:{temp('f32')}").realize()

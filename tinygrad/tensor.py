@@ -7,11 +7,12 @@ from collections import defaultdict
 import numpy as np
 
 from tinygrad.dtype import DType, dtypes, ImageDType, Scalar, least_upper_float, least_upper_dtype, cast_scalar
-from tinygrad.helpers import argfix, make_pair, IMAGE, DEBUG, WINO, flatten, prod, all_int, round_up, merge_dicts, fully_flatten, flat_mv
+from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, fully_flatten, flat_mv
+from tinygrad.helpers import IMAGE, DEBUG, WINO, THREEFRY
 from tinygrad.lazy import LazyBuffer
 from tinygrad.features.multi import MultiLazyBuffer
 from tinygrad.ops import LoadOps
-from tinygrad.device import Device, Buffer
+from tinygrad.device import Buffer, Device
 from tinygrad.shape.symbolic import sint
 from tinygrad.realize import run_schedule, create_schedule
 
@@ -212,7 +213,7 @@ class Tensor:
   # ***** creation llop entrypoint *****
 
   @staticmethod
-  def _loadop(op, shape, device:Optional[Union[Tuple[str], str]]=None, dtype:Optional[DType]=None, arg=None, **kwargs):
+  def _loadop(op, shape, device:Optional[Union[Tuple[str, ...], str]]=None, dtype:Optional[DType]=None, arg=None, **kwargs):
     if isinstance(device, tuple):
       return Tensor(MultiLazyBuffer([LazyBuffer.loadop(op, shape, dtype or dtypes.default_float, Device.canonicalize(d), arg) \
                                       for d in device], None), device, dtype, **kwargs)
@@ -222,16 +223,34 @@ class Tensor:
   def empty(*shape, **kwargs): return Tensor._loadop(LoadOps.EMPTY, argfix(*shape), **kwargs)
 
   _seed: int = int(time.time())
+  _rng_counter: Optional[Tensor] = None
   @staticmethod
-  def manual_seed(seed=0): Tensor._seed = seed
+  def manual_seed(seed=0): Tensor._seed, Tensor._rng_counter = seed, Tensor([0], dtype=dtypes.uint32, requires_grad=False)
 
   @staticmethod
-  def rand(*shape, **kwargs):
-    if kwargs.get("dtype") == dtypes.bfloat16:
-      # TODO: remove this once we use threefry for rand.
-      kwargs.pop("dtype")
-      return Tensor.rand(*shape, **kwargs, dtype=dtypes.float).cast(dtypes.bfloat16)
-    return Tensor._loadop(LoadOps.CUSTOM, argfix(*shape), arg=custom_random, **kwargs)
+  def rand(*shape, device:Optional[Union[Tuple[str, ...], str]]=None, dtype:Optional[DType]=None, **kwargs):
+    if Tensor._rng_counter is None: Tensor._rng_counter = Tensor([0], dtype=dtypes.uint32, requires_grad=False)
+    if not THREEFRY.value:
+      if dtype == dtypes.bfloat16:
+        return Tensor.rand(*shape, **kwargs, device=device, dtype=dtypes.float).cast(dtypes.bfloat16)
+      return Tensor._loadop(LoadOps.CUSTOM, argfix(*shape), arg=custom_random, device=device, dtype=dtype, **kwargs)
+
+    # threefry
+    if (num := prod((shape:=argfix(*shape)))) == 0: return Tensor.zeros(shape, device=device, dtype=dtype, **kwargs)
+    counts = (Tensor.arange(num, device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._rng_counter.to(device)).realize().pad(((0,num%2),))
+    Tensor._rng_counter.assign(Tensor._rng_counter + num).realize()
+
+    rotations = [[13, 15, 26, 6], [17, 29, 16, 24]]
+    ks = [0x0, Tensor._seed ^ 0x0 ^ 0x1BD11BDA, Tensor._seed]
+
+    x = [(c := counts.chunk(2))[0] + ks[-1], c[1] + ks[0]]
+    for i in range(5):
+      for r in rotations[i % 2]: x[0], x[1] = (x0 := x[0] + x[1]), x0 ^ ((x[1] * (2 ** r)) + (x[1].div(2 ** (32 - r), upcast=False)))
+      x = [(x[0] + ks[i % 3]), (x[1] + ks[(i + 1) % 3] + i + 1)]
+    out = x[0].cat(x[1])[:num].div(2 ** 8, upcast=False).cast(dtypes.float32).div(2 ** 24)
+    out = out.reshape(shape).cast(dtypes.default_float if dtype is None else dtype)
+    out.requires_grad = kwargs.get("requires_grad")
+    return out.contiguous()
 
   # ***** creation helper functions *****
 
@@ -248,6 +267,7 @@ class Tensor:
   @staticmethod
   def arange(start, stop=None, step=1, **kwargs):
     if stop is None: stop, start = start, 0
+    assert all(isinstance(s, (int, float)) for s in (start, stop, step)), "symbolic arange not supported"
     dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
     return (Tensor.full((math.ceil((stop-start)/step),), step, dtype=dtype, **kwargs)._cumsum() + (start - step)).cast(dtype)
 
@@ -866,10 +886,10 @@ class Tensor:
     if not isinstance(x, Tensor) and x == 0.0: return mlops.Zero.apply(self)
     if not isinstance(x, Tensor) and x == -1.0: return -self
     return mlops.Mul.apply(*self._broadcasted(x, reverse)) if isinstance(x, Tensor) or x != 1.0 else self
-  def div(self, x:Union[Tensor, Scalar], reverse=False) -> Tensor:
+  def div(self, x:Union[Tensor, Scalar], reverse=False, upcast=True) -> Tensor:
     x = self._to_const_val(x)
-    if not isinstance(x, Tensor) and not reverse and x != 0: return self.mul(1/x)
-    if isinstance(x, Tensor) and dtypes.is_float(x.dtype): return mlops.Div.apply(*self._broadcasted(x, reverse))
+    if not isinstance(x, Tensor) and not reverse and x != 0 and upcast: return self.mul(1/x)
+    if (isinstance(x, Tensor) and dtypes.is_float(x.dtype)) or not upcast: return mlops.Div.apply(*self._broadcasted(x, reverse))
     return mlops.Div.apply(*self.cast(least_upper_float(self.dtype))._broadcasted(x, reverse))
   def xor(self, x:Tensor, reverse=False) -> Tensor: return mlops.Xor.apply(*self._broadcasted(x, reverse))
 
@@ -1022,7 +1042,7 @@ if IMAGE:
   setattr(Tensor, "conv2d", image_conv2d)
   setattr(Tensor, "dot", image_dot)
 
-# TODO: remove the custom op and replace with threefry
+# TODO: eventually remove this
 def custom_random(out:Buffer):
   Tensor._seed += 1
   if DEBUG >= 2: print(f"*** {out.device}   rand  seed {Tensor._seed} size {out.size:<15d} dtype {out.dtype}")
