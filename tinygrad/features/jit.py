@@ -119,6 +119,7 @@ class TinyJit(Generic[ReturnType]):
       CacheCollector.start(var_vals)
       with Context(GRAPH=getenv("JITGRAPH", GRAPH.value)):
         self.ret = self.fxn(*args, **kwargs)
+        del self.fxn
         for p in get_parameters(self.ret): p.realize()
       self.jit_cache = CacheCollector.finish()
       assert len(self.jit_cache) != 0, "didn't JIT anything!"
