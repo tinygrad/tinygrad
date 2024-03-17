@@ -168,7 +168,10 @@ class LazyBuffer:
       prod(self.shape) // prod(new_shape) < getenv("REDUCEOP_SPLIT_THRESHOLD", 32768):
       return self._reduce_op(op, axis)
     # divide on largest stride of adequate size
-    _, divisor, dim_to_split = max(((st or 256, divisor, i) for i, (s, st) in enumerate(zip(self.shape, self.st.real_strides())) \
+    # 256 stride is local but not very, used as a default if we can't tell the real stride
+    # 256 split maximum should be "negligible reduce" for low prod(new_shape)
+    # 2048 is heuristic number of warps to achieve max occupancy, assuming reduces are done with GROUP
+    _, divisor, dim_to_split = max(((st or 256, divisor, i) for i, (s, st) in enumerate(zip(self.shape, self.st.real_strides(ignore_valid=True))) \
                                    if i in axis and (st is None or isinstance(st, int) and st > 0) and
                                    (divisor := max((x for x in range(1, min(256, 2048 // prod(new_shape))+1) if s % x == 0), default=1)) >= 16), default=(0, 1, 0))
     if divisor == 1: return self._reduce_op(op, axis)
