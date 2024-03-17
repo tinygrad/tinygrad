@@ -1008,7 +1008,7 @@ class Tensor:
           .transpose(-2, -1).flatten(-2).bitcast(to_uint[self.dtype.itemsize])
         idxs = Tensor.arange(repeat).repeat([self.shape[-1]])
         bits = 8 * dtype.itemsize
-        shift = (2 ** (bits * idxs)).cast(to_uint[self.dtype.itemsize])
+        shift = (2 ** (bits * idxs)).cast(dtypes.uint64)
         def div(t1: Tensor, t2: Tensor): return mlops.Div.apply(t1, t2)
         def mod(t1: Tensor, t2: Tensor): return t1 - (div(t1, t2) * t2)
         shifted = div(*as_repeated_uint._broadcasted(shift))
