@@ -30,7 +30,7 @@ def _test_single_value(vals, op, dts):
   buf = Buffer(Device.DEFAULT, 1, output_dtype)
   buf2 = [Buffer(Device.DEFAULT, 1, dtype).copyin(np.array([a], dtype=dtype.np).data) for a,dtype in zip(vals, dts)]
   prg = _uops_to_prg(UOpGraph(uops))
-  prg.exec([buf]+buf2)
+  prg.exec([buf]+buf2, [buf])
   ret = np.empty(1, output_dtype.np)
   buf.copyout(ret.data)
   return ret[0]
@@ -44,7 +44,7 @@ def _test_single_value_const(vals, op, dts):
   uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
   buf = Buffer(Device.DEFAULT, 1, output_dtype)
   prg = _uops_to_prg(UOpGraph(uops))
-  prg.exec([buf])
+  prg.exec([buf], [buf])
   ret = np.empty(1, output_dtype.np)
   buf.copyout(ret.data)
   return ret[0]
