@@ -518,13 +518,13 @@ def helper_linearizer_opt(r:Tensor, opts=[], apply_tc=False, atol=1e-4, rtol=1e-
       assert (cs:=[(x,y) for x,y in zip(k.colors(), k.full_shape)]) == expected_color_size, f"expected={expected_color_size} got={cs}"
     prg = to_prg(k)
     real_bufs[0].copyin(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np).data) # Zero to check that all values are filled
-    prg.exec(real_bufs, [real_bufs[0]])
+    prg.exec(real_bufs)
     np.testing.assert_allclose(wanna_output, np.frombuffer(real_bufs[0].as_buffer(), real_bufs[0].dtype.np), atol=atol, rtol=rtol)
 
   # Get baseline, which is not optimized at all.
   k = Linearizer(realized_ast)
   prg = Device[Device.DEFAULT].to_program(k)
-  prg.exec(real_bufs, [real_bufs[0]])
+  prg.exec(real_bufs)
   wanna_output = np.frombuffer(real_bufs[0].as_buffer(), real_bufs[0].dtype.np).copy()
 
   # Check correctness of handcoded optimiztions.
@@ -532,7 +532,7 @@ def helper_linearizer_opt(r:Tensor, opts=[], apply_tc=False, atol=1e-4, rtol=1e-
   k.hand_coded_optimizations()
   prg = Device[Device.DEFAULT].to_program(k)
   real_bufs[0].copyin(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np).data) # Zero to check that all values are filled
-  prg.exec(real_bufs, [real_bufs[0]])
+  prg.exec(real_bufs)
   np.testing.assert_allclose(wanna_output, np.frombuffer(real_bufs[0].as_buffer(), real_bufs[0].dtype.np), atol=atol, rtol=rtol)
   for i, x in enumerate(opts): # Check custom transformations if any.
     check_opt(x, lambda: Linearizer(realized_ast), Device[Device.DEFAULT].to_program, color_sizes[i] if i < len(color_sizes) else None)

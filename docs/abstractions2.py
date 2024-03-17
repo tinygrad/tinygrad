@@ -64,7 +64,7 @@ print(fxn.prg)
 # NOTE: fxn.clprg is the ClangProgram
 
 # run the program
-fxn.exec([out, a, b], [out])
+fxn.exec([out, a, b])
 
 # check the data out
 assert out.as_buffer().cast('I')[0] == 5
