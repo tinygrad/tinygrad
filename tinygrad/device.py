@@ -75,7 +75,7 @@ class BufferOptions:
   signal: bool = False
 
 class Buffer:
-  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferOptions]=None):
+  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferOptions]=None, initial_value:Optional[bytes]=None):
     assert isinstance(dtype, DType)
     if isinstance(dtype, ImageDType): options = BufferOptions(image=dtype) # TODO: image hack shouldn't be here. where should it be?
     self.device, self.size, self.dtype, self.d, self.options = device, size, dtype, Device[device], options
@@ -83,6 +83,11 @@ class Buffer:
     self._buf = opaque if opaque is not None else self.allocator.alloc(self.nbytes, options)
     # TODO: mem_used for all devices
     if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.nbytes
+    if initial_value is not None: self.copyin(memoryview(initial_value))
+  def __reduce__(self):
+    buf = bytearray(self.nbytes)
+    self.copyout(memoryview(buf))
+    return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf)
   @property
   def nbytes(self): return self.size*self.dtype.itemsize
   def __del__(self):
