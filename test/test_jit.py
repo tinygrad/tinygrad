@@ -182,7 +182,7 @@ class TestJit(unittest.TestCase):
     a = Tensor.randn(10, 10).realize()  # realize these before resetting the random seed
     b = Tensor.randn(10, 10).realize()
 
-    Tensor.manual_seed(1234)
+    Tensor._seed = 1234
     jf = TinyJit(f)
     res = set()
     for _ in range(5):
@@ -190,7 +190,7 @@ class TestJit(unittest.TestCase):
       res.add(o1.numpy()[0][0])
     assert len(res) == 5, "All values should be different, rand works in jit."
 
-    Tensor.manual_seed(1234)
+    Tensor._seed = 1234
     jf2 = TinyJit(f)
     res2 = set()
     for _ in range(5):
@@ -199,7 +199,7 @@ class TestJit(unittest.TestCase):
     assert len(res2) == 5, "All values should be different, rand works in jit."
     assert res == res2, "Jit rand is not reproducible with the same seed"
 
-    Tensor.manual_seed(3421)
+    Tensor._seed = 3421
     jf3 = TinyJit(f)
     res3 = set()
     for _ in range(5):
