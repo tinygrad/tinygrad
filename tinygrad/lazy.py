@@ -167,13 +167,20 @@ class LazyBuffer:
     if not getenv("SPLIT_REDUCEOP", 1) or not all_int(self.shape) or (0 in self.shape) or \
       prod(self.shape) // prod(new_shape) < getenv("REDUCEOP_SPLIT_THRESHOLD", 32768):
       return self._reduce_op(op, axis)
-    heuristic, divisor, dim_to_split = max(((divisor := math.gcd(256, s))/(st or math.inf), divisor, i) for i,(s,st) in \
-                                           enumerate(zip(self.shape, self.st.real_strides())) if i in axis and (st is None or isinstance(st, int)))
-    if divisor < 16 or heuristic < 0.1: return self._reduce_op(op, axis)
-    # choose largest divisor (>=16) to split on, penalize large strides
-    def splitted_shape(dim_aft_div):
-      return self.shape[:dim_to_split] + (self.shape[dim_to_split]//divisor,) + dim_aft_div + self.shape[dim_to_split+1:]
-    return self.reshape(splitted_shape((divisor,)))._reduce_op(op, (dim_to_split+1,)).reshape(splitted_shape(()))._reduce_op(op, axis)
+    # divide on largest stride of adequate size
+    _, divisor, dim_to_split = max(((st or 256, divisor, i) for i, (s, st) in enumerate(zip(self.shape, self.st.real_strides())) \
+                                   if i in axis and (st is None or isinstance(st, int) and st > 0) and
+                                   (divisor := max((x for x in range(1, min(256, 2048 // prod(new_shape))+1) if s % x == 0), default=1)) >= 16), default=(0, 1, 0))
+    if divisor == 1: return self._reduce_op(op, axis)
+    def splitted_shape(first_stage=1):
+      return self.shape[:dim_to_split] + (divisor,) + (self.shape[dim_to_split]//divisor,)*first_stage + self.shape[dim_to_split+1:]
+    ret = self.reshape(splitted_shape(first_stage=1)).permute(tuple([x for x in range(len(self.shape)+1) if x != dim_to_split]+[dim_to_split]))
+    s1 = ret.shape
+    ret = ret._reduce_op(op, axis)
+    s2 = ret.shape
+    ret = ret._reduce_op(op, (len(new_shape),))
+    print('trigger', self.shape, s1, s2, ret.shape, new_shape, divisor, prod(self.shape) // prod(new_shape) // divisor, dim_to_split, prod(new_shape) * divisor)
+    return ret.reshape(new_shape)
 
   # *** movement ops ***
 
