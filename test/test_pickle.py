@@ -17,7 +17,7 @@ class TestPickle(unittest.TestCase):
 
   def test_pickle_jit(self):
     @TinyJit
-    def add(a, b): return a+b
+    def add(a, b): return a+b+1
     for _ in range(3): add(Tensor.rand(10, 10), Tensor.rand(10, 10))
     #import dill
     #with dill.detect.trace(): dill.dumps(add)
@@ -27,7 +27,8 @@ class TestPickle(unittest.TestCase):
     x = Tensor.ones(10, 10).contiguous().realize()
     y = Tensor.ones(10, 10).contiguous().realize()
     print("post jit")
-    add_fxn(x, y)
+    out = add_fxn(x, y)
+    np.testing.assert_equal(out.numpy(), 3)
 
 if __name__ == '__main__':
   unittest.main()
