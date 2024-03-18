@@ -17,7 +17,6 @@ def _test_overflow(ast, opts):
   lin.linearize()
   bufs = bufs_from_lin(lin)
   print(bufs)
-  if bufs[0].device in {"HIP", "HSA"}: print([hex(x._buf.value) for x in bufs])
   time_linearizer(lin, bufs)
 
 # NOTE: if you want these to trigger, set launch bounds on HIP kernels
