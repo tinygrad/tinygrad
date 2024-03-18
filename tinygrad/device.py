@@ -75,7 +75,7 @@ class BufferOptions:
   signal: bool = False
 
 class Buffer:
-  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferOptions]=None):
+  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferOptions]=None, initial_value:Optional[bytes]=None):
     assert isinstance(dtype, DType)
     if isinstance(dtype, ImageDType): options = BufferOptions(image=dtype) # TODO: image hack shouldn't be here. where should it be?
     self.device, self.size, self.dtype, self.d, self.options = device, size, dtype, Device[device], options
@@ -83,6 +83,11 @@ class Buffer:
     self._buf = opaque if opaque is not None else self.allocator.alloc(self.nbytes, options)
     # TODO: mem_used for all devices
     if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.nbytes
+    if initial_value is not None: self.copyin(memoryview(initial_value))
+  def __reduce__(self):
+    buf = bytearray(self.nbytes)
+    self.copyout(memoryview(buf))
+    return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf)
   @property
   def nbytes(self): return self.size*self.dtype.itemsize
   def __del__(self):
@@ -187,19 +192,26 @@ class Compiler:
     return lib
 
 class CompiledASTRunner(JITRunner):
-  def __init__(self, name:str, prg:str, device:Compiled, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None,
+  def __init__(self, name:str, prg:str, dname:str, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None,
                variables:Optional[List[Variable]]=None, op_estimate:sint=0, mem_estimate:sint=0, precompiled:Optional[bytes]=None):
     super().__init__()
     if DEBUG >= 4: print(prg)
     if global_size is not None: global_size = global_size + [1]*(3-len(global_size))
     if local_size is not None: local_size = local_size + [1]*(3-len(local_size))
-    self.name, self.display_name, self.prg, self.device, self.global_size, self.local_size, self.first_run = \
-      to_function_name(name), name, prg, device, global_size, local_size, True
-    assert self.device.compiler is not None, "compiler is reuired to make an AST kernel"
+    self.name, self.display_name, self.prg, self.dname, self.global_size, self.local_size, self.first_run = \
+      to_function_name(name), name, prg, dname, global_size, local_size, True
+    assert self.device.compiler is not None, "compiler is required to make an AST kernel"
     lib:bytes = precompiled if precompiled is not None else self.device.compiler.compile_cached(prg)
     self.lib, self.clprg = lib, self.device.runtime(self.name, lib)
     self.vars: List[Variable] = [] if variables is None else variables
     self.op_estimate, self.mem_estimate = op_estimate, mem_estimate
+
+  @property
+  def device(self): return Device[self.dname]
+
+  def __reduce__(self):
+    return self.__class__, (self.name, self.prg, self.dname, self.global_size, self.local_size,
+                            self.vars, self.op_estimate, self.mem_estimate, self.lib)
 
   def launch_dims(self, var_vals):
     global_size = [sym_infer(sz, var_vals) for sz in self.global_size] if self.global_size is not None else self.global_size
@@ -218,7 +230,7 @@ class CompiledASTRunner(JITRunner):
     if local_size: lra['local_size'] = local_size
     et = self.clprg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k] for k in self.vars), wait=wait or DEBUG>=2)
     if do_update_stats: update_stats(self.display_name, self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit,
-                                     lra=lra, device=self.device.dname, first_run=self.first_run)
+                                     lra=lra, device=self.dname, first_run=self.first_run)
     self.first_run = False
     return et
 
@@ -238,7 +250,7 @@ class Compiled:
     ops, mem = k.uops.flops_mem()
     run_count = prod((k.global_size if k.global_size else []) + (k.local_size if k.local_size else []))
     # NOTE: we use min here to ignore the indexing FLOPS
-    ret = CompiledASTRunner(k.name, self.compiler.render(to_function_name(k.name), k.uops), self, k.global_size, k.local_size,
+    ret = CompiledASTRunner(k.name, self.compiler.render(to_function_name(k.name), k.uops), self.dname, k.global_size, k.local_size,
                             k.uops.vars(), min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))
     return ret
 

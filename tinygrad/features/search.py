@@ -36,7 +36,7 @@ def _time_program(variables:List[Variable], rdev:Compiled, lib:bytes, global_siz
   factor = 1
   if global_size is not None and max_global_size is not None:
     global_size, factor = _get_test_global_size(global_size, max_global_size, var_vals)
-  try: car = CompiledASTRunner(name, "", rdev, global_size, local_size, variables=variables, precompiled=lib)
+  try: car = CompiledASTRunner(name, "", rdev.dname, global_size, local_size, variables=variables, precompiled=lib)
   except AssertionError: return [math.inf] * cnt
   tms = []
   for _ in range(cnt):
