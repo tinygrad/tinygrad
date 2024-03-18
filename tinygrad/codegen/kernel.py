@@ -514,14 +514,16 @@ class Kernel:
       # are we grouping? (requires local shape support)
       if not self.float4_axis(0) and self.first_reduce < len(self.full_unupcasted_shape) and prod(self.sts[0].shape[:self.first_reduce]) <= 8192:  # noqa: E501
         # TODO: use 1024 if it's allowed in a smarter way
+        def default_(x, d): return d if x is None else x
         desired_group = 256 if prod(self.sts[0].shape[:self.first_reduce]) <= 512 else 32
         grouped = 1
         num_reduces = len(self.full_unupcasted_shape) - self.first_reduce - self.group_for_reduces
         for reducei in range(num_reduces-1, -1, -1):
           for sz in [256, 128, 64, 32, 16, 8, 4, 2]:
-            if sz > desired_group or sz < 16 and grouped == 1: continue
+            if sz > desired_group or sz < 16 and grouped == 1 and False: continue
+            if prod(self.full_unupcasted_shape[self.first_reduce+self.group_for_reduces:])//sz < grouped * sz * 4: continue
             if self.full_shape[self.first_reduce+self.group_for_reduces+reducei] % sz == 0 and \
-              (grouped >= 8 or all((st.real_strides(ignore_valid=True)[self.first_reduce+self.group_for_reduces+reducei] or 256) <= 4 * grouped for st in self.sts)):
+              (grouped >= 8 or all(default_(st.real_strides(ignore_valid=True)[self.first_reduce+self.group_for_reduces+reducei], 256) <= 4 * grouped for st in self.sts)):
               try: # may fail due to excessive smem usage
                 old_colored_shape = self.colored_shape()
                 self.apply_opt(Opt(OptOps.GROUP, reducei, sz))
