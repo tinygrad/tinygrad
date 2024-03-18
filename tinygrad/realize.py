@@ -107,10 +107,14 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
     return LazyOp(BufferOps.LOAD, (), MemBuffer(inputs.index(buf)+1, buf.dtype, unbound_st))
 
   # if a CONTIGUOUS or ASSIGN made it all the way here, just skip it
-  if buf.op in {LoadOps.CONTIGUOUS, LoadOps.ASSIGN}:
+  if buf.op is LoadOps.CONTIGUOUS:
     assert first
-    return _recursive_lazyop(buf.srcs[0], inputs, var_vals, st, realizes, cache, False,
-                             assign_to=buf.srcs[1].base if buf.op is LoadOps.ASSIGN else None)
+    return _recursive_lazyop(buf.srcs[0], inputs, var_vals, st, realizes, cache, False)
+  if buf.op is LoadOps.ASSIGN:
+    assert first
+    assert buf.srcs[1].base is buf.srcs[1], "assign must be to base"
+    assert buf.srcs[1].realized is not None, f"assign must be already realized to schedule {buf.srcs[1]}"
+    return _recursive_lazyop(buf.srcs[0], inputs, var_vals, st, realizes, cache, False, assign_to=buf.srcs[1])
 
   # if it's a reduce, we have to change the shapetracker
   if buf.op in ReduceOps:

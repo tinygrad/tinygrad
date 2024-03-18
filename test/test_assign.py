@@ -178,7 +178,7 @@ class TestAssign(unittest.TestCase):
     b.realize()
     ba1 = a.lazydata.base.realized
     bb1 = b.lazydata.base.realized
-    with self.assertRaises(RuntimeError):
+    with self.assertRaises((RuntimeError, AssertionError)):
       a = a.permute(1,0)
       a += b
       a.realize()
