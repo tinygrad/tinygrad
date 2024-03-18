@@ -3,10 +3,11 @@ import ctypes, functools, subprocess, io, atexit, collections, json
 from typing import Tuple, TypeVar, List, Dict, Any
 import tinygrad.runtime.autogen.hsa as hsa
 from tinygrad.helpers import DEBUG, init_c_var, from_mv, round_up, to_mv, init_c_struct_t, getenv
-from tinygrad.device import Compiled, LRUAllocator, BufferOptions
+from tinygrad.device import Compiled, LRUAllocator, BufferOptions, Compiler
 from tinygrad.codegen.kernel import LinearizerOptions
-from tinygrad.runtime.ops_hip import HIPCompiler
 from tinygrad.runtime.driver.hsa import check, scan_agents, find_memory_pool, AQLQueue
+from tinygrad.renderer.cstyle import HIPRenderer
+from tinygrad.runtime.driver.hip_comgr import compile_hip
 
 PROFILE = getenv("PROFILE", 0)
 
@@ -40,8 +41,13 @@ class HSAProfiler:
     print(f"Saved HSA profile to {path}")
 Profiler = HSAProfiler()
 
-class HSACompiler(HIPCompiler):
+class HSACompiler(Compiler):
   linearizer_opts = LinearizerOptions("HSA", has_tensor_cores=True, shared_max=65536)
+  def __init__(self, arch:str):
+    self.arch = arch
+    super().__init__(f"compile_hip_{self.arch}")
+  def render(self, name:str, uops) -> str: return HIPRenderer(name, uops)
+  def compile(self, src:str) -> bytes: return compile_hip(src, self.arch)
 
 class HSAProgram:
   def __init__(self, device:HSADevice, name:str, lib:bytes):
@@ -250,7 +256,7 @@ class HSADevice(Compiled):
   def alloc_kernargs(self, sz):
     if self.kernarg_next_addr + sz >= self.kernarg_start_addr + self.kernarg_pool_sz: self._new_kernargs_region(int(self.kernarg_pool_sz * 2))
     result = self.kernarg_next_addr
-    self.kernarg_next_addr = (self.kernarg_next_addr + sz + 15) & (~15) # align to 16 bytes
+    self.kernarg_next_addr = round_up(self.kernarg_next_addr + sz, 16)
     return result
 
   def _new_kernargs_region(self, sz:int):

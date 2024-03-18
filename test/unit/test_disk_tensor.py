@@ -2,7 +2,8 @@ import pathlib, unittest
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load
-from tinygrad.helpers import Timing, CI, fetch, temp, getenv
+from tinygrad.helpers import Timing, fetch, temp
+from test.helpers import is_dtype_supported
 
 def compare_weights_both(url):
   import torch
@@ -25,10 +26,7 @@ class TestTorchLoad(unittest.TestCase):
   # pytorch zip format
   def test_load_convnext(self): compare_weights_both('https://dl.fbaipublicfiles.com/convnext/convnext_tiny_1k_224_ema.pth')
 
-  # for GPU, cl_khr_fp16 isn't supported
-  # for LLVM, it segfaults because it can't link to the casting function
-  # CUDACPU architecture is sm_35 but we need at least sm_70 to run fp16 ALUs
-  @unittest.skipIf(Device.DEFAULT in ["GPU", "LLVM", "CUDA"] and CI, "fp16 broken in some backends")
+  @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need float16 support")
   def test_load_llama2bfloat(self): compare_weights_both("https://huggingface.co/qazalin/bf16-lightweight/resolve/main/consolidated.00.pth?download=true")
 
   # pytorch tar format
@@ -216,9 +214,9 @@ class TestDiskTensor(unittest.TestCase):
 
     np.testing.assert_array_equal(t.numpy(), np.array([3] * 10))
 
-  @unittest.skipIf(getenv("HIPCPU"), "no real HIP device exists in CI")
+  @unittest.skipIf(Device.DEFAULT == "RHIP", "no real HIP device exists in CI")
   def test_bf16_disk_write_read(self):
-    t = Tensor([10000, -1, -1000, -10000, 20]).cast(dtypes.float32)
+    t = Tensor([10000, -1, -1000, -10000, 20], dtype=dtypes.float32)
     t.to(f"disk:{temp('f32')}").realize()
 
     # hack to "cast" f32 -> bf16
@@ -226,9 +224,8 @@ class TestDiskTensor(unittest.TestCase):
     adat = b''.join([dat[i+2:i+4] for i in range(0, len(dat), 4)])
     with open(temp('bf16'), "wb") as f: f.write(adat)
 
-    t = Tensor.empty(5, dtype=dtypes.bfloat16, device=f"disk:{temp('bf16')}").llvm().realize()
-    back = t.cast(dtypes.float32)
-    assert tuple(back.numpy().tolist()) == (9984., -1, -1000, -9984, 20)
+    t = Tensor.empty(5, dtype=dtypes.bfloat16, device=f"disk:{temp('bf16')}").llvm_bf16_cast(dtypes.float)
+    assert t.numpy().tolist() == [9984., -1, -1000, -9984, 20]
 
 if __name__ == "__main__":
   unittest.main()

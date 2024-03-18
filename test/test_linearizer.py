@@ -34,6 +34,21 @@ class TestLinearizer(unittest.TestCase):
     np.testing.assert_equal(a.numpy(), ta)
     np.testing.assert_equal(b.numpy(), tb)
 
+  def test_multioutput(self):
+    dtype, st = dtypes.int, ShapeTracker.from_shape((8,))
+    a = LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=2, dtype=dtype, st=st))
+    b = LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=3, dtype=dtype, st=st))
+    out0 = LazyOp(BufferOps.STORE, (LazyOp(op=BinaryOps.ADD, src=(a,b)),), MemBuffer(idx=0, dtype=dtype, st=st))
+    out1 = LazyOp(BufferOps.STORE, (LazyOp(op=BinaryOps.MUL, src=(a,b)),), MemBuffer(idx=1, dtype=dtype, st=st))
+
+    lin = Linearizer(out0, out1)
+    lin.linearize()
+
+    stores = [u for u in lin.uops if u.uop is UOps.STORE]
+    mutable_bufs = [u for u in lin.uops if u.uop is UOps.DEFINE_GLOBAL and u.arg[-1]]
+    assert len(mutable_bufs) == len(stores) == 2
+    assert [u.arg[0] for u in mutable_bufs] == [0, 1]
+
   def test_load_dedup(self):
     # for different leaves in the AST, the same loads may occur.
 
@@ -197,6 +212,25 @@ class TestLinearizer(unittest.TestCase):
     assert len(sched) == 1
     lin = Linearizer(*sched[0].ast)
     assert not any(u.uop == UOps.LOOP for u in lin.linearize().uops), "found loop in sum collapse"
+
+  def test_assign_fold(self):
+    a = Tensor.ones(4, 4).contiguous().realize()
+    m = Tensor.ones(4, 4).shrink(((1, 2), None)).pad(((1, 2), None))
+    a.assign(a+m)
+    a.realize()
+    np.testing.assert_equal(a.flatten().numpy(), [1.,1.,1.,1.,2.,2.,2.,2.,1.,1.,1.,1.,1.,1.,1.,1.])
+
+  def test_where_fold(self):
+    a = Tensor.ones(4, 4).contiguous().realize()
+    b = a.shrink(((1, 2), None)).pad(((1, 2), None))
+    a.assign(b.where(2, a))
+    sched = create_schedule([a.lazydata])
+    assert len(sched) == 1
+    lin = Linearizer(*sched[-1].ast)
+    lin.hand_coded_optimizations()
+    lin.linearize()
+    assert not any(u.arg == TernaryOps.WHERE for u in lin.uops), "found where where where should be folded"
+    np.testing.assert_equal(a.flatten().numpy(), [1.,1.,1.,1.,2.,2.,2.,2.,1.,1.,1.,1.,1.,1.,1.,1.])
 
   def test_simplify_uop(self):
     def helper_test_simplify(uop, dtype, vin, arg=None):
@@ -672,7 +706,7 @@ class TestLinearizerOpts(unittest.TestCase):
       ], apply_tc=True, atol=atol, rtol=rtol)
 
   def test_padto_matmul(self):
-    if Device.DEFAULT in ["CUDA", "HIP"]: self.skipTest("super slow on CUDA and HIP because of the big grid dims")
+    if Device.DEFAULT in ["CUDA", "RHIP"]: self.skipTest("super slow on CUDA and RHIP because of the big grid dims")
     N = 17 * 17
     Tensor.manual_seed(289)
     a = Tensor.rand(N, N)
