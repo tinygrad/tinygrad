@@ -20,7 +20,7 @@ for x in GPUS: Device[x]
 
 if getenv('WANDB', 0): 
   import wandb
-  wandb.init(project="tinygrad-examples_mlperf", config={
+  wandb.init(project="MLPerf-BERT", config={
     "max_lr": MAX_LR,
     "batch_size": BS,
     "steps": STEPS,
@@ -137,12 +137,12 @@ def pretrain():
       if step % EVAL_STEP_FREQ == 0 and step > 0 and not getenv('DISABLE_EVAL', 0):
         train_step_jitted.reset()
         Tensor.train = False
-        accu = Tensor.zeros(1, requires_grad=False)
+        accu = 0.0
         for _ in range(MAX_EVAL_STEPS):
           X, Y = next(eval_batcher)
           accu += eval_step_jitted(Tensor(X["input_ids"]), Tensor(X["segment_ids"]), Tensor(X["input_mask"]), Tensor(X["masked_lm_positions"]), Tensor(Y["masked_lm_ids"])).numpy()
         Tensor.train = True
-        print(f"{step:3d} {(acc := (accu.numpy()/MAX_EVAL_STEPS))*100:.2f}% MLM Acc")
+        print(f"{step:3d} {(acc := (accu/MAX_EVAL_STEPS))*100:.2f}% MLM Acc")
         wandb.log({"MLM Accuracy": acc*100}) if getenv('WANDB', 0) else None
         if acc >= 0.72:
           wallclock_end = time.monotonic()
@@ -151,6 +151,7 @@ def pretrain():
           save_model(model, getenv('SAVE_PATH', getenv("SAVE_PATH", "/raid/tmp/")) + "final.safetensors")
           accuracy_achieved = True
           break
+        eval_step_jitted.reset()
       
       if accuracy_achieved: break
 
