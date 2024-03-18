@@ -1,10 +1,12 @@
 import unittest
-from tinygrad.device import Device
-from tinygrad.tensor import Tensor
-from tinygrad.realize import create_schedule
+
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.runtime.ops_cuda import PTXCompiler, CUDACompiler
+from tinygrad.device import Device
 from tinygrad.features.search import _compile_linearizer
+from tinygrad.realize import create_schedule
+from tinygrad.runtime.ops_cuda import CUDACompiler, PTXCompiler
+from tinygrad.tensor import Tensor
+
 
 class TestSearchCompileLinearizer(unittest.TestCase):
     @unittest.skipIf(Device.DEFAULT != "CUDA", "Only run on CUDA")
@@ -12,8 +14,8 @@ class TestSearchCompileLinearizer(unittest.TestCase):
         dev = Device["CUDA"]
         compiler = PTXCompiler(dev.arch)
 
-        out1 = Tensor([True, True, False]) + Tensor([True, True, False]) # Trigger first cond in uops_to_asm
-        out2 = (True == Tensor([1, 2, 3])) == False # Trigger second cond in uops_to_asm 
+        out1 = Tensor([True, True, False]) + Tensor([True, True, False])
+        out2 = (True == Tensor([1, 2, 3])) == False # noqa: E712
 
         lin1 = Linearizer(create_schedule([out1.lazydata])[-1].ast[0])
         lin2 = Linearizer(create_schedule([out2.lazydata])[-1].ast[0])
@@ -27,8 +29,8 @@ class TestSearchCompileLinearizer(unittest.TestCase):
         dev = Device["CUDA"]
         compiler = CUDACompiler(dev.arch)
 
-        out1 = Tensor([True, True, False]) + Tensor([True, True, False]) # Trigger first cond in uops_to_asm
-        out2 = (True == Tensor([1, 2, 3])) == False # Trigger second cond in uops_to_asm 
+        out1 = Tensor([True, True, False]) + Tensor([True, True, False])
+        out2 = (True == Tensor([1, 2, 3])) == False # noqa: E712
 
         lin1 = Linearizer(create_schedule([out1.lazydata])[-1].ast[0])
         lin2 = Linearizer(create_schedule([out2.lazydata])[-1].ast[0])
