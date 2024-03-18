@@ -49,7 +49,7 @@ def _time_program(variables:List[Variable], outcount:int, rdev:Compiled, lib:byt
 def _compile_linearizer(compiler:Compiler, lin:Linearizer, name:Optional[str]=None) -> Tuple[bytes, Optional[List[int]], Optional[List[int]],
                                                                                              List[Variable], int]:
   lin.linearize()
-  src = compiler.render(name if name is not None else to_function_name(lin.name), lin.uops.uops)   # NOTE: these all have the same name for deduping
+  src = compiler.render(name if name is not None else to_function_name(lin.name), lin.uops)   # NOTE: these all have the same name for deduping
   if DEBUG >= 5: print(src)
   return compiler.compile(src), lin.global_size, lin.local_size, lin.uops.vars(), len(lin.outbufs)
 
