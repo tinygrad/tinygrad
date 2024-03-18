@@ -86,6 +86,7 @@ class LinearizerOptions(NamedTuple):
   local_max: Optional[List[int]] = None
   shared_max: int = 32768
 
+I = 0
 class Kernel:
   def __init__(self, *ast:LazyOp, opts:Optional[LinearizerOptions]=None):
     self.opts = opts or (device.compiler.linearizer_opts if isinstance(device:=Device[Device.DEFAULT], Compiled) and device.compiler is not None else
@@ -131,6 +132,12 @@ class Kernel:
     # group simplifies
     self.simplify_ones()
     self.simplify_merge_adjacent()
+    # global I
+    # I += 1
+    # if I == 3:
+    #   from tinygrad.features.graph import print_tree
+    #   print_tree(self.ast)
+    #   import code; code.interact(local=dict(globals(), **locals()))
 
     # cache
     self.applied_opts_cache: Optional[List[Opt]] = None

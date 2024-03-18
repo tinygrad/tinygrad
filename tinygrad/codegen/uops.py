@@ -134,10 +134,12 @@ class UOpGraph:
     from tinygrad.features.graph import graph_uops
     graph_uops(self.uops)
 
-  def print(self):
-    for u in self.uops:
-      print(f"{self.uops.index(u):4d} {str(u.uop):20s}: {str(u.dtype) if u.dtype is not None else '':25s} "
-            f"{str([self.uops.index(x) for x in u.vin]):32s} {u.arg}")
+  def print_uop(self, u:UOp):
+    print(f"{self.uops.index(u) if u in self.uops else -1:4d} {str(u.uop):20s}: {str(u.dtype) if u.dtype is not None else '':25s} "
+            f"{str([(self.uops.index(x) if x in self.uops else f'BAD UOP: {x}') for x in u.vin]):32s} {u.arg}")
+
+  def print(self, uops=None):
+    for u in (self.uops if uops is None else uops): self.print_uop(u)
 
   def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None, cachable=True, insert_before=None,
           simplify=True) -> UOp:
@@ -148,7 +150,7 @@ class UOpGraph:
     key = (ret.uop, ret.dtype, ret.vin, ret.arg)
     if insert_before is None: insert_before = len(self.uops)
     # check if the cached expr is valid with the given insert place.
-    if cachable and (expr:=self.saved_exprs.get(key, None)) is not None and self.uops.index(expr) <= insert_before: return expr
+    if cachable and (expr:=self.saved_exprs.get(key, None)) is not None and expr in self.uops and self.uops.index(expr) <= insert_before: return expr
     self.uops.insert(insert_before, ret)
     if cachable: self.saved_exprs[key] = ret
     return ret
@@ -166,8 +168,10 @@ class UOpGraph:
 
   # optional
   def type_verify(self):
-    for u in self.uops:
+    for i, u in enumerate(self.uops):
       uop, arg, vin, dtype = u.uop, u.arg, u.vin, u.dtype
+      assert all(e in self.uops for e in vin), f"{i}th vin not in uops"
+      assert all(i > self.uops.index(x) for x in vin), f"{i}th vin not in order"
       if uop is UOps.ALU:
         if arg in UnaryOps:
           assert dtype == vin[0].dtype, f"{arg} dtype mismatch {dtype=} != {vin[0].dtype=}"
@@ -180,13 +184,13 @@ class UOpGraph:
           assert vin[0].dtype == dtypes.bool, f"{arg} selector dtype mismatch {vin[0].dtype=} != {dtypes.bool}"
           assert dtype == vin[1].dtype == vin[2].dtype, f"{arg} choice dtype mismatch {dtype=} != {vin[1].dtype=} != {vin[2].dtype=}"
 
-  def get_recursive_children(self, x:UOp) -> Set[UOp]:
+  def get_recursive_children(self, x:UOp, include_phi=False) -> Set[UOp]:
     deps = set([x])
     ssize = 0
     while ssize != len(deps):
       ssize = len(deps)
       for u in self.uops:
-        if len(deps.intersection([x for x in u.vin if x.uop != UOps.PHI])):
+        if len(deps.intersection([x for x in u.vin if include_phi or x.uop != UOps.PHI])):
           deps.add(u)
     return deps
 
@@ -194,23 +198,50 @@ class UOpGraph:
     for u in self.uops:
       if u.uop is UOps.LOOP:
         # add END of loops after the last thing that (recursively) depends on them
-        insert_before = self.uops.index(sorted(list(self.get_recursive_children(u)), key=self.uops.index)[-1])+1
+        insert_before = max((self.uops.index(child) for child in self.get_recursive_children(u)))+1
         self.add(UOps.ENDLOOP, None, (u,), cachable=False, insert_before=insert_before)
       elif u.uop is UOps.IF:
         # END any if statements at the end of the uops
         self.add(UOps.ENDIF, None, (u,), cachable=False)
 
-  def fix_loop_scope(self, get_recursive_parents:Callable[..., Set[UOp]]):
+    # Fix the ENDLOOPs to be in the right order (reverse order of the loop starts unless a loop ends before another starts)
+    loop_stack: List[UOp] = []
+    relocate_ends: List[UOp] = []
+    for u in self.uops:
+      if u.uop is UOps.LOOP: loop_stack.append(u)
+      elif u.uop is UOps.ENDLOOP:
+        if u.vin[0] == loop_stack[-1]:
+          loop_stack.pop()
+          while 1:
+            if loop_stack: 
+              for e in relocate_ends:
+                if loop_stack[-1] == e.vin[0]:
+                  self.add(UOps.ENDLOOP, None, (loop_stack[-1],), cachable=False, insert_before=self.uops.index(u))
+                  loop_stack.pop()
+                  relocate_ends.remove(e)
+                  break
+              else: break
+            else:
+              break
+        else:
+          relocate_ends.append(u)
+          self.uops.remove(u)
+    for u in relocate_ends: self.uops.append(u)
+
+  def fix_loop_scope(self):
     loop_stack: List[List[UOp]] = [[]]
     # push uops upward out of loop if it does not depend on the loop
     for u in self.uops:
       if not loop_stack[-1]: loop_stack[-1].append(u)
       elif u.uop is UOps.LOOP: loop_stack.append([u])
-      elif u.uop not in [UOps.CONST, UOps.ALU, UOps.CAST, UOps.LOAD]: loop_stack[-1].append(u)
+      elif u.uop not in [UOps.CONST, UOps.ALU, UOps.CAST, UOps.LOAD, UOps.IF]: loop_stack[-1].append(u)
       else:
-        parents = get_recursive_parents(u, with_phi=True)
+        parents = self.get_recursive_parents(u, with_phi=True)
+        # Do not push LOADs that are dependent on STOREs
+        if u.uop is UOps.LOAD and any(uop.uop is UOps.STORE and uop.vin[0] == u.vin[0] for uop in self.uops):
+          loop_stack[-1].append(u)
         # don't push any local buffer because there might have STORE and BARRIER (not considered as parent) between DEFINE_LOCAL and here
-        if any(u.uop is UOps.DEFINE_LOCAL for u in parents): loop_stack[-1].append(u)
+        elif any(u.uop is UOps.DEFINE_LOCAL for u in parents): loop_stack[-1].append(u)
         else:
           for i in reversed(range(len(loop_stack))):
             # check backwards and put the uop in the first encounter with some dependency
@@ -223,7 +254,7 @@ class UOpGraph:
     for v in self.uops: v.vin = tuple(new if x is old else x for x in v.vin)
     self.uops.remove(old)
 
-  def simplify_phi_loops(self, get_recursive_parents):
+  def simplify_phi_loops(self):
     def alu_opposite(arg, x, y):
       if arg == BinaryOps.ADD: return x - y
       elif arg == BinaryOps.MUL: return Node.__floordiv__(x, y, False)
@@ -239,8 +270,8 @@ class UOpGraph:
     def loop_factor(with_loop: UOp, factored: Node, loop_op, round_up=False):
       if with_loop == loop_op: return factored
       elif with_loop.uop is UOps.ALU:
-        next_with_loop = next(v for v in with_loop.vin if v == loop_op or loop_op in get_recursive_parents(v))
-        non_loop = to_symbolic(next(v for v in with_loop.vin if v != next_with_loop and loop_op not in get_recursive_parents(v)))
+        next_with_loop = next(v for v in with_loop.vin if v == loop_op or loop_op in self.get_recursive_parents(v))
+        non_loop = to_symbolic(next(v for v in with_loop.vin if v != next_with_loop and loop_op not in self.get_recursive_parents(v)))
         if round_up and with_loop.arg is BinaryOps.MUL: factored = factored + (non_loop - 1)
         return loop_factor(next_with_loop, alu_opposite(with_loop.arg, factored, non_loop), loop_op)
     def const(x): return self.add(UOps.CONST, dtypes.default_int, tuple(), x)
@@ -258,13 +289,13 @@ class UOpGraph:
                   functools.reduce(lambda a, b: uop_alu_idx(a, b, BinaryOps.ADD), self.nodes[1:], self.nodes[0].render(ops, self))}
 
     allowed_ops = {UOps.CONST, UOps.SPECIAL, UOps.ALU, UOps.LOOP, UOps.DEFINE_ACC}
-    allowed_alus = {BinaryOps.MUL, BinaryOps.ADD, BinaryOps.CMPLT, TernaryOps.WHERE}
+    allowed_alus = {BinaryOps.MUL, BinaryOps.ADD, BinaryOps.CMPLT, BinaryOps.CMPEQ, TernaryOps.WHERE}
     for loop_op in reversed([op for op in self.uops if op.uop is UOps.LOOP]):
       phis = set([u for u in self.get_recursive_children(loop_op) if u.uop is UOps.PHI])
-      wheres = set([u for phi in phis for u in get_recursive_parents(phi) if u.arg == TernaryOps.WHERE])
-      if (any([u.uop not in allowed_ops or (u.uop is UOps.ALU and u.arg not in allowed_alus) for phi in phis for u in get_recursive_parents(phi)])
+      wheres = set([u for phi in phis for u in self.get_recursive_parents(phi) if u.arg == TernaryOps.WHERE])
+      if (any([u.uop not in allowed_ops or (u.uop is UOps.ALU and u.arg not in allowed_alus) for phi in phis for u in self.get_recursive_parents(phi)])
         or any([where.vin[2].arg != 0 or where.vin[0].vin[1].uop is not UOps.CONST for where in wheres])
-        or any(len([op for op in get_recursive_parents(where) if op.uop is UOps.LOOP]) == 0 for where in wheres)): continue
+        or any(len([op for op in self.get_recursive_parents(where) if op.uop is UOps.LOOP]) == 0 for where in wheres)): continue
       if DEBUG >= 4 and (len(phis) > 0 or len(wheres) > 0): print("simplified {} PHI and {} WHERE in loop".format(len(phis), len(wheres)))
       for where in sorted(wheres, key=lambda x: self.uops.index(x)):
         comp_lt, comp_gt = where.vin[0].vin[0], where.vin[0].vin[1]
@@ -279,7 +310,7 @@ class UOpGraph:
         final_op = self.add(UOps.ALU, where.dtype, (maybe_cast, where.vin[1]), BinaryOps.MUL)
         self.uops = self.uops + after_split_ops
         self.replace_op(where, final_op)
-        get_recursive_parents.cache_clear()
+        self.get_recursive_parents.cache_clear()
       for phi in phis:
         self.replace_op(phi, phi.vin[1])
         self.uops.remove((accumulator:=phi.vin[0]))
@@ -303,13 +334,13 @@ class UOpGraph:
       except ValueError: pass  # already removed
       self.uops[self.uops.index(prev)].vin = (prev.vin[0],prev.vin[1],new) # replace with the float4 value
 
-  def uops_optimization(self, get_recursive_parents):
+  def uops_optimization(self):
     for u in self.uops:
       if u.uop is UOps.PHI and len(u.vin) == 3:
         # if the parents of the PHI node don't have the LOOP in their parents, it can be folded
         # TODO: ADD becomes a MUL, MAX can just become nothing
         # NOTE: ADD -> MUL does not fold, this maintains original MULACC code path
-        if all(x.uop is not UOps.LOOP for x in get_recursive_parents(UOp(u.uop, u.dtype, u.vin[0:2], u.arg))) \
+        if all(x.uop is not UOps.LOOP for x in self.get_recursive_parents(UOp(u.uop, u.dtype, u.vin[0:2], u.arg))) \
           and u.vin[1].arg is BinaryOps.ADD and u.vin[1].vin[0].arg is not BinaryOps.MUL:
           if DEBUG >= 4: print(f"removing PHI node {u}")
           del self.saved_exprs[(u.uop, u.dtype, u.vin, u.arg)]
@@ -321,34 +352,180 @@ class UOpGraph:
           new = self.add(UOps.ALU, u.dtype, (u.vin[1], loop_len,), BinaryOps.MUL, insert_before=self.uops.index(u))
           self.replace_op(u, new)
           return True
+    
+  def zero_initialize_output(self):
+    output_uop = self.get_output()
+    first_loop = next(op for op in self.uops if op.uop is UOps.LOOP)
+    zero = self.add(UOps.CONST, dtypes.int, tuple(), 0, insert_before=self.uops.index(first_loop))
+    # insert a loop storing zero to the output buffer
+    if not len(store_ops:=[op for op in self.uops if op.uop is UOps.STORE and op.vin[0] == output_uop]): return
+    parents = self.get_recursive_parents(store_ops[0].vin[1])
+    const_parents = [op for op in parents if op.uop is UOps.CONST]
+    const_parent_args = set([op.arg for op in const_parents if op.arg != 0 and \
+      any(e.uop is UOps.LOOP for e in self.uops if e in self.get_recursive_children(op))])
+
+    max_idx = functools.reduce(lambda x, y: x*y, const_parent_args)
+    n = 0
+    end_range = self.add(UOps.CONST, dtypes.int, tuple(), max_idx, insert_before=n); n += 1
+    loop = self.add(UOps.LOOP, dtypes.int, (zero, end_range), 0, insert_before=n); n += 1
+    self.add(UOps.STORE, None, (output_uop, loop, zero), 0, insert_before=self.uops.index(first_loop))
+
+  def sorted_by_latest_dependency(self, uops:List[UOp] | Set[UOp]) -> List[UOp]:
+    return sorted(uops, key=lambda u: max((self.uops.index(x) for x in u.vin), default=-1))
+
+  def get_output(self):
+    return self.uops[0]
+
+  def replace_accs_with_store(self):
+    # Replace accumulators with loads and stores
+    for u in self.uops:
+      if u.uop is not UOps.DEFINE_ACC: continue
+      output_uop = self.get_output(); dt = output_uop.dtype
+      output_dtype = DType(dt.priority, dt.itemsize, dt.name, dt.fmt, dt.count)
+      loops = [op for op in self.uops if op.uop is UOps.LOOP]
+
+      children = self.get_recursive_children(u, include_phi=True)
+      children_direct = set([u])
+      for uop in self.uops:
+          if len(children_direct.intersection([x for x in uop.vin])):
+            children_direct.add(uop)
+
+      children_direct = self.sorted_by_latest_dependency(children_direct)
+      if not len(store_ops:=[op for op in children if op.uop is UOps.STORE and op.vin[0] == output_uop]): continue
+      store_uop = store_ops[0]
+      for c in children_direct:
+        if c == u: continue
+        if c == store_uop:
+          self.uops.remove(c)
+          continue
+        elif c.uop is UOps.STORE: continue
+        else:
+          op_idx = self.uops.index(c)
+          idx_op = store_uop.vin[1]
+          load = self.add(UOps.LOAD, output_dtype, (output_uop, idx_op), c.arg, insert_before=self.uops.index(idx_op)+1)
+          if c.uop == UOps.ALU:
+            vin = tuple(load if e == u else e for e in c.vin)
+            insert_before = max([self.uops.index(e)+1 for e in vin], default=self.uops.index(idx_op)+1)
+            new_alu = self.add(UOps.ALU, output_dtype, vin, c.arg, insert_before=insert_before)
+            self.replace_op(c, new_alu)
+          elif c.uop == UOps.PHI:
+            vin = tuple(load if e == u else e for e in c.vin)
+            insert_before = max([self.uops.index(e)+1 for e in vin], default=self.uops.index(idx_op)+1)
+            store = self.add(UOps.STORE, output_dtype, (output_uop, idx_op, c.vin[1]), c.arg, insert_before=insert_before)
+            self.replace_op(c, store)
+          else:
+            raise RuntimeError(f"unhandled uop {c.uop}")
+
+  def reorder_acc_bool_loops(self):
+    # This works by finding loops with bools that should be constant and figuring out if we can move them out of the loop and potentially not run the loop if the bool is constant
+    # find all the loops
+    if len(loops := [u for u in self.uops if u.uop is UOps.LOOP]) < 2: return
+    loop_idxs = [self.uops.index(l) for l in loops]
+    loop_ends = [max(self.uops.index(e) for e in self.get_recursive_children(l)) for l in loops] 
+
+    if len(phis := [u for u in self.uops if u.uop is UOps.PHI]) != 1: return
+    if len(phi_srcs := [e for e in phis[0].vin[1].vin if e != phis[0].vin[0]]) != 1: return
+    if not (phi_srcs[0].uop is UOps.ALU and phi_srcs[0].arg == BinaryOps.MUL): return
+    # If there is not a multiplication from a bool cast skip all this
+    if not any(e.uop == UOps.CAST and e.vin[0].dtype == dtypes.bool for e in phi_srcs[0].vin): return
+    mul_ops_bools = [*set(self.get_recursive_parents(phi_srcs[0]))]
+
+    # find all the bools
+    bools = [u for u in self.uops if u.dtype == dtypes.bool and u in mul_ops_bools]
+    # find the dependencies of the bools
+    bool_deps = {u: self.get_recursive_parents(u) for u in bools}
+    # find what loops the bools are in and what loops the dependencies are in
+    bool_loops = {u: [l for l in loops if l in bool_deps[u]] for u in bools}
+
+    loop_subsets = [[loops[0]]]
+    for loop, end in zip(loops[1:], loop_ends[1:]):
+      if self.uops.index(loop) > loop_ends[loops.index(loop_subsets[-1][0])]: loop_subsets.append([loop])
+      else: loop_subsets[-1].append(loop)
+
+    changed = False
+    for loop_subset in loop_subsets:
+      if len(loop_subset) < 2: return
+      # find the loops that the bools are in
+      loops_ordered_by_bools = sorted(loop_subset, key=lambda l: -sum(1 for b in bools if l in bool_loops[b])*100 + loops.index(l))
+      loop_subset_idxs = [self.uops.index(l) for l in loop_subset]
+      # reorder the loops so that the bools are in the outermost loops that they can be
+      for idx, old_loop, new_loop in zip(loop_subset_idxs, loop_subset, loops_ordered_by_bools):
+        changed |= old_loop == new_loop
+        if DEBUG >= 4: print(f"reordering loop {old_loop} to be outermost for bools {bool_loops}")
+        self.uops[idx] = new_loop
+
+      # fix variable ordering
+      for loop in loop_subset:
+        for child in self.get_recursive_children(loop):
+          if self.uops.index(child) < (loop_idx:=self.uops.index(loop)):
+            self.uops.remove(child)
+            self.uops.insert(loop_idx, child)
+
+    if changed:
+      self.replace_accs_with_store()
+      self.zero_initialize_output()
+      self.replace_cast_bools_with_consts()
+
+  def replace_cast_bools_with_consts(self):
+    for u in self.uops:
+      if not (u.uop is UOps.CAST and u.vin[0].dtype == dtypes.bool): continue
+      for child in self.get_recursive_children(u):
+        if not (child.uop is UOps.ALU and child.arg == BinaryOps.MUL and u in child.vin): continue
+        self.replace_op(child, next(arg for arg in child.vin if arg != u))
+        if_op = self.add(UOps.IF, None, (u,), None, insert_before=self.uops.index(u)+1)
+        child.vin = (*child.vin, if_op)
+
+  def rewrite_all(self):
+    while 1: # keep rewriting until no more rewrites are possible
+      for u in self.uops:
+        if (rewritten:=constant_folder.rewrite(u)) is not None:
+          self.replace_op(u, rewritten)
+          break
+      else: break
+
+  def try_fix_vin(self):
+    def try_fix_vin_helper(uops):
+      for u in uops:
+        for v in u.vin:
+          if v not in uops and v.uop is UOps.CONST:
+            uops.insert(uops.index(u), v)
+            return True
+      return False
+    while try_fix_vin_helper(self.uops): pass
+
+  # graph helper functions
+  @functools.lru_cache(None)
+  def get_recursive_parents(self, x:UOp, with_phi=False) -> Set[UOp]:
+    return set.union(set(x.vin), *[self.get_recursive_parents(p, with_phi) for p in x.vin], set(self.acc_scope[x]) if with_phi else set())
 
   def uoptimize(self):
     # get PHI node loop scope, link anything using a DEFINE_ACC to the loop as a "parent"
-    acc_scope: DefaultDict[UOp, List[UOp]] = defaultdict(list)
-    for u in self.uops:
-      if u.uop is UOps.PHI: acc_scope[u.vin[0]] += u.vin[2:]
-
-    # graph helper functions
-    @functools.lru_cache(None)
-    def get_recursive_parents(x:UOp, with_phi=False) -> Set[UOp]:
-      return set.union(set(x.vin), *[get_recursive_parents(p, with_phi) for p in x.vin], set(acc_scope[x]) if with_phi else set())
+    self.acc_scope: DefaultDict[UOp, List[UOp]] = defaultdict(list)
+    for u in self.uops: 
+      if u.uop is UOps.PHI:
+        self.acc_scope[u.vin[0]] += u.vin[2:]
 
     # fix loop scope, push uops upward out of loop if it does not depend on the loop
-    self.fix_loop_scope(get_recursive_parents)
+    self.reorder_acc_bool_loops()
+    self.fix_loop_scope()
+    self.rewrite_all()
 
     # uops optimization
-    while self.uops_optimization(get_recursive_parents): pass
-    self.simplify_phi_loops(get_recursive_parents)
+    while self.uops_optimization(): pass
+    self.simplify_phi_loops()
 
     # (recursively) remove childless uops
-    # TODO: remove DEFINE_GLOBAL from here
-    self.remove_childless(set(x for x in self.uops if x.uop in {UOps.DEFINE_GLOBAL, UOps.STORE}))
+    # TODO: remove DEFINE_GLOBAL, UOps.IF from here
+    self.remove_childless(set(x for x in self.uops if x.uop in {UOps.DEFINE_GLOBAL, UOps.STORE, UOps.IF}))
 
     # store float4 upcasts directly if possible
     self.fix_to_store_directly()
 
     # add UOps.END*
     self.add_ends()
+
+    # Try to re-add any contstants that are not there but should be.
+    self.try_fix_vin()
 
     # verify the uop types
     self.type_verify()

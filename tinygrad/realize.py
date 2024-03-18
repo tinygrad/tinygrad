@@ -143,7 +143,7 @@ def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyB
   if out.op is LoadOps.ASSIGN and out.srcs[1].base not in inputs and out.srcs[1].base in realizes: inputs.append(out.srcs[1].base)
   return flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in inputs) + [si]
 
-# recursively search the entire graph for all LazyBuffers, insert realizes after expands
+# recursively search the entire graph for all LazyBuffers, insert realizes after expands unless it is a bool cast
 def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffer, None],
                 simple_pads:Set[LazyBuffer], children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], scheduled=False):
   if buf in allbufs or buf.base.realized: return
@@ -158,8 +158,8 @@ def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffe
       if len(buf.st.views) == 1 and buf.st.views[-1].mask and all_int(buf.base.st.shape) and \
           prod(buf.base.st.shape) >= prod([y-x for x,y in buf.st.views[-1].mask]):
         simple_pads.add(buf.base)
-      else:
-        realizes.add(buf.base)
+      elif buf.base.op == UnaryOps.CAST and buf.base.srcs[0].dtype == dtypes.bool: pass
+      else: realizes.add(buf.base)
     return _recurse_lb(buf.base, realizes, allbufs, simple_pads, children)
   if buf.forced_realize: realizes.add(buf)
   allbufs[buf] = None
