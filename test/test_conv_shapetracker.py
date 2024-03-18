@@ -13,10 +13,10 @@ class TestConvShapetracker(unittest.TestCase):
     # first run to init the weights, they are saved in seen
     create_schedule([conv(Tensor.empty(1, 16, 10, 10)).lazydata], seen)
     # run it again to get the kernels
-    sched = [si for si in create_schedule([conv(Tensor.empty(1, 16, 10, 10)).lazydata], seen) if si.ast.op not in LoadOps]
+    sched = [si for si in create_schedule([conv(Tensor.empty(1, 16, 10, 10)).lazydata], seen) if si.ast[0].op not in LoadOps]
     assert len(sched) == 1, f"conv should only have one kernel, getting {len(sched)}"
     print(sched[0])
-    for arg in [sched[0].out, *sched[0].inputs]:
+    for arg in [sched[0].outputs[0], *sched[0].inputs]:
       print(arg.st)
       assert len(arg.st.views) == 1
 

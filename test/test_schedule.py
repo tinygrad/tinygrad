@@ -6,7 +6,6 @@ import unittest
 from typing import List, Optional
 from tinygrad.tensor import Tensor
 from tinygrad.ops import LoadOps
-from tinygrad.device import Device, Compiled
 from tinygrad.helpers import DEBUG, GRAPH
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.graph import print_tree, realized_lazybuffer
@@ -18,22 +17,24 @@ def check_schedule(t:Tensor, allowed:int, to_prerealize:Optional[List[Tensor]]=N
   if to_prerealize:
     for pre in to_prerealize:
       for s in create_schedule([pre.lazydata], seen.copy()):
-        if GRAPH: realized_lazybuffer(s.out, 0)
-        seen.add(s.out)
+        for i,out in enumerate(s.outputs):
+          if GRAPH: realized_lazybuffer(out, 0)
+          seen.add(out)
   sched = create_schedule([t.lazydata], seen)
   if GRAPH:
-    for i,s in enumerate(sched): realized_lazybuffer(s.out, i+1)
-  if filter_loadops: sched = [s for s in sched if s.ast.op not in LoadOps]
+    for i,s in enumerate(sched):
+      for out in s.outputs: realized_lazybuffer(out, i+1)
+  if filter_loadops: sched = [s for s in sched if s.ast[0].op not in LoadOps]
   if len(sched) != allowed: print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
   if len(sched) != allowed or DEBUG >= 3:
     for i, s in enumerate(sched):
       print("kernel", i+1)
-      print_tree(s.ast)
+      for op in s.ast: print_tree(op)
   assert len(sched) == allowed
   # test the (non loadops) ops linearize
   for s in sched:
-    if s.ast.op in LoadOps: continue
-    l = Linearizer(s.ast)
+    if s.ast[0].op in LoadOps: continue
+    l = Linearizer(*s.ast)
     l.hand_coded_optimizations()
     l.linearize()
 
@@ -79,7 +80,6 @@ class TestSchedule(unittest.TestCase):
     d = (a+b).permute(1,0)+c
     check_schedule(d, 1)
 
-  @unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled) or Device.DEFAULT == "LLVM", "only test for compiled backends")
   def test_constants_are_embedded(self):
     a = Tensor.empty(3,3) * 2
     check_schedule(a, 2, filter_loadops=False)
@@ -422,6 +422,12 @@ class TestSchedule(unittest.TestCase):
     x = x[:16]
     out = x + y
     check_schedule(out, 2)  # TODO: this should be 1
+
+  def test_const_no_recompute(self):
+    x = Tensor(2) + Tensor(2)
+    y = Tensor(2) + Tensor(2)
+    out = x.contiguous() + y.contiguous()
+    check_schedule(out, 2)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

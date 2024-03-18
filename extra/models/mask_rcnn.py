@@ -61,12 +61,12 @@ def get_strides(shape):
   prod = [1]
   for idx in range(len(shape)-1, -1, -1): prod.append(prod[-1] * shape[idx])
   # something about ints is broken with gpu, cuda
-  return Tensor(prod[::-1][1:], dtype=dtypes.int32).unsqueeze(0).cpu()
+  return Tensor(prod[::-1][1:], dtype=dtypes.int32).unsqueeze(0)
 
 # with keys as integer array for all axes
 def tensor_getitem(tensor, *keys):
   # something about ints is broken with gpu, cuda
-  flat_keys = Tensor.stack([key.expand((sum(keys)).shape).reshape(-1) for key in keys], dim=1).cpu().cast(dtypes.int32)
+  flat_keys = Tensor.stack([key.expand((sum(keys)).shape).reshape(-1) for key in keys], dim=1).cast(dtypes.int32)
   strides = get_strides(tensor.shape)
   idxs = (flat_keys * strides).sum(1)
   gatherer = npgather if USE_NP_GATHER else _gather
@@ -985,7 +985,7 @@ class Pooler:
   def __call__(self, x, boxes):
     num_levels = len(self.poolers)
     rois = self.convert_to_roi_format(boxes)
-    if rois:
+    if rois is not None:
       if num_levels == 1:
         return self.poolers[0](x[0], rois)
 

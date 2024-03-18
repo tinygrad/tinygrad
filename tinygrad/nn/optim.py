@@ -22,6 +22,8 @@ class Optimizer:
     # NOTE: in extra is too late for most of the params due to issues with assign
     Tensor.corealize(extra + self.params + self.buffers if extra is not None else self.params + self.buffers)
 
+  def step(self) -> None: raise NotImplementedError
+
 class SGD(Optimizer):
   def __init__(self, params: List[Tensor], lr=0.001, momentum=0, weight_decay=0.0, nesterov=False):
     super().__init__(params, lr)
@@ -32,10 +34,9 @@ class SGD(Optimizer):
   def step(self) -> None:
     for i, t in enumerate(self.params):
       assert t.grad is not None
-      # this is needed since the grads can form a "diamond"
+      # contiguous is needed since the grads can allegedly form a "diamond"
       # TODO: fix this in lazy.py
-      t.grad.realize()
-      g = t.grad + self.wd * t.detach()
+      g = t.grad.contiguous() + self.wd * t.detach()
       if self.momentum:
         self.b[i].assign(self.momentum * self.b[i] + g)  # NOTE: self.b[i] is zero on the first run, no if required
         g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]

@@ -1,9 +1,9 @@
-import ctypes, collections, time
-from typing import List, Any, Dict, cast, Optional, Union
-from tinygrad.helpers import GraphException, init_c_var
+import ctypes, collections, time, itertools
+from typing import List, Any, Dict, cast, Optional, Union, Tuple
+from tinygrad.helpers import GraphException, init_c_var, round_up
 from tinygrad.device import Compiled, Buffer, CompiledASTRunner, BufferXfer, MultiDeviceJITGraph, update_stats
 from tinygrad.shape.symbolic import Variable
-from tinygrad.runtime.ops_hsa import HSADevice
+from tinygrad.runtime.ops_hsa import HSADevice, PROFILE, Profiler
 from tinygrad.features.jit import JitItem, get_input_replace, get_jit_stats, \
                                   get_jc_idxs_with_updatable_launch_dims, get_jc_idxs_with_updatable_var_vals
 import tinygrad.runtime.autogen.hsa as hsa
@@ -45,22 +45,17 @@ class HSAGraph(MultiDeviceJITGraph):
     self.devices: List[HSADevice] = list(compiled_devices) #type:ignore
 
     # Allocate kernel args.
-    kernargs_size: Dict[HSADevice, int] = collections.defaultdict(int)
+    kernargs_size: Dict[Compiled, int] = collections.defaultdict(int)
     for ji in self.jit_cache:
-      if isinstance(ji.prg, CompiledASTRunner): kernargs_size[cast(HSADevice, ji.prg.device)] += (ctypes.sizeof(ji.prg.clprg.args_struct_t)+15) & ~15
-
-    kernargs_ptrs: Dict[Compiled, int] = {}
-    for dev,sz in kernargs_size.items():
-      kernargs_ptrs[dev] = init_c_var(ctypes.c_void_p(),
-                                      lambda x: check(hsa.hsa_amd_memory_pool_allocate(dev.kernargs_pool, sz, 0, ctypes.byref(x)))).value
-      check(hsa.hsa_amd_agents_allow_access(1, ctypes.byref(dev.agent), None, kernargs_ptrs[dev]))
+      if isinstance(ji.prg, CompiledASTRunner): kernargs_size[ji.prg.device] += round_up(ctypes.sizeof(ji.prg.clprg.args_struct_t), 16)
+    kernargs_ptrs: Dict[Compiled, int] = {dev:dev.allocator._alloc(sz) for dev,sz in kernargs_size.items()}
 
     # Fill initial arguments.
     self.ji_kargs_structs: Dict[int, ctypes.Structure] = {}
     for j,ji in enumerate(self.jit_cache):
       if not isinstance(ji.prg, CompiledASTRunner): continue
       self.ji_kargs_structs[j] = ji.prg.clprg.args_struct_t.from_address(kernargs_ptrs[ji.prg.device])
-      kernargs_ptrs[ji.prg.device] += (ctypes.sizeof(ji.prg.clprg.args_struct_t) + 15) & ~15
+      kernargs_ptrs[ji.prg.device] += round_up(ctypes.sizeof(ji.prg.clprg.args_struct_t), 16)
       for i in range(len(ji.rawbufs)): self.ji_kargs_structs[j].__setattr__(f'f{i}', cast(Buffer, ji.rawbufs[i])._buf)
       for i in range(len(ji.prg.vars)): self.ji_kargs_structs[j].__setattr__(f'v{i}', var_vals[ji.prg.vars[i]])
 
@@ -69,9 +64,10 @@ class HSAGraph(MultiDeviceJITGraph):
     self.packets = {}
     self.transfers = []
     self.signals_to_reset: List[hsa.hsa_signal_t] = []
-    self.w_dependency_map: Dict[Any, Union[hsa.hsa_signal_t, hsa.hsa_agent_dispatch_packet_t]] = {}
-    self.r_dependency_map: Dict[Any, Union[hsa.hsa_signal_t, hsa.hsa_agent_dispatch_packet_t]] = {}
+    self.w_dependency_map: Dict[Any, Union[hsa.hsa_signal_t, int]] = {}
+    self.r_dependency_map: Dict[Any, List[Union[hsa.hsa_signal_t, int]]] = collections.defaultdict(list)
     signals_to_devices: Dict[ctypes.c_uint64, List[HSADevice]] = {}
+    self.profile_info: Dict[Compiled, List[Tuple[Any, ...]]] = collections.defaultdict(list)
 
     # Special packet to wait for the world.
     self.kickoff_signals: Dict[HSADevice, hsa.hsa_signal_t] = {}
@@ -84,7 +80,11 @@ class HSAGraph(MultiDeviceJITGraph):
         for i in range(0, len(wait_signals), 5):
           self.virt_aql_queues[ji.prg.device].submit_barrier(wait_signals=wait_signals[i:i+5])
         self.packets[j] = hsa.hsa_kernel_dispatch_packet_t.from_address(self.virt_aql_queues[ji.prg.device].write_addr)
-        self.virt_aql_queues[ji.prg.device].submit_kernel(ji.prg.clprg, *ji.prg.launch_dims(var_vals), ctypes.addressof(self.ji_kargs_structs[j])) #type:ignore
+        sync_signal = self.virt_aql_queues[ji.prg.device].submit_kernel(ji.prg.clprg, *ji.prg.launch_dims(var_vals), #type:ignore
+                                                                        ctypes.addressof(self.ji_kargs_structs[j]), need_signal=PROFILE)
+        if PROFILE:
+          self.profile_info[ji.prg.device].append((sync_signal, ji.prg.clprg.name, False))
+          self.signals_to_reset.append(sync_signal)
       elif isinstance(ji.prg, BufferXfer):
         dest, src = [cast(Buffer, x) for x in ji.rawbufs[0:2]]
         dest_dev, src_dev = cast(HSADevice, dest.d), cast(HSADevice, src.d)
@@ -95,10 +95,11 @@ class HSAGraph(MultiDeviceJITGraph):
         wait_signals = self.access_resources(read=[src], write=[dest], new_dependency=sync_signal, sync_with_aql_packets=True)
         self.transfers.append((dest._buf, dest_dev.agent, src._buf, src_dev.agent, dest.nbytes, len(wait_signals),
                               (hsa.hsa_signal_t*len(wait_signals))(*wait_signals), sync_signal, hsa.HSA_AMD_SDMA_ENGINE_0, True))
+        if PROFILE: self.profile_info[src_dev].append((sync_signal, f"transfer: HSA:{src_dev.device_id} -> HSA:{dest_dev.device_id}", True))
 
     # Wait for all active signals to finish the graph
     wait_signals_to_finish: Dict[HSADevice, List[hsa.hsa_signal_t]] = collections.defaultdict(list)
-    for v in dedup_signals([s for s in list(self.w_dependency_map.values())+list(self.r_dependency_map.values()) if isinstance(s, hsa.hsa_signal_t)]):
+    for v in dedup_signals(list(self.w_dependency_map.values()) + list(itertools.chain.from_iterable(self.r_dependency_map.values()))):
       for dev in signals_to_devices[v.handle]:
         wait_signals_to_finish[dev].append(v)
 
@@ -138,6 +139,7 @@ class HSAGraph(MultiDeviceJITGraph):
       self.packets[j].grid_size_z = gl[2] * lc[2]
 
     for dev in self.devices:
+      dev.flush_hdp()
       dev.hw_queue.blit_packets(self.virt_aql_queues[dev].queue_base, self.virt_aql_queues[dev].packets_count)
 
     for transfer_data in self.transfers:
@@ -149,6 +151,7 @@ class HSAGraph(MultiDeviceJITGraph):
       hsa.hsa_signal_wait_scacquire(self.finish_signal, hsa.HSA_SIGNAL_CONDITION_LT, 1, (1 << 64) - 1, hsa.HSA_WAIT_STATE_ACTIVE)
       et = time.perf_counter() - st
 
+    for profdev,profdata in self.profile_info.items(): Profiler.tracked_signals[profdev] += profdata
     update_stats(f"<batched {len(self.jit_cache)}>", self.op_estimate, self.mem_estimate, var_vals, et, buf_count=len(input_rawbuffers),
                  jit=jit, num_kernels=len(self.jit_cache), device="HSA")
     return et
@@ -163,13 +166,26 @@ class HSAGraph(MultiDeviceJITGraph):
     return None
 
   def access_resources(self, read, write, new_dependency=None, sync_with_aql_packets=False):
-    wait_signals = []
+    # To synchronize access to resources, we monitor the necessary prerequisites for accessing each resource,
+    # whether for write or read operations. A resource can be accessed by either a single writer or multiple readers.
+    # The tracked dependencies are either hsa signals or ints that reference a specific aql packet.
+    wait_signals: List[Optional[hsa.hsa_signal_t]] = []
+
+    if sync_with_aql_packets: wait_signals += [self.kickoff_signals[rawbuf.d] for rawbuf in read+write]
     for rawbuf in read:
       wait_signals.append(self.dependency_as_signal(self.w_dependency_map.get(rawbuf._buf), sync_with_aql_packets=sync_with_aql_packets))
-      if new_dependency: self.r_dependency_map[rawbuf._buf] = new_dependency
     for rawbuf in write:
       wait_signals.append(self.dependency_as_signal(self.w_dependency_map.get(rawbuf._buf), sync_with_aql_packets=sync_with_aql_packets))
-      wait_signals.append(self.dependency_as_signal(self.r_dependency_map.get(rawbuf._buf), sync_with_aql_packets=sync_with_aql_packets))
-      if new_dependency: self.w_dependency_map[rawbuf._buf] = new_dependency
-    if sync_with_aql_packets: wait_signals += [self.kickoff_signals[rawbuf.d] for rawbuf in read+write]
+      if rawbuf._buf in self.r_dependency_map:
+        rdeps = self.r_dependency_map.pop(rawbuf._buf)
+
+        # When synchronizing to aql packets, we only need to sync to the latest one, as they are executed in order.
+        signal_deps, aql_deps = [x for x in rdeps if isinstance(x, hsa.hsa_signal_t)], [x for x in rdeps if isinstance(x, int)]
+        deps = signal_deps + [max(aql_deps)] if aql_deps else []
+        for dep in deps: wait_signals.append(self.dependency_as_signal(dep, sync_with_aql_packets=sync_with_aql_packets))
+
+    if new_dependency is not None:
+      for rawbuf in read: self.r_dependency_map[rawbuf._buf].append(new_dependency)
+      for rawbuf in write: self.w_dependency_map[rawbuf._buf] = new_dependency
+
     return dedup_signals(wait_signals)

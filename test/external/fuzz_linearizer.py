@@ -7,7 +7,7 @@ from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.search import get_linearizer_actions, bufs_from_lin
 from tinygrad.tensor import Tensor
 from tinygrad.features.graph import print_tree
-from tinygrad.helpers import getenv, from_mv, prod, Context
+from tinygrad.helpers import getenv, from_mv, prod, colored, Context
 from tinygrad.device import Device, Compiled
 from tinygrad.codegen.linearizer import UOp
 
@@ -66,11 +66,11 @@ def run_linearizer(lin: Linearizer, rawbufs=None, var_vals=None):
 
 
 def fuzz_linearizer(lin: Linearizer):
-  random.seed(42)
-  np.random.seed(42)
-  print_tree(lin.ast)
+  SEED = getenv("SEED", 42)
+  random.seed(SEED)
+  np.random.seed(SEED)
+  for op in lin.ast: print_tree(op)
   print(lin.colored_shape())
-  rawbufs = get_fuzz_rawbufs(lin)
   seen_uops = {}
   last_lins = [lin]
   failures = defaultdict(list)
@@ -82,8 +82,17 @@ def fuzz_linearizer(lin: Linearizer):
     return failures
 
   # get baseline unoptimized output
-  unoptimized = Linearizer(lin.ast)
-  var_vals = {v: random.randint(v.min, v.max) for v in lin.ast.vars()}
+  unoptimized = Linearizer(*lin.ast)
+  var_vals = {v: random.randint(v.min, v.max) for v in lin.ast[0].vars()}
+
+  try:
+    rawbufs = get_fuzz_rawbufs(lin)
+  except Exception:
+    traceback.print_exc()
+    print("RAWBUFS FAILED!!")
+    failures["RAWBUFS_ERROR"].append((unoptimized.ast, unoptimized.applied_opts))
+    return failures
+
   if run_linearizer(unoptimized, rawbufs, var_vals) != "PASS":
     failures["BASELINE_ERROR"].append((unoptimized.ast, unoptimized.applied_opts))
     return failures
@@ -103,7 +112,7 @@ def fuzz_linearizer(lin: Linearizer):
         if not FUZZ_BEAM and test_lin.applied_opts: print(f"applied opts: {test_lin.applied_opts}")
 
         # stop if kernel uops repeat
-        tuops = tuplize_uops(test_lin.linearize().uops)
+        tuops = tuplize_uops(test_lin.linearize().uops.uops)
         if tuops in seen_uops:
           continue
         seen_uops[tuops] = tuple(test_lin.applied_opts)
@@ -111,7 +120,6 @@ def fuzz_linearizer(lin: Linearizer):
         if not FUZZ_BEAM: print(test_lin.colored_shape())
         # get a new output buffer
         rawbufs[0] = get_fuzz_rawbuf_like(rawbufs[0], zero=True)
-        var_vals = {v: random.randint(v.min, v.max) for v in test_lin.ast.vars()}
         if (msg := run_linearizer(test_lin, rawbufs, var_vals)) != "PASS":
           failures[msg].append((test_lin.ast, test_lin.applied_opts))
           continue
@@ -134,22 +142,33 @@ def fuzz_linearizer(lin: Linearizer):
   return failures
 
 if __name__ == "__main__":
-  ast_strs = load_worlds()
+  ast_strs = load_worlds(filter_reduce=False, filter_novariable=False)
   print(f"{len(ast_strs)=}")
   tested = 0
+  failed_ids = []
   failures = defaultdict(list)
   for i, ast in enumerate(ast_strs[:getenv("FUZZ_N", len(ast_strs))]):
+    if (nth := getenv("FUZZ_NTH", -1)) != -1 and i != nth: continue
     if "dtypes.image" in ast and Device.DEFAULT != "GPU": continue  # IMAGE is only for GPU
     print(f"testing ast {i}")
     tested += 1
     lin = ast_str_to_lin(ast)
-    for k, v in fuzz_linearizer(lin).items():
+
+    fuzz_failures = fuzz_linearizer(lin)
+    if fuzz_failures: failed_ids.append(i)
+    for k, v in fuzz_failures.items():
       for f in v:
         failures[k].append(f)
+
   for msg, errors in failures.items():
     for i, (ast, opts) in enumerate(errors):
       print(f"{msg} {i} AST: {ast}")
       print(f"{msg} {i} OPTS: {opts}\n")
+
   print(f"{tested=}")
-  for msg, errors in failures.items():
-    print(f"{msg}: {len(errors)}")
+  if failures:
+    print(f"{failed_ids=}")
+    for msg, errors in failures.items():
+      print(f"{msg}: {len(errors)}")
+  else:
+    print(colored("all passed", "green"))

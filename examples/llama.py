@@ -12,7 +12,7 @@ from tinygrad.helpers import Timing, Profiling, getenv, DEBUG, colored
 from tinygrad import Device, GlobalCounters, dtypes, nn
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
-from extra.models.llama import Transformer, convert_from_huggingface
+from extra.models.llama import Transformer, convert_from_huggingface, fix_bf16
 from sentencepiece import SentencePieceProcessor
 
 MAX_CONTEXT = getenv("MAX_CONTEXT", 4096)
@@ -176,8 +176,7 @@ class LLaMa:
     if "model.embed_tokens.weight" in weights:
       weights = convert_from_huggingface(weights, model, params["args"]["n_heads"], params["args"].get("n_kv_heads", params["args"]["n_heads"]))
 
-    # fix bf16, TODO: check if device supports bf16
-    weights = {k:v.to(Device.DEFAULT).cast(dtypes.float16) if v.dtype == dtypes.bfloat16 else v for k,v in weights.items()}
+    weights = fix_bf16(weights)
 
     if quantize:
       weights = AbsmaxQuantizedLinear.quantize(weights)
@@ -392,7 +391,7 @@ After you are done speaking, output [EOS]. You are not Chad.
 
     print(f"Preparing KV cache for chatbot with personality {args.personality}...")
     with Timing():
-      llama.model(Tensor([toks]), 0, args.temperature).realize()  # NOTE: outputs are not used
+      llama.model(Tensor([toks], device=device), 0, args.temperature).realize()  # NOTE: outputs are not used
     start_pos = len(toks)
   else:
     # non chat bot mode
@@ -453,9 +452,10 @@ After you are done speaking, output [EOS]. You are not Chad.
     expected = {
       ("1", "7B"): "Hello. I'm a 20 year old male",
       ("2", "7B"): "Hello. I'm a 20 year old girl",
+      ("2", "70B"): "Hello. I am a 20 year old female.",
     }
     try:
-      assert text == expected[key], "invalid output: " + colored(text, "red")
+      assert text == expected[key], f"invalid output: `{colored(text, 'red')}` != `{expected[key]}`"
       print("\n" + colored("output validated", "green"))  # NOTE: "\n" iside colored does not render the color in github action
     except KeyError:
       pass

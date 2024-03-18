@@ -2,35 +2,13 @@
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
 from typing import Tuple, List, Optional, Any, Dict
-import pickle, base64, itertools, time, math, struct
+import pickle, base64, itertools, time, struct
 from tinygrad.dtype import DType, dtypes, ImageDType
 from tinygrad.helpers import all_same, getenv, flatten
 from tinygrad.device import Compiled, Allocator, Compiler
-from tinygrad.codegen.uops import UOp, UOps
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
+from tinygrad.codegen.uops import UOpGraph, UOps, exec_alu
+from tinygrad.ops import BinaryOps, TernaryOps
 from tinygrad.codegen.kernel import LinearizerOptions
-
-def exec_alu(arg, dtype, p):
-  # TODO: make this complete and correctly honor the dtypes
-  # TODO: use this for constant folding
-  if arg == TernaryOps.WHERE: return p[1] if p[0] else p[2]
-  if arg == UnaryOps.LOG2: return math.log2(p[0]) if p[0] > 0 else -math.inf if p[0] == 0 else math.nan
-  if arg == UnaryOps.EXP2:
-    try: return math.exp(p[0]*math.log(2))
-    except OverflowError: return math.inf
-  if arg == UnaryOps.SQRT: return math.sqrt(p[0]) if p[0] >= 0 else math.nan
-  if arg == UnaryOps.SIN: return math.sin(p[0])
-  if arg == UnaryOps.NEG: return -p[0]
-  if arg == BinaryOps.MUL: return p[0]*p[1]
-  if arg == BinaryOps.ADD: return p[0]+p[1]
-  if arg == BinaryOps.SUB: return p[0]-p[1]
-  if arg == BinaryOps.XOR: return p[0]^p[1]
-  if arg == BinaryOps.MAX: return max(p[0], p[1])
-  if arg == BinaryOps.CMPEQ: return p[0] == p[1]
-  if arg == BinaryOps.CMPLT: return p[0] < p[1]
-  if arg == BinaryOps.DIV: return p[0]//p[1] if dtypes.is_int(dtype) else (p[0]/p[1] if p[1] != 0 else math.nan)
-  if arg == BinaryOps.MOD: return p[0]%p[1]
-  raise NotImplementedError(f"no support for {arg}")
 
 def _load(m, i):
   if i<0 or i>=len(m): raise IndexError(f"load out of bounds, size is {len(m)} and access is {i}")
@@ -66,19 +44,21 @@ class PythonProgram:
         dtp = [dl[v] for v in idp if self.uops[v][0] not in void_ops]
         if getenv("TRACE"): print(i, uop, dtype, arg, inp, dtp)
         if uop is UOps.STORE:
-          assert len(inp) <= 3, "gated stores not supported yet"
+          if len(inp) == 3: inp.append([True] * len(inp[0]))  # set the gate to True
           if isinstance(dtp[0], ImageDType):
             # image store
             assert dtp[2].count == 4
             for j,val in enumerate(inp[2]):
-              for m,ox,oy,v in zip(inp[0], inp[1][0], inp[1][1], val):
+              for m,ox,oy,v,g in zip(inp[0], inp[1][0], inp[1][1], val, inp[3]):
                 assert ox >= 0 and ox < dtp[0].shape[1] and oy >= 0 and oy < dtp[0].shape[0]
-                _store(m, ox*4 + oy*dtp[0].shape[1]*4 + j, v)
+                if g: _store(m, ox*4 + oy*dtp[0].shape[1]*4 + j, v)
           elif dtp[2].count > 1:
             for j,val in enumerate(inp[2]):
-              for m,o,v in zip(inp[0], inp[1], val): _store(m, o+j, v)
+              for m,o,v,g in zip(inp[0], inp[1], val, inp[3]):
+                if g: _store(m, o+j, v)
           else:
-            for m,o,v in zip(*inp): _store(m, o, v)
+            for m,o,v,g in zip(*inp):
+              if g: _store(m, o, v)
           i += 1
           continue
         elif uop is UOps.ENDLOOP:
@@ -126,13 +106,13 @@ class PythonProgram:
               del ul[i]
               i = loop_ends[i] + 1
               continue
-        elif uop is UOps.CAST:
+        elif uop in {UOps.CAST, UOps.BITCAST}:
           if dtype.count > 1:
             ul[i] = inp
           else:
             assert dtp[0].fmt and dtype.fmt
             pack_format, unpack_format = str(warp_size) + dtp[0].fmt, str(warp_size) + dtype.fmt
-            if arg[1]:
+            if uop is UOps.BITCAST:
               ul[i] = list(struct.unpack(unpack_format, struct.pack(pack_format, *inp[0])))
             else:
               casted = [float(x) if dtypes.is_float(dtype) else int(x) if dtypes.is_int(dtype) else x for x in inp[0]]
@@ -191,6 +171,11 @@ class PythonProgram:
               return a_elem(x, j, i, goff)
             def c_map(lane, elem): return (lane%16, lane//16+elem*2) # (i, j), C, D (8 elements on 32 threads): row major
             ul[i] = wmma_helper(32, 16, 16, 16, 8, a_elem, b_elem, c_map)
+          elif arg == '__cuda_mma_m16n8k16_f16_f32':
+            def a_elem(x, i, j, goff): return x[(i%2)+(j//8)*2+(i//8)*4][goff+((i//2)%4)+(j%8)*4] # A (8 elements on 32 threads)
+            def b_elem(x, i, j, goff): return x[(j%2)+(j//8)*2][goff+(j//2)%4+(i)*4] # B (4 elements on 32 threads)
+            def c_map(lane, elem): return ((elem%2)+(lane%4)*2, (lane//4)+(elem//2)*8) # (i, j), C, D (4 elements on 32 threads)
+            ul[i] = wmma_helper(32, 16, 8, 4, 4, a_elem, b_elem, c_map)
           else:
             raise Exception(f"unimplemented tensor core {arg}")
         elif uop is UOps.ALU:
@@ -203,9 +188,10 @@ class PythonProgram:
 
 class PythonCompiler(Compiler):
   linearizer_opts = LinearizerOptions("METAL", has_tensor_cores=True) if getenv("EMULATE_METAL") else \
-    (LinearizerOptions("HIP", has_tensor_cores=True) if getenv("EMULATE_HIP") else LinearizerOptions())
-  def render(self, name:str, uops:List[UOp]) -> str:
-    lops = [(u.uop, u.dtype, [uops.index(v) for v in u.vin], u.arg) for u in uops]
+    (LinearizerOptions("HIP", has_tensor_cores=True) if getenv("EMULATE_HIP") else \
+    (LinearizerOptions("CUDA", has_tensor_cores=True) if getenv("EMULATE_CUDA") else LinearizerOptions("PYTHON")))
+  def render(self, name:str, uops:UOpGraph) -> str:
+    lops = [(u.uop, u.dtype, [uops.uops.index(v) for v in u.vin], u.arg) for u in uops]
     return base64.b64encode(pickle.dumps(lops)).decode()
   def compile(self, src:str) -> bytes: return base64.b64decode(src)
 
