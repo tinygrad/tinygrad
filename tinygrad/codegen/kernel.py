@@ -436,7 +436,7 @@ class Kernel:
       check(self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem")
       check(axis >= self.first_reduce + self.group_for_reduces and axis < self.shape_len-self.upcasted, "must be reduce axis to group")
       check(not self.tensor_core, "can't group with tensor cores")
-      self.shift_to(axis, amt, top=(opt.op is OptOps.GROUPTOP), insert_before=self.first_reduce + self.group_for_reduces)
+      self.shift_to(axis, amt, top=(opt.op is OptOps.GROUPTOP), insert_before=self.first_reduce)
       self.group_for_reduces += 1
     elif opt.op is OptOps.UNROLL:                     # purple
       check(axis < self.shape_len-self.upcasted, "can't upcasted already upcasted")
@@ -512,14 +512,24 @@ class Kernel:
 
     if self.opts.has_local and self.opts.has_shared and all_int(self.sts[0].shape[:self.first_reduce]):
       # are we grouping? (requires local shape support)
-      if not self.float4_axis(0) and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:  # noqa: E501
+      if not self.float4_axis(0) and self.first_reduce < len(self.full_unupcasted_shape) and prod(self.sts[0].shape[:self.first_reduce]) <= 8192:  # noqa: E501
         # TODO: use 1024 if it's allowed in a smarter way
-        for sz in (([256, 16]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
-          if all(st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts):
-            try: # may fail due to excessive smem usage
-              self.apply_opt(Opt(OptOps.GROUPTOP, 0, sz))
-              break
-            except KernelOptError: pass
+        desired_group = 256 if prod(self.sts[0].shape[:self.first_reduce]) <= 512 else 32
+        grouped = 1
+        num_reduces = len(self.full_unupcasted_shape) - self.first_reduce - self.group_for_reduces
+        for reducei in range(num_reduces-1, -1, -1):
+          for sz in [256, 128, 64, 32, 16, 8, 4, 2]:
+            if sz > desired_group or sz < 16 and grouped == 1: continue
+            if self.full_shape[self.first_reduce+self.group_for_reduces+reducei] % sz == 0 and \
+              (grouped >= 8 or all((st.real_strides(ignore_valid=True)[self.first_reduce+self.group_for_reduces+reducei] or 256) <= 4 * grouped for st in self.sts)):
+              try: # may fail due to excessive smem usage
+                old_colored_shape = self.colored_shape()
+                self.apply_opt(Opt(OptOps.GROUP, reducei, sz))
+                print('grouped', old_colored_shape, '->', self.colored_shape())
+                desired_group //= sz
+                grouped *= sz
+                break
+              except KernelOptError: pass
 
       # are we upcasting in mid reduce? (only for images)
       if self.bufs[0].dtype.name.startswith('image') and not self.float4_axis(0) and self.group_for_reduces and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1:  # noqa: E501
