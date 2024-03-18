@@ -372,7 +372,7 @@ class UOpGraph:
     const_parent_args = set([op.arg for op in const_parents if op.arg != 0 and \
       any(e.uop is UOps.LOOP for e in self.uops if e in self.get_recursive_children(op))])
 
-    max_idx = functools.reduce(lambda x, y: x*y, const_parent_args)
+    max_idx = functools.reduce(lambda x, y: x*y, const_parent_args) if const_parent_args else 0
     end_range = self.add(UOps.CONST, dtypes.int, tuple(), max_idx, insert_before=self.uops.index(first_loop))
     loop = self.add(UOps.LOOP, dtypes.int, (zero, end_range), 0, insert_before=self.uops.index(first_loop))
     self.add(UOps.STORE, None, (output_uop, loop, zero), 0, insert_before=self.uops.index(first_loop))
