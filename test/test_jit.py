@@ -8,10 +8,10 @@ from tinygrad.features.jit import TinyJit
 from tinygrad.device import Device
 from tinygrad.helpers import CI
 
-def _simple_test(add, extract=lambda x: x):
+def _simple_test(add, extract=lambda x: x, N=10):
   for _ in range(5):
-    a = Tensor.randn(10, 10)
-    b = Tensor.randn(10, 10)
+    a = Tensor.randn(N, N)
+    b = Tensor.randn(N, N)
     c = add(a, b)
     np.testing.assert_allclose(extract(c).numpy(), a.numpy()+b.numpy(), atol=1e-4, rtol=1e-5)
   assert_jit_cache_len(add, 1)
@@ -21,6 +21,13 @@ class TestJit(unittest.TestCase):
     @TinyJit
     def add(a, b): return (a+b).realize()
     _simple_test(add)
+
+  def test_simple_jit_reset(self):
+    @TinyJit
+    def add(a, b): return (a+b).realize()
+    _simple_test(add)
+    add.reset()
+    _simple_test(add, N=20)
 
   def test_simple_jit_norealize(self):
     @TinyJit
@@ -182,7 +189,7 @@ class TestJit(unittest.TestCase):
     a = Tensor.randn(10, 10).realize()  # realize these before resetting the random seed
     b = Tensor.randn(10, 10).realize()
 
-    Tensor.manual_seed(1234)
+    Tensor._seed = 1234
     jf = TinyJit(f)
     res = set()
     for _ in range(5):
@@ -190,7 +197,7 @@ class TestJit(unittest.TestCase):
       res.add(o1.numpy()[0][0])
     assert len(res) == 5, "All values should be different, rand works in jit."
 
-    Tensor.manual_seed(1234)
+    Tensor._seed = 1234
     jf2 = TinyJit(f)
     res2 = set()
     for _ in range(5):
@@ -199,7 +206,7 @@ class TestJit(unittest.TestCase):
     assert len(res2) == 5, "All values should be different, rand works in jit."
     assert res == res2, "Jit rand is not reproducible with the same seed"
 
-    Tensor.manual_seed(3421)
+    Tensor._seed = 3421
     jf3 = TinyJit(f)
     res3 = set()
     for _ in range(5):

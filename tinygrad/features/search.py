@@ -36,12 +36,12 @@ def _time_program(variables:List[Variable], rdev:Compiled, lib:bytes, global_siz
   factor = 1
   if global_size is not None and max_global_size is not None:
     global_size, factor = _get_test_global_size(global_size, max_global_size, var_vals)
-  try: car = CompiledASTRunner(name, "", rdev, global_size, local_size, variables=variables, precompiled=lib)
+  try: car = CompiledASTRunner(name, "", rdev.dname, global_size, local_size, variables=variables, precompiled=lib)
   except AssertionError: return [math.inf] * cnt
   tms = []
   for _ in range(cnt):
     if clear_l2:
-      with Context(DEBUG=0, BEAM=0): Tensor.ones(1024,1024).contiguous().realize()
+      with Context(DEBUG=0): Tensor.rand(1024,1024).realize()
     tms.append(cast(float, car(rawbufs, var_vals, wait=True, do_update_stats=False))*factor)
     if early_stop is not None and early_stop < tms[-1]: break
   return tms
