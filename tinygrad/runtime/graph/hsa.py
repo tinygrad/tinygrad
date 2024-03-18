@@ -96,7 +96,7 @@ class HSAGraph(MultiDeviceJITGraph):
         wait_signals = self.access_resources(read=[src], write=[dest], new_dependency=sync_signal, sync_with_aql_packets=True)
         self.transfers.append([dest._buf, dest_dev.agent, src._buf, src_dev.agent, dest.nbytes, len(wait_signals),
                               (hsa.hsa_signal_t*len(wait_signals))(*wait_signals), sync_signal, hsa.HSA_AMD_SDMA_ENGINE_0, True])
-        self.ji_to_transfer[j] = len(self.transfers)
+        self.ji_to_transfer[j] = len(self.transfers) - 1
         if PROFILE: self.profile_info[src_dev].append((sync_signal, f"transfer: HSA:{src_dev.device_id} -> HSA:{dest_dev.device_id}", True))
 
     # Wait for all active signals to finish the graph
