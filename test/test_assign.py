@@ -92,7 +92,7 @@ class TestAssign(unittest.TestCase):
     new = a + old_a
     np.testing.assert_allclose(new.numpy(), 4)
 
-  @unittest.expectedFailure
+  #@unittest.expectedFailure
   def test_assign_diamond(self):
     a = Tensor.ones(4).contiguous().realize()
     times_a = a*3

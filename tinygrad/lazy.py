@@ -15,6 +15,8 @@ def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Op]=
   if st.size == 0 and op not in {LoadOps.SYNC, LoadOps.WAIT}: op, arg, srcs, base = LoadOps.CONST, 0, (), None
   if op is LoadOps.CONST: enable_cache = True
 
+  srcs = tuple(s.base.srcs[0]._view(s.st) if s.base.realized is None and s.base.op is LoadOps.ASSIGN else s for s in srcs)
+
   cache_key = (device, st, dtype, op, arg, tuple(ref(x) for x in srcs)) if base is None else (st, ref(base))
   if enable_cache and (rret := lazycache.get(cache_key, None)): return rret
 

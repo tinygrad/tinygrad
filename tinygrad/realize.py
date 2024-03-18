@@ -4,7 +4,7 @@ from typing import Deque, List, Dict, Optional, cast, Set, DefaultDict
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters, LazyOp, ReduceOps, ConstBuffer, MemBuffer, BinaryOps, UnaryOps
 from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats, Compiled, BufferOptions
 from tinygrad.features.graph import realized_lazybuffer, log_lazybuffer
-from tinygrad.helpers import colored, getenv, GRAPH, cpu_time_execution, DEBUG, prod, dedup, all_int
+from tinygrad.helpers import colored, getenv, GRAPH, cpu_time_execution, DEBUG, prod, dedup, all_int, partition
 from tinygrad.shape.symbolic import Variable
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.lazy import LazyBuffer
@@ -261,4 +261,8 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
     if x in seen: continue
     sched.append(_schedule_one(x, realizes, reduce_for_op))
     seen.add(x)
+
+  # do all assigns at the end. TODO: there's probably a better way
+  late, early = partition(sched, lambda x: x.outputs[0].op is LoadOps.ASSIGN)
+  sched = early + late
   return sched
