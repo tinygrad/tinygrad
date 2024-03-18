@@ -8,10 +8,10 @@ from tinygrad.features.jit import TinyJit
 from tinygrad.device import Device
 from tinygrad.helpers import CI
 
-def _simple_test(add, extract=lambda x: x):
+def _simple_test(add, extract=lambda x: x, N=10):
   for _ in range(5):
-    a = Tensor.randn(10, 10)
-    b = Tensor.randn(10, 10)
+    a = Tensor.randn(N, N)
+    b = Tensor.randn(N, N)
     c = add(a, b)
     np.testing.assert_allclose(extract(c).numpy(), a.numpy()+b.numpy(), atol=1e-4, rtol=1e-5)
   assert_jit_cache_len(add, 1)
@@ -21,6 +21,13 @@ class TestJit(unittest.TestCase):
     @TinyJit
     def add(a, b): return (a+b).realize()
     _simple_test(add)
+
+  def test_simple_jit_reset(self):
+    @TinyJit
+    def add(a, b): return (a+b).realize()
+    _simple_test(add)
+    add.reset()
+    _simple_test(add, N=20)
 
   def test_simple_jit_norealize(self):
     @TinyJit
@@ -340,6 +347,23 @@ class TestJit(unittest.TestCase):
     def g(x,y,z): return (x+y+z).realize()
     for i in range(5):
       np.testing.assert_equal(g(Tensor([i]*3), Tensor.ones(3), Tensor.zeros(3)).numpy(), np.array([i+1]*3))
+
+  @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL", "HSA"}, "no GPU CI")
+  def test_jitted_transfers(self):
+    d0, d1 = f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"
+
+    def f(a, b):
+      x = a.to(d1)
+      y = b.to(d1)
+      return x.realize(), y.realize()
+
+    jf = TinyJit(f)
+    for _ in range(5):
+      a = Tensor.randn(10, 10, device=d0).realize()
+      b = Tensor.randn(10, 10, device=d0).realize()
+      xc, yc = jf(a, b)
+      np.testing.assert_allclose(a.numpy(), xc.numpy(), atol=1e-4, rtol=1e-5)
+      np.testing.assert_allclose(b.numpy(), yc.numpy(), atol=1e-4, rtol=1e-5)
 
 
 if __name__ == '__main__':
