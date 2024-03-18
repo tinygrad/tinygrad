@@ -92,6 +92,25 @@ class TestAssign(unittest.TestCase):
     new = a + old_a
     np.testing.assert_allclose(new.numpy(), 4)
 
+  def test_assign_stale_replace(self):
+    a = Tensor.ones(4).contiguous().realize()
+    old_a = Tensor.zeros(4)
+    old_a.replace(a)
+    a.assign(Tensor.full((4,), 2.).contiguous())
+    # old_a should syntactically be 1 but actually its 2, which is fine... I guess
+    new = a + old_a
+    np.testing.assert_allclose(new.numpy(), 4)
+
+  def test_assign_unrealized(self):
+    a = Tensor.ones(4)
+    b = a * 2
+    # normal lazydata overwrite
+    b += 4
+    b = b.contiguous()
+    # this one may or may not reuse buffer from previous line
+    b += b
+    np.testing.assert_allclose(b.numpy(), 12)
+
   @unittest.expectedFailure
   def test_assign_diamond(self):
     a = Tensor.ones(4).contiguous().realize()
@@ -106,6 +125,69 @@ class TestAssign(unittest.TestCase):
     times_a = a*3
     new = a + times_a
     np.testing.assert_allclose(new.numpy(), 8)
+
+  @unittest.expectedFailure
+  def test_assign_fork_ooo(self):
+    a = Tensor.ones(4).contiguous().realize()
+    times_a = a*3
+    a.assign(Tensor.full((4,), 2.).contiguous())
+    times_a = times_a * 5  # should be toposorted before the assign
+    Tensor.corealize([a, times_a])
+    np.testing.assert_allclose(a.numpy(), 2)
+    np.testing.assert_allclose(times_a.numpy(), 15)
+
+  @unittest.expectedFailure
+  def test_assign_fork_multirealize(self):
+    a = Tensor.ones(4).contiguous().realize()
+    times_a = a*3
+    a.assign(Tensor.full((4,), 2.).contiguous()).realize()
+    with self.assertRaises(Exception):
+      # naively, times_a would be calculated with the new assigned a now :(
+      times_a.realize()
+    np.testing.assert_allclose(times_a.numpy(), 3)
+    np.testing.assert_allclose(a.numpy(), 2)
+
+  def test_assign_twice(self):
+    # eg if we do multiple steps in 1 schedule
+    a = Tensor.ones(4).contiguous().realize()
+    a += a * 2
+    a += a * 4
+    np.testing.assert_allclose(a.numpy(), 15)
+
+  def test_assign_fib(self):
+    # test that things happen in the correct order
+    a = Tensor.ones(4).contiguous().realize()
+    b = Tensor.ones(4).contiguous().realize()
+    a += b
+    b += a
+    a += b
+    b += a
+    Tensor.corealize([a, b])
+    np.testing.assert_allclose(a.numpy(), 5)
+    np.testing.assert_allclose(b.numpy(), 8)
+
+  def test_assign_cycle(self):
+    a = Tensor.ones(4).contiguous().realize()
+    b = Tensor.ones(4).contiguous().realize()
+    c = a + 1
+    a.assign(b + 1)
+    b.assign(c)
+    with self.assertRaises(Exception):
+      # there is a cycle in the dag for this one.
+      # technically possible to do it with multioutput XD
+      Tensor.corealize(a, b)
+
+  @unittest.expectedFailure
+  def test_assign_momentum(self):
+    # This is just normal sgd with momentum
+    weight = Tensor.ones(4).contiguous().realize()
+    momentum = Tensor.zeros(4).contiguous().realize()
+    # long update calculation
+    momentum += (weight + 5).relu().sum().expand(4).sum().expand(4).sum().expand(4)
+    weight += momentum
+    Tensor.corealize([weight, momentum])
+    np.testing.assert_allclose(weight.numpy(), 384 + 1)
+    np.testing.assert_allclose(momentum.numpy(), 384)
 
   def test_assign_kv_cache(self):
     bsz, max_context = 2, 8
