@@ -122,7 +122,8 @@ class TinyJit(Generic[ReturnType]):
         for p in get_parameters(self.ret): p.realize()
       self.jit_cache = CacheCollector.finish()
       assert len(self.jit_cache) != 0, "didn't JIT anything!"
-      del self.fxn
+      # TODO: reset doesn't work if we delete this
+      #del self.fxn
       if DEBUG >= 1 and len(set(get_input_replace(self.jit_cache, input_rawbuffers).values())) != len(input_rawbuffers):
         print("WARNING: some input tensors not found")
       if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
