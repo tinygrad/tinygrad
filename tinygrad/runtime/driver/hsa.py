@@ -7,6 +7,8 @@ def check(status):
     hsa.hsa_status_string(status, ctypes.byref(status_str := ctypes.POINTER(ctypes.c_char)()))
     raise RuntimeError(f"HSA Error {status}: {ctypes.string_at(status_str).decode()}")
 
+## AQL packets
+
 # Precalulated AQL info
 AQL_PACKET_SIZE = ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t)
 EMPTY_SIGNAL = hsa.hsa_signal_t()
@@ -21,6 +23,9 @@ BARRIER_HEADER  = 1 << hsa.HSA_PACKET_HEADER_BARRIER
 BARRIER_HEADER |= hsa.HSA_FENCE_SCOPE_SYSTEM << hsa.HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE
 BARRIER_HEADER |= hsa.HSA_FENCE_SCOPE_SYSTEM << hsa.HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE
 BARRIER_HEADER |= hsa.HSA_PACKET_TYPE_BARRIER_AND << hsa.HSA_PACKET_HEADER_TYPE
+
+class amd_aql_pm4_packet_t(ctypes.Structure):
+    _fields_ = [('header', ctypes.c_uint16), ('format', ctypes.c_uint16), ('pm4_cmds', ctypes.c_uint32*13), ('completion_signal', hsa.hsa_signal_t)]
 
 class AQLQueue:
   def __init__(self, device, sz=-1):
@@ -87,6 +92,23 @@ class AQLQueue:
 
     return signal
 
+  def submit_pm4_ib(self, ib_address, ib_size, need_signal=False, completion_signal=None):
+    if self.available_packet_slots == 0: self._wait_queue()
+    signal = (completion_signal or self._alloc_signal(reusable=True)) if need_signal else EMPTY_SIGNAL
+
+    indirect_exec_cmd = pm4_build_indirect_command(ib_address, ib_size)
+
+    ctypes.memset(self.write_addr, 0, 64)
+    packet = amd_aql_pm4_packet_t.from_address(self.write_addr)
+    packet.format = 0x1 # AMD_AQL_FORMAT_PM4_IB
+    for i, value in enumerate(indirect_exec_cmd): packet.pm4_cmds[i] = value
+    packet.pm4_cmds[len(indirect_exec_cmd)] = 14 - len(indirect_exec_cmd) # remain dwords count
+    packet.completion_signal = signal
+    packet.header = hsa.HSA_PACKET_TYPE_VENDOR_SPECIFIC << hsa.HSA_PACKET_HEADER_TYPE
+    self._submit_packet()
+
+    return signal
+
   def blit_packets(self, packet_addr, packet_cnt):
     if self.available_packet_slots < packet_cnt: self._wait_queue(packet_cnt)
 
@@ -118,6 +140,29 @@ class AQLQueue:
       self.write_addr = self.queue_base + (self.write_addr - self.queue_base) % self.queue_size
 
   def _alloc_signal(self, reusable=False): return self.device.alloc_signal(reusable=reusable)
+
+## PM4 packets
+
+PM4_HDR_IT_OPCODE_INDIRECT_BUFFER = 0x3f
+PM4_INDIRECT_BUFFER_VALID = 1 << 23
+
+PM4_HDR_IT_OPCODE_ACQUIRE_MEM = 0x58
+PM4_ACQUIRE_MEM_GCR_CNTL_GLI_INV = 1 << 0
+PM4_ACQUIRE_MEM_GCR_CNTL_GLK_INV = 1 << 7
+PM4_ACQUIRE_MEM_GCR_CNTL_GLV_INV = 1 << 8
+PM4_ACQUIRE_MEM_GCR_CNTL_GL1_INV = 1 << 9
+PM4_ACQUIRE_MEM_GCR_CNTL_GL2_INV = 1 << 14
+
+def pm4_header(op, cmd_size): return 3 << 30 | ((cmd_size - 2) & 0x3FFF) << 16 | (((op) & 0xFF) << 8)
+def pm4_build_indirect_command(ib_addr, ib_sz):
+  return [pm4_header(PM4_HDR_IT_OPCODE_INDIRECT_BUFFER, 4), ib_addr & 0xffffffff, (ib_addr>>32) & 0xffffffff, (ib_sz//4) | PM4_INDIRECT_BUFFER_VALID]
+def pm4_build_cache_inv_command(addr=0, sz=0xffffffffff):
+  return [pm4_header(PM4_HDR_IT_OPCODE_ACQUIRE_MEM, 8), 0,
+          sz & 0xffffffff, (sz >> 32) & 0xffffffff, addr & 0xffffffff, (addr >> 32) & 0xffffffff, 0,
+          PM4_ACQUIRE_MEM_GCR_CNTL_GLI_INV | PM4_ACQUIRE_MEM_GCR_CNTL_GLK_INV | PM4_ACQUIRE_MEM_GCR_CNTL_GLV_INV | \
+          PM4_ACQUIRE_MEM_GCR_CNTL_GL1_INV | PM4_ACQUIRE_MEM_GCR_CNTL_GL2_INV ]
+
+## Agents
 
 def scan_agents():
   agents = collections.defaultdict(list)

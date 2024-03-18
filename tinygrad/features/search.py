@@ -41,7 +41,9 @@ def _time_program(variables:List[Variable], rdev:Compiled, lib:bytes, global_siz
   tms = []
   for _ in range(cnt):
     if clear_l2:
-      with Context(DEBUG=0): Tensor.rand(1024,1024).realize()
+      if hasattr(rdev, 'inv_cache'): rdev.inv_cache()
+      else:
+        with Context(DEBUG=0): Tensor.rand(1024,1024).realize()
     tms.append(cast(float, car(rawbufs, var_vals, wait=True, do_update_stats=False))*factor)
     if early_stop is not None and early_stop < tms[-1]: break
   return tms
@@ -125,7 +127,8 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
         if lib in seen_libs: continue
         #print(acted_lins[i].colored_shape(), acted_lins[i].applied_opts)  # for debugging BEAMs that segfault
         seen_libs.add(lib)
-        try: tms = _time_program(vars, dev, lib, global_size, local_size, var_vals, rawbufs, early_stop=beam[0][1]*3 if len(beam) else 1.0)
+        try: tms = _time_program(vars, dev, lib, global_size, local_size, var_vals, rawbufs,
+                                 early_stop=beam[0][1]*3 if len(beam) else 1.0, clear_l2=hasattr(dev, 'inv_cache'))
         except RuntimeError: continue # for runtime issues
         timed_lins.append((acted_lins[i], min(tms)))
         if DEBUG >= 2: print(f"\r{time.perf_counter() - st:7.2f}s: {timed_lins[-1][1]*1e6:12.2f} us       {len(timed_lins):4d}/{len(acted_lins):4d}         {timed_lins[-1][0].colored_shape()}\033[K", end="")  # noqa: E501
