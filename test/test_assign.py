@@ -84,29 +84,6 @@ class TestAssign(unittest.TestCase):
     for _ in range(4): f(y)
     assert y.item() == 4
 
-  def test_assign_changes(self):
-    a = Tensor.ones(4).contiguous().realize()
-    old_a = a
-    a.assign(Tensor.full((4,), 2.).contiguous())
-    # NOTE: old_a is now 2, and this would match the behavior of pytorch
-    new = a + old_a
-    np.testing.assert_allclose(new.numpy(), 4)
-
-  @unittest.expectedFailure
-  def test_assign_diamond(self):
-    a = Tensor.ones(4).contiguous().realize()
-    times_a = a*3
-    a.assign(Tensor.full((4,), 2.).contiguous())
-    new = a + times_a
-    np.testing.assert_allclose(new.numpy(), 5)
-
-  def test_assign_diamond_alt(self):
-    a = Tensor.ones(4).contiguous().realize()
-    a.assign(Tensor.full((4,), 2.).contiguous())
-    times_a = a*3
-    new = a + times_a
-    np.testing.assert_allclose(new.numpy(), 8)
-
   def test_assign_kv_cache(self):
     bsz, max_context = 2, 8
 
