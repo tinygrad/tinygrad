@@ -28,7 +28,7 @@ def safe_numpy(t) -> np.ndarray:
 # not supported: STRING = 8 COMPLEX64 = 14, COMPLEX128 = 15
 # NOTE: 17, 18, 19, 20 are float8, 10 is half
 DTYPE_MAP = {1:dtypes.float, 2:dtypes.uint8, 3:dtypes.int8, 4:dtypes.uint16, 5:dtypes.int16, 6:dtypes.int32, 7:dtypes.int64,
-              9:dtypes.bool, 10:dtypes.float, 11:dtypes.double, 12:dtypes.uint32, 13:dtypes.uint64, 16:dtypes.bfloat16,
+              9:dtypes.bool, 10:dtypes.half, 11:dtypes.double, 12:dtypes.uint32, 13:dtypes.uint64, 16:dtypes.bfloat16,
               17:dtypes.float, 18:dtypes.float, 19:dtypes.float, 20:dtypes.float}
 # TODO: fix buffer_parse to use this and fix get_weight_and_biases to only use buffer_parse
 
