@@ -173,10 +173,10 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
         r[u] = "%" + args[1]
         kernel = [f".reg .u32 %{args[1]};"] + kernel
       elif uop == UOps.CONST:
-            if dtype.count > 1:
-              r[u] = [const(args, dtype.scalar(), mov=True) for _ in range(dtype.count)]
-            else:
-              r[u] = const(args, dtype, mov=True)
+        if dtype.count > 1:
+          r[u] = [const(args, dtype.scalar(), mov=True) for _ in range(dtype.count)]
+        else:
+          r[u] = const(args, dtype, mov=True)
       elif uop == UOps.GEP:
         r[u] = r[vin[0]][u.arg]
       elif uop == UOps.LOAD:
