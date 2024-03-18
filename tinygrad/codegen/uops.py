@@ -423,7 +423,7 @@ class UOpGraph:
             raise RuntimeError(f"unhandled uop {c.uop}")
 
   def reorder_acc_bool_loops(self):
-    # This works by finding loops with bools that should be constant and figuring out if we can move them out of the loop and potentially not 
+    # This works by finding loops with bools that should be constant and figuring out if we can move them out of the loop and potentially not
     #  run the loop if the bool is constant
     # find all the loops
     if len(loops := [u for u in self.uops if u.uop is UOps.LOOP]) < 2: return
