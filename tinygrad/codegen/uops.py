@@ -213,7 +213,7 @@ class UOpGraph:
         if u.vin[0] == loop_stack[-1]:
           loop_stack.pop()
           while 1:
-            if loop_stack: 
+            if loop_stack:
               for e in relocate_ends:
                 if loop_stack[-1] == e.vin[0]:
                   self.add(UOps.ENDLOOP, None, (loop_stack[-1],), cachable=False, insert_before=self.uops.index(u))
@@ -293,7 +293,8 @@ class UOpGraph:
     for loop_op in reversed([op for op in self.uops if op.uop is UOps.LOOP]):
       phis = set([u for u in self.get_recursive_children(loop_op) if u.uop is UOps.PHI])
       wheres = set([u for phi in phis for u in self.get_recursive_parents(phi) if u.arg == TernaryOps.WHERE])
-      if (any([u.uop not in allowed_ops or (u.uop is UOps.ALU and u.arg not in allowed_alus) for phi in phis for u in self.get_recursive_parents(phi)])
+      if (any([u.uop not in allowed_ops or (u.uop is UOps.ALU and u.arg not in allowed_alus) \
+        for phi in phis for u in self.get_recursive_parents(phi)])
         or any([where.vin[2].arg != 0 or where.vin[0].vin[1].uop is not UOps.CONST for where in wheres])
         or any(len([op for op in self.get_recursive_parents(where) if op.uop is UOps.LOOP]) == 0 for where in wheres)): continue
       if DEBUG >= 4 and (len(phis) > 0 or len(wheres) > 0): print("simplified {} PHI and {} WHERE in loop".format(len(phis), len(wheres)))
@@ -352,7 +353,7 @@ class UOpGraph:
           new = self.add(UOps.ALU, u.dtype, (u.vin[1], loop_len,), BinaryOps.MUL, insert_before=self.uops.index(u))
           self.replace_op(u, new)
           return True
-    
+
   def zero_initialize_output(self):
     output_uop = self.get_output()
     first_loop = next(op for op in self.uops if op.uop is UOps.LOOP)
@@ -365,9 +366,8 @@ class UOpGraph:
       any(e.uop is UOps.LOOP for e in self.uops if e in self.get_recursive_children(op))])
 
     max_idx = functools.reduce(lambda x, y: x*y, const_parent_args)
-    n = 0
-    end_range = self.add(UOps.CONST, dtypes.int, tuple(), max_idx, insert_before=n); n += 1
-    loop = self.add(UOps.LOOP, dtypes.int, (zero, end_range), 0, insert_before=n); n += 1
+    end_range = self.add(UOps.CONST, dtypes.int, tuple(), max_idx, insert_before=self.uops.index(first_loop))
+    loop = self.add(UOps.LOOP, dtypes.int, (zero, end_range), 0, insert_before=self.uops.index(first_loop))
     self.add(UOps.STORE, None, (output_uop, loop, zero), 0, insert_before=self.uops.index(first_loop))
 
   def sorted_by_latest_dependency(self, uops:List[UOp] | Set[UOp]) -> List[UOp]:
@@ -380,9 +380,9 @@ class UOpGraph:
     # Replace accumulators with loads and stores
     for u in self.uops:
       if u.uop is not UOps.DEFINE_ACC: continue
-      output_uop = self.get_output(); dt = output_uop.dtype
+      output_uop = self.get_output()
+      dt = output_uop.dtype
       output_dtype = DType(dt.priority, dt.itemsize, dt.name, dt.fmt, dt.count)
-      loops = [op for op in self.uops if op.uop is UOps.LOOP]
 
       children = self.get_recursive_children(u, include_phi=True)
       children_direct = set([u])
@@ -390,7 +390,7 @@ class UOpGraph:
           if len(children_direct.intersection([x for x in uop.vin])):
             children_direct.add(uop)
 
-      children_direct = self.sorted_by_latest_dependency(children_direct)
+      children_direct = set(self.sorted_by_latest_dependency(children_direct))
       if not len(store_ops:=[op for op in children if op.uop is UOps.STORE and op.vin[0] == output_uop]): continue
       store_uop = store_ops[0]
       for c in children_direct:
@@ -400,7 +400,6 @@ class UOpGraph:
           continue
         elif c.uop is UOps.STORE: continue
         else:
-          op_idx = self.uops.index(c)
           idx_op = store_uop.vin[1]
           load = self.add(UOps.LOAD, output_dtype, (output_uop, idx_op), c.arg, insert_before=self.uops.index(idx_op)+1)
           if c.uop == UOps.ALU:
@@ -417,11 +416,11 @@ class UOpGraph:
             raise RuntimeError(f"unhandled uop {c.uop}")
 
   def reorder_acc_bool_loops(self):
-    # This works by finding loops with bools that should be constant and figuring out if we can move them out of the loop and potentially not run the loop if the bool is constant
+    # This works by finding loops with bools that should be constant and figuring out if we can move them out of the loop and potentially not 
+    #  run the loop if the bool is constant
     # find all the loops
     if len(loops := [u for u in self.uops if u.uop is UOps.LOOP]) < 2: return
-    loop_idxs = [self.uops.index(l) for l in loops]
-    loop_ends = [max(self.uops.index(e) for e in self.get_recursive_children(l)) for l in loops] 
+    loop_ends = [max(self.uops.index(e) for e in self.get_recursive_children(l)) for l in loops]
 
     if len(phis := [u for u in self.uops if u.uop is UOps.PHI]) != 1: return
     if len(phi_srcs := [e for e in phis[0].vin[1].vin if e != phis[0].vin[0]]) != 1: return
@@ -501,7 +500,7 @@ class UOpGraph:
   def uoptimize(self):
     # get PHI node loop scope, link anything using a DEFINE_ACC to the loop as a "parent"
     self.acc_scope: DefaultDict[UOp, List[UOp]] = defaultdict(list)
-    for u in self.uops: 
+    for u in self.uops:
       if u.uop is UOps.PHI:
         self.acc_scope[u.vin[0]] += u.vin[2:]
 
