@@ -7,8 +7,9 @@ from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, di
 from tinygrad.dtype import ImageDType
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.codegen.kernel import KernelOptError
-from tinygrad.tensor import Tensor
 from tinygrad.shape.symbolic import sym_infer, Variable
+from tinygrad import Tensor, dtypes
+from tinygrad.realize import create_schedule
 
 from tinygrad.codegen.kernel import Opt, OptOps
 actions = [Opt(op=OptOps.UPCAST, axis=axis, amt=amt) for amt in [0,2,3,4,5,7] for axis in range(6)]
@@ -31,6 +32,17 @@ def _get_test_global_size(global_size, max_global_size, var_vals):
         break
   return test_global_size, factor
 
+@functools.lru_cache(None)
+def _get_clear_l2_runner(device, sz):
+  sched = create_schedule([Tensor.arange(sz, device=device.dname, dtype=dtypes.int).contiguous().lazydata])
+  assert len(sched) == 1 and sched[0].ast
+  with Context(DEBUG=0, BEAM=0):
+    return device.get_runner(*sched[0].ast)
+
+def _clear_l2(device, sz=2*1024*2014):
+  with Context(DEBUG=0):
+    _get_clear_l2_runner(device, sz)([Buffer(device.dname, sz, dtypes.int)], {}, wait=True, do_update_stats=False)
+
 def _time_program(variables:List[Variable], rdev:Compiled, lib:bytes, global_size, local_size, var_vals, rawbufs,
                   early_stop=None, max_global_size=65536, clear_l2=False, cnt=3, name="test"):
   factor = 1
@@ -40,8 +52,7 @@ def _time_program(variables:List[Variable], rdev:Compiled, lib:bytes, global_siz
   except AssertionError: return [math.inf] * cnt
   tms = []
   for _ in range(cnt):
-    if clear_l2:
-      with Context(DEBUG=0): Tensor.rand(1024,1024).realize()
+    if clear_l2: _clear_l2(rdev)
     tms.append(cast(float, car(rawbufs, var_vals, wait=True, do_update_stats=False))*factor)
     if early_stop is not None and early_stop < tms[-1]: break
   return tms
