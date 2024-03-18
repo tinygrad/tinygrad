@@ -113,7 +113,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
   if buf.op is LoadOps.ASSIGN:
     assert first
     assert buf.srcs[1].base is buf.srcs[1], "assign must be to base"
-    assert buf.srcs[1].realized is not None, "assign must be already realized to schedule"
+    assert buf.srcs[1].realized is not None, f"assign must be already realized to schedule {buf.srcs[1]}"
     return _recursive_lazyop(buf.srcs[0], inputs, var_vals, st, realizes, cache, False, assign_to=buf.srcs[1])
 
   # if it's a reduce, we have to change the shapetracker

@@ -59,8 +59,10 @@ class LazyBuffer:
     shape = self.shape if shape is None else shape
     return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, self.device, arg=cast_scalar(val, self.dtype)).reshape((1,)*len(shape)).expand(shape)
 
+  def is_realized(self) -> bool: return self.base.realized is not None
+
   def assign(self, x:LazyBuffer) -> LazyBuffer:
-    assert (self.base is self) or (self.st.contiguous and self.size == self.base.size), "assign target must be contiguous"
+    assert (self.base is self) or (self.st.contiguous and self.size == self.base.size), f"assign target must be contiguous {self.st}"
     return LazyBuffer.loadop(LoadOps.ASSIGN, self.shape, self.dtype, self.device, src=(x, self.base))
 
   def contiguous(self):
