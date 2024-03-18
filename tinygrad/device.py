@@ -193,7 +193,7 @@ class Compiler:
 
 class CompiledASTRunner(JITRunner):
   def __init__(self, name:str, prg:str, dname:str, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None,
-               variables:Optional[List[Variable]]=None, op_estimate:sint=0, mem_estimate:sint=0, precompiled:Optional[bytes]=None):
+               variables:Optional[List[Variable]]=None, op_estimate:sint=0, mem_estimate:sint=0, precompiled:Optional[bytes]=None, outcount:int=1):
     super().__init__()
     if DEBUG >= 4: print(prg)
     if global_size is not None: global_size = global_size + [1]*(3-len(global_size))
@@ -202,7 +202,7 @@ class CompiledASTRunner(JITRunner):
       to_function_name(name), name, prg, dname, global_size, local_size, True
     assert self.device.compiler is not None, "compiler is required to make an AST kernel"
     lib:bytes = precompiled if precompiled is not None else self.device.compiler.compile_cached(prg)
-    self.lib, self.clprg = lib, self.device.runtime(self.name, lib)
+    self.lib, self.clprg, self.outcount = lib, self.device.runtime(self.name, lib), outcount
     self.vars: List[Variable] = [] if variables is None else variables
     self.op_estimate, self.mem_estimate = op_estimate, mem_estimate
 
@@ -251,7 +251,7 @@ class Compiled:
     run_count = prod((k.global_size if k.global_size else []) + (k.local_size if k.local_size else []))
     # NOTE: we use min here to ignore the indexing FLOPS
     ret = CompiledASTRunner(k.name, self.compiler.render(to_function_name(k.name), k.uops), self.dname, k.global_size, k.local_size,
-                            k.uops.vars(), min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))
+                            k.uops.vars(), min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count), outcount=len(k.outbufs))
     return ret
 
   def get_linearizer(self, *ast:LazyOp) -> Linearizer:
