@@ -8,7 +8,7 @@ from tinygrad.dtype import DType
 from tinygrad.helpers import CI, getenv
 from tinygrad.realize import create_schedule
 from tinygrad.ops import UnaryOps, get_lazyop_info
-from test.test_dtype import is_dtype_supported
+from test.helpers import is_dtype_supported
 
 settings.register_profile("my_profile", max_examples=200, deadline=None)
 settings.load_profile("my_profile")
@@ -142,7 +142,7 @@ class TestDTypeALU(unittest.TestCase):
   def test_int32_midcast_float(self, a, b, c, op1, op2): universal_test_midcast(a, b, c, op1, op2, dtypes.int32, dtypes.float32)
 
   # Metal and CUDACPU and HIP behave differently than numpy in CI for overflows
-  skip_overflow = CI and (Device.DEFAULT == "HIP" or getenv("CUDACPU"))
+  skip_overflow = CI and (Device.DEFAULT in {"RHIP", "HSA"} or getenv("CUDACPU"))
   @given(strat.floats(width=32, min_value=0, max_value=10.0) if skip_overflow else ht.float32,
          strat.floats(width=32, min_value=0, max_value=10.0) if skip_overflow else ht.float32,
          ht.int32, strat.sampled_from(binary_operations), strat.sampled_from(integer_binary_operations))

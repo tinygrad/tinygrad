@@ -147,7 +147,7 @@ def Expand(x: Tensor, shape):
 
 def Gemm(A: Tensor, B: Tensor, C: Tensor=None, alpha=1.0, beta=1.0, transA=0, transB=0, broadcast=0):
   ret = alpha * (A.transpose(transA) @ B.transpose(transB))
-  if C is not None: ret += beta * (C if broadcast == 0 else C.reshape([-1 if i <  len(C.shape) else 1 for i in range(ret.ndim)][::-1]))
+  if C is not None: ret = ret + beta * (C if broadcast == 0 else C.reshape([-1 if i <  len(C.shape) else 1 for i in range(ret.ndim)][::-1]))
   return ret
 
 def Einsum(*Inputs: List[Tensor], equation): return Tensor.einsum(equation, Inputs)
