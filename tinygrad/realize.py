@@ -16,15 +16,15 @@ class CustomOp(JITRunner):
   def __init__(self, fxn):
     self.fxn = fxn
     super().__init__()
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False): self.fxn(*rawbufs)
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False, metadata=None): self.fxn(*rawbufs)
 
 class SyncOp(JITRunner):
   def __init__(self, device):
     self.device, self.dname = Device[device], device
     super().__init__()
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False):
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False, metadata=None):
     et = cpu_time_execution(self.device.synchronize, enable=wait or DEBUG >= 1)
-    update_stats(colored("synchronize", "RED"), 0, 0, {}, et, 1, device=self.dname)
+    update_stats(colored("synchronize", "RED"), 0, 0, {}, et, 1, device=self.dname, metadata=metadata)
 
 def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
   if si.ast[0].op not in {LoadOps.COPY, LoadOps.WAIT}: assert len(set(x.device for x in si.outputs+si.inputs)) == 1
@@ -66,8 +66,8 @@ def run_schedule(schedule:List[ScheduleItem]):
     # run the function (put it in JIT)
     real_buffers = [x.realized for x in si.outputs+si.inputs if x.size != 0]
     assert all(x is not None for x in real_buffers), f"can't run, some inputs aren't realized {real_buffers}"
-    if prg: prg.exec(cast(List[Buffer], real_buffers), si.var_vals)
-    elif (out:=si.outputs[0]).size > 0: update_stats(colored(f"empty {out.st.size:10d} {out.dtype}", "yellow"), 0, 0, {}, None, 1, device=out.device)
+    if prg: prg.exec(cast(List[Buffer], real_buffers), si.var_vals, metadata=si.metadata)
+    elif (out:=si.outputs[0]).size > 0: update_stats(colored(f"empty {out.st.size:10d} {out.dtype}", "yellow"), 0, 0, {}, None, 1, device=out.device, metadata=si.metadata)
     if GRAPH:
       for out in si.outputs: realized_lazybuffer(out, GlobalCounters.kernel_count)
 
@@ -125,13 +125,17 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
 def _schedule_one(out:LazyBuffer, realizes:Set[LazyBuffer], reduce_for_op: Dict[LazyBuffer, LazyBuffer]) -> ScheduleItem:
   inputs: List[LazyBuffer] = []
   var_vals: Dict[Variable, int] = out.st.var_vals.copy()
+  metadatas = []
   if out.op in {LoadOps.CUSTOM, LoadOps.SYNC, LoadOps.WAIT, LoadOps.COPY, LoadOps.EMPTY}:
     op, inputs = LazyOp(out.op, (), out.arg), list(out.srcs)
   else:
     output_st = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape)
-    op = _recursive_lazyop(out, inputs, var_vals, output_st, realizes, cache={})
+    cache = {}
+    op = _recursive_lazyop(out, inputs, var_vals, output_st, realizes, cache=cache)
+    for buf, _ in cache: metadatas.append(buf.metadata)
     op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_st.simplify().unbind()[0]))
-  return ScheduleItem((op,), (out,), tuple(inputs), var_vals)
+  metadatas.append(out.metadata)
+  return ScheduleItem((op,), (out,), tuple(inputs), var_vals, metadata=', '.join([x for x in dedup(metadatas[::-1])[::-1] if x]))
 
 # recursively search the entire graph for all LazyBuffers, insert realizes after expands
 def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffer, None],

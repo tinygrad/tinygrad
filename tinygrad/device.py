@@ -44,27 +44,31 @@ class JITRunner:
   def __init__(self):
     self.op_estimate:sint = 0
     self.mem_estimate:sint = 0
-  def exec(self, rawbufs:List[Buffer], var_vals:Optional[Dict[Variable, int]]=None) -> Optional[float]:
+  def exec(self, rawbufs:List[Buffer], var_vals:Optional[Dict[Variable, int]]=None, metadata=None) -> Optional[float]:
     var_vals = var_vals if var_vals is not None else {}
     from tinygrad.features.jit import CacheCollector
-    et = self(rawbufs, var_vals)
+    et = self(rawbufs, var_vals, metadata=metadata)
     if CACHECOLLECTING: CacheCollector.add(self, rawbufs, var_vals)
     return et
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False, metadata=None) -> Optional[float]:
     raise NotImplementedError("override this")
 
-def update_stats(name:str, op_estimate:sint, mem_estimate:sint, var_vals: Optional[Dict[Variable, int]], et: Optional[float], buf_count:int, jit=False, num_kernels=1, lra: Optional[Dict]=None, device:str="", first_run=False):  # noqa: E501
+def update_stats(name:str, op_estimate:sint, mem_estimate:sint, var_vals: Optional[Dict[Variable, int]], et: Optional[float], buf_count:int, jit=False, num_kernels=1, lra: Optional[Dict]=None, device:str="", first_run=False, metadata=None):  # noqa: E501
   if var_vals is None: var_vals = {}
   op_estimate = sym_infer(op_estimate, var_vals)
   mem_estimate = sym_infer(mem_estimate, var_vals)
   GlobalCounters.kernel_count += num_kernels
   GlobalCounters.global_ops += op_estimate
   GlobalCounters.global_mem += mem_estimate
-  if et is not None: GlobalCounters.time_sum_s += et
+  if et is not None:
+    GlobalCounters.time_sum_s += et
+    time_attr = [x.strip() for x in metadata.split(',')]
+    time_attr = ', '.join([x.strip() for x in time_attr if "__" not in x and "relu" not in x and "sqrt" not in x and not (x[-3:] == ' bw' and x[:-3] in time_attr) and not 'pow' in x and not 'add' in x and not 'backward' in x])
+    GlobalCounters.fn_usage[time_attr] += et
   if DEBUG >= 2:
     ptm = (colored(f"{et*1e3:9.2f}ms", "yellow") if et > 0.01 else f"{et*1e6:9.2f}us") if et is not None else ""
     print(f"{colored(f'*** {device[:7]:7s} {GlobalCounters.kernel_count:4d}', ('magenta' if num_kernels == 1 else 'CYAN') if jit else ('green' if first_run else None))} {name+' '*(38-ansilen(name))} arg {buf_count:3d} mem {GlobalCounters.mem_used/1e9:5.2f} GB " +  # noqa: E501
-          (str() if et is None else f"tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))  # noqa: E501
+          (str() if et is None else f"tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)  {metadata}"))  # noqa: E501
 
 # **************** Buffer / Allocator ****************
 
@@ -114,7 +118,7 @@ class Buffer:
 
 class BufferCopy(JITRunner):
   def copy(self, dest, src): dest.copyin(src.as_buffer(allow_zero_copy=True))  # may allocate a CPU buffer depending on allow_zero_copy
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False):
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False, metadata=None):
     dest, src = rawbufs[0:2]
     assert dest.size == src.size and dest.dtype == src.dtype, f"buffer copy mismatch, {dest.size} != {src.size}, {dest.dtype} != {src.dtype}"
     st = time.perf_counter()
@@ -126,7 +130,7 @@ class BufferCopy(JITRunner):
     total_sz = dest.size*dest.dtype.itemsize
     if total_sz >= 1e6: name = f"{type(self).__name__[6:].lower()} {total_sz/1e6:7.2f}M, {dest.device[:7]:>7s} <- {src.device[:7]:7s}"
     else: name = f"{type(self).__name__[6:].lower()} {total_sz:8d}, {dest.device[:7]:>7s} <- {src.device[:7]:7s}"
-    update_stats(colored(name, "yellow"), 0, total_sz, {}, et, 2, jit, device=dest.device)
+    update_stats(colored(name, "yellow"), 0, total_sz, {}, et, 2, jit, device=dest.device, metadata=metadata)
 
 class BufferRead(BufferCopy):
   def copy(self, dest, src):
@@ -219,7 +223,7 @@ class CompiledASTRunner(JITRunner):
     local_size = [sym_infer(sz, var_vals) for sz in self.local_size] if self.local_size is not None else self.local_size
     return global_size, local_size
 
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False, do_update_stats=True) -> Optional[float]:
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False, do_update_stats=True, metadata=None) -> Optional[float]:
     global_size, local_size = self.launch_dims(var_vals)
     if global_size is not None and local_size is None and all_int(self.global_size): # type: ignore[arg-type]
       # TODO: this is copied from get_program
@@ -231,12 +235,12 @@ class CompiledASTRunner(JITRunner):
     if local_size: lra['local_size'] = local_size
     et = self.clprg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k] for k in self.vars), wait=wait or DEBUG>=2)
     if do_update_stats: update_stats(self.display_name, self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit,
-                                     lra=lra, device=self.dname, first_run=self.first_run)
+                                     lra=lra, device=self.dname, first_run=self.first_run, metadata=metadata)
     self.first_run = False
     return et
 
 class MultiDeviceJITGraph(JITRunner):
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False, metadata=None) -> Optional[float]:
     raise NotImplementedError("override this")
 
 class Compiled:

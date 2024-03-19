@@ -51,7 +51,7 @@ class MetalGraph:
     self.command_buffer: Any = None
     if len(var_vals): self.int_buf_view = self.int_buf.contents().as_buffer(self.int_buf.length()).cast('i')
 
-  def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
+  def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False, jit=False, metadata=None) -> Optional[float]:
     # NOTE: you at least can't update the ints if this is running
     if self.command_buffer is not None and self.command_buffer in self.device.mtl_buffers_in_flight: wait_check(self.command_buffer)
     all_resources = self.all_resources + [x._buf for x in input_rawbuffers]
@@ -74,5 +74,5 @@ class MetalGraph:
     else:
       self.device.mtl_buffers_in_flight.append(command_buffer)
       et = None
-    update_stats(f"<batched {len(self.jit_cache)}>", self.op_estimate, self.mem_estimate, var_vals, et, buf_count=len(input_rawbuffers), jit=jit, num_kernels=len(self.jit_cache))  # noqa: E501
+    update_stats(f"<batched {len(self.jit_cache)}>", self.op_estimate, self.mem_estimate, var_vals, et, buf_count=len(input_rawbuffers), jit=jit, num_kernels=len(self.jit_cache), metadata=metadata)  # noqa: E501
     return et

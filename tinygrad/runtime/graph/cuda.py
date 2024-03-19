@@ -40,7 +40,7 @@ class CUDAGraph:
 
     self.instance = self.graph_instantiate(self.graph)
 
-  def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
+  def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False, jit=False, metadata=None) -> Optional[float]:
     self.set_device()
     # Update rawbuffers in the c_input_params struct.
     for (j,i),input_idx in self.input_replace.items():
@@ -61,7 +61,7 @@ class CUDAGraph:
 
     et = self.graph_launch(self.instance, None, wait=wait)
     update_stats(f"<batched {len(self.jit_cache)}>", self.op_estimate, self.mem_estimate, var_vals, et, buf_count=len(input_rawbuffers),
-                 jit=jit, num_kernels=len(self.jit_cache), device=f"<GPU>:{self.device}")
+                 jit=jit, num_kernels=len(self.jit_cache), device=f"<GPU>:{self.device}", metadata=metadata)
     return et
 
   def __del__(self):

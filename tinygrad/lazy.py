@@ -2,7 +2,7 @@ from __future__ import annotations
 import math
 from typing import Union, Optional, Any, Tuple, List
 from tinygrad.dtype import cast_scalar, dtypes, DType, Scalar
-from tinygrad.helpers import prod, getenv, all_int, all_same
+from tinygrad.helpers import prod, getenv, all_int, all_same, FUNCTION_CTX
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op
 from tinygrad.shape.symbolic import sint
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -35,6 +35,7 @@ class LazyBuffer:
       self.output_buffer: Optional[Buffer] = None
       self.contiguous_child: Optional[Tuple[ReferenceType[LazyBuffer], ShapeTracker]] = None
       self.forced_realize = False
+      self.metadata = FUNCTION_CTX.value
     else:
       # properties on view
       assert base.base == base, "base must be a base itself"

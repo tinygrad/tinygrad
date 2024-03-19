@@ -115,7 +115,7 @@ class HSAGraph(MultiDeviceJITGraph):
     for sig in self.signals_to_reset: hsa.hsa_signal_silent_store_relaxed(sig, 0)
     hsa.hsa_signal_silent_store_relaxed(self.finish_signal, 0)
 
-  def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
+  def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False, jit=False, metadata=None) -> Optional[float]:
     # Wait and restore signals
     hsa.hsa_signal_wait_scacquire(self.finish_signal, hsa.HSA_SIGNAL_CONDITION_LT, 1, (1 << 64) - 1, hsa.HSA_WAIT_STATE_ACTIVE)
     for sig in self.signals_to_reset: hsa.hsa_signal_silent_store_relaxed(sig, 1)
@@ -159,7 +159,7 @@ class HSAGraph(MultiDeviceJITGraph):
 
     for profdev,profdata in self.profile_info.items(): Profiler.tracked_signals[profdev] += profdata
     update_stats(f"<batched {len(self.jit_cache)}>", self.op_estimate, self.mem_estimate, var_vals, et, buf_count=len(input_rawbuffers),
-                 jit=jit, num_kernels=len(self.jit_cache), device="HSA")
+                 jit=jit, num_kernels=len(self.jit_cache), device="HSA", metadata=metadata)
     return et
 
   def dependency_as_signal(self, dep, sync_with_aql_packets) -> Optional[hsa.hsa_signal_t]:

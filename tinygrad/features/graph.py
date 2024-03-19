@@ -18,6 +18,11 @@ if DEBUG >= 2:
     if GlobalCounters.time_sum_s == 0: return
     print(f"avg: {GlobalCounters.global_ops*1e-9/GlobalCounters.time_sum_s:8.2f} GFLOPS {GlobalCounters.global_mem*1e-9/GlobalCounters.time_sum_s:8.2f} GB/s",  # noqa: E501
           f"{' '*10}total: {GlobalCounters.kernel_count:5d} kernels {GlobalCounters.global_ops*1e-9:8.2f} GOPS {GlobalCounters.global_mem*1e-9:8.2f} GB {GlobalCounters.time_sum_s*1e3:8.2f} ms")  # noqa: E501
+
+    usage = list(GlobalCounters.fn_usage.items())
+    usage.sort(key=lambda x: x[1], reverse=True)
+    for fn, tm in usage[:30]:
+      print(f"{fn:30} {tm:8.3f}")
   atexit.register(print_globalcounters)
 
 def save_graph(G, fn, opt=""):

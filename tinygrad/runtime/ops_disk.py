@@ -65,7 +65,7 @@ class DiskRunner(JITRunner):
     assert strides_for_shape(view.shape) == view.strides, "disk tensors don't support strides"
     self.new_size = prod(view.shape)
     self.new_offset = view.offset * top_src.arg.dtype.itemsize
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Any, int], wait=False, jit=False):
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Any, int], wait=False, jit=False, metadata=None):
     assert len(rawbufs) == 2
     src = rawbufs[1]._buf
     rawbufs[0]._buf = DiskBuffer(src.ud, self.new_size, self.new_dtype, offset=src.offset+self.new_offset)

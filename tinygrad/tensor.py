@@ -7,7 +7,7 @@ from collections import defaultdict
 import numpy as np
 
 from tinygrad.dtype import DType, dtypes, ImageDType, Scalar, least_upper_float, least_upper_dtype, cast_scalar
-from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, fully_flatten, flat_mv
+from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, fully_flatten, flat_mv, Context
 from tinygrad.helpers import IMAGE, DEBUG, WINO, THREEFRY
 from tinygrad.lazy import LazyBuffer
 from tinygrad.features.multi import MultiLazyBuffer
@@ -19,10 +19,11 @@ from tinygrad.realize import run_schedule, create_schedule
 # **** start with two base classes, Tensor and Function ****
 
 class Function:
-  def __init__(self, device:Union[str, Tuple[str, ...]], *tensors:Tensor):
+  def __init__(self, device:Union[str, Tuple[str, ...]], *tensors:Tensor, metadata=None):
     self.device = device
     self.needs_input_grad = [t.requires_grad for t in tensors]
     self.requires_grad = True if any(self.needs_input_grad) else None if None in self.needs_input_grad else False
+    self.metadata = metadata
     if self.requires_grad: self.parents = tensors
 
   def forward(self, *args, **kwargs): raise NotImplementedError(f"forward not implemented for {type(self)}")
@@ -30,9 +31,17 @@ class Function:
 
   @classmethod
   def apply(fxn:Type[Function], *x:Tensor, **kwargs) -> Tensor:
-    ctx = fxn(x[0].device, *x)
+    import traceback
+    stack = traceback.extract_stack()
+
+    stack = [frame for frame in stack if __file__[:-len('tensor.py')] in frame.filename and '__call__' not in frame.name and '__init__' not in frame.name and 'sequential' not in frame.name and 'lambda' not in frame.name]
+    stack_ = [frame for frame in stack if __file__ in frame.filename]
+    if '__' not in stack_[0].name and 'sqrt' not in stack_[0].name: stack = stack_
+
+    ctx = fxn(x[0].device, *x, metadata=stack[0].name)
     ret = Tensor.__new__(Tensor)
-    ret.lazydata, ret.requires_grad, ret.grad = ctx.forward(*[t.lazydata for t in x], **kwargs), ctx.requires_grad, None
+    with Context(FUNCTION_CTX=ctx.metadata):
+      ret.lazydata, ret.requires_grad, ret.grad = ctx.forward(*[t.lazydata for t in x], **kwargs), ctx.requires_grad, None
     ret._ctx = ctx if ctx.requires_grad and not Tensor.no_grad else None  # used by autograd engine
     return ret
 
@@ -348,7 +357,8 @@ class Tensor:
 
     for t0 in reversed(self.deepwalk()):
       if t0.grad is None: raise RuntimeError("tensor has no grad")
-      grads = t0._ctx.backward(t0.grad.lazydata)
+      with Context(FUNCTION_CTX=f"{t0._ctx.metadata} bw"):
+        grads = t0._ctx.backward(t0.grad.lazydata)
       grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
         for g in ([grads] if len(t0._ctx.parents) == 1 else grads)]
       for t, g in zip(t0._ctx.parents, grads):

@@ -6,6 +6,7 @@ from tinygrad.helpers import prod, dedup
 from tinygrad.dtype import dtypes, DType
 from tinygrad.shape.symbolic import Variable, sint
 from dataclasses import dataclass
+from collections import defaultdict
 
 # these are the llops your accelerator must implement, along with toCpu
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
@@ -45,6 +46,7 @@ class ScheduleItem:
   outputs: Tuple[LazyBuffer, ...]
   inputs: Tuple[LazyBuffer, ...]
   var_vals: Dict[Variable, int]
+  metadata: str
 
 @dataclass(frozen=True, eq=False)
 class LazyOp:
@@ -108,5 +110,8 @@ class GlobalCounters:
   time_sum_s: ClassVar[float] = 0.0
   kernel_count: ClassVar[int] = 0
   mem_used: ClassVar[int] = 0   # NOTE: this is not reset
+  fn_usage: ClassVar[dict] = defaultdict(lambda: 0)
   @staticmethod
-  def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count = 0,0,0.0,0
+  def reset():
+    GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count = 0,0,0.0,0
+    GlobalCounters.fn_usage.clear()
