@@ -382,7 +382,7 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     # assert (i*128+128)*2 // (i*128+128) == 2
     # assert (i*128+128)*2 % (i*128+128) == 0
 
-  def test_sumnode_divmod_num_no_factoring(self):
+  def test_sumnode_div_numnode_no_factoring(self):
     gid = Variable("gid", 0, 1023)
     lid = Variable("lid", 0, 3)
     expr_before_div = NumNode(-1019)-4*lid-gid
