@@ -31,9 +31,13 @@ def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
   if si.ast[0].op is BufferOps.STORE: return Device[si.outputs[0].device].get_runner(*si.ast)
   assert len(si.ast) == 1 and len(si.outputs) == 1, "only ASTRunner supports multioutput"
   out, ast = si.outputs[0], si.ast[0]
-  if ast.op in {LoadOps.SYNC, LoadOps.WAIT} and out.device.startswith("HSA") and si.inputs[0].device.startswith("HSA"):
+  if ast.op in {LoadOps.SYNC, LoadOps.COPY} and out.device.startswith("HSA") and si.inputs[0].device.startswith("HSA"):
     # Our HSA runtime handles synchronization
     if ast.op is LoadOps.SYNC: return None
+    if ast.op is LoadOps.COPY and out.size <= getenv("HSA_AQL_COPY_TRESHOLD", 16 << 10): # TODO: profile better
+      st = ShapeTracker.from_shape((out.size,))
+      ast = LazyOp(BufferOps.STORE, (LazyOp(BufferOps.LOAD, (), MemBuffer(1, out.dtype, st)), ), MemBuffer(0, out.dtype, st))
+      return Device[si.inputs[0].device].get_runner(ast)
   if ast.op is LoadOps.COPY:
     if hasattr(Device[out.device].allocator, 'transfer') and type(Device[out.device]) is type(Device[si.inputs[0].device]): return BufferXfer()
     if si.inputs[0].device.startswith("DISK"): return BufferRead()

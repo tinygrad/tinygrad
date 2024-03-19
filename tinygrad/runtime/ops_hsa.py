@@ -207,6 +207,7 @@ class HSADevice(Compiled):
     self.agent = HSADevice.agents[hsa.HSA_DEVICE_TYPE_GPU][self.device_id]
     self.gpu_mempool = find_memory_pool(self.agent, segtyp=hsa.HSA_AMD_SEGMENT_GLOBAL, location=hsa.HSA_AMD_MEMORY_POOL_LOCATION_GPU)
     self.hw_queue = AQLQueue(self)
+    self.copy_queue = AQLQueue(self)
     HSADevice.devices.append(self)
 
     check(hsa.hsa_agent_get_info(self.agent, hsa.HSA_AGENT_INFO_NAME, ctypes.byref(agent_name_buf := ctypes.create_string_buffer(256))))

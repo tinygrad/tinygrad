@@ -46,9 +46,9 @@ class AQLQueue:
   def __del__(self):
     if hasattr(self, 'hw_queue'): check(hsa.hsa_queue_destroy(self.hw_queue))
 
-  def submit_kernel(self, prg, global_size, local_size, kernargs, need_signal=False):
+  def submit_kernel(self, prg, global_size, local_size, kernargs, need_signal=False, completion_signal=None):
     if self.available_packet_slots == 0: self._wait_queue()
-    signal = self._alloc_signal(reusable=True) if need_signal else EMPTY_SIGNAL
+    signal = (completion_signal or self._alloc_signal(reusable=True)) if need_signal else EMPTY_SIGNAL
 
     packet = hsa.hsa_kernel_dispatch_packet_t.from_address(self.write_addr)
     packet.workgroup_size_x = local_size[0]
