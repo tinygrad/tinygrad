@@ -45,7 +45,6 @@ class Linearizer(Kernel):
 
   # NOTE: the consts have to be cached for deduping of downstream uops to work
   def const(self, b:Union[int,float], dtype=dtypes.int32, insert_before=None) -> UOp:
-    b = int(b) if dtypes.is_int(dtype) else float(b)
     return self.uops.add(UOps.CONST, dtype, tuple(), b, insert_before=insert_before)
 
   def cast(self, val: UOp, dtype) -> UOp: return self.uops.add(UOps.CAST, dtype, (val,)) if val.dtype != dtype else val
