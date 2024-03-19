@@ -198,9 +198,39 @@ class TestLinearizerFailures(unittest.TestCase):
     all_failing_opts = [
       [Opt(op=OptOps.UPCAST, axis=0, amt=4), Opt(op=OptOps.GROUPTOP, axis=0, amt=32), Opt(op=OptOps.UNROLL, axis=0, amt=0)],
       [Opt(op=OptOps.GROUPTOP, axis=0, amt=32), Opt(op=OptOps.UNROLL, axis=0, amt=0), Opt(op=OptOps.UPCAST, axis=0, amt=4)],
+      [Opt(op=OptOps.UNROLL, axis=0, amt=4), Opt(op=OptOps.UNROLL, axis=0, amt=4), Opt(op=OptOps.LOCAL, axis=0, amt=16), Opt(op=OptOps.UPCAST, axis=0, amt=0)],
+      [Opt(op=OptOps.UNROLL, axis=0, amt=4), Opt(op=OptOps.LOCAL, axis=0, amt=4), Opt(op=OptOps.UPCAST, axis=0, amt=4), Opt(op=OptOps.UPCAST, axis=0, amt=0)],
+      [Opt(op=OptOps.UNROLL, axis=0, amt=4), Opt(op=OptOps.LOCAL, axis=0, amt=16), Opt(op=OptOps.UPCAST, axis=0, amt=0), Opt(op=OptOps.UNROLL, axis=0, amt=4)],
+      [Opt(op=OptOps.LOCAL, axis=0, amt=4), Opt(op=OptOps.UPCAST, axis=0, amt=4), Opt(op=OptOps.UNROLL, axis=0, amt=4), Opt(op=OptOps.UPCAST, axis=0, amt=0)],
+      [Opt(op=OptOps.LOCAL, axis=0, amt=16), Opt(op=OptOps.UPCAST, axis=0, amt=0), Opt(op=OptOps.UNROLL, axis=0, amt=4), Opt(op=OptOps.UNROLL, axis=0, amt=4)],
+      [Opt(op=OptOps.LOCAL, axis=0, amt=16), Opt(op=OptOps.UPCAST, axis=0, amt=0), Opt(op=OptOps.GROUP, axis=0, amt=8), Opt(op=OptOps.UNROLL, axis=1, amt=4)],
+      [Opt(op=OptOps.LOCAL, axis=0, amt=16), Opt(op=OptOps.GROUP, axis=0, amt=16), Opt(op=OptOps.UPCAST, axis=0, amt=0), Opt(op=OptOps.UNROLL, axis=1, amt=4)],
+      [Opt(op=OptOps.LOCAL, axis=0, amt=16), Opt(op=OptOps.GROUP, axis=0, amt=16), Opt(op=OptOps.UNROLL, axis=1, amt=4), Opt(op=OptOps.UPCAST, axis=0, amt=0)],
+      [Opt(op=OptOps.GROUP, axis=0, amt=8), Opt(op=OptOps.UNROLL, axis=1, amt=4), Opt(op=OptOps.LOCAL, axis=0, amt=16), Opt(op=OptOps.UPCAST, axis=0, amt=0)],
     ]
     for opts in all_failing_opts:
       helper_test_lin(Linearizer(ast), opts, failed_platforms=["METAL", "GPU", "HSA", "CUDA"])
+
+  # COMPARE_ERROR from GPT2 kernel - just the first element off
+  # testing ast 41
+  # 0 ━┳ STORE MemBuffer(idx=0, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 16, 13, 1), strides=(0, 13, 1, 0), offset=0, mask=None, contiguous=True),)))
+  # 1  ┗━┳ MAX (3,)
+  # 2    ┗━━ LOAD MemBuffer(idx=1, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 16, 13, 13), strides=(0, 169, 13, 1), offset=0, mask=None, contiguous=True),)))
+  # 208   13
+  # ...
+  # Mismatched elements: 1 / 1232 (0.0812%)
+  # Max absolute difference: 0.8687
+  # Max relative difference: 1.
+  #  x: array([0.   , 0.996, 0.829, ..., 0.   , 0.   , 0.   ], dtype=float16)
+  #  y: array([0.8687, 0.996 , 0.829 , ..., 0.    , 0.    , 0.    ], dtype=float16)
+  # COMPARE FAILED!!
+  def test_failure_27(self):
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.MAX, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 16, 13, 13), strides=(0, 169, 13, 1), offset=0, mask=None, contiguous=True),)))),), arg=(3,)),), arg=MemBuffer(idx=0, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 16, 13, 1), strides=(0, 13, 1, 0), offset=0, mask=None, contiguous=True),))))
+    all_failing_opts = [
+      [Opt(op=OptOps.PADTO, axis=0, amt=32), Opt(op=OptOps.UPCAST, axis=0, amt=4), Opt(op=OptOps.UPCAST, axis=0, amt=7), Opt(op=OptOps.UPCAST, axis=0, amt=0)],
+    ]
+    for opts in all_failing_opts:
+      helper_test_lin(Linearizer(ast), opts, failed_platforms=["METAL", "HSA", "CUDA", "CLANG"]) # "GPU" is a compiler failure
 
 if __name__ == '__main__':
   unittest.main()
