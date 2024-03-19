@@ -38,7 +38,7 @@ def get_fuzz_rawbuf_like(rawbuf, zero=False, size=None):
 
 def run_linearizer(lin: Linearizer, rawbufs=None, var_vals=None):
   if rawbufs is None: rawbufs = bufs_from_lin(lin)
-  if var_vals is None: var_vals = {v: v.min for v in lin.ast.vars()}
+  if var_vals is None: var_vals = {v: v.min for v in lin.ast[0].vars()}
 
   # TODO: images needs required_optimization
   try:
