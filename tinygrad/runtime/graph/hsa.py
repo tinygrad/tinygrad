@@ -79,15 +79,15 @@ class HSAGraph(MultiDeviceJITGraph):
     for j,ji in enumerate(self.jit_cache):
       if isinstance(ji.prg, CompiledASTRunner):
         sync_with_signals = len(set(rb.d for rb in ji.rawbufs)) > 1
-        dependency = j if not sync_with_signals else self.alloc_signal(reset_on_start=True, wait_on=list(set(rb.d for rb in ji.rawbufs)))
+        sync_dep = self.alloc_signal(reset_on_start=True, wait_on=list(set(rb.d for rb in ji.rawbufs))) if sync_with_signals or PROFILE else j
 
-        wait_signals = self.access_resources(read=ji.rawbufs[1:], write=ji.rawbufs[0:1], new_dependency=dependency, sync_with_aql_packets=sync_with_signals)
+        wait_signals = self.access_resources(read=ji.rawbufs[1:], write=ji.rawbufs[0:1], new_dependency=sync_dep, sync_with_aql_packets=sync_with_signals)
         for i in range(0, len(wait_signals), 5):
           self.virt_aql_queues[ji.prg.device].submit_barrier(wait_signals=wait_signals[i:i+5])
         self.packets[j] = hsa.hsa_kernel_dispatch_packet_t.from_address(self.virt_aql_queues[ji.prg.device].write_addr)
         self.virt_aql_queues[ji.prg.device].submit_kernel(ji.prg.clprg, *ji.prg.launch_dims(var_vals), ctypes.addressof(self.ji_kargs_structs[j]), #type:ignore
-                                                          need_signal=(sync_with_signals or PROFILE), completion_signal=dependency)
-        if PROFILE: self.profile_info[ji.prg.device].append((dependency, ji.prg.clprg.name, False))
+                                                          need_signal=(sync_with_signals or PROFILE), completion_signal=sync_dep)
+        if PROFILE: self.profile_info[ji.prg.device].append((sync_dep, ji.prg.clprg.name, False))
       elif isinstance(ji.prg, BufferXfer):
         dest, src = [cast(Buffer, x) for x in ji.rawbufs[0:2]]
         dest_dev, src_dev = cast(HSADevice, dest.d), cast(HSADevice, src.d)
