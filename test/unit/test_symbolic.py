@@ -382,6 +382,15 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     # assert (i*128+128)*2 // (i*128+128) == 2
     # assert (i*128+128)*2 % (i*128+128) == 0
 
+  def test_sumnode_div_numnode_no_factoring(self):
+    gid = Variable("gid", 0, 1023)
+    lid = Variable("lid", 0, 3)
+    expr_before_div = NumNode(-1019)-4*lid-gid
+    unfactored_expr = Node.__floordiv__(expr_before_div, NumNode(-16), False)
+    factored_expr = Node.__floordiv__(expr_before_div, NumNode(-16), True)
+    self.assertEqual(unfactored_expr.render(), "(((lid*4)+1019+gid)//16)")
+    self.assertEqual(factored_expr.render(), "((((1019+gid)//4)+lid)//4)")
+
   def test_mod_node_max(self):
     i = Variable("i", 1, 128)
     gidx0 = Variable("gidx0", 0, i)
