@@ -391,6 +391,7 @@ class TestTypeSpec(unittest.TestCase):
   @given(strat.sampled_from(dtype_ints), strat.sampled_from(dtype_floats))
   def test_arange(self, default_int, default_float):
     dtypes.default_int, dtypes.default_float = default_int, default_float
+    if not is_dtype_supported(default_int) or not is_dtype_supported(default_float): return
 
     _assert_eq(Tensor.arange(5), dtypes.default_int, np.arange(5))
     _assert_eq(Tensor.arange(120), dtypes.default_int, np.arange(120))
