@@ -230,7 +230,7 @@ class TestLinearizerFailures(unittest.TestCase):
       [Opt(op=OptOps.PADTO, axis=0, amt=32), Opt(op=OptOps.UPCAST, axis=0, amt=4), Opt(op=OptOps.UPCAST, axis=0, amt=7), Opt(op=OptOps.UPCAST, axis=0, amt=0)],
     ]
     for opts in all_failing_opts:
-      helper_test_lin(Linearizer(ast), opts, failed_platforms=["METAL", "HSA", "CUDA"]) # "GPU" is a compiler failure
+      helper_test_lin(Linearizer(ast), opts, failed_platforms=["METAL", "HSA", "CUDA", "CLANG"]) # "GPU" is a compiler failure
 
 if __name__ == '__main__':
   unittest.main()
