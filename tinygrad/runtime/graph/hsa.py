@@ -23,7 +23,6 @@ class VirtAQLQueue(AQLQueue):
     self.write_addr += AQL_PACKET_SIZE
     self.packets_count += 1
     self.available_packet_slots -= 1
-  def _alloc_signal(self, reusable=False): return init_c_var(hsa.hsa_signal_t(), lambda x: check(hsa.hsa_signal_create(1, 0, None, ctypes.byref(x))))
 
 class HSAGraph(MultiDeviceJITGraph):
   def __init__(self, jit_cache: List[JitItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
@@ -67,31 +66,28 @@ class HSAGraph(MultiDeviceJITGraph):
     self.signals_to_reset: List[hsa.hsa_signal_t] = []
     self.w_dependency_map: Dict[Any, Union[hsa.hsa_signal_t, int]] = {}
     self.r_dependency_map: Dict[Any, List[Union[hsa.hsa_signal_t, int]]] = collections.defaultdict(list)
-    signals_to_devices: Dict[ctypes.c_uint64, List[HSADevice]] = {}
+    self.signals_to_devices: Dict[ctypes.c_uint64, List[HSADevice]] = {}
     self.profile_info: Dict[Compiled, List[Tuple[Any, ...]]] = collections.defaultdict(list)
 
     # Special packet to wait for the world.
-    self.kickoff_signals: Dict[HSADevice, hsa.hsa_signal_t] = {}
-    for dev in self.devices: self.kickoff_signals[dev] = self.virt_aql_queues[dev].submit_barrier(need_signal=True)
-    self.signals_to_reset += list(self.kickoff_signals.values())
+    self.kickoff_signals: Dict[HSADevice, hsa.hsa_signal_t] = {dev:self.alloc_signal(reset_on_start=True) for dev in self.devices}
+    for dev in self.devices: self.virt_aql_queues[dev].submit_barrier([], self.kickoff_signals[dev])
 
     for j,ji in enumerate(self.jit_cache):
       if isinstance(ji.prg, CompiledASTRunner):
         wait_signals = self.access_resources(ji.rawbufs[(outs:=ji.prg.outcount):], ji.rawbufs[:outs], new_dependency=j, sync_with_aql_packets=False)
         for i in range(0, len(wait_signals), 5):
-          self.virt_aql_queues[ji.prg.device].submit_barrier(wait_signals=wait_signals[i:i+5])
+          self.virt_aql_queues[ji.prg.device].submit_barrier(wait_signals[i:i+5])
         self.packets[j] = hsa.hsa_kernel_dispatch_packet_t.from_address(self.virt_aql_queues[ji.prg.device].write_addr)
-        sync_signal = self.virt_aql_queues[ji.prg.device].submit_kernel(ji.prg.clprg, *ji.prg.launch_dims(var_vals), #type:ignore
-                                                                        ctypes.addressof(self.ji_kargs_structs[j]), need_signal=PROFILE)
-        if PROFILE:
-          self.profile_info[ji.prg.device].append((sync_signal, ji.prg.clprg.name, False))
-          self.signals_to_reset.append(sync_signal)
+
+        sync_signal = self.alloc_signal(reset_on_start=True) if PROFILE else None
+        self.virt_aql_queues[ji.prg.device].submit_kernel(ji.prg.clprg, *ji.prg.launch_dims(var_vals), #type:ignore
+                                                          ctypes.addressof(self.ji_kargs_structs[j]), completion_signal=sync_signal)
+        if PROFILE: self.profile_info[ji.prg.device].append((sync_signal, ji.prg.clprg.name, False))
       elif isinstance(ji.prg, BufferXfer):
         dest, src = [cast(Buffer, x) for x in ji.rawbufs[0:2]]
         dest_dev, src_dev = cast(HSADevice, dest.d), cast(HSADevice, src.d)
-        sync_signal = init_c_var(hsa.hsa_signal_t(), lambda x: check(hsa.hsa_amd_signal_create(1, 0, None, 0, ctypes.byref(x))))
-        self.signals_to_reset.append(sync_signal)
-        signals_to_devices[sync_signal.handle] = [dest_dev, src_dev]
+        sync_signal = self.alloc_signal(reset_on_start=True, wait_on=[dest_dev, src_dev])
 
         wait_signals = self.access_resources(read=[src], write=[dest], new_dependency=sync_signal, sync_with_aql_packets=True)
         self.transfers.append([dest._buf, dest_dev.agent, src._buf, src_dev.agent, dest.nbytes, len(wait_signals),
@@ -102,14 +98,14 @@ class HSAGraph(MultiDeviceJITGraph):
     # Wait for all active signals to finish the graph
     wait_signals_to_finish: Dict[HSADevice, List[hsa.hsa_signal_t]] = collections.defaultdict(list)
     for v in dedup_signals(list(self.w_dependency_map.values()) + list(itertools.chain.from_iterable(self.r_dependency_map.values()))):
-      for dev in signals_to_devices[v.handle]:
+      for dev in self.signals_to_devices[v.handle]:
         wait_signals_to_finish[dev].append(v)
 
     self.finish_signal = init_c_var(hsa.hsa_signal_t(), lambda x: check(hsa.hsa_amd_signal_create(1, 0, None, 0, ctypes.byref(x))))
     for dev in self.devices:
       wait_signals = wait_signals_to_finish[dev]
       for i in range(0, max(1, len(wait_signals)), 5):
-        self.virt_aql_queues[dev].submit_barrier(wait_signals[i:i+5], need_signal=(i+5>=len(wait_signals)), completion_signal=self.finish_signal)
+        self.virt_aql_queues[dev].submit_barrier(wait_signals[i:i+5], completion_signal=self.finish_signal if i+5>=len(wait_signals) else None)
 
     # Zero signals to allow graph to start and execute.
     for sig in self.signals_to_reset: hsa.hsa_signal_silent_store_relaxed(sig, 0)
@@ -162,12 +158,16 @@ class HSAGraph(MultiDeviceJITGraph):
                  jit=jit, num_kernels=len(self.jit_cache), device="HSA")
     return et
 
+  def alloc_signal(self, reset_on_start=False, wait_on=None):
+    sync_signal = init_c_var(hsa.hsa_signal_t(), lambda x: check(hsa.hsa_amd_signal_create(1, 0, None, 0, ctypes.byref(x))))
+    if reset_on_start: self.signals_to_reset.append(sync_signal)
+    if wait_on is not None: self.signals_to_devices[sync_signal.handle] = wait_on
+    return sync_signal
+
   def dependency_as_signal(self, dep, sync_with_aql_packets) -> Optional[hsa.hsa_signal_t]:
     if isinstance(dep, hsa.hsa_signal_t): return dep
     elif sync_with_aql_packets and isinstance(packet := self.packets.get(dep), hsa.hsa_kernel_dispatch_packet_t):
-      if packet.completion_signal.handle == EMPTY_SIGNAL.handle:
-        packet.completion_signal = init_c_var(hsa.hsa_signal_t(), lambda x: check(hsa.hsa_amd_signal_create(1, 0, None, 0, ctypes.byref(x))))
-        self.signals_to_reset.append(packet.completion_signal)
+      if packet.completion_signal.handle == EMPTY_SIGNAL.handle: packet.completion_signal = self.alloc_signal(reset_on_start=True)
       return packet.completion_signal
     return None
 
