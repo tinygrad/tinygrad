@@ -60,7 +60,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
     new = uops.add(UOps.CAST, dtypes.bool, (root,), insert_before=uops.uops.index(root)+1)
     ptr_ar(root)
     return new
-    
+
   def gate_rep(root, x, y, z, k):
     new = uops.add(UOps.CAST, dtypes.uint8, (k,), insert_before=uops.uops.index(root))
     root.vin = (x,y,z,new)
@@ -82,7 +82,8 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
   matcher = PatternMatcher([
     ({"__name__": "root", "uop": UOps.ALU, "arg": BinaryOps.CMPEQ, "vin": ({"__name__": "x", "dtype": dtypes.bool},{"__name__": "y"})}, eq_rep),
     ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": ({"__name__": "x", "dtype": dtypes.bool},{"__name__": "y"})}, lt_rep),
-    ({"__name__": "root", "uop": UOps.LOAD,"dtype": dtypes.bool, "vin": ({"__name__": "x"},{"__name__": "y"},{"__name__": "z"},{"__name__": "k"})}, gate_rep),
+    ({"__name__": "root", "uop": UOps.LOAD,"dtype": dtypes.bool,
+      "vin": ({"__name__": "x"},{"__name__": "y"},{"__name__": "z"},{"__name__": "k"})}, gate_rep),
     ({"__name__": "root", "uop": UOps.LOAD,"dtype": dtypes.bool, "vin": ({"__name__": "x"},{"__name__": "y"})}, ld_rep),
     ({"__name__": "root", "uop": UOps.STORE, "vin": {}}, ptr_ar),
     ({"__name__": "root", "uop": UOps.LOAD, "vin": {}}, ptr_ar),
