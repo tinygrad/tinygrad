@@ -10,7 +10,6 @@ from tinygrad.helpers import getenv
 
 class TestTimeLinearizer(unittest.TestCase):
   def test_reasonable_time(self):
-    if getenv("PTX"): self.skipTest('PTX expects UOpsGraph, this passes UOps as list')
     si = [i for i in create_schedule([Tensor([1,2,3,4]).add(1).lazydata]) if i.ast[0].op not in LoadOps][0]
     out = Buffer(Device.DEFAULT, si.outputs[0].st.real_size(), si.outputs[0].dtype)
     rawbufs = [out] + [Buffer(Device.DEFAULT, x.st.real_size(), x.dtype) for x in si.inputs]
