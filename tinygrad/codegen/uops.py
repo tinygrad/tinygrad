@@ -250,10 +250,10 @@ class UOpGraph:
         non_loop = to_symbolic(next(v for v in with_loop.vin if v != next_with_loop and loop_op not in get_recursive_parents(v)))
         if round_up and with_loop.arg is BinaryOps.MUL: factored = factored + (non_loop - 1)
         return loop_factor(next_with_loop, alu_opposite(with_loop.arg, factored, non_loop), loop_op)
-    def const(x): return self.add(UOps.CONST, dtypes.default_int, tuple(), x)
-    def neg(x): return self.add(UOps.ALU, dtypes.default_int, (x,), UnaryOps.NEG)
-    def max(x, y): return self.add(UOps.ALU, dtypes.default_int, (x, y), BinaryOps.MAX)
-    def uop_alu_idx(a: UOp, b, op, dtype=dtypes.default_int):
+    def const(x): return self.add(UOps.CONST, dtypes.int32, tuple(), x)
+    def neg(x): return self.add(UOps.ALU, dtypes.int32, (x,), UnaryOps.NEG)
+    def max(x, y): return self.add(UOps.ALU, dtypes.int32, (x, y), BinaryOps.MAX)
+    def uop_alu_idx(a: UOp, b, op, dtype=dtypes.int32):
       render_b: UOp = cast(UOp, (NumNode(b) if not isinstance(b, Node) else b).render(render_ops))
       return self.add(UOps.ALU, dtype, (a, render_b), op)
     seen_vars: Dict[UOp,str] = {}
@@ -282,7 +282,7 @@ class UOpGraph:
         loop_length = loop_op.vin[1].arg - loop_op.vin[0].arg
         min_clamped = max(rendered, const(0)) if (final_value.min < 0) else rendered
         max_clamped = neg(max(const(-1*loop_length), neg(min_clamped))) if (final_value.max > loop_length) else min_clamped
-        maybe_cast = self.add(UOps.CAST, where.dtype, (max_clamped,)) if where.dtype != dtypes.default_int else max_clamped
+        maybe_cast = self.add(UOps.CAST, where.dtype, (max_clamped,)) if where.dtype != dtypes.int32 else max_clamped
         final_op = self.add(UOps.ALU, where.dtype, (maybe_cast, where.vin[1]), BinaryOps.MUL)
         self.uops = self.uops + after_split_ops
         self.replace_op(where, final_op)

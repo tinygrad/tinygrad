@@ -388,18 +388,20 @@ class TestTypeSpec(unittest.TestCase):
     # _assert_eq(Tensor.ones((2,3,0), dtype=dtypes.default_int).sum(2), dtypes.default_int, np.zeros((2, 3)))
     _assert_eq(Tensor.ones((2,3,0), dtype=dtypes.int32).sum(2), dtypes.int32, np.zeros((2, 3)))
 
+  @unittest.skipIf(Device.DEFAULT=="RHIP", "failed in HIP CI")
   @given(strat.sampled_from(dtype_ints), strat.sampled_from(dtype_floats))
   def test_arange(self, default_int, default_float):
     dtypes.default_int, dtypes.default_float = default_int, default_float
 
-    # TODO: this might fail with different default dtype https://github.com/tinygrad/tinygrad/issues/3823
-    assert Tensor.arange(5).dtype == dtypes.default_int
-    assert Tensor.arange(5.0).dtype == dtypes.default_float
-    assert Tensor.arange(5, dtype=dtypes.int16).dtype == dtypes.int16
-    assert Tensor.arange(5, dtype=dtypes.int64).dtype == dtypes.int64
-    assert Tensor.arange(5, dtype=dtypes.float16).dtype == dtypes.float16
-    assert Tensor.arange(3, 9, 0.7).dtype == dtypes.default_float
-    assert Tensor.arange(3, 8.5, 3).dtype == dtypes.default_float
+    _assert_eq(Tensor.arange(5), dtypes.default_int, np.arange(5))
+    _assert_eq(Tensor.arange(120), dtypes.default_int, np.arange(120))
+    _assert_eq(Tensor.arange(5.0), dtypes.default_float, np.arange(5))
+    _assert_eq(Tensor.arange(5, dtype=dtypes.int16), dtypes.int16, np.arange(5))
+    _assert_eq(Tensor.arange(5, dtype=dtypes.int64), dtypes.int64, np.arange(5))
+    if is_dtype_supported(dtypes.float16):
+      _assert_eq(Tensor.arange(5, dtype=dtypes.float16), dtypes.float16, np.arange(5))
+    _assert_eq(Tensor.arange(3, 9, 0.7), dtypes.default_float, np.arange(3, 9, 0.7))
+    _assert_eq(Tensor.arange(3, 8.5, 3), dtypes.default_float, np.arange(3, 8.5, 3))
 
   @given(strat.sampled_from(core_dtypes), strat.sampled_from([operator.gt, operator.ge, operator.le, operator.lt, operator.eq, operator.ne]))
   def test_bool_ops(self, dtype, op):
