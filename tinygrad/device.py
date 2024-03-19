@@ -278,6 +278,12 @@ class Compiled:
         timed = sorted([(nm, tk, time_linearizer(tk, test_rawbuffers, allow_test_size=False, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
         if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
         k = timed[0][1]
+
+        if getenv("BEAM_VERIFY", 0): # compare the beam generated values with required_opts only
+          from test.external.fuzz_linearizer import compare_linearizer
+          if (msg:=(compare_linearizer(k, None, None, None, getenv("BEAM_VERIFY_RTOL", 1e-2), getenv("BEAM_VERIFY_ATOL", 1e-2)))[0]) != "PASS":
+            raise RuntimeError(f"BEAM_VERIFY FAILED: {msg=}\nast={k.ast}\nbeam color={k.colored_shape()}\nbeam applied_opts={k.applied_opts}")
+
     return k
 
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
