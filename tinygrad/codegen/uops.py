@@ -345,9 +345,7 @@ class UOpGraph:
 
     # uops optimization
     while self.uops_optimization(get_recursive_parents): pass
-
-    # TODO: enabling this breaks test_linearizer_failure.test_failure_25
-    # self.simplify_phi_loops(get_recursive_parents)
+    self.simplify_phi_loops(get_recursive_parents)
 
     # (recursively) remove childless uops
     # TODO: remove DEFINE_GLOBAL from here
