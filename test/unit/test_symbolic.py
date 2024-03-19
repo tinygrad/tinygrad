@@ -386,10 +386,10 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     gid = Variable("gid", 0, 1023)
     lid = Variable("lid", 0, 3)
     expr_before_div = NumNode(-1019)-4*lid-gid
-    no_factor_expr = Node.__floordiv__(expr_before_div, NumNode(-16), False)
-    factor_expr = Node.__floordiv__(expr_before_div, NumNode(-16), True)
-    self.assertEqual(no_factor_expr.render(), "(((lid*4)+1019+gid)//16)")
-    self.assertEqual(factor_expr.render(), "((((1019+gid)//4)+lid)//4)")
+    unfactored_expr = Node.__floordiv__(expr_before_div, NumNode(-16), False)
+    factored_expr = Node.__floordiv__(expr_before_div, NumNode(-16), True)
+    self.assertEqual(unfactored_expr.render(), "(((lid*4)+1019+gid)//16)")
+    self.assertEqual(factored_expr.render(), "((((1019+gid)//4)+lid)//4)")
 
   def test_mod_node_max(self):
     i = Variable("i", 1, 128)
