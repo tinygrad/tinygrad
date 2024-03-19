@@ -268,7 +268,7 @@ class Tensor:
     if stop is None: stop, start = start, 0
     assert all(isinstance(s, (int, float)) for s in (start, stop, step)), "symbolic arange not supported"
     dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
-    return (Tensor.full((math.ceil((stop-start)/step),), step, dtype=dtype, **kwargs).cumsum() + (start - step)).cast(dtype)
+    return (Tensor.full((math.ceil((stop-start)/step)-1,), step, dtype=dtype, **kwargs)._cumsum(_first_zero=True)).cast(dtype)
 
   @staticmethod
   def eye(dim:int, **kwargs):
@@ -486,12 +486,14 @@ class Tensor:
       sum_dim = tuple(d if n==0 else d+max_idx_dim-n for n,d in enumerate(idx.keys()))
       arange = [Tensor.arange(ret.shape[d], requires_grad=False, device=self.device).reshape(ret.shape[d], *[1]*(ret.ndim+max_idx_dim-n-sd-1)) \
                 for n,(sd,d) in enumerate(zip(sum_dim, idx.keys()))]
-      reshaped_idx = [i.reshape(i.shape + (1,)*(ret.ndim - first_dim - (n or 1))) for n,i in enumerate(idx.values())]
+      reshaped_idx = [i.reshape((1,) + i.shape + (1,)*(ret.ndim - first_dim - (n or 1))) for n,i in enumerate(idx.values())]
       ret = ret.reshape(ret.shape[:first_dim+1] + (1,)*max_idx_dim + ret.shape[first_dim+1:])
 
       # iteratively eq -> mul -> sum fancy index
       try:
-        for a,i,sd in zip(arange, reshaped_idx, sum_dim): ret = (a==i).mul(ret).sum(sd)
+        for a,i,sd in zip(arange, reshaped_idx, sum_dim):
+          big_shape = tuple(max(x,y,z) for x,y,z in zip(a.shape, i.shape, ret.shape))
+          ret = (a.expand(big_shape)==i.expand(big_shape)).mul(ret).sum(sd)
       except AssertionError as exc: raise IndexError("cannot broadcast indices") from exc
 
       # special permute case
