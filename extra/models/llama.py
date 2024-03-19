@@ -1,4 +1,4 @@
-from typing import Tuple, Union, Optional, Dict
+from typing import Tuple, Union, Optional, Dict, Any
 from tinygrad import Tensor, Variable, TinyJit, dtypes, nn, Device
 from tinygrad.helpers import getenv
 
@@ -69,8 +69,8 @@ class Attention:
       self.cache_v = Tensor.zeros(bsz, self.max_context, self.n_kv_heads, self.head_dim, dtype=x.dtype).contiguous().realize()
       if isinstance(x.device, tuple):
         # TODO: instead of specifying how to shard, it can follow how xk and xv are being sharded
-        self.cache_k.shard_((xk.device), axis=None)
-        self.cache_v.shard_((xv.device), axis=None)
+        self.cache_k.shard_((xk.device), axis=None).realize()
+        self.cache_v.shard_((xv.device), axis=None).realize()
 
     # HACK: without contiguous, the conversation mode is broken and the cache is not updated
     keys = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1).contiguous() if start_pos > 0 else xk
@@ -163,3 +163,10 @@ def convert_from_huggingface(weights:Dict[str, Tensor], model: Transformer, n_he
         v = permute(v, n_kv_heads)
     sd[keymap[k]] = v
   return sd
+
+def fix_bf16(weights:Dict[Any, Tensor]):
+  if getenv("SUPPORT_BF16", 1):
+    # TODO: without casting to float16, 70B llama OOM on tinybox.
+    return {k:v.cast(dtypes.float16) if v.dtype == dtypes.bfloat16 else v for k,v in weights.items()}
+  # TODO: check if device supports bf16
+  return {k:v.llvm_bf16_cast(dtypes.half).to(v.device) if v.dtype == dtypes.bfloat16 else v for k,v in weights.items()}

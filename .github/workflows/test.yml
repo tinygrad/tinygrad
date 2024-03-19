@@ -35,16 +35,18 @@ jobs:
         IMAGE=2 PYTHON=1 python3 test/test_ops.py TestOps.test_simple_conv2d
     - name: Test emulated METAL tensor cores
       run: DEBUG=2 EMULATE_METAL=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_big_gemm
-    - name: Test emulated HIP tensor cores
+    - name: Test emulated HSA tensor cores
       run: |
-        PYTHONPATH=. DEBUG=2 EMULATE_HIP=1 FORWARD_ONLY=1 PYTHON=1 N=16 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
-        PYTHONPATH=. DEBUG=2 EMULATE_HIP=1 FORWARD_ONLY=1 PYTHON=1 N=64 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
-        PYTHONPATH=. DEBUG=2 EMULATE_HIP=1 FORWARD_ONLY=1 PYTHON=1 N=16 HALF=1 ACC_HALF=1 python3 ./extra/gemm/simple_matmul.py
-        PYTHONPATH=. DEBUG=2 EMULATE_HIP=1 FORWARD_ONLY=1 PYTHON=1 N=64 HALF=1 ACC_HALF=1 python3 ./extra/gemm/simple_matmul.py
+        PYTHONPATH=. DEBUG=2 EMULATE_HSA=1 FORWARD_ONLY=1 PYTHON=1 N=16 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
+        PYTHONPATH=. DEBUG=2 EMULATE_HSA=1 FORWARD_ONLY=1 PYTHON=1 N=64 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
+        PYTHONPATH=. DEBUG=2 EMULATE_HSA=1 FORWARD_ONLY=1 PYTHON=1 N=16 HALF=1 ACC_HALF=1 python3 ./extra/gemm/simple_matmul.py
+        PYTHONPATH=. DEBUG=2 EMULATE_HSA=1 FORWARD_ONLY=1 PYTHON=1 N=64 HALF=1 ACC_HALF=1 python3 ./extra/gemm/simple_matmul.py
+    - name: Test enumlated CUDA tensor cores
+      run: DEBUG=2 EMULATE_CUDA=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_big_gemm
     - name: Full test tensor cores
       run: |
         DEBUG=2 EMULATE_METAL=1 FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
-        DEBUG=2 EMULATE_HIP=1 FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
+        DEBUG=2 EMULATE_HSA=1 FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
         DEBUG=2 EMULATE_CUDA=1 FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
     - name: Test dtype with Python emulator
       run: PYTHONPATH=. DEBUG=2 PYTHON=1 python3 test/test_dtype.py
@@ -208,11 +210,6 @@ jobs:
       - if: ${{ matrix.task == 'openpilot' }}
         name: Test openpilot fastvits model correctness (float32)
         run: FLOAT16=0 DEBUGCL=1 GPU=1 IMAGE=2 python openpilot/compile2.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
-      #- if: ${{ matrix.task == 'openpilot' }}
-      #  name: Test multigpu
-      #  run: |
-      #    PYTHONPATH="." python test/external/dist/test_world.py
-      #    PYTHONPATH="." python test/external/dist/test_collectives.py
       - if: ${{ matrix.task == 'onnx' }}
         name: Test ONNX (GPU)
         run: GPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
@@ -228,6 +225,9 @@ jobs:
       - if: ${{ matrix.task == 'onnx' }}
         name: Test MLPerf optimizers
         run: GPU=1 python -m pytest -n=auto test/external/external_test_optim.py --durations=20
+      - if: ${{ matrix.task == 'onnx' }}
+        name: Test THREEFRY
+        run: PYTHONPATH=. THREEFRY=1 GPU=1 python3 -m pytest test/test_randomness.py test/test_jit.py
 
   #testwebgpu:
   #  name: WebGPU Tests
@@ -375,7 +375,7 @@ jobs:
           path: ~/.cache/tinygrad/downloads/
           key: downloads-cache-${{ matrix.backend }}-${{ env.DOWNLOAD_CACHE_VERSION }}
       - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'cuda' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\n' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nPTX=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas' || matrix.backend == 'hip' && 'HIP=1\nHIPCPU=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
+        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'cuda' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\n' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nPTX=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas' || matrix.backend == 'hip' && 'RHIP=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
       - name: Install OpenCL
         if: matrix.backend == 'gpu'
         run: |
@@ -435,7 +435,7 @@ jobs:
         run: pip install -e '.[testing${{matrix.backend=='llvm'&&',llvm'||matrix.backend=='cuda'&&',cuda'||matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
       - name: Check Device.DEFAULT and print some source
         run: |
-          python -c "from tinygrad import Device; assert Device.DEFAULT in ['LLVM','CLANG','CUDA','GPU', 'HIP'], Device.DEFAULT"
+          python -c "from tinygrad import Device; assert Device.DEFAULT in ['LLVM','CLANG','CUDA','GPU','RHIP'], Device.DEFAULT"
           DEBUG=5 PYTHONPATH=${{ github.workspace }} FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
       - name: Verify OpenCL autogen
         if: matrix.backend == 'gpu'

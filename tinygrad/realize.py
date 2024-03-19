@@ -31,10 +31,6 @@ def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
   if si.ast[0].op is BufferOps.STORE: return Device[si.outputs[0].device].get_runner(*si.ast)
   assert len(si.ast) == 1 and len(si.outputs) == 1, "only ASTRunner supports multioutput"
   out, ast = si.outputs[0], si.ast[0]
-  if ast.op in {LoadOps.SYNC, LoadOps.WAIT, LoadOps.COPY} and out.device.startswith("HIP") and si.inputs[0].device.startswith("HIP"):
-    from tinygrad.runtime.ops_hip import HIPSyncEvent, HIPWaitEvent
-    if ast.op is LoadOps.SYNC: return HIPSyncEvent(out)
-    if ast.op is LoadOps.WAIT: return HIPWaitEvent(out.device)
   if ast.op in {LoadOps.SYNC, LoadOps.WAIT} and out.device.startswith("HSA") and si.inputs[0].device.startswith("HSA"):
     # Our HSA runtime handles synchronization
     if ast.op is LoadOps.SYNC: return None
@@ -111,10 +107,14 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
     return LazyOp(BufferOps.LOAD, (), MemBuffer(inputs.index(buf)+1, buf.dtype, unbound_st))
 
   # if a CONTIGUOUS or ASSIGN made it all the way here, just skip it
-  if buf.op in {LoadOps.CONTIGUOUS, LoadOps.ASSIGN}:
+  if buf.op is LoadOps.CONTIGUOUS:
     assert first
-    return _recursive_lazyop(buf.srcs[0], inputs, var_vals, st, realizes, cache, False,
-                             assign_to=buf.srcs[1].base if buf.op is LoadOps.ASSIGN else None)
+    return _recursive_lazyop(buf.srcs[0], inputs, var_vals, st, realizes, cache, False)
+  if buf.op is LoadOps.ASSIGN:
+    assert first
+    assert buf.srcs[1].base is buf.srcs[1], "assign must be to base"
+    assert buf.srcs[1].realized is not None, f"assign must be already realized to schedule {buf.srcs[1]}"
+    return _recursive_lazyop(buf.srcs[0], inputs, var_vals, st, realizes, cache, False, assign_to=buf.srcs[1])
 
   # if it's a reduce, we have to change the shapetracker
   if buf.op in ReduceOps:

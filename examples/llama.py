@@ -12,7 +12,7 @@ from tinygrad.helpers import Timing, Profiling, getenv, DEBUG, colored
 from tinygrad import Device, GlobalCounters, dtypes, nn
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
-from extra.models.llama import Transformer, convert_from_huggingface
+from extra.models.llama import Transformer, convert_from_huggingface, fix_bf16
 from sentencepiece import SentencePieceProcessor
 
 MAX_CONTEXT = getenv("MAX_CONTEXT", 4096)
@@ -176,8 +176,7 @@ class LLaMa:
     if "model.embed_tokens.weight" in weights:
       weights = convert_from_huggingface(weights, model, params["args"]["n_heads"], params["args"].get("n_kv_heads", params["args"]["n_heads"]))
 
-    # fix bf16, TODO: check if device supports bf16
-    weights = {k:v.to(Device.DEFAULT).cast(dtypes.float16) if v.dtype == dtypes.bfloat16 else v for k,v in weights.items()}
+    weights = fix_bf16(weights)
 
     if quantize:
       weights = AbsmaxQuantizedLinear.quantize(weights)
