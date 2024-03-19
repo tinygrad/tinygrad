@@ -405,13 +405,12 @@ class TestTypeSpec(unittest.TestCase):
   def test_bool_ops(self, dtype, op):
     assert op(Tensor.rand(4, 4, dtype=dtype), Tensor.rand(4, 4, dtype=dtype)).dtype == dtypes.bool
 
-  @given(strat.sampled_from(core_dtypes),
-         strat.sampled_from([dtypes.int8,dtypes.int16,dtypes.int32,dtypes.int64]), strat.sampled_from([dtypes.float16,dtypes.float32,dtypes.float64]))
+  @given(strat.sampled_from(core_dtypes), strat.sampled_from(dtype_ints), strat.sampled_from(dtype_floats))
   def test_functions_return_index(self, dtype, default_int, default_float):
     dtypes.default_int, dtypes.default_float = default_int, default_float
-    assert Tensor([0, 1], dtype=dtype).argmax().dtype == dtypes.default_int
-    assert Tensor([0, 1], dtype=dtype).argmin().dtype == dtypes.default_int
-    assert Tensor([0, 1], dtype=dtype).multinomial().dtype == dtypes.default_int
+    assert Tensor([0, 1], dtype=dtype).argmax().dtype == dtypes.int32
+    assert Tensor([0, 1], dtype=dtype).argmin().dtype == dtypes.int32
+    assert Tensor([0, 1], dtype=dtype).multinomial().dtype == dtypes.int32
 
 class TestTypePromotion(unittest.TestCase):
   @given(strat.sampled_from(core_dtypes))
