@@ -122,6 +122,8 @@ class TinyJit(Generic[ReturnType]):
         for p in get_parameters(self.ret): p.realize()
       self.jit_cache = CacheCollector.finish()
       assert len(self.jit_cache) != 0, "didn't JIT anything!"
+      # TODO: reset doesn't work if we delete this
+      #del self.fxn
       if DEBUG >= 1 and len(set(get_input_replace(self.jit_cache, input_rawbuffers).values())) != len(input_rawbuffers):
         print("WARNING: some input tensors not found")
       if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
@@ -162,16 +164,15 @@ class _CacheCollector:
     self.placeholders: WeakKeyDictionary[Buffer, PlaceHolder] = WeakKeyDictionary()
     self.var_vals = var_vals if var_vals is not None else {}
 
-  def add(self, prg, rawbufs, var_vals):
+  def add(self, prg, rawbufs:List[Buffer], var_vals:Dict[Variable, int]):
     if self.cache is None: return
     for k,v in var_vals.items(): assert k in self.var_vals and self.var_vals[k] == v, f"var_vals {k} mismatch {v} != {self.var_vals.get(k)}"
 
     # Buffer optimization is allowed only for kernel operations. Avoids for copies (prevents parallelism) and syncs (incorrect buffer reuse).
-    allow_buffer_optimization = isinstance(prg, CompiledASTRunner)
+    if isinstance(prg, CompiledASTRunner):
+      for i in range(prg.outcount): self.placeholders[rawbufs[i]] = PlaceHolder(rawbufs[i])
 
-    # NOTE: this is making an assumption that 0 is special
-    if len(rawbufs): self.placeholders[rawbufs[0]] = PlaceHolder(rawbufs[0])
-    self.cache.append((prg, [self.placeholders.get(x, x) if isinstance(x, Buffer) and allow_buffer_optimization else x for x in rawbufs]))
+    self.cache.append((prg, [self.placeholders.get(x, x) if isinstance(x, Buffer) else x for x in rawbufs]))
 
   def finish(self) -> List[JitItem]:
     if self.cache is None: return []
