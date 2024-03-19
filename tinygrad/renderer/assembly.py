@@ -4,7 +4,7 @@ from collections import defaultdict
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op
 from tinygrad.dtype import dtypes, DType, PtrDType, INVERSE_DTYPES_DICT
-from tinygrad.codegen.uops import UOpGraph
+from tinygrad.codegen.uops import UOpGraph, PatternMatcher
 
 def render_val(x, dtype):
   if dtypes.is_float(dtype):
@@ -45,9 +45,51 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
   kernel:List[str] = []
   bufs = []
 
+  def eq_rep(root, x, y):
+    root.arg = BinaryOps.XOR
+    new = uops.add(UOps.ALU, dtypes.bool, (root,), arg=UnaryOps.NEG, insert_before=uops.uops.index(root)+1)
+    return new
+
+  def lt_rep(x, y):
+    new = uops.add(UOps.ALU, dtypes.bool, (u.vin[0],), arg=UnaryOps.NEG, insert_before=uops.uops.index(u))
+    u.vin = (new, u.vin[1])
+    u.arg = BinaryOps.MUL
+
+  def ld_rep(root, x, y):
+    root.dtype = dtypes.uint8
+    new = uops.add(UOps.CAST, dtypes.bool, (root,), insert_before=uops.uops.index(root)+1)
+    ptr_ar(root)
+    return new
+    
+  def gate_rep(root, x, y, z, k):
+    new = uops.add(UOps.CAST, dtypes.uint8, (k,), insert_before=uops.uops.index(root))
+    root.vin = (x,y,z,new)
+    return ld_rep(root,x,y)
+
+  def ptr_ar(root):
+    root.arg = '.shared' if root.vin[0].uop == UOps.DEFINE_LOCAL else '.global'  # move this to the argL
+    if root.vin[0].dtype.itemsize > 1:
+      val = uops.add(UOps.CONST, dtypes.int, tuple(), arg=root.vin[0].dtype.itemsize, insert_before=uops.uops.index(root))
+      ptr = uops.add(UOps.ALU, dtypes.int, (root.vin[1], val), arg=BinaryOps.MUL, insert_before=uops.uops.index(root))
+    else: ptr = root.vin[1]
+    if ptr.uop == UOps.CONST: root.vin = (root.vin[0], ptr) + root.vin[2:]
+    else:
+      zero = uops.add(UOps.CONST, dtypes.int, tuple(), arg=0, cachable=False, insert_before=uops.uops.index(root))
+      bptr = uops.add(UOps.CAST, dtypes.uint64, (ptr,), insert_before=uops.uops.index(root))
+      fptr = uops.add(UOps.ALU, dtypes.uint64, (root.vin[0], bptr), arg=BinaryOps.ADD, insert_before=uops.uops.index(root))
+      root.vin = (fptr, zero) + root.vin[2:]
+
+  matcher = PatternMatcher([
+    ({"__name__": "root", "uop": UOps.ALU, "arg": BinaryOps.CMPEQ, "vin": ({"__name__": "x", "dtype": dtypes.bool},{"__name__": "y"})}, eq_rep),
+    ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": ({"__name__": "x", "dtype": dtypes.bool},{"__name__": "y"})}, lt_rep),
+    ({"__name__": "root", "uop": UOps.LOAD,"dtype": dtypes.bool, "vin": ({"__name__": "x"},{"__name__": "y"},{"__name__": "z"},{"__name__": "k"})}, gate_rep),
+    ({"__name__": "root", "uop": UOps.LOAD,"dtype": dtypes.bool, "vin": ({"__name__": "x"},{"__name__": "y"})}, ld_rep),
+    ({"__name__": "root", "uop": UOps.STORE, "vin": {}}, ptr_ar),
+    ({"__name__": "root", "uop": UOps.LOAD, "vin": {}}, ptr_ar),
+  ])
+
   # here we do a pretransform on UOps to fix some shortcomings of PTX
   # all uops must be a register
-  # TODO: uops class should make these rewrites easier
   replace: Dict[UOp, UOp] = {}
   seen: Set[UOp] = set()
   for u in uops:
@@ -56,38 +98,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
     for o,n in replace.items():
       if o in u.vin and u is not n:
         u.vin = tuple(n if x == o else x for x in u.vin)
-    if u.uop is UOps.LOAD and u.dtype is dtypes.bool:
-      # rewrite load bool
-      if len(u.vin) == 4:
-        new = uops.add(UOps.CAST, dtypes.uint8, (u.vin[3],), insert_before=uops.uops.index(u))
-        u.vin = u.vin[0:3] + (new,)
-      u.dtype = dtypes.uint8
-      new = uops.add(UOps.CAST, dtypes.bool, (u,), insert_before=uops.uops.index(u)+1)
-      replace[u] = new
-    if u.uop is UOps.ALU and u.arg in {BinaryOps.CMPEQ, BinaryOps.CMPLT} and u.vin[0].dtype is dtypes.bool:
-      if u.arg == BinaryOps.CMPEQ:
-        u.arg = BinaryOps.XOR
-        new = uops.add(UOps.ALU, dtypes.bool, (u,), arg=UnaryOps.NEG, insert_before=uops.uops.index(u)+1)
-        replace[u] = new
-      if u.arg == BinaryOps.CMPLT:
-        new = uops.add(UOps.ALU, dtypes.bool, (u.vin[0],), arg=UnaryOps.NEG, insert_before=uops.uops.index(u))
-        u.vin = (new, u.vin[1])
-        u.arg = BinaryOps.MUL
-    if u.uop in {UOps.LOAD, UOps.STORE}:
-      u.arg = '.shared' if u.vin[0].uop == UOps.DEFINE_LOCAL else '.global'  # move this to the argL
-      if u.vin[0].dtype.itemsize > 1:
-        val = uops.add(UOps.CONST, dtypes.int, tuple(), arg=u.vin[0].dtype.itemsize, insert_before=uops.uops.index(u))
-        ptr = uops.add(UOps.ALU, dtypes.int, (u.vin[1], val), arg=BinaryOps.MUL, insert_before=uops.uops.index(u))
-      else:
-        ptr = u.vin[1]
-      if ptr.uop == UOps.CONST:
-        u.vin = (u.vin[0], ptr) + u.vin[2:]
-      else:
-        zero = uops.add(UOps.CONST, dtypes.int, tuple(), arg=0, cachable=False, insert_before=uops.uops.index(u))
-        bptr = uops.add(UOps.CAST, dtypes.uint64, (ptr,), insert_before=uops.uops.index(u))
-        fptr = uops.add(UOps.ALU, dtypes.uint64, (u.vin[0], bptr), arg=BinaryOps.ADD, insert_before=uops.uops.index(u))
-        u.vin = (fptr, zero) + u.vin[2:]
-  # uops.print()
+    if rew := matcher.rewrite(u): replace[u] = rew
 
   def kk(*s: str): kernel.append("\n".join(s))
 
