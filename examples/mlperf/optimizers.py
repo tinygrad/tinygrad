@@ -12,10 +12,10 @@ class LARS(Optimizer):
     self.b = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params]
     self.skip_list = set(skip_list or [])
 
-  def step(self):
+  def step(self, loss_scaler=1):
     for i, t in enumerate(self.params):
       assert t.grad is not None
-      g = t.grad.contiguous()
+      g = (t.grad / loss_scaler).contiguous()
       w = t.detach()
 
       if t not in self.skip_list:

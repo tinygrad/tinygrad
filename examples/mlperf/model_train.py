@@ -26,6 +26,8 @@ def train_resnet():
   for x in GPUS: Device[x]
 
   # ** model definition and initializers **
+  FP16 = config["FP16"] = getenv("FP16")
+  if FP16: dtypes.default_float = dtypes.float16
   num_classes = 1000
   resnet.Conv2d = Conv2dHeNormal
   resnet.Linear = Linear
@@ -47,6 +49,8 @@ def train_resnet():
   base_lr           = config["base_lr"]           = getenv("LR", 8.5 * (BS/2048))
   lr_warmup_epochs  = config["lr_warmup_epochs"]  = getenv("WARMUP_EPOCHS", 5)
   decay             = config["decay"]             = getenv("DECAY", 2e-4)
+
+  loss_scaler       = config["LOSS_SCALER"]       = getenv("LOSS_SCALER", 128)
 
   target, achieved  = getenv("TARGET", 0.759), False
   eval_start_epoch  = getenv("EVAL_START_EPOCH", 0)
@@ -96,17 +100,17 @@ def train_resnet():
     optimizer.zero_grad()
     X = normalize(X)
     out = model.forward(X)
-    loss = out.sparse_categorical_crossentropy(Y, label_smoothing=0.1)
+    loss = out.cast(dtypes.float32).sparse_categorical_crossentropy(Y, label_smoothing=0.1)
     top_1 = (out.argmax(-1) == Y).sum()
-    loss.backward()
-    optimizer.step()
+    (loss * loss_scaler).backward()
+    optimizer.step(loss_scaler)
     scheduler.step()
     return loss.realize(), top_1.realize()
   @TinyJit
   def eval_step(X, Y):
     X = normalize(X)
     out = model.forward(X)
-    loss = out.sparse_categorical_crossentropy(Y, label_smoothing=0.1)
+    loss = out.cast(dtypes.float32).sparse_categorical_crossentropy(Y, label_smoothing=0.1)
     top_1 = (out.argmax(-1) == Y).sum()
     return loss.realize(), top_1.realize()
   def data_get(it):
