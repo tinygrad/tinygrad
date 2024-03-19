@@ -4,9 +4,10 @@ from typing import TYPE_CHECKING, Any, List, Optional, Dict, Tuple, ClassVar
 import importlib, inspect, functools, pathlib, time, ctypes
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.helpers import ansilen, DEBUG, getenv, colored, BEAM, NOOPT, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put
-from tinygrad.helpers import prod
+from tinygrad.helpers import prod, CACHECOLLECTING
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.ops import LazyOp, get_lazyop_info, GlobalCounters
+from tinygrad.codegen.uops import UOpGraph
 from dataclasses import dataclass
 
 if TYPE_CHECKING:
@@ -47,7 +48,7 @@ class JITRunner:
     var_vals = var_vals if var_vals is not None else {}
     from tinygrad.features.jit import CacheCollector
     et = self(rawbufs, var_vals)
-    CacheCollector.add(self, rawbufs, var_vals)
+    if CACHECOLLECTING: CacheCollector.add(self, rawbufs, var_vals)
     return et
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     raise NotImplementedError("override this")
@@ -183,7 +184,7 @@ MallocAllocator = _MallocAllocator()
 class Compiler:
   linearizer_opts: ClassVar[LinearizerOptions]
   def __init__(self, cachekey:Optional[str]=None): self.cachekey = None if getenv("DISABLE_COMPILER_CACHE") else cachekey
-  def render(self, name:str, uops) -> str: raise NotImplementedError("need a render function")
+  def render(self, name:str, uops:UOpGraph) -> str: raise NotImplementedError("need a render function")
   def compile(self, src:str) -> bytes: raise NotImplementedError("need a compile function")
   def compile_cached(self, src:str) -> bytes:
     if self.cachekey is None or (lib := diskcache_get(self.cachekey, src)) is None:
@@ -193,7 +194,7 @@ class Compiler:
 
 class CompiledASTRunner(JITRunner):
   def __init__(self, name:str, prg:str, dname:str, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None,
-               variables:Optional[List[Variable]]=None, op_estimate:sint=0, mem_estimate:sint=0, precompiled:Optional[bytes]=None):
+               variables:Optional[List[Variable]]=None, op_estimate:sint=0, mem_estimate:sint=0, precompiled:Optional[bytes]=None, outcount:int=1):
     super().__init__()
     if DEBUG >= 4: print(prg)
     if global_size is not None: global_size = global_size + [1]*(3-len(global_size))
@@ -202,7 +203,7 @@ class CompiledASTRunner(JITRunner):
       to_function_name(name), name, prg, dname, global_size, local_size, True
     assert self.device.compiler is not None, "compiler is required to make an AST kernel"
     lib:bytes = precompiled if precompiled is not None else self.device.compiler.compile_cached(prg)
-    self.lib, self.clprg = lib, self.device.runtime(self.name, lib)
+    self.lib, self.clprg, self.outcount = lib, self.device.runtime(self.name, lib), outcount
     self.vars: List[Variable] = [] if variables is None else variables
     self.op_estimate, self.mem_estimate = op_estimate, mem_estimate
 
@@ -251,7 +252,7 @@ class Compiled:
     run_count = prod((k.global_size if k.global_size else []) + (k.local_size if k.local_size else []))
     # NOTE: we use min here to ignore the indexing FLOPS
     ret = CompiledASTRunner(k.name, self.compiler.render(to_function_name(k.name), k.uops), self.dname, k.global_size, k.local_size,
-                            k.uops.vars(), min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))
+                            k.uops.vars(), min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count), outcount=len(k.outbufs))
     return ret
 
   def get_linearizer(self, *ast:LazyOp) -> Linearizer:
