@@ -7,13 +7,13 @@ from tinygrad.features.multi import MultiLazyBuffer, ring_allreduce
 from tinygrad.features.jit import TinyJit
 from tinygrad.realize import create_schedule, run_schedule
 from tinygrad.helpers import getenv
-from typing import List
+from typing import List, Union
 
 def naive_allreduce(op: ReduceOps, lbs: List[LazyBuffer]):
   bop = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[op]
   return [functools.reduce(lambda x,y: x.e(bop, y), [x.copy_to_device(lb.device) for x in lbs]) for lb in lbs]
 
-def realize(x: LazyBuffer | List[LazyBuffer]):
+def realize(x: Union[LazyBuffer, List[LazyBuffer]]):
   x = x if isinstance(x, list) else [x]
   run_schedule(create_schedule(x))
   for lb in x: Device[lb.device].synchronize()
