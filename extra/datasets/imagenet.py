@@ -14,14 +14,12 @@ def get_imagenet_categories():
 
 @diskcache
 def get_train_files():
-  files = glob.glob(p:=str(BASEDIR / "train/*/*"))
-  assert files, f"No training files found in {p}"
+  if not (files:=glob.glob(p:=str(BASEDIR / "train/*/*"))): raise FileNotFoundError(f"No training files in {p}")
   return files
 
 @functools.lru_cache(None)
 def get_val_files():
-  files = glob.glob(p:=str(BASEDIR / "val/*/*"))
-  assert files, f"No validation files found in {p}"
+  if not (files:=glob.glob(p:=str(BASEDIR / "val/*/*"))): raise FileNotFoundError(f"No validation files in {p}")
   return files
 
 def image_resize(img, size, interpolation):
