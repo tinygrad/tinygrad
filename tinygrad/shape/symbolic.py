@@ -150,7 +150,7 @@ class NumNode(Node):
 
 def create_node(ret:Node):
   assert ret.min <= ret.max, f"min greater than max! {ret.min} {ret.max} when creating {type(ret)} {ret}"
-  assert -2 ** 31 <= ret.min < 2 ** 31, f"calculation overflows 32-bit int!"
+  assert -2 ** 31 <= ret.min <= ret.max < 2 ** 31, f"calculation overflows 32-bit int!"
   if ret.min == ret.max: return NumNode(ret.min)
   return ret
 
