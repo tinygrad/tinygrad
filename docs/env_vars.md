@@ -33,7 +33,7 @@ Variable | Possible Value(s) | Description
 DEBUG               | [1-6]      | enable debugging output, with 4 you get operations, timings, speed, generated code and more
 GPU                 | [1]        | enable the GPU backend
 CUDA                | [1]        | enable CUDA backend
-HIP                 | [1]        | enable HIP backend
+HSA                 | [1]        | enable HSA backend
 CPU                 | [1]        | enable CPU backend
 METAL               | [1]        | enable Metal backend (for Mac M1 and after)
 METAL_XCODE         | [1]        | enable Metal using macOS Xcode SDK

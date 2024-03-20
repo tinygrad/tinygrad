@@ -46,9 +46,8 @@ class AQLQueue:
   def __del__(self):
     if hasattr(self, 'hw_queue'): check(hsa.hsa_queue_destroy(self.hw_queue))
 
-  def submit_kernel(self, prg, global_size, local_size, kernargs, need_signal=False):
+  def submit_kernel(self, prg, global_size, local_size, kernargs, completion_signal=None):
     if self.available_packet_slots == 0: self._wait_queue()
-    signal = self._alloc_signal(reusable=True) if need_signal else EMPTY_SIGNAL
 
     packet = hsa.hsa_kernel_dispatch_packet_t.from_address(self.write_addr)
     packet.workgroup_size_x = local_size[0]
@@ -63,17 +62,14 @@ class AQLQueue:
     packet.kernel_object = prg.handle
     packet.kernarg_address = kernargs
     packet.reserved2 = 0
-    packet.completion_signal = signal
+    packet.completion_signal = completion_signal if completion_signal else EMPTY_SIGNAL
     packet.setup = DISPATCH_KERNEL_SETUP
     packet.header = DISPATCH_KERNEL_HEADER
     self._submit_packet()
 
-    return signal
-
-  def submit_barrier(self, wait_signals=None, need_signal=False, completion_signal=None):
+  def submit_barrier(self, wait_signals=None, completion_signal=None):
     assert wait_signals is None or len(wait_signals) <= 5
     if self.available_packet_slots == 0: self._wait_queue()
-    signal = (completion_signal or self._alloc_signal(reusable=True)) if need_signal else EMPTY_SIGNAL
 
     packet = hsa.hsa_barrier_and_packet_t.from_address(self.write_addr)
     packet.reserved0 = 0
@@ -81,11 +77,9 @@ class AQLQueue:
     for i in range(5):
       packet.dep_signal[i] = wait_signals[i] if wait_signals and len(wait_signals) > i else EMPTY_SIGNAL
     packet.reserved2 = 0
-    packet.completion_signal = signal
+    packet.completion_signal = completion_signal if completion_signal else EMPTY_SIGNAL
     packet.header = BARRIER_HEADER
     self._submit_packet()
-
-    return signal
 
   def blit_packets(self, packet_addr, packet_cnt):
     if self.available_packet_slots < packet_cnt: self._wait_queue(packet_cnt)
@@ -98,8 +92,8 @@ class AQLQueue:
     self._submit_packet(packet_cnt)
 
   def wait(self):
-    signal = self.submit_barrier(need_signal=True)
-    hsa.hsa_signal_wait_scacquire(signal, hsa.HSA_SIGNAL_CONDITION_LT, 1, (1 << 64) - 1, hsa.HSA_WAIT_STATE_ACTIVE)
+    self.submit_barrier([], finish_signal := self.device.alloc_signal(reusable=True))
+    hsa.hsa_signal_wait_scacquire(finish_signal, hsa.HSA_SIGNAL_CONDITION_LT, 1, (1 << 64) - 1, hsa.HSA_WAIT_STATE_ACTIVE)
     self.available_packet_slots = self.queue_size // AQL_PACKET_SIZE
 
   def _wait_queue(self, need_packets=1):
@@ -116,8 +110,6 @@ class AQLQueue:
     self.write_addr += AQL_PACKET_SIZE * cnt
     if self.write_addr > self.write_addr_end:
       self.write_addr = self.queue_base + (self.write_addr - self.queue_base) % self.queue_size
-
-  def _alloc_signal(self, reusable=False): return self.device.alloc_signal(reusable=reusable)
 
 def scan_agents():
   agents = collections.defaultdict(list)

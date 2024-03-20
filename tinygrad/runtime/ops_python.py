@@ -188,7 +188,7 @@ class PythonProgram:
 
 class PythonCompiler(Compiler):
   linearizer_opts = LinearizerOptions("METAL", has_tensor_cores=True) if getenv("EMULATE_METAL") else \
-    (LinearizerOptions("HIP", has_tensor_cores=True) if getenv("EMULATE_HIP") else \
+    (LinearizerOptions("HSA", has_tensor_cores=True) if getenv("EMULATE_HSA") else \
     (LinearizerOptions("CUDA", has_tensor_cores=True) if getenv("EMULATE_CUDA") else LinearizerOptions("PYTHON")))
   def render(self, name:str, uops:UOpGraph) -> str:
     lops = [(u.uop, u.dtype, [uops.uops.index(v) for v in u.vin], u.arg) for u in uops]
