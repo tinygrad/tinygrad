@@ -30,6 +30,7 @@ class Optimizer:
 
 class OptimizerGroup(Optimizer):
   def __init__(self, *optimizers: Optimizer): self.optimizers, self.params, self.buffers = optimizers, [], [] # pylint: disable=super-init-not-called
+  def __getitem__(self, i): return self.optimizers[i]
   def zero_grad(self): [o.zero_grad() for o in self.optimizers]
   def _step(self) -> List[Tensor]: return [x for o in self.optimizers for x in o._step()]
 
@@ -48,12 +49,13 @@ class LARS(Optimizer):
       assert t.grad is not None
       # contiguous is needed since the grads can allegedly form a "diamond"
       # TODO: fix this in lazy.py
-      g = t.grad.contiguous() + self.wd * t.detach()
+      g = t.grad.realize()
       if self.tcoef != 0:
         r1 = t.detach().square().sum().sqrt()
         r2 = g.square().sum().sqrt()
-        r = (r1 > 0).where((r2 > 0).where(self.tcoef * r1 / r2, 1.0), 1.0)
+        r = (r1 > 0).where((r2 > 0).where(self.tcoef * r1 / (r2 + self.wd * r1), 1.0), 1.0)
       else: r = 1.0
+      g = g + self.wd * t.detach()
       # classic momentum does post learning rate update
       if self.classic: g = g * r * self.lr
       if self.momentum:
