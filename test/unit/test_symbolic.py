@@ -456,5 +456,20 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     c = b.substitute({a: NumNode(1)})
     assert c == NumNode(2)
 
+class TestSymbolicRealWorld(unittest.TestCase):
+  def test_resnet_half(self):
+    gidx0 = Variable("gidx0", 0, 3)
+    gidx1 = Variable("gidx1", 0, 127)
+    gidx2 = Variable("gidx2", 0, 7)
+    lidx3 = Variable("lidx3", 0, 7)
+    lidx4 = Variable("lidx4", 0, 1)
+    lidx5 = Variable("lidx5", 0, 15)
+
+    idx = ((((1+lidx5)%16)*49)+(((262145+lidx5)//16)*802816)+(gidx0*3211264)+(gidx1*784)+(gidx2*8)+(lidx4*100352)+-13151129600+lidx3)
+    print(idx.render())
+    # TODO: 13,151,129,600 is out of int32 range.
+    # assert idx.render() == \
+    #   "((((1+lidx5)%16)*49)+(((262145+lidx5)//16)*802816)+(gidx0*3211264)+(gidx1*784)+(gidx2*8)+(lidx4*100352)+-13151129600+lidx3)"
+
 if __name__ == '__main__':
   unittest.main()
