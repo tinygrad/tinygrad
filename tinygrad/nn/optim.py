@@ -1,6 +1,6 @@
 # sorted in order of increasing complexity
 from typing import List, Optional
-from tinygrad.helpers import dedup, getenv
+from tinygrad.helpers import dedup, flatten, getenv
 from tinygrad.tensor import Tensor
 
 class Optimizer:
@@ -29,7 +29,9 @@ class Optimizer:
   def _step(self) -> List[Tensor]: raise NotImplementedError
 
 class OptimizerGroup(Optimizer):
-  def __init__(self, *optimizers: Optimizer): self.optimizers, self.params, self.buffers = optimizers, [], [] # pylint: disable=super-init-not-called
+  def __init__(self, *optimizers: Optimizer): # pylint: disable=super-init-not-called
+    self.optimizers = optimizers
+    self.params, self.buffers = flatten([o.params for o in self.optimizers]), flatten([o.buffers for o in self.optimizers])
   def __getitem__(self, i): return self.optimizers[i]
   def zero_grad(self): [o.zero_grad() for o in self.optimizers]
   def _step(self) -> List[Tensor]: return [x for o in self.optimizers for x in o._step()]
@@ -49,7 +51,7 @@ class LARS(Optimizer):
       assert t.grad is not None
       # contiguous is needed since the grads can allegedly form a "diamond"
       # TODO: fix this in lazy.py
-      g = t.grad.realize()
+      g = t.grad.contiguous()
       if self.tcoef != 0:
         r1 = t.detach().square().sum().sqrt()
         r2 = g.square().sum().sqrt()
