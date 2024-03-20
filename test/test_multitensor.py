@@ -1,13 +1,11 @@
-import unittest, functools, random
+import unittest, functools
 from typing import List
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit
 from tinygrad.device import BufferCopy
-from tinygrad.ops import LoadOps, ReduceOps, BinaryOps
-from tinygrad.helpers import CI, prod
+from tinygrad.ops import LoadOps, ReduceOps
+from tinygrad.helpers import CI
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.realize import create_schedule
-from tinygrad.features.multi import ring_allreduce, MultiLazyBuffer
-from random import randint
 import numpy as np
 from hypothesis import given, strategies as strat, settings
 
@@ -91,24 +89,6 @@ class TestMultiTensor(unittest.TestCase):
     fX = f(X)
     fn = f(n)
     np.testing.assert_allclose(fX.numpy(), fn, rtol=1e-6, atol=1e-6)
-
-  @unittest.skipIf(CI and Device.DEFAULT == "CLANG", "clang is slow")
-  def test_fuzz_allreduce(self):
-    def naive_allreduce(lbs):
-      return [functools.reduce(lambda x,y: x.e(BinaryOps.ADD, y), [x.copy_to_device(lb.device) for x in lbs]) for lb in lbs]
-
-    random.seed(41)
-    for it in range(100):
-      for n in range(2, 4+1):
-        t = Tensor.rand(tuple([(n if i == 0 else 1) * randint(1, 10) for i in range(randint(1, 4))])).shard_(tuple([d0, d1, d2, d3][:n]), 0)
-        a = Tensor(MultiLazyBuffer(naive_allreduce(t.lazydata.lbs), 0))
-        b = Tensor(MultiLazyBuffer(ring_allreduce(ReduceOps.SUM, t.lazydata.lbs), 0))
-        diff = a - b
-        mean_err = diff.reshape((prod(diff.shape),)).abs().mean().numpy()
-        max_err = diff.reshape((prod(diff.shape),)).abs().max().numpy()
-        assert mean_err < 1e-6, f"big mean error, iteration {it}_{n}"
-        assert max_err < 1e-6, f"big max error, iteration {it}_{n}"
-
 
   def _test_matmul_shard_axis(self, shard_x, shard_w, device):
     X = Tensor.kaiming_uniform(N, N).realize()
