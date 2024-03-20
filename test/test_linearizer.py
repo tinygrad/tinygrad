@@ -251,7 +251,6 @@ class TestLinearizer(unittest.TestCase):
     assert helper_test_simplify(UOps.ALU, dtypes.float, vin=(UOp(UOps.CONST, dtypes.bool, vin=(), arg=True), c0, c1),
                                 arg=TernaryOps.WHERE).arg == c0.arg
 
-  @unittest.expectedFailure
   def test_phi_simplification(self):
     def helper(t, max_ops=0):
       sched = create_schedule([t.lazydata])
