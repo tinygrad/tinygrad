@@ -279,9 +279,9 @@ class Compiled:
         timed = sorted([(nm, tk, time_linearizer(tk, test_rawbuffers, allow_test_size=False, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
         if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
         k = timed[0][1]
-        if logkern and logkern_level > 1: logkern.write("\n".join(map(lambda x: str((x[1].ast, x[1].applied_opts,)), timed[1:]))+"\n")
+        if logkern is not None and logkern_level > 1: logkern.writelines(map(lambda x: str((x[1].ast, x[1].applied_opts,))+"\n", timed[1:]))
     # TODO: check the correctness inline once compare_linearizer is in core
-    if logkern: logkern.write(str((k.ast, k.applied_opts,))+"\n")
+    if logkern is not None: logkern.writelines([str((k.ast, k.applied_opts,))+"\n"])
     return k
 
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none

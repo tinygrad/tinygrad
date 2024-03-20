@@ -27,9 +27,9 @@ if __name__ == "__main__":
     with open(args.file, 'r') as file:
       kern_strs = file.readlines()
   else:
-    raise RuntimeError("no kernel specified; use --lin or --file options")
+    raise RuntimeError("no kernel specified; use --kernel or --file options")
 
-  print(f"verifying {len(kern_strs)} kernel")
+  print(f"verifying {len(kern_strs)} kernels")
 
   failed_ids = []
   failures = defaultdict(list)
@@ -47,7 +47,7 @@ if __name__ == "__main__":
       print(f"{msg} {i} AST: {ast}")
       print(f"{msg} {i} OPTS: {opts}\n")
 
-  print(f"tested {len(kern_strs)} kernel")
+  print(f"tested {len(kern_strs)} kernels")
   if failures:
     print(f"{failed_ids=}")
     for msg, errors in failures.items():
