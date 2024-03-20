@@ -389,7 +389,7 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     unfactored_expr = Node.__floordiv__(expr_before_div, NumNode(-16), False)
     factored_expr = Node.__floordiv__(expr_before_div, NumNode(-16), True)
     self.assertEqual(unfactored_expr.render(), "(((lid*4)+1019+gid)//16)")
-    self.assertEqual(factored_expr.render(), "((((1019+gid)//4)+lid)//4)")
+    self.assertEqual(factored_expr.render(), "(((((3+gid)//4)+2+lid)//4)+63)")
 
   def test_mod_node_max(self):
     i = Variable("i", 1, 128)
@@ -455,6 +455,20 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     b = a + 1
     c = b.substitute({a: NumNode(1)})
     assert c == NumNode(2)
+
+class TestSymbolicRealWorld(unittest.TestCase):
+  def test_resnet_half(self):
+    gidx0 = Variable("gidx0", 0, 3)
+    gidx1 = Variable("gidx1", 0, 127)
+    gidx2 = Variable("gidx2", 0, 7)
+    lidx3 = Variable("lidx3", 0, 7)
+    lidx4 = Variable("lidx4", 0, 1)
+    lidx5 = Variable("lidx5", 0, 15)
+
+    idx = ((((1+lidx5)%16)*49)+(((262145+lidx5)//16)*802816)+(gidx0*3211264)+(gidx1*784)+(gidx2*8)+(lidx4*100352)+-13151129600+lidx3)
+    print(idx.render())
+    # NOTE: this used to have 13,151,129,600 in the output which is out of int32 range.
+    assert idx.render() == "((((1+lidx5)%16)*49)+(((1+lidx5)//16)*802816)+(gidx0*3211264)+(gidx1*784)+(gidx2*8)+(lidx4*100352)+2207744+lidx3)"
 
 if __name__ == '__main__':
   unittest.main()
