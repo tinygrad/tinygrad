@@ -56,21 +56,62 @@ check(ze.zeEventCreate(event_pool, ctypes.byref(ev_desc), ctypes.byref(event := 
 print("trying to create module")
 from tinygrad.runtime.ops_gpu import CLCompiler
 from tinygrad import Device
-spriv_bin = CLCompiler(Device["GPU"], "test").compile(f"""
+
+src = f"""
 __attribute__((reqd_sub_group_size(8)))
 __kernel void test(__global float* data0, const __global float* data1) {{
   data0[0] = data1[0];
 }}
-""")
+"""
+
+spriv_bin = CLCompiler(Device["GPU"], "test").compile(src)
+
+clang_lib = ctypes.CDLL('/home/nimlgen/intel/llvm/build/lib/libopencl-clang.so')
+clang_compile = clang_lib.Compile
+empty_array = (ctypes.c_char_p * 1)(0)
+print(bytes(ctypes.create_string_buffer((src + "\0").encode())))
+buf = ctypes.create_string_buffer(b"200")
+cdf = ctypes.create_string_buffer((src).encode())
+r = clang_lib.Compile(cdf, empty_array, 0, empty_array, 0, None, 0,
+                      None, buf, ctypes.byref(cmp := ctypes.c_void_p()))
+
+class IOCLFEBinaryResult(ctypes.Structure): pass
+
+# Define the function pointer type for GetIRName
+GetIRNameFunctionType = ctypes.CFUNCTYPE(ctypes.c_char_p, ctypes.POINTER(IOCLFEBinaryResult))
+GetIRLenFunctionType = ctypes.CFUNCTYPE(ctypes.c_size_t, ctypes.POINTER(IOCLFEBinaryResult))
+GetIRPtrFunctionType = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.POINTER(IOCLFEBinaryResult))
+
+# Assuming ptrr is a ctypes pointer to an IOCLFEBinaryResult object
+ptrr = ctypes.cast(cmp, ctypes.POINTER(IOCLFEBinaryResult))
+
+# Get the address of the vtable
+vtable_address = ctypes.cast(cmp, ctypes.POINTER(ctypes.c_void_p)).contents.value
+print("fai", hex(vtable_address))
+
+# Convert the vtable address to a pointer to an array of function pointers
+vtable = ctypes.cast(vtable_address, ctypes.POINTER(ctypes.c_void_p))
+get_ir_len_func = ctypes.cast(vtable[0], GetIRLenFunctionType)
+get_ir_ptr_func = ctypes.cast(vtable[1], GetIRPtrFunctionType)
+get_ir_name_func = ctypes.cast(vtable[2], GetIRNameFunctionType)
+
+ir_len = get_ir_len_func(ptrr)
+ir_bytes = get_ir_ptr_func(ptrr)
+ir_name = get_ir_name_func(ptrr)
+print(ir_len, ir_bytes, ir_name)
+
+print(r, cmp)
 
 module_desc = ze.ze_module_desc_t()
 module_desc.stype = ze.ZE_STRUCTURE_TYPE_MODULE_DESC
 module_desc.pNext = None
-module_desc.format = ze.ZE_MODULE_FORMAT_NATIVE # should switch to spriv?
-module_desc.inputSize = len(spriv_bin)
-module_desc.pInputModule = (ctypes.c_uint8*len(spriv_bin)).from_buffer(bytearray(spriv_bin))
+module_desc.format = ze.ZE_MODULE_FORMAT_IL_SPIRV # should switch to spriv?
+module_desc.inputSize = ir_len
+module_desc.pInputModule = (ctypes.c_uint8*ir_len).from_address(ir_bytes)
 module_desc.pBuildFlags = None
 module_desc.pConstants = None
+
+# x = input()
 
 check(ze.zeModuleCreate(context, agents[0], ctypes.byref(module_desc), ctypes.byref(module := ze.ze_module_handle_t()), None))
 
