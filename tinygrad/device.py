@@ -274,15 +274,17 @@ class Compiled:
         kb.required_optimizations()
         from tinygrad.features.search import beam_search, time_linearizer, bufs_from_lin
         test_rawbuffers = bufs_from_lin(kb)    # allocate scratch buffers for optimization
-        lins.append((f"beam{BEAM.value}", (bs_lin:=beam_search(kb, test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1))))))
+        lins.append((f"beam{BEAM.value}", beam_search(kb, test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))))
         timed = sorted([(nm, tk, time_linearizer(tk, test_rawbuffers, allow_test_size=False, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
         if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
         k = timed[0][1]
 
         if getenv("BEAM_VERIFY", 0): # compare the beam generated values with required_opts only
           from test.external.fuzz_linearizer import compare_linearizer
-          if (msg:=(compare_linearizer(bs_lin, None, None, None, getenv("BEAM_VERIFY_RTOL", 1e-2), getenv("BEAM_VERIFY_ATOL", 1e-2)))[0]) != "PASS":
-            raise RuntimeError(f"BEAM_VERIFY FAILED: {msg=}\nast={bs_lin.ast}\ncolor={bs_lin.colored_shape()}\napplied_opts={bs_lin.applied_opts}")
+          rb, vv, gt, rtol, atol = None, None, None, getenv("BEAM_VERIFY_RTOL", 1e-2), getenv("BEAM_VERIFY_ATOL", 1e-2)
+          for (name, lin) in lins:
+            (msg, rb, vv, gt) = compare_linearizer(lin, rb, vv, gt, rtol, atol)
+            if msg != "PASS": raise RuntimeError(f"BEAM_VERIFY FAILED on {name}: {msg=}\n{lin.ast}\n{lin.applied_opts}\n{lin.colored_shape()}")
 
     return k
 

@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 # stuff needed to unpack a kernel
 from tinygrad.ops import LazyOp, TernaryOps, BinaryOps, UnaryOps, ReduceOps, BufferOps, MemBuffer, ConstBuffer
 from tinygrad.dtype import dtypes
