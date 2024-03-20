@@ -239,6 +239,7 @@ class MultiDeviceJITGraph(JITRunner):
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     raise NotImplementedError("override this")
 
+logkern, logkern_level = open(getenv("LOGKERN", ""), "a") if getenv("LOGKERN", "") else None, getenv("LOGKERN_LEVEL", 1)
 class Compiled:
   def __init__(self, device:str, allocator:Allocator, compiler:Optional[Compiler], runtime, graph=None):
     self.dname, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler, runtime, graph
@@ -278,14 +279,9 @@ class Compiled:
         timed = sorted([(nm, tk, time_linearizer(tk, test_rawbuffers, allow_test_size=False, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
         if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
         k = timed[0][1]
-
-        if getenv("BEAM_VERIFY", 0): # compare the beam generated values with required_opts only
-          from test.external.fuzz_linearizer import compare_linearizer
-          rb, vv, gt, rtol, atol = None, None, None, getenv("BEAM_VERIFY_RTOL", 1e-2), getenv("BEAM_VERIFY_ATOL", 1e-2)
-          for (name, lin) in lins:
-            (msg, rb, vv, gt) = compare_linearizer(lin, rb, vv, gt, rtol, atol)
-            if msg != "PASS": raise RuntimeError(f"BEAM_VERIFY FAILED on {name}: {msg=}\n{lin.ast}\n{lin.applied_opts}\n{lin.colored_shape()}")
-
+        if logkern and logkern_level > 1: logkern.write("\n".join(map(lambda x: str((x[1].ast, x[1].applied_opts,)), timed[1:]))+"\n")
+    # TODO: check the correctness inline once compare_linearizer is in core
+    if logkern: logkern.write(str((k.ast, k.applied_opts,))+"\n")
     return k
 
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
