@@ -7,8 +7,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
 
 def rand(*shape):
-  if CI: return Tensor(np.random.rand(*shape))
-  return Tensor.rand(*shape)
+  return Tensor(np.random.rand(*shape).astype(np.float32))
 
 class TestBeamSearch(unittest.TestCase):
   def setUp(self):
