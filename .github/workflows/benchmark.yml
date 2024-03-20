@@ -90,12 +90,22 @@ jobs:
       uses: actions/checkout@v4
     - name: Print nvidia-smi
       run: nvidia-smi
+    - name: Symlink models and datasets
+      run: |
+        mkdir -p weights
+        ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
     - name: Run model inference benchmark
       run: CUDA=1 python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
       run: CUDA=1 BIG=2 TORCHCUDA=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
     - name: Run Tensor Core GEMM
       run: CUDA=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
+    - name: Run LLaMA
+      run: |
+        CUDA=1 JIT=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
+        CUDA=1 JIT=1 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
+    - name: Run LLaMA with BEAM
+      run: CUDA=1 JIT=1 BEAM=2 CACHELEVEL=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_beam.txt
     - name: Run GPT2
       run: |
         CUDA=1 JIT=0 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_unjitted.txt
@@ -113,6 +123,9 @@ jobs:
           onnx_inference_speed.csv
           torch_speed.txt
           matmul.txt
+          llama_unjitted.txt
+          llama_jitted.txt
+          llama_beam.txt
           gpt2_unjitted.txt
           gpt2_jitted.txt
           gpt2_half.txt
