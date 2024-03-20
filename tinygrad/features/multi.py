@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Optional, Union, Any, Tuple, List
 import functools, itertools, operator
-from tinygrad.helpers import all_same, all_int, dedup, round_up, prod, DEBUG, getenv
+from tinygrad.helpers import all_same, all_int, dedup, round_up, prod, DEBUG, RING
 from tinygrad.dtype import DType, Scalar
 from tinygrad.ops import BinaryOps, LoadOps, UnaryOps, TernaryOps, ReduceOps
 from tinygrad.lazy import LazyBuffer
@@ -15,7 +15,9 @@ def ring_allreduce(op: ReduceOps, lbs: List[LazyBuffer]):
   n_lbs, dim = len(lbs), prod(lbs[0].shape)
   # Ring allreduce doesn't provide a benefit with only 2 nodes or where number of elements is less than 256k (empirically)
   # so just fallback to naive allreduce to save on kernel dispatch, chunking and reassembling chunks.
-  if n_lbs < 3 or dim < 256_000 or not getenv("RING", 1):
+  use_ring = (RING >= 2 or (n_lbs > 2 and dim > 256_000 and RING >= 1))
+  if DEBUG >= 0: print(f"{'RING ALLREDUCE' if use_ring else 'NAIVE ALLREDUCE'} {n_lbs}x{dim} | {lbs[0].dtype}")
+  if not use_ring:
     return [functools.reduce(lambda x,y: x.e(bop, y), [x.copy_to_device(lb.device) for x in lbs]) for lb in lbs]
   base, left = dim // n_lbs, dim % n_lbs
   c_lens = [base + 1 if left - i > 0 else base for i in range(n_lbs)]
