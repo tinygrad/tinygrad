@@ -8,6 +8,7 @@ from tinygrad.helpers import getenv, BEAM, WINO
 from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_save
 from tinygrad.nn.optim import LARS, SGD, OptimizerGroup
 
+from extra.lr_scheduler import LRSchedulerGroup
 from examples.mlperf.helpers import get_training_state, load_training_state
 
 def train_resnet():
@@ -73,12 +74,13 @@ def train_resnet():
   scheduler_skip = PolynomialDecayWithWarmup(optimizer_skip, initial_lr=base_lr, end_lr=1e-4,
                                              train_steps=epochs * steps_in_train_epoch,
                                              warmup=lr_warmup_epochs * steps_in_train_epoch)
+  scheduler_group = LRSchedulerGroup(scheduler, scheduler_skip)
   print(f"training with batch size {BS} for {epochs} epochs")
 
   # ** resume from checkpointing **
   start_epoch = 0
   if ckpt:=getenv("RESUME", ""):
-    load_training_state(model, optimizer_group, scheduler, safe_load(ckpt))
+    load_training_state(model, optimizer_group, scheduler_group, safe_load(ckpt))
     start_epoch = int(scheduler.epoch_counter.numpy().item() / steps_in_train_epoch)
     print(f"resuming from {ckpt} at epoch {start_epoch}")
 
@@ -105,8 +107,7 @@ def train_resnet():
     top_1 = (out.argmax(-1) == Y).sum()
     loss.backward()
     optimizer_group.step()
-    scheduler.step()
-    scheduler_skip.step()
+    scheduler_group.step()
     return loss.realize(), top_1.realize()
   @TinyJit
   def eval_step(X, Y):
@@ -219,7 +220,7 @@ def train_resnet():
         else:
           fn = f"./ckpts/{time.strftime('%Y%m%d_%H%M%S')}_e{e}.safe"
         print(f"saving ckpt to {fn}")
-        safe_save(get_training_state(model, optimizer_group, scheduler), fn)
+        safe_save(get_training_state(model, optimizer_group, scheduler_group), fn)
 
 def train_retinanet():
   # TODO: Retinanet

@@ -14,6 +14,11 @@ class LR_Scheduler:
     self.epoch_counter.assign(self.epoch_counter + 1).realize()
     self.optimizer.lr.assign(self.get_lr()).realize()
 
+class LRSchedulerGroup:
+  def __init__(self, *schedulers: LR_Scheduler): self.schedulers = schedulers
+  def step(self) -> None:
+    for s in self.schedulers: s.step()
+
 class MultiStepLR(LR_Scheduler):
   def __init__(self, optimizer: Optimizer, milestones: List[int], gamma=0.1):
     super().__init__(optimizer)
