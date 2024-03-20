@@ -15,7 +15,7 @@ class LARS(Optimizer):
   def step(self, loss_scaler=1):
     for i, t in enumerate(self.params):
       assert t.grad is not None
-      g = (t.grad / loss_scaler).contiguous()
+      g = t.grad.contiguous() / loss_scaler
       w = t.detach()
 
       if t not in self.skip_list:
