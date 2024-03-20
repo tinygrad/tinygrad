@@ -259,6 +259,9 @@ class SumNode(RedNode):
       if x.__class__ in (NumNode, MulNode):
         if x.b%b == 0: fully_divided.append(x//b)
         else:
+          if x.__class__ is NumNode and (rem := x.b // b):
+            fully_divided.append(NumNode(rem))
+            x = NumNode(x.b - b * rem)
           rest.append(x)
           if isinstance(x.b, int):
             _gcd = gcd(_gcd, x.b)
