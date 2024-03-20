@@ -245,9 +245,9 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
   in_degree: DefaultDict[LazyBuffer,int] = defaultdict(int)
   queue: Deque[LazyBuffer] = deque()
   for buf in allbufs:
-    if buf.realized: continue
+    if buf.realized or buf.op is LoadOps.CONST: continue
     for x in buf.srcs:
-      if x.base.realized: continue
+      if x.base.realized or x.base.op is LoadOps.CONST: continue
       graph[x.base].append(buf)
       in_degree[buf] += 1
     if in_degree[buf] == 0: queue.append(buf)
@@ -255,14 +255,13 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
   sorted_realizes: List[LazyBuffer] = []
   while queue:
     buf = queue.popleft()
-    if buf.op != LoadOps.CONST and buf in realizes and buf not in seen: sorted_realizes.append(buf)
+    if buf in realizes and buf not in seen:
+      sorted_realizes.append(buf)
+      seen.add(buf)
     for x in graph[buf]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)
 
   sched:List[ScheduleItem] = []
-  for x in sorted_realizes:
-    if x in seen: continue
-    sched.append(_schedule_one(x, realizes, reduce_for_op))
-    seen.add(x)
+  for x in sorted_realizes: sched.append(_schedule_one(x, realizes, reduce_for_op))
   return sched
