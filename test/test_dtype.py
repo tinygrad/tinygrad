@@ -52,9 +52,16 @@ class TestDType(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
     if not cls.DTYPE or not is_dtype_supported(cls.DTYPE): raise unittest.SkipTest("dtype not supported")
-    if dtypes.is_int(cls.DTYPE): cls.DATA = np.random.randint(0, 100, size=10, dtype=cls.DTYPE.np).tolist()
-    elif cls.DTYPE == dtypes.bool: cls.DATA = np.random.choice([True, False], size=10).tolist()
-    else: cls.DATA = np.random.uniform(0, 1, size=10).tolist()
+    DATA_SIZE = 10
+    if dtypes.is_unsigned(cls.DTYPE):
+      cls.DATA = np.random.randint(0, 100, size=DATA_SIZE, dtype=cls.DTYPE.np)
+    elif dtypes.is_int(cls.DTYPE):
+      cls.DATA = np.random.randint(-100, 100, size=DATA_SIZE, dtype=cls.DTYPE.np)
+    elif cls.DTYPE == dtypes.bool:
+      cls.DATA = np.random.choice([True, False], size=DATA_SIZE)
+    else:
+      # TODO: include negative numbers here and fix negative number cast to uint
+      cls.DATA = np.random.uniform(0, 10, size=DATA_SIZE).astype(cls.DTYPE.np)
   def setUp(self):
     if self.DTYPE is None: raise unittest.SkipTest("base class")
 
