@@ -362,9 +362,9 @@ def load_file(file):
 def iterate(bs=1, start=0, val=False):
   files = get_val_files() if val else get_train_files()
   with Pool() as p:
-    for i in range(start, len(files), bs):
+    i = start
+    while True:
       results = p.map(load_file, files[i:i+bs])
-
       X = {
         "input_ids": np.concatenate([f["input_ids"] for f in results], axis=0),
         "input_mask": np.concatenate([f["input_mask"] for f in results], axis=0),
@@ -376,6 +376,7 @@ def iterate(bs=1, start=0, val=False):
         "next_sentence_labels": np.concatenate([f["next_sentence_labels"] for f in results], axis=0),
       }
       yield X, Y
+      i = (i + bs) % len(files)
 
 if __name__ == "__main__":
   tokenizer = Tokenizer(Path(__file__).parent / "wiki" / "vocab.txt")

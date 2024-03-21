@@ -102,7 +102,7 @@ def pretrain():
       x.to_(GPUS)
 
   optimizer = optim.LAMB(get_parameters(model), 1 / WARMUP_STEPS, eps=1e-6, wd=0.01, adam=True) # TODO: Keep in FP32?, Exclude LayerNorm, and bias from weight decay
-  lr_scheduler = OneCycleLR(optimizer, MAX_LR, MAX_LR * WARMUP_STEPS, MAX_LR * 1e12, STEPS, WARMUP_STEPS / STEPS)
+  lr_scheduler = OneCycleLR(optimizer, MAX_LR, 1e8, MAX_LR * 1e12, STEPS, WARMUP_STEPS / STEPS)
 
   @TinyJit
   def train_step_jitted(input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor, masked_positions:Tensor, masked_lm_ids:Tensor, next_sentence_labels:Tensor):
