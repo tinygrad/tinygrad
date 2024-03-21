@@ -1,6 +1,6 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
-import time, math, itertools, functools
+import time, math, itertools, functools, operator
 from contextlib import ContextDecorator
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Iterable, Dict, DefaultDict, cast, get_args
 from collections import defaultdict
@@ -888,21 +888,82 @@ class Tensor:
     return x.lazydata.base.arg if isinstance(x, Tensor) and isinstance(x.lazydata, LazyBuffer) and x.lazydata.is_unrealized_contiguous_const() \
       and not x.requires_grad and self._broadcasted(x)[0].shape == self.shape else x
 
+  def make_smol(self:Tensor, i:int): return self.shrink(tuple((0, 1) if j == i else None for j in range(self.ndim)))
+
   def add(self, x:Union[Tensor, Scalar], reverse=False) -> Tensor:
     x = self._to_const_val(x)
+
+    if isinstance(self.lazydata, LazyBuffer):
+      op = operator.add
+      if isinstance(x, Tensor):
+        if isinstance(x.lazydata, LazyBuffer):
+          real_strides = [self.lazydata.st.real_strides(), x.lazydata.st.real_strides()]
+          for i, (sts, s) in enumerate(zip(zip(*real_strides), self.shape)):
+            if all(st == 0 for st in sts) and s > 1:
+              return op(self.make_smol(i), x.make_smol(i)).expand(tuple(s if j == i else None for j in range(self.ndim)))
+      else:
+        real_stride = self.lazydata.st.real_strides()
+        for i, (st, s) in enumerate(zip(real_stride, self.shape)):
+          if st == 0 and s > 1:
+            return op(self.make_smol(i), x).expand(tuple(s if j == i else None for j in range(self.ndim)))
+
     return mlops.Add.apply(*self._broadcasted(x, reverse)) if isinstance(x, Tensor) or x else self
   def sub(self, x:Union[Tensor, Scalar], reverse=False) -> Tensor:
     x = self._to_const_val(x)
+
+    if isinstance(self.lazydata, LazyBuffer):
+      op = operator.sub
+      if isinstance(x, Tensor):
+        if isinstance(x.lazydata, LazyBuffer):
+          real_strides = [self.lazydata.st.real_strides(), x.lazydata.st.real_strides()]
+          for i, (sts, s) in enumerate(zip(zip(*real_strides), self.shape)):
+            if all(st == 0 for st in sts) and s > 1:
+              return op(self.make_smol(i), x.make_smol(i)).expand(tuple(s if j == i else None for j in range(self.ndim)))
+      else:
+        real_stride = self.lazydata.st.real_strides()
+        for i, (st, s) in enumerate(zip(real_stride, self.shape)):
+          if st == 0 and s > 1:
+            return op(self.make_smol(i), x).expand(tuple(s if j == i else None for j in range(self.ndim)))
+
     return mlops.Sub.apply(*self._broadcasted(x, reverse)) if isinstance(x, Tensor) or x else (-self if reverse else self)
   def mul(self, x:Union[Tensor, Scalar], reverse=False) -> Tensor:
     x = self._to_const_val(x)
     if not isinstance(x, Tensor) and x == 0.0: return mlops.Zero.apply(self)
     if not isinstance(x, Tensor) and x == -1.0: return -self
+
+    if isinstance(self.lazydata, LazyBuffer):
+      op = operator.mul
+      if isinstance(x, Tensor):
+        if isinstance(x.lazydata, LazyBuffer):
+          real_strides = [self.lazydata.st.real_strides(), x.lazydata.st.real_strides()]
+          for i, (sts, s) in enumerate(zip(zip(*real_strides), self.shape)):
+            if all(st == 0 for st in sts) and s > 1:
+              return op(self.make_smol(i), x.make_smol(i)).expand(tuple(s if j == i else None for j in range(self.ndim)))
+      else:
+        real_stride = self.lazydata.st.real_strides()
+        for i, (st, s) in enumerate(zip(real_stride, self.shape)):
+          if st == 0 and s > 1:
+            return op(self.make_smol(i), x).expand(tuple(s if j == i else None for j in range(self.ndim)))
+
     return mlops.Mul.apply(*self._broadcasted(x, reverse)) if isinstance(x, Tensor) or x != 1.0 else self
   def div(self, x:Union[Tensor, Scalar], reverse=False, upcast=True) -> Tensor:
     x = self._to_const_val(x)
     if not isinstance(x, Tensor) and not reverse and x != 0 and upcast: return self.mul(1/x)
     if (isinstance(x, Tensor) and dtypes.is_float(x.dtype)) or not upcast: return mlops.Div.apply(*self._broadcasted(x, reverse))
+
+    if isinstance(self.lazydata, LazyBuffer):
+      if isinstance(x, Tensor):
+        if isinstance(x.lazydata, LazyBuffer):
+          real_strides = [self.lazydata.st.real_strides(), x.lazydata.st.real_strides()]
+          for i, (sts, s) in enumerate(zip(zip(*real_strides), self.shape)):
+            if all(st == 0 for st in sts) and s > 1:
+              return self.make_smol(i).div(x.make_smol(i)).expand(tuple(s if j == i else None for j in range(self.ndim)))
+      else:
+        real_stride = self.lazydata.st.real_strides()
+        for i, (st, s) in enumerate(zip(real_stride, self.shape)):
+          if st == 0 and s > 1:
+            return self.make_smol(i).div(x).expand(tuple(s if j == i else None for j in range(self.ndim)))
+
     return mlops.Div.apply(*self.cast(least_upper_float(self.dtype))._broadcasted(x, reverse))
   def xor(self, x:Tensor, reverse=False) -> Tensor: return mlops.Xor.apply(*self._broadcasted(x, reverse))
 
