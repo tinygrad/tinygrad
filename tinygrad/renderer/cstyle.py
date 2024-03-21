@@ -260,22 +260,14 @@ code_for_op_hip = {
 }
 
 def _make_hip_code_for_op():
-  code_for_op = {}
-  base = {**CStyleLanguage().code_for_op, **code_for_op_hip}
   def wrapper(key, func):
-    def modified_func(*args, **kwargs):
-      dtype = args[-1]
-      if dtype == dtypes.bfloat16:
-        oprs = tuple(f"bf16_to_float({arg})" for arg in (args[1:-1] if key is TernaryOps.WHERE else args[:-1]))
-        extra = (args[0],) if key is TernaryOps.WHERE else ()
-        modified_args = extra + oprs + (dtypes.float,)
-        return f"float_to_bf16({func(*modified_args, **kwargs)})"
-      else:
-          return func(*args, **kwargs)
-    return modified_func
-
-  for key in base.keys(): code_for_op[key] = wrapper(key, base[key])
-  return code_for_op
+    def cast_bf16(*args):
+      if args[-1] == dtypes.bfloat16:
+        operands = tuple(f"bf16_to_float({arg})" for arg in (args[1:-1] if key is TernaryOps.WHERE else args[:-1]))
+        return f"float_to_bf16({func(*(((args[0],) if key is TernaryOps.WHERE else ()) + operands), dtypes.float)})"
+      return func(*args)
+    return cast_bf16
+  return { k:wrapper(k,v) for k,v in {**CStyleLanguage().code_for_op, **code_for_op_hip}.items() }
 
 def _make_hip_dtype(base_type, name, cnt):
   nms = "xyzwabcdefghijkl"[:cnt]
@@ -328,10 +320,39 @@ class HIPLanguage(CStyleLanguage):
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     prefix = ["#include <hip/hip_common.h>\n#define INFINITY (__builtin_inff())\n#define NAN (__builtin_nanf(\"\"))",
               "typedef long unsigned int size_t;"]
-    if any(uop.dtype == dtypes.bfloat16 for uop in uops): prefix.append("#include <hip/amd_detail/amd_hip_bfloat16.h>")
-    else: prefix.append('\n'.join(_make_hip_dtype(*x) for x in [("float", "float", 2), ("float", "float", 4),
+    if any(uop.dtype == dtypes.bfloat16 for uop in uops): prefix.append("""struct hip_bfloat16 { unsigned short data; };
+static __attribute__((device)) hip_bfloat16 float_to_bf16(float val) {
+  hip_bfloat16 ret;
+  union { float fp32; unsigned int u32; } u = {val};
+   if (~u.u32 & 0x7f800000) {
+     u.u32 += 0x7fff + ((u.u32 >> 16) & 1);
+   } else if (u.u32 & 0xffff) {
+     u.u32 |= 0x10000;
+   }
+   ret.data = (u.u32 >> 16);
+  return ret;
+}
+static __attribute__((device)) float bf16_to_float(hip_bfloat16 val) {
+  unsigned int uval = 0;
+  uval = val.data << 16;
+  union { unsigned int u32; float fp32; } u = {uval};
+  return u.fp32;
+}
+static __attribute__((device)) bool operator<(hip_bfloat16 a, hip_bfloat16 b) {
+  return bf16_to_float(a) < bf16_to_float(b);
+}
+static __attribute__((device)) bool operator==(hip_bfloat16 a, hip_bfloat16 b) {
+  return bf16_to_float(a) == bf16_to_float(b);
+}
+""")
+    prefix.append('\n'.join(_make_hip_dtype(*x) for x in [("float", "float", 2), ("float", "float", 4),
                                                              ("signed int", "int", 4), ("signed int", "int", 2)]))
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
+
+  def render_cast(self, x: List[str], var_dtype: DType, bitcast=False, src_dtype=None) -> str:
+    if var_dtype == dtypes.bfloat16: return f"float_to_bf16({self.render_cast(x, dtypes.float, src_dtype=src_dtype)})"
+    if src_dtype == dtypes.bfloat16: return self.render_cast([f"bf16_to_float({x[0]})"], var_dtype)
+    return super().render_cast(x, var_dtype, bitcast, src_dtype)
 
   def get_kernel_modifier(self, uops:UOpGraph) -> str:
     requiredMaxThreadsPerBlock = prod(u.arg[2] for u in uops if u.uop == UOps.SPECIAL and u.arg[1][0] == "l")
