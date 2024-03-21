@@ -2,7 +2,7 @@ import time
 from tinygrad import Tensor, Device
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import ReduceOps, GlobalCounters
-from tinygrad.features.multi import MultiLazyBuffer, ring_allreduce
+from tinygrad.features.multi import MultiLazyBuffer, all_reduce
 from tinygrad.features.jit import TinyJit
 from tinygrad.realize import create_schedule, run_schedule
 from tinygrad.helpers import getenv, Context, RING
@@ -15,7 +15,7 @@ def realize(x: Union[LazyBuffer, List[LazyBuffer]]):
 
 def test(devs: List[str], N: int, iters:int = 10):
   def _wrapped(op: ReduceOps, t: Tensor) -> Tensor:
-    return Tensor(MultiLazyBuffer(ring_allreduce(op, t.lazydata.lbs), 0), device=devs)
+    return Tensor(MultiLazyBuffer(all_reduce(op, t.lazydata.lbs), 0), device=devs)
   _jitted = TinyJit(_wrapped) if getenv("USEJIT", 1) == 1 else _wrapped
 
   secs, gflops, gbs = 0, 0, 0

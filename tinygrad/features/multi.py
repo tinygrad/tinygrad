@@ -7,7 +7,7 @@ from tinygrad.ops import BinaryOps, LoadOps, UnaryOps, TernaryOps, ReduceOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import sint
 
-def ring_allreduce(op: ReduceOps, lbs: List[LazyBuffer]):
+def all_reduce(op: ReduceOps, lbs: List[LazyBuffer]):
   assert all_int(lbs[0].shape), f"does not support symbolic shape {lbs[0].shape}"
   assert all_same([lb.shape[0] for lb in lbs]), "allreduce with uneven shards is undefined"
   bop = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[op]
@@ -16,7 +16,7 @@ def ring_allreduce(op: ReduceOps, lbs: List[LazyBuffer]):
   # Ring allreduce doesn't provide a benefit with only 2 nodes or where number of elements is less than 256k (empirically)
   # so just fallback to naive allreduce to save on kernel dispatch, chunking and reassembling chunks.
   use_ring = (RING >= 2 or (n_lbs > 2 and dim > 256_000 and RING >= 1))
-  if DEBUG >= 0: print(f"{'RING ALLREDUCE' if use_ring else 'NAIVE ALLREDUCE'} {n_lbs}x{dim} | {lbs[0].dtype}")
+  if DEBUG >= 2: print(f"{'RING ALLREDUCE' if use_ring else 'NAIVE ALLREDUCE'} {n_lbs}x{dim} | {lbs[0].dtype}")
   if not use_ring:
     return [functools.reduce(lambda x,y: x.e(bop, y), [x.copy_to_device(lb.device) for x in lbs]) for lb in lbs]
   base, left = dim // n_lbs, dim % n_lbs
@@ -118,7 +118,7 @@ class MultiLazyBuffer:
       # all-reduce on sharded axes
       new_shape = tuple(1 if i in axis else s for i,s in enumerate(self.shape))
       reduced_parts = [x.r(op, axis) if r else x.const(0, shape=new_shape) for x,r in zip(self.lbs, self.real)]
-      if all(self.real): return MultiLazyBuffer(ring_allreduce(op, reduced_parts), None)
+      if all(self.real): return MultiLazyBuffer(all_reduce(op, reduced_parts), None)
       return MultiLazyBuffer(reduced_parts, None, self.real)
     # reduce on non sharded axes, piecewise is fine. if axis is None this is also correct
     return MultiLazyBuffer([x.r(op, axis) for x in self.lbs], self.axis, self.real)
