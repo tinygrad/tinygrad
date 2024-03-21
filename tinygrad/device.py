@@ -4,9 +4,10 @@ from typing import TYPE_CHECKING, Any, List, Optional, Dict, Tuple, ClassVar
 import importlib, inspect, functools, pathlib, time, ctypes
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.helpers import ansilen, DEBUG, getenv, colored, BEAM, NOOPT, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put
-from tinygrad.helpers import prod
+from tinygrad.helpers import prod, CACHECOLLECTING
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.ops import LazyOp, get_lazyop_info, GlobalCounters
+from tinygrad.codegen.uops import UOpGraph
 from dataclasses import dataclass
 
 if TYPE_CHECKING:
@@ -47,7 +48,7 @@ class JITRunner:
     var_vals = var_vals if var_vals is not None else {}
     from tinygrad.features.jit import CacheCollector
     et = self(rawbufs, var_vals)
-    CacheCollector.add(self, rawbufs, var_vals)
+    if CACHECOLLECTING: CacheCollector.add(self, rawbufs, var_vals)
     return et
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     raise NotImplementedError("override this")
@@ -183,7 +184,7 @@ MallocAllocator = _MallocAllocator()
 class Compiler:
   linearizer_opts: ClassVar[LinearizerOptions]
   def __init__(self, cachekey:Optional[str]=None): self.cachekey = None if getenv("DISABLE_COMPILER_CACHE") else cachekey
-  def render(self, name:str, uops) -> str: raise NotImplementedError("need a render function")
+  def render(self, name:str, uops:UOpGraph) -> str: raise NotImplementedError("need a render function")
   def compile(self, src:str) -> bytes: raise NotImplementedError("need a compile function")
   def compile_cached(self, src:str) -> bytes:
     if self.cachekey is None or (lib := diskcache_get(self.cachekey, src)) is None:
@@ -238,6 +239,7 @@ class MultiDeviceJITGraph(JITRunner):
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     raise NotImplementedError("override this")
 
+logkern, logkern_level = open(getenv("LOGKERN", ""), "a") if getenv("LOGKERN", "") else None, getenv("LOGKERN_LEVEL", 1)
 class Compiled:
   def __init__(self, device:str, allocator:Allocator, compiler:Optional[Compiler], runtime, graph=None):
     self.dname, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler, runtime, graph
@@ -277,6 +279,9 @@ class Compiled:
         timed = sorted([(nm, tk, time_linearizer(tk, test_rawbuffers, allow_test_size=False, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
         if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
         k = timed[0][1]
+        if logkern is not None and logkern_level > 1: logkern.writelines([f"{(lin.ast, lin.applied_opts)}\n" for (_,lin,_) in timed[1:]])
+    # TODO: check the correctness inline once compare_linearizer is in core
+    if logkern is not None: logkern.writelines([f"{(k.ast, k.applied_opts)}\n"])
     return k
 
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none

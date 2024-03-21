@@ -120,7 +120,7 @@ class TestSafetensors(unittest.TestCase):
     for dtype in dtypes.fields().values():
       if dtype in [dtypes.bfloat16]: continue # not supported in numpy
       path = temp(f"ones.{dtype}.safetensors")
-      ones = Tensor.rand((10,10), dtype=dtype)
+      ones = Tensor(np.random.rand(10,10), dtype=dtype)
       safe_save(get_state_dict(ones), path)
       np.testing.assert_equal(ones.numpy(), list(safe_load(path).values())[0].numpy())
 
