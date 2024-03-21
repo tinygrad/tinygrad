@@ -28,7 +28,7 @@ if CUDACPU:
 def check(status):
   if status != 0: raise RuntimeError(f"CUDA Error {status}, {ctypes.string_at(init_c_var(ctypes.POINTER(ctypes.c_char)(), lambda x: cuda.cuGetErrorString(status, ctypes.byref(x)))).decode()}")  # noqa: E501
 
-def encode_args(args, vals) -> Tuple[ctypes.Array, ctypes.Structure]:
+def encode_args(args, vals) -> Tuple[ctypes.Structure, ctypes.Array]:
   c_args = init_c_struct_t(tuple([(f'f{i}', cuda.CUdeviceptr_v2) for i in range(len(args))] +
                                  [(f'v{i}', ctypes.c_int) for i in range(len(vals))]))(*args, *vals)
   vargs = (ctypes.c_void_p * 5)(ctypes.c_void_p(1), ctypes.cast(ctypes.byref(c_args), ctypes.c_void_p), ctypes.c_void_p(2),
@@ -90,7 +90,8 @@ class CUDAProgram:
     if DEBUG >= 5: print("\n".join([f"{i+1:>3} {line}" for i, line in enumerate(pretty_ptx(lib.decode('utf-8')).split("\n"))]))
     if DEBUG >= 6: cuda_disassemble(lib, device.arch)
 
-    if not CUDACPU:
+    if CUDACPU: self.prg = lib
+    else:
       check(cuda.cuCtxSetCurrent(self.device.context))
       self.module = cuda.CUmodule()
       status = cuda.cuModuleLoadData(ctypes.byref(self.module), lib)
@@ -99,20 +100,20 @@ class CUDAProgram:
         cuda_disassemble(lib, device.arch)
         raise RuntimeError("module load failed")
       check(cuda.cuModuleGetFunction(ctypes.byref(prg := cuda.CUfunction()), self.module, name.encode("utf-8")))
-    self.prg = prg if not CUDACPU else lib
+      self.prg = prg #type: ignore
 
   def __del__(self):
     if hasattr(self, 'module'): check(cuda.cuModuleUnload(self.module))
 
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
-    if not CUDACPU:
+    if CUDACPU: self.vargs = args+tuple(vals)
+    else:
       check(cuda.cuCtxSetCurrent(self.device.context))
       if not hasattr(self, "vargs"):
-        self.c_args, self.vargs = encode_args(args, vals)
+        self.c_args, self.vargs = encode_args(args, vals) #type: ignore
       else:
         for i in range(len(args)): self.c_args.__setattr__(f'f{i}', args[i])
         for i in range(len(vals)): self.c_args.__setattr__(f'v{i}', vals[i])
-    else: self.vargs = args+tuple(vals)
     return cu_time_execution(lambda: check(cuda.cuLaunchKernel(self.prg, *global_size, *local_size, 0, None, None, self.vargs)), enable=wait)
 
 class CUDAAllocator(LRUAllocator):
