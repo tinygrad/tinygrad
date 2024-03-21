@@ -592,6 +592,19 @@ class Tensor:
     axis_: Tuple[int, ...] = tuple(range(len(self.shape))) if axis is None else ((axis,) if isinstance(axis, int) else tuple(axis))
     axis_ = tuple(x if x >= 0 else x+len(self.shape) for x in axis_)
     shape = tuple(s for i,s in enumerate(self.shape) if i not in axis_)
+
+    if not axis_: return self
+    if isinstance(self.lazydata, LazyBuffer):
+      real_strides = self.lazydata.st.real_strides()
+      can_simp = tuple(a for a in axis_ if real_strides[a] == 0 and self.shape[a])
+      if can_simp:
+        simp_a = can_simp[0]
+        multiplier = self.shape[simp_a] if fxn is mlops.Sum else 1
+        new_axis = tuple(a for a in axis_ if a != simp_a)
+        smol = self.shrink(tuple((0, 1) if i == simp_a else None for i in range(self.ndim)))
+        ret = multiplier * smol._reduce(fxn, new_axis, keepdim)
+        return ret if keepdim else ret.reshape(shape=shape)
+
     ret = fxn.apply(self, axis=axis_)
     return ret if keepdim else ret.reshape(shape=shape)
 
