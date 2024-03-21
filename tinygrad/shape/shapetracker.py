@@ -89,6 +89,8 @@ class ShapeTracker:
         idxs.append((idx//acc)%d)
         acc *= d
       idx, valid = _expr_view(view, idxs[::-1], valid)
+    assert not isinstance(idx.min, int) or idx.min >= -2**31, f"idx.min too small. {idx=}, {idx.min=}"
+    assert not isinstance(idx.max, int) or idx.max < 2**31, f"idx.max too big. {idx=}, {idx.max=}"
     return idx, valid
 
   def axis_is_masked(self, axis:int) -> bool:
