@@ -3,17 +3,17 @@ from typing import List, Tuple, DefaultDict
 import numpy as np
 from collections import defaultdict
 from extra.optimization.helpers import load_worlds, ast_str_to_lin
+
+from tinygrad import Tensor, Device, dtypes
 from tinygrad.codegen.linearizer import Linearizer, UOp
 from tinygrad.codegen.kernel import Opt
 from tinygrad.features.search import get_linearizer_actions, bufs_from_lin
-from tinygrad.tensor import Tensor
 from tinygrad.features.graph import print_tree
 from tinygrad.helpers import getenv, from_mv, prod, colored, Context
-from tinygrad.device import Device, Compiled
-from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import LazyOp
 
-def tuplize_uops(uops:List[UOp]) -> Tuple: return tuple([(x.uop, x.dtype, tuple(uops.index(x) for x in x.vin), x.arg) for x in uops])
+def tuplize_uops(uops:List[UOp]) -> Tuple:
+  return tuple([(x.uop, x.dtype, tuple(uops.index(x) for x in x.vin), x.arg) for x in uops])
 
 device = Device[Device.DEFAULT]
 
@@ -21,13 +21,21 @@ def get_fuzz_rawbufs(lin):
   rawbufs = bufs_from_lin(lin)
 
   # Reallocate output buffer with additional area to detect out-of-bounds writes.
-  RED_AREA_SIZE = 1024 if isinstance(device, Compiled) else 0
+  RED_AREA_SIZE = 1024
+  # setting output  # TODO: multi-output kernel
   rawbufs[0] = get_fuzz_rawbuf_like(rawbufs[0], zero=True, size=rawbufs[0].size+RED_AREA_SIZE)
+  # setting inputs
   with Context(DEBUG=0):
     for rawbuf in rawbufs[1:]:
-      # TODO: better rand values based on dtype
-      t = Tensor.uniform((rawbuf.size,), dtype=rawbuf.dtype)
-      if isinstance(ld:=t.realize().lazydata, LazyBuffer) and ld.realized: rawbuf.copyin(ld.realized.as_buffer())
+      if dtypes.is_unsigned(rawbuf.dtype):
+        data = np.random.randint(0, 100, size=rawbuf.size, dtype=rawbuf.dtype.np)
+      elif dtypes.is_int(rawbuf.dtype):
+        data = np.random.randint(-100, 100, size=rawbuf.size, dtype=rawbuf.dtype.np)
+      elif rawbuf.dtype == dtypes.bool:
+        data = np.random.choice([True, False], size=rawbuf.size)
+      else:
+        data = np.random.uniform(-10, 10, size=rawbuf.size).astype(dtype=rawbuf.dtype.np)
+      rawbuf.copyin(Tensor(data).realize().lazydata.realized.as_buffer())
   return rawbufs
 
 def get_fuzz_rawbuf_like(rawbuf, zero=False, size=None):
