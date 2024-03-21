@@ -62,7 +62,7 @@ if __name__ == "__main__":
     choices = []
     for lin in lins:
       tm = time_linearizer(lin, rawbufs, allow_test_size=False, cnt=10)
-      gflops = sym_infer(lin.info.flops, {k:k.min for k in lin.ast.vars()})*1e-9/tm
+      gflops = sym_infer(lin.info.flops, {k:k.min for k in lin.ast[0].vars()})*1e-9/tm
       choices.append((tm, gflops, lin.linearize()))
 
       # print all kernels
