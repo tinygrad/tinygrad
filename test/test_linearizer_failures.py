@@ -6,7 +6,7 @@ from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.search import Opt, OptOps
 from tinygrad import Device, dtypes, Tensor
 from tinygrad.helpers import CI
-from test.external.fuzz_linearizer import run_linearizer, get_fuzz_rawbufs, get_fuzz_rawbuf_like
+from test.external.fuzz_linearizer import compare_linearizer
 from test.helpers import is_dtype_supported
 
 from tinygrad.ops import LazyOp, BinaryOps, UnaryOps, ReduceOps, BufferOps, MemBuffer, ConstBuffer
@@ -17,12 +17,6 @@ def helper_test_lin(lin: Linearizer, opts, failed_platforms):
   if any(b.dtype == dtypes.half for b in lin.membufs) and not is_dtype_supported(dtypes.half):
     return
 
-  rawbufs = get_fuzz_rawbufs(lin)
-  var_vals = {v: random.randint(v.min, v.max) for v in lin.ast[0].vars()}
-
-  assert run_linearizer(lin, rawbufs, var_vals) == "PASS" or Device.DEFAULT in failed_platforms, "Failed running non-optimized ast"
-  ground_truth = np.frombuffer(rawbufs[0].as_buffer(), rawbufs[0].dtype.np)
-
   for opt in opts:
     try:
       lin.apply_opt(opt)
@@ -31,13 +25,12 @@ def helper_test_lin(lin: Linearizer, opts, failed_platforms):
       assert Device.DEFAULT not in failed_platforms
       return
 
-  rawbufs[0] = get_fuzz_rawbuf_like(rawbufs[0], zero=True)
-  linearizer_passed = (run_linearizer(lin, rawbufs, var_vals) == "PASS")
-  output_allclose = np.allclose(ground_truth, np.frombuffer(rawbufs[0].as_buffer(), rawbufs[0].dtype.np), rtol=1e-2, atol=1e-2)
-  if Device.DEFAULT not in failed_platforms:
-    assert linearizer_passed and output_allclose, f"{linearizer_passed=}, {output_allclose=}"
+  compare_result = compare_linearizer(lin)
+  if compare_result[0] in ["PASS", "KernelOptError"]:
+    # it's considered fixed if we invalidated the opts
+    assert Device.DEFAULT not in failed_platforms, f"unexpected success on {Device.DEFAULT}"
   else:
-    assert not linearizer_passed or not output_allclose, f"{linearizer_passed=}, {output_allclose=}"
+    assert Device.DEFAULT in failed_platforms, f"failed on {Device.DEFAULT} with {compare_result[0]}"
 
 @unittest.skipIf(CI and Device.DEFAULT=="CUDA", "failed on CUDA CI")
 class TestLinearizerFailures(unittest.TestCase):
