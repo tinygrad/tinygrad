@@ -36,7 +36,7 @@ def encode_args(args, vals) -> Tuple[ctypes.Structure, ctypes.Array]:
   return c_args, vargs
 
 def cu_time_execution(cb, enable=False) -> Optional[float]:
-  if CUDACPU: cpu_time_execution(cb, enable=enable)
+  if CUDACPU: return cpu_time_execution(cb, enable=enable)
   if not enable: return cb()
   evs = [init_c_var(cuda.CUevent(), lambda x: cuda.cuEventCreate(ctypes.byref(x), 0)) for _ in range(2)]
   cuda.cuEventRecord(evs[0], None)
