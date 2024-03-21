@@ -73,6 +73,7 @@ def compare_linearizer(lin: Linearizer, rawbufs=None, var_vals=None, ground_trut
       return ("BASELINE_ERROR", rawbufs, var_vals, ground_truth,)
     ground_truth = np.frombuffer(rawbufs[0].as_buffer(), rawbufs[0].dtype.np).copy()
 
+  rawbufs[0] = get_fuzz_rawbuf_like(rawbufs[0], zero=True) # get a new output buffer
   if (run_msg := run_linearizer(lin, rawbufs, var_vals)) != "PASS":
     return (run_msg, rawbufs, var_vals, ground_truth,)
   result = np.frombuffer(rawbufs[0].as_buffer(), rawbufs[0].dtype.np)
