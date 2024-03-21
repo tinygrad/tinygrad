@@ -44,7 +44,9 @@ generate_hip() {
   sed -i "s\import ctypes\import ctypes, os\g" $BASE/hip.py
   sed -i "s\'/opt/rocm/\os.getenv('ROCM_PATH', '/opt/rocm/')+'/\g" $BASE/hip.py
   python3 -c "import tinygrad.runtime.autogen.hip"
+}
 
+generate_comgr() {
   clang2py /opt/rocm/include/amd_comgr/amd_comgr.h \
   --clang-args="-D__HIP_PLATFORM_AMD__ -I/opt/rocm/include -x c++" -o $BASE/comgr.py -l /opt/rocm/lib/libamd_comgr.so
   fixup $BASE/comgr.py
@@ -77,8 +79,9 @@ generate_hsa() {
 
 if [ "$1" == "opencl" ]; then generate_opencl
 elif [ "$1" == "hip" ]; then generate_hip
+elif [ "$1" == "comgr" ]; then generate_comgr
 elif [ "$1" == "cuda" ]; then generate_cuda
 elif [ "$1" == "hsa" ]; then generate_hsa
-elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_cuda; generate_hsa
+elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_hsa
 else echo "usage: $0 <type>"
 fi

@@ -454,10 +454,11 @@ jobs:
       - name: Verify HIP autogen
         if: matrix.backend == 'hip'
         run: |
-          cp tinygrad/runtime/autogen/hip.py /tmp/hip.py.bak
+          cp tinygrad/runtime/autogen/hsa.py /tmp/hsa.py.bak
           cp tinygrad/runtime/autogen/comgr.py /tmp/comgr.py.bak
-          ./autogen_stubs.sh hip
-          diff /tmp/hip.py.bak tinygrad/runtime/autogen/hip.py
+          ./autogen_stubs.sh hsa
+          ./autogen_stubs.sh comgr
+          diff /tmp/hsa.py.bak tinygrad/runtime/autogen/hsa.py
           diff /tmp/comgr.py.bak tinygrad/runtime/autogen/comgr.py
       - name: Run pytest (not cuda or hip)
         if: matrix.backend!='cuda' && matrix.backend!='ptx' && matrix.backend!='triton' && matrix.backend != 'hip'
