@@ -633,10 +633,11 @@ class Tensor:
     return m - ss.log()
 
   def argmax(self, axis=None, keepdim=False):
+    # NOTE: return the first index if there are multiple occurrences of the maximum values
     if axis is None:
       idx = (self == self.max(axis)) * Tensor.arange(prod(self.shape)-1,-1,-1, requires_grad=False, device=self.device).reshape(self.shape)
       return (prod(self.shape) - idx.max() - 1).cast(dtypes.int32)
-    axis = axis + len(self.shape) if axis < 0 else axis
+    axis = self._resolve_dim(axis)
     m = self == self.max(axis=axis, keepdim=True)
     idx = m * Tensor.arange(self.shape[axis]-1,-1,-1, requires_grad=False, device=self.device).reshape(self.shape[axis], *[1]*(self.ndim-axis-1))
     return (self.shape[axis]-idx.max(axis=axis, keepdim=keepdim)-1).cast(dtypes.int32)
