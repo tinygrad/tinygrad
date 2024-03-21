@@ -5,6 +5,7 @@ if [[ ! $(clang2py -V) ]]; then
   pushd .
   cd /tmp
   sudo apt-get install -y --no-install-recommends clang
+  pip install --upgrade pip setuptools
   pip install clang==14.0.6
   git clone https://github.com/geohot/ctypeslib.git
   cd ctypeslib
