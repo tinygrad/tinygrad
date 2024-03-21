@@ -251,7 +251,7 @@ class UOpGraph:
         non_loop = to_symbolic(next(v for v in with_loop.vin if v != next_with_loop and loop_op not in get_recursive_parents(v)))
         if round_up and with_loop.arg is BinaryOps.MUL: factored = factored + (non_loop - 1)
         return loop_factor(next_with_loop, alu_opposite(with_loop.arg, factored, non_loop), loop_op)
-    def const(x): return self.add(UOps.CONST, dtypes.int32, tuple(), x)
+    def const(x, insert_before=None): return self.add(UOps.CONST, dtypes.int32, tuple(), x, insert_before=insert_before)
     def neg(x): return self.add(UOps.ALU, dtypes.int32, (x,), UnaryOps.NEG)
     def max(x, y): return self.add(UOps.ALU, dtypes.int32, (x, y), BinaryOps.MAX)
     def uop_alu_idx(a: UOp, b, op, dtype=dtypes.int32):
@@ -274,6 +274,7 @@ class UOpGraph:
         or any([where.vin[2].arg != 0 or where.vin[0].vin[1].uop is not UOps.CONST for where in wheres])
         or any(len([op for op in get_recursive_parents(where) if op.uop is UOps.LOOP]) == 0 for where in wheres)): continue
       if DEBUG >= 4 and (len(phis) > 0 or len(wheres) > 0): print("simplified {} PHI and {} WHERE in loop".format(len(phis), len(wheres)))
+      adjusted_adds = set()
       for where in sorted(wheres, key=lambda x: self.uops.index(x)):
         comp_lt, comp_gt = where.vin[0].vin[0], where.vin[0].vin[1]
         factored = loop_factor(comp_lt, NumNode(int(comp_gt.arg)), loop_op, round_up=(comp_gt.arg > 0))
@@ -287,6 +288,11 @@ class UOpGraph:
         final_op = self.add(UOps.ALU, where.dtype, (maybe_cast, where.vin[1]), BinaryOps.MUL)
         self.uops = self.uops + after_split_ops
         self.replace_op(where, final_op)
+        for op in self.get_recursive_children(final_op):
+          if (op.arg is BinaryOps.ADD and any([u.uop is UOps.PHI for u in self.get_recursive_children(op)]) and op not in adjusted_adds
+            and op != final_op and final_op.uop is not UOps.CONST):
+            op.vin = tuple([const(vin.arg * loop_length, insert_before=self.uops.index(op)) if vin.uop is UOps.CONST else vin for vin in list(op.vin)])
+            adjusted_adds.add(op)
         get_recursive_parents.cache_clear()
       for phi in phis:
         self.replace_op(phi, phi.vin[1])
