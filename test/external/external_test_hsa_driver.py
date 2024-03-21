@@ -1,5 +1,4 @@
 import ctypes, unittest
-from tinygrad import Tensor
 from tinygrad.helpers import init_c_struct_t
 from tinygrad.device import Device, Buffer, BufferXfer
 from tinygrad.dtype import dtypes
