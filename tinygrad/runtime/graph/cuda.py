@@ -49,7 +49,7 @@ class CUDAGraph:
     # Update var_vals in the c_input_params struct.
     for j in self.jc_idxs_with_updatable_var_vals:
       for i,v in enumerate(cast(CompiledASTRunner, self.jit_cache[j].prg).vars):
-        setattr(self.updatable_nodes[j][2], f'f{len(self.jit_cache[j].rawbufs) + i}', var_vals[v])
+        setattr(self.updatable_nodes[j][2], f'v{i}', var_vals[v])
 
     # Update launch dims in the c_node_params struct.
     for j in self.jc_idxs_with_updatable_launch_dims:
