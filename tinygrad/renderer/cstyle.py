@@ -33,7 +33,7 @@ class CStyleLanguage(NamedTuple):
     TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})"}
 
   # returns a str expression of the casted xs with the given type
-  def render_cast(self, x:List[str], var_dtype:DType, bitcast=False) -> str:
+  def render_cast(self, x:List[str], var_dtype:DType, bitcast=False, src_dtype=None) -> str:
     if bitcast: return f"(*(({self.buffer_prefix}{self.render_dtype(var_dtype)}*)&{x[0]}))"
     if len(x) == 1: return f"({self.render_dtype(var_dtype)})({x[0]})"
     assert len(x) == var_dtype.count, f"cast is wrong size {len(x)} != {var_dtype.count}"
@@ -150,9 +150,9 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str
           assert len(vin) == 1
           precast = ssa(None,'precast')
           kk(f"{lang.render_dtype(cast(DType, vin[0].dtype))} {precast} = {r[vin[0]]};")
-          val = lang.render_cast([precast], dtype, bitcast=True)
+          val = lang.render_cast([precast], dtype, bitcast=True, src_dtype=vin[0].dtype)
         else:
-          val = lang.render_cast([r[x] for x in vin], dtype, bitcast=False)
+          val = lang.render_cast([r[x] for x in vin], dtype, bitcast=False, src_dtype=vin[0].dtype)
         if child_count[u] <= 1: r[u] = val
         else: kk(f"{dtype.name} {ssa(u,'cast')} = {val};")
       elif uop is UOps.DEFINE_LOCAL:
@@ -186,7 +186,7 @@ class OpenCLLanguage(CStyleLanguage):
   code_for_workitem = {"g": lambda x: f"get_group_id({x})", "l": lambda x: f"get_local_id({x})", "i": lambda x: f"get_global_id({x})"}
   uses_vload = True
   type_map = { dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong" }
-  def render_cast(self, x, var_dtype, bitcast=False) -> str:
+  def render_cast(self, x, var_dtype, bitcast=False, src_dtype=None) -> str:
     return f"as_{self.type_map.get(var_dtype) or var_dtype.name}({x[0]})" if bitcast else super().render_cast(x, var_dtype)
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
@@ -204,7 +204,7 @@ class MetalLanguage(CStyleLanguage):
   uses_ptr_arithmetic = True
   code_for_workitem = {"g": lambda x: f"gid.{chr(120+x)}", "l": lambda x: f"lid.{chr(120+x)}"}
   extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
-  def render_cast(self, x: List[str], var_dtype: DType, bitcast=False) -> str:
+  def render_cast(self, x: List[str], var_dtype: DType, bitcast=False, src_dtype=None) -> str:
     return f"as_type<{var_dtype.name}>({x[0]})" if bitcast else super().render_cast(x, var_dtype)
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
