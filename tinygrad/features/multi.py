@@ -1,16 +1,45 @@
 from __future__ import annotations
 from typing import Optional, Union, Any, Tuple, List
 import functools, itertools, operator
-from tinygrad.helpers import all_same, dedup, round_up, prod, DEBUG
+from tinygrad.helpers import all_same, all_int, dedup, round_up, prod, DEBUG, RING
 from tinygrad.dtype import DType, Scalar
 from tinygrad.ops import BinaryOps, LoadOps, UnaryOps, TernaryOps, ReduceOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import sint
 
-def all_reduce(op:ReduceOps, lbs):
-  # TODO: replace this with ring reduce
+def all_reduce(op: ReduceOps, lbs: List[LazyBuffer]) -> List[LazyBuffer]:
+  assert all_int(lbs[0].shape), f"does not support symbolic shape {lbs[0].shape}"
+  assert all_same([lb.shape[0] for lb in lbs]), "allreduce with uneven shards is undefined"
   bop = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[op]
-  return [functools.reduce(lambda x,y: x.e(bop, y), [x.copy_to_device(lb.device) for x in lbs]) for lb in lbs]
+
+  n_lbs, dim = len(lbs), prod(lbs[0].shape)
+  # Ring allreduce doesn't provide a benefit with only 2 nodes or where number of elements is less than 256k (empirically)
+  # so just fallback to naive allreduce to save on kernel dispatch, chunking and reassembling chunks.
+  use_ring = (RING >= 2 or (n_lbs > 2 and dim > 256_000 and RING >= 1))
+  if DEBUG >= 2: print(f"{'RING ALLREDUCE' if use_ring else 'NAIVE ALLREDUCE'} {n_lbs}x{dim} | {lbs[0].dtype}")
+  if not use_ring:
+    return [functools.reduce(lambda x,y: x.e(bop, y), [x.copy_to_device(lb.device) for x in lbs]) for lb in lbs]
+  base, left = dim // n_lbs, dim % n_lbs
+  c_lens = [base + 1 if left - i > 0 else base for i in range(n_lbs)]
+  acc = 0
+  chunks = [(acc, (acc := acc + i)) for i in c_lens if i > 0]
+  chunked = [[lb.reshape((dim,)).shrink(((s,e),)) for s,e in chunks] for lb in lbs]
+
+  # Scatter-reduce step
+  for step in range(n_lbs - 1):
+    for i in range(len(chunks)):
+      s, r = (i+step)%n_lbs, (i+step+1)%n_lbs
+      chunked[r][i] = chunked[r][i].e(bop, chunked[s][i].copy_to_device(chunked[r][i].device, force=True))
+
+  # Allgather step
+  for step in range(n_lbs - 1):
+    for i in range(len(chunks)):
+      s, r = (i+step-1)%n_lbs, (i+step)%n_lbs
+      chunked[r][i] = chunked[s][i].copy_to_device(chunked[r][i].device, force=True)
+
+  # Assemble chunks back
+  pads = [((s,dim-e),) for s,e in chunks]
+  return [functools.reduce(lambda x,y: x.e(BinaryOps.ADD, y), [c.pad(pads[i]) for i,c in enumerate(lb_c)]).reshape(lbs[0].shape) for lb_c in chunked]
 
 def to_sharded(lbs:List[LazyBuffer], axis:int) -> List[LazyBuffer]:
   if DEBUG >= 3 and lbs[0].shape[axis] % len(lbs) != 0: print(f"multi axis uneven: {lbs[0].shape=} {axis=} {len(lbs)=}")
