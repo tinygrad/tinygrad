@@ -51,12 +51,12 @@ class Node:
   def __rfloordiv__(self, b:int): return NumNode(b) // self
   def __floordiv__(self, b:Union[Node,int], factoring_allowed=True):
     if isinstance(b, Node):
-      if b.__class__ is NumNode: return self // b.b
+      if b.__class__ is NumNode: return self.__floordiv__(b.b, factoring_allowed)
       if self == b: return NumNode(1)
       if (b - self).min > 0 and self.min >= 0: return NumNode(0) # b - self simplifies the node
       raise RuntimeError(f"not supported: {self} // {b}")
     assert b != 0
-    if b < 0: return (self*-1)//-b
+    if b < 0: return (self*-1).__floordiv__(-b, factoring_allowed)
     if b == 1: return self
 
     # the numerator of div is not allowed to be negative

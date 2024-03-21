@@ -69,8 +69,8 @@ class Attention:
       self.cache_v = Tensor.zeros(bsz, self.max_context, self.n_kv_heads, self.head_dim, dtype=x.dtype).contiguous().realize()
       if isinstance(x.device, tuple):
         # TODO: instead of specifying how to shard, it can follow how xk and xv are being sharded
-        self.cache_k.shard_((xk.device), axis=None)
-        self.cache_v.shard_((xv.device), axis=None)
+        self.cache_k.shard_((xk.device), axis=None).realize()
+        self.cache_v.shard_((xv.device), axis=None).realize()
 
     # HACK: without contiguous, the conversation mode is broken and the cache is not updated
     keys = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1).contiguous() if start_pos > 0 else xk

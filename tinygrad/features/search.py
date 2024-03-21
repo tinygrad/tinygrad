@@ -41,7 +41,7 @@ def _time_program(variables:List[Variable], outcount:int, rdev:Compiled, lib:byt
   tms = []
   for _ in range(cnt):
     if clear_l2:
-      with Context(DEBUG=0): Tensor.rand(1024,1024).realize()
+      with Context(DEBUG=0, BEAM=0, CACHECOLLECTING=0): Tensor.ones(1024,1024).contiguous().realize()
     tms.append(cast(float, car(rawbufs, var_vals, wait=True, do_update_stats=False))*factor)
     if early_stop is not None and early_stop < tms[-1]: break
   return tms
@@ -49,7 +49,7 @@ def _time_program(variables:List[Variable], outcount:int, rdev:Compiled, lib:byt
 def _compile_linearizer(compiler:Compiler, lin:Linearizer, name:Optional[str]=None) -> Tuple[bytes, Optional[List[int]], Optional[List[int]],
                                                                                              List[Variable], int]:
   lin.linearize()
-  src = compiler.render(name if name is not None else to_function_name(lin.name), lin.uops.uops)   # NOTE: these all have the same name for deduping
+  src = compiler.render(name if name is not None else to_function_name(lin.name), lin.uops)   # NOTE: these all have the same name for deduping
   if DEBUG >= 5: print(src)
   return compiler.compile(src), lin.global_size, lin.local_size, lin.uops.vars(), len(lin.outbufs)
 
@@ -107,7 +107,7 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
   beam: List[Tuple[Linearizer, float]] = []
   seen_libs = set()
 
-  default_parallel, min_progress_micros = 1 if lin.opts.device in {"CUDA", "HIP", "HSA"} else 0, getenv("BEAM_MIN_PROGRESS",0.01)
+  default_parallel, min_progress_micros = 1 if lin.opts.device in {"CUDA", "HSA"} else 0, getenv("BEAM_MIN_PROGRESS",0.01)
   if beam_pool is None and getenv("PARALLEL", default_parallel): beam_pool = multiprocessing.Pool(multiprocessing.cpu_count(), _init_worker)
 
   try:

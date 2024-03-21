@@ -4,9 +4,10 @@ from typing import TYPE_CHECKING, Any, List, Optional, Dict, Tuple, ClassVar
 import importlib, inspect, functools, pathlib, time, ctypes
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.helpers import ansilen, DEBUG, getenv, colored, BEAM, NOOPT, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put
-from tinygrad.helpers import prod
+from tinygrad.helpers import prod, CACHECOLLECTING
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.ops import LazyOp, get_lazyop_info, GlobalCounters
+from tinygrad.codegen.uops import UOpGraph
 from dataclasses import dataclass
 
 if TYPE_CHECKING:
@@ -47,7 +48,7 @@ class JITRunner:
     var_vals = var_vals if var_vals is not None else {}
     from tinygrad.features.jit import CacheCollector
     et = self(rawbufs, var_vals)
-    CacheCollector.add(self, rawbufs, var_vals)
+    if CACHECOLLECTING: CacheCollector.add(self, rawbufs, var_vals)
     return et
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     raise NotImplementedError("override this")
@@ -183,7 +184,7 @@ MallocAllocator = _MallocAllocator()
 class Compiler:
   linearizer_opts: ClassVar[LinearizerOptions]
   def __init__(self, cachekey:Optional[str]=None): self.cachekey = None if getenv("DISABLE_COMPILER_CACHE") else cachekey
-  def render(self, name:str, uops) -> str: raise NotImplementedError("need a render function")
+  def render(self, name:str, uops:UOpGraph) -> str: raise NotImplementedError("need a render function")
   def compile(self, src:str) -> bytes: raise NotImplementedError("need a compile function")
   def compile_cached(self, src:str) -> bytes:
     if self.cachekey is None or (lib := diskcache_get(self.cachekey, src)) is None:
