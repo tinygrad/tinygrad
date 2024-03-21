@@ -187,7 +187,7 @@ class OpenCLLanguage(CStyleLanguage):
   uses_vload = True
   type_map = { dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong" }
   def render_cast(self, x, var_dtype, bitcast=False, src_dtype=None) -> str:
-    return f"as_{self.type_map.get(var_dtype) or var_dtype.name}({x[0]})" if bitcast else super().render_cast(x, var_dtype)
+    return f"as_{self.type_map.get(var_dtype) or var_dtype.name}({x[0]})" if bitcast else super().render_cast(x, var_dtype, src_dtype=src_dtype)
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     if any(uop.dtype == dtypes.half for uop in uops): prefix = ["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"]
@@ -259,6 +259,24 @@ code_for_op_hip = {
   UnaryOps.EXP2: lambda x,dtype: f"__ocml_exp2_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
 }
 
+def _make_hip_code_for_op():
+  code_for_op = {}
+  base = {**CStyleLanguage().code_for_op, **code_for_op_hip}
+  def wrapper(key, func):
+    def modified_func(*args, **kwargs):
+      dtype = args[-1]
+      if dtype == dtypes.bfloat16:
+        oprs = tuple(f"bf16_to_float({arg})" for arg in (args[1:-1] if key is TernaryOps.WHERE else args[:-1]))
+        extra = (args[0],) if key is TernaryOps.WHERE else ()
+        modified_args = extra + oprs + (dtypes.float,)
+        return f"float_to_bf16({func(*modified_args, **kwargs)})"
+      else:
+          return func(*args, **kwargs)
+    return modified_func
+
+  for key in base.keys(): code_for_op[key] = wrapper(key, base[key])
+  return code_for_op
+
 def _make_hip_dtype(base_type, name, cnt):
   nms = "xyzwabcdefghijkl"[:cnt]
   return f"typedef {base_type} {name}{cnt} __attribute__((ext_vector_type({cnt})));\n" + \
@@ -299,7 +317,7 @@ class HIPLanguage(CStyleLanguage):
   }\nextern "C" __attribute__((global))"""
   code_for_workitem = {"g": lambda x: f"__ockl_get_group_id({x})", "l": lambda x: f"__ockl_get_local_id({x})",
                        "i": lambda x: f"(__ockl_get_group_id({x})*__ockl_get_local_size({x})+__ockl_get_local_id({x}))"}
-  code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_hip}
+  code_for_op = _make_hip_code_for_op()
   smem_prefix = "__attribute__((shared))"
   barrier = '__builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");' + '__builtin_amdgcn_s_barrier();' + \
             '__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");'
