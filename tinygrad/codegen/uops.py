@@ -478,7 +478,7 @@ class UOpGraph:
       for child in self.get_recursive_children(u):
         if not (child.uop is UOps.ALU and child.arg == BinaryOps.MUL and u in child.vin): continue
         self.replace_op(child, next(arg for arg in child.vin if arg != u))
-        if_op = self.add(UOps.IF, None, (u,), None, insert_before=self.uops.index(u)+1)
+        if_op = self.add(UOps.IF, dtypes.bool, (u,), None, insert_before=self.uops.index(u)+1)
         child.vin = (*child.vin, if_op)
 
   def rewrite_all(self):
