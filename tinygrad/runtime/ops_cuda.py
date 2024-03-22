@@ -127,9 +127,7 @@ class CUDAAllocator(LRUAllocator):
       return init_c_var(ctypes.c_void_p(), lambda x: check(cuda.cuMemHostAlloc(ctypes.byref(x), size, 0)))
     else:
       raise Exception("no options")
-  def _free(self, opaque):
-    CUDADevice.synchronize_system()
-    check(cuda.cuMemFree_v2(opaque))
+  def _free(self, opaque): check(cuda.cuMemFree_v2(opaque))
   def copyin(self, dest, src:memoryview):
     host_mem = self._alloc_with_options(len(src), BufferOptions(host=True))
     self.device.pending_copyin.append(host_mem.value)
