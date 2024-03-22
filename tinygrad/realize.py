@@ -60,6 +60,10 @@ def run_schedule(schedule:List[ScheduleItem]):
         else:
           out.realized = out.output_buffer if out.output_buffer is not None else \
             Buffer(out.device, out.size, out.dtype, "PLACEHOLDER" if getattr(prg, "skip_allocation", False) else None, options=options)
+          if out.size >= 1e9 / 4:
+            print(f"big buffer {out.size / 1e9:.3f}")
+            from tinygrad.features.graph import print_tree
+            print_tree(si.ast[0])
         del out.srcs
 
     # run the function (put it in JIT)
