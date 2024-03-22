@@ -78,20 +78,11 @@ generate_hsa() {
   python3 -c "import tinygrad.runtime.autogen.hsa"
 }
 
-generate_hsakmt() {
-  clang2py /opt/rocm/include/hsakmt/hsakmt.h \
-  --clang-args="-I/opt/rocm/include" -o $BASE/hsakmt.py -l /usr/local/lib/libhsakmt.so
-  fixup $BASE/hsakmt.py
-  sed -i "s\import ctypes\import ctypes, os\g" $BASE/hsakmt.py
-  python3 -c "import tinygrad.runtime.autogen.hsakmt"
-}
-
 if [ "$1" == "opencl" ]; then generate_opencl
 elif [ "$1" == "hip" ]; then generate_hip
 elif [ "$1" == "comgr" ]; then generate_comgr
 elif [ "$1" == "cuda" ]; then generate_cuda
 elif [ "$1" == "hsa" ]; then generate_hsa
-elif [ "$1" == "hsakmt" ]; then generate_hsakmt
 elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_hsa
 else echo "usage: $0 <type>"
 fi
