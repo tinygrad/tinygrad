@@ -60,8 +60,7 @@ class TestDType(unittest.TestCase):
     elif cls.DTYPE == dtypes.bool:
       cls.DATA = np.random.choice([True, False], size=DATA_SIZE)
     else:
-      # TODO: include negative numbers here and fix negative number cast to uint
-      cls.DATA = np.random.uniform(0, 10, size=DATA_SIZE).astype(cls.DTYPE.np)
+      cls.DATA = np.random.uniform(-10, 10, size=DATA_SIZE).astype(cls.DTYPE.np)
   def setUp(self):
     if self.DTYPE is None: raise unittest.SkipTest("base class")
 
