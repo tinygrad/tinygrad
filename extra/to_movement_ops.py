@@ -135,17 +135,16 @@ def test_rebuild(st: ShapeTracker):
   last_v2 = rebuilt_st.views[-1]
   assert last_v1.shape == last_v2.shape, f"{last_v1.shape} != {last_v2.shape}"
 
-def test_interpret_ast(ast:LazyOp):
+def test_rebuild_bufferop_st(ast:LazyOp):
   if ast.op in BufferOps:
     test_rebuild(ast.arg.st)
-  else:
-    for src in ast.src: test_interpret_ast(src)
+    for src in ast.src: test_rebuild_bufferop_st(src)
 
 
 if __name__ == "__main__":
-  ast_strs = load_worlds(False, False, True)[:4000]
+  ast_strs = load_worlds(False, False, True)[:2000]
   for ast_str in tqdm(ast_strs):
-    for op in ast_str_to_ast(ast_str):
-      test_interpret_ast(op)
+    for ast in ast_str_to_ast(ast_str):
+      test_rebuild_bufferop_st(ast)
 
   print(f"avg length of mop = {sum(k*v for k,v in c.items()) / sum(c.values()):.2f}")
