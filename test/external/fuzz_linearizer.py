@@ -1,4 +1,4 @@
-import random, traceback, ctypes
+import random, traceback, ctypes, argparse
 from typing import List, Tuple, DefaultDict
 import numpy as np
 from collections import defaultdict
@@ -159,7 +159,22 @@ def fuzz_linearizer(lin: Linearizer):
   return failures
 
 if __name__ == "__main__":
-  ast_strs = load_worlds(filter_reduce=False, filter_novariable=False)
+  parser = argparse.ArgumentParser(description="Run a fuzz testing on one or more kernels", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+  parser.add_argument("--ast", type=str, default=None, help="the ast for the kernel to be optimized")
+  parser.add_argument("--file", type=str, default=None, help="a file containing asts to be optimized, one per line")
+  args = parser.parse_args()
+
+  if args.ast is not None:
+    print("loaded AST from CLI")
+    ast_strs = [args.ast]
+  elif args.file is not None:
+    print(f"loading ASTs from file '{args.file}'")
+    with open(args.file, 'r') as file:
+      ast_strs = file.readlines()
+  else:
+    print("loading ASTs from world")
+    ast_strs = load_worlds(filter_reduce=False, filter_novariable=False)
+
   print(f"{len(ast_strs)=}")
   tested = 0
   failed_ids = []
