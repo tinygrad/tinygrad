@@ -158,7 +158,6 @@ class CUDADevice(Compiled):
       self.context = init_c_var(cuda.CUcontext(), lambda x: check(cuda.cuCtxCreate_v2(ctypes.byref(x), 0, cu_device)))
       check(cuda.cuDeviceComputeCapability(ctypes.byref(major := ctypes.c_int()), ctypes.byref(minor := ctypes.c_int()), device_id))
 
-    CUDADevice.devices.append(self)
     self.arch = f"sm_{major.value}{minor.value}" if not CUDACPU else "sm_35"
     self.pending_copyin: List[int] = []
     CUDADevice.devices.append(self)

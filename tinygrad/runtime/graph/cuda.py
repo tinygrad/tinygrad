@@ -1,7 +1,7 @@
-import ctypes, time, collections
+import ctypes, collections
 from typing import Any, Optional, Tuple, Dict, List, cast
 import tinygrad.runtime.autogen.cuda as cuda
-from tinygrad.helpers import init_c_var, all_same, GraphException, dedup
+from tinygrad.helpers import init_c_var, GraphException
 from tinygrad.device import CompiledASTRunner, update_stats, Buffer, MultiDeviceJITGraph, BufferXfer
 from tinygrad.runtime.ops_cuda import CUDADevice, check, encode_args, cu_time_execution
 from tinygrad.shape.symbolic import Variable
@@ -16,7 +16,7 @@ class CUDAGraph(MultiDeviceJITGraph):
     self.jc_idxs_with_updatable_launch_dims = get_jc_idxs_with_updatable_launch_dims(jit_cache)
     self.jc_idxs_with_updatable_var_vals = get_jc_idxs_with_updatable_var_vals(jit_cache)
     self.jc_idxs_with_updatable_rawbufs = list(set([x[0] for x in self.input_replace.keys()]))
-    self.updatable_nodes: Dict[int, Tuple[Compiled, Any, Any, Any]] = {} # Dict[jc index] = tuple(dev, graph node, node params, input kernel params)
+    self.updatable_nodes: Dict[int, Tuple[Any, Any, Any]] = {} # Dict[jc index] = tuple(graph node, node params, input kernel params)
 
     # Check all jit items are compatible.
     compiled_devices = set()
@@ -29,8 +29,8 @@ class CUDAGraph(MultiDeviceJITGraph):
 
     self.devices: List[CUDADevice] = list(compiled_devices) #type:ignore
     self.graph = init_c_var(cuda.CUgraph(), lambda x: check(cuda.cuGraphCreate(ctypes.byref(x), 0)))
-    self.w_dependency_map: Dict[Any, cuda.CUgraphNode] = {}
-    self.r_dependency_map: Dict[Any, List[cuda.CUgraphNode]] = collections.defaultdict(list)
+    self.w_dependency_map: Dict[Any, Any] = {}
+    self.r_dependency_map: Dict[Any, List[Any]] = collections.defaultdict(list)
 
     for j,ji in enumerate(self.jit_cache):
       if isinstance(ji.prg, CompiledASTRunner):
@@ -48,7 +48,7 @@ class CUDAGraph(MultiDeviceJITGraph):
           self.updatable_nodes[j] = (new_node, kern_params, c_args)
       elif isinstance(ji.prg, BufferXfer):
         dest, src = [cast(Buffer, x) for x in ji.rawbufs[0:2]]
-        dest_dev, src_dev = cast(CUDADevice, dest.d), cast(CUDADevice, src.d)
+        src_dev = cast(CUDADevice, src.d)
 
         new_node = cuda.CUgraphNode()
         deps = self.access_resources(read=[src], write=[dest], new_dependency=new_node)
@@ -84,7 +84,7 @@ class CUDAGraph(MultiDeviceJITGraph):
 
     et = cu_time_execution(lambda: check(cuda.cuGraphLaunch(self.instance, None)), enable=wait)
     update_stats(f"<batched {len(self.jit_cache)}>", self.op_estimate, self.mem_estimate, var_vals, et, buf_count=len(input_rawbuffers),
-                 jit=jit, num_kernels=len(self.jit_cache), device=f"CUDA")
+                 jit=jit, num_kernels=len(self.jit_cache), device="CUDA")
     return et
 
   def __del__(self):
@@ -95,7 +95,7 @@ class CUDAGraph(MultiDeviceJITGraph):
     node.blockDimX, node.blockDimY, node.blockDimZ, node.gridDimX, node.gridDimY, node.gridDimZ = *local_size, *global_size
 
   def access_resources(self, read, write, new_dependency):
-    wait_nodes: List[cu.CUgraphNode] = []
+    wait_nodes = []
 
     for rawbuf in read:
       if rawbuf._buf.value in self.w_dependency_map: wait_nodes.append(self.w_dependency_map[rawbuf._buf.value])
