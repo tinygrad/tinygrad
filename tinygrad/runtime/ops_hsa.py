@@ -115,7 +115,7 @@ class HSAAllocator(LRUAllocator):
       check(hsa.hsa_amd_memory_pool_allocate(HSADevice.cpu_mempool, size, 0, ctypes.byref(mem := ctypes.c_void_p())))
       check(hsa.hsa_amd_agents_allow_access(2, (hsa.hsa_agent_t*2)(HSADevice.cpu_agent, self.device.agent), None, mem))
       return mem.value
-    else: raise Exception("no options")
+    else: raise ValueError("no options")
 
   def _free(self, opaque:T):
     HSADevice.synchronize_system()
