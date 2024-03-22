@@ -1,9 +1,9 @@
-import ctypes, time
+import ctypes, time, collections
 from typing import Any, Optional, Tuple, Dict, List, cast
 import tinygrad.runtime.autogen.cuda as cuda
-from tinygrad.helpers import init_c_var, all_same, GraphException
+from tinygrad.helpers import init_c_var, all_same, GraphException, dedup
 from tinygrad.device import CompiledASTRunner, update_stats, Buffer, MultiDeviceJITGraph, BufferXfer
-from tinygrad.runtime.ops_cuda import CUDADevice, check, encode_args
+from tinygrad.runtime.ops_cuda import CUDADevice, check, encode_args, cu_time_execution
 from tinygrad.shape.symbolic import Variable
 from tinygrad.features.jit import JitItem, get_input_replace, get_jit_stats, \
                                   get_jc_idxs_with_updatable_launch_dims, get_jc_idxs_with_updatable_var_vals
@@ -18,10 +18,6 @@ class CUDAGraph(MultiDeviceJITGraph):
     self.jc_idxs_with_updatable_rawbufs = list(set([x[0] for x in self.input_replace.keys()]))
     self.updatable_nodes: Dict[int, Tuple[Compiled, Any, Any, Any]] = {} # Dict[jc index] = tuple(dev, graph node, node params, input kernel params)
 
-    self.graphs: Dict[CUDADevice, cuda.CUgraph] = {}
-    self.instances: Dict[CUDADevice, cuda.CUgraphExec] = {}
-    self.prev_graph_node = {}
-
     # Check all jit items are compatible.
     compiled_devices = set()
     for ji in self.jit_cache:
@@ -33,56 +29,38 @@ class CUDAGraph(MultiDeviceJITGraph):
 
     self.devices: List[CUDADevice] = list(compiled_devices) #type:ignore
     self.graph = init_c_var(cuda.CUgraph(), lambda x: check(cuda.cuGraphCreate(ctypes.byref(x), 0)))
+    self.w_dependency_map: Dict[Any, cuda.CUgraphNode] = {}
+    self.r_dependency_map: Dict[Any, List[cuda.CUgraphNode]] = collections.defaultdict(list)
 
     for j,ji in enumerate(self.jit_cache):
       if isinstance(ji.prg, CompiledASTRunner):
         global_size, local_size = ji.prg.launch_dims(var_vals)
 
+        new_node = cuda.CUgraphNode()
+        deps = self.access_resources(ji.rawbufs[(outs:=ji.prg.outcount):], ji.rawbufs[:outs], new_dependency=new_node)
+        c_deps = (cuda.CUgraphNode*len(deps))(*deps) if deps else None
+
         c_args, vargs = encode_args([cast(Buffer, x)._buf for x in ji.rawbufs], [var_vals[x] for x in ji.prg.vars])
         kern_params = cuda.CUDA_KERNEL_NODE_PARAMS(ji.prg.clprg.prg, *global_size, *local_size, 0, None, vargs)
-
-        c_deps = (cuda.CUgraphNode*1)(self.prev_graph_node[ji.prg.device]) if ji.prg.device in self.prev_graph_node else None
-        check(cuda.cuGraphAddKernelNode(ctypes.byref(node := cuda.CUgraphNode()), self.graph, c_deps, 1 if c_deps else 0, ctypes.byref(kern_params)))
-        self.prev_graph_node[ji.prg.device] = node
+        check(cuda.cuGraphAddKernelNode(ctypes.byref(new_node), self.graph, c_deps, len(deps), ctypes.byref(kern_params)))
 
         if j in self.jc_idxs_with_updatable_launch_dims or j in self.jc_idxs_with_updatable_var_vals or j in self.jc_idxs_with_updatable_rawbufs:
-          self.updatable_nodes[j] = (node, kern_params, c_args)
+          self.updatable_nodes[j] = (new_node, kern_params, c_args)
       elif isinstance(ji.prg, BufferXfer):
         dest, src = [cast(Buffer, x) for x in ji.rawbufs[0:2]]
         dest_dev, src_dev = cast(CUDADevice, dest.d), cast(CUDADevice, src.d)
 
-        cp_params = cuda.CUDA_MEMCPY3D_v2()
-        cp_params.srcMemoryType = cuda.CU_MEMORYTYPE_DEVICE
-        cp_params.srcDevice = src._buf
-        cp_params.srcPitch = src.nbytes
-        cp_params.srcHeight = 1
-        cp_params.dstMemoryType = cuda.CU_MEMORYTYPE_DEVICE
-        cp_params.dstDevice = dest._buf
-        cp_params.dstPitch = dest.nbytes
-        cp_params.dstHeight = 1
-        cp_params.WidthInBytes = dest.nbytes
-        cp_params.Height = 1
-        cp_params.Depth = 1
+        new_node = cuda.CUgraphNode()
+        deps = self.access_resources(read=[src], write=[dest], new_dependency=new_node)
+        c_deps = (cuda.CUgraphNode*len(deps))(*deps) if deps else None
 
-        deps = [x for x in [self.prev_graph_node.get(src_dev, None), self.prev_graph_node.get(dest_dev, None)] if x is not None]
-        andeps = []
-        ss = set()
-        for d in deps:
-          if id(d) not in ss: 
-            andeps.append(d)
-            ss.add(id(d))
-        deps = andeps
-        c_deps = (cuda.CUgraphNode*len(deps))(*deps)
-        # print(c_deps, deps, len(deps))
-        check(cuda.cuGraphAddMemcpyNode(ctypes.byref(node := cuda.CUgraphNode()), self.graph, c_deps, len(deps),
-                                        ctypes.byref(cp_params), src_dev.context))
-        # print(node == node)
-        self.prev_graph_node[dest_dev] = node
-        self.prev_graph_node[src_dev] = node
+        cp_params = cuda.CUDA_MEMCPY3D_v2(srcMemoryType=cuda.CU_MEMORYTYPE_DEVICE, srcDevice=src._buf, srcPitch=src.nbytes, srcHeight=1,
+                                          dstMemoryType=cuda.CU_MEMORYTYPE_DEVICE, dstDevice=dest._buf, dstPitch=dest.nbytes, dstHeight=1,
+                                          WidthInBytes=dest.nbytes, Height=1, Depth=1)
+        check(cuda.cuGraphAddMemcpyNode(ctypes.byref(new_node), self.graph, c_deps, len(deps), ctypes.byref(cp_params), src_dev.context))
 
-        if j in self.jc_idxs_with_updatable_launch_dims or j in self.jc_idxs_with_updatable_var_vals or j in self.jc_idxs_with_updatable_rawbufs:
-          self.updatable_nodes[j] = (node, cp_params, None)
-
+        if j in self.jc_idxs_with_updatable_rawbufs:
+          self.updatable_nodes[j] = (new_node, cp_params, None)
 
     self.instance = init_c_var(cuda.CUgraphExec(), lambda x: check(cuda.cuGraphInstantiate_v2(ctypes.byref(x), self.graph, None, None, 0)))
 
@@ -104,28 +82,28 @@ class CUDAGraph(MultiDeviceJITGraph):
     for node, c_node_params, _ in self.updatable_nodes.values():
       check(cuda.cuGraphExecKernelNodeSetParams(self.instance, node, ctypes.byref(c_node_params)))
 
-    # for dev,instance in self.instances.items():
-      # check(cuda.cuCtxSetCurrent(dev.context))
-    check(cuda.cuGraphLaunch(self.instance, None))
-
-    et = None
-    if wait:
-      st = time.perf_counter()
-      for dev in self.devices:
-        check(cuda.cuCtxSetCurrent(dev.context))
-        check(cuda.cuCtxSynchronize())
-      et = time.perf_counter() - st
-
+    et = cu_time_execution(lambda: check(cuda.cuGraphLaunch(self.instance, None)), enable=wait)
     update_stats(f"<batched {len(self.jit_cache)}>", self.op_estimate, self.mem_estimate, var_vals, et, buf_count=len(input_rawbuffers),
                  jit=jit, num_kernels=len(self.jit_cache), device=f"CUDA")
     return et
 
-  def __del__(self): pass
-    # for graph in self.graphs.values(): check(cuda.cuGraphDestroy(graph))
-    # for inst in self.instances.values(): check(cuda.cuGraphExecDestroy(inst))
+  def __del__(self):
+    if hasattr(self, 'graph'): check(cuda.cuGraphDestroy(self.graph))
+    if hasattr(self, 'instance'): check(cuda.cuGraphExecDestroy(self.instance))
 
   def set_kernel_node_launch_dims(self, node, global_size: Tuple[int, int, int], local_size: Tuple[int, int, int]):
     node.blockDimX, node.blockDimY, node.blockDimZ, node.gridDimX, node.gridDimY, node.gridDimZ = *local_size, *global_size
 
-  
-  # def 
+  def access_resources(self, read, write, new_dependency):
+    wait_nodes: List[cu.CUgraphNode] = []
+
+    for rawbuf in read:
+      if rawbuf._buf.value in self.w_dependency_map: wait_nodes.append(self.w_dependency_map[rawbuf._buf.value])
+    for rawbuf in write:
+      if rawbuf._buf.value in self.w_dependency_map: wait_nodes.append(self.w_dependency_map[rawbuf._buf.value])
+      if rawbuf._buf.value in self.r_dependency_map: wait_nodes.extend(self.r_dependency_map.pop(rawbuf._buf.value))
+
+    if new_dependency is not None:
+      for rawbuf in read: self.r_dependency_map[rawbuf._buf.value].append(new_dependency)
+      for rawbuf in write: self.w_dependency_map[rawbuf._buf.value] = new_dependency
+    return {id(x):x for x in wait_nodes}.values()

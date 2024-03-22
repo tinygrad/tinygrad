@@ -127,7 +127,9 @@ class CUDAAllocator(LRUAllocator):
       return init_c_var(ctypes.c_void_p(), lambda x: check(cuda.cuMemHostAlloc(ctypes.byref(x), size, 0)))
     else:
       raise Exception("no options")
-  def _free(self, opaque): check(cuda.cuMemFree_v2(opaque))
+  def _free(self, opaque):
+    CUDADevice.synchronize_system()
+    check(cuda.cuMemFree_v2(opaque))
   def copyin(self, dest, src:memoryview):
     host_mem = self._alloc_with_options(len(src), BufferOptions(host=True))
     self.device.pending_copyin.append(host_mem.value)
@@ -156,6 +158,7 @@ class CUDADevice(Compiled):
       self.context = init_c_var(cuda.CUcontext(), lambda x: check(cuda.cuCtxCreate_v2(ctypes.byref(x), 0, cu_device)))
       check(cuda.cuDeviceComputeCapability(ctypes.byref(major := ctypes.c_int()), ctypes.byref(minor := ctypes.c_int()), device_id))
 
+    CUDADevice.devices.append(self)
     self.arch = f"sm_{major.value}{minor.value}" if not CUDACPU else "sm_35"
     self.pending_copyin: List[int] = []
     CUDADevice.devices.append(self)
