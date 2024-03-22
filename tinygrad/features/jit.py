@@ -119,7 +119,7 @@ class TinyJit(Generic[ReturnType]):
       CacheCollector.start(var_vals)
       with Context(GRAPH=getenv("JITGRAPH", GRAPH.value)):
         self.ret = self.fxn(*args, **kwargs)
-        for p in get_parameters(self.ret): p.realize()
+        Tensor.corealize(get_parameters(self.ret))
       self.jit_cache = CacheCollector.finish()
       assert len(self.jit_cache) != 0, "didn't JIT anything!"
       # TODO: reset doesn't work if we delete this
@@ -135,7 +135,7 @@ class TinyJit(Generic[ReturnType]):
     elif self.cnt == 0:
       # jit ignore
       self.ret = self.fxn(*args, **kwargs)
-      for p in get_parameters(self.ret): p.realize()
+      Tensor.corealize(get_parameters(self.ret))
 
     # clear jit inputs
     for (j,i) in self.input_replace.keys(): self.jit_cache[j].rawbufs[i] = None
