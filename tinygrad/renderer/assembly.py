@@ -216,6 +216,14 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
         if lang.load_global:
           dt = dtypes.ulong if dtype.__class__ == PtrDType else dtype
           kk(*lang.render_load(args[1], ssa(u, 'dat', dtype=lang.types[dt]), dt, ss=".param"))
+      elif uop is UOps.WMMA:
+        wmma=[]
+        for v in vin[:2]:
+          for i in range(0, len(r[v]), 2): # type: ignore
+            wmma.append(ssa(None, "wmma", "b32"))
+            kk(f'mov.b32 {wmma[-1]}, {{{", ".join(r[v][i:i+2])}}};') # type: ignore
+        r[u] = r[vin[2]]
+        kk(f'{args} {{{", ".join(r[u])}}}, {{{", ".join(wmma[:4])}}}, {{{", ".join(wmma[4:])}}}, {{{", ".join(r[u])}}};')
       else: raise NotImplementedError(f"no code for {uop}")
 
   return lang.render_kernel(kernel, function_name, bufs, c.items())
