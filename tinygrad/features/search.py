@@ -47,11 +47,14 @@ def _time_program(variables:List[Variable], outcount:int, rdev:Compiled, lib:byt
   return tms
 
 def _compile_linearizer(compiler:Compiler, lin:Linearizer, name:Optional[str]=None) -> Tuple[bytes, Optional[List[int]], Optional[List[int]],
-                                                                                             List[Variable], int]:
+                                                                                             List[Variable], int, float, int]:
   lin.linearize()
   src = compiler.render(name if name is not None else to_function_name(lin.name), lin.uops)   # NOTE: these all have the same name for deduping
   if DEBUG >= 5: print(src)
-  return compiler.compile(src), lin.global_size, lin.local_size, lin.uops.vars(), len(lin.outbufs)
+  st = time.perf_counter()
+  prog = compiler.compile(src)
+  et = time.perf_counter() - st
+  return prog, lin.global_size, lin.local_size, lin.uops.vars(), len(lin.outbufs), et, len(lin.uops.uops)
 
 def _try_compile_linearized_w_idx(x, compiler:Compiler):
   try: return (x[0], _compile_linearizer(compiler, x[1], "test"))
@@ -122,14 +125,15 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
       _compile_fn = functools.partial(_try_compile_linearized_w_idx, compiler=dev.compiler)
       for i,proc in (map(_compile_fn, enumerate(acted_lins)) if beam_pool is None else beam_pool.imap_unordered(_compile_fn, enumerate(acted_lins))):
         if proc is None: continue
-        lib, global_size, local_size, vars, outcount = proc
+        lib, global_size, local_size, vars, outcount, compile_et, num_uops = proc
         if lib in seen_libs: continue
         #print(acted_lins[i].colored_shape(), acted_lins[i].applied_opts)  # for debugging BEAMs that segfault
         seen_libs.add(lib)
         try: tms = _time_program(vars, outcount, dev, lib, global_size, local_size, var_vals, rawbufs, early_stop=beam[0][1]*3 if len(beam) else 1.0)
         except RuntimeError: continue # for runtime issues
         timed_lins.append((acted_lins[i], min(tms)))
-        if DEBUG >= 2: print(f"\r{time.perf_counter() - st:7.2f}s: {timed_lins[-1][1]*1e6:12.2f} us       {len(timed_lins):4d}/{len(acted_lins):4d}         {timed_lins[-1][0].colored_shape()}\033[K", end="")  # noqa: E501
+        if getenv("BEAM_LOG", 0) > 0: print(f"{time.perf_counter() - st:7.2f}s: {i:5d} {num_uops:5d} uops {compile_et*1e6:12.2f} us compile/{timed_lins[-1][1]*1e6:12.2f} us run       {len(timed_lins):4d}/{len(acted_lins):4d}         {timed_lins[-1][0].colored_shape()}")  # noqa: E501
+        elif DEBUG >= 2: print(f"\r{time.perf_counter() - st:7.2f}s: {timed_lins[-1][1]*1e6:12.2f} us       {len(timed_lins):4d}/{len(acted_lins):4d}         {timed_lins[-1][0].colored_shape()}\033[K", end="")  # noqa: E501
 
       # done
       opts = sorted(timed_lins, key=lambda x: x[1])
@@ -166,7 +170,7 @@ def time_linearizer(lin:Linearizer, rawbufs:List[Buffer], allow_test_size=True, 
   assert isinstance(dev, Compiled) and dev.compiler is not None
 
   var_vals = {k:(k.max+k.min)//2 for k in lin.ast[0].vars()}
-  lib, global_size, local_size, vars, outcount = _compile_linearizer(dev.compiler, lin)
+  lib, global_size, local_size, vars, outcount, _, _ = _compile_linearizer(dev.compiler, lin)
   tms = _time_program(vars, outcount, dev, lib, global_size, local_size, var_vals, rawbufs, max_global_size=max_global_size if allow_test_size else None, clear_l2=clear_l2, cnt=cnt, name=to_function_name(lin.name))  # noqa: E501
 
   if CACHELEVEL >= 2: diskcache_put("time_linearizer", key, tms)
