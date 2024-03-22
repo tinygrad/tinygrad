@@ -33,7 +33,7 @@ class CStyleLanguage(NamedTuple):
     TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})"}
 
   # returns a str expression of the casted xs with the given type
-  def render_cast(self, x:List[str], var_dtype:DType, bitcast=False, src_dtype=None) -> str:
+  def render_cast(self, x:List[str], var_dtype:DType, bitcast=False) -> str:
     if bitcast: return f"(*(({self.buffer_prefix}{self.render_dtype(var_dtype)}*)&{x[0]}))"
     if len(x) == 1: return f"({self.render_dtype(var_dtype)})({x[0]})"
     assert len(x) == var_dtype.count, f"cast is wrong size {len(x)} != {var_dtype.count}"
@@ -150,9 +150,9 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str
           assert len(vin) == 1
           precast = ssa(None,'precast')
           kk(f"{lang.render_dtype(cast(DType, vin[0].dtype))} {precast} = {r[vin[0]]};")
-          val = lang.render_cast([precast], dtype, bitcast=True, src_dtype=vin[0].dtype)
+          val = lang.render_cast([precast], dtype, bitcast=True)
         else:
-          val = lang.render_cast([r[x] for x in vin], dtype, bitcast=False, src_dtype=vin[0].dtype)
+          val = lang.render_cast([r[x] for x in vin], dtype, bitcast=False)
         if child_count[u] <= 1: r[u] = val
         else: kk(f"{dtype.name} {ssa(u,'cast')} = {val};")
       elif uop is UOps.DEFINE_LOCAL:
@@ -186,8 +186,8 @@ class OpenCLLanguage(CStyleLanguage):
   code_for_workitem = {"g": lambda x: f"get_group_id({x})", "l": lambda x: f"get_local_id({x})", "i": lambda x: f"get_global_id({x})"}
   uses_vload = True
   type_map = { dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong" }
-  def render_cast(self, x, var_dtype, bitcast=False, src_dtype=None) -> str:
-    return f"as_{self.type_map.get(var_dtype) or var_dtype.name}({x[0]})" if bitcast else super().render_cast(x, var_dtype, src_dtype=src_dtype)
+  def render_cast(self, x, var_dtype, bitcast=False) -> str:
+    return f"as_{self.type_map.get(var_dtype) or var_dtype.name}({x[0]})" if bitcast else super().render_cast(x, var_dtype)
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     if any(uop.dtype == dtypes.half for uop in uops): prefix = ["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"]
@@ -204,7 +204,7 @@ class MetalLanguage(CStyleLanguage):
   uses_ptr_arithmetic = True
   code_for_workitem = {"g": lambda x: f"gid.{chr(120+x)}", "l": lambda x: f"lid.{chr(120+x)}"}
   extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
-  def render_cast(self, x: List[str], var_dtype: DType, bitcast=False, src_dtype=None) -> str:
+  def render_cast(self, x: List[str], var_dtype: DType, bitcast=False) -> str:
     return f"as_type<{var_dtype.name}>({x[0]})" if bitcast else super().render_cast(x, var_dtype)
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
@@ -263,8 +263,8 @@ def _make_hip_code_for_op():
   def wrapper(key, func):
     def cast_bf16(*args):
       if args[-1] == dtypes.bfloat16:
-        operands = tuple(f"bf16_to_float({arg})" for arg in (args[1:-1] if key is TernaryOps.WHERE else args[:-1]))
-        return f"float_to_bf16({func(*(((args[0],) if key is TernaryOps.WHERE else ()) + operands), dtypes.float)})"
+        operands = tuple(f"(float)({arg})" for arg in (args[1:-1] if key is TernaryOps.WHERE else args[:-1]))
+        return f"(hip_bfloat16)({func(*(((args[0],) if key is TernaryOps.WHERE else ()) + operands), dtypes.float)})"
       return func(*args)
     return cast_bf16
   return { k:wrapper(k,v) for k,v in {**CStyleLanguage().code_for_op, **code_for_op_hip}.items() }
@@ -320,39 +320,33 @@ class HIPLanguage(CStyleLanguage):
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     prefix = ["#include <hip/hip_common.h>\n#define INFINITY (__builtin_inff())\n#define NAN (__builtin_nanf(\"\"))",
               "typedef long unsigned int size_t;"]
-    if any(uop.dtype == dtypes.bfloat16 for uop in uops): prefix.append("""struct hip_bfloat16 { unsigned short data; };
-static __attribute__((device)) hip_bfloat16 float_to_bf16(float val) {
-  hip_bfloat16 ret;
-  union { float fp32; unsigned int u32; } u = {val};
-   if (~u.u32 & 0x7f800000) {
-     u.u32 += 0x7fff + ((u.u32 >> 16) & 1);
-   } else if (u.u32 & 0xffff) {
-     u.u32 |= 0x10000;
-   }
-   ret.data = (u.u32 >> 16);
-  return ret;
-}
-static __attribute__((device)) float bf16_to_float(hip_bfloat16 val) {
-  unsigned int uval = 0;
-  uval = val.data << 16;
-  union { unsigned int u32; float fp32; } u = {uval};
-  return u.fp32;
-}
+    if any(uop.dtype == dtypes.bfloat16 for uop in uops): prefix.append("""
+struct hip_bfloat16 {
+  unsigned short data;
+  __attribute__((device)) hip_bfloat16(float val) {
+    union { float fp32; unsigned int u32; } u = {val};
+    if (~u.u32 & 0x7f800000) {
+        u.u32 += 0x7fff + ((u.u32 >> 16) & 1);
+    } else if (u.u32 & 0xffff) {
+        u.u32 |= 0x10000;
+    }
+    data = (u.u32 >> 16);
+  }
+  __attribute__((device)) operator float() const {
+      unsigned int uval = data << 16;
+      return *reinterpret_cast<float*>(&uval);
+  }
+};
 static __attribute__((device)) bool operator<(hip_bfloat16 a, hip_bfloat16 b) {
-  return bf16_to_float(a) < bf16_to_float(b);
+  return ((float)a) < ((float)b);
 }
 static __attribute__((device)) bool operator==(hip_bfloat16 a, hip_bfloat16 b) {
-  return bf16_to_float(a) == bf16_to_float(b);
+  return ((float)a) == ((float)b);
 }
 """)
     prefix.append('\n'.join(_make_hip_dtype(*x) for x in [("float", "float", 2), ("float", "float", 4),
                                                              ("signed int", "int", 4), ("signed int", "int", 2)]))
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
-
-  def render_cast(self, x: List[str], var_dtype: DType, bitcast=False, src_dtype=None) -> str:
-    if var_dtype == dtypes.bfloat16: return f"float_to_bf16({self.render_cast(x, dtypes.float, src_dtype=src_dtype)})"
-    if src_dtype == dtypes.bfloat16: return self.render_cast([f"bf16_to_float({x[0]})"], var_dtype)
-    return super().render_cast(x, var_dtype, bitcast, src_dtype)
 
   def get_kernel_modifier(self, uops:UOpGraph) -> str:
     requiredMaxThreadsPerBlock = prod(u.arg[2] for u in uops if u.uop == UOps.SPECIAL and u.arg[1][0] == "l")
