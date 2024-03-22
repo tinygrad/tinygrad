@@ -75,10 +75,21 @@ generate_hsa() {
   python3 -c "import tinygrad.runtime.autogen.hsa"
 }
 
+generate_ze() {
+  clang2py \
+    /usr/include/level_zero/ze_api.h \
+    /usr/include/level_zero/loader/ze_loader.h \
+    --clang-args="-I/usr/include/" \
+    -o $BASE/ze.py -l /usr/lib/x86_64-linux-gnu/libze_loader.so
+  fixup $BASE/ze.py
+  python3 -c "import tinygrad.runtime.autogen.ze"
+}
+
 if [ "$1" == "opencl" ]; then generate_opencl
 elif [ "$1" == "hip" ]; then generate_hip
 elif [ "$1" == "cuda" ]; then generate_cuda
 elif [ "$1" == "hsa" ]; then generate_hsa
+elif [ "$1" == "ze" ]; then generate_ze
 elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_cuda; generate_hsa
 else echo "usage: $0 <type>"
 fi
