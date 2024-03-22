@@ -258,8 +258,9 @@ class PTXLanguage(AssemblyLanguage):
   }
   supports_half = [UnaryOps.NEG, UnaryOps.EXP2, BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPLT, TernaryOps.WHERE]
   types = {
-    dtypes.int8: "s8", dtypes.int16: "s16", dtypes.int32: "s32", dtypes.int64: "s64",
-    dtypes.uint8: "u8", dtypes.uint16: "u16", dtypes.uint32: "u32", dtypes.uint64: "u64",
+    # HACK: Use s16 and u16 for int8 and uint8 buffers. This can be wrong in cast.
+    dtypes.int8: "s16", dtypes.int16: "s16", dtypes.int32: "s32", dtypes.int64: "s64",
+    dtypes.uint8: "u16", dtypes.uint16: "u16", dtypes.uint32: "u32", dtypes.uint64: "u64",
     dtypes.float16: "f16", dtypes.float32: "f32", dtypes.float64: "f64",
     dtypes.bool: "pred"
   }
