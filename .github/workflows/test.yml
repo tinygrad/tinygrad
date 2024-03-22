@@ -425,11 +425,11 @@ jobs:
           echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
           wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
           sudo tee /etc/apt/sources.list.d/rocm.list <<'EOF'
-          deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/debian jammy main
+          deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/6.0.2 jammy main
           EOF
           echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | sudo tee /etc/apt/preferences.d/rocm-pin-600
           sudo apt update
-          sudo apt install --no-install-recommends --allow-unauthenticated -y rocm-hip-libraries hip-dev
+          sudo apt install --no-install-recommends --allow-unauthenticated -y hsa-rocr comgr rocm-llvm hsa-rocr-dev
           curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
           jq -r '.assets[] | select(.name == "libremu.so").browser_download_url' | \
           sudo xargs curl -L -o /usr/local/lib/libremu.so
@@ -454,10 +454,11 @@ jobs:
       - name: Verify HIP autogen
         if: matrix.backend == 'hip'
         run: |
-          cp tinygrad/runtime/autogen/hip.py /tmp/hip.py.bak
+          cp tinygrad/runtime/autogen/hsa.py /tmp/hsa.py.bak
           cp tinygrad/runtime/autogen/comgr.py /tmp/comgr.py.bak
-          ./autogen_stubs.sh hip
-          diff /tmp/hip.py.bak tinygrad/runtime/autogen/hip.py
+          ./autogen_stubs.sh hsa
+          ./autogen_stubs.sh comgr
+          diff /tmp/hsa.py.bak tinygrad/runtime/autogen/hsa.py
           diff /tmp/comgr.py.bak tinygrad/runtime/autogen/comgr.py
       - name: Run pytest (not cuda or hip)
         if: matrix.backend!='cuda' && matrix.backend!='ptx' && matrix.backend!='triton' && matrix.backend != 'hip'
