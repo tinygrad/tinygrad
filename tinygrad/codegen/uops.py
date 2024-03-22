@@ -170,6 +170,7 @@ class UOpGraph:
       if len(nu) == len(self.uops): break
       if DEBUG >= 4: print(f"reduced UOp count from {len(self.uops)} to {len(nu)}")
       self.uops = nu
+    self.saved_exprs = {k:v for k,v in self.saved_exprs.items() if v in nu}
 
   # optional
   def type_verify(self):
