@@ -89,7 +89,8 @@ class HSAProgram:
       for i in range(len(vals)): args_st.__setattr__(f'v{i}', vals[i])
       self.device.flush_hdp()
 
-    signal = self.device.hw_queue.submit_kernel(self, global_size, local_size, kernargs, need_signal=(wait or PROFILE))
+    signal = self.device.alloc_signal(reusable=True) if wait or PROFILE else None
+    self.device.hw_queue.submit_kernel(self, global_size, local_size, kernargs, completion_signal=signal)
     if PROFILE: Profiler.track(signal, self.device, self.name)
     if wait:
       hsa.hsa_signal_wait_scacquire(signal, hsa.HSA_SIGNAL_CONDITION_LT, 1, (1 << 64) - 1, hsa.HSA_WAIT_STATE_ACTIVE)
@@ -122,18 +123,17 @@ class HSAAllocator(LRUAllocator):
 
   def copyin(self, dest:T, src: memoryview):
     # Async copyin sync model uses barriers on the main hw queue, since barriers are guaranteed to execute in order with all other packets.
-    copy_signal = self.device.alloc_signal(reusable=True)
-    sync_signal = self.device.hw_queue.submit_barrier(need_signal=True)
+    self.device.hw_queue.submit_barrier([], sync_signal := self.device.alloc_signal(reusable=True))
     mem = self._alloc_with_options(src.nbytes, BufferOptions(host=True))
     ctypes.memmove(mem, from_mv(src), src.nbytes)
-    check(hsa.hsa_amd_memory_async_copy_on_engine(dest, self.device.agent, mem, HSADevice.cpu_agent, src.nbytes,
-                                                  1, ctypes.byref(sync_signal), copy_signal, hsa.HSA_AMD_SDMA_ENGINE_0, True))
-    self.device.hw_queue.submit_barrier(wait_signals=[copy_signal])
+    check(hsa.hsa_amd_memory_async_copy_on_engine(dest, self.device.agent, mem, HSADevice.cpu_agent, src.nbytes, 1, ctypes.byref(sync_signal),
+                                                  copy_signal := self.device.alloc_signal(reusable=True), hsa.HSA_AMD_SDMA_ENGINE_0, True))
+    self.device.hw_queue.submit_barrier([copy_signal])
     self.device.delayed_free.append(mem)
     if PROFILE: Profiler.track(copy_signal, self.device, f"copyin: CPU -> HSA:{self.device.device_id}", is_copy=True)
 
   def copy_from_fd(self, dest, fd, offset, size):
-    sync_signal = self.device.hw_queue.submit_barrier(need_signal=True)
+    self.device.hw_queue.submit_barrier([], sync_signal := self.device.alloc_signal(reusable=True))
 
     if not hasattr(self, 'hb'):
       self.hb = [self._alloc_with_options(CHUNK_SIZE, BufferOptions(host=True)) for _ in range(2)]
@@ -167,7 +167,7 @@ class HSAAllocator(LRUAllocator):
 
     wait_signals = [self.hb_signals[self.hb_polarity - 1]]
     if copies_called > 1: wait_signals.append(self.hb_signals[self.hb_polarity])
-    self.device.hw_queue.submit_barrier(wait_signals=wait_signals)
+    self.device.hw_queue.submit_barrier(wait_signals)
 
   def copyout(self, dest:memoryview, src:T):
     HSADevice.synchronize_system()
@@ -180,13 +180,13 @@ class HSAAllocator(LRUAllocator):
     if PROFILE: Profiler.track(copy_signal, self.device, f"copyout: HSA:{self.device.device_id} -> CPU", is_copy=True)
 
   def transfer(self, dest:T, src:T, sz:int, src_dev=None, dest_dev=None):
-    copy_signal = dest_dev.alloc_signal(reusable=False)
-    sync_signal_1 = src_dev.hw_queue.submit_barrier(need_signal=True)
-    sync_signal_2 = dest_dev.hw_queue.submit_barrier(need_signal=True)
+    src_dev.hw_queue.submit_barrier([], sync_signal_1 := src_dev.alloc_signal(reusable=True))
+    dest_dev.hw_queue.submit_barrier([], sync_signal_2 := dest_dev.alloc_signal(reusable=True))
     c_wait_signal = (hsa.hsa_signal_t*2)(sync_signal_1, sync_signal_2)
-    check(hsa.hsa_amd_memory_async_copy_on_engine(dest, dest_dev.agent, src, src_dev.agent, sz, 2, c_wait_signal, copy_signal, hsa.HSA_AMD_SDMA_ENGINE_0, True)) # noqa: E501
-    src_dev.hw_queue.submit_barrier(wait_signals=[copy_signal])
-    dest_dev.hw_queue.submit_barrier(wait_signals=[copy_signal])
+    check(hsa.hsa_amd_memory_async_copy_on_engine(dest, dest_dev.agent, src, src_dev.agent, sz, 2, c_wait_signal,
+                                                  copy_signal := dest_dev.alloc_signal(reusable=False), hsa.HSA_AMD_SDMA_ENGINE_0, True))
+    src_dev.hw_queue.submit_barrier([copy_signal])
+    dest_dev.hw_queue.submit_barrier([copy_signal])
     if PROFILE: Profiler.track(copy_signal, src_dev, f"transfer: HSA:{src_dev.device_id} -> HSA:{dest_dev.device_id}", is_copy=True)
 
 class HSADevice(Compiled):

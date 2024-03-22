@@ -214,7 +214,7 @@ class View:
     return View.create(tuple(s.b if isinstance(s, NumNode) else s for s in shape), self.strides, self.offset+offset, mask)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
-  def pad(self, arg: Tuple[Tuple[int, int], ...]) -> View:
+  def pad(self, arg: Tuple[Tuple[sint, sint], ...]) -> View:
     assert all((b>=0 and e>=0) for b,e in arg) and len(arg) == len(self.shape), f"{self.shape=}, {arg=}"
     if any(b or e for b, e in arg):
       zvarg = tuple([(-b,s+e) for s,(b,e) in zip(self.shape, arg)])
