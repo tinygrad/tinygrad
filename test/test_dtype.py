@@ -41,9 +41,6 @@ def _assert_eq(tensor:Tensor, target_dtype:DType, target):
 def _test_op(fxn, target_dtype:DType, target):
   _assert_eq(fxn(), target_dtype, target)
 def _test_cast(a:Tensor, target_dtype:DType):
-  if a.dtype != dtypes.uchar: return
-  print(f"{Device.DEFAULT=}")
-  print(f"{a.dtype=}, {target_dtype=}, {a.numpy()}")
   _test_op(lambda: a.cast(target_dtype), target_dtype, list(a.numpy().astype(target_dtype.np)))
 def _test_bitcast(a:Tensor, target_dtype:DType, target=None):
   if target_dtype == dtypes.bfloat16: raise unittest.SkipTest("no test for bf16 bitcast yet")
