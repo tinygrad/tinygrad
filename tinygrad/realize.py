@@ -31,14 +31,13 @@ def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
   if si.ast[0].op is BufferOps.STORE: return Device[si.outputs[0].device].get_runner(*si.ast)
   assert len(si.ast) == 1 and len(si.outputs) == 1, "only ASTRunner supports multioutput"
   out, ast = si.outputs[0], si.ast[0]
-  if ast.op in {LoadOps.SYNC, LoadOps.WAIT} and out.device.startswith("HSA") and si.inputs[0].device.startswith("HSA"):
-    # Our HSA runtime handles synchronization
-    if ast.op is LoadOps.SYNC: return None
   if ast.op is LoadOps.COPY:
     if hasattr(Device[out.device].allocator, 'transfer') and type(Device[out.device]) is type(Device[si.inputs[0].device]): return BufferXfer()
     if si.inputs[0].device.startswith("DISK"): return BufferRead()
     return BufferCopy()
   if ast.op is LoadOps.CUSTOM: return CustomOp(ast.arg)
+  if ast.op is LoadOps.SYNC and out.device.startswith("CUDA") and si.inputs[0].device.startswith("CUDA"): return None
+  if ast.op is LoadOps.SYNC and out.device.startswith("HSA") and si.inputs[0].device.startswith("HSA"): return None
   if ast.op is LoadOps.SYNC: return SyncOp(out.device) if isinstance(Device[out.device], Compiled) else None
   return None
 
@@ -242,28 +241,38 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
       assert len(realized_children) == 1
       reduce_for_op[next(iter(realized_children.keys()))] = r
 
+  # preschedule all buffers in realizes
+  prescheduled = {x:_schedule_one(x, realizes, reduce_for_op) for x in realizes if x not in seen and x.realized is None and x.op is not LoadOps.CONST}
+  assign_targets = {x.srcs[1]:x for x in realizes if x.op is LoadOps.ASSIGN and x not in seen and x.realized is None}
+
+  # breadth first ordering
   graph: DefaultDict[LazyBuffer,List[LazyBuffer]] = defaultdict(list)
   in_degree: DefaultDict[LazyBuffer,int] = defaultdict(int)
   queue: Deque[LazyBuffer] = deque()
   for buf in allbufs:
-    if buf.realized: continue
+    if buf.realized or buf.op is LoadOps.CONST: continue
+    if buf in prescheduled:
+      for inp in prescheduled[buf].inputs:
+        if inp in assign_targets:
+          graph[buf].append(assign_targets[inp])
+          in_degree[assign_targets[inp]] += 1
     for x in buf.srcs:
-      if x.base.realized: continue
+      if x.base.realized or x.base.op is LoadOps.CONST: continue
       graph[x.base].append(buf)
       in_degree[buf] += 1
     if in_degree[buf] == 0: queue.append(buf)
 
-  sorted_realizes: List[LazyBuffer] = []
+  schedule: List[ScheduleItem] = []
   while queue:
     buf = queue.popleft()
-    if buf.op != LoadOps.CONST and buf in realizes and buf not in seen: sorted_realizes.append(buf)
+    if buf in realizes and buf not in seen:
+      schedule.append(prescheduled[buf])
+      seen.add(buf)
     for x in graph[buf]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)
 
-  sched:List[ScheduleItem] = []
-  for x in sorted_realizes:
-    if x in seen: continue
-    sched.append(_schedule_one(x, realizes, reduce_for_op))
-    seen.add(x)
-  return sched
+  # confirm everything was scheduled
+  assert len(prescheduled) == len(schedule), f"prescheduled {len(prescheduled)} but only scheduled {len(schedule)}"
+  return schedule
+
