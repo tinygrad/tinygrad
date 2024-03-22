@@ -353,10 +353,8 @@ class UOpGraph:
           if DEBUG >= 4: print(f"removing PHI node {u}")
           del self.saved_exprs[(u.uop, u.dtype, u.vin, u.arg)]
           # NOTE: assuming u.vin[2].vin[1] and u.vin[2].vin[0] have the same dtype
-          loop_len = self.add(UOps.ALU, u.vin[2].vin[1].dtype, (u.vin[2].vin[1], u.vin[2].vin[0]), BinaryOps.SUB,
-                              insert_before=self.uops.index(u))
-          if loop_len.dtype != u.dtype: loop_len = self.add(UOps.CAST, u.dtype, (loop_len,),
-                                                            insert_before=self.uops.index(u))
+          loop_len = self.add(UOps.ALU, u.vin[2].vin[1].dtype, (u.vin[2].vin[1], u.vin[2].vin[0]), BinaryOps.SUB, insert_before=self.uops.index(u))
+          if loop_len.dtype != u.dtype: loop_len = self.add(UOps.CAST, u.dtype, (loop_len,), insert_before=self.uops.index(u))
           new = self.add(UOps.ALU, u.dtype, (u.vin[1], loop_len,), BinaryOps.MUL, insert_before=self.uops.index(u))
           self.replace_op(u, new)
           return True
@@ -371,16 +369,12 @@ class UOpGraph:
     const_parents = [op for op in parents if op.uop is UOps.CONST]
     const_parent_args = set([op.arg for op in const_parents if op.arg != 0 and \
       any(e.uop is UOps.LOOP for e in self.uops if e in self.get_recursive_children(op))])
-    if len(const_parent_args) == 0:
-      self.add(UOps.STORE, None, (output_uop, store_ops[0].vin[1], zero), 0, insert_before=self.uops.index(first_loop))
+    if len(const_parent_args) == 0: self.add(UOps.STORE, output_uop.dtype, (output_uop, store_ops[0].vin[1], zero), 0, insert_before=self.uops.index(first_loop))
     else:
       max_idx = functools.reduce(lambda x, y: x*y, const_parent_args)
       end_range = self.add(UOps.CONST, dtypes.int, tuple(), max_idx, insert_before=self.uops.index(first_loop))
       loop = self.add(UOps.LOOP, dtypes.int, (zero, end_range), 0, insert_before=self.uops.index(first_loop))
-      self.add(UOps.STORE, None, (output_uop, loop, zero), 0, insert_before=self.uops.index(first_loop))
-
-  def sorted_by_latest_dependency(self, uops:List[UOp] | Set[UOp]) -> List[UOp]:
-    return sorted(uops, key=lambda u: max((self.uops.index(x) for x in u.vin), default=-1))
+      self.add(UOps.STORE, output_uop.dtype, (output_uop, loop, zero), 0, insert_before=self.uops.index(first_loop))
 
   def get_output(self):
     return self.uops[0]
@@ -392,38 +386,29 @@ class UOpGraph:
       output_uop = self.get_output()
       dt = output_uop.dtype
       output_dtype = DType(dt.priority, dt.itemsize, dt.name, dt.fmt, dt.count)
+      childern = self.get_recursive_children(u, include_phi=True)
+      if not len(store_ops:=[op for op in childern if op.uop is UOps.STORE and op.vin[0] == output_uop]): continue
 
-      children = self.get_recursive_children(u, include_phi=True)
-      children_direct = set([u])
-      for uop in self.uops:
-          if len(children_direct.intersection([x for x in uop.vin])):
-            children_direct.add(uop)
-
-      children_direct = set(self.sorted_by_latest_dependency(children_direct))
-      if not len(store_ops:=[op for op in children if op.uop is UOps.STORE and op.vin[0] == output_uop]): continue
-      store_uop = store_ops[0]
-      for c in children_direct:
-        if c == u: continue
-        if c == store_uop:
+      for c in childern:
+        if c == u or c.uop is UOps.STORE: continue
+        elif c == store_ops[0]:
           self.uops.remove(c)
           continue
-        elif c.uop is UOps.STORE: continue
         else:
-          idx_op = store_uop.vin[1]
-          load = self.add(UOps.LOAD, output_dtype, (output_uop, idx_op), c.arg, insert_before=self.uops.index(c))
+          idx_op = store_ops[0].vin[1]
+          insert_before = max((self.uops.index(e)+1 for e in (output_uop, idx_op)), default=self.uops.index(c))
+          load = self.add(UOps.LOAD, output_dtype, (output_uop, idx_op), c.arg, insert_before=insert_before)
+          vin = tuple(load if e == u else e for e in c.vin)
+          insert_before = max([self.uops.index(e)+1 for e in vin], default=self.uops.index(load)+1)
           if c.uop == UOps.ALU:
-            vin = tuple(load if e == u else e for e in c.vin)
-            insert_before = max([self.uops.index(e)+1 for e in vin], default=self.uops.index(load)+1)
-            new_alu = self.add(UOps.ALU, output_dtype, vin, c.arg, insert_before=insert_before)
-            self.replace_op(c, new_alu)
+            new_op = self.add(UOps.ALU, output_dtype, vin, c.arg, insert_before=insert_before)
           elif c.uop == UOps.PHI:
-            vin = tuple(load if e == u else e for e in c.vin)
-            insert_before = max([self.uops.index(e)+1 for e in vin], default=self.uops.index(load)+1)
-            store = self.add(UOps.STORE, output_dtype, (output_uop, idx_op, c.vin[1]), c.arg, insert_before=insert_before)
-            self.replace_op(c, store)
+            self.add(UOps.STORE, output_dtype, (output_uop, idx_op, c.vin[1]), c.arg, insert_before=insert_before)
+            new_op = self.add(UOps.LOAD, output_dtype, (output_uop, idx_op), c.arg, insert_before=insert_before+1)
           else:
             raise RuntimeError(f"unhandled uop {c.uop}")
-
+          self.replace_op(c, new_op)
+      
   def reorder_acc_bool_loops(self):
     # This works by finding loops with bools that should be constant and figuring out if we can move them out of the loop and potentially not
     #  run the loop if the bool is constant
@@ -454,8 +439,8 @@ class UOpGraph:
     for loop_subset in loop_subsets:
       if len(loop_subset) < 2: return
       # find the loops that the bools are in
-      loops_ordered_by_bools = sorted(loop_subset, key=lambda l: -sum(1 for b in bools if l in bool_loops[b])*100 + loops.index(l))
       loop_subset_idxs = [self.uops.index(l) for l in loop_subset]
+      loops_ordered_by_bools = sorted(loop_subset, key=lambda l: -sum(1 for b in bools if l in bool_loops[b])*100 + loops.index(l))
       # reorder the loops so that the bools are in the outermost loops that they can be
       for idx, old_loop, new_loop in zip(loop_subset_idxs, loop_subset, loops_ordered_by_bools):
         changed |= old_loop == new_loop
@@ -463,11 +448,9 @@ class UOpGraph:
         self.uops[idx] = new_loop
 
       # fix variable ordering
-      for loop in loop_subset:
+      for loop in loop_subset: 
         for child in self.get_recursive_children(loop):
-          if self.uops.index(child) < (loop_idx:=self.uops.index(loop)):
-            self.uops.remove(child)
-            self.uops.insert(loop_idx, child)
+          if self.uops.index(child) < (loop_idx:=self.uops.index(loop)): self.uops.insert(loop_idx, self.uops.pop(child))
 
     if changed:
       self.replace_accs_with_store()
