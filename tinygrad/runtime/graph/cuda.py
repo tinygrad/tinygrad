@@ -10,6 +10,9 @@ from tinygrad.features.jit import JitItem, get_input_replace, get_jit_stats, \
 
 class CUDAGraph(MultiDeviceJITGraph):
   def __init__(self, jit_cache: List[JitItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
+    # Check all jit items are compatible.
+    if not all(isinstance(ji.prg, CompiledASTRunner) or isinstance(ji.prg, BufferXfer) for ji in jit_cache): raise GraphException
+
     self.jit_cache = jit_cache
     self.input_replace = get_input_replace(jit_cache, input_rawbuffers)
     self.op_estimate, self.mem_estimate = get_jit_stats(jit_cache)
@@ -18,16 +21,6 @@ class CUDAGraph(MultiDeviceJITGraph):
     self.jc_idxs_with_updatable_rawbufs = list(set([x[0] for x in self.input_replace.keys()]))
     self.updatable_nodes: Dict[int, Tuple[Any, Any, Any, bool]] = {} # Dict[jc index] = tuple(graph node, node params, input kernel params, is memcpy)
 
-    # Check all jit items are compatible.
-    compiled_devices = set()
-    for ji in self.jit_cache:
-      if isinstance(ji.prg, CompiledASTRunner): compiled_devices.add(ji.prg.device)
-      elif isinstance(ji.prg, BufferXfer):
-        for x in ji.rawbufs[0:2]: compiled_devices.add(cast(Buffer, x).d)
-      else: raise GraphException
-    if any(not isinstance(d, CUDADevice) for d in compiled_devices): raise GraphException
-
-    self.devices: List[CUDADevice] = list(compiled_devices) #type:ignore
     self.graph = init_c_var(cuda.CUgraph(), lambda x: check(cuda.cuGraphCreate(ctypes.byref(x), 0)))
     self.w_dependency_map: Dict[Any, Any] = {}
     self.r_dependency_map: Dict[Any, List[Any]] = collections.defaultdict(list)
@@ -58,9 +51,7 @@ class CUDAGraph(MultiDeviceJITGraph):
                                           dstMemoryType=cuda.CU_MEMORYTYPE_DEVICE, dstDevice=dest._buf, dstPitch=dest.nbytes, dstHeight=1,
                                           WidthInBytes=dest.nbytes, Height=1, Depth=1)
         check(cuda.cuGraphAddMemcpyNode(ctypes.byref(new_node), self.graph, c_deps, len(deps), ctypes.byref(cp_params), src_dev.context))
-
-        if j in self.jc_idxs_with_updatable_rawbufs:
-          self.updatable_nodes[j] = (new_node, cp_params, src_dev.context, True)
+        if j in self.jc_idxs_with_updatable_rawbufs: self.updatable_nodes[j] = (new_node, cp_params, src_dev.context, True)
 
     self.instance = init_c_var(cuda.CUgraphExec(), lambda x: check(cuda.cuGraphInstantiate_v2(ctypes.byref(x), self.graph, None, None, 0)))
 
@@ -75,7 +66,7 @@ class CUDAGraph(MultiDeviceJITGraph):
     # Update var_vals in the c_args struct.
     for j in self.jc_idxs_with_updatable_var_vals:
       for i,v in enumerate(cast(CompiledASTRunner, self.jit_cache[j].prg).vars):
-        setattr(self.updatable_nodes[j][2], f'f{len(self.jit_cache[j].rawbufs) + i}', var_vals[v])
+        setattr(self.updatable_nodes[j][2], f'v{i}', var_vals[v])
 
     # Update launch dims in the kern_params struct.
     for j in self.jc_idxs_with_updatable_launch_dims:
@@ -101,10 +92,9 @@ class CUDAGraph(MultiDeviceJITGraph):
   def access_resources(self, read, write, new_dependency):
     wait_nodes = []
 
-    for rawbuf in read:
+    for rawbuf in read + write:
       if rawbuf._buf.value in self.w_dependency_map: wait_nodes.append(self.w_dependency_map[rawbuf._buf.value])
     for rawbuf in write:
-      if rawbuf._buf.value in self.w_dependency_map: wait_nodes.append(self.w_dependency_map[rawbuf._buf.value])
       if rawbuf._buf.value in self.r_dependency_map: wait_nodes.extend(self.r_dependency_map.pop(rawbuf._buf.value))
 
     if new_dependency is not None:
