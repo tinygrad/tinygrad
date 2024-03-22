@@ -47,7 +47,7 @@ def _time_program(variables:List[Variable], outcount:int, rdev:Compiled, lib:byt
   return tms
 
 def _compile_linearizer(compiler:Compiler, lin:Linearizer, name:Optional[str]=None) -> Tuple[bytes, Optional[List[int]], Optional[List[int]],
-                                                                                             List[Variable], int]:
+                                                                                             List[Variable], int, float, int]:
   lin.linearize()
   src = compiler.render(name if name is not None else to_function_name(lin.name), lin.uops)   # NOTE: these all have the same name for deduping
   if DEBUG >= 5: print(src)
@@ -170,7 +170,7 @@ def time_linearizer(lin:Linearizer, rawbufs:List[Buffer], allow_test_size=True, 
   assert isinstance(dev, Compiled) and dev.compiler is not None
 
   var_vals = {k:(k.max+k.min)//2 for k in lin.ast[0].vars()}
-  lib, global_size, local_size, vars, outcount, et, num_uops = _compile_linearizer(dev.compiler, lin)
+  lib, global_size, local_size, vars, outcount, _, _ = _compile_linearizer(dev.compiler, lin)
   tms = _time_program(vars, outcount, dev, lib, global_size, local_size, var_vals, rawbufs, max_global_size=max_global_size if allow_test_size else None, clear_l2=clear_l2, cnt=cnt, name=to_function_name(lin.name))  # noqa: E501
 
   if CACHELEVEL >= 2: diskcache_put("time_linearizer", key, tms)
