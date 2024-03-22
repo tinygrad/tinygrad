@@ -242,6 +242,7 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
 
   # preschedule all buffers in realizes
   prescheduled = {x:_schedule_one(x, realizes, reduce_for_op) for x in realizes if x not in seen and x.realized is None and x.op is not LoadOps.CONST}
+  assign_targets = {x.srcs[1]:x for x in realizes if x.op is LoadOps.ASSIGN and x not in seen and x.realized is None}
 
   # breadth first ordering
   graph: DefaultDict[LazyBuffer,List[LazyBuffer]] = defaultdict(list)
@@ -249,6 +250,11 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
   queue: Deque[LazyBuffer] = deque()
   for buf in allbufs:
     if buf.realized or buf.op is LoadOps.CONST: continue
+    if buf in prescheduled:
+      for inp in prescheduled[buf].inputs:
+        if inp in assign_targets:
+          graph[buf].append(assign_targets[inp])
+          in_degree[assign_targets[inp]] += 1
     for x in buf.srcs:
       if x.base.realized or x.base.op is LoadOps.CONST: continue
       graph[x.base].append(buf)
