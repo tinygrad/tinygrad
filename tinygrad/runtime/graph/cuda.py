@@ -16,7 +16,7 @@ class CUDAGraph(MultiDeviceJITGraph):
     self.jc_idxs_with_updatable_launch_dims = get_jc_idxs_with_updatable_launch_dims(jit_cache)
     self.jc_idxs_with_updatable_var_vals = get_jc_idxs_with_updatable_var_vals(jit_cache)
     self.jc_idxs_with_updatable_rawbufs = list(set([x[0] for x in self.input_replace.keys()]))
-    self.updatable_nodes: Dict[int, Tuple[Any, Any, Any]] = {} # Dict[jc index] = tuple(graph node, node params, input kernel params)
+    self.updatable_nodes: Dict[int, Tuple[Any, Any, Any, bool]] = {} # Dict[jc index] = tuple(graph node, node params, input kernel params, is memcpy)
 
     # Check all jit items are compatible.
     compiled_devices = set()
@@ -45,7 +45,7 @@ class CUDAGraph(MultiDeviceJITGraph):
         check(cuda.cuGraphAddKernelNode(ctypes.byref(new_node), self.graph, c_deps, len(deps), ctypes.byref(kern_params)))
 
         if j in self.jc_idxs_with_updatable_launch_dims or j in self.jc_idxs_with_updatable_var_vals or j in self.jc_idxs_with_updatable_rawbufs:
-          self.updatable_nodes[j] = (new_node, kern_params, c_args)
+          self.updatable_nodes[j] = (new_node, kern_params, c_args, False)
       elif isinstance(ji.prg, BufferXfer):
         dest, src = [cast(Buffer, x) for x in ji.rawbufs[0:2]]
         src_dev = cast(CUDADevice, src.d)
@@ -60,14 +60,17 @@ class CUDAGraph(MultiDeviceJITGraph):
         check(cuda.cuGraphAddMemcpyNode(ctypes.byref(new_node), self.graph, c_deps, len(deps), ctypes.byref(cp_params), src_dev.context))
 
         if j in self.jc_idxs_with_updatable_rawbufs:
-          self.updatable_nodes[j] = (new_node, cp_params, None)
+          self.updatable_nodes[j] = (new_node, cp_params, src_dev.context, True)
 
     self.instance = init_c_var(cuda.CUgraphExec(), lambda x: check(cuda.cuGraphInstantiate_v2(ctypes.byref(x), self.graph, None, None, 0)))
 
   def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     # Update rawbuffers in the c_args struct.
     for (j,i),input_idx in self.input_replace.items():
-      setattr(self.updatable_nodes[j][2], f'f{i}', input_rawbuffers[input_idx]._buf)
+      if not self.updatable_nodes[j][3]: setattr(self.updatable_nodes[j][2], f'f{i}', input_rawbuffers[input_idx]._buf)
+      else:
+        if i == 0: self.updatable_nodes[j][1].destDevice = input_rawbuffers[input_idx]._buf
+        elif i == 1: self.updatable_nodes[j][1].srcDevice = input_rawbuffers[input_idx]._buf
 
     # Update var_vals in the c_args struct.
     for j in self.jc_idxs_with_updatable_var_vals:
@@ -79,8 +82,9 @@ class CUDAGraph(MultiDeviceJITGraph):
       self.set_kernel_node_launch_dims(self.updatable_nodes[j][1], *cast(CompiledASTRunner, self.jit_cache[j].prg).launch_dims(var_vals))
 
     # Update graph nodes with the updated structs.
-    for node, c_node_params, _ in self.updatable_nodes.values():
-      check(cuda.cuGraphExecKernelNodeSetParams(self.instance, node, ctypes.byref(c_node_params)))
+    for node, c_node_params, c_args, is_copy in self.updatable_nodes.values():
+      if not is_copy: check(cuda.cuGraphExecKernelNodeSetParams(self.instance, node, ctypes.byref(c_node_params)))
+      else: check(cuda.cuGraphExecMemcpyNodeSetParams(self.instance, node, ctypes.byref(c_node_params), c_args))
 
     et = cu_time_execution(lambda: check(cuda.cuGraphLaunch(self.instance, None)), enable=wait)
     update_stats(f"<batched {len(self.jit_cache)}>", self.op_estimate, self.mem_estimate, var_vals, et, buf_count=len(input_rawbuffers),
