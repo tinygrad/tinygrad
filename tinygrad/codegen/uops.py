@@ -410,10 +410,7 @@ class UOpGraph:
         elif c.uop is UOps.STORE: continue
         else:
           idx_op = store_uop.vin[1]
-          try:
-            load = self.add(UOps.LOAD, output_dtype, (output_uop, idx_op), c.arg, insert_before=self.uops.index(c))
-          except:
-            import code; code.interact(local=dict(locals(), **globals()))
+          load = self.add(UOps.LOAD, output_dtype, (output_uop, idx_op), c.arg, insert_before=self.uops.index(c))
           if c.uop == UOps.ALU:
             vin = tuple(load if e == u else e for e in c.vin)
             insert_before = max([self.uops.index(e)+1 for e in vin], default=self.uops.index(load)+1)
@@ -473,7 +470,6 @@ class UOpGraph:
             self.uops.insert(loop_idx, child)
 
     if changed:
-      print(f"Changed!")
       self.replace_accs_with_store()
       self.zero_initialize_output()
       self.replace_cast_bools_with_consts()
