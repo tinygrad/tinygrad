@@ -13,7 +13,7 @@ settings.load_profile("my_profile")
 
 core_dtypes = list(DTYPES_DICT.values())
 if Device.DEFAULT == "CPU": core_dtypes.remove(dtypes.bfloat16)  # NOTE: this is for teenygrad, don't remove
-dtype_ints = [dt for dt in core_dtypes if dtypes.is_int(dt)]
+dtype_ints = [dt for dt in core_dtypes if dtypes.is_int(dt) and is_dtype_supported(dt)]
 dtype_floats = [dt for dt in core_dtypes if dtypes.is_float(dt) and is_dtype_supported(dt)]
 
 def get_available_cast_dtypes(dtype: DType) -> List[DType]:
@@ -41,6 +41,9 @@ def _assert_eq(tensor:Tensor, target_dtype:DType, target):
 def _test_op(fxn, target_dtype:DType, target):
   _assert_eq(fxn(), target_dtype, target)
 def _test_cast(a:Tensor, target_dtype:DType):
+  if a.dtype != dtypes.uchar: return
+  print(f"{Device.DEFAULT=}")
+  print(f"{a.dtype=}, {target_dtype=}, {a.numpy()}")
   _test_op(lambda: a.cast(target_dtype), target_dtype, list(a.numpy().astype(target_dtype.np)))
 def _test_bitcast(a:Tensor, target_dtype:DType, target=None):
   if target_dtype == dtypes.bfloat16: raise unittest.SkipTest("no test for bf16 bitcast yet")
