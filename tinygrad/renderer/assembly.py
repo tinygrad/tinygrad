@@ -13,8 +13,6 @@ def render_val(x, dtype):
     return "0f%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
   return str(int(x)) + ("U" if dtypes.is_unsigned(dtype) else "")
 
-def is_bool_or_unsigned(dtype: DType): return dtype == dtypes.bool or dtypes.is_unsigned(dtype)
-
 class AssemblyLanguage(NamedTuple):
   kernel_prefix: str = ""
   barrier: str = ""
@@ -260,6 +258,7 @@ class PTXLanguage(AssemblyLanguage):
   }
   supports_half = [UnaryOps.NEG, UnaryOps.EXP2, BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPLT, TernaryOps.WHERE]
   types = {
+    # HACK: Use s16 and u16 for int8 and uint8 buffers. This can be wrong in cast.
     dtypes.int8: "s16", dtypes.int16: "s16", dtypes.int32: "s32", dtypes.int64: "s64",
     dtypes.uint8: "u16", dtypes.uint16: "u16", dtypes.uint32: "u32", dtypes.uint64: "u64",
     dtypes.float16: "f16", dtypes.float32: "f32", dtypes.float64: "f64",
