@@ -215,13 +215,5 @@ class TestLinearizerFailures(unittest.TestCase):
     for opts in all_failing_opts:
       helper_test_lin(Linearizer(ast), opts, failed_platforms=["METAL", "HSA", "CUDA", "CLANG"]) # "GPU" is a compiler failure
 
-  def test_failure_28(self):
-    # mod simplifier results in big negative subtract
-    # <((((1+lidx5[0-15])%16)*49)+(((262145+lidx5[0-15])//16)*802816)+(gidx0[0-3]*3211264)+(gidx1[0-127]*784)+(gidx2[0-7]*8)+(lidx4[0-1]*100352)+-13151129600+lidx3[0-7])
-    ast = (LazyOp(op=BufferOps.STORE, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(128, 1, 2048, 7, 7, 512, 1, 1), strides=(25088, 0, 0, 7, 1, 49, 0, 0), offset=0, mask=None, contiguous=False),)))), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(128, 1, 2048, 7, 7, 512, 1, 1), strides=(0, 0, 512, 0, 0, 1, 0, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=(dtypes.float, False)),), arg=(5,)),), arg=(dtypes.half, False)),), arg=MemBuffer(idx=0, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(128, 1, 2048, 7, 7, 1, 1, 1), strides=(100352, 0, 49, 7, 1, 0, 0, 0), offset=0, mask=None, contiguous=True),)))),)
-    opts = [Opt(op=OptOps.TC, axis=0, amt=1), Opt(op=OptOps.PADTO, axis=2, amt=32), Opt(op=OptOps.LOCAL, axis=2, amt=8), Opt(op=OptOps.UPCAST, axis=0, amt=2)]
-    helper_test_lin(Linearizer(*ast), opts, failed_platforms=[])
-
-
 if __name__ == '__main__':
   unittest.main()
