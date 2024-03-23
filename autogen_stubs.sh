@@ -56,6 +56,13 @@ generate_comgr() {
   python3 -c "import tinygrad.runtime.autogen.comgr"
 }
 
+generate_kfd() {
+  clang2py /usr/include/linux/kfd_ioctl.h -o $BASE/kfd.py -k cdefstum
+  fixup $BASE/kfd.py
+  sed -i "s\import ctypes\import ctypes, os\g" $BASE/kfd.py
+  python3 -c "import tinygrad.runtime.autogen.kfd"
+}
+
 generate_cuda() {
   clang2py /usr/include/cuda.h /usr/include/nvrtc.h -o $BASE/cuda.py -l /usr/lib/x86_64-linux-gnu/libcuda.so -l /usr/lib/x86_64-linux-gnu/libnvrtc.so
   sed -i "s\import ctypes\import ctypes, ctypes.util\g" $BASE/cuda.py
@@ -83,6 +90,7 @@ elif [ "$1" == "hip" ]; then generate_hip
 elif [ "$1" == "comgr" ]; then generate_comgr
 elif [ "$1" == "cuda" ]; then generate_cuda
 elif [ "$1" == "hsa" ]; then generate_hsa
-elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_hsa
+elif [ "$1" == "kfd" ]; then generate_kfd
+elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_hsa; generate_kfd
 else echo "usage: $0 <type>"
 fi
