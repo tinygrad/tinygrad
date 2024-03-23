@@ -616,7 +616,7 @@ class Kernel:
 
     # if nothing at all is upcasted and it's easy to, do an upcast
     # TODO: this is breaking the tests
-    for splits in [4]:
+    for splits in [7, 4]:
       if self.upcasted == 0 and self.full_unupcasted_shape and self.full_unupcasted_shape[-1] % splits == 0:
         self.apply_opt(Opt(OptOps.UPCAST, len(self.full_unupcasted_shape)-1, splits))
 
