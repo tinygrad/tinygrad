@@ -203,10 +203,6 @@ def get_run_onnx(onnx_model: ModelProto):
         raise Exception(f"op_type {n.op_type} not supported")
 
       if not isinstance(ret, tuple): ret = (ret, )
-      # for r in ret:
-      #   if isinstance(r, Tensor):
-      #     print(r.numpy())
-      #     print(r.dtype)
       assert len(n.output) <= len(ret), f"expected output size must be less than {len(ret)}, it's {n.output}"
       if debug >= 2: print([x.shape if isinstance(x, Tensor) else None for x in ret])
       if debug >= 2: print("outputs:")

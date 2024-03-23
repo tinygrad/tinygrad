@@ -103,21 +103,6 @@ def benchmark_model(m, devices, validate_outs=False):
     tinygrad_model = get_run_onnx(onnx_model)
     tinygrad_out = tinygrad_model(inputs)
 
-    # try:
-    #   torch_model = convert(onnx_model)
-    # except Exception as e:
-    #   print(f"{m:16s}onnx2torch {type(e).__name__:>25}")
-    # else:
-    #   # torch_inputs = [torch.tensor(x) for x in np_inputs.values()]
-    #   # try: benchmark(m, "torch_cpu", lambda: torch_model(*torch_inputs))
-    #   # except Exception as e: print(f"{m:16s}torch_cpu {type(e).__name__:>25}")
-
-    #   torch_device = "mps" if OSX else "cuda"
-    #   torch_mps_model = torch_model.to(torch_device)
-    #   torch_inputs = [torch.tensor(x) for x in np_inputs.values()]
-    #   torch_mps_inputs = [x.to(torch_device) for x in torch_inputs]
-    #   torch_out = torch_mps_model(*torch_mps_inputs)
-
     # https://github.com/microsoft/onnxruntime/issues/15977
     # provider = ("CUDA" if not OSX else "CoreML") + "ExecutionProvider"
     provider = "CPUExecutionProvider"
@@ -134,18 +119,10 @@ def benchmark_model(m, devices, validate_outs=False):
     open_csv.writeheader()
   open_csv.writerow(CSV)
 
-# def assert_allclose_torch(tiny_out:dict, torch_out:torch.Tensor, rtol=1e-5, atol=1e-5):
-#   tiny_v = list(tiny_out.values())[0]
-#   torch_v = torch_out.detach().cpu().numpy()
-#   assert (tiny_v := tiny_v.numpy()).dtype == torch_v.dtype, f"tiny={tiny_v.dtype} onnx={torch_v.dtype}"
-#   np.testing.assert_allclose(tiny_v, torch_v, rtol=rtol, atol=atol, err_msg=f"For tensor '{0}' in {tiny_out.keys()}")
-#
 def l1_norm_allclose(x:np.ndarray, y:np.ndarray, atol, rtol, err_msg):
-  # np.sum(np.abs(x-y)) <= atol + np.sum(rtol * np.abs(y))
   return np.testing.assert_array_less(np.sum(np.abs(x-y)),  atol + rtol * np.sum(np.abs(y)), err_msg="l1 norm failed: " + err_msg)
 
 def l2_norm_allclose(x:np.ndarray, y:np.ndarray, atol, rtol, err_msg):
-  # np.sqrt(np.sum((x - y)**2)) <= np.sqrt(np.sum(atol + rtol * y**2)), err_msg=err_msg
   return np.testing.assert_array_less(np.sqrt(np.sum((x - y)**2)),  atol + rtol * np.sqrt(np.sum(y**2)), err_msg="l2 norm failed: " + err_msg)
 
 def assert_allclose(tiny_out:dict, onnx_out:dict, rtol=1e-5, atol=1e-5):
