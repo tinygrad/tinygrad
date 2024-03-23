@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Callable, List, Tuple, Dict, cast, Union, Optional, TypeVar, Generic
+from typing import Callable, List, Tuple, Dict, cast, Union, Optional, TypeVar, Generic, Set
 import functools, itertools, operator
 from tinygrad.nn.state import get_parameters
 from tinygrad.dtype import DType
@@ -128,6 +128,15 @@ class TinyJit(Generic[ReturnType]):
       if DEBUG >= 1 and len(set(get_input_replace(self.jit_cache, input_rawbuffers).values())) != len(input_rawbuffers):
         print("WARNING: some input tensors not found")
       if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
+
+      # get kernels that depend on the inputs
+      # NOTE: this is wrong for multioutput
+      depends: Set[Buffer] = set(input_rawbuffers)
+      for ji in self.jit_cache:
+        if any(b in depends for b in ji.rawbufs[1:]):
+          assert isinstance(ji.rawbufs[0], Buffer)
+          depends.add(ji.rawbufs[0])
+      self.jit_cache = [ji for ji in self.jit_cache if ji.rawbufs[0] in depends]
 
       # Condense the items into a graph executor.
       if getenv("JIT") != 2: self.jit_cache = apply_graph_to_jit(self.jit_cache, input_rawbuffers, var_vals)
