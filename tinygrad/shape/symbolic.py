@@ -13,6 +13,7 @@ class Node:
   max: sint
   def render(self, ops=None, ctx=None) -> Any:
     if ops is None: ops = render_python
+    assert -2 ** 31 <= self.min <= self.max < 2 ** 31, f"calculation overflows 32-bit int! {self.__class__} {self.min} {self.max}"
     assert self.__class__ in (Variable, NumNode) or self.min != self.max
     return ops[type(self)](self, ops, ctx)
   def vars(self) -> Set[Variable]: return set()
@@ -150,7 +151,6 @@ class NumNode(Node):
 
 def create_node(ret:Node):
   assert ret.min <= ret.max, f"min greater than max! {ret.min} {ret.max} when creating {type(ret)} {ret}"
-  assert -2 ** 31 <= ret.min <= ret.max < 2 ** 31, f"calculation overflows 32-bit int!"
   if ret.min == ret.max: return NumNode(ret.min)
   return ret
 
