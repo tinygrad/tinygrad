@@ -9,7 +9,6 @@ from tinygrad import Tensor, dtypes, TinyJit, GlobalCounters
 if "FLOAT16" not in os.environ: os.environ["FLOAT16"] = "1"
 if "IMAGE" not in os.environ: os.environ["IMAGE"] = "2"
 if "NOLOCALS" not in os.environ: os.environ["NOLOCALS"] = "1"
-if "OPT" not in os.environ: os.environ["OPT"] = "99"
 
 OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx"
 
@@ -22,10 +21,10 @@ if __name__ == "__main__":
   input_shapes = {inp.name:tuple(x.dim_value for x in inp.type.tensor_type.shape.dim) for inp in onnx_model.graph.input}
 
   # run the model
-  inputs = {k:Tensor.empty(*shp) for k,shp in input_shapes.items()}
   @TinyJit
   def run(**inputs) -> Tensor: return next(iter(run_onnx(inputs).values())).cast(dtypes.float32).contiguous()
   for _ in range(3):
+    inputs = {k:Tensor.empty(*shp).realize() for k,shp in input_shapes.items()}
     GlobalCounters.reset()
     run(**inputs)
 
