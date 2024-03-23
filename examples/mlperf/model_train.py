@@ -247,10 +247,16 @@ def train_retinanet():
   BS = 8
   
   model = RetinaNet(ResNeXt50_32X4D())
+  for k, x in get_state_dict(model).items():
+    # x.requires_grad = True
+    x.realize()
+    print(x.grad, x.shape, x.device)
 
-  optimizer = Adam(get_parameters(model))
-  # @TinyJit
+  parameters = get_parameters(model)
+  optimizer = Adam(parameters)
+  @TinyJit
   def train_step(X, Y):
+    Tensor.training = True
     anchors = model.anchor_gen(X.shape[1:3])
     anchors = [Tensor(t) for t in anchors]
     optimizer.zero_grad()
@@ -258,8 +264,9 @@ def train_retinanet():
     print('Train_step logits', logits_reg.shape, logits_class.shape)
     # print(logits_reg.numpy())
     # logits_reg, logits_class = model(X)
-    loss = model.loss(logits_reg, logits_class, Y, anchors)
-    print('loss',loss.numpy())
+    # loss = model.loss(logits_reg, logits_class, Y, anchors)
+    loss = logits_reg.sparse_categorical_crossentropy(Tensor([1,2,3,4,5,6,7,8], requires_grad=True).reshape(8,1))
+    # print('loss',loss.numpy())
     # sys.exit()
     loss.backward()
     optimizer.step()
@@ -275,8 +282,10 @@ def train_retinanet():
     for X,Y in iterate(coco, BS, True):
       
       loss = train_step(X, Y)
-      print('Iter done')
-      sys.exit()
+
+      print('Iter done:', loss.numpy())
+      
+      # sys.exit()
 
 
 
