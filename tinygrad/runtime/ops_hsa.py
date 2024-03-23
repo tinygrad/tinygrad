@@ -226,7 +226,7 @@ class HSADevice(Compiled):
     super().__init__(device, HSAAllocator(self), HSACompiler(self.arch), functools.partial(HSAProgram, self), HSAGraph)
 
     # Finish init: preallocate some signals + space for kernargs
-    self.signal_pool = [init_c_var(hsa.hsa_signal_t(), lambda x: check(hsa.hsa_signal_create(1, 0, None, ctypes.byref(x)))) for _ in range(4096)]
+    self.signal_pool = [init_c_var(hsa.hsa_signal_t(), lambda x: check(hsa.hsa_signal_create(1, 0, None, ctypes.byref(x)))) for _ in range(256)]
     self._new_kernargs_region(16 << 20) # initial region size is 16mb
 
   def synchronize(self):
