@@ -6,6 +6,12 @@ from tinygrad import Tensor, dtypes, Device
 from tinygrad.helpers import getenv, DEBUG, CI, OSX
 from typing import List, Dict
 from onnx import AttributeProto, ModelProto, TensorProto, TypeProto # onnx 1.50 uses serialized file (see onnx/onnx-ml.proto) as descriptors
+try:
+  from onnx.helper import tensor_dtype_to_np_dtype
+except ImportError:
+  # for onnx < 1.13
+  from onnx.mapping import TENSOR_TYPE_TO_NP_TYPE
+  tensor_dtype_to_np_dtype = lambda x: TENSOR_TYPE_TO_NP_TYPE[x]
 
 # global numpy cache for parameters
 numpy_cache = {}
@@ -63,7 +69,7 @@ def get_run_onnx(onnx_model: ModelProto):
     if dat := list(inp.float_data) or list(inp.int32_data) or list(inp.int64_data):
       return Tensor(dat, dtype=dtype, requires_grad=False).reshape(tuple(inp.dims))
     if len(inp.raw_data) > 0:
-      return Tensor(np.frombuffer(inp.raw_data, dtype=dtype.np).copy(), requires_grad=False).reshape(tuple(inp.dims))
+      return Tensor(np.frombuffer(inp.raw_data, dtype=tensor_dtype_to_np_dtype(inp.data_type)).copy(), requires_grad=False).reshape(tuple(inp.dims)).cast(dtype)
     return Tensor(None, requires_grad=False)
 
   def attribute_parse(a: AttributeProto) -> float | int | str | Tensor | tuple[float] | tuple[int]:
