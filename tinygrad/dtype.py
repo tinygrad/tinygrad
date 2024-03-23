@@ -2,6 +2,7 @@ from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Union
 from dataclasses import dataclass
 import numpy as np  # TODO: remove numpy
 import functools
+from tinygrad.helpers import getenv
 
 Scalar = Union[float, int, bool]
 
@@ -80,7 +81,7 @@ class dtypes:
   @staticmethod
   def imagef(shp): return ImageDType(100, 4, "imagef", 'f', 1, shape=shp, base=dtypes.float32)
 
-  default_float: ClassVar[DType] = float32
+  default_float: ClassVar[DType] = float16 if getenv("DEFAULT_FP16") else bfloat16 if getenv("DEFAULT_BF16") else float32
   default_int: ClassVar[DType] = int32
 
 # https://jax.readthedocs.io/en/latest/jep/9407-type-promotion.html
