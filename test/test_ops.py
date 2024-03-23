@@ -1674,6 +1674,15 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: torch.nn.functional.nll_loss(torch.nn.functional.log_softmax(data, dim = 1), torch.tensor(target)).type(torch.float32),
                        lambda: Tensor(data.numpy()).negative_log_likelihood(Tensor(target)), forward_only=True)
 
+  def test_cross_entropy(self):
+    data, target = torch.randn(1,3), torch.randint(3, (1,), dtype = torch.int64)
+    helper_test_op([], lambda: torch.nn.functional.cross_entropy(data, target).type(torch.float32),
+                       lambda: Tensor(data.numpy()).cross_entropy(Tensor(target.numpy())), forward_only=True)
+
+    data, target = torch.randn(3, 5), torch.randint(5, (3,), dtype = torch.int64)
+    helper_test_op([], lambda: torch.nn.functional.cross_entropy(data, target).type(torch.float32),
+                       lambda: Tensor(data.numpy()).cross_entropy(Tensor(target.numpy())), forward_only=True)
+
 if __name__ == '__main__':
   np.random.seed(1337)
   unittest.main(verbosity=2)
