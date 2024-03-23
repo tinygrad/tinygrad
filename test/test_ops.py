@@ -1666,22 +1666,31 @@ class TestOps(unittest.TestCase):
                        lambda: Tensor(data).one_hot(8), forward_only=True)
 
   def test_negative_log_likelihood(self):
-    data, target = torch.randn(1,3), [2]
-    helper_test_op([], lambda: torch.nn.functional.nll_loss(torch.nn.functional.log_softmax(data, dim = 1), torch.tensor(target)).type(torch.float32),
-                       lambda: Tensor(data.numpy()).nll(Tensor(target)), forward_only=True)
+    reduction_types = ['none', 'sum', 'mean']
+    torch_nll_loss = torch.nn.functional.nll_loss
+    torch_log_softmax = torch.nn.functional.log_softmax
 
-    data, target = torch.randn(3, 5), [1, 0, 4]
-    helper_test_op([], lambda: torch.nn.functional.nll_loss(torch.nn.functional.log_softmax(data, dim = 1), torch.tensor(target)).type(torch.float32),
-                       lambda: Tensor(data.numpy()).nll(Tensor(target)), forward_only=True)
+    for reduction in reduction_types:
+      for weight in [None, np.random.randn(5)]:
+        if weight is not None:
+          weight_torch, weight_t = torch.tensor(weight), Tensor(weight)
+
+        helper_test_op(None,
+                       lambda data, target: torch_nll_loss(torch_log_softmax(data, dim = 1), target.type(torch.int64),
+                                                           weight = weight_torch, reduction=reduction),
+                       lambda data, target: data.nll_loss(target, weight = weight_t, reduction=reduction),
+                       forward_only=True, vals = [np.random.randn(3, 5), [1, 0, 4]])
+
+
 
   def test_cross_entropy(self):
-    data, target = torch.randn(1,3), torch.randint(3, (1,), dtype = torch.int64)
-    helper_test_op([], lambda: torch.nn.functional.cross_entropy(data, target).type(torch.float32),
-                       lambda: Tensor(data.numpy()).cross_entropy(Tensor(target.numpy())), forward_only=True)
+    # data, target = torch.randn(1,3), torch.randint(3, (1,), dtype = torch.int64)
+    # helper_test_op([], lambda: torch.nn.functional.cross_entropy(data, target).type(torch.float32),
+    #                    lambda: Tensor(data.numpy()).cross_entropy(Tensor(target.numpy())), forward_only=True)
 
-    data, target = torch.randn(3, 5), torch.randint(5, (3,), dtype = torch.int64)
-    helper_test_op([], lambda: torch.nn.functional.cross_entropy(data, target).type(torch.float32),
-                       lambda: Tensor(data.numpy()).cross_entropy(Tensor(target.numpy())), forward_only=True)
+    # data, target = torch.randn(3, 5), torch.randint(5, (3,), dtype = torch.int64)
+    helper_test_op([(32, 10), [32]], lambda data, target: torch.nn.functional.cross_entropy(data, target.type(torch.int64)),
+                       lambda data, target: Tensor(data.numpy()).cross_entropy(Tensor(target.numpy())), forward_only=True, low = 0, high = 4)
 
 if __name__ == '__main__':
   np.random.seed(1337)
