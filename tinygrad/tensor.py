@@ -662,8 +662,8 @@ class Tensor:
 
     # Determine the inverse permutation to revert back to original order
     rhs_order_sorted, rhs_letters = tuple(zip(*sorted(enumerate(output), key=lambda e:e[1]))) or ([], [])
-    rhs_order = [0]*len(rhs_order_sorted)
-    for i, order in enumerate(rhs_order_sorted): rhs_order[order] = i
+    rhs_order:List[int] = [0]*len(rhs_order_sorted)
+    for sorted_idx,orig_idx in enumerate(rhs_order_sorted): rhs_order[orig_idx] = sorted_idx
 
     # sum over all axes that's not in the output, then permute to the output order
     return functools.reduce(lambda a,b:a*b, xs_) \
