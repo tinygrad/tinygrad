@@ -63,7 +63,7 @@ def train_resnet():
 
   # ** Optimizer **
   skip_list = [v for k, v in get_state_dict(model).items() if "bn" in k or "bias" in k or "downsample.1" in k]
-  parameters = [x for x in parameters if x not in skip_list]
+  parameters = [x for x in parameters if x not in set(skip_list)]
   optimizer = LARS(parameters, base_lr, momentum=.9, weight_decay=decay)
   optimizer_skip = SGD(skip_list, base_lr, momentum=.9, weight_decay=0.0, classic=True)
   optimizer_group = OptimizerGroup(optimizer, optimizer_skip)
