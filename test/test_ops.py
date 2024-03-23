@@ -1674,6 +1674,8 @@ class TestOps(unittest.TestCase):
       for weight in [None, np.random.randn(5)]:
         if weight is not None:
           weight_torch, weight_t = torch.tensor(weight), Tensor(weight)
+        else:
+          weight_torch, weight_t = weight, weight
 
         helper_test_op(None,
                        lambda data, target: torch_nll_loss(torch_log_softmax(data, dim = 1), target.type(torch.int64),
@@ -1684,13 +1686,21 @@ class TestOps(unittest.TestCase):
 
 
   def test_cross_entropy(self):
-    # data, target = torch.randn(1,3), torch.randint(3, (1,), dtype = torch.int64)
-    # helper_test_op([], lambda: torch.nn.functional.cross_entropy(data, target).type(torch.float32),
-    #                    lambda: Tensor(data.numpy()).cross_entropy(Tensor(target.numpy())), forward_only=True)
+    reduction_types = ['none', 'sum', 'mean']
+    torch_cross_entropy = torch.nn.functional.cross_entropy
 
-    # data, target = torch.randn(3, 5), torch.randint(5, (3,), dtype = torch.int64)
-    helper_test_op([(32, 10), [32]], lambda data, target: torch.nn.functional.cross_entropy(data, target.type(torch.int64)),
-                       lambda data, target: Tensor(data.numpy()).cross_entropy(Tensor(target.numpy())), forward_only=True, low = 0, high = 4)
+    for reduction in reduction_types:
+      for weight in [None, np.random.randn(5)]:
+        if weight is not None:
+          weight_torch, weight_t = torch.tensor(weight), Tensor(weight)
+        else:
+          weight_torch, weight_t = weight, weight
+
+        helper_test_op(None,
+                       lambda data, target: torch_cross_entropy(data, target.type(torch.int64),
+                                                           weight = weight_torch, reduction=reduction),
+                       lambda data, target: data.cross_entropy(target, weight = weight_t, reduction=reduction),
+                       forward_only=True, vals = [np.random.randn(3, 5), [1, 0, 4]])
 
 if __name__ == '__main__':
   np.random.seed(1337)
