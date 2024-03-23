@@ -1668,11 +1668,11 @@ class TestOps(unittest.TestCase):
   def test_negative_log_likelihood(self):
     data, target = torch.randn(1,3), [2]
     helper_test_op([], lambda: torch.nn.functional.nll_loss(torch.nn.functional.log_softmax(data, dim = 1), torch.tensor(target)).type(torch.float32),
-                       lambda: Tensor(data.numpy()).negative_log_likelihood(Tensor(target)), forward_only=True)
+                       lambda: Tensor(data.numpy()).nll(Tensor(target)), forward_only=True)
 
     data, target = torch.randn(3, 5), [1, 0, 4]
     helper_test_op([], lambda: torch.nn.functional.nll_loss(torch.nn.functional.log_softmax(data, dim = 1), torch.tensor(target)).type(torch.float32),
-                       lambda: Tensor(data.numpy()).negative_log_likelihood(Tensor(target)), forward_only=True)
+                       lambda: Tensor(data.numpy()).nll(Tensor(target)), forward_only=True)
 
   def test_cross_entropy(self):
     data, target = torch.randn(1,3), torch.randint(3, (1,), dtype = torch.int64)

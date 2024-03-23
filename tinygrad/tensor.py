@@ -987,14 +987,15 @@ class Tensor:
   def one_hot(self, num_classes:int) -> Tensor:
     return (self[..., None] == Tensor.arange(num_classes, requires_grad=False, device=self.device)).where(1, 0)
 
-  def negative_log_likelihood(self, target:Tensor, weight:Optional[Tensor] = None, reduction:Literal['none', 'mean', 'sum'] = 'mean') -> Tensor:
+  # nll --> Negative Log Likelihood (linter was throwing in errors...)
+  def nll(self, target:Tensor, weight:Optional[Tensor] = None, reduction:Literal['none', 'mean', 'sum'] = 'mean') -> Tensor:
     Y = target.one_hot(self.shape[-1])
     Y = Y if weight is None else Y.matmul(Tensor.eye(self.shape[-1], dtype=weight.dtype) * weight)
-    res = {'none': -1*self.log_softmax().mul(Y).sum(-1), 'mean': -1*self.log_softmax().mul(Y).sum() / Y.sum(), 'sum': -1*self.log_softmax().mul(Y).sum()}[reduction]
-    return res
+    res = {'none': self.log_softmax().mul(Y).sum(-1), 'mean': self.log_softmax().mul(Y).sum() / Y.sum(), 'sum': self.log_softmax().mul(Y).sum()}
+    return -1*res[reduction]
 
   def cross_entropy(self, target:Tensor, weight:Optional[Tensor] = None, reduction:Literal['none', 'mean', 'sum'] = 'mean') -> Tensor:
-    return self.log_softmax().negative_log_likelihood(target, weight=weight, ignore_index=ignore_index, reduction=reduction)
+    return self.log_softmax().nll(target, weight=weight, reduction=reduction)
 
   def scaled_dot_product_attention(self, key:Tensor, value:Tensor, attn_mask:Optional[Tensor]=None,
                                    dropout_p:float=0.0, is_causal:bool=False) -> Tensor:
