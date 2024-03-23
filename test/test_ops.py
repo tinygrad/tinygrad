@@ -1679,7 +1679,7 @@ class TestOps(unittest.TestCase):
 
         helper_test_op(None,
                        lambda data, target: torch_nll_loss(torch_log_softmax(data, dim = 1), target.type(torch.int64),
-                                                           weight = weight_torch, reduction=reduction),
+                                                           weight = weight_torch, reduction=reduction).type(torch.float64),
                        lambda data, target: data.nll_loss(target, weight = weight_t, reduction=reduction),
                        forward_only=True, vals = [np.random.randn(3, 5), [1, 0, 4]])
 
@@ -1698,7 +1698,7 @@ class TestOps(unittest.TestCase):
 
         helper_test_op(None,
                        lambda data, target: torch_cross_entropy(data, target.type(torch.int64),
-                                                           weight = weight_torch, reduction=reduction),
+                                                           weight = weight_torch, reduction=reduction).type(torch.float64),
                        lambda data, target: data.cross_entropy(target, weight = weight_t, reduction=reduction),
                        forward_only=True, vals = [np.random.randn(3, 5), [1, 0, 4]])
 
