@@ -987,6 +987,12 @@ class Tensor:
   def one_hot(self, num_classes:int) -> Tensor:
     return (self[..., None] == Tensor.arange(num_classes, requires_grad=False, device=self.device)).where(1, 0)
 
+  def negative_log_likelihood(self, target:Tensor, weight:Optional[Tensor] = None, ignore_index=-100, reduction:Literal['none', 'mean', 'sum'] = 'mean') -> Tensor: 
+    Y = target.one_hot(self.shape[-1])
+    Y = Y if weight is None else Y.matmul(Tensor.eye(self.shape[-1], dtype=weight.dtype) * weight)
+    res = {'none': -1*self.log_softmax().mul(Y).sum(-1), 'mean': -1*self.log_softmax().mul(Y).sum() / Y.sum(), 'sum': -1*self.log_softmax().mul(Y).sum()}[reduction]
+    return res
+
   def scaled_dot_product_attention(self, key:Tensor, value:Tensor, attn_mask:Optional[Tensor]=None,
                                    dropout_p:float=0.0, is_causal:bool=False) -> Tensor:
     # NOTE: it works if key, value have symbolic shape
