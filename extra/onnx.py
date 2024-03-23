@@ -27,9 +27,9 @@ def is_dtype_supported(dtype, device: str = Device.DEFAULT):
 
 # src: onnx/mapping.py
 # not supported: STRING = 8 COMPLEX64 = 14, COMPLEX128 = 15
-# NOTE: 17, 18, 19, 20 are float8, 10 is half
+# NOTE: 17, 18, 19, 20 are float8
 DTYPE_MAP = {1:dtypes.float, 2:dtypes.uint8, 3:dtypes.int8, 4:dtypes.uint16, 5:dtypes.int16, 6:dtypes.int32, 7:dtypes.int64,
-              9:dtypes.bool, 10:dtypes.float16, 11:dtypes.double, 12:dtypes.uint32, 13:dtypes.uint64, 16:dtypes.bfloat16,
+              9:dtypes.bool, 10:dtypes.half, 11:dtypes.double, 12:dtypes.uint32, 13:dtypes.uint64, 16:dtypes.bfloat16,
               17:dtypes.float, 18:dtypes.float, 19:dtypes.float, 20:dtypes.float}
 
 onnx_ops = importlib.import_module('extra.onnx_ops')
@@ -63,7 +63,7 @@ def get_run_onnx(onnx_model: ModelProto):
     if dat := list(inp.float_data) or list(inp.int32_data) or list(inp.int64_data):
       return Tensor(dat, dtype=dtype, requires_grad=False).reshape(tuple(inp.dims))
     if len(inp.raw_data) > 0:
-      ret = Tensor(np.frombuffer(inp.raw_data, dtype=dtype.np).copy(), requires_grad=False).reshape(tuple(inp.dims))
+      ret = Tensor(np.frombuffer(inp.raw_data, dtype=dtype.np).reshape(tuple(inp.dims)).copy(), requires_grad=False)
       return ret
     return Tensor(None, requires_grad=False)
 
@@ -203,6 +203,10 @@ def get_run_onnx(onnx_model: ModelProto):
         raise Exception(f"op_type {n.op_type} not supported")
 
       if not isinstance(ret, tuple): ret = (ret, )
+      # for r in ret:
+      #   if isinstance(r, Tensor):
+      #     print(r.numpy())
+      #     print(r.dtype)
       assert len(n.output) <= len(ret), f"expected output size must be less than {len(ret)}, it's {n.output}"
       if debug >= 2: print([x.shape if isinstance(x, Tensor) else None for x in ret])
       if debug >= 2: print("outputs:")

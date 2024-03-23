@@ -6,6 +6,15 @@ from tinygrad.helpers import prod, flatten
 from extra.onnx import safe_numpy, DTYPE_MAP
 import numpy as np
 
+def half_to_float_to_half(func):
+  def wrapper(*args, **kwargs):
+    new_args = [arg.float() if isinstance(arg, Tensor) else arg for arg in args]
+    ret = func(*new_args, **kwargs)
+    if not isinstance(ret, tuple): ret = (ret,)
+    ret = tuple(r.cast(dtypes.float16) if isinstance(r, Tensor) else r for r in ret)
+    return ret
+  return wrapper
+
 tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu", "Sigmoid", "MatMul",
                   "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",
                   "Elu", "Celu", "Xor", "Round"}
@@ -33,7 +42,7 @@ def CastLike(x: Tensor, target_type: Tensor, saturate=1): return x.cast(target_t
 # https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_div.py
 def Div(x: Tensor, other: Tensor): return (x/other).cast(x.dtype)
 
-def Constant(value: Tensor=None, value_float=None, value_floats=None, value_int=None, value_ints=None, value_string=None, value_strings=None):
+def Constant(value:Optional[Tensor]=None, value_float=None, value_floats=None, value_int=None, value_ints=None, value_string=None, value_strings=None):
   if value is not None: return value
   if value_float is not None: return Tensor(value_float, dtype=dtypes.float32, requires_grad=False)
   if value_floats is not None: return Tensor(list(value_floats), dtype=dtypes.float32, requires_grad=False)
@@ -600,15 +609,18 @@ def AffineGrid(theta: Tensor, size: Tensor, align_corners=0):
 
 # **************** com.microsoft Ops ****************
 
+@half_to_float_to_half
 def SkipLayerNormalization(x:Tensor, skip:Tensor, gamma, beta:Optional[Tensor]=None, bias:Optional[Tensor]=None, epsilon=None):
-  if epsilon is None: epsilon=1e-12
+  if epsilon is None: epsilon = 1e-12 if x.dtype == dtypes.float else 1e-5 # Tensor can only be float or half
   x = x + skip + bias
   return x.layernorm(eps=epsilon) * gamma + beta, None, None, x
 
+@half_to_float_to_half
 def FastGelu(x:Tensor, bias:Optional[Tensor]=None):
   x = x + bias
   return 0.5 * x * (1 + (x * 0.797885 + 0.035677 * x ** 3).tanh())
 
+@half_to_float_to_half # l2 norm for commavq fails without this
 def EmbedLayerNormalization(input_ids: Tensor, segment_ids:Optional[Tensor]=None, word_embedding:Tensor=None, position_embedding:Tensor=None, segment_embedding:Optional[Tensor]=None, gamma=None, beta=None, mask:Optional[Tensor]=None, position_ids:Optional[Tensor]=None, epsilon=None, mask_index_type=None):
   # https://github.com/microsoft/onnxruntime/blob/main/docs/ContribOperators.md#com.microsoft.EmbedLayerNormalization
   assert (segment_ids is None) is (segment_embedding is None)
@@ -624,7 +636,7 @@ def EmbedLayerNormalization(input_ids: Tensor, segment_ids:Optional[Tensor]=None
     return (vocab_counter == x.unsqueeze(2).expand(*x.shape, vocab_size)) @ weight
 
   # bert embedding layer
-  if epsilon is None: epsilon = 1e-12
+  if epsilon is None: epsilon = 1e-12 if input_ids.dtype == dtypes.float else 1e-5 # Tensor can only be float or half
   if position_ids is None: position_ids = Tensor.arange(seq_length, requires_grad=False).unsqueeze(0).expand(*input_shape)
   wrd_embedding_res = embedding(input_ids, vocab_size, word_embedding)
   pos_embedding_res = embedding(position_ids, max_position_embeddings, position_embedding)
