@@ -661,13 +661,13 @@ class Tensor:
       xs_.append(x.permute(order).reshape([val if letter in letters else 1 for letter,val in letter_val]).expand([val for _,val in letter_val]))
 
     # Determine the inverse permutation to revert back to original order
-    rhs_order_sorted, rhs_letters = tuple(zip(*sorted(enumerate(output), key=lambda e:e[1]))) or ([], [])
-    rhs_order:List[int] = [0]*len(rhs_order_sorted)
-    for sorted_idx,orig_idx in enumerate(rhs_order_sorted): rhs_order[orig_idx] = sorted_idx
+    rhs_letter_order = [idx for idx,_ in sorted(enumerate(output), key=lambda e:e[1])]
+    rhs_order:List[int] = [0]*len(rhs_letter_order)
+    for sorted_idx,orig_idx in enumerate(rhs_letter_order): rhs_order[orig_idx] = sorted_idx
 
     # sum over all axes that's not in the output, then permute to the output order
     return functools.reduce(lambda a,b:a*b, xs_) \
-      .sum(axis=[axis for axis,(letter,_) in enumerate(letter_val) if letter not in rhs_letters]).permute(rhs_order)
+      .sum(axis=[axis for axis,(letter,_) in enumerate(letter_val) if letter not in output]).permute(rhs_order)
 
   # ***** processing ops *****
 
