@@ -84,6 +84,62 @@ class TestAssign(unittest.TestCase):
     for _ in range(4): f(y)
     assert y.item() == 4
 
+  def test_assign_changes(self):
+    a = Tensor.ones(4).contiguous().realize()
+    old_a = a
+    a.assign(Tensor.full((4,), 2.).contiguous())
+    # NOTE: old_a is now 2, and this would match the behavior of pytorch
+    new = a + old_a
+    np.testing.assert_allclose(new.numpy(), 4)
+
+  @unittest.expectedFailure
+  def test_assign_diamond(self):
+    a = Tensor.ones(4).contiguous().realize()
+    times_a = a*3
+    a.assign(Tensor.full((4,), 2.).contiguous())
+    new = a + times_a
+    np.testing.assert_allclose(new.numpy(), 5)
+
+  def test_assign_diamond_possible(self):
+    a = Tensor.ones(4).contiguous().realize()
+    times_a = a*3
+    a.assign(Tensor.full((4,), 2.).contiguous())
+    new = a + (times_a-1).contiguous()
+    np.testing.assert_allclose(new.numpy(), 4)
+
+  def test_assign_diamond_alt(self):
+    a = Tensor.ones(4).contiguous().realize()
+    a.assign(Tensor.full((4,), 2.).contiguous())
+    times_a = a*3
+    new = a + times_a
+    np.testing.assert_allclose(new.numpy(), 8)
+
+  def test_double_assign(self):
+    a = Tensor.ones(4).contiguous().realize()
+    a += 1
+    a += 1
+    np.testing.assert_allclose(a.numpy(), 3)
+
+  def test_crossover_assign(self):
+    a = Tensor.full((4,), 2).contiguous().realize()
+    b = Tensor.full((4,), 3).contiguous().realize()
+    a += b
+    b += a
+    Tensor.corealize([a,b])
+    np.testing.assert_allclose(a.numpy(), 5)
+    np.testing.assert_allclose(b.numpy(), 8)
+
+  @unittest.expectedFailure
+  def test_crossunder_assign(self):
+    a = Tensor.full((4,), 2).contiguous().realize()
+    b = Tensor.full((4,), 3).contiguous().realize()
+    c = a+9
+    a += b
+    b += c
+    Tensor.corealize([a,b])
+    np.testing.assert_allclose(a.numpy(), 2+3)
+    np.testing.assert_allclose(b.numpy(), 3+2+9)
+
   def test_assign_kv_cache(self):
     bsz, max_context = 2, 8
 
@@ -129,7 +185,7 @@ class TestAssign(unittest.TestCase):
     b.realize()
     ba1 = a.lazydata.base.realized
     bb1 = b.lazydata.base.realized
-    with self.assertRaises(RuntimeError):
+    with self.assertRaises((RuntimeError, AssertionError)):
       a = a.permute(1,0)
       a += b
       a.realize()

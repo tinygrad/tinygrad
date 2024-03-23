@@ -195,9 +195,9 @@ class Linearizer(Kernel):
       if isinstance(buf, MemBuffer):
         self.buf_uops[i] = self.uops.add(UOps.DEFINE_GLOBAL,
                                          buf.dtype if isinstance(buf.dtype, ImageDType) else PtrDType(buf.dtype), (),
-                                         (buf.idx, f"data{buf.idx}", buf.idx == 0))
+                                         (buf.idx, f"data{buf.idx}", any(buf.idx == x.idx for x in self.outbufs)))
     # add var vals
-    for i,var in enumerate(self.ast.vars()):
+    for i,var in enumerate(self.vars):
       assert var.expr is not None
       self.loop_uops[var.expr] = self.uops.add(UOps.DEFINE_VAR, dtypes.int32, (), var)
     # define local buffers
@@ -387,10 +387,9 @@ class Linearizer(Kernel):
                            for i,b in enumerate(self.bufs) if b not in self.earlybufs and b.__class__ is not LocalBuffer})
 
     # run late AST (without the store)
-    val = self.ast_parse(self.ast.src[0], acc, None, loaded_buffers)
-
-    # store
-    self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val)
+    for op in self.ast:
+      val = self.ast_parse(op.src[0], acc, None, loaded_buffers)
+      self.global_store(op.arg.idx, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val)
 
     # optimize the uops
     self.uops.uoptimize()
