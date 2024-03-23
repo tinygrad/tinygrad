@@ -200,6 +200,7 @@ def train_resnet():
 
       # save model if achieved target
       if not achieved and total_top_1 >= target:
+        if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
         fn = f"./ckpts/resnet50.safe"
         safe_save(get_state_dict(model), fn)
         print(f" *** Model saved to {fn} ***")
