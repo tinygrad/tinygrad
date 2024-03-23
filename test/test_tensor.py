@@ -345,7 +345,7 @@ class TestTinygrad(unittest.TestCase):
       x = Tensor(x_init, requires_grad=True)
       y = Tensor.zeros_like(x, requires_grad=False)
       # equivalent to y.replace(x) or y.assign(x)
-      y = func(x, y)
+      y = func(y, x)
       out = y.sum()
       out.backward()
 
@@ -356,6 +356,7 @@ class TestTinygrad(unittest.TestCase):
       out_torch.backward()
       # grad of sum() is [1, 1, 1]
       np.testing.assert_allclose(out.grad.numpy(), out_torch.grad.numpy())
+      self.assertEqual(out.requires_grad, out_torch.requires_grad)
 
 
 @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
