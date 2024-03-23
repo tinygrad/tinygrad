@@ -8,6 +8,7 @@ from tinygrad.device import Compiled, LRUAllocator, MallocAllocator, Compiler, B
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.renderer.assembly import PTXRenderer
+if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl  # noqa: F401
 
 def pretty_ptx(s):
   # all expressions match `<valid_before><expr><valid_after>` and replace it with `<valid_before>color(<expr>)<valid_after>`
