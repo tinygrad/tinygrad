@@ -664,7 +664,7 @@ class Tensor:
     rhs_order_sorted, rhs_letters = tuple(zip(*sorted(enumerate(output), key=lambda e:e[1]))) or ([], [])
     rhs_order = [0]*len(rhs_order_sorted)
     for i, order in enumerate(rhs_order_sorted): rhs_order[order] = i
-    # rhs_order = rhs_order_sorted
+
     # sum over all axes that's not in the output, then permute to the output order
     return functools.reduce(lambda a,b:a*b, xs_) \
       .sum(axis=[axis for axis,(letter,_) in enumerate(letter_val) if letter not in rhs_letters]).permute(rhs_order)
