@@ -173,22 +173,17 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
       elif uop == UOps.DEFINE_ACC:
         if dtype.count > 1:
           r[u] = [ssa(None, 'acc', lang.types[dtype.scalar()]) for _ in range(dtype.count)]
-          for uu in r[u]:
-            kk(f"mov.b{lang.types[dtype.scalar()][1:]} {uu}, {const(args, dtype.scalar())};")
-        else:
-          kk(f"mov.b{lang.types[dtype][1:]} {ssa(u, 'acc')}, {const(args, dtype)};")
+          for uu in r[u]: kk(f"mov.b{lang.types[dtype.scalar()][1:]} {uu}, {const(args, dtype.scalar())};")
+        else: kk(f"mov.b{lang.types[dtype][1:]} {ssa(u, 'acc')}, {const(args, dtype)};")
       elif uop == UOps.SPECIAL:
         assert args[1][0] != "i", "idx not supported"
         kk(f"mov.u32 %{args[1]}, {(lang.gid if args[1][0] == 'g' else lang.lid)[args[0]]};")
         r[u] = "%" + args[1]
         kernel = [f".reg .u32 %{args[1]};"] + kernel
       elif uop == UOps.CONST:
-        if dtype.count > 1:
-          r[u] = [const(args, dtype.scalar(), mov=True) for _ in range(dtype.count)]
-        else:
-          r[u] = const(args, dtype, mov=True)
-      elif uop == UOps.GEP:
-        r[u] = r[vin[0]][u.arg]
+        if dtype.count > 1: r[u] = [const(args, dtype.scalar(), mov=True) for _ in range(dtype.count)]
+        else: r[u] = const(args, dtype, mov=True)
+      elif uop == UOps.GEP: r[u] = r[vin[0]][u.arg]
       elif uop == UOps.LOAD:
         assert vin[1].dtype is not None
         if dtype.count > 1:
@@ -205,10 +200,8 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
         r[u] = r[vin[0]]
       elif uop in {UOps.CAST, UOps.BITCAST}:
         assert vin[0].dtype is not None
-        if dtype.count>1:
-          r[u] = [r[x] for x in vin] # type: ignore
-        else:
-          cast(r[vin[0]], dtype, vin[0].dtype, bitcast=uop is UOps.BITCAST, u=u)
+        if dtype.count>1: r[u] = [r[x] for x in vin] # type: ignore
+        else: cast(r[vin[0]], dtype, vin[0].dtype, bitcast=uop is UOps.BITCAST, u=u)
       elif uop == UOps.DEFINE_LOCAL:
         # TODO: we should sum these, and fetch 0xC000 from somewhere
         assert args[1]*dtype.itemsize <= 0xC000, "too large local"
@@ -216,8 +209,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
       elif uop is UOps.DEFINE_VAR:
         bufs.append((args.expr, dtype))
         r[u] = f"%{args.expr}"
-        if lang.load_global:
-          kk(*lang.render_load(args.expr, ssa(u, 'dat', dtype=lang.types[dtype]), dtype, ss=".param"))
+        if lang.load_global: kk(*lang.render_load(args.expr, ssa(u, 'dat', dtype=lang.types[dtype]), dtype, ss=".param"))
       elif uop is UOps.DEFINE_GLOBAL:
         bufs.append((args[1], dtype))
         r[u] = f"%{args[1]}"
@@ -243,8 +235,7 @@ class PTXLanguage(AssemblyLanguage):
   asm_for_op = {
     UnaryOps.NEG: lambda d,a,dt,name: f"not.pred {d}, {a};" if name == "pred" else f"neg.{name} {d}, {a};",
     UnaryOps.EXP2: lambda d,a,dt,name: f"ex2.approx.{name} {d}, {a};", UnaryOps.LOG2: lambda d,a,dt,name: f"lg2.approx.{name} {d}, {a};",
-    UnaryOps.SIN: lambda d,a,dt,name: f"sin.approx.{name} {d}, {a};",
-    UnaryOps.SQRT: lambda d,a,dt,name: f"sqrt.approx.{name} {d}, {a};",
+    UnaryOps.SIN: lambda d,a,dt,name: f"sin.approx.{name} {d}, {a};", UnaryOps.SQRT: lambda d,a,dt,name: f"sqrt.approx.{name} {d}, {a};",
     BinaryOps.ADD: lambda d,a,b,dt,name: f"{'or' if name == 'pred' else 'add'}.{name} {d}, {a}, {b};",
     BinaryOps.SUB: lambda d,a,b,dt,name: f"sub.{name} {d}, {a}, {b};",
     BinaryOps.MUL: lambda d,a,b,dt,name: ('and' if dt == dtypes.bool else 'mul') + f"{'.lo' if dtypes.is_int(dt) else ''}.{name} {d}, {a}, {b};",
@@ -257,13 +248,10 @@ class PTXLanguage(AssemblyLanguage):
       f"@{a} mov.{name} {d}, {b};\n@!{a} mov.{name} {d}, {c};" if name == "pred" else f"selp.{'b16' if name == 'f16' else name} {d}, {b}, {c}, {a};"
   }
   supports_half = [UnaryOps.NEG, UnaryOps.EXP2, BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPLT, TernaryOps.WHERE]
-  types = {
-    # HACK: Use s16 and u16 for int8 and uint8 buffers. This can be wrong in cast.
-    dtypes.int8: "s16", dtypes.int16: "s16", dtypes.int32: "s32", dtypes.int64: "s64",
-    dtypes.uint8: "u16", dtypes.uint16: "u16", dtypes.uint32: "u32", dtypes.uint64: "u64",
-    dtypes.float16: "f16", dtypes.float32: "f32", dtypes.float64: "f64",
-    dtypes.bool: "pred"
-  }
+  # HACK: Use s16 and u16 for int8 and uint8 buffers. This can be wrong in cast.
+  types = { dtypes.int8: "s16", dtypes.int16: "s16", dtypes.int32: "s32", dtypes.int64: "s64",
+            dtypes.uint8: "u16", dtypes.uint16: "u16", dtypes.uint32: "u32", dtypes.uint64: "u64",
+            dtypes.float16: "f16", dtypes.float32: "f32", dtypes.float64: "f64", dtypes.bool: "pred" }
 
   const_requires_mov = [dtypes.half, dtypes.bool]
 
@@ -283,11 +271,8 @@ class PTXLanguage(AssemblyLanguage):
 
   def render_load(self, loc, dest, dtype, gate=None, alt=None, ss="", offset=0) -> List[str]:
     assert dtype is not dtypes.bool
-    ret = []
-    if gate: ret.extend([f"@{gate} ld{ss}.{self.mem_type(dtype)} {dest}, [{loc}+{offset}];",
-                         f"@!{gate} mov.b{self.types[dtype][1:]} {dest}, {alt};"])
-    else: ret.append(f"ld{ss}.{self.mem_type(dtype)} {dest}, [{loc}+{offset}];")
-    return ret
+    if gate: return [f"@{gate} ld{ss}.{self.mem_type(dtype)} {dest}, [{loc}+{offset}];", f"@!{gate} mov.b{self.types[dtype][1:]} {dest}, {alt};"]
+    else: return [f"ld{ss}.{self.mem_type(dtype)} {dest}, [{loc}+{offset}];"]
 
   def render_store(self, loc, val, dtype, gate=None, ss="", offset=0) -> List[str]:
     if dtype == dtypes.bool: return [f".reg .s16 {val}_cast;", *self.render_cast(f"{val}_cast", val, dtypes.int16, dtype),
