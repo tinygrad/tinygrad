@@ -260,7 +260,7 @@ def train_retinanet():
     # logits_reg, logits_class = model(X)
     loss = model.loss(logits_reg, logits_class, Y, anchors)
     print('loss',loss.numpy())
-    sys.exit()
+    # sys.exit()
     loss.backward()
     optimizer.step()
     return loss.realize()

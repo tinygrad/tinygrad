@@ -21,8 +21,8 @@ def sigmoid_focal_loss(
       alpha_t = alpha * targets + (1 - alpha) * (1 - targets)
       loss = alpha_t * loss
 
-      # Reducing with sum instead of mean
-      loss = loss.sum()
+    # Reducing with sum instead of mean
+    loss = loss.sum()
 
     return loss
 
@@ -232,7 +232,7 @@ def decode_bbox(offsets, anchors):
   pred_x2, pred_y2 = pred_cx + 0.5 * pred_w, pred_cy + 0.5 * pred_h
   return np.stack([pred_x1, pred_y1, pred_x2, pred_y2], axis=1, dtype=np.float32)
 def encode_boxes(reference_boxes, proposals, weights = (1.0,1.0,1.0,1.0)):
-  print('Encode BOx', proposals.shape)
+  print('Encode BOx', proposals.shape, reference_boxes.shape)
   # type: (Tensor, Tensor, Tensor) -> Tensor
   """
   Encode a set of proposals with respect to some
@@ -254,23 +254,34 @@ def encode_boxes(reference_boxes, proposals, weights = (1.0,1.0,1.0,1.0)):
   proposals_y1 = proposals[:, 1].unsqueeze(1)
   proposals_x2 = proposals[:, 2].unsqueeze(1)
   proposals_y2 = proposals[:, 3].unsqueeze(1)
+  print('proposals:', proposals_x1.numpy(), proposals_x2.numpy(), proposals_y1.numpy(),
+        proposals_y2.numpy())
 
   reference_boxes_x1 = reference_boxes[:, 0].unsqueeze(1)
   reference_boxes_y1 = reference_boxes[:, 1].unsqueeze(1)
   reference_boxes_x2 = reference_boxes[:, 2].unsqueeze(1)
   reference_boxes_y2 = reference_boxes[:, 3].unsqueeze(1)
+  print('reference boxes:', reference_boxes_x1.numpy(), reference_boxes_x2.numpy(),
+        reference_boxes_y1.numpy(), reference_boxes_y2.numpy())
 
   # implementation starts here
   ex_widths = proposals_x2 - proposals_x1
   ex_heights = proposals_y2 - proposals_y1
   ex_ctr_x = proposals_x1 + 0.5 * ex_widths
   ex_ctr_y = proposals_y1 + 0.5 * ex_heights
+  print('exw,exh,excx,excy:',ex_widths.numpy(),ex_heights.numpy(),ex_ctr_x.numpy(),ex_ctr_y.numpy())
 
   gt_widths = reference_boxes_x2 - reference_boxes_x1
   gt_heights = reference_boxes_y2 - reference_boxes_y1
   gt_ctr_x = reference_boxes_x1 + 0.5 * gt_widths
   gt_ctr_y = reference_boxes_y1 + 0.5 * gt_heights
+  # when these all are 0, results in inf
+  print('gtw,gth,gtcx,gtcy', gt_widths.numpy(), gt_heights.numpy(), gt_ctr_x.numpy(), gt_ctr_y.numpy())
 
+  if gt_widths.item() == 0.0:
+    print('replace jhack hit')
+    gt_widths = Tensor(3)
+    gt_heights = Tensor(3)
   targets_dx = wx * (gt_ctr_x - ex_ctr_x) / ex_widths
   targets_dy = wy * (gt_ctr_y - ex_ctr_y) / ex_heights
   targets_dw = ww * (gt_widths / ex_widths).log()
