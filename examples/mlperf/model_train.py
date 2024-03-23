@@ -217,6 +217,72 @@ def train_resnet():
 
 def train_retinanet():
   # TODO: Retinanet
+  from extra.models.retinanet import RetinaNet
+  from extra.models.resnet import ResNeXt50_32X4D
+  from tinygrad.nn.optim import Adam
+  from extra.datasets.openimages import openimages, iterate
+  from pycocotools.coco import COCO
+  from pycocotools.cocoeval import COCOeval
+  import numpy as np
+  import sys
+  coco = COCO(openimages())
+  coco_eval = COCOeval(coco, iouType="bbox")
+  coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
+  input_mean = Tensor([0.485, 0.456, 0.406]).reshape(1, -1, 1, 1)
+  input_std = Tensor([0.229, 0.224, 0.225]).reshape(1, -1, 1, 1)
+  def input_fixup(x):
+    x = x.permute([0,3,1,2]) / 255.0
+    # x -= input_mean
+    x = x - input_mean
+    # x /= input_std
+    x = x/input_std
+    return x
+  # from examples.mlperf.dataloader import batch_load_resnet
+  # from extra.datasets.imagenet import get_train_files, get_val_files
+  # from examples.mlperf.lr_schedulers import PolynomialDecayWithWarmup
+  # from examples.mlperf.initializers import Conv2dHeNormal, Linear
+  # from examples.hlb_cifar10 import UnsyncedBatchNorm
+
+  EPOCHS = 10
+  BS = 8
+  
+  model = RetinaNet(ResNeXt50_32X4D())
+
+  optimizer = Adam(get_parameters(model))
+  # @TinyJit
+  def train_step(X, Y):
+    anchors = model.anchor_gen(X.shape[1:3])
+    anchors = [Tensor(t) for t in anchors]
+    optimizer.zero_grad()
+    logits_reg, logits_class = model(input_fixup(X))
+    print('Train_step logits', logits_reg.shape, logits_class.shape)
+    # print(logits_reg.numpy())
+    # logits_reg, logits_class = model(X)
+    loss = model.loss(logits_reg, logits_class, Y, anchors)
+    print('loss',loss.numpy())
+    sys.exit()
+    loss.backward()
+    optimizer.step()
+    return loss.realize()
+  # @TinyJit
+  def eval_step(X, Y):
+    Tensor.training = False
+
+    Tensor.training = True
+
+  for epoch in range(EPOCHS):
+    Tensor.training = True
+    for X,Y in iterate(coco, BS, True):
+      
+      loss = train_step(X, Y)
+      print('Iter done')
+      sys.exit()
+
+
+
+
+
+
   pass
 
 def train_unet3d():
