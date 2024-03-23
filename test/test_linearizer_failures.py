@@ -9,13 +9,13 @@ from tinygrad.helpers import CI
 from test.external.fuzz_linearizer import compare_linearizer
 from test.helpers import is_dtype_supported
 
-from tinygrad.ops import LazyOp, BinaryOps, UnaryOps, ReduceOps, BufferOps, MemBuffer, ConstBuffer
+from tinygrad.ops import LazyOp, BinaryOps, UnaryOps, ReduceOps, TernaryOps, BufferOps, MemBuffer, ConstBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 
 def helper_test_lin(lin: Linearizer, opts, failed_platforms):
-  if any(b.dtype == dtypes.half for b in lin.membufs) and not is_dtype_supported(dtypes.half):
-    return
+  if any(b.dtype == dtypes.half for b in lin.membufs) and not is_dtype_supported(dtypes.half): return
+  if any(b.dtype == dtypes.bfloat16 for b in lin.membufs) and not is_dtype_supported(dtypes.bfloat16): return
 
   for opt in opts:
     try:
@@ -214,6 +214,10 @@ class TestLinearizerFailures(unittest.TestCase):
     ]
     for opts in all_failing_opts:
       helper_test_lin(Linearizer(ast), opts, failed_platforms=["METAL", "HSA", "CUDA", "CLANG"]) # "GPU" is a compiler failure
+
+  def test_failure_28(self):
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=TernaryOps.WHERE, src=(LazyOp(op=BinaryOps.CMPLT, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True),)))),), arg=(dtypes.bfloat16, False)), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=230.0, dtype=dtypes.bfloat16, st=ShapeTracker(views=(View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True),))))), arg=None), LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True),)))),), arg=(dtypes.bfloat16, False)), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.004347826086956522, dtype=dtypes.bfloat16, st=ShapeTracker(views=(View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True),))))), arg=None), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.199374800625, dtype=dtypes.bfloat16, st=ShapeTracker(views=(View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True),))))), arg=None), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=1.99375e-07, dtype=dtypes.bfloat16, st=ShapeTracker(views=(View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True),))))), arg=None), LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BinaryOps.SUB, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True),)))),), arg=(dtypes.bfloat16, False)), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=230.0, dtype=dtypes.bfloat16, st=ShapeTracker(views=(View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True),))))), arg=None), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.0012987012987012987, dtype=dtypes.bfloat16, st=ShapeTracker(views=(View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True),))))), arg=None), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=-0.19439062499999998, dtype=dtypes.bfloat16, st=ShapeTracker(views=(View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True),))))), arg=None), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.199375, dtype=dtypes.bfloat16, st=ShapeTracker(views=(View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True),))))), arg=None)), arg=None),), arg=MemBuffer(idx=0, dtype=dtypes.bfloat16, st=ShapeTracker(views=(View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True),))))
+    helper_test_lin(Linearizer(ast), opts=[], failed_platforms=[])
 
 if __name__ == '__main__':
   unittest.main()

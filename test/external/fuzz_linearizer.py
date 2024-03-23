@@ -67,6 +67,9 @@ def run_linearizer(lin: Linearizer, rawbufs=None, var_vals=None):
   return "PASS"
 
 def compare_linearizer(lin: Linearizer, rawbufs=None, var_vals=None, ground_truth=None, rtol=1e-2, atol=1e-2):
+  # TODO: for bfloat16 it compiles linearizer, but it does not run because numpy cannot generate bf16 buffer.
+  has_bf16 = any(b.dtype == dtypes.bfloat16 for b in lin.membufs)
+
   # TODO: raise specific fuzzing errors instead of str, and propagate the error message
   try:
     if rawbufs is None:
@@ -80,7 +83,7 @@ def compare_linearizer(lin: Linearizer, rawbufs=None, var_vals=None, ground_trut
     # TODO: handle symbolic max case
     var_vals = {v: random.randint(v.min, v.max if isinstance(v.max, int) else v.min) for v in lin.ast[0].vars()}
 
-  if ground_truth is None:
+  if ground_truth is None and not has_bf16:
     unoptimized = Linearizer(*lin.ast)
     unoptimized.required_optimizations()
     if run_linearizer(unoptimized, rawbufs, var_vals) != "PASS":
@@ -90,10 +93,11 @@ def compare_linearizer(lin: Linearizer, rawbufs=None, var_vals=None, ground_trut
   rawbufs[0] = get_fuzz_rawbuf_like(rawbufs[0], zero=True) # get a new output buffer
   if (run_msg := run_linearizer(lin, rawbufs, var_vals)) != "PASS":
     return (run_msg, rawbufs, var_vals, ground_truth,)
-  result = np.frombuffer(rawbufs[0].as_buffer(), rawbufs[0].dtype.np)
 
   try:
-    np.testing.assert_allclose(result, ground_truth, rtol=rtol, atol=atol)
+    if not has_bf16:
+      result = np.frombuffer(rawbufs[0].as_buffer(), rawbufs[0].dtype.np)
+      np.testing.assert_allclose(result, ground_truth, rtol=rtol, atol=atol)
   except AssertionError as e:
     if DEBUG >= 2:
       print(f"COMPARE_ERROR details: {e}")
