@@ -57,7 +57,8 @@ def apply_graph_to_jit(jit_cache: List[JitItem], input_rawbuffers: List[Buffer],
   for ji in jit_cache:
     ji_graph_dev: Optional[Compiled] = None # device on which the ji will be graphed. Not graphed if None.
     if isinstance(ji.prg, CompiledASTRunner): ji_graph_dev = ji.prg.device
-    elif isinstance(ji.prg, BufferXfer) and ji.rawbufs[0] and ji.rawbufs[0].d.dname.startswith("HSA"): ji_graph_dev = ji.rawbufs[0].d
+    elif isinstance(ji.prg, BufferXfer) and ji.rawbufs[0] and ji.rawbufs[0].d.dname.split(":", 1)[0] in {"HSA", "CUDA"}:
+      ji_graph_dev = ji.rawbufs[0].d
 
     can_be_graphed = ji_graph_dev and ji_graph_dev.graph
     can_extend_graph_batch = can_be_graphed and len(current_batch) < max_batch_size and (ji_graph_dev == current_device or
@@ -119,7 +120,7 @@ class TinyJit(Generic[ReturnType]):
       CacheCollector.start(var_vals)
       with Context(GRAPH=getenv("JITGRAPH", GRAPH.value)):
         self.ret = self.fxn(*args, **kwargs)
-        for p in get_parameters(self.ret): p.realize()
+        Tensor.corealize(get_parameters(self.ret))
       self.jit_cache = CacheCollector.finish()
       assert len(self.jit_cache) != 0, "didn't JIT anything!"
       # TODO: reset doesn't work if we delete this
@@ -135,7 +136,7 @@ class TinyJit(Generic[ReturnType]):
     elif self.cnt == 0:
       # jit ignore
       self.ret = self.fxn(*args, **kwargs)
-      for p in get_parameters(self.ret): p.realize()
+      Tensor.corealize(get_parameters(self.ret))
 
     # clear jit inputs
     for (j,i) in self.input_replace.keys(): self.jit_cache[j].rawbufs[i] = None

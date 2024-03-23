@@ -139,7 +139,8 @@ class AbsmaxQuantizedLinear:
   def quantize(tensors):
     new_tensors = {}
     for name,v in tensors.items():
-      if "feed_forward" in name or ("attention.w") in name or name == "output.weight":
+      if "feed_forward" in name or "attention.w" in name or name == "output.weight":
+        assert "weight" in name, name
         scale = v.abs().max(axis=1) / 127.0
         int8_weight = (v.T/scale).T.cast(dtype=dtypes.int8)
         new_tensors[name] = int8_weight
@@ -158,17 +159,6 @@ class LLaMa:
     jit = bool(getenv("JIT", 1))
     model = Transformer(**params["args"], linear=AbsmaxQuantizedLinear, max_context=MAX_CONTEXT, jit=jit) if quantize else Transformer(**params["args"], max_context=MAX_CONTEXT, jit=jit)
 
-    if isinstance(device, tuple):
-      for k,v in nn.state.get_state_dict(model).items():
-        if '.attention.' in k: v.shard_(device, axis=-1)
-        elif '.feed_forward.' in k: v.shard_(device, axis=-1)
-        elif 'tok_embeddings.weight' in k: v.shard_(device, axis=-1)
-        elif 'output.weight' in k: v.shard_(device, axis=-1)
-        #elif k.endswith('.weight'): v.shard_(device, axis=-1)
-        #elif 'norm.' in k: v.shard_(device, axis=-1)
-        else: v.shard_(device, axis=None)
-        #print(k, v.shape, v.lazydata.axis)
-
     if model_path.is_dir():
       weights = concat_weights([load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]])
     else:
@@ -181,6 +171,19 @@ class LLaMa:
     if quantize:
       weights = AbsmaxQuantizedLinear.quantize(weights)
       for _,v in weights.items(): v.realize()
+
+    if isinstance(device, tuple):
+      for k,v in nn.state.get_state_dict(model).items():
+        if 'scale' in k: v.shard_(device, axis=None)  # from quantized
+        elif '.attention.' in k: v.shard_(device, axis=-1)
+        elif '.feed_forward.' in k: v.shard_(device, axis=-1)
+        elif 'tok_embeddings.weight' in k: v.shard_(device, axis=-1)
+        elif 'output.weight' in k: v.shard_(device, axis=-1)
+        #elif k.endswith('.weight'): v.shard_(device, axis=-1)
+        #elif 'norm.' in k: v.shard_(device, axis=-1)
+        else: v.shard_(device, axis=None)
+        #print(k, v.shape, v.lazydata.axis)
+
     load_state_dict(model, weights, strict=False, consume=True)
 
     return LLaMa(model, sp_model)
@@ -422,7 +425,7 @@ After you are done speaking, output [EOS]. You are not Chad.
       if args.timing or args.profile: print("")
       st = GlobalCounters.time_sum_s
       with Profiling(enabled=args.profile):
-        with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/sec"):
+        with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/s, {GlobalCounters.global_mem/x:.2f} GB/s, param {param_count*2/x:.2f} GB/s"):
           with Timing("enqueue in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
                       f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
                       (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_count*1e-9*2/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=args.timing):
