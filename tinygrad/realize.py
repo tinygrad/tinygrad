@@ -27,7 +27,7 @@ class SyncOp(JITRunner):
     update_stats(colored("synchronize", "RED"), 0, 0, {}, et, 1, device=self.dname)
 
 def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
-  if si.ast[0].op not in {LoadOps.COPY, LoadOps.WAIT}: assert len(set(x.device for x in si.outputs+si.inputs)) == 1
+  if si.ast[0].op is not LoadOps.COPY: assert len(set(x.device for x in si.outputs+si.inputs)) == 1
   if si.ast[0].op is BufferOps.STORE: return Device[si.outputs[0].device].get_runner(*si.ast)
   assert len(si.ast) == 1 and len(si.outputs) == 1, "only ASTRunner supports multioutput"
   out, ast = si.outputs[0], si.ast[0]
@@ -128,7 +128,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
 def _schedule_one(out:LazyBuffer, realizes:Set[LazyBuffer], reduce_for_op: Dict[LazyBuffer, LazyBuffer]) -> ScheduleItem:
   inputs: List[LazyBuffer] = []
   var_vals: Dict[Variable, int] = out.st.var_vals.copy()
-  if out.op in {LoadOps.CUSTOM, LoadOps.SYNC, LoadOps.WAIT, LoadOps.COPY, LoadOps.EMPTY}:
+  if out.op in {LoadOps.CUSTOM, LoadOps.SYNC, LoadOps.COPY, LoadOps.EMPTY}:
     op, inputs = LazyOp(out.op, (), out.arg), list(out.srcs)
   else:
     output_st = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape)
