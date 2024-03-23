@@ -44,19 +44,21 @@ class PythonProgram:
         dtp = [dl[v] for v in idp if self.uops[v][0] not in void_ops]
         if getenv("TRACE"): print(i, uop, dtype, arg, inp, dtp)
         if uop is UOps.STORE:
-          assert len(inp) <= 3, "gated stores not supported yet"
+          if len(inp) == 3: inp.append([True] * len(inp[0]))  # set the gate to True
           if isinstance(dtp[0], ImageDType):
             # image store
             assert dtp[2].count == 4
             for j,val in enumerate(inp[2]):
-              for m,ox,oy,v in zip(inp[0], inp[1][0], inp[1][1], val):
+              for m,ox,oy,v,g in zip(inp[0], inp[1][0], inp[1][1], val, inp[3]):
                 assert ox >= 0 and ox < dtp[0].shape[1] and oy >= 0 and oy < dtp[0].shape[0]
-                _store(m, ox*4 + oy*dtp[0].shape[1]*4 + j, v)
+                if g: _store(m, ox*4 + oy*dtp[0].shape[1]*4 + j, v)
           elif dtp[2].count > 1:
             for j,val in enumerate(inp[2]):
-              for m,o,v in zip(inp[0], inp[1], val): _store(m, o+j, v)
+              for m,o,v,g in zip(inp[0], inp[1], val, inp[3]):
+                if g: _store(m, o+j, v)
           else:
-            for m,o,v in zip(*inp): _store(m, o, v)
+            for m,o,v,g in zip(*inp):
+              if g: _store(m, o, v)
           i += 1
           continue
         elif uop is UOps.ENDLOOP:
@@ -104,13 +106,13 @@ class PythonProgram:
               del ul[i]
               i = loop_ends[i] + 1
               continue
-        elif uop is UOps.CAST:
+        elif uop in {UOps.CAST, UOps.BITCAST}:
           if dtype.count > 1:
             ul[i] = inp
           else:
             assert dtp[0].fmt and dtype.fmt
             pack_format, unpack_format = str(warp_size) + dtp[0].fmt, str(warp_size) + dtype.fmt
-            if isinstance(arg, tuple) and arg[1]:
+            if uop is UOps.BITCAST:
               ul[i] = list(struct.unpack(unpack_format, struct.pack(pack_format, *inp[0])))
             else:
               casted = [float(x) if dtypes.is_float(dtype) else int(x) if dtypes.is_int(dtype) else x for x in inp[0]]
@@ -175,7 +177,7 @@ class PythonProgram:
             def c_map(lane, elem): return ((elem%2)+(lane%4)*2, (lane//4)+(elem//2)*8) # (i, j), C, D (4 elements on 32 threads)
             ul[i] = wmma_helper(32, 16, 8, 4, 4, a_elem, b_elem, c_map)
           else:
-            raise Exception(f"unimplemented tensor core {arg}")
+            raise NotImplementedError(f"unimplemented tensor core {arg}")
         elif uop is UOps.ALU:
           assert all_same([len(x) for x in inp]), f"{[len(x) for x in inp]} doesn't match on {arg}"
           assert all_same([dtype] + dtp) or arg in {BinaryOps.CMPEQ, BinaryOps.CMPLT, TernaryOps.WHERE}, f"dtype mismatch on {arg}"
@@ -186,7 +188,7 @@ class PythonProgram:
 
 class PythonCompiler(Compiler):
   linearizer_opts = LinearizerOptions("METAL", has_tensor_cores=True) if getenv("EMULATE_METAL") else \
-    (LinearizerOptions("HIP", has_tensor_cores=True) if getenv("EMULATE_HIP") else \
+    (LinearizerOptions("HSA", has_tensor_cores=True) if getenv("EMULATE_HSA") else \
     (LinearizerOptions("CUDA", has_tensor_cores=True) if getenv("EMULATE_CUDA") else LinearizerOptions("PYTHON")))
   def render(self, name:str, uops:UOpGraph) -> str:
     lops = [(u.uop, u.dtype, [uops.uops.index(v) for v in u.vin], u.arg) for u in uops]

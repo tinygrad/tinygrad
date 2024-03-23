@@ -1,8 +1,8 @@
 from __future__ import annotations
-import functools, math, operator
+import functools, math, operator, itertools
 from typing import List, Set, Optional, Tuple, Any, Dict, DefaultDict, Callable, cast
 from collections import defaultdict
-from tinygrad.helpers import DEBUG, flatten, all_same
+from tinygrad.helpers import DEBUG, flatten
 from tinygrad.dtype import dtypes, DType
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.shape.symbolic import sint, Variable, Node, NumNode, MulNode, DivNode, SumNode
@@ -14,16 +14,19 @@ class UOps(Enum):
   LOOP = auto(); IF = auto(); ENDLOOP = auto(); ENDIF = auto(); SPECIAL = auto() # loops can be global, local, or other # noqa: E702
   DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # this defines buffers # noqa: E702
   LOAD = auto(); STORE = auto(); CONST = auto(); BARRIER = auto(); PHI = auto() # noqa: E702
-  ALU = auto(); WMMA = auto(); CAST = auto(); GEP = auto() # noqa: E702
+  ALU = auto(); WMMA = auto(); CAST = auto(); BITCAST = auto(); GEP = auto(); NOOP = auto() # noqa: E702
 
 @dataclass(eq=False)
 class UOp:
   uop: UOps
-  dtype: Optional[DType]
-  vin: Tuple[UOp, ...]
-  arg: Any
+  dtype: Optional[DType] = None
+  vin: Tuple[UOp, ...] = tuple()
+  arg: Any = None
   def __repr__(self):
     return f"{str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.uop for x in self.vin]):32s} {self.arg}"
+  @staticmethod
+  def const(dtype, val):
+    return UOp(UOps.CONST, dtype, arg=float(val) if dtypes.is_float(dtype) else (int(val) if dtypes.is_int(dtype) else bool(val)))
 
 def hook_overflow(dv, fxn):
   def wfxn(*args):
@@ -56,7 +59,71 @@ def uop_alu_resolve(u:UOp) -> sint:
   elif u.uop is UOps.ALU and u.arg == BinaryOps.ADD: return uop_alu_resolve(u.vin[0]) + uop_alu_resolve(u.vin[1])
   else: raise RuntimeError(f"ALU resolve fail @ {u.uop}")
 
-def phi_resolve_acc(u:UOp) -> UOp: return u if u.uop is UOps.DEFINE_ACC else phi_resolve_acc(u.vin[0])
+def _match(uop:UOp, pattern:Dict[str, Any], store:Dict[str, UOp]) -> bool:
+  for k,v in pattern.items():
+    if k == "__name__":
+      if v in store and store[v] != uop: return False
+      store[v] = uop
+    elif k == "vin":
+      # only one if it's a tuple
+      # try all permutations if it's a list
+      # repeat if it's a dict
+      for vp in itertools.permutations(v) if isinstance(v, list) else ([v] if isinstance(v, tuple) else [(v,)*len(uop.vin)]):
+        if len(uop.vin) != len(vp): return False
+        new_store = store.copy()
+        if all(_match(uu, vv, new_store) for uu, vv in zip(uop.vin, vp)):
+          for k,v in new_store.items(): store[k] = v
+          return True
+      return False
+    else:
+      if uop.__getattribute__(k) != v: return False
+  return True
+
+class PatternMatcher:
+  def __init__(self, patterns:List[Tuple[Dict[str, Any], Any]]):
+    self.patterns = patterns
+    self.pdict = defaultdict(list)
+    # uop is required, arg is optional
+    for p,fxn in self.patterns: self.pdict[(p.get("uop"), p.get("arg", None))].append((p, fxn))
+
+  def rewrite(self, uop:UOp) -> Optional[UOp]:
+    for p,fxn in itertools.chain(self.pdict[(uop.uop, uop.arg)], self.pdict[(uop.uop, None)]):
+      store: Dict[str, UOp] = {}
+      if _match(uop, p, store): return fxn(**store)
+    return None
+
+constant_folder = PatternMatcher([
+  # const rules
+  ({"__name__": "root", "uop": UOps.GEP, "vin": ({"__name__": "c", "uop": UOps.CONST},)}, lambda root, c: UOp.const(root.dtype, c.arg)),
+  ({"__name__": "root", "uop": UOps.CAST, "vin": {"__name__": "c", "uop": UOps.CONST}}, lambda root, c: UOp.const(root.dtype, c.arg)),
+  # a phi without loops (len(vin)==2) is a noop
+  ({"uop": UOps.PHI, "vin": ({}, {"__name__": "x"})}, lambda x: x),
+  # x+-y -> x-y
+  ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": ({"__name__": "x"}, {"__name__": "my", "uop": UOps.ALU, "arg": UnaryOps.NEG})},
+    lambda x, my: UOp(UOps.ALU, x.dtype, (x, my.vin[0]), BinaryOps.SUB)),
+  # a conditional with the same results either way is a noop, also fold const conditionals
+  ({"uop": UOps.ALU, "arg": TernaryOps.WHERE, "vin": ({}, {"__name__": "val"}, {"__name__": "val"})}, lambda val: val),
+  ({"uop": UOps.ALU, "arg": TernaryOps.WHERE, "vin": ({"__name__": "gate", "uop": UOps.CONST}, {"__name__": "c0"}, {"__name__": "c1"})},
+    lambda gate, c0, c1: c0 if gate.arg else c1),
+  # ** constant folding **
+  ({"__name__": "root", "uop": UOps.ALU, "vin": {"uop": UOps.CONST}},
+    lambda root: UOp.const(root.dtype, exec_alu(root.arg, root.dtype, [x.arg for x in root.vin]))),
+  # ** self folding **
+  ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"__name__": "x"}, {"uop": UOps.CONST, "arg": 0}]}, lambda x: x),   # x+0 -> x or 0+x -> x
+  ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{"__name__": "x"}, {"uop": UOps.CONST, "arg": 1}]}, lambda x: x),   # x*1 -> x or 1*x -> x
+  ({"uop": UOps.ALU, "arg": BinaryOps.SUB, "vin": ({"__name__": "x"}, {"uop": UOps.CONST, "arg": 0})}, lambda x: x),   # x-0 -> x
+  ({"uop": UOps.ALU, "arg": BinaryOps.DIV, "vin": ({"__name__": "x"}, {"uop": UOps.CONST, "arg": 1})}, lambda x: x),   # x/1 -> x
+  # ** zero folding **
+  ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{}, {"__name__": "c", "uop": UOps.CONST, "arg": 0}]}, lambda c: c), # x*0 -> 0 or 0*x -> 0
+  ({"uop": UOps.ALU, "arg": BinaryOps.SUB, "vin": ({"__name__": "x"}, {"__name__": "x"})}, lambda x: UOp.const(x.dtype, 0)),   # x-x -> 0
+  # ** load/store folding **
+  ({"uop": UOps.STORE, "vin": ({"__name__": "buf"}, {"__name__": "idx"},
+                               {"uop": UOps.LOAD, "vin": ({"__name__": "buf"}, {"__name__": "idx"})})}, lambda buf, idx: UOp(UOps.NOOP)),
+  # TODO: can do the invert of this (flip alt/load) when we fix double ops
+  ({"uop": UOps.STORE, "vin": ({"__name__": "buf"}, {"__name__": "idx"}, {"uop": UOps.ALU, "arg": TernaryOps.WHERE,
+                       "vin": ({"__name__": "gate"}, {"__name__": "alt"}, {"uop": UOps.LOAD, "vin": ({"__name__": "buf"}, {"__name__": "idx"})})})},
+    lambda buf, idx, gate, alt: UOp(UOps.STORE, None, (buf, idx, alt, gate))),
+])
 
 class UOpGraph:
   def __init__(self, start_uops:Optional[List[UOp]]=None):
@@ -81,49 +148,29 @@ class UOpGraph:
 
   def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None, cachable=True, insert_before=None,
           simplify=True) -> UOp:
-    if simplify:
-      if uop is UOps.PHI and len(vin) == 2: return vin[1]   # a phi without loops is a noop
-      if uop is UOps.GEP and vin[0].uop is UOps.CONST: return self.add(UOps.CONST, dtype, arg=vin[0].arg, insert_before=insert_before)
-      if uop is UOps.CAST and all(x.uop is UOps.CONST for x in vin) and all_same([x.arg for x in vin]):
-        return self.add(UOps.CONST, dtype, arg=vin[0].arg, insert_before=insert_before)
-      if uop is UOps.ALU:
-        # rewrites. NOTE: the rewritten NEG op is still around...
-        if arg is BinaryOps.ADD and vin[1].uop is UOps.ALU and vin[1].arg is UnaryOps.NEG:
-          return self.add(UOps.ALU, dtype, (vin[0], vin[1].vin[0]), BinaryOps.SUB, cachable, insert_before)
-        # constant folding
-        if arg is TernaryOps.WHERE and vin[1] == vin[2]: return vin[1] # a conditional with the same results either way is a noop
-        if arg is TernaryOps.WHERE and vin[0].uop is UOps.CONST: return vin[1] if vin[0].arg else vin[2]
-        if all(x.uop is UOps.CONST for x in vin):
-          return self.add(UOps.CONST, dtype, arg=exec_alu(arg, dtype, [x.arg for x in vin]), insert_before=insert_before)
-        # zero folding
-        for x in [0,1]:
-          if arg is BinaryOps.ADD and vin[x].uop is UOps.CONST and vin[x].arg == 0.0: return vin[1-x]
-          if arg is BinaryOps.MUL and vin[x].uop is UOps.CONST and vin[x].arg == 1.0: return vin[1-x]
-          if arg is BinaryOps.MUL and vin[x].uop is UOps.CONST and vin[x].arg == 0.0: return vin[x]
-        if arg is BinaryOps.SUB and vin[1].uop is UOps.CONST and vin[1].arg == 0.0: return vin[0]
-        if arg is BinaryOps.DIV and vin[1].uop is UOps.CONST and vin[1].arg == 1.0: return vin[0]
-
-    key = (uop, dtype, vin, arg)
+    ret = UOp(uop, dtype, vin, arg)
+    if simplify and (rewritten:=constant_folder.rewrite(ret)) is not None:
+      if rewritten in self.uops: return rewritten  # ignore cachable
+      ret = rewritten
+    key = (ret.uop, ret.dtype, ret.vin, ret.arg)
     if insert_before is None: insert_before = len(self.uops)
     # check if the cached expr is valid with the given insert place.
     if cachable and (expr:=self.saved_exprs.get(key, None)) is not None and self.uops.index(expr) <= insert_before: return expr
-    ret = UOp(uop, dtype, vin, arg)
     self.uops.insert(insert_before, ret)
     if cachable: self.saved_exprs[key] = ret
     return ret
 
-  def remove_childless(self):
-    UOPS_W_SIDE_EFFECTS = {UOps.DEFINE_GLOBAL, UOps.STORE}
-
+  def remove_childless(self, keep:Set[UOp]):
     while 1:
       has_child: Set[UOp] = set()
       for ru in self.uops:
         for vu in ru.vin:
           has_child.add(vu)
-      nu: List[UOp] = [x for x in self.uops if x in has_child or x.uop in UOPS_W_SIDE_EFFECTS]
+      nu: List[UOp] = [x for x in self.uops if x in has_child or x in keep]
       if len(nu) == len(self.uops): break
       if DEBUG >= 4: print(f"reduced UOp count from {len(self.uops)} to {len(nu)}")
       self.uops = nu
+    self.saved_exprs = {k:v for k,v in self.saved_exprs.items() if v in nu}
 
   # optional
   def type_verify(self):
@@ -204,10 +251,10 @@ class UOpGraph:
         non_loop = to_symbolic(next(v for v in with_loop.vin if v != next_with_loop and loop_op not in get_recursive_parents(v)))
         if round_up and with_loop.arg is BinaryOps.MUL: factored = factored + (non_loop - 1)
         return loop_factor(next_with_loop, alu_opposite(with_loop.arg, factored, non_loop), loop_op)
-    def const(x): return self.add(UOps.CONST, dtypes.default_int, tuple(), x)
-    def neg(x): return self.add(UOps.ALU, dtypes.default_int, (x,), UnaryOps.NEG)
-    def max(x, y): return self.add(UOps.ALU, dtypes.default_int, (x, y), BinaryOps.MAX)
-    def uop_alu_idx(a: UOp, b, op, dtype=dtypes.default_int):
+    def const(x): return self.add(UOps.CONST, dtypes.int32, tuple(), x)
+    def neg(x): return self.add(UOps.ALU, dtypes.int32, (x,), UnaryOps.NEG)
+    def max(x, y): return self.add(UOps.ALU, dtypes.int32, (x, y), BinaryOps.MAX)
+    def uop_alu_idx(a: UOp, b, op, dtype=dtypes.int32):
       render_b: UOp = cast(UOp, (NumNode(b) if not isinstance(b, Node) else b).render(render_ops))
       return self.add(UOps.ALU, dtype, (a, render_b), op)
     seen_vars: Dict[UOp,str] = {}
@@ -236,7 +283,7 @@ class UOpGraph:
         loop_length = loop_op.vin[1].arg - loop_op.vin[0].arg
         min_clamped = max(rendered, const(0)) if (final_value.min < 0) else rendered
         max_clamped = neg(max(const(-1*loop_length), neg(min_clamped))) if (final_value.max > loop_length) else min_clamped
-        maybe_cast = self.add(UOps.CAST, where.dtype, (max_clamped,)) if where.dtype != dtypes.default_int else max_clamped
+        maybe_cast = self.add(UOps.CAST, where.dtype, (max_clamped,)) if where.dtype != dtypes.int32 else max_clamped
         final_op = self.add(UOps.ALU, where.dtype, (maybe_cast, where.vin[1]), BinaryOps.MUL)
         self.uops = self.uops + after_split_ops
         self.replace_op(where, final_op)
@@ -246,6 +293,23 @@ class UOpGraph:
         self.uops.remove((accumulator:=phi.vin[0]))
         for alu_with_accum in [op for op in self.uops if accumulator in op.vin]:
           self.replace_op(alu_with_accum, next(op for op in alu_with_accum.vin if op != accumulator))
+
+  def fix_to_store_directly(self):
+    replaced_stores: Dict[UOp,UOp] = {}
+    for u in self.uops:
+      if u.uop is not UOps.STORE or (val:=u.vin[-1]).uop is not UOps.CAST or cast(DType,val.dtype).count == 1: continue
+
+      vins = val.vin
+      while all(el.uop is UOps.PHI for el in vins): vins = tuple([el.vin[0] for el in vins])
+      if all(el.uop is UOps.GEP for el in vins) and len(set(el.vin[0] for el in vins)) == 1 and val.dtype == vins[0].vin[0].dtype:
+        # Check that accesses are in order.
+        if all(i==el.arg for i,el in enumerate(vins)):
+          replaced_stores[u] = vins[0].vin[0]
+
+    for prev,new in replaced_stores.items():
+      try: self.uops.remove(prev.vin[-1])  # remove the old upcast NOTE: the upcast's vins become childless now
+      except ValueError: pass  # already removed
+      self.uops[self.uops.index(prev)].vin = (prev.vin[0],prev.vin[1],new) # replace with the float4 value
 
   def uops_optimization(self, get_recursive_parents):
     for u in self.uops:
@@ -285,18 +349,11 @@ class UOpGraph:
     self.simplify_phi_loops(get_recursive_parents)
 
     # (recursively) remove childless uops
-    self.remove_childless()
+    # TODO: remove DEFINE_GLOBAL from here
+    self.remove_childless(set(x for x in self.uops if x.uop in {UOps.DEFINE_GLOBAL, UOps.STORE}))
 
     # store float4 upcasts directly if possible
-    replaced_stores: Dict[UOp,UOp] = {}
-    for u in self.uops:
-      if u.uop is not UOps.STORE or (val:=u.vin[-1]).uop is not UOps.CAST or cast(DType,val.dtype).count == 1: continue
-      if all(el.uop is UOps.GEP for el in val.vin): replaced_stores[u] = val.vin[0].vin[0]
-      elif all(el.uop is UOps.PHI for el in val.vin): replaced_stores[u] = phi_resolve_acc(val)
-    for prev,new in replaced_stores.items():
-      try: self.uops.remove(prev.vin[-1])  # remove the old upcast NOTE: the upcast's vins become childless now
-      except ValueError: pass  # already removed
-      self.uops[self.uops.index(prev)].vin = (prev.vin[0],prev.vin[1],new) # replace with the float4 value
+    self.fix_to_store_directly()
 
     # add UOps.END*
     self.add_ends()
@@ -327,5 +384,5 @@ class UOpGraph:
         if u.arg.startswith("__metal_wmma"): flops += 2*(8*8*8)//32 * mults
         elif u.arg == "__hip_wmma_f16_f16" or u.arg == "__builtin_amdgcn_wmma_f32_16x16x16_f16_w32": flops += 2*(16*16*16)//32 * mults
         elif u.arg == "__cuda_mma_m16n8k16_f16_f32": flops += 2*(8*16*16)//32 * mults
-        else: raise Exception("not implemented")
+        else: raise NotImplementedError(f"not implemented wmma {u.arg=}")
     return flops, mem

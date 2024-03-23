@@ -152,13 +152,13 @@ class EfficientNet:
           k = k.replace('.weight', '')
 
       #print(k, v.shape)
-      mv = get_child(self, k)
+      mv:Tensor = get_child(self, k)
       vnp = v #.astype(np.float32)
       vnp = vnp if k != '_fc' else vnp.clang().T
       #vnp = vnp if vnp.shape != () else np.array([vnp])
 
       if mv.shape == vnp.shape:
-        mv.assign(vnp.to(mv.device))
+        mv.replace(vnp.to(mv.device))
       else:
         print("MISMATCH SHAPE IN %s, %r %r" % (k, mv.shape, vnp.shape))
 
