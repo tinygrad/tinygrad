@@ -2,7 +2,7 @@ import sys
 from collections import defaultdict, deque
 from typing import Deque, List, Dict, Optional, cast, Set, DefaultDict
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters, LazyOp, ReduceOps, ConstBuffer, MemBuffer, BinaryOps, UnaryOps
-from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats, Compiled, BufferOptions
+from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats, BufferOptions
 from tinygrad.features.graph import realized_lazybuffer, log_lazybuffer
 from tinygrad.helpers import colored, getenv, GRAPH, cpu_time_execution, DEBUG, prod, dedup, all_int
 from tinygrad.shape.symbolic import Variable
@@ -38,7 +38,7 @@ def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
   if ast.op is LoadOps.CUSTOM: return CustomOp(ast.arg)
   if ast.op is LoadOps.SYNC and out.device.startswith("CUDA") and si.inputs[0].device.startswith("CUDA"): return None
   if ast.op is LoadOps.SYNC and out.device.startswith("HSA") and si.inputs[0].device.startswith("HSA"): return None
-  if ast.op is LoadOps.SYNC: return SyncOp(out.device) if isinstance(Device[out.device], Compiled) else None
+  if ast.op is LoadOps.SYNC: return SyncOp(out.device)
   return None
 
 logops = open(getenv("LOGOPS", ""), "a") if getenv("LOGOPS", "") else None
