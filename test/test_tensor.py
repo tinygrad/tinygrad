@@ -356,6 +356,7 @@ class TestTinygrad(unittest.TestCase):
       out_torch.backward()
       # grad of sum() is [1, 1, 1]
       np.testing.assert_allclose(out.grad.numpy(), out_torch.grad.numpy())
+      self.assertEqual(y.requires_grad, y_torch.requires_grad)
       self.assertEqual(out.requires_grad, out_torch.requires_grad)
 
 
