@@ -84,8 +84,9 @@ class LazyBuffer:
   def is_unrealized_contiguous_const(self): return self.base == self and not self.base.realized and self.op is LoadOps.CONST
 
   def _copy(self, device:str) -> LazyBuffer:
-    if self.device.startswith("EXT") or self.device.startswith("DISK"):
+    if (dstart:=self.device.split(":")[0]) in {"EXT", "DISK"} or (dstart in {"HSA", "CUDA"} and device.split(":")[0] == dstart):
       # DISK/EXT don't sync
+      # copies in HSA/CUDA to other HSA/CUDA don't sync either
       return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, None, (self,), enable_cache=False)
     sync = LazyBuffer.loadop(LoadOps.SYNC, (0,), dtypes.uint32, self.device, src=(self,), enable_cache=True)
     wait = LazyBuffer.loadop(LoadOps.WAIT, (0,), dtypes.uint32, device, src=(sync,), enable_cache=True)
