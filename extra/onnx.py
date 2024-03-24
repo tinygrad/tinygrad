@@ -1,5 +1,6 @@
 from __future__ import annotations
 from google.protobuf.internal.containers import RepeatedCompositeFieldContainer
+from collections import defaultdict
 import importlib
 import numpy as np
 from tinygrad import Tensor, dtypes, Device
@@ -132,7 +133,6 @@ def get_run_onnx(onnx_model: ModelProto):
       if x != "": return input_tensors[x]
       return None
 
-    from collections import defaultdict
     if debug >= 1: ops = defaultdict(int)
     for num,n in enumerate(onnx_model.graph.node):
       inp: List[Tensor] = []

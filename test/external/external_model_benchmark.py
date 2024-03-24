@@ -98,43 +98,46 @@ def benchmark_model(m, devices, validate_outs=False):
     del ort_sess
 
   if validate_outs:
-    rtol, atol = 2e-3, 2e-3  # tolerance for fp16 models
-    inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
-    tinygrad_model = get_run_onnx(onnx_model)
-    tinygrad_out = tinygrad_model(inputs)
+    if any(t == np.dtype(np.float16) for t in input_types.values()): rtol, atol = 4e-3, 1e-3  # tolerance for fp16 models
+    else: rtol, atol = 1e-5, 1e-5 # tolerance for fp32 models
 
-    # https://github.com/microsoft/onnxruntime/issues/15977
-    # provider = ("CUDA" if not OSX else "CoreML") + "ExecutionProvider"
-    provider = "CPUExecutionProvider"
-    ort_sess = ort.InferenceSession(str(fn), ort_options, [provider])
-    onnx_out = ort_sess.run(output_names, np_inputs)
-    onnx_out = dict([*[(name,x) for name, x in zip(output_names, onnx_out)]])
+    for device in devices:
+      Device.DEFAULT = device
+      inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
+      tinygrad_model = get_run_onnx(onnx_model)
+      tinygrad_out = tinygrad_model(inputs)
 
-    assert_allclose(tinygrad_out, onnx_out, rtol=rtol, atol=atol)
-    # assert_allclose_torch(tinygrad_out, torch_out, rtol=rtol, atol=atol)
-    print(f"{m:16s}outputs validated with rtol={rtol:.1e}, atol={atol:.1e}")
+      provider = "CPUExecutionProvider"
+      ort_sess = ort.InferenceSession(str(fn), ort_options, [provider])
+      onnx_out = ort_sess.run(output_names, np_inputs)
+      onnx_out = dict([*[(name,x) for name, x in zip(output_names, onnx_out)]])
+
+      assert_allclose(tinygrad_out, onnx_out, rtol=rtol, atol=atol)
+      print(f"{m:16s}outputs validated with {device=} rtol={rtol:.1e}, atol={atol:.1e}")
 
   if open_csv is None:
     open_csv = csv.DictWriter(open('onnx_inference_speed.csv', 'w', newline=''), fieldnames=list(CSV.keys()))
     open_csv.writeheader()
   open_csv.writerow(CSV)
 
-def l1_norm_allclose(x:np.ndarray, y:np.ndarray, atol, rtol, err_msg):
-  return np.testing.assert_array_less(np.sum(np.abs(x-y)),  atol + rtol * np.sum(np.abs(y)), err_msg="l1 norm failed: " + err_msg)
-
-def l2_norm_allclose(x:np.ndarray, y:np.ndarray, atol, rtol, err_msg):
-  return np.testing.assert_array_less(np.sqrt(np.sum((x - y)**2)),  atol + rtol * np.sqrt(np.sum(y**2)), err_msg="l2 norm failed: " + err_msg)
-
-def assert_allclose(tiny_out:dict, onnx_out:dict, rtol=1e-5, atol=1e-5):
+def assert_allclose(tiny_out:dict, onnx_out:dict, rtol, atol):
   assert len(tiny_out) == len(onnx_out) and tiny_out.keys() == onnx_out.keys()
   for k in tiny_out.keys():
     tiny_v, onnx_v = tiny_out[k], onnx_out[k]
     if tiny_v is None: assert tiny_v == onnx_v
     else:
       assert (tiny_v := tiny_v.numpy()).dtype == onnx_v.dtype, f"tiny={tiny_v.dtype} onnx={onnx_v.dtype}"
-      # np.testing.assert_allclose(tiny_v, onnx_v, rtol=rtol, atol=atol, err_msg=f"For tensor '{k}' in {tiny_out.keys()}")
-      l1_norm_allclose(tiny_v, onnx_v, rtol=rtol, atol=atol, err_msg=f"For tensor '{k}' in {tiny_out.keys()}")
-      l2_norm_allclose(tiny_v, onnx_v, rtol=rtol, atol=atol, err_msg=f"For tensor '{k}' in {tiny_out.keys()}")
+      try:
+        np.testing.assert_allclose(tiny_v, onnx_v, rtol=rtol, atol=atol, err_msg=f"device={Device.DEFAULT} using {rtol=} {atol=} for tensor '{k}' in {tiny_out.keys()}")
+      except AssertionError:
+        # test using l1 norm and l2 norm instead
+        diff = tiny_v - onnx_v
+        try:
+          assert np.sum(np.abs(diff)) <= atol + rtol * np.sum(np.abs(onnx_v)), \
+          f"l1 norm failed on device={Device.DEFAULT} using {rtol=} {atol=} for tensor={k} in {tiny_out.keys()}"
+        except AssertionError:
+          assert np.sqrt(np.sum(np.square(diff))) <= atol + rtol * np.sqrt(np.sum(np.square(onnx_v))), \
+          f"l2 norm failed on device={Device.DEFAULT} using {rtol=} {atol=} for tensor'{k}' in {tiny_out.keys()}"
 
 if __name__ == "__main__":
   devices = [Device.DEFAULT] if getenv("NOCLANG") else [Device.DEFAULT, "CLANG"]

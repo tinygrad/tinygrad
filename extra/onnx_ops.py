@@ -1,19 +1,10 @@
 import functools, io, math
 from typing import Union, Tuple, Optional, List, Any
 from tinygrad import Tensor, dtypes
-from tinygrad.dtype import ImageDType
+from tinygrad.dtype import least_upper_dtype
 from tinygrad.helpers import prod, flatten
 from extra.onnx import safe_numpy, DTYPE_MAP
 import numpy as np
-
-def half_to_float_to_half(func):
-  def wrapper(*args, **kwargs):
-    new_args = [arg.float() if isinstance(arg, Tensor) else arg for arg in args]
-    ret = func(*new_args, **kwargs)
-    if not isinstance(ret, tuple): ret = (ret,)
-    ret = tuple(r.cast(dtypes.float16) if isinstance(r, Tensor) else r for r in ret)
-    return ret
-  return wrapper
 
 tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu", "Sigmoid", "MatMul",
                   "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",
@@ -609,18 +600,15 @@ def AffineGrid(theta: Tensor, size: Tensor, align_corners=0):
 
 # **************** com.microsoft Ops ****************
 
-@half_to_float_to_half
-def SkipLayerNormalization(x:Tensor, skip:Tensor, gamma, beta:Optional[Tensor]=None, bias:Optional[Tensor]=None, epsilon=None):
-  if epsilon is None: epsilon = 1e-12 if x.dtype == dtypes.float else 1e-5 # Tensor can only be float or half
+def SkipLayerNormalization(x:Tensor, skip:Tensor, gamma:Tensor, beta:Optional[Tensor]=None, bias:Optional[Tensor]=None, epsilon=None):
+  if epsilon is None: epsilon = 1e-12
   x = x + skip + bias
-  return x.layernorm(eps=epsilon) * gamma + beta, None, None, x
+  return x.float().layernorm(eps=epsilon).cast(x.dtype) * gamma + beta, None, None, x
 
-@half_to_float_to_half
 def FastGelu(x:Tensor, bias:Optional[Tensor]=None):
   x = x + bias
   return 0.5 * x * (1 + (x * 0.797885 + 0.035677 * x ** 3).tanh())
 
-@half_to_float_to_half # l2 norm for commavq fails without this
 def EmbedLayerNormalization(input_ids: Tensor, segment_ids:Optional[Tensor]=None, word_embedding:Tensor=None, position_embedding:Tensor=None, segment_embedding:Optional[Tensor]=None, gamma=None, beta=None, mask:Optional[Tensor]=None, position_ids:Optional[Tensor]=None, epsilon=None, mask_index_type=None):
   # https://github.com/microsoft/onnxruntime/blob/main/docs/ContribOperators.md#com.microsoft.EmbedLayerNormalization
   assert (segment_ids is None) is (segment_embedding is None)
@@ -632,18 +620,18 @@ def EmbedLayerNormalization(input_ids: Tensor, segment_ids:Optional[Tensor]=None
   vocab_size, max_position_embeddings, type_vocab_size = word_embedding.shape[0], position_embedding.shape[0], (segment_embedding.shape[0] if compute_seg_emb else None)
 
   def embedding(x:Tensor, vocab_size, weight:Tensor)->Tensor:  # TODO from nn.Embedding. Could probably upstream this to Tensor
-    vocab_counter = Tensor.arange(vocab_size, dtype=x.dtype, requires_grad=False).reshape(1, 1, vocab_size).expand(*x.shape, vocab_size)
+    vocab_counter = Tensor.arange(vocab_size, dtype=dtypes.int, requires_grad=False).reshape(1, 1, vocab_size).expand(*x.shape, vocab_size)
     return (vocab_counter == x.unsqueeze(2).expand(*x.shape, vocab_size)) @ weight
 
   # bert embedding layer
-  if epsilon is None: epsilon = 1e-12 if input_ids.dtype == dtypes.float else 1e-5 # Tensor can only be float or half
-  if position_ids is None: position_ids = Tensor.arange(seq_length, requires_grad=False).unsqueeze(0).expand(*input_shape)
+  if epsilon is None: epsilon = 1e-12
+  if position_ids is None: position_ids = Tensor.arange(seq_length, dtype=dtypes.int, requires_grad=False).unsqueeze(0).expand(*input_shape)
   wrd_embedding_res = embedding(input_ids, vocab_size, word_embedding)
   pos_embedding_res = embedding(position_ids, max_position_embeddings, position_embedding)
   seg_embedding_res = embedding(segment_ids, type_vocab_size, segment_embedding) if compute_seg_emb else None
 
   embedding_sum = wrd_embedding_res + pos_embedding_res + seg_embedding_res
-  out = embedding_sum.layernorm(eps=epsilon) * gamma + beta
+  out = embedding_sum.float().layernorm(eps=epsilon).cast(word_embedding.dtype) * gamma + beta
   return out, None, embedding_sum
 
 def Attention(x:Tensor, weights, bias:Optional[Tensor]=None, mask_index:Optional[Tensor]=None, past:Optional[Tensor]=None, relative_position_bias:Optional[Tensor]=None, past_sequence_length:Optional[Tensor]=None, do_rotary=None, mask_filter_value=None, num_heads=None, past_present_share_buffer=None, qkv_hidden_sizes=None, scale=None, unidirectional=None):
@@ -673,7 +661,7 @@ def Attention(x:Tensor, weights, bias:Optional[Tensor]=None, mask_index:Optional
     attn_weights = query @ key.transpose(-1, -2) / math.sqrt(value.shape[-1])
     # This is where Tensor.scaled_dot_product_attention differs:
     causal_mask = Tensor.ones((cdim, cdim), requires_grad=False, dtype=dtypes.bool).tril(0)[key_length - query_length : key_length, :key_length]
-    return (Tensor.where(causal_mask, attn_weights, -float("inf")) + attn_mask).softmax(-1) @ value
+    return (Tensor.where(causal_mask, attn_weights, float("-inf")) + attn_mask).softmax(-1) @ value
 
   bsz, _, seq_len, _ = xq.shape
   out = attn(xq, xk, xv, mask_index).transpose(1, 2).reshape(bsz, seq_len, -1)
