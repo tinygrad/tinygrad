@@ -1699,7 +1699,7 @@ class TestOps(unittest.TestCase):
         helper_test_op(None,
                        lambda data, target: torch_cross_entropy(data, target,
                                                            weight = weight_torch, reduction=reduction),
-                       lambda data, target: data.cross_entropy(target, weight = weight_t, reduction=reduction),
+                       lambda data, target: Tensor(data.cross_entropy(target, weight = weight_t, reduction=reduction).numpy(), dtype=dtypes.float64),
                        forward_only=True, vals = [np.random.randn(3, 5), [1, 0, 4]])
 
 if __name__ == '__main__':
