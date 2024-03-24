@@ -1,6 +1,6 @@
 import sys
 from collections import defaultdict, deque
-from typing import Deque, List, Dict, Optional, Tuple, cast, Set, DefaultDict
+from typing import List, Dict, Optional, cast, Set, DefaultDict
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters, LazyOp, ReduceOps, ConstBuffer, MemBuffer, BinaryOps, UnaryOps
 from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats
 from tinygrad.features.graph import realized_lazybuffer, log_lazybuffer
@@ -244,18 +244,15 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
   # breadth first ordering
   graph: DefaultDict[LazyBuffer,List[LazyBuffer]] = defaultdict(list)
   in_degree: DefaultDict[LazyBuffer,int] = defaultdict(int)
-  queue: Deque[LazyBuffer] = deque()
   for out, si in prescheduled.items():
     for x in si.inputs:
       graph[x].append(out)
       if x in assign_targets:
         graph[out].append(assign_targets[x])
         in_degree[assign_targets[x]] += 1
-      if x.realized is None and x not in seen: in_degree[out] += 1
+      if x in prescheduled: in_degree[out] += 1
 
-  for out in prescheduled:
-    if in_degree[out] == 0: queue.append(out)
-
+  queue = deque(out for out in prescheduled if in_degree[out] == 0)
   schedule: List[ScheduleItem] = []
   while queue:
     buf = queue.popleft()
