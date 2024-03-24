@@ -114,6 +114,12 @@ jobs:
       run: CUDA=1 JIT=1 HALF=1 python3 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half.txt
     - name: Run GPT2 w HALF/BEAM
       run: CUDA=1 JIT=1 HALF=1 BEAM=2 CACHELEVEL=0 CAST_BEFORE_VIEW=0 JIT_BATCH_SIZE=4 python3 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half_beam.txt
+    - name: Run 10 CIFAR training steps
+      run: CUDA=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
+    - name: Run 10 CIFAR training steps w HALF
+      run: CUDA=1 STEPS=10 HALF=1 python3 examples/hlb_cifar10.py | tee train_cifar_half.txt
+    - name: Run 10 CIFAR training steps w BF16
+      run: CUDA=1 STEPS=10 BF16=1 python3 examples/hlb_cifar10.py | tee train_cifar_bf16.txt
     - name: Run full CIFAR training
       run: time CUDA=1 HALF=1 LATEWINO=1 STEPS=1000 TARGET_EVAL_ACC_PCT=93.3 python3 examples/hlb_cifar10.py | tee train_cifar_one_gpu.txt
     - uses: actions/upload-artifact@v4
@@ -130,6 +136,9 @@ jobs:
           gpt2_jitted.txt
           gpt2_half.txt
           gpt2_half_beam.txt
+          train_cifar.txt
+          train_cifar_half.txt
+          train_cifar_bf16.txt
           train_cifar_one_gpu.txt
 
   testamdbenchmark:
@@ -228,6 +237,8 @@ jobs:
       run: HSA=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
     - name: Run 10 CIFAR training steps w HALF
       run: HSA=1 STEPS=10 HALF=1 python3 examples/hlb_cifar10.py | tee train_cifar_half.txt
+    - name: Run 10 CIFAR training steps w BF16
+      run: HSA=1 STEPS=10 BF16=1 python3 examples/hlb_cifar10.py | tee train_cifar_bf16.txt
     - name: Run full CIFAR training w 1 GPU
       run: time HSA=1 HALF=1 LATEWINO=1 STEPS=1000 TARGET_EVAL_ACC_PCT=93.3 python3 examples/hlb_cifar10.py | tee train_cifar_one_gpu.txt
     - name: Run full CIFAR training steps w 6 GPUS
@@ -244,6 +255,7 @@ jobs:
         path: |
           train_cifar.txt
           train_cifar_half.txt
+          train_cifar_bf16.txt
           train_cifar_wino.txt
           train_cifar_one_gpu.txt
           train_resnet.txt

@@ -22,6 +22,8 @@ assert EVAL_BS % len(GPUS) == 0, f"{EVAL_BS=} is not a multiple of {len(GPUS)=},
 
 if getenv("HALF"):
   dtypes.default_float = dtypes.float16
+elif getenv("BF16"):
+  dtypes.default_float = dtypes.bfloat16
 else:
   dtypes.default_float = dtypes.float32
 
@@ -200,8 +202,8 @@ def train_cifar():
     BS, _, H, W = shape
     low_x = Tensor.randint(BS, low=0, high=W-mask_size).reshape(BS,1,1,1)
     low_y = Tensor.randint(BS, low=0, high=H-mask_size).reshape(BS,1,1,1)
-    idx_x = Tensor.arange(W).reshape((1,1,1,W))
-    idx_y = Tensor.arange(H).reshape((1,1,H,1))
+    idx_x = Tensor.arange(W, dtype=dtypes.int32).reshape((1,1,1,W))
+    idx_y = Tensor.arange(H, dtype=dtypes.int32).reshape((1,1,H,1))
     return (idx_x >= low_x) * (idx_x < (low_x + mask_size)) * (idx_y >= low_y) * (idx_y < (low_y + mask_size))
 
   def random_crop(X:Tensor, crop_size=32):
