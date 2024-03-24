@@ -244,7 +244,7 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
   # breadth first ordering
   graph: DefaultDict[LazyBuffer,List[LazyBuffer]] = defaultdict(list)
   in_degree: DefaultDict[LazyBuffer,int] = defaultdict(int)
-  queue: Deque[Tuple[int,LazyBuffer]] = deque()
+  queue: Deque[LazyBuffer] = deque()
   for out, si in prescheduled.items():
     for x in si.inputs:
       graph[x].append(out)
@@ -254,16 +254,16 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
       if x.realized is None and x not in seen: in_degree[out] += 1
 
   for out in prescheduled:
-    if in_degree[out] == 0: queue.append((0,out))
+    if in_degree[out] == 0: queue.append(out)
 
   schedule: List[ScheduleItem] = []
   while queue:
-    level, buf = queue.popleft()
+    buf = queue.popleft()
     seen.add(buf)
     schedule.append(prescheduled[buf])
     for x in graph[buf]:
       in_degree[x] -= 1
-      if in_degree[x] == 0: queue.append((level+1,x))
+      if in_degree[x] == 0: queue.append(x)
 
   # confirm everything was scheduled
   assert len(prescheduled) == len(schedule), f"prescheduled {len(prescheduled)} but only scheduled {len(schedule)}"
