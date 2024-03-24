@@ -2,7 +2,7 @@ from __future__ import annotations
 import math, itertools
 from typing import NamedTuple, Optional, List, Tuple, cast, Dict, Union
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps
-from tinygrad.device import Device, Compiled
+from tinygrad.device import Device
 from tinygrad.dtype import dtypes, ImageDType, DType
 from tinygrad.helpers import colored, ansilen, dedup, flatten, getenv, prod, DEBUG, round_up, all_int, get_contraction
 from tinygrad.shape.shapetracker import ShapeTracker
