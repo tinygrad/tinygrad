@@ -237,7 +237,7 @@ class TestMultiTensor(unittest.TestCase):
     import sys, pathlib
     sys.path.append((pathlib.Path(__file__).parent.parent / "extra" / "models").as_posix())
     from resnet import ResNet18
-    from examples.mlperf.optimizers import LARS
+    from tinygrad.nn.optim import LARS
 
     fake_image = Tensor.rand((2, 3, 224, 224))
     fake_image_sharded = fake_image.shard((d0, d1), axis=0)
