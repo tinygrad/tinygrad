@@ -33,8 +33,8 @@ class UnsyncedBatchNorm:
     if affine: self.weight, self.bias = Tensor.ones(sz), Tensor.zeros(sz)
     else: self.weight, self.bias = None, None
 
-    self.running_mean = Tensor.zeros(num_devices, sz, requires_grad=False, dtypes=dtypes.float32)
-    self.running_var = Tensor.ones(num_devices, sz, requires_grad=False, dtypes=dtypes.float32)
+    self.running_mean = Tensor.zeros(num_devices, sz, requires_grad=False, dtype=dtypes.float32)
+    self.running_var = Tensor.ones(num_devices, sz, requires_grad=False, dtype=dtypes.float32)
     self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
 
   def __call__(self, x:Tensor):
