@@ -189,10 +189,13 @@ class UOpGraph:
           assert dtype == vin[1].dtype == vin[2].dtype, f"{arg} choice dtype mismatch {dtype=} != {vin[1].dtype=} != {vin[2].dtype=}"
 
   def get_recursive_children(self, x:UOp) -> Set[UOp]:
-    deps = {x}
-    for u in self.uops:
-      if len(set.intersection(deps, set(u.vin))):
-        deps.add(u)
+    deps = set([x])
+    ssize = 0
+    while ssize != len(deps):
+      ssize = len(deps)
+      for u in self.uops:
+        if len(deps.intersection([x for x in u.vin if x.uop != UOps.PHI])):
+          deps.add(u)
     return deps
 
   def add_ends(self):
