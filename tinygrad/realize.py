@@ -125,7 +125,9 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
 def _get_inputs(buf:LazyBuffer, realizes:Set[LazyBuffer]):
   deps: Set[LazyBuffer] = set()
   def _deepwalk(x: LazyBuffer):
-    if x.op != LoadOps.CONST and (x.realized or x in realizes): return deps.add(x)
+    if x.op != LoadOps.CONST and (x.realized or x in realizes):
+      if buf.op is LoadOps.ASSIGN and x == buf.srcs[1]: return
+      return deps.add(x)
     for src in x.srcs: _deepwalk(src.base)
   for src in ((buf.srcs[0],) if buf.op is LoadOps.ASSIGN else buf.srcs): _deepwalk(src.base)
   return deps
@@ -258,11 +260,16 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
       if x.realized or x.op is LoadOps.CONST: continue
       graph[x].append(out)
       in_degree[out] += 1
+    #print(out, i, in_degree[out])
+
+  for out in realizes:
+    if out.realized or out.op is LoadOps.CONST: continue
     if in_degree[out] == 0: queue.append((0,out))
 
   schedule: List[ScheduleItem] = []
   while queue:
     level, buf = queue.popleft()
+    #print(level, buf)
     schedule.append(_schedule_one(buf, realizes, reduce_for_op))
     for x in graph[buf]:
       in_degree[x] -= 1
