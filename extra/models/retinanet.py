@@ -4,6 +4,7 @@ from tinygrad import Tensor, dtypes
 import tinygrad.nn as nn
 from extra.models.resnet import ResNet
 import numpy as np
+from typing import List, Tuple
 
 def sigmoid_focal_loss(
     inputs: Tensor,
@@ -27,9 +28,9 @@ def sigmoid_focal_loss(
     return loss
 
 def l1_loss(x1:Tensor, x2:Tensor) -> Tensor:
-  print('l1 loss inputs', x1.numpy(), x2.numpy())
+  # print('l1 loss inputs', x1.numpy(), x2.numpy())
   ans = (x1 - x2).abs().mean().sum()
-  print('l1 loss', ans.numpy())
+  # print('l1 loss', ans.numpy())
   return ans
 def _sum(x) -> Tensor:
     # List[Tensor]
@@ -40,24 +41,179 @@ def _sum(x) -> Tensor:
     return res
 
 def box_iou(boxes1: Tensor, boxes2: Tensor) -> Tensor:
-  print('BOX_IOU Arguements', boxes1.numpy(), boxes2.numpy())
+  # print('BOX_IOU Arguements', boxes1.numpy(), boxes2.numpy())
   def box_area(boxes): return (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
   area1 = box_area(boxes1)
   area2 = box_area(boxes2)
   b1 =boxes1[:, None, :2]
   b2 = boxes2[:, None,:2]
-  print('BOx_IOUTPYES: 1:',type(b1), type(b2), boxes1.shape, boxes2.shape)
+  # print('BOx_IOUTPYES: 1:',type(b1), type(b2), boxes1.shape, boxes2.shape)
   lt = Tensor.maximum(boxes1[:, None, :2], boxes2[:, :2])  # [N,M,2]
   rb = Tensor.minimum(boxes1[:, None, 2:], boxes2[:, 2:])  # [N,M,2]
-  print('BOx_IOU shapes', lt.shape, rb.shape)
+  # print('BOx_IOU shapes', lt.shape, rb.shape)
+
   # wh = (rb - lt).clip(min_=0)  # [N,M,2]
   wh = (rb - lt)#.maximum(0)  # [N,M,2]
   inter = wh[:, :, 0] * wh[:, :, 1]  # [N,M]
   union = area1[:, None] + area2 - inter
   iou = inter / union
-  print('BOx_IOU Ret Shape:', iou.shape)
-  print(iou.numpy())
+  # print('BOx_IOU Ret Shape:', iou.shape)
+  # print(iou.numpy())
   return iou
+def cust_meshgrid(x:Tensor, y:Tensor):
+  xs = x.shape[0]
+  ys = y.shape[0]
+  y = Tensor.stack([y]*xs)
+  x = x.reshape(xs, 1).expand((xs,ys))
+  return x, y
+class ImageList(object):
+  """
+  Structure that holds a list of images (of possibly
+  varying sizes) as a single tensor.
+  This works by padding the images to the same size,
+  and storing in a field the original sizes of each image
+  """
+
+  def __init__(self, tensors: Tensor, image_sizes: List[Tuple[int, int]]):
+    """
+    Args:
+        tensors (tensor)
+        image_sizes (list[tuple[int, int]])
+    """
+    self.tensors = tensors
+    self.image_sizes = image_sizes
+
+  # def to(self, device: torch.device) -> 'ImageList':
+  #   cast_tensor = self.tensors.to(device)
+  #   return ImageList(cast_tensor, self.image_sizes)
+class AnchorGenerator:
+  """
+  Module that generates anchors for a set of feature maps and
+  image sizes.
+
+  The module support computing anchors at multiple sizes and aspect ratios
+  per feature map. This module assumes aspect ratio = height / width for
+  each anchor.
+
+  sizes and aspect_ratios should have the same number of elements, and it should
+  correspond to the number of feature maps.
+
+  sizes[i] and aspect_ratios[i] can have an arbitrary number of elements,
+  and AnchorGenerator will output a set of sizes[i] * aspect_ratios[i] anchors
+  per spatial location for feature map i.
+
+  Args:
+      sizes (Tuple[Tuple[int]]):
+      aspect_ratios (Tuple[Tuple[float]]):
+  """
+
+  __annotations__ = {
+    "cell_anchors": List[Tensor],
+  }
+
+  def __init__(
+    self,
+    sizes=((128, 256, 512),),
+    aspect_ratios=((0.5, 1.0, 2.0),),
+  ):
+    # super(AnchorGenerator, self).__init__()
+
+    if not isinstance(sizes[0], (list, tuple)):
+      # TODO change this
+      sizes = tuple((s,) for s in sizes)
+    if not isinstance(aspect_ratios[0], (list, tuple)):
+      aspect_ratios = (aspect_ratios,) * len(sizes)
+
+    assert len(sizes) == len(aspect_ratios)
+
+    self.sizes = sizes
+    self.aspect_ratios = aspect_ratios
+    self.cell_anchors = [self.generate_anchors(size, aspect_ratio)
+                          for size, aspect_ratio in zip(sizes, aspect_ratios)]
+
+  # TODO: https://github.com/pytorch/pytorch/issues/26792
+  # For every (aspect_ratios, scales) combination, output a zero-centered anchor with those values.
+  # (scales, aspect_ratios) are usually an element of zip(self.scales, self.aspect_ratios)
+  # This method assumes aspect ratio = height / width for an anchor.
+  def generate_anchors(self, scales: List[int], aspect_ratios: List[float], dtype=dtypes.float):
+    scales = Tensor(list(scales), dtype=dtype)
+    aspect_ratios = Tensor(list(aspect_ratios), dtype=dtype)
+    h_ratios = aspect_ratios.sqrt()
+    w_ratios = 1 / h_ratios
+
+    ws = (w_ratios[:, None] * scales[None, :])  #.view(-1)
+    hs = (h_ratios[:, None] * scales[None, :])  #.view(-1)
+
+    base_anchors = Tensor.stack([-ws, -hs, ws, hs], dim=1) / 2
+    return base_anchors.round()
+
+  def set_cell_anchors(self, dtype):
+    self.cell_anchors = [cell_anchor.cast(dtype)
+                          for cell_anchor in self.cell_anchors]
+
+  def num_anchors_per_location(self):
+    return [len(s) * len(a) for s, a in zip(self.sizes, self.aspect_ratios)]
+
+  # For every combination of (a, (g, s), i) in (self.cell_anchors, zip(grid_sizes, strides), 0:2),
+  # output g[i] anchors that are s[i] distance apart in direction i, with the same dimensions as a.
+  def grid_anchors(self, grid_sizes: List[List[int]], strides: List[List[Tensor]]) -> List[Tensor]:
+    anchors = []
+    cell_anchors = self.cell_anchors
+    assert cell_anchors is not None
+
+    if not (len(grid_sizes) == len(strides) == len(cell_anchors)):
+      raise ValueError("Anchors should be Tuple[Tuple[int]] because each feature "
+                        "map could potentially have different sizes and aspect ratios. "
+                        "There needs to be a match between the number of "
+                        "feature maps passed and the number of sizes / aspect ratios specified.")
+
+    for size, stride, base_anchors in zip(
+        grid_sizes, strides, cell_anchors
+    ):
+      grid_height, grid_width = size
+      stride_height, stride_width = stride
+      # device = base_anchors.device
+
+      # For output anchor, compute [x_center, y_center, x_center, y_center]
+      shifts_x = Tensor.arange(
+          0, grid_width, dtype=dtypes.float) * stride_width
+      shifts_y = Tensor.arange(
+          0, grid_height, dtype=dtypes.float) * stride_height
+      shift_y, shift_x = cust_meshgrid(shifts_y, shifts_x)
+      # shift_x = shift_x.reshape(-1)
+      # shift_y = shift_y.reshape(-1)
+      shifts = Tensor.stack((shift_x, shift_y, shift_x, shift_y), dim=1)
+
+      # For every (base anchor, output anchor) pair,
+      # offset each zero-centered base anchor by the center of the output anchor.
+
+      anchors.append(
+        (shifts.reshape(-1, 1, 4) + base_anchors.reshape(1, -1, 4)).reshape(-1, 4)
+      )
+      # anchors.append(
+      #   shifts + base_anchors
+      # )
+
+    return anchors
+
+  def forward(self, image_list: ImageList, feature_maps: List[Tensor]) -> List[Tensor]:
+    grid_sizes = [feature_map.shape[-2:] for feature_map in feature_maps]
+    image_size = image_list.tensors.shape[-2:]
+    dtype = feature_maps[0].dtype
+    strides = [[Tensor(image_size[0] // g[0], dtype=dtypes.int64),
+                Tensor(image_size[1] // g[1], dtype=dtypes.int64)] for g in grid_sizes]
+    self.set_cell_anchors(dtype)
+    anchors_over_all_feature_maps = self.grid_anchors(grid_sizes, strides)
+    anchors: List[List[Tensor]] = []
+    for _ in range(len(image_list.image_sizes)):
+      anchors_in_image = [anchors_per_feature_map for anchors_per_feature_map in anchors_over_all_feature_maps]
+      anchors.append(anchors_in_image)
+    anchors = [Tensor.cat(*anchors_per_image) for anchors_per_image in anchors]
+    return anchors
+  def __call__(self, image_list: ImageList, feature_maps: List[Tensor]):
+    return self.forward(image_list, feature_maps)
+
+
 class Matcher(object):
   """
   This class assigns to each predicted "element" (e.g., a box) a ground-truth
@@ -104,6 +260,7 @@ class Matcher(object):
     self.allow_low_quality_matches = allow_low_quality_matches
 
   def __call__(self, match_quality_matrix:Tensor):
+    print('MAtcher Call:', match_quality_matrix.shape, match_quality_matrix.numpy())
     """
     Args:
       match_quality_matrix (Tensor[float]): an MxN tensor, containing the
@@ -132,8 +289,10 @@ class Matcher(object):
     # print('MATCHER MAX:', temp.shape, match_quality_matrix.shape, temp_ind.numpy())
     # print(temp.numpy())
     # matched_vals, matches = match_quality_matrix.max(axis=0)
-    matched_vals = match_quality_matrix.max(axis=0)
-    matches = match_quality_matrix.argmax(axis=0)
+    matched_vals = match_quality_matrix.max(axis=1)
+    matches = match_quality_matrix.argmax(axis=1)
+    print('matches post argmax:', matches.shape, matches.numpy())
+    print('matches post max:', matched_vals.shape, matched_vals.numpy())
     # matches.lazydata.contiguous()
     if self.allow_low_quality_matches:
       # all_matches = matches.clone()
@@ -149,7 +308,7 @@ class Matcher(object):
     between_thresholds = (matched_vals >= self.low_threshold) * (
       matched_vals < self.high_threshold
     )    
-    print('MATCHER CALL below_low_threshold:', below_low_threshold.numpy(), matches.shape, matches.dtype)
+    # print('MATCHER CALL below_low_threshold:', below_low_threshold.numpy(), matches.shape, matches.dtype)
 
     # below_idx = np.arange(below_low_threshold.shape[0])
     # between_idx = np.arange(between_thresholds.shape[0])
@@ -160,15 +319,18 @@ class Matcher(object):
     # for i,b in zip(between_idx, between_thresholds.numpy()):
     #   if b:
     #     matches[i.item()] = self.BETWEEN_THRESHOLDS
-    matches = Tensor.where(below_low_threshold, matches, self.BELOW_LOW_THRESHOLD)
-    matches = Tensor.where(between_thresholds, matches, self.BETWEEN_THRESHOLDS)
+    # matches = Tensor.where(below_low_threshold, matches, self.BELOW_LOW_THRESHOLD)
+    matches = Tensor.where(below_low_threshold, self.BELOW_LOW_THRESHOLD, matches)
+    # matches = Tensor.where(between_thresholds, matches, self.BETWEEN_THRESHOLDS)
+    matches = Tensor.where(between_thresholds, self.BETWEEN_THRESHOLDS, matches)
     # matches[below_low_threshold] = self.BELOW_LOW_THRESHOLD
     # matches[between_thresholds] = self.BETWEEN_THRESHOLDS
 
     if self.allow_low_quality_matches:
       assert all_matches is not None
       self.set_low_quality_matches_(matches, all_matches, match_quality_matrix)
-    print('Finished MAther code call')
+    # print('Finished MAther code call')
+    print('Post matcher call:', matches.shape, matches.numpy())
     return matches
 
   def set_low_quality_matches_(self, matches, all_matches, match_quality_matrix):
@@ -254,34 +416,34 @@ def encode_boxes(reference_boxes, proposals, weights = (1.0,1.0,1.0,1.0)):
   proposals_y1 = proposals[:, 1].unsqueeze(1)
   proposals_x2 = proposals[:, 2].unsqueeze(1)
   proposals_y2 = proposals[:, 3].unsqueeze(1)
-  print('proposals:', proposals_x1.numpy(), proposals_x2.numpy(), proposals_y1.numpy(),
-        proposals_y2.numpy())
+  # print('proposals:', proposals_x1.numpy(), proposals_x2.numpy(), proposals_y1.numpy(),
+  #       proposals_y2.numpy())
 
   reference_boxes_x1 = reference_boxes[:, 0].unsqueeze(1)
   reference_boxes_y1 = reference_boxes[:, 1].unsqueeze(1)
   reference_boxes_x2 = reference_boxes[:, 2].unsqueeze(1)
   reference_boxes_y2 = reference_boxes[:, 3].unsqueeze(1)
-  print('reference boxes:', reference_boxes_x1.numpy(), reference_boxes_x2.numpy(),
-        reference_boxes_y1.numpy(), reference_boxes_y2.numpy())
+  # print('reference boxes:', reference_boxes_x1.numpy(), reference_boxes_x2.numpy(),
+        # reference_boxes_y1.numpy(), reference_boxes_y2.numpy())
 
   # implementation starts here
   ex_widths = proposals_x2 - proposals_x1
   ex_heights = proposals_y2 - proposals_y1
   ex_ctr_x = proposals_x1 + 0.5 * ex_widths
   ex_ctr_y = proposals_y1 + 0.5 * ex_heights
-  print('exw,exh,excx,excy:',ex_widths.numpy(),ex_heights.numpy(),ex_ctr_x.numpy(),ex_ctr_y.numpy())
+  # print('exw,exh,excx,excy:',ex_widths.numpy(),ex_heights.numpy(),ex_ctr_x.numpy(),ex_ctr_y.numpy())
 
   gt_widths = reference_boxes_x2 - reference_boxes_x1
   gt_heights = reference_boxes_y2 - reference_boxes_y1
   gt_ctr_x = reference_boxes_x1 + 0.5 * gt_widths
   gt_ctr_y = reference_boxes_y1 + 0.5 * gt_heights
   # when these all are 0, results in inf
-  print('gtw,gth,gtcx,gtcy', gt_widths.numpy(), gt_heights.numpy(), gt_ctr_x.numpy(), gt_ctr_y.numpy())
+  # print('gtw,gth,gtcx,gtcy', gt_widths.numpy(), gt_heights.numpy(), gt_ctr_x.numpy(), gt_ctr_y.numpy())
 
-  if gt_widths.item() == 0.0:
-    print('replace jhack hit')
-    gt_widths = Tensor(3)
-    gt_heights = Tensor(3)
+  # if gt_widths.item() == 0.0:
+  #   print('replace gt_width/height hack hit')
+  #   gt_widths = Tensor(3.)
+  #   gt_heights = Tensor(3.)
   targets_dx = wx * (gt_ctr_x - ex_ctr_x) / ex_widths
   targets_dy = wy * (gt_ctr_y - ex_ctr_y) / ex_heights
   targets_dw = ww * (gt_widths / ex_widths).log()
@@ -326,7 +488,12 @@ class RetinaNet:
   def __call__(self, x):
     return self.forward(x)
   def forward(self, x):
-    return self.head(self.backbone(x))
+    if Tensor.training:
+      b = self.backbone(x)
+      r,c = self.head(b)
+      return b, r, c
+    else:
+      return self.head(self.backbone(x))
   def loss(self, logits_reg, logits_class, targets, anchors) -> Tensor:
     matched_idxs = []
     for anchors_per_image, targets_per_image in zip(anchors, targets):
@@ -341,8 +508,9 @@ class RetinaNet:
     loss_reg = self.head.regression_head.loss(logits_reg, targets, anchors, matched_idxs)
     loss_class = self.head.classification_head.loss(logits_class, targets, matched_idxs)
     # https://github.com/mlcommons/training/blob/master/single_stage_detector/ssd/engine.py#L36
-    print('loss_reg', loss_reg.numpy())
-    print('loss_class', loss_class.numpy())
+    
+    # print('loss_reg', loss_reg.numpy())
+    # print('loss_class', loss_class.numpy())
     return (loss_reg+loss_class)
   def load_from_pretrained(self):
     model_urls = {
@@ -448,22 +616,23 @@ class ClassificationHead:
       if foreground_idxs_per_image.shape==(0,):
         print('empty forground idx in class head')
         foreground_idxs_per_image = Tensor([0])
+        # foreground_idxs_per_image = Tensor([])
       else:
         foreground_idxs_per_image = Tensor(foreground_idxs_per_image)
       num_foreground = foreground_idxs_per_image.sum()
-      print('num_foreground:',num_foreground.shape, num_foreground.numpy())
+      # print('num_foreground:',num_foreground.shape, num_foreground.numpy())
 
       # create the target classification
       gt_classes_target = Tensor.zeros_like(cls_logits_per_image)
-      print('gt class target',gt_classes_target.shape)
+      print('gt class target',gt_classes_target.shape, foreground_idxs_per_image.shape)
       gt_classes_target[
         foreground_idxs_per_image,
         targets_per_image['labels'][matched_idxs_per_image[foreground_idxs_per_image]]
-      ] = Tensor([1.0])
+      ] = Tensor([1.0]*foreground_idxs_per_image.shape[0])
 
       # find indices for which anchors should be ignored
       valid_idxs_per_image = matched_idxs_per_image != Matcher.BETWEEN_THRESHOLDS
-      print(valid_idxs_per_image.shape)
+      # print('valid_idxs_per_image',valid_idxs_per_image.shape)
       valid_idxs_per_image = np.nonzero(valid_idxs_per_image.numpy())[0]
       if valid_idxs_per_image.shape==(0,):
         print('empty valid_idxs_per_image in class head')
@@ -475,7 +644,7 @@ class ClassificationHead:
         cls_logits_per_image[valid_idxs_per_image],
         gt_classes_target[valid_idxs_per_image],
         
-      ) / max(1, num_foreground.item()))
+      ) / Tensor(max(1, num_foreground.item()), dtype=dtypes.float))
 
     return _sum(losses) / len(targets)
 
@@ -494,16 +663,16 @@ class RegressionHead:
       # determine only the foreground indices, ignore the rest
       # foreground_idxs_per_image = torch.where(matched_idxs_per_image >= 0)[0]
       # Hack for now
-      print('Regression head match idx type:', type(matched_idxs_per_image), matched_idxs_per_image)
+      # print('Regression head match idx type:', type(matched_idxs_per_image), matched_idxs_per_image)
       foreground_idxs_per_image = np.nonzero(matched_idxs_per_image.numpy() >= 0)[0]
       # print('np forground:', foreground_idxs_per_image, foreground_idxs_per_image.shape)
       if foreground_idxs_per_image.shape==(0,):
-        print('empty forground idx')
+        print('empty forground idx in regression head')
         foreground_idxs_per_image = Tensor([0])
       else:
         foreground_idxs_per_image = Tensor(foreground_idxs_per_image)
       # print(foreground_idxs_per_image, matched_idxs_per_image.numpy())
-      print('Foreground idx per img: ', foreground_idxs_per_image.shape, foreground_idxs_per_image.numpy())
+      # print('Foreground idx per img: ', foreground_idxs_per_image.shape, foreground_idxs_per_image.numpy())
       num_foreground = foreground_idxs_per_image.numel()
 
       # select only the foreground boxes
@@ -518,12 +687,12 @@ class RegressionHead:
       losses.append(l1_loss(
         bbox_regression_per_image,
         target_regression,
-      ) / max(1, num_foreground))
+      ) / Tensor(max(1, num_foreground), dtype=dtypes.float))
     
-    print('REgression head loss num/dem', _sum(losses).numpy(),  max(1, len(targets)))
-    print('regression loss length', len(losses))
-    for i in losses:
-      print(i.numpy())
+    # print('REgression head loss num/dem', _sum(losses).numpy(),  max(1, len(targets)))
+    # print('regression loss length', len(losses))
+    # for i in losses:
+    #   print(i.numpy())
 
     return _sum(losses) / max(1, len(targets))
 

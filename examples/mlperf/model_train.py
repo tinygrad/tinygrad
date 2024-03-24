@@ -217,7 +217,7 @@ def train_resnet():
 
 def train_retinanet():
   # TODO: Retinanet
-  from extra.models.retinanet import RetinaNet
+  from extra.models.retinanet import RetinaNet, AnchorGenerator, ImageList
   from extra.models.resnet import ResNeXt50_32X4D
   from tinygrad.nn.optim import Adam
   from extra.datasets.openimages import openimages, iterate
@@ -225,6 +225,11 @@ def train_retinanet():
   from pycocotools.cocoeval import COCOeval
   import numpy as np
   import sys
+  anchor_sizes = tuple((x, int(x * 2 ** (1.0 / 3)), int(x * 2 ** (2.0 / 3))) for x in [32, 64, 128, 256, 512])
+  aspect_ratios = ((0.5, 1.0, 2.0),) * len(anchor_sizes)
+  anchor_generator = AnchorGenerator(
+      anchor_sizes, aspect_ratios
+  )
   coco = COCO(openimages())
   coco_eval = COCOeval(coco, iouType="bbox")
   coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
@@ -244,28 +249,43 @@ def train_retinanet():
   # from examples.hlb_cifar10 import UnsyncedBatchNorm
 
   EPOCHS = 10
-  BS = 8
+  BS = 4
   
   model = RetinaNet(ResNeXt50_32X4D())
+  parameters = []
   for k, x in get_state_dict(model).items():
     # x.requires_grad = True
     x.realize()
-    print(x.grad, x.shape, x.device)
+    # print(k, x.grad, x.shape, x.device)
+    if 'head' in k:
+      parameters.append(x)
 
-  parameters = get_parameters(model)
+
+  # parameters = get_parameters(model)
   optimizer = Adam(parameters)
-  @TinyJit
+  
+
+  # @TinyJit
   def train_step(X, Y):
     Tensor.training = True
-    anchors = model.anchor_gen(X.shape[1:3])
-    anchors = [Tensor(t) for t in anchors]
+    image_list = ImageList(X, [(800,800)*X.shape[0]])
+
+    # anchors = model.anchor_gen(X.shape[1:3])
+    # anchors = [Tensor(t, dtype=dtypes.float) for t in anchors]
+    # for t in anchors:
+    #   print(t.shape)
+    # sys.exit()
     optimizer.zero_grad()
-    logits_reg, logits_class = model(input_fixup(X))
-    print('Train_step logits', logits_reg.shape, logits_class.shape)
+    features, logits_reg, logits_class = model(input_fixup(X))
+    # print('backbone:', len(backbone_logits))
+    # features = [backbone_logits[i] for i in range(X.shape[0])]
+    anchors = anchor_generator(image_list, features)
+    
+    # print('Train_step logits', logits_reg.shape, logits_class.shape)
     # print(logits_reg.numpy())
     # logits_reg, logits_class = model(X)
-    # loss = model.loss(logits_reg, logits_class, Y, anchors)
-    loss = logits_reg.sparse_categorical_crossentropy(Tensor([1,2,3,4,5,6,7,8], requires_grad=True).reshape(8,1))
+    loss = model.loss(logits_reg, logits_class, Y, anchors)
+    # loss = logits_reg.sparse_categorical_crossentropy(Tensor([1,2,3,4,5,6,7,8]).reshape(8,1), label_smoothing=0.1)
     # print('loss',loss.numpy())
     # sys.exit()
     loss.backward()
@@ -280,10 +300,21 @@ def train_retinanet():
   for epoch in range(EPOCHS):
     Tensor.training = True
     for X,Y in iterate(coco, BS, True):
-      
+      print('Input Data Shape:', X.shape)
+      # a = model.anchor_gen(X.shape[1:3])
+      # print(a)
+      # sys.exit()
+      # for i in range(len(Y)):
+      #   print(Y[i]['boxes'].numpy())
+      #   print(Y[i]['labels'].numpy())
+      #   print(Y[i]['image_id'])
+      #   print(Y[i]['image_size'])
+      # sys.exit()
+      st = time.monotonic()
       loss = train_step(X, Y)
 
-      print('Iter done:', loss.numpy())
+      print('Iter done! Time:',time.monotonic()-st,'Loss:', loss.numpy())
+      del loss, X, Y
       
       # sys.exit()
 
