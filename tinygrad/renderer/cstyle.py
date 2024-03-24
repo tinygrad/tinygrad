@@ -216,14 +216,12 @@ class MetalLanguage(CStyleLanguage):
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 MetalRenderer = functools.partial(uops_to_cstyle, MetalLanguage())
 
-# TODO: unify this and _make_hip_code_for_op
 code_for_op_half = {
   BinaryOps.MAX: lambda a,b,dtype: {dtypes.half:f"__hmax({a},{b})", dtypes.bfloat16:f"(nv_bfloat16)fmax({a},{b})"}.get(dtype, f"max({a},{b})"),
-  UnaryOps.SQRT: lambda x,dtype: {dtypes.half:f"hsqrt({x})", dtypes.bfloat16:f"(nv_bfloat16)sqrt({x})"}.get(dtype, f"sqrt({x})"),
-  UnaryOps.SIN: lambda x,dtype: {dtypes.half:f"hsin({x})", dtypes.bfloat16:f"(nv_bfloat16)sin({x})"}.get(dtype, f"sin({x})"),
-  UnaryOps.LOG2: lambda x,dtype: {dtypes.half:f"hlog2({x})", dtypes.bfloat16:f"(nv_bfloat16)log2({x})"}.get(dtype, f"log2({x})"),
-  UnaryOps.EXP2: lambda x,dtype: {dtypes.half:f"hexp2({x})", dtypes.bfloat16:f"(nv_bfloat16)exp2({x})"}.get(dtype, f"exp2({x})"),
-}
+  UnaryOps.SQRT: lambda x,dtype: {dtypes.half:f"hsqrt({x})", dtypes.bfloat16:f"hsqrt({x})"}.get(dtype, f"sqrt({x})"),
+  UnaryOps.SIN: lambda x,dtype: {dtypes.half:f"hsin({x})", dtypes.bfloat16:f"hsin({x})"}.get(dtype, f"sin({x})"),
+  UnaryOps.LOG2: lambda x,dtype: {dtypes.half:f"hlog2({x})", dtypes.bfloat16:f"hlog2({x})"}.get(dtype, f"log2({x})"),
+  UnaryOps.EXP2: lambda x,dtype: {dtypes.half:f"hexp2({x})", dtypes.bfloat16:f"hexp2({x})"}.get(dtype, f"exp2({x})"),}
 
 class CUDALanguage(CStyleLanguage):
   kernel_prefix = "extern \"C\" __global__ "
