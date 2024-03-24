@@ -226,6 +226,8 @@ def train_retinanet():
   import numpy as np
   import sys
   anchor_sizes = tuple((x, int(x * 2 ** (1.0 / 3)), int(x * 2 ** (2.0 / 3))) for x in [32, 64, 128, 256, 512])
+  # print(anchor_sizes)
+  # sys.exit()
   aspect_ratios = ((0.5, 1.0, 2.0),) * len(anchor_sizes)
   anchor_generator = AnchorGenerator(
       anchor_sizes, aspect_ratios
@@ -268,7 +270,13 @@ def train_retinanet():
   # @TinyJit
   def train_step(X, Y):
     Tensor.training = True
-    image_list = ImageList(X, [(800,800)*X.shape[0]])
+    i_s = [y['image_size'] for y in Y]
+    # print(i_s)
+    # sys.exit()
+    # image_list = ImageList(X, [(800,800)]*X.shape[0])
+    image_list = ImageList(X, i_s)
+    # a1 = model.anchor_gen(X.shape[1:3])
+    # a1 = [Tensor(t, dtype=dtypes.float) for t in a1]
 
     # anchors = model.anchor_gen(X.shape[1:3])
     # anchors = [Tensor(t, dtype=dtypes.float) for t in anchors]
@@ -284,6 +292,10 @@ def train_retinanet():
     # print('Train_step logits', logits_reg.shape, logits_class.shape)
     # print(logits_reg.numpy())
     # logits_reg, logits_class = model(X)
+    # print(anchors)
+    # print(a1)
+    # print(features)
+    # sys.exit()
     loss = model.loss(logits_reg, logits_class, Y, anchors)
     # loss = logits_reg.sparse_categorical_crossentropy(Tensor([1,2,3,4,5,6,7,8]).reshape(8,1), label_smoothing=0.1)
     # print('loss',loss.numpy())

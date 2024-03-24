@@ -5,6 +5,7 @@ import tinygrad.nn as nn
 from extra.models.resnet import ResNet
 import numpy as np
 from typing import List, Tuple
+import sys
 
 def sigmoid_focal_loss(
     inputs: Tensor,
@@ -24,6 +25,8 @@ def sigmoid_focal_loss(
 
     # Reducing with sum instead of mean
     loss = loss.sum()
+
+    print('sigmoid_focal_loss:', loss.numpy())
 
     return loss
 
@@ -53,7 +56,7 @@ def box_iou(boxes1: Tensor, boxes2: Tensor) -> Tensor:
   # print('BOx_IOU shapes', lt.shape, rb.shape)
 
   # wh = (rb - lt).clip(min_=0)  # [N,M,2]
-  wh = (rb - lt)#.maximum(0)  # [N,M,2]
+  wh = (rb - lt).maximum(0)  # [N,M,2]
   inter = wh[:, :, 0] * wh[:, :, 1]  # [N,M]
   union = area1[:, None] + area2 - inter
   iou = inter / union
@@ -114,6 +117,7 @@ class AnchorGenerator:
   def __init__(
     self,
     sizes=((128, 256, 512),),
+    # sizes=((800),),
     aspect_ratios=((0.5, 1.0, 2.0),),
   ):
     # super(AnchorGenerator, self).__init__()
@@ -186,13 +190,14 @@ class AnchorGenerator:
 
       # For every (base anchor, output anchor) pair,
       # offset each zero-centered base anchor by the center of the output anchor.
-
+      # print('trying anchor append')
       anchors.append(
         (shifts.reshape(-1, 1, 4) + base_anchors.reshape(1, -1, 4)).reshape(-1, 4)
       )
       # anchors.append(
       #   shifts + base_anchors
       # )
+      # print('SUCESS anchor append')
 
     return anchors
 
@@ -260,7 +265,7 @@ class Matcher(object):
     self.allow_low_quality_matches = allow_low_quality_matches
 
   def __call__(self, match_quality_matrix:Tensor):
-    print('MAtcher Call:', match_quality_matrix.shape, match_quality_matrix.numpy())
+    # print('MAtcher Call:', match_quality_matrix.shape, match_quality_matrix.numpy())
     """
     Args:
       match_quality_matrix (Tensor[float]): an MxN tensor, containing the
@@ -291,8 +296,8 @@ class Matcher(object):
     # matched_vals, matches = match_quality_matrix.max(axis=0)
     matched_vals = match_quality_matrix.max(axis=1)
     matches = match_quality_matrix.argmax(axis=1)
-    print('matches post argmax:', matches.shape, matches.numpy())
-    print('matches post max:', matched_vals.shape, matched_vals.numpy())
+    # print('matches post argmax:', matches.shape, matches.numpy())
+    # print('matches post max:', matched_vals.shape, matched_vals.numpy())
     # matches.lazydata.contiguous()
     if self.allow_low_quality_matches:
       # all_matches = matches.clone()
@@ -330,7 +335,7 @@ class Matcher(object):
       assert all_matches is not None
       self.set_low_quality_matches_(matches, all_matches, match_quality_matrix)
     # print('Finished MAther code call')
-    print('Post matcher call:', matches.shape, matches.numpy())
+    # print('Post matcher call:', matches.shape, matches.numpy())
     return matches
 
   def set_low_quality_matches_(self, matches, all_matches, match_quality_matrix):
@@ -394,7 +399,11 @@ def decode_bbox(offsets, anchors):
   pred_x2, pred_y2 = pred_cx + 0.5 * pred_w, pred_cy + 0.5 * pred_h
   return np.stack([pred_x1, pred_y1, pred_x2, pred_y2], axis=1, dtype=np.float32)
 def encode_boxes(reference_boxes, proposals, weights = (1.0,1.0,1.0,1.0)):
-  print('Encode BOx', proposals.shape, reference_boxes.shape)
+  # print('Encode BOx', reference_boxes.shape, proposals.shape)
+  # print(reference_boxes.numpy())
+  # print(proposals.numpy())
+  
+  # sys.exit()
   # type: (Tensor, Tensor, Tensor) -> Tensor
   """
   Encode a set of proposals with respect to some
@@ -499,7 +508,7 @@ class RetinaNet:
     for anchors_per_image, targets_per_image in zip(anchors, targets):
       if targets_per_image['boxes'].numel() == 0:
         print('NUMEL==0 HIT!!!')
-        matched_idxs.append(Tensor.full((anchors_per_image.shape[0],), -1, dtype=dtypes.float,))
+        matched_idxs.append(Tensor.full((anchors_per_image.shape[0],), -1, dtype=dtypes.int64,))
                                         # device=anchors_per_image.device))
         continue
 
@@ -509,8 +518,8 @@ class RetinaNet:
     loss_class = self.head.classification_head.loss(logits_class, targets, matched_idxs)
     # https://github.com/mlcommons/training/blob/master/single_stage_detector/ssd/engine.py#L36
     
-    # print('loss_reg', loss_reg.numpy())
-    # print('loss_class', loss_class.numpy())
+    print('loss_reg', loss_reg.numpy())
+    print('loss_class', loss_class.numpy())
     return (loss_reg+loss_class)
   def load_from_pretrained(self):
     model_urls = {
@@ -631,9 +640,11 @@ class ClassificationHead:
       ] = Tensor([1.0]*foreground_idxs_per_image.shape[0])
 
       # find indices for which anchors should be ignored
+      print('Class_head matched_idxs_per_image', matched_idxs_per_image.numpy())
       valid_idxs_per_image = matched_idxs_per_image != Matcher.BETWEEN_THRESHOLDS
-      # print('valid_idxs_per_image',valid_idxs_per_image.shape)
+      
       valid_idxs_per_image = np.nonzero(valid_idxs_per_image.numpy())[0]
+      print('valid_idxs_per_image POST',valid_idxs_per_image)
       if valid_idxs_per_image.shape==(0,):
         print('empty valid_idxs_per_image in class head')
         valid_idxs_per_image = Tensor([0])
@@ -663,7 +674,7 @@ class RegressionHead:
       # determine only the foreground indices, ignore the rest
       # foreground_idxs_per_image = torch.where(matched_idxs_per_image >= 0)[0]
       # Hack for now
-      # print('Regression head match idx type:', type(matched_idxs_per_image), matched_idxs_per_image)
+      # print('Regression head match idx type:', matched_idxs_per_image.numpy())
       foreground_idxs_per_image = np.nonzero(matched_idxs_per_image.numpy() >= 0)[0]
       # print('np forground:', foreground_idxs_per_image, foreground_idxs_per_image.shape)
       if foreground_idxs_per_image.shape==(0,):
@@ -674,6 +685,11 @@ class RegressionHead:
       # print(foreground_idxs_per_image, matched_idxs_per_image.numpy())
       # print('Foreground idx per img: ', foreground_idxs_per_image.shape, foreground_idxs_per_image.numpy())
       num_foreground = foreground_idxs_per_image.numel()
+
+      # print('target img selection')
+      # print(targets_per_image['boxes'].numpy())
+      # print(matched_idxs_per_image.numpy())
+      # print(foreground_idxs_per_image.numpy())
 
       # select only the foreground boxes
       matched_gt_boxes_per_image = targets_per_image['boxes'][matched_idxs_per_image[foreground_idxs_per_image]]
