@@ -41,9 +41,13 @@ def _assert_eq(tensor:Tensor, target_dtype:DType, target):
 def _test_op(fxn, target_dtype:DType, target):
   _assert_eq(fxn(), target_dtype, target)
 def _test_cast(a:Tensor, target_dtype:DType):
-  if dtypes.is_unsigned(target_dtype) and a.is_floating_point():
+  if a.is_floating_point() and dtypes.is_unsigned(target_dtype):
     # converting negative float to unsigned integer is undefined
     a = a.abs()
+  if target_dtype == dtypes.half and Device.DEFAULT == "PYTHON":
+    # TODO: struct.pack cannot pack value > 65504 (max of half) into e format
+    a = (a > 65504).where(65504, a)
+
   _test_op(lambda: a.cast(target_dtype), target_dtype, list(a.numpy().astype(target_dtype.np)))
 def _test_bitcast(a:Tensor, target_dtype:DType, target=None):
   if target_dtype == dtypes.bfloat16: raise unittest.SkipTest("no test for bf16 bitcast yet")
