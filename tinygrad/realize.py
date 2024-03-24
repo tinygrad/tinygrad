@@ -248,6 +248,9 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
   for out, si in prescheduled.items():
     for x in si.inputs:
       graph[x].append(out)
+      if x in assign_targets:
+        graph[out].append(assign_targets[x])
+        in_degree[assign_targets[x]] += 1
       if x.realized is None and x not in seen: in_degree[out] += 1
 
   for out in prescheduled:
