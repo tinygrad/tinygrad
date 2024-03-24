@@ -189,13 +189,10 @@ class UOpGraph:
           assert dtype == vin[1].dtype == vin[2].dtype, f"{arg} choice dtype mismatch {dtype=} != {vin[1].dtype=} != {vin[2].dtype=}"
 
   def get_recursive_children(self, x:UOp) -> Set[UOp]:
-    deps = set([x])
-    ssize = 0
-    while ssize != len(deps):
-      ssize = len(deps)
-      for u in self.uops:
-        if len(deps.intersection([x for x in u.vin if x.uop != UOps.PHI])):
-          deps.add(u)
+    deps = {x}
+    for u in self.uops:
+      if len(set.intersection(deps, set(u.vin))):
+        deps.add(u)
     return deps
 
   def add_ends(self):
@@ -274,6 +271,7 @@ class UOpGraph:
         or any([where.vin[2].arg != 0 or where.vin[0].vin[1].uop is not UOps.CONST for where in wheres])
         or any(len([op for op in get_recursive_parents(where) if op.uop is UOps.LOOP]) == 0 for where in wheres)): continue
       if DEBUG >= 4 and (len(phis) > 0 or len(wheres) > 0): print("simplified {} PHI and {} WHERE in loop".format(len(phis), len(wheres)))
+      loop_len = loop_op.vin[1].arg - loop_op.vin[0].arg
       adjusted_adds = set()
       for where in sorted(wheres, key=lambda x: self.uops.index(x)):
         comp_lt, comp_gt = where.vin[0].vin[0], where.vin[0].vin[1]
@@ -281,24 +279,23 @@ class UOpGraph:
         final_value = factored - NumNode(loop_op.vin[0].arg) if (comp_gt.arg > 0) else NumNode(loop_op.vin[1].arg-1) - factored
         self.uops, after_split_ops = self.uops[:(where_index:=self.uops.index(where))], self.uops[where_index:]
         rendered = final_value.render(render_ops)
-        loop_length = loop_op.vin[1].arg - loop_op.vin[0].arg
         min_clamped = max(rendered, const(0)) if (final_value.min < 0) else rendered
-        max_clamped = neg(max(const(-1*loop_length), neg(min_clamped))) if (final_value.max > loop_length) else min_clamped
+        max_clamped = neg(max(const(-1*loop_len), neg(min_clamped))) if (final_value.max > loop_len) else min_clamped
         maybe_cast = self.add(UOps.CAST, where.dtype, (max_clamped,)) if where.dtype != dtypes.int32 else max_clamped
         final_op = self.add(UOps.ALU, where.dtype, (maybe_cast, where.vin[1]), BinaryOps.MUL)
         self.uops = self.uops + after_split_ops
         self.replace_op(where, final_op)
-        for op in self.get_recursive_children(final_op):
-          if (op.arg is BinaryOps.ADD and any([u.uop is UOps.PHI for u in self.get_recursive_children(op)]) and op not in adjusted_adds
-            and op != final_op and final_op.uop is not UOps.CONST):
-            op.vin = tuple([const(vin.arg * loop_length, insert_before=self.uops.index(op)) if vin.uop is UOps.CONST else vin for vin in list(op.vin)])
-            adjusted_adds.add(op)
-        get_recursive_parents.cache_clear()
+        if final_op.uop is not UOps.CONST:
+          for op in [op for op in (self.get_recursive_children(final_op)) if any([x.uop is UOps.PHI for x in self.get_recursive_children(op)])]:
+            if op.arg is BinaryOps.ADD and op not in adjusted_adds and op != final_op:
+              op.vin = tuple([const(vin.arg*loop_len, insert_before=self.uops.index(op)) if vin.uop is UOps.CONST else vin for vin in list(op.vin)])
+              adjusted_adds.add(op)
       for phi in phis:
         self.replace_op(phi, phi.vin[1])
         self.uops.remove((accumulator:=phi.vin[0]))
         for alu_with_accum in [op for op in self.uops if accumulator in op.vin]:
           self.replace_op(alu_with_accum, next(op for op in alu_with_accum.vin if op != accumulator))
+      get_recursive_parents.cache_clear()
 
   def fix_to_store_directly(self):
     replaced_stores: Dict[UOp,UOp] = {}
