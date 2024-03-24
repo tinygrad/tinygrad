@@ -8,6 +8,7 @@ from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.runtime.driver.hsa import check, scan_agents, find_memory_pool, AQLQueue
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.runtime.driver.hip_comgr import compile_hip
+if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401
 
 PROFILE = getenv("PROFILE", 0)
 

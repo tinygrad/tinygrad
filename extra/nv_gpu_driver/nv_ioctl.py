@@ -43,57 +43,51 @@ def install_hook(c_function, python_function):
   libc.memcpy(ioctl_address.contents, ctypes.create_string_buffer(tramp), len(tramp))
 
 # *** ioctl lib end ***
-
-# clang2py kfd_ioctl.h -o kfd_ioctl.py
-from extra.hip_gpu_driver import kfd_ioctl
-def ioctls_from_header():
-  hdr = (pathlib.Path(__file__).parent.parent.parent / "extra/hip_gpu_driver/kfd_ioctl.h").read_text().replace("\\\n", "")
-  pattern = r'#define\s+(AMDKFD_IOC_[A-Z0-9_]+)\s+AMDKFD_IOW?R?\((0x[0-9a-fA-F]+),\s+struct\s([A-Za-z0-9_]+)\)'
-  matches = re.findall(pattern, hdr, re.MULTILINE)
-  return {int(nr, 0x10):(name, getattr(kfd_ioctl, "struct_"+sname)) for name, nr, sname in matches}
-nrs = ioctls_from_header()
+import extra.nv_gpu_driver.esc_ioctl as ESC
+import extra.nv_gpu_driver.ctrl_ioctl as CTRL
+import extra.nv_gpu_driver.class_ioctl as CLASS
+nvescs = {getattr(ESC, x):x for x in dir(ESC) if x.startswith("NV_ESC")}
+nvcmds = {getattr(CTRL, x):(x, getattr(CTRL, "struct_"+x+"_PARAMS", getattr(CTRL, "struct_"+x.replace("_CMD_", "_")+"_PARAMS", None))) for x in dir(CTRL) if \
+          x.startswith("NV") and x[6:].startswith("_CTRL_") and isinstance(getattr(CTRL, x), int)}
+nvclasses = {getattr(CLASS, x):x for x in dir(CLASS) if isinstance(getattr(CLASS, x), int)}
 
 @ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_ulong, ctypes.c_void_p)
 def ioctl(fd, request, argp):
   st = time.perf_counter()
   ret = libc.syscall(IOCTL_SYSCALL, ctypes.c_int(fd), ctypes.c_ulong(request), ctypes.c_void_p(argp))
   et = time.perf_counter()-st
+  fn = os.readlink(f"/proc/self/fd/{fd}")
+  #print(f"ioctl {request:8x} {fn:20s}")
   idir, size, itype, nr = (request>>30), (request>>16)&0x3FFF, (request>>8)&0xFF, request&0xFF
-  if nr in nrs and itype == 75:
-    # /dev/kfd
-    name, stype = nrs[nr]
-    s = get_struct(argp, stype)
-    print(f"{(st-start)*1000:7.2f} ms +{et*1000.:7.2f} ms : {ret:2d} = {name:40s}", ' '.join(format_struct(s)))
-    if name == "AMDKFD_IOC_SVM":
-      out = ctypes.cast(s.attrs, ctypes.POINTER(kfd_ioctl.struct_kfd_ioctl_svm_attribute))
-      for i in range(s.nattr): print(f"{i}: {kfd_ioctl.kfd_ioctl_svm_attr_type__enumvalues[out[i].type]:40s}: {out[i].value:#x}")
-  else:
-    print("ioctl", f"{idir=} {size=} {itype=} {nr=} {fd=} {ret=}", os.readlink(f"/proc/self/fd/{fd}") if fd >= 0 else "")
+  if itype == ord(ESC.NV_IOCTL_MAGIC):
+    if nr == ESC.NV_ESC_RM_CONTROL:
+      s = get_struct(argp, ESC.NVOS54_PARAMETERS)
+      if s.cmd in nvcmds:
+        name, struc = nvcmds[s.cmd]
+        if struc is not None:
+          ss = get_struct(s.params, struc)
+          print("NV_ESC_RM_CONTROL ", name, format_struct(ss))
+        else:
+          print("NV_ESC_RM_CONTROL ", name)
+      else:
+        print("unhandled cmd", hex(s.cmd))
+      #format_struct(s)
+      #print(f"{(st-start)*1000:7.2f} ms +{et*1000.:7.2f} ms : {ret:2d} = {name:40s}", ' '.join(format_struct(s)))
+    elif nr == ESC.NV_ESC_RM_ALLOC:
+      s = get_struct(argp, ESC.NVOS21_PARAMETERS)
+      print(f"NV_ESC_RM_ALLOC    class: {nvclasses[s.hClass]:30s}")
+    elif nr == ESC.NV_ESC_RM_MAP_MEMORY:
+      # nv_ioctl_nvos33_parameters_with_fd
+      s = get_struct(argp, ESC.NVOS33_PARAMETERS)
+      print(f"NV_ESC_RM_MAP_MEMORY   {s.pLinearAddress:x}")
+    elif nr in nvescs:
+      print(nvescs[nr])
+    else:
+      print("unhandled NR", nr)
+  #print("ioctl", f"{idir=} {size=} {itype=} {nr=} {fd=} {ret=}", os.readlink(f"/proc/self/fd/{fd}") if fd >= 0 else "")
   return ret
 
 install_hook(libc.ioctl, ioctl)
 
-# AMD_LOG_LEVEL=4 HSAKMT_DEBUG_LEVEL=7
-if __name__ == "__main__":
-  print("***** import tinygrad")
-  from tinygrad import Tensor, Device, TinyJit
-  print("***** access HIP")
-  dev = Device["HIP"]
-  print("***** create tensor a")
-  a = Tensor([1.,2.]*1024*1024, device="HIP").realize()
-  print("***** create tensor b")
-  b = Tensor([3.,4.]*1024*1024, device="HIP").realize()
-  @TinyJit
-  def add(a, b): return (a+b).realize()
-  for i in range(4):
-    print(f"***** add tensors {i}")
-    c = add(a, b)
-    #dev.synchronize()
-    c = add(b, a)
-    dev.synchronize()
-  print(f"***** copyout")
-  nc = c.numpy()
-  print(f"***** delete")
-  del add, a, b, c, dev
-  print(f"***** done")
-  os._exit(0)
+
+# IOCTL=1 PTX=1 CUDA=1 python3 test/test_ops.py TestOps.test_tiny_add

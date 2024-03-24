@@ -41,6 +41,13 @@ def _assert_eq(tensor:Tensor, target_dtype:DType, target):
 def _test_op(fxn, target_dtype:DType, target):
   _assert_eq(fxn(), target_dtype, target)
 def _test_cast(a:Tensor, target_dtype:DType):
+  if a.is_floating_point() and dtypes.is_unsigned(target_dtype):
+    # converting negative float to unsigned integer is undefined
+    a = a.abs()
+  if target_dtype == dtypes.half and Device.DEFAULT == "PYTHON":
+    # TODO: struct.pack cannot pack value > 65504 (max of half) into e format
+    a = (a > 65504).where(65504, a)
+
   _test_op(lambda: a.cast(target_dtype), target_dtype, list(a.numpy().astype(target_dtype.np)))
 def _test_bitcast(a:Tensor, target_dtype:DType, target=None):
   if target_dtype == dtypes.bfloat16: raise unittest.SkipTest("no test for bf16 bitcast yet")
@@ -60,8 +67,7 @@ class TestDType(unittest.TestCase):
     elif cls.DTYPE == dtypes.bool:
       cls.DATA = np.random.choice([True, False], size=DATA_SIZE)
     else:
-      # TODO: include negative numbers here and fix negative number cast to uint
-      cls.DATA = np.random.uniform(0, 10, size=DATA_SIZE).astype(cls.DTYPE.np)
+      cls.DATA = np.random.uniform(-10, 10, size=DATA_SIZE).astype(cls.DTYPE.np)
   def setUp(self):
     if self.DTYPE is None: raise unittest.SkipTest("base class")
 
