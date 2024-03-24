@@ -1679,9 +1679,9 @@ class TestOps(unittest.TestCase):
 
         helper_test_op(None,
                        lambda data, target: torch_nll_loss(torch_log_softmax(data, dim = 1), target,
-                                                           weight = weight_torch, reduction=reduction).type(torch.float32),
-                       lambda data, target: data.nll_loss(target, weight = weight_t, reduction=reduction),
-                       forward_only=True, vals = [np.random.randn(3, 5), np.array([1, 0, 4])])
+                                                           weight = weight_torch, reduction=reduction),
+                       lambda data, target: Tensor(data.nll_loss(target, weight = weight_t, reduction=reduction).numpy(), dtype=dtypes.float64),
+                       forward_only=True, vals = [np.random.randn(3, 5).astype(np.float64), np.array([1, 0, 4])])
 
 
 
