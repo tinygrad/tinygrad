@@ -287,12 +287,11 @@ class UOpGraph:
         maybe_cast = self.add(UOps.CAST, where.dtype, (max_clamped,)) if where.dtype != dtypes.int32 else max_clamped
         final_op = self.add(UOps.ALU, where.dtype, (maybe_cast, where.vin[1]), BinaryOps.MUL)
         self.uops = self.uops + after_split_ops
+        for op in [op for op in (self.get_recursive_children(where)) if any([x.uop is UOps.PHI for x in self.get_recursive_children(op)])]:
+          if op.arg is BinaryOps.ADD and op not in adjusted_adds and op != where:
+            op.vin = tuple([const(vin.arg*loop_len, insert_before=self.uops.index(op)) if vin.uop is UOps.CONST else vin for vin in list(op.vin)])
+            adjusted_adds.add(op)
         self.replace_op(where, final_op)
-        if final_op.uop is not UOps.CONST:
-          for op in [op for op in (self.get_recursive_children(final_op)) if any([x.uop is UOps.PHI for x in self.get_recursive_children(op)])]:
-            if op.arg is BinaryOps.ADD and op not in adjusted_adds and op != final_op:
-              op.vin = tuple([const(vin.arg*loop_len, insert_before=self.uops.index(op)) if vin.uop is UOps.CONST else vin for vin in list(op.vin)])
-              adjusted_adds.add(op)
       for phi in phis:
         self.replace_op(phi, phi.vin[1])
         self.uops.remove((accumulator:=phi.vin[0]))
