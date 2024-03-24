@@ -274,23 +274,21 @@ class UOpGraph:
         or any([where.vin[2].arg != 0 or where.vin[0].vin[1].uop is not UOps.CONST for where in wheres])
         or any(len([op for op in get_recursive_parents(where) if op.uop is UOps.LOOP]) == 0 for where in wheres)): continue
       if DEBUG >= 4 and (len(phis) > 0 or len(wheres) > 0): print("simplified {} PHI and {} WHERE in loop".format(len(phis), len(wheres)))
-      adjusted_adds = set()
+      loop_len = loop_op.vin[1].arg - loop_op.vin[0].arg
+      for op in [op for op in self.uops if op.arg is BinaryOps.ADD]:
+        if len(wheres.intersection(get_recursive_parents(op))) and len(phis.intersection(self.get_recursive_children(op))):
+          op.vin = tuple([const(vin.arg*loop_len, insert_before=self.uops.index(op)) if vin.uop is UOps.CONST else vin for vin in list(op.vin)])
       for where in sorted(wheres, key=lambda x: self.uops.index(x)):
         comp_lt, comp_gt = where.vin[0].vin[0], where.vin[0].vin[1]
         factored = loop_factor(comp_lt, NumNode(int(comp_gt.arg)), loop_op, round_up=(comp_gt.arg > 0))
         final_value = factored - NumNode(loop_op.vin[0].arg) if (comp_gt.arg > 0) else NumNode(loop_op.vin[1].arg-1) - factored
         self.uops, after_split_ops = self.uops[:(where_index:=self.uops.index(where))], self.uops[where_index:]
         rendered = final_value.render(render_ops)
-        loop_len = loop_op.vin[1].arg - loop_op.vin[0].arg
         min_clamped = max(rendered, const(0)) if (final_value.min < 0) else rendered
         max_clamped = neg(max(const(-1*loop_len), neg(min_clamped))) if (final_value.max > loop_len) else min_clamped
         maybe_cast = self.add(UOps.CAST, where.dtype, (max_clamped,)) if where.dtype != dtypes.int32 else max_clamped
         final_op = self.add(UOps.ALU, where.dtype, (maybe_cast, where.vin[1]), BinaryOps.MUL)
         self.uops = self.uops + after_split_ops
-        for op in [op for op in (self.get_recursive_children(where)) if any([x.uop is UOps.PHI for x in self.get_recursive_children(op)])]:
-          if op.arg is BinaryOps.ADD and op not in adjusted_adds and op != where:
-            op.vin = tuple([const(vin.arg*loop_len, insert_before=self.uops.index(op)) if vin.uop is UOps.CONST else vin for vin in list(op.vin)])
-            adjusted_adds.add(op)
         self.replace_op(where, final_op)
       for phi in phis:
         self.replace_op(phi, phi.vin[1])
