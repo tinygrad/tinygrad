@@ -247,6 +247,7 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
       assert len(realized_children) == 1
       reduce_for_op[next(iter(realized_children.keys()))] = r
 
+  # precompute what all the kernels will be (graph realizes)
   graph: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
   in_degree: DefaultDict[LazyBuffer, int] = defaultdict(int)
   queue: Deque[LazyBuffer] = deque()
@@ -260,11 +261,11 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
       if x.realized or x.op is LoadOps.CONST or x in seen: continue
       graph[x].append(out)
       in_degree[out] += 1
-
   for out in realizes:
     if out.realized or out.op is LoadOps.CONST or out in seen: continue
     if in_degree[out] == 0: queue.append(out)
 
+  # breadth first ordering
   schedule: List[ScheduleItem] = []
   while queue:
     buf = queue.popleft()
