@@ -274,7 +274,6 @@ class UOpGraph:
         or any([where.vin[2].arg != 0 or where.vin[0].vin[1].uop is not UOps.CONST for where in wheres])
         or any(len([op for op in get_recursive_parents(where) if op.uop is UOps.LOOP]) == 0 for where in wheres)): continue
       if DEBUG >= 4 and (len(phis) > 0 or len(wheres) > 0): print("simplified {} PHI and {} WHERE in loop".format(len(phis), len(wheres)))
-      loop_len = loop_op.vin[1].arg - loop_op.vin[0].arg
       adjusted_adds = set()
       for where in sorted(wheres, key=lambda x: self.uops.index(x)):
         comp_lt, comp_gt = where.vin[0].vin[0], where.vin[0].vin[1]
@@ -282,6 +281,7 @@ class UOpGraph:
         final_value = factored - NumNode(loop_op.vin[0].arg) if (comp_gt.arg > 0) else NumNode(loop_op.vin[1].arg-1) - factored
         self.uops, after_split_ops = self.uops[:(where_index:=self.uops.index(where))], self.uops[where_index:]
         rendered = final_value.render(render_ops)
+        loop_len = loop_op.vin[1].arg - loop_op.vin[0].arg
         min_clamped = max(rendered, const(0)) if (final_value.min < 0) else rendered
         max_clamped = neg(max(const(-1*loop_len), neg(min_clamped))) if (final_value.max > loop_len) else min_clamped
         maybe_cast = self.add(UOps.CAST, where.dtype, (max_clamped,)) if where.dtype != dtypes.int32 else max_clamped
