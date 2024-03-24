@@ -1,6 +1,6 @@
 import sys
 from collections import defaultdict, deque
-from typing import Deque, List, Dict, Optional, Tuple, cast, Set, DefaultDict
+from typing import Deque, List, Dict, Optional, cast, Set, DefaultDict
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters, LazyOp, ReduceOps, ConstBuffer, MemBuffer, BinaryOps, UnaryOps
 from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats
 from tinygrad.features.graph import realized_lazybuffer, log_lazybuffer
@@ -249,29 +249,28 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
 
   graph: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
   in_degree: DefaultDict[LazyBuffer, int] = defaultdict(int)
-  queue: Deque[Tuple[int,LazyBuffer]] = deque()
-  mutated_bufs = {x.srcs[1].base:x for x in realizes if x.op is LoadOps.ASSIGN and x.realized is None}
+  queue: Deque[LazyBuffer] = deque()
+  mutated_bufs = {x.srcs[1].base:x for x in realizes if x.op is LoadOps.ASSIGN and x.realized is None and x not in seen}
   for out in realizes:
-    if out.realized or out.op is LoadOps.CONST: continue
-    for x in (i:=_get_inputs(out, realizes)):
+    if out.realized or out.op is LoadOps.CONST or out in seen: continue
+    for x in _get_inputs(out, realizes):
       if x in mutated_bufs:
         graph[out].append(mutated_bufs[x])
         in_degree[mutated_bufs[x]] += 1
-      if x.realized or x.op is LoadOps.CONST: continue
+      if x.realized or x.op is LoadOps.CONST or x in seen: continue
       graph[x].append(out)
       in_degree[out] += 1
-    #print(out, i, in_degree[out])
 
   for out in realizes:
-    if out.realized or out.op is LoadOps.CONST: continue
-    if in_degree[out] == 0: queue.append((0,out))
+    if out.realized or out.op is LoadOps.CONST or out in seen: continue
+    if in_degree[out] == 0: queue.append(out)
 
   schedule: List[ScheduleItem] = []
   while queue:
-    level, buf = queue.popleft()
-    #print(level, buf)
+    buf = queue.popleft()
     schedule.append(_schedule_one(buf, realizes, reduce_for_op))
+    seen.add(buf)
     for x in graph[buf]:
       in_degree[x] -= 1
-      if in_degree[x] == 0: queue.append((level+1,x))
+      if in_degree[x] == 0: queue.append(x)
   return schedule
