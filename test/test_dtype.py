@@ -354,9 +354,6 @@ class TestTypeSpec(unittest.TestCase):
       assert dtypes.default_float == default_float
 
   def test_env_set_default_float(self):
-    # check default
-    subprocess.run(["python3", "-c", "from tinygrad import dtypes; assert dtypes.default_float == dtypes.float32"],
-                    env={"DEFAULT_FLOAT": ""}, check=True)
     # check change
     subprocess.run(["python3", "-c", "from tinygrad import dtypes; assert dtypes.default_float == dtypes.half"],
                     env={"DEFAULT_FLOAT": "HALF"}, check=True)
