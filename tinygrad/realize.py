@@ -1,6 +1,6 @@
 import sys
 from collections import defaultdict, deque
-from typing import Deque, List, Dict, Optional, cast, Set, DefaultDict
+from typing import Deque, List, Dict, Optional, Tuple, cast, Set, DefaultDict
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters, LazyOp, ReduceOps, ConstBuffer, MemBuffer, BinaryOps, UnaryOps
 from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats
 from tinygrad.features.graph import realized_lazybuffer, log_lazybuffer
@@ -122,16 +122,6 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
     LazyOp(buf.op, tuple(_recursive_lazyop(x, inputs, var_vals, st, realizes, cache, False, assign_to) for x in buf.srcs), buf.arg)
   return ret
 
-def _get_inputs(buf:LazyBuffer, realizes:Set[LazyBuffer]):
-  deps: Set[LazyBuffer] = set()
-  def _deepwalk(x: LazyBuffer):
-    if x.op != LoadOps.CONST and (x.realized or x in realizes):
-      if buf.op is LoadOps.ASSIGN and x == buf.srcs[1]: return
-      return deps.add(x)
-    for src in x.srcs: _deepwalk(src.base)
-  for src in ((buf.srcs[0],) if buf.op is LoadOps.ASSIGN else buf.srcs): _deepwalk(src.base)
-  return deps
-
 def _schedule_one(out:LazyBuffer, realizes:Set[LazyBuffer], reduce_for_op: Dict[LazyBuffer, LazyBuffer]) -> ScheduleItem:
   inputs: List[LazyBuffer] = []
   var_vals: Dict[Variable, int] = out.st.var_vals.copy()
@@ -247,31 +237,32 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
       assert len(realized_children) == 1
       reduce_for_op[next(iter(realized_children.keys()))] = r
 
-  # precompute what all the kernels will be (graph realizes)
-  graph: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
-  in_degree: DefaultDict[LazyBuffer, int] = defaultdict(int)
-  queue: Deque[LazyBuffer] = deque()
-  mutated_bufs = {x.srcs[1].base:x for x in realizes if x.op is LoadOps.ASSIGN and x.realized is None and x not in seen}
-  for out in realizes:
-    if out.realized or out.op is LoadOps.CONST or out in seen: continue
-    for x in _get_inputs(out, realizes):
-      if x in mutated_bufs:
-        graph[out].append(mutated_bufs[x])
-        in_degree[mutated_bufs[x]] += 1
-      if x.realized or x.op is LoadOps.CONST or x in seen: continue
-      graph[x].append(out)
-      in_degree[out] += 1
-  for out in realizes:
-    if out.realized or out.op is LoadOps.CONST or out in seen: continue
-    if in_degree[out] == 0: queue.append(out)
+  # preschedule all buffers in realizes
+  prescheduled = {x:_schedule_one(x, realizes, reduce_for_op) for x in realizes if x not in seen and x.realized is None and x.op is not LoadOps.CONST}
+  assign_targets = {x.srcs[1]:x for x in realizes if x.op is LoadOps.ASSIGN and x not in seen and x.realized is None}
 
   # breadth first ordering
+  graph: DefaultDict[LazyBuffer,List[LazyBuffer]] = defaultdict(list)
+  in_degree: DefaultDict[LazyBuffer,int] = defaultdict(int)
+  queue: Deque[Tuple[int,LazyBuffer]] = deque()
+  for out, si in prescheduled.items():
+    for x in si.inputs:
+      graph[x].append(out)
+      if x.realized is None and x not in seen: in_degree[out] += 1
+
+  for out in prescheduled:
+    if in_degree[out] == 0: queue.append((0,out))
+
   schedule: List[ScheduleItem] = []
   while queue:
-    buf = queue.popleft()
-    schedule.append(_schedule_one(buf, realizes, reduce_for_op))
+    level, buf = queue.popleft()
     seen.add(buf)
+    schedule.append(prescheduled[buf])
     for x in graph[buf]:
       in_degree[x] -= 1
-      if in_degree[x] == 0: queue.append(x)
+      if in_degree[x] == 0: queue.append((level+1,x))
+
+  # confirm everything was scheduled
+  assert len(prescheduled) == len(schedule), f"prescheduled {len(prescheduled)} but only scheduled {len(schedule)}"
   return schedule
+
