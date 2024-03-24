@@ -276,9 +276,9 @@ class UOpGraph:
         or any(len([op for op in get_recursive_parents(where) if op.uop is UOps.LOOP]) == 0 for where in wheres)): continue
       if DEBUG >= 4 and (len(phis) > 0 or len(wheres) > 0): print("simplified {} PHI and {} WHERE in loop".format(len(phis), len(wheres)))
       loop_length = loop_op.vin[1].arg - loop_op.vin[0].arg
-      for op in [op for op in self.uops if op.arg is BinaryOps.ADD]:
-        if len(wheres.intersection(get_recursive_parents(op))) and len(phis.intersection(self.get_recursive_children(op))):
-          op.vin = tuple([const(vin.arg*loop_length, insert_before=self.uops.index(op)) if vin.uop is UOps.CONST else vin for vin in list(op.vin)])
+      for u in self.uops:
+        if u.arg is BinaryOps.ADD and len(wheres.intersection(get_recursive_parents(u))) and len(phis.intersection(self.get_recursive_children(u))):
+          u.vin = tuple([const(vin.arg*loop_length, insert_before=self.uops.index(u)) if vin.uop is UOps.CONST else vin for vin in list(u.vin)])
       for where in sorted(wheres, key=lambda x: self.uops.index(x)):
         comp_lt, comp_gt = where.vin[0].vin[0], where.vin[0].vin[1]
         factored = loop_factor(comp_lt, NumNode(int(comp_gt.arg)), loop_op, round_up=(comp_gt.arg > 0))
