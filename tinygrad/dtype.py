@@ -81,8 +81,12 @@ class dtypes:
   @staticmethod
   def imagef(shp): return ImageDType(100, 4, "imagef", 'f', 1, shape=shp, base=dtypes.float32)
 
-  default_float: ClassVar[DType] = float16 if getenv("DEFAULT_FP16") else bfloat16 if getenv("DEFAULT_BF16") else float32
+  default_float: ClassVar[DType] = float32
   default_int: ClassVar[DType] = int32
+
+if (env_default_float := getenv("DEFAULT_FLOAT", "")):
+  dtypes.default_float = getattr(dtypes, env_default_float.lower())
+  assert dtypes.is_float(dtypes.default_float), f"{env_default_float} is not a float dtype"
 
 # https://jax.readthedocs.io/en/latest/jep/9407-type-promotion.html
 # we don't support weak type and complex type
