@@ -33,19 +33,20 @@ class UnsyncedBatchNorm:
     if affine: self.weight, self.bias = Tensor.ones(sz), Tensor.zeros(sz)
     else: self.weight, self.bias = None, None
 
-    self.running_mean, self.running_var = Tensor.zeros(num_devices, sz, requires_grad=False), Tensor.ones(num_devices, sz, requires_grad=False)
+    self.running_mean = Tensor.zeros(num_devices, sz, requires_grad=False, dtypes=dtypes.float32)
+    self.running_var = Tensor.ones(num_devices, sz, requires_grad=False, dtypes=dtypes.float32)
     self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
 
   def __call__(self, x:Tensor):
     if isinstance(x.lazydata, MultiLazyBuffer): assert x.lazydata.axis is None or x.lazydata.axis == 0 and len(x.lazydata.lbs) == self.num_devices
 
-    rshape, x = x.shape, x.reshape(self.num_devices, -1, *x.shape[1:])
-    batch_mean, batch_invstd = self.calc_stats(x.cast(dtypes.float32))
-    ret = x.batchnorm(
+    xr = x.reshape(self.num_devices, -1, *x.shape[1:]).cast(dtypes.float32)
+    batch_mean, batch_invstd = self.calc_stats(xr)
+    ret = xr.batchnorm(
       self.weight.reshape(1, -1).expand((self.num_devices, -1)),
       self.bias.reshape(1, -1).expand((self.num_devices, -1)),
       batch_mean, batch_invstd, axis=(0, 2))
-    return ret.reshape(rshape).cast(x.dtype)
+    return ret.reshape(x.shape).cast(x.dtype)
 
   def calc_stats(self, x:Tensor):
     if Tensor.training:
@@ -59,8 +60,8 @@ class UnsyncedBatchNorm:
 
       # NOTE: wow, this is done all throughout training in most PyTorch models
       if self.track_running_stats:
-        self.running_mean.assign(((1-self.momentum) * self.running_mean + self.momentum * batch_mean.detach()).cast(dtypes.default_float))
-        self.running_var.assign(((1-self.momentum) * self.running_var + self.momentum * prod(y.shape[1:])/(prod(y.shape[1:])-y.shape[2]) * batch_var.detach()).cast(dtypes.default_float))
+        self.running_mean.assign((1-self.momentum) * self.running_mean + self.momentum * batch_mean.detach())
+        self.running_var.assign((1-self.momentum) * self.running_var + self.momentum * prod(y.shape[1:])/(prod(y.shape[1:])-y.shape[2]) * batch_var.detach())
         self.num_batches_tracked += 1
     else:
       batch_mean = self.running_mean
