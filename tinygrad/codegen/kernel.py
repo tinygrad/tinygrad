@@ -2,7 +2,7 @@ from __future__ import annotations
 import math, itertools
 from typing import NamedTuple, Optional, List, Tuple, cast, Dict, Union
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps
-from tinygrad.device import Device, Compiled
+from tinygrad.device import Device
 from tinygrad.dtype import dtypes, ImageDType, DType
 from tinygrad.helpers import colored, ansilen, dedup, flatten, getenv, prod, DEBUG, round_up, all_int, get_contraction
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -87,8 +87,8 @@ class LinearizerOptions(NamedTuple):
 
 class Kernel:
   def __init__(self, *ast:LazyOp, opts:Optional[LinearizerOptions]=None):
-    self.opts = opts or (device.compiler.linearizer_opts if isinstance(device:=Device[Device.DEFAULT], Compiled) and device.compiler is not None else
-                         LinearizerOptions(Device.DEFAULT))
+    self.opts = opts if opts is not None else (device.compiler.linearizer_opts if (device:=Device[Device.DEFAULT]).compiler is not None else
+                                               LinearizerOptions(Device.DEFAULT))
     assert all(op.op is BufferOps.STORE for op in ast), f"kernels must have stores as the output, got {ast}"
     assert len(set(op.arg.st.size for op in ast)) == 1, f"all outbufs should have the same size, got {[op.arg.st for op in ast]}"
     self.ast = ast
