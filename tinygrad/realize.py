@@ -122,7 +122,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
     LazyOp(buf.op, tuple(_recursive_lazyop(x, inputs, var_vals, st, realizes, cache, False, assign_to) for x in buf.srcs), buf.arg)
   return ret
 
-def _get_deps(buf:LazyBuffer, realizes:Set[LazyBuffer]):
+def _get_inputs(buf:LazyBuffer, realizes:Set[LazyBuffer]):
   deps: Set[LazyBuffer] = set()
   def _deepwalk(x: LazyBuffer):
     if x.op != LoadOps.CONST and (x.realized or x in realizes): return deps.add(x)
@@ -247,12 +247,14 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
 
   graph: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
   in_degree: DefaultDict[LazyBuffer, int] = defaultdict(int)
-  inputs: Dict[LazyBuffer,Set[LazyBuffer]] = defaultdict(set)
   queue: Deque[Tuple[int,LazyBuffer]] = deque()
+  mutated_bufs = {x.srcs[1].base:x for x in realizes if x.op is LoadOps.ASSIGN and x.realized is None}
   for out in realizes:
     if out.realized or out.op is LoadOps.CONST: continue
-    inputs[out] = _get_deps(out, realizes)
-    for x in inputs[out]:
+    for x in (i:=_get_inputs(out, realizes)):
+      if x in mutated_bufs:
+        graph[out].append(mutated_bufs[x])
+        in_degree[mutated_bufs[x]] += 1
       if x.realized or x.op is LoadOps.CONST: continue
       graph[x].append(out)
       in_degree[out] += 1
