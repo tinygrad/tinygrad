@@ -160,7 +160,7 @@ class CUDADevice(Compiled):
       check(cuda.cuDeviceComputeCapability(ctypes.byref(major := ctypes.c_int()), ctypes.byref(minor := ctypes.c_int()), device_id))
 
     self.arch = f"sm_{major.value}{minor.value}" if not CUDACPU else "sm_35"
-    self.pending_copyin: List[int, int, Optional[BufferOptions]] = []
+    self.pending_copyin: List[Tuple[int, int, Optional[BufferOptions]]] = []
     CUDADevice.devices.append(self)
 
     from tinygrad.runtime.graph.cuda import CUDAGraph
