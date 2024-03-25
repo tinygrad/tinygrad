@@ -354,17 +354,20 @@ class TestTypeSpec(unittest.TestCase):
       assert dtypes.default_float == default_float
 
   def test_env_set_default_float(self):
+    # check default
+    subprocess.run(['python3 -c "from tinygrad import dtypes; assert dtypes.default_float == dtypes.float"'],
+                    shell=True, check=True)
     # check change
-    subprocess.run(["python3", "-c", "from tinygrad import dtypes; assert dtypes.default_float == dtypes.half"],
-                    env={"DEFAULT_FLOAT": "HALF"}, check=True)
+    subprocess.run(['DEFAULT_FLOAT=HALF python3 -c "from tinygrad import dtypes; assert dtypes.default_float == dtypes.half"'],
+                    shell=True, check=True)
     # check invalid
     with self.assertRaises(subprocess.CalledProcessError):
-      subprocess.run(["python3", "-c", "from tinygrad import dtypes; assert dtypes.default_float == dtypes.half"],
-                      env={"DEFAULT_FLOAT": "INT32"}, check=True)
+      subprocess.run(['DEFAULT_FLOAT=INT32 python3 -c "from tinygrad import dtypes"'],
+                      shell=True, check=True)
 
     with self.assertRaises(subprocess.CalledProcessError):
-      subprocess.run(["python3", "-c", "from tinygrad import dtypes; assert dtypes.default_float == dtypes.half"],
-                      env={"DEFAULT_FLOAT": "TYPO"}, check=True)
+      subprocess.run(['DEFAULT_FLOAT=TYPO python3 -c "from tinygrad import dtypes"'],
+                      shell=True, check=True)
 
   @given(strat.sampled_from(dtype_ints), strat.sampled_from(dtype_floats))
   def test_creation(self, default_int, default_float):
