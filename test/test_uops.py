@@ -207,6 +207,7 @@ class TestConstantFolding(unittest.TestCase):
     assert any(uop.uop is UOps.BITCAST for uop in lin.uops.uops), f"{[uop.uop for uop in lin.uops.uops]} does not contain bitcast"
 
 class TestLocalAccess(unittest.TestCase):
+  @unittest.skipIf(Device.DEFAULT in {"LLVM"}, "device doesn't support local memory")
   def test_local_basic(self):
     uops = []
     smem = uop(uops, UOps.DEFINE_LOCAL, PtrDType(dtypes.float32), (), ('smem', 16))
@@ -214,6 +215,7 @@ class TestLocalAccess(unittest.TestCase):
     sres = uop(uops, UOps.LOAD, dtypes.float32, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 0)))
     self.assertEqual(_test_uops_result(dtypes.float32, uops, sres), 42)
 
+  @unittest.skipIf(Device.DEFAULT in {"LLVM"}, "device doesn't support local memory")
   def test_local_indirect(self):
     uops = []
     smem = uop(uops, UOps.DEFINE_LOCAL, PtrDType(dtypes.int32), (), ('smem', 16))
