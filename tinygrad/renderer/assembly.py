@@ -218,10 +218,10 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
           kk(*lang.render_load(args[1], ssa(u, 'dat', dtype=lang.types[dt]), dt, ss=".param"))
       elif uop is UOps.WMMA:
         wmma=[]
-        for v in vin[:2]:
-          for i in range(0, len(r[v]), 2): # type: ignore
+        for vv in vin[:2]:
+          for i in range(0, len(r[vv]), 2):
             wmma.append(ssa(None, "wmma", "b32"))
-            kk(f'mov.b32 {wmma[-1]}, {{{", ".join(r[v][i:i+2])}}};') # type: ignore
+            kk(f'mov.b32 {wmma[-1]}, {{{", ".join(r[vv][i:i+2])}}};')
         r[u] = r[vin[2]]
         kk(f'{args} {{{", ".join(r[u])}}}, {{{", ".join(wmma[:4])}}}, {{{", ".join(wmma[4:])}}}, {{{", ".join(r[u])}}};')
       else: raise NotImplementedError(f"no code for {uop}")
