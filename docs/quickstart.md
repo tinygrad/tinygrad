@@ -23,7 +23,7 @@ The tensor class can be imported like so:
 from tinygrad.tensor import Tensor
 ```
 
-Tensors can be created from an existing data structure like a python list or numpy ndarray:
+Tensors can be created from an existing data structure like a python list or numpy `ndarray`:
 
 ```python
 t1 = Tensor([1, 2, 3, 4, 5])
@@ -166,7 +166,7 @@ from extra.datasets import fetch_mnist
 Now we have everything we need to start training our neural network.
 We will be training for 1000 steps with a batch size of 64.
 
-We use `with Tensor.train()` set the internal flag `Tensor.training` to `True` during training.
+We use `with Tensor.train()` to set the internal flag `Tensor.training` to `True` during training.
 Upon exit, the flag is restored to its previous value by the context manager.
 
 ```python
@@ -184,7 +184,7 @@ with Tensor.train():
     out = net(batch)
 
     # compute loss
-    loss = sparse_categorical_crossentropy(out, labels)
+    loss = Tensor.sparse_categorical_crossentropy(out, labels)
 
     # zero gradients
     opt.zero_grad()
@@ -297,7 +297,7 @@ Many of the models in the [models/](/models) folder have a `load_from_pretrained
 ### Environment Variables
 
 There exist a bunch of environment variables that control the runtime behavior of tinygrad.
-Some of the commons ones are `DEBUG` and the different backend enablement variables.
+Some of the common ones are `DEBUG` and the different backend enablement variables.
 
 You can find a full list and their descriptions in [env_vars.md](/docs/env_vars.md).
 
