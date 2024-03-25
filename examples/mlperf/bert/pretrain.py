@@ -95,6 +95,9 @@ def load_model(model:BertMLperf, path:str = "/tmp/model"): get_state_dict(model,
 
 # ************ Actual training ************
 def pretrain():
+  seed = getenv("SEED", 12345)
+  Tensor.manual_seed(seed)
+
   model = get_model(Path(__file__).parent.parents[2] / "extra" / "datasets" / "wiki" / "bert_config.json")
 
   if len(GPUS) > 1:
@@ -176,8 +179,7 @@ def pretrain():
       device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
 
       print(f"{step:3d} {(cl-st)*1000.0:7.2f} ms run, {(mem-st)*1000.0:7.2f} ms fetch, {(et-mem)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms {device_str}, {loss_cpu:7.2f} loss, {(lr := optimizer.lr.numpy()[0]):.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
-      wandb.log({"Loss": loss_cpu, "LR": lr}) if getenv('WANDB', 0) else None
-      st = cl
+      wandb.log({"Loss": loss_cpu, "LR": lr, "GFLOPS": GlobalCounters.global_ops*1e-9/(cl-st)}) if getenv('WANDB', 0) else None
       step += 1
     epoch += 1
 
