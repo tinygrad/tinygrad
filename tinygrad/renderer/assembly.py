@@ -220,7 +220,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
   return lang.render_kernel(kernel, function_name, bufs, c.items())
 
 class PTXLanguage(AssemblyLanguage):
-  kernel_prefix = """.version 7.5
+  kernel_prefix = """.version VERSION
 .target TARGET
 .address_size 64
 .visible .entry"""
