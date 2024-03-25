@@ -17,7 +17,7 @@ class MetalCompiler(Compiler):
   def __init__(self, device:Optional[MetalDevice]):
     self.device = device
     super().__init__("compile_metal")
-    if getenv("METAL") == 1 and (getenv("CONDA_DEFAULT_ENV", "") or getenv("CONDA_PREFIX", "")): print("WARNING: it looks like you might be running conda and using METAL backend. If you experience issues with \"MTLLibrary is not formatted as a MetalLib file\" try switching to system python or using METAL_XCODE. If you aren't using conda, report this in the following issue: https://github.com/tinygrad/tinygrad/issues/2226")  # noqa: E501
+    if getenv("METAL") == 1 and (getenv("CONDA_DEFAULT_ENV", "") or getenv("CONDA_PREFIX", "")): print("WARNING: it looks like you might be running conda and using METAL backend. If you experience the \"MTLLibrary is not formatted as a MetalLib file\" issue, try switching to system python or using METAL_XCODE=1 and DISABLE_COMPILER_CACHE=1.")  # noqa: E501
   def render(self, name:str, uops) -> str: return MetalRenderer(name, uops)
   def compile(self, src:str) -> bytes:
     if self.device is None:
