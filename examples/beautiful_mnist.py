@@ -1,6 +1,7 @@
 # model based off https://towardsdatascience.com/going-beyond-99-mnist-handwritten-digits-recognition-cfff96337392
 from typing import List, Callable
 from tinygrad import Tensor, TinyJit, nn, GlobalCounters
+from tinygrad.helpers import getenv, colored
 from extra.datasets import fetch_mnist
 from tqdm import trange
 
@@ -42,3 +43,8 @@ if __name__ == "__main__":
     loss = train_step()
     if i%10 == 9: test_acc = get_test_acc().item()
     t.set_description(f"loss: {loss.item():6.2f} test_accuracy: {test_acc:5.2f}%")
+
+  # verify eval acc
+  if target := getenv("TARGET_EVAL_ACC_PCT", 0.0):
+    if test_acc >= target: print(colored(f"{test_acc=} >= {target}", "green"))
+    else: raise ValueError(colored(f"{test_acc=} < {target}", "red"))
