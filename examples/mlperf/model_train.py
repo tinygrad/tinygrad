@@ -256,8 +256,6 @@ def train_unet3d():
   SIZE = (64, 64, 64) if getenv("SMALL") else (128, 128, 128)
   SEED = getenv("SEED")
 
-  if getenv("HALF"): dtypes.default_float = dtypes.half
-
   if SEED:
     assert 1 <= SEED <= 9, "seed must be between 1-9"
     Tensor.manual_seed(SEED)
