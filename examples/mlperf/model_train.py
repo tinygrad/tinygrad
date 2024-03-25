@@ -9,6 +9,7 @@ from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_sa
 from tinygrad.nn.optim import LARS, SGD, OptimizerGroup
 
 from extra.lr_scheduler import LRSchedulerGroup
+from examples.mlperf.bert.pretrain import pretrain as train
 from examples.mlperf.helpers import get_training_state, load_training_state
 
 def train_resnet():
