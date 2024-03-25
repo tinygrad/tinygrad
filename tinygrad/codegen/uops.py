@@ -170,6 +170,7 @@ class UOpGraph:
       if len(nu) == len(self.uops): break
       if DEBUG >= 4: print(f"reduced UOp count from {len(self.uops)} to {len(nu)}")
       self.uops = nu
+    self.saved_exprs = {k:v for k,v in self.saved_exprs.items() if v in nu}
 
   # optional
   def type_verify(self):
@@ -250,10 +251,10 @@ class UOpGraph:
         non_loop = to_symbolic(next(v for v in with_loop.vin if v != next_with_loop and loop_op not in get_recursive_parents(v)))
         if round_up and with_loop.arg is BinaryOps.MUL: factored = factored + (non_loop - 1)
         return loop_factor(next_with_loop, alu_opposite(with_loop.arg, factored, non_loop), loop_op)
-    def const(x): return self.add(UOps.CONST, dtypes.default_int, tuple(), x)
-    def neg(x): return self.add(UOps.ALU, dtypes.default_int, (x,), UnaryOps.NEG)
-    def max(x, y): return self.add(UOps.ALU, dtypes.default_int, (x, y), BinaryOps.MAX)
-    def uop_alu_idx(a: UOp, b, op, dtype=dtypes.default_int):
+    def const(x, insert_before=None): return self.add(UOps.CONST, dtypes.int32, tuple(), x, insert_before=insert_before)
+    def neg(x): return self.add(UOps.ALU, dtypes.int32, (x,), UnaryOps.NEG)
+    def max(x, y): return self.add(UOps.ALU, dtypes.int32, (x, y), BinaryOps.MAX)
+    def uop_alu_idx(a: UOp, b, op, dtype=dtypes.int32):
       render_b: UOp = cast(UOp, (NumNode(b) if not isinstance(b, Node) else b).render(render_ops))
       return self.add(UOps.ALU, dtype, (a, render_b), op)
     seen_vars: Dict[UOp,str] = {}
@@ -269,29 +270,33 @@ class UOpGraph:
     for loop_op in reversed([op for op in self.uops if op.uop is UOps.LOOP]):
       phis = set([u for u in self.get_recursive_children(loop_op) if u.uop is UOps.PHI])
       wheres = set([u for phi in phis for u in get_recursive_parents(phi) if u.arg == TernaryOps.WHERE])
-      if (any([u.uop not in allowed_ops or (u.uop is UOps.ALU and u.arg not in allowed_alus) for phi in phis for u in get_recursive_parents(phi)])
+      if (any([u.uop is not UOps.CONST for u in loop_op.vin])
+        or any([u.uop not in allowed_ops or (u.uop is UOps.ALU and u.arg not in allowed_alus) for phi in phis for u in get_recursive_parents(phi)])
         or any([where.vin[2].arg != 0 or where.vin[0].vin[1].uop is not UOps.CONST for where in wheres])
         or any(len([op for op in get_recursive_parents(where) if op.uop is UOps.LOOP]) == 0 for where in wheres)): continue
       if DEBUG >= 4 and (len(phis) > 0 or len(wheres) > 0): print("simplified {} PHI and {} WHERE in loop".format(len(phis), len(wheres)))
+      loop_length = loop_op.vin[1].arg - loop_op.vin[0].arg
+      for u in self.uops:
+        if u.arg is BinaryOps.ADD and len(wheres.intersection(get_recursive_parents(u))) and len(phis.intersection(self.get_recursive_children(u))):
+          u.vin = tuple([const(vin.arg*loop_length, insert_before=self.uops.index(u)) if vin.uop is UOps.CONST else vin for vin in list(u.vin)])
       for where in sorted(wheres, key=lambda x: self.uops.index(x)):
         comp_lt, comp_gt = where.vin[0].vin[0], where.vin[0].vin[1]
         factored = loop_factor(comp_lt, NumNode(int(comp_gt.arg)), loop_op, round_up=(comp_gt.arg > 0))
         final_value = factored - NumNode(loop_op.vin[0].arg) if (comp_gt.arg > 0) else NumNode(loop_op.vin[1].arg-1) - factored
         self.uops, after_split_ops = self.uops[:(where_index:=self.uops.index(where))], self.uops[where_index:]
         rendered = final_value.render(render_ops)
-        loop_length = loop_op.vin[1].arg - loop_op.vin[0].arg
         min_clamped = max(rendered, const(0)) if (final_value.min < 0) else rendered
         max_clamped = neg(max(const(-1*loop_length), neg(min_clamped))) if (final_value.max > loop_length) else min_clamped
-        maybe_cast = self.add(UOps.CAST, where.dtype, (max_clamped,)) if where.dtype != dtypes.default_int else max_clamped
+        maybe_cast = self.add(UOps.CAST, where.dtype, (max_clamped,)) if where.dtype != dtypes.int32 else max_clamped
         final_op = self.add(UOps.ALU, where.dtype, (maybe_cast, where.vin[1]), BinaryOps.MUL)
         self.uops = self.uops + after_split_ops
         self.replace_op(where, final_op)
-        get_recursive_parents.cache_clear()
       for phi in phis:
         self.replace_op(phi, phi.vin[1])
         self.uops.remove((accumulator:=phi.vin[0]))
         for alu_with_accum in [op for op in self.uops if accumulator in op.vin]:
           self.replace_op(alu_with_accum, next(op for op in alu_with_accum.vin if op != accumulator))
+      get_recursive_parents.cache_clear()
 
   def fix_to_store_directly(self):
     replaced_stores: Dict[UOp,UOp] = {}
@@ -383,5 +388,5 @@ class UOpGraph:
         if u.arg.startswith("__metal_wmma"): flops += 2*(8*8*8)//32 * mults
         elif u.arg == "__hip_wmma_f16_f16" or u.arg == "__builtin_amdgcn_wmma_f32_16x16x16_f16_w32": flops += 2*(16*16*16)//32 * mults
         elif u.arg == "__cuda_mma_m16n8k16_f16_f32": flops += 2*(8*16*16)//32 * mults
-        else: raise Exception("not implemented")
+        else: raise NotImplementedError(f"not implemented wmma {u.arg=}")
     return flops, mem

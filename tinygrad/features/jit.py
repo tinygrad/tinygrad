@@ -57,7 +57,8 @@ def apply_graph_to_jit(jit_cache: List[JitItem], input_rawbuffers: List[Buffer],
   for ji in jit_cache:
     ji_graph_dev: Optional[Compiled] = None # device on which the ji will be graphed. Not graphed if None.
     if isinstance(ji.prg, CompiledASTRunner): ji_graph_dev = ji.prg.device
-    elif isinstance(ji.prg, BufferXfer) and ji.rawbufs[0] and ji.rawbufs[0].d.dname.startswith("HSA"): ji_graph_dev = ji.rawbufs[0].d
+    elif isinstance(ji.prg, BufferXfer) and ji.rawbufs[0] and ji.rawbufs[0].d.dname.split(":", 1)[0] in {"HSA", "CUDA"}:
+      ji_graph_dev = ji.rawbufs[0].d
 
     can_be_graphed = ji_graph_dev and ji_graph_dev.graph
     can_extend_graph_batch = can_be_graphed and len(current_batch) < max_batch_size and (ji_graph_dev == current_device or
@@ -119,9 +120,11 @@ class TinyJit(Generic[ReturnType]):
       CacheCollector.start(var_vals)
       with Context(GRAPH=getenv("JITGRAPH", GRAPH.value)):
         self.ret = self.fxn(*args, **kwargs)
-        for p in get_parameters(self.ret): p.realize()
+        Tensor.corealize(get_parameters(self.ret))
       self.jit_cache = CacheCollector.finish()
       assert len(self.jit_cache) != 0, "didn't JIT anything!"
+      # TODO: reset doesn't work if we delete this
+      #del self.fxn
       if DEBUG >= 1 and len(set(get_input_replace(self.jit_cache, input_rawbuffers).values())) != len(input_rawbuffers):
         print("WARNING: some input tensors not found")
       if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
@@ -133,7 +136,7 @@ class TinyJit(Generic[ReturnType]):
     elif self.cnt == 0:
       # jit ignore
       self.ret = self.fxn(*args, **kwargs)
-      for p in get_parameters(self.ret): p.realize()
+      Tensor.corealize(get_parameters(self.ret))
 
     # clear jit inputs
     for (j,i) in self.input_replace.keys(): self.jit_cache[j].rawbufs[i] = None
@@ -162,16 +165,15 @@ class _CacheCollector:
     self.placeholders: WeakKeyDictionary[Buffer, PlaceHolder] = WeakKeyDictionary()
     self.var_vals = var_vals if var_vals is not None else {}
 
-  def add(self, prg, rawbufs, var_vals):
+  def add(self, prg, rawbufs:List[Buffer], var_vals:Dict[Variable, int]):
     if self.cache is None: return
     for k,v in var_vals.items(): assert k in self.var_vals and self.var_vals[k] == v, f"var_vals {k} mismatch {v} != {self.var_vals.get(k)}"
 
     # Buffer optimization is allowed only for kernel operations. Avoids for copies (prevents parallelism) and syncs (incorrect buffer reuse).
-    allow_buffer_optimization = isinstance(prg, CompiledASTRunner)
+    if isinstance(prg, CompiledASTRunner):
+      for i in range(prg.outcount): self.placeholders[rawbufs[i]] = PlaceHolder(rawbufs[i])
 
-    # NOTE: this is making an assumption that 0 is special
-    if len(rawbufs): self.placeholders[rawbufs[0]] = PlaceHolder(rawbufs[0])
-    self.cache.append((prg, [self.placeholders.get(x, x) if isinstance(x, Buffer) and allow_buffer_optimization else x for x in rawbufs]))
+    self.cache.append((prg, [self.placeholders.get(x, x) if isinstance(x, Buffer) else x for x in rawbufs]))
 
   def finish(self) -> List[JitItem]:
     if self.cache is None: return []

@@ -4,11 +4,11 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_addons as tfa
 from tensorflow.python.ops import math_ops
+from extra.lr_scheduler import LRSchedulerGroup
 
 from tinygrad.tensor import Tensor
-from tinygrad.nn.optim import LAMB
+from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup
 
-from examples.mlperf.optimizers import LARS
 from test.external.mlperf_resnet.lars_optimizer import LARSOptimizer
 
 from examples.mlperf.lr_schedulers import PolynomialDecayWithWarmup
@@ -55,7 +55,7 @@ def step(optim, steps=1, kwargs={}, scheduler=None, schedopts=None, do_optim=Tru
       out = net.forward()
       optim.zero_grad()
       out.backward()
-    lrs.append(optim.lr.numpy().item())
+    lrs.append(optim.lr.item() if not isinstance(optim, OptimizerGroup) else optim.optimizers[0].lr.item())
     if do_optim: optim.step()
     if scheduler is not None: scheduler.step()
   return lrs, net.x.detach().numpy(), net.W.detach().numpy()
@@ -83,11 +83,19 @@ def step_tf(optim, steps=1, kwargs={}, scheduler=None, schedopts=None, do_optim=
       optim._iterations.assign_add(1)
   return lrs, net.x.numpy(), net.W.numpy()
 
-# skip_list=True -> skip W
-def create_tiny_lars(params, lr, skip_list=False): return LARS(params, lr, skip_list=[params[1]] if skip_list else None)
+# skip list is skipping W
+def create_tiny_lars(params, lr, skip_list=False):
+  if skip_list: return OptimizerGroup(LARS([params[0]], lr), SGD([params[1]], lr, classic=True, weight_decay=0., momentum=.9))
+  return LARS(params, lr)
 def create_tf_lars(lr, skip_list=False): return LARSOptimizer(lr, skip_list=["W"] if skip_list else None)
 
-def create_tf_polylr(initial_lr, end_lr, train_steps, warmup, power=2):
+def create_tiny_polylr(optim, initial_lr, end_lr, train_steps, warmup, power=2, skip_list=False):
+  assert power == 2
+  if skip_list: return LRSchedulerGroup(
+    PolynomialDecayWithWarmup(optim[0], initial_lr, end_lr, train_steps, warmup, power),
+    PolynomialDecayWithWarmup(optim[1], initial_lr, end_lr, train_steps, warmup, power))
+  return PolynomialDecayWithWarmup(optim, initial_lr, end_lr, train_steps, warmup, power)
+def create_tf_polylr(initial_lr, end_lr, train_steps, warmup, power=2, skip_list=False):
   assert power == 2
   return PolynomialDecayWithWarmup_tf(1, 1, train_steps,
                                       initial_learning_rate=initial_lr, end_learning_rate=end_lr, warmup_epochs=warmup)
@@ -102,7 +110,7 @@ class ExternalTestOptim(unittest.TestCase):
   def _test_lars(self, steps, opts, atol, rtol): self._test_optim(create_tiny_lars, create_tf_lars, steps, opts, atol, rtol)
   def _test_lars_polylr(self, steps, opts, schedopts, atol, rtol, do_optim=True):
     self._test_optim(create_tiny_lars, create_tf_lars, steps, opts, atol, rtol,
-                     tiny_sched=PolynomialDecayWithWarmup, tf_sched=create_tf_polylr, schedopts=schedopts, do_optim=do_optim)
+                     tiny_sched=create_tiny_polylr, tf_sched=create_tf_polylr, schedopts=schedopts, do_optim=do_optim)
 
   def test_lamb(self): self._test_lamb(1, {'lr': 0.001}, 1e-5, 0)
   def test_lamb_high_lr(self): self._test_lamb(1, {'lr': 10}, 1e-5, 1e-5)
@@ -112,9 +120,12 @@ class ExternalTestOptim(unittest.TestCase):
 
   def test_lars(self): self._test_lars(1, {'lr': 0.01}, 1e-5, 0)
   def test_lars_high_lr(self): self._test_lars(1, {'lr': 10}, 1e-5, 1e-5)
-  def test_multistep_lars(self): self._test_lamb(10, {'lr': 0.001}, 1e-5, 0)
-  def test_multistep_lars_high_lr(self): self._test_lamb(10, {'lr': 10}, 1e-5, 3e-4)
-  def test_lars_skip_list(self): self._test_lars(1, {'lr': 0.01, 'skip_list': True}, 1e-5, 0)
+  def test_multistep_lars(self): self._test_lars(10, {'lr': 0.001}, 1e-5, 0)
+  def test_multistep_lars_high_lr(self): self._test_lars(10, {'lr': 10}, 1e-5, 3e-4)
+  def test_lars_skip(self): self._test_lars(10, {'lr': 10, 'skip_list': True}, 1e-5, 3e-4)
+  def test_lars_skip_high_lr(self): self._test_lars(1, {'lr': 10, 'skip_list': True}, 1e-5, 1e-5)
+  def test_lars_skip_multistep(self): self._test_lars(10, {'lr': 0.001, 'skip_list': True}, 1e-5, 0)
+  def test_lars_skip_multistep_high_lr(self): self._test_lars(10, {'lr': 10, 'skip_list': True}, 1e-5, 3e-4)
 
   def test_lars_polylr(self):
     self._test_lars_polylr(10, {'lr': 1.0}, {
@@ -130,6 +141,15 @@ class ExternalTestOptim(unittest.TestCase):
       'train_steps': 100,
       'warmup': 43
     }, 1e-5, 1e-5, do_optim=False)
+  def test_lars_polylr_skip(self):
+    self._test_lars_polylr(10, {'lr': 1.0, 'skip_list': True}, {
+      'initial_lr': 1.0,
+      'end_lr': 1e-4,
+      'train_steps': 10,
+      'warmup': 3,
+      'skip_list': True
+    }, 1e-5, 1e-5)
+
   @unittest.skip("slow, but you can run this locally to check")
   def test_lars_polylr_resnet(self):
     train_files = 1_281_167

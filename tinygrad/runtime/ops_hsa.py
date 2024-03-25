@@ -3,10 +3,12 @@ import ctypes, functools, subprocess, io, atexit, collections, json
 from typing import Tuple, TypeVar, List, Dict, Any
 import tinygrad.runtime.autogen.hsa as hsa
 from tinygrad.helpers import DEBUG, init_c_var, from_mv, round_up, to_mv, init_c_struct_t, getenv
-from tinygrad.device import Compiled, LRUAllocator, BufferOptions
+from tinygrad.device import Compiled, LRUAllocator, BufferOptions, Compiler
 from tinygrad.codegen.kernel import LinearizerOptions
-from tinygrad.runtime.ops_hip import HIPCompiler
 from tinygrad.runtime.driver.hsa import check, scan_agents, find_memory_pool, AQLQueue
+from tinygrad.renderer.cstyle import HIPRenderer
+from tinygrad.runtime.driver.hip_comgr import compile_hip
+if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401
 
 PROFILE = getenv("PROFILE", 0)
 
@@ -40,8 +42,13 @@ class HSAProfiler:
     print(f"Saved HSA profile to {path}")
 Profiler = HSAProfiler()
 
-class HSACompiler(HIPCompiler):
+class HSACompiler(Compiler):
   linearizer_opts = LinearizerOptions("HSA", has_tensor_cores=True, shared_max=65536)
+  def __init__(self, arch:str):
+    self.arch = arch
+    super().__init__(f"compile_hip_{self.arch}")
+  def render(self, name:str, uops) -> str: return HIPRenderer(name, uops)
+  def compile(self, src:str) -> bytes: return compile_hip(src, self.arch)
 
 class HSAProgram:
   def __init__(self, device:HSADevice, name:str, lib:bytes):
@@ -83,7 +90,8 @@ class HSAProgram:
       for i in range(len(vals)): args_st.__setattr__(f'v{i}', vals[i])
       self.device.flush_hdp()
 
-    signal = self.device.hw_queue.submit_kernel(self, global_size, local_size, kernargs, need_signal=(wait or PROFILE))
+    signal = self.device.alloc_signal(reusable=True) if wait or PROFILE else None
+    self.device.hw_queue.submit_kernel(self, global_size, local_size, kernargs, completion_signal=signal)
     if PROFILE: Profiler.track(signal, self.device, self.name)
     if wait:
       hsa.hsa_signal_wait_scacquire(signal, hsa.HSA_SIGNAL_CONDITION_LT, 1, (1 << 64) - 1, hsa.HSA_WAIT_STATE_ACTIVE)
@@ -108,7 +116,7 @@ class HSAAllocator(LRUAllocator):
       check(hsa.hsa_amd_memory_pool_allocate(HSADevice.cpu_mempool, size, 0, ctypes.byref(mem := ctypes.c_void_p())))
       check(hsa.hsa_amd_agents_allow_access(2, (hsa.hsa_agent_t*2)(HSADevice.cpu_agent, self.device.agent), None, mem))
       return mem.value
-    else: raise Exception("no options")
+    else: raise ValueError("no options")
 
   def _free(self, opaque:T):
     HSADevice.synchronize_system()
@@ -116,18 +124,17 @@ class HSAAllocator(LRUAllocator):
 
   def copyin(self, dest:T, src: memoryview):
     # Async copyin sync model uses barriers on the main hw queue, since barriers are guaranteed to execute in order with all other packets.
-    copy_signal = self.device.alloc_signal(reusable=True)
-    sync_signal = self.device.hw_queue.submit_barrier(need_signal=True)
+    self.device.hw_queue.submit_barrier([], sync_signal := self.device.alloc_signal(reusable=True))
     mem = self._alloc_with_options(src.nbytes, BufferOptions(host=True))
     ctypes.memmove(mem, from_mv(src), src.nbytes)
-    check(hsa.hsa_amd_memory_async_copy_on_engine(dest, self.device.agent, mem, HSADevice.cpu_agent, src.nbytes,
-                                                  1, ctypes.byref(sync_signal), copy_signal, hsa.HSA_AMD_SDMA_ENGINE_0, True))
-    self.device.hw_queue.submit_barrier(wait_signals=[copy_signal])
+    check(hsa.hsa_amd_memory_async_copy_on_engine(dest, self.device.agent, mem, HSADevice.cpu_agent, src.nbytes, 1, ctypes.byref(sync_signal),
+                                                  copy_signal := self.device.alloc_signal(reusable=True), hsa.HSA_AMD_SDMA_ENGINE_0, True))
+    self.device.hw_queue.submit_barrier([copy_signal])
     self.device.delayed_free.append(mem)
     if PROFILE: Profiler.track(copy_signal, self.device, f"copyin: CPU -> HSA:{self.device.device_id}", is_copy=True)
 
   def copy_from_fd(self, dest, fd, offset, size):
-    sync_signal = self.device.hw_queue.submit_barrier(need_signal=True)
+    self.device.hw_queue.submit_barrier([], sync_signal := self.device.alloc_signal(reusable=True))
 
     if not hasattr(self, 'hb'):
       self.hb = [self._alloc_with_options(CHUNK_SIZE, BufferOptions(host=True)) for _ in range(2)]
@@ -161,7 +168,7 @@ class HSAAllocator(LRUAllocator):
 
     wait_signals = [self.hb_signals[self.hb_polarity - 1]]
     if copies_called > 1: wait_signals.append(self.hb_signals[self.hb_polarity])
-    self.device.hw_queue.submit_barrier(wait_signals=wait_signals)
+    self.device.hw_queue.submit_barrier(wait_signals)
 
   def copyout(self, dest:memoryview, src:T):
     HSADevice.synchronize_system()
@@ -174,13 +181,13 @@ class HSAAllocator(LRUAllocator):
     if PROFILE: Profiler.track(copy_signal, self.device, f"copyout: HSA:{self.device.device_id} -> CPU", is_copy=True)
 
   def transfer(self, dest:T, src:T, sz:int, src_dev=None, dest_dev=None):
-    copy_signal = dest_dev.alloc_signal(reusable=False)
-    sync_signal_1 = src_dev.hw_queue.submit_barrier(need_signal=True)
-    sync_signal_2 = dest_dev.hw_queue.submit_barrier(need_signal=True)
+    src_dev.hw_queue.submit_barrier([], sync_signal_1 := src_dev.alloc_signal(reusable=True))
+    dest_dev.hw_queue.submit_barrier([], sync_signal_2 := dest_dev.alloc_signal(reusable=True))
     c_wait_signal = (hsa.hsa_signal_t*2)(sync_signal_1, sync_signal_2)
-    check(hsa.hsa_amd_memory_async_copy_on_engine(dest, dest_dev.agent, src, src_dev.agent, sz, 2, c_wait_signal, copy_signal, hsa.HSA_AMD_SDMA_ENGINE_0, True)) # noqa: E501
-    src_dev.hw_queue.submit_barrier(wait_signals=[copy_signal])
-    dest_dev.hw_queue.submit_barrier(wait_signals=[copy_signal])
+    check(hsa.hsa_amd_memory_async_copy_on_engine(dest, dest_dev.agent, src, src_dev.agent, sz, 2, c_wait_signal,
+                                                  copy_signal := dest_dev.alloc_signal(reusable=False), hsa.HSA_AMD_SDMA_ENGINE_0, True))
+    src_dev.hw_queue.submit_barrier([copy_signal])
+    dest_dev.hw_queue.submit_barrier([copy_signal])
     if PROFILE: Profiler.track(copy_signal, src_dev, f"transfer: HSA:{src_dev.device_id} -> HSA:{dest_dev.device_id}", is_copy=True)
 
 class HSADevice(Compiled):

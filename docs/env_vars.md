@@ -33,7 +33,7 @@ Variable | Possible Value(s) | Description
 DEBUG               | [1-6]      | enable debugging output, with 4 you get operations, timings, speed, generated code and more
 GPU                 | [1]        | enable the GPU backend
 CUDA                | [1]        | enable CUDA backend
-HIP                 | [1]        | enable HIP backend
+HSA                 | [1]        | enable HSA backend
 CPU                 | [1]        | enable CPU backend
 METAL               | [1]        | enable Metal backend (for Mac M1 and after)
 METAL_XCODE         | [1]        | enable Metal using macOS Xcode SDK
@@ -45,6 +45,7 @@ BEAM                | [#]        | number of beams in kernel beam search
 GRAPH               | [1]        | create a graph of all operations (requires graphviz)
 GRAPHUOPS           | [1]        | create a graph of uops (requires graphviz and saves at /tmp/uops.{svg,dot})
 GRAPHPATH           | [/path/to] | where to put the generated graph
+DEFAULT_FLOAT       | [HALF, ...]| specify the default float dtype (FLOAT32, HALF, BFLOAT16, FLOAT64, ...), default to FLOAT32
 IMAGE               | [1-2]      | enable 2d specific optimizations
 FLOAT16             | [1]        | use float16 for images instead of float32
 DISALLOW_ASSIGN     | [1]        | disallow assignment of tensors

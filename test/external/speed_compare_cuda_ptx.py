@@ -38,7 +38,7 @@ if __name__ == "__main__":
     lin.linearize()
     ptx_src = ptx.render(to_function_name(lin.name), lin.uops)
     try:
-      ptx_prg = CompiledASTRunner(lin.name, ptx_src, dev, lin.global_size, lin.local_size, lin.uops.vars(), precompiled=ptx.compile(ptx_src))
+      ptx_prg = CompiledASTRunner(lin.name, ptx_src, "CUDA", lin.global_size, lin.local_size, lin.uops.vars(), precompiled=ptx.compile(ptx_src))
     except RuntimeError:
       print("PTX FAIL")
       continue

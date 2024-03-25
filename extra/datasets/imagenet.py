@@ -13,10 +13,14 @@ def get_imagenet_categories():
   return {v[0]: int(k) for k,v in ci.items()}
 
 @diskcache
-def get_train_files(): return glob.glob(str(BASEDIR / "train/*/*"))
+def get_train_files():
+  if not (files:=glob.glob(p:=str(BASEDIR / "train/*/*"))): raise FileNotFoundError(f"No training files in {p}")
+  return files
 
 @functools.lru_cache(None)
-def get_val_files(): return glob.glob(str(BASEDIR / "val/*/*"))
+def get_val_files():
+  if not (files:=glob.glob(p:=str(BASEDIR / "val/*/*"))): raise FileNotFoundError(f"No validation files in {p}")
+  return files
 
 def image_resize(img, size, interpolation):
   w, h = img.size

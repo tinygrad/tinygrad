@@ -1,17 +1,19 @@
-import random, traceback, ctypes
-from typing import List, Tuple
+import random, traceback, ctypes, argparse
+from typing import List, Tuple, DefaultDict
 import numpy as np
 from collections import defaultdict
 from extra.optimization.helpers import load_worlds, ast_str_to_lin
-from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.features.search import get_linearizer_actions, bufs_from_lin
-from tinygrad.tensor import Tensor
-from tinygrad.features.graph import print_tree
-from tinygrad.helpers import getenv, from_mv, prod, colored, Context
-from tinygrad.device import Device, Compiled
-from tinygrad.codegen.linearizer import UOp
 
-def tuplize_uops(uops:List[UOp]) -> Tuple: return tuple([(x.uop, x.dtype, tuple(uops.index(x) for x in x.vin), x.arg) for x in uops])
+from tinygrad import Tensor, Device, dtypes
+from tinygrad.codegen.linearizer import Linearizer, UOp
+from tinygrad.codegen.kernel import Opt
+from tinygrad.features.search import get_linearizer_actions, bufs_from_lin
+from tinygrad.features.graph import print_tree
+from tinygrad.helpers import getenv, from_mv, prod, colored, Context, DEBUG
+from tinygrad.ops import LazyOp
+
+def tuplize_uops(uops:List[UOp]) -> Tuple:
+  return tuple([(x.uop, x.dtype, tuple(uops.index(x) for x in x.vin), x.arg) for x in uops])
 
 device = Device[Device.DEFAULT]
 
@@ -19,12 +21,21 @@ def get_fuzz_rawbufs(lin):
   rawbufs = bufs_from_lin(lin)
 
   # Reallocate output buffer with additional area to detect out-of-bounds writes.
-  RED_AREA_SIZE = 1024 if isinstance(device, Compiled) else 0
+  RED_AREA_SIZE = 1024
+  # setting output  # TODO: multi-output kernel
   rawbufs[0] = get_fuzz_rawbuf_like(rawbufs[0], zero=True, size=rawbufs[0].size+RED_AREA_SIZE)
+  # setting inputs
   with Context(DEBUG=0):
     for rawbuf in rawbufs[1:]:
-      t = Tensor.uniform((rawbuf.size,), dtype=rawbuf.dtype)
-      rawbuf.copyin(t.realize().lazydata.realized.as_buffer())
+      if dtypes.is_unsigned(rawbuf.dtype):
+        data = np.random.randint(0, 100, size=rawbuf.size, dtype=rawbuf.dtype.np)
+      elif dtypes.is_int(rawbuf.dtype):
+        data = np.random.randint(-100, 100, size=rawbuf.size, dtype=rawbuf.dtype.np)
+      elif rawbuf.dtype == dtypes.bool:
+        data = np.random.choice([True, False], size=rawbuf.size)
+      else:
+        data = np.random.uniform(-10, 10, size=rawbuf.size).astype(dtype=rawbuf.dtype.np)
+      rawbuf.copyin(Tensor(data).realize().lazydata.realized.as_buffer())
   return rawbufs
 
 def get_fuzz_rawbuf_like(rawbuf, zero=False, size=None):
@@ -38,32 +49,66 @@ def get_fuzz_rawbuf_like(rawbuf, zero=False, size=None):
 
 def run_linearizer(lin: Linearizer, rawbufs=None, var_vals=None):
   if rawbufs is None: rawbufs = bufs_from_lin(lin)
-  if var_vals is None: var_vals = {v: v.min for v in lin.ast.vars()}
+  if var_vals is None: var_vals = {v: v.min for v in lin.ast[0].vars()}
 
   # TODO: images needs required_optimization
   try:
-    if isinstance(device, Compiled):
-      prg = device.to_program(lin)
-    else:
-      prg = device.get_runner(lin.ast)
+    prg = device.to_program(lin)
   except Exception:
-    print(lin.ast)
-    print(lin.applied_opts)
     traceback.print_exc()
-    print("COMPILE FAILED!!")
     return "COMPILE_ERROR"
 
   try:
-    prg.exec(rawbufs, var_vals)
+    prg(rawbufs, var_vals, wait=True, do_update_stats=False)
   except Exception:
-    print(lin.ast)
-    print(lin.applied_opts)
     traceback.print_exc()
-    print("EXEC FAILED!!")
     return "EXEC_ERROR"
 
   return "PASS"
 
+def compare_linearizer(lin: Linearizer, rawbufs=None, var_vals=None, ground_truth=None, rtol=1e-2, atol=1e-2):
+  # TODO: for bfloat16 it compiles linearizer, but it does not run because numpy cannot generate bf16 buffer.
+  has_bf16 = any(b.dtype == dtypes.bfloat16 for b in lin.membufs)
+
+  # TODO: raise specific fuzzing errors instead of str, and propagate the error message
+  try:
+    if rawbufs is None:
+      rawbufs = get_fuzz_rawbufs(lin)
+    else:
+      rawbufs[0] = get_fuzz_rawbuf_like(rawbufs[0], zero=True) # get a new output buffer
+  except BaseException:
+    return ("RAWBUFS_ERROR", rawbufs, var_vals, ground_truth,)
+
+  if var_vals is None:
+    # TODO: handle symbolic max case
+    var_vals = {v: random.randint(v.min, v.max if isinstance(v.max, int) else v.min) for v in lin.ast[0].vars()}
+
+  if ground_truth is None and not has_bf16:
+    unoptimized = Linearizer(*lin.ast)
+    unoptimized.required_optimizations()
+    if run_linearizer(unoptimized, rawbufs, var_vals) != "PASS":
+      return ("BASELINE_ERROR", rawbufs, var_vals, ground_truth,)
+    ground_truth = np.frombuffer(rawbufs[0].as_buffer(), rawbufs[0].dtype.np).copy()
+
+  rawbufs[0] = get_fuzz_rawbuf_like(rawbufs[0], zero=True) # get a new output buffer
+  if (run_msg := run_linearizer(lin, rawbufs, var_vals)) != "PASS":
+    return (run_msg, rawbufs, var_vals, ground_truth,)
+
+  try:
+    if not has_bf16:
+      result = np.frombuffer(rawbufs[0].as_buffer(), rawbufs[0].dtype.np)
+      np.testing.assert_allclose(result, ground_truth, rtol=rtol, atol=atol)
+  except AssertionError as e:
+    if DEBUG >= 2:
+      print(f"COMPARE_ERROR details: {e}")
+      mismatch_indices = np.where(~np.isclose(result, ground_truth, rtol=rtol, atol=atol))
+      mismatched_result = result[mismatch_indices]
+      mismatched_ground_truth = ground_truth[mismatch_indices]
+      for i, idx in enumerate(mismatch_indices[0]):
+        print(f"mismatch at {idx=}: result={mismatched_result[i]} <> ground_truth={mismatched_ground_truth[i]}")
+    return ("COMPARE_ERROR", rawbufs, var_vals, ground_truth,)
+
+  return ("PASS", rawbufs, var_vals, ground_truth,)
 
 def fuzz_linearizer(lin: Linearizer):
   SEED = getenv("SEED", 42)
@@ -73,30 +118,14 @@ def fuzz_linearizer(lin: Linearizer):
   print(lin.colored_shape())
   seen_uops = {}
   last_lins = [lin]
-  failures = defaultdict(list)
+  failures:DefaultDict[str, List[Tuple[Tuple[LazyOp,...],List[Opt]]]] = defaultdict(list)
+  rawbufs, var_vals, ground_truth = None, None, None
 
   FUZZ_BEAM = getenv("FUZZ_BEAM", 0)
   FUZZ_MAX_SIZE = getenv("FUZZ_MAX_SIZE", 0)
   if FUZZ_MAX_SIZE > 0 and prod(lin.full_shape) > FUZZ_MAX_SIZE:
     print("skipping large kernel")
     return failures
-
-  # get baseline unoptimized output
-  unoptimized = Linearizer(*lin.ast)
-  var_vals = {v: random.randint(v.min, v.max) for v in lin.ast[0].vars()}
-
-  try:
-    rawbufs = get_fuzz_rawbufs(lin)
-  except Exception:
-    traceback.print_exc()
-    print("RAWBUFS FAILED!!")
-    failures["RAWBUFS_ERROR"].append((unoptimized.ast, unoptimized.applied_opts))
-    return failures
-
-  if run_linearizer(unoptimized, rawbufs, var_vals) != "PASS":
-    failures["BASELINE_ERROR"].append((unoptimized.ast, unoptimized.applied_opts))
-    return failures
-  ground_truth = np.frombuffer(rawbufs[0].as_buffer(), rawbufs[0].dtype.np).copy()
 
   for depth in range(getenv("DEPTH", 1 if FUZZ_BEAM else 10)):
     next_lins = []
@@ -118,23 +147,15 @@ def fuzz_linearizer(lin: Linearizer):
         seen_uops[tuops] = tuple(test_lin.applied_opts)
 
         if not FUZZ_BEAM: print(test_lin.colored_shape())
-        # get a new output buffer
-        rawbufs[0] = get_fuzz_rawbuf_like(rawbufs[0], zero=True)
-        if (msg := run_linearizer(test_lin, rawbufs, var_vals)) != "PASS":
+
+        (msg, rawbufs, var_vals, ground_truth) = compare_linearizer(test_lin, rawbufs, var_vals, ground_truth)
+        if msg != "PASS":
+          print(test_lin.ast)
+          print(test_lin.applied_opts)
+          print(msg)
           failures[msg].append((test_lin.ast, test_lin.applied_opts))
           continue
 
-        result = np.frombuffer(rawbufs[0].as_buffer(), rawbufs[0].dtype.np)
-        try:
-          # compare memoryviews directly
-          np.testing.assert_allclose(result, ground_truth, rtol=1e-2, atol=1e-2)
-        except AssertionError:
-          print(test_lin.ast)
-          print(test_lin.applied_opts)
-          traceback.print_exc()
-          print("COMPARE FAILED!!")
-          failures["COMPARE_ERROR"].append((test_lin.ast, test_lin.applied_opts))
-          continue
         next_lins.append(test_lin)
 
     last_lins = next_lins
@@ -142,7 +163,22 @@ def fuzz_linearizer(lin: Linearizer):
   return failures
 
 if __name__ == "__main__":
-  ast_strs = load_worlds(filter_reduce=False, filter_novariable=False)
+  parser = argparse.ArgumentParser(description="Run a fuzz testing on one or more kernels", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+  parser.add_argument("--ast", type=str, default=None, help="the ast for the kernel to be optimized")
+  parser.add_argument("--file", type=str, default=None, help="a file containing asts to be optimized, one per line")
+  args = parser.parse_args()
+
+  if args.ast is not None:
+    print("loaded AST from CLI")
+    ast_strs = [args.ast]
+  elif args.file is not None:
+    print(f"loading ASTs from file '{args.file}'")
+    with open(args.file, 'r') as file:
+      ast_strs = file.readlines()
+  else:
+    print("loading ASTs from world")
+    ast_strs = load_worlds(filter_reduce=False, filter_novariable=False)
+
   print(f"{len(ast_strs)=}")
   tested = 0
   failed_ids = []

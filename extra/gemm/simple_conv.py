@@ -16,15 +16,16 @@ COMP = getenv("COMP", 0)
 FLOPS = BS*K*K*CIN*HW*HW*COUT*2
 def rand_input(): return Tensor.rand(BS, CIN, HW, HW, dtype=dtype_in).realize(), Tensor.rand(COUT, CIN, K, K, dtype=dtype_in).realize()
 
-a, b = rand_input()
-for i in range(CNT):
-  if i > 0 and getenv("RAND", 0) != 0:
-    a, b = rand_input()
-  c = a.conv2d(b, padding=PADDING, acc_dtype=acc_dtype).realize()
+if __name__ == "__main__":
+  a, b = rand_input()
+  for i in range(CNT):
+    if i > 0 and getenv("RAND", 0) != 0:
+      a, b = rand_input()
+    c = a.conv2d(b, padding=PADDING, acc_dtype=acc_dtype).realize()
 
-if COMP:
-  import numpy as np, time, torch
-  torch_device = "cuda:0" if torch.cuda.is_available() else ("mps" if getenv("MPS", 0) else "cpu")
-  ta, tb = torch.from_numpy(a.numpy()).to(torch_device), torch.from_numpy(b.numpy()).to(torch_device)
-  tc = torch.nn.functional.conv2d(ta, tb, padding=PADDING)
-  np.testing.assert_allclose(c.numpy(), tc.cpu(), atol=1e-4, rtol=3e-2)
+  if COMP:
+    import numpy as np, time, torch
+    torch_device = "cuda:0" if torch.cuda.is_available() else ("mps" if getenv("MPS", 0) else "cpu")
+    ta, tb = torch.from_numpy(a.numpy()).to(torch_device), torch.from_numpy(b.numpy()).to(torch_device)
+    tc = torch.nn.functional.conv2d(ta, tb, padding=PADDING)
+    np.testing.assert_allclose(c.numpy(), tc.cpu(), atol=1e-4, rtol=3e-2)
