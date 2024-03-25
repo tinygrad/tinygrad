@@ -2,6 +2,7 @@ from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Union
 from dataclasses import dataclass
 import numpy as np  # TODO: remove numpy
 import functools
+from tinygrad.helpers import getenv
 
 Scalar = Union[float, int, bool]
 
@@ -82,6 +83,10 @@ class dtypes:
 
   default_float: ClassVar[DType] = float32
   default_int: ClassVar[DType] = int32
+
+if (env_default_float := getenv("DEFAULT_FLOAT", "")):
+  dtypes.default_float = getattr(dtypes, env_default_float.lower())
+  assert dtypes.is_float(dtypes.default_float), f"{env_default_float} is not a float dtype"
 
 # https://jax.readthedocs.io/en/latest/jep/9407-type-promotion.html
 # we don't support weak type and complex type
