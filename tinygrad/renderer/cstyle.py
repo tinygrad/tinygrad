@@ -24,11 +24,8 @@ class CStyleLanguage(NamedTuple):
   uses_vload: bool = False
   uses_ptr_arithmetic: bool = False
   type_map: Dict[DType, str] = {}
-  code_for_op: Dict = {UnaryOps.NEG: lambda x,dtype: f"(!{x})" if dtype is dtypes.bool else f"(-{x})",
-    UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})" if dtype == dtypes.double else f"(half)sqrt({x})" if dtype == dtypes.half else f"sqrtf({x})",
-    UnaryOps.EXP2: lambda x,dtype: f"exp2({x})" if dtype == dtypes.double else f"(half)exp2({x})" if dtype == dtypes.half else f"exp2f({x})",
-    UnaryOps.LOG2: lambda x,dtype: f"log2({x})" if dtype == dtypes.double else f"(half)log2({x})" if dtype == dtypes.half else f"log2f({x})",
-    UnaryOps.SIN: lambda x,dtype: f"sin({x})" if dtype == dtypes.double else f"(half)sin({x})" if dtype == dtypes.half else f"sinf({x})",
+  code_for_op: Dict = {UnaryOps.NEG: lambda x,dtype: f"(!{x})" if dtype is dtypes.bool else f"(-{x})", UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
+    UnaryOps.EXP2: lambda x,dtype: f"exp2({x})", UnaryOps.LOG2: lambda x,dtype: f"log2({x})", UnaryOps.SIN: lambda x,dtype: f"sin({x})",
     BinaryOps.ADD: lambda a,b,dtype: f"({a}+{b})", BinaryOps.SUB: lambda a,b,dtype: f"({a}-{b})", BinaryOps.MUL: lambda a,b,dtype: f"({a}*{b})",
     BinaryOps.DIV: lambda a,b,dtype: f"({a}/{b})", BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})", BinaryOps.MOD: lambda a,b,dtype: f"({a}%{b})",
     BinaryOps.CMPLT: lambda a,b,dtype: f"({a}<{b})", BinaryOps.CMPEQ: lambda a,b,dtype: f"({a}=={b})", BinaryOps.XOR: lambda a,b,dtype: f"({a}^{b})",
@@ -190,9 +187,6 @@ class OpenCLLanguage(CStyleLanguage):
   type_map = { dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong" }
   code_for_op = {**CStyleLanguage().code_for_op, UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})", UnaryOps.EXP2: lambda x,dtype: f"exp2({x})",
     UnaryOps.LOG2: lambda x,dtype: f"log2({x})", UnaryOps.SIN: lambda x,dtype: f"sin({x})",}
-  def render_cast(self, x, var_dtype, bitcast=False) -> str:
-    return f"as_{self.render_dtype(var_dtype)}({x[0]})" if bitcast else super().render_cast(x, var_dtype)
-
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     if any(uop.dtype == dtypes.half for uop in uops): prefix = ["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"]
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
@@ -208,9 +202,6 @@ class MetalLanguage(CStyleLanguage):
   uses_ptr_arithmetic = True
   code_for_workitem = {"g": lambda x: f"gid.{chr(120+x)}", "l": lambda x: f"lid.{chr(120+x)}"}
   extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
-  code_for_op = {**CStyleLanguage().code_for_op, UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})", UnaryOps.EXP2: lambda x,dtype: f"exp2({x})",
-    UnaryOps.LOG2: lambda x,dtype: f"log2({x})", UnaryOps.SIN: lambda x,dtype: f"sin({x})",}
-
   def render_cast(self, x: List[str], var_dtype: DType, bitcast=False) -> str:
     return f"as_type<{self.render_dtype(var_dtype)}>({x[0]})" if bitcast else super().render_cast(x, var_dtype)
 
