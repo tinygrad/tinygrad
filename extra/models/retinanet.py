@@ -1,5 +1,5 @@
 import math
-from tinygrad.helpers import flatten, get_child
+from tinygrad.helpers import flatten, get_child, colored
 from tinygrad import Tensor, dtypes
 import tinygrad.nn as nn
 from extra.models.resnet import ResNet
@@ -26,7 +26,7 @@ def sigmoid_focal_loss(
     # Reducing with sum instead of mean
     loss = loss.sum()
 
-    print('sigmoid_focal_loss:', loss.numpy())
+    # print('sigmoid_focal_loss:', loss.numpy())
 
     return loss
 
@@ -518,8 +518,8 @@ class RetinaNet:
     loss_class = self.head.classification_head.loss(logits_class, targets, matched_idxs)
     # https://github.com/mlcommons/training/blob/master/single_stage_detector/ssd/engine.py#L36
     
-    print('loss_reg', loss_reg.numpy())
-    print('loss_class', loss_class.numpy())
+    # print('loss_reg', loss_reg.numpy())
+    # print('loss_class', loss_class.numpy())
     return (loss_reg+loss_class)
   def load_from_pretrained(self):
     model_urls = {

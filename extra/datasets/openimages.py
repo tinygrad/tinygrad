@@ -170,7 +170,7 @@ def iterate(coco, bs=8, train=False):
       x, original_size = image_load(coco.loadImgs(img_id)[0]["file_name"])
       X.append(x)
       annotations = coco.loadAnns(coco.getAnnIds(img_id))
-      targets.append(prepare_target(annotations, img_id, original_size, train))
+      targets.append(prepare_target(annotations, img_id, original_size, train=train))
     if train:
       yield Tensor(X), targets
     else:

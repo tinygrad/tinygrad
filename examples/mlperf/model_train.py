@@ -224,13 +224,16 @@ def train_retinanet():
   from extra.datasets.openimages_new import iterate, get_openimages
   ROOT = 'extra/datasets/open-images-v6TEST'
   NAME = 'openimages-mlperf'
-  coco_val = get_openimages(NAME,ROOT, 'val')
-  for x,y in iterate(coco_val, 8):
-    print(x)
-    print(y)
-    print(x[0])
-    sys.exit()
-  from extra.datasets.openimages import openimages, iterate
+  coco = get_openimages(NAME,ROOT, 'val')
+  # for x,y in iterate(coco, 8):
+  #   print(x.shape)
+  #   print(y[0].keys())
+  #   print(y[0]['boxes'].shape, y[0]['image_size'])
+  #   print(y[1]['boxes'].shape, y[1]['image_size'])
+  #   print(y[2]['boxes'].shape, y[2]['image_size'])
+  #   print(x[0])
+  #   sys.exit()
+  # # from extra.datasets.openimages import openimages, iterate
   from pycocotools.coco import COCO
   from pycocotools.cocoeval import COCOeval
   import numpy as np
@@ -242,9 +245,9 @@ def train_retinanet():
   anchor_generator = AnchorGenerator(
       anchor_sizes, aspect_ratios
   )
-  coco = COCO(openimages())
-  coco_eval = COCOeval(coco, iouType="bbox")
-  coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
+  # coco = COCO(openimages())
+  # coco_eval = COCOeval(coco, iouType="bbox")
+  # coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
   input_mean = Tensor([0.485, 0.456, 0.406]).reshape(1, -1, 1, 1)
   input_std = Tensor([0.229, 0.224, 0.225]).reshape(1, -1, 1, 1)
   def input_fixup(x):
@@ -280,7 +283,9 @@ def train_retinanet():
   # @TinyJit
   def train_step(X, Y):
     Tensor.training = True
-    i_s = [y['image_size'] for y in Y]
+    # i_s = [y['image_size'] for y in Y]
+    # https://github.com/mlcommons/training/blob/master/single_stage_detector/ssd/model/transform.py#L96
+    i_s = [(800,800)]*X.shape[0]
     # print(i_s)
     # sys.exit()
     # image_list = ImageList(X, [(800,800)]*X.shape[0])
@@ -310,8 +315,8 @@ def train_retinanet():
     # loss = logits_reg.sparse_categorical_crossentropy(Tensor([1,2,3,4,5,6,7,8]).reshape(8,1), label_smoothing=0.1)
     # print('loss',loss.numpy())
     # sys.exit()
-    loss.backward()
-    optimizer.step()
+    # loss.backward()
+    # optimizer.step()
     return loss.realize()
   # @TinyJit
   def eval_step(X, Y):
@@ -321,8 +326,17 @@ def train_retinanet():
 
   for epoch in range(EPOCHS):
     Tensor.training = True
-    for X,Y in iterate(coco, BS, True):
+    # for X,Y in iterate(coco, BS, True):
+    for X,Y in iterate(coco, BS):
+
       print('Input Data Shape:', X.shape)
+      print(X.shape)
+      print(Y[0].keys())
+      print(Y[0]['boxes'].shape, Y[0]['image_size'])
+      print(Y[1]['boxes'].shape, Y[1]['image_size'])
+      print(Y[2]['boxes'].shape, Y[2]['image_size'])
+      print(x[0])
+      # sys.exit()
       # a = model.anchor_gen(X.shape[1:3])
       # print(a)
       # sys.exit()
@@ -336,7 +350,7 @@ def train_retinanet():
       loss = train_step(X, Y)
 
       print('Iter done! Time:',time.monotonic()-st,'Loss:', loss.numpy())
-      del loss, X, Y
+      # del loss, X, Y
       
       # sys.exit()
 

@@ -1,7 +1,9 @@
-import copy
+import copy,sys
 import os
 from PIL import Image
 from typing import Any, Callable, List, Optional, Tuple, Union
+
+import numpy as np
 
 from tinygrad import Tensor, dtypes
 
@@ -24,13 +26,15 @@ class ConvertCocoPolysToMask(object):
 
     boxes = [obj["bbox"] for obj in anno]
     # guard against no boxes via resizing
-    boxes = Tensor(boxes, dtype=dtypes.float).reshape(-1, 4)
+    boxes = np.array(boxes, dtype=np.float32).reshape(-1, 4)
     boxes[:, 2:] += boxes[:, :2]
-    boxes[:, 0::2].clamp(min=0, max=w)
-    boxes[:, 1::2].clamp(min=0, max=h)
+    # boxes[:, 0::2].clip(min_=0, max_=w)
+    # boxes[:, 1::2].clip(min_=0, max_=h)
+    boxes[:, 0::2] = boxes[:, 0::2].clip(0, w)
+    boxes[:, 1::2] = boxes[:, 1::2].clip(0, h)
 
     classes = [obj["category_id"] for obj in anno]
-    classes = Tensor(classes, dtype=dtypes.int64)
+    classes = np.array(classes, dtype=np.int64)
 
     keypoints = None
     if anno and "keypoints" in anno[0]:
@@ -45,8 +49,8 @@ class ConvertCocoPolysToMask(object):
     classes = classes[keep]
 
     target = {}
-    target["boxes"] = boxes
-    target["labels"] = classes
+    target["boxes"] = Tensor(boxes)
+    target["labels"] = Tensor(classes)
     target["image_id"] = image_id
 
     # for conversion to coco api
@@ -76,6 +80,8 @@ class CocoDetection:
 
     id = self.ids[index]
     img = self._load_image(id)
+    orig_size = img.size
+    # sys.exit()
     target = self._load_target(id)
 
     # if self.transforms is not None:
@@ -85,6 +91,7 @@ class CocoDetection:
     target = dict(image_id=image_id, annotations=target)
     if self._transforms is not None:
       img, target = self._transforms(img, target)
+      target['image_size'] = orig_size
     return img, target
   
 def get_openimages(name, root, image_set, transforms=None):
@@ -93,7 +100,7 @@ def get_openimages(name, root, image_set, transforms=None):
       "val":   os.path.join(root, "validation"),
   }
 
-  t = [ConvertCocoPolysToMask(filter_iscrowd=False)]
+  t = ConvertCocoPolysToMask(filter_iscrowd=False)
 
   # if transforms is not None:
   #     t.append(transforms)
@@ -102,14 +109,37 @@ def get_openimages(name, root, image_set, transforms=None):
   img_folder = os.path.join(PATHS[image_set], "data")
   ann_file = os.path.join(PATHS[image_set], "labels", f"{name}.json")
 
-  dataset = CocoDetection(img_folder, ann_file, transforms=transforms)
+  dataset = CocoDetection(img_folder, ann_file, transforms=t)
 
   return dataset
+
+def resize_boxes(boxes: Tensor, original_size: List[int], new_size: List[int]) -> Tensor:
+  ratios = [
+      Tensor(s, dtype=dtypes.float32) / Tensor(s_orig, dtype=dtypes.float32)
+      for s, s_orig in zip(new_size, original_size)
+  ]
+  ratio_height, ratio_width = ratios
+  print(boxes.shape)
+  xmin, ymin, xmax, ymax = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
+
+  xmin = xmin * ratio_width
+  xmax = xmax * ratio_width
+  ymin = ymin * ratio_height
+  ymax = ymax * ratio_height
+  return Tensor.stack((xmin, ymin, xmax, ymax), dim=1)
+import torchvision.transforms.functional as F
+
 def iterate(coco, bs=8):
-  for i in range(0, len(coco.ids), bs):
+  for i in range(8, len(coco.ids), bs):
     X, targets= [], []
     for img_id in coco.ids[i:i+bs]:
       x,t = coco.__getitem__(img_id)
-      X.append(x)
+      
+
+      xNew = F.resize(x, size=(800, 800))
+      xNew = np.array(xNew)
+      X.append(xNew)
+      bbox = t['boxes']
+      bbox = resize_boxes(bbox, x.size, (800,800))
       targets.append(t)
-    yield X, targets
+    yield Tensor(X), targets
