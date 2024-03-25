@@ -108,9 +108,9 @@ def pretrain():
   lr_scheduler = OneCycleLR(optimizer, MAX_LR, 1e8, MAX_LR * 1e12, STEPS, WARMUP_STEPS / STEPS)
 
   @TinyJit
-  def train_step_jitted(input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor, masked_positions:Tensor, masked_lm_ids:Tensor, next_sentence_labels:Tensor):
+  def train_step_jitted(input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor, masked_positions:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
     lm_logits, clsf_logits = model(input_ids, segment_ids, attention_mask, masked_positions)
-    lm_loss = lm_logits.sparse_categorical_crossentropy(masked_lm_ids)
+    lm_loss = lm_logits.sparse_categorical_crossentropy(masked_lm_ids, ignore_index=masked_lm_weights)
     clsf_loss = clsf_logits.binary_crossentropy_logits(next_sentence_labels)
     loss = lm_loss + clsf_loss
 
@@ -123,11 +123,22 @@ def pretrain():
     return loss.realize()
   
   @TinyJit
-  def eval_step_jitted(input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor, masked_positions:Tensor, masked_lm_ids:Tensor):
-    lm_logits, _ = model(input_ids, segment_ids, attention_mask, masked_positions)
-    predictions = lm_logits.log_softmax().argmax(-1)
-    return (predictions == masked_lm_ids).float().mean()
-  
+  def eval_step_jitted(input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor, masked_positions:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
+    lm_logits, clsf_logits = model(input_ids, segment_ids, attention_mask, masked_positions)
+
+    clsf_predictions = clsf_logits.log_softmax().argmax(-1)
+    clsf_accuracy = (clsf_predictions == next_sentence_labels).float().mean()
+
+    mlm_predictions = lm_logits.log_softmax().argmax(-1)
+    mask = masked_lm_weights == 1.0
+    filtered_predictions = mlm_predictions[mask]
+    filtered_true_labels = masked_lm_ids[mask]
+    mlm_accuracy = (filtered_predictions == filtered_true_labels).float().mean()
+
+    lm_loss = lm_logits.sparse_categorical_crossentropy(masked_lm_ids, ignore_index=masked_lm_weights)
+    clsf_loss = clsf_logits.binary_crossentropy_logits(next_sentence_labels)
+    return {"masked_lm_accuracy": mlm_accuracy, "masked_lm_loss": lm_loss, "next_sentence_accuracy": clsf_accuracy, "next_sentence_loss": clsf_loss}
+
   train_batcher = iterate(bs=BS, val=False)
   eval_batcher = iterate(bs=EVAL_BS, val=True)
 
@@ -141,12 +152,14 @@ def pretrain():
         train_step_jitted.reset()
         Tensor.train = False
         accu = 0.0
-        for _ in range(MAX_EVAL_STEPS):
-          X, Y = next(eval_batcher)
-          accu += eval_step_jitted(Tensor(X["input_ids"]), Tensor(X["segment_ids"]), Tensor(X["input_mask"]), Tensor(X["masked_lm_positions"]), Tensor(Y["masked_lm_ids"])).numpy()
+        for eval_step in range(MAX_EVAL_STEPS):
+          data = next(eval_batcher)
+          eval_result = eval_step_jitted(data["input_ids"], data["segment_ids"], data["input_mask"], data["masked_lm_positions"], data["masked_lm_ids"], data["masked_lm_weights"]).numpy()
+          accu += eval_result["masked_lm_accuracy"]
+          print(f"{eval_step:3d} MLM Acc: {eval_result['masked_lm_accuracy']:.2f} MLM Loss: {eval_result['masked_lm_loss']:.2f} NS Acc: {eval_result['next_sentence_accuracy']:.2f} NS Loss: {eval_result['next_sentence_loss']:.2f}")
         Tensor.train = True
-        print(f"{step:3d} {(acc := (accu/MAX_EVAL_STEPS))*100:.2f}% MLM Acc")
-        wandb.log({"MLM Accuracy": acc*100}) if getenv('WANDB', 0) else None
+        print(f"{step:3d} Average MLM Accuracy{(acc := (accu/MAX_EVAL_STEPS))*100:.2f}%")
+        wandb.log({"Average MLM Accuracy": acc*100}) if getenv('WANDB', 0) else None
         if acc >= 0.72:
           wallclock_end = time.monotonic()
           hours, minutes = divmod((wallclock_end - wallclock_start) / 3600, 1)
@@ -159,20 +172,15 @@ def pretrain():
       if accuracy_achieved: break
 
       st = time.monotonic()
-      X, Y = next(train_batcher) 
-      input_ids, segment_ids, input_mask, masked_lm_positions, masked_lm_ids, next_sentence_labels = Tensor(X["input_ids"], dtype=dtypes.default_float), Tensor(X["segment_ids"], dtype=dtypes.default_float), Tensor(X["input_mask"], dtype=dtypes.default_float), Tensor(X["masked_lm_positions"], dtype=dtypes.default_float), Tensor(Y["masked_lm_ids"], dtype=dtypes.default_float), Tensor(Y["next_sentence_labels"], dtype=dtypes.default_float)
+      data: dict[str, Tensor] = next(train_batcher) 
       if len(GPUS) > 1:
-        input_ids.shard_(GPUS, axis=0)
-        segment_ids.shard_(GPUS, axis=0)
-        input_mask.shard_(GPUS, axis=0)
-        masked_lm_positions.shard_(GPUS, axis=0)
-        masked_lm_ids.shard_(GPUS, axis=0)
-        next_sentence_labels.shard_(GPUS, axis=0)
+        for key in data.keys():
+          data[key].shard_(GPUS, axis=0)
 
       mem = time.monotonic()
       GlobalCounters.reset()
 
-      loss = train_step_jitted(input_ids, segment_ids, input_mask, masked_lm_positions, masked_lm_ids, next_sentence_labels)
+      loss = train_step_jitted(data["input_ids"], data["segment_ids"], data["input_mask"], data["masked_lm_positions"], data["masked_lm_ids"], data["masked_lm_weights"], data["next_sentence_labels"])
       et = time.monotonic()
       loss_cpu = loss.numpy()
       cl = time.monotonic()

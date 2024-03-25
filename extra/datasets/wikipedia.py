@@ -1,12 +1,9 @@
 import sys, pickle, random, unicodedata, functools, os
-from multiprocessing import Pool
 from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 from tinygrad.helpers import diskcache, getenv
 from tqdm.contrib.concurrent import process_map
-
-from tinygrad.tensor import Tensor
 
 BASEDIR = Path(__file__).parent / "wiki"
 
@@ -291,20 +288,23 @@ def instance_to_features(instance, tokenizer):
 
   masked_lm_positions = instance["masked_lm_positions"]
   masked_lm_ids = tokenizer.convert_tokens_to_ids(instance["masked_lm_labels"])
+  masked_lm_weights = [1.0] * len(masked_lm_ids)
 
   while len(masked_lm_positions) < getenv("MAX_PREDICTIONS_PER_SEQ", 20):
     masked_lm_positions.append(0)
     masked_lm_ids.append(0)
+    masked_lm_weights.append(0.0)
 
   next_sentence_label = 1 if instance["is_random_next"] else 0
 
   return {
-    "input_ids": np.expand_dims(np.array(input_ids, dtype=np.float32), 0),
-    "input_mask": np.expand_dims(np.array(input_mask, dtype=np.float32), 0),
-    "segment_ids": np.expand_dims(np.array(segment_ids, dtype=np.float32), 0),
-    "masked_lm_positions": np.expand_dims(np.array(masked_lm_positions, dtype=np.float32), 0),
-    "masked_lm_ids": np.expand_dims(np.array(masked_lm_ids, dtype=np.float32), 0),
-    "next_sentence_labels": np.expand_dims(np.array([next_sentence_label], dtype=np.float32), 0),
+    "input_ids": np.expand_dims(np.array(input_ids, dtype=np.int32), 0),
+    "input_mask": np.expand_dims(np.array(input_mask, dtype=np.int32), 0),
+    "segment_ids": np.expand_dims(np.array(segment_ids, dtype=np.int32), 0),
+    "masked_lm_positions": np.expand_dims(np.array(masked_lm_positions, dtype=np.int32), 0),
+    "masked_lm_ids": np.expand_dims(np.array(masked_lm_ids, dtype=np.int32), 0),
+    "masked_lm_weights": np.expand_dims(np.array(masked_lm_weights, dtype=np.float32), 0),
+    "next_sentence_labels": np.expand_dims(np.array([next_sentence_label], dtype=np.int32), 0),
   }
 
 def process_part(part):
@@ -347,42 +347,12 @@ def get_val_files():
 def get_train_files():
   return sorted(list((BASEDIR / "train/").glob("*/*.pkl")))
 
-def load_file(file):
-  with open(file, "rb") as f:
-    features = pickle.load(f)
-    return {
-        "input_ids": features["input_ids"],
-        "input_mask": features["input_mask"],
-        "segment_ids": features["segment_ids"],
-        "masked_lm_positions": features["masked_lm_positions"],
-        "masked_lm_ids": features["masked_lm_ids"],
-        "next_sentence_labels": features["next_sentence_labels"],
-    }
-
-def iterate(bs=1, start=0, val=False):
-  files = get_val_files() if val else get_train_files()
-  with Pool() as p:
-    i = start
-    while True:
-      results = p.map(load_file, files[i:i+bs])
-      X = {
-        "input_ids": np.concatenate([f["input_ids"] for f in results], axis=0),
-        "input_mask": np.concatenate([f["input_mask"] for f in results], axis=0),
-        "segment_ids": np.concatenate([f["segment_ids"] for f in results], axis=0),
-        "masked_lm_positions": np.concatenate([f["masked_lm_positions"] for f in results], axis=0),
-      }
-      Y = {
-        "masked_lm_ids": np.concatenate([f["masked_lm_ids"] for f in results], axis=0),
-        "next_sentence_labels": np.concatenate([f["next_sentence_labels"] for f in results], axis=0),
-      }
-      yield X, Y
-      i = (i + bs) % len(files)
-
 if __name__ == "__main__":
+  from examples.mlperf.dataloader import batch_load_bert
   tokenizer = Tokenizer(Path(__file__).parent / "wiki" / "vocab.txt")
 
   if len(sys.argv) <= 1:
-    X, Y = next(iterate(val=False))
+    X, Y = next(batch_load_bert(val=False))
     print("Input Ids:\n", X["input_ids"][0])
     print("Tokens:\n", tokenizer.convert_ids_to_tokens(X["input_ids"][0]))
     print("Masked token ids:\n", Y["masked_lm_ids"])

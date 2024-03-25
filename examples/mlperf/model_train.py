@@ -1,14 +1,13 @@
-import functools
-import os
-import time
+import functools, os, time, math
+from pathlib import Path
 from tqdm import tqdm
 
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
 from tinygrad.helpers import getenv, BEAM, WINO
 from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_save
-from tinygrad.nn.optim import LARS, SGD, OptimizerGroup
+from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup
 
-from extra.lr_scheduler import LRSchedulerGroup
+from extra.lr_scheduler import LRSchedulerGroup, OneCycleLR
 from examples.mlperf.bert.pretrain import pretrain as train
 from examples.mlperf.helpers import get_training_state, load_training_state
 
@@ -237,7 +236,221 @@ def train_rnnt():
   # TODO: RNN-T
   pass
 
-def train_bert(): train()
+def train_bert():
+  # TODO: Log trainable parameters
+  # TODO: Change weight init range
+  from examples.mlperf.dataloader import batch_load_bert
+  from examples.mlperf.helpers import get_mlperf_bert_model
+
+  config = {}
+  seed = config["seed"] = getenv("SEED", 12345)
+  Tensor.manual_seed(seed)  # seed for weight initialization
+
+  GPUS = config["GPUS"] = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
+  print(f"Training on {GPUS}")
+  for x in GPUS: Device[x]
+
+  config_path = getenv("BERT_CONFIG_PATH", Path(__file__).parent.parents[2] / "extra" / "datasets" / "wiki" / "bert_config.json")
+  model = get_mlperf_bert_model(config_path)
+
+  # shard weights and initialize in order
+  for _, x in get_state_dict(model).items():
+    x.realize().to_(GPUS)
+  parameters = get_parameters(model)
+
+  # ** hyperparameters ** NOTE: Check which hparams are actually allowed to be changed
+  epochs            = config["epochs"]            = getenv("EPOCHS", 1)
+  BS                = config["BS"]                = getenv("BS", 32 * len(GPUS))
+  EVAL_BS           = config["EVAL_BS"]           = getenv("EVAL_BS", 8)
+  max_lr            = config["MAX_LR"]            = getenv("MAX_LR", 1e-4)
+
+  train_steps       = config["TRAIN_STEPS"]       = getenv("TRAIN_STEPS", 100000)
+  warmup_steps      = config["WARMUP_STEPS"]      = getenv("WARMUP_STEPS", 10000)
+  max_eval_steps    = config["MAX_EVAL_STEPS"]    = getenv("MAX_EVAL_STEPS", 100)
+  eval_step_freq    = config["EVAL_STEP_FREQ"]    = math.floor(0.05 * (230.23 * BS + 3000000) / 25000) * 25000
+
+  decay             = config["decay"]             = getenv("DECAY", 0.01)
+
+  target, achieved                                = getenv("TARGET", 0.72), False
+
+  config["BEAM"]    = BEAM.value
+
+  # ** Optimizer **
+  skip_list = [v for k, v in get_state_dict(model).items() if "bias" in k or "layernorm" in k] # TODO: Check it is actually called LayerNorm
+  parameters = [x for x in parameters if x not in set(skip_list)]
+  optimizer = LAMB(parameters, 1 / warmup_steps, eps=1e-6, wd=decay, adam=True) # TODO: Double check optimizer settings
+  optimizer_skip = LAMB(skip_list, 1 / warmup_steps, eps=1e-6, wd=0.0, adam=True)
+  optimizer_group = OptimizerGroup(optimizer, optimizer_skip)
+
+  # ** LR scheduler **
+  scheduler = OneCycleLR(optimizer, max_lr, 1e9, max_lr * 1e12, train_steps, warmup_steps / train_steps)
+  print(f"training with batch size {BS} for {epochs} epochs with each {train_steps} steps")
+
+  # ** resume from checkpointing **
+  start_step = 0
+  if ckpt:=getenv("RESUME", ""):
+    load_training_state(model, optimizer_group, scheduler, safe_load(ckpt))
+    start_step = int(scheduler.total_steps / train_steps) # TODO: Check whether total_steps is appropriate
+    print(f"resuming from {ckpt} at step {start_step}")
+
+  # ** init wandb **
+  WANDB = getenv("WANDB")
+  if WANDB:
+    import wandb
+    wandb_args = {"id": wandb_id, "resume": "must", "project": "MLPerf"} if (wandb_id := getenv("WANDB_RESUME", "")) else {}
+    wandb.init(config=config, **wandb_args)
+
+  BENCHMARK = getenv("BENCHMARK")
+
+  @TinyJit
+  def train_step(input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor, masked_positions:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
+    lm_logits, clsf_logits = model(input_ids, segment_ids, attention_mask, masked_positions)
+    lm_loss = lm_logits.sparse_categorical_crossentropy(masked_lm_ids, ignore_index=masked_lm_weights)
+    clsf_loss = clsf_logits.binary_crossentropy_logits(next_sentence_labels)
+    loss = lm_loss + clsf_loss
+
+    if not getenv('DISABLE_BACKWARD', 0):
+      optimizer_group.zero_grad()
+      loss.backward()
+
+      optimizer_group.step()
+      scheduler.step()
+    return loss.realize()
+  @TinyJit
+  def eval_step(input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor, masked_positions:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
+    lm_logits, clsf_logits = model(input_ids, segment_ids, attention_mask, masked_positions)
+
+    clsf_predictions = clsf_logits.log_softmax().argmax(-1)
+    clsf_accuracy = (clsf_predictions == next_sentence_labels).float().mean()
+
+    mlm_predictions = lm_logits.log_softmax().argmax(-1)
+    mask = masked_lm_weights == 1.0
+    filtered_predictions = mlm_predictions[mask]
+    filtered_true_labels = masked_lm_ids[mask]
+    mlm_accuracy = (filtered_predictions == filtered_true_labels).float().mean()
+
+    lm_loss = lm_logits.sparse_categorical_crossentropy(masked_lm_ids, ignore_index=masked_lm_weights)
+    clsf_loss = clsf_logits.binary_crossentropy_logits(next_sentence_labels)
+    return {
+      "masked_lm_accuracy": mlm_accuracy.realize(), 
+      "masked_lm_loss": lm_loss.realize(), 
+      "next_sentence_accuracy": clsf_accuracy.realize(), 
+      "next_sentence_loss": clsf_loss.realize()
+      }
+
+  def data_get(it): # TODO: Change behaviour where iterator will wrap around dataset. Only for eval do wrapping
+    data: dict[str, Tensor] = next(it)
+    for key in data.keys(): data[key].shard_(GPUS, axis=0)
+    return data
+
+  # ** epoch loop **
+  step_times = []
+  for e in range(epochs):
+    # ** train loop **
+    Tensor.training = True
+    it = iter(batch_load_bert(batch_size=BS, val=False))
+    i, data = 0, data_get(it)
+    st = time.perf_counter()
+    while data is not None:
+      GlobalCounters.reset()
+      loss = train_step(data["input_ids"], data["segment_ids"], data["attention_mask"], data["masked_positions"], \
+                        data["masked_lm_ids"], data["masked_lm_weights"], data["next_sentence_labels"])
+
+      pt = time.perf_counter()
+
+      try:
+        next_data = data_get(it)
+      except StopIteration:
+        next_data = None
+
+      dt = time.perf_counter()
+
+      device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
+      loss = loss.numpy().item()
+
+      cl = time.perf_counter()
+      if BENCHMARK:
+        step_times.append(cl - st)
+
+      tqdm.write(
+        f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(pt - st) * 1000.0:7.2f} ms python, {(dt - pt) * 1000.0:6.2f} ms fetch data, "
+        f"{(cl - dt) * 1000.0:7.2f} ms {device_str}, {loss:5.2f} loss, {optimizer.lr.numpy()[0]:.6f} LR, "
+        f"{GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS")
+      if WANDB:
+        wandb.log({"lr": optimizer.lr.numpy(), "train/loss": loss, "train/step_time": cl - st,
+                   "train/python_time": pt - st, "train/data_time": dt - pt, "train/cl_time": cl - dt,
+                   "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": e + (i + 1) / train_steps})
+
+      st = cl
+      data, next_data = next_data, None
+      i += 1
+
+      if i == BENCHMARK: # NOTE: Probs remove as we wont do more than one epoch
+        median_step_time = sorted(step_times)[(BENCHMARK + 1) // 2]  # in seconds
+        estimated_total_hours = median_step_time * train_steps * epochs / 60 / 60
+        print(f"Estimated training time: {estimated_total_hours:.0f}h{(estimated_total_hours - int(estimated_total_hours)) * 60:.0f}m")
+        return
+
+    # ** eval loop **
+    if i % eval_step_freq == 0:
+      train_step.reset()  # free the train step memory :(
+      eval_loss = []
+      eval_accuracy = []
+      eval_times = []
+      Tensor.training = False
+
+      it = iter(tqdm(batch_load_bert(batch_size=EVAL_BS, val=True), total=max_eval_steps))
+      data = data_get(it)
+      for eval_s in range(max_eval_steps):
+        GlobalCounters.reset()
+        st = time.time()
+
+        eval_result: dict[str, Tensor] = eval_step(data["input_ids"], data["segment_ids"], data["attention_mask"], data["masked_positions"], \
+                                                   data["masked_lm_ids"], data["masked_lm_weights"], data["next_sentence_labels"])
+
+        try:
+          next_data = data_get(it)
+        except StopIteration:
+          next_data = None
+
+        lm_loss, clsf_loss  = eval_result["masked_lm_loss"].numpy().item(), eval_result["next_sentence_loss"].numpy().item()
+        mlm_accuracy, clsf_accuracy = eval_result["masked_lm_accuracy"].numpy().item(), eval_result["next_sentence_accuracy"].numpy().item()
+        eval_loss.append([lm_loss, clsf_loss])
+        eval_accuracy.append([mlm_accuracy, clsf_accuracy])
+        data, next_data = next_data, None
+
+        et = time.time()
+        eval_times.append(et - st)
+
+      eval_step.reset()
+      total_lm_loss = sum(pair[0] for pair in eval_loss) / len(eval_loss)
+      total_clsf_loss = sum(pair[1] for pair in eval_loss) / len(eval_loss)
+      total_lm_accuracy = sum(pair[0] for pair in eval_accuracy) / len(eval_accuracy)
+      total_clsf_accuracy = sum(pair[1] for pair in eval_accuracy) / len(eval_accuracy)
+      total_fw_time = sum(eval_times) / len(eval_times)
+      tqdm.write(f"eval lm loss: {total_lm_loss:.2f}, eval clsf loss: {total_clsf_loss:.2f}, eval lm accuracy: {total_lm_accuracy:.2f}, \
+                  eval clsf accuracy: {total_clsf_accuracy:.2f}, eval time: {total_fw_time:.2f}")
+      if WANDB:
+        wandb.log({"eval/lm_loss": total_lm_loss, "eval/clsf_loss": total_clsf_loss, "eval/lm_accuracy": total_lm_accuracy, \
+                    "eval/clsf_accuracy": total_clsf_accuracy, "eval/forward_time": total_fw_time, "epoch": e + 1})
+
+      # save model if achieved target
+      if not achieved and total_lm_accuracy >= target:
+        if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
+        fn = f"./ckpts/bert-large.safe"
+        safe_save(get_state_dict(model), fn)
+        print(f" *** Model saved to {fn} ***")
+        achieved = True
+
+      # checkpoint every time we eval
+      if getenv("CKPT"):
+        if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
+        if WANDB and wandb.run is not None:
+          fn = f"./ckpts/{time.strftime('%Y%m%d_%H%M%S')}_{wandb.run.id}_e{e}.safe"
+        else:
+          fn = f"./ckpts/{time.strftime('%Y%m%d_%H%M%S')}_e{e}.safe"
+        print(f"saving ckpt to {fn}")
+        safe_save(get_training_state(model, optimizer_group, scheduler), fn)
 
 def train_maskrcnn():
   # TODO: Mask RCNN

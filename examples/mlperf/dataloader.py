@@ -4,6 +4,7 @@ from PIL import Image
 from tqdm import tqdm
 import pickle
 from tinygrad import dtypes, Tensor
+from multiprocessing import Pool
 from tinygrad.helpers import getenv, prod, Timing, Context
 from multiprocessing import Queue, Process, shared_memory, connection, Lock, cpu_count
 
@@ -138,6 +139,38 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None):
     for p in procs: p.join()
     shm.close()
     shm.unlink()
+
+# TODO: REturn Tensor
+
+def load_bert_file(file_name):
+  with open(file_name, "rb") as f:
+    features = pickle.load(f)
+    return {
+        "input_ids": features["input_ids"],
+        "input_mask": features["input_mask"],
+        "segment_ids": features["segment_ids"],
+        "masked_lm_positions": features["masked_lm_positions"],
+        "masked_lm_ids": features["masked_lm_ids"],
+        "next_sentence_labels": features["next_sentence_labels"],
+    }
+
+def batch_load_bert(batch_size=32, start=0, val=False):
+  from extra.datasets.wikipedia import get_train_files, get_val_files
+  files = get_val_files() if val else get_train_files()
+  with Pool() as p:
+    i = start
+    while True:
+      results = p.map(load_bert_file, files[i:i+batch_size])
+      yield {
+        "input_ids": Tensor([np.concatenate([f["input_ids"] for f in results], axis=0)]),
+        "input_mask": Tensor([np.concatenate([f["input_mask"] for f in results], axis=0)]),
+        "segment_ids": Tensor([np.concatenate([f["segment_ids"] for f in results], axis=0)]),
+        "masked_lm_positions": Tensor([np.concatenate([f["masked_lm_positions"] for f in results], axis=0)]),
+        "masked_lm_ids": Tensor([np.concatenate([f["masked_lm_ids"] for f in results], axis=0)]),
+        "masked_lm_weights": Tensor([np.concatenate([f["masked_lm_weights"] for f in results], axis=0)]),
+        "next_sentence_labels": Tensor([np.concatenate([f["next_sentence_labels"] for f in results], axis=0)]),
+      }
+      i = (i + batch_size) % len(files)
 
 if __name__ == "__main__":
   from extra.datasets.imagenet import get_train_files, get_val_files

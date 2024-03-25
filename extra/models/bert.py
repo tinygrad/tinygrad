@@ -33,6 +33,44 @@ class BertForQuestionAnswering:
 
     return Tensor.stack([start_logits, end_logits])
 
+class BertForMLPerf:
+  def __init__(self, hidden_size, intermediate_size, max_position_embeddings, num_attention_heads, num_hidden_layers, type_vocab_size, vocab_size, attention_probs_dropout_prob, hidden_dropout_prob) -> None:
+    self.model = Bert(
+      hidden_size,
+      intermediate_size, 
+      max_position_embeddings, 
+      num_attention_heads, 
+      num_hidden_layers, 
+      type_vocab_size, 
+      vocab_size, 
+      attention_probs_dropout_prob, 
+      hidden_dropout_prob
+    )
+    # for clsf:
+    self.fc = Linear(hidden_size, hidden_size)
+    self.activation1 = Tensor.tanh
+    self.classifier = Linear(hidden_size, 2)
+
+    # for lm:
+    self.linear = Linear(hidden_size, hidden_size)
+    self.activation2 = Tensor.gelu
+    self.norm = Tensor.layernorm
+
+    self.decoder = Linear(hidden_size, vocab_size, bias=False)
+    self.decoder.weight = self.model.embeddings.word_embeddings.weight
+    self.decoder_bias = Tensor.zeros(vocab_size)
+  
+  def __call__(self, input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor, masked_positions:Tensor):
+    output = self.model(input_ids, attention_mask, segment_ids)
+    clsf_logits = self.classifier(self.activation1(self.fc(output[:, 0])))
+
+    masked_positions = masked_positions[:, :, None].expand(-1, -1, output.shape[-1])
+    h_masked = Tensor.gather(output, masked_positions, 1)
+    h_masked = self.norm(self.activation2(self.linear(h_masked)))
+    lm_logits = self.decoder(h_masked) + self.decoder_bias
+
+    return lm_logits, clsf_logits
+
 class Bert:
   def __init__(self, hidden_size, intermediate_size, max_position_embeddings, num_attention_heads, num_hidden_layers, type_vocab_size, vocab_size, attention_probs_dropout_prob, hidden_dropout_prob):
     self.embeddings = BertEmbeddings(hidden_size, max_position_embeddings, type_vocab_size, vocab_size, hidden_dropout_prob)

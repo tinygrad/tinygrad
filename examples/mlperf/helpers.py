@@ -1,5 +1,5 @@
 from collections import OrderedDict
-import unicodedata
+import unicodedata, json
 import numpy as np
 from scipy import signal
 from tinygrad.nn import state
@@ -190,3 +190,19 @@ def get_bert_qa_prediction(features, example, start_end_logits):
     orig_text = " ".join(orig_tokens)
     return _get_final_text(tok_text, orig_text)
   return "empty"
+
+def get_mlperf_bert_model(config_path:str):
+  from extra.models.bert import BertForMLPerf
+  with open(config_path, "r") as f:
+    config = json.load(f)
+  return BertForMLPerf(
+    config["hidden_size"],
+    config["intermediate_size"], 
+    config["max_position_embeddings"], 
+    config["num_attention_heads"], 
+    config["num_hidden_layers"], 
+    config["type_vocab_size"], 
+    config["vocab_size"], 
+    config["attention_probs_dropout_prob"], 
+    config["hidden_dropout_prob"]
+  )
