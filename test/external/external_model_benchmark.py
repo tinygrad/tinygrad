@@ -98,7 +98,7 @@ def benchmark_model(m, devices, validate_outs=False):
     del ort_sess
 
   if validate_outs:
-    if any(t == np.dtype(np.float16) for t in input_types.values()): rtol, atol = 4e-3, 1e-3  # tolerance for fp16 models
+    if any(t == np.dtype(np.float16) for t in input_types.values()): rtol, atol = 3e-3, 1e-3  # tolerance for fp16 models
     else: rtol, atol = 1e-5, 1e-5 # tolerance for fp32 models
 
     for device in devices:
@@ -128,16 +128,14 @@ def assert_allclose(tiny_out:dict, onnx_out:dict, rtol, atol):
     else:
       assert (tiny_v := tiny_v.numpy()).dtype == onnx_v.dtype, f"tiny={tiny_v.dtype} onnx={onnx_v.dtype}"
       try:
-        np.testing.assert_allclose(tiny_v, onnx_v, rtol=rtol, atol=atol, err_msg=f"device={Device.DEFAULT} using {rtol=} {atol=} for tensor '{k}' in {tiny_out.keys()}")
+        np.testing.assert_allclose(tiny_v, onnx_v, rtol=rtol, atol=atol,
+                                   err_msg=f"device={Device.DEFAULT} using {rtol=} {atol=} for tensor '{k}' in {tiny_out.keys()}")
       except AssertionError:
         # test using l1 norm and l2 norm instead
         diff = tiny_v - onnx_v
-        try:
-          assert np.sum(np.abs(diff)) <= atol + rtol * np.sum(np.abs(onnx_v)), \
-          f"l1 norm failed on device={Device.DEFAULT} using {rtol=} {atol=} for tensor={k} in {tiny_out.keys()}"
-        except AssertionError:
-          assert np.sqrt(np.sum(np.square(diff))) <= atol + rtol * np.sqrt(np.sum(np.square(onnx_v))), \
-          f"l2 norm failed on device={Device.DEFAULT} using {rtol=} {atol=} for tensor'{k}' in {tiny_out.keys()}"
+        assert (l1_norm := np.sum(np.abs(diff)) <= atol + rtol * np.sum(np.abs(onnx_v))) \
+        or (l2_norm := np.sqrt(np.sum(np.square(diff))) <= atol + rtol * np.sqrt(np.sum(np.square(onnx_v)))), \
+        f"{l1_norm=} {l2_norm=} passed on device={Device.DEFAULT} using {rtol=} {atol=} for tensor={k} in {tiny_out.keys()}"
 
 if __name__ == "__main__":
   devices = [Device.DEFAULT] if getenv("NOCLANG") else [Device.DEFAULT, "CLANG"]
