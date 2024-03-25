@@ -4,6 +4,7 @@ from collections import defaultdict
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op
 from tinygrad.dtype import dtypes, DType, PtrDType, INVERSE_DTYPES_DICT
+from tinygrad.helpers import partition
 from tinygrad.codegen.uops import UOpGraph, PatternMatcher
 
 def render_val(x, dtype):
@@ -64,6 +65,12 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
     root.vin = (x,y,z,new)
     return ld_rep(root,x,y)
 
+  def mulacc(root):
+    muls, non_muls = partition(root.vin, lambda x: x.uop is UOps.ALU and x.arg is BinaryOps.MUL)
+    if len(muls) == 1 and dtypes.is_float(root.dtype):
+      root.arg = TernaryOps.MULACC
+      root.vin = muls[0].vin + tuple(non_muls)
+
   def ptr_ar(root):
     root.arg = '.shared' if root.vin[0].uop == UOps.DEFINE_LOCAL else '.global'  # move this to the argL
     val = uops.add(UOps.CONST, dtypes.int, tuple(), arg=root.vin[0].dtype.itemsize, insert_before=uops.uops.index(root))
@@ -77,6 +84,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
 
   matcher = PatternMatcher([
     ({"__name__": "root", "uop": UOps.ALU, "arg": BinaryOps.CMPEQ, "vin": ({"__name__": "x", "dtype": dtypes.bool},{"__name__": "y"})}, eq_rep),
+    ({"__name__": "root", "uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": {}}, mulacc),
     ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": ({"__name__": "x", "dtype": dtypes.bool},{"__name__": "y"})}, lt_rep),
     ({"__name__": "root", "uop": UOps.LOAD,"dtype": dtypes.bool,
       "vin": ({"__name__": "x"},{"__name__": "y"},{"__name__": "z"},{"__name__": "k"})}, gate_rep),
@@ -243,6 +251,7 @@ class PTXLanguage(AssemblyLanguage):
     BinaryOps.MAX: lambda d,a,b,dt,name: f"max.{name} {d}, {a}, {b};", BinaryOps.MOD: lambda d,a,b,dt,name: f"rem.{name} {d}, {a}, {b};",
     BinaryOps.CMPLT: lambda d,a,b,dt,name: f"setp.lt.{name} {d}, {a}, {b};",
     BinaryOps.CMPEQ: lambda d,a,b,dt,name: f"setp.eq.{name} {d}, {a}, {b};",
+    TernaryOps.MULACC: lambda d,a,b,c,dt,name: f"fma.rn.{name} {d}, {a}, {b}, {c};",
     TernaryOps.WHERE: lambda d,a,b,c,dt,name:
       f"@{a} mov.{name} {d}, {b};\n@!{a} mov.{name} {d}, {c};" if name == "pred" else f"selp.{'b16' if name == 'f16' else name} {d}, {b}, {c}, {a};"
   }
