@@ -117,11 +117,11 @@ jobs:
     - name: Run 10 CIFAR training steps
       run: CUDA=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
     - name: Run 10 CIFAR training steps w HALF
-      run: CUDA=1 STEPS=10 HALF=1 python3 examples/hlb_cifar10.py | tee train_cifar_half.txt
+      run: CUDA=1 STEPS=10 DEFAULT_FLOAT=HALF python3 examples/hlb_cifar10.py | tee train_cifar_half.txt
     - name: Run 10 CIFAR training steps w BF16
-      run: CUDA=1 STEPS=10 BF16=1 python3 examples/hlb_cifar10.py | tee train_cifar_bf16.txt
+      run: CUDA=1 STEPS=10 DEFAULT_FLOAT=BFLOAT16 python3 examples/hlb_cifar10.py | tee train_cifar_bf16.txt
     - name: Run full CIFAR training
-      run: time CUDA=1 HALF=1 LATEWINO=1 STEPS=1000 TARGET_EVAL_ACC_PCT=93.3 python3 examples/hlb_cifar10.py | tee train_cifar_one_gpu.txt
+      run: time CUDA=1 DEFAULT_FLOAT=HALF LATEWINO=1 STEPS=1000 TARGET_EVAL_ACC_PCT=93.3 python3 examples/hlb_cifar10.py | tee train_cifar_one_gpu.txt
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (NVIDIA)
@@ -236,13 +236,13 @@ jobs:
     - name: Run 10 CIFAR training steps
       run: HSA=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
     - name: Run 10 CIFAR training steps w HALF
-      run: HSA=1 STEPS=10 HALF=1 python3 examples/hlb_cifar10.py | tee train_cifar_half.txt
+      run: HSA=1 STEPS=10 DEFAULT_FLOAT=HALF python3 examples/hlb_cifar10.py | tee train_cifar_half.txt
     - name: Run 10 CIFAR training steps w BF16
-      run: HSA=1 STEPS=10 BF16=1 python3 examples/hlb_cifar10.py | tee train_cifar_bf16.txt
+      run: HSA=1 STEPS=10 DEFAULT_FLOAT=BFLOAT16 python3 examples/hlb_cifar10.py | tee train_cifar_bf16.txt
     - name: Run full CIFAR training w 1 GPU
-      run: time HSA=1 HALF=1 LATEWINO=1 STEPS=1000 TARGET_EVAL_ACC_PCT=93.3 python3 examples/hlb_cifar10.py | tee train_cifar_one_gpu.txt
+      run: time HSA=1 DEFAULT_FLOAT=HALF LATEWINO=1 STEPS=1000 TARGET_EVAL_ACC_PCT=93.3 python3 examples/hlb_cifar10.py | tee train_cifar_one_gpu.txt
     - name: Run full CIFAR training steps w 6 GPUS
-      run: time HSA=1 HALF=1 STEPS=350 BS=1536 GPUS=6 TARGET_EVAL_ACC_PCT=93.3 python3 examples/hlb_cifar10.py | tee train_cifar_six_gpu.txt
+      run: time HSA=1 DEFAULT_FLOAT=HALF STEPS=350 BS=1536 GPUS=6 TARGET_EVAL_ACC_PCT=93.3 python3 examples/hlb_cifar10.py | tee train_cifar_six_gpu.txt
     - name: Run MLPerf resnet eval on training data
       run: time HSA=1 MODEL=resnet python3 examples/mlperf/model_eval.py
     - name: Run 10 MLPerf ResNet50 training steps (1 gpu)
