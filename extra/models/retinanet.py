@@ -638,6 +638,7 @@ class ClassificationHead:
         foreground_idxs_per_image,
         targets_per_image['labels'][matched_idxs_per_image[foreground_idxs_per_image]]
       ] = Tensor([1.0]*foreground_idxs_per_image.shape[0])
+      gt_classes_target.realize()
 
       # find indices for which anchors should be ignored
       print('Class_head matched_idxs_per_image', matched_idxs_per_image.numpy())
@@ -674,16 +675,16 @@ class RegressionHead:
       # determine only the foreground indices, ignore the rest
       # foreground_idxs_per_image = torch.where(matched_idxs_per_image >= 0)[0]
       # Hack for now
-      # print('Regression head match idx type:', matched_idxs_per_image.numpy())
+      print('Regression head match idx type:', matched_idxs_per_image.numpy())
       foreground_idxs_per_image = np.nonzero(matched_idxs_per_image.numpy() >= 0)[0]
-      # print('np forground:', foreground_idxs_per_image, foreground_idxs_per_image.shape)
+      print('np forground REGRESSION:', foreground_idxs_per_image, foreground_idxs_per_image.shape)
       if foreground_idxs_per_image.shape==(0,):
         print('empty forground idx in regression head')
         foreground_idxs_per_image = Tensor([0])
       else:
         foreground_idxs_per_image = Tensor(foreground_idxs_per_image)
       # print(foreground_idxs_per_image, matched_idxs_per_image.numpy())
-      # print('Foreground idx per img: ', foreground_idxs_per_image.shape, foreground_idxs_per_image.numpy())
+      # print('Regression Foreground idx per img: ', foreground_idxs_per_image.shape, foreground_idxs_per_image.numpy())
       num_foreground = foreground_idxs_per_image.numel()
 
       # print('target img selection')

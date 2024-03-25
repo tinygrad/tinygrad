@@ -217,14 +217,24 @@ def train_resnet():
 
 def train_retinanet():
   # TODO: Retinanet
+  import sys
   from extra.models.retinanet import RetinaNet, AnchorGenerator, ImageList
   from extra.models.resnet import ResNeXt50_32X4D
   from tinygrad.nn.optim import Adam
+  from extra.datasets.openimages_new import iterate, get_openimages
+  ROOT = 'extra/datasets/open-images-v6TEST'
+  NAME = 'openimages-mlperf'
+  coco_val = get_openimages(NAME,ROOT, 'val')
+  for x,y in iterate(coco_val, 8):
+    print(x)
+    print(y)
+    print(x[0])
+    sys.exit()
   from extra.datasets.openimages import openimages, iterate
   from pycocotools.coco import COCO
   from pycocotools.cocoeval import COCOeval
   import numpy as np
-  import sys
+  
   anchor_sizes = tuple((x, int(x * 2 ** (1.0 / 3)), int(x * 2 ** (2.0 / 3))) for x in [32, 64, 128, 256, 512])
   # print(anchor_sizes)
   # sys.exit()

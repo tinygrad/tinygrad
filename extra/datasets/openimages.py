@@ -140,9 +140,13 @@ def image_load(fn):
   import torchvision.transforms.functional as F
   ret = F.resize(img, size=(800, 800))
   ret = np.array(ret)
+  # print('image_load', ret.shape, img.size)
   return ret, img.size[::-1]
 
-def prepare_target(annotations, img_id, img_size, train=False):
+# def convert_coco_to_mask()
+def prepare_target(annotations, img_id, img_size, filter_crowded=False,train=False):
+  if filter_crowded:
+    annotations = [obj for obj in annotations if obj['iscrowd'] == 0]
   boxes = [annot["bbox"] for annot in annotations]
   boxes = np.array(boxes, dtype=np.float32).reshape(-1, 4)
   boxes[:, 2:] += boxes[:, :2]
