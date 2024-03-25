@@ -25,10 +25,11 @@ def safe_numpy(t) -> np.ndarray:
     numpy_cache[t] = tmp
   return numpy_cache[t]
 
+# copied from helpers.py
 def is_dtype_supported(dtype, device: str = Device.DEFAULT):
-  if dtype == dtypes.bfloat16: return False
+  if dtype == dtypes.bfloat16: return device in {"RHIP", "HSA"}
   if device in ["WEBGPU", "WEBGL"]: return dtype in [dtypes.float, dtypes.int32, dtypes.uint32]
-  if dtype == dtypes.half: return not (CI and device in ["GPU", "LLVM", "CUDA"])
+  if dtype == dtypes.half: return not (CI and device in {"GPU", "LLVM", "CUDA"})
   if dtype == dtypes.float64: return device != "METAL" and not (OSX and device == "GPU")
   return True
 
