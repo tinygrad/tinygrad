@@ -106,10 +106,11 @@ if __name__ == "__main__":
                         # ctx_save_restore_address, ctx_save_restore_size
                         #ctl_stack_size = 0xa000,
                         write_pointer_address=rw_ptr.va_addr+0x38, read_pointer_address=rw_ptr.va_addr+0x80)
+  doorbell = libc.mmap(0, 8192, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, fd, nq.doorbell_offset)
+  print(hex(doorbell))
+  #define KFD_MMAP_TYPE_SHIFT	62
+  #define KFD_MMAP_TYPE_DOORBELL	(0x3ULL << KFD_MMAP_TYPE_SHIFT)
   evt = kio.create_event(fd, auto_reset=1)
-
-  buf = libc.mmap(0, 4, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|MAP_FIXED, drm_fd, nq.doorbell_offset)
-  print(hex(buf))
 
   BARRIER_HEADER  = 1 << hsa.HSA_PACKET_HEADER_BARRIER
   BARRIER_HEADER |= hsa.HSA_FENCE_SCOPE_SYSTEM << hsa.HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE
@@ -125,6 +126,9 @@ if __name__ == "__main__":
   packet.reserved2 = 0
   packet.completion_signal = hsa.hsa_signal_t(evt.event_id)
   packet.header = BARRIER_HEADER
+
+  # ring doorbell
+  to_mv(doorbell, 4).cast("I")[0] = 1
 
   evt_arr = (kfd.struct_kfd_event_data * 1)()
   evt_arr[0].event_id = evt.event_id
