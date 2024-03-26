@@ -1,7 +1,7 @@
 import numpy as np
 from tinygrad.helpers import getenv
 from tinygrad import dtypes, Tensor
-dtype_in = dtypes.half if getenv("HALF") else dtypes.float
+dtype_in = dtypes.half if getenv("HALF") else dtypes.bfloat16 if getenv("BFLOAT16") else dtypes.float
 acc_dtype = dtypes.half if getenv("ACC_HALF") else None
 N = getenv("N", 4096)
 CNT = getenv("CNT", 10)
