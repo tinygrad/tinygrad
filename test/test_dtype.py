@@ -1,4 +1,4 @@
-import unittest, operator
+import unittest, operator, subprocess
 import numpy as np
 import torch
 from typing import Any, List
@@ -353,6 +353,22 @@ class TestTypeSpec(unittest.TestCase):
       dtypes.default_float = default_float
       assert dtypes.default_float == default_float
 
+  def test_env_set_default_float(self):
+    # check default
+    subprocess.run(['python3 -c "from tinygrad import dtypes; assert dtypes.default_float == dtypes.float"'],
+                    shell=True, check=True)
+    # check change
+    subprocess.run(['DEFAULT_FLOAT=HALF python3 -c "from tinygrad import dtypes; assert dtypes.default_float == dtypes.half"'],
+                    shell=True, check=True)
+    # check invalid
+    with self.assertRaises(subprocess.CalledProcessError):
+      subprocess.run(['DEFAULT_FLOAT=INT32 python3 -c "from tinygrad import dtypes"'],
+                      shell=True, check=True)
+
+    with self.assertRaises(subprocess.CalledProcessError):
+      subprocess.run(['DEFAULT_FLOAT=TYPO python3 -c "from tinygrad import dtypes"'],
+                      shell=True, check=True)
+
   @given(strat.sampled_from(dtype_ints), strat.sampled_from(dtype_floats))
   def test_creation(self, default_int, default_float):
     dtypes.default_int, dtypes.default_float = default_int, default_float
@@ -604,10 +620,10 @@ class TestImplicitFunctionTypeChange(unittest.TestCase):
       t = func(Tensor([4.0, 3.0])).max() == func(Tensor([4.0, 3.0]))
       result.append(t.numpy().sum())
 
-    if Device.DEFAULT not in ["PYTHON", "CLANG"]:
+    if Device.DEFAULT not in ["PYTHON"]:
       assert all(result)
     else:
-      # CLANG and PYTHON function default returns in double, and comparison to float can fail
+      # PYTHON function default returns in double, and comparison to float can fail
       # TODO: fix this
       assert not all(result)
 

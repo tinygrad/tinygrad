@@ -43,7 +43,7 @@ def cu_time_execution(cb, enable=False) -> Optional[float]:
   cuda.cuEventRecord(evs[0], None)
   cb()
   cuda.cuEventRecord(evs[1], None)
-  cuda.cuEventSynchronize(evs[1])
+  check(cuda.cuEventSynchronize(evs[1]))
   cuda.cuEventElapsedTime(ctypes.byref(ret := ctypes.c_float()), evs[0], evs[1])
   for ev in evs: cuda.cuEventDestroy_v2(ev)
   return ret.value * 1e-3
@@ -56,9 +56,10 @@ class PTXCompiler(Compiler):
   linearizer_opts = LinearizerOptions("CUDA", suffix="PTX", global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024], shared_max=49152)
   def __init__(self, arch:str):
     self.arch = arch
+    self.version = "7.8" if arch >= "sm_89" else "7.5"
     PTXCompiler.linearizer_opts = PTXCompiler.linearizer_opts._replace(has_tensor_cores=int(arch[3:]) >= 80)
     super().__init__(f"compile_ptx_{self.arch}")
-  def render(self, name:str, uops) -> str: return PTXRenderer(name, uops).replace("TARGET", self.arch)
+  def render(self, name:str, uops) -> str: return PTXRenderer(name, uops).replace("TARGET", self.arch).replace("VERSION", self.version)
   def compile(self, src:str) -> bytes: return src.encode()
 
 class CUDACompiler(Compiler):
@@ -122,18 +123,17 @@ class CUDAAllocator(LRUAllocator):
   def __init__(self, device:CUDADevice):
     self.device = device
     super().__init__()
-  def _alloc(self, size):
+  def _alloc(self, size, options:BufferOptions):
     check(cuda.cuCtxSetCurrent(self.device.context))
-    return init_c_var(cuda.CUdeviceptr(), lambda x: check(cuda.cuMemAlloc_v2(ctypes.byref(x), size)))
-  def _alloc_with_options(self, size:int, options:BufferOptions):
-    if options.host:
-      return init_c_var(ctypes.c_void_p(), lambda x: check(cuda.cuMemHostAlloc(ctypes.byref(x), size, 0)))
-    else:
-      raise ValueError("no options")
-  def _free(self, opaque): check(cuda.cuMemFree_v2(opaque))
+    if options.host: return init_c_var(ctypes.c_void_p(), lambda x: check(cuda.cuMemHostAlloc(ctypes.byref(x), size, 0)))
+    else: return init_c_var(cuda.CUdeviceptr(), lambda x: check(cuda.cuMemAlloc_v2(ctypes.byref(x), size)))
+  def _free(self, opaque, options:BufferOptions):
+    if options.host: return check(cuda.cuMemFreeHost(opaque))
+    else: check(cuda.cuMemFree_v2(opaque))
   def copyin(self, dest, src:memoryview):
-    host_mem = self._alloc_with_options(len(src), BufferOptions(host=True))
-    self.device.pending_copyin.append(host_mem.value)
+    check(cuda.cuCtxSetCurrent(self.device.context))
+    host_mem = self.alloc(len(src), BufferOptions(host=True))
+    self.device.pending_copyin.append((host_mem, len(src), BufferOptions(host=True)))
     ctypes.memmove(host_mem, from_mv(src), len(src))
     check(cuda.cuMemcpyHtoDAsync_v2(dest, host_mem, len(src), None))
   def copyout(self, dest:memoryview, src):
@@ -160,7 +160,7 @@ class CUDADevice(Compiled):
       check(cuda.cuDeviceComputeCapability(ctypes.byref(major := ctypes.c_int()), ctypes.byref(minor := ctypes.c_int()), device_id))
 
     self.arch = f"sm_{major.value}{minor.value}" if not CUDACPU else "sm_35"
-    self.pending_copyin: List[int] = []
+    self.pending_copyin: List[Tuple[int, int, Optional[BufferOptions]]] = []
     CUDADevice.devices.append(self)
 
     from tinygrad.runtime.graph.cuda import CUDAGraph
@@ -172,7 +172,7 @@ class CUDADevice(Compiled):
     if CUDACPU: return
     check(cuda.cuCtxSetCurrent(self.context))
     check(cuda.cuCtxSynchronize())
-    for opaque in self.pending_copyin: check(cuda.cuMemFreeHost(opaque))
+    for opaque,sz,options in self.pending_copyin: self.allocator.free(opaque, sz, options)
     self.pending_copyin.clear()
 
   @staticmethod

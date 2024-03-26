@@ -20,13 +20,6 @@ GPUS = [f'{Device.DEFAULT}:{i}' for i in range(getenv("GPUS", 1))]
 assert BS % len(GPUS) == 0, f"{BS=} is not a multiple of {len(GPUS)=}, uneven multi GPU is slow"
 assert EVAL_BS % len(GPUS) == 0, f"{EVAL_BS=} is not a multiple of {len(GPUS)=}, uneven multi GPU is slow"
 
-if getenv("HALF"):
-  dtypes.default_float = dtypes.float16
-elif getenv("BF16"):
-  dtypes.default_float = dtypes.bfloat16
-else:
-  dtypes.default_float = dtypes.float32
-
 class UnsyncedBatchNorm:
   def __init__(self, sz:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1, num_devices=len(GPUS)):
     self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
