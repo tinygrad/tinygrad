@@ -297,7 +297,7 @@ class MambaMixer:
       batch_shape = (batch_size,)
       conv_state = Tensor.zeros(
         batch_size, self.dim * self.expand, self.d_conv
-      ).realize()
+      ).contiguous().realize()
       ssm_state = Tensor.zeros(
         batch_size, self.dim * self.expand, self.d_state
       ).realize()
