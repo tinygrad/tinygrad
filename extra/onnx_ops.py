@@ -41,7 +41,7 @@ def CastLike(x: Tensor, target_type: Tensor, saturate=1): return x.cast(target_t
 # https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_div.py
 def Div(x: Tensor, other: Tensor): return (x/other).cast(x.dtype)
 
-def Constant(value:Optional[Tensor]=None, value_float=None, value_floats=None, value_int=None, value_ints=None, value_string=None, value_strings=None):
+def Constant(value: Tensor=None, value_float=None, value_floats=None, value_int=None, value_ints=None, value_string=None, value_strings=None):
   if value is not None: return value
   if value_float is not None: return Tensor(value_float, dtype=dtypes.float32, requires_grad=False)
   if value_floats is not None: return Tensor(list(value_floats), dtype=dtypes.float32, requires_grad=False)

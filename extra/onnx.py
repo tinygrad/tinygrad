@@ -1,6 +1,5 @@
 from __future__ import annotations
 from google.protobuf.internal.containers import RepeatedCompositeFieldContainer
-from collections import defaultdict
 import importlib
 import numpy as np
 from tinygrad import Tensor, dtypes, Device
@@ -118,8 +117,7 @@ def get_run_onnx(onnx_model: ModelProto):
         elif isinstance(inputs[inp.name], list):
           input_tensors[inp.name] = [Tensor(i, requires_grad=False) for i in inputs[inp.name]]
         elif domain == "ai.onnx.preview.training": # not sure if in real use the domain is "ai.onnx.preview.training"
-          # TODO there isn't a good way to parse which inp requires_grad, some are manually turned off in optimizer ops
-          input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=True)
+          input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=True) # TODO there isn't a good way to parse which inp requires_grad, some are manually turned off in optimizer ops
         else:
           input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=False)
         if shape: # if only input_tensor is not variable type
@@ -134,7 +132,6 @@ def get_run_onnx(onnx_model: ModelProto):
       if x != "": return input_tensors[x]
       return None
 
-    if debug >= 1: ops = defaultdict(int)
     for num,n in enumerate(onnx_model.graph.node):
       inp: List[Tensor] = []
       if debug >= 3: print("inputs:")
@@ -143,9 +140,7 @@ def get_run_onnx(onnx_model: ModelProto):
         if debug >= 3: print(f"\t{x} - {t}")
         inp.append(t)
       opt: Dict = attribute_dict[num]
-      if debug >= 1:
-        print(f"{num}: op {n.op_type} tensor {[(x.shape, x.dtype) if isinstance(x, Tensor) else x for x in inp]} opt {opt}")
-        ops[n.op_type] += 1
+      if debug >= 1: print(f"{num}: op {n.op_type} shape {[x.shape if isinstance(x, Tensor) else x for x in inp]} opt {opt}")
 
       # NOTE some ops live here because they require access to some local variables
       # have to use n.output for cases when num_outputs is absent
@@ -219,6 +214,5 @@ def get_run_onnx(onnx_model: ModelProto):
         output_tensor_names = n.output
         break
 
-    if debug >= 1: print(ops)
     return {outp:intermediate_tensors[outp] for outp in output_tensor_names}
   return run_onnx
