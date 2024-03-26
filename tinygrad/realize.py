@@ -1,10 +1,10 @@
 import sys
 from collections import defaultdict, deque
-from typing import List, Dict, Optional, cast, Set, DefaultDict
+from typing import Deque, List, Dict, Optional, Tuple, cast, Set, DefaultDict
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters, LazyOp, ReduceOps, ConstBuffer, MemBuffer, BinaryOps, UnaryOps
 from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats
 from tinygrad.features.graph import realized_lazybuffer, log_lazybuffer
-from tinygrad.helpers import colored, getenv, GRAPH, cpu_time_execution, DEBUG, prod, dedup, all_int
+from tinygrad.helpers import colored, flatten, getenv, GRAPH, cpu_time_execution, DEBUG, merge_dicts, prod, dedup, all_int
 from tinygrad.shape.symbolic import Variable
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.lazy import LazyBuffer
@@ -99,7 +99,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
           raise RuntimeError(f"must be contiguous for assign {unbound_st}")
       return LazyOp(BufferOps.LOAD, (), MemBuffer(0, buf.dtype, unbound_st))
     if buf not in inputs: inputs.append(buf)
-    return LazyOp(BufferOps.LOAD, (), MemBuffer(inputs.index(buf)+1, buf.dtype, unbound_st))
+    return LazyOp(BufferOps.LOAD, (), MemBuffer(inputs.index(buf), buf.dtype, unbound_st))
 
   # if a CONTIGUOUS or ASSIGN made it all the way here, just skip it
   if buf.op is LoadOps.CONTIGUOUS:
@@ -122,15 +122,25 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
   return ret
 
 def _schedule_one(out:LazyBuffer, realizes:Set[LazyBuffer], reduce_for_op: Dict[LazyBuffer, LazyBuffer]) -> ScheduleItem:
-  inputs: List[LazyBuffer] = []
   var_vals: Dict[Variable, int] = out.st.var_vals.copy()
   if out.op in {LoadOps.CUSTOM, LoadOps.SYNC, LoadOps.WAIT, LoadOps.COPY, LoadOps.EMPTY}:
     op, inputs = LazyOp(out.op, (), out.arg), list(out.srcs)
   else:
-    output_st = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape)
+    output_st, inputs = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape), [out]
     op = _recursive_lazyop(out, inputs, var_vals, output_st, realizes, cache={})
-    op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_st.simplify().unbind()[0]))
+    op, inputs = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_st.simplify().unbind()[0])), inputs[1:]
   return ScheduleItem((op,), (out,), tuple(inputs), var_vals)
+
+def _merge_realizes(nodes: List[ScheduleItem], reduce_for_op: Dict[LazyBuffer, LazyBuffer]) -> ScheduleItem:
+  if len(nodes) == 1: return nodes[0]
+  nodes = sorted(nodes, key=lambda x: x.ast[0].src[0].key)
+  inputs, outputs, var_vals = {x:None for si in nodes for x in si.inputs}, [si.outputs[0] for si in nodes], merge_dicts([si.var_vals for si in nodes])
+  ast: List[LazyOp] = []
+  for i, si in enumerate(nodes):
+    output_st = ShapeTracker.from_shape(reduce_for_op[out].shape if (out:=si.outputs[0]) in reduce_for_op else out.shape)
+    op = _recursive_lazyop(out, outputs+list(inputs), var_vals, output_st, set(inputs), {})
+    ast.append(LazyOp(BufferOps.STORE, (op, ), MemBuffer(i, out.dtype, output_st.simplify().unbind()[0])))
+  return ScheduleItem(tuple(ast), tuple(outputs), tuple(inputs), var_vals)
 
 # recursively search the entire graph for all LazyBuffers, insert realizes after expands
 def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffer, None],
@@ -251,17 +261,23 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
         in_degree[assign_targets[x]] += 1
       if x in prescheduled: in_degree[out] += 1
 
-  queue = deque(out for out in prescheduled if in_degree[out] == 0)
-  schedule: List[ScheduleItem] = []
+  queue: Deque[Tuple[int,LazyBuffer]] = deque((0,out) for out in prescheduled if in_degree[out] == 0)
+  groups: DefaultDict[Tuple,List[ScheduleItem]] = defaultdict(list)
   while queue:
-    buf = queue.popleft()
+    level, buf = queue.popleft()
     seen.add(buf)
-    schedule.append(prescheduled[buf])
+    # single output
+    if buf.op in LoadOps or buf.device.startswith("DISK") or \
+        buf.op in ReduceOps or buf in reduce_for_op or buf.forced_realize: key: Tuple = (buf,)
+    # multioutput
+    else: key = (level, buf.shape, buf.device)
+    groups[key].append(prescheduled[buf])
     for x in graph[buf]:
       in_degree[x] -= 1
-      if in_degree[x] == 0: queue.append(x)
+      if in_degree[x] == 0: queue.append((level+1,x))
+  schedule: List[ScheduleItem] = [_merge_realizes(group, reduce_for_op) for group in groups.values()]
 
   # confirm everything was scheduled
-  assert len(prescheduled) == len(schedule), f"prescheduled {len(prescheduled)} but only scheduled {len(schedule)}"
+  assert len(prescheduled) == len(flatten(si.outputs for si in schedule)), f"prescheduled {len(prescheduled)} but only scheduled {len(schedule)}"
   return schedule
 
