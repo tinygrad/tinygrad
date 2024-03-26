@@ -8,7 +8,6 @@ from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_sa
 from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup
 
 from extra.lr_scheduler import LRSchedulerGroup, OneCycleLR
-from examples.mlperf.bert.pretrain import pretrain as train
 from examples.mlperf.helpers import get_training_state, load_training_state
 
 def train_resnet():
@@ -239,8 +238,11 @@ def train_rnnt():
 def train_bert():
   # TODO: Log trainable parameters
   # TODO: Change weight init range
+  # TODO: Separate dataloaders or fix wrap around issue
+  # TODO: Change train loop from while to for
   from examples.mlperf.dataloader import batch_load_bert
   from examples.mlperf.helpers import get_mlperf_bert_model
+  from extra.datasets.wikipedia import get_val_files
 
   config = {}
   seed = config["seed"] = getenv("SEED", 12345)
@@ -250,7 +252,7 @@ def train_bert():
   print(f"Training on {GPUS}")
   for x in GPUS: Device[x]
 
-  config_path = getenv("BERT_CONFIG_PATH", Path(__file__).parent.parents[2] / "extra" / "datasets" / "wiki" / "bert_config.json")
+  config_path = getenv("BERT_CONFIG_PATH", Path(__file__).parent.parents[1] / "extra" / "datasets" / "wiki" / "bert_config.json")
   model = get_mlperf_bert_model(config_path)
 
   # shard weights and initialize in order
@@ -284,10 +286,11 @@ def train_bert():
 
   # ** LR scheduler **
   scheduler = OneCycleLR(optimizer, max_lr, 1e9, max_lr * 1e12, train_steps, warmup_steps / train_steps)
-  print(f"training with batch size {BS} for {epochs} epochs with each {train_steps} steps")
+  print(f"Training with batch size {BS} for {epochs} epochs with each {train_steps} steps")
 
   # ** resume from checkpointing **
   start_step = 0
+  start_eval_step = 0
   if ckpt:=getenv("RESUME", ""):
     load_training_state(model, optimizer_group, scheduler, safe_load(ckpt))
     start_step = int(scheduler.total_steps / train_steps) # TODO: Check whether total_steps is appropriate
@@ -348,18 +351,18 @@ def train_bert():
   for e in range(epochs):
     # ** train loop **
     Tensor.training = True
-    it = iter(batch_load_bert(batch_size=BS, val=False))
-    i, data = 0, data_get(it)
+    train_it = iter(batch_load_bert(batch_size=BS, val=False))
+    i, data = 0, data_get(train_it)
     st = time.perf_counter()
     while data is not None:
       GlobalCounters.reset()
-      loss = train_step(data["input_ids"], data["segment_ids"], data["attention_mask"], data["masked_positions"], \
+      loss = train_step(data["input_ids"], data["segment_ids"], data["input_mask"], data["masked_lm_positions"], \
                         data["masked_lm_ids"], data["masked_lm_weights"], data["next_sentence_labels"])
 
       pt = time.perf_counter()
 
       try:
-        next_data = data_get(it)
+        next_data = data_get(train_it)
       except StopIteration:
         next_data = None
 
@@ -391,66 +394,63 @@ def train_bert():
         print(f"Estimated training time: {estimated_total_hours:.0f}h{(estimated_total_hours - int(estimated_total_hours)) * 60:.0f}m")
         return
 
-    # ** eval loop **
-    if i % eval_step_freq == 0:
-      train_step.reset()  # free the train step memory :(
-      eval_loss = []
-      eval_accuracy = []
-      eval_times = []
-      Tensor.training = False
+      # ** eval loop **
+      if i % eval_step_freq == 0:
+        train_step.reset()  # free the train step memory :(
+        eval_loss = []
+        eval_accuracy = []
+        eval_times = []
+        Tensor.training = False
 
-      it = iter(tqdm(batch_load_bert(batch_size=EVAL_BS, val=True), total=max_eval_steps))
-      data = data_get(it)
-      for eval_s in range(max_eval_steps):
-        GlobalCounters.reset()
-        st = time.time()
+        eval_it = iter(tqdm(batch_load_bert(batch_size=EVAL_BS, val=True, start=start_eval_step), total=max_eval_steps))
 
-        eval_result: dict[str, Tensor] = eval_step(data["input_ids"], data["segment_ids"], data["attention_mask"], data["masked_positions"], \
-                                                   data["masked_lm_ids"], data["masked_lm_weights"], data["next_sentence_labels"])
+        for eval_s in range(max_eval_steps):
+          end_index, data = data_get(eval_it)
+          GlobalCounters.reset()
+          st = time.time()
 
-        try:
-          next_data = data_get(it)
-        except StopIteration:
-          next_data = None
+          eval_result: dict[str, Tensor] = eval_step(data["input_ids"], data["segment_ids"], data["input_mask"], data["masked_lm_positions"], \
+                                                    data["masked_lm_ids"], data["masked_lm_weights"], data["next_sentence_labels"])
 
-        lm_loss, clsf_loss  = eval_result["masked_lm_loss"].numpy().item(), eval_result["next_sentence_loss"].numpy().item()
-        mlm_accuracy, clsf_accuracy = eval_result["masked_lm_accuracy"].numpy().item(), eval_result["next_sentence_accuracy"].numpy().item()
-        eval_loss.append([lm_loss, clsf_loss])
-        eval_accuracy.append([mlm_accuracy, clsf_accuracy])
-        data, next_data = next_data, None
+          lm_loss, clsf_loss  = eval_result["masked_lm_loss"].numpy().item(), eval_result["next_sentence_loss"].numpy().item()
+          mlm_accuracy, clsf_accuracy = eval_result["masked_lm_accuracy"].numpy().item(), eval_result["next_sentence_accuracy"].numpy().item()
+          eval_loss.append([lm_loss, clsf_loss])
+          eval_accuracy.append([mlm_accuracy, clsf_accuracy])
+          data, next_data = next_data, None
 
-        et = time.time()
-        eval_times.append(et - st)
+          et = time.time()
+          eval_times.append(et - st)
+        start_eval_step = end_index
 
-      eval_step.reset()
-      total_lm_loss = sum(pair[0] for pair in eval_loss) / len(eval_loss)
-      total_clsf_loss = sum(pair[1] for pair in eval_loss) / len(eval_loss)
-      total_lm_accuracy = sum(pair[0] for pair in eval_accuracy) / len(eval_accuracy)
-      total_clsf_accuracy = sum(pair[1] for pair in eval_accuracy) / len(eval_accuracy)
-      total_fw_time = sum(eval_times) / len(eval_times)
-      tqdm.write(f"eval lm loss: {total_lm_loss:.2f}, eval clsf loss: {total_clsf_loss:.2f}, eval lm accuracy: {total_lm_accuracy:.2f}, \
-                  eval clsf accuracy: {total_clsf_accuracy:.2f}, eval time: {total_fw_time:.2f}")
-      if WANDB:
-        wandb.log({"eval/lm_loss": total_lm_loss, "eval/clsf_loss": total_clsf_loss, "eval/lm_accuracy": total_lm_accuracy, \
-                    "eval/clsf_accuracy": total_clsf_accuracy, "eval/forward_time": total_fw_time, "epoch": e + 1})
+        eval_step.reset()
+        total_lm_loss = sum(pair[0] for pair in eval_loss) / len(eval_loss)
+        total_clsf_loss = sum(pair[1] for pair in eval_loss) / len(eval_loss)
+        total_lm_accuracy = sum(pair[0] for pair in eval_accuracy) / len(eval_accuracy)
+        total_clsf_accuracy = sum(pair[1] for pair in eval_accuracy) / len(eval_accuracy)
+        total_fw_time = sum(eval_times) / len(eval_times)
+        tqdm.write(f"eval lm loss: {total_lm_loss:.2f}, eval clsf loss: {total_clsf_loss:.2f}, eval lm accuracy: {total_lm_accuracy:.2f}, \
+                    eval clsf accuracy: {total_clsf_accuracy:.2f}, eval time: {total_fw_time:.2f}")
+        if WANDB:
+          wandb.log({"eval/lm_loss": total_lm_loss, "eval/clsf_loss": total_clsf_loss, "eval/lm_accuracy": total_lm_accuracy, \
+                      "eval/clsf_accuracy": total_clsf_accuracy, "eval/forward_time": total_fw_time, "epoch": e + 1})
 
-      # save model if achieved target
-      if not achieved and total_lm_accuracy >= target:
-        if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
-        fn = f"./ckpts/bert-large.safe"
-        safe_save(get_state_dict(model), fn)
-        print(f" *** Model saved to {fn} ***")
-        achieved = True
+        # save model if achieved target
+        if not achieved and total_lm_accuracy >= target:
+          if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
+          fn = f"./ckpts/bert-large.safe"
+          safe_save(get_state_dict(model), fn)
+          print(f" *** Model saved to {fn} ***")
+          achieved = True
 
-      # checkpoint every time we eval
-      if getenv("CKPT"):
-        if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
-        if WANDB and wandb.run is not None:
-          fn = f"./ckpts/{time.strftime('%Y%m%d_%H%M%S')}_{wandb.run.id}_e{e}.safe"
-        else:
-          fn = f"./ckpts/{time.strftime('%Y%m%d_%H%M%S')}_e{e}.safe"
-        print(f"saving ckpt to {fn}")
-        safe_save(get_training_state(model, optimizer_group, scheduler), fn)
+        # checkpoint every time we eval
+        if getenv("CKPT"):
+          if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
+          if WANDB and wandb.run is not None:
+            fn = f"./ckpts/{time.strftime('%Y%m%d_%H%M%S')}_{wandb.run.id}_e{e}.safe"
+          else:
+            fn = f"./ckpts/{time.strftime('%Y%m%d_%H%M%S')}_e{e}.safe"
+          print(f"saving ckpt to {fn}")
+          safe_save(get_training_state(model, optimizer_group, scheduler), fn)
 
 def train_maskrcnn():
   # TODO: Mask RCNN

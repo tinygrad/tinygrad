@@ -140,8 +140,6 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None):
     shm.close()
     shm.unlink()
 
-# TODO: REturn Tensor
-
 def load_bert_file(file_name):
   with open(file_name, "rb") as f:
     features = pickle.load(f)
@@ -151,26 +149,28 @@ def load_bert_file(file_name):
         "segment_ids": features["segment_ids"],
         "masked_lm_positions": features["masked_lm_positions"],
         "masked_lm_ids": features["masked_lm_ids"],
+        "masked_lm_weights": features["masked_lm_weights"],
         "next_sentence_labels": features["next_sentence_labels"],
     }
 
-def batch_load_bert(batch_size=32, start=0, val=False):
+def batch_load_bert(batch_size=32, start=0, val=False) -> dict[str, Tensor]:
   from extra.datasets.wikipedia import get_train_files, get_val_files
   files = get_val_files() if val else get_train_files()
   with Pool() as p:
     i = start
     while True:
-      results = p.map(load_bert_file, files[i:i+batch_size])
-      yield {
-        "input_ids": Tensor([np.concatenate([f["input_ids"] for f in results], axis=0)]),
-        "input_mask": Tensor([np.concatenate([f["input_mask"] for f in results], axis=0)]),
-        "segment_ids": Tensor([np.concatenate([f["segment_ids"] for f in results], axis=0)]),
-        "masked_lm_positions": Tensor([np.concatenate([f["masked_lm_positions"] for f in results], axis=0)]),
-        "masked_lm_ids": Tensor([np.concatenate([f["masked_lm_ids"] for f in results], axis=0)]),
-        "masked_lm_weights": Tensor([np.concatenate([f["masked_lm_weights"] for f in results], axis=0)]),
-        "next_sentence_labels": Tensor([np.concatenate([f["next_sentence_labels"] for f in results], axis=0)]),
+      end_index = min(i + batch_size, len(files))
+      results = p.map(load_bert_file, files[i:end_index])
+      yield end_index, {
+        "input_ids": Tensor(np.concatenate([f["input_ids"] for f in results], axis=0)),
+        "input_mask": Tensor(np.concatenate([f["input_mask"] for f in results], axis=0)),
+        "segment_ids": Tensor(np.concatenate([f["segment_ids"] for f in results], axis=0)),
+        "masked_lm_positions": Tensor(np.concatenate([f["masked_lm_positions"] for f in results], axis=0)),
+        "masked_lm_ids": Tensor(np.concatenate([f["masked_lm_ids"] for f in results], axis=0)),
+        "masked_lm_weights": Tensor(np.concatenate([f["masked_lm_weights"] for f in results], axis=0)),
+        "next_sentence_labels": Tensor(np.concatenate([f["next_sentence_labels"] for f in results], axis=0)),
       }
-      i = (i + batch_size) % len(files)
+      i = (end_index) % len(files)
 
 if __name__ == "__main__":
   from extra.datasets.imagenet import get_train_files, get_val_files

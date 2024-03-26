@@ -1,3 +1,4 @@
+from multiprocessing import Pool
 import sys, pickle, random, unicodedata, functools, os
 from pathlib import Path
 import numpy as np
@@ -347,12 +348,41 @@ def get_val_files():
 def get_train_files():
   return sorted(list((BASEDIR / "train/").glob("*/*.pkl")))
 
+def load_bert_file(file_name):
+  with open(file_name, "rb") as f:
+    features = pickle.load(f)
+    return {
+        "input_ids": features["input_ids"],
+        "input_mask": features["input_mask"],
+        "segment_ids": features["segment_ids"],
+        "masked_lm_positions": features["masked_lm_positions"],
+        "masked_lm_ids": features["masked_lm_ids"],
+        "next_sentence_labels": features["next_sentence_labels"],
+    }
+
+def iterator(BS:int, val=False, start=0):
+  from extra.datasets.wikipedia import get_train_files, get_val_files
+  files = get_val_files() if val else get_train_files()
+  with Pool() as p:
+    i = start
+    while True:
+      results = p.map(load_bert_file, files[i:i+BS])
+      yield {
+        "input_ids": np.concatenate([f["input_ids"] for f in results], axis=0),
+        "input_mask": np.concatenate([f["input_mask"] for f in results], axis=0),
+        "segment_ids": np.concatenate([f["segment_ids"] for f in results], axis=0),
+        "masked_lm_positions": np.concatenate([f["masked_lm_positions"] for f in results], axis=0),
+        "masked_lm_ids": np.concatenate([f["masked_lm_ids"] for f in results], axis=0),
+        "masked_lm_weights": np.concatenate([f["masked_lm_weights"] for f in results], axis=0),
+        "next_sentence_labels": np.concatenate([f["next_sentence_labels"] for f in results], axis=0),
+      }
+      i = (i + BS) % len(files)
+
 if __name__ == "__main__":
-  from examples.mlperf.dataloader import batch_load_bert
   tokenizer = Tokenizer(Path(__file__).parent / "wiki" / "vocab.txt")
 
   if len(sys.argv) <= 1:
-    X, Y = next(batch_load_bert(val=False))
+    X, Y = next(iterator(val=False))
     print("Input Ids:\n", X["input_ids"][0])
     print("Tokens:\n", tokenizer.convert_ids_to_tokens(X["input_ids"][0]))
     print("Masked token ids:\n", Y["masked_lm_ids"])

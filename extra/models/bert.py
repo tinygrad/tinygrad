@@ -37,13 +37,13 @@ class BertForMLPerf:
   def __init__(self, hidden_size, intermediate_size, max_position_embeddings, num_attention_heads, num_hidden_layers, type_vocab_size, vocab_size, attention_probs_dropout_prob, hidden_dropout_prob) -> None:
     self.model = Bert(
       hidden_size,
-      intermediate_size, 
-      max_position_embeddings, 
-      num_attention_heads, 
-      num_hidden_layers, 
-      type_vocab_size, 
-      vocab_size, 
-      attention_probs_dropout_prob, 
+      intermediate_size,
+      max_position_embeddings,
+      num_attention_heads,
+      num_hidden_layers,
+      type_vocab_size,
+      vocab_size,
+      attention_probs_dropout_prob,
       hidden_dropout_prob
     )
     # for clsf:
