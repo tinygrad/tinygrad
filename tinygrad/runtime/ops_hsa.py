@@ -125,12 +125,12 @@ class HSAAllocator(LRUAllocator):
   def copyin(self, dest:T, src: memoryview):
     # Async copyin sync model uses barriers on the main hw queue, since barriers are guaranteed to execute in order with all other packets.
     self.device.hw_queue.submit_barrier([], sync_signal := self.device.alloc_signal(reusable=True))
-    mem = self._alloc_with_options(src.nbytes, BufferOptions(host=True))
-    ctypes.memmove(mem, from_mv(src), src.nbytes)
-    check(hsa.hsa_amd_memory_async_copy_on_engine(dest, self.device.agent, mem, HSADevice.cpu_agent, src.nbytes, 1, ctypes.byref(sync_signal),
+    c_agents = (hsa.hsa_agent_t*2)(self.device.agent, HSADevice.cpu_agent)
+    check(hsa.hsa_amd_memory_lock_to_pool(from_mv(src), src.nbytes, c_agents, 2, HSADevice.cpu_mempool, 0, ctypes.byref(addr:=ctypes.c_void_p())))
+    check(hsa.hsa_amd_memory_async_copy_on_engine(dest, self.device.agent, addr, HSADevice.cpu_agent, src.nbytes, 1, ctypes.byref(sync_signal),
                                                   copy_signal := self.device.alloc_signal(reusable=True), hsa.HSA_AMD_SDMA_ENGINE_0, True))
     self.device.hw_queue.submit_barrier([copy_signal])
-    self.device.delayed_free.append(mem)
+    self.device.delayed_unlock.append(src)
     if PROFILE: Profiler.track(copy_signal, self.device, f"copyin: CPU -> HSA:{self.device.device_id}", is_copy=True)
 
   def copy_from_fd(self, dest, fd, offset, size):
@@ -220,6 +220,7 @@ class HSADevice(Compiled):
     self.hdp_flush = hdp_flush
 
     self.delayed_free: List[int] = []
+    self.delayed_unlock: List[int] = []
     self.reusable_signals: List[hsa.hsa_signal_t] = []
 
     from tinygrad.runtime.graph.hsa import HSAGraph
@@ -235,6 +236,9 @@ class HSADevice(Compiled):
     for sig in self.reusable_signals: hsa.hsa_signal_silent_store_relaxed(sig, 1)
     self.signal_pool.extend(self.reusable_signals)
     self.reusable_signals.clear()
+
+    for mv_to_unlock in self.delayed_unlock: check(hsa.hsa_amd_memory_unlock(from_mv(mv_to_unlock)))
+    self.delayed_unlock.clear()
 
     for opaque_to_free in self.delayed_free: check(hsa.hsa_amd_memory_pool_free(opaque_to_free))
     self.delayed_free.clear()
