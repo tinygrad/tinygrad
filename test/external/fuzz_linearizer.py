@@ -101,7 +101,7 @@ def compare_linearizer(lin: Linearizer, rawbufs=None, var_vals=None, ground_trut
   except AssertionError as e:
     if DEBUG >= 2:
       print(f"COMPARE_ERROR details: {e}")
-      if getenv("DEBUG_VALUES", 0) > 0:
+      if getenv("DEBUG_VALUES") > 0:
         mismatch_indices = np.where(~np.isclose(result, ground_truth, rtol=rtol, atol=atol))
         mismatched_result = result[mismatch_indices]
         mismatched_ground_truth = ground_truth[mismatch_indices]
@@ -169,8 +169,8 @@ def fuzz_linearizer(lin: Linearizer):
 
 def _is_simple(lin: Linearizer) -> bool:
   if len(lin.ast) > 1: return False
-  lop:LazyOp = lin.ast[0]
-  if lop.src[0] and lop.src[0].op == UnaryOps.CAST and lop.src[0].src[0] and lop.src[0].src[0].op == BufferOps.LOAD: return True
+  ast:LazyOp = lin.ast[0]
+  if ast.src[0] and ast.src[0].op == UnaryOps.CAST and ast.src[0].src[0] and ast.src[0].src[0].op == BufferOps.LOAD: return True
   return False
 
 if __name__ == "__main__":
@@ -195,12 +195,12 @@ if __name__ == "__main__":
   tested = 0
   failed_ids = []
   failures = defaultdict(list)
-  seen_ast_strs = {}
+  seen_ast_strs = set()
   for i, ast in enumerate(ast_strs[:getenv("FUZZ_N", len(ast_strs))]):
     if (nth := getenv("FUZZ_NTH", -1)) != -1 and i != nth: continue
     if "dtypes.image" in ast and Device.DEFAULT != "GPU": continue  # IMAGE is only for GPU
     if ast in seen_ast_strs: continue
-    seen_ast_strs[ast] = True
+    seen_ast_strs.add(ast)
 
     print(f"testing ast {i}")
     tested += 1
