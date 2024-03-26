@@ -287,12 +287,12 @@ def train_unet3d():
 
   optim = SGD(params, lr=LR, momentum=MOMENTUM, nesterov=True)
 
-  def _lr_warm_up(optim, init_lr, lr, current_epoch, warmup_epochs):
+  def lr_warm_up(optim, init_lr, lr, current_epoch, warmup_epochs):
     scale = current_epoch / warmup_epochs
     optim.lr.assign(Tensor([init_lr + (lr - init_lr) * scale], device=GPUS if len(GPUS) > 1 else None))
 
   @TinyJit
-  def _train_step(model, x, y):
+  def train_step(model, x, y):
     optim.zero_grad()
 
     y_hat = model(x)
@@ -302,51 +302,55 @@ def train_unet3d():
     optim.step()
     return loss.realize()
   
-  def _eval_step(model, x, y):
+  def eval_step(model, x, y):
     y_hat, y = sliding_window_inference(model, x, y)
     score = dice_score(Tensor(y_hat), Tensor(y)).mean().item()
     return score
+  
+  def data_get(it):
+    x, y = next(it)
+    x, y = Tensor(x), Tensor(y, requires_grad=False)
+    if len(GPUS) > 1: x, y = x.shard(GPUS, axis=0).realize(), y.shard(GPUS, axis=0)
+    return x.realize(), y
 
   if WANDB: wandb.init(project=PROJ_NAME)
 
   for epoch in range(1, NUM_EPOCHS + 1):
     if epoch <= LR_WARMUP_EPOCHS and LR_WARMUP_EPOCHS > 0:
-      _lr_warm_up(optim, LR_WARMUP_INIT_LR, LR, epoch, LR_WARMUP_EPOCHS)
+      lr_warm_up(optim, LR_WARMUP_INIT_LR, LR, epoch, LR_WARMUP_EPOCHS)
 
-    for x, y in (t:=tqdm(iterate(val=False, shuffle=True, bs=BS, size=SIZE), desc=f"[Training][Epoch: {epoch}/{NUM_EPOCHS}]", total=len(get_train_files()) // BS)):
-      x, y = Tensor(x, requires_grad=False), Tensor(y, requires_grad=False)
+    it = iter(tqdm(iterate(val=False, shuffle=True, bs=BS, size=SIZE), total=len(get_train_files()) // BS, desc=f"epoch {epoch}"))
+    i, proc = 0, data_get(it)
+    st = time.perf_counter()
 
-      if len(GPUS) > 1:
-        x.shard_(GPUS, axis=0)
-        y.shard_(GPUS, axis=0)
+    while proc is not None:
+      GlobalCounters.reset()
 
-      loss = _train_step(model, x, y)
-      t.set_description(f"[Training][Epoch: {epoch}/{NUM_EPOCHS}][Loss: {loss.item():.3f}][RAM used: {GlobalCounters.mem_used/1e9:5.2f} GB]")
-      if WANDB: wandb.log({"train_loss": loss.item()})
+      loss = train_step(model, proc[0], proc[1])
 
-    if epoch % CHECKPOINT_EVERY == 0:
-      state_dict = get_state_dict(model)
-      safe_save(state_dict, f"unet3d_mlperf_epoch_{epoch}.safetensors")
-      print(f"Saved checkpoint at epoch {epoch}")
+      pt = time.perf_counter()
 
-    if epoch % EVAL_AT == 0:
-      with Tensor.train(val=False):
-        scores = 0
+      try:
+        next_proc = data_get(it)
+      except StopIteration:
+        next_proc = None
 
-        for i, (x, y) in enumerate((t:=tqdm(iterate(), desc=f"[Validation][Epoch: {epoch}/{NUM_EPOCHS}]", total=len(get_val_files()))), start=1):
-          scores += _eval_step(model , x, y) # NOTE: passing in model instead since it is jitted
-          t.set_description(f"[Validation][Epoch: {epoch}/{NUM_EPOCHS}][Mean DICE: {scores / i:.3f}]")
+      dt = time.perf_counter()
 
-        scores /= i
+      device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
+      loss = loss.numpy().item()
 
-        if WANDB: wandb.log({"val_mean_dice": scores})
+      cl = time.perf_counter()
 
-        if scores >= TARGET_METRIC:
-          print(f"Target metric ({TARGET_METRIC:.3f}) has been reached with validation metric of {scores:.3f}")
-          print("Training complete")
-          break
-        else:
-          print(f"Target metric ({TARGET_METRIC:.3f}) has not been reached with validation metric of {scores:.3f}")
+      tqdm.write(
+        f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(pt - st) * 1000.0:7.2f} ms python, {(dt - pt) * 1000.0:6.2f} ms fetch data, "
+        f"{(cl - dt) * 1000.0:7.2f} ms {device_str}, {loss:5.2f} loss, {optim.lr.numpy()[0]:.6f} LR, "
+        f"{GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS"
+      )
+
+      st = cl
+      proc, next_proc = next_proc, None
+      i += 1
 
 def train_rnnt():
   # TODO: RNN-T
