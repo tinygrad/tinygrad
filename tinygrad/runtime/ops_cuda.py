@@ -127,7 +127,7 @@ class CUDAAllocator(LRUAllocator):
     check(cuda.cuCtxSetCurrent(self.device.context))
     return init_c_var(cuda.CUdeviceptr(), lambda x: check(cuda.cuMemAlloc_v2(ctypes.byref(x), size)))
   def _alloc_with_options(self, size:int, options:BufferOptions):
-    if options.host: return init_c_var(ctypes.c_void_p(), lambda x: check(cuda.cuMemHostAlloc(ctypes.byref(x), size, 0)))
+    if options.host: return init_c_var(ctypes.c_void_p(), lambda x: check(cuda.cuMemHostAlloc(ctypes.byref(x), size, 0x01)))
     else: raise ValueError("no options")
   def _free(self, opaque): check(cuda.cuMemFree_v2(opaque))
   def copyin(self, dest, src:memoryview):
@@ -152,12 +152,12 @@ class CUDADevice(Compiled):
   devices: List[CUDADevice] = []
 
   def __init__(self, device:str):
-    device_id = int(device.split(":")[1]) if ":" in device else 0
+    self.device_id = int(device.split(":")[1]) if ":" in device else 0
     if not CUDACPU:
       check(cuda.cuInit(0))
-      check(cuda.cuDeviceGet(ctypes.byref(cu_device := cuda.CUdevice()), device_id))
+      check(cuda.cuDeviceGet(ctypes.byref(cu_device := cuda.CUdevice()), self.device_id))
       self.context = init_c_var(cuda.CUcontext(), lambda x: check(cuda.cuCtxCreate_v2(ctypes.byref(x), 0, cu_device)))
-      check(cuda.cuDeviceComputeCapability(ctypes.byref(major := ctypes.c_int()), ctypes.byref(minor := ctypes.c_int()), device_id))
+      check(cuda.cuDeviceComputeCapability(ctypes.byref(major := ctypes.c_int()), ctypes.byref(minor := ctypes.c_int()), self.device_id))
 
     self.arch = f"sm_{major.value}{minor.value}" if not CUDACPU else "sm_35"
     self.pending_copyin: List[Tuple[int, int, Optional[BufferOptions]]] = []
