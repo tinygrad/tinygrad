@@ -31,7 +31,7 @@ jobs:
     #- name: Run Stable Diffusion
     #  run: python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
     - name: Run model inference benchmark
-      run: METAL=1 NOCLANG=1 python3 test/external/external_model_benchmark.py
+      run: METAL=1 python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
       run: BIG=2 MPS=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
     - name: Run Tensor Core GEMM
@@ -95,7 +95,7 @@ jobs:
         mkdir -p weights
         ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
     - name: Run model inference benchmark
-      run: CUDA=1 NOCLANG=1 python3 test/external/external_model_benchmark.py
+      run: CUDA=1 python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
       run: CUDA=1 BIG=2 TORCHCUDA=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
     - name: Run Tensor Core GEMM
