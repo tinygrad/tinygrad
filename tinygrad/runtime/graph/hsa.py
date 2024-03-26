@@ -187,7 +187,7 @@ class HSAGraph(MultiDeviceJITGraph):
 
         # When synchronizing to aql packets, we only need to sync to the latest one, as they are executed in order.
         signal_deps, aql_deps = [x for x in rdeps if isinstance(x, hsa.hsa_signal_t)], [x for x in rdeps if isinstance(x, int)]
-        deps = signal_deps + [max(aql_deps)] if aql_deps else []
+        deps = signal_deps + ([max(aql_deps)] if len(aql_deps) > 0 else [])
         for dep in deps: wait_signals.append(self.dependency_as_signal(dep, sync_with_aql_packets=sync_with_aql_packets))
 
     if new_dependency is not None:
