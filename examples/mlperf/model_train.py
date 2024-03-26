@@ -268,13 +268,9 @@ def train_unet3d():
     except ImportError:
       raise "Need to install wandb to use it"
 
-  if ((num_gpus := getenv("GPUS")) > 1):
-    print(f"Using {num_gpus} GPUS for training")
-    GPUS = tuple([Device.canonicalize(f'{Device.DEFAULT}:{i}') for i in range(num_gpus)])
-    assert BS % len(GPUS) == 0, f"{BS=} is not a multiple of {len(GPUS)=}"
-    for x in GPUS: Device[x]
-  else:
-    GPUS = tuple()
+  GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
+  print(f"Training on {GPUS}")
+  for x in GPUS: Device[x]
 
   model = UNet3D()
 
