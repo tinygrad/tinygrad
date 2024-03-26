@@ -4,7 +4,7 @@ from examples.llama import Transformer, MODEL_PARAMS
 from tinygrad.tensor import Tensor
 from tinygrad import Device
 from tinygrad.nn.state import get_state_dict
-from tinygrad.device import Compiled, Allocator
+from tinygrad.device import Allocator
 from tinygrad.helpers import Profiling
 
 class FakeProgram:
@@ -16,7 +16,6 @@ class FakeAllocator(Allocator):
   def copyin(self, dest, src:memoryview): pass
 
 class TestLLaMASpeed(unittest.TestCase):
-  @unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "only test for compiled backends")
   def test_llama_compile(self):
     backup_program = Device[Device.DEFAULT].runtime
     backup_allocator = Device[Device.DEFAULT].allocator

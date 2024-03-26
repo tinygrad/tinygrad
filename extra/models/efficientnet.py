@@ -35,7 +35,7 @@ class MBConvBlock:
 
   def __call__(self, inputs):
     x = inputs
-    if self._expand_conv:
+    if self._expand_conv is not None:
       x = self._bn0(x.conv2d(self._expand_conv)).swish()
     x = x.conv2d(self._depthwise_conv, padding=self.pad, stride=self.strides, groups=self._depthwise_conv.shape[0])
     x = self._bn1(x).swish()
@@ -152,13 +152,13 @@ class EfficientNet:
           k = k.replace('.weight', '')
 
       #print(k, v.shape)
-      mv = get_child(self, k)
+      mv:Tensor = get_child(self, k)
       vnp = v #.astype(np.float32)
       vnp = vnp if k != '_fc' else vnp.clang().T
       #vnp = vnp if vnp.shape != () else np.array([vnp])
 
       if mv.shape == vnp.shape:
-        mv.assign(vnp.to(mv.device))
+        mv.replace(vnp.to(mv.device))
       else:
         print("MISMATCH SHAPE IN %s, %r %r" % (k, mv.shape, vnp.shape))
 

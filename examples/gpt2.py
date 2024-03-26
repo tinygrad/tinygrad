@@ -33,7 +33,7 @@ class Attention:
 
     # create kv cache
     if not hasattr(self, "cache_kv"):
-      self.cache_kv = Tensor.zeros(2, bsz, MAX_CONTEXT, self.n_heads, self.head_dim, dtype=x.dtype)
+      self.cache_kv = Tensor.zeros(2, bsz, MAX_CONTEXT, self.n_heads, self.head_dim, dtype=x.dtype).contiguous().realize()
 
     if start_pos > 0:
       keys = self.cache_kv[0].shrink((None, (0, start_pos), None, None)).cat(xk, dim=1)
@@ -43,7 +43,7 @@ class Attention:
       values = xv
 
     # update the cache
-    new_cache = Tensor.stack([keys, values]).pad((None, None,(0,MAX_CONTEXT-start_pos-seqlen),None,None)).contiguous()
+    new_cache = Tensor.stack([keys, values]).pad((None, None,(0,MAX_CONTEXT-start_pos-seqlen),None,None))
     self.cache_kv.assign(new_cache).realize()
 
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
@@ -141,7 +141,7 @@ class GPT2:
 
     if HALF:
       for l in get_state_dict(model).values():
-        l.assign(l.half().realize())
+        l.replace(l.half().realize())
 
     return GPT2(model, tokenizer)
 
