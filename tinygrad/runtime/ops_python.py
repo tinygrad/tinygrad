@@ -188,7 +188,7 @@ class PythonCompiler(Compiler):
   def compile(self, src:str) -> bytes: return base64.b64decode(src)
 
 class PythonAllocator(Allocator):
-  def _alloc(self, size): return memoryview(bytearray(size))
+  def _alloc(self, size, options): return memoryview(bytearray(size))
   def copyin(self, dest, src:memoryview): dest[:] = src
   def copyout(self, dest:memoryview, src): dest[:] = src
 
