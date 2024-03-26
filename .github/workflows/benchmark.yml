@@ -56,6 +56,10 @@ jobs:
       run: time PYTHONPATH=. TARGET_EVAL_ACC_PCT=97.5 python3 examples/beautiful_mnist.py | tee beautiful_mnist.txt
     - name: Run 10 CIFAR training steps
       run: STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
+    - name: Run 10 CIFAR training steps w HALF
+      run: STEPS=10 DEFAULT_FLOAT=HALF python3 examples/hlb_cifar10.py | tee train_cifar_half.txt
+    - name: Run 10 CIFAR training steps w BF16
+      run: STEPS=10 DEFAULT_FLOAT=BFLOAT16 python3 examples/hlb_cifar10.py | tee train_cifar_bf16.txt
     # TODO: this is flaky too
     # - name: Run 10 CIFAR training steps w winograd
     #   run: WINO=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino.txt
@@ -65,9 +69,6 @@ jobs:
         path: |
           onnx_inference_speed.csv
           torch_speed.txt
-          beautiful_mnist.txt
-          train_cifar.txt
-          train_cifar_wino.txt
           llama_unjitted.txt
           llama_jitted.txt
           llama_beam.txt
@@ -78,6 +79,11 @@ jobs:
           matmul.txt
           matmul_half.txt
           sd.txt
+          beautiful_mnist.txt
+          train_cifar.txt
+          train_cifar_half.txt
+          train_cifar_bf16.txt
+          train_cifar_wino.txt
 
   testnvidiabenchmark:
     name: NVIDIA Benchmark
