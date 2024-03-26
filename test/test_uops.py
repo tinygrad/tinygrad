@@ -49,6 +49,18 @@ def _test_single_value_const(vals, op, dts):
   buf.copyout(ret.data)
   return ret[0]
 
+def _test_uops_result(output_dtype, uops, res):
+  # uops = []
+  buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(output_dtype), (), (0, 'data0',True))
+  # res = output_fn(uops)
+  uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), res))
+  buf = Buffer(Device.DEFAULT, 1, output_dtype)
+  prg = _uops_to_prg(UOpGraph(uops))
+  prg.exec([buf])
+  ret = np.empty(1, output_dtype.np)
+  buf.copyout(ret.data)
+  return ret[0]
+
 class TestUOps(unittest.TestCase):
   def _equal(self, v1, v2):
     if not (math.isnan(v1) and math.isnan(v2)): self.assertAlmostEqual(v1, v2, places=5) if v1.dtype != np.bool_ else self.assertEqual(v1, v2)
@@ -193,6 +205,25 @@ class TestConstantFolding(unittest.TestCase):
     si = si[0]
     lin = Device[Device.DEFAULT].get_linearizer(si.ast[0]).linearize()
     assert any(uop.uop is UOps.BITCAST for uop in lin.uops.uops), f"{[uop.uop for uop in lin.uops.uops]} does not contain bitcast"
+
+class TestLocalAccess(unittest.TestCase):
+  @unittest.skipIf(Device.DEFAULT in {"LLVM"}, "device doesn't support local memory")
+  def test_local_basic(self):
+    uops = []
+    smem = uop(uops, UOps.DEFINE_LOCAL, PtrDType(dtypes.float32), (), ('smem', 16))
+    uop(uops, UOps.STORE, None, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 0), uop(uops, UOps.CONST, dtypes.float32, (), 42)))
+    sres = uop(uops, UOps.LOAD, dtypes.float32, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 0)))
+    self.assertEqual(_test_uops_result(dtypes.float32, uops, sres), 42)
+
+  @unittest.skipIf(Device.DEFAULT in {"LLVM"}, "device doesn't support local memory")
+  def test_local_indirect(self):
+    uops = []
+    smem = uop(uops, UOps.DEFINE_LOCAL, PtrDType(dtypes.int32), (), ('smem', 16))
+    uop(uops, UOps.STORE, None, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 1), uop(uops, UOps.CONST, dtypes.int32, (), 2)))
+    uop(uops, UOps.STORE, None, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 2), uop(uops, UOps.CONST, dtypes.int32, (), 42)))
+    ofs = uop(uops, UOps.LOAD, dtypes.int32, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 1)))
+    sres = uop(uops, UOps.LOAD, dtypes.int32, (smem, ofs))
+    self.assertEqual(_test_uops_result(dtypes.int32, uops, sres), 42)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
