@@ -85,6 +85,11 @@ if __name__ == "__main__":
                                  kfd.KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE)
   stm = kio.map_memory_to_gpu(fd, handle=rw_ptr.handle, device_ids_array_ptr=ctypes.addressof(arr), n_devices=1)
   assert stm.n_success == 1
+  event_page = gpu_alloc(fd, 0x8000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT | kfd.KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE |
+                                 kfd.KFD_IOC_ALLOC_MEM_FLAGS_COHERENT | kfd.KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED |
+                                 kfd.KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE)
+  stm = kio.map_memory_to_gpu(fd, handle=event_page.handle, device_ids_array_ptr=ctypes.addressof(arr), n_devices=1)
+  assert stm.n_success == 1
   ring_base = gpu_alloc_userptr(fd, 0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | kfd.KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE |
                                     kfd.KFD_IOC_ALLOC_MEM_FLAGS_COHERENT | kfd.KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED |
                                     kfd.KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE)
@@ -103,7 +108,7 @@ if __name__ == "__main__":
   ctx_save_restore_address = gpu_alloc(fd, 0x2C02000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM |
                                      kfd.KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE |
                                      kfd.KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE)
-  stm = kio.map_memory_to_gpu(fd, handle=eop_buffer.handle, device_ids_array_ptr=ctypes.addressof(arr), n_devices=1)
+  stm = kio.map_memory_to_gpu(fd, handle=ctx_save_restore_address.handle, device_ids_array_ptr=ctypes.addressof(arr), n_devices=1)
   assert stm.n_success == 1
 
   #113.00 ms +   0.00 ms :  0 = AMDKFD_IOC_CREATE_QUEUE                  ring_base_address:0x797465200000 write_pointer_address:0x79751C068038 read_pointer_address:0x79751C068080 doorbell_offset:0x0 ring_size:0x800000 gpu_id:0x433D queue_type:0x2 queue_per
@@ -114,7 +119,7 @@ if __name__ == "__main__":
 
   #define KFD_MMAP_TYPE_SHIFT	62
   #define KFD_MMAP_TYPE_DOORBELL	(0x3ULL << KFD_MMAP_TYPE_SHIFT)
-  evt = kio.create_event(fd, auto_reset=1)
+  evt = kio.create_event(fd, event_page_offset=event_page.handle, auto_reset=1)
 
   nq = kio.create_queue(fd, ring_base_address=ring_base.va_addr, ring_size=0x1000, gpu_id=GPU_ID,
                         queue_type=kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE,
@@ -131,11 +136,12 @@ if __name__ == "__main__":
   to_mv(signals.va_addr, 0x40)
 
   """
-  event_page = libc.mmap(0, 0x2000, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, fd, evt.event_page_offset)
-  print("event_page", hex(event_page))
-  hexdump(to_mv(event_page, 0x2000))
+  hexdump(to_mv(event_page.va_addr, 0x40))
   kio.set_event(fd, event_id=evt.event_id)
-  hexdump(to_mv(event_page, 0x2000))
+  hexdump(to_mv(event_page.va_addr, 0x40))
+  kio.reset_event(fd, event_id=evt.event_id)
+  hexdump(to_mv(event_page.va_addr, 0x40))
+  exit(0)
   """
 
   # KFD_EVENT_TYPE_SIGNAL
@@ -166,9 +172,16 @@ if __name__ == "__main__":
   packet.header = BARRIER_HEADER
   hexdump(to_mv(ring_base.va_addr, AQL_PACKET_SIZE))
 
-  to_mv(signals.va_addr, 0x40).cast("I")[0x18//4] = evt.event_id
-  print(hex(ds[0]), hex(ds[1]))
+  # _HsaEventData
+  to_mv(signals.va_addr, 0x40).cast("Q")[0] = 1
+  to_mv(signals.va_addr, 0x40).cast("Q")[1] = 1
+  #to_mv(signals.va_addr, 0x40).cast("Q")[2] = event_page
+  to_mv(signals.va_addr, 0x40).cast("Q")[2] = event_page.va_addr + evt.event_slot_index*8  # HWAddress
+  to_mv(signals.va_addr, 0x40).cast("Q")[3] = evt.event_trigger_data # HWData
+  print(hex(ds[0]), hex(ds[1]), hex(ds[2]))
   hexdump(to_mv(signals.va_addr, 0x40))
+
+  # 10 08 49 3E 46 77 00 00
 
 
   # ring doorbell
@@ -180,7 +193,7 @@ if __name__ == "__main__":
   evt_arr[0].event_id = evt.event_id
   kio.wait_events(fd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=0, timeout=1000)
 
-  print(hex(ds[0]), hex(ds[1]))
+  print(hex(ds[0]), hex(ds[1]), hex(ds[2]))
   hexdump(to_mv(signals.va_addr, 0x40))
 
   #nq = kio.create_queue(fd, ring_base_address=buf, ring_size=0x1000, gpu_id=GPU_ID,
