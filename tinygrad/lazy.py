@@ -32,7 +32,6 @@ class LazyBuffer:
       # properties on base
       self.op, self.arg, self.srcs = op, arg, srcs  # this is a LazyOp, except the src is LazyBuffers and not LazyOps
       self.realized: Optional[Buffer] = None
-      self.output_buffer: Optional[Buffer] = None
       self.contiguous_child: Optional[Tuple[ReferenceType[LazyBuffer], ShapeTracker]] = None
       self.forced_realize = False
     else:

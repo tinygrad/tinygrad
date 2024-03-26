@@ -55,8 +55,7 @@ def run_schedule(schedule:List[ScheduleItem]):
           # if the buffer isn't realized, it might be a const or something. this is fine
           out.realized = out.srcs[1].base.realized
         else:
-          out.realized = out.output_buffer if out.output_buffer is not None else \
-            Buffer(out.device, out.size, out.dtype, "PLACEHOLDER" if getattr(prg, "skip_allocation", False) else None)
+          out.realized = Buffer(out.device, out.size, out.dtype, "PLACEHOLDER" if getattr(prg, "skip_allocation", False) else None)
         del out.srcs
 
     # run the function (put it in JIT)
