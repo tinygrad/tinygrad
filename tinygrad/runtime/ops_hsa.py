@@ -260,7 +260,7 @@ class HSADevice(Compiled):
 
   def _new_kernargs_region(self, sz:int):
     if hasattr(self, 'kernarg_start_addr'): self.delayed_free.append(self.kernarg_start_addr)
-    self.kernarg_start_addr: int = self.allocator._alloc(sz)
+    self.kernarg_start_addr: int = self.allocator._alloc(sz, BufferOptions())
     self.kernarg_next_addr = self.kernarg_start_addr
     self.kernarg_pool_sz: int = sz
 
