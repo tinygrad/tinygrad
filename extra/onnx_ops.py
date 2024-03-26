@@ -8,7 +8,7 @@ import numpy as np
 
 def half_to_float_to_half(func):
   def wrapper(*args, **kwargs):
-    ret = func(*[arg.float() if isinstance(arg, Tensor) else arg for arg in args], **kwargs)
+    ret = func(*(arg.float() if isinstance(arg, Tensor) else arg for arg in args), **kwargs)
     if not isinstance(ret, tuple): ret = (ret,)
     return tuple(r.cast(dtypes.float16) if isinstance(r, Tensor) else r for r in ret)
   return wrapper
