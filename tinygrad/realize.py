@@ -267,7 +267,7 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
     level, buf = queue.popleft()
     seen.add(buf)
     # single output
-    if buf.op in LoadOps or buf.device.startswith("DISK") or \
+    if buf.op in LoadOps or buf.device.startswith("DISK") or buf.device == "METAL" or \
         buf.op in ReduceOps or buf in reduce_for_op or buf.forced_realize: key: Tuple = (buf,)
     # multioutput
     else: key = (level, buf.shape, buf.device)

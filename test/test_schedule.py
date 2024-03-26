@@ -3,13 +3,15 @@
 # NOTE: this has overlap with external_test_opt.py
 
 import unittest
+import numpy as np
 from typing import List, Optional
+from tinygrad.device import Device
 from tinygrad.tensor import Tensor
 from tinygrad.ops import LoadOps
 from tinygrad.helpers import DEBUG, GRAPH
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.graph import print_tree, realized_lazybuffer
-from tinygrad.realize import create_schedule
+from tinygrad.realize import create_schedule, run_schedule
 from tinygrad import nn, dtypes
 
 def check_schedule(t:Tensor, allowed:int, to_prerealize:Optional[List[Tensor]]=None, filter_loadops=True):
@@ -428,6 +430,50 @@ class TestSchedule(unittest.TestCase):
     y = Tensor(2) + Tensor(2)
     out = x.contiguous() + y.contiguous()
     check_schedule(out, 2)
+
+@unittest.skipIf(Device.DEFAULT == "METAL", "No multioutput in Metal because of the 32 buffer limit.")
+class TestMultioutputSchedule(unittest.TestCase):
+  def _test(self, outs_tiny:List[Tensor], outs_np:List[np.ndarray], allowed:int):
+    sched = create_schedule([x.lazydata for x in outs_tiny])
+    kernels = [si for si in sched if si.ast[0].op not in LoadOps]
+    assert len(kernels) == allowed, f"Expected {allowed} kernels, got {len(kernels)}"
+    run_schedule(sched)
+    for out_tiny, out_np in zip(outs_tiny, outs_np): np.testing.assert_equal(out_tiny.numpy(), out_np)
+
+  def test_simple(self):
+    a, b = Tensor([1,2]), Tensor([3,4])
+    out0, out1 = a+b, a*2 + b
+    out0_np, out1_np = a.numpy()+b.numpy(), a.numpy()*2 + b.numpy()
+    self._test([out0, out1], [out0_np, out1_np], 1)
+
+  def test_reduce_unique_kernel(self):
+    a, b = Tensor([1,2]), Tensor([3,4])
+    out0, out1, out2 = a+b, a*b, a.sum()
+    out3 = out2 + a
+    out0_np, out1_np, out2_np = a.numpy()+b.numpy(), a.numpy()*b.numpy(), a.numpy().sum()
+    out3_np = out2_np+a.numpy()
+    self._test([out0, out1, out2, out3], [out0_np, out1_np, out2_np, out3_np], 3)
+
+  def test_change_shape(self):
+    a, b = Tensor([1,2,3,4]), Tensor([5,6,7,8])
+    out0, out1 = a+b, a*b
+    out2, out3 = a.reshape((2,2))+b.reshape((2,2)), a.reshape((2,2))*b.reshape((2,2))
+    self._test([out0, out1, out2, out3], [], 2)
+
+  @unittest.skip("Doesn't yet fuse multilevel")
+  def test_multilevel_nodes(self):
+    a, b = Tensor([1]), Tensor([2])
+    out0, out1 = a+2, b+2
+    out2 = out0 + out1
+    out0_np, out1_np = a.numpy()+2, b.numpy()+2
+    self._test([out0, out1, out2], [out0_np, out1_np, out0_np+out1_np], 1)
+
+  @unittest.skip("Doesn't yet simplify ones")
+  def test_simplified_shape(self):
+    a, b = Tensor.randn(4).reshape(4, 1), Tensor.randn(4)
+    out0, out1 = a+2, b+2
+    out0_np, out1_np = a.numpy()+2, b.numpy()+2
+    self._test([out0, out1], [out0_np, out1_np], 1)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
