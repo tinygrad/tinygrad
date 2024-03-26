@@ -123,13 +123,13 @@ class CUDAAllocator(LRUAllocator):
   def __init__(self, device:CUDADevice):
     self.device = device
     super().__init__()
-  def _alloc(self, size):
+  def _alloc(self, size, options:BufferOptions):
     check(cuda.cuCtxSetCurrent(self.device.context))
-    return init_c_var(cuda.CUdeviceptr(), lambda x: check(cuda.cuMemAlloc_v2(ctypes.byref(x), size)))
-  def _alloc_with_options(self, size:int, options:BufferOptions):
     if options.host: return init_c_var(ctypes.c_void_p(), lambda x: check(cuda.cuMemHostAlloc(ctypes.byref(x), size, 0)))
-    else: raise ValueError("no options")
-  def _free(self, opaque): check(cuda.cuMemFree_v2(opaque))
+    else: return init_c_var(cuda.CUdeviceptr(), lambda x: check(cuda.cuMemAlloc_v2(ctypes.byref(x), size)))
+  def _free(self, opaque, options:BufferOptions):
+    if options.host: return check(cuda.cuMemFreeHost(opaque))
+    else: check(cuda.cuMemFree_v2(opaque))
   def copyin(self, dest, src:memoryview):
     check(cuda.cuCtxSetCurrent(self.device.context))
     host_mem = self.alloc(len(src), BufferOptions(host=True))

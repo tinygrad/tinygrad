@@ -148,11 +148,11 @@ class BufferXfer(BufferCopy):
 class Allocator:
   def alloc(self, size:int, options:Optional[BufferOptions]=None):
     assert not isinstance(size, int) or size > 0, f"alloc size must be positve, getting {size}"
-    return self._alloc_with_options(size, options) if options is not None else self._alloc(size)
-  def _alloc(self, size:int): raise NotImplementedError("need alloc")
-  def _alloc_with_options(self, size:int, options:BufferOptions): return self._alloc(size)  # TODO: override this if you support options
-  def free(self, opaque, size:int, options:Optional[BufferOptions]=None): self._free(opaque)
-  def _free(self, opaque): pass  # if opaque is a Python object, you don't need a free
+    return self._alloc(size, options if options is not None else BufferOptions())
+  def _alloc(self, size:int, options:BufferOptions): raise NotImplementedError("need alloc")
+  def free(self, opaque, size:int, options:Optional[BufferOptions]=None):
+    self._free(opaque, options if options is not None else BufferOptions())
+  def _free(self, opaque, options:BufferOptions): pass  # if opaque is a Python object, you don't need a free
   def copyin(self, dest, src:memoryview): raise NotImplementedError("need copyin")
   def copyout(self, dest:memoryview, src): raise NotImplementedError("need copyout")
 
@@ -165,15 +165,15 @@ class LRUAllocator(Allocator):  # pylint: disable=abstract-method
       self.free_cache()
       return super().alloc(size, options)
   def free_cache(self):
-    for opaques in self.cache.values():
-      for opaque in opaques: self._free(opaque)
+    for (sz,options),opaques in self.cache.items():
+      for opaque in opaques: super().free(opaque, sz, options)
       opaques.clear()
   def free(self, opaque:Any, size:int, options:Optional[BufferOptions]=None):
     if getenv("LRU", 1) and (options is None or not options.signal): self.cache[(size, options)].append(opaque)
-    else: self._free(opaque)
+    else: super().free(size, size, options)
 
 class _MallocAllocator(LRUAllocator):
-  def _alloc(self, size:int): return (ctypes.c_uint8 * size)()
+  def _alloc(self, size:int, options:BufferOptions): return (ctypes.c_uint8 * size)()
   def as_buffer(self, src) -> memoryview: return flat_mv(memoryview(src))
   def copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
   def copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
