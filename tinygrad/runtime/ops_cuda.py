@@ -43,7 +43,7 @@ def cu_time_execution(cb, enable=False) -> Optional[float]:
   cuda.cuEventRecord(evs[0], None)
   cb()
   cuda.cuEventRecord(evs[1], None)
-  cuda.cuEventSynchronize(evs[1])
+  check(cuda.cuEventSynchronize(evs[1]))
   cuda.cuEventElapsedTime(ctypes.byref(ret := ctypes.c_float()), evs[0], evs[1])
   for ev in evs: cuda.cuEventDestroy_v2(ev)
   return ret.value * 1e-3
