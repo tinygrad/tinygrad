@@ -56,8 +56,8 @@ class TestShapeTrackerBasics(unittest.TestCase):
     assert x == x1.simplify()
 
   def test_simplify_is_correct(self):
-    multiv = ShapeTracker(views=(View(shape=(15, 3), strides=(9, 1), offset=6, mask=None, contiguous=False),
-                                 View(shape=(4, 3), strides=(12, 4), offset=0, mask=None, contiguous=False)))
+    multiv = ShapeTracker(views=(View(shape=(15, 3), strides=(9, 1), offset=6, mask=None),
+                                 View(shape=(4, 3), strides=(12, 4), offset=0, mask=None)))
     assert st_equal(multiv, multiv.simplify())
 
 class TestShapeTrackerAdd(unittest.TestCase):
@@ -85,10 +85,10 @@ class TestShapeTrackerAdd(unittest.TestCase):
     assert st_equal(backup + st.sts[1], st.sts[0])
 
   def test_off_by_one(self):
-    st1 = ShapeTracker(views=(View(shape=(5,), strides=(1,), offset=0, mask=None, contiguous=True),
-                              View(shape=(5,), strides=(1,), offset=0, mask=None, contiguous=True)))
-    st2 = ShapeTracker(views=(View(shape=(4,), strides=(1,), offset=0, mask=None, contiguous=True),
-                              View(shape=(5,), strides=(1,), offset=0, mask=None, contiguous=True)))
+    st1 = ShapeTracker(views=(View(shape=(5,), strides=(1,), offset=0, mask=None),
+                              View(shape=(5,), strides=(1,), offset=0, mask=None)))
+    st2 = ShapeTracker(views=(View(shape=(4,), strides=(1,), offset=0, mask=None),
+                              View(shape=(5,), strides=(1,), offset=0, mask=None)))
     assert not (st_equal(st1, st2))
 
 class TestShapeTrackerAddVariable(unittest.TestCase):
@@ -109,16 +109,16 @@ class TestShapeTrackerAddVariable(unittest.TestCase):
   def test_merge_symbolic_views(self):
     var_i = Variable('i', 1, 10)
     var_j = Variable('i', 1, 10)
-    vm1 = View(shape=(var_i, var_j, 3), strides=(3, 0, 1), offset=0, mask=None, contiguous=False)
-    vm2 = View(shape=(var_i, var_j, 3), strides=(var_j*3, 3, 1), offset=0, mask=None, contiguous=True)
+    vm1 = View(shape=(var_i, var_j, 3), strides=(3, 0, 1), offset=0, mask=None)
+    vm2 = View(shape=(var_i, var_j, 3), strides=(var_j*3, 3, 1), offset=0, mask=None)
     ShapeTracker((vm1,)) + ShapeTracker((vm2,))
 
   @unittest.skip("two vars not supported")
   def test_merge_symbolic_views_2(self):
     var_i = Variable('i', 1, 10)
     var_j = Variable('j', 1, 10)
-    vm1 = View(shape=(var_i, var_j), strides=(0, 0), offset=0, mask=None, contiguous=False)
-    vm2 = View(shape=(var_i, var_j), strides=(var_j, 1), offset=0, mask=None, contiguous=True)
+    vm1 = View(shape=(var_i, var_j), strides=(0, 0), offset=0, mask=None)
+    vm2 = View(shape=(var_i, var_j), strides=(var_j, 1), offset=0, mask=None)
     ret = (ShapeTracker((vm1,)) + ShapeTracker((vm2,))).reshape((var_i, var_j, 1))
     ret_2 = ShapeTracker((vm1,)) + ShapeTracker((vm2,)).reshape((var_i, var_j, 1))
     assert ret == ret_2
