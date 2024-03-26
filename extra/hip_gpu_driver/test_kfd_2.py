@@ -141,7 +141,6 @@ if __name__ == "__main__":
   hexdump(to_mv(event_page.va_addr, 0x40))
   kio.reset_event(fd, event_id=evt.event_id)
   hexdump(to_mv(event_page.va_addr, 0x40))
-  exit(0)
   """
 
   # KFD_EVENT_TYPE_SIGNAL
@@ -176,8 +175,8 @@ if __name__ == "__main__":
   to_mv(signals.va_addr, 0x40).cast("Q")[0] = 1
   to_mv(signals.va_addr, 0x40).cast("Q")[1] = 1
   #to_mv(signals.va_addr, 0x40).cast("Q")[2] = event_page
-  to_mv(signals.va_addr, 0x40).cast("Q")[2] = event_page.va_addr + evt.event_slot_index*8  # HWAddress
-  to_mv(signals.va_addr, 0x40).cast("Q")[3] = evt.event_trigger_data # HWData
+  to_mv(signals.va_addr, 0x40).cast("Q")[2] = event_page.va_addr + evt.event_slot_index*8  # HWData2=HWAddress
+  to_mv(signals.va_addr, 0x40).cast("Q")[3] = evt.event_trigger_data # HWData3=HWData
   print(hex(ds[0]), hex(ds[1]), hex(ds[2]))
   hexdump(to_mv(signals.va_addr, 0x40))
 
