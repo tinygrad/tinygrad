@@ -164,7 +164,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str
         assert len(bufs) == args[0], f"missed a global buffer {len(bufs)} {args}"
         bufs.append((args[1], (dtype,args[2])))
         r[u] = args[1]
-      elif uop is UOps.WMMA: kk(f"{lang.render_dtype(dtype)} {ssa(u, 'wmma')} = {args}({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")
+      elif uop is UOps.WMMA: kk(f"{lang.render_dtype(dtype)} {ssa(u, 'wmma')} = __{args[0]}({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")
       elif uop is UOps.DEFINE_ACC: kk(f"{lang.render_dtype(dtype)} {ssa(u,'acc')} = {lang.render_const(args, dtype)};")
       elif uop is UOps.CONST: r[u] = lang.render_const(args, dtype) if args >= 0 else f"({lang.render_const(args, dtype)})"
       elif uop is UOps.GEP:
@@ -215,11 +215,11 @@ class MetalLanguage(CStyleLanguage):
     return f"as_type<{self.render_dtype(var_dtype)}>({x[0]})" if bitcast else super().render_cast(x, var_dtype)
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
-    prefix = ["#include <metal_stdlib>","using namespace metal;"]
-    if any(uop.uop == UOps.WMMA for uop in uops): prefix.append("""template<typename T, typename S, typename U> U __metal_wmma(T m, T n, U o) {
-    S a,b,c; a.thread_elements()[0] = m.x; a.thread_elements()[1] = m.y; b.thread_elements()[0] = n.x; b.thread_elements()[1] = n.y;
-    c.thread_elements()[0] = o.x; c.thread_elements()[1] = o.y; simdgroup_multiply_accumulate(c, a, b, c);
-    return U(c.thread_elements()[0], c.thread_elements()[1]);\n}""")
+    prefix, wmma_args = ["#include <metal_stdlib>","using namespace metal;"], set([uop.arg for uop in uops if uop.uop == UOps.WMMA])
+    for arg in wmma_args: prefix.append(f"""{arg[3].name}2 __{arg[0]}({arg[2].name}2 m, {arg[2].name}2 n, {arg[3].name}2 o) {{
+  simdgroup_{arg[3].name}8x8 a,b,c; a.thread_elements()[0] = m.x; a.thread_elements()[1] = m.y; b.thread_elements()[0] = n.x;
+  b.thread_elements()[1] = n.y; c.thread_elements()[0] = o.x; c.thread_elements()[1] = o.y; simdgroup_multiply_accumulate(c, a, b, c);
+  return {arg[3].name}2(c.thread_elements()[0], c.thread_elements()[1]);\n}}""")
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 MetalRenderer = functools.partial(uops_to_cstyle, MetalLanguage())
 
@@ -228,6 +228,11 @@ code_for_op_half = {BinaryOps.MAX: lambda a,b,dtype: f"__hmax({a},{b})" if dtype
                     UnaryOps.SIN: lambda x,dtype: f"hsin({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"sin({x})",
                     UnaryOps.LOG2: lambda x,dtype: f"hlog2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"log2({x})",
                     UnaryOps.EXP2: lambda x,dtype: f"hexp2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"exp2({x})",}
+
+_nms = "xyzwabcdefghijkl"
+def _make_cuda_dtype(base_type, name, cnt):
+  vec, elems, header = f"{name}{cnt}", ', '.join(_nms[:cnt]), ', '.join([f"{base_type} {x}" for x in _nms[:cnt]])
+  return f"struct {vec} {{ {base_type} {elems}; }}; __device__ {vec} make_{vec}({header}) {{ {vec} r={{{elems}}}; return r; }}"
 
 class CUDALanguage(CStyleLanguage):
   kernel_prefix = "extern \"C\" __global__ "
@@ -241,17 +246,24 @@ class CUDALanguage(CStyleLanguage):
   type_map = {dtypes.bfloat16: "nv_bfloat16"}
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
+    # TODO: why is dtypes.bfloat16.name == "__bf16"? would be easier not override dtypes.name
+    dt_map = { dtypes.float: ("float","f32"), dtypes.half: ("half","f16"), dtypes.bfloat16: ("bfloat16","bf16"), }
+
     prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))"]
     if any(uop.dtype == dtypes.half for uop in uops):
-      prefix += ["#include <cuda_fp16.h>", "struct half4 { half x, y, z, w; };", "struct half8 { half x, y, z, w, a, b, c, d; };",
-      "__device__ half4 make_half4(half x, half y, half z, half w) { half4 r={x, y, z, w}; return r; }",
-      "__device__ half8 make_half8(half x, half y, half z, half w, half a, half b, half c, half d) { half8 r={x, y, z, w, a, b, c, d}; return r; }",
-      """__device__ float4 __cuda_mma_m16n8k16_f16_f32(half8 a, half4 b, float4 c) { int *a_pk = (int *) (&a), *b_pk = (int *) (&b);
-  asm( "mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 { %0, %1, %2, %3 }, { %4, %5, %6, %7 }, { %8, %9 }, { %0, %1, %2, %3 };"
-    : "+f"(c.x), "+f"(c.y), "+f"(c.z), "+f"(c.w) : "r"(a_pk[0]), "r"(a_pk[1]), "r"(a_pk[2]),  "r"(a_pk[3]), "r"(b_pk[0]), "r"(b_pk[1]) );
-  return c;}""",]
+      prefix += ["#include <cuda_fp16.h>"] + [_make_cuda_dtype("half", "half", x) for x in [4, 8]]
 
-    if any(uop.dtype == dtypes.bfloat16 for uop in uops): prefix.append("#include <cuda_bf16.h>")
+    if any(uop.dtype == dtypes.bfloat16 for uop in uops):
+      prefix += ["#include <cuda_bf16.h>"] + [_make_cuda_dtype("nv_bfloat16", "bfloat16", x) for x in [4, 8]]
+
+    # TODO: this has to be way better to generate for arbitrary M,N,K: use arg[1] for MNK, use arg[4] for vec sizes, encode register packing
+    for arg in set([uop.arg for uop in uops if uop.uop == UOps.WMMA]):
+      fn, ti, to, ci, co = arg[0], dt_map[arg[2]][0], dt_map[arg[3]][0], dt_map[arg[2]][1], dt_map[arg[3]][1]
+      prefix.append(f"""__device__ {to}4 __{fn}({ti}8 a, {ti}4 b, {to}4 c) {{ int *a_pk = (int *) (&a), *b_pk = (int *) (&b);
+asm( "mma.sync.aligned.m16n8k16.row.col.{co}.{ci}.{ci}.{co} {{ %0, %1, %2, %3 }}, {{ %4, %5, %6, %7 }}, {{ %8, %9 }}, {{ %0, %1, %2, %3 }};"
+  : "+f"(c.x), "+f"(c.y), "+f"(c.z), "+f"(c.w) : "r"(a_pk[0]), "r"(a_pk[1]), "r"(a_pk[2]),  "r"(a_pk[3]), "r"(b_pk[0]), "r"(b_pk[1]) );
+return c;}}""")
+
     return super().render_kernel(function_name, kernel, bufs, uops, prefix=prefix)
 CUDARenderer = functools.partial(uops_to_cstyle, CUDALanguage())
 
@@ -273,43 +285,31 @@ def _make_hip_code_for_op():
   return { k:wrapper(k,v) for k,v in {**CStyleLanguage().code_for_op, **code_for_op_hip}.items() }
 
 def _make_hip_dtype(base_type, name, cnt):
-  nms = "xyzwabcdefghijkl"[:cnt]
+  elems, header = ', '.join(_nms[:cnt]), ', '.join([f"{base_type} {x}" for x in _nms[:cnt]])
   return f"typedef {base_type} {name}{cnt} __attribute__((ext_vector_type({cnt})));\n" + \
-         f"static inline __attribute__((device)) {name}{cnt} make_{name}{cnt}(" + ', '.join([f"{base_type} {x}" for x in nms]) + \
-         ") { return {" + ', '.join(nms) + "}; }"
+         f"static inline __attribute__((device)) {name}{cnt} make_{name}{cnt}({header}) {{ return {{{elems}}}; }}"
 
 class HIPLanguage(CStyleLanguage):
-  kernel_prefix = """
-  #define half _Float16
-
-  extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_local_id(unsigned int);
-  extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_group_id(unsigned int);
-  extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_local_size(unsigned int);
-
-  extern "C" {
-  __attribute__((device)) __attribute__((const)) float __ocml_fmax_f32(float, float);
-  __attribute__((device)) __attribute__((pure)) float __ocml_exp2_f32(float);
-  __attribute__((device)) __attribute__((pure)) float __ocml_log2_f32(float);
-  __attribute__((device)) float __ocml_sin_f32(float);
-  __attribute__((device)) __attribute__((const)) float __ocml_sqrt_f32(float);
-  __attribute__((device)) __attribute__((const)) double __ocml_fmax_f64(double, double);
-  __attribute__((device)) __attribute__((pure)) double __ocml_exp2_f64(double);
-  __attribute__((device)) __attribute__((pure)) double __ocml_log2_f64(double);
-  __attribute__((device)) double __ocml_sin_f64(double);
-  __attribute__((device)) __attribute__((const)) double __ocml_sqrt_f64(double);
-  __attribute__((device)) __attribute__((const)) _Float16 __ocml_fmax_f16(_Float16, _Float16);
-  __attribute__((device)) __attribute__((pure)) _Float16 __ocml_exp2_f16(_Float16);
-  __attribute__((device)) __attribute__((pure)) _Float16 __ocml_log2_f16(_Float16);
-  __attribute__((device)) _Float16 __ocml_sin_f16(_Float16);
-  __attribute__((device)) __attribute__((const)) _Float16 __ocml_sqrt_f16(_Float16);
-    }\n""" + '\n'.join([_make_hip_dtype(*x) for x in [
-                     ("_Float16", "half", 2), ("_Float16", "half", 4), ("_Float16", "half", 8), ("_Float16", "half", 16),
-                     ("float", "float", 8)]]) + """
-  static __attribute__((device)) half8 __hip_wmma_f16_f16(half16 a, half16 b, half8 c) {
-    half16 c_frag = {}; half8 d; for (int n = 0; n < 8; n++) { c_frag[n*2] = c[n]; }
-    c_frag = __builtin_amdgcn_wmma_f16_16x16x16_f16_w32(a, b, c_frag, false);
-    for (int n = 0; n < 8; n++) { d[n] = c_frag[n*2]; } return d;
-  }\nextern "C" __attribute__((global))"""
+  kernel_prefix = """extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_local_id(unsigned int);
+extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_group_id(unsigned int);
+extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_local_size(unsigned int);
+extern "C" {
+__attribute__((device)) __attribute__((const)) float __ocml_fmax_f32(float, float);
+__attribute__((device)) __attribute__((pure)) float __ocml_exp2_f32(float);
+__attribute__((device)) __attribute__((pure)) float __ocml_log2_f32(float);
+__attribute__((device)) float __ocml_sin_f32(float);
+__attribute__((device)) __attribute__((const)) float __ocml_sqrt_f32(float);
+__attribute__((device)) __attribute__((const)) double __ocml_fmax_f64(double, double);
+__attribute__((device)) __attribute__((pure)) double __ocml_exp2_f64(double);
+__attribute__((device)) __attribute__((pure)) double __ocml_log2_f64(double);
+__attribute__((device)) double __ocml_sin_f64(double);
+__attribute__((device)) __attribute__((const)) double __ocml_sqrt_f64(double);
+__attribute__((device)) __attribute__((const)) _Float16 __ocml_fmax_f16(_Float16, _Float16);
+__attribute__((device)) __attribute__((pure)) _Float16 __ocml_exp2_f16(_Float16);
+__attribute__((device)) __attribute__((pure)) _Float16 __ocml_log2_f16(_Float16);
+__attribute__((device)) _Float16 __ocml_sin_f16(_Float16);
+__attribute__((device)) __attribute__((const)) _Float16 __ocml_sqrt_f16(_Float16);
+}\nextern "C" __attribute__((global))"""
   code_for_workitem = {"g": lambda x: f"__ockl_get_group_id({x})", "l": lambda x: f"__ockl_get_local_id({x})",
                        "i": lambda x: f"(__ockl_get_group_id({x})*__ockl_get_local_size({x})+__ockl_get_local_id({x}))"}
   code_for_op = _make_hip_code_for_op()
@@ -321,8 +321,10 @@ class HIPLanguage(CStyleLanguage):
   type_map = {dtypes.bfloat16: "hip_bfloat16"}
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
-    prefix = ["#define INFINITY (__builtin_inff())\n#define NAN (__builtin_nanf(\"\"))",
-              "typedef long unsigned int size_t;"]
+    prefix = ["#define INFINITY (__builtin_inff())", "#define NAN (__builtin_nanf(\"\"))", "typedef long unsigned int size_t;"]
+    vec_dts = [("float", "float", 2), ("float", "float", 4), ("float", "float", 8), ("signed int", "int", 4), ("signed int", "int", 2)]
+
+    # TODO: add BF16 vec dts
     if any(uop.dtype == dtypes.bfloat16 for uop in uops): prefix.append("""
 struct hip_bfloat16 {
   unsigned short data;
@@ -339,8 +341,19 @@ struct hip_bfloat16 {
 static __attribute__((device)) bool operator<(hip_bfloat16 a, hip_bfloat16 b) { return ((float)a) < ((float)b); }
 static __attribute__((device)) bool operator==(hip_bfloat16 a, hip_bfloat16 b) { return ((float)a) == ((float)b); }
 """)
-    prefix.append('\n'.join(_make_hip_dtype(*x) for x in [("float", "float", 2), ("float", "float", 4),
-                                                             ("signed int", "int", 4), ("signed int", "int", 2)]))
+
+    if any(uop.dtype == dtypes.half for uop in uops):
+      prefix.append("#define half _Float16")
+      vec_dts += [("_Float16", "half", 2), ("_Float16", "half", 4), ("_Float16", "half", 8), ("_Float16", "half", 16)]
+
+    prefix += [_make_hip_dtype(*x) for x in vec_dts]
+
+    for arg in set([uop.arg for uop in uops if uop.uop == UOps.WMMA]): # TODO: handle TCs f32_bf16 and bf16_bf16 w/ wrapper
+      if arg[3] == dtypes.float: prefix.append(f"#define __{arg[0]} __builtin_amdgcn_wmma_f32_16x16x16_f16_w32")
+      else: prefix.append(f"static __attribute__((device)) half8 __{arg[0]}"+"""(half16 a, half16 b, half8 c) {
+  half16 c_frag = {}; half8 d; for (int n = 0; n < 8; n++) { c_frag[n*2] = c[n]; }
+  c_frag = __builtin_amdgcn_wmma_f16_16x16x16_f16_w32(a, b, c_frag, false);
+  for (int n = 0; n < 8; n++) { d[n] = c_frag[n*2]; } return d;\n}""")
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
   def get_kernel_modifier(self, uops:UOpGraph) -> str:

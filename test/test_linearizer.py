@@ -12,7 +12,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.engine.jit import CacheCollector
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
-from tinygrad.helpers import prod, Context
+from tinygrad.helpers import prod, Context, getenv
 from tinygrad.dtype import DType, dtypes
 from tinygrad.codegen.uops import UOpGraph
 
@@ -186,6 +186,7 @@ class TestLinearizer(unittest.TestCase):
     if not Device[Device.DEFAULT].compiler.linearizer_opts.has_tensor_cores:
       self.skipTest("device doesn't have tensor cores")
     for tc in tensor_cores[Device[Device.DEFAULT].compiler.linearizer_opts.device]:
+      if getenv("EMULATE_CUDA") and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
       a, b = Tensor.rand(tc.dims[1], tc.dims[2], dtype=tc.dtype_in), Tensor.rand(tc.dims[2], tc.dims[0], dtype=tc.dtype_in)
       np_a, np_b = a.numpy(), b.numpy()
       r = a.matmul(b, acc_dtype=tc.dtype_out)
