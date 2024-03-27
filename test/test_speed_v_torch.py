@@ -13,7 +13,7 @@ from tinygrad import Device, GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
 from tinygrad.helpers import colored, getenv, CI
-from tinygrad.features.jit import TinyJit
+from tinygrad.engine.jit import TinyJit
 
 IN_CHANS = [int(x) for x in getenv("IN_CHANS", "4,16,64").split(",")]
 

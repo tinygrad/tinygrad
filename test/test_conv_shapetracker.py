@@ -3,7 +3,7 @@ import unittest
 from tinygrad.tensor import Tensor
 from tinygrad.ops import LoadOps
 from tinygrad.nn import Conv2d
-from tinygrad.realize import create_schedule
+from tinygrad.engine.realize import create_schedule
 
 class TestConvShapetracker(unittest.TestCase):
   def test_conv_3x3_one_view(self):
