@@ -85,8 +85,7 @@ class PythonProgram:
           elif arg[1][0] == 'l':
             ul[i] = [x[2-arg[0]] for x in warp]
         elif uop is UOps.CONST:
-          casted_arg = int(arg) if dtypes.is_int(dtype) else float(arg)
-          ul[i] = [[casted_arg] * warp_size for _ in range(dtype.count)] if dtype.count > 1 else [casted_arg] * warp_size
+          ul[i] = [[arg] * warp_size for _ in range(dtype.count)] if dtype.count > 1 else [arg] * warp_size
         elif uop is UOps.DEFINE_ACC:
           ul[i] = [[arg] * warp_size for _ in range(dtype.count)] if dtype.count > 1 else [arg] * warp_size
         elif uop is UOps.LOOP:
@@ -105,7 +104,7 @@ class PythonProgram:
             pack_format, unpack_format = str(warp_size) + dtp[0].fmt, str(warp_size) + dtype.fmt
             if uop is UOps.BITCAST: ul[i] = list(struct.unpack(unpack_format, struct.pack(pack_format, *inp[0])))
             else:
-              casted = [float(x) if dtypes.is_float(dtype) else int(x) if dtypes.is_int(dtype) else x for x in inp[0]]
+              casted = [dtypes.as_const(x, dtype) for x in inp[0]]
               overflow_adjust = 2**(dtype.itemsize*8 - 1) if (dtypes.is_int(dtype) and not dtypes.is_unsigned(dtype)) else 0
               overflow_fixed = [((x + overflow_adjust) % 2**(dtype.itemsize*8) - overflow_adjust) if dtypes.is_int(dtype) else x for x in casted]
               ul[i] = list(struct.unpack(unpack_format, struct.pack(unpack_format, *overflow_fixed)))
@@ -146,13 +145,14 @@ class PythonProgram:
                   out[elem_idx][goff+lane_id] += sum(a_elem(inp[0], _k, c_j, goff) * b_elem(inp[1], c_i, _k, goff) for _k in range(K))
             return out
 
-          if arg.startswith('__metal_wmma'):
+          # TODO: refactor these to a shared TensorCoreLayout in kernel.py
+          if arg[5] == "METAL":
             # A (2 elements on 32 threads): row major
             def a_b_elem(x, i, j, goff): return x[(i%2)][goff+(i//2)%2+(j%4)*2+(i//4)*8+(j//4)*16]
             # (i, j), C, D (2 elements on 32 threads): row major same as A/B
             def c_map(lane, elem): return (elem + ((lane%2)*2) + ((lane//8)%2)*4, ((lane//2)%4) + (lane//16)*4)
             ul[i] = wmma_helper(32, 8, 2, 2, 2, a_b_elem, a_b_elem, c_map)
-          elif arg == '__builtin_amdgcn_wmma_f32_16x16x16_f16_w32' or arg == '__hip_wmma_f16_f16':
+          elif arg[5] == "HSA":
             # A (16 elements on 32 threads): col major, lane 16-32 == lane 0-15
             def a_elem(x, i, j, goff):
               assert x[i][goff+j] == x[i][goff+j+16], "warp elements not duplicated properly across lanes"
@@ -161,7 +161,7 @@ class PythonProgram:
             def b_elem(x, i, j, goff): return a_elem(x, j, i, goff)
             def c_map(lane, elem): return (lane%16, lane//16+elem*2) # (i, j), C, D (8 elements on 32 threads): row major
             ul[i] = wmma_helper(32, 16, 16, 16, 8, a_elem, b_elem, c_map)
-          elif arg == '__cuda_mma_m16n8k16_f16_f32':
+          elif arg[5] == "CUDA":
             # A (8 elements on 32 threads)
             def a_elem(x, i, j, goff): return x[(i%2)+(j//8)*2+(i//8)*4][goff+((i//2)%4)+(j%8)*4]
             # B (4 elements on 32 threads)
@@ -188,7 +188,7 @@ class PythonCompiler(Compiler):
   def compile(self, src:str) -> bytes: return base64.b64decode(src)
 
 class PythonAllocator(Allocator):
-  def _alloc(self, size): return memoryview(bytearray(size))
+  def _alloc(self, size, options): return memoryview(bytearray(size))
   def copyin(self, dest, src:memoryview): dest[:] = src
   def copyout(self, dest:memoryview, src): dest[:] = src
 
