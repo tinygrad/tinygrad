@@ -25,8 +25,7 @@ class UOp:
   def __repr__(self):
     return f"{str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.uop for x in self.vin]):32s} {self.arg}"
   @staticmethod
-  def const(dtype, val):
-    return UOp(UOps.CONST, dtype, arg=float(val) if dtypes.is_float(dtype) else (int(val) if dtypes.is_int(dtype) else bool(val)))
+  def const(dtype, val): return UOp(UOps.CONST, dtype, arg=dtypes.as_const(val, dtype))
 
 def hook_overflow(dv, fxn):
   def wfxn(*args):
@@ -148,7 +147,7 @@ class UOpGraph:
 
   def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None, cachable=True, insert_before=None,
           simplify=True) -> UOp:
-    ret = UOp(uop, dtype, vin, arg)
+    ret = UOp(uop, dtype, vin, arg) if uop is not UOps.CONST else UOp.const(dtype, arg)
     if simplify and (rewritten:=constant_folder.rewrite(ret)) is not None:
       if rewritten in self.uops: return rewritten  # ignore cachable
       ret = rewritten
@@ -176,6 +175,7 @@ class UOpGraph:
   def type_verify(self):
     for u in self.uops:
       uop, arg, vin, dtype = u.uop, u.arg, u.vin, u.dtype
+      if uop is UOps.CONST: assert dtype is not None and type(arg) is type(dtypes.as_const(arg, dtype)), f"{arg} type does not match {dtype}"
       if uop is UOps.ALU:
         if arg in UnaryOps:
           assert dtype == vin[0].dtype, f"{arg} dtype mismatch {dtype=} != {vin[0].dtype=}"

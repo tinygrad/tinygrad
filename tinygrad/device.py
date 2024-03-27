@@ -46,7 +46,7 @@ class JITRunner:
     self.mem_estimate:sint = 0
   def exec(self, rawbufs:List[Buffer], var_vals:Optional[Dict[Variable, int]]=None) -> Optional[float]:
     var_vals = var_vals if var_vals is not None else {}
-    from tinygrad.features.jit import CacheCollector
+    from tinygrad.engine.jit import CacheCollector
     et = self(rawbufs, var_vals)
     if CACHECOLLECTING: CacheCollector.add(self, rawbufs, var_vals)
     return et
@@ -170,7 +170,7 @@ class LRUAllocator(Allocator):  # pylint: disable=abstract-method
       opaques.clear()
   def free(self, opaque:Any, size:int, options:Optional[BufferOptions]=None):
     if getenv("LRU", 1) and (options is None or not options.signal): self.cache[(size, options)].append(opaque)
-    else: super().free(size, size, options)
+    else: super().free(opaque, size, options)
 
 class _MallocAllocator(LRUAllocator):
   def _alloc(self, size:int, options:BufferOptions): return (ctypes.c_uint8 * size)()

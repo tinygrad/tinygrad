@@ -63,9 +63,7 @@ def cast(bb, val, input_type, output_type, bitcast=False):
 
   raise NotImplementedError(f"cast from {input_type} -> {output_type} not implemented")
 
-def const(args, dtype):
-  # TODO: remove int from int(args) once const args conform with dtype
-  return ir.Constant(dtype_to_llvm_dtype[dtype], int(args) if dtypes.is_int(dtype) else bool(args) if dtype == dtypes.bool else args)
+def const(args, dtype): return ir.Constant(dtype_to_llvm_dtype[dtype], args)
 
 def uops_to_llvm_ir(function_name:str, uops:UOpGraph) -> str:
   # all llvm stuff goes into a module

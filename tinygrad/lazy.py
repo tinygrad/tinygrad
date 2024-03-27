@@ -1,7 +1,7 @@
 from __future__ import annotations
 import math
 from typing import Union, Optional, Any, Tuple, List
-from tinygrad.dtype import cast_scalar, dtypes, DType, Scalar
+from tinygrad.dtype import dtypes, DType, ConstType
 from tinygrad.helpers import prod, getenv, all_int, all_same
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op
 from tinygrad.shape.symbolic import sint
@@ -13,7 +13,9 @@ lazycache: WeakValueDictionary[Any, LazyBuffer] = WeakValueDictionary()
 def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
                       base:Optional[LazyBuffer]=None, enable_cache=bool(getenv("LAZYCACHE", 1))):
   if st.size == 0 and op not in {LoadOps.SYNC, LoadOps.WAIT}: op, arg, srcs, base = LoadOps.CONST, 0, (), None
-  if op is LoadOps.CONST: enable_cache = True
+  if op is LoadOps.CONST:
+    arg = dtypes.as_const(arg, dtype)
+    enable_cache = True
 
   cache_key = (device, st, dtype, op, arg, tuple(ref(x) for x in srcs)) if base is None else (st, ref(base))
   if enable_cache and (rret := lazycache.get(cache_key, None)): return rret
@@ -54,9 +56,9 @@ class LazyBuffer:
     if _buf is not None: ret.realized = _buf
     return ret
 
-  def const(self, val:Scalar, shape:Optional[Tuple[sint,...]]=None) -> LazyBuffer:
+  def const(self, val:ConstType, shape:Optional[Tuple[sint,...]]=None) -> LazyBuffer:
     shape = self.shape if shape is None else shape
-    return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, self.device, arg=cast_scalar(val, self.dtype)).reshape((1,)*len(shape)).expand(shape)
+    return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, self.device, arg=val).reshape((1,)*len(shape)).expand(shape)
 
   def is_realized(self) -> bool: return self.base.realized is not None
 
