@@ -309,7 +309,7 @@ class Kernel:
 
   # ******************** helpers ********************
 
-  def _limit_size(self, x: Tuple[int], max_size: List[Union[int,float]]) -> Tuple[int, ...]:
+  def _limit_size(self, x: Tuple[sint], max_size: List[Union[int,float]]) -> Tuple[int, ...]:
     new_shape = list(x)
     for i in range(len(new_shape)):
       next_idx = (i + 1) % len(new_shape)
