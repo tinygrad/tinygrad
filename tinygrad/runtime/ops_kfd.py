@@ -108,15 +108,7 @@ class KFDProgram:
     #print("end  ", self.device.mgart[0], self.device.mgart[1])
 
     assert (wp:=self.device.amd_aql_queue.write_dispatch_id) == (rp:=self.device.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
-    if wait:
-      st = self.device._convert_ts_to_system_domain(self.device.completion_signal.start_ts)
-      et = self.device._convert_ts_to_system_domain(self.device.completion_signal.end_ts)
-      return (et - st) / 1e9
-
-    # TODO: why aren't the times being set in self.device.completion_signal?
-    #print(format_struct(self.device.completion_signal))
-    #from hexdump import hexdump
-    #hexdump(to_mv(self.device.eop_buffer.va_addr, 0x100))
+    if wait: return (self.device.completion_signal.end_ts-self.device.completion_signal.start_ts)/1e9
 
 class KFDAllocator(LRUAllocator):
   def __init__(self, device:KFDDevice):
@@ -155,13 +147,6 @@ class KFDDevice(Compiled):
       stm = kio.map_memory_to_gpu(self.kfd, handle=mem.handle, device_ids_array_ptr=ctypes.addressof(arr), n_devices=1)
       assert stm.n_success == 1
     return mem
-
-  def _convert_ts_to_system_domain(self, tick:int):
-    self.t1 = kio.get_clock_counters(KFDDevice.kfd, gpu_id=self.gpu_id)
-    sysdelta = self.t1.system_clock_counter - self.t0.system_clock_counter
-    gpudelta = self.t1.gpu_clock_counter - self.t0.gpu_clock_counter
-    offtick = tick - self.t1.gpu_clock_counter
-    return (sysdelta * offtick + gpudelta * self.t1.system_clock_counter) / gpudelta
 
   def __init__(self, device:str=""):
     if KFDDevice.kfd == -1: KFDDevice.kfd = os.open("/dev/kfd", os.O_RDWR)
@@ -205,9 +190,4 @@ class KFDDevice(Compiled):
     self.doorbell = to_mv(libc.mmap(0, 8192, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED,
                                     KFDDevice.kfd, self.aql_queue.doorbell_offset), 8192).cast("I")
     self.doorbell_value = 0
-
-    # Clock
-    self.t0 = self.t1 = kio.get_clock_counters(KFDDevice.kfd, gpu_id=self.gpu_id)
-    self.historical_clock_ratio = 0
-
     super().__init__(device, KFDAllocator(self), KFDCompiler(self.arch), functools.partial(KFDProgram, self))
