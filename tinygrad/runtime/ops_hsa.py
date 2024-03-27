@@ -79,8 +79,8 @@ class HSAProgram:
     self.private_segment_size = init_c_var(ctypes.c_uint32(), lambda x: check(hsa.hsa_executable_symbol_get_info(self.kernel, hsa.HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE, ctypes.byref(x)))).value # noqa: E501
     print("private_segment_size", self.private_segment_size)
 
-    from hexdump import hexdump
-    hexdump(to_mv(self.handle.value-0x540, 0x3000))
+    #from hexdump import hexdump
+    #hexdump(to_mv(self.handle.value-0x540, 0x3000))
 
   def __del__(self):
     self.device.synchronize()
