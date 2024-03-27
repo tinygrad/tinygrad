@@ -68,12 +68,15 @@ class TestUOps(unittest.TestCase):
   def _test_uop_fxn(self, op, fxn, dts=(PtrDType(dtypes.float32), )):
     for f in [_test_single_value, _test_single_value_const]:
       for a in [-2.0, 0.0, 1.0]:
+        a = dtypes.as_const(a, dts[0])
         self._equal(f([a], op, dts), fxn(a))
 
   def _test_bop_fxn(self, op, fxn, dts=(PtrDType(dtypes.float32), )*2, no_b_zero=False):
     for f in [_test_single_value, _test_single_value_const]:
       for a in [-2.0, 0.0, 1.0]:
         for b in [-3.0, 1.0] + ([] if no_b_zero else [0.0]):
+          a = dtypes.as_const(a, dts[0])
+          b = dtypes.as_const(b, dts[1])
           self._equal(f([a,b], op, dts), fxn(a,b))
 
   def _test_top_fxn(self, op, fxn, dts=(PtrDType(dtypes.float32), )*3):
@@ -81,6 +84,9 @@ class TestUOps(unittest.TestCase):
       for a in [-2.0, 0, 1]:
         for b in [-3.0, 3.0]:
           for c in [-4.0, 4.0]:
+            a = dtypes.as_const(a, dts[0])
+            b = dtypes.as_const(b, dts[1])
+            c = dtypes.as_const(c, dts[2])
             self._equal(f([a,b,c], op, dts), fxn(a,b,c))
 
 class TestFloatUOps(TestUOps):
@@ -211,7 +217,7 @@ class TestLocalAccess(unittest.TestCase):
   def test_local_basic(self):
     uops = []
     smem = uop(uops, UOps.DEFINE_LOCAL, PtrDType(dtypes.float32), (), ('smem', 16))
-    uop(uops, UOps.STORE, None, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 0), uop(uops, UOps.CONST, dtypes.float32, (), 42)))
+    uop(uops, UOps.STORE, None, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 0), uop(uops, UOps.CONST, dtypes.float32, (), 42.0)))
     sres = uop(uops, UOps.LOAD, dtypes.float32, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 0)))
     self.assertEqual(_test_uops_result(dtypes.float32, uops, sres), 42)
 

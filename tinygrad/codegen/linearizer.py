@@ -92,7 +92,7 @@ class Linearizer(Kernel):
     e_idxs, e_valids = expand_node(g_idx, expand_vars), expand_node(g_valid, expand_vars)
 
     ret = []
-    invalid_value = 0 if dtypes.is_int(buf.dtype) else 0.0
+    invalid_value = 0
     for idx, valid, rep_idx in zip(e_idxs, e_valids, iter_idxs(expand_vars)):
       this_const, idx, valid = (invalid_value, NumNode(0), NumNode(1)) if valid.max == 0 else (const, idx, valid)
       key = f"{acc}{localtype}{'CONST'+str(this_const) if this_const is not None and acc is None else (buf.idx if isinstance(buf, MemBuffer) else cast(LocalBuffer, buf).name)}{idx.render()}{valid.render()}"  # noqa: E501
