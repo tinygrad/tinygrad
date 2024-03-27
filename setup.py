@@ -54,7 +54,7 @@ setup(name='tinygrad',
             "hypothesis",
         ],
         'testing_tf': [
-            "tensorflow",
+            "tensorflow==2.16.0",
             "tensorflow_addons",
         ]
       },
