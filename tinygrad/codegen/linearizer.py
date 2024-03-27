@@ -213,7 +213,8 @@ class Linearizer(Kernel):
       self.buf_uops.append(self.uops.add(UOps.DEFINE_LOCAL, PtrDType(temp_dtype), (), ("temp", self.sts[-1].size)))
 
     # kernel name (before late upcast)
-    self.name = ("r_" if self.reduceop else "E_") + colored('_', 'BLACK').join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
+    self.name = ("r" if self.reduceop else "E") + (f"{len(self.outbufs)}_" if len(self.outbufs) > 1 else "_") + \
+      colored('_', 'BLACK').join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
 
     # name the function something unique
     Linearizer.kernel_cnt[(function_name := to_function_name(self.name))] += 1
