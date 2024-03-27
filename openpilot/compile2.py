@@ -16,7 +16,8 @@ from extra.onnx import get_run_onnx
 from tinygrad import Tensor, Device, GlobalCounters, dtypes
 from tinygrad.dtype import ImageDType
 from tinygrad.helpers import partition, Context, fetch, getenv, GRAPH, DEBUG
-from tinygrad.engine.realize import run_schedule, lower_schedule_item, create_schedule
+from tinygrad.engine.realize import run_schedule, lower_schedule_item
+from tinygrad.engine.schedule import create_schedule
 from tinygrad.ops import LoadOps, ScheduleItem
 Device.DEFAULT = "GPU"
 
