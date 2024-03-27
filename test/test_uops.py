@@ -5,7 +5,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.device import Buffer, Device, CompiledASTRunner
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
-from tinygrad.engine.realize import create_schedule
+from tinygrad.engine.schedule import create_schedule
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.codegen.uops import exec_alu, UOpGraph
 from test.helpers import is_dtype_supported

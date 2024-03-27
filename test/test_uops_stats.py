@@ -1,6 +1,7 @@
 import unittest
 from tinygrad import Tensor
-from tinygrad.engine.realize import create_schedule, lower_schedule_item
+from tinygrad.engine.schedule import create_schedule
+from tinygrad.engine.realize import lower_schedule_item
 
 # TODO: can copy this in here when we remove it
 #from tinygrad.ops import get_lazyop_info

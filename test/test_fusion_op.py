@@ -2,7 +2,8 @@ import unittest
 import time
 import numpy as np
 from tinygrad import Tensor, dtypes
-from tinygrad.engine.realize import run_schedule, create_schedule, lower_schedule_item
+from tinygrad.engine.schedule import create_schedule
+from tinygrad.engine.realize import run_schedule, lower_schedule_item
 
 class TestFusionOp(unittest.TestCase):
   def test_contiguous_add(self):

@@ -10,7 +10,8 @@ from tinygrad.shape.view import View
 from tinygrad.shape.symbolic import MulNode, Variable, NumNode, Node
 from tinygrad.tensor import Tensor
 from tinygrad.engine.jit import CacheCollector
-from tinygrad.engine.realize import create_schedule, run_schedule
+from tinygrad.engine.schedule import create_schedule
+from tinygrad.engine.realize import run_schedule
 from tinygrad.helpers import prod, Context
 from tinygrad.dtype import DType, dtypes
 from tinygrad.codegen.uops import UOpGraph

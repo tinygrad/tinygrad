@@ -14,7 +14,8 @@ from tinygrad.features.multi import MultiLazyBuffer
 from tinygrad.ops import LoadOps
 from tinygrad.device import Buffer, Device
 from tinygrad.shape.symbolic import sint
-from tinygrad.engine.realize import run_schedule, create_schedule
+from tinygrad.engine.realize import run_schedule
+from tinygrad.engine.schedule import create_schedule
 
 # **** start with two base classes, Tensor and Function ****
 

@@ -6,7 +6,7 @@ import numpy as np
 from hypothesis import given, strategies as strat, settings
 from tinygrad.dtype import DType
 from tinygrad.helpers import CI, getenv
-from tinygrad.engine.realize import create_schedule
+from tinygrad.engine.schedule import create_schedule
 from tinygrad.ops import UnaryOps, get_lazyop_info
 from test.helpers import is_dtype_supported
 

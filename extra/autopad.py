@@ -3,7 +3,7 @@ from tinygrad.ops import LoadOps
 from tinygrad.codegen.linearizer import Linearizer
 from test.external.fuzz_linearizer import run_linearizer
 from tinygrad.codegen.kernel import Opt, OptOps
-from tinygrad.engine.realize import create_schedule
+from tinygrad.engine.schedule import create_schedule
 
 N = 17**3
 
