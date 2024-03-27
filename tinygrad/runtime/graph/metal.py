@@ -55,7 +55,8 @@ class MetalGraph:
     # NOTE: you at least can't update the ints if this is running
     if self.command_buffer is not None and self.command_buffer in self.device.mtl_buffers_in_flight: wait_check(self.command_buffer)
     all_resources = self.all_resources + [x._buf for x in input_rawbuffers]
-    for (j,i),input_idx in self.input_replace.items():
+    for (j,i),(input_idx,input_offset,input_size) in self.input_replace.items():
+      assert input_offset == 0, "metal doesn't support offset yet"
       self.icb.indirectComputeCommandAtIndex_(j).setKernelBuffer_offset_atIndex_(input_rawbuffers[input_idx]._buf, 0, i)
     for j in self.jc_idx_with_updatable_launch_dims:
       global_size, local_size = cast(CompiledASTRunner, self.jit_cache[j].prg).launch_dims(var_vals)

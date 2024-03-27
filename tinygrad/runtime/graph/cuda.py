@@ -57,7 +57,8 @@ class CUDAGraph(MultiDeviceJITGraph):
 
   def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     # Update rawbuffers in the c_args struct.
-    for (j,i),input_idx in self.input_replace.items():
+    for (j,i),(input_idx,input_offset,input_size) in self.input_replace.items():
+      assert input_offset == 0, "cuda doesn't support offset yet"
       if not self.updatable_nodes[j][3]: setattr(self.updatable_nodes[j][2], f'f{i}', input_rawbuffers[input_idx]._buf)
       else:
         if i == 0: self.updatable_nodes[j][1].destDevice = input_rawbuffers[input_idx]._buf
