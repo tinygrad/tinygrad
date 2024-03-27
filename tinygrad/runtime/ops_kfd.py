@@ -107,7 +107,7 @@ class KFDProgram:
     kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=1000)
     #print("end  ", self.device.mgart[0], self.device.mgart[1])
 
-    assert self.device.amd_aql_queue.write_dispatch_id == self.device.amd_aql_queue.read_dispatch_id, f"didn't run {self.device.amd_aql_queue.write_dispatch_id} != {self.device.amd_aql_queue.read_dispatch_id}"
+    assert (wp:=self.device.amd_aql_queue.write_dispatch_id) == (rp:=self.device.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
 
     # TODO: why aren't the times being set in self.device.completion_signal?
     #print(format_struct(self.device.completion_signal))
@@ -167,7 +167,7 @@ class KFDDevice(Compiled):
     self.aql_ring = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
     self.signals_page = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
     self.gart = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
-    self.mgart = to_mv(self.gart.va_addr, 0x1000).cast("Q")
+    # self.mgart = to_mv(self.gart.va_addr, 0x1000).cast("Q")
     self.kernargs = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
     self.ctx_save_restore_address = self._gpu_alloc(0x2C02000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
 
@@ -188,8 +188,9 @@ class KFDDevice(Compiled):
       queue_type=kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE, queue_priority=kfd.KFD_MAX_QUEUE_PRIORITY,
       eop_buffer_address=self.eop_buffer.va_addr, eop_buffer_size=self.eop_buffer.size,
       ctx_save_restore_address=self.ctx_save_restore_address.va_addr, ctx_save_restore_size=self.ctx_save_restore_address.size,
-      ctl_stack_size = 0xa000, write_pointer_address=self.gart.va_addr + getattr(hsa.amd_queue_t, 'write_dispatch_id').offset,
-      read_pointer_address=self.gart.va_addr + getattr(hsa.amd_queue_t, 'read_dispatch_id').offset,)
+      ctl_stack_size = 0xa000,
+      write_pointer_address=self.gart.va_addr + getattr(hsa.amd_queue_t, 'write_dispatch_id').offset,
+      read_pointer_address=self.gart.va_addr + getattr(hsa.amd_queue_t, 'read_dispatch_id').offset)
     self.doorbell = to_mv(libc.mmap(0, 8192, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED,
                                     KFDDevice.kfd, self.aql_queue.doorbell_offset), 8192).cast("I")
     self.doorbell_value = 0
