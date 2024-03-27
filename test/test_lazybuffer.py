@@ -3,7 +3,7 @@ import numpy as np
 import unittest
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.lazy import LazyBuffer, ReduceOps
-from tinygrad.engine.realize import create_schedule
+from tinygrad.engine.schedule import create_schedule
 
 class TestLazyBuffer(unittest.TestCase):
   def test_fromcpu_shape_tracker(self):

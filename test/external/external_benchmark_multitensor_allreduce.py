@@ -4,7 +4,8 @@ from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import ReduceOps, GlobalCounters
 from tinygrad.features.multi import MultiLazyBuffer, all_reduce
 from tinygrad.engine.jit import TinyJit
-from tinygrad.engine.realize import create_schedule, run_schedule
+from tinygrad.engine.schedule import create_schedule
+from tinygrad.engine.realize import run_schedule
 from tinygrad.helpers import getenv, Context, RING
 from typing import List, Union
 

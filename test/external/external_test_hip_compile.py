@@ -2,7 +2,7 @@ import time, unittest
 from tinygrad.runtime.driver.hip_comgr import compile_hip
 from tinygrad import Tensor
 from tinygrad.device import Device
-from tinygrad.engine.realize import create_schedule
+from tinygrad.engine.schedule import create_schedule
 from tinygrad.codegen.linearizer import Linearizer
 
 class TestHIPCompileSpeed(unittest.TestCase):

@@ -30,7 +30,7 @@ except ImportError:
 
 import os
 from tinygrad.tensor import Tensor
-from tinygrad.engine.realize import create_schedule
+from tinygrad.engine.schedule import create_schedule
 
 # define the compute
 A = Tensor.rand(M, K, device="clang")
