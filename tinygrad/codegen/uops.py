@@ -76,7 +76,7 @@ def _match(uop:UOp, pattern:Dict[str, Any], store:Dict[str, UOp]) -> bool:
           return True
       return False
     else:
-      if (callable(v) and not v(uop.__getattribute__(k))) or uop.__getattribute__(k) != v: return False
+      if callable(v) and not v(uop.__getattribute__(k)) or not callable(v) and uop.__getattribute__(k) != v: return False
   return True
 
 class PatternMatcher:
