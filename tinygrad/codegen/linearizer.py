@@ -308,7 +308,7 @@ class Linearizer(Kernel):
           upcast_idxs[n] = replace_acc_idxs[len(tc.threads)+n] # replace upcasts
         if DEBUG >= 3: print(f"store alias: sts={self.sts[0]} idxs={global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs}")
 
-        wmma_sz = [prod(l) for l in tc.thread_local_sizes]
+        wmma_sz = tc.num_elems()
         def upcast_strides(buf:int):
           strides, next = [], 1
           for (sz, stride, reduce) in self.upcasted_axis(buf)[tc.num_upcasts():]:
@@ -320,8 +320,8 @@ class Linearizer(Kernel):
           offs = [x*y for (x,y) in zip([sum([prod(x) for x in zip(iter, [stride for stride,_ in y])]) for y in upcasts], wmma_sz)]
           ops = (self.uops.add(UOps.CAST, tc.dtype_in.vec(wmma_sz[0]), tuple(locals_to_store[0][2][offs[0]:offs[0]+wmma_sz[0]])),
                  self.uops.add(UOps.CAST, tc.dtype_in.vec(wmma_sz[1]), tuple(locals_to_store[1][2][offs[1]:offs[1]+wmma_sz[1]])),
-                 self.uops.add(UOps.CAST, tc.dtype_out.vec(wmma_sz[2]), tuple(op3:=acc[offs[2]:offs[2]+wmma_sz[2]])))
-          ret = self.uops.add(UOps.WMMA, tc.dtype_out.vec(wmma_sz[2]), ops, tc.wmma_func)
+                 self.uops.add(UOps.CAST, (out:=tc.dtype_out.vec(wmma_sz[2])), tuple(op3:=acc[offs[2]:offs[2]+wmma_sz[2]])))
+          ret = self.uops.add(UOps.WMMA, out, ops, (str(tc),tc.dims,tc.dtype_in,tc.dtype_out,tc.num_elems(),self.opts.device))
           for z in range(wmma_sz[2]):
             acc[offs[2]+z] = self.uops.add(UOps.PHI, tc.dtype_out, (op3[z], self.uops.add(UOps.GEP, tc.dtype_out, (ret,), z)) + loop_ctx)
       else:
