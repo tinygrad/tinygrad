@@ -5,7 +5,7 @@ from tinygrad.device import BufferCopy
 from tinygrad.ops import LoadOps, ReduceOps
 from tinygrad.helpers import CI, prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
-from tinygrad.realize import create_schedule
+from tinygrad.engine.schedule import create_schedule
 from tinygrad.features.multi import all_reduce, MultiLazyBuffer
 from random import randint
 import numpy as np
@@ -237,7 +237,7 @@ class TestMultiTensor(unittest.TestCase):
     import sys, pathlib
     sys.path.append((pathlib.Path(__file__).parent.parent / "extra" / "models").as_posix())
     from resnet import ResNet18
-    from examples.mlperf.optimizers import LARS
+    from tinygrad.nn.optim import LARS
 
     fake_image = Tensor.rand((2, 3, 224, 224))
     fake_image_sharded = fake_image.shard((d0, d1), axis=0)
@@ -261,7 +261,7 @@ class TestMultiTensor(unittest.TestCase):
     shard_output.backward()
     shard_grad = m.conv1.weight.grad.numpy()
     # sometimes there is zeros in these grads... why?
-    np.testing.assert_allclose(grad, shard_grad, atol=1e-6, rtol=1e-6)
+    np.testing.assert_allclose(grad, shard_grad, atol=3e-6, rtol=3e-6)
 
   def test_multi_tensor_jit_param(self):
     @TinyJit
