@@ -326,8 +326,8 @@ def process_iterate(tokenizer, val=False, part=0): # Convert raw text to masked 
     tqdm.write(f"Picking 10000 samples")
 
     pick_ratio = len(instances) // 10000
-    picks = [instance_to_features(instances[inst*pick_ratio], tokenizer) for inst in range(1000)]
-    for batch in range(10000 // 1000):
+    picks = [instance_to_features(instances[inst*pick_ratio], tokenizer) for inst in range(10000)]
+    for batch in range(10):
       yield picks[batch*1000:(batch+1)*1000]
   else:
     documents = get_documents(rng, tokenizer, f"results4/part-{part:05d}-of-00500")

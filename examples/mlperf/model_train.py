@@ -236,13 +236,12 @@ def train_rnnt():
   pass
 
 def train_bert():
-  # TODO: Log trainable parameters
+  # TODO: Log trainable parameters ? 
   # TODO: Change weight init range
-  # TODO: Separate dataloaders or fix wrap around issue
-  # TODO: Change train loop from while to for
+  # TODO CHECK resuming
+  # TODO: First eval acc == 0,34something
   from examples.mlperf.dataloader import batch_load_bert
   from examples.mlperf.helpers import get_mlperf_bert_model
-  from extra.datasets.wikipedia import get_val_files
 
   config = {}
   seed = config["seed"] = getenv("SEED", 12345)
@@ -290,17 +289,16 @@ def train_bert():
 
   # ** resume from checkpointing **
   start_step = 0
-  start_eval_step = 0
   if ckpt:=getenv("RESUME", ""):
     load_training_state(model, optimizer_group, scheduler, safe_load(ckpt))
-    start_step = int(scheduler.total_steps / train_steps) # TODO: Check whether total_steps is appropriate
+    start_step = scheduler.epoch_counter.numpy().item() # We will likely do only one epoch
     print(f"resuming from {ckpt} at step {start_step}")
 
   # ** init wandb **
   WANDB = getenv("WANDB")
   if WANDB:
     import wandb
-    wandb_args = {"id": wandb_id, "resume": "must", "project": "MLPerf"} if (wandb_id := getenv("WANDB_RESUME", "")) else {}
+    wandb_args = {"id": wandb_id, "project": "MLPerf"} if (wandb_id := getenv("WANDB_RESUME", "")) else {}
     wandb.init(config=config, **wandb_args)
 
   BENCHMARK = getenv("BENCHMARK")
@@ -327,10 +325,8 @@ def train_bert():
     clsf_accuracy = (clsf_predictions == next_sentence_labels).float().mean()
 
     mlm_predictions = lm_logits.log_softmax().argmax(-1)
-    mask = masked_lm_weights == 1.0
-    filtered_predictions = mlm_predictions[mask]
-    filtered_true_labels = masked_lm_ids[mask]
-    mlm_accuracy = (filtered_predictions == filtered_true_labels).float().mean()
+    mask = (masked_lm_weights == 1.0)
+    mlm_accuracy = ((mlm_predictions == masked_lm_ids) == mask).float().mean()
 
     lm_loss = lm_logits.sparse_categorical_crossentropy(masked_lm_ids, ignore_index=masked_lm_weights)
     clsf_loss = clsf_logits.binary_crossentropy_logits(next_sentence_labels)
@@ -341,20 +337,22 @@ def train_bert():
       "next_sentence_loss": clsf_loss.realize()
       }
 
-  def data_get(it): # TODO: Change behaviour where iterator will wrap around dataset. Only for eval do wrapping
+  def data_get(it):
     data: dict[str, Tensor] = next(it)
     for key in data.keys(): data[key].shard_(GPUS, axis=0)
     return data
+  
+  eval_it = iter(batch_load_bert(EVAL_BS, val=True))
 
   # ** epoch loop **
   step_times = []
   for e in range(epochs):
     # ** train loop **
     Tensor.training = True
-    train_it = iter(batch_load_bert(batch_size=BS, val=False))
+    train_it = iter(tqdm(batch_load_bert(BS, val=False), total=train_steps))
     i, data = 0, data_get(train_it)
-    st = time.perf_counter()
-    while data is not None:
+    while data is not None and i < train_steps:
+      st = time.perf_counter()
       GlobalCounters.reset()
       loss = train_step(data["input_ids"], data["segment_ids"], data["input_mask"], data["masked_lm_positions"], \
                         data["masked_lm_ids"], data["masked_lm_weights"], data["next_sentence_labels"])
@@ -384,28 +382,25 @@ def train_bert():
                    "train/python_time": pt - st, "train/data_time": dt - pt, "train/cl_time": cl - dt,
                    "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": e + (i + 1) / train_steps})
 
-      st = cl
       data, next_data = next_data, None
       i += 1
 
-      if i == BENCHMARK: # NOTE: Probs remove as we wont do more than one epoch
+      if i == BENCHMARK:
         median_step_time = sorted(step_times)[(BENCHMARK + 1) // 2]  # in seconds
         estimated_total_hours = median_step_time * train_steps * epochs / 60 / 60
         print(f"Estimated training time: {estimated_total_hours:.0f}h{(estimated_total_hours - int(estimated_total_hours)) * 60:.0f}m")
         return
 
       # ** eval loop **
-      if i % eval_step_freq == 0:
+      if i % 2 == 0:
         train_step.reset()  # free the train step memory :(
         eval_loss = []
         eval_accuracy = []
         eval_times = []
         Tensor.training = False
 
-        eval_it = iter(tqdm(batch_load_bert(batch_size=EVAL_BS, val=True, start=start_eval_step), total=max_eval_steps))
-
-        for eval_s in range(max_eval_steps):
-          end_index, data = data_get(eval_it)
+        for _ in tqdm(range((max_eval_steps * 8) // EVAL_BS), desc="Evaluating", total=(max_eval_steps * 8) // EVAL_BS):
+          data = data_get(eval_it)
           GlobalCounters.reset()
           st = time.time()
 
@@ -416,11 +411,9 @@ def train_bert():
           mlm_accuracy, clsf_accuracy = eval_result["masked_lm_accuracy"].numpy().item(), eval_result["next_sentence_accuracy"].numpy().item()
           eval_loss.append([lm_loss, clsf_loss])
           eval_accuracy.append([mlm_accuracy, clsf_accuracy])
-          data, next_data = next_data, None
 
           et = time.time()
           eval_times.append(et - st)
-        start_eval_step = end_index
 
         eval_step.reset()
         total_lm_loss = sum(pair[0] for pair in eval_loss) / len(eval_loss)
@@ -432,7 +425,7 @@ def train_bert():
                     eval clsf accuracy: {total_clsf_accuracy:.2f}, eval time: {total_fw_time:.2f}")
         if WANDB:
           wandb.log({"eval/lm_loss": total_lm_loss, "eval/clsf_loss": total_clsf_loss, "eval/lm_accuracy": total_lm_accuracy, \
-                      "eval/clsf_accuracy": total_clsf_accuracy, "eval/forward_time": total_fw_time, "epoch": e + 1})
+                      "eval/clsf_accuracy": total_clsf_accuracy, "eval/forward_time": total_fw_time})
 
         # save model if achieved target
         if not achieved and total_lm_accuracy >= target:
