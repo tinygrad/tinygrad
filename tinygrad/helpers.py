@@ -69,6 +69,14 @@ def to_function_name(s:str): return ''.join([c if c in (string.ascii_letters+str
 def getenv(key:str, default=0): return type(default)(os.getenv(key, default))
 def temp(x:str) -> str: return (pathlib.Path(tempfile.gettempdir()) / x).as_posix()
 
+def format_struct(s):
+  sdats = []
+  for field_name, field_type in s._fields_:
+    dat = getattr(s, field_name)
+    if isinstance(dat, int): sdats.append(f"{field_name}:0x{dat:X}")
+    else: sdats.append(f"{field_name}:{dat}")
+  return sdats
+
 class GraphException(Exception): pass
 
 class Context(contextlib.ContextDecorator):
