@@ -80,6 +80,7 @@ class KFDProgram:
     for i in range(len(args)): args_st.__setattr__(f'f{i}', args[i].va_addr)
     for i in range(len(vals)): args_st.__setattr__(f'v{i}', vals[i])
 
+    self.device.completion_signal.value = 1 # reset the signal before call
     packet = hsa.hsa_kernel_dispatch_packet_t.from_address(self.device.aql_ring.va_addr +
                                                            (self.device.doorbell_value*AQL_PACKET_SIZE) % self.device.aql_ring.size)
     packet.workgroup_size_x, packet.workgroup_size_y, packet.workgroup_size_z = local_size
@@ -96,7 +97,7 @@ class KFDProgram:
 
     # one pending packet + ring doorbell
     #print("start", self.device.mgart[0], self.device.mgart[1])
-    self.device.mgart[0] = self.device.doorbell_value+1
+    self.device.amd_aql_queue.write_dispatch_id = self.device.doorbell_value+1
     #self.device.mgart[1] = 0
     self.device.doorbell[0] = self.device.doorbell_value
     self.device.doorbell_value += 1
@@ -106,7 +107,7 @@ class KFDProgram:
     kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=1000)
     #print("end  ", self.device.mgart[0], self.device.mgart[1])
 
-    assert self.device.mgart[0] == self.device.mgart[1], f"didn't run {self.device.mgart[0]} != {self.device.mgart[1]}"
+    assert self.device.amd_aql_queue.write_dispatch_id == self.device.amd_aql_queue.read_dispatch_id, f"didn't run {self.device.amd_aql_queue.write_dispatch_id} != {self.device.amd_aql_queue.read_dispatch_id}"
 
     # TODO: why aren't the times being set in self.device.completion_signal?
     #print(format_struct(self.device.completion_signal))
@@ -171,16 +172,24 @@ class KFDDevice(Compiled):
     self.ctx_save_restore_address = self._gpu_alloc(0x2C02000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
 
     self.completion_signal = hsa.amd_signal_t.from_address(self.signals_page.va_addr)
+    self.completion_signal.value = 1
     self.completion_signal.kind = hsa.AMD_SIGNAL_KIND_USER
     self.completion_signal.event_mailbox_ptr = self.event_page.va_addr + self.sync_event.event_slot_index*8
     self.completion_signal.event_id = self.sync_event.event_id
+
+    # aql queue setup
+    self.amd_aql_queue = hsa.amd_queue_t.from_address(self.gart.va_addr)
+    self.amd_aql_queue.write_dispatch_id = 0
+    self.amd_aql_queue.read_dispatch_id = 0
+    self.amd_aql_queue.read_dispatch_id_field_base_byte_offset = getattr(hsa.amd_queue_t, 'read_dispatch_id').offset
+    self.amd_aql_queue.queue_properties = hsa.AMD_QUEUE_PROPERTIES_IS_PTR64 | hsa.AMD_QUEUE_PROPERTIES_ENABLE_PROFILING
 
     self.aql_queue = kio.create_queue(KFDDevice.kfd, ring_base_address=self.aql_ring.va_addr, ring_size=self.aql_ring.size, gpu_id=self.gpu_id,
       queue_type=kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE, queue_priority=kfd.KFD_MAX_QUEUE_PRIORITY,
       eop_buffer_address=self.eop_buffer.va_addr, eop_buffer_size=self.eop_buffer.size,
       ctx_save_restore_address=self.ctx_save_restore_address.va_addr, ctx_save_restore_size=self.ctx_save_restore_address.size,
-      ctl_stack_size = 0xa000,
-      write_pointer_address=self.gart.va_addr+0, read_pointer_address=self.gart.va_addr+0x8)
+      ctl_stack_size = 0xa000, write_pointer_address=self.gart.va_addr + getattr(hsa.amd_queue_t, 'write_dispatch_id').offset,
+      read_pointer_address=self.gart.va_addr + getattr(hsa.amd_queue_t, 'read_dispatch_id').offset,)
     self.doorbell = to_mv(libc.mmap(0, 8192, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED,
                                     KFDDevice.kfd, self.aql_queue.doorbell_offset), 8192).cast("I")
     self.doorbell_value = 0

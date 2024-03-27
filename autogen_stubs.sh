@@ -77,6 +77,8 @@ generate_hsa() {
     /opt/rocm/include/hsa/hsa.h \
     /opt/rocm/include/hsa/hsa_ext_amd.h \
     /opt/rocm/include/hsa/amd_hsa_signal.h \
+    /opt/rocm/include/hsa/amd_hsa_kernel_code.h \
+    /opt/rocm/include/hsa/amd_hsa_queue.h \
     /opt/rocm/include/hsa/hsa_ext_finalize.h /opt/rocm/include/hsa/hsa_ext_image.h \
     --clang-args="-I/opt/rocm/include" \
     -o $BASE/hsa.py -l /opt/rocm/lib/libhsa-runtime64.so
