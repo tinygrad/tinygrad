@@ -3,7 +3,7 @@ from collections import defaultdict, deque
 from typing import Deque, List, Dict, Optional, Set, DefaultDict, Tuple
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, LazyOp, ReduceOps, ConstBuffer, MemBuffer, BinaryOps, UnaryOps
 from tinygrad.features.graph import log_lazybuffer
-from tinygrad.helpers import GRAPH, DEBUG, flatten, merge_dicts, prod, dedup, all_int
+from tinygrad.helpers import GRAPH, DEBUG, DISALLOW_MULTIOUT, flatten, merge_dicts, prod, dedup, all_int
 from tinygrad.shape.symbolic import Variable
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.lazy import LazyBuffer
@@ -210,7 +210,7 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
     seen.add(buf)
     # single output
     if buf.op in LoadOps or buf.device.startswith("DISK") or buf.device == "METAL" or \
-        buf.op in ReduceOps or buf in reduce_for_op or buf.forced_realize: key: Tuple = (buf,)
+        buf.op in ReduceOps or buf in reduce_for_op or buf.forced_realize or DISALLOW_MULTIOUT: key: Tuple = (buf,)
     # multioutput
     else: key = (level, buf.shape, buf.device)
     groups[key].append(prescheduled[buf])

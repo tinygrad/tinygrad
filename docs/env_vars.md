@@ -49,6 +49,7 @@ DEFAULT_FLOAT       | [HALF, ...]| specify the default float dtype (FLOAT32, HAL
 IMAGE               | [1-2]      | enable 2d specific optimizations
 FLOAT16             | [1]        | use float16 for images instead of float32
 DISALLOW_ASSIGN     | [1]        | disallow assignment of tensors
+DISALLOW_MULTIOUT   | [1]        | disallow multioutput kernels when using Tensor.corealize
 PTX                 | [1]        | enable the specialized [PTX](https://docs.nvidia.com/cuda/parallel-thread-execution/) assembler for Nvidia GPUs. If not set, defaults to generic CUDA codegen backend.
 
 ## File Specific Variables
