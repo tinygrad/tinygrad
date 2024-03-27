@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Tuple
 import os, fcntl, ctypes, functools, re, pathlib, mmap
 from tinygrad.device import Compiled, LRUAllocator, Compiler
-from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up
+from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up, format_struct
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.runtime.driver.hip_comgr import compile_hip
@@ -88,7 +88,7 @@ class KFDProgram:
     packet.kernel_object = self.handle
     packet.kernarg_address = self.device.kernargs.va_addr
     packet.group_segment_size = self.group_segment_size
-    packet.private_segment_size = self.private_segment_size   # what it this and why doesn't it work?
+    packet.private_segment_size = self.private_segment_size   # what it this and why doesn't it work? (see TestOps.test_dilated_conv_transpose2d)
     packet.reserved2 = 0
     packet.completion_signal = hsa.hsa_signal_t(ctypes.addressof(self.device.completion_signal))
     packet.setup = DISPATCH_KERNEL_SETUP
@@ -107,6 +107,11 @@ class KFDProgram:
     #print("end  ", self.device.mgart[0], self.device.mgart[1])
 
     assert self.device.mgart[0] == self.device.mgart[1], f"didn't run {self.device.mgart[0]} != {self.device.mgart[1]}"
+
+    # TODO: why aren't the times being set in self.device.completion_signal?
+    #print(format_struct(self.device.completion_signal))
+    #from hexdump import hexdump
+    #hexdump(to_mv(self.device.eop_buffer.va_addr, 0x100))
 
 class KFDAllocator(LRUAllocator):
   def __init__(self, device:KFDDevice):
