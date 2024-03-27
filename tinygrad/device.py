@@ -99,7 +99,8 @@ class Buffer:
     if not hasattr(self, '_buf'): return # happens when __init__ has raised exception
     if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
     self.allocator.free(self._buf, self.nbytes, self.options)
-  def __repr__(self): return f"<buf device:{self.device} size:{self.size} base:{self.base == self} dtype:{self.dtype}" + (">" if self.options is None else f"{self.options=}>")
+  def __repr__(self): return f"<buf device:{self.device} size:{self.size} base:{self.base == self} dtype:{self.dtype}" + \
+    (">" if self.options is None else f"{self.options=}>")
   def offset(self, offset: int, size: int) -> Buffer:
     if self.base == self and (self._offset+offset) == 0 and size == self.size: return self
     assert hasattr(self.d.allocator, "offset"), "device doesn't support offsets"
