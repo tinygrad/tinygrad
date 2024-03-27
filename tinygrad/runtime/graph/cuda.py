@@ -59,10 +59,10 @@ class CUDAGraph(MultiDeviceJITGraph):
     # Update rawbuffers in the c_args struct.
     for (j,i),(input_idx,off) in self.input_replace.items():
       assert off is None, "cuda doesn't support offset yet"
-      if not self.updatable_nodes[j][3]: setattr(self.updatable_nodes[j][2], f'f{i}', input_rawbuffers[input_idx]._buf)
+      if not self.updatable_nodes[j][3]: setattr(self.updatable_nodes[j][2], f'f{i}', input_rawbuffers[input_idx]._buf+(0 if off is None else off[0]))
       else:
-        if i == 0: self.updatable_nodes[j][1].destDevice = input_rawbuffers[input_idx]._buf
-        elif i == 1: self.updatable_nodes[j][1].srcDevice = input_rawbuffers[input_idx]._buf
+        if i == 0: self.updatable_nodes[j][1].destDevice = input_rawbuffers[input_idx]._buf+(0 if off is None else off[0])
+        elif i == 1: self.updatable_nodes[j][1].srcDevice = input_rawbuffers[input_idx]._buf+(0 if off is None else off[0])
 
     # Update var_vals in the c_args struct.
     for j in self.jc_idxs_with_updatable_var_vals:
