@@ -122,8 +122,8 @@ class HSAGraph(MultiDeviceJITGraph):
       if j in self.ji_kargs_structs:
         self.ji_kargs_structs[j].__setattr__(f'f{i}', input_rawbuffers[input_idx]._buf+(0 if off is None else off[0]))
       else:
-        if i == 0: self.transfers[self.ji_to_transfer[j]][0] = input_rawbuffers[input_idx]._buf(0 if off is None else off[0]) # dest
-        elif i == 1: self.transfers[self.ji_to_transfer[j]][2] = input_rawbuffers[input_idx]._buf(0 if off is None else off[0]) # src
+        if i == 0: self.transfers[self.ji_to_transfer[j]][0] = input_rawbuffers[input_idx]._buf+(0 if off is None else off[0]) # dest
+        elif i == 1: self.transfers[self.ji_to_transfer[j]][2] = input_rawbuffers[input_idx]._buf+(0 if off is None else off[0]) # src
 
     # Update var_vals
     for j in self.jc_idxs_with_updatable_var_vals:
