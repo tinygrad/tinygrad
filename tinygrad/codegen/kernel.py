@@ -163,9 +163,10 @@ class Kernel:
   def shape_offsets(self, i:int): return itertools.product(*[list(range(cast(int, s))) for s in self.sts[i].shape[self.shape_len-self.upcasted:][::-1]]) if self.upcasted > 0 else [tuple()]  # noqa: E501
   def float4_axis(self, i:int): return [x-(self.shape_len-self.upcasted) for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x]%4 == 0]  # noqa: E501
 
-  def upcasted_axis(self, i:int):
-    return list(zip(self.sts[i].shape[self.shape_len-self.upcasted:],
-                    self.sts[i].real_strides()[self.shape_len-self.upcasted:],
+  def upcasted_axis(self, i:int) -> List[Tuple[int, Optional[sint], bool]]:
+    upcasted_shape, upcasted_stride = self.sts[i].shape[self.shape_len-self.upcasted:], self.sts[i].real_strides()[self.shape_len-self.upcasted:]
+    assert all_int(upcasted_shape), f"cannot upcast a symbolic amount {upcasted_shape=}"
+    return list(zip(upcasted_shape, upcasted_stride,
                     [x!=y for x,y in zip(self.sts[0].shape[self.shape_len-self.upcasted:], self.full_shape[self.shape_len-self.upcasted:])]))
 
   # TODO: is there a better way to write this?

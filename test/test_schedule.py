@@ -6,12 +6,13 @@ import unittest
 import numpy as np
 from typing import List, Optional
 from tinygrad.device import Device
+from tinygrad.engine.realize import run_schedule
 from tinygrad.tensor import Tensor
 from tinygrad.ops import LoadOps
 from tinygrad.helpers import DEBUG, GRAPH
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.graph import print_tree, realized_lazybuffer
-from tinygrad.realize import create_schedule, run_schedule
+from tinygrad.engine.schedule import create_schedule
 from tinygrad import nn, dtypes
 
 def check_schedule(t:Tensor, allowed:int, to_prerealize:Optional[List[Tensor]]=None, filter_loadops=True):
@@ -468,7 +469,7 @@ class TestMultioutputSchedule(unittest.TestCase):
     out0_np, out1_np = a.numpy()+2, b.numpy()+2
     self._test([out0, out1, out2], [out0_np, out1_np, out0_np+out1_np], 1)
 
-  @unittest.skip("Doesn't yet simplify ones")
+  @unittest.skip("Doesn't yet simplify ones in output shape")
   def test_simplified_shape(self):
     a, b = Tensor.randn(4).reshape(4, 1), Tensor.randn(4)
     out0, out1 = a+2, b+2
