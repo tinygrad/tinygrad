@@ -392,7 +392,7 @@ def train_bert():
         return
 
       # ** eval loop **
-      if i % 2 == 0:
+      if i % eval_step_freq == 0:
         train_step.reset()  # free the train step memory :(
         eval_loss = []
         eval_accuracy = []
