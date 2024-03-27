@@ -187,7 +187,7 @@ class Tensor:
 
   def to(self, device:Optional[Union[str, Tuple[str, ...]]]) -> Tensor:
     device = tuple(Device.canonicalize(x) for x in device) if isinstance(device, (tuple, list)) else Device.canonicalize(device)
-    if device is None or device == self.device: return self
+    if device == self.device: return self
     if not isinstance(device, str): return self.shard(device)
     ret = Tensor(self.lazydata, device, requires_grad=self.requires_grad)
     if self.grad is not None: ret.grad = self.grad.to(device)
