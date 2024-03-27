@@ -41,10 +41,10 @@ class CStyleLanguage(NamedTuple):
     return f"{self.float4.replace('float4', self.render_dtype(var_dtype))}({','.join(x)})"
 
   # returns a str expression of the const with the given type
-  def render_const(self, x:Union[float,int,bool], var_dtype) -> str:
+  def render_const(self, x:Union[float,int,bool], var_dtype:DType) -> str:
     if math.isnan(x): val = "NAN"
     elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
-    elif var_dtype == dtypes.float64: val = f"{float(x)}"
+    elif var_dtype == dtypes.float64: val = f"{x}"
     else: val = f"{x}f" if dtypes.is_float(var_dtype) else f"{x}" if dtypes.is_int(var_dtype) else f"{x}".lower()
     return (self.render_cast([val]*var_dtype.count, var_dtype)
       if var_dtype.count > 1 or var_dtype not in [dtypes.float, dtypes.int, dtypes.bool] else val)
@@ -91,7 +91,6 @@ class CStyleLanguage(NamedTuple):
 def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str:
   kernel = []
   bufs: List[Tuple[str, Tuple[DType, bool]]] = []
-  #pend_close = None
   depth = 1
   def kk(s): kernel.append("  "*depth+s)
 
