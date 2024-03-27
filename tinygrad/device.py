@@ -170,7 +170,7 @@ class LRUAllocator(Allocator):  # pylint: disable=abstract-method
       opaques.clear()
   def free(self, opaque:Any, size:int, options:Optional[BufferOptions]=None):
     if getenv("LRU", 1) and (options is None or not options.signal): self.cache[(size, options)].append(opaque)
-    else: super().free(size, size, options)
+    else: super().free(opaque, size, options)
 
 class _MallocAllocator(LRUAllocator):
   def _alloc(self, size:int, options:BufferOptions): return (ctypes.c_uint8 * size)()
