@@ -46,7 +46,7 @@ class JITRunner:
     self.mem_estimate:sint = 0
   def exec(self, rawbufs:List[Buffer], var_vals:Optional[Dict[Variable, int]]=None) -> Optional[float]:
     var_vals = var_vals if var_vals is not None else {}
-    from tinygrad.features.jit import CacheCollector
+    from tinygrad.engine.jit import CacheCollector
     et = self(rawbufs, var_vals)
     if CACHECOLLECTING: CacheCollector.add(self, rawbufs, var_vals)
     return et
@@ -73,7 +73,7 @@ class BufferOptions:
   image: Optional[ImageDType] = None
   uncached: bool = False
   host: bool = False
-  signal: bool = False
+  nolru: bool = False
 
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferOptions]=None, initial_value:Optional[bytes]=None):
@@ -169,8 +169,8 @@ class LRUAllocator(Allocator):  # pylint: disable=abstract-method
       for opaque in opaques: super().free(opaque, sz, options)
       opaques.clear()
   def free(self, opaque:Any, size:int, options:Optional[BufferOptions]=None):
-    if getenv("LRU", 1) and (options is None or not options.signal): self.cache[(size, options)].append(opaque)
-    else: super().free(size, size, options)
+    if getenv("LRU", 1) and (options is None or not options.nolru): self.cache[(size, options)].append(opaque)
+    else: super().free(opaque, size, options)
 
 class _MallocAllocator(LRUAllocator):
   def _alloc(self, size:int, options:BufferOptions): return (ctypes.c_uint8 * size)()

@@ -92,7 +92,7 @@ class Linearizer(Kernel):
     e_idxs, e_valids = expand_node(g_idx, expand_vars), expand_node(g_valid, expand_vars)
 
     ret = []
-    invalid_value = 0 if dtypes.is_int(buf.dtype) else 0.0
+    invalid_value = 0
     for idx, valid, rep_idx in zip(e_idxs, e_valids, iter_idxs(expand_vars)):
       this_const, idx, valid = (invalid_value, NumNode(0), NumNode(1)) if valid.max == 0 else (const, idx, valid)
       key = f"{acc}{localtype}{'CONST'+str(this_const) if this_const is not None and acc is None else (buf.idx if isinstance(buf, MemBuffer) else cast(LocalBuffer, buf).name)}{idx.render()}{valid.render()}"  # noqa: E501
@@ -213,7 +213,8 @@ class Linearizer(Kernel):
       self.buf_uops.append(self.uops.add(UOps.DEFINE_LOCAL, PtrDType(temp_dtype), (), ("temp", self.sts[-1].size)))
 
     # kernel name (before late upcast)
-    self.name = ("r_" if self.reduceop else "E_") + colored('_', 'BLACK').join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
+    self.name = ("r" if self.reduceop else "E") + (f"{len(self.outbufs)}_" if len(self.outbufs) > 1 else "_") + \
+      colored('_', 'BLACK').join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
 
     # name the function something unique
     Linearizer.kernel_cnt[(function_name := to_function_name(self.name))] += 1
