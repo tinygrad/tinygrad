@@ -64,16 +64,21 @@ DISPATCH_KERNEL_HEADER |= hsa.HSA_PACKET_TYPE_KERNEL_DISPATCH << hsa.HSA_PACKET_
 
 class KFDProgram:
   def __init__(self, device:KFDDevice, name:str, lib:bytes):
+    print("here")
     # TODO; this API needs the type signature of the function and global_size/local_size
     self.device, self.name, self.lib = device, name, lib
-    #print("prog alloc:", round_up(len(lib), 0x1000))
-    self.lib_gpu = gpu_alloc(KFDDevice.kfd, self.device.drm_fd, self.device.gpu_id, 0x3000, #round_up(len(lib), 0x1000),
+    self.lib_gpu = gpu_alloc(KFDDevice.kfd, self.device.drm_fd, self.device.gpu_id, round_up(len(lib), 0x1000),
                              kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM |
                              kfd.KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE |
                              kfd.KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC)
-    to_mv(self.lib_gpu.va_addr, len(lib))[:] = lib
+    lib_mv = to_mv(self.lib_gpu.va_addr, len(lib))
+    lib_mv[:] = lib
+    assert lib_mv.cast("I")[0x550//4] == 0x10c0
+    lib_mv.cast("I")[0x550//4] -= 0x1000
+    self.handle = self.lib_gpu.va_addr + 0x540
 
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
+    print("call")
     self.args_struct_t = init_c_struct_t(tuple([(f'f{i}', ctypes.c_void_p) for i in range(len(args))] +
                                                 [(f'v{i}', ctypes.c_int) for i in range(len(vals))]))
     args_st = self.args_struct_t.from_address(self.device.kernargs.va_addr)
@@ -86,7 +91,9 @@ class KFDProgram:
       if ctypes.sizeof(self.args_struct_t) != self.kernargs_segment_size:
         raise RuntimeError(f"HSAProgram.__call__: incorrect args struct size {ctypes.sizeof(self.args_struct_t)} != {self.kernargs_segment_size}")
     """
+    print("there")
     packet = hsa.hsa_kernel_dispatch_packet_t.from_address(self.device.aql_ring.va_addr)
+    print("there 2")
     packet.workgroup_size_x, packet.workgroup_size_y, packet.workgroup_size_z = local_size
     packet.reserved0 = 0
     packet.grid_size_x, packet.grid_size_y, packet.grid_size_z = tuple(g*l for g,l in zip(global_size, local_size))
@@ -94,7 +101,7 @@ class KFDProgram:
     #from hexdump import hexdump
     #hexdump(to_mv(self.lib_gpu.va_addr + 0x540, 0x1000))
 
-    packet.kernel_object = self.lib_gpu.va_addr + 0x540
+    packet.kernel_object = self.handle
     packet.kernarg_address = self.device.kernargs.va_addr
     packet.private_segment_size = 0
     packet.group_segment_size = 0
@@ -124,7 +131,7 @@ class KFDAllocator(LRUAllocator):
   def _alloc(self, size:int):
     return gpu_alloc(KFDDevice.kfd, self.device.drm_fd, self.device.gpu_id, size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM |
                      kfd.KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE |
-                     kfd.KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE)
+                     kfd.KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC)
 
   # obviously slow
   def copyin(self, dest, src: memoryview):

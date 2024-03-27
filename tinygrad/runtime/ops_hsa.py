@@ -80,7 +80,7 @@ class HSAProgram:
     print("private_segment_size", self.private_segment_size)
 
     from hexdump import hexdump
-    hexdump(to_mv(self.handle.value-0x540, 0x1000))
+    hexdump(to_mv(self.handle.value-0x540, 0x3000))
 
   def __del__(self):
     self.device.synchronize()
