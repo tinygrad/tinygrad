@@ -112,8 +112,7 @@ class TinyJit(Generic[ReturnType]):
       assert all(x[0] == y[0] and x[1].views == y[1].views and x[2] == y[2] and x[3] == y[3]
                  for x,y in zip(self.expected_name_sts_dtype_device, expected_name_sts_dtype_device)), \
         f"mismatch of input tensors, expected {self.expected_name_sts_dtype_device} got {expected_name_sts_dtype_device}"
-      for (j,i),(input_idx, input_offset, input_size) in self.input_replace.items():
-        self.jit_cache[j].rawbufs[i] = input_rawbuffers[input_idx].offset(input_offset, input_size)
+      for (j,i),(inp_i,inp_o,inp_sz) in self.input_replace.items(): self.jit_cache[j].rawbufs[i] = input_rawbuffers[inp_i].offset(inp_o, inp_sz)
       for ji in self.jit_cache: ji.prg(cast(List[Buffer], ji.rawbufs), var_vals, wait=DEBUG>=2, jit=True)
     elif self.cnt == 1:
       # jit capture
