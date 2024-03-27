@@ -108,6 +108,10 @@ class KFDProgram:
     #print("end  ", self.device.mgart[0], self.device.mgart[1])
 
     assert (wp:=self.device.amd_aql_queue.write_dispatch_id) == (rp:=self.device.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
+    if wait:
+      st = self.device._convert_ts_to_system_domain(self.device.completion_signal.start_ts)
+      et = self.device._convert_ts_to_system_domain(self.device.completion_signal.end_ts)
+      return (et - st) / 1e9
 
     # TODO: why aren't the times being set in self.device.completion_signal?
     #print(format_struct(self.device.completion_signal))
@@ -152,6 +156,13 @@ class KFDDevice(Compiled):
       assert stm.n_success == 1
     return mem
 
+  def _convert_ts_to_system_domain(self, tick:int):
+    self.t1 = kio.get_clock_counters(KFDDevice.kfd, gpu_id=self.gpu_id)
+    sysdelta = self.t1.system_clock_counter - self.t0.system_clock_counter
+    gpudelta = self.t1.gpu_clock_counter - self.t0.gpu_clock_counter
+    offtick = tick - self.t1.gpu_clock_counter
+    return (sysdelta * offtick + gpudelta * self.t1.system_clock_counter) / gpudelta
+
   def __init__(self, device:str=""):
     if KFDDevice.kfd == -1: KFDDevice.kfd = os.open("/dev/kfd", os.O_RDWR)
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
@@ -177,7 +188,7 @@ class KFDDevice(Compiled):
     self.completion_signal.event_mailbox_ptr = self.event_page.va_addr + self.sync_event.event_slot_index*8
     self.completion_signal.event_id = self.sync_event.event_id
 
-    # aql queue setup
+    # Queue
     self.amd_aql_queue = hsa.amd_queue_t.from_address(self.gart.va_addr)
     self.amd_aql_queue.write_dispatch_id = 0
     self.amd_aql_queue.read_dispatch_id = 0
@@ -194,4 +205,9 @@ class KFDDevice(Compiled):
     self.doorbell = to_mv(libc.mmap(0, 8192, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED,
                                     KFDDevice.kfd, self.aql_queue.doorbell_offset), 8192).cast("I")
     self.doorbell_value = 0
+
+    # Clock
+    self.t0 = self.t1 = kio.get_clock_counters(KFDDevice.kfd, gpu_id=self.gpu_id)
+    self.historical_clock_ratio = 0
+
     super().__init__(device, KFDAllocator(self), KFDCompiler(self.arch), functools.partial(KFDProgram, self))
