@@ -96,16 +96,13 @@ class KFDProgram:
     packet.header = DISPATCH_KERNEL_HEADER
 
     # one pending packet + ring doorbell
-    #print("start", self.device.mgart[0], self.device.mgart[1])
     self.device.amd_aql_queue.write_dispatch_id = self.device.doorbell_value+1
-    #self.device.mgart[1] = 0
     self.device.doorbell[0] = self.device.doorbell_value
     self.device.doorbell_value += 1
 
     evt_arr = (kfd.struct_kfd_event_data * 1)()
     evt_arr[0].event_id = self.device.completion_signal.event_id
     kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=1000)
-    #print("end  ", self.device.mgart[0], self.device.mgart[1])
 
     assert (wp:=self.device.amd_aql_queue.write_dispatch_id) == (rp:=self.device.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
     if wait: return (self.device.completion_signal.end_ts-self.device.completion_signal.start_ts)/1e9
