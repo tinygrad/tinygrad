@@ -171,8 +171,8 @@ class Tensor:
     # NOTE: this realizes on the object from as_buffer being a Python object
     cpu = self.cast(self.dtype.scalar()).contiguous().to("CLANG").realize()
     buf = cast(Buffer, cast(LazyBuffer, cpu.lazydata).base.realized)
-    buf.options = BufferOptions(nolru=True)
-    return buf.as_buffer(allow_zero_copy=True)
+    if self.device != "CLANG": buf.options = BufferOptions(nolru=True)
+    return buf.as_buffer(allow_zero_copy=True if self.device != "CLANG" else False)
 
   def data(self) -> memoryview:
     assert self.dtype.fmt is not None, f"no fmt dtype for {self.dtype}"
