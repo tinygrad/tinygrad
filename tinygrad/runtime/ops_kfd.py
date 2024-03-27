@@ -55,32 +55,40 @@ class KFDProgram:
     lib_mv = to_mv(self.lib_gpu.va_addr, len(lib))
     lib_mv[:] = lib
 
-    # fixups
-    #with open("/tmp/lib", "wb") as f: f.write(lib)
-    #from hexdump import hexdump
-    #hexdump(lib)
-
+    # TODO: elf parsing
     offset = lib_mv.cast("I")[0xa0//4] - 0x40
     lib_mv.cast("I")[(offset+0x10)//4] -= 0x1000
     self.handle = self.lib_gpu.va_addr + offset
-    #hexdump(to_mv(self.handle, 0x40))
+
+    self.group_segment_size = lib_mv.cast("I")[(offset)//4]
+    self.private_segment_size = lib_mv.cast("I")[(offset+4)//4]
+    self.kernargs_segment_size = lib_mv.cast("I")[(offset+8)//4]
+
+    #from hexdump import hexdump
+    #hexdump(to_mv(self.handle, 0x100))
+
+  # NOTE: no programs are ever freed
+  def __del__(self): kio.free_memory_of_gpu(KFDDevice.kfd, handle=self.lib_gpu.handle)
 
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
     if not hasattr(self, "args_struct_t"):
       self.args_struct_t = init_c_struct_t(tuple([(f'f{i}', ctypes.c_void_p) for i in range(len(args))] +
                                                 [(f'v{i}', ctypes.c_int) for i in range(len(vals))]))
+      if ctypes.sizeof(self.args_struct_t) != self.kernargs_segment_size:
+        raise RuntimeError(f"HSAProgram.__call__: incorrect args struct size {ctypes.sizeof(self.args_struct_t)} != {self.kernargs_segment_size}")
     args_st = self.args_struct_t.from_address(self.device.kernargs.va_addr)
     for i in range(len(args)): args_st.__setattr__(f'f{i}', args[i].va_addr)
     for i in range(len(vals)): args_st.__setattr__(f'v{i}', vals[i])
 
-    packet = hsa.hsa_kernel_dispatch_packet_t.from_address(self.device.aql_ring.va_addr + self.device.doorbell_value*AQL_PACKET_SIZE)
+    packet = hsa.hsa_kernel_dispatch_packet_t.from_address(self.device.aql_ring.va_addr +
+                                                           (self.device.doorbell_value*AQL_PACKET_SIZE) % self.device.aql_ring.size)
     packet.workgroup_size_x, packet.workgroup_size_y, packet.workgroup_size_z = local_size
     packet.reserved0 = 0
     packet.grid_size_x, packet.grid_size_y, packet.grid_size_z = tuple(g*l for g,l in zip(global_size, local_size))
     packet.kernel_object = self.handle
     packet.kernarg_address = self.device.kernargs.va_addr
-    packet.private_segment_size = 0
-    packet.group_segment_size = 0
+    packet.group_segment_size = self.group_segment_size
+    packet.private_segment_size = self.private_segment_size   # what it this and why doesn't it work?
     packet.reserved2 = 0
     packet.completion_signal = hsa.hsa_signal_t(ctypes.addressof(self.device.completion_signal))
     packet.setup = DISPATCH_KERNEL_SETUP
@@ -97,6 +105,8 @@ class KFDProgram:
     evt_arr[0].event_id = self.device.completion_signal.event_id
     kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=1000)
     #print("end  ", self.device.mgart[0], self.device.mgart[1])
+
+    assert self.device.mgart[0] == self.device.mgart[1], f"didn't run {self.device.mgart[0]} != {self.device.mgart[1]}"
 
 class KFDAllocator(LRUAllocator):
   def __init__(self, device:KFDDevice):
@@ -116,7 +126,7 @@ MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
 class KFDDevice(Compiled):
   kfd:int = -1
 
-  def _gpu_alloc(self, size:int, flags:int, uncached=False, public=False):
+  def _gpu_alloc(self, size:int, flags:int, uncached=False, public=False, map_to_gpu=True):
     flags |= kfd.KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE
     if uncached: flags |= kfd.KFD_IOC_ALLOC_MEM_FLAGS_COHERENT | kfd.KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED
     if public: flags |= kfd.KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC
@@ -130,9 +140,10 @@ class KFDDevice(Compiled):
       buf = libc.mmap(mem.va_addr, mem.size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|MAP_FIXED, self.drm_fd, mem.mmap_offset)
       assert buf != 0xffffffffffffffff
       assert addr == buf == mem.va_addr
-    arr = (ctypes.c_int32 * 1)(self.gpu_id)
-    stm = kio.map_memory_to_gpu(self.kfd, handle=mem.handle, device_ids_array_ptr=ctypes.addressof(arr), n_devices=1)
-    assert stm.n_success == 1
+    if map_to_gpu:
+      arr = (ctypes.c_int32 * 1)(self.gpu_id)
+      stm = kio.map_memory_to_gpu(self.kfd, handle=mem.handle, device_ids_array_ptr=ctypes.addressof(arr), n_devices=1)
+      assert stm.n_success == 1
     return mem
 
   def __init__(self, device:str=""):
@@ -147,7 +158,7 @@ class KFDDevice(Compiled):
     self.event_page = self._gpu_alloc(0x8000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
     self.sync_event = kio.create_event(KFDDevice.kfd, event_page_offset=self.event_page.handle, auto_reset=1)
     self.eop_buffer = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
-    self.aql_ring = self._gpu_alloc(0x10000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
+    self.aql_ring = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
     self.signals_page = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
     self.gart = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
     self.mgart = to_mv(self.gart.va_addr, 0x1000).cast("Q")
