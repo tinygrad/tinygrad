@@ -13,7 +13,7 @@ from tinygrad import Device, GlobalCounters, dtypes, Tensor
 from tinygrad.helpers import Timing, Context, getenv, fetch, colored
 from tinygrad.nn import Conv2d, Linear, GroupNorm, LayerNorm, Embedding
 from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict
-from tinygrad.features.jit import TinyJit
+from tinygrad.engine.jit import TinyJit
 
 class AttnBlock:
   def __init__(self, in_channels):
@@ -602,7 +602,7 @@ if __name__ == "__main__":
 
   if args.fp16:
     for l in get_state_dict(model).values():
-      l.assign(l.cast(dtypes.float16).realize())
+      l.replace(l.cast(dtypes.float16).realize())
 
   # run through CLIP to get context
   tokenizer = ClipTokenizer()

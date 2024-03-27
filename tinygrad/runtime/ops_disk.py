@@ -20,7 +20,7 @@ class DiskBuffer:
 MAP_LOCKED, MAP_POPULATE = 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000)
 class DiskAllocator(Allocator):
   def __init__(self, device:str): self.device = device
-  def _alloc(self, size:int):
+  def _alloc(self, size:int, options):
     if self.device.startswith("shm:"):
       fd = _posixshmem.shm_open("/"+self.device[4:].lstrip("/"), os.O_RDWR, 0o600)
       mem = mmap.mmap(fd, size, mmap.MAP_SHARED | MAP_POPULATE | MAP_LOCKED)
@@ -73,4 +73,6 @@ class DiskRunner(JITRunner):
 class DiskDevice(Compiled):
   def __init__(self, device:str): super().__init__(device, DiskAllocator(device[len("disk:"):]), None, None)
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
-  def get_runner(self, ast:LazyOp): return DiskRunner(ast)
+  def get_runner(self, *ast:LazyOp):
+    assert len(ast) == 1, "DiskRunner doesn't support multioutput kernels."
+    return DiskRunner(ast[0])

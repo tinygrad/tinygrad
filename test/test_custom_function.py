@@ -21,7 +21,7 @@ def atan2_gpu(ret:Buffer, a:Buffer, b:Buffer):
     int idx = get_global_id(0);
     c[idx] = atan2(a[idx], b[idx]);
   }"""
-  CompiledASTRunner("atan2_gpu", src, Device[ret.device], global_size=[ret.size]).exec([ret, a, b])
+  CompiledASTRunner("atan2_gpu", src, ret.device, global_size=[ret.size]).exec([ret, a, b])
 
 def atan2_cpu(ret:Buffer, a:Buffer, b:Buffer): ret.copyin(np.require(np.arctan2(a._buf, b._buf), requirements='C').data)
 
@@ -87,7 +87,7 @@ class TestCustomFunction(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT in ["CPU"], "atan2_cpu not jittable")
   def test_atan2_jit(self):
     # custom ops even work in the JIT!
-    from tinygrad.features.jit import TinyJit
+    from tinygrad.engine.jit import TinyJit
 
     @TinyJit
     def jitted_atan2(a:Tensor, b:Tensor) -> Tensor:

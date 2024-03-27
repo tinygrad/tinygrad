@@ -9,7 +9,7 @@ from tinygrad.ops import LoadOps
 from tinygrad.helpers import DEBUG, GRAPH
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.graph import print_tree, realized_lazybuffer
-from tinygrad.realize import create_schedule
+from tinygrad.engine.schedule import create_schedule
 from tinygrad import nn, dtypes
 
 def check_schedule(t:Tensor, allowed:int, to_prerealize:Optional[List[Tensor]]=None, filter_loadops=True):
@@ -17,22 +17,24 @@ def check_schedule(t:Tensor, allowed:int, to_prerealize:Optional[List[Tensor]]=N
   if to_prerealize:
     for pre in to_prerealize:
       for s in create_schedule([pre.lazydata], seen.copy()):
-        if GRAPH: realized_lazybuffer(s.out, 0)
-        seen.add(s.out)
+        for i,out in enumerate(s.outputs):
+          if GRAPH: realized_lazybuffer(out, 0)
+          seen.add(out)
   sched = create_schedule([t.lazydata], seen)
   if GRAPH:
-    for i,s in enumerate(sched): realized_lazybuffer(s.out, i+1)
-  if filter_loadops: sched = [s for s in sched if s.ast.op not in LoadOps]
+    for i,s in enumerate(sched):
+      for out in s.outputs: realized_lazybuffer(out, i+1)
+  if filter_loadops: sched = [s for s in sched if s.ast[0].op not in LoadOps]
   if len(sched) != allowed: print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
   if len(sched) != allowed or DEBUG >= 3:
     for i, s in enumerate(sched):
       print("kernel", i+1)
-      print_tree(s.ast)
+      for op in s.ast: print_tree(op)
   assert len(sched) == allowed
   # test the (non loadops) ops linearize
   for s in sched:
-    if s.ast.op in LoadOps: continue
-    l = Linearizer(s.ast)
+    if s.ast[0].op in LoadOps: continue
+    l = Linearizer(*s.ast)
     l.hand_coded_optimizations()
     l.linearize()
 
@@ -179,7 +181,7 @@ class TestSchedule(unittest.TestCase):
     # run
     img = Tensor.rand(2,3,64,64)
     out = c1(img).elu()
-    check_schedule(out, 1, [c1.weight, c1.bias])
+    check_schedule(out, 1, [c1.weight, c1.bias, img])
 
   def test_two_sum(self):
     img = Tensor.empty(64,64)
@@ -334,7 +336,7 @@ class TestSchedule(unittest.TestCase):
     out = bn1(conv1(x)).relu()
     out = bn2(conv2(out))
     out = (out + x).relu()
-    check_schedule(out, 4)
+    check_schedule(out, 2, [conv1.weight, conv2.weight])
 
   def test_contiguous_while_contiguous(self):
     x = Tensor.empty(1, 64, 32, 32)

@@ -1,4 +1,4 @@
-from typing import Tuple, Union, Optional, Dict
+from typing import Tuple, Union, Optional, Dict, Any
 from tinygrad import Tensor, Variable, TinyJit, dtypes, nn, Device
 from tinygrad.helpers import getenv
 
@@ -65,12 +65,12 @@ class Attention:
 
     # create kv cache
     if not hasattr(self, "cache_k"):
-      self.cache_k = Tensor.zeros(bsz, self.max_context, self.n_kv_heads, self.head_dim, dtype=x.dtype).contiguous()
-      self.cache_v = Tensor.zeros(bsz, self.max_context, self.n_kv_heads, self.head_dim, dtype=x.dtype).contiguous()
+      self.cache_k = Tensor.zeros(bsz, self.max_context, self.n_kv_heads, self.head_dim, dtype=x.dtype).contiguous().realize()
+      self.cache_v = Tensor.zeros(bsz, self.max_context, self.n_kv_heads, self.head_dim, dtype=x.dtype).contiguous().realize()
       if isinstance(x.device, tuple):
         # TODO: instead of specifying how to shard, it can follow how xk and xv are being sharded
-        self.cache_k.shard_((xk.device), axis=None)
-        self.cache_v.shard_((xv.device), axis=None)
+        self.cache_k.shard_((xk.device), axis=None).realize()
+        self.cache_v.shard_((xv.device), axis=None).realize()
 
     # HACK: without contiguous, the conversation mode is broken and the cache is not updated
     keys = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1).contiguous() if start_pos > 0 else xk
@@ -78,8 +78,8 @@ class Attention:
 
     # update the cache
     assert keys.dtype == self.cache_k.dtype and values.dtype == self.cache_v.dtype, f"{keys.dtype=}, {values.dtype=}, {self.cache_k.dtype=}, {self.cache_v.dtype=}"
-    self.cache_k.assign(keys.pad((None,(0,self.max_context-start_pos-seqlen),None,None)).contiguous()).realize()
-    self.cache_v.assign(values.pad((None,(0,self.max_context-start_pos-seqlen),None,None)).contiguous()).realize()
+    self.cache_k.assign(keys.pad((None,(0,self.max_context-start_pos-seqlen),None,None))).realize()
+    self.cache_v.assign(values.pad((None,(0,self.max_context-start_pos-seqlen),None,None))).realize()
     keys, values = repeat_kv(keys, self.n_rep), repeat_kv(values, self.n_rep)
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
     attn = xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2)
@@ -163,3 +163,10 @@ def convert_from_huggingface(weights:Dict[str, Tensor], model: Transformer, n_he
         v = permute(v, n_kv_heads)
     sd[keymap[k]] = v
   return sd
+
+def fix_bf16(weights:Dict[Any, Tensor]):
+  if getenv("SUPPORT_BF16", 1):
+    # TODO: without casting to float16, 70B llama OOM on tinybox.
+    return {k:v.cast(dtypes.float16) if v.dtype == dtypes.bfloat16 else v for k,v in weights.items()}
+  # TODO: check if device supports bf16
+  return {k:v.llvm_bf16_cast(dtypes.half).to(v.device) if v.dtype == dtypes.bfloat16 else v for k,v in weights.items()}

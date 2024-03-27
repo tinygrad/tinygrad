@@ -1,3 +1,4 @@
+# type: ignore
 import ctypes, ctypes.util, struct, platform, pathlib, re, time, os
 start = time.perf_counter()
 

@@ -27,7 +27,8 @@ class LLVMProgram:
     self.fxn = device.engine.get_function_address(name)
 
   def __call__(self, *bufs, vals:Tuple[int, ...]=(), wait=False):
-    self.cfunc = ctypes.CFUNCTYPE(ctypes.c_int, *([ctypes.c_void_p]*len(bufs)), *([ctypes.c_int32]*len(vals)))(self.fxn)
+    if not hasattr(self, 'cfunc'):
+      self.cfunc = ctypes.CFUNCTYPE(ctypes.c_int, *([ctypes.c_void_p]*len(bufs)), *([ctypes.c_int32]*len(vals)))(self.fxn)
     return cpu_time_execution(lambda: self.cfunc(*bufs, *vals), enable=wait)
 
 class LLVMDevice(Compiled):
