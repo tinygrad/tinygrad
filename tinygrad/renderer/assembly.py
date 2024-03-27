@@ -65,6 +65,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
     return ld_rep(root,x,y)
 
   def mulacc(root, muls, non_muls):
+    if dtypes.is_float(root.dtype):
       root.arg = TernaryOps.MULACC
       root.vin = muls.vin + (non_muls,)
 
@@ -82,7 +83,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
 
   matcher = PatternMatcher([
     ({"__name__": "root", "uop": UOps.ALU, "arg": BinaryOps.CMPEQ, "vin": ({"__name__": "x", "dtype": dtypes.bool},{"__name__": "y"})}, eq_rep),
-    ({"__name__": "root", "uop": UOps.ALU, "arg": BinaryOps.ADD, "dtype": dtypes.is_float,
+    ({"__name__": "root", "uop": UOps.ALU, "arg": BinaryOps.ADD,
       "vin": [{"__name__": "non_muls"}, {"__name__": "muls", "uop": UOps.ALU, "arg": BinaryOps.MUL}]}, mulacc),
     ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": ({"__name__": "x", "dtype": dtypes.bool},{"__name__": "y"})}, lt_rep),
     ({"__name__": "root", "uop": UOps.LOAD,"dtype": dtypes.bool,
