@@ -12,7 +12,7 @@ from tinygrad.helpers import IMAGE, DEBUG, WINO, THREEFRY
 from tinygrad.lazy import LazyBuffer
 from tinygrad.features.multi import MultiLazyBuffer
 from tinygrad.ops import LoadOps
-from tinygrad.device import Buffer, Device
+from tinygrad.device import Buffer, Device, BufferOptions
 from tinygrad.shape.symbolic import sint
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.schedule import create_schedule
@@ -168,8 +168,11 @@ class Tensor:
 
   def _data(self) -> memoryview:
     if 0 in self.shape: return memoryview(bytearray(0))
-    t = self if isinstance(self.device, str) else self.to(self.device[0])   # deal with multitensor
-    return cast(Buffer, t.cast(t.dtype.scalar()).contiguous().realize().lazydata.base.realized).as_buffer()
+    # NOTE: this realizes on the object from as_buffer being a Python object
+    cpu = self.cast(self.dtype.scalar()).contiguous().to("CLANG").realize()
+    buf = cast(Buffer, cast(LazyBuffer, cpu.lazydata).base.realized)
+    if self.device != "CLANG": buf.options = BufferOptions(nolru=True)
+    return buf.as_buffer(allow_zero_copy=True if self.device != "CLANG" else False)
 
   def data(self) -> memoryview:
     assert self.dtype.fmt is not None, f"no fmt dtype for {self.dtype}"
