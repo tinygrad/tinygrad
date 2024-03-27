@@ -311,32 +311,34 @@ def instance_to_features(instance, tokenizer):
 def process_part(part):
   tokenizer = Tokenizer(Path(__file__).parent / "wiki" / "vocab.txt")
   os.makedirs(BASEDIR / "train" / str(part), exist_ok=True)
-  for i, features in enumerate(process_iterate(tokenizer, val=False, part=part)):
+  for i, feature_batch in enumerate(process_iterate(tokenizer, val=False, part=part)):
     with open(BASEDIR / f"train/{str(part)}/{part}_{i}.pkl", "wb") as f:
-      pickle.dump(features, f)
+      pickle.dump(feature_batch, f)
 
 def process_iterate(tokenizer, val=False, part=0): # Convert raw text to masked NSP samples
   rng = random.Random(getenv('SEED', 12345))
 
   if val:
+    tqdm.write("Getting samples from dataset")
     documents = get_documents(rng, tokenizer, "results4/eval.txt")
     instances = get_instances(rng, tokenizer, documents)
-    print(f"there are {len(instances)} samples in the dataset")
 
-    print(f"picking 10000 samples")
+    tqdm.write(f"There are {len(instances)} samples in the dataset")
+    tqdm.write(f"Picking 10000 samples")
+
     pick_ratio = len(instances) // 10000
-    for i in range(10000):
-      instance = instances[i * pick_ratio]
-      features = instance_to_features(instance, tokenizer)
-      yield features
+    picks = [instance_to_features(instances[inst*pick_ratio], tokenizer) for inst in range(1000)]
+    for batch in range(10000 // 1000):
+      yield picks[batch*1000:(batch+1)*1000]
   else:
-    # part padded to 5 digits
     documents = get_documents(rng, tokenizer, f"results4/part-{part:05d}-of-00500")
     instances = get_instances(rng, tokenizer, documents)
 
-    for instance in instances:
-      features = instance_to_features(instance, tokenizer)
-      yield features
+    while len(instances) > 0:
+      batch_size = min(1000, len(instances))
+      batch = instances[:batch_size]
+      del instances[:batch_size]
+      yield [instance_to_features(instance, tokenizer) for instance in batch]
 
 ##################### Data loading #####################
 
@@ -348,63 +350,30 @@ def get_val_files():
 def get_train_files():
   return sorted(list((BASEDIR / "train/").glob("*/*.pkl")))
 
-def load_bert_file(file_name):
-  with open(file_name, "rb") as f:
-    features = pickle.load(f)
-    return {
-        "input_ids": features["input_ids"],
-        "input_mask": features["input_mask"],
-        "segment_ids": features["segment_ids"],
-        "masked_lm_positions": features["masked_lm_positions"],
-        "masked_lm_ids": features["masked_lm_ids"],
-        "next_sentence_labels": features["next_sentence_labels"],
-    }
-
-def iterator(BS:int, val=False, start=0):
-  from extra.datasets.wikipedia import get_train_files, get_val_files
-  files = get_val_files() if val else get_train_files()
-  with Pool() as p:
-    i = start
-    while True:
-      results = p.map(load_bert_file, files[i:i+BS])
-      yield {
-        "input_ids": np.concatenate([f["input_ids"] for f in results], axis=0),
-        "input_mask": np.concatenate([f["input_mask"] for f in results], axis=0),
-        "segment_ids": np.concatenate([f["segment_ids"] for f in results], axis=0),
-        "masked_lm_positions": np.concatenate([f["masked_lm_positions"] for f in results], axis=0),
-        "masked_lm_ids": np.concatenate([f["masked_lm_ids"] for f in results], axis=0),
-        "masked_lm_weights": np.concatenate([f["masked_lm_weights"] for f in results], axis=0),
-        "next_sentence_labels": np.concatenate([f["next_sentence_labels"] for f in results], axis=0),
-      }
-      i = (i + BS) % len(files)
-
 if __name__ == "__main__":
   tokenizer = Tokenizer(Path(__file__).parent / "wiki" / "vocab.txt")
 
-  if len(sys.argv) <= 1:
-    X, Y = next(iterator(val=False))
-    print("Input Ids:\n", X["input_ids"][0])
-    print("Tokens:\n", tokenizer.convert_ids_to_tokens(X["input_ids"][0]))
-    print("Masked token ids:\n", Y["masked_lm_ids"])
-    print("Masked tokens:\n", tokenizer.convert_ids_to_tokens(Y["masked_lm_ids"][0]))
+  assert len(sys.argv) > 1, "Usage: python wikipedia.py pre-eval|pre-train [part]|all"
 
-    # fill in the blanks
-    for i in range(getenv('MAX_PREDICTIONS_PER_SEQ', 20)):
-      X["input_ids"][0][int(X["masked_lm_positions"][0][i])] = Y["masked_lm_ids"][0][i]
-    print(" ".join(tokenizer.convert_ids_to_tokens(X["input_ids"][0])))
-  else:
-    if sys.argv[1] == "pre-eval":
-      os.makedirs(BASEDIR / "eval", exist_ok=True)
-      for i, features in tqdm(enumerate(process_iterate(tokenizer, val=True)), total=10000):
-        with open(BASEDIR / f"eval/{i}.pkl", "wb") as f:
-          pickle.dump(features, f)
-    elif sys.argv[1] == "pre-train":
-      os.makedirs(BASEDIR / "train", exist_ok=True)
-      if sys.argv[2] == "all":
-        process_map(process_part, [part for part in range(500)], max_workers=getenv('NUM_WORKERS', os.cpu_count()), chunksize=1)
-      else:
-        part = int(sys.argv[2])
-        os.makedirs(BASEDIR / "train" / str(part), exist_ok=True)
-        for i, features in tqdm(enumerate(process_iterate(tokenizer, val=False, part=part))):
-          with open(BASEDIR / f"train/{str(part)}/{part}_{i}.pkl", "wb") as f:
-            pickle.dump(features, f)
+  if sys.argv[1] == "pre-eval":
+    os.makedirs(BASEDIR / "eval", exist_ok=True)
+
+    os.environ["MAX_SEQ_LENGTH"] = "512"
+    os.environ["MAX_PREDICTIONS_PER_SEQ"] = "76"
+
+    for i, feature_batch in tqdm(enumerate(process_iterate(tokenizer, val=True)), total=10):
+      with open(BASEDIR / f"eval/{i}.pkl", "wb") as f:
+        pickle.dump(feature_batch, f)
+  elif sys.argv[1] == "pre-train":
+    os.makedirs(BASEDIR / "train", exist_ok=True)
+    if sys.argv[2] == "all":
+      process_map(process_part, [part for part in range(500)], max_workers=getenv('NUM_WORKERS', os.cpu_count()), chunksize=1)
+    else:
+      part = int(sys.argv[2])
+      os.makedirs(BASEDIR / "train" / str(part), exist_ok=True)
+      for i, feature_batch in tqdm(enumerate(process_iterate(tokenizer, val=False, part=part))):
+        with open(BASEDIR / f"train/{str(part)}/{part}_{i}.pkl", "wb") as f:
+          pickle.dump(feature_batch, f)
+
+# better logging in single process part
+# dataloader rework
