@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Tuple
-import os, fcntl, ctypes, functools, re, pathlib, mmap
+import os, fcntl, ctypes, functools, re, pathlib, mmap, struct
 from tinygrad.device import Compiled, LRUAllocator, Compiler, BufferOptions
 from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up
 from tinygrad.codegen.kernel import LinearizerOptions
@@ -51,18 +51,37 @@ class KFDProgram:
   def __init__(self, device:KFDDevice, name:str, lib:bytes):
     # TODO; this API needs the type signature of the function and global_size/local_size
     self.device, self.name, self.lib = device, name, lib
-    self.lib_gpu = self.device._gpu_alloc(round_up(len(lib), 0x1000), kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=True)
-    lib_mv = to_mv(self.lib_gpu.va_addr, len(lib))
-    lib_mv[:] = lib
 
-    # TODO: elf parsing
-    offset = lib_mv.cast("I")[0xa0//4] - 0x40
-    lib_mv.cast("I")[(offset+0x10)//4] -= 0x1000
-    self.handle = self.lib_gpu.va_addr + offset
+    e_phoff, e_shoff, e_flags, e_ehsize, e_phentsize, e_phnum, e_shentsize, e_shnum, e_shstrndx = struct.unpack_from("<QQIHHHHHH", self.lib, 0x20)
+    last_vaddr = 0
+    for i in range(e_phnum):
+      offset = e_phoff + i * e_phentsize
+      p_type, p_flags, p_offset, p_vaddr, p_paddr, p_filesz, p_memsz, p_align = struct.unpack_from("<IIQQQQQQ", self.lib, offset)
+      if p_type == 0x1: last_vaddr = max(last_vaddr, p_vaddr + p_memsz)
 
-    self.group_segment_size = lib_mv.cast("I")[(offset)//4]
-    self.private_segment_size = lib_mv.cast("I")[(offset+4)//4]
-    self.kernargs_segment_size = lib_mv.cast("I")[(offset+8)//4]
+    self.lib_gpu = self.device._gpu_alloc(round_up(last_vaddr, 0x1000), kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=True)
+    lib_mv = to_mv(self.lib_gpu.va_addr, last_vaddr)
+
+    for i in range(e_phnum):
+      offset = e_phoff + i * e_phentsize
+      p_type, p_flags, p_offset, p_vaddr, p_paddr, p_filesz, p_memsz, p_align = struct.unpack_from("<IIQQQQQQ", self.lib, offset)
+      
+      if p_type == 0x1: # PT_LOAD
+        # print("PT_LOAD", p_offset, p_vaddr, p_paddr, p_filesz, p_memsz, p_flags)
+        lib_mv[p_vaddr:p_vaddr+p_filesz] = bytearray(self.lib[p_offset:p_offset+p_filesz])
+
+    header_offset = None
+    for i in range(e_shnum):
+      offset = e_shoff + i * e_shentsize
+      sh_name_off, sh_type, sh_flags, sh_addr, sh_offset, sh_size, sh_link, sh_info, sh_addralign = struct.unpack_from("<IIQQQQIIQ", self.lib, offset)
+      
+      if sh_type == 0x1 and sh_size == 64 and sh_flags == 0x2: header_offset = sh_addr
+
+    assert header_offset is not None
+    self.handle = self.lib_gpu.va_addr + header_offset
+    self.group_segment_size = lib_mv.cast("I")[(header_offset)//4]
+    self.private_segment_size = lib_mv.cast("I")[(header_offset+4)//4]
+    self.kernargs_segment_size = lib_mv.cast("I")[(header_offset+8)//4]
 
     #from hexdump import hexdump
     #hexdump(to_mv(self.handle, 0x100))
@@ -160,6 +179,7 @@ class KFDDevice(Compiled):
     self.aql_ring = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
     self.signals_page = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
     self.gart = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
+    self.smth_base = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
     # self.mgart = to_mv(self.gart.va_addr, 0x1000).cast("Q")
     self.kernargs = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
     self.ctx_save_restore_address = self._gpu_alloc(0x2C02000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
@@ -176,6 +196,9 @@ class KFDDevice(Compiled):
     self.amd_aql_queue.read_dispatch_id = 0
     self.amd_aql_queue.read_dispatch_id_field_base_byte_offset = getattr(hsa.amd_queue_t, 'read_dispatch_id').offset
     self.amd_aql_queue.queue_properties = hsa.AMD_QUEUE_PROPERTIES_IS_PTR64 | hsa.AMD_QUEUE_PROPERTIES_ENABLE_PROFILING
+    self.amd_aql_queue.private_segment_aperture_base_hi = ((self.smth_base.va_addr) >> 32) & 0xFFFFFFFF
+    self.amd_aql_queue.group_segment_aperture_base_hi = ((self.smth_base.va_addr) >> 32) & 0xFFFFFFFF
+    self.amd_aql_queue.mem_alignment_size = 256
 
     self.aql_queue = kio.create_queue(KFDDevice.kfd, ring_base_address=self.aql_ring.va_addr, ring_size=self.aql_ring.size, gpu_id=self.gpu_id,
       queue_type=kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE, queue_priority=kfd.KFD_MAX_QUEUE_PRIORITY,
