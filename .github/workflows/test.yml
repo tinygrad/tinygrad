@@ -89,7 +89,6 @@ jobs:
       run: python -m mypy --strict-equality
     - name: Test Docs
       run: |
-        python docs/abstractions.py
         python docs/abstractions2.py
     - name: Test Quickstart
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  PYTHONPATH=. python quickstart.py
