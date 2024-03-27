@@ -46,7 +46,7 @@ class JITRunner:
     self.mem_estimate:sint = 0
   def exec(self, rawbufs:List[Buffer], var_vals:Optional[Dict[Variable, int]]=None) -> Optional[float]:
     var_vals = var_vals if var_vals is not None else {}
-    from tinygrad.features.jit import CacheCollector
+    from tinygrad.engine.jit import CacheCollector
     et = self(rawbufs, var_vals)
     if CACHECOLLECTING: CacheCollector.add(self, rawbufs, var_vals)
     return et

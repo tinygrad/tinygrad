@@ -5,7 +5,7 @@ from tinygrad.helpers import init_c_var, GraphException
 from tinygrad.device import CompiledASTRunner, update_stats, Buffer, MultiDeviceJITGraph, BufferXfer
 from tinygrad.runtime.ops_cuda import CUDADevice, check, encode_args, cu_time_execution
 from tinygrad.shape.symbolic import Variable
-from tinygrad.features.jit import JitItem, get_input_replace, get_jit_stats, \
+from tinygrad.engine.jit import JitItem, get_input_replace, get_jit_stats, \
                                   get_jc_idxs_with_updatable_launch_dims, get_jc_idxs_with_updatable_var_vals
 
 class CUDAGraph(MultiDeviceJITGraph):

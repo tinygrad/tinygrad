@@ -4,7 +4,7 @@ from tinygrad.helpers import GraphException, init_c_var, round_up
 from tinygrad.device import Compiled, Buffer, BufferOptions, CompiledASTRunner, BufferXfer, MultiDeviceJITGraph, update_stats
 from tinygrad.shape.symbolic import Variable
 from tinygrad.runtime.ops_hsa import HSADevice, PROFILE, Profiler
-from tinygrad.features.jit import JitItem, get_input_replace, get_jit_stats, \
+from tinygrad.engine.jit import JitItem, get_input_replace, get_jit_stats, \
                                   get_jc_idxs_with_updatable_launch_dims, get_jc_idxs_with_updatable_var_vals
 import tinygrad.runtime.autogen.hsa as hsa
 from tinygrad.runtime.driver.hsa import check, AQLQueue, AQL_PACKET_SIZE, EMPTY_SIGNAL

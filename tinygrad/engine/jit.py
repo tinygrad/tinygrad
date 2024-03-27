@@ -21,11 +21,11 @@ class JitItem:
 def get_jit_stats(jit_cache: List[JitItem]) -> Tuple[sint, int]:
   return functools.reduce(operator.add, [ji.prg.op_estimate for ji in jit_cache if isinstance(ji.prg, CompiledASTRunner)], 0), \
          functools.reduce(operator.add, [ji.prg.mem_estimate for ji in jit_cache if isinstance(ji.prg, CompiledASTRunner)], 0)
-def get_input_replace(jit_cache: List[JitItem], input_rawbuffers:List[Buffer], check:bool = False) -> Dict[Tuple[int, int], Tuple[int, int, int]]:
+def get_input_replace(jit_cache: List[JitItem], input_rawbuffers:List[Buffer]) -> Dict[Tuple[int, int], Tuple[int, int, int]]:
   input_replace: Dict[Tuple[int, int], Tuple[int, int, int]] = {}
   for j,ji in enumerate(jit_cache):
     for i,a in enumerate(ji.rawbufs):
-      if a is not None and (a if check else a.base) in input_rawbuffers:
+      if a is not None and a.base in input_rawbuffers:
         input_replace[(j,i)] = (input_rawbuffers.index(a.base), a._offset, a.size)
   return input_replace
 def get_jc_idxs_with_updatable_launch_dims(jit_cache: List[JitItem]) -> List[int]:
@@ -126,8 +126,8 @@ class TinyJit(Generic[ReturnType]):
       assert len(self.jit_cache) != 0, "didn't JIT anything!"
       # TODO: reset doesn't work if we delete this
       #del self.fxn
-      if DEBUG >= 1 and len(set(get_input_replace(self.jit_cache, input_rawbuffers, check=True).values())) != len(input_rawbuffers):
-        print("WARNING: some input tensors not found")
+      #if DEBUG >= 1 and len(set(get_input_replace(self.jit_cache, input_rawbuffers).values())) != len(input_rawbuffers):
+        #print("WARNING: some input tensors not found")
       if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
 
       # Condense the items into a graph executor.

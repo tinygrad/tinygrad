@@ -2,7 +2,7 @@ import unittest, time, gc
 import numpy as np
 from tinygrad.nn import optim
 from tinygrad.nn.state import get_parameters
-from tinygrad.features.jit import TinyJit
+from tinygrad.engine.jit import TinyJit
 from tinygrad import Tensor, Device, GlobalCounters, dtypes
 from tinygrad.helpers import CI, getenv
 from tinygrad.shape.symbolic import Variable
