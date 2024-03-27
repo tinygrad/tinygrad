@@ -202,6 +202,7 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)
 
+  assert all(degree == 0 for degree in in_degree.values()), "Cycle detected in the graph"
   # confirm everything was scheduled
   assert len(prescheduled) == len(schedule), f"prescheduled {len(prescheduled)} but only scheduled {len(schedule)}"
   return schedule
