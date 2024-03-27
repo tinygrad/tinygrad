@@ -100,7 +100,8 @@ class Buffer:
     self.allocator.free(self._buf, self.nbytes, self.options)
   def __repr__(self): return f"<buf device:{self.device} size:{self.size} dtype:{self.dtype}" + (">" if self.options is None else f"{self.options=}>")
   def offset(self, offset: int, size: int) -> Buffer:
-    if self.base == self and (self._offset+offset) == 0 and size == self.size: return self
+    if (self._offset+offset) == 0 and size == self.base.size: return self
+    assert (self._offset+offset)+size <= self.base.size, "oob"
     assert hasattr(self.allocator, "offset"), "device doesn't support offsets"
     return Buffer(self.device, size, self.dtype, self.allocator.offset(self.base._buf, (self._offset+offset)*self.itsz,size*self.itsz),
                   self.options, offset=self._offset+offset, base=self.base)

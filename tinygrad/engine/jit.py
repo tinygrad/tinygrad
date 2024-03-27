@@ -21,12 +21,12 @@ class JitItem:
 def get_jit_stats(jit_cache: List[JitItem]) -> Tuple[sint, int]:
   return functools.reduce(operator.add, [ji.prg.op_estimate for ji in jit_cache if isinstance(ji.prg, CompiledASTRunner)], 0), \
          functools.reduce(operator.add, [ji.prg.mem_estimate for ji in jit_cache if isinstance(ji.prg, CompiledASTRunner)], 0)
-def get_input_replace(jit_cache: List[JitItem], input_rawbuffers:List[Buffer]) -> Dict[Tuple[int, int], Tuple[int, int, int]]:
-  input_replace: Dict[Tuple[int, int], Tuple[int, int, int]] = {}
+def get_input_replace(jit_cache: List[JitItem], input_rawbuffers:List[Buffer]) -> Dict[Tuple[int, int], Tuple[int, Optional[Tuple[int, int]]]]:
+  input_replace: Dict[Tuple[int, int], Tuple[int, Optional[Tuple[int, int]]]] = {}
   for j,ji in enumerate(jit_cache):
     for i,a in enumerate(ji.rawbufs):
       if a is not None and a.base in input_rawbuffers:
-        input_replace[(j,i)] = (input_rawbuffers.index(a.base), a._offset, a.size)
+        input_replace[(j,i)] = (input_rawbuffers.index(a.base), (a._offset, a.size) if a.base != a else None)
   return input_replace
 def get_jc_idxs_with_updatable_launch_dims(jit_cache: List[JitItem]) -> List[int]:
   return [j for j,ji in enumerate(jit_cache) if isinstance(ji.prg, CompiledASTRunner) and ((ji.prg.global_size and not all_int(ji.prg.global_size)) or (ji.prg.local_size and not all_int(ji.prg.local_size)))]  # noqa: E501
@@ -83,7 +83,7 @@ class TinyJit(Generic[ReturnType]):
 
   def reset(self):
     self.jit_cache: List[JitItem] = []
-    self.input_replace: Dict[Tuple[int, int], Tuple[int, int, int]] = {}
+    self.input_replace: Dict[Tuple[int, int], Tuple[int, Optional[Tuple[int, int]]]] = {}
     self.cnt: int = 0
     self.ret: Optional[ReturnType] = None
     self.expected_vals: Optional[Tuple[Variable, ...]] = None
@@ -112,7 +112,8 @@ class TinyJit(Generic[ReturnType]):
       assert all(x[0] == y[0] and x[1].views == y[1].views and x[2] == y[2] and x[3] == y[3]
                  for x,y in zip(self.expected_name_sts_dtype_device, expected_name_sts_dtype_device)), \
         f"mismatch of input tensors, expected {self.expected_name_sts_dtype_device} got {expected_name_sts_dtype_device}"
-      for (j,i),(inp_i,inp_o,inp_sz) in self.input_replace.items(): self.jit_cache[j].rawbufs[i] = input_rawbuffers[inp_i].offset(inp_o, inp_sz)
+      for (j,i),(inp_i,off) in self.input_replace.items():
+        self.jit_cache[j].rawbufs[i] = input_rawbuffers[inp_i].offset(*off) if off is not None else input_rawbuffers[inp_i]
       for ji in self.jit_cache: ji.prg(cast(List[Buffer], ji.rawbufs), var_vals, wait=DEBUG>=2, jit=True)
     elif self.cnt == 1:
       # jit capture

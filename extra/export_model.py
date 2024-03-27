@@ -53,8 +53,8 @@ def jit_model(model, *args) -> Tuple[TinyJit,Dict[int,str]]:
   special_names = {}
 
   # hack to put the inputs back
-  for (j,i),(idx,offset,size) in run.input_replace.items():
-    assert offset == 0, "model export doesn't support offsets"
+  for (j,i),(idx,off) in run.input_replace.items():
+    assert off is None, "model export doesn't support offsets"
     realized_input = args[idx].lazydata.base.realized
     run.jit_cache[j].rawbufs[i] = realized_input
     special_names[id(realized_input)] = f'input{idx}'
