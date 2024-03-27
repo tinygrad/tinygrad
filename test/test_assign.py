@@ -93,7 +93,8 @@ class TestAssign(unittest.TestCase):
     np.testing.assert_allclose(new.numpy(), 4)
 
   def test_assign_diamond(self):
-    with self.assertRaises(AssertionError):
+    # NOTE: should *not* raise AssertionError from numpy
+    with self.assertRaises(RuntimeError):
       a = Tensor.ones(4).contiguous().realize()
       times_a = a*3
       a.assign(Tensor.full((4,), 2.).contiguous())
@@ -137,7 +138,8 @@ class TestAssign(unittest.TestCase):
     np.testing.assert_allclose(b.numpy(), 8)
 
   def test_crossunder_assign(self):
-    with self.assertRaises(AssertionError):
+    # NOTE: should *not* raise AssertionError from numpy
+    with self.assertRaises(RuntimeError):
       a = Tensor.full((4,), 2).contiguous().realize()
       b = Tensor.full((4,), 3).contiguous().realize()
       c = a+9
