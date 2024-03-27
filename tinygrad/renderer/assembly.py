@@ -4,7 +4,6 @@ from collections import defaultdict
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op
 from tinygrad.dtype import dtypes, DType, PtrDType, INVERSE_DTYPES_DICT
-from tinygrad.helpers import partition
 from tinygrad.codegen.uops import UOpGraph, PatternMatcher
 
 def render_val(x, dtype):
@@ -65,11 +64,9 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
     root.vin = (x,y,z,new)
     return ld_rep(root,x,y)
 
-  def mulacc(root):
-    muls, non_muls = partition(root.vin, lambda x: x.uop is UOps.ALU and x.arg is BinaryOps.MUL)
-    if len(muls) == 1 and dtypes.is_float(root.dtype):
+  def mulacc(root, muls, non_muls):
       root.arg = TernaryOps.MULACC
-      root.vin = muls[0].vin + tuple(non_muls)
+      root.vin = muls.vin + (non_muls,)
 
   def ptr_ar(root):
     assert root.arg in {'.shared', '.global', None}
@@ -85,7 +82,8 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
 
   matcher = PatternMatcher([
     ({"__name__": "root", "uop": UOps.ALU, "arg": BinaryOps.CMPEQ, "vin": ({"__name__": "x", "dtype": dtypes.bool},{"__name__": "y"})}, eq_rep),
-    ({"__name__": "root", "uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": {}}, mulacc),
+    ({"__name__": "root", "uop": UOps.ALU, "arg": BinaryOps.ADD, "dtype": dtypes.is_float,
+      "vin": [{"__name__": "non_muls"}, {"__name__": "muls", "uop": UOps.ALU, "arg": BinaryOps.MUL}]}, mulacc),
     ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": ({"__name__": "x", "dtype": dtypes.bool},{"__name__": "y"})}, lt_rep),
     ({"__name__": "root", "uop": UOps.LOAD,"dtype": dtypes.bool,
       "vin": ({"__name__": "x"},{"__name__": "y"},{"__name__": "z"},{"__name__": "k"})}, gate_rep),
