@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Optional, Union, Any, Tuple, List
 import functools, itertools, operator
 from tinygrad.helpers import all_same, all_int, dedup, round_up, prod, DEBUG, RING
-from tinygrad.dtype import DType, Scalar
+from tinygrad.dtype import DType, ConstType
 from tinygrad.ops import BinaryOps, LoadOps, UnaryOps, TernaryOps, ReduceOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import sint
@@ -88,7 +88,7 @@ class MultiLazyBuffer:
   # passthroughs
   def is_realized(self) -> bool: return all([lb.base.realized is not None for lb, r in zip(self.lbs, self.real) if r is True])
   def cast(self, dtype:DType, bitcast:bool=False): return MultiLazyBuffer([x.cast(dtype, bitcast) for x in self.lbs], self.axis, self.real)
-  def const(self, val:Scalar) -> MultiLazyBuffer: return MultiLazyBuffer([x.const(val) for x in self.lbs], self.axis, self.real)
+  def const(self, val:ConstType) -> MultiLazyBuffer: return MultiLazyBuffer([x.const(val) for x in self.lbs], self.axis, self.real)
   def assign(self, x:MultiLazyBuffer): return MultiLazyBuffer([s.assign(d) for s,d in zip(self.lbs, x.lbs)], self.axis, self.real)
   def contiguous(self): return MultiLazyBuffer([x.contiguous() for x in self.lbs], self.axis, self.real)
 

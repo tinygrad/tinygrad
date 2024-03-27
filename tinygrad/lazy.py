@@ -1,7 +1,7 @@
 from __future__ import annotations
 import math
 from typing import Union, Optional, Any, Tuple, List
-from tinygrad.dtype import cast_scalar, dtypes, DType, Scalar
+from tinygrad.dtype import dtypes, DType, ConstType
 from tinygrad.helpers import prod, getenv, all_int, all_same
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op
 from tinygrad.shape.symbolic import sint
@@ -54,9 +54,9 @@ class LazyBuffer:
     if _buf is not None: ret.realized = _buf
     return ret
 
-  def const(self, val:Scalar, shape:Optional[Tuple[sint,...]]=None) -> LazyBuffer:
-    shape = self.shape if shape is None else shape
-    return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, self.device, arg=cast_scalar(val, self.dtype)).reshape((1,)*len(shape)).expand(shape)
+  def const(self, val:ConstType, shape:Optional[Tuple[sint,...]]=None) -> LazyBuffer:
+    shape, arg = self.shape if shape is None else shape, dtypes.as_const(val, self.dtype)
+    return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, self.device, arg=arg).reshape((1,)*len(shape)).expand(shape)
 
   def is_realized(self) -> bool: return self.base.realized is not None
 

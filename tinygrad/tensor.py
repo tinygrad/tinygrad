@@ -6,7 +6,7 @@ from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Seque
 from collections import defaultdict
 import numpy as np
 
-from tinygrad.dtype import DType, dtypes, ImageDType, Scalar, least_upper_float, least_upper_dtype, cast_scalar
+from tinygrad.dtype import DType, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype
 from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, fully_flatten, flat_mv
 from tinygrad.helpers import IMAGE, DEBUG, WINO, THREEFRY
 from tinygrad.lazy import LazyBuffer
@@ -77,7 +77,7 @@ class Tensor:
     def __init__(self, mode:bool = True): self.mode = mode
     def __enter__(self): self.prev, Tensor.no_grad = Tensor.no_grad, self.mode
     def __exit__(self, exc_type, exc_value, traceback): Tensor.no_grad = self.prev
-  def __init__(self, data:Union[None, Scalar, List, Tuple, LazyBuffer, np.ndarray, bytes, MultiLazyBuffer],
+  def __init__(self, data:Union[None, ConstType, List, Tuple, LazyBuffer, np.ndarray, bytes, MultiLazyBuffer],
                device:Optional[Union[str, tuple, list]]=None, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
     assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
     device = tuple(Device.canonicalize(x) for x in device) if isinstance(device, (tuple, list)) else Device.canonicalize(device)
@@ -91,7 +91,7 @@ class Tensor:
     # internal variables used for autograd graph construction
     self._ctx: Optional[Function] = None
     if isinstance(data, LazyBuffer): assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
-    elif isinstance(data, get_args(Scalar)): data = _loadop(LoadOps.CONST, tuple(), dtype or dtypes.from_py(data), device, data)
+    elif isinstance(data, get_args(ConstType)): data = _loadop(LoadOps.CONST, tuple(), dtype or dtypes.from_py(data), device, data)
     elif isinstance(data, bytes): data = _fromcpu(np.frombuffer(data, np.uint8))
     elif data is None: data = _loadop(LoadOps.EMPTY, (0,), dtype or dtypes.default_float, device)
     elif isinstance(data, list):
@@ -174,7 +174,7 @@ class Tensor:
     assert self.dtype.fmt is not None, f"no fmt dtype for {self.dtype}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
     return self._data().cast(self.dtype.fmt, self.shape if len(self.shape) else (1,))
-  def item(self) -> Scalar:
+  def item(self) -> ConstType:
     assert self.dtype.fmt is not None, f"no fmt dtype for {self.dtype}"
     assert self.numel() == 1, "must have one element for item"
     return self._data().cast(self.dtype.fmt)[0]
@@ -255,7 +255,7 @@ class Tensor:
   # ***** creation helper functions *****
 
   @staticmethod
-  def full(shape:Tuple[sint, ...], fill_value:Scalar, **kwargs):
+  def full(shape:Tuple[sint, ...], fill_value:ConstType, **kwargs):
     return Tensor(fill_value, **kwargs).reshape((1, )*len(new_shape := argfix(shape))).expand(new_shape)
 
   @staticmethod
@@ -275,7 +275,7 @@ class Tensor:
   def eye(dim:int, **kwargs):
     return Tensor.ones((dim,1),**kwargs).pad((None,(0,dim))).flatten().shrink(((0,dim*dim),)).reshape(dim, dim)
 
-  def full_like(self, fill_value:Scalar, **kwargs):
+  def full_like(self, fill_value:ConstType, **kwargs):
     return Tensor.full(self.shape, fill_value, dtype=kwargs.pop("dtype", self.dtype), device=kwargs.pop("device", self.device), **kwargs)
   def zeros_like(self, **kwargs): return self.full_like(0, **kwargs)
   def ones_like(self, **kwargs): return self.full_like(1, **kwargs)
@@ -853,14 +853,14 @@ class Tensor:
 
   # ***** broadcasted elementwise mlops *****
 
-  def _broadcasted(self, y:Union[Tensor, Scalar], reverse:bool=False, match_dtype:bool=True) -> Tuple[Tensor, Tensor]:
+  def _broadcasted(self, y:Union[Tensor, ConstType], reverse:bool=False, match_dtype:bool=True) -> Tuple[Tensor, Tensor]:
     x: Tensor = self
     if not isinstance(y, Tensor):
       # make y a Tensor
       assert isinstance(y, (float, int, bool)), f"{type(y)=}, {y=}"
       if isinstance(self.dtype, ImageDType) or dtypes.is_float(x.dtype) or (dtypes.is_int(x.dtype) and isinstance(y, int)): y_dtype = x.dtype
       else: y_dtype = dtypes.from_py(y)
-      y = Tensor(cast_scalar(y, y_dtype), self.device, y_dtype, requires_grad=False)
+      y = Tensor(dtypes.as_const(y, y_dtype), self.device, y_dtype, requires_grad=False)
 
     if match_dtype:
       output_dtype = least_upper_dtype(x.dtype, y.dtype)
@@ -875,30 +875,30 @@ class Tensor:
     broadcasted_shape = tuple(0 if xi==0 or yi==0 else max(xi, yi) for xi, yi in zip(x.shape, y.shape))
     return x.expand(broadcasted_shape), y.expand(broadcasted_shape)
 
-  def _to_const_val(self, x:Union[Tensor, Scalar]) -> Union[Tensor, Scalar]:
+  def _to_const_val(self, x:Union[Tensor, ConstType]) -> Union[Tensor, ConstType]:
     # TODO: update with multi
     return x.lazydata.base.arg if isinstance(x, Tensor) and isinstance(x.lazydata, LazyBuffer) and x.lazydata.is_unrealized_contiguous_const() \
       and not x.requires_grad and self._broadcasted(x)[0].shape == self.shape else x
 
-  def add(self, x:Union[Tensor, Scalar], reverse=False) -> Tensor:
+  def add(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     x = self._to_const_val(x)
     return mlops.Add.apply(*self._broadcasted(x, reverse)) if isinstance(x, Tensor) or x else self
-  def sub(self, x:Union[Tensor, Scalar], reverse=False) -> Tensor:
+  def sub(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     x = self._to_const_val(x)
     return mlops.Sub.apply(*self._broadcasted(x, reverse)) if isinstance(x, Tensor) or x else (-self if reverse else self)
-  def mul(self, x:Union[Tensor, Scalar], reverse=False) -> Tensor:
+  def mul(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     x = self._to_const_val(x)
     if not isinstance(x, Tensor) and x == 0.0: return mlops.Zero.apply(self)
     if not isinstance(x, Tensor) and x == -1.0: return -self
     return mlops.Mul.apply(*self._broadcasted(x, reverse)) if isinstance(x, Tensor) or x != 1.0 else self
-  def div(self, x:Union[Tensor, Scalar], reverse=False, upcast=True) -> Tensor:
+  def div(self, x:Union[Tensor, ConstType], reverse=False, upcast=True) -> Tensor:
     x = self._to_const_val(x)
     if not isinstance(x, Tensor) and not reverse and x != 0 and upcast: return self.mul(1/x)
     if (isinstance(x, Tensor) and dtypes.is_float(x.dtype)) or not upcast: return mlops.Div.apply(*self._broadcasted(x, reverse))
     return mlops.Div.apply(*self.cast(least_upper_float(self.dtype))._broadcasted(x, reverse))
   def xor(self, x:Tensor, reverse=False) -> Tensor: return mlops.Xor.apply(*self._broadcasted(x, reverse))
 
-  def pow(self, x:Union[Tensor, Scalar], reverse=False) -> Tensor:
+  def pow(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     x = self._to_const_val(x)
     if not isinstance(x, Tensor) and not reverse:
       # simple pow identities
@@ -919,11 +919,11 @@ class Tensor:
     inject_nan = ((((-to_nan) * 2) + 1)).log().add(1) if isinstance(to_nan, Tensor) else 1 if not to_nan else float("nan")
     return ar.mul(sign * base_sign + (1 - base_sign)).mul(inject_nan)
 
-  def maximum(self, x:Union[Tensor, Scalar]) -> Tensor:
+  def maximum(self, x:Union[Tensor, ConstType]) -> Tensor:
     return (self<x).detach().where(x, (self==x).detach().where(((self * 0.5 + x * 0.5).cast(self.dtype)), self))
-  def minimum(self, x:Union[Tensor, Scalar]) -> Tensor: return -((-self).maximum(-x))
+  def minimum(self, x:Union[Tensor, ConstType]) -> Tensor: return -((-self).maximum(-x))
 
-  def where(self:Tensor, input_:Union[Tensor, Scalar], other:Union[Tensor, Scalar]):
+  def where(self:Tensor, input_:Union[Tensor, ConstType], other:Union[Tensor, ConstType]):
     if isinstance(input_, Tensor): input_, other = input_._broadcasted(other)
     elif isinstance(other, Tensor): other, input_ = other._broadcasted(input_)
     x_,y = self._broadcasted(input_, match_dtype=False)
