@@ -433,7 +433,7 @@ class TestSchedule(unittest.TestCase):
     check_schedule(out, 2)
 
 @unittest.skipIf(Device.DEFAULT == "METAL", "No multioutput in Metal because of the 32 buffer limit.")
-class TestMultioutputSchedule(unittest.TestCase):
+class TestMultiOutputSchedule(unittest.TestCase):
   def _test(self, outs_tiny:List[Tensor], outs_np:List[np.ndarray], allowed:int):
     sched = create_schedule([x.lazydata for x in outs_tiny])
     kernels = [si for si in sched if si.ast[0].op not in LoadOps]
@@ -454,6 +454,12 @@ class TestMultioutputSchedule(unittest.TestCase):
     out0_np, out1_np, out2_np = a.numpy()+b.numpy(), a.numpy()*b.numpy(), a.numpy().sum()
     out3_np = out2_np+a.numpy()
     self._test([out0, out1, out2, out3], [out0_np, out1_np, out2_np, out3_np], 3)
+
+  def test_assign_unique_kernel(self):
+    a, b = Tensor.ones(4).contiguous().realize(), Tensor.ones(4).contiguous().realize()
+    a.assign(Tensor.full((4,), 2.))
+    b.assign(Tensor.full((4,), 3.))
+    self._test([a, b], [np.full((4,), 2.), np.full((4,), 3.)], 2)
 
   def test_change_shape(self):
     a, b = Tensor([1,2,3,4]), Tensor([5,6,7,8])
