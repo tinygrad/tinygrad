@@ -1,8 +1,8 @@
 from __future__ import annotations
 from typing import Tuple
 import os, fcntl, ctypes, functools, re, pathlib, mmap
-from tinygrad.device import Compiled, LRUAllocator, Compiler
-from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up, format_struct
+from tinygrad.device import Compiled, LRUAllocator, Compiler, BufferOptions
+from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.runtime.driver.hip_comgr import compile_hip
@@ -112,7 +112,7 @@ class KFDAllocator(LRUAllocator):
     self.device = device
     super().__init__()
 
-  def _alloc(self, size:int):
+  def _alloc(self, size:int, options:BufferOptions):
     return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=True)
 
   # obviously slow
