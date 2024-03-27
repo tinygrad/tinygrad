@@ -219,6 +219,7 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
       if in_degree[x] == 0: queue.append((level+1,x))
   schedule: List[ScheduleItem] = [_merge_realizes(group, reduce_for_op) for group in groups.values()]
 
-  # confirm everything was scheduled
-  assert len(prescheduled) == len(flatten(si.outputs for si in schedule)), f"prescheduled {len(prescheduled)} but only scheduled {len(schedule)}"
+  # confirm everything was scheduled correctly
+  if not all(degree == 0 for degree in in_degree.values()) or len(prescheduled) != len(flatten(si.outputs for si in schedule)):
+    raise RuntimeError(f"cycle detected in graph, prescheduled {len(prescheduled)} but only scheduled {len(schedule)}")
   return schedule

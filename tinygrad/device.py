@@ -73,7 +73,7 @@ class BufferOptions:
   image: Optional[ImageDType] = None
   uncached: bool = False
   host: bool = False
-  signal: bool = False
+  nolru: bool = False
 
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferOptions]=None, initial_value:Optional[bytes]=None):
@@ -169,7 +169,7 @@ class LRUAllocator(Allocator):  # pylint: disable=abstract-method
       for opaque in opaques: super().free(opaque, sz, options)
       opaques.clear()
   def free(self, opaque:Any, size:int, options:Optional[BufferOptions]=None):
-    if getenv("LRU", 1) and (options is None or not options.signal): self.cache[(size, options)].append(opaque)
+    if getenv("LRU", 1) and (options is None or not options.nolru): self.cache[(size, options)].append(opaque)
     else: super().free(opaque, size, options)
 
 class _MallocAllocator(LRUAllocator):
