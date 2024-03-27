@@ -231,6 +231,11 @@ code_for_op_half = {BinaryOps.MAX: lambda a,b,dtype: f"__hmax({a},{b})" if dtype
                     UnaryOps.LOG2: lambda x,dtype: f"hlog2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"log2({x})",
                     UnaryOps.EXP2: lambda x,dtype: f"hexp2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"exp2({x})",}
 
+def _make_cuda_dtype(base_type, name, cnt):
+  nms, vec = "xyzwabcd"[:cnt], f"{name}{cnt}"
+  return f"struct {vec} {{ {base_type} {', '.join(nms)}; }}; __device__ {vec} make_{vec}(" + \
+          ', '.join([f"{base_type} {x}" for x in nms]) + f") {{ {vec} r={{{', '.join(nms)}}}; return r; }}"
+
 class CUDALanguage(CStyleLanguage):
   kernel_prefix = "extern \"C\" __global__ "
   smem_prefix = "__shared__ "
@@ -240,27 +245,21 @@ class CUDALanguage(CStyleLanguage):
   code_for_workitem = {"g": lambda x: f"blockIdx.{chr(120+x)}", "l": lambda x: f"threadIdx.{chr(120+x)}",
                        "i": lambda x: f"(blockIdx.{chr(120+x)}*blockDim.{chr(120+x)}+threadIdx.{chr(120+x)})"}
   code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_half}
-  name_for_dt = { dtypes.float: "float", dtypes.half: "half", dtypes.bfloat16: "bfloat16", } # TODO: why is dtypes.bfloat16.name == "__bf16"?
-  abv_for_dt = { dtypes.float: "f32", dtypes.half: "f16", dtypes.bfloat16: "bf16", }
+  # TODO: why is dtypes.bfloat16.name == "__bf16"? would be easier not override dtypes.name
+  dt_map = { dtypes.float: ("float","f32"), dtypes.half: ("half","f16"), dtypes.bfloat16: ("bfloat16","bf16"), }
   type_map = {dtypes.bfloat16: "nv_bfloat16"}
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
     prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))"]
     if any(uop.dtype == dtypes.half for uop in uops):
-      prefix += ["#include <cuda_fp16.h>", "struct half4 { half x, y, z, w; };", "struct half8 { half x, y, z, w, a, b, c, d; };",
-      "__device__ half4 make_half4(half x, half y, half z, half w) { half4 r={x, y, z, w}; return r; }",
-      "__device__ half8 make_half8(half x, half y, half z, half w, half a, half b, half c, half d) { half8 r={x, y, z, w, a, b, c, d}; return r; }"]
+      prefix += ["#include <cuda_fp16.h>"] + [_make_cuda_dtype("half", "half", x) for x in [4, 8]]
 
     if any(uop.dtype == dtypes.bfloat16 for uop in uops):
-      prefix += ["#include <cuda_bf16.h>", "struct bfloat164 { nv_bfloat16 x, y, z, w; };",
-                 "struct bfloat168 { nv_bfloat16 x, y, z, w, a, b, c, d; };",
-      "__device__ bfloat164 make_bfloat164(nv_bfloat16 x, nv_bfloat16 y, nv_bfloat16 z, nv_bfloat16 w) { bfloat164 r={x, y, z, w}; return r; }",
-      "__device__ bfloat168 make_bfloat168(nv_bfloat16 x, nv_bfloat16 y, nv_bfloat16 z, nv_bfloat16 w, nv_bfloat16 a, nv_bfloat16 b, \
-          nv_bfloat16 c, nv_bfloat16 d) { bfloat168 r={x, y, z, w, a, b, c, d}; return r; }"]
+      prefix += ["#include <cuda_bf16.h>"] + [_make_cuda_dtype("nv_bfloat16", "bfloat16", x) for x in [4, 8]]
 
     # TODO: this has to be way better to generate for arbitrary M,N,K
     for arg in set([uop.arg for uop in uops if uop.uop == UOps.WMMA]):
-      fn, ti, to, ci, co = arg[0], self.name_for_dt[arg[2]], self.name_for_dt[arg[3]], self.abv_for_dt[arg[2]], self.abv_for_dt[arg[3]]
+      fn, ti, to, ci, co = arg[0], self.dt_map[arg[2]][0], self.dt_map[arg[3]][0], self.dt_map[arg[2]][1], self.dt_map[arg[3]][1]
       prefix.append(f"""__device__ {to}4 __{fn}({ti}8 a, {ti}4 b, {to}4 c) {{ int *a_pk = (int *) (&a), *b_pk = (int *) (&b);
 asm( "mma.sync.aligned.m16n8k16.row.col.{co}.{ci}.{ci}.{co} {{ %0, %1, %2, %3 }}, {{ %4, %5, %6, %7 }}, {{ %8, %9 }}, {{ %0, %1, %2, %3 }};"
   : "+f"(c.x), "+f"(c.y), "+f"(c.z), "+f"(c.w) : "r"(a_pk[0]), "r"(a_pk[1]), "r"(a_pk[2]),  "r"(a_pk[3]), "r"(b_pk[0]), "r"(b_pk[1]) );
@@ -347,8 +346,9 @@ static __attribute__((device)) bool operator==(hip_bfloat16 a, hip_bfloat16 b) {
     if any(uop.dtype == dtypes.half for uop in uops):
       prefix.append("#define half _Float16")
       prefix += [_make_hip_dtype(*x) for x in [("_Float16", "half", 2), ("_Float16", "half", 4), ("_Float16", "half", 8), ("_Float16", "half", 16)]]
+
     prefix += [_make_hip_dtype(*x) for x in [("float", "float", 2), ("float", "float", 4), ("float", "float", 8),
-                                                             ("signed int", "int", 4), ("signed int", "int", 2)]]
+                                             ("signed int", "int", 4), ("signed int", "int", 2)]]
     for arg in wmma_args:
       if arg[3] == dtypes.float: prefix.append(f"#define __{arg[0]} __builtin_amdgcn_wmma_f32_16x16x16_f16_w32")
       else: prefix.append(f"static __attribute__((device)) half8 __{arg[0]}"+"""(half16 a, half16 b, half8 c) {
