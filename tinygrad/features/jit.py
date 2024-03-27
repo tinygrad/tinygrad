@@ -21,12 +21,12 @@ class JitItem:
 def get_jit_stats(jit_cache: List[JitItem]) -> Tuple[sint, int]:
   return functools.reduce(operator.add, [ji.prg.op_estimate for ji in jit_cache if isinstance(ji.prg, CompiledASTRunner)], 0), \
          functools.reduce(operator.add, [ji.prg.mem_estimate for ji in jit_cache if isinstance(ji.prg, CompiledASTRunner)], 0)
-def get_input_replace(jit_cache: List[JitItem], input_rawbuffers:List[Buffer]) -> Dict[Tuple[int, int], int]:
-  input_replace: Dict[Tuple[int, int], int] = {}
+def get_input_replace(jit_cache: List[JitItem], input_rawbuffers:List[Buffer], check:bool = False) -> Dict[Tuple[int, int], Tuple[int, int, int]]:
+  input_replace: Dict[Tuple[int, int], Tuple[int, int, int]] = {}
   for j,ji in enumerate(jit_cache):
     for i,a in enumerate(ji.rawbufs):
-      if a in input_rawbuffers:
-        input_replace[(j,i)] = input_rawbuffers.index(a)
+      if a is not None and (a if check else a.base) in input_rawbuffers:
+        input_replace[(j,i)] = (input_rawbuffers.index(a.base), a._offset, a.size)
   return input_replace
 def get_jc_idxs_with_updatable_launch_dims(jit_cache: List[JitItem]) -> List[int]:
   return [j for j,ji in enumerate(jit_cache) if isinstance(ji.prg, CompiledASTRunner) and ((ji.prg.global_size and not all_int(ji.prg.global_size)) or (ji.prg.local_size and not all_int(ji.prg.local_size)))]  # noqa: E501
@@ -83,7 +83,7 @@ class TinyJit(Generic[ReturnType]):
 
   def reset(self):
     self.jit_cache: List[JitItem] = []
-    self.input_replace: Dict[Tuple[int, int], int] = {}
+    self.input_replace: Dict[Tuple[int, int], Tuple[int, int, int]] = {}
     self.cnt: int = 0
     self.ret: Optional[ReturnType] = None
     self.expected_vals: Optional[Tuple[Variable, ...]] = None
@@ -112,7 +112,8 @@ class TinyJit(Generic[ReturnType]):
       assert all(x[0] == y[0] and x[1].views == y[1].views and x[2] == y[2] and x[3] == y[3]
                  for x,y in zip(self.expected_name_sts_dtype_device, expected_name_sts_dtype_device)), \
         f"mismatch of input tensors, expected {self.expected_name_sts_dtype_device} got {expected_name_sts_dtype_device}"
-      for (j,i),input_idx in self.input_replace.items(): self.jit_cache[j].rawbufs[i] = input_rawbuffers[input_idx]
+      for (j,i),(input_idx, input_offset, input_size) in self.input_replace.items():
+        self.jit_cache[j].rawbufs[i] = input_rawbuffers[input_idx].offset(input_offset, input_size)
       for ji in self.jit_cache: ji.prg(cast(List[Buffer], ji.rawbufs), var_vals, wait=DEBUG>=2, jit=True)
     elif self.cnt == 1:
       # jit capture
@@ -125,7 +126,7 @@ class TinyJit(Generic[ReturnType]):
       assert len(self.jit_cache) != 0, "didn't JIT anything!"
       # TODO: reset doesn't work if we delete this
       #del self.fxn
-      if DEBUG >= 1 and len(set(get_input_replace(self.jit_cache, input_rawbuffers).values())) != len(input_rawbuffers):
+      if DEBUG >= 1 and len(set(get_input_replace(self.jit_cache, input_rawbuffers, check=True).values())) != len(input_rawbuffers):
         print("WARNING: some input tensors not found")
       if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
 

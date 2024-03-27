@@ -35,6 +35,9 @@ class ShapeTracker:
   def contiguous(self) -> bool: return len(self.views) == 1 and self.views[0].contiguous
 
   @property
+  def consecutive(self) -> bool: return len(self.views) == 1 and self.views[0].consecutive
+
+  @property
   def shape(self) -> Tuple[sint, ...]: return self.views[-1].shape
 
   @property

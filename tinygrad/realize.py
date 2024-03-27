@@ -54,6 +54,9 @@ def run_schedule(schedule:List[ScheduleItem]):
         if out.op is LoadOps.ASSIGN and out.srcs[1].base.realized is not None:
           # if the buffer isn't realized, it might be a const or something. this is fine
           out.realized = out.srcs[1].base.realized
+        elif len(si.outputs) == 1 and si.ast[0].op == LoadOps.CONTIGUOUS:
+          assert si.inputs[0].realized is not None, f"input {si.inputs[0]} isn't realized"
+          out.realized = si.inputs[0].realized.offset(si.ast[0].arg[0], si.ast[0].arg[1])
         else:
           out.realized = Buffer(out.device, out.size, out.dtype, "PLACEHOLDER" if getattr(prg, "skip_allocation", False) else None)
         del out.srcs
@@ -126,6 +129,9 @@ def _schedule_one(out:LazyBuffer, realizes:Set[LazyBuffer], reduce_for_op: Dict[
   var_vals: Dict[Variable, int] = out.st.var_vals.copy()
   if out.op in {LoadOps.CUSTOM, LoadOps.SYNC, LoadOps.WAIT, LoadOps.COPY, LoadOps.EMPTY}:
     op, inputs = LazyOp(out.op, (), out.arg), list(out.srcs)
+  elif out.op == LoadOps.CONTIGUOUS and (out.srcs[0].base in realizes or out.srcs[0].base.realized is not None) \
+    and not out.srcs[0].base.is_unrealized_const() and out.srcs[0].st.consecutive and hasattr(Device[out.device].allocator, "offset"):
+    op, inputs = LazyOp(LoadOps.CONTIGUOUS, (), (out.srcs[0].st.views[0].offset, out.srcs[0].size)), [out.srcs[0].base]
   else:
     output_st = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape)
     op = _recursive_lazyop(out, inputs, var_vals, output_st, realizes, cache={})

@@ -188,6 +188,8 @@ class HSAAllocator(LRUAllocator):
     dest_dev.hw_queue.submit_barrier([copy_signal])
     if PROFILE: Profiler.track(copy_signal, src_dev, f"transfer: HSA:{src_dev.device_id} -> HSA:{dest_dev.device_id}", is_copy=True)
 
+  def offset(self, buffer, offset, _size): return buffer + offset
+
 class HSADevice(Compiled):
   devices: List[HSADevice] = []
   agents: Dict[int, List[hsa.hsa_agent_t]] = {}

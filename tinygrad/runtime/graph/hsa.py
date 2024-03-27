@@ -118,12 +118,12 @@ class HSAGraph(MultiDeviceJITGraph):
     hsa.hsa_signal_silent_store_relaxed(self.finish_signal, len(self.devices))
 
     # Update rawbuffers
-    for (j,i),input_idx in self.input_replace.items():
+    for (j,i),(input_idx,input_offset,input_size) in self.input_replace.items():
       if j in self.ji_kargs_structs:
-        self.ji_kargs_structs[j].__setattr__(f'f{i}', input_rawbuffers[input_idx]._buf)
+        self.ji_kargs_structs[j].__setattr__(f'f{i}', input_rawbuffers[input_idx]._buf+input_offset)
       else:
-        if i == 0: self.transfers[self.ji_to_transfer[j]][0] = input_rawbuffers[input_idx]._buf # dest
-        elif i == 1: self.transfers[self.ji_to_transfer[j]][2] = input_rawbuffers[input_idx]._buf # src
+        if i == 0: self.transfers[self.ji_to_transfer[j]][0] = input_rawbuffers[input_idx]._buf+input_offset # dest
+        elif i == 1: self.transfers[self.ji_to_transfer[j]][2] = input_rawbuffers[input_idx]._buf+input_offset # src
 
     # Update var_vals
     for j in self.jc_idxs_with_updatable_var_vals:
