@@ -12,6 +12,8 @@ HW = getenv("HW", 128)
 K = getenv("K", 3)
 PADDING = getenv("PADDING", 1)
 COMP = getenv("COMP", 0)
+ATOL = getenv("ATOL", 1e-4)
+RTOL = getenv("RTOL", 3e-2)
 
 FLOPS = BS*K*K*CIN*HW*HW*COUT*2
 def rand_input(): return Tensor.rand(BS, CIN, HW, HW, dtype=dtype_in).realize(), Tensor.rand(COUT, CIN, K, K, dtype=dtype_in).realize()
@@ -28,4 +30,4 @@ if __name__ == "__main__":
     torch_device = "cuda:0" if torch.cuda.is_available() else ("mps" if getenv("MPS", 0) else "cpu")
     ta, tb = torch.from_numpy(a.numpy()).to(torch_device), torch.from_numpy(b.numpy()).to(torch_device)
     tc = torch.nn.functional.conv2d(ta, tb, padding=PADDING)
-    np.testing.assert_allclose(c.numpy(), tc.cpu(), atol=1e-4, rtol=3e-2)
+    np.testing.assert_allclose(c.numpy(), tc.cpu(), atol=ATOL, rtol=RTOL)

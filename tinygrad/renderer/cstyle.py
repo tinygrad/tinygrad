@@ -216,12 +216,12 @@ class MetalLanguage(CStyleLanguage):
     return f"as_type<{self.render_dtype(var_dtype)}>({x[0]})" if bitcast else super().render_cast(x, var_dtype)
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
-    prefix, wmma_args = ["#include <metal_stdlib>","using namespace metal;"], [uop.arg for uop in uops if uop.uop == UOps.WMMA]
+    prefix, wmma_args = ["#include <metal_stdlib>","using namespace metal;"], set([uop.arg for uop in uops if uop.uop == UOps.WMMA])
     if any(wmma_args): prefix.append("""template<typename T, typename S, typename U> U __metal_wmma(T m, T n, U o) {
     S a,b,c; a.thread_elements()[0] = m.x; a.thread_elements()[1] = m.y; b.thread_elements()[0] = n.x; b.thread_elements()[1] = n.y;
     c.thread_elements()[0] = o.x; c.thread_elements()[1] = o.y; simdgroup_multiply_accumulate(c, a, b, c);
     return U(c.thread_elements()[0], c.thread_elements()[1]);\n}""")
-    for arg in set(wmma_args): prefix.append(f"#define __{arg[0]} __metal_wmma<{arg[2].name}2,simdgroup_{arg[3].name}8x8,{arg[3].name}2>")
+    for arg in wmma_args: prefix.append(f"#define __{arg[0]} __metal_wmma<{arg[2].name}2,simdgroup_{arg[3].name}8x8,{arg[3].name}2>")
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 MetalRenderer = functools.partial(uops_to_cstyle, MetalLanguage())
 
@@ -313,7 +313,7 @@ class HIPLanguage(CStyleLanguage):
   __attribute__((device)) __attribute__((pure)) _Float16 __ocml_log2_f16(_Float16);
   __attribute__((device)) _Float16 __ocml_sin_f16(_Float16);
   __attribute__((device)) __attribute__((const)) _Float16 __ocml_sqrt_f16(_Float16);
-    }\nextern "C" __attribute__((global))\n"""
+  }\nextern "C" __attribute__((global))\n"""
   code_for_workitem = {"g": lambda x: f"__ockl_get_group_id({x})", "l": lambda x: f"__ockl_get_local_id({x})",
                        "i": lambda x: f"(__ockl_get_group_id({x})*__ockl_get_local_size({x})+__ockl_get_local_id({x}))"}
   code_for_op = _make_hip_code_for_op()
