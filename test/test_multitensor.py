@@ -5,7 +5,7 @@ from tinygrad.device import BufferCopy
 from tinygrad.ops import LoadOps, ReduceOps
 from tinygrad.helpers import CI, prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
-from tinygrad.realize import create_schedule
+from tinygrad.engine.realize import create_schedule
 from tinygrad.features.multi import all_reduce, MultiLazyBuffer
 from random import randint
 import numpy as np

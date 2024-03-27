@@ -3,8 +3,8 @@ from tinygrad import Tensor, Device
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import ReduceOps, GlobalCounters
 from tinygrad.features.multi import MultiLazyBuffer, all_reduce
-from tinygrad.features.jit import TinyJit
-from tinygrad.realize import create_schedule, run_schedule
+from tinygrad.engine.jit import TinyJit
+from tinygrad.engine.realize import create_schedule, run_schedule
 from tinygrad.helpers import getenv, Context, RING
 from typing import List, Union
 

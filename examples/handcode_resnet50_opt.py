@@ -8,7 +8,7 @@ from tinygrad.features.search import time_linearizer, beam_search, bufs_from_lin
 from tinygrad.helpers import ansilen, DEBUG, getenv
 from tinygrad.shape.symbolic import sym_infer
 from tinygrad.dtype import dtypes
-from tinygrad.realize import create_schedule
+from tinygrad.engine.realize import create_schedule
 
 if __name__ == "__main__":
   if getenv("HALF"):

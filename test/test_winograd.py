@@ -3,7 +3,7 @@ from tinygrad import Tensor, GlobalCounters
 from tinygrad.helpers import Timing, CI, Profiling, WINO, DEBUG
 from tinygrad.ops import LoadOps
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.realize import create_schedule
+from tinygrad.engine.realize import create_schedule
 
 class TestWinograd(unittest.TestCase):
   def setUp(self):

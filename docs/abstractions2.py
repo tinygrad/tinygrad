@@ -73,7 +73,7 @@ assert out.as_buffer().cast('I')[0] == 5
 print("******** third, the LazyBuffer ***********")
 
 from tinygrad.lazy import LazyBuffer, LoadOps
-from tinygrad.realize import run_schedule, create_schedule
+from tinygrad.engine.realize import run_schedule, create_schedule
 
 # allocate some values + load in values
 a = LazyBuffer.loadop(LoadOps.EMPTY, (1,), dtypes.int32, DEVICE)
