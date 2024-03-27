@@ -1,4 +1,3 @@
-from multiprocessing import Pool
 import sys, pickle, random, unicodedata, functools, os
 from pathlib import Path
 import numpy as np
@@ -340,8 +339,6 @@ def process_iterate(tokenizer, val=False, part=0): # Convert raw text to masked 
       del instances[:batch_size]
       yield [instance_to_features(instance, tokenizer) for instance in batch]
 
-##################### Data loading #####################
-
 @functools.lru_cache(None)
 def get_val_files():
   return sorted(list((BASEDIR / "eval/").glob("*.pkl")))
@@ -375,5 +372,4 @@ if __name__ == "__main__":
         with open(BASEDIR / f"train/{str(part)}/{part}_{i}.pkl", "wb") as f:
           pickle.dump(feature_batch, f)
 
-# better logging in single process part
 # dataloader rework

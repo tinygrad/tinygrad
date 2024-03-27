@@ -1,11 +1,11 @@
-import os, random
+import os, random, pickle
+from typing import List
 import numpy as np
 from PIL import Image
 from tqdm import tqdm
-import pickle
 from tinygrad import dtypes, Tensor
 from multiprocessing import Pool
-from tinygrad.helpers import getenv, prod, Timing, Context
+from tinygrad.helpers import getenv, prod, Context
 from multiprocessing import Queue, Process, shared_memory, connection, Lock, cpu_count
 
 class MyQueue:
@@ -140,37 +140,35 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None):
     shm.close()
     shm.unlink()
 
-def load_bert_file(file_name):
-  with open(file_name, "rb") as f:
-    features = pickle.load(f)
-    return {
-        "input_ids": features["input_ids"],
-        "input_mask": features["input_mask"],
-        "segment_ids": features["segment_ids"],
-        "masked_lm_positions": features["masked_lm_positions"],
-        "masked_lm_ids": features["masked_lm_ids"],
-        "masked_lm_weights": features["masked_lm_weights"],
-        "next_sentence_labels": features["next_sentence_labels"],
-    }
+def load_bert_file(fn:str) -> List[dict]:
+  with open(fn, "rb") as f: data = pickle.load(f)
+  return data
 
-def batch_load_bert(batch_size=32, start=0, val=False) -> dict[str, Tensor]:
+def process_batch_bert(data: List[dict]) -> dict[str, Tensor]:
+  return {
+    "input_ids": Tensor(np.concatenate([s["input_ids"] for s in data], axis=0), dtype=dtypes.default_float),
+    "input_mask": Tensor(np.concatenate([s["input_mask"] for s in data], axis=0), dtype=dtypes.default_float),
+    "segment_ids": Tensor(np.concatenate([s["segment_ids"] for s in data], axis=0), dtype=dtypes.default_float),
+    "masked_lm_positions": Tensor(np.concatenate([s["masked_lm_positions"] for s in data], axis=0), dtype=dtypes.default_float),
+    "masked_lm_ids": Tensor(np.concatenate([s["masked_lm_ids"] for s in data], axis=0), dtype=dtypes.default_float),
+    "masked_lm_weights": Tensor(np.concatenate([s["masked_lm_weights"] for s in data], axis=0), dtype=dtypes.default_float),
+    "next_sentence_labels": Tensor(np.concatenate([s["next_sentence_labels"] for s in data], axis=0), dtype=dtypes.default_float),
+  }
+
+def batch_load_bert(BS:int, val=False):
   from extra.datasets.wikipedia import get_train_files, get_val_files
   files = get_val_files() if val else get_train_files()
-  with Pool() as p:
-    i = start
-    while True:
-      end_index = min(i + batch_size, len(files))
-      results = p.map(load_bert_file, files[i:end_index])
-      yield end_index, {
-        "input_ids": Tensor(np.concatenate([f["input_ids"] for f in results], axis=0)),
-        "input_mask": Tensor(np.concatenate([f["input_mask"] for f in results], axis=0)),
-        "segment_ids": Tensor(np.concatenate([f["segment_ids"] for f in results], axis=0)),
-        "masked_lm_positions": Tensor(np.concatenate([f["masked_lm_positions"] for f in results], axis=0)),
-        "masked_lm_ids": Tensor(np.concatenate([f["masked_lm_ids"] for f in results], axis=0)),
-        "masked_lm_weights": Tensor(np.concatenate([f["masked_lm_weights"] for f in results], axis=0)),
-        "next_sentence_labels": Tensor(np.concatenate([f["next_sentence_labels"] for f in results], axis=0)),
-      }
-      i = (end_index) % len(files)
+  blob, end = [], False
+  while files:
+    while len(blob) < BS:
+      blob.extend(load_bert_file(files.pop(0)))
+      if not files: end = True
+    if not end:
+      yield process_batch_bert(blob[:BS])
+      blob = blob[BS:]
+    else:
+      files = get_val_files() if val else [] # For eval: Wrap around dataset
+      end = False
 
 if __name__ == "__main__":
   from extra.datasets.imagenet import get_train_files, get_val_files
