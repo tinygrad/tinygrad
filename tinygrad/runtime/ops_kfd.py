@@ -39,22 +39,7 @@ def ioctls_from_header():
   return type("KIO", (object, ), fxns)
 kio = ioctls_from_header()
 
-MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
-def gpu_alloc(fd:int, drm_fd:int, gpu_id:int, size:int, flags:int):
-  if flags & kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR:
-    buf = addr = libc.mmap(0, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|mmap.MAP_ANONYMOUS, -1, 0)
-  else:
-    buf, addr = 0, libc.mmap(0, size, 0, mmap.MAP_PRIVATE|mmap.MAP_ANONYMOUS|MAP_NORESERVE, -1, 0)
-  assert addr != 0xffffffffffffffff
-  mem = kio.alloc_memory_of_gpu(fd, va_addr=addr, size=size, gpu_id=gpu_id, flags=flags, mmap_offset=buf)
-  if not (flags & kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR):
-    buf = libc.mmap(mem.va_addr, mem.size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|MAP_FIXED, drm_fd, mem.mmap_offset)
-    assert buf != 0xffffffffffffffff
-    assert addr == buf == mem.va_addr
-  arr = (ctypes.c_int32 * 1)(gpu_id)
-  stm = kio.map_memory_to_gpu(fd, handle=mem.handle, device_ids_array_ptr=ctypes.addressof(arr), n_devices=1)
-  assert stm.n_success == 1
-  return mem
+AQL_PACKET_SIZE = ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t)
 
 DISPATCH_KERNEL_SETUP = 3 << hsa.HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS
 DISPATCH_KERNEL_HEADER  = 1 << hsa.HSA_PACKET_HEADER_BARRIER
@@ -64,64 +49,54 @@ DISPATCH_KERNEL_HEADER |= hsa.HSA_PACKET_TYPE_KERNEL_DISPATCH << hsa.HSA_PACKET_
 
 class KFDProgram:
   def __init__(self, device:KFDDevice, name:str, lib:bytes):
-    print("here")
     # TODO; this API needs the type signature of the function and global_size/local_size
     self.device, self.name, self.lib = device, name, lib
-    self.lib_gpu = gpu_alloc(KFDDevice.kfd, self.device.drm_fd, self.device.gpu_id, round_up(len(lib), 0x1000),
-                             kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM |
-                             kfd.KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE |
-                             kfd.KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC)
+    self.lib_gpu = self.device._gpu_alloc(round_up(len(lib), 0x1000), kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=True)
     lib_mv = to_mv(self.lib_gpu.va_addr, len(lib))
     lib_mv[:] = lib
-    assert lib_mv.cast("I")[0x550//4] == 0x10c0
-    lib_mv.cast("I")[0x550//4] -= 0x1000
-    self.handle = self.lib_gpu.va_addr + 0x540
+
+    # fixups
+    #with open("/tmp/lib", "wb") as f: f.write(lib)
+    #from hexdump import hexdump
+    #hexdump(lib)
+
+    offset = lib_mv.cast("I")[0xa0//4] - 0x40
+    lib_mv.cast("I")[(offset+0x10)//4] -= 0x1000
+    self.handle = self.lib_gpu.va_addr + offset
+    #hexdump(to_mv(self.handle, 0x40))
 
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
-    print("call")
-    self.args_struct_t = init_c_struct_t(tuple([(f'f{i}', ctypes.c_void_p) for i in range(len(args))] +
+    if not hasattr(self, "args_struct_t"):
+      self.args_struct_t = init_c_struct_t(tuple([(f'f{i}', ctypes.c_void_p) for i in range(len(args))] +
                                                 [(f'v{i}', ctypes.c_int) for i in range(len(vals))]))
     args_st = self.args_struct_t.from_address(self.device.kernargs.va_addr)
     for i in range(len(args)): args_st.__setattr__(f'f{i}', args[i].va_addr)
     for i in range(len(vals)): args_st.__setattr__(f'v{i}', vals[i])
-    """
-    if not hasattr(self, "args_struct_t"):
-      self.args_struct_t = init_c_struct_t(tuple([(f'f{i}', ctypes.c_void_p) for i in range(len(args))] +
-                                                 [(f'v{i}', ctypes.c_int) for i in range(len(vals))]))
-      if ctypes.sizeof(self.args_struct_t) != self.kernargs_segment_size:
-        raise RuntimeError(f"HSAProgram.__call__: incorrect args struct size {ctypes.sizeof(self.args_struct_t)} != {self.kernargs_segment_size}")
-    """
-    print("there")
-    packet = hsa.hsa_kernel_dispatch_packet_t.from_address(self.device.aql_ring.va_addr)
-    print("there 2")
+
+    packet = hsa.hsa_kernel_dispatch_packet_t.from_address(self.device.aql_ring.va_addr + self.device.doorbell_value*AQL_PACKET_SIZE)
     packet.workgroup_size_x, packet.workgroup_size_y, packet.workgroup_size_z = local_size
     packet.reserved0 = 0
     packet.grid_size_x, packet.grid_size_y, packet.grid_size_z = tuple(g*l for g,l in zip(global_size, local_size))
-
-    #from hexdump import hexdump
-    #hexdump(to_mv(self.lib_gpu.va_addr + 0x540, 0x1000))
-
     packet.kernel_object = self.handle
     packet.kernarg_address = self.device.kernargs.va_addr
     packet.private_segment_size = 0
     packet.group_segment_size = 0
-
     packet.reserved2 = 0
     packet.completion_signal = hsa.hsa_signal_t(ctypes.addressof(self.device.completion_signal))
     packet.setup = DISPATCH_KERNEL_SETUP
     packet.header = DISPATCH_KERNEL_HEADER
 
     # one pending packet + ring doorbell
-    self.device.mgart[0] = 1
-    self.device.doorbell[0] = 0
-
-    #self.device._submit_packet()
+    #print("start", self.device.mgart[0], self.device.mgart[1])
+    self.device.mgart[0] = self.device.doorbell_value+1
+    #self.device.mgart[1] = 0
+    self.device.doorbell[0] = self.device.doorbell_value
+    self.device.doorbell_value += 1
 
     evt_arr = (kfd.struct_kfd_event_data * 1)()
     evt_arr[0].event_id = self.device.completion_signal.event_id
     kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=1000)
-
-    print(self.device.mgart[0], self.device.mgart[1])
+    #print("end  ", self.device.mgart[0], self.device.mgart[1])
 
 class KFDAllocator(LRUAllocator):
   def __init__(self, device:KFDDevice):
@@ -129,9 +104,7 @@ class KFDAllocator(LRUAllocator):
     super().__init__()
 
   def _alloc(self, size:int):
-    return gpu_alloc(KFDDevice.kfd, self.device.drm_fd, self.device.gpu_id, size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM |
-                     kfd.KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE |
-                     kfd.KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC)
+    return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=True)
 
   # obviously slow
   def copyin(self, dest, src: memoryview):
@@ -139,8 +112,29 @@ class KFDAllocator(LRUAllocator):
   def copyout(self, dest:memoryview, src):
     ctypes.memmove(from_mv(dest), src.va_addr, src.size)
 
+MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
 class KFDDevice(Compiled):
   kfd:int = -1
+
+  def _gpu_alloc(self, size:int, flags:int, uncached=False, public=False):
+    flags |= kfd.KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE
+    if uncached: flags |= kfd.KFD_IOC_ALLOC_MEM_FLAGS_COHERENT | kfd.KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED
+    if public: flags |= kfd.KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC
+    if flags & kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR:
+      buf = addr = libc.mmap(0, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|mmap.MAP_ANONYMOUS, -1, 0)
+    else:
+      buf, addr = 0, libc.mmap(0, size, 0, mmap.MAP_PRIVATE|mmap.MAP_ANONYMOUS|MAP_NORESERVE, -1, 0)
+    assert addr != 0xffffffffffffffff
+    mem = kio.alloc_memory_of_gpu(self.kfd, va_addr=addr, size=size, gpu_id=self.gpu_id, flags=flags, mmap_offset=buf)
+    if not (flags & kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR):
+      buf = libc.mmap(mem.va_addr, mem.size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|MAP_FIXED, self.drm_fd, mem.mmap_offset)
+      assert buf != 0xffffffffffffffff
+      assert addr == buf == mem.va_addr
+    arr = (ctypes.c_int32 * 1)(self.gpu_id)
+    stm = kio.map_memory_to_gpu(self.kfd, handle=mem.handle, device_ids_array_ptr=ctypes.addressof(arr), n_devices=1)
+    assert stm.n_success == 1
+    return mem
+
   def __init__(self, device:str=""):
     if KFDDevice.kfd == -1: KFDDevice.kfd = os.open("/dev/kfd", os.O_RDWR)
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
@@ -150,29 +144,15 @@ class KFDDevice(Compiled):
     self.arch = "gfx1100"
     kio.acquire_vm(KFDDevice.kfd, drm_fd=self.drm_fd, gpu_id=self.gpu_id)
 
-    self.event_page = gpu_alloc(KFDDevice.kfd, self.drm_fd, self.gpu_id, 0x8000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT |
-                                kfd.KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_COHERENT | kfd.KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED |
-                                kfd.KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE)
+    self.event_page = self._gpu_alloc(0x8000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
     self.sync_event = kio.create_event(KFDDevice.kfd, event_page_offset=self.event_page.handle, auto_reset=1)
-    self.eop_buffer = gpu_alloc(KFDDevice.kfd, self.drm_fd, self.gpu_id, 0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM |
-                              kfd.KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE |
-                              kfd.KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE)
-    self.aql_ring = gpu_alloc(KFDDevice.kfd, self.drm_fd, self.gpu_id, 0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR |
-                              kfd.KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_COHERENT | kfd.KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED |
-                              kfd.KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE)
-    self.signals_page = gpu_alloc(KFDDevice.kfd, self.drm_fd, self.gpu_id, 0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR |
-                                  kfd.KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_COHERENT | kfd.KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED |
-                                  kfd.KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE)
-    self.gart = gpu_alloc(KFDDevice.kfd, self.drm_fd, self.gpu_id, 0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT | kfd.KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE |
-                              kfd.KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_COHERENT | kfd.KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED |
-                              kfd.KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE)
+    self.eop_buffer = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
+    self.aql_ring = self._gpu_alloc(0x10000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
+    self.signals_page = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
+    self.gart = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
     self.mgart = to_mv(self.gart.va_addr, 0x1000).cast("Q")
-    self.kernargs = gpu_alloc(KFDDevice.kfd, self.drm_fd, self.gpu_id, 0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM |
-                              kfd.KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE |
-                              kfd.KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE)
-    self.ctx_save_restore_address = gpu_alloc(KFDDevice.kfd, self.drm_fd, self.gpu_id, 0x2C02000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM |
-                                      kfd.KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE |
-                                      kfd.KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE)
+    self.kernargs = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
+    self.ctx_save_restore_address = self._gpu_alloc(0x2C02000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
 
     self.completion_signal = hsa.amd_signal_t.from_address(self.signals_page.va_addr)
     self.completion_signal.kind = hsa.AMD_SIGNAL_KIND_USER
@@ -187,4 +167,5 @@ class KFDDevice(Compiled):
       write_pointer_address=self.gart.va_addr+0, read_pointer_address=self.gart.va_addr+0x8)
     self.doorbell = to_mv(libc.mmap(0, 8192, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED,
                                     KFDDevice.kfd, self.aql_queue.doorbell_offset), 8192).cast("I")
+    self.doorbell_value = 0
     super().__init__(device, KFDAllocator(self), KFDCompiler(self.arch), functools.partial(KFDProgram, self))
