@@ -26,8 +26,6 @@ def train_resnet():
   for x in GPUS: Device[x]
 
   # ** model definition and initializers **
-  FP16 = config["FP16"] = getenv("FP16")
-  if FP16: dtypes.default_float = dtypes.float16
   num_classes = 1000
   resnet.Conv2d = Conv2dHeNormal
   resnet.Linear = Linear
@@ -59,6 +57,7 @@ def train_resnet():
   steps_in_train_epoch  = config["steps_in_train_epoch"]  = (len(get_train_files()) // BS)
   steps_in_val_epoch    = config["steps_in_val_epoch"]    = (len(get_val_files()) // EVAL_BS)
 
+  config["DEFAULT_FLOAT"] = dtypes.default_float.name
   config["BEAM"]    = BEAM.value
   config["WINO"]    = WINO.value
   config["SYNCBN"]  = getenv("SYNCBN")

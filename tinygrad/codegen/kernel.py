@@ -495,7 +495,6 @@ class Kernel:
     elif opt.op == OptOps.PADTO:
       check(not self.vars, "does not work with symbolic shape")
       check(axis < self.first_reduce, "cannot pad a reduce axis")
-      check(False, "bugged")
       padded = False
       for i,st in enumerate(self.sts):
         check(self.sts[i].shape[axis] > amt//2, "pad adds more than double the work")

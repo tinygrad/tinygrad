@@ -1,6 +1,6 @@
-from typing import List, Set
+from typing import List
 
-from tinygrad import Tensor, dtypes
+from tinygrad import Tensor
 from tinygrad.nn.optim import Optimizer
 
 # https://github.com/mlcommons/training/blob/master/image_classification/tensorflow2/lars_optimizer.py
@@ -19,13 +19,13 @@ class LARS(Optimizer):
       w = t.detach()
 
       if t not in self.skip_list:
-        g_norm = (g * g).float().sum().sqrt()
-        w_norm = (w * w).float().sum().sqrt()
+        g_norm = (g * g).sum().sqrt()
+        w_norm = (w * w).sum().sqrt()
         trust_ratio = ((w_norm > 0) * (g_norm > 0)).where(
             self.eta * w_norm / (g_norm + self.weight_decay * w_norm + self.eps),
           1.0)
 
-        scaled_lr = (self.lr * trust_ratio).cast(dtypes.default_float)
+        scaled_lr = (self.lr * trust_ratio)
         g = g + self.weight_decay * t.detach()
       else:
         scaled_lr = self.lr

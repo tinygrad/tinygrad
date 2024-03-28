@@ -33,8 +33,7 @@ class UnsyncedBatchNorm:
     if affine: self.weight, self.bias = Tensor.ones(sz), Tensor.zeros(sz)
     else: self.weight, self.bias = None, None
 
-    self.running_mean = Tensor.zeros(num_devices, sz, requires_grad=False, dtype=dtypes.float32)
-    self.running_var = Tensor.ones(num_devices, sz, requires_grad=False, dtype=dtypes.float32)
+    self.running_mean, self.running_var = Tensor.zeros(num_devices, sz, requires_grad=False), Tensor.ones(num_devices, sz, requires_grad=False)
     self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
 
   def __call__(self, x:Tensor):
@@ -60,8 +59,9 @@ class UnsyncedBatchNorm:
 
       # NOTE: wow, this is done all throughout training in most PyTorch models
       if self.track_running_stats:
-        self.running_mean.assign((1-self.momentum) * self.running_mean + self.momentum * batch_mean.detach())
-        self.running_var.assign((1-self.momentum) * self.running_var + self.momentum * prod(y.shape[1:])/(prod(y.shape[1:])-y.shape[2]) * batch_var.detach())
+        self.running_mean.assign((1-self.momentum) * self.running_mean + self.momentum * batch_mean.detach().cast(self.running_mean.dtype))
+        batch_var_adjust = prod(y.shape[1:])/(prod(y.shape[1:])-y.shape[2])
+        self.running_var.assign((1-self.momentum) * self.running_var + self.momentum * batch_var_adjust * batch_var.detach().cast(self.running_var.dtype))
         self.num_batches_tracked += 1
     else:
       batch_mean = self.running_mean
