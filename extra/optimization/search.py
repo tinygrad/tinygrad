@@ -25,7 +25,7 @@ if __name__ == '__main__':
 
   for ast_str in ast_strs:
     print(f"optimizing ast={ast_str}")
-    lin = ast_str_to_lin(ast_str, opts=device.compiler.linearizer_opts)
+    lin = ast_str_to_lin(ast_str, opts=device.compiler.compiler_opts)
     rawbufs = bufs_from_lin(lin)
     lin = beam_search(lin, rawbufs, getenv("BEAM", 8), bool(getenv("BEAM_ESTIMATE", 1)))
 

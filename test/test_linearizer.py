@@ -97,7 +97,7 @@ class TestLinearizer(unittest.TestCase):
     assert num_ops <= 1, "more alu uops than needed"
 
   def test_reduce_upcast(self):
-    if not Device[Device.DEFAULT].compiler.linearizer_opts.supports_float4:
+    if not Device[Device.DEFAULT].compiler.compiler_opts.supports_float4:
       self.skipTest("device does not support upcast")
     x, w = Tensor.randn((1,1,3)).realize(), Tensor.randn((1,1,2)).realize()
     r = Tensor.conv2d(x,w,padding=1).relu()
@@ -113,7 +113,7 @@ class TestLinearizer(unittest.TestCase):
     assert stores[0].vin[-1].dtype == accs[0].dtype == dtypes.float.vec(4)
 
   def test_upcast_with_locals(self):
-    if not (opts:=Device[Device.DEFAULT].compiler.linearizer_opts).has_local or not opts.has_shared or not opts.supports_float4:
+    if not (opts:=Device[Device.DEFAULT].compiler.compiler_opts).has_local or not opts.has_shared or not opts.supports_float4:
       self.skipTest("device does not support upcasted reduce with locals")
 
     x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
@@ -183,9 +183,9 @@ class TestLinearizer(unittest.TestCase):
       helper_arg_acc_dtype(d.conv2d(w, acc_dtype=acc_dtype), expected_dtype)
 
   def test_tensor_cores(self):
-    if not Device[Device.DEFAULT].compiler.linearizer_opts.has_tensor_cores:
+    if not Device[Device.DEFAULT].compiler.compiler_opts.has_tensor_cores:
       self.skipTest("device doesn't have tensor cores")
-    for tc in tensor_cores[Device[Device.DEFAULT].compiler.linearizer_opts.device]:
+    for tc in tensor_cores[Device[Device.DEFAULT].compiler.compiler_opts.device]:
       if getenv("EMULATE_CUDA") and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
       a, b = Tensor.rand(tc.dims[1], tc.dims[2], dtype=tc.dtype_in), Tensor.rand(tc.dims[2], tc.dims[0], dtype=tc.dtype_in)
       np_a, np_b = a.numpy(), b.numpy()
@@ -281,7 +281,7 @@ def helper_realized_ast(r:Tensor):
   output_buffer = Buffer((out:=s[-1].outputs[0]).device, prod((s if isinstance(s, int) else s.max for s in out.shape)), out.dtype).allocate()
   return s[-1].ast[0], [output_buffer] + [l.realized for l in s[-1].inputs]
 
-@unittest.skipUnless(Device[Device.DEFAULT].compiler.linearizer_opts.supports_float4, "need backends that support float4")
+@unittest.skipUnless(Device[Device.DEFAULT].compiler.compiler_opts.supports_float4, "need backends that support float4")
 class TestFloat4(unittest.TestCase):
   @staticmethod
   def count_float4(k):
@@ -490,7 +490,7 @@ class TestHandCodedOpts(unittest.TestCase):
     assert prod(k.full_shape[k.shape_len-k.upcasted:k.shape_len]) <= 49
 
   def test_matvec(self):
-    if not Device[Device.DEFAULT].compiler.linearizer_opts.has_local:
+    if not Device[Device.DEFAULT].compiler.compiler_opts.has_local:
       self.skipTest("Only devices with locals")
     N = 128
     a = Tensor.rand(1, N).realize()
@@ -539,9 +539,9 @@ def helper_linearizer_opt(r:Tensor, opts=[], apply_tc=False, atol=1e-4, rtol=1e-
   for i, x in enumerate(opts): # Check custom transformations if any.
     check_opt(x, lambda: Linearizer(realized_ast), Device[Device.DEFAULT].to_program, color_sizes[i] if i < len(color_sizes) else None)
 
-class TestLinearizerOpts(unittest.TestCase):
+class TestKernelOpts(unittest.TestCase):
   def test_local_and_grouped_reduce(self):
-    if not Device[Device.DEFAULT].compiler.linearizer_opts.has_local or not Device[Device.DEFAULT].compiler.linearizer_opts.has_shared:
+    if not Device[Device.DEFAULT].compiler.compiler_opts.has_local or not Device[Device.DEFAULT].compiler.compiler_opts.has_shared:
       self.skipTest("Only Compiled uses linearizer with locals and shared")
 
     N = 128
@@ -587,7 +587,7 @@ class TestLinearizerOpts(unittest.TestCase):
     ])
 
   def test_matmul(self):
-    if not Device[Device.DEFAULT].compiler.linearizer_opts.has_local or not Device[Device.DEFAULT].compiler.linearizer_opts.has_shared:
+    if not Device[Device.DEFAULT].compiler.compiler_opts.has_local or not Device[Device.DEFAULT].compiler.compiler_opts.has_shared:
       self.skipTest("Only Compiled uses linearizer with locals and shared")
 
     N = 128
@@ -617,7 +617,7 @@ class TestLinearizerOpts(unittest.TestCase):
     ])
 
   def test_double_reduce(self):
-    if not Device[Device.DEFAULT].compiler.linearizer_opts.has_local or not Device[Device.DEFAULT].compiler.linearizer_opts.has_shared:
+    if not Device[Device.DEFAULT].compiler.compiler_opts.has_local or not Device[Device.DEFAULT].compiler.compiler_opts.has_shared:
       self.skipTest("Only Compiled uses linearizer with locals and shared")
 
     N = 128
@@ -644,7 +644,7 @@ class TestLinearizerOpts(unittest.TestCase):
     ])
 
   def test_invalid_tensor_core_extra_opts(self):
-    if not Device[Device.DEFAULT].compiler.linearizer_opts.has_tensor_cores:
+    if not Device[Device.DEFAULT].compiler.compiler_opts.has_tensor_cores:
       self.skipTest("device doesn't have tensor cores")
     if Device.DEFAULT not in tensor_cores:
       self.skipTest("No tensor cores for device")
@@ -665,25 +665,25 @@ class TestLinearizerOpts(unittest.TestCase):
         assert k.apply_tensor_cores(use_tensor_cores=1, extra_opts=x), "no valid tensor core" # for METAL in runners
 
   def test_buf_index_not_found_tensor_core(self):
-    if not Device[Device.DEFAULT].compiler.linearizer_opts.has_tensor_cores:
+    if not Device[Device.DEFAULT].compiler.compiler_opts.has_tensor_cores:
       self.skipTest("device doesn't have tensor cores")
     if Device.DEFAULT not in tensor_cores:
       self.skipTest("No tensor cores for device")
 
     ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BinaryOps.CMPEQ, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1243, 256), strides=(0, 1), offset=0, mask=None, contiguous=False),)))), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1243, 256), strides=(1, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=(dtypes.float, False)), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=3, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1243, 256), strides=(1, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=(0,)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 256), strides=(0, 1), offset=0, mask=None, contiguous=True),))))  # noqa: E501
-    k = Linearizer(ast, opts=Device[Device.DEFAULT].compiler.linearizer_opts)
+    k = Linearizer(ast, opts=Device[Device.DEFAULT].compiler.compiler_opts)
     with self.assertRaises(KernelOptError):
       k.apply_opt(Opt(OptOps.TC, 0, 1))
 
   def test_tensor_core_opts(self):
-    if not Device[Device.DEFAULT].compiler.linearizer_opts.has_tensor_cores:
+    if not Device[Device.DEFAULT].compiler.compiler_opts.has_tensor_cores:
       self.skipTest("device doesn't have tensor cores")
     if Device.DEFAULT not in tensor_cores:
       self.skipTest("No tensor cores for device")
 
     N = 128
     Tensor.manual_seed(1552)
-    for tc in tensor_cores[Device[Device.DEFAULT].compiler.linearizer_opts.device]:
+    for tc in tensor_cores[Device[Device.DEFAULT].compiler.compiler_opts.device]:
       a, b = Tensor.rand(N, N, dtype=tc.dtype_in), Tensor.rand(N, N, dtype=tc.dtype_in)
       r = a.matmul(b, acc_dtype=tc.dtype_out)
       (atol, rtol) = ((0.25, 0.01) if tc.dtype_out == dtypes.half else (3e-2, 1e-3)) if tc.dtype_in == dtypes.half else (1e-4, 1e-4)
@@ -749,7 +749,7 @@ class TestLinearizerOpts(unittest.TestCase):
     ])
 
   def test_color_shapes_with_local(self):
-    if not Device[Device.DEFAULT].compiler.linearizer_opts.has_local or not Device[Device.DEFAULT].compiler.linearizer_opts.has_shared:
+    if not Device[Device.DEFAULT].compiler.compiler_opts.has_local or not Device[Device.DEFAULT].compiler.compiler_opts.has_shared:
       self.skipTest("Only Compiled uses linearizer with locals and shared")
 
     N = 32
@@ -819,7 +819,7 @@ class TestLinearizerHelper(unittest.TestCase):
     assert expand_idxs(idxs) == (uidx0, NumNode(0), uidx1)
 
 class TestLinearizerUOptimize(unittest.TestCase):
-  @unittest.skipUnless(Device[Device.DEFAULT].compiler.linearizer_opts.supports_float4, "device doesn't support float4")
+  @unittest.skipUnless(Device[Device.DEFAULT].compiler.compiler_opts.supports_float4, "device doesn't support float4")
   def test_grouped_store_phis(self):
     x, y = Tensor.randn(64,64), Tensor.randn(64,64)
     out = x.matmul(y)
@@ -833,7 +833,7 @@ class TestLinearizerUOptimize(unittest.TestCase):
     for val in store_vals:
       assert val.dtype == dtypes.float.vec(4) and val.uop != UOps.CAST
 
-  @unittest.skipUnless(Device[Device.DEFAULT].compiler.linearizer_opts.supports_float4, "device doesn't support float4")
+  @unittest.skipUnless(Device[Device.DEFAULT].compiler.compiler_opts.supports_float4, "device doesn't support float4")
   def test_grouped_store_values(self):
     x = Tensor.randn((4,3,6,6)).realize()
     out = x.flip((0,1)).contiguous()
@@ -846,8 +846,8 @@ class TestLinearizerUOptimize(unittest.TestCase):
     assert store_val.dtype == dtypes.float.vec(4) and store_val.uop != UOps.CAST
 
   def test_grouped_store_locals_and_globals(self):
-    if not Device[Device.DEFAULT].compiler.linearizer_opts.has_local or not Device[Device.DEFAULT].compiler.linearizer_opts.has_shared or \
-       not Device[Device.DEFAULT].compiler.linearizer_opts.supports_float4:
+    if not Device[Device.DEFAULT].compiler.compiler_opts.has_local or not Device[Device.DEFAULT].compiler.compiler_opts.has_shared or \
+       not Device[Device.DEFAULT].compiler.compiler_opts.supports_float4:
       self.skipTest("Only Compiled uses linearizer with locals, shared, and float4")
 
     x, y = Tensor.rand(128, 128), Tensor.rand(128, 128)
@@ -871,8 +871,8 @@ class TestLinearizerUOptimize(unittest.TestCase):
     assert len([u for u in k.uops if u.uop is UOps.IF and u.vin[-1] == barrier]) == 1
 
   def test_grouped_store_local_only(self):
-    if not Device[Device.DEFAULT].compiler.linearizer_opts.has_local or not Device[Device.DEFAULT].compiler.linearizer_opts.has_shared or \
-       not Device[Device.DEFAULT].compiler.linearizer_opts.supports_float4:
+    if not Device[Device.DEFAULT].compiler.compiler_opts.has_local or not Device[Device.DEFAULT].compiler.compiler_opts.has_shared or \
+       not Device[Device.DEFAULT].compiler.compiler_opts.supports_float4:
       self.skipTest("Only Compiled uses linearizer with locals, shared, and float4")
 
     x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
@@ -891,7 +891,7 @@ class TestLinearizerUOptimize(unittest.TestCase):
     assert stores[1].vin[-1].dtype == dtypes.float
 
   def test_skip_unmatching_upcasts(self):
-    if not Device[Device.DEFAULT].compiler.linearizer_opts.has_local or not Device[Device.DEFAULT].compiler.linearizer_opts.supports_float4:
+    if not Device[Device.DEFAULT].compiler.compiler_opts.has_local or not Device[Device.DEFAULT].compiler.compiler_opts.supports_float4:
       self.skipTest("Needs locals and float4")
     ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(240, 40, 1, 1), strides=(1, 240, 0, 0), offset=0, mask=None, contiguous=False),)))),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(240, 40, 1, 1), strides=(40, 1, 0, 0), offset=0, mask=None, contiguous=True),)))) # noqa: E501
     opts = [
@@ -907,7 +907,7 @@ class TestLinearizerUOptimize(unittest.TestCase):
     assert out.vin[-1].uop is UOps.CAST and out.vin[-1].dtype == dtypes.float.vec(4)
 
   def test_skip_unmatching_upcasts_with_gep(self):
-    if not Device[Device.DEFAULT].compiler.linearizer_opts.has_local or not Device[Device.DEFAULT].compiler.linearizer_opts.supports_float4:
+    if not Device[Device.DEFAULT].compiler.compiler_opts.has_local or not Device[Device.DEFAULT].compiler.compiler_opts.supports_float4:
       self.skipTest("Needs locals and float4")
     ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(8, 32, 1, 1), strides=(1, 8, 0, 0), offset=0, mask=None, contiguous=False),)))),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(8, 32, 1, 1), strides=(32, 1, 0, 0), offset=0, mask=None, contiguous=True),)))) # noqa: E501
     opts = [Opt(op=OptOps.LOCAL, axis=1, amt=4), Opt(op=OptOps.UPCAST, axis=2, amt=2), Opt(op=OptOps.LOCAL, axis=1, amt=8),
