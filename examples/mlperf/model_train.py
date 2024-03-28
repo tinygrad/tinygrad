@@ -110,7 +110,7 @@ def train_resnet():
     loss = out.cast(dtypes.float32).sparse_categorical_crossentropy(Y, label_smoothing=0.1)
     top_1 = (out.argmax(-1) == Y).sum()
     (loss * loss_scaler).backward()
-    for t in [*optimizer_group.params, *scheduler_group.params]: t.grad = t.grad.contiguous() / loss_scaler
+    for t in optimizer_group.params: t.grad = t.grad.contiguous() / loss_scaler
     optimizer_group.step()
     scheduler_group.step()
     return loss.realize(), top_1.realize()
