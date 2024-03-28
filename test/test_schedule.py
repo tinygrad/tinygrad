@@ -3,6 +3,9 @@
 # NOTE: this has overlap with external_test_opt.py
 
 import unittest
+from test.helpers import assert_jit_cache_len
+from tinygrad.engine.jit import TinyJit
+import torch
 import numpy as np
 from typing import List, Optional
 from tinygrad.device import Device
@@ -499,6 +502,34 @@ class TestMultiOutputSchedule(unittest.TestCase):
     out0, out1 = a+b, a*b
     out2, out3 = a.reshape((2,2))+b.reshape((2,2)), a.reshape((2,2))*b.reshape((2,2))
     self._test([out0, out1, out2, out3], [], 2)
+
+  def test_multiple_steps_fusion(self):
+    init_x = Tensor.randn((1, 4)).numpy()
+    init_W = Tensor.randn((4, 4)).numpy()
+
+    class Model:
+      def __init__(self, tensor):
+        self.x = tensor(init_x, requires_grad=True)
+        self.W = tensor(init_W, requires_grad=True)
+      def forward(self): return (self.x * self.W).sum()
+
+    tiny_model = Model(Tensor)
+    tiny_adam = nn.optim.Adam([tiny_model.x, tiny_model.W], lr=0.001)
+    torch_model = Model(torch.tensor)
+    torch_adam = torch.optim.Adam([torch_model.x, torch_model.W], lr=0.001)
+
+    def train_step(model, optimizer):
+      out = model.forward()
+      optimizer.zero_grad()
+      out.backward()
+      optimizer.step()
+    jitted_step = TinyJit(train_step)
+
+    for _ in range(4):
+      jitted_step(tiny_model, tiny_adam)
+      train_step(torch_model, torch_adam)
+    assert_jit_cache_len(jitted_step, 7)
+    np.testing.assert_allclose(tiny_model.x.detach().numpy(), torch_model.x.detach().numpy(), atol=1e-4, rtol=1e-4)
 
   @unittest.skip("Doesn't yet fuse multilevel")
   def test_multilevel_nodes(self):
