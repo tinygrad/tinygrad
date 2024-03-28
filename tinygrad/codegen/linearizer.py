@@ -8,7 +8,7 @@ from tinygrad.helpers import colored, DEBUG, prod, getenv, to_function_name
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ConstBuffer, MemBuffer, BufferOps, get_lazyop_info
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, create_lt_node
-from tinygrad.codegen.kernel import LocalBuffer, Kernel
+from tinygrad.codegen.kernel import LocalBuffer, Kernel, TensorCore
 from tinygrad.features.image import to_image_idx
 
 from tinygrad.codegen.uops import UOps, UOp, UOpGraph
@@ -284,10 +284,10 @@ class Linearizer(Kernel):
           return replace_idxs
 
       # compute local aliases
-      locals_to_store = []
+      locals_to_store:List[Tuple[int,List[Node],List[UOp]]] = []
       for i in self.local_alias:
         localbuf_idx = self.bufs.index(self.local_alias[i])
-        buf_idxs = [idx*0 if s == 0 else idx for idx,s in zip(global_idxs+local_idxs+reduce_idxs+full_upcast_idxs,self.sts[i].real_strides())]
+        buf_idxs = [NumNode(0) if s == 0 else idx for idx,s in zip(global_idxs+local_idxs+reduce_idxs+full_upcast_idxs,self.sts[i].real_strides())]
         if (tc:=self.tensor_core):
           min_alias_idx = min(self.local_alias.keys())
           replace_input_idxs = calc_tc_idxs(tc.thread_local_sizes[i-min_alias_idx], tc.thread_local_aliases[i-min_alias_idx])
@@ -309,13 +309,13 @@ class Linearizer(Kernel):
         if DEBUG >= 3: print(f"store alias: sts={self.sts[0]} idxs={global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs}")
 
         wmma_sz = [prod(l) for l in tc.thread_local_sizes]
-        def upcast_strides(buf:int):
+        def upcast_strides(tc:TensorCore, buf:int):
           strides, next = [], 1
           for (sz, stride, reduce) in self.upcasted_axis(buf)[tc.num_upcasts():]:
             strides.append((0 if stride == 0 else next, sz))
             next *= 1 if stride == 0 else sz
           return strides
-        upcasts, dev = [upcast_strides(x) for x in [locals_to_store[0][0], locals_to_store[1][0], 0]], self.opts.device
+        upcasts, dev = [upcast_strides(tc, x) for x in [locals_to_store[0][0], locals_to_store[1][0], 0]], self.opts.device
         for iter in [x[::-1] for x in itertools.product(*[x for x in [range(sz) for _,sz in upcasts[0]][::-1]])]:
           offs = [x*y for (x,y) in zip([sum([prod(x) for x in zip(iter, [stride for stride,_ in y])]) for y in upcasts], wmma_sz)]
           ops = (self.uops.add(UOps.CAST, tc.dtype_in.vec(wmma_sz[0]), tuple(locals_to_store[0][2][offs[0]:offs[0]+wmma_sz[0]])),

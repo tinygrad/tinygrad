@@ -2,7 +2,6 @@ from __future__ import annotations
 import math, itertools
 from typing import NamedTuple, Optional, List, Tuple, cast, Dict, Union
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps
-from tinygrad.device import Device
 from tinygrad.dtype import dtypes, ImageDType, DType
 from tinygrad.helpers import colored, ansilen, dedup, flatten, getenv, prod, DEBUG, round_up, all_int, get_contraction
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -76,6 +75,7 @@ class LinearizerOptions(NamedTuple):
 
 class Kernel:
   def __init__(self, *ast:LazyOp, opts:Optional[LinearizerOptions]=None):
+    from tinygrad.device import Device
     self.opts = opts if opts is not None else (device.compiler.linearizer_opts if (device:=Device[Device.DEFAULT]).compiler is not None else
                                                LinearizerOptions(Device.DEFAULT))
     assert all(op.op is BufferOps.STORE for op in ast), f"kernels must have stores as the output, got {ast}"
@@ -398,12 +398,12 @@ class Kernel:
           for opt in extra_opts: self.apply_opt(opt)
         else:
           # hand-coded TC opts
-          def late_upcast_tc(tc_dim: int):
+          def late_upcast_tc(tc_opts:TensorCoreOptions, tc_dim:int):
             if tc_opts.axes_exist[tc_dim]:
               ax_div = [upc for upc in [5,4,3,2,1] if self.full_shape[tc_opts.axes[tc_dim]]%upc == 0][0]
               if ax_div != 1: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[tc_dim], ax_div))
-          late_upcast_tc(1) # attempt to upcast M
-          late_upcast_tc(0) # attempt to upcast N
+          late_upcast_tc(tc_opts, 1) # attempt to upcast M
+          late_upcast_tc(tc_opts, 0) # attempt to upcast N
 
           if self.tensor_core and tc_opts.axes_exist[0]: # attempt to local N
             for upc in [4,2]:

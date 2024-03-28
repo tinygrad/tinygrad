@@ -1,6 +1,7 @@
 from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable
 import itertools, functools, random, math, time, multiprocessing, traceback, signal
 from collections import defaultdict
+from multiprocessing.pool import Pool
 from tinygrad.device import Device, Compiled, Buffer, CompiledASTRunner, Compiler
 from tinygrad.ops import MemBuffer
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, to_function_name
@@ -96,7 +97,7 @@ def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Lineariz
     except KernelOptError: pass
   return acted_lins
 
-beam_pool = None
+beam_pool:Optional[Pool] = None
 def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linearizer:
   global beam_pool
   key = {"ast": lin.ast[0].key, "amt": amt, "allow_test_size": allow_test_size, "device": lin.opts.device, "suffix": lin.opts.suffix}
