@@ -340,6 +340,26 @@ class TestTinygrad(unittest.TestCase):
     c = (a + b).mean().backward()
     print(c)
 
+  def test_replace_and_assign_grads(self):
+    for func in [Tensor.replace, Tensor.assign]:
+      x = Tensor(x_init, requires_grad=True)
+      y = Tensor.zeros_like(x, requires_grad=False)
+      # equivalent to y.replace(x) or y.assign(x)
+      y = func(y, x)
+      out = y.sum()
+      out.backward()
+
+      x_torch = torch.tensor(x_init, requires_grad=True)
+      y_torch = torch.zeros_like(x_torch, requires_grad=False)
+      y_torch.copy_(x_torch)
+      out_torch = y.sum()
+      out_torch.backward()
+      # grad of sum() is [1, 1, 1]
+      np.testing.assert_allclose(out.grad.numpy(), out_torch.grad.numpy())
+      self.assertEqual(y.requires_grad, y_torch.requires_grad)
+      self.assertEqual(out.requires_grad, out_torch.requires_grad)
+
+
 @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
 class TestMoveTensor(unittest.TestCase):
   d0, d1 = f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"
