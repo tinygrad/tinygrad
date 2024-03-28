@@ -2,13 +2,12 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any, List, Optional, Dict, Tuple, ClassVar
 import importlib, inspect, functools, pathlib, time, ctypes
-from tinygrad.dtype import DType, ImageDType
 from tinygrad.helpers import ansilen, DEBUG, getenv, colored, BEAM, NOOPT, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put
 from tinygrad.helpers import prod, CACHECOLLECTING
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.ops import LazyOp, get_lazyop_info, GlobalCounters
+from tinygrad.buffer import Buffer, BufferOptions
 from tinygrad.codegen.uops import UOpGraph
-from dataclasses import dataclass
 
 if TYPE_CHECKING:
   from tinygrad.codegen.linearizer import Linearizer
@@ -68,50 +67,6 @@ def update_stats(name:str, op_estimate:sint, mem_estimate:sint, var_vals: Option
 
 # **************** Buffer / Allocator ****************
 
-@dataclass(frozen=True, eq=True)
-class BufferOptions:
-  image: Optional[ImageDType] = None
-  uncached: bool = False
-  host: bool = False
-  nolru: bool = False
-
-class Buffer:
-  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferOptions]=None, initial_value:Optional[bytes]=None):
-    assert isinstance(dtype, DType)
-    if isinstance(dtype, ImageDType): options = BufferOptions(image=dtype) # TODO: image hack shouldn't be here. where should it be?
-    self.device, self.size, self.dtype, self.d, self.options = device, size, dtype, Device[device], options
-    self.allocator = self.d.allocator
-    self._buf = opaque if opaque is not None else self.allocator.alloc(self.nbytes, options)
-    # TODO: mem_used for all devices
-    if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.nbytes
-    if initial_value is not None: self.copyin(memoryview(initial_value))
-  def __reduce__(self):
-    buf = bytearray(self.nbytes)
-    self.copyout(memoryview(buf))
-    return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf)
-  @property
-  def nbytes(self): return self.size*self.dtype.itemsize
-  def __del__(self):
-    if not hasattr(self, '_buf'): return # happens when __init__ has raised exception
-    if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
-    self.allocator.free(self._buf, self.nbytes, self.options)
-  def __repr__(self): return f"<buf device:{self.device} size:{self.size} dtype:{self.dtype}" + (">" if self.options is None else f"{self.options=}>")
-  def as_buffer(self, allow_zero_copy=False, force_zero_copy=False) -> memoryview:
-    # zero copy with as_buffer (disabled by default due to use after free)
-    if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, 'as_buffer'): return self.allocator.as_buffer(self._buf)
-    assert not force_zero_copy, "force zero copy was passed, but copy is required"
-    return self.copyout(memoryview(bytearray(self.nbytes)))
-  def copyin(self, mv:memoryview):
-    mv = flat_mv(mv)
-    assert len(mv) == self.nbytes, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
-    self.allocator.copyin(self._buf, mv)
-    return self
-  def copyout(self, mv:memoryview) -> memoryview:
-    mv = flat_mv(mv)
-    assert len(mv) == self.nbytes, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
-    self.allocator.copyout(mv, self._buf)
-    return mv
-
 class BufferCopy(JITRunner):
   def copy(self, dest, src):
     if src.device.startswith("DISK") and hasattr(dest.allocator, 'copy_from_fd') and src.nbytes >= 4096 and src._buf.ud.fd is not None:
@@ -128,7 +83,7 @@ class BufferCopy(JITRunner):
     self.copy(dest, src)
     et = None
     if wait or DEBUG >= 2:
-      dest.d.synchronize()
+      Device[dest.device].synchronize()
       et = time.perf_counter() - st
     total_sz = dest.size*dest.dtype.itemsize
     if total_sz >= 1e6: name = f"{type(self).__name__[6:].lower()} {total_sz/1e6:7.2f}M, {dest.device[:7]:>7s} <- {src.device[:7]:7s}"
