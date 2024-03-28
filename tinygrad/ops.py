@@ -2,10 +2,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Dict, Callable, ClassVar
 import functools, hashlib
 from enum import Enum, auto
+from dataclasses import dataclass
 from tinygrad.helpers import prod, dedup
 from tinygrad.dtype import dtypes, DType
 from tinygrad.shape.symbolic import Variable, sint
-from dataclasses import dataclass
+from tinygrad.shape.shapetracker import ShapeTracker
 
 # these are the llops your accelerator must implement, along with toCpu
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
@@ -24,7 +25,6 @@ Op = Union[UnaryOps, BinaryOps, ReduceOps, LoadOps, TernaryOps, BufferOps]
 OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[LoadOps], Type[TernaryOps], Type[BufferOps]]
 
 if TYPE_CHECKING:
-  from tinygrad.shape.shapetracker import ShapeTracker
   from tinygrad.lazy import LazyBuffer
 
 @dataclass(frozen=True)
