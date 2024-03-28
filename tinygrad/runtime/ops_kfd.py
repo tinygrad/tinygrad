@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Tuple
-import os, fcntl, ctypes, functools, re, pathlib, mmap
+import os, fcntl, ctypes, functools, re, pathlib, mmap, struct
 from tinygrad.device import Compiled, LRUAllocator, Compiler, BufferOptions
 from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up
 from tinygrad.codegen.kernel import LinearizerOptions
@@ -47,22 +47,30 @@ DISPATCH_KERNEL_HEADER |= hsa.HSA_FENCE_SCOPE_SYSTEM << hsa.HSA_PACKET_HEADER_SC
 DISPATCH_KERNEL_HEADER |= hsa.HSA_FENCE_SCOPE_SYSTEM << hsa.HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE
 DISPATCH_KERNEL_HEADER |= hsa.HSA_PACKET_TYPE_KERNEL_DISPATCH << hsa.HSA_PACKET_HEADER_TYPE
 
+SHT_PROGBITS = 0x1
+SHF_ALLOC = 0x2
+
 class KFDProgram:
   def __init__(self, device:KFDDevice, name:str, lib:bytes):
     # TODO; this API needs the type signature of the function and global_size/local_size
     self.device, self.name, self.lib = device, name, lib
-    self.lib_gpu = self.device._gpu_alloc(round_up(len(lib), 0x1000), kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=True)
-    lib_mv = to_mv(self.lib_gpu.va_addr, len(lib))
-    lib_mv[:] = lib
 
-    # TODO: elf parsing
-    offset = lib_mv.cast("I")[0xa0//4] - 0x40
-    lib_mv.cast("I")[(offset+0x10)//4] -= 0x1000
-    self.handle = self.lib_gpu.va_addr + offset
+    e_phoff, e_shoff, e_flags, e_ehsize, e_phentsize, e_phnum, e_shentsize, e_shnum, e_shstrndx = struct.unpack_from("<QQIHHHHHH", self.lib, 0x20)
+    sections = [struct.unpack_from("<IIQQQQIIQ", self.lib, e_shoff + i * e_shentsize) for i in range(e_shnum)]
 
-    self.group_segment_size = lib_mv.cast("I")[(offset)//4]
-    self.private_segment_size = lib_mv.cast("I")[(offset+4)//4]
-    self.kernargs_segment_size = lib_mv.cast("I")[(offset+8)//4]
+    lib_gpu_size = round_up(max(sh[5]+sh[3] for sh in sections if sh[1] == SHT_PROGBITS), 0x1000)
+    self.lib_gpu = self.device._gpu_alloc(lib_gpu_size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=True)
+    lib_gpu_view = to_mv(self.lib_gpu.va_addr, lib_gpu_size)
+
+    for _, sh_type, sh_flags, sh_addr, sh_offset, sh_size, _, _, _ in sections:
+      if sh_type == SHT_PROGBITS and sh_flags & SHF_ALLOC: lib_gpu_view[sh_addr:sh_addr+sh_size] = self.lib[sh_offset:sh_offset+sh_size]
+
+    entry_point = min(sh[3] for sh in sections if sh[1] == SHT_PROGBITS and sh[2] & SHF_ALLOC)
+    self.handle = self.lib_gpu.va_addr + entry_point
+    self.group_segment_size = lib_gpu_view.cast("I")[entry_point//4]
+    self.private_segment_size = lib_gpu_view.cast("I")[entry_point//4 + 1]
+    self.kernargs_segment_size = lib_gpu_view.cast("I")[entry_point//4 + 2]
+    assert self.private_segment_size <= self.device.max_private_segment_size, f"{self.private_segment_size=} > {self.device.max_private_segment_size=}"
 
     #from hexdump import hexdump
     #hexdump(to_mv(self.handle, 0x100))
@@ -176,6 +184,24 @@ class KFDDevice(Compiled):
     self.amd_aql_queue.read_dispatch_id = 0
     self.amd_aql_queue.read_dispatch_id_field_base_byte_offset = getattr(hsa.amd_queue_t, 'read_dispatch_id').offset
     self.amd_aql_queue.queue_properties = hsa.AMD_QUEUE_PROPERTIES_IS_PTR64 | hsa.AMD_QUEUE_PROPERTIES_ENABLE_PROFILING
+
+    self.amd_aql_queue.max_cu_id = 95 # TODO: hardcoded for 7900xtx
+    self.amd_aql_queue.max_wave_id = 31
+
+    # scratch setup
+    self.max_private_segment_size = 256
+    self.scratch_len = self.max_private_segment_size * (self.amd_aql_queue.max_cu_id + 1) * (self.amd_aql_queue.max_wave_id + 1)
+    self.scratch = self._gpu_alloc(self.scratch_len, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
+    self.amd_aql_queue.scratch_backing_memory_location = self.scratch.va_addr
+    self.amd_aql_queue.scratch_backing_memory_byte_size = self.scratch_len
+    self.amd_aql_queue.scratch_wave64_lane_byte_size = self.max_private_segment_size * (self.amd_aql_queue.max_wave_id + 1) // 64
+    self.amd_aql_queue.scratch_resource_descriptor[0] = self.scratch.va_addr & 0xFFFFFFFF
+    self.amd_aql_queue.scratch_resource_descriptor[1] = ((self.scratch.va_addr >> 32) & 0xFFFF) | (1 << 30) # va_hi | SWIZZLE_ENABLE
+    self.amd_aql_queue.scratch_resource_descriptor[2] = self.scratch_len & 0xFFFFFFFF
+    self.amd_aql_queue.scratch_resource_descriptor[3] = 0x20814fac # FORMAT=BUF_FORMAT_32_UINT, OOB_SELECT=2, ADD_TID_ENABLE=1, TYPE=SQ_RSRC_BUF, SQ_SELs
+
+    wave_scratch = (((self.amd_aql_queue.max_wave_id + 1) * self.max_private_segment_size + 255) // 256)
+    self.amd_aql_queue.compute_tmpring_size = wave_scratch << 12 | (self.amd_aql_queue.max_cu_id + 1)
 
     self.aql_queue = kio.create_queue(KFDDevice.kfd, ring_base_address=self.aql_ring.va_addr, ring_size=self.aql_ring.size, gpu_id=self.gpu_id,
       queue_type=kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE, queue_priority=kfd.KFD_MAX_QUEUE_PRIORITY,
