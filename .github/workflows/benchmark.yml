@@ -107,10 +107,12 @@ jobs:
       run: CUDA=1 python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
       run: CUDA=1 BIG=2 TORCHCUDA=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
-    - name: Run Tensor Core GEMM
+    - name: Run Tensor Core GEMM(CUDA)
       run: |
         CUDA=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
         CUDA=1 BFLOAT16=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_bfloat16.txt
+    - name: Run Tensor Core GEMM(PTX)
+      run: CUDA=1 PTX=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
     - name: Run LLaMA
       run: |
         CUDA=1 JIT=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
