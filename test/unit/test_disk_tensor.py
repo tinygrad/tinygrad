@@ -67,6 +67,10 @@ class TestRawDiskBuffer(unittest.TestCase):
     t.bitcast(dtypes.float32).assign(Tensor.full((128, 32), 3.1415927, dtype=dtypes.float32)).realize()
     _test_bitcasted(t, dtypes.float32, 3.1415927)
     _test_bitcasted(t, dtypes.uint32, 0x40490FDB)
+    # doesn't suport normal cast
+    with self.assertRaises(RuntimeError) as cm:
+      Tensor.empty((4,), dtype=dtypes.int16, requires_grad=True, device="DISK:/tmp/dt_b1.txt").cast(dtypes.float16)
+    self.assertEqual('attempted to cast disk buffer (bitcast only)', str(cm.exception))
 
 @unittest.skipIf(Device.DEFAULT == "WEBGPU", "webgpu doesn't support uint8 datatype")
 class TestSafetensors(unittest.TestCase):

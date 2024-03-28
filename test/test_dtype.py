@@ -249,8 +249,21 @@ class TestUint8Dtype(TestDType):
 @unittest.skipIf(Device.DEFAULT == "WEBGL", "No bitcast on WebGL")
 class TestBitCast(unittest.TestCase):
   def test_shape_change_bitcast(self):
-    with self.assertRaises(AssertionError):
-      _test_bitcast(Tensor([100000], dtype=dtypes.float32), dtypes.uint8, [100000])
+    _test_bitcast(Tensor([100000], dtype=dtypes.float32, device="DISK:/tmp/dummy.txt"), dtypes.uint32, [0x47C35000])
+    _test_bitcast(Tensor([100000], dtype=dtypes.float32, device="DISK:/tmp/dummy.txt"), dtypes.uint16, [0x5000, 0x47C3])
+    _test_bitcast(Tensor([100000], dtype=dtypes.float32, device="DISK:/tmp/dummy.txt"), dtypes.uint8, [0x00, 0x50, 0xC3, 0x47])
+
+    with self.assertRaises(AssertionError) as cm:
+      _test_bitcast(Tensor.empty((128,), dtype=dtypes.float32), dtypes.uint8)
+    self.assertEqual('shape changing bitcast only supported on DISK right now', str(cm.exception))
+
+    with self.assertRaises(AssertionError) as cm:
+      Tensor.empty((3,), dtype=dtypes.int8, device="DISK:/tmp/dummy.txt").bitcast(dtypes.float16)
+    self.assertEqual('wrong size', str(cm.exception))
+
+    with self.assertRaises(AssertionError) as cm:
+      Tensor.empty((4,), dtype=dtypes.int8, requires_grad=True, device="DISK:/tmp/dummy.txt").bitcast(dtypes.float16)
+    self.assertEqual('can\'t backprop through bitcast', str(cm.exception))
 
   def test_bitcast_float_to_int32(self):
     a = Tensor([1.,2,3])
