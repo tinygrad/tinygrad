@@ -6,11 +6,10 @@ from tinygrad.ops import MemBuffer
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, to_function_name
 from tinygrad.dtype import ImageDType
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.codegen.kernel import KernelOptError
+from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError
 from tinygrad.tensor import Tensor
 from tinygrad.shape.symbolic import sym_infer, Variable
 
-from tinygrad.codegen.kernel import Opt, OptOps
 actions = [Opt(op=OptOps.UPCAST, axis=axis, amt=amt) for amt in [0,2,3,4,5,7] for axis in range(6)]
 actions += [Opt(op=OptOps.UNROLL, axis=axis, amt=amt) for amt in [0,4] for axis in range(4)]
 actions += [Opt(op=OptOps.LOCAL, axis=axis, amt=amt) for amt in [2,3,4,8,13,16,29] for axis in range(5)]
@@ -56,11 +55,11 @@ def _compile_linearizer(compiler:Compiler, lin:Linearizer, name:Optional[str]=No
   et = time.perf_counter() - st
   return prog, lin.global_size, lin.local_size, lin.uops.vars(), len(lin.outbufs), et, len(lin.uops.uops)
 
-def _try_compile_linearized_w_idx(x, compiler:Compiler):
-  try: return (x[0], _compile_linearizer(compiler, x[1], "test"))
+def _try_compile_linearized_w_idx(x:Tuple[int,Linearizer], compiler:Compiler):
+  try: return x[0], _compile_linearizer(compiler, x[1], "test")
   except Exception:
     if DEBUG >= 4: traceback.print_exc()
-    return (x[0], None)
+    return x[0], None
 
 # workers should ignore ctrl c
 def _init_worker(): signal.signal(signal.SIGINT, signal.SIG_IGN)
@@ -91,11 +90,10 @@ def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Lineariz
       up, lcl = 1, 1
       for s,c in zip(lin2.full_shape, lin2.colors()):
         if c in {"magenta", "yellow"}: up *= s
-        if c in {"cyan", "green", "white"}: lcl *= s
+        elif c in {"cyan", "green", "white"}: lcl *= s
       if up > max_up or lcl > max_lcl: continue
       acted_lins[i+1] = lin2
-    except KernelOptError:
-      pass
+    except KernelOptError: pass
   return acted_lins
 
 beam_pool = None
@@ -118,7 +116,6 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
     var_vals = {k:(k.max+k.min)//2 for k in lin.ast[0].vars()}
     exiting, st = False, time.perf_counter()
     dev = Device[lin.opts.device]
-    assert isinstance(dev, Compiled)
     while not exiting:
       acted_lins: List[Linearizer] = flatten([get_linearizer_actions(lin, include_0=False).values() for lin,_ in beam]) if len(beam) else [lin]
       timed_lins: List[Tuple[Linearizer, float]] = []
@@ -167,7 +164,7 @@ def time_linearizer(lin:Linearizer, rawbufs:List[Buffer], allow_test_size=True, 
   if not disable_cache and CACHELEVEL >= 2 and (val:=diskcache_get("time_linearizer", key)) is not None: return min(val)
 
   dev = Device[lin.opts.device]
-  assert isinstance(dev, Compiled) and dev.compiler is not None
+  assert dev.compiler is not None
 
   var_vals = {k:(k.max+k.min)//2 for k in lin.ast[0].vars()}
   lib, global_size, local_size, vars, outcount, _, _ = _compile_linearizer(dev.compiler, lin)

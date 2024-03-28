@@ -106,7 +106,7 @@ MODEL_PARAMS = {
 
 
 # **** helper functions ****
-def concat_weights(models, device=Device.DEFAULT):
+def concat_weights(models, device=None):
   def convert(name) -> Tensor:
     disk_tensors: List[Tensor] = [model[name] for model in models]
     if len(disk_tensors) == 1 or len(disk_tensors[0].shape) == 1:
@@ -160,7 +160,7 @@ class LLaMa:
     model = Transformer(**params["args"], linear=AbsmaxQuantizedLinear, max_context=MAX_CONTEXT, jit=jit) if quantize else Transformer(**params["args"], max_context=MAX_CONTEXT, jit=jit)
 
     if model_path.is_dir():
-      weights = concat_weights([load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]])
+      weights = concat_weights([load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]], device[0] if isinstance(device, tuple) else device)
     else:
       weights = load(str(model_path))
     if "model.embed_tokens.weight" in weights:
@@ -386,7 +386,7 @@ After you are done speaking, output [EOS]. You are not Chad.
   print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
   device = tuple(f"{Device.DEFAULT}:{i}" for i in range(args.shard)) if args.shard > 1 else Device.DEFAULT
   llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, quantize=args.quantize, device=device)
-  param_count = sum(x.lazydata.size for x in get_parameters(llama.model))
+  param_bytes = sum(x.lazydata.size * x.dtype.itemsize for x in get_parameters(llama.model))
 
   if chatbot:
     # encode pre prompt
@@ -425,10 +425,10 @@ After you are done speaking, output [EOS]. You are not Chad.
       if args.timing or args.profile: print("")
       st = GlobalCounters.time_sum_s
       with Profiling(enabled=args.profile):
-        with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/s, {GlobalCounters.global_mem/x:.2f} GB/s, param {param_count*2/x:.2f} GB/s"):
+        with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/s, {GlobalCounters.global_mem/x:.2f} GB/s, param {param_bytes/x:.2f} GB/s"):
           with Timing("enqueue in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
                       f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
-                      (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_count*1e-9*2/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=args.timing):
+                      (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_bytes*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=args.timing):
             tok_tensor = llama.model(Tensor([toks[start_pos:]], device=device), start_pos, args.temperature)
           tok = tok_tensor.item()
 

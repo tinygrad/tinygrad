@@ -67,7 +67,7 @@ class MetalAllocator(LRUAllocator):
     for x in self.track_cross_device: x.synchronize()
     self.track_cross_device.clear()
     return super().free_cache()
-  def _alloc(self, size:int) -> Any:
+  def _alloc(self, size:int, options) -> Any:
     ret = self.device.device.newBufferWithLength_options_(size, Metal.MTLResourceStorageModeShared)
     if ret is None: raise MemoryError(f"Metal OOM while allocating {size=}")
     return ret
@@ -82,7 +82,7 @@ class MetalAllocator(LRUAllocator):
     ret = self.device.device.newBufferWithBytesNoCopy_length_options_deallocator_(src, len(src), Metal.MTLResourceStorageModeShared, None)
     if ret: self.device.mv_in_metal.append(src)
     return ret
-  def _free(self, opaque:Any): opaque.release()
+  def _free(self, opaque:Any, options): opaque.release()
   def as_buffer(self, src:Any) -> memoryview:
     self.device.synchronize()
     return src.contents().as_buffer(src.length())
