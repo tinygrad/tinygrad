@@ -19,6 +19,7 @@ if __name__ == "__main__":
   parser.add_argument("--rtol", type=float, default=1e-2, help="relative tolerance for numerical comparison")
   parser.add_argument("--atol", type=float, default=1e-2, help="absolute tolerance for numerical comparison")
   parser.add_argument("--timing", action='store_true', help="show final timing for the kernel")
+  parser.add_argument("--expected-failures", type=int, default=0, help="the number of expected failed kernels")
   args = parser.parse_args()
 
   if args.kernel is not None:
@@ -58,6 +59,9 @@ if __name__ == "__main__":
     print(f"{failed_ids=}")
     for msg, errors in failures.items():
       print(f"{msg}: {len(errors)}")
-    raise RuntimeError(f"failed on {len(failed_ids)} kernels")
+    if len(failed_ids) == args.expected_failures:
+      print(colored(f"{len(failed_ids)} failed as expected", "yellow"))
+  if len(failed_ids) != args.expected_failures:
+    raise RuntimeError(f"failed on {len(failed_ids)} kernels, expected {args.expected_failures}")
   else:
     print(colored("all passed", "green"))

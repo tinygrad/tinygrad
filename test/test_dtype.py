@@ -1,4 +1,4 @@
-import unittest, operator
+import unittest, operator, subprocess
 import numpy as np
 import torch
 from typing import Any, List
@@ -41,6 +41,13 @@ def _assert_eq(tensor:Tensor, target_dtype:DType, target):
 def _test_op(fxn, target_dtype:DType, target):
   _assert_eq(fxn(), target_dtype, target)
 def _test_cast(a:Tensor, target_dtype:DType):
+  if a.is_floating_point() and dtypes.is_unsigned(target_dtype):
+    # converting negative float to unsigned integer is undefined
+    a = a.abs()
+  if target_dtype == dtypes.half and Device.DEFAULT == "PYTHON":
+    # TODO: struct.pack cannot pack value > 65504 (max of half) into e format
+    a = (a > 65504).where(65504, a)
+
   _test_op(lambda: a.cast(target_dtype), target_dtype, list(a.numpy().astype(target_dtype.np)))
 def _test_bitcast(a:Tensor, target_dtype:DType, target=None):
   if target_dtype == dtypes.bfloat16: raise unittest.SkipTest("no test for bf16 bitcast yet")
@@ -60,8 +67,7 @@ class TestDType(unittest.TestCase):
     elif cls.DTYPE == dtypes.bool:
       cls.DATA = np.random.choice([True, False], size=DATA_SIZE)
     else:
-      # TODO: include negative numbers here and fix negative number cast to uint
-      cls.DATA = np.random.uniform(0, 10, size=DATA_SIZE).astype(cls.DTYPE.np)
+      cls.DATA = np.random.uniform(-10, 10, size=DATA_SIZE).astype(cls.DTYPE.np)
   def setUp(self):
     if self.DTYPE is None: raise unittest.SkipTest("base class")
 
@@ -347,6 +353,22 @@ class TestTypeSpec(unittest.TestCase):
       dtypes.default_float = default_float
       assert dtypes.default_float == default_float
 
+  def test_env_set_default_float(self):
+    # check default
+    subprocess.run(['python3 -c "from tinygrad import dtypes; assert dtypes.default_float == dtypes.float"'],
+                    shell=True, check=True)
+    # check change
+    subprocess.run(['DEFAULT_FLOAT=HALF python3 -c "from tinygrad import dtypes; assert dtypes.default_float == dtypes.half"'],
+                    shell=True, check=True)
+    # check invalid
+    with self.assertRaises(subprocess.CalledProcessError):
+      subprocess.run(['DEFAULT_FLOAT=INT32 python3 -c "from tinygrad import dtypes"'],
+                      shell=True, check=True)
+
+    with self.assertRaises(subprocess.CalledProcessError):
+      subprocess.run(['DEFAULT_FLOAT=TYPO python3 -c "from tinygrad import dtypes"'],
+                      shell=True, check=True)
+
   @given(strat.sampled_from(dtype_ints), strat.sampled_from(dtype_floats))
   def test_creation(self, default_int, default_float):
     dtypes.default_int, dtypes.default_float = default_int, default_float
@@ -566,6 +588,24 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([1, 2], dtype=dtypes.float16) / 2).dtype == dtypes.float16
     assert (Tensor([1, 2], dtype=dtypes.float16) / 2.0).dtype == dtypes.float16
 
+  def test_gradient_dtype(self):
+    old_default_float = dtypes.default_float
+
+    for default_dtype in [dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64]:
+      if not is_dtype_supported(default_dtype): continue
+      dtypes.default_float = default_dtype
+      for dtype in [dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64]:
+        if not is_dtype_supported(dtype): continue
+        if DEBUG >= 2:
+          print(f"testing {default_dtype=}, {dtype=}")
+        a = Tensor([1, 2, 3], dtype=dtype, requires_grad=True)
+        b = (a * 5).sum()
+        b.backward()  # if there is dtype mismatch, lazy should assert
+        assert a.grad.dtype == a.dtype
+        np.testing.assert_allclose(a.grad.numpy(), [5, 5, 5])
+
+    dtypes.default_float = old_default_float
+
 class TestImplicitFunctionTypeChange(unittest.TestCase):
   def test_functions(self):
     result = []
@@ -580,10 +620,10 @@ class TestImplicitFunctionTypeChange(unittest.TestCase):
       t = func(Tensor([4.0, 3.0])).max() == func(Tensor([4.0, 3.0]))
       result.append(t.numpy().sum())
 
-    if Device.DEFAULT not in ["PYTHON", "CLANG"]:
+    if Device.DEFAULT not in ["PYTHON"]:
       assert all(result)
     else:
-      # CLANG and PYTHON function default returns in double, and comparison to float can fail
+      # PYTHON function default returns in double, and comparison to float can fail
       # TODO: fix this
       assert not all(result)
 
