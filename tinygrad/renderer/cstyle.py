@@ -161,6 +161,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str
         bufs.append((args.expr, (dtype,False)))
         r[u] = args.expr
       elif uop is UOps.DEFINE_GLOBAL:
+        while len(bufs) < args[0]: bufs.append((f"fake_{len(bufs)}", (PtrDType(dtypes.float),False)))
         assert len(bufs) == args[0], f"missed a global buffer {len(bufs)} {args}"
         bufs.append((args[1], (dtype,args[2])))
         r[u] = args[1]
