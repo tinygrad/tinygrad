@@ -25,6 +25,18 @@ class TestSymbolicOps(unittest.TestCase):
       expected = f(a, b).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
+  def test_multioutput(self):
+    def f(a, b):
+      Tensor.corealize(outs:=[a+b, a*b])
+      return outs
+    for i in range(1, 5):
+      vi = Variable("i", 1, 10).bind(i)
+      a = Tensor.rand(3, i)
+      b = Tensor.rand(3, i)
+      symbolic = [x.reshape(3, i).numpy() for x in f(a.reshape(3, vi), b.reshape(3, vi))]
+      expected = [x.numpy() for x in f(a, b)]
+      np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
+
   def test_matmul(self):
     def f(a, b): return (a@b).realize()
     for i in range(1, 5):

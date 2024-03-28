@@ -1,9 +1,9 @@
 import sys
 from collections import defaultdict, deque
-from typing import List, Dict, Optional, Set, DefaultDict
+from typing import Deque, List, Dict, Optional, Set, DefaultDict, Tuple
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, LazyOp, ReduceOps, ConstBuffer, MemBuffer, BinaryOps, UnaryOps
 from tinygrad.features.graph import log_lazybuffer
-from tinygrad.helpers import GRAPH, DEBUG, prod, dedup, all_int
+from tinygrad.helpers import GRAPH, DEBUG, flatten, getenv, merge_dicts, prod, dedup, all_int
 from tinygrad.shape.symbolic import Variable
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.lazy import LazyBuffer
@@ -14,7 +14,7 @@ sys.setrecursionlimit(10000)
 
 # recursively create a lazyop
 def _recursive_lazyop(buf:LazyBuffer, membufs:List[LazyBuffer], var_vals:Dict[Variable, int], st:ShapeTracker,
-                      realizes:Set[LazyBuffer], cache, first=True, assign_to:Optional[LazyBuffer]=None) -> LazyOp:
+                      realizes:Set[LazyBuffer], cache, first=True, assign_to:Optional[LazyBuffer]=None, assign_idx:Optional[int]=None) -> LazyOp:
   if (buf, st) in cache: return cache[(buf, st)]
   if buf != buf.base:
     st = buf.st + st
@@ -33,12 +33,13 @@ def _recursive_lazyop(buf:LazyBuffer, membufs:List[LazyBuffer], var_vals:Dict[Va
     unbound_st, st_var_vals = st.simplify().unbind()
     var_vals.update(st_var_vals)
     if assign_to is not None and buf is assign_to:
+      assert assign_idx is not None
       if not unbound_st.contiguous:
         # we also allow masked views. if it has a single view and it's equal when you shrink a contig, it's fine
         if not (len(unbound_st.views) == 1 and unbound_st.views[0].mask is not None and
             ShapeTracker.from_shape(unbound_st.shape).shrink(unbound_st.views[0].mask) == unbound_st.shrink(unbound_st.views[0].mask)):
           raise RuntimeError(f"must be contiguous for assign {unbound_st}")
-      return LazyOp(BufferOps.LOAD, (), MemBuffer(0, buf.dtype, unbound_st))
+      return LazyOp(BufferOps.LOAD, (), MemBuffer(assign_idx, buf.dtype, unbound_st))
     if buf not in membufs: membufs.append(buf)
     return LazyOp(BufferOps.LOAD, (), MemBuffer(membufs.index(buf), buf.dtype, unbound_st))
 
@@ -50,7 +51,7 @@ def _recursive_lazyop(buf:LazyBuffer, membufs:List[LazyBuffer], var_vals:Dict[Va
     assert first
     assert buf.srcs[1].base is buf.srcs[1], "assign must be to base"
     assert buf.srcs[1].realized is not None, f"assign must be already realized to schedule {buf.srcs[1]}"
-    return _recursive_lazyop(buf.srcs[0], membufs, var_vals, st, realizes, cache, False, assign_to=buf.srcs[1])
+    return _recursive_lazyop(buf.srcs[0], membufs, var_vals, st, realizes, cache, False, assign_to=buf.srcs[1], assign_idx=membufs.index(buf))
 
   # if it's a reduce, we have to change the shapetracker
   if buf.op in ReduceOps:
@@ -59,7 +60,7 @@ def _recursive_lazyop(buf:LazyBuffer, membufs:List[LazyBuffer], var_vals:Dict[Va
 
   # otherwise we fuse it like normal
   cache[(buf, st)] = ret = \
-    LazyOp(buf.op, tuple(_recursive_lazyop(x, membufs, var_vals, st, realizes, cache, False, assign_to) for x in buf.srcs), buf.arg)
+    LazyOp(buf.op, tuple(_recursive_lazyop(x, membufs, var_vals, st, realizes, cache, False, assign_to, assign_idx) for x in buf.srcs), buf.arg)
   return ret
 
 def _schedule_one(out:LazyBuffer, realizes:Set[LazyBuffer], reduce_for_op: Dict[LazyBuffer, LazyBuffer]) -> ScheduleItem:
@@ -72,6 +73,18 @@ def _schedule_one(out:LazyBuffer, realizes:Set[LazyBuffer], reduce_for_op: Dict[
     op = _recursive_lazyop(out, membufs, var_vals, output_st, realizes, cache={})
     op, inputs = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_st.simplify().unbind()[0])), membufs[1:]
   return ScheduleItem((op,), (out,), tuple(inputs), var_vals)
+
+def _fuse_group(group:List[ScheduleItem], reduce_for_op:Dict[LazyBuffer, LazyBuffer]) -> ScheduleItem:
+  if len(group) == 1: return group[0]
+  # sort the group before fusion
+  group = sorted(group, key=lambda x: x.ast[0].src[0].key)
+  inputs, outputs, var_vals = {x: None for n in group for x in n.inputs}, [n.outputs[0] for n in group], merge_dicts([n.var_vals for n in group])
+  ast: List[LazyOp] = []
+  for i, out in enumerate(outputs):
+    output_st = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape)
+    op = _recursive_lazyop(out, outputs+list(inputs), var_vals, output_st, set(inputs), {})
+    ast.append(LazyOp(BufferOps.STORE, (op, ), MemBuffer(i, out.dtype, output_st.simplify().unbind()[0])))
+  return ScheduleItem(tuple(ast), tuple(outputs), tuple(inputs), var_vals)
 
 # recursively search the entire graph for all LazyBuffers, insert realizes after expands
 def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffer, None],
@@ -192,17 +205,23 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
         in_degree[assign_targets[x]] += 1
       if x in prescheduled: in_degree[out] += 1
 
-  queue = deque(out for out in prescheduled if in_degree[out] == 0)
-  schedule: List[ScheduleItem] = []
+  queue: Deque[Tuple[int,LazyBuffer]] = deque((0,out) for out in prescheduled if in_degree[out] == 0)
+  groups: DefaultDict[Tuple,List[ScheduleItem]] = defaultdict(list)
   while queue:
-    buf = queue.popleft()
+    level, buf = queue.popleft()
     seen.add(buf)
-    schedule.append(prescheduled[buf])
+    # single output
+    if (buf.op in LoadOps and buf.op is not LoadOps.ASSIGN) or buf.device.startswith("DISK") or buf.device == "METAL" or \
+        buf.op in ReduceOps or buf in reduce_for_op or buf.forced_realize or getenv("DISALLOW_MULTIOUT"): key: Tuple = (buf,)
+    # multioutput
+    else: key = (level, buf.shape, buf.device)
+    groups[key].append(prescheduled[buf])
     for x in graph[buf]:
       in_degree[x] -= 1
-      if in_degree[x] == 0: queue.append(x)
+      if in_degree[x] == 0: queue.append((level+1,x))
+  schedule: List[ScheduleItem] = [_fuse_group(group, reduce_for_op) for group in groups.values()]
 
   # confirm everything was scheduled correctly
-  if not all(degree == 0 for degree in in_degree.values()) or len(prescheduled) != len(schedule):
+  if not all(degree == 0 for degree in in_degree.values()) or len(prescheduled) != len(flatten(si.outputs for si in schedule)):
     raise RuntimeError(f"cycle detected in graph, prescheduled {len(prescheduled)} but only scheduled {len(schedule)}")
   return schedule
