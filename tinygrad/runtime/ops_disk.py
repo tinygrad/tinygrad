@@ -68,7 +68,7 @@ class DiskRunner(JITRunner):
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Any, int], wait=False, jit=False):
     assert len(rawbufs) == 2
     src = rawbufs[1]._buf
-    rawbufs[0]._buf = DiskBuffer(src.ud, self.new_size, self.new_dtype, offset=src.offset+self.new_offset)
+    rawbufs[0].allocate(DiskBuffer(src.ud, self.new_size, self.new_dtype, offset=src.offset+self.new_offset))
 
 class DiskDevice(Compiled):
   def __init__(self, device:str): super().__init__(device, DiskAllocator(device[len("disk:"):]), None, None)
