@@ -82,6 +82,7 @@ class LazyBuffer:
       return self.base.cast(dtype, bitcast)._view(self.st)
     new_shape = self.shape
     if bitcast and self.dtype.itemsize != dtype.itemsize:
+      assert self.device.startswith("DISK"), "shape changing bitcast only supported on DISK right now"
       assert all_int(new_shape), "shape changing bitcast with symbolic shape isn't supported yet"
       # https://pytorch.org/docs/stable/generated/torch.Tensor.view.html
       assert (new_shape[-1]*self.dtype.itemsize) % dtype.itemsize == 0, "wrong size"
