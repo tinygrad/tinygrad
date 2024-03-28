@@ -4,6 +4,7 @@ from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import DType
 from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load
 from tinygrad.helpers import Timing, fetch, temp
+import tempfile
 from test.helpers import is_dtype_supported
 
 def compare_weights_both(url):
@@ -49,9 +50,9 @@ class TestRawDiskBuffer(unittest.TestCase):
       with Timing("copy in ", lambda et_ns: f" {test_size/et_ns:.2f} GB/s"):
         f.readinto(tst)
   def test_bitcasts_on_disk(self):
+    tmp = tempfile.mktemp()
     # ground truth = https://evanw.github.io/float-toy/
-    pathlib.Path(temp("dt_b1")).unlink(missing_ok=True)
-    t = Tensor.empty((128, 128), dtype=dtypes.uint8, device=f"disk:{temp('dt_b1')}") # uint8
+    t = Tensor.empty((128, 128), dtype=dtypes.uint8, device=f"disk:{tmp}") # uint8
     # all zeroes
     _test_bitcasted(t, dtypes.float16, 0.0)
     _test_bitcasted(t, dtypes.uint16, 0)
@@ -69,8 +70,9 @@ class TestRawDiskBuffer(unittest.TestCase):
     _test_bitcasted(t, dtypes.uint32, 0x40490FDB)
     # doesn't suport normal cast
     with self.assertRaises(RuntimeError) as cm:
-      Tensor.empty((4,), dtype=dtypes.int16, requires_grad=True, device="DISK:/tmp/dt_b1.txt").cast(dtypes.float16)
+      Tensor.empty((4,), dtype=dtypes.int16, requires_grad=True, device=f"disk:{tmp}").cast(dtypes.float16)
     self.assertEqual('attempted to cast disk buffer (bitcast only)', str(cm.exception))
+    pathlib.Path(tmp).unlink()
 
 @unittest.skipIf(Device.DEFAULT == "WEBGPU", "webgpu doesn't support uint8 datatype")
 class TestSafetensors(unittest.TestCase):
