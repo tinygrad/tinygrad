@@ -175,7 +175,8 @@ class UOpGraph:
   def type_verify(self):
     for u in self.uops:
       uop, arg, vin, dtype = u.uop, u.arg, u.vin, u.dtype
-      if uop is UOps.CONST: assert dtype is not None and type(arg) is type(dtypes.as_const(arg, dtype)), f"{arg} type does not match {dtype}"
+      if uop in {UOps.CONST, UOps.DEFINE_ACC}:
+        assert dtype is not None and type(arg) is type(dtypes.as_const(arg, dtype)), f"type of {arg=} does not match {dtype}"
       if uop is UOps.ALU:
         if arg in UnaryOps:
           assert dtype == vin[0].dtype, f"{arg} dtype mismatch {dtype=} != {vin[0].dtype=}"
