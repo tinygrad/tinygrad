@@ -135,7 +135,7 @@ class Tensor:
   @staticmethod
   def corealize(lst:Iterable[Tensor]):
     outs: List[LazyBuffer] = flatten([x.lazydata.lbs if isinstance(x.lazydata, MultiLazyBuffer) else [x.lazydata] for x in lst])
-    CommandQueue(create_schedule(outs), set(outs))()
+    CommandQueue(create_schedule(outs), outs)()
 
   def realize(self) -> Tensor:
     Tensor.corealize([self])
