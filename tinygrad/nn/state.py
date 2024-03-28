@@ -14,7 +14,7 @@ inverse_safe_dtypes = {v:k for k,v in safe_dtypes.items()}
 
 def safe_load_metadata(fn:Union[Tensor,str]) -> Tuple[Tensor, int, Any]:
   t = fn if isinstance(fn, Tensor) else Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}")
-  json_len = t[0:1].cast(dtypes.int64).item()
+  json_len = t[0:8].bitcast(dtypes.int64).item()
   return t, json_len, json.loads(t[8:8+json_len].numpy().tobytes())
 
 def safe_load(fn:Union[Tensor,str]) -> Dict[str, Tensor]:
@@ -23,8 +23,8 @@ def safe_load(fn:Union[Tensor,str]) -> Dict[str, Tensor]:
   for k,v in metadata.items():
     if k == "__metadata__": continue
     dtype = safe_dtypes[v['dtype']]
-    sz = (v['data_offsets'][1]-v['data_offsets'][0])//dtype.itemsize
-    ret[k] = t[8+json_len+v['data_offsets'][0]:8+json_len+v['data_offsets'][0]+sz].cast(dtype).reshape(v['shape'])
+    sz = (v['data_offsets'][1]-v['data_offsets'][0])
+    ret[k] = t[8+json_len+v['data_offsets'][0]:8+json_len+v['data_offsets'][0]+sz].bitcast(dtype).reshape(v['shape'])
   return ret
 
 def safe_save(tensors:Dict[str, Tensor], fn:str, metadata:Optional[Dict[str, Any]]=None):
@@ -37,7 +37,7 @@ def safe_save(tensors:Dict[str, Tensor], fn:str, metadata:Optional[Dict[str, Any
   j += "\x20"*((8-len(j)%8)%8)
   pathlib.Path(fn).unlink(missing_ok=True)
   t = Tensor.empty(8+len(j)+offset, dtype=dtypes.uint8, device=f"disk:{fn}")
-  t[0:1].cast(dtypes.int64).assign([len(j)])
+  t[0:8].bitcast(dtypes.int64).assign([len(j)])
   t[8:8+len(j)].assign(list(j.encode('utf-8')))
   for k,v in safe_load(t).items(): v.assign(tensors[k])
 
@@ -83,7 +83,7 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
     lens[storage[2]] = storage[4] * storage[1].itemsize
     if storage[2] not in offsets: return None
     byte_offset = offsets[storage[2]]+storage_offset*storage[1].itemsize
-    ret = t[byte_offset:byte_offset+prod(size)].cast(storage[1])
+    ret = t[byte_offset:byte_offset+prod(size)*storage[1].itemsize].bitcast(storage[1])
 
     # 7 lines to deal with permuted tensors. NOTE: this currently requires reading off the disk
     shape_strides = [(s, st) for s,st in zip(size, stride) if s != 1]
