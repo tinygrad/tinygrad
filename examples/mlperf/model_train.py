@@ -4,7 +4,7 @@ import time
 from tqdm import tqdm
 
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
-from tinygrad.helpers import getenv, BEAM, WINO
+from tinygrad.helpers import colored, getenv, BEAM, WINO
 from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_save
 
 from examples.mlperf.helpers import get_training_state, load_training_state
@@ -224,7 +224,7 @@ def train_retinanet():
   from extra.datasets.openimages_new import iterate, get_openimages
   ROOT = 'extra/datasets/open-images-v6TEST'
   NAME = 'openimages-mlperf'
-  coco = get_openimages(NAME,ROOT, 'val')
+  coco = get_openimages(NAME,ROOT, 'train')
   # for x,y in iterate(coco, 8):
   #   print(x.shape)
   #   print(y[0].keys())
@@ -331,7 +331,8 @@ def train_retinanet():
 
       print('Input Data Shape:', X.shape)
       print(X.shape)
-      print(Y[0].keys())
+      print(Y[0]['boxes'].shape, Y[0]['labels'].shape )
+      print(Y[1]['boxes'].shape, Y[1]['labels'].shape)
       print(Y[0]['boxes'].shape, Y[0]['image_size'])
       print(Y[1]['boxes'].shape, Y[1]['image_size'])
       print(Y[2]['boxes'].shape, Y[2]['image_size'])
@@ -349,7 +350,7 @@ def train_retinanet():
       st = time.monotonic()
       loss = train_step(X, Y)
 
-      print('Iter done! Time:',time.monotonic()-st,'Loss:', loss.numpy())
+      print(colored(f'Iter done! Time: {time.monotonic()-st} Loss: {loss.numpy()}', 'red'))
       # del loss, X, Y
       
       # sys.exit()

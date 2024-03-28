@@ -44,6 +44,10 @@ def _sum(x) -> Tensor:
     return res
 
 def box_iou(boxes1: Tensor, boxes2: Tensor) -> Tensor:
+  print(boxes1.shape)
+  print(boxes2.shape)
+  import sys
+  sys.exit()
   # print('BOX_IOU Arguements', boxes1.numpy(), boxes2.numpy())
   def box_area(boxes): return (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
   area1 = box_area(boxes1)
@@ -518,8 +522,8 @@ class RetinaNet:
     loss_class = self.head.classification_head.loss(logits_class, targets, matched_idxs)
     # https://github.com/mlcommons/training/blob/master/single_stage_detector/ssd/engine.py#L36
     
-    # print('loss_reg', loss_reg.numpy())
-    # print('loss_class', loss_class.numpy())
+    print(colored(f'loss_reg {loss_reg.numpy()}', 'green'))
+    print(colored(f'loss_class {loss_class.numpy()}', 'green'))
     return (loss_reg+loss_class)
   def load_from_pretrained(self):
     model_urls = {
@@ -646,11 +650,11 @@ class ClassificationHead:
       
       valid_idxs_per_image = np.nonzero(valid_idxs_per_image.numpy())[0]
       print('valid_idxs_per_image POST',valid_idxs_per_image)
-      if valid_idxs_per_image.shape==(0,):
-        print('empty valid_idxs_per_image in class head')
-        valid_idxs_per_image = Tensor([0])
-      else:
-        valid_idxs_per_image = Tensor(valid_idxs_per_image)
+      # if valid_idxs_per_image.shape==(0,):
+      #   print(colored('empty valid_idxs_per_image in class head'), 'blue')
+      #   valid_idxs_per_image = Tensor([0])
+      # else:
+      valid_idxs_per_image = Tensor(valid_idxs_per_image)
       # compute the classification loss
       losses.append(sigmoid_focal_loss(
         cls_logits_per_image[valid_idxs_per_image],
@@ -678,11 +682,11 @@ class RegressionHead:
       print('Regression head match idx type:', matched_idxs_per_image.numpy())
       foreground_idxs_per_image = np.nonzero(matched_idxs_per_image.numpy() >= 0)[0]
       print('np forground REGRESSION:', foreground_idxs_per_image, foreground_idxs_per_image.shape)
-      if foreground_idxs_per_image.shape==(0,):
-        print('empty forground idx in regression head')
-        foreground_idxs_per_image = Tensor([0])
-      else:
-        foreground_idxs_per_image = Tensor(foreground_idxs_per_image)
+      # if foreground_idxs_per_image.shape==(0,):
+      #   print(colored('empty forground idx in regression head', 'blue'))
+      #   foreground_idxs_per_image = Tensor([0])
+      # else:
+      foreground_idxs_per_image = Tensor(foreground_idxs_per_image)
       # print(foreground_idxs_per_image, matched_idxs_per_image.numpy())
       # print('Regression Foreground idx per img: ', foreground_idxs_per_image.shape, foreground_idxs_per_image.numpy())
       num_foreground = foreground_idxs_per_image.numel()

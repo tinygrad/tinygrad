@@ -72,10 +72,18 @@ from tinygrad.dtype import dtypes
 # t = [(2,3)]*5
 # print(t)
 
-t = Tensor.arange(16).reshape(4,4)
-ans =[]
-for i in range(4):
-    ans.append(t[i])
-print(ans)
-for i in ans:
-    print(i.numpy())
+# t = Tensor.arange(16).reshape(4,4)
+# ans =[]
+# for i in range(4):
+#     ans.append(t[i])
+# print(ans)
+# for i in ans:
+#     print(i.numpy())
+
+t = Tensor([11,22,34,44])
+print(t[[2,0]].numpy())
+print(t[[]].numpy())
+
+tor = torch.tensor([11,22,34,44])
+print(tor[[2,0]].numpy())
+print(tor[[]].numpy())
