@@ -1,7 +1,7 @@
 import ctypes, collections, time, itertools
 from typing import List, Any, Dict, cast, Optional, Union, Tuple
 from tinygrad.helpers import GraphException, init_c_var, round_up
-from tinygrad.device import Compiled, Buffer, BufferOptions, CompiledASTRunner, BufferXfer, MultiDeviceJITGraph, update_stats
+from tinygrad.device import Compiled, Buffer, BufferOptions, CompiledASTRunner, BufferXfer, MultiDeviceJITGraph, update_stats, Device
 from tinygrad.shape.symbolic import Variable
 from tinygrad.runtime.ops_hsa import HSADevice, PROFILE, Profiler
 from tinygrad.engine.jit import JitItem, get_input_replace, get_jit_stats, \
@@ -37,7 +37,7 @@ class HSAGraph(MultiDeviceJITGraph):
     for ji in self.jit_cache:
       if isinstance(ji.prg, CompiledASTRunner): compiled_devices.add(ji.prg.device)
       elif isinstance(ji.prg, BufferXfer):
-        for x in ji.rawbufs[0:2]: compiled_devices.add(cast(Buffer, x).d)
+        for x in ji.rawbufs[0:2]: compiled_devices.add(Device[cast(Buffer, x).device])
       else: raise GraphException
     if any(not isinstance(d, HSADevice) for d in compiled_devices): raise GraphException
 
@@ -86,7 +86,7 @@ class HSAGraph(MultiDeviceJITGraph):
         if PROFILE: self.profile_info[ji.prg.device].append((sync_signal, ji.prg.clprg.name, False))
       elif isinstance(ji.prg, BufferXfer):
         dest, src = [cast(Buffer, x) for x in ji.rawbufs[0:2]]
-        dest_dev, src_dev = cast(HSADevice, dest.d), cast(HSADevice, src.d)
+        dest_dev, src_dev = cast(HSADevice, Device[dest.device]), cast(HSADevice, Device[src.device])
         sync_signal = self.alloc_signal(reset_on_start=True, wait_on=[dest_dev, src_dev])
 
         wait_signals = self.access_resources(read=[src], write=[dest], new_dependency=sync_signal, sync_with_aql_packets=True)

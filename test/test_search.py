@@ -10,8 +10,8 @@ from tinygrad.tensor import Tensor
 class TestTimeLinearizer(unittest.TestCase):
   def test_reasonable_time(self):
     si = [i for i in create_schedule([Tensor([1,2,3,4]).add(1).lazydata]) if i.ast[0].op not in LoadOps][0]
-    out = Buffer(Device.DEFAULT, si.outputs[0].st.real_size(), si.outputs[0].dtype)
-    rawbufs = [out] + [Buffer(Device.DEFAULT, x.st.real_size(), x.dtype) for x in si.inputs]
+    out = Buffer(Device.DEFAULT, si.outputs[0].st.real_size(), si.outputs[0].dtype).allocate()
+    rawbufs = [out] + [Buffer(Device.DEFAULT, x.st.real_size(), x.dtype).allocate() for x in si.inputs]
     tm = time_linearizer(Linearizer(*si.ast), rawbufs, allow_test_size=False, cnt=10)
     assert tm > 0 and tm != float('inf')
 

@@ -12,7 +12,8 @@ from tinygrad.helpers import IMAGE, DEBUG, WINO, THREEFRY
 from tinygrad.lazy import LazyBuffer
 from tinygrad.features.multi import MultiLazyBuffer
 from tinygrad.ops import LoadOps
-from tinygrad.device import Buffer, Device, BufferOptions
+from tinygrad.buffer import Buffer, BufferOptions
+from tinygrad.device import Device
 from tinygrad.shape.symbolic import sint
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.schedule import create_schedule

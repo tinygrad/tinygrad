@@ -43,9 +43,9 @@ from tinygrad.ops import LazyOp, BufferOps, MemBuffer, BinaryOps
 from tinygrad.shape.shapetracker import ShapeTracker
 
 # allocate some buffers + load in values
-out = Buffer(DEVICE, 1, dtypes.int32)
-a = Buffer(DEVICE, 1, dtypes.int32).copyin(memoryview(bytearray(struct.pack("I", 2))))
-b = Buffer(DEVICE, 1, dtypes.int32).copyin(memoryview(bytearray(struct.pack("I", 3))))
+out = Buffer(DEVICE, 1, dtypes.int32).allocate()
+a = Buffer(DEVICE, 1, dtypes.int32).allocate().copyin(memoryview(bytearray(struct.pack("I", 2))))
+b = Buffer(DEVICE, 1, dtypes.int32).allocate().copyin(memoryview(bytearray(struct.pack("I", 3))))
 # NOTE: a._buf is the same as the return from MallocAllocator.alloc
 
 # describe the computation
@@ -79,8 +79,8 @@ from tinygrad.engine.schedule import create_schedule
 # allocate some values + load in values
 a = LazyBuffer.loadop(LoadOps.EMPTY, (1,), dtypes.int32, DEVICE)
 b = LazyBuffer.loadop(LoadOps.EMPTY, (1,), dtypes.int32, DEVICE)
-a.realized = Buffer(DEVICE, 1, dtypes.int32).copyin(memoryview(bytearray(struct.pack("I", 2))))
-b.realized = Buffer(DEVICE, 1, dtypes.int32).copyin(memoryview(bytearray(struct.pack("I", 3))))
+a.realized = Buffer(DEVICE, 1, dtypes.int32).allocate().copyin(memoryview(bytearray(struct.pack("I", 2))))
+b.realized = Buffer(DEVICE, 1, dtypes.int32).allocate().copyin(memoryview(bytearray(struct.pack("I", 3))))
 
 # describe the computation
 out = a.e(BinaryOps.ADD, b)
