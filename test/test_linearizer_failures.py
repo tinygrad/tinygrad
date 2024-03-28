@@ -230,7 +230,7 @@ class TestLinearizerFailures(unittest.TestCase):
     opts = [Opt(op=OptOps.PADTO, axis=3, amt=32), Opt(op=OptOps.LOCAL, axis=3, amt=32), Opt(op=OptOps.UPCAST, axis=3, amt=4), Opt(op=OptOps.UPCAST, axis=3, amt=0)]
 
     with self.assertRaises(AssertionError):
-      helper_test_lin(Linearizer(ast), opts, failed_platforms=[], atol=1.0)
+      helper_test_lin(Linearizer(ast), opts, failed_platforms=["LLVM", "GPU", "CLANG"], atol=1.0)
 
 if __name__ == '__main__':
   unittest.main()
