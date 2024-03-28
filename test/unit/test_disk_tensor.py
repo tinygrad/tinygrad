@@ -1,10 +1,9 @@
-import pathlib, unittest
+import pathlib, tempfile, unittest
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import DType
 from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load
 from tinygrad.helpers import Timing, fetch, temp
-import tempfile
 from test.helpers import is_dtype_supported
 
 def compare_weights_both(url):
