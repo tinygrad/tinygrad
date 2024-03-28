@@ -139,7 +139,7 @@ class Tensor:
     Tensor.corealize([self])
     return self
 
-  def replace(self, x:Tensor) -> Tensor:
+  def _replace(self, x:Tensor) -> Tensor:
     # used for replacing a Tensor with a new version of it (potentially with a different device and dtype)
     assert not x.requires_grad and getattr(self, '_ctx', None) is None
     assert self.shape == x.shape, f"replace shape mismatch {self.shape} != {x.shape}"
@@ -161,7 +161,7 @@ class Tensor:
     assert self.dtype == x.dtype, f"assign dtype mismatch {self.dtype} != {x.dtype}"
     assert not isinstance(self.lazydata, MultiLazyBuffer) or self.lazydata.axis == x.lazydata.axis, "axis must match on MultiLazyBuffer"
     assert not x.requires_grad  # self requires_grad is okay?
-    if not self.lazydata.is_realized(): return self.replace(x)
+    if not self.lazydata.is_realized(): return self._replace(x)
     self.lazydata = self.lazydata.assign(x.lazydata)
     return self
   def detach(self) -> Tensor: return Tensor(self.lazydata, device=self.device, requires_grad=False)
