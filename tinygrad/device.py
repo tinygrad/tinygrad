@@ -1,6 +1,6 @@
 from __future__ import annotations
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any, List, Optional, Dict, Tuple, ClassVar
+from typing import TYPE_CHECKING, Any, List, Optional, Dict, Tuple, ClassVar, NamedTuple
 import importlib, inspect, functools, pathlib, time, ctypes
 from tinygrad.helpers import ansilen, DEBUG, getenv, colored, BEAM, NOOPT, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put
 from tinygrad.helpers import prod, CACHECOLLECTING
@@ -11,7 +11,6 @@ from tinygrad.codegen.uops import UOpGraph
 
 if TYPE_CHECKING:
   from tinygrad.codegen.linearizer import Linearizer
-  from tinygrad.codegen.kernel import LinearizerOptions
 
 # **************** Device ****************
 
@@ -134,8 +133,21 @@ MallocAllocator = _MallocAllocator()
 
 # **************** for Compiled Devices ****************
 
+class CompilerOptions(NamedTuple):
+  device: str = ""
+  suffix: str = ""
+  # TODO: make this generic with a list of supported types
+  supports_float4: bool = True
+  has_local: bool = True
+  has_shared: bool = True
+  has_tensor_cores: bool = False
+  # NOTE: these two should be in z,y,x(reversed) order for cstyle backends, they are flipped when kernel is rendered
+  global_max: Optional[List[int]] = None
+  local_max: Optional[List[int]] = None
+  shared_max: int = 32768
+
 class Compiler:
-  linearizer_opts: ClassVar[LinearizerOptions]
+  compiler_opts: ClassVar[CompilerOptions]
   def __init__(self, cachekey:Optional[str]=None): self.cachekey = None if getenv("DISABLE_COMPILER_CACHE") else cachekey
   def render(self, name:str, uops:UOpGraph) -> str: raise NotImplementedError("need a render function")
   def compile(self, src:str) -> bytes: raise NotImplementedError("need a compile function")
@@ -215,16 +227,16 @@ class Compiled:
       from tinygrad.features.graph import print_tree
       for op in ast: print_tree(op)
     from tinygrad.codegen.linearizer import Linearizer
-    k = Linearizer(*ast, opts=self.compiler.linearizer_opts)
+    k = Linearizer(*ast, opts=self.compiler.compiler_opts)
     k.required_optimizations()
     if not NOOPT:
       if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
       if BEAM >= 1:
         lins = [(("tc" if used_tensor_cores else "hc"), k)]
         if used_tensor_cores:
-          lins.append(("hc", Linearizer(*ast, opts=self.compiler.linearizer_opts)))
+          lins.append(("hc", Linearizer(*ast, opts=self.compiler.compiler_opts)))
           lins[-1][1].hand_coded_optimizations()
-        kb = Linearizer(*ast, opts=self.compiler.linearizer_opts)
+        kb = Linearizer(*ast, opts=self.compiler.compiler_opts)
         kb.required_optimizations()
         from tinygrad.features.search import beam_search, time_linearizer, bufs_from_lin
         test_rawbuffers = bufs_from_lin(kb)    # allocate scratch buffers for optimization
