@@ -1,6 +1,6 @@
 from typing import List, Dict, Optional, cast
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters
-from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats
+from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, JITRunner, update_stats
 from tinygrad.features.graph import realized_lazybuffer
 from tinygrad.helpers import colored, getenv, GRAPH, cpu_time_execution, DEBUG
 from tinygrad.shape.symbolic import Variable
@@ -26,7 +26,6 @@ def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
   out, ast = si.outputs[0], si.ast[0]
   if ast.op is LoadOps.COPY:
     if hasattr(Device[out.device].allocator, 'transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]: return BufferXfer()
-    if si.inputs[0].device.startswith("DISK"): return BufferRead()
     return BufferCopy()
   if ast.op is LoadOps.CUSTOM: return CustomOp(ast.arg)
   if ast.op is LoadOps.SYNC: return SyncOp(out.device)
