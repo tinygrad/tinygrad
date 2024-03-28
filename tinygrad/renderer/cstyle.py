@@ -293,23 +293,13 @@ class HIPLanguage(CStyleLanguage):
   kernel_prefix = """extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_local_id(unsigned int);
 extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_group_id(unsigned int);
 extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_local_size(unsigned int);
-extern "C" {
-__attribute__((device)) __attribute__((const)) float __ocml_fmax_f32(float, float);
-__attribute__((device)) __attribute__((pure)) float __ocml_exp2_f32(float);
-__attribute__((device)) __attribute__((pure)) float __ocml_log2_f32(float);
-__attribute__((device)) float __ocml_sin_f32(float);
-__attribute__((device)) __attribute__((const)) float __ocml_sqrt_f32(float);
-__attribute__((device)) __attribute__((const)) double __ocml_fmax_f64(double, double);
-__attribute__((device)) __attribute__((pure)) double __ocml_exp2_f64(double);
-__attribute__((device)) __attribute__((pure)) double __ocml_log2_f64(double);
-__attribute__((device)) double __ocml_sin_f64(double);
-__attribute__((device)) __attribute__((const)) double __ocml_sqrt_f64(double);
-__attribute__((device)) __attribute__((const)) _Float16 __ocml_fmax_f16(_Float16, _Float16);
-__attribute__((device)) __attribute__((pure)) _Float16 __ocml_exp2_f16(_Float16);
-__attribute__((device)) __attribute__((pure)) _Float16 __ocml_log2_f16(_Float16);
-__attribute__((device)) _Float16 __ocml_sin_f16(_Float16);
-__attribute__((device)) __attribute__((const)) _Float16 __ocml_sqrt_f16(_Float16);
-}\nextern "C" __attribute__((global))"""
+extern "C" {\n""" + "".join([
+f"""  __attribute__((device)) __attribute__((const)) {dt} __ocml_fmax_f{n}({dt}, {dt});
+  __attribute__((device)) __attribute__((pure)) {dt} __ocml_exp2_f{n}({dt});
+  __attribute__((device)) __attribute__((pure)) {dt} __ocml_log2_f{n}({dt});
+  __attribute__((device)) __attribute__((const)) {dt} __ocml_sqrt_f{n}({dt});
+  __attribute__((device)) {dt} __ocml_sin_f{n}({dt});\n""" for dt,n in [("float",32), ("double",64), ("_Float16",16)]]) +\
+'}\nextern "C" __attribute__((global))'
   code_for_workitem = {"g": lambda x: f"__ockl_get_group_id({x})", "l": lambda x: f"__ockl_get_local_id({x})",
                        "i": lambda x: f"(__ockl_get_group_id({x})*__ockl_get_local_size({x})+__ockl_get_local_id({x}))"}
   code_for_op = _make_hip_code_for_op()
