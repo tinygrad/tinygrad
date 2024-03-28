@@ -505,7 +505,9 @@ class Tensor:
         ret = ret.permute(ret_dims[first_dim:first_dim+max_idx_dim] + ret_dims[:first_dim] + ret_dims[first_dim+max_idx_dim:])
     return ret
 
-  def __setitem__(self,indices,v): return self.__getitem__(indices).assign(v)
+  def __setitem__(self,indices,v):
+    if isinstance(self.device, str) and self.device.startswith("DISK"): return self.__getitem__(indices).assign(v)
+    raise NotImplementedError("not implemented yet")
 
   # NOTE: using slice is discouraged and things should migrate to pad and shrink
   def slice(self, arg:Sequence[Optional[Tuple[int, sint]]], value:float=0) -> Tensor:
