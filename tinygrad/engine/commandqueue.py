@@ -1,6 +1,6 @@
 # NOTE: this will replace jit.py, realize.py, and a lot of the boilerplate in each graph executor
 from __future__ import annotations
-from typing import List, Dict, Optional, Union, DefaultDict, cast
+from typing import List, Dict, Optional, Union, DefaultDict, cast, Set
 from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.helpers import colored, getenv, GRAPH, cpu_time_execution, DEBUG
@@ -61,7 +61,7 @@ class WaitItem:
 
 # this will interface with HWCommandQueue to replace Graph
 class CommandQueue:
-  def __init__(self, schedule:List[ScheduleItem], outs:List[LazyBuffer]):
+  def __init__(self, schedule:List[ScheduleItem], outs:Set[LazyBuffer]):
     sync_sid = 0
 
     # loop through the schedule, find (real) inputs, add assign outputs, and split into different devices
