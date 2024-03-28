@@ -294,11 +294,11 @@ class HIPLanguage(CStyleLanguage):
 extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_group_id(unsigned int);
 extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_local_size(unsigned int);
 extern "C" {\n""" + "".join([
-f"__attribute__((device)) __attribute__((const)) {dt} __ocml_fmax_f{n}({dt}, {dt});\n"
-f"__attribute__((device)) __attribute__((pure)) {dt} __ocml_exp2_f{n}({dt});\n"
-f"__attribute__((device)) __attribute__((pure)) {dt} __ocml_log2_f{n}({dt});\n"
-f"__attribute__((device)) __attribute__((const)) {dt} __ocml_sqrt_f{n}({dt});\n"
-f"__attribute__((device)) {dt} __ocml_sin_f{n}({dt});\n" for dt,n in [("float",32), ("double",64), ("_Float16",16)]]) +\
+f"""  __attribute__((device)) __attribute__((const)) {dt} __ocml_fmax_f{n}({dt}, {dt});
+  __attribute__((device)) __attribute__((pure)) {dt} __ocml_exp2_f{n}({dt});
+  __attribute__((device)) __attribute__((pure)) {dt} __ocml_log2_f{n}({dt});
+  __attribute__((device)) __attribute__((const)) {dt} __ocml_sqrt_f{n}({dt});
+  __attribute__((device)) {dt} __ocml_sin_f{n}({dt});\n""" for dt,n in [("float",32), ("double",64), ("_Float16",16)]]) +\
 '}\nextern "C" __attribute__((global))'
   code_for_workitem = {"g": lambda x: f"__ockl_get_group_id({x})", "l": lambda x: f"__ockl_get_local_id({x})",
                        "i": lambda x: f"(__ockl_get_group_id({x})*__ockl_get_local_size({x})+__ockl_get_local_id({x}))"}
