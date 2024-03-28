@@ -432,6 +432,7 @@ class TestSchedule(unittest.TestCase):
     out = x.contiguous() + y.contiguous()
     check_schedule(out, 2)
 
+
 @unittest.skipIf(Device.DEFAULT == "METAL", "No multioutput in Metal because of the 32 buffer limit.")
 class TestMultiOutputSchedule(unittest.TestCase):
   def _test(self, outs_tiny:List[Tensor], outs_np:List[np.ndarray], allowed:int):
@@ -443,9 +444,15 @@ class TestMultiOutputSchedule(unittest.TestCase):
 
   def test_simple(self):
     a, b = Tensor([1,2]), Tensor([3,4])
-    out0, out1 = a+b, a*2 + b
-    out0_np, out1_np = a.numpy()+b.numpy(), a.numpy()*2 + b.numpy()
+    out0, out1 = a+b, a*b
+    out0_np, out1_np = a.numpy()+b.numpy(), a.numpy()*b.numpy()
     self._test([out0, out1], [out0_np, out1_np], 1)
+
+  def test_contiguous_single_kernel(self):
+    a, b = Tensor([1,2]), Tensor([3,4])
+    out0, out1 = (a+b).contiguous(), (a*b).contiguous()
+    out0_np, out1_np = a.numpy()+b.numpy(), a.numpy()*b.numpy()
+    self._test([out0, out1], [out0_np, out1_np], 2)
 
   def test_reduce_unique_kernel(self):
     a, b = Tensor([1,2]), Tensor([3,4])
@@ -455,11 +462,37 @@ class TestMultiOutputSchedule(unittest.TestCase):
     out3_np = out2_np+a.numpy()
     self._test([out0, out1, out2, out3], [out0_np, out1_np, out2_np, out3_np], 3)
 
-  def test_assign_unique_kernel(self):
+  def test_simple_assign(self):
     a, b = Tensor.ones(4).contiguous().realize(), Tensor.ones(4).contiguous().realize()
     a.assign(Tensor.full((4,), 2.))
     b.assign(Tensor.full((4,), 3.))
-    self._test([a, b], [np.full((4,), 2.), np.full((4,), 3.)], 2)
+    self._test([a, b], [np.full((4,), 2.), np.full((4,), 3.)], 1)
+
+  def test_double_assign(self):
+    a = Tensor.ones(4).contiguous().realize()
+    a += 1
+    a += 1
+    self._test([a], [np.full((4,), 3.)], 2)
+
+  def test_fused_diamond(self):
+    a, b = Tensor.ones(4).contiguous().realize(), Tensor.ones(4).contiguous().realize()
+    times_a, times_b = a*2, b*3 # 2, 3
+
+    # 1
+    a.assign(Tensor.full((4,), 4.))
+    b.assign(Tensor.full((4,), 5.))
+
+    # 2
+    old_a_add = (times_a+1).contiguous()
+
+    # 3
+    old_b_add = (times_b+1).contiguous()
+
+    # 4
+    new0 = a + old_a_add
+    new1 = b + old_b_add
+
+    self._test([new0, new1], [np.full((4,), 7.), np.full((4,), 9.)], 4)
 
   def test_change_shape(self):
     a, b = Tensor([1,2,3,4]), Tensor([5,6,7,8])
