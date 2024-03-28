@@ -82,6 +82,7 @@ class KFDProgram:
     self.group_segment_size = lib_mv.cast("I")[(header_offset)//4]
     self.private_segment_size = lib_mv.cast("I")[(header_offset+4)//4]
     self.kernargs_segment_size = lib_mv.cast("I")[(header_offset+8)//4]
+    assert self.private_segment_size <= self.device.max_private_segment_size, f"{self.private_segment_size=} > {self.device.max_private_segment_size=}"
 
     #from hexdump import hexdump
     #hexdump(to_mv(self.handle, 0x100))
@@ -190,15 +191,45 @@ class KFDDevice(Compiled):
     self.completion_signal.event_mailbox_ptr = self.event_page.va_addr + self.sync_event.event_slot_index*8
     self.completion_signal.event_id = self.sync_event.event_id
 
+    # amd_queue_.queue_inactive_signal
+    # self.event_page = self._gpu_alloc(0x8000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
+    # self.queue_inactive_event = kio.create_event(KFDDevice.kfd, event_page_offset=self.event_page.handle)
+    self.queue_inactive_signal = hsa.amd_signal_t.from_address(self.signals_page.va_addr+0x100)
+    self.queue_inactive_signal.value = 0
+    self.queue_inactive_signal.kind = hsa.AMD_SIGNAL_KIND_USER
+    # self.queue_inactive_signal.event_mailbox_ptr = self.event_page.va_addr + self.queue_inactive_event.event_slot_index*8
+    # self.queue_inactive_signal.event_id = self.queue_inactive_event.event_id
+
     # Queue
     self.amd_aql_queue = hsa.amd_queue_t.from_address(self.gart.va_addr)
     self.amd_aql_queue.write_dispatch_id = 0
     self.amd_aql_queue.read_dispatch_id = 0
     self.amd_aql_queue.read_dispatch_id_field_base_byte_offset = getattr(hsa.amd_queue_t, 'read_dispatch_id').offset
     self.amd_aql_queue.queue_properties = hsa.AMD_QUEUE_PROPERTIES_IS_PTR64 | hsa.AMD_QUEUE_PROPERTIES_ENABLE_PROFILING
-    self.amd_aql_queue.private_segment_aperture_base_hi = ((self.smth_base.va_addr) >> 32) & 0xFFFFFFFF
-    self.amd_aql_queue.group_segment_aperture_base_hi = ((self.smth_base.va_addr) >> 32) & 0xFFFFFFFF
-    self.amd_aql_queue.mem_alignment_size = 256
+
+    # i hope we don't need this
+    # self.amd_aql_queue.queue_inactive_signal = hsa.hsa_signal_t(ctypes.addressof(self.queue_inactive_signal))
+
+    self.amd_aql_queue.max_cu_id = 95 # TODO: hardcoded for 7900xtx
+    self.amd_aql_queue.max_wave_id = 31
+
+    # scratch setup
+    self.max_private_segment_size = 256
+    self.scratch_len = self.max_private_segment_size * (self.amd_aql_queue.max_cu_id + 1) * (self.amd_aql_queue.max_wave_id + 1)
+    self.scratch = self._gpu_alloc(self.scratch_len, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
+    self.amd_aql_queue.scratch_backing_memory_location = self.scratch.va_addr
+    self.amd_aql_queue.scratch_backing_memory_byte_size = self.scratch_len
+    self.amd_aql_queue.scratch_wave64_lane_byte_size = self.max_private_segment_size * (self.amd_aql_queue.max_wave_id + 1) // 64
+    self.amd_aql_queue.scratch_resource_descriptor[0] = self.scratch.va_addr & 0xFFFFFFFF
+    self.amd_aql_queue.scratch_resource_descriptor[1] = ((self.scratch.va_addr >> 32) & 0xFFFF) | (1 << 30) # va_hi | SWIZZLE_ENABLE
+    self.amd_aql_queue.scratch_resource_descriptor[2] = self.scratch_len & 0xFFFFFFFF
+    self.amd_aql_queue.scratch_resource_descriptor[3] = 0x20814fac # TODO: as normal bit fields
+    self.amd_aql_queue.compute_tmpring_size = 0x20010 # TODO: as normal bit fields (hardcoded for max_private_segment_size=256)
+
+    # TODO: not sure we need this at all
+    # self.amd_aql_queue.private_segment_aperture_base_hi = ((self.smth_base.va_addr) >> 32) & 0xFFFFFFFF
+    # self.amd_aql_queue.group_segment_aperture_base_hi = ((self.smth_base.va_addr) >> 32) & 0xFFFFFFFF
+    # self.amd_aql_queue.mem_alignment_size = 256
 
     self.aql_queue = kio.create_queue(KFDDevice.kfd, ring_base_address=self.aql_ring.va_addr, ring_size=self.aql_ring.size, gpu_id=self.gpu_id,
       queue_type=kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE, queue_priority=kfd.KFD_MAX_QUEUE_PRIORITY,
