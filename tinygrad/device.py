@@ -76,11 +76,12 @@ class BufferOptions:
   nolru: bool = False
 
 class Buffer:
-  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferOptions]=None, initial_value:Optional[bytes]=None):
+  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferOptions]=None, initial_value:Optional[bytes]=None,
+               offset:int = 0, base: Optional[Buffer] = None):
     assert isinstance(dtype, DType)
     if isinstance(dtype, ImageDType): options = BufferOptions(image=dtype) # TODO: image hack shouldn't be here. where should it be?
-    self.device, self.size, self.dtype, self.d, self.options = device, size, dtype, Device[device], options
-    self.allocator = self.d.allocator
+    self.device, self.size, self.dtype, self.d, self.options, self._offset, self._base = device, size, dtype, Device[device], options, offset, base
+    self.allocator, self.itsz = self.d.allocator, self.dtype.itemsize
     self._buf = opaque if opaque is not None else self.allocator.alloc(self.nbytes, options)
     # TODO: mem_used for all devices
     if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.nbytes
@@ -90,12 +91,20 @@ class Buffer:
     self.copyout(memoryview(buf))
     return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf)
   @property
-  def nbytes(self): return self.size*self.dtype.itemsize
+  def nbytes(self): return self.size*self.itsz
+  @property
+  def base(self): return self._base if self._base is not None else self
   def __del__(self):
-    if not hasattr(self, '_buf'): return # happens when __init__ has raised exception
+    if not hasattr(self, '_buf') or self.base != self: return # happens when __init__ has raised exception | when we are offset view
     if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
     self.allocator.free(self._buf, self.nbytes, self.options)
   def __repr__(self): return f"<buf device:{self.device} size:{self.size} dtype:{self.dtype}" + (">" if self.options is None else f"{self.options=}>")
+  def offset(self, offset: int, size: int) -> Buffer:
+    if (self._offset+offset) == 0 and size == self.base.size: return self
+    assert (self._offset+offset)+size <= self.base.size, "oob"
+    assert hasattr(self.allocator, "offset"), "device doesn't support offsets"
+    return Buffer(self.device, size, self.dtype, self.allocator.offset(self.base._buf, (self._offset+offset)*self.itsz,size*self.itsz),
+                  self.options, offset=self._offset+offset, base=self.base)
   def as_buffer(self, allow_zero_copy=False, force_zero_copy=False) -> memoryview:
     # zero copy with as_buffer (disabled by default due to use after free)
     if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, 'as_buffer'): return self.allocator.as_buffer(self._buf)
@@ -175,6 +184,7 @@ class _MallocAllocator(LRUAllocator):
   def as_buffer(self, src) -> memoryview: return flat_mv(memoryview(src))
   def copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
   def copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
+  def offset(self, buf, offset, size): return ctypes.cast(ctypes.byref(buf, offset), ctypes.POINTER(ctypes.c_uint8 * size)).contents
 MallocAllocator = _MallocAllocator()
 
 # **************** for Compiled Devices ****************

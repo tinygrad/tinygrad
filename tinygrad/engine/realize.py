@@ -46,6 +46,9 @@ def run_schedule(schedule:List[ScheduleItem]):
         if out.op is LoadOps.ASSIGN and out.srcs[1].base.realized is not None:
           # if the buffer isn't realized, it might be a const or something. this is fine
           out.realized = out.srcs[1].base.realized
+        elif len(si.outputs) == 1 and si.ast[0].op == LoadOps.CONTIGUOUS:
+          assert si.inputs[0].realized is not None, f"input {si.inputs[0]} isn't realized"
+          out.realized = si.inputs[0].realized.offset(si.ast[0].arg[0], si.ast[0].arg[1])
         else:
           out.realized = Buffer(out.device, out.size, out.dtype, "PLACEHOLDER" if getattr(prg, "skip_allocation", False) else None)
         del out.srcs

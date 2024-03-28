@@ -7,6 +7,7 @@ from tinygrad.helpers import GRAPH, DEBUG, prod, dedup, all_int
 from tinygrad.shape.symbolic import Variable
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.lazy import LazyBuffer
+from tinygrad.device import Device
 from tinygrad.shape.shapetracker import ShapeTracker
 
 # creation can recurse a lot
@@ -67,6 +68,9 @@ def _schedule_one(out:LazyBuffer, realizes:Set[LazyBuffer], reduce_for_op: Dict[
   var_vals: Dict[Variable, int] = out.st.var_vals.copy()
   if out.op in {LoadOps.CUSTOM, LoadOps.SYNC, LoadOps.WAIT, LoadOps.COPY, LoadOps.EMPTY}:
     op, inputs = LazyOp(out.op, (), out.arg), list(out.srcs)
+  elif out.op == LoadOps.CONTIGUOUS and (out.srcs[0].base in realizes or out.srcs[0].base.realized is not None) \
+    and not out.srcs[0].base.is_unrealized_const() and out.srcs[0].st.consecutive and hasattr(Device[out.device].allocator, "offset"):
+    op, inputs = LazyOp(LoadOps.CONTIGUOUS, (), (out.srcs[0].st.views[0].offset, out.srcs[0].size)), [out.srcs[0].base]
   else:
     output_st, membufs = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape), [out]
     op = _recursive_lazyop(out, membufs, var_vals, output_st, realizes, cache={})

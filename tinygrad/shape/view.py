@@ -91,6 +91,9 @@ class View:
     assert isinstance(ret, int), f"{ret=} is not int"
     return ret
 
+  @property
+  def consecutive(self) -> bool: return self.mask is None and self.strides == strides_for_shape(self.shape)
+
   @staticmethod
   @functools.lru_cache(maxsize=None)
   def create(shape:Tuple[sint, ...], strides:Optional[Tuple[sint, ...]]=None, offset:sint=0, mask:Optional[Tuple[Tuple[sint, sint], ...]]=None):
