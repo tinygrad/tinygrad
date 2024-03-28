@@ -47,22 +47,25 @@ DISPATCH_KERNEL_HEADER |= hsa.HSA_FENCE_SCOPE_SYSTEM << hsa.HSA_PACKET_HEADER_SC
 DISPATCH_KERNEL_HEADER |= hsa.HSA_FENCE_SCOPE_SYSTEM << hsa.HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE
 DISPATCH_KERNEL_HEADER |= hsa.HSA_PACKET_TYPE_KERNEL_DISPATCH << hsa.HSA_PACKET_HEADER_TYPE
 
+SHT_PROGBITS = 0x1
+SHF_ALLOC = 0x2
+
 class KFDProgram:
   def __init__(self, device:KFDDevice, name:str, lib:bytes):
     # TODO; this API needs the type signature of the function and global_size/local_size
     self.device, self.name, self.lib = device, name, lib
 
     e_phoff, e_shoff, e_flags, e_ehsize, e_phentsize, e_phnum, e_shentsize, e_shnum, e_shstrndx = struct.unpack_from("<QQIHHHHHH", self.lib, 0x20)
-    sections = [sh for i in range(e_shnum) if (sh:=struct.unpack_from("<IIQQQQIIQ", self.lib, e_shoff + i * e_shentsize))[1] == 0x1]
+    sections = [struct.unpack_from("<IIQQQQIIQ", self.lib, e_shoff + i * e_shentsize) for i in range(e_shnum)]
 
-    lib_gpu_size = round_up(max(sh[5]+sh[3] for sh in sections if sh[1] == 0x1), 0x1000)
+    lib_gpu_size = round_up(max(sh[5]+sh[3] for sh in sections if sh[1] == SHT_PROGBITS), 0x1000)
     self.lib_gpu = self.device._gpu_alloc(lib_gpu_size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=True)
     lib_gpu_view = to_mv(self.lib_gpu.va_addr, lib_gpu_size)
 
     for _, sh_type, sh_flags, sh_addr, sh_offset, sh_size, _, _, _ in sections:
-      if sh_type == 0x1 and sh_flags & 0x2: lib_gpu_view[sh_addr:sh_addr+sh_size] = self.lib[sh_offset:sh_offset+sh_size]
+      if sh_type == SHT_PROGBITS and sh_flags & SHF_ALLOC: lib_gpu_view[sh_addr:sh_addr+sh_size] = self.lib[sh_offset:sh_offset+sh_size]
 
-    entry_point = min(sh[3] for sh in sections if sh[1] == 0x1 and sh[2] & 0x2)
+    entry_point = min(sh[3] for sh in sections if sh[1] == SHT_PROGBITS and sh[2] & SHF_ALLOC)
     self.handle = self.lib_gpu.va_addr + entry_point
     self.group_segment_size = lib_gpu_view.cast("I")[entry_point//4]
     self.private_segment_size = lib_gpu_view.cast("I")[entry_point//4 + 1]
