@@ -2,7 +2,7 @@
 from __future__ import annotations
 import time, math, itertools, functools
 from contextlib import ContextDecorator
-from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Iterable, Dict, DefaultDict, cast, get_args
+from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Iterable, Dict, DefaultDict, Literal, cast, get_args
 from collections import defaultdict
 import numpy as np
 
@@ -997,6 +997,16 @@ class Tensor:
 
   def one_hot(self, num_classes:int) -> Tensor:
     return (self[..., None] == Tensor.arange(num_classes, requires_grad=False, device=self.device)).where(1, 0)
+
+  # nll --> Negative Log Likelihood (linter was throwing in errors...)
+  def nll_loss(self, target:Tensor, weight:Optional[Tensor] = None, reduction:Literal['none', 'mean', 'sum'] = 'mean') -> Tensor:
+    Y = target.one_hot(self.shape[-1])
+    Y = Y if weight is None else Y.matmul(Tensor.eye(self.shape[-1], dtype=weight.dtype) * weight)
+    res = {'none': self.log_softmax().mul(Y).sum(-1), 'mean': self.log_softmax().mul(Y).sum() / Y.sum(), 'sum': self.log_softmax().mul(Y).sum()}
+    return -1*res[reduction]
+
+  def cross_entropy(self, target:Tensor, weight:Optional[Tensor] = None, reduction:Literal['none', 'mean', 'sum'] = 'mean') -> Tensor:
+    return self.log_softmax().nll_loss(target, weight=weight, reduction=reduction)
 
   def scaled_dot_product_attention(self, key:Tensor, value:Tensor, attn_mask:Optional[Tensor]=None,
                                    dropout_p:float=0.0, is_causal:bool=False) -> Tensor:
