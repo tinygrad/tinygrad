@@ -177,7 +177,7 @@ class HSAGraph(MultiDeviceJITGraph):
     # The tracked dependencies are either hsa signals or ints that reference a specific aql packet.
     wait_signals: List[Optional[hsa.hsa_signal_t]] = []
 
-    if sync_with_aql_packets: wait_signals += [self.kickoff_signals[rawbuf.d] for rawbuf in read+write]
+    if sync_with_aql_packets: wait_signals += [self.kickoff_signals[cast(HSADevice, Device[rawbuf.device])] for rawbuf in read+write]
     for rawbuf in read:
       wait_signals.append(self.dependency_as_signal(self.w_dependency_map.get(rawbuf._buf), sync_with_aql_packets=sync_with_aql_packets))
     for rawbuf in write:
