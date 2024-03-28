@@ -1,18 +1,16 @@
 from __future__ import annotations
-from collections import defaultdict
-from typing import TYPE_CHECKING, Any, List, Optional, Dict, Tuple, ClassVar
+from typing import Any, List, Optional, Dict, Tuple, ClassVar
 import importlib, inspect, functools, pathlib, time, ctypes
+from collections import defaultdict
+from dataclasses import dataclass
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.helpers import ansilen, DEBUG, getenv, colored, BEAM, NOOPT, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put
 from tinygrad.helpers import prod, CACHECOLLECTING
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.ops import LazyOp, get_lazyop_info, GlobalCounters
 from tinygrad.codegen.uops import UOpGraph
-from dataclasses import dataclass
-
-if TYPE_CHECKING:
-  from tinygrad.codegen.linearizer import Linearizer
-  from tinygrad.codegen.kernel import LinearizerOptions
+from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.codegen.kernel import LinearizerOptions
 
 # **************** Device ****************
 
@@ -259,7 +257,6 @@ class Compiled:
     if DEBUG >= 3:
       from tinygrad.features.graph import print_tree
       for op in ast: print_tree(op)
-    from tinygrad.codegen.linearizer import Linearizer
     k = Linearizer(*ast, opts=self.compiler.linearizer_opts)
     k.required_optimizations()
     if not NOOPT:
