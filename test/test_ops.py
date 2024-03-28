@@ -316,6 +316,9 @@ class TestOps(unittest.TestCase):
   def test_tiny_add(self):
     helper_test_op([(3), (3)], lambda x,y: x+y, Tensor.add, forward_only=True)
 
+  def test_add_dummy(self):
+    helper_test_op([(1024, 1024), (1024, 1024)], lambda x,y: x+y, Tensor.add)
+
   def test_add(self):
     helper_test_op([(45,68), (45,68)], lambda x,y: x+y, Tensor.add)
     helper_test_op([(45,68), (45,68)], lambda x,y: x+y)

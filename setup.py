@@ -28,6 +28,7 @@ setup(name='tinygrad',
         'llvm': ["llvmlite"],
         'arm': ["unicorn"],
         'triton': ["triton-nightly>=2.1.0.dev20231014192330"],
+        'kompute': ["kp>=0.9.0"],
         'linting': [
             "pylint",
             "mypy",

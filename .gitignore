@@ -50,3 +50,5 @@ quickstart.py
 .hypothesis
 weights
 *.lprof
+tmp_kp_shader.comp
+tmp_kp_shader.comp.spv
