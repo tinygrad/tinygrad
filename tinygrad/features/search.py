@@ -74,7 +74,7 @@ def bufs_from_lin(lin:Linearizer) -> List[Buffer]:
   for k,lx in bufsts.items():
     buf_size = prod(lx[0].dtype.shape) if isinstance(lx[0].dtype, ImageDType) else max(y.st.real_size() for y in lx)
     if buf_size == 0: buf_size = 1  # create a size 1 buffer if no cell is accessed in kernel. # TODO: remove from kernel input in this case.
-    rawbufs[k] = Buffer(lin.opts.device, buf_size, lx[0].dtype)
+    rawbufs[k] = Buffer(lin.opts.device, buf_size, lx[0].dtype).allocate()
   assert all(r is not None for r in rawbufs)
   return cast(List[Buffer], rawbufs)
 
@@ -148,7 +148,7 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
   return beam[0][0]
 
 def optimize_local_size(clprg:Callable, global_size:List[int], rawbufs:List[Buffer]) -> List[int]:
-  test_rawbuffers = [Buffer(rawbufs[0].device, rawbufs[0].size, rawbufs[0].dtype), *rawbufs[1:]] if rawbufs[0] in rawbufs[1:] else rawbufs
+  test_rawbuffers = [Buffer(rawbufs[0].device, rawbufs[0].size, rawbufs[0].dtype).allocate(), *rawbufs[1:]] if rawbufs[0] in rawbufs[1:] else rawbufs
   MAX_WORKGROUP = 1024
   local_dims = [[x for x in set([sz, 1, 2, 4, 8, 16, 32, 64, 128, 256, MAX_WORKGROUP]) if x<=sz] for sz in global_size]
   local_sizes = [list(x) for x in itertools.product(*local_dims) if prod(x) <= MAX_WORKGROUP] * 2  # try each valid size twice
