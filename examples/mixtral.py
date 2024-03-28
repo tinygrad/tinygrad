@@ -42,7 +42,7 @@ if __name__ == "__main__":
     else:
       device = Device.DEFAULT
     t.set_description(f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB, loading {k} to {device}")
-    model_state_dict[k].replace(state[k].to(device).half()).realize()
+    model_state_dict[k]._replace(state[k].to(device).half()).realize()
   if CI: print(f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB")
 
   from sentencepiece import SentencePieceProcessor

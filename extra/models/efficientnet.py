@@ -158,7 +158,7 @@ class EfficientNet:
       #vnp = vnp if vnp.shape != () else np.array([vnp])
 
       if mv.shape == vnp.shape:
-        mv.replace(vnp.to(mv.device))
+        mv._replace(vnp.to(mv.device))
       else:
         print("MISMATCH SHAPE IN %s, %r %r" % (k, mv.shape, vnp.shape))
 
