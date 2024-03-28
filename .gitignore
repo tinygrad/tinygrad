@@ -24,6 +24,7 @@ disassemblers/cuda_ioctl_sniffer
 extra/datasets/cifar-10-python.tar.gz
 extra/datasets/librispeech/
 extra/datasets/imagenet/
+extra/datasets/wiki/
 extra/datasets/kits19/
 extra/datasets/squad/
 extra/datasets/img_align_celeba*
