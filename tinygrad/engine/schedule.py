@@ -209,10 +209,8 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
   while queue:
     level, buf = queue.popleft()
     seen.add(buf)
-    # multioutput assign
-    if buf.op is LoadOps.ASSIGN: key = (level, buf.shape, buf.device)
     # single output
-    elif buf.op in LoadOps or buf.device.startswith("DISK") or buf.device == "METAL" or \
+    if (buf.op in LoadOps and buf.op is not LoadOps.ASSIGN) or buf.device.startswith("DISK") or buf.device == "METAL" or \
         buf.op in ReduceOps or buf in reduce_for_op or buf.forced_realize or getenv("DISALLOW_MULTIOUT"): key: Tuple = (buf,)
     # multioutput
     else: key = (level, buf.shape, buf.device)
