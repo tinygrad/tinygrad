@@ -74,13 +74,14 @@ def _schedule_one(out:LazyBuffer, realizes:Set[LazyBuffer], reduce_for_op: Dict[
     op, inputs = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_st.simplify().unbind()[0])), membufs[1:]
   return ScheduleItem((op,), (out,), tuple(inputs), var_vals)
 
-def _merge_realizes(nodes: List[ScheduleItem], reduce_for_op: Dict[LazyBuffer, LazyBuffer]) -> ScheduleItem:
-  if len(nodes) == 1: return nodes[0]
-  nodes = sorted(nodes, key=lambda x: x.ast[0].src[0].key)
-  inputs, outputs, var_vals = {x:None for si in nodes for x in si.inputs}, [si.outputs[0] for si in nodes], merge_dicts([si.var_vals for si in nodes])
+def _fuse_group(group:List[ScheduleItem], reduce_for_op:Dict[LazyBuffer, LazyBuffer]) -> ScheduleItem:
+  if len(group) == 1: return group[0]
+  # sort the group before fusion
+  group = sorted(group, key=lambda x: x.ast[0].src[0].key)
+  inputs, outputs, var_vals = {x: None for n in group for x in n.inputs}, [n.outputs[0] for n in group], merge_dicts([n.var_vals for n in group])
   ast: List[LazyOp] = []
-  for i, si in enumerate(nodes):
-    output_st = ShapeTracker.from_shape(reduce_for_op[out].shape if (out:=si.outputs[0]) in reduce_for_op else out.shape)
+  for i, out in enumerate(outputs):
+    output_st = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape)
     op = _recursive_lazyop(out, outputs+list(inputs), var_vals, output_st, set(inputs), {})
     ast.append(LazyOp(BufferOps.STORE, (op, ), MemBuffer(i, out.dtype, output_st.simplify().unbind()[0])))
   return ScheduleItem(tuple(ast), tuple(outputs), tuple(inputs), var_vals)
@@ -218,7 +219,7 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
     for x in graph[buf]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append((level+1,x))
-  schedule: List[ScheduleItem] = [_merge_realizes(group, reduce_for_op) for group in groups.values()]
+  schedule: List[ScheduleItem] = [_fuse_group(group, reduce_for_op) for group in groups.values()]
 
   # confirm everything was scheduled correctly
   if not all(degree == 0 for degree in in_degree.values()) or len(prescheduled) != len(flatten(si.outputs for si in schedule)):
