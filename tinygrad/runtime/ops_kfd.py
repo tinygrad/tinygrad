@@ -53,35 +53,20 @@ class KFDProgram:
     self.device, self.name, self.lib = device, name, lib
 
     e_phoff, e_shoff, e_flags, e_ehsize, e_phentsize, e_phnum, e_shentsize, e_shnum, e_shstrndx = struct.unpack_from("<QQIHHHHHH", self.lib, 0x20)
-    last_vaddr = 0
-    for i in range(e_phnum):
-      offset = e_phoff + i * e_phentsize
-      p_type, p_flags, p_offset, p_vaddr, p_paddr, p_filesz, p_memsz, p_align = struct.unpack_from("<IIQQQQQQ", self.lib, offset)
-      if p_type == 0x1: last_vaddr = max(last_vaddr, p_vaddr + p_memsz)
+    sections = [sh for i in range(e_shnum) if (sh:=struct.unpack_from("<IIQQQQIIQ", self.lib, e_shoff + i * e_shentsize))[1] == 0x1]
 
-    self.lib_gpu = self.device._gpu_alloc(round_up(last_vaddr, 0x1000), kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=True)
-    lib_mv = to_mv(self.lib_gpu.va_addr, last_vaddr)
+    lib_gpu_size = round_up(max(sh[5]+sh[3] for sh in sections if sh[1] == 0x1), 0x1000)
+    self.lib_gpu = self.device._gpu_alloc(lib_gpu_size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=True)
+    lib_gpu_view = to_mv(self.lib_gpu.va_addr, lib_gpu_size)
 
-    for i in range(e_phnum):
-      offset = e_phoff + i * e_phentsize
-      p_type, p_flags, p_offset, p_vaddr, p_paddr, p_filesz, p_memsz, p_align = struct.unpack_from("<IIQQQQQQ", self.lib, offset)
-      
-      if p_type == 0x1: # PT_LOAD
-        # print("PT_LOAD", p_offset, p_vaddr, p_paddr, p_filesz, p_memsz, p_flags)
-        lib_mv[p_vaddr:p_vaddr+p_filesz] = bytearray(self.lib[p_offset:p_offset+p_filesz])
+    for _, sh_type, sh_flags, sh_addr, sh_offset, sh_size, _, _, _ in sections:
+      if sh_type == 0x1 and sh_flags & 0x2: lib_gpu_view[sh_addr:sh_addr+sh_size] = self.lib[sh_offset:sh_offset+sh_size]
 
-    header_offset = None
-    for i in range(e_shnum):
-      offset = e_shoff + i * e_shentsize
-      sh_name_off, sh_type, sh_flags, sh_addr, sh_offset, sh_size, sh_link, sh_info, sh_addralign = struct.unpack_from("<IIQQQQIIQ", self.lib, offset)
-      
-      if sh_type == 0x1 and sh_size == 64 and sh_flags == 0x2: header_offset = sh_addr
-
-    assert header_offset is not None
-    self.handle = self.lib_gpu.va_addr + header_offset
-    self.group_segment_size = lib_mv.cast("I")[(header_offset)//4]
-    self.private_segment_size = lib_mv.cast("I")[(header_offset+4)//4]
-    self.kernargs_segment_size = lib_mv.cast("I")[(header_offset+8)//4]
+    entry_point = min(sh[3] for sh in sections if sh[1] == 0x1 and sh[2] & 0x2)
+    self.handle = self.lib_gpu.va_addr + entry_point
+    self.group_segment_size = lib_gpu_view.cast("I")[entry_point//4]
+    self.private_segment_size = lib_gpu_view.cast("I")[entry_point//4 + 1]
+    self.kernargs_segment_size = lib_gpu_view.cast("I")[entry_point//4 + 2]
     assert self.private_segment_size <= self.device.max_private_segment_size, f"{self.private_segment_size=} > {self.device.max_private_segment_size=}"
 
     #from hexdump import hexdump
@@ -206,9 +191,6 @@ class KFDDevice(Compiled):
     self.amd_aql_queue.read_dispatch_id_field_base_byte_offset = getattr(hsa.amd_queue_t, 'read_dispatch_id').offset
     self.amd_aql_queue.queue_properties = hsa.AMD_QUEUE_PROPERTIES_IS_PTR64 | hsa.AMD_QUEUE_PROPERTIES_ENABLE_PROFILING
 
-    # i hope we don't need this
-    # self.amd_aql_queue.queue_inactive_signal = hsa.hsa_signal_t(ctypes.addressof(self.queue_inactive_signal))
-
     self.amd_aql_queue.max_cu_id = 95 # TODO: hardcoded for 7900xtx
     self.amd_aql_queue.max_wave_id = 31
 
@@ -222,13 +204,10 @@ class KFDDevice(Compiled):
     self.amd_aql_queue.scratch_resource_descriptor[0] = self.scratch.va_addr & 0xFFFFFFFF
     self.amd_aql_queue.scratch_resource_descriptor[1] = ((self.scratch.va_addr >> 32) & 0xFFFF) | (1 << 30) # va_hi | SWIZZLE_ENABLE
     self.amd_aql_queue.scratch_resource_descriptor[2] = self.scratch_len & 0xFFFFFFFF
-    self.amd_aql_queue.scratch_resource_descriptor[3] = 0x20814fac # TODO: as normal bit fields
-    self.amd_aql_queue.compute_tmpring_size = 0x20010 # TODO: as normal bit fields (hardcoded for max_private_segment_size=256)
+    self.amd_aql_queue.scratch_resource_descriptor[3] = 0x20814fac # FORMAT=BUF_FORMAT_32_UINT, OOB_SELECT=2, ADD_TID_ENABLE=1, TYPE=SQ_RSRC_BUF, SQ_SELs
 
-    # TODO: not sure we need this at all
-    # self.amd_aql_queue.private_segment_aperture_base_hi = ((self.smth_base.va_addr) >> 32) & 0xFFFFFFFF
-    # self.amd_aql_queue.group_segment_aperture_base_hi = ((self.smth_base.va_addr) >> 32) & 0xFFFFFFFF
-    # self.amd_aql_queue.mem_alignment_size = 256
+    wave_scratch = (((self.amd_aql_queue.max_wave_id + 1) * self.max_private_segment_size + 255) // 256)
+    self.amd_aql_queue.compute_tmpring_size = wave_scratch << 12 | (self.amd_aql_queue.max_cu_id + 1)
 
     self.aql_queue = kio.create_queue(KFDDevice.kfd, ring_base_address=self.aql_ring.va_addr, ring_size=self.aql_ring.size, gpu_id=self.gpu_id,
       queue_type=kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE, queue_priority=kfd.KFD_MAX_QUEUE_PRIORITY,
