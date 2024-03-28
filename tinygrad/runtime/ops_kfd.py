@@ -7,6 +7,7 @@ from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.runtime.driver.hip_comgr import compile_hip
 import tinygrad.runtime.autogen.kfd as kfd
+from tinygrad.runtime.driver.kfd import libc, kio, SDMAQueue
 import tinygrad.runtime.autogen.hsa as hsa
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401
 
@@ -17,27 +18,6 @@ class KFDCompiler(Compiler):
     super().__init__(f"compile_hip_{self.arch}")
   def render(self, name:str, uops) -> str: return HIPRenderer(name, uops)
   def compile(self, src:str) -> bytes: return compile_hip(src, self.arch)
-
-libc = ctypes.CDLL("libc.so.6")
-libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
-libc.mmap.restype = ctypes.c_void_p
-
-def kfd_ioctl(idir, nr, user_struct, fd, **kwargs):
-  made = user_struct(**kwargs)
-  ret = fcntl.ioctl(fd, (idir<<30) | (ctypes.sizeof(user_struct)<<16) | (ord('K')<<8) | nr, made)
-  if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
-  return made
-
-def ioctls_from_header():
-  hdr = pathlib.Path("/usr/include/linux/kfd_ioctl.h").read_text().replace("\\\n", "")
-  pattern = r'#define\s+(AMDKFD_IOC_[A-Z0-9_]+)\s+AMDKFD_(IOW?R?)\((0x[0-9a-fA-F]+),\s+struct\s([A-Za-z0-9_]+)\)'
-  matches = re.findall(pattern, hdr, re.MULTILINE)
-  idirs = {"IOW": 1, "IOR": 2, "IOWR": 3}
-  fxns = {name.replace("AMDKFD_IOC_", "").lower():
-          functools.partial(kfd_ioctl, idirs[idir], int(nr, 0x10), getattr(kfd, "struct_"+sname))
-          for name, idir, nr, sname in matches}
-  return type("KIO", (object, ), fxns)
-kio = ioctls_from_header()
 
 AQL_PACKET_SIZE = ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t)
 
@@ -108,11 +88,16 @@ class KFDProgram:
     self.device.doorbell[0] = self.device.doorbell_value
     self.device.doorbell_value += 1
 
-    evt_arr = (kfd.struct_kfd_event_data * 1)()
-    evt_arr[0].event_id = self.device.completion_signal.event_id
-    kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=1000)
+    # TODO: This does not signal, tried higher timeout and it never returns...
+    # evt_arr = (kfd.struct_kfd_event_data * 1)()
+    # evt_arr[0].event_id = self.device.completion_signal.event_id
+    # kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=1000)
 
-    assert (wp:=self.device.amd_aql_queue.write_dispatch_id) == (rp:=self.device.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
+    while True: # Kind of active wait
+      val = self.device.completion_signal.value
+      if val == 0: break
+
+    # assert (wp:=self.device.amd_aql_queue.write_dispatch_id) == (rp:=self.device.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
     if wait: return (self.device.completion_signal.end_ts-self.device.completion_signal.start_ts)/1e9
 
 class KFDAllocator(LRUAllocator):
@@ -121,11 +106,29 @@ class KFDAllocator(LRUAllocator):
     super().__init__()
 
   def _alloc(self, size:int, options:BufferOptions):
-    return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=True)
+    if options.host: return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, public=True)
+    else: return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
 
   # obviously slow
   def copyin(self, dest, src: memoryview):
-    ctypes.memmove(dest.va_addr, from_mv(src), dest.size)
+    # TODO: need to make the address visible to gpu and pass it directly to sdma.
+    mem = self._alloc(src.nbytes, BufferOptions(host=True))
+    ctypes.memmove(mem.va_addr, from_mv(src), src.nbytes)
+
+    self.device.completion_signal.value = 1
+    self.device.sdma_queue.submit_copy(dest.va_addr, mem.va_addr, src.nbytes, completion_signal=self.device.completion_signal)
+    # while self.device.completion_signal.value != 0: pass
+    # evt_arr = (kfd.struct_kfd_event_data * 1)()
+    # evt_arr[0].event_id = self.device.completion_signal.event_id
+    # kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=1000000)
+
+    while True:
+      val = self.device.completion_signal.value
+      if val == 0: break
+    # import time
+    # time.sleep(2)
+    # print("out signal", self.device.completion_signal.value)
+    # ctypes.memmove(dest.va_addr, from_mv(src), dest.size)
   def copyout(self, dest:memoryview, src):
     ctypes.memmove(from_mv(dest), src.va_addr, src.size)
 
@@ -213,4 +216,5 @@ class KFDDevice(Compiled):
     self.doorbell = to_mv(libc.mmap(0, 8192, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED,
                                     KFDDevice.kfd, self.aql_queue.doorbell_offset), 8192).cast("I")
     self.doorbell_value = 0
+    self.sdma_queue = SDMAQueue(self)
     super().__init__(device, KFDAllocator(self), KFDCompiler(self.arch), functools.partial(KFDProgram, self))

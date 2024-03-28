@@ -81,6 +81,13 @@ generate_hsa() {
     /opt/rocm/include/hsa/hsa_ext_finalize.h /opt/rocm/include/hsa/hsa_ext_image.h \
     --clang-args="-I/opt/rocm/include" \
     -o $BASE/hsa.py -l /opt/rocm/lib/libhsa-runtime64.so
+
+  # clang2py broken when pass -x c++ to prev headers
+  clang2py \
+    /home/nimlgen/amd/ROCR-Runtime/src/core/inc/sdma_registers.h \
+    --clang-args="-I/opt/rocm/include -x c++" \
+    -o $BASE/amd_sdma.py -l /opt/rocm/lib/libhsa-runtime64.so
+
   fixup $BASE/hsa.py
   sed -i "s\import ctypes\import ctypes, os\g" $BASE/hsa.py
   sed -i "s\'/opt/rocm/\os.getenv('ROCM_PATH', '/opt/rocm/')+'/\g" $BASE/hsa.py
