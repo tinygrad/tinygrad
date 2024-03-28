@@ -8,7 +8,7 @@ from tinygrad.features.graph import realized_lazybuffer
 from tinygrad.ops import ScheduleItem, LoadOps, BufferOps, GlobalCounters
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.symbolic import Variable
-from tinygrad.device import Buffer, JITRunner, Device, BufferXfer, BufferRead, BufferCopy, update_stats
+from tinygrad.device import Buffer, JITRunner, Device, BufferXfer, BufferCopy, update_stats
 
 class CustomOp(JITRunner):
   def __init__(self, fxn):
@@ -23,7 +23,6 @@ def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
   out, ast = si.outputs[0], si.ast[0]
   if ast.op is LoadOps.COPY:
     if hasattr(Device[out.device].allocator, 'transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]: return BufferXfer()
-    if si.inputs[0].device.startswith("DISK"): return BufferRead()
     return BufferCopy()
   if ast.op is LoadOps.CUSTOM: return CustomOp(ast.arg)
   return None
