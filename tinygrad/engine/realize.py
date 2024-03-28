@@ -2,7 +2,7 @@ from typing import List, Dict, Optional, cast
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters
 from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, JITRunner, update_stats
 from tinygrad.features.graph import realized_lazybuffer
-from tinygrad.helpers import colored, getenv, GRAPH, cpu_time_execution, DEBUG
+from tinygrad.helpers import colored, getenv, GRAPH
 from tinygrad.shape.symbolic import Variable
 
 class CustomOp(JITRunner):
@@ -11,16 +11,8 @@ class CustomOp(JITRunner):
     super().__init__()
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False): self.fxn(*rawbufs)
 
-class SyncOp(JITRunner):
-  def __init__(self, device):
-    self.device, self.dname = Device[device], device
-    super().__init__()
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False):
-    et = cpu_time_execution(self.device.synchronize, enable=wait or DEBUG >= 1)
-    update_stats(colored("synchronize", "RED"), 0, 0, {}, et, 1, device=self.dname)
-
 def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
-  assert len(set(x.device for x in si.outputs+si.inputs)) == 1 or si.ast[0].op in {LoadOps.COPY, LoadOps.WAIT}
+  assert len(set(x.device for x in si.outputs+si.inputs)) == 1 or si.ast[0].op is LoadOps.COPY
   if si.ast[0].op is BufferOps.STORE: return Device[si.outputs[0].device].get_runner(*si.ast)
   assert len(si.ast) == 1 and len(si.outputs) == 1, "only ASTRunner supports multioutput"
   out, ast = si.outputs[0], si.ast[0]
@@ -28,7 +20,6 @@ def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
     if hasattr(Device[out.device].allocator, 'transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]: return BufferXfer()
     return BufferCopy()
   if ast.op is LoadOps.CUSTOM: return CustomOp(ast.arg)
-  if ast.op is LoadOps.SYNC: return SyncOp(out.device)
   return None
 
 logops = open(getenv("LOGOPS", ""), "a") if getenv("LOGOPS", "") else None
