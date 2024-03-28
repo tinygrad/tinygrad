@@ -79,8 +79,8 @@ from tinygrad.engine.schedule import create_schedule
 # allocate some values + load in values
 a = LazyBuffer.loadop(LoadOps.EMPTY, (1,), dtypes.int32, DEVICE)
 b = LazyBuffer.loadop(LoadOps.EMPTY, (1,), dtypes.int32, DEVICE)
-a.realized = Buffer(DEVICE, 1, dtypes.int32).allocate().copyin(memoryview(bytearray(struct.pack("I", 2))))
-b.realized = Buffer(DEVICE, 1, dtypes.int32).allocate().copyin(memoryview(bytearray(struct.pack("I", 3))))
+a.buffer.allocate().copyin(memoryview(bytearray(struct.pack("I", 2))))
+b.buffer.allocate().copyin(memoryview(bytearray(struct.pack("I", 3))))
 
 # describe the computation
 out = a.e(BinaryOps.ADD, b)

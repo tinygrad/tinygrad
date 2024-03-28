@@ -45,10 +45,9 @@ def run_schedule(schedule:List[ScheduleItem]):
       if out.size > 0:
         if out.op is LoadOps.ASSIGN and out.srcs[1].base.realized is not None:
           # if the buffer isn't realized, it might be a const or something. this is fine
-          out.realized = out.srcs[1].base.realized
+          out.buffer = out.srcs[1].base.buffer
         else:
-          out.realized = Buffer(out.device, out.size, out.dtype)
-          if not getattr(prg, "skip_allocation", False): out.realized.allocate()
+          if not getattr(prg, "skip_allocation", False): out.buffer.allocate()
         del out.srcs
 
     # run the function (put it in JIT)
