@@ -175,15 +175,6 @@ class KFDDevice(Compiled):
     self.completion_signal.event_mailbox_ptr = self.event_page.va_addr + self.sync_event.event_slot_index*8
     self.completion_signal.event_id = self.sync_event.event_id
 
-    # amd_queue_.queue_inactive_signal
-    # self.event_page = self._gpu_alloc(0x8000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
-    # self.queue_inactive_event = kio.create_event(KFDDevice.kfd, event_page_offset=self.event_page.handle)
-    self.queue_inactive_signal = hsa.amd_signal_t.from_address(self.signals_page.va_addr+0x100)
-    self.queue_inactive_signal.value = 0
-    self.queue_inactive_signal.kind = hsa.AMD_SIGNAL_KIND_USER
-    # self.queue_inactive_signal.event_mailbox_ptr = self.event_page.va_addr + self.queue_inactive_event.event_slot_index*8
-    # self.queue_inactive_signal.event_id = self.queue_inactive_event.event_id
-
     # Queue
     self.amd_aql_queue = hsa.amd_queue_t.from_address(self.gart.va_addr)
     self.amd_aql_queue.write_dispatch_id = 0
