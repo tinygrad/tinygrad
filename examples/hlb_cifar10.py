@@ -34,13 +34,13 @@ class UnsyncedBatchNorm:
   def __call__(self, x:Tensor):
     if isinstance(x.lazydata, MultiLazyBuffer): assert x.lazydata.axis is None or x.lazydata.axis == 0 and len(x.lazydata.lbs) == self.num_devices
 
-    rshape, x = x.shape, x.reshape(self.num_devices, -1, *x.shape[1:])
-    batch_mean, batch_invstd = self.calc_stats(x)
-    ret = x.batchnorm(
+    xr = x.reshape(self.num_devices, -1, *x.shape[1:]).cast(dtypes.float32)
+    batch_mean, batch_invstd = self.calc_stats(xr)
+    ret = xr.batchnorm(
       self.weight.reshape(1, -1).expand((self.num_devices, -1)),
       self.bias.reshape(1, -1).expand((self.num_devices, -1)),
       batch_mean, batch_invstd, axis=(0, 2))
-    return ret.reshape(rshape)
+    return ret.reshape(x.shape).cast(x.dtype)
 
   def calc_stats(self, x:Tensor):
     if Tensor.training:
@@ -54,8 +54,9 @@ class UnsyncedBatchNorm:
 
       # NOTE: wow, this is done all throughout training in most PyTorch models
       if self.track_running_stats:
-        self.running_mean.assign((1-self.momentum) * self.running_mean + self.momentum * batch_mean.detach())
-        self.running_var.assign((1-self.momentum) * self.running_var + self.momentum * prod(y.shape[1:])/(prod(y.shape[1:])-y.shape[2]) * batch_var.detach())
+        self.running_mean.assign((1-self.momentum) * self.running_mean + self.momentum * batch_mean.detach().cast(self.running_mean.dtype))
+        batch_var_adjust = prod(y.shape[1:])/(prod(y.shape[1:])-y.shape[2])
+        self.running_var.assign((1-self.momentum) * self.running_var + self.momentum * batch_var_adjust * batch_var.detach().cast(self.running_var.dtype))
         self.num_batches_tracked += 1
     else:
       batch_mean = self.running_mean

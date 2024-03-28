@@ -4,7 +4,7 @@ from tinygrad.device import Device, Buffer, BufferXfer
 from tinygrad.dtype import dtypes
 from tinygrad.runtime.driver.hsa import AQLQueue
 from tinygrad.runtime.graph.hsa import VirtAQLQueue, HSAGraph
-from tinygrad.features.jit import JitItem
+from tinygrad.engine.jit import JitItem
 
 def get_hsa_inc_prog(dev, inc=1):
   prg = f"""
