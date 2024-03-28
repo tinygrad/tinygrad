@@ -72,6 +72,15 @@ class TestRawDiskBuffer(unittest.TestCase):
     with self.assertRaises(RuntimeError) as cm:
       Tensor.empty((4,), dtype=dtypes.int16, requires_grad=True, device=f"disk:{tmp}").cast(dtypes.float16)
     self.assertEqual('attempted to cast disk buffer (bitcast only)', str(cm.exception))
+
+    # Those two should be moved to test_dtype.py:test_shape_change_bitcast after bitcast works on non-disk
+    with self.assertRaises(RuntimeError) as cm:
+      Tensor.empty((3,), dtype=dtypes.int8, device=f"DISK:{tmp}").bitcast(dtypes.float16)
+    self.assertEqual('unsupported size in bitcast', str(cm.exception))
+
+    with self.assertRaises(RuntimeError) as cm:
+      Tensor.empty((4,), dtype=dtypes.int8, requires_grad=True, device=f"DISK:{tmp}").bitcast(dtypes.float16)
+    self.assertEqual('can\'t backprop through bitcast', str(cm.exception))
     pathlib.Path(tmp).unlink()
 
 @unittest.skipIf(Device.DEFAULT == "WEBGPU", "webgpu doesn't support uint8 datatype")
