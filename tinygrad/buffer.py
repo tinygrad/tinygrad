@@ -26,7 +26,7 @@ class Buffer:
       self.allocate()
       self.copyin(memoryview(initial_value))
   def allocate(self, opaque=None) -> Buffer:
-    assert not hasattr(self, '_buf'), "can't allocate already allocated buffer"
+    assert not hasattr(self, '_buf') or self._buf is None, "can't allocate already allocated buffer"
     from tinygrad.device import Device
     self.allocator = Device[self.device].allocator
     self._buf = opaque if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
@@ -47,10 +47,8 @@ class Buffer:
       newbase.views, self.views = self.views, WeakSet()
       for v in newbase.views: v.base, v._buf = newbase, self.allocator.offset(newbase._buf, v.offset, v.size*v.dtype.itemsize)
     elif self.cow: # we are the CoW view buffer, detach ourselfs from base buffer and convert into base
-      oldbuf, oldbase = self.as_buffer(allow_zero_copy=True), self.base
-      oldbase.views.remove(self)
-      self.base, self.views, self.offset, self.cow = None, WeakSet(), 0, False
-      del self._buf
+      self.base.views.remove(self)
+      oldbuf, self.base, self._buf, self.views, self.offset, self.cow = self.as_buffer(allow_zero_copy=True), None, None, WeakSet(), 0, False
       self.allocate()
       self.copyin(oldbuf)
     else: self.base.writable()
