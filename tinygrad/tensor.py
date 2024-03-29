@@ -46,7 +46,9 @@ def _loadop(op, shape:Tuple[sint,...], dtype:DType, device:Union[str, Tuple[str,
 
 def _fromcpu(x: np.ndarray) -> LazyBuffer:
   ret = LazyBuffer.loadop(LoadOps.EMPTY, x.shape, dtypes.from_np(x.dtype), "EXT")
+  # fake realize
   ret.buffer.allocate((memoryview(bytearray()), None) if x.size == 0 else (flat_mv(np.require(x, requirements='C').data), x))
+  del ret.srcs
   return ret
 
 def _get_winograd_matcols(mat, dims:int, shp:Tuple[sint, ...], device:Union[str, Tuple[str, ...]]) -> List[List[Tensor]]:
