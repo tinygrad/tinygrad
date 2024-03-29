@@ -75,7 +75,7 @@ class DoubleBuffer:
     if not isinstance(mv, memoryview): mv = memoryview(bytearray(mv))
     self.buf.copyin(mv)
     self.refbuf.copyin(mv)
-    self.check()
+    self.check(mv)
     return self
 
 class TestOffsetBuffer(unittest.TestCase):
@@ -90,6 +90,7 @@ class TestOffsetBuffer(unittest.TestCase):
     # copyout on empty thing
     with self.assertRaises(Exception):
       DoubleBuffer(16, dtypes.uint8).check()
+
   def test_simple_onelevel(self):
     # --- create ---
     d1 = DoubleBuffer(16, dtype=dtypes.uint8, initial_value=range(16))
@@ -119,7 +120,6 @@ class TestOffsetBuffer(unittest.TestCase):
     # --- create ---
     d1 = DoubleBuffer(16, dtype=dtypes.uint8, initial_value=range(16))
 
-    # --- test cow=False ---
     d2 = d1.view(4,4, cow=False)
 
     d2.check([4,5,6,7]) # should offset
@@ -131,12 +131,26 @@ class TestOffsetBuffer(unittest.TestCase):
     # --- create ---
     d1 = DoubleBuffer(16, dtype=dtypes.uint8, initial_value=range(16))
 
-    # --- test cow=True ---
     d2 = d1.view(4,4)
 
     d2.check([4,5,6,7]) # should offset
     d1.copyin([255-x for x in range(16)])
     d2.check([4,5,6,7]) # shouldn't change because it's cow=True
+
+  @unittest.expectedFailure
+  def test_multilevel_assign(self):
+    base = DoubleBuffer(16, dtype=dtypes.uint8, initial_value=range(16))
+
+    cow = base.view(4,8)
+    cow.check([4,5,6,7,8,9,10,11])
+    nocow = cow.view(4,4, cow=False)
+    nocow.check([8,9,10,11])
+    # base -> cow -> nocow <- assign
+    # base should stay the same, cow should be detached from base and be assigned to
+    nocow.copyin([100,101,102,103])
+
+    cow.check([4,5,6,7,100,101,102,103]) # check that assign was passed through nocow to cow
+    base.check(range(16)) # check that assign wasn't passed though cow to base
 
 if __name__ == "__main__":
   unittest.main()
