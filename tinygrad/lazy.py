@@ -47,8 +47,8 @@ class LazyBuffer:
 
   @property
   def realized(self) -> Optional[Buffer]:
-    # NOTE: we check for a lack of srcs to make unrealized assigns return None here
-    return self.buffer if self._base is None and hasattr(self.buffer, "_buf") and not hasattr(self, 'srcs') else None
+    # NOTE: we check for a lack of srcs instead of an allocated buffer to make unrealized assigns return None here
+    return self.buffer if self._base is None and not hasattr(self, 'srcs') else None
 
   # NOTE: this has to be a function to prevent self reference
   @property
