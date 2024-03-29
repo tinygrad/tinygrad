@@ -81,10 +81,10 @@ class DoubleBuffer:
 class TestOffsetBuffer(unittest.TestCase):
   def test_create(self):
     # 0..16
-    d1 = DoubleBuffer(16, dtypes.uint8, initial_value=[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15])
+    d1 = DoubleBuffer(16, dtypes.uint8, initial_value=range(16))
     d1.check([0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15])
     # tuple = random
-    DoubleBuffer(16, dtypes.uint8, initial_value=())
+    DoubleBuffer(16, dtypes.uint8, initial_value=()).check()
     # empty/unallocated
     DoubleBuffer(16, dtypes.uint8)
     # copyout on empty thing
@@ -117,7 +117,6 @@ class TestOffsetBuffer(unittest.TestCase):
     d2.check([255,254,253,252]) # d2 shouldn't change because it was forked before copyin to cow=False view
 
   def test_base_assign_nocow(self):
-    # --- create ---
     d1 = DoubleBuffer(16, dtype=dtypes.uint8, initial_value=range(16))
 
     d2 = d1.view(4,4, cow=False)
@@ -128,7 +127,6 @@ class TestOffsetBuffer(unittest.TestCase):
 
   @unittest.expectedFailure
   def test_base_assign_cow(self):
-    # --- create ---
     d1 = DoubleBuffer(16, dtype=dtypes.uint8, initial_value=range(16))
 
     d2 = d1.view(4,4)
@@ -162,7 +160,7 @@ class TestOffsetBuffer(unittest.TestCase):
     nocow = cow.view(4,4, cow=False)
     nocow.check([8,9,10,11])
     # base -> cow -> nocow
-    # ^-assign
+    #  ^-assign
     # base should be updated, cow and nocow should stay the same
     base.copyin([255-x for x in range(16)])
 
