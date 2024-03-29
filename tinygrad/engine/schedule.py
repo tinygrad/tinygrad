@@ -212,13 +212,16 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
     if (buf.op in LoadOps and buf.op is not LoadOps.ASSIGN) or buf.device.startswith("DISK") or buf.device == "METAL" or \
         buf.op in ReduceOps or buf.forced_realize or getenv("DISALLOW_MULTIOUT"): key: Tuple = (buf,)
     # multioutput reduce paires
-    elif buf in reduce_for_op: key = (level, reduce_for_op[buf])
+    elif buf in reduce_for_op:
+      prev_key, key = tuple(k for k in groups if k[-1] == (r:=reduce_for_op[buf])), (level, r)
+      if prev_key and prev_key[-1][0] == key[0]-1: groups[key] = groups.pop(prev_key[-1])
     # non-reduce multioutput
     else: key = (level, buf.shape, buf.device)
     groups[key].append(prescheduled[buf])
     for x in graph[buf]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append((level+1,x))
+
   schedule: List[ScheduleItem] = [_fuse_group(group, reduce_for_op) for group in groups.values()]
 
   # confirm everything was scheduled correctly
