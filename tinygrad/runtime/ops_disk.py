@@ -53,7 +53,7 @@ class DiskRunner(JITRunner):
     # TODO: there shouldn't actually be casts here, bitcasts should fold into the load
     if ast.src[0].op == UnaryOps.CAST:
       top_src = ast.src[0].src[0]
-      # TODO: assert that this is bitcast
+      assert ast.src[0].arg[1], "disk only supports bitcasts, not normal casts"
       self.new_dtype = ast.src[0].arg[0]
     else:
       top_src = ast.src[0]
@@ -68,7 +68,7 @@ class DiskRunner(JITRunner):
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Any, int], wait=False, jit=False):
     assert len(rawbufs) == 2
     src = rawbufs[1]._buf
-    rawbufs[0]._buf = DiskBuffer(src.ud, self.new_size, self.new_dtype, offset=src.offset+self.new_offset)
+    rawbufs[0].allocate(DiskBuffer(src.ud, self.new_size, self.new_dtype, offset=src.offset+self.new_offset))
 
 class DiskDevice(Compiled):
   def __init__(self, device:str): super().__init__(device, DiskAllocator(device[len("disk:"):]), None, None)

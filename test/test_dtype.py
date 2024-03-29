@@ -249,7 +249,7 @@ class TestUint8Dtype(TestDType):
 @unittest.skipIf(Device.DEFAULT == "WEBGL", "No bitcast on WebGL")
 class TestBitCast(unittest.TestCase):
   def test_shape_change_bitcast(self):
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(RuntimeError):
       _test_bitcast(Tensor([100000], dtype=dtypes.float32), dtypes.uint8, [100000])
 
   def test_bitcast_float_to_int32(self):
@@ -620,12 +620,7 @@ class TestImplicitFunctionTypeChange(unittest.TestCase):
       t = func(Tensor([4.0, 3.0])).max() == func(Tensor([4.0, 3.0]))
       result.append(t.numpy().sum())
 
-    if Device.DEFAULT not in ["PYTHON"]:
-      assert all(result)
-    else:
-      # PYTHON function default returns in double, and comparison to float can fail
-      # TODO: fix this
-      assert not all(result)
+    assert all(result)
 
 if __name__ == '__main__':
   unittest.main()

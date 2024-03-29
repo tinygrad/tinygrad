@@ -3,9 +3,8 @@ from typing import Tuple, Optional, List, cast
 import ctypes, functools, hashlib
 import tinygrad.runtime.autogen.opencl as cl
 from tinygrad.helpers import init_c_var, to_char_p_p, from_mv, OSX, DEBUG
-from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import OpenCLRenderer
-from tinygrad.device import Compiled, LRUAllocator, BufferOptions, Compiler
+from tinygrad.device import Compiled, LRUAllocator, BufferOptions, Compiler, CompilerOptions
 
 # see test/external/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
 OSX_TIMING_RATIO = (125/3) if OSX else 1.0
@@ -15,7 +14,7 @@ def check(status):
 def checked(ret, status): return (check(status.value), ret)[1]
 
 class CLCompiler(Compiler):
-  linearizer_opts = LinearizerOptions("GPU")
+  compiler_opts = CompilerOptions("GPU")
   def __init__(self, device:CLDevice, compile_key:str):
     self.device = device
     super().__init__(f"compile_cl_{compile_key}")

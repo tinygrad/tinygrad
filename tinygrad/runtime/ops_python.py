@@ -5,10 +5,9 @@ from typing import Tuple, List, Optional, Any, Dict
 import pickle, base64, itertools, time, struct
 from tinygrad.dtype import DType, dtypes, ImageDType
 from tinygrad.helpers import all_same, getenv, flatten
-from tinygrad.device import Compiled, Allocator, Compiler
+from tinygrad.device import Compiled, Allocator, Compiler, CompilerOptions
 from tinygrad.codegen.uops import UOpGraph, UOps, exec_alu
 from tinygrad.ops import BinaryOps, TernaryOps
-from tinygrad.codegen.kernel import LinearizerOptions
 
 def _load(m, i):
   if i < 0 or i >= len(m): raise IndexError(f"load out of bounds, size is {len(m)} and access is {i}")
@@ -179,9 +178,9 @@ class PythonProgram:
     return time.perf_counter() - st
 
 class PythonCompiler(Compiler):
-  linearizer_opts = LinearizerOptions("METAL", has_tensor_cores=True) if getenv("EMULATE_METAL") else \
-    (LinearizerOptions("HSA", has_tensor_cores=True) if getenv("EMULATE_HSA") else \
-    (LinearizerOptions("CUDA", has_tensor_cores=True) if getenv("EMULATE_CUDA") else LinearizerOptions("PYTHON")))
+  compiler_opts = CompilerOptions("METAL", has_tensor_cores=True) if getenv("EMULATE_METAL") else \
+    (CompilerOptions("HSA", has_tensor_cores=True) if getenv("EMULATE_HSA") else \
+    (CompilerOptions("CUDA", has_tensor_cores=True) if getenv("EMULATE_CUDA") else CompilerOptions("PYTHON")))
   def render(self, name:str, uops:UOpGraph) -> str:
     lops = [(u.uop, u.dtype, [uops.uops.index(v) for v in u.vin], u.arg) for u in uops]
     return base64.b64encode(pickle.dumps(lops)).decode()
