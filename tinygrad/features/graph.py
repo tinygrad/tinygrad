@@ -49,7 +49,7 @@ top_colors = {LoadOps: '#FFFFa0', UnaryOps: "#c0c0c0", ReduceOps: "#FFA0A0", Bin
               TernaryOps: "#c0c0c0", BufferOps: '#a0a0ff'}
 def log_lazybuffer(lb:'LazyBuffer', scheduled=False):
   init_graph()
-  if lb.base.realized is None and lb.base.op == LoadOps.CONST: return
+  if lb.base.realized is None and lb.base.op is LoadOps.CONST: return
   if lb.base != lb:
     offset = lb.st.expr_idxs([NumNode(0)] * len(lb.st.shape))[0]
     label = f"{lb.st.shape}\n{lb.st.real_strides()}" + (f"\n{offset}" if offset != 0 else "")
@@ -60,7 +60,7 @@ def log_lazybuffer(lb:'LazyBuffer', scheduled=False):
     label_append = []
     for idx,x in enumerate(lb.srcs):
       if nm(x) not in G.nodes: log_lazybuffer(x)
-      if x.base.realized is None and x.base.op == LoadOps.CONST:
+      if x.base.realized is None and x.base.op is LoadOps.CONST:
         label_append.append(f"\nCONST{idx} {x.base.arg}")
       else:
         G.add_edge(nm(x), nm(lb), color='#a0a0a0')

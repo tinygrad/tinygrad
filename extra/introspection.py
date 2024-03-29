@@ -11,7 +11,7 @@ def print_objects():
   tensors = [x for x in gc.get_objects() if isinstance(x, Tensor)]
   tensor_ram_used = sum([prod(x.shape)*4 for x in tensors])
   lazybuffers = [x for x in gc.get_objects() if isinstance(x, LazyBuffer)]
-  gpubuffers = [x for x in gc.get_objects() if isinstance(x, Buffer)]
+  gpubuffers = [x for x in gc.get_objects() if isinstance(x, Buffer) and hasattr(x, "_buf")]
   realized_buffers = [x.realized for x in lazybuffers if x.base == x and x.realized]
   gpubuffers_orphaned = [x for x in gpubuffers if x not in realized_buffers]
 
@@ -24,7 +24,7 @@ def print_objects():
     bb = gc.get_referrers(tb)
     for b in bb:
       if b is not gpubuffers and b is not gpubuffers_orphaned:
-        print(tb, "\nreference", type(b), len(b), str(b)[0:150])
+        print(tb, "\nreference", type(b), str(b)[0:150])
         for x in gc.get_referrers(b):
           print("double reference", str(x)[0:100])
         print("\n")
