@@ -2,7 +2,7 @@ import unittest
 from typing import Union, Tuple, Optional, List
 from tinygrad.buffer import Buffer, flat_mv
 from tinygrad.dtype import DType, dtypes
-from random import randbytes, randint, seed
+from random import randbytes, randint, choice, seed
 
 def mvs(mv: memoryview) -> str:
   return str(list(mv))
@@ -165,12 +165,28 @@ class TestOffsetBuffer(unittest.TestCase):
     cow.check([4,5,6,7,8,9,10,11])
     nocow.check([8,9,10,11])
 
+  def test_changing_dtype(self):
+    base = DoubleBuffer(16, dtype=dtypes.uint8, initial_value=range(16))
+    i32 = base.view(4,4, dtype=dtypes.int32)
+    i32.check([4,5,6,7])
+    assert i32.refbuf.size == 1 and i32.refbuf.nbytes == 4
+    u16 = i32.view(0,4,dtype=dtypes.uint16)
+    u16.check([4,5,6,7])
+    assert u16.refbuf.size == 2 and i32.refbuf.nbytes == 4
+    with self.assertRaises(AssertionError):
+      base.view(0,6).view(0,6,dtype=dtypes.int32)
+
   def test_fuzz(self):
     seed(1337)
     for _ in range(1000):
       try:
         syms = {"base": randint(16,1024)}
         prg = [f"base = DoubleBuffer({syms['base']}, dtype=dtypes.uint8, initial_value=())"]
+        def dt(sz:int) -> str:
+          avail = ["dtypes.uint8", "dtypes.int8"]
+          if sz % 2 == 0: avail.extend(["dtypes.uint16", "dtypes.int16", "dtypes.float16"]*12)
+          if sz % 4 == 0: avail.extend(["dtypes.uint32", "dtypes.int32", "dtypes.float32"]*24)
+          return choice(avail)
         for _ in range(randint(4, 64)):
           action = randint(0,100)
           if action < 50:
@@ -180,13 +196,13 @@ class TestOffsetBuffer(unittest.TestCase):
               continue
             newof = randint(0,srcsz-1)
             newsz = randint(1,srcsz-newof)
-            prg.append(f"b{len(syms)} = {src}.view({newof}, {newsz}, cow={bool(randint(0,1))})")
+            prg.append(f"b{len(syms)} = {src}.view({newof}, {newsz}, dtype={dt(newsz)}, cow={bool(randint(0,1))})")
             syms[f"b{len(syms)}"] = newsz
           elif action < 90:
             dst = list(syms.keys())[randint(0, len(syms)-1)]
             prg.append(f"{dst}.copyin(())")
           else:
-            for _ in range(randint(1, 10)):
+            for _ in range(randint(1, 5)):
               dst = list(syms.keys())[randint(0, len(syms)-1)]
               prg.append(f"{dst}.check()")
 
