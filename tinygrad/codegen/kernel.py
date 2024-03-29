@@ -424,7 +424,7 @@ class Kernel:
       if opt.op is not OptOps.PADTO: check(self.full_shape[axis] % amt == 0, "no longer valid shift")
     else: amt = -1
 
-    if self.reduceop and (opt.op in [OptOps.GROUP, OptOps.GROUPTOP] or (self.group_for_reduces and opt.op not in [OptOps.NOLOCALS, OptOps.PADTO])):
+    if self.reduceop and (opt.op in {OptOps.GROUP, OptOps.GROUPTOP} or (self.group_for_reduces and opt.op not in {OptOps.NOLOCALS, OptOps.PADTO})):
       acc_sz = dt.base.itemsize if isinstance((dt:=get_lazyop_info(self.reduceop).dtype), ImageDType) else dt.itemsize
       upcast_sz = prod(self.full_shape[self.shape_len-self.upcasted:])
       local_sz = prod(self.full_shape[self.first_reduce-self.local_dims:self.first_reduce+self.group_for_reduces])
@@ -439,7 +439,7 @@ class Kernel:
       check(self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem")
       check(axis >= self.first_reduce + self.group_for_reduces and axis < self.shape_len-self.upcasted, "must be reduce axis to group")
       check(not self.tensor_core, "can't group with tensor cores")
-      self.shift_to(axis, amt, top=(opt.op==OptOps.GROUPTOP), insert_before=self.first_reduce + self.group_for_reduces)
+      self.shift_to(axis, amt, top=(opt.op is OptOps.GROUPTOP), insert_before=self.first_reduce + self.group_for_reduces)
       self.group_for_reduces += 1
     elif opt.op is OptOps.UNROLL:                     # purple
       check(axis < self.shape_len-self.upcasted, "can't upcasted already upcasted")
