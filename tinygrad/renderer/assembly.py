@@ -64,11 +64,6 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
     root.vin = (x,y,z,new)
     return ld_rep(root,x,y)
 
-  def mulacc(root, muls, non_muls):
-    if dtypes.is_float(root.dtype):
-      root.arg = TernaryOps.MULACC
-      root.vin = muls.vin + (non_muls,)
-
   def ptr_ar(root):
     assert root.arg in {'.shared', '.global', None}
     if root.arg is None: root.arg = '.shared' if root.vin[0].uop == UOps.DEFINE_LOCAL else '.global'  # move this to the argL
@@ -83,8 +78,9 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
 
   matcher = PatternMatcher([
     ({"__name__": "root", "uop": UOps.ALU, "arg": BinaryOps.CMPEQ, "vin": ({"__name__": "x", "dtype": dtypes.bool},{"__name__": "y"})}, eq_rep),
-    ({"__name__": "root", "uop": UOps.ALU, "arg": BinaryOps.ADD,
-      "vin": [{"__name__": "non_muls"}, {"__name__": "muls", "uop": UOps.ALU, "arg": BinaryOps.MUL}]}, mulacc),
+    ({"__name__": "root", "uop": UOps.ALU, "arg": BinaryOps.ADD, "dtype": set([dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64]),
+      "vin": [{"__name__": "non_muls"}, {"__name__": "muls", "uop": UOps.ALU, "arg": BinaryOps.MUL}]},
+      lambda root, muls, non_muls : uops.add(UOps.ALU, root.dtype, muls.vin + (non_muls,), TernaryOps.MULACC, insert_before=uops.uops.index(root))),
     ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": ({"__name__": "x", "dtype": dtypes.bool},{"__name__": "y"})}, lt_rep),
     ({"__name__": "root", "uop": UOps.LOAD,"dtype": dtypes.bool,
       "vin": ({"__name__": "x"},{"__name__": "y"},{"__name__": "z"},{"__name__": "k"})}, gate_rep),
