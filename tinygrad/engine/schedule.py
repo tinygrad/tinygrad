@@ -151,10 +151,9 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
       for tr,st in child_set.items():
         if tr in realizes:
           realized_children[tr] = st
-          # can only have one output buffer
           # can only reduce contiguous
           # max one reduceop per kernel
-          if len(realized_children) > 1 or not st.contiguous or st.size != r.st.size or (tr in reduce_for_op and reduce_for_op[tr] != r):
+          if not st.contiguous or st.size != r.st.size or (tr in reduce_for_op and reduce_for_op[tr] != r):
             can_chase = tr not in reduce_for_op or reduce_for_op[tr] == r
             forced_realize = True
             break
@@ -187,8 +186,7 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
         reduce_for_op[tr] = r
       realizes.add(tr)
     else:
-      assert len(realized_children) == 1
-      reduce_for_op[next(iter(realized_children.keys()))] = r
+      for child in realized_children: reduce_for_op[child] = r
 
   # preschedule all buffers in realizes
   prescheduled = {x:_schedule_one(x, realizes, reduce_for_op) for x in realizes if x not in seen and x.realized is None and x.op is not LoadOps.CONST}
@@ -212,8 +210,10 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
     seen.add(buf)
     # single output
     if (buf.op in LoadOps and buf.op is not LoadOps.ASSIGN) or buf.device.startswith("DISK") or buf.device == "METAL" or \
-        buf.op in ReduceOps or buf in reduce_for_op or buf.forced_realize or getenv("DISALLOW_MULTIOUT"): key: Tuple = (buf,)
-    # multioutput
+        buf.op in ReduceOps or buf.forced_realize or getenv("DISALLOW_MULTIOUT"): key: Tuple = (buf,)
+    # multioutput reduce paires
+    elif buf in reduce_for_op: key = (level, reduce_for_op[buf])
+    # non-reduce multioutput
     else: key = (level, buf.shape, buf.device)
     groups[key].append(prescheduled[buf])
     for x in graph[buf]:

@@ -465,6 +465,12 @@ class TestMultiOutputSchedule(unittest.TestCase):
     out3_np = out2_np+a.numpy()
     self._test([out0, out1, out2, out3], [out0_np, out1_np, out2_np, out3_np], 3)
 
+  def test_reduce_pair_fusion(self):
+    a_sum = Tensor([1,2,3,4]).sum()
+    out0, out1 = a_sum+2, a_sum+3
+    out0_np, out1_np = a_sum.numpy()+2, a_sum.numpy()+3
+    self._test([out0, out1], [out0_np, out1_np], 1)
+
   def test_simple_assign(self):
     a, b = Tensor.ones(4).contiguous().realize(), Tensor.ones(4).contiguous().realize()
     a.assign(Tensor.full((4,), 2.))
@@ -528,7 +534,7 @@ class TestMultiOutputSchedule(unittest.TestCase):
     for _ in range(4):
       jitted_step(tiny_model, tiny_adam)
       train_step(torch_model, torch_adam)
-    assert_jit_cache_len(jitted_step, 7)
+    assert_jit_cache_len(jitted_step, 6)
     np.testing.assert_allclose(tiny_model.x.detach().numpy(), torch_model.x.detach().numpy(), atol=1e-4, rtol=1e-4)
 
   @unittest.skip("Doesn't yet fuse multilevel")
