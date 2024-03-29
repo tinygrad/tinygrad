@@ -670,7 +670,7 @@ class Tensor:
       # permute to the sorted letter order, then reshape/expand to create dimensions for the missing letters
       xs_.append(x.permute(order).reshape([val if letter in letters else 1 for letter,val in letter_val]).expand([val for _,val in letter_val]))
 
-    # Determine the inverse permutation to revert back to original order
+    # determine the inverse permutation to revert back to original order
     rhs_letter_order = argsort(list(output))
     rhs_order = argsort(rhs_letter_order)
 
