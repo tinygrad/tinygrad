@@ -103,7 +103,7 @@ class TestRandomness(unittest.TestCase):
     self.assertTrue(normal_test(Tensor.randn))
     self.assertTrue(equal_distribution(Tensor.randn, torch.randn, lambda x: np.random.randn(*x)))
 
-  @given(strat.sampled_from([dtypes.float, dtypes.float16]))#, dtypes.bfloat16]))  # TODO: add bfloat16
+  @given(strat.sampled_from([dtypes.float, dtypes.float16, dtypes.bfloat16]))
   @unittest.skipIf(Device.DEFAULT=="RHIP", "broken in HIP CI")
   def test_randn_finite(self, default_float):
     if not is_dtype_supported(default_float): return
@@ -113,10 +113,9 @@ class TestRandomness(unittest.TestCase):
     t = Tensor.randn(1024, 1024)
     mx = t.max().numpy().item()
     mn = t.min().numpy().item()
-    if default_float == dtypes.float or (default_float == dtypes.float16 and not THREEFRY.value):
-      print(f"testing with {default_float=}")
-      assert math.isfinite(mx), mx
-      assert math.isfinite(mn), mn
+    print(f"testing with {default_float=}")
+    assert math.isfinite(mx), mx
+    assert math.isfinite(mn), mn
     dtypes.default_float = old_default_float
 
   def test_randint(self):
