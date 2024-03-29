@@ -7,6 +7,10 @@ import torch
 from tinygrad import nn, dtypes, Tensor
 from tinygrad.helpers import THREEFRY
 from test.helpers import is_dtype_supported
+from hypothesis import given, settings, strategies as strat
+
+settings.register_profile("my_profile", max_examples=200, deadline=None)
+settings.load_profile("my_profile")
 
 # https://gist.github.com/devries/11405101
 def ksprob(a):
@@ -99,6 +103,20 @@ class TestRandomness(unittest.TestCase):
   def test_randn(self):
     self.assertTrue(normal_test(Tensor.randn))
     self.assertTrue(equal_distribution(Tensor.randn, torch.randn, lambda x: np.random.randn(*x)))
+
+  @given(strat.sampled_from([dtypes.float, dtypes.float16, dtypes.bfloat16]))
+  def test_randn_finite(self, default_float):
+    old_default_float = dtypes.default_float
+    # low precision can result in inf from randn
+    dtypes.default_float = default_float
+    t = Tensor.randn(1024, 1024)
+    mx = t.max().numpy().item()
+    mn = t.min().numpy().item()
+    if default_float == dtypes.float or (default_float == dtypes.float16 and not THREEFRY.value):
+      # TODO: fix for bfloat16
+      assert math.isfinite(mx), mx
+      assert math.isfinite(mn), mn
+    dtypes.default_float = old_default_float
 
   def test_randint(self):
     self.assertFalse(normal_test(Tensor.randint))
