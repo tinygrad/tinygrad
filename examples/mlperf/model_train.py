@@ -236,12 +236,9 @@ def train_rnnt():
   pass
 
 def train_bert():
-  # TODO: Log trainable parameters ? 
-  # TODO: Change weight init range
-  # TODO CHECK resuming
-  # TODO: First eval acc == 0,34something
   from examples.mlperf.dataloader import batch_load_bert
   from examples.mlperf.helpers import get_mlperf_bert_model
+  from examples.mlperf.lr_schedulers import PolynomialDecayWithWarmup
 
   config = {}
   seed = config["seed"] = getenv("SEED", 12345)
@@ -259,47 +256,57 @@ def train_bert():
     x.realize().to_(GPUS)
   parameters = get_parameters(model)
 
-  # ** hyperparameters ** NOTE: Check which hparams are actually allowed to be changed
-  epochs            = config["epochs"]            = getenv("EPOCHS", 1)
-  BS                = config["BS"]                = getenv("BS", 32 * len(GPUS))
-  EVAL_BS           = config["EVAL_BS"]           = getenv("EVAL_BS", 8)
-  max_lr            = config["MAX_LR"]            = getenv("MAX_LR", 1e-4)
+  # ** hyperparameters **
+  epochs             = config["epochs"]                 = getenv("EPOCHS", 1)
+  BS                 = config["GLOBAL_BATCH_SIZE"]      = getenv("GLOBAL_BATCH_SIZE", 32 * len(GPUS))
+  EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 8)
+  max_lr             = config["OPT_BASE_LEARNING_RATE"] = getenv("OPT_BASE_LEARNING_RATE", 1e-4)
 
-  train_steps       = config["TRAIN_STEPS"]       = getenv("TRAIN_STEPS", 100000)
-  warmup_steps      = config["WARMUP_STEPS"]      = getenv("WARMUP_STEPS", 10000)
-  max_eval_steps    = config["MAX_EVAL_STEPS"]    = getenv("MAX_EVAL_STEPS", 100)
-  eval_step_freq    = config["EVAL_STEP_FREQ"]    = math.floor(0.05 * (230.23 * BS + 3000000) / 25000) * 25000
+  train_steps        = config["TRAIN_STEPS"]            = getenv("TRAIN_STEPS", 100000)
+  warmup_steps       = config["NUM_WARMUP_STEPS"]       = getenv("NUM_WARMUP_STEPS", 10000)
+  start_warmup_steps = config["START_WARMUP_STEPS"]     = getenv("START_WARMUP_STEPS", 0)
+  max_eval_steps     = config["MAX_EVAL_STEPS"]         = getenv("MAX_EVAL_STEPS", 100)
+  eval_step_freq     = config["EVAL_STEP_FREQ"]         = (math.floor(0.05 * (230.23 * BS + 3000000) / 25000) * 25000) / BS
+  save_ckpt_freq     = config["SAVE_CKPT_FREQ"]         = getenv("SAVE_CKPT_FREQ", 1000)
 
-  decay             = config["decay"]             = getenv("DECAY", 0.01)
+  decay              = config["decay"]                  = getenv("DECAY", 0.01)
+  poly_power         = config["poly_power"]             = getenv("POLY_POWER", 1.0)
 
-  target, achieved                                = getenv("TARGET", 0.72), False
+  target, achieved                                      = getenv("TARGET", 0.72), False
 
   config["BEAM"]    = BEAM.value
 
+  assert 800 % EVAL_BS == 0, "Evaluation batch size must divide 800 without remainder"
+
+  # ** Log hparams **
+  print("Hyperparameters:")
+  for key, value in config.items():
+      print(f'HParam: "{key}": {value}')
+
   # ** Optimizer **
-  skip_list = [v for k, v in get_state_dict(model).items() if "bias" in k or "layernorm" in k] # TODO: Check it is actually called LayerNorm
+  skip_list = [v for k, v in get_state_dict(model).items() if "bias" in k or "LayerNorm" in k]
   parameters = [x for x in parameters if x not in set(skip_list)]
-  optimizer = LAMB(parameters, 1 / warmup_steps, eps=1e-6, wd=decay, adam=True) # TODO: Double check optimizer settings
-  optimizer_skip = LAMB(skip_list, 1 / warmup_steps, eps=1e-6, wd=0.0, adam=True)
+  optimizer = LAMB(parameters, 1 / warmup_steps, eps=1e-6, wd=decay, adam=False) # TODO: Double check optimizer settings
+  optimizer_skip = LAMB(skip_list, 1 / warmup_steps, eps=1e-6, wd=0.0, adam=False)
   optimizer_group = OptimizerGroup(optimizer, optimizer_skip)
 
   # ** LR scheduler **
-  scheduler = OneCycleLR(optimizer, max_lr, 1e9, max_lr * 1e12, train_steps, warmup_steps / train_steps)
+  scheduler = PolynomialDecayWithWarmup(optimizer, max_lr, 0, train_steps, warmup_steps, power=poly_power)
   print(f"Training with batch size {BS} for {epochs} epochs with each {train_steps} steps")
 
   # ** resume from checkpointing **
   start_step = 0
   if ckpt:=getenv("RESUME", ""):
     load_training_state(model, optimizer_group, scheduler, safe_load(ckpt))
-    start_step = scheduler.epoch_counter.numpy().item() # We will likely do only one epoch
+    start_step = scheduler.epoch_counter.numpy().item() # We will likely only do one epoch
     print(f"resuming from {ckpt} at step {start_step}")
 
   # ** init wandb **
   WANDB = getenv("WANDB")
   if WANDB:
     import wandb
-    wandb_args = {"id": wandb_id, "project": "MLPerf"} if (wandb_id := getenv("WANDB_RESUME", "")) else {}
-    wandb.init(config=config, **wandb_args)
+    wandb_args = {"id": wandb_id, "resume": "must"} if (wandb_id := getenv("WANDB_RESUME", "")) else {}
+    wandb.init(config=config, **wandb_args, project="MLPerf-BERT")
 
   BENCHMARK = getenv("BENCHMARK")
 
@@ -326,7 +333,7 @@ def train_bert():
 
     mlm_predictions = lm_logits.log_softmax().argmax(-1)
     mask = (masked_lm_weights == 1.0)
-    mlm_accuracy = ((mlm_predictions == masked_lm_ids) == mask).float().mean()
+    mlm_accuracy = (((mlm_predictions == masked_lm_ids) == mask).float() / mask.float().sum()).mean()
 
     lm_loss = lm_logits.sparse_categorical_crossentropy(masked_lm_ids, ignore_index=masked_lm_weights)
     clsf_loss = clsf_logits.binary_crossentropy_logits(next_sentence_labels)
@@ -346,7 +353,7 @@ def train_bert():
 
   # ** epoch loop **
   step_times = []
-  for e in range(epochs):
+  for e in range(1, epochs + 1):
     # ** train loop **
     Tensor.training = True
     train_it = iter(tqdm(batch_load_bert(BS, val=False), total=train_steps))
@@ -380,7 +387,7 @@ def train_bert():
       if WANDB:
         wandb.log({"lr": optimizer.lr.numpy(), "train/loss": loss, "train/step_time": cl - st,
                    "train/python_time": pt - st, "train/data_time": dt - pt, "train/cl_time": cl - dt,
-                   "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": e + (i + 1) / train_steps})
+                   "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st)})
 
       data, next_data = next_data, None
       i += 1
@@ -421,6 +428,7 @@ def train_bert():
         total_lm_accuracy = sum(pair[0] for pair in eval_accuracy) / len(eval_accuracy)
         total_clsf_accuracy = sum(pair[1] for pair in eval_accuracy) / len(eval_accuracy)
         total_fw_time = sum(eval_times) / len(eval_times)
+        tqdm.write("\nEVAL Results:\n\n")
         tqdm.write(f"eval lm loss: {total_lm_loss:.2f}, eval clsf loss: {total_clsf_loss:.2f}, eval lm accuracy: {total_lm_accuracy:.2f}, \
                     eval clsf accuracy: {total_clsf_accuracy:.2f}, eval time: {total_fw_time:.2f}")
         if WANDB:
@@ -433,17 +441,17 @@ def train_bert():
           fn = f"./ckpts/bert-large.safe"
           safe_save(get_state_dict(model), fn)
           print(f" *** Model saved to {fn} ***")
+          print(f"Reference Convergence point reached after {(e - 1) * train_steps * BS + i * BS} datasamples.")
           achieved = True
 
-        # checkpoint every time we eval
-        if getenv("CKPT"):
-          if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
-          if WANDB and wandb.run is not None:
-            fn = f"./ckpts/{time.strftime('%Y%m%d_%H%M%S')}_{wandb.run.id}_e{e}.safe"
-          else:
-            fn = f"./ckpts/{time.strftime('%Y%m%d_%H%M%S')}_e{e}.safe"
-          print(f"saving ckpt to {fn}")
-          safe_save(get_training_state(model, optimizer_group, scheduler), fn)
+      if getenv("CKPT") and i % save_ckpt_freq == 0:
+        if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
+        if WANDB and wandb.run is not None:
+          fn = f"./ckpts/{time.strftime('%Y%m%d_%H%M%S')}_{wandb.run.id}_e{e}.safe"
+        else:
+          fn = f"./ckpts/{time.strftime('%Y%m%d_%H%M%S')}_e{e}.safe"
+        print(f"saving ckpt to {fn}")
+        safe_save(get_training_state(model, optimizer_group, scheduler), fn)
 
 def train_maskrcnn():
   # TODO: Mask RCNN

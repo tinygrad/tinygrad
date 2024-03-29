@@ -192,7 +192,14 @@ def get_bert_qa_prediction(features, example, start_end_logits):
   return "empty"
 
 def get_mlperf_bert_model(config_path:str):
+  from extra.models import bert
+  from examples.mlperf.initializers import LinearBert, EmbeddingBert
+
+  bert.Linear = LinearBert
+  bert.Embedding = EmbeddingBert 
+
   from extra.models.bert import BertForMLPerf
+
   with open(config_path, "r") as f:
     config = json.load(f)
   return BertForMLPerf(
@@ -206,3 +213,11 @@ def get_mlperf_bert_model(config_path:str):
     config["attention_probs_dropout_prob"], 
     config["hidden_dropout_prob"]
   )
+
+if __name__ == "__main__":
+  model = get_mlperf_bert_model("/home/elwa/repos/tinygrad/extra/datasets/wiki/bert_config.json")
+  from tinygrad.nn.state import get_state_dict
+  for k, v in get_state_dict(model).items():
+    if "bias" in k or "LayerNorm" in k:
+      print(k, v)
+  #print([v for k, v in get_state_dict(model).items() if "bias" in k or "layernorm" in k]) # TODO: Check it is actually called LayerNorm

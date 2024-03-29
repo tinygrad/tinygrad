@@ -25,3 +25,13 @@ class Linear(nn.Linear):
     super().__init__(in_features, out_features, bias=bias)
     self.weight = Tensor.normal((out_features, in_features), mean=0.0, std=0.01)
     if bias: self.bias = Tensor.zeros(out_features)
+
+class LinearBert(nn.Linear):
+  def __init__(self, in_features, out_features, bias=True, std=0.02):
+    self.weight = std * rand_truncn(out_features, in_features)# Init as trunc normal
+    self.bias = Tensor.zeros(out_features) if bias else None # Init bias as zero
+
+class EmbeddingBert(nn.Embedding):
+  def __init__(self, vocab_size:int, embed_size:int, std=0.02):
+    self.vocab_size, self.embed_size = vocab_size, embed_size
+    self.weight = std * rand_truncn(vocab_size, embed_size)

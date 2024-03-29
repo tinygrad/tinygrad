@@ -1,8 +1,12 @@
-from tinygrad.tensor import Tensor
-from tinygrad.nn import Linear, LayerNorm, Embedding
-from tinygrad.helpers import fetch, get_child
 from pathlib import Path
+from tinygrad.tensor import Tensor
+from tinygrad import nn
+from tinygrad.helpers import fetch, get_child
+from examples.mlperf.initializers import LinearBert, EmbeddingBert
 
+Linear = nn.Linear
+Embedding = nn.Embedding
+LayerNorm = nn.LayerNorm
 
 class BertForQuestionAnswering:
   def __init__(self, hidden_size=1024, intermediate_size=4096, max_position_embeddings=512, num_attention_heads=16, num_hidden_layers=24, type_vocab_size=2, vocab_size=30522, attention_probs_dropout_prob=0.1, hidden_dropout_prob=0.1):
@@ -47,16 +51,16 @@ class BertForMLPerf:
       hidden_dropout_prob
     )
     # for clsf:
-    self.fc = Linear(hidden_size, hidden_size)
+    self.fc = LinearBert(hidden_size, hidden_size)
     self.activation1 = Tensor.tanh
-    self.classifier = Linear(hidden_size, 2)
+    self.classifier = LinearBert(hidden_size, 2)
 
     # for lm:
-    self.linear = Linear(hidden_size, hidden_size)
+    self.linear = LinearBert(hidden_size, hidden_size)
     self.activation2 = Tensor.gelu
     self.norm = Tensor.layernorm
 
-    self.decoder = Linear(hidden_size, vocab_size, bias=False)
+    self.decoder = LinearBert(hidden_size, vocab_size, bias=False)
     self.decoder.weight = self.model.embeddings.word_embeddings.weight
     self.decoder_bias = Tensor.zeros(vocab_size)
   
