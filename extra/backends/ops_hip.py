@@ -4,13 +4,12 @@ from typing import Tuple, TypeVar, List, Any, cast, Set
 import tinygrad.runtime.autogen.hip as hip
 from tinygrad.helpers import DEBUG, getenv, init_c_var
 from tinygrad.helpers import from_mv, round_up, to_mv, colored, init_c_struct_t
-from tinygrad.device import Compiled, LRUAllocator, BufferOptions, JITRunner, Device, Buffer, MallocAllocator, update_stats, Compiler
+from tinygrad.device import Compiled, LRUAllocator, BufferOptions, JITRunner, Device, Buffer, MallocAllocator, update_stats, Compiler, CompilerOptions
 from tinygrad.renderer.cstyle import HIPRenderer
-from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.runtime.driver.hip_comgr import compile_hip
 
 class HIPCompiler(Compiler):
-  linearizer_opts = LinearizerOptions("HIP", has_tensor_cores=True, shared_max=65536)
+  compiler_opts = CompilerOptions("HIP", has_tensor_cores=True, shared_max=65536)
   def __init__(self, arch:str):
     self.arch = arch
     super().__init__(f"compile_hip_{self.arch}")

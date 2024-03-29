@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor, dtypes
-from tinygrad.features.jit import TinyJit
+from tinygrad.engine.jit import TinyJit
 from tinygrad.helpers import CI
 from test.helpers import derandomize_model
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 import functools, math, operator, itertools
 from typing import List, Set, Optional, Tuple, Any, Dict, DefaultDict, Callable, cast
 from collections import defaultdict
-from tinygrad.helpers import DEBUG, flatten
+from tinygrad.helpers import DEBUG, flatten, prod
 from tinygrad.dtype import dtypes, DType
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.shape.symbolic import sint, Variable, Node, NumNode, MulNode, DivNode, SumNode
@@ -25,8 +25,7 @@ class UOp:
   def __repr__(self):
     return f"{str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.uop for x in self.vin]):32s} {self.arg}"
   @staticmethod
-  def const(dtype, val):
-    return UOp(UOps.CONST, dtype, arg=float(val) if dtypes.is_float(dtype) else (int(val) if dtypes.is_int(dtype) else bool(val)))
+  def const(dtype, val): return UOp(UOps.CONST, dtype, arg=dtypes.as_const(val, dtype))
 
 def hook_overflow(dv, fxn):
   def wfxn(*args):
@@ -40,8 +39,9 @@ python_alu = {
   UnaryOps.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan, UnaryOps.SIN: math.sin,
   UnaryOps.NEG: lambda x: (not x) if isinstance(x, bool) else -x,
   BinaryOps.MUL: operator.mul, BinaryOps.ADD: operator.add, BinaryOps.SUB: operator.sub, BinaryOps.XOR: operator.xor,
-  BinaryOps.MAX: max, BinaryOps.CMPEQ: operator.eq, BinaryOps.CMPLT: operator.lt, BinaryOps.MOD: operator.mod,
-  BinaryOps.DIV: lambda x,y: int(x/y) if isinstance(x, int) else (x/y if y != 0 else math.nan),
+  BinaryOps.MAX: max, BinaryOps.CMPEQ: operator.eq, BinaryOps.CMPLT: operator.lt,
+  BinaryOps.MOD: lambda x,y: abs(int(x))%abs(int(y))*(1,-1)[x<0],
+  BinaryOps.DIV: lambda x,y: int(x/y) if isinstance(x, int) else (x/y if y != 0 else x*math.inf),
   TernaryOps.WHERE: lambda x,y,z: y if x else z}
 
 truncate: Dict[DType, Callable] = {
@@ -148,7 +148,7 @@ class UOpGraph:
 
   def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None, cachable=True, insert_before=None,
           simplify=True) -> UOp:
-    ret = UOp(uop, dtype, vin, arg)
+    ret = UOp(uop, dtype, vin, arg) if uop is not UOps.CONST else UOp.const(dtype, arg)
     if simplify and (rewritten:=constant_folder.rewrite(ret)) is not None:
       if rewritten in self.uops: return rewritten  # ignore cachable
       ret = rewritten
@@ -176,6 +176,8 @@ class UOpGraph:
   def type_verify(self):
     for u in self.uops:
       uop, arg, vin, dtype = u.uop, u.arg, u.vin, u.dtype
+      if uop in {UOps.CONST, UOps.DEFINE_ACC}:
+        assert dtype is not None and type(arg) is type(dtypes.as_const(arg, dtype)), f"type of {arg=} does not match {dtype}"
       if uop is UOps.ALU:
         if arg in UnaryOps:
           assert dtype == vin[0].dtype, f"{arg} dtype mismatch {dtype=} != {vin[0].dtype=}"
@@ -385,8 +387,6 @@ class UOpGraph:
         assert u.vin[2].dtype is not None
         mem += u.vin[2].dtype.itemsize * mults
       elif u.uop is UOps.WMMA:
-        if u.arg.startswith("__metal_wmma"): flops += 2*(8*8*8)//32 * mults
-        elif u.arg == "__hip_wmma_f16_f16" or u.arg == "__builtin_amdgcn_wmma_f32_16x16x16_f16_w32": flops += 2*(16*16*16)//32 * mults
-        elif u.arg == "__cuda_mma_m16n8k16_f16_f32": flops += 2*(8*16*16)//32 * mults
-        else: raise NotImplementedError(f"not implemented wmma {u.arg=}")
+        assert u.arg[1] is not None
+        flops += 2 * prod(u.arg[1]) // 32 * mults
     return flops, mem

@@ -4,7 +4,7 @@ import numpy as np
 
 from test.helpers import assert_jit_cache_len
 from tinygrad.tensor import Tensor
-from tinygrad.features.jit import TinyJit
+from tinygrad.engine.jit import TinyJit
 from tinygrad.device import Device
 from tinygrad.helpers import CI
 

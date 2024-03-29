@@ -50,6 +50,8 @@ def train_resnet():
   lr_warmup_epochs  = config["lr_warmup_epochs"]  = getenv("WARMUP_EPOCHS", 5)
   decay             = config["decay"]             = getenv("DECAY", 2e-4)
 
+  loss_scaler       = config["LOSS_SCALER"]       = getenv("LOSS_SCALER", 128.0 if dtypes.default_float == dtypes.float16 else 1.0)
+
   target, achieved  = getenv("TARGET", 0.759), False
   eval_start_epoch  = getenv("EVAL_START_EPOCH", 0)
   eval_epochs       = getenv("EVAL_EPOCHS", 1)
@@ -57,6 +59,7 @@ def train_resnet():
   steps_in_train_epoch  = config["steps_in_train_epoch"]  = (len(get_train_files()) // BS)
   steps_in_val_epoch    = config["steps_in_val_epoch"]    = (len(get_val_files()) // EVAL_BS)
 
+  config["DEFAULT_FLOAT"] = dtypes.default_float.name
   config["BEAM"]    = BEAM.value
   config["WINO"]    = WINO.value
   config["SYNCBN"]  = getenv("SYNCBN")
@@ -98,15 +101,16 @@ def train_resnet():
   input_mean = Tensor([123.68, 116.78, 103.94], device=GPUS, dtype=dtypes.float32).reshape(1, -1, 1, 1)
   # mlperf reference resnet does not divide by input_std for some reason
   # input_std = Tensor([0.229, 0.224, 0.225], device=GPUS, dtype=dtypes.float32).reshape(1, -1, 1, 1)
-  def normalize(x): return x.permute([0, 3, 1, 2]) - input_mean
+  def normalize(x): return (x.permute([0, 3, 1, 2]) - input_mean).cast(dtypes.default_float)
   @TinyJit
   def train_step(X, Y):
     optimizer_group.zero_grad()
     X = normalize(X)
     out = model.forward(X)
-    loss = out.sparse_categorical_crossentropy(Y, label_smoothing=0.1)
+    loss = out.cast(dtypes.float32).sparse_categorical_crossentropy(Y, label_smoothing=0.1)
     top_1 = (out.argmax(-1) == Y).sum()
-    loss.backward()
+    (loss * loss_scaler).backward()
+    for t in optimizer_group.params: t.grad = t.grad.contiguous() / loss_scaler
     optimizer_group.step()
     scheduler_group.step()
     return loss.realize(), top_1.realize()
@@ -114,7 +118,7 @@ def train_resnet():
   def eval_step(X, Y):
     X = normalize(X)
     out = model.forward(X)
-    loss = out.sparse_categorical_crossentropy(Y, label_smoothing=0.1)
+    loss = out.cast(dtypes.float32).sparse_categorical_crossentropy(Y, label_smoothing=0.1)
     top_1 = (out.argmax(-1) == Y).sum()
     return loss.realize(), top_1.realize()
   def data_get(it):

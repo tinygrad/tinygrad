@@ -2,9 +2,8 @@ from __future__ import annotations
 import os, subprocess, pathlib, ctypes, tempfile, functools
 import Metal, libdispatch
 from typing import List, Set, Any, Tuple, Optional
-from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.helpers import prod, getenv, DEBUG, unwrap2
-from tinygrad.device import Compiled, LRUAllocator, Compiler
+from tinygrad.device import Compiled, LRUAllocator, Compiler, CompilerOptions
 from tinygrad.renderer.cstyle import MetalRenderer
 
 def wait_check(cbuf: Any):
@@ -13,7 +12,7 @@ def wait_check(cbuf: Any):
     raise RuntimeError(error)
 
 class MetalCompiler(Compiler):
-  linearizer_opts = LinearizerOptions("METAL", has_tensor_cores=os.uname().machine == "arm64", shared_max=32768)
+  compiler_opts = CompilerOptions("METAL", has_tensor_cores=os.uname().machine == "arm64", shared_max=32768)
   def __init__(self, device:Optional[MetalDevice]):
     self.device = device
     super().__init__("compile_metal")
@@ -67,7 +66,7 @@ class MetalAllocator(LRUAllocator):
     for x in self.track_cross_device: x.synchronize()
     self.track_cross_device.clear()
     return super().free_cache()
-  def _alloc(self, size:int) -> Any:
+  def _alloc(self, size:int, options) -> Any:
     ret = self.device.device.newBufferWithLength_options_(size, Metal.MTLResourceStorageModeShared)
     if ret is None: raise MemoryError(f"Metal OOM while allocating {size=}")
     return ret
@@ -82,7 +81,7 @@ class MetalAllocator(LRUAllocator):
     ret = self.device.device.newBufferWithBytesNoCopy_length_options_deallocator_(src, len(src), Metal.MTLResourceStorageModeShared, None)
     if ret: self.device.mv_in_metal.append(src)
     return ret
-  def _free(self, opaque:Any): opaque.release()
+  def _free(self, opaque:Any, options): opaque.release()
   def as_buffer(self, src:Any) -> memoryview:
     self.device.synchronize()
     return src.contents().as_buffer(src.length())
