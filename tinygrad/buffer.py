@@ -22,7 +22,7 @@ class Buffer:
       self.allocate()
       self.copyin(memoryview(initial_value))
   def allocate(self, opaque=None) -> Buffer:
-    assert not hasattr(self, '_buf'), "can't alloc"
+    assert not hasattr(self, '_buf'), "can't allocate already allocated buffer"
     from tinygrad.device import Device
     self.allocator = Device[self.device].allocator
     self._buf = opaque if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
@@ -40,7 +40,9 @@ class Buffer:
     if not hasattr(self, '_buf'): return
     if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
     self.allocator.free(self._buf, self.nbytes, self.options)
-  def __repr__(self): return f"<buf device:{self.device} size:{self.size} dtype:{self.dtype}" + (">" if self.options is None else f"{self.options=}>")
+  def __repr__(self):
+    return f"<buf real:{hasattr(self, '_buf')} device:{self.device} size:{self.size} dtype:{self.dtype}" + \
+           (">" if self.options is None else f"{self.options=}>")
   def as_buffer(self, allow_zero_copy=False, force_zero_copy=False) -> memoryview:
     # zero copy with as_buffer (disabled by default due to use after free)
     if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, 'as_buffer'): return self.allocator.as_buffer(self._buf)

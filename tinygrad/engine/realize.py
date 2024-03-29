@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional, cast
+from typing import List, Dict, Optional
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters
 from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, JITRunner, update_stats
 from tinygrad.features.graph import realized_lazybuffer
@@ -39,22 +39,22 @@ def run_schedule(schedule:List[ScheduleItem]):
 
     # get the program
     prg = lower_schedule_item(si)
+    dont_allocate = getattr(prg, "skip_allocation", False)
 
     for out in si.outputs:
       # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
       if out.size > 0:
         if out.op is LoadOps.ASSIGN and out.srcs[1].base.realized is not None:
           # if the buffer isn't realized, it might be a const or something. this is fine
-          out.realized = out.srcs[1].base.realized
+          out.buffer = out.srcs[1].base.buffer
         else:
-          out.realized = Buffer(out.device, out.size, out.dtype)
-          if not getattr(prg, "skip_allocation", False): out.realized.allocate()
+          if not dont_allocate: out.buffer.allocate()
         del out.srcs
 
     # run the function (put it in JIT)
-    real_buffers = [x.realized for x in si.outputs+si.inputs if x.size != 0]
-    assert all(x is not None for x in real_buffers), f"can't run, some inputs aren't realized {real_buffers}"
-    if prg: prg.exec(cast(List[Buffer], real_buffers), si.var_vals)
+    real_buffers = [x.buffer for x in si.outputs+si.inputs if x.size != 0]
+    assert dont_allocate or all(hasattr(x, "_buf") for x in real_buffers), f"can't run, some inputs aren't realized {real_buffers}"
+    if prg: prg.exec(real_buffers, si.var_vals)
     elif (out:=si.outputs[0]).size > 0: update_stats(colored(f"empty {out.st.size:10d} {out.dtype}", "yellow"), 0, 0, {}, None, 1, device=out.device)
     if GRAPH:
       for out in si.outputs: realized_lazybuffer(out, GlobalCounters.kernel_count)

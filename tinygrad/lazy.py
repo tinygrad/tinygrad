@@ -33,7 +33,7 @@ class LazyBuffer:
     if base is None:
       # properties on base
       self.op, self.arg, self.srcs = op, arg, srcs  # this is a LazyOp, except the src is LazyBuffers and not LazyOps
-      self.realized: Optional[Buffer] = None
+      self.buffer: Buffer = Buffer(device, self.size, dtype)
       self.contiguous_child: Optional[Tuple[ReferenceType[LazyBuffer], ShapeTracker]] = None
       self.forced_realize = False
     else:
@@ -44,17 +44,18 @@ class LazyBuffer:
   def __repr__(self) -> str:
     return f"<LB {self.device} {self.shape} contig:{self.st.contiguous} {self.st if self.base != self else (self.op, self.realized)}>"
 
+  @property
+  def realized(self) -> Optional[Buffer]:
+    return self.buffer if self._base is None and hasattr(self.buffer, "_buf") else None
+
   # NOTE: this has to be a function to prevent self reference
   @property
   def base(self) -> LazyBuffer: return self._base if self._base is not None else self
 
   @staticmethod
-  def loadop(op, shape:Tuple[sint,...], dtype:DType, device:str, arg=None,
-             src:Tuple[LazyBuffer, ...]=(), enable_cache=False, _buf:Optional[Buffer]=None) -> LazyBuffer:
+  def loadop(op, shape:Tuple[sint,...], dtype:DType, device:str, arg=None, src:Tuple[LazyBuffer, ...]=(), enable_cache=False) -> LazyBuffer:
     assert isinstance(src, tuple)
-    ret = create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype, op, arg, src, enable_cache=enable_cache)
-    if _buf is not None: ret.realized = _buf
-    return ret
+    return create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype, op, arg, src, enable_cache=enable_cache)
 
   def const(self, val:ConstType, shape:Optional[Tuple[sint,...]]=None) -> LazyBuffer:
     shape = self.shape if shape is None else shape
