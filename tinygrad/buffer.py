@@ -69,6 +69,7 @@ class Buffer:
   def __del__(self):
     if not hasattr(self, '_buf') or self.base is not None: return
     if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
+    assert len(self.views) == 0, "attempted to free base that has views"
     self.allocator.free(self._buf, self.nbytes, self.options)
   def __repr__(self):
     return f"<buf real:{hasattr(self, '_buf')} device:{self.device} size:{self.size} dtype:{self.dtype}" + \
