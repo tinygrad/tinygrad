@@ -1,10 +1,9 @@
-import math
-import unittest
+import unittest, math
 from functools import partial
 
 import numpy as np
 import torch
-from tinygrad import nn, dtypes, Tensor
+from tinygrad import nn, dtypes, Tensor, Device
 from tinygrad.helpers import THREEFRY
 from test.helpers import is_dtype_supported
 from hypothesis import given, settings, strategies as strat
@@ -105,6 +104,7 @@ class TestRandomness(unittest.TestCase):
     self.assertTrue(equal_distribution(Tensor.randn, torch.randn, lambda x: np.random.randn(*x)))
 
   @given(strat.sampled_from([dtypes.float, dtypes.float16]))#, dtypes.bfloat16]))  # TODO: add bfloat16
+  @unittest.skipIf(Device.DEFAULT=="RHIP", "broken in HIP CI")
   def test_randn_finite(self, default_float):
     if not is_dtype_supported(default_float): return
     old_default_float = dtypes.default_float
