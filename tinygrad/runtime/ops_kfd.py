@@ -131,16 +131,11 @@ class KFDProgram:
     self.device.aql_doorbell[0] = self.device.aql_doorbell_value
     self.device.aql_doorbell_value += 1
 
-    # TODO: This does not signal, tried higher timeout and it never returns...
-    # evt_arr = (kfd.struct_kfd_event_data * 1)()
-    # evt_arr[0].event_id = self.device.completion_signal.event_id
-    # kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=1000)
+    evt_arr = (kfd.struct_kfd_event_data * 1)()
+    evt_arr[0].event_id = self.device.completion_signal.event_id
+    kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=1000)
 
-    while True: # Kind of active wait
-      val = self.device.completion_signal.value
-      if val == 0: break
-
-    # assert (wp:=self.device.amd_aql_queue.write_dispatch_id) == (rp:=self.device.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
+    assert (wp:=self.device.amd_aql_queue.write_dispatch_id) == (rp:=self.device.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
     if wait: return (self.device.completion_signal.end_ts-self.device.completion_signal.start_ts)/1e9
 
 class KFDAllocator(LRUAllocator):
@@ -157,23 +152,11 @@ class KFDAllocator(LRUAllocator):
     # TODO: need to make the address visible to gpu and pass it directly to sdma.
     mem = self._alloc(src.nbytes, BufferOptions(host=True))
     ctypes.memmove(mem.va_addr, from_mv(src), src.nbytes)
-
     self.device.completion_signal.value = 1
     self.device._submit_sdma(dest.va_addr, mem.va_addr, src.nbytes, completion_signal=self.device.completion_signal)
-    # self.device.sdma_queue.submit_copy(dest.va_addr, mem.va_addr, src.nbytes, completion_signal=self.device.completion_signal)
-    # while self.device.completion_signal.value != 0: pass
-    # evt_arr = (kfd.struct_kfd_event_data * 1)()
-    # evt_arr[0].event_id = self.device.completion_signal.event_id
-    # kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=1000000)
-
-    while True:
-      val = self.device.completion_signal.value
-      print(self.device.sdma_read_pointer[0], self.device.sdma_write_pointer[0], val)
-      if val == 0: break
-    # import time
-    # time.sleep(2)
-    # print("out signal", self.device.completion_signal.value)
-    # ctypes.memmove(dest.va_addr, from_mv(src), dest.size)
+    evt_arr = (kfd.struct_kfd_event_data * 1)()
+    evt_arr[0].event_id = self.device.completion_signal.event_id
+    kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=1000)
   def copyout(self, dest:memoryview, src):
     ctypes.memmove(from_mv(dest), src.va_addr, src.size)
 
@@ -293,16 +276,20 @@ class KFDDevice(Compiled):
       ctypes.memmove(self.sdma_ring.va_addr + (self.sdma_doorbell_value % self.sdma_ring.size), ctypes.addressof(cmd), sz:=ctypes.sizeof(cmd))
       self.sdma_doorbell_value += sz
 
-    # if wait_signals is not None:
-    #   # NOTE: we check only low 32 bits to be zeroed, we don't use higher values for signals
-    #   for sig in wait_signals: 
-    #     poll_addr = ctypes.addressof(sig) + getattr(hsa.amd_signal_t, 'value').offset + 4
-    #     build_sdma_command(sdma_pkts.poll_regmem, op=amd_sdma.SDMA_OP_POLL_REGMEM, mem_poll=1, func=0x3, addr_31_0=poll_addr&0xffffffff,
-    #                        addr_63_32=(poll_addr>>32)&0xffffffff, value=0, mask=0xffffffff, interval=0x04, retry_count=0xfff)
+    if wait_signals is not None:
+      # NOTE: we check only low 32 bits to be zeroed, we don't use higher values for signals
+      for sig in wait_signals:
+        poll_addr = ctypes.addressof(sig) + getattr(hsa.amd_signal_t, 'value').offset
+        build_sdma_command(sdma_pkts.poll_regmem, op=amd_sdma.SDMA_OP_POLL_REGMEM, mem_poll=1, func=0x3, addr_31_0=poll_addr&0xffffffff,
+                           addr_63_32=(poll_addr>>32)&0xffffffff, value=0, mask=0xffffffff, interval=0x04, retry_count=0xfff)
 
+    if completion_signal is not None:
+      ts_addr = ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'start_ts').offset
+      build_sdma_command(sdma_pkts.timestamp, op=amd_sdma.SDMA_OP_TIMESTAMP, sub_op=amd_sdma.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL,
+                       addr_31_0=ts_addr&0xffffffff, addr_63_32=(ts_addr>>32)&0xffffffff)
     blit_sdma_command(self.sdma_flush_hdp_pkt)
     blit_sdma_command(self.sdma_cache_inv)
-    
+
     copied = 0
     copies_commands = (copy_size + SDMA_MAX_COPY_SIZE - 1) // SDMA_MAX_COPY_SIZE
     for _ in range(copies_commands):
@@ -313,10 +300,19 @@ class KFDDevice(Compiled):
       copied += step_copy_size
 
     blit_sdma_command(self.sdma_cache_wb)
+    if completion_signal is not None:
+      ts_addr = ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'end_ts').offset
+      build_sdma_command(sdma_pkts.timestamp, op=amd_sdma.SDMA_OP_TIMESTAMP, sub_op=amd_sdma.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL,
+                        addr_31_0=ts_addr&0xffffffff, addr_63_32=(ts_addr>>32)&0xffffffff)
 
     if completion_signal is not None:
       signal_addr = ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'value').offset
       build_sdma_command(sdma_pkts.atomic, op=amd_sdma.SDMA_OP_ATOMIC, operation=amd_sdma.SDMA_ATOMIC_ADD64, addr_31_0=signal_addr&0xffffffff,
                          addr_63_32=(signal_addr>>32)&0xffffffff, src_data_31_0=0xffffffff, src_data_63_32=0xffffffff)
+      if completion_signal.event_mailbox_ptr != 0:
+        build_sdma_command(sdma_pkts.fence, op=amd_sdma.SDMA_OP_FENCE, mtype=3, addr_31_0=completion_signal.event_mailbox_ptr&0xffffffff,
+                           addr_63_32=(completion_signal.event_mailbox_ptr>>32)&0xffffffff, data=completion_signal.event_id)
+        build_sdma_command(sdma_pkts.trap, op=amd_sdma.SDMA_OP_TRAP, int_ctx=completion_signal.event_id)
+
     self.sdma_write_pointer[0] = self.sdma_doorbell_value
     self.sdma_doorbell[0] = self.sdma_doorbell_value
