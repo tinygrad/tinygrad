@@ -1,6 +1,6 @@
 from typing import List, Dict, Optional, cast
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters
-from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats
+from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, JITRunner, update_stats
 from tinygrad.features.graph import realized_lazybuffer
 from tinygrad.helpers import colored, getenv, GRAPH, cpu_time_execution, DEBUG
 from tinygrad.shape.symbolic import Variable
@@ -26,7 +26,6 @@ def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
   out, ast = si.outputs[0], si.ast[0]
   if ast.op is LoadOps.COPY:
     if hasattr(Device[out.device].allocator, 'transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]: return BufferXfer()
-    if si.inputs[0].device.startswith("DISK"): return BufferRead()
     return BufferCopy()
   if ast.op is LoadOps.CUSTOM: return CustomOp(ast.arg)
   if ast.op is LoadOps.SYNC: return SyncOp(out.device)
@@ -48,7 +47,8 @@ def run_schedule(schedule:List[ScheduleItem]):
           # if the buffer isn't realized, it might be a const or something. this is fine
           out.realized = out.srcs[1].base.realized
         else:
-          out.realized = Buffer(out.device, out.size, out.dtype, "PLACEHOLDER" if getattr(prg, "skip_allocation", False) else None)
+          out.realized = Buffer(out.device, out.size, out.dtype)
+          if not getattr(prg, "skip_allocation", False): out.realized.allocate()
         del out.srcs
 
     # run the function (put it in JIT)

@@ -39,8 +39,8 @@ C = (A.reshape(M, 1, K) * B.permute(1,0).reshape(1, N, K)).sum(axis=2)
 
 sched = create_schedule([C.lazydata])
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.codegen.kernel import LinearizerOptions
-lin = Linearizer(sched[-1].ast, LinearizerOptions(has_local=False, supports_float4=False))
+from tinygrad.device import CompilerOptions
+lin = Linearizer(sched[-1].ast, CompilerOptions(has_local=False, supports_float4=False))
 #lin.hand_coded_optimizations()
 lin.linearize()
 from tinygrad.runtime.ops_clang import renderer
