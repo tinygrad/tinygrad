@@ -793,7 +793,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(10,10,10)], lambda x: x.softmax(0), atol=1e-7, grad_atol=1e-7)
     helper_test_op([(10,10,10)], lambda x: x.softmax(1), atol=1e-7, grad_atol=1e-7)
     helper_test_op([(10,10,10)], lambda x: x.softmax(2), atol=1e-7, grad_atol=1e-7)
-  @unittest.skipIf(Device.DEFAULT in ["PYTHON"], "Broken ISSUE #3552")
   def test_softmax_argmax(self):
     helper_test_op([(45,65)], lambda x: x.softmax(0).argmax().type(torch.int32),
                               lambda x: x.softmax(0).argmax(), forward_only=True, atol=1e-7, grad_atol=1e-7)

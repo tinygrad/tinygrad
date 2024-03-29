@@ -7,12 +7,13 @@ from collections import defaultdict
 import numpy as np
 
 from tinygrad.dtype import DType, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype
-from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, fully_flatten, flat_mv
+from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, fully_flatten, flat_mv, argsort
 from tinygrad.helpers import IMAGE, DEBUG, WINO, THREEFRY
 from tinygrad.lazy import LazyBuffer
 from tinygrad.features.multi import MultiLazyBuffer
 from tinygrad.ops import LoadOps
-from tinygrad.device import Buffer, Device, BufferOptions
+from tinygrad.buffer import Buffer, BufferOptions
+from tinygrad.device import Device
 from tinygrad.shape.symbolic import sint
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.schedule import create_schedule
@@ -44,9 +45,11 @@ def _loadop(op, shape:Tuple[sint,...], dtype:DType, device:Union[str, Tuple[str,
   return MultiLazyBuffer([LazyBuffer.loadop(op, shape, dtype, d, arg, src) for d in device], None)
 
 def _fromcpu(x: np.ndarray) -> LazyBuffer:
-  return LazyBuffer.loadop(LoadOps.EMPTY, x.shape, dtypes.from_np(x.dtype), "EXT",
-                           _buf=Buffer("EXT", 0, dtypes.from_np(x.dtype), (memoryview(bytearray()), None)) if x.size == 0 else \
-                                Buffer("EXT", prod(x.shape), dtypes.from_np(x.dtype), (flat_mv(np.require(x, requirements='C').data), x)))
+  ret = LazyBuffer.loadop(LoadOps.EMPTY, x.shape, dtypes.from_np(x.dtype), "EXT")
+  # fake realize
+  ret.buffer.allocate((memoryview(bytearray()), None) if x.size == 0 else (flat_mv(np.require(x, requirements='C').data), x))
+  del ret.srcs
+  return ret
 
 def _get_winograd_matcols(mat, dims:int, shp:Tuple[sint, ...], device:Union[str, Tuple[str, ...]]) -> List[List[Tensor]]:
   return [[Tensor.cat(*[Tensor.full(shp[:dim] + (1,) + shp[dim+1:], float(m[k]), device=device) for m in mat], dim=dim)
@@ -289,7 +292,7 @@ class Tensor:
   @staticmethod
   def randn(*shape, dtype:Optional[DType]=None, **kwargs) -> Tensor:
     # https://en.wikipedia.org/wiki/Box%E2%80%93Muller_transform
-    src = Tensor.rand((2, *argfix(*shape)), **kwargs)
+    src = Tensor.rand((2, *argfix(*shape)), **{**kwargs, "dtype": dtypes.float32})
     return src[0].mul(2*math.pi).cos().mul((1 - src[1]).log().mul(-2).sqrt()).cast(dtype or dtypes.default_float)
 
   @staticmethod
@@ -667,10 +670,9 @@ class Tensor:
       # permute to the sorted letter order, then reshape/expand to create dimensions for the missing letters
       xs_.append(x.permute(order).reshape([val if letter in letters else 1 for letter,val in letter_val]).expand([val for _,val in letter_val]))
 
-    # Determine the inverse permutation to revert back to original order
-    rhs_letter_order = [idx for idx,_ in sorted(enumerate(output), key=lambda e:e[1])]
-    rhs_order:List[int] = [0]*len(rhs_letter_order)
-    for sorted_idx,orig_idx in enumerate(rhs_letter_order): rhs_order[orig_idx] = sorted_idx
+    # determine the inverse permutation to revert back to original order
+    rhs_letter_order = argsort(list(output))
+    rhs_order = argsort(rhs_letter_order)
 
     # sum over all axes that's not in the output, then permute to the output order
     return functools.reduce(lambda a,b:a*b, xs_) \
@@ -1030,7 +1032,7 @@ class Tensor:
     return self.to("LLVM").bitcast(dtypes.uint16).cast(dtypes.uint32).mul(1<<16).bitcast(dtypes.float32).cast(dtype)
   def cast(self, dtype:DType) -> Tensor: return self if self.dtype == dtype else mlops.Cast.apply(self, dtype=dtype)
   def bitcast(self, dtype:DType) -> Tensor:
-    assert self.dtype.itemsize == dtype.itemsize, "can't bitcast mismatched dtype itemsizes"
+    if self.requires_grad: raise RuntimeError("can't backprop through bitcast")
     return mlops.Cast.apply(self, dtype=dtype, bitcast=True) if self.dtype != dtype else self
   def float(self) -> Tensor: return self.cast(dtypes.float32)
   def half(self) -> Tensor: return self.cast(dtypes.float16)
