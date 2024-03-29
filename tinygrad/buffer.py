@@ -42,9 +42,9 @@ class Buffer:
     return Buffer(self.device, size//dtype.itemsize, dtype, self.allocator.offset(base._buf, self.offset+offset, size), self.options, base=base,
                   offset=self.offset+offset, cow=cow)
   def uncow(self): # uncow = be ready to be written into
-    if not hasattr(self.allocator, "offset"): raise RuntimeError("device doesn't support views")
     if self.base is None: # we are the base buffer, create new base buffer and transfer CoW views into it if we have any
       if len((transfer := [v for v in self.views if v.cow])) == 0: return self
+      if not hasattr(self.allocator, "offset"): raise RuntimeError("device doesn't support views")
       newbase = Buffer(self.device, self.size, self.dtype, options=self.options, initial_value=self.as_buffer(allow_zero_copy=True)) # TODO: faster
       for v in transfer:
         v.base, v._buf = newbase, self.allocator.offset(newbase._buf, v.offset, v.size*v.dtype.itemsize)
