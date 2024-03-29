@@ -33,7 +33,8 @@ class LazyBuffer:
     if base is None:
       # properties on base
       self.op, self.arg, self.srcs = op, arg, srcs  # this is a LazyOp, except the src is LazyBuffers and not LazyOps
-      self.realized: Optional[Buffer] = None
+      assert self.op is not LoadOps.ASSIGN or srcs[1].base.realized is not None, "assign target must be realized"
+      self.buffer: Buffer = srcs[1].base.buffer if self.op is LoadOps.ASSIGN else Buffer(device, self.size, dtype)
       self.contiguous_child: Optional[Tuple[ReferenceType[LazyBuffer], ShapeTracker]] = None
       self.forced_realize = False
     else:
@@ -44,17 +45,19 @@ class LazyBuffer:
   def __repr__(self) -> str:
     return f"<LB {self.device} {self.shape} contig:{self.st.contiguous} {self.st if self.base != self else (self.op, self.realized)}>"
 
+  @property
+  def realized(self) -> Optional[Buffer]:
+    # NOTE: we check for a lack of srcs instead of an allocated buffer to make unrealized assigns return None here
+    return self.buffer if self._base is None and not hasattr(self, 'srcs') else None
+
   # NOTE: this has to be a function to prevent self reference
   @property
   def base(self) -> LazyBuffer: return self._base if self._base is not None else self
 
   @staticmethod
-  def loadop(op, shape:Tuple[sint,...], dtype:DType, device:str, arg=None,
-             src:Tuple[LazyBuffer, ...]=(), enable_cache=False, _buf:Optional[Buffer]=None) -> LazyBuffer:
+  def loadop(op, shape:Tuple[sint,...], dtype:DType, device:str, arg=None, src:Tuple[LazyBuffer, ...]=(), enable_cache=False) -> LazyBuffer:
     assert isinstance(src, tuple)
-    ret = create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype, op, arg, src, enable_cache=enable_cache)
-    if _buf is not None: ret.realized = _buf
-    return ret
+    return create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype, op, arg, src, enable_cache=enable_cache)
 
   def const(self, val:ConstType, shape:Optional[Tuple[sint,...]]=None) -> LazyBuffer:
     shape = self.shape if shape is None else shape
@@ -76,13 +79,21 @@ class LazyBuffer:
 
   def cast(self, dtype:DType, bitcast:bool=False):
     if self.dtype == dtype: return self
+    if self.device.startswith("DISK") and not bitcast: raise RuntimeError("attempted to cast disk buffer (bitcast only)")
     # TODO: applying this makes gpt2 slower
     if getenv("CAST_BEFORE_VIEW", 1) and dtype.itemsize <= self.dtype.itemsize and self != self.base:
       return self.base.cast(dtype, bitcast)._view(self.st)
-    return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), dtype, UnaryOps.CAST, (dtype, bitcast), (self,))
+    new_shape = self.shape
+    if bitcast and self.dtype.itemsize != dtype.itemsize:
+      if not self.device.startswith("DISK"): raise RuntimeError("shape changing bitcast only supported on DISK right now")
+      if not all_int(new_shape): raise RuntimeError("shape changing bitcast with symbolic shape isn't supported yet")
+      # https://pytorch.org/docs/stable/generated/torch.Tensor.view.html
+      if not (new_shape[-1]*self.dtype.itemsize) % dtype.itemsize == 0: raise RuntimeError("unsupported size in bitcast")
+      new_shape = new_shape[:-1] + ((new_shape[-1]*self.dtype.itemsize) // dtype.itemsize,)
+    return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), dtype, UnaryOps.CAST, (dtype, bitcast), (self,))
 
-  def is_unrealized_const(self): return not self.base.realized and self.base.op is LoadOps.CONST
-  def is_unrealized_contiguous_const(self): return self.base == self and not self.base.realized and self.op is LoadOps.CONST
+  def is_unrealized_const(self): return self.base.realized is None and self.base.op is LoadOps.CONST
+  def is_unrealized_contiguous_const(self): return self.base == self and self.base.realized is None and self.op is LoadOps.CONST
 
   def _copy(self, device:str) -> LazyBuffer:
     if (dstart:=self.device.split(":")[0]) in {"EXT", "DISK"} or (dstart in {"HSA", "CUDA"} and device.split(":")[0] == dstart):

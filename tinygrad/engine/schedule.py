@@ -13,8 +13,8 @@ from tinygrad.shape.shapetracker import ShapeTracker
 sys.setrecursionlimit(10000)
 
 # recursively create a lazyop
-def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Variable, int], st:ShapeTracker,
-                      realizes:Set[LazyBuffer], cache, first=True, assign_to:Optional[LazyBuffer]=None) -> LazyOp:
+def _recursive_lazyop(buf:LazyBuffer, membufs:List[LazyBuffer], var_vals:Dict[Variable, int], st:ShapeTracker,
+                      realizes:Set[LazyBuffer], cache, first=True, assign_to:Optional[LazyBuffer]=None, assign_idx:Optional[int]=None) -> LazyOp:
   if (buf, st) in cache: return cache[(buf, st)]
   if buf != buf.base:
     st = buf.st + st
@@ -33,24 +33,25 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
     unbound_st, st_var_vals = st.simplify().unbind()
     var_vals.update(st_var_vals)
     if assign_to is not None and buf is assign_to:
+      assert assign_idx is not None
       if not unbound_st.contiguous:
         # we also allow masked views. if it has a single view and it's equal when you shrink a contig, it's fine
         if not (len(unbound_st.views) == 1 and unbound_st.views[0].mask is not None and
             ShapeTracker.from_shape(unbound_st.shape).shrink(unbound_st.views[0].mask) == unbound_st.shrink(unbound_st.views[0].mask)):
           raise RuntimeError(f"must be contiguous for assign {unbound_st}")
-      return LazyOp(BufferOps.LOAD, (), MemBuffer(0, buf.dtype, unbound_st))
-    if buf not in inputs: inputs.append(buf)
-    return LazyOp(BufferOps.LOAD, (), MemBuffer(inputs.index(buf)+1, buf.dtype, unbound_st))
+      return LazyOp(BufferOps.LOAD, (), MemBuffer(assign_idx, buf.dtype, unbound_st))
+    if buf not in membufs: membufs.append(buf)
+    return LazyOp(BufferOps.LOAD, (), MemBuffer(membufs.index(buf), buf.dtype, unbound_st))
 
   # if a CONTIGUOUS or ASSIGN made it all the way here, just skip it
   if buf.op is LoadOps.CONTIGUOUS:
     assert first
-    return _recursive_lazyop(buf.srcs[0], inputs, var_vals, st, realizes, cache, False)
+    return _recursive_lazyop(buf.srcs[0], membufs, var_vals, st, realizes, cache, False)
   if buf.op is LoadOps.ASSIGN:
     assert first
     assert buf.srcs[1].base is buf.srcs[1], "assign must be to base"
     assert buf.srcs[1].realized is not None, f"assign must be already realized to schedule {buf.srcs[1]}"
-    return _recursive_lazyop(buf.srcs[0], inputs, var_vals, st, realizes, cache, False, assign_to=buf.srcs[1])
+    return _recursive_lazyop(buf.srcs[0], membufs, var_vals, st, realizes, cache, False, assign_to=buf.srcs[1], assign_idx=membufs.index(buf))
 
   # if it's a reduce, we have to change the shapetracker
   if buf.op in ReduceOps:
@@ -59,7 +60,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
 
   # otherwise we fuse it like normal
   cache[(buf, st)] = ret = \
-    LazyOp(buf.op, tuple(_recursive_lazyop(x, inputs, var_vals, st, realizes, cache, False, assign_to) for x in buf.srcs), buf.arg)
+    LazyOp(buf.op, tuple(_recursive_lazyop(x, membufs, var_vals, st, realizes, cache, False, assign_to, assign_idx) for x in buf.srcs), buf.arg)
   return ret
 
 def _schedule_one(out:LazyBuffer, realizes:Set[LazyBuffer], reduce_for_op: Dict[LazyBuffer, LazyBuffer]) -> ScheduleItem:
@@ -68,9 +69,9 @@ def _schedule_one(out:LazyBuffer, realizes:Set[LazyBuffer], reduce_for_op: Dict[
   if out.op in {LoadOps.CUSTOM, LoadOps.SYNC, LoadOps.WAIT, LoadOps.COPY, LoadOps.EMPTY}:
     op, inputs = LazyOp(out.op, (), out.arg), list(out.srcs)
   else:
-    output_st = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape)
-    op = _recursive_lazyop(out, inputs, var_vals, output_st, realizes, cache={})
-    op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_st.simplify().unbind()[0]))
+    output_st, membufs = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape), [out]
+    op = _recursive_lazyop(out, membufs, var_vals, output_st, realizes, cache={})
+    op, inputs = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_st.simplify().unbind()[0])), membufs[1:]
   return ScheduleItem((op,), (out,), tuple(inputs), var_vals)
 
 # recursively search the entire graph for all LazyBuffers, insert realizes after expands
@@ -82,6 +83,11 @@ def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffe
                                             not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
     if DEBUG >= 3: print(f"forcing image {buf.dtype} with shape {buf.shape} to float32")
     buf.dtype = dtypes.float32  # NOTE: this is what makes the dtype above not match
+    # hack the underlying buffer too
+    if buf.base is buf:
+      assert not hasattr(buf.buffer, '_buf'), "can't fixup allocated buffer"
+      buf.buffer.dtype = dtypes.float32
+      buf.buffer.options = None
   if buf.base != buf:
     # realize all places where the buffer is expanded
     if prod(buf.base.st.shape) < prod(buf.st.shape):
@@ -94,7 +100,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffe
   if buf.forced_realize: realizes.add(buf)
   allbufs[buf] = None
   if buf.op in LoadOps: realizes.add(buf.base)
-  if buf.op == LoadOps.COPY:
+  if buf.op is LoadOps.COPY:
     assert buf.srcs[0].st.contiguous and buf.srcs[0].size == buf.srcs[0].base.size, "can only copy contig"
     realizes.add(buf.srcs[0].base)
   for x in buf.srcs:
@@ -202,6 +208,7 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)
 
-  # confirm everything was scheduled
-  assert len(prescheduled) == len(schedule), f"prescheduled {len(prescheduled)} but only scheduled {len(schedule)}"
+  # confirm everything was scheduled correctly
+  if not all(degree == 0 for degree in in_degree.values()) or len(prescheduled) != len(schedule):
+    raise RuntimeError(f"cycle detected in graph, prescheduled {len(prescheduled)} but only scheduled {len(schedule)}")
   return schedule

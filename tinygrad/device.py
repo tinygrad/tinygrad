@@ -1,18 +1,16 @@
 from __future__ import annotations
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any, List, Optional, Dict, Tuple, ClassVar
+from typing import TYPE_CHECKING, Any, List, Optional, Dict, Tuple, ClassVar, NamedTuple
 import importlib, inspect, functools, pathlib, time, ctypes
-from tinygrad.dtype import DType, ImageDType
 from tinygrad.helpers import ansilen, DEBUG, getenv, colored, BEAM, NOOPT, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put
 from tinygrad.helpers import prod, CACHECOLLECTING
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.ops import LazyOp, get_lazyop_info, GlobalCounters
+from tinygrad.buffer import Buffer, BufferOptions
 from tinygrad.codegen.uops import UOpGraph
-from dataclasses import dataclass
 
 if TYPE_CHECKING:
   from tinygrad.codegen.linearizer import Linearizer
-  from tinygrad.codegen.kernel import LinearizerOptions
 
 # **************** Device ****************
 
@@ -68,52 +66,15 @@ def update_stats(name:str, op_estimate:sint, mem_estimate:sint, var_vals: Option
 
 # **************** Buffer / Allocator ****************
 
-@dataclass(frozen=True, eq=True)
-class BufferOptions:
-  image: Optional[ImageDType] = None
-  uncached: bool = False
-  host: bool = False
-  signal: bool = False
-
-class Buffer:
-  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferOptions]=None, initial_value:Optional[bytes]=None):
-    assert isinstance(dtype, DType)
-    if isinstance(dtype, ImageDType): options = BufferOptions(image=dtype) # TODO: image hack shouldn't be here. where should it be?
-    self.device, self.size, self.dtype, self.d, self.options = device, size, dtype, Device[device], options
-    self.allocator = self.d.allocator
-    self._buf = opaque if opaque is not None else self.allocator.alloc(self.nbytes, options)
-    # TODO: mem_used for all devices
-    if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.nbytes
-    if initial_value is not None: self.copyin(memoryview(initial_value))
-  def __reduce__(self):
-    buf = bytearray(self.nbytes)
-    self.copyout(memoryview(buf))
-    return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf)
-  @property
-  def nbytes(self): return self.size*self.dtype.itemsize
-  def __del__(self):
-    if not hasattr(self, '_buf'): return # happens when __init__ has raised exception
-    if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
-    self.allocator.free(self._buf, self.nbytes, self.options)
-  def __repr__(self): return f"<buf device:{self.device} size:{self.size} dtype:{self.dtype}" + (">" if self.options is None else f"{self.options=}>")
-  def as_buffer(self, allow_zero_copy=False, force_zero_copy=False) -> memoryview:
-    # zero copy with as_buffer (disabled by default due to use after free)
-    if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, 'as_buffer'): return self.allocator.as_buffer(self._buf)
-    assert not force_zero_copy, "force zero copy was passed, but copy is required"
-    return self.copyout(memoryview(bytearray(self.nbytes)))
-  def copyin(self, mv:memoryview):
-    mv = flat_mv(mv)
-    assert len(mv) == self.nbytes, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
-    self.allocator.copyin(self._buf, mv)
-    return self
-  def copyout(self, mv:memoryview) -> memoryview:
-    mv = flat_mv(mv)
-    assert len(mv) == self.nbytes, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
-    self.allocator.copyout(mv, self._buf)
-    return mv
-
 class BufferCopy(JITRunner):
-  def copy(self, dest, src): dest.copyin(src.as_buffer(allow_zero_copy=True))  # may allocate a CPU buffer depending on allow_zero_copy
+  def copy(self, dest, src):
+    if src.device.startswith("DISK") and hasattr(dest.allocator, 'copy_from_fd') and src.nbytes >= 4096 and src._buf.ud.fd is not None:
+      dest.allocator.copy_from_fd(dest._buf, src._buf.ud.fd, src._buf.offset, src.nbytes)
+    elif src.device.startswith("DISK") and hasattr(dest.allocator, 'as_buffer'):
+      # fast(ish) path, uses readinto in diskbuffers
+      src.allocator.copyout(dest.allocator.as_buffer(dest._buf), src._buf)
+    else:
+      dest.copyin(src.as_buffer(allow_zero_copy=True))  # may allocate a CPU buffer depending on allow_zero_copy
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False):
     dest, src = rawbufs[0:2]
     assert dest.size == src.size and dest.dtype == src.dtype, f"buffer copy mismatch, {dest.size} != {src.size}, {dest.dtype} != {src.dtype}"
@@ -121,21 +82,12 @@ class BufferCopy(JITRunner):
     self.copy(dest, src)
     et = None
     if wait or DEBUG >= 2:
-      dest.d.synchronize()
+      Device[dest.device].synchronize()
       et = time.perf_counter() - st
     total_sz = dest.size*dest.dtype.itemsize
     if total_sz >= 1e6: name = f"{type(self).__name__[6:].lower()} {total_sz/1e6:7.2f}M, {dest.device[:7]:>7s} <- {src.device[:7]:7s}"
     else: name = f"{type(self).__name__[6:].lower()} {total_sz:8d}, {dest.device[:7]:>7s} <- {src.device[:7]:7s}"
     update_stats(colored(name, "yellow"), 0, total_sz, {}, et, 2, jit, device=dest.device)
-
-class BufferRead(BufferCopy):
-  def copy(self, dest, src):
-    if hasattr(dest.allocator, 'copy_from_fd') and src.device.startswith("DISK") and src.nbytes >= 4096 and src._buf.ud.fd is not None:
-      dest.allocator.copy_from_fd(dest._buf, src._buf.ud.fd, src._buf.offset, src.nbytes)
-    elif hasattr(dest.allocator, 'as_buffer'):
-      # fast(ish) path, uses readinto in diskbuffers
-      src.allocator.copyout(dest.allocator.as_buffer(dest._buf), src._buf)
-    else: super().copy(dest, src)
 
 class BufferXfer(BufferCopy):
   def copy(self, dest, src):
@@ -169,7 +121,7 @@ class LRUAllocator(Allocator):  # pylint: disable=abstract-method
       for opaque in opaques: super().free(opaque, sz, options)
       opaques.clear()
   def free(self, opaque:Any, size:int, options:Optional[BufferOptions]=None):
-    if getenv("LRU", 1) and (options is None or not options.signal): self.cache[(size, options)].append(opaque)
+    if getenv("LRU", 1) and (options is None or not options.nolru): self.cache[(size, options)].append(opaque)
     else: super().free(opaque, size, options)
 
 class _MallocAllocator(LRUAllocator):
@@ -181,8 +133,21 @@ MallocAllocator = _MallocAllocator()
 
 # **************** for Compiled Devices ****************
 
+class CompilerOptions(NamedTuple):
+  device: str = ""
+  suffix: str = ""
+  # TODO: make this generic with a list of supported types
+  supports_float4: bool = True
+  has_local: bool = True
+  has_shared: bool = True
+  has_tensor_cores: bool = False
+  # NOTE: these two should be in z,y,x(reversed) order for cstyle backends, they are flipped when kernel is rendered
+  global_max: Optional[List[int]] = None
+  local_max: Optional[List[int]] = None
+  shared_max: int = 32768
+
 class Compiler:
-  linearizer_opts: ClassVar[LinearizerOptions]
+  compiler_opts: ClassVar[CompilerOptions]
   def __init__(self, cachekey:Optional[str]=None): self.cachekey = None if getenv("DISABLE_COMPILER_CACHE") else cachekey
   def render(self, name:str, uops:UOpGraph) -> str: raise NotImplementedError("need a render function")
   def compile(self, src:str) -> bytes: raise NotImplementedError("need a compile function")
@@ -262,16 +227,16 @@ class Compiled:
       from tinygrad.features.graph import print_tree
       for op in ast: print_tree(op)
     from tinygrad.codegen.linearizer import Linearizer
-    k = Linearizer(*ast, opts=self.compiler.linearizer_opts)
+    k = Linearizer(*ast, opts=self.compiler.compiler_opts)
     k.required_optimizations()
     if not NOOPT:
       if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
       if BEAM >= 1:
         lins = [(("tc" if used_tensor_cores else "hc"), k)]
         if used_tensor_cores:
-          lins.append(("hc", Linearizer(*ast, opts=self.compiler.linearizer_opts)))
+          lins.append(("hc", Linearizer(*ast, opts=self.compiler.compiler_opts)))
           lins[-1][1].hand_coded_optimizations()
-        kb = Linearizer(*ast, opts=self.compiler.linearizer_opts)
+        kb = Linearizer(*ast, opts=self.compiler.compiler_opts)
         kb.required_optimizations()
         from tinygrad.features.search import beam_search, time_linearizer, bufs_from_lin
         test_rawbuffers = bufs_from_lin(kb)    # allocate scratch buffers for optimization
