@@ -197,6 +197,7 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
         graph[out].append(assign_targets[x])
         in_degree[assign_targets[x]] += 1
       if x in prescheduled: in_degree[out] += 1
+    del out.srcs  # can only schedule once
 
   queue = deque(out for out in prescheduled if in_degree[out] == 0)
   schedule: List[ScheduleItem] = []
