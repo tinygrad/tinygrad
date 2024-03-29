@@ -92,7 +92,7 @@ class TestOffsetBuffer(unittest.TestCase):
       DoubleBuffer(16, dtypes.uint8).check()
   def test_simple_onelevel(self):
     # --- create ---
-    d1 = DoubleBuffer(16, dtype=dtypes.uint8, initial_value=[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15])
+    d1 = DoubleBuffer(16, dtype=dtypes.uint8, initial_value=range(16))
     d1.check([0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]) # should copy
 
     # --- test cow=True ---
@@ -103,7 +103,7 @@ class TestOffsetBuffer(unittest.TestCase):
     d2.check([255,254,253,252]) # d2 should change
 
     # side effects
-    d1.check([0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]) # d1 shouldn't change because cow=True
+    d1.check(range(16)) # d1 shouldn't change because cow=True
 
     # --- test cow=False ---
     d3 = d1.view(4,4, cow=False)
@@ -115,6 +115,31 @@ class TestOffsetBuffer(unittest.TestCase):
     # side effects
     d1.check([0,1,2,3,125,126,127,128,8,9,10,11,12,13,14,15]) # part of d1 should change to d3 because cow=False
     d2.check([255,254,253,252]) # d2 shouldn't change because it was forked before copyin to cow=False view
+
+  def test_base_assign_nocow(self):
+    # --- create ---
+    d1 = DoubleBuffer(16, dtype=dtypes.uint8, initial_value=range(16))
+    d1.check(range(16)) # should copy
+
+    # --- test cow=False ---
+    d2 = d1.view(4,4, cow=False)
+
+    d2.check([4,5,6,7]) # should offset
+    d1.copyin([255-x for x in range(16)])
+    d2.check([251,250,249,248]) # should change because it's cow=False
+
+  @unittest.expectedFailure
+  def test_base_assign_cow(self):
+    # --- create ---
+    d1 = DoubleBuffer(16, dtype=dtypes.uint8, initial_value=range(16))
+    d1.check(range(16)) # should copy
+
+    # --- test cow=True ---
+    d2 = d1.view(4,4)
+
+    d2.check([4,5,6,7]) # should offset
+    d1.copyin([255-x for x in range(16)])
+    d2.check([4,5,6,7]) # shouldn't change because it's cow=True
 
 if __name__ == "__main__":
   unittest.main()

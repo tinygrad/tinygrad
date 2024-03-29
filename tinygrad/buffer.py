@@ -47,7 +47,7 @@ class Buffer:
     assert size % dtype.itemsize == 0, "size isn't multiple of dtype.itemsize"
     return Buffer(self.device, size//dtype.itemsize, dtype, self.allocator.offset(self._buf, offset, size), self.options, base=self, cow=cow)
   def uncow(self) -> Buffer:
-    if len(self.views) > 0: raise NotImplementedError()
+    if len([x for x in self.views if x.cow]) > 0: raise NotImplementedError()
     if not self.cow: return self
     if self.base is not None:
       buf = self.as_buffer()
