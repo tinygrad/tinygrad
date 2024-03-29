@@ -18,7 +18,6 @@ class Buffer:
     if isinstance(dtype, ImageDType): options = BufferOptions(image=dtype) # TODO: image hack shouldn't be here. where should it be?
     self.device, self.size, self.dtype, self.options = device, size, dtype, options
     if opaque is not None: self.allocate(opaque)
-    if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.nbytes
     if initial_value is not None:
       self.allocate()
       self.copyin(memoryview(initial_value))
@@ -27,6 +26,7 @@ class Buffer:
     from tinygrad.device import Device
     self.allocator = Device[self.device].allocator
     self._buf = opaque if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
+    if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.nbytes
     return self
   def __reduce__(self):
     buf = None
