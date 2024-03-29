@@ -57,6 +57,7 @@ class Buffer:
       del self._buf
       self.allocate()
       self.copyin(oldbuf)
+    else: self.base.uncow()
     return self
   def __reduce__(self): # FIXME: support serialization
     buf = None

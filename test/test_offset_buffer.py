@@ -1,8 +1,11 @@
 import unittest
-from typing import Union, Tuple, Optional
+from typing import Union, Tuple, Optional, List
 from tinygrad.buffer import Buffer, flat_mv
 from tinygrad.dtype import DType, dtypes
-from random import randbytes
+from random import randbytes, randint, seed
+
+def mvs(mv: memoryview) -> str:
+  return str(list(mv))
 
 # Simplest thing that works to check behaviour of sophisticated Buffer with zero copy, CoW and stuff agaisnt
 class ReferenceBuffer:
@@ -17,16 +20,14 @@ class ReferenceBuffer:
   def view(self, offset:int, size:int, dtype:Optional[DType]=None, cow=True):
     dtype = dtype if dtype is not None else self.dtype
     assert offset+size <= self.nbytes and size % dtype.itemsize == 0
-    if cow:
-      return ReferenceBuffer(size//dtype.itemsize, dtype, initial_value=self.as_buffer()[offset:offset+size])
-    else:
-      return ReferenceBuffer(size//dtype.itemsize, dtype, opaque=self.as_buffer()[offset:offset+size])
+    if cow: return ReferenceBuffer(size//dtype.itemsize, dtype, initial_value=self.as_buffer()[offset:offset+size])
+    else: return ReferenceBuffer(size//dtype.itemsize, dtype, opaque=self._buf[offset:offset+size])
   def allocate(self, opaque: Optional[memoryview]=None):
     assert not hasattr(self, '_buf'), "can't allocate already allocated buffer"
     self._buf = opaque if opaque is not None else memoryview(bytearray([0] * self.nbytes))
     return self
   def as_buffer(self) -> memoryview:
-    return self._buf
+    return self.copyout(memoryview(bytearray(self.nbytes)))
   def copyin(self, mv:memoryview):
     mv = flat_mv(mv)
     assert len(mv) == self.nbytes, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
@@ -57,10 +58,10 @@ class DoubleBuffer:
     assert self.refbuf.size == self.buf.size, "size mismatch"
     bufmem = self.buf.as_buffer()
     refbufmem = self.refbuf.as_buffer()
-    assert bufmem == refbufmem, "bufmem != refbufmem"
+    assert refbufmem == bufmem, f"{mvs(refbufmem)} != {mvs(bufmem)}"
     if expected is not None:
       if not isinstance(expected, memoryview): expected = memoryview(bytearray(expected))
-      assert refbufmem == expected, "mem != expected"
+      assert expected == bufmem, f"{mvs(expected)} != {mvs(bufmem)}"
   def view(self, offset:int, size:int, dtype:Optional[DType]=None, cow=True):
     rb = self.refbuf.view(offset, size, dtype, cow)
     b = self.buf.view(offset, size, dtype, cow)
@@ -163,6 +164,41 @@ class TestOffsetBuffer(unittest.TestCase):
 
     cow.check([4,5,6,7,8,9,10,11])
     nocow.check([8,9,10,11])
+
+  def test_fuzz(self):
+    seed(1337)
+    for _ in range(1000):
+      try:
+        syms = {"base": randint(16,1024)}
+        prg = [f"base = DoubleBuffer({syms['base']}, dtype=dtypes.uint8, initial_value=())"]
+        for _ in range(randint(4, 64)):
+          action = randint(0,100)
+          if action < 50:
+            src,srcsz = list(syms.items())[randint(0, len(syms)-1)]
+            if srcsz < 4:
+              action = randint(60,100)
+              continue
+            newof = randint(0,srcsz-1)
+            newsz = randint(1,srcsz-newof)
+            prg.append(f"b{len(syms)} = {src}.view({newof}, {newsz}, cow={bool(randint(0,1))})")
+            syms[f"b{len(syms)}"] = newsz
+          elif action < 90:
+            dst = list(syms.keys())[randint(0, len(syms)-1)]
+            prg.append(f"{dst}.copyin(())")
+          else:
+            for _ in range(randint(1, 10)):
+              dst = list(syms.keys())[randint(0, len(syms)-1)]
+              prg.append(f"{dst}.check()")
+
+        for dst in syms.keys(): prg.append(f"{dst}.check()")
+
+        s = "\n".join(prg)
+        #print(f"-----\n{s}\n-----")
+        exec(s)
+      except:
+        print(s)
+        raise
+
 
 if __name__ == "__main__":
   unittest.main()
