@@ -145,7 +145,8 @@ class TestOffsetBuffer(unittest.TestCase):
     cow.check([4,5,6,7,8,9,10,11])
     nocow = cow.view(4,4, cow=False)
     nocow.check([8,9,10,11])
-    # base -> cow -> nocow <- assign
+    # base -> cow -> nocow
+    #                  ^-- assign
     # base should stay the same, cow should be detached from base and be assigned to
     nocow.copyin([100,101,102,103])
 
