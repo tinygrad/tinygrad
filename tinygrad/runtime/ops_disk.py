@@ -53,7 +53,7 @@ class DiskRunner(JITRunner):
     # TODO: there shouldn't actually be casts here, bitcasts should fold into the load
     if ast.src[0].op == UnaryOps.CAST:
       top_src = ast.src[0].src[0]
-      # TODO: assert that this is bitcast
+      assert ast.src[0].arg[1], "disk only supports bitcasts, not normal casts"
       self.new_dtype = ast.src[0].arg[0]
     else:
       top_src = ast.src[0]
