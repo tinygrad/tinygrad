@@ -37,7 +37,7 @@ class Buffer:
     if not hasattr(self.allocator, "offset"): raise RuntimeError("device doesn't support views")
     assert self.nbytes >= offset + size, "OOB"
     assert size % dtype.itemsize == 0, "size isn't multiple of dtype.itemsize"
-    if not cow: self.uncow() # force uncow ourselfs because othervise tracking bases is very hard and not clean
+    if not cow: self.uncow() # force uncow ourselfs because otherwise tracking bases is very hard and not clean
     base = self.base if self.base is not None else self
     return Buffer(self.device, size//dtype.itemsize, dtype, self.allocator.offset(base._buf, self.offset+offset, size), self.options, base=base,
                   offset=self.offset+offset, cow=cow)
