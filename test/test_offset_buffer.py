@@ -152,5 +152,21 @@ class TestOffsetBuffer(unittest.TestCase):
     cow.check([4,5,6,7,100,101,102,103]) # check that assign was passed through nocow to cow
     base.check(range(16)) # check that assign wasn't passed though cow to base
 
+  @unittest.expectedFailure
+  def test_multilevel_assign_base(self):
+    base = DoubleBuffer(16, dtype=dtypes.uint8, initial_value=range(16))
+
+    cow = base.view(4,8)
+    cow.check([4,5,6,7,8,9,10,11])
+    nocow = cow.view(4,4, cow=False)
+    nocow.check([8,9,10,11])
+    # base -> cow -> nocow
+    # ^-assign
+    # base should be updated, cow and nocow should stay the same
+    base.copyin([255-x for x in range(16)])
+
+    cow.check([4,5,6,7,8,9,10,11])
+    nocow.check([8,9,10,11])
+
 if __name__ == "__main__":
   unittest.main()
