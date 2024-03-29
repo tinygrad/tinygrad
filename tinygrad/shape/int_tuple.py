@@ -1,13 +1,11 @@
-from functools import reduce
-from typing import Union, Tuple
 from collections import deque
 import functools
-
+from typing import Union, Tuple
 from tinygrad.shape.symbolic import Node
 from tinygrad.helpers import prod
 
 def is_tuple(x): return isinstance(x, tuple)
-def is_int(x): return isinstance(x, int) or isinstance(x, Node) 
+def is_int(x): return isinstance(x, int) or isinstance(x, Node)
 
 @functools.lru_cache(maxsize=None)
 def flatten(t):
@@ -25,8 +23,8 @@ def signum(a): return bool(a > 0) - bool(a < 0)
 
 @functools.lru_cache(maxsize=None)
 def shape_div(a, b):
-  if is_tuple(a):    # tuple, 
-    r = deque()
+  if is_tuple(a):    # tuple,
+    r: deque[Union[int, Node, Tuple]] = deque()
     for v in reversed(a):
       r.appendleft(shape_div(v,b))
       b = shape_div(b, product(v))
@@ -40,7 +38,7 @@ def shape_div(a, b):
         return a // b
       else:
         return signum(a*b)
-  
+
 @functools.lru_cache(maxsize=None)
 def compact_strides(a, init=1):
     if is_tuple(a):
@@ -48,14 +46,14 @@ def compact_strides(a, init=1):
             assert len(a) == len(init)
             return tuple(compact_strides(v, i) for v, i in zip(a, init))
         else:  # tuple "int"
-            r = deque()
+            r: deque[Union[int, Node, Tuple]] = deque()
             for v in reversed(a):
                 r.appendleft(compact_strides(v, init))
                 init = init * product(v)
             return tuple(r)
     else:
       return init if is_int(init) else RuntimeError("compact_strides: init is not an int")
-        
+
 def idx2crd(idx, shape, strides=None):
     if strides is None:
         strides = compact_strides(shape)
