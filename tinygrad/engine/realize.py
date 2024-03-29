@@ -43,8 +43,6 @@ def run_schedule(schedule:List[ScheduleItem]):
 
     for out in si.outputs:
       # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
-      #if out.size > 0 and not dont_allocate and out.op is not LoadOps.ASSIGN: out.buffer.allocate()
-      #del out.srcs
       if out.size > 0 and not dont_allocate and not hasattr(out, "_buf"): out.allocate()
 
     # run the function (put it in JIT)
