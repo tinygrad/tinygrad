@@ -92,8 +92,8 @@ class LazyBuffer:
       new_shape = new_shape[:-1] + ((new_shape[-1]*self.dtype.itemsize) // dtype.itemsize,)
     return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), dtype, UnaryOps.CAST, (dtype, bitcast), (self,))
 
-  def is_unrealized_const(self): return not self.base.realized and self.base.op is LoadOps.CONST
-  def is_unrealized_contiguous_const(self): return self.base == self and not self.base.realized and self.op is LoadOps.CONST
+  def is_unrealized_const(self): return self.base.realized is None and self.base.op is LoadOps.CONST
+  def is_unrealized_contiguous_const(self): return self.base == self and self.base.realized is None and self.op is LoadOps.CONST
 
   def _copy(self, device:str) -> LazyBuffer:
     if (dstart:=self.device.split(":")[0]) in {"EXT", "DISK"} or (dstart in {"HSA", "CUDA"} and device.split(":")[0] == dstart):
