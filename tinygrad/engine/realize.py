@@ -43,13 +43,8 @@ def run_schedule(schedule:List[ScheduleItem]):
 
     for out in si.outputs:
       # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
-      if out.size > 0:
-        if out.op is LoadOps.ASSIGN and out.srcs[1].base.realized is not None:
-          # if the buffer isn't realized, it might be a const or something. this is fine
-          out.buffer = out.srcs[1].base.buffer
-        else:
-          if not dont_allocate: out.buffer.allocate()
-        del out.srcs
+      if out.size > 0 and not dont_allocate and out.op is not LoadOps.ASSIGN: out.buffer.allocate()
+      del out.srcs
 
     # run the function (put it in JIT)
     real_buffers = [x.buffer for x in si.outputs+si.inputs if x.size != 0]

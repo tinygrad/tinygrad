@@ -33,7 +33,8 @@ class LazyBuffer:
     if base is None:
       # properties on base
       self.op, self.arg, self.srcs = op, arg, srcs  # this is a LazyOp, except the src is LazyBuffers and not LazyOps
-      self.buffer: Buffer = Buffer(device, self.size, dtype)
+      assert self.op is not LoadOps.ASSIGN or srcs[1].base.realized is not None, "assign target must be realized"
+      self.buffer: Buffer = srcs[1].base.buffer if self.op is LoadOps.ASSIGN else Buffer(device, self.size, dtype)
       self.contiguous_child: Optional[Tuple[ReferenceType[LazyBuffer], ShapeTracker]] = None
       self.forced_realize = False
     else:
@@ -46,7 +47,8 @@ class LazyBuffer:
 
   @property
   def realized(self) -> Optional[Buffer]:
-    return self.buffer if self._base is None and hasattr(self.buffer, "_buf") else None
+    # NOTE: we check for a lack of srcs instead of an allocated buffer to make unrealized assigns return None here
+    return self.buffer if self._base is None and not hasattr(self, 'srcs') else None
 
   # NOTE: this has to be a function to prevent self reference
   @property
