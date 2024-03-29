@@ -15,9 +15,9 @@ libc = ctypes.CDLL("libc.so.6")
 libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
 libc.mmap.restype = ctypes.c_void_p
 
-def kfd_ioctl(idir, nr, user_struct, fd, **kwargs):
-  made = user_struct(**kwargs)
-  ret = fcntl.ioctl(fd, (idir<<30) | (ctypes.sizeof(user_struct)<<16) | (ord('K')<<8) | nr, made)
+def kfd_ioctl(idir, nr, user_struct, fd, made_struct=None, **kwargs):
+  made = made_struct or user_struct(**kwargs)
+  ret = fcntl.ioctl(fd, (idir<<30) | (ctypes.sizeof(made)<<16) | (ord('K')<<8) | nr, made)
   if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
   return made
 
@@ -150,19 +150,28 @@ class KFDAllocator(LRUAllocator):
   # obviously slow
   def copyin(self, dest, src: memoryview):
     # TODO: need to make the address visible to gpu and pass it directly to sdma.
-    mem = self._alloc(src.nbytes, BufferOptions(host=True))
-    ctypes.memmove(mem.va_addr, from_mv(src), src.nbytes)
+    self.device._map_userptr_to_gpu(ctypes.addressof(from_mv(src).contents), src.nbytes)
     self.device.completion_signal.value = 1
-    self.device._submit_sdma(dest.va_addr, mem.va_addr, src.nbytes, completion_signal=self.device.completion_signal)
+    self.device._submit_sdma(dest.va_addr, ctypes.addressof(from_mv(src).contents), src.nbytes, completion_signal=self.device.completion_signal)
     evt_arr = (kfd.struct_kfd_event_data * 1)()
     evt_arr[0].event_id = self.device.completion_signal.event_id
     kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=1000)
   def copyout(self, dest:memoryview, src):
-    ctypes.memmove(from_mv(dest), src.va_addr, src.size)
+    self.device._map_userptr_to_gpu(ctypes.addressof(from_mv(dest).contents), dest.nbytes)
+    self.device.completion_signal.value = 1
+    self.device._submit_sdma(ctypes.addressof(from_mv(dest).contents), src.va_addr, dest.nbytes, completion_signal=self.device.completion_signal)
+    evt_arr = (kfd.struct_kfd_event_data * 1)()
+    evt_arr[0].event_id = self.device.completion_signal.event_id
+    kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=1000)
 
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
 class KFDDevice(Compiled):
   kfd:int = -1
+
+  def _map_userptr_to_gpu(self, addr, size):
+    self.map_uptr2gpu_struct.start_addr = addr&~0xfff
+    self.map_uptr2gpu_struct.size = round_up(size+addr-(addr&~0xfff), 0x1000)
+    kio.svm(self.kfd, made_struct=self.map_uptr2gpu_struct)
 
   def _gpu_alloc(self, size:int, flags:int, uncached=False, public=False, map_to_gpu=True):
     flags |= kfd.KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE
@@ -264,6 +273,14 @@ class KFDDevice(Compiled):
                                         GCR_CONTROL_GL2_RANGE=0)
     self.sdma_cache_wb = sdma_pkts.gcr(op=amd_sdma.SDMA_OP_GCR, sub_op=amd_sdma.SDMA_SUBOP_USER_GCR, GCR_CONTROL_GL2_WB=1, GCR_CONTROL_GLK_WB=1,
                                         GCR_CONTROL_GL2_RANGE=0)
+
+    # Helpers
+    map_uptr2gpu_struct_t = init_c_struct_t(tuple(kfd.struct_kfd_ioctl_svm_args._fields_[:-1]+[('attrs', kfd.struct_kfd_ioctl_svm_attribute*2)]))
+    self.map_uptr2gpu_struct = map_uptr2gpu_struct_t(nattr=2, op=0x0)
+    self.map_uptr2gpu_struct.attrs[0].type = kfd.KFD_IOCTL_SVM_ATTR_SET_FLAGS
+    self.map_uptr2gpu_struct.attrs[0].value = kfd.KFD_IOCTL_SVM_FLAG_COHERENT
+    self.map_uptr2gpu_struct.attrs[1].type = kfd.KFD_IOCTL_SVM_ATTR_ACCESS_IN_PLACE
+    self.map_uptr2gpu_struct.attrs[1].value = self.gpu_id
 
     super().__init__(device, KFDAllocator(self), KFDCompiler(self.arch), functools.partial(KFDProgram, self))
 
