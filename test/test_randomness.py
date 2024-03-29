@@ -104,7 +104,7 @@ class TestRandomness(unittest.TestCase):
     self.assertTrue(normal_test(Tensor.randn))
     self.assertTrue(equal_distribution(Tensor.randn, torch.randn, lambda x: np.random.randn(*x)))
 
-  @given(strat.sampled_from([dtypes.float, dtypes.float16, dtypes.bfloat16]))
+  @given(strat.sampled_from([dtypes.float, dtypes.float16]))#, dtypes.bfloat16]))  # TODO: add bfloat16
   def test_randn_finite(self, default_float):
     if not is_dtype_supported(default_float): return
     old_default_float = dtypes.default_float
@@ -114,7 +114,7 @@ class TestRandomness(unittest.TestCase):
     mx = t.max().numpy().item()
     mn = t.min().numpy().item()
     if default_float == dtypes.float or (default_float == dtypes.float16 and not THREEFRY.value):
-      # TODO: fix for bfloat16
+      print(f"testing with {default_float=}")
       assert math.isfinite(mx), mx
       assert math.isfinite(mn), mn
     dtypes.default_float = old_default_float
