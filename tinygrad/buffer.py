@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Any, Optional
 from dataclasses import dataclass
+from weakref import WeakSet
 from tinygrad.helpers import flat_mv
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.ops import GlobalCounters
@@ -13,10 +14,13 @@ class BufferOptions:
   nolru: bool = False
 
 class Buffer:
-  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferOptions]=None, initial_value:Optional[bytes]=None):
+  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferOptions]=None, initial_value:Optional[bytes]=None,
+               base:Optional[Buffer]=None, cow:bool=False):
     assert isinstance(dtype, DType)
     if isinstance(dtype, ImageDType): options = BufferOptions(image=dtype) # TODO: image hack shouldn't be here. where should it be?
-    self.device, self.size, self.dtype, self.options = device, size, dtype, options
+    if base is not None: base.views.add(self)
+    self.device, self.size, self.dtype, self.options, self.base, self.cow = device, size, dtype, options, base, cow
+    self.views: WeakSet[Buffer] = WeakSet()
     if opaque is not None: self.allocate(opaque)
     if initial_value is not None:
       self.allocate()
@@ -26,9 +30,9 @@ class Buffer:
     from tinygrad.device import Device
     self.allocator = Device[self.device].allocator
     self._buf = opaque if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
-    if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.nbytes
+    if not self.device.startswith("DISK") and self.base is None: GlobalCounters.mem_used += self.nbytes
     return self
-  def __reduce__(self):
+  def __reduce__(self): # FIXME: support and test serialization
     buf = None
     if hasattr(self, '_buf'):
       buf = bytearray(self.nbytes)
@@ -36,9 +40,27 @@ class Buffer:
     return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf)
   @property
   def nbytes(self): return self.size*self.dtype.itemsize
+  def view(self, offset:int, size:int, dtype:Optional[DType]=None, cow=True) -> Buffer: # both size and offset are in bytes
+    dtype = self.dtype if dtype is None else dtype
+    if not hasattr(self.allocator, "offset"): raise RuntimeError("device doesn't support views")
+    assert self.nbytes >= offset + size, "OOB"
+    assert size % dtype.itemsize == 0, "size isn't multiple of dtype.itemsize"
+    return Buffer(self.device, size//dtype.itemsize, dtype, self.allocator.offset(self._buf, offset, size), self.options, base=self, cow=cow)
+  def uncow(self) -> Buffer:
+    if len(self.views) > 0: raise NotImplementedError()
+    if not self.cow: return self
+    if self.base is not None:
+      buf = self.as_buffer()
+      del self._buf
+      self.allocate()
+      self.allocator.copyin(self._buf, buf)
+      self.base.views.remove(self)
+      self.base = None
+    return self
   def __del__(self):
-    if not hasattr(self, '_buf'): return
+    if not hasattr(self, '_buf') or self.base is not None: return
     if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
+    assert len(self.views) == 0, "attempted to free base before deleting all its views"
     self.allocator.free(self._buf, self.nbytes, self.options)
   def __repr__(self):
     return f"<buf real:{hasattr(self, '_buf')} device:{self.device} size:{self.size} dtype:{self.dtype}" + \
@@ -51,6 +73,7 @@ class Buffer:
   def copyin(self, mv:memoryview):
     mv = flat_mv(mv)
     assert len(mv) == self.nbytes, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
+    self.uncow()
     self.allocator.copyin(self._buf, mv)
     return self
   def copyout(self, mv:memoryview) -> memoryview:
