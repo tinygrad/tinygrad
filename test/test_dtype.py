@@ -620,12 +620,7 @@ class TestImplicitFunctionTypeChange(unittest.TestCase):
       t = func(Tensor([4.0, 3.0])).max() == func(Tensor([4.0, 3.0]))
       result.append(t.numpy().sum())
 
-    if Device.DEFAULT not in ["PYTHON"]:
-      assert all(result)
-    else:
-      # PYTHON function default returns in double, and comparison to float can fail
-      # TODO: fix this
-      assert not all(result)
+    assert all(result)
 
 if __name__ == '__main__':
   unittest.main()
