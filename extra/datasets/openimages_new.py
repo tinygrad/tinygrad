@@ -25,36 +25,36 @@ class ConvertCocoPolysToMask(object):
       anno = [obj for obj in anno if obj['iscrowd'] == 0]
 
     boxes = [obj["bbox"] for obj in anno]
-    print('BOXES:HHHHH', boxes)
+    # print('BOXES:HHHHH', boxes)
     # guard against no boxes via resizing
     boxes = np.array(boxes, dtype=np.float32).reshape(-1, 4)
-    print('BOXES:POSTT', boxes)
+    # print('BOXES:POSTT', boxes)
     boxes[:, 2:] += boxes[:, :2]
     # boxes[:, 0::2].clip(min_=0, max_=w)
     # boxes[:, 1::2].clip(min_=0, max_=h)
     boxes[:, 0::2] = boxes[:, 0::2].clip(0, w)
     boxes[:, 1::2] = boxes[:, 1::2].clip(0, h)
-    print('BOXES:POSTPOST', boxes)
+    # print('BOXES:POSTPOST', boxes)
     classes = [obj["category_id"] for obj in anno]
     classes = np.array(classes, dtype=np.int64)
 
     keypoints = None
     if anno and "keypoints" in anno[0]:
       keypoints = [obj["keypoints"] for obj in anno]
-      keypoints = Tensor(keypoints, dtype=dtypes.float)
+      keypoints = Tensor(keypoints, dtype=dtypes.float32)
       num_keypoints = keypoints.shape[0]
       if num_keypoints:
         keypoints = keypoints.reshape(num_keypoints, -1, 3)
 
     keep = (boxes[:, 3] > boxes[:, 1]) & (boxes[:, 2] > boxes[:, 0])
     boxes = boxes[keep]
-    print('BOXES:KEPPPOST', boxes)
+    # print('BOXES:KEPPPOST', boxes)
     classes = classes[keep]
 
     target = {}
-    target["boxes"] = Tensor(boxes)
-    print('BOXES:TENSCONV', target["boxes"].numpy())
-    target["labels"] = Tensor(classes)
+    target["boxes"] = Tensor(boxes).realize()
+    # print('BOXES:TENSCONV', target["boxes"].numpy())
+    target["labels"] = Tensor(classes).realize()
     target["image_id"] = image_id
 
     # for conversion to coco api
@@ -123,43 +123,56 @@ def resize_boxes(boxes: Tensor, original_size: List[int], new_size: List[int]) -
       for s, s_orig in zip(new_size, original_size)
   ]
   ratio_height, ratio_width = ratios
-  print('resize_boxes boxes.shape:',boxes.shape, original_size, new_size)
-  print(boxes.numpy())
-  boxes = boxes.permute(1,0)
-  print('post permute', boxes.shape)
-  print(boxes.numpy())
-  print(boxes[0].numpy())
-  xmin, ymin, xmax, ymax = boxes[0], boxes[1], boxes[2], boxes[3]
-  xmin = boxes[0]
+
+  # print('resize_boxes boxes.shape:',boxes.shape, original_size, new_size)
+  # print(boxes.numpy())
+
+
+  # boxes = boxes.permute(1,0)
+  # print('post permute', boxes.shape)
+  # print(boxes.numpy())
+  # print(boxes[0].numpy())
+  # xmin, ymin, xmax, ymax = boxes[0], boxes[1], boxes[2], boxes[3]
+  # xmin = boxes[0]
+  bnp = boxes.numpy()
+  xmin, ymin, xmax, ymax = Tensor(bnp[:, 0]), Tensor(bnp[:, 1]), \
+                          Tensor(bnp[:, 2]), Tensor(bnp[:, 3])
+
   # xmin, ymin, xmax, ymax = boxes.split(1, dim=1)
   # print('temp t LEN:',t)
   # xmin, ymin, xmax, ymax = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
-  print('UNBIND SHAPE_PRE:', xmin.shape, xmin.numpy())
+  # print('UNBIND SHAPE_PRE:', xmin.shape, xmin.numpy())
 
   xmin = xmin * ratio_width
   xmax = xmax * ratio_width
   ymin = ymin * ratio_height
   ymax = ymax * ratio_height
-  print('UNBIND SHAPE_POST:', xmin.shape)
-  ans = Tensor.cat(*(xmin, ymin, xmax, ymax), dim=1)
-  print('RESIZE_ANS', ans.shape)
+  # print('UNBIND SHAPE_POST:', xmin.shape, xmax.shape, ymin.shape, ymax.shape)
+  # ans = Tensor([xmin, ymin, xmax, ymax])
+
+
+  # ans = Tensor.cat(*(xmin, ymin, xmax, ymax), dim=1)
+  ans = Tensor.stack((xmin, ymin, xmax, ymax), dim=1)#.cast(dtypes.float32)
+  # print('RESIZE_ANS', ans.shape)
   return ans
 import torchvision.transforms.functional as F
-
+# SIZE = (400,400)
+SIZE = (800, 800)
 def iterate(coco, bs=8):
-  for i in range(8, len(coco.ids), bs):
+  for i in range(8, 800, bs):
+  # for i in range(8, len(coco.ids), bs):
     X, targets= [], []
     for img_id in coco.ids[i:i+bs]:
       x,t = coco.__getitem__(img_id)
       
 
-      xNew = F.resize(x, size=(800, 800))
+      xNew = F.resize(x, size=SIZE)
       xNew = np.array(xNew)
       X.append(xNew)
       bbox = t['boxes']
-      print('ITERATE_PRE_RESIZE', bbox.shape)
-      bbox = resize_boxes(bbox, x.size, (800,800))
-      print('ITERATE_POST_RESIZE', bbox.shape)
+      # print('ITERATE_PRE_RESIZE', bbox.shape)
+      bbox = resize_boxes(bbox, x.size, SIZE)
+      # print('ITERATE_POST_RESIZE', bbox.shape)
       t['boxes'] = bbox
       targets.append(t)
     yield Tensor(X), targets

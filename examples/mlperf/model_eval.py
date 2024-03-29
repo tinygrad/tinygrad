@@ -83,7 +83,7 @@ def eval_unet3d():
 def eval_retinanet():
   # RetinaNet with ResNeXt50_32X4D
   from extra.models.resnet import ResNeXt50_32X4D
-  from extra.models.retinanet import RetinaNet
+  from extra.models.retinanetNew import RetinaNet
   mdl = RetinaNet(ResNeXt50_32X4D())
   mdl.load_from_pretrained()
 
@@ -106,9 +106,10 @@ def eval_retinanet():
   from tinygrad.engine.jit import TinyJit
   mdlrun = TinyJit(lambda x: mdl(input_fixup(x)).realize())
 
-  n, bs = 0, 8
+  n, bs = 0, 2
   st = time.perf_counter()
   for x, targets in iterate(coco, bs):
+    # print(x.shape, type(x))
     dat = Tensor(x.astype(np.float32))
     mt = time.perf_counter()
     if dat.shape[0] == bs:
@@ -242,8 +243,8 @@ def eval_mrcnn():
 
 if __name__ == "__main__":
   # inference only
-  Tensor.training = False
-  Tensor.no_grad = True
+  Tensor.training = True
+  # Tensor.no_grad = True
 
   models = getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,mrcnn").split(",")
   for m in models:
