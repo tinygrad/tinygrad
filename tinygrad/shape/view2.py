@@ -79,6 +79,7 @@ def make_view(*views: View) -> View:
   shape, strides = zip(*((a.shape,a.strides) for a in views))
   return View(shape, strides)
 
+@functools.lru_cache(maxsize=None)
 def coalesce(view):
   result_shape  = deque([1])
   result_strides = deque([0])
@@ -88,10 +89,8 @@ def coalesce(view):
     elif result_shape[0] == 1:
       result_shape[0]  = shape
       result_strides[0] = strides
-    # merge modes if the shape*strides match
     elif result_shape[0] * result_strides[0] == strides:
       result_shape[0] = result_shape[0] * shape
-    # append a new mode
     else:
       result_shape.appendleft(shape)
       result_strides.appendleft(strides)
@@ -101,6 +100,7 @@ def coalesce(view):
   else:
     return View(tuple(result_shape), tuple(result_strides))
 
+@functools.lru_cache(maxsize=None)
 def composition(viewA: View, viewB:View):
   if viewB.strides == 0: return View(viewB.shape, 0)
 
