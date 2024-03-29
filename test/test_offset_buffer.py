@@ -125,7 +125,6 @@ class TestOffsetBuffer(unittest.TestCase):
     d1.copyin([255-x for x in range(16)])
     d2.check([251,250,249,248]) # should change because it's cow=False
 
-  @unittest.expectedFailure
   def test_base_assign_cow(self):
     d1 = DoubleBuffer(16, dtype=dtypes.uint8, initial_value=range(16))
 
@@ -135,7 +134,6 @@ class TestOffsetBuffer(unittest.TestCase):
     d1.copyin([255-x for x in range(16)])
     d2.check([4,5,6,7]) # shouldn't change because it's cow=True
 
-  @unittest.expectedFailure
   def test_multilevel_assign(self):
     base = DoubleBuffer(16, dtype=dtypes.uint8, initial_value=range(16))
 
@@ -151,7 +149,6 @@ class TestOffsetBuffer(unittest.TestCase):
     cow.check([4,5,6,7,100,101,102,103]) # check that assign was passed through nocow to cow
     base.check(range(16)) # check that assign wasn't passed though cow to base
 
-  @unittest.expectedFailure
   def test_multilevel_assign_base(self):
     base = DoubleBuffer(16, dtype=dtypes.uint8, initial_value=range(16))
 

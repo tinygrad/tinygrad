@@ -15,12 +15,12 @@ class BufferOptions:
 
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferOptions]=None, initial_value:Optional[bytes]=None,
-               base:Optional[Buffer]=None, cow:bool=False):
+               base:Optional[Buffer]=None, offset:int=0, cow:bool=False):
     assert isinstance(dtype, DType)
     if isinstance(dtype, ImageDType): options = BufferOptions(image=dtype) # TODO: image hack shouldn't be here. where should it be?
-    if base is not None: base.views.add(self)
-    self.device, self.size, self.dtype, self.options, self.base, self.cow = device, size, dtype, options, base, cow
-    self.views: WeakSet[Buffer] = WeakSet()
+    self.device, self.size, self.dtype, self.options, self.base, self.offset, self.cow = device, size, dtype, options, base, offset, cow
+    if self.base is None: self.views: WeakSet[Buffer] = WeakSet()
+    else: self.base.views.add(self)
     if opaque is not None: self.allocate(opaque)
     if initial_value is not None:
       self.allocate()
@@ -32,7 +32,33 @@ class Buffer:
     self._buf = opaque if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
     if not self.device.startswith("DISK") and self.base is None: GlobalCounters.mem_used += self.nbytes
     return self
-  def __reduce__(self): # FIXME: support and test serialization
+  def view(self, offset:int, size:int, dtype:Optional[DType]=None, cow=True) -> Buffer: # both size and offset are in bytes
+    dtype = self.dtype if dtype is None else dtype
+    if not hasattr(self.allocator, "offset"): raise RuntimeError("device doesn't support views")
+    assert self.nbytes >= offset + size, "OOB"
+    assert size % dtype.itemsize == 0, "size isn't multiple of dtype.itemsize"
+    if not cow: self.uncow() # force uncow ourselfs because othervise tracking bases is very hard and not clean
+    base = self.base if self.base is not None else self
+    return Buffer(self.device, size//dtype.itemsize, dtype, self.allocator.offset(base._buf, self.offset+offset, size), self.options, base=base,
+                  offset=self.offset+offset, cow=cow)
+  def uncow(self): # uncow = be ready to be written into
+    if not hasattr(self.allocator, "offset"): raise RuntimeError("device doesn't support views")
+    if self.base is None: # we are the base buffer, detach CoW views if any
+      if len((transfer := [v for v in self.views if v.cow])) == 0: return self
+      newbase = Buffer(self.device, self.size, self.dtype, options=self.options, initial_value=self.as_buffer(allow_zero_copy=True)) # TODO: faster
+      for v in transfer:
+        v.base, v._buf = newbase, self.allocator.offset(newbase._buf, v.offset, v.size*v.dtype.itemsize)
+        newbase.views.add(v)
+        self.views.remove(v)
+    elif self.cow: # we are the CoW view buffer, detach ourselfs from base buffer and convert into base
+      oldbuf, oldbase = self.as_buffer(), self.base
+      del self._buf
+      self.base, self.views, self.offset, self.cow = None, WeakSet(), 0, False
+      self.allocate()
+      self.copyin(oldbuf)
+      oldbase.views.remove(self)
+    return self
+  def __reduce__(self): # FIXME: support serialization
     buf = None
     if hasattr(self, '_buf'):
       buf = bytearray(self.nbytes)
@@ -40,27 +66,9 @@ class Buffer:
     return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf)
   @property
   def nbytes(self): return self.size*self.dtype.itemsize
-  def view(self, offset:int, size:int, dtype:Optional[DType]=None, cow=True) -> Buffer: # both size and offset are in bytes
-    dtype = self.dtype if dtype is None else dtype
-    if not hasattr(self.allocator, "offset"): raise RuntimeError("device doesn't support views")
-    assert self.nbytes >= offset + size, "OOB"
-    assert size % dtype.itemsize == 0, "size isn't multiple of dtype.itemsize"
-    return Buffer(self.device, size//dtype.itemsize, dtype, self.allocator.offset(self._buf, offset, size), self.options, base=self, cow=cow)
-  def uncow(self) -> Buffer:
-    if len([x for x in self.views if x.cow]) > 0: raise NotImplementedError()
-    if not self.cow: return self
-    if self.base is not None:
-      buf = self.as_buffer()
-      del self._buf
-      self.allocate()
-      self.allocator.copyin(self._buf, buf)
-      self.base.views.remove(self)
-      self.base = None
-    return self
   def __del__(self):
     if not hasattr(self, '_buf') or self.base is not None: return
     if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
-    assert len(self.views) == 0, "attempted to free base before deleting all its views"
     self.allocator.free(self._buf, self.nbytes, self.options)
   def __repr__(self):
     return f"<buf real:{hasattr(self, '_buf')} device:{self.device} size:{self.size} dtype:{self.dtype}" + \
