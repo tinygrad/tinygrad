@@ -37,13 +37,13 @@ class Buffer:
     if not hasattr(self.allocator, "offset"): raise RuntimeError("device doesn't support views")
     assert self.nbytes >= offset + size, "OOB"
     assert size % dtype.itemsize == 0, "size isn't multiple of dtype.itemsize"
-    if not cow: self.uncow() # force uncow ourselfs because otherwise tracking bases is very hard and not clean
+    if not cow: self.uncow() # force uncow ourselfs if we are non-base CoW view because otherwise tracking bases is very hard and not clean
     base = self.base if self.base is not None else self
     return Buffer(self.device, size//dtype.itemsize, dtype, self.allocator.offset(base._buf, self.offset+offset, size), self.options, base=base,
                   offset=self.offset+offset, cow=cow)
   def uncow(self): # uncow = be ready to be written into
     if not hasattr(self.allocator, "offset"): raise RuntimeError("device doesn't support views")
-    if self.base is None: # we are the base buffer, detach CoW views if any
+    if self.base is None: # we are the base buffer, create new base buffer and transfer CoW views into it if we have any
       if len((transfer := [v for v in self.views if v.cow])) == 0: return self
       newbase = Buffer(self.device, self.size, self.dtype, options=self.options, initial_value=self.as_buffer(allow_zero_copy=True)) # TODO: faster
       for v in transfer:
@@ -51,12 +51,12 @@ class Buffer:
         newbase.views.add(v)
         self.views.remove(v)
     elif self.cow: # we are the CoW view buffer, detach ourselfs from base buffer and convert into base
-      oldbuf, oldbase = self.as_buffer(), self.base
-      del self._buf
+      oldbuf, oldbase = self.as_buffer(allow_zero_copy=True), self.base
+      oldbase.views.remove(self)
       self.base, self.views, self.offset, self.cow = None, WeakSet(), 0, False
+      del self._buf
       self.allocate()
       self.copyin(oldbuf)
-      oldbase.views.remove(self)
     return self
   def __reduce__(self): # FIXME: support serialization
     buf = None
