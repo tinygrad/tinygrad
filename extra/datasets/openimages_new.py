@@ -173,6 +173,6 @@ def iterate(coco, bs=8):
       # print('ITERATE_PRE_RESIZE', bbox.shape)
       bbox = resize_boxes(bbox, x.size, SIZE)
       # print('ITERATE_POST_RESIZE', bbox.shape)
-      t['boxes'] = bbox
+      t['boxes'] = bbox.realize()
       targets.append(t)
     yield Tensor(X), targets

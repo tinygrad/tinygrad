@@ -416,7 +416,7 @@ def train_retinanet():
   coco = get_openimages(NAME,ROOT, 'train')
   model = RetinaNet(ResNeXt50_32X4D())
   mdlrun = TinyJit(lambda x: model(input_fixup(x)))
-  mdlloss = TinyJit(lambda r, c, Y, a: model.loss(r,c,Y,a).realize())
+  # mdlloss = TinyJit(lambda r, c, Y, a: model.loss(r,c,Y,a).realize())
   # for k, x in get_state_dict(model).items():
   #   if 'head' in k:
   #     x.requires_grad = True
@@ -432,13 +432,13 @@ def train_retinanet():
     b, r, c = outputs
     # c.realize()
     # r.realize()
-    return r
+    # return r
     anchors = anchor_generator(image_list, b)
-    # loss = model.loss(r, c, Y, anchors)
-    loss = mdlloss(r, c, Y, anchors)
+    loss = model.loss(r, c, Y, anchors)
+    # loss = mdlloss(r, c, Y, anchors)
     # return loss
     # loss = outputs['h']
-    return loss.realize()
+    return loss#.realize()
   
   for epoch in range(EPOCHS):
     print(colored(f'EPOCH {epoch}/{EPOCHS}:', 'cyan'))

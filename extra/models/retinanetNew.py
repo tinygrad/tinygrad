@@ -204,8 +204,8 @@ class Matcher(object):
     self.low_threshold = low_threshold
     self.allow_low_quality_matches = allow_low_quality_matches
 
-  def __call__(self, match_quality_matrix_t):
-    match_quality_matrix = torch.as_tensor(match_quality_matrix_t.numpy())
+  def __call__(self, match_quality_matrix):
+    match_quality_matrix = torch.as_tensor(match_quality_matrix.numpy())
     """
     Args:
         match_quality_matrix (Tensor[float]): an MxN tensor, containing the
@@ -316,8 +316,8 @@ class RetinaNet:
       match_quality_matrix = box_iou(targets_per_image['boxes'], anchors_per_image)
       # print('match_quality_matrix', match_quality_matrix.shape)
       # print(match_quality_matrix.numpy())
-      matched_idxs.append(self.proposal_matcher(match_quality_matrix))
-      # print('matcher apppend:', matched_idxs[-1].numpy())
+      matched_idxs.append((self.proposal_matcher(match_quality_matrix)).realize())
+      print('matcher apppend:', matched_idxs[-1].shape)
 
       # sys.exit()
       # matched_idxs.append(self.proposal_matcher(match_quality_matrix))
@@ -425,12 +425,12 @@ class ClassificationHead:
       foreground_idxs_per_image = matched_idxs_per_image >= 0
       # Idk if this hack works
       foreground_idxs_per_image = np.nonzero(foreground_idxs_per_image.numpy())[0]
-      if foreground_idxs_per_image.shape==(0,):
-        print(colored('empty forground idx in class head', 'red'))
-        foreground_idxs_per_image = Tensor([0])
-        # foreground_idxs_per_image = Tensor([])
-      else:
-        foreground_idxs_per_image = Tensor(foreground_idxs_per_image)
+      # if foreground_idxs_per_image.shape==(0,):
+      #   print(colored('empty forground idx in class head', 'red'))
+      #   foreground_idxs_per_image = Tensor([0])
+      #   # foreground_idxs_per_image = Tensor([])
+      # else:
+      foreground_idxs_per_image = Tensor(foreground_idxs_per_image)
       num_foreground = foreground_idxs_per_image.sum()
       # print('num_foreground:',num_foreground.shape, num_foreground.numpy())
 
@@ -458,11 +458,11 @@ class ClassificationHead:
       # else:
       valid_idxs_per_image = Tensor(valid_idxs_per_image)
       # compute the classification loss
-      losses.append(sigmoid_focal_loss(
+      losses.append((sigmoid_focal_loss(
         cls_logits_per_image[valid_idxs_per_image],
         gt_classes_target[valid_idxs_per_image],
         
-      ) / Tensor(max(1, num_foreground.item()), dtype=dtypes.float))
+      ) / Tensor(max(1, num_foreground.item()), dtype=dtypes.float32)))
     # print(colored('FINISHED CLASS LOSS APPEND', 'green'))
     # print(losses[0].shape)
     return _sum(losses) / len(targets)
@@ -512,7 +512,7 @@ class RegressionHead:
       losses.append(l1_loss(
         bbox_regression_per_image,
         target_regression,
-      ) / Tensor(max(1, num_foreground), dtype=dtypes.float))
+      ) / Tensor(max(1, num_foreground), dtype=dtypes.float32))
     
     # print('REgression head loss num/dem', _sum(losses).numpy(),  max(1, len(targets)))
     # print('regression loss length', len(losses))
