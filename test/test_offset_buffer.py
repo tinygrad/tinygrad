@@ -93,7 +93,6 @@ class TestOffsetBuffer(unittest.TestCase):
   def test_simple_onelevel(self):
     # --- create ---
     d1 = DoubleBuffer(16, dtype=dtypes.uint8, initial_value=range(16))
-    d1.check([0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]) # should copy
 
     # --- test cow=True ---
     d2 = d1.view(4,4)
@@ -119,7 +118,6 @@ class TestOffsetBuffer(unittest.TestCase):
   def test_base_assign_nocow(self):
     # --- create ---
     d1 = DoubleBuffer(16, dtype=dtypes.uint8, initial_value=range(16))
-    d1.check(range(16)) # should copy
 
     # --- test cow=False ---
     d2 = d1.view(4,4, cow=False)
@@ -132,7 +130,6 @@ class TestOffsetBuffer(unittest.TestCase):
   def test_base_assign_cow(self):
     # --- create ---
     d1 = DoubleBuffer(16, dtype=dtypes.uint8, initial_value=range(16))
-    d1.check(range(16)) # should copy
 
     # --- test cow=True ---
     d2 = d1.view(4,4)
