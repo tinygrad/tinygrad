@@ -19,8 +19,8 @@ class Buffer:
     assert isinstance(dtype, DType)
     if isinstance(dtype, ImageDType): options = BufferOptions(image=dtype) # TODO: image hack shouldn't be here. where should it be?
     self.device, self.size, self.dtype, self.options, self.base, self.offset, self.cow = device, size, dtype, options, base, offset, cow
-    if self.base is None: self.views: WeakSet[Buffer] = WeakSet()
-    else: self.base.views.add(self)
+    self.views: WeakSet[Buffer] = WeakSet()
+    if self.base is not None and self.cow: self.base.views.add(self)
     if opaque is not None: self.allocate(opaque)
     if initial_value is not None:
       self.allocate()
@@ -32,24 +32,20 @@ class Buffer:
     self._buf = opaque if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
     if not self.device.startswith("DISK") and self.base is None: GlobalCounters.mem_used += self.nbytes
     return self
-  def view(self, offset:int, size:int, dtype:Optional[DType]=None, cow=True) -> Buffer: # both size and offset are in bytes
-    dtype = self.dtype if dtype is None else dtype
+  def view(self, offset:int, size:int, dtype:Optional[DType]=None, cow=True) -> Buffer:
     if not hasattr(self.allocator, "offset"): raise RuntimeError("device doesn't support views")
-    assert self.nbytes >= offset + size, "OOB"
-    assert size % dtype.itemsize == 0, "size isn't multiple of dtype.itemsize"
-    if not cow: self.uncow() # force uncow ourselfs if we are non-base CoW view because otherwise tracking bases is very hard and not clean
-    base = self.base if self.base is not None else self
+    if not cow: self.writable()
+    dtype, base = self.dtype if dtype is None else dtype, self.base if self.base is not None else self
+    assert self.nbytes >= offset + size and size % dtype.itemsize == 0, "wrong size for dtype"
     return Buffer(self.device, size//dtype.itemsize, dtype, self.allocator.offset(base._buf, self.offset+offset, size), self.options, base=base,
                   offset=self.offset+offset, cow=cow)
-  def uncow(self): # uncow = be ready to be written into
+  def writable(self):
     if self.base is None: # we are the base buffer, create new base buffer and transfer CoW views into it if we have any
-      if len((transfer := [v for v in self.views if v.cow])) == 0: return self
+      if len(self.views) == 0: return self
       if not hasattr(self.allocator, "offset"): raise RuntimeError("device doesn't support views")
-      newbase = Buffer(self.device, self.size, self.dtype, options=self.options, initial_value=self.as_buffer(allow_zero_copy=True)) # TODO: faster
-      for v in transfer:
-        v.base, v._buf = newbase, self.allocator.offset(newbase._buf, v.offset, v.size*v.dtype.itemsize)
-        newbase.views.add(v)
-        self.views.remove(v)
+      newbase = Buffer(self.device, self.size, self.dtype, options=self.options, initial_value=self.as_buffer(allow_zero_copy=True))
+      newbase.views, self.views = self.views, WeakSet()
+      for v in newbase.views: v.base, v._buf = newbase, self.allocator.offset(newbase._buf, v.offset, v.size*v.dtype.itemsize)
     elif self.cow: # we are the CoW view buffer, detach ourselfs from base buffer and convert into base
       oldbuf, oldbase = self.as_buffer(allow_zero_copy=True), self.base
       oldbase.views.remove(self)
@@ -57,9 +53,9 @@ class Buffer:
       del self._buf
       self.allocate()
       self.copyin(oldbuf)
-    else: self.base.uncow()
+    else: self.base.writable()
     return self
-  def __reduce__(self): # FIXME: support serialization
+  def __reduce__(self):
     buf = None
     if hasattr(self, '_buf'):
       buf = bytearray(self.nbytes)
@@ -83,7 +79,7 @@ class Buffer:
   def copyin(self, mv:memoryview):
     mv = flat_mv(mv)
     assert len(mv) == self.nbytes, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
-    self.uncow()
+    self.writable()
     self.allocator.copyin(self._buf, mv)
     return self
   def copyout(self, mv:memoryview) -> memoryview:
