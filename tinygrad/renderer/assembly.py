@@ -66,10 +66,10 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
 
   def ptr_ar(root):
     assert root.arg in {'.shared', '.global', None}
-    if root.arg is None: root.arg = '.shared' if root.vin[0].uop == UOps.DEFINE_LOCAL else '.global'  # move this to the argL
+    if root.arg is None: root.arg = '.shared' if root.vin[0].uop is UOps.DEFINE_LOCAL else '.global'  # move this to the argL
     val = uops.add(UOps.CONST, dtypes.int, tuple(), arg=root.vin[0].dtype.itemsize, insert_before=uops.uops.index(root))
     ptr = uops.add(UOps.ALU, dtypes.int, (root.vin[1], val), arg=BinaryOps.MUL, insert_before=uops.uops.index(root))
-    if ptr.uop == UOps.CONST: root.vin = (root.vin[0], ptr) + root.vin[2:]
+    if ptr.uop is UOps.CONST: root.vin = (root.vin[0], ptr) + root.vin[2:]
     else:
       zero = uops.add(UOps.CONST, dtypes.int, tuple(), arg=0, cachable=False, insert_before=uops.uops.index(root))
       bptr = uops.add(UOps.CAST, dtypes.uint64, (ptr,), insert_before=uops.uops.index(root))
@@ -133,17 +133,17 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
 
   for u in uops:
     uop,dtype,vin,args = u.uop,u.dtype,u.vin,u.arg
-    if uop == UOps.IF:
+    if uop is UOps.IF:
       assert vin[0].dtype is not None
       kk(*lang.render_bra(lb:=ssa_label(u, 'if'), cast(r[vin[0]], dtypes.bool, vin[0].dtype, u=u, pred=True), f"{lb}_true"), f"{lb}_true:")
-    elif uop == UOps.BARRIER and lang.barrier: kk(lang.barrier)
-    elif uop == UOps.ENDLOOP:
+    elif uop is UOps.BARRIER and lang.barrier: kk(lang.barrier)
+    elif uop is UOps.ENDLOOP:
       kk(lang.asm_for_op[BinaryOps.ADD](r[vin[0]], r[vin[0]], "1", dtypes.int, lang.types[dtypes.int]),
           lang.asm_for_op[BinaryOps.CMPLT](pred:=ssa(None, "pred", "pred"), r[vin[0]], r[vin[0].vin[1]], dtypes.int, lang.types[dtypes.int]))
       kk(*lang.render_bra(r_label[vin[0]], pred, f"{r_label[vin[0]]}_exit"), f"{r_label[vin[0]]}_exit:")
-    elif uop == UOps.ENDIF:
+    elif uop is UOps.ENDIF:
       kk(f"{r_label[vin[0]]}:")
-    elif uop == UOps.STORE:
+    elif uop is UOps.STORE:
       assert vin[0].dtype is not None and vin[1].dtype is not None and vin[2].dtype is not None
       if vin[2].dtype.count > 1:
         kk((f"@{r[vin[3]]} " if len(vin)>3 else "") + \
@@ -152,8 +152,8 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
         kk(*lang.render_store(r[vin[0]], r[vin[2]], vin[2].dtype, gate=r[vin[3]] if len(vin)>3 else None, ss=u.arg, offset=vin[1].arg))
     else:
       assert dtype is not None, f"None dtype for uop {uop}"
-      if uop == UOps.LOOP: kk(*lang.render_loop(ssa(u, 'ridx'), r[vin[0]], ssa_label(u, 'loop')))
-      elif uop == UOps.ALU:
+      if uop is UOps.LOOP: kk(*lang.render_loop(ssa(u, 'ridx'), r[vin[0]], ssa_label(u, 'loop')))
+      elif uop is UOps.ALU:
         assert vin[0].dtype is not None
         operands = [r[x] for x in vin]
         lab = ssa(u, "alu")
@@ -163,28 +163,28 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
           for i, op in enumerate(operands):
             operands[i] = ssa(None, "alu_cast", lang.types[dtype])
             kk(*lang.render_cast(operands[i], op, dtype, dtypes.half)) # type: ignore
-        if args == BinaryOps.CMPLT or args == BinaryOps.CMPEQ:
+        if args is BinaryOps.CMPLT or args is BinaryOps.CMPEQ:
           # pass in the other dtype here
           kk(lang.asm_for_op[args](lab, *operands, vin[0].dtype, lang.types[vin[0].dtype]))
         else:
           kk(lang.asm_for_op[args](lab, *operands, dtype, lang.types[dtype]))
         if needs_upcast:
           kk(*lang.render_cast(out_lab, lab, dtypes.half, dtype))
-      elif uop == UOps.DEFINE_ACC:
+      elif uop is UOps.DEFINE_ACC:
         if dtype.count > 1:
           r[u] = [ssa(None, 'acc', lang.types[dtype.scalar()]) for _ in range(dtype.count)]
           for uu in r[u]: kk(f"mov.b{lang.types[dtype.scalar()][1:]} {uu}, {const(args, dtype.scalar())};")
         else: kk(f"mov.b{lang.types[dtype][1:]} {ssa(u, 'acc')}, {const(args, dtype)};")
-      elif uop == UOps.SPECIAL:
+      elif uop is UOps.SPECIAL:
         assert args[1][0] != "i", "idx not supported"
         kk(f"mov.u32 %{args[1]}, {(lang.gid if args[1][0] == 'g' else lang.lid)[args[0]]};")
         r[u] = "%" + args[1]
         kernel = [f".reg .u32 %{args[1]};"] + kernel
-      elif uop == UOps.CONST:
+      elif uop is UOps.CONST:
         if dtype.count > 1: r[u] = [const(args, dtype.scalar(), mov=True) for _ in range(dtype.count)]
         else: r[u] = const(args, dtype, mov=True)
-      elif uop == UOps.GEP: r[u] = r[vin[0]][u.arg]
-      elif uop == UOps.LOAD:
+      elif uop is UOps.GEP: r[u] = r[vin[0]][u.arg]
+      elif uop is UOps.LOAD:
         assert vin[1].dtype is not None
         if dtype.count > 1:
           r[u] = [ssa(None, 'val', lang.types[dtype.scalar()]) for _ in range(dtype.count)]
@@ -195,14 +195,14 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
         else:
           kk(*lang.render_load(r[vin[0]], ssa(u, 'val'), dtype, gate=r[vin[2]] if len(vin) > 3 else None,
                               alt=r[vin[3]] if len(vin) > 3 else None, ss=u.arg, offset=vin[1].arg))
-      elif uop == UOps.PHI:
+      elif uop is UOps.PHI:
         kk(f"mov.b{lang.types[dtype][1:]} {r[vin[0]]}, {r[vin[1]]};")
         r[u] = r[vin[0]]
       elif uop in {UOps.CAST, UOps.BITCAST}:
         assert vin[0].dtype is not None
         if dtype.count>1: r[u] = [r[x] for x in vin] # type: ignore
         else: cast(r[vin[0]], dtype, vin[0].dtype, bitcast=uop is UOps.BITCAST, u=u)
-      elif uop == UOps.DEFINE_LOCAL:
+      elif uop is UOps.DEFINE_LOCAL:
         # TODO: we should sum these, and fetch 0xC000 from somewhere
         assert args[1]*dtype.itemsize <= 0xC000, "too large local"
         kk(*lang.render_local(ssa(u, 'local', lang.types[dtypes.ulong]), args[0], args[1], dtype))
