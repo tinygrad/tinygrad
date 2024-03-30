@@ -203,9 +203,9 @@ class KFDDevice(Compiled):
     if KFDDevice.kfd == -1: KFDDevice.kfd = os.open("/dev/kfd", os.O_RDWR)
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
     with open(node_sysfs_path(self.device_id+1, "gpu_id"), "r") as f: self.gpu_id = int(f.read())
-    with open(node_sysfs_path(self.device_id+1, "properties"), "r") as f: self.propirties = {line.split()[0]: int(line.split()[1]) for line in f}
-    self.drm_fd = os.open(f"/dev/dri/renderD{self.propirties['drm_render_minor']}", os.O_RDWR)
-    self.arch = f"gfx{self.propirties['gfx_target_version']//100}"
+    with open(node_sysfs_path(self.device_id+1, "properties"), "r") as f: self.properties = {line.split()[0]: int(line.split()[1]) for line in f}
+    self.drm_fd = os.open(f"/dev/dri/renderD{self.properties['drm_render_minor']}", os.O_RDWR)
+    self.arch = f"gfx{self.properties['gfx_target_version']//100}"
     kio.acquire_vm(KFDDevice.kfd, drm_fd=self.drm_fd, gpu_id=self.gpu_id)
 
     self.event_page = self._gpu_alloc(0x8000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
@@ -230,8 +230,8 @@ class KFDDevice(Compiled):
     self.amd_aql_queue.read_dispatch_id_field_base_byte_offset = getattr(hsa.amd_queue_t, 'read_dispatch_id').offset
     self.amd_aql_queue.queue_properties = hsa.AMD_QUEUE_PROPERTIES_IS_PTR64 | hsa.AMD_QUEUE_PROPERTIES_ENABLE_PROFILING
 
-    self.amd_aql_queue.max_cu_id = self.propirties['simd_count'] // self.propirties['simd_per_cu']
-    self.amd_aql_queue.max_wave_id = self.propirties['max_waves_per_simd'] * self.propirties['simd_per_cu']
+    self.amd_aql_queue.max_cu_id = self.properties['simd_count'] // self.properties['simd_per_cu'] - 1
+    self.amd_aql_queue.max_wave_id = self.properties['max_waves_per_simd'] * self.properties['simd_per_cu'] - 1
 
     # scratch setup
     self.max_private_segment_size = 256
