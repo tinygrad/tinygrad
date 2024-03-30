@@ -52,7 +52,7 @@ class ConvertCocoPolysToMask(object):
     classes = classes[keep]
 
     target = {}
-    target["boxes"] = Tensor(boxes).realize()
+    target["boxes"] = Tensor(boxes)#.realize()
     # print('BOXES:TENSCONV', target["boxes"].numpy())
     target["labels"] = Tensor(classes).realize()
     target["image_id"] = image_id
@@ -158,21 +158,49 @@ def resize_boxes(boxes: Tensor, original_size: List[int], new_size: List[int]) -
 import torchvision.transforms.functional as F
 # SIZE = (400,400)
 SIZE = (800, 800)
-def iterate(coco, bs=8):
-  for i in range(8, 800, bs):
-  # for i in range(8, len(coco.ids), bs):
-    X, targets= [], []
-    for img_id in coco.ids[i:i+bs]:
-      x,t = coco.__getitem__(img_id)
+# def iterate(coco, bs=8):
+#   for i in range(0, 800, bs):
+#   # for i in range(8, len(coco.ids), bs):
+#     X, targets= [], []
+#     for img_id in coco.ids[i:i+bs]:
+#       x,t = coco.__getitem__(img_id)
       
 
-      xNew = F.resize(x, size=SIZE)
-      xNew = np.array(xNew)
-      X.append(xNew)
-      bbox = t['boxes']
-      # print('ITERATE_PRE_RESIZE', bbox.shape)
-      bbox = resize_boxes(bbox, x.size, SIZE)
-      # print('ITERATE_POST_RESIZE', bbox.shape)
-      t['boxes'] = bbox.realize()
-      targets.append(t)
+#       xNew = F.resize(x, size=SIZE)
+#       xNew = np.array(xNew)
+#       X.append(xNew)
+#       bbox = t['boxes']
+#       # print('ITERATE_PRE_RESIZE', bbox.shape)
+#       bbox = resize_boxes(bbox, x.size, SIZE)
+#       # print('ITERATE_POST_RESIZE', bbox.shape)
+#       t['boxes'] = bbox.realize()
+#       targets.append(t)
+#     yield Tensor(X), targets
+  
+def iterate (coco, bs=8):
+  
+  i = 0
+  while(i<800):
+    i_sub = 0
+    rem =0
+    X, targets = [], []
+    while(i_sub<bs):
+      # print(i_sub)
+      x,t = coco.__getitem__(i+i_sub+rem)
+      if(t['boxes'].shape[0]==0):
+        rem+=1
+        # pass
+      else:
+        xNew = F.resize(x, size=SIZE)
+        xNew = np.array(xNew)
+        X.append(xNew)
+        bbox = t['boxes']
+        # print('ITERATE_PRE_RESIZE', bbox.shape)
+        bbox = resize_boxes(bbox, x.size, SIZE)
+        # print('ITERATE_POST_RESIZE', bbox.shape)
+        t['boxes'] = bbox.realize()
+        targets.append(t)
+        i_sub+=1
     yield Tensor(X), targets
+    i= i+bs+rem
+

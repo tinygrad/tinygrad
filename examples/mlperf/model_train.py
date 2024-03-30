@@ -1,5 +1,5 @@
 import functools
-import os
+import os, sys
 import time
 from tqdm import tqdm
 
@@ -392,7 +392,7 @@ def train_resnet():
 #   pass
 def train_retinanet():
   EPOCHS = 10
-  BS = 2
+  BS = 1
   input_mean = Tensor([0.485, 0.456, 0.406]).reshape(1, -1, 1, 1)
   input_std = Tensor([0.229, 0.224, 0.225]).reshape(1, -1, 1, 1)
   def input_fixup(x):
@@ -410,19 +410,45 @@ def train_retinanet():
   )
   from extra.models.resnet import ResNeXt50_32X4D
   from tinygrad.nn.optim import Adam
-  from extra.datasets.openimages_new import iterate, get_openimages
+  from extra.datasets.openimages_new import iterate
+  from extra.datasets.openimages_new import get_openimages
   ROOT = 'extra/datasets/open-images-v6TEST'
   NAME = 'openimages-mlperf'
   coco = get_openimages(NAME,ROOT, 'train')
+
+  # from extra.datasets.openimages import openimages, iterate
+  # from pycocotools.coco import COCO
+  # from pycocotools.cocoeval import COCOeval
+  # coco = COCO(openimages())
+  # coco_eval = COCOeval(coco, iouType="bbox")
+
+
   model = RetinaNet(ResNeXt50_32X4D())
   mdlrun = TinyJit(lambda x: model(input_fixup(x)))
   # mdlloss = TinyJit(lambda r, c, Y, a: model.loss(r,c,Y,a).realize())
+  parameters = []
+  for k, x in get_state_dict(model).items():
+    print(k, x.requires_grad)
+    # print(k, x.numpy())
+    # x.requires_grad = True
+    
+    # print(k, x.grad, x.shape, x.device)
+    if 'head' in k and 'reg' in k:
+      print(k)
+      x.requires_grad = True
+      # parameters.append(x)
+    else:
+      x.requires_grad = False
+    # x.realize()
+    # print(k, x.numpy(), x.grad)
+  parameters = get_parameters(model)
+  optimizer = Adam(parameters)
   # for k, x in get_state_dict(model).items():
   #   if 'head' in k:
   #     x.requires_grad = True
   #   else:
   #     x.requires_grad = False
-  #   print(k, x.requires_grad)
+  #   # print(k, x.requires_grad)
   def train_step(X, Y):
     Tensor.training = True
     # outputs = model(X)
@@ -432,23 +458,49 @@ def train_retinanet():
     b, r, c = outputs
     # c.realize()
     # r.realize()
-    # return r
+    return b, r, c
+    # return [bI.realize() for bI in b], r.realize(), c.realize()
     anchors = anchor_generator(image_list, b)
     loss = model.loss(r, c, Y, anchors)
     # loss = mdlloss(r, c, Y, anchors)
     # return loss
     # loss = outputs['h']
-    return loss#.realize()
+    return loss.realize()
   
   for epoch in range(EPOCHS):
     print(colored(f'EPOCH {epoch}/{EPOCHS}:', 'cyan'))
     cnt = 0
     for X,Y in iterate(coco, BS):
+    # for X,Y in iterate(coco, BS, True):
       cnt+=1
       loss = train_step(X, Y)
+      # Tensor.training = False
       # loss.realize()
-      print(colored(f'{cnt} LOSS SHAPE {loss.shape}', 'green'))
+      print(colored(f'{cnt} LOSS SHAPE {loss[-2].shape}', 'magenta'))
+      if cnt>6:
+        # optimizer.zero_grad()
+        i_s = []
+        for t in Y:
+          i_s.append(t['image_size'])
+        image_list = ImageList(X, i_s)
+        anchors = anchor_generator(image_list, loss[0])
+        anchors = [a.realize() for a in anchors]
+        print(colored(f'Computed anchor gen', 'red'))
+        loss = model.loss(loss[1], loss[2], Y, anchors)
+        print(colored(f'FOUND LOSS {loss.shape}', 'green'))
+        loss.realize()
+        print(colored(f'SUCESS LOSS REAILIZE {loss.shape} {loss.numpy()}', 'cyan'))
+        loss.backward()
+        print(colored(f'SUCESS LOSS BACKWARDS {loss.shape} {loss} {loss.grad}', 'cyan'))
+        # for t in optimizer.params: t.grad = t.grad.contiguous()
+        optimizer.step()
+        print(colored(f'SUCESS OPTIMIZER STEP', 'cyan'))
+
+
+        print(colored(f'{cnt} LOSS SHAPE {loss.shape}', 'green'))
       del loss
+      if cnt>200:
+        sys.exit()
   pass
 def train_unet3d():
   # TODO: Unet3d

@@ -158,7 +158,7 @@ def prepare_target(annotations, img_id, img_size, filter_crowded=False,train=Fal
   classes = np.array(classes, dtype=np.int64)
   classes = classes[keep]
   if train:
-    return {"boxes": Tensor(boxes), "labels": Tensor(classes), "image_id": img_id, "image_size": img_size}
+    return {"boxes": Tensor(boxes).realize(), "labels": Tensor(classes).realize(), "image_id": img_id, "image_size": img_size}
   else:
     return {"boxes": boxes, "labels": classes, "image_id": img_id, "image_size": img_size}
 

@@ -88,15 +88,21 @@ from tinygrad.dtype import dtypes
 # print(tor[[2,0]].numpy())
 # print(tor[[]].numpy())
 
-tor1 = torch.ones(5,4)+1
-t1 = Tensor.ones(5,4)+1
-tor1_unsqueeze = tor1[:, None, :2]
-t1_unsqueeze = t1
-tor2 = torch.ones(40029,4)
-tor_ans = torch.max(tor1[:, None, :2], tor2[:, :2])
-print(tor1)
-print(tor1_unsqueeze.shape)
-print(t1_unsqueeze.shape)
-print(tor_ans.shape)
+# tor1 = torch.ones(5,4)+1
+# t1 = Tensor.ones(5,4)+1
+# tor1_unsqueeze = tor1[:, None, :2]
+# t1_unsqueeze = t1
+# tor2 = torch.ones(40029,4)
+# tor_ans = torch.max(tor1[:, None, :2], tor2[:, :2])
+# print(tor1)
+# print(tor1_unsqueeze.shape)
+# print(t1_unsqueeze.shape)
+# print(tor_ans.shape)
 
 # print(tor_ans)
+t = Tensor([[11,22,33,44,55]]*5)+1
+a = [1,2,3,4,5,6]
+
+for tt, aa in zip(t, a):
+    print(tt.numpy())
+    print(aa)
