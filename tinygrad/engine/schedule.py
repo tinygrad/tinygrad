@@ -197,7 +197,7 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
 
   # breadth first ordering
   graph: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
-  in_degree: DefaultDict[LazyBuffer,int] = defaultdict(int)
+  in_degree: DefaultDict[LazyBuffer, int] = defaultdict(int)
   for out, si in prescheduled.items():
     for x in si.inputs:
       graph[x].append(out)
