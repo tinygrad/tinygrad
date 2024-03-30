@@ -158,19 +158,28 @@ union_SDMA_PKT_COPY_LINEAR_TAG_HEADER_UNION._fields_ = [
 class union_SDMA_PKT_COPY_LINEAR_TAG_COUNT_UNION(Union):
     pass
 
-class struct_SDMA_PKT_COPY_LINEAR_TAG_1_0(Structure):
+class struct_SDMA_PKT_COPY_LINEAR_TAG_1_count(Structure):
     pass
 
-struct_SDMA_PKT_COPY_LINEAR_TAG_1_0._pack_ = 1 # source:False
-struct_SDMA_PKT_COPY_LINEAR_TAG_1_0._fields_ = [
+struct_SDMA_PKT_COPY_LINEAR_TAG_1_count._pack_ = 1 # source:False
+struct_SDMA_PKT_COPY_LINEAR_TAG_1_count._fields_ = [
     ('count', ctypes.c_uint32, 22),
     ('reserved_0', ctypes.c_uint32, 10),
 ]
 
+class struct_SDMA_PKT_COPY_LINEAR_TAG_1_count_ext(Structure):
+    pass
+
+struct_SDMA_PKT_COPY_LINEAR_TAG_1_count_ext._pack_ = 1 # source:False
+struct_SDMA_PKT_COPY_LINEAR_TAG_1_count_ext._fields_ = [
+    ('count', ctypes.c_uint32, 30),
+    ('reserved_0', ctypes.c_uint32, 2),
+]
+
 union_SDMA_PKT_COPY_LINEAR_TAG_COUNT_UNION._pack_ = 1 # source:False
-union_SDMA_PKT_COPY_LINEAR_TAG_COUNT_UNION._anonymous_ = ('_0',)
 union_SDMA_PKT_COPY_LINEAR_TAG_COUNT_UNION._fields_ = [
-    ('_0', struct_SDMA_PKT_COPY_LINEAR_TAG_1_0),
+    ('count', struct_SDMA_PKT_COPY_LINEAR_TAG_1_count),
+    ('count_ext', struct_SDMA_PKT_COPY_LINEAR_TAG_1_count_ext),
     ('DW_1_DATA', ctypes.c_uint32),
 ]
 
@@ -1351,7 +1360,8 @@ __all__ = \
     'struct_SDMA_PKT_COPY_LINEAR_RECT_TAG_9_0',
     'struct_SDMA_PKT_COPY_LINEAR_TAG',
     'struct_SDMA_PKT_COPY_LINEAR_TAG_0_0',
-    'struct_SDMA_PKT_COPY_LINEAR_TAG_1_0',
+    'struct_SDMA_PKT_COPY_LINEAR_TAG_1_count',
+    'struct_SDMA_PKT_COPY_LINEAR_TAG_1_count_ext',
     'struct_SDMA_PKT_COPY_LINEAR_TAG_2_0',
     'struct_SDMA_PKT_COPY_LINEAR_TAG_3_0',
     'struct_SDMA_PKT_COPY_LINEAR_TAG_4_0',

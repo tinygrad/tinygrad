@@ -83,8 +83,7 @@ generate_hsa() {
     -o $BASE/hsa.py -l /opt/rocm/lib/libhsa-runtime64.so
 
   # clang2py broken when pass -x c++ to prev headers
-  clang2py \
-    /home/nimlgen/amd/ROCR-Runtime/src/core/inc/sdma_registers.h \
+  clang2py extra/hip_gpu_driver/sdma_registers.h \
     --clang-args="-I/opt/rocm/include -x c++" \
     -o $BASE/amd_sdma.py -l /opt/rocm/lib/libhsa-runtime64.so
 
