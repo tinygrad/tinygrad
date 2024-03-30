@@ -15,6 +15,8 @@ libc = ctypes.CDLL("libc.so.6")
 libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
 libc.mmap.restype = ctypes.c_void_p
 
+def node_sysfs_path(node_id, file): return f"/sys/devices/virtual/kfd/kfd/topology/nodes/{node_id}/{file}"
+
 def kfd_ioctl(idir, nr, user_struct, fd, made_struct=None, **kwargs):
   made = made_struct or user_struct(**kwargs)
   ret = fcntl.ioctl(fd, (idir<<30) | (ctypes.sizeof(made)<<16) | (ord('K')<<8) | nr, made)
@@ -196,10 +198,10 @@ class KFDDevice(Compiled):
   def __init__(self, device:str=""):
     if KFDDevice.kfd == -1: KFDDevice.kfd = os.open("/dev/kfd", os.O_RDWR)
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
-    self.drm_fd = os.open(f"/dev/dri/renderD{128+self.device_id}", os.O_RDWR)
-    with open(f"/sys/devices/virtual/kfd/kfd/topology/nodes/{1+self.device_id}/gpu_id", "r") as f:
-      self.gpu_id = int(f.read())
-    self.arch = "gfx1100"
+    with open(node_sysfs_path(self.device_id+1, "gpu_id"), "r") as f: self.gpu_id = int(f.read())
+    with open(node_sysfs_path(self.device_id+1, "properties"), "r") as f: self.propirties = {line.split()[0]: int(line.split()[1]) for line in f}
+    self.drm_fd = os.open(f"/dev/dri/renderD{self.propirties['drm_render_minor']}", os.O_RDWR)
+    self.arch = f"gfx{self.propirties['gfx_target_version']//100}"
     kio.acquire_vm(KFDDevice.kfd, drm_fd=self.drm_fd, gpu_id=self.gpu_id)
 
     self.event_page = self._gpu_alloc(0x8000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
@@ -224,8 +226,8 @@ class KFDDevice(Compiled):
     self.amd_aql_queue.read_dispatch_id_field_base_byte_offset = getattr(hsa.amd_queue_t, 'read_dispatch_id').offset
     self.amd_aql_queue.queue_properties = hsa.AMD_QUEUE_PROPERTIES_IS_PTR64 | hsa.AMD_QUEUE_PROPERTIES_ENABLE_PROFILING
 
-    self.amd_aql_queue.max_cu_id = 95 # TODO: hardcoded for 7900xtx
-    self.amd_aql_queue.max_wave_id = 31
+    self.amd_aql_queue.max_cu_id = self.propirties['simd_count'] // self.propirties['simd_per_cu']
+    self.amd_aql_queue.max_wave_id = self.propirties['max_waves_per_simd'] * self.propirties['simd_per_cu']
 
     # scratch setup
     self.max_private_segment_size = 256
