@@ -188,8 +188,8 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
   assign_targets = {x.srcs[1]:x for x in realizes if x.op is LoadOps.ASSIGN and x not in seen and x.realized is None}
 
   # breadth first ordering
-  graph: DefaultDict[LazyBuffer,List[LazyBuffer]] = defaultdict(list)
-  in_degree: DefaultDict[LazyBuffer,int] = defaultdict(int)
+  graph: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
+  in_degree: DefaultDict[LazyBuffer, int] = defaultdict(int)
   for out, si in prescheduled.items():
     for x in si.inputs:
       graph[x].append(out)
