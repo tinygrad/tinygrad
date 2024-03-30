@@ -129,6 +129,7 @@ class _MallocAllocator(LRUAllocator):
   def as_buffer(self, src) -> memoryview: return flat_mv(memoryview(src))
   def copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
   def copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
+  def offset(self, buf, offset, size): return ctypes.cast(ctypes.byref(buf, offset), ctypes.POINTER(ctypes.c_uint8 * size)).contents
 MallocAllocator = _MallocAllocator()
 
 # **************** for Compiled Devices ****************

@@ -12,10 +12,11 @@ class BufferOptions:
   nolru: bool = False
 
 class Buffer:
-  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferOptions]=None, initial_value:Optional[bytes]=None):
+  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferOptions]=None, initial_value:Optional[bytes]=None,
+               base:Optional[Buffer]=None, offset:int=0):
     assert isinstance(dtype, DType)
     if isinstance(dtype, ImageDType): options = BufferOptions(image=dtype) # TODO: image hack shouldn't be here. where should it be?
-    self.device, self.size, self.dtype, self.options = device, size, dtype, options
+    self.device, self.size, self.dtype, self.options, self.base, self.offset = device, size, dtype, options, base, offset
     if opaque is not None: self.allocate(opaque)
     if initial_value is not None:
       self.allocate()
@@ -25,8 +26,14 @@ class Buffer:
     from tinygrad.device import Device
     self.allocator = Device[self.device].allocator
     self._buf = opaque if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
-    if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.nbytes
+    if not self.device.startswith("DISK") and self.base is None: GlobalCounters.mem_used += self.nbytes
     return self
+  def view(self, offset:int, size:int, dtype:Optional[DType]=None) -> Buffer:
+    assert hasattr(self.allocator, "offset"), "device doesn't support offsets"
+    dtype, base = self.dtype if dtype is None else dtype, self.base if self.base is not None else self
+    assert self.nbytes >= offset + size and size % dtype.itemsize == 0, "wrong size for dtype"
+    return Buffer(self.device, size//dtype.itemsize, dtype, self.allocator.offset(base._buf, self.offset+offset, size), self.options, base=base,
+                  offset=self.offset+offset)
   def __reduce__(self):
     buf = None
     if hasattr(self, '_buf'):
@@ -36,7 +43,7 @@ class Buffer:
   @property
   def nbytes(self): return self.size*self.dtype.itemsize
   def __del__(self):
-    if not hasattr(self, '_buf'): return
+    if not hasattr(self, '_buf') or self.base is not None: return
     if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
     self.allocator.free(self._buf, self.nbytes, self.options)
   def __repr__(self):
