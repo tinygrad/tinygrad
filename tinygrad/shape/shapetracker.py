@@ -57,7 +57,7 @@ class ShapeTracker:
 
   def unbind(self) -> Tuple[ShapeTracker, Dict[Variable, int]]:
     unbound_views, var_vals = zip(*[v.unbind() for v in self.views])
-    return ShapeTracker(tuple(unbound_views)), merge_dicts(var_vals)
+    return ShapeTracker(tuple(unbound_views)).simplify(), merge_dicts(var_vals)
 
   # NOTE: if a stride is not always valid, it will be None
   def real_strides(self, ignore_valid=False) -> Tuple[Optional[sint], ...]:
