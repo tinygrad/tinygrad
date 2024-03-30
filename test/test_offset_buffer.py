@@ -36,7 +36,7 @@ class TestOffsetBuffer(unittest.TestCase):
     v = base.view(4,4)
     check(v, [4,5,6,7]) # should offset
     base.copyin(memoryview(bytearray([255-x for x in range(16)]))) # copy stuff to base
-    check(v, [251,250,249,248]) # d2 should change
+    check(v, [251,250,249,248]) # v should change
 
   def test_changing_dtype(self):
     base = Buffer(DEVICE, 16, dtype=dtypes.uint8, initial_value=bytearray(range(16)))

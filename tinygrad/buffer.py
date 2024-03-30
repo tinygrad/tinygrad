@@ -28,12 +28,13 @@ class Buffer:
     self._buf = opaque if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
     if not self.device.startswith("DISK") and self.base is None: GlobalCounters.mem_used += self.nbytes
     return self
-  def view(self, offset:int, size:int, dtype:Optional[DType]=None) -> Buffer:
-    assert hasattr(self.allocator, "offset"), "device doesn't support offsets"
-    dtype, base = self.dtype if dtype is None else dtype, self.base if self.base is not None else self
+  def view(self, offset:int=0, size:Optional[int]=None, dtype:Optional[DType]=None) -> Buffer:
+    dtype, base, opaque, size = dtype or self.dtype, (self.base or self), (self.base or self)._buf, self.nbytes if size is None else size
     assert self.nbytes >= offset + size and size % dtype.itemsize == 0, "wrong size for dtype"
-    return Buffer(self.device, size//dtype.itemsize, dtype, self.allocator.offset(base._buf, self.offset+offset, size), self.options, base=base,
-                  offset=self.offset+offset)
+    if self.offset+offset != 0 or size != base.nbytes:
+      assert hasattr(self.allocator, "offset"), "device doesn't support offsets"
+      opaque = self.allocator.offset(opaque, self.offset+offset, size)
+    return Buffer(self.device, size//dtype.itemsize, dtype, opaque, self.options, base=base, offset=self.offset+offset)
   def __reduce__(self):
     buf = None
     if hasattr(self, '_buf'):
