@@ -1,8 +1,7 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
-from tinygrad.tensor import Tensor
-from tinygrad import dtypes, TinyJit, GlobalCounters, Variable
+from tinygrad import dtypes, Tensor, TinyJit, GlobalCounters, Variable
 
 N = 200  # has to be bigger than the cache to fail
 

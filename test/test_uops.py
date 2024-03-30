@@ -63,7 +63,11 @@ def _test_uops_result(output_dtype, uops, res):
 
 class TestUOps(unittest.TestCase):
   def _equal(self, v1, v2):
-    if not (math.isnan(v1) and math.isnan(v2)): self.assertAlmostEqual(v1, v2, places=5) if v1.dtype != np.bool_ else self.assertEqual(v1, v2)
+    assert isinstance(v2, (float, int, bool))
+    if isinstance(v2, float):
+      np.testing.assert_allclose(v1, v2, rtol=2e-7)
+    else:
+      np.testing.assert_equal(v1, v2)
 
   def _test_uop_fxn(self, op, fxn, dts=(PtrDType(dtypes.float32), )):
     for f in [_test_single_value, _test_single_value_const]:
@@ -161,9 +165,9 @@ class TestExecALU(TestUOps):
     self.assertEqual(exec_alu(BinaryOps.DIV, dtypes.int8, (7, -3)), -2)
     self.assertEqual(exec_alu(BinaryOps.DIV, dtypes.int8, (-50, 6)), -8)
 
-    self.assertEqual(exec_alu(BinaryOps.DIV, dtypes.float32, (8.0, 2.0)), 4.0)
-    self.assertEqual(exec_alu(BinaryOps.DIV, dtypes.float32, (7.0, 3.0)), 2+(1.0/3.0))
-    self.assertEqual(exec_alu(BinaryOps.DIV, dtypes.float32, (7.0, -3.0)), -2-(1.0/3.0))
+    np.testing.assert_allclose(exec_alu(BinaryOps.DIV, dtypes.float32, (8.0, 2.0)), 4.0)
+    np.testing.assert_allclose(exec_alu(BinaryOps.DIV, dtypes.float32, (7.0, 3.0)), 2+(1.0/3.0))
+    np.testing.assert_allclose(exec_alu(BinaryOps.DIV, dtypes.float32, (7.0, -3.0)), -2-(1.0/3.0))
 
   def test_bool_neg(self):
     self.assertEqual(exec_alu(UnaryOps.NEG, dtypes.bool, (False,)), True)
@@ -176,9 +180,9 @@ class TestExecALU(TestUOps):
     self.assertEqual(exec_alu(BinaryOps.CMPLT, dtypes.bool, (True, True)), False)
 
   def test_bool_where(self):
-    self.assertIs(exec_alu(TernaryOps.WHERE, dtypes.bool, (False, False, False)), False)
-    self.assertIs(exec_alu(TernaryOps.WHERE, dtypes.int, (False, 2, 4)), 4)
-    self.assertIs(exec_alu(TernaryOps.WHERE, dtypes.float, (False, 2.2, 4.5)), 4.5)
+    self.assertEqual(exec_alu(TernaryOps.WHERE, dtypes.bool, (False, False, False)), False)
+    self.assertEqual(exec_alu(TernaryOps.WHERE, dtypes.int, (False, 2, 4)), 4)
+    np.testing.assert_allclose(exec_alu(TernaryOps.WHERE, dtypes.float, (False, 2.2, 4.5)), 4.5)
 
   def test_overflow(self):
     self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.uint8, (250, 250)), 244)
