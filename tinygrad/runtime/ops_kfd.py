@@ -51,7 +51,10 @@ def create_sdma_packets():
           fname = union_fields[0]
           if fname in names: fname = pkt_fields[0]+fname
           names.add(fname)
-          fields.append(tuple([fname, *union_fields[1:]]))
+          if fname.endswith("_63_32") and fields[-1][0].endswith("_31_0"):
+            fields[-1] = tuple([fname[:-6], ctypes.c_ulong, 64])  # merge together 64-bit fields
+          else:
+            fields.append(tuple([fname, *union_fields[1:]]))
     new_name = name[16:-4].lower()
     structs[new_name] = init_c_struct_t(tuple(fields))
     assert ctypes.sizeof(structs[new_name]) == ctypes.sizeof(pkt), f"{ctypes.sizeof(structs[new_name])} != {ctypes.sizeof(pkt)}"
@@ -296,13 +299,12 @@ class KFDDevice(Compiled):
       # NOTE: we check only low 32 bits to be zeroed, we don't use higher values for signals
       for sig in wait_signals:
         poll_addr = ctypes.addressof(sig) + getattr(hsa.amd_signal_t, 'value').offset
-        blit_sdma_command(sdma_pkts.poll_regmem(op=amd_sdma.SDMA_OP_POLL_REGMEM, mem_poll=1, func=0x3, addr_31_0=poll_addr&0xffffffff,
-                          addr_63_32=(poll_addr>>32)&0xffffffff, value=0, mask=0xffffffff, interval=0x04, retry_count=0xfff))
+        blit_sdma_command(sdma_pkts.poll_regmem(op=amd_sdma.SDMA_OP_POLL_REGMEM, mem_poll=1, func=0x3, addr=poll_addr,
+                          value=0, mask=0xffffffff, interval=0x04, retry_count=0xfff))
 
     if completion_signal is not None:
       ts_addr = ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'start_ts').offset
-      blit_sdma_command(sdma_pkts.timestamp(op=amd_sdma.SDMA_OP_TIMESTAMP, sub_op=amd_sdma.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL,
-                        addr_31_0=ts_addr&0xffffffff, addr_63_32=(ts_addr>>32)&0xffffffff))
+      blit_sdma_command(sdma_pkts.timestamp(op=amd_sdma.SDMA_OP_TIMESTAMP, sub_op=amd_sdma.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL, addr=ts_addr))
     blit_sdma_command(self.sdma_flush_hdp_pkt)
     blit_sdma_command(self.sdma_cache_inv)
 
@@ -310,24 +312,21 @@ class KFDDevice(Compiled):
     copies_commands = (copy_size + SDMA_MAX_COPY_SIZE - 1) // SDMA_MAX_COPY_SIZE
     for _ in range(copies_commands):
       step_copy_size = min(copy_size - copied, SDMA_MAX_COPY_SIZE)
-      blit_sdma_command(sdma_pkts.copy_linear(op=amd_sdma.SDMA_OP_COPY, sub_op=amd_sdma.SDMA_SUBOP_COPY_LINEAR, count=step_copy_size-1,
-                        src_addr_31_0=(src+copied)&0xffffffff, src_addr_63_32=((src+copied)>>32)&0xffffffff,
-                        dst_addr_31_0=(dest+copied)&0xffffffff, dst_addr_63_32=((dest+copied)>>32)&0xffffffff))
+      blit_sdma_command(sdma_pkts.copy_linear(op=amd_sdma.SDMA_OP_COPY, sub_op=amd_sdma.SDMA_SUBOP_COPY_LINEAR,
+                                              count=step_copy_size-1, src_addr=src+copied, dst_addr=dest+copied))
       copied += step_copy_size
 
     blit_sdma_command(self.sdma_cache_wb)
     if completion_signal is not None:
       ts_addr = ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'end_ts').offset
-      blit_sdma_command(sdma_pkts.timestamp(op=amd_sdma.SDMA_OP_TIMESTAMP, sub_op=amd_sdma.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL,
-                        addr_31_0=ts_addr&0xffffffff, addr_63_32=(ts_addr>>32)&0xffffffff))
+      blit_sdma_command(sdma_pkts.timestamp(op=amd_sdma.SDMA_OP_TIMESTAMP, sub_op=amd_sdma.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL, addr=ts_addr))
 
     if completion_signal is not None:
       signal_addr = ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'value').offset
-      blit_sdma_command(sdma_pkts.atomic(op=amd_sdma.SDMA_OP_ATOMIC, operation=amd_sdma.SDMA_ATOMIC_ADD64, addr_31_0=signal_addr&0xffffffff,
-                        addr_63_32=(signal_addr>>32)&0xffffffff, src_data_31_0=0xffffffff, src_data_63_32=0xffffffff))
+      blit_sdma_command(sdma_pkts.atomic(op=amd_sdma.SDMA_OP_ATOMIC, operation=amd_sdma.SDMA_ATOMIC_ADD64, addr=signal_addr, src_data=(1<<64)-1))
       if completion_signal.event_mailbox_ptr != 0:
-        blit_sdma_command(sdma_pkts.fence(op=amd_sdma.SDMA_OP_FENCE, mtype=3, addr_31_0=completion_signal.event_mailbox_ptr&0xffffffff,
-                          addr_63_32=(completion_signal.event_mailbox_ptr>>32)&0xffffffff, data=completion_signal.event_id))
+        blit_sdma_command(sdma_pkts.fence(op=amd_sdma.SDMA_OP_FENCE, mtype=3, addr=completion_signal.event_mailbox_ptr,
+                          data=completion_signal.event_id))
         blit_sdma_command(sdma_pkts.trap(op=amd_sdma.SDMA_OP_TRAP, int_ctx=completion_signal.event_id))
 
     self.sdma_write_pointer[0] = self.sdma_doorbell_value
