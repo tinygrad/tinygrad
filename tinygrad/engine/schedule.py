@@ -33,13 +33,13 @@ def _recursive_lazyop(buf:LazyBuffer, membufs:List[LazyBuffer], var_vals:Dict[Va
 
   # consts are always fused and generated
   if buf.op is LoadOps.CONST:
-    unbound_st, st_var_vals = st.unbind()
+    unbound_st, st_var_vals = st.simplify().unbind()
     var_vals.update(st_var_vals)
     return LazyOp(BufferOps.CONST, (), ConstBuffer(buf.arg, buf.dtype, unbound_st))
 
   # if we aren't fusing it, it's a load and we add it to the inputs
   if buf.realized or (buf in realizes and not first):
-    unbound_st, st_var_vals = st.unbind()
+    unbound_st, st_var_vals = st.simplify().unbind()
     var_vals.update(st_var_vals)
     if assign_to is not None and buf is assign_to:
       assert assign_idx is not None
