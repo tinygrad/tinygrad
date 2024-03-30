@@ -49,6 +49,6 @@ def run_schedule(schedule:List[ScheduleItem]):
     real_buffers = [x.buffer for x in si.outputs+si.inputs if x.size != 0]
     assert dont_allocate or all(hasattr(x, "_buf") for x in real_buffers), f"can't run, some inputs aren't realized {real_buffers}"
     if prg: prg.exec(real_buffers, si.var_vals)
-    elif (out:=si.outputs[0]).size > 0: update_stats(colored(f"empty {out.st.size:10d} {out.dtype}", "yellow"), 0, 0, {}, None, 1, device=out.device)
+    elif (out:=si.outputs[0]).size > 0: update_stats(colored(f"empty {out.size:10d} {out.dtype}", "yellow"), 0, 0, {}, None, 1, device=out.device)
     if GRAPH:
       for out in si.outputs: realized_lazybuffer(out, GlobalCounters.kernel_count)
