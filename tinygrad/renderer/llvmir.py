@@ -63,9 +63,7 @@ def cast(bb, val, input_type, output_type, bitcast=False):
 
   raise NotImplementedError(f"cast from {input_type} -> {output_type} not implemented")
 
-def const(args, dtype):
-  # TODO: remove int from int(args) once const args conform with dtype
-  return ir.Constant(dtype_to_llvm_dtype[dtype], int(args) if dtypes.is_int(dtype) else bool(args) if dtype == dtypes.bool else args)
+def const(args, dtype): return ir.Constant(dtype_to_llvm_dtype[dtype], args)
 
 def uops_to_llvm_ir(function_name:str, uops:UOpGraph) -> str:
   # all llvm stuff goes into a module
@@ -111,7 +109,7 @@ def uops_to_llvm_ir(function_name:str, uops:UOpGraph) -> str:
       bb[-2].cbranch(bb[-2].icmp_unsigned("<", idx_p1, lvars[vin[0].vin[1]]), loop_entry_bb, bb[-1].block)
     else:
       assert dtype is not None, f"None dtype for uop {uop}"
-      if uop == UOps.LOOP:
+      if uop is UOps.LOOP:
         bb.append(ir.IRBuilder(func.append_basic_block(f"loop_body_{len(loop_blocks)}")))
         bb[-2].branch(bb[-1].block)
 
@@ -140,7 +138,7 @@ def uops_to_llvm_ir(function_name:str, uops:UOpGraph) -> str:
         lvars[u] = lvars[vin[1]]
         # PHI UOps can link to other PHI Uops, backtrace this to DEFINE_ACC
         backward = vin[0]
-        while backward.uop == UOps.PHI: backward = backward.vin[0]
+        while backward.uop is UOps.PHI: backward = backward.vin[0]
         lvars[backward] = lvars[u]
       elif uop is UOps.ALU:
         lvars[u] = code_for_op[args](bb[-1], *[lvars[x] for x in vin], dtype if args not in (BinaryOps.CMPLT, BinaryOps.CMPEQ) else vin[0].dtype)

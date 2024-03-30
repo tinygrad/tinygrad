@@ -4,8 +4,7 @@ from pathlib import Path
 from typing import Tuple, Optional, List
 import tinygrad.runtime.autogen.cuda as cuda
 from tinygrad.helpers import DEBUG, getenv, from_mv, to_char_p_p, init_c_var, init_c_struct_t, colored, cpu_time_execution
-from tinygrad.device import Compiled, LRUAllocator, MallocAllocator, Compiler, BufferOptions
-from tinygrad.codegen.kernel import LinearizerOptions
+from tinygrad.device import Compiled, LRUAllocator, MallocAllocator, Compiler, BufferOptions, CompilerOptions
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.renderer.assembly import PTXRenderer
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl  # noqa: F401
@@ -43,7 +42,7 @@ def cu_time_execution(cb, enable=False) -> Optional[float]:
   cuda.cuEventRecord(evs[0], None)
   cb()
   cuda.cuEventRecord(evs[1], None)
-  cuda.cuEventSynchronize(evs[1])
+  check(cuda.cuEventSynchronize(evs[1]))
   cuda.cuEventElapsedTime(ctypes.byref(ret := ctypes.c_float()), evs[0], evs[1])
   for ev in evs: cuda.cuEventDestroy_v2(ev)
   return ret.value * 1e-3
@@ -53,20 +52,20 @@ def _get_bytes(arg, get_str, get_sz, check) -> bytes:
   return ctypes.string_at(init_c_var(ctypes.create_string_buffer(sz.value), lambda x: check(get_str(arg, x))), size=sz.value)
 
 class PTXCompiler(Compiler):
-  linearizer_opts = LinearizerOptions("CUDA", suffix="PTX", global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024], shared_max=49152)
+  compiler_opts = CompilerOptions("CUDA", suffix="PTX", global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024], shared_max=49152)
   def __init__(self, arch:str):
     self.arch = arch
     self.version = "7.8" if arch >= "sm_89" else "7.5"
-    PTXCompiler.linearizer_opts = PTXCompiler.linearizer_opts._replace(has_tensor_cores=int(arch[3:]) >= 80)
+    PTXCompiler.compiler_opts = PTXCompiler.compiler_opts._replace(has_tensor_cores=int(arch[3:]) >= 80)
     super().__init__(f"compile_ptx_{self.arch}")
   def render(self, name:str, uops) -> str: return PTXRenderer(name, uops).replace("TARGET", self.arch).replace("VERSION", self.version)
   def compile(self, src:str) -> bytes: return src.encode()
 
 class CUDACompiler(Compiler):
-  linearizer_opts = LinearizerOptions("CUDA", global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024], shared_max=49152)
+  compiler_opts = CompilerOptions("CUDA", global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024], shared_max=49152)
   def __init__(self, arch:str):
     self.arch = arch
-    CUDACompiler.linearizer_opts = CUDACompiler.linearizer_opts._replace(has_tensor_cores=int(arch[3:]) >= 80)
+    CUDACompiler.compiler_opts = CUDACompiler.compiler_opts._replace(has_tensor_cores=int(arch[3:]) >= 80)
     check(cuda.nvrtcVersion((nvrtcMajor := ctypes.c_int()), (nvrtcMinor := ctypes.c_int())))
     self.compile_options = [f'--gpu-architecture={arch}', "-I/usr/local/cuda/include", "-I/usr/include", "-I/opt/cuda/include/"]
     if (nvrtcMajor.value, nvrtcMinor.value) >= (12, 4): self.compile_options.append("--minimal")
@@ -123,13 +122,13 @@ class CUDAAllocator(LRUAllocator):
   def __init__(self, device:CUDADevice):
     self.device = device
     super().__init__()
-  def _alloc(self, size):
+  def _alloc(self, size, options:BufferOptions):
     check(cuda.cuCtxSetCurrent(self.device.context))
-    return init_c_var(cuda.CUdeviceptr(), lambda x: check(cuda.cuMemAlloc_v2(ctypes.byref(x), size)))
-  def _alloc_with_options(self, size:int, options:BufferOptions):
     if options.host: return init_c_var(ctypes.c_void_p(), lambda x: check(cuda.cuMemHostAlloc(ctypes.byref(x), size, 0)))
-    else: raise ValueError("no options")
-  def _free(self, opaque): check(cuda.cuMemFree_v2(opaque))
+    else: return init_c_var(cuda.CUdeviceptr(), lambda x: check(cuda.cuMemAlloc_v2(ctypes.byref(x), size)))
+  def _free(self, opaque, options:BufferOptions):
+    if options.host: return check(cuda.cuMemFreeHost(opaque))
+    else: check(cuda.cuMemFree_v2(opaque))
   def copyin(self, dest, src:memoryview):
     check(cuda.cuCtxSetCurrent(self.device.context))
     host_mem = self.alloc(len(src), BufferOptions(host=True))

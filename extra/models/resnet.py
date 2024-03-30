@@ -1,5 +1,5 @@
 import tinygrad.nn as nn
-from tinygrad.tensor import Tensor
+from tinygrad import Tensor, dtypes
 from tinygrad.nn.state import torch_load
 from tinygrad.helpers import fetch, get_child
 
@@ -118,7 +118,7 @@ class ResNet:
     if is_feature_only: features.append(out)
     if not is_feature_only:
       out = out.mean([2,3])
-      out = self.fc(out)
+      out = self.fc(out.cast(dtypes.float32))
       return out
     return features
 

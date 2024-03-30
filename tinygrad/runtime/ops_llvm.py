@@ -1,14 +1,13 @@
 from __future__ import annotations
 import ctypes, functools
 from typing import Tuple
-from tinygrad.device import Compiled, MallocAllocator, Compiler
+from tinygrad.device import Compiled, MallocAllocator, Compiler, CompilerOptions
 from tinygrad.helpers import DEBUG, cpu_time_execution
-from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.llvmir import uops_to_llvm_ir
 import llvmlite.binding as llvm
 
 class LLVMCompiler(Compiler):
-  linearizer_opts = LinearizerOptions("LLVM", supports_float4=False, has_local=False, has_shared=False)
+  compiler_opts = CompilerOptions("LLVM", supports_float4=False, has_local=False, has_shared=False)
   def __init__(self, device:LLVMDevice):
     self.device = device
     super().__init__("compile_llvm")

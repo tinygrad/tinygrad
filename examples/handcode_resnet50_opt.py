@@ -8,7 +8,7 @@ from tinygrad.features.search import time_linearizer, beam_search, bufs_from_lin
 from tinygrad.helpers import ansilen, DEBUG, getenv
 from tinygrad.shape.symbolic import sym_infer
 from tinygrad.dtype import dtypes
-from tinygrad.realize import create_schedule
+from tinygrad.engine.schedule import create_schedule
 
 if __name__ == "__main__":
   if getenv("HALF"):
@@ -43,18 +43,18 @@ if __name__ == "__main__":
     lins:List[Linearizer] = []
 
     # always try hand coded opt
-    lin = Linearizer(*si.ast, opts=device.compiler.linearizer_opts)
+    lin = Linearizer(*si.ast, opts=device.compiler.compiler_opts)
     lin.hand_coded_optimizations()
     lins.append(lin)
 
     # maybe try tensor cores
-    lin = Linearizer(*si.ast, opts=device.compiler.linearizer_opts)
+    lin = Linearizer(*si.ast, opts=device.compiler.compiler_opts)
     if lin.apply_tensor_cores():
       lins.append(lin)
 
     # try a beam search
     if beam:=getenv("BEAM"):
-      lin = Linearizer(*si.ast, opts=device.compiler.linearizer_opts)
+      lin = Linearizer(*si.ast, opts=device.compiler.compiler_opts)
       lin = beam_search(lin, rawbufs, beam, bool(getenv("BEAM_ESTIMATE", 1)))
       lins.append(lin)
 

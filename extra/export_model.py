@@ -1,7 +1,7 @@
 from typing import Tuple, Dict, List
 from tinygrad.dtype import DType
 from tinygrad.tensor import Device, Tensor
-from tinygrad.features.jit import TinyJit
+from tinygrad.engine.jit import TinyJit
 from tinygrad.nn.state import get_state_dict
 from tinygrad.dtype import dtypes
 import json
