@@ -1,5 +1,5 @@
 import unittest
-from typing import Union, Tuple, Optional, List
+from typing import Union, Tuple, Optional
 from tinygrad.buffer import Buffer, flat_mv
 from tinygrad.dtype import DType, dtypes
 from random import randbytes, randint, choice, seed
