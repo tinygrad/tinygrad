@@ -273,6 +273,6 @@ def hsa_terminate():
 
   # hsa_shut_down cleans up all hsa-related resources.
   hsa.hsa_shut_down()
-  HSADevice.synchronize = lambda: None
-  HSAProgram.__del__ = lambda _: None
+  HSADevice.synchronize = lambda: None #type:ignore
+  HSAProgram.__del__ = lambda _: None #type:ignore
   if Profiler.collected_events: Profiler.save("/tmp/profile.json")
