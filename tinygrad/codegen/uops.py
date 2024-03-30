@@ -57,8 +57,8 @@ def exec_alu(arg, dtype, p): return truncate[dtype](python_alu[arg](*p))
 def uop_alu_resolve(u:UOp) -> sint:
   if u.uop is UOps.CONST: return u.arg
   elif u.uop is UOps.DEFINE_VAR: return u.arg
-  elif u.uop is UOps.ALU and u.arg == BinaryOps.MUL: return uop_alu_resolve(u.vin[0]) * uop_alu_resolve(u.vin[1])
-  elif u.uop is UOps.ALU and u.arg == BinaryOps.ADD: return uop_alu_resolve(u.vin[0]) + uop_alu_resolve(u.vin[1])
+  elif u.uop is UOps.ALU and u.arg is BinaryOps.MUL: return uop_alu_resolve(u.vin[0]) * uop_alu_resolve(u.vin[1])
+  elif u.uop is UOps.ALU and u.arg is BinaryOps.ADD: return uop_alu_resolve(u.vin[0]) + uop_alu_resolve(u.vin[1])
   else: raise RuntimeError(f"ALU resolve fail @ {u.uop}")
 
 def _match(uop:UOp, pattern:Dict[str, Any], store:Dict[str, UOp]) -> bool:
@@ -198,7 +198,7 @@ class UOpGraph:
     while ssize != len(deps):
       ssize = len(deps)
       for u in self.uops:
-        if len(deps.intersection([x for x in u.vin if x.uop != UOps.PHI])):
+        if len(deps.intersection([x for x in u.vin if x.uop is not UOps.PHI])):
           deps.add(u)
     return deps
 
@@ -237,16 +237,16 @@ class UOpGraph:
 
   def simplify_phi_loops(self, get_recursive_parents):
     def alu_opposite(arg, x, y):
-      if arg == BinaryOps.ADD: return x - y
-      elif arg == BinaryOps.MUL: return Node.__floordiv__(x, y, False)
+      if arg is BinaryOps.ADD: return x - y
+      elif arg is BinaryOps.MUL: return Node.__floordiv__(x, y, False)
       else: raise RuntimeError("unhandled alu")
     def to_symbolic(u: UOp):
-      if u.uop == UOps.CONST: return NumNode(int(u.arg))
+      if u.uop is UOps.CONST: return NumNode(int(u.arg))
       elif u.uop in {UOps.LOOP, UOps.SPECIAL}:
         if u not in seen_vars: seen_vars[u] = u.arg[1] if u.uop is UOps.SPECIAL else "loop{}".format(len(seen_vars))
         return Variable(seen_vars[u], u.vin[0].arg, u.vin[1].arg-1) if u.uop is UOps.LOOP else Variable(seen_vars[u], 0, u.arg[2]-1)
-      elif u.uop == UOps.ALU and u.arg == BinaryOps.ADD: return to_symbolic(u.vin[0]) + to_symbolic(u.vin[1])
-      elif u.uop == UOps.ALU and u.arg == BinaryOps.MUL: return to_symbolic(u.vin[0]) * to_symbolic(u.vin[1])
+      elif u.uop is UOps.ALU and u.arg is BinaryOps.ADD: return to_symbolic(u.vin[0]) + to_symbolic(u.vin[1])
+      elif u.uop is UOps.ALU and u.arg is BinaryOps.MUL: return to_symbolic(u.vin[0]) * to_symbolic(u.vin[1])
       else: raise RuntimeError("unhandled op: {}".format(u))
     def loop_factor(with_loop: UOp, factored: Node, loop_op, round_up=False):
       if with_loop == loop_op: return factored
