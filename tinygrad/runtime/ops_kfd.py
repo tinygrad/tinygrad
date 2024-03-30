@@ -303,8 +303,8 @@ class KFDDevice(Compiled):
                           value=0, mask=0xffffffff, interval=0x04, retry_count=0xfff))
 
     if completion_signal is not None:
-      ts_addr = ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'start_ts').offset
-      blit_sdma_command(sdma_pkts.timestamp(op=amd_sdma.SDMA_OP_TIMESTAMP, sub_op=amd_sdma.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL, addr=ts_addr))
+      blit_sdma_command(sdma_pkts.timestamp(op=amd_sdma.SDMA_OP_TIMESTAMP, sub_op=amd_sdma.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL,
+                                            addr=ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'start_ts').offset))
     blit_sdma_command(self.sdma_flush_hdp_pkt)
     blit_sdma_command(self.sdma_cache_inv)
 
@@ -318,8 +318,8 @@ class KFDDevice(Compiled):
 
     blit_sdma_command(self.sdma_cache_wb)
     if completion_signal is not None:
-      ts_addr = ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'end_ts').offset
-      blit_sdma_command(sdma_pkts.timestamp(op=amd_sdma.SDMA_OP_TIMESTAMP, sub_op=amd_sdma.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL, addr=ts_addr))
+      blit_sdma_command(sdma_pkts.timestamp(op=amd_sdma.SDMA_OP_TIMESTAMP, sub_op=amd_sdma.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL,
+                                            addr=ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'end_ts').offset))
 
     if completion_signal is not None:
       signal_addr = ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'value').offset
