@@ -13,8 +13,9 @@ from tinygrad.shape.shapetracker import ShapeTracker
 # creation can recurse a lot
 sys.setrecursionlimit(10000)
 
+# TODO: it's unfortunate this needs to exist, but because of ASSIGN, we have to retain the LazyBuffer structure until post toposort
 @dataclass(frozen=True)
-class LBScheduleItem:
+class _LBScheduleItem:
   ast: Tuple[LazyOp, ...]
   outputs: Tuple[LazyBuffer, ...]
   inputs: Tuple[LazyBuffer, ...]
@@ -71,7 +72,7 @@ def _recursive_lazyop(buf:LazyBuffer, membufs:List[LazyBuffer], var_vals:Dict[Va
     LazyOp(buf.op, tuple(_recursive_lazyop(x, membufs, var_vals, st, realizes, cache, False, assign_to, assign_idx) for x in buf.srcs), buf.arg)
   return ret
 
-def _schedule_one(out:LazyBuffer, realizes:Set[LazyBuffer], reduce_for_op: Dict[LazyBuffer, LazyBuffer]) -> LBScheduleItem:
+def _schedule_one(out:LazyBuffer, realizes:Set[LazyBuffer], reduce_for_op: Dict[LazyBuffer, LazyBuffer]) -> _LBScheduleItem:
   inputs: List[LazyBuffer] = []
   var_vals: Dict[Variable, int] = out.st.var_vals.copy()
   if out.op in {LoadOps.CUSTOM, LoadOps.SYNC, LoadOps.COPY, LoadOps.EMPTY}:
@@ -80,7 +81,7 @@ def _schedule_one(out:LazyBuffer, realizes:Set[LazyBuffer], reduce_for_op: Dict[
     output_st, membufs = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape), [out]
     op = _recursive_lazyop(out, membufs, var_vals, output_st, realizes, cache={})
     op, inputs = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_st.simplify().unbind()[0])), membufs[1:]
-  return LBScheduleItem((op,), (out,), tuple(inputs), var_vals)
+  return _LBScheduleItem((op,), (out,), tuple(inputs), var_vals)
 
 # recursively search the entire graph for all LazyBuffers, insert realizes after expands
 def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffer, None],
