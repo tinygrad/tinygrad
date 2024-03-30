@@ -22,46 +22,14 @@ def kfd_ioctl(idir, nr, user_struct, fd, made_struct=None, **kwargs):
   if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
   return made
 
-# TODO: how do we autogen this?
-matches = [
-  ('AMDKFD_IOC_GET_VERSION', 'IOR', '0x01', 'kfd_ioctl_get_version_args'),
-  ('AMDKFD_IOC_CREATE_QUEUE', 'IOWR', '0x02', 'kfd_ioctl_create_queue_args'),
-  ('AMDKFD_IOC_DESTROY_QUEUE', 'IOWR', '0x03', 'kfd_ioctl_destroy_queue_args'),
-  ('AMDKFD_IOC_SET_MEMORY_POLICY', 'IOW', '0x04', 'kfd_ioctl_set_memory_policy_args'),
-  ('AMDKFD_IOC_GET_CLOCK_COUNTERS', 'IOWR', '0x05', 'kfd_ioctl_get_clock_counters_args'),
-  ('AMDKFD_IOC_GET_PROCESS_APERTURES', 'IOR', '0x06', 'kfd_ioctl_get_process_apertures_args'),
-  ('AMDKFD_IOC_UPDATE_QUEUE', 'IOW', '0x07', 'kfd_ioctl_update_queue_args'),
-  ('AMDKFD_IOC_CREATE_EVENT', 'IOWR', '0x08', 'kfd_ioctl_create_event_args'),
-  ('AMDKFD_IOC_DESTROY_EVENT', 'IOW', '0x09', 'kfd_ioctl_destroy_event_args'),
-  ('AMDKFD_IOC_SET_EVENT', 'IOW', '0x0A', 'kfd_ioctl_set_event_args'),
-  ('AMDKFD_IOC_RESET_EVENT', 'IOW', '0x0B', 'kfd_ioctl_reset_event_args'),
-  ('AMDKFD_IOC_WAIT_EVENTS', 'IOWR', '0x0C', 'kfd_ioctl_wait_events_args'),
-  ('AMDKFD_IOC_DBG_REGISTER', 'IOW', '0x0D', 'kfd_ioctl_dbg_register_args'),
-  ('AMDKFD_IOC_DBG_UNREGISTER', 'IOW', '0x0E', 'kfd_ioctl_dbg_unregister_args'),
-  ('AMDKFD_IOC_DBG_ADDRESS_WATCH', 'IOW', '0x0F', 'kfd_ioctl_dbg_address_watch_args'),
-  ('AMDKFD_IOC_DBG_WAVE_CONTROL', 'IOW', '0x10', 'kfd_ioctl_dbg_wave_control_args'),
-  ('AMDKFD_IOC_SET_SCRATCH_BACKING_VA', 'IOWR', '0x11', 'kfd_ioctl_set_scratch_backing_va_args'),
-  ('AMDKFD_IOC_GET_TILE_CONFIG', 'IOWR', '0x12', 'kfd_ioctl_get_tile_config_args'),
-  ('AMDKFD_IOC_SET_TRAP_HANDLER', 'IOW', '0x13', 'kfd_ioctl_set_trap_handler_args'),
-  ('AMDKFD_IOC_GET_PROCESS_APERTURES_NEW', 'IOWR', '0x14', 'kfd_ioctl_get_process_apertures_new_args'),
-  ('AMDKFD_IOC_ACQUIRE_VM', 'IOW', '0x15', 'kfd_ioctl_acquire_vm_args'),
-  ('AMDKFD_IOC_ALLOC_MEMORY_OF_GPU', 'IOWR', '0x16', 'kfd_ioctl_alloc_memory_of_gpu_args'),
-  ('AMDKFD_IOC_FREE_MEMORY_OF_GPU', 'IOW', '0x17', 'kfd_ioctl_free_memory_of_gpu_args'),
-  ('AMDKFD_IOC_MAP_MEMORY_TO_GPU', 'IOWR', '0x18', 'kfd_ioctl_map_memory_to_gpu_args'),
-  ('AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU', 'IOWR', '0x19', 'kfd_ioctl_unmap_memory_from_gpu_args'),
-  ('AMDKFD_IOC_SET_CU_MASK', 'IOW', '0x1A', 'kfd_ioctl_set_cu_mask_args'),
-  ('AMDKFD_IOC_GET_QUEUE_WAVE_STATE', 'IOWR', '0x1B', 'kfd_ioctl_get_queue_wave_state_args'),
-  ('AMDKFD_IOC_GET_DMABUF_INFO', 'IOWR', '0x1C', 'kfd_ioctl_get_dmabuf_info_args'),
-  ('AMDKFD_IOC_IMPORT_DMABUF', 'IOWR', '0x1D', 'kfd_ioctl_import_dmabuf_args'),
-  ('AMDKFD_IOC_ALLOC_QUEUE_GWS', 'IOWR', '0x1E', 'kfd_ioctl_alloc_queue_gws_args'),
-  ('AMDKFD_IOC_SMI_EVENTS', 'IOWR', '0x1F', 'kfd_ioctl_smi_events_args'),
-  ('AMDKFD_IOC_SVM', 'IOWR', '0x20', 'kfd_ioctl_svm_args'),
-  ('AMDKFD_IOC_SET_XNACK_MODE', 'IOWR', '0x21', 'kfd_ioctl_set_xnack_mode_args')]
-
 def ioctls_from_header():
   #hdr = pathlib.Path("/usr/include/linux/kfd_ioctl.h").read_text().replace("\\\n", "")
   #pattern = r'#define\s+(AMDKFD_IOC_[A-Z0-9_]+)\s+AMDKFD_(IOW?R?)\((0x[0-9a-fA-F]+),\s+struct\s([A-Za-z0-9_]+)\)'
   #matches = re.findall(pattern, hdr, re.MULTILINE)
+  # get this from python instead
+  hdrpy = (pathlib.Path(__file__).parent / "autogen" / "kfd.py").read_text()
+  pattern = r'# (AMDKFD_IOC_[A-Z0-9_]+)\s=\s_(IOW?R?).*\(( 0x[0-9a-fA-F]+) ,\s+struct\s([A-Za-z0-9_]+)\s+\)'
+  matches = re.findall(pattern, hdrpy, re.MULTILINE)
   idirs = {"IOW": 1, "IOR": 2, "IOWR": 3}
   fxns = {name.replace("AMDKFD_IOC_", "").lower():
           functools.partial(kfd_ioctl, idirs[idir], int(nr, 0x10), getattr(kfd, "struct_"+sname))
