@@ -78,11 +78,6 @@ class AQLQueue:
       packet.dep_signal[i] = wait_signals[i] if wait_signals and len(wait_signals) > i else EMPTY_SIGNAL
     packet.reserved2 = 0
     packet.completion_signal = completion_signal if completion_signal else EMPTY_SIGNAL
-    print(f"DEP {packet.dep_signal[0].handle:X} {packet.completion_signal.handle:X}")
-    if packet.completion_signal.handle != 0:
-      from hexdump import hexdump
-      from tinygrad.helpers import to_mv
-      hexdump(to_mv(packet.completion_signal.handle, 0x80))
     packet.header = BARRIER_HEADER
     self._submit_packet()
 

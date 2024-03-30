@@ -89,6 +89,7 @@ generate_hsa() {
     -o $BASE/amd_sdma.py -l /opt/rocm/lib/libhsa-runtime64.so
 
   fixup $BASE/hsa.py
+  fixup $BASE/amd_sdma.py
   sed -i "s\import ctypes\import ctypes, os\g" $BASE/hsa.py
   sed -i "s\'/opt/rocm/\os.getenv('ROCM_PATH', '/opt/rocm/')+'/\g" $BASE/hsa.py
   python3 -c "import tinygrad.runtime.autogen.hsa"

@@ -1,9 +1,8 @@
 from __future__ import annotations
 from typing import Tuple
 import os, fcntl, ctypes, functools, re, pathlib, mmap, struct
-from tinygrad.device import Compiled, LRUAllocator, Compiler, BufferOptions
+from tinygrad.device import Compiled, LRUAllocator, Compiler, BufferOptions, CompilerOptions
 from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up
-from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.runtime.driver.hip_comgr import compile_hip
 import tinygrad.runtime.autogen.kfd as kfd
@@ -56,7 +55,7 @@ def create_sdma_packets():
 sdma_pkts = create_sdma_packets()
 
 class KFDCompiler(Compiler):
-  linearizer_opts = LinearizerOptions("KFD", has_tensor_cores=True, shared_max=65536)
+  linearizer_opts = CompilerOptions("KFD", has_tensor_cores=True, shared_max=65536)
   def __init__(self, arch:str):
     self.arch = arch
     super().__init__(f"compile_hip_{self.arch}")
@@ -80,8 +79,8 @@ class KFDProgram:
     # TODO; this API needs the type signature of the function and global_size/local_size
     self.device, self.name, self.lib = device, name, lib
 
-    e_phoff, e_shoff, e_flags, e_ehsize, e_phentsize, e_phnum, e_shentsize, e_shnum, e_shstrndx = struct.unpack_from("<QQIHHHHHH", self.lib, 0x20)
-    sections = [struct.unpack_from("<IIQQQQIIQ", self.lib, e_shoff + i * e_shentsize) for i in range(e_shnum)]
+    _phoff, _shoff, _flags, _ehsize, _phentsize, _phnum, _shentsize, _shnum, _shstrndx = struct.unpack_from("<QQIHHHHHH", self.lib, 0x20)
+    sections = [struct.unpack_from("<IIQQQQIIQ", self.lib, _shoff + i * _shentsize) for i in range(_shnum)]
 
     lib_gpu_size = round_up(max(sh[5]+sh[3] for sh in sections if sh[1] == SHT_PROGBITS), 0x1000)
     self.lib_gpu = self.device._gpu_alloc(lib_gpu_size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=True)
@@ -95,7 +94,8 @@ class KFDProgram:
     self.group_segment_size = lib_gpu_view.cast("I")[entry_point//4]
     self.private_segment_size = lib_gpu_view.cast("I")[entry_point//4 + 1]
     self.kernargs_segment_size = lib_gpu_view.cast("I")[entry_point//4 + 2]
-    assert self.private_segment_size <= self.device.max_private_segment_size, f"{self.private_segment_size=} > {self.device.max_private_segment_size=}"
+    assert self.private_segment_size <= self.device.max_private_segment_size, \
+      f"{self.private_segment_size=} > {self.device.max_private_segment_size=}"
 
     #from hexdump import hexdump
     #hexdump(to_mv(self.handle, 0x100))
@@ -239,7 +239,7 @@ class KFDDevice(Compiled):
     self.amd_aql_queue.scratch_resource_descriptor[0] = self.scratch.va_addr & 0xFFFFFFFF
     self.amd_aql_queue.scratch_resource_descriptor[1] = ((self.scratch.va_addr >> 32) & 0xFFFF) | (1 << 30) # va_hi | SWIZZLE_ENABLE
     self.amd_aql_queue.scratch_resource_descriptor[2] = self.scratch_len & 0xFFFFFFFF
-    self.amd_aql_queue.scratch_resource_descriptor[3] = 0x20814fac # FORMAT=BUF_FORMAT_32_UINT, OOB_SELECT=2, ADD_TID_ENABLE=1, TYPE=SQ_RSRC_BUF, SQ_SELs
+    self.amd_aql_queue.scratch_resource_descriptor[3] = 0x20814fac # FORMAT=BUF_FORMAT_32_UINT,OOB_SELECT=2,ADD_TID_ENABLE=1,TYPE=SQ_RSRC_BUF,SQ_SELs
 
     wave_scratch = (((self.amd_aql_queue.max_wave_id + 1) * self.max_private_segment_size + 255) // 256)
     self.amd_aql_queue.compute_tmpring_size = wave_scratch << 12 | (self.amd_aql_queue.max_cu_id + 1)
@@ -277,7 +277,7 @@ class KFDDevice(Compiled):
                                         GCR_CONTROL_GL2_RANGE=0)
 
     # Helpers
-    map_uptr2gpu_struct_t = init_c_struct_t(tuple(kfd.struct_kfd_ioctl_svm_args._fields_[:-1]+[('attrs', kfd.struct_kfd_ioctl_svm_attribute*2)]))
+    map_uptr2gpu_struct_t = init_c_struct_t(tuple(kfd.struct_kfd_ioctl_svm_args._fields_[:-1]+[('attrs', kfd.struct_kfd_ioctl_svm_attribute*2)])) # type: ignore
     self.map_uptr2gpu_struct = map_uptr2gpu_struct_t(nattr=2, op=0x0)
     self.map_uptr2gpu_struct.attrs[0].type = kfd.KFD_IOCTL_SVM_ATTR_SET_FLAGS
     self.map_uptr2gpu_struct.attrs[0].value = kfd.KFD_IOCTL_SVM_FLAG_COHERENT

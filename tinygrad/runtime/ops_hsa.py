@@ -57,29 +57,17 @@ class HSAProgram:
       asm = subprocess.check_output(["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], input=lib)
       print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
 
-    print("hsa.hsa_executable_create_alt")
     self.exec = init_c_var(hsa.hsa_executable_t(), lambda x: check(hsa.hsa_executable_create_alt(hsa.HSA_PROFILE_FULL, hsa.HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT, None, ctypes.byref(x)))) # noqa: E501
-    print("hsa.hsa_code_object_reader_create_from_memory")
     self.code_reader = init_c_var(hsa.hsa_code_object_reader_t(),
                                   lambda x: check(hsa.hsa_code_object_reader_create_from_memory(lib, len(lib), ctypes.byref(x))))
-    print("hsa.hsa_executable_load_agent_code_object")
     check(hsa.hsa_executable_load_agent_code_object(self.exec, self.device.agent, self.code_reader, None, None))
-    print("hsa.hsa_executable_freeze")
     check(hsa.hsa_executable_freeze(self.exec, None))
-    print("end create program")
 
     self.kernel = init_c_var(hsa.hsa_executable_symbol_t(), lambda x: check(hsa.hsa_executable_get_symbol_by_name(self.exec, (name+".kd").encode("utf-8"), ctypes.byref(self.device.agent), ctypes.byref(x)))) # noqa: E501
     self.handle = init_c_var(ctypes.c_uint64(), lambda x: check(hsa.hsa_executable_symbol_get_info(self.kernel, hsa.HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, ctypes.byref(x)))) # noqa: E501
-    print("handle", hex(self.handle.value))
     self.kernargs_segment_size = init_c_var(ctypes.c_uint32(), lambda x: check(hsa.hsa_executable_symbol_get_info(self.kernel, hsa.HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE, ctypes.byref(x)))).value # noqa: E501
-    print("kernargs_segment_size", self.kernargs_segment_size)
     self.group_segment_size = init_c_var(ctypes.c_uint32(), lambda x: check(hsa.hsa_executable_symbol_get_info(self.kernel, hsa.HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE, ctypes.byref(x)))).value # noqa: E501
-    print("group_segment_size", self.group_segment_size)
     self.private_segment_size = init_c_var(ctypes.c_uint32(), lambda x: check(hsa.hsa_executable_symbol_get_info(self.kernel, hsa.HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE, ctypes.byref(x)))).value # noqa: E501
-    print("private_segment_size", self.private_segment_size)
-
-    #from hexdump import hexdump
-    #hexdump(to_mv(self.handle.value-0x540, 0x3000))
 
   def __del__(self):
     self.device.synchronize()
@@ -235,7 +223,7 @@ class HSADevice(Compiled):
     super().__init__(device, HSAAllocator(self), HSACompiler(self.arch), functools.partial(HSAProgram, self), HSAGraph)
 
     # Finish init: preallocate some signals + space for kernargs
-    self.signal_pool = [init_c_var(hsa.hsa_signal_t(), lambda x: check(hsa.hsa_signal_create(1, 0, None, ctypes.byref(x)))) for _ in range(256)]
+    self.signal_pool = [init_c_var(hsa.hsa_signal_t(), lambda x: check(hsa.hsa_signal_create(1, 0, None, ctypes.byref(x)))) for _ in range(4096)]
     self._new_kernargs_region(16 << 20) # initial region size is 16mb
 
   def synchronize(self):
@@ -281,10 +269,8 @@ def hsa_terminate():
   # Need to stop/delete aql queue before hsa shut down, this leads to gpu hangs.
   for dev in HSADevice.devices:
     Profiler.process(dev)
+    setattr(dev, 'synchronize', lambda: None) # some destructors might require to sync, but hw_queue is removed.
     del dev.hw_queue
 
-  # hsa_shut_down cleans up all hsa-related resources.
   hsa.hsa_shut_down()
-  HSADevice.synchronize = lambda: None #type:ignore
-  HSAProgram.__del__ = lambda _: None #type:ignore
   if Profiler.collected_events: Profiler.save("/tmp/profile.json")
