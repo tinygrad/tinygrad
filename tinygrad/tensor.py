@@ -14,6 +14,7 @@ from tinygrad.features.multi import MultiLazyBuffer
 from tinygrad.ops import LoadOps
 from tinygrad.buffer import Buffer, BufferOptions
 from tinygrad.device import Device
+from tinygrad.shape.view import un1d
 from tinygrad.shape.symbolic import sint
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.schedule import create_schedule
@@ -508,9 +509,17 @@ class Tensor:
         ret = ret.permute(ret_dims[first_dim:first_dim+max_idx_dim] + ret_dims[:first_dim] + ret_dims[first_dim+max_idx_dim:])
     return ret
 
-  def __setitem__(self,indices,v):
+  def __setitem__(self, indices, v):
     if isinstance(self.device, str) and self.device.startswith("DISK"): return self.__getitem__(indices).assign(v)
-    raise NotImplementedError("not implemented yet")
+    t = self[indices]
+    assert isinstance(self.lazydata, LazyBuffer) and isinstance(t.lazydata, LazyBuffer)
+    # TODO: multi -> each shard will have a paddable piece
+    assert len(t.lazydata.st.views) == 1
+    assert t.lazydata.st.views[-1].strides == self.lazydata.st.views[-1].strides
+    offsets = un1d(self.shape, t.lazydata.st.views[-1].offset)
+    pads = tuple((offset, si-ti-offset) for offset,si,ti in zip(offsets,self.shape,t.shape))
+    padded = t.pad(pads)
+    self.assign(padded.where(v, self))  # need to pad v too
 
   # NOTE: using slice is discouraged and things should migrate to pad and shrink
   def slice(self, arg:Sequence[Optional[Tuple[int, sint]]], value:float=0) -> Tensor:
