@@ -213,11 +213,3 @@ def get_mlperf_bert_model(config_path:str):
     config["attention_probs_dropout_prob"], 
     config["hidden_dropout_prob"]
   )
-
-if __name__ == "__main__":
-  model = get_mlperf_bert_model("/home/elwa/repos/tinygrad/extra/datasets/wiki/bert_config.json")
-  from tinygrad.nn.state import get_state_dict
-  for k, v in get_state_dict(model).items():
-    if "bias" in k or "LayerNorm" in k:
-      print(k, v)
-  #print([v for k, v in get_state_dict(model).items() if "bias" in k or "layernorm" in k]) # TODO: Check it is actually called LayerNorm

@@ -160,15 +160,16 @@ def batch_load_bert(BS:int, val=False):
   files = get_val_files() if val else get_train_files()
   blob, end = [], False
   while files:
-    while len(blob) < BS:
+    while len(blob) < BS and not end:
       blob.extend(load_bert_file(files.pop(0)))
-      if not files: end = True
-    if not end:
+      if not files: 
+        if val: 
+          files = get_val_files()
+        else:
+          end = True
+    if len(blob) >= BS: # if last train step does not have enough for a full batch
       yield process_batch_bert(blob[:BS])
       blob = blob[BS:]
-    else:
-      files = get_val_files() if val else [] # For eval: Wrap around dataset
-      end = False
 
 if __name__ == "__main__":
   from extra.datasets.imagenet import get_train_files, get_val_files

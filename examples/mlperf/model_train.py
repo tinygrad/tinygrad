@@ -7,7 +7,7 @@ from tinygrad.helpers import getenv, BEAM, WINO
 from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_save
 from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup
 
-from extra.lr_scheduler import LRSchedulerGroup, OneCycleLR
+from extra.lr_scheduler import LRSchedulerGroup
 from examples.mlperf.helpers import get_training_state, load_training_state
 
 def train_resnet():
@@ -254,7 +254,7 @@ def train_bert():
   # ** hyperparameters **
   epochs             = config["epochs"]                 = getenv("EPOCHS", 1)
   BS                 = config["GLOBAL_BATCH_SIZE"]      = getenv("GLOBAL_BATCH_SIZE", 32 * len(GPUS))
-  EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 8)
+  EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 2)
   max_lr             = config["OPT_BASE_LEARNING_RATE"] = getenv("OPT_BASE_LEARNING_RATE", 1e-4)
 
   train_steps        = config["TRAIN_STEPS"]            = getenv("TRAIN_STEPS", 100000)
@@ -269,12 +269,10 @@ def train_bert():
 
   target, achieved                                      = getenv("TARGET", 0.72), False
 
-  half              = config["FP16"]                    = getenv("FP16", 0)
+  config["DEFAULT_FLOAT"] = dtypes.default_float.name
   config["BEAM"]    = BEAM.value
 
   Tensor.manual_seed(seed)  # seed for weight initialization
-
-  if half: dtypes.default_float = dtypes.float16
 
   config_path = getenv("BERT_CONFIG_PATH", Path(__file__).parent.parents[1] / "extra" / "datasets" / "wiki" / "bert_config.json")
   model = get_mlperf_bert_model(config_path)
@@ -340,7 +338,7 @@ def train_bert():
 
     mlm_predictions = lm_logits.log_softmax().argmax(-1)
     mask = (masked_lm_weights == 1.0)
-    mlm_accuracy = (((mlm_predictions == masked_lm_ids) == mask).float() / mask.float().sum()).mean()
+    mlm_accuracy = (mlm_predictions == masked_lm_ids).where(mask, 0).sum() / mask.float().sum()
 
     lm_loss = lm_logits.sparse_categorical_crossentropy(masked_lm_ids, ignore_index=masked_lm_weights)
     clsf_loss = clsf_logits.binary_crossentropy_logits(next_sentence_labels)
@@ -351,9 +349,9 @@ def train_bert():
       "next_sentence_loss": clsf_loss.realize()
       }
 
-  def data_get(it):
+  def data_get(it, eval=False):
     data: dict[str, Tensor] = next(it)
-    for key in data.keys(): data[key].shard_(GPUS, axis=0)
+    for key in data.keys(): data[key].shard_(GPUS if not eval else [GPUS[0]], axis=0) # Cant shard EVAL_BS 8 across 6
     return data
   
   eval_it = iter(batch_load_bert(EVAL_BS, val=True))
@@ -362,8 +360,9 @@ def train_bert():
   step_times = []
   for e in range(1, epochs + 1):
     # ** train loop **
+    wc_start = time.perf_counter()
     Tensor.training = True
-    train_it = iter(tqdm(batch_load_bert(BS, val=False), total=train_steps))
+    train_it = iter(tqdm(batch_load_bert(BS, val=False), total=train_steps, disable=BENCHMARK))
     i, data = 0, data_get(train_it)
     while data is not None and i < train_steps:
       st = time.perf_counter()
@@ -413,8 +412,8 @@ def train_bert():
         eval_times = []
         Tensor.training = False
 
-        for _ in tqdm(range((max_eval_steps * 8) // EVAL_BS), desc="Evaluating", total=(max_eval_steps * 8) // EVAL_BS):
-          data = data_get(eval_it)
+        for _ in tqdm(range((max_eval_steps * 8) // EVAL_BS), desc="Evaluating", total=(max_eval_steps * 8) // EVAL_BS, disable=BENCHMARK):
+          data = data_get(eval_it, eval=True)
           GlobalCounters.reset()
           st = time.time()
 
@@ -435,8 +434,7 @@ def train_bert():
         total_lm_accuracy = sum(pair[0] for pair in eval_accuracy) / len(eval_accuracy)
         total_clsf_accuracy = sum(pair[1] for pair in eval_accuracy) / len(eval_accuracy)
         total_fw_time = sum(eval_times) / len(eval_times)
-        tqdm.write("\nEVAL Results:\n\n")
-        tqdm.write(f"eval lm loss: {total_lm_loss:.2f}, eval clsf loss: {total_clsf_loss:.2f}, eval lm accuracy: {total_lm_accuracy:.2f}, \
+        tqdm.write(f"eval lm loss: {total_lm_loss:.2f}, eval clsf loss: {total_clsf_loss:.2f}, eval lm accuracy: {total_lm_accuracy:.6f}, \
                     eval clsf accuracy: {total_clsf_accuracy:.2f}, eval time: {total_fw_time:.2f}")
         if WANDB:
           wandb.log({"eval/lm_loss": total_lm_loss, "eval/clsf_loss": total_clsf_loss, "eval/lm_accuracy": total_lm_accuracy, \
@@ -444,19 +442,25 @@ def train_bert():
 
         # save model if achieved target
         if not achieved and total_lm_accuracy >= target:
-          if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
-          fn = f"./ckpts/bert-large.safe"
+          wc_end = time.perf_counter()
+          if not os.path.exists(ckpt_dir := getenv('CKPT_DIR', "./ckpts")): os.mkdir(ckpt_dir)
+          fn = f"{ckpt_dir}/bert-large.safe"
           safe_save(get_state_dict(model), fn)
           print(f" *** Model saved to {fn} ***")
-          print(f"Reference Convergence point reached after {(e - 1) * train_steps * BS + i * BS} datasamples.")
+
+          total_seconds = wc_end - wc_start
+          hours = int(total_seconds // 3600)
+          minutes = int((total_seconds % 3600) // 60)
+          seconds = total_seconds % 60
+          print(f"Reference Convergence point reached after {(e - 1) * train_steps * BS + i * BS} datasamples and {hours}h{minutes}m{seconds:.2f}s.")
           achieved = True
 
       if getenv("CKPT") and i % save_ckpt_freq == 0:
-        if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
+        if not os.path.exists(ckpt_dir := getenv('CKPT_DIR', "./ckpts")): os.mkdir(ckpt_dir)
         if WANDB and wandb.run is not None:
-          fn = f"./ckpts/{time.strftime('%Y%m%d_%H%M%S')}_{wandb.run.id}_e{e}.safe"
+          fn = f"{ckpt_dir}/{time.strftime('%Y%m%d_%H%M%S')}_{wandb.run.id}_e{e}.safe"
         else:
-          fn = f"./ckpts/{time.strftime('%Y%m%d_%H%M%S')}_e{e}.safe"
+          fn = f"{ckpt_dir}/{time.strftime('%Y%m%d_%H%M%S')}_e{e}.safe"
         print(f"saving ckpt to {fn}")
         safe_save(get_training_state(model, optimizer_group, scheduler), fn)
 

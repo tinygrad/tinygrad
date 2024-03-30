@@ -339,13 +339,10 @@ def process_iterate(tokenizer, val=False, part=0): # Convert raw text to masked 
       del instances[:batch_size]
       yield [instance_to_features(instance, tokenizer) for instance in batch]
 
-@functools.lru_cache(None)
-def get_val_files():
-  return sorted(list((BASEDIR / "eval/").glob("*.pkl")))
+def get_val_files(): return sorted(list((BASEDIR / "eval/").glob("*.pkl")))
 
 @diskcache
-def get_train_files():
-  return sorted(list((BASEDIR / "train/").glob("*/*.pkl")))
+def get_train_files(): return sorted(list((BASEDIR / "train/").glob("*/*.pkl")))
 
 if __name__ == "__main__":
   tokenizer = Tokenizer(Path(__file__).parent / "wiki" / "vocab.txt")
