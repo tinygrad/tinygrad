@@ -8,23 +8,16 @@ from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.runtime.driver.hip_comgr import compile_hip
 import tinygrad.runtime.autogen.kfd as kfd
 import tinygrad.runtime.autogen.hsa as hsa
+import tinygrad.runtime.autogen.amd_sdma as amd_sdma
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401
-
-class KFDCompiler(Compiler):
-  linearizer_opts = LinearizerOptions("KFD", has_tensor_cores=True, shared_max=65536)
-  def __init__(self, arch:str):
-    self.arch = arch
-    super().__init__(f"compile_hip_{self.arch}")
-  def render(self, name:str, uops) -> str: return HIPRenderer(name, uops)
-  def compile(self, src:str) -> bytes: return compile_hip(src, self.arch)
 
 libc = ctypes.CDLL("libc.so.6")
 libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
 libc.mmap.restype = ctypes.c_void_p
 
-def kfd_ioctl(idir, nr, user_struct, fd, **kwargs):
-  made = user_struct(**kwargs)
-  ret = fcntl.ioctl(fd, (idir<<30) | (ctypes.sizeof(user_struct)<<16) | (ord('K')<<8) | nr, made)
+def kfd_ioctl(idir, nr, user_struct, fd, made_struct=None, **kwargs):
+  made = made_struct or user_struct(**kwargs)
+  ret = fcntl.ioctl(fd, (idir<<30) | (ctypes.sizeof(made)<<16) | (ord('K')<<8) | nr, made)
   if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
   return made
 
@@ -39,7 +32,37 @@ def ioctls_from_header():
   return type("KIO", (object, ), fxns)
 kio = ioctls_from_header()
 
+def create_sdma_packets():
+  # TODO: clean up this, if we want to keep it
+  structs = {}
+  for name,pkt in [(name,s) for name,s in amd_sdma.__dict__.items() if name.startswith("struct_SDMA_PKT_") and name.endswith("_TAG")]:
+    names = set()
+    fields = []
+    for pkt_fields in pkt._fields_:
+      if not pkt_fields[0].endswith("_UNION"): fields.append(pkt_fields)
+      else:
+        assert pkt_fields[1]._fields_[0][0] == '_0'
+        for union_fields in pkt_fields[1]._fields_[0][1]._fields_:
+          fname = union_fields[0]
+          if fname in names: fname = pkt_fields[0]+fname
+          names.add(fname)
+          fields.append(tuple([fname, *union_fields[1:]]))
+    new_name = name[16:-4].lower()
+    structs[new_name] = init_c_struct_t(tuple(fields))
+    assert ctypes.sizeof(structs[new_name]) == ctypes.sizeof(pkt), f"{ctypes.sizeof(structs[new_name])} != {ctypes.sizeof(pkt)}"
+  return type("SDMA_PKTS", (object, ), structs)
+sdma_pkts = create_sdma_packets()
+
+class KFDCompiler(Compiler):
+  linearizer_opts = LinearizerOptions("KFD", has_tensor_cores=True, shared_max=65536)
+  def __init__(self, arch:str):
+    self.arch = arch
+    super().__init__(f"compile_hip_{self.arch}")
+  def render(self, name:str, uops) -> str: return HIPRenderer(name, uops)
+  def compile(self, src:str) -> bytes: return compile_hip(src, self.arch)
+
 AQL_PACKET_SIZE = ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t)
+SDMA_MAX_COPY_SIZE = 0x400000
 
 DISPATCH_KERNEL_SETUP = 3 << hsa.HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS
 DISPATCH_KERNEL_HEADER  = 1 << hsa.HSA_PACKET_HEADER_BARRIER
@@ -90,7 +113,7 @@ class KFDProgram:
 
     self.device.completion_signal.value = 1 # reset the signal before call
     packet = hsa.hsa_kernel_dispatch_packet_t.from_address(self.device.aql_ring.va_addr +
-                                                           (self.device.doorbell_value*AQL_PACKET_SIZE) % self.device.aql_ring.size)
+                                                           (self.device.aql_doorbell_value*AQL_PACKET_SIZE) % self.device.aql_ring.size)
     packet.workgroup_size_x, packet.workgroup_size_y, packet.workgroup_size_z = local_size
     packet.reserved0 = 0
     packet.grid_size_x, packet.grid_size_y, packet.grid_size_z = tuple(g*l for g,l in zip(global_size, local_size))
@@ -104,9 +127,9 @@ class KFDProgram:
     packet.header = DISPATCH_KERNEL_HEADER
 
     # one pending packet + ring doorbell
-    self.device.amd_aql_queue.write_dispatch_id = self.device.doorbell_value+1
-    self.device.doorbell[0] = self.device.doorbell_value
-    self.device.doorbell_value += 1
+    self.device.amd_aql_queue.write_dispatch_id = self.device.aql_doorbell_value + 1
+    self.device.aql_doorbell[0] = self.device.aql_doorbell_value
+    self.device.aql_doorbell_value += 1
 
     evt_arr = (kfd.struct_kfd_event_data * 1)()
     evt_arr[0].event_id = self.device.completion_signal.event_id
@@ -121,17 +144,34 @@ class KFDAllocator(LRUAllocator):
     super().__init__()
 
   def _alloc(self, size:int, options:BufferOptions):
-    return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=True)
+    if options.host: return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, public=True)
+    else: return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=True)
 
   # obviously slow
   def copyin(self, dest, src: memoryview):
-    ctypes.memmove(dest.va_addr, from_mv(src), dest.size)
+    # TODO: need to make the address visible to gpu and pass it directly to sdma.
+    self.device._map_userptr_to_gpu(ctypes.addressof(from_mv(src).contents), src.nbytes)
+    self.device.completion_signal.value = 1
+    self.device._submit_sdma(dest.va_addr, ctypes.addressof(from_mv(src).contents), src.nbytes, completion_signal=self.device.completion_signal)
+    evt_arr = (kfd.struct_kfd_event_data * 1)()
+    evt_arr[0].event_id = self.device.completion_signal.event_id
+    kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=1000)
   def copyout(self, dest:memoryview, src):
-    ctypes.memmove(from_mv(dest), src.va_addr, src.size)
+    self.device._map_userptr_to_gpu(ctypes.addressof(from_mv(dest).contents), dest.nbytes)
+    self.device.completion_signal.value = 1
+    self.device._submit_sdma(ctypes.addressof(from_mv(dest).contents), src.va_addr, dest.nbytes, completion_signal=self.device.completion_signal)
+    evt_arr = (kfd.struct_kfd_event_data * 1)()
+    evt_arr[0].event_id = self.device.completion_signal.event_id
+    kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=1000)
 
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
 class KFDDevice(Compiled):
   kfd:int = -1
+
+  def _map_userptr_to_gpu(self, addr, size):
+    self.map_uptr2gpu_struct.start_addr = addr&~0xfff
+    self.map_uptr2gpu_struct.size = round_up(size+addr-(addr&~0xfff), 0x1000)
+    kio.svm(self.kfd, made_struct=self.map_uptr2gpu_struct)
 
   def _gpu_alloc(self, size:int, flags:int, uncached=False, public=False, map_to_gpu=True):
     flags |= kfd.KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE
@@ -168,7 +208,6 @@ class KFDDevice(Compiled):
     self.aql_ring = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
     self.signals_page = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
     self.gart = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
-    # self.mgart = to_mv(self.gart.va_addr, 0x1000).cast("Q")
     self.kernargs = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
     self.ctx_save_restore_address = self._gpu_alloc(0x2C02000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
 
@@ -178,7 +217,7 @@ class KFDDevice(Compiled):
     self.completion_signal.event_mailbox_ptr = self.event_page.va_addr + self.sync_event.event_slot_index*8
     self.completion_signal.event_id = self.sync_event.event_id
 
-    # Queue
+    # AQL Queue
     self.amd_aql_queue = hsa.amd_queue_t.from_address(self.gart.va_addr)
     self.amd_aql_queue.write_dispatch_id = 0
     self.amd_aql_queue.read_dispatch_id = 0
@@ -210,7 +249,87 @@ class KFDDevice(Compiled):
       ctl_stack_size = 0xa000,
       write_pointer_address=self.gart.va_addr + getattr(hsa.amd_queue_t, 'write_dispatch_id').offset,
       read_pointer_address=self.gart.va_addr + getattr(hsa.amd_queue_t, 'read_dispatch_id').offset)
-    self.doorbell = to_mv(libc.mmap(0, 8192, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED,
-                                    KFDDevice.kfd, self.aql_queue.doorbell_offset), 8192).cast("I")
-    self.doorbell_value = 0
+
+    self.doorbells_base = self.aql_queue.doorbell_offset & (~0xfff)
+    self.doorbells = libc.mmap(0, 8192, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, KFDDevice.kfd, self.doorbells_base)
+    self.aql_doorbell = to_mv(self.doorbells + self.aql_queue.doorbell_offset - self.doorbells_base, 4).cast("I")
+    self.aql_doorbell_value = 0
+
+    # SDMA Queue
+    self.sdma_ring = self._gpu_alloc(1 << 20, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
+    self.sdma_queue = kio.create_queue(KFDDevice.kfd, ring_base_address=self.sdma_ring.va_addr, ring_size=self.sdma_ring.size, gpu_id=self.gpu_id,
+      queue_type=kfd.KFD_IOC_QUEUE_TYPE_SDMA, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE, queue_priority=kfd.KFD_MAX_QUEUE_PRIORITY,
+      write_pointer_address=self.gart.va_addr + 0x100, read_pointer_address=self.gart.va_addr + 0x108)
+
+    self.sdma_read_pointer = to_mv(self.sdma_queue.read_pointer_address, 8).cast("Q")
+    self.sdma_write_pointer = to_mv(self.sdma_queue.write_pointer_address, 8).cast("Q")
+    self.sdma_doorbell = to_mv(self.doorbells + self.sdma_queue.doorbell_offset - self.doorbells_base, 4).cast("I")
+    self.sdma_doorbell_value = 0
+
+    # prebuilt packets
+    self.sdma_flush_hdp_pkt = sdma_pkts.hdp_flush(0x8, 0x0, 0x80000000, 0x0, 0x0, 0x0)
+    self.sdma_cache_inv = sdma_pkts.gcr(op=amd_sdma.SDMA_OP_GCR, sub_op=amd_sdma.SDMA_SUBOP_USER_GCR, GCR_CONTROL_GL2_WB=1, GCR_CONTROL_GLK_WB=1,
+                                        GCR_CONTROL_GL2_INV=1, GCR_CONTROL_GL1_INV=1, GCR_CONTROL_GLV_INV=1, GCR_CONTROL_GLK_INV=1,
+                                        GCR_CONTROL_GL2_RANGE=0)
+    self.sdma_cache_wb = sdma_pkts.gcr(op=amd_sdma.SDMA_OP_GCR, sub_op=amd_sdma.SDMA_SUBOP_USER_GCR, GCR_CONTROL_GL2_WB=1, GCR_CONTROL_GLK_WB=1,
+                                        GCR_CONTROL_GL2_RANGE=0)
+
+    # Helpers
+    map_uptr2gpu_struct_t = init_c_struct_t(tuple(kfd.struct_kfd_ioctl_svm_args._fields_[:-1]+[('attrs', kfd.struct_kfd_ioctl_svm_attribute*2)]))
+    self.map_uptr2gpu_struct = map_uptr2gpu_struct_t(nattr=2, op=0x0)
+    self.map_uptr2gpu_struct.attrs[0].type = kfd.KFD_IOCTL_SVM_ATTR_SET_FLAGS
+    self.map_uptr2gpu_struct.attrs[0].value = kfd.KFD_IOCTL_SVM_FLAG_COHERENT
+    self.map_uptr2gpu_struct.attrs[1].type = kfd.KFD_IOCTL_SVM_ATTR_ACCESS_IN_PLACE
+    self.map_uptr2gpu_struct.attrs[1].value = self.gpu_id
+
     super().__init__(device, KFDAllocator(self), KFDCompiler(self.arch), functools.partial(KFDProgram, self))
+
+  def _submit_sdma(self, dest, src, copy_size, wait_signals=None, completion_signal=None):
+    def build_sdma_command(pkt_typ, **kwargs):
+      cmd = pkt_typ.from_address(self.sdma_ring.va_addr + (self.sdma_doorbell_value % self.sdma_ring.size))
+      for k,v in kwargs.items(): cmd.__setattr__(k, v)
+      self.sdma_doorbell_value += ctypes.sizeof(pkt_typ)
+    def blit_sdma_command(cmd):
+      ctypes.memmove(self.sdma_ring.va_addr + (self.sdma_doorbell_value % self.sdma_ring.size), ctypes.addressof(cmd), sz:=ctypes.sizeof(cmd))
+      self.sdma_doorbell_value += sz
+
+    if wait_signals is not None:
+      # NOTE: we check only low 32 bits to be zeroed, we don't use higher values for signals
+      for sig in wait_signals:
+        poll_addr = ctypes.addressof(sig) + getattr(hsa.amd_signal_t, 'value').offset
+        build_sdma_command(sdma_pkts.poll_regmem, op=amd_sdma.SDMA_OP_POLL_REGMEM, mem_poll=1, func=0x3, addr_31_0=poll_addr&0xffffffff,
+                           addr_63_32=(poll_addr>>32)&0xffffffff, value=0, mask=0xffffffff, interval=0x04, retry_count=0xfff)
+
+    if completion_signal is not None:
+      ts_addr = ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'start_ts').offset
+      build_sdma_command(sdma_pkts.timestamp, op=amd_sdma.SDMA_OP_TIMESTAMP, sub_op=amd_sdma.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL,
+                       addr_31_0=ts_addr&0xffffffff, addr_63_32=(ts_addr>>32)&0xffffffff)
+    blit_sdma_command(self.sdma_flush_hdp_pkt)
+    blit_sdma_command(self.sdma_cache_inv)
+
+    copied = 0
+    copies_commands = (copy_size + SDMA_MAX_COPY_SIZE - 1) // SDMA_MAX_COPY_SIZE
+    for _ in range(copies_commands):
+      step_copy_size = min(copy_size - copied, SDMA_MAX_COPY_SIZE)
+      build_sdma_command(sdma_pkts.copy_linear, op=amd_sdma.SDMA_OP_COPY, sub_op=amd_sdma.SDMA_SUBOP_COPY_LINEAR, count=step_copy_size-1,
+                         src_addr_31_0=(src+copied)&0xffffffff, src_addr_63_32=((src+copied)>>32)&0xffffffff,
+                         dst_addr_31_0=(dest+copied)&0xffffffff, dst_addr_63_32=((dest+copied)>>32)&0xffffffff)
+      copied += step_copy_size
+
+    blit_sdma_command(self.sdma_cache_wb)
+    if completion_signal is not None:
+      ts_addr = ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'end_ts').offset
+      build_sdma_command(sdma_pkts.timestamp, op=amd_sdma.SDMA_OP_TIMESTAMP, sub_op=amd_sdma.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL,
+                        addr_31_0=ts_addr&0xffffffff, addr_63_32=(ts_addr>>32)&0xffffffff)
+
+    if completion_signal is not None:
+      signal_addr = ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'value').offset
+      build_sdma_command(sdma_pkts.atomic, op=amd_sdma.SDMA_OP_ATOMIC, operation=amd_sdma.SDMA_ATOMIC_ADD64, addr_31_0=signal_addr&0xffffffff,
+                         addr_63_32=(signal_addr>>32)&0xffffffff, src_data_31_0=0xffffffff, src_data_63_32=0xffffffff)
+      if completion_signal.event_mailbox_ptr != 0:
+        build_sdma_command(sdma_pkts.fence, op=amd_sdma.SDMA_OP_FENCE, mtype=3, addr_31_0=completion_signal.event_mailbox_ptr&0xffffffff,
+                           addr_63_32=(completion_signal.event_mailbox_ptr>>32)&0xffffffff, data=completion_signal.event_id)
+        build_sdma_command(sdma_pkts.trap, op=amd_sdma.SDMA_OP_TRAP, int_ctx=completion_signal.event_id)
+
+    self.sdma_write_pointer[0] = self.sdma_doorbell_value
+    self.sdma_doorbell[0] = self.sdma_doorbell_value
