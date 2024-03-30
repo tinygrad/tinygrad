@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Dict, Callable, ClassVar
+from typing import Union, Type, Tuple, Any, List, Dict, Callable
 import functools, hashlib
 from enum import Enum, auto
 from dataclasses import dataclass
@@ -7,6 +7,7 @@ from tinygrad.helpers import prod, dedup
 from tinygrad.dtype import dtypes, DType
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.buffer import Buffer
 
 # these are the llops your accelerator must implement, along with toCpu
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
@@ -22,9 +23,6 @@ class LoadOps(Enum): EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS =
 
 Op = Union[UnaryOps, BinaryOps, ReduceOps, LoadOps, TernaryOps, BufferOps]
 OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[LoadOps], Type[TernaryOps], Type[BufferOps]]
-
-if TYPE_CHECKING:
-  from tinygrad.buffer import Buffer
 
 @dataclass(frozen=True)
 class MemBuffer:
@@ -98,14 +96,3 @@ def get_lazyop_info(ast:LazyOp) -> FlopCounter:
   @functools.lru_cache(None) # NOTE: this cache needs to be recreated for new ASTs
   def run_ast(ast): return InterpretedFlopCounter[ast.op](*([run_ast(x) for x in ast.src]+([ast.arg] if ast.arg is not None else [])))
   return run_ast(ast)
-
-# **************** global state Counters ****************
-
-class GlobalCounters:
-  global_ops: ClassVar[int] = 0
-  global_mem: ClassVar[int] = 0
-  time_sum_s: ClassVar[float] = 0.0
-  kernel_count: ClassVar[int] = 0
-  mem_used: ClassVar[int] = 0   # NOTE: this is not reset
-  @staticmethod
-  def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count = 0,0,0.0,0

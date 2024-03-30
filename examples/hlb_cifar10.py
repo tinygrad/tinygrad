@@ -5,7 +5,7 @@
 # https://siboehm.com/articles/22/CUDA-MMM
 import random, time
 import numpy as np
-from typing import Optional, List
+from typing import Optional
 from extra.datasets import fetch_cifar, cifar_mean, cifar_std
 from extra.lr_scheduler import OneCycleLR
 from tinygrad import nn, dtypes, Tensor, Device, GlobalCounters, TinyJit

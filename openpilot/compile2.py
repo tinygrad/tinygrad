@@ -10,12 +10,11 @@ if "OPT" not in os.environ: os.environ["OPT"] = "99"
 OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx"
 
 import onnx
-from tqdm import tqdm
 from typing import Tuple, List, Optional, Dict
 from extra.onnx import get_run_onnx
 from tinygrad import Tensor, Device, GlobalCounters, dtypes
 from tinygrad.dtype import ImageDType
-from tinygrad.helpers import partition, Context, fetch, getenv, GRAPH, DEBUG
+from tinygrad.helpers import partition, Context, fetch, getenv, DEBUG
 from tinygrad.engine.realize import run_schedule, lower_schedule_item
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.ops import LoadOps, ScheduleItem
