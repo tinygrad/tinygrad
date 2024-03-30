@@ -7,6 +7,7 @@ from hypothesis import given, strategies as strat, settings
 from tinygrad.dtype import DType
 from tinygrad.helpers import CI, getenv
 from tinygrad.engine.schedule import create_schedule
+from tinygrad.engine.realize import run_schedule
 from tinygrad.ops import UnaryOps, get_lazyop_info
 from test.helpers import is_dtype_supported
 
@@ -65,7 +66,9 @@ def universal_test(a, b, dtype, op):
 def universal_test_unary(a, dtype, op):
   if not isinstance(op, tuple): op = (op, op)
   out: Tensor = op[0](Tensor([a], dtype=dtype))
-  ast = create_schedule([out.lazydata])[-1].ast[0]
+  sched = create_schedule([out.lazydata])
+  ast = sched[-1].ast[0]
+  run_schedule(sched)
   tensor_value = out.numpy()
   numpy_value = op[1](np.array([a]).astype(dtype.np))
   if dtype in dtypes_float:
