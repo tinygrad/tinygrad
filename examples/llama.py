@@ -9,8 +9,7 @@ import sys, argparse, json
 import numpy as np
 np.set_printoptions(linewidth=200)
 from tinygrad.helpers import Timing, Profiling, getenv, DEBUG, colored
-from tinygrad import Device, GlobalCounters, dtypes, nn
-from tinygrad.tensor import Tensor
+from tinygrad import Tensor, Device, GlobalCounters, dtypes, nn
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
 from extra.models.llama import Transformer, convert_from_huggingface, fix_bf16
 from sentencepiece import SentencePieceProcessor
@@ -106,7 +105,7 @@ MODEL_PARAMS = {
 
 
 # **** helper functions ****
-def concat_weights(models, device=Device.DEFAULT):
+def concat_weights(models, device=None):
   def convert(name) -> Tensor:
     disk_tensors: List[Tensor] = [model[name] for model in models]
     if len(disk_tensors) == 1 or len(disk_tensors[0].shape) == 1:
@@ -160,7 +159,7 @@ class LLaMa:
     model = Transformer(**params["args"], linear=AbsmaxQuantizedLinear, max_context=MAX_CONTEXT, jit=jit) if quantize else Transformer(**params["args"], max_context=MAX_CONTEXT, jit=jit)
 
     if model_path.is_dir():
-      weights = concat_weights([load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]])
+      weights = concat_weights([load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]], device[0] if isinstance(device, tuple) else device)
     else:
       weights = load(str(model_path))
     if "model.embed_tokens.weight" in weights:
