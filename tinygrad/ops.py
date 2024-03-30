@@ -25,7 +25,7 @@ Op = Union[UnaryOps, BinaryOps, ReduceOps, LoadOps, TernaryOps, BufferOps]
 OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[LoadOps], Type[TernaryOps], Type[BufferOps]]
 
 if TYPE_CHECKING:
-  from tinygrad.buffer import Buffer
+  from tinygrad.lazy import LazyBuffer
 
 @dataclass(frozen=True)
 class MemBuffer:
@@ -42,8 +42,8 @@ class ConstBuffer:
 @dataclass(frozen=True)
 class ScheduleItem:
   ast: Tuple[LazyOp, ...]
-  outputs: Tuple[Buffer, ...]
-  inputs: Tuple[Buffer, ...]
+  outputs: Tuple[LazyBuffer, ...]
+  inputs: Tuple[LazyBuffer, ...]
   var_vals: Dict[Variable, int]
 
 @dataclass(frozen=True, eq=False)

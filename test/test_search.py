@@ -4,14 +4,15 @@ from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.features.search import time_linearizer, bufs_from_lin
 from tinygrad.device import Device, Buffer
-from tinygrad.ops import LoadOps
+from tinygrad.ops import LoadOps, BufferOps
 from tinygrad.tensor import Tensor
 
 class TestTimeLinearizer(unittest.TestCase):
   def test_reasonable_time(self):
     si = [i for i in create_schedule([Tensor([1,2,3,4]).add(1).lazydata]) if i.ast[0].op not in LoadOps][0]
-    out = Buffer(Device.DEFAULT, si.outputs[0].st.real_size(), si.outputs[0].dtype).allocate()
-    rawbufs = [out] + [Buffer(Device.DEFAULT, x.st.real_size(), x.dtype).allocate() for x in si.inputs]
+    out = Buffer(Device.DEFAULT, si.outputs[0].size, si.outputs[0].dtype).allocate()
+    memops = {x.arg.idx:x.arg.st.real_size() for x in si.ast[0].lazyops if x.op is BufferOps.LOAD}
+    rawbufs = [out] + [Buffer(Device.DEFAULT, memops[i], x.dtype).allocate() for i,x in enumerate(si.inputs, start=len(si.outputs))]
     tm = time_linearizer(Linearizer(*si.ast), rawbufs, allow_test_size=False, cnt=10)
     assert tm > 0 and tm != float('inf')
 
