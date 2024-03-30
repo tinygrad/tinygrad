@@ -199,7 +199,7 @@ class KFDDevice(Compiled):
     if KFDDevice.kfd == -1: KFDDevice.kfd = os.open("/dev/kfd", os.O_RDWR)
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
     with open(node_sysfs_path(self.device_id+1, "gpu_id"), "r") as f: self.gpu_id = int(f.read())
-    with open(node_sysfs_path(self.device_id+1, "properties")) as f: self.propirties = {line.split()[0]: int(line.split()[1]) for line in f}
+    with open(node_sysfs_path(self.device_id+1, "properties"), "r") as f: self.propirties = {line.split()[0]: int(line.split()[1]) for line in f}
     self.drm_fd = os.open(f"/dev/dri/renderD{self.propirties['drm_render_minor']}", os.O_RDWR)
     self.arch = f"gfx{self.propirties['gfx_target_version']//100}"
     kio.acquire_vm(KFDDevice.kfd, drm_fd=self.drm_fd, gpu_id=self.gpu_id)
