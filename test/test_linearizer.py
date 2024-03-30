@@ -228,11 +228,13 @@ class TestLinearizer(unittest.TestCase):
     a.assign(b.where(2, a))
     sched = create_schedule([a.lazydata])
     assert len(sched) == 1
-    lin = Linearizer(*sched[-1].ast)
+    sched_copy = sched[:]
+    run_schedule(sched)
+    np.testing.assert_equal(a.flatten().numpy(), [1.,1.,1.,1.,2.,2.,2.,2.,1.,1.,1.,1.,1.,1.,1.,1.])
+    lin = Linearizer(*sched_copy[-1].ast)
     lin.hand_coded_optimizations()
     lin.linearize()
     assert not any(u.arg == TernaryOps.WHERE for u in lin.uops), "found where where where should be folded"
-    np.testing.assert_equal(a.flatten().numpy(), [1.,1.,1.,1.,2.,2.,2.,2.,1.,1.,1.,1.,1.,1.,1.,1.])
 
   def test_simplify_uop(self):
     def helper_test_simplify(uop, dtype, vin, arg=None):
