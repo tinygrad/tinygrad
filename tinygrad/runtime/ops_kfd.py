@@ -101,9 +101,6 @@ class KFDProgram:
     assert self.private_segment_size <= self.device.max_private_segment_size, \
       f"{self.private_segment_size=} > {self.device.max_private_segment_size=}"
 
-    #from hexdump import hexdump
-    #hexdump(to_mv(self.handle, 0x100))
-
   # NOTE: no programs are ever freed
   def __del__(self): kio.free_memory_of_gpu(KFDDevice.kfd, handle=self.lib_gpu.handle)
 
