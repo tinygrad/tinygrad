@@ -130,6 +130,9 @@ class Tensor:
   def shape(self) -> Tuple[sint, ...]: return self.lazydata.shape
 
   @property
+  def size(self) -> Tuple[sint, ...]: return self.lazydata.size
+
+  @property
   def dtype(self) -> DType: return self.lazydata.dtype
 
   # ***** data handlers ****
