@@ -1,8 +1,7 @@
-from typing import List, Dict, Optional, cast
-from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters
+from typing import List, Dict, Optional
+from tinygrad.ops import LoadOps, ScheduleItem, BufferOps
 from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, JITRunner, update_stats
-from tinygrad.features.graph import realized_lazybuffer
-from tinygrad.helpers import colored, getenv, GRAPH
+from tinygrad.helpers import colored, getenv, DEBUG
 from tinygrad.shape.symbolic import Variable
 
 class CustomOp(JITRunner):
@@ -30,21 +29,14 @@ def run_schedule(schedule:List[ScheduleItem]):
 
     # get the program
     prg = lower_schedule_item(si)
+    dont_allocate = getattr(prg, "skip_allocation", False)
 
     for out in si.outputs:
       # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
-      if out.size > 0:
-        if out.op is LoadOps.ASSIGN and out.srcs[1].base.realized is not None:
-          # if the buffer isn't realized, it might be a const or something. this is fine
-          out.realized = out.srcs[1].base.realized
-        else:
-          out.realized = Buffer(out.device, out.size, out.dtype, "PLACEHOLDER" if getattr(prg, "skip_allocation", False) else None)
-        del out.srcs
+      if out.size > 0 and not dont_allocate and not hasattr(out, "_buf"): out.allocate()
 
     # run the function (put it in JIT)
-    real_buffers = [x.realized for x in si.outputs+si.inputs if x.size != 0]
-    assert all(x is not None for x in real_buffers), f"can't run, some inputs aren't realized {real_buffers}"
-    if prg: prg.exec(cast(List[Buffer], real_buffers), si.var_vals)
-    elif (out:=si.outputs[0]).size > 0: update_stats(colored(f"empty {out.st.size:10d} {out.dtype}", "yellow"), 0, 0, {}, None, 1, device=out.device)
-    if GRAPH:
-      for out in si.outputs: realized_lazybuffer(out, GlobalCounters.kernel_count)
+    real_buffers = [x for x in si.outputs+si.inputs if x.size != 0]
+    assert dont_allocate or all(hasattr(x, "_buf") for x in real_buffers), f"can't run, some inputs aren't realized {real_buffers}"
+    if prg: prg.exec(real_buffers, si.var_vals)
+    elif (out:=si.outputs[0]).size > 0: update_stats(colored(f"empty {out.size:10d} {out.dtype}", "yellow"), 0, 0, {}, None, 1, device=out.device)

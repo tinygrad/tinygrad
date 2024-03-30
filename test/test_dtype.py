@@ -142,13 +142,11 @@ class TestBFloat16(unittest.TestCase):
     np.testing.assert_allclose(tnp, np.array(data))
 
   def test_bf16_ones(self):
-    # TODO: fix this with correct bfloat16 cast
     t = Tensor.ones(3, 5, dtype=dtypes.bfloat16)
     assert t.dtype == dtypes.bfloat16
     np.testing.assert_allclose(t.numpy(), np.ones((3, 5)))
 
   def test_bf16_eye(self):
-    # TODO: fix this with correct bfloat16 cast
     t = Tensor.eye(3, dtype=dtypes.bfloat16)
     assert t.dtype == dtypes.bfloat16
     np.testing.assert_allclose(t.numpy(), np.eye(3))
@@ -160,8 +158,6 @@ class TestBFloat16DType(unittest.TestCase):
 
   def test_float_to_bf16(self):
     _test_cast(Tensor([100000], dtype=dtypes.float32), dtypes.bfloat16)
-
-  # torch.tensor([10000, -1, -1000, -10000, 20]).type(torch.bfloat16)
 
   def test_bf16(self):
     t = Tensor([10000, -1, -1000, -10000, 20]).cast(dtypes.bfloat16)
@@ -249,7 +245,7 @@ class TestUint8Dtype(TestDType):
 @unittest.skipIf(Device.DEFAULT == "WEBGL", "No bitcast on WebGL")
 class TestBitCast(unittest.TestCase):
   def test_shape_change_bitcast(self):
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(RuntimeError):
       _test_bitcast(Tensor([100000], dtype=dtypes.float32), dtypes.uint8, [100000])
 
   def test_bitcast_float_to_int32(self):
@@ -620,12 +616,7 @@ class TestImplicitFunctionTypeChange(unittest.TestCase):
       t = func(Tensor([4.0, 3.0])).max() == func(Tensor([4.0, 3.0]))
       result.append(t.numpy().sum())
 
-    if Device.DEFAULT not in ["PYTHON"]:
-      assert all(result)
-    else:
-      # PYTHON function default returns in double, and comparison to float can fail
-      # TODO: fix this
-      assert not all(result)
+    assert all(result)
 
 if __name__ == '__main__':
   unittest.main()
