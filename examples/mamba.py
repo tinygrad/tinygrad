@@ -311,38 +311,46 @@ class InferenceParams:
     if self.lengths_per_sample is not None:
       self.lengths_per_sample.zero_()
 
-def generate(model, tokenizer, prompt: str, n_tokens_to_gen: int = 10, sample: bool = False, top_k: int = None):
+def generate(model, tokenizer, prompt: str, n_tokens_to_gen: int = 10, temp: bool = 1.0, sample: bool = False, top_k: int = None):
   tks = tokenizer(prompt)["input_ids"]
   while len(tks) < 4:
     tks = [50279] + tks
-  # TODO: sampling
-  temperature = 0.5
   start_pos = 0
   inference_params = InferenceParams(max_seqlen=1, max_batch_size=1, seqlen_offset=0)
   for _ in tqdm(range(n_tokens_to_gen), desc="Speed Gen"):
     logits = model(Tensor([tks[start_pos:]]), inference_params, start_pos, jit=False)
     inference_params.seqlen_offset = len(tks)
-    tok = logits[:, -1, :].argmax(axis=-1).item()
+    # TODO: topk
+    if sample:
+      logits = (logits/temp).softmax()
+      tok = logits[:, -1, :].multinomial().item()
+    else:
+      tok = logits[:, -1, :].argmax(axis=-1).item()
     start_pos = len(tks)
     tks.append(tok)
   output_completions = ''.join([tokenizer.decode(output) for output in tks])
   return output_completions
 
 if __name__ == "__main__":
+  ORIG_PROMPT = "Why is gravity "
   parser = argparse.ArgumentParser(description="Run Mamba in tinygrad", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
   parser.add_argument("--prompt", type=str, default="Why is gravity ", help="Prompt for LLM completion")
   parser.add_argument("--size", type=str, default="370m",
                       help=f"Size of model to use [{', '.join([k for k in MODELS.keys()])}]")
   parser.add_argument("--n_tokens", type=int, default=10, help="Number of tokens to generate")
+  parser.add_argument("--sample", dest="sample", action="store_true", help="Sample flag")
+  parser.add_argument("--temp", type=float, default=1.0, help="Sampling temp has to be <=1.0")
   args = parser.parse_args()
 
   tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b")
   model = Mamba.from_pretrained(args.size)
   prompt = args.prompt
   num_toks = args.n_tokens
+  sample = args.sample
+  temp = args.temp
   s = time.time()
-  tinyoutput = generate(model, tokenizer, prompt, n_tokens_to_gen=num_toks)
+  tinyoutput = generate(model, tokenizer, prompt, n_tokens_to_gen=num_toks, sample=sample, temp=temp)
   print(tinyoutput)
   print('TIME: ', time.time() - s)
   TORCHOUTPUT = "Why is gravity \nso important?\nBecause it's the only"
-  print('Outputs Match:', tinyoutput == TORCHOUTPUT)
+  if ORIG_PROMPT == prompt and not sample: print('Outputs Match:', tinyoutput == TORCHOUTPUT)
