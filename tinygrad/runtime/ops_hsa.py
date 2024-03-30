@@ -71,8 +71,8 @@ class HSAProgram:
 
   def __del__(self):
     self.device.synchronize()
-    if hasattr(self, 'code_reader'): check(hsa.hsa_code_object_reader_destroy(self.code_reader))
-    if hasattr(self, 'exec'): check(hsa.hsa_executable_destroy(self.exec))
+    if not HSADevice.runtime_terminated and hasattr(self, 'code_reader'): check(hsa.hsa_code_object_reader_destroy(self.code_reader))
+    if not HSADevice.runtime_terminated and hasattr(self, 'exec'): check(hsa.hsa_executable_destroy(self.exec))
 
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
     if not hasattr(self, "args_struct_t"):
@@ -188,6 +188,7 @@ class HSAAllocator(LRUAllocator):
     if PROFILE: Profiler.track(copy_signal, src_dev, f"transfer: HSA:{src_dev.device_id} -> HSA:{dest_dev.device_id}", is_copy=True)
 
 class HSADevice(Compiled):
+  runtime_terminated = False
   devices: List[HSADevice] = []
   agents: Dict[int, List[hsa.hsa_agent_t]] = {}
   cpu_agent: hsa.hsa_agent_t
@@ -273,4 +274,5 @@ def hsa_terminate():
     del dev.hw_queue
 
   hsa.hsa_shut_down()
+  HSADevice.runtime_terminated = True
   if Profiler.collected_events: Profiler.save("/tmp/profile.json")
