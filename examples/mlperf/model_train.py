@@ -245,20 +245,11 @@ def train_bert():
   from examples.mlperf.lr_schedulers import PolynomialDecayWithWarmup
 
   config = {}
-  seed = config["seed"] = getenv("SEED", 12345)
-  Tensor.manual_seed(seed)  # seed for weight initialization
 
   GPUS = config["GPUS"] = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
   print(f"Training on {GPUS}")
   for x in GPUS: Device[x]
-
-  config_path = getenv("BERT_CONFIG_PATH", Path(__file__).parent.parents[1] / "extra" / "datasets" / "wiki" / "bert_config.json")
-  model = get_mlperf_bert_model(config_path)
-
-  # shard weights and initialize in order
-  for _, x in get_state_dict(model).items():
-    x.realize().to_(GPUS)
-  parameters = get_parameters(model)
+  seed = config["seed"] = getenv("SEED", 12345)
 
   # ** hyperparameters **
   epochs             = config["epochs"]                 = getenv("EPOCHS", 1)
@@ -278,12 +269,24 @@ def train_bert():
 
   target, achieved                                      = getenv("TARGET", 0.72), False
 
+  half              = config["FP16"]                    = getenv("FP16", 0)
   config["BEAM"]    = BEAM.value
+
+  Tensor.manual_seed(seed)  # seed for weight initialization
+
+  if half: dtypes.default_float = dtypes.float16
+
+  config_path = getenv("BERT_CONFIG_PATH", Path(__file__).parent.parents[1] / "extra" / "datasets" / "wiki" / "bert_config.json")
+  model = get_mlperf_bert_model(config_path)
+
+  # shard weights and initialize in order
+  for _, x in get_state_dict(model).items():
+    x.realize().to_(GPUS)
+  parameters = get_parameters(model)
 
   assert 800 % EVAL_BS == 0, "Evaluation batch size must divide 800 without remainder"
 
   # ** Log hparams **
-  print("Hyperparameters:")
   for key, value in config.items():
       print(f'HParam: "{key}": {value}')
 
