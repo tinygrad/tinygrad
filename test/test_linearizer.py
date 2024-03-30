@@ -283,8 +283,8 @@ def helper_realized_ast(r:Tensor):
   run_schedule(s[:-1])  # run all kernels except the last one
   # now all input LazyBuffers buffers in s[-1] should be realized
   # allocate an output buffer
-  output_buffer = Buffer((out:=s[-1].outputs[0]).device, prod((s if isinstance(s, int) else s.max for s in out.shape)), out.dtype).allocate()
-  return s[-1].ast[0], [output_buffer] + [l.realized for l in s[-1].inputs]
+  output_buffer = Buffer((out:=s[-1].outputs[0]).device, out.size, out.dtype).allocate()
+  return s[-1].ast[0], [output_buffer] + list(s[-1].inputs)
 
 @unittest.skipUnless(Device[Device.DEFAULT].compiler.compiler_opts.supports_float4, "need backends that support float4")
 class TestFloat4(unittest.TestCase):
