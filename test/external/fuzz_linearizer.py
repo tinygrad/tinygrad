@@ -39,7 +39,7 @@ def get_fuzz_rawbufs(lin):
   return rawbufs
 
 def get_fuzz_rawbuf_like(rawbuf, zero=False, size=None):
-  rawbuf = type(rawbuf)(Device.DEFAULT, rawbuf.size if size is None else size, rawbuf.dtype)
+  rawbuf = type(rawbuf)(Device.DEFAULT, rawbuf.size if size is None else size, rawbuf.dtype).allocate()
   if zero:
     with Context(DEBUG=0):
       mv = memoryview(bytearray(rawbuf.size * rawbuf.dtype.itemsize))
@@ -170,7 +170,7 @@ def fuzz_linearizer(lin: Linearizer):
 def _is_simple(lin: Linearizer) -> bool:
   if len(lin.ast) > 1: return False
   ast:LazyOp = lin.ast[0]
-  if ast.src[0] and ast.src[0].op == UnaryOps.CAST and ast.src[0].src[0] and ast.src[0].src[0].op == BufferOps.LOAD: return True
+  if ast.src[0] and ast.src[0].op is UnaryOps.CAST and ast.src[0].src[0] and ast.src[0].src[0].op is BufferOps.LOAD: return True
   return False
 
 if __name__ == "__main__":
