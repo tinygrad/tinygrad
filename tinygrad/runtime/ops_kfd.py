@@ -55,7 +55,7 @@ def create_sdma_packets():
 sdma_pkts = create_sdma_packets()
 
 class KFDCompiler(Compiler):
-  linearizer_opts = CompilerOptions("KFD", has_tensor_cores=True, shared_max=65536)
+  compiler_opts = CompilerOptions("KFD", has_tensor_cores=True, shared_max=65536)
   def __init__(self, arch:str):
     self.arch = arch
     super().__init__(f"compile_hip_{self.arch}")
