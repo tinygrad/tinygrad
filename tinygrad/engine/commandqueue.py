@@ -4,9 +4,9 @@ from typing import List, Dict, Optional, Union, DefaultDict, cast, Tuple
 from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.dtype import DType
-from tinygrad.helpers import colored, getenv, GRAPH, cpu_time_execution, DEBUG, dedup
+from tinygrad.helpers import colored, getenv, GRAPH, cpu_time_execution, DEBUG, GlobalCounters
 from tinygrad.features.graph import realized_lazybuffer
-from tinygrad.ops import ScheduleItem, LoadOps, BufferOps, GlobalCounters, LazyOp
+from tinygrad.ops import ScheduleItem, LoadOps, BufferOps, LazyOp
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.symbolic import Variable
 from tinygrad.device import Buffer, JITRunner, Device, BufferXfer, BufferCopy, update_stats, BufferOptions
@@ -51,116 +51,91 @@ def exec_si(si):
   if GRAPH:
     for out in si.outputs: realized_lazybuffer(out, GlobalCounters.kernel_count)
 
-# TODO: should the schedule have FutureBuffer instead of LazyBuffer?
-@dataclass(frozen=True)
-class FutureBuffer:
-  device: str
-  size: int
-  dtype: DType
-  # TODO: add options here?
-
-@dataclass(frozen=True)
+# NOTE: two syncitems aren't the same if they are in different places in the queue
+@dataclass(eq=False)
 class SyncItem:
-  sid: int
+  device: str
+  waiters: int = 0
+  def __repr__(self): return f"SyncItem({self.device}, waiters={self.waiters}, {id(self)})"
 
-# TODO: don't use sid, just link to the SyncItem
 @dataclass(frozen=True)
 class WaitItem:
-  sid: int
+  sync: SyncItem
 
 @dataclass(frozen=True)
 class CopyItem:
-  output: Union[Buffer, FutureBuffer]
-  input: Union[Buffer, FutureBuffer]
-
-@dataclass(frozen=True)
-class ComputeItem:
-  ast: Tuple[LazyOp, ...]
-  outputs: Tuple[Union[Buffer, FutureBuffer], ...]
-  inputs: Tuple[Union[Buffer, FutureBuffer], ...]
-  var_vals: Dict[Variable, int]
+  output: Buffer
+  input: Buffer
 
 # this will interface with HWCommandQueue to replace Graph
 class CommandQueue:
   def __init__(self, schedule:List[ScheduleItem], outs:List[LazyBuffer]):
-    sync_sid = 0
-
     # loop through the schedule, find (real) inputs, add assign outputs, and split into different devices
     self.inputs: List[LazyBuffer] = []
     self.outputs: List[LazyBuffer] = outs[:]
-    self.q: DefaultDict[str, List[Union[ComputeItem, CopyItem, SyncItem, WaitItem]]] = defaultdict(list)
+    self.q: DefaultDict[str, List[Union[ScheduleItem, CopyItem, SyncItem, WaitItem]]] = defaultdict(list)
 
-    mapping: Dict[LazyBuffer, Union[FutureBuffer, Buffer]] = {}
-    def lmap(x:LazyBuffer) -> Union[FutureBuffer, Buffer]:
-      if x in mapping: return mapping[x]
-      if x.realized is not None: ret = x.realized
-      else: ret = FutureBuffer(x.device, x.size, x.dtype)
-      mapping[x] = ret
-      return ret
+    def add_sync_item(device:str):
+      if not len(self.q[device]) or not isinstance(sync_item:=self.q[device][-1], SyncItem):
+        sync_item = SyncItem(device)
+        self.q[device].append(sync_item)
+      return sync_item
+
+    def add_wait_item(device:str, syncitem:SyncItem):
+      # if you are adding this right after a first sync, delete this one
+      if len(self.q[device]) and isinstance(wi:=self.q[device][-1], WaitItem) and wi.sync.device == syncitem.device:
+        self.q[device] = self.q[device][:-1]
+        wi.sync.waiters -= 1
+        if wi.sync.waiters == 0: self.q[wi.sync.device].remove(wi.sync)
+      if (wi:=WaitItem(syncitem)) not in self.q[device]:
+        syncitem.waiters += 1
+        self.q[device].append(wi)
 
     while len(schedule):
       si = schedule.pop(0)
       assert len(set(x.device for x in si.outputs+si.inputs)) == 1 or (si.ast[0].op is LoadOps.COPY and len(si.outputs) == 1)
-      assert all(x.realized is None for x in si.outputs), "some outputs are allocated?"
-      out_q = self.q[si.outputs[0].device]
+      queue = self.q[si.outputs[0].device]
 
       if si.ast[0].op is LoadOps.COPY:
-        if si.inputs[0].device not in {"EXT", "DISK"}:
-          # add sync between the devices
-          if not len(self.q[si.inputs[0].device]) or not isinstance(sync_item:=self.q[si.inputs[0].device][-1], SyncItem):
-            sync_item = SyncItem(sync_sid)
-            self.q[si.inputs[0].device].append(sync_item)
-            sync_sid += 1
-          out_q.append(WaitItem(sync_item.sid))
-        out_q.append(CopyItem(lmap(si.outputs[0]), lmap(si.inputs[0])))
+        copy_device = si.outputs[0].device+"-copy"
+        add_wait_item(copy_device, add_sync_item(si.inputs[0].device))
+        self.q[copy_device].append(CopyItem(si.outputs[0], si.inputs[0]))
+        add_wait_item(si.outputs[0].device, add_sync_item(copy_device))
         continue
-      out_q.append(ComputeItem(si.ast, tuple(lmap(x) for x in si.outputs), tuple(lmap(x) for x in si.inputs), si.var_vals))
 
-
-      #if si.ast[0].op is LoadOps.ASSIGN:
-        #assert si.inputs[1].realized is not None, "assign must be realized"
-        # all things assigned to are treated as outputs
-        #self.outputs.append(si.inputs[1])
-        #mapping[si.outputs[0]] = si.inputs[1].realized
-
-      #if si.ast[0].op is LoadOps.COPY:
-      #  pass
-
-      #self.inputs += [x for x in si.inputs if x.realized is not None]
-      #self.q[device].append(si)
-    #self.inputs, self.outputs = dedup(self.inputs), dedup(self.outputs)
-
-    # plan memory here with liveness analysis
-
-      #self.inputs += [x.realized for x in si.outputs + si.inputs if x.realized is not None]
-    #print(self.inputs)
+      assert si.ast[0].op not in LoadOps
+      queue.append(si)
 
   def __call__(self):
     print("OUTS:", self.outputs)
     for k,v in self.q.items():
       print("****", k)
       for si in v:
-        print(str(si)[:150])
+        print("  ", str(si)[:150])
 
+    print("**** run ****")
     # this should be callable if we discover a full lazy graph has the same hash
     active_queues = list(self.q.keys())
-    waiting_queues: DefaultDict[int, List[str]] = defaultdict(list)
+    print(active_queues)
+    waiting_queues: DefaultDict[SyncItem, List[str]] = defaultdict(list)
     seen_sids = set()
     while len(active_queues):
       device = active_queues.pop(0)
       if not len(self.q[device]): continue
       si = self.q[device].pop(0)
+      print(device, si, active_queues, seen_sids)
       if isinstance(si, SyncItem):
-        et = cpu_time_execution(Device[device].synchronize, enable=DEBUG>=2)
-        update_stats(colored("synchronize", "RED"), 0, 0, {}, et, 1, device=device)
-        if si.sid in waiting_queues:
-          active_queues += waiting_queues[si.sid]
-          waiting_queues[si.sid].clear()
-        seen_sids.add(si.sid)
+        #et = cpu_time_execution(Device[device].synchronize, enable=DEBUG>=2)
+        #update_stats(colored("synchronize", "RED"), 0, 0, {}, et, 1, device=device)
+        if si in waiting_queues:
+          active_queues += waiting_queues[si]
+          waiting_queues[si].clear()
+        seen_sids.add(si)
       elif isinstance(si, WaitItem):
-        if si.sid not in seen_sids:
-          waiting_queues[si.sid].append(device)
+        if si.sync not in seen_sids:
+          waiting_queues[si.sync].append(device)
           continue
       else:
-        exec_si(si)
+        pass
       active_queues.append(device)
+    print("**** run ****")
