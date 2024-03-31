@@ -56,6 +56,13 @@ generate_comgr() {
   python3 -c "import tinygrad.runtime.autogen.comgr"
 }
 
+generate_kfd() {
+  clang2py /usr/include/linux/kfd_ioctl.h -o $BASE/kfd.py -k cdefstum
+  fixup $BASE/kfd.py
+  sed -i "s\import ctypes\import ctypes, os\g" $BASE/kfd.py
+  python3 -c "import tinygrad.runtime.autogen.kfd"
+}
+
 generate_cuda() {
   clang2py /usr/include/cuda.h /usr/include/nvrtc.h -o $BASE/cuda.py -l /usr/lib/x86_64-linux-gnu/libcuda.so -l /usr/lib/x86_64-linux-gnu/libnvrtc.so
   sed -i "s\import ctypes\import ctypes, ctypes.util\g" $BASE/cuda.py
@@ -69,10 +76,19 @@ generate_hsa() {
   clang2py \
     /opt/rocm/include/hsa/hsa.h \
     /opt/rocm/include/hsa/hsa_ext_amd.h \
+    /opt/rocm/include/hsa/amd_hsa_signal.h \
+    /opt/rocm/include/hsa/amd_hsa_queue.h \
     /opt/rocm/include/hsa/hsa_ext_finalize.h /opt/rocm/include/hsa/hsa_ext_image.h \
     --clang-args="-I/opt/rocm/include" \
     -o $BASE/hsa.py -l /opt/rocm/lib/libhsa-runtime64.so
+
+  # clang2py broken when pass -x c++ to prev headers
+  clang2py extra/hip_gpu_driver/sdma_registers.h \
+    --clang-args="-I/opt/rocm/include -x c++" \
+    -o $BASE/amd_sdma.py -l /opt/rocm/lib/libhsa-runtime64.so
+
   fixup $BASE/hsa.py
+  fixup $BASE/amd_sdma.py
   sed -i "s\import ctypes\import ctypes, os\g" $BASE/hsa.py
   sed -i "s\'/opt/rocm/\os.getenv('ROCM_PATH', '/opt/rocm/')+'/\g" $BASE/hsa.py
   python3 -c "import tinygrad.runtime.autogen.hsa"
@@ -83,6 +99,7 @@ elif [ "$1" == "hip" ]; then generate_hip
 elif [ "$1" == "comgr" ]; then generate_comgr
 elif [ "$1" == "cuda" ]; then generate_cuda
 elif [ "$1" == "hsa" ]; then generate_hsa
-elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_hsa
+elif [ "$1" == "kfd" ]; then generate_kfd
+elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_hsa; generate_kfd
 else echo "usage: $0 <type>"
 fi
