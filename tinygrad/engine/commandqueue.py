@@ -104,7 +104,10 @@ class CommandQueue:
         #add_wait_item(si.outputs[0].device, add_sync_item(copy_device))
         continue
 
-      assert si.ast[0].op not in LoadOps
+      #if si.ast[0].op is LoadOps.EMPTY: continue
+
+      # NOTE: LoadOps.EMPTY and LoadOps.CUSTOM are making it here
+      assert si.ast[0].op not in LoadOps, f"LoadOps {si.ast[0].op} made it through"
       queue.append(si)
 
   def __call__(self):
