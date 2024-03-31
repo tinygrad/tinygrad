@@ -49,9 +49,11 @@ jobs:
         DEBUG=2 EMULATE_HSA=1 FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
         DEBUG=2 EMULATE_CUDA=1 FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
     - name: Test dtype with Python emulator
-      run: PYTHONPATH=. DEBUG=2 PYTHON=1 python3 test/test_dtype.py
+      run: DEBUG=1 PYTHONPATH=. PYTHON=1 python3 test/test_dtype.py
     - name: Test ops with Python emulator
       run: DEBUG=2 PYTHON=1 python3 -m pytest test/test_ops.py -k "not (test_split or test_simple_cumsum or test_cumsum or test_einsum or test_dot or test_dot_1d or test_big_gemm or test_broadcastdot or test_multidot or test_var_axis or test_std_axis or test_broadcast_full or test_broadcast_partial or test_simple_conv3d or test_dilated_conv_transpose2d or test_simple_conv_transpose3d or test_large_input_conv2d or test_maxpool2d or test_maxpool2d_simple or test_maxpool2d_bigger_stride or test_avgpool2d or test_cat or test_scaled_product_attention or test_scaled_product_attention_causal)" --durations=20
+    - name: Test uops with Python emulator
+      run: PYTHON=1 python3 -m pytest test/test_uops.py --durations=20
     - name: Test symbolic with Python emulator
       run: PYTHONPATH=. PYTHON=1 python3 test/test_symbolic_ops.py
     - name: test_linearizer_failures with Python emulator
@@ -89,7 +91,6 @@ jobs:
       run: python -m mypy --strict-equality
     - name: Test Docs
       run: |
-        python docs/abstractions.py
         python docs/abstractions2.py
     - name: Test Quickstart
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  PYTHONPATH=. python quickstart.py
@@ -111,8 +112,8 @@ jobs:
         python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
     - name: Test DEBUG
       run: DEBUG=100 python3 -c "from tinygrad import Tensor; N = 1024; a, b = Tensor.rand(N, N), Tensor.rand(N, N); c = (a.reshape(N, 1, N) * b.T.reshape(1, N, N)).sum(axis=2); print((c.numpy() - (a.numpy() @ b.numpy())).mean())"
-    - name: Repo line count <6500 lines
-      run: MAX_LINE_COUNT=6500 python sz.py
+    - name: Repo line count <7000 lines
+      run: MAX_LINE_COUNT=7000 python sz.py
 
   testcpuimagenet:
     name: ImageNet to C Tests
@@ -315,7 +316,7 @@ jobs:
     - name: Test Beam Search
       run: PYTHONPATH="." METAL=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
     - name: Fuzz Test linearizer
-      run: PYTHONPATH="." METAL=1 CACHELEVEL=0 FUZZ_BEAM=1 DEPTH=2 FUZZ_N=48 FUZZ_MAX_SIZE=10000000 python test/external/fuzz_linearizer.py
+      run: PYTHONPATH="." METAL=1 CACHELEVEL=0 FUZZ_ALL_ACTIONS=1 DEPTH=2 FUZZ_N=48 FUZZ_MAX_SIZE=10000000 python test/external/fuzz_linearizer.py
 
 
 #  testwebgl:

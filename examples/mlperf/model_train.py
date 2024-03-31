@@ -6,7 +6,9 @@ from tqdm import tqdm
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
 from tinygrad.helpers import getenv, BEAM, WINO
 from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_save
+from tinygrad.nn.optim import LARS, SGD, OptimizerGroup
 
+from extra.lr_scheduler import LRSchedulerGroup
 from examples.mlperf.helpers import get_training_state, load_training_state
 
 def train_resnet():
@@ -48,6 +50,8 @@ def train_resnet():
   lr_warmup_epochs  = config["lr_warmup_epochs"]  = getenv("WARMUP_EPOCHS", 5)
   decay             = config["decay"]             = getenv("DECAY", 2e-4)
 
+  loss_scaler       = config["LOSS_SCALER"]       = getenv("LOSS_SCALER", 128.0 if dtypes.default_float == dtypes.float16 else 1.0)
+
   target, achieved  = getenv("TARGET", 0.759), False
   eval_start_epoch  = getenv("EVAL_START_EPOCH", 0)
   eval_epochs       = getenv("EVAL_EPOCHS", 1)
@@ -55,25 +59,32 @@ def train_resnet():
   steps_in_train_epoch  = config["steps_in_train_epoch"]  = (len(get_train_files()) // BS)
   steps_in_val_epoch    = config["steps_in_val_epoch"]    = (len(get_val_files()) // EVAL_BS)
 
+  config["DEFAULT_FLOAT"] = dtypes.default_float.name
   config["BEAM"]    = BEAM.value
   config["WINO"]    = WINO.value
   config["SYNCBN"]  = getenv("SYNCBN")
 
   # ** Optimizer **
-  from examples.mlperf.optimizers import LARS
-  skip_list = {v for k, v in get_state_dict(model).items() if "bn" in k or "bias" in k or "downsample.1" in k}
-  optimizer = LARS(parameters, base_lr, momentum=.9, weight_decay=decay, skip_list=skip_list)
+  skip_list = [v for k, v in get_state_dict(model).items() if "bn" in k or "bias" in k or "downsample.1" in k]
+  parameters = [x for x in parameters if x not in set(skip_list)]
+  optimizer = LARS(parameters, base_lr, momentum=.9, weight_decay=decay)
+  optimizer_skip = SGD(skip_list, base_lr, momentum=.9, weight_decay=0.0, classic=True)
+  optimizer_group = OptimizerGroup(optimizer, optimizer_skip)
 
   # ** LR scheduler **
   scheduler = PolynomialDecayWithWarmup(optimizer, initial_lr=base_lr, end_lr=1e-4,
                                         train_steps=epochs * steps_in_train_epoch,
                                         warmup=lr_warmup_epochs * steps_in_train_epoch)
+  scheduler_skip = PolynomialDecayWithWarmup(optimizer_skip, initial_lr=base_lr, end_lr=1e-4,
+                                             train_steps=epochs * steps_in_train_epoch,
+                                             warmup=lr_warmup_epochs * steps_in_train_epoch)
+  scheduler_group = LRSchedulerGroup(scheduler, scheduler_skip)
   print(f"training with batch size {BS} for {epochs} epochs")
 
   # ** resume from checkpointing **
   start_epoch = 0
   if ckpt:=getenv("RESUME", ""):
-    load_training_state(model, optimizer, scheduler, safe_load(ckpt))
+    load_training_state(model, optimizer_group, scheduler_group, safe_load(ckpt))
     start_epoch = int(scheduler.epoch_counter.numpy().item() / steps_in_train_epoch)
     print(f"resuming from {ckpt} at epoch {start_epoch}")
 
@@ -90,23 +101,24 @@ def train_resnet():
   input_mean = Tensor([123.68, 116.78, 103.94], device=GPUS, dtype=dtypes.float32).reshape(1, -1, 1, 1)
   # mlperf reference resnet does not divide by input_std for some reason
   # input_std = Tensor([0.229, 0.224, 0.225], device=GPUS, dtype=dtypes.float32).reshape(1, -1, 1, 1)
-  def normalize(x): return x.permute([0, 3, 1, 2]) - input_mean
+  def normalize(x): return (x.permute([0, 3, 1, 2]) - input_mean).cast(dtypes.default_float)
   @TinyJit
   def train_step(X, Y):
-    optimizer.zero_grad()
+    optimizer_group.zero_grad()
     X = normalize(X)
     out = model.forward(X)
-    loss = out.sparse_categorical_crossentropy(Y, label_smoothing=0.1)
+    loss = out.cast(dtypes.float32).sparse_categorical_crossentropy(Y, label_smoothing=0.1)
     top_1 = (out.argmax(-1) == Y).sum()
-    loss.backward()
-    optimizer.step()
-    scheduler.step()
+    (loss * loss_scaler).backward()
+    for t in optimizer_group.params: t.grad = t.grad.contiguous() / loss_scaler
+    optimizer_group.step()
+    scheduler_group.step()
     return loss.realize(), top_1.realize()
   @TinyJit
   def eval_step(X, Y):
     X = normalize(X)
     out = model.forward(X)
-    loss = out.sparse_categorical_crossentropy(Y, label_smoothing=0.1)
+    loss = out.cast(dtypes.float32).sparse_categorical_crossentropy(Y, label_smoothing=0.1)
     top_1 = (out.argmax(-1) == Y).sum()
     return loss.realize(), top_1.realize()
   def data_get(it):
@@ -159,6 +171,8 @@ def train_resnet():
         median_step_time = sorted(step_times)[(BENCHMARK + 1) // 2]  # in seconds
         estimated_total_hours = median_step_time * steps_in_train_epoch * epochs / 60 / 60
         print(f"Estimated training time: {estimated_total_hours:.0f}h{(estimated_total_hours - int(estimated_total_hours)) * 60:.0f}m")
+        # if we are doing beam search, run the first eval too
+        if BEAM.value and e == start_epoch: break
         return
 
     # ** eval loop **
@@ -200,6 +214,7 @@ def train_resnet():
 
       # save model if achieved target
       if not achieved and total_top_1 >= target:
+        if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
         fn = f"./ckpts/resnet50.safe"
         safe_save(get_state_dict(model), fn)
         print(f" *** Model saved to {fn} ***")
@@ -213,7 +228,7 @@ def train_resnet():
         else:
           fn = f"./ckpts/{time.strftime('%Y%m%d_%H%M%S')}_e{e}.safe"
         print(f"saving ckpt to {fn}")
-        safe_save(get_training_state(model, optimizer, scheduler), fn)
+        safe_save(get_training_state(model, optimizer_group, scheduler_group), fn)
 
 def train_retinanet():
   # TODO: Retinanet

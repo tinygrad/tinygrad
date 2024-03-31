@@ -3588,6 +3588,128 @@ try:
     hsa_amd_vmem_get_alloc_properties_from_handle.argtypes = [hsa_amd_vmem_alloc_handle_t, ctypes.POINTER(struct_hsa_amd_memory_pool_s), ctypes.POINTER(c__EA_hsa_amd_memory_type_t)]
 except AttributeError:
     pass
+amd_queue_properties32_t = ctypes.c_uint32
+
+# values for enumeration 'amd_queue_properties_t'
+amd_queue_properties_t__enumvalues = {
+    0: 'AMD_QUEUE_PROPERTIES_ENABLE_TRAP_HANDLER_SHIFT',
+    1: 'AMD_QUEUE_PROPERTIES_ENABLE_TRAP_HANDLER_WIDTH',
+    1: 'AMD_QUEUE_PROPERTIES_ENABLE_TRAP_HANDLER',
+    1: 'AMD_QUEUE_PROPERTIES_IS_PTR64_SHIFT',
+    1: 'AMD_QUEUE_PROPERTIES_IS_PTR64_WIDTH',
+    2: 'AMD_QUEUE_PROPERTIES_IS_PTR64',
+    2: 'AMD_QUEUE_PROPERTIES_ENABLE_TRAP_HANDLER_DEBUG_SGPRS_SHIFT',
+    1: 'AMD_QUEUE_PROPERTIES_ENABLE_TRAP_HANDLER_DEBUG_SGPRS_WIDTH',
+    4: 'AMD_QUEUE_PROPERTIES_ENABLE_TRAP_HANDLER_DEBUG_SGPRS',
+    3: 'AMD_QUEUE_PROPERTIES_ENABLE_PROFILING_SHIFT',
+    1: 'AMD_QUEUE_PROPERTIES_ENABLE_PROFILING_WIDTH',
+    8: 'AMD_QUEUE_PROPERTIES_ENABLE_PROFILING',
+    4: 'AMD_QUEUE_PROPERTIES_USE_SCRATCH_ONCE_SHIFT',
+    1: 'AMD_QUEUE_PROPERTIES_USE_SCRATCH_ONCE_WIDTH',
+    16: 'AMD_QUEUE_PROPERTIES_USE_SCRATCH_ONCE',
+    5: 'AMD_QUEUE_PROPERTIES_RESERVED1_SHIFT',
+    27: 'AMD_QUEUE_PROPERTIES_RESERVED1_WIDTH',
+    -32: 'AMD_QUEUE_PROPERTIES_RESERVED1',
+}
+AMD_QUEUE_PROPERTIES_ENABLE_TRAP_HANDLER_SHIFT = 0
+AMD_QUEUE_PROPERTIES_ENABLE_TRAP_HANDLER_WIDTH = 1
+AMD_QUEUE_PROPERTIES_ENABLE_TRAP_HANDLER = 1
+AMD_QUEUE_PROPERTIES_IS_PTR64_SHIFT = 1
+AMD_QUEUE_PROPERTIES_IS_PTR64_WIDTH = 1
+AMD_QUEUE_PROPERTIES_IS_PTR64 = 2
+AMD_QUEUE_PROPERTIES_ENABLE_TRAP_HANDLER_DEBUG_SGPRS_SHIFT = 2
+AMD_QUEUE_PROPERTIES_ENABLE_TRAP_HANDLER_DEBUG_SGPRS_WIDTH = 1
+AMD_QUEUE_PROPERTIES_ENABLE_TRAP_HANDLER_DEBUG_SGPRS = 4
+AMD_QUEUE_PROPERTIES_ENABLE_PROFILING_SHIFT = 3
+AMD_QUEUE_PROPERTIES_ENABLE_PROFILING_WIDTH = 1
+AMD_QUEUE_PROPERTIES_ENABLE_PROFILING = 8
+AMD_QUEUE_PROPERTIES_USE_SCRATCH_ONCE_SHIFT = 4
+AMD_QUEUE_PROPERTIES_USE_SCRATCH_ONCE_WIDTH = 1
+AMD_QUEUE_PROPERTIES_USE_SCRATCH_ONCE = 16
+AMD_QUEUE_PROPERTIES_RESERVED1_SHIFT = 5
+AMD_QUEUE_PROPERTIES_RESERVED1_WIDTH = 27
+AMD_QUEUE_PROPERTIES_RESERVED1 = -32
+amd_queue_properties_t = ctypes.c_int32 # enum
+class struct_amd_queue_s(Structure):
+    pass
+
+struct_amd_queue_s._pack_ = 1 # source:False
+struct_amd_queue_s._fields_ = [
+    ('hsa_queue', hsa_queue_t),
+    ('reserved1', ctypes.c_uint32 * 4),
+    ('write_dispatch_id', ctypes.c_uint64),
+    ('group_segment_aperture_base_hi', ctypes.c_uint32),
+    ('private_segment_aperture_base_hi', ctypes.c_uint32),
+    ('max_cu_id', ctypes.c_uint32),
+    ('max_wave_id', ctypes.c_uint32),
+    ('max_legacy_doorbell_dispatch_id_plus_1', ctypes.c_uint64),
+    ('legacy_doorbell_lock', ctypes.c_uint32),
+    ('reserved2', ctypes.c_uint32 * 9),
+    ('read_dispatch_id', ctypes.c_uint64),
+    ('read_dispatch_id_field_base_byte_offset', ctypes.c_uint32),
+    ('compute_tmpring_size', ctypes.c_uint32),
+    ('scratch_resource_descriptor', ctypes.c_uint32 * 4),
+    ('scratch_backing_memory_location', ctypes.c_uint64),
+    ('scratch_backing_memory_byte_size', ctypes.c_uint64),
+    ('scratch_wave64_lane_byte_size', ctypes.c_uint32),
+    ('queue_properties', ctypes.c_uint32),
+    ('reserved3', ctypes.c_uint32 * 2),
+    ('queue_inactive_signal', hsa_signal_t),
+    ('reserved4', ctypes.c_uint32 * 14),
+]
+
+amd_queue_t = struct_amd_queue_s
+amd_signal_kind64_t = ctypes.c_int64
+
+# values for enumeration 'amd_signal_kind_t'
+amd_signal_kind_t__enumvalues = {
+    0: 'AMD_SIGNAL_KIND_INVALID',
+    1: 'AMD_SIGNAL_KIND_USER',
+    -1: 'AMD_SIGNAL_KIND_DOORBELL',
+    -2: 'AMD_SIGNAL_KIND_LEGACY_DOORBELL',
+}
+AMD_SIGNAL_KIND_INVALID = 0
+AMD_SIGNAL_KIND_USER = 1
+AMD_SIGNAL_KIND_DOORBELL = -1
+AMD_SIGNAL_KIND_LEGACY_DOORBELL = -2
+amd_signal_kind_t = ctypes.c_int32 # enum
+class struct_amd_signal_s(Structure):
+    pass
+
+class union_amd_signal_s_0(Union):
+    pass
+
+union_amd_signal_s_0._pack_ = 1 # source:False
+union_amd_signal_s_0._fields_ = [
+    ('value', ctypes.c_int64),
+    ('legacy_hardware_doorbell_ptr', ctypes.POINTER(ctypes.c_uint32)),
+    ('hardware_doorbell_ptr', ctypes.POINTER(ctypes.c_uint64)),
+]
+
+class union_amd_signal_s_1(Union):
+    pass
+
+union_amd_signal_s_1._pack_ = 1 # source:False
+union_amd_signal_s_1._fields_ = [
+    ('queue_ptr', ctypes.POINTER(struct_amd_queue_s)),
+    ('reserved2', ctypes.c_uint64),
+]
+
+struct_amd_signal_s._pack_ = 1 # source:False
+struct_amd_signal_s._anonymous_ = ('_0', '_1',)
+struct_amd_signal_s._fields_ = [
+    ('kind', ctypes.c_int64),
+    ('_0', union_amd_signal_s_0),
+    ('event_mailbox_ptr', ctypes.c_uint64),
+    ('event_id', ctypes.c_uint32),
+    ('reserved1', ctypes.c_uint32),
+    ('start_ts', ctypes.c_uint64),
+    ('end_ts', ctypes.c_uint64),
+    ('_1', union_amd_signal_s_1),
+    ('reserved3', ctypes.c_uint32 * 2),
+]
+
+amd_signal_t = struct_amd_signal_s
 class struct_BrigModuleHeader(Structure):
     pass
 
@@ -3713,7 +3835,27 @@ struct_hsa_ext_finalizer_1_00_pfn_s._fields_ = [
 
 hsa_ext_finalizer_1_00_pfn_t = struct_hsa_ext_finalizer_1_00_pfn_s
 __all__ = \
-    ['BrigModule_t', 'HSA_ACCESS_PERMISSION_NONE',
+    ['AMD_QUEUE_PROPERTIES_ENABLE_PROFILING',
+    'AMD_QUEUE_PROPERTIES_ENABLE_PROFILING_SHIFT',
+    'AMD_QUEUE_PROPERTIES_ENABLE_PROFILING_WIDTH',
+    'AMD_QUEUE_PROPERTIES_ENABLE_TRAP_HANDLER',
+    'AMD_QUEUE_PROPERTIES_ENABLE_TRAP_HANDLER_DEBUG_SGPRS',
+    'AMD_QUEUE_PROPERTIES_ENABLE_TRAP_HANDLER_DEBUG_SGPRS_SHIFT',
+    'AMD_QUEUE_PROPERTIES_ENABLE_TRAP_HANDLER_DEBUG_SGPRS_WIDTH',
+    'AMD_QUEUE_PROPERTIES_ENABLE_TRAP_HANDLER_SHIFT',
+    'AMD_QUEUE_PROPERTIES_ENABLE_TRAP_HANDLER_WIDTH',
+    'AMD_QUEUE_PROPERTIES_IS_PTR64',
+    'AMD_QUEUE_PROPERTIES_IS_PTR64_SHIFT',
+    'AMD_QUEUE_PROPERTIES_IS_PTR64_WIDTH',
+    'AMD_QUEUE_PROPERTIES_RESERVED1',
+    'AMD_QUEUE_PROPERTIES_RESERVED1_SHIFT',
+    'AMD_QUEUE_PROPERTIES_RESERVED1_WIDTH',
+    'AMD_QUEUE_PROPERTIES_USE_SCRATCH_ONCE',
+    'AMD_QUEUE_PROPERTIES_USE_SCRATCH_ONCE_SHIFT',
+    'AMD_QUEUE_PROPERTIES_USE_SCRATCH_ONCE_WIDTH',
+    'AMD_SIGNAL_KIND_DOORBELL', 'AMD_SIGNAL_KIND_INVALID',
+    'AMD_SIGNAL_KIND_LEGACY_DOORBELL', 'AMD_SIGNAL_KIND_USER',
+    'BrigModule_t', 'HSA_ACCESS_PERMISSION_NONE',
     'HSA_ACCESS_PERMISSION_RO', 'HSA_ACCESS_PERMISSION_RW',
     'HSA_ACCESS_PERMISSION_WO', 'HSA_AGENT_FEATURE_AGENT_DISPATCH',
     'HSA_AGENT_FEATURE_KERNEL_DISPATCH',
@@ -4082,8 +4224,10 @@ __all__ = \
     'HSA_VARIABLE_SEGMENT_READONLY', 'HSA_WAIT_STATE_ACTIVE',
     'HSA_WAIT_STATE_BLOCKED', 'HSA_WAVEFRONT_INFO_SIZE',
     'MEMORY_TYPE_NONE', 'MEMORY_TYPE_PINNED',
-    'c__EA_hsa_access_permission_t', 'c__EA_hsa_agent_feature_t',
-    'c__EA_hsa_agent_info_t',
+    'amd_queue_properties32_t', 'amd_queue_properties_t',
+    'amd_queue_t', 'amd_signal_kind64_t', 'amd_signal_kind_t',
+    'amd_signal_t', 'c__EA_hsa_access_permission_t',
+    'c__EA_hsa_agent_feature_t', 'c__EA_hsa_agent_info_t',
     'c__EA_hsa_amd_agent_memory_pool_info_t',
     'c__EA_hsa_amd_copy_direction_t',
     'c__EA_hsa_amd_hw_exception_reset_cause_t',
@@ -4422,6 +4566,7 @@ __all__ = \
     'hsa_wait_state_t__enumvalues', 'hsa_wavefront_get_info',
     'hsa_wavefront_info_t', 'hsa_wavefront_info_t__enumvalues',
     'hsa_wavefront_t', 'int32_t', 'size_t', 'struct_BrigModuleHeader',
+    'struct_amd_queue_s', 'struct_amd_signal_s',
     'struct_hsa_agent_dispatch_packet_s', 'struct_hsa_agent_s',
     'struct_hsa_amd_barrier_value_packet_s', 'struct_hsa_amd_event_s',
     'struct_hsa_amd_gpu_hw_exception_info_s',
@@ -4455,4 +4600,5 @@ __all__ = \
     'struct_hsa_queue_s', 'struct_hsa_region_s',
     'struct_hsa_signal_group_s', 'struct_hsa_signal_s',
     'struct_hsa_wavefront_s', 'uint16_t', 'uint32_t', 'uint64_t',
+    'union_amd_signal_s_0', 'union_amd_signal_s_1',
     'union_hsa_amd_event_s_0']

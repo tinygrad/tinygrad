@@ -4,10 +4,10 @@ from pathlib import Path
 from typing import Tuple, Optional, List
 import tinygrad.runtime.autogen.cuda as cuda
 from tinygrad.helpers import DEBUG, getenv, from_mv, to_char_p_p, init_c_var, init_c_struct_t, colored, cpu_time_execution
-from tinygrad.device import Compiled, LRUAllocator, MallocAllocator, Compiler, BufferOptions
-from tinygrad.codegen.kernel import LinearizerOptions
+from tinygrad.device import Compiled, LRUAllocator, MallocAllocator, Compiler, BufferOptions, CompilerOptions
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.renderer.assembly import PTXRenderer
+if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl  # noqa: F401
 
 def pretty_ptx(s):
   # all expressions match `<valid_before><expr><valid_after>` and replace it with `<valid_before>color(<expr>)<valid_after>`
@@ -42,7 +42,7 @@ def cu_time_execution(cb, enable=False) -> Optional[float]:
   cuda.cuEventRecord(evs[0], None)
   cb()
   cuda.cuEventRecord(evs[1], None)
-  cuda.cuEventSynchronize(evs[1])
+  check(cuda.cuEventSynchronize(evs[1]))
   cuda.cuEventElapsedTime(ctypes.byref(ret := ctypes.c_float()), evs[0], evs[1])
   for ev in evs: cuda.cuEventDestroy_v2(ev)
   return ret.value * 1e-3
@@ -52,25 +52,28 @@ def _get_bytes(arg, get_str, get_sz, check) -> bytes:
   return ctypes.string_at(init_c_var(ctypes.create_string_buffer(sz.value), lambda x: check(get_str(arg, x))), size=sz.value)
 
 class PTXCompiler(Compiler):
-  linearizer_opts = LinearizerOptions("CUDA", suffix="PTX", global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024], shared_max=49152)
+  compiler_opts = CompilerOptions("CUDA", suffix="PTX", global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024], shared_max=49152)
   def __init__(self, arch:str):
     self.arch = arch
-    PTXCompiler.linearizer_opts = PTXCompiler.linearizer_opts._replace(has_tensor_cores=int(arch[3:]) >= 80)
+    self.version = "7.8" if arch >= "sm_89" else "7.5"
+    PTXCompiler.compiler_opts = PTXCompiler.compiler_opts._replace(has_tensor_cores=int(arch[3:]) >= 80)
     super().__init__(f"compile_ptx_{self.arch}")
-  def render(self, name:str, uops) -> str: return PTXRenderer(name, uops).replace("TARGET", self.arch)
+  def render(self, name:str, uops) -> str: return PTXRenderer(name, uops).replace("TARGET", self.arch).replace("VERSION", self.version)
   def compile(self, src:str) -> bytes: return src.encode()
 
 class CUDACompiler(Compiler):
-  linearizer_opts = LinearizerOptions("CUDA", global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024], shared_max=49152)
+  compiler_opts = CompilerOptions("CUDA", global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024], shared_max=49152)
   def __init__(self, arch:str):
     self.arch = arch
-    CUDACompiler.linearizer_opts = CUDACompiler.linearizer_opts._replace(has_tensor_cores=int(arch[3:]) >= 80)
+    CUDACompiler.compiler_opts = CUDACompiler.compiler_opts._replace(has_tensor_cores=int(arch[3:]) >= 80)
+    check(cuda.nvrtcVersion((nvrtcMajor := ctypes.c_int()), (nvrtcMinor := ctypes.c_int())))
+    self.compile_options = [f'--gpu-architecture={arch}', "-I/usr/local/cuda/include", "-I/usr/include", "-I/opt/cuda/include/"]
+    if (nvrtcMajor.value, nvrtcMinor.value) >= (12, 4): self.compile_options.append("--minimal")
     super().__init__(f"compile_cuda_{self.arch}")
   def render(self, name:str, uops) -> str: return CUDARenderer(name, uops)
   def compile(self, src:str) -> bytes:
-    compile_options = [f'--gpu-architecture={self.arch}', "-I/usr/local/cuda/include", "-I/usr/include", "-I/opt/cuda/include/"]
     check(cuda.nvrtcCreateProgram(ctypes.byref(prog := cuda.nvrtcProgram()), src.encode(), "<null>".encode(), 0, None, None))
-    status = cuda.nvrtcCompileProgram(prog, len(compile_options), to_char_p_p([o.encode() for o in compile_options]))
+    status = cuda.nvrtcCompileProgram(prog, len(self.compile_options), to_char_p_p([o.encode() for o in self.compile_options]))
 
     if status != 0: raise RuntimeError(f"compile failed: {_get_bytes(prog, cuda.nvrtcGetProgramLog, cuda.nvrtcGetProgramLogSize, check).decode()}")
     return _get_bytes(prog, cuda.nvrtcGetPTX, cuda.nvrtcGetPTXSize, check)
@@ -119,18 +122,17 @@ class CUDAAllocator(LRUAllocator):
   def __init__(self, device:CUDADevice):
     self.device = device
     super().__init__()
-  def _alloc(self, size):
+  def _alloc(self, size, options:BufferOptions):
     check(cuda.cuCtxSetCurrent(self.device.context))
-    return init_c_var(cuda.CUdeviceptr(), lambda x: check(cuda.cuMemAlloc_v2(ctypes.byref(x), size)))
-  def _alloc_with_options(self, size:int, options:BufferOptions):
-    if options.host:
-      return init_c_var(ctypes.c_void_p(), lambda x: check(cuda.cuMemHostAlloc(ctypes.byref(x), size, 0)))
-    else:
-      raise ValueError("no options")
-  def _free(self, opaque): check(cuda.cuMemFree_v2(opaque))
+    if options.host: return init_c_var(ctypes.c_void_p(), lambda x: check(cuda.cuMemHostAlloc(ctypes.byref(x), size, 0)))
+    else: return init_c_var(cuda.CUdeviceptr(), lambda x: check(cuda.cuMemAlloc_v2(ctypes.byref(x), size)))
+  def _free(self, opaque, options:BufferOptions):
+    if options.host: return check(cuda.cuMemFreeHost(opaque))
+    else: check(cuda.cuMemFree_v2(opaque))
   def copyin(self, dest, src:memoryview):
-    host_mem = self._alloc_with_options(len(src), BufferOptions(host=True))
-    self.device.pending_copyin.append(host_mem.value)
+    check(cuda.cuCtxSetCurrent(self.device.context))
+    host_mem = self.alloc(len(src), BufferOptions(host=True))
+    self.device.pending_copyin.append((host_mem, len(src), BufferOptions(host=True)))
     ctypes.memmove(host_mem, from_mv(src), len(src))
     check(cuda.cuMemcpyHtoDAsync_v2(dest, host_mem, len(src), None))
   def copyout(self, dest:memoryview, src):
@@ -157,7 +159,7 @@ class CUDADevice(Compiled):
       check(cuda.cuDeviceComputeCapability(ctypes.byref(major := ctypes.c_int()), ctypes.byref(minor := ctypes.c_int()), device_id))
 
     self.arch = f"sm_{major.value}{minor.value}" if not CUDACPU else "sm_35"
-    self.pending_copyin: List[int] = []
+    self.pending_copyin: List[Tuple[int, int, Optional[BufferOptions]]] = []
     CUDADevice.devices.append(self)
 
     from tinygrad.runtime.graph.cuda import CUDAGraph
@@ -169,7 +171,7 @@ class CUDADevice(Compiled):
     if CUDACPU: return
     check(cuda.cuCtxSetCurrent(self.context))
     check(cuda.cuCtxSynchronize())
-    for opaque in self.pending_copyin: check(cuda.cuMemFreeHost(opaque))
+    for opaque,sz,options in self.pending_copyin: self.allocator.free(opaque, sz, options)
     self.pending_copyin.clear()
 
   @staticmethod

@@ -10,13 +10,13 @@ if "OPT" not in os.environ: os.environ["OPT"] = "99"
 OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx"
 
 import onnx
-from tqdm import tqdm
 from typing import Tuple, List, Optional, Dict
 from extra.onnx import get_run_onnx
 from tinygrad import Tensor, Device, GlobalCounters, dtypes
 from tinygrad.dtype import ImageDType
-from tinygrad.helpers import partition, Context, fetch, getenv, GRAPH, DEBUG
-from tinygrad.realize import run_schedule, lower_schedule_item, create_schedule
+from tinygrad.helpers import partition, Context, fetch, getenv, DEBUG
+from tinygrad.engine.realize import run_schedule, lower_schedule_item
+from tinygrad.engine.schedule import create_schedule
 from tinygrad.ops import LoadOps, ScheduleItem
 Device.DEFAULT = "GPU"
 
@@ -35,7 +35,7 @@ def get_schedule(onnx_data) -> Tuple[List[ScheduleItem], List[ScheduleItem]]:
   schedule = create_schedule([ret.lazydata])
 
   # filter schedule that don't depend on the inputs
-  input_lb = [x.lazydata.base for x in inputs.values()]
+  input_lb = [x.lazydata.base.buffer for x in inputs.values()]
   depends = set(input_lb)
   for si in schedule:
     if any(b in depends for b in si.inputs):
@@ -88,10 +88,10 @@ def test_vs_onnx(onnx_data, schedule:Optional[List[ScheduleItem]], inputs:Dict[s
 
   # run code (all buffers have been allocated)
   GlobalCounters.reset()
-  for si in schedule: lower_schedule_item(si)([x.realized for x in si.outputs+si.inputs], {})
+  for si in schedule: lower_schedule_item(si)(si.outputs+si.inputs, {})
 
-  new_tinygrad_out = Tensor(schedule[-1].outputs[0]).numpy()
-  np.testing.assert_allclose(new_torch_out, new_tinygrad_out, atol=1e-4, rtol=1e-2)
+  new_tinygrad_out = np.frombuffer(schedule[-1].outputs[0].as_buffer(), dtype=schedule[-1].outputs[0].dtype.np)
+  np.testing.assert_allclose(new_torch_out.reshape(new_tinygrad_out.shape), new_tinygrad_out, atol=1e-4, rtol=1e-2)
   print("semi-thneed self-test passed!")
 
 if __name__ == "__main__":

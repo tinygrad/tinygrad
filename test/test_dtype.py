@@ -1,4 +1,4 @@
-import unittest, operator
+import unittest, operator, subprocess
 import numpy as np
 import torch
 from typing import Any, List
@@ -41,6 +41,13 @@ def _assert_eq(tensor:Tensor, target_dtype:DType, target):
 def _test_op(fxn, target_dtype:DType, target):
   _assert_eq(fxn(), target_dtype, target)
 def _test_cast(a:Tensor, target_dtype:DType):
+  if a.is_floating_point() and dtypes.is_unsigned(target_dtype):
+    # converting negative float to unsigned integer is undefined
+    a = a.abs()
+  if target_dtype == dtypes.half and Device.DEFAULT == "PYTHON":
+    # TODO: struct.pack cannot pack value > 65504 (max of half) into e format
+    a = (a > 65504).where(65504, a)
+
   _test_op(lambda: a.cast(target_dtype), target_dtype, list(a.numpy().astype(target_dtype.np)))
 def _test_bitcast(a:Tensor, target_dtype:DType, target=None):
   if target_dtype == dtypes.bfloat16: raise unittest.SkipTest("no test for bf16 bitcast yet")
@@ -60,8 +67,7 @@ class TestDType(unittest.TestCase):
     elif cls.DTYPE == dtypes.bool:
       cls.DATA = np.random.choice([True, False], size=DATA_SIZE)
     else:
-      # TODO: include negative numbers here and fix negative number cast to uint
-      cls.DATA = np.random.uniform(0, 10, size=DATA_SIZE).astype(cls.DTYPE.np)
+      cls.DATA = np.random.uniform(-10, 10, size=DATA_SIZE).astype(cls.DTYPE.np)
   def setUp(self):
     if self.DTYPE is None: raise unittest.SkipTest("base class")
 
@@ -136,13 +142,11 @@ class TestBFloat16(unittest.TestCase):
     np.testing.assert_allclose(tnp, np.array(data))
 
   def test_bf16_ones(self):
-    # TODO: fix this with correct bfloat16 cast
     t = Tensor.ones(3, 5, dtype=dtypes.bfloat16)
     assert t.dtype == dtypes.bfloat16
     np.testing.assert_allclose(t.numpy(), np.ones((3, 5)))
 
   def test_bf16_eye(self):
-    # TODO: fix this with correct bfloat16 cast
     t = Tensor.eye(3, dtype=dtypes.bfloat16)
     assert t.dtype == dtypes.bfloat16
     np.testing.assert_allclose(t.numpy(), np.eye(3))
@@ -154,8 +158,6 @@ class TestBFloat16DType(unittest.TestCase):
 
   def test_float_to_bf16(self):
     _test_cast(Tensor([100000], dtype=dtypes.float32), dtypes.bfloat16)
-
-  # torch.tensor([10000, -1, -1000, -10000, 20]).type(torch.bfloat16)
 
   def test_bf16(self):
     t = Tensor([10000, -1, -1000, -10000, 20]).cast(dtypes.bfloat16)
@@ -243,7 +245,7 @@ class TestUint8Dtype(TestDType):
 @unittest.skipIf(Device.DEFAULT == "WEBGL", "No bitcast on WebGL")
 class TestBitCast(unittest.TestCase):
   def test_shape_change_bitcast(self):
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(RuntimeError):
       _test_bitcast(Tensor([100000], dtype=dtypes.float32), dtypes.uint8, [100000])
 
   def test_bitcast_float_to_int32(self):
@@ -346,6 +348,22 @@ class TestTypeSpec(unittest.TestCase):
     for default_float in [dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64]:
       dtypes.default_float = default_float
       assert dtypes.default_float == default_float
+
+  def test_env_set_default_float(self):
+    # check default
+    subprocess.run(['python3 -c "from tinygrad import dtypes; assert dtypes.default_float == dtypes.float"'],
+                    shell=True, check=True)
+    # check change
+    subprocess.run(['DEFAULT_FLOAT=HALF python3 -c "from tinygrad import dtypes; assert dtypes.default_float == dtypes.half"'],
+                    shell=True, check=True)
+    # check invalid
+    with self.assertRaises(subprocess.CalledProcessError):
+      subprocess.run(['DEFAULT_FLOAT=INT32 python3 -c "from tinygrad import dtypes"'],
+                      shell=True, check=True)
+
+    with self.assertRaises(subprocess.CalledProcessError):
+      subprocess.run(['DEFAULT_FLOAT=TYPO python3 -c "from tinygrad import dtypes"'],
+                      shell=True, check=True)
 
   @given(strat.sampled_from(dtype_ints), strat.sampled_from(dtype_floats))
   def test_creation(self, default_int, default_float):
@@ -598,12 +616,7 @@ class TestImplicitFunctionTypeChange(unittest.TestCase):
       t = func(Tensor([4.0, 3.0])).max() == func(Tensor([4.0, 3.0]))
       result.append(t.numpy().sum())
 
-    if Device.DEFAULT not in ["PYTHON", "CLANG"]:
-      assert all(result)
-    else:
-      # CLANG and PYTHON function default returns in double, and comparison to float can fail
-      # TODO: fix this
-      assert not all(result)
+    assert all(result)
 
 if __name__ == '__main__':
   unittest.main()

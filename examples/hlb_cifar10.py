@@ -5,7 +5,7 @@
 # https://siboehm.com/articles/22/CUDA-MMM
 import random, time
 import numpy as np
-from typing import Optional, List
+from typing import Optional
 from extra.datasets import fetch_cifar, cifar_mean, cifar_std
 from extra.lr_scheduler import OneCycleLR
 from tinygrad import nn, dtypes, Tensor, Device, GlobalCounters, TinyJit
@@ -19,11 +19,6 @@ EVAL_BS = getenv("EVAL_BS", BS)
 GPUS = [f'{Device.DEFAULT}:{i}' for i in range(getenv("GPUS", 1))]
 assert BS % len(GPUS) == 0, f"{BS=} is not a multiple of {len(GPUS)=}, uneven multi GPU is slow"
 assert EVAL_BS % len(GPUS) == 0, f"{EVAL_BS=} is not a multiple of {len(GPUS)=}, uneven multi GPU is slow"
-
-if getenv("HALF"):
-  dtypes.default_float = dtypes.float16
-else:
-  dtypes.default_float = dtypes.float32
 
 class UnsyncedBatchNorm:
   def __init__(self, sz:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1, num_devices=len(GPUS)):
@@ -39,13 +34,13 @@ class UnsyncedBatchNorm:
   def __call__(self, x:Tensor):
     if isinstance(x.lazydata, MultiLazyBuffer): assert x.lazydata.axis is None or x.lazydata.axis == 0 and len(x.lazydata.lbs) == self.num_devices
 
-    rshape, x = x.shape, x.reshape(self.num_devices, -1, *x.shape[1:])
-    batch_mean, batch_invstd = self.calc_stats(x)
-    ret = x.batchnorm(
+    xr = x.reshape(self.num_devices, -1, *x.shape[1:]).cast(dtypes.float32)
+    batch_mean, batch_invstd = self.calc_stats(xr)
+    ret = xr.batchnorm(
       self.weight.reshape(1, -1).expand((self.num_devices, -1)),
       self.bias.reshape(1, -1).expand((self.num_devices, -1)),
       batch_mean, batch_invstd, axis=(0, 2))
-    return ret.reshape(rshape)
+    return ret.reshape(x.shape).cast(x.dtype)
 
   def calc_stats(self, x:Tensor):
     if Tensor.training:
@@ -59,8 +54,9 @@ class UnsyncedBatchNorm:
 
       # NOTE: wow, this is done all throughout training in most PyTorch models
       if self.track_running_stats:
-        self.running_mean.assign((1-self.momentum) * self.running_mean + self.momentum * batch_mean.detach())
-        self.running_var.assign((1-self.momentum) * self.running_var + self.momentum * prod(y.shape[1:])/(prod(y.shape[1:])-y.shape[2]) * batch_var.detach())
+        self.running_mean.assign((1-self.momentum) * self.running_mean + self.momentum * batch_mean.detach().cast(self.running_mean.dtype))
+        batch_var_adjust = prod(y.shape[1:])/(prod(y.shape[1:])-y.shape[2])
+        self.running_var.assign((1-self.momentum) * self.running_var + self.momentum * batch_var_adjust * batch_var.detach().cast(self.running_var.dtype))
         self.num_batches_tracked += 1
     else:
       batch_mean = self.running_mean
@@ -200,8 +196,8 @@ def train_cifar():
     BS, _, H, W = shape
     low_x = Tensor.randint(BS, low=0, high=W-mask_size).reshape(BS,1,1,1)
     low_y = Tensor.randint(BS, low=0, high=H-mask_size).reshape(BS,1,1,1)
-    idx_x = Tensor.arange(W).reshape((1,1,1,W))
-    idx_y = Tensor.arange(H).reshape((1,1,H,1))
+    idx_x = Tensor.arange(W, dtype=dtypes.int32).reshape((1,1,1,W))
+    idx_y = Tensor.arange(H, dtype=dtypes.int32).reshape((1,1,H,1))
     return (idx_x >= low_x) * (idx_x < (low_x + mask_size)) * (idx_y >= low_y) * (idx_y < (low_y + mask_size))
 
   def random_crop(X:Tensor, crop_size=32):
