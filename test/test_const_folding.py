@@ -34,18 +34,13 @@ class TestSimpleConstFolding(unittest.TestCase):
   def test_div_tensor_one(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) / Tensor.ones(4))
 
-  # TODO: fix pow const folding
-  @unittest.expectedFailure
   def test_pow_literal_zero(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) ** 0)
-  @unittest.expectedFailure
   def test_pow_tensor_zero(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) ** Tensor.zeros(4))
 
-  @unittest.expectedFailure
   def test_pow_literal_one(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) ** 1)
-  @unittest.expectedFailure
   def test_pow_tensor_one(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) ** Tensor.ones(4))
 
