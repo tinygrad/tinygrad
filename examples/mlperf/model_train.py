@@ -237,7 +237,7 @@ def train_unet3d():
   from examples.mlperf.metrics import dice_score
   from extra.models.unet3d import UNet3D
   from extra.datasets.kits19 import iterate, get_train_files, get_val_files, sliding_window_inference
-  from tinygrad import dtypes, Device, TinyJit, Tensor
+  from tinygrad import Device, TinyJit, Tensor
   from tinygrad.nn.optim import SGD
   from tinygrad.nn.state import load_state_dict
   from tinygrad.ops import GlobalCounters
@@ -245,6 +245,7 @@ def train_unet3d():
 
   import numpy as np
   import random
+  import time
 
   TARGET_METRIC = 0.908
   NUM_EPOCHS = getenv("NUM_EPOCHS", 4000)
@@ -289,20 +290,17 @@ def train_unet3d():
     load_state_dict(model, state_dict)
     print(f"Loaded checkpoint {CHECKPOINT_FN} into model")
 
-  # for p in params:
-  #   p.realize().to_(GPUS)
-  # for _, x in get_state_dict(model).items():
-  #   x.realize().to_(GPUS)
-
   params = get_parameters(model)
+
+  for p in params: p.realize().to_(GPUS)
 
   optim = SGD(params, lr=LR, momentum=MOMENTUM, nesterov=True)
 
   def lr_warm_up(optim, init_lr, lr, current_epoch, warmup_epochs):
     scale = current_epoch / warmup_epochs
-    optim.lr.assign(Tensor([init_lr + (lr - init_lr) * scale]))
+    optim.lr.assign(Tensor([init_lr + (lr - init_lr) * scale], device=GPUS))
 
-  # @TinyJit
+  @TinyJit
   def train_step(model, x, y):
     optim.zero_grad()
 
@@ -314,7 +312,7 @@ def train_unet3d():
     return loss.realize()
   
   def eval_step(model, x, y):
-    y_hat, y = sliding_window_inference(model, x, y)
+    y_hat, y = sliding_window_inference(model, x, y, gpus=GPUS)
     y_hat, y = Tensor(y_hat), Tensor(y, requires_grad=False)
     loss = dice_ce_loss(y_hat, y)
     score = dice_score(y_hat, y)
@@ -331,18 +329,22 @@ def train_unet3d():
     if epoch <= LR_WARMUP_EPOCHS and LR_WARMUP_EPOCHS > 0:
       lr_warm_up(optim, LR_WARMUP_INIT_LR, LR, epoch, LR_WARMUP_EPOCHS)
 
-    for i, (x, y) in enumerate(tqdm(iterate(val=False, shuffle=True, bs=BS), total=TRAIN_DATASET_SIZE // BS, desc=f"epoch {epoch}"), start=1):
+    st = time.perf_counter()
+
+    for i, (x, y) in enumerate(tqdm(iterate(val=False, shuffle=True, bs=BS, cache_preprocessed_data=True), total=TRAIN_DATASET_SIZE // BS, desc=f"epoch {epoch}"), start=1):
       GlobalCounters.reset()
 
-      x, y = Tensor(x, device=Device.DEFAULT).realize(), Tensor(y, device=Device.DEFAULT, requires_grad=False)
+      x, y = Tensor(x).realize().shard(GPUS, axis=0), Tensor(y, requires_grad=False).shard(GPUS, axis=0)
 
       loss = train_step(model, x, y)
+      pt = time.perf_counter()
+
       loss = loss.numpy().item()
 
-      tqdm.write(f"{i:5} {loss:5.2f} loss, {optim.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used")
+      tqdm.write(f"{i:5} {loss:5.2f} loss, {optim.lr.numpy()[0]:.6f} LR, {(pt - st) * 1000.0:7.2f} ms python, {GlobalCounters.mem_used / 1e9:.2f} GB used")
 
-      if WANDB:
-        wandb.log({"lr": optim.lr.numpy(), "train/loss": loss, "epoch": epoch + i / (TRAIN_DATASET_SIZE // BS)})
+      if WANDB: wandb.log({"lr": optim.lr.numpy(), "train/loss": loss, "train/python_time": pt - st})
+      st = pt
 
     if epoch == next_eval_at:
       Tensor.training = False
@@ -351,7 +353,7 @@ def train_unet3d():
       eval_loss = []
       scores = []
 
-      for x, y in tqdm(iterate(), total=VAL_DATASET_SIZE):
+      for x, y in tqdm(iterate(cache_preprocessed_data=True), total=VAL_DATASET_SIZE):
         eval_loss_value, score = eval_step(model, x, y)
         eval_loss.append(eval_loss_value)
         scores.append(score)

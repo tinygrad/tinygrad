@@ -5,7 +5,6 @@ import numpy as np
 import nibabel as nib
 import os
 import scipy
-import time
 import torch
 import torch.nn.functional as F
 from tinygrad.tensor import Tensor
@@ -77,7 +76,6 @@ def iterate(val=True, shuffle=False, bs=1, cache_preprocessed_data=False):
   order = list(range(0, len(files)))
   preprocessed_path = BASEDIR / ".." / "preprocessed"
   if cache_preprocessed_data:
-    print("Caching preprocessed data")
     if not os.path.exists(preprocessed_path): os.mkdir(preprocessed_path)
     for i in range(len(files)):
       case = os.path.basename(files[i])
@@ -88,12 +86,9 @@ def iterate(val=True, shuffle=False, bs=1, cache_preprocessed_data=False):
         print(f"Saving preprocessed data {case}")
         np.save(image_preproc_path, image, allow_pickle=False)
         np.save(label_preproc_path, label, allow_pickle=False)
-    assert len(files) == len(os.listdir(preprocessed_path)) // 2, "missing files from preprocessed data"
-    print("Done")
 
   if shuffle: random.shuffle(order)
 
-  st = time.perf_counter()
   for i in range(0, len(files), bs):
     samples = []
     for i in order[i:i+bs]:
@@ -113,10 +108,6 @@ def iterate(val=True, shuffle=False, bs=1, cache_preprocessed_data=False):
         Y_preprocessed.append(y)
       yield np.stack(X_preprocessed, axis=0), np.stack(Y_preprocessed, axis=0)
 
-    dt = time.perf_counter()
-    print(f"{(dt - st) * 1000.0:6.2f} ms fetch data")
-    st = dt
-
 def gaussian_kernel(n, std):
   gaussian_1d = scipy.signal.gaussian(n, std)
   gaussian_2d = np.outer(gaussian_1d, gaussian_1d)
@@ -132,7 +123,7 @@ def pad_input(volume, roi_shape, strides, padding_mode="constant", padding_val=-
   paddings = [bounds[2]//2, bounds[2]-bounds[2]//2, bounds[1]//2, bounds[1]-bounds[1]//2, bounds[0]//2, bounds[0]-bounds[0]//2, 0, 0, 0, 0]
   return F.pad(torch.from_numpy(volume), paddings, mode=padding_mode, value=padding_val).numpy(), paddings
 
-def sliding_window_inference(model, inputs, labels, roi_shape=(128, 128, 128), overlap=0.5):
+def sliding_window_inference(model, inputs, labels, roi_shape=(128, 128, 128), overlap=0.5, gpus=None):
   from tinygrad.engine.jit import TinyJit
   mdl_run = TinyJit(lambda x: model(x).realize())
   image_shape, dim = list(inputs.shape[2:]), len(inputs.shape[2:])
@@ -161,7 +152,7 @@ def sliding_window_inference(model, inputs, labels, roi_shape=(128, 128, 128), o
   for i in range(0, strides[0] * size[0], strides[0]):
     for j in range(0, strides[1] * size[1], strides[1]):
       for k in range(0, strides[2] * size[2], strides[2]):
-        out = mdl_run(Tensor(inputs[..., i:roi_shape[0]+i,j:roi_shape[1]+j, k:roi_shape[2]+k])).numpy()
+        out = mdl_run(Tensor(inputs[..., i:roi_shape[0]+i,j:roi_shape[1]+j, k:roi_shape[2]+k], device=gpus)).numpy()
         result[..., i:roi_shape[0]+i, j:roi_shape[1]+j, k:roi_shape[2]+k] += out * norm_patch
         norm_map[..., i:roi_shape[0]+i, j:roi_shape[1]+j, k:roi_shape[2]+k] += norm_patch
   result /= norm_map
