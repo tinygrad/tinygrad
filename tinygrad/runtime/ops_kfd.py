@@ -295,8 +295,8 @@ class KFDDevice(Compiled):
       if (cmdsz:=ctypes.sizeof(cmd)) > (fill:=self.sdma_ring.size - self.sdma_doorbell_value % self.sdma_ring.size):
         ctypes.memset(self.sdma_ring.va_addr + (self.sdma_doorbell_value % self.sdma_ring.size), 0, fill)
         self.sdma_doorbell_value += fill
-      ctypes.memmove(self.sdma_ring.va_addr + (self.sdma_doorbell_value % self.sdma_ring.size), ctypes.addressof(cmd), sz:=ctypes.sizeof(cmd))
-      self.sdma_doorbell_value += sz
+      ctypes.memmove(self.sdma_ring.va_addr + (self.sdma_doorbell_value % self.sdma_ring.size), ctypes.addressof(cmd), cmdsz)
+      self.sdma_doorbell_value += cmdsz
 
     if wait_signals is not None:
       # NOTE: we check only low 32 bits to be zeroed, we don't use higher values for signals
