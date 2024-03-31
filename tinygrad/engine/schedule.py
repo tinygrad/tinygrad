@@ -218,7 +218,8 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
     if GRAPH:
       kernel_number += 1
       for out in ps.outputs: realized_lazybuffer(out, kernel_number)
-    schedule.append(ScheduleItem(ps.ast, tuple(x.buffer for x in ps.outputs), tuple(x.buffer for x in ps.inputs), ps.var_vals))
+    schedule.append(ScheduleItem(ps.ast, tuple(x.buffer for x in ps.outputs if x.size != 0),
+                                 tuple(x.buffer for x in ps.inputs if x.size != 0), ps.var_vals))
     for x in graph[buf]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)

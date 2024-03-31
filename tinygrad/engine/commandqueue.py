@@ -1,15 +1,13 @@
 # NOTE: this will replace jit.py, realize.py, and a lot of the boilerplate in each graph executor
 from __future__ import annotations
-from typing import List, Dict, Optional, Union, DefaultDict, cast, Tuple
+from typing import List, Dict, Union, DefaultDict
 from collections import defaultdict
 from dataclasses import dataclass
-from tinygrad.dtype import DType
-from tinygrad.helpers import colored, getenv, GRAPH, cpu_time_execution, DEBUG, GlobalCounters
-from tinygrad.features.graph import realized_lazybuffer
-from tinygrad.ops import ScheduleItem, LoadOps, BufferOps, LazyOp
+from tinygrad.helpers import colored, cpu_time_execution, DEBUG
+from tinygrad.ops import ScheduleItem, LoadOps, BufferOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.symbolic import Variable
-from tinygrad.device import Buffer, JITRunner, Device, BufferXfer, BufferCopy, update_stats, BufferOptions
+from tinygrad.device import Buffer, JITRunner, Device, BufferXfer, BufferCopy, update_stats
 
 class CustomOp(JITRunner):
   def __init__(self, fxn):
@@ -106,13 +104,14 @@ class CommandQueue:
           si.output.device.split(":")[0] == si.input.device.split(":")[0] else BufferCopy()
         fxn.exec([si.output, si.input])
       elif isinstance(si, ScheduleItem):
-        for out in si.outputs: out.allocate()
+        for out in si.outputs:
+          if not hasattr(out, "_buf") and not (out.device.startswith("DISK") and si.ast[0].op is BufferOps.STORE): out.allocate()
         if si.ast[0].op is not LoadOps.EMPTY:
           if si.ast[0].op is LoadOps.CUSTOM:
-            runner = CustomOp(si.ast[0].arg)
+            runner:JITRunner = CustomOp(si.ast[0].arg)
           elif si.ast[0].op is BufferOps.STORE:
             runner = Device[si.outputs[0].device].get_runner(*si.ast)
           else: raise RuntimeError(f"unknown type {si}")
-          runner.exec(si.outputs+si.inputs, si.var_vals)
+          runner.exec(list(si.outputs+si.inputs), si.var_vals)
       else: raise RuntimeError(f"unknown type {si}")
       active_queues.append(device)

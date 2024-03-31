@@ -1,7 +1,7 @@
 from typing import List, Dict, Optional
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps
 from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, JITRunner, update_stats
-from tinygrad.helpers import colored, getenv, DEBUG
+from tinygrad.helpers import colored, getenv
 from tinygrad.shape.symbolic import Variable
 
 class CustomOp(JITRunner):
