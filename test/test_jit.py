@@ -339,11 +339,6 @@ class TestJit(unittest.TestCase):
 
   def test_jit_const_inputs(self):
     @TinyJit
-    def f(x,y): return (x+y).realize()
-    for _ in range(5):
-      np.testing.assert_equal(f(Tensor.ones(3), Tensor.zeros(3)).numpy(), np.ones(3))
-
-    @TinyJit
     def g(x,y,z): return (x+y+z).realize()
     for i in range(5):
       np.testing.assert_equal(g(Tensor([i]*3), Tensor.ones(3), Tensor.zeros(3)).numpy(), np.array([i+1]*3))
