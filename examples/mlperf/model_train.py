@@ -241,6 +241,7 @@ def train_unet3d():
   from tinygrad.nn.optim import SGD
   from tinygrad.nn.state import load_state_dict
   from tinygrad.ops import GlobalCounters
+  from math import ceil
 
   import numpy as np
   import random
@@ -252,16 +253,21 @@ def train_unet3d():
   MOMENTUM = getenv("MOMENTUM", 0.9)
   LR_WARMUP_EPOCHS = getenv("LR_WARMUP_EPOCHS", 200)
   LR_WARMUP_INIT_LR = getenv("LR_WARMUP_INIT_LR", 0.0001)
-  EVAL_AT = getenv("EVAL_AT", 20)
-  CHECKPOINT_EVERY = getenv("CHECKPOINT_EVERY", 10)
   CHECKPOINT_FN = getenv("CHECKPOINT_FN")
   WANDB = getenv("WANDB")
   PROJ_NAME = getenv("PROJ_NAME", "tinygrad_unet3d_mlperf")
-  SIZE = (64, 64, 64) if getenv("SMALL") else (128, 128, 128)
   SEED = getenv("SEED")
+  TRAIN_DATASET_SIZE = len(get_train_files())
+  VAL_DATASET_SIZE = len(get_val_files())
+  START_EVAL_AT = getenv("START_EVAL_AT", ceil(1000 * TRAIN_DATASET_SIZE / (TRAIN_DATASET_SIZE * BS)))
+  EVALUATE_EVERY = getenv("EVALUATE_EVERY", ceil(20 * TRAIN_DATASET_SIZE / (TRAIN_DATASET_SIZE * BS)))
+
+  start_eval_at = START_EVAL_AT
+  evaluate_every = EVALUATE_EVERY
+
+  print(f"Starting evaluation at epoch {start_eval_at} and evaluating every {evaluate_every} epochs")
 
   if SEED:
-    assert 1 <= SEED <= 9, "seed must be between 1-9"
     Tensor.manual_seed(SEED)
     np.random.seed(SEED)
     random.seed(SEED)
@@ -283,19 +289,20 @@ def train_unet3d():
     load_state_dict(model, state_dict)
     print(f"Loaded checkpoint {CHECKPOINT_FN} into model")
 
-  params = get_parameters(model)
+  # for p in params:
+  #   p.realize().to_(GPUS)
+  # for _, x in get_state_dict(model).items():
+  #   x.realize().to_(GPUS)
 
-  if len(GPUS) > 1:
-    for p in params:
-      p.to_(GPUS)
+  params = get_parameters(model)
 
   optim = SGD(params, lr=LR, momentum=MOMENTUM, nesterov=True)
 
   def lr_warm_up(optim, init_lr, lr, current_epoch, warmup_epochs):
     scale = current_epoch / warmup_epochs
-    optim.lr.assign(Tensor([init_lr + (lr - init_lr) * scale], device=GPUS if len(GPUS) > 1 else None))
+    optim.lr.assign(Tensor([init_lr + (lr - init_lr) * scale]))
 
-  @TinyJit
+  # @TinyJit
   def train_step(model, x, y):
     optim.zero_grad()
 
@@ -308,53 +315,71 @@ def train_unet3d():
   
   def eval_step(model, x, y):
     y_hat, y = sliding_window_inference(model, x, y)
-    score = dice_score(Tensor(y_hat), Tensor(y)).mean().item()
-    return score
+    y_hat, y = Tensor(y_hat), Tensor(y, requires_grad=False)
+    loss = dice_ce_loss(y_hat, y)
+    score = dice_score(y_hat, y)
+    return loss.realize(), score.realize()
   
-  def data_get(it):
-    x, y = next(it)
-    x, y = Tensor(x), Tensor(y, requires_grad=False)
-    if len(GPUS) > 1: x, y = x.shard(GPUS, axis=0).realize(), y.shard(GPUS, axis=0)
-    return x.realize(), y
-
   if WANDB: wandb.init(project=PROJ_NAME)
 
+  is_successful, diverged = False, False
+  next_eval_at = start_eval_at
+
   for epoch in range(1, NUM_EPOCHS + 1):
+    Tensor.training = True
+
     if epoch <= LR_WARMUP_EPOCHS and LR_WARMUP_EPOCHS > 0:
       lr_warm_up(optim, LR_WARMUP_INIT_LR, LR, epoch, LR_WARMUP_EPOCHS)
 
-    it = iter(tqdm(iterate(val=False, shuffle=True, bs=BS, size=SIZE), total=len(get_train_files()) // BS, desc=f"epoch {epoch}"))
-    i, proc = 0, data_get(it)
-    st = time.perf_counter()
-
-    while proc is not None:
+    for i, (x, y) in enumerate(tqdm(iterate(val=False, shuffle=True, bs=BS), total=TRAIN_DATASET_SIZE // BS, desc=f"epoch {epoch}"), start=1):
       GlobalCounters.reset()
 
-      loss = train_step(model, proc[0], proc[1])
+      x, y = Tensor(x, device=Device.DEFAULT).realize(), Tensor(y, device=Device.DEFAULT, requires_grad=False)
 
-      pt = time.perf_counter()
-
-      try:
-        next_proc = data_get(it)
-      except StopIteration:
-        next_proc = None
-
-      dt = time.perf_counter()
-
-      device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
+      loss = train_step(model, x, y)
       loss = loss.numpy().item()
 
-      cl = time.perf_counter()
+      tqdm.write(f"{i:5} {loss:5.2f} loss, {optim.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used")
 
-      tqdm.write(
-        f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(pt - st) * 1000.0:7.2f} ms python, {(dt - pt) * 1000.0:6.2f} ms fetch data, "
-        f"{(cl - dt) * 1000.0:7.2f} ms {device_str}, {loss:5.2f} loss, {optim.lr.numpy()[0]:.6f} LR, "
-        f"{GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS"
-      )
+      if WANDB:
+        wandb.log({"lr": optim.lr.numpy(), "train/loss": loss, "epoch": epoch + i / (TRAIN_DATASET_SIZE // BS)})
 
-      st = cl
-      proc, next_proc = next_proc, None
-      i += 1
+    if epoch == next_eval_at:
+      Tensor.training = False
+
+      next_eval_at += evaluate_every
+      eval_loss = []
+      scores = []
+
+      for x, y in tqdm(iterate(), total=VAL_DATASET_SIZE):
+        eval_loss_value, score = eval_step(model, x, y)
+        eval_loss.append(eval_loss_value)
+        scores.append(score)
+
+      scores = Tensor.mean(Tensor.stack(scores, dim=0), axis=0).numpy()
+      eval_loss = Tensor.mean(Tensor.stack(eval_loss, dim=0), axis=0).numpy()
+
+      l1_dice, l2_dice = scores[-2], scores[-1]
+      mean_dice = (l2_dice + l1_dice) / 2
+
+      tqdm.write(f"{l1_dice} L1 dice, {l2_dice} L2 dice, {mean_dice:.3f} mean_dice, {eval_loss:5.2f} eval_loss")
+
+      if WANDB:
+        wandb.log({"eval/loss": eval_loss, "eval/mean_dice": mean_dice, "epoch": epoch})
+
+      if mean_dice >= TARGET_METRIC:
+        is_successful = True
+
+        if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
+        fn = f"./ckpts/unet3d.safe"
+        safe_save(get_state_dict(model), fn)
+        print(f" *** Model saved to {fn} ***")
+      elif mean_dice < 1e-6:
+        print("Model diverged. Aborting.")
+        diverged = True
+
+    if is_successful or diverged:
+      break
 
 def train_rnnt():
   # TODO: RNN-T

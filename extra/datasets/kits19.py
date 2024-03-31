@@ -3,7 +3,9 @@ import functools
 from pathlib import Path
 import numpy as np
 import nibabel as nib
+import os
 import scipy
+import time
 import torch
 import torch.nn.functional as F
 from tinygrad.tensor import Tensor
@@ -62,26 +64,47 @@ def pad_to_min_shape(image, label, roi_shape=(128, 128, 128)):
   label = np.pad(label, paddings, mode="edge")
   return image, label
 
-def preprocess(file_path, roi_shape):
+def preprocess(file_path):
   image, label, image_spacings = load_pair(file_path)
   image, label = resample3d(image, label, image_spacings)
   image = normal_intensity(image.copy())
-  image, label = pad_to_min_shape(image, label, roi_shape=roi_shape)
+  image, label = pad_to_min_shape(image, label)
   return image, label
 
-def iterate(val=True, shuffle=False, bs=1, size=(128, 128, 128)):
+def iterate(val=True, shuffle=False, bs=1, cache_preprocessed_data=False):
   if val: assert bs == 1, "bs has to be 1"
   files = get_val_files() if val else get_train_files()
   order = list(range(0, len(files)))
+  preprocessed_path = BASEDIR / ".." / "preprocessed"
+  if cache_preprocessed_data:
+    print("Caching preprocessed data")
+    if not os.path.exists(preprocessed_path): os.mkdir(preprocessed_path)
+    for i in range(len(files)):
+      case = os.path.basename(files[i])
+      image_preproc_path, label_preproc_path = preprocessed_path / f"{case}_x.npy", preprocessed_path / f"{case}_y.npy"
+      if not image_preproc_path.exists() and not label_preproc_path.exists():
+        image, label = preprocess(files[i])
+        image, label = image.astype(np.float32), label.astype(np.uint8)
+        print(f"Saving preprocessed data {case}")
+        np.save(image_preproc_path, image, allow_pickle=False)
+        np.save(label_preproc_path, label, allow_pickle=False)
+    assert len(files) == len(os.listdir(preprocessed_path)) // 2, "missing files from preprocessed data"
+    print("Done")
+
   if shuffle: random.shuffle(order)
+
+  st = time.perf_counter()
   for i in range(0, len(files), bs):
-    samples = [preprocess(files[i], roi_shape=size) for i in order[i:i+bs]]
+    samples = []
+    for i in order[i:i+bs]:
+      if cache_preprocessed_data: samples += [(np.load(preprocessed_path / f"{os.path.basename(files[i])}_x.npy"), np.load(preprocessed_path / f"{os.path.basename(files[i])}_y.npy"))]
+      else: samples += [preprocess(files[i])]
     X, Y = [x[0] for x in samples], [x[1] for x in samples]
     if val: yield X[0][None], Y[0]
     else:
       X_preprocessed, Y_preprocessed = [], []
       for x, y in zip(X, Y):
-        x, y = rand_balanced_crop(x, y, patch_size=size)
+        x, y = rand_balanced_crop(x, y)
         x, y = rand_flip(x, y)
         x, y = x.astype(np.float32), y.astype(np.uint8)
         x = random_brightness_augmentation(x)
@@ -89,6 +112,10 @@ def iterate(val=True, shuffle=False, bs=1, size=(128, 128, 128)):
         X_preprocessed.append(x)
         Y_preprocessed.append(y)
       yield np.stack(X_preprocessed, axis=0), np.stack(Y_preprocessed, axis=0)
+
+    dt = time.perf_counter()
+    print(f"{(dt - st) * 1000.0:6.2f} ms fetch data")
+    st = dt
 
 def gaussian_kernel(n, std):
   gaussian_1d = scipy.signal.gaussian(n, std)
@@ -207,5 +234,5 @@ def rand_balanced_crop(image, label, patch_size=(128, 128, 128), oversampling=0.
   return image, label
 
 if __name__ == "__main__":
-  for X, Y in iterate():
+  for X, Y in iterate(cache_preprocessed_data=getenv("CACHE_PREPROCESSED_DATA")):
     print(X.shape, Y.shape)
