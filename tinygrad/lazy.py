@@ -138,7 +138,8 @@ class LazyBuffer:
       if (val := in_srcs[0].base.arg) == 1: return self
       if val == -1: return self.e(UnaryOps.NEG)
       if val == 0: return self.const(0)
-    # TODO: DIV
+    if op is BinaryOps.DIV and dtypes.is_float(self.dtype) and in_srcs[0].is_unrealized_unpadded_const() and in_srcs[0].base.arg != 0:
+      return self.e(BinaryOps.MUL, self.const(1 / in_srcs[0].base.arg))
 
     out_dtype = dtypes.bool if op in (BinaryOps.CMPLT, BinaryOps.CMPEQ) else srcs[-1].dtype
     return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), out_dtype, op, arg, tuple(srcs))

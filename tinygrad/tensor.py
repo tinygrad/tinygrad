@@ -892,10 +892,9 @@ class Tensor:
   def sub(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor: return F.Sub.apply(*self._broadcasted(x, reverse))
   def mul(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor: return F.Mul.apply(*self._broadcasted(x, reverse))
   def div(self, x:Union[Tensor, ConstType], reverse=False, upcast=True) -> Tensor:
-    x = self._to_const_val(x)
-    if not isinstance(x, Tensor) and not reverse and x != 0 and upcast: return self.mul(1/x)
-    if (isinstance(x, Tensor) and dtypes.is_float(x.dtype)) or not upcast: return F.Div.apply(*self._broadcasted(x, reverse))
-    return F.Div.apply(*self.cast(least_upper_float(self.dtype))._broadcasted(x, reverse))
+    numerator, denominator = self._broadcasted(x, reverse)
+    if upcast: numerator, denominator = numerator.cast(least_upper_float(numerator.dtype)), denominator.cast(least_upper_float(denominator.dtype))
+    return F.Div.apply(numerator, denominator)
   def xor(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor: return F.Xor.apply(*self._broadcasted(x, reverse))
 
   def pow(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
