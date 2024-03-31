@@ -97,36 +97,35 @@ class CommandQueue:
       queue = self.q[si.outputs[0].device]
 
       if si.ast[0].op is LoadOps.COPY:
-        copy_device = si.outputs[0].device+"-copy"
+        # TODO: add back copy device
+        copy_device = si.outputs[0].device #+"-copy"
         add_wait_item(copy_device, add_sync_item(si.inputs[0].device))
         self.q[copy_device].append(CopyItem(si.outputs[0], si.inputs[0]))
-        add_wait_item(si.outputs[0].device, add_sync_item(copy_device))
+        #add_wait_item(si.outputs[0].device, add_sync_item(copy_device))
         continue
 
       assert si.ast[0].op not in LoadOps
       queue.append(si)
 
   def __call__(self):
-    print("OUTS:", self.outputs)
-    for k,v in self.q.items():
-      print("****", k)
-      for si in v:
-        print("  ", str(si)[:150])
+    #print("OUTS:", self.outputs)
+    #for k,v in self.q.items():
+    #  print("****", k)
+    #  for si in v:
+    #    print("  ", str(si)[:150])
 
-    print("**** run ****")
     # this should be callable if we discover a full lazy graph has the same hash
     active_queues = list(self.q.keys())
-    print(active_queues)
     waiting_queues: DefaultDict[SyncItem, List[str]] = defaultdict(list)
     seen_sids = set()
     while len(active_queues):
       device = active_queues.pop(0)
       if not len(self.q[device]): continue
       si = self.q[device].pop(0)
-      print(device, si, active_queues, seen_sids)
+      #print(device, si, active_queues, seen_sids)
       if isinstance(si, SyncItem):
-        #et = cpu_time_execution(Device[device].synchronize, enable=DEBUG>=2)
-        #update_stats(colored("synchronize", "RED"), 0, 0, {}, et, 1, device=device)
+        et = cpu_time_execution(Device[device].synchronize, enable=DEBUG>=2)
+        update_stats(colored("synchronize", "RED"), 0, 0, {}, et, 1, device=device)
         if si in waiting_queues:
           active_queues += waiting_queues[si]
           waiting_queues[si].clear()
@@ -135,7 +134,14 @@ class CommandQueue:
         if si.sync not in seen_sids:
           waiting_queues[si.sync].append(device)
           continue
-      else:
-        pass
+      elif isinstance(si, CopyItem):
+        si.output.allocate()
+        fxn = BufferXfer() if hasattr(Device[si.output.device].allocator, 'transfer') and \
+          si.output.device.split(":")[0] == si.input.device.split(":")[0] else BufferCopy()
+        fxn.exec([si.output, si.input])
+      elif isinstance(si, ScheduleItem):
+        for out in si.outputs: out.allocate()
+        runner = Device[si.outputs[0].device].get_runner(*si.ast)
+        runner.exec(si.outputs+si.inputs, si.var_vals)
+      else: raise RuntimeError(f"unknown type {si}")
       active_queues.append(device)
-    print("**** run ****")
