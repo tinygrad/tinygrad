@@ -287,6 +287,14 @@ class TestJit(unittest.TestCase):
     for i in range(5):
       np.testing.assert_equal(g(Tensor([i]*3), Tensor.ones(3), Tensor.zeros(3)).numpy(), np.array([i+1]*3))
 
+  def test_jit_assign(self):
+    a = Tensor.zeros(1)
+    assign = TinyJit(lambda t, v: t.assign(v))
+    for i in range(5):
+      assign(a, Tensor([i*1.]))
+      np.testing.assert_equal([i], a.numpy())
+    assert_jit_cache_len(assign, 1)
+
   @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL", "HSA"}, "no GPU CI")
   def test_jitted_transfers(self):
     d0, d1 = f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"
