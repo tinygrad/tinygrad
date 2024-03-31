@@ -888,23 +888,15 @@ class Tensor:
     return x.lazydata.base.arg if isinstance(x, Tensor) and isinstance(x.lazydata, LazyBuffer) and x.lazydata.is_unrealized_unpadded_const() \
       and not x.requires_grad and self._broadcasted(x)[0].shape == self.shape else x
 
-  def add(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
-    x = self._to_const_val(x)
-    return F.Add.apply(*self._broadcasted(x, reverse)) if isinstance(x, Tensor) or x else self
-  def sub(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
-    x = self._to_const_val(x)
-    return F.Sub.apply(*self._broadcasted(x, reverse)) if isinstance(x, Tensor) or x else (-self if reverse else self)
-  def mul(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
-    x = self._to_const_val(x)
-    if not isinstance(x, Tensor) and x == 0.0: return F.Zero.apply(self)
-    if not isinstance(x, Tensor) and x == -1.0: return -self
-    return F.Mul.apply(*self._broadcasted(x, reverse)) if isinstance(x, Tensor) or x != 1.0 else self
+  def add(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor: return F.Add.apply(*self._broadcasted(x, reverse))
+  def sub(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor: return F.Sub.apply(*self._broadcasted(x, reverse))
+  def mul(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor: return F.Mul.apply(*self._broadcasted(x, reverse))
   def div(self, x:Union[Tensor, ConstType], reverse=False, upcast=True) -> Tensor:
     x = self._to_const_val(x)
     if not isinstance(x, Tensor) and not reverse and x != 0 and upcast: return self.mul(1/x)
     if (isinstance(x, Tensor) and dtypes.is_float(x.dtype)) or not upcast: return F.Div.apply(*self._broadcasted(x, reverse))
     return F.Div.apply(*self.cast(least_upper_float(self.dtype))._broadcasted(x, reverse))
-  def xor(self, x:Tensor, reverse=False) -> Tensor: return F.Xor.apply(*self._broadcasted(x, reverse))
+  def xor(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor: return F.Xor.apply(*self._broadcasted(x, reverse))
 
   def pow(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     x = self._to_const_val(x)
