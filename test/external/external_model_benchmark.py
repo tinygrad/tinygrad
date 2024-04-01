@@ -106,8 +106,7 @@ def benchmark_model(m, devices, validate_outs=False):
     if any(t == np.dtype(np.float16) for t in input_types.values()): rtol, atol = 3e-3, 1e-3  # tolerance for fp16 models
     else: rtol, atol = 1e-5, 1e-5 # tolerance for fp32 models
 
-    provider = "CPUExecutionProvider"
-    ort_sess = ort.InferenceSession(str(fn), ort_options, [provider])
+    ort_sess = ort.InferenceSession(str(fn), ort_options, ["CPUExecutionProvider"])
     onnx_out = ort_sess.run(output_names, np_inputs)
     onnx_out = dict([*[(name,x) for name, x in zip(output_names, onnx_out)]])
 
@@ -118,7 +117,7 @@ def benchmark_model(m, devices, validate_outs=False):
       tinygrad_out = tinygrad_model(inputs)
 
       assert_allclose(tinygrad_out, onnx_out, rtol=rtol, atol=atol)
-      print(f"{m:16s}outputs validated with {device=} rtol={rtol:.1e}, atol={atol:.1e}")
+      print(f"{m:16s}outputs validated on {device=} with rtol={rtol:.1e}, atol={atol:.1e}")
 
   if open_csv is None:
     open_csv = csv.DictWriter(open('onnx_inference_speed.csv', 'w', newline=''), fieldnames=list(CSV.keys()))
