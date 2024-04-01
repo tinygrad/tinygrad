@@ -22,6 +22,7 @@ def compile_hip(prg:str, arch="gfx1100") -> bytes:
 
   check(comgr.amd_comgr_create_data_set(ctypes.byref(data_set_src := comgr.amd_comgr_data_set_t())))
   check(comgr.amd_comgr_create_data_set(ctypes.byref(data_set_bc := comgr.amd_comgr_data_set_t())))
+  check(comgr.amd_comgr_create_data_set(ctypes.byref(data_set_asm := comgr.amd_comgr_data_set_t())))
   check(comgr.amd_comgr_create_data_set(ctypes.byref(data_set_reloc := comgr.amd_comgr_data_set_t())))
   check(comgr.amd_comgr_create_data_set(ctypes.byref(data_set_exec := comgr.amd_comgr_data_set_t())))
 
@@ -37,7 +38,10 @@ def compile_hip(prg:str, arch="gfx1100") -> bytes:
     print(_get_comgr_data(data_set_bc, comgr.AMD_COMGR_DATA_KIND_LOG).decode())
     raise RuntimeError("compile failed")
   check(comgr.amd_comgr_action_info_set_options(action_info, b"-O3 -mllvm -amdgpu-internalize-symbols"))
-  check(comgr.amd_comgr_do_action(comgr.AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE, action_info, data_set_bc, data_set_reloc))
+  check(comgr.amd_comgr_do_action(comgr.AMD_COMGR_ACTION_CODEGEN_BC_TO_ASSEMBLY, action_info, data_set_bc, data_set_asm))
+  asm = _get_comgr_data(data_set_asm, comgr.AMD_COMGR_DATA_KIND_SOURCE)
+  print(asm.decode())
+  check(comgr.amd_comgr_do_action(comgr.AMD_COMGR_ACTION_ASSEMBLE_SOURCE_TO_RELOCATABLE, action_info, data_set_asm, data_set_reloc))
   check(comgr.amd_comgr_action_info_set_options(action_info, b""))
   check(comgr.amd_comgr_do_action(comgr.AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE, action_info, data_set_reloc, data_set_exec))
   ret = _get_comgr_data(data_set_exec, comgr.AMD_COMGR_DATA_KIND_EXECUTABLE)

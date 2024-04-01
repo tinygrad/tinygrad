@@ -43,7 +43,7 @@ nc = np.random.default_rng().standard_normal(size=(N,N), dtype=np.float32).astyp
 hipallocator.copyin(b, memoryview(bytearray(nb)))
 hipallocator.copyin(c, memoryview(bytearray(nc)))
 
-prog_str = f"""
+prog_start = f"""
 #define F32
 typedef long unsigned int size_t;
 #define half _Float16
@@ -60,11 +60,15 @@ extern "C" __attribute__((global))void __attribute__((amdgpu_flat_work_group_siz
   const int gy = __ockl_get_group_id(1) + __ockl_get_local_id(3);
 
   const int lIdx = __ockl_get_local_id(0);
+  const int lhigh = lIdx >> 4;
   const int lane = lIdx%16;
 
   c += gx*{KX*16}*{N} + gy*{KY*16} + (lIdx/16)*{N} + lane;
   a += gx*{KX*16}*{N};
   b += gy*{KY*16};
+  
+  __attribute__((shared)) half a_buf[2][16][{KX} * 16 + 2];
+  __attribute__((shared)) half b_buf[2][16][{KY} * 16];
 
   half16 a_frag[{KX}];
   half16 b_frag[{KY}];
@@ -74,21 +78,39 @@ extern "C" __attribute__((global))void __attribute__((amdgpu_flat_work_group_siz
     half16 c_frag[{KY}][{KX}] = {{}};
   #endif
 
-  for (int k = 0; k < {N}; k += 16) {{
+"""
+prog_barrier = f"""
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
     __builtin_amdgcn_s_barrier();
     __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
+"""
 
+prog_gds_to_lds = f"""
+    for (int t = 0; t < 16; ++t) {{
+      for (int x = 0; x < {KX}; x+=2) {{
+        a_buf[PHASE][t][x*16+lIdx] = a[(k+lane) + (x+lhigh)*16*{N} + {N}*t];
+      }}
+    }}
+    for (int ele = 0; ele < 16; ++ele) {{
+      for (int y = 0; y < {KY}; y+=2) {{
+        b_buf[PHASE][ele][y*16+lIdx] = b[lIdx + y * 16 + (k + ele) * {N}];
+      }}
+    }}
+    k += 16;
+"""
+prog_lds_to_vgpr = f"""
     for (int ele = 0; ele < 16; ++ele) {{
       for (int x = 0; x < {KX}; x++) {{
-        a_frag[x][ele] = a[(k+ele) + x*{16*N} + {N}*lane];
+        a_frag[x][ele] = a_buf[PHASE][lane][x * 16 + ele];
       }}
     }}
     for (int ele = 0; ele < 16; ++ele) {{
       for (int y = 0; y < {KY}; y++) {{
-        b_frag[y][ele] = b[(k+ele)*{N} + y*16 + lane];
+        b_frag[y][ele] = b_buf[PHASE][ele][y * 16 + lane]; 
       }}
     }}
+"""
+prog_wmma = f"""
     for (int y = 0; y < {KY}; y++) {{
       for (int x = 0; x < {KX}; x++) {{
         #ifdef F32
@@ -98,8 +120,8 @@ extern "C" __attribute__((global))void __attribute__((amdgpu_flat_work_group_siz
         #endif
       }}
     }}
-  }}
-
+"""
+prog_end = f"""
   for (int ele = 0; ele < 8; ++ele) {{
     for (int y = 0; y < {KY}; y++) {{
       for (int x = 0; x < {KX}; x++) {{
@@ -112,6 +134,27 @@ extern "C" __attribute__((global))void __attribute__((amdgpu_flat_work_group_siz
     }}
   }}
 }}"""
+
+prog_str = f"""
+{prog_start}
+  int k = 0;
+  {prog_gds_to_lds.replace("PHASE", "1")}
+  while (k < {N}-16) {{
+    {prog_barrier}
+    {prog_gds_to_lds.replace("PHASE", "0")}
+    {prog_lds_to_vgpr.replace("PHASE", "1")}
+    {prog_wmma}
+    {prog_gds_to_lds.replace("PHASE", "1")}
+    {prog_lds_to_vgpr.replace("PHASE", "0")}
+    {prog_wmma}
+  }}
+  {prog_gds_to_lds.replace("PHASE", "0")}
+  {prog_lds_to_vgpr.replace("PHASE", "1")}
+  {prog_wmma}
+  {prog_lds_to_vgpr.replace("PHASE", "0")}
+  {prog_wmma}
+{prog_end}
+"""
 
 if DEBUG > 1: print(prog_str)
 lib = device.compiler.compile(prog_str)
