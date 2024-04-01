@@ -100,7 +100,7 @@ class KFDProgram:
     for _, sh_type, sh_flags, sh_addr, sh_offset, sh_size, _, _, _ in sections:
       if sh_type == SHT_PROGBITS and sh_flags & SHF_ALLOC: lib_gpu_view[sh_addr:sh_addr+sh_size] = self.lib[sh_offset:sh_offset+sh_size]
 
-    self.device._submit_cache_inv()
+    self.device._submit_cache_inv(self.lib_gpu.va_addr, lib_gpu_size)
 
     entry_point = min(sh[3] for sh in sections if sh[1] == SHT_PROGBITS and sh[2] & SHF_ALLOC)
     self.handle = self.lib_gpu.va_addr + entry_point
