@@ -104,14 +104,12 @@ class TestMultiConstFolding(unittest.TestCase):
     np.testing.assert_equal((t * 0).numpy(), [0] * 16)
     np.testing.assert_equal((t * 1).numpy(), np.arange(16))
 
-  @unittest.expectedFailure
   def test_multi_const_folding_tensor(self):
     ds = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
     t = Tensor.arange(16).float().realize().to(ds)
     zero = Tensor.zeros(16).realize().to(ds)
     one = Tensor.ones(16).realize().to(ds)
 
-    # TODO: fix const to multi and const folding multi
     # const folded
     _check_ast_count(0, t + zero)
     _check_ast_count(0, zero + t)
@@ -132,3 +130,6 @@ class TestMultiConstFolding(unittest.TestCase):
     _check_ast_count(0, t ** 0)
     _check_ast_count(0, t ** 1)
     _check_ast_count(0, 1 ** t)
+
+if __name__ == '__main__':
+  unittest.main()
