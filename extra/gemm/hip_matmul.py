@@ -151,17 +151,17 @@ prog_str = f"""
   {prog_gds_to_lds.replace("PHASE", "1")}
   while (k < {N}-16) {{
     {prog_barrier}
-    {prog_gds_to_lds.replace("PHASE", "0")}
     {prog_lds_to_vgpr.replace("PHASE", "1")}
+    {prog_gds_to_lds.replace("PHASE", "0")}
     {prog_wmma}
     {prog_barrier}
-    {prog_gds_to_lds.replace("PHASE", "1")}
     {prog_lds_to_vgpr.replace("PHASE", "0")}
+    {prog_gds_to_lds.replace("PHASE", "1")}
     {prog_wmma}
   }}
   {prog_barrier}
-  {prog_gds_to_lds.replace("PHASE", "0")}
   {prog_lds_to_vgpr.replace("PHASE", "1")}
+  {prog_gds_to_lds.replace("PHASE", "0")}
   {prog_wmma}
   {prog_barrier}
   {prog_lds_to_vgpr.replace("PHASE", "0")}
