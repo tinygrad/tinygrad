@@ -7,7 +7,7 @@ from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.runtime.driver.hip_comgr import compile_hip
 import tinygrad.runtime.autogen.kfd as kfd
 import tinygrad.runtime.autogen.hsa as hsa
-import tinygrad.runtime.autogen.amd_sdma as amd_sdma
+import tinygrad.runtime.autogen.amd_gpu as amd_gpu
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401
 
 libc = ctypes.CDLL("libc.so.6")
@@ -15,25 +15,6 @@ libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_i
 libc.mmap.restype = ctypes.c_void_p
 libc.munmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
 libc.munmap.restype = ctypes.c_int
-
-PM4_HDR_IT_OPCODE_INDIRECT_BUFFER = 0x3f
-PM4_INDIRECT_BUFFER_VALID = 1 << 23
-
-PM4_HDR_IT_OPCODE_ACQUIRE_MEM = 0x58
-PM4_ACQUIRE_MEM_GCR_CNTL_GLI_INV = 1 << 0
-PM4_ACQUIRE_MEM_GCR_CNTL_GLK_INV = 1 << 7
-PM4_ACQUIRE_MEM_GCR_CNTL_GLV_INV = 1 << 8
-PM4_ACQUIRE_MEM_GCR_CNTL_GL1_INV = 1 << 9
-PM4_ACQUIRE_MEM_GCR_CNTL_GL2_INV = 1 << 14
-
-def pm4_header(op, cmd_size): return 3 << 30 | ((cmd_size - 2) & 0x3FFF) << 16 | (((op) & 0xFF) << 8)
-def pm4_build_indirect_command(ib_addr, ib_sz):
-  return [pm4_header(PM4_HDR_IT_OPCODE_INDIRECT_BUFFER, 4), ib_addr & 0xffffffff, (ib_addr>>32) & 0xffffffff, (ib_sz//4) | PM4_INDIRECT_BUFFER_VALID]
-def pm4_build_cache_inv_command(addr=0, sz=0xffffffffff):
-  return [pm4_header(PM4_HDR_IT_OPCODE_ACQUIRE_MEM, 8), 0,
-          sz & 0xffffffff, (sz >> 32) & 0xffffffff, addr & 0xffffffff, (addr >> 32) & 0xffffffff, 0,
-          PM4_ACQUIRE_MEM_GCR_CNTL_GLI_INV | PM4_ACQUIRE_MEM_GCR_CNTL_GLK_INV | PM4_ACQUIRE_MEM_GCR_CNTL_GLV_INV | \
-      PM4_ACQUIRE_MEM_GCR_CNTL_GL1_INV | PM4_ACQUIRE_MEM_GCR_CNTL_GL2_INV ]
 
 def node_sysfs_path(node_id, file): return f"/sys/devices/virtual/kfd/kfd/topology/nodes/{node_id}/{file}"
 
@@ -61,7 +42,7 @@ kio = ioctls_from_header()
 def create_sdma_packets():
   # TODO: clean up this, if we want to keep it
   structs = {}
-  for name,pkt in [(name,s) for name,s in amd_sdma.__dict__.items() if name.startswith("struct_SDMA_PKT_") and name.endswith("_TAG")]:
+  for name,pkt in [(name,s) for name,s in amd_gpu.__dict__.items() if name.startswith("struct_SDMA_PKT_") and name.endswith("_TAG")]:
     names = set()
     fields = []
     for pkt_fields in pkt._fields_:
@@ -92,6 +73,8 @@ class KFDCompiler(Compiler):
 
 AQL_PACKET_SIZE = ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t)
 SDMA_MAX_COPY_SIZE = 0x400000
+
+VENDOR_HEADER = hsa.HSA_PACKET_TYPE_VENDOR_SPECIFIC << hsa.HSA_PACKET_HEADER_TYPE
 
 DISPATCH_KERNEL_SETUP = 3 << hsa.HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS
 DISPATCH_KERNEL_HEADER  = 1 << hsa.HSA_PACKET_HEADER_BARRIER
@@ -174,8 +157,12 @@ class KFDAllocator(LRUAllocator):
     super().__init__()
 
   def _alloc(self, size:int, options:BufferOptions):
-    if options.host: return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, public=True)
-    else: return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=True)
+    try:
+      if options.host: return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, public=True)
+      else: return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=True)
+    except OSError as e:
+      if e.errno == errno.ENOMEM: raise MemoryError("Cannot allocate memory") from e
+      else: raise
 
   def _free(self, gpumem, options:BufferOptions):
     self.device._gpu_free(gpumem)
@@ -196,9 +183,6 @@ class KFDAllocator(LRUAllocator):
     evt_arr = (kfd.struct_kfd_event_data * 1)()
     evt_arr[0].event_id = self.device.completion_signal.event_id
     kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=1000)
-
-class amd_aql_pm4_packet_t(ctypes.Structure):
-  _fields_ = [('header', ctypes.c_uint16), ('format', ctypes.c_uint16), ('pm4_cmds', ctypes.c_uint32*13), ('completion_signal', hsa.hsa_signal_t)]
 
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
 class KFDDevice(Compiled):
@@ -312,11 +296,17 @@ class KFDDevice(Compiled):
 
     # prebuilt packets
     self.sdma_flush_hdp_pkt = sdma_pkts.hdp_flush(0x8, 0x0, 0x80000000, 0x0, 0x0, 0x0)
-    self.sdma_cache_inv = sdma_pkts.gcr(op=amd_sdma.SDMA_OP_GCR, sub_op=amd_sdma.SDMA_SUBOP_USER_GCR, GCR_CONTROL_GL2_WB=1, GCR_CONTROL_GLK_WB=1,
+    self.sdma_cache_inv = sdma_pkts.gcr(op=amd_gpu.SDMA_OP_GCR, sub_op=amd_gpu.SDMA_SUBOP_USER_GCR, GCR_CONTROL_GL2_WB=1, GCR_CONTROL_GLK_WB=1,
                                         GCR_CONTROL_GL2_INV=1, GCR_CONTROL_GL1_INV=1, GCR_CONTROL_GLV_INV=1, GCR_CONTROL_GLK_INV=1,
                                         GCR_CONTROL_GL2_RANGE=0)
-    self.sdma_cache_wb = sdma_pkts.gcr(op=amd_sdma.SDMA_OP_GCR, sub_op=amd_sdma.SDMA_SUBOP_USER_GCR, GCR_CONTROL_GL2_WB=1, GCR_CONTROL_GLK_WB=1,
+    self.sdma_cache_wb = sdma_pkts.gcr(op=amd_gpu.SDMA_OP_GCR, sub_op=amd_gpu.SDMA_SUBOP_USER_GCR, GCR_CONTROL_GL2_WB=1, GCR_CONTROL_GLK_WB=1,
                                         GCR_CONTROL_GL2_RANGE=0)
+
+    pm4_indirect_cmd = (ctypes.c_uint32*13)(amd_gpu.PACKET3(amd_gpu.PACKET3_INDIRECT_BUFFER, 2), self.pm4_indirect_buf.va_addr & 0xffffffff,
+                                            (self.pm4_indirect_buf.va_addr>>32) & 0xffffffff, 8 | amd_gpu.INDIRECT_BUFFER_VALID, 0xa)
+    ctypes.memmove(ctypes.addressof(pm4_cmds:=(ctypes.c_uint16*27)(1))+2, ctypes.addressof(pm4_indirect_cmd), ctypes.sizeof(pm4_indirect_cmd))
+    self.pm4_packet = hsa.hsa_ext_amd_aql_pm4_packet_t(header=VENDOR_HEADER, pm4_command=pm4_cmds,
+                                                       completion_signal=hsa.hsa_signal_t(ctypes.addressof(self.completion_signal)))
 
     # Helpers
     map_uptr2gpu_struct_t = init_c_struct_t(tuple(kfd.struct_kfd_ioctl_svm_args._fields_[:-1]+[('attrs', kfd.struct_kfd_ioctl_svm_attribute*2)])) # type: ignore
@@ -325,9 +315,6 @@ class KFDDevice(Compiled):
     self.map_uptr2gpu_struct.attrs[0].value = kfd.KFD_IOCTL_SVM_FLAG_COHERENT
     self.map_uptr2gpu_struct.attrs[1].type = kfd.KFD_IOCTL_SVM_ATTR_ACCESS_IN_PLACE
     self.map_uptr2gpu_struct.attrs[1].value = self.gpu_id
-
-    self.pm4_inv_buffer = to_mv(self.pm4_indirect_buf.va_addr, 0x1000).cast("I")
-    for i, value in enumerate(pm4_build_cache_inv_command()): self.pm4_inv_buffer[i] = value
 
     super().__init__(device, KFDAllocator(self), KFDCompiler(self.arch), functools.partial(KFDProgram, self))
 
@@ -343,11 +330,11 @@ class KFDDevice(Compiled):
       # NOTE: we check only low 32 bits to be zeroed, we don't use higher values for signals
       for sig in wait_signals:
         poll_addr = ctypes.addressof(sig) + getattr(hsa.amd_signal_t, 'value').offset
-        blit_sdma_command(sdma_pkts.poll_regmem(op=amd_sdma.SDMA_OP_POLL_REGMEM, mem_poll=1, func=0x3, addr=poll_addr,
+        blit_sdma_command(sdma_pkts.poll_regmem(op=amd_gpu.SDMA_OP_POLL_REGMEM, mem_poll=1, func=0x3, addr=poll_addr,
                           value=0, mask=0xffffffff, interval=0x04, retry_count=0xfff))
 
     if completion_signal is not None:
-      blit_sdma_command(sdma_pkts.timestamp(op=amd_sdma.SDMA_OP_TIMESTAMP, sub_op=amd_sdma.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL,
+      blit_sdma_command(sdma_pkts.timestamp(op=amd_gpu.SDMA_OP_TIMESTAMP, sub_op=amd_gpu.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL,
                                             addr=ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'start_ts').offset))
     blit_sdma_command(self.sdma_flush_hdp_pkt)
     blit_sdma_command(self.sdma_cache_inv)
@@ -356,36 +343,36 @@ class KFDDevice(Compiled):
     copies_commands = (copy_size + SDMA_MAX_COPY_SIZE - 1) // SDMA_MAX_COPY_SIZE
     for _ in range(copies_commands):
       step_copy_size = min(copy_size - copied, SDMA_MAX_COPY_SIZE)
-      blit_sdma_command(sdma_pkts.copy_linear(op=amd_sdma.SDMA_OP_COPY, sub_op=amd_sdma.SDMA_SUBOP_COPY_LINEAR,
+      blit_sdma_command(sdma_pkts.copy_linear(op=amd_gpu.SDMA_OP_COPY, sub_op=amd_gpu.SDMA_SUBOP_COPY_LINEAR,
                                               count=step_copy_size-1, src_addr=src+copied, dst_addr=dest+copied))
       copied += step_copy_size
 
     blit_sdma_command(self.sdma_cache_wb)
     if completion_signal is not None:
-      blit_sdma_command(sdma_pkts.timestamp(op=amd_sdma.SDMA_OP_TIMESTAMP, sub_op=amd_sdma.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL,
+      blit_sdma_command(sdma_pkts.timestamp(op=amd_gpu.SDMA_OP_TIMESTAMP, sub_op=amd_gpu.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL,
                                             addr=ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'end_ts').offset))
 
     if completion_signal is not None:
       signal_addr = ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'value').offset
-      blit_sdma_command(sdma_pkts.atomic(op=amd_sdma.SDMA_OP_ATOMIC, operation=amd_sdma.SDMA_ATOMIC_ADD64, addr=signal_addr, src_data=(1<<64)-1))
+      blit_sdma_command(sdma_pkts.atomic(op=amd_gpu.SDMA_OP_ATOMIC, operation=amd_gpu.SDMA_ATOMIC_ADD64, addr=signal_addr, src_data=(1<<64)-1))
       if completion_signal.event_mailbox_ptr != 0:
-        blit_sdma_command(sdma_pkts.fence(op=amd_sdma.SDMA_OP_FENCE, mtype=3, addr=completion_signal.event_mailbox_ptr,
+        blit_sdma_command(sdma_pkts.fence(op=amd_gpu.SDMA_OP_FENCE, mtype=3, addr=completion_signal.event_mailbox_ptr,
                           data=completion_signal.event_id))
-        blit_sdma_command(sdma_pkts.trap(op=amd_sdma.SDMA_OP_TRAP, int_ctx=completion_signal.event_id))
+        blit_sdma_command(sdma_pkts.trap(op=amd_gpu.SDMA_OP_TRAP, int_ctx=completion_signal.event_id))
 
     self.sdma_write_pointer[0] = self.sdma_doorbell_value
     self.sdma_doorbell[0] = self.sdma_doorbell_value
 
-  def _submit_cache_inv(self):
-    indirect_exec_cmd = pm4_build_indirect_command(self.pm4_indirect_buf.va_addr, 8 * 4)
-
-    ctypes.memset(self.aql_ring.va_addr + (self.aql_doorbell_value*AQL_PACKET_SIZE) % self.aql_ring.size, 0, 64)
-    packet = amd_aql_pm4_packet_t.from_address(self.aql_ring.va_addr + (self.aql_doorbell_value*AQL_PACKET_SIZE) % self.aql_ring.size)
-    packet.format = 0x1 # AMD_AQL_FORMAT_PM4_IB
-    for i, value in enumerate(indirect_exec_cmd): packet.pm4_cmds[i] = value
-    packet.pm4_cmds[len(indirect_exec_cmd)] = 14 - len(indirect_exec_cmd) # remain dwords count
-    packet.completion_signal = hsa.hsa_signal_t(ctypes.addressof(self.completion_signal))
-    packet.header = hsa.HSA_PACKET_TYPE_VENDOR_SPECIFIC << hsa.HSA_PACKET_HEADER_TYPE
+  def _submit_cache_inv(self, addr=0x0, sz=(1 << 64)-1):
+    pm4_buffer_view = to_mv(self.pm4_indirect_buf.va_addr, 0x1000).cast("I")
+    pm4_cmd = [amd_gpu.PACKET3(amd_gpu.PACKET3_ACQUIRE_MEM, 6), 0,
+               sz & 0xffffffff, (sz >> 32) & 0xffffffff, addr & 0xffffffff, (addr >> 32) & 0xffffffff, 0,
+               amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLI_INV(2) | amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLK_INV(2) | \
+               amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLV_INV(2) | amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL1_INV(2) | \
+               amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL2_INV(2) ]
+    for i, value in enumerate(pm4_cmd): pm4_buffer_view[i] = value
+    ctypes.memmove(self.aql_ring.va_addr + (self.aql_doorbell_value * AQL_PACKET_SIZE) % self.aql_ring.size,
+                   ctypes.addressof(self.pm4_packet), AQL_PACKET_SIZE)
 
     self.amd_aql_queue.write_dispatch_id = self.aql_doorbell_value + 1
     self.aql_doorbell[0] = self.aql_doorbell_value

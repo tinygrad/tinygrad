@@ -113,7 +113,7 @@ class LRUAllocator(Allocator):  # pylint: disable=abstract-method
   def alloc(self, size:int, options:Optional[BufferOptions]=None):
     if len(c := self.cache[(size, options)]): return c.pop()
     try: return super().alloc(size, options)
-    except (RuntimeError, MemoryError, OSError):
+    except (RuntimeError, MemoryError):
       self.free_cache()
       return super().alloc(size, options)
   def free_cache(self):
