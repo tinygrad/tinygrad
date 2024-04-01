@@ -79,16 +79,21 @@ generate_hsa() {
     /opt/rocm/include/hsa/amd_hsa_signal.h \
     /opt/rocm/include/hsa/amd_hsa_queue.h \
     /opt/rocm/include/hsa/hsa_ext_finalize.h /opt/rocm/include/hsa/hsa_ext_image.h \
+    /opt/rocm/include/hsa/hsa_ven_amd_aqlprofile.h \
     --clang-args="-I/opt/rocm/include" \
     -o $BASE/hsa.py -l /opt/rocm/lib/libhsa-runtime64.so
 
   # clang2py broken when pass -x c++ to prev headers
   clang2py extra/hip_gpu_driver/sdma_registers.h \
     --clang-args="-I/opt/rocm/include -x c++" \
-    -o $BASE/amd_sdma.py -l /opt/rocm/lib/libhsa-runtime64.so
+    -o $BASE/amd_gpu.py -l /opt/rocm/lib/libhsa-runtime64.so
+
+  sed 's/^\(.*\)\(\s*\/\*\)\(.*\)$/\1 #\2\3/; s/^\(\s*\*\)\(.*\)$/#\1\2/' extra/hip_gpu_driver/nvd.h >> $BASE/amd_gpu.py # comments
+  sed -i 's/#\s*define\s*\([^ \t]*\)(\([^)]*\))\s*\(.*\)/def \1(\2): return \3/' $BASE/amd_gpu.py # #define name(x) (smth) -> def name(x): return (smth)
+  sed -i '/#\s*define\s\+\([^ \t]\+\)\s\+\([^ ]\+\)/s//\1 = \2/' $BASE/amd_gpu.py # #define name val -> name = val
 
   fixup $BASE/hsa.py
-  fixup $BASE/amd_sdma.py
+  fixup $BASE/amd_gpu.py
   sed -i "s\import ctypes\import ctypes, os\g" $BASE/hsa.py
   sed -i "s\'/opt/rocm/\os.getenv('ROCM_PATH', '/opt/rocm/')+'/\g" $BASE/hsa.py
   python3 -c "import tinygrad.runtime.autogen.hsa"

@@ -146,6 +146,16 @@ if ctypes.sizeof(ctypes.c_longdouble) == 16:
 else:
     c_long_double_t = ctypes.c_ubyte*16
 
+class FunctionFactoryStub:
+    def __getattr__(self, _):
+      return ctypes.CFUNCTYPE(lambda y:y)
+
+# libraries['FIXME_STUB'] explanation
+# As you did not list (-l libraryname.so) a library that exports this function
+# This is a non-working stub instead.
+# You can either re-run clan2py with -l /path/to/library.so
+# Or manually fix this by comment the ctypes.CDLL loading
+_libraries['FIXME_STUB'] = FunctionFactoryStub() #  ctypes.CDLL('FIXME_STUB')
 
 
 
@@ -3834,6 +3844,327 @@ struct_hsa_ext_finalizer_1_00_pfn_s._fields_ = [
 ]
 
 hsa_ext_finalizer_1_00_pfn_t = struct_hsa_ext_finalizer_1_00_pfn_s
+try:
+    hsa_ven_amd_aqlprofile_version_major = _libraries['FIXME_STUB'].hsa_ven_amd_aqlprofile_version_major
+    hsa_ven_amd_aqlprofile_version_major.restype = uint32_t
+    hsa_ven_amd_aqlprofile_version_major.argtypes = []
+except AttributeError:
+    pass
+try:
+    hsa_ven_amd_aqlprofile_version_minor = _libraries['FIXME_STUB'].hsa_ven_amd_aqlprofile_version_minor
+    hsa_ven_amd_aqlprofile_version_minor.restype = uint32_t
+    hsa_ven_amd_aqlprofile_version_minor.argtypes = []
+except AttributeError:
+    pass
+
+# values for enumeration 'c__EA_hsa_ven_amd_aqlprofile_event_type_t'
+c__EA_hsa_ven_amd_aqlprofile_event_type_t__enumvalues = {
+    0: 'HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_PMC',
+    1: 'HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_TRACE',
+}
+HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_PMC = 0
+HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_TRACE = 1
+c__EA_hsa_ven_amd_aqlprofile_event_type_t = ctypes.c_uint32 # enum
+hsa_ven_amd_aqlprofile_event_type_t = c__EA_hsa_ven_amd_aqlprofile_event_type_t
+hsa_ven_amd_aqlprofile_event_type_t__enumvalues = c__EA_hsa_ven_amd_aqlprofile_event_type_t__enumvalues
+
+# values for enumeration 'c__EA_hsa_ven_amd_aqlprofile_block_name_t'
+c__EA_hsa_ven_amd_aqlprofile_block_name_t__enumvalues = {
+    0: 'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPC',
+    1: 'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPF',
+    2: 'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GDS',
+    3: 'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GRBM',
+    4: 'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GRBMSE',
+    5: 'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SPI',
+    6: 'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ',
+    7: 'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQCS',
+    8: 'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SRBM',
+    9: 'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SX',
+    10: 'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TA',
+    11: 'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCA',
+    12: 'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCC',
+    13: 'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCP',
+    14: 'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TD',
+    15: 'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCARB',
+    16: 'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCHUB',
+    17: 'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCMCBVM',
+    18: 'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCSEQ',
+    19: 'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2',
+    20: 'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCXBAR',
+    21: 'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_ATC',
+    22: 'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_ATCL2',
+    23: 'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GCEA',
+    24: 'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_RPB',
+    25: 'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SDMA',
+    26: 'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GL1A',
+    27: 'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GL1C',
+    28: 'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GL2A',
+    29: 'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GL2C',
+    30: 'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GCR',
+    31: 'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GUS',
+    32: 'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_UMC',
+    33: 'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MMEA',
+    34: 'HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER',
+}
+HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPC = 0
+HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPF = 1
+HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GDS = 2
+HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GRBM = 3
+HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GRBMSE = 4
+HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SPI = 5
+HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ = 6
+HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQCS = 7
+HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SRBM = 8
+HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SX = 9
+HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TA = 10
+HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCA = 11
+HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCC = 12
+HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCP = 13
+HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TD = 14
+HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCARB = 15
+HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCHUB = 16
+HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCMCBVM = 17
+HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCSEQ = 18
+HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2 = 19
+HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCXBAR = 20
+HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_ATC = 21
+HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_ATCL2 = 22
+HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GCEA = 23
+HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_RPB = 24
+HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SDMA = 25
+HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GL1A = 26
+HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GL1C = 27
+HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GL2A = 28
+HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GL2C = 29
+HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GCR = 30
+HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GUS = 31
+HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_UMC = 32
+HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MMEA = 33
+HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER = 34
+c__EA_hsa_ven_amd_aqlprofile_block_name_t = ctypes.c_uint32 # enum
+hsa_ven_amd_aqlprofile_block_name_t = c__EA_hsa_ven_amd_aqlprofile_block_name_t
+hsa_ven_amd_aqlprofile_block_name_t__enumvalues = c__EA_hsa_ven_amd_aqlprofile_block_name_t__enumvalues
+class struct_c__SA_hsa_ven_amd_aqlprofile_event_t(Structure):
+    pass
+
+struct_c__SA_hsa_ven_amd_aqlprofile_event_t._pack_ = 1 # source:False
+struct_c__SA_hsa_ven_amd_aqlprofile_event_t._fields_ = [
+    ('block_name', hsa_ven_amd_aqlprofile_block_name_t),
+    ('block_index', ctypes.c_uint32),
+    ('counter_id', ctypes.c_uint32),
+]
+
+hsa_ven_amd_aqlprofile_event_t = struct_c__SA_hsa_ven_amd_aqlprofile_event_t
+try:
+    hsa_ven_amd_aqlprofile_validate_event = _libraries['FIXME_STUB'].hsa_ven_amd_aqlprofile_validate_event
+    hsa_ven_amd_aqlprofile_validate_event.restype = hsa_status_t
+    hsa_ven_amd_aqlprofile_validate_event.argtypes = [hsa_agent_t, ctypes.POINTER(struct_c__SA_hsa_ven_amd_aqlprofile_event_t), ctypes.POINTER(ctypes.c_bool)]
+except AttributeError:
+    pass
+
+# values for enumeration 'c__EA_hsa_ven_amd_aqlprofile_parameter_name_t'
+c__EA_hsa_ven_amd_aqlprofile_parameter_name_t__enumvalues = {
+    0: 'HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_COMPUTE_UNIT_TARGET',
+    1: 'HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_VM_ID_MASK',
+    2: 'HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_MASK',
+    3: 'HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK',
+    4: 'HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK2',
+    5: 'HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SE_MASK',
+    6: 'HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SAMPLE_RATE',
+    7: 'HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_K_CONCURRENT',
+}
+HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_COMPUTE_UNIT_TARGET = 0
+HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_VM_ID_MASK = 1
+HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_MASK = 2
+HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK = 3
+HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK2 = 4
+HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SE_MASK = 5
+HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SAMPLE_RATE = 6
+HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_K_CONCURRENT = 7
+c__EA_hsa_ven_amd_aqlprofile_parameter_name_t = ctypes.c_uint32 # enum
+hsa_ven_amd_aqlprofile_parameter_name_t = c__EA_hsa_ven_amd_aqlprofile_parameter_name_t
+hsa_ven_amd_aqlprofile_parameter_name_t__enumvalues = c__EA_hsa_ven_amd_aqlprofile_parameter_name_t__enumvalues
+class struct_c__SA_hsa_ven_amd_aqlprofile_parameter_t(Structure):
+    pass
+
+struct_c__SA_hsa_ven_amd_aqlprofile_parameter_t._pack_ = 1 # source:False
+struct_c__SA_hsa_ven_amd_aqlprofile_parameter_t._fields_ = [
+    ('parameter_name', hsa_ven_amd_aqlprofile_parameter_name_t),
+    ('value', ctypes.c_uint32),
+]
+
+hsa_ven_amd_aqlprofile_parameter_t = struct_c__SA_hsa_ven_amd_aqlprofile_parameter_t
+class struct_c__SA_hsa_ven_amd_aqlprofile_descriptor_t(Structure):
+    pass
+
+struct_c__SA_hsa_ven_amd_aqlprofile_descriptor_t._pack_ = 1 # source:False
+struct_c__SA_hsa_ven_amd_aqlprofile_descriptor_t._fields_ = [
+    ('ptr', ctypes.POINTER(None)),
+    ('size', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+]
+
+hsa_ven_amd_aqlprofile_descriptor_t = struct_c__SA_hsa_ven_amd_aqlprofile_descriptor_t
+class struct_c__SA_hsa_ven_amd_aqlprofile_profile_t(Structure):
+    pass
+
+struct_c__SA_hsa_ven_amd_aqlprofile_profile_t._pack_ = 1 # source:False
+struct_c__SA_hsa_ven_amd_aqlprofile_profile_t._fields_ = [
+    ('agent', hsa_agent_t),
+    ('type', hsa_ven_amd_aqlprofile_event_type_t),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('events', ctypes.POINTER(struct_c__SA_hsa_ven_amd_aqlprofile_event_t)),
+    ('event_count', ctypes.c_uint32),
+    ('PADDING_1', ctypes.c_ubyte * 4),
+    ('parameters', ctypes.POINTER(struct_c__SA_hsa_ven_amd_aqlprofile_parameter_t)),
+    ('parameter_count', ctypes.c_uint32),
+    ('PADDING_2', ctypes.c_ubyte * 4),
+    ('output_buffer', hsa_ven_amd_aqlprofile_descriptor_t),
+    ('command_buffer', hsa_ven_amd_aqlprofile_descriptor_t),
+]
+
+hsa_ven_amd_aqlprofile_profile_t = struct_c__SA_hsa_ven_amd_aqlprofile_profile_t
+class struct_c__SA_hsa_ext_amd_aql_pm4_packet_t(Structure):
+    pass
+
+struct_c__SA_hsa_ext_amd_aql_pm4_packet_t._pack_ = 1 # source:False
+struct_c__SA_hsa_ext_amd_aql_pm4_packet_t._fields_ = [
+    ('header', ctypes.c_uint16),
+    ('pm4_command', ctypes.c_uint16 * 27),
+    ('completion_signal', hsa_signal_t),
+]
+
+hsa_ext_amd_aql_pm4_packet_t = struct_c__SA_hsa_ext_amd_aql_pm4_packet_t
+try:
+    hsa_ven_amd_aqlprofile_start = _libraries['FIXME_STUB'].hsa_ven_amd_aqlprofile_start
+    hsa_ven_amd_aqlprofile_start.restype = hsa_status_t
+    hsa_ven_amd_aqlprofile_start.argtypes = [ctypes.POINTER(struct_c__SA_hsa_ven_amd_aqlprofile_profile_t), ctypes.POINTER(struct_c__SA_hsa_ext_amd_aql_pm4_packet_t)]
+except AttributeError:
+    pass
+try:
+    hsa_ven_amd_aqlprofile_stop = _libraries['FIXME_STUB'].hsa_ven_amd_aqlprofile_stop
+    hsa_ven_amd_aqlprofile_stop.restype = hsa_status_t
+    hsa_ven_amd_aqlprofile_stop.argtypes = [ctypes.POINTER(struct_c__SA_hsa_ven_amd_aqlprofile_profile_t), ctypes.POINTER(struct_c__SA_hsa_ext_amd_aql_pm4_packet_t)]
+except AttributeError:
+    pass
+try:
+    hsa_ven_amd_aqlprofile_read = _libraries['FIXME_STUB'].hsa_ven_amd_aqlprofile_read
+    hsa_ven_amd_aqlprofile_read.restype = hsa_status_t
+    hsa_ven_amd_aqlprofile_read.argtypes = [ctypes.POINTER(struct_c__SA_hsa_ven_amd_aqlprofile_profile_t), ctypes.POINTER(struct_c__SA_hsa_ext_amd_aql_pm4_packet_t)]
+except AttributeError:
+    pass
+HSA_VEN_AMD_AQLPROFILE_LEGACY_PM4_PACKET_SIZE = 192 # Variable ctypes.c_uint32
+try:
+    hsa_ven_amd_aqlprofile_legacy_get_pm4 = _libraries['FIXME_STUB'].hsa_ven_amd_aqlprofile_legacy_get_pm4
+    hsa_ven_amd_aqlprofile_legacy_get_pm4.restype = hsa_status_t
+    hsa_ven_amd_aqlprofile_legacy_get_pm4.argtypes = [ctypes.POINTER(struct_c__SA_hsa_ext_amd_aql_pm4_packet_t), ctypes.POINTER(None)]
+except AttributeError:
+    pass
+class struct_c__SA_hsa_ven_amd_aqlprofile_info_data_t(Structure):
+    pass
+
+class union_c__SA_hsa_ven_amd_aqlprofile_info_data_t_0(Union):
+    pass
+
+class struct_c__SA_hsa_ven_amd_aqlprofile_info_data_t_0_pmc_data(Structure):
+    pass
+
+struct_c__SA_hsa_ven_amd_aqlprofile_info_data_t_0_pmc_data._pack_ = 1 # source:False
+struct_c__SA_hsa_ven_amd_aqlprofile_info_data_t_0_pmc_data._fields_ = [
+    ('event', hsa_ven_amd_aqlprofile_event_t),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('result', ctypes.c_uint64),
+]
+
+union_c__SA_hsa_ven_amd_aqlprofile_info_data_t_0._pack_ = 1 # source:False
+union_c__SA_hsa_ven_amd_aqlprofile_info_data_t_0._fields_ = [
+    ('pmc_data', struct_c__SA_hsa_ven_amd_aqlprofile_info_data_t_0_pmc_data),
+    ('trace_data', hsa_ven_amd_aqlprofile_descriptor_t),
+    ('PADDING_0', ctypes.c_ubyte * 8),
+]
+
+struct_c__SA_hsa_ven_amd_aqlprofile_info_data_t._pack_ = 1 # source:False
+struct_c__SA_hsa_ven_amd_aqlprofile_info_data_t._anonymous_ = ('_0',)
+struct_c__SA_hsa_ven_amd_aqlprofile_info_data_t._fields_ = [
+    ('sample_id', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('_0', union_c__SA_hsa_ven_amd_aqlprofile_info_data_t_0),
+]
+
+hsa_ven_amd_aqlprofile_info_data_t = struct_c__SA_hsa_ven_amd_aqlprofile_info_data_t
+class struct_c__SA_hsa_ven_amd_aqlprofile_id_query_t(Structure):
+    pass
+
+struct_c__SA_hsa_ven_amd_aqlprofile_id_query_t._pack_ = 1 # source:False
+struct_c__SA_hsa_ven_amd_aqlprofile_id_query_t._fields_ = [
+    ('name', ctypes.POINTER(ctypes.c_char)),
+    ('id', ctypes.c_uint32),
+    ('instance_count', ctypes.c_uint32),
+]
+
+hsa_ven_amd_aqlprofile_id_query_t = struct_c__SA_hsa_ven_amd_aqlprofile_id_query_t
+
+# values for enumeration 'c__EA_hsa_ven_amd_aqlprofile_info_type_t'
+c__EA_hsa_ven_amd_aqlprofile_info_type_t__enumvalues = {
+    0: 'HSA_VEN_AMD_AQLPROFILE_INFO_COMMAND_BUFFER_SIZE',
+    1: 'HSA_VEN_AMD_AQLPROFILE_INFO_PMC_DATA_SIZE',
+    2: 'HSA_VEN_AMD_AQLPROFILE_INFO_PMC_DATA',
+    3: 'HSA_VEN_AMD_AQLPROFILE_INFO_TRACE_DATA',
+    4: 'HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_COUNTERS',
+    5: 'HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_ID',
+    6: 'HSA_VEN_AMD_AQLPROFILE_INFO_ENABLE_CMD',
+    7: 'HSA_VEN_AMD_AQLPROFILE_INFO_DISABLE_CMD',
+}
+HSA_VEN_AMD_AQLPROFILE_INFO_COMMAND_BUFFER_SIZE = 0
+HSA_VEN_AMD_AQLPROFILE_INFO_PMC_DATA_SIZE = 1
+HSA_VEN_AMD_AQLPROFILE_INFO_PMC_DATA = 2
+HSA_VEN_AMD_AQLPROFILE_INFO_TRACE_DATA = 3
+HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_COUNTERS = 4
+HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_ID = 5
+HSA_VEN_AMD_AQLPROFILE_INFO_ENABLE_CMD = 6
+HSA_VEN_AMD_AQLPROFILE_INFO_DISABLE_CMD = 7
+c__EA_hsa_ven_amd_aqlprofile_info_type_t = ctypes.c_uint32 # enum
+hsa_ven_amd_aqlprofile_info_type_t = c__EA_hsa_ven_amd_aqlprofile_info_type_t
+hsa_ven_amd_aqlprofile_info_type_t__enumvalues = c__EA_hsa_ven_amd_aqlprofile_info_type_t__enumvalues
+hsa_ven_amd_aqlprofile_data_callback_t = ctypes.CFUNCTYPE(c__EA_hsa_status_t, c__EA_hsa_ven_amd_aqlprofile_info_type_t, ctypes.POINTER(struct_c__SA_hsa_ven_amd_aqlprofile_info_data_t), ctypes.POINTER(None))
+try:
+    hsa_ven_amd_aqlprofile_get_info = _libraries['FIXME_STUB'].hsa_ven_amd_aqlprofile_get_info
+    hsa_ven_amd_aqlprofile_get_info.restype = hsa_status_t
+    hsa_ven_amd_aqlprofile_get_info.argtypes = [ctypes.POINTER(struct_c__SA_hsa_ven_amd_aqlprofile_profile_t), hsa_ven_amd_aqlprofile_info_type_t, ctypes.POINTER(None)]
+except AttributeError:
+    pass
+try:
+    hsa_ven_amd_aqlprofile_iterate_data = _libraries['FIXME_STUB'].hsa_ven_amd_aqlprofile_iterate_data
+    hsa_ven_amd_aqlprofile_iterate_data.restype = hsa_status_t
+    hsa_ven_amd_aqlprofile_iterate_data.argtypes = [ctypes.POINTER(struct_c__SA_hsa_ven_amd_aqlprofile_profile_t), hsa_ven_amd_aqlprofile_data_callback_t, ctypes.POINTER(None)]
+except AttributeError:
+    pass
+try:
+    hsa_ven_amd_aqlprofile_error_string = _libraries['FIXME_STUB'].hsa_ven_amd_aqlprofile_error_string
+    hsa_ven_amd_aqlprofile_error_string.restype = hsa_status_t
+    hsa_ven_amd_aqlprofile_error_string.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
+except AttributeError:
+    pass
+kAqlProfileLib = 'libhsa-amd-aqlprofile64.so' # Variable ctypes.c_char * 27
+class struct_hsa_ven_amd_aqlprofile_1_00_pfn_s(Structure):
+    pass
+
+struct_hsa_ven_amd_aqlprofile_1_00_pfn_s._pack_ = 1 # source:False
+struct_hsa_ven_amd_aqlprofile_1_00_pfn_s._fields_ = [
+    ('hsa_ven_amd_aqlprofile_version_major', ctypes.CFUNCTYPE(ctypes.c_uint32)),
+    ('hsa_ven_amd_aqlprofile_version_minor', ctypes.CFUNCTYPE(ctypes.c_uint32)),
+    ('hsa_ven_amd_aqlprofile_error_string', ctypes.CFUNCTYPE(c__EA_hsa_status_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)))),
+    ('hsa_ven_amd_aqlprofile_validate_event', ctypes.CFUNCTYPE(c__EA_hsa_status_t, struct_hsa_agent_s, ctypes.POINTER(struct_c__SA_hsa_ven_amd_aqlprofile_event_t), ctypes.POINTER(ctypes.c_bool))),
+    ('hsa_ven_amd_aqlprofile_start', ctypes.CFUNCTYPE(c__EA_hsa_status_t, ctypes.POINTER(struct_c__SA_hsa_ven_amd_aqlprofile_profile_t), ctypes.POINTER(struct_c__SA_hsa_ext_amd_aql_pm4_packet_t))),
+    ('hsa_ven_amd_aqlprofile_stop', ctypes.CFUNCTYPE(c__EA_hsa_status_t, ctypes.POINTER(struct_c__SA_hsa_ven_amd_aqlprofile_profile_t), ctypes.POINTER(struct_c__SA_hsa_ext_amd_aql_pm4_packet_t))),
+    ('hsa_ven_amd_aqlprofile_read', ctypes.CFUNCTYPE(c__EA_hsa_status_t, ctypes.POINTER(struct_c__SA_hsa_ven_amd_aqlprofile_profile_t), ctypes.POINTER(struct_c__SA_hsa_ext_amd_aql_pm4_packet_t))),
+    ('hsa_ven_amd_aqlprofile_legacy_get_pm4', ctypes.CFUNCTYPE(c__EA_hsa_status_t, ctypes.POINTER(struct_c__SA_hsa_ext_amd_aql_pm4_packet_t), ctypes.POINTER(None))),
+    ('hsa_ven_amd_aqlprofile_get_info', ctypes.CFUNCTYPE(c__EA_hsa_status_t, ctypes.POINTER(struct_c__SA_hsa_ven_amd_aqlprofile_profile_t), c__EA_hsa_ven_amd_aqlprofile_info_type_t, ctypes.POINTER(None))),
+    ('hsa_ven_amd_aqlprofile_iterate_data', ctypes.CFUNCTYPE(c__EA_hsa_status_t, ctypes.POINTER(struct_c__SA_hsa_ven_amd_aqlprofile_profile_t), ctypes.CFUNCTYPE(c__EA_hsa_status_t, c__EA_hsa_ven_amd_aqlprofile_info_type_t, ctypes.POINTER(struct_c__SA_hsa_ven_amd_aqlprofile_info_data_t), ctypes.POINTER(None)), ctypes.POINTER(None))),
+]
+
+hsa_ven_amd_aqlprofile_1_00_pfn_t = struct_hsa_ven_amd_aqlprofile_1_00_pfn_s
+hsa_ven_amd_aqlprofile_pfn_t = struct_hsa_ven_amd_aqlprofile_1_00_pfn_s
 __all__ = \
     ['AMD_QUEUE_PROPERTIES_ENABLE_PROFILING',
     'AMD_QUEUE_PROPERTIES_ENABLE_PROFILING_SHIFT',
@@ -4221,13 +4552,68 @@ __all__ = \
     'HSA_SYSTEM_INFO_VERSION_MAJOR', 'HSA_SYSTEM_INFO_VERSION_MINOR',
     'HSA_VARIABLE_ALLOCATION_AGENT',
     'HSA_VARIABLE_ALLOCATION_PROGRAM', 'HSA_VARIABLE_SEGMENT_GLOBAL',
-    'HSA_VARIABLE_SEGMENT_READONLY', 'HSA_WAIT_STATE_ACTIVE',
-    'HSA_WAIT_STATE_BLOCKED', 'HSA_WAVEFRONT_INFO_SIZE',
-    'MEMORY_TYPE_NONE', 'MEMORY_TYPE_PINNED',
-    'amd_queue_properties32_t', 'amd_queue_properties_t',
-    'amd_queue_t', 'amd_signal_kind64_t', 'amd_signal_kind_t',
-    'amd_signal_t', 'c__EA_hsa_access_permission_t',
-    'c__EA_hsa_agent_feature_t', 'c__EA_hsa_agent_info_t',
+    'HSA_VARIABLE_SEGMENT_READONLY',
+    'HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER',
+    'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_ATC',
+    'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_ATCL2',
+    'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPC',
+    'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPF',
+    'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GCEA',
+    'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GCR',
+    'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GDS',
+    'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GL1A',
+    'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GL1C',
+    'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GL2A',
+    'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GL2C',
+    'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GRBM',
+    'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GRBMSE',
+    'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GUS',
+    'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCARB',
+    'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCHUB',
+    'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCMCBVM',
+    'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCSEQ',
+    'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2',
+    'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCXBAR',
+    'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MMEA',
+    'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_RPB',
+    'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SDMA',
+    'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SPI',
+    'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ',
+    'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQCS',
+    'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SRBM',
+    'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SX',
+    'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TA',
+    'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCA',
+    'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCC',
+    'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCP',
+    'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TD',
+    'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_UMC',
+    'HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_PMC',
+    'HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_TRACE',
+    'HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_COUNTERS',
+    'HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_ID',
+    'HSA_VEN_AMD_AQLPROFILE_INFO_COMMAND_BUFFER_SIZE',
+    'HSA_VEN_AMD_AQLPROFILE_INFO_DISABLE_CMD',
+    'HSA_VEN_AMD_AQLPROFILE_INFO_ENABLE_CMD',
+    'HSA_VEN_AMD_AQLPROFILE_INFO_PMC_DATA',
+    'HSA_VEN_AMD_AQLPROFILE_INFO_PMC_DATA_SIZE',
+    'HSA_VEN_AMD_AQLPROFILE_INFO_TRACE_DATA',
+    'HSA_VEN_AMD_AQLPROFILE_LEGACY_PM4_PACKET_SIZE',
+    'HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_COMPUTE_UNIT_TARGET',
+    'HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_K_CONCURRENT',
+    'HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_MASK',
+    'HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SAMPLE_RATE',
+    'HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SE_MASK',
+    'HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK',
+    'HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK2',
+    'HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_VM_ID_MASK',
+    'HSA_WAIT_STATE_ACTIVE', 'HSA_WAIT_STATE_BLOCKED',
+    'HSA_WAVEFRONT_INFO_SIZE', 'MEMORY_TYPE_NONE',
+    'MEMORY_TYPE_PINNED', 'amd_queue_properties32_t',
+    'amd_queue_properties_t', 'amd_queue_t', 'amd_signal_kind64_t',
+    'amd_signal_kind_t', 'amd_signal_t',
+    'c__EA_hsa_access_permission_t', 'c__EA_hsa_agent_feature_t',
+    'c__EA_hsa_agent_info_t',
     'c__EA_hsa_amd_agent_memory_pool_info_t',
     'c__EA_hsa_amd_copy_direction_t',
     'c__EA_hsa_amd_hw_exception_reset_cause_t',
@@ -4267,6 +4653,10 @@ __all__ = \
     'c__EA_hsa_status_t', 'c__EA_hsa_symbol_kind_t',
     'c__EA_hsa_symbol_linkage_t', 'c__EA_hsa_system_info_t',
     'c__EA_hsa_variable_allocation_t', 'c__EA_hsa_variable_segment_t',
+    'c__EA_hsa_ven_amd_aqlprofile_block_name_t',
+    'c__EA_hsa_ven_amd_aqlprofile_event_type_t',
+    'c__EA_hsa_ven_amd_aqlprofile_info_type_t',
+    'c__EA_hsa_ven_amd_aqlprofile_parameter_name_t',
     'c__EA_hsa_wait_state_t', 'c__EA_hsa_wavefront_info_t',
     'c__Ea_HSA_EXT_AGENT_INFO_IMAGE_1D_MAX_ELEMENTS',
     'c__Ea_HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED',
@@ -4418,7 +4808,8 @@ __all__ = \
     'hsa_executable_symbol_info_t__enumvalues',
     'hsa_executable_symbol_t', 'hsa_executable_t',
     'hsa_executable_validate', 'hsa_executable_validate_alt',
-    'hsa_ext_control_directives_t', 'hsa_ext_finalizer_1_00_pfn_t',
+    'hsa_ext_amd_aql_pm4_packet_t', 'hsa_ext_control_directives_t',
+    'hsa_ext_finalizer_1_00_pfn_t',
     'hsa_ext_finalizer_call_convention_t',
     'hsa_ext_finalizer_call_convention_t__enumvalues',
     'hsa_ext_image_capability_t',
@@ -4562,11 +4953,45 @@ __all__ = \
     'hsa_system_major_extension_supported',
     'hsa_variable_allocation_t',
     'hsa_variable_allocation_t__enumvalues', 'hsa_variable_segment_t',
-    'hsa_variable_segment_t__enumvalues', 'hsa_wait_state_t',
+    'hsa_variable_segment_t__enumvalues',
+    'hsa_ven_amd_aqlprofile_1_00_pfn_t',
+    'hsa_ven_amd_aqlprofile_block_name_t',
+    'hsa_ven_amd_aqlprofile_block_name_t__enumvalues',
+    'hsa_ven_amd_aqlprofile_data_callback_t',
+    'hsa_ven_amd_aqlprofile_descriptor_t',
+    'hsa_ven_amd_aqlprofile_error_string',
+    'hsa_ven_amd_aqlprofile_event_t',
+    'hsa_ven_amd_aqlprofile_event_type_t',
+    'hsa_ven_amd_aqlprofile_event_type_t__enumvalues',
+    'hsa_ven_amd_aqlprofile_get_info',
+    'hsa_ven_amd_aqlprofile_id_query_t',
+    'hsa_ven_amd_aqlprofile_info_data_t',
+    'hsa_ven_amd_aqlprofile_info_type_t',
+    'hsa_ven_amd_aqlprofile_info_type_t__enumvalues',
+    'hsa_ven_amd_aqlprofile_iterate_data',
+    'hsa_ven_amd_aqlprofile_legacy_get_pm4',
+    'hsa_ven_amd_aqlprofile_parameter_name_t',
+    'hsa_ven_amd_aqlprofile_parameter_name_t__enumvalues',
+    'hsa_ven_amd_aqlprofile_parameter_t',
+    'hsa_ven_amd_aqlprofile_pfn_t',
+    'hsa_ven_amd_aqlprofile_profile_t', 'hsa_ven_amd_aqlprofile_read',
+    'hsa_ven_amd_aqlprofile_start', 'hsa_ven_amd_aqlprofile_stop',
+    'hsa_ven_amd_aqlprofile_validate_event',
+    'hsa_ven_amd_aqlprofile_version_major',
+    'hsa_ven_amd_aqlprofile_version_minor', 'hsa_wait_state_t',
     'hsa_wait_state_t__enumvalues', 'hsa_wavefront_get_info',
     'hsa_wavefront_info_t', 'hsa_wavefront_info_t__enumvalues',
-    'hsa_wavefront_t', 'int32_t', 'size_t', 'struct_BrigModuleHeader',
-    'struct_amd_queue_s', 'struct_amd_signal_s',
+    'hsa_wavefront_t', 'int32_t', 'kAqlProfileLib', 'size_t',
+    'struct_BrigModuleHeader', 'struct_amd_queue_s',
+    'struct_amd_signal_s',
+    'struct_c__SA_hsa_ext_amd_aql_pm4_packet_t',
+    'struct_c__SA_hsa_ven_amd_aqlprofile_descriptor_t',
+    'struct_c__SA_hsa_ven_amd_aqlprofile_event_t',
+    'struct_c__SA_hsa_ven_amd_aqlprofile_id_query_t',
+    'struct_c__SA_hsa_ven_amd_aqlprofile_info_data_t',
+    'struct_c__SA_hsa_ven_amd_aqlprofile_info_data_t_0_pmc_data',
+    'struct_c__SA_hsa_ven_amd_aqlprofile_parameter_t',
+    'struct_c__SA_hsa_ven_amd_aqlprofile_profile_t',
     'struct_hsa_agent_dispatch_packet_s', 'struct_hsa_agent_s',
     'struct_hsa_amd_barrier_value_packet_s', 'struct_hsa_amd_event_s',
     'struct_hsa_amd_gpu_hw_exception_info_s',
@@ -4599,6 +5024,8 @@ __all__ = \
     'struct_hsa_loaded_code_object_s', 'struct_hsa_pitched_ptr_s',
     'struct_hsa_queue_s', 'struct_hsa_region_s',
     'struct_hsa_signal_group_s', 'struct_hsa_signal_s',
+    'struct_hsa_ven_amd_aqlprofile_1_00_pfn_s',
     'struct_hsa_wavefront_s', 'uint16_t', 'uint32_t', 'uint64_t',
     'union_amd_signal_s_0', 'union_amd_signal_s_1',
+    'union_c__SA_hsa_ven_amd_aqlprofile_info_data_t_0',
     'union_hsa_amd_event_s_0']
