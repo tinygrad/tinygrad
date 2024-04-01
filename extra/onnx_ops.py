@@ -1,7 +1,6 @@
 import functools, io, math
 from typing import Union, Tuple, Optional, List, Any
 from tinygrad import Tensor, dtypes
-from tinygrad.dtype import least_upper_dtype
 from tinygrad.helpers import prod, flatten
 from extra.onnx import safe_numpy, DTYPE_MAP
 import numpy as np
@@ -609,8 +608,8 @@ def AffineGrid(theta: Tensor, size: Tensor, align_corners=0):
 # **************** com.microsoft Ops ****************
 
 @half_to_float_to_half
-def SkipLayerNormalization(x:Tensor, skip:Tensor, gamma:Tensor, beta:Optional[Tensor]=None, bias:Optional[Tensor]=None, epsilon=None):
-  if epsilon is None: epsilon = 1e-12
+def SkipLayerNormalization(x:Tensor, skip:Tensor, gamma, beta:Optional[Tensor]=None, bias:Optional[Tensor]=None, epsilon=None):
+  if epsilon is None: epsilon=1e-12
   x = x + skip + bias
   return x.layernorm(eps=epsilon) * gamma + beta, None, None, x
 
