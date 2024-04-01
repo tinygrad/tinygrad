@@ -5,7 +5,6 @@ from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.helpers import colored, cpu_time_execution, DEBUG
 from tinygrad.ops import ScheduleItem, LoadOps, BufferOps
-from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.symbolic import Variable
 from tinygrad.device import Buffer, JITRunner, Device, BufferXfer, BufferCopy, update_stats
 
@@ -33,10 +32,7 @@ class CopyItem:
 
 # this will interface with HWCommandQueue to replace Graph
 class CommandQueue:
-  def __init__(self, schedule:List[ScheduleItem], outs:List[LazyBuffer]):
-    # loop through the schedule, find (real) inputs, add assign outputs, and split into different devices
-    self.inputs: List[LazyBuffer] = []
-    self.outputs: List[LazyBuffer] = outs[:]
+  def __init__(self, schedule:List[ScheduleItem]):
     self.q: DefaultDict[str, List[Union[ScheduleItem, CopyItem, SyncItem, WaitItem]]] = defaultdict(list)
 
     def add_sync_item(device:str):
@@ -72,13 +68,6 @@ class CommandQueue:
       queue.append(si)
 
   def __call__(self):
-    #print("OUTS:", self.outputs)
-    #for k,v in self.q.items():
-    #  print("****", k)
-    #  for si in v:
-    #    print("  ", str(si)[:150])
-
-    # this should be callable if we discover a full lazy graph has the same hash
     active_queues = list(self.q.keys())
     waiting_queues: DefaultDict[SyncItem, List[str]] = defaultdict(list)
     seen_sids = set()
