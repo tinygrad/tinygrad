@@ -92,16 +92,18 @@ prog_barrier = f"""
 """
 
 prog_gds_to_lds = f"""
-    for (int t = 0; t < 16; ++t) {{
-      for (int x = 0; x < {KX}; x+={LY}*2) {{
-        a_buf[PHASE][lx][t][(x+ly*2)*16+lIdx] = a[(k+lane) + (x+ly*2+lhigh)*16*{N} + {N}*t];
+    for (int x = 0; x < {KX}; x+={LY}) {{
+      for (int ele = 0; ele < 8; ele++) {{
+        a_buf[PHASE][lx][lane][(x+ly)*16+lhigh*8+ele] = a[(lhigh*8+ele) + (x+ly)*16*{N} + {N}*lane];
       }}
     }}
+    a += 16;
     for (int ele = 0; ele < 16; ++ele) {{
       for (int y = 0; y < {KY}; y+={LX}*2) {{
-        b_buf[PHASE][ly][ele][(y+lx*2)*16+lIdx] = b[lIdx + (y+lx*2) * 16 + (k + ele) * {N}];
+        b_buf[PHASE][ly][ele][(y+lx*2)*16+lIdx] = b[lIdx + (y+lx*2) * 16 + ele * {N}];
       }}
     }}
+    b += 16 * {N};
     k += 16;
 """
 prog_lds_to_vgpr = f"""
