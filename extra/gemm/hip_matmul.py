@@ -95,8 +95,8 @@ prog_gds_to_lds = f"""
       }}
     }}
     for (int ele = 0; ele < 16; ++ele) {{
-      for (int y = 0; y < {KY}; y+=2) {{
-        b_buf[ly][PHASE][ele][y*16+lIdx] = b[lIdx + y * 16 + (k + ele) * {N}];
+      for (int y = 0; y < {KY}; y+={LX}*2) {{
+        b_buf[ly][PHASE][ele][(y+lx*2)*16+lIdx] = b[lIdx + (y+lx*2) * 16 + (k + ele) * {N}];
       }}
     }}
     k += 16;
