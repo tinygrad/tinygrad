@@ -91,7 +91,7 @@ class LazyBuffer:
     return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), dtype, UnaryOps.CAST, (dtype, bitcast), (self,))
 
   def is_unrealized_const(self): return self.base.realized is None and self.base.op is LoadOps.CONST
-  def is_unrealized_contiguous_const(self): return self.base == self and self.base.realized is None and self.op is LoadOps.CONST
+  def is_unrealized_unpadded_const(self): return self.is_unrealized_const() and all(v.mask is None for v in self.st.views)
 
   def _copy(self, device:str) -> LazyBuffer:
     if (dstart:=self.device.split(":")[0]) in {"EXT", "DISK"} or (dstart in {"HSA", "CUDA"} and device.split(":")[0] == dstart):
@@ -130,6 +130,17 @@ class LazyBuffer:
     assert all_same([x.shape for x in srcs]), f"all shapes must be the same {[x.shape for x in srcs]}"
     if op is TernaryOps.WHERE: assert srcs[0].dtype == dtypes.bool, "TernaryOps.WHERE must have the first arg be bool"
     if op is UnaryOps.NEG: assert srcs[0].dtype != dtypes.bool, "UnaryOps.NEG does not accept dtype bool"
+
+    # const folding
+    if op is BinaryOps.ADD and in_srcs[0].is_unrealized_unpadded_const() and in_srcs[0].base.arg == 0: return self
+    if op is BinaryOps.SUB and in_srcs[0].is_unrealized_unpadded_const() and in_srcs[0].base.arg == 0: return self
+    if op is BinaryOps.MUL and in_srcs[0].is_unrealized_unpadded_const():
+      if (val := in_srcs[0].base.arg) == 1: return self
+      if val == -1: return self.e(UnaryOps.NEG)
+      if val == 0: return self.const(0)
+    if op is BinaryOps.DIV and dtypes.is_float(self.dtype) and in_srcs[0].is_unrealized_unpadded_const() and in_srcs[0].base.arg != 0:
+      return self.e(BinaryOps.MUL, self.const(1 / in_srcs[0].base.arg))
+
     out_dtype = dtypes.bool if op in (BinaryOps.CMPLT, BinaryOps.CMPEQ) else srcs[-1].dtype
     return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), out_dtype, op, arg, tuple(srcs))
 
