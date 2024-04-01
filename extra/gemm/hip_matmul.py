@@ -74,7 +74,7 @@ extern "C" __attribute__((global))void __attribute__((amdgpu_flat_work_group_siz
   b += gy*{KY*16};
   
   __attribute__((shared)) half a_buf[2][{LX}][16][{KX} * 16 + 4];
-  __attribute__((shared)) half b_buf[2][{LY}][16][{KY} * 16];
+  __attribute__((shared)) half b_buf[2][{LY}][16][{KY} * 16];  // transposing this in LDS can help coalesce the local loads
 
   half16 a_frag[{KX}];
   half16 b_frag[{KY}];
