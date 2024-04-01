@@ -49,6 +49,17 @@ class HSACompiler(Compiler):
   def render(self, name:str, uops) -> str: return HIPRenderer(name, uops)
   def compile(self, src:str) -> bytes: return compile_hip(src, self.arch)
 
+"""
+from extra.assembly.assembly_rdna import RDNACodegen
+class RDNACompiler(Compiler):
+  compiler_opts = CompilerOptions("HSA", suffix="PTX", shared_max=65536)
+  def __init__(self, arch:str):
+    self.arch = arch
+    super().__init__(f"compile_rdna_{self.arch}")
+  def render(self, name:str, uops) -> str: return RDNARenderer(name, uops).replace("TARGET", self.arch).replace("VERSION", self.version)
+  def compile(self, src:str) -> bytes: return src.encode()
+  """
+
 class HSAProgram:
   def __init__(self, device:HSADevice, name:str, lib:bytes):
     self.device, self.name, self.lib = device, name, lib
