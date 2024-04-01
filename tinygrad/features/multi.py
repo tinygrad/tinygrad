@@ -83,7 +83,7 @@ class MultiLazyBuffer:
     return functools.reduce(lambda x,y: x.e(BinaryOps.ADD, y), llbs)
 
   # TODO: fix this
-  def is_unrealized_contiguous_const(self): return False
+  def is_unrealized_unpadded_const(self): return False
 
   # passthroughs
   def is_realized(self) -> bool: return all([lb.base.realized is not None for lb, r in zip(self.lbs, self.real) if r is True])
