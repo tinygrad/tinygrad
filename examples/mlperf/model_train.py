@@ -347,6 +347,8 @@ def train_unet3d():
       st = pt
 
     if epoch == next_eval_at:
+      train_step.reset()  # free the train step memory :(
+
       Tensor.training = False
 
       next_eval_at += evaluate_every
@@ -357,6 +359,8 @@ def train_unet3d():
         eval_loss_value, score = eval_step(model, x, y)
         eval_loss.append(eval_loss_value)
         scores.append(score)
+
+      eval_step.reset()
 
       scores = Tensor.mean(Tensor.stack(scores, dim=0), axis=0).numpy()
       eval_loss = Tensor.mean(Tensor.stack(eval_loss, dim=0), axis=0).numpy()
