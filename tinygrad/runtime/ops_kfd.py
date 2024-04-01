@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Tuple
-import os, fcntl, ctypes, functools, re, pathlib, mmap, struct
+import os, fcntl, ctypes, functools, re, pathlib, mmap, struct, errno
 from tinygrad.device import Compiled, LRUAllocator, Compiler, BufferOptions, CompilerOptions
 from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up
 from tinygrad.renderer.cstyle import HIPRenderer
