@@ -2,7 +2,7 @@ import ctypes, collections
 from typing import Any, Optional, Tuple, Dict, List, cast
 import tinygrad.runtime.autogen.cuda as cuda
 from tinygrad.helpers import init_c_var, GraphException
-from tinygrad.device import CompiledASTRunner, update_stats, Buffer, MultiDeviceJITGraph, BufferXfer
+from tinygrad.device import CompiledASTRunner, update_stats, Buffer, MultiDeviceJITGraph, BufferXfer, Device
 from tinygrad.runtime.ops_cuda import CUDADevice, check, encode_args, cu_time_execution
 from tinygrad.shape.symbolic import Variable
 from tinygrad.engine.jit import JitItem, get_input_replace, get_jit_stats, \
@@ -41,7 +41,7 @@ class CUDAGraph(MultiDeviceJITGraph):
           self.updatable_nodes[j] = (new_node, kern_params, c_args, False)
       elif isinstance(ji.prg, BufferXfer):
         dest, src = [cast(Buffer, x) for x in ji.rawbufs[0:2]]
-        src_dev = cast(CUDADevice, src.d)
+        src_dev = cast(CUDADevice, Device[src.device])
 
         new_node = cuda.CUgraphNode()
         deps = self.access_resources(read=[src], write=[dest], new_dependency=new_node)
