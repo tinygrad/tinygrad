@@ -28,6 +28,9 @@ assert N%(16*KY*LY) == 0, f"N must be multiple of {16*KY*LY}"
 FLOPS = N*N*N*2
 BW = N*N*3*4
 
+assert KX % (LX * 2) == 0
+assert KY % (LY * 2) == 0
+
 local_size = [32, LX, LY]
 global_size = [N//(KX*16*LX), N//(KY*16*LY), 1]
 num_threads = prod(local_size)
@@ -70,8 +73,8 @@ extern "C" __attribute__((global))void __attribute__((amdgpu_flat_work_group_siz
   a += gx*{KX*16}*{N};
   b += gy*{KY*16};
   
-  __attribute__((shared)) half a_buf[{LX}][2][16][{KX} * 16 + 2];
-  __attribute__((shared)) half b_buf[{LY}][2][16][{KY} * 16];
+  __attribute__((shared)) half a_buf[2][{LX}][16][{KX} * 16 + 4];
+  __attribute__((shared)) half b_buf[2][{LY}][16][{KY} * 16];
 
   half16 a_frag[{KX}];
   half16 b_frag[{KY}];
@@ -91,12 +94,12 @@ prog_barrier = f"""
 prog_gds_to_lds = f"""
     for (int t = 0; t < 16; ++t) {{
       for (int x = 0; x < {KX}; x+={LY}*2) {{
-        a_buf[lx][PHASE][t][(x+ly*2)*16+lIdx] = a[(k+lane) + (x+ly*2+lhigh)*16*{N} + {N}*t];
+        a_buf[PHASE][lx][t][(x+ly*2)*16+lIdx] = a[(k+lane) + (x+ly*2+lhigh)*16*{N} + {N}*t];
       }}
     }}
     for (int ele = 0; ele < 16; ++ele) {{
       for (int y = 0; y < {KY}; y+={LX}*2) {{
-        b_buf[ly][PHASE][ele][(y+lx*2)*16+lIdx] = b[lIdx + (y+lx*2) * 16 + (k + ele) * {N}];
+        b_buf[PHASE][ly][ele][(y+lx*2)*16+lIdx] = b[lIdx + (y+lx*2) * 16 + (k + ele) * {N}];
       }}
     }}
     k += 16;
@@ -104,12 +107,12 @@ prog_gds_to_lds = f"""
 prog_lds_to_vgpr = f"""
     for (int ele = 0; ele < 16; ++ele) {{
       for (int x = 0; x < {KX}; x++) {{
-        a_frag[x][ele] = a_buf[lx][PHASE][lane][x * 16 + ele];
+        a_frag[x][ele] = a_buf[PHASE][lx][lane][x * 16 + ele];
       }}
     }}
     for (int ele = 0; ele < 16; ++ele) {{
       for (int y = 0; y < {KY}; y++) {{
-        b_frag[y][ele] = b_buf[ly][PHASE][ele][y * 16 + lane]; 
+        b_frag[y][ele] = b_buf[PHASE][ly][ele][y * 16 + lane]; 
       }}
     }}
 """
