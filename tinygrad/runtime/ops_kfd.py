@@ -107,7 +107,8 @@ class KFDProgram:
       f"{self.private_segment_size=} > {self.device.max_private_segment_size=}"
 
   # NOTE: no programs are ever freed
-  def __del__(self): self.device._gpu_free(self.lib_gpu)
+  def __del__(self):
+    if hasattr(self, 'lib_gpu'): self.device._gpu_free(self.lib_gpu)
 
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
     if not hasattr(self, "args_struct_t"):
@@ -208,8 +209,8 @@ class KFDDevice(Compiled):
     if (gpus:=getattr(mem, "mapped_gpu_ids", None)) is not None:
       stm = kio.unmap_memory_from_gpu(self.kfd, handle=mem.handle, device_ids_array_ptr=ctypes.addressof(gpus), n_devices=len(gpus))
       assert stm.n_success == len(gpus)
+    libc.munmap(mem.va_addr, mem.size)
     kio.free_memory_of_gpu(self.kfd, handle=mem.handle)
-    if mem.flags & kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR: libc.munmap(mem.va_addr, mem.size)
 
   def __init__(self, device:str=""):
     if KFDDevice.kfd == -1: KFDDevice.kfd = os.open("/dev/kfd", os.O_RDWR)
