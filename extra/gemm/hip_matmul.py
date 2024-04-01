@@ -22,13 +22,14 @@ CNT = getenv("CNT", 128)
 N = getenv("N", 4096)
 KX = getenv("KX", 4)
 KY = getenv("KY", 4)
-assert N%(16*KX) == 0, f"N must be multiple of {16*KX}"
-assert N%(16*KY) == 0, f"N must be multiple of {16*KY}"
+LX = LY = 2
+assert N%(16*KX*LX) == 0, f"N must be multiple of {16*KX*LX}"
+assert N%(16*KY*LY) == 0, f"N must be multiple of {16*KY*LY}"
 FLOPS = N*N*N*2
 BW = N*N*3*4
 
-local_size = [32, 1, 1]
-global_size = [N//(KX*16), N//(KY*16), 1]
+local_size = [32, LX, LY]
+global_size = [N//(KX*16*LX), N//(KY*16*LY), 1]
 num_threads = prod(local_size)
 
 # Can HSAAllocator initialized as device=0 by default?
@@ -56,8 +57,10 @@ extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_grou
 extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_local_size(unsigned int);
 extern "C" __attribute__((global))void __attribute__((amdgpu_flat_work_group_size(1, {num_threads}))) test(float* c, half* a, half* b) {{
 
-  const int gx = __ockl_get_group_id(0) + __ockl_get_local_id(2);
-  const int gy = __ockl_get_group_id(1) + __ockl_get_local_id(3);
+  const int lx = __ockl_get_local_id(1);
+  const int ly = __ockl_get_local_id(2);
+  const int gx = __ockl_get_group_id(0) * {LX} + lx;
+  const int gy = __ockl_get_group_id(1) * {LY} + ly;
 
   const int lIdx = __ockl_get_local_id(0);
   const int lhigh = lIdx >> 4;
@@ -67,8 +70,8 @@ extern "C" __attribute__((global))void __attribute__((amdgpu_flat_work_group_siz
   a += gx*{KX*16}*{N};
   b += gy*{KY*16};
   
-  __attribute__((shared)) half a_buf[2][16][{KX} * 16 + 2];
-  __attribute__((shared)) half b_buf[2][16][{KY} * 16];
+  __attribute__((shared)) half a_buf[{LX}][2][16][{KX} * 16 + 2];
+  __attribute__((shared)) half b_buf[{LY}][2][16][{KY} * 16];
 
   half16 a_frag[{KX}];
   half16 b_frag[{KY}];
@@ -87,13 +90,13 @@ prog_barrier = f"""
 
 prog_gds_to_lds = f"""
     for (int t = 0; t < 16; ++t) {{
-      for (int x = 0; x < {KX}; x+=2) {{
-        a_buf[PHASE][t][x*16+lIdx] = a[(k+lane) + (x+lhigh)*16*{N} + {N}*t];
+      for (int x = 0; x < {KX}; x+={LY}*2) {{
+        a_buf[lx][PHASE][t][(x+ly*2)*16+lIdx] = a[(k+lane) + (x+ly*2+lhigh)*16*{N} + {N}*t];
       }}
     }}
     for (int ele = 0; ele < 16; ++ele) {{
       for (int y = 0; y < {KY}; y+=2) {{
-        b_buf[PHASE][ele][y*16+lIdx] = b[lIdx + y * 16 + (k + ele) * {N}];
+        b_buf[ly][PHASE][ele][y*16+lIdx] = b[lIdx + y * 16 + (k + ele) * {N}];
       }}
     }}
     k += 16;
@@ -101,12 +104,12 @@ prog_gds_to_lds = f"""
 prog_lds_to_vgpr = f"""
     for (int ele = 0; ele < 16; ++ele) {{
       for (int x = 0; x < {KX}; x++) {{
-        a_frag[x][ele] = a_buf[PHASE][lane][x * 16 + ele];
+        a_frag[x][ele] = a_buf[lx][PHASE][lane][x * 16 + ele];
       }}
     }}
     for (int ele = 0; ele < 16; ++ele) {{
       for (int y = 0; y < {KY}; y++) {{
-        b_frag[y][ele] = b_buf[PHASE][ele][y * 16 + lane]; 
+        b_frag[y][ele] = b_buf[ly][PHASE][ele][y * 16 + lane]; 
       }}
     }}
 """
@@ -144,13 +147,16 @@ prog_str = f"""
     {prog_gds_to_lds.replace("PHASE", "0")}
     {prog_lds_to_vgpr.replace("PHASE", "1")}
     {prog_wmma}
+    {prog_barrier}
     {prog_gds_to_lds.replace("PHASE", "1")}
     {prog_lds_to_vgpr.replace("PHASE", "0")}
     {prog_wmma}
   }}
+  {prog_barrier}
   {prog_gds_to_lds.replace("PHASE", "0")}
   {prog_lds_to_vgpr.replace("PHASE", "1")}
   {prog_wmma}
+  {prog_barrier}
   {prog_lds_to_vgpr.replace("PHASE", "0")}
   {prog_wmma}
 {prog_end}
