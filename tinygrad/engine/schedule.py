@@ -83,17 +83,18 @@ def _schedule_one(out:LazyBuffer, realizes:Set[LazyBuffer], reduce_for_op: Dict[
     op, inputs = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_st.simplify().unbind()[0])), membufs[1:]
   return _LBScheduleItem((op,), (out,), tuple(inputs), var_vals)
 
-def _schedule_group(group:List[_LBScheduleItem], reduce_for_op:Dict[LazyBuffer, LazyBuffer]) -> ScheduleItem:
-  if len(group) == 1: return ScheduleItem((r:=group[0]).ast, (r.outputs[0].buffer,), tuple(x.buffer for x in r.inputs), r.var_vals)
-  # sort the group before fusion
-  group = sorted(group, key=lambda x: x.ast[0].src[0].key)
-  inputs, outputs, var_vals = {x: None for n in group for x in n.inputs}, [n.outputs[0] for n in group], merge_dicts([n.var_vals for n in group])
+def _schedule_outputs(outs:List[_LBScheduleItem], reduce_for_op:Dict[LazyBuffer, LazyBuffer]) -> ScheduleItem:
+  if len(outs) == 1: return ScheduleItem((r:=outs[0]).ast, (r.outputs[0].buffer,), tuple(x.buffer for x in r.inputs), r.var_vals)
+  # sort the outputs before fusion
+  outs = sorted(outs, key=lambda x: x.ast[0].src[0].key)
+  inputs, outbufs, var_vals = {x: None for n in outs for x in n.inputs}, [n.outputs[0] for n in outs], merge_dicts([n.var_vals for n in outs])
+  # recreate the multi output AST
   ast: List[LazyOp] = []
-  for i, out in enumerate(outputs):
-    output_st = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape)
-    op = _recursive_lazyop(out, outputs+list(inputs), var_vals, output_st, set(inputs), {})
-    ast.append(LazyOp(BufferOps.STORE, (op, ), MemBuffer(i, out.dtype, output_st.simplify().unbind()[0])))
-  return ScheduleItem(tuple(ast), tuple(x.buffer for x in outputs), tuple(x.buffer for x in inputs), var_vals)
+  for i, lb in enumerate(outbufs):
+    output_st = ShapeTracker.from_shape(reduce_for_op[lb].shape if lb in reduce_for_op else lb.shape)
+    op = _recursive_lazyop(lb, outbufs+list(inputs), var_vals, output_st, set(inputs), {})
+    ast.append(LazyOp(BufferOps.STORE, (op, ), MemBuffer(i, lb.dtype, output_st.simplify().unbind()[0])))
+  return ScheduleItem(tuple(ast), tuple(x.buffer for x in outbufs), tuple(x.buffer for x in inputs), var_vals)
 
 # recursively search the entire graph for all LazyBuffers, insert realizes after expands
 def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffer, None],
@@ -227,7 +228,7 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
     # single output
     if (buf.op in LoadOps and buf.op is not LoadOps.ASSIGN) or buf.device.startswith("DISK") or buf.device == "METAL" or \
         buf.op in ReduceOps or buf in reduce_for_op or buf.forced_realize or getenv("DISALLOW_MULTIOUT"): key: Tuple = (buf,)
-    # multioutput
+    # multi output
     else: key = (level, buf.shape, buf.device)
     groups[key].append(prescheduled[buf])
     for x in graph[buf]:
@@ -240,7 +241,7 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
     if GRAPH:
       kernel_number += 1
       for ps in group: realized_lazybuffer(ps.outputs[0], kernel_number)
-    schedule.append(_schedule_group(group, reduce_for_op))
+    schedule.append(_schedule_outputs(group, reduce_for_op))
     for ps in group: del ps.outputs[0].srcs  # can only schedule once
 
   # confirm everything was scheduled correctly

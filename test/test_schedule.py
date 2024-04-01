@@ -547,7 +547,7 @@ class TestMultiOutputSchedule(unittest.TestCase):
     out0_np, out1_np = a.numpy()+2, b.numpy()+2
     self._test([out0, out1], [out0_np, out1_np], 1)
 
-  @unittest.skip("TODO: correct reduce pairs")
+  @unittest.skip("TODO: Multioutput reduce pairs")
   def test_reduce_contig_children_with_reduce(self):
     a_sum = Tensor([1,2,3,4]).sum()
     b = Tensor([6])
@@ -556,7 +556,7 @@ class TestMultiOutputSchedule(unittest.TestCase):
     out1 = c.max()+a_sum+b
     self._test([out0, out1], allowed=2)
 
-  @unittest.skip("TODO: correct reduce pairs")
+  @unittest.skip("TODO: Multioutput reduce pairs")
   def test_reduce_pair_different_parents_possible_fusion(self):
     a_sum = Tensor([1,2,3,4]).sum()
     b, c = Tensor([1]), Tensor([2])
@@ -564,7 +564,7 @@ class TestMultiOutputSchedule(unittest.TestCase):
     out1 = a_sum+c
     self._test([out0, out1], [np.array([11]), np.array([12])], 1)
 
-  @unittest.skip("TODO: correct reduce pairs")
+  @unittest.skip("TODO: Multioutput reduce pairs")
   def test_reduce_pair_different_reduce_parents(self):
     a_reduce = Tensor.randint((4,)).sum()
     b_reduce = Tensor.randint((4,)).sum()
