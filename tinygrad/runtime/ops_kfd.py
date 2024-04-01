@@ -100,7 +100,7 @@ class KFDProgram:
     for _, sh_type, sh_flags, sh_addr, sh_offset, sh_size, _, _, _ in sections:
       if sh_type == SHT_PROGBITS and sh_flags & SHF_ALLOC: lib_gpu_view[sh_addr:sh_addr+sh_size] = self.lib[sh_offset:sh_offset+sh_size]
 
-    self.device._submit_cache_inv(self.lib_gpu.va_addr, lib_gpu_size)
+    self.device._submit_cache_inv(gli=2)
 
     entry_point = min(sh[3] for sh in sections if sh[1] == SHT_PROGBITS and sh[2] & SHF_ALLOC)
     self.handle = self.lib_gpu.va_addr + entry_point
@@ -363,13 +363,13 @@ class KFDDevice(Compiled):
     self.sdma_write_pointer[0] = self.sdma_doorbell_value
     self.sdma_doorbell[0] = self.sdma_doorbell_value
 
-  def _submit_cache_inv(self, addr=0x0, sz=(1 << 64)-1):
+  def _submit_cache_inv(self, addr=0x0, sz=(1 << 64)-1, gli=0, glv=0, glk=0, gl1=0, gl2=0):
     pm4_buffer_view = to_mv(self.pm4_indirect_buf.va_addr, 0x1000).cast("I")
     pm4_cmd = [amd_gpu.PACKET3(amd_gpu.PACKET3_ACQUIRE_MEM, 6), 0,
                sz & 0xffffffff, (sz >> 32) & 0xffffffff, addr & 0xffffffff, (addr >> 32) & 0xffffffff, 0,
-               amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLI_INV(2) | amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLK_INV(2) | \
-               amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLV_INV(2) | amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL1_INV(2) | \
-               amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL2_INV(2) ]
+               amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLI_INV(gli) | amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLK_INV(glk) | \
+               amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLV_INV(glv) | amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL1_INV(gl1) | \
+               amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL2_INV(gl2)]
     for i, value in enumerate(pm4_cmd): pm4_buffer_view[i] = value
     ctypes.memmove(self.aql_ring.va_addr + (self.aql_doorbell_value * AQL_PACKET_SIZE) % self.aql_ring.size,
                    ctypes.addressof(self.pm4_packet), AQL_PACKET_SIZE)
