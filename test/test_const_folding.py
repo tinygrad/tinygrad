@@ -13,6 +13,10 @@ class TestSimpleConstFolding(unittest.TestCase):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) + 0)
   def test_add_tensor_zero(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) + Tensor.zeros(4))
+  def test_literal_zero_add(self):
+    _check_ast_count(0, 0 + Tensor([1.0, 2, 3, 4]))
+  def test_tensor_zero_add(self):
+    _check_ast_count(0, Tensor.zeros(4) + Tensor([1.0, 2, 3, 4]))
 
   def test_sub_literal_zero(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) - 0)
@@ -23,11 +27,19 @@ class TestSimpleConstFolding(unittest.TestCase):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) * 0)
   def test_mul_tensor_zero(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) * Tensor.zeros(4))
+  def test_literal_zero_mul(self):
+    _check_ast_count(0, 0 * Tensor([1.0, 2, 3, 4]) * 0)
+  def test_tensor_zero_mul(self):
+    _check_ast_count(0, Tensor.zeros(4) * Tensor([1.0, 2, 3, 4]))
 
   def test_mul_literal_one(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) * 1)
   def test_mul_tensor_one(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) * Tensor.ones(4))
+  def test_literal_one_mul(self):
+    _check_ast_count(0, 1 * Tensor([1.0, 2, 3, 4]))
+  def test_tensor_one_mul(self):
+    _check_ast_count(0, Tensor.ones(4) * Tensor([1.0, 2, 3, 4]))
 
   def test_div_literal_one(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) / 1)
@@ -38,11 +50,24 @@ class TestSimpleConstFolding(unittest.TestCase):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) ** 0)
   def test_pow_tensor_zero(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) ** Tensor.zeros(4))
+  # TODO: fix pow folding with left operand = 0 or 1
+  @unittest.expectedFailure
+  def test_literal_zero_pow(self):
+    _check_ast_count(0, 0 ** Tensor([1.0, 2, 3, 4]))
+  @unittest.expectedFailure
+  def test_tensor_zero_pow(self):
+    _check_ast_count(0, Tensor.zeros(4) ** Tensor([1.0, 2, 3, 4]))
 
   def test_pow_literal_one(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) ** 1)
   def test_pow_tensor_one(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) ** Tensor.ones(4))
+  @unittest.expectedFailure
+  def test_literal_one_pow(self):
+    _check_ast_count(0, 1 ** Tensor([1.0, 2, 3, 4]))
+  @unittest.expectedFailure
+  def test_tensor_one_pow(self):
+    _check_ast_count(0, Tensor.ones(4) ** Tensor([1.0, 2, 3, 4]))
 
 class TestMovedConstFolding(unittest.TestCase):
   def test_add_shrunk_zero(self):
