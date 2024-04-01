@@ -16,6 +16,25 @@ libc.mmap.restype = ctypes.c_void_p
 libc.munmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
 libc.munmap.restype = ctypes.c_int
 
+PM4_HDR_IT_OPCODE_INDIRECT_BUFFER = 0x3f
+PM4_INDIRECT_BUFFER_VALID = 1 << 23
+
+PM4_HDR_IT_OPCODE_ACQUIRE_MEM = 0x58
+PM4_ACQUIRE_MEM_GCR_CNTL_GLI_INV = 1 << 0
+PM4_ACQUIRE_MEM_GCR_CNTL_GLK_INV = 1 << 7
+PM4_ACQUIRE_MEM_GCR_CNTL_GLV_INV = 1 << 8
+PM4_ACQUIRE_MEM_GCR_CNTL_GL1_INV = 1 << 9
+PM4_ACQUIRE_MEM_GCR_CNTL_GL2_INV = 1 << 14
+
+def pm4_header(op, cmd_size): return 3 << 30 | ((cmd_size - 2) & 0x3FFF) << 16 | (((op) & 0xFF) << 8)
+def pm4_build_indirect_command(ib_addr, ib_sz):
+  return [pm4_header(PM4_HDR_IT_OPCODE_INDIRECT_BUFFER, 4), ib_addr & 0xffffffff, (ib_addr>>32) & 0xffffffff, (ib_sz//4) | PM4_INDIRECT_BUFFER_VALID]
+def pm4_build_cache_inv_command(addr=0, sz=0xffffffffff):
+  return [pm4_header(PM4_HDR_IT_OPCODE_ACQUIRE_MEM, 8), 0,
+          sz & 0xffffffff, (sz >> 32) & 0xffffffff, addr & 0xffffffff, (addr >> 32) & 0xffffffff, 0,
+          PM4_ACQUIRE_MEM_GCR_CNTL_GLI_INV | PM4_ACQUIRE_MEM_GCR_CNTL_GLK_INV | PM4_ACQUIRE_MEM_GCR_CNTL_GLV_INV | \
+      PM4_ACQUIRE_MEM_GCR_CNTL_GL1_INV | PM4_ACQUIRE_MEM_GCR_CNTL_GL2_INV ]
+
 def node_sysfs_path(node_id, file): return f"/sys/devices/virtual/kfd/kfd/topology/nodes/{node_id}/{file}"
 
 def kfd_ioctl(idir, nr, user_struct, fd, made_struct=None, **kwargs):
@@ -98,6 +117,8 @@ class KFDProgram:
     for _, sh_type, sh_flags, sh_addr, sh_offset, sh_size, _, _, _ in sections:
       if sh_type == SHT_PROGBITS and sh_flags & SHF_ALLOC: lib_gpu_view[sh_addr:sh_addr+sh_size] = self.lib[sh_offset:sh_offset+sh_size]
 
+    self.device._submit_cache_inv()
+
     entry_point = min(sh[3] for sh in sections if sh[1] == SHT_PROGBITS and sh[2] & SHF_ALLOC)
     self.handle = self.lib_gpu.va_addr + entry_point
     self.group_segment_size = lib_gpu_view.cast("I")[entry_point//4]
@@ -176,6 +197,9 @@ class KFDAllocator(LRUAllocator):
     evt_arr[0].event_id = self.device.completion_signal.event_id
     kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=1000)
 
+class amd_aql_pm4_packet_t(ctypes.Structure):
+  _fields_ = [('header', ctypes.c_uint16), ('format', ctypes.c_uint16), ('pm4_cmds', ctypes.c_uint32*13), ('completion_signal', hsa.hsa_signal_t)]
+
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
 class KFDDevice(Compiled):
   kfd:int = -1
@@ -228,6 +252,7 @@ class KFDDevice(Compiled):
     self.signals_page = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
     self.gart = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
     self.kernargs = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
+    self.pm4_indirect_buf = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
     self.ctx_save_restore_address = self._gpu_alloc(0x2C02000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
 
     self.completion_signal = hsa.amd_signal_t.from_address(self.signals_page.va_addr)
@@ -301,6 +326,9 @@ class KFDDevice(Compiled):
     self.map_uptr2gpu_struct.attrs[1].type = kfd.KFD_IOCTL_SVM_ATTR_ACCESS_IN_PLACE
     self.map_uptr2gpu_struct.attrs[1].value = self.gpu_id
 
+    self.pm4_inv_buffer = to_mv(self.pm4_indirect_buf.va_addr, 0x1000).cast("I")
+    for i, value in enumerate(pm4_build_cache_inv_command()): self.pm4_inv_buffer[i] = value
+
     super().__init__(device, KFDAllocator(self), KFDCompiler(self.arch), functools.partial(KFDProgram, self))
 
   def _submit_sdma(self, dest, src, copy_size, wait_signals=None, completion_signal=None):
@@ -347,3 +375,24 @@ class KFDDevice(Compiled):
 
     self.sdma_write_pointer[0] = self.sdma_doorbell_value
     self.sdma_doorbell[0] = self.sdma_doorbell_value
+
+  def _submit_cache_inv(self):
+    indirect_exec_cmd = pm4_build_indirect_command(self.pm4_indirect_buf.va_addr, 8 * 4)
+
+    ctypes.memset(self.aql_ring.va_addr + (self.aql_doorbell_value*AQL_PACKET_SIZE) % self.aql_ring.size, 0, 64)
+    packet = amd_aql_pm4_packet_t.from_address(self.aql_ring.va_addr + (self.aql_doorbell_value*AQL_PACKET_SIZE) % self.aql_ring.size)
+    packet.format = 0x1 # AMD_AQL_FORMAT_PM4_IB
+    for i, value in enumerate(indirect_exec_cmd): packet.pm4_cmds[i] = value
+    packet.pm4_cmds[len(indirect_exec_cmd)] = 14 - len(indirect_exec_cmd) # remain dwords count
+    packet.completion_signal = hsa.hsa_signal_t(ctypes.addressof(self.completion_signal))
+    packet.header = hsa.HSA_PACKET_TYPE_VENDOR_SPECIFIC << hsa.HSA_PACKET_HEADER_TYPE
+
+    self.amd_aql_queue.write_dispatch_id = self.aql_doorbell_value + 1
+    self.aql_doorbell[0] = self.aql_doorbell_value
+    self.aql_doorbell_value += 1
+
+    evt_arr = (kfd.struct_kfd_event_data * 1)()
+    evt_arr[0].event_id = self.completion_signal.event_id
+    kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=1000)
+
+    assert (wp:=self.amd_aql_queue.write_dispatch_id) == (rp:=self.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
