@@ -138,8 +138,8 @@ class LazyBuffer:
       if x.is_unrealized_unpadded_const() and x.base.arg == 0: return y
     if op is BinaryOps.SUB and y.is_unrealized_unpadded_const() and y.base.arg == 0: return x
     if op is BinaryOps.MUL:
-      if x.is_unrealized_unpadded_const() and (val := x.base.arg) in (1, -1, 0): return {1: y, -1: y.e(UnaryOps.NEG), 0: y.const(0)}[val]
-      if y.is_unrealized_unpadded_const() and (val := y.base.arg) in (1, -1, 0): return {1: x, -1: x.e(UnaryOps.NEG), 0: x.const(0)}[val]
+      if x.is_unrealized_unpadded_const() and (val := x.base.arg) in (1, 0): return {1: y, 0: y.const(0)}[val]
+      if y.is_unrealized_unpadded_const() and (val := y.base.arg) in (1, 0): return {1: x, 0: x.const(0)}[val]
     if op is BinaryOps.DIV and dtypes.is_float(x.dtype) and y.is_unrealized_unpadded_const() and y.base.arg != 0:
       return x.e(BinaryOps.MUL, x.const(1 / y.base.arg))
 
