@@ -2,11 +2,9 @@ import time
 start = time.perf_counter()
 from pathlib import Path
 import numpy as np
-from tinygrad import Tensor, Device, dtypes, GlobalCounters
-from tinygrad.features.jit import TinyJit
+from tinygrad import Tensor, Device, dtypes, GlobalCounters, TinyJit
 from tinygrad.nn.state import get_parameters, load_state_dict, safe_load
-from tinygrad.helpers import getenv, Timing
-from examples.mlperf import helpers
+from tinygrad.helpers import getenv
 def tlog(x): print(f"{x:25s}  @ {time.perf_counter()-start:5.2f}s")
 
 def eval_resnet():
@@ -30,7 +28,7 @@ def eval_resnet():
       x = x.permute([0,3,1,2]).cast(dtypes.float32) / 255.0
       x -= self.input_mean
       x /= self.input_std
-      return self.mdl(x).argmax(axis=1).realize()
+      return self.mdl(x).log_softmax().argmax(axis=1).realize()
 
   mdl = TinyJit(ResnetRunner(GPUS))
   tlog("loaded models")
@@ -103,7 +101,7 @@ def eval_retinanet():
   coco_eval = COCOeval(coco, iouType="bbox")
   coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
 
-  from tinygrad.features.jit import TinyJit
+  from tinygrad.engine.jit import TinyJit
   mdlrun = TinyJit(lambda x: mdl(input_fixup(x)).realize())
 
   n, bs = 0, 8

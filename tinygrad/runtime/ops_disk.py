@@ -20,7 +20,7 @@ class DiskBuffer:
 MAP_LOCKED, MAP_POPULATE = 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000)
 class DiskAllocator(Allocator):
   def __init__(self, device:str): self.device = device
-  def _alloc(self, size:int):
+  def _alloc(self, size:int, options):
     if self.device.startswith("shm:"):
       fd = _posixshmem.shm_open("/"+self.device[4:].lstrip("/"), os.O_RDWR, 0o600)
       mem = mmap.mmap(fd, size, mmap.MAP_SHARED | MAP_POPULATE | MAP_LOCKED)
@@ -48,17 +48,17 @@ class DiskRunner(JITRunner):
   skip_allocation = True
   def __init__(self, ast:LazyOp):
     # two ASTs are allowed here.
-    assert ast.op == BufferOps.STORE, "output of AST must be store"
+    assert ast.op is BufferOps.STORE, "output of AST must be store"
     assert ast.arg.st.contiguous, "shapetracker must be contiguous"
     # TODO: there shouldn't actually be casts here, bitcasts should fold into the load
-    if ast.src[0].op == UnaryOps.CAST:
+    if ast.src[0].op is UnaryOps.CAST:
       top_src = ast.src[0].src[0]
-      # TODO: assert that this is bitcast
+      assert ast.src[0].arg[1], "disk only supports bitcasts, not normal casts"
       self.new_dtype = ast.src[0].arg[0]
     else:
       top_src = ast.src[0]
       self.new_dtype = top_src.arg.dtype
-    assert top_src.op == BufferOps.LOAD, "top of AST must be load"
+    assert top_src.op is BufferOps.LOAD, "top of AST must be load"
     assert len(top_src.arg.st.views) == 1, "shapetracker must have 1 view"
     view = top_src.arg.st.views[0]
     assert view.mask is None, "view cannot have a mask"
@@ -68,9 +68,11 @@ class DiskRunner(JITRunner):
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Any, int], wait=False, jit=False):
     assert len(rawbufs) == 2
     src = rawbufs[1]._buf
-    rawbufs[0]._buf = DiskBuffer(src.ud, self.new_size, self.new_dtype, offset=src.offset+self.new_offset)
+    rawbufs[0].allocate(DiskBuffer(src.ud, self.new_size, self.new_dtype, offset=src.offset+self.new_offset))
 
 class DiskDevice(Compiled):
   def __init__(self, device:str): super().__init__(device, DiskAllocator(device[len("disk:"):]), None, None)
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
-  def get_runner(self, ast:LazyOp): return DiskRunner(ast)
+  def get_runner(self, *ast:LazyOp):
+    assert len(ast) == 1, "DiskRunner doesn't support multioutput kernels."
+    return DiskRunner(ast[0])

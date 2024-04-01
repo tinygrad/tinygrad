@@ -17,7 +17,11 @@ OSX = platform.system() == "Darwin"
 CI = os.getenv("CI", "") != ""
 
 def dedup(x:Iterable[T]): return list(dict.fromkeys(x))   # retains list order
-def argfix(*x): return tuple(x[0]) if x and x[0].__class__ in (tuple, list) else x
+def argfix(*x):
+  if x and x[0].__class__ in (tuple, list):
+    if len(x) != 1: raise ValueError(f"bad arg {x}")
+    return tuple(x[0])
+  return x
 def argsort(x): return type(x)(sorted(range(len(x)), key=x.__getitem__)) # https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
 def all_same(items:List[T]): return all(x == items[0] for x in items)
 def all_int(t: Sequence[Any]) -> TypeGuard[Tuple[int, ...]]: return all(isinstance(s, int) for s in t)
@@ -90,8 +94,22 @@ class ContextVar:
   def __gt__(self, x): return self.value > x
   def __lt__(self, x): return self.value < x
 
-DEBUG, IMAGE, WINO, BEAM, NOOPT = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0), ContextVar("WINO", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0)
-GRAPH, GRAPHPATH = ContextVar("GRAPH", 0), getenv("GRAPHPATH", "/tmp/net")
+DEBUG, IMAGE, BEAM, NOOPT = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0)
+WINO, THREEFRY, CACHECOLLECTING = ContextVar("WINO", 0), ContextVar("THREEFRY", 0), ContextVar("CACHECOLLECTING", 1)
+GRAPH, GRAPHPATH, RING = ContextVar("GRAPH", 0), getenv("GRAPHPATH", "/tmp/net"), ContextVar("RING", 1)
+
+# **************** global state Counters ****************
+
+class GlobalCounters:
+  global_ops: ClassVar[int] = 0
+  global_mem: ClassVar[int] = 0
+  time_sum_s: ClassVar[float] = 0.0
+  kernel_count: ClassVar[int] = 0
+  mem_used: ClassVar[int] = 0   # NOTE: this is not reset
+  @staticmethod
+  def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count = 0,0,0.0,0
+
+# **************** timer and profiler ****************
 
 class Timing(contextlib.ContextDecorator):
   def __init__(self, prefix="", on_exit=None, enabled=True): self.prefix, self.on_exit, self.enabled = prefix, on_exit, enabled
@@ -125,7 +143,7 @@ _cache_dir: str = getenv("XDG_CACHE_HOME", os.path.expanduser("~/Library/Caches"
 CACHEDB: str = getenv("CACHEDB", os.path.abspath(os.path.join(_cache_dir, "tinygrad", "cache.db")))
 CACHELEVEL = getenv("CACHELEVEL", 2)
 
-VERSION = 12
+VERSION = 13
 _db_connection = None
 def db_connection():
   global _db_connection
@@ -207,23 +225,4 @@ def init_c_struct_t(fields: Tuple[Tuple[str, ctypes._SimpleCData], ...]):
     _pack_, _fields_ = 1, fields
   return CStruct
 def init_c_var(ctypes_var, creat_cb): return (creat_cb(ctypes_var), ctypes_var)[1]
-def flat_mv(mv:memoryview):
-  if len(mv) == 0: return mv
-  return mv.cast("B", shape=(mv.nbytes,))
-
-# *** Helpers for CUDA-like APIs.
-
-def encode_args_cuda_style(bufs, vals, device_ptr_t, marks) -> Tuple[ctypes.Array, ctypes.Structure]:
-  c_args = init_c_struct_t(tuple([(f'f{i}', device_ptr_t) for i in range(len(bufs))] + [(f'f{i}', ctypes.c_int) for i in range(len(bufs), len(bufs)+len(vals))]))(*bufs, *vals)  # noqa: E501
-  return (ctypes.c_void_p * 5)(ctypes.c_void_p(marks[0]), ctypes.cast(ctypes.pointer(c_args), ctypes.c_void_p), ctypes.c_void_p(marks[1]), ctypes.cast(ctypes.pointer(ctypes.c_size_t(ctypes.sizeof(c_args))), ctypes.c_void_p), ctypes.c_void_p(marks[2])), c_args  # noqa: E501
-
-def time_execution_cuda_style(cb, ev_t, evcreate, evrecord, evsync, evdestroy, evtime, enable=False) -> Optional[float]:
-  if not enable: return cb()
-  evs = [init_c_var(ev_t(), lambda x: evcreate(ctypes.byref(x), 0)) for _ in range(2)]
-  evrecord(evs[0], None)
-  cb()
-  evrecord(evs[1], None)
-  evsync(evs[1])
-  evtime(ctypes.byref(ret := ctypes.c_float()), evs[0], evs[1])
-  for ev in evs: evdestroy(ev)
-  return ret.value * 1e-3
+def flat_mv(mv:memoryview): return mv if len(mv) == 0 else mv.cast("B", shape=(mv.nbytes,))

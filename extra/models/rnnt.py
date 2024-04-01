@@ -1,5 +1,5 @@
 from tinygrad.tensor import Tensor
-from tinygrad.features.jit import TinyJit
+from tinygrad.engine.jit import TinyJit
 from tinygrad.nn import Linear, Embedding
 from tinygrad.helpers import fetch
 import numpy as np

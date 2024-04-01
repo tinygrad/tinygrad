@@ -1,3 +1,4 @@
+# type: ignore
 import ctypes, ctypes.util, struct, platform, pathlib, re, time, os
 start = time.perf_counter()
 
@@ -43,10 +44,9 @@ def install_hook(c_function, python_function):
 
 # *** ioctl lib end ***
 
-# clang2py kfd_ioctl.h -o kfd_ioctl.py
-from extra.hip_gpu_driver import kfd_ioctl
+import tinygrad.runtime.autogen.kfd as kfd_ioctl
 def ioctls_from_header():
-  hdr = (pathlib.Path(__file__).parent.parent.parent / "extra/hip_gpu_driver/kfd_ioctl.h").read_text().replace("\\\n", "")
+  hdr = pathlib.Path("/usr/include/linux/kfd_ioctl.h").read_text().replace("\\\n", "")
   pattern = r'#define\s+(AMDKFD_IOC_[A-Z0-9_]+)\s+AMDKFD_IOW?R?\((0x[0-9a-fA-F]+),\s+struct\s([A-Za-z0-9_]+)\)'
   matches = re.findall(pattern, hdr, re.MULTILINE)
   return {int(nr, 0x10):(name, getattr(kfd_ioctl, "struct_"+sname)) for name, nr, sname in matches}
@@ -67,7 +67,8 @@ def ioctl(fd, request, argp):
       out = ctypes.cast(s.attrs, ctypes.POINTER(kfd_ioctl.struct_kfd_ioctl_svm_attribute))
       for i in range(s.nattr): print(f"{i}: {kfd_ioctl.kfd_ioctl_svm_attr_type__enumvalues[out[i].type]:40s}: {out[i].value:#x}")
   else:
-    print("ioctl", f"{idir=} {size=} {itype=} {nr=} {fd=} {ret=}", os.readlink(f"/proc/self/fd/{fd}") if fd >= 0 else "")
+    print(f"{(st-start)*1000:7.2f} ms +{et*1000.:7.2f} ms : ioctl",
+          f"{idir=} {size=} {itype=} {nr=} {fd=} {ret=}", os.readlink(f"/proc/self/fd/{fd}") if fd >= 0 else "")
   return ret
 
 install_hook(libc.ioctl, ioctl)

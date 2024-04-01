@@ -9,7 +9,7 @@ from tinygrad import nn, dtypes
 from tinygrad.helpers import fetch
 from tinygrad.nn.state import torch_load
 from tinygrad.tensor import Tensor
-from tinygrad.features.jit import TinyJit
+from tinygrad.engine.jit import TinyJit
 from unidecode import unidecode
 
 LRELU_SLOPE = 0.1
@@ -557,7 +557,7 @@ def load_checkpoint(checkpoint_path, model: Synthesizer, optimizer=None, skip_li
             if k == "weight_g": weight_g = v
             else: weight_v = v
           if not skip: obj = getattr(obj, k)
-      if weight_g and weight_v:
+      if weight_g is not None and weight_v is not None:
         setattr(obj, "weight_g", weight_g.numpy())
         setattr(obj, "weight_v", weight_v.numpy())
         obj, v = getattr(parent, "weight"), weight_norm(weight_v, weight_g, 0)

@@ -1,13 +1,53 @@
 from __future__ import annotations
-import ctypes, functools, subprocess, io, atexit
-from typing import Tuple, TypeVar, List, Dict
+import ctypes, functools, subprocess, io, atexit, collections, json
+from typing import Tuple, TypeVar, List, Dict, Any
 import tinygrad.runtime.autogen.hsa as hsa
-from tinygrad.helpers import DEBUG, init_c_var, from_mv, round_up, to_mv, init_c_struct_t
-from tinygrad.device import Compiled, LRUAllocator, BufferOptions
-from tinygrad.runtime.ops_hip import HIPCompiler
+from tinygrad.helpers import DEBUG, init_c_var, from_mv, round_up, to_mv, init_c_struct_t, getenv
+from tinygrad.device import Compiled, LRUAllocator, BufferOptions, Compiler, CompilerOptions
 from tinygrad.runtime.driver.hsa import check, scan_agents, find_memory_pool, AQLQueue
+from tinygrad.renderer.cstyle import HIPRenderer
+from tinygrad.runtime.driver.hip_comgr import compile_hip
+if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401
 
-HSACompiler = HIPCompiler
+PROFILE = getenv("PROFILE", 0)
+
+class HSAProfiler:
+  def __init__(self):
+    self.tracked_signals = collections.defaultdict(list)
+    self.collected_events: List[Tuple[Any, ...]] = []
+    self.copy_timings = hsa.hsa_amd_profiling_async_copy_time_t()
+    self.disp_timings = hsa.hsa_amd_profiling_dispatch_time_t()
+
+  def track(self, signal, device, name, is_copy=False): self.tracked_signals[device].append((signal, name, is_copy))
+  def process(self, device):
+    # Process all tracked signals, should be called before any of tracked signals are reused.
+    for sig,name,is_copy in self.tracked_signals[device]:
+      if is_copy: check(hsa.hsa_amd_profiling_get_async_copy_time(sig, ctypes.byref(timings :=  self.copy_timings)))
+      else: check(hsa.hsa_amd_profiling_get_dispatch_time(device.agent, sig, ctypes.byref(timings := self.disp_timings))) #type:ignore
+      self.collected_events.append((device.device_id, 1 if is_copy else 0, name, timings.start, timings.end))
+    self.tracked_signals.pop(device)
+
+  def save(self, path):
+    mjson = []
+    for i in range(len(HSADevice.devices)):
+      mjson.append({"name": "process_name", "ph": "M", "pid": i, "args": {"name": "HSA"}})
+      mjson.append({"name": "thread_name", "ph": "M", "pid": i, "tid": 0, "args": {"name": "AQL"}})
+      mjson.append({"name": "thread_name", "ph": "M", "pid": i, "tid": 1, "args": {"name": "SDMA"}})
+
+    for dev_id,queue_id,name,st,et in self.collected_events:
+      mjson.append({"name": name, "ph": "B", "pid": dev_id, "tid": queue_id, "ts": st*1e-3})
+      mjson.append({"name": name, "ph": "E", "pid": dev_id, "tid": queue_id, "ts": et*1e-3})
+    with open(path, "w") as f: f.write(json.dumps({"traceEvents": mjson}))
+    print(f"Saved HSA profile to {path}")
+Profiler = HSAProfiler()
+
+class HSACompiler(Compiler):
+  compiler_opts = CompilerOptions("HSA", has_tensor_cores=True, shared_max=65536)
+  def __init__(self, arch:str):
+    self.arch = arch
+    super().__init__(f"compile_hip_{self.arch}")
+  def render(self, name:str, uops) -> str: return HIPRenderer(name, uops)
+  def compile(self, src:str) -> bytes: return compile_hip(src, self.arch)
 
 class HSAProgram:
   def __init__(self, device:HSADevice, name:str, lib:bytes):
@@ -38,7 +78,8 @@ class HSAProgram:
     if not hasattr(self, "args_struct_t"):
       self.args_struct_t = init_c_struct_t(tuple([(f'f{i}', ctypes.c_void_p) for i in range(len(args))] +
                                                  [(f'v{i}', ctypes.c_int) for i in range(len(vals))]))
-      assert ctypes.sizeof(self.args_struct_t) == self.kernargs_segment_size, f"{ctypes.sizeof(self.args_struct_t)} != {self.kernargs_segment_size}"
+      if ctypes.sizeof(self.args_struct_t) != self.kernargs_segment_size:
+        raise RuntimeError(f"HSAProgram.__call__: incorrect args struct size {ctypes.sizeof(self.args_struct_t)} != {self.kernargs_segment_size}")
 
     kernargs = None
     if self.kernargs_segment_size > 0:
@@ -48,7 +89,9 @@ class HSAProgram:
       for i in range(len(vals)): args_st.__setattr__(f'v{i}', vals[i])
       self.device.flush_hdp()
 
-    signal = self.device.hw_queue.submit_kernel(self, global_size, local_size, kernargs, need_signal=wait)
+    signal = self.device.alloc_signal(reusable=True) if wait or PROFILE else None
+    self.device.hw_queue.submit_kernel(self, global_size, local_size, kernargs, completion_signal=signal)
+    if PROFILE: Profiler.track(signal, self.device, self.name)
     if wait:
       hsa.hsa_signal_wait_scacquire(signal, hsa.HSA_SIGNAL_CONDITION_LT, 1, (1 << 64) - 1, hsa.HSA_WAIT_STATE_ACTIVE)
       check(hsa.hsa_amd_profiling_get_dispatch_time(self.device.agent, signal, ctypes.byref(timings := hsa.hsa_amd_profiling_dispatch_time_t())))
@@ -61,39 +104,37 @@ class HSAAllocator(LRUAllocator):
     self.device = device
     super().__init__()
 
-  def _alloc(self, size:int):
-    c_agents = (hsa.hsa_agent_t * len(HSADevice.agents[hsa.HSA_DEVICE_TYPE_GPU]))(*HSADevice.agents[hsa.HSA_DEVICE_TYPE_GPU])
-    check(hsa.hsa_amd_memory_pool_allocate(self.device.gpu_mempool, size, 0, ctypes.byref(buf := ctypes.c_void_p())))
-    check(hsa.hsa_amd_agents_allow_access(len(HSADevice.agents[hsa.HSA_DEVICE_TYPE_GPU]), c_agents, None, buf))
-    return buf.value
-
-  def _alloc_with_options(self, size:int, options:BufferOptions):
+  def _alloc(self, size:int, options:BufferOptions):
     if options.host:
       check(hsa.hsa_amd_memory_pool_allocate(HSADevice.cpu_mempool, size, 0, ctypes.byref(mem := ctypes.c_void_p())))
       check(hsa.hsa_amd_agents_allow_access(2, (hsa.hsa_agent_t*2)(HSADevice.cpu_agent, self.device.agent), None, mem))
       return mem.value
-    else: raise Exception("no options")
+    else:
+      c_agents = (hsa.hsa_agent_t * len(HSADevice.agents[hsa.HSA_DEVICE_TYPE_GPU]))(*HSADevice.agents[hsa.HSA_DEVICE_TYPE_GPU])
+      check(hsa.hsa_amd_memory_pool_allocate(self.device.gpu_mempool, size, 0, ctypes.byref(buf := ctypes.c_void_p())))
+      check(hsa.hsa_amd_agents_allow_access(len(HSADevice.agents[hsa.HSA_DEVICE_TYPE_GPU]), c_agents, None, buf))
+      return buf.value
 
-  def _free(self, opaque:T):
+  def _free(self, opaque:T, options:BufferOptions):
     HSADevice.synchronize_system()
     check(hsa.hsa_amd_memory_pool_free(opaque))
 
   def copyin(self, dest:T, src: memoryview):
     # Async copyin sync model uses barriers on the main hw queue, since barriers are guaranteed to execute in order with all other packets.
-    copy_signal = self.device.alloc_signal(reusable=True)
-    sync_signal = self.device.hw_queue.submit_barrier(need_signal=True)
-    mem = self._alloc_with_options(src.nbytes, BufferOptions(host=True))
+    self.device.hw_queue.submit_barrier([], sync_signal := self.device.alloc_signal(reusable=True))
+    mem = self._alloc(src.nbytes, BufferOptions(host=True))
     ctypes.memmove(mem, from_mv(src), src.nbytes)
-    check(hsa.hsa_amd_memory_async_copy_on_engine(dest, self.device.agent, mem, HSADevice.cpu_agent, src.nbytes,
-                                                  1, ctypes.byref(sync_signal), copy_signal, hsa.HSA_AMD_SDMA_ENGINE_0, True))
-    self.device.hw_queue.submit_barrier(wait_signals=[copy_signal])
+    check(hsa.hsa_amd_memory_async_copy_on_engine(dest, self.device.agent, mem, HSADevice.cpu_agent, src.nbytes, 1, ctypes.byref(sync_signal),
+                                                  copy_signal := self.device.alloc_signal(reusable=True), hsa.HSA_AMD_SDMA_ENGINE_0, True))
+    self.device.hw_queue.submit_barrier([copy_signal])
     self.device.delayed_free.append(mem)
+    if PROFILE: Profiler.track(copy_signal, self.device, f"copyin: CPU -> HSA:{self.device.device_id}", is_copy=True)
 
   def copy_from_fd(self, dest, fd, offset, size):
-    sync_signal = self.device.hw_queue.submit_barrier(need_signal=True)
+    self.device.hw_queue.submit_barrier([], sync_signal := self.device.alloc_signal(reusable=True))
 
     if not hasattr(self, 'hb'):
-      self.hb = [self._alloc_with_options(CHUNK_SIZE, BufferOptions(host=True)) for _ in range(2)]
+      self.hb = [self._alloc(CHUNK_SIZE, BufferOptions(host=True)) for _ in range(2)]
       self.hb_signals = [self.device.alloc_signal(reusable=False) for _ in range(2)]
       self.hb_polarity = 0
       self.sdma = [hsa.HSA_AMD_SDMA_ENGINE_0, hsa.HSA_AMD_SDMA_ENGINE_1]
@@ -124,7 +165,7 @@ class HSAAllocator(LRUAllocator):
 
     wait_signals = [self.hb_signals[self.hb_polarity - 1]]
     if copies_called > 1: wait_signals.append(self.hb_signals[self.hb_polarity])
-    self.device.hw_queue.submit_barrier(wait_signals=wait_signals)
+    self.device.hw_queue.submit_barrier(wait_signals)
 
   def copyout(self, dest:memoryview, src:T):
     HSADevice.synchronize_system()
@@ -134,15 +175,17 @@ class HSAAllocator(LRUAllocator):
     check(hsa.hsa_amd_memory_async_copy(addr, HSADevice.cpu_agent, src, self.device.agent, dest.nbytes, 0, None, copy_signal))
     hsa.hsa_signal_wait_scacquire(copy_signal, hsa.HSA_SIGNAL_CONDITION_LT, 1, (1 << 64) - 1, hsa.HSA_WAIT_STATE_ACTIVE)
     check(hsa.hsa_amd_memory_unlock(from_mv(dest)))
+    if PROFILE: Profiler.track(copy_signal, self.device, f"copyout: HSA:{self.device.device_id} -> CPU", is_copy=True)
 
   def transfer(self, dest:T, src:T, sz:int, src_dev=None, dest_dev=None):
-    copy_signal = dest_dev.alloc_signal(reusable=False)
-    sync_signal_1 = src_dev.hw_queue.submit_barrier(need_signal=True)
-    sync_signal_2 = dest_dev.hw_queue.submit_barrier(need_signal=True)
+    src_dev.hw_queue.submit_barrier([], sync_signal_1 := src_dev.alloc_signal(reusable=True))
+    dest_dev.hw_queue.submit_barrier([], sync_signal_2 := dest_dev.alloc_signal(reusable=True))
     c_wait_signal = (hsa.hsa_signal_t*2)(sync_signal_1, sync_signal_2)
-    check(hsa.hsa_amd_memory_async_copy_on_engine(dest, dest_dev.agent, src, src_dev.agent, sz, 2, c_wait_signal, copy_signal, hsa.HSA_AMD_SDMA_ENGINE_0, True)) # noqa: E501
-    src_dev.hw_queue.submit_barrier(wait_signals=[copy_signal])
-    dest_dev.hw_queue.submit_barrier(wait_signals=[copy_signal])
+    check(hsa.hsa_amd_memory_async_copy_on_engine(dest, dest_dev.agent, src, src_dev.agent, sz, 2, c_wait_signal,
+                                                  copy_signal := dest_dev.alloc_signal(reusable=False), hsa.HSA_AMD_SDMA_ENGINE_0, True))
+    src_dev.hw_queue.submit_barrier([copy_signal])
+    dest_dev.hw_queue.submit_barrier([copy_signal])
+    if PROFILE: Profiler.track(copy_signal, src_dev, f"transfer: HSA:{src_dev.device_id} -> HSA:{dest_dev.device_id}", is_copy=True)
 
 class HSADevice(Compiled):
   devices: List[HSADevice] = []
@@ -152,10 +195,11 @@ class HSADevice(Compiled):
   def __init__(self, device:str=""):
     if not HSADevice.agents:
       check(hsa.hsa_init())
-      atexit.register(lambda: hsa.hsa_shut_down())
+      atexit.register(hsa_terminate)
       HSADevice.agents = scan_agents()
       HSADevice.cpu_agent = HSADevice.agents[hsa.HSA_DEVICE_TYPE_CPU][0]
       HSADevice.cpu_mempool = find_memory_pool(HSADevice.cpu_agent, segtyp=hsa.HSA_AMD_SEGMENT_GLOBAL, location=hsa.HSA_AMD_MEMORY_POOL_LOCATION_CPU)
+      if PROFILE: check(hsa.hsa_amd_profiling_async_copy_enable(1))
 
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
     self.agent = HSADevice.agents[hsa.HSA_DEVICE_TYPE_GPU][self.device_id]
@@ -193,6 +237,7 @@ class HSADevice(Compiled):
     self.delayed_free.clear()
 
     self.kernarg_next_addr = self.kernarg_start_addr
+    Profiler.process(self)
 
   @staticmethod
   def synchronize_system():
@@ -209,13 +254,25 @@ class HSADevice(Compiled):
   def alloc_kernargs(self, sz):
     if self.kernarg_next_addr + sz >= self.kernarg_start_addr + self.kernarg_pool_sz: self._new_kernargs_region(int(self.kernarg_pool_sz * 2))
     result = self.kernarg_next_addr
-    self.kernarg_next_addr = (self.kernarg_next_addr + sz + 15) & (~15) # align to 16 bytes
+    self.kernarg_next_addr = round_up(self.kernarg_next_addr + sz, 16)
     return result
 
   def _new_kernargs_region(self, sz:int):
     if hasattr(self, 'kernarg_start_addr'): self.delayed_free.append(self.kernarg_start_addr)
-    self.kernarg_start_addr: int = self.allocator._alloc(sz)
+    self.kernarg_start_addr: int = self.allocator._alloc(sz, BufferOptions())
     self.kernarg_next_addr = self.kernarg_start_addr
     self.kernarg_pool_sz: int = sz
 
   def flush_hdp(self): self.hdp_flush.HDP_MEM_FLUSH_CNTL[0] = 1
+
+def hsa_terminate():
+  # Need to stop/delete aql queue before hsa shut down, this leads to gpu hangs.
+  for dev in HSADevice.devices:
+    Profiler.process(dev)
+    del dev.hw_queue
+
+  # hsa_shut_down cleans up all hsa-related resources.
+  hsa.hsa_shut_down()
+  HSADevice.synchronize = lambda: None #type:ignore
+  HSAProgram.__del__ = lambda _: None #type:ignore
+  if Profiler.collected_events: Profiler.save("/tmp/profile.json")
