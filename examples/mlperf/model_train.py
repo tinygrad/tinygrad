@@ -375,6 +375,9 @@ def train_unet3d():
         fn = f"./ckpts/unet3d.safe"
         safe_save(get_state_dict(model), fn)
         print(f" *** Model saved to {fn} ***")
+      elif mean_dice < 1e-6:
+        print("Model diverging. Aborting.")
+        diverged = True
 
     if is_successful or diverged:
       break
