@@ -248,11 +248,6 @@ def train_unet3d():
   import random
   import time
 
-  if SEED:
-    Tensor.manual_seed(SEED)
-    np.random.seed(SEED)
-    random.seed(SEED)
-
   if WANDB:
     try:
       import wandb
@@ -282,6 +277,11 @@ def train_unet3d():
   evaluate_every = EVALUATE_EVERY
 
   print(f"Start evaluation at epoch {start_eval_at} and every {evaluate_every} epochs after")
+
+  if SEED:
+    Tensor.manual_seed(SEED)
+    np.random.seed(SEED)
+    random.seed(SEED)
 
   model = UNet3D()
   params = get_parameters(model)
