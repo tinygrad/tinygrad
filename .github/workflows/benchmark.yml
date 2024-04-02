@@ -5,6 +5,7 @@ on:
     branches:
       - master
       - update_benchmark
+  pull_request:
 
 jobs:
   testmacbenchmark:
