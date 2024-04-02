@@ -30,7 +30,7 @@ if __name__ == "__main__":
   for k, x in nn.state.get_state_dict(model).items(): x.to_(GPUS)  # we put a copy of the model on every GPU
   opt = nn.optim.Adam(nn.state.get_parameters(model))
 
-  @TinyJit
+  #@TinyJit
   def train_step() -> Tensor:
     with Tensor.train():
       opt.zero_grad()

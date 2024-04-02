@@ -82,24 +82,36 @@ DISPATCH_KERNEL_HEADER |= hsa.HSA_FENCE_SCOPE_SYSTEM << hsa.HSA_PACKET_HEADER_SC
 DISPATCH_KERNEL_HEADER |= hsa.HSA_FENCE_SCOPE_SYSTEM << hsa.HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE
 DISPATCH_KERNEL_HEADER |= hsa.HSA_PACKET_TYPE_KERNEL_DISPATCH << hsa.HSA_PACKET_HEADER_TYPE
 
+BARRIER_HEADER  = 1 << hsa.HSA_PACKET_HEADER_BARRIER
+BARRIER_HEADER |= hsa.HSA_FENCE_SCOPE_SYSTEM << hsa.HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE
+BARRIER_HEADER |= hsa.HSA_FENCE_SCOPE_SYSTEM << hsa.HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE
+BARRIER_HEADER |= hsa.HSA_PACKET_TYPE_BARRIER_AND << hsa.HSA_PACKET_HEADER_TYPE
+
 SHT_PROGBITS = 0x1
 SHF_ALLOC = 0x2
 
+EMPTY_SIGNAL = hsa.hsa_signal_t()
+
 class HWComputeQueue:
   def __init__(self):
-    pass
+    self.q = []
 
-  def exec(self, prg:KFDProgram, kernel_count:int, global_size:Tuple[int,int,int]=(1,1,1),
-           local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=()):
-    pass
+  def exec(self, prg:KFDProgram, kernargs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), completion_signal:int=0):
+    self.q.append(hsa.hsa_kernel_dispatch_packet_t(
+      setup=DISPATCH_KERNEL_SETUP, header=DISPATCH_KERNEL_HEADER,
+      workgroup_size_x=local_size[0], workgroup_size_y=local_size[1], workgroup_size_z=local_size[2],
+      grid_size_x=global_size[0]*local_size[0], grid_size_y=global_size[1]*local_size[1], grid_size_z=global_size[2]*local_size[2],
+      kernel_object=prg.handle, group_segment_size=prg.group_segment_size, private_segment_size=prg.private_segment_size,
+      kernarg_address=kernargs, completion_signal=hsa.hsa_signal_t(completion_signal)))
 
   def signal(self, signal:int):
-    pass
+    self.q.append(hsa.hsa_barrier_and_packet_t(header=BARRIER_HEADER, completion_signal=hsa.hsa_signal_t(signal)))
 
   def wait(self, signal:int):
-    pass
+    self.q.append(hsa.hsa_barrier_and_packet_t(header=BARRIER_HEADER,
+                                               dep_signal=[hsa.hsa_signal_t(signal), EMPTY_SIGNAL, EMPTY_SIGNAL, EMPTY_SIGNAL, EMPTY_SIGNAL]))
 
-# prebuilt packets
+# prebuilt sdma packets
 sdma_flush_hdp_pkt = sdma_pkts.hdp_flush(0x8, 0x0, 0x80000000, 0x0, 0x0, 0x0)
 sdma_cache_inv = sdma_pkts.gcr(op=amd_gpu.SDMA_OP_GCR, sub_op=amd_gpu.SDMA_SUBOP_USER_GCR, GCR_CONTROL_GL2_WB=1, GCR_CONTROL_GLK_WB=1,
                               GCR_CONTROL_GL2_INV=1, GCR_CONTROL_GL1_INV=1, GCR_CONTROL_GLV_INV=1, GCR_CONTROL_GLK_INV=1,
@@ -139,7 +151,6 @@ class HWCopyQueue:
   def wait(self, poll_addr:int):
     self.q.append(sdma_pkts.poll_regmem(op=amd_gpu.SDMA_OP_POLL_REGMEM, mem_poll=1, func=0x3, addr=poll_addr,
                                         value=0, mask=0xffffffff, interval=0x04, retry_count=0xfff))
-
 
 class KFDProgram:
   def __init__(self, device:KFDDevice, name:str, lib:bytes):
@@ -181,19 +192,12 @@ class KFDProgram:
     for i in range(len(vals)): args_st.__setattr__(f'v{i}', vals[i])
 
     self.device.completion_signal.value = 1 # reset the signal before call
-    packet = hsa.hsa_kernel_dispatch_packet_t.from_address(self.device.aql_ring.va_addr +
-                                                           (self.device.aql_doorbell_value*AQL_PACKET_SIZE) % self.device.aql_ring.size)
-    packet.workgroup_size_x, packet.workgroup_size_y, packet.workgroup_size_z = local_size
-    packet.reserved0 = 0
-    packet.grid_size_x, packet.grid_size_y, packet.grid_size_z = tuple(g*l for g,l in zip(global_size, local_size))
-    packet.kernel_object = self.handle
-    packet.kernarg_address = self.device.kernargs.va_addr
-    packet.group_segment_size = self.group_segment_size
-    packet.private_segment_size = self.private_segment_size   # what it this and why doesn't it work? (see TestOps.test_dilated_conv_transpose2d)
-    packet.reserved2 = 0
-    packet.completion_signal = hsa.hsa_signal_t(ctypes.addressof(self.device.completion_signal))
-    packet.setup = DISPATCH_KERNEL_SETUP
-    packet.header = DISPATCH_KERNEL_HEADER
+
+    ring_addr = self.device.aql_ring.va_addr + (self.device.aql_doorbell_value*AQL_PACKET_SIZE) % self.device.aql_ring.size
+
+    self.q = HWComputeQueue()
+    self.q.exec(self, self.device.kernargs.va_addr, global_size, local_size, ctypes.addressof(self.device.completion_signal))
+    for cmd in self.q.q: ctypes.memmove(ring_addr, ctypes.addressof(cmd), AQL_PACKET_SIZE)
 
     # one pending packet + ring doorbell
     self.device.amd_aql_queue.write_dispatch_id = self.device.aql_doorbell_value + 1

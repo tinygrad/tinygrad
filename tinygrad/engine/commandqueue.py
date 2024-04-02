@@ -58,16 +58,19 @@ class CommandQueue:
 
       if si.ast[0].op is LoadOps.COPY:
         # TODO: add back copy device
-        copy_device = si.outputs[0].device #+"-copy"
+        copy_device = si.outputs[0].device
+        if si.outputs[0].device.startswith("KFD"): copy_device += "-copy"
         add_wait_item(copy_device, add_sync_item(si.inputs[0].device))
         self.q[copy_device].append(CopyItem(si.outputs[0], si.inputs[0]))
-        #add_wait_item(si.outputs[0].device, add_sync_item(copy_device))
+        if copy_device.endswith("-copy"): add_wait_item(si.outputs[0].device, add_sync_item(copy_device))
         continue
 
       # NOTE: LoadOps.EMPTY and LoadOps.CUSTOM are making it here
       queue.append(si)
 
   def __call__(self):
+    print({d:len(self.q[d]) for d in self.q})
+
     active_queues = list(self.q.keys())
     waiting_queues: DefaultDict[SyncItem, List[str]] = defaultdict(list)
     seen_sids = set()
@@ -79,8 +82,8 @@ class CommandQueue:
       if isinstance(si, SyncItem):
         # don't sync if there's other options
         if all(isinstance(self.q[x][0], SyncItem) for x in active_queues if len(self.q[x])):
-          et = cpu_time_execution(Device[device].synchronize, enable=DEBUG>=2)
-          update_stats(colored("synchronize", "RED"), 0, 0, {}, et, 1, device=device)
+          et = cpu_time_execution(Device[device.split("-")[0]].synchronize, enable=DEBUG>=2)
+          update_stats(colored(f"synchronize {id(si)}", "RED"), 0, 0, {}, et, 1, device=device)
           if si in waiting_queues:
             active_queues += waiting_queues[si]
             waiting_queues[si].clear()
@@ -89,12 +92,13 @@ class CommandQueue:
           # put it back
           self.q[device] = [si] + self.q[device]
       elif isinstance(si, WaitItem):
+        update_stats(colored(f"wait {si.sync.device} {id(si.sync)}", "RED"), 0, 0, {}, 0, 0, device=device)
         if si.sync not in seen_sids:
           waiting_queues[si.sync].append(device)
           continue
       elif isinstance(si, CopyItem):
         si.output.allocate()
-        fxn = BufferXfer() if hasattr(Device[si.output.device].allocator, 'transfer') and \
+        fxn = BufferXfer() if hasattr(Device[si.output.device.split("-")[0]].allocator, 'transfer') and \
           si.output.device.split(":")[0] == si.input.device.split(":")[0] else BufferCopy()
         fxn.exec([si.output, si.input])
       elif isinstance(si, ScheduleItem):
