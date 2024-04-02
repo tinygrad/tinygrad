@@ -1,4 +1,4 @@
-import unittest
+import unittest, math
 from tinygrad import Tensor, Device
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.features.multi import MultiLazyBuffer
@@ -142,14 +142,21 @@ class TestTautologicalCompare(unittest.TestCase):
     np.testing.assert_equal((True < Tensor([True, False])).numpy(), [False, False])
 
   def test_a_eq_a(self):
-    # self eq is always true
+    # self eq is always true for int or bool
     a = Tensor([1, 2, 3])
     np.testing.assert_equal((a == a).numpy(), [True, True, True])
 
+    a = Tensor([math.nan, 1.0, 2.0])
+    np.testing.assert_equal((a == a).numpy(), [False, True, True])
+
   def test_a_ne_a(self):
-    # self not eq is always false
+    # self not eq is always false for int or bool
     a = Tensor([1, 2, 3])
     np.testing.assert_equal((a != a).numpy(), [False, False, False])
+
+    # except nan
+    a = Tensor([math.nan, 1.0, 2.0])
+    np.testing.assert_equal((a != a).numpy(), [True, False, False])
 
 if __name__ == '__main__':
   unittest.main()

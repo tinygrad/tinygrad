@@ -51,7 +51,9 @@ def _match(uop:UOp, pattern:Dict[str, Any], store:Dict[str, UOp]) -> bool:
           return True
       return False
     else:
-      if uop.__getattribute__(k) != v: return False
+      if callable(v):
+        if not v(uop.__getattribute__(k)): return False
+      elif uop.__getattribute__(k) != v: return False
   return True
 
 class PatternMatcher:
@@ -81,7 +83,8 @@ constant_folder = PatternMatcher([
   ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": ({"__name__": "x", "uop": UOps.CONST, "dtype": dtypes.bool, "arg": True}, {})},
    lambda x: UOp.const(x.dtype, False)),
   # x == x is always true
-  ({"uop": UOps.ALU, "arg": BinaryOps.CMPEQ, "vin": ({"__name__": "x"}, {"__name__": "x"})}, lambda x: UOp.const(dtypes.bool, True)),
+  ({"uop": UOps.ALU, "arg": BinaryOps.CMPEQ, "vin": ({"__name__": "x", "dtype": lambda dt: not dtypes.is_float(dt)}, {"__name__": "x"})},
+   lambda x: UOp.const(dtypes.bool, True)),
   # a conditional with the same results either way is a noop, also fold const conditionals
   ({"uop": UOps.ALU, "arg": TernaryOps.WHERE, "vin": ({}, {"__name__": "val"}, {"__name__": "val"})}, lambda val: val),
   ({"uop": UOps.ALU, "arg": TernaryOps.WHERE, "vin": ({"__name__": "gate", "uop": UOps.CONST}, {"__name__": "c0"}, {"__name__": "c1"})},
