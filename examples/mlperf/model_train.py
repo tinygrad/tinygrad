@@ -253,7 +253,7 @@ def train_bert():
 
   # ** hyperparameters **
   epochs             = config["epochs"]                 = getenv("EPOCHS", 1)
-  BS                 = config["GLOBAL_BATCH_SIZE"]      = getenv("GLOBAL_BATCH_SIZE", 32 * len(GPUS))
+  BS                 = config["GLOBAL_BATCH_SIZE"]      = getenv("GLOBAL_BATCH_SIZE", 29 * len(GPUS)) # FP32 6 GPUS -> BS174
   EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 2)
   max_lr             = config["OPT_BASE_LEARNING_RATE"] = getenv("OPT_BASE_LEARNING_RATE", 1e-4)
 
@@ -261,8 +261,9 @@ def train_bert():
   warmup_steps       = config["NUM_WARMUP_STEPS"]       = getenv("NUM_WARMUP_STEPS", 10000)
   start_warmup_steps = config["START_WARMUP_STEPS"]     = getenv("START_WARMUP_STEPS", 0)
   max_eval_steps     = config["MAX_EVAL_STEPS"]         = getenv("MAX_EVAL_STEPS", 100)
-  eval_step_freq     = config["EVAL_STEP_FREQ"]         = (math.floor(0.05 * (230.23 * BS + 3000000) / 25000) * 25000) / BS
+  eval_step_freq     = config["EVAL_STEP_FREQ"]         = int((math.floor(0.05 * (230.23 * BS + 3000000) / 25000) * 25000) / BS) # Round down
   save_ckpt_freq     = config["SAVE_CKPT_FREQ"]         = getenv("SAVE_CKPT_FREQ", 1000)
+  keep_ckpt_amount   = config["KEEP_CKPT_AMOUNT"]       = getenv("KEEP_CKPT_AMOUNT", 5)
 
   decay              = config["decay"]                  = getenv("DECAY", 0.01)
   poly_power         = config["poly_power"]             = getenv("POLY_POWER", 1.0)
@@ -282,7 +283,7 @@ def train_bert():
     x.realize().to_(GPUS)
   parameters = get_parameters(model)
 
-  assert 800 % EVAL_BS == 0, "Evaluation batch size must divide 800 without remainder"
+  #assert 800 % EVAL_BS == 0, "Evaluation batch size must divide 800 without remainder"
 
   # ** Log hparams **
   for key, value in config.items():
@@ -311,7 +312,7 @@ def train_bert():
   if WANDB:
     import wandb
     wandb_args = {"id": wandb_id, "resume": "must"} if (wandb_id := getenv("WANDB_RESUME", "")) else {}
-    wandb.init(config=config, **wandb_args, project="MLPerf-BERT")
+    wandb.init(config=config, **wandb_args, project="MLPerf")
 
   BENCHMARK = getenv("BENCHMARK")
 
@@ -351,7 +352,12 @@ def train_bert():
 
   def data_get(it, eval=False):
     data: dict[str, Tensor] = next(it)
-    for key in data.keys(): data[key].shard_(GPUS if not eval else [GPUS[0]], axis=0) # Cant shard EVAL_BS 8 across 6
+    for key in data.keys():
+        if not eval:
+            data[key].shard_(GPUS, axis=0) if len(GPUS) > 1 else None
+        else:
+            eval_gpus = GPUS[:max(2, min(len(GPUS), 8) // 2 * 2)]
+            data[key].shard_(eval_gpus, axis=0) if len(eval_gpus) > 1 else None
     return data
   
   eval_it = iter(batch_load_bert(EVAL_BS, val=True))
@@ -405,7 +411,7 @@ def train_bert():
         return
 
       # ** eval loop **
-      if i % eval_step_freq == 0:
+      if i % eval_step_freq == 0 or i == 1:
         train_step.reset()  # free the train step memory :(
         eval_loss = []
         eval_accuracy = []
@@ -463,6 +469,12 @@ def train_bert():
           fn = f"{ckpt_dir}/{time.strftime('%Y%m%d_%H%M%S')}_e{e}.safe"
         print(f"saving ckpt to {fn}")
         safe_save(get_training_state(model, optimizer_group, scheduler), fn)
+        ckpt_files = [f for f in os.listdir(ckpt_dir) if os.path.isfile(os.path.join(ckpt_dir, f))]
+        ckpt_files.sort(key=lambda x: os.path.getmtime(os.path.join(ckpt_dir, x)))
+        while len(ckpt_files) > keep_ckpt_amount:
+          last = ckpt_files.pop(0)
+          print(f"Removing old ckpt {last}")
+          os.remove(os.path.join(ckpt_dir, last))
 
 def train_maskrcnn():
   # TODO: Mask RCNN

@@ -5,7 +5,7 @@ from tqdm import tqdm
 from tinygrad.helpers import diskcache, getenv
 from tqdm.contrib.concurrent import process_map
 
-BASEDIR = Path(__file__).parent / "wiki"
+BASEDIR = getenv('BASEDIR', Path(__file__).parent / "wiki")
 
 ################### Tokenization #####################
 
