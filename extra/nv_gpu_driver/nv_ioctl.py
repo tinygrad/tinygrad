@@ -10,6 +10,11 @@ IOCTL_SYSCALL = {"aarch64": 0x1d, "x86_64":16}[processor]
 def get_struct(argp, stype):
   return ctypes.cast(ctypes.c_void_p(argp), ctypes.POINTER(stype)).contents
 
+def dump_struct(st):
+  print("\t", st.__class__.__name__, end=" { ")
+  for v in type(st)._fields_: print(f"{v[0]}={getattr(st, v[0])}", end=" ")
+  print("}")
+
 def format_struct(s):
   sdats = []
   for field_name, field_type in s._fields_:
@@ -46,10 +51,12 @@ def install_hook(c_function, python_function):
 import extra.nv_gpu_driver.esc_ioctl as ESC
 import extra.nv_gpu_driver.ctrl_ioctl as CTRL
 import extra.nv_gpu_driver.class_ioctl as CLASS
+import extra.nv_gpu_driver.uvm_ioctl as UVM
 nvescs = {getattr(ESC, x):x for x in dir(ESC) if x.startswith("NV_ESC")}
 nvcmds = {getattr(CTRL, x):(x, getattr(CTRL, "struct_"+x+"_PARAMS", getattr(CTRL, "struct_"+x.replace("_CMD_", "_")+"_PARAMS", None))) for x in dir(CTRL) if \
           x.startswith("NV") and x[6:].startswith("_CTRL_") and isinstance(getattr(CTRL, x), int)}
 nvclasses = {getattr(CLASS, x):x for x in dir(CLASS) if isinstance(getattr(CLASS, x), int)}
+nvuvms = {int(getattr(UVM, x)[2]):x for x in dir(UVM) if isinstance(getattr(UVM, x), list) and len(getattr(UVM, x)) == 4 and getattr(UVM, x)[0] == 'i'} # broken clang2py generates mess
 
 @ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_ulong, ctypes.c_void_p)
 def ioctl(fd, request, argp):
@@ -75,7 +82,11 @@ def ioctl(fd, request, argp):
       #print(f"{(st-start)*1000:7.2f} ms +{et*1000.:7.2f} ms : {ret:2d} = {name:40s}", ' '.join(format_struct(s)))
     elif nr == ESC.NV_ESC_RM_ALLOC:
       s = get_struct(argp, ESC.NVOS21_PARAMETERS)
-      print(f"NV_ESC_RM_ALLOC    class: {nvclasses[s.hClass]:30s}")
+      print(f"NV_ESC_RM_ALLOC    hClass={nvclasses[s.hClass]:30s}, hRoot={s.hRoot}, hObjectParent={s.hObjectParent}, pAllocParms={s.pAllocParms}, hObjectNew={s.hObjectNew}")
+      if s.pAllocParms is not None:
+        if s.hClass == CLASS.NV01_DEVICE_0: dump_struct(get_struct(s.pAllocParms, CLASS.NV0080_ALLOC_PARAMETERS))
+        if s.hClass == CLASS.FERMI_VASPACE_A: dump_struct(get_struct(s.pAllocParms, ESC.NV_VASPACE_ALLOCATION_PARAMETERS))
+        if s.hClass == CLASS.NV50_MEMORY_VIRTUAL: dump_struct(get_struct(s.pAllocParms, ESC.NV_MEMORY_ALLOCATION_PARAMS))
     elif nr == ESC.NV_ESC_RM_MAP_MEMORY:
       # nv_ioctl_nvos33_parameters_with_fd
       s = get_struct(argp, ESC.NVOS33_PARAMETERS)
@@ -84,7 +95,11 @@ def ioctl(fd, request, argp):
       print(nvescs[nr])
     else:
       print("unhandled NR", nr)
-  #print("ioctl", f"{idir=} {size=} {itype=} {nr=} {fd=} {ret=}", os.readlink(f"/proc/self/fd/{fd}") if fd >= 0 else "")
+  elif os.readlink(f"/proc/self/fd/{fd}").endswith("nvidia-uvm"):
+    print(f"{nvuvms.get(request, f'UVM UNKNOWN {request=}')}")
+    if nvuvms.get(request) is not None: dump_struct(get_struct(argp, getattr(UVM, nvuvms.get(request)+"_PARAMS")))
+
+  # print("ioctl", f"{idir=} {size=} {itype=} {nr=} {fd=} {ret=}", os.readlink(f"/proc/self/fd/{fd}") if fd >= 0 else "")
   return ret
 
 install_hook(libc.ioctl, ioctl)

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# TARGET arch is: []
+# TARGET arch is: ['-I/home/nimlgen/cuda_ioctl_sniffer/open-gpu-kernel-modules/src/common/sdk/nvidia/inc/']
 # WORD_SIZE is: 8
 # POINTER_SIZE is: 8
 # LONGDOUBLE_SIZE is: 16
@@ -8,8 +8,138 @@
 import ctypes
 
 
+class AsDictMixin:
+    @classmethod
+    def as_dict(cls, self):
+        result = {}
+        if not isinstance(self, AsDictMixin):
+            # not a structure, assume it's already a python object
+            return self
+        if not hasattr(cls, "_fields_"):
+            return result
+        # sys.version_info >= (3, 5)
+        # for (field, *_) in cls._fields_:  # noqa
+        for field_tuple in cls._fields_:  # noqa
+            field = field_tuple[0]
+            if field.startswith('PADDING_'):
+                continue
+            value = getattr(self, field)
+            type_ = type(value)
+            if hasattr(value, "_length_") and hasattr(value, "_type_"):
+                # array
+                if not hasattr(type_, "as_dict"):
+                    value = [v for v in value]
+                else:
+                    type_ = type_._type_
+                    value = [type_.as_dict(v) for v in value]
+            elif hasattr(value, "contents") and hasattr(value, "_type_"):
+                # pointer
+                try:
+                    if not hasattr(type_, "as_dict"):
+                        value = value.contents
+                    else:
+                        type_ = type_._type_
+                        value = type_.as_dict(value.contents)
+                except ValueError:
+                    # nullptr
+                    value = None
+            elif isinstance(value, AsDictMixin):
+                # other structure
+                value = type_.as_dict(value)
+            result[field] = value
+        return result
 
 
+class Structure(ctypes.Structure, AsDictMixin):
+
+    def __init__(self, *args, **kwds):
+        # We don't want to use positional arguments fill PADDING_* fields
+
+        args = dict(zip(self.__class__._field_names_(), args))
+        args.update(kwds)
+        super(Structure, self).__init__(**args)
+
+    @classmethod
+    def _field_names_(cls):
+        if hasattr(cls, '_fields_'):
+            return (f[0] for f in cls._fields_ if not f[0].startswith('PADDING'))
+        else:
+            return ()
+
+    @classmethod
+    def get_type(cls, field):
+        for f in cls._fields_:
+            if f[0] == field:
+                return f[1]
+        return None
+
+    @classmethod
+    def bind(cls, bound_fields):
+        fields = {}
+        for name, type_ in cls._fields_:
+            if hasattr(type_, "restype"):
+                if name in bound_fields:
+                    if bound_fields[name] is None:
+                        fields[name] = type_()
+                    else:
+                        # use a closure to capture the callback from the loop scope
+                        fields[name] = (
+                            type_((lambda callback: lambda *args: callback(*args))(
+                                bound_fields[name]))
+                        )
+                    del bound_fields[name]
+                else:
+                    # default callback implementation (does nothing)
+                    try:
+                        default_ = type_(0).restype().value
+                    except TypeError:
+                        default_ = None
+                    fields[name] = type_((
+                        lambda default_: lambda *args: default_)(default_))
+            else:
+                # not a callback function, use default initialization
+                if name in bound_fields:
+                    fields[name] = bound_fields[name]
+                    del bound_fields[name]
+                else:
+                    fields[name] = type_()
+        if len(bound_fields) != 0:
+            raise ValueError(
+                "Cannot bind the following unknown callback(s) {}.{}".format(
+                    cls.__name__, bound_fields.keys()
+            ))
+        return cls(**fields)
+
+
+class Union(ctypes.Union, AsDictMixin):
+    pass
+
+
+
+
+
+NV01_DEVICE_0 = (0x00000080) # macro
+# NV0080_MAX_DEVICES = NV_MAX_DEVICES # macro
+NV0080_ALLOC_PARAMETERS_MESSAGE_ID = (0x0080) # macro
+class struct_NV0080_ALLOC_PARAMETERS(Structure):
+    pass
+
+struct_NV0080_ALLOC_PARAMETERS._pack_ = 1 # source:False
+struct_NV0080_ALLOC_PARAMETERS._fields_ = [
+    ('deviceId', ctypes.c_uint32),
+    ('hClientShare', ctypes.c_uint32),
+    ('hTargetClient', ctypes.c_uint32),
+    ('hTargetDevice', ctypes.c_uint32),
+    ('flags', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('vaSpaceSize', ctypes.c_uint64),
+    ('vaStartInternal', ctypes.c_uint64),
+    ('vaLimitInternal', ctypes.c_uint64),
+    ('vaMode', ctypes.c_uint32),
+    ('PADDING_1', ctypes.c_ubyte * 4),
+]
+
+NV0080_ALLOC_PARAMETERS = struct_NV0080_ALLOC_PARAMETERS
 NV01_ROOT = (0x00000000) # macro
 NV1_ROOT = (0x00000000) # macro
 NV01_NULL_OBJECT = (0x00000000) # macro
@@ -19,7 +149,6 @@ NV1_ROOT_NON_PRIV = (0x00000001) # macro
 NV01_ROOT_CLIENT = (0x00000041) # macro
 FABRIC_MANAGER_SESSION = (0x0000000f) # macro
 NV0020_GPU_MANAGEMENT = (0x00000020) # macro
-NV01_DEVICE_0 = (0x00000080) # macro
 NV20_SUBDEVICE_0 = (0x00002080) # macro
 NV2081_BINAPI = (0x00002081) # macro
 NV2082_BINAPI_PRIVILEGED = (0x00002082) # macro
@@ -48,9 +177,13 @@ NV01_MEMORY_HW_RESOURCES = (0x000000b1) # macro
 NV01_MEMORY_LIST_SYSTEM = (0x00000081) # macro
 NV01_MEMORY_LIST_FBMEM = (0x00000082) # macro
 NV01_MEMORY_LIST_OBJECT = (0x00000083) # macro
+NV_IMEX_SESSION = (0x000000f1) # macro
 NV01_MEMORY_FLA = (0x000000f3) # macro
+NV_MEMORY_EXPORT = (0x000000e0) # macro
 NV_CE_UTILS = (0x00000050) # macro
 NV_MEMORY_FABRIC = (0x000000f8) # macro
+NV_MEMORY_FABRIC_IMPORT_V2 = (0x000000f9) # macro
+NV_MEMORY_FABRIC_IMPORTED_REF = (0x000000fb) # macro
 FABRIC_VASPACE_A = (0x000000fc) # macro
 NV_MEMORY_MULTICAST_FABRIC = (0x000000fd) # macro
 IO_VASPACE_A = (0x000000f2) # macro
@@ -174,11 +307,14 @@ NV40_DEBUG_BUFFER = (0x000000db) # macro
 RM_USER_SHARED_DATA = (0x000000de) # macro
 GT200_DEBUGGER = (0x000083de) # macro
 NV40_I2C = (0x0000402c) # macro
+KEPLER_DEVICE_VGPU = (0x0000a080) # macro
 NVA081_VGPU_CONFIG = (0x0000a081) # macro
 NVA084_KERNEL_HOST_VGPU_DEVICE = (0x0000a084) # macro
 NV0060_SYNC_GPU_BOOST = (0x00000060) # macro
 GP100_UVM_SW = (0x0000c076) # macro
+NVENC_SW_SESSION = (0x0000a0bc) # macro
 NV_EVENT_BUFFER = (0x000090cd) # macro
+NVFBC_SW_SESSION = (0x0000a0bd) # macro
 NV_CONFIDENTIAL_COMPUTE = (0x0000cb33) # macro
 NV_COUNTER_COLLECTION_UNIT = (0x0000cbca) # macro
 NV_SEMAPHORE_SURFACE = (0x000000da) # macro
@@ -199,11 +335,13 @@ __all__ = \
     'HOPPER_DMA_COPY_A', 'HOPPER_SEC2_WORK_LAUNCH_A',
     'HOPPER_USERMODE_A', 'IO_VASPACE_A', 'KEPLER_CHANNEL_GPFIFO_A',
     'KEPLER_CHANNEL_GPFIFO_B', 'KEPLER_CHANNEL_GROUP_A',
-    'KEPLER_INLINE_TO_MEMORY_B', 'KERNEL_GRAPHICS_CONTEXT',
-    'MAXWELL_CHANNEL_GPFIFO_A', 'MAXWELL_DMA_COPY_A',
-    'MAXWELL_PROFILER', 'MAXWELL_PROFILER_DEVICE', 'MMU_FAULT_BUFFER',
+    'KEPLER_DEVICE_VGPU', 'KEPLER_INLINE_TO_MEMORY_B',
+    'KERNEL_GRAPHICS_CONTEXT', 'MAXWELL_CHANNEL_GPFIFO_A',
+    'MAXWELL_DMA_COPY_A', 'MAXWELL_PROFILER',
+    'MAXWELL_PROFILER_DEVICE', 'MMU_FAULT_BUFFER',
     'MMU_VIDMEM_ACCESS_BIT_BUFFER', 'MPS_COMPUTE',
     'NV0020_GPU_MANAGEMENT', 'NV0060_SYNC_GPU_BOOST',
+    'NV0080_ALLOC_PARAMETERS', 'NV0080_ALLOC_PARAMETERS_MESSAGE_ID',
     'NV0092_RG_LINE_CALLBACK', 'NV01_CONTEXT_DMA', 'NV01_DEVICE_0',
     'NV01_EVENT', 'NV01_EVENT_KERNEL_CALLBACK',
     'NV01_EVENT_KERNEL_CALLBACK_EX', 'NV01_EVENT_OS_EVENT',
@@ -247,12 +385,15 @@ __all__ = \
     'NVC7B0_VIDEO_DECODER', 'NVC7B7_VIDEO_ENCODER',
     'NVC7FA_VIDEO_OFA', 'NVC9B0_VIDEO_DECODER',
     'NVC9B7_VIDEO_ENCODER', 'NVC9D1_VIDEO_NVJPG', 'NVC9FA_VIDEO_OFA',
-    'NV_CE_UTILS', 'NV_CONFIDENTIAL_COMPUTE',
-    'NV_COUNTER_COLLECTION_UNIT', 'NV_EVENT_BUFFER',
-    'NV_MEMORY_EXTENDED_USER', 'NV_MEMORY_FABRIC', 'NV_MEMORY_MAPPER',
-    'NV_MEMORY_MULTICAST_FABRIC', 'NV_SEMAPHORE_SURFACE',
-    'PASCAL_CHANNEL_GPFIFO_A', 'PASCAL_DMA_COPY_A',
-    'RM_USER_SHARED_DATA', 'TURING_A', 'TURING_CHANNEL_GPFIFO_A',
-    'TURING_COMPUTE_A', 'TURING_DMA_COPY_A', 'TURING_USERMODE_A',
-    'UVM_CHANNEL_RETAINER', 'VOLTA_CHANNEL_GPFIFO_A',
-    'VOLTA_USERMODE_A']
+    'NVENC_SW_SESSION', 'NVFBC_SW_SESSION', 'NV_CE_UTILS',
+    'NV_CONFIDENTIAL_COMPUTE', 'NV_COUNTER_COLLECTION_UNIT',
+    'NV_EVENT_BUFFER', 'NV_IMEX_SESSION', 'NV_MEMORY_EXPORT',
+    'NV_MEMORY_EXTENDED_USER', 'NV_MEMORY_FABRIC',
+    'NV_MEMORY_FABRIC_IMPORTED_REF', 'NV_MEMORY_FABRIC_IMPORT_V2',
+    'NV_MEMORY_MAPPER', 'NV_MEMORY_MULTICAST_FABRIC',
+    'NV_SEMAPHORE_SURFACE', 'PASCAL_CHANNEL_GPFIFO_A',
+    'PASCAL_DMA_COPY_A', 'RM_USER_SHARED_DATA', 'TURING_A',
+    'TURING_CHANNEL_GPFIFO_A', 'TURING_COMPUTE_A',
+    'TURING_DMA_COPY_A', 'TURING_USERMODE_A', 'UVM_CHANNEL_RETAINER',
+    'VOLTA_CHANNEL_GPFIFO_A', 'VOLTA_USERMODE_A',
+    'struct_NV0080_ALLOC_PARAMETERS']
