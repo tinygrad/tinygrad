@@ -254,7 +254,7 @@ def train_unet3d():
 
   TARGET_METRIC = 0.908
   NUM_EPOCHS = getenv("NUM_EPOCHS", 4000)
-  BS = getenv("BS", 2 * len(GPUS))
+  BS = getenv("BS", 1 * len(GPUS))
   LR = getenv("LR", 0.8)
   MOMENTUM = getenv("MOMENTUM", 0.9)
   LR_WARMUP_EPOCHS = getenv("LR_WARMUP_EPOCHS", 200)
