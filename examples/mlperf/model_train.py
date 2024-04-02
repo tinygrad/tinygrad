@@ -241,7 +241,7 @@ def train_unet3d():
   from extra.datasets.kits19 import iterate, get_train_files, get_val_files, sliding_window_inference
   from tinygrad import Device, TinyJit, Tensor
   from tinygrad.nn.optim import SGD
-  from tinygrad.ops import GlobalCounters
+  from tinygrad import GlobalCounters
   from math import ceil
 
   import numpy as np
