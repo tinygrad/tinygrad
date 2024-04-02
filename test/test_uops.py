@@ -5,14 +5,14 @@ from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.device import Buffer, Device, CompiledASTRunner
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
-from tinygrad.realize import create_schedule
+from tinygrad.engine.schedule import create_schedule
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.codegen.uops import exec_alu, UOpGraph
 from test.helpers import is_dtype_supported
 
 def _uops_to_prg(uops):
   src = Device[Device.DEFAULT].compiler.render("test", uops)
-  has_local = Device[Device.DEFAULT].compiler.linearizer_opts.has_local
+  has_local = Device[Device.DEFAULT].compiler.compiler_opts.has_local
   return CompiledASTRunner("test", src, Device.DEFAULT, [1] if has_local else None, [1] if has_local else None)
 
 def uop(uops:List[UOp], uop:UOps, dtype:Optional[DType], vin:Tuple[UOp, ...], arg:Any=None) -> UOp:
@@ -27,8 +27,8 @@ def _test_single_value(vals, op, dts):
   loads = (uop(uops, UOps.LOAD, dtype, [buf_loads[i], uop(uops, UOps.CONST, dtypes.int32, (), 0)]) for i,dtype in enumerate(dts))
   alu = uop(uops, UOps.ALU, output_dtype, loads, op)
   uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
-  buf = Buffer(Device.DEFAULT, 1, output_dtype)
-  buf2 = [Buffer(Device.DEFAULT, 1, dtype).copyin(np.array([a], dtype=dtype.np).data) for a,dtype in zip(vals, dts)]
+  buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
+  buf2 = [Buffer(Device.DEFAULT, 1, dtype).allocate().copyin(np.array([a], dtype=dtype.np).data) for a,dtype in zip(vals, dts)]
   prg = _uops_to_prg(UOpGraph(uops))
   prg.exec([buf]+buf2)
   ret = np.empty(1, output_dtype.np)
@@ -42,7 +42,19 @@ def _test_single_value_const(vals, op, dts):
   loads = (uop(uops, UOps.CONST, dtype, [], a) for a,dtype in zip(vals, dts))
   alu = uop(uops, UOps.ALU, output_dtype, loads, op)
   uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
-  buf = Buffer(Device.DEFAULT, 1, output_dtype)
+  buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
+  prg = _uops_to_prg(UOpGraph(uops))
+  prg.exec([buf])
+  ret = np.empty(1, output_dtype.np)
+  buf.copyout(ret.data)
+  return ret[0]
+
+def _test_uops_result(output_dtype, uops, res):
+  # uops = []
+  buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(output_dtype), (), (0, 'data0',True))
+  # res = output_fn(uops)
+  uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), res))
+  buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
   prg = _uops_to_prg(UOpGraph(uops))
   prg.exec([buf])
   ret = np.empty(1, output_dtype.np)
@@ -51,17 +63,24 @@ def _test_single_value_const(vals, op, dts):
 
 class TestUOps(unittest.TestCase):
   def _equal(self, v1, v2):
-    if not (math.isnan(v1) and math.isnan(v2)): self.assertAlmostEqual(v1, v2, places=5) if v1.dtype != np.bool_ else self.assertEqual(v1, v2)
+    assert isinstance(v2, (float, int, bool))
+    if isinstance(v2, float):
+      np.testing.assert_allclose(v1, v2, rtol=2e-7)
+    else:
+      np.testing.assert_equal(v1, v2)
 
   def _test_uop_fxn(self, op, fxn, dts=(PtrDType(dtypes.float32), )):
     for f in [_test_single_value, _test_single_value_const]:
       for a in [-2.0, 0.0, 1.0]:
+        a = dtypes.as_const(a, dts[0])
         self._equal(f([a], op, dts), fxn(a))
 
   def _test_bop_fxn(self, op, fxn, dts=(PtrDType(dtypes.float32), )*2, no_b_zero=False):
     for f in [_test_single_value, _test_single_value_const]:
       for a in [-2.0, 0.0, 1.0]:
         for b in [-3.0, 1.0] + ([] if no_b_zero else [0.0]):
+          a = dtypes.as_const(a, dts[0])
+          b = dtypes.as_const(b, dts[1])
           self._equal(f([a,b], op, dts), fxn(a,b))
 
   def _test_top_fxn(self, op, fxn, dts=(PtrDType(dtypes.float32), )*3):
@@ -69,6 +88,9 @@ class TestUOps(unittest.TestCase):
       for a in [-2.0, 0, 1]:
         for b in [-3.0, 3.0]:
           for c in [-4.0, 4.0]:
+            a = dtypes.as_const(a, dts[0])
+            b = dtypes.as_const(b, dts[1])
+            c = dtypes.as_const(c, dts[2])
             self._equal(f([a,b,c], op, dts), fxn(a,b,c))
 
 class TestFloatUOps(TestUOps):
@@ -143,9 +165,9 @@ class TestExecALU(TestUOps):
     self.assertEqual(exec_alu(BinaryOps.DIV, dtypes.int8, (7, -3)), -2)
     self.assertEqual(exec_alu(BinaryOps.DIV, dtypes.int8, (-50, 6)), -8)
 
-    self.assertEqual(exec_alu(BinaryOps.DIV, dtypes.float32, (8.0, 2.0)), 4.0)
-    self.assertEqual(exec_alu(BinaryOps.DIV, dtypes.float32, (7.0, 3.0)), 2+(1.0/3.0))
-    self.assertEqual(exec_alu(BinaryOps.DIV, dtypes.float32, (7.0, -3.0)), -2-(1.0/3.0))
+    np.testing.assert_allclose(exec_alu(BinaryOps.DIV, dtypes.float32, (8.0, 2.0)), 4.0)
+    np.testing.assert_allclose(exec_alu(BinaryOps.DIV, dtypes.float32, (7.0, 3.0)), 2+(1.0/3.0))
+    np.testing.assert_allclose(exec_alu(BinaryOps.DIV, dtypes.float32, (7.0, -3.0)), -2-(1.0/3.0))
 
   def test_bool_neg(self):
     self.assertEqual(exec_alu(UnaryOps.NEG, dtypes.bool, (False,)), True)
@@ -158,9 +180,9 @@ class TestExecALU(TestUOps):
     self.assertEqual(exec_alu(BinaryOps.CMPLT, dtypes.bool, (True, True)), False)
 
   def test_bool_where(self):
-    self.assertIs(exec_alu(TernaryOps.WHERE, dtypes.bool, (False, False, False)), False)
-    self.assertIs(exec_alu(TernaryOps.WHERE, dtypes.int, (False, 2, 4)), 4)
-    self.assertIs(exec_alu(TernaryOps.WHERE, dtypes.float, (False, 2.2, 4.5)), 4.5)
+    self.assertEqual(exec_alu(TernaryOps.WHERE, dtypes.bool, (False, False, False)), False)
+    self.assertEqual(exec_alu(TernaryOps.WHERE, dtypes.int, (False, 2, 4)), 4)
+    np.testing.assert_allclose(exec_alu(TernaryOps.WHERE, dtypes.float, (False, 2.2, 4.5)), 4.5)
 
   def test_overflow(self):
     self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.uint8, (250, 250)), 244)
@@ -193,6 +215,25 @@ class TestConstantFolding(unittest.TestCase):
     si = si[0]
     lin = Device[Device.DEFAULT].get_linearizer(si.ast[0]).linearize()
     assert any(uop.uop is UOps.BITCAST for uop in lin.uops.uops), f"{[uop.uop for uop in lin.uops.uops]} does not contain bitcast"
+
+class TestLocalAccess(unittest.TestCase):
+  @unittest.skipIf(Device.DEFAULT in {"LLVM"}, "device doesn't support local memory")
+  def test_local_basic(self):
+    uops = []
+    smem = uop(uops, UOps.DEFINE_LOCAL, PtrDType(dtypes.float32), (), ('smem', 16))
+    uop(uops, UOps.STORE, None, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 0), uop(uops, UOps.CONST, dtypes.float32, (), 42.0)))
+    sres = uop(uops, UOps.LOAD, dtypes.float32, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 0)))
+    self.assertEqual(_test_uops_result(dtypes.float32, uops, sres), 42)
+
+  @unittest.skipIf(Device.DEFAULT in {"LLVM"}, "device doesn't support local memory")
+  def test_local_indirect(self):
+    uops = []
+    smem = uop(uops, UOps.DEFINE_LOCAL, PtrDType(dtypes.int32), (), ('smem', 16))
+    uop(uops, UOps.STORE, None, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 1), uop(uops, UOps.CONST, dtypes.int32, (), 2)))
+    uop(uops, UOps.STORE, None, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 2), uop(uops, UOps.CONST, dtypes.int32, (), 42)))
+    ofs = uop(uops, UOps.LOAD, dtypes.int32, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 1)))
+    sres = uop(uops, UOps.LOAD, dtypes.int32, (smem, ofs))
+    self.assertEqual(_test_uops_result(dtypes.int32, uops, sres), 42)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

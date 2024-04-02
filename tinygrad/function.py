@@ -24,10 +24,6 @@ class Cast(Function):
 
 # ************* unary ops *************
 
-class Zero(Function):
-  def forward(self, x:LazyBuffer) -> LazyBuffer: return x.const(0)
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.const(0)
-
 class Neg(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer: return x.e(UnaryOps.NEG)
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.e(UnaryOps.NEG)
