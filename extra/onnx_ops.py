@@ -613,6 +613,7 @@ def SkipLayerNormalization(x:Tensor, skip:Tensor, gamma, beta:Optional[Tensor]=N
   x = x + skip + bias
   return x.layernorm(eps=epsilon) * gamma + beta, None, None, x
 
+@half_to_float_to_half
 def FastGelu(x:Tensor, bias:Optional[Tensor]=None):
   x = x + bias
   return 0.5 * x * (1 + (x * 0.797885 + 0.035677 * x ** 3).tanh())

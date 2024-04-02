@@ -135,11 +135,9 @@ def assert_allclose(tiny_out:dict, onnx_out:dict, rtol, atol):
         np.testing.assert_allclose(tiny_v, onnx_v, rtol=rtol, atol=atol,
                                    err_msg=f"device={Device.DEFAULT} using {rtol=} {atol=} for tensor '{k}' in {tiny_out.keys()}")
       except AssertionError:
-        # test using l1 norm and l2 norm instead
-        diff = tiny_v - onnx_v
-        assert (l1_norm := np.sum(np.abs(diff)) <= atol + rtol * np.sum(np.abs(onnx_v))) \
-        or (l2_norm := np.sqrt(np.sum(np.square(diff))) <= atol + rtol * np.sqrt(np.sum(np.square(onnx_v)))), \
-        f"{l1_norm=} {l2_norm=} passed on device={Device.DEFAULT} using {rtol=} {atol=} for tensor={k} in {tiny_out.keys()}"
+        # test using l2 norm instead
+        assert (diff := np.linalg.norm(tiny_v - onnx_v)) <= (tol := (atol + rtol * np.linalg.norm(onnx_v)).astype(onnx_v.dtype)), \
+        f"{diff=} is larger than {tol=} on device={Device.DEFAULT} using {rtol=} {atol=} for tensor={k} in {tiny_out.keys()}"
 
 if __name__ == "__main__":
   devices = [Device.DEFAULT] if getenv("NOCLANG") else [Device.DEFAULT, "CLANG"]
