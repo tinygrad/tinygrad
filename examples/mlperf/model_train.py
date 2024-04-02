@@ -241,34 +241,12 @@ def train_unet3d():
   from extra.datasets.kits19 import iterate, get_train_files, get_val_files, sliding_window_inference
   from tinygrad import Device, TinyJit, Tensor
   from tinygrad.nn.optim import SGD
-  from tinygrad.nn.state import load_state_dict
   from tinygrad.ops import GlobalCounters
   from math import ceil
 
   import numpy as np
   import random
   import time
-
-  TARGET_METRIC = 0.908
-  NUM_EPOCHS = getenv("NUM_EPOCHS", 4000)
-  BS = getenv("BS", 1)
-  LR = getenv("LR", 0.8)
-  MOMENTUM = getenv("MOMENTUM", 0.9)
-  LR_WARMUP_EPOCHS = getenv("LR_WARMUP_EPOCHS", 200)
-  LR_WARMUP_INIT_LR = getenv("LR_WARMUP_INIT_LR", 0.0001)
-  CHECKPOINT_FN = getenv("CHECKPOINT_FN")
-  WANDB = getenv("WANDB")
-  PROJ_NAME = getenv("PROJ_NAME", "tinygrad_unet3d_mlperf")
-  SEED = getenv("SEED")
-  TRAIN_DATASET_SIZE = len(get_train_files())
-  VAL_DATASET_SIZE = len(get_val_files())
-  START_EVAL_AT = getenv("START_EVAL_AT", ceil(1000 * TRAIN_DATASET_SIZE / (TRAIN_DATASET_SIZE * BS)))
-  EVALUATE_EVERY = getenv("EVALUATE_EVERY", ceil(20 * TRAIN_DATASET_SIZE / (TRAIN_DATASET_SIZE * BS)))
-
-  start_eval_at = START_EVAL_AT
-  evaluate_every = EVALUATE_EVERY
-
-  print(f"Starting evaluation at epoch {start_eval_at} and evaluating every {evaluate_every} epochs")
 
   if SEED:
     Tensor.manual_seed(SEED)
@@ -285,13 +263,27 @@ def train_unet3d():
   print(f"Training on {GPUS}")
   for x in GPUS: Device[x]
 
+  TARGET_METRIC = 0.908
+  NUM_EPOCHS = getenv("NUM_EPOCHS", 4000)
+  BS = getenv("BS", 2 * len(GPUS))
+  LR = getenv("LR", 0.8)
+  MOMENTUM = getenv("MOMENTUM", 0.9)
+  LR_WARMUP_EPOCHS = getenv("LR_WARMUP_EPOCHS", 200)
+  LR_WARMUP_INIT_LR = getenv("LR_WARMUP_INIT_LR", 0.0001)
+  WANDB = getenv("WANDB")
+  PROJ_NAME = getenv("PROJ_NAME", "tinygrad_unet3d_mlperf")
+  SEED = getenv("SEED")
+  TRAIN_DATASET_SIZE = len(get_train_files())
+  VAL_DATASET_SIZE = len(get_val_files())
+  START_EVAL_AT = getenv("START_EVAL_AT", ceil(1000 * TRAIN_DATASET_SIZE / (TRAIN_DATASET_SIZE * BS)))
+  EVALUATE_EVERY = getenv("EVALUATE_EVERY", ceil(20 * TRAIN_DATASET_SIZE / (TRAIN_DATASET_SIZE * BS)))
+
+  start_eval_at = START_EVAL_AT
+  evaluate_every = EVALUATE_EVERY
+
+  print(f"Start evaluation at epoch {start_eval_at} and every {evaluate_every} epochs after")
+
   model = UNet3D()
-
-  if CHECKPOINT_FN:
-    state_dict = safe_load(CHECKPOINT_FN)
-    load_state_dict(model, state_dict)
-    print(f"Loaded checkpoint {CHECKPOINT_FN} into model")
-
   params = get_parameters(model)
 
   for p in params: p.realize().to_(GPUS)
@@ -313,6 +305,7 @@ def train_unet3d():
     optim.step()
     return loss.realize()
   
+  @TinyJit
   def eval_step(model, x, y):
     y_hat, y = sliding_window_inference(model, x, y, gpus=GPUS)
     y_hat, y = Tensor(y_hat), Tensor(y, requires_grad=False)
@@ -349,7 +342,7 @@ def train_unet3d():
       st = pt
 
     if epoch == next_eval_at:
-      train_step.reset()  # free the train step memory :(
+      train_step.reset()
 
       Tensor.training = False
 
@@ -382,9 +375,6 @@ def train_unet3d():
         fn = f"./ckpts/unet3d.safe"
         safe_save(get_state_dict(model), fn)
         print(f" *** Model saved to {fn} ***")
-      elif mean_dice < 1e-6:
-        print("Model diverged. Aborting.")
-        diverged = True
 
     if is_successful or diverged:
       break
