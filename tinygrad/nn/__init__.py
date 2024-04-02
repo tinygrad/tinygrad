@@ -120,14 +120,15 @@ class LayerNorm:
 class LayerNorm2d(LayerNorm):
   def __call__(self, x): return super().__call__(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
 
+
 class Embedding:
   def __init__(self, vocab_size:int, embed_size:int):
     self.vocab_size, self.embed_size = vocab_size, embed_size
-    self.weight = Tensor.glorot_uniform(vocab_size, embed_size)
+    self.weight = Tensor.glorot_uniform(vocab_size, embed_size).reshape((1, vocab_size, embed_size))
+    self.arange = Tensor.arange(self.vocab_size, requires_grad=False, device=self.weight.device).reshape(1, self.vocab_size, 1)
 
   def __call__(self, idx:Tensor) -> Tensor:
-    if not hasattr(self, 'vocab_counter'):
-      self.vocab_counter = Tensor.arange(self.vocab_size, requires_grad=False, device=self.weight.device).reshape(1, 1, self.vocab_size)
-    batch_size, seqlen = idx.shape
-    if seqlen == 0: return Tensor.empty(batch_size, 0, self.embed_size, device=self.weight.device)
-    return (self.vocab_counter == idx.unsqueeze(2)).expand(*idx.shape, self.vocab_size) @ self.weight
+    if idx.numel() == 0: return Tensor.empty(idx.shape + (self.embed_size,), device=self.weight.device)
+    big_shape = (idx.numel(), self.vocab_size, self.embed_size)
+    arange, indices, vals = self.arange.expand(big_shape), idx.reshape((idx.numel(), 1, 1,)).expand(big_shape), self.weight.expand(big_shape)
+    return (arange == indices).mul(vals).sum(0)
