@@ -1,9 +1,17 @@
 #!/bin/bash
-SRC=/home/kafka/build/open-gpu-kernel-modules
+SRC=/home/nimlgen/cuda_ioctl_sniffer/open-gpu-kernel-modules
+
+# clang2py \
+#   $SRC/src/common/sdk/nvidia/inc/class/cl0080.h \
+#   $SRC/src/nvidia/generated/g_allclasses.h \
+#   --clang-args="-I$SRC/src/common/sdk/nvidia/inc/" \
+#   -o class_ioctl.py -k cdefstum
 
 clang2py \
-  $SRC/src/nvidia/generated/g_allclasses.h \
-  -o class_ioctl.py -k cdefstum
+  $SRC/kernel-open/nvidia-uvm/uvm_ioctl.h \
+  $SRC/kernel-open/nvidia-uvm/uvm_linux_ioctl.h \
+  --clang-args="-I$SRC/src/common/inc -I$SRC/kernel-open/nvidia-uvm -I$SRC/kernel-open/common/inc" \
+  -o uvm_ioctl.py -k cdefstum
 
 exit
 
@@ -21,6 +29,6 @@ clang2py \
   $SRC/src/common/sdk/nvidia/inc/ctrl/ctrlc36f.h \
   $SRC/src/common/sdk/nvidia/inc/ctrl/ctrlcb33.h \
   $SRC/src/common/sdk/nvidia/inc/ctrl/ctrla06c.h \
-  --clang-args="-I $SRC/src/common/sdk/nvidia/inc -I $SRC/src/common/sdk/nvidia/inc/ctrl" \
+  --clang-args="-I$SRC/src/common/sdk/nvidia/inc -I$SRC/src/common/sdk/nvidia/inc/ctrl" \
   -o ctrl_ioctl.py -k cdefstum
 sed -i "s\(0000000001)\1\g" ctrl_ioctl.py
