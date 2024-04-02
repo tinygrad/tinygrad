@@ -58,14 +58,19 @@ nvcmds = {getattr(CTRL, x):(x, getattr(CTRL, "struct_"+x+"_PARAMS", getattr(CTRL
 nvclasses = {getattr(CLASS, x):x for x in dir(CLASS) if isinstance(getattr(CLASS, x), int)}
 nvuvms = {int(getattr(UVM, x)[2]):x for x in dir(UVM) if isinstance(getattr(UVM, x), list) and len(getattr(UVM, x)) == 4 and getattr(UVM, x)[0] == 'i'} # broken clang2py generates mess
 
+global_ioctl_id = 0
+
 @ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_ulong, ctypes.c_void_p)
 def ioctl(fd, request, argp):
+  global global_ioctl_id
+  global_ioctl_id += 1
   st = time.perf_counter()
   ret = libc.syscall(IOCTL_SYSCALL, ctypes.c_int(fd), ctypes.c_ulong(request), ctypes.c_void_p(argp))
   et = time.perf_counter()-st
   fn = os.readlink(f"/proc/self/fd/{fd}")
   #print(f"ioctl {request:8x} {fn:20s}")
   idir, size, itype, nr = (request>>30), (request>>16)&0x3FFF, (request>>8)&0xFF, request&0xFF
+  print(f"#{global_ioctl_id}: ", end="")
   if itype == ord(ESC.NV_IOCTL_MAGIC):
     if nr == ESC.NV_ESC_RM_CONTROL:
       s = get_struct(argp, ESC.NVOS54_PARAMETERS)
@@ -87,10 +92,16 @@ def ioctl(fd, request, argp):
         if s.hClass == CLASS.NV01_DEVICE_0: dump_struct(get_struct(s.pAllocParms, CLASS.NV0080_ALLOC_PARAMETERS))
         if s.hClass == CLASS.FERMI_VASPACE_A: dump_struct(get_struct(s.pAllocParms, ESC.NV_VASPACE_ALLOCATION_PARAMETERS))
         if s.hClass == CLASS.NV50_MEMORY_VIRTUAL: dump_struct(get_struct(s.pAllocParms, ESC.NV_MEMORY_ALLOCATION_PARAMS))
+        if s.hClass == CLASS.NV1_MEMORY_USER: dump_struct(get_struct(s.pAllocParms, ESC.NV_MEMORY_ALLOCATION_PARAMS))
+        if s.hClass == CLASS.AMPERE_CHANNEL_GPFIFO_A: dump_struct(get_struct(s.pAllocParms, ESC.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS))
+        if s.hClass == CLASS.KEPLER_CHANNEL_GROUP_A: dump_struct(get_struct(s.pAllocParms, ESC.NV_CHANNEL_GROUP_ALLOCATION_PARAMETERS))
     elif nr == ESC.NV_ESC_RM_MAP_MEMORY:
       # nv_ioctl_nvos33_parameters_with_fd
       s = get_struct(argp, ESC.NVOS33_PARAMETERS)
-      print(f"NV_ESC_RM_MAP_MEMORY   {s.pLinearAddress:x}")
+      print(f"NV_ESC_RM_MAP_MEMORY   hClient={s.hClient}, hDevice={s.hDevice}, hMemory={s.hMemory}, length={s.length} flags={s.flags}")
+    elif nr == ESC.NV_ESC_RM_UPDATE_DEVICE_MAPPING_INFO:
+      s = get_struct(argp, ESC.NVOS56_PARAMETERS)
+      print(f"NV_ESC_RM_UPDATE_DEVICE_MAPPING_INFO   hClient={s.hClient}, hDevice={s.hDevice}, hMemory={s.hMemory}, pOldCpuAddress={s.pOldCpuAddress} pNewCpuAddress={s.pNewCpuAddress} status={s.status}")
     elif nr in nvescs:
       print(nvescs[nr])
     else:
