@@ -120,7 +120,6 @@ class LayerNorm:
 class LayerNorm2d(LayerNorm):
   def __call__(self, x): return super().__call__(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
 
-
 class Embedding:
   def __init__(self, vocab_size:int, embed_size:int):
     self.vocab_size, self.embed_size = vocab_size, embed_size
