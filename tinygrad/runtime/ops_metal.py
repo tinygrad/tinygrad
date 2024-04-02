@@ -36,7 +36,8 @@ class MetalProgram:
         shader.write(lib)
         shader.flush()
         os.system(f"cd {pathlib.Path(__file__).parents[2]}/disassemblers/applegpu && python3 compiler_explorer.py {shader.name}")
-    assert lib[:4] == b"MTLB", "ERROR: invalid Metal library. This could be due to using a conda managed python. Try switching to system python or using METAL_XCODE=1 and DISABLE_COMPILER_CACHE=1."  # noqa: E501
+    assert lib[:4] == b"MTLB", "ERROR: invalid Metal library. This could be due to using a conda managed python. \
+                                    Try switching to system python or using METAL_XCODE=1 and DISABLE_COMPILER_CACHE=1."
     data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
     self.library = unwrap2(self.device.device.newLibraryWithData_error_(data, None))
     self.fxn = self.library.newFunctionWithName_(name)
