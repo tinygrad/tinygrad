@@ -124,11 +124,11 @@ class LayerNorm2d(LayerNorm):
 class Embedding:
   def __init__(self, vocab_size:int, embed_size:int):
     self.vocab_size, self.embed_size = vocab_size, embed_size
-    self.weight = Tensor.glorot_uniform(vocab_size, embed_size).reshape((1, vocab_size, embed_size))
-    self.arange = Tensor.arange(self.vocab_size, requires_grad=False, device=self.weight.device).reshape(1, self.vocab_size, 1)
+    self.weight = Tensor.glorot_uniform((1, 1, vocab_size, embed_size))
+    self.arange = Tensor.arange(self.vocab_size, requires_grad=False, device=self.weight.device).reshape(1, 1, self.vocab_size, 1)
 
   def __call__(self, idx:Tensor) -> Tensor:
     if idx.numel() == 0: return Tensor.empty(idx.shape + (self.embed_size,), device=self.weight.device)
-    big_shape = (idx.numel(), self.vocab_size, self.embed_size)
-    arange, indices, vals = self.arange.expand(big_shape), idx.reshape((idx.numel(), 1, 1,)).expand(big_shape), self.weight.expand(big_shape)
-    return (arange == indices).mul(vals).sum(0)
+    big_shape = idx.shape + (self.vocab_size, self.embed_size,)
+    arange, indices, vals = self.arange.expand(big_shape), idx.reshape(idx.shape + (1, 1,)).expand(big_shape), self.weight.expand(big_shape)
+    return (arange == indices).mul(vals).sum(2)
