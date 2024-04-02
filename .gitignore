@@ -28,7 +28,6 @@ extra/datasets/kits19/
 extra/datasets/squad/
 extra/datasets/img_align_celeba*
 extra/datasets/open-images-v6-mlperf
-extra/datasets/open-images-v6TEST
 extra/datasets/kits/
 extra/datasets/COCO/
 extra/datasets/audio*

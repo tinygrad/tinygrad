@@ -12,10 +12,8 @@ from weakref import ref, ReferenceType, WeakValueDictionary
 lazycache: WeakValueDictionary[Any, LazyBuffer] = WeakValueDictionary()
 def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
                       base:Optional[LazyBuffer]=None, enable_cache=bool(getenv("LAZYCACHE", 1))):
-  if st.size == 0 and op not in {LoadOps.SYNC, LoadOps.WAIT}: op, arg, srcs, base = LoadOps.CONST, 0, (), None
-  if op is LoadOps.CONST:
-    arg = dtypes.as_const(arg, dtype)
-    enable_cache = True
+  if st.size == 0 and op is not LoadOps.SYNC: op, arg, srcs, base = LoadOps.CONST, 0, (), None
+  if op is LoadOps.CONST: arg, enable_cache = dtypes.as_const(arg, dtype), True
 
   cache_key = (device, st, dtype, op, arg, tuple(ref(x) for x in srcs)) if base is None else (st, ref(base))
   if enable_cache and (rret := lazycache.get(cache_key, None)): return rret
@@ -33,7 +31,8 @@ class LazyBuffer:
     if base is None:
       # properties on base
       self.op, self.arg, self.srcs = op, arg, srcs  # this is a LazyOp, except the src is LazyBuffers and not LazyOps
-      self.buffer: Buffer = Buffer(device, self.size, dtype)
+      assert self.op is not LoadOps.ASSIGN or srcs[1].base.realized is not None, "assign target must be realized"
+      self.buffer: Buffer = srcs[1].base.buffer if self.op is LoadOps.ASSIGN else Buffer(device, self.size, dtype)
       self.contiguous_child: Optional[Tuple[ReferenceType[LazyBuffer], ShapeTracker]] = None
       self.forced_realize = False
     else:
@@ -46,7 +45,8 @@ class LazyBuffer:
 
   @property
   def realized(self) -> Optional[Buffer]:
-    return self.buffer if self._base is None and hasattr(self.buffer, "_buf") else None
+    # NOTE: we check for a lack of srcs instead of an allocated buffer to make unrealized assigns return None here
+    return self.buffer if self._base is None and not hasattr(self, 'srcs') else None
 
   # NOTE: this has to be a function to prevent self reference
   @property
@@ -77,13 +77,21 @@ class LazyBuffer:
 
   def cast(self, dtype:DType, bitcast:bool=False):
     if self.dtype == dtype: return self
+    if self.device.startswith("DISK") and not bitcast: raise RuntimeError("attempted to cast disk buffer (bitcast only)")
     # TODO: applying this makes gpt2 slower
     if getenv("CAST_BEFORE_VIEW", 1) and dtype.itemsize <= self.dtype.itemsize and self != self.base:
       return self.base.cast(dtype, bitcast)._view(self.st)
-    return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), dtype, UnaryOps.CAST, (dtype, bitcast), (self,))
+    new_shape = self.shape
+    if bitcast and self.dtype.itemsize != dtype.itemsize:
+      if not self.device.startswith("DISK"): raise RuntimeError("shape changing bitcast only supported on DISK right now")
+      if not all_int(new_shape): raise RuntimeError("shape changing bitcast with symbolic shape isn't supported yet")
+      # https://pytorch.org/docs/stable/generated/torch.Tensor.view.html
+      if not (new_shape[-1]*self.dtype.itemsize) % dtype.itemsize == 0: raise RuntimeError("unsupported size in bitcast")
+      new_shape = new_shape[:-1] + ((new_shape[-1]*self.dtype.itemsize) // dtype.itemsize,)
+    return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), dtype, UnaryOps.CAST, (dtype, bitcast), (self,))
 
-  def is_unrealized_const(self): return not self.base.realized and self.base.op is LoadOps.CONST
-  def is_unrealized_contiguous_const(self): return self.base == self and not self.base.realized and self.op is LoadOps.CONST
+  def is_unrealized_const(self): return self.base.realized is None and self.base.op is LoadOps.CONST
+  def is_unrealized_unpadded_const(self): return self.is_unrealized_const() and all(v.mask is None for v in self.st.views)
 
   def _copy(self, device:str) -> LazyBuffer:
     if (dstart:=self.device.split(":")[0]) in {"EXT", "DISK"} or (dstart in {"HSA", "CUDA"} and device.split(":")[0] == dstart):
@@ -91,8 +99,7 @@ class LazyBuffer:
       # copies in HSA/CUDA to other HSA/CUDA don't sync either
       return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, None, (self,), enable_cache=False)
     sync = LazyBuffer.loadop(LoadOps.SYNC, (0,), dtypes.uint32, self.device, src=(self,), enable_cache=True)
-    wait = LazyBuffer.loadop(LoadOps.WAIT, (0,), dtypes.uint32, device, src=(sync,), enable_cache=True)
-    return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, None, (self, wait), enable_cache=False)
+    return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, None, (self, sync), enable_cache=False)
 
   def copy_to_device(self, device:str, force: bool = False) -> LazyBuffer:
     # no COPY
@@ -123,6 +130,19 @@ class LazyBuffer:
     assert all_same([x.shape for x in srcs]), f"all shapes must be the same {[x.shape for x in srcs]}"
     if op is TernaryOps.WHERE: assert srcs[0].dtype == dtypes.bool, "TernaryOps.WHERE must have the first arg be bool"
     if op is UnaryOps.NEG: assert srcs[0].dtype != dtypes.bool, "UnaryOps.NEG does not accept dtype bool"
+
+    # const folding
+    if op in BinaryOps: x, y = self, in_srcs[0]
+    if op is BinaryOps.ADD:
+      if y.is_unrealized_unpadded_const() and y.base.arg == 0: return x
+      if x.is_unrealized_unpadded_const() and x.base.arg == 0: return y
+    if op is BinaryOps.SUB and y.is_unrealized_unpadded_const() and y.base.arg == 0: return x
+    if op is BinaryOps.MUL:
+      if x.is_unrealized_unpadded_const() and (val := x.base.arg) in (1, 0): return {1: y, 0: y.const(0)}[val]
+      if y.is_unrealized_unpadded_const() and (val := y.base.arg) in (1, 0): return {1: x, 0: x.const(0)}[val]
+    if op is BinaryOps.DIV and dtypes.is_float(x.dtype) and y.is_unrealized_unpadded_const() and y.base.arg != 0:
+      return x.e(BinaryOps.MUL, x.const(1 / y.base.arg))
+
     out_dtype = dtypes.bool if op in (BinaryOps.CMPLT, BinaryOps.CMPEQ) else srcs[-1].dtype
     return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), out_dtype, op, arg, tuple(srcs))
 

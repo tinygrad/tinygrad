@@ -53,8 +53,8 @@ class Linearizer(Kernel):
     info = get_lazyop_info(reduceop)
     assert all(0 <= x < len(info.shape) for x in reduceop.arg), "arg axis out of range"
     dtype = info.dtype
-    if reduceop.op == ReduceOps.SUM: return 0.0 if dtypes.is_float(dtype) else 0
-    elif reduceop.op == ReduceOps.MAX:
+    if reduceop.op is ReduceOps.SUM: return 0.0 if dtypes.is_float(dtype) else 0
+    elif reduceop.op is ReduceOps.MAX:
       if dtypes.is_int(dtype): return 0 if dtypes.is_unsigned(dtype) else -2**(dtype.itemsize*8-1)
       return -math.inf if dtypes.is_float(dtype) else False
 
@@ -410,7 +410,7 @@ class Linearizer(Kernel):
     if cache is None: cache = {}
     if x in cache: return cache[x]
     if x.op in BufferOps: return loaded_buffers[x.arg]
-    if x.op == UnaryOps.CAST: return [self.uops.add(UOps.BITCAST if x.arg[1] else UOps.CAST, self.get_base_dtype(x.arg[0]), (u,), x.arg[0]) \
+    if x.op is UnaryOps.CAST: return [self.uops.add(UOps.BITCAST if x.arg[1] else UOps.CAST, self.get_base_dtype(x.arg[0]), (u,), x.arg[0]) \
                                       for u in self.ast_parse(x.src[0], acc, offs, loaded_buffers)]
     if x.op in ReduceOps and not do_reduce:
       assert offs is None, "not available if we aren't doing reduce"
@@ -428,6 +428,6 @@ class Linearizer(Kernel):
         if input_acc[off] != acc[off]:
           acc[off] = self.uops.add(UOps.PHI, input_acc[off].dtype, (input_acc[off], acc[off]) + tuple(loop_ctx))
     else:
-      ret = [self.uops.add(UOps.ALU, dtypes.bool if x.op in (BinaryOps.CMPLT, BinaryOps.CMPEQ) else val[-1].dtype, val, x.op) for val in zip(*values)]
+      ret = [self.uops.add(UOps.ALU, dtypes.bool if x.op in {BinaryOps.CMPLT, BinaryOps.CMPEQ} else val[-1].dtype, val, x.op) for val in zip(*values)]
     cache[x] = ret
     return ret

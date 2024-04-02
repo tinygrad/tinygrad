@@ -9,11 +9,10 @@ from collections import namedtuple
 from PIL import Image
 import numpy as np
 from tqdm import tqdm
-from tinygrad import Device, GlobalCounters, dtypes, Tensor
+from tinygrad import Device, GlobalCounters, dtypes, Tensor, TinyJit
 from tinygrad.helpers import Timing, Context, getenv, fetch, colored
 from tinygrad.nn import Conv2d, Linear, GroupNorm, LayerNorm, Embedding
 from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict
-from tinygrad.engine.jit import TinyJit
 
 class AttnBlock:
   def __init__(self, in_channels):

@@ -1,9 +1,8 @@
 from __future__ import annotations
 from typing import Any, Optional
 from dataclasses import dataclass
-from tinygrad.helpers import flat_mv
+from tinygrad.helpers import GlobalCounters, flat_mv
 from tinygrad.dtype import DType, ImageDType
-from tinygrad.ops import GlobalCounters
 
 @dataclass(frozen=True, eq=True)
 class BufferOptions:

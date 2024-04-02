@@ -81,6 +81,8 @@ a = LazyBuffer.loadop(LoadOps.EMPTY, (1,), dtypes.int32, DEVICE)
 b = LazyBuffer.loadop(LoadOps.EMPTY, (1,), dtypes.int32, DEVICE)
 a.buffer.allocate().copyin(memoryview(bytearray(struct.pack("I", 2))))
 b.buffer.allocate().copyin(memoryview(bytearray(struct.pack("I", 3))))
+del a.srcs
+del b.srcs
 
 # describe the computation
 out = a.e(BinaryOps.ADD, b)
