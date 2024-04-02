@@ -248,12 +248,6 @@ def train_unet3d():
   import random
   import time
 
-  if WANDB:
-    try:
-      import wandb
-    except ImportError:
-      raise "Need to install wandb to use it"
-
   GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
   print(f"Training on {GPUS}")
   for x in GPUS: Device[x]
@@ -277,6 +271,12 @@ def train_unet3d():
   evaluate_every = EVALUATE_EVERY
 
   print(f"Start evaluation at epoch {start_eval_at} and every {evaluate_every} epochs after")
+
+  if WANDB:
+    try:
+      import wandb
+    except ImportError:
+      raise "Need to install wandb to use it"
 
   if SEED:
     Tensor.manual_seed(SEED)
