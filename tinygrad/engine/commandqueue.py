@@ -77,12 +77,17 @@ class CommandQueue:
       si = self.q[device].pop(0)
       #print(device, si, active_queues, seen_sids)
       if isinstance(si, SyncItem):
-        et = cpu_time_execution(Device[device].synchronize, enable=DEBUG>=2)
-        update_stats(colored("synchronize", "RED"), 0, 0, {}, et, 1, device=device)
-        if si in waiting_queues:
-          active_queues += waiting_queues[si]
-          waiting_queues[si].clear()
-        seen_sids.add(si)
+        # don't sync if there's other options
+        if all(isinstance(self.q[x][0], SyncItem) for x in active_queues if len(self.q[x])):
+          et = cpu_time_execution(Device[device].synchronize, enable=DEBUG>=2)
+          update_stats(colored("synchronize", "RED"), 0, 0, {}, et, 1, device=device)
+          if si in waiting_queues:
+            active_queues += waiting_queues[si]
+            waiting_queues[si].clear()
+          seen_sids.add(si)
+        else:
+          # put it back
+          self.q[device] = [si] + self.q[device]
       elif isinstance(si, WaitItem):
         if si.sync not in seen_sids:
           waiting_queues[si.sync].append(device)
@@ -102,5 +107,7 @@ class CommandQueue:
             runner = Device[si.outputs[0].device].get_runner(*si.ast)
           else: raise RuntimeError(f"unknown type {si}")
           runner.exec(list(si.outputs+si.inputs), si.var_vals)
+        else:
+          update_stats(colored(f"empty {si.outputs[0].size:10d} {si.outputs[0].dtype}", "yellow"), 0, 0, {}, None, 1, device=si.outputs[0].device)
       else: raise RuntimeError(f"unknown type {si}")
       active_queues.append(device)
