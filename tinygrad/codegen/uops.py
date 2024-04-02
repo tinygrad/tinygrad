@@ -82,7 +82,7 @@ constant_folder = PatternMatcher([
   ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": ({}, {"__name__": "x", "uop": UOps.CONST, "dtype": dtypes.bool, "arg": False})}, lambda x: x),
   ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": ({"__name__": "x", "uop": UOps.CONST, "dtype": dtypes.bool, "arg": True}, {})},
    lambda x: UOp.const(x.dtype, False)),
-  # x == x is always true
+  # x == x is always true for non-float
   ({"uop": UOps.ALU, "arg": BinaryOps.CMPEQ, "vin": ({"__name__": "x", "dtype": lambda dt: not dtypes.is_float(dt)}, {"__name__": "x"})},
    lambda x: UOp.const(dtypes.bool, True)),
   # a conditional with the same results either way is a noop, also fold const conditionals
