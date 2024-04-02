@@ -41,7 +41,7 @@ if __name__ == "__main__":
       opt.step()
       return loss
 
-  @TinyJit
+  #@TinyJit
   def get_test_acc() -> Tensor: return (model(X_test).argmax(axis=1) == Y_test).mean()*100
 
   test_acc = float('nan')
