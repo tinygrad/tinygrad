@@ -131,5 +131,25 @@ class TestMultiConstFolding(unittest.TestCase):
     _check_ast_count(0, t ** 1)
     _check_ast_count(0, 1 ** t)
 
+class TestTautologicalCompare(unittest.TestCase):
+  # without const folding, these would have triggered -Wtautological-compare in clang
+  def test_lt_false(self):
+    # bool < False is always false
+    np.testing.assert_equal((Tensor([True, False]) < False).numpy(), [False, False])
+
+  def test_true_lt(self):
+    # True < bool is always false
+    np.testing.assert_equal((True < Tensor([True, False])).numpy(), [False, False])
+
+  def test_a_eq_a(self):
+    # self eq is always true
+    a = Tensor([1, 2, 3])
+    np.testing.assert_equal((a == a).numpy(), [True, True, True])
+
+  def test_a_ne_a(self):
+    # self not eq is always false
+    a = Tensor([1, 2, 3])
+    np.testing.assert_equal((a != a).numpy(), [False, False, False])
+
 if __name__ == '__main__':
   unittest.main()
