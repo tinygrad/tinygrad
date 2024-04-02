@@ -1,7 +1,6 @@
 import os, sys, math, argparse, time
 sys.path.append(os.getcwd())
 from typing import Any, Optional, Dict
-from dataclasses import dataclass, field
 
 from tinygrad import Tensor, TinyJit, nn
 from tinygrad.helpers import fetch
