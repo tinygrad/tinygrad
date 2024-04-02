@@ -40,6 +40,29 @@ class TestMultiTensor(unittest.TestCase):
       assert lb.shape == (128,)
     (X + X).realize()
 
+  def test_sharded_memory(self):
+    mem_base = GlobalCounters.mem_used
+
+    X = Tensor.ones(256).contiguous().realize()
+    assert GlobalCounters.mem_used-mem_base== X.dtype.itemsize * 256, GlobalCounters.mem_used-mem_base
+    X.shard_((d0, d1, d2, d3)).realize()
+    assert GlobalCounters.mem_used-mem_base == X.dtype.itemsize * 256 * 4, GlobalCounters.mem_used-mem_base
+
+    X = Tensor.ones(256).contiguous().realize()
+    assert GlobalCounters.mem_used-mem_base == X.dtype.itemsize * 256, GlobalCounters.mem_used-mem_base
+    X.shard_((d0, d1, d2, d3), axis=0).realize()
+    assert GlobalCounters.mem_used-mem_base == X.dtype.itemsize * 256, GlobalCounters.mem_used-mem_base
+
+    X = Tensor.ones(256).realize()
+    assert GlobalCounters.mem_used-mem_base == 0
+    X.shard_((d0, d1, d2, d3)).realize()
+    assert GlobalCounters.mem_used-mem_base == 0
+
+    X = Tensor.ones(256).realize()
+    assert GlobalCounters.mem_used-mem_base == 0
+    X.shard_((d0, d1, d2, d3), axis=0).realize()
+    assert GlobalCounters.mem_used-mem_base == 0
+
   def test_shard_same_device(self):
     X = Tensor.ones(256).contiguous().realize()
     X.shard_((d0, X.device), 0)
