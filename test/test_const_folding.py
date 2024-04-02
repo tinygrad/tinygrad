@@ -141,6 +141,12 @@ class TestTautologicalCompare(unittest.TestCase):
     # True < bool is always false
     np.testing.assert_equal((True < Tensor([True, False])).numpy(), [False, False])
 
+  def test_truth_table(self):
+    np.testing.assert_equal((Tensor(False) < Tensor(False)).numpy(), False)
+    np.testing.assert_equal((Tensor(False) < Tensor(True)).numpy(), True)
+    np.testing.assert_equal((Tensor(True) < Tensor(False)).numpy(), False)
+    np.testing.assert_equal((Tensor(True) < Tensor(True)).numpy(), False)
+
   @unittest.skipIf(Device.DEFAULT=="LLVM", "LLVM compare with nan is incorrect")
   def test_a_eq_a(self):
     # self eq is always true for int or bool
