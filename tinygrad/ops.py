@@ -116,7 +116,7 @@ python_alu = {
   BinaryOps.DIV: lambda x,y: int(x/y) if isinstance(x, int) else (x/y if y != 0 else x*math.inf),
   TernaryOps.WHERE: lambda x,y,z: y if x else z}
 
-truncate: Dict[DType, Callable] = {dtypes.bool: bool, **{dt:lambda x: x for dt in dtypes.fields().values() if dtypes.is_float(dt)},
+truncate: Dict[DType, Callable] = {dtypes.bool: bool,
   # TODO: float16 and bfloat16?
   dtypes.float32: lambda x: ctypes.c_float(x).value, dtypes.float64: lambda x: ctypes.c_double(x).value,
   dtypes.uint8: lambda x: ctypes.c_uint8(x).value, dtypes.uint16: lambda x: ctypes.c_uint16(x).value,
@@ -124,4 +124,4 @@ truncate: Dict[DType, Callable] = {dtypes.bool: bool, **{dt:lambda x: x for dt i
   dtypes.int8: lambda x: ctypes.c_int8(x).value, dtypes.int16: lambda x: ctypes.c_int16(x).value,
   dtypes.int32: lambda x: ctypes.c_int32(x).value, dtypes.int64: lambda x: ctypes.c_int64(x).value,}
 
-def exec_alu(arg, dtype, p): return truncate[dtype](python_alu[arg](*p))
+def exec_alu(op:Op, dtype:DType, operands): return truncate.get(dtype, lambda x: x)(python_alu[op](*operands))
