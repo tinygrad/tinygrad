@@ -74,6 +74,8 @@ class KFDCompiler(Compiler):
 AQL_PACKET_SIZE = ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t)
 SDMA_MAX_COPY_SIZE = 0x400000
 
+SIGNAL_SIZE, SIGNAL_COUNT = ctypes.sizeof(hsa.amd_signal_t), 256
+
 VENDOR_HEADER = hsa.HSA_PACKET_TYPE_VENDOR_SPECIFIC << hsa.HSA_PACKET_HEADER_TYPE
 
 DISPATCH_KERNEL_SETUP = 3 << hsa.HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS
@@ -96,20 +98,22 @@ class HWComputeQueue:
   def __init__(self):
     self.q = []
 
-  def exec(self, prg:KFDProgram, kernargs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), completion_signal:int=0):
+  def exec(self, prg:KFDProgram, kernargs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), completion_signal=None):
     self.q.append(hsa.hsa_kernel_dispatch_packet_t(
       setup=DISPATCH_KERNEL_SETUP, header=DISPATCH_KERNEL_HEADER,
       workgroup_size_x=local_size[0], workgroup_size_y=local_size[1], workgroup_size_z=local_size[2],
       grid_size_x=global_size[0]*local_size[0], grid_size_y=global_size[1]*local_size[1], grid_size_z=global_size[2]*local_size[2],
       kernel_object=prg.handle, group_segment_size=prg.group_segment_size, private_segment_size=prg.private_segment_size,
-      kernarg_address=kernargs, completion_signal=hsa.hsa_signal_t(completion_signal)))
+      kernarg_address=kernargs,
+      completion_signal=hsa.hsa_signal_t(ctypes.addressof(completion_signal)) if completion_signal is not None else EMPTY_SIGNAL))
 
-  def signal(self, signal:int):
-    self.q.append(hsa.hsa_barrier_and_packet_t(header=BARRIER_HEADER, completion_signal=hsa.hsa_signal_t(signal)))
+  def signal(self, signal):
+    self.q.append(hsa.hsa_barrier_and_packet_t(header=BARRIER_HEADER, completion_signal=hsa.hsa_signal_t(ctypes.addressof(signal))))
 
-  def wait(self, signal:int):
-    self.q.append(hsa.hsa_barrier_and_packet_t(header=BARRIER_HEADER,
-                                               dep_signal=[hsa.hsa_signal_t(signal), EMPTY_SIGNAL, EMPTY_SIGNAL, EMPTY_SIGNAL, EMPTY_SIGNAL]))
+  def wait(self, signal):
+    sig = hsa.hsa_barrier_and_packet_t(header=BARRIER_HEADER)
+    sig.dep_signal[0] = hsa.hsa_signal_t(ctypes.addressof(signal))
+    self.q.append(sig)
 
   def submit(self, device:KFDDevice):
     for cmd in self.q:
@@ -157,11 +161,9 @@ class HWCopyQueue:
       copied += step_copy_size
     self.q.append(sdma_cache_wb)
 
-  def signal(self, signal_addr:int):
-    self.q.append(sdma_pkts.atomic(op=amd_gpu.SDMA_OP_ATOMIC, operation=amd_gpu.SDMA_ATOMIC_ADD64, addr=signal_addr, src_data=(1<<64)-1))
-
-  def signal_trap(self, completion_signal):
-    self.signal(ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'value').offset)
+  def signal(self, completion_signal):
+    self.q.append(sdma_pkts.atomic(op=amd_gpu.SDMA_OP_ATOMIC, operation=amd_gpu.SDMA_ATOMIC_ADD64,
+                                   addr=ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'value').offset, src_data=(1<<64)-1))
     if completion_signal.event_mailbox_ptr != 0:
       self.q.append(sdma_pkts.fence(op=amd_gpu.SDMA_OP_FENCE, mtype=3, addr=completion_signal.event_mailbox_ptr, data=completion_signal.event_id))
       self.q.append(sdma_pkts.trap(op=amd_gpu.SDMA_OP_TRAP, int_ctx=completion_signal.event_id))
@@ -212,7 +214,7 @@ class KFDProgram:
     self.device.completion_signal.value = 1 # reset the signal before call
 
     self.q = HWComputeQueue()
-    self.q.exec(self, self.device.kernargs_ptr, global_size, local_size, ctypes.addressof(self.device.completion_signal) if wait else 0)
+    self.q.exec(self, self.device.kernargs_ptr, global_size, local_size, self.device.completion_signal if wait else None)
     self.device.kernargs_ptr += self.kernargs_segment_size
 
     # one pending packet + ring doorbell
@@ -263,10 +265,11 @@ MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
 class KFDDevice(Compiled):
   kfd:int = -1
   event_page:Any = None  # TODO: fix types in kfd, Optional[kfd.struct_kfd_ioctl_alloc_memory_of_gpu_args]
+  signals_page:Any = None
 
   def synchronize(self):
     q = HWComputeQueue()
-    q.signal(ctypes.addressof(self.completion_signal))
+    q.signal(self.completion_signal)
 
     ring_addr = self.aql_ring.va_addr + (self.aql_doorbell_value*AQL_PACKET_SIZE) % self.aql_ring.size
     for cmd in q.q: ctypes.memmove(ring_addr, ctypes.addressof(cmd), AQL_PACKET_SIZE)
@@ -322,6 +325,10 @@ class KFDDevice(Compiled):
     libc.munmap(mem.va_addr, mem.size)
     kio.free_memory_of_gpu(self.kfd, handle=mem.handle)
 
+  @classmethod
+  def _get_signal(self, num):
+    return KFDDevice.signals_page.va_addr + SIGNAL_SIZE*num
+
   def __init__(self, device:str=""):
     if KFDDevice.kfd == -1: KFDDevice.kfd = os.open("/dev/kfd", os.O_RDWR)
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
@@ -332,15 +339,20 @@ class KFDDevice(Compiled):
     kio.acquire_vm(KFDDevice.kfd, drm_fd=self.drm_fd, gpu_id=self.gpu_id)
 
     if KFDDevice.event_page is None:
+      KFDDevice.signals_page = self._gpu_alloc(SIGNAL_SIZE*SIGNAL_COUNT, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
+      for i in range(SIGNAL_COUNT):
+        sig = hsa.amd_signal_t.from_address(KFDDevice._get_signal(i))
+        sig.value = 1
+        sig.kind = hsa.AMD_SIGNAL_KIND_USER
       KFDDevice.event_page = self._gpu_alloc(0x8000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
       self.sync_event = kio.create_event(KFDDevice.kfd, event_page_offset=KFDDevice.event_page.handle, auto_reset=1)
     else:
+      self._gpu_map(KFDDevice.signals_page)
       self._gpu_map(KFDDevice.event_page)
       self.sync_event = kio.create_event(KFDDevice.kfd, auto_reset=1)
 
     self.gart = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
     self.aql_ring = self._gpu_alloc(0x10000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
-    self.signals_page = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
     self.pm4_indirect_buf = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
 
     self.eop_buffer = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
@@ -348,9 +360,7 @@ class KFDDevice(Compiled):
     self.kernargs_ptr = self.kernargs.va_addr
     self.ctx_save_restore_address = self._gpu_alloc(0x2C02000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
 
-    self.completion_signal = hsa.amd_signal_t.from_address(self.signals_page.va_addr)
-    self.completion_signal.value = 1
-    self.completion_signal.kind = hsa.AMD_SIGNAL_KIND_USER
+    self.completion_signal = hsa.amd_signal_t.from_address(KFDDevice._get_signal(self.device_id))
     self.completion_signal.event_mailbox_ptr = KFDDevice.event_page.va_addr + self.sync_event.event_slot_index*8
     self.completion_signal.event_id = self.sync_event.event_id
 
@@ -430,7 +440,7 @@ class KFDDevice(Compiled):
     if completion_signal is not None: q.timestamp(ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'start_ts').offset)
     q.copy(dest, src, copy_size)
     if completion_signal is not None: q.timestamp(ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'end_ts').offset)
-    if completion_signal is not None: q.signal_trap(completion_signal)
+    if completion_signal is not None: q.signal(completion_signal)
     q.submit(self)
 
   def _submit_cache_inv(self, addr=0x0, sz=(1 << 64)-1, gli=0, glv=0, glk=0, gl1=0, gl2=0):

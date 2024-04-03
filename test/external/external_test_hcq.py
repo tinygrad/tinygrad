@@ -17,7 +17,9 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.addr = struct.pack("QQ", TestHCQ.b.lazydata.buffer._buf.va_addr, TestHCQ.a.lazydata.buffer._buf.va_addr)
     TestHCQ.addr2 = struct.pack("QQ", TestHCQ.a.lazydata.buffer._buf.va_addr, TestHCQ.b.lazydata.buffer._buf.va_addr)
 
-  def setUp(self): TestHCQ.b.lazydata.buffer.copyin(memoryview(bytearray(b"\x00"*8)))
+  def setUp(self):
+    TestHCQ.a.lazydata.buffer.copyin(memoryview(bytearray(struct.pack("ff", 0, 1))))
+    TestHCQ.b.lazydata.buffer.copyin(memoryview(bytearray(struct.pack("ff", 0, 0))))
 
   def test_run_to_3(self):
     ctypes.memmove(TestHCQ.d0.kernargs_ptr, TestHCQ.addr, len(TestHCQ.addr))
@@ -25,15 +27,25 @@ class TestHCQ(unittest.TestCase):
     q = HWComputeQueue()
     q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size)
     q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr+len(TestHCQ.addr), TestHCQ.runner.global_size, TestHCQ.runner.local_size)
-    q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size, ctypes.addressof(TestHCQ.d0.completion_signal))
+    q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size, TestHCQ.d0.completion_signal)
     q.submit(TestHCQ.d0)
     TestHCQ.d0._wait_on(TestHCQ.d0.completion_signal.event_id)
     assert (val:=TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[0]) == 3.0, f"got val {val}"
 
+  def test_wait_signal(self):
+    ctypes.memmove(TestHCQ.d0.kernargs_ptr, TestHCQ.addr, len(TestHCQ.addr))
+    TestHCQ.d0.completion_signal.value = 1
+    q = HWComputeQueue()
+    q.wait(TestHCQ.d0.completion_signal)
+    q.signal(TestHCQ.d0.completion_signal)
+    q.submit(TestHCQ.d0)
+    with self.assertRaises(RuntimeError):
+      TestHCQ.d0._wait_on(TestHCQ.d0.completion_signal.event_id, timeout=50)
+
   def test_run_normal(self):
     ctypes.memmove(TestHCQ.d0.kernargs_ptr, TestHCQ.addr, len(TestHCQ.addr))
     q = HWComputeQueue()
-    q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size, ctypes.addressof(TestHCQ.d0.completion_signal))
+    q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size, TestHCQ.d0.completion_signal)
     q.submit(TestHCQ.d0)
     TestHCQ.d0._wait_on(TestHCQ.d0.completion_signal.event_id)
     assert (val:=TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[0]) == 1.0, f"got val {val}"
@@ -46,7 +58,7 @@ class TestHCQ(unittest.TestCase):
 
   def test_signal(self):
     q = HWComputeQueue()
-    q.signal(ctypes.addressof(TestHCQ.d0.completion_signal))
+    q.signal(TestHCQ.d0.completion_signal)
     q.submit(TestHCQ.d0)
     TestHCQ.d0._wait_on(TestHCQ.d0.completion_signal.event_id)
 
@@ -54,21 +66,21 @@ class TestHCQ(unittest.TestCase):
     ctypes.memmove(TestHCQ.d0.kernargs_ptr, TestHCQ.addr, len(TestHCQ.addr))
     q = HWComputeQueue()
     q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size)
-    q.signal(ctypes.addressof(TestHCQ.d0.completion_signal))
+    q.signal(TestHCQ.d0.completion_signal)
     q.submit(TestHCQ.d0)
     TestHCQ.d0._wait_on(TestHCQ.d0.completion_signal.event_id)
     assert (val:=TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[0]) == 1.0, f"got val {val}"
 
   def test_copy_signal(self):
     q = HWCopyQueue()
-    q.signal_trap(TestHCQ.d0.completion_signal)
+    q.signal(TestHCQ.d0.completion_signal)
     q.submit(TestHCQ.d0)
     TestHCQ.d0._wait_on(TestHCQ.d0.completion_signal.event_id)
 
   def test_copy_copies(self):
     q = HWCopyQueue()
     q.copy(TestHCQ.b.lazydata.buffer._buf.va_addr, TestHCQ.a.lazydata.buffer._buf.va_addr, 8)
-    q.signal_trap(TestHCQ.d0.completion_signal)
+    q.signal(TestHCQ.d0.completion_signal)
     q.submit(TestHCQ.d0)
     TestHCQ.d0._wait_on(TestHCQ.d0.completion_signal.event_id)
     assert (val:=TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[1]) == 1.0, f"got val {val}"

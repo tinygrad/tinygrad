@@ -1,6 +1,6 @@
 # NOTE: this will replace jit.py, realize.py, and a lot of the boilerplate in each graph executor
 from __future__ import annotations
-from typing import List, Dict, Union, DefaultDict, Any
+from typing import List, Dict, Union, DefaultDict
 from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.helpers import colored, cpu_time_execution, DEBUG
@@ -19,7 +19,6 @@ class CustomOp(JITRunner):
 class SyncItem:
   device: str
   waiters: int = 0
-  opaque: Any = None
   def __repr__(self): return f"SyncItem({self.device}, waiters={self.waiters}, {id(self)})"
 
 @dataclass(frozen=True)
@@ -30,8 +29,6 @@ class WaitItem:
 class CopyItem:
   output: Buffer
   input: Buffer
-
-from tinygrad.runtime.ops_kfd import HWComputeQueue, HWCopyQueue, KFDDevice
 
 # this will interface with HWCommandQueue to replace Graph
 class CommandQueue:
@@ -61,47 +58,18 @@ class CommandQueue:
 
       if si.ast[0].op is LoadOps.COPY:
         # TODO: add back copy device
-        copy_device = si.outputs[0].device
-        if si.outputs[0].device.startswith("KFD"): copy_device += "-copy"
+        copy_device = si.outputs[0].device #+"-copy"
         add_wait_item(copy_device, add_sync_item(si.inputs[0].device))
         self.q[copy_device].append(CopyItem(si.outputs[0], si.inputs[0]))
-        if copy_device.endswith("-copy"): add_wait_item(si.outputs[0].device, add_sync_item(copy_device))
+        #add_wait_item(si.outputs[0].device, add_sync_item(copy_device))
         continue
 
       # NOTE: LoadOps.EMPTY and LoadOps.CUSTOM are making it here
       queue.append(si)
 
   def __call__(self):
-    if all(x.startswith("KFD") for x in self.q.keys()) and False:
-      signal_number = 1
-      for x in self.q.keys():
-        q = HWCopyQueue() if x.endswith("-copy") else HWComputeQueue()
-        for si in self.q[x]:
-          if isinstance(si, SyncItem):
-            q.signal(KFDDevice.event_page + signal_number*8)
-          elif isinstance(si, WaitItem):
-            q.wait(KFDDevice.event_page + signal_number*8)
-          elif isinstance(si, CopyItem):
-            si.output.allocate()
-            q.copy(si.output._buf, si.input._buf, si.output.nbytes)
-          elif isinstance(si, ScheduleItem):
-            for out in si.outputs:
-              if not hasattr(out, "_buf"): out.allocate()
-            runner = Device[si.outputs[0].device].get_runner(*si.ast)
-            q.exec(runner.prg, runner.global_size, runner.local_size)
-    else:
-      #print({d:len(self.q[d]) for d in self.q})
-      self.exec_queues(list(self.q.keys()))
-
-    #waiting_q = self.exec_queues([x for x in self.q.keys() if not x.startswith("KFD")])
-    # exec HSA queues
-    #print(waiting_q)
-    #self.exec_queues([x for x in self.q.keys()], waiting_q)
-
-    #active_queues = list(self.q.keys())
-
-  def exec_queues(self, active_queues, waiting_q=None):
-    waiting_queues: DefaultDict[SyncItem, List[str]] = defaultdict(list) if waiting_q is None else waiting_q
+    active_queues = list(self.q.keys())
+    waiting_queues: DefaultDict[SyncItem, List[str]] = defaultdict(list)
     seen_sids = set()
     while len(active_queues):
       device = active_queues.pop(0)
@@ -111,8 +79,8 @@ class CommandQueue:
       if isinstance(si, SyncItem):
         # don't sync if there's other options
         if all(isinstance(self.q[x][0], SyncItem) for x in active_queues if len(self.q[x])):
-          et = cpu_time_execution(Device[device.split("-")[0]].synchronize, enable=DEBUG>=2)
-          update_stats(colored(f"synchronize {id(si)}", "RED"), 0, 0, {}, et, 1, device=device)
+          et = cpu_time_execution(Device[device].synchronize, enable=DEBUG>=2)
+          update_stats(colored("synchronize", "RED"), 0, 0, {}, et, 1, device=device)
           if si in waiting_queues:
             active_queues += waiting_queues[si]
             waiting_queues[si].clear()
@@ -121,13 +89,12 @@ class CommandQueue:
           # put it back
           self.q[device] = [si] + self.q[device]
       elif isinstance(si, WaitItem):
-        update_stats(colored(f"wait {si.sync.device} {id(si.sync)}", "RED"), 0, 0, {}, 0, 0, device=device)
         if si.sync not in seen_sids:
           waiting_queues[si.sync].append(device)
           continue
       elif isinstance(si, CopyItem):
         si.output.allocate()
-        fxn = BufferXfer() if hasattr(Device[si.output.device.split("-")[0]].allocator, 'transfer') and \
+        fxn = BufferXfer() if hasattr(Device[si.output.device].allocator, 'transfer') and \
           si.output.device.split(":")[0] == si.input.device.split(":")[0] else BufferCopy()
         fxn.exec([si.output, si.input])
       elif isinstance(si, ScheduleItem):
@@ -144,4 +111,3 @@ class CommandQueue:
           update_stats(colored(f"empty {si.outputs[0].size:10d} {si.outputs[0].dtype}", "yellow"), 0, 0, {}, None, 1, device=si.outputs[0].device)
       else: raise RuntimeError(f"unknown type {si}")
       active_queues.append(device)
-    return waiting_queues
