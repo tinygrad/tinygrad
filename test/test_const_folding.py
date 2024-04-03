@@ -19,7 +19,6 @@ class TestSimpleConstFolding(unittest.TestCase):
     _check_ast_count(0, Tensor.ones(4) + Tensor.ones(4))
     _check_ast_count(0, Tensor.ones(4) / Tensor.ones(4))
 
-  @unittest.expectedFailure
   def test_cast(self):
     _check_ast_count(0, Tensor.ones(4).cast(dtypes.int16))
     _check_ast_count(0, Tensor.full(4, fill_value=-1).cast(dtypes.uint16))
@@ -88,6 +87,16 @@ class TestMovedConstFolding(unittest.TestCase):
 
   def test_add_padded_one(self):
     _check_ast_count(1, Tensor([1.0, 2, 3, 4]) * Tensor.ones(2).pad(((1, 1),)))
+
+  def test_cast_padded(self):
+    # NOTE: this is folded due to CAST_BEFORE_VIEW
+    _check_ast_count(0, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16))
+    np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16).numpy(), [0, 1, 1, 1, 1, 0])
+    _check_ast_count(0, Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16))
+    np.testing.assert_equal(Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16).numpy(), [0, 65535, 65535, 65535, 65535, 0])
+    # not folded
+    _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int64))
+    np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int64).numpy(), [0, 1, 1, 1, 1, 0])
 
 @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
 class TestMultiConstFolding(unittest.TestCase):
