@@ -1,26 +1,10 @@
 <div align="center">
 
 <picture>
+  <source media="(prefers-color-scheme: dark)" srcset="/docs/logo_tiny_dark.svg" width="50%" height="50%">
+  <source media="(prefers-color-scheme: light)" srcset="/docs/logo_tiny_light.svg" width="50%" height="50%">
+  <img alt="tiny corp logo" src="/docs/logo_tiny_light.svg" width="50%" height="50%">
   <a href="https://tinygrad.org">
-  <svg viewBox="-10 -10 150 70" xmlns="http://www.w3.org/2000/svg" style="background-color: transparent;" width="50%" height="50%">
-    <!-- t -->
-    <rect x="10" y="0" width="10" height="40" fill="#ffffff" />
-    <rect x="0" y="10" width="30" height="10" fill="#ffffff" />
-    <rect x="10" y="30" width="20" height="10" fill="#ffffff" />
-    <!-- i -->
-    <rect x="40" y="0" width="10" height="10" fill="#ffffff" />
-    <rect x="40" y="20" width="10" height="20" fill="#ffffff" />
-    <!-- n -->
-    <rect x="60" y="10" width="10" height="30" fill="#ffffff" />
-    <rect x="60" y="10" width="20" height="10" fill="#ffffff" />
-    <rect x="80" y="20" width="10" height="20" fill="#ffffff" />
-    <!-- y -->
-    <rect x="100" y="10" width="10" height="20" fill="#ffffff" />
-    <rect x="100" y="20" width="30" height="10" fill="#ffffff" />
-    <rect x="120" y="10" width="10" height="30" fill="#ffffff" />
-    <rect x="100" y="40" width="20" height="10" fill="#ffffff" />
-  </svg>
-  </a>
 </picture>
 
 tinygrad: For something between [PyTorch](https://github.com/pytorch/pytorch) and [karpathy/micrograd](https://github.com/karpathy/micrograd). Maintained by [tiny corp](https://tinygrad.org).
