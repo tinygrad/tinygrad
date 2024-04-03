@@ -291,9 +291,10 @@ class KFDDevice(Compiled):
     kio.svm(self.kfd, made_struct=self.map_uptr2gpu_struct)
 
   def _gpu_map(self, mem):
-    mem.__setattr__("mapped_gpu_ids", (ctypes.c_int32 * 1)(self.gpu_id))
-    stm = kio.map_memory_to_gpu(self.kfd, handle=mem.handle, device_ids_array_ptr=ctypes.addressof(gpus:=mem.mapped_gpu_ids), n_devices=len(gpus))
-    assert stm.n_success == 1
+    mem.__setattr__("mapped_gpu_ids", getattr(mem, "mapped_gpu_ids", []) + [self.gpu_id])
+    c_gpus = (ctypes.c_int32 * len(mem.mapped_gpu_ids))(*mem.mapped_gpu_ids)
+    stm = kio.map_memory_to_gpu(self.kfd, handle=mem.handle, device_ids_array_ptr=ctypes.addressof(c_gpus), n_devices=len(mem.mapped_gpu_ids))
+    assert stm.n_success == len(mem.mapped_gpu_ids)
 
   def _wait_on(self, event_id, timeout=1000):
     evt_arr = (kfd.struct_kfd_event_data * 1)()
@@ -319,8 +320,9 @@ class KFDDevice(Compiled):
     return mem
 
   def _gpu_free(self, mem):
-    if (gpus:=getattr(mem, "mapped_gpu_ids", None)) is not None:
-      stm = kio.unmap_memory_from_gpu(self.kfd, handle=mem.handle, device_ids_array_ptr=ctypes.addressof(gpus), n_devices=len(gpus))
+    if len(gpus:=getattr(mem, "mapped_gpu_ids", [])):
+      c_gpus = (ctypes.c_int32 * len(gpus))(*gpus)
+      stm = kio.unmap_memory_from_gpu(self.kfd, handle=mem.handle, device_ids_array_ptr=ctypes.addressof(c_gpus), n_devices=len(gpus))
       assert stm.n_success == len(gpus)
     libc.munmap(mem.va_addr, mem.size)
     kio.free_memory_of_gpu(self.kfd, handle=mem.handle)

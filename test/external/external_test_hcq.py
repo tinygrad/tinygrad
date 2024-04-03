@@ -1,7 +1,15 @@
-import unittest, ctypes, struct
-from tinygrad import Device, Tensor
+import unittest, ctypes, struct, time
+from tinygrad import Device, Tensor, dtypes
+from tinygrad.buffer import Buffer, BufferOptions
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.runtime.ops_kfd import KFDDevice, HWCopyQueue, HWComputeQueue
+
+def _time_queue(q, d):
+  st = time.perf_counter()
+  q.signal(d.completion_signal)
+  q.submit(d)
+  d._wait_on(d.completion_signal.event_id)
+  return time.perf_counter() - st
 
 class TestHCQ(unittest.TestCase):
   @classmethod
@@ -84,6 +92,29 @@ class TestHCQ(unittest.TestCase):
     q.submit(TestHCQ.d0)
     TestHCQ.d0._wait_on(TestHCQ.d0.completion_signal.event_id)
     assert (val:=TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[1]) == 1.0, f"got val {val}"
+
+  def test_copy_bandwidth(self):
+    SZ = 2_000_000_000
+    a = Buffer("KFD", SZ, dtypes.uint8, options=BufferOptions(nolru=True)).allocate()
+    b = Buffer("KFD", SZ, dtypes.uint8, options=BufferOptions(nolru=True)).allocate()
+    q = HWCopyQueue()
+    q.copy(a._buf.va_addr, b._buf.va_addr, SZ)
+    et = _time_queue(q, TestHCQ.d0)
+    gb_s = (SZ/1e9)/et
+    print(f"same device copy:  {et*1e3:.2f} ms, {gb_s:.2f} GB/s")
+    assert gb_s > 10 and gb_s < 1000
+
+  def test_cross_device_copy_bandwidth(self):
+    SZ = 2_000_000_000
+    a = Buffer("KFD", SZ, dtypes.uint8, options=BufferOptions(nolru=True)).allocate()
+    b = Buffer("KFD:1", SZ, dtypes.uint8, options=BufferOptions(nolru=True)).allocate()
+    TestHCQ.d0._gpu_map(b._buf)
+    q = HWCopyQueue()
+    q.copy(a._buf.va_addr, b._buf.va_addr, SZ)
+    et = _time_queue(q, TestHCQ.d0)
+    gb_s = (SZ/1e9)/et
+    print(f"cross device copy: {et*1e3:.2f} ms, {gb_s:.2f} GB/s")
+    assert gb_s > 2 and gb_s < 50
 
 if __name__ == "__main__":
   unittest.main()
