@@ -22,7 +22,7 @@ def to_tensor(exp: Node, shape: Tuple[int], vars: Iterable[Variable] = None):
         ans.append(exp.substitute(dict(zip(vars, map(NumNode, indices[-1][i])))).b)
     return Tensor(ans).reshape(shape)
 
-def is_single_view(s: ShapeTracker, lower_corner: Tuple[int]=None):
+def is_single_view(s: ShapeTracker):
     x = to_tensor(s.expr_idxs()[0], s.shape, s.expr_idxs()[0].vars())
     m = to_tensor(s.expr_idxs()[1], s.shape, s.expr_idxs()[0].vars())
     u = m
