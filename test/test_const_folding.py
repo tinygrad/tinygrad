@@ -79,14 +79,14 @@ class TestSimpleConstFolding(unittest.TestCase):
     _check_ast_count(0, Tensor.ones((256,256)).sum())
   def test_sum_axis(self):
     _check_ast_count(0, Tensor.ones((256,256)).sum(1))
-  def test_sum_neg_axis(self):
+  def test_sum_axis_neg(self):
     _check_ast_count(0, Tensor.ones((256,256)).sum(-1))
 
   def test_max_one(self):
     _check_ast_count(0, Tensor.ones((3,3)).max())
   def test_max_axis(self):
     _check_ast_count(0, Tensor(3.0).max(1))
-  def test_max_neg_axis(self):
+  def test_max_axis_neg(self):
     _check_ast_count(0, Tensor(3.0).max(-1))
 
 class TestMovedConstFolding(unittest.TestCase):

@@ -178,7 +178,7 @@ class TestOpt(unittest.TestCase):
     with CLCache():
       ret = img.sum() + addme
       ret.realize()
-      assert len(CacheCollector.cache) == 1, "optimizer didn't fold reduce/elementwise"
+      assert len(CacheCollector.cache) == 0, "optimizer didn't fold reduce/elementwise"
     assert ret.item() == 33
 
   def test_fold_batchnorm(self):
