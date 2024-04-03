@@ -5,18 +5,14 @@ from tinygrad import Tensor
 from typing import List, Tuple
 
 def node_to_tensor(exp: Node, vars: List[Variable], shape: Tuple[sint, ...]) -> Tensor:
-    if len(vars) == 0:
-        assert isinstance(exp, NumNode), f'No vars in {exp}'
-        return Tensor(exp.min) if shape is None else Tensor.full(shape, exp.min)
+    if len(vars) == 0: return Tensor(exp.min) if shape is None else Tensor.full(shape, exp.min)
     indices: List[List[List[int]]] = [list() for _ in vars]
     indices[0] = [[x] for x in list(range(vars[0].min, vars[0].max + 1))]
     for i, v in enumerate(vars[1:]):
         for j in range(v.min, v.max + 1):
             indices[i+1] += [x + [j] for x in indices[i]]
     indices[-1].sort()
-    ans = []
-    for i in range(len(indices[-1])):
-        ans.append(exp.substitute(dict(zip(vars, map(NumNode, indices[-1][i])))).b)
+    ans = [exp.substitute(dict(zip(vars, map(NumNode, i)))).b for i in indices[-1]]
     return Tensor(ans).reshape(shape)
 
 def st_to_tensors(st: ShapeTracker) -> Tuple[Tensor, Tensor]:

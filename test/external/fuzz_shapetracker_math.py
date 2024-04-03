@@ -46,13 +46,13 @@ if __name__ == "__main__":
       if getenv("CHECK_MV"):
         if len((old := st1.simplify()).views) > len((new := simplify2(st1)).views):
           print(colored("new simplify better than old", "green"))
-          print(old)
-          print(new)
+          print(f"OLD: {old}")
+          print(f"NEW: {new}")
           mv_win += 1
         if len(old.views) < len(new.views):
           print(colored("old simplify better than new ", "green"))
-          print(st1.simplify())
-          print(simplify2(st1))
+          print(f"OLD: {old}")
+          print(f"NEW: {new}")
           mv_loss += 1
       if DEBUG >= 1:
         print(f"EXP: {st1}")
