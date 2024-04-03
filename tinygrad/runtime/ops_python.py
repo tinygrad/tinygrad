@@ -73,7 +73,7 @@ class PythonProgram:
         dl[i] = dtype
         if uop is UOps.DEFINE_GLOBAL:
           assert dtype.fmt is not None
-          ul[i] = [pbufs[self.buf_idxs.index(arg[0])].cast(dtype.fmt)] * warp_size
+          ul[i] = [pbufs[self.buf_idxs.index(arg[0]) if self.buf_idxs is not None else arg[0]].cast(dtype.fmt)] * warp_size
         elif uop is UOps.DEFINE_LOCAL:
           assert dtype.fmt is not None
           lbuf = memoryview(bytearray(arg[1]*dtype.itemsize))
