@@ -46,3 +46,9 @@ def merge_views(st: ShapeTracker) -> ShapeTracker:
     offset = (x[lower_corner] - (Tensor(strides) * Tensor(list(lower_corner))).sum()).item()
     st2 = ShapeTracker(views=(View.create(shape=x.shape, strides=tuple(strides), offset=offset, mask=mask),))
     return st2 if st_equal(st, st2) else st
+
+def simplify2(st: ShapeTracker) -> ShapeTracker:
+    for i in range(2, len(st.views) + 1):
+        if len((st2 := merge_views(ShapeTracker(st.views[-i:]))).views) < i:
+            return simplify2(ShapeTracker(st.views[:-i] + st2.views))
+    return st
