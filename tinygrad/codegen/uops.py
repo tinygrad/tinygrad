@@ -67,6 +67,27 @@ class PatternMatcher:
       if _match(uop, p, store): return fxn(**store)
     return None
 
+  def rewrite_graph(self, uops: UOpGraph):
+    replace: Dict[UOp, UOp] = {}
+    seen: Set[UOp] = set()
+    for u in uops:
+      if u in seen: continue
+      seen.add(u)
+      for o,n in replace.items():
+        if o in u.vin and u is not n:
+          u.vin = tuple(n if x == o else x for x in u.vin)
+      if rew := self.rewrite(u): replace[u] = rew
+
+    for o,n in replace.items():
+      queue = [n]
+      while queue:
+        if all([qq in uops.uops for qq in queue[-1].vin]):
+          q = queue.pop()
+          new = uops.add(q.uop, q.dtype, q.vin, q.arg, insert_before=max([0]+[uops.uops.index(vv) for vv in q.vin])+1)
+          for vv in uops.uops + queue: vv.vin = tuple(new if x is q else x for x in vv.vin)
+        else: queue.extend([qq for qq in queue[-1].vin if qq not in uops.uops])
+      if not any([o in u.vin for u in uops]): uops.uops.remove(o)
+
 constant_folder = PatternMatcher([
   # const rules
   ({"__name__": "root", "uop": UOps.GEP, "vin": ({"__name__": "c", "uop": UOps.CONST},)}, lambda root, c: UOp.const(root.dtype, c.arg)),
