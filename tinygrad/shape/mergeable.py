@@ -1,14 +1,14 @@
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, un1d
-from tinygrad.shape.symbolic import Node, NumNode, Variable
+from tinygrad.shape.symbolic import Node, NumNode, Variable, sint
 from tinygrad import Tensor
-from typing import Tuple, Iterable
+from typing import Tuple, Optional, Set, List
 
-def to_tensor(exp: Node, shape: Tuple[int], vars: Iterable[Variable] = None):
-    if vars is None: vars = exp.vars()
-    if len(vars) == 0: return None
-    vars = sorted(list(vars), key=str)
-    indices = [list() for _ in vars]
+def to_tensor(exp: Node, shape: Tuple[sint, ...], vars1: Optional[Set[Variable]]):
+    if vars1 is None: vars1 = exp.vars()
+    if len(vars1) == 0: return None
+    vars = sorted(list(vars1), key=str)
+    indices: List[List[List[int]]] = [list() for _ in vars]
     indices[0] = [[x] for x in list(range(vars[0].min, vars[0].max + 1))]
     for i, v in enumerate(vars[1:]):
         for j in range(v.min, v.max + 1):
