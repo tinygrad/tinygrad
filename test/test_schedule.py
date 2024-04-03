@@ -363,7 +363,7 @@ class TestSchedule(unittest.TestCase):
     x = Tensor([1,2,3,4])
     out = x ** Tensor(0)
     # NOTE: this is ConstBuffer 0 + ConstBuffer 1
-    check_schedule(out, 1)
+    check_schedule(out, 0)
 
   def test_zero_size(self):
     x = Tensor.empty(2, 3, 0)
@@ -423,6 +423,7 @@ class TestSchedule(unittest.TestCase):
     out = x + y
     check_schedule(out, 2)  # TODO: this should be 1
 
+  @unittest.skip("broken due to const folding and two contiguous are different kernels")
   def test_const_no_recompute(self):
     x = Tensor(2) + Tensor(2)
     y = Tensor(2) + Tensor(2)

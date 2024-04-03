@@ -71,9 +71,10 @@ def Adam(params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8): return LAM
 class LAMB(Optimizer):
   def __init__(self, params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, wd=0.0, adam=False):
     super().__init__(params, lr)
-    self.b1, self.b2, self.eps, self.wd, self.adam, self.t = b1, b2, eps, wd, adam, Tensor([0], device=self.device, requires_grad=False).realize()
-    self.m = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params]
-    self.v = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params]
+    self.eps, self.wd, self.adam = eps, wd, adam
+    self.b1, self.b2, self.t = (Tensor([x], device=self.device, requires_grad=False).realize() for x in [b1, b2, 0])
+    self.m = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False).contiguous() for t in self.params]
+    self.v = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False).contiguous() for t in self.params]
 
   def _step(self) -> List[Tensor]:
     self.t.assign(self.t + 1)
@@ -81,8 +82,8 @@ class LAMB(Optimizer):
       assert t.grad is not None
       self.m[i].assign(self.b1 * self.m[i] + (1.0 - self.b1) * t.grad)
       self.v[i].assign(self.b2 * self.v[i] + (1.0 - self.b2) * (t.grad * t.grad))
-      m_hat = self.m[i] / (1.0 - self.b1**self.t)
-      v_hat = self.v[i] / (1.0 - self.b2**self.t)
+      m_hat = self.m[i] / (1.0 - self.b1 ** self.t)
+      v_hat = self.v[i] / (1.0 - self.b2 ** self.t)
       up = (m_hat / (v_hat.sqrt() + self.eps)) + self.wd * t.detach()
       if not self.adam:
         r1 = t.detach().square().sum().sqrt()
