@@ -1,6 +1,6 @@
 # ruff: noqa: E501
 import unittest
-from tinygrad import dtypes
+from tinygrad import dtypes, Device
 from tinygrad.helpers import CI
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.search import Opt, OptOps
@@ -63,7 +63,7 @@ class TestLinearizerOverflow(unittest.TestCase):
     opts = [Opt(op=OptOps.UPCAST, axis=3, amt=4), Opt(op=OptOps.LOCAL, axis=3, amt=16), Opt(op=OptOps.UPCAST, axis=1, amt=4), Opt(op=OptOps.LOCAL, axis=2, amt=8), Opt(op=OptOps.UPCAST, axis=1, amt=2), Opt(op=OptOps.UPCAST, axis=2, amt=4)]
     _test_overflow(ast, opts)
 
-#@unittest.skipIf(Device.DEFAULT not in {"GPU", "HSA", "CUDA", "METAL"}, "only backends with locals")
+@unittest.skipIf(Device.DEFAULT not in {"GPU", "HSA", "CUDA", "METAL"}, "only backends with locals")
 @unittest.skipIf(CI, "slow")
 class TestLinearizerOverflowAlt(unittest.TestCase):
   def test_overflow_1(self):

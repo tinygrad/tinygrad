@@ -1,5 +1,5 @@
-import unittest
-from tinygrad import Tensor, Device
+import unittest, math
+from tinygrad import Tensor, Device, dtypes
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.features.multi import MultiLazyBuffer
 from tinygrad.helpers import CI
@@ -13,6 +13,17 @@ def _check_ast_count(desired_count:int, t:Tensor):
   assert len(asts) == desired_count
 
 class TestSimpleConstFolding(unittest.TestCase):
+  def test_all_consts_ops(self):
+    _check_ast_count(0, Tensor.ones(4).exp())
+    _check_ast_count(0, Tensor.ones(4).sqrt())
+    _check_ast_count(0, Tensor.ones(4) + Tensor.ones(4))
+    _check_ast_count(0, Tensor.ones(4) / Tensor.ones(4))
+
+  @unittest.expectedFailure
+  def test_cast(self):
+    _check_ast_count(0, Tensor.ones(4).cast(dtypes.int16))
+    _check_ast_count(0, Tensor.full(4, fill_value=-1).cast(dtypes.uint16))
+
   def test_add_literal_zero(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) + 0)
   def test_add_tensor_zero(self):
@@ -59,11 +70,8 @@ class TestSimpleConstFolding(unittest.TestCase):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) ** 1)
   def test_pow_tensor_one(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) ** Tensor.ones(4))
-  # TODO: fix pow folding with left operand = 1
-  @unittest.expectedFailure
   def test_literal_one_pow(self):
     _check_ast_count(0, 1 ** Tensor([1.0, 2, 3, 4]))
-  @unittest.expectedFailure
   def test_tensor_one_pow(self):
     _check_ast_count(0, Tensor.ones(4) ** Tensor([1.0, 2, 3, 4]))
 
@@ -104,6 +112,10 @@ class TestMultiConstFolding(unittest.TestCase):
     np.testing.assert_equal((t * 0).numpy(), [0] * 16)
     np.testing.assert_equal((t * 1).numpy(), np.arange(16))
 
+    _check_ast_count(0, t ** 0)
+    _check_ast_count(0, t ** 1)
+    _check_ast_count(0, 1 ** t)
+
   def test_multi_const_folding_tensor(self):
     ds = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
     t = Tensor.arange(16).float().realize().to(ds)
@@ -125,11 +137,49 @@ class TestMultiConstFolding(unittest.TestCase):
   def test_multi_todo_pow(self):
     ds = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
     t = Tensor.arange(16).float().realize().to(ds)
+    zero = Tensor.zeros(16).realize().to(ds)
+    one = Tensor.ones(16).realize().to(ds)
 
     # TODO: fix pow folding
-    _check_ast_count(0, t ** 0)
-    _check_ast_count(0, t ** 1)
-    _check_ast_count(0, 1 ** t)
+    _check_ast_count(0, t ** zero)
+    _check_ast_count(0, t ** one)
+    _check_ast_count(0, one ** t)
+
+class TestTautologicalCompare(unittest.TestCase):
+  # without const folding, these would have triggered -Wtautological-compare in clang
+  def test_lt_false(self):
+    # bool < False is always false
+    np.testing.assert_equal((Tensor([True, False]) < False).numpy(), [False, False])
+
+  def test_true_lt(self):
+    # True < bool is always false
+    np.testing.assert_equal((True < Tensor([True, False])).numpy(), [False, False])
+
+  def test_truth_table(self):
+    np.testing.assert_equal((Tensor(False) < Tensor(False)).numpy(), False)
+    np.testing.assert_equal((Tensor(False) < Tensor(True)).numpy(), True)
+    np.testing.assert_equal((Tensor(True) < Tensor(False)).numpy(), False)
+    np.testing.assert_equal((Tensor(True) < Tensor(True)).numpy(), False)
+
+  @unittest.skip("not implemented yet")
+  def test_a_eq_a(self):
+    # self eq is always true for int or bool
+    a = Tensor([1, 2, 3])
+    np.testing.assert_equal((a == a).numpy(), [True, True, True])
+
+    # not true for nan
+    a = Tensor([math.nan, 1.0, 2.0])
+    np.testing.assert_equal((a == a).numpy(), [False, True, True])
+
+  @unittest.skip("not implemented yet")
+  def test_a_ne_a(self):
+    # self not eq is always false for int or bool
+    a = Tensor([1, 2, 3])
+    np.testing.assert_equal((a != a).numpy(), [False, False, False])
+
+    # not true for nan
+    a = Tensor([math.nan, 1.0, 2.0])
+    np.testing.assert_equal((a != a).numpy(), [True, False, False])
 
 if __name__ == '__main__':
   unittest.main()

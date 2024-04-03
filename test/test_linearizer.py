@@ -142,15 +142,6 @@ class TestLinearizer(unittest.TestCase):
     num_ops = len([uop for uop in k.uops if uop.uop is UOps.ALU])
     assert num_ops == 0, "more alu uops than needed"
 
-  def test_constant_fold(self):
-    a, b = Tensor(2), Tensor(3)
-    r = a * b
-
-    k = Linearizer(*create_schedule([r.lazydata])[-1].ast)
-    k.linearize()
-    num_ops = len([uop for uop in k.uops if uop.uop in [UOps.LOAD, UOps.ALU]])
-    assert num_ops <= 0, "more load or alu uops than needed"
-
   def test_sum_acc_dtype(self):
     for tensor_dtype, acc_dtype in (
       (dtypes.bool, dtypes.int), (dtypes.int16, dtypes.int), (dtypes.float16, dtypes.float), (dtypes.bfloat16, dtypes.float)):
