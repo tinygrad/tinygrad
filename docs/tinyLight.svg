@@ -1,4 +1,7 @@
 <svg viewBox="0 0 130 60" xmlns="http://www.w3.org/2000/svg" style="background-color: white;">
+  <!-- Top bar -->
+  <rect x="0" y="0" width="130" height="5" fill="#ffffff"></rect>
+
   <!-- t -->
   <rect x="10" y="10" width="10" height="40" fill="#000000"></rect>
   <rect x="0" y="20" width="30" height="10" fill="#000000"></rect>
@@ -19,4 +22,6 @@
   <rect x="120" y="20" width="10" height="30" fill="#000000"></rect>
   <rect x="100" y="50" width="20" height="10" fill="#000000"></rect>
 
+  <!-- Bottom bar -->
+  <rect x="0" y="55" width="130" height="5" fill="#ffffff"></rect>
 </svg>
