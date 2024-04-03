@@ -158,8 +158,7 @@ class LazyBuffer:
     # TODO: this logic should move to the scheduler
     if self.size == 0 and 0 not in new_shape: return self.const({ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[op], new_shape)
     if self.is_unrealized_unpadded_const():
-      sum_shape = tuple(s if i in axis else 1 for i,s in enumerate(self.shape))
-      return self.const(self.base.arg * {ReduceOps.SUM: prod(sum_shape), ReduceOps.MAX: 1}[op], new_shape)
+      return self.const(self.base.arg * (prod(s if i in axis else 1 for i,s in enumerate(self.shape)) if op is ReduceOps.SUM else 1), new_shape)
     # TODO: can we split symbolic shape if the reduce axis is not symbolic?
     if not all_int(self.shape) or (0 in self.shape) or prod(self.shape) // prod(new_shape) < getenv("REDUCEOP_SPLIT_THRESHOLD", 32768):
       return self._reduce_op(op, axis)
