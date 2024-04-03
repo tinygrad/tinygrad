@@ -158,14 +158,11 @@ class Compiler:
     return lib
 
 class CompiledASTRunner(JITRunner):
-  def __init__(self, name:str, prg:str, dname:str, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None,
-               variables:Optional[List[Variable]]=None, op_estimate:sint=0, mem_estimate:sint=0, precompiled:Optional[bytes]=None, outcount:int=1):
+  def __init__(self, name:str, prg:str, dname:str, variables:Optional[List[Variable]]=None, op_estimate:sint=0, mem_estimate:sint=0, precompiled:Optional[bytes]=None, outcount:int=1):
     super().__init__()
     if DEBUG >= 4: print(prg)
-    if global_size is not None: global_size = global_size + [1]*(3-len(global_size))
-    if local_size is not None: local_size = local_size + [1]*(3-len(local_size))
-    self.name, self.display_name, self.prg, self.dname, self.global_size, self.local_size, self.first_run = \
-      to_function_name(name), name, prg, dname, global_size, local_size, True
+    self.name, self.display_name, self.prg, self.dname, self.first_run = \
+      to_function_name(name), name, prg, dname, True
     assert self.device.compiler is not None, "compiler is required to make an AST kernel"
     lib:bytes = precompiled if precompiled is not None else self.device.compiler.compile_cached(prg)
     self.lib, self.clprg, self.outcount = lib, self.device.runtime(self.name, lib), outcount
@@ -176,27 +173,13 @@ class CompiledASTRunner(JITRunner):
   def device(self): return Device[self.dname]
 
   def __reduce__(self):
-    return self.__class__, (self.name, self.prg, self.dname, self.global_size, self.local_size,
+    return self.__class__, (self.name, self.prg, self.dname,
                             self.vars, self.op_estimate, self.mem_estimate, self.lib)
 
-  def launch_dims(self, var_vals):
-    global_size = [sym_infer(sz, var_vals) for sz in self.global_size] if self.global_size is not None else self.global_size
-    local_size = [sym_infer(sz, var_vals) for sz in self.local_size] if self.local_size is not None else self.local_size
-    return global_size, local_size
-
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False, do_update_stats=True) -> Optional[float]:
-    global_size, local_size = self.launch_dims(var_vals)
-    if global_size is not None and local_size is None and all_int(self.global_size): # type: ignore[arg-type]
-      # TODO: this is copied from get_program
-      from tinygrad.features.search import optimize_local_size
-      local_size = self.local_size = optimize_local_size(self.clprg, global_size, rawbufs)
-      global_size = self.global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
-    lra = {}
-    if global_size: lra['global_size'] = global_size
-    if local_size: lra['local_size'] = local_size
-    et = self.clprg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k] for k in self.vars), wait=wait or DEBUG>=2)
+    et = self.clprg(*[x._buf for x in rawbufs], vals=tuple(var_vals[k] for k in self.vars), wait=wait or DEBUG>=2)
     if do_update_stats: update_stats(self.display_name, self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit,
-                                     lra=lra, device=self.dname, first_run=self.first_run)
+                                     device=self.dname, first_run=self.first_run)
     self.first_run = False
     return et
 
@@ -217,7 +200,7 @@ class Compiled:
     ops, mem = k.uops.flops_mem()
     run_count = prod((k.global_size if k.global_size else []) + (k.local_size if k.local_size else []))
     # NOTE: we use min here to ignore the indexing FLOPS
-    ret = CompiledASTRunner(k.name, self.compiler.render(to_function_name(k.name), k.uops), self.dname, k.global_size, k.local_size,
+    ret = CompiledASTRunner(k.name, self.compiler.render(to_function_name(k.name), k.uops), self.dname,
                             k.uops.vars(), min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count), outcount=len(k.outbufs))
     return ret
 
