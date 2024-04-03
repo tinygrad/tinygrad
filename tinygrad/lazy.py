@@ -78,6 +78,8 @@ class LazyBuffer:
   def cast(self, dtype:DType, bitcast:bool=False):
     if self.dtype == dtype: return self
     if self.device.startswith("DISK") and not bitcast: raise RuntimeError("attempted to cast disk buffer (bitcast only)")
+    if self.is_unrealized_unpadded_const() and not bitcast:
+      return create_lazybuffer(self.device, self.st, dtype, LoadOps.CONST, dtypes.as_const(self.base.arg, dtype))
     # TODO: applying this makes gpt2 slower
     if getenv("CAST_BEFORE_VIEW", 1) and dtype.itemsize <= self.dtype.itemsize and self != self.base:
       return self.base.cast(dtype, bitcast)._view(self.st)
