@@ -34,17 +34,19 @@ def is_single_view(s: ShapeTracker):
     for i in range(N):
         strides.append((x[tuple([lower_corner[i] if j != i else lower_corner[i] + 1 for j in range(N)])] - x[lower_corner]).item())
     s2 = ShapeTracker(views=(View(shape=x.shape, strides=tuple(strides), offset=s.views[-1].offset, mask=mask, contiguous=False),))   # TODO: check if offset is right
-    return (x == to_tensor(s2.expr_idxs()[0], s2.shape, s2.expr_idxs()[0].vars())).numpy().all()
-
+    return (m * x == m * to_tensor(s2.expr_idxs()[0], s2.shape, s2.expr_idxs()[0].vars())).numpy().all()
 
 
 s = ShapeTracker.from_shape((2,4)).permute((1,0)).reshape((2,4))
 s1 = ShapeTracker.from_shape((2,4))
 s2 = ShapeTracker(views=(View.create(shape=(3,3,3), strides=(9, 3,1), mask=((1,3), (1,3), (1,3)), offset=0),))
 s3 = ShapeTracker(views=(View.create(shape=(3,3,3), strides=(9, 3,1), mask=None, offset=99),))
+views = list(s.views)
+views[1] = View.create(shape=views[1].shape, mask=((0,2), (0,2)))
+s4 = ShapeTracker(views=tuple(views))
 
 print(is_single_view(s))
 print(is_single_view(s1))
 print(is_single_view(s2))
 print(is_single_view(s3))
-
+print(is_single_view(s4))
