@@ -217,51 +217,55 @@ class Matcher(object):
 
   def __call__(self, match_quality_matrix):
     # print('MATCHER ARG SIZE:', match_quality_matrix.shape)
-    with torch.no_grad():
-      match_quality_matrix = torch.as_tensor(match_quality_matrix.numpy())
-      """
-      Args:
-          match_quality_matrix (Tensor[float]): an MxN tensor, containing the
-          pairwise quality between M ground-truth elements and N predicted elements.
+    # with torch.no_grad():
+    # match_quality_matrix_np = torch.as_tensor(match_quality_matrix.numpy())
+    match_quality_matrix_np = match_quality_matrix.numpy()
 
-      Returns:
-          matches (Tensor[int64]): an N tensor where N[i] is a matched gt in
-          [0, M - 1] or a negative value indicating that prediction i could not
-          be matched.
-      """
-      if match_quality_matrix.numel() == 0:
-        # empty targets or proposals not supported during training
-        if match_quality_matrix.shape[0] == 0:
-          raise ValueError(
-              "No ground-truth boxes available for one of the images "
-              "during training")
-        else:
-          raise ValueError(
-              "No proposal boxes available for one of the images "
-                "during training")
+    """
+    Args:
+        match_quality_matrix (Tensor[float]): an MxN tensor, containing the
+        pairwise quality between M ground-truth elements and N predicted elements.
 
-      # match_quality_matrix is M (gt) x N (predicted)
-      # Max over gt elements (dim 0) to find best gt candidate for each prediction
-      matched_vals, matches = match_quality_matrix.max(dim=0)
-      if self.allow_low_quality_matches:
-        all_matches = matches.clone()
+    Returns:
+        matches (Tensor[int64]): an N tensor where N[i] is a matched gt in
+        [0, M - 1] or a negative value indicating that prediction i could not
+        be matched.
+    """
+    if match_quality_matrix.numel() == 0:
+      # empty targets or proposals not supported during training
+      if match_quality_matrix.shape[0] == 0:
+        raise ValueError(
+            "No ground-truth boxes available for one of the images "
+            "during training")
       else:
-        all_matches = None
+        raise ValueError(
+            "No proposal boxes available for one of the images "
+              "during training")
 
-      # Assign candidate matches with low quality to negative (unassigned) values
-      below_low_threshold = matched_vals < self.low_threshold
-      between_thresholds = (matched_vals >= self.low_threshold) & (
-          matched_vals < self.high_threshold
-      )
-      matches[below_low_threshold] = self.BELOW_LOW_THRESHOLD
-      matches[between_thresholds] = self.BETWEEN_THRESHOLDS
+    # match_quality_matrix is M (gt) x N (predicted)
+    # Max over gt elements (dim 0) to find best gt candidate for each prediction
+    matched_vals = match_quality_matrix_np.max(axis=0)
+    matches = match_quality_matrix_np.argmax(axis=0)
+    if self.allow_low_quality_matches:
+      # all_matches = matches.clone()
+      all_matches = np.copy(matches)
+    else:
+      all_matches = None
 
-      if self.allow_low_quality_matches:
-        # assert all_matches is not None
-        matches = self.set_low_quality_matches_(matches, all_matches, match_quality_matrix)
-      matches_tens = Tensor(matches.numpy()).realize()
-      del all_matches, matches, match_quality_matrix, below_low_threshold, between_thresholds
-      return matches_tens
+    # Assign candidate matches with low quality to negative (unassigned) values
+    below_low_threshold = matched_vals < self.low_threshold
+    between_thresholds = (matched_vals >= self.low_threshold) & (
+        matched_vals < self.high_threshold
+    )
+    matches[below_low_threshold] = self.BELOW_LOW_THRESHOLD
+    matches[between_thresholds] = self.BETWEEN_THRESHOLDS
+
+    if self.allow_low_quality_matches:
+      # assert all_matches is not None
+      matches = self.set_low_quality_matches_(matches, all_matches, match_quality_matrix_np)
+    matches_tens = Tensor(matches).realize()
+    del all_matches, matches, match_quality_matrix_np, below_low_threshold, between_thresholds
+    return matches_tens
 
   def set_low_quality_matches_(self, matches, all_matches, match_quality_matrix):
     """
@@ -272,9 +276,10 @@ class Matcher(object):
     quality value.
     """
     # For each gt, find the prediction with which it has highest quality
-    highest_quality_foreach_gt, _ = match_quality_matrix.max(dim=1)
+    highest_quality_foreach_gt = match_quality_matrix.max(axis=1)
     # Find highest quality match available, even if it is low, including ties
-    gt_pred_pairs_of_highest_quality = torch.where(
+    
+    gt_pred_pairs_of_highest_quality = np.nonzero(
         match_quality_matrix == highest_quality_foreach_gt[:, None]
     )
     # Example gt_pred_pairs_of_highest_quality:
@@ -293,7 +298,7 @@ class Matcher(object):
 
     pred_inds_to_update = gt_pred_pairs_of_highest_quality[1]
     matches[pred_inds_to_update] = all_matches[pred_inds_to_update]
-    del gt_pred_pairs_of_highest_quality, highest_quality_foreach_gt, _
+    del gt_pred_pairs_of_highest_quality, highest_quality_foreach_gt
     return matches
 class RetinaNet:
   def __init__(self, backbone: ResNet, num_classes=264, num_anchors=9, scales=None, aspect_ratios=None,fg_iou_thresh=0.5, bg_iou_thresh=0.4):
@@ -315,10 +320,17 @@ class RetinaNet:
     
     b = self.backbone(x)
     r, c = self.head(b)
-    if Tensor.training: return b, r, c
-    return r.cat(c.sigmoid(), dim=-1)
+    if Tensor.training:
+      # l = self.loss_temp(c)
+      # l = self.loss(r, c, Y, anchor_gen(x, b))
+      # return l 
+      return b, r, c
+    else: 
+      return r.cat(c.sigmoid(), dim=-1)
   def forward(self, x):
     return self.head(self.backbone(x))
+  def loss_temp(self, logits) -> Tensor:
+    return logits.sum()
   def loss(self, logits_reg, logits_class, targets, anchors) -> Tensor:
     # print(colored(f'RNET_LOSS SHAPES {logits_reg.shape} {logits_class.shape}','green'))
     matched_idxs = []
@@ -338,6 +350,7 @@ class RetinaNet:
 
       # sys.exit()
       # matched_idxs.append(self.proposal_matcher(match_quality_matrix))
+    # return logits_class.sum()
     loss_class = self.head.classification_head.loss(logits_class, targets, matched_idxs)
     # return loss_class
     loss_reg = self.head.regression_head.loss(logits_reg, targets, anchors, matched_idxs)
@@ -459,6 +472,7 @@ class ClassificationHead:
       foreground_idxs_per_image = matched_idxs_per_image >= 0
       num_foreground = foreground_idxs_per_image.sum()
       
+      print('num_foreground:',num_foreground.shape, num_foreground.numpy())
       # Idk if this hack works
       foreground_idxs_per_image_np = np.nonzero(foreground_idxs_per_image.numpy())[0]
       # if foreground_idxs_per_image.shape==(0,):
@@ -471,8 +485,6 @@ class ClassificationHead:
       # print(colored(f'foreground_idxs_per_image CLASS{foreground_idxs_per_image.shape}', 'red' ))
 
       
-      print('num_foreground:',num_foreground.shape, num_foreground.numpy())
-
       # create the target classification
 
       # print('cls_logits_per_image:', cls_logits_per_image.shape)
@@ -489,7 +501,7 @@ class ClassificationHead:
       # print(colored(f'TORCH gt_classes_target {type(gt_classes_target_np)} {gt_classes_target_np.shape}','yellow'))
       
       # gt_classes_target = Tensor(gt_classes_target.numpy())
-      gt_classes_target = Tensor(gt_classes_target_np).realize()
+      gt_classes_target = Tensor(gt_classes_target_np)#.realize()
       del gt_classes_target_np
 
       # print('Class_head matched_idxs_per_image', matched_idxs_per_image.numpy())
@@ -541,13 +553,14 @@ class RegressionHead:
       # Hack for now
       # print('Regression head match idx type:', matched_idxs_per_image.numpy())
       foreground_idxs_per_image = matched_idxs_per_image >= 0
-      foreground_idxs_per_image = np.nonzero(foreground_idxs_per_image.numpy())[0]
+      foreground_idxs_per_image_np = np.nonzero(foreground_idxs_per_image.numpy())[0]
       # print('np forground REGRESSION:', foreground_idxs_per_image, foreground_idxs_per_image.shape)
       # if foreground_idxs_per_image.shape==(0,):
       #   print(colored('empty forground idx in regression head', 'blue'))
       #   foreground_idxs_per_image = Tensor([0])
       # else:
-      foreground_idxs_per_image = Tensor(foreground_idxs_per_image)
+      foreground_idxs_per_image = Tensor(foreground_idxs_per_image_np)
+      del foreground_idxs_per_image_np
       # print(colored(f'foreground_idxs_per_image {foreground_idxs_per_image.shape}', 'blue' ))
 
       # print(foreground_idxs_per_image, matched_idxs_per_image.numpy())
@@ -571,7 +584,7 @@ class RegressionHead:
       losses.append(l1_loss(
         bbox_regression_per_image,
         target_regression,
-      ) / Tensor(max(1, num_foreground), dtype=dtypes.float32))
+      ) / max(1, num_foreground))
     
     # print('REgression head loss num/dem', _sum(losses).numpy(),  max(1, len(targets)))
     # print('regression loss length', len(losses))

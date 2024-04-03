@@ -207,21 +207,21 @@ class AnchorGenerator:
 
     return anchors
 
-  def forward(self, image_list: ImageList, feature_maps: List[Tensor]) -> List[Tensor]:
+  def forward(self, image_list: Tensor, feature_maps: List[Tensor]) -> List[Tensor]:
     grid_sizes = [feature_map.shape[-2:] for feature_map in feature_maps]
-    image_size = image_list.tensors.shape[-2:]
+    image_size = image_list.shape[-2:]
     dtype = feature_maps[0].dtype
     strides = [[Tensor(image_size[0] // g[0], dtype=dtypes.int64),
                 Tensor(image_size[1] // g[1], dtype=dtypes.int64)] for g in grid_sizes]
     self.set_cell_anchors(dtype)
     anchors_over_all_feature_maps = self.grid_anchors(grid_sizes, strides)
     anchors: List[List[Tensor]] = []
-    for _ in range(len(image_list.image_sizes)):
+    for _ in range(image_list.shape[0]):
       anchors_in_image = [anchors_per_feature_map for anchors_per_feature_map in anchors_over_all_feature_maps]
       anchors.append(anchors_in_image)
     anchors = [Tensor.cat(*anchors_per_image) for anchors_per_image in anchors]
     return anchors
-  def __call__(self, image_list: ImageList, feature_maps: List[Tensor]):
+  def __call__(self, image_list, feature_maps: List[Tensor]):
     return self.forward(image_list, feature_maps)
   
 import torch
