@@ -4,9 +4,19 @@ SRC=/home/nimlgen/cuda_ioctl_sniffer/open-gpu-kernel-modules
 clang2py \
   $SRC/src/common/sdk/nvidia/inc/class/cl0080.h \
   $SRC/src/common/sdk/nvidia/inc/class/cl2080_notification.h \
+  $SRC/src/common/sdk/nvidia/inc/class/clc56f.h \
   $SRC/src/nvidia/generated/g_allclasses.h \
   --clang-args="-I$SRC/src/common/sdk/nvidia/inc/" \
   -o class_ioctl.py -k cdefstum
+
+# clang2py \
+#   $SRC/src/common/sdk/nvidia/inc/class/clc6c0.h \
+#   $SRC/kernel-open/nvidia-uvm/clc6b5.h \
+#   $SRC/../include/clc6c0qmd.h \
+#   --clang-args="-I$SRC/src/common/sdk/nvidia/inc/" \
+#   -o nv_qcmds.py -k cdefstum
+
+#   sed -i 's/# \(.*\) = MW ( \([0-9]*\) : \([0-9]*\) ) # macro/\1 = (\2, \3) # macro/' nv_qcmds.py
 
 # clang2py \
 #   $SRC/kernel-open/nvidia-uvm/uvm_ioctl.h \
