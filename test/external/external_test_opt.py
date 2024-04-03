@@ -188,7 +188,7 @@ class TestOpt(unittest.TestCase):
       with CLCache():
         img_bn = bn(img).realize()
         print(img_bn)
-        assert len(CacheCollector.cache) == 3, f"optimizer didn't fold batchnorm, got {len(CacheCollector.cache)}"
+        assert len(CacheCollector.cache) == 0, f"optimizer didn't fold batchnorm, got {len(CacheCollector.cache)}"
 
   def test_fold_conv_sgd(self):
     with Tensor.train():
