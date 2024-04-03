@@ -1,10 +1,10 @@
 from __future__ import annotations
-import functools, math, operator, itertools, ctypes
+import functools, itertools
 from typing import List, Set, Optional, Tuple, Any, Dict, DefaultDict, Callable, cast
 from collections import defaultdict
 from tinygrad.helpers import DEBUG, flatten, prod
 from tinygrad.dtype import dtypes, DType
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
+from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, exec_alu
 from tinygrad.shape.symbolic import sint, Variable, Node, NumNode, MulNode, DivNode, SumNode
 from enum import Enum, auto
 from dataclasses import dataclass
@@ -26,33 +26,6 @@ class UOp:
     return f"{str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.uop for x in self.vin]):32s} {self.arg}"
   @staticmethod
   def const(dtype, val): return UOp(UOps.CONST, dtype, arg=dtypes.as_const(val, dtype))
-
-def hook_overflow(dv, fxn):
-  def wfxn(*args):
-    try: return fxn(*args)
-    except OverflowError: return dv
-  return wfxn
-
-python_alu = {
-  UnaryOps.LOG2: lambda x: math.log2(x) if x > 0 else -math.inf if x == 0 else math.nan,
-  UnaryOps.EXP2: hook_overflow(math.inf, lambda x: math.exp(x*math.log(2))),
-  UnaryOps.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan, UnaryOps.SIN: math.sin,
-  UnaryOps.NEG: lambda x: (not x) if isinstance(x, bool) else -x,
-  BinaryOps.MUL: operator.mul, BinaryOps.ADD: operator.add, BinaryOps.SUB: operator.sub, BinaryOps.XOR: operator.xor,
-  BinaryOps.MAX: max, BinaryOps.CMPEQ: operator.eq, BinaryOps.CMPLT: operator.lt,
-  BinaryOps.MOD: lambda x,y: abs(int(x))%abs(int(y))*(1,-1)[x<0],
-  BinaryOps.DIV: lambda x,y: int(x/y) if isinstance(x, int) else (x/y if y != 0 else x*math.inf),
-  TernaryOps.WHERE: lambda x,y,z: y if x else z}
-
-truncate: Dict[DType, Callable] = {dtypes.bool: bool, **{dt:lambda x: x for dt in dtypes.fields().values() if dtypes.is_float(dt)},
-  # TODO: float16 and bfloat16?
-  dtypes.float32: lambda x: ctypes.c_float(x).value, dtypes.float64: lambda x: ctypes.c_double(x).value,
-  dtypes.uint8: lambda x: ctypes.c_uint8(x).value, dtypes.uint16: lambda x: ctypes.c_uint16(x).value,
-  dtypes.uint32: lambda x: ctypes.c_uint32(x).value, dtypes.uint64: lambda x: ctypes.c_uint64(x).value,
-  dtypes.int8: lambda x: ctypes.c_int8(x).value, dtypes.int16: lambda x: ctypes.c_int16(x).value,
-  dtypes.int32: lambda x: ctypes.c_int32(x).value, dtypes.int64: lambda x: ctypes.c_int64(x).value,}
-
-def exec_alu(arg, dtype, p): return truncate[dtype](python_alu[arg](*p))
 
 def uop_alu_resolve(u:UOp) -> sint:
   if u.uop is UOps.CONST: return u.arg
@@ -103,6 +76,10 @@ constant_folder = PatternMatcher([
   # x+-y -> x-y
   ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": ({"__name__": "x"}, {"__name__": "my", "uop": UOps.ALU, "arg": UnaryOps.NEG})},
     lambda x, my: UOp(UOps.ALU, x.dtype, (x, my.vin[0]), BinaryOps.SUB)),
+  # bool < False is always false, True < bool is always false
+  ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": ({}, {"__name__": "x", "uop": UOps.CONST, "dtype": dtypes.bool, "arg": False})}, lambda x: x),
+  ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": ({"__name__": "x", "uop": UOps.CONST, "dtype": dtypes.bool, "arg": True}, {})},
+    lambda x: UOp.const(dtypes.bool, False)),
   # a conditional with the same results either way is a noop, also fold const conditionals
   ({"uop": UOps.ALU, "arg": TernaryOps.WHERE, "vin": ({}, {"__name__": "val"}, {"__name__": "val"})}, lambda val: val),
   ({"uop": UOps.ALU, "arg": TernaryOps.WHERE, "vin": ({"__name__": "gate", "uop": UOps.CONST}, {"__name__": "c0"}, {"__name__": "c1"})},

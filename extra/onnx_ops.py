@@ -620,7 +620,7 @@ def EmbedLayerNormalization(input_ids: Tensor, segment_ids:Optional[Tensor]=None
   compute_seg_emb = (segment_embedding is not None and segment_ids is not None)
   vocab_size, max_position_embeddings, type_vocab_size = word_embedding.shape[0], position_embedding.shape[0], (segment_embedding.shape[0] if compute_seg_emb else None)
 
-  def embedding(x:Tensor, vocab_size, weight:Tensor)->Tensor:  # TODO from nn.Embedding. Could probably upstream this to Tensor
+  def embedding(x:Tensor, vocab_size, weight:Tensor) -> Tensor:  # TODO from nn.Embedding. Could probably upstream this to Tensor
     vocab_counter = Tensor.arange(vocab_size, dtype=x.dtype, requires_grad=False).reshape(1, 1, vocab_size).expand(*x.shape, vocab_size)
     return (vocab_counter == x.unsqueeze(2).expand(*x.shape, vocab_size)) @ weight
 
@@ -631,7 +631,8 @@ def EmbedLayerNormalization(input_ids: Tensor, segment_ids:Optional[Tensor]=None
   pos_embedding_res = embedding(position_ids, max_position_embeddings, position_embedding)
   seg_embedding_res = embedding(segment_ids, type_vocab_size, segment_embedding) if compute_seg_emb else None
 
-  embedding_sum = wrd_embedding_res + pos_embedding_res + seg_embedding_res
+  embedding_sum = wrd_embedding_res + pos_embedding_res
+  if seg_embedding_res is not None: embedding_sum = embedding_sum + seg_embedding_res
   out = embedding_sum.layernorm(eps=epsilon) * gamma + beta
   return out, None, embedding_sum
 
@@ -662,7 +663,9 @@ def Attention(x:Tensor, weights, bias:Optional[Tensor]=None, mask_index:Optional
     attn_weights = query @ key.transpose(-1, -2) / math.sqrt(value.shape[-1])
     # This is where Tensor.scaled_dot_product_attention differs:
     causal_mask = Tensor.ones((cdim, cdim), requires_grad=False, dtype=dtypes.bool).tril(0)[key_length - query_length : key_length, :key_length]
-    return (Tensor.where(causal_mask, attn_weights, -float("inf")) + attn_mask).softmax(-1) @ value
+    masked = Tensor.where(causal_mask, attn_weights, -math.inf)
+    if attn_mask is not None: masked = masked + attn_mask
+    return masked.softmax(-1) @ value
 
   bsz, _, seq_len, _ = xq.shape
   out = attn(xq, xk, xv, mask_index).transpose(1, 2).reshape(bsz, seq_len, -1)
