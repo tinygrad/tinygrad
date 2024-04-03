@@ -1,6 +1,7 @@
 <div align="center">
 
-[![logo](https://raw.githubusercontent.com/tinygrad/tinygrad/master/docs/logo.png)](https://tinygrad.org)
+[![logoDark](https://raw.githubusercontent.com/tinygrad/tinygrad/master/docs/tinyDark.svg#gh-dark-mode-only)](https://tinygrad.org)
+[![logolight](https://raw.githubusercontent.com/tinygrad/tinygrad/master/docs/tinyLight.svg#gh-light-mode-only)](https://tinygrad.org)
 
 tinygrad: For something between [PyTorch](https://github.com/pytorch/pytorch) and [karpathy/micrograd](https://github.com/karpathy/micrograd). Maintained by [tiny corp](https://tinygrad.org).
 
@@ -123,6 +124,7 @@ print(y.grad.numpy())  # dz/dy
 ```
 
 The same thing but in PyTorch:
+
 ```py
 import torch
 
@@ -142,7 +144,7 @@ There has been a lot of interest in tinygrad lately. Following these guidelines 
 We'll start with what will get your PR closed with a pointer to this section:
 
 - No code golf! While low line count is a guiding light of this project, anything that remotely looks like code golf will be closed. The true goal is reducing complexity and increasing readability, and deleting `\n`s does nothing to help with that.
-- All docs and whitespace changes will be closed unless you are a well-known contributor. The people writing the docs should be those who know the codebase the absolute best. People who have not demonstrated that shouldn't be messing with docs. Whitespace changes are both useless *and* carry a risk of introducing bugs.
+- All docs and whitespace changes will be closed unless you are a well-known contributor. The people writing the docs should be those who know the codebase the absolute best. People who have not demonstrated that shouldn't be messing with docs. Whitespace changes are both useless _and_ carry a risk of introducing bugs.
 - Anything you claim is a "speedup" must be benchmarked. In general, the goal is simplicity, so even if your PR makes things marginally faster, you have to consider the tradeoff with maintainablity and readablity.
 - In general, the code outside the core `tinygrad/` folder is not well tested, so unless the current code there is broken, you shouldn't be changing it.
 - If your PR looks "complex", is a big diff, or adds lots of lines, it won't be reviewed or merged. Consider breaking it up into smaller PRs that are individually clear wins. A common pattern I see is prerequisite refactors before adding new functionality. If you can (cleanly) refactor to the point that the feature is a 3 line change, this is great, and something easy for us to review.
@@ -163,6 +165,7 @@ You should install the pre-commit hooks with `pre-commit install`. This will run
 For more examples on how to run the full test suite please refer to the [CI workflow](.github/workflows/test.yml).
 
 Some examples of running tests locally:
+
 ```sh
 python3 -m pip install -e '.[testing]'  # install extra deps for testing
 python3 test/test_ops.py                # just the ops tests
