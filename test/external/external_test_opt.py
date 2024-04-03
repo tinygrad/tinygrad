@@ -173,13 +173,13 @@ class TestOpt(unittest.TestCase):
     np.testing.assert_allclose(d.numpy(), na*nb+nc, rtol=1e-5, atol=1e-7)
 
   def test_fold_reduce_elementwise(self):
-    img = Tensor.rand(32)
+    img = Tensor([2,3,4])
     addme = Tensor.ones(1)
     with CLCache():
       ret = img.sum() + addme
       ret.realize()
       assert len(CacheCollector.cache) == 1, "optimizer didn't fold reduce/elementwise"
-    assert ret.item() == 33
+    assert ret.item() == 10
 
   def test_fold_batchnorm(self):
     with Tensor.train():
