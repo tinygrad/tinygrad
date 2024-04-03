@@ -1,29 +1,5 @@
 <div align="center">
 
-<svg viewBox="0 0 130 50" xmlns="http://www.w3.org/2000/svg">
-  <style>
-    .dynamic-color { fill: black; } /* Default to black for light mode */
-    @media (prefers-color-scheme: dark) {
-      .dynamic-color { fill: white; } /* Change to white in dark mode */
-    }
-  </style>
-  <!-- t -->
-  <rect x="10" y="0" width="10" height="40" class="dynamic-color" />
-  <rect x="0" y="10" width="30" height="10" class="dynamic-color" />
-  <rect x="10" y="30" width="20" height="10" class="dynamic-color" />
-  <!-- i -->
-  <rect x="40" y="0" width="10" height="10" class="dynamic-color" />
-  <rect x="40" y="20" width="10" height="20" class="dynamic-color" />
-  <!-- n -->
-  <rect x="60" y="10" width="10" height="30" class="dynamic-color" />
-  <rect x="60" y="10" width="20" height="10" class="dynamic-color" />
-  <rect x="80" y="20" width="10" height="20" class="dynamic-color" />
-  <!-- y -->
-  <rect x="100" y="10" width="10" height="20" class="dynamic-color" />
-  <rect x="100" y="20" width="30" height="10" class="dynamic-color" />
-  <rect x="120" y="10" width="10" height="30" class="dynamic-color" />
-  <rect x="100" y="40" width="20" height="10" class="dynamic-color" />
-</svg>
 
 tinygrad: For something between [PyTorch](https://github.com/pytorch/pytorch) and [karpathy/micrograd](https://github.com/karpathy/micrograd). Maintained by [tiny corp](https://tinygrad.org).
 
