@@ -1,6 +1,6 @@
 <div align="center">
 
-[![logoDark](https://raw.githubusercontent.com/aaronstevenson408/tinygrad/master/docs/tinyDark.svg#gh-dark-mode-only) ![logolight](https://raw.githubusercontent.com/aaronstevenson408/tinygrad/master/docs/tinyLight.svg#gh-light-mode-only)](https://tinygrad.org)
+[![logo](https://raw.githubusercontent.com/aaronstevenson408/tinygrad/master/docs/tinyDark.svg#gh-dark-mode-only)![logo](https://raw.githubusercontent.com/aaronstevenson408/tinygrad/master/docs/tinyLight.svg#gh-light-mode-only)](https://tinygrad.org)
 
 tinygrad: For something between [PyTorch](https://github.com/pytorch/pytorch) and [karpathy/micrograd](https://github.com/karpathy/micrograd). Maintained by [tiny corp](https://tinygrad.org).
 
