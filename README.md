@@ -4,7 +4,6 @@
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/aaronstevenson408/tinygrad/master/docs/tinyDark.svg">
   <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/aaronstevenson408/tinygrad/master/docs/tinyLight.svg">
   <a href="https://tinygrad.org">
-  <img alt="The TinyCorp Logo" src="https://raw.githubusercontent.com/aaronstevenson408/tinygrad/master/docs/tinyLight.svg">
 </picture>
 
 tinygrad: For something between [PyTorch](https://github.com/pytorch/pytorch) and [karpathy/micrograd](https://github.com/karpathy/micrograd). Maintained by [tiny corp](https://tinygrad.org).
