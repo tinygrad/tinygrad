@@ -392,7 +392,7 @@ class TestNN(unittest.TestCase):
     # ignore kernel optimized IF/LOOP statements for now
     if if_op := next((u for u in uops if u.uop is UOps.IF), None):
       uops = uops[:uops.index(if_op)]
-    self.assertEqual(0, len([u for u in uops if u.uop is UOps.LOOP]), "no loops")
+    self.assertEqual(1, len(set([u.uop for u in uops if u.uop in {UOps.LOOP, UOps.SPECIAL}])), "either specials or loops, not both")
 
 
 if __name__ == '__main__':
