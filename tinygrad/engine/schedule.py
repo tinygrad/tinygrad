@@ -193,8 +193,8 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
       reduce_for_op[next(iter(realized_children.keys()))] = r
 
   # preschedule all buffers in realizes
-  prescheduled = {x:_schedule_one(x, realizes, reduce_for_op) for x in realizes if x not in seen and x.realized is None and x.op is not LoadOps.CONST}
-  assign_targets = {x.srcs[1]:x for x in realizes if x.op is LoadOps.ASSIGN and x not in seen and x.realized is None}
+  outs = sorted([x for x in realizes if x not in seen and x.realized is None and x.op is not LoadOps.CONST], key=lambda x: x.key)
+  prescheduled, assign_targets = {x:_schedule_one(x, realizes, reduce_for_op) for x in outs}, {x.srcs[1]:x for x in outs if x.op is LoadOps.ASSIGN}
 
   # breadth first ordering
   graph: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)

@@ -1,5 +1,5 @@
 from __future__ import annotations
-import math
+import math, hashlib, functools
 from typing import Union, Optional, Any, Tuple, List
 from tinygrad.dtype import dtypes, DType, ConstType
 from tinygrad.helpers import prod, getenv, all_int, all_same
@@ -51,6 +51,10 @@ class LazyBuffer:
   # NOTE: this has to be a function to prevent self reference
   @property
   def base(self) -> LazyBuffer: return self._base if self._base is not None else self
+
+  @functools.cached_property
+  def key(self) -> bytes: return hashlib.sha256(functools.reduce(lambda x,y: x+y, [s.base.key for s in self.srcs if s.base.op is not LoadOps.EMPTY],
+                                                                 str((self.op, self.arg, self.device)).encode())).digest()
 
   @staticmethod
   def loadop(op, shape:Tuple[sint,...], dtype:DType, device:str, arg=None, src:Tuple[LazyBuffer, ...]=(), enable_cache=False) -> LazyBuffer:
