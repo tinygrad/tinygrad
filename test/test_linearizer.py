@@ -205,9 +205,7 @@ class TestLinearizer(unittest.TestCase):
   def test_sum_collapse(self):
     t = Tensor.ones(256,256).sum()
     sched = [si for si in create_schedule([t.lazydata]) if si.ast[0].op not in LoadOps]
-    assert len(sched) == 1
-    lin = Linearizer(*sched[0].ast)
-    assert not any(u.uop is UOps.LOOP for u in lin.linearize().uops), "found loop in sum collapse"
+    assert len(sched) == 0
 
   def test_assign_fold(self):
     a = Tensor.ones(4, 4).contiguous().realize()
@@ -716,25 +714,6 @@ class TestKernelOpts(unittest.TestCase):
       # can optimize further post PADTO
       [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32), Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.UPCAST, 1, 2),],
     ])
-
-  def test_padto_max(self):
-    N = 17 * 17
-    a = -Tensor.ones(N, N)
-
-    helper_linearizer_opt(a.max(0), [
-      [Opt(OptOps.PADTO, 0, 32)],
-      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],
-    ])
-    helper_linearizer_opt(a.max(1), [
-      [Opt(OptOps.PADTO, 0, 32)],
-      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],
-    ])
-
-    # cannot pad a reduce axis
-    with self.assertRaises(KernelOptError):
-      helper_linearizer_opt(a.max(), [[Opt(OptOps.PADTO, 0, 32)],])
-    with self.assertRaises(KernelOptError):
-      helper_linearizer_opt(a.max(0), [[Opt(OptOps.PADTO, 1, 32)],])
 
   def test_padto_where(self):
     N = 17 * 17

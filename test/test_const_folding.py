@@ -75,6 +75,20 @@ class TestSimpleConstFolding(unittest.TestCase):
   def test_tensor_one_pow(self):
     _check_ast_count(0, Tensor.ones(4) ** Tensor([1.0, 2, 3, 4]))
 
+  def test_sum_one(self):
+    _check_ast_count(0, Tensor.ones((256,256)).sum())
+  def test_sum_axis(self):
+    _check_ast_count(0, Tensor.ones((256,256)).sum(1))
+  def test_sum_neg_axis(self):
+    _check_ast_count(0, Tensor.ones((256,256)).sum(-1))
+
+  def test_max_one(self):
+    _check_ast_count(0, Tensor.ones((3,3)).max())
+  def test_max_axis(self):
+    _check_ast_count(0, Tensor(3.0).max(1))
+  def test_max_neg_axis(self):
+    _check_ast_count(0, Tensor(3.0).max(-1))
+
 class TestMovedConstFolding(unittest.TestCase):
   def test_add_shrunk_zero(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) + Tensor.zeros(6).shrink(((1, 5),)))
