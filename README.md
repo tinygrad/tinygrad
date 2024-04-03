@@ -1,8 +1,8 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/aaronstevenson408/tinygrad/master/docs/tinyDark.svg" width="100%" height="100%">
-  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/aaronstevenson408/tinygrad/master/docs/tinyLight.svg" width="100%" height="100%">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/aaronstevenson408/tinygrad/master/docs/tinyDark.svg" width="50%" height="50%">
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/aaronstevenson408/tinygrad/master/docs/tinyLight.svg" width="50%" height="50%">
   <img alt="The TinyCorp Logo" src="https://raw.githubusercontent.com/aaronstevenson408/tinygrad/master/docs/tinyLight.svg" width="100%" height="100%">
   <a href="https://tinygrad.org">
 </picture>
