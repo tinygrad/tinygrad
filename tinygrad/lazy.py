@@ -35,7 +35,7 @@ class LazyBuffer:
       self.buffer: Buffer = srcs[1].base.buffer if self.op is LoadOps.ASSIGN else Buffer(device, self.size, dtype)
       self.contiguous_child: Optional[Tuple[ReferenceType[LazyBuffer], ShapeTracker]] = None
       self.forced_realize = False
-      self.optimizations = base.optimizations if base is not None else set()
+      self.optimizations: Set[str] = set()
     else:
       # properties on view
       assert base.base == base, "base must be a base itself"
