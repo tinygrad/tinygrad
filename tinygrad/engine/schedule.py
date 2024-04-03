@@ -80,7 +80,7 @@ def _schedule_one(out:LazyBuffer, realizes:Set[LazyBuffer], reduce_for_op: Dict[
   else:
     output_st, membufs = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape), [out]
     op = _recursive_lazyop(out, membufs, var_vals, output_st, realizes, cache={})
-    op, inputs = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_st.simplify().unbind()[0])), membufs[1:]
+    op, inputs = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_st.simplify().unbind()[0]), optimizations=out.base.optimizations), membufs[1:]
   return _LBScheduleItem((op,), (out,), tuple(inputs), var_vals)
 
 # recursively search the entire graph for all LazyBuffers, insert realizes after expands

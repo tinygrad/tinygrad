@@ -279,6 +279,19 @@ class UOpGraph:
           self.replace_op(alu_with_accum, next(op for op in alu_with_accum.vin if op != accumulator))
       get_recursive_parents.cache_clear()
 
+  def optimize_embedding(self, get_recursive_parents):
+    if not all([u.uop is UOps.DEFINE_GLOBAL for u in self.uops[:4]]): return
+    if DEBUG >= 4: print("optimizing embedding")
+    indices_load, arange_load, input_load = [next(op for op in self.uops if op.uop is UOps.LOAD and buf in op.vin) for buf in self.uops[1:4]]
+    arange_loop = next(op for op in arange_load.vin if op.uop is UOps.LOOP)
+    maybe_cast_indices = self.add(UOps.CAST, arange_load.dtype, (indices_load,), insert_before=self.uops.index(indices_load)+1) if arange_load.dtype != indices_load.dtype else indices_load
+    for op in get_recursive_parents(input_load):
+      if op.uop is UOps.ALU:
+        op.vin = tuple([maybe_cast_indices if op is arange_loop else op for op in list(op.vin)])
+    phi = next(op for op in self.uops if op.uop is UOps.PHI)
+    self.replace_op(phi, input_load)
+    get_recursive_parents.cache_clear()
+
   def fix_to_store_directly(self):
     replaced_stores: Dict[UOp,UOp] = {}
     for u in self.uops:
@@ -315,7 +328,7 @@ class UOpGraph:
           self.replace_op(u, new)
           return True
 
-  def uoptimize(self):
+  def uoptimize(self, extra_optimizations:Tuple[str]=[]):
     # get PHI node loop scope, link anything using a DEFINE_ACC to the loop as a "parent"
     acc_scope: DefaultDict[UOp, List[UOp]] = defaultdict(list)
     for u in self.uops:
@@ -332,6 +345,7 @@ class UOpGraph:
     # uops optimization
     while self.uops_optimization(get_recursive_parents): pass
     self.simplify_phi_loops(get_recursive_parents)
+    if "embedding" in extra_optimizations: self.optimize_embedding(get_recursive_parents)
 
     # (recursively) remove childless uops
     # TODO: remove DEFINE_GLOBAL from here

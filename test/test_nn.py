@@ -319,6 +319,17 @@ class TestNN(unittest.TestCase):
     torch_z = torch_layer(torch_x)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-3, rtol=5e-3)
 
+  def test_embedding_tiny(self):
+    layer = Embedding(20, 30)
+    a = Tensor([[1, 5, 9, 11],
+                [12, 19, 8, 1]])
+    layer(a).realize()
+    print("now realizing b")
+    b = Tensor([[1, 2, 3],
+                [4, 5, 6],
+                [7, 8, 9]])
+    layer(b).realize()
+
   def test_embedding(self):
     B, T, embed_size, vocab_size = 4, 10, 20, 28
 

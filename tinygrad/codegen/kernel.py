@@ -329,6 +329,9 @@ class Kernel:
     if DEBUG >= 4: print("aliasing buffer", self.sts[i])
     self.local_alias[i] = cast(LocalBuffer, self.bufs[-1])
 
+  def extra_optimizations(self) -> Tuple[str]:
+    return self.ast[0].optimizations or []
+
   # ******************** high level optimizers ********************
 
   def _apply_tc_opt(self, use_tensor_cores:int, axis:int, opt_level:int) -> bool:
@@ -404,6 +407,10 @@ class Kernel:
 
   def apply_opt(self, opt:Opt, append_opt:bool=True):
     check(not self.dont_use_locals or opt.op not in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP, OptOps.UPCASTMID}, "not using locals")
+
+    if "embedding" in self.extra_optimizations() and opt.op in {OptOps.UNROLL, OptOps.UPCAST}:
+      if DEBUG >= 6: print(f"not applying opt due to active embedding optim")
+      return
 
     if opt.op is OptOps.TC:
       check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: things like PADTO might be fine

@@ -11,21 +11,21 @@ from weakref import ref, ReferenceType, WeakValueDictionary
 
 lazycache: WeakValueDictionary[Any, LazyBuffer] = WeakValueDictionary()
 def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
-                      base:Optional[LazyBuffer]=None, enable_cache=bool(getenv("LAZYCACHE", 1))):
+                      base:Optional[LazyBuffer]=None, enable_cache=bool(getenv("LAZYCACHE", 1)), optimizations:Optional[Tuple[str]]=None):
   if st.size == 0: op, arg, srcs, base = LoadOps.CONST, 0, (), None
   if op is LoadOps.CONST: arg, enable_cache = dtypes.as_const(arg, dtype), True
 
   cache_key = (device, st, dtype, op, arg, tuple(ref(x) for x in srcs)) if base is None else (st, ref(base))
   if enable_cache and (rret := lazycache.get(cache_key, None)): return rret
 
-  ret = LazyBuffer(device, st, dtype, op, arg, srcs, base=base)
+  ret = LazyBuffer(device, st, dtype, op, arg, srcs, base=base, optimizations=(optimizations or (base.optimizations if base else None)))
   if enable_cache: lazycache[cache_key] = ret
   return ret
 
 class LazyBuffer:
   def __init__(self, device:str, st:ShapeTracker, dtype:DType,
                op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
-               base:Optional[LazyBuffer]=None):
+               base:Optional[LazyBuffer]=None, optimizations:Optional[Tuple[str]]=None):
     self.device, self.st, self.dtype, self.shape, self.size = device, st, dtype, st.shape, st.size
     self._base: Optional[LazyBuffer] = None
     if base is None:
@@ -35,6 +35,7 @@ class LazyBuffer:
       self.buffer: Buffer = srcs[1].base.buffer if self.op is LoadOps.ASSIGN else Buffer(device, self.size, dtype)
       self.contiguous_child: Optional[Tuple[ReferenceType[LazyBuffer], ShapeTracker]] = None
       self.forced_realize = False
+      self.optimizations = optimizations
     else:
       # properties on view
       assert base.base == base, "base must be a base itself"
