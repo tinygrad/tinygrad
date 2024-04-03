@@ -177,6 +177,10 @@ class Tensor:
     if self.device != "CLANG": buf.options = BufferOptions(nolru=True)
     return buf.as_buffer(allow_zero_copy=True if self.device != "CLANG" else False)
 
+  def add_optimization(self, optim:str):
+    self.lazydata.add_optimization(optim)
+    return self
+
   def data(self) -> memoryview:
     assert self.dtype.fmt is not None, f"no fmt dtype for {self.dtype}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"

@@ -1,6 +1,6 @@
 from __future__ import annotations
 import math
-from typing import Union, Optional, Any, Tuple, List
+from typing import Union, Optional, Any, Tuple, List, Set
 from tinygrad.dtype import dtypes, DType, ConstType
 from tinygrad.helpers import prod, getenv, all_int, all_same
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op, exec_alu, python_alu
@@ -25,7 +25,7 @@ def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Op]=
 class LazyBuffer:
   def __init__(self, device:str, st:ShapeTracker, dtype:DType,
                op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
-               base:Optional[LazyBuffer]=None, optimizations:Optional[Tuple[str]]=None):
+               base:Optional[LazyBuffer]=None, optimizations:Optional[Set[str]]=None):
     self.device, self.st, self.dtype, self.shape, self.size = device, st, dtype, st.shape, st.size
     self._base: Optional[LazyBuffer] = None
     if base is None:
@@ -35,7 +35,7 @@ class LazyBuffer:
       self.buffer: Buffer = srcs[1].base.buffer if self.op is LoadOps.ASSIGN else Buffer(device, self.size, dtype)
       self.contiguous_child: Optional[Tuple[ReferenceType[LazyBuffer], ShapeTracker]] = None
       self.forced_realize = False
-      self.optimizations = optimizations
+      self.optimizations = optimizations or set()
     else:
       # properties on view
       assert base.base == base, "base must be a base itself"
@@ -90,6 +90,8 @@ class LazyBuffer:
       if not (new_shape[-1]*self.dtype.itemsize) % dtype.itemsize == 0: raise RuntimeError("unsupported size in bitcast")
       new_shape = new_shape[:-1] + ((new_shape[-1]*self.dtype.itemsize) // dtype.itemsize,)
     return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), dtype, UnaryOps.CAST, (dtype, bitcast), (self,))
+
+  def add_optimization(self, optim): self.base.optimizations.add(optim)
 
   def is_unrealized_const(self): return self.base.realized is None and self.base.op is LoadOps.CONST
   def is_unrealized_unpadded_const(self): return self.is_unrealized_const() and all(v.mask is None for v in self.st.views)
