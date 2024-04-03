@@ -1,7 +1,7 @@
 <div align="center">
 
 <a href="https://tinygrad.org">
-    <img src="./docs/tinylogo.svg" alt="logo" width="75px" />
+    <img src="./docs/tinylogo.svg" alt="logo" style="max-width:200px; width: 30%;" />
 </a>
 
 tinygrad: For something between [PyTorch](https://github.com/pytorch/pytorch) and [karpathy/micrograd](https://github.com/karpathy/micrograd). Maintained by [tiny corp](https://tinygrad.org).
