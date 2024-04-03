@@ -1,6 +1,3 @@
-# DISABLE_CPU_CACHE=1 METAL=1 python3 tinygrad/shape/mergeable.py
-# Alternates between incorrect and correct behavior when cache is enabled on M1 Mac...
-
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, un1d
 from tinygrad.shape.symbolic import Node, NumNode, Variable
