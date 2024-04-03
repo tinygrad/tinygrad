@@ -6,13 +6,14 @@ start = time.perf_counter()
 libc = ctypes.CDLL(ctypes.util.find_library("c"))
 processor = platform.processor()
 IOCTL_SYSCALL = {"aarch64": 0x1d, "x86_64":16}[processor]
+MMAP_SYSCALL = {"aarch64": 0xde, "x86_64":0x09}[processor]
 
 def get_struct(argp, stype):
   return ctypes.cast(ctypes.c_void_p(argp), ctypes.POINTER(stype)).contents
 
 def dump_struct(st):
   print("\t", st.__class__.__name__, end=" { ")
-  for v in type(st)._fields_: print(f"{v[0]}={getattr(st, v[0])}", end=" ")
+  for v in type(st)._fields_: print(f"{v[0]}={getattr(st, v[0]) if not isinstance(getattr(st, v[0]), ctypes.Array) else [i for i in getattr(st, v[0])]}", end=" ")
   print("}")
 
 def format_struct(s):
@@ -33,9 +34,9 @@ def install_hook(c_function, python_function):
     tramp = b"\x70\x00\x00\x10\x10\x02\x40\xf9\x00\x02\x1f\xd6"
     tramp += struct.pack("Q", python_function_addr)
   elif processor == "x86_64":
-    # 0x0000000000000000:  49 B8 aa aa aa aa aa aa aa aa    movabs r8, <address>
-    # 0x000000000000000a:  41 FF E0                         jmp    r8
-    tramp = b"\x49\xB8" + struct.pack("Q", python_function_addr) + b"\x41\xFF\xE0"
+    # 0x0000000000000000:  49 BB aa aa aa aa aa aa aa aa    movabs r11, <address>
+    # 0x000000000000000a:  41 FF E3                         jmp    r11
+    tramp = b"\x49\xBB" + struct.pack("Q", python_function_addr) + b"\x41\xFF\xE3"
   else:
     raise Exception(f"processor {processor} not supported")
 
@@ -55,7 +56,7 @@ import extra.nv_gpu_driver.uvm_ioctl as UVM
 nvescs = {getattr(ESC, x):x for x in dir(ESC) if x.startswith("NV_ESC")}
 nvcmds = {getattr(CTRL, x):(x, getattr(CTRL, "struct_"+x+"_PARAMS", getattr(CTRL, "struct_"+x.replace("_CMD_", "_")+"_PARAMS", None))) for x in dir(CTRL) if \
           x.startswith("NV") and x[6:].startswith("_CTRL_") and isinstance(getattr(CTRL, x), int)}
-nvclasses = {getattr(CLASS, x):x for x in dir(CLASS) if isinstance(getattr(CLASS, x), int)}
+nvclasses = {getattr(CLASS, x):x for x in dir(CLASS) if isinstance(getattr(CLASS, x), int) and not x.startswith("NV2080_")}
 nvuvms = {int(getattr(UVM, x)[2]):x for x in dir(UVM) if isinstance(getattr(UVM, x), list) and len(getattr(UVM, x)) == 4 and getattr(UVM, x)[0] == 'i'} # broken clang2py generates mess
 
 global_ioctl_id = 0
@@ -76,11 +77,10 @@ def ioctl(fd, request, argp):
       s = get_struct(argp, ESC.NVOS54_PARAMETERS)
       if s.cmd in nvcmds:
         name, struc = nvcmds[s.cmd]
-        if struc is not None:
-          ss = get_struct(s.params, struc)
-          print("NV_ESC_RM_CONTROL ", name, format_struct(ss))
-        else:
-          print("NV_ESC_RM_CONTROL ", name)
+        print(f"NV_ESC_RM_CONTROL    cmd={name:30s} hClient={s.hClient}, hObject={s.hObject}, flags={s.flags}, params={s.params}, paramsSize={s.paramsSize}, status={s.status}")
+        if struc is not None: dump_struct(get_struct(s.params, struc))
+        elif hasattr(CTRL, name+"_PARAMS"): dump_struct(get_struct(argp, getattr(CTRL, name+"_PARAMS")))
+        elif name == "NVA06C_CTRL_CMD_GPFIFO_SCHEDULE": dump_struct(get_struct(argp, CTRL.NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS))
       else:
         print("unhandled cmd", hex(s.cmd))
       #format_struct(s)
@@ -93,12 +93,13 @@ def ioctl(fd, request, argp):
         if s.hClass == CLASS.FERMI_VASPACE_A: dump_struct(get_struct(s.pAllocParms, ESC.NV_VASPACE_ALLOCATION_PARAMETERS))
         if s.hClass == CLASS.NV50_MEMORY_VIRTUAL: dump_struct(get_struct(s.pAllocParms, ESC.NV_MEMORY_ALLOCATION_PARAMS))
         if s.hClass == CLASS.NV1_MEMORY_USER: dump_struct(get_struct(s.pAllocParms, ESC.NV_MEMORY_ALLOCATION_PARAMS))
+        if s.hClass == CLASS.NV1_MEMORY_SYSTEM: dump_struct(get_struct(s.pAllocParms, ESC.NV_MEMORY_ALLOCATION_PARAMS))
         if s.hClass == CLASS.AMPERE_CHANNEL_GPFIFO_A: dump_struct(get_struct(s.pAllocParms, ESC.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS))
         if s.hClass == CLASS.KEPLER_CHANNEL_GROUP_A: dump_struct(get_struct(s.pAllocParms, ESC.NV_CHANNEL_GROUP_ALLOCATION_PARAMETERS))
     elif nr == ESC.NV_ESC_RM_MAP_MEMORY:
       # nv_ioctl_nvos33_parameters_with_fd
       s = get_struct(argp, ESC.NVOS33_PARAMETERS)
-      print(f"NV_ESC_RM_MAP_MEMORY   hClient={s.hClient}, hDevice={s.hDevice}, hMemory={s.hMemory}, length={s.length} flags={s.flags}")
+      print(f"NV_ESC_RM_MAP_MEMORY   hClient={s.hClient}, hDevice={s.hDevice}, hMemory={s.hMemory}, length={s.length} flags={s.flags} pLinearAddress={s.pLinearAddress}")
     elif nr == ESC.NV_ESC_RM_UPDATE_DEVICE_MAPPING_INFO:
       s = get_struct(argp, ESC.NVOS56_PARAMETERS)
       print(f"NV_ESC_RM_UPDATE_DEVICE_MAPPING_INFO   hClient={s.hClient}, hDevice={s.hDevice}, hMemory={s.hMemory}, pOldCpuAddress={s.pOldCpuAddress} pNewCpuAddress={s.pNewCpuAddress} status={s.status}")
@@ -113,7 +114,14 @@ def ioctl(fd, request, argp):
   # print("ioctl", f"{idir=} {size=} {itype=} {nr=} {fd=} {ret=}", os.readlink(f"/proc/self/fd/{fd}") if fd >= 0 else "")
   return ret
 
-install_hook(libc.ioctl, ioctl)
+# @ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long)
+# def _mmap(addr, length, prot, flags, fd, offset):
+#   print(f"mmap {addr=}, {length=}, {prot=}, {flags=}, {fd=}, {offset=}")
+#   ret = libc.syscall(MMAP_SYSCALL, ctypes.c_void_p(addr), ctypes.c_size_t(length), ctypes.c_int(prot), ctypes.c_int(flags), ctypes.c_int(fd), ctypes.c_long(offset))
+#   print(f"mmap {addr=}, {length=}, {prot=}, {flags=}, {fd=}, {offset=} {ret=}")
+#   return ret
 
+install_hook(libc.ioctl, ioctl)
+# install_hook(libc.mmap, _mmap)
 
 # IOCTL=1 PTX=1 CUDA=1 python3 test/test_ops.py TestOps.test_tiny_add
