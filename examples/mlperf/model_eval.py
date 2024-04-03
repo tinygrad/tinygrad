@@ -2,11 +2,9 @@ import time
 start = time.perf_counter()
 from pathlib import Path
 import numpy as np
-from tinygrad import Tensor, Device, dtypes, GlobalCounters
-from tinygrad.engine.jit import TinyJit
+from tinygrad import Tensor, Device, dtypes, GlobalCounters, TinyJit
 from tinygrad.nn.state import get_parameters, load_state_dict, safe_load
-from tinygrad.helpers import getenv, Timing
-from examples.mlperf import helpers
+from tinygrad.helpers import getenv
 def tlog(x): print(f"{x:25s}  @ {time.perf_counter()-start:5.2f}s")
 
 def eval_resnet():

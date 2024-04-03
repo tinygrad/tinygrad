@@ -43,28 +43,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
   kernel:List[str] = []
   bufs = []
 
-  def eq_rep(root, x, y):
-    root.arg = BinaryOps.XOR
-    new = uops.add(UOps.ALU, dtypes.bool, (root,), arg=UnaryOps.NEG, insert_before=uops.uops.index(root)+1)
-    return new
-
-  def lt_rep(x, y):
-    new = uops.add(UOps.ALU, dtypes.bool, (u.vin[0],), arg=UnaryOps.NEG, insert_before=uops.uops.index(u))
-    u.vin = (new, u.vin[1])
-    u.arg = BinaryOps.MUL
-
-  def ld_rep(root, x, y):
-    root.dtype = dtypes.uint8
-    new = uops.add(UOps.CAST, dtypes.bool, (root,), insert_before=uops.uops.index(root)+1)
-    ptr_ar(root)
-    return new
-
-  def gate_rep(root, x, y, z, k):
-    new = uops.add(UOps.CAST, dtypes.uint8, (k,), insert_before=uops.uops.index(root))
-    root.vin = (x,y,z,new)
-    return ld_rep(root,x,y)
-
-  def ptr_ar(root):
+  def ptr_ar(root, uops):
     assert root.arg in {'.shared', '.global', None}
     if root.arg is None: root.arg = '.shared' if root.vin[0].uop is UOps.DEFINE_LOCAL else '.global'  # move this to the argL
     val = uops.add(UOps.CONST, dtypes.int, tuple(), arg=root.vin[0].dtype.itemsize, insert_before=uops.uops.index(root))
@@ -77,13 +56,22 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
       root.vin = (fptr, zero) + root.vin[2:]
 
   matcher = PatternMatcher([
-    ({"__name__": "root", "uop": UOps.ALU, "arg": BinaryOps.CMPEQ, "vin": ({"__name__": "x", "dtype": dtypes.bool},{"__name__": "y"})}, eq_rep),
-    ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": ({"__name__": "x", "dtype": dtypes.bool},{"__name__": "y"})}, lt_rep),
-    ({"__name__": "root", "uop": UOps.LOAD,"dtype": dtypes.bool,
-      "vin": ({"__name__": "x"},{"__name__": "y"},{"__name__": "z"},{"__name__": "k"})}, gate_rep),
-    ({"__name__": "root", "uop": UOps.LOAD,"dtype": dtypes.bool, "vin": ({"__name__": "x"},{"__name__": "y"})}, ld_rep),
-    ({"__name__": "root", "uop": UOps.STORE, "vin": {}}, ptr_ar),
-    ({"__name__": "root", "uop": UOps.LOAD, "vin": {}}, ptr_ar),
+    ({"__name__": "root", "uop": UOps.ALU, "arg": BinaryOps.CMPEQ, "vin": ({"dtype": dtypes.bool},{})},
+     lambda root: UOp(UOps.ALU, dtypes.bool, (UOp(root.uop, root.dtype, root.vin, BinaryOps.XOR),), UnaryOps.NEG)),
+    ({"__name__": "root", "uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": ({"__name__": "x", "dtype": dtypes.bool},{"__name__": "y"})},
+     lambda root,x,y: UOp(root.uop, root.dtype, (UOp(UOps.ALU, dtypes.bool, (x,), UnaryOps.NEG), y), BinaryOps.MUL)),
+    *[({"__name__": "x", "uop": UOps.ALU, "dtype": dtypes.half, "arg": op},
+       lambda x: UOp(UOps.CAST, dtypes.half, (UOp(x.uop, dtypes.float32, tuple([UOp(UOps.CAST, dtypes.float32, (vv,)) for vv in x.vin]), x.arg),)))
+      for op in lang.asm_for_op.keys() if op not in lang.supports_half],
+    ({"__name__": "root", "uop": UOps.LOAD, "dtype": dtypes.bool,
+      "vin": ({"__name__": "x"},{"__name__": "y"},{"__name__": "z"},{"__name__": "k"})},
+     lambda root,x,y,z,k: UOp(UOps.CAST, dtypes.bool, (UOp(root.uop, dtypes.int8, (x,y,z,UOp(UOps.CAST, dtypes.uint8, (k,)))),), root.arg)),
+    ({"__name__": "root", "uop": UOps.LOAD,"dtype": dtypes.bool, "vin": ({},{})},
+     lambda root: UOp(UOps.CAST, dtypes.bool, (UOp(root.uop, dtypes.uint8, root.vin, root.arg),))),
+    ({"__name__": "root", "uop": UOps.STORE, "vin": ({},{},{"__name__": "z","dtype": dtypes.bool}, {})},
+     lambda root,z: UOp(root.uop, root.dtype, root.vin[:2] + (UOp(UOps.CAST, dtypes.uint8, (z,), None),), root.arg)),
+    ({"__name__": "root", "uop": UOps.STORE, "vin": ({},{},{"__name__": "z","dtype": dtypes.bool})},
+     lambda root,z: UOp(root.uop, root.dtype, root.vin[:2] + (UOp(UOps.CAST, dtypes.uint8, (z,), None),), root.arg)),
   ])
 
   # here we do a pretransform on UOps to fix some shortcomings of PTX
@@ -97,6 +85,18 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
       if o in u.vin and u is not n:
         u.vin = tuple(n if x == o else x for x in u.vin)
     if rew := matcher.rewrite(u): replace[u] = rew
+
+  for o,n in replace.items():
+    queue = [n]
+    while queue:
+      if all([qq in uops.uops for qq in queue[-1].vin]):
+        q = queue.pop()
+        new = uops.add(q.uop, q.dtype, q.vin, q.arg, insert_before=max([uops.uops.index(vv) for vv in q.vin])+1)
+        for vv in uops.uops + queue: vv.vin = tuple(new if x is q else x for x in vv.vin)
+      else: queue.extend([qq for qq in queue[-1].vin if qq not in uops.uops])
+    uops.uops.remove(o)
+
+  for pointer_op in list(filter(lambda uop: uop.uop in [UOps.LOAD, UOps.STORE], uops.uops)): ptr_ar(pointer_op, uops)
   uops.remove_childless(set(x for x in uops if x.uop in {UOps.DEFINE_GLOBAL, UOps.PHI, UOps.ENDIF, UOps.ENDLOOP, UOps.STORE}))
 
   def kk(*s: str): kernel.append("\n".join(s))
@@ -155,21 +155,11 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
       if uop is UOps.LOOP: kk(*lang.render_loop(ssa(u, 'ridx'), r[vin[0]], ssa_label(u, 'loop')))
       elif uop is UOps.ALU:
         assert vin[0].dtype is not None
-        operands = [r[x] for x in vin]
-        lab = ssa(u, "alu")
-        if needs_upcast := dtype == dtypes.half and args not in lang.supports_half:
-          dtype = dtypes.float32
-          out_lab, lab = lab, ssa(None, "alu_cast", lang.types[dtype])
-          for i, op in enumerate(operands):
-            operands[i] = ssa(None, "alu_cast", lang.types[dtype])
-            kk(*lang.render_cast(operands[i], op, dtype, dtypes.half)) # type: ignore
         if args is BinaryOps.CMPLT or args is BinaryOps.CMPEQ:
           # pass in the other dtype here
-          kk(lang.asm_for_op[args](lab, *operands, vin[0].dtype, lang.types[vin[0].dtype]))
+          kk(lang.asm_for_op[args](ssa(u, "alu"), *[r[x] for x in vin], vin[0].dtype, lang.types[vin[0].dtype]))
         else:
-          kk(lang.asm_for_op[args](lab, *operands, dtype, lang.types[dtype]))
-        if needs_upcast:
-          kk(*lang.render_cast(out_lab, lab, dtypes.half, dtype))
+          kk(lang.asm_for_op[args](ssa(u, "alu"), *[r[x] for x in vin], dtype, lang.types[dtype]))
       elif uop is UOps.DEFINE_ACC:
         if dtype.count > 1:
           r[u] = [ssa(None, 'acc', lang.types[dtype.scalar()]) for _ in range(dtype.count)]
@@ -275,8 +265,6 @@ class PTXLanguage(AssemblyLanguage):
     else: return [f"ld{ss}.{self.mem_type(dtype)} {dest}, [{loc}+{offset}];"]
 
   def render_store(self, loc, val, dtype, gate=None, ss="", offset=0) -> List[str]:
-    if dtype == dtypes.bool: return [f".reg .s16 {val}_cast;", *self.render_cast(f"{val}_cast", val, dtypes.int16, dtype),
-                                     (f"@{gate} " if gate else "") + f"st{ss}.{self.mem_type(dtype)} [{loc}+{offset}], {val}_cast;"]
     return [(f"@{gate} " if gate else "") + f"st{ss}.{self.mem_type(dtype)} [{loc}+{offset}], {val};"]
 
   def render_cast(self, d:str, a:str, dtype:DType, atype:DType, bitcast=False, pred=False) -> List[str]:

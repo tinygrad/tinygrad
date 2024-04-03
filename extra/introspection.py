@@ -1,10 +1,9 @@
 # TODO: move the GRAPH and DEBUG stuff to here
 import gc
 from tinygrad.helpers import prod
-from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
-from tinygrad.device import Buffer
-from tinygrad import GlobalCounters
+from tinygrad.buffer import Buffer
+from tinygrad import Tensor, GlobalCounters
 
 def print_objects():
   #gc.collect()

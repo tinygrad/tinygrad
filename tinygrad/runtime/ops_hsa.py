@@ -269,8 +269,10 @@ def hsa_terminate():
   # Need to stop/delete aql queue before hsa shut down, this leads to gpu hangs.
   for dev in HSADevice.devices:
     Profiler.process(dev)
-    setattr(dev, 'synchronize', lambda: None) # some destructors might require to sync, but hw_queue is removed.
     del dev.hw_queue
 
+  # hsa_shut_down cleans up all hsa-related resources.
   hsa.hsa_shut_down()
+  HSADevice.synchronize = lambda: None #type:ignore
+  HSAProgram.__del__ = lambda _: None #type:ignore
   if Profiler.collected_events: Profiler.save("/tmp/profile.json")
