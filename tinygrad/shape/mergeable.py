@@ -4,26 +4,26 @@ from tinygrad.shape.symbolic import Node, NumNode, Variable, sint
 from tinygrad import Tensor
 from typing import Tuple, Optional, Set, List
 
-def to_tensor(exp: Node, shape: Tuple[sint, ...], vars1: Optional[Set[Variable]]):
-    if vars1 is None: vars1 = exp.vars()
-    if len(vars1) == 0: return None
-    vars = sorted(list(vars1), key=str)
-    indices: List[List[List[int]]] = [list() for _ in vars]
-    indices[0] = [[x] for x in list(range(vars[0].min, vars[0].max + 1))]
-    for i, v in enumerate(vars[1:]):
+def to_tensor(exp: Node, shape: Tuple[sint, ...], vars: Optional[Set[Variable]]):
+    if vars is None: vars = exp.vars()
+    if len(vars) == 0: return None
+    vars2 = sorted(list(vars), key=str)
+    indices: List[List[List[int]]] = [list() for _ in vars2]
+    indices[0] = [[x] for x in list(range(vars2[0].min, vars2[0].max + 1))]
+    for i, v in enumerate(vars2[1:]):
         for j in range(v.min, v.max + 1):
             indices[i+1] += [x + [j] for x in indices[i]]
     indices[-1].sort()
     ans = []
     for i in range(len(indices[-1])):
-        ans.append(exp.substitute(dict(zip(vars, map(NumNode, indices[-1][i])))).b)
+        ans.append(exp.substitute(dict(zip(vars2, map(NumNode, indices[-1][i])))).b)
     return Tensor(ans).reshape(shape)
 
-def is_single_view(s: ShapeTracker):
-    x = to_tensor(s.expr_idxs()[0], s.shape, s.expr_idxs()[0].vars())
-    m = to_tensor(s.expr_idxs()[1], s.shape, s.expr_idxs()[0].vars())
+def is_single_view(st: ShapeTracker):
+    x = to_tensor(st.expr_idxs()[0], st.shape, st.expr_idxs()[0].vars())
+    m = to_tensor(st.expr_idxs()[1], st.shape, st.expr_idxs()[0].vars())
     u = m
-    for i in range(N := len(s.shape)):
+    for i in range(N := len(st.shape)):
         u = u.cumsum(axis=i)
     lower_corner = tuple(un1d(m.shape, (u == 1).argmax().item()))
     mask = tuple(zip(lower_corner, [c + 1 for c in un1d(m.shape, u.argmax().item())]))
@@ -32,8 +32,8 @@ def is_single_view(s: ShapeTracker):
         strides.append((x[tuple([lower_corner[i] if j != i else lower_corner[i] + 1 for j in range(N)])] - x[lower_corner]).item())
 
     # TODO: check if offset is right
-    s2 = ShapeTracker(views=(View(shape=x.shape, strides=tuple(strides), offset=s.views[-1].offset, mask=mask, contiguous=False),))
-    return (m * x == m * to_tensor(s2.expr_idxs()[0], s2.shape, s2.expr_idxs()[0].vars())).numpy().all()
+    st2 = ShapeTracker(views=(View(shape=x.shape, strides=tuple(strides), offset=st.views[-1].offset, mask=mask, contiguous=False),))
+    return (m * x == m * to_tensor(st2.expr_idxs()[0], st2.shape, st2.expr_idxs()[0].vars())).numpy().all()
 
 
 s = ShapeTracker.from_shape((2,4)).permute((1,0)).reshape((2,4))
