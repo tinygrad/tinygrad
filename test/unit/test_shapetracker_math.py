@@ -4,6 +4,7 @@ from tinygrad.helpers import prod
 from tinygrad.shape.view import View
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, sym_infer
+from tinygrad.shape.mergeable import merge_views
 
 class MultiShapeTracker:
   def __init__(self, sts:List[ShapeTracker]): self.sts = sts
@@ -61,6 +62,14 @@ class TestShapeTrackerBasics(unittest.TestCase):
     assert st_equal(multiv, multiv.simplify())
 
 class TestShapeTrackerAdd(unittest.TestCase):
+  def test_merge_view(self):
+    st1 = ShapeTracker(views=(View(shape=(9, 44), strides=(1, 6), offset=-13, mask=((1, 7), (2, 42)), contiguous=False),
+                              View(shape=(28,), strides=(-2,), offset=354, mask=None, contiguous=False)))
+    st2 = ShapeTracker(views=(View(shape=(28,), strides=(-12,), offset=533, mask=((25, 28),), contiguous=False),))
+    assert st_equal(st1, st2)
+    assert st1.simplify() == st1
+    assert merge_views(st1) == st2
+
   def test_simple_add_reshape(self):
     a = ShapeTracker.from_shape((10, 10))
     a = a.reshape((100,))
