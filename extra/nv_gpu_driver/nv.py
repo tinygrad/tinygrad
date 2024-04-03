@@ -1,5 +1,5 @@
 import os, ctypes, pathlib, re, fcntl, functools, mmap, time
-from tinygrad.helpers import to_mv, getenv
+from tinygrad.helpers import to_mv, getenv, round_up
 from extra.nv_gpu_driver import nv_ioctl
 from extra.nv_gpu_driver import esc_ioctl as nvesc
 from extra.nv_gpu_driver import class_ioctl as nvcls
@@ -15,8 +15,7 @@ libc = ctypes.CDLL("libc.so.6")
 libc.memset.argtypes = [ctypes.c_void_p, ctypes.c_char, ctypes.c_int]
 libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
 libc.mmap.restype = ctypes.c_void_p
-MAP_NORESERVE = 0x4000
-MAP_FIXED = 0x10
+MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
 
 ring_cmd = 0x0
 ring_off = 0x0
@@ -177,6 +176,27 @@ def heap_alloc(fd_ctl, fd_uvm, fd_dev0, root, device, subdevice, addr, length, f
   uvm_ioctl(fd_uvm, int(nvuvm.UVM_MAP_EXTERNAL_ALLOCATION[2]), map_ext_params)
   return mem_handle
 
+gpu_base_address = 0x500000000
+def _gpu_alloc(root, device, fd_ctl, gpu_uuid, size:int, fixed_address=None):
+  global gpu_base_address, gpu_va_base
+  size = round_up(size, 2<<20)
+  alloc_params = nvesc.NV_MEMORY_ALLOCATION_PARAMS(owner=root, flags=114945, attr=293601280, attr2=1048581, format=6, size=size, alignment=2<<20, offset=gpu_base_address, limit=2097151)
+  mem_handle = rm_alloc(fd_ctl, nvcls.NV1_MEMORY_USER, root, device, alloc_params).hObjectNew
+  gpu_base_address += size
+
+  gpu_va_base = libc.mmap(0, size, 0, 34, -1, 0) #if fixed_address else 
+  
+  creat_range_params = nvuvm.UVM_CREATE_EXTERNAL_RANGE_PARAMS(base=gpu_va_base, length=size)
+  uvm_ioctl(fd_uvm, int(nvuvm.UVM_CREATE_EXTERNAL_RANGE[2]), creat_range_params)
+
+  map_ext_params = nvuvm.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS(base=gpu_va_base, length=size, rmCtrlFd=fd_ctl, hClient=root, hMemory=mem_handle,
+                                                            gpuAttributesCount=1)
+  map_ext_params.perGpuAttributes[0].gpuUuid = nvuvm.struct_nv_uuid(uuid=gpu_uuid)
+  map_ext_params.perGpuAttributes[0].gpuMappingType = 1
+  uvm_ioctl(fd_uvm, int(nvuvm.UVM_MAP_EXTERNAL_ALLOCATION[2]), map_ext_params)
+
+  return gpu_va_base
+
 if __name__ == "__main__":
   device_id = 0
   fd_ctl = os.open("/dev/nvidiactl", os.O_RDWR | os.O_CLOEXEC)
@@ -267,6 +287,8 @@ if __name__ == "__main__":
   while get_val != 1: get_val = gpu_ring_controls.GPGet
 
   hexdump(to_mv(gpu_base, 0x100))
+
+  _gpu_alloc(root, device, fd_ctl, gpu_uuid, 64)
 
   # ring_off
 

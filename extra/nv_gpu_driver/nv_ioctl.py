@@ -1,5 +1,6 @@
 # type: ignore
 import ctypes, ctypes.util, struct, platform, pathlib, re, time, os
+from tinygrad.helpers import from_mv
 start = time.perf_counter()
 
 # *** ioctl lib ***
@@ -24,7 +25,9 @@ def format_struct(s):
     else: sdats.append(f"{field_name}:{dat}")
   return sdats
 
+real_func_pool = {}
 def install_hook(c_function, python_function):
+  orig_func = (ctypes.c_char*4096)()
   python_function_addr = ctypes.cast(ctypes.byref(python_function), ctypes.POINTER(ctypes.c_ulong)).contents.value
   # AARCH64 trampoline to ioctl
   if processor == "aarch64":
@@ -46,7 +49,11 @@ def install_hook(c_function, python_function):
   # hook ioctl
   ret = libc.mprotect(ctypes.c_ulong((ioctl_address.contents.value//0x1000)*0x1000), 0x2000, 7)
   assert ret == 0
+  ret = libc.mprotect(ctypes.c_ulong((ctypes.addressof(orig_func)//0x1000)*0x1000), 0x3000, 7)
+  assert ret == 0
+  libc.memcpy(orig_func, ioctl_address.contents, 0x1000)
   libc.memcpy(ioctl_address.contents, ctypes.create_string_buffer(tramp), len(tramp))
+  return orig_func
 
 # *** ioctl lib end ***
 import extra.nv_gpu_driver.esc_ioctl as ESC
@@ -56,7 +63,7 @@ import extra.nv_gpu_driver.uvm_ioctl as UVM
 nvescs = {getattr(ESC, x):x for x in dir(ESC) if x.startswith("NV_ESC")}
 nvcmds = {getattr(CTRL, x):(x, getattr(CTRL, "struct_"+x+"_PARAMS", getattr(CTRL, "struct_"+x.replace("_CMD_", "_")+"_PARAMS", None))) for x in dir(CTRL) if \
           x.startswith("NV") and x[6:].startswith("_CTRL_") and isinstance(getattr(CTRL, x), int)}
-nvclasses = {getattr(CLASS, x):x for x in dir(CLASS) if isinstance(getattr(CLASS, x), int) and not x.startswith("NV2080_")}
+nvclasses = {getattr(CLASS, x):x for x in dir(CLASS) if isinstance(getattr(CLASS, x), int) and not x.startswith("NV2080_") and not x.startswith("NVC56F")}
 nvuvms = {int(getattr(UVM, x)[2]):x for x in dir(UVM) if isinstance(getattr(UVM, x), list) and len(getattr(UVM, x)) == 4 and getattr(UVM, x)[0] == 'i'} # broken clang2py generates mess
 
 global_ioctl_id = 0
@@ -113,18 +120,22 @@ def ioctl(fd, request, argp):
   elif os.readlink(f"/proc/self/fd/{fd}").endswith("nvidia-uvm"):
     print(f"{nvuvms.get(request, f'UVM UNKNOWN {request=}')}")
     if nvuvms.get(request) is not None: dump_struct(get_struct(argp, getattr(UVM, nvuvms.get(request)+"_PARAMS")))
+    if nvuvms.get(request) == "UVM_MAP_EXTERNAL_ALLOCATION":
+      st = get_struct(argp, getattr(UVM, nvuvms.get(request)+"_PARAMS"))
+      dump_struct(st.perGpuAttributes[0])
 
   print("ioctl", f"{idir=} {size=} {itype=} {nr=} {fd=} {ret=}", os.readlink(f"/proc/self/fd/{fd}") if fd >= 0 else "")
   return ret
 
-# @ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long)
-# def _mmap(addr, length, prot, flags, fd, offset):
-#   print(f"mmap {addr=}, {length=}, {prot=}, {flags=}, {fd=}, {offset=}")
-#   ret = libc.syscall(MMAP_SYSCALL, ctypes.c_void_p(addr), ctypes.c_size_t(length), ctypes.c_int(prot), ctypes.c_int(flags), ctypes.c_int(fd), ctypes.c_long(offset))
-#   print(f"mmap {addr=}, {length=}, {prot=}, {flags=}, {fd=}, {offset=} {ret=}")
-#   return ret
+@ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long)
+def _mmap(addr, length, prot, flags, fd, offset):
+  mmap_type = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long)
+  orig_mmap = mmap_type(ctypes.addressof(orig_mmap_mv))
+  ret = orig_mmap(addr, length, prot, flags, fd, offset)
+  print(f"mmap {addr=}, {length=}, {prot=}, {flags=}, {fd=}, {offset=} {ret=}")
+  return ret
 
 install_hook(libc.ioctl, ioctl)
-# install_hook(libc.mmap, _mmap)
+# orig_mmap_mv = install_hook(libc.mmap, _mmap)
 
 # IOCTL=1 PTX=1 CUDA=1 python3 test/test_ops.py TestOps.test_tiny_add
