@@ -281,15 +281,14 @@ class UOpGraph:
 
   def optimize_embedding(self, get_recursive_parents):
     if not all([u.uop is UOps.DEFINE_GLOBAL for u in self.uops[:4]]): return
-    if DEBUG >= 4: print("optimizing embedding")
-    indices_load, arange_load, input_load = [next(op for op in self.uops if op.uop is UOps.LOAD and buf in op.vin) for buf in self.uops[1:4]]
+    if DEBUG >= 5: print("optimizing embedding")
+    idx_load, arange_load, input_load = [next(op for op in self.uops if op.uop is UOps.LOAD and buf in op.vin) for buf in self.uops[1:4]]
     arange_loop = next(op for op in get_recursive_parents(arange_load) if op.uop is UOps.LOOP)
-    maybe_cast_indices = self.add(UOps.CAST, arange_load.dtype, (indices_load,), insert_before=self.uops.index(indices_load)+1) if arange_load.dtype != indices_load.dtype else indices_load
+    maybe_cast_indices = self.add(UOps.CAST, arange_load.dtype, (idx_load,), insert_before=self.uops.index(idx_load)+1) if arange_load.dtype != idx_load.dtype else idx_load
     for op in get_recursive_parents(input_load):
       if op.uop is UOps.ALU:
         op.vin = tuple([maybe_cast_indices if op is arange_loop else op for op in list(op.vin)])
-    phi = next(op for op in self.uops if op.uop is UOps.PHI)
-    self.replace_op(phi, input_load)
+    self.replace_op(next(op for op in self.uops if op.uop is UOps.PHI), input_load)
     get_recursive_parents.cache_clear()
 
   def fix_to_store_directly(self):

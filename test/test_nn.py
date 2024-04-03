@@ -3,11 +3,12 @@ import unittest
 import numpy as np
 import torch
 from tinygrad import Tensor, Device, TinyJit
+from tinygrad.codegen.linearizer import Linearizer, UOps
+from tinygrad.engine.schedule import create_schedule
+from tinygrad.engine.realize import run_schedule
 from tinygrad.helpers import CI, Context
 from tinygrad.ops import BufferOps
 from tinygrad.nn import BatchNorm2d, Conv1d,ConvTranspose1d, Conv2d,ConvTranspose2d, Linear, GroupNorm, LayerNorm,LayerNorm2d, Embedding, InstanceNorm
-from tinygrad.engine.schedule import create_schedule
-from tinygrad.engine.realize import run_schedule
 
 @unittest.skipIf(CI and Device.DEFAULT == "CUDA", "slow")
 class TestNN(unittest.TestCase):
@@ -380,8 +381,18 @@ class TestNN(unittest.TestCase):
                 [7, 8, 9]])
     result = layer(b)
     schedule = create_schedule([result.lazydata])
-    self.assertEqual(1, len([item for item in schedule if item.ast[0].op is BufferOps.STORE]), "second run realizes embedding only")
+
+    stores = [item for item in schedule if item.ast[0].op is BufferOps.STORE]
+    self.assertEqual(1, len(stores), "second run realizes embedding only")
     run_schedule(schedule)
+
+    lin = Linearizer(*stores[0].ast)
+    lin.hand_coded_optimizations()
+    uops = list(lin.linearize().uops)
+    # ignore kernel optimized IF/LOOP statements for now
+    if if_op := next((u for u in uops if u.uop is UOps.IF), None):
+      uops = uops[:uops.index(if_op)]
+    self.assertEqual(0, len([u for u in uops if u.uop is UOps.LOOP]), "no loops")
 
 
 if __name__ == '__main__':
