@@ -1,6 +1,7 @@
 from typing import Optional, Tuple, Any, List
 import unittest, math
 import numpy as np
+from tinygrad.renderer.assembly import ptr_ar
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.device import Buffer, Device, CompiledASTRunner
@@ -234,6 +235,27 @@ class TestLocalAccess(unittest.TestCase):
     ofs = uop(uops, UOps.LOAD, dtypes.int32, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 1)))
     sres = uop(uops, UOps.LOAD, dtypes.int32, (smem, ofs))
     self.assertEqual(_test_uops_result(dtypes.int32, uops, sres), 42)
+
+class TestAssembly(unittest.TestCase):
+  def test_pointer_arithmetics_caching(self):
+    uops = UOpGraph()
+    u1 = uops.add(UOps.DEFINE_GLOBAL, dtypes.int, tuple(), (0, 'data0', True))
+    u2 = uops.add(UOps.SPECIAL, dtypes.int, tuple(), (0, 'gidx0', 9))
+    u3 = uops.add(UOps.CONST, dtypes.int, tuple(), arg=42)
+    u4 = uops.add(UOps.ALU, dtypes.int, (u2, u3), BinaryOps.MUL)
+    u5 = uops.add(UOps.CONST, dtypes.int, tuple(), arg=0)
+    u6 = uops.add(UOps.CONST, dtypes.int, tuple(), arg=1)
+    u7 = uops.add(UOps.ALU, dtypes.int, (u4, u5), BinaryOps.ADD)
+    u8 = uops.add(UOps.ALU, dtypes.int, (u4, u6), BinaryOps.ADD)
+    u9 = uops.add(UOps.LOAD, dtypes.int, (u1, u7))
+    u10 = uops.add(UOps.LOAD, dtypes.int, (u1, u8))
+    ptr_ar(u9, uops)
+    ptr_ar(u10, uops)
+    self.assertEqual(u9.vin[0], u10.vin[0])
+    self.assertEqual(u9.vin[1].uop, UOps.CONST)
+    self.assertEqual(u9.vin[1].arg, u5.arg*dtypes.float.itemsize)
+    self.assertEqual(u10.vin[1].uop, UOps.CONST)
+    self.assertEqual(u10.vin[1].arg, u6.arg*dtypes.float.itemsize)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
