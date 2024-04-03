@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Union, Type, Tuple, Any, List, Dict, Callable, Set
 import functools, hashlib, math, operator, ctypes
 from enum import Enum, auto
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from tinygrad.helpers import prod, dedup
 from tinygrad.dtype import dtypes, DType
 from tinygrad.shape.symbolic import Variable, sint
@@ -48,7 +48,7 @@ class LazyOp:
   op: Op
   src: Tuple[LazyOp, ...] = ()
   arg: Any = None
-  optimizations: Set[str] = set()
+  optimizations: Set[str] = field(default_factory=lambda: set())
   def cached_compare(self, x, context):
     if id(self) == id(x): return True
     if self.op != x.op or self.arg != x.arg or len(self.src) != len(x.src): return False
