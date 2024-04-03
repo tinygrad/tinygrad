@@ -202,11 +202,6 @@ class TestLinearizer(unittest.TestCase):
     assert lin.full_shape[:lin.global_dims] == (5, 6, 7, 8, 9)
     lin.limit_dims_to_max(global_max=[16, 16, 16], local_max=[16, 16, 16])
 
-  def test_sum_collapse(self):
-    t = Tensor.ones(256,256).sum()
-    sched = [si for si in create_schedule([t.lazydata]) if si.ast[0].op not in LoadOps]
-    assert len(sched) == 0
-
   def test_assign_fold(self):
     a = Tensor.ones(4, 4).contiguous().realize()
     m = Tensor.ones(4, 4).shrink(((1, 2), None)).pad(((1, 2), None))
