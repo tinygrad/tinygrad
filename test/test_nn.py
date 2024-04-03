@@ -325,11 +325,6 @@ class TestNN(unittest.TestCase):
     a = Tensor([[1, 5, 9, 11],
                 [12, 19, 8, 1]])
     layer(a).realize()
-    print("now realizing b")
-    b = Tensor([[1, 2, 3],
-                [4, 5, 6],
-                [7, 8, 9]])
-    layer(b).realize()
 
   def test_embedding(self):
     B, T, embed_size, vocab_size = 4, 10, 20, 28

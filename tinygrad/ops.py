@@ -48,7 +48,7 @@ class LazyOp:
   op: Op
   src: Tuple[LazyOp, ...] = ()
   arg: Any = None
-  optimizations: Set[str] = field(default_factory=lambda: set())
+  optimizations: Set[str] = field(default_factory=set)
   def cached_compare(self, x, context):
     if id(self) == id(x): return True
     if self.op != x.op or self.arg != x.arg or len(self.src) != len(x.src): return False
