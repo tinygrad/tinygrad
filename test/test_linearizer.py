@@ -719,7 +719,7 @@ class TestKernelOpts(unittest.TestCase):
 
   def test_padto_max(self):
     N = 17 * 17
-    a = -Tensor.ones(N, N)
+    a = -Tensor.rand(N, N)
 
     helper_linearizer_opt(a.max(0), [
       [Opt(OptOps.PADTO, 0, 32)],
