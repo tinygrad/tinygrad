@@ -173,7 +173,7 @@ class TestOpt(unittest.TestCase):
     np.testing.assert_allclose(d.numpy(), na*nb+nc, rtol=1e-5, atol=1e-7)
 
   def test_fold_reduce_elementwise(self):
-    img = Tensor([2,3,4])
+    img = Tensor.rand(32)
     addme = Tensor.ones(1)
     with CLCache():
       ret = img.sum() + addme
