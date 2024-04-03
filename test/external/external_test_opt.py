@@ -173,7 +173,7 @@ class TestOpt(unittest.TestCase):
     np.testing.assert_allclose(d.numpy(), na*nb+nc, rtol=1e-5, atol=1e-7)
 
   def test_fold_reduce_elementwise(self):
-    img = Tensor.ones(32)
+    img = Tensor.ones(32).contiguous()
     addme = Tensor.ones(1)
     with CLCache():
       ret = img.sum() + addme
@@ -183,7 +183,7 @@ class TestOpt(unittest.TestCase):
 
   def test_fold_batchnorm(self):
     with Tensor.train():
-      img = Tensor.ones(1,32,4,4)
+      img = Tensor.ones(1,32,4,4).contiguous()
       bn = nn.BatchNorm2d(32, track_running_stats=False)
       with CLCache():
         img_bn = bn(img).realize()

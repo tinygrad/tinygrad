@@ -12,7 +12,7 @@ def _check_ast_count(desired_count:int, t:Tensor):
   asts = [s for s in schedule if s.ast[0].op is BufferOps.STORE]
   assert len(asts) == desired_count
 
-class TestSimpleConstFolding(unittest.TestCase):
+class TestUnaryOpsConstFolding(unittest.TestCase):
   def test_all_consts_ops(self):
     _check_ast_count(0, Tensor.ones(4).exp())
     _check_ast_count(0, Tensor.ones(4).sqrt())
@@ -23,6 +23,7 @@ class TestSimpleConstFolding(unittest.TestCase):
     _check_ast_count(0, Tensor.ones(4).cast(dtypes.int16))
     _check_ast_count(0, Tensor.full(4, fill_value=-1).cast(dtypes.uint16))
 
+class TestBinaryOpsConstFolding(unittest.TestCase):
   def test_add_literal_zero(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) + 0)
   def test_add_tensor_zero(self):
@@ -97,6 +98,29 @@ class TestMovedConstFolding(unittest.TestCase):
     # not folded
     _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int64))
     np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int64).numpy(), [0, 1, 1, 1, 1, 0])
+
+class TestReduceOpsConstFolding(unittest.TestCase):
+  def test_const_sum(self):
+    _check_ast_count(0, Tensor.ones(4, 5, 6).sum())
+    np.testing.assert_equal(Tensor.ones(4, 5, 6).sum().numpy(), 4 * 5 * 6)
+    _check_ast_count(0, Tensor.ones(4, 5, 6).sum(axis=0))
+    np.testing.assert_equal(Tensor.ones(4, 5, 6).sum(axis=0).numpy(), np.full((5, 6), 4))
+    _check_ast_count(0, Tensor(4).sum())
+    np.testing.assert_equal(Tensor(4).sum().numpy(), 4)
+
+  def test_padded_const_sum(self):
+    _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).sum())
+    np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).sum().numpy(), 4)
+
+    # NOTE: cannot just count the non-padded area because some UnaryOps f do not have f(0) = 0.
+    _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).exp().sum())
+    np.testing.assert_allclose(Tensor.ones(4).pad(((1, 1),)).exp().sum().numpy(), 4 * math.e + 2)
+
+  def test_const_max(self):
+    _check_ast_count(0, Tensor.ones(4, 5, 6).max())
+    np.testing.assert_equal(Tensor.ones(4, 5, 6).max().numpy(), 1)
+    _check_ast_count(0, Tensor(4).max())
+    np.testing.assert_equal(Tensor(4).max().numpy(), 4)
 
 @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
 class TestMultiConstFolding(unittest.TestCase):
