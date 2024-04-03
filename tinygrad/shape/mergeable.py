@@ -33,7 +33,7 @@ def is_single_view(s: ShapeTracker):
     strides = []
     for i in range(N):
         strides.append((x[tuple([lower_corner[i] if j != i else lower_corner[i] + 1 for j in range(N)])] - x[lower_corner]).item())
-    
+
     # TODO: check if offset is right
     s2 = ShapeTracker(views=(View(shape=x.shape, strides=tuple(strides), offset=s.views[-1].offset, mask=mask, contiguous=False),))
     return (m * x == m * to_tensor(s2.expr_idxs()[0], s2.shape, s2.expr_idxs()[0].vars())).numpy().all()
