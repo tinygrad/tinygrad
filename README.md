@@ -1,6 +1,8 @@
 <div align="center">
 
-[![logo](./docs/tinylogo.svg)](https://tinygrad.org)
+<a href="https://tinygrad.org">
+    <img src="./docs/tinylogo.svg" alt="logo" width="30%" />
+</a>
 
 tinygrad: For something between [PyTorch](https://github.com/pytorch/pytorch) and [karpathy/micrograd](https://github.com/karpathy/micrograd). Maintained by [tiny corp](https://tinygrad.org).
 
