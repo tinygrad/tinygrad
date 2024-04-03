@@ -13,7 +13,7 @@ def get_struct(argp, stype):
 
 def dump_struct(st):
   print("\t", st.__class__.__name__, end=" { ")
-  for v in type(st)._fields_: print(f"{v[0]}={getattr(st, v[0]) if not isinstance(getattr(st, v[0]), ctypes.Array) else [i for i in getattr(st, v[0])]}", end=" ")
+  for v in type(st)._fields_: print(f"{v[0]}={getattr(st, v[0])}", end=" ")
   print("}")
 
 def format_struct(s):
@@ -103,6 +103,9 @@ def ioctl(fd, request, argp):
     elif nr == ESC.NV_ESC_RM_UPDATE_DEVICE_MAPPING_INFO:
       s = get_struct(argp, ESC.NVOS56_PARAMETERS)
       print(f"NV_ESC_RM_UPDATE_DEVICE_MAPPING_INFO   hClient={s.hClient}, hDevice={s.hDevice}, hMemory={s.hMemory}, pOldCpuAddress={s.pOldCpuAddress} pNewCpuAddress={s.pNewCpuAddress} status={s.status}")
+    elif nr == ESC.NV_ESC_RM_ALLOC_MEMORY:
+      s = get_struct(argp, ESC.nv_ioctl_nvos02_parameters_with_fd)
+      print(f"NV_ESC_RM_ALLOC_MEMORY  fd={s.fd}, hRoot={s.params.hRoot}, hObjectParent={s.params.hObjectParent}, hObjectNew={s.params.hObjectNew}, hClass={s.params.hClass}, flags={s.params.flags}, pMemory={s.params.pMemory}, limit={s.params.limit}, status={s.params.status}")
     elif nr in nvescs:
       print(nvescs[nr])
     else:
@@ -111,7 +114,7 @@ def ioctl(fd, request, argp):
     print(f"{nvuvms.get(request, f'UVM UNKNOWN {request=}')}")
     if nvuvms.get(request) is not None: dump_struct(get_struct(argp, getattr(UVM, nvuvms.get(request)+"_PARAMS")))
 
-  # print("ioctl", f"{idir=} {size=} {itype=} {nr=} {fd=} {ret=}", os.readlink(f"/proc/self/fd/{fd}") if fd >= 0 else "")
+  print("ioctl", f"{idir=} {size=} {itype=} {nr=} {fd=} {ret=}", os.readlink(f"/proc/self/fd/{fd}") if fd >= 0 else "")
   return ret
 
 # @ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long)
