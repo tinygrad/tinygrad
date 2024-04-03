@@ -6,6 +6,7 @@
   <img alt="The TinyCorp Logo" src="https://raw.githubusercontent.com/aaronstevenson408/tinygrad/master/docs/tinyLight.svg" width="100%" height="100%">
   <a href="https://tinygrad.org">
 </picture>
+<br>
 tinygrad: For something between [PyTorch](https://github.com/pytorch/pytorch) and [karpathy/micrograd](https://github.com/karpathy/micrograd). Maintained by [tiny corp](https://tinygrad.org).
 
 <h3>
