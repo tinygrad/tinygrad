@@ -407,10 +407,6 @@ class Kernel:
   def apply_opt(self, opt:Opt, append_opt:bool=True):
     check(not self.dont_use_locals or opt.op not in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP, OptOps.UPCASTMID}, "not using locals")
 
-    if "embedding" in self.extra_optimizations() and opt.op in {OptOps.UNROLL, OptOps.UPCAST}:
-      if DEBUG >= 6: print(f"not applying opt due to active embedding optim")
-      return
-
     if opt.op is OptOps.TC:
       check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: things like PADTO might be fine
       check(opt.axis is not None and opt.amt is not None, "tensor core opts must have an axis and amt")
@@ -499,6 +495,8 @@ class Kernel:
         self.apply_opt(Opt(OptOps.UPCAST, unit_stride_axes_mul_4[0], 4))
 
   def hand_coded_optimizations(self):
+    if "embedding" in self.extra_optimizations(): return
+
     self.required_optimizations()
 
     # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
