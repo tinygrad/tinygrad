@@ -1,18 +1,11 @@
 #!/usr/bin/env python
-import os
 
 import torch
-if "OPT" not in os.environ:
-  os.environ["OPT"] = "2"
-else:
-  assert int(os.environ["OPT"]) >= 2, "test is broken with OPT=0 or OPT=1"
 
-import gc
+import gc, unittest
 import numpy as np
 
-import unittest
-from tinygrad.tensor import Tensor, Device
-from tinygrad import nn, GlobalCounters
+from tinygrad import nn, GlobalCounters, Tensor, Device
 from tinygrad.helpers import getenv
 from tinygrad.nn import optim
 #from tinygrad.lazy import PUSH_PERMUTES
