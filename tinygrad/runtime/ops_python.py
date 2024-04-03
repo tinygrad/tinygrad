@@ -23,7 +23,9 @@ def _store(m, i, v):
 
 class PythonProgram:
   def __init__(self, name:str, lib:bytes):
-    self.uops: List[Tuple[UOps, Optional[DType], List[int], Any]] = pickle.loads(lib)
+    body = pickle.loads(lib)
+    self.uops: List[Tuple[UOps, Optional[DType], List[int], Any]] = body[0]
+    self.buf_idxs: List[int] = body[1]
   def __call__(self, *bufs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
     st = time.perf_counter()
     warp = list(itertools.product(*[range(x) for x in local_size[::-1]]))
@@ -71,7 +73,7 @@ class PythonProgram:
         dl[i] = dtype
         if uop is UOps.DEFINE_GLOBAL:
           assert dtype.fmt is not None
-          ul[i] = [pbufs[arg[0]].cast(dtype.fmt)] * warp_size
+          ul[i] = [pbufs[self.buf_idxs.index(arg[0])].cast(dtype.fmt)] * warp_size
         elif uop is UOps.DEFINE_LOCAL:
           assert dtype.fmt is not None
           lbuf = memoryview(bytearray(arg[1]*dtype.itemsize))
@@ -182,8 +184,8 @@ class PythonCompiler(Compiler):
     (CompilerOptions("HSA", has_tensor_cores=True) if getenv("EMULATE_HSA") else \
     (CompilerOptions("CUDA", has_tensor_cores=True) if getenv("EMULATE_CUDA") else CompilerOptions("PYTHON")))
   def render(self, name:str, uops:UOpGraph) -> str:
-    lops = [(u.uop, u.dtype, [uops.uops.index(v) for v in u.vin], u.arg) for u in uops]
-    return base64.b64encode(pickle.dumps(lops)).decode()
+    body = [(u.uop, u.dtype, [uops.uops.index(v) for v in u.vin], u.arg) for u in uops], uops.buf_idxs
+    return base64.b64encode(pickle.dumps(body)).decode()
   def compile(self, src:str) -> bytes: return base64.b64decode(src)
 
 class PythonAllocator(Allocator):

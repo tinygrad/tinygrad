@@ -135,6 +135,9 @@ class UOpGraph:
     # global uop cache
     self.saved_exprs: Dict[Tuple, UOp] = dict()
 
+    # indeices of global buffers that used in kernel, updated after linearize
+    self.buf_idxs: Optional[List[int]] = None
+
   def __iter__(self): return iter(self.uops)
 
   def vars(self) -> List[Variable]: return [x.arg for x in self.uops if x.uop is UOps.DEFINE_VAR]

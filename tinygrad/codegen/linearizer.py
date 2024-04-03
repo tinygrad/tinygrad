@@ -393,7 +393,7 @@ class Linearizer(Kernel):
     # optimize the uops
     self.uops.uoptimize()
     # indices of global buffers that are used in kernel
-    self.buf_idxs = [uop.arg[0] for uop in self.uops.uops if uop.uop is UOps.DEFINE_GLOBAL]
+    self.uops.buf_idxs = [uop.arg[0] for uop in self.uops.uops if uop.uop is UOps.DEFINE_GLOBAL]
 
     # maybe graph the uops
     if DEBUG >= 5: self.uops.print()
