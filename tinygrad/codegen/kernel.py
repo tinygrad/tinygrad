@@ -1,6 +1,6 @@
 from __future__ import annotations
 import math, itertools
-from typing import NamedTuple, Optional, List, Tuple, cast, Dict, Union
+from typing import NamedTuple, Optional, List, Tuple, cast, Dict, Union, Set
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps
 from tinygrad.device import Device, CompilerOptions
 from tinygrad.dtype import dtypes, ImageDType, DType
@@ -329,8 +329,7 @@ class Kernel:
     if DEBUG >= 4: print("aliasing buffer", self.sts[i])
     self.local_alias[i] = cast(LocalBuffer, self.bufs[-1])
 
-  def extra_optimizations(self) -> Tuple[str]:
-    return self.ast[0].optimizations or []
+  def extra_optimizations(self) -> Set[str]: return self.ast[0].optimizations
 
   # ******************** high level optimizers ********************
 

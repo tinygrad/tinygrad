@@ -328,7 +328,7 @@ class UOpGraph:
           self.replace_op(u, new)
           return True
 
-  def uoptimize(self, extra_optimizations:Tuple[str]=[]):
+  def uoptimize(self, extra_optimizations:Set[str]):
     # get PHI node loop scope, link anything using a DEFINE_ACC to the loop as a "parent"
     acc_scope: DefaultDict[UOp, List[UOp]] = defaultdict(list)
     for u in self.uops:
