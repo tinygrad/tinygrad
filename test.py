@@ -100,9 +100,16 @@ from tinygrad.dtype import dtypes
 # print(tor_ans.shape)
 
 # print(tor_ans)
-t = Tensor([[11,22,33,44,55]]*5)+1
-a = [1,2,3,4,5,6]
+# t = Tensor([[11,22,33,44,55]]*5)+1
+# a = [1,2,3,4,5,6]
 
-for tt, aa in zip(t, a):
-    print(tt.numpy())
-    print(aa)
+# for tt, aa in zip(t, a):
+#     print(tt.numpy())
+#     print(aa)
+t = Tensor.arange(4*4).reshape(4,4)
+b = Tensor([True, True, False, True]).reshape(-1,1)
+
+print(t.numpy())
+print(b.numpy(), b.shape)
+a = t*b
+print(a.numpy())

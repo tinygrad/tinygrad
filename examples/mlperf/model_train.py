@@ -394,7 +394,7 @@ def train_resnet():
 #   pass
 def train_retinanet():
   EPOCHS = 10
-  BS = 1
+  BS = 2
   input_mean = Tensor([0.485, 0.456, 0.406]).reshape(1, -1, 1, 1)
   input_std = Tensor([0.229, 0.224, 0.225]).reshape(1, -1, 1, 1)
   def input_fixup(x):
@@ -430,20 +430,23 @@ def train_retinanet():
   # mdlloss = TinyJit(lambda r, c, Y, a: model.loss(r,c,Y,a).realize())
   parameters = []
   for k, x in get_state_dict(model).items():
-    print(k, x.requires_grad)
+    # print(k, x.requires_grad)
     # print(k, x.numpy())
     # x.requires_grad = True
     
     # print(k, x.grad, x.shape, x.device)
-    if 'head' in k and 'reg' in k:
+    if 'head' in k and ('clas' in k or 'reg' in k ):
       print(k)
       x.requires_grad = True
       # parameters.append(x)
     else:
       x.requires_grad = False
-    # x.realize()
+    x.realize()
     # print(k, x.numpy(), x.grad)
-  parameters = get_parameters(model)
+  p = get_parameters(model)
+  for t in p:
+    if t.requires_grad:
+      parameters.append(t)
   optimizer = Adam(parameters)
   # for k, x in get_state_dict(model).items():
   #   if 'head' in k:
@@ -476,11 +479,12 @@ def train_retinanet():
     # for X,Y in iterate(coco, BS, True):
       cnt+=1
       loss = train_step(X, Y)
+      # print(loss[2].numpy())
       # Tensor.training = False
       # loss.realize()
-      print(colored(f'{cnt} LOSS SHAPE {loss[-2].shape}', 'magenta'))
+      print(colored(f'{cnt} STEP', 'magenta'))
       if cnt>6:
-        # optimizer.zero_grad()
+        optimizer.zero_grad()
         i_s = []
         for t in Y:
           i_s.append(t['image_size'])
@@ -489,18 +493,19 @@ def train_retinanet():
         anchors = [a.realize() for a in anchors]
         print(colored(f'Computed anchor gen', 'red'))
         loss = model.loss(loss[1], loss[2], Y, anchors)
-        print(colored(f'FOUND LOSS {loss.shape}', 'green'))
+        # print(colored(f'FOUND LOSS {loss.shape}', 'green'))
         loss.realize()
         print(colored(f'SUCESS LOSS REAILIZE {loss.shape} {loss.numpy()}', 'cyan'))
         loss.backward()
-        print(colored(f'SUCESS LOSS BACKWARDS {loss.shape} {loss} {loss.grad}', 'cyan'))
-        # for t in optimizer.params: t.grad = t.grad.contiguous()
+        print(colored(f'SUCESS LOSS BACKWARDS {loss.shape} {loss} {loss.grad}', 'red'))
+        # # for t in optimizer.params: t.grad = t.grad.contiguous()
         optimizer.step()
         print(colored(f'SUCESS OPTIMIZER STEP', 'cyan'))
 
 
-        print(colored(f'{cnt} LOSS SHAPE {loss.shape}', 'green'))
-      del loss
+        # print(colored(f'{cnt} LOSS SHAPE {loss.shape}', 'green'))
+        # del image_list
+      # del loss
       if cnt>200:
         sys.exit()
   pass
