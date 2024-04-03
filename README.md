@@ -3,6 +3,7 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/aaronstevenson408/tinygrad/master/docs/tinyDark.svg">
   <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/aaronstevenson408/tinygrad/master/docs/tinyLight.svg">
+  <img alt="The TinyCorp Logo" src="https://raw.githubusercontent.com/aaronstevenson408/tinygrad/master/docs/tinyLight.svg">
   <a href="https://tinygrad.org">
 </picture>
 
