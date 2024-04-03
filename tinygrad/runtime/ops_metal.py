@@ -1,6 +1,7 @@
 from __future__ import annotations
 import os, subprocess, pathlib, ctypes, tempfile, functools
 import Metal, libdispatch
+from Cocoa import NSURL
 from typing import List, Set, Any, Tuple, Optional
 from tinygrad.helpers import prod, getenv, DEBUG, unwrap2
 from tinygrad.device import Compiled, LRUAllocator, Compiler, CompilerOptions
@@ -26,7 +27,20 @@ class MetalCompiler(Compiler):
       options = Metal.MTLCompileOptions.new()
       options.setFastMathEnabled_(getenv("METAL_FAST_MATH"))
       library = unwrap2(self.device.device.newLibraryWithSource_options_error_(src, options, None))
-      return library.libraryDataContents().bytes().tobytes()
+      fxn = library.newFunctionWithName_(library.functionNames()[0])
+      comp_desc = Metal.MTLComputePipelineDescriptor.new()
+      comp_desc.setComputeFunction_(fxn)
+      ar_desc = Metal.MTLBinaryArchiveDescriptor.new()
+      archive = unwrap2(self.device.device.newBinaryArchiveWithDescriptor_error_(ar_desc, None))
+      archive.addComputePipelineFunctionsWithDescriptor_error_(comp_desc, None)
+      tmp = tempfile.mktemp()
+      url = NSURL.fileURLWithPath_(tmp)
+      archive.serializeToURL_error_(url, None)
+      data = None
+      with open(tmp, "rb") as f:
+        data = f.read()
+      pathlib.Path(tmp).unlink()
+      return data
 
 class MetalProgram:
   def __init__(self, device:MetalDevice, name:str, lib:bytes):
