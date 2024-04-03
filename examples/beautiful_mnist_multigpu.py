@@ -30,7 +30,7 @@ if __name__ == "__main__":
   for k, x in nn.state.get_state_dict(model).items(): x.to_(GPUS)  # we put a copy of the model on every GPU
   opt = nn.optim.Adam(nn.state.get_parameters(model))
 
-  #@TinyJit
+  @TinyJit
   def train_step() -> Tensor:
     with Tensor.train():
       opt.zero_grad()
@@ -41,7 +41,7 @@ if __name__ == "__main__":
       opt.step()
       return loss
 
-  #@TinyJit
+  @TinyJit
   def get_test_acc() -> Tensor: return (model(X_test).argmax(axis=1) == Y_test).mean()*100
 
   test_acc = float('nan')
