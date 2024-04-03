@@ -131,6 +131,17 @@ class HWCopyQueue:
   def __init__(self):
     self.q = []
 
+  def submit(self, device:KFDDevice):
+    def blit_sdma_command(cmd):
+      if (cmdsz:=ctypes.sizeof(cmd)) > (fill:=device.sdma_ring.size - device.sdma_doorbell_value % device.sdma_ring.size):
+        ctypes.memset(device.sdma_ring.va_addr + (device.sdma_doorbell_value % device.sdma_ring.size), 0, fill)
+        device.sdma_doorbell_value += fill
+      ctypes.memmove(device.sdma_ring.va_addr + (device.sdma_doorbell_value % device.sdma_ring.size), ctypes.addressof(cmd), cmdsz)
+      device.sdma_doorbell_value += cmdsz
+    for cmd in self.q: blit_sdma_command(cmd)
+    device.sdma_write_pointer[0] = device.sdma_doorbell_value
+    device.sdma_doorbell[0] = device.sdma_doorbell_value
+
   def timestamp(self, addr):
     self.q.append(sdma_pkts.timestamp(op=amd_gpu.SDMA_OP_TIMESTAMP, sub_op=amd_gpu.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL, addr=addr))
 
@@ -200,20 +211,12 @@ class KFDProgram:
 
     self.device.completion_signal.value = 1 # reset the signal before call
 
-    ring_addr = self.device.aql_ring.va_addr + (self.device.aql_doorbell_value*AQL_PACKET_SIZE) % self.device.aql_ring.size
-
     self.q = HWComputeQueue()
     self.q.exec(self, self.device.kernargs_ptr, global_size, local_size, ctypes.addressof(self.device.completion_signal) if wait else 0)
-    #for cmd in self.q.q: ctypes.memmove(ring_addr, ctypes.addressof(cmd), AQL_PACKET_SIZE)
-
-    # increment
     self.device.kernargs_ptr += self.kernargs_segment_size
 
     # one pending packet + ring doorbell
-    self.q.submit(self)
-    #self.device.amd_aql_queue.write_dispatch_id = self.device.aql_doorbell_value + 1
-    #self.device.aql_doorbell[0] = self.device.aql_doorbell_value
-    #self.device.aql_doorbell_value += 1
+    self.q.submit(self.device)
 
     if wait:
       evt_arr = (kfd.struct_kfd_event_data * 1)()
@@ -289,11 +292,11 @@ class KFDDevice(Compiled):
     stm = kio.map_memory_to_gpu(self.kfd, handle=mem.handle, device_ids_array_ptr=ctypes.addressof(gpus:=mem.mapped_gpu_ids), n_devices=len(gpus))
     assert stm.n_success == 1
 
-  def _wait_on(self, event_id):
+  def _wait_on(self, event_id, timeout=1000):
     evt_arr = (kfd.struct_kfd_event_data * 1)()
     evt_arr[0].event_id = event_id
-    ret = kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=1000)
-    assert ret.wait_result == 0, f"wait_result got {ret.wait_result}, hit timeout?"
+    ret = kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=timeout)
+    if ret.wait_result != 0: raise RuntimeError(f"wait_result got {ret.wait_result}, hit timeout?")
 
   def _gpu_alloc(self, size:int, flags:int, uncached=False, public=False, map_to_gpu=True):
     flags |= kfd.KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE
@@ -417,12 +420,6 @@ class KFDDevice(Compiled):
     super().__init__(device, KFDAllocator(self), KFDCompiler(self.arch), functools.partial(KFDProgram, self))
 
   def _submit_sdma(self, dest, src, copy_size, wait_signals=None, completion_signal=None):
-    def blit_sdma_command(cmd):
-      if (cmdsz:=ctypes.sizeof(cmd)) > (fill:=self.sdma_ring.size - self.sdma_doorbell_value % self.sdma_ring.size):
-        ctypes.memset(self.sdma_ring.va_addr + (self.sdma_doorbell_value % self.sdma_ring.size), 0, fill)
-        self.sdma_doorbell_value += fill
-      ctypes.memmove(self.sdma_ring.va_addr + (self.sdma_doorbell_value % self.sdma_ring.size), ctypes.addressof(cmd), cmdsz)
-      self.sdma_doorbell_value += cmdsz
 
     q = HWCopyQueue()
 
@@ -434,11 +431,7 @@ class KFDDevice(Compiled):
     q.copy(dest, src, copy_size)
     if completion_signal is not None: q.timestamp(ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'end_ts').offset)
     if completion_signal is not None: q.signal_trap(completion_signal)
-
-    for cmd in q.q: blit_sdma_command(cmd)
-
-    self.sdma_write_pointer[0] = self.sdma_doorbell_value
-    self.sdma_doorbell[0] = self.sdma_doorbell_value
+    q.submit(self)
 
   def _submit_cache_inv(self, addr=0x0, sz=(1 << 64)-1, gli=0, glv=0, glk=0, gl1=0, gl2=0):
     pm4_buffer_view = to_mv(self.pm4_indirect_buf.va_addr, 0x1000).cast("I")

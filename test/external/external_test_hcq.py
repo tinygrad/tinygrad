@@ -8,7 +8,7 @@ class TestHCQ(unittest.TestCase):
   def setUpClass(self):
     TestHCQ.d0: KFDDevice = Device["KFD"]
     TestHCQ.d1: KFDDevice = Device["KFD:1"]
-    TestHCQ.a = Tensor([0.,0], device="KFD").realize()
+    TestHCQ.a = Tensor([0.,1.], device="KFD").realize()
     TestHCQ.b = self.a + 1
     si = create_schedule([self.b.lazydata])[-1]
     TestHCQ.runner = TestHCQ.d0.get_runner(*si.ast)
@@ -38,6 +38,18 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0._wait_on(TestHCQ.d0.completion_signal.event_id)
     assert (val:=TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[0]) == 1.0, f"got val {val}"
 
+  def test_signal_timeout(self):
+    q = HWComputeQueue()
+    q.submit(TestHCQ.d0)
+    with self.assertRaises(RuntimeError):
+      TestHCQ.d0._wait_on(TestHCQ.d0.completion_signal.event_id, timeout=50)
+
+  def test_signal(self):
+    q = HWComputeQueue()
+    q.signal(ctypes.addressof(TestHCQ.d0.completion_signal))
+    q.submit(TestHCQ.d0)
+    TestHCQ.d0._wait_on(TestHCQ.d0.completion_signal.event_id)
+
   def test_run_signal(self):
     ctypes.memmove(TestHCQ.d0.kernargs_ptr, TestHCQ.addr, len(TestHCQ.addr))
     q = HWComputeQueue()
@@ -46,6 +58,20 @@ class TestHCQ(unittest.TestCase):
     q.submit(TestHCQ.d0)
     TestHCQ.d0._wait_on(TestHCQ.d0.completion_signal.event_id)
     assert (val:=TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[0]) == 1.0, f"got val {val}"
+
+  def test_copy_signal(self):
+    q = HWCopyQueue()
+    q.signal_trap(TestHCQ.d0.completion_signal)
+    q.submit(TestHCQ.d0)
+    TestHCQ.d0._wait_on(TestHCQ.d0.completion_signal.event_id)
+
+  def test_copy_copies(self):
+    q = HWCopyQueue()
+    q.copy(TestHCQ.b.lazydata.buffer._buf.va_addr, TestHCQ.a.lazydata.buffer._buf.va_addr, 8)
+    q.signal_trap(TestHCQ.d0.completion_signal)
+    q.submit(TestHCQ.d0)
+    TestHCQ.d0._wait_on(TestHCQ.d0.completion_signal.event_id)
+    assert (val:=TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[1]) == 1.0, f"got val {val}"
 
 if __name__ == "__main__":
   unittest.main()
