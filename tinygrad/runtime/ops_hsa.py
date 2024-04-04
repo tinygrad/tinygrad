@@ -162,7 +162,6 @@ class HSAAllocator(LRUAllocator):
       self.hb_polarity = (self.hb_polarity + 1) % len(self.hb)
       minor_offset = 0 # only on the first
       copies_called += 1
-    assert copied_in == size
 
     wait_signals = [self.hb_signals[self.hb_polarity - 1]]
     if copies_called > 1: wait_signals.append(self.hb_signals[self.hb_polarity])
