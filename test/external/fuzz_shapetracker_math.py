@@ -50,7 +50,7 @@ if __name__ == "__main__":
           print(f"NEW: {new}")
           mv_win += 1
         if len(old.views) < len(new.views):
-          print(colored("old simplify better than new ", "green"))
+          print(colored("old simplify better than new ", "red"))
           print(f"OLD: {old}")
           print(f"NEW: {new}")
           mv_loss += 1
