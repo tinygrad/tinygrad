@@ -227,10 +227,7 @@ class KFDProgram:
     self.q.submit(self.device)
 
     if wait:
-      evt_arr = (kfd.struct_kfd_event_data * 1)()
-      evt_arr[0].event_id = self.device.completion_signal.event_id
-      ret = kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=1000)
-      assert ret.wait_result == 0, f"wait_result got {ret.wait_result}, hit timeout?"
+      self.device._wait_on(self.device.completion_signal.event_id)
       assert (wp:=self.device.amd_aql_queue.write_dispatch_id) == (rp:=self.device.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
       return (self.device.completion_signal.end_ts-self.device.completion_signal.start_ts)/1e9
 
@@ -422,7 +419,7 @@ class KFDDevice(Compiled):
 
     # Helpers
     map_uptr2gpu_struct_t = init_c_struct_t(tuple(kfd.struct_kfd_ioctl_svm_args._fields_[:-1]+[('attrs', kfd.struct_kfd_ioctl_svm_attribute*2)])) # type: ignore
-    self.map_uptr2gpu_struct = map_uptr2gpu_struct_t(nattr=2, op=0x0)
+    self.map_uptr2gpu_struct = map_uptr2gpu_struct_t(nattr=2, op=kfd.KFD_IOCTL_SVM_OP_SET_ATTR)
     self.map_uptr2gpu_struct.attrs[0].type = kfd.KFD_IOCTL_SVM_ATTR_SET_FLAGS
     self.map_uptr2gpu_struct.attrs[0].value = kfd.KFD_IOCTL_SVM_FLAG_COHERENT
     self.map_uptr2gpu_struct.attrs[1].type = kfd.KFD_IOCTL_SVM_ATTR_ACCESS_IN_PLACE
