@@ -386,6 +386,34 @@ class Tensor:
 
   # ***** movement hlops *****
 
+  # HACK hehe
+  '''
+  def _bigbroadcasted(self, *y:Tuple[Union[Tensor, ConstType],...], reverse:bool=False, match_dtype:bool=True) -> Tuple[Tensor, ...]:
+    def to_tensor(s: ConstType) -> Tensor:
+      if 0 in self.shape: return self.full_like(s)
+      if isinstance(self.dtype, ImageDType) or dtypes.is_float(self.dtype) or (dtypes.is_int(self.dtype) and isinstance(s, int)): s_dtype = self.dtype
+      else: s_dtype = dtypes.from_py(s)
+      return Tensor(s, self.device, s_dtype, requires_grad=False)
+
+    assert not (reverse and len(y) > 1), "reverse only works with single item broadcast"
+
+    tensors = (self,) + tuple(to_tensor(val) if not isinstance(val, Tensor) else val for val in y)
+    max_ndim, shapes, tensor_dtypes = max(t.ndim for t in tensors), tuple(t.shape for t in tensors), tuple(t.dtype for t in tensors)
+
+    if match_dtype:
+      output_dtype = least_upper_dtype(*tensor_dtypes)
+      tensors = tuple(t.cast(output_dtype) for t in tensors)
+    if reverse: tensors = tensors[::-1]
+
+    # left pad shape with 1s
+    tensors = tuple(t.reshape((1,) * (max_ndim - t.ndim) + t.shape) for t in tensors)
+
+    broadcasted_shape = tuple(0 if any(i==0 for i in sh) else max(sh) for sh in zip(*[t.shape for t in tensors]))
+    try: return tuple(t.expand(broadcasted_shape) for t in tensors)
+    except AssertionError as exc: raise TypeError(f"unable to broadcast tensors with {shapes=}") from exc
+  '''
+
+
   # Supported Indexing Implementations:
   #   1. Int indexing (no copy)
   #     - for all dims where there's int, shrink -> reshape
@@ -491,10 +519,18 @@ class Tensor:
       idx: Dict[int,Tensor] = {(dim := calc_dim(td)):(tensor<0).where(ret.shape[dim],0) + tensor for td,tensor in zip(type_dim[Tensor], tensor_index)}
 
       masks, first_dim, last_dim, max_idx_dim = [], min(idx.keys()), max(idx.keys()), max(i.ndim for i in idx.values())
+      extended_shapes = [(1,)*(max_idx_dim-t.ndim) + t.shape for t in idx.values()]
+      big_shape = tuple(max(sh) for sh in zip(*extended_shapes))
+      pre_reduce_shape = ret.shape[:first_dim] + big_shape + ret.shape[first_dim:]
+      # print(pre_reduce_shape)
+
       # create masks
       for dim, i in idx.items():
-        i = i.reshape(i.shape + (1,)*(ret.ndim - first_dim))
-        a = Tensor.arange(ret.shape[dim], device=self.device, requires_grad=False).reshape(ret.shape[dim:dim+1] + (1,)*(ret.ndim - dim - 1))
+        # print(i.shape + (1,)*(ret.ndim - first_dim))
+        i = i.reshape((1,)*(first_dim+max_idx_dim-i.ndim) + i.shape + (1,)*(ret.ndim - first_dim)).expand(pre_reduce_shape)
+        a = Tensor.arange(ret.shape[dim], device=self.device, requires_grad=False).reshape((ret.shape[dim],) + (1,)*(ret.ndim - dim - 1))
+        # print(i.shape)
+        # print(a.shape)
         masks.append(i == a)
 
       # reduce masks to 1 mask
