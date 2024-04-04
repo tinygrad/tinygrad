@@ -189,7 +189,6 @@ class Linearizer(Kernel):
     self.uops:UOpGraph = UOpGraph()
     self.buf_uops: List[Optional[UOp]] = [None]*len(self.bufs)
     self.loop_uops: Dict[str, UOp] = {}
-    self.one_hot_cmpeq: Set[UOp] = set()
 
     # add global buffers
     for i,buf in enumerate(self.bufs):
@@ -395,7 +394,6 @@ class Linearizer(Kernel):
 
     # optimize the uops
     self.uops.uoptimize()
-    for x in self.one_hot_cmpeq: self.uops.optimize_one_hot_cmpeq(x)
 
     # maybe graph the uops
     if DEBUG >= 5: self.uops.print()
@@ -431,6 +429,6 @@ class Linearizer(Kernel):
           acc[off] = self.uops.add(UOps.PHI, input_acc[off].dtype, (input_acc[off], acc[off]) + tuple(loop_ctx))
     else:
       ret = [self.uops.add(UOps.ALU, dtypes.bool if x.op in {BinaryOps.CMPLT, BinaryOps.CMPEQ} else val[-1].dtype, val, x.op) for val in zip(*values)]
-      if x.arg == "one_hot": self.one_hot_cmpeq.add(ret[0])
+      if x.arg == "one_hot_arange": self.uops.one_hot_cmpeq.add(ret[0])
     cache[x] = ret
     return ret

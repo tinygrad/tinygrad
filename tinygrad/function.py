@@ -92,7 +92,7 @@ class Less(Function):
   def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]: return None, None
 
 class Eq(Function):
-  def forward(self, x:LazyBuffer, y:LazyBuffer, one_hot=None) -> LazyBuffer: return x.e(BinaryOps.CMPEQ, y, arg="one_hot" if one_hot else None)
+  def forward(self, x:LazyBuffer, y:LazyBuffer, one_hot=None) -> LazyBuffer: return x.e(BinaryOps.CMPEQ, y, arg="one_hot_arange" if one_hot else None)
   def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]: return None, None
 
 class Xor(Function):

@@ -112,6 +112,8 @@ class UOpGraph:
     # global uop cache
     self.saved_exprs: Dict[Tuple, UOp] = dict()
 
+    self.one_hot_cmpeq: Set[UOp] = set()
+
   def __iter__(self): return iter(self.uops)
 
   def vars(self) -> List[Variable]: return [x.arg for x in self.uops if x.uop is UOps.DEFINE_VAR]
@@ -279,19 +281,18 @@ class UOpGraph:
           self.replace_op(alu_with_accum, next(op for op in alu_with_accum.vin if op != accumulator))
       get_recursive_parents.cache_clear()
 
-  def optimize_one_hot_cmpeq(self, op):
-    print("optimizing op")
-    print(op)
-    # if not all([u.uop is UOps.DEFINE_GLOBAL for u in self.uops[:4]]): return
-    # if DEBUG >= 5: print("optimizing embedding")
-    # idx, arange, val = [next(op for op in self.uops if op.uop is UOps.LOAD and buf in op.vin) for buf in self.uops[1:4]]
-    # arange_loop = next(op for op in get_recursive_parents(arange) if op.uop is UOps.LOOP)
-    # idx = self.add(UOps.CAST, arange.dtype, (idx,), insert_before=self.uops.index(idx)+1) if arange.dtype != idx.dtype else idx
-    # for op in get_recursive_parents(val):
-    #   if op.uop is UOps.ALU:
-    #     op.vin = tuple([idx if op is arange_loop else op for op in list(op.vin)])
-    # self.replace_op(next(op for op in self.uops if op.uop is UOps.PHI), val)
-    # get_recursive_parents.cache_clear()
+  def optimize_one_hot_cmpeq(self, get_recursive_parents, op):
+    idx_load, arange_load = op.vin[0], op.vin[1] # todo make sure this is right..
+    arange_loop = next((op for op in get_recursive_parents(arange_load) if op.uop is UOps.LOOP), None)
+    phi = next((op for op in self.get_recursive_children(op) if op.uop is UOps.PHI), None)
+    if arange_loop is None or phi is None: return
+    if DEBUG >= 5: print("optimizing one hot cmpeq loop")
+    val_load = next(op for op in get_recursive_parents(phi) if op.uop is UOps.LOAD and op.vin[0] not in [idx_load.vin[0], arange_load.vin[0]])
+    for u in get_recursive_parents(val_load):
+      if u.uop is UOps.ALU:
+        u.vin = tuple([idx_load if vin is arange_loop else vin for vin in list(u.vin)])
+    self.replace_op(phi, val_load)
+    get_recursive_parents.cache_clear()
 
   def fix_to_store_directly(self):
     replaced_stores: Dict[UOp,UOp] = {}
@@ -346,7 +347,7 @@ class UOpGraph:
     # uops optimization
     while self.uops_optimization(get_recursive_parents): pass
     self.simplify_phi_loops(get_recursive_parents)
-    # self.optimize_embedding(get_recursive_parents)
+    for x in self.one_hot_cmpeq: self.optimize_one_hot_cmpeq(get_recursive_parents, x)
 
     # (recursively) remove childless uops
     # TODO: remove DEFINE_GLOBAL from here
