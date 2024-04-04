@@ -247,8 +247,8 @@ class KFDAllocator(LRUAllocator):
       if e.errno == errno.ENOMEM: raise MemoryError("Cannot allocate memory") from e
       else: raise
 
-  def _free(self, gpumem, options:BufferOptions):
-    self.device._gpu_free(gpumem)
+  def _free(self, gpumem, options:BufferOptions): self.device._gpu_free(gpumem)
+  def as_buffer(self, src:Any) -> memoryview: return to_mv(src.va_addr, src.size)
 
   def copy_from_fd(self, dest, fd, offset, size):
     fo = io.FileIO(fd, "a+b", closefd=False)
@@ -444,28 +444,16 @@ class KFDDevice(Compiled):
                amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLV_INV(glv) | amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL1_INV(gl1) | \
                amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL2_INV(gl2)]
     for i, value in enumerate(pm4_cmd): pm4_buffer_view[i] = value
-    ctypes.memmove(self.aql_ring.va_addr + (self.aql_doorbell_value * AQL_PACKET_SIZE) % self.aql_ring.size,
-                   ctypes.addressof(self.pm4_packet), AQL_PACKET_SIZE)
-
-    self.amd_aql_queue.write_dispatch_id = self.aql_doorbell_value + 1
-    self.aql_doorbell[0] = self.aql_doorbell_value
-    self.aql_doorbell_value += 1
-
+    q = HWComputeQueue()
+    q.q.append(self.pm4_packet)
+    q.submit(self)
     self._wait_on(self.completion_signal.event_id)
     assert (wp:=self.amd_aql_queue.write_dispatch_id) == (rp:=self.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
 
   def synchronize(self):
     q = HWComputeQueue()
     q.signal(self.completion_signal)
-
-    ring_addr = self.aql_ring.va_addr + (self.aql_doorbell_value*AQL_PACKET_SIZE) % self.aql_ring.size
-    for cmd in q.q: ctypes.memmove(ring_addr, ctypes.addressof(cmd), AQL_PACKET_SIZE)
-
-    # one pending packet + ring doorbell
-    self.amd_aql_queue.write_dispatch_id = self.aql_doorbell_value + 1
-    self.aql_doorbell[0] = self.aql_doorbell_value
-    self.aql_doorbell_value += 1
-
+    q.submit(self)
     self._wait_on(self.completion_signal.event_id)
     assert (wp:=self.amd_aql_queue.write_dispatch_id) == (rp:=self.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
 
