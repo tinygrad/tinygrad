@@ -113,6 +113,9 @@ def ioctl(fd, request, argp):
     elif nr == ESC.NV_ESC_RM_ALLOC_MEMORY:
       s = get_struct(argp, ESC.nv_ioctl_nvos02_parameters_with_fd)
       print(f"NV_ESC_RM_ALLOC_MEMORY  fd={s.fd}, hRoot={s.params.hRoot}, hObjectParent={s.params.hObjectParent}, hObjectNew={s.params.hObjectNew}, hClass={s.params.hClass}, flags={s.params.flags}, pMemory={s.params.pMemory}, limit={s.params.limit}, status={s.params.status}")
+    elif nr == ESC.NV_ESC_ALLOC_OS_EVENT:
+      s = get_struct(argp, ESC.nv_ioctl_nvos02_parameters_with_fd)
+    
     elif nr in nvescs:
       print(nvescs[nr])
     else:
