@@ -208,6 +208,7 @@ class KFDProgram:
     if hasattr(self, 'lib_gpu'): self.device._gpu_free(self.lib_gpu)
 
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
+    assert self.device.kernargs_ptr < (self.device.kernargs.va_addr + self.device.kernargs.size + self.kernargs_segment_size), "kernargs overrun"
     if not hasattr(self, "args_struct_t"):
       self.args_struct_t = init_c_struct_t(tuple([(f'f{i}', ctypes.c_void_p) for i in range(len(args))] +
                                                 [(f'v{i}', ctypes.c_int) for i in range(len(vals))]))
@@ -227,10 +228,7 @@ class KFDProgram:
     self.q.submit(self.device)
 
     if wait:
-      evt_arr = (kfd.struct_kfd_event_data * 1)()
-      evt_arr[0].event_id = self.device.completion_signal.event_id
-      ret = kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=1000)
-      assert ret.wait_result == 0, f"wait_result got {ret.wait_result}, hit timeout?"
+      self.device._wait_on(self.device.completion_signal.event_id)
       assert (wp:=self.device.amd_aql_queue.write_dispatch_id) == (rp:=self.device.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
       return (self.device.completion_signal.end_ts-self.device.completion_signal.start_ts)/1e9
 
@@ -268,21 +266,6 @@ class KFDDevice(Compiled):
   kfd:int = -1
   event_page:Any = None  # TODO: fix types in kfd, Optional[kfd.struct_kfd_ioctl_alloc_memory_of_gpu_args]
   signals_page:Any = None
-
-  def synchronize(self):
-    q = HWComputeQueue()
-    q.signal(self.completion_signal)
-
-    ring_addr = self.aql_ring.va_addr + (self.aql_doorbell_value*AQL_PACKET_SIZE) % self.aql_ring.size
-    for cmd in q.q: ctypes.memmove(ring_addr, ctypes.addressof(cmd), AQL_PACKET_SIZE)
-
-    # one pending packet + ring doorbell
-    self.amd_aql_queue.write_dispatch_id = self.aql_doorbell_value + 1
-    self.aql_doorbell[0] = self.aql_doorbell_value
-    self.aql_doorbell_value += 1
-
-    self._wait_on(self.completion_signal.event_id)
-    assert (wp:=self.amd_aql_queue.write_dispatch_id) == (rp:=self.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
 
   def _map_userptr_to_gpu(self, addr, size):
     self.map_uptr2gpu_struct.start_addr = addr&~0xfff
@@ -422,7 +405,7 @@ class KFDDevice(Compiled):
 
     # Helpers
     map_uptr2gpu_struct_t = init_c_struct_t(tuple(kfd.struct_kfd_ioctl_svm_args._fields_[:-1]+[('attrs', kfd.struct_kfd_ioctl_svm_attribute*2)])) # type: ignore
-    self.map_uptr2gpu_struct = map_uptr2gpu_struct_t(nattr=2, op=0x0)
+    self.map_uptr2gpu_struct = map_uptr2gpu_struct_t(nattr=2, op=kfd.KFD_IOCTL_SVM_OP_SET_ATTR)
     self.map_uptr2gpu_struct.attrs[0].type = kfd.KFD_IOCTL_SVM_ATTR_SET_FLAGS
     self.map_uptr2gpu_struct.attrs[0].value = kfd.KFD_IOCTL_SVM_FLAG_COHERENT
     self.map_uptr2gpu_struct.attrs[1].type = kfd.KFD_IOCTL_SVM_ATTR_ACCESS_IN_PLACE
@@ -461,3 +444,21 @@ class KFDDevice(Compiled):
 
     self._wait_on(self.completion_signal.event_id)
     assert (wp:=self.amd_aql_queue.write_dispatch_id) == (rp:=self.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
+
+  def synchronize(self):
+    q = HWComputeQueue()
+    q.signal(self.completion_signal)
+
+    ring_addr = self.aql_ring.va_addr + (self.aql_doorbell_value*AQL_PACKET_SIZE) % self.aql_ring.size
+    for cmd in q.q: ctypes.memmove(ring_addr, ctypes.addressof(cmd), AQL_PACKET_SIZE)
+
+    # one pending packet + ring doorbell
+    self.amd_aql_queue.write_dispatch_id = self.aql_doorbell_value + 1
+    self.aql_doorbell[0] = self.aql_doorbell_value
+    self.aql_doorbell_value += 1
+
+    self._wait_on(self.completion_signal.event_id)
+    assert (wp:=self.amd_aql_queue.write_dispatch_id) == (rp:=self.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
+
+    # reset kernargs
+    self.kernargs_ptr = self.kernargs.va_addr
