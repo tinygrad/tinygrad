@@ -1,5 +1,7 @@
 import os, ctypes, pathlib, re, fcntl, functools, mmap, time
 from tinygrad.helpers import to_mv, getenv, round_up
+from tinygrad.runtime.ops_nv import NVDevice, NVAllocator
+from tinygrad.device import Compiled, LRUAllocator, Compiler, BufferOptions, CompilerOptions
 from extra.nv_gpu_driver import nv_ioctl
 from extra.nv_gpu_driver import esc_ioctl as nvesc
 from extra.nv_gpu_driver import class_ioctl as nvcls
@@ -264,133 +266,40 @@ def _gpu_uvm_map(root, device, fd_ctl, fd_dev0, gpu_uuid, mem_handle, size:int, 
 
 if __name__ == "__main__":
   device_id = 0
-  fd_ctl = os.open("/dev/nvidiactl", os.O_RDWR | os.O_CLOEXEC)
-  fd_uvm = os.open("/dev/nvidia-uvm", os.O_RDWR | os.O_CLOEXEC)
-  fd_uvm_2 = os.open("/dev/nvidia-uvm", os.O_RDWR | os.O_CLOEXEC)
-  fd_dev0 = os.open(f"/dev/nvidia{device_id}", os.O_RDWR | os.O_CLOEXEC)
+  dev = NVDevice("NV:0")
+  alloctor = NVAllocator(dev)
 
-  root = rm_alloc(fd_ctl, nvesc.NV01_ROOT_CLIENT, 0, 0, None).hObjectNew
-
-  device_params = nvcls.NV0080_ALLOC_PARAMETERS(deviceId=0x0, hClientShare=root, vaMode=nvesc.NV_DEVICE_ALLOCATION_VAMODE_MULTIPLE_VASPACES)
-  device = rm_alloc(fd_ctl, nvcls.NV01_DEVICE_0, root, root, device_params).hObjectNew
-  subdevice = rm_alloc(fd_ctl, nvcls.NV20_SUBDEVICE_0, root, device, None).hObjectNew
-  usermode = rm_alloc(fd_ctl, nvcls.TURING_USERMODE_A, root, subdevice, None).hObjectNew
-  # gpu_mmio_ptr = mmap_object(fd_ctl, fd_dev0, root, subdevice, usermode, 0x10000, None, 2)
-  gpu_mmio_ptr = _gpu_map_to_cpu(fd_ctl, fd_dev0, root, subdevice, usermode, 0x10000, None, 2)
-  gpu_mmio = to_mv(gpu_mmio_ptr, 0x10000).cast("Q") # turing regs from
-
-  vaspace_params = nvesc.NV_VASPACE_ALLOCATION_PARAMETERS(vaBase=0x1000, vaSize=0x1fffffb000000,
-    flags=nvesc.NV_VASPACE_ALLOCATION_FLAGS_ENABLE_PAGE_FAULTING|nvesc.NV_VASPACE_ALLOCATION_FLAGS_IS_EXTERNALLY_OWNED)
-  vaspace = rm_alloc(fd_ctl, nvcls.FERMI_VASPACE_A, root, device, vaspace_params).hObjectNew
-
-  # vaspace_params = nvesc.NV_VASPACE_ALLOCATION_PARAMETERS(vaBase=83886080, vaSize=562949869535232, flags=0)
-  # vaspace2 = rm_alloc(fd_ctl, nvcls.FERMI_VASPACE_A, root, device, vaspace_params).hObjectNew
-
-  gpu_uuid_params = nvctrl.NV2080_CTRL_GPU_GET_GID_INFO_PARAMS(flags=nvctrl.NV2080_GPU_CMD_GPU_GET_GID_FLAGS_FORMAT_BINARY, length=16)
-  rm_control(fd_ctl, nvctrl.NV2080_CTRL_CMD_GPU_GET_GID_INFO, root, subdevice, gpu_uuid_params)
-  gpu_uuid = (ctypes.c_ubyte*16)()
-  for i in range(16): gpu_uuid[i] = gpu_uuid_params.data[i]
-  
-  # register uvm
-  uvm_ioctl(fd_uvm, int(nvuvm.UVM_INITIALIZE), nvuvm.UVM_INITIALIZE_PARAMS())
-  uvm_ioctl(fd_uvm_2, int(nvuvm.UVM_MM_INITIALIZE[2]), nvuvm.UVM_MM_INITIALIZE_PARAMS(uvmFd=fd_uvm))
-  # uvm_ioctl(fd_uvm, int(nvuvm.UVM_PAGEABLE_MEM_ACCESS[2]), nvuvm.UVM_PAGEABLE_MEM_ACCESS_PARAMS(pageableMemAccess=0))
-
-  register_gpu = nvuvm.UVM_REGISTER_GPU_PARAMS(rmCtrlFd=-1, gpu_uuid=nvuvm.struct_nv_uuid(uuid=gpu_uuid))
-  uvm_ioctl(fd_uvm, int(nvuvm.UVM_REGISTER_GPU[2]), register_gpu)
-
-  # create_group = nvuvm.UVM_CREATE_RANGE_GROUP_PARAMS(rangeGroupId=0)
-  # uvm_ioctl(fd_uvm, int(nvuvm.UVM_CREATE_RANGE_GROUP[2]), create_group)
-
-  register_vaspace = nvuvm.UVM_REGISTER_GPU_VASPACE_PARAMS(gpuUuid=nvuvm.struct_nv_uuid(uuid=gpu_uuid), rmCtrlFd=fd_ctl, hClient=root, hVaSpace=vaspace)
-  uvm_ioctl(fd_uvm, int(nvuvm.UVM_REGISTER_GPU_VASPACE[2]), register_vaspace)
-
-  # register fifo
-  channel_params = nvesc.NV_CHANNEL_GROUP_ALLOCATION_PARAMETERS(engineType=nvcls.NV2080_ENGINE_TYPE_GRAPHICS)
-  channel_group = rm_alloc(fd_ctl, nvcls.KEPLER_CHANNEL_GROUP_A, root, device, channel_params).hObjectNew
-
-  # fifo_mem_handle = heap_alloc(fd_ctl, fd_uvm, fd_dev0, root, device, subdevice, 0x200400000, 0x200000,
-  #   nvesc.NVOS32_ALLOC_FLAGS_IGNORE_BANK_PLACEMENT | nvesc.NVOS32_ALLOC_FLAGS_ALIGNMENT_FORCE |
-  #   nvesc.NVOS32_ALLOC_FLAGS_MEMORY_HANDLE_PROVIDED | nvesc.NVOS32_ALLOC_FLAGS_MAP_NOT_REQUIRED | nvesc.NVOS32_ALLOC_FLAGS_PERSISTENT_VIDMEM,
-  #   0xc0000, nvesc.NVOS32_TYPE_IMAGE, gpu_uuid)
-  # fifo_buffer_addr = 0x200400000
-  # fifo_buffer = _gpu_alloc(root, device, fd_ctl, fd_dev0, gpu_uuid, 0x200000, fixed_address=0x200400000)
-  fifo_mem_handle = _gpu_alloc(root, device, fd_ctl, 0x200000, huge_page=True, contig=True)
-  fifo_buffer_addr = _gpu_uvm_map(root, device, fd_ctl, fd_dev0, gpu_uuid, fifo_mem_handle, 0x200000, cpu_visible=True, fixed_address=0x200400000)
-
-  err_buffer = _gpu_alloc(root, device, fd_ctl, 0x1000, coherent=True, system=True)
-  # err_buffer = heap_alloc(fd_ctl, fd_uvm, fd_dev0, root, device, subdevice, 0x7ffff7ffb000, 0x1000, 0xc001, 0, nvesc.NVOS32_TYPE_NOTIFIER, gpu_uuid)
-  # err_buffer = heap_alloc(fd_ctl, fd_uvm, fd_dev0, root, device, subdevice, 0x7ffff7ffb000, 0x1000, 0xc001, 0, nvesc.NVOS32_TYPE_NOTIFIER, gpu_uuid)
-
-  ctxshare_params = nvesc.NV_CTXSHARE_ALLOCATION_PARAMETERS(hVASpace=vaspace, flags=nvesc.NV_CTXSHARE_ALLOCATION_FLAGS_SUBCONTEXT_ASYNC)
-  ctxshare = rm_alloc(fd_ctl, nvcls.FERMI_CONTEXT_SHARE_A, root, channel_group, ctxshare_params).hObjectNew
-
-  gpfifo_params = nvesc.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS(hObjectError=err_buffer, hObjectBuffer=fifo_mem_handle, gpFifoOffset=fifo_buffer_addr,
-    gpFifoEntries=0x400, hContextShare=ctxshare, hUserdMemory=(ctypes.c_uint32*8)(fifo_mem_handle), userdOffset=(ctypes.c_uint64*8)(0x2000))
-  gpfifo = rm_alloc(fd_ctl, nvcls.AMPERE_CHANNEL_GPFIFO_A, root, channel_group, gpfifo_params).hObjectNew
-  compute = rm_alloc(fd_ctl, nvcls.ADA_COMPUTE_A, root, gpfifo, None).hObjectNew
-
-  ws_token_params = nvctrl.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS(workSubmitToken=-1)
-  rm_control(fd_ctl, nvctrl.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN, root, gpfifo, ws_token_params)
-  assert ws_token_params.workSubmitToken != -1
-
-  register_channel_params = nvuvm.UVM_REGISTER_CHANNEL_PARAMS(gpuUuid=nvuvm.struct_nv_uuid(uuid=gpu_uuid), rmCtrlFd=fd_ctl, hClient=root,
-    hChannel=gpfifo, base=0x203600000, length=0x2c1a000)
-  uvm_ioctl(fd_uvm, int(nvuvm.UVM_REGISTER_CHANNEL[2]), register_channel_params)
-
-  en_fifo_params = nvctrl.NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS(bEnable=1)
-  rm_control(fd_ctl, nvctrl.NVA06C_CTRL_CMD_GPFIFO_SCHEDULE, root, channel_group, en_fifo_params)
-
-  gpu_base = fifo_buffer_addr + 0x100000
+  gpu_base = 0x200400000 + 0x100000
   cmdq = gpu_base+0x6000
   signal_addr = gpu_base+0x7000
   ring_cmd = to_mv(cmdq, 0x1000).cast("I")
   cmd_memcpy(gpu_base+4, (ctypes.c_uint32*1).from_buffer_copy(b'\xaa\xbb\xcc\xdd'), 4, signal_addr)
+  buf = (ctypes.c_uint32*1).from_buffer_copy(b'\xaa\xbb\xcc\xdd')
 
-  gpu_ring = to_mv(fifo_buffer_addr, 0x2000).cast("Q")
+  print("smth", dev._gpu_host_alloc(2 << 20))
 
-  # looks like these are this: https://github.com/NVIDIA/open-gpu-doc/blob/master/manuals/ampere/ga100/dev_pbdma.ref.txt (NV_PPBDMA GPENTRY DATA FORMAT)
-  #define NV_PPBDMA_GP_ENTRY__SIZE                                  8 /*       */
-  #define NV_PPBDMA_GP_ENTRY0                              0x10000000 /*       */
-  #define NV_PPBDMA_GP_ENTRY0_OPERAND                            31:0 /*       */
-  #define NV_PPBDMA_GP_ENTRY0_FETCH                               0:0 /*       */
-  #define NV_PPBDMA_GP_ENTRY0_FETCH_UNCONDITIONAL          0x00000000 /*       */
-  #define NV_PPBDMA_GP_ENTRY0_FETCH_CONDITIONAL            0x00000001 /*       */
-  #define NV_PPBDMA_GP_ENTRY0_GET                                31:2 /*       */
-  #define NV_PPBDMA_GP_ENTRY1                              0x10000004 /*       */
-  #define NV_PPBDMA_GP_ENTRY1_GET_HI                              7:0 /*       */
-  #define NV_PPBDMA_GP_ENTRY1_LEVEL                               9:9 /*       */
-  #define NV_PPBDMA_GP_ENTRY1_LEVEL_MAIN                   0x00000000 /*       */
-  #define NV_PPBDMA_GP_ENTRY1_LEVEL_SUBROUTINE             0x00000001 /*       */
-  #define NV_PPBDMA_GP_ENTRY1_LENGTH                            30:10 /*       */
-  #define NV_PPBDMA_GP_ENTRY1_LENGTH_CONTROL               0x00000000 /*       */
-  #define NV_PPBDMA_GP_ENTRY1_SYNC                              31:31 /*       */
-  #define NV_PPBDMA_GP_ENTRY1_SYNC_PROCEED                 0x00000000 /*       */
-  #define NV_PPBDMA_GP_ENTRY1_SYNC_WAIT                    0x00000001 /*       */
-  #define NV_PPBDMA_GP_ENTRY1_OPCODE                              7:0 /*       */
-  #define NV_PPBDMA_GP_ENTRY1_OPCODE_NOP                   0x00000000 /*       */
-  #define NV_PPBDMA_GP_ENTRY1_OPCODE_ILLEGAL               0x00000001 /*       */
-  #define NV_PPBDMA_GP_ENTRY1_OPCODE_GP_CRC                0x00000002 /*       */
-  #define NV_PPBDMA_GP_ENTRY1_OPCODE_PB_CRC                0x00000003 /*       */
+  cmd_dma_copy(gpu_base+8, gpu_base+4, 4)
+  cmd_dma_copy(gpu_base+12, ctypes.addressof(buf), 4)
+
+  gpu_ring = dev.gpu_ring
+
   assert cmdq == ((cmdq >> 2) << 2)
   assert ring_off == ((ring_off >> 2) << 2)
   gpu_ring[0] = cmdq | (ring_off << 40) | (1 << 63) # sync them
   
-  gpu_ring_controls = nvcls.AmpereAControlGPFifo.from_address(fifo_buffer_addr + 0x2000)
-  gpu_ring_controls.GPPut = 1
+  dev.gpu_ring_controls.GPPut = 1
 
   # these are open-gpu-kernel-modules/src/common/inc/swref/published/turing/tu102/dev_vm.h (which are not priv)
-  gpu_mmio_ptr_view = to_mv(gpu_mmio_ptr, 0x1000).cast("I")
-  gpu_mmio_ptr_view[0x90>>2] = ws_token_params.workSubmitToken
+  dev.gpu_mmio[0x90//8] = dev.gpfifo_token
 
   signal_addr_mv = to_mv(signal_addr, 16).cast("Q")
   get_val = signal_addr_mv[0]
-  while get_val != 0xdeadbeefdeadbeef: get_val = signal_addr_mv[0]
+  # while get_val != 0xdeadbeefdeadbeef: get_val = signal_addr_mv[0]
 
   # while 
 
-  # import time
-  # time.sleep(1)
+  import time
+  time.sleep(1)
 
   hexdump(to_mv(gpu_base, 0x20))
 
