@@ -57,6 +57,12 @@ class LazyOp:
   def __eq__(self, x): return self.cached_compare(x, context={})
   def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
   @functools.cached_property
+  def dtype(self) -> DType:
+    if self.op in BufferOps: return self.arg.dtype
+    if self.op is UnaryOps.CAST: return self.arg[0]
+    return dtypes.bool if self.op in {BinaryOps.CMPLT, BinaryOps.CMPEQ} else self.src[-1].dtype
+
+  @functools.cached_property
   def key(self) -> bytes:
     return hashlib.sha256(functools.reduce(lambda x,y: x+y, [s.key for s in self.src], str((self.op, self.arg)).encode())).digest()
   @functools.cached_property
