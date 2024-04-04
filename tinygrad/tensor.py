@@ -3,7 +3,7 @@ from __future__ import annotations
 import time, math, itertools, functools
 from contextlib import ContextDecorator
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Iterable, Dict, DefaultDict, cast, get_args
-from collections import defaultdict
+from collections import defaultdict, namedtuple
 import numpy as np
 
 from tinygrad.dtype import DType, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype
@@ -522,15 +522,11 @@ class Tensor:
       extended_shapes = [(1,)*(max_idx_dim-t.ndim) + t.shape for t in idx.values()]
       big_shape = tuple(max(sh) for sh in zip(*extended_shapes))
       pre_reduce_shape = ret.shape[:first_dim] + big_shape + ret.shape[first_dim:]
-      # print(pre_reduce_shape)
 
       # create masks
       for dim, i in idx.items():
-        # print(i.shape + (1,)*(ret.ndim - first_dim))
         i = i.reshape((1,)*(first_dim+max_idx_dim-i.ndim) + i.shape + (1,)*(ret.ndim - first_dim)).expand(pre_reduce_shape)
         a = Tensor.arange(ret.shape[dim], device=self.device, requires_grad=False).reshape((ret.shape[dim],) + (1,)*(ret.ndim - dim - 1))
-        # print(i.shape)
-        # print(a.shape)
         masks.append(i == a)
 
       # reduce masks to 1 mask
