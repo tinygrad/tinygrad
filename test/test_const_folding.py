@@ -83,7 +83,8 @@ class TestIndexingConstFolding(unittest.TestCase):
     _check_ast_count(0, t[:,:,Tensor(1),Tensor(0)])
 
   @unittest.expectedFailure
-  def test_index(self):
+  def test_const_tensor_index(self):
+    # TODO: implement const tensor folded indexing
     t = Tensor.arange(16).float().reshape(1,1,4,4).realize()
     _check_ast_count(0, t[:,:,Tensor([1]),:])
     _check_ast_count(0, t[:,:,Tensor.ones(2,1),:])
