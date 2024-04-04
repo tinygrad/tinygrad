@@ -155,12 +155,9 @@ class HWCopyQueue:
   def timestamp(self, addr):
     self.q.append(sdma_pkts.timestamp(op=amd_gpu.SDMA_OP_TIMESTAMP, sub_op=amd_gpu.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL, addr=addr))
 
-  def cache_inv(self):
+  def copy(self, dest, src, copy_size):
     self.q.append(sdma_flush_hdp_pkt)  # TODO: do I need this?
     self.q.append(sdma_cache_inv)
-
-  def copy(self, dest, src, copy_size):
-    self.cache_inv()
     copied = 0
     copies_commands = (copy_size + SDMA_MAX_COPY_SIZE - 1) // SDMA_MAX_COPY_SIZE
     for _ in range(copies_commands):
@@ -278,19 +275,14 @@ class KFDAllocator(LRUAllocator):
     dest_dev._gpu_map(src)
     q = HWComputeQueue()
     q2 = HWComputeQueue()
-    #qc = HWCopyQueue()
     qc2 = HWCopyQueue()
     q.signal(sig := KFDDevice._get_signal())
-    #qc.wait(sig)
-    #qc.cache_inv()
-    #qc.signal(sig2 := KFDDevice._get_signal())
-    #qc2.wait(sig2)
     qc2.wait(sig)
     qc2.copy(dest.va_addr, src.va_addr, sz)
     qc2.signal(sigc := KFDDevice._get_signal())
     q2.wait(sigc)
+    q.wait(sigc)  # NOTE: we need to wait here to prevent buffer reuse
     q.submit(src_dev)
-    #qc.submit(src_dev)
     qc2.submit(dest_dev)
     q2.submit(dest_dev)
 
