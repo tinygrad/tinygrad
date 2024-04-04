@@ -122,8 +122,9 @@ class HWComputeQueue:
       ctypes.memmove(ring_addr, ctypes.addressof(cmd), AQL_PACKET_SIZE)
       device.amd_aql_queue.write_dispatch_id += 1
     if (device.amd_aql_queue.write_dispatch_id-read_ptr)*AQL_PACKET_SIZE > device.aql_ring.size: raise RuntimeError("AQL queue overrun")
-    device.aql_doorbell[0] = device.aql_doorbell_value + len(self.q) - 1
-    device.aql_doorbell_value += len(self.q)
+    if len(self.q):
+      device.aql_doorbell[0] = device.aql_doorbell_value + len(self.q) - 1
+      device.aql_doorbell_value += len(self.q)
 
 # prebuilt sdma packets
 sdma_flush_hdp_pkt = sdma_pkts.hdp_flush(0x8, 0x0, 0x80000000, 0x0, 0x0, 0x0)

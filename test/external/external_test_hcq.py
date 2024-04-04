@@ -15,7 +15,7 @@ class TestHCQ(unittest.TestCase):
   @classmethod
   def setUpClass(self):
     TestHCQ.d0: KFDDevice = Device["KFD"]
-    #TestHCQ.d1: KFDDevice = Device["KFD:1"]
+    TestHCQ.d1: KFDDevice = Device["KFD:1"]
     TestHCQ.a = Tensor([0.,1.], device="KFD").realize()
     TestHCQ.b = self.a + 1
     si = create_schedule([self.b.lazydata])[-1]
@@ -179,6 +179,15 @@ class TestHCQ(unittest.TestCase):
     q.submit(TestHCQ.d0)
     TestHCQ.d0._wait_on(TestHCQ.d0.completion_signal.event_id)
     assert (val:=TestHCQ.a.lazydata.buffer.as_buffer().cast("f")[0]) == 1.0, f"got val {val}"
+
+  def test_cross_device_signal(self):
+    q1 = HWComputeQueue()
+    q2 = HWComputeQueue()
+    q1.signal(TestHCQ.d0.completion_signal)
+    q2.wait(TestHCQ.d0.completion_signal)
+    q2.submit(TestHCQ.d0)
+    q1.submit(TestHCQ.d1)
+    TestHCQ.d0._wait_on(TestHCQ.d0.completion_signal.event_id)
 
 if __name__ == "__main__":
   unittest.main()
