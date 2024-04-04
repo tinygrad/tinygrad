@@ -15,7 +15,7 @@ class TestHCQ(unittest.TestCase):
   @classmethod
   def setUpClass(self):
     TestHCQ.d0: KFDDevice = Device["KFD"]
-    TestHCQ.d1: KFDDevice = Device["KFD:1"]
+    #TestHCQ.d1: KFDDevice = Device["KFD:1"]
     TestHCQ.a = Tensor([0.,1.], device="KFD").realize()
     TestHCQ.b = self.a + 1
     si = create_schedule([self.b.lazydata])[-1]
@@ -71,6 +71,9 @@ class TestHCQ(unittest.TestCase):
     q.submit(TestHCQ.d0)
     with self.assertRaises(RuntimeError):
       TestHCQ.d0._wait_on(TestHCQ.d0.completion_signal.event_id, timeout=50)
+    # clean up
+    TestHCQ.d0.completion_signal.value = 0
+    TestHCQ.d0._wait_on(TestHCQ.d0.completion_signal.event_id, timeout=1000)
 
   def test_wait_copy_signal(self):
     TestHCQ.d0.completion_signal.value = 1
@@ -80,6 +83,9 @@ class TestHCQ(unittest.TestCase):
     q.submit(TestHCQ.d0)
     with self.assertRaises(RuntimeError):
       TestHCQ.d0._wait_on(TestHCQ.d0.completion_signal.event_id, timeout=50)
+    # clean up
+    TestHCQ.d0.completion_signal.value = 0
+    TestHCQ.d0._wait_on(TestHCQ.d0.completion_signal.event_id, timeout=1000)
 
   def test_run_normal(self):
     q = HWComputeQueue()
@@ -163,6 +169,7 @@ class TestHCQ(unittest.TestCase):
     q = HWComputeQueue()
     qc = HWCopyQueue()
     q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size)  # b = [1, 2]
+    KFDDevice._get_signal(10).value = 1
     q.signal(sig:=KFDDevice._get_signal(10))
     qc.wait(sig)
     qc.copy(TestHCQ.a.lazydata.buffer._buf.va_addr, TestHCQ.b.lazydata.buffer._buf.va_addr, 8)

@@ -254,17 +254,13 @@ class KFDAllocator(LRUAllocator):
     self.device._map_userptr_to_gpu(ctypes.addressof(from_mv(src).contents), src.nbytes)
     self.device.completion_signal.value = 1
     self.device._submit_sdma(dest.va_addr, ctypes.addressof(from_mv(src).contents), src.nbytes, completion_signal=self.device.completion_signal)
-    evt_arr = (kfd.struct_kfd_event_data * 1)()
-    evt_arr[0].event_id = self.device.completion_signal.event_id
-    kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=1000)
+    self.device._wait_on(self.device.completion_signal.event_id)
 
   def copyout(self, dest:memoryview, src):
     self.device._map_userptr_to_gpu(ctypes.addressof(from_mv(dest).contents), dest.nbytes)
     self.device.completion_signal.value = 1
     self.device._submit_sdma(ctypes.addressof(from_mv(dest).contents), src.va_addr, dest.nbytes, completion_signal=self.device.completion_signal)
-    evt_arr = (kfd.struct_kfd_event_data * 1)()
-    evt_arr[0].event_id = self.device.completion_signal.event_id
-    kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=1000)
+    self.device._wait_on(self.device.completion_signal.event_id)
 
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
 class KFDDevice(Compiled):
@@ -284,10 +280,7 @@ class KFDDevice(Compiled):
     self.aql_doorbell[0] = self.aql_doorbell_value
     self.aql_doorbell_value += 1
 
-    evt_arr = (kfd.struct_kfd_event_data * 1)()
-    evt_arr[0].event_id = self.completion_signal.event_id
-    ret = kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=1000)
-    assert ret.wait_result == 0, f"wait_result got {ret.wait_result}, hit timeout?"
+    self._wait_on(self.completion_signal.event_id)
     assert (wp:=self.amd_aql_queue.write_dispatch_id) == (rp:=self.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
 
   def _map_userptr_to_gpu(self, addr, size):
@@ -410,7 +403,7 @@ class KFDDevice(Compiled):
     self.aql_doorbell_value = 0
 
     # SDMA Queue
-    self.sdma_ring = self._gpu_alloc(0x10000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
+    self.sdma_ring = self._gpu_alloc(0x100000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
     self.sdma_queue = kio.create_queue(KFDDevice.kfd, ring_base_address=self.sdma_ring.va_addr, ring_size=self.sdma_ring.size, gpu_id=self.gpu_id,
       queue_type=kfd.KFD_IOC_QUEUE_TYPE_SDMA, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE, queue_priority=kfd.KFD_MAX_QUEUE_PRIORITY,
       write_pointer_address=self.gart.va_addr + 0x100, read_pointer_address=self.gart.va_addr + 0x108)
@@ -465,9 +458,5 @@ class KFDDevice(Compiled):
     self.aql_doorbell[0] = self.aql_doorbell_value
     self.aql_doorbell_value += 1
 
-    evt_arr = (kfd.struct_kfd_event_data * 1)()
-    evt_arr[0].event_id = self.completion_signal.event_id
-    ret = kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=1000)
-    assert ret.wait_result == 0, f"wait_result got {ret.wait_result}, hit timeout?"
-
+    self._wait_on(self.completion_signal.event_id)
     assert (wp:=self.amd_aql_queue.write_dispatch_id) == (rp:=self.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
