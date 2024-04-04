@@ -208,6 +208,7 @@ class KFDProgram:
     if hasattr(self, 'lib_gpu'): self.device._gpu_free(self.lib_gpu)
 
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
+    assert self.device.kernargs_ptr < (self.device.kernargs.va_addr + self.device.kernargs.size + self.kernargs_segment_size), "kernargs overrun"
     if not hasattr(self, "args_struct_t"):
       self.args_struct_t = init_c_struct_t(tuple([(f'f{i}', ctypes.c_void_p) for i in range(len(args))] +
                                                 [(f'v{i}', ctypes.c_int) for i in range(len(vals))]))
@@ -280,6 +281,9 @@ class KFDDevice(Compiled):
 
     self._wait_on(self.completion_signal.event_id)
     assert (wp:=self.amd_aql_queue.write_dispatch_id) == (rp:=self.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
+
+    # reset kernargs
+    self.kernargs_ptr = self.kernargs.va_addr
 
   def _map_userptr_to_gpu(self, addr, size):
     self.map_uptr2gpu_struct.start_addr = addr&~0xfff
