@@ -207,7 +207,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
           dt = dtypes.ulong if dtype.__class__ == PtrDType else dtype
           kk(*lang.render_load(args[1], ssa(u, 'dat', dtype=lang.types[dt]), dt, ss=".param"))
       elif uop is UOps.WMMA:
-        wmma=[]
+        wmma = []
         for vv in vin[:2]:
           for i in range(0, len(r[vv]), 2):
             wmma.append(ssa(None, "wmma", "b32"))
