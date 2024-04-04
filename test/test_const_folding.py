@@ -75,6 +75,22 @@ class TestBinaryOpsConstFolding(unittest.TestCase):
   def test_tensor_one_pow(self):
     _check_ast_count(0, Tensor.ones(4) ** Tensor([1.0, 2, 3, 4]))
 
+# folds advance indexing into basic indexing
+class TestIndexingConstFolding(unittest.TestCase):
+  def test_scalar_index(self):
+    t = Tensor.arange(16).float().reshape(1,1,4,4).realize()
+    _check_ast_count(0, t[:,:,Tensor(1),:])
+    _check_ast_count(0, t[:,:,Tensor(1)+2,:])
+    _check_ast_count(0, t[:,:,Tensor(1),Tensor(0)])
+
+  @unittest.expectedFailure
+  def test_const_tensor_index(self):
+    # TODO: implement const tensor folded indexing
+    t = Tensor.arange(16).float().reshape(1,1,4,4).realize()
+    _check_ast_count(0, t[:,:,Tensor.ones(2,1),:])
+    _check_ast_count(0, t[:,:,Tensor.ones(1,2)+2,:])
+    _check_ast_count(0, t[:,:,Tensor.ones(1,1),Tensor.zeros(2,1,2)])
+
 class TestMovedConstFolding(unittest.TestCase):
   def test_add_shrunk_zero(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) + Tensor.zeros(6).shrink(((1, 5),)))
