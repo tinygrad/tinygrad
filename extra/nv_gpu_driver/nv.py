@@ -329,18 +329,21 @@ if __name__ == "__main__":
   gpu_mmio_ptr_view = to_mv(gpu_mmio_ptr, 0x1000).cast("I")
   gpu_mmio_ptr_view[0x90//4] = ws_token_params.workSubmitToken
 
-  get_val = gpu_ring_controls.GPGet
-  while get_val != 1: get_val = gpu_ring_controls.GPGet
+  signal_addr_mv = to_mv(signal_addr, 16).cast("Q")
+  get_val = signal_addr_mv[0]
+  while get_val != 0xdeadbeefdeadbeef: get_val = signal_addr_mv[0]
 
-  import time
-  time.sleep(1)
+  # while 
+
+  # import time
+  # time.sleep(1)
 
   hexdump(to_mv(gpu_base, 0x20))
 
   print()
   hexdump(to_mv(signal_addr, 0x20))
 
-  _gpu_alloc(root, device, fd_ctl, gpu_uuid, 64)
+  # _gpu_alloc(root, device, fd_ctl, gpu_uuid, 64)
 
   # ring_off
 
