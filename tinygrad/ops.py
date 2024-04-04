@@ -1,8 +1,8 @@
 from __future__ import annotations
-from typing import Union, Type, Tuple, Any, List, Dict, Callable, Set
+from typing import Union, Type, Tuple, Any, List, Dict, Callable
 import functools, hashlib, math, operator, ctypes
 from enum import Enum, auto
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from tinygrad.helpers import prod, dedup
 from tinygrad.dtype import dtypes, DType
 from tinygrad.shape.symbolic import Variable, sint

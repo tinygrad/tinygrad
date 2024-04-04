@@ -1,6 +1,6 @@
 from __future__ import annotations
 import math
-from typing import Union, Optional, Any, Tuple, List, Set
+from typing import Union, Optional, Any, Tuple, List
 from tinygrad.dtype import dtypes, DType, ConstType
 from tinygrad.helpers import prod, getenv, all_int, all_same
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op, exec_alu, python_alu
