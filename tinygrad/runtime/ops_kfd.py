@@ -267,24 +267,6 @@ class KFDDevice(Compiled):
   event_page:Any = None  # TODO: fix types in kfd, Optional[kfd.struct_kfd_ioctl_alloc_memory_of_gpu_args]
   signals_page:Any = None
 
-  def synchronize(self):
-    q = HWComputeQueue()
-    q.signal(self.completion_signal)
-
-    ring_addr = self.aql_ring.va_addr + (self.aql_doorbell_value*AQL_PACKET_SIZE) % self.aql_ring.size
-    for cmd in q.q: ctypes.memmove(ring_addr, ctypes.addressof(cmd), AQL_PACKET_SIZE)
-
-    # one pending packet + ring doorbell
-    self.amd_aql_queue.write_dispatch_id = self.aql_doorbell_value + 1
-    self.aql_doorbell[0] = self.aql_doorbell_value
-    self.aql_doorbell_value += 1
-
-    self._wait_on(self.completion_signal.event_id)
-    assert (wp:=self.amd_aql_queue.write_dispatch_id) == (rp:=self.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
-
-    # reset kernargs
-    self.kernargs_ptr = self.kernargs.va_addr
-
   def _map_userptr_to_gpu(self, addr, size):
     self.map_uptr2gpu_struct.start_addr = addr&~0xfff
     self.map_uptr2gpu_struct.size = round_up(size+addr-(addr&~0xfff), 0x1000)
@@ -462,3 +444,21 @@ class KFDDevice(Compiled):
 
     self._wait_on(self.completion_signal.event_id)
     assert (wp:=self.amd_aql_queue.write_dispatch_id) == (rp:=self.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
+
+  def synchronize(self):
+    q = HWComputeQueue()
+    q.signal(self.completion_signal)
+
+    ring_addr = self.aql_ring.va_addr + (self.aql_doorbell_value*AQL_PACKET_SIZE) % self.aql_ring.size
+    for cmd in q.q: ctypes.memmove(ring_addr, ctypes.addressof(cmd), AQL_PACKET_SIZE)
+
+    # one pending packet + ring doorbell
+    self.amd_aql_queue.write_dispatch_id = self.aql_doorbell_value + 1
+    self.aql_doorbell[0] = self.aql_doorbell_value
+    self.aql_doorbell_value += 1
+
+    self._wait_on(self.completion_signal.event_id)
+    assert (wp:=self.amd_aql_queue.write_dispatch_id) == (rp:=self.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
+
+    # reset kernargs
+    self.kernargs_ptr = self.kernargs.va_addr
