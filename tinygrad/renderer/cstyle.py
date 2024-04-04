@@ -4,7 +4,7 @@ from collections import defaultdict, Counter
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import strip_parens, getenv, prod
-from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
+from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, ConstType
 from tinygrad.codegen.uops import UOpGraph
 
 class CStyleLanguage(NamedTuple):
@@ -41,13 +41,12 @@ class CStyleLanguage(NamedTuple):
     return f"{self.float4.replace('float4', self.render_dtype(var_dtype))}({','.join(x)})"
 
   # returns a str expression of the const with the given type
-  def render_const(self, x:Union[float,int,bool], var_dtype:DType) -> str:
+  def render_const(self, x:ConstType, dtype:DType) -> str:
     if math.isnan(x): val = "NAN"
     elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
-    elif var_dtype == dtypes.float64: val = f"{x}"
-    else: val = f"{x}f" if dtypes.is_float(var_dtype) else f"{x}" if dtypes.is_int(var_dtype) else f"{x}".lower()
-    return (self.render_cast([val]*var_dtype.count, var_dtype)
-      if var_dtype.count > 1 or var_dtype not in [dtypes.float, dtypes.int, dtypes.bool] else val)
+    elif dtype == dtypes.float64: val = f"{x}"
+    else: val = f"{x}f" if dtypes.is_float(dtype) else f"{x}" if dtypes.is_int(dtype) else f"{x}".lower()
+    return (self.render_cast([val] * dtype.count, dtype) if dtype.count > 1 or dtype not in [dtypes.float, dtypes.int, dtypes.bool] else val)
 
   # returns a str expression of the loaded value with the output type
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
