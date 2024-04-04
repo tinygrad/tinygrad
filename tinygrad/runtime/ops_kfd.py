@@ -75,7 +75,7 @@ AQL_PACKET_SIZE = ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t)
 SDMA_MAX_COPY_SIZE = 0x400000
 PAGE_SIZE = 0x1000
 
-SIGNAL_SIZE, SIGNAL_COUNT = ctypes.sizeof(hsa.amd_signal_t), 256
+SIGNAL_SIZE, SIGNAL_COUNT = ctypes.sizeof(hsa.amd_signal_t), 16384
 
 VENDOR_HEADER = hsa.HSA_PACKET_TYPE_VENDOR_SPECIFIC << hsa.HSA_PACKET_HEADER_TYPE
 
@@ -155,9 +155,12 @@ class HWCopyQueue:
   def timestamp(self, addr):
     self.q.append(sdma_pkts.timestamp(op=amd_gpu.SDMA_OP_TIMESTAMP, sub_op=amd_gpu.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL, addr=addr))
 
-  def copy(self, dest, src, copy_size):
-    self.q.append(sdma_flush_hdp_pkt)
+  def cache_inv(self):
+    self.q.append(sdma_flush_hdp_pkt)  # TODO: do I need this?
     self.q.append(sdma_cache_inv)
+
+  def copy(self, dest, src, copy_size):
+    self.cache_inv()
     copied = 0
     copies_commands = (copy_size + SDMA_MAX_COPY_SIZE - 1) // SDMA_MAX_COPY_SIZE
     for _ in range(copies_commands):
@@ -248,7 +251,9 @@ class KFDAllocator(LRUAllocator):
       else: raise
 
   def _free(self, gpumem, options:BufferOptions): self.device._gpu_free(gpumem)
-  def as_buffer(self, src:Any) -> memoryview: return to_mv(src.va_addr, src.size)
+  def as_buffer(self, src:Any) -> memoryview:
+    self.device.synchronize()
+    return to_mv(src.va_addr, src.size)
 
   def copy_from_fd(self, dest, fd, offset, size):
     fo = io.FileIO(fd, "a+b", closefd=False)
@@ -268,6 +273,26 @@ class KFDAllocator(LRUAllocator):
       copied_in += copy_size
       minor_offset = 0 # only on the first
     self.device._wait_on(self.device.completion_signal.event_id)
+
+  def transfer(self, dest, src, sz:int, src_dev=None, dest_dev=None):
+    dest_dev._gpu_map(src)
+    q = HWComputeQueue()
+    q2 = HWComputeQueue()
+    #qc = HWCopyQueue()
+    qc2 = HWCopyQueue()
+    q.signal(sig := KFDDevice._get_signal())
+    #qc.wait(sig)
+    #qc.cache_inv()
+    #qc.signal(sig2 := KFDDevice._get_signal())
+    #qc2.wait(sig2)
+    qc2.wait(sig)
+    qc2.copy(dest.va_addr, src.va_addr, sz)
+    qc2.signal(sigc := KFDDevice._get_signal())
+    q2.wait(sigc)
+    q.submit(src_dev)
+    #qc.submit(src_dev)
+    qc2.submit(dest_dev)
+    q2.submit(dest_dev)
 
   def copyin(self, dest, src: memoryview):
     for i in range(0, src.nbytes, self.b[0].size):
@@ -291,8 +316,10 @@ class KFDDevice(Compiled):
   kfd:int = -1
   event_page:Any = None  # TODO: fix types in kfd, Optional[kfd.struct_kfd_ioctl_alloc_memory_of_gpu_args]
   signals_page:Any = None
+  signal_number:int = 10
 
   def _gpu_map(self, mem):
+    if self.gpu_id in getattr(mem, "mapped_gpu_ids", []): return
     mem.__setattr__("mapped_gpu_ids", getattr(mem, "mapped_gpu_ids", []) + [self.gpu_id])
     c_gpus = (ctypes.c_int32 * len(mem.mapped_gpu_ids))(*mem.mapped_gpu_ids)
     stm = kio.map_memory_to_gpu(self.kfd, handle=mem.handle, device_ids_array_ptr=ctypes.addressof(c_gpus), n_devices=len(mem.mapped_gpu_ids))
@@ -330,8 +357,13 @@ class KFDDevice(Compiled):
     kio.free_memory_of_gpu(self.kfd, handle=mem.handle)
 
   @classmethod
-  def _get_signal(self, num):
-    return hsa.amd_signal_t.from_address(KFDDevice.signals_page.va_addr + SIGNAL_SIZE*num)
+  def _get_signal(self, num=None):
+    if num is None: num = KFDDevice.signal_number
+    KFDDevice.signal_number += 1
+    if KFDDevice.signal_number == SIGNAL_COUNT: KFDDevice.signal_number = 10
+    ret = hsa.amd_signal_t.from_address(KFDDevice.signals_page.va_addr + SIGNAL_SIZE*num)
+    ret.value = 1
+    return ret
 
   def __init__(self, device:str=""):
     if KFDDevice.kfd == -1: KFDDevice.kfd = os.open("/dev/kfd", os.O_RDWR)
