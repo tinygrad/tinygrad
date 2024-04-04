@@ -44,7 +44,10 @@ if __name__ == "__main__":
         print(st2.simplify())
         same_but_neq += 1
       if getenv("CHECK_MV"):
-        if len((prod := st1.simplify()).views) > len((ref := simplify2(st1)).views):
+        prod = st1.simplify()
+        ref = simplify2(st1)
+        assert(st_equal(prod, ref))
+        if len(prod.views) > len(ref.views):
           print(colored("prod simplify worse than ref", "red"))
           print(f"PROD: {prod}")
           print(f"REF: {ref}")
