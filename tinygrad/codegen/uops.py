@@ -50,6 +50,8 @@ def _match(uop:UOp, pattern:Dict[str, Any], store:Dict[str, UOp]) -> bool:
           for k,v in new_store.items(): store[k] = v
           return True
       return False
+    elif k == "dtype":
+      if uop.__getattribute__(k) not in (v if isinstance(v, set) else set([v])): return False
     else:
       if uop.__getattribute__(k) != v: return False
   return True
