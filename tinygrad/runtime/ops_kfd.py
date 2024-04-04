@@ -74,6 +74,8 @@ class KFDCompiler(Compiler):
 AQL_PACKET_SIZE = ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t)
 SDMA_MAX_COPY_SIZE = 0x400000
 
+SIGNAL_SIZE, SIGNAL_COUNT = ctypes.sizeof(hsa.amd_signal_t), 256
+
 VENDOR_HEADER = hsa.HSA_PACKET_TYPE_VENDOR_SPECIFIC << hsa.HSA_PACKET_HEADER_TYPE
 
 DISPATCH_KERNEL_SETUP = 3 << hsa.HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS
@@ -82,8 +84,99 @@ DISPATCH_KERNEL_HEADER |= hsa.HSA_FENCE_SCOPE_SYSTEM << hsa.HSA_PACKET_HEADER_SC
 DISPATCH_KERNEL_HEADER |= hsa.HSA_FENCE_SCOPE_SYSTEM << hsa.HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE
 DISPATCH_KERNEL_HEADER |= hsa.HSA_PACKET_TYPE_KERNEL_DISPATCH << hsa.HSA_PACKET_HEADER_TYPE
 
+BARRIER_HEADER  = 1 << hsa.HSA_PACKET_HEADER_BARRIER
+BARRIER_HEADER |= hsa.HSA_FENCE_SCOPE_SYSTEM << hsa.HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE
+BARRIER_HEADER |= hsa.HSA_FENCE_SCOPE_SYSTEM << hsa.HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE
+BARRIER_HEADER |= hsa.HSA_PACKET_TYPE_BARRIER_AND << hsa.HSA_PACKET_HEADER_TYPE
+
 SHT_PROGBITS = 0x1
 SHF_ALLOC = 0x2
+
+EMPTY_SIGNAL = hsa.hsa_signal_t()
+
+class HWComputeQueue:
+  def __init__(self):
+    self.q = []
+
+  def exec(self, prg:KFDProgram, kernargs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), completion_signal=None):
+    self.q.append(hsa.hsa_kernel_dispatch_packet_t(
+      setup=DISPATCH_KERNEL_SETUP, header=DISPATCH_KERNEL_HEADER,
+      workgroup_size_x=local_size[0], workgroup_size_y=local_size[1], workgroup_size_z=local_size[2],
+      grid_size_x=global_size[0]*local_size[0], grid_size_y=global_size[1]*local_size[1], grid_size_z=global_size[2]*local_size[2],
+      kernel_object=prg.handle, group_segment_size=prg.group_segment_size, private_segment_size=prg.private_segment_size,
+      kernarg_address=kernargs,
+      completion_signal=hsa.hsa_signal_t(ctypes.addressof(completion_signal)) if completion_signal is not None else EMPTY_SIGNAL))
+
+  def signal(self, signal):
+    self.q.append(hsa.hsa_barrier_and_packet_t(header=BARRIER_HEADER, completion_signal=hsa.hsa_signal_t(ctypes.addressof(signal))))
+
+  def wait(self, signal):
+    sig = hsa.hsa_barrier_and_packet_t(header=BARRIER_HEADER)
+    sig.dep_signal[0] = hsa.hsa_signal_t(ctypes.addressof(signal))
+    self.q.append(sig)
+
+  def submit(self, device:KFDDevice):
+    read_ptr = device.amd_aql_queue.read_dispatch_id
+    for cmd in self.q:
+      ring_addr = device.aql_ring.va_addr + (device.amd_aql_queue.write_dispatch_id*AQL_PACKET_SIZE) % device.aql_ring.size
+      ctypes.memmove(ring_addr, ctypes.addressof(cmd), AQL_PACKET_SIZE)
+      device.amd_aql_queue.write_dispatch_id += 1
+    if (device.amd_aql_queue.write_dispatch_id-read_ptr)*AQL_PACKET_SIZE > device.aql_ring.size: raise RuntimeError("AQL queue overrun")
+    if len(self.q):
+      device.aql_doorbell[0] = device.aql_doorbell_value + len(self.q) - 1
+      device.aql_doorbell_value += len(self.q)
+
+# prebuilt sdma packets
+sdma_flush_hdp_pkt = sdma_pkts.hdp_flush(0x8, 0x0, 0x80000000, 0x0, 0x0, 0x0)
+sdma_cache_inv = sdma_pkts.gcr(op=amd_gpu.SDMA_OP_GCR, sub_op=amd_gpu.SDMA_SUBOP_USER_GCR, GCR_CONTROL_GL2_WB=1, GCR_CONTROL_GLK_WB=1,
+                              GCR_CONTROL_GL2_INV=1, GCR_CONTROL_GL1_INV=1, GCR_CONTROL_GLV_INV=1, GCR_CONTROL_GLK_INV=1,
+                              GCR_CONTROL_GL2_RANGE=0)
+sdma_cache_wb = sdma_pkts.gcr(op=amd_gpu.SDMA_OP_GCR, sub_op=amd_gpu.SDMA_SUBOP_USER_GCR, GCR_CONTROL_GL2_WB=1, GCR_CONTROL_GLK_WB=1,
+                              GCR_CONTROL_GL2_RANGE=0)
+
+class HWCopyQueue:
+  def __init__(self):
+    self.q = []
+
+  def submit(self, device:KFDDevice):
+    def blit_sdma_command(cmd):
+      if (cmdsz:=ctypes.sizeof(cmd)) > (fill:=device.sdma_ring.size - device.sdma_doorbell_value % device.sdma_ring.size):
+        ctypes.memset(device.sdma_ring.va_addr + (device.sdma_doorbell_value % device.sdma_ring.size), 0, fill)
+        device.sdma_doorbell_value += fill
+      ctypes.memmove(device.sdma_ring.va_addr + (device.sdma_doorbell_value % device.sdma_ring.size), ctypes.addressof(cmd), cmdsz)
+      device.sdma_doorbell_value += cmdsz
+    read_ptr = device.sdma_read_pointer[0]
+    for cmd in self.q: blit_sdma_command(cmd)
+    if (device.sdma_doorbell_value-read_ptr) > device.sdma_ring.size: raise RuntimeError("SDMA queue overrun")
+    device.sdma_write_pointer[0] = device.sdma_doorbell_value
+    device.sdma_doorbell[0] = device.sdma_doorbell_value
+
+  def timestamp(self, addr):
+    self.q.append(sdma_pkts.timestamp(op=amd_gpu.SDMA_OP_TIMESTAMP, sub_op=amd_gpu.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL, addr=addr))
+
+  def copy(self, dest, src, copy_size):
+    self.q.append(sdma_flush_hdp_pkt)
+    self.q.append(sdma_cache_inv)
+    copied = 0
+    copies_commands = (copy_size + SDMA_MAX_COPY_SIZE - 1) // SDMA_MAX_COPY_SIZE
+    for _ in range(copies_commands):
+      step_copy_size = min(copy_size - copied, SDMA_MAX_COPY_SIZE)
+      self.q.append(sdma_pkts.copy_linear(op=amd_gpu.SDMA_OP_COPY, sub_op=amd_gpu.SDMA_SUBOP_COPY_LINEAR,
+                                          count=step_copy_size-1, src_addr=src+copied, dst_addr=dest+copied))
+      copied += step_copy_size
+    self.q.append(sdma_cache_wb)
+
+  def signal(self, completion_signal):
+    self.q.append(sdma_pkts.atomic(op=amd_gpu.SDMA_OP_ATOMIC, operation=amd_gpu.SDMA_ATOMIC_ADD64,
+                                   addr=ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'value').offset, src_data=(1<<64)-1))
+    if completion_signal.event_mailbox_ptr != 0:
+      self.q.append(sdma_pkts.fence(op=amd_gpu.SDMA_OP_FENCE, mtype=3, addr=completion_signal.event_mailbox_ptr, data=completion_signal.event_id))
+      self.q.append(sdma_pkts.trap(op=amd_gpu.SDMA_OP_TRAP, int_ctx=completion_signal.event_id))
+
+  def wait(self, completion_signal):
+    self.q.append(sdma_pkts.poll_regmem(op=amd_gpu.SDMA_OP_POLL_REGMEM, mem_poll=1, func=0x3,
+                                        addr=ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'value').offset,
+                                        value=0, mask=0xffffffff, interval=0x04, retry_count=0xfff))
 
 class KFDProgram:
   def __init__(self, device:KFDDevice, name:str, lib:bytes):
@@ -120,36 +213,26 @@ class KFDProgram:
                                                 [(f'v{i}', ctypes.c_int) for i in range(len(vals))]))
       if ctypes.sizeof(self.args_struct_t) != self.kernargs_segment_size:
         raise RuntimeError(f"HSAProgram.__call__: incorrect args struct size {ctypes.sizeof(self.args_struct_t)} != {self.kernargs_segment_size}")
-    args_st = self.args_struct_t.from_address(self.device.kernargs.va_addr)
+    args_st = self.args_struct_t.from_address(self.device.kernargs_ptr)
     for i in range(len(args)): args_st.__setattr__(f'f{i}', args[i].va_addr)
     for i in range(len(vals)): args_st.__setattr__(f'v{i}', vals[i])
 
     self.device.completion_signal.value = 1 # reset the signal before call
-    packet = hsa.hsa_kernel_dispatch_packet_t.from_address(self.device.aql_ring.va_addr +
-                                                           (self.device.aql_doorbell_value*AQL_PACKET_SIZE) % self.device.aql_ring.size)
-    packet.workgroup_size_x, packet.workgroup_size_y, packet.workgroup_size_z = local_size
-    packet.reserved0 = 0
-    packet.grid_size_x, packet.grid_size_y, packet.grid_size_z = tuple(g*l for g,l in zip(global_size, local_size))
-    packet.kernel_object = self.handle
-    packet.kernarg_address = self.device.kernargs.va_addr
-    packet.group_segment_size = self.group_segment_size
-    packet.private_segment_size = self.private_segment_size   # what it this and why doesn't it work? (see TestOps.test_dilated_conv_transpose2d)
-    packet.reserved2 = 0
-    packet.completion_signal = hsa.hsa_signal_t(ctypes.addressof(self.device.completion_signal))
-    packet.setup = DISPATCH_KERNEL_SETUP
-    packet.header = DISPATCH_KERNEL_HEADER
+
+    self.q = HWComputeQueue()
+    self.q.exec(self, self.device.kernargs_ptr, global_size, local_size, self.device.completion_signal if wait else None)
+    self.device.kernargs_ptr += self.kernargs_segment_size
 
     # one pending packet + ring doorbell
-    self.device.amd_aql_queue.write_dispatch_id = self.device.aql_doorbell_value + 1
-    self.device.aql_doorbell[0] = self.device.aql_doorbell_value
-    self.device.aql_doorbell_value += 1
+    self.q.submit(self.device)
 
-    evt_arr = (kfd.struct_kfd_event_data * 1)()
-    evt_arr[0].event_id = self.device.completion_signal.event_id
-    kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=1000)
-
-    assert (wp:=self.device.amd_aql_queue.write_dispatch_id) == (rp:=self.device.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
-    if wait: return (self.device.completion_signal.end_ts-self.device.completion_signal.start_ts)/1e9
+    if wait:
+      evt_arr = (kfd.struct_kfd_event_data * 1)()
+      evt_arr[0].event_id = self.device.completion_signal.event_id
+      ret = kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=1000)
+      assert ret.wait_result == 0, f"wait_result got {ret.wait_result}, hit timeout?"
+      assert (wp:=self.device.amd_aql_queue.write_dispatch_id) == (rp:=self.device.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
+      return (self.device.completion_signal.end_ts-self.device.completion_signal.start_ts)/1e9
 
 class KFDAllocator(LRUAllocator):
   def __init__(self, device:KFDDevice):
@@ -172,22 +255,34 @@ class KFDAllocator(LRUAllocator):
     self.device._map_userptr_to_gpu(ctypes.addressof(from_mv(src).contents), src.nbytes)
     self.device.completion_signal.value = 1
     self.device._submit_sdma(dest.va_addr, ctypes.addressof(from_mv(src).contents), src.nbytes, completion_signal=self.device.completion_signal)
-    evt_arr = (kfd.struct_kfd_event_data * 1)()
-    evt_arr[0].event_id = self.device.completion_signal.event_id
-    kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=1000)
+    self.device._wait_on(self.device.completion_signal.event_id)
 
   def copyout(self, dest:memoryview, src):
     self.device._map_userptr_to_gpu(ctypes.addressof(from_mv(dest).contents), dest.nbytes)
     self.device.completion_signal.value = 1
     self.device._submit_sdma(ctypes.addressof(from_mv(dest).contents), src.va_addr, dest.nbytes, completion_signal=self.device.completion_signal)
-    evt_arr = (kfd.struct_kfd_event_data * 1)()
-    evt_arr[0].event_id = self.device.completion_signal.event_id
-    kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=1000)
+    self.device._wait_on(self.device.completion_signal.event_id)
 
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
 class KFDDevice(Compiled):
   kfd:int = -1
   event_page:Any = None  # TODO: fix types in kfd, Optional[kfd.struct_kfd_ioctl_alloc_memory_of_gpu_args]
+  signals_page:Any = None
+
+  def synchronize(self):
+    q = HWComputeQueue()
+    q.signal(self.completion_signal)
+
+    ring_addr = self.aql_ring.va_addr + (self.aql_doorbell_value*AQL_PACKET_SIZE) % self.aql_ring.size
+    for cmd in q.q: ctypes.memmove(ring_addr, ctypes.addressof(cmd), AQL_PACKET_SIZE)
+
+    # one pending packet + ring doorbell
+    self.amd_aql_queue.write_dispatch_id = self.aql_doorbell_value + 1
+    self.aql_doorbell[0] = self.aql_doorbell_value
+    self.aql_doorbell_value += 1
+
+    self._wait_on(self.completion_signal.event_id)
+    assert (wp:=self.amd_aql_queue.write_dispatch_id) == (rp:=self.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
 
   def _map_userptr_to_gpu(self, addr, size):
     self.map_uptr2gpu_struct.start_addr = addr&~0xfff
@@ -195,9 +290,16 @@ class KFDDevice(Compiled):
     kio.svm(self.kfd, made_struct=self.map_uptr2gpu_struct)
 
   def _gpu_map(self, mem):
-    mem.__setattr__("mapped_gpu_ids", (ctypes.c_int32 * 1)(self.gpu_id))
-    stm = kio.map_memory_to_gpu(self.kfd, handle=mem.handle, device_ids_array_ptr=ctypes.addressof(gpus:=mem.mapped_gpu_ids), n_devices=len(gpus))
-    assert stm.n_success == 1
+    mem.__setattr__("mapped_gpu_ids", getattr(mem, "mapped_gpu_ids", []) + [self.gpu_id])
+    c_gpus = (ctypes.c_int32 * len(mem.mapped_gpu_ids))(*mem.mapped_gpu_ids)
+    stm = kio.map_memory_to_gpu(self.kfd, handle=mem.handle, device_ids_array_ptr=ctypes.addressof(c_gpus), n_devices=len(mem.mapped_gpu_ids))
+    assert stm.n_success == len(mem.mapped_gpu_ids)
+
+  def _wait_on(self, event_id, timeout=1000):
+    evt_arr = (kfd.struct_kfd_event_data * 1)()
+    evt_arr[0].event_id = event_id
+    ret = kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=timeout)
+    if ret.wait_result != 0: raise RuntimeError(f"wait_result got {ret.wait_result}, hit timeout?")
 
   def _gpu_alloc(self, size:int, flags:int, uncached=False, public=False, map_to_gpu=True):
     flags |= kfd.KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE
@@ -217,11 +319,16 @@ class KFDDevice(Compiled):
     return mem
 
   def _gpu_free(self, mem):
-    if (gpus:=getattr(mem, "mapped_gpu_ids", None)) is not None:
-      stm = kio.unmap_memory_from_gpu(self.kfd, handle=mem.handle, device_ids_array_ptr=ctypes.addressof(gpus), n_devices=len(gpus))
+    if len(gpus:=getattr(mem, "mapped_gpu_ids", [])):
+      c_gpus = (ctypes.c_int32 * len(gpus))(*gpus)
+      stm = kio.unmap_memory_from_gpu(self.kfd, handle=mem.handle, device_ids_array_ptr=ctypes.addressof(c_gpus), n_devices=len(gpus))
       assert stm.n_success == len(gpus)
     libc.munmap(mem.va_addr, mem.size)
     kio.free_memory_of_gpu(self.kfd, handle=mem.handle)
+
+  @classmethod
+  def _get_signal(self, num):
+    return hsa.amd_signal_t.from_address(KFDDevice.signals_page.va_addr + SIGNAL_SIZE*num)
 
   def __init__(self, device:str=""):
     if KFDDevice.kfd == -1: KFDDevice.kfd = os.open("/dev/kfd", os.O_RDWR)
@@ -233,24 +340,28 @@ class KFDDevice(Compiled):
     kio.acquire_vm(KFDDevice.kfd, drm_fd=self.drm_fd, gpu_id=self.gpu_id)
 
     if KFDDevice.event_page is None:
+      KFDDevice.signals_page = self._gpu_alloc(SIGNAL_SIZE*SIGNAL_COUNT, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
+      for i in range(SIGNAL_COUNT):
+        sig = KFDDevice._get_signal(i)
+        sig.value = 1
+        sig.kind = hsa.AMD_SIGNAL_KIND_USER
       KFDDevice.event_page = self._gpu_alloc(0x8000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
       self.sync_event = kio.create_event(KFDDevice.kfd, event_page_offset=KFDDevice.event_page.handle, auto_reset=1)
     else:
+      self._gpu_map(KFDDevice.signals_page)
       self._gpu_map(KFDDevice.event_page)
       self.sync_event = kio.create_event(KFDDevice.kfd, auto_reset=1)
 
     self.gart = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
-    self.aql_ring = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
-    self.signals_page = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
+    self.aql_ring = self._gpu_alloc(0x100000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
     self.pm4_indirect_buf = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
 
     self.eop_buffer = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
-    self.kernargs = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
+    self.kernargs = self._gpu_alloc(0x100000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
+    self.kernargs_ptr = self.kernargs.va_addr
     self.ctx_save_restore_address = self._gpu_alloc(0x2C02000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
 
-    self.completion_signal = hsa.amd_signal_t.from_address(self.signals_page.va_addr)
-    self.completion_signal.value = 1
-    self.completion_signal.kind = hsa.AMD_SIGNAL_KIND_USER
+    self.completion_signal = KFDDevice._get_signal(self.device_id)
     self.completion_signal.event_mailbox_ptr = KFDDevice.event_page.va_addr + self.sync_event.event_slot_index*8
     self.completion_signal.event_id = self.sync_event.event_id
 
@@ -293,7 +404,7 @@ class KFDDevice(Compiled):
     self.aql_doorbell_value = 0
 
     # SDMA Queue
-    self.sdma_ring = self._gpu_alloc(1 << 20, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
+    self.sdma_ring = self._gpu_alloc(0x100000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
     self.sdma_queue = kio.create_queue(KFDDevice.kfd, ring_base_address=self.sdma_ring.va_addr, ring_size=self.sdma_ring.size, gpu_id=self.gpu_id,
       queue_type=kfd.KFD_IOC_QUEUE_TYPE_SDMA, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE, queue_priority=kfd.KFD_MAX_QUEUE_PRIORITY,
       write_pointer_address=self.gart.va_addr + 0x100, read_pointer_address=self.gart.va_addr + 0x108)
@@ -302,14 +413,6 @@ class KFDDevice(Compiled):
     self.sdma_write_pointer = to_mv(self.sdma_queue.write_pointer_address, 8).cast("Q")
     self.sdma_doorbell = to_mv(self.doorbells + self.sdma_queue.doorbell_offset - self.doorbells_base, 4).cast("I")
     self.sdma_doorbell_value = 0
-
-    # prebuilt packets
-    self.sdma_flush_hdp_pkt = sdma_pkts.hdp_flush(0x8, 0x0, 0x80000000, 0x0, 0x0, 0x0)
-    self.sdma_cache_inv = sdma_pkts.gcr(op=amd_gpu.SDMA_OP_GCR, sub_op=amd_gpu.SDMA_SUBOP_USER_GCR, GCR_CONTROL_GL2_WB=1, GCR_CONTROL_GLK_WB=1,
-                                        GCR_CONTROL_GL2_INV=1, GCR_CONTROL_GL1_INV=1, GCR_CONTROL_GLV_INV=1, GCR_CONTROL_GLK_INV=1,
-                                        GCR_CONTROL_GL2_RANGE=0)
-    self.sdma_cache_wb = sdma_pkts.gcr(op=amd_gpu.SDMA_OP_GCR, sub_op=amd_gpu.SDMA_SUBOP_USER_GCR, GCR_CONTROL_GL2_WB=1, GCR_CONTROL_GLK_WB=1,
-                                        GCR_CONTROL_GL2_RANGE=0)
 
     pm4_indirect_cmd = (ctypes.c_uint32*13)(amd_gpu.PACKET3(amd_gpu.PACKET3_INDIRECT_BUFFER, 2), self.pm4_indirect_buf.va_addr & 0xffffffff,
                                             (self.pm4_indirect_buf.va_addr>>32) & 0xffffffff, 8 | amd_gpu.INDIRECT_BUFFER_VALID, 0xa)
@@ -328,49 +431,18 @@ class KFDDevice(Compiled):
     super().__init__(device, KFDAllocator(self), KFDCompiler(self.arch), functools.partial(KFDProgram, self))
 
   def _submit_sdma(self, dest, src, copy_size, wait_signals=None, completion_signal=None):
-    def blit_sdma_command(cmd):
-      if (cmdsz:=ctypes.sizeof(cmd)) > (fill:=self.sdma_ring.size - self.sdma_doorbell_value % self.sdma_ring.size):
-        ctypes.memset(self.sdma_ring.va_addr + (self.sdma_doorbell_value % self.sdma_ring.size), 0, fill)
-        self.sdma_doorbell_value += fill
-      ctypes.memmove(self.sdma_ring.va_addr + (self.sdma_doorbell_value % self.sdma_ring.size), ctypes.addressof(cmd), cmdsz)
-      self.sdma_doorbell_value += cmdsz
+
+    q = HWCopyQueue()
 
     if wait_signals is not None:
       # NOTE: we check only low 32 bits to be zeroed, we don't use higher values for signals
-      for sig in wait_signals:
-        poll_addr = ctypes.addressof(sig) + getattr(hsa.amd_signal_t, 'value').offset
-        blit_sdma_command(sdma_pkts.poll_regmem(op=amd_gpu.SDMA_OP_POLL_REGMEM, mem_poll=1, func=0x3, addr=poll_addr,
-                          value=0, mask=0xffffffff, interval=0x04, retry_count=0xfff))
+      for sig in wait_signals: q.wait(ctypes.addressof(sig) + getattr(hsa.amd_signal_t, 'value').offset)
 
-    if completion_signal is not None:
-      blit_sdma_command(sdma_pkts.timestamp(op=amd_gpu.SDMA_OP_TIMESTAMP, sub_op=amd_gpu.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL,
-                                            addr=ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'start_ts').offset))
-    blit_sdma_command(self.sdma_flush_hdp_pkt)
-    blit_sdma_command(self.sdma_cache_inv)
-
-    copied = 0
-    copies_commands = (copy_size + SDMA_MAX_COPY_SIZE - 1) // SDMA_MAX_COPY_SIZE
-    for _ in range(copies_commands):
-      step_copy_size = min(copy_size - copied, SDMA_MAX_COPY_SIZE)
-      blit_sdma_command(sdma_pkts.copy_linear(op=amd_gpu.SDMA_OP_COPY, sub_op=amd_gpu.SDMA_SUBOP_COPY_LINEAR,
-                                              count=step_copy_size-1, src_addr=src+copied, dst_addr=dest+copied))
-      copied += step_copy_size
-
-    blit_sdma_command(self.sdma_cache_wb)
-    if completion_signal is not None:
-      blit_sdma_command(sdma_pkts.timestamp(op=amd_gpu.SDMA_OP_TIMESTAMP, sub_op=amd_gpu.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL,
-                                            addr=ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'end_ts').offset))
-
-    if completion_signal is not None:
-      signal_addr = ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'value').offset
-      blit_sdma_command(sdma_pkts.atomic(op=amd_gpu.SDMA_OP_ATOMIC, operation=amd_gpu.SDMA_ATOMIC_ADD64, addr=signal_addr, src_data=(1<<64)-1))
-      if completion_signal.event_mailbox_ptr != 0:
-        blit_sdma_command(sdma_pkts.fence(op=amd_gpu.SDMA_OP_FENCE, mtype=3, addr=completion_signal.event_mailbox_ptr,
-                          data=completion_signal.event_id))
-        blit_sdma_command(sdma_pkts.trap(op=amd_gpu.SDMA_OP_TRAP, int_ctx=completion_signal.event_id))
-
-    self.sdma_write_pointer[0] = self.sdma_doorbell_value
-    self.sdma_doorbell[0] = self.sdma_doorbell_value
+    if completion_signal is not None: q.timestamp(ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'start_ts').offset)
+    q.copy(dest, src, copy_size)
+    if completion_signal is not None: q.timestamp(ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'end_ts').offset)
+    if completion_signal is not None: q.signal(completion_signal)
+    q.submit(self)
 
   def _submit_cache_inv(self, addr=0x0, sz=(1 << 64)-1, gli=0, glv=0, glk=0, gl1=0, gl2=0):
     pm4_buffer_view = to_mv(self.pm4_indirect_buf.va_addr, 0x1000).cast("I")
@@ -387,8 +459,5 @@ class KFDDevice(Compiled):
     self.aql_doorbell[0] = self.aql_doorbell_value
     self.aql_doorbell_value += 1
 
-    evt_arr = (kfd.struct_kfd_event_data * 1)()
-    evt_arr[0].event_id = self.completion_signal.event_id
-    kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=1000)
-
+    self._wait_on(self.completion_signal.event_id)
     assert (wp:=self.amd_aql_queue.write_dispatch_id) == (rp:=self.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
