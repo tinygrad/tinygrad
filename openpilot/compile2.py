@@ -5,7 +5,6 @@ sys.path.insert(0, str(pathlib.Path(__file__).parents[1]))
 if "FLOAT16" not in os.environ: os.environ["FLOAT16"] = "1"
 if "IMAGE" not in os.environ: os.environ["IMAGE"] = "2"
 if "NOLOCALS" not in os.environ: os.environ["NOLOCALS"] = "1"
-if "OPT" not in os.environ: os.environ["OPT"] = "99"
 
 OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx"
 
@@ -15,7 +14,8 @@ from extra.onnx import get_run_onnx
 from tinygrad import Tensor, Device, GlobalCounters, dtypes
 from tinygrad.dtype import ImageDType
 from tinygrad.helpers import partition, Context, fetch, getenv, DEBUG
-from tinygrad.engine.realize import run_schedule, lower_schedule_item
+from tinygrad.engine.realize import run_schedule
+from tinygrad.engine.commandqueue import CommandQueue
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.ops import LoadOps, ScheduleItem
 Device.DEFAULT = "GPU"
@@ -88,9 +88,10 @@ def test_vs_onnx(onnx_data, schedule:Optional[List[ScheduleItem]], inputs:Dict[s
 
   # run code (all buffers have been allocated)
   GlobalCounters.reset()
-  for si in schedule: lower_schedule_item(si)(si.outputs+si.inputs, {})
+  output = schedule[-1].outputs[0]
+  CommandQueue(schedule)()
 
-  new_tinygrad_out = np.frombuffer(schedule[-1].outputs[0].as_buffer(), dtype=schedule[-1].outputs[0].dtype.np)
+  new_tinygrad_out = np.frombuffer(output.as_buffer(), dtype=output.dtype.np)
   np.testing.assert_allclose(new_torch_out.reshape(new_tinygrad_out.shape), new_tinygrad_out, atol=1e-4, rtol=1e-2)
   print("semi-thneed self-test passed!")
 

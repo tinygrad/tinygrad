@@ -423,7 +423,7 @@ class Tensor:
     else: indices = [indices]
 
     # turn scalar Tensors into const val for int indexing if possible
-    indices = [self._to_const_val(i) if isinstance(i, Tensor) else i for i in indices]
+    indices = [self._to_const_val(i) if isinstance(i, Tensor) and i.shape == () else i for i in indices]
     # move Tensor indices to the same device as self
     indices = [i.to(self.device) if isinstance(i, Tensor) else i for i in indices]
 
@@ -889,33 +889,25 @@ class Tensor:
 
   def _to_const_val(self, x:Union[Tensor, ConstType]) -> Union[Tensor, ConstType]:
     # TODO: update with multi
-    return x.lazydata.base.arg if isinstance(x, Tensor) and isinstance(x.lazydata, LazyBuffer) and x.lazydata.is_unrealized_contiguous_const() \
+    return x.lazydata.base.arg if isinstance(x, Tensor) and isinstance(x.lazydata, LazyBuffer) and x.lazydata.is_unrealized_unpadded_const() \
       and not x.requires_grad and self._broadcasted(x)[0].shape == self.shape else x
 
-  def add(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
-    x = self._to_const_val(x)
-    return F.Add.apply(*self._broadcasted(x, reverse)) if isinstance(x, Tensor) or x else self
-  def sub(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
-    x = self._to_const_val(x)
-    return F.Sub.apply(*self._broadcasted(x, reverse)) if isinstance(x, Tensor) or x else (-self if reverse else self)
-  def mul(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
-    x = self._to_const_val(x)
-    if not isinstance(x, Tensor) and x == 0.0: return F.Zero.apply(self)
-    if not isinstance(x, Tensor) and x == -1.0: return -self
-    return F.Mul.apply(*self._broadcasted(x, reverse)) if isinstance(x, Tensor) or x != 1.0 else self
+  def add(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor: return F.Add.apply(*self._broadcasted(x, reverse))
+  def sub(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor: return F.Sub.apply(*self._broadcasted(x, reverse))
+  def mul(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor: return F.Mul.apply(*self._broadcasted(x, reverse))
   def div(self, x:Union[Tensor, ConstType], reverse=False, upcast=True) -> Tensor:
-    x = self._to_const_val(x)
-    if not isinstance(x, Tensor) and not reverse and x != 0 and upcast: return self.mul(1/x)
-    if (isinstance(x, Tensor) and dtypes.is_float(x.dtype)) or not upcast: return F.Div.apply(*self._broadcasted(x, reverse))
-    return F.Div.apply(*self.cast(least_upper_float(self.dtype))._broadcasted(x, reverse))
-  def xor(self, x:Tensor, reverse=False) -> Tensor: return F.Xor.apply(*self._broadcasted(x, reverse))
+    numerator, denominator = self._broadcasted(x, reverse)
+    if upcast: numerator, denominator = numerator.cast(least_upper_float(numerator.dtype)), denominator.cast(least_upper_float(denominator.dtype))
+    return F.Div.apply(numerator, denominator)
+  def xor(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor: return F.Xor.apply(*self._broadcasted(x, reverse))
 
   def pow(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     x = self._to_const_val(x)
     if not isinstance(x, Tensor) and not reverse:
       # simple pow identities
       if x < 0: return self.reciprocal().pow(-x)
-      if x in [3,2,1,0]: return functools.reduce(lambda acc,_: acc * self, range(int(x)), F.Zero.apply(self)+1)
+      if x == 0: return 1 + self * 0
+      if x in [3,2,1]: return functools.reduce(lambda acc,_: acc * self, range(int(x)-1), self)
       if x == 0.5: return self.sqrt()
     if not isinstance(x, Tensor) and reverse and x > 0: return self.mul(math.log(x)).exp()
     ar = self.abs().log().mul(x).exp() if not reverse or isinstance(x, Tensor) else self.mul(math.log(abs(x))).exp()

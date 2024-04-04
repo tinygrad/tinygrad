@@ -907,6 +907,11 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,3,3)], lambda x: x[1:2, 1:2, None, -1])
     helper_test_op([(3,3,3)], lambda x: x[None, None, 1, None, 2, 0:2])
 
+  def test_slice_with_const_tensor(self):
+    t = Tensor.zeros(1, dtype=dtypes.int)
+    helper_test_op([(3,3,3)], lambda x: x[:, [0], :], lambda x: x[:, t, :])
+    helper_test_op([(3,3,3)], lambda x: x[:, [0], :], lambda x: x[:, t.contiguous(), :])
+
   def test_slice_one_endpoint_out_of_bounds(self):
     helper_test_op([(3,3,3)], lambda x: x[0:4])
     helper_test_op([(3,3,3)], lambda x: x[-6:4])

@@ -6,8 +6,8 @@ import pickle, base64, itertools, time, struct
 from tinygrad.dtype import DType, dtypes, ImageDType
 from tinygrad.helpers import all_same, getenv, flatten
 from tinygrad.device import Compiled, Allocator, Compiler, CompilerOptions
-from tinygrad.codegen.uops import UOpGraph, UOps, exec_alu
-from tinygrad.ops import BinaryOps, TernaryOps
+from tinygrad.codegen.uops import UOpGraph, UOps
+from tinygrad.ops import BinaryOps, TernaryOps, exec_alu
 
 def _load(m, i):
   if i < 0 or i >= len(m): raise IndexError(f"load out of bounds, size is {len(m)} and access is {i}")
