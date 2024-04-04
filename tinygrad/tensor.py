@@ -962,7 +962,7 @@ class Tensor:
   def __gt__(self, x) -> Tensor: return F.Less.apply(*self._broadcasted(x, True))
   def __ge__(self, x) -> Tensor: return (self<x).logical_not()
   def __le__(self, x) -> Tensor: return (self>x).logical_not()
-  def __eq__(self, x, one_hot=False) -> Tensor: return F.Eq.apply(*self._broadcasted(x, True), arg={"one_hot": one_hot})  # type: ignore[override]
+  def __eq__(self, x, one_hot=False) -> Tensor: return F.Eq.apply(*self._broadcasted(x, True), one_hot=one_hot)  # type: ignore[override]
   def __ne__(self, x) -> Tensor: return (self==x).logical_not()                       # type: ignore[override]
 
   # ***** functional nn ops *****

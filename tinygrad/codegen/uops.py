@@ -279,17 +279,19 @@ class UOpGraph:
           self.replace_op(alu_with_accum, next(op for op in alu_with_accum.vin if op != accumulator))
       get_recursive_parents.cache_clear()
 
-  def optimize_embedding(self, get_recursive_parents):
-    if not all([u.uop is UOps.DEFINE_GLOBAL for u in self.uops[:4]]): return
-    if DEBUG >= 5: print("optimizing embedding")
-    idx, arange, val = [next(op for op in self.uops if op.uop is UOps.LOAD and buf in op.vin) for buf in self.uops[1:4]]
-    arange_loop = next(op for op in get_recursive_parents(arange) if op.uop is UOps.LOOP)
-    idx = self.add(UOps.CAST, arange.dtype, (idx,), insert_before=self.uops.index(idx)+1) if arange.dtype != idx.dtype else idx
-    for op in get_recursive_parents(val):
-      if op.uop is UOps.ALU:
-        op.vin = tuple([idx if op is arange_loop else op for op in list(op.vin)])
-    self.replace_op(next(op for op in self.uops if op.uop is UOps.PHI), val)
-    get_recursive_parents.cache_clear()
+  def optimize_one_hot_cmpeq(self, op):
+    print("optimizing op")
+    print(op)
+    # if not all([u.uop is UOps.DEFINE_GLOBAL for u in self.uops[:4]]): return
+    # if DEBUG >= 5: print("optimizing embedding")
+    # idx, arange, val = [next(op for op in self.uops if op.uop is UOps.LOAD and buf in op.vin) for buf in self.uops[1:4]]
+    # arange_loop = next(op for op in get_recursive_parents(arange) if op.uop is UOps.LOOP)
+    # idx = self.add(UOps.CAST, arange.dtype, (idx,), insert_before=self.uops.index(idx)+1) if arange.dtype != idx.dtype else idx
+    # for op in get_recursive_parents(val):
+    #   if op.uop is UOps.ALU:
+    #     op.vin = tuple([idx if op is arange_loop else op for op in list(op.vin)])
+    # self.replace_op(next(op for op in self.uops if op.uop is UOps.PHI), val)
+    # get_recursive_parents.cache_clear()
 
   def fix_to_store_directly(self):
     replaced_stores: Dict[UOp,UOp] = {}
