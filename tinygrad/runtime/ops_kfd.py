@@ -116,10 +116,12 @@ class HWComputeQueue:
     self.q.append(sig)
 
   def submit(self, device:KFDDevice):
+    read_ptr = device.amd_aql_queue.read_dispatch_id
     for cmd in self.q:
       ring_addr = device.aql_ring.va_addr + (device.amd_aql_queue.write_dispatch_id*AQL_PACKET_SIZE) % device.aql_ring.size
       ctypes.memmove(ring_addr, ctypes.addressof(cmd), AQL_PACKET_SIZE)
       device.amd_aql_queue.write_dispatch_id += 1
+    if (device.amd_aql_queue.write_dispatch_id-read_ptr)*AQL_PACKET_SIZE > device.aql_ring.size: raise RuntimeError("AQL queue overrun")
     device.aql_doorbell[0] = device.aql_doorbell_value + len(self.q) - 1
     device.aql_doorbell_value += len(self.q)
 
@@ -142,7 +144,9 @@ class HWCopyQueue:
         device.sdma_doorbell_value += fill
       ctypes.memmove(device.sdma_ring.va_addr + (device.sdma_doorbell_value % device.sdma_ring.size), ctypes.addressof(cmd), cmdsz)
       device.sdma_doorbell_value += cmdsz
+    read_ptr = device.sdma_read_pointer[0]
     for cmd in self.q: blit_sdma_command(cmd)
+    if (device.sdma_doorbell_value-read_ptr) > device.sdma_ring.size: raise RuntimeError("SDMA queue overrun")
     device.sdma_write_pointer[0] = device.sdma_doorbell_value
     device.sdma_doorbell[0] = device.sdma_doorbell_value
 
@@ -168,8 +172,9 @@ class HWCopyQueue:
       self.q.append(sdma_pkts.fence(op=amd_gpu.SDMA_OP_FENCE, mtype=3, addr=completion_signal.event_mailbox_ptr, data=completion_signal.event_id))
       self.q.append(sdma_pkts.trap(op=amd_gpu.SDMA_OP_TRAP, int_ctx=completion_signal.event_id))
 
-  def wait(self, poll_addr:int):
-    self.q.append(sdma_pkts.poll_regmem(op=amd_gpu.SDMA_OP_POLL_REGMEM, mem_poll=1, func=0x3, addr=poll_addr,
+  def wait(self, completion_signal):
+    self.q.append(sdma_pkts.poll_regmem(op=amd_gpu.SDMA_OP_POLL_REGMEM, mem_poll=1, func=0x3,
+                                        addr=ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'value').offset,
                                         value=0, mask=0xffffffff, interval=0x04, retry_count=0xfff))
 
 class KFDProgram:
@@ -329,7 +334,7 @@ class KFDDevice(Compiled):
 
   @classmethod
   def _get_signal(self, num):
-    return KFDDevice.signals_page.va_addr + SIGNAL_SIZE*num
+    return hsa.amd_signal_t.from_address(KFDDevice.signals_page.va_addr + SIGNAL_SIZE*num)
 
   def __init__(self, device:str=""):
     if KFDDevice.kfd == -1: KFDDevice.kfd = os.open("/dev/kfd", os.O_RDWR)
@@ -343,7 +348,7 @@ class KFDDevice(Compiled):
     if KFDDevice.event_page is None:
       KFDDevice.signals_page = self._gpu_alloc(SIGNAL_SIZE*SIGNAL_COUNT, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
       for i in range(SIGNAL_COUNT):
-        sig = hsa.amd_signal_t.from_address(KFDDevice._get_signal(i))
+        sig = KFDDevice._get_signal(i)
         sig.value = 1
         sig.kind = hsa.AMD_SIGNAL_KIND_USER
       KFDDevice.event_page = self._gpu_alloc(0x8000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
@@ -362,7 +367,7 @@ class KFDDevice(Compiled):
     self.kernargs_ptr = self.kernargs.va_addr
     self.ctx_save_restore_address = self._gpu_alloc(0x2C02000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
 
-    self.completion_signal = hsa.amd_signal_t.from_address(KFDDevice._get_signal(self.device_id))
+    self.completion_signal = KFDDevice._get_signal(self.device_id)
     self.completion_signal.event_mailbox_ptr = KFDDevice.event_page.va_addr + self.sync_event.event_slot_index*8
     self.completion_signal.event_id = self.sync_event.event_id
 
@@ -405,7 +410,7 @@ class KFDDevice(Compiled):
     self.aql_doorbell_value = 0
 
     # SDMA Queue
-    self.sdma_ring = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
+    self.sdma_ring = self._gpu_alloc(0x10000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
     self.sdma_queue = kio.create_queue(KFDDevice.kfd, ring_base_address=self.sdma_ring.va_addr, ring_size=self.sdma_ring.size, gpu_id=self.gpu_id,
       queue_type=kfd.KFD_IOC_QUEUE_TYPE_SDMA, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE, queue_priority=kfd.KFD_MAX_QUEUE_PRIORITY,
       write_pointer_address=self.gart.va_addr + 0x100, read_pointer_address=self.gart.va_addr + 0x108)

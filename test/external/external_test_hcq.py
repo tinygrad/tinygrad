@@ -72,6 +72,15 @@ class TestHCQ(unittest.TestCase):
     with self.assertRaises(RuntimeError):
       TestHCQ.d0._wait_on(TestHCQ.d0.completion_signal.event_id, timeout=50)
 
+  def test_wait_copy_signal(self):
+    TestHCQ.d0.completion_signal.value = 1
+    q = HWCopyQueue()
+    q.wait(TestHCQ.d0.completion_signal)
+    q.signal(TestHCQ.d0.completion_signal)
+    q.submit(TestHCQ.d0)
+    with self.assertRaises(RuntimeError):
+      TestHCQ.d0._wait_on(TestHCQ.d0.completion_signal.event_id, timeout=50)
+
   def test_run_normal(self):
     q = HWComputeQueue()
     q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size, TestHCQ.d0.completion_signal)
@@ -127,6 +136,7 @@ class TestHCQ(unittest.TestCase):
     assert (val:=TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[1]) == 1.0, f"got val {val}"
 
   def test_copy_bandwidth(self):
+    # THEORY: the bandwidth is low here because it's only using one SDMA queue. I suspect it's more stable like this at least.
     SZ = 2_000_000_000
     a = Buffer("KFD", SZ, dtypes.uint8, options=BufferOptions(nolru=True)).allocate()
     b = Buffer("KFD", SZ, dtypes.uint8, options=BufferOptions(nolru=True)).allocate()
@@ -148,6 +158,20 @@ class TestHCQ(unittest.TestCase):
     gb_s = (SZ/1e9)/et
     print(f"cross device copy: {et*1e3:.2f} ms, {gb_s:.2f} GB/s")
     assert gb_s > 2 and gb_s < 50
+
+  def test_interleave_compute_and_copy(self):
+    q = HWComputeQueue()
+    qc = HWCopyQueue()
+    q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size)  # b = [1, 2]
+    q.signal(sig:=KFDDevice._get_signal(10))
+    qc.wait(sig)
+    qc.copy(TestHCQ.a.lazydata.buffer._buf.va_addr, TestHCQ.b.lazydata.buffer._buf.va_addr, 8)
+    qc.signal(TestHCQ.d0.completion_signal)
+    qc.submit(TestHCQ.d0)
+    time.sleep(0.02) # give it time for the wait to fail
+    q.submit(TestHCQ.d0)
+    TestHCQ.d0._wait_on(TestHCQ.d0.completion_signal.event_id)
+    assert (val:=TestHCQ.a.lazydata.buffer.as_buffer().cast("f")[0]) == 1.0, f"got val {val}"
 
 if __name__ == "__main__":
   unittest.main()
