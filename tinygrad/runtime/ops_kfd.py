@@ -107,14 +107,17 @@ class HWComputeQueue:
       kernel_object=prg.handle, group_segment_size=prg.group_segment_size, private_segment_size=prg.private_segment_size,
       kernarg_address=kernargs,
       completion_signal=hsa.hsa_signal_t(ctypes.addressof(completion_signal)) if completion_signal is not None else EMPTY_SIGNAL))
+    return self
 
   def signal(self, signal):
     self.q.append(hsa.hsa_barrier_and_packet_t(header=BARRIER_HEADER, completion_signal=hsa.hsa_signal_t(ctypes.addressof(signal))))
+    return self
 
   def wait(self, signal):
     sig = hsa.hsa_barrier_and_packet_t(header=BARRIER_HEADER)
     sig.dep_signal[0] = hsa.hsa_signal_t(ctypes.addressof(signal))
     self.q.append(sig)
+    return self
 
   def submit(self, device:KFDDevice):
     read_ptr = device.amd_aql_queue.read_dispatch_id
@@ -126,6 +129,7 @@ class HWComputeQueue:
     if len(self.q):
       device.aql_doorbell[0] = device.aql_doorbell_value + len(self.q) - 1
       device.aql_doorbell_value += len(self.q)
+    return self
 
 # prebuilt sdma packets
 sdma_flush_hdp_pkt = sdma_pkts.hdp_flush(0x8, 0x0, 0x80000000, 0x0, 0x0, 0x0)
@@ -151,9 +155,11 @@ class HWCopyQueue:
     if (device.sdma_doorbell_value-read_ptr) > device.sdma_ring.size: raise RuntimeError("SDMA queue overrun")
     device.sdma_write_pointer[0] = device.sdma_doorbell_value
     device.sdma_doorbell[0] = device.sdma_doorbell_value
+    return self
 
   def timestamp(self, addr):
     self.q.append(sdma_pkts.timestamp(op=amd_gpu.SDMA_OP_TIMESTAMP, sub_op=amd_gpu.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL, addr=addr))
+    return self
 
   def copy(self, dest, src, copy_size):
     self.q.append(sdma_flush_hdp_pkt)  # TODO: do I need this?
@@ -166,6 +172,7 @@ class HWCopyQueue:
                                           count=step_copy_size-1, src_addr=src+copied, dst_addr=dest+copied))
       copied += step_copy_size
     self.q.append(sdma_cache_wb)
+    return self
 
   def signal(self, completion_signal):
     self.q.append(sdma_pkts.atomic(op=amd_gpu.SDMA_OP_ATOMIC, operation=amd_gpu.SDMA_ATOMIC_ADD64,
@@ -173,11 +180,13 @@ class HWCopyQueue:
     if completion_signal.event_mailbox_ptr != 0:
       self.q.append(sdma_pkts.fence(op=amd_gpu.SDMA_OP_FENCE, mtype=3, addr=completion_signal.event_mailbox_ptr, data=completion_signal.event_id))
       self.q.append(sdma_pkts.trap(op=amd_gpu.SDMA_OP_TRAP, int_ctx=completion_signal.event_id))
+    return self
 
   def wait(self, completion_signal):
     self.q.append(sdma_pkts.poll_regmem(op=amd_gpu.SDMA_OP_POLL_REGMEM, mem_poll=1, func=0x3,
                                         addr=ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'value').offset,
                                         value=0, mask=0xffffffff, interval=0x04, retry_count=0xfff))
+    return self
 
 class KFDProgram:
   def __init__(self, device:KFDDevice, name:str, lib:bytes):
@@ -220,13 +229,9 @@ class KFDProgram:
     for i in range(len(vals)): args_st.__setattr__(f'v{i}', vals[i])
 
     self.device.completion_signal.value = 1 # reset the signal before call
-
-    self.q = HWComputeQueue()
-    self.q.exec(self, self.device.kernargs_ptr, global_size, local_size, self.device.completion_signal if wait else None)
+    HWComputeQueue().exec(self, self.device.kernargs_ptr, global_size, local_size,
+                          self.device.completion_signal if wait else None).submit(self.device)
     self.device.kernargs_ptr += self.kernargs_segment_size
-
-    # one pending packet + ring doorbell
-    self.q.submit(self.device)
 
     if wait:
       self.device._wait_on(self.device.completion_signal.event_id)
@@ -273,18 +278,10 @@ class KFDAllocator(LRUAllocator):
 
   def transfer(self, dest, src, sz:int, src_dev=None, dest_dev=None):
     dest_dev._gpu_map(src)
-    q = HWComputeQueue()
-    q2 = HWComputeQueue()
-    qc2 = HWCopyQueue()
-    q.signal(sig := KFDDevice._get_signal())
-    qc2.wait(sig)
-    qc2.copy(dest.va_addr, src.va_addr, sz)
-    qc2.signal(sigc := KFDDevice._get_signal())
-    q2.wait(sigc)
-    q.wait(sigc)  # NOTE: we need to wait here to prevent buffer reuse
-    q.submit(src_dev)
-    qc2.submit(dest_dev)
-    q2.submit(dest_dev)
+    q = HWComputeQueue().signal(sig := KFDDevice._get_signal())
+    HWCopyQueue().wait(sig).copy(dest.va_addr, src.va_addr, sz).signal(sigc := KFDDevice._get_signal()).submit(dest_dev)
+    HWComputeQueue().wait(sigc).submit(dest_dev)
+    q.wait(sigc).submit(src_dev)
 
   def copyin(self, dest, src: memoryview):
     for i in range(0, src.nbytes, self.b[0].size):
@@ -475,9 +472,7 @@ class KFDDevice(Compiled):
     assert (wp:=self.amd_aql_queue.write_dispatch_id) == (rp:=self.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
 
   def synchronize(self):
-    q = HWComputeQueue()
-    q.signal(self.completion_signal)
-    q.submit(self)
+    HWComputeQueue().signal(self.completion_signal).submit(self)
     self._wait_on(self.completion_signal.event_id)
     assert (wp:=self.amd_aql_queue.write_dispatch_id) == (rp:=self.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
 
