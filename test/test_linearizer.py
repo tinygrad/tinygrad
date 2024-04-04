@@ -142,15 +142,6 @@ class TestLinearizer(unittest.TestCase):
     num_ops = len([uop for uop in k.uops if uop.uop is UOps.ALU])
     assert num_ops == 0, "more alu uops than needed"
 
-  def test_constant_fold(self):
-    a, b = Tensor(2), Tensor(3)
-    r = a * b
-
-    k = Linearizer(*create_schedule([r.lazydata])[-1].ast)
-    k.linearize()
-    num_ops = len([uop for uop in k.uops if uop.uop in [UOps.LOAD, UOps.ALU]])
-    assert num_ops <= 0, "more load or alu uops than needed"
-
   def test_sum_acc_dtype(self):
     for tensor_dtype, acc_dtype in (
       (dtypes.bool, dtypes.int), (dtypes.int16, dtypes.int), (dtypes.float16, dtypes.float), (dtypes.bfloat16, dtypes.float)):
@@ -212,7 +203,7 @@ class TestLinearizer(unittest.TestCase):
     lin.limit_dims_to_max(global_max=[16, 16, 16], local_max=[16, 16, 16])
 
   def test_sum_collapse(self):
-    t = Tensor.ones(256,256).sum()
+    t = Tensor([2]).reshape(1, 1).expand(256, 256).sum()
     sched = [si for si in create_schedule([t.lazydata]) if si.ast[0].op not in LoadOps]
     assert len(sched) == 1
     lin = Linearizer(*sched[0].ast)
@@ -728,7 +719,7 @@ class TestKernelOpts(unittest.TestCase):
 
   def test_padto_max(self):
     N = 17 * 17
-    a = -Tensor.ones(N, N)
+    a = -Tensor.rand(N, N)
 
     helper_linearizer_opt(a.max(0), [
       [Opt(OptOps.PADTO, 0, 32)],

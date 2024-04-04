@@ -203,10 +203,7 @@ class TestConstantFolding(unittest.TestCase):
   def test_cast_const(self):
     t = Tensor(1, dtype=dtypes.float).cast(dtypes.int)
     si = create_schedule([t.lazydata])
-    assert len(si) == 1
-    si = si[0]
-    lin = Device[Device.DEFAULT].get_linearizer(si.ast[0]).linearize()
-    assert all(uop.uop is not UOps.CAST for uop in lin.uops.uops), f"{[uop.uop for uop in lin.uops.uops]} contains non-folded constant cast"
+    assert len(si) == 0
 
   def test_bitcast_const(self):
     t = Tensor(1, dtype=dtypes.float).bitcast(dtypes.int)

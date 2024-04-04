@@ -422,7 +422,7 @@ class Tensor:
     else: indices = [indices]
 
     # turn scalar Tensors into const val for int indexing if possible
-    indices = [self._to_const_val(i) if isinstance(i, Tensor) else i for i in indices]
+    indices = [self._to_const_val(i) if isinstance(i, Tensor) and i.shape == () else i for i in indices]
     # move Tensor indices to the same device as self
     indices = [i.to(self.device) if isinstance(i, Tensor) else i for i in indices]
 
