@@ -230,7 +230,7 @@ class KFDProgram:
     if wait:
       self.device._wait_on(self.device.completion_signal.event_id)
       assert (wp:=self.device.amd_aql_queue.write_dispatch_id) == (rp:=self.device.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
-      return (self.device.completion_signal.end_ts-self.device.completion_signal.start_ts)/1e9
+      return (self.device.completion_signal.end_ts-self.device.completion_signal.start_ts)/1e8
 
 class KFDAllocator(LRUAllocator):
   def __init__(self, device:KFDDevice):
