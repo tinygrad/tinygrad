@@ -27,6 +27,9 @@ def PUSH_DATA(data):
 def PUSH_DATA64(data):
   PUSH_DATA(data >> 32)
   PUSH_DATA(data & 0xFFFFFFFF)
+def PUSH_DATA64LE(data):
+  PUSH_DATA(data & 0xFFFFFFFF)
+  PUSH_DATA(data >> 32)
 def NVC0_FIFO_PKHDR_SQ(subc, mthd, size): return 0x20000000 | (size << 16) | (subc << 13) | (mthd >> 2)
 def BEGIN_NVC0(subc, mthd, size): PUSH_DATA(NVC0_FIFO_PKHDR_SQ(subc, mthd, size)) 
 def NVC0_FIFO_PKHDR_NI(subc, mthd, size): return 0x60000000 | (size << 16) | (subc << 13) | (mthd >> 2)
@@ -61,7 +64,15 @@ def cmd_dma_copy(dst, src, sz):
   BEGIN_NVC0(4, nvqcmd.NVC6B5_LAUNCH_DMA, 1)
   PUSH_DATA(0x00000182)
 
-def cmd_memcpy(dst, src, sz):
+def cmd_memcpy(dst, src, sz, signal_addr):
+  BEGIN_NVC0(1, nvcls.NVC56F_SEM_ADDR_LO, 5)
+  PUSH_DATA64LE(signal_addr)
+  PUSH_DATA64LE(0x0)
+  PUSH_DATA(0x2 | (1 << 12)| (1 << 24))
+
+  BEGIN_NVC0(0, nvcls.NVC56F_NON_STALL_INTERRUPT, 1)
+  PUSH_DATA(0x333)
+  
   BEGIN_NVC0(1, nvqcmd.NVC6C0_OFFSET_OUT_UPPER, 2)
   PUSH_DATA64(dst)
   BEGIN_NVC0(1, nvqcmd.NVC6C0_LINE_LENGTH_IN, 2)
@@ -71,6 +82,14 @@ def cmd_memcpy(dst, src, sz):
   PUSH_DATA(0x41)
   BEGIN_NIC0(1, nvqcmd.NVC6C0_LOAD_INLINE_DATA, sz//4)
   for i in range(sz//4): PUSH_DATA(src[i])
+
+  BEGIN_NVC0(0, nvcls.NVC56F_SEM_ADDR_LO, 5)
+  PUSH_DATA64LE(signal_addr)
+  PUSH_DATA64LE(0xdeadbeefdeadbeef)
+  PUSH_DATA(0x1 | (1 << 24) | (1 << 25))
+
+  BEGIN_NVC0(0, nvcls.NVC56F_NON_STALL_INTERRUPT, 1)
+  PUSH_DATA(0x333)
 
 def cmd_compute(qmd, prog, params, params_len):
   arr = (ctypes.c_uint32 * 0x40)()
@@ -270,11 +289,38 @@ if __name__ == "__main__":
 
   gpu_base = 0x200500000
   cmdq = gpu_base+0x6000
+  signal_addr = gpu_base+0x7000
   ring_cmd = to_mv(cmdq, 0x1000).cast("I")
-  cmd_memcpy(gpu_base+4, (ctypes.c_uint32*1).from_buffer_copy(b'\xaa\xbb\xcc\xdd'), 4)
+  cmd_memcpy(gpu_base+4, (ctypes.c_uint32*1).from_buffer_copy(b'\xaa\xbb\xcc\xdd'), 4, signal_addr)
 
   gpu_ring = to_mv(0x200400000, 0x2000).cast("Q")
-  gpu_ring[0] = cmdq | (ring_off << 40)
+
+  # looks like these are this: https://github.com/NVIDIA/open-gpu-doc/blob/master/manuals/ampere/ga100/dev_pbdma.ref.txt (NV_PPBDMA GPENTRY DATA FORMAT)
+  #define NV_PPBDMA_GP_ENTRY__SIZE                                  8 /*       */
+  #define NV_PPBDMA_GP_ENTRY0                              0x10000000 /*       */
+  #define NV_PPBDMA_GP_ENTRY0_OPERAND                            31:0 /*       */
+  #define NV_PPBDMA_GP_ENTRY0_FETCH                               0:0 /*       */
+  #define NV_PPBDMA_GP_ENTRY0_FETCH_UNCONDITIONAL          0x00000000 /*       */
+  #define NV_PPBDMA_GP_ENTRY0_FETCH_CONDITIONAL            0x00000001 /*       */
+  #define NV_PPBDMA_GP_ENTRY0_GET                                31:2 /*       */
+  #define NV_PPBDMA_GP_ENTRY1                              0x10000004 /*       */
+  #define NV_PPBDMA_GP_ENTRY1_GET_HI                              7:0 /*       */
+  #define NV_PPBDMA_GP_ENTRY1_LEVEL                               9:9 /*       */
+  #define NV_PPBDMA_GP_ENTRY1_LEVEL_MAIN                   0x00000000 /*       */
+  #define NV_PPBDMA_GP_ENTRY1_LEVEL_SUBROUTINE             0x00000001 /*       */
+  #define NV_PPBDMA_GP_ENTRY1_LENGTH                            30:10 /*       */
+  #define NV_PPBDMA_GP_ENTRY1_LENGTH_CONTROL               0x00000000 /*       */
+  #define NV_PPBDMA_GP_ENTRY1_SYNC                              31:31 /*       */
+  #define NV_PPBDMA_GP_ENTRY1_SYNC_PROCEED                 0x00000000 /*       */
+  #define NV_PPBDMA_GP_ENTRY1_SYNC_WAIT                    0x00000001 /*       */
+  #define NV_PPBDMA_GP_ENTRY1_OPCODE                              7:0 /*       */
+  #define NV_PPBDMA_GP_ENTRY1_OPCODE_NOP                   0x00000000 /*       */
+  #define NV_PPBDMA_GP_ENTRY1_OPCODE_ILLEGAL               0x00000001 /*       */
+  #define NV_PPBDMA_GP_ENTRY1_OPCODE_GP_CRC                0x00000002 /*       */
+  #define NV_PPBDMA_GP_ENTRY1_OPCODE_PB_CRC                0x00000003 /*       */
+  assert cmdq == ((cmdq >> 2) << 2)
+  assert ring_off == ((ring_off >> 2) << 2)
+  gpu_ring[0] = cmdq | (ring_off << 40) | (1 << 63) # sync them
   
   gpu_ring_controls = nvcls.AmpereAControlGPFifo.from_address(0x200400000 + 0x2000)
   gpu_ring_controls.GPPut = 1
@@ -286,7 +332,13 @@ if __name__ == "__main__":
   get_val = gpu_ring_controls.GPGet
   while get_val != 1: get_val = gpu_ring_controls.GPGet
 
-  hexdump(to_mv(gpu_base, 0x100))
+  import time
+  time.sleep(1)
+
+  hexdump(to_mv(gpu_base, 0x20))
+
+  print()
+  hexdump(to_mv(signal_addr, 0x20))
 
   _gpu_alloc(root, device, fd_ctl, gpu_uuid, 64)
 
