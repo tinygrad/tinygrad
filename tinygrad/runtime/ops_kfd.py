@@ -235,6 +235,7 @@ class KFDProgram:
 class KFDAllocator(LRUAllocator):
   def __init__(self, device:KFDDevice):
     self.device = device
+    self.b = [self.device._gpu_alloc(SDMA_MAX_COPY_SIZE, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, public=True) for _ in range(1)]
     super().__init__()
 
   def _alloc(self, size:int, options:BufferOptions):
@@ -249,28 +250,25 @@ class KFDAllocator(LRUAllocator):
     self.device._gpu_free(gpumem)
 
   def copyin(self, dest, src: memoryview):
-    # TODO: need to make the address visible to gpu and pass it directly to sdma.
-    self.device._map_userptr_to_gpu(ctypes.addressof(from_mv(src).contents), src.nbytes)
-    self.device.completion_signal.value = 1
-    self.device._submit_sdma(dest.va_addr, ctypes.addressof(from_mv(src).contents), src.nbytes, completion_signal=self.device.completion_signal)
-    self.device._wait_on(self.device.completion_signal.event_id)
+    for i in range(0, src.nbytes, self.b[0].size):
+      ctypes.memmove(self.b[0].va_addr, from_mv(src[i:]), lsize:=min(self.b[0].size, src.nbytes-i))
+      self.device.completion_signal.value = 1
+      self.device._submit_sdma(dest.va_addr+i, self.b[0].va_addr, lsize, completion_signal=self.device.completion_signal)
+      self.device._wait_on(self.device.completion_signal.event_id)
 
   def copyout(self, dest:memoryview, src):
-    self.device._map_userptr_to_gpu(ctypes.addressof(from_mv(dest).contents), dest.nbytes)
-    self.device.completion_signal.value = 1
-    self.device._submit_sdma(ctypes.addressof(from_mv(dest).contents), src.va_addr, dest.nbytes, completion_signal=self.device.completion_signal)
-    self.device._wait_on(self.device.completion_signal.event_id)
+    for i in range(0, dest.nbytes, self.b[0].size):
+      self.device.completion_signal.value = 1
+      self.device._submit_sdma(self.b[0].va_addr, src.va_addr+i, lsize:=min(self.b[0].size, dest.nbytes-i),
+                               completion_signal=self.device.completion_signal)
+      self.device._wait_on(self.device.completion_signal.event_id)
+      ctypes.memmove(from_mv(dest[i:]), self.b[0].va_addr, lsize)
 
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
 class KFDDevice(Compiled):
   kfd:int = -1
   event_page:Any = None  # TODO: fix types in kfd, Optional[kfd.struct_kfd_ioctl_alloc_memory_of_gpu_args]
   signals_page:Any = None
-
-  def _map_userptr_to_gpu(self, addr, size):
-    self.map_uptr2gpu_struct.start_addr = addr&~0xfff
-    self.map_uptr2gpu_struct.size = round_up(size+addr-(addr&~0xfff), 0x1000)
-    kio.svm(self.kfd, made_struct=self.map_uptr2gpu_struct)
 
   def _gpu_map(self, mem):
     mem.__setattr__("mapped_gpu_ids", getattr(mem, "mapped_gpu_ids", []) + [self.gpu_id])
@@ -403,24 +401,13 @@ class KFDDevice(Compiled):
     self.pm4_packet = hsa.hsa_ext_amd_aql_pm4_packet_t(header=VENDOR_HEADER, pm4_command=pm4_cmds,
                                                        completion_signal=hsa.hsa_signal_t(ctypes.addressof(self.completion_signal)))
 
-    # Helpers
-    map_uptr2gpu_struct_t = init_c_struct_t(tuple(kfd.struct_kfd_ioctl_svm_args._fields_[:-1]+[('attrs', kfd.struct_kfd_ioctl_svm_attribute*2)])) # type: ignore
-    self.map_uptr2gpu_struct = map_uptr2gpu_struct_t(nattr=2, op=kfd.KFD_IOCTL_SVM_OP_SET_ATTR)
-    self.map_uptr2gpu_struct.attrs[0].type = kfd.KFD_IOCTL_SVM_ATTR_SET_FLAGS
-    self.map_uptr2gpu_struct.attrs[0].value = kfd.KFD_IOCTL_SVM_FLAG_COHERENT
-    self.map_uptr2gpu_struct.attrs[1].type = kfd.KFD_IOCTL_SVM_ATTR_ACCESS_IN_PLACE
-    self.map_uptr2gpu_struct.attrs[1].value = self.gpu_id
-
     super().__init__(device, KFDAllocator(self), KFDCompiler(self.arch), functools.partial(KFDProgram, self))
 
   def _submit_sdma(self, dest, src, copy_size, wait_signals=None, completion_signal=None):
-
     q = HWCopyQueue()
-
     if wait_signals is not None:
       # NOTE: we check only low 32 bits to be zeroed, we don't use higher values for signals
       for sig in wait_signals: q.wait(ctypes.addressof(sig) + getattr(hsa.amd_signal_t, 'value').offset)
-
     if completion_signal is not None: q.timestamp(ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'start_ts').offset)
     q.copy(dest, src, copy_size)
     if completion_signal is not None: q.timestamp(ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'end_ts').offset)

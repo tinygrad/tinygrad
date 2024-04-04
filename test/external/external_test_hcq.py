@@ -169,11 +169,11 @@ class TestHCQ(unittest.TestCase):
     q = HWComputeQueue()
     qc = HWCopyQueue()
     q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size)  # b = [1, 2]
-    KFDDevice._get_signal(10).value = 1
     q.signal(sig:=KFDDevice._get_signal(10))
     qc.wait(sig)
     qc.copy(TestHCQ.a.lazydata.buffer._buf.va_addr, TestHCQ.b.lazydata.buffer._buf.va_addr, 8)
     qc.signal(TestHCQ.d0.completion_signal)
+    sig.value = 1
     qc.submit(TestHCQ.d0)
     time.sleep(0.02) # give it time for the wait to fail
     q.submit(TestHCQ.d0)
