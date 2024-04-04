@@ -5,7 +5,7 @@ from collections import defaultdict
 
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.helpers import colored, DEBUG, prod, getenv, to_function_name
-from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ConstBuffer, MemBuffer, BufferOps, get_lazyop_info
+from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ConstBuffer, MemBuffer, BufferOps
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, create_lt_node
 from tinygrad.codegen.kernel import LocalBuffer, Kernel
@@ -50,9 +50,7 @@ class Linearizer(Kernel):
   def cast(self, val: UOp, dtype) -> UOp: return self.uops.add(UOps.CAST, dtype, (val,)) if val.dtype != dtype else val
 
   def get_reduce_acc(self, reduceop:LazyOp):
-    info = get_lazyop_info(reduceop)
-    assert all(0 <= x < len(info.shape) for x in reduceop.arg), "arg axis out of range"
-    dtype = info.dtype
+    dtype = reduceop.dtype
     if reduceop.op is ReduceOps.SUM: return 0.0 if dtypes.is_float(dtype) else 0
     elif reduceop.op is ReduceOps.MAX:
       if dtypes.is_int(dtype): return 0 if dtypes.is_unsigned(dtype) else -2**(dtype.itemsize*8-1)
@@ -73,7 +71,7 @@ class Linearizer(Kernel):
 
   def global_load(self, i:int, idxs:List[Node], acc=None, barrier:Optional[UOp]=None) -> List[UOp]:
     buf = self.bufs[i]
-    localtype = self.get_base_dtype(buf.dtype if acc is None else get_lazyop_info(self.reduceop).dtype)
+    localtype = self.get_base_dtype(buf.dtype if acc is None else self.reduceop.dtype)
     const = buf.val if isinstance(buf, ConstBuffer) else acc
 
     expand_vars = expand_idxs(idxs)
@@ -208,7 +206,7 @@ class Linearizer(Kernel):
     if self.group_for_reduces:
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker.from_shape(tuple([1] * self.global_dims + list(self.full_shape[self.global_dims:self.global_dims+self.local_dims+self.group_for_reduces]) + [1] * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))  # noqa: E501
-      temp_dtype = self.get_base_dtype(get_lazyop_info(self.reduceop).dtype)
+      temp_dtype = self.get_base_dtype(self.reduceop.dtype)
       self.bufs.append(LocalBuffer("temp", self.sts[-1].size, temp_dtype))
       self.buf_uops.append(self.uops.add(UOps.DEFINE_LOCAL, PtrDType(temp_dtype), (), ("temp", self.sts[-1].size)))
 
