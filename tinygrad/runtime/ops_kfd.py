@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Tuple, Any
-import os, fcntl, ctypes, functools, re, pathlib, mmap, struct, errno
+import os, fcntl, ctypes, functools, re, pathlib, mmap, struct, errno, io
 from tinygrad.device import Compiled, LRUAllocator, Compiler, BufferOptions, CompilerOptions
 from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up
 from tinygrad.renderer.cstyle import HIPRenderer
@@ -73,6 +73,7 @@ class KFDCompiler(Compiler):
 
 AQL_PACKET_SIZE = ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t)
 SDMA_MAX_COPY_SIZE = 0x400000
+PAGE_SIZE = 0x1000
 
 SIGNAL_SIZE, SIGNAL_COUNT = ctypes.sizeof(hsa.amd_signal_t), 256
 
@@ -235,7 +236,7 @@ class KFDProgram:
 class KFDAllocator(LRUAllocator):
   def __init__(self, device:KFDDevice):
     self.device = device
-    self.b = [self.device._gpu_alloc(SDMA_MAX_COPY_SIZE, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, public=True) for _ in range(1)]
+    self.b = [self.device._gpu_alloc(SDMA_MAX_COPY_SIZE*4, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, public=True) for _ in range(2)]
     super().__init__()
 
   def _alloc(self, size:int, options:BufferOptions):
@@ -249,12 +250,33 @@ class KFDAllocator(LRUAllocator):
   def _free(self, gpumem, options:BufferOptions):
     self.device._gpu_free(gpumem)
 
+  def copy_from_fd(self, dest, fd, offset, size):
+    fo = io.FileIO(fd, "a+b", closefd=False)
+    fo.seek(offset - (minor_offset:=offset % PAGE_SIZE))
+    copied_in, total_copy_size = 0, round_up(size+minor_offset, PAGE_SIZE)
+    for i in range(0, size+minor_offset, self.b[0].size):
+      local_size = min(self.b[0].size, total_copy_size-i)
+      copy_size = min(local_size-minor_offset, size-copied_in)
+      if copy_size == 0: break
+
+      fo.readinto(to_mv(self.b[1].va_addr, local_size))
+      if i != 0: self.device._wait_on(self.device.completion_signal.event_id)
+      self.b = self.b[::-1]
+      self.device.completion_signal.value = 1  # TODO: when do we have to reset it?
+      self.device._submit_sdma(dest.va_addr+copied_in, self.b[0].va_addr+minor_offset, copy_size, completion_signal=self.device.completion_signal)
+
+      copied_in += copy_size
+      minor_offset = 0 # only on the first
+    self.device._wait_on(self.device.completion_signal.event_id)
+
   def copyin(self, dest, src: memoryview):
     for i in range(0, src.nbytes, self.b[0].size):
-      ctypes.memmove(self.b[0].va_addr, from_mv(src[i:]), lsize:=min(self.b[0].size, src.nbytes-i))
-      self.device.completion_signal.value = 1
+      ctypes.memmove(self.b[1].va_addr, from_mv(src[i:]), lsize:=min(self.b[0].size, src.nbytes-i))
+      if i != 0: self.device._wait_on(self.device.completion_signal.event_id)
+      self.b = self.b[::-1]
+      self.device.completion_signal.value = 1  # TODO: when do we have to reset it?
       self.device._submit_sdma(dest.va_addr+i, self.b[0].va_addr, lsize, completion_signal=self.device.completion_signal)
-      self.device._wait_on(self.device.completion_signal.event_id)
+    self.device._wait_on(self.device.completion_signal.event_id)
 
   def copyout(self, dest:memoryview, src):
     for i in range(0, dest.nbytes, self.b[0].size):
