@@ -247,6 +247,7 @@ class KFDProgram:
 class KFDAllocator(LRUAllocator):
   def __init__(self, device:KFDDevice):
     self.device = device
+    # NOTE: KFD_IOC_ALLOC_MEM_FLAGS_GTT doesn't work here for readinto
     self.b = [self.device._gpu_alloc(SDMA_MAX_COPY_SIZE*4, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, public=True) for _ in range(2)]
     super().__init__()
 
@@ -263,7 +264,7 @@ class KFDAllocator(LRUAllocator):
   #  self.device.synchronize()
   #  return to_mv(src.va_addr, src.size)
 
-  def transfer(self, dest, src, sz:int, src_dev=None, dest_dev=None):
+  def transfer(self, dest, src, sz:int, src_dev:KFDDevice, dest_dev:KFDDevice):
     dest_dev._gpu_map(src)
     q = HWComputeQueue().signal(sig := KFDDevice._get_signal())
     HWCopyQueue().wait(sig).copy(dest.va_addr, src.va_addr, sz).signal(sigc := KFDDevice._get_signal()).submit(dest_dev)
@@ -373,7 +374,7 @@ class KFDDevice(Compiled):
     kio.acquire_vm(KFDDevice.kfd, drm_fd=self.drm_fd, gpu_id=self.gpu_id)
 
     if KFDDevice.event_page is None:
-      KFDDevice.signals_page = self._gpu_alloc(SIGNAL_SIZE*SIGNAL_COUNT, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
+      KFDDevice.signals_page = self._gpu_alloc(SIGNAL_SIZE*SIGNAL_COUNT, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
       KFDDevice.event_page = self._gpu_alloc(0x8000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
       sync_event = kio.create_event(KFDDevice.kfd, event_page_offset=KFDDevice.event_page.handle, auto_reset=1)
     else:
@@ -386,7 +387,7 @@ class KFDDevice(Compiled):
 
     self.gart_aql = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
     self.gart_sdma = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
-    self.aql_ring = self._gpu_alloc(0x100000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
+    self.aql_ring = self._gpu_alloc(0x100000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
     self.eop_buffer = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
     self.kernargs = self._gpu_alloc(0x1000000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
     self.kernargs_ptr = self.kernargs.va_addr
@@ -431,7 +432,7 @@ class KFDDevice(Compiled):
     self.aql_doorbell_value = 0
 
     # SDMA Queue
-    self.sdma_ring = self._gpu_alloc(0x100000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
+    self.sdma_ring = self._gpu_alloc(0x100000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
     self.sdma_queue = kio.create_queue(KFDDevice.kfd, ring_base_address=self.sdma_ring.va_addr, ring_size=self.sdma_ring.size, gpu_id=self.gpu_id,
       queue_type=kfd.KFD_IOC_QUEUE_TYPE_SDMA, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE, queue_priority=kfd.KFD_MAX_QUEUE_PRIORITY,
       write_pointer_address=self.gart_sdma.va_addr, read_pointer_address=self.gart_sdma.va_addr)
@@ -442,7 +443,7 @@ class KFDDevice(Compiled):
     self.sdma_doorbell_value = 0
 
     # PM4 stuff
-    self.pm4_indirect_buf = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
+    self.pm4_indirect_buf = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
     pm4_indirect_cmd = (ctypes.c_uint32*13)(amd_gpu.PACKET3(amd_gpu.PACKET3_INDIRECT_BUFFER, 2), self.pm4_indirect_buf.va_addr & 0xffffffff,
                                             (self.pm4_indirect_buf.va_addr>>32) & 0xffffffff, 8 | amd_gpu.INDIRECT_BUFFER_VALID, 0xa)
     ctypes.memmove(ctypes.addressof(pm4_cmds:=(ctypes.c_uint16*27)(1))+2, ctypes.addressof(pm4_indirect_cmd), ctypes.sizeof(pm4_indirect_cmd))
