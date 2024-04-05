@@ -54,7 +54,7 @@ class ConvertCocoPolysToMask(object):
     target = {}
     target["boxes"] = Tensor(boxes)#.realize()
     # print('BOXES:TENSCONV', target["boxes"].numpy())
-    target["labels"] = Tensor(classes).realize()
+    target["labels"] = Tensor(classes)#.realize()
     target["image_id"] = image_id
 
     # for conversion to coco api
@@ -156,8 +156,28 @@ def resize_boxes(boxes: Tensor, original_size: List[int], new_size: List[int]) -
   # print('RESIZE_ANS', ans.shape)
   return ans
 import torchvision.transforms.functional as F
+import torch
 # SIZE = (400,400)
 SIZE = (800, 800)
+# image_std = torch.tensor([0.229, 0.224, 0.225])
+# image_mean = torch.tensor([0.485, 0.456, 0.406])
+# def normalize(image):
+#         if not image.is_floating_point():
+#             raise TypeError(
+#                 f"Expected input images to be of floating type (in range [0, 1]), "
+#                 f"but found type {image.dtype} instead"
+#             )
+#         # dtype, device = image.dtype, image.device
+#         # mean = torch.as_tensor(self.image_mean, dtype=dtype, device=device)
+#         # std = torch.as_tensor(self.image_std, dtype=dtype, device=device)
+#         return (image - image_mean[:, None, None]) / image_std[:, None, None]
+image_std = Tensor([0.229, 0.224, 0.225]).reshape(-1,1,1)
+image_mean = Tensor([0.485, 0.456, 0.406]).reshape(-1,1,1)
+def normalize(x):
+  x = x.permute((2,0,1)) / 255.0
+  x -= image_mean
+  x /= image_std
+  return x.realize()
 # def iterate(coco, bs=8):
 #   for i in range(0, 800, bs):
 #   # for i in range(8, len(coco.ids), bs):
@@ -186,21 +206,40 @@ def iterate (coco, bs=8):
     X, targets = [], []
     while(i_sub<bs):
       # print(i_sub)
-      x,t = coco.__getitem__(i+i_sub+rem)
+      x_orig,t = coco.__getitem__(i+i_sub+rem)
       if(t['boxes'].shape[0]==0):
         rem+=1
         # pass
       else:
-        xNew = F.resize(x, size=SIZE)
-        xNew = np.array(xNew)
+        # temp = np.array(x_orig)
+        # print('TEMP', temp.shape)
+        # x_torch = torch.as_tensor(x_orig, dtype=torch.float)
+        # print('xTORCH', x_torch.shape)
+        # x_torch =x_torch.unsqueeze(0)
+        # x_torch = x_torch.to(memory_format=torch.channels_last)
+        # x_torch =x_torch.squeeze(0)
+        # # x_torch = x_torch.permute(2, 0, 1)
+        # print('POST xTORCH', x_torch.shape)
+        # x_torch = normalize(x_torch)
+        # print(x_torch)
+        xNew = F.resize(x_orig, size=SIZE)
+        # print('POSt RESIZE')
+        
+        # xNew = xNew.numpy()
+
+        # xNew = Tensor(np.array(xNew))
+        xNew = normalize(Tensor(np.array(xNew)))
+
+        # print('X_NEW',xNew.shape, xNew)
         X.append(xNew)
         bbox = t['boxes']
         # print('ITERATE_PRE_RESIZE', bbox.shape)
-        bbox = resize_boxes(bbox, x.size, SIZE)
+        bbox = resize_boxes(bbox, x_orig.size, SIZE)
         # print('ITERATE_POST_RESIZE', bbox.shape)
-        t['boxes'] = bbox.realize()
+        t['boxes'] = bbox#.realize()
         targets.append(t)
         i_sub+=1
-    yield Tensor(X), targets
+    # yield Tensor(X), targets
+    yield Tensor.stack(X), targets
     i= i+bs+rem
 

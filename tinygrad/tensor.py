@@ -121,7 +121,11 @@ class Tensor:
   # Python has a non moving GC, so this should be okay
   def __hash__(self): return id(self)
 
-  def __bool__(self): raise TypeError("__bool__ on Tensor is not defined")
+  def __bool__(self): 
+    if(self.numel()==1): 
+      # print('__BOOL__ TeNS',self.item())
+      return self.item()
+    raise TypeError("__bool__ on Tensor is not defined")
 
   @property
   def device(self) -> Union[str, Tuple[str, ...]]: return self.lazydata.device

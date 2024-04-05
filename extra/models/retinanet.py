@@ -140,6 +140,10 @@ class AnchorGenerator:
     self.aspect_ratios = aspect_ratios
     self.cell_anchors = [self.generate_anchors(size, aspect_ratio)
                           for size, aspect_ratio in zip(sizes, aspect_ratios)]
+    # print('ANCHOR_GEN', self.sizes, self.aspect_ratios)
+    # for c in self.cell_anchors:
+    #   print(c.shape)
+    #   print(c.numpy())
 
   # TODO: https://github.com/pytorch/pytorch/issues/26792
   # For every (aspect_ratios, scales) combination, output a zero-centered anchor with those values.
@@ -151,8 +155,11 @@ class AnchorGenerator:
     h_ratios = aspect_ratios.sqrt()
     w_ratios = 1 / h_ratios
 
-    ws = (w_ratios[:, None] * scales[None, :])  #.view(-1)
-    hs = (h_ratios[:, None] * scales[None, :])  #.view(-1)
+    # ws = (w_ratios[:, None] * scales[None, :])  #.view(-1)
+    # hs = (h_ratios[:, None] * scales[None, :])  #.view(-1)
+
+    ws = (w_ratios.unsqueeze(1) * scales.unsqueeze(0)).reshape(-1)  #.view(-1)
+    hs = (h_ratios.unsqueeze(1) * scales.unsqueeze(0)).reshape(-1)  #.view(-1)
 
     base_anchors = Tensor.stack([-ws, -hs, ws, hs], dim=1) / 2
     return base_anchors.round()

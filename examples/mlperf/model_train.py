@@ -428,9 +428,10 @@ def train_retinanet():
   model = RetinaNet(ResNeXt50_32X4D(), num_anchors=anchor_generator.num_anchors_per_location()[0])
   mdlrun = TinyJit(lambda x: model(input_fixup(x)))
   mdlloss = TinyJit(lambda r, c, Y, a: model.loss(r,c,Y,a))
+  mdlloss_temp = TinyJit(lambda r, c,y,a : model.loss_temp(r,c,y,a))
   parameters = []
   for k, x in get_state_dict(model).items():
-    print(k, x.shape)
+    # print(k, x.shape)
     # print(k, x.numpy())
     # x.requires_grad = True
     
@@ -438,7 +439,7 @@ def train_retinanet():
     if 'head' in k and ('clas' in k or 'reg' in k ):
     # if 'head' in k and ('reg' in k ):
     # if 'head' in k and ('clas' in k ):
-      # print(k)
+      print(k)
       x.requires_grad = True
       # parameters.append(x)
     else:
@@ -456,12 +457,39 @@ def train_retinanet():
   #   else:
   #     x.requires_grad = False
   #   # print(k, x.requires_grad)
+  @TinyJit
   def train_step(X, Y):
     Tensor.training = True
+    optimizer.zero_grad()
     # mdlloss.reset()
-    b,r,c = mdlrun(X)
+    # b,r,c = mdlrun(X)
+    # b,r,c = model(input_fixup(X))
+    b,r,c = model(X)
+    r = r.chunk(BS)
+    r = [rr.squeeze(0) for rr in r]
+    c = c.chunk(BS)
+    c = [cc.squeeze(0) for cc in c]
+    # print(len(b))
+    # for bb in b:
+    #   print(bb.shape)
+    # a = anchor_generator(X, b)
+    # print('ANCHORS')
+    # for aa in a:
+    #   print(aa.numpy())
+    #   print(aa.shape)
+    #   aa.realize()
+    # print('Old ANCHORS')
+    # a_old = model.anchor_gen((800,800))
+    # print(len(a_old), type(a_old[0]))
+    # for aa in a_old:
+    #   print(aa.shape)
     loss = model.loss(r, c, Y, anchor_generator(X, b))
+    # loss = mdlloss_temp(r,c, Y, anchor_generator(X, b))
+    # loss = model.loss_temp(r,c, Y, anchor_generator(X, b))
     # loss = mdlloss(r, c, Y, anchor_generator(X, b))
+    loss.backward()
+
+    optimizer.step()
     return loss
     return model(input_fixup(X))
     b,r,c = model(input_fixup(X))
@@ -486,15 +514,32 @@ def train_retinanet():
     print(colored(f'EPOCH {epoch}/{EPOCHS}:', 'cyan'))
     cnt = 0
     for X,Y in iterate(coco, BS):
+      st = time.time()
+      # print('IMAGE DATA', X)
+      # for tt in Y:
+      #   print(tt['boxes'].shape)
+      #   print(tt['boxes'].numpy())
+      # # print(X.numpy())
     # for X,Y in iterate(coco, BS, True):
+      # print('PRE ZZEERROO OPTIMIZER PARAMS')
+      # for pp in optimizer.params:
+      #   print(pp.requires_grad, pp.grad)
+      # print(colored(f'Image shape PREEEE {X.shape}', 'yellow'))
+      # temp = input_fixup(X).realize()
+      # print(colored(f'POST KIMAGE SHape {temp.shape} {temp.numpy()}', 'yellow'))
       cnt+=1
       # optimizer.zero_grad()
+      # a = anchor_generator(X, b)
       loss = train_step(X, Y)
-      # print(loss[2].numpy())
-      # Tensor.training = False
-      loss.backward()
+      
+      # print(colored(f'JIT STATE {train_step.cnt} {train_step.jit_cache} {train_step.input_replace}', 'red'))
+      
+      # loss.backward()
       # optimizer.step()
-      print(colored(f'{cnt} STEP {loss.numpy()}', 'magenta'))
+      print(colored(f'{cnt} STEP {loss.numpy()} || {time.time()-st}', 'magenta'))
+      # print('OPTIMIZER PARAMS')
+      # for pp in optimizer.params:
+      #   print(pp.requires_grad, pp.grad)
       # del loss
   #     if cnt>6:
   #       optimizer.zero_grad()
