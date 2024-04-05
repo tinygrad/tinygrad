@@ -5,6 +5,8 @@ from tinygrad.helpers import colored, flatten, get_child
 import tinygrad.nn as nn
 from extra.models.resnet import ResNet
 import numpy as np
+def cust_bin_cross_logits(inputs, targets):
+  return inputs.maximum(0) - targets * inputs + (1 + inputs.abs().neg().exp()).log()
 # @TinyJit
 def sigmoid_focal_loss(
     inputs: Tensor,
@@ -18,7 +20,8 @@ def sigmoid_focal_loss(
   # print(mask.numpy())
   # p = inputs.sigmoid()
   p = Tensor.sigmoid(inputs)
-  ce_loss = inputs.binary_crossentropy_logits(targets)
+  # ce_loss = inputs.binary_crossentropy_logits(targets)
+  ce_loss = cust_bin_cross_logits(inputs, targets)
   p_t = p * targets + (1 - p) * (1 - targets)
   loss = ce_loss * ((1 - p_t) ** gamma)
 
@@ -35,11 +38,14 @@ def sigmoid_focal_loss(
   # print('sigmoid_focal_loss:', loss.shape)
   # sys.exit()
   return loss
+# import torch
+# torch.nn.functional.l1_loss
+
 def l1_loss(x1:Tensor, x2:Tensor) -> Tensor:
   # print('l1 loss inputs', x1.numpy(), x2.numpy())
   # reduce with mean
   # https://pytorch.org/docs/stable/_modules/torch/nn/functional.html#l1_loss
-  ans = (x1 - x2).abs().mean(-1).sum()
+  ans = (x1 - x2).abs().sum()
   # print('l1 loss', ans.numpy())
   return ans
 def _sum(x):
@@ -487,7 +493,7 @@ class ClassificationHead:
   def loss(self, logits, targets, matched_idxs):
     losses = []
     for targets_per_image, cls_logits_per_image, matched_idxs_per_image in zip(targets, logits, matched_idxs):
-      print(colored(f'matched_idxs_per_image CLASS {matched_idxs_per_image.shape} {cls_logits_per_image.shape}', 'red' ))
+      # print(colored(f'matched_idxs_per_image CLASS {matched_idxs_per_image.shape} {cls_logits_per_image.shape}', 'red' ))
       # print(matched_idxs_per_image.numpy())
       # determine only the foreground
       foreground_idxs_per_image = matched_idxs_per_image >= 0
@@ -496,7 +502,10 @@ class ClassificationHead:
       # match_temp = Tensor.where(foreground_idxs_per_image, matched_idxs_per_image, -1)
       labels_temp = ((targets_per_image['labels'][matched_idxs_per_image]+1)*foreground_idxs_per_image)-1
       # labels_temp = Tensor.where(foreground_idxs_per_image, )
+      # print(colored(f'LABEL_TEMP {labels_temp.shape} {labels_temp.numpy()}', 'yellow'))
       gt_classes_target = labels_temp.one_hot(cls_logits_per_image.shape[-1])
+      # print(colored(f'gt_classes_target {gt_classes_target.shape} {gt_classes_target.sum().item()} {gt_classes_target.numpy()}', 'yellow'))
+      # print(colored(f'cls_logits {cls_logits_per_image.shape} {cls_logits_per_image.numpy()}', 'green'))
       # cls_logits_per_image = cls_logits_per_image.contiguous()
 
       # print('num_foreground:',num_foreground.shape, num_foreground.numpy())
@@ -535,7 +544,7 @@ class ClassificationHead:
       # gt_classes_target = Tensor(gt_classes_target_np.numpy()).realize()
       # del gt_classes_target_np
 
-      print('CLASs HEAD GT_TARGET', gt_classes_target.sum().item(), foreground_idxs_per_image.shape)
+      # print('CLASs HEAD GT_TARGET', gt_classes_target.sum().item(), foreground_idxs_per_image.shape)
 
       # print('Class_head matched_idxs_per_image', matched_idxs_per_image.numpy())
       valid_idxs_per_image = matched_idxs_per_image != Matcher.BETWEEN_THRESHOLDS
@@ -546,7 +555,10 @@ class ClassificationHead:
       # print(cls_logits_per_image.numpy())
       s = sigmoid_focal_loss(cls_logits_per_image, 
                                        gt_classes_target, valid_idxs_per_image)
-      losses.append(s/max(1, num_foreground.item()))
+      # s.realize()
+      a = s/max(1, num_foreground.item())
+      # print('SIGMOID LOSS', a.numpy(), max(1, num_foreground.item()), s.numpy())
+      losses.append(a)
       # print('CLASS LOSS ARRAY', losses[-1].numpy(), '||', num_foreground.item(), s.numpy())
 
     # print(colored(f'FINISHED CLASS LOSS APPEND{losses}', 'cyan'))
@@ -594,7 +606,7 @@ class RegressionHead:
       # print('Regression head match idx type:', matched_idxs_per_image.numpy())
       foreground_idxs_per_image = matched_idxs_per_image >= 0
       num_foreground = foreground_idxs_per_image.sum().item()
-      print('forGROUNDidx', foreground_idxs_per_image.shape)
+      # print('forGROUNDidx', foreground_idxs_per_image.shape)
       matched_gt_boxes_per_image = targets_per_image['boxes'][matched_idxs_per_image]*foreground_idxs_per_image.reshape(-1,1)
       bbox_regression_per_image = bbox_regression_per_image * foreground_idxs_per_image.reshape(-1,1)
       anchors_per_image = anchors_per_image * foreground_idxs_per_image.reshape(-1,1)
@@ -626,7 +638,7 @@ class RegressionHead:
 
       # compute the regression targets
       target_regression = encode_boxes(matched_gt_boxes_per_image, anchors_per_image)
-      print(f'L1_LOSS ARGS {bbox_regression_per_image.shape} {target_regression.shape}')
+      # print(f'L1_LOSS ARGS {bbox_regression_per_image.shape} {target_regression.shape}')
       target_regression = target_regression*foreground_idxs_per_image.reshape(-1,1)
       # compute the loss
       losses.append(l1_loss(

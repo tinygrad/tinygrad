@@ -14,7 +14,7 @@ class ConvertCocoPolysToMask(object):
     self.filter_iscrowd = filter_iscrowd
 
   def __call__(self, image, target):
-    h, w = image.size
+    w, h = image.size
 
     image_id = target["image_id"]
     image_id = Tensor([image_id])
@@ -50,6 +50,26 @@ class ConvertCocoPolysToMask(object):
     boxes = boxes[keep]
     # print('BOXES:KEPPPOST', boxes)
     classes = classes[keep]
+
+    # boxes = torch.as_tensor(boxes, dtype=torch.float32).reshape(-1, 4)
+    # boxes[:, 2:] += boxes[:, :2]
+    # boxes[:, 0::2].clamp_(min=0, max=w)
+    # boxes[:, 1::2].clamp_(min=0, max=h)
+
+    # classes = [obj["category_id"] for obj in anno]
+    # classes = torch.tensor(classes, dtype=torch.int64)
+
+    # keypoints = None
+    # if anno and "keypoints" in anno[0]:
+    #     keypoints = [obj["keypoints"] for obj in anno]
+    #     keypoints = torch.as_tensor(keypoints, dtype=torch.float32)
+    #     num_keypoints = keypoints.shape[0]
+    #     if num_keypoints:
+    #         keypoints = keypoints.view(num_keypoints, -1, 3)
+
+    # keep = (boxes[:, 3] > boxes[:, 1]) & (boxes[:, 2] > boxes[:, 0])
+    # boxes = boxes[keep]
+    # classes = classes[keep]
 
     target = {}
     target["boxes"] = Tensor(boxes)#.realize()
@@ -197,7 +217,7 @@ def normalize(x):
 #       targets.append(t)
 #     yield Tensor(X), targets
   
-def iterate (coco, bs=8):
+def iterate(coco, bs=8):
   
   i = 0
   while(i<800):
@@ -207,7 +227,8 @@ def iterate (coco, bs=8):
     while(i_sub<bs):
       # print(i_sub)
       x_orig,t = coco.__getitem__(i+i_sub+rem)
-      if(t['boxes'].shape[0]==0):
+      # print('DATLOAD_ITER', t['boxes'].shape)
+      if(t['boxes'].shape[0]<=0):
         rem+=1
         # pass
       else:

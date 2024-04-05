@@ -426,7 +426,7 @@ def train_retinanet():
 
 
   model = RetinaNet(ResNeXt50_32X4D(), num_anchors=anchor_generator.num_anchors_per_location()[0])
-  mdlrun = TinyJit(lambda x: model(x))
+  mdlrun = TinyJit(lambda x: model(x, True))
   mdlloss = TinyJit(lambda r, c, Y, a: model.loss(r,c,Y,a))
   mdlloss_temp = TinyJit(lambda r, c,y,a : model.loss_temp(r,c,y,a))
   parameters = []
@@ -468,18 +468,18 @@ def train_retinanet():
     # _ = model(X)
     # _ = mdlrun(X)
     # Tensor.training = False
-    # b,r,c = mdlrun(X)
+    b,r,c = mdlrun(X)
     # b,r,c = model(input_fixup(X))
 
     # b,r,c = model(X, True)
-    _ = model(X, False)
+    # _ = model(X, False)
     # r = r.chunk(BS)
     # r = [rr.squeeze(0) for rr in r]
     # c = c.chunk(BS)
     # c = [cc.squeeze(0) for cc in c]
 
-    loss = Tensor(69)
-    # loss = model.loss(r, c, Y, anchor_generator(X, b))
+    # loss = Tensor(69)
+    loss = model.loss(r, c, Y, anchor_generator(X, b))
     # loss = mdlloss_temp(r,c, Y, anchor_generator(X, b))
     # loss = model.loss_temp(r,c, Y, anchor_generator(X, b))
     # loss = mdlloss(r, c, Y, anchor_generator(X, b))
@@ -487,7 +487,7 @@ def train_retinanet():
     
     # loss.backward()
     # optimizer.step()
-    return loss
+    return loss.realize()
     return model(input_fixup(X))
     b,r,c = model(input_fixup(X))
     # outputs = mdlrun(X)
@@ -511,7 +511,7 @@ def train_retinanet():
     print(colored(f'EPOCH {epoch}/{EPOCHS}:', 'cyan'))
     cnt = 0
     for X,Y in iterate(coco, BS):
-      print('X_REQ_GRADDD', X.requires_grad)
+      # print('X_REQ_GRADDD', X.requires_grad)
       # train_step.reset()
       st = time.time()
       # print('IMAGE DATA', X)
