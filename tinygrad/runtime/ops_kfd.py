@@ -54,10 +54,9 @@ def create_sdma_packets():
           fname = union_fields[0]
           if fname in names: fname = pkt_fields[0]+fname
           names.add(fname)
-          if fname.endswith("_63_32") and fields[-1][0].endswith("_31_0"):
-            fields[-1] = tuple([fname[:-6], ctypes.c_ulong, 64])  # merge together 64-bit fields
-          else:
-            fields.append(tuple([fname, *union_fields[1:]]))
+          # merge together 64-bit fields, otherwise just append them
+          if fname.endswith("_63_32") and fields[-1][0].endswith("_31_0"): fields[-1] = tuple([fname[:-6], ctypes.c_ulong, 64])
+          else: fields.append(tuple([fname, *union_fields[1:]]))
     new_name = name[16:-4].lower()
     structs[new_name] = init_c_struct_t(tuple(fields))
     assert ctypes.sizeof(structs[new_name]) == ctypes.sizeof(pkt), f"{ctypes.sizeof(structs[new_name])} != {ctypes.sizeof(pkt)}"
@@ -148,15 +147,14 @@ class HWCopyQueue:
   def __init__(self): self.q = []
 
   def submit(self, device:KFDDevice):
-    def blit_sdma_command(cmd):
+    read_ptr = device.sdma_read_pointer[0]
+    if (device.sdma_doorbell_value-read_ptr) > device.sdma_ring.size: raise RuntimeError("SDMA queue overrun")
+    for cmd in self.q:
       if (cmdsz:=ctypes.sizeof(cmd)) > (fill:=device.sdma_ring.size - device.sdma_doorbell_value % device.sdma_ring.size):
         ctypes.memset(device.sdma_ring.va_addr + (device.sdma_doorbell_value % device.sdma_ring.size), 0, fill)
         device.sdma_doorbell_value += fill
       ctypes.memmove(device.sdma_ring.va_addr + (device.sdma_doorbell_value % device.sdma_ring.size), ctypes.addressof(cmd), cmdsz)
       device.sdma_doorbell_value += cmdsz
-    read_ptr = device.sdma_read_pointer[0]
-    if (device.sdma_doorbell_value-read_ptr) > device.sdma_ring.size: raise RuntimeError("SDMA queue overrun")
-    for cmd in self.q: blit_sdma_command(cmd)
     device.sdma_write_pointer[0] = device.sdma_doorbell_value
     device.sdma_doorbell[0] = device.sdma_doorbell_value
     return self
@@ -330,7 +328,6 @@ class KFDDevice(Compiled):
     mem = kio.alloc_memory_of_gpu(self.kfd, va_addr=addr, size=size, gpu_id=self.gpu_id, flags=flags, mmap_offset=buf)
     if not (flags & kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR):
       buf = libc.mmap(mem.va_addr, mem.size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|MAP_FIXED, self.drm_fd, mem.mmap_offset)
-      assert buf != 0xffffffffffffffff
       assert addr == buf == mem.va_addr
     if map_to_gpu: self._gpu_map(mem)
     return mem
