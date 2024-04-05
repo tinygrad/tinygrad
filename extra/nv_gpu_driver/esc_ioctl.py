@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# TARGET arch is: ['-I', '/home/nimlgen/cuda_ioctl_sniffer/open-gpu-kernel-modules/src/common/sdk/nvidia/inc', '-I', '/home/nimlgen/cuda_ioctl_sniffer/open-gpu-kernel-modules/src/common/sdk/nvidia/inc/ctrl']
+# TARGET arch is: ['-I/home/nimlgen/cuda_ioctl_sniffer/open-gpu-kernel-modules/src/common/sdk/nvidia/inc', '-I/home/nimlgen/cuda_ioctl_sniffer/open-gpu-kernel-modules/src/nvidia/arch/nvalloc/unix/include', '-I/home/nimlgen/cuda_ioctl_sniffer/open-gpu-kernel-modules/src/common/sdk/nvidia/inc/ctrl']
 # WORD_SIZE is: 8
 # POINTER_SIZE is: 8
 # LONGDOUBLE_SIZE is: 16
@@ -156,6 +156,7 @@ NV_ESC_RM_EXPORT_OBJECT_TO_FD = 0x5C # macro
 NV_ESC_RM_IMPORT_OBJECT_FROM_FD = 0x5D # macro
 NV_ESC_RM_UPDATE_DEVICE_MAPPING_INFO = 0x5E # macro
 NV_ESC_RM_LOCKLESS_DIAGNOSTIC = 0x5F # macro
+NV_IOCTL_H = True # macro
 NV_IOCTL_NUMBERS_H = True # macro
 NV_IOCTL_MAGIC = 'F' # macro
 NV_IOCTL_BASE = 200 # macro
@@ -171,6 +172,215 @@ NV_ESC_QUERY_DEVICE_INTR = (200+13) # macro
 NV_ESC_SYS_PARAMS = (200+14) # macro
 NV_ESC_EXPORT_TO_DMABUF_FD = (200+17) # macro
 NV_ESC_WAIT_OPEN_COMPLETE = (200+18) # macro
+NV_RM_API_VERSION_STRING_LENGTH = 64 # macro
+NV_RM_API_VERSION_CMD_STRICT = 0 # macro
+NV_RM_API_VERSION_CMD_RELAXED = '1' # macro
+NV_RM_API_VERSION_CMD_QUERY = '2' # macro
+NV_RM_API_VERSION_REPLY_UNRECOGNIZED = 0 # macro
+NV_RM_API_VERSION_REPLY_RECOGNIZED = 1 # macro
+NV_DMABUF_EXPORT_MAX_HANDLES = 128 # macro
+class struct_c__SA_nv_pci_info_t(Structure):
+    pass
+
+struct_c__SA_nv_pci_info_t._pack_ = 1 # source:False
+struct_c__SA_nv_pci_info_t._fields_ = [
+    ('domain', ctypes.c_uint32),
+    ('bus', ctypes.c_ubyte),
+    ('slot', ctypes.c_ubyte),
+    ('function', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte),
+    ('vendor_id', ctypes.c_uint16),
+    ('device_id', ctypes.c_uint16),
+]
+
+nv_pci_info_t = struct_c__SA_nv_pci_info_t
+class struct_nv_ioctl_xfer(Structure):
+    pass
+
+struct_nv_ioctl_xfer._pack_ = 1 # source:False
+struct_nv_ioctl_xfer._fields_ = [
+    ('cmd', ctypes.c_uint32),
+    ('size', ctypes.c_uint32),
+    ('ptr', ctypes.POINTER(None)),
+]
+
+nv_ioctl_xfer_t = struct_nv_ioctl_xfer
+class struct_nv_ioctl_card_info(Structure):
+    pass
+
+struct_nv_ioctl_card_info._pack_ = 1 # source:False
+struct_nv_ioctl_card_info._fields_ = [
+    ('valid', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+    ('pci_info', nv_pci_info_t),
+    ('gpu_id', ctypes.c_uint32),
+    ('interrupt_line', ctypes.c_uint16),
+    ('PADDING_1', ctypes.c_ubyte * 2),
+    ('reg_address', ctypes.c_uint64),
+    ('reg_size', ctypes.c_uint64),
+    ('fb_address', ctypes.c_uint64),
+    ('fb_size', ctypes.c_uint64),
+    ('minor_number', ctypes.c_uint32),
+    ('dev_name', ctypes.c_ubyte * 10),
+    ('PADDING_2', ctypes.c_ubyte * 2),
+]
+
+nv_ioctl_card_info_t = struct_nv_ioctl_card_info
+class struct_nv_ioctl_alloc_os_event(Structure):
+    pass
+
+struct_nv_ioctl_alloc_os_event._pack_ = 1 # source:False
+struct_nv_ioctl_alloc_os_event._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hDevice', ctypes.c_uint32),
+    ('fd', ctypes.c_uint32),
+    ('Status', ctypes.c_uint32),
+]
+
+nv_ioctl_alloc_os_event_t = struct_nv_ioctl_alloc_os_event
+class struct_nv_ioctl_free_os_event(Structure):
+    pass
+
+struct_nv_ioctl_free_os_event._pack_ = 1 # source:False
+struct_nv_ioctl_free_os_event._fields_ = [
+    ('hClient', ctypes.c_uint32),
+    ('hDevice', ctypes.c_uint32),
+    ('fd', ctypes.c_uint32),
+    ('Status', ctypes.c_uint32),
+]
+
+nv_ioctl_free_os_event_t = struct_nv_ioctl_free_os_event
+class struct_nv_ioctl_status_code(Structure):
+    pass
+
+struct_nv_ioctl_status_code._pack_ = 1 # source:False
+struct_nv_ioctl_status_code._fields_ = [
+    ('domain', ctypes.c_uint32),
+    ('bus', ctypes.c_ubyte),
+    ('slot', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('status', ctypes.c_uint32),
+]
+
+nv_ioctl_status_code_t = struct_nv_ioctl_status_code
+class struct_nv_ioctl_rm_api_version(Structure):
+    pass
+
+struct_nv_ioctl_rm_api_version._pack_ = 1 # source:False
+struct_nv_ioctl_rm_api_version._fields_ = [
+    ('cmd', ctypes.c_uint32),
+    ('reply', ctypes.c_uint32),
+    ('versionString', ctypes.c_char * 64),
+]
+
+nv_ioctl_rm_api_version_t = struct_nv_ioctl_rm_api_version
+class struct_nv_ioctl_query_device_intr(Structure):
+    pass
+
+struct_nv_ioctl_query_device_intr._pack_ = 1 # source:False
+struct_nv_ioctl_query_device_intr._fields_ = [
+    ('intrStatus', ctypes.c_uint32),
+    ('status', ctypes.c_uint32),
+]
+
+nv_ioctl_query_device_intr = struct_nv_ioctl_query_device_intr
+class struct_nv_ioctl_sys_params(Structure):
+    pass
+
+struct_nv_ioctl_sys_params._pack_ = 1 # source:False
+struct_nv_ioctl_sys_params._fields_ = [
+    ('memblock_size', ctypes.c_uint64),
+]
+
+nv_ioctl_sys_params_t = struct_nv_ioctl_sys_params
+class struct_nv_ioctl_register_fd(Structure):
+    pass
+
+struct_nv_ioctl_register_fd._pack_ = 1 # source:False
+struct_nv_ioctl_register_fd._fields_ = [
+    ('ctl_fd', ctypes.c_int32),
+]
+
+nv_ioctl_register_fd_t = struct_nv_ioctl_register_fd
+class struct_nv_ioctl_export_to_dma_buf_fd(Structure):
+    pass
+
+struct_nv_ioctl_export_to_dma_buf_fd._pack_ = 1 # source:False
+struct_nv_ioctl_export_to_dma_buf_fd._fields_ = [
+    ('fd', ctypes.c_int32),
+    ('hClient', ctypes.c_uint32),
+    ('totalObjects', ctypes.c_uint32),
+    ('numObjects', ctypes.c_uint32),
+    ('index', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('totalSize', ctypes.c_uint64),
+    ('handles', ctypes.c_uint32 * 128),
+    ('offsets', ctypes.c_uint64 * 128),
+    ('sizes', ctypes.c_uint64 * 128),
+    ('status', ctypes.c_uint32),
+    ('PADDING_1', ctypes.c_ubyte * 4),
+]
+
+nv_ioctl_export_to_dma_buf_fd_t = struct_nv_ioctl_export_to_dma_buf_fd
+class struct_nv_ioctl_wait_open_complete(Structure):
+    pass
+
+struct_nv_ioctl_wait_open_complete._pack_ = 1 # source:False
+struct_nv_ioctl_wait_open_complete._fields_ = [
+    ('rc', ctypes.c_int32),
+    ('adapterStatus', ctypes.c_uint32),
+]
+
+nv_ioctl_wait_open_complete_t = struct_nv_ioctl_wait_open_complete
+NV_IOCTL_NUMA_H = True # macro
+# def __aligned(n):  # macro
+#    return __attribute__((aligned(n)))  
+NV_ESC_NUMA_INFO = (200+15) # macro
+NV_ESC_SET_NUMA_STATUS = (200+16) # macro
+NV_IOCTL_NUMA_INFO_MAX_OFFLINE_ADDRESSES = 64 # macro
+NV_IOCTL_NUMA_STATUS_DISABLED = 0 # macro
+NV_IOCTL_NUMA_STATUS_OFFLINE = 1 # macro
+NV_IOCTL_NUMA_STATUS_ONLINE_IN_PROGRESS = 2 # macro
+NV_IOCTL_NUMA_STATUS_ONLINE = 3 # macro
+NV_IOCTL_NUMA_STATUS_ONLINE_FAILED = 4 # macro
+NV_IOCTL_NUMA_STATUS_OFFLINE_IN_PROGRESS = 5 # macro
+NV_IOCTL_NUMA_STATUS_OFFLINE_FAILED = 6 # macro
+class struct_offline_addresses(Structure):
+    pass
+
+struct_offline_addresses._pack_ = 1 # source:False
+struct_offline_addresses._fields_ = [
+    ('addresses', ctypes.c_uint64 * 64),
+    ('numEntries', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+]
+
+nv_offline_addresses_t = struct_offline_addresses
+class struct_nv_ioctl_numa_info(Structure):
+    pass
+
+struct_nv_ioctl_numa_info._pack_ = 1 # source:False
+struct_nv_ioctl_numa_info._fields_ = [
+    ('nid', ctypes.c_int32),
+    ('status', ctypes.c_int32),
+    ('memblock_size', ctypes.c_uint64),
+    ('numa_mem_addr', ctypes.c_uint64),
+    ('numa_mem_size', ctypes.c_uint64),
+    ('use_auto_online', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 7),
+    ('offline_addresses', nv_offline_addresses_t),
+]
+
+nv_ioctl_numa_info_t = struct_nv_ioctl_numa_info
+class struct_nv_ioctl_set_numa_status(Structure):
+    pass
+
+struct_nv_ioctl_set_numa_status._pack_ = 1 # source:False
+struct_nv_ioctl_set_numa_status._fields_ = [
+    ('status', ctypes.c_int32),
+]
+
+nv_ioctl_set_numa_status_t = struct_nv_ioctl_set_numa_status
 _NV_UNIX_NVOS_PARAMS_WRAPPERS_H_ = True # macro
 NVOS_INCLUDED = True # macro
 NVOS04_FLAGS_CHANNEL_TYPE = ['1', ':', '0'] # macro
@@ -2675,10 +2885,11 @@ __all__ = \
     'NV_DEVICE_ALLOCATION_VAMODE_MULTIPLE_VASPACES',
     'NV_DEVICE_ALLOCATION_VAMODE_OPTIONAL_MULTIPLE_VASPACES',
     'NV_DEVICE_ALLOCATION_VAMODE_SINGLE_VASPACE',
-    'NV_ESCAPE_H_INCLUDED', 'NV_ESC_ALLOC_OS_EVENT',
-    'NV_ESC_ATTACH_GPUS_TO_FD', 'NV_ESC_CARD_INFO',
-    'NV_ESC_CHECK_VERSION_STR', 'NV_ESC_EXPORT_TO_DMABUF_FD',
-    'NV_ESC_FREE_OS_EVENT', 'NV_ESC_IOCTL_XFER_CMD',
+    'NV_DMABUF_EXPORT_MAX_HANDLES', 'NV_ESCAPE_H_INCLUDED',
+    'NV_ESC_ALLOC_OS_EVENT', 'NV_ESC_ATTACH_GPUS_TO_FD',
+    'NV_ESC_CARD_INFO', 'NV_ESC_CHECK_VERSION_STR',
+    'NV_ESC_EXPORT_TO_DMABUF_FD', 'NV_ESC_FREE_OS_EVENT',
+    'NV_ESC_IOCTL_XFER_CMD', 'NV_ESC_NUMA_INFO',
     'NV_ESC_QUERY_DEVICE_INTR', 'NV_ESC_REGISTER_FD',
     'NV_ESC_RM_ACCESS_REGISTRY', 'NV_ESC_RM_ADD_VBLANK_CALLBACK',
     'NV_ESC_RM_ALLOC', 'NV_ESC_RM_ALLOC_CONTEXT_DMA2',
@@ -2694,20 +2905,31 @@ __all__ = \
     'NV_ESC_RM_MAP_MEMORY_DMA', 'NV_ESC_RM_SHARE',
     'NV_ESC_RM_UNMAP_MEMORY', 'NV_ESC_RM_UNMAP_MEMORY_DMA',
     'NV_ESC_RM_UPDATE_DEVICE_MAPPING_INFO',
-    'NV_ESC_RM_VID_HEAP_CONTROL', 'NV_ESC_STATUS_CODE',
-    'NV_ESC_SYS_PARAMS', 'NV_ESC_WAIT_OPEN_COMPLETE',
-    'NV_GR_ALLOCATION_PARAMETERS',
+    'NV_ESC_RM_VID_HEAP_CONTROL', 'NV_ESC_SET_NUMA_STATUS',
+    'NV_ESC_STATUS_CODE', 'NV_ESC_SYS_PARAMS',
+    'NV_ESC_WAIT_OPEN_COMPLETE', 'NV_GR_ALLOCATION_PARAMETERS',
     'NV_GSP_TEST_GET_MSG_BLOCK_PARAMETERS',
     'NV_GSP_TEST_SEND_EVENT_NOTIFICATION_PARAMETERS',
     'NV_GSP_TEST_SEND_MSG_RESPONSE_PARAMETERS',
     'NV_HOPPER_USERMODE_A_PARAMS', 'NV_IOCTL_BASE',
-    'NV_IOCTL_FCT_BASE', 'NV_IOCTL_MAGIC', 'NV_IOCTL_NUMBERS_H',
+    'NV_IOCTL_FCT_BASE', 'NV_IOCTL_H', 'NV_IOCTL_MAGIC',
+    'NV_IOCTL_NUMA_H', 'NV_IOCTL_NUMA_INFO_MAX_OFFLINE_ADDRESSES',
+    'NV_IOCTL_NUMA_STATUS_DISABLED', 'NV_IOCTL_NUMA_STATUS_OFFLINE',
+    'NV_IOCTL_NUMA_STATUS_OFFLINE_FAILED',
+    'NV_IOCTL_NUMA_STATUS_OFFLINE_IN_PROGRESS',
+    'NV_IOCTL_NUMA_STATUS_ONLINE',
+    'NV_IOCTL_NUMA_STATUS_ONLINE_FAILED',
+    'NV_IOCTL_NUMA_STATUS_ONLINE_IN_PROGRESS', 'NV_IOCTL_NUMBERS_H',
     'NV_MEMORY_ALLOCATION_PARAMS', 'NV_MEMORY_DESC_PARAMS',
     'NV_MEMORY_HW_RESOURCES_ALLOCATION_PARAMS',
     'NV_ME_ALLOCATION_PARAMETERS', 'NV_MSENC_ALLOCATION_PARAMETERS',
     'NV_NVJPG_ALLOCATION_PARAMETERS', 'NV_OFA_ALLOCATION_PARAMETERS',
     'NV_OS_DESC_MEMORY_ALLOCATION_PARAMS',
-    'NV_PPP_ALLOCATION_PARAMETERS',
+    'NV_PPP_ALLOCATION_PARAMETERS', 'NV_RM_API_VERSION_CMD_QUERY',
+    'NV_RM_API_VERSION_CMD_RELAXED', 'NV_RM_API_VERSION_CMD_STRICT',
+    'NV_RM_API_VERSION_REPLY_RECOGNIZED',
+    'NV_RM_API_VERSION_REPLY_UNRECOGNIZED',
+    'NV_RM_API_VERSION_STRING_LENGTH',
     'NV_RM_OS32_ALLOC_OS_DESCRIPTOR_WITH_OS32_ATTR',
     'NV_SEC2_ALLOCATION_PARAMETERS', 'NV_SWRUNLIST_ALLOCATION_PARAMS',
     'NV_SWRUNLIST_QOS_INTR_NONE',
@@ -2740,8 +2962,15 @@ __all__ = \
     'PNVPOWERSTATE_PARAMETERS', 'UNIFIED_NV_STATUS',
     '_NV_UNIX_NVOS_PARAMS_WRAPPERS_H_',
     'c__EA_NV_VIDMEM_ACCESS_BIT_ALLOCATION_PARAMS_ADDR_SPACE',
-    'nv_ioctl_nvos02_parameters_with_fd',
+    'nv_ioctl_alloc_os_event_t', 'nv_ioctl_card_info_t',
+    'nv_ioctl_export_to_dma_buf_fd_t', 'nv_ioctl_free_os_event_t',
+    'nv_ioctl_numa_info_t', 'nv_ioctl_nvos02_parameters_with_fd',
     'nv_ioctl_nvos33_parameters_with_fd',
+    'nv_ioctl_query_device_intr', 'nv_ioctl_register_fd_t',
+    'nv_ioctl_rm_api_version_t', 'nv_ioctl_set_numa_status_t',
+    'nv_ioctl_status_code_t', 'nv_ioctl_sys_params_t',
+    'nv_ioctl_wait_open_complete_t', 'nv_ioctl_xfer_t',
+    'nv_offline_addresses_t', 'nv_pci_info_t',
     'struct_NV_CHANNEL_ALLOC_PARAMS', 'struct_NV_MEMORY_DESC_PARAMS',
     'struct_RS_ACCESS_MASK', 'struct_RS_SHARE_POLICY',
     'struct_c__SA_NV50VAIO_CHANNELDMA_ALLOCATION_PARAMETERS',
@@ -2816,4 +3045,13 @@ __all__ = \
     'struct_c__SA_NvUnixEvent',
     'struct_c__SA_nv_ioctl_nvos02_parameters_with_fd',
     'struct_c__SA_nv_ioctl_nvos33_parameters_with_fd',
-    'union_c__SA_NVOS32_PARAMETERS_data']
+    'struct_c__SA_nv_pci_info_t', 'struct_nv_ioctl_alloc_os_event',
+    'struct_nv_ioctl_card_info',
+    'struct_nv_ioctl_export_to_dma_buf_fd',
+    'struct_nv_ioctl_free_os_event', 'struct_nv_ioctl_numa_info',
+    'struct_nv_ioctl_query_device_intr',
+    'struct_nv_ioctl_register_fd', 'struct_nv_ioctl_rm_api_version',
+    'struct_nv_ioctl_set_numa_status', 'struct_nv_ioctl_status_code',
+    'struct_nv_ioctl_sys_params',
+    'struct_nv_ioctl_wait_open_complete', 'struct_nv_ioctl_xfer',
+    'struct_offline_addresses', 'union_c__SA_NVOS32_PARAMETERS_data']
