@@ -95,6 +95,7 @@ SHT_PROGBITS = 0x1
 SHF_ALLOC = 0x2
 
 EMPTY_SIGNAL = hsa.hsa_signal_t()
+SIGNAL_VALUE_OFFSET = getattr(hsa.amd_signal_t, 'value').offset
 
 class HWComputeQueue:
   def __init__(self):
@@ -121,17 +122,17 @@ class HWComputeQueue:
     return self
 
   def submit(self, device:KFDDevice):
-    read_ptr = device.amd_aql_queue.read_dispatch_id
+    if not len(self.q): return
+    write_ptr, read_ptr = device.amd_aql_queue.write_dispatch_id, device.amd_aql_queue.read_dispatch_id
     for cmd in self.q:
-      ring_addr = device.aql_ring.va_addr + (device.amd_aql_queue.write_dispatch_id*AQL_PACKET_SIZE) % device.aql_ring.size
-      ctypes.memmove(ring_addr+2, ctypes.addressof(cmd)+2, AQL_PACKET_SIZE-2)
-      # write the header last. TODO: add CPU memory barrier
-      ctypes.memmove(ring_addr, ctypes.addressof(cmd), 2)
-      device.amd_aql_queue.write_dispatch_id += 1
-    if (device.amd_aql_queue.write_dispatch_id-read_ptr)*AQL_PACKET_SIZE > device.aql_ring.size: raise RuntimeError("AQL queue overrun")
-    if len(self.q):
-      device.aql_doorbell[0] = device.aql_doorbell_value + len(self.q) - 1
-      device.aql_doorbell_value += len(self.q)
+      ring_addr = device.aql_ring.va_addr + (write_ptr*AQL_PACKET_SIZE) % device.aql_ring.size
+      ctypes.memmove(ring_addr, ctypes.addressof(cmd), AQL_PACKET_SIZE)
+      # TODO: add CPU memory barrier here
+      write_ptr += 1
+    if (write_ptr-read_ptr)*AQL_PACKET_SIZE > device.aql_ring.size: raise RuntimeError("AQL queue overrun")
+    device.amd_aql_queue.write_dispatch_id = write_ptr
+    device.aql_doorbell[0] = device.aql_doorbell_value + len(self.q) - 1
+    device.aql_doorbell_value += len(self.q)
     return self
 
 # prebuilt sdma packets
@@ -154,8 +155,8 @@ class HWCopyQueue:
       ctypes.memmove(device.sdma_ring.va_addr + (device.sdma_doorbell_value % device.sdma_ring.size), ctypes.addressof(cmd), cmdsz)
       device.sdma_doorbell_value += cmdsz
     read_ptr = device.sdma_read_pointer[0]
-    for cmd in self.q: blit_sdma_command(cmd)
     if (device.sdma_doorbell_value-read_ptr) > device.sdma_ring.size: raise RuntimeError("SDMA queue overrun")
+    for cmd in self.q: blit_sdma_command(cmd)
     device.sdma_write_pointer[0] = device.sdma_doorbell_value
     device.sdma_doorbell[0] = device.sdma_doorbell_value
     return self
@@ -179,7 +180,7 @@ class HWCopyQueue:
 
   def signal(self, signal:hsa.amd_signal_t):
     self.q.append(sdma_pkts.atomic(op=amd_gpu.SDMA_OP_ATOMIC, operation=amd_gpu.SDMA_ATOMIC_ADD64,
-                                   addr=ctypes.addressof(signal) + getattr(hsa.amd_signal_t, 'value').offset, src_data=(1<<64)-1))
+                                   addr=ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET, src_data=(1<<64)-1))
     if signal.event_mailbox_ptr != 0:
       self.q.append(sdma_pkts.fence(op=amd_gpu.SDMA_OP_FENCE, mtype=3, addr=signal.event_mailbox_ptr, data=signal.event_id))
       self.q.append(sdma_pkts.trap(op=amd_gpu.SDMA_OP_TRAP, int_ctx=signal.event_id))
@@ -187,7 +188,7 @@ class HWCopyQueue:
 
   def wait(self, signal:hsa.amd_signal_t):
     self.q.append(sdma_pkts.poll_regmem(op=amd_gpu.SDMA_OP_POLL_REGMEM, mem_poll=1, func=0x3,
-                                        addr=ctypes.addressof(signal) + getattr(hsa.amd_signal_t, 'value').offset,
+                                        addr=ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET,
                                         value=0, mask=0xffffffff, interval=0x04, retry_count=0xfff))
     return self
 
@@ -281,7 +282,6 @@ class KFDAllocator(LRUAllocator):
       fo.readinto(to_mv(self.b[1].va_addr, local_size))
       if i != 0: self.device._wait_signal(self.device.signal_sdma)
       self.b = self.b[::-1]
-      self.device.signal_sdma.value = 1  # TODO: when do we have to reset it?
       self.device._submit_sdma(dest.va_addr+copied_in, self.b[0].va_addr+minor_offset, copy_size, completion_signal=self.device.signal_sdma)
 
       copied_in += copy_size
@@ -293,14 +293,12 @@ class KFDAllocator(LRUAllocator):
       ctypes.memmove(self.b[1].va_addr, from_mv(src[i:]), lsize:=min(self.b[0].size, src.nbytes-i))
       if i != 0: self.device._wait_signal(self.device.signal_sdma)
       self.b = self.b[::-1]
-      self.device.signal_sdma.value = 1  # TODO: when do we have to reset it?
       self.device._submit_sdma(dest.va_addr+i, self.b[0].va_addr, lsize, completion_signal=self.device.signal_sdma)
     self.device._wait_signal(self.device.signal_sdma)
 
   def copyout(self, dest:memoryview, src):
     self.device.synchronize()
     for i in range(0, dest.nbytes, self.b[0].size):
-      self.device.signal_sdma.value = 1
       self.device._submit_sdma(self.b[0].va_addr, src.va_addr+i, lsize:=min(self.b[0].size, dest.nbytes-i), completion_signal=self.device.signal_sdma)
       self.device._wait_signal(self.device.signal_sdma)
       ctypes.memmove(from_mv(dest[i:]), self.b[0].va_addr, lsize)
@@ -465,7 +463,9 @@ class KFDDevice(Compiled):
     if completion_signal is not None: q.timestamp(ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'start_ts').offset)
     q.copy(dest, src, copy_size)
     if completion_signal is not None: q.timestamp(ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'end_ts').offset)
-    if completion_signal is not None: q.signal(completion_signal)
+    if completion_signal is not None:
+      completion_signal.value = 1
+      q.signal(completion_signal)
     q.submit(self)
 
   def _submit_cache_inv(self, addr=0x0, sz=(1 << 64)-1, gli=0, glv=0, glk=0, gl1=0, gl2=0):
