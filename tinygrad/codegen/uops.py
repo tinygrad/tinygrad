@@ -284,9 +284,8 @@ class UOpGraph:
   def optimize_one_hot_reduce_loops(self, get_recursive_parents, cmpeq):
     phi = next((op for op in self.get_recursive_children(cmpeq) if op.uop is UOps.PHI), None)
     phi_alus = [op for op in get_recursive_parents(phi) if op.uop is UOps.ALU] if phi else None
-    if phi_alus is None or len(phi_alus) != 3 and set([x.arg for x in phi_alus]) != {BinaryOps.MUL, BinaryOps.ADD, BinaryOps.CMPEQ}: return
-    loop = phi.vin[2]
-    arange = next(x for x in cmpeq.vin if loop in get_recursive_parents(x))
+    if not phi or not phi_alus or len(phi_alus) != 3 and set([x.arg for x in phi_alus]) != {BinaryOps.MUL, BinaryOps.ADD, BinaryOps.CMPEQ}: return
+    arange = next(x for x in cmpeq.vin if (loop:=phi.vin[2]) in get_recursive_parents(x))
     if arange.uop is UOps.LOAD and arange.vin[1].uop is not UOps.LOOP: return
     index = next(x for x in cmpeq.vin if x != arange)
     index_casted = self.add(UOps.CAST, loop.dtype, (index,), insert_before=self.uops.index(index)+1) if loop.dtype != arange.dtype else index
