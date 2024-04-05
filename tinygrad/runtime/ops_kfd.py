@@ -1,7 +1,8 @@
 from __future__ import annotations
 from typing import Tuple, Any
 import os, fcntl, ctypes, functools, re, pathlib, mmap, struct, errno, io
-from tinygrad.device import Compiled, LRUAllocator, Compiler, BufferOptions, CompilerOptions
+from tinygrad.device import Compiled, LRUAllocator, Compiler, CompilerOptions
+from tinygrad.buffer import BufferOptions
 from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.runtime.driver.hip_comgr import compile_hip
