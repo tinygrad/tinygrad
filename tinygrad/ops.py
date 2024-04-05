@@ -4,7 +4,7 @@ import functools, hashlib, math, operator, ctypes
 from enum import Enum, auto
 from dataclasses import dataclass
 from tinygrad.helpers import prod, dedup
-from tinygrad.dtype import dtypes, DType
+from tinygrad.dtype import dtypes, DType, ConstType
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.buffer import Buffer
@@ -32,7 +32,7 @@ class MemBuffer:
 
 @dataclass(frozen=True)
 class ConstBuffer:
-  val: Union[int, float]
+  val: ConstType
   dtype: DType
   st: ShapeTracker
 
