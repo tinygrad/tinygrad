@@ -23,7 +23,7 @@ jobs:
       with:
         python-version: 3.12
     - name: Cache python packages
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: ${{ env.Python3_ROOT_DIR }}/lib/python3.12/site-packages
         key: uops-packages-${{ hashFiles('**/setup.py') }}-3.12
@@ -73,7 +73,7 @@ jobs:
       with:
         python-version: 3.8
     - name: Cache python packages
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: ${{ env.Python3_ROOT_DIR }}/lib/python3.8/site-packages
         key: linting-packages-${{ hashFiles('**/setup.py') }}-3.8
@@ -128,12 +128,12 @@ jobs:
       with:
         python-version: 3.8
     - name: Cache python packages
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: ${{ env.Python3_ROOT_DIR }}/lib/python3.8/site-packages
         key: testing-packages-${{ hashFiles('**/setup.py') }}
     - name: Cache downloads
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: ~/.cache/tinygrad/downloads/
         key: downloads-cache-cpu-${{ env.DOWNLOAD_CACHE_VERSION }}
@@ -174,12 +174,12 @@ jobs:
         with:
           python-version: 3.11
       - name: Cache python packages
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
           key: testing-packages-${{ hashFiles('**/setup.py') }}
       - name: Cache downloads
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/.cache/tinygrad/downloads/
           key: downloads-cache-${{ matrix.task }}-${{ env.DOWNLOAD_CACHE_VERSION }}
@@ -244,14 +244,14 @@ jobs:
   #    with:
   #      python-version: 3.11
   #  - name: Cache python packages
-  #    uses: actions/cache@v3
+  #    uses: actions/cache@v4
   #    with:
   #      path: /Users/runner/Library/Python/3.11/lib/python/site-packages
   #      key: webgpu-testing-user3-packages-${{ hashFiles('**/setup.py') }}
   #  - name: Install Dependencies
   #    run: pip install --user -e '.[webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
   #  - name: Cache downloads
-  #    uses: actions/cache@v3
+  #    uses: actions/cache@v4
   #    with:
   #      path: ~/Library/Caches/tinygrad/downloads/
   #      key: downloads-cache-webgpu-${{ env.DOWNLOAD_CACHE_VERSION }}
@@ -286,14 +286,14 @@ jobs:
       with:
         python-version: 3.11
     - name: Cache python packages
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: /Users/runner/Library/Python/3.11/lib/python/site-packages
         key: metal-m1-testing-user3-packages-${{ hashFiles('**/setup.py') }}
     - name: Install Dependencies
       run: pip install --user -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Cache downloads
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: ~/Library/Caches/tinygrad/downloads/
         key: downloads-cache-metal-only-${{ env.DOWNLOAD_CACHE_VERSION }}
@@ -332,14 +332,14 @@ jobs:
 #      with:
 #        python-version: 3.11
 #    - name: Cache python packages
-#      uses: actions/cache@v3
+#      uses: actions/cache@v4
 #      with:
 #        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
 #        key: webgl-testing-packages-${{ hashFiles('**/setup.py') }}
 #    - name: Install Dependencies
 #      run: pip install -e '.[webgl,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
 #    - name: Cache downloads
-#      uses: actions/cache@v3
+#      uses: actions/cache@v4
 #      with:
 #        path: ~/Library/Caches/tinygrad/downloads/
 #        key: downloads-cache-webgl-${{ env.DOWNLOAD_CACHE_VERSION }}
@@ -370,12 +370,12 @@ jobs:
         with:
           python-version: 3.11
       - name: Cache python packages
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
           key: ${{ matrix.backend }}-packages-${{ hashFiles('**/setup.py') }}
       - name: Cache downloads
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/.cache/tinygrad/downloads/
           key: downloads-cache-${{ matrix.backend }}-${{ env.DOWNLOAD_CACHE_VERSION }}
@@ -401,7 +401,7 @@ jobs:
       - name: Cache gpuocelot
         if: matrix.backend == 'cuda' || matrix.backend == 'ptx' || matrix.backend == 'triton'
         id: cache-build
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         env:
           cache-name: cache-gpuocelot-build
         with:
@@ -488,7 +488,7 @@ jobs:
   #      with:
   #        python-version: 3.11
   #    - name: Cache python packages
-  #      uses: actions/cache@v3
+  #      uses: actions/cache@v4
   #      with:
   #        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
   #        key: testing-arm-packages-${{ hashFiles('**/setup.py') }}
