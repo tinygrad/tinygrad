@@ -102,7 +102,7 @@ class HWComputeQueue:
 
   def exec(self, prg:KFDProgram, kernargs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), completion_signal=None):
     self.q.append(hsa.hsa_kernel_dispatch_packet_t(
-      setup=DISPATCH_KERNEL_SETUP, header=DISPATCH_KERNEL_HEADER,
+      header=DISPATCH_KERNEL_HEADER, setup=DISPATCH_KERNEL_SETUP,
       workgroup_size_x=local_size[0], workgroup_size_y=local_size[1], workgroup_size_z=local_size[2],
       grid_size_x=global_size[0]*local_size[0], grid_size_y=global_size[1]*local_size[1], grid_size_z=global_size[2]*local_size[2],
       kernel_object=prg.handle, group_segment_size=prg.group_segment_size, private_segment_size=prg.private_segment_size,
@@ -226,7 +226,7 @@ class KFDProgram:
     assert self.device.kernargs_ptr < (self.device.kernargs.va_addr + self.device.kernargs.size + self.kernargs_segment_size), "kernargs overrun"
     if not hasattr(self, "args_struct_t"):
       self.args_struct_t = init_c_struct_t(tuple([(f'f{i}', ctypes.c_void_p) for i in range(len(args))] +
-                                                [(f'v{i}', ctypes.c_int) for i in range(len(vals))]))
+                                                 [(f'v{i}', ctypes.c_int) for i in range(len(vals))]))
       if ctypes.sizeof(self.args_struct_t) != self.kernargs_segment_size:
         raise RuntimeError(f"HSAProgram.__call__: incorrect args struct size {ctypes.sizeof(self.args_struct_t)} != {self.kernargs_segment_size}")
     args_st = self.args_struct_t.from_address(self.device.kernargs_ptr)
@@ -262,6 +262,13 @@ class KFDAllocator(LRUAllocator):
   #  self.device.synchronize()
   #  return to_mv(src.va_addr, src.size)
 
+  def transfer(self, dest, src, sz:int, src_dev=None, dest_dev=None):
+    dest_dev._gpu_map(src)
+    q = HWComputeQueue().signal(sig := KFDDevice._get_signal())
+    HWCopyQueue().wait(sig).copy(dest.va_addr, src.va_addr, sz).signal(sigc := KFDDevice._get_signal()).submit(dest_dev)
+    HWComputeQueue().wait(sigc).submit(dest_dev)
+    q.wait(sigc).submit(src_dev)
+
   def copy_from_fd(self, dest, fd, offset, size):
     fo = io.FileIO(fd, "a+b", closefd=False)
     fo.seek(offset - (minor_offset:=offset % PAGE_SIZE))
@@ -272,38 +279,30 @@ class KFDAllocator(LRUAllocator):
       if copy_size == 0: break
 
       fo.readinto(to_mv(self.b[1].va_addr, local_size))
-      if i != 0: self.device._wait_signal(self.device.completion_signal)
+      if i != 0: self.device._wait_signal(self.device.signal_sdma)
       self.b = self.b[::-1]
-      self.device.completion_signal.value = 1  # TODO: when do we have to reset it?
-      self.device._submit_sdma(dest.va_addr+copied_in, self.b[0].va_addr+minor_offset, copy_size, completion_signal=self.device.completion_signal)
+      self.device.signal_sdma.value = 1  # TODO: when do we have to reset it?
+      self.device._submit_sdma(dest.va_addr+copied_in, self.b[0].va_addr+minor_offset, copy_size, completion_signal=self.device.signal_sdma)
 
       copied_in += copy_size
       minor_offset = 0 # only on the first
-    self.device._wait_signal(self.device.completion_signal)
-
-  def transfer(self, dest, src, sz:int, src_dev=None, dest_dev=None):
-    dest_dev._gpu_map(src)
-    q = HWComputeQueue().signal(sig := KFDDevice._get_signal())
-    HWCopyQueue().wait(sig).copy(dest.va_addr, src.va_addr, sz).signal(sigc := KFDDevice._get_signal()).submit(dest_dev)
-    HWComputeQueue().wait(sigc).submit(dest_dev)
-    q.wait(sigc).submit(src_dev)
+    self.device._wait_signal(self.device.signal_sdma)
 
   def copyin(self, dest, src: memoryview):
     for i in range(0, src.nbytes, self.b[0].size):
       ctypes.memmove(self.b[1].va_addr, from_mv(src[i:]), lsize:=min(self.b[0].size, src.nbytes-i))
-      if i != 0: self.device._wait_signal(self.device.completion_signal)
+      if i != 0: self.device._wait_signal(self.device.signal_sdma)
       self.b = self.b[::-1]
-      self.device.completion_signal.value = 1  # TODO: when do we have to reset it?
-      self.device._submit_sdma(dest.va_addr+i, self.b[0].va_addr, lsize, completion_signal=self.device.completion_signal)
-    self.device._wait_signal(self.device.completion_signal)
+      self.device.signal_sdma.value = 1  # TODO: when do we have to reset it?
+      self.device._submit_sdma(dest.va_addr+i, self.b[0].va_addr, lsize, completion_signal=self.device.signal_sdma)
+    self.device._wait_signal(self.device.signal_sdma)
 
   def copyout(self, dest:memoryview, src):
     self.device.synchronize()
     for i in range(0, dest.nbytes, self.b[0].size):
-      self.device.completion_signal.value = 1
-      self.device._submit_sdma(self.b[0].va_addr, src.va_addr+i, lsize:=min(self.b[0].size, dest.nbytes-i),
-                               completion_signal=self.device.completion_signal)
-      self.device._wait_signal(self.device.completion_signal)
+      self.device.signal_sdma.value = 1
+      self.device._submit_sdma(self.b[0].va_addr, src.va_addr+i, lsize:=min(self.b[0].size, dest.nbytes-i), completion_signal=self.device.signal_sdma)
+      self.device._wait_signal(self.device.signal_sdma)
       ctypes.memmove(from_mv(dest[i:]), self.b[0].va_addr, lsize)
 
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
@@ -311,7 +310,7 @@ class KFDDevice(Compiled):
   kfd:int = -1
   event_page:Any = None  # TODO: fix types in kfd, Optional[kfd.struct_kfd_ioctl_alloc_memory_of_gpu_args]
   signals_page:Any = None
-  signal_number:int = 10
+  signal_number:int = 16
 
   def _gpu_map(self, mem):
     if self.gpu_id in getattr(mem, "mapped_gpu_ids", []): return
@@ -346,13 +345,16 @@ class KFDDevice(Compiled):
     kio.free_memory_of_gpu(self.kfd, handle=mem.handle)
 
   @classmethod
-  def _get_signal(self, num=None) -> hsa.amd_signal_t:
+  def _get_signal(self, num=None, sync_event=None) -> hsa.amd_signal_t:
     if num is None:
       num = KFDDevice.signal_number
       KFDDevice.signal_number += 1
-      if KFDDevice.signal_number == SIGNAL_COUNT: KFDDevice.signal_number = 10
+      if KFDDevice.signal_number == SIGNAL_COUNT: KFDDevice.signal_number = 16
     ret = hsa.amd_signal_t.from_address(KFDDevice.signals_page.va_addr + SIGNAL_SIZE*num)
     ret.value = 1
+    if sync_event is not None:
+      ret.event_mailbox_ptr = KFDDevice.event_page.va_addr + sync_event.event_slot_index*8
+      ret.event_id = sync_event.event_id
     return ret
 
   @classmethod
@@ -379,11 +381,14 @@ class KFDDevice(Compiled):
         sig.value = 1
         sig.kind = hsa.AMD_SIGNAL_KIND_USER
       KFDDevice.event_page = self._gpu_alloc(0x8000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
-      self.sync_event = kio.create_event(KFDDevice.kfd, event_page_offset=KFDDevice.event_page.handle, auto_reset=1)
+      sync_event = kio.create_event(KFDDevice.kfd, event_page_offset=KFDDevice.event_page.handle, auto_reset=1)
     else:
       self._gpu_map(KFDDevice.signals_page)
       self._gpu_map(KFDDevice.event_page)
-      self.sync_event = kio.create_event(KFDDevice.kfd, auto_reset=1)
+      sync_event = kio.create_event(KFDDevice.kfd, auto_reset=1)
+
+    self.completion_signal = KFDDevice._get_signal(self.device_id*2, sync_event=sync_event)
+    self.signal_sdma = KFDDevice._get_signal(self.device_id*2+1, sync_event=kio.create_event(KFDDevice.kfd, auto_reset=1))
 
     self.gart_aql = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
     self.gart_sdma = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
@@ -392,10 +397,6 @@ class KFDDevice(Compiled):
     self.kernargs = self._gpu_alloc(0x1000000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
     self.kernargs_ptr = self.kernargs.va_addr
     self.ctx_save_restore_address = self._gpu_alloc(0x2C02000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
-
-    self.completion_signal = KFDDevice._get_signal(self.device_id)
-    self.completion_signal.event_mailbox_ptr = KFDDevice.event_page.va_addr + self.sync_event.event_slot_index*8
-    self.completion_signal.event_id = self.sync_event.event_id
 
     # AQL Queue
     self.amd_aql_queue = hsa.amd_queue_t.from_address(self.gart_aql.va_addr)
