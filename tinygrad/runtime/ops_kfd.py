@@ -315,6 +315,7 @@ class KFDDevice(Compiled):
     stm = kio.map_memory_to_gpu(self.kfd, handle=mem.handle, device_ids_array_ptr=ctypes.addressof(c_gpus), n_devices=len(mem.mapped_gpu_ids))
     assert stm.n_success == len(mem.mapped_gpu_ids)
 
+  @classmethod
   def _wait_on(self, event_id, timeout=10000):
     evt_arr = (kfd.struct_kfd_event_data * 1)()
     evt_arr[0].event_id = event_id
@@ -400,7 +401,7 @@ class KFDDevice(Compiled):
     self.amd_aql_queue.max_wave_id = self.properties['max_waves_per_simd'] * self.properties['simd_per_cu'] - 1
 
     # scratch setup
-    self.max_private_segment_size = 512
+    self.max_private_segment_size = 4096
     wave_scratch_len = round_up(((self.amd_aql_queue.max_wave_id + 1) * self.max_private_segment_size), 256) # gfx11 requires alignment of 256
     self.scratch_len = (self.amd_aql_queue.max_cu_id + 1) * self.properties['max_slots_scratch_cu'] * wave_scratch_len
     self.scratch = self._gpu_alloc(self.scratch_len, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
