@@ -431,7 +431,7 @@ class KFDDevice(Compiled):
       write_pointer_address=self.gart_aql.va_addr + getattr(hsa.amd_queue_t, 'write_dispatch_id').offset,
       read_pointer_address=self.gart_aql.va_addr + getattr(hsa.amd_queue_t, 'read_dispatch_id').offset)
 
-    self.doorbells_base = self.aql_queue.doorbell_offset & (~0xfff)
+    self.doorbells_base = self.aql_queue.doorbell_offset & (~0x1fff)  # doorbell is two pages
     self.doorbells = libc.mmap(0, 0x2000, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, KFDDevice.kfd, self.doorbells_base)
     self.aql_doorbell = to_mv(self.doorbells + self.aql_queue.doorbell_offset - self.doorbells_base, 4).cast("I")
     self.aql_doorbell_value = 0
