@@ -105,8 +105,7 @@ class HWComputeQueue:
       header=DISPATCH_KERNEL_HEADER, setup=DISPATCH_KERNEL_SETUP,
       workgroup_size_x=local_size[0], workgroup_size_y=local_size[1], workgroup_size_z=local_size[2],
       grid_size_x=global_size[0]*local_size[0], grid_size_y=global_size[1]*local_size[1], grid_size_z=global_size[2]*local_size[2],
-      kernel_object=prg.handle, group_segment_size=prg.group_segment_size, private_segment_size=prg.private_segment_size,
-      kernarg_address=kernargs,
+      kernel_object=prg.handle, group_segment_size=prg.group_segment_size, private_segment_size=prg.private_segment_size, kernarg_address=kernargs,
       completion_signal=hsa.hsa_signal_t(ctypes.addressof(completion_signal)) if completion_signal is not None else EMPTY_SIGNAL))
     return self
 
@@ -124,12 +123,12 @@ class HWComputeQueue:
   def submit(self, device:KFDDevice):
     if not len(self.q): return
     write_ptr, read_ptr = device.amd_aql_queue.write_dispatch_id, device.amd_aql_queue.read_dispatch_id
+    if (len(self.q)+write_ptr-read_ptr)*AQL_PACKET_SIZE > device.aql_ring.size: raise RuntimeError("AQL queue overrun")
     for cmd in self.q:
       ring_addr = device.aql_ring.va_addr + (write_ptr*AQL_PACKET_SIZE) % device.aql_ring.size
       ctypes.memmove(ring_addr, ctypes.addressof(cmd), AQL_PACKET_SIZE)
-      # TODO: add CPU memory barrier here
       write_ptr += 1
-    if (write_ptr-read_ptr)*AQL_PACKET_SIZE > device.aql_ring.size: raise RuntimeError("AQL queue overrun")
+    # TODO: add CPU memory barrier here
     device.amd_aql_queue.write_dispatch_id = write_ptr
     device.aql_doorbell[0] = device.aql_doorbell_value + len(self.q) - 1
     device.aql_doorbell_value += len(self.q)
