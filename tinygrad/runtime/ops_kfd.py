@@ -124,7 +124,9 @@ class HWComputeQueue:
     read_ptr = device.amd_aql_queue.read_dispatch_id
     for cmd in self.q:
       ring_addr = device.aql_ring.va_addr + (device.amd_aql_queue.write_dispatch_id*AQL_PACKET_SIZE) % device.aql_ring.size
-      ctypes.memmove(ring_addr, ctypes.addressof(cmd), AQL_PACKET_SIZE)
+      ctypes.memmove(ring_addr+2, ctypes.addressof(cmd)+2, AQL_PACKET_SIZE-2)
+      # write the header last. TODO: add CPU memory barrier
+      ctypes.memmove(ring_addr, ctypes.addressof(cmd), 2)
       device.amd_aql_queue.write_dispatch_id += 1
     if (device.amd_aql_queue.write_dispatch_id-read_ptr)*AQL_PACKET_SIZE > device.aql_ring.size: raise RuntimeError("AQL queue overrun")
     if len(self.q):
@@ -382,7 +384,8 @@ class KFDDevice(Compiled):
       self._gpu_map(KFDDevice.event_page)
       self.sync_event = kio.create_event(KFDDevice.kfd, auto_reset=1)
 
-    self.gart = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
+    self.gart_aql = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
+    self.gart_sdma = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
     self.aql_ring = self._gpu_alloc(0x100000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
     self.eop_buffer = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
     self.kernargs = self._gpu_alloc(0x1000000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
@@ -394,7 +397,7 @@ class KFDDevice(Compiled):
     self.completion_signal.event_id = self.sync_event.event_id
 
     # AQL Queue
-    self.amd_aql_queue = hsa.amd_queue_t.from_address(self.gart.va_addr)
+    self.amd_aql_queue = hsa.amd_queue_t.from_address(self.gart_aql.va_addr)
     self.amd_aql_queue.write_dispatch_id = 0
     self.amd_aql_queue.read_dispatch_id = 0
     self.amd_aql_queue.read_dispatch_id_field_base_byte_offset = getattr(hsa.amd_queue_t, 'read_dispatch_id').offset
@@ -423,11 +426,11 @@ class KFDDevice(Compiled):
       eop_buffer_address=self.eop_buffer.va_addr, eop_buffer_size=self.eop_buffer.size,
       ctx_save_restore_address=self.ctx_save_restore_address.va_addr, ctx_save_restore_size=self.ctx_save_restore_address.size,
       ctl_stack_size = 0xa000,
-      write_pointer_address=self.gart.va_addr + getattr(hsa.amd_queue_t, 'write_dispatch_id').offset,
-      read_pointer_address=self.gart.va_addr + getattr(hsa.amd_queue_t, 'read_dispatch_id').offset)
+      write_pointer_address=self.gart_aql.va_addr + getattr(hsa.amd_queue_t, 'write_dispatch_id').offset,
+      read_pointer_address=self.gart_aql.va_addr + getattr(hsa.amd_queue_t, 'read_dispatch_id').offset)
 
     self.doorbells_base = self.aql_queue.doorbell_offset & (~0xfff)
-    self.doorbells = libc.mmap(0, 8192, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, KFDDevice.kfd, self.doorbells_base)
+    self.doorbells = libc.mmap(0, 0x2000, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, KFDDevice.kfd, self.doorbells_base)
     self.aql_doorbell = to_mv(self.doorbells + self.aql_queue.doorbell_offset - self.doorbells_base, 4).cast("I")
     self.aql_doorbell_value = 0
 
@@ -435,7 +438,7 @@ class KFDDevice(Compiled):
     self.sdma_ring = self._gpu_alloc(0x100000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
     self.sdma_queue = kio.create_queue(KFDDevice.kfd, ring_base_address=self.sdma_ring.va_addr, ring_size=self.sdma_ring.size, gpu_id=self.gpu_id,
       queue_type=kfd.KFD_IOC_QUEUE_TYPE_SDMA, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE, queue_priority=kfd.KFD_MAX_QUEUE_PRIORITY,
-      write_pointer_address=self.gart.va_addr + 0x100, read_pointer_address=self.gart.va_addr + 0x108)
+      write_pointer_address=self.gart_sdma.va_addr, read_pointer_address=self.gart_sdma.va_addr)
 
     self.sdma_read_pointer = to_mv(self.sdma_queue.read_pointer_address, 8).cast("Q")
     self.sdma_write_pointer = to_mv(self.sdma_queue.write_pointer_address, 8).cast("Q")
