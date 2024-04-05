@@ -65,10 +65,7 @@ class TestHCQ(unittest.TestCase):
 
   def test_wait_signal(self):
     TestHCQ.d0.completion_signal.value = 1
-    q = HWComputeQueue()
-    q.wait(TestHCQ.d0.completion_signal)
-    q.signal(TestHCQ.d0.completion_signal)
-    q.submit(TestHCQ.d0)
+    HWComputeQueue().wait(TestHCQ.d0.completion_signal).signal(TestHCQ.d0.completion_signal).submit(TestHCQ.d0)
     with self.assertRaises(RuntimeError):
       TestHCQ.d0._wait_on(TestHCQ.d0.completion_signal.event_id, timeout=50)
     # clean up
@@ -77,10 +74,7 @@ class TestHCQ(unittest.TestCase):
 
   def test_wait_copy_signal(self):
     TestHCQ.d0.completion_signal.value = 1
-    q = HWCopyQueue()
-    q.wait(TestHCQ.d0.completion_signal)
-    q.signal(TestHCQ.d0.completion_signal)
-    q.submit(TestHCQ.d0)
+    HWCopyQueue().wait(TestHCQ.d0.completion_signal).signal(TestHCQ.d0.completion_signal).submit(TestHCQ.d0)
     with self.assertRaises(RuntimeError):
       TestHCQ.d0._wait_on(TestHCQ.d0.completion_signal.event_id, timeout=50)
     # clean up
@@ -94,16 +88,20 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0._wait_on(TestHCQ.d0.completion_signal.event_id)
     assert (val:=TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[0]) == 1.0, f"got val {val}"
 
+  def test_submit_empty_queues(self):
+    HWComputeQueue().submit(TestHCQ.d0)
+    HWCopyQueue().submit(TestHCQ.d0)
+
   def test_signal_timeout(self):
-    q = HWComputeQueue()
-    q.submit(TestHCQ.d0)
     with self.assertRaises(RuntimeError):
       TestHCQ.d0._wait_on(TestHCQ.d0.completion_signal.event_id, timeout=50)
 
   def test_signal(self):
-    q = HWComputeQueue()
-    q.signal(TestHCQ.d0.completion_signal)
-    q.submit(TestHCQ.d0)
+    HWComputeQueue().signal(TestHCQ.d0.completion_signal).submit(TestHCQ.d0)
+    TestHCQ.d0._wait_on(TestHCQ.d0.completion_signal.event_id)
+
+  def test_copy_signal(self):
+    HWCopyQueue().signal(TestHCQ.d0.completion_signal).submit(TestHCQ.d0)
     TestHCQ.d0._wait_on(TestHCQ.d0.completion_signal.event_id)
 
   def test_run_signal(self):
@@ -113,12 +111,6 @@ class TestHCQ(unittest.TestCase):
     q.submit(TestHCQ.d0)
     TestHCQ.d0._wait_on(TestHCQ.d0.completion_signal.event_id)
     assert (val:=TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[0]) == 1.0, f"got val {val}"
-
-  def test_copy_signal(self):
-    q = HWCopyQueue()
-    q.signal(TestHCQ.d0.completion_signal)
-    q.submit(TestHCQ.d0)
-    TestHCQ.d0._wait_on(TestHCQ.d0.completion_signal.event_id)
 
   def test_copy_1000_times(self):
     q = HWCopyQueue()
@@ -169,11 +161,11 @@ class TestHCQ(unittest.TestCase):
     q = HWComputeQueue()
     qc = HWCopyQueue()
     q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size)  # b = [1, 2]
-    KFDDevice._get_signal(10).value = 1
     q.signal(sig:=KFDDevice._get_signal(10))
     qc.wait(sig)
     qc.copy(TestHCQ.a.lazydata.buffer._buf.va_addr, TestHCQ.b.lazydata.buffer._buf.va_addr, 8)
     qc.signal(TestHCQ.d0.completion_signal)
+    sig.value = 1
     qc.submit(TestHCQ.d0)
     time.sleep(0.02) # give it time for the wait to fail
     q.submit(TestHCQ.d0)
