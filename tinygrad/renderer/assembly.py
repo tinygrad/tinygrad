@@ -3,7 +3,7 @@ import functools, struct
 from collections import defaultdict
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op
-from tinygrad.dtype import dtypes, DType, PtrDType, INVERSE_DTYPES_DICT
+from tinygrad.dtype import dtypes, DType, PtrDType, ConstType, INVERSE_DTYPES_DICT
 from tinygrad.codegen.uops import UOpGraph, PatternMatcher
 
 def render_val(x, dtype):
@@ -46,7 +46,7 @@ class AssemblyLanguage(NamedTuple):
   types: Dict[DType, str] = INVERSE_DTYPES_DICT
   supports_half: List[Op] = []
 
-  def render_const(self, x:Union[float,int,bool], dtype, mov=None) -> Union[List[str], str]: raise NotImplementedError()
+  def render_const(self, x:ConstType, dtype:DType, mov=None) -> Union[List[str], str]: raise NotImplementedError()
   def render_local(self, dest, name, size, dtype) -> List[str]: raise NotImplementedError()
 
   def render_loop(self, idx, start, label, acc=None) -> List[str]: raise NotImplementedError()
@@ -112,7 +112,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
     r_label[u] = f"{lang.label_prefix}{prefix}_{c_label[prefix]-1}"
     return r_label[u]
 
-  def const(x:Union[float,int,bool], dtype, mov=False):
+  def const(x:ConstType, dtype:DType, mov=False):
     if mov or dtype in lang.const_requires_mov:
       kk(*lang.render_const(x, dtype, mov=(out:=ssa(None, 'const', lang.types[dtype]))))
       return out
@@ -249,7 +249,7 @@ class PTXLanguage(AssemblyLanguage):
 
   const_requires_mov = [dtypes.half, dtypes.bool]
 
-  def render_const(self, x:Union[float,int,bool], dtype, mov=None) -> Union[List[str], str]:
+  def render_const(self, x:ConstType, dtype:DType, mov=None) -> Union[List[str], str]:
     val = render_val(x, dtype)
     if dtype == dtypes.bool: return [f"setp.ne.s16 {mov}, {val}, 0;"]
     return [f"mov.b{self.types[dtype][1:]} {mov}, {val};"] if mov else val
