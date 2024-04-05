@@ -65,7 +65,7 @@ def box_iou(boxes1: Tensor, boxes2: Tensor) -> Tensor:
   iou = inter / union
   # print('BOx_IOU Ret Shape:', iou.shape)
 
-  return iou.realize()
+  return iou#.realize()
 
 def nms(boxes, scores, thresh=0.5):
   x1, y1, x2, y2 = np.rollaxis(boxes, 1)
@@ -267,8 +267,8 @@ class Matcher(object):
     if self.allow_low_quality_matches:
       # assert all_matches is not None
       matches = self.set_low_quality_matches_(matches, all_matches, match_quality_matrix_np)
-    matches_tens = Tensor(matches).realize()
-    # del all_matches, matches, match_quality_matrix_np, below_low_threshold, between_thresholds
+    matches_tens = Tensor(matches, requires_grad=False)#.realize()
+    del all_matches, matches, match_quality_matrix_np, below_low_threshold, between_thresholds
     return matches_tens
 
   def set_low_quality_matches_(self, matches, all_matches, match_quality_matrix):
@@ -302,7 +302,7 @@ class Matcher(object):
 
     pred_inds_to_update = gt_pred_pairs_of_highest_quality[1]
     matches[pred_inds_to_update] = all_matches[pred_inds_to_update]
-    # del gt_pred_pairs_of_highest_quality, highest_quality_foreach_gt
+    # del gt_pred_pairs_of_highest_quality, highest_quality_foreach_gt,all_matches
     return matches
 class RetinaNet:
   def __init__(self, backbone: ResNet, num_classes=264, num_anchors=9, scales=None, aspect_ratios=None,fg_iou_thresh=0.5, bg_iou_thresh=0.4):
@@ -320,11 +320,12 @@ class RetinaNet:
                     bg_iou_thresh,
                     allow_low_quality_matches=True,
                 )
-  def __call__(self, x):
+  def __call__(self, x, train=False):
     
     b = self.backbone(x)
     r, c = self.head(b)
-    if Tensor.training:
+    # if Tensor.training:
+    if train:
       # l = self.loss_temp(c)
       # l = self.loss(r, c, Y, anchor_gen(x, b))
       # return l 
@@ -337,7 +338,9 @@ class RetinaNet:
     temp = 0
     for yy in y:
       temp+=yy['boxes'].shape[0]
-    return logits_reg.sum()+logits_class.sum()+temp
+    return logits_reg.mean()+logits_class.mean()+temp
+  def loss_dummy(self, r, c):
+    return r.argmax()+c.argmax()
   def loss(self, logits_reg, logits_class, targets, anchors) -> Tensor:
     # print(colored(f'RNET_LOSS SHAPES {logits_reg.shape} {logits_class.shape}','green'))
     matched_idxs = []
@@ -456,12 +459,18 @@ class RetinaNet:
 class ClassificationHead:
   def __init__(self, in_channels, num_anchors, num_classes, prior_probability=0.01):
     self.num_classes = num_classes
-    self.conv = flatten([(nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1), lambda x: x.relu()) for _ in range(4)])
-    # print(len(self.conv))
-    for i in self.conv:
-      if isinstance(i, nn.Conv2d):
-        i.weight = Tensor.normal(i.weight.shape, std=0.01).realize()
-        i.bias = Tensor.full(i.bias.shape, 0.0).realize()
+    # self.conv = flatten([(nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1), lambda x: x.relu()) for _ in range(4)])
+    self.conv = []
+    for _ in range(4):
+      c = nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1)
+      c.weight = Tensor.normal(c.weight.shape, std=0.01).realize()
+      c.bias = Tensor.full(c.bias.shape, 0.0).realize()
+      self.conv.append(c)
+      self.conv.append(Tensor.relu)
+    # for i in self.conv:
+    #   if isinstance(i, nn.Conv2d):
+    #     i.weight = Tensor.normal(i.weight.shape, std=0.01).realize()
+    #     i.bias = Tensor.full(i.bias.shape, 0.0).realize()
 
     self.cls_logits = nn.Conv2d(in_channels, num_anchors * num_classes, kernel_size=3, padding=1)
     print('CLASS ININTTTTTTT')
@@ -543,17 +552,24 @@ class ClassificationHead:
     # print(colored(f'FINISHED CLASS LOSS APPEND{losses}', 'cyan'))
     # print(losses[0].shape)
     # return losses[0]+losses[1]
-    return Tensor.stack(losses).mean()
+    # return Tensor.stack(losses).mean()
     return _sum(losses) / len(targets)
   
 
 class RegressionHead:
   def __init__(self, in_channels, num_anchors):
-    self.conv = flatten([(nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1), lambda x: x.relu()) for _ in range(4)])
-    for i in self.conv:
-      if isinstance(i, nn.Conv2d):
-        i.weight = Tensor.normal(i.weight.shape, std=0.01).realize()
-        i.bias = Tensor.full(i.bias.shape, 0.0).realize()
+    # self.conv = flatten([(nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1), lambda x: x.relu()) for _ in range(4)])
+    self.conv = []
+    for _ in range(4):
+      c = nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1)
+      c.weight = Tensor.normal(c.weight.shape, std=0.01).realize()
+      c.bias = Tensor.full(c.bias.shape, 0.0).realize()
+      self.conv.append(c)
+      self.conv.append(Tensor.relu)
+    # for i in self.conv:
+    #   if isinstance(i, nn.Conv2d):
+    #     i.weight = Tensor.normal(i.weight.shape, std=0.01).realize()
+    #     i.bias = Tensor.full(i.bias.shape, 0.0).realize()
     self.bbox_reg = nn.Conv2d(in_channels, num_anchors * 4, kernel_size=3, padding=1)
     self.bbox_reg.weight = Tensor.normal(self.bbox_reg.weight.shape, std=0.01).realize()
     self.bbox_reg.bias = Tensor.full(self.bbox_reg.bias.shape, 0.0).realize()
@@ -622,7 +638,7 @@ class RegressionHead:
     # print('regression loss length', len(losses))
     # for i in losses:
     #   print(i.numpy())
-    return Tensor.stack(losses).mean()
+    # return Tensor.stack(losses).mean()
     return _sum(losses) / max(1, len(targets))
 class RetinaHead:
   def __init__(self, in_channels, num_anchors, num_classes):
@@ -657,7 +673,11 @@ class ResNetFPN:
 class ExtraFPNBlock:
   def __init__(self, in_channels, out_channels):
     self.p6 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=2, padding=1)
+    self.p6.weight = Tensor.kaiming_uniform(self.p6.weight.shape, a=1).realize()
+    self.p6.bias = Tensor.full(self.p6.bias.shape, 0.0).realize()
     self.p7 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=2, padding=1)
+    self.p7.weight = Tensor.kaiming_uniform(self.p7.weight.shape, a=1).realize()
+    self.p7.bias = Tensor.full(self.p7.bias.shape, 0.0).realize()
     self.use_P5 = in_channels == out_channels
 
   def __call__(self, p, c):
@@ -672,8 +692,14 @@ class FPN:
   def __init__(self, in_channels_list, out_channels, extra_blocks=None):
     self.inner_blocks, self.layer_blocks = [], []
     for in_channels in in_channels_list:
-      self.inner_blocks.append(nn.Conv2d(in_channels, out_channels, kernel_size=1))
-      self.layer_blocks.append(nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1))
+      c1 = nn.Conv2d(in_channels, out_channels, kernel_size=1)
+      c1.weight = Tensor.kaiming_uniform(c1.weight.shape, a=1).realize()
+      c1.bias = Tensor.full(c1.bias.shape, 0.0).realize()
+      self.inner_blocks.append(c1)
+      c2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
+      c2.weight = Tensor.kaiming_uniform(c2.weight.shape, a=1).realize()
+      c2.bias = Tensor.full(c2.bias.shape, 0.0).realize()
+      self.layer_blocks.append(c2)
     self.extra_blocks = ExtraFPNBlock(256, 256) if extra_blocks is None else extra_blocks
 
   def __call__(self, x):

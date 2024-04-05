@@ -426,7 +426,7 @@ def train_retinanet():
 
 
   model = RetinaNet(ResNeXt50_32X4D(), num_anchors=anchor_generator.num_anchors_per_location()[0])
-  mdlrun = TinyJit(lambda x: model(input_fixup(x)))
+  mdlrun = TinyJit(lambda x: model(x))
   mdlloss = TinyJit(lambda r, c, Y, a: model.loss(r,c,Y,a))
   mdlloss_temp = TinyJit(lambda r, c,y,a : model.loss_temp(r,c,y,a))
   parameters = []
@@ -457,39 +457,36 @@ def train_retinanet():
   #   else:
   #     x.requires_grad = False
   #   # print(k, x.requires_grad)
-  @TinyJit
+  # @TinyJit
   def train_step(X, Y):
     Tensor.training = True
-    optimizer.zero_grad()
+    
+
+    # optimizer.zero_grad()
+
     # mdlloss.reset()
+    # _ = model(X)
+    # _ = mdlrun(X)
+    # Tensor.training = False
     # b,r,c = mdlrun(X)
     # b,r,c = model(input_fixup(X))
-    b,r,c = model(X)
-    r = r.chunk(BS)
-    r = [rr.squeeze(0) for rr in r]
-    c = c.chunk(BS)
-    c = [cc.squeeze(0) for cc in c]
-    # print(len(b))
-    # for bb in b:
-    #   print(bb.shape)
-    # a = anchor_generator(X, b)
-    # print('ANCHORS')
-    # for aa in a:
-    #   print(aa.numpy())
-    #   print(aa.shape)
-    #   aa.realize()
-    # print('Old ANCHORS')
-    # a_old = model.anchor_gen((800,800))
-    # print(len(a_old), type(a_old[0]))
-    # for aa in a_old:
-    #   print(aa.shape)
-    loss = model.loss(r, c, Y, anchor_generator(X, b))
+
+    b,r,c = model(X, True)
+    
+    # r = r.chunk(BS)
+    # r = [rr.squeeze(0) for rr in r]
+    # c = c.chunk(BS)
+    # c = [cc.squeeze(0) for cc in c]
+
+    # loss = Tensor(69)
+    # loss = model.loss(r, c, Y, anchor_generator(X, b))
     # loss = mdlloss_temp(r,c, Y, anchor_generator(X, b))
     # loss = model.loss_temp(r,c, Y, anchor_generator(X, b))
     # loss = mdlloss(r, c, Y, anchor_generator(X, b))
-    loss.backward()
-
-    optimizer.step()
+    loss = model.loss_dummy(r,c)
+    
+    # loss.backward()
+    # optimizer.step()
     return loss
     return model(input_fixup(X))
     b,r,c = model(input_fixup(X))
@@ -514,6 +511,8 @@ def train_retinanet():
     print(colored(f'EPOCH {epoch}/{EPOCHS}:', 'cyan'))
     cnt = 0
     for X,Y in iterate(coco, BS):
+      print('X_REQ_GRADDD', X.requires_grad)
+      # train_step.reset()
       st = time.time()
       # print('IMAGE DATA', X)
       # for tt in Y:

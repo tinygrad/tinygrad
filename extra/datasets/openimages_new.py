@@ -228,7 +228,7 @@ def iterate (coco, bs=8):
         # xNew = xNew.numpy()
 
         # xNew = Tensor(np.array(xNew))
-        xNew = normalize(Tensor(np.array(xNew)))
+        xNew = normalize(Tensor(np.array(xNew), requires_grad=False))
 
         # print('X_NEW',xNew.shape, xNew)
         X.append(xNew)
