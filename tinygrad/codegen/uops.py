@@ -281,18 +281,20 @@ class UOpGraph:
           self.replace_op(alu_with_accum, next(op for op in alu_with_accum.vin if op != accumulator))
       get_recursive_parents.cache_clear()
 
-  def optimize_one_hot_cmpeq(self, get_recursive_parents, op):
-    idx_load, arange_load = op.vin[0], op.vin[1] # todo make sure this is right..
-    arange_loop = next((op for op in get_recursive_parents(arange_load) if op.uop is UOps.LOOP), None)
-    phi = next((op for op in self.get_recursive_children(op) if op.uop is UOps.PHI), None)
-    if arange_loop is None or phi is None: return
-    if DEBUG >= 5: print("optimizing one hot cmpeq loop")
-    val_load = next(op for op in get_recursive_parents(phi) if op.uop is UOps.LOAD and op.vin[0] not in [idx_load.vin[0], arange_load.vin[0]])
-    for u in get_recursive_parents(val_load):
-      if u.uop is UOps.ALU:
-        u.vin = tuple([idx_load if vin is arange_loop else vin for vin in list(u.vin)])
-    self.replace_op(phi, val_load)
-    get_recursive_parents.cache_clear()
+  def optimize_one_hot_reduce_loops(self, get_recursive_parents, cmpeq):
+    phi = next((op for op in self.get_recursive_children(cmpeq) if op.uop is UOps.PHI), None)
+    phi_alus = [op for op in get_recursive_parents(phi) if op.uop is UOps.ALU] if phi else None
+    print(phi_alus, len(phi_alus), set([x.arg for x in phi_alus]))
+    if phi_alus is None or len(phi_alus) != 3 and set([x.arg for x in phi_alus]) != {BinaryOps.MUL, BinaryOps.ADD, BinaryOps.CMPEQ}: return
+    loop = phi.vin[2]
+    loop_val_to_reduce = next(x for x in cmpeq.vin if loop in get_recursive_parents(x))
+    index = next(x for x in cmpeq.vin if x != loop_val_to_reduce)
+    mul_op = next(x for x in phi_alus if x.arg is BinaryOps.MUL)
+    val_to_sum = next(op for op in mul_op.vin if cmpeq not in get_recursive_parents(op))
+    for u in get_recursive_parents(val_to_sum):
+      if loop in u.vin:
+        u.vin = tuple([index if vin is loop else vin for vin in list(u.vin)])
+    self.replace_op(phi, val_to_sum)
 
   def fix_to_store_directly(self):
     replaced_stores: Dict[UOp,UOp] = {}
@@ -347,7 +349,7 @@ class UOpGraph:
     # uops optimization
     while self.uops_optimization(get_recursive_parents): pass
     self.simplify_phi_loops(get_recursive_parents)
-    for x in self.one_hot_cmpeq: self.optimize_one_hot_cmpeq(get_recursive_parents, x)
+    for x in self.one_hot_cmpeq: self.optimize_one_hot_reduce_loops(get_recursive_parents, x)
 
     # (recursively) remove childless uops
     # TODO: remove DEFINE_GLOBAL from here
