@@ -471,19 +471,19 @@ def train_retinanet():
     # b,r,c = mdlrun(X)
     # b,r,c = model(input_fixup(X))
 
-    b,r,c = model(X, True)
-    
+    # b,r,c = model(X, True)
+    _ = model(X, False)
     # r = r.chunk(BS)
     # r = [rr.squeeze(0) for rr in r]
     # c = c.chunk(BS)
     # c = [cc.squeeze(0) for cc in c]
 
-    # loss = Tensor(69)
+    loss = Tensor(69)
     # loss = model.loss(r, c, Y, anchor_generator(X, b))
     # loss = mdlloss_temp(r,c, Y, anchor_generator(X, b))
     # loss = model.loss_temp(r,c, Y, anchor_generator(X, b))
     # loss = mdlloss(r, c, Y, anchor_generator(X, b))
-    loss = model.loss_dummy(r,c)
+    # loss = model.loss_dummy(r,c)
     
     # loss.backward()
     # optimizer.step()
