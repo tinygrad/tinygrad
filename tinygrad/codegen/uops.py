@@ -284,16 +284,17 @@ class UOpGraph:
   def optimize_one_hot_reduce_loops(self, get_recursive_parents, cmpeq):
     phi = next((op for op in self.get_recursive_children(cmpeq) if op.uop is UOps.PHI), None)
     phi_alus = [op for op in get_recursive_parents(phi) if op.uop is UOps.ALU] if phi else None
-    print(phi_alus, len(phi_alus), set([x.arg for x in phi_alus]))
     if phi_alus is None or len(phi_alus) != 3 and set([x.arg for x in phi_alus]) != {BinaryOps.MUL, BinaryOps.ADD, BinaryOps.CMPEQ}: return
     loop = phi.vin[2]
-    loop_val_to_reduce = next(x for x in cmpeq.vin if loop in get_recursive_parents(x))
-    index = next(x for x in cmpeq.vin if x != loop_val_to_reduce)
+    arange = next(x for x in cmpeq.vin if loop in get_recursive_parents(x))
+    if arange.uop is UOps.LOAD and arange.vin[1].uop is not UOps.LOOP: return
+    index = next(x for x in cmpeq.vin if x != arange)
+    index_casted = self.add(UOps.CAST, loop.dtype, (index,), insert_before=self.uops.index(index)+1) if loop.dtype != arange.dtype else index
     mul_op = next(x for x in phi_alus if x.arg is BinaryOps.MUL)
     val_to_sum = next(op for op in mul_op.vin if cmpeq not in get_recursive_parents(op))
     for u in get_recursive_parents(val_to_sum):
       if loop in u.vin:
-        u.vin = tuple([index if vin is loop else vin for vin in list(u.vin)])
+        u.vin = tuple([index_casted if vin is loop else vin for vin in list(u.vin)])
     self.replace_op(phi, val_to_sum)
 
   def fix_to_store_directly(self):
