@@ -7,7 +7,7 @@ from collections import defaultdict
 import numpy as np
 
 from tinygrad.dtype import DType, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype
-from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, fully_flatten, flat_mv, argsort
+from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, fully_flatten, flat_mv, argsort, broadcast_shapes
 from tinygrad.helpers import IMAGE, DEBUG, WINO, THREEFRY
 from tinygrad.lazy import LazyBuffer
 from tinygrad.features.multi import MultiLazyBuffer
@@ -372,8 +372,9 @@ class Tensor:
     new_shape = tuple([-prod(self.shape) // prod(new_shape) if s == -1 else (s if s is not None else self.shape[i]) for i,s in enumerate(new_shape)])
     return F.Reshape.apply(self, shape=new_shape) if new_shape != self.shape else self
   def expand(self, shape, *args) -> Tensor:
-    new_shape = tuple([x if x != -1 and x is not None else s for s,x in zip(self.shape, argfix(shape, *args))])
-    return F.Expand.apply(self, shape=new_shape) if new_shape != self.shape else self
+    x = self.reshape((1,)*(len(shape := argfix(shape, *args))-self.ndim) + self.shape)
+    new_shape = tuple([x if x != -1 and x is not None else s for s,x in zip(x.shape, shape)])
+    return F.Expand.apply(x, shape=new_shape) if new_shape != x.shape else x
   def permute(self, order, *args) -> Tensor: return F.Permute.apply(self, order=argfix(order, *args))
   def flip(self, axis, *args) -> Tensor: return F.Flip.apply(self, axis=[x if x >= 0 else x+len(self.shape) for x in argfix(axis, *args)])
   def shrink(self, arg:Tuple[Optional[Tuple[sint, sint]], ...]) -> Tensor:
@@ -876,12 +877,9 @@ class Tensor:
 
     if reverse: x, y = y, x
 
-    # left pad shape with 1s
-    if len(y.shape) < len(x.shape): y = y.reshape((1,) * (len(x.shape) - len(y.shape)) + y.shape)
-    elif len(x.shape) < len(y.shape): x = x.reshape((1,) * (len(y.shape) - len(x.shape)) + x.shape)
-
-    broadcasted_shape = tuple(0 if xi==0 or yi==0 else max(xi, yi) for xi, yi in zip(x.shape, y.shape))
-    return x.expand(broadcasted_shape), y.expand(broadcasted_shape)
+    # expand to broadcasted shape
+    shape = broadcast_shapes(x.shape, y.shape)
+    return x.expand(shape), y.expand(shape)
 
   def _to_const_val(self, x:Union[Tensor, ConstType]) -> Union[Tensor, ConstType]:
     # TODO: update with multi

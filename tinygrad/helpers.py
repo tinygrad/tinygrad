@@ -55,6 +55,11 @@ def get_child(obj, key):
     elif isinstance(obj, dict): obj = obj[k]
     else: obj = getattr(obj, k)
   return obj
+def broadcast_shapes(*shs:Tuple[sint, ...]) -> Tuple[sint, ...]:
+  padded_shs = tuple((1,) * (max(len(s_) for s_ in shs) - len(s)) + s for s in shs)
+  if not all((len(set(axis)) == 2 and 1 in set(axis)) or len(set(axis)) == 1 or 0 in set(axis) for axis in zip(*padded_shs)):
+    raise ValueError(f"unable to broadcast shapes={shs}")
+  return tuple(0 if any(sh_ == 0 for sh_ in sh) else max(sh) for sh in zip(*padded_shs))
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
 def get_contraction(old_shape:Tuple[sint, ...], new_shape:Tuple[sint, ...]) -> Optional[List[List[int]]]:
