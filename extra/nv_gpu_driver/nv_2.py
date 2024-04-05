@@ -1,6 +1,8 @@
+import subprocess
 import os, ctypes, pathlib, re, fcntl, functools, mmap, time
 from tinygrad.helpers import to_mv, getenv, round_up
-from tinygrad.runtime.ops_nv import NVDevice, NVAllocator
+from tinygrad.runtime.ops_nv import NVDevice, NVAllocator, NVCompiler, NVProgram
+from tinygrad.runtime.ops_cuda import CUDACompiler
 from tinygrad.device import Compiled, LRUAllocator, Compiler, BufferOptions, CompilerOptions
 from extra.nv_gpu_driver import nv_ioctl
 from extra.nv_gpu_driver import esc_ioctl as nvesc
@@ -264,22 +266,132 @@ def _gpu_uvm_map(root, device, fd_ctl, fd_dev0, gpu_uuid, mem_handle, size:int, 
 
   return va_base
 
+code = """
+#define INFINITY (__int_as_float(0x7f800000))
+#define NAN (__int_as_float(0x7fffffff))
+extern "C" __global__ void E_3(int* data0) {
+  // int lidx0 = threadIdx.x; /* 3 */
+  data0[0] = 0xdeadbeef;
+}
+"""
+
 if __name__ == "__main__":
   device_id = 0
   dev = NVDevice("NV:0")
   alloctor = NVAllocator(dev)
+  compiler = NVCompiler(arch='sm_90')
+  ccompiler = CUDACompiler(arch='sm_90')
 
+  binary = compiler.compile(code)
+  ptx = ccompiler.compile(code)
+  try:
+    with open("/home/nimlgen/tmp/tmp.ptx", "wb") as f: f.write(ptx)
+    lb = subprocess.check_output(["ptxas", f"-arch=sm_90", "-o", "/home/nimlgen/tmp/tmp.ptx.o", "/home/nimlgen/tmp/tmp.ptx"])
+  except Exception as e: print("failed to generate SASS", str(e))
+  # print(lb)
+  # hexdump("dai", lb)
+  # with open("/home/nimlgen/cubin.elf", 'wb') as file:
+  #   file.write(binary)
+
+  # from io import BytesIO
+  # from elftools.elf.elffile import ELFFile
+  # from elftools.elf.sections import NoteSection
+  # with BytesIO(binary) as f:
+  # with open("/home/nimlgen/cuda_ioctl_sniffer/out/simple.o", "rb") as f:
+  #   elf = ELFFile(f)
+  #   print(elf.header['e_type'])
+
+  #   # Print all segments
+  #   print("Segments:")
+  #   for i, segment in enumerate(elf.iter_segments()):
+  #     print(f"  Segment {i}:")
+  #     print(f"    Type: {segment['p_type']}")
+  #     print(f"    Offset: {segment['p_offset']}")
+  #     print(f"    Virtual Address: {segment['p_vaddr']}")
+  #     print(f"    Physical Address: {segment['p_paddr']}")
+  #     print(f"    Size in File: {segment['p_filesz']}")
+  #     print(f"    Size in Memory: {segment['p_memsz']}")
+  #     print(f"    Flags: {segment['p_flags']}")
+  #     print(f"    Alignment: {segment['p_align']}")
+
+  #   print("\nSections:")
+  #   for i, section in enumerate(elf.iter_sections()):
+  #     print(f"  Section {i}: {section.name}")
+  #     print(f"    Type: {section['sh_type']}")
+  #     print(f"    Address: {section['sh_addr']}")
+  #     print(f"    Offset: {section['sh_offset']}")
+  #     print(f"    Size: {section['sh_size']}")
+  #     print(f"    Flags: {section['sh_flags']}")
+  #     print(f"    Link: {section['sh_link']}")
+  #     print(f"    Info: {section['sh_info']}")
+  #     print(f"    Address Alignment: {section['sh_addralign']}")
+  #     print(f"    Entry Size: {section['sh_entsize']}")
+
+    # dynsym = elffile.get_section_by_name('.dynsym')
+    # if not dynsym:
+    #   print("Dynamic symbol table not found.")
+
+    # kern_info = None
+    # for section in elffile.iter_sections():
+    #   if isinstance(section, NoteSection):
+
+  prog = NVProgram(dev, "E_3", binary)
+  gpu_buf_addr = alloctor.alloc(2<<20)
+  # gpu_buf_addr2 = 0x200400000 + 0x107000 #alloctor.alloc(2<<20)
+  # alloctor.copyin(gpu_buf_addr2, memoryview(bytearray(b'\xff\x00\xdd\xee')))
+  # dev.synchronize()
+  
+
+  # for i in range(10): 
+  prog(gpu_buf_addr)
+  dev.synchronize()
+  dev._cmdq_dma_copy(gpu_buf_addr+0x18, gpu_buf_addr, 8)
+  dev.synchronize()
+  # print("wait done called")
+  # hexdump(to_mv(gpu_buf_addr, 0x40))
+  hexdump(to_mv(dev.qmd, 0x40))
+  # hexdump(to_mv(prog.handle, 0x100))
+  # hexdump(to_mv(prog.kernarg_address, 0x200))
+  res = memoryview(bytearray(0x4))
+  alloctor.copyout(res, gpu_buf_addr)
+  alloctor.copyout(res, gpu_buf_addr)
+  alloctor.copyout(res, gpu_buf_addr)
+  alloctor.copyout(res, gpu_buf_addr)
+  alloctor.copyout(res, gpu_buf_addr)
+  alloctor.copyout(res, gpu_buf_addr)
+  alloctor.copyout(res, gpu_buf_addr)
+  alloctor.copyout(res, gpu_buf_addr)
+  alloctor.copyout(res, gpu_buf_addr)
+  alloctor.copyout(res, gpu_buf_addr)
+  print(res)
+  for byte in res.tobytes(): print(byte)
+
+  exit(0)
   gpu_base = 0x200400000 + 0x100000
-  cmdq = gpu_base+0x6000
+  cmdq = dev.cmdq_addr
   signal_addr = gpu_base+0x7000
   ring_cmd = to_mv(cmdq, 0x1000).cast("I")
   cmd_memcpy(gpu_base+4, (ctypes.c_uint32*1).from_buffer_copy(b'\xaa\xbb\xcc\xdd'), 4, signal_addr)
-  buf = (ctypes.c_uint32*1).from_buffer_copy(b'\xaa\xbb\xcc\xdd')
+  buf = (ctypes.c_uint32*1).from_buffer_copy(bytearray(b'\xff\x00\xdd\xee'))
 
-  print("smth", dev._gpu_host_alloc(2 << 20))
+  # addr = dev._gpu_map_to_gpu(ctypes.addressof(buf), (2<<20))
+  # print(addr)
+  local_buf_addr = alloctor.alloc(4, BufferOptions(host=True))
+  gpu_buf_addr = alloctor.alloc(2<<20)
+  ctypes.memmove(local_buf_addr, buf, 4)
+
+
+  alloctor.copyin(gpu_buf_addr, memoryview(bytearray(b'\xff\x00\xdd\xee')))
+  res = memoryview(bytearray(0x4))
+  alloctor.copyout(res, gpu_buf_addr)
+  dev.synchronize()
+  for byte in res.tobytes(): print(byte)
 
   cmd_dma_copy(gpu_base+8, gpu_base+4, 4)
-  cmd_dma_copy(gpu_base+12, ctypes.addressof(buf), 4)
+  cmd_dma_copy(gpu_buf_addr, local_buf_addr, 4)
+  cmd_dma_copy(gpu_base+12, gpu_buf_addr, 4)
+
+  dev.synchronize()
 
   gpu_ring = dev.gpu_ring
 

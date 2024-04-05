@@ -1,13 +1,14 @@
 #!/bin/bash
 SRC=/home/nimlgen/cuda_ioctl_sniffer/open-gpu-kernel-modules
 
-clang2py \
-  $SRC/src/common/sdk/nvidia/inc/class/cl0080.h \
-  $SRC/src/common/sdk/nvidia/inc/class/cl2080_notification.h \
-  $SRC/src/common/sdk/nvidia/inc/class/clc56f.h \
-  $SRC/src/nvidia/generated/g_allclasses.h \
-  --clang-args="-I$SRC/src/common/sdk/nvidia/inc/" \
-  -o class_ioctl.py -k cdefstum
+# clang2py \
+#   $SRC/src/common/sdk/nvidia/inc/class/cl0080.h \
+#   $SRC/src/common/sdk/nvidia/inc/class/cl2080_notification.h \
+#   $SRC/src/common/sdk/nvidia/inc/class/clc56f.h \
+#   $SRC/src/common/sdk/nvidia/inc/class/clc56f.h \
+#   $SRC/src/nvidia/generated/g_allclasses.h \
+#   --clang-args="-I$SRC/src/common/sdk/nvidia/inc/" \
+#   -o class_ioctl.py -k cdefstum
 
 # clang2py \
 #   $SRC/src/common/sdk/nvidia/inc/class/clc6c0.h \
@@ -26,13 +27,15 @@ clang2py \
 
 # exit
 
-# clang2py $SRC/src/nvidia/arch/nvalloc/unix/include/nv_escape.h \
-#  $SRC/src/nvidia/arch/nvalloc/unix/include/nv-ioctl-numbers.h \
-#  $SRC/src/nvidia/arch/nvalloc/unix/include/nv-unix-nvos-params-wrappers.h \
-#  $SRC/src/common/sdk/nvidia/inc/alloc/alloc_channel.h \
-#  $SRC/src/common/sdk/nvidia/inc/nvos.h \
-#  --clang-args="-I $SRC/src/common/sdk/nvidia/inc -I $SRC/src/common/sdk/nvidia/inc/ctrl" \
-#  -o esc_ioctl.py -k cdefstum
+clang2py $SRC/src/nvidia/arch/nvalloc/unix/include/nv_escape.h \
+ $SRC/src/nvidia/arch/nvalloc/unix/include/nv-ioctl.h \
+ $SRC/src/nvidia/arch/nvalloc/unix/include/nv-ioctl-numbers.h \
+ $SRC/src/nvidia/arch/nvalloc/unix/include/nv-ioctl-numa.h \
+ $SRC/src/nvidia/arch/nvalloc/unix/include/nv-unix-nvos-params-wrappers.h \
+ $SRC/src/common/sdk/nvidia/inc/alloc/alloc_channel.h \
+ $SRC/src/common/sdk/nvidia/inc/nvos.h \
+ --clang-args="-I$SRC/src/common/sdk/nvidia/inc -I$SRC/src/nvidia/arch/nvalloc/unix/include -I$SRC/src/common/sdk/nvidia/inc/ctrl" \
+ -o esc_ioctl.py -k cdefstum
 
 # clang2py \
 #   $SRC/src/common/sdk/nvidia/inc/ctrl/ctrl0000/*.h \
