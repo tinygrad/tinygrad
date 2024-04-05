@@ -219,6 +219,8 @@ class KFDProgram:
     if hasattr(self, 'lib_gpu'): self.device._gpu_free(self.lib_gpu)
 
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
+    if self.device.kernargs_ptr >= (self.device.kernargs.va_addr + self.device.kernargs.size + self.kernargs_segment_size):
+      self.device.kernargs_ptr = self.device.kernargs.va_addr
     assert self.device.kernargs_ptr < (self.device.kernargs.va_addr + self.device.kernargs.size + self.kernargs_segment_size), "kernargs overrun"
     if not hasattr(self, "args_struct_t"):
       self.args_struct_t = init_c_struct_t(tuple([(f'f{i}', ctypes.c_void_p) for i in range(len(args))] +
@@ -294,6 +296,7 @@ class KFDAllocator(LRUAllocator):
     self.device._wait_on(self.device.completion_signal.event_id)
 
   def copyout(self, dest:memoryview, src):
+    self.device.synchronize()
     for i in range(0, dest.nbytes, self.b[0].size):
       self.device.completion_signal.value = 1
       self.device._submit_sdma(self.b[0].va_addr, src.va_addr+i, lsize:=min(self.b[0].size, dest.nbytes-i),
@@ -315,11 +318,12 @@ class KFDDevice(Compiled):
     stm = kio.map_memory_to_gpu(self.kfd, handle=mem.handle, device_ids_array_ptr=ctypes.addressof(c_gpus), n_devices=len(mem.mapped_gpu_ids))
     assert stm.n_success == len(mem.mapped_gpu_ids)
 
-  def _wait_on(self, event_id, timeout=1000):
+  @classmethod
+  def _wait_on(self, event_id, timeout=10000):
     evt_arr = (kfd.struct_kfd_event_data * 1)()
     evt_arr[0].event_id = event_id
     ret = kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=timeout)
-    if ret.wait_result != 0: raise RuntimeError(f"wait_result got {ret.wait_result}, hit timeout?")
+    if ret.wait_result != 0: raise RuntimeError(f"wait_result: {ret.wait_result}, {timeout} ms TIMEOUT!")
 
   def _gpu_alloc(self, size:int, flags:int, uncached=False, public=False, map_to_gpu=True):
     flags |= kfd.KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE
@@ -348,9 +352,10 @@ class KFDDevice(Compiled):
 
   @classmethod
   def _get_signal(self, num=None):
-    if num is None: num = KFDDevice.signal_number
-    KFDDevice.signal_number += 1
-    if KFDDevice.signal_number == SIGNAL_COUNT: KFDDevice.signal_number = 10
+    if num is None:
+      num = KFDDevice.signal_number
+      KFDDevice.signal_number += 1
+      if KFDDevice.signal_number == SIGNAL_COUNT: KFDDevice.signal_number = 10
     ret = hsa.amd_signal_t.from_address(KFDDevice.signals_page.va_addr + SIGNAL_SIZE*num)
     ret.value = 1
     return ret
@@ -379,8 +384,6 @@ class KFDDevice(Compiled):
 
     self.gart = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
     self.aql_ring = self._gpu_alloc(0x100000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
-    self.pm4_indirect_buf = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
-
     self.eop_buffer = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
     self.kernargs = self._gpu_alloc(0x1000000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
     self.kernargs_ptr = self.kernargs.va_addr
@@ -401,7 +404,7 @@ class KFDDevice(Compiled):
     self.amd_aql_queue.max_wave_id = self.properties['max_waves_per_simd'] * self.properties['simd_per_cu'] - 1
 
     # scratch setup
-    self.max_private_segment_size = 512
+    self.max_private_segment_size = 4096
     wave_scratch_len = round_up(((self.amd_aql_queue.max_wave_id + 1) * self.max_private_segment_size), 256) # gfx11 requires alignment of 256
     self.scratch_len = (self.amd_aql_queue.max_cu_id + 1) * self.properties['max_slots_scratch_cu'] * wave_scratch_len
     self.scratch = self._gpu_alloc(self.scratch_len, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
@@ -439,6 +442,8 @@ class KFDDevice(Compiled):
     self.sdma_doorbell = to_mv(self.doorbells + self.sdma_queue.doorbell_offset - self.doorbells_base, 4).cast("I")
     self.sdma_doorbell_value = 0
 
+    # PM4 stuff
+    self.pm4_indirect_buf = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
     pm4_indirect_cmd = (ctypes.c_uint32*13)(amd_gpu.PACKET3(amd_gpu.PACKET3_INDIRECT_BUFFER, 2), self.pm4_indirect_buf.va_addr & 0xffffffff,
                                             (self.pm4_indirect_buf.va_addr>>32) & 0xffffffff, 8 | amd_gpu.INDIRECT_BUFFER_VALID, 0xa)
     ctypes.memmove(ctypes.addressof(pm4_cmds:=(ctypes.c_uint16*27)(1))+2, ctypes.addressof(pm4_indirect_cmd), ctypes.sizeof(pm4_indirect_cmd))
