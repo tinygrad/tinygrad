@@ -254,9 +254,9 @@ class KFDAllocator(LRUAllocator):
       else: raise
 
   def _free(self, gpumem, options:BufferOptions): self.device._gpu_free(gpumem)
-  def as_buffer(self, src:Any) -> memoryview:
-    self.device.synchronize()
-    return to_mv(src.va_addr, src.size)
+  #def as_buffer(self, src:Any) -> memoryview:
+  #  self.device.synchronize()
+  #  return to_mv(src.va_addr, src.size)
 
   def copy_from_fd(self, dest, fd, offset, size):
     fo = io.FileIO(fd, "a+b", closefd=False)
@@ -382,7 +382,7 @@ class KFDDevice(Compiled):
     self.pm4_indirect_buf = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
 
     self.eop_buffer = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
-    self.kernargs = self._gpu_alloc(0x100000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
+    self.kernargs = self._gpu_alloc(0x1000000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
     self.kernargs_ptr = self.kernargs.va_addr
     self.ctx_save_restore_address = self._gpu_alloc(0x2C02000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
 
