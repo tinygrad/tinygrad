@@ -110,11 +110,11 @@ class HWComputeQueue:
       completion_signal=hsa.hsa_signal_t(ctypes.addressof(completion_signal)) if completion_signal is not None else EMPTY_SIGNAL))
     return self
 
-  def signal(self, signal):
+  def signal(self, signal:hsa.amd_signal_t):
     self.q.append(hsa.hsa_barrier_and_packet_t(header=BARRIER_HEADER, completion_signal=hsa.hsa_signal_t(ctypes.addressof(signal))))
     return self
 
-  def wait(self, signal):
+  def wait(self, signal:hsa.amd_signal_t):
     sig = hsa.hsa_barrier_and_packet_t(header=BARRIER_HEADER)
     sig.dep_signal[0] = hsa.hsa_signal_t(ctypes.addressof(signal))
     self.q.append(sig)
@@ -177,17 +177,17 @@ class HWCopyQueue:
     self.q.append(sdma_cache_wb)
     return self
 
-  def signal(self, completion_signal):
+  def signal(self, signal:hsa.amd_signal_t):
     self.q.append(sdma_pkts.atomic(op=amd_gpu.SDMA_OP_ATOMIC, operation=amd_gpu.SDMA_ATOMIC_ADD64,
-                                   addr=ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'value').offset, src_data=(1<<64)-1))
-    if completion_signal.event_mailbox_ptr != 0:
-      self.q.append(sdma_pkts.fence(op=amd_gpu.SDMA_OP_FENCE, mtype=3, addr=completion_signal.event_mailbox_ptr, data=completion_signal.event_id))
-      self.q.append(sdma_pkts.trap(op=amd_gpu.SDMA_OP_TRAP, int_ctx=completion_signal.event_id))
+                                   addr=ctypes.addressof(signal) + getattr(hsa.amd_signal_t, 'value').offset, src_data=(1<<64)-1))
+    if signal.event_mailbox_ptr != 0:
+      self.q.append(sdma_pkts.fence(op=amd_gpu.SDMA_OP_FENCE, mtype=3, addr=signal.event_mailbox_ptr, data=signal.event_id))
+      self.q.append(sdma_pkts.trap(op=amd_gpu.SDMA_OP_TRAP, int_ctx=signal.event_id))
     return self
 
-  def wait(self, completion_signal):
+  def wait(self, signal:hsa.amd_signal_t):
     self.q.append(sdma_pkts.poll_regmem(op=amd_gpu.SDMA_OP_POLL_REGMEM, mem_poll=1, func=0x3,
-                                        addr=ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'value').offset,
+                                        addr=ctypes.addressof(signal) + getattr(hsa.amd_signal_t, 'value').offset,
                                         value=0, mask=0xffffffff, interval=0x04, retry_count=0xfff))
     return self
 
@@ -239,7 +239,7 @@ class KFDProgram:
     self.device.kernargs_ptr += self.kernargs_segment_size
 
     if wait:
-      self.device._wait_on(self.device.completion_signal.event_id)
+      self.device._wait_signal(self.device.completion_signal)
       assert (wp:=self.device.amd_aql_queue.write_dispatch_id) == (rp:=self.device.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
       return (self.device.completion_signal.end_ts-self.device.completion_signal.start_ts)/1e8
 
@@ -272,14 +272,14 @@ class KFDAllocator(LRUAllocator):
       if copy_size == 0: break
 
       fo.readinto(to_mv(self.b[1].va_addr, local_size))
-      if i != 0: self.device._wait_on(self.device.completion_signal.event_id)
+      if i != 0: self.device._wait_signal(self.device.completion_signal)
       self.b = self.b[::-1]
       self.device.completion_signal.value = 1  # TODO: when do we have to reset it?
       self.device._submit_sdma(dest.va_addr+copied_in, self.b[0].va_addr+minor_offset, copy_size, completion_signal=self.device.completion_signal)
 
       copied_in += copy_size
       minor_offset = 0 # only on the first
-    self.device._wait_on(self.device.completion_signal.event_id)
+    self.device._wait_signal(self.device.completion_signal)
 
   def transfer(self, dest, src, sz:int, src_dev=None, dest_dev=None):
     dest_dev._gpu_map(src)
@@ -291,11 +291,11 @@ class KFDAllocator(LRUAllocator):
   def copyin(self, dest, src: memoryview):
     for i in range(0, src.nbytes, self.b[0].size):
       ctypes.memmove(self.b[1].va_addr, from_mv(src[i:]), lsize:=min(self.b[0].size, src.nbytes-i))
-      if i != 0: self.device._wait_on(self.device.completion_signal.event_id)
+      if i != 0: self.device._wait_signal(self.device.completion_signal)
       self.b = self.b[::-1]
       self.device.completion_signal.value = 1  # TODO: when do we have to reset it?
       self.device._submit_sdma(dest.va_addr+i, self.b[0].va_addr, lsize, completion_signal=self.device.completion_signal)
-    self.device._wait_on(self.device.completion_signal.event_id)
+    self.device._wait_signal(self.device.completion_signal)
 
   def copyout(self, dest:memoryview, src):
     self.device.synchronize()
@@ -303,7 +303,7 @@ class KFDAllocator(LRUAllocator):
       self.device.completion_signal.value = 1
       self.device._submit_sdma(self.b[0].va_addr, src.va_addr+i, lsize:=min(self.b[0].size, dest.nbytes-i),
                                completion_signal=self.device.completion_signal)
-      self.device._wait_on(self.device.completion_signal.event_id)
+      self.device._wait_signal(self.device.completion_signal)
       ctypes.memmove(from_mv(dest[i:]), self.b[0].va_addr, lsize)
 
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
@@ -319,13 +319,6 @@ class KFDDevice(Compiled):
     c_gpus = (ctypes.c_int32 * len(mem.mapped_gpu_ids))(*mem.mapped_gpu_ids)
     stm = kio.map_memory_to_gpu(self.kfd, handle=mem.handle, device_ids_array_ptr=ctypes.addressof(c_gpus), n_devices=len(mem.mapped_gpu_ids))
     assert stm.n_success == len(mem.mapped_gpu_ids)
-
-  @classmethod
-  def _wait_on(self, event_id, timeout=10000):
-    evt_arr = (kfd.struct_kfd_event_data * 1)()
-    evt_arr[0].event_id = event_id
-    ret = kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=timeout)
-    if ret.wait_result != 0: raise RuntimeError(f"wait_result: {ret.wait_result}, {timeout} ms TIMEOUT!")
 
   def _gpu_alloc(self, size:int, flags:int, uncached=False, public=False, map_to_gpu=True):
     flags |= kfd.KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE
@@ -353,7 +346,7 @@ class KFDDevice(Compiled):
     kio.free_memory_of_gpu(self.kfd, handle=mem.handle)
 
   @classmethod
-  def _get_signal(self, num=None):
+  def _get_signal(self, num=None) -> hsa.amd_signal_t:
     if num is None:
       num = KFDDevice.signal_number
       KFDDevice.signal_number += 1
@@ -361,6 +354,14 @@ class KFDDevice(Compiled):
     ret = hsa.amd_signal_t.from_address(KFDDevice.signals_page.va_addr + SIGNAL_SIZE*num)
     ret.value = 1
     return ret
+
+  @classmethod
+  def _wait_signal(self, signal:hsa.amd_signal_t, timeout=10000):
+    assert signal.event_id != 0, "can't wait on this signal"
+    evt_arr = (kfd.struct_kfd_event_data * 1)()
+    evt_arr[0].event_id = signal.event_id
+    ret = kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=timeout)
+    if ret.wait_result != 0: raise RuntimeError(f"wait_result: {ret.wait_result}, {timeout} ms TIMEOUT!")
 
   def __init__(self, device:str=""):
     if KFDDevice.kfd == -1: KFDDevice.kfd = os.open("/dev/kfd", os.O_RDWR)
@@ -477,12 +478,12 @@ class KFDDevice(Compiled):
     q = HWComputeQueue()
     q.q.append(self.pm4_packet)
     q.submit(self)
-    self._wait_on(self.completion_signal.event_id)
+    self._wait_signal(self.completion_signal)
     assert (wp:=self.amd_aql_queue.write_dispatch_id) == (rp:=self.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
 
   def synchronize(self):
     HWComputeQueue().signal(self.completion_signal).submit(self)
-    self._wait_on(self.completion_signal.event_id)
+    self._wait_signal(self.completion_signal)
     assert (wp:=self.amd_aql_queue.write_dispatch_id) == (rp:=self.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
 
     # reset kernargs
