@@ -219,6 +219,8 @@ class KFDProgram:
     if hasattr(self, 'lib_gpu'): self.device._gpu_free(self.lib_gpu)
 
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
+    if self.device.kernargs_ptr >= (self.device.kernargs.va_addr + self.device.kernargs.size + self.kernargs_segment_size):
+      self.device.kernargs_ptr = self.device.kernargs.va_addr
     assert self.device.kernargs_ptr < (self.device.kernargs.va_addr + self.device.kernargs.size + self.kernargs_segment_size), "kernargs overrun"
     if not hasattr(self, "args_struct_t"):
       self.args_struct_t = init_c_struct_t(tuple([(f'f{i}', ctypes.c_void_p) for i in range(len(args))] +
@@ -294,6 +296,7 @@ class KFDAllocator(LRUAllocator):
     self.device._wait_on(self.device.completion_signal.event_id)
 
   def copyout(self, dest:memoryview, src):
+    self.device.synchronize()
     for i in range(0, dest.nbytes, self.b[0].size):
       self.device.completion_signal.value = 1
       self.device._submit_sdma(self.b[0].va_addr, src.va_addr+i, lsize:=min(self.b[0].size, dest.nbytes-i),
@@ -320,7 +323,7 @@ class KFDDevice(Compiled):
     evt_arr = (kfd.struct_kfd_event_data * 1)()
     evt_arr[0].event_id = event_id
     ret = kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=timeout)
-    if ret.wait_result != 0: raise RuntimeError(f"wait_result got {ret.wait_result}, hit timeout?")
+    if ret.wait_result != 0: raise RuntimeError(f"wait_result: {ret.wait_result}, {timeout} ms TIMEOUT!")
 
   def _gpu_alloc(self, size:int, flags:int, uncached=False, public=False, map_to_gpu=True):
     flags |= kfd.KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE
