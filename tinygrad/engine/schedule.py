@@ -2,11 +2,13 @@ import sys
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import Tuple, List, Dict, Optional, Set, DefaultDict
+from weakref import WeakSet
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, LazyOp, ReduceOps, ConstBuffer, MemBuffer, BinaryOps, UnaryOps
 from tinygrad.features.graph import log_lazybuffer, realized_lazybuffer
 from tinygrad.helpers import GRAPH, DEBUG, GlobalCounters, prod, dedup, all_int
 from tinygrad.shape.symbolic import Variable
-from tinygrad.dtype import ImageDType, dtypes
+from tinygrad.dtype import ImageDType, dtypes, DType
+from tinygrad.buffer import Buffer
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
 
@@ -123,7 +125,7 @@ def _is_padding_okay(buf:LazyBuffer, realizes:Set[LazyBuffer]) -> bool:
   if buf.op in UNSAFE_PAD_OPS: return False
   return all(_is_padding_okay(x.base, realizes) for x in buf.srcs)
 
-def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> List[ScheduleItem]:
+def _lower_to_buffer(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> Tuple[List[ScheduleItem], WeakSet[LazyBuffer]]:
   if seen is None: seen = set()
 
   # start by just realizing the buffers passed in
@@ -226,4 +228,34 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
   # confirm everything was scheduled correctly
   if not all(degree == 0 for degree in in_degree.values()) or len(prescheduled) != len(schedule):
     raise RuntimeError(f"cycle detected in graph, prescheduled {len(prescheduled)} but only scheduled {len(schedule)}")
-  return schedule
+
+  return schedule, WeakSet([x.base for x in graph.keys()])
+
+def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> List[ScheduleItem]:
+  schedule, wlb = _lower_to_buffer(outs, seen)
+
+  # *** memory scheduler ***
+  # NOTE: this must be in a new function because the unparented LazyBuffers need to be GCed
+  assigned: Dict[Buffer, Buffer] = {}
+
+  # all unallocated unparented buffers are fair game to replace
+  parented_buffers = set([x.buffer for x in wlb])
+  unallocated = [[x for x in (si.outputs+si.inputs) if not hasattr(x, '_buf') and x not in parented_buffers] for si in schedule]
+  last_appearance = {}
+  for i,u in enumerate(unallocated):
+    for buf in u: last_appearance[buf] = i
+
+  # LRU algorithm
+  local_cache: DefaultDict[Tuple[str, int, DType], List[Buffer]] = defaultdict(list)
+  for i,u in enumerate(unallocated):
+    for buf in u:
+      key = (buf.device, buf.size, buf.dtype)
+      if buf not in assigned:
+        if len(ll:=local_cache[key]): assigned[buf] = ll.pop()
+        else: assigned[buf] = Buffer(*key)
+      if i == last_appearance[buf]:
+        local_cache[key].append(assigned[buf])
+
+  # do the buffer replacements in the schedule
+  return [ScheduleItem(si.ast, tuple(assigned.get(x, x) for x in si.outputs),
+                               tuple(assigned.get(x, x) for x in si.inputs), si.var_vals) for si in schedule]
