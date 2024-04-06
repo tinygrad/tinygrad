@@ -499,7 +499,7 @@ class Tensor:
       # iteratively eq -> mul -> sum fancy index
       try:
         for a,i,sd in zip(arange, reshaped_idx, sum_dim): ret = (a==i).mul(ret).sum(sd)
-      except AssertionError as exc: raise IndexError("cannot broadcast indices") from exc
+      except ValueError as exc: raise IndexError("cannot broadcast indices") from exc
 
       # special permute case
       if first_dim != 0 and len(idx) != 1 and tuple(idx.keys()) != tuple(range(first_dim, last_dim+1)):
@@ -861,10 +861,11 @@ class Tensor:
   # ***** broadcasted elementwise mlops *****
   @staticmethod
   def _broadcast_tensors(*ts:Tensor, shape:Tuple[sint, ...]=()):
-    # TODO: what if shape is smaller than tensor shapes...
-    shps = tuple(t.shape for t in ts) + (shape,)
-    padded_shps = tuple((1,) * (max(len(s_) for s_ in shps) - len(s)) + s for s in shps)
-    if not all((len(set(axis)) == 2 and 1 in set(axis)) or len(set(axis)) == 1 or 0 in set(axis) for axis in zip(*padded_shps)):
+    shps, max_ndim = tuple(t.shape for t in ts) + (shape,), max(t.ndim for t in ts)
+    padded_shps = tuple((1,) * (max(max_ndim, len(shape))- len(s)) + s for s in shps)
+    if shape != () and (max_ndim > len(shape) or any(axis[-1] != 0 and any(axis[-1] < a for a in axis[:-1]) for axis in zip(*padded_shps))):
+      raise ValueError(f"{shape=} has to have higher dims than tensors and each dim has to be larger or equal 0")
+    if not all((len(vals := set(axis)) == 2 and 1 in vals) or len(vals) == 1 or 0 in vals for axis in zip(*padded_shps)):
       raise ValueError(f"unable to broadcast shapes={shps}")
     expand_arg = tuple(0 if any(sh_ == 0 for sh_ in sh) else max(sh) for sh in zip(*padded_shps))
     return tuple(F.Expand.apply(t.reshape(reshape_arg), shape=expand_arg) if expand_arg != t.shape else t for t,reshape_arg in zip(ts, padded_shps))
