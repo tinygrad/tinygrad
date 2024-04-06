@@ -12,6 +12,7 @@ def get_imagenet_categories():
 
 if getenv("MNISTMOCK"):
   BASEDIR = pathlib.Path(__file__).parent / "mnist"
+
   @functools.lru_cache(None)
   def get_train_files():
     if not BASEDIR.exists():

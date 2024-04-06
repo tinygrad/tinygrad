@@ -11,9 +11,12 @@ X_train, Y_train, X_test, Y_test = fetch_mnist()
 def act(arg):
   (basedir, i, train) = arg
   if train:
-    Image.fromarray(np.uint8(X_train[i])).resize((224, 224)).convert('RGB').save(basedir / f"train/{Y_train[i]}/{i}.jpg")
+    img = np.uint8(X_train[i]).reshape(28, 28)
+    nm = f"train/{Y_train[i]}/{i}.jpg"
   else:
-    Image.fromarray(np.uint8(X_test[i])).resize((224, 224)).convert('RGB').save(basedir / f"val/{Y_test[i]}/{i}.jpg")
+    img = np.uint8(X_test[i]).reshape(28, 28)
+    nm = f"val/{Y_test[i]}/{i}.jpg"
+  Image.fromarray(img).resize((224, 224)).convert('RGB').save(basedir / nm)
 
 def create_fake_mnist_imagenet(basedir:pathlib.Path):
   print(f"creating mock MNIST dataset at {basedir}")
