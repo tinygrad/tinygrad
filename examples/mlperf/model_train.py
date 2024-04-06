@@ -236,8 +236,152 @@ def train_retinanet():
   pass
 
 def train_unet3d():
-  # TODO: Unet3d
-  pass
+  from examples.mlperf.losses import dice_ce_loss
+  from examples.mlperf.metrics import dice_score
+  from extra.models.unet3d import UNet3D
+  from extra.datasets.kits19 import iterate, get_train_files, get_val_files, sliding_window_inference
+  from tinygrad import Device, TinyJit, Tensor
+  from tinygrad.nn.optim import SGD
+  from tinygrad import GlobalCounters
+  from math import ceil
+
+  import numpy as np
+  import random
+  import time
+
+  GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
+  print(f"Training on {GPUS}")
+  for x in GPUS: Device[x]
+
+  TARGET_METRIC = 0.908
+  NUM_EPOCHS = getenv("NUM_EPOCHS", 4000)
+  BS = getenv("BS", 1 * len(GPUS))
+  LR = getenv("LR", 0.8)
+  MOMENTUM = getenv("MOMENTUM", 0.9)
+  LR_WARMUP_EPOCHS = getenv("LR_WARMUP_EPOCHS", 200)
+  LR_WARMUP_INIT_LR = getenv("LR_WARMUP_INIT_LR", 0.0001)
+  WANDB = getenv("WANDB")
+  PROJ_NAME = getenv("PROJ_NAME", "tinygrad_unet3d_mlperf")
+  SEED = getenv("SEED")
+  TRAIN_DATASET_SIZE = len(get_train_files())
+  VAL_DATASET_SIZE = len(get_val_files())
+  START_EVAL_AT = getenv("START_EVAL_AT", ceil(1000 * TRAIN_DATASET_SIZE / (TRAIN_DATASET_SIZE * BS)))
+  EVALUATE_EVERY = getenv("EVALUATE_EVERY", ceil(20 * TRAIN_DATASET_SIZE / (TRAIN_DATASET_SIZE * BS)))
+
+  start_eval_at = START_EVAL_AT
+  evaluate_every = EVALUATE_EVERY
+
+  print(f"Start evaluation at epoch {start_eval_at} and every {evaluate_every} epochs after")
+
+  if WANDB:
+    try:
+      import wandb
+    except ImportError:
+      raise "Need to install wandb to use it"
+
+  if SEED:
+    Tensor.manual_seed(SEED)
+    np.random.seed(SEED)
+    random.seed(SEED)
+
+  model = UNet3D()
+  params = get_parameters(model)
+
+  for p in params: p.realize().to_(GPUS)
+
+  optim = SGD(params, lr=LR, momentum=MOMENTUM, nesterov=True)
+
+  def lr_warm_up(optim, init_lr, lr, current_epoch, warmup_epochs):
+    scale = current_epoch / warmup_epochs
+    optim.lr.assign(Tensor([init_lr + (lr - init_lr) * scale], device=GPUS))
+
+  @TinyJit
+  def train_step(model, x, y):
+    optim.zero_grad()
+
+    y_hat = model(x)
+    loss = dice_ce_loss(y_hat, y)
+
+    loss.backward()
+    optim.step()
+    return loss.realize()
+
+  @TinyJit
+  def eval_step(model, x, y):
+    y_hat, y = sliding_window_inference(model, x, y, gpus=GPUS)
+    y_hat, y = Tensor(y_hat), Tensor(y, requires_grad=False)
+    loss = dice_ce_loss(y_hat, y)
+    score = dice_score(y_hat, y)
+    return loss.realize(), score.realize()
+
+  if WANDB: wandb.init(project=PROJ_NAME)
+
+  is_successful, diverged = False, False
+  next_eval_at = start_eval_at
+
+  for epoch in range(1, NUM_EPOCHS + 1):
+    Tensor.training = True
+
+    if epoch <= LR_WARMUP_EPOCHS and LR_WARMUP_EPOCHS > 0:
+      lr_warm_up(optim, LR_WARMUP_INIT_LR, LR, epoch, LR_WARMUP_EPOCHS)
+
+    st = time.perf_counter()
+
+    for i, (x, y) in enumerate(tqdm(iterate(val=False, shuffle=True, bs=BS, cache_preprocessed_data=True), total=TRAIN_DATASET_SIZE // BS, desc=f"epoch {epoch}"), start=1):
+      GlobalCounters.reset()
+
+      x, y = Tensor(x).realize().shard(GPUS, axis=0), Tensor(y, requires_grad=False).shard(GPUS, axis=0)
+
+      loss = train_step(model, x, y)
+      pt = time.perf_counter()
+
+      loss = loss.numpy().item()
+
+      tqdm.write(f"{i:5} {loss:5.2f} loss, {optim.lr.numpy()[0]:.6f} LR, {(pt - st) * 1000.0:7.2f} ms python, {GlobalCounters.mem_used / 1e9:.2f} GB used")
+
+      if WANDB: wandb.log({"lr": optim.lr.numpy(), "train/loss": loss, "train/python_time": pt - st})
+      st = pt
+
+    if epoch == next_eval_at:
+      train_step.reset()
+
+      Tensor.training = False
+
+      next_eval_at += evaluate_every
+      eval_loss = []
+      scores = []
+
+      for x, y in tqdm(iterate(cache_preprocessed_data=True), total=VAL_DATASET_SIZE):
+        eval_loss_value, score = eval_step(model, x, y)
+        eval_loss.append(eval_loss_value)
+        scores.append(score)
+
+      eval_step.reset()
+
+      scores = Tensor.mean(Tensor.stack(scores, dim=0), axis=0).numpy()
+      eval_loss = Tensor.mean(Tensor.stack(eval_loss, dim=0), axis=0).numpy()
+
+      l1_dice, l2_dice = scores[-2], scores[-1]
+      mean_dice = (l2_dice + l1_dice) / 2
+
+      tqdm.write(f"{l1_dice} L1 dice, {l2_dice} L2 dice, {mean_dice:.3f} mean_dice, {eval_loss:5.2f} eval_loss")
+
+      if WANDB:
+        wandb.log({"eval/loss": eval_loss, "eval/mean_dice": mean_dice, "epoch": epoch})
+
+      if mean_dice >= TARGET_METRIC:
+        is_successful = True
+
+        if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
+        fn = f"./ckpts/unet3d.safe"
+        safe_save(get_state_dict(model), fn)
+        print(f" *** Model saved to {fn} ***")
+      elif mean_dice < 1e-6:
+        print("Model diverging. Aborting.")
+        diverged = True
+
+    if is_successful or diverged:
+      break
 
 def train_rnnt():
   # TODO: RNN-T
