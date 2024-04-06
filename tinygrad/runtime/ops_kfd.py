@@ -353,7 +353,7 @@ class KFDDevice(Compiled):
     return ret
 
   @classmethod
-  def _wait_signal(self, signal:hsa.amd_signal_t, timeout=10000):
+  def _wait_signal(self, signal:hsa.amd_signal_t, timeout=60000):
     assert signal.event_id != 0, "can't wait on this signal"
     evt_arr = (kfd.struct_kfd_event_data * 1)()
     evt_arr[0].event_id = signal.event_id
