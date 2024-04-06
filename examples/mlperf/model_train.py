@@ -56,8 +56,11 @@ def train_resnet():
   eval_start_epoch  = getenv("EVAL_START_EPOCH", 0)
   eval_epochs       = getenv("EVAL_EPOCHS", 1)
 
-  steps_in_train_epoch  = config["steps_in_train_epoch"]  = (len(get_train_files()) // BS)
-  steps_in_val_epoch    = config["steps_in_val_epoch"]    = (len(get_val_files()) // EVAL_BS)
+  if getenv("MOCKDATA"):
+    steps_in_train_epoch, steps_in_val_epoch = 100, 0
+  else:
+    steps_in_train_epoch  = config["steps_in_train_epoch"]  = (len(get_train_files()) // BS)
+    steps_in_val_epoch    = config["steps_in_val_epoch"]    = (len(get_val_files()) // EVAL_BS)
 
   config["DEFAULT_FLOAT"] = dtypes.default_float.name
   config["BEAM"]    = BEAM.value
@@ -130,8 +133,13 @@ def train_resnet():
   for e in range(start_epoch, epochs):
     # ** train loop **
     Tensor.training = True
-    it = iter(tqdm(batch_load_resnet(batch_size=BS, val=False, shuffle=True, seed=seed*epochs + e),
-                   total=steps_in_train_epoch, desc=f"epoch {e}", disable=BENCHMARK))
+    if getenv("MOCKDATA"):
+      def mockdata():
+        for _ in range(steps_in_train_epoch): yield Tensor.ones(BS,224,224,3,dtype=dtypes.uint8), [0]*BS, None
+      batch_loader = mockdata()
+    else:
+      batch_loader = batch_load_resnet(batch_size=BS, val=False, shuffle=True, seed=seed*epochs + e)
+    it = iter(tqdm(batch_loader, total=steps_in_train_epoch, desc=f"epoch {e}", disable=BENCHMARK))
     i, proc = 0, data_get(it)
     st = time.perf_counter()
     while proc is not None:
@@ -176,7 +184,7 @@ def train_resnet():
         return
 
     # ** eval loop **
-    if (e + 1 - eval_start_epoch) % eval_epochs == 0:
+    if (e + 1 - eval_start_epoch) % eval_epochs == 0 and steps_in_val_epoch > 0:
       train_step.reset()  # free the train step memory :(
       eval_loss = []
       eval_times = []
