@@ -184,7 +184,7 @@ def train_resnet():
         return
 
     # ** eval loop **
-    if (e + 1 - eval_start_epoch) % eval_epochs == 0:
+    if (e + 1 - eval_start_epoch) % eval_epochs == 0 and steps_in_val_epoch > 0:
       train_step.reset()  # free the train step memory :(
       eval_loss = []
       eval_times = []
