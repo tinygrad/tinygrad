@@ -14,7 +14,8 @@ class ConvertCocoPolysToMask(object):
     self.filter_iscrowd = filter_iscrowd
 
   def __call__(self, image, target):
-    w, h = image.size
+    # w, h = image.size
+    h, w = image.size
 
     image_id = target["image_id"]
     image_id = Tensor([image_id])
@@ -157,7 +158,8 @@ def resize_boxes(boxes: Tensor, original_size: List[int], new_size: List[int]) -
   bnp = boxes.numpy()
   xmin, ymin, xmax, ymax = Tensor(bnp[:, 0]), Tensor(bnp[:, 1]), \
                           Tensor(bnp[:, 2]), Tensor(bnp[:, 3])
-
+  # xmin, ymin, xmax, ymax = boxes[:, 0], boxes[:, 1], \
+  #                         boxes[:, 2], boxes[:, 3]
   # xmin, ymin, xmax, ymax = boxes.split(1, dim=1)
   # print('temp t LEN:',t)
   # xmin, ymin, xmax, ymax = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
@@ -243,19 +245,23 @@ def iterate(coco, bs=8):
         # print('POST xTORCH', x_torch.shape)
         # x_torch = normalize(x_torch)
         # print(x_torch)
-        xNew = F.resize(x_orig, size=SIZE)
+        xNew = normalize(Tensor(np.array(x_orig)))
+        xNew = F.resize(torch.as_tensor(xNew.numpy()), size=SIZE)
+        xNew = Tensor(xNew.numpy())
         # print('POSt RESIZE')
         
         # xNew = xNew.numpy()
 
         # xNew = Tensor(np.array(xNew))
-        xNew = normalize(Tensor(np.array(xNew), requires_grad=False))
+        # xNew = normalize(Tensor(np.array(xNew), requires_grad=False))
 
-        # print('X_NEW',xNew.shape, xNew)
+        print('X_MEAN_NORM',xNew.shape, xNew.mean().numpy())
         X.append(xNew)
         bbox = t['boxes']
         # print('ITERATE_PRE_RESIZE', bbox.shape)
+        bbox = resize_boxes(bbox, (x_orig.size[1],x_orig.size[0]), SIZE)
         bbox = resize_boxes(bbox, x_orig.size, SIZE)
+
         # print('ITERATE_POST_RESIZE', bbox.shape)
         t['boxes'] = bbox#.realize()
         targets.append(t)
