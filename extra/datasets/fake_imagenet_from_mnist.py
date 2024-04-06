@@ -16,6 +16,7 @@ def act(arg):
     Image.fromarray(np.uint8(X_test[i])).resize((224, 224)).convert('RGB').save(basedir / f"val/{Y_test[i]}/{i}.jpg")
 
 def create_fake_mnist_imagenet(basedir:pathlib.Path):
+  print(f"creating mock MNIST dataset at {basedir}")
   basedir.mkdir(exist_ok=True)
 
   with (basedir / "imagenet_class_index.json").open('w') as f:

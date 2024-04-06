@@ -15,7 +15,6 @@ if getenv("MNISTMOCK"):
   @functools.lru_cache(None)
   def get_train_files():
     if not BASEDIR.exists():
-      print("creating mock MNIST dataset")
       from extra.datasets.fake_imagenet_from_mnist import create_fake_mnist_imagenet
       create_fake_mnist_imagenet(BASEDIR)
 
