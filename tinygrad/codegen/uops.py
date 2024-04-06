@@ -63,22 +63,26 @@ class PatternMatcher:
     # uop is required, arg is optional
     for p,fxn in self.patterns: self.pdict[(p.get("uop"), p.get("arg", None))].append((p, fxn))
 
-  def rewrite(self, uop:UOp) -> Optional[UOp]:
+  def rewrite(self, uop:UOp) -> Optional[Tuple]:
     for p,fxn in itertools.chain(self.pdict[(uop.uop, uop.arg)], self.pdict[(uop.uop, None)]):
       store: Dict[str, UOp] = {}
-      if _match(uop, p, store): return fxn(**store)
+      if _match(uop, p, store): return store.values(), fxn(**store)
     return None
 
   def rewrite_graph(self, uops: UOpGraph):
     replace: Dict[UOp, UOp] = {}
     seen: Set[UOp] = set()
-    for u in uops:
+    remove: Set[UOp] = set()
+    for i, u in enumerate(uops):
       if u in seen: continue
       seen.add(u)
       for o,n in replace.items():
         if o in u.vin and u is not n:
           u.vin = tuple(n if x == o else x for x in u.vin)
-      if rew := self.rewrite(u): replace[u] = rew
+      if ret := self.rewrite(u):
+        ux, rew = ret
+        replace[u] = rew
+        remove.update([x for x in uops.uops[i-1:i+1] if x in ux and x != u])
 
     for o,n in replace.items():
       queue = [n]
@@ -89,6 +93,7 @@ class PatternMatcher:
           for vv in uops.uops + queue: vv.vin = tuple(new if x is q else x for x in vv.vin)
         else: queue.extend([qq for qq in queue[-1].vin if qq not in uops.uops])
       if not any([o in u.vin for u in uops]): uops.uops.remove(o)
+    for x in remove: uops.uops.remove(x)
 
 constant_folder = PatternMatcher([
   # const rules
@@ -151,7 +156,8 @@ class UOpGraph:
   def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None, cachable=True, insert_before=None,
           simplify=True) -> UOp:
     ret = UOp(uop, dtype, vin, arg) if uop is not UOps.CONST else UOp.const(dtype, arg)
-    if simplify and (rewritten:=constant_folder.rewrite(ret)) is not None:
+    if simplify and (r:=constant_folder.rewrite(ret)) is not None:
+      _, rewritten = r
       if rewritten in self.uops: return rewritten  # ignore cachable
       ret = rewritten
     key = (ret.uop, ret.dtype, ret.vin, ret.arg)
