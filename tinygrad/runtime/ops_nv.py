@@ -238,7 +238,7 @@ class NVDevice(Compiled):
     return mem_handle
 
   def _new_gpu_fd(self):
-    fd_dev0 = os.open(f"/dev/nvidia0", os.O_RDWR | os.O_CLOEXEC)
+    fd_dev0 = os.open(f"/dev/nvidia{self.device_id}", os.O_RDWR | os.O_CLOEXEC)
     made = nvesc.nv_ioctl_register_fd_t(ctl_fd=self.fd_ctl)
     ret = fcntl.ioctl(fd_dev0, _IOWR(ord('F'), nvesc.NV_ESC_REGISTER_FD, ctypes.sizeof(made)), made)
     if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
@@ -305,9 +305,9 @@ class NVDevice(Compiled):
     # TODO: Get classes from NV0080_CTRL_CMD_GPU_GET_CLASSLIST_V2
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
     self.fd_dev = os.open(f"/dev/nvidia{self.device_id}", os.O_RDWR | os.O_CLOEXEC)
-    self.host_mem_object_enumerator = 0x1000 # start 
+    self.host_mem_object_enumerator = 0x1000 + 0x400 * self.device_id # start 
 
-    device_params = nvcls.NV0080_ALLOC_PARAMETERS(deviceId=0x0, hClientShare=self.root, vaMode=nvesc.NV_DEVICE_ALLOCATION_VAMODE_MULTIPLE_VASPACES)
+    device_params = nvcls.NV0080_ALLOC_PARAMETERS(deviceId=self.device_id, hClientShare=self.root, vaMode=nvesc.NV_DEVICE_ALLOCATION_VAMODE_MULTIPLE_VASPACES)
     self.device = rm_alloc(self.fd_ctl, nvcls.NV01_DEVICE_0, self.root, self.root, device_params).hObjectNew
     self.subdevice = rm_alloc(self.fd_ctl, nvcls.NV20_SUBDEVICE_0, self.root, self.device, None).hObjectNew
     self.usermode = rm_alloc(self.fd_ctl, nvcls.TURING_USERMODE_A, self.root, self.subdevice, None).hObjectNew
@@ -333,7 +333,7 @@ class NVDevice(Compiled):
     channel_group = rm_alloc(self.fd_ctl, nvcls.KEPLER_CHANNEL_GROUP_A, self.root, self.device, channel_params).hObjectNew
 
     gpfifo_mem_handle = self._gpu_alloc(0x200000, huge_page=True, contig=True)
-    gpfifo_addr = self._gpu_uvm_map(gpfifo_mem_handle, 0x200000, cpu_visible=True, fixed_address=0x200400000)
+    gpfifo_addr = self._gpu_uvm_map(gpfifo_mem_handle, 0x200000, cpu_visible=True, fixed_address=0x200400000 + 0x10000000 * self.device_id)
 
     notifier = self._gpu_alloc(0x1000, coherent=True, system=True)
 
@@ -351,7 +351,7 @@ class NVDevice(Compiled):
     assert ws_token_params.workSubmitToken != -1
 
     register_channel_params = nvuvm.UVM_REGISTER_CHANNEL_PARAMS(gpuUuid=nvuvm.struct_nv_uuid(uuid=self.gpu_uuid), rmCtrlFd=self.fd_ctl, hClient=self.root,
-      hChannel=gpfifo, base=0x203600000, length=0x2c1a000)
+      hChannel=gpfifo, base=0x203600000 + 0x10000000 * self.device_id, length=0x2c1a000)
     uvm_ioctl(self.fd_uvm, int(nvuvm.UVM_REGISTER_CHANNEL[2]), register_channel_params)
 
     en_fifo_params = nvctrl.NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS(bEnable=1)
@@ -363,23 +363,23 @@ class NVDevice(Compiled):
     self.gpfifo_token = ws_token_params.workSubmitToken
 
     cmdq_mem_handle = self._gpu_alloc(0x200000, huge_page=True, contig=True)
-    self.cmdq_addr = self._gpu_uvm_map(cmdq_mem_handle, 0x200000, cpu_visible=True, fixed_address=0x200700000)
+    self.cmdq_addr = self._gpu_uvm_map(cmdq_mem_handle, 0x200000, cpu_visible=True, fixed_address=0x200700000 + 0x10000000 * self.device_id)
     self.cmdq = to_mv(self.cmdq_addr, 0x200000).cast("I")
     self.cmdq_wptr = 0 # in bytes
 
     semaphores_mem_handle = self._gpu_alloc(0x200000, huge_page=True, contig=True)
-    self.semaphores_addr = self._gpu_uvm_map(semaphores_mem_handle, 0x200000, cpu_visible=True, fixed_address=0x200900000)
+    self.semaphores_addr = self._gpu_uvm_map(semaphores_mem_handle, 0x200000, cpu_visible=True, fixed_address=0x200900000 + 0x10000000 * self.device_id)
     self.semaphores = to_mv(self.semaphores_addr, 0x200000).cast("Q")
 
     kernargs_mem_handle = self._gpu_alloc(0x200000, huge_page=True, contig=True)
-    self.kernargs_base_addr = self._gpu_uvm_map(kernargs_mem_handle, 0x200000, cpu_visible=True, fixed_address=0x300a00000)
+    self.kernargs_base_addr = self._gpu_uvm_map(kernargs_mem_handle, 0x200000, cpu_visible=True, fixed_address=0x300a00000 + 0x10000000 * self.device_id)
     self.kernargs_ptr = self.kernargs_base_addr
 
     qmd_mem_handle = self._gpu_alloc(0x200000, huge_page=True, contig=True)
-    self.qmd = self._gpu_uvm_map(qmd_mem_handle, 0x200000, cpu_visible=True, fixed_address=0x300c00000)
+    self.qmd = self._gpu_uvm_map(qmd_mem_handle, 0x200000, cpu_visible=True, fixed_address=0x300c00000 + 0x10000000 * self.device_id)
 
     self.arch = 'sm_90' # TODO: fix
-    self.next_lib_address = 0x300e00000 # TODO: remove with better alloc
+    self.next_lib_address = 0x300e00000 + 0x10000000 * self.device_id # TODO: remove with better alloc
     
     super().__init__(device, NVAllocator(self), NVCompiler(self.arch), functools.partial(NVProgram, self))
 
