@@ -1,6 +1,7 @@
 # type: ignore
-import ctypes, ctypes.util, struct, platform, pathlib, re, time, os
-from tinygrad.helpers import from_mv
+import ctypes, ctypes.util, struct, platform, pathlib, re, time, os, signal
+from tinygrad.helpers import from_mv, to_mv
+from hexdump import hexdump
 start = time.perf_counter()
 
 # *** ioctl lib ***
@@ -60,17 +61,22 @@ import extra.nv_gpu_driver.esc_ioctl as ESC
 import extra.nv_gpu_driver.ctrl_ioctl as CTRL
 import extra.nv_gpu_driver.class_ioctl as CLASS
 import extra.nv_gpu_driver.uvm_ioctl as UVM
+import extra.nv_gpu_driver.nv_qcmds as QMD
 nvescs = {getattr(ESC, x):x for x in dir(ESC) if x.startswith("NV_ESC")}
 nvcmds = {getattr(CTRL, x):(x, getattr(CTRL, "struct_"+x+"_PARAMS", getattr(CTRL, "struct_"+x.replace("_CMD_", "_")+"_PARAMS", None))) for x in dir(CTRL) if \
           x.startswith("NV") and x[6:].startswith("_CTRL_") and isinstance(getattr(CTRL, x), int)}
 nvclasses = {getattr(CLASS, x):x for x in dir(CLASS) if isinstance(getattr(CLASS, x), int) and not x.startswith("NV2080_") and not x.startswith("NVC56F")}
 nvuvms = {int(getattr(UVM, x)[2]):x for x in dir(UVM) if isinstance(getattr(UVM, x), list) and len(getattr(UVM, x)) == 4 and getattr(UVM, x)[0] == 'i'} # broken clang2py generates mess
+nvqcmds = {int(getattr(QMD, x)):x for x in dir(QMD) if isinstance(getattr(QMD, x), int)}
 
 global_ioctl_id = 0
+gpus_user_modes = []
+gpus_mmio = []
+gpus_fifo = []
 
 @ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_ulong, ctypes.c_void_p)
 def ioctl(fd, request, argp):
-  global global_ioctl_id
+  global global_ioctl_id, gpus_user_modes, gpus_mmio
   global_ioctl_id += 1
   st = time.perf_counter()
   ret = libc.syscall(IOCTL_SYSCALL, ctypes.c_int(fd), ctypes.c_ulong(request), ctypes.c_void_p(argp))
@@ -101,12 +107,21 @@ def ioctl(fd, request, argp):
         if s.hClass == CLASS.NV50_MEMORY_VIRTUAL: dump_struct(get_struct(s.pAllocParms, ESC.NV_MEMORY_ALLOCATION_PARAMS))
         if s.hClass == CLASS.NV1_MEMORY_USER: dump_struct(get_struct(s.pAllocParms, ESC.NV_MEMORY_ALLOCATION_PARAMS))
         if s.hClass == CLASS.NV1_MEMORY_SYSTEM: dump_struct(get_struct(s.pAllocParms, ESC.NV_MEMORY_ALLOCATION_PARAMS))
-        if s.hClass == CLASS.AMPERE_CHANNEL_GPFIFO_A: dump_struct(get_struct(s.pAllocParms, ESC.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS))
+        if s.hClass == CLASS.AMPERE_CHANNEL_GPFIFO_A:
+          sx = get_struct(s.pAllocParms, ESC.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS)
+          dump_struct(sx)
+          gpus_fifo.append((sx.gpFifoOffset, sx.gpFifoEntries))
         if s.hClass == CLASS.KEPLER_CHANNEL_GROUP_A: dump_struct(get_struct(s.pAllocParms, ESC.NV_CHANNEL_GROUP_ALLOCATION_PARAMETERS))
+      if s.hClass == CLASS.TURING_USERMODE_A: gpus_user_modes.append(s.hObjectNew)
     elif nr == ESC.NV_ESC_RM_MAP_MEMORY:
       # nv_ioctl_nvos33_parameters_with_fd
       s = get_struct(argp, ESC.NVOS33_PARAMETERS)
       print(f"NV_ESC_RM_MAP_MEMORY   hClient={s.hClient}, hDevice={s.hDevice}, hMemory={s.hMemory}, length={s.length} flags={s.flags} pLinearAddress={s.pLinearAddress}")
+      # print("gpus_user_modes", gpus_user_modes)
+      # if s.hMemory in gpus_user_modes:
+      #   gpus_mmio.append(s.pLinearAddress)
+      #   print(hex(s.pLinearAddress))
+      #   print("mprtc", libc.mprotect(s.pLinearAddress, 0x1000, 0))
     elif nr == ESC.NV_ESC_RM_UPDATE_DEVICE_MAPPING_INFO:
       s = get_struct(argp, ESC.NVOS56_PARAMETERS)
       print(f"NV_ESC_RM_UPDATE_DEVICE_MAPPING_INFO   hClient={s.hClient}, hDevice={s.hDevice}, hMemory={s.hMemory}, pOldCpuAddress={s.pOldCpuAddress} pNewCpuAddress={s.pNewCpuAddress} status={s.status}")
@@ -115,7 +130,9 @@ def ioctl(fd, request, argp):
       print(f"NV_ESC_RM_ALLOC_MEMORY  fd={s.fd}, hRoot={s.params.hRoot}, hObjectParent={s.params.hObjectParent}, hObjectNew={s.params.hObjectNew}, hClass={s.params.hClass}, flags={s.params.flags}, pMemory={s.params.pMemory}, limit={s.params.limit}, status={s.params.status}")
     elif nr == ESC.NV_ESC_ALLOC_OS_EVENT:
       s = get_struct(argp, ESC.nv_ioctl_nvos02_parameters_with_fd)
-    
+    elif nr == ESC.NV_ESC_REGISTER_FD:
+      s = get_struct(argp, ESC.nv_ioctl_register_fd_t)
+      print(f"NV_ESC_REGISTER_FD  fd={s.ctl_fd}")
     elif nr in nvescs:
       print(nvescs[nr])
     else:
@@ -135,10 +152,73 @@ def _mmap(addr, length, prot, flags, fd, offset):
   mmap_type = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long)
   orig_mmap = mmap_type(ctypes.addressof(orig_mmap_mv))
   ret = orig_mmap(addr, length, prot, flags, fd, offset)
+  # ll = os.readlink(f"/proc/self/fd/{fd}") if fd >= 0 else ""
   print(f"mmap {addr=}, {length=}, {prot=}, {flags=}, {fd=}, {offset=} {ret=}")
   return ret
 
 install_hook(libc.ioctl, ioctl)
 # orig_mmap_mv = install_hook(libc.mmap, _mmap)
+
+# def handler(signum, frame):
+#   print("Caught SIGSEGV")
+  # Here you would need to add logic to log the write and modify the program state to continue execution
+
+# signal.signal(signal.SIGSEGV, handler)
+
+import collections
+old_gpputs = collections.defaultdict(int)
+def _dump_gpfifo(mark):
+  print("_dump_gpfifo:", mark)
+  for start,size in gpus_fifo:
+    gpfifo_controls = CLASS.AmpereAControlGPFifo.from_address(start+size*8)
+    gpfifo = to_mv(start, gpfifo_controls.GPPut * 8).cast("Q")
+    if old_gpputs[start] == gpfifo_controls.GPPut: continue
+
+    print(f"gpfifo {start}: {gpfifo_controls.GPPut=}")
+    for i in range(old_gpputs[start], gpfifo_controls.GPPut):
+      addr = ((gpfifo[i % size] & ((1 << 40)-1)) >> 2) << 2
+      pckt_cnt = (gpfifo[i % size]>>42)&((1 << 20)-1)
+
+      print(f"\t{i}: 0x{gpfifo[i % size]:x}: addr:0x{addr:x} packets:{pckt_cnt} sync:{(gpfifo[i % size] >> 63) & 0x1} fetch:{gpfifo[i % size] & 0x1}")
+      old_gpputs[start] = gpfifo_controls.GPPut
+      _dump_qmd(addr, pckt_cnt)
+
+import types
+def _dump_qmd(address, packets):
+  gpfifo = to_mv(address, packets * 4).cast("I")
+
+  i = 0
+  while i < packets:
+    dat = gpfifo[i]
+    typ = (dat>>28) & 0xF
+    if typ == 0: break
+    size = (dat>>16) & 0xFFF
+    subc = (dat>>13) & 7
+    mthd = (dat<<2) & 0x7FFF
+    method_name = nvqcmds.get(mthd, f"unknown method #{mthd}")
+    print(f"\t\t{method_name}, {typ=} {size=} {subc=} {mthd=}")
+    for j in range(size): print(f"\t\t\t{j}: {gpfifo[i+j+1]} | 0x{gpfifo[i+j+1]:x}")
+    if mthd == 792:
+      for x in dir(QMD):
+        if x.startswith("NVC6C0_QMDV03_00_"):
+          vv = getattr(QMD, x)
+          bits = None
+          if isinstance(vv, tuple) and len(vv) == 2:
+            bits = vv
+          if isinstance(vv, types.FunctionType):
+            bits = vv(0)
+          
+          if bits is not None:
+            res = 0
+            for bt in range(bits[1], bits[0]+1): res |= ((gpfifo[i + 3 + bt // 32] >> (bt % 32)) & 0x1) << (bt - bits[1])
+            if res != 0: print(f"{x}, {hex(res)} | {bin(res)}")
+
+      const_addr = gpfifo[i+35] + ((gpfifo[i+36] & 0xffff) << 32)
+      const_len = ((gpfifo[i+36] >> 19))
+      print("CONSTADDR", hex(const_addr), const_len)
+      # hexdump(to_mv(const_addr, const_len))
+
+    i += size + 1
+
 
 # IOCTL=1 PTX=1 CUDA=1 python3 test/test_ops.py TestOps.test_tiny_add
