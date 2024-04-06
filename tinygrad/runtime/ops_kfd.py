@@ -374,7 +374,8 @@ class KFDDevice(Compiled):
     with open(f"{KFDDevice.gpus[self.device_id]}/gpu_id", "r") as f: self.gpu_id = int(f.read())
     with open(f"{KFDDevice.gpus[self.device_id]}/properties", "r") as f: self.properties = {line.split()[0]: int(line.split()[1]) for line in f}
     self.drm_fd = os.open(f"/dev/dri/renderD{self.properties['drm_render_minor']}", os.O_RDWR)
-    self.arch = f"gfx{self.properties['gfx_target_version']//100}"
+    target = int(self.properties['gfx_target_version'])
+    self.arch = "gfx%d%x%x" % (target // 10000, (target // 100) % 100, target % 100)
     kio.acquire_vm(KFDDevice.kfd, drm_fd=self.drm_fd, gpu_id=self.gpu_id)
 
     if KFDDevice.event_page is None:
