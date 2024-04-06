@@ -144,6 +144,7 @@ class TinyJit(Generic[ReturnType]):
     self.cnt += 1
     return cast(ReturnType, self.ret)
 
+# NOTE: this is still in here to support good memory usage in JIT with multiple calls to realize
 class PlaceHolder:
   def __init__(self, buf:Buffer):
     self.size, self.dtype, self.device, self.ref, self.bufid, self.options = buf.size, buf.dtype, buf.device, ref(buf), id(buf._buf), buf.options

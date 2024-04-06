@@ -93,7 +93,7 @@ class CommandQueue:
           waiting_queues[si.sync].append(device)
           continue
       elif isinstance(si, CopyItem):
-        si.output.allocate()
+        if not hasattr(si.output, "_buf"): si.output.allocate()
         fxn = BufferXfer() if hasattr(Device[si.output.device].allocator, 'transfer') and \
           si.output.device.split(":")[0] == si.input.device.split(":")[0] else BufferCopy()
         fxn.exec([si.output, si.input])
