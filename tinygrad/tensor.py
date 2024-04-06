@@ -510,9 +510,13 @@ class Tensor:
         ret = ret.permute(ret_dims[first_dim:first_dim+max_idx_dim] + ret_dims[:first_dim] + ret_dims[first_dim+max_idx_dim:])
     return ret
 
-  def __setitem__(self,indices,v):
+  def __setitem__(self, indices, v):
     if isinstance(self.device, str) and self.device.startswith("DISK"): return self.__getitem__(indices).assign(v)
-    raise NotImplementedError("not implemented yet")
+    # TODO: broadcast v to the shape here, refactor for const v and one way broadcast_shape
+    # TODO: remove realize?
+    assign_to = self.__getitem__(indices)
+    if not isinstance(v, Tensor): v = Tensor(v, device=self.device)
+    return assign_to.assign(v._broadcast_to(broadcast_shape(assign_to.shape, v.shape))).realize()
 
   # NOTE: using slice is discouraged and things should migrate to pad and shrink
   def slice(self, arg:Sequence[Optional[Tuple[int, sint]]], value:float=0) -> Tensor:
