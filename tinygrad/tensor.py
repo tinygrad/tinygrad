@@ -372,7 +372,7 @@ class Tensor:
     new_shape = tuple([-prod(self.shape) // prod(new_shape) if s == -1 else (s if s is not None else self.shape[i]) for i,s in enumerate(new_shape)])
     return F.Reshape.apply(self, shape=new_shape) if new_shape != self.shape else self
   def expand(self, shape, *args) -> Tensor:
-    return Tensor._broadcast_shape(self, shape=tuple(1 if s==-1 or s is None else s for s in argfix(shape, *args)))[0]
+    return Tensor._broadcast_tensors(self, shape=tuple(1 if s==-1 or s is None else s for s in argfix(shape, *args)))[0]
   def permute(self, order, *args) -> Tensor: return F.Permute.apply(self, order=argfix(order, *args))
   def flip(self, axis, *args) -> Tensor: return F.Flip.apply(self, axis=[x if x >= 0 else x+len(self.shape) for x in argfix(axis, *args)])
   def shrink(self, arg:Tuple[Optional[Tuple[sint, sint]], ...]) -> Tensor:
@@ -860,7 +860,8 @@ class Tensor:
 
   # ***** broadcasted elementwise mlops *****
   @staticmethod
-  def _broadcast_shape(*ts:Tensor, shape:Tuple[sint, ...]=()):
+  def _broadcast_tensors(*ts:Tensor, shape:Tuple[sint, ...]=()):
+    # TODO: what if shape is smaller than tensor shapes...
     shps = tuple(t.shape for t in ts) + (shape,)
     padded_shps = tuple((1,) * (max(len(s_) for s_ in shps) - len(s)) + s for s in shps)
     if not all((len(set(axis)) == 2 and 1 in set(axis)) or len(set(axis)) == 1 or 0 in set(axis) for axis in zip(*padded_shps)):
@@ -884,7 +885,7 @@ class Tensor:
     if reverse: x, y = y, x
 
     # expand to broadcasted shape
-    return Tensor._broadcast_shape(x, y)
+    return Tensor._broadcast_tensors(x, y)
 
   def _to_const_val(self, x:Union[Tensor, ConstType]) -> Union[Tensor, ConstType]:
     # TODO: update with multi
