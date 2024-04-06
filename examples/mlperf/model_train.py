@@ -2,6 +2,7 @@ import functools
 import os
 import time
 from tqdm import tqdm
+import multiprocessing
 
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
 from tinygrad.helpers import getenv, BEAM, WINO
@@ -251,6 +252,7 @@ def train_maskrcnn():
   pass
 
 if __name__ == "__main__":
+  multiprocessing.set_start_method('spawn')
   with Tensor.train():
     for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn").split(","):
       nm = f"train_{m}"
