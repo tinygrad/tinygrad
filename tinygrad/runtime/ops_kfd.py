@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Tuple, Any
-import os, fcntl, ctypes, functools, re, pathlib, mmap, struct, errno, io
+import os, fcntl, ctypes, functools, re, pathlib, mmap, struct, errno
 from tinygrad.device import Compiled, LRUAllocator, Compiler, CompilerOptions
 from tinygrad.buffer import BufferOptions
 from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up
@@ -261,30 +261,23 @@ class KFDAllocator(LRUAllocator):
   #  self.device.synchronize()
   #  return to_mv(src.va_addr, src.size)
 
-  def transfer(self, dest, src, sz:int, src_dev:KFDDevice, dest_dev:KFDDevice):
-    dest_dev._gpu_map(src)
-    q = HWComputeQueue().signal(sig := KFDDevice._get_signal())
-    HWCopyQueue().wait(sig).copy(dest.va_addr, src.va_addr, sz).signal(sigc := KFDDevice._get_signal()).submit(dest_dev)
-    HWComputeQueue().wait(sigc).submit(dest_dev)
-    q.wait(sigc).submit(src_dev)
+  #def copy_from_fd(self, dest, fd, offset, size):
+  #  fo = io.FileIO(fd, "a+b", closefd=False)
+  #  fo.seek(offset - (minor_offset:=offset % PAGE_SIZE))
+  #  copied_in, total_copy_size = 0, round_up(size+minor_offset, PAGE_SIZE)
+  #  for i in range(0, size+minor_offset, self.b[0].size):
+  #    local_size = min(self.b[0].size, total_copy_size-i)
+  #    copy_size = min(local_size-minor_offset, size-copied_in)
+  #    if copy_size == 0: break
 
-  def copy_from_fd(self, dest, fd, offset, size):
-    fo = io.FileIO(fd, "a+b", closefd=False)
-    fo.seek(offset - (minor_offset:=offset % PAGE_SIZE))
-    copied_in, total_copy_size = 0, round_up(size+minor_offset, PAGE_SIZE)
-    for i in range(0, size+minor_offset, self.b[0].size):
-      local_size = min(self.b[0].size, total_copy_size-i)
-      copy_size = min(local_size-minor_offset, size-copied_in)
-      if copy_size == 0: break
+  #    fo.readinto(to_mv(self.b[1].va_addr, local_size))
+  #    if i != 0: self.device._wait_signal(self.device.signal_sdma)
+  #    self.b = self.b[::-1]
+  #    self.device._submit_sdma(dest.va_addr+copied_in, self.b[0].va_addr+minor_offset, copy_size, completion_signal=self.device.signal_sdma)
 
-      fo.readinto(to_mv(self.b[1].va_addr, local_size))
-      if i != 0: self.device._wait_signal(self.device.signal_sdma)
-      self.b = self.b[::-1]
-      self.device._submit_sdma(dest.va_addr+copied_in, self.b[0].va_addr+minor_offset, copy_size, completion_signal=self.device.signal_sdma)
-
-      copied_in += copy_size
-      minor_offset = 0 # only on the first
-    self.device._wait_signal(self.device.signal_sdma)
+  #    copied_in += copy_size
+  #    minor_offset = 0 # only on the first
+  #  self.device._wait_signal(self.device.signal_sdma)
 
   def copyin(self, dest, src: memoryview):
     for i in range(0, src.nbytes, self.b[0].size):
@@ -300,6 +293,13 @@ class KFDAllocator(LRUAllocator):
       self.device._submit_sdma(self.b[0].va_addr, src.va_addr+i, lsize:=min(self.b[0].size, dest.nbytes-i), completion_signal=self.device.signal_sdma)
       self.device._wait_signal(self.device.signal_sdma)
       ctypes.memmove(from_mv(dest[i:]), self.b[0].va_addr, lsize)
+
+  def transfer(self, dest, src, sz:int, src_dev:KFDDevice, dest_dev:KFDDevice):
+    dest_dev._gpu_map(src)
+    q = HWComputeQueue().signal(sig := KFDDevice._get_signal())
+    HWCopyQueue().wait(sig).copy(dest.va_addr, src.va_addr, sz).signal(sigc := KFDDevice._get_signal()).submit(dest_dev)
+    HWComputeQueue().wait(sigc).submit(dest_dev)
+    q.wait(sigc).submit(src_dev)
 
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
 class KFDDevice(Compiled):
@@ -353,7 +353,7 @@ class KFDDevice(Compiled):
     return ret
 
   @classmethod
-  def _wait_signal(self, signal:hsa.amd_signal_t, timeout=10000):
+  def _wait_signal(self, signal:hsa.amd_signal_t, timeout=60000):
     assert signal.event_id != 0, "can't wait on this signal"
     evt_arr = (kfd.struct_kfd_event_data * 1)()
     evt_arr[0].event_id = signal.event_id
