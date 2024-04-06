@@ -15,7 +15,7 @@ from tinygrad.ops import LoadOps
 from tinygrad.buffer import Buffer, BufferOptions
 from tinygrad.device import Device
 from tinygrad.shape.symbolic import sint
-from tinygrad.engine.realize import run_schedule
+from tinygrad.engine.commandqueue import CommandQueue
 from tinygrad.engine.schedule import create_schedule
 
 # **** start with two base classes, Tensor and Function ****
@@ -136,7 +136,8 @@ class Tensor:
 
   @staticmethod
   def corealize(lst:Iterable[Tensor]):
-    run_schedule(create_schedule(flatten([x.lazydata.lbs if isinstance(x.lazydata, MultiLazyBuffer) else [x.lazydata] for x in lst])))
+    outputs = flatten([x.lazydata.lbs if isinstance(x.lazydata, MultiLazyBuffer) else [x.lazydata] for x in lst])
+    CommandQueue(create_schedule(outputs), [x.base.buffer for x in outputs])()
 
   def realize(self) -> Tensor:
     Tensor.corealize([self])

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import List, Dict, Union, DefaultDict
 from collections import defaultdict
 from dataclasses import dataclass
-from tinygrad.helpers import colored, cpu_time_execution, DEBUG
+from tinygrad.helpers import colored, cpu_time_execution, DEBUG, dedup, flatten
 from tinygrad.ops import ScheduleItem, LoadOps, BufferOps
 from tinygrad.shape.symbolic import Variable
 from tinygrad.device import Buffer, JITRunner, Device, BufferXfer, BufferCopy, update_stats
@@ -32,7 +32,37 @@ class CopyItem:
 
 # this will interface with HWCommandQueue to replace Graph
 class CommandQueue:
-  def __init__(self, schedule:List[ScheduleItem]):
+  def __init__(self, schedule:List[ScheduleItem], outputs:List[Buffer]):
+    # allocate all outputs
+    for out in outputs:
+      if not hasattr(out, "_buf"): out.allocate()
+
+    # all unallocated buffers are fair game to replace
+    unallocated = [[x for x in (si.outputs+si.inputs) if not hasattr(x, '_buf')] for si in schedule]
+    all_unallocated = sorted(dedup(flatten(unallocated)), key=lambda x: x.nbytes, reverse=True)
+    def to_range(lst): return list(range(min(lst), max(lst)+1))
+    liveness = {buf:to_range([i for i,b in enumerate(unallocated) if buf in b]) for buf in all_unallocated}
+
+    # greedy algorithm to assign buffers to others that don't liveness overlap
+    assigned = {}
+    while len(all_unallocated):
+      buf = all_unallocated.pop(0)
+      if buf.device.startswith("DISK"): continue  # don't mess with DISK
+      assert not hasattr(buf, '_buf'), "allocated?"
+      if buf in assigned: continue
+      assigned[buf] = nbuf = Buffer(buf.device, buf.size, buf.dtype)
+      used_range = liveness[buf]
+      # see which other buffers we can assign it to
+      for x in all_unallocated:
+        if x.device == buf.device and x.dtype == buf.dtype and x.size <= buf.size:
+          if not any(i in used_range for i in liveness[x]):
+            used_range += liveness[x]
+            assigned[x] = nbuf
+
+    # do the buffer replacements in the schedule
+    schedule = [ScheduleItem(si.ast, tuple(assigned.get(x, x) for x in si.outputs),
+                             tuple(assigned.get(x, x) for x in si.inputs), si.var_vals) for si in schedule]
+
     self.q: DefaultDict[str, List[Union[ScheduleItem, CopyItem, SyncItem, WaitItem]]] = defaultdict(list)
 
     def add_sync_item(device:str):
@@ -93,7 +123,7 @@ class CommandQueue:
           waiting_queues[si.sync].append(device)
           continue
       elif isinstance(si, CopyItem):
-        si.output.allocate()
+        if not hasattr(si.output, "_buf"): si.output.allocate()
         fxn = BufferXfer() if hasattr(Device[si.output.device].allocator, 'transfer') and \
           si.output.device.split(":")[0] == si.input.device.split(":")[0] else BufferCopy()
         fxn.exec([si.output, si.input])
