@@ -249,9 +249,10 @@ def train_unet3d():
   import random
   import time
 
-  GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
+  GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))] if getenv("GPUS", 1) > 1 else Device.DEFAULT
   print(f"Training on {GPUS}")
-  for x in GPUS: Device[x]
+  if isinstance(GPUS, list):
+    for x in GPUS: Device[x]
 
   TARGET_METRIC = 0.908
   NUM_EPOCHS = getenv("NUM_EPOCHS", 4000)
@@ -330,7 +331,8 @@ def train_unet3d():
     for i, (x, y) in enumerate(tqdm(iterate(val=False, shuffle=True, bs=BS, cache_preprocessed_data=True), total=TRAIN_DATASET_SIZE // BS, desc=f"epoch {epoch}"), start=1):
       GlobalCounters.reset()
 
-      x, y = Tensor(x).realize().shard(GPUS, axis=0), Tensor(y, requires_grad=False).shard(GPUS, axis=0)
+      if isinstance(GPUS, list): x, y = Tensor(x).realize().shard(GPUS, axis=0), Tensor(y, requires_grad=False).shard(GPUS, axis=0)
+      else: x, y = Tensor(x).realize(), Tensor(y, requires_grad=False)
 
       loss = train_step(model, x, y)
       pt = time.perf_counter()
