@@ -40,10 +40,5 @@ class TestFlopCounter(unittest.TestCase):
     info = get_lazyop_info(op2)
     self.assertEqual(info.flops, 9)
 
-  def test_flops_one_hot_cmpeq(self):
-    op0 = LazyOp(BinaryOps.CMPEQ, (self.buf0,self.buf1,), "one_hot_arange")
-    info = get_lazyop_info(op0)
-    self.assertEqual(info.flops, 4)
-
 if __name__ == '__main__':
   unittest.main()

@@ -427,6 +427,5 @@ class Linearizer(Kernel):
           acc[off] = self.uops.add(UOps.PHI, input_acc[off].dtype, (input_acc[off], acc[off]) + tuple(loop_ctx))
     else:
       ret = [self.uops.add(UOps.ALU, dtypes.bool if x.op in {BinaryOps.CMPLT, BinaryOps.CMPEQ} else val[-1].dtype, val, x.op) for val in zip(*values)]
-      if x.arg == "one_hot_arange": self.uops.one_hot_cmpeq.add(ret[0])
     cache[x] = ret
     return ret

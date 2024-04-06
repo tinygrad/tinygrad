@@ -276,7 +276,9 @@ class Tensor:
     if stop is None: stop, start = start, 0
     assert all(isinstance(s, (int, float)) for s in (start, stop, step)), "symbolic arange not supported"
     dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
-    return (Tensor.full((math.ceil((stop-start)/step),), step, dtype=dtype, **kwargs)._cumsum() + (start - step)).cast(dtype)
+    result = (Tensor.full((math.ceil((stop-start)/step),), step, dtype=dtype, **kwargs)._cumsum() + (start - step)).cast(dtype)
+    result.lazydata.base.is_arange = True
+    return result
 
   @staticmethod
   def eye(dim:int, **kwargs):
@@ -962,7 +964,7 @@ class Tensor:
   def __gt__(self, x) -> Tensor: return F.Less.apply(*self._broadcasted(x, True))
   def __ge__(self, x) -> Tensor: return (self<x).logical_not()
   def __le__(self, x) -> Tensor: return (self>x).logical_not()
-  def __eq__(self, x, one_hot=False) -> Tensor: return F.Eq.apply(*self._broadcasted(x, True), one_hot=one_hot)  # type: ignore[override]
+  def __eq__(self, x) -> Tensor: return F.Eq.apply(*self._broadcasted(x, True))  # type: ignore[override]
   def __ne__(self, x) -> Tensor: return (self==x).logical_not()                       # type: ignore[override]
 
   # ***** functional nn ops *****
