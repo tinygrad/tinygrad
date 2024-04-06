@@ -29,32 +29,60 @@ class WaitItem:
 class CopyItem:
   output: Buffer
   input: Buffer
+  nbytes: int
 
 # this will interface with HWCommandQueue to replace Graph
+from tinygrad.lazy import lazycache, LazyBuffer
+import gc
 class CommandQueue:
   def __init__(self, schedule:List[ScheduleItem], outputs:List[Buffer]):
-    # allocate all outputs
-    for out in outputs:
-      if not hasattr(out, "_buf"): out.allocate()
 
-    # all unallocated buffers are fair game to replace
+    # first pass
+    all_output_buffers = set(flatten([si.outputs for si in schedule]))
+
+    # allocate all parented buffers
+    all_lazybuffers = [x for x in gc.get_objects() if isinstance(x, LazyBuffer)]  # balls slow
+    parented_buffers = set(bb for x in all_lazybuffers if (bb:=x.base.buffer) in all_output_buffers)
+    #print(len(all_lazybuffers), len(parented_buffers), len(outputs))
+
+    #for si in schedule: print(si)
+
+    #for o in outputs:
+    #  assert o in all_scheduled_buffers, o
+    #  assert o in parented_buffers
+
+
+    #parented_buffers = set(x.base.buffer for x in lazycache.values()) # if (bb:=x.base.buffer) in all_buffers)
+
+
+    #all_parented_buffers = all_buffers.intersection(parented_buffers)
+
+    #print(len(all_parented_buffers), len(outputs))
+
+    #for o in outputs: assert o in parented_buffers
+    for x in parented_buffers:
+      if not hasattr(x, '_buf') and not x.device.startswith("DISK"): x.allocate()
+
+    # all (still) unallocated buffers are fair game to replace
     unallocated = [[x for x in (si.outputs+si.inputs) if not hasattr(x, '_buf')] for si in schedule]
     all_unallocated = sorted(dedup(flatten(unallocated)), key=lambda x: x.nbytes, reverse=True)
     def to_range(lst): return list(range(min(lst), max(lst)+1))
     liveness = {buf:to_range([i for i,b in enumerate(unallocated) if buf in b]) for buf in all_unallocated}
 
     # greedy algorithm to assign buffers to others that don't liveness overlap
-    assigned = {}
+    assigned: Dict[Buffer, Buffer] = {}
     while len(all_unallocated):
       buf = all_unallocated.pop(0)
       if buf.device.startswith("DISK"): continue  # don't mess with DISK
       assert not hasattr(buf, '_buf'), "allocated?"
+      assert buf.options is None
       if buf in assigned: continue
-      assigned[buf] = nbuf = Buffer(buf.device, buf.size, buf.dtype)
+      assigned[buf] = nbuf = Buffer(buf.device, buf.size, buf.dtype) #.allocate()
+      #print(buf, assigned[buf])
       used_range = liveness[buf]
       # see which other buffers we can assign it to
       for x in all_unallocated:
-        if x.device == buf.device and x.dtype == buf.dtype and x.size <= buf.size:
+        if x.device == buf.device and x.dtype == buf.dtype and x.size == buf.size:
           if not any(i in used_range for i in liveness[x]):
             used_range += liveness[x]
             assigned[x] = nbuf
@@ -90,7 +118,7 @@ class CommandQueue:
         # TODO: add back copy device
         copy_device = si.outputs[0].device #+"-copy"
         add_wait_item(copy_device, add_sync_item(si.inputs[0].device))
-        self.q[copy_device].append(CopyItem(si.outputs[0], si.inputs[0]))
+        self.q[copy_device].append(CopyItem(si.outputs[0], si.inputs[0], si.ast[0].arg))
         #add_wait_item(si.outputs[0].device, add_sync_item(copy_device))
         continue
 
@@ -124,8 +152,8 @@ class CommandQueue:
           continue
       elif isinstance(si, CopyItem):
         if not hasattr(si.output, "_buf"): si.output.allocate()
-        fxn = BufferXfer() if hasattr(Device[si.output.device].allocator, 'transfer') and \
-          si.output.device.split(":")[0] == si.input.device.split(":")[0] else BufferCopy()
+        fxn = BufferXfer(si.nbytes) if hasattr(Device[si.output.device].allocator, 'transfer') and \
+          si.output.device.split(":")[0] == si.input.device.split(":")[0] else BufferCopy(si.nbytes)
         fxn.exec([si.output, si.input])
       elif isinstance(si, ScheduleItem):
         for out in si.outputs:

@@ -67,17 +67,18 @@ def update_stats(name:str, op_estimate:sint, mem_estimate:sint, var_vals: Option
 # **************** Buffer / Allocator ****************
 
 class BufferCopy(JITRunner):
+  def __init__(self, nbytes): self.nbytes = nbytes
   def copy(self, dest, src):
     if src.device.startswith("DISK") and hasattr(dest.allocator, 'copy_from_fd') and src.nbytes >= 4096 and src._buf.ud.fd is not None:
-      dest.allocator.copy_from_fd(dest._buf, src._buf.ud.fd, src._buf.offset, src.nbytes)
-    elif src.device.startswith("DISK") and hasattr(dest.allocator, 'as_buffer'):
+      dest.allocator.copy_from_fd(dest._buf, src._buf.ud.fd, src._buf.offset, self.nbytes)
+    #elif src.device.startswith("DISK") and hasattr(dest.allocator, 'as_buffer'):
       # fast(ish) path, uses readinto in diskbuffers
-      src.allocator.copyout(dest.allocator.as_buffer(dest._buf), src._buf)
+      #src.allocator.copyout(dest.allocator.as_buffer(dest._buf), src._buf)
     else:
-      dest.copyin(src.as_buffer(allow_zero_copy=True))  # may allocate a CPU buffer depending on allow_zero_copy
+      dest.copyin(src.as_buffer(allow_zero_copy=True)[:self.nbytes])  # may allocate a CPU buffer depending on allow_zero_copy
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False):
     dest, src = rawbufs[0:2]
-    assert dest.size == src.size and dest.dtype == src.dtype, f"buffer copy mismatch, {dest.size} != {src.size}, {dest.dtype} != {src.dtype}"
+    assert dest.dtype == src.dtype, f"buffer dtype mismatch, {dest.size} != {src.size}, {dest.dtype} != {src.dtype}"
     st = time.perf_counter()
     self.copy(dest, src)
     et = None
@@ -94,7 +95,7 @@ class BufferXfer(BufferCopy):
     if hasattr(dest.allocator.device, "track_cross_buffer") and hasattr(src.allocator, "track_cross_device"):
       dest.allocator.device.track_cross_buffer.append(src)
       src.allocator.track_cross_device.add(dest.allocator.device)
-    dest.allocator.transfer(dest._buf, src._buf, dest.nbytes, src_dev=src.allocator.device, dest_dev=dest.allocator.device)
+    dest.allocator.transfer(dest._buf, src._buf, self.nbytes, src_dev=src.allocator.device, dest_dev=dest.allocator.device)
 
 # TODO: size, dest, src are the same type. can we enforce this?
 class Allocator:
