@@ -10,6 +10,7 @@ from tinygrad.lazy import LazyBuffer
 from tinygrad.features.multi import MultiLazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, sint
+from weakref import ref, WeakKeyDictionary
 from dataclasses import dataclass
 
 @dataclass(frozen=True)
@@ -143,21 +144,40 @@ class TinyJit(Generic[ReturnType]):
     self.cnt += 1
     return cast(ReturnType, self.ret)
 
+class PlaceHolder:
+  def __init__(self, buf:Buffer):
+    self.size, self.dtype, self.device, self.ref, self.bufid, self.options = buf.size, buf.dtype, buf.device, ref(buf), id(buf._buf), buf.options
+  def to_tuple(self): return (self.size, self.dtype, self.device, self.bufid, self.options)
+  def __hash__(self): return hash(self.to_tuple())
+  def __eq__(self, x): return isinstance(x, PlaceHolder) and self.to_tuple() == x.to_tuple()
+  def alloc_if_needed(self, buffer_cache: Dict[PlaceHolder, Buffer]) -> Buffer:
+    ret = self.ref()
+    if ret: return ret
+    if self not in buffer_cache: buffer_cache[self] = Buffer(self.device, self.size, self.dtype, options=self.options).allocate()
+    return buffer_cache[self]
+
 class _CacheCollector:
   def __init__(self):
-    self.cache: Optional[List[JitItem]] = None
+    self.cache: Optional[List[Tuple[JITRunner, List[Union[Buffer, PlaceHolder]]]]] = None
 
   def start(self, var_vals:Optional[Dict[Variable, int]]=None):
     self.cache = []
+    self.placeholders: WeakKeyDictionary[Buffer, PlaceHolder] = WeakKeyDictionary()
     self.var_vals = var_vals if var_vals is not None else {}
 
   def add(self, prg, rawbufs:List[Buffer], var_vals:Dict[Variable, int]):
     if self.cache is None: return
     for k,v in var_vals.items(): assert k in self.var_vals and self.var_vals[k] == v, f"var_vals {k} mismatch {v} != {self.var_vals.get(k)}"
-    self.cache.append(JitItem(prg, cast(List[Optional[Buffer]], rawbufs)))
+
+    # Buffer optimization is allowed only for kernel operations. Avoids for copies (prevents parallelism) and syncs (incorrect buffer reuse).
+    if isinstance(prg, CompiledASTRunner):
+      for i in range(prg.outcount): self.placeholders[rawbufs[i]] = PlaceHolder(rawbufs[i])
+
+    self.cache.append((prg, [self.placeholders.get(x, x) if isinstance(x, Buffer) else x for x in rawbufs]))
 
   def finish(self) -> List[JitItem]:
     if self.cache is None: return []
+    buffer_cache: Dict[PlaceHolder, Buffer] = {}
     saved_cache, self.cache = self.cache, None
-    return saved_cache
+    return [JitItem(prg, [x.alloc_if_needed(buffer_cache) if isinstance(x, PlaceHolder) else x for x in pl]) for prg, pl in saved_cache]
 CacheCollector = _CacheCollector()
