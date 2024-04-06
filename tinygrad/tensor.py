@@ -7,7 +7,7 @@ from collections import defaultdict
 import numpy as np
 
 from tinygrad.dtype import DType, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype
-from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, fully_flatten, flat_mv, argsort, broadcast_shapes
+from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, fully_flatten, flat_mv, argsort
 from tinygrad.helpers import IMAGE, DEBUG, WINO, THREEFRY
 from tinygrad.lazy import LazyBuffer
 from tinygrad.features.multi import MultiLazyBuffer
@@ -372,9 +372,9 @@ class Tensor:
     new_shape = tuple([-prod(self.shape) // prod(new_shape) if s == -1 else (s if s is not None else self.shape[i]) for i,s in enumerate(new_shape)])
     return F.Reshape.apply(self, shape=new_shape) if new_shape != self.shape else self
   def expand(self, shape, *args) -> Tensor:
-    x = self.reshape((1,)*(len(shape := argfix(shape, *args))-self.ndim) + self.shape)
-    new_shape = tuple([x if x != -1 and x is not None else s for s,x in zip(x.shape, shape)])
-    return F.Expand.apply(x, shape=new_shape) if new_shape != x.shape else x
+    # new_shape = tuple([x if x != -1 and x is not None else s for s,x in zip(x.shape, argfix(shape, *args))])
+    # return Tensor._broadcast_shape(self, shape=new_shape)
+    return Tensor._broadcast_shape(self, shape=argfix(shape, *args))[0]
   def permute(self, order, *args) -> Tensor: return F.Permute.apply(self, order=argfix(order, *args))
   def flip(self, axis, *args) -> Tensor: return F.Flip.apply(self, axis=[x if x >= 0 else x+len(self.shape) for x in argfix(axis, *args)])
   def shrink(self, arg:Tuple[Optional[Tuple[sint, sint]], ...]) -> Tensor:
@@ -861,6 +861,14 @@ class Tensor:
   def softsign(self): return self / (1 + self.abs())
 
   # ***** broadcasted elementwise mlops *****
+  @staticmethod
+  def _broadcast_shape(*ts:Tensor, shape:Tuple[sint, ...]=()):
+    shps = tuple(t.shape for t in ts) + (shape,)
+    padded_shps = tuple((1,) * (max(len(s_) for s_ in shps) - len(s)) + s for s in shps)
+    if not all((len(set(axis)) == 2 and 1 in set(axis)) or len(set(axis)) == 1 or 0 in set(axis) for axis in zip(*padded_shps)):
+      raise ValueError(f"unable to broadcast shapes={shps}")
+    expand_arg = tuple(0 if any(sh_ == 0 for sh_ in sh) else max(sh) for sh in zip(*padded_shps))
+    return tuple(F.Expand.apply(t.reshape(reshape_arg), shape=expand_arg) if expand_arg != t.shape else t for t,reshape_arg in zip(ts, padded_shps))
 
   def _broadcasted(self, y:Union[Tensor, ConstType], reverse:bool=False, match_dtype:bool=True) -> Tuple[Tensor, Tensor]:
     x: Tensor = self
@@ -878,8 +886,7 @@ class Tensor:
     if reverse: x, y = y, x
 
     # expand to broadcasted shape
-    shape = broadcast_shapes(x.shape, y.shape)
-    return x.expand(shape), y.expand(shape)
+    return Tensor._broadcast_shape(x,y)
 
   def _to_const_val(self, x:Union[Tensor, ConstType]) -> Union[Tensor, ConstType]:
     # TODO: update with multi
