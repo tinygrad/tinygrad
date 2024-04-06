@@ -18,7 +18,8 @@ def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Op]=
   cache_key = (device, st, dtype, op, arg, tuple(ref(x) for x in srcs)) if base is None else (st, ref(base))
   if enable_cache and (rret := lazycache.get(cache_key, None)): return rret
 
-  is_arange = is_arange or (op in {UnaryOps.CAST, LoadOps.COPY} and all([x.base.is_arange for x in srcs]))
+  is_arange = is_arange or (op in {UnaryOps.CAST, LoadOps.COPY} and (all([x.base.is_arange for x in srcs])
+                                                                     or (isinstance(arg, LazyBuffer) and arg.base.is_arange)))
   ret = LazyBuffer(device, st, dtype, op, arg, srcs, base=base, is_arange=is_arange)
   if enable_cache: lazycache[cache_key] = ret
   return ret

@@ -302,8 +302,25 @@ class UOpGraph:
           self.replace_op(alu_with_accum, next(op for op in alu_with_accum.vin if op != accumulator))
       get_recursive_parents.cache_clear()
 
-  def optimize_one_hot_reduce_loops(self, get_recursive_parents, cmpeq):
-    pass
+  def optimize_arange_loops(self, get_recursive_parents, arange_buf):
+    load = next((u for u in self.get_recursive_children(arange_buf) if u.uop is UOps.LOAD and arange_buf in u.vin), None)
+    if load is None or (loop:=load.vin[1]).uop is not UOps.LOOP: return
+    # look for reduction loops which can only be true on one iteration of the loop
+    phi = next((u for u in self.get_recursive_children(loop) if u.uop is UOps.PHI), None)
+    if phi is None or (phi_add:=phi.vin[1]).arg is not BinaryOps.ADD or (accum:=phi.vin[0]) not in phi_add.vin: return
+    item_to_sum = next(x for x in phi_add.vin if x != accum)
+    cmpeq = next((u for u in get_recursive_parents(item_to_sum) if u.arg is BinaryOps.CMPEQ), None)
+    if loop not in [x.vin[0] if x.uop is UOps.CAST else x for x in cmpeq.vin]: return
+    index = next(x for x in cmpeq.vin if loop not in get_recursive_parents(x))
+    val = next(x for x in get_recursive_parents(phi) if x.uop is UOps.LOAD and x.vin[0] not in [arange_buf, index])
+    self.replace_op(load, loop) # arange load can be replaced with loop idx directly for this case
+    for u in get_recursive_parents(val):
+      if u.uop is UOps.ALU and loop in u.vin:
+        u.vin = tuple([index if vin is loop else vin for vin in list(u.vin)])
+    self.replace_op(phi, val)
+
+
+
     # phi = next((op for op in self.get_recursive_children(cmpeq) if op.uop is UOps.PHI), None)
     # alus = [op for op in self.get_recursive_children(cmpeq) if op.uop is UOps.ALU]
     # if not phi or len(alus) != 3 and set([x.arg for x in alus]) != {BinaryOps.MUL, BinaryOps.ADD, BinaryOps.CMPEQ}: return
@@ -371,6 +388,7 @@ class UOpGraph:
     # uops optimization
     while self.uops_optimization(get_recursive_parents): pass
     self.simplify_phi_loops(get_recursive_parents)
+    [self.optimize_arange_loops(get_recursive_parents, x) for x in self.uops if x.uop is UOps.DEFINE_GLOBAL and x.arg[3] is True]
     # for x in self.one_hot_cmpeq: self.optimize_one_hot_reduce_loops(get_recursive_parents, x)
 
     # (recursively) remove childless uops

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Tuple, Any, Optional, cast, DefaultDict, Dict, Union, Final, Iterator, Sequence
+from typing import List, Tuple, Any, Optional, cast, DefaultDict, Dict, Union, Final, Iterator, Sequence, Set
 import itertools, math, functools
 from collections import defaultdict
 
@@ -193,7 +193,7 @@ class Linearizer(Kernel):
       if isinstance(buf, MemBuffer):
         self.buf_uops[i] = self.uops.add(UOps.DEFINE_GLOBAL,
                                          buf.dtype if isinstance(buf.dtype, ImageDType) else PtrDType(buf.dtype), (),
-                                         (buf.idx, f"data{buf.idx}", any(buf.idx == x.idx for x in self.outbufs)))
+                                         (buf.idx, f"data{buf.idx}", any(buf.idx == x.idx for x in self.outbufs), buf.is_arange))
     # add var vals
     for i,var in enumerate(self.vars):
       assert var.expr is not None

@@ -29,6 +29,7 @@ class MemBuffer:
   idx: int
   dtype: DType
   st: ShapeTracker
+  is_arange: bool = False
 
 @dataclass(frozen=True)
 class ConstBuffer:
