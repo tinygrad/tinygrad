@@ -119,7 +119,7 @@ class LazyBuffer:
     return self.base._copy(device)._view(self.st)
 
   def set_arange(self, val): self.base._is_arange = val
-  def is_arange(self): return self.base._is_arange
+  def is_arange(self) -> bool: return self.base._is_arange
 
   def e(self, op:Union[LoadOps, UnaryOps, BinaryOps, TernaryOps], *in_srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
     srcs: List[LazyBuffer] = []
