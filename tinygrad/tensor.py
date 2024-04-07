@@ -863,11 +863,10 @@ class Tensor:
 
   # ***** broadcasted elementwise mlops *****
   def _broadcast_to(self, shape:Tuple[sint, ...]):
-    padded_shps = _pad_left(self.shape, shape)
-    if self.ndim > len(shape) or not all(sh in {s,1} or s==0 for sh,s in zip(*padded_shps)):
+    reshape_arg, _ = _pad_left(self.shape, shape)
+    if self.ndim > len(shape) or not all(sh in {s,1} or s==0 for sh,s in zip(reshape_arg, shape)):
       raise ValueError(f"cannot broadcast shapes={self.shape, shape}")
-    expand_arg = tuple(0 if any(sh_ == 0 for sh_ in sh) else max(sh) for sh in zip(*padded_shps))
-    return F.Expand.apply(self.reshape(padded_shps[0]), shape=expand_arg) if expand_arg != self.shape else self
+    return F.Expand.apply(self.reshape(reshape_arg), shape=shape) if shape != self.shape else self
 
   def _broadcasted(self, y:Union[Tensor, ConstType], reverse:bool=False, match_dtype:bool=True) -> Tuple[Tensor, Tensor]:
     x: Tensor = self
