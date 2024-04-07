@@ -84,7 +84,7 @@ class PatternMatcher:
       ux: List[UOp] = []
       if rew := self.rewrite(u, ux):
         replace[u] = rew
-        remove.update([x for x in uops.uops[i-1:i+1] if x in ux and x != u])
+        if i > 0 and (x := uops.uops[i-1]) in ux and x != u: remove.add(x)
 
     for o,n in replace.items():
       queue = [n]
