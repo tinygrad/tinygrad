@@ -63,10 +63,12 @@ class PatternMatcher:
     # uop is required, arg is optional
     for p,fxn in self.patterns: self.pdict[(p.get("uop"), p.get("arg", None))].append((p, fxn))
 
-  def rewrite(self, uop:UOp) -> Optional[Tuple]:
+  def rewrite(self, uop:UOp, ux:List[UOp]=[]) -> Optional[UOp]:
     for p,fxn in itertools.chain(self.pdict[(uop.uop, uop.arg)], self.pdict[(uop.uop, None)]):
       store: Dict[str, UOp] = {}
-      if _match(uop, p, store): return store.values(), fxn(**store)
+      if _match(uop, p, store):
+        ux.extend(store.values())
+        return fxn(**store)
     return None
 
   def rewrite_graph(self, uops: UOpGraph):
@@ -79,8 +81,8 @@ class PatternMatcher:
       for o,n in replace.items():
         if o in u.vin and u is not n:
           u.vin = tuple(n if x == o else x for x in u.vin)
-      if ret := self.rewrite(u):
-        ux, rew = ret
+      ux: List[UOp] = []
+      if rew := self.rewrite(u, ux):
         replace[u] = rew
         remove.update([x for x in uops.uops[i-1:i+1] if x in ux and x != u])
 
@@ -156,8 +158,7 @@ class UOpGraph:
   def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None, cachable=True, insert_before=None,
           simplify=True) -> UOp:
     ret = UOp(uop, dtype, vin, arg) if uop is not UOps.CONST else UOp.const(dtype, arg)
-    if simplify and (r:=constant_folder.rewrite(ret)) is not None:
-      _, rewritten = r
+    if simplify and (rewritten:=constant_folder.rewrite(ret)) is not None:
       if rewritten in self.uops: return rewritten  # ignore cachable
       ret = rewritten
     key = (ret.uop, ret.dtype, ret.vin, ret.arg)
