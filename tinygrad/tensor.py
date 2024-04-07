@@ -884,7 +884,7 @@ class Tensor:
 
     if reverse: x, y = y, x
 
-    # expand to broadcasted shape
+    # broadcast
     out_shape = _broadcast_shape(x.shape, y.shape)
     return x._broadcast_to(out_shape), y._broadcast_to(out_shape)
 
