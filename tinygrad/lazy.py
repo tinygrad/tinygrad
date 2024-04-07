@@ -18,8 +18,7 @@ def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Op]=
   cache_key = (device, st, dtype, op, arg, tuple(ref(x) for x in srcs)) if base is None else (st, ref(base))
   if enable_cache and (rret := lazycache.get(cache_key, None)): return rret
 
-  is_arange = is_arange or (op in {UnaryOps.CAST, LoadOps.COPY} and (all([x.base.is_arange for x in srcs])
-                                                                     or (isinstance(arg, LazyBuffer) and arg.base.is_arange)))
+  is_arange = is_arange or (op in {UnaryOps.CAST, LoadOps.COPY} and (all([x.is_arange() for x in srcs]) or (isinstance(arg, LazyBuffer) and arg.is_arange())))
   ret = LazyBuffer(device, st, dtype, op, arg, srcs, base=base, is_arange=is_arange)
   if enable_cache: lazycache[cache_key] = ret
   return ret
@@ -37,7 +36,7 @@ class LazyBuffer:
       self.buffer: Buffer = srcs[1].base.buffer if self.op is LoadOps.ASSIGN else Buffer(device, self.size, dtype)
       self.contiguous_child: Optional[Tuple[ReferenceType[LazyBuffer], ShapeTracker]] = None
       self.forced_realize = False
-      self.is_arange = is_arange
+      self._is_arange = is_arange
     else:
       # properties on view
       assert base.base == base, "base must be a base itself"
@@ -118,6 +117,9 @@ class LazyBuffer:
 
     # copy the base and apply the shapetracker on the new device
     return self.base._copy(device)._view(self.st)
+
+  def set_arange(self, val): self.base._is_arange = val
+  def is_arange(self): return self.base._is_arange
 
   def e(self, op:Union[LoadOps, UnaryOps, BinaryOps, TernaryOps], *in_srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
     srcs: List[LazyBuffer] = []
