@@ -40,6 +40,7 @@ class TestMultiTensor(unittest.TestCase):
       assert lb.shape == (128,)
     (X + X).realize()
 
+  @unittest.skipIf(Device.DEFAULT == "METAL", "metal multi-device is fake")
   def test_sharded_memory(self):
     mem_base = GlobalCounters.mem_used
 
