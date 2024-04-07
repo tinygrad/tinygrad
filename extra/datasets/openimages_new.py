@@ -197,6 +197,7 @@ image_std = Tensor([0.229, 0.224, 0.225]).reshape(-1,1,1)
 image_mean = Tensor([0.485, 0.456, 0.406]).reshape(-1,1,1)
 def normalize(x):
   x = x.permute((2,0,1)) / 255.0
+  # x = x.permute((2,1,0)) / 255.0
   x -= image_mean
   x /= image_std
   return x.realize()
@@ -229,6 +230,7 @@ def iterate(coco, bs=8):
     while(i_sub<bs):
       # print(i_sub)
       x_orig,t = coco.__getitem__(i+i_sub+rem)
+      # print('X_ORIG_SIZE', x_orig.size)
       # print('DATLOAD_ITER', t['boxes'].shape)
       if(t['boxes'].shape[0]<=0):
         rem+=1
@@ -247,6 +249,7 @@ def iterate(coco, bs=8):
         # print(x_torch)
         xNew = normalize(Tensor(np.array(x_orig)))
         xNew = F.resize(torch.as_tensor(xNew.numpy()), size=SIZE)
+        # print('X_NEW', xNew.shape)
         xNew = Tensor(xNew.numpy())
         # print('POSt RESIZE')
         
@@ -255,12 +258,12 @@ def iterate(coco, bs=8):
         # xNew = Tensor(np.array(xNew))
         # xNew = normalize(Tensor(np.array(xNew), requires_grad=False))
 
-        print('X_MEAN_NORM',xNew.shape, xNew.mean().numpy())
+        # print('X_MEAN_NORM',xNew.shape, xNew.mean().numpy())
         X.append(xNew)
         bbox = t['boxes']
         # print('ITERATE_PRE_RESIZE', bbox.shape)
         bbox = resize_boxes(bbox, (x_orig.size[1],x_orig.size[0]), SIZE)
-        bbox = resize_boxes(bbox, x_orig.size, SIZE)
+        # bbox = resize_boxes(bbox, x_orig.size, SIZE)
 
         # print('ITERATE_POST_RESIZE', bbox.shape)
         t['boxes'] = bbox#.realize()

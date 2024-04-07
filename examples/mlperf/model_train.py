@@ -402,7 +402,7 @@ def train_retinanet():
     x -= input_mean
     x /= input_std
     return x
-  from extra.models.retinanetNew import RetinaNet
+  from extra.models.retinanetNew import RetinaNet, sigmoid_focal_loss
   # from extra.models.retinanet import RetinaNet
   from extra.models.retinanet import AnchorGenerator, ImageList
   anchor_sizes = tuple((x, int(x * 2 ** (1.0 / 3)), int(x * 2 ** (2.0 / 3))) for x in [32, 64, 128, 256, 512])
@@ -513,6 +513,7 @@ def train_retinanet():
     for X,Y in iterate(coco, BS):
       # print('X_REQ_GRADDD', X.requires_grad)
       # train_step.reset()
+      # if cnt<5: sigmoid_focal_loss.reset()
       st = time.time()
       # print('IMAGE DATA', X)
       # for tt in Y:
