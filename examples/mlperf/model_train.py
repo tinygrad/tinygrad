@@ -239,7 +239,7 @@ def train_unet3d():
   from examples.mlperf.losses import dice_ce_loss
   from examples.mlperf.metrics import dice_score
   from extra.models.unet3d import UNet3D
-  from extra.datasets.kits19 import iterate, get_train_files, get_val_files, sliding_window_inference
+  from extra.datasets.kits19 import iterate, get_train_files, get_val_files, sliding_window_inference, preprocess, BASEDIR
   from tinygrad import Device, TinyJit, Tensor
   from tinygrad.nn.optim import SGD
   from tinygrad import GlobalCounters
@@ -267,11 +267,7 @@ def train_unet3d():
   VAL_DATASET_SIZE = len(get_val_files())
   START_EVAL_AT = getenv("START_EVAL_AT", ceil(1000 * TRAIN_DATASET_SIZE / (TRAIN_DATASET_SIZE * BS)))
   EVALUATE_EVERY = getenv("EVALUATE_EVERY", ceil(20 * TRAIN_DATASET_SIZE / (TRAIN_DATASET_SIZE * BS)))
-
-  start_eval_at = START_EVAL_AT
-  evaluate_every = EVALUATE_EVERY
-
-  print(f"Start evaluation at epoch {start_eval_at} and every {evaluate_every} epochs after")
+  PREPROCESSED_DIR = BASEDIR / ".." / "preprocessed"
 
   if WANDB:
     try:
@@ -290,6 +286,16 @@ def train_unet3d():
   for p in params: p.realize().to_(GPUS)
 
   optim = SGD(params, lr=LR, momentum=MOMENTUM, nesterov=True)
+
+  def preprocess_dataset(filenames, is_val=False):
+    for fn in tqdm(filenames, desc=f"preprocess {'val' if is_val else 'train'}"):
+      case = os.path.basename(fn)
+      image_preproc_path, label_preproc_path = PREPROCESSED_DIR / f"{case}_x.npy", PREPROCESSED_DIR / f"{case}_y.npy"
+      image, label = preprocess(fn)
+      image, label = image.astype(np.float32), label.astype(np.uint8)
+      np.save(image_preproc_path, image, allow_pickle=False)
+      np.save(label_preproc_path, label, allow_pickle=False)
+      tqdm.write(f"Saved preprocessed data {case}")
 
   def lr_warm_up(optim, init_lr, lr, current_epoch, warmup_epochs):
     scale = current_epoch / warmup_epochs
@@ -317,7 +323,14 @@ def train_unet3d():
   if WANDB: wandb.init(project=PROJ_NAME)
 
   is_successful, diverged = False, False
+  start_eval_at, evaluate_every = START_EVAL_AT, EVALUATE_EVERY
   next_eval_at = start_eval_at
+  print(f"Evaluating starting at epoch {start_eval_at} and every {evaluate_every} epochs after")
+
+  if not PREPROCESSED_DIR.exists():
+    PREPROCESSED_DIR.mkdir()
+    preprocess_dataset(get_train_files())
+    preprocess_dataset(get_val_files(), is_val=True)
 
   for epoch in range(1, NUM_EPOCHS + 1):
     Tensor.training = True
@@ -327,7 +340,7 @@ def train_unet3d():
 
     st = time.perf_counter()
 
-    for i, (x, y) in enumerate(tqdm(iterate(val=False, shuffle=True, bs=BS, cache_preprocessed_data=True), total=TRAIN_DATASET_SIZE // BS, desc=f"epoch {epoch}"), start=1):
+    for i, (x, y) in enumerate(tqdm(iterate(val=False, shuffle=True, bs=BS), total=TRAIN_DATASET_SIZE // BS, desc=f"epoch {epoch}"), start=1):
       GlobalCounters.reset()
 
       x, y = Tensor(x).realize().shard(GPUS, axis=0), Tensor(y, requires_grad=False).shard(GPUS, axis=0)
@@ -351,7 +364,7 @@ def train_unet3d():
       eval_loss = []
       scores = []
 
-      for x, y in tqdm(iterate(cache_preprocessed_data=True), total=VAL_DATASET_SIZE):
+      for x, y in tqdm(iterate(), total=VAL_DATASET_SIZE):
         eval_loss_value, score = eval_step(model, x, y)
         eval_loss.append(eval_loss_value)
         scores.append(score)

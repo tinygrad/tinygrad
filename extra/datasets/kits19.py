@@ -70,29 +70,17 @@ def preprocess(file_path):
   image, label = pad_to_min_shape(image, label)
   return image, label
 
-def iterate(val=True, shuffle=False, bs=1, cache_preprocessed_data=False):
+def iterate(val=True, shuffle=False, bs=1):
   if val: assert bs == 1, "bs has to be 1"
   files = get_val_files() if val else get_train_files()
   order = list(range(0, len(files)))
   preprocessed_path = BASEDIR / ".." / "preprocessed"
-  if cache_preprocessed_data:
-    if not os.path.exists(preprocessed_path): os.mkdir(preprocessed_path)
-    for i in range(len(files)):
-      case = os.path.basename(files[i])
-      image_preproc_path, label_preproc_path = preprocessed_path / f"{case}_x.npy", preprocessed_path / f"{case}_y.npy"
-      if not image_preproc_path.exists() and not label_preproc_path.exists():
-        image, label = preprocess(files[i])
-        image, label = image.astype(np.float32), label.astype(np.uint8)
-        print(f"Saving preprocessed data {case}")
-        np.save(image_preproc_path, image, allow_pickle=False)
-        np.save(label_preproc_path, label, allow_pickle=False)
-
   if shuffle: random.shuffle(order)
-
   for i in range(0, len(files), bs):
     samples = []
     for i in order[i:i+bs]:
-      if cache_preprocessed_data: samples += [(np.load(preprocessed_path / f"{os.path.basename(files[i])}_x.npy"), np.load(preprocessed_path / f"{os.path.basename(files[i])}_y.npy"))]
+      x_cached_path, y_cached_path = preprocessed_path / f"{os.path.basename(files[i])}_x.npy", preprocessed_path / f"{os.path.basename(files[i])}_y.npy"
+      if x_cached_path.exists() and y_cached_path.exists(): samples += [(np.load(x_cached_path), np.load(y_cached_path))]
       else: samples += [preprocess(files[i])]
     X, Y = [x[0] for x in samples], [x[1] for x in samples]
     if val: yield X[0][None], Y[0]
