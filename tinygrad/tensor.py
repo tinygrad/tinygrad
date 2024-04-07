@@ -865,7 +865,7 @@ class Tensor:
   def _broadcast_to(self, shape:Tuple[sint, ...]):
     reshape_arg, _ = _pad_left(self.shape, shape)
     if self.ndim > len(shape) or not all(sh in {s,1} or (s==0 and sh==1) for sh,s in zip(reshape_arg, shape)):
-      raise ValueError(f"cannot broadcast shapes={self.shape, shape}")
+      raise ValueError(f"cannot broadcast tensor with shape={self.shape} to {shape=}")
     return F.Expand.apply(self.reshape(reshape_arg), shape=shape) if shape != self.shape else self
 
   def _broadcasted(self, y:Union[Tensor, ConstType], reverse:bool=False, match_dtype:bool=True) -> Tuple[Tensor, Tensor]:
