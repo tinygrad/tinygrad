@@ -7,7 +7,7 @@ from collections import defaultdict
 import numpy as np
 
 from tinygrad.dtype import DType, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype
-from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, fully_flatten, flat_mv, argsort
+from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, fully_flatten, flat_mv, argsort, pad_left
 from tinygrad.helpers import IMAGE, DEBUG, WINO, THREEFRY
 from tinygrad.lazy import LazyBuffer
 from tinygrad.features.multi import MultiLazyBuffer
@@ -372,7 +372,8 @@ class Tensor:
     new_shape = tuple([-prod(self.shape) // prod(new_shape) if s == -1 else (s if s is not None else self.shape[i]) for i,s in enumerate(new_shape)])
     return F.Reshape.apply(self, shape=new_shape) if new_shape != self.shape else self
   def expand(self, shape, *args) -> Tensor:
-    return Tensor._broadcast_tensors(self, shape=tuple(1 if s==-1 or s is None else s for s in argfix(shape, *args)))[0]
+    shape = tuple(sh if s==-1 or s is None else s for s, sh in zip(*(pad_left(argfix(shape, *args), self.shape))))
+    return Tensor._broadcast_tensors(self, shape=shape)[0]
   def permute(self, order, *args) -> Tensor: return F.Permute.apply(self, order=argfix(order, *args))
   def flip(self, axis, *args) -> Tensor: return F.Flip.apply(self, axis=[x if x >= 0 else x+len(self.shape) for x in argfix(axis, *args)])
   def shrink(self, arg:Tuple[Optional[Tuple[sint, sint]], ...]) -> Tensor:
@@ -862,11 +863,11 @@ class Tensor:
   @staticmethod
   def _broadcast_tensors(*ts:Tensor, shape:Tuple[sint, ...]=()):
     shps, max_ndim = tuple(t.shape for t in ts) + (shape,), max(t.ndim for t in ts)
-    padded_shps = tuple((1,) * (max(max_ndim, len(shape))- len(s)) + s for s in shps)
+    padded_shps = pad_left(*shps)
     if shape != () and (max_ndim > len(shape) or any(axis[-1] != 0 and any(axis[-1] < a for a in axis[:-1]) for axis in zip(*padded_shps))):
       raise ValueError(f"{shape=} has to have higher dims than tensors and each dim has to be larger or equal 0")
     if not all((len(vals := set(axis)) == 2 and 1 in vals) or len(vals) == 1 or 0 in vals for axis in zip(*padded_shps)):
-      raise ValueError(f"unable to broadcast shapes={shps}")
+      raise ValueError(f"cannot broadcast shapes={shps}")
     expand_arg = tuple(0 if any(sh_ == 0 for sh_ in sh) else max(sh) for sh in zip(*padded_shps))
     return tuple(F.Expand.apply(t.reshape(reshape_arg), shape=expand_arg) if expand_arg != t.shape else t for t,reshape_arg in zip(ts, padded_shps))
 

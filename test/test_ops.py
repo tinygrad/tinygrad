@@ -1093,8 +1093,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(4,3,1,6)], lambda x: x.expand((4,3,2,6)))
     helper_test_op([(1,1,1,1)], lambda x: x.expand((4,3,2,6)))
     helper_test_op([(4,3,1,6)], lambda x: x.expand((6,1,4,3,2,6)))
-    helper_test_op([(1,1,1,1)], lambda x: x.expand((6,1,4,3,2,6)))
     helper_test_op([(4,3,1,6)], lambda x: x.expand((0,1,4,3,2,6)))
+    helper_test_op([(4,3,1,6)], lambda x: x.expand((4,3,0,6)))
     helper_test_op([()], lambda x: x.expand((4,3,2,6)))
     helper_test_op([()], lambda x: x.expand([]))
 
