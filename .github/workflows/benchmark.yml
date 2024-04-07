@@ -44,6 +44,8 @@ jobs:
         JIT=1 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
     - name: Run LLaMA with BEAM
       run: JIT=1 BEAM=2 CACHELEVEL=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_beam.txt
+    - name: Run LLaMA 7B on 4 (virtual) GPUs
+      run: JIT=1 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_four_gpu.txt
     - name: Run GPT2
       run: |
         JIT=0 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_unjitted.txt
@@ -72,6 +74,7 @@ jobs:
           llama_unjitted.txt
           llama_jitted.txt
           llama_beam.txt
+          llama_four_gpu.txt
           gpt2_unjitted.txt
           gpt2_jitted.txt
           gpt2_half.txt
