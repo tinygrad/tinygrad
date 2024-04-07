@@ -874,9 +874,6 @@ class TestOps(unittest.TestCase):
           else:
             helper_test_op(shapes, torch_op, tinygrad_op, low=0, high=3)
 
-  # def test_broadcast_tensors(self):
-
-
   def test_slice_in_bounds_1dim(self):
     helper_test_op([(3)], lambda x: x[1:3])
     helper_test_op([(3)], lambda x: x[0:2])

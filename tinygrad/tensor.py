@@ -7,7 +7,7 @@ from collections import defaultdict
 import numpy as np
 
 from tinygrad.dtype import DType, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype
-from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, fully_flatten, flat_mv, argsort, pad_left
+from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, fully_flatten, flat_mv, argsort
 from tinygrad.helpers import IMAGE, DEBUG, WINO, THREEFRY
 from tinygrad.lazy import LazyBuffer
 from tinygrad.features.multi import MultiLazyBuffer
@@ -66,6 +66,9 @@ def _apply_winograd_matrix(mat, t:Tensor, dims:int) -> Tensor:
   ret = sum(prod(col[idx] for col, idx in zip(matcols, mat_is)) * t_[mat_is] for mat_is in itertools.product(range(len(mat[0])), repeat=dims))
   assert isinstance(ret, Tensor), "sum didn't return a Tensor"
   return ret
+
+def _pad_left(*shps:Tuple[sint, ...], v=1): return tuple((v,) * (max(len(i_) for i_ in shps) - len(i)) + i for i in shps)
+def _broadcast_shape(*shps:Tuple[sint, ...]): return tuple(0 if any(sh_ == 0 for sh_ in sh) else max(sh) for sh in zip(*_pad_left(*shps)))
 
 class Tensor:
   __slots__ = "lazydata", "requires_grad", "grad", "_ctx"
@@ -372,8 +375,7 @@ class Tensor:
     new_shape = tuple([-prod(self.shape) // prod(new_shape) if s == -1 else (s if s is not None else self.shape[i]) for i,s in enumerate(new_shape)])
     return F.Reshape.apply(self, shape=new_shape) if new_shape != self.shape else self
   def expand(self, shape, *args) -> Tensor:
-    shape = tuple(sh if s==-1 or s is None else s for s, sh in zip(*(pad_left(argfix(shape, *args), self.shape))))
-    return Tensor._broadcast_tensors(self, shape=shape)[0]
+    return self._broadcast_to(tuple(sh if s==-1 or s is None else s for s, sh in zip(*(_pad_left(argfix(shape, *args), self.shape)))))
   def permute(self, order, *args) -> Tensor: return F.Permute.apply(self, order=argfix(order, *args))
   def flip(self, axis, *args) -> Tensor: return F.Flip.apply(self, axis=[x if x >= 0 else x+len(self.shape) for x in argfix(axis, *args)])
   def shrink(self, arg:Tuple[Optional[Tuple[sint, sint]], ...]) -> Tensor:
@@ -860,16 +862,12 @@ class Tensor:
   def softsign(self): return self / (1 + self.abs())
 
   # ***** broadcasted elementwise mlops *****
-  @staticmethod
-  def _broadcast_tensors(*ts:Tensor, shape:Tuple[sint, ...]=()):
-    shps, max_ndim = tuple(t.shape for t in ts) + (shape,), max(t.ndim for t in ts)
-    padded_shps = pad_left(*shps)
-    if shape != () and (max_ndim > len(shape) or any(axis[-1] != 0 and any(axis[-1] < a for a in axis[:-1]) for axis in zip(*padded_shps))):
-      raise ValueError(f"{shape=} has to have higher dims than tensors and each dim has to be larger or equal 0")
-    if not all((len(vals := set(axis)) == 2 and 1 in vals) or len(vals) == 1 or 0 in vals for axis in zip(*padded_shps)):
-      raise ValueError(f"cannot broadcast shapes={shps}")
+  def _broadcast_to(self, shape:Tuple[sint, ...]):
+    padded_shps = _pad_left(self.shape, shape)
+    if self.ndim > len(shape) or not all(sh in {s,1} or s==0 for sh,s in zip(*padded_shps)):
+      raise ValueError(f"cannot broadcast shapes={self.shape, shape}")
     expand_arg = tuple(0 if any(sh_ == 0 for sh_ in sh) else max(sh) for sh in zip(*padded_shps))
-    return tuple(F.Expand.apply(t.reshape(reshape_arg), shape=expand_arg) if expand_arg != t.shape else t for t,reshape_arg in zip(ts, padded_shps))
+    return F.Expand.apply(self.reshape(padded_shps[0]), shape=expand_arg) if expand_arg != self.shape else self
 
   def _broadcasted(self, y:Union[Tensor, ConstType], reverse:bool=False, match_dtype:bool=True) -> Tuple[Tensor, Tensor]:
     x: Tensor = self
@@ -887,7 +885,8 @@ class Tensor:
     if reverse: x, y = y, x
 
     # expand to broadcasted shape
-    return Tensor._broadcast_tensors(x, y)
+    out_shape = _broadcast_shape(x.shape, y.shape)
+    return x._broadcast_to(out_shape), y._broadcast_to(out_shape)
 
   def _to_const_val(self, x:Union[Tensor, ConstType]) -> Union[Tensor, ConstType]:
     # TODO: update with multi
