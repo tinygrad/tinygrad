@@ -1,7 +1,7 @@
 import functools, io, math
 from typing import Union, Tuple, Optional, List, Any
-from tinygrad import Tensor, dtypes
-from tinygrad.dtype import ImageDType
+from tinygrad.tensor import Tensor, broadcast_shape
+from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.helpers import prod, flatten
 from extra.onnx import safe_numpy, DTYPE_MAP
 import numpy as np
@@ -82,6 +82,7 @@ def Size(data: Tensor): return prod(data if isinstance(data, list) else data.sha
 def Flatten(x: Tensor, axis=1): return x.reshape(prod(x.shape[0:axis]), -1)
 def Reshape(data: Tensor, shape: Tensor, allowzero=0):
   return data.reshape([int(x) if x != 0 else (0 if allowzero else data.shape[i]) for i,x in enumerate(safe_numpy(shape))])
+def Expand(x: Tensor, shape:Tensor): return x.expand(broadcast_shape(x.shape, tuple(int(x) for x in safe_numpy(shape))))
 def Shrink(x: Tensor, bias=0.0, lambd=0.5): return (x < -lambd)*(x+bias) + (x > lambd)*(x-bias)
 def And(x:Tensor, y:Tensor): return (x==y).where(x, False)
 def Or(x:Tensor, y:Tensor): return (x==y).where(x, True)
@@ -134,14 +135,6 @@ def ConstantOfShape(x, value:Tensor=None):
   if value is None: value=Tensor([0.0])
   shape = [int(x) for x in safe_numpy(x)]
   return Tensor.ones(*shape, dtype=value.dtype) * (value if shape[0]!=0 else 1)
-
-# TODO: abstract out the broadcast logic in tensor
-def Expand(x: Tensor, shape):
-  x_shape, y_shape = x.shape, [int(x) for x in safe_numpy(shape)]
-  # copied from _broadcasted
-  x_shape, y_shape = [([1]*(max(len(x_shape), len(y_shape))-len(t_shape)) + list(t_shape)) for t_shape in [x_shape, y_shape]]
-  shape_ret = tuple(max(sx, sy) for sx,sy in zip(x_shape, y_shape))
-  return x.reshape(x_shape).expand(shape_ret)
 
 # **************** Complex Ops ****************
 
