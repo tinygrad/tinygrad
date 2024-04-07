@@ -421,10 +421,8 @@ class TestZeroShapeTensor(unittest.TestCase):
       # cannot reshape from size 0 to size 1
       a = t.reshape(())
 
-  # TODO: should this be allowed?
-  @unittest.expectedFailure
   def test_expand(self):
-    t = Tensor.full((3, 2, 0), 12).expand((6, 2, 0))
+    t = Tensor.full((1, 2, 0), 12).expand((6, 2, 0))
     assert t.shape == (6, 2, 0)
     np.testing.assert_equal(t.numpy(), np.full((6, 2, 0), 12))
 

@@ -1098,13 +1098,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: x.expand((4,3,2,6)))
     helper_test_op([()], lambda x: x.expand([]))
 
-    with self.assertRaises((ValueError, RuntimeError)):
-      a = Tensor.ones(4,3,1,6)
-      a.expand(4,1,2,3)
-
-    with self.assertRaises((ValueError, RuntimeError)):
-      a = Tensor.ones(4,3,1,6)
-      a.expand(3,1,6)
+    with self.assertRaises((ValueError, RuntimeError)): Tensor.ones(4,3,1,6).expand(4,1,2,3)
+    with self.assertRaises((ValueError, RuntimeError)): Tensor.ones(4,3,1,6).expand(3,1,6)
 
   @unittest.skip("very slow")
   def test_sd_big_conv(self):
