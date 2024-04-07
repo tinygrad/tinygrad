@@ -1,7 +1,6 @@
 from collections import OrderedDict
 import unicodedata
 import numpy as np
-from scipy import signal
 from tinygrad.nn import state
 
 #
@@ -32,6 +31,7 @@ def load_training_state(model, optimizer, scheduler, state_dict):
   state.load_state_dict(scheduler_state, state_dict)
 
 def gaussian_kernel(n, std):
+  from scipy import signal
   gaussian_1d = signal.gaussian(n, std)
   gaussian_2d = np.outer(gaussian_1d, gaussian_1d)
   gaussian_3d = np.outer(gaussian_2d, gaussian_1d)
