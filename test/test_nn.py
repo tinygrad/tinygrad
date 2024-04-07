@@ -4,7 +4,10 @@ import numpy as np
 import torch
 from tinygrad import Tensor, Device, TinyJit
 from tinygrad.helpers import CI, Context
+from tinygrad.ops import BufferOps
 from tinygrad.nn import BatchNorm2d, Conv1d,ConvTranspose1d, Conv2d,ConvTranspose2d, Linear, GroupNorm, LayerNorm,LayerNorm2d, Embedding, InstanceNorm
+from tinygrad.engine.schedule import create_schedule
+from tinygrad.engine.realize import run_schedule
 
 @unittest.skipIf(CI and Device.DEFAULT == "CUDA", "slow")
 class TestNN(unittest.TestCase):
@@ -351,6 +354,23 @@ class TestNN(unittest.TestCase):
       torch_x = torch.tensor(x.numpy())
       torch_z = torch_layer(torch_x)
       np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=1e-8, rtol=1e-8)
+
+  def test_embedding_one_kernel(self):
+    layer = Embedding(20, 30)
+    a = Tensor([[1, 5, 9, 11],
+                [12, 19, 8, 1]])
+    result = layer(a)
+    schedule = create_schedule([result.lazydata])
+    self.assertEqual(3, len([item for item in schedule if item.ast[0].op is BufferOps.STORE]), "first run realizes arange, weight, and embedding")
+    run_schedule(schedule)
+
+    b = Tensor([[1, 2, 3],
+                [4, 5, 6],
+                [7, 8, 9]])
+    result = layer(b)
+    schedule = create_schedule([result.lazydata])
+    self.assertEqual(1, len([item for item in schedule if item.ast[0].op is BufferOps.STORE]), "second run realizes embedding only")
+    run_schedule(schedule)
 
 
 if __name__ == '__main__':
