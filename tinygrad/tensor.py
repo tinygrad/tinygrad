@@ -831,7 +831,7 @@ class Tensor:
   def round(self: Tensor) -> Tensor:
     return ((self > 0) == ((b := self.cast(dtypes.int32) / 2.0).cast(dtypes.int32) == b)).where((self - 0.5).ceil(), (self + 0.5).floor())
   def lerp(self, end: Tensor, weight: Union[Tensor, float]) -> Tensor:
-    return self + (end - self) * (weight if isinstance(weight, Tensor) else Tensor.as_tensor(weight, self.device, self.dtype))
+    return self + (end - self) * weight
 
   def square(self): return self*self
   def clip(self, min_, max_): return self.maximum(min_).minimum(max_)
