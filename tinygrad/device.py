@@ -233,21 +233,25 @@ class Compiled:
     if not NOOPT:
       if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
       if BEAM >= 1:
-        lins = [(("tc" if used_tensor_cores else "hc"), k)]
-        if used_tensor_cores:
-          lins.append(("hc", Linearizer(*ast, opts=self.compiler.compiler_opts)))
-          lins[-1][1].hand_coded_optimizations()
+        from tinygrad.features.search import beam_search, time_linearizer, bufs_from_lin
         kb = Linearizer(*ast, opts=self.compiler.compiler_opts)
         kb.required_optimizations()
-        from tinygrad.features.search import beam_search, time_linearizer, bufs_from_lin
-        test_rawbuffers = bufs_from_lin(kb)    # allocate scratch buffers for optimization
-        lins.append((f"beam{BEAM.value}", beam_search(kb, test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))))
-        timed = sorted([(nm, tk, time_linearizer(tk, test_rawbuffers, allow_test_size=False, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
-        if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
-        k = timed[0][1]
-        if logkern is not None and logkern_level > 1: logkern.writelines([f"{(lin.ast, lin.applied_opts)}\n" for (_,lin,_) in timed[1:]])
+        beam_lin = beam_search(kb, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
+        if getenv("BEAM_COMPARE", 1):
+          lins = [(("tc" if used_tensor_cores else "hc"), k)]
+          if used_tensor_cores:
+            lins.append(("hc", Linearizer(*ast, opts=self.compiler.compiler_opts)))
+            lins[-1][1].hand_coded_optimizations()
+          test_rawbuffers = bufs_from_lin(kb)    # allocate scratch buffers for optimization
+          lins.append((f"beam{BEAM.value}", beam_lin))
+          timed = sorted([(nm, tk, time_linearizer(tk, test_rawbuffers, allow_test_size=False, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
+          if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
+          k = timed[0][1]
+          if logkern is not None and logkern_level > 1: logkern.writelines([f"{(lin.ast, lin.applied_opts)}\n" for (_,lin,_) in timed[1:]])
+        else: k = beam_lin
     # TODO: check the correctness inline once compare_linearizer is in core
     if logkern is not None: logkern.writelines([f"{(k.ast, k.applied_opts)}\n"])
+    if DEBUG >= 4: print((k.ast, k.applied_opts))
     return k
 
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
