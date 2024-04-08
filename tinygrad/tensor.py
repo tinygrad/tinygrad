@@ -497,14 +497,13 @@ class Tensor:
 
       # create masks
       for dim, i in idx.items():
-        i = i.reshape(i.shape + (1,)*(ret.ndim - first_dim)).expand(pre_reduce_shape)
+        try: i = i.reshape(i.shape + (1,)*(ret.ndim - first_dim)).expand(pre_reduce_shape)
+        except ValueError as exc: raise IndexError("cannot broadcast indices") from exc
         a = Tensor.arange(ret.shape[dim], device=self.device, requires_grad=False).reshape((ret.shape[dim],) + (1,)*(ret.ndim - dim - 1))
         masks.append(i == a)
 
       # reduce masks to 1 mask
-      # if masks can't broadcast, indices cannot broadcast
-      try: mask = functools.reduce(lambda x,y: x.mul(y), masks)
-      except ValueError as exc: raise IndexError("cannot broadcast indices") from exc
+      mask = functools.reduce(lambda x,y: x.mul(y), masks)
 
       # inject 1's for the extra dims added in create masks
       sh = ret.shape[:first_dim] + (1,) * len(big_shape) + ret.shape[first_dim:]
