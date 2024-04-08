@@ -10,6 +10,17 @@ class TestSetitem(unittest.TestCase):
     n[2:4, 3:5] = np.ones((2, 2))
     np.testing.assert_allclose(t.numpy(), n)
 
+    t = Tensor.zeros(6, 6).contiguous().realize()
+    t[2:4, 3:5] = 1.0
+    n = np.zeros((6, 6))
+    n[2:4, 3:5] = 1.0
+    np.testing.assert_allclose(t.numpy(), n)
+
+  def test_setitem_into_unrealized(self):
+    t = Tensor.arange(4).reshape(2, 2)
+    t[1] = 5
+    np.testing.assert_allclose(t.numpy(), [[0, 1], [5, 5]])
+
   def test_simple_jit_setitem(self):
     @TinyJit
     def f(t:Tensor, a:Tensor):
