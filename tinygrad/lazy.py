@@ -172,8 +172,9 @@ class LazyBuffer:
     # cap output buffer to 2**19 items: heuristic number of globals achieve max occupancy with enough locals+upcasts.
     #   ~2**10 should be enough if GROUP is used
     # 256 split maximum should be "negligible reduce" for low prod(new_shape), 8 split minimum.
-    dim_to_split, divisor = next(((i, x) for i in axis for x in range(min(256,2**19//prod(new_shape)),8-1,-1) if self.shape[i] % x == 0), (None, 1))
-    if dim_to_split is None: return self._reduce_op(op, axis)
+    split_candidates = [((i, x) for i in axis for x in range(min(256,2**19//prod(new_shape)),8-1,-1) if self.shape[i] % x == 0)]
+    if not split_candidates: return self._reduce_op(op, axis)
+    dim_to_split, divisor = split_candidates[0]
     splitted_shape = self.shape[:dim_to_split] + (divisor,) + (self.shape[dim_to_split]//divisor,) + self.shape[dim_to_split+1:]
     splitted = self.reshape(splitted_shape).permute(tuple([x for x in range(len(splitted_shape)) if x != dim_to_split]+[dim_to_split]))  # move split to end
     return splitted._reduce_op(op, axis)._reduce_op(op, (len(new_shape),)).reshape(new_shape)  # reduce original axes, then split
