@@ -18,6 +18,7 @@ SUB = PACKET3_SET_SH_REG_START - BASE_ADDR
 
 regCOMPUTE_PGM_LO = 0x1bac - SUB
 regCOMPUTE_START_X = 0x1ba4 - SUB
+regCOMPUTE_NUM_THREAD_X = 0x1ba7 - SUB
 regCOMPUTE_USER_DATA_0 = 0x1be0 - SUB
 regCOMPUTE_USER_DATA_8 = 0x1be8 - SUB
 
@@ -27,6 +28,8 @@ regCOMPUTE_PGM_RSRC2 = 0x1bb3 - SUB
 # DEBUG=6 python3 extra/hip_gpu_driver/test_pm4.py
 # sudo umr -i 1 -s amd744c.gfx1100 --sbank 1 1 2 | grep regCOMPUTE
 
+# 0x00009025
+
 COMPUTE_SHADER_EN = 1
 USE_THREAD_DIMENSIONS = 1 << 5
 CS_W32_EN = 1 << 15
@@ -34,7 +37,7 @@ CS_W32_EN = 1 << 15
 if __name__ == "__main__":
   dev = Device["KFD"]
 
-  a = Tensor([0.,1.], device="KFD").realize()
+  a = Tensor([0.,1.,2.], device="KFD").realize()
   b = a + 7
   b.lazydata.buffer.allocate()
   si = create_schedule([b.lazydata])[-1]
@@ -70,18 +73,21 @@ if __name__ == "__main__":
 
   code_ptr = (prg.handle + 0x1100) >> 8
 
+  #runner.local_size = [2,1,1]
+
   print(runner.local_size, runner.global_size)
 
-  pm4_cmd =  [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 8), regCOMPUTE_START_X, 0,0,0,
-              runner.local_size[0],runner.local_size[1],runner.local_size[2],0,0]
   #pm4_cmd += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 6), mmCOMPUTE_PGM_LO,
   #  prg.handle&0xFFFFFFFF, prg.handle>>32, 0, 0, (scratch.va_addr>>8)&0xFFFFFFFF, scratch.va_addr>>40]
-  pm4_cmd += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 6), regCOMPUTE_PGM_LO, code_ptr&0xFFFFFFFF, code_ptr>>32, 0, 0, 0, 0]
+  pm4_cmd  = [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 6), regCOMPUTE_PGM_LO, code_ptr&0xFFFFFFFF, code_ptr>>32, 0, 0, 0, 0]
   pm4_cmd += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), regCOMPUTE_PGM_RSRC1, 0x40af0000, 0x0000009e]
   pm4_cmd += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), regCOMPUTE_USER_DATA_0, dev.kernargs_ptr&0xFFFFFFFF, dev.kernargs_ptr>>32]
   #pm4_cmd += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), regCOMPUTE_USER_DATA_0, 0, 0]
+  pm4_cmd += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 8), regCOMPUTE_START_X, 0,0,0,
+              runner.local_size[0],runner.local_size[1],runner.local_size[2],0,0]
+  # disabled USE_THREAD_DIMENSIONS
   pm4_cmd += [amd_gpu.PACKET3(amd_gpu.PACKET3_DISPATCH_DIRECT, 3),
-              runner.global_size[0],runner.global_size[1],runner.global_size[2], CS_W32_EN | USE_THREAD_DIMENSIONS | COMPUTE_SHADER_EN]
+              runner.global_size[0],runner.global_size[1],runner.global_size[2], CS_W32_EN | COMPUTE_SHADER_EN]
 
   #pm4_cmd = [amd_gpu.PACKET3(amd_gpu.PACKET3_NOP, 0x3fff)]*0x200
 
