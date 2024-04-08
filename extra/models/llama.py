@@ -75,13 +75,12 @@ class Attention:
     # HACK: without contiguous, the conversation mode is broken and the cache is not updated
 
     # update the cache
-    # assert keys.dtype == self.cache_k.dtype and values.dtype == self.cache_v.dtype, f"{keys.dtype=}, {values.dtype=}, {self.cache_k.dtype=}, {self.cache_v.dtype=}"
+    assert xk.dtype == self.cache_k.dtype and xv.dtype == self.cache_v.dtype, f"{xk.dtype=}, {xv.dtype=}, {self.cache_k.dtype=}, {self.cache_v.dtype=}"
     self.cache_k.shrink((None, (start_pos, start_pos+seqlen), None, None)).assign(xk.contiguous()).realize()
-    keys = self.cache_k.shrink((None, (0, start_pos+seqlen), None, None)).contiguous() if start_pos > 0 else xk
-
-    # TODO: implicitly call contiguous on assign input?
     self.cache_v.shrink((None, (start_pos, start_pos+seqlen), None, None)).assign(xv.contiguous()).realize()
-    values = self.cache_v.shrink((None, (0, start_pos+seqlen), None, None)).contiguous() if start_pos > 0 else xv
+
+    keys = self.cache_k.shrink((None, (0, start_pos+seqlen), None, None)) if start_pos > 0 else xk
+    values = self.cache_v.shrink((None, (0, start_pos+seqlen), None, None)) if start_pos > 0 else xv
 
     keys, values = repeat_kv(keys, self.n_rep), repeat_kv(values, self.n_rep)
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)

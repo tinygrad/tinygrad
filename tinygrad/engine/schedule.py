@@ -82,7 +82,7 @@ def _schedule_one(out:LazyBuffer, realizes:Set[LazyBuffer], reduce_for_op: Dict[
     output_view = out.arg[0] if out.op is LoadOps.ASSIGN and out.arg else output_st
     op = _recursive_lazyop(out, membufs, var_vals, output_st, realizes, cache={})
     output_view, vv = output_view.simplify().unbind()
-    var_vals.update(vv)
+    if vv: var_vals.update(vv)
     op, inputs = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_view)), membufs[1:]
   return _LBScheduleItem((op,), (out,), tuple(inputs), var_vals)
 

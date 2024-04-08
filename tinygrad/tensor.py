@@ -512,11 +512,11 @@ class Tensor:
 
   def __setitem__(self, indices, v:Tensor):
     if isinstance(self.device, str) and self.device.startswith("DISK"): return self.__getitem__(indices).assign(v)
+    # TODO: support python const v
     # TODO: broadcast v to the shape here, refactor for const v and one way broadcast_shape
-    # TODO: support const v
     assign_to = self.__getitem__(indices)
-    # NOTE: .contiguous().realize() to prevent const folding.
-    return assign_to.assign(v._broadcast_to(broadcast_shape(assign_to.shape, v.shape)).contiguous().realize()).realize()
+    # NOTE: contiguous to prevent const folding.
+    return assign_to.assign(v._broadcast_to(broadcast_shape(assign_to.shape, v.shape)).contiguous()).realize()
 
   # NOTE: using slice is discouraged and things should migrate to pad and shrink
   def slice(self, arg:Sequence[Optional[Tuple[int, sint]]], value:float=0) -> Tensor:
