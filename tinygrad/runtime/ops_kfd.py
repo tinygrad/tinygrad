@@ -1,9 +1,9 @@
 from __future__ import annotations
 from typing import Tuple, Any
-import os, fcntl, ctypes, functools, re, pathlib, mmap, struct, errno
+import os, fcntl, ctypes, functools, re, pathlib, mmap, struct, errno, subprocess
 from tinygrad.device import Compiled, LRUAllocator, Compiler, CompilerOptions
 from tinygrad.buffer import BufferOptions
-from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up
+from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up, DEBUG
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.runtime.driver.hip_comgr import compile_hip
 import tinygrad.runtime.autogen.kfd as kfd
@@ -194,6 +194,10 @@ class KFDProgram:
   def __init__(self, device:KFDDevice, name:str, lib:bytes):
     # TODO; this API needs the type signature of the function and global_size/local_size
     self.device, self.name, self.lib = device, name, lib
+
+    if DEBUG >= 6:
+      asm = subprocess.check_output(["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], input=lib)
+      print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
 
     _phoff, _shoff, _flags, _ehsize, _phentsize, _phnum, _shentsize, _shnum, _shstrndx = struct.unpack_from("<QQIHHHHHH", self.lib, 0x20)
     sections = [struct.unpack_from("<IIQQQQIIQ", self.lib, _shoff + i * _shentsize) for i in range(_shnum)]
