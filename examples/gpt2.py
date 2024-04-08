@@ -34,16 +34,15 @@ class Attention:
     if not hasattr(self, "cache_kv"):
       self.cache_kv = Tensor.zeros(2, bsz, MAX_CONTEXT, self.n_heads, self.head_dim, dtype=x.dtype).contiguous().realize()
 
+    # update the cache
+    self.cache_kv.shrink((None, None,(start_pos,start_pos+seqlen),None,None)).assign(Tensor.stack([xk, xv])).realize()
+
     if start_pos > 0:
-      keys = self.cache_kv[0].shrink((None, (0, start_pos), None, None)).cat(xk, dim=1)
-      values = self.cache_kv[1].shrink((None, (0, start_pos), None, None)).cat(xv, dim=1)
+      keys = self.cache_kv[0].shrink((None, (0, start_pos+seqlen), None, None))
+      values = self.cache_kv[1].shrink((None, (0, start_pos+seqlen), None, None))
     else:
       keys = xk
       values = xv
-
-    # update the cache
-    new_cache = Tensor.stack([keys, values]).pad((None, None,(0,MAX_CONTEXT-start_pos-seqlen),None,None))
-    self.cache_kv.assign(new_cache).realize()
 
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
     return self.c_proj(xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2).reshape(bsz, seqlen, self.dim))
