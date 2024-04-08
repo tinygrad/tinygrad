@@ -422,7 +422,7 @@ class TestZeroShapeTensor(unittest.TestCase):
       a = t.reshape(())
 
   def test_expand(self):
-    t = Tensor.full((3, 2, 0), 12).expand((6, 2, 0))
+    t = Tensor.full((1, 2, 0), 12).expand((6, 2, 0))
     assert t.shape == (6, 2, 0)
     np.testing.assert_equal(t.numpy(), np.full((6, 2, 0), 12))
 
