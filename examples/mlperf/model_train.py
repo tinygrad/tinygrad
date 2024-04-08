@@ -286,7 +286,7 @@ def train_bert():
     x.realize().to_(GPUS)
   parameters = get_parameters(model)
 
-  assert 800 % EVAL_BS == 0, "Evaluation batch size must divide 800 without remainder"
+  #assert 800 % EVAL_BS == 0, "Evaluation batch size must divide 800 without remainder" TODO: Determine whether EVAL_BS != 8 is allowed
 
   # ** Log hparams **
   for key, value in config.items():

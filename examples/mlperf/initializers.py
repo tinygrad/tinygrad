@@ -33,5 +33,5 @@ class LinearBert(nn.Linear):
 
 class EmbeddingBert(nn.Embedding):
   def __init__(self, vocab_size:int, embed_size:int, std=0.02):
-    self.vocab_size, self.embed_size = vocab_size, embed_size
+    self.vocab_sz, self.embed_sz = vocab_size, embed_size
     self.weight = std * rand_truncn(vocab_size, embed_size)
