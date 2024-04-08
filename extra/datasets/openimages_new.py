@@ -269,7 +269,7 @@ def iterate(coco, bs=8):
         # print('ITERATE_POST_RESIZE', bbox.shape)
         t['boxes'] = bbox.realize()
         # max_pad = 120087
-        # max_pad = 2000
+        # max_pad = 200
         # n = t['boxes'].shape[0]
         # t['boxes'] = t['boxes'].pad((((0,max_pad-n), None)),0)
         # t['labels'] = t['labels'].reshape(-1,1).pad((((0,max_pad-n), None)),-1).reshape(-1)

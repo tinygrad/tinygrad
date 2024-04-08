@@ -216,30 +216,136 @@ from tinygrad.dtype import dtypes
 #     else:
 #         print('Miss PP')
 
-print(Tensor([-1,1,2,50]).one_hot(5).numpy())
+# print(Tensor([-1,1,2,50]).one_hot(5).numpy())
 
-np.set_printoptions(threshold=sys.maxsize)
-R_SIZE = 5
-C_SIZE = 3
-rows = Tensor([True, True, False, False, True])
-row_idx = Tensor.arange(5)
-col_temp = Tensor([2,3,4,5,6])
-masked_row_idx = Tensor.where(rows, row_idx, -5)
-print('masked_row_idx', masked_row_idx.numpy())
-logits = []
-for m,r,c in zip(rows, masked_row_idx, col_temp):
-    print(m.numpy(),'||', r.numpy(), '||', c.numpy())
-    print('*******')
-    # temp_append = Tensor.where(m, )
-    # if(m):
-    #     print('hit')
-    # else:
-    #     print('miss')
+# np.set_printoptions(threshold=sys.maxsize)
+# R_SIZE = 5
+# C_SIZE = 3
+# rows = Tensor([True, True, False, False, True])
+# row_idx = Tensor.arange(5)
+# col_temp = Tensor([2,3,4,5,6])
+# masked_row_idx = Tensor.where(rows, row_idx, -5)
+# print('masked_row_idx', masked_row_idx.numpy())
+# logits = []
+# for m,r,c in zip(rows, masked_row_idx, col_temp):
+#     print(m.numpy(),'||', r.numpy(), '||', c.numpy())
+#     print('*******')
+#     # temp_append = Tensor.where(m, )
+#     # if(m):
+#     #     print('hit')
+#     # else:
+#     #     print('miss')
 
 
 
-t = Tensor([2,3,4,5,6])
-print(t[[2,3,7,1]].numpy())
+# t = Tensor([2,3,4,5,6])
+# print(t[[2,3,7,1]].numpy())
 
-print(Tensor([0]).log().numpy())
-print((Tensor([5])/0).numpy())
+# print(Tensor([0]).log().numpy())
+# print((Tensor([5])/0).numpy())
+
+# t = Tensor([2,3,4,5,6])
+# print(t[-2:].numpy())
+
+# t = np.array([1,2,3,4])
+# t[2] = 666
+# print(t)
+
+# t = Tensor.arange(4*5).reshape(4,5)
+# b = Tensor([True,True, False,True]).reshape(-1,1)
+# a = t*b
+# print(a.numpy())
+
+# t = Tensor([1,44,55,6,7,43])
+# a = Tensor.maximum(t, 10)
+# print(a.numpy())
+
+# t = Tensor.arange(4*5).reshape(4,5)
+# i = [0,2]
+# print(t[i].numpy())
+# i_new = Tensor(i).reshape(-1,1)
+# i_new = Tensor([[0,0],[0,1],[0,2],[0,3]])#.reshape(2,4)
+# print(i_new.numpy(), i_new.shape)
+# print(t.gather(i_new, 1).numpy())
+
+# t = Tensor([[0,1,2,2,3,0,1,2,0,0,1,1,3], [0,1,2,2,3,0,1,2,0,0,1,1,3]])
+# print(t.sigmoid().numpy())
+
+
+# t = Tensor.arange(4*5).reshape(4,5)
+# b = Tensor([True, True, False, True]).reshape(-1,1)
+# print(t.shape, b.shape)
+# a = t*b
+# # a = b*t
+# print(a.numpy())
+
+# t = Tensor([1,44,55,6,7,43]).reshape(-1,1)
+# a = t.one_hot(10)
+# print(a.shape, a.numpy())
+# i = Tensor([1,3])
+# print(t[i].numpy())
+
+# t = Tensor([True, True, False, True]).reshape(-1,1)
+# a = Tensor.where(t,Tensor(3).one_hot(6),True)
+# print(a.numpy())
+
+# t = Tensor.arange(4*5).reshape(4,5).pad((((0,3), None)),-1)
+# # t = Tensor([1,2,3,44,5]).reshape(-1,1).pad((((0,3), None)),-1).reshape(-1)
+# print(t.numpy())
+
+# i = Tensor([5])
+# t = Tensor.arange(i)
+
+# print(t.numpy())
+
+def box_iou(boxes1: Tensor, boxes2: Tensor) -> Tensor:
+  # print('BOX_IOU Arguements', boxes1.shape, boxes2.shape)
+
+  def box_area(boxes): return (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+  area1 = box_area(boxes1)
+  area2 = box_area(boxes2)
+  lt = Tensor.maximum(boxes1[:, :2].unsqueeze(1), boxes2[:, :2])  # [N,M,2]
+  rb = Tensor.minimum(boxes1[:, 2:].unsqueeze(1), boxes2[:, 2:])  # [N,M,2]
+  # wh = (rb - lt).clip(min_=0)  # [N,M,2]
+  wh = (rb - lt).maximum(0)  # [N,M,2]
+  inter = wh[:, :, 0] * wh[:, :, 1]  # [N,M]
+  # union = area1[:, None] + area2 - inter
+  union = area1.unsqueeze(1) + area2 - inter
+  iou = inter / union
+#   print('BOx_IOU Ret Shape:', iou.shape, boxes1.shape, boxes2.shape)
+#   print(iou[-1].numpy(), iou[-1].sum().numpy())
+
+  return iou#.realize()
+
+def box_torch(boxes1: torch.Tensor, boxes2: torch.Tensor) -> torch.Tensor:
+  def _upcast(t: torch.Tensor) -> torch.Tensor:
+    # Protects from numerical overflows in multiplications by upcasting to the equivalent higher type
+    if t.is_floating_point():
+        return t if t.dtype in (torch.float32, torch.float64) else t.float()
+    else:
+        return t if t.dtype in (torch.int32, torch.int64) else t.int()
+  def box_area(boxes: torch.Tensor) -> torch.Tensor:
+    boxes = _upcast(boxes)
+    return (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+  area1 = box_area(boxes1)
+  area2 = box_area(boxes2)
+
+  lt = torch.max(boxes1[:, None, :2], boxes2[:, :2])  # [N,M,2]
+  rb = torch.min(boxes1[:, None, 2:], boxes2[:, 2:])  # [N,M,2]
+
+  wh = _upcast(rb - lt).clamp(min=0)  # [N,M,2]
+  inter = wh[:, :, 0] * wh[:, :, 1]  # [N,M]
+
+  union = area1[:, None] + area2 - inter
+
+  iou = inter / union
+  return iou
+b1 = Tensor.rand((3,4))
+b2 = Tensor.rand((400, 4))
+b1_torch = torch.tensor(b1.numpy())
+b2_torch = torch.tensor(b2.numpy())
+
+out_torch = box_torch(b1_torch, b2_torch)
+out = box_iou(b1,b2)
+print(out_torch.max())
+print(out.max().numpy())

@@ -427,9 +427,9 @@ def train_retinanet():
 
   model = RetinaNet(ResNeXt50_32X4D(), num_anchors=anchor_generator.num_anchors_per_location()[0])
   mdlrun = TinyJit(lambda x: model(x, True))
-  mdlrun_false = TinyJit(lambda x: model(x, False))
-  mdlloss = TinyJit(lambda r, c, Y, a: model.loss(r,c,Y,a))
-  mdlloss_temp = TinyJit(lambda r, c,y,a : model.loss_temp(r,c,y,a))
+  # mdlrun_false = TinyJit(lambda x: model(x, False))
+  # mdlloss = TinyJit(lambda r, c, Y, a: model.loss(r,c,Y,a))
+  # mdlloss_temp = TinyJit(lambda r, c,y,a : model.loss_temp(r,c,y,a))
   parameters = []
   for k, x in get_state_dict(model).items():
     # print(k, x.shape)

@@ -22,7 +22,7 @@ def sigmoid_focal_loss(
   # print(inputs.numpy())
   # print(mask.numpy())
   # p = inputs.sigmoid()
-  p = Tensor.sigmoid(inputs) #* mask
+  p = Tensor.sigmoid(inputs) * mask
   # ce_loss = inputs.binary_crossentropy_logits(targets)
   ce_loss = cust_bin_cross_logits(inputs, targets) #* mask
   # print('ce_loss', ce_loss.shape)
@@ -76,7 +76,8 @@ def box_iou(boxes1: Tensor, boxes2: Tensor) -> Tensor:
   # union = area1[:, None] + area2 - inter
   union = area1.unsqueeze(1) + area2 - inter
   iou = inter / union
-  # print('BOx_IOU Ret Shape:', iou.shape)
+  # print('BOx_IOU Ret Shape:', iou.shape, boxes1.shape, boxes2.shape)
+  # print(iou[-1].numpy(), iou[-1].sum().numpy())
 
   return iou#.realize()
 # def box_iou(b1: Tensor, b2: Tensor):
@@ -514,8 +515,40 @@ class RetinaNet:
       # print('matcher apppend:', matched_idxs[-1].shape)
       # sys.exit()
     # return logits_class.sum()
+
+    # losses_reg, losses_class = [], []
+    # for bbox_regression_per_image, cls_logits_per_image, tb, tl, anchors_per_image, matched_idxs_per_image in \
+    # zip(logits_reg, logits_class, t_b, t_l, anchors, matched_idxs):
+    #   foreground_idxs_per_image = matched_idxs_per_image >= 0
+    #   num_foreground = foreground_idxs_per_image.sum().item()
+    #   foreground_idxs_per_image = foreground_idxs_per_image.reshape(-1,1)
+
+    #   matched_gt_boxes_per_image = tb[matched_idxs_per_image]*foreground_idxs_per_image
+    #   bbox_regression_per_image = bbox_regression_per_image * foreground_idxs_per_image
+    #   anchors_per_image = anchors_per_image * foreground_idxs_per_image
+    #   target_regression = encode_boxes(matched_gt_boxes_per_image, anchors_per_image)
+    #   target_regression = target_regression*foreground_idxs_per_image
+    #   a = l1_loss(
+    #     bbox_regression_per_image,
+    #     target_regression,
+    #   ) / max(1, num_foreground)
+    #   losses_reg.append(a.realize())
+
+    #   new_mask = Tensor.where(foreground_idxs_per_image, 1, -1)
+    #   labels_temp = tl[matched_idxs_per_image] *new_mask
+    #   gt_classes_target = labels_temp.one_hot(cls_logits_per_image.shape[-1])
+    #   valid_idxs_per_image = matched_idxs_per_image != Matcher.BETWEEN_THRESHOLDS
+    #   s = sigmoid_focal_loss(cls_logits_per_image, 
+    #                                    gt_classes_target, 
+    #                                    valid_idxs_per_image.reshape(-1,1))
+    #   a = s/max(1, num_foreground)
+    #   losses_class.append(a.realize())
+    
+    # loss_reg = _sum(losses_reg)/logits_reg.shape[0]
+    # loss_class = _sum(losses_class)/logits_reg.shape[0]
     loss_class = self.head.classification_head.loss(logits_class, t_l, matched_idxs)
     loss_reg = self.head.regression_head.loss(logits_reg, t_b, anchors, matched_idxs)
+    
     # return loss_class
     # return loss_reg
     # print(colored(f'FINISHED CLASS LOSS FINAL COMPUTE {loss_reg}|||', 'green'))
