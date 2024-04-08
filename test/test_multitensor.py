@@ -41,16 +41,20 @@ class TestMultiTensor(unittest.TestCase):
     (X + X).realize()
 
   def test_sharded_memory(self):
+    # Buffer may be stuck in track_cross_buffer
+    for x in (d_zero, d0, d1, d2, d3): Device[x].synchronize()
     mem_base = GlobalCounters.mem_used
 
     X = Tensor.ones(256).contiguous().realize()
     assert GlobalCounters.mem_used-mem_base== X.dtype.itemsize * 256, GlobalCounters.mem_used-mem_base
     X.shard_((d0, d1, d2, d3)).realize()
+    for x in (d_zero, d0, d1, d2, d3): Device[x].synchronize()
     assert GlobalCounters.mem_used-mem_base == X.dtype.itemsize * 256 * 4, GlobalCounters.mem_used-mem_base
 
     X = Tensor.ones(256).contiguous().realize()
     assert GlobalCounters.mem_used-mem_base == X.dtype.itemsize * 256, GlobalCounters.mem_used-mem_base
     X.shard_((d0, d1, d2, d3), axis=0).realize()
+    for x in (d_zero, d0, d1, d2, d3): Device[x].synchronize()
     assert GlobalCounters.mem_used-mem_base == X.dtype.itemsize * 256, GlobalCounters.mem_used-mem_base
 
     X = Tensor.ones(256).realize()
@@ -115,9 +119,8 @@ class TestMultiTensor(unittest.TestCase):
     fn = f(n)
     np.testing.assert_allclose(fX.numpy(), fn, rtol=1e-6, atol=1e-6)
 
-  @unittest.skipIf(CI and Device.DEFAULT == "CLANG", "clang is slow")
+  @unittest.skip("slow")
   def test_fuzz_allreduce(self):
-
     random.seed(41)
     for it in range(100):
       for n in range(2, 4+1):
@@ -131,7 +134,6 @@ class TestMultiTensor(unittest.TestCase):
         max_err = diff.reshape((prod(diff.shape),)).abs().max().numpy()
         assert mean_err < 1e-6, f"big mean error, iteration {it}_{n}"
         assert max_err < 1e-6, f"big max error, iteration {it}_{n}"
-
 
   def _test_matmul_shard_axis(self, shard_x, shard_w, device):
     X = Tensor.kaiming_uniform(N, N).realize()

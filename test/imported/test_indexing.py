@@ -1087,9 +1087,8 @@ class TestIndexing(unittest.TestCase):
 
     # indexing by a scalar should slice (not copy)
     self.assertEqual(data_ptr(a[0, 1]), data_ptr(a[zero, one]))
-    # NOTE: skipped cuz casting in tinygrad makes _to_const_val not work
-    # self.assertEqual(data_ptr(a[1]), data_ptr(a[one.cast(dtypes.int32)]))
-    # self.assertEqual(data_ptr(a[1]), data_ptr(a[one.cast(dtypes.int16)]))
+    self.assertEqual(data_ptr(a[1]), data_ptr(a[one.cast(dtypes.int32)]))
+    self.assertEqual(data_ptr(a[1]), data_ptr(a[one.cast(dtypes.int16)]))
 
     # scalar indexed with scalar
     r = Tensor.randn()

@@ -15,7 +15,6 @@ from tinygrad import Tensor, Device, GlobalCounters, dtypes
 from tinygrad.dtype import ImageDType
 from tinygrad.helpers import partition, Context, fetch, getenv, DEBUG
 from tinygrad.engine.realize import run_schedule
-from tinygrad.engine.commandqueue import CommandQueue
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.ops import LoadOps, ScheduleItem
 Device.DEFAULT = "GPU"
@@ -89,7 +88,7 @@ def test_vs_onnx(onnx_data, schedule:Optional[List[ScheduleItem]], inputs:Dict[s
   # run code (all buffers have been allocated)
   GlobalCounters.reset()
   output = schedule[-1].outputs[0]
-  CommandQueue(schedule)()
+  run_schedule(schedule)
 
   new_tinygrad_out = np.frombuffer(output.as_buffer(), dtype=output.dtype.np)
   np.testing.assert_allclose(new_torch_out.reshape(new_tinygrad_out.shape), new_tinygrad_out, atol=1e-4, rtol=1e-2)
