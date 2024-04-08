@@ -177,9 +177,8 @@ class LazyBuffer:
                                    (divisor := max((x for x in range(1, min(256, 2 ** 19 // prod(new_shape))+1) if s % x == 0), default=1)) >= 8), default=(0, 1, 0))
     if divisor == 1: return self._reduce_op(op, axis)
     splitted_shape = self.shape[:dim_to_split] + (divisor,) + (self.shape[dim_to_split]//divisor,) + self.shape[dim_to_split+1:]
-    ret = self.reshape(splitted_shape).permute(tuple([x for x in range(len(self.shape)+1) if x != dim_to_split]+[dim_to_split]))  # move split to end
-    ret = ret._reduce_op(op, axis)._reduce_op(op, (len(new_shape),))  # reduce original axes, then split
-    return ret.reshape(new_shape)
+    reshaped = self.reshape(splitted_shape).permute(tuple([x for x in range(len(self.shape)+1) if x != dim_to_split]+[dim_to_split]))  # move split to end
+    return reshaped._reduce_op(op, axis)._reduce_op(op, (len(new_shape),)).reshape(new_shape)  # reduce original axes, then split
 
   # *** movement ops ***
 
