@@ -1,6 +1,8 @@
 import unittest, pickle
 import numpy as np
 from tinygrad import Tensor, TinyJit
+from tinygrad.engine.schedule import create_schedule
+from tinygrad.ops import BinaryOps
 
 class TestPickle(unittest.TestCase):
   def test_pickle_realized_tensor(self):
@@ -30,6 +32,14 @@ class TestPickle(unittest.TestCase):
     print("post jit")
     out = add_fxn(x, y)
     np.testing.assert_equal(out.numpy(), 3)
+
+  def test_pickle_schedule(self):
+    a = Tensor([1,2])
+    out = a + 2
+    sched = create_schedule([out.lazydata])
+    pk = pickle.dumps(sched)
+    sched_pk = pickle.loads(pk)
+    assert sched_pk[-1].ast[0].op is BinaryOps.ADD
 
 if __name__ == '__main__':
   unittest.main()
