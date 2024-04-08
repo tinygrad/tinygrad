@@ -521,13 +521,11 @@ class Tensor:
       idx: Dict[int,Tensor] = {(dim := calc_dim(td)):(tensor<0).where(ret.shape[dim],0) + tensor for td,tensor in zip(type_dim[Tensor], tensor_index)}
 
       masks, first_dim, last_dim, max_idx_dim = [], min(idx.keys()), max(idx.keys()), max(i.ndim for i in idx.values())
-      extended_shapes = [(1,)*(max_idx_dim-t.ndim) + t.shape for t in idx.values()]
-      big_shape = tuple(max(sh) for sh in zip(*extended_shapes))
-      pre_reduce_shape = ret.shape[:first_dim] + big_shape + ret.shape[first_dim:]
+      pre_reduce_shape = ret.shape[:first_dim] + broadcast_shape(*(t.shape for t in idx.values())) + ret.shape[first_dim:]
 
       # create masks
       for dim, i in idx.items():
-        i = i.reshape((1,)*(first_dim+max_idx_dim-i.ndim) + i.shape + (1,)*(ret.ndim - first_dim)).expand(pre_reduce_shape)
+        i = i.reshape(i.shape + (1,)*(ret.ndim - first_dim)).expand(pre_reduce_shape)
         a = Tensor.arange(ret.shape[dim], device=self.device, requires_grad=False).reshape((ret.shape[dim],) + (1,)*(ret.ndim - dim - 1))
         masks.append(i == a)
 
