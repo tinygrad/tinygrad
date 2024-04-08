@@ -63,28 +63,22 @@ class PatternMatcher:
     # uop is required, arg is optional
     for p,fxn in self.patterns: self.pdict[(p.get("uop"), p.get("arg", None))].append((p, fxn))
 
-  def rewrite(self, uop:UOp, ux:List[UOp]=[]) -> Optional[UOp]:
+  def rewrite(self, uop:UOp) -> Optional[UOp]:
     for p,fxn in itertools.chain(self.pdict[(uop.uop, uop.arg)], self.pdict[(uop.uop, None)]):
       store: Dict[str, UOp] = {}
-      if _match(uop, p, store):
-        ux.extend(store.values())
-        return fxn(**store)
+      if _match(uop, p, store): return fxn(**store)
     return None
 
   def rewrite_graph(self, uops: UOpGraph):
     replace: Dict[UOp, UOp] = {}
     seen: Set[UOp] = set()
-    remove: Set[UOp] = set()
-    for i, u in enumerate(uops):
+    for u in uops:
       if u in seen: continue
       seen.add(u)
       for o,n in replace.items():
         if o in u.vin and u is not n:
           u.vin = tuple(n if x == o else x for x in u.vin)
-      ux: List[UOp] = []
-      if rew := self.rewrite(u, ux):
-        replace[u] = rew
-        if i > 0 and (x := uops.uops[i-1]) in ux and x != u: remove.add(x)
+      if rew := self.rewrite(u): replace[u] = rew
 
     for o,n in replace.items():
       queue = [n]
@@ -95,7 +89,7 @@ class PatternMatcher:
           for vv in uops.uops + queue: vv.vin = tuple(new if x is q else x for x in vv.vin)
         else: queue.extend([qq for qq in queue[-1].vin if qq not in uops.uops])
       if not any([o in u.vin for u in uops]): uops.uops.remove(o)
-    for x in remove: uops.uops.remove(x)
+    uops.remove_childless(set(x for x in uops if x.uop in {UOps.DEFINE_GLOBAL, UOps.STORE}))
 
 constant_folder = PatternMatcher([
   # const rules
