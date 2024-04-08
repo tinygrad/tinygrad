@@ -226,7 +226,8 @@ def iterate(coco, bs=8):
   while(i<800):
     i_sub = 0
     rem =0
-    X, targets = [], []
+    # X, targets = [], []
+    X, target_boxes, target_labels = [], [], []
     while(i_sub<bs):
       # print(i_sub)
       x_orig,t = coco.__getitem__(i+i_sub+rem)
@@ -266,11 +267,19 @@ def iterate(coco, bs=8):
         # bbox = resize_boxes(bbox, x_orig.size, SIZE)
 
         # print('ITERATE_POST_RESIZE', bbox.shape)
-        t['boxes'] = bbox#.realize()
+        t['boxes'] = bbox.realize()
+        # max_pad = 120087
+        # max_pad = 2000
+        # n = t['boxes'].shape[0]
+        # t['boxes'] = t['boxes'].pad((((0,max_pad-n), None)),0)
+        # t['labels'] = t['labels'].reshape(-1,1).pad((((0,max_pad-n), None)),-1).reshape(-1)
         # print('ITERATE', xNew.shape, t['boxes'].shape, t['labels'].shape)
-        targets.append(t)
+        target_boxes.append(t['boxes'])
+        target_labels.append(t['labels'])
+        # targets.append(t)
         i_sub+=1
     # yield Tensor(X), targets
-    yield Tensor.stack(X), targets
+    yield Tensor.stack(X), target_boxes, target_labels
+    # yield Tensor.stack(X), targets
     i= i+bs+rem
 
