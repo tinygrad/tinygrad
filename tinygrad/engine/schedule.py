@@ -1,7 +1,7 @@
 import sys
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Tuple, List, Dict, Optional, Set, DefaultDict
+from typing import Deque, Tuple, List, Dict, Optional, Set, DefaultDict
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, LazyOp, ReduceOps, ConstBuffer, MemBuffer, BinaryOps, UnaryOps
 from tinygrad.features.graph import log_lazybuffer, realized_lazybuffer
 from tinygrad.helpers import GRAPH, DEBUG, GlobalCounters, prod, dedup, all_int
@@ -196,9 +196,8 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
       reduce_for_op[next(iter(realized_children.keys()))] = r
 
   # preschedule all buffers in realizes
-  all_outputs = sorted([x for x in realizes if x not in seen and x.realized is None and x.op is not LoadOps.CONST], key=lambda x: x.key)
-  prescheduled = {x:_schedule_one(x, realizes, reduce_for_op) for x in all_outputs}
-  assign_targets = {x.srcs[1]:x for x in all_outputs if x.op is LoadOps.ASSIGN}
+  prescheduled = {x:_schedule_one(x, realizes, reduce_for_op) for x in realizes if x not in seen and x.realized is None and x.op is not LoadOps.CONST}
+  assign_targets = {x.srcs[1]:x for x in realizes if x.op is LoadOps.ASSIGN and x not in seen and x.realized is None}
 
   # breadth first ordering
   graph: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
@@ -212,20 +211,24 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
       if x in prescheduled: in_degree[key] += 1
     for out in si.outputs: del out.srcs  # can only schedule once
 
-  queue = deque(si for key, si in prescheduled.items() if in_degree[key] == 0)
-  schedule: List[ScheduleItem] = []
+  queue: Deque[Tuple[int, _LBScheduleItem]] = deque((0, si) for key, si in prescheduled.items() if in_degree[key] == 0)
+  schedule_tree: DefaultDict[int, List[ScheduleItem]] = defaultdict(list)
   kernel_number = GlobalCounters.kernel_count
   while queue:
-    ps = queue.popleft()
+    depth, ps = queue.popleft()
     for buf in ps.outputs: seen.add(buf)
     if GRAPH:
       kernel_number += 1
       for out in ps.outputs: realized_lazybuffer(out, kernel_number)
-    schedule.append(ScheduleItem(ps.ast, tuple(x.buffer for x in ps.outputs if x.size != 0),
+    schedule_tree[depth].append(ScheduleItem(ps.ast, tuple(x.buffer for x in ps.outputs if x.size != 0),
                                  tuple(x.buffer for x in ps.inputs if x.size != 0), ps.var_vals))
     for x in graph[ps.outputs[0]]:
       in_degree[x] -= 1
-      if in_degree[x] == 0: queue.append(prescheduled[x])
+      if in_degree[x] == 0: queue.append((depth+1, prescheduled[x]))
+
+  # deterministic order
+  schedule: List[ScheduleItem] = []
+  for items in schedule_tree.values(): schedule.extend(items if len(items) == 1 else sorted(items, key=lambda x: x.outputs[0].__hash__()))
 
   # confirm everything was scheduled correctly
   if not all(degree == 0 for degree in in_degree.values()) or len(prescheduled) != len(schedule):
