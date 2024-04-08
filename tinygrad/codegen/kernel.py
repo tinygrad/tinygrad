@@ -514,20 +514,14 @@ class Kernel:
       # are we grouping? (requires local shape support)
       if not self.float4_axis(0) and self.first_reduce < len(self.full_unupcasted_shape) and prod(self.sts[0].shape[:self.first_reduce]) <= 8192:  # noqa: E501
         # TODO: use 1024 if it's allowed in a smarter way
-        def default_(x, d): return d if x is None else x
         desired_group = 256 if prod(self.sts[0].shape[:self.first_reduce]) <= 512 else 32
-        for axis in range(len(self.full_unupcasted_shape) - 1, self.first_reduce + self.group_for_reduces - 1, -1):
-          for sz in [256, 128, 64, 32, 16, 8, 4, 2]:
+        for sz in [256, 128, 64, 32, 16, 8, 4]:
+          for axis in range(len(self.full_unupcasted_shape) - 1, self.first_reduce + self.group_for_reduces - 1, -1):
             if sz > desired_group or self.full_shape[axis] % sz != 0: continue
-            if prod(self.full_unupcasted_shape[self.first_reduce+self.group_for_reduces:]) // sz < sz * 4: continue
-            if all(default_(st.real_strides(ignore_valid=True)[axis], 256) <= 4 for st in self.sts):
-              try: # may fail due to excessive smem usage
-                old_colored_shape = self.colored_shape()
-                self.apply_opt(Opt(OptOps.GROUP, axis-(self.first_reduce+self.group_for_reduces), sz))
-                print('grouped', old_colored_shape, '->', self.colored_shape())
-                desired_group = 1
-                break
-              except KernelOptError: pass
+            try: # may fail due to excessive smem usage
+              self.apply_opt(Opt(OptOps.GROUP, axis-(self.first_reduce+self.group_for_reduces), sz))
+              desired_group //= sz
+            except KernelOptError: pass
 
       # are we upcasting in mid reduce? (only for images)
       if self.bufs[0].dtype.name.startswith('image') and not self.float4_axis(0) and self.group_for_reduces and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1:  # noqa: E501
