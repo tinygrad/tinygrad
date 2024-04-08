@@ -516,20 +516,16 @@ class Kernel:
         # TODO: use 1024 if it's allowed in a smarter way
         def default_(x, d): return d if x is None else x
         desired_group = 256 if prod(self.sts[0].shape[:self.first_reduce]) <= 512 else 32
-        grouped = 1
-        num_reduces = len(self.full_unupcasted_shape) - self.first_reduce - self.group_for_reduces
-        for reducei in range(num_reduces-1, -1, -1):
+        for axis in range(len(self.full_unupcasted_shape) - 1, self.first_reduce + self.group_for_reduces - 1, -1):
           for sz in [256, 128, 64, 32, 16, 8, 4, 2]:
-            if sz > desired_group or sz < 16 and grouped == 1 and False: continue
-            if prod(self.full_unupcasted_shape[self.first_reduce+self.group_for_reduces:])//sz < grouped * sz * 4: continue
-            if self.full_shape[self.first_reduce+self.group_for_reduces+reducei] % sz == 0 and \
-              (grouped >= 8 or all(default_(st.real_strides(ignore_valid=True)[self.first_reduce+self.group_for_reduces+reducei], 256) <= 4 * grouped for st in self.sts)):
+            if sz > desired_group or self.full_shape[axis] % sz != 0: continue
+            if prod(self.full_unupcasted_shape[self.first_reduce+self.group_for_reduces:]) // sz < sz * 4: continue
+            if all(default_(st.real_strides(ignore_valid=True)[axis], 256) <= 4 for st in self.sts):
               try: # may fail due to excessive smem usage
                 old_colored_shape = self.colored_shape()
-                self.apply_opt(Opt(OptOps.GROUP, reducei, sz))
+                self.apply_opt(Opt(OptOps.GROUP, axis-(self.first_reduce+self.group_for_reduces), sz))
                 print('grouped', old_colored_shape, '->', self.colored_shape())
-                desired_group //= sz
-                grouped *= sz
+                desired_group = 1
                 break
               except KernelOptError: pass
 
