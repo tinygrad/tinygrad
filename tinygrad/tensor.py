@@ -388,34 +388,6 @@ class Tensor:
 
   # ***** movement hlops *****
 
-  # HACK hehe
-  '''
-  def _bigbroadcasted(self, *y:Tuple[Union[Tensor, ConstType],...], reverse:bool=False, match_dtype:bool=True) -> Tuple[Tensor, ...]:
-    def to_tensor(s: ConstType) -> Tensor:
-      if 0 in self.shape: return self.full_like(s)
-      if isinstance(self.dtype, ImageDType) or dtypes.is_float(self.dtype) or (dtypes.is_int(self.dtype) and isinstance(s, int)): s_dtype = self.dtype
-      else: s_dtype = dtypes.from_py(s)
-      return Tensor(s, self.device, s_dtype, requires_grad=False)
-
-    assert not (reverse and len(y) > 1), "reverse only works with single item broadcast"
-
-    tensors = (self,) + tuple(to_tensor(val) if not isinstance(val, Tensor) else val for val in y)
-    max_ndim, shapes, tensor_dtypes = max(t.ndim for t in tensors), tuple(t.shape for t in tensors), tuple(t.dtype for t in tensors)
-
-    if match_dtype:
-      output_dtype = least_upper_dtype(*tensor_dtypes)
-      tensors = tuple(t.cast(output_dtype) for t in tensors)
-    if reverse: tensors = tensors[::-1]
-
-    # left pad shape with 1s
-    tensors = tuple(t.reshape((1,) * (max_ndim - t.ndim) + t.shape) for t in tensors)
-
-    broadcasted_shape = tuple(0 if any(i==0 for i in sh) else max(sh) for sh in zip(*[t.shape for t in tensors]))
-    try: return tuple(t.expand(broadcasted_shape) for t in tensors)
-    except AssertionError as exc: raise TypeError(f"unable to broadcast tensors with {shapes=}") from exc
-  '''
-
-
   # Supported Indexing Implementations:
   #   1. Int indexing (no copy)
   #     - for all dims where there's int, shrink -> reshape
@@ -520,8 +492,8 @@ class Tensor:
       # calc_dim to get dim and use that to normalize the negative tensor indices
       idx: Dict[int,Tensor] = {(dim := calc_dim(td)):(tensor<0).where(ret.shape[dim],0) + tensor for td,tensor in zip(type_dim[Tensor], tensor_index)}
 
-      masks, first_dim, last_dim, max_idx_dim = [], min(idx.keys()), max(idx.keys()), max(i.ndim for i in idx.values())
-      pre_reduce_shape = ret.shape[:first_dim] + broadcast_shape(*(t.shape for t in idx.values())) + ret.shape[first_dim:]
+      masks, first_dim, last_dim = [], min(idx.keys()), max(idx.keys())
+      pre_reduce_shape = ret.shape[:first_dim] + (big_shape := broadcast_shape(*(t.shape for t in idx.values()))) + ret.shape[first_dim:]
 
       # create masks
       for dim, i in idx.items():
@@ -535,13 +507,13 @@ class Tensor:
       except ValueError as exc: raise IndexError("cannot broadcast indices") from exc
 
       # inject 1's for the extra dims added in create masks
-      sh = ret.shape[:first_dim] + (1,) * max_idx_dim + ret.shape[first_dim:]
+      sh = ret.shape[:first_dim] + (1,) * len(big_shape) + ret.shape[first_dim:]
       # sum reduce the extra dims introduced in create masks
-      ret = (ret.reshape(sh) * mask).sum(tuple(i + max_idx_dim for i in idx.keys()))
+      ret = (ret.reshape(sh) * mask).sum(tuple(i + len(big_shape) for i in idx.keys()))
 
       # special permute case
       if first_dim != 0 and len(idx) != 1 and tuple(idx.keys()) != tuple(range(first_dim, last_dim+1)):
-        ret = ret.permute(*range(first_dim, first_dim+max_idx_dim), *range(0, first_dim), *range(first_dim+max_idx_dim, ret.ndim))
+        ret = ret.permute(*range(first_dim, first_dim+len(big_shape)), *range(0, first_dim), *range(first_dim+len(big_shape), ret.ndim))
     return ret
 
   def __setitem__(self, indices, v:Tensor):
@@ -559,14 +531,14 @@ class Tensor:
     return self.pad(padding, value=value).shrink(tuple((l + pl, r + pl) for (l,r),(pl,_) in zip(arg_, padding)))
 
   def gather(self:Tensor, idx:Tensor, dim:int) -> Tensor:
-    assert idx.ndim == self.ndim, f"{idx.ndim=} must equal {self.ndim=}"
-    assert all(s >= i for s,i in zip(self.shape, idx.shape)), f"{idx.shape=} cannot be larger than {self.shape=}"
-    if dim < 0: dim += self.ndim
-    idx = idx.to(self.device).unsqueeze(-1)
-    idx_mask = idx == Tensor.arange(self.shape[dim], requires_grad=False, device=self.device)
-    permarg = (*range(dim), *range(dim + 1, self.ndim), dim)
-    shrinkarg = tuple((0,idx.shape[i]) for i in permarg[:-1]) + ((0,self.shape[dim]),)
-    return (idx_mask * self.permute(permarg).shrink(shrinkarg).unsqueeze(dim)).sum(-1)
+    assert idx.ndim == self.ndim, "self.ndim must equal idx.ndim"
+    assert all(s >= i for s,i in zip(self.shape, idx.shape)), "all dim of idx.shape must be smaller than self.shape"
+    dim = self._resolve_dim(dim)
+    idx = idx.to(self.device).transpose(ax1=dim, ax2=0).unsqueeze(-1)
+    permarg = list(range(self.ndim))
+    permarg = permarg[1:dim] + [permarg[0]] + permarg[dim+1:] + [permarg[dim]] if dim != 0 else permarg[1:] + [permarg[0]]
+    return ((idx == Tensor.arange(self.shape[dim], requires_grad=False, device=self.device)) * self.permute(*permarg).shrink(
+      tuple([*[(0,sh) for sh in idx.shape[1:-1]], (0,self.shape[dim])])).unsqueeze(0)).sum(-1).transpose(ax1=0, ax2=dim)
 
   def cat(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
     dim = self._resolve_dim(dim)

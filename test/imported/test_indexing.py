@@ -1522,10 +1522,8 @@ class TestNumpy(unittest.TestCase):
     self.assertIsNot(a, a[:])
 
   def test_broaderrors_indexing(self):
-    ...
-    # TODO enable these
-    # a = Tensor.zeros(5, 5)
-    # self.assertRaises(IndexError, a.__getitem__, ([0, 1], [0, 1, 2]))
+    a = Tensor.zeros(5, 5)
+    self.assertRaises(IndexError, a.__getitem__, ([0, 1], [0, 1, 2]))
     # TODO setitem
     # self.assertRaises(IndexError, a.__setitem__, ([0, 1], [0, 1, 2]), 0)
 
