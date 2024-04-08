@@ -201,6 +201,64 @@ def generate_anchors(input_size, grid_sizes, scales, aspect_ratios):
   return anchors
 
 # import torch
+class Matcher(object):
+
+  BELOW_LOW_THRESHOLD = -1
+  BETWEEN_THRESHOLDS = -2
+
+  __annotations__ = {'BELOW_LOW_THRESHOLD': int, 'BETWEEN_THRESHOLDS': int }
+
+  def __init__(self, high_threshold, low_threshold, allow_low_quality_matches=False):
+    # type: (float, float, bool) -> None
+    self.BELOW_LOW_THRESHOLD = -1
+    self.BETWEEN_THRESHOLDS = -2
+    assert low_threshold <= high_threshold
+    self.high_threshold = high_threshold
+    self.low_threshold = low_threshold
+    self.allow_low_quality_matches = allow_low_quality_matches
+
+  def __call__(self, match_quality_matrix):   
+    # print('MATCHER ARG SIZE:', match_quality_matrix.shape)
+    if match_quality_matrix.numel() == 0:
+      # empty targets or proposals not supported during training
+      if match_quality_matrix.shape[0] == 0:
+        raise ValueError(
+            "No ground-truth boxes available for one of the images "
+            "during training")
+      else:
+        raise ValueError(
+            "No proposal boxes available for one of the images "
+            "during training")
+
+    # match_quality_matrix is M (gt) x N (predicted)
+    # Max over gt elements (dim 0) to find best gt candidate for each prediction
+    # matched_vals, matches = match_quality_matrix.max(dim=0)
+    matched_vals = match_quality_matrix.max(axis=0)
+    matches = match_quality_matrix.argmax(axis=0)
+    if self.allow_low_quality_matches:
+      # all_matches = matches.clone()
+      all_matches = Tensor(matches.numpy())
+    else:
+      all_matches = None
+
+    # Assign candidate matches with low quality to negative (unassigned) values
+    below_low_threshold = matched_vals < self.low_threshold
+    between_thresholds = (matched_vals >= self.low_threshold) * (
+        matched_vals < self.high_threshold
+    )
+
+    matches = Tensor.where(below_low_threshold, self.BELOW_LOW_THRESHOLD, matches)
+    matches = Tensor.where(between_thresholds, self.BETWEEN_THRESHOLDS, matches)
+
+    if self.allow_low_quality_matches:
+      assert all_matches is not None
+      highest_quality_foreach_gt = match_quality_matrix.max(axis=1)
+      gt_quality = match_quality_matrix == highest_quality_foreach_gt.unsqueeze(1)
+      gt_quality = gt_quality.sum(0)
+      # print('TENs_MATCHER', gt_quality.shape, all_matches.shape, matches.shape)
+      matches = Tensor.where(gt_quality, all_matches, matches)
+    return matches
+
 # class Matcher(object):
 #   """
 #   This class assigns to each predicted "element" (e.g., a box) a ground-truth
@@ -246,7 +304,12 @@ def generate_anchors(input_size, grid_sizes, scales, aspect_ratios):
 #     self.low_threshold = low_threshold
 #     self.allow_low_quality_matches = allow_low_quality_matches
 
-#   def __call__(self, match_quality_matrix_tens):
+#   def __call__(self, match_quality_matrix):
+#     # print('MATCHER ARG SIZE:', match_quality_matrix.shape)
+#     # with torch.no_grad():
+#     # match_quality_matrix_np = torch.as_tensor(match_quality_matrix.numpy())
+#     match_quality_matrix_np = match_quality_matrix.numpy()
+
 #     """
 #     Args:
 #         match_quality_matrix (Tensor[float]): an MxN tensor, containing the
@@ -257,8 +320,6 @@ def generate_anchors(input_size, grid_sizes, scales, aspect_ratios):
 #         [0, M - 1] or a negative value indicating that prediction i could not
 #         be matched.
 #     """
-#     match_quality_matrix = torch.as_tensor(match_quality_matrix_tens.numpy())
-#     # print('MATCHER ARG SIZE:', match_quality_matrix.shape)
 #     if match_quality_matrix.numel() == 0:
 #       # empty targets or proposals not supported during training
 #       if match_quality_matrix.shape[0] == 0:
@@ -268,34 +329,33 @@ def generate_anchors(input_size, grid_sizes, scales, aspect_ratios):
 #       else:
 #         raise ValueError(
 #             "No proposal boxes available for one of the images "
-#             "during training")
+#               "during training")
 
 #     # match_quality_matrix is M (gt) x N (predicted)
 #     # Max over gt elements (dim 0) to find best gt candidate for each prediction
-#     matched_vals, matches = match_quality_matrix.max(dim=0)
+#     matched_vals = match_quality_matrix_np.max(axis=0)
+#     matches = match_quality_matrix_np.argmax(axis=0)
 #     if self.allow_low_quality_matches:
-#         all_matches = matches.clone()
+#       # all_matches = matches.clone()
+#       all_matches = np.copy(matches)
 #     else:
-#         all_matches = None
+#       all_matches = None
 
 #     # Assign candidate matches with low quality to negative (unassigned) values
 #     below_low_threshold = matched_vals < self.low_threshold
 #     between_thresholds = (matched_vals >= self.low_threshold) & (
 #         matched_vals < self.high_threshold
 #     )
-#     # print('MATCHER matches pre index', matches.shape)
-#     # print(matches)
 #     matches[below_low_threshold] = self.BELOW_LOW_THRESHOLD
 #     matches[between_thresholds] = self.BETWEEN_THRESHOLDS
-#     # print('MATCHER matches POST index', matches.shape)
-#     # print(matches)
-#     # import sys
-#     # sys.exit()
-#     if self.allow_low_quality_matches:
-#       assert all_matches is not None
-#       self.set_low_quality_matches_(matches, all_matches, match_quality_matrix)
 
-#     return Tensor(matches.numpy())
+#     if self.allow_low_quality_matches:
+#       # assert all_matches is not None
+#       matches = self.set_low_quality_matches_(matches, all_matches, match_quality_matrix_np)
+#     matches_tens = Tensor(matches, requires_grad=False)#.realize()
+#     del all_matches, matches, match_quality_matrix_np, below_low_threshold, between_thresholds
+#     # print('Matcher:', matches_tens.shape)
+#     return matches_tens
 
 #   def set_low_quality_matches_(self, matches, all_matches, match_quality_matrix):
 #     """
@@ -306,11 +366,14 @@ def generate_anchors(input_size, grid_sizes, scales, aspect_ratios):
 #     quality value.
 #     """
 #     # For each gt, find the prediction with which it has highest quality
-#     highest_quality_foreach_gt, _ = match_quality_matrix.max(dim=1)
+#     highest_quality_foreach_gt = match_quality_matrix.max(axis=1)
+#     temp = match_quality_matrix.argmax(axis=1)
 #     # Find highest quality match available, even if it is low, including ties
-#     gt_pred_pairs_of_highest_quality = torch.where(
+    
+#     gt_pred_pairs_of_highest_quality = np.nonzero(
 #         match_quality_matrix == highest_quality_foreach_gt[:, None]
 #     )
+#     temp_quality = match_quality_matrix == highest_quality_foreach_gt[:, None]
 #     # Example gt_pred_pairs_of_highest_quality:
 #     #   tensor([[    0, 39796],
 #     #           [    1, 32055],
@@ -326,138 +389,17 @@ def generate_anchors(input_size, grid_sizes, scales, aspect_ratios):
 #     # Note how gt items 1, 2, 3, and 5 each have two ties
 
 #     pred_inds_to_update = gt_pred_pairs_of_highest_quality[1]
+#     # print('pred_inds_to_update', pred_inds_to_update.shape)
+#     # print('TEMP', temp.shape)
+#     # print('TEMP_QUAL_SUM', temp_quality.sum(0).shape)
+#     # print(temp_quality.shape)
+#     # print(highest_quality_foreach_gt.shape)
+#     # print('MATCHES_SHAPE', matches.shape, match_quality_matrix.shape)
 #     matches[pred_inds_to_update] = all_matches[pred_inds_to_update]
-class Matcher(object):
-  """
-  This class assigns to each predicted "element" (e.g., a box) a ground-truth
-  element. Each predicted element will have exactly zero or one matches; each
-  ground-truth element may be assigned to zero or more predicted elements.
+#     # del gt_pred_pairs_of_highest_quality, highest_quality_foreach_gt,all_matches
+#     print('TENs_MATCHER', pred_inds_to_update.shape, all_matches.shape, matches.shape)
 
-  Matching is based on the MxN match_quality_matrix, that characterizes how well
-  each (ground-truth, predicted)-pair match. For example, if the elements are
-  boxes, the matrix may contain box IoU overlap values.
-
-  The matcher returns a tensor of size N containing the index of the ground-truth
-  element m that matches to prediction n. If there is no match, a negative value
-  is returned.
-  """
-
-  BELOW_LOW_THRESHOLD = -1
-  BETWEEN_THRESHOLDS = -2
-
-  __annotations__ = {
-      'BELOW_LOW_THRESHOLD': int,
-      'BETWEEN_THRESHOLDS': int,
-  }
-
-  def __init__(self, high_threshold, low_threshold, allow_low_quality_matches=False):
-    # type: (float, float, bool) -> None
-    """
-    Args:
-        high_threshold (float): quality values greater than or equal to
-            this value are candidate matches.
-        low_threshold (float): a lower quality threshold used to stratify
-            matches into three levels:
-            1) matches >= high_threshold
-            2) BETWEEN_THRESHOLDS matches in [low_threshold, high_threshold)
-            3) BELOW_LOW_THRESHOLD matches in [0, low_threshold)
-        allow_low_quality_matches (bool): if True, produce additional matches
-            for predictions that have only low-quality match candidates. See
-            set_low_quality_matches_ for more details.
-    """
-    self.BELOW_LOW_THRESHOLD = -1
-    self.BETWEEN_THRESHOLDS = -2
-    assert low_threshold <= high_threshold
-    self.high_threshold = high_threshold
-    self.low_threshold = low_threshold
-    self.allow_low_quality_matches = allow_low_quality_matches
-
-  def __call__(self, match_quality_matrix):
-    # print('MATCHER ARG SIZE:', match_quality_matrix.shape)
-    # with torch.no_grad():
-    # match_quality_matrix_np = torch.as_tensor(match_quality_matrix.numpy())
-    match_quality_matrix_np = match_quality_matrix.numpy()
-
-    """
-    Args:
-        match_quality_matrix (Tensor[float]): an MxN tensor, containing the
-        pairwise quality between M ground-truth elements and N predicted elements.
-
-    Returns:
-        matches (Tensor[int64]): an N tensor where N[i] is a matched gt in
-        [0, M - 1] or a negative value indicating that prediction i could not
-        be matched.
-    """
-    if match_quality_matrix.numel() == 0:
-      # empty targets or proposals not supported during training
-      if match_quality_matrix.shape[0] == 0:
-        raise ValueError(
-            "No ground-truth boxes available for one of the images "
-            "during training")
-      else:
-        raise ValueError(
-            "No proposal boxes available for one of the images "
-              "during training")
-
-    # match_quality_matrix is M (gt) x N (predicted)
-    # Max over gt elements (dim 0) to find best gt candidate for each prediction
-    matched_vals = match_quality_matrix_np.max(axis=0)
-    matches = match_quality_matrix_np.argmax(axis=0)
-    if self.allow_low_quality_matches:
-      # all_matches = matches.clone()
-      all_matches = np.copy(matches)
-    else:
-      all_matches = None
-
-    # Assign candidate matches with low quality to negative (unassigned) values
-    below_low_threshold = matched_vals < self.low_threshold
-    between_thresholds = (matched_vals >= self.low_threshold) & (
-        matched_vals < self.high_threshold
-    )
-    matches[below_low_threshold] = self.BELOW_LOW_THRESHOLD
-    matches[between_thresholds] = self.BETWEEN_THRESHOLDS
-
-    if self.allow_low_quality_matches:
-      # assert all_matches is not None
-      matches = self.set_low_quality_matches_(matches, all_matches, match_quality_matrix_np)
-    matches_tens = Tensor(matches, requires_grad=False)#.realize()
-    del all_matches, matches, match_quality_matrix_np, below_low_threshold, between_thresholds
-    # print('Matcher:', matches_tens.shape)
-    return matches_tens
-
-  def set_low_quality_matches_(self, matches, all_matches, match_quality_matrix):
-    """
-    Produce additional matches for predictions that have only low-quality matches.
-    Specifically, for each ground-truth find the set of predictions that have
-    maximum overlap with it (including ties); for each prediction in that set, if
-    it is unmatched, then match it to the ground-truth with which it has the highest
-    quality value.
-    """
-    # For each gt, find the prediction with which it has highest quality
-    highest_quality_foreach_gt = match_quality_matrix.max(axis=1)
-    # Find highest quality match available, even if it is low, including ties
-    
-    gt_pred_pairs_of_highest_quality = np.nonzero(
-        match_quality_matrix == highest_quality_foreach_gt[:, None]
-    )
-    # Example gt_pred_pairs_of_highest_quality:
-    #   tensor([[    0, 39796],
-    #           [    1, 32055],
-    #           [    1, 32070],
-    #           [    2, 39190],
-    #           [    2, 40255],
-    #           [    3, 40390],
-    #           [    3, 41455],
-    #           [    4, 45470],
-    #           [    5, 45325],
-    #           [    5, 46390]])
-    # Each row is a (gt index, prediction index)
-    # Note how gt items 1, 2, 3, and 5 each have two ties
-
-    pred_inds_to_update = gt_pred_pairs_of_highest_quality[1]
-    matches[pred_inds_to_update] = all_matches[pred_inds_to_update]
-    # del gt_pred_pairs_of_highest_quality, highest_quality_foreach_gt,all_matches
-    return matches
+#     return matches
 class RetinaNet:
   def __init__(self, backbone: ResNet, num_classes=264, num_anchors=9, scales=None, aspect_ratios=None,
                fg_iou_thresh=0.5, bg_iou_thresh=0.4):

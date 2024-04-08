@@ -459,7 +459,7 @@ def train_retinanet():
   #     x.requires_grad = False
   #   # print(k, x.requires_grad)
   # @TinyJit
-  def train_step(X, Y_b, Y_l):
+  def train_step(X, Y_b, Y_l, anchors):
     Tensor.training = True
     
 
@@ -485,7 +485,7 @@ def train_retinanet():
 
     # loss = Tensor(69)
     # loss_reg, loss_class = model.loss(r, c, Y, anchor_generator(X, b))
-    loss_reg, loss_class = model.loss(r, c, Y_b, Y_l, anchor_generator(X, b))
+    loss_reg, loss_class = model.loss(r, c, Y_b, Y_l, anchors)
 
     print(colored(f'loss_reg {loss_reg.numpy()}', 'green'))
     print(colored(f'loss_class {loss_class.numpy()}', 'green'))
@@ -525,6 +525,10 @@ def train_retinanet():
       # print('X_REQ_GRADDD', X.requires_grad)
       # train_step.reset()
       # if cnt<5: sigmoid_focal_loss.reset()
+      if(cnt==0 and epoch==0):
+        b,_,_ = mdlrun(X)
+        ANCHORS = anchor_generator(X, b)
+        ANCHORS = [a.realize() for a in ANCHORS]
       st = time.time()
       # print('IMAGE DATA', X)
       # for tt in Y:
@@ -542,7 +546,7 @@ def train_retinanet():
       # optimizer.zero_grad()
       # a = anchor_generator(X, b)
       # loss = train_step(X, Y)
-      loss = train_step(X, Y_boxes, Y_labels)
+      loss = train_step(X, Y_boxes, Y_labels, ANCHORS)
       # loss = Tensor(44)
       
       # print(colored(f'JIT STATE {train_step.cnt} {train_step.jit_cache} {train_step.input_replace}', 'red'))
