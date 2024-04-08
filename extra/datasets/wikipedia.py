@@ -308,7 +308,7 @@ def instance_to_features(instance, tokenizer):
   }
 
 def process_part(part):
-  tokenizer = Tokenizer(Path(__file__).parent / "wiki" / "vocab.txt")
+  tokenizer = Tokenizer(getenv("BASEDIR", Path(__file__).parent / "wiki" / "vocab.txt"))
   os.makedirs(BASEDIR / "train" / str(part), exist_ok=True)
   for i, feature_batch in enumerate(process_iterate(tokenizer, val=False, part=part)):
     with open(BASEDIR / f"train/{str(part)}/{part}_{i}.pkl", "wb") as f:
@@ -345,7 +345,7 @@ def get_val_files(): return sorted(list((BASEDIR / "eval/").glob("*.pkl")))
 def get_train_files(): return sorted(list((BASEDIR / "train/").glob("*/*.pkl")))
 
 if __name__ == "__main__":
-  tokenizer = Tokenizer(Path(__file__).parent / "wiki" / "vocab.txt")
+  tokenizer = Tokenizer(getenv("BASEDIR", Path(__file__).parent / "wiki") / "vocab.txt")
 
   assert len(sys.argv) > 1, "Usage: python wikipedia.py pre-eval|pre-train [part]|all"
 
@@ -368,5 +368,3 @@ if __name__ == "__main__":
       for i, feature_batch in tqdm(enumerate(process_iterate(tokenizer, val=False, part=part))):
         with open(BASEDIR / f"train/{str(part)}/{part}_{i}.pkl", "wb") as f:
           pickle.dump(feature_batch, f)
-
-# dataloader rework

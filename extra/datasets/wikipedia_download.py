@@ -49,4 +49,4 @@ def download_wikipedia(path:str):
         print(f"Checksums match.")
 
 if __name__ == "__main__": 
-  download_wikipedia(os.path.join(Path(__file__).parent / "wiki"))
+  download_wikipedia(getenv("BASEDIR", os.path.join(Path(__file__).parent / "wiki")))

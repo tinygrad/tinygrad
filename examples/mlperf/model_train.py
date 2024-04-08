@@ -275,7 +275,7 @@ def train_bert():
 
   Tensor.manual_seed(seed)  # seed for weight initialization
 
-  config_path = getenv("BERT_CONFIG_PATH", Path(__file__).parent.parents[1] / "extra" / "datasets" / "wiki" / "bert_config.json")
+  config_path = getenv("BASEDIR", Path(__file__).parent.parents[1] / "extra" / "datasets" / "wiki") / "bert_config.json"
   model = get_mlperf_bert_model(config_path)
 
   # shard weights and initialize in order
@@ -283,7 +283,7 @@ def train_bert():
     x.realize().to_(GPUS)
   parameters = get_parameters(model)
 
-  #assert 800 % EVAL_BS == 0, "Evaluation batch size must divide 800 without remainder"
+  assert 800 % EVAL_BS == 0, "Evaluation batch size must divide 800 without remainder"
 
   # ** Log hparams **
   for key, value in config.items():
@@ -354,10 +354,10 @@ def train_bert():
     data: dict[str, Tensor] = next(it)
     for key in data.keys():
         if not eval:
-            data[key].shard_(GPUS, axis=0) if len(GPUS) > 1 else None
+            data[key].shard_(GPUS, axis=0)
         else:
             eval_gpus = GPUS[:max(2, min(len(GPUS), 8) // 2 * 2)]
-            data[key].shard_(eval_gpus, axis=0) if len(eval_gpus) > 1 else None
+            data[key].shard_(eval_gpus, axis=0)
     return data
   
   eval_it = iter(batch_load_bert(EVAL_BS, val=True))
