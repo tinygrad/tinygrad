@@ -64,8 +64,8 @@ class LazyBuffer:
   def is_realized(self) -> bool: return self.base.realized is not None
 
   def assign(self, x:LazyBuffer) -> LazyBuffer:
-    assert (self.base is self) or (self.st.contiguous and self.size == self.base.size), f"assign target must be contiguous {self.st}"
-    return LazyBuffer.loadop(LoadOps.ASSIGN, self.shape, self.dtype, self.device, src=(x, self.base))
+    assert x.size == self.size, f"assign target must have same size {self.size=} != {x.size=}"
+    return LazyBuffer.loadop(LoadOps.ASSIGN, self.shape, self.dtype, self.device, arg=() if self.st.contiguous else (self.st,), src=(x, self.base))
 
   def contiguous(self):
     if not self.st.contiguous or self.size != self.base.size or self.is_unrealized_const():
