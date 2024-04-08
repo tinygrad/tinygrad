@@ -197,8 +197,8 @@ class AnchorGenerator:
       shifts_y = Tensor.arange(
           0, grid_height, dtype=dtypes.float) * stride_height
       shift_y, shift_x = cust_meshgrid(shifts_y, shifts_x)
-      # shift_x = shift_x.reshape(-1)
-      # shift_y = shift_y.reshape(-1)
+      shift_x = shift_x.reshape(-1)
+      shift_y = shift_y.reshape(-1)
       shifts = Tensor.stack((shift_x, shift_y, shift_x, shift_y), dim=1)
 
       # For every (base anchor, output anchor) pair,
