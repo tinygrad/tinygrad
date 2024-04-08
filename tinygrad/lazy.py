@@ -167,18 +167,16 @@ class LazyBuffer:
     if not getenv("SPLIT_REDUCEOP", 1) or not all_int(self.shape) or (0 in self.shape) or \
       prod(self.shape) // prod(new_shape) < getenv("REDUCEOP_SPLIT_THRESHOLD", 32768):
       return self._reduce_op(op, axis)
+
     # if there are few globals, make some reduces into globals by splitting into two kernels
-    # divide on largest stride of adequate size
     # cap output buffer to 2**19 items: heuristic number of globals achieve max occupancy with enough locals+upcasts.
     #   ~2**10 should be enough if GROUP is used
-    # 256 split maximum should be "negligible reduce" for low prod(new_shape)
-    _, divisor, dim_to_split = max(((st or 256, divisor, i) for i, (s, st) in enumerate(zip(self.shape, self.st.real_strides(ignore_valid=True))) \
-                                   if i in axis and (st is None or isinstance(st, int) and st > 0) and
-                                   (divisor := max((x for x in range(1, min(256, 2 ** 19 // prod(new_shape))+1) if s % x == 0), default=1)) >= 8), default=(0, 1, 0))
-    if divisor == 1: return self._reduce_op(op, axis)
+    # 256 split maximum should be "negligible reduce" for low prod(new_shape), 8 split minimum.
+    dim_to_split, divisor = next(((i, x) for i in axis for x in range(min(256,2**19//prod(new_shape)),8-1,-1) if self.shape[i] % x == 0), (None, 1))
+    if dim_to_split is None: return self._reduce_op(op, axis)
     splitted_shape = self.shape[:dim_to_split] + (divisor,) + (self.shape[dim_to_split]//divisor,) + self.shape[dim_to_split+1:]
-    reshaped = self.reshape(splitted_shape).permute(tuple([x for x in range(len(self.shape)+1) if x != dim_to_split]+[dim_to_split]))  # move split to end
-    return reshaped._reduce_op(op, axis)._reduce_op(op, (len(new_shape),)).reshape(new_shape)  # reduce original axes, then split
+    splitted = self.reshape(splitted_shape).permute(tuple([x for x in range(len(splitted_shape)) if x != dim_to_split]+[dim_to_split]))  # move split to end
+    return splitted._reduce_op(op, axis)._reduce_op(op, (len(new_shape),)).reshape(new_shape)  # reduce original axes, then split
 
   # *** movement ops ***
 
