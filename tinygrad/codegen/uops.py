@@ -304,15 +304,18 @@ class UOpGraph:
 
   def optimize_arange_loops(self, get_recursive_parents, arange_buf):
     # look for sum reduction loops which can only be true on one iteration of the loop
-    load = next((u for u in self.get_recursive_children(arange_buf) if u.uop is UOps.LOAD and u.vin[0] is arange_buf and u.vin[1].uop is UOps.LOOP), None)
-    cmpeq = next((u for u in self.get_recursive_children(load) if u.arg is BinaryOps.CMPEQ and load in [v.vin[0] if v.uop is UOps.CAST else v for v in u.vin]), None) if load is not None else None
-    phi = next((u for u in self.get_recursive_children(cmpeq) if u.uop is UOps.PHI), None) if cmpeq is not None else None
-    ops_between = [x for x in (self.get_recursive_children(cmpeq).intersection(get_recursive_parents(phi)) - {cmpeq, phi}) if x.uop is not UOps.CAST] if cmpeq and phi else []
-    if len(ops_between) == 2 and set([x.arg for x in ops_between]) == {BinaryOps.MUL, BinaryOps.ADD} and (phi_op:=phi.vin[1]).arg is BinaryOps.ADD and (accum:=phi.vin[0]) in phi_op.vin:
+    load = next((u for u in self.uops if u.uop is UOps.LOAD and u.vin[0] is arange_buf and u.vin[1].uop is UOps.LOOP), None)
+    if not load: return
+    cmpeq = next((u for u in self.uops if u.arg is BinaryOps.CMPEQ and load in [v.vin[0] if v.uop is UOps.CAST else v for v in u.vin]), None)
+    phi = next((u for u in self.get_recursive_children(load) if u.uop is UOps.PHI), None)
+    if not cmpeq or not phi: return
+    phi_op, accum = phi.vin[1], phi.vin[0]
+    calc = [x for x in (self.get_recursive_children(cmpeq).intersection(get_recursive_parents(phi)) - {cmpeq, phi}) if x.uop is not UOps.CAST]
+    if len(calc) == 2 and set([x.arg for x in calc]) == {BinaryOps.MUL, BinaryOps.ADD} and phi_op.arg is BinaryOps.ADD and accum in phi_op.vin:
       self.replace_op(load, (loop:=load.vin[1]))
-      val_to_sum = next(v for x in ops_between for v in x.vin if x.arg is BinaryOps.MUL and cmpeq not in get_recursive_parents(v))
-      index = next(v for v in cmpeq.vin if load not in get_recursive_parents(v))
-      index_casted = self.add(UOps.CAST, loop.dtype, (index,), loop.dtype, insert_before=self.uops.index(index)+1) if index.dtype != loop.dtype else index
+      val_to_sum = next(v for x in calc for v in x.vin if x.arg is BinaryOps.MUL and cmpeq not in get_recursive_parents(v))
+      idx = next(v for v in cmpeq.vin if load not in get_recursive_parents(v))
+      index_casted = self.add(UOps.CAST, loop.dtype, (idx,), loop.dtype, insert_before=self.uops.index(idx)+1) if idx.dtype != loop.dtype else idx
       for u in get_recursive_parents(val_to_sum):
         u.vin = tuple([index_casted if vin is loop else vin for vin in list(u.vin)])
       self.replace_op(phi, val_to_sum)
