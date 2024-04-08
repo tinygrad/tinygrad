@@ -267,6 +267,7 @@ def iterate(coco, bs=8):
 
         # print('ITERATE_POST_RESIZE', bbox.shape)
         t['boxes'] = bbox#.realize()
+        # print('ITERATE', xNew.shape, t['boxes'].shape, t['labels'].shape)
         targets.append(t)
         i_sub+=1
     # yield Tensor(X), targets

@@ -427,6 +427,7 @@ def train_retinanet():
 
   model = RetinaNet(ResNeXt50_32X4D(), num_anchors=anchor_generator.num_anchors_per_location()[0])
   mdlrun = TinyJit(lambda x: model(x, True))
+  mdlrun_false = TinyJit(lambda x: model(x, False))
   mdlloss = TinyJit(lambda r, c, Y, a: model.loss(r,c,Y,a))
   mdlloss_temp = TinyJit(lambda r, c,y,a : model.loss_temp(r,c,y,a))
   parameters = []
@@ -469,7 +470,11 @@ def train_retinanet():
     # _ = mdlrun(X)
     # Tensor.training = False
     b,r,c = mdlrun(X)
-    # b,r,c = model(input_fixup(X))
+    # b,r,c = model(X, True)
+    # o = mdlrun_false(X)
+    # o = model(X, False)
+    # loss = o.max()
+    # return loss.realize()
 
     # b,r,c = model(X, True)
     # _ = model(X, False)
@@ -479,7 +484,10 @@ def train_retinanet():
     # c = [cc.squeeze(0) for cc in c]
 
     # loss = Tensor(69)
-    loss = model.loss(r, c, Y, anchor_generator(X, b))
+    loss_reg, loss_class = model.loss(r, c, Y, anchor_generator(X, b))
+    print(colored(f'loss_reg {loss_reg.numpy()}', 'green'))
+    print(colored(f'loss_class {loss_class.numpy()}', 'green'))
+    loss = loss_reg+loss_class
     # loss = mdlloss_temp(r,c, Y, anchor_generator(X, b))
     # loss = model.loss_temp(r,c, Y, anchor_generator(X, b))
     # loss = mdlloss(r, c, Y, anchor_generator(X, b))

@@ -421,6 +421,7 @@ class Matcher(object):
       matches = self.set_low_quality_matches_(matches, all_matches, match_quality_matrix_np)
     matches_tens = Tensor(matches, requires_grad=False)#.realize()
     del all_matches, matches, match_quality_matrix_np, below_low_threshold, between_thresholds
+    # print('Matcher:', matches_tens.shape)
     return matches_tens
 
   def set_low_quality_matches_(self, matches, all_matches, match_quality_matrix):
@@ -522,7 +523,7 @@ class RetinaNet:
     # return loss_reg
     # print(colored(f'FINISHED CLASS LOSS FINAL COMPUTE {loss_reg}|||', 'green'))
     # https://github.com/mlcommons/training/blob/master/single_stage_detector/ssd/engine.py#L36
-    
+    return loss_reg, loss_class
     print(colored(f'loss_reg {loss_reg.numpy()}', 'green'))
     print(colored(f'loss_class {loss_class.numpy()}', 'green'))
     # return loss_class
