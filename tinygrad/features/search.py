@@ -64,17 +64,19 @@ def _try_compile_linearized_w_idx(x:Tuple[int,Linearizer], compiler:Compiler):
 # workers should ignore ctrl c
 def _init_worker(): signal.signal(signal.SIGINT, signal.SIG_IGN)
 
+def _ensure_buffer_alloc(bufs:List[Buffer]) -> List[Buffer]: return [buf if hasattr(buf, "_buf") else buf.allocate() for buf in bufs]
+
 # *** external API ***
 
 # get (scrap) buffers for timing the linearizer
-def bufs_from_lin(lin:Linearizer) -> List[Buffer]:
+def bufs_from_lin(lin:Linearizer, allocate:bool=True) -> List[Buffer]:
   bufsts:DefaultDict[int, List[MemBuffer]] = defaultdict(list)
   for x in lin.membufs: bufsts[x.idx].append(x)
   rawbufs:List[Optional[Buffer]] = [None]*len(bufsts)
   for k,lx in bufsts.items():
     buf_size = prod(lx[0].dtype.shape) if isinstance(lx[0].dtype, ImageDType) else max(y.st.real_size() for y in lx)
     if buf_size == 0: buf_size = 1  # create a size 1 buffer if no cell is accessed in kernel. # TODO: remove from kernel input in this case.
-    rawbufs[k] = Buffer(lin.opts.device, buf_size, lx[0].dtype).allocate()
+    rawbufs[k] = Buffer(lin.opts.device, buf_size, lx[0].dtype).allocate() if allocate else Buffer(lin.opts.device, buf_size, lx[0].dtype)
   assert all(r is not None for r in rawbufs)
   return cast(List[Buffer], rawbufs)
 
@@ -97,7 +99,7 @@ def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Lineariz
   return acted_lins
 
 beam_pool = None
-def beam_search(lin:Linearizer, rawbufs:Optional[List[Buffer]], amt:int, allow_test_size=True) -> Linearizer:
+def beam_search(lin:Linearizer, rawbufs:List[Buffer], amt:int, allow_test_size=True) -> Linearizer:
   global beam_pool
   key = {"ast": lin.ast[0].key, "amt": amt, "allow_test_size": allow_test_size, "device": lin.opts.device, "suffix": lin.opts.suffix}
   if (val:=diskcache_get("beam_search", key)) is not None and not getenv("IGNORE_BEAM_CACHE") and CACHELEVEL >= 1:
@@ -113,7 +115,7 @@ def beam_search(lin:Linearizer, rawbufs:Optional[List[Buffer]], amt:int, allow_t
     beam_pool = multiprocessing.get_context("spawn").Pool(multiprocessing.cpu_count(), _init_worker, (), getenv("BEAM_MAX_TASKS_PER_CHILD", 16))
 
   try:
-    if rawbufs is None: rawbufs = bufs_from_lin(lin)
+    rawbufs = _ensure_buffer_alloc(rawbufs)
     var_vals = {k:(k.max+k.min)//2 for k in lin.ast[0].vars()}
     exiting, st = False, time.perf_counter()
     dev = Device[lin.opts.device]
@@ -166,6 +168,7 @@ def time_linearizer(lin:Linearizer, rawbufs:List[Buffer], allow_test_size=True, 
   dev = Device[lin.opts.device]
   assert dev.compiler is not None
 
+  rawbufs = _ensure_buffer_alloc(rawbufs)
   var_vals = {k:(k.max+k.min)//2 for k in lin.ast[0].vars()}
   lib, global_size, local_size, vars, outcount, _, _ = _compile_linearizer(dev.compiler, lin)
   tms = _time_program(vars, outcount, dev, lib, global_size, local_size, var_vals, rawbufs, max_global_size=max_global_size if allow_test_size else None, clear_l2=clear_l2, cnt=cnt, name=to_function_name(lin.name))  # noqa: E501
