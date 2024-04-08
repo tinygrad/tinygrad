@@ -9,7 +9,7 @@ repos:
         pass_filenames: false
       - id: ruff
         name: ruff
-        entry: ruff . --preview
+        entry: ruff check . --preview
         language: system
         always_run: true
         pass_filenames: false

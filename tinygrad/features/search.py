@@ -87,11 +87,11 @@ def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Lineariz
     lin2 = lin.copy()
     try:
       lin2.apply_opt(a)
-      up, lcl = 1, 1
+      up, lcl, tc_up = 1, 1, prod(tc.dims)//prod([x[1] for x in tc.threads]) if (tc:=lin2.tensor_core) else 1
       for s,c in zip(lin2.full_shape, lin2.colors()):
         if c in {"magenta", "yellow"}: up *= s
         elif c in {"cyan", "green", "white"}: lcl *= s
-      if up > max_up or lcl > max_lcl: continue
+      if up//tc_up > max_up or lcl > max_lcl: continue
       acted_lins[i+1] = lin2
     except KernelOptError: pass
   return acted_lins
@@ -108,7 +108,7 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
   beam: List[Tuple[Linearizer, float]] = []
   seen_libs = set()
 
-  default_parallel, min_progress_micros = 1 if lin.opts.device in {"CUDA", "HSA"} else 0, getenv("BEAM_MIN_PROGRESS",0.01)
+  default_parallel, min_progress_micros = 1 if lin.opts.device in {"CUDA", "HSA", "KFD"} else 0, getenv("BEAM_MIN_PROGRESS",0.01)
   if beam_pool is None and getenv("PARALLEL", default_parallel):
     beam_pool = multiprocessing.get_context("spawn").Pool(multiprocessing.cpu_count(), _init_worker, (), getenv("BEAM_MAX_TASKS_PER_CHILD", 16))
 

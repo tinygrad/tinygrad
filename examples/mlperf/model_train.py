@@ -1,6 +1,7 @@
 import functools, os, time, math
 from pathlib import Path
 from tqdm import tqdm
+import multiprocessing
 
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
 from tinygrad.helpers import getenv, BEAM, WINO
@@ -129,8 +130,8 @@ def train_resnet():
   for e in range(start_epoch, epochs):
     # ** train loop **
     Tensor.training = True
-    it = iter(tqdm(batch_load_resnet(batch_size=BS, val=False, shuffle=True, seed=seed*epochs + e),
-                   total=steps_in_train_epoch, desc=f"epoch {e}", disable=BENCHMARK))
+    batch_loader = batch_load_resnet(batch_size=BS, val=False, shuffle=True, seed=seed*epochs + e)
+    it = iter(tqdm(batch_loader, total=steps_in_train_epoch, desc=f"epoch {e}", disable=BENCHMARK))
     i, proc = 0, data_get(it)
     st = time.perf_counter()
     while proc is not None:
@@ -170,10 +171,12 @@ def train_resnet():
         median_step_time = sorted(step_times)[(BENCHMARK + 1) // 2]  # in seconds
         estimated_total_hours = median_step_time * steps_in_train_epoch * epochs / 60 / 60
         print(f"Estimated training time: {estimated_total_hours:.0f}h{(estimated_total_hours - int(estimated_total_hours)) * 60:.0f}m")
+        # if we are doing beam search, run the first eval too
+        if BEAM.value and e == start_epoch: break
         return
 
     # ** eval loop **
-    if (e + 1 - eval_start_epoch) % eval_epochs == 0:
+    if (e + 1 - eval_start_epoch) % eval_epochs == 0 and steps_in_val_epoch > 0:
       train_step.reset()  # free the train step memory :(
       eval_loss = []
       eval_times = []
@@ -481,6 +484,7 @@ def train_maskrcnn():
   pass
 
 if __name__ == "__main__":
+  multiprocessing.set_start_method('spawn')
   with Tensor.train():
     for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn").split(","):
       nm = f"train_{m}"

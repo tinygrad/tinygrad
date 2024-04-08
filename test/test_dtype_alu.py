@@ -7,7 +7,8 @@ from hypothesis import given, strategies as strat, settings
 from tinygrad.dtype import DType
 from tinygrad.helpers import CI, getenv
 from tinygrad.engine.schedule import create_schedule
-from tinygrad.ops import UnaryOps, get_lazyop_info
+from tinygrad.engine.realize import run_schedule
+from tinygrad.ops import UnaryOps
 from test.helpers import is_dtype_supported
 
 settings.register_profile("my_profile", max_examples=200, deadline=None)
@@ -65,7 +66,9 @@ def universal_test(a, b, dtype, op):
 def universal_test_unary(a, dtype, op):
   if not isinstance(op, tuple): op = (op, op)
   out: Tensor = op[0](Tensor([a], dtype=dtype))
-  ast = create_schedule([out.lazydata])[-1].ast[0]
+  sched = create_schedule([out.lazydata])
+  ast = sched[-1].ast[0]
+  run_schedule(sched)
   tensor_value = out.numpy()
   numpy_value = op[1](np.array([a]).astype(dtype.np))
   if dtype in dtypes_float:
@@ -73,7 +76,7 @@ def universal_test_unary(a, dtype, op):
   else: np.testing.assert_equal(tensor_value, numpy_value)
   if op[0] != Tensor.reciprocal: # reciprocal is not supported in most backends
     op = [x for x in ast.lazyops if x.op in UnaryOps][0]
-    assert get_lazyop_info(op).dtype == dtype
+    assert op.dtype == dtype
 
 def universal_test_cast(a, in_dtype, dtype):
   tensor_value = Tensor([a], dtype=in_dtype).cast(dtype)

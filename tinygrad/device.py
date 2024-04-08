@@ -1,11 +1,11 @@
 from __future__ import annotations
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any, List, Optional, Dict, Tuple, ClassVar, NamedTuple
-import importlib, inspect, functools, pathlib, time, ctypes
-from tinygrad.helpers import ansilen, DEBUG, getenv, colored, BEAM, NOOPT, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put
-from tinygrad.helpers import prod, CACHECOLLECTING
+import importlib, inspect, functools, pathlib, time, ctypes, os
+from tinygrad.helpers import ansilen, prod, getenv, colored, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put
+from tinygrad.helpers import DEBUG, CACHECOLLECTING, BEAM, NOOPT, GlobalCounters
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
-from tinygrad.ops import LazyOp, get_lazyop_info, GlobalCounters
+from tinygrad.ops import LazyOp, get_lazyop_info
 from tinygrad.buffer import Buffer, BufferOptions
 from tinygrad.codegen.uops import UOpGraph
 
@@ -23,13 +23,14 @@ class _Device:
   def __getitem__(self, ix:str) -> Compiled: return self.__get_canonicalized_item(self.canonicalize(ix))
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def __get_canonicalized_item(self, ix:str) -> Compiled:
+    if DEBUG >= 1: print(f"opening device {ix} from pid:{os.getpid()}")
     x = ix.split(":")[0].upper()
     return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._devices][0](ix)  # noqa: E501
   @functools.cached_property
   def DEFAULT(self) -> str:
     device_from_env: Optional[str] = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._devices, None)   # type: ignore
     if device_from_env: return device_from_env
-    for device in ["METAL", "HSA", "CUDA", "GPU", "LLVM", "CLANG"]:
+    for device in ["METAL", "HSA", "CUDA", "GPU", "CLANG", "LLVM"]:
       try:
         if self[device]: return device
       except Exception: pass

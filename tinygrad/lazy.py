@@ -3,19 +3,17 @@ import math
 from typing import Union, Optional, Any, Tuple, List
 from tinygrad.dtype import dtypes, DType, ConstType
 from tinygrad.helpers import prod, getenv, all_int, all_same
-from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op
+from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op, exec_alu, python_alu
 from tinygrad.shape.symbolic import sint
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.device import Buffer
+from tinygrad.buffer import Buffer
 from weakref import ref, ReferenceType, WeakValueDictionary
 
 lazycache: WeakValueDictionary[Any, LazyBuffer] = WeakValueDictionary()
 def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
                       base:Optional[LazyBuffer]=None, enable_cache=bool(getenv("LAZYCACHE", 1))):
-  if st.size == 0 and op not in {LoadOps.SYNC, LoadOps.WAIT}: op, arg, srcs, base = LoadOps.CONST, 0, (), None
-  if op is LoadOps.CONST:
-    arg = dtypes.as_const(arg, dtype)
-    enable_cache = True
+  if st.size == 0: op, arg, srcs, base = LoadOps.CONST, 0, (), None
+  if op is LoadOps.CONST: arg, enable_cache = dtypes.as_const(arg, dtype), True
 
   cache_key = (device, st, dtype, op, arg, tuple(ref(x) for x in srcs)) if base is None else (st, ref(base))
   if enable_cache and (rret := lazycache.get(cache_key, None)): return rret
@@ -66,8 +64,8 @@ class LazyBuffer:
   def is_realized(self) -> bool: return self.base.realized is not None
 
   def assign(self, x:LazyBuffer) -> LazyBuffer:
-    assert (self.base is self) or (self.st.contiguous and self.size == self.base.size), f"assign target must be contiguous {self.st}"
-    return LazyBuffer.loadop(LoadOps.ASSIGN, self.shape, self.dtype, self.device, src=(x, self.base))
+    assert x.size == self.size, f"assign target must have same size {self.size=} != {x.size=}"
+    return LazyBuffer.loadop(LoadOps.ASSIGN, self.shape, self.dtype, self.device, arg=() if self.st.contiguous else (self.st,), src=(x, self.base))
 
   def contiguous(self):
     if not self.st.contiguous or self.size != self.base.size or self.is_unrealized_const():
@@ -80,6 +78,8 @@ class LazyBuffer:
   def cast(self, dtype:DType, bitcast:bool=False):
     if self.dtype == dtype: return self
     if self.device.startswith("DISK") and not bitcast: raise RuntimeError("attempted to cast disk buffer (bitcast only)")
+    if self.is_unrealized_unmasked_const() and not bitcast:
+      return create_lazybuffer(self.device, self.st, dtype, LoadOps.CONST, dtypes.as_const(self.base.arg, dtype))
     # TODO: applying this makes gpt2 slower
     if getenv("CAST_BEFORE_VIEW", 1) and dtype.itemsize <= self.dtype.itemsize and self != self.base:
       return self.base.cast(dtype, bitcast)._view(self.st)
@@ -93,16 +93,10 @@ class LazyBuffer:
     return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), dtype, UnaryOps.CAST, (dtype, bitcast), (self,))
 
   def is_unrealized_const(self): return self.base.realized is None and self.base.op is LoadOps.CONST
-  def is_unrealized_contiguous_const(self): return self.base == self and self.base.realized is None and self.op is LoadOps.CONST
+  def is_unrealized_unmasked_const(self): return self.is_unrealized_const() and all(v.mask is None for v in self.st.views)
 
   def _copy(self, device:str) -> LazyBuffer:
-    if (dstart:=self.device.split(":")[0]) in {"EXT", "DISK"} or (dstart in {"HSA", "CUDA"} and device.split(":")[0] == dstart):
-      # DISK/EXT don't sync
-      # copies in HSA/CUDA to other HSA/CUDA don't sync either
-      return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, None, (self,), enable_cache=False)
-    sync = LazyBuffer.loadop(LoadOps.SYNC, (0,), dtypes.uint32, self.device, src=(self,), enable_cache=True)
-    wait = LazyBuffer.loadop(LoadOps.WAIT, (0,), dtypes.uint32, device, src=(sync,), enable_cache=True)
-    return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, None, (self, wait), enable_cache=False)
+    return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, None, (self,), enable_cache=False)
 
   def copy_to_device(self, device:str, force: bool = False) -> LazyBuffer:
     # no COPY
@@ -133,7 +127,23 @@ class LazyBuffer:
     assert all_same([x.shape for x in srcs]), f"all shapes must be the same {[x.shape for x in srcs]}"
     if op is TernaryOps.WHERE: assert srcs[0].dtype == dtypes.bool, "TernaryOps.WHERE must have the first arg be bool"
     if op is UnaryOps.NEG: assert srcs[0].dtype != dtypes.bool, "UnaryOps.NEG does not accept dtype bool"
+
     out_dtype = dtypes.bool if op in (BinaryOps.CMPLT, BinaryOps.CMPEQ) else srcs[-1].dtype
+
+    # const folding
+    if op in python_alu and all(s.is_unrealized_unmasked_const() for s in srcs):
+      return self.cast(out_dtype).const(exec_alu(op, out_dtype, [s.base.arg for s in srcs]))
+    if op in BinaryOps: x, y = self, in_srcs[0]
+    if op is BinaryOps.ADD:
+      if y.is_unrealized_unmasked_const() and y.base.arg == 0: return x
+      if x.is_unrealized_unmasked_const() and x.base.arg == 0: return y
+    if op is BinaryOps.SUB and y.is_unrealized_unmasked_const() and y.base.arg == 0: return x
+    if op is BinaryOps.MUL:
+      if x.is_unrealized_unmasked_const() and (val := x.base.arg) in (1, 0): return {1: y, 0: y.const(0)}[val]
+      if y.is_unrealized_unmasked_const() and (val := y.base.arg) in (1, 0): return {1: x, 0: x.const(0)}[val]
+    if op is BinaryOps.DIV and dtypes.is_float(x.dtype) and y.is_unrealized_unmasked_const() and y.base.arg != 0:
+      return x.e(BinaryOps.MUL, x.const(1 / y.base.arg))
+
     return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), out_dtype, op, arg, tuple(srcs))
 
   # *** reduce ops ***
@@ -149,6 +159,10 @@ class LazyBuffer:
     new_shape = tuple(1 if i in axis else s for i,s in enumerate(self.shape))
     # TODO: this logic should move to the scheduler
     if self.size == 0 and 0 not in new_shape: return self.const({ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[op], new_shape)
+
+    if self.is_unrealized_unmasked_const():
+      return self.const(self.base.arg * {ReduceOps.SUM: prod(self.shape[i] for i in axis), ReduceOps.MAX: 1}[op], new_shape)
+
     # TODO: can we split symbolic shape if the reduce axis is not symbolic?
     if not all_int(self.shape) or (0 in self.shape) or prod(self.shape) // prod(new_shape) < getenv("REDUCEOP_SPLIT_THRESHOLD", 32768):
       return self._reduce_op(op, axis)
