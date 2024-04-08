@@ -35,6 +35,7 @@ if __name__ == "__main__":
     same_but_neq = 0
     ref_win = 0
     ref_loss = 0
+    multiview = 0
     for _ in trange(total, desc=f"{fuzz}"):
       st1, st2 = fuzz()
       eq = st_equal(st1, st2)
@@ -44,19 +45,21 @@ if __name__ == "__main__":
         print(st2.simplify())
         same_but_neq += 1
       if getenv("CHECK_MV"):
-        prod = st1.simplify()
-        ref = simplify2(st1)
+        prod = st2.simplify()
+        ref = simplify2(st2)
         assert(st_equal(prod, ref))
         if len(prod.views) > len(ref.views):
           print(colored("prod simplify worse than ref", "red"))
-          print(f"PROD: {prod}")
-          print(f"REF: {ref}")
+          print(f"prod = {prod}")
+          print(f"ref =  {ref}")
           ref_win += 1
         if len(prod.views) < len(ref.views):
           print(colored("prod simplify better than ref ", "green"))
-          print(f"PROD: {prod}")
-          print(f"REF: {ref}")
+          print(f"prod =  {prod}")
+          print(f"ref = {ref}")
           ref_loss += 1
+        if len(prod.views) > 1:
+          multiview += 1
       if DEBUG >= 1:
         print(f"EXP: {st1}")
         print(f"GOT: {st2}")
@@ -64,5 +67,5 @@ if __name__ == "__main__":
       if not eq: exit(0)
     if getenv("CHECK_NEQ"): print(f"same but unequal {(same_but_neq/total)*100:.2f}%")
     if getenv("CHECK_MV"):
-      print(f"prod simplify worse than ref {(ref_win/total)*100:.2f}%")
-      print(f"prod simplify better than ref {(ref_loss/total)*100:.2f}%")
+      print(f"prod worse than ref {(ref_win/multiview)*100:.2f}%")
+      print(f"prod better than ref {(ref_loss/multiview)*100:.2f}%")
