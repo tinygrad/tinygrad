@@ -1,5 +1,5 @@
 import unittest, math
-from tinygrad import Tensor, Device
+from tinygrad import Tensor, Device, dtypes
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.features.multi import MultiLazyBuffer
 from tinygrad.helpers import CI
@@ -12,7 +12,18 @@ def _check_ast_count(desired_count:int, t:Tensor):
   asts = [s for s in schedule if s.ast[0].op is BufferOps.STORE]
   assert len(asts) == desired_count
 
-class TestSimpleConstFolding(unittest.TestCase):
+class TestUnaryOpsConstFolding(unittest.TestCase):
+  def test_all_consts_ops(self):
+    _check_ast_count(0, Tensor.ones(4).exp())
+    _check_ast_count(0, Tensor.ones(4).sqrt())
+    _check_ast_count(0, Tensor.ones(4) + Tensor.ones(4))
+    _check_ast_count(0, Tensor.ones(4) / Tensor.ones(4))
+
+  def test_cast(self):
+    _check_ast_count(0, Tensor.ones(4).cast(dtypes.int16))
+    _check_ast_count(0, Tensor.full(4, fill_value=-1).cast(dtypes.uint16))
+
+class TestBinaryOpsConstFolding(unittest.TestCase):
   def test_add_literal_zero(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) + 0)
   def test_add_tensor_zero(self):
@@ -59,13 +70,26 @@ class TestSimpleConstFolding(unittest.TestCase):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) ** 1)
   def test_pow_tensor_one(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) ** Tensor.ones(4))
-  # TODO: fix pow folding with left operand = 1
-  @unittest.expectedFailure
   def test_literal_one_pow(self):
     _check_ast_count(0, 1 ** Tensor([1.0, 2, 3, 4]))
-  @unittest.expectedFailure
   def test_tensor_one_pow(self):
     _check_ast_count(0, Tensor.ones(4) ** Tensor([1.0, 2, 3, 4]))
+
+# folds advance indexing into basic indexing
+class TestIndexingConstFolding(unittest.TestCase):
+  def test_scalar_index(self):
+    t = Tensor.arange(16).float().reshape(1,1,4,4).realize()
+    _check_ast_count(0, t[:,:,Tensor(1),:])
+    _check_ast_count(0, t[:,:,Tensor(1)+2,:])
+    _check_ast_count(0, t[:,:,Tensor(1),Tensor(0)])
+
+  @unittest.expectedFailure
+  def test_const_tensor_index(self):
+    # TODO: implement const tensor folded indexing
+    t = Tensor.arange(16).float().reshape(1,1,4,4).realize()
+    _check_ast_count(0, t[:,:,Tensor.ones(2,1),:])
+    _check_ast_count(0, t[:,:,Tensor.ones(1,2)+2,:])
+    _check_ast_count(0, t[:,:,Tensor.ones(1,1),Tensor.zeros(2,1,2)])
 
 class TestMovedConstFolding(unittest.TestCase):
   def test_add_shrunk_zero(self):
@@ -80,6 +104,39 @@ class TestMovedConstFolding(unittest.TestCase):
 
   def test_add_padded_one(self):
     _check_ast_count(1, Tensor([1.0, 2, 3, 4]) * Tensor.ones(2).pad(((1, 1),)))
+
+  def test_cast_padded(self):
+    # NOTE: this is folded due to CAST_BEFORE_VIEW
+    _check_ast_count(0, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16))
+    np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16).numpy(), [0, 1, 1, 1, 1, 0])
+    _check_ast_count(0, Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16))
+    np.testing.assert_equal(Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16).numpy(), [0, 65535, 65535, 65535, 65535, 0])
+    # not folded
+    _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int64))
+    np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int64).numpy(), [0, 1, 1, 1, 1, 0])
+
+class TestReduceOpsConstFolding(unittest.TestCase):
+  def test_const_sum(self):
+    _check_ast_count(0, Tensor.ones(4, 5, 6).sum())
+    np.testing.assert_equal(Tensor.ones(4, 5, 6).sum().numpy(), 4 * 5 * 6)
+    _check_ast_count(0, Tensor.ones(4, 5, 6).sum(axis=0))
+    np.testing.assert_equal(Tensor.ones(4, 5, 6).sum(axis=0).numpy(), np.full((5, 6), 4))
+    _check_ast_count(0, Tensor(4).sum())
+    np.testing.assert_equal(Tensor(4).sum().numpy(), 4)
+
+  def test_padded_const_sum(self):
+    _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).sum())
+    np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).sum().numpy(), 4)
+
+    # NOTE: cannot just count the non-padded area because some UnaryOps f do not have f(0) = 0.
+    _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).exp().sum())
+    np.testing.assert_allclose(Tensor.ones(4).pad(((1, 1),)).exp().sum().numpy(), 4 * math.e + 2)
+
+  def test_const_max(self):
+    _check_ast_count(0, Tensor.ones(4, 5, 6).max())
+    np.testing.assert_equal(Tensor.ones(4, 5, 6).max().numpy(), 1)
+    _check_ast_count(0, Tensor(4).max())
+    np.testing.assert_equal(Tensor(4).max().numpy(), 4)
 
 @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
 class TestMultiConstFolding(unittest.TestCase):
@@ -104,6 +161,10 @@ class TestMultiConstFolding(unittest.TestCase):
     np.testing.assert_equal((t * 0).numpy(), [0] * 16)
     np.testing.assert_equal((t * 1).numpy(), np.arange(16))
 
+    _check_ast_count(0, t ** 0)
+    _check_ast_count(0, t ** 1)
+    _check_ast_count(0, 1 ** t)
+
   def test_multi_const_folding_tensor(self):
     ds = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
     t = Tensor.arange(16).float().realize().to(ds)
@@ -125,11 +186,13 @@ class TestMultiConstFolding(unittest.TestCase):
   def test_multi_todo_pow(self):
     ds = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
     t = Tensor.arange(16).float().realize().to(ds)
+    zero = Tensor.zeros(16).realize().to(ds)
+    one = Tensor.ones(16).realize().to(ds)
 
     # TODO: fix pow folding
-    _check_ast_count(0, t ** 0)
-    _check_ast_count(0, t ** 1)
-    _check_ast_count(0, 1 ** t)
+    _check_ast_count(0, t ** zero)
+    _check_ast_count(0, t ** one)
+    _check_ast_count(0, one ** t)
 
 class TestTautologicalCompare(unittest.TestCase):
   # without const folding, these would have triggered -Wtautological-compare in clang

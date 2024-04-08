@@ -1,7 +1,7 @@
 from __future__ import annotations
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any, List, Optional, Dict, Tuple, ClassVar, NamedTuple
-import importlib, inspect, functools, pathlib, time, ctypes
+import importlib, inspect, functools, pathlib, time, ctypes, os
 from tinygrad.helpers import ansilen, prod, getenv, colored, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put
 from tinygrad.helpers import DEBUG, CACHECOLLECTING, BEAM, NOOPT, GlobalCounters
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
@@ -23,6 +23,7 @@ class _Device:
   def __getitem__(self, ix:str) -> Compiled: return self.__get_canonicalized_item(self.canonicalize(ix))
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def __get_canonicalized_item(self, ix:str) -> Compiled:
+    if DEBUG >= 1: print(f"opening device {ix} from pid:{os.getpid()}")
     x = ix.split(":")[0].upper()
     return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._devices][0](ix)  # noqa: E501
   @functools.cached_property
@@ -232,21 +233,24 @@ class Compiled:
     if not NOOPT:
       if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
       if BEAM >= 1:
-        lins = [(("tc" if used_tensor_cores else "hc"), k)]
-        if used_tensor_cores:
-          lins.append(("hc", Linearizer(*ast, opts=self.compiler.compiler_opts)))
-          lins[-1][1].hand_coded_optimizations()
-        kb = Linearizer(*ast, opts=self.compiler.compiler_opts)
-        kb.required_optimizations()
         from tinygrad.features.search import beam_search, time_linearizer, bufs_from_lin
-        test_rawbuffers = bufs_from_lin(kb)    # allocate scratch buffers for optimization
-        lins.append((f"beam{BEAM.value}", beam_search(kb, test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))))
-        timed = sorted([(nm, tk, time_linearizer(tk, test_rawbuffers, allow_test_size=False, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
-        if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
-        k = timed[0][1]
-        if logkern is not None and logkern_level > 1: logkern.writelines([f"{(lin.ast, lin.applied_opts)}\n" for (_,lin,_) in timed[1:]])
+        kb, k_opt = Linearizer(*ast, opts=self.compiler.compiler_opts), k
+        kb.required_optimizations()
+        rawbufs = bufs_from_lin(kb, allocate=False)
+        k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
+        if getenv("BEAM_COMPARE", 1):
+          # TODO: move the HC/TC/BEAM compare to beam_search so it can be optionally cached which choice is better
+          lins = [(f"beam{BEAM.value}", k), (("tc" if used_tensor_cores else "hc"), k_opt)]
+          if used_tensor_cores:
+            lins.append(("hc", Linearizer(*ast, opts=self.compiler.compiler_opts)))
+            lins[-1][1].hand_coded_optimizations()
+          timed = sorted([(nm, tk, time_linearizer(tk, rawbufs, allow_test_size=False, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
+          if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
+          k = timed[0][1]
+          if logkern is not None and logkern_level > 1: logkern.writelines([f"{(lin.ast, lin.applied_opts)}\n" for (_,lin,_) in timed[1:]])
     # TODO: check the correctness inline once compare_linearizer is in core
     if logkern is not None: logkern.writelines([f"{(k.ast, k.applied_opts)}\n"])
+    if DEBUG >= 4: print((k.ast, k.applied_opts)) # print here to show final applied_opts for all kernels instead of just in beam_search
     return k
 
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
