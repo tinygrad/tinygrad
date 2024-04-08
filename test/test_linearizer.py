@@ -203,7 +203,7 @@ class TestLinearizer(unittest.TestCase):
     lin.limit_dims_to_max(global_max=[16, 16, 16], local_max=[16, 16, 16])
 
   def test_sum_collapse(self):
-    t = Tensor.ones(256,256).sum()
+    t = Tensor([2]).reshape(1, 1).expand(256, 256).sum()
     sched = [si for si in create_schedule([t.lazydata]) if si.ast[0].op not in LoadOps]
     assert len(sched) == 1
     lin = Linearizer(*sched[0].ast)
@@ -719,7 +719,7 @@ class TestKernelOpts(unittest.TestCase):
 
   def test_padto_max(self):
     N = 17 * 17
-    a = -Tensor.ones(N, N)
+    a = -Tensor.rand(N, N)
 
     helper_linearizer_opt(a.max(0), [
       [Opt(OptOps.PADTO, 0, 32)],

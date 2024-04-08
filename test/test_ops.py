@@ -1089,7 +1089,16 @@ class TestOps(unittest.TestCase):
   def test_expand(self):
     helper_test_op([(4,3,1,6)], lambda x: x.expand((4,3,2,6)))
     helper_test_op([(1,1,1,1)], lambda x: x.expand((4,3,2,6)))
+    helper_test_op([(4,3,1,6)], lambda x: x.expand((6,1,4,3,2,6)))
+    helper_test_op([(4,3,1,6)], lambda x: x.expand((0,1,4,3,2,6)))
+    helper_test_op([(4,3,1,6)], lambda x: x.expand((4,3,0,6)))
+    helper_test_op([()], lambda x: x.expand((4,3,2,6)))
     helper_test_op([()], lambda x: x.expand([]))
+
+    with self.assertRaises((ValueError, RuntimeError)): Tensor.ones(4,3,1,6).expand(4,1,1,6)
+    with self.assertRaises((ValueError, RuntimeError)): Tensor.ones(4,3,1,6).expand(4,6,1,6)
+    with self.assertRaises((ValueError, RuntimeError)): Tensor.ones(4,3,1,6).expand(3,1,6)
+    with self.assertRaises((ValueError, RuntimeError)): Tensor.ones(4,3,2,6).expand(4,3,0,6)
 
   @unittest.skip("very slow")
   def test_sd_big_conv(self):
@@ -1431,6 +1440,13 @@ class TestOps(unittest.TestCase):
         helper_test_op([(32,2,110,28)],
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(2,2), stride=stride),
           lambda x: Tensor.max_pool2d(x, kernel_size=(2,2), stride=stride))
+
+  def test_maxpool2d_bigger_stride_dilation(self):
+    for stride, dilation in zip([(2,3), (3,2), 2, 3, 4], [(3,2), (2,3), 2, 3, 6]):
+      with self.subTest(stride=stride):
+        helper_test_op([(32,2,110,28)],
+          lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(2,2), stride=stride, dilation=dilation),
+          lambda x: Tensor.max_pool2d(x, kernel_size=(2,2), stride=stride, dilation=dilation))
 
   @unittest.skipIf(Device.DEFAULT == "CUDA", "CUDA fails on this")
   def test_maxpool2d_unit_stride(self):
