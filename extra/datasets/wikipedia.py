@@ -140,7 +140,7 @@ def create_masked_lm_predictions(tokens, tokenizer, rng, vocab_words):
 
   rng.shuffle(cand_indices)
   output_tokens = list(tokens)
-  num_to_predict = min(getenv('MAX_PREDICTIONS_PER_SEQ', 20), max(1, int(round(len(tokens) * 0.15))))
+  num_to_predict = min(getenv('MAX_PREDICTIONS_PER_SEQ', 76), max(1, int(round(len(tokens) * 0.15))))
 
   masked_lms = []
   covered_indices = set()
@@ -173,7 +173,7 @@ def create_masked_lm_predictions(tokens, tokenizer, rng, vocab_words):
   return output_tokens, masked_lm_positions, masked_lm_labels
 
 def create_instances_from_document(rng, tokenizer, doc, di, documents):
-  max_num_tokens = getenv('MAX_SEQ_LENGTH', 128) - 3 # [CLS] + 2 * [SEP]
+  max_num_tokens = getenv('MAX_SEQ_LENGTH', 512) - 3 # [CLS] + 2 * [SEP]
 
   target_seq_length = max_num_tokens
   if rng.random() < 0.1:
@@ -275,7 +275,7 @@ def instance_to_features(instance, tokenizer):
   input_mask = [1] * len(input_ids)
   segment_ids = instance["segment_ids"]
 
-  max_seq_length = getenv('MAX_SEQ_LENGTH', 128)
+  max_seq_length = getenv('MAX_SEQ_LENGTH', 512)
 
   assert len(input_ids) <= max_seq_length
   while len(input_ids) < max_seq_length:
@@ -290,7 +290,7 @@ def instance_to_features(instance, tokenizer):
   masked_lm_ids = tokenizer.convert_tokens_to_ids(instance["masked_lm_labels"])
   masked_lm_weights = [1.0] * len(masked_lm_ids)
 
-  while len(masked_lm_positions) < getenv("MAX_PREDICTIONS_PER_SEQ", 20):
+  while len(masked_lm_positions) < getenv("MAX_PREDICTIONS_PER_SEQ", 76):
     masked_lm_positions.append(0)
     masked_lm_ids.append(0)
     masked_lm_weights.append(0.0)
@@ -351,9 +351,6 @@ if __name__ == "__main__":
 
   if sys.argv[1] == "pre-eval":
     os.makedirs(BASEDIR / "eval", exist_ok=True)
-
-    os.environ["MAX_SEQ_LENGTH"] = "512"
-    os.environ["MAX_PREDICTIONS_PER_SEQ"] = "76"
 
     for i, feature_batch in tqdm(enumerate(process_iterate(tokenizer, val=True)), total=10):
       with open(BASEDIR / f"eval/{i}.pkl", "wb") as f:
