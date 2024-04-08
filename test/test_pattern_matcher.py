@@ -1,6 +1,6 @@
 import unittest
 from tinygrad.dtype import dtypes
-from tinygrad.ops import BinaryOps
+from tinygrad.ops import BinaryOps, TernaryOps
 from tinygrad.codegen.uops import UOpGraph, UOps, PatternMatcher, UOp
 
 class TestPatternMatcher(unittest.TestCase):
@@ -60,14 +60,13 @@ class TestPatternMatcher(unittest.TestCase):
 
   def test_rewrite_graph_folds(self):
     uops = UOpGraph()
-    uops.add(UOps.CONST, dtypes.float, arg=2.0, simplify=False)
+    c1 = uops.add(UOps.CONST, dtypes.float, arg=2.0, simplify=False)
+    uops.add(UOps.STORE, dtypes.int, (c1,), simplify=False) # added so that graph is not childless
     matcher = PatternMatcher([({"__name__": "x", "uop": UOps.CONST, "dtype": dtypes.float},
                                 lambda x: UOp(UOps.CAST, dtypes.int, (UOp(UOps.ALU, x.dtype, (x, x), BinaryOps.ADD),)))])
     matcher.rewrite_graph(uops)
-    # TODO: fix this. it's 2 now
-    # self.assertEqual(len(uops.uops), 1)
     self.assertEqual(len(uops.uops), 2)
-    self.assert_equiv_uops(UOp(UOps.CONST, dtypes.int, arg=4), uops.uops[-1])
+    self.assert_equiv_uops(UOp(UOps.CONST, dtypes.int, arg=4), uops.uops[-2])
 
   def test_rewrite_graph_adds(self):
     uops = UOpGraph()
@@ -75,7 +74,6 @@ class TestPatternMatcher(unittest.TestCase):
     matcher = PatternMatcher([({"__name__": "x", "uop": UOps.CONST, "dtype": dtypes.int},
                                lambda x: UOp(UOps.STORE, x.dtype, (UOp(UOps.DEFINE_GLOBAL, x.dtype, tuple(), None), x)))])
     matcher.rewrite_graph(uops)
-    uops.remove_childless(set(x for x in uops if x.uop in {UOps.STORE}))
 
     self.assertEqual(len(uops.uops), 3)
 
@@ -86,6 +84,21 @@ class TestPatternMatcher(unittest.TestCase):
     self.assert_equiv_uops(e1, uops.uops[0])
     self.assert_equiv_uops(e2, uops.uops[1])
     self.assert_equiv_uops(e3, uops.uops[2])
+
+  def test_rewrite_double_op_fold(self):
+    uops = UOpGraph()
+    c1 = uops.add(UOps.LOAD, dtypes.int, arg=2, simplify=False)
+    c2 = uops.add(UOps.LOAD, dtypes.int, arg=3, simplify=False)
+    c3 = uops.add(UOps.CONST, dtypes.int, arg=0, simplify=False)
+    c4 = uops.add(UOps.ALU, dtypes.int, (c1, c2), BinaryOps.MUL, simplify=False)
+    c5 = uops.add(UOps.ALU, dtypes.int, (c3, c4), BinaryOps.ADD, simplify=False)
+    uops.add(UOps.STORE, dtypes.int, (c3, c5), simplify=False)
+    matcher = PatternMatcher([({"__name__": "root", "uop": UOps.ALU, "arg": BinaryOps.ADD, "dtype": dtypes.int,
+                              "vin": [{"__name__": "non_muls"}, {"__name__": "muls", "uop": UOps.ALU, "arg": BinaryOps.MUL}]},
+                              lambda root, muls, non_muls: UOp(UOps.ALU, root.dtype, muls.vin + (non_muls,), TernaryOps.MULACC))])
+    matcher.rewrite_graph(uops)
+    self.assertEqual(len(uops.uops), 5)
+
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
