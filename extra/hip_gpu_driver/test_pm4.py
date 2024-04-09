@@ -3,6 +3,7 @@ from hexdump import hexdump
 from tinygrad import Tensor, Device
 import tinygrad.runtime.autogen.amd_gpu as amd_gpu
 import tinygrad.runtime.autogen.kfd as kfd
+import tinygrad.runtime.autogen.hsa as hsa
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.runtime.ops_kfd import kio, KFDProgram
 from tinygrad.helpers import to_mv
@@ -33,6 +34,14 @@ regCOMPUTE_PGM_RSRC2 = 0x1bb3 - SUB
 COMPUTE_SHADER_EN = 1
 USE_THREAD_DIMENSIONS = 1 << 5
 CS_W32_EN = 1 << 15
+
+def format_struct(s):
+  sdats = []
+  for field_name, field_type in s._fields_:
+    dat = getattr(s, field_name)
+    if isinstance(dat, int): sdats.append(f"{field_name}:0x{dat:X}")
+    else: sdats.append(f"{field_name}:{dat}")
+  return sdats
 
 if __name__ == "__main__":
   dev = Device["KFD"]
@@ -68,19 +77,20 @@ if __name__ == "__main__":
   compute_write_pointer = to_mv(compute_queue.write_pointer_address, 8).cast("Q")
 
   hexdump(to_mv(prg.handle, 0x40))
+  code = hsa.amd_kernel_code_t.from_address(prg.handle)
+
+  #print(format_struct(code))
   #print("code")
   #hexdump(to_mv(code_ptr, 0x100))
-
-  code_ptr = (prg.handle + 0x1100) >> 8
-
   #runner.local_size = [2,1,1]
 
   print(runner.local_size, runner.global_size)
 
   #pm4_cmd += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 6), mmCOMPUTE_PGM_LO,
   #  prg.handle&0xFFFFFFFF, prg.handle>>32, 0, 0, (scratch.va_addr>>8)&0xFFFFFFFF, scratch.va_addr>>40]
+  code_ptr = (prg.handle + code.kernel_code_entry_byte_offset) >> 8
   pm4_cmd  = [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 6), regCOMPUTE_PGM_LO, code_ptr&0xFFFFFFFF, code_ptr>>32, 0, 0, 0, 0]
-  pm4_cmd += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), regCOMPUTE_PGM_RSRC1, 0x40af0000, 0x0000009e]
+  pm4_cmd += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), regCOMPUTE_PGM_RSRC1, code.compute_pgm_rsrc1, code.compute_pgm_rsrc2]
   pm4_cmd += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), regCOMPUTE_USER_DATA_0, dev.kernargs_ptr&0xFFFFFFFF, dev.kernargs_ptr>>32]
   #pm4_cmd += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), regCOMPUTE_USER_DATA_0, 0, 0]
   pm4_cmd += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 8), regCOMPUTE_START_X, 0,0,0,
