@@ -257,9 +257,12 @@ class KFDAllocator(LRUAllocator):
       else: raise
 
   def _free(self, gpumem, options:BufferOptions): self.device._gpu_free(gpumem)
-  #def as_buffer(self, src:Any) -> memoryview:
-  #  self.device.synchronize()
-  #  return to_mv(src.va_addr, src.size)
+  def as_buffer(self, src:Any) -> memoryview:
+    self.device.synchronize()
+    return to_mv(src.va_addr, src.size)
+
+  def copyin(self, dest, src: memoryview): self.as_buffer(dest)[:] = src
+  def copyout(self, dest:memoryview, src): dest[:] = self.as_buffer(src)
 
   #def copy_from_fd(self, dest, fd, offset, size):
   #  fo = io.FileIO(fd, "a+b", closefd=False)
@@ -279,20 +282,20 @@ class KFDAllocator(LRUAllocator):
   #    minor_offset = 0 # only on the first
   #  self.device._wait_signal(self.device.signal_sdma)
 
-  def copyin(self, dest, src: memoryview):
-    for i in range(0, src.nbytes, self.b[0].size):
-      ctypes.memmove(self.b[1].va_addr, from_mv(src[i:]), lsize:=min(self.b[0].size, src.nbytes-i))
-      if i != 0: self.device._wait_signal(self.device.signal_sdma)
-      self.b = self.b[::-1]
-      self.device._submit_sdma(dest.va_addr+i, self.b[0].va_addr, lsize, completion_signal=self.device.signal_sdma)
-    self.device._wait_signal(self.device.signal_sdma)
+  #def copyin(self, dest, src: memoryview):
+  #  for i in range(0, src.nbytes, self.b[0].size):
+  #    ctypes.memmove(self.b[1].va_addr, from_mv(src[i:]), lsize:=min(self.b[0].size, src.nbytes-i))
+  #    if i != 0: self.device._wait_signal(self.device.signal_sdma)
+  #    self.b = self.b[::-1]
+  #    self.device._submit_sdma(dest.va_addr+i, self.b[0].va_addr, lsize, completion_signal=self.device.signal_sdma)
+  #  self.device._wait_signal(self.device.signal_sdma)
 
-  def copyout(self, dest:memoryview, src):
-    self.device.synchronize()
-    for i in range(0, dest.nbytes, self.b[0].size):
-      self.device._submit_sdma(self.b[0].va_addr, src.va_addr+i, lsize:=min(self.b[0].size, dest.nbytes-i), completion_signal=self.device.signal_sdma)
-      self.device._wait_signal(self.device.signal_sdma)
-      ctypes.memmove(from_mv(dest[i:]), self.b[0].va_addr, lsize)
+  #def copyout(self, dest:memoryview, src):
+  #  self.device.synchronize()
+  #  for i in range(0, dest.nbytes, self.b[0].size):
+  #    self.device._submit_sdma(self.b[0].va_addr, src.va_addr+i, lsize:=min(self.b[0].size, dest.nbytes-i), completion_signal=self.device.signal_sdma)
+  #    self.device._wait_signal(self.device.signal_sdma)
+  #    ctypes.memmove(from_mv(dest[i:]), self.b[0].va_addr, lsize)
 
   def transfer(self, dest, src, sz:int, src_dev:KFDDevice, dest_dev:KFDDevice):
     dest_dev._gpu_map(src)
