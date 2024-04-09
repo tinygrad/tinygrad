@@ -29,6 +29,7 @@ class Buffer:
     return self
   def __reduce__(self):
     buf = None
+    if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options)
     if hasattr(self, '_buf'):
       buf = bytearray(self.nbytes)
       self.copyout(memoryview(buf))

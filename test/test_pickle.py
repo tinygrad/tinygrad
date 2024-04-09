@@ -15,6 +15,12 @@ class TestPickle(unittest.TestCase):
     t2:Tensor = pickle.loads(st)
     np.testing.assert_equal(t.numpy(), t2.numpy())
 
+  def test_pickle_numpy(self):
+    t = Tensor(np.array([1,2,3,4.]))
+    st = pickle.dumps(t)
+    t2:Tensor = pickle.loads(st)
+    np.testing.assert_equal(t.numpy(), t2.numpy())
+
   @unittest.expectedFailure
   def test_pickle_jit(self):
     @TinyJit
