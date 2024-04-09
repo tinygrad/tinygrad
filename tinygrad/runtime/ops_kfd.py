@@ -124,18 +124,19 @@ class HWPM4Queue:
 
   def signal(self, signal:hsa.amd_signal_t):
     assert signal.event_mailbox_ptr != 0
+    # NOTE: this needs an EOP buffer on the queue or it will NULL pointer
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_RELEASE_MEM, 6),
-      # event_index__mec_release_mem__shader_done
-      amd_gpu.PACKET3_RELEASE_MEM_EVENT_TYPE(0x14) | amd_gpu.PACKET3_RELEASE_MEM_EVENT_INDEX(6) | \
+      # event_index__mec_release_mem__end_of_pipe = 5
+      # event_index__mec_release_mem__shader_done = 6
+      amd_gpu.PACKET3_RELEASE_MEM_EVENT_TYPE(0x14) | amd_gpu.PACKET3_RELEASE_MEM_EVENT_INDEX(5) | \
         amd_gpu.PACKET3_RELEASE_MEM_GCR_GLV_INV | amd_gpu.PACKET3_RELEASE_MEM_GCR_GL1_INV | amd_gpu.PACKET3_RELEASE_MEM_GCR_GL2_INV | \
         amd_gpu.PACKET3_RELEASE_MEM_GCR_GL2_WB | amd_gpu.PACKET3_RELEASE_MEM_GCR_SEQ,
-      amd_gpu.PACKET3_RELEASE_MEM_DATA_SEL(2) | amd_gpu.PACKET3_RELEASE_MEM_INT_SEL(1) | amd_gpu.PACKET3_RELEASE_MEM_DST_SEL(0),
+      amd_gpu.PACKET3_RELEASE_MEM_DATA_SEL(2) | amd_gpu.PACKET3_RELEASE_MEM_INT_SEL(2) | amd_gpu.PACKET3_RELEASE_MEM_DST_SEL(0),
       signal.event_mailbox_ptr&0xFFFFFFFF,
       signal.event_mailbox_ptr>>32,
       signal.event_id&0xFFFFFFFF,
       signal.event_id>>32,
-      0
-    ]
+      signal.event_id]
     return self
 
   def submit(self, device:KFDDevice):
@@ -495,10 +496,12 @@ class KFDDevice(Compiled):
     self.sdma_doorbell_value = 0
 
     # PM4 Queue
+    self.eop_pm4_buffer = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
     self.gart_pm4 = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
     self.pm4_ring = self._gpu_alloc(0x100000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
     self.pm4_queue = kio.create_queue(KFDDevice.kfd, ring_base_address=self.pm4_ring.va_addr, ring_size=self.pm4_ring.size, gpu_id=self.gpu_id,
       queue_type=kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE, queue_priority=kfd.KFD_MAX_QUEUE_PRIORITY,
+      eop_buffer_address=self.eop_pm4_buffer.va_addr, eop_buffer_size=self.eop_pm4_buffer.size,
       write_pointer_address=self.gart_pm4.va_addr, read_pointer_address=self.gart_pm4.va_addr+8)
 
     self.pm4_read_pointer = to_mv(self.pm4_queue.read_pointer_address, 8).cast("Q")
@@ -541,7 +544,8 @@ class KFDDevice(Compiled):
     assert (wp:=self.amd_aql_queue.write_dispatch_id) == (rp:=self.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
 
   def synchronize(self):
-    HWComputeQueue().signal(self.completion_signal).submit(self)
+    #HWComputeQueue().signal(self.completion_signal).submit(self)
+    HWPM4Queue().signal(self.completion_signal).submit(self)
     self._wait_signal(self.completion_signal)
     assert (wp:=self.amd_aql_queue.write_dispatch_id) == (rp:=self.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
 
