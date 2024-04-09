@@ -45,7 +45,8 @@ def sigmoid_focal_loss(
   loss = loss * mask
   # print(f'SIg_LOSS_PPOOOSSSSTTT_MASK {loss.shape} {mask.shape}')
   # Reducing with sum instead of mean
-  loss = loss.sum()
+  loss = loss.sum(-1)
+  loss = loss.sum(-1)
 
   # print('sigmoid_focal_loss:', loss.shape)
   # sys.exit()
@@ -604,6 +605,24 @@ class ClassificationHead:
     return out[0].cat(*out[1:], dim=1)#.sigmoid()
   # @TinyJit
   def loss(self, logits_class, T_l, matched_idxs):
+    batch_size = logits_class.shape[0]
+    foreground_idxs = matched_idxs >= 0
+    num_foreground = foreground_idxs.sum(-1)
+    labels_temp = []
+    for tl, m in zip(T_l, matched_idxs):
+      labels_temp.append(tl[m])
+    labels_temp = Tensor.stack(labels_temp)
+    labels_temp = (labels_temp+1)*foreground_idxs-1
+    print('LAbels_temp:', labels_temp.shape)
+    gt_classes_target = labels_temp.one_hot(logits_class.shape[-1])
+    print('gt_classes_target', gt_classes_target.shape)
+    valid_idxs = matched_idxs != Matcher.BETWEEN_THRESHOLDS
+    s = sigmoid_focal_loss(logits_class, 
+                                       gt_classes_target, 
+                                       valid_idxs.reshape(batch_size,-1,1)).realize()
+    print('sig_loss:', s.shape)
+    a = s/num_foreground
+    return a.mean()
     losses = []
     for tl, cls_logits_per_image, matched_idxs_per_image in zip(T_l, logits_class, matched_idxs):
       # print(colored(f'matched_idxs_per_image CLASS {matched_idxs_per_image.shape} {cls_logits_per_image.shape}', 'red' ))
