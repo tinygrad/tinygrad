@@ -240,7 +240,7 @@ def train_unet3d():
   from examples.mlperf.metrics import dice_score
   from extra.models.unet3d import UNet3D
   from extra.datasets.kits19 import iterate, get_train_files, get_val_files, sliding_window_inference, preprocess, BASEDIR
-  from tinygrad import Device, TinyJit, Tensor
+  from tinygrad import Device, Tensor
   from tinygrad.nn.optim import SGD
   from tinygrad import GlobalCounters
   from math import ceil
