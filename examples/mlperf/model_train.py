@@ -234,7 +234,11 @@ def train_resnet():
 def train_retinanet():
   EPOCHS = 10
   BS = 2
+  WARMUP_EPOCHS = 1
+  WARMUP_FACTOR = 0.001
+  LR = 0.0001
   from extra.models.retinanetNew import RetinaNet, AnchorGenerator
+  from examples.mlperf.lr_schedulers import Retina_LR
   anchor_sizes = tuple((x, int(x * 2 ** (1.0 / 3)), int(x * 2 ** (2.0 / 3))) for x in [32, 64, 128, 256, 512])
   aspect_ratios = ((0.5, 1.0, 2.0),) * len(anchor_sizes)
   anchor_generator = AnchorGenerator(
@@ -260,7 +264,7 @@ def train_retinanet():
     else:
       x.requires_grad = False
 
-  optimizer = Adam(parameters)
+  optimizer = Adam(parameters, lr=LR)
 
   @TinyJit
   def train_step(X, Y_b_P, Y_l_P, matched_idxs):
@@ -283,6 +287,11 @@ def train_retinanet():
 
   for epoch in range(EPOCHS):
     print(colored(f'EPOCH {epoch}/{EPOCHS}:', 'cyan'))
+    lr_sched = None
+    if epoch < WARMUP_EPOCHS:
+      start_iter = epoch*len(coco.ids)//BS
+      warmup_iters = WARMUP_EPOCHS*len(coco.ids)//BS
+      lr_sched = Retina_LR(optimizer, start_iter, warmup_iters, WARMUP_FACTOR, LR)
     cnt = 0
     # for X,Y in iterate(coco, BS):
     for X, Y_boxes, Y_labels, Y_boxes_p, Y_labels_p in iterate(coco, BS):
@@ -304,7 +313,8 @@ def train_retinanet():
 
       matched_idxs = model.matcher_gen(ANCHORS, Y_boxes).realize()
       loss = train_step(X, Y_boxes_p, Y_labels_p, matched_idxs)
-
+      if lr_sched is not None:
+        lr_sched.step()
       print(colored(f'{cnt} STEP {loss.numpy()} || {time.time()-st} || LR: {optimizer.lr.item()}', 'magenta'))
       
 def train_unet3d():

@@ -20,3 +20,17 @@ class PolynomialDecayWithWarmup(LR_Scheduler):
     warmup_lr = (self.epoch_counter * (1.0 / self.warmup)) * self.initial_lr
     x = (1 - (self.epoch_counter - self.warmup) / (self.epochs - self.warmup + 1))
     return (self.epoch_counter <= self.warmup).where(warmup_lr, (self.initial_lr - self.end_lr) * x ** self.power + self.end_lr).cast(self.optimizer.lr.dtype)
+
+class Retina_LR(LR_Scheduler):
+  def __init__(self, optimizer: Optimizer, start_iter, warmup_iters, warmup_factor, base_lr):
+    super().__init__(optimizer)
+    self.start_iter = start_iter
+    self.warmup_iters = warmup_iters
+    self.warmup_factor = warmup_factor
+    self.base_lr = base_lr
+
+  def get_lr(self):
+    x = self.epoch_counter + self.start_iter 
+    temp_bool = x >= self.warmup_iters
+    a = x.item()/self.warmup_iters
+    return temp_bool.where(1*self.base_lr, (self.warmup_factor*(1-a)+a)*self.base_lr)

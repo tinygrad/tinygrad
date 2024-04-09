@@ -151,15 +151,19 @@ def normalize(x):
   
 def iterate(coco, bs=8):
   i = 0
-  while(i<len(coco.ids)):
+  i_sub = 0
+  rem =0
+  while(i+bs+rem<len(coco.ids)):
+    # print('iterate', i)
     i_sub = 0
     rem =0
     X, target_boxes, target_labels, target_boxes_padded, target_labels_padded = [], [], [], [], []
-    while(i_sub<bs):
+    while(i_sub<bs and i+bs+rem<len(coco.ids)):
       # print(i_sub)
       x_orig,t = coco.__getitem__(i+i_sub+rem)
       # print('X_ORIG_SIZE', x_orig.size)
       # print('DATLOAD_ITER', t['boxes'].shape)
+
       # Training not done on empty targets
       if(t['boxes'].shape[0]<=0):
         rem+=1
