@@ -177,7 +177,7 @@ class NVProgram:
       self.args_struct_t = init_c_struct_t(tuple([(f'f{i}', ctypes.c_void_p) for i in range(len(args))] +
                                                 [(f'v{i}', ctypes.c_int) for i in range(len(vals))]))
 
-    ctypes.memset(self.device.kernargs_ptr, 0x0, 0x160)
+    # ctypes.memset(self.device.kernargs_ptr, 0x0, 0x160)
     args_st = self.args_struct_t.from_address(self.device.kernargs_ptr + 0x160)
     for i in range(len(args)): args_st.__setattr__(f'f{i}', args[i])
     for i in range(len(vals)): args_st.__setattr__(f'v{i}', vals[i])
@@ -200,6 +200,12 @@ class NVProgram:
     set_bits_in_array(qmd, *nvqcmd.NVC6C0_QMDV03_00_RELEASE0_PAYLOAD_LOWER, 0x1)
     set_bits_in_array(qmd, *nvqcmd.NVC6C0_QMDV03_00_RELEASE0_STRUCTURE_SIZE, 0x1)
     set_bits_in_array(qmd, *nvqcmd.NVC6C0_QMDV03_00_RELEASE0_MEMBAR_TYPE, 0x1)
+
+    # set_bits_in_array(qmd, *nvqcmd.NVC6C0_QMDV03_00_CONSTANT_BUFFER_ADDR_UPPER(1), self.device.kernargs_ptr>>32)
+    # set_bits_in_array(qmd, *nvqcmd.NVC6C0_QMDV03_00_CONSTANT_BUFFER_ADDR_LOWER(1), self.device.kernargs_ptr&0xffffffff)
+    # set_bits_in_array(qmd, *nvqcmd.NVC6C0_QMDV03_00_CONSTANT_BUFFER_SIZE_SHIFTED4(1), 0x90)
+    # set_bits_in_array(qmd, *nvqcmd.NVC6C0_QMDV03_00_CONSTANT_BUFFER_VALID(1), nvqcmd.NVC6C0_QMDV03_00_CONSTANT_BUFFER_VALID_TRUE)
+
     if self.constant_buffer is not None:
       ctypes.memmove(self.device.constbuf_ptr, from_mv(self.constant_buffer), self.constant_buffer.nbytes)
       set_bits_in_array(qmd, *nvqcmd.NVC6C0_QMDV03_00_CONSTANT_BUFFER_ADDR_UPPER(2), self.device.constbuf_ptr>>32)
@@ -225,46 +231,51 @@ class NVProgram:
     cmdq_push_method(self.device, 1, nvqcmd.NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI, 1)
     cmdq_push_data(self.device, (1 << 12) | (1 << 4) | (1 << 0))
 
+    self.device.inc += 1
+
     # CONSTBUFFER FILLUP
-    # cmdq_push_method(self.device, 1, nvqcmd.NVC6C0_OFFSET_OUT_UPPER, 2)
-    # cmdq_push_data64(self.device, self.device.kernargs_ptr)
-    # cmdq_push_method(self.device, 1, nvqcmd.NVC6C0_LINE_LENGTH_IN, 2)
-    # cmdq_push_data(self.device, 0x160)
-    # cmdq_push_data(self.device, 0x1)
-    # cmdq_push_method(self.device, 1, nvqcmd.NVC6C0_LAUNCH_DMA, 1)
-    # cmdq_push_data(self.device, 0x41)
-    # cmdq_push_method(self.device, 1, nvqcmd.NVC6C0_LOAD_INLINE_DATA, 0x160 // 4, typ=6)
-    # cmdq_push_data(self.device, global_size[0])
-    # cmdq_push_data(self.device, global_size[1])
-    # cmdq_push_data(self.device, global_size[2])
-    # cmdq_push_data(self.device, local_size[0])
-    # cmdq_push_data(self.device, local_size[1])
-    # cmdq_push_data(self.device, local_size[2])
-    # cmdq_push_data64_le(self.device, self.device.NVC6C0_SHADER_SHARED_MEMORY_WINDOW)
-    # cmdq_push_data64_le(self.device, self.device.NVC6C0_SHADER_LOCAL_MEMORY_WINDOW)
-    # cmdq_push_data64_le(self.device, 0xfffdc0)
-    # cmdq_push_data64_le(self.device, 0x1) # TODO: change this
-    # cmdq_push_data64_le(self.device, self.device.unknown_buffer_1) # ???
-    # cmdq_push_data64_le(self.device, self.device.kernargs_ptr) # constant buffer 0
-    # cmdq_push_data64_le(self.device, 0x0) # cuda sets constant buffer 1, something uses it? what's there?
-    # for i in range(7): cmdq_push_data64_le(self.device, 0x0) # don't have any other const buffers
-    # cmdq_push_data64_le(self.device, 0x37a2f08) # always the same, flags?
-    # for i in range(2): cmdq_push_data64_le(self.device, 0x0)
-    # cmdq_push_data64_le(self.device, 0x1) # always the same
-    # for i in range(12): cmdq_push_data64_le(self.device, 0x0)
-    # cmdq_push_data(self.device, 0x0)
-    # cmdq_push_data(self.device, 0x80)
-    # cmdq_push_data(self.device, 0x0)
-    # cmdq_push_data(self.device, 0x400)
-    # for i in range(2): cmdq_push_data(self.device, 0xf)
-    # cmdq_push_data(self.device, 0x120)
-    # for i in range(2): cmdq_push_data(self.device, 0x0)
-    # cmdq_push_data(self.device, 0x160 + len(args)*8 + len(vals)*4)
-    # for i in range(2): cmdq_push_data(self.device, 0x0)
-    # cmdq_push_data64_le(self.device, self.device.unknown_buffer_2) # ???
-    # cmdq_push_data64_le(self.device, self.lib_gpu)
-    # cmdq_push_data64_le(self.device, 0x400) # shared mem
-    # for i in range(2): cmdq_push_data64_le(self.device, 0x0)
+    cmdq_push_method(self.device, 1, nvqcmd.NVC6C0_OFFSET_OUT_UPPER, 2)
+    cmdq_push_data64(self.device, self.device.kernargs_ptr)
+    cmdq_push_method(self.device, 1, nvqcmd.NVC6C0_LINE_LENGTH_IN, 2)
+    cmdq_push_data(self.device, 0x160)
+    cmdq_push_data(self.device, 0x1)
+    cmdq_push_method(self.device, 1, nvqcmd.NVC6C0_LAUNCH_DMA, 1)
+    cmdq_push_data(self.device, 0x41)
+    cmdq_push_method(self.device, 1, nvqcmd.NVC6C0_LOAD_INLINE_DATA, 0x160 // 4, typ=6)
+    cmdq_push_data(self.device, global_size[0])
+    cmdq_push_data(self.device, global_size[1])
+    cmdq_push_data(self.device, global_size[2])
+    cmdq_push_data(self.device, local_size[0])
+    cmdq_push_data(self.device, local_size[1])
+    cmdq_push_data(self.device, local_size[2])
+    cmdq_push_data64_le(self.device, self.device.NVC6C0_SHADER_SHARED_MEMORY_WINDOW)
+    cmdq_push_data64_le(self.device, self.device.NVC6C0_SHADER_LOCAL_MEMORY_WINDOW)
+    cmdq_push_data64_le(self.device, 0xfffdc0)
+    cmdq_push_data64_le(self.device, self.device.inc) # TODO: change this
+    cmdq_push_data64_le(self.device, self.device.unknown_buffer_1) # ???
+    cmdq_push_data64_le(self.device, self.device.kernargs_ptr) # constant buffer 0
+    cmdq_push_data64_le(self.device, 0x0) # cuda sets constant buffer 1, something uses it? what's there?
+    for i in range(7): cmdq_push_data64_le(self.device, 0x0) # don't have any other const buffers
+    cmdq_push_data64_le(self.device, 0x37a2f08) # always the same, flags?
+    for i in range(2): cmdq_push_data64_le(self.device, 0x0)
+    cmdq_push_data64_le(self.device, 0x1) # always the same
+    for i in range(12): cmdq_push_data64_le(self.device, 0x0)
+    cmdq_push_data(self.device, 0x0)
+    cmdq_push_data(self.device, 0x80)
+    cmdq_push_data(self.device, 0x0)
+    cmdq_push_data(self.device, 0x400)
+    for i in range(2): cmdq_push_data(self.device, 0xf)
+    cmdq_push_data(self.device, 0x120)
+    for i in range(2): cmdq_push_data(self.device, 0x0)
+    cmdq_push_data(self.device, 0x160 + len(args)*8 + len(vals)*4)
+    for i in range(2): cmdq_push_data(self.device, 0x0)
+    cmdq_push_data64_le(self.device, self.device.unknown_buffer_2) # ???
+    cmdq_push_data64_le(self.device, self.lib_gpu)
+    cmdq_push_data64_le(self.device, 0x400) # shared mem
+    for i in range(2): cmdq_push_data64_le(self.device, 0x0)
+
+    cmdq_push_method(self.device, 1, nvqcmd.NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI, 1)
+    cmdq_push_data(self.device, (1 << 12) | (1 << 4) | (1 << 0))
 
     # # self.device._cmdq_insert_progress_semaphore(subc=1)
     # packets_written = (self.device.cmdq_wptr - cmdq_start_wptr) // 4
@@ -295,11 +306,13 @@ class NVProgram:
   
     cmdq_push_method(self.device, 1, nvqcmd.NVC6C0_SET_INLINE_QMD_ADDRESS_A, 0x42)
     # print(hex(self.device.qmd))
-    cmdq_push_data64(self.device, self.device.qmd>>8)
+    cmdq_push_data64(self.device, self.device.qmd_ptr>>8)
     cmdq_blit_data(self.device, qmd, 0x40 * 4)
     # for i in range(0x40): cmdq_push_data(self.device, qmd[i])
 
-    self.device.qmd += 8 << 8
+    self.device.qmd_ptr += 8 << 8
+    if self.device.qmd_ptr - self.device.qmd_base_addr >= 0x800000:
+      self.device.qmd_ptr = self.device.qmd_base_addr
 
     # self.device._cmdq_insert_progress_semaphore(subc=1)
     # cmdq_push_method(self.device, 1, nvqcmd.NVC6C0_SET_REPORT_SEMAPHORE_A, 4)
@@ -312,7 +325,7 @@ class NVProgram:
     self.device.compute_put_value = (self.device.compute_put_value + 1) % self.device.compute_gpfifo_entries
     self.device.compute_gpu_ring_controls.GPPut = self.device.compute_put_value
     self.device._cmdq_ring_doorbell(self.device.compute_gpfifo_token)
-    print("DAL", self.device.compute_put_value)
+    # print("DAL", self.device.compute_put_value)
     self.device.synchronize() # TODO: remove
     # print("EXIT")
     # import time
@@ -406,13 +419,24 @@ class NVDevice(Compiled):
     if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
     return fd_dev0
 
-  def _gpu_map_to_cpu(self, memory_handle, size, target=None, flags=0, need_fd=True):
-    fd_dev0 = self._new_gpu_fd() if need_fd else -1
+  def _gpu_map_to_cpu(self, memory_handle, size, target=None, flags=0, use_reloc=True):
+    fd_dev0 = self._new_gpu_fd() #if not use_reloc else -1
     made = nvesc.nv_ioctl_nvos33_parameters_with_fd(fd=fd_dev0,
       params=nvesc.NVOS33_PARAMETERS(hClient=self.root, hDevice=self.device, hMemory=memory_handle, length=size, flags=flags))
     ret = fcntl.ioctl(self.fd_ctl, _IOWR(ord('F'), nvesc.NV_ESC_RM_MAP_MEMORY, ctypes.sizeof(made)), made)
     if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
     if made.params.status != 0: raise RuntimeError(f"mmap_object returned {made.params.status}")
+
+    # if use_reloc:
+    #   addr = made.params.pLinearAddress
+    #   if target is not None:
+    #     made = nvesc.NVOS56_PARAMETERS(hClient=self.root, hDevice=self.device, hMemory=memory_handle, pOldCpuAddress=addr, pNewCpuAddress=target)
+    #     ret = fcntl.ioctl(self.fd_ctl, _IOWR(ord('F'), nvesc.NV_ESC_RM_UPDATE_DEVICE_MAPPING_INFO, ctypes.sizeof(made)), made)
+    #     if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
+    #     if made.status != 0: raise RuntimeError(f"mmap_object returned {made.params.status}")
+    #     addr = target
+    #   # return addr
+
     res = libc.mmap(target, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if target is not None else 0), fd_dev0, 0)
     # print(hex(res))
     return res
@@ -479,7 +503,7 @@ class NVDevice(Compiled):
     self.device = rm_alloc(self.fd_ctl, nvcls.NV01_DEVICE_0, self.root, self.root, device_params).hObjectNew
     self.subdevice = rm_alloc(self.fd_ctl, nvcls.NV20_SUBDEVICE_0, self.root, self.device, None).hObjectNew
     self.usermode = rm_alloc(self.fd_ctl, nvcls.TURING_USERMODE_A, self.root, self.subdevice, None).hObjectNew
-    gpu_mmio_ptr = self._gpu_map_to_cpu(self.usermode, 0x10000, flags=2)
+    gpu_mmio_ptr = self._gpu_map_to_cpu(self.usermode, 0x10000, flags=2, use_reloc=False)
 
     vaspace_params = nvesc.NV_VASPACE_ALLOCATION_PARAMETERS(vaBase=0x1000, vaSize=0x1fffffb000000,
       flags=nvesc.NV_VASPACE_ALLOCATION_FLAGS_ENABLE_PAGE_FAULTING | nvesc.NV_VASPACE_ALLOCATION_FLAGS_IS_EXTERNALLY_OWNED)
@@ -501,12 +525,12 @@ class NVDevice(Compiled):
     channel_group = rm_alloc(self.fd_ctl, nvcls.KEPLER_CHANNEL_GROUP_A, self.root, self.device, channel_params).hObjectNew
 
     gpfifo_mem_handle = self._gpu_alloc(0x200000, huge_page=True, contig=True)
-    gpfifo_addr = self._gpu_uvm_map(gpfifo_mem_handle, 0x200000, cpu_visible=True, fixed_address=0x200400000 + 0x10000000 * self.device_id)
+    gpfifo_addr = self._gpu_uvm_map(gpfifo_mem_handle, 0x200000, cpu_visible=True, fixed_address=0x200400000 + 0x10000000 * self.device_id, map_flags=0x10d0000)
 
     ctxshare_params = nvesc.NV_CTXSHARE_ALLOCATION_PARAMETERS(hVASpace=vaspace, flags=nvesc.NV_CTXSHARE_ALLOCATION_FLAGS_SUBCONTEXT_ASYNC)
     ctxshare = rm_alloc(self.fd_ctl, nvcls.FERMI_CONTEXT_SHARE_A, self.root, channel_group, ctxshare_params).hObjectNew
 
-    self.compute_gpfifo_entries = 0x1000
+    self.compute_gpfifo_entries = 0x4000
     self.compute_gpfifo_token = self._gpu_fifo_setup(gpfifo_mem_handle, gpfifo_addr, ctxshare, channel_group, offset=0, entries=self.compute_gpfifo_entries)
 
     self.dma_gpfifo_entries = 0x4000
@@ -523,9 +547,9 @@ class NVDevice(Compiled):
     self.dma_put_value = 0
     self.gpu_mmio = to_mv(gpu_mmio_ptr, 0x10000).cast("I")
 
-    cmdq_mem_handle = self._gpu_alloc(0x200000, huge_page=True, contig=True)
-    self.cmdq_addr = self._gpu_uvm_map(cmdq_mem_handle, 0x200000, cpu_visible=True, fixed_address=0x200700000 + 0x10000000 * self.device_id)
-    self.cmdq = to_mv(self.cmdq_addr, 0x200000).cast("I")
+    cmdq_mem_handle = self._gpu_alloc(0x600000, huge_page=True, contig=True)
+    self.cmdq_addr = self._gpu_uvm_map(cmdq_mem_handle, 0x600000, cpu_visible=True, fixed_address=0x400700000 + 0x10000000 * self.device_id)
+    self.cmdq = to_mv(self.cmdq_addr, 0x600000).cast("I")
     self.cmdq_wptr = 0 # in bytes
 
     semaphores_mem_handle = self._gpu_alloc(0x200000, huge_page=True, contig=True)
@@ -540,13 +564,15 @@ class NVDevice(Compiled):
     self.constbuf_base_addr = self._gpu_uvm_map(constbuf_mem_handle, 0x200000, cpu_visible=True, fixed_address=0x300c00000 + 0x10000000 * self.device_id)
     self.constbuf_ptr = self.constbuf_base_addr
 
-    qmd_mem_handle = self._gpu_alloc(0x600000, huge_page=True, contig=True)
-    self.qmd = self._gpu_uvm_map(qmd_mem_handle, 0x600000, cpu_visible=True, fixed_address=0x300e00000 + 0x10000000 * self.device_id)
+    qmd_mem_handle = self._gpu_alloc(0x800000, huge_page=True, contig=True)
+    self.qmd_base_addr = self._gpu_uvm_map(qmd_mem_handle, 0x800000, cpu_visible=True, fixed_address=0x300e00000 + 0x10000000 * self.device_id)
+    self.qmd_ptr = self.qmd_base_addr
 
     progs_mem_handle = self._gpu_alloc(0x600000, huge_page=True, contig=True)
     self.progs_addr_start = self.progs_addr = self._gpu_uvm_map(progs_mem_handle, 0x600000, cpu_visible=True)
 
     self.arch = 'sm_89' # TODO: fix
+    self.inc = 0
     self.pending_copyin = []
 
     super().__init__(device, NVAllocator(self), NVCompiler(self.arch), functools.partial(NVProgram, self))
@@ -585,23 +611,32 @@ class NVDevice(Compiled):
     assert ws_token_params.workSubmitToken != -1
 
     register_channel_params = nvuvm.UVM_REGISTER_CHANNEL_PARAMS(gpuUuid=nvuvm.struct_nv_uuid(uuid=self.gpu_uuid), rmCtrlFd=self.fd_ctl, hClient=self.root,
-      hChannel=gpfifo, base=0x203600000, length=0x2c1a000)
+      hChannel=gpfifo, base=0x203600000, length=0x4000000)
     uvm_ioctl(self.fd_uvm, int(nvuvm.UVM_REGISTER_CHANNEL[2]), register_channel_params)
 
     return ws_token_params.workSubmitToken
 
   def _cmdq_setup_compute_gpfifo(self):
     shared_mem_handle = self._gpu_alloc(0x8000000, huge_page=True, contig=True)
-    start = self._gpu_uvm_map(shared_mem_handle, 0x8000000, cpu_visible=True, fixed_address=0x7f7d55000000)
+    start = self._gpu_uvm_map(shared_mem_handle, 0x8000000)
+    local_mem_window_handle = self._gpu_alloc(0x12c00000, huge_page=True, contig=True)
+    self.NVC6C0_SHADER_LOCAL_MEMORY_WINDOW = self._gpu_uvm_map(local_mem_window_handle, 0x12c00000)
+    local_mem_handle = self._gpu_alloc(0x12c00000, huge_page=True, contig=True)
+    self.NVC6C0_SHADER_LOCAL_MEMORY = self._gpu_uvm_map(local_mem_handle, 0x12c00000)
+    # print(hex(self.NVC6C0_SHADER_LOCAL_MEMORY_WINDOW))
     # start = 0x7f7d55000000
-    self.NVC6C0_SHADER_LOCAL_MEMORY_WINDOW = start
+    # self.NVC6C0_SHADER_LOCAL_MEMORY_WINDOW = start
     self.NVC6C0_SHADER_SHARED_MEMORY_WINDOW = start + 0x2000000
-    self.unknown_buffer_1 = start + 0x4000000
-    self.unknown_buffer_2 = start + 0x6000000
+    self.unknown_buffer_1 = 0xffffffffffffffff
+    self.unknown_buffer_2 = 0xffffffffffffffff
 
     cmdq_start_wptr = self.cmdq_wptr
     cmdq_push_method(self, 1, nvqcmd.NVC6C0_SET_OBJECT, 1)
     cmdq_push_data(self, nvcls.ADA_COMPUTE_A)
+    cmdq_push_method(self, 1, nvqcmd.NVC6C0_SET_SHADER_LOCAL_MEMORY_A, 1)
+    cmdq_push_data(self, (self.NVC6C0_SHADER_LOCAL_MEMORY >> 32))
+    cmdq_push_method(self, 1, nvqcmd.NVC6C0_SET_SHADER_LOCAL_MEMORY_B, 1)
+    cmdq_push_data(self, (self.NVC6C0_SHADER_LOCAL_MEMORY & 0xffffffff))
     cmdq_push_method(self, 1, nvqcmd.NVC6C0_SET_SHADER_SHARED_MEMORY_WINDOW_A, 1)
     cmdq_push_data(self, (self.NVC6C0_SHADER_SHARED_MEMORY_WINDOW >> 32))
     cmdq_push_method(self, 1, nvqcmd.NVC6C0_SET_SHADER_SHARED_MEMORY_WINDOW_B, 1)
