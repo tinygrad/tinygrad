@@ -438,58 +438,45 @@ class RetinaNet:
     return logits_reg.mean()+logits_class.mean()+temp
   def loss_dummy(self, r, c):
     return r.argmax()+c.argmax()
-  def loss(self, logits_reg, logits_class, t_b, t_l, anchors) -> Tensor:
-    # print(colored(f'RNET_LOSS SHAPES {logits_reg.shape} {logits_class.shape}','green'))
+  def matcher_gen(self, anchors, target_boxes):
     matched_idxs = []
-    for anchors_per_image, tb in zip(anchors, t_b):
+    for anchors_per_image, tb in zip(anchors, target_boxes):
       if tb.numel() == 0:
         print('NUMEL==0 HIT!!!')
         matched_idxs.append(Tensor.full((anchors_per_image.shape[0],), -1, dtype=dtypes.int64,))
                                         # device=anchors_per_image.device))
         continue
-
       match_quality_matrix = box_iou(tb, anchors_per_image)
       # print(colored(f'BOX_IOU {match_quality_matrix.shape} {match_quality_matrix.numpy()}', 'green'))
       # print('match_quality_matrix', match_quality_matrix.shape)
       # print(match_quality_matrix.numpy())
-      matched_idxs.append(self.proposal_matcher(match_quality_matrix))
+      matched_idxs.append(self.proposal_matcher(match_quality_matrix.realize()))
       # print(colored(f'PROP MATCHER {matched_idxs[-1].shape} {matched_idxs[-1].numpy()}', 'magenta'))
-      # print('matcher apppend:', matched_idxs[-1].shape)
-      # sys.exit()
-    # return logits_class.sum()
+    matched_idxs = Tensor.stack(matched_idxs)
+    return matched_idxs
+  def loss(self, logits_reg, logits_class, t_b, t_l, anchors, t_b_padded, t_l_padded) -> Tensor:
+    # print(colored(f'RNET_LOSS SHAPES {logits_reg.shape} {logits_class.shape}','green'))
+    # matched_idxs = []
+    # for anchors_per_image, tb in zip(anchors, t_b):
+    #   if tb.numel() == 0:
+    #     print('NUMEL==0 HIT!!!')
+    #     matched_idxs.append(Tensor.full((anchors_per_image.shape[0],), -1, dtype=dtypes.int64,))
+    #                                     # device=anchors_per_image.device))
+    #     continue
 
-    # losses_reg, losses_class = [], []
-    # for bbox_regression_per_image, cls_logits_per_image, tb, tl, anchors_per_image, matched_idxs_per_image in \
-    # zip(logits_reg, logits_class, t_b, t_l, anchors, matched_idxs):
-    #   foreground_idxs_per_image = matched_idxs_per_image >= 0
-    #   num_foreground = foreground_idxs_per_image.sum().item()
-    #   foreground_idxs_per_image = foreground_idxs_per_image.reshape(-1,1)
-
-    #   matched_gt_boxes_per_image = tb[matched_idxs_per_image]*foreground_idxs_per_image
-    #   bbox_regression_per_image = bbox_regression_per_image * foreground_idxs_per_image
-    #   anchors_per_image = anchors_per_image * foreground_idxs_per_image
-    #   target_regression = encode_boxes(matched_gt_boxes_per_image, anchors_per_image)
-    #   target_regression = target_regression*foreground_idxs_per_image
-    #   a = l1_loss(
-    #     bbox_regression_per_image,
-    #     target_regression,
-    #   ) / max(1, num_foreground)
-    #   losses_reg.append(a.realize())
-
-    #   new_mask = Tensor.where(foreground_idxs_per_image, 1, -1)
-    #   labels_temp = tl[matched_idxs_per_image] *new_mask
-    #   gt_classes_target = labels_temp.one_hot(cls_logits_per_image.shape[-1])
-    #   valid_idxs_per_image = matched_idxs_per_image != Matcher.BETWEEN_THRESHOLDS
-    #   s = sigmoid_focal_loss(cls_logits_per_image, 
-    #                                    gt_classes_target, 
-    #                                    valid_idxs_per_image.reshape(-1,1))
-    #   a = s/max(1, num_foreground)
-    #   losses_class.append(a.realize())
-    
-    # loss_reg = _sum(losses_reg)/logits_reg.shape[0]
-    # loss_class = _sum(losses_class)/logits_reg.shape[0]
-    loss_class = self.head.classification_head.loss(logits_class, t_l, matched_idxs)
-    loss_reg = self.head.regression_head.loss(logits_reg, t_b, anchors, matched_idxs)
+    #   match_quality_matrix = box_iou(tb, anchors_per_image)
+    #   # print(colored(f'BOX_IOU {match_quality_matrix.shape} {match_quality_matrix.numpy()}', 'green'))
+    #   # print('match_quality_matrix', match_quality_matrix.shape)
+    #   # print(match_quality_matrix.numpy())
+    #   matched_idxs.append(self.proposal_matcher(match_quality_matrix.realize()))
+    #   # print(colored(f'PROP MATCHER {matched_idxs[-1].shape} {matched_idxs[-1].numpy()}', 'magenta'))
+    #   # print('matcher apppend:', matched_idxs[-1].shape)
+    #   # sys.exit()
+    # # return logits_class.sum()
+    # matched_idxs = Tensor.stack(matched_idxs)
+    matched_idxs = self.matcher_gen(anchors, t_b)
+    loss_class = self.head.classification_head.loss(logits_class, t_l_padded, matched_idxs)
+    loss_reg = self.head.regression_head.loss(logits_reg, t_b_padded, anchors, matched_idxs)
     
     # return loss_class
     # return loss_reg
@@ -610,6 +597,7 @@ class ClassificationHead:
   def __call__(self, x):
     out = [self.cls_logits(feat.sequential(self.conv)).permute(0, 2, 3, 1).reshape(feat.shape[0], -1, self.num_classes) for feat in x]
     return out[0].cat(*out[1:], dim=1)#.sigmoid()
+  # @TinyJit
   def loss(self, logits_class, T_l, matched_idxs):
     losses = []
     for tl, cls_logits_per_image, matched_idxs_per_image in zip(T_l, logits_class, matched_idxs):
@@ -621,9 +609,11 @@ class ClassificationHead:
       # gt_classes_target = []
       # match_temp = Tensor.where(foreground_idxs_per_image, matched_idxs_per_image, -1)
       # labels_temp = (((targets_per_image['labels'][matched_idxs_per_image]+1)*foreground_idxs_per_image)-1)#.reshape(-1,1)
-      new_mask = Tensor.where(foreground_idxs_per_image, 1, -1)
       
-      labels_temp = tl[matched_idxs_per_image] *new_mask#.reshape(-1,1)
+      # new_mask = Tensor.where(foreground_idxs_per_image, 1, -1)
+      # negative IDX give 0's in one_hot
+      labels_temp = tl[matched_idxs_per_image] #*new_mask#.reshape(-1,1)
+      labels_temp = Tensor.where(foreground_idxs_per_image, labels_temp, -1)
       # print('NEW-MASK', labels_temp.shape, new_mask.shape)
       # labels_temp = Tensor.where(foreground_idxs_per_image, )
       # print(colored(f'LABEL_TEMP {labels_temp.shape} {labels_temp.numpy()}', 'yellow'))
@@ -712,6 +702,7 @@ class ClassificationHead:
     # print(losses[0].shape)
     # return losses[0]+losses[1]
     # return Tensor.stack(losses).mean()
+    return _sum(losses) / logits_class.shape[0]
     return _sum(losses) / len(T_l)
   
 
@@ -736,6 +727,7 @@ class RegressionHead:
   def __call__(self, x):
     out = [self.bbox_reg(feat.sequential(self.conv)).permute(0, 2, 3, 1).reshape(feat.shape[0], -1, 4) for feat in x]
     return out[0].cat(*out[1:], dim=1)
+  # @TinyJit
   def loss(self, logits_reg, T_b, anchors, matched_idxs):
     losses = []
 
@@ -798,6 +790,7 @@ class RegressionHead:
     # for i in losses:
     #   print(i.numpy())
     # return Tensor.stack(losses).mean()
+    return _sum(losses) / logits_reg.shape[0]
     return _sum(losses) / max(1, len(T_b))
 class RetinaHead:
   def __init__(self, in_channels, num_anchors, num_classes):

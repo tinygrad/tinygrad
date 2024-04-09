@@ -443,15 +443,15 @@ def train_retinanet():
     # if 'head' in k and ('clas' in k ):
       print(k)
       x.requires_grad = True
-      # parameters.append(x)
+      parameters.append(x)
     else:
       x.requires_grad = False
     # x.realize()
     # print(k, x.numpy(), x.grad)
-  p = get_parameters(model)
-  for t in p:
-    if t.requires_grad:
-      parameters.append(t)
+  # p = get_parameters(model)
+  # for t in p:
+  #   if t.requires_grad:
+  #     parameters.append(t)
   optimizer = Adam(parameters)
   # for k, x in get_state_dict(model).items():
   #   if 'head' in k:
@@ -460,10 +460,8 @@ def train_retinanet():
   #     x.requires_grad = False
   #   # print(k, x.requires_grad)
   # @TinyJit
-  def train_step(X, Y_b, Y_l, anchors):
+  def train_step(X, Y_b_P, Y_l_P, matched_idxs):
     Tensor.training = True
-    
-
     # optimizer.zero_grad()
 
     # mdlloss.reset()
@@ -472,6 +470,7 @@ def train_retinanet():
     # Tensor.training = False
     b,r,c = mdlrun(X)
     # b,r,c = model(X, True)
+    # return model.loss_dummy(r,c)
     # o = mdlrun_false(X)
     # o = model(X, False)
     # loss = o.max()
@@ -482,11 +481,17 @@ def train_retinanet():
     # r = r.chunk(BS)
     # r = [rr.squeeze(0) for rr in r]
     # c = c.chunk(BS)
-    # c = [cc.squeeze(0) for cc in c]
+    # c = [cc.squeeze(0).contiguous() for cc in c]
 
     # loss = Tensor(69)
     # loss_reg, loss_class = model.loss(r, c, Y, anchor_generator(X, b))
-    loss_reg, loss_class = model.loss(r, c, Y_b, Y_l, anchors)
+    # loss_reg, loss_class = model.loss(r, c, Y_b, Y_l, anchors, Y_b_P, Y_l_P)
+    # loss_reg = model.head.regression_head.loss(r, Y_b_P, anchors, matched_idxs)
+    # loss_class = model.head.classification_head.loss(c, Y_l_P, matched_idxs)
+    # loss_reg = mdl_reg_loss_jit(r, Y_b_P, matched_idxs)
+    # loss_class = mdl_class_loss_jit(c, Y_l_P, matched_idxs)
+    loss_reg = mdl_reg_loss(r, Y_b_P, matched_idxs)
+    loss_class = mdl_class_loss(c, Y_l_P, matched_idxs)
 
     print(colored(f'loss_reg {loss_reg.numpy()}', 'green'))
     print(colored(f'loss_class {loss_class.numpy()}', 'green'))
@@ -495,34 +500,26 @@ def train_retinanet():
     # loss = model.loss_temp(r,c, Y, anchor_generator(X, b))
     # loss = mdlloss(r, c, Y, anchor_generator(X, b))
     # loss = model.loss_dummy(r,c)
-    
+    # for o in optimizer.params:
+    #   print(o.grad)
     # loss.backward()
+    # print('******')
+    # for o in optimizer.params:
+    #   print(o.grad)
     # optimizer.step()
     return loss.realize()
-    return model(input_fixup(X))
-    b,r,c = model(input_fixup(X))
-    # outputs = mdlrun(X)
-    # image_list = ImageList(X, [(800,800)]*X.shape[0])
-    # return outputs
-    # b, r, c = outputs
-    # c.realize()
-    # r.realize()
-    return b, r, c
-    return b, r.realize(), c.realize()
-    return [bI.realize() for bI in b], r.realize(), c.realize()
-    anchors = anchor_generator(image_list, b)
-    loss = model.loss(r, c, Y, anchors)
-    # loss = mdlloss(r, c, Y, anchors)
-    # return loss
-    # loss = outputs['h']
-    return loss.realize()
+
   # print('Yuh', anchor_generator.num_anchors_per_location()[0])
   # sys.exit()
   for epoch in range(EPOCHS):
     print(colored(f'EPOCH {epoch}/{EPOCHS}:', 'cyan'))
     cnt = 0
     # for X,Y in iterate(coco, BS):
-    for X,Y_boxes,Y_labels in iterate(coco, BS):
+    for X, Y_boxes, Y_labels, Y_boxes_p, Y_labels_p in iterate(coco, BS):
+      # print('SHAPE_CHECKK', Y_labels_p.shape)
+      # print('ITERATE', Y_boxes_p.shape, Y_labels_p.shape)
+      # for y1,y2 in zip(Y_boxes_p, Y_labels_p):
+      #   print(y1.shape, y2.shape)
       # print('X_REQ_GRADDD', X.requires_grad)
       # train_step.reset()
       # if cnt<5: sigmoid_focal_loss.reset()
@@ -530,6 +527,12 @@ def train_retinanet():
         b,_,_ = mdlrun(X)
         ANCHORS = anchor_generator(X, b)
         ANCHORS = [a.realize() for a in ANCHORS]
+        ANCHORS = Tensor.stack(ANCHORS)
+        mdl_reg_loss_jit = TinyJit(lambda r, y, m: model.head.regression_head.loss(r,y,ANCHORS, m).realize())
+        mdl_class_loss_jit = TinyJit(lambda c, y,m: model.head.classification_head.loss(c,y,m).realize())
+        mdl_reg_loss = lambda r, y, m: model.head.regression_head.loss(r,y,ANCHORS, m)
+        mdl_class_loss = lambda c, y,m: model.head.classification_head.loss(c,y,m)
+
       st = time.time()
       # print('IMAGE DATA', X)
       # for tt in Y:
@@ -547,7 +550,8 @@ def train_retinanet():
       # optimizer.zero_grad()
       # a = anchor_generator(X, b)
       # loss = train_step(X, Y)
-      loss = train_step(X, Y_boxes, Y_labels, ANCHORS)
+      matched_idxs = model.matcher_gen(ANCHORS, Y_boxes)
+      loss = train_step(X, Y_boxes_p, Y_labels_p, matched_idxs)
       # loss = Tensor(44)
       
       # print(colored(f'JIT STATE {train_step.cnt} {train_step.jit_cache} {train_step.input_replace}', 'red'))

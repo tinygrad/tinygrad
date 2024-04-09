@@ -227,12 +227,13 @@ def iterate(coco, bs=8):
     i_sub = 0
     rem =0
     # X, targets = [], []
-    X, target_boxes, target_labels = [], [], []
+    X, target_boxes, target_labels, target_boxes_padded, target_labels_padded = [], [], [], [], []
     while(i_sub<bs):
       # print(i_sub)
       x_orig,t = coco.__getitem__(i+i_sub+rem)
       # print('X_ORIG_SIZE', x_orig.size)
       # print('DATLOAD_ITER', t['boxes'].shape)
+      # Training not done on empty targets
       if(t['boxes'].shape[0]<=0):
         rem+=1
         # pass
@@ -263,23 +264,31 @@ def iterate(coco, bs=8):
         X.append(xNew)
         bbox = t['boxes']
         # print('ITERATE_PRE_RESIZE', bbox.shape)
-        bbox = resize_boxes(bbox, (x_orig.size[1],x_orig.size[0]), SIZE)
-        # bbox = resize_boxes(bbox, x_orig.size, SIZE)
+        # bbox = resize_boxes(bbox, (x_orig.size[1],x_orig.size[0]), SIZE)
+        bbox = resize_boxes(bbox, x_orig.size, SIZE)
 
         # print('ITERATE_POST_RESIZE', bbox.shape)
         t['boxes'] = bbox.realize()
         # max_pad = 120087
-        # max_pad = 200
-        # n = t['boxes'].shape[0]
-        # t['boxes'] = t['boxes'].pad((((0,max_pad-n), None)),0)
-        # t['labels'] = t['labels'].reshape(-1,1).pad((((0,max_pad-n), None)),-1).reshape(-1)
+        max_pad = 500
+        n = t['boxes'].shape[0]
+        boxes_padded = t['boxes'].pad((((0,max_pad-n), None)),0)
+        labels_padded = t['labels'].reshape(-1,1).pad((((0,max_pad-n), None)),-1).reshape(-1)
         # print('ITERATE', xNew.shape, t['boxes'].shape, t['labels'].shape)
+        # print('ITERATE_PADDED', xNew.shape, boxes_padded.shape, labels_padded.shape)
         target_boxes.append(t['boxes'])
         target_labels.append(t['labels'])
+        # print('lABEL LOAD CHEK', target_labels[-1].shape)
+        # print('PADDING LOGIC', labels_padded.numpy())
+        # print(boxes_padded.numpy())
+        target_boxes_padded.append(boxes_padded)
+        target_labels_padded.append(labels_padded)
         # targets.append(t)
         i_sub+=1
     # yield Tensor(X), targets
-    yield Tensor.stack(X), target_boxes, target_labels
+    yield Tensor.stack(X), target_boxes, target_labels, Tensor.stack(target_boxes_padded), Tensor.stack(target_labels_padded)
+    # yield Tensor.stack(X), target_boxes, target_labels
+    # yield Tensor.stack(X), Tensor.stack(target_boxes), Tensor.stack(target_labels)
     # yield Tensor.stack(X), targets
     i= i+bs+rem
 
