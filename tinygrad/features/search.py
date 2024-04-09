@@ -83,7 +83,7 @@ def bufs_from_lin(lin:Linearizer, allocate:bool=True) -> List[Buffer]:
 
 # get dictionary of all possible actions
 def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Linearizer]:
-  acted_lins, max_up, max_lcl = {0:lin} if include_0 else {}, getenv("BEAM_UPCAST_MAX", 64), getenv("BEAM_LOCAL_MAX", 256)
+  acted_lins, max_up, max_lcl = {0:lin} if include_0 else {}, getenv("BEAM_UPCAST_MAX", 256), getenv("BEAM_LOCAL_MAX", 256)
   for i,a in enumerate(actions):
     if a.axis is not None and a.axis >= lin.shape_len: continue
     if a.axis is not None and lin.full_shape[a.axis] == a.amt and Opt(a.op, a.axis, 0) in actions: continue
@@ -111,7 +111,7 @@ def beam_search(lin:Linearizer, rawbufs:List[Buffer], amt:int, allow_test_size=T
   beam: List[Tuple[Linearizer, float]] = []
   seen_libs = set()
 
-  default_parallel, min_progress_micros = 1 if lin.opts.device in {"CUDA", "HSA", "KFD"} else 0, getenv("BEAM_MIN_PROGRESS", 5)
+  default_parallel, min_progress_micros = 1 if lin.opts.device in {"CUDA", "HSA", "KFD"} else 0, getenv("BEAM_MIN_PROGRESS",0.01)
   if beam_pool is None and getenv("PARALLEL", default_parallel):
     beam_pool = multiprocessing.get_context("spawn").Pool(multiprocessing.cpu_count(), _init_worker, (), getenv("BEAM_MAX_TASKS_PER_CHILD", 4))
 
