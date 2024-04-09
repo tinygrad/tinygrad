@@ -231,178 +231,9 @@ def train_resnet():
         print(f"saving ckpt to {fn}")
         safe_save(get_training_state(model, optimizer_group, scheduler_group), fn)
 
-# def train_retinanet():
-#   # TODO: Retinanet
-#   import sys
-#   from extra.models.retinanet import RetinaNet, AnchorGenerator, ImageList
-#   from extra.models.resnet import ResNeXt50_32X4D
-#   from tinygrad.nn.optim import Adam
-#   from extra.datasets.openimages_new import iterate, get_openimages
-#   ROOT = 'extra/datasets/open-images-v6TEST'
-#   NAME = 'openimages-mlperf'
-#   coco = get_openimages(NAME,ROOT, 'train')
-#   # for x,y in iterate(coco, 8):
-#   #   print(x.shape)
-#   #   print(y[0].keys())
-#   #   print(y[0]['boxes'].shape, y[0]['image_size'])
-#   #   print(y[1]['boxes'].shape, y[1]['image_size'])
-#   #   print(y[2]['boxes'].shape, y[2]['image_size'])
-#   #   print(x[0])
-#   #   sys.exit()
-#   # # from extra.datasets.openimages import openimages, iterate
-#   from pycocotools.coco import COCO
-#   from pycocotools.cocoeval import COCOeval
-#   import numpy as np
-  
-#   anchor_sizes = tuple((x, int(x * 2 ** (1.0 / 3)), int(x * 2 ** (2.0 / 3))) for x in [32, 64, 128, 256, 512])
-#   # print(anchor_sizes)
-#   # sys.exit()
-#   aspect_ratios = ((0.5, 1.0, 2.0),) * len(anchor_sizes)
-#   anchor_generator = AnchorGenerator(
-#       anchor_sizes, aspect_ratios
-#   )
-#   # coco = COCO(openimages())
-#   # coco_eval = COCOeval(coco, iouType="bbox")
-#   # coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
-#   input_mean = Tensor([0.485, 0.456, 0.406]).reshape(1, -1, 1, 1)
-#   input_std = Tensor([0.229, 0.224, 0.225]).reshape(1, -1, 1, 1)
-#   def input_fixup(x):
-#     x = x.permute([0,3,1,2]) / 255.0
-#     # x -= input_mean
-#     x = x - input_mean
-#     # x /= input_std
-#     x = x/input_std
-#     return x
-#   # from examples.mlperf.dataloader import batch_load_resnet
-#   # from extra.datasets.imagenet import get_train_files, get_val_files
-#   # from examples.mlperf.lr_schedulers import PolynomialDecayWithWarmup
-#   # from examples.mlperf.initializers import Conv2dHeNormal, Linear
-#   # from examples.hlb_cifar10 import UnsyncedBatchNorm
-
-#   EPOCHS = 3
-#   BS = 4
-#   BS = 2
-
-  
-#   model = RetinaNet(ResNeXt50_32X4D())
-#   parameters = []
-#   for k, x in get_state_dict(model).items():
-#     # x.requires_grad = True
-#     x.realize()
-#     # print(k, x.grad, x.shape, x.device)
-#     if 'head' in k:
-#       parameters.append(x)
-
-
-#   # parameters = get_parameters(model)
-#   optimizer = Adam(parameters)
-  
-
-#   # @TinyJit
-#   def train_step(X, Y):
-#     Tensor.training = True
-#     # i_s = [y['image_size'] for y in Y]
-#     # https://github.com/mlcommons/training/blob/master/single_stage_detector/ssd/model/transform.py#L96
-#     i_s = [(800,800)]*X.shape[0]
-#     # print(i_s)
-#     # sys.exit()
-#     # image_list = ImageList(X, [(800,800)]*X.shape[0])
-
-#     image_list = ImageList(X, i_s)
-    
-#     # a1 = model.anchor_gen(X.shape[1:3])
-#     # a1 = [Tensor(t, dtype=dtypes.float) for t in a1]
-
-#     # anchors = model.anchor_gen(X.shape[1:3])
-#     # anchors = [Tensor(t, dtype=dtypes.float) for t in anchors]
-#     # for t in anchors:
-#     #   print(t.shape)
-#     # sys.exit()
-
-#     # optimizer.zero_grad()
-
-#     logits = model(X, Y, anchor_generator)
-#     return logits.realize()
-#     features, logits_reg, logits_class = model(X)
-#     print(colored(f'HEAD TYPES RETURN {len(features)} {type(features)} {features[0].shape} {features[1].shape} {type(logits_reg)} {type(logits_class)}', 'magenta'))
-#     del features, logits_reg, logits_class
-#     return Tensor([1,2,7])
-#     return logits_reg.realize()
-#     # features, logits_reg, logits_class = model(input_fixup(X))
-#     # features, logits_reg, logits_class = model(X.permute([0,3,1,2]) / 255.0)
-#     # print('backbone:', len(backbone_logits))
-#     # features = [backbone_logits[i] for i in range(X.shape[0])]
-#     anchors = anchor_generator(image_list, features)
-    
-#     # print('Train_step logits', logits_reg.shape, logits_class.shape)
-#     # print(logits_reg.numpy())
-#     # logits_reg, logits_class = model(X)
-#     # print(anchors)
-#     # print(a1)
-#     # print(features)
-#     # sys.exit()
-   
-#     # return logits_reg.realize()
-#     loss = model.loss(logits_reg, logits_class, Y, anchors)
-    
-#     # loss = logits_reg.sparse_categorical_crossentropy(Tensor([1,2,3,4,5,6,7,8]).reshape(8,1), label_smoothing=0.1)
-#     # print('loss',loss.numpy())
-#     # sys.exit()
-#     # loss.backward()
-#     # optimizer.step()
-#     return loss
-#     return loss.realize()
-#   # @TinyJit
-#   def eval_step(X, Y):
-#     Tensor.training = False
-
-#     Tensor.training = True
-
-#   for epoch in range(EPOCHS):
-#     Tensor.training = True
-#     # for X,Y in iterate(coco, BS, True):
-#     for X,Y in iterate(coco, BS):
-#       X = input_fixup(X).realize()
-#       print(colored(f'Input Data Shape: {X.shape} {X.dtype} {Tensor.training}','green'))
-#       # print(X.shape)
-#       # print(Y[0]['boxes'].shape, Y[0]['labels'].shape )
-#       # print(Y[1]['boxes'].shape, Y[1]['labels'].shape)
-#       # print(Y[0]['boxes'].shape, Y[0]['image_size'])
-#       # print(Y[1]['boxes'].shape, Y[1]['image_size'])
-#       # print(Y[2]['boxes'].shape, Y[2]['image_size'])
-#       # print(x[0])
-
-#       # sys.exit()
-#       # a = model.anchor_gen(X.shape[1:3])
-#       # print(a)
-#       # sys.exit()
-#       # for i in range(len(Y)):
-#       #   print(Y[i]['boxes'].numpy())
-#       #   print(Y[i]['labels'].numpy())
-#       #   print(Y[i]['image_id'])
-#       #   print(Y[i]['image_size'])
-#       # sys.exit()
-#       st = time.monotonic()
-#       loss = train_step(X, Y)
-
-#       print(colored(f'Iter done! Time: {time.monotonic()-st} Loss: {loss.numpy()}', 'red'))
-#       # print(colored(f'Iter done! Time: {time.monotonic()-st}', 'red'))
-
-#       del loss, X, Y
-#       # break
-#     # break
-#       # sys.exit()
-#   pass
 def train_retinanet():
   EPOCHS = 10
   BS = 2
-  input_mean = Tensor([0.485, 0.456, 0.406]).reshape(1, -1, 1, 1)
-  input_std = Tensor([0.229, 0.224, 0.225]).reshape(1, -1, 1, 1)
-  def input_fixup(x):
-    x = x.permute([0,3,1,2]) / 255.0
-    x -= input_mean
-    x /= input_std
-    return x
   from extra.models.retinanetNew import RetinaNet, sigmoid_focal_loss
   # from extra.models.retinanet import RetinaNet
   from extra.models.retinanet import AnchorGenerator, ImageList
@@ -419,87 +250,37 @@ def train_retinanet():
   NAME = 'openimages-mlperf'
   coco = get_openimages(NAME,ROOT, 'train')
 
-  # from extra.datasets.openimages import openimages, iterate
-  # from pycocotools.coco import COCO
-  # from pycocotools.cocoeval import COCOeval
-  # coco = COCO(openimages())
-  # coco_eval = COCOeval(coco, iouType="bbox")
-
-
   model = RetinaNet(ResNeXt50_32X4D(), num_anchors=anchor_generator.num_anchors_per_location()[0])
   mdlrun = TinyJit(lambda x: model(x, True))
-  # mdlrun_false = TinyJit(lambda x: model(x, False))
-  # mdlloss = TinyJit(lambda r, c, Y, a: model.loss(r,c,Y,a))
-  # mdlloss_temp = TinyJit(lambda r, c,y,a : model.loss_temp(r,c,y,a))
+
   parameters = []
   for k, x in get_state_dict(model).items():
-    # print(k, x.shape)
-    # print(k, x.numpy())
-    # x.requires_grad = True
-    
-    # print(k, x.grad, x.shape, x.device)
     if 'head' in k and ('clas' in k or 'reg' in k ):
-    # if 'head' in k and ('reg' in k ):
-    # if 'head' in k and ('clas' in k ):
       print(k)
       x.requires_grad = True
       parameters.append(x)
     else:
       x.requires_grad = False
-    # x.realize()
-    # print(k, x.numpy(), x.grad)
-  # p = get_parameters(model)
-  # for t in p:
-  #   if t.requires_grad:
-  #     parameters.append(t)
+
   optimizer = Adam(parameters)
-  # for k, x in get_state_dict(model).items():
-  #   if 'head' in k:
-  #     x.requires_grad = True
-  #   else:
-  #     x.requires_grad = False
-  #   # print(k, x.requires_grad)
+
   # @TinyJit
   def train_step(X, Y_b_P, Y_l_P, matched_idxs):
     Tensor.training = True
     # optimizer.zero_grad()
 
-    # mdlloss.reset()
-    # _ = model(X)
-    # _ = mdlrun(X)
-    # Tensor.training = False
     b,r,c = mdlrun(X)
     # b,r,c = model(X, True)
     # return model.loss_dummy(r,c)
-    # o = mdlrun_false(X)
-    # o = model(X, False)
-    # loss = o.max()
-    # return loss.realize()
 
-    # b,r,c = model(X, True)
-    # _ = model(X, False)
-    # r = r.chunk(BS)
-    # r = [rr.squeeze(0) for rr in r]
-    # c = c.chunk(BS)
-    # c = [cc.squeeze(0).contiguous() for cc in c]
-
-    # loss = Tensor(69)
-    # loss_reg, loss_class = model.loss(r, c, Y, anchor_generator(X, b))
-    # loss_reg, loss_class = model.loss(r, c, Y_b, Y_l, anchors, Y_b_P, Y_l_P)
-    # loss_reg = model.head.regression_head.loss(r, Y_b_P, anchors, matched_idxs)
-    # loss_class = model.head.classification_head.loss(c, Y_l_P, matched_idxs)
     # loss_reg = mdl_reg_loss_jit(r, Y_b_P, matched_idxs)
     # loss_class = mdl_class_loss_jit(c, Y_l_P, matched_idxs)
     loss_reg = mdl_reg_loss(r, Y_b_P, matched_idxs)
     loss_class = mdl_class_loss(c, Y_l_P, matched_idxs)
+    loss = loss_reg+loss_class
 
     print(colored(f'loss_reg {loss_reg.numpy()}', 'green'))
     print(colored(f'loss_class {loss_class.numpy()}', 'green'))
-    loss = loss_reg+loss_class
-    # loss = mdlloss_temp(r,c, Y, anchor_generator(X, b))
-    # loss = model.loss_temp(r,c, Y, anchor_generator(X, b))
-    # loss = mdlloss(r, c, Y, anchor_generator(X, b))
-    # loss = model.loss_dummy(r,c)
     # for o in optimizer.params:
     #   print(o.grad)
     # loss.backward()
@@ -509,20 +290,11 @@ def train_retinanet():
     # optimizer.step()
     return loss.realize()
 
-  # print('Yuh', anchor_generator.num_anchors_per_location()[0])
-  # sys.exit()
   for epoch in range(EPOCHS):
     print(colored(f'EPOCH {epoch}/{EPOCHS}:', 'cyan'))
     cnt = 0
     # for X,Y in iterate(coco, BS):
     for X, Y_boxes, Y_labels, Y_boxes_p, Y_labels_p in iterate(coco, BS):
-      # print('SHAPE_CHECKK', Y_labels_p.shape)
-      # print('ITERATE', Y_boxes_p.shape, Y_labels_p.shape)
-      # for y1,y2 in zip(Y_boxes_p, Y_labels_p):
-      #   print(y1.shape, y2.shape)
-      # print('X_REQ_GRADDD', X.requires_grad)
-      # train_step.reset()
-      # if cnt<5: sigmoid_focal_loss.reset()
       if(cnt==0 and epoch==0):
         b,_,_ = mdlrun(X)
         ANCHORS = anchor_generator(X, b)
@@ -534,63 +306,14 @@ def train_retinanet():
         mdl_class_loss = lambda c, y,m: model.head.classification_head.loss(c,y,m)
 
       st = time.time()
-      # print('IMAGE DATA', X)
-      # for tt in Y:
-      #   print(tt['boxes'].shape)
-      #   print(tt['boxes'].numpy())
-      # # print(X.numpy())
-    # for X,Y in iterate(coco, BS, True):
-      # print('PRE ZZEERROO OPTIMIZER PARAMS')
-      # for pp in optimizer.params:
-      #   print(pp.requires_grad, pp.grad)
-      # print(colored(f'Image shape PREEEE {X.shape}', 'yellow'))
-      # temp = input_fixup(X).realize()
-      # print(colored(f'POST KIMAGE SHape {temp.shape} {temp.numpy()}', 'yellow'))
       cnt+=1
-      # optimizer.zero_grad()
-      # a = anchor_generator(X, b)
-      # loss = train_step(X, Y)
+      # not jittable for now
       matched_idxs = model.matcher_gen(ANCHORS, Y_boxes).realize()
+
       loss = train_step(X, Y_boxes_p, Y_labels_p, matched_idxs)
-      # loss = Tensor(44)
-      
-      # print(colored(f'JIT STATE {train_step.cnt} {train_step.jit_cache} {train_step.input_replace}', 'red'))
-      
-      # loss.backward()
-      # optimizer.step()
+
       print(colored(f'{cnt} STEP {loss.numpy()} || {time.time()-st}', 'magenta'))
-      # print('OPTIMIZER PARAMS')
-      # for pp in optimizer.params:
-      #   print(pp.requires_grad, pp.grad)
-      # del loss
-  #     if cnt>6:
-  #       optimizer.zero_grad()
-  #       i_s = []
-  #       for t in Y:
-  #         i_s.append(t['image_size'])
-  #       # image_list = ImageList(X, i_s)
-  #       anchors = anchor_generator(X, loss[0])
-  #       # anchors = [a.realize() for a in anchors]
-  #       print(colored(f'Computed anchor gen', 'red'))
-  #       # loss = model.loss(loss[1], loss[2], Y, anchors)
-  #       loss = model.loss_temp(loss[2])
-  #       # print(colored(f'FOUND LOSS {loss.shape}', 'green'))
-  #       loss.realize()
-  #       print(colored(f'SUCESS LOSS REAILIZE {loss.shape} {loss.numpy()}', 'cyan'))
-  #       # loss.backward()
-  #       # print(colored(f'SUCESS LOSS BACKWARDS {loss.shape} {loss.grad}', 'red'))
-  #       # # # for t in optimizer.params: t.grad = t.grad.contiguous()
-  #       # optimizer.step()
-  #       # print(colored(f'SUCESS OPTIMIZER STEP', 'cyan'))
-
-
-  #       # print(colored(f'{cnt} LOSS SHAPE {loss.shape}', 'green'))
-  #       # del image_list
-  #     # del loss
-  #     if cnt>200:
-  #       sys.exit()
-  #     del X, Y
-  # pass
+      
 def train_unet3d():
   # TODO: Unet3d
   pass

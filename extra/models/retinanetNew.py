@@ -49,25 +49,16 @@ def sigmoid_focal_loss(
   loss = loss.sum(-1)
 
   # print('sigmoid_focal_loss:', loss.shape)
-  # sys.exit()
   return loss
-# import torch
-# torch.nn.functional.l1_loss
 
 def l1_loss(x1:Tensor, x2:Tensor) -> Tensor:
   # print('l1 loss inputs', x1.numpy(), x2.numpy())
-  # reduce with mean
   # https://pytorch.org/docs/stable/_modules/torch/nn/functional.html#l1_loss
-  ans = (x1 - x2).abs().sum()
+  ans = (x1 - x2).abs().sum(-1)
+  ans = ans.sum(-1)
   # print('l1 loss', ans.numpy())
   return ans
-def _sum(x):
-  # List[Tensor]
-  res = x[0]
-  for i in x[1:]:
-    res = res + i
-  
-  return res
+
 def box_iou(boxes1: Tensor, boxes2: Tensor) -> Tensor:
   # print('BOX_IOU Arguements', boxes1.shape, boxes2.shape)
 
@@ -85,20 +76,7 @@ def box_iou(boxes1: Tensor, boxes2: Tensor) -> Tensor:
   # print('BOx_IOU Ret Shape:', iou.shape, boxes1.shape, boxes2.shape)
   # print(iou[-1].numpy(), iou[-1].sum().numpy())
 
-  return iou#.realize()
-# def box_iou(b1: Tensor, b2: Tensor):
-#   boxes1 = torch.as_tensor(b1.numpy())
-#   boxes2 = torch.as_tensor(b2.numpy())
-#   def box_area(boxes): return (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
-#   area1 = box_area(boxes1)
-#   area2 = box_area(boxes2)
-#   lt = torch.max(boxes1[:, None, :2], boxes2[:, :2])  # [N,M,2]
-#   rb = torch.min(boxes1[:, None, 2:], boxes2[:, 2:])  # [N,M,2]
-#   wh = (rb - lt).clamp(min=0)  # [N,M,2]
-#   inter = wh[:, :, 0] * wh[:, :, 1]  # [N,M]
-#   union = area1[:, None] + area2 - inter
-#   iou = inter / union
-#   return Tensor(iou.numpy())
+  return iou
 
 def nms(boxes, scores, thresh=0.5):
   x1, y1, x2, y2 = np.rollaxis(boxes, 1)
@@ -148,17 +126,17 @@ def encode_boxes(reference_boxes, proposals, weights = (1.0,1.0,1.0,1.0)):
   ww = weights[2]
   wh = weights[3]
 
-  proposals_x1 = proposals[:, 0].unsqueeze(1)
-  proposals_y1 = proposals[:, 1].unsqueeze(1)
-  proposals_x2 = proposals[:, 2].unsqueeze(1)
-  proposals_y2 = proposals[:, 3].unsqueeze(1)
+  proposals_x1 = proposals[:,:, 0].unsqueeze(-1)
+  proposals_y1 = proposals[:,:, 1].unsqueeze(-1)
+  proposals_x2 = proposals[:,:, 2].unsqueeze(-1)
+  proposals_y2 = proposals[:,:, 3].unsqueeze(-1)
   # print('proposals:', proposals_x1.numpy(), proposals_x2.numpy(), proposals_y1.numpy(),
   #       proposals_y2.numpy())
 
-  reference_boxes_x1 = reference_boxes[:, 0].unsqueeze(1)
-  reference_boxes_y1 = reference_boxes[:, 1].unsqueeze(1)
-  reference_boxes_x2 = reference_boxes[:, 2].unsqueeze(1)
-  reference_boxes_y2 = reference_boxes[:, 3].unsqueeze(1)
+  reference_boxes_x1 = reference_boxes[:,:, 0].unsqueeze(-1)
+  reference_boxes_y1 = reference_boxes[:,:, 1].unsqueeze(-1)
+  reference_boxes_x2 = reference_boxes[:,:, 2].unsqueeze(-1)
+  reference_boxes_y2 = reference_boxes[:,:, 3].unsqueeze(-1)
   # print('reference boxes:', reference_boxes_x1.numpy(), reference_boxes_x2.numpy(),
         # reference_boxes_y1.numpy(), reference_boxes_y2.numpy())
 
@@ -173,19 +151,13 @@ def encode_boxes(reference_boxes, proposals, weights = (1.0,1.0,1.0,1.0)):
   gt_heights = reference_boxes_y2 - reference_boxes_y1
   gt_ctr_x = reference_boxes_x1 + 0.5 * gt_widths
   gt_ctr_y = reference_boxes_y1 + 0.5 * gt_heights
-  # when these all are 0, results in inf
-  # print('gtw,gth,gtcx,gtcy', gt_widths.numpy(), gt_heights.numpy(), gt_ctr_x.numpy(), gt_ctr_y.numpy())
 
-  # if gt_widths.item() == 0.0:
-  #   print('replace gt_width/height hack hit')
-  #   gt_widths = Tensor(3.)
-  #   gt_heights = Tensor(3.)
   targets_dx = wx * (gt_ctr_x - ex_ctr_x) / ex_widths
   targets_dy = wy * (gt_ctr_y - ex_ctr_y) / ex_heights
   targets_dw = ww * (gt_widths / ex_widths).log()
   targets_dh = wh * (gt_heights / ex_heights).log()
 
-  targets = Tensor.cat(*(targets_dx, targets_dy, targets_dw, targets_dh), dim=1)#.realize()
+  targets = Tensor.cat(*(targets_dx, targets_dy, targets_dw, targets_dh), dim=2)#.realize()
   # print('Encode BOX RETURN', targets.shape)
   return targets
 def generate_anchors(input_size, grid_sizes, scales, aspect_ratios):
@@ -206,7 +178,6 @@ def generate_anchors(input_size, grid_sizes, scales, aspect_ratios):
     anchors.append((shifts[:, None] + base_anchors[None, :]).reshape(-1, 4))
   return anchors
 
-# import torch
 class Matcher(object):
 
   BELOW_LOW_THRESHOLD = -1
@@ -238,7 +209,6 @@ class Matcher(object):
 
     # match_quality_matrix is M (gt) x N (predicted)
     # Max over gt elements (dim 0) to find best gt candidate for each prediction
-    # matched_vals, matches = match_quality_matrix.max(dim=0)
     matched_vals = match_quality_matrix.max(axis=0)
     matches = match_quality_matrix.argmax(axis=0)
     if self.allow_low_quality_matches:
@@ -265,147 +235,6 @@ class Matcher(object):
       matches = Tensor.where(gt_quality, all_matches, matches)
     return matches
 
-# class Matcher(object):
-#   """
-#   This class assigns to each predicted "element" (e.g., a box) a ground-truth
-#   element. Each predicted element will have exactly zero or one matches; each
-#   ground-truth element may be assigned to zero or more predicted elements.
-
-#   Matching is based on the MxN match_quality_matrix, that characterizes how well
-#   each (ground-truth, predicted)-pair match. For example, if the elements are
-#   boxes, the matrix may contain box IoU overlap values.
-
-#   The matcher returns a tensor of size N containing the index of the ground-truth
-#   element m that matches to prediction n. If there is no match, a negative value
-#   is returned.
-#   """
-
-#   BELOW_LOW_THRESHOLD = -1
-#   BETWEEN_THRESHOLDS = -2
-
-#   __annotations__ = {
-#       'BELOW_LOW_THRESHOLD': int,
-#       'BETWEEN_THRESHOLDS': int,
-#   }
-
-#   def __init__(self, high_threshold, low_threshold, allow_low_quality_matches=False):
-#     # type: (float, float, bool) -> None
-#     """
-#     Args:
-#         high_threshold (float): quality values greater than or equal to
-#             this value are candidate matches.
-#         low_threshold (float): a lower quality threshold used to stratify
-#             matches into three levels:
-#             1) matches >= high_threshold
-#             2) BETWEEN_THRESHOLDS matches in [low_threshold, high_threshold)
-#             3) BELOW_LOW_THRESHOLD matches in [0, low_threshold)
-#         allow_low_quality_matches (bool): if True, produce additional matches
-#             for predictions that have only low-quality match candidates. See
-#             set_low_quality_matches_ for more details.
-#     """
-#     self.BELOW_LOW_THRESHOLD = -1
-#     self.BETWEEN_THRESHOLDS = -2
-#     assert low_threshold <= high_threshold
-#     self.high_threshold = high_threshold
-#     self.low_threshold = low_threshold
-#     self.allow_low_quality_matches = allow_low_quality_matches
-
-#   def __call__(self, match_quality_matrix):
-#     # print('MATCHER ARG SIZE:', match_quality_matrix.shape)
-#     # with torch.no_grad():
-#     # match_quality_matrix_np = torch.as_tensor(match_quality_matrix.numpy())
-#     match_quality_matrix_np = match_quality_matrix.numpy()
-
-#     """
-#     Args:
-#         match_quality_matrix (Tensor[float]): an MxN tensor, containing the
-#         pairwise quality between M ground-truth elements and N predicted elements.
-
-#     Returns:
-#         matches (Tensor[int64]): an N tensor where N[i] is a matched gt in
-#         [0, M - 1] or a negative value indicating that prediction i could not
-#         be matched.
-#     """
-#     if match_quality_matrix.numel() == 0:
-#       # empty targets or proposals not supported during training
-#       if match_quality_matrix.shape[0] == 0:
-#         raise ValueError(
-#             "No ground-truth boxes available for one of the images "
-#             "during training")
-#       else:
-#         raise ValueError(
-#             "No proposal boxes available for one of the images "
-#               "during training")
-
-#     # match_quality_matrix is M (gt) x N (predicted)
-#     # Max over gt elements (dim 0) to find best gt candidate for each prediction
-#     matched_vals = match_quality_matrix_np.max(axis=0)
-#     matches = match_quality_matrix_np.argmax(axis=0)
-#     if self.allow_low_quality_matches:
-#       # all_matches = matches.clone()
-#       all_matches = np.copy(matches)
-#     else:
-#       all_matches = None
-
-#     # Assign candidate matches with low quality to negative (unassigned) values
-#     below_low_threshold = matched_vals < self.low_threshold
-#     between_thresholds = (matched_vals >= self.low_threshold) & (
-#         matched_vals < self.high_threshold
-#     )
-#     matches[below_low_threshold] = self.BELOW_LOW_THRESHOLD
-#     matches[between_thresholds] = self.BETWEEN_THRESHOLDS
-
-#     if self.allow_low_quality_matches:
-#       # assert all_matches is not None
-#       matches = self.set_low_quality_matches_(matches, all_matches, match_quality_matrix_np)
-#     matches_tens = Tensor(matches, requires_grad=False)#.realize()
-#     del all_matches, matches, match_quality_matrix_np, below_low_threshold, between_thresholds
-#     # print('Matcher:', matches_tens.shape)
-#     return matches_tens
-
-#   def set_low_quality_matches_(self, matches, all_matches, match_quality_matrix):
-#     """
-#     Produce additional matches for predictions that have only low-quality matches.
-#     Specifically, for each ground-truth find the set of predictions that have
-#     maximum overlap with it (including ties); for each prediction in that set, if
-#     it is unmatched, then match it to the ground-truth with which it has the highest
-#     quality value.
-#     """
-#     # For each gt, find the prediction with which it has highest quality
-#     highest_quality_foreach_gt = match_quality_matrix.max(axis=1)
-#     temp = match_quality_matrix.argmax(axis=1)
-#     # Find highest quality match available, even if it is low, including ties
-    
-#     gt_pred_pairs_of_highest_quality = np.nonzero(
-#         match_quality_matrix == highest_quality_foreach_gt[:, None]
-#     )
-#     temp_quality = match_quality_matrix == highest_quality_foreach_gt[:, None]
-#     # Example gt_pred_pairs_of_highest_quality:
-#     #   tensor([[    0, 39796],
-#     #           [    1, 32055],
-#     #           [    1, 32070],
-#     #           [    2, 39190],
-#     #           [    2, 40255],
-#     #           [    3, 40390],
-#     #           [    3, 41455],
-#     #           [    4, 45470],
-#     #           [    5, 45325],
-#     #           [    5, 46390]])
-#     # Each row is a (gt index, prediction index)
-#     # Note how gt items 1, 2, 3, and 5 each have two ties
-
-#     pred_inds_to_update = gt_pred_pairs_of_highest_quality[1]
-#     # print('pred_inds_to_update', pred_inds_to_update.shape)
-#     # print('TEMP', temp.shape)
-#     # print('TEMP_QUAL_SUM', temp_quality.sum(0).shape)
-#     # print(temp_quality.shape)
-#     # print(highest_quality_foreach_gt.shape)
-#     # print('MATCHES_SHAPE', matches.shape, match_quality_matrix.shape)
-#     matches[pred_inds_to_update] = all_matches[pred_inds_to_update]
-#     # del gt_pred_pairs_of_highest_quality, highest_quality_foreach_gt,all_matches
-#     print('TENs_MATCHER', pred_inds_to_update.shape, all_matches.shape, matches.shape)
-
-#     return matches
 class RetinaNet:
   def __init__(self, backbone: ResNet, num_classes=264, num_anchors=9, scales=None, aspect_ratios=None,
                fg_iou_thresh=0.5, bg_iou_thresh=0.4):
@@ -572,13 +401,10 @@ class RetinaNet:
 
       detections.append({"boxes":image_boxes, "scores":image_scores[keep], "labels":image_labels[keep]})
     return detections
-# import torch
-
 
 class ClassificationHead:
   def __init__(self, in_channels, num_anchors, num_classes, prior_probability=0.01):
     self.num_classes = num_classes
-    # self.conv = flatten([(nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1), lambda x: x.relu()) for _ in range(4)])
     self.conv = []
     for _ in range(4):
       c = nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1)
@@ -586,19 +412,10 @@ class ClassificationHead:
       c.bias = Tensor.full(c.bias.shape, 0.0).realize()
       self.conv.append(c)
       self.conv.append(Tensor.relu)
-    # for i in self.conv:
-    #   if isinstance(i, nn.Conv2d):
-    #     i.weight = Tensor.normal(i.weight.shape, std=0.01).realize()
-    #     i.bias = Tensor.full(i.bias.shape, 0.0).realize()
-
     self.cls_logits = nn.Conv2d(in_channels, num_anchors * num_classes, kernel_size=3, padding=1)
-    print('CLASS ININTTTTTTT')
-    # print(self.cls_logits.weight.numpy())
     self.cls_logits.weight = Tensor.normal(self.cls_logits.weight.shape, std=0.01).realize()
     self.cls_logits.bias = Tensor.full(self.cls_logits.bias.shape, -math.log((1 - prior_probability) / prior_probability)).realize()
-    # print(self.cls_logits.bias.shape)
-    # print(self.cls_logits.bias.numpy())
-    # print(self.cls_logits.weight.numpy())
+
 
   def __call__(self, x):
     out = [self.cls_logits(feat.sequential(self.conv)).permute(0, 2, 3, 1).reshape(feat.shape[0], -1, self.num_classes) for feat in x]
@@ -613,129 +430,19 @@ class ClassificationHead:
       labels_temp.append(tl[m])
     labels_temp = Tensor.stack(labels_temp)
     labels_temp = (labels_temp+1)*foreground_idxs-1
-    print('LAbels_temp:', labels_temp.shape)
+    # print('LAbels_temp:', labels_temp.shape)
     gt_classes_target = labels_temp.one_hot(logits_class.shape[-1])
-    print('gt_classes_target', gt_classes_target.shape)
+    # print('gt_classes_target', gt_classes_target.shape)
     valid_idxs = matched_idxs != Matcher.BETWEEN_THRESHOLDS
     s = sigmoid_focal_loss(logits_class, 
                                        gt_classes_target, 
                                        valid_idxs.reshape(batch_size,-1,1)).realize()
-    print('sig_loss:', s.shape)
+    # print('sig_loss:', s.shape)
     a = s/num_foreground
     return a.mean()
-    losses = []
-    for tl, cls_logits_per_image, matched_idxs_per_image in zip(T_l, logits_class, matched_idxs):
-      # print(colored(f'matched_idxs_per_image CLASS {matched_idxs_per_image.shape} {cls_logits_per_image.shape}', 'red' ))
-      # print(matched_idxs_per_image.numpy())
-      # determine only the foreground
-      foreground_idxs_per_image = matched_idxs_per_image >= 0
-      num_foreground = foreground_idxs_per_image.sum()
-      # gt_classes_target = []
-      # match_temp = Tensor.where(foreground_idxs_per_image, matched_idxs_per_image, -1)
-      # labels_temp = (((targets_per_image['labels'][matched_idxs_per_image]+1)*foreground_idxs_per_image)-1)#.reshape(-1,1)
-      
-      # new_mask = Tensor.where(foreground_idxs_per_image, 1, -1)
-      # negative IDX give 0's in one_hot
-      labels_temp = tl[matched_idxs_per_image] #*new_mask#.reshape(-1,1)
-      # labels_temp = Tensor.where(foreground_idxs_per_image, labels_temp, -1)
-      labels_temp = (labels_temp+1)*foreground_idxs_per_image-1
-      # print('NEW-MASK', labels_temp.shape, new_mask.shape)
-      # labels_temp = Tensor.where(foreground_idxs_per_image, )
-      # print(colored(f'LABEL_TEMP {labels_temp.shape} {labels_temp.numpy()}', 'yellow'))
-      gt_classes_target = labels_temp.one_hot(cls_logits_per_image.shape[-1])
-      # print('GT_SUM', gt_classes_target.sum().numpy(), foreground_idxs_per_image.sum().numpy())
-      # print(colored(f'gt_classes_target {gt_classes_target.shape} {gt_classes_target.sum().item()} {gt_classes_target.numpy()}', 'yellow'))
-      # print(colored(f'cls_logits {cls_logits_per_image.shape} {cls_logits_per_image.numpy()}', 'green'))
-      # cls_logits_per_image = cls_logits_per_image.contiguous()
-
-      # print('num_foreground:',num_foreground.shape, num_foreground.numpy())
-      # Idk if this hack works
-      
-      # foreground_idxs_per_image_np = np.nonzero(foreground_idxs_per_image.numpy())[0]
-      # foreground_idxs_per_image_np = foreground_idxs_per_image.numpy()
-      # # foreground_idxs_per_image = Tensor(foreground_idxs_per_image_np)
-
-      # # del foreground_idxs_per_image_np
-      # # print(colored(f'foreground_idxs_per_image CLASS{foreground_idxs_per_image.shape}', 'red' ))
-
-      # # create the target classification
-
-      # # print('cls_logits_per_image:', cls_logits_per_image.shape, foreground_idxs_per_image_np.shape, matched_idxs_per_image.shape)
-      # # gt_classes_target_np = np.zeros(cls_logits_per_image.shape)
-      
-
-      # gt_classes_target_np = torch.zeros(cls_logits_per_image.shape)
-      # target_labels = targets_per_image['labels'].numpy()
-      # x1 = foreground_idxs_per_image_np
-      # x2 = target_labels[matched_idxs_per_image.numpy()[foreground_idxs_per_image_np]]
-      # print(colored(f'TARGETS {target_labels}', 'red'))
-      # print(colored(f'X1 {x1}\n\nX2 {x2}\n{x1.shape} || {x2.shape}', 'cyan'))
-      # print(colored(f'matched_idxs_per_image {matched_idxs_per_image.shape} {matched_idxs_per_image.numpy()}', 'yellow'))
-      # gt_classes_target_np[
-      #     x1,
-      #     x2
-      # ] = 1.0
-      # # # print('gt_classes_target shape NP VERSION:', gt_classes_target.shape)
-      # # # gt_classes_target = Tensor(gt_classes_target)
-
-      # # # print(colored(f'TORCH gt_classes_target {type(gt_classes_target_np)} {gt_classes_target_np.shape}','yellow'))
-      
-      # # # gt_classes_target = Tensor(gt_classes_target.numpy())
-      # gt_classes_target = Tensor(gt_classes_target_np.numpy()).realize()
-      # del gt_classes_target_np
-
-      # print('CLASs HEAD GT_TARGET', gt_classes_target.sum().item(), foreground_idxs_per_image.shape)
-
-      # print('Class_head matched_idxs_per_image', matched_idxs_per_image.numpy())
-      valid_idxs_per_image = matched_idxs_per_image != Matcher.BETWEEN_THRESHOLDS
-      # idx = Tensor.arange(valid_idxs_per_image.shape[0])
-      # choosen_idx =[]
-      # for v,i in zip(valid_idxs_per_image, idx):
-      #   print(len(choosen_idx))
-      #   if(v.item()):
-      #     choosen_idx.append(i)
-      # n = Tensor(np.nonzero(valid_idxs_per_image.numpy())[0])
-      # n = Tensor(np.nonzero(foreground_idxs_per_image.numpy())[0])
-
-      # print(n[0].shape)
-      # choosen_idx = Tensor(n[0].tolist()).reshape(-1,1).realize()
-      # choosen_idx = Tensor(np.argwhere(valid_idxs_per_image.numpy()))
-      # print(colored(f'PREE valid idx {valid_idxs_per_image.shape} {valid_idxs_per_image.numpy()}', 'yellow'))
-      
-      # valid_idxs_per_image = valid_idxs_per_image.reshape(-1,1)
-      # print(colored(f'valid idx {valid_idxs_per_image.shape} {valid_idxs_per_image.numpy()}', 'yellow'))
-      # print(cls_logits_per_image.shape)
-      # s = sigmoid_focal_loss(cls_logits_per_image.gather(choosen_idx,0), 
-      #                                  gt_classes_target.gather(choosen_idx,0), valid_idxs_per_image)
-      # s = sigmoid_focal_loss(cls_logits_per_image*valid_idxs_per_image.reshape(-1,1), 
-      #                                  gt_classes_target*valid_idxs_per_image.reshape(-1,1), 
-      #                                  valid_idxs_per_image.reshape(-1,1))
-
-      # cls_logits_per_image = cls_logits_per_image[n]
-      # gt_classes_target = gt_classes_target[n]
-      # print('sig START')
-      s = sigmoid_focal_loss(cls_logits_per_image, 
-                                       gt_classes_target, 
-                                       valid_idxs_per_image.reshape(-1,1)).realize()
-      # print('sigEND')
-      # s.realize()
-      a = s/max(1, num_foreground.item())
-      # print('SIGMOID LOSS', a.numpy(), max(1, num_foreground.item()), s.numpy())
-      # print(n.numpy())
-      losses.append(a)
-      # print('CLASS LOSS ARRAY', losses[-1].numpy(), '||', num_foreground.item(), s.numpy())
-
-    # print(colored(f'FINISHED CLASS LOSS APPEND{losses}', 'cyan'))
-    # print(losses[0].shape)
-    # return losses[0]+losses[1]
-    # return Tensor.stack(losses).mean()
-    return _sum(losses) / logits_class.shape[0]
-    return _sum(losses) / len(T_l)
-  
 
 class RegressionHead:
   def __init__(self, in_channels, num_anchors):
-    # self.conv = flatten([(nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1), lambda x: x.relu()) for _ in range(4)])
     self.conv = []
     for _ in range(4):
       c = nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1)
@@ -743,10 +450,6 @@ class RegressionHead:
       c.bias = Tensor.full(c.bias.shape, 0.0).realize()
       self.conv.append(c)
       self.conv.append(Tensor.relu)
-    # for i in self.conv:
-    #   if isinstance(i, nn.Conv2d):
-    #     i.weight = Tensor.normal(i.weight.shape, std=0.01).realize()
-    #     i.bias = Tensor.full(i.bias.shape, 0.0).realize()
     self.bbox_reg = nn.Conv2d(in_channels, num_anchors * 4, kernel_size=3, padding=1)
     self.bbox_reg.weight = Tensor.normal(self.bbox_reg.weight.shape, std=0.01).realize()
     self.bbox_reg.bias = Tensor.full(self.bbox_reg.bias.shape, 0.0).realize()
@@ -756,69 +459,27 @@ class RegressionHead:
     return out[0].cat(*out[1:], dim=1)
   # @TinyJit
   def loss(self, logits_reg, T_b, anchors, matched_idxs):
-    losses = []
-
-    for tb, bbox_regression_per_image, anchors_per_image, matched_idxs_per_image in \
-                zip(T_b, logits_reg, anchors, matched_idxs):
-      # b = targets_per_image['boxes']
-
-      # print(colored(f'targets_per_image {b.shape}', 'blue' ))
-      # print(colored(f'matched_idxs_per_image {matched_idxs_per_image.shape}', 'blue' ))
-
-      # print(matched_idxs_per_image.numpy())
-      # determine only the foreground indices, ignore the rest
-      # foreground_idxs_per_image = torch.where(matched_idxs_per_image >= 0)[0]
-      # Hack for now
-      # print('Regression head match idx type:', matched_idxs_per_image.numpy())
-      foreground_idxs_per_image = matched_idxs_per_image >= 0
-      num_foreground = foreground_idxs_per_image.sum().item()
-      # print('forGROUNDidx', foreground_idxs_per_image.shape)
-      matched_gt_boxes_per_image = tb[matched_idxs_per_image]*foreground_idxs_per_image.reshape(-1,1)
-      bbox_regression_per_image = bbox_regression_per_image * foreground_idxs_per_image.reshape(-1,1)
-      anchors_per_image = anchors_per_image * foreground_idxs_per_image.reshape(-1,1)
-
-      # foreground_idxs_per_image = np.nonzero(foreground_idxs_per_image.numpy())[0]
-      # # print('np forground REGRESSION:', foreground_idxs_per_image, foreground_idxs_per_image.shape)
-
-      # # if foreground_idxs_per_image.shape==(0,):
-      # #   print(colored('empty forground idx in regression head', 'blue'))
-      # #   foreground_idxs_per_image = Tensor([0])
-      # # else:
-      # # foreground_idxs_per_image = Tensor(foreground_idxs_per_image)
-      # # del foreground_idxs_per_image_np
-      # # print(colored(f'foreground_idxs_per_image {foreground_idxs_per_image.shape}', 'blue' ))
-
-      # # print(foreground_idxs_per_image, matched_idxs_per_image.numpy())
-      # # print('Regression Foreground idx per img: ', foreground_idxs_per_image.shape, foreground_idxs_per_image.numpy())
-      # # num_foreground = foreground_idxs_per_image.numel()
-
-      # # print('target img selection')
-      # # print(targets_per_image['boxes'].numpy())
-      # # print(matched_idxs_per_image.numpy())
-      # # print(foreground_idxs_per_image.numpy())
-
-      # # select only the foreground boxes
-      # matched_gt_boxes_per_image = targets_per_image['boxes'][matched_idxs_per_image[foreground_idxs_per_image.tolist()]]
-      # bbox_regression_per_image = bbox_regression_per_image[foreground_idxs_per_image.tolist(), :]
-      # anchors_per_image = anchors_per_image[foreground_idxs_per_image.tolist(), :]
-
-      # compute the regression targets
-      target_regression = encode_boxes(matched_gt_boxes_per_image, anchors_per_image)
-      # print(f'L1_LOSS ARGS {bbox_regression_per_image.shape} {target_regression.shape}')
-      target_regression = target_regression*foreground_idxs_per_image.reshape(-1,1)
-      # compute the loss
-      losses.append(l1_loss(
-        bbox_regression_per_image,
+    batch_size = logits_reg.shape[0]
+    foreground_idxs = matched_idxs >= 0
+    num_foreground = foreground_idxs.sum(-1)
+    boxes_temp = []
+    for tb, m in zip(T_b, matched_idxs):
+      boxes_temp.append(tb[m])
+    boxes_temp = Tensor.stack(boxes_temp)
+    # print('boxes_temp', boxes_temp.shape)
+    matched_gt_boxes = boxes_temp * foreground_idxs.reshape(batch_size,-1,1)
+    bbox_reg = logits_reg * foreground_idxs.reshape(batch_size,-1,1)
+    anchors = anchors*foreground_idxs.reshape(batch_size,-1,1)
+    target_regression = encode_boxes(matched_gt_boxes, anchors)
+    target_regression = target_regression * foreground_idxs.reshape(batch_size,-1,1)
+    # print('l1_LOSS', bbox_reg.shape, target_regression.shape, num_foreground.shape)
+    l = l1_loss(
+        bbox_reg,
         target_regression,
-      ) / max(1, num_foreground))
-    
-    # print('REgression head loss num/dem', _sum(losses).numpy(),  max(1, len(targets)))
-    # print('regression loss length', len(losses))
-    # for i in losses:
-    #   print(i.numpy())
-    # return Tensor.stack(losses).mean()
-    return _sum(losses) / logits_reg.shape[0]
-    return _sum(losses) / max(1, len(T_b))
+      ) / num_foreground
+    # print('l1_POST',l.shape, l.numpy())
+    return l.mean()
+
 class RetinaHead:
   def __init__(self, in_channels, num_anchors, num_classes):
     self.classification_head = ClassificationHead(in_channels, num_anchors, num_classes)
