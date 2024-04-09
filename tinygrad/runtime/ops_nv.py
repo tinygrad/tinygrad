@@ -310,9 +310,9 @@ class NVProgram:
     cmdq_blit_data(self.device, qmd, 0x40 * 4)
     # for i in range(0x40): cmdq_push_data(self.device, qmd[i])
 
-    self.device.qmd_ptr += 8 << 8
-    if self.device.qmd_ptr - self.device.qmd_base_addr >= 0x800000:
-      self.device.qmd_ptr = self.device.qmd_base_addr
+    # self.device.qmd_ptr += 8 << 8
+    # if self.device.qmd_ptr - self.device.qmd_base_addr >= 0x800000:
+    #   self.device.qmd_ptr = self.device.qmd_base_addr
 
     # self.device._cmdq_insert_progress_semaphore(subc=1)
     # cmdq_push_method(self.device, 1, nvqcmd.NVC6C0_SET_REPORT_SEMAPHORE_A, 4)
@@ -322,10 +322,12 @@ class NVProgram:
 
     packets_written = (self.device.cmdq_wptr - cmdq_start_wptr) // 4
     self.device.compute_gpu_ring[self.device.compute_put_value % self.device.compute_gpfifo_entries] = ((self.device.cmdq_addr+cmdq_start_wptr)//4 << 2) | (packets_written << 42) | (1 << 41) | (1 << 63)
-    self.device.compute_put_value = (self.device.compute_put_value + 1) % self.device.compute_gpfifo_entries
-    self.device.compute_gpu_ring_controls.GPPut = self.device.compute_put_value
+    self.device.compute_put_value += 1
+    self.device.compute_gpu_ring_controls.GPPut = self.device.compute_put_value % self.device.compute_gpfifo_entries
     self.device._cmdq_ring_doorbell(self.device.compute_gpfifo_token)
     # print("DAL", self.device.compute_put_value)
+    # import time
+    # time.sleep(0.09)
     self.device.synchronize() # TODO: remove
     # print("EXIT")
     # import time
@@ -340,17 +342,12 @@ class NVProgram:
 class NVAllocator(LRUAllocator):
   def __init__(self, device:NVDevice):
     self.device = device
-    # self.nxt = 0x200410000
     super().__init__()
 
   def _alloc(self, size:int, options:BufferOptions):
     size = round_up(size, 2 << 20)
     if options.host: return self.device._gpu_host_alloc(size)
     else:
-      # return self.device._gpu_host_alloc(size)
-      # tt = self.nxt
-      # self.nxt += size
-      # return tt
       mem_handle = self.device._gpu_alloc(size)
       return self.device._gpu_uvm_map(mem_handle, size)
 
@@ -500,6 +497,8 @@ class NVDevice(Compiled):
     self.host_mem_object_enumerator = 0x1000 + 0x400 * self.device_id # start 
 
     self.next_gpu_vaddr = 0x1000000000
+    # 0x10_bda00000
+    # 0x10_00000000
 
     device_params = nvcls.NV0080_ALLOC_PARAMETERS(deviceId=self.device_id, hClientShare=self.root, vaMode=nvesc.NV_DEVICE_ALLOCATION_VAMODE_MULTIPLE_VASPACES)
     self.device = rm_alloc(self.fd_ctl, nvcls.NV01_DEVICE_0, self.root, self.root, device_params).hObjectNew
@@ -549,9 +548,9 @@ class NVDevice(Compiled):
     self.dma_put_value = 0
     self.gpu_mmio = to_mv(gpu_mmio_ptr, 0x10000).cast("I")
 
-    cmdq_mem_handle = self._gpu_alloc(0x600000, huge_page=True, contig=True)
-    self.cmdq_addr = self._gpu_uvm_map(cmdq_mem_handle, 0x600000, cpu_visible=True, fixed_address=0x400700000 + 0x10000000 * self.device_id)
-    self.cmdq = to_mv(self.cmdq_addr, 0x600000).cast("I")
+    cmdq_mem_handle = self._gpu_alloc(0x1a00000, huge_page=True, contig=True)
+    self.cmdq_addr = self._gpu_uvm_map(cmdq_mem_handle, 0x1a00000, cpu_visible=True, fixed_address=0x400700000 + 0x10000000 * self.device_id)
+    self.cmdq = to_mv(self.cmdq_addr, 0x1a00000).cast("I")
     self.cmdq_wptr = 0 # in bytes
 
     semaphores_mem_handle = self._gpu_alloc(0x200000, huge_page=True, contig=True)
@@ -583,32 +582,30 @@ class NVDevice(Compiled):
     self._cmdq_setup_dma_gpfifo()
 
   def synchronize(self):
-    # print(self.semaphores[0], self.compute_gpu_ring_controls.GPPut, self.semaphores[2])
     sem_value = self.semaphores[0]
-    while sem_value < self.compute_put_value: sem_value = self.semaphores[0]
+    while sem_value != self.compute_put_value: sem_value = self.semaphores[0]
     sem_value = self.semaphores[4]
-    while sem_value < (self.dma_put_value if USE_DMA_FIFO else self.compute_put_value): sem_value = self.semaphores[4]
-    # import time
-    # time.sleep(0.01)
+    while sem_value != (self.dma_put_value if USE_DMA_FIFO else self.compute_put_value): sem_value = self.semaphores[4]
 
-    sem_value = self.compute_gpu_ring_controls.GPGet
-    while sem_value != self.compute_gpu_ring_controls.GPPut: sem_value = self.compute_gpu_ring_controls.GPGet
-    sem_value = self.dma_gpu_ring_controls.GPGet
-    while sem_value != self.dma_gpu_ring_controls.GPPut: sem_value = self.dma_gpu_ring_controls.GPGet
+    # sem_value = self.compute_gpu_ring_controls.GPGet
+    # while sem_value != self.compute_gpu_ring_controls.GPPut: sem_value = self.compute_gpu_ring_controls.GPGet
+    # sem_value = self.dma_gpu_ring_controls.GPGet
+    # while sem_value != self.dma_gpu_ring_controls.GPPut: sem_value = self.dma_gpu_ring_controls.GPGet
 
-    srs = (self.compute_gpu_ring_controls.PutHi << 32) + self.compute_gpu_ring_controls.Put
-    dss = (self.compute_gpu_ring_controls.GetHi << 32) + self.compute_gpu_ring_controls.Get
-    while srs != dss:
-      srs = (self.compute_gpu_ring_controls.PutHi << 32) + self.compute_gpu_ring_controls.Put
-      dss = (self.compute_gpu_ring_controls.GetHi << 32) + self.compute_gpu_ring_controls.Get
-      # print("c", hex(srs), hex(dss))
+    # srs = (self.compute_gpu_ring_controls.PutHi << 32) + self.compute_gpu_ring_controls.Put
+    # dss = (self.compute_gpu_ring_controls.GetHi << 32) + self.compute_gpu_ring_controls.Get
+    # while srs != dss:
+    #   srs = (self.compute_gpu_ring_controls.PutHi << 32) + self.compute_gpu_ring_controls.Put
+    #   dss = (self.compute_gpu_ring_controls.GetHi << 32) + self.compute_gpu_ring_controls.Get
+    #   # print("c", hex(srs), hex(dss))
 
-    srs = (self.dma_gpu_ring_controls.PutHi << 32) + self.dma_gpu_ring_controls.Put
-    dss = (self.dma_gpu_ring_controls.GetHi << 32) + self.dma_gpu_ring_controls.Get
-    while srs != dss:
-      srs = (self.dma_gpu_ring_controls.PutHi << 32) + self.dma_gpu_ring_controls.Put
-      dss = (self.dma_gpu_ring_controls.GetHi << 32) + self.dma_gpu_ring_controls.Get
+    # srs = (self.dma_gpu_ring_controls.PutHi << 32) + self.dma_gpu_ring_controls.Put
+    # dss = (self.dma_gpu_ring_controls.GetHi << 32) + self.dma_gpu_ring_controls.Get
+    # while srs != dss:
+    #   srs = (self.dma_gpu_ring_controls.PutHi << 32) + self.dma_gpu_ring_controls.Put
+    #   dss = (self.dma_gpu_ring_controls.GetHi << 32) + self.dma_gpu_ring_controls.Get
       # print("d", hex(srs), hex(dss))
+    self.cmdq_wptr = 0
 
     # print(self.compute_gpu_ring_controls.GPGet, self.compute_gpu_ring_controls.GPPut)
     # print(hex((self.compute_gpu_ring_controls.PutHi << 32) + self.compute_gpu_ring_controls.Put))
@@ -693,8 +690,8 @@ class NVDevice(Compiled):
     
     packets_written = (self.cmdq_wptr - cmdq_start_wptr) // 4
     self.compute_gpu_ring[self.compute_put_value % self.compute_gpfifo_entries] = ((self.cmdq_addr+cmdq_start_wptr)//4 << 2) | (packets_written << 42) | (1 << 63)
-    self.compute_put_value = (self.compute_put_value + 1) % self.compute_gpfifo_entries
-    self.compute_gpu_ring_controls.GPPut = self.compute_put_value
+    self.compute_put_value += 1
+    self.compute_gpu_ring_controls.GPPut = self.compute_put_value % self.compute_gpfifo_entries
     self._cmdq_ring_doorbell(self.compute_gpfifo_token)
     self.synchronize() # TODO: remove
   
@@ -712,8 +709,8 @@ class NVDevice(Compiled):
 
     packets_written = (self.cmdq_wptr - cmdq_start_wptr) // 4
     self.dma_gpu_ring[self.dma_put_value % self.dma_gpfifo_entries] = ((self.cmdq_addr+cmdq_start_wptr)//4 << 2) | (packets_written << 42) | (1 << 63)
-    self.dma_put_value = (self.dma_put_value + 1) % self.dma_gpfifo_entries
-    self.dma_gpu_ring_controls.GPPut = self.dma_put_value
+    self.dma_put_value += 1
+    self.dma_gpu_ring_controls.GPPut = self.dma_put_value % self.dma_gpfifo_entries
     self._cmdq_ring_doorbell(self.dma_gpfifo_token)
     self.synchronize() # TODO: remove
     # pass
@@ -741,15 +738,15 @@ class NVDevice(Compiled):
     packets_written = (self.cmdq_wptr - cmdq_start_wptr) // 4
     if USE_DMA_FIFO:
       self.dma_gpu_ring[self.dma_put_value % self.dma_gpfifo_entries] = ((self.cmdq_addr+cmdq_start_wptr)//4 << 2) | (packets_written << 42) | (1 << 41) | (1 << 63)
-      self.dma_put_value = (self.dma_put_value + 1) % self.dma_gpfifo_entries
-      self.dma_gpu_ring_controls.GPPut = self.dma_put_value
+      self.dma_put_value += 1
+      self.dma_gpu_ring_controls.GPPut = self.dma_put_value % self.dma_gpfifo_entries
       self._cmdq_ring_doorbell(self.dma_gpfifo_token)
     else:
       self.compute_gpu_ring[self.compute_put_value % self.compute_gpfifo_entries] = ((self.cmdq_addr+cmdq_start_wptr)//4 << 2) | (packets_written << 42) | (1 << 41) | (1 << 63)
-      self.compute_put_value = (self.compute_put_value + 1) % self.compute_gpfifo_entries
-      self.compute_gpu_ring_controls.GPPut = self.compute_put_value
+      self.compute_put_value += 1
+      self.compute_gpu_ring_controls.GPPut = self.compute_put_value % self.compute_gpfifo_entries
       self._cmdq_ring_doorbell(self.compute_gpfifo_token)
-    print("DMA", hex(src), hex(dst))
+    # print("DMA", hex(src), hex(dst))
     self.synchronize() # TODO: remove
     # print("EXIT")
 
