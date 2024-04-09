@@ -126,21 +126,68 @@ def format_struct(s):
     else: sdats.append(f"{field_name}:{dat}")
   return sdats
 
+"""
+regCOMPUTE_PGM_RSRC1 0 0x1bb2 12 0 0
+	VGPRS 0 5
+	SGPRS 6 9
+	PRIORITY 10 11
+	FLOAT_MODE 12 19
+	PRIV 20 20
+	DX10_CLAMP 21 21
+	IEEE_MODE 23 23
+	BULKY 24 24
+	FP16_OVFL 26 26
+	WGP_MODE 29 29
+	MEM_ORDERED 30 30
+	FWD_PROGRESS 31 31
+regCOMPUTE_PGM_RSRC2 0 0x1bb3 11 0 0
+	SCRATCH_EN 0 0
+	USER_SGPR 1 5
+	TRAP_PRESENT 6 6
+	TGID_X_EN 7 7
+	TGID_Y_EN 8 8
+	TGID_Z_EN 9 9
+	TG_SIZE_EN 10 10
+	TIDIG_COMP_CNT 11 12
+	EXCP_EN_MSB 13 14
+	LDS_SIZE 15 23
+	EXCP_EN 24 30
+"""
+
 class HWPM4Queue:
   def __init__(self): self.q = []
 
   def exec(self, prg:KFDProgram, kernargs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), completion_signal=None):
-    code = hsa.amd_kernel_code_t.from_address(prg.handle)
+    # overkill?
+    addr=0x0
+    sz=(1 << 64)-1
+    gli=1
+    glv=1
+    glk=1
+    gl1=1
+    gl2=1
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_ACQUIRE_MEM, 6), 0,
+               sz & 0xffffffff, (sz >> 32) & 0xff, addr & 0xffffffff, (addr >> 32) & 0xffffff, 0,
+               amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLI_INV(gli) | amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLK_INV(glk) | \
+               amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLV_INV(glv) | amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL1_INV(gl1) | \
+               amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL2_INV(gl2)]
+    code = hsa.amd_kernel_code_t.from_address(prg.handle)  # NOTE: this is wrong, it's not this object
     # kernel_code_properties:0x408
     assert code.kernel_code_properties == 0x408  # ENABLE_WAVEFRONT_SIZE32 | ENABLE_SGPR_KERNARG_SEGMENT_PTR
     assert code.workitem_private_segment_byte_size == 0
     assert code.max_scratch_backing_memory_byte_size == 0
     assert code.kernel_code_prefetch_byte_size == 0
+    assert prg.group_segment_size%64 == 0
+    #assert prg.private_segment_size == 0
     #for s in format_struct(code): print(s)
+    #print(hex(code.compute_pgm_rsrc1), hex(code.compute_pgm_rsrc2))
+    rsrc1, rsrc2 = code.compute_pgm_rsrc1, code.compute_pgm_rsrc2
+    #print(hex(code.compute_pgm_rsrc1), hex(code.compute_pgm_rsrc2))
+    rsrc2 |= (prg.group_segment_size//64) << 15
     shiftedIsaAddr = (prg.handle + code.kernel_code_entry_byte_offset) >> 8
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 6), regCOMPUTE_PGM_LO, shiftedIsaAddr&0xFFFFFFFF, shiftedIsaAddr>>32, 0, 0,
                (prg.device.scratch.va_addr>>8)&0xFFFFFFFF, prg.device.scratch.va_addr>>40]
-    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), regCOMPUTE_PGM_RSRC1, code.compute_pgm_rsrc1, code.compute_pgm_rsrc2]
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), regCOMPUTE_PGM_RSRC1, rsrc1, rsrc2]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), regCOMPUTE_TMPRING_SIZE, 0x00200200] # (waveSize << 12) | (numWaves)
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), regCOMPUTE_RESOURCE_LIMITS, 0]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 4), regCOMPUTE_RESTART_X, 0,0,0,0]
