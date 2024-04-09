@@ -89,7 +89,7 @@ class PatternMatcher:
           for vv in uops.uops + queue: vv.vin = tuple(new if x is q else x for x in vv.vin)
         else: queue.extend([qq for qq in queue[-1].vin if qq not in uops.uops])
       if not any([o in u.vin for u in uops]): uops.uops.remove(o)
-    uops.remove_childless(set(x for x in uops if x.uop in {UOps.DEFINE_GLOBAL, UOps.STORE}))
+    uops.uoptimize()
 
 constant_folder = PatternMatcher([
   # const rules
