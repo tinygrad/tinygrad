@@ -250,14 +250,13 @@ def train_unet3d():
   import time
 
   GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
-  print(f"Training on {GPUS}")
   for x in GPUS: Device[x]
+  print(f"Training on {GPUS}")
 
   TARGET_METRIC = 0.908
   NUM_EPOCHS = getenv("NUM_EPOCHS", 4000)
   BS = getenv("BS", 1 * len(GPUS))
   LR = getenv("LR", 0.8)
-  MOMENTUM = getenv("MOMENTUM", 0.9)
   LR_WARMUP_EPOCHS = getenv("LR_WARMUP_EPOCHS", 200)
   LR_WARMUP_INIT_LR = getenv("LR_WARMUP_INIT_LR", 0.0001)
   WANDB = getenv("WANDB")
@@ -280,12 +279,26 @@ def train_unet3d():
     np.random.seed(SEED)
     random.seed(SEED)
 
+  config = {
+    "num_epochs": NUM_EPOCHS,
+    "batch_size": BS,
+    "learning_rate": LR,
+    "learning_rate_warmup_epochs": LR_WARMUP_EPOCHS,
+    "learning_rate_warmup_init": LR_WARMUP_INIT_LR,
+    "seed": SEED,
+    "start_eval_at": START_EVAL_AT,
+    "evaluate_every": EVALUATE_EVERY,
+    "beam": getenv("BEAM"),
+    "gpus": GPUS,
+    "default_float": getenv("DEFAULT_FLOAT", "FLOAT32")
+  }
+
   model = UNet3D()
   params = get_parameters(model)
 
   for p in params: p.realize().to_(GPUS)
 
-  optim = SGD(params, lr=LR, momentum=MOMENTUM, nesterov=True)
+  optim = SGD(params, lr=LR, momentum=0.9, nesterov=True)
 
   def preprocess_dataset(filenames, is_val=False):
     for fn in tqdm(filenames, desc=f"preprocess {'val' if is_val else 'train'}"):
@@ -320,12 +333,12 @@ def train_unet3d():
     score = dice_score(y_hat, y)
     return loss.realize(), score.realize()
   
-  if WANDB: wandb.init(project=PROJ_NAME)
+  if WANDB: wandb.init(config=config, project=PROJ_NAME)
 
   is_successful, diverged = False, False
   start_eval_at, evaluate_every = START_EVAL_AT, EVALUATE_EVERY
   next_eval_at = start_eval_at
-  print(f"Evaluating starting at epoch {start_eval_at} and every {evaluate_every} epochs after")
+  print(f"Eval starts at epoch {start_eval_at} and every {evaluate_every} epochs afterwards")
 
   if not PREPROCESSED_DIR.exists():
     PREPROCESSED_DIR.mkdir()
