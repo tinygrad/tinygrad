@@ -18,7 +18,7 @@ class ConvertCocoPolysToMask(object):
     h, w = image.size
 
     image_id = target["image_id"]
-    image_id = Tensor([image_id])
+    image_id = Tensor([image_id], requires_grad=False)
 
     anno = target["annotations"]
 
@@ -37,23 +37,15 @@ class ConvertCocoPolysToMask(object):
     classes = [obj["category_id"] for obj in anno]
     classes = np.array(classes, dtype=np.int64)
 
-    keypoints = None
-    if anno and "keypoints" in anno[0]:
-      keypoints = [obj["keypoints"] for obj in anno]
-      keypoints = Tensor(keypoints, dtype=dtypes.float32)
-      num_keypoints = keypoints.shape[0]
-      if num_keypoints:
-        keypoints = keypoints.reshape(num_keypoints, -1, 3)
-
     keep = (boxes[:, 3] > boxes[:, 1]) & (boxes[:, 2] > boxes[:, 0])
     boxes = boxes[keep]
     # print('BOXES:KEPPPOST', boxes)
     classes = classes[keep]
 
     target = {}
-    target["boxes"] = Tensor(boxes)#.realize()
+    target["boxes"] = Tensor(boxes, requires_grad=False)#.realize()
     # print('BOXES:TENSCONV', target["boxes"].numpy())
-    target["labels"] = Tensor(classes)#.realize()
+    target["labels"] = Tensor(classes, requires_grad=False)#.realize()
     target["image_id"] = image_id
 
     # for conversion to coco api
@@ -141,9 +133,10 @@ def resize_boxes(boxes: Tensor, original_size: List[int], new_size: List[int]) -
   # print('UNBIND SHAPE_POST:', xmin.shape, xmax.shape, ymin.shape, ymax.shape)
   ans = Tensor.stack((xmin, ymin, xmax, ymax), dim=1)#.cast(dtypes.float32)
   # print('RESIZE_ANS', ans.shape)
+  ans.requires_grad = False
   return ans
+
 import torchvision.transforms.functional as F
-import torch
 # SIZE = (400,400)
 SIZE = (800, 800)
 
@@ -154,15 +147,13 @@ def normalize(x):
   # x = x.permute((2,1,0)) / 255.0
   x -= image_mean
   x /= image_std
-  return x.realize()
+  return x#.realize()
   
 def iterate(coco, bs=8):
-  
   i = 0
   while(i<800):
     i_sub = 0
     rem =0
-    # X, targets = [], []
     X, target_boxes, target_labels, target_boxes_padded, target_labels_padded = [], [], [], [], []
     while(i_sub<bs):
       # print(i_sub)
@@ -173,11 +164,10 @@ def iterate(coco, bs=8):
       if(t['boxes'].shape[0]<=0):
         rem+=1
       else:
-        xNew = normalize(Tensor(np.array(x_orig)))
-        xNew_tor = F.resize(torch.as_tensor(xNew.numpy(), device='cpu'), size=SIZE)
+        # xNew_pre = normalize(Tensor(np.array(x_orig)))
+        xNew_tor = F.resize(x_orig, size=SIZE)
         # print('X_NEW', xNew.shape)
-        xNew = Tensor(xNew_tor.numpy())
-        del xNew_tor
+        xNew = normalize(Tensor(np.array(xNew_tor)))
 
         # print('X_MEAN_NORM',xNew.shape, xNew.mean().numpy())
         X.append(xNew)
@@ -195,15 +185,13 @@ def iterate(coco, bs=8):
         # print('ITERATE', xNew.shape, t['boxes'].shape, t['labels'].shape)
         # print('ITERATE_PADDED', xNew.shape, boxes_padded.shape, labels_padded.shape)
         target_boxes.append(t['boxes'])
-        target_labels.append(t['labels'])
+        target_labels.append(t['labels'].realize())
         # print('lABEL LOAD CHEK', target_labels[-1].shape)
         # print('PADDING LOGIC', labels_padded.numpy())
         # print(boxes_padded.numpy())
         target_boxes_padded.append(boxes_padded)
         target_labels_padded.append(labels_padded)
         i_sub+=1
-        x_orig.close()
+
     yield Tensor.stack(X), target_boxes, target_labels, Tensor.stack(target_boxes_padded), Tensor.stack(target_labels_padded)
-
     i= i+bs+rem
-

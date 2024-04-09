@@ -384,7 +384,7 @@ class RetinaNet:
       # print(colored(f'BOX_IOU {match_quality_matrix.shape} {match_quality_matrix.numpy()}', 'green'))
       # print('match_quality_matrix', match_quality_matrix.shape)
       # print(match_quality_matrix.numpy())
-      matched_idxs.append(self.proposal_matcher(match_quality_matrix.realize()))
+      matched_idxs.append(self.proposal_matcher(match_quality_matrix))
       # print(colored(f'PROP MATCHER {matched_idxs[-1].shape} {matched_idxs[-1].numpy()}', 'magenta'))
     matched_idxs = Tensor.stack(matched_idxs)
     return matched_idxs

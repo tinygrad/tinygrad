@@ -269,22 +269,15 @@ def train_retinanet():
 
     # b,r,c = mdlrun(X)
     b,r,c = model(X, True)
-    # return model.loss_dummy(r,c)
 
-    # loss_reg = mdl_reg_loss_jit(r, Y_b_P, matched_idxs)
-    # loss_class = mdl_class_loss_jit(c, Y_l_P, matched_idxs)
     loss_reg = mdl_reg_loss(r, Y_b_P, matched_idxs)
     loss_class = mdl_class_loss(c, Y_l_P, matched_idxs)
     loss = loss_reg+loss_class
 
     print(colored(f'loss_reg {loss_reg.numpy()}', 'green'))
     print(colored(f'loss_class {loss_class.numpy()}', 'green'))
-    # for o in optimizer.params:
-    #   print(o.grad)
+
     loss.backward()
-    # print('******')
-    # for o in optimizer.params:
-    #   print(o.grad)
     optimizer.step()
     return loss.realize()
 
@@ -293,21 +286,23 @@ def train_retinanet():
     cnt = 0
     # for X,Y in iterate(coco, BS):
     for X, Y_boxes, Y_labels, Y_boxes_p, Y_labels_p in iterate(coco, BS):
+    # for X in iterate(coco, BS):
       if(cnt==0 and epoch==0):
+        # INIT LOSS FUNC
         b,_,_ = mdlrun(X)
         ANCHORS = anchor_generator(X, b)
         ANCHORS = [a.realize() for a in ANCHORS]
         ANCHORS = Tensor.stack(ANCHORS)
-        mdl_reg_loss_jit = TinyJit(lambda r, y, m: model.head.regression_head.loss(r,y,ANCHORS, m).realize())
-        mdl_class_loss_jit = TinyJit(lambda c, y,m: model.head.classification_head.loss(c,y,m).realize())
+        # mdl_reg_loss_jit = TinyJit(lambda r, y, m: model.head.regression_head.loss(r,y,ANCHORS, m).realize())
+        # mdl_class_loss_jit = TinyJit(lambda c, y,m: model.head.classification_head.loss(c,y,m).realize())
         mdl_reg_loss = lambda r, y, m: model.head.regression_head.loss(r,y,ANCHORS, m)
         mdl_class_loss = lambda c, y,m: model.head.classification_head.loss(c,y,m)
 
       st = time.time()
       cnt+=1
       # not jittable for now
-      matched_idxs = model.matcher_gen(ANCHORS, Y_boxes).realize()
 
+      matched_idxs = model.matcher_gen(ANCHORS, Y_boxes).realize()
       loss = train_step(X, Y_boxes_p, Y_labels_p, matched_idxs)
 
       print(colored(f'{cnt} STEP {loss.numpy()} || {time.time()-st} || LR: {optimizer.lr.item()}', 'magenta'))
