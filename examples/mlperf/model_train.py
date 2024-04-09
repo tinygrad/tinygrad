@@ -264,13 +264,13 @@ def train_retinanet():
 
   optimizer = Adam(parameters)
 
-  # @TinyJit
+  @TinyJit
   def train_step(X, Y_b_P, Y_l_P, matched_idxs):
     Tensor.training = True
-    # optimizer.zero_grad()
+    optimizer.zero_grad()
 
-    b,r,c = mdlrun(X)
-    # b,r,c = model(X, True)
+    # b,r,c = mdlrun(X)
+    b,r,c = model(X, True)
     # return model.loss_dummy(r,c)
 
     # loss_reg = mdl_reg_loss_jit(r, Y_b_P, matched_idxs)
@@ -283,11 +283,11 @@ def train_retinanet():
     print(colored(f'loss_class {loss_class.numpy()}', 'green'))
     # for o in optimizer.params:
     #   print(o.grad)
-    # loss.backward()
+    loss.backward()
     # print('******')
     # for o in optimizer.params:
     #   print(o.grad)
-    # optimizer.step()
+    optimizer.step()
     return loss.realize()
 
   for epoch in range(EPOCHS):
@@ -312,7 +312,7 @@ def train_retinanet():
 
       loss = train_step(X, Y_boxes_p, Y_labels_p, matched_idxs)
 
-      print(colored(f'{cnt} STEP {loss.numpy()} || {time.time()-st}', 'magenta'))
+      print(colored(f'{cnt} STEP {loss.numpy()} || {time.time()-st} || LR: {optimizer.lr.item()}', 'magenta'))
       
 def train_unet3d():
   # TODO: Unet3d
