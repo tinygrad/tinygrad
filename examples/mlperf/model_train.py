@@ -290,7 +290,7 @@ def train_unet3d():
     "evaluate_every": EVALUATE_EVERY,
     "beam": getenv("BEAM"),
     "gpus": GPUS,
-    "default_float": getenv("DEFAULT_FLOAT", "FLOAT32")
+    "default_float": dtypes.default_float.name
   }
 
   model = UNet3D()
