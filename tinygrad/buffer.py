@@ -25,16 +25,17 @@ class Buffer:
     assert not hasattr(self, '_buf'), "can't allocate already allocated buffer"
     from tinygrad.device import Device
     self.allocator = Device[self.device].allocator
+    if self.base is not None:
+      assert hasattr(self.base, "_buf"), "attempting to allocate a view of not yet allocated Buffer"
+      assert hasattr(self.allocator, "offset"), "device doesn't support offsets"
+      opaque = self.allocator.offset(self.base._buf, self.offset, self.nbytes)
     self._buf = opaque if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
     if not self.device.startswith("DISK") and self.base is None: GlobalCounters.mem_used += self.nbytes
     return self
   def view(self, offset:int=0, size:Optional[int]=None, dtype:Optional[DType]=None) -> Buffer:
-    dtype, base, opaque, size = dtype or self.dtype, (self.base or self), (self.base or self)._buf, self.nbytes if size is None else size
+    dtype, base, size = dtype or self.dtype, (self.base or self), self.nbytes if size is None else size
     assert self.nbytes >= offset + size and size % dtype.itemsize == 0, "wrong size for dtype"
-    if self.offset+offset != 0 or size != base.nbytes:
-      assert hasattr(self.allocator, "offset"), "device doesn't support offsets"
-      opaque = self.allocator.offset(opaque, self.offset+offset, size)
-    return Buffer(self.device, size//dtype.itemsize, dtype, opaque, self.options, base=base, offset=self.offset+offset)
+    return Buffer(self.device, size//dtype.itemsize, dtype, self.options, base=base, offset=self.offset+offset)
   def __reduce__(self):
     buf = None
     if hasattr(self, '_buf'):
