@@ -45,7 +45,7 @@ class TestPickle(unittest.TestCase):
     sched = create_schedule([out.lazydata])
     pk = pickle.dumps(sched)
     sched_pk = pickle.loads(pk)
-    assert sched_pk[-1].ast[0].op is BinaryOps.ADD
+    assert sched_pk[-1].ast == sched[-1].ast
 
 if __name__ == '__main__':
   unittest.main()
