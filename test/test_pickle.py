@@ -2,7 +2,6 @@ import unittest, pickle
 import numpy as np
 from tinygrad import Tensor, TinyJit
 from tinygrad.engine.schedule import create_schedule
-from tinygrad.ops import BinaryOps
 
 class TestPickle(unittest.TestCase):
   def test_pickle_realized_tensor(self):
