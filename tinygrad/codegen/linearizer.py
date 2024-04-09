@@ -168,11 +168,9 @@ class Linearizer(Kernel):
     # no new opts and we already ran? skip relinearizing
     if self.applied_opts == self.applied_opts_cache: return self
 
-    # late alias the tensor core buffers
-    if (tc:=self.tensor_core) and (tc_opts:=self.tensor_core_opts):
-      alias_pattern = [0]*(self.global_dims+(self.local_dims-len(tc.threads))) + [2]*(len(tc.threads)) + [0]*(self.shape_len-self.upcasted-self.first_reduce) + [1]*tc.num_upcasts() + [3]*(self.upcasted-tc.num_upcasts())  # noqa: E501
-      for tc_buf in tc_opts.bufs:
-        self.alias_buffer(tc_buf, alias_pattern)
+    # late alias the tensor core buffers = total number of elements from A and B per loop (i.e. all upcasts except the TC unroll)
+    if self.tensor_core and (tc_opts:=self.tensor_core_opts):
+      for tc_buf in tc_opts.bufs: self.alias_buffer("ldata", tc_buf, [0]*(self.shape_len-self.upcasted+1) + [1]*(self.upcasted-1))
 
     # save backups
     sts_backup, gfr_backup, upc_backup = self.sts[:], self.group_for_reduces, self.upcasted
@@ -202,9 +200,9 @@ class Linearizer(Kernel):
     for lb in self.local_alias.values():
       self.buf_uops[self.bufs.index(lb)] = self.uops.add(UOps.DEFINE_LOCAL,
                                                          PtrDType(dtypes.float32), (), (lb.name, self.sts[self.bufs.index(lb)].size))
-    # add a local buffer for multistage reduce. # TODO: use local alias
+    # add a local buffer for multistage reduce. # TODO: use alias_buffer("temp", ...)
     if self.group_for_reduces:
-      # TODO: the strides of this can be controlled
+      # TODO: the strides of this need to match output for GROUP after TC to work properly
       self.sts.append(ShapeTracker.from_shape(tuple([1] * self.global_dims + list(self.full_shape[self.global_dims:self.global_dims+self.local_dims+self.group_for_reduces]) + [1] * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))  # noqa: E501
       temp_dtype = self.get_base_dtype(self.reduceop.dtype)
       self.bufs.append(LocalBuffer("temp", self.sts[-1].size, temp_dtype))

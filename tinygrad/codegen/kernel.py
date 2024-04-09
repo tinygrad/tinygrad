@@ -309,7 +309,7 @@ class Kernel:
           self.reshape_and_permute(None, order)
           if DEBUG >= 3: print("permuted global dim", order, "due to allocation exceeds global limit")
 
-  def alias_buffer(self, i, pattern):
+  def alias_buffer(self, prefix:str, i:int, pattern:List[int]):
     assert len(pattern) == len(self.sts[i].shape), f"must include a pattern for each shape {pattern} {self.sts[i].shape}"
 
     bst = 1
@@ -322,14 +322,14 @@ class Kernel:
           bst *= shp[j]
 
     self.sts.append(ShapeTracker((View.create(tuple(shp), tuple(stride)),)))
-    self.bufs.append(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size))
-    if DEBUG >= 4: print("aliasing buffer", self.sts[i])
+    self.bufs.append(LocalBuffer(name=f"{prefix}{i}", size=self.sts[-1].size))
+    if DEBUG >= 4: print(f"aliasing buffer {i} to {prefix}{i}: size={self.sts[-1].size} sts={self.sts[-i]}")
     self.local_alias[i] = cast(LocalBuffer, self.bufs[-1])
 
   # ******************** high level optimizers ********************
 
-  def _apply_tc_opt(self, use_tensor_cores:int, axis:int, opt_level:int) -> bool:
-    if use_tensor_cores and self.opts.has_local and self.reduceop and self.reduceop.op is ReduceOps.SUM and self.opts.device in tensor_cores:
+  def _apply_tc_opt(self, axis:int, opt_level:int) -> bool:
+    if self.opts.has_local and self.reduceop and self.reduceop.op is ReduceOps.SUM and self.opts.device in tensor_cores:
       for tc in tensor_cores[self.opts.device]:
         has_cast = tc.dtype_in != tc.dtype_out
         if has_cast and not(self.reduceop.src[0].op is UnaryOps.CAST and self.reduceop.src[0].arg[0] == tc.dtype_out): continue
@@ -366,14 +366,12 @@ class Kernel:
           if tc.dims[i] > sz: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[i], tc.dims[i]//sz), append_opt=False)
         for (tc_dim, tc_amt) in tc.threads:
           self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
-
-        # assert tensor core
-        if use_tensor_cores == 1: self.tensor_core = tc # TC=2 will do the shape ops without the WMMA
+        self.tensor_core = tc
         return True
     return False
 
   def apply_tensor_cores(self, use_tensor_cores=1, extra_opts:Optional[List[Opt]]=None) -> bool:
-    if not self.opts.has_tensor_cores and use_tensor_cores != 2: return False
+    if not (self.opts.has_tensor_cores and use_tensor_cores): return False
     try: # check TC first and apply hand-coded opts if successful
       self.apply_opt(Opt(OptOps.TC, 0, 0))
 
@@ -405,8 +403,8 @@ class Kernel:
     if opt.op is OptOps.TC:
       check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: things like PADTO might be fine
       check(opt.axis is not None and opt.amt is not None, "tensor core opts must have an axis and amt")
-      check((use_tensor_cores:=getenv("TC", 1)) == 2 or self.opts.has_tensor_cores, "must have tensor cores or TC=2")
-      check(self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), cast(int, opt.amt)), "no tensor core available")
+      check(self.opts.has_tensor_cores, "must have tensor cores")
+      check(self._apply_tc_opt(cast(int, opt.axis), cast(int, opt.amt)), "no tensor core available")
       self.applied_opts.append(opt)
       return
 
