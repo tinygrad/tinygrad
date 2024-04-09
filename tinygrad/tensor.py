@@ -635,9 +635,16 @@ class Tensor:
     return out.div(prod(self.shape) / prod(out.shape)) if 0 not in out.shape else out
   def var(self, axis=None, keepdim=False, correction=1):
     assert all_int(self.shape), "does not support symbolic shape"
-    square_sum = ((self - self.mean(axis=axis, keepdim=True)).square()).sum(axis=axis, keepdim=keepdim)
-    return square_sum.div(max(0, prod(self.shape)/prod(square_sum.shape)-correction))
-  def std(self, axis=None, keepdim=False, correction=1): return self.var(axis, keepdim, correction).sqrt()
+    n_elements = prod(self.shape) if axis is None else prod([self.shape[ax] for ax in (axis if isinstance(axis, (list, tuple)) else [axis])])
+    divisor = max(n_elements - correction, 1)  
+    squared_tensor = self.square()
+    stacked_tensor = self.stack([self, squared_tensor], dim=0)
+    sums = stacked_tensor.sum(axis=-1, keepdim=keepdim)
+    variance =   sums[1].div(n_elements) - sums[0].div(n_elements).square()
+    variance = variance.mul(n_elements).div(divisor)
+    return variance
+  def std(self, axis=None, keepdim=False, correction=1): 
+    return self.var(axis, keepdim, correction).sqrt()
 
   def _softmax(self, axis):
     if len(self.shape) == 0:
