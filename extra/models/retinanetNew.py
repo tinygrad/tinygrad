@@ -7,6 +7,7 @@ from tinygrad.helpers import colored, flatten, get_child
 import tinygrad.nn as nn
 from extra.models.resnet import ResNet
 import numpy as np
+
 def cust_bin_cross_logits(inputs, targets):
   return inputs.maximum(0) - targets * inputs + (1 + inputs.abs().neg().exp()).log()
 # @TinyJit
@@ -24,7 +25,9 @@ def sigmoid_focal_loss(
   # p = inputs.sigmoid()
   p = Tensor.sigmoid(inputs) * mask
   # ce_loss = inputs.binary_crossentropy_logits(targets)
-  ce_loss = cust_bin_cross_logits(inputs, targets) #* mask
+  # print('Cross_ENT_LOSS START')
+  ce_loss = cust_bin_cross_logits(inputs, targets).realize() #* mask
+  
   # print('ce_loss', ce_loss.shape)
   p_t = p * targets + (1 - p) * (1 - targets)
   # print('P_T', p_t.shape)
@@ -35,6 +38,8 @@ def sigmoid_focal_loss(
   if alpha >= 0:
     alpha_t = alpha * targets + (1 - alpha) * (1 - targets)
     loss = alpha_t * loss
+  loss=loss.realize()
+  # print('Cross_ENT_LOSS EEENNNDDDD')
   # print(colored(f'ENTERED SIMOID_LOSS {loss.shape}', 'green'))
   # print(f'SIg_LOSS_PRE_MASK {loss.shape} {mask.shape}')
   loss = loss * mask
@@ -613,7 +618,8 @@ class ClassificationHead:
       # new_mask = Tensor.where(foreground_idxs_per_image, 1, -1)
       # negative IDX give 0's in one_hot
       labels_temp = tl[matched_idxs_per_image] #*new_mask#.reshape(-1,1)
-      labels_temp = Tensor.where(foreground_idxs_per_image, labels_temp, -1)
+      # labels_temp = Tensor.where(foreground_idxs_per_image, labels_temp, -1)
+      labels_temp = (labels_temp+1)*foreground_idxs_per_image-1
       # print('NEW-MASK', labels_temp.shape, new_mask.shape)
       # labels_temp = Tensor.where(foreground_idxs_per_image, )
       # print(colored(f'LABEL_TEMP {labels_temp.shape} {labels_temp.numpy()}', 'yellow'))
@@ -688,9 +694,11 @@ class ClassificationHead:
 
       # cls_logits_per_image = cls_logits_per_image[n]
       # gt_classes_target = gt_classes_target[n]
+      # print('sig START')
       s = sigmoid_focal_loss(cls_logits_per_image, 
                                        gt_classes_target, 
-                                       valid_idxs_per_image.reshape(-1,1))
+                                       valid_idxs_per_image.reshape(-1,1)).realize()
+      # print('sigEND')
       # s.realize()
       a = s/max(1, num_foreground.item())
       # print('SIGMOID LOSS', a.numpy(), max(1, num_foreground.item()), s.numpy())

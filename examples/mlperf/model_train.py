@@ -550,7 +550,7 @@ def train_retinanet():
       # optimizer.zero_grad()
       # a = anchor_generator(X, b)
       # loss = train_step(X, Y)
-      matched_idxs = model.matcher_gen(ANCHORS, Y_boxes)
+      matched_idxs = model.matcher_gen(ANCHORS, Y_boxes).realize()
       loss = train_step(X, Y_boxes_p, Y_labels_p, matched_idxs)
       # loss = Tensor(44)
       
