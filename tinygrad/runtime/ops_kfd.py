@@ -96,6 +96,56 @@ SHF_ALLOC = 0x2
 EMPTY_SIGNAL = hsa.hsa_signal_t()
 SIGNAL_VALUE_OFFSET = getattr(hsa.amd_signal_t, 'value').offset
 
+BASE_ADDR = 0x00001260
+PACKET3_SET_SH_REG_START = 0x2c00
+SUB = PACKET3_SET_SH_REG_START - BASE_ADDR
+
+regCOMPUTE_PGM_LO = 0x1bac - SUB
+regCOMPUTE_PGM_RSRC1 = 0x1bb2 - SUB
+regCOMPUTE_USER_DATA_0 = 0x1be0 - SUB
+regCOMPUTE_START_X = 0x1ba4 - SUB
+
+COMPUTE_SHADER_EN = 1
+CS_W32_EN = 1 << 15
+
+class HWPM4Queue:
+  def __init__(self): self.q = []
+
+  def exec(self, prg:KFDProgram, kernargs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), completion_signal=None):
+    code = hsa.amd_kernel_code_t.from_address(prg.handle)
+    code_ptr = (prg.handle + code.kernel_code_entry_byte_offset) >> 8
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 6), regCOMPUTE_PGM_LO, code_ptr&0xFFFFFFFF, code_ptr>>32, 0, 0, 0, 0]
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), regCOMPUTE_PGM_RSRC1, code.compute_pgm_rsrc1, code.compute_pgm_rsrc2]
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), regCOMPUTE_USER_DATA_0, kernargs&0xFFFFFFFF, kernargs>>32]
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 8), regCOMPUTE_START_X, 0,0,0, local_size[0],local_size[1],local_size[2],0,0]
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_DISPATCH_DIRECT, 3), global_size[0],global_size[1],global_size[2], CS_W32_EN | COMPUTE_SHADER_EN]
+    if completion_signal: self.signal(completion_signal)
+    return self
+
+  def signal(self, signal:hsa.amd_signal_t):
+    assert signal.event_mailbox_ptr != 0
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_RELEASE_MEM, 6),
+      # event_index__mec_release_mem__shader_done
+      amd_gpu.PACKET3_RELEASE_MEM_EVENT_TYPE(0x14) | amd_gpu.PACKET3_RELEASE_MEM_EVENT_INDEX(6) | \
+        amd_gpu.PACKET3_RELEASE_MEM_GCR_GLV_INV | amd_gpu.PACKET3_RELEASE_MEM_GCR_GL1_INV | amd_gpu.PACKET3_RELEASE_MEM_GCR_GL2_INV | \
+        amd_gpu.PACKET3_RELEASE_MEM_GCR_GL2_WB | amd_gpu.PACKET3_RELEASE_MEM_GCR_SEQ,
+      amd_gpu.PACKET3_RELEASE_MEM_DATA_SEL(2) | amd_gpu.PACKET3_RELEASE_MEM_INT_SEL(1) | amd_gpu.PACKET3_RELEASE_MEM_DST_SEL(0),
+      signal.event_mailbox_ptr&0xFFFFFFFF,
+      signal.event_mailbox_ptr>>32,
+      signal.event_id&0xFFFFFFFF,
+      signal.event_id>>32,
+      0
+    ]
+    return self
+
+  def submit(self, device:KFDDevice):
+    wptr = device.pm4_write_pointer[0]
+    pm4_buffer_view = to_mv(device.pm4_ring.va_addr, device.pm4_ring.size).cast("I")
+    for i, value in enumerate(self.q): pm4_buffer_view[(wptr+i)%device.pm4_ring.size] = value
+    device.pm4_write_pointer[0] = wptr + len(self.q)
+    device.pm4_doorbell[0] = wptr + len(self.q)
+    return self
+
 class HWComputeQueue:
   def __init__(self): self.q = []
 
@@ -236,8 +286,10 @@ class KFDProgram:
     for i in range(len(args)): args_st.__setattr__(f'f{i}', args[i].va_addr)
     for i in range(len(vals)): args_st.__setattr__(f'v{i}', vals[i])
 
-    HWComputeQueue().exec(self, self.device.kernargs_ptr, global_size, local_size,
-                          self.device.completion_signal if wait else None).submit(self.device)
+    #HWComputeQueue().exec(self, self.device.kernargs_ptr, global_size, local_size,
+    #                      self.device.completion_signal if wait else None).submit(self.device)
+    HWPM4Queue().exec(self, self.device.kernargs_ptr, global_size, local_size,
+                      self.device.completion_signal if wait else None).submit(self.device)
     self.device.kernargs_ptr += self.kernargs_segment_size
 
     if wait:
@@ -386,7 +438,6 @@ class KFDDevice(Compiled):
     self.signal_sdma = KFDDevice._get_signal(self.device_id*2+1, sync_event=kio.create_event(KFDDevice.kfd, auto_reset=1))
 
     self.gart_aql = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
-    self.gart_sdma = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
     self.aql_ring = self._gpu_alloc(0x100000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
     self.eop_buffer = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
     self.kernargs = self._gpu_alloc(0x1000000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
@@ -432,6 +483,7 @@ class KFDDevice(Compiled):
     self.aql_doorbell_value = 0
 
     # SDMA Queue
+    self.gart_sdma = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
     self.sdma_ring = self._gpu_alloc(0x100000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
     self.sdma_queue = kio.create_queue(KFDDevice.kfd, ring_base_address=self.sdma_ring.va_addr, ring_size=self.sdma_ring.size, gpu_id=self.gpu_id,
       queue_type=kfd.KFD_IOC_QUEUE_TYPE_SDMA, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE, queue_priority=kfd.KFD_MAX_QUEUE_PRIORITY,
@@ -441,6 +493,17 @@ class KFDDevice(Compiled):
     self.sdma_write_pointer = to_mv(self.sdma_queue.write_pointer_address, 8).cast("Q")
     self.sdma_doorbell = to_mv(self.doorbells + self.sdma_queue.doorbell_offset - self.doorbells_base, 4).cast("I")
     self.sdma_doorbell_value = 0
+
+    # PM4 Queue
+    self.gart_pm4 = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
+    self.pm4_ring = self._gpu_alloc(0x100000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
+    self.pm4_queue = kio.create_queue(KFDDevice.kfd, ring_base_address=self.pm4_ring.va_addr, ring_size=self.pm4_ring.size, gpu_id=self.gpu_id,
+      queue_type=kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE, queue_priority=kfd.KFD_MAX_QUEUE_PRIORITY,
+      write_pointer_address=self.gart_pm4.va_addr, read_pointer_address=self.gart_pm4.va_addr+8)
+
+    self.pm4_read_pointer = to_mv(self.pm4_queue.read_pointer_address, 8).cast("Q")
+    self.pm4_write_pointer = to_mv(self.pm4_queue.write_pointer_address, 8).cast("Q")
+    self.pm4_doorbell = to_mv(self.doorbells + self.pm4_queue.doorbell_offset - self.doorbells_base, 4).cast("I")
 
     # PM4 stuff
     self.pm4_indirect_buf = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
