@@ -112,7 +112,7 @@ class Kernel:
     ret = type(self).__new__(type(self))
 
     # base linearizer params
-    ret.opts, ret.ast = self.opts, self.ast
+    ret.opts, ret.ast, ret.lazyops = self.opts, self.ast, self.lazyops
 
     # things downstream of the AST
     ret.reduceop, ret.outbufs, ret.vars, ret.bufs, ret.earlybufs, ret.full_buf_index = \
