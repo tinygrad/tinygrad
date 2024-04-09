@@ -5,9 +5,11 @@ import importlib, inspect, functools, pathlib, time, ctypes, os
 from tinygrad.helpers import ansilen, prod, getenv, colored, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put
 from tinygrad.helpers import DEBUG, CACHECOLLECTING, BEAM, NOOPT, GlobalCounters
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
-from tinygrad.ops import LazyOp, get_lazyop_info
+from tinygrad.ops import LazyOp, get_lazyop_info, MemBuffer, BufferOps
 from tinygrad.buffer import Buffer, BufferOptions
 from tinygrad.codegen.uops import UOpGraph
+from tinygrad.dtype import dtypes
+from tinygrad.shape.shapetracker import ShapeTracker
 
 if TYPE_CHECKING:
   from tinygrad.codegen.linearizer import Linearizer
@@ -200,6 +202,17 @@ class CompiledASTRunner(JITRunner):
                                      lra=lra, device=self.dname, first_run=self.first_run)
     self.first_run = False
     return et
+
+class CopyKernel(CompiledASTRunner):
+  def __init__(self, out_device, in_device, sz):  # pylint: disable=super-init-not-called
+    copy_ast = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.uint8, st:=ShapeTracker.from_shape((sz,))))
+    copy_ast = LazyOp(BufferOps.STORE, (copy_ast,), MemBuffer(0, dtypes.uint8, st))
+    self.map_function = (lambda x: gpu_map(x._buf)) if (gpu_map:=getattr(Device[out_device], "_gpu_map", None)) else (lambda x: None)
+    self.copy_runner = Device[out_device].get_runner(copy_ast)
+  def __getattr__(self, name: str) -> Any: return getattr(self.copy_runner, name)
+  def __call__(self, rawbufs: List[Buffer], var_vals: Dict[Variable, int], wait=False, jit=False, do_update_stats=True) -> float | None:
+    self.map_function(rawbufs[1])
+    return self.copy_runner(rawbufs, var_vals, wait, jit, do_update_stats)
 
 class MultiDeviceJITGraph(JITRunner):
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
