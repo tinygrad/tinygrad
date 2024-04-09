@@ -104,18 +104,30 @@ regCOMPUTE_PGM_LO = 0x1bac - SUB
 regCOMPUTE_PGM_RSRC1 = 0x1bb2 - SUB
 regCOMPUTE_USER_DATA_0 = 0x1be0 - SUB
 regCOMPUTE_START_X = 0x1ba4 - SUB
+regCOMPUTE_TMPRING_SIZE = 0x1bb8 - SUB
 
 COMPUTE_SHADER_EN = 1
 CS_W32_EN = 1 << 15
+
+def format_struct(s):
+  sdats = []
+  for field_name, field_type in s._fields_:
+    dat = getattr(s, field_name)
+    if isinstance(dat, int): sdats.append(f"{field_name}:0x{dat:X}")
+    else: sdats.append(f"{field_name}:{dat}")
+  return sdats
 
 class HWPM4Queue:
   def __init__(self): self.q = []
 
   def exec(self, prg:KFDProgram, kernargs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), completion_signal=None):
     code = hsa.amd_kernel_code_t.from_address(prg.handle)
-    code_ptr = (prg.handle + code.kernel_code_entry_byte_offset) >> 8
-    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 6), regCOMPUTE_PGM_LO, code_ptr&0xFFFFFFFF, code_ptr>>32, 0, 0, 0, 0]
+    #for s in format_struct(code): print(s)
+    shiftedIsaAddr = (prg.handle + code.kernel_code_entry_byte_offset) >> 8
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 6), regCOMPUTE_PGM_LO, shiftedIsaAddr&0xFFFFFFFF, shiftedIsaAddr>>32, 0, 0,
+               (prg.device.scratch.va_addr>>8)&0xFFFFFFFF, prg.device.scratch.va_addr>>40]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), regCOMPUTE_PGM_RSRC1, code.compute_pgm_rsrc1, code.compute_pgm_rsrc2]
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), regCOMPUTE_TMPRING_SIZE, 0x00200200] # (waveSize << 12) | (numWaves)
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), regCOMPUTE_USER_DATA_0, kernargs&0xFFFFFFFF, kernargs>>32]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 8), regCOMPUTE_START_X, 0,0,0, local_size[0],local_size[1],local_size[2],0,0]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_DISPATCH_DIRECT, 3), global_size[0],global_size[1],global_size[2], CS_W32_EN | COMPUTE_SHADER_EN]
@@ -496,12 +508,16 @@ class KFDDevice(Compiled):
     self.sdma_doorbell_value = 0
 
     # PM4 Queue
+    self.pm4_ctx_save_restore_address = self._gpu_alloc(0x2C02000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
     self.eop_pm4_buffer = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
     self.gart_pm4 = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
     self.pm4_ring = self._gpu_alloc(0x100000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
     self.pm4_queue = kio.create_queue(KFDDevice.kfd, ring_base_address=self.pm4_ring.va_addr, ring_size=self.pm4_ring.size, gpu_id=self.gpu_id,
       queue_type=kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE, queue_priority=kfd.KFD_MAX_QUEUE_PRIORITY,
       eop_buffer_address=self.eop_pm4_buffer.va_addr, eop_buffer_size=self.eop_pm4_buffer.size,
+      # TODO: are these needed? (i know eop is)
+      ctx_save_restore_address=self.pm4_ctx_save_restore_address.va_addr, ctx_save_restore_size=self.pm4_ctx_save_restore_address.size,
+      ctl_stack_size = 0xa000,
       write_pointer_address=self.gart_pm4.va_addr, read_pointer_address=self.gart_pm4.va_addr+8)
 
     self.pm4_read_pointer = to_mv(self.pm4_queue.read_pointer_address, 8).cast("Q")
