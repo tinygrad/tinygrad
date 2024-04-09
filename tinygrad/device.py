@@ -207,11 +207,16 @@ class CopyKernel(CompiledASTRunner):
   def __init__(self, out_device, in_device, sz):  # pylint: disable=super-init-not-called
     copy_ast = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.uint8, st:=ShapeTracker.from_shape((sz,))))
     copy_ast = LazyOp(BufferOps.STORE, (copy_ast,), MemBuffer(0, dtypes.uint8, st))
-    self.map_function = (lambda x: gpu_map(x._buf)) if (gpu_map:=getattr(Device[out_device], "_gpu_map", None)) else (lambda x: None)
+    self.out_device, self.in_device = out_device, in_device
     self.copy_runner = Device[out_device].get_runner(copy_ast)
   def __getattr__(self, name: str) -> Any: return getattr(self.copy_runner, name)
   def __call__(self, rawbufs: List[Buffer], var_vals: Dict[Variable, int], wait=False, jit=False, do_update_stats=True) -> float | None:
-    self.map_function(rawbufs[1])
+    # TODO: add cross sync device as needed for others
+    if self.out_device.startswith("KFD"):
+      from tinygrad.runtime.ops_kfd import KFDDevice, HWComputeQueue
+      Device[self.out_device]._gpu_map(rawbufs[1]._buf)
+      HWComputeQueue().signal(sig:=KFDDevice._get_signal()).submit(Device[self.in_device])
+      HWComputeQueue().wait(sig).submit(Device[self.out_device])
     return self.copy_runner(rawbufs, var_vals, wait, jit, do_update_stats)
 
 class MultiDeviceJITGraph(JITRunner):
