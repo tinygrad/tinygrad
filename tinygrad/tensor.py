@@ -280,7 +280,7 @@ class Tensor:
     assert all(isinstance(s, (int, float)) for s in (start, stop, step)), "symbolic arange not supported"
     dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
     result = (Tensor.full((math.ceil((stop-start)/step),), step, dtype=dtype, **kwargs)._cumsum() + (start - step)).cast(dtype)
-    result.lazydata.set_arange(True)
+    result.lazydata.set_arange((start, stop, step))
     return result
 
   @staticmethod

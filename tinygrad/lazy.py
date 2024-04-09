@@ -11,22 +11,22 @@ from weakref import ref, ReferenceType, WeakValueDictionary
 
 lazycache: WeakValueDictionary[Any, LazyBuffer] = WeakValueDictionary()
 def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
-                      base:Optional[LazyBuffer]=None, enable_cache=bool(getenv("LAZYCACHE", 1)), is_arange=False):
+                      base:Optional[LazyBuffer]=None, enable_cache=bool(getenv("LAZYCACHE", 1)), arange_data=None):
   if st.size == 0: op, arg, srcs, base = LoadOps.CONST, 0, (), None
   if op is LoadOps.CONST: arg, enable_cache = dtypes.as_const(arg, dtype), True
 
   cache_key = (device, st, dtype, op, arg, tuple(ref(x) for x in srcs)) if base is None else (st, ref(base))
   if enable_cache and (rret := lazycache.get(cache_key, None)): return rret
 
-  is_arange = is_arange or (op in {UnaryOps.CAST, LoadOps.COPY} and srcs[0].is_arange()) or (isinstance(arg, LazyBuffer) and arg.is_arange())
-  ret = LazyBuffer(device, st, dtype, op, arg, srcs, base=base, is_arange=is_arange)
+  arange_data = arange_data or (op in {UnaryOps.CAST, LoadOps.COPY} and srcs[0].arange_data())
+  ret = LazyBuffer(device, st, dtype, op, arg, srcs, base=base, arange_data=arange_data)
   if enable_cache: lazycache[cache_key] = ret
   return ret
 
 class LazyBuffer:
   def __init__(self, device:str, st:ShapeTracker, dtype:DType,
                op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
-               base:Optional[LazyBuffer]=None, is_arange=False):
+               base:Optional[LazyBuffer]=None, arange_data=None):
     self.device, self.st, self.dtype, self.shape, self.size = device, st, dtype, st.shape, st.size
     self._base: Optional[LazyBuffer] = None
     if base is None:
@@ -36,7 +36,7 @@ class LazyBuffer:
       self.buffer: Buffer = srcs[1].base.buffer if self.op is LoadOps.ASSIGN else Buffer(device, self.size, dtype)
       self.contiguous_child: Optional[Tuple[ReferenceType[LazyBuffer], ShapeTracker]] = None
       self.forced_realize = False
-      self._is_arange = is_arange
+      self._arange_data = arange_data
     else:
       # properties on view
       assert base.base == base, "base must be a base itself"
@@ -118,8 +118,8 @@ class LazyBuffer:
     # copy the base and apply the shapetracker on the new device
     return self.base._copy(device)._view(self.st)
 
-  def set_arange(self, val): self.base._is_arange = val
-  def is_arange(self) -> bool: return self.base._is_arange
+  def set_arange(self, val): self.base._arange_data = val
+  def arange_data(self) -> Optional[Tuple]: return self.base._arange_data
 
   def e(self, op:Union[LoadOps, UnaryOps, BinaryOps, TernaryOps], *in_srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
     srcs: List[LazyBuffer] = []

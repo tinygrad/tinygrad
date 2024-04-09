@@ -303,6 +303,7 @@ class UOpGraph:
       get_recursive_parents.cache_clear()
 
   def optimize_arange_loops(self, get_recursive_parents, arange_buf):
+    if (arange_data:=arange_buf.arg[3])[0] != 0 or arange_data[2] != 1: return
     # look for sum reduction loops which can only be true on one iteration of the loop
     load = next((u for u in self.uops if u.uop is UOps.LOAD and u.vin[0] is arange_buf and u.vin[1].uop is UOps.LOOP), None)
     if not load: return
@@ -373,7 +374,7 @@ class UOpGraph:
     # uops optimization
     while self.uops_optimization(get_recursive_parents): pass
     self.simplify_phi_loops(get_recursive_parents)
-    [self.optimize_arange_loops(get_recursive_parents, x) for x in self.uops if x.uop is UOps.DEFINE_GLOBAL and x.arg[3] is True]
+    [self.optimize_arange_loops(get_recursive_parents, x) for x in self.uops if x.uop is UOps.DEFINE_GLOBAL and x.arg[3]]
     # for x in self.one_hot_cmpeq: self.optimize_one_hot_reduce_loops(get_recursive_parents, x)
 
     # (recursively) remove childless uops

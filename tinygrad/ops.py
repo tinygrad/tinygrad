@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Union, Type, Tuple, Any, List, Dict, Callable
+from typing import Union, Type, Tuple, Any, List, Dict, Callable, Optional
 import functools, hashlib, math, operator, ctypes
 from enum import Enum, auto
 from dataclasses import dataclass
@@ -29,7 +29,7 @@ class MemBuffer:
   idx: int
   dtype: DType
   st: ShapeTracker
-  is_arange: bool = False
+  arange_data: Optional[Tuple] = (),
 
 @dataclass(frozen=True)
 class ConstBuffer:
