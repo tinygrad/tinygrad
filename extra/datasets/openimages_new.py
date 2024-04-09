@@ -151,7 +151,7 @@ def normalize(x):
   
 def iterate(coco, bs=8):
   i = 0
-  while(i<800):
+  while(i<len(coco.ids)):
     i_sub = 0
     rem =0
     X, target_boxes, target_labels, target_boxes_padded, target_labels_padded = [], [], [], [], []
