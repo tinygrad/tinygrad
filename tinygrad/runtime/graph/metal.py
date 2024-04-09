@@ -51,6 +51,9 @@ class MetalGraph:
     self.command_buffer: Any = None
     if len(var_vals): self.int_buf_view = self.int_buf.contents().as_buffer(self.int_buf.length()).cast('i')
 
+    # clear jit inputs to allow their memory to be freed/reused
+    for (j,i) in self.input_replace.keys(): self.jit_cache[j].rawbufs[i] = None
+
   def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     # NOTE: you at least can't update the ints if this is running
     if self.command_buffer is not None and self.command_buffer in self.device.mtl_buffers_in_flight: wait_check(self.command_buffer)

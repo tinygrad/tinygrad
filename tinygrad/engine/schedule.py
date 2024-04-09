@@ -22,8 +22,8 @@ class _LBScheduleItem:
   var_vals: Dict[Variable, int]
 
 # recursively create a lazyop
-def _recursive_lazyop(buf:LazyBuffer, membufs:List[LazyBuffer], var_vals:Dict[Variable, int], st:ShapeTracker,
-                      realizes:Set[LazyBuffer], cache, first=True, assign_to:Optional[LazyBuffer]=None, assign_idx:Optional[int]=None) -> LazyOp:
+def _recursive_lazyop(buf:LazyBuffer, membufs:List[LazyBuffer], outbufs:Tuple[LazyBuffer, ...], var_vals:Dict[Variable, int], st:ShapeTracker,
+                      realizes:Set[LazyBuffer], cache, assign_to:Optional[LazyBuffer]=None, assign_idx:Optional[int]=None) -> LazyOp:
   if (buf, st) in cache: return cache[(buf, st)]
   if buf != buf.base:
     st = buf.st + st
@@ -38,7 +38,7 @@ def _recursive_lazyop(buf:LazyBuffer, membufs:List[LazyBuffer], var_vals:Dict[Va
     return LazyOp(BufferOps.CONST, (), ConstBuffer(buf.arg, buf.dtype, unbound_st))
 
   # if we aren't fusing it, it's a load and we add it to the inputs
-  if buf.realized or (buf in realizes and not first):
+  if buf.realized or (buf in realizes and buf not in outbufs):
     unbound_st, st_var_vals = st.simplify().unbind()
     var_vals.update(st_var_vals)
     if assign_to is not None and buf is assign_to:
@@ -54,13 +54,13 @@ def _recursive_lazyop(buf:LazyBuffer, membufs:List[LazyBuffer], var_vals:Dict[Va
 
   # if a CONTIGUOUS or ASSIGN made it all the way here, just skip it
   if buf.op is LoadOps.CONTIGUOUS:
-    assert first
-    return _recursive_lazyop(buf.srcs[0], membufs, var_vals, st, realizes, cache, False)
+    assert buf in outbufs
+    return _recursive_lazyop(buf.srcs[0], membufs, outbufs, var_vals, st, realizes, cache)
   if buf.op is LoadOps.ASSIGN:
-    assert first
+    assert buf in outbufs
     assert buf.srcs[1].base is buf.srcs[1], "assign must be to base"
     assert buf.srcs[1].realized is not None, f"assign must be already realized to schedule {buf.srcs[1]}"
-    return _recursive_lazyop(buf.srcs[0], membufs, var_vals, st, realizes, cache, False, assign_to=buf.srcs[1], assign_idx=membufs.index(buf))
+    return _recursive_lazyop(buf.srcs[0], membufs, outbufs, var_vals, st, realizes, cache, assign_to=buf.srcs[1], assign_idx=membufs.index(buf))
 
   # if it's a reduce, we have to change the shapetracker
   if buf.op in ReduceOps:
@@ -69,7 +69,7 @@ def _recursive_lazyop(buf:LazyBuffer, membufs:List[LazyBuffer], var_vals:Dict[Va
 
   # otherwise we fuse it like normal
   cache[(buf, st)] = ret = \
-    LazyOp(buf.op, tuple(_recursive_lazyop(x, membufs, var_vals, st, realizes, cache, False, assign_to, assign_idx) for x in buf.srcs), buf.arg)
+    LazyOp(buf.op, tuple(_recursive_lazyop(x, membufs, outbufs, var_vals, st, realizes, cache, assign_to, assign_idx) for x in buf.srcs), buf.arg)
   return ret
 
 def _schedule_one(out:LazyBuffer, realizes:Set[LazyBuffer], reduce_for_op: Dict[LazyBuffer, LazyBuffer]) -> _LBScheduleItem:
@@ -79,8 +79,11 @@ def _schedule_one(out:LazyBuffer, realizes:Set[LazyBuffer], reduce_for_op: Dict[
     op, inputs = LazyOp(out.op, (), out.arg), list(out.srcs)
   else:
     output_st, membufs = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape), [out]
-    op = _recursive_lazyop(out, membufs, var_vals, output_st, realizes, cache={})
-    op, inputs = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_st.simplify().unbind()[0])), membufs[1:]
+    output_view = out.arg[0] if out.op is LoadOps.ASSIGN and out.arg else output_st
+    op = _recursive_lazyop(out, membufs, (out, ), var_vals, output_st, realizes, cache={})
+    output_view, vv = output_view.simplify().unbind()
+    if vv: var_vals.update(vv)
+    op, inputs = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_view)), membufs[1:]
   return _LBScheduleItem((op,), (out,), tuple(inputs), var_vals)
 
 # recursively search the entire graph for all LazyBuffers, insert realizes after expands
@@ -194,18 +197,23 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
 
   # preschedule all buffers in realizes
   prescheduled = {x:_schedule_one(x, realizes, reduce_for_op) for x in realizes if x not in seen and x.realized is None and x.op is not LoadOps.CONST}
+  schedule_targets = {out:ps for ps in prescheduled.values() for out in ps.outputs}
   assign_targets = {x.srcs[1]:x for x in realizes if x.op is LoadOps.ASSIGN and x not in seen and x.realized is None}
 
   # breadth first ordering
   graph: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
   in_degree: DefaultDict[LazyBuffer, int] = defaultdict(int)
   for key, si in prescheduled.items():
-    for x in si.inputs:
+    # realize outputs after all parents are realized
+    scheduled_parents = set(schedule_targets[x].outputs[0] for x in si.inputs if x in schedule_targets)
+    for x in scheduled_parents:
       graph[x].append(key)
-      if x in assign_targets:
-        graph[key].append(assign_targets[x])
-        in_degree[assign_targets[x]] += 1
-      if x in prescheduled: in_degree[key] += 1
+      in_degree[key] += 1
+    # realize outputs before a parent is assigned to
+    parents_assigns = set(schedule_targets[assign_targets[x]].outputs[0] for x in si.inputs if x in assign_targets)
+    for assign in parents_assigns:
+      graph[key].append(assign)
+      in_degree[assign] += 1
     for out in si.outputs: del out.srcs  # can only schedule once
 
   queue = deque(si for key, si in prescheduled.items() if in_degree[key] == 0)

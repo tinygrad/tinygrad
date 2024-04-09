@@ -708,7 +708,7 @@ class TestIndexing(unittest.TestCase):
     numpy_testing_assert_equal_helper(v[::11], [0])
     numpy_testing_assert_equal_helper(v[1:6:2], [1, 3, 5])
 
-  # TODO setitem
+  # TODO setitem with stride
   '''
   def test_step_assignment(self):
     v = Tensor.zeros(4, 4)
@@ -733,7 +733,6 @@ class TestIndexing(unittest.TestCase):
       numpy_testing_assert_equal_helper(v[boolIndices], Tensor([True]))
       numpy_testing_assert_equal_helper(len(w), 2)
 
-  # TODO setitem
   @unittest.skip("bool indexing not supported")
   def test_bool_indices_accumulate(self):
     mask = Tensor.zeros(size=(10, ), dtype=dtypes.bool)
@@ -892,7 +891,6 @@ class TestIndexing(unittest.TestCase):
     r = v[c > 0]
     numpy_testing_assert_equal_helper(r.shape, (num_ones, 3))
 
-  # TODO setitem
   @unittest.skip("bool indexing not supported")
   def test_jit_indexing(self):
     def fn1(x):
@@ -1144,8 +1142,6 @@ class TestIndexing(unittest.TestCase):
     self.assertNotEqual(x, unmodified)
     '''
 
-  # TODO setitem
-  '''
   def test_int_assignment(self):
     x = Tensor.arange(0, 4).reshape(2, 2)
     x[1] = 5
@@ -1154,7 +1150,6 @@ class TestIndexing(unittest.TestCase):
     x = Tensor.arange(0, 4).reshape(2, 2)
     x[1] = Tensor.arange(5, 7)
     numpy_testing_assert_equal_helper(x.numpy().tolist(), [[0, 1], [5, 6]])
-  '''
 
   # TODO setitem
   '''
@@ -1524,10 +1519,9 @@ class TestNumpy(unittest.TestCase):
   def test_broaderrors_indexing(self):
     a = Tensor.zeros(5, 5)
     self.assertRaises(IndexError, a.__getitem__, ([0, 1], [0, 1, 2]))
-    # TODO setitem
-    # self.assertRaises(IndexError, a.__setitem__, ([0, 1], [0, 1, 2]), 0)
+    self.assertRaises(IndexError, a.__setitem__, ([0, 1], [0, 1, 2]), 0)
 
-  # TODO setitem
+  # TODO out of bound getitem does not raise error
   '''
   def test_trivial_fancy_out_of_bounds(self):
     a = Tensor.zeros(5)
