@@ -76,7 +76,7 @@ print(t6.numpy())
 ```
 
 There are a lot more operations that can be performed on tensors, you can find them in the [tensor.py](/tinygrad/tensor.py) file.
-Additionally reading through [abstractions.py](/docs/abstractions.py) will help you understand how operations on these tensors make their way down to your hardware.
+Additionally reading through [abstractions2.py](/docs/abstractions2.py) will help you understand how operations on these tensors make their way down to your hardware.
 
 ## Models
 
@@ -232,7 +232,7 @@ with Timing("Time: "):
 Highly recommend you check out the [examples/](/examples) folder for more examples of using tinygrad.
 Reading the source code of tinygrad is also a great way to learn how it works.
 Specifically the tests in [test/](/test) are a great place to see how to use and the semantics of the different operations.
-There are also a bunch of models implemented in [models/](/models) that you can use as a reference.
+There are also a bunch of models implemented in [models/](/extra/models) that you can use as a reference.
 
 Additionally, feel free to ask questions in the `#learn-tinygrad` channel on the [discord](https://discord.gg/beYbxwxVdx). Don't ask to ask, just ask!
 
@@ -247,7 +247,7 @@ To use the JIT we just need to add a function decorator to the forward pass of o
 Or in this case we will create a wrapper function and decorate the wrapper function to speed up the evaluation of our neural network.
 
 ```python
-from tinygrad.jit import TinyJit
+from tinygrad import TinyJit
 
 @TinyJit
 def jit(x):

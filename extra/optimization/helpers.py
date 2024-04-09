@@ -1,5 +1,7 @@
 # stuff needed to unpack a kernel
+from typing import Tuple
 from tinygrad.ops import LazyOp, TernaryOps, BinaryOps, UnaryOps, ReduceOps, BufferOps, MemBuffer, ConstBuffer
+from tinygrad.codegen.kernel import Opt, OptOps
 from tinygrad.dtype import dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
@@ -8,8 +10,14 @@ inf, nan = float('inf'), float('nan')
 
 # kernel unpacker
 from tinygrad.codegen.linearizer import Linearizer
-def ast_str_to_ast(ast_str:str) -> LazyOp: return eval(ast_str)
-def ast_str_to_lin(ast_str:str): return Linearizer(ast_str_to_ast(ast_str))
+def ast_str_to_ast(ast_str:str) -> Tuple[LazyOp,...]: return val if isinstance(val:=eval(ast_str), tuple) else (val,)
+def ast_str_to_lin(ast_str:str, opts=None): return Linearizer(*ast_str_to_ast(ast_str), opts=opts)
+def kern_str_to_lin(kern_str:str, opts=None):
+  (ast, applied_opts,) = eval(kern_str)
+  k = Linearizer(*ast, opts=opts)
+  for opt in applied_opts:
+    k.apply_opt(opt)
+  return k
 
 # load worlds, a dataset of about 12k kernels
 import gzip

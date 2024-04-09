@@ -5,18 +5,17 @@ sys.path.insert(0, str(pathlib.Path(__file__).parents[1]))
 if "FLOAT16" not in os.environ: os.environ["FLOAT16"] = "1"
 if "IMAGE" not in os.environ: os.environ["IMAGE"] = "2"
 if "NOLOCALS" not in os.environ: os.environ["NOLOCALS"] = "1"
-if "OPT" not in os.environ: os.environ["OPT"] = "99"
 
 OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx"
 
 import onnx
-from tqdm import tqdm
 from typing import Tuple, List, Optional, Dict
 from extra.onnx import get_run_onnx
 from tinygrad import Tensor, Device, GlobalCounters, dtypes
 from tinygrad.dtype import ImageDType
-from tinygrad.helpers import partition, Context, fetch, getenv, GRAPH, DEBUG
-from tinygrad.realize import run_schedule, lower_schedule_item
+from tinygrad.helpers import partition, Context, fetch, getenv, DEBUG
+from tinygrad.engine.realize import run_schedule
+from tinygrad.engine.schedule import create_schedule
 from tinygrad.ops import LoadOps, ScheduleItem
 Device.DEFAULT = "GPU"
 
@@ -32,22 +31,22 @@ def get_schedule(onnx_data) -> Tuple[List[ScheduleItem], List[ScheduleItem]]:
   # run the model
   inputs = {k:Tensor.empty(*shp) for k,shp in input_shapes.items()}
   ret: Tensor = next(iter(run_onnx(inputs).values())).cast(dtypes.float32).contiguous()
-  schedule = ret.lazydata.schedule()
+  schedule = create_schedule([ret.lazydata])
 
   # filter schedule that don't depend on the inputs
-  input_lb = [x.lazydata.base for x in inputs.values()]
+  input_lb = [x.lazydata.base.buffer for x in inputs.values()]
   depends = set(input_lb)
   for si in schedule:
     if any(b in depends for b in si.inputs):
-      depends.add(si.out)
+      for out in si.outputs: depends.add(out)
 
   # run all kernels that don't depend on the inputs
   # NOTE: there's two extra kernels due to fusions that now happen since the weights aren't realized
-  schedule, schedule_independent = partition(schedule, lambda si: si.out in depends)
+  schedule, schedule_independent = partition(schedule, lambda si: any(out in depends for out in si.outputs))
   print(f"{len(schedule)} schedule items depend on the input, {len(schedule_independent)} don't")
 
   # confirm no loadops in the (non independent) schedule except for the ones that load the input buffers
-  assert all(si.ast.op not in LoadOps or si.out in input_lb for si in schedule), "has loadops, can't compile to Thneed"
+  assert all(si.ast[0].op not in LoadOps or out in input_lb for si in schedule for out in si.outputs), "has loadops, can't compile to Thneed"
   return schedule, schedule_independent, inputs
 
 def test_vs_onnx(onnx_data, schedule:Optional[List[ScheduleItem]], inputs:Dict[str, Tensor]):
@@ -88,10 +87,11 @@ def test_vs_onnx(onnx_data, schedule:Optional[List[ScheduleItem]], inputs:Dict[s
 
   # run code (all buffers have been allocated)
   GlobalCounters.reset()
-  for si in schedule: lower_schedule_item(si)([si.out.realized] + [x.realized for x in si.inputs], {})
+  output = schedule[-1].outputs[0]
+  run_schedule(schedule)
 
-  new_tinygrad_out = Tensor(schedule[-1].out).numpy()
-  np.testing.assert_allclose(new_torch_out, new_tinygrad_out, atol=1e-4, rtol=1e-2)
+  new_tinygrad_out = np.frombuffer(output.as_buffer(), dtype=output.dtype.np)
+  np.testing.assert_allclose(new_torch_out.reshape(new_tinygrad_out.shape), new_tinygrad_out, atol=1e-4, rtol=1e-2)
   print("semi-thneed self-test passed!")
 
 if __name__ == "__main__":
@@ -102,13 +102,13 @@ if __name__ == "__main__":
   #exit(0)
 
   schedule, schedule_independent, inputs = get_schedule(onnx_data)
-  schedule, schedule_input = partition(schedule, lambda x: x.ast.op not in LoadOps)
+  schedule, schedule_input = partition(schedule, lambda x: x.ast[0].op not in LoadOps)
   print(f"{len(schedule_input)} inputs")
 
   run_schedule(schedule_independent)
   run_schedule(schedule_input)
   with Context(DEBUG=max(DEBUG.value, 2), BEAM=getenv("LATEBEAM")):
-    image_count = sum(isinstance(si.out.dtype, ImageDType) for si in schedule)
+    image_count = sum(isinstance(out.dtype, ImageDType) for si in schedule for out in si.outputs)
     print(f"**** running real kernels {image_count}/{len(schedule)} images ****")
 
     GlobalCounters.reset()

@@ -9,10 +9,9 @@ import sys, argparse, json
 import numpy as np
 np.set_printoptions(linewidth=200)
 from tinygrad.helpers import Timing, Profiling, getenv, DEBUG, colored
-from tinygrad import Device, GlobalCounters, dtypes, nn
-from tinygrad.tensor import Tensor
+from tinygrad import Tensor, Device, GlobalCounters, dtypes, nn
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
-from extra.models.llama import Transformer, convert_from_huggingface
+from extra.models.llama import Transformer, convert_from_huggingface, fix_bf16
 from sentencepiece import SentencePieceProcessor
 
 MAX_CONTEXT = getenv("MAX_CONTEXT", 4096)
@@ -106,7 +105,7 @@ MODEL_PARAMS = {
 
 
 # **** helper functions ****
-def concat_weights(models, device=Device.DEFAULT):
+def concat_weights(models, device=None):
   def convert(name) -> Tensor:
     disk_tensors: List[Tensor] = [model[name] for model in models]
     if len(disk_tensors) == 1 or len(disk_tensors[0].shape) == 1:
@@ -139,7 +138,8 @@ class AbsmaxQuantizedLinear:
   def quantize(tensors):
     new_tensors = {}
     for name,v in tensors.items():
-      if "feed_forward" in name or ("attention.w") in name or name == "output.weight":
+      if "feed_forward" in name or "attention.w" in name or name == "output.weight":
+        assert "weight" in name, name
         scale = v.abs().max(axis=1) / 127.0
         int8_weight = (v.T/scale).T.cast(dtype=dtypes.int8)
         new_tensors[name] = int8_weight
@@ -158,9 +158,23 @@ class LLaMa:
     jit = bool(getenv("JIT", 1))
     model = Transformer(**params["args"], linear=AbsmaxQuantizedLinear, max_context=MAX_CONTEXT, jit=jit) if quantize else Transformer(**params["args"], max_context=MAX_CONTEXT, jit=jit)
 
+    if model_path.is_dir():
+      weights = concat_weights([load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]], device[0] if isinstance(device, tuple) else device)
+    else:
+      weights = load(str(model_path))
+    if "model.embed_tokens.weight" in weights:
+      weights = convert_from_huggingface(weights, model, params["args"]["n_heads"], params["args"].get("n_kv_heads", params["args"]["n_heads"]))
+
+    weights = fix_bf16(weights)
+
+    if quantize:
+      weights = AbsmaxQuantizedLinear.quantize(weights)
+      for _,v in weights.items(): v.realize()
+
     if isinstance(device, tuple):
       for k,v in nn.state.get_state_dict(model).items():
-        if '.attention.' in k: v.shard_(device, axis=-1)
+        if 'scale' in k: v.shard_(device, axis=None)  # from quantized
+        elif '.attention.' in k: v.shard_(device, axis=-1)
         elif '.feed_forward.' in k: v.shard_(device, axis=-1)
         elif 'tok_embeddings.weight' in k: v.shard_(device, axis=-1)
         elif 'output.weight' in k: v.shard_(device, axis=-1)
@@ -169,19 +183,6 @@ class LLaMa:
         else: v.shard_(device, axis=None)
         #print(k, v.shape, v.lazydata.axis)
 
-    if model_path.is_dir():
-      weights = concat_weights([load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]])
-    else:
-      weights = load(str(model_path))
-    if "model.embed_tokens.weight" in weights:
-      weights = convert_from_huggingface(weights, model, params["args"]["n_heads"], params["args"].get("n_kv_heads", params["args"]["n_heads"]))
-
-    # fix bf16, TODO: check if device supports bf16
-    weights = {k:v.to(Device.DEFAULT).cast(dtypes.float16) if v.dtype == dtypes.bfloat16 else v for k,v in weights.items()}
-
-    if quantize:
-      weights = AbsmaxQuantizedLinear.quantize(weights)
-      for _,v in weights.items(): v.realize()
     load_state_dict(model, weights, strict=False, consume=True)
 
     return LLaMa(model, sp_model)
@@ -384,7 +385,7 @@ After you are done speaking, output [EOS]. You are not Chad.
   print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
   device = tuple(f"{Device.DEFAULT}:{i}" for i in range(args.shard)) if args.shard > 1 else Device.DEFAULT
   llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, quantize=args.quantize, device=device)
-  param_count = sum(x.lazydata.size for x in get_parameters(llama.model))
+  param_bytes = sum(x.lazydata.size * x.dtype.itemsize for x in get_parameters(llama.model))
 
   if chatbot:
     # encode pre prompt
@@ -392,7 +393,7 @@ After you are done speaking, output [EOS]. You are not Chad.
 
     print(f"Preparing KV cache for chatbot with personality {args.personality}...")
     with Timing():
-      llama.model(Tensor([toks]), 0, args.temperature).realize()  # NOTE: outputs are not used
+      llama.model(Tensor([toks], device=device), 0, args.temperature).realize()  # NOTE: outputs are not used
     start_pos = len(toks)
   else:
     # non chat bot mode
@@ -423,10 +424,10 @@ After you are done speaking, output [EOS]. You are not Chad.
       if args.timing or args.profile: print("")
       st = GlobalCounters.time_sum_s
       with Profiling(enabled=args.profile):
-        with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/sec"):
+        with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/s, {GlobalCounters.global_mem/x:.2f} GB/s, param {param_bytes/x:.2f} GB/s"):
           with Timing("enqueue in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
                       f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
-                      (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_count*1e-9*2/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=args.timing):
+                      (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_bytes*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=args.timing):
             tok_tensor = llama.model(Tensor([toks[start_pos:]], device=device), start_pos, args.temperature)
           tok = tok_tensor.item()
 
@@ -453,9 +454,10 @@ After you are done speaking, output [EOS]. You are not Chad.
     expected = {
       ("1", "7B"): "Hello. I'm a 20 year old male",
       ("2", "7B"): "Hello. I'm a 20 year old girl",
+      ("2", "70B"): "Hello. I am a 20 year old female.",
     }
     try:
-      assert text == expected[key], "invalid output: " + colored(text, "red")
+      assert text == expected[key], f"invalid output: `{colored(text, 'red')}` != `{expected[key]}`"
       print("\n" + colored("output validated", "green"))  # NOTE: "\n" iside colored does not render the color in github action
     except KeyError:
       pass

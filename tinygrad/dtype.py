@@ -2,8 +2,9 @@ from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Union
 from dataclasses import dataclass
 import numpy as np  # TODO: remove numpy
 import functools
+from tinygrad.helpers import getenv
 
-Scalar = Union[float, int, bool]
+ConstType = Union[float, int, bool]
 
 @dataclass(frozen=True, order=True)
 class DType:
@@ -11,12 +12,12 @@ class DType:
   itemsize: int
   name: str
   fmt: Optional[str]
-  sz: int
-  def __repr__(self): return f"dtypes.{'_'*(c:=self.sz!=1)}{INVERSE_DTYPES_DICT[self.name if not c else self.scalar().name]}{str(self.sz)*c}"
+  count: int
+  def __repr__(self): return f"dtypes.{'_'*(c:=self.count!=1)}{INVERSE_DTYPES_DICT[self.name if not c else self.scalar().name]}{str(self.count)*c}"
   def vec(self, sz:int):
-    assert sz > 1 and self.sz == 1, f"can't vectorize {self} with size {sz}"
+    assert sz > 1 and self.count == 1, f"can't vectorize {self} with size {sz}"
     return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self.name]}{sz}", None, sz)
-  def scalar(self): return DTYPES_DICT[self.name[:-len(str(self.sz))]] if self.sz > 1 else self
+  def scalar(self): return DTYPES_DICT[self.name[:-len(str(self.count))]] if self.count > 1 else self
   # TODO: someday this will be removed with the "remove numpy" project
   @property
   def np(self) -> Optional[type]: return np.dtype(self.fmt).type if self.fmt is not None else None
@@ -32,10 +33,10 @@ class ImageDType(DType):
 
 # @dataclass(frozen=True, init=False, repr=False, eq=False)
 class PtrDType(DType):
-  def __init__(self, dt:DType): super().__init__(dt.priority, dt.itemsize, dt.name, dt.fmt, dt.sz)
+  def __init__(self, dt:DType): super().__init__(dt.priority, dt.itemsize, dt.name, dt.fmt, dt.count)
   def __repr__(self): return f"ptr.{super().__repr__()}"
   def __hash__(self): return super().__hash__()
-  def __eq__(self, dt): return self.priority==dt.priority and self.itemsize==dt.itemsize and self.name==dt.name and self.sz==dt.sz
+  def __eq__(self, dt): return self.priority==dt.priority and self.itemsize==dt.itemsize and self.name==dt.name and self.count==dt.count
   def __ne__(self, dt): return not (self == dt)
 
 class dtypes:
@@ -49,6 +50,8 @@ class dtypes:
   def from_np(x: type) -> DType: return DTYPES_DICT[np.dtype(x).name]
   @staticmethod  # NOTE: isinstance(True, int) is True in python
   def from_py(x) -> DType: return dtypes.default_float if isinstance(x, float) else dtypes.bool if isinstance(x, bool) else dtypes.default_int
+  @staticmethod
+  def as_const(val: ConstType, dtype:DType): return int(val) if dtypes.is_int(dtype) else float(val) if dtypes.is_float(dtype) else bool(val)
   @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
   bool: Final[DType] = DType(0, 1, "bool", '?', 1)
@@ -79,6 +82,10 @@ class dtypes:
 
   default_float: ClassVar[DType] = float32
   default_int: ClassVar[DType] = int32
+
+if (env_default_float := getenv("DEFAULT_FLOAT", "")):
+  dtypes.default_float = getattr(dtypes, env_default_float.lower())
+  assert dtypes.is_float(dtypes.default_float), f"{env_default_float} is not a float dtype"
 
 # https://jax.readthedocs.io/en/latest/jep/9407-type-promotion.html
 # we don't support weak type and complex type

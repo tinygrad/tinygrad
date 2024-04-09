@@ -1,16 +1,45 @@
 from __future__ import annotations
 from typing import Optional, Union, Any, Tuple, List
 import functools, itertools, operator
-from tinygrad.helpers import all_same, dedup, round_up, prod, DEBUG
-from tinygrad.dtype import DType, Scalar
+from tinygrad.helpers import all_same, all_int, dedup, round_up, prod, DEBUG, RING
+from tinygrad.dtype import DType, ConstType
 from tinygrad.ops import BinaryOps, LoadOps, UnaryOps, TernaryOps, ReduceOps
-from tinygrad.lazy import LazyBuffer, create_schedule
+from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import sint
 
-def all_reduce(op:ReduceOps, lbs):
-  # TODO: replace this with ring reduce
+def all_reduce(op: ReduceOps, lbs: List[LazyBuffer]) -> List[LazyBuffer]:
+  assert all_int(lbs[0].shape), f"does not support symbolic shape {lbs[0].shape}"
+  assert all_same([lb.shape[0] for lb in lbs]), "allreduce with uneven shards is undefined"
   bop = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[op]
-  return [functools.reduce(lambda x,y: x.e(bop, y), [x.copy_to_device(lb.device) for x in lbs]) for lb in lbs]
+
+  n_lbs, dim = len(lbs), prod(lbs[0].shape)
+  # Ring allreduce doesn't provide a benefit with only 2 nodes or where number of elements is less than 256k (empirically)
+  # so just fallback to naive allreduce to save on kernel dispatch, chunking and reassembling chunks.
+  use_ring = (RING >= 2 or (n_lbs > 2 and dim > 256_000 and RING >= 1))
+  if DEBUG >= 3: print(f"{'RING ALLREDUCE' if use_ring else 'NAIVE ALLREDUCE'} {n_lbs}x{dim} | {lbs[0].dtype}")
+  if not use_ring:
+    return [functools.reduce(lambda x,y: x.e(bop, y), [x.copy_to_device(lb.device) for x in lbs]) for lb in lbs]
+  base, left = dim // n_lbs, dim % n_lbs
+  c_lens = [base + 1 if left - i > 0 else base for i in range(n_lbs)]
+  acc = 0
+  chunks = [(acc, (acc := acc + i)) for i in c_lens if i > 0]
+  chunked = [[lb.reshape((dim,)).shrink(((s,e),)) for s,e in chunks] for lb in lbs]
+
+  # Scatter-reduce step
+  for step in range(n_lbs - 1):
+    for i in range(len(chunks)):
+      s, r = (i+step)%n_lbs, (i+step+1)%n_lbs
+      chunked[r][i] = chunked[r][i].e(bop, chunked[s][i].copy_to_device(chunked[r][i].device, force=True))
+
+  # Allgather step
+  for step in range(n_lbs - 1):
+    for i in range(len(chunks)):
+      s, r = (i+step-1)%n_lbs, (i+step)%n_lbs
+      chunked[r][i] = chunked[s][i].copy_to_device(chunked[r][i].device, force=True)
+
+  # Assemble chunks back
+  pads = [((s,dim-e),) for s,e in chunks]
+  return [functools.reduce(lambda x,y: x.e(BinaryOps.ADD, y), [c.pad(pads[i]) for i,c in enumerate(lb_c)]).reshape(lbs[0].shape) for lb_c in chunked]
 
 def to_sharded(lbs:List[LazyBuffer], axis:int) -> List[LazyBuffer]:
   if DEBUG >= 3 and lbs[0].shape[axis] % len(lbs) != 0: print(f"multi axis uneven: {lbs[0].shape=} {axis=} {len(lbs)=}")
@@ -41,8 +70,9 @@ class MultiLazyBuffer:
 
   @staticmethod
   def from_sharded(lb:LazyBuffer, devices:Tuple[str, ...], axis:Optional[int]=None):
-    lbs = [lb.contiguous() if lb.base != lb else lb] * len(devices)
-    return MultiLazyBuffer([lb.copy_to_device(d).contiguous() for lb,d in zip(to_sharded(lbs, axis) if axis is not None else lbs, devices)], axis)
+    lbs = [lb.contiguous() if lb.base != lb and not lb.is_unrealized_unmasked_const() else lb] * len(devices)
+    sharded_lbs = [lb.copy_to_device(d) for lb,d in zip(to_sharded(lbs, axis) if axis is not None else lbs, devices)]
+    return MultiLazyBuffer([lb if lb.is_unrealized_unmasked_const() else lb.contiguous() for lb in sharded_lbs], axis)
 
   def copy_to_device(self, device:str) -> LazyBuffer:
     if self.axis is None: return self.lbs[self.real.index(True)].copy_to_device(device)
@@ -53,13 +83,11 @@ class MultiLazyBuffer:
       llbs.append(lb.pad(pad_arg))
     return functools.reduce(lambda x,y: x.e(BinaryOps.ADD, y), llbs)
 
-  # TODO: fix this
-  def is_unrealized_contiguous_const(self): return False
-
   # passthroughs
-  def schedule(self, seen=None): return create_schedule(self.real_lbs, seen)
+  def is_realized(self) -> bool: return all([lb.base.realized is not None for lb, r in zip(self.lbs, self.real) if r is True])
   def cast(self, dtype:DType, bitcast:bool=False): return MultiLazyBuffer([x.cast(dtype, bitcast) for x in self.lbs], self.axis, self.real)
-  def const(self, val:Scalar) -> MultiLazyBuffer: return MultiLazyBuffer([x.const(val) for x in self.lbs], self.axis, self.real)
+  def const(self, val:ConstType) -> MultiLazyBuffer: return MultiLazyBuffer([x.const(val) for x in self.lbs], self.axis, self.real)
+  def assign(self, x:MultiLazyBuffer): return MultiLazyBuffer([s.assign(d) for s,d in zip(self.lbs, x.lbs)], self.axis, self.real)
   def contiguous(self): return MultiLazyBuffer([x.contiguous() for x in self.lbs], self.axis, self.real)
 
   # elementwise is simple
@@ -84,23 +112,30 @@ class MultiLazyBuffer:
   def _shape_to_single_shard(self, shape:Tuple[sint, ...], lb:LazyBuffer) -> Tuple[sint, ...]:
     return tuple(lb.shape[self.axis] if a == self.axis else s for a,s in enumerate(shape))
 
-  def r(self, op:ReduceOps, new_shape:Tuple[sint, ...]) -> MultiLazyBuffer:
-    if self.axis is not None and new_shape[self.axis] == 1:
+  def r(self, op:ReduceOps, axis:Tuple[int, ...]) -> MultiLazyBuffer:
+    if self.axis is not None and self.axis in axis:
       # all-reduce on sharded axes
-      reduced_parts = [x.r(op, new_shape) if r else x.const(0, shape=new_shape) for x,r in zip(self.lbs, self.real)]
+      new_shape = tuple(1 if i in axis else s for i,s in enumerate(self.shape))
+      reduced_parts = [x.r(op, axis) if r else x.const(0, shape=new_shape) for x,r in zip(self.lbs, self.real)]
       if all(self.real): return MultiLazyBuffer(all_reduce(op, reduced_parts), None)
       return MultiLazyBuffer(reduced_parts, None, self.real)
     # reduce on non sharded axes, piecewise is fine. if axis is None this is also correct
-    return MultiLazyBuffer([x.r(op, self._shape_to_single_shard(new_shape, x)) for x in self.lbs], self.axis, self.real)
+    return MultiLazyBuffer([x.r(op, axis) for x in self.lbs], self.axis, self.real)
 
   # *** movement ops ***
 
   def reshape(self, arg:Tuple[sint, ...]):
     if self.axis is None: return MultiLazyBuffer([x.reshape(arg) for x in self.lbs], None, self.real)
     arg_acc:List[sint] = list(itertools.accumulate(arg, operator.mul, initial=1))
-    # new_axis is the one that preserves prod(prior to new_axis) and prod(post to new_axis)
-    new_axis = [tuple(p) for p in zip(arg_acc, arg_acc[1:])].index((prod(self.shape[:self.axis]), prod(self.shape[:self.axis+1])))
-    return MultiLazyBuffer([x.reshape(tuple(x.shape[self.axis] if a == new_axis else s for a,s in enumerate(arg))) for x in self.lbs],
+    # new_axis is the last one that preserves prod(prior to new_axis) and must not move items between shards
+    # todo: what to do about shrinking to self.shape[self.axis]==1 len(self.real_lbs)==1?
+    new_axis = len(arg_acc) - arg_acc[::-1].index(prod(self.shape[:self.axis])) - 1
+    if arg[new_axis] != self.shape[self.axis]:
+      assert self.shape[self.axis] % len(self.real_lbs) == 0, f"cannot reshape on-axis for uneven shard {self.axis} {self.shape} {len(self.real_lbs)}"
+      assert arg[new_axis] % len(self.real_lbs) == 0, f"new on-axis shape must divide evenly between devices {new_axis} {arg} {len(self.real_lbs)}"
+    return MultiLazyBuffer([x.reshape(tuple(s if a != new_axis else
+                              x.shape[self.axis] if s == self.shape[self.axis] else
+                              s // len(self.real_lbs) for a,s in enumerate(arg))) for x in self.lbs],
                            new_axis, self.real)
 
   def pad(self, arg:Tuple[Tuple[sint, sint], ...]):

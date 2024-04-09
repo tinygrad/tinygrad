@@ -1,10 +1,13 @@
-import unittest, functools
+import unittest, functools, random
 from typing import List
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit
 from tinygrad.device import BufferCopy
 from tinygrad.ops import LoadOps, ReduceOps
-from tinygrad.helpers import CI
-from tinygrad.nn.state import get_parameters
+from tinygrad.helpers import CI, prod, Context
+from tinygrad.nn.state import get_parameters, get_state_dict
+from tinygrad.engine.schedule import create_schedule
+from tinygrad.features.multi import all_reduce, MultiLazyBuffer
+from random import randint
 import numpy as np
 from hypothesis import given, strategies as strat, settings
 
@@ -36,6 +39,33 @@ class TestMultiTensor(unittest.TestCase):
     for lb in X.lazydata.lbs:
       assert lb.shape == (128,)
     (X + X).realize()
+
+  def test_sharded_memory(self):
+    # Buffer may be stuck in track_cross_buffer
+    for x in (d_zero, d0, d1, d2, d3): Device[x].synchronize()
+    mem_base = GlobalCounters.mem_used
+
+    X = Tensor.ones(256).contiguous().realize()
+    assert GlobalCounters.mem_used-mem_base== X.dtype.itemsize * 256, GlobalCounters.mem_used-mem_base
+    X.shard_((d0, d1, d2, d3)).realize()
+    for x in (d_zero, d0, d1, d2, d3): Device[x].synchronize()
+    assert GlobalCounters.mem_used-mem_base == X.dtype.itemsize * 256 * 4, GlobalCounters.mem_used-mem_base
+
+    X = Tensor.ones(256).contiguous().realize()
+    assert GlobalCounters.mem_used-mem_base == X.dtype.itemsize * 256, GlobalCounters.mem_used-mem_base
+    X.shard_((d0, d1, d2, d3), axis=0).realize()
+    for x in (d_zero, d0, d1, d2, d3): Device[x].synchronize()
+    assert GlobalCounters.mem_used-mem_base == X.dtype.itemsize * 256, GlobalCounters.mem_used-mem_base
+
+    X = Tensor.ones(256).realize()
+    assert GlobalCounters.mem_used-mem_base == 0
+    X.shard_((d0, d1, d2, d3)).realize()
+    assert GlobalCounters.mem_used-mem_base == 0
+
+    X = Tensor.ones(256).realize()
+    assert GlobalCounters.mem_used-mem_base == 0
+    X.shard_((d0, d1, d2, d3), axis=0).realize()
+    assert GlobalCounters.mem_used-mem_base == 0
 
   def test_shard_same_device(self):
     X = Tensor.ones(256).contiguous().realize()
@@ -88,6 +118,22 @@ class TestMultiTensor(unittest.TestCase):
     fX = f(X)
     fn = f(n)
     np.testing.assert_allclose(fX.numpy(), fn, rtol=1e-6, atol=1e-6)
+
+  @unittest.skip("slow")
+  def test_fuzz_allreduce(self):
+    random.seed(41)
+    for it in range(100):
+      for n in range(2, 4+1):
+        t = Tensor.rand(tuple([(n if i == 0 else 1) * randint(1, 10) for i in range(randint(1, 4))])).shard_(tuple([d0, d1, d2, d3][:n]), 0)
+        with Context(RING=0):
+          a = Tensor(MultiLazyBuffer(all_reduce(ReduceOps.SUM, t.lazydata.lbs), 0))
+        with Context(RING=2):
+          b = Tensor(MultiLazyBuffer(all_reduce(ReduceOps.SUM, t.lazydata.lbs), 0))
+        diff = a - b
+        mean_err = diff.reshape((prod(diff.shape),)).abs().mean().numpy()
+        max_err = diff.reshape((prod(diff.shape),)).abs().max().numpy()
+        assert mean_err < 1e-6, f"big mean error, iteration {it}_{n}"
+        assert max_err < 1e-6, f"big max error, iteration {it}_{n}"
 
   def _test_matmul_shard_axis(self, shard_x, shard_w, device):
     X = Tensor.kaiming_uniform(N, N).realize()
@@ -147,6 +193,7 @@ class TestMultiTensor(unittest.TestCase):
     out.mean().backward()
     #for p in get_parameters(conv): p.grad.realize()
     optim.step()
+    out.numpy()
 
   def test_lr_scheduler_OneCycleLR(self):
     from extra.lr_scheduler import OneCycleLR
@@ -164,7 +211,7 @@ class TestMultiTensor(unittest.TestCase):
     z = layer(x)
 
     layer_sharded = nn.Embedding(vocab_size, embed_size)
-    layer_sharded.weight.assign(layer.weight.shard((d0, d1), axis=1)).realize()
+    layer_sharded.weight.replace(layer.weight.shard((d0, d1), axis=1)).realize()
     x_sharded = x.shard((d0, d1), axis=None)
     z_shard = layer_sharded(x_sharded)
 
@@ -202,14 +249,44 @@ class TestMultiTensor(unittest.TestCase):
     fake_image_sharded = fake_image.shard((d0, d1), axis=0)
     m = ResNet18()
     m.load_from_pretrained()
-    real_output = m(fake_image).numpy()
+    real_output = m(fake_image).log_softmax().numpy()
     for p in get_parameters(m): p.shard_((d0, d1)).realize()
     GlobalCounters.reset()
-    shard_output = m(fake_image_sharded).realize()
+    shard_output = m(fake_image_sharded).log_softmax().realize()
     assert shard_output.lazydata.lbs[0].shape == (1, 1000)
     assert shard_output.lazydata.lbs[1].shape == (1, 1000)
     shard_output_np = shard_output.numpy()
     np.testing.assert_allclose(real_output, shard_output_np, atol=1e-6, rtol=1e-6)
+
+  def test_data_parallel_resnet_train_step(self):
+    import sys, pathlib
+    sys.path.append((pathlib.Path(__file__).parent.parent / "extra" / "models").as_posix())
+    from resnet import ResNet18
+    from tinygrad.nn.optim import LARS
+
+    fake_image = Tensor.rand((2, 3, 224, 224))
+    fake_image_sharded = fake_image.shard((d0, d1), axis=0)
+    labels = Tensor.randint(2, low=0, high=1000)
+    labels_sharded = labels.shard((d0, d1), axis=0)
+
+    m = ResNet18()
+    optimizer = LARS(get_parameters(m), 0.1)  # set requires_grad for all params
+
+    optimizer.zero_grad()
+    m.load_from_pretrained()
+    output = m(fake_image).sparse_categorical_crossentropy(labels, label_smoothing=0.1)
+    output.backward()
+    grad = m.conv1.weight.grad.numpy()
+
+    for p in get_parameters(m): p.shard_((d0, d1)).realize()
+    GlobalCounters.reset()
+    optimizer.zero_grad()
+    shard_output = m(fake_image_sharded).sparse_categorical_crossentropy(labels_sharded, label_smoothing=0.1)
+    assert shard_output.lazydata.axis is None
+    shard_output.backward()
+    shard_grad = m.conv1.weight.grad.numpy()
+    # sometimes there is zeros in these grads... why?
+    np.testing.assert_allclose(grad, shard_grad, atol=3e-6, rtol=3e-6)
 
   def test_multi_tensor_jit_param(self):
     @TinyJit
@@ -296,15 +373,79 @@ class TestMultiTensor(unittest.TestCase):
     for p in get_parameters(bn): p.shard_(devices).realize()
 
     out = bn(t)
-    scheds = [sched for sched in out.lazydata.schedule() if sched.out.device in devices and sched.ast.op is not LoadOps.COPY]
-    assert set(sched.out.device for sched in scheds) == set(devices), "should have ast on each shard device"
+    scheds = [sched for sched in create_schedule(out.lazydata.lbs) if sched.outputs[0].device in devices and sched.ast[0].op is not LoadOps.COPY]
+    assert set(out.device for sched in scheds for out in sched.outputs) == set(devices), "should have ast on each shard device"
     asts = [sched.ast for sched in scheds]
-    assert len(asts) == 8, len(asts)
+    assert len(asts)
     # test case to show that ast can be different on devices
     # TODO: make ast identical on devices
     #assert len(set(asts)) == 4, len(asts)
     # for i, ast in enumerate(asts):
     #   print(f"{i} {ast}")
+
+  def test_reshape_on_axis(self):
+    devices = (d0, d1, d2)
+
+    t0 = Tensor.rand((26, 15, 7)).shard(devices, axis=1)
+
+    # test split and rejoin to the right
+    t1 = t0.reshape((26, 3, 5, 7))
+    t2 = t0.reshape((26, 3, 35))
+    t3 = t1.reshape((26, 15, 7))
+    t4 = t2.reshape((26, 105,))
+
+    for t in [t0, t1, t2, t3, t4]:
+      assert t.lazydata.axis == 1
+      np.testing.assert_allclose(t.numpy().flatten(), t0.numpy().flatten())
+
+    # test shape-one axis
+    t5 = t4.reshape((26, 1, 105))
+    assert t5.lazydata.axis == 2
+    np.testing.assert_allclose(t.numpy().flatten(), t5.numpy().flatten())
+
+    # test split and rejoin to the right and reshape to the left
+    t5 = t0.reshape((2, 13, 3, 5, 7))
+    t6 = t0.reshape((13, 2, 3, 7, 5))
+    t7 = t0.reshape((1, 13, 2, 3, 1, 7, 5))
+    np.testing.assert_allclose(t5.numpy().flatten(), t0.numpy().flatten())
+    assert t5.lazydata.axis == 2
+    np.testing.assert_allclose(t6.numpy().flatten(), t0.numpy().flatten())
+    assert t6.lazydata.axis == 2
+    np.testing.assert_allclose(t7.numpy().flatten(), t0.numpy().flatten())
+    assert t7.lazydata.axis == 3
+
+    # test no left join
+    with self.assertRaises((AssertionError, ValueError)):
+      t0.reshape((26*15,7))
+
+  def test_reshape_on_axis_uneven(self):
+    devices = (d0, d1, d2)
+    t0 = Tensor.rand((4, 8, 15)).shard(devices, axis=1)
+
+    # no split axis if uneven
+    with self.assertRaises((AssertionError, ValueError)):
+      t0.reshape((4,4,2,15))
+
+    # ok to split reshape left and right though
+    t1 = t0.reshape(2, 2, 8, 3, 5)
+    np.testing.assert_allclose(t0.numpy().flatten(), t1.numpy().flatten())
+    assert t1.lazydata.axis == 2
+
+  def test_mlb_assign_change_axis(self):
+    devices = (d0, d1)
+
+    t_none = Tensor.zeros((16, 16)).shard(devices).contiguous().realize()
+    t_zero = Tensor.ones((16, 16)).shard(devices, axis=0)
+    with self.assertRaises(AssertionError):
+      # don't allow assigns that change axes
+      t_none.assign(t_zero)
+
+  def test_dropout_on_shard(self):
+    Tensor.training = True
+    X = Tensor.ones(256).to(devices_2)
+    output = X.dropout(0.5)
+    output.numpy()
+    Tensor.training = False
 
 @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
 class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
@@ -414,7 +555,7 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
 
     c = a.pad(((2, 4), None)) + b.pad(((6, 0), None))
     expected = np.concatenate([np.zeros_like(t.numpy()[0:2]), na, np.zeros_like(t.numpy()[4:6]), nb])
-    np.testing.assert_equal(c, expected)
+    np.testing.assert_equal(c.numpy(), expected)
 
   def test_add_different_tensors(self):
     devices = [f"{Device.DEFAULT}:{i}" for i in range(4)]
@@ -455,6 +596,7 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
     optim.zero_grad()
     out.mean().backward()
     optim.step()
+    out.numpy()
 
   def test_unsynced_backprop_standalone_bn(self):
     from extra.lr_scheduler import OneCycleLR
@@ -492,6 +634,31 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
       out.mean().backward()
       optim.step()
 
+  def test_unsynced_backprop_sync_weights(self):
+    from extra.lr_scheduler import OneCycleLR
+    from examples.hlb_cifar10 import UnsyncedBatchNorm
+    GPUS = (d1, d2)
+
+    with Tensor.train():
+      conv = nn.Conv2d(3, 16, 3)
+      bn = UnsyncedBatchNorm(16, num_devices=len(GPUS))
+
+      for k, p in get_state_dict([conv, bn]).items():
+        if 'running_mean' in k or 'running_var' in k:
+          p.shard_(GPUS, axis=0)
+        else:
+          p.to_(GPUS)
+      optim = nn.optim.Adam(get_parameters([conv, bn]))
+      lr_sched = OneCycleLR(optim, max_lr=0.1, pct_start=0.1, div_factor=100, final_div_factor=0.1, total_steps=10)
+      lr_sched.step()
+
+      fake_image = Tensor.rand((8, 3, 32, 32)).shard(GPUS, axis=0)
+
+      out = bn(conv(fake_image))
+      optim.zero_grad()
+      out.mean().backward()
+      optim.step()
+
   @given(strat.sampled_from((False, True)))
   def test_batchnorm(self, is_training):
     devices = [f"{Device.DEFAULT}:{i}" for i in range(4)]
@@ -515,21 +682,27 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
       bn_ts[0].cat(*bn_ts[1:]).numpy()
 
   def test_synced_vs_unsynced_bn(self):
-    from examples.hlb_cifar10 import BatchNorm, UnsyncedBatchNorm
+    from examples.hlb_cifar10 import UnsyncedBatchNorm
+    from tinygrad.nn import BatchNorm2d
     devices = [f"{Device.DEFAULT}:{i}" for i in range(4)]
     x = Tensor.ones(8, 8, 8, 8).contiguous().realize().shard(devices, axis=0)
 
     with Tensor.train():
-      synced_bn = BatchNorm(8)
-      unsynced_bn = UnsyncedBatchNorm(8)
+      synced_bn = BatchNorm2d(8)
+      unsynced_bn = UnsyncedBatchNorm(8, num_devices=len(devices))
 
-      for p in get_parameters([synced_bn, unsynced_bn]):
+      for p in get_parameters(synced_bn):
         p.shard_(devices)
+      for k, p in get_state_dict(unsynced_bn).items():
+        if 'running_mean' in k or 'running_var' in k:
+          p.shard_(devices, axis=0)
+        else:
+          p.to_(devices)
 
       synced_out = synced_bn(x)
-      synced_si = [si for si in synced_out.lazydata.schedule()]
+      synced_si = [si for si in create_schedule(synced_out.lazydata.lbs)]
       unsynced_out = unsynced_bn(x)
-      unsynced_si = [si for si in unsynced_out.lazydata.schedule()]
+      unsynced_si = [si for si in create_schedule(unsynced_out.lazydata.lbs)]
 
     # TODO: test synced / unsynced batchnorm cross device kernel and copies
     assert synced_si

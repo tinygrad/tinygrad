@@ -6,33 +6,35 @@ import unittest
 from typing import List, Optional
 from tinygrad.tensor import Tensor
 from tinygrad.ops import LoadOps
-from tinygrad.device import Device, Compiled
 from tinygrad.helpers import DEBUG, GRAPH
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.graph import print_tree, realized_lazybuffer
+from tinygrad.features.graph import print_tree, realized_lazybuffer
+from tinygrad.engine.schedule import create_schedule
 from tinygrad import nn, dtypes
 
 def check_schedule(t:Tensor, allowed:int, to_prerealize:Optional[List[Tensor]]=None, filter_loadops=True):
   seen = set()
   if to_prerealize:
     for pre in to_prerealize:
-      for s in pre.lazydata.schedule(seen.copy()):
-        if GRAPH: realized_lazybuffer(s.out, 0)
-        seen.add(s.out)
-  sched = t.lazydata.schedule(seen)
+      for s in create_schedule([pre.lazydata], seen.copy()):
+        for i,out in enumerate(s.outputs):
+          if GRAPH: realized_lazybuffer(out, 0)
+          seen.add(out)
+  sched = create_schedule([t.lazydata], seen)
   if GRAPH:
-    for i,s in enumerate(sched): realized_lazybuffer(s.out, i+1)
-  if filter_loadops: sched = [s for s in sched if s.ast.op not in LoadOps]
+    for i,s in enumerate(sched):
+      for out in s.outputs: realized_lazybuffer(out, i+1)
+  if filter_loadops: sched = [s for s in sched if s.ast[0].op not in LoadOps]
   if len(sched) != allowed: print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
   if len(sched) != allowed or DEBUG >= 3:
     for i, s in enumerate(sched):
       print("kernel", i+1)
-      print_tree(s.ast)
+      for op in s.ast: print_tree(op)
   assert len(sched) == allowed
   # test the (non loadops) ops linearize
   for s in sched:
-    if s.ast.op in LoadOps: continue
-    l = Linearizer(s.ast)
+    if s.ast[0].op in LoadOps: continue
+    l = Linearizer(*s.ast)
     l.hand_coded_optimizations()
     l.linearize()
 
@@ -78,7 +80,6 @@ class TestSchedule(unittest.TestCase):
     d = (a+b).permute(1,0)+c
     check_schedule(d, 1)
 
-  @unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled) or Device.DEFAULT == "LLVM", "only test for compiled backends")
   def test_constants_are_embedded(self):
     a = Tensor.empty(3,3) * 2
     check_schedule(a, 2, filter_loadops=False)
@@ -180,7 +181,7 @@ class TestSchedule(unittest.TestCase):
     # run
     img = Tensor.rand(2,3,64,64)
     out = c1(img).elu()
-    check_schedule(out, 1, [c1.weight, c1.bias])
+    check_schedule(out, 1, [c1.weight, c1.bias, img])
 
   def test_two_sum(self):
     img = Tensor.empty(64,64)
@@ -335,7 +336,7 @@ class TestSchedule(unittest.TestCase):
     out = bn1(conv1(x)).relu()
     out = bn2(conv2(out))
     out = (out + x).relu()
-    check_schedule(out, 4)
+    check_schedule(out, 2, [conv1.weight, conv2.weight])
 
   def test_contiguous_while_contiguous(self):
     x = Tensor.empty(1, 64, 32, 32)
@@ -349,7 +350,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_double_from(self):
     x = Tensor([1,2,3,4])
-    out = x.to('cpu')
+    out = x.to('npy')
     check_schedule(out, 0, filter_loadops=False)
 
   def test_pow_const_tensor_simplified(self):
@@ -362,7 +363,7 @@ class TestSchedule(unittest.TestCase):
     x = Tensor([1,2,3,4])
     out = x ** Tensor(0)
     # NOTE: this is ConstBuffer 0 + ConstBuffer 1
-    check_schedule(out, 1)
+    check_schedule(out, 0)
 
   def test_zero_size(self):
     x = Tensor.empty(2, 3, 0)
@@ -421,6 +422,13 @@ class TestSchedule(unittest.TestCase):
     x = x[:16]
     out = x + y
     check_schedule(out, 2)  # TODO: this should be 1
+
+  @unittest.skip("broken due to const folding and two contiguous are different kernels")
+  def test_const_no_recompute(self):
+    x = Tensor(2) + Tensor(2)
+    y = Tensor(2) + Tensor(2)
+    out = x.contiguous() + y.contiguous()
+    check_schedule(out, 2)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

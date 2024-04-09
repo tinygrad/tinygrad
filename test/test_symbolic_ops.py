@@ -5,7 +5,6 @@ from tinygrad.tensor import Tensor
 from examples.gpt2 import Attention
 import numpy as np
 
-@unittest.skipIf(getenv("ARM64") or getenv("PTX"), "ARM64 and PTX are not supported")
 class TestSymbolicOps(unittest.TestCase):
   def test_plus1(self):
     def f(a): return (a+1).realize()
@@ -108,7 +107,6 @@ class TestSymbolicOps(unittest.TestCase):
         expected = f(a, b).numpy()
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
-  @unittest.skip("two vars not supported")
   def test_two_vars_plus1_ij(self):
     def f(a, b): return (a@b+1).realize()
     for i in range(1, 5):
@@ -121,7 +119,6 @@ class TestSymbolicOps(unittest.TestCase):
         expected = f(a, b).numpy()
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
-  @unittest.skip("two vars not supported")
   def test_two_vars_plus1_ji(self):
     # reverse the order of variables
     def f(a, b): return (a@b+1).realize()

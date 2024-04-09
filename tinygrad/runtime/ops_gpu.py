@@ -3,9 +3,9 @@ from typing import Tuple, Optional, List, cast
 import ctypes, functools, hashlib
 import tinygrad.runtime.autogen.opencl as cl
 from tinygrad.helpers import init_c_var, to_char_p_p, from_mv, OSX, DEBUG
-from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import OpenCLRenderer
-from tinygrad.device import Compiled, LRUAllocator, BufferOptions, Compiler
+from tinygrad.buffer import BufferOptions
+from tinygrad.device import Compiled, LRUAllocator, Compiler, CompilerOptions
 
 # see test/external/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
 OSX_TIMING_RATIO = (125/3) if OSX else 1.0
@@ -15,7 +15,7 @@ def check(status):
 def checked(ret, status): return (check(status.value), ret)[1]
 
 class CLCompiler(Compiler):
-  linearizer_opts = LinearizerOptions("GPU")
+  compiler_opts = CompilerOptions("GPU")
   def __init__(self, device:CLDevice, compile_key:str):
     self.device = device
     super().__init__(f"compile_cl_{compile_key}")
@@ -23,8 +23,8 @@ class CLCompiler(Compiler):
   def compile(self, src:str) -> bytes:
     program = checked(cl.clCreateProgramWithSource(self.device.context, 1, to_char_p_p([prg_bytes := src.encode()]),
                                                   ctypes.byref(ctypes.c_size_t(len(prg_bytes))), ctypes.byref(status := ctypes.c_int32())), status)
-    status = cl.clBuildProgram(program, 1, ctypes.byref(self.device.device_id), None, cl.clBuildProgram.argtypes[4](), None)
-    if status != 0:
+    build_status: int = cl.clBuildProgram(program, 1, ctypes.byref(self.device.device_id), None, cl.clBuildProgram.argtypes[4](), None)
+    if build_status != 0:
       cl.clGetProgramBuildInfo(program, self.device.device_id, cl.CL_PROGRAM_BUILD_LOG, 0, None, ctypes.byref(log_size := ctypes.c_size_t()))
       cl.clGetProgramBuildInfo(program, self.device.device_id, cl.CL_PROGRAM_BUILD_LOG, log_size.value, mstr := ctypes.create_string_buffer(log_size.value), None)  # noqa: E501
       raise RuntimeError(f"OpenCL Compile Error\n\n{ctypes.string_at(mstr, size=log_size.value).decode()}")
@@ -65,15 +65,13 @@ class CLAllocator(LRUAllocator):
   def __init__(self, device:CLDevice):
     self.device = device
     super().__init__()
-  def _alloc(self, size:int) -> ctypes._CData:
-    return checked(cl.clCreateBuffer(self.device.context, cl.CL_MEM_READ_WRITE, size, None, ctypes.byref(status := ctypes.c_int32())), status)
-  def _alloc_with_options(self, size:int, options:BufferOptions) -> ctypes._CData:
+  def _alloc(self, size:int, options:BufferOptions) -> ctypes._CData:
     if options.image is not None:
       return checked(cl.clCreateImage2D(self.device.context, cl.CL_MEM_READ_WRITE,
                                         cl.cl_image_format(cl.CL_RGBA, {2: cl.CL_HALF_FLOAT, 4: cl.CL_FLOAT}[options.image.itemsize]),
                                         options.image.shape[1], options.image.shape[0], 0, None, ctypes.byref(status := ctypes.c_int32())), status)
-    else: return self._alloc(size)
-  def _free(self, buf:ctypes._CData): check(cl.clReleaseMemObject(buf))
+    else: return checked(cl.clCreateBuffer(self.device.context, cl.CL_MEM_READ_WRITE, size, None, ctypes.byref(status := ctypes.c_int32())), status)
+  def _free(self, buf:ctypes._CData, options:BufferOptions): check(cl.clReleaseMemObject(buf))
   def copyin(self, dest:ctypes._CData, src:memoryview):
     check(cl.clEnqueueWriteBuffer(self.device.queue, dest, False, 0, len(src)*src.itemsize, from_mv(src), 0, None, None))
     self.device.pending_copyin.append(src)    # NOTE: these can't be freed until the GPU actually executes this command

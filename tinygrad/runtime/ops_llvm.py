@@ -1,14 +1,13 @@
 from __future__ import annotations
 import ctypes, functools
 from typing import Tuple
-from tinygrad.device import Compiled, MallocAllocator, Compiler
+from tinygrad.device import Compiled, MallocAllocator, Compiler, CompilerOptions
 from tinygrad.helpers import DEBUG, cpu_time_execution
-from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.llvmir import uops_to_llvm_ir
 import llvmlite.binding as llvm
 
 class LLVMCompiler(Compiler):
-  linearizer_opts = LinearizerOptions("LLVM", supports_float4=False, has_local=False, has_shared=False)
+  compiler_opts = CompilerOptions("LLVM", supports_float4=False, has_local=False, has_shared=False)
   def __init__(self, device:LLVMDevice):
     self.device = device
     super().__init__("compile_llvm")
@@ -27,7 +26,8 @@ class LLVMProgram:
     self.fxn = device.engine.get_function_address(name)
 
   def __call__(self, *bufs, vals:Tuple[int, ...]=(), wait=False):
-    self.cfunc = ctypes.CFUNCTYPE(ctypes.c_int, *([ctypes.c_void_p]*len(bufs)), *([ctypes.c_int32]*len(vals)))(self.fxn)
+    if not hasattr(self, 'cfunc'):
+      self.cfunc = ctypes.CFUNCTYPE(ctypes.c_int, *([ctypes.c_void_p]*len(bufs)), *([ctypes.c_int32]*len(vals)))(self.fxn)
     return cpu_time_execution(lambda: self.cfunc(*bufs, *vals), enable=wait)
 
 class LLVMDevice(Compiled):
