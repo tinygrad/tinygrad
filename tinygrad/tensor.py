@@ -515,11 +515,13 @@ class Tensor:
         ret = ret.permute(*range(first_dim, first_dim+len(big_shape)), *range(0, first_dim), *range(first_dim+len(big_shape), ret.ndim))
     return ret
 
-  def __setitem__(self, indices, v:Tensor):
+  def __setitem__(self, indices, v:Union[Tensor, ConstType]):
     if isinstance(self.device, str) and self.device.startswith("DISK"): return self.__getitem__(indices).assign(v)
-    # TODO: support python const v
     # TODO: broadcast v to the shape here, refactor for const v and one way broadcast_shape
-    assign_to = self.__getitem__(indices)
+    if not isinstance(v, Tensor): v = Tensor(v, self.device, self.dtype)
+    assign_to = self.realize().__getitem__(indices)
+    # NOTE: we check that indices is valid first
+    assert self.lazydata.contiguous(), "setitem target needs to be contiguous"
     # NOTE: contiguous to prevent const folding.
     return assign_to.assign(v._broadcast_to(broadcast_shape(assign_to.shape, v.shape)).contiguous()).realize()
 
@@ -841,6 +843,7 @@ class Tensor:
   def floor(self: Tensor) -> Tensor: return (self < (b := self.trunc())).where(b-1, b)
   def round(self: Tensor) -> Tensor:
     return ((self > 0) == ((b := self.cast(dtypes.int32) / 2.0).cast(dtypes.int32) == b)).where((self - 0.5).ceil(), (self + 0.5).floor())
+  def lerp(self, end: Tensor, weight: Union[Tensor, float]) -> Tensor: return self + (end - self) * weight
 
   def square(self): return self*self
   def clip(self, min_, max_): return self.maximum(min_).minimum(max_)
