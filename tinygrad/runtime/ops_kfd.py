@@ -105,6 +105,10 @@ regCOMPUTE_PGM_RSRC1 = 0x1bb2 - SUB
 regCOMPUTE_USER_DATA_0 = 0x1be0 - SUB
 regCOMPUTE_START_X = 0x1ba4 - SUB
 regCOMPUTE_TMPRING_SIZE = 0x1bb8 - SUB
+regCOMPUTE_RESOURCE_LIMITS = 0x1bb5 - SUB
+regCOMPUTE_RESTART_X = 0x1bbb - SUB
+regCOMPUTE_STATIC_THREAD_MGMT_SE0 = 0x1bb6 - SUB
+regCOMPUTE_STATIC_THREAD_MGMT_SE4 = 0x1bb6 - SUB
 
 COMPUTE_SHADER_EN = 1
 CS_W32_EN = 1 << 15
@@ -122,12 +126,21 @@ class HWPM4Queue:
 
   def exec(self, prg:KFDProgram, kernargs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), completion_signal=None):
     code = hsa.amd_kernel_code_t.from_address(prg.handle)
+    # kernel_code_properties:0x408
+    assert code.kernel_code_properties == 0x408  # ENABLE_WAVEFRONT_SIZE32 | ENABLE_SGPR_KERNARG_SEGMENT_PTR
+    assert code.workitem_private_segment_byte_size == 0
+    assert code.max_scratch_backing_memory_byte_size == 0
+    assert code.kernel_code_prefetch_byte_size == 0
     #for s in format_struct(code): print(s)
     shiftedIsaAddr = (prg.handle + code.kernel_code_entry_byte_offset) >> 8
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 6), regCOMPUTE_PGM_LO, shiftedIsaAddr&0xFFFFFFFF, shiftedIsaAddr>>32, 0, 0,
                (prg.device.scratch.va_addr>>8)&0xFFFFFFFF, prg.device.scratch.va_addr>>40]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), regCOMPUTE_PGM_RSRC1, code.compute_pgm_rsrc1, code.compute_pgm_rsrc2]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), regCOMPUTE_TMPRING_SIZE, 0x00200200] # (waveSize << 12) | (numWaves)
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), regCOMPUTE_RESOURCE_LIMITS, 0]
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 4), regCOMPUTE_RESTART_X, 0,0,0,0]
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 4), regCOMPUTE_STATIC_THREAD_MGMT_SE0, 0xFFFFFFFF,0xFFFFFFFF,0xFFFFFFFF,0xFFFFFFFF]
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 4), regCOMPUTE_STATIC_THREAD_MGMT_SE4, 0xFFFFFFFF,0xFFFFFFFF,0xFFFFFFFF,0xFFFFFFFF]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), regCOMPUTE_USER_DATA_0, kernargs&0xFFFFFFFF, kernargs>>32]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 8), regCOMPUTE_START_X, 0,0,0, local_size[0],local_size[1],local_size[2],0,0]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_DISPATCH_DIRECT, 3), global_size[0],global_size[1],global_size[2], CS_W32_EN | COMPUTE_SHADER_EN]
@@ -299,10 +312,12 @@ class KFDProgram:
     for i in range(len(args)): args_st.__setattr__(f'f{i}', args[i].va_addr)
     for i in range(len(vals)): args_st.__setattr__(f'v{i}', vals[i])
 
-    #HWComputeQueue().exec(self, self.device.kernargs_ptr, global_size, local_size,
-    #                      self.device.completion_signal if wait else None).submit(self.device)
-    HWPM4Queue().exec(self, self.device.kernargs_ptr, global_size, local_size,
-                      self.device.completion_signal if wait else None).submit(self.device)
+    if getenv("PM4"):
+      HWPM4Queue().exec(self, self.device.kernargs_ptr, global_size, local_size,
+                        self.device.completion_signal if wait else None).submit(self.device)
+    else:
+      HWComputeQueue().exec(self, self.device.kernargs_ptr, global_size, local_size,
+                            self.device.completion_signal if wait else None).submit(self.device)
     self.device.kernargs_ptr += self.kernargs_segment_size
 
     if wait:
@@ -560,8 +575,10 @@ class KFDDevice(Compiled):
     assert (wp:=self.amd_aql_queue.write_dispatch_id) == (rp:=self.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
 
   def synchronize(self):
-    #HWComputeQueue().signal(self.completion_signal).submit(self)
-    HWPM4Queue().signal(self.completion_signal).submit(self)
+    if getenv("PM4"):
+      HWPM4Queue().signal(self.completion_signal).submit(self)
+    else:
+      HWComputeQueue().signal(self.completion_signal).submit(self)
     self._wait_signal(self.completion_signal)
     assert (wp:=self.amd_aql_queue.write_dispatch_id) == (rp:=self.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
 
