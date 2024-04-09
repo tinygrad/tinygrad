@@ -234,9 +234,7 @@ def train_resnet():
 def train_retinanet():
   EPOCHS = 10
   BS = 2
-  from extra.models.retinanetNew import RetinaNet, sigmoid_focal_loss
-  # from extra.models.retinanet import RetinaNet
-  from extra.models.retinanet import AnchorGenerator, ImageList
+  from extra.models.retinanetNew import RetinaNet, AnchorGenerator
   anchor_sizes = tuple((x, int(x * 2 ** (1.0 / 3)), int(x * 2 ** (2.0 / 3))) for x in [32, 64, 128, 256, 512])
   aspect_ratios = ((0.5, 1.0, 2.0),) * len(anchor_sizes)
   anchor_generator = AnchorGenerator(

@@ -1,7 +1,6 @@
 import math
 import sys
-
-import torch
+from typing import List
 from tinygrad import Tensor, dtypes, TinyJit
 from tinygrad.helpers import colored, flatten, get_child
 import tinygrad.nn as nn
@@ -177,6 +176,106 @@ def generate_anchors(input_size, grid_sizes, scales, aspect_ratios):
     shifts = np.stack([shifts_x, shifts_y, shifts_x, shifts_y], axis=1, dtype=np.float32)
     anchors.append((shifts[:, None] + base_anchors[None, :]).reshape(-1, 4))
   return anchors
+def cust_meshgrid(x:Tensor, y:Tensor):
+  xs = x.shape[0]
+  ys = y.shape[0]
+  y = Tensor.stack([y]*xs)
+  x = x.reshape(xs, 1).expand((xs,ys))
+  return x, y
+class AnchorGenerator:
+
+  def __init__(
+    self,
+    sizes=((128, 256, 512),),
+    aspect_ratios=((0.5, 1.0, 2.0),),
+  ):
+    if not isinstance(sizes[0], (list, tuple)):
+      # TODO change this
+      sizes = tuple((s,) for s in sizes)
+    if not isinstance(aspect_ratios[0], (list, tuple)):
+      aspect_ratios = (aspect_ratios,) * len(sizes)
+
+    assert len(sizes) == len(aspect_ratios)
+
+    self.sizes = sizes
+    self.aspect_ratios = aspect_ratios
+    self.cell_anchors = [self.generate_anchors(size, aspect_ratio)
+                          for size, aspect_ratio in zip(sizes, aspect_ratios)]
+
+  # TODO: https://github.com/pytorch/pytorch/issues/26792
+  # For every (aspect_ratios, scales) combination, output a zero-centered anchor with those values.
+  # (scales, aspect_ratios) are usually an element of zip(self.scales, self.aspect_ratios)
+  # This method assumes aspect ratio = height / width for an anchor.
+  def generate_anchors(self, scales: List[int], aspect_ratios: List[float], dtype=dtypes.float):
+    scales = Tensor(list(scales), dtype=dtype)
+    aspect_ratios = Tensor(list(aspect_ratios), dtype=dtype)
+    h_ratios = aspect_ratios.sqrt()
+    w_ratios = 1 / h_ratios
+    ws = (w_ratios.unsqueeze(1) * scales.unsqueeze(0)).reshape(-1)  #.view(-1)
+    hs = (h_ratios.unsqueeze(1) * scales.unsqueeze(0)).reshape(-1)  #.view(-1)
+    base_anchors = Tensor.stack([-ws, -hs, ws, hs], dim=1) / 2
+    return base_anchors.round()
+
+  def set_cell_anchors(self, dtype):
+    self.cell_anchors = [cell_anchor.cast(dtype)
+                          for cell_anchor in self.cell_anchors]
+
+  def num_anchors_per_location(self):
+    return [len(s) * len(a) for s, a in zip(self.sizes, self.aspect_ratios)]
+
+  # For every combination of (a, (g, s), i) in (self.cell_anchors, zip(grid_sizes, strides), 0:2),
+  # output g[i] anchors that are s[i] distance apart in direction i, with the same dimensions as a.
+  def grid_anchors(self, grid_sizes: List[List[int]], strides: List[List[Tensor]]) -> List[Tensor]:
+    anchors = []
+    cell_anchors = self.cell_anchors
+    assert cell_anchors is not None
+
+    if not (len(grid_sizes) == len(strides) == len(cell_anchors)):
+      raise ValueError("Anchors should be Tuple[Tuple[int]] because each feature "
+                        "map could potentially have different sizes and aspect ratios. "
+                        "There needs to be a match between the number of "
+                        "feature maps passed and the number of sizes / aspect ratios specified.")
+
+    for size, stride, base_anchors in zip(
+        grid_sizes, strides, cell_anchors
+    ):
+      grid_height, grid_width = size
+      stride_height, stride_width = stride
+      # device = base_anchors.device
+      # For output anchor, compute [x_center, y_center, x_center, y_center]
+      shifts_x = Tensor.arange(
+          0, grid_width, dtype=dtypes.float) * stride_width
+      shifts_y = Tensor.arange(
+          0, grid_height, dtype=dtypes.float) * stride_height
+      shift_y, shift_x = cust_meshgrid(shifts_y, shifts_x)
+      shift_x = shift_x.reshape(-1)
+      shift_y = shift_y.reshape(-1)
+      shifts = Tensor.stack((shift_x, shift_y, shift_x, shift_y), dim=1)
+
+      # For every (base anchor, output anchor) pair,
+      # offset each zero-centered base anchor by the center of the output anchor.
+      # print('trying anchor append')
+      anchors.append(
+        (shifts.reshape(-1, 1, 4) + base_anchors.reshape(1, -1, 4)).reshape(-1, 4)
+      )
+    return anchors
+
+  def forward(self, image_list: Tensor, feature_maps: List[Tensor]) -> List[Tensor]:
+    grid_sizes = [feature_map.shape[-2:] for feature_map in feature_maps]
+    image_size = image_list.shape[-2:]
+    dtype = feature_maps[0].dtype
+    strides = [[Tensor(image_size[0] // g[0], dtype=dtypes.int64),
+                Tensor(image_size[1] // g[1], dtype=dtypes.int64)] for g in grid_sizes]
+    self.set_cell_anchors(dtype)
+    anchors_over_all_feature_maps = self.grid_anchors(grid_sizes, strides)
+    anchors: List[List[Tensor]] = []
+    for _ in range(image_list.shape[0]):
+      anchors_in_image = [anchors_per_feature_map for anchors_per_feature_map in anchors_over_all_feature_maps]
+      anchors.append(anchors_in_image)
+    anchors = [Tensor.cat(*anchors_per_image) for anchors_per_image in anchors]
+    return anchors
+  def __call__(self, image_list, feature_maps: List[Tensor]):
+    return self.forward(image_list, feature_maps)
 
 class Matcher(object):
 
