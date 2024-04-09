@@ -1,8 +1,9 @@
 import unittest, ctypes, struct, time
 from tinygrad import Device, Tensor, dtypes
+from tinygrad.helpers import getenv
 from tinygrad.buffer import Buffer, BufferOptions
 from tinygrad.engine.schedule import create_schedule
-from tinygrad.runtime.ops_kfd import KFDDevice, HWCopyQueue, HWComputeQueue
+from tinygrad.runtime.ops_kfd import KFDDevice, HWCopyQueue, HWComputeQueue, HWPM4Queue
 
 def _time_queue(q, d):
   st = time.perf_counter()
@@ -15,7 +16,7 @@ class TestHCQ(unittest.TestCase):
   @classmethod
   def setUpClass(self):
     TestHCQ.d0: KFDDevice = Device["KFD"]
-    TestHCQ.d1: KFDDevice = Device["KFD:1"]
+    #TestHCQ.d1: KFDDevice = Device["KFD:1"]
     TestHCQ.a = Tensor([0.,1.], device="KFD").realize()
     TestHCQ.b = self.a + 1
     si = create_schedule([self.b.lazydata])[-1]
@@ -26,13 +27,14 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.addr2 = struct.pack("QQ", TestHCQ.a.lazydata.buffer._buf.va_addr, TestHCQ.b.lazydata.buffer._buf.va_addr)
     ctypes.memmove(TestHCQ.d0.kernargs_ptr, TestHCQ.addr, len(TestHCQ.addr))
     ctypes.memmove(TestHCQ.d0.kernargs_ptr+len(TestHCQ.addr), TestHCQ.addr2, len(TestHCQ.addr2))
+    TestHCQ.compute_queue = HWPM4Queue if getenv("PM4") else HWComputeQueue
 
   def setUp(self):
     TestHCQ.a.lazydata.buffer.copyin(memoryview(bytearray(struct.pack("ff", 0, 1))))
     TestHCQ.b.lazydata.buffer.copyin(memoryview(bytearray(struct.pack("ff", 0, 0))))
 
   def test_run_1000_times_one_submit(self):
-    q = HWComputeQueue()
+    q = TestHCQ.compute_queue()
     for _ in range(1000):
       q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size)
       q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr+len(TestHCQ.addr), TestHCQ.runner.global_size, TestHCQ.runner.local_size)
@@ -42,7 +44,7 @@ class TestHCQ(unittest.TestCase):
     assert (val:=TestHCQ.a.lazydata.buffer.as_buffer().cast("f")[0]) == 2000.0, f"got val {val}"
 
   def test_run_1000_times(self):
-    q = HWComputeQueue()
+    q = TestHCQ.compute_queue()
     q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size)
     q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr+len(TestHCQ.addr), TestHCQ.runner.global_size,
            TestHCQ.runner.local_size, TestHCQ.d0.completion_signal)
@@ -55,7 +57,7 @@ class TestHCQ(unittest.TestCase):
     assert (val:=TestHCQ.a.lazydata.buffer.as_buffer().cast("f")[0]) == 2000.0, f"got val {val}"
 
   def test_run_to_3(self):
-    q = HWComputeQueue()
+    q = TestHCQ.compute_queue()
     q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size)
     q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr+len(TestHCQ.addr), TestHCQ.runner.global_size, TestHCQ.runner.local_size)
     q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size, TestHCQ.d0.completion_signal)
@@ -65,7 +67,7 @@ class TestHCQ(unittest.TestCase):
 
   def test_wait_signal(self):
     TestHCQ.d0.completion_signal.value = 1
-    HWComputeQueue().wait(TestHCQ.d0.completion_signal).signal(TestHCQ.d0.completion_signal).submit(TestHCQ.d0)
+    TestHCQ.compute_queue().wait(TestHCQ.d0.completion_signal).signal(TestHCQ.d0.completion_signal).submit(TestHCQ.d0)
     with self.assertRaises(RuntimeError):
       TestHCQ.d0._wait_signal(TestHCQ.d0.completion_signal, timeout=50)
     # clean up
@@ -82,14 +84,14 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0._wait_signal(TestHCQ.d0.completion_signal, timeout=1000)
 
   def test_run_normal(self):
-    q = HWComputeQueue()
+    q = TestHCQ.compute_queue()
     q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size, TestHCQ.d0.completion_signal)
     q.submit(TestHCQ.d0)
     TestHCQ.d0._wait_signal(TestHCQ.d0.completion_signal)
     assert (val:=TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[0]) == 1.0, f"got val {val}"
 
   def test_submit_empty_queues(self):
-    HWComputeQueue().submit(TestHCQ.d0)
+    TestHCQ.compute_queue().submit(TestHCQ.d0)
     HWCopyQueue().submit(TestHCQ.d0)
 
   def test_signal_timeout(self):
@@ -97,7 +99,7 @@ class TestHCQ(unittest.TestCase):
       TestHCQ.d0._wait_signal(TestHCQ.d0.completion_signal, timeout=50)
 
   def test_signal(self):
-    HWComputeQueue().signal(TestHCQ.d0.completion_signal).submit(TestHCQ.d0)
+    TestHCQ.compute_queue().signal(TestHCQ.d0.completion_signal).submit(TestHCQ.d0)
     TestHCQ.d0._wait_signal(TestHCQ.d0.completion_signal)
 
   def test_copy_signal(self):
@@ -105,7 +107,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0._wait_signal(TestHCQ.d0.completion_signal)
 
   def test_run_signal(self):
-    q = HWComputeQueue()
+    q = TestHCQ.compute_queue()
     q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size)
     q.signal(TestHCQ.d0.completion_signal)
     q.submit(TestHCQ.d0)
@@ -147,8 +149,8 @@ class TestHCQ(unittest.TestCase):
 
   def test_cross_device_copy_bandwidth(self):
     SZ = 2_000_000_000
-    a = Buffer("KFD", SZ, dtypes.uint8, options=BufferOptions(nolru=True)).allocate()
     b = Buffer("KFD:1", SZ, dtypes.uint8, options=BufferOptions(nolru=True)).allocate()
+    a = Buffer("KFD", SZ, dtypes.uint8, options=BufferOptions(nolru=True)).allocate()
     TestHCQ.d0._gpu_map(b._buf)
     q = HWCopyQueue()
     q.copy(a._buf.va_addr, b._buf.va_addr, SZ)
@@ -158,7 +160,7 @@ class TestHCQ(unittest.TestCase):
     assert gb_s > 2 and gb_s < 50
 
   def test_interleave_compute_and_copy(self):
-    q = HWComputeQueue()
+    q = TestHCQ.compute_queue()
     qc = HWCopyQueue()
     q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size)  # b = [1, 2]
     q.signal(sig:=KFDDevice._get_signal(10))
@@ -173,12 +175,13 @@ class TestHCQ(unittest.TestCase):
     assert (val:=TestHCQ.a.lazydata.buffer.as_buffer().cast("f")[0]) == 1.0, f"got val {val}"
 
   def test_cross_device_signal(self):
-    q1 = HWComputeQueue()
-    q2 = HWComputeQueue()
+    d1 = Device["KFD:1"]
+    q1 = TestHCQ.compute_queue()
+    q2 = TestHCQ.compute_queue()
     q1.signal(TestHCQ.d0.completion_signal)
     q2.wait(TestHCQ.d0.completion_signal)
     q2.submit(TestHCQ.d0)
-    q1.submit(TestHCQ.d1)
+    q1.submit(d1)
     TestHCQ.d0._wait_signal(TestHCQ.d0.completion_signal)
 
 if __name__ == "__main__":
