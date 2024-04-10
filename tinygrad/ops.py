@@ -29,7 +29,7 @@ class MemBuffer:
   idx: int
   dtype: DType
   st: ShapeTracker
-  arange_data: Optional[Tuple] = (),
+  arange_data: Optional[Tuple] = None
 
 @dataclass(frozen=True)
 class ConstBuffer:
