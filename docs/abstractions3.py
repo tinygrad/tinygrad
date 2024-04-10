@@ -34,12 +34,11 @@ optim._step()
 # The weight Tensors have been assigned to, but not yet realized. Everything is still lazy at this point
 # l1.lazydata and l2.lazydata define a computation graph
 
-from tinygrad.engine.schedule import create_schedule
-schedule, var_vals = create_schedule([l1.lazydata, l2.lazydata])
+from tinygrad.engine.schedule import create_schedule_with_vars
+schedule, var_vals = create_schedule_with_vars([l1.lazydata, l2.lazydata])
 
 # Once scheduled, all the computation is put in a line.
 
-from tinygrad import Variable
 from tinygrad.ops import LazyOp
 from tinygrad.buffer import Buffer
 
@@ -48,8 +47,6 @@ class ScheduleItem:
   ast: Tuple[LazyOp, ...]
   outputs: Tuple[Buffer, ...]    # NOTE: if a buffer is both read from and written to, it appears in both outputs and inputs
   inputs: Tuple[Buffer, ...]
-  # TODO: this shouldn't be here? it's not needed for computation. it should be a global
-  #var_vals: Dict[Variable, int]
 
 print(f"The schedule contains {len(schedule)} items.")
 for si in schedule: print(str(si)[:80])
