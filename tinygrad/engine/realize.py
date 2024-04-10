@@ -23,7 +23,7 @@ def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
   return None
 
 logops = open(getenv("LOGOPS", ""), "a") if getenv("LOGOPS", "") else None
-def run_schedule(schedule:List[ScheduleItem]):
+def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[Variable, int]] = None):
   while len(schedule):
     si = schedule.pop(0)
     if logops and si.ast[0].op not in LoadOps and not any(i.device.startswith("DISK:") for i in si.inputs): logops.write(str(si.ast)+"\n")
@@ -37,5 +37,5 @@ def run_schedule(schedule:List[ScheduleItem]):
 
     # run the function (put it in JIT)
     real_buffers = [x for x in si.outputs+si.inputs if x.size != 0]
-    if prg: prg.exec(real_buffers, si.var_vals)
+    if prg: prg.exec(real_buffers, var_vals if var_vals is not None else {})
     elif (out:=si.outputs[0]).size > 0: update_stats(colored(f"empty {out.size:10d} {out.dtype}", "yellow"), 0, 0, {}, None, 1, device=out.device)
