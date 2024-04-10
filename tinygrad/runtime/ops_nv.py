@@ -20,15 +20,10 @@ if getenv("IOCTL"):
   from extra.nv_gpu_driver.nv_ioctl import _dump_gpfifo
 else: _dump_gpfifo = lambda x: None
 
-USE_DMA_FIFO = True
-
 libc = ctypes.CDLL("libc.so.6")
 libc.memset.argtypes = [ctypes.c_void_p, ctypes.c_char, ctypes.c_int]
 libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
 libc.mmap.restype = ctypes.c_void_p
-
-libc.memcmp.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t]
-libc.memcmp.restype = ctypes.c_int
 
 def _IOWR(type, nr, size):
   return (3 << 30) | (size & 0x1FFF) << 16 | (type & 0xFF) << 8 | (nr & 0xFF)
@@ -52,78 +47,27 @@ def uvm_ioctl(fd, cmd, params):
   if ret != 0: raise RuntimeError(f"ioctl (uvm_control) returned {ret}")
   if params.rmStatus != 0: raise RuntimeError(f"ioctl (uvm_control) returned {params.rmStatus}")
 
-def set_bits_in_array(arr, end_bit, start_bit, value):
-  for bt in range(start_bit, end_bit+1): arr[bt // 32] |= ((value >> (bt - start_bit)) & 0x1) << (bt % 32)
+def make_qmd_struct_type():
+  fields = []
+  bits = [(name,dt) for name,dt in nvqcmd.__dict__.items() if name.startswith("NVC6C0_QMDV03_00") and isinstance(dt, tuple)]
+  bits += [(name+f"_{i}",dt(i)) for name,dt in nvqcmd.__dict__.items() for i in range(8) if name.startswith("NVC6C0_QMDV03_00") and callable(dt)]
+  bits = sorted(bits, key=lambda x: x[1][1])
+  for i,(name, data) in enumerate(bits):
+    if i > 0 and (gap:=(data[1] - bits[i-1][1][0] - 1)) != 0:  fields.append((f"_reserved{i}", ctypes.c_uint32, gap))
+    fields.append((name.replace("NVC6C0_QMDV03_00_", "").lower(), ctypes.c_uint32, data[0]-data[1]+1))
+  return init_c_struct_t(tuple(fields))
+qmd_struct_t = make_qmd_struct_type()
+assert ctypes.sizeof(qmd_struct_t) == 0x40 * 4
 
-def cmd_compute(program_address, constant_address, constant_len, register_usage, shared_size, global_size, local_size):
-  arr = (ctypes.c_uint32 * 0x40)()
-
-  smem_config = max(8 * 1024, min(96 * 1024, round_up(shared_size, 8 * 1024))) // 4096 + 1
-
-  set_bits_in_array(arr, *nvqcmd.NVC6C0_QMDV03_00_QMD_GROUP_ID, 0x3F)
-  set_bits_in_array(arr, *nvqcmd.NVC6C0_QMDV03_00_SM_GLOBAL_CACHING_ENABLE, 1)
-  set_bits_in_array(arr, *nvqcmd.NVC6C0_QMDV03_00_INVALIDATE_TEXTURE_HEADER_CACHE, 1)
-  set_bits_in_array(arr, *nvqcmd.NVC6C0_QMDV03_00_INVALIDATE_TEXTURE_SAMPLER_CACHE, 1)
-  set_bits_in_array(arr, *nvqcmd.NVC6C0_QMDV03_00_INVALIDATE_TEXTURE_DATA_CACHE, 1)
-  set_bits_in_array(arr, *nvqcmd.NVC6C0_QMDV03_00_INVALIDATE_SHADER_DATA_CACHE, 1)
-
-  set_bits_in_array(arr, *nvqcmd.NVC6C0_QMDV03_00_CWD_MEMBAR_TYPE, nvqcmd.NVC6C0_QMDV03_00_CWD_MEMBAR_TYPE_L1_SYSMEMBAR)
-  set_bits_in_array(arr, *nvqcmd.NVC6C0_QMDV03_00_API_VISIBLE_CALL_LIMIT, 1)
-  set_bits_in_array(arr, *nvqcmd.NVC6C0_QMDV03_00_SAMPLER_INDEX, 1)
-  set_bits_in_array(arr, *nvqcmd.NVC6C0_QMDV03_00_SHARED_MEMORY_SIZE, max(0x400, round_up(shared_size, 0x100)))
-  set_bits_in_array(arr, *nvqcmd.NVC6C0_QMDV03_00_MIN_SM_CONFIG_SHARED_MEM_SIZE, 0x3)
-  set_bits_in_array(arr, *nvqcmd.NVC6C0_QMDV03_00_MAX_SM_CONFIG_SHARED_MEM_SIZE, 0x1a)
-  set_bits_in_array(arr, *nvqcmd.NVC6C0_QMDV03_00_QMD_MAJOR_VERSION, 3)
-  set_bits_in_array(arr, *nvqcmd.NVC6C0_QMDV03_00_REGISTER_COUNT_V, register_usage)
-  set_bits_in_array(arr, *nvqcmd.NVC6C0_QMDV03_00_TARGET_SM_CONFIG_SHARED_MEM_SIZE, smem_config)
-  set_bits_in_array(arr, *nvqcmd.NVC6C0_QMDV03_00_BARRIER_COUNT, 1)
-  set_bits_in_array(arr, *nvqcmd.NVC6C0_QMDV03_00_SHADER_LOCAL_MEMORY_HIGH_SIZE, 0x640)
-  set_bits_in_array(arr, *nvqcmd.NVC6C0_QMDV03_00_PROGRAM_PREFETCH_SIZE, 0x10)
-  set_bits_in_array(arr, *nvqcmd.NVC6C0_QMDV03_00_SASS_VERSION, 0x89)
-
-  # print(smem_config, round_up(shared_size, 0x100), register_usage)
-
-  # group
-  # set_bits_in_array(arr, *nvqcmd.NVC6C0_QMDV03_00_CTA_RASTER_WIDTH, global_size[0])
-  # set_bits_in_array(arr, *nvqcmd.NVC6C0_QMDV03_00_CTA_RASTER_HEIGHT, global_size[1])
-  # set_bits_in_array(arr, *nvqcmd.NVC6C0_QMDV03_00_CTA_RASTER_DEPTH, global_size[2])
-  # set_bits_in_array(arr, *nvqcmd.NVC6C0_QMDV03_00_CTA_THREAD_DIMENSION0, local_size[0])
-  # set_bits_in_array(arr, *nvqcmd.NVC6C0_QMDV03_00_CTA_THREAD_DIMENSION1, local_size[1])
-  # set_bits_in_array(arr, *nvqcmd.NVC6C0_QMDV03_00_CTA_THREAD_DIMENSION2, local_size[2])
-
-  # program
-  set_bits_in_array(arr, *nvqcmd.NVC6C0_QMDV03_00_PROGRAM_ADDRESS_LOWER, program_address)
-  set_bits_in_array(arr, *nvqcmd.NVC6C0_QMDV03_00_PROGRAM_ADDRESS_UPPER, program_address>>32)
-  set_bits_in_array(arr, *nvqcmd.NVC6C0_QMDV03_00_PROGRAM_PREFETCH_ADDR_LOWER_SHIFTED, program_address>>8)
-  set_bits_in_array(arr, *nvqcmd.NVC6C0_QMDV03_00_PROGRAM_PREFETCH_ADDR_UPPER_SHIFTED, program_address>>40)
-
-  # args
-  # set_bits_in_array(arr, *nvqcmd.NVC6C0_QMDV03_00_CONSTANT_BUFFER_ADDR_UPPER(0), constant_address>>32)
-  # set_bits_in_array(arr, *nvqcmd.NVC6C0_QMDV03_00_CONSTANT_BUFFER_ADDR_LOWER(0), constant_address)
-  set_bits_in_array(arr, *nvqcmd.NVC6C0_QMDV03_00_CONSTANT_BUFFER_SIZE_SHIFTED4(0), constant_len)
-  set_bits_in_array(arr, *nvqcmd.NVC6C0_QMDV03_00_CONSTANT_BUFFER_INVALIDATE(0), nvqcmd.NVC6C0_QMDV03_00_CONSTANT_BUFFER_INVALIDATE_TRUE)
-  set_bits_in_array(arr, *nvqcmd.NVC6C0_QMDV03_00_CONSTANT_BUFFER_VALID(0), nvqcmd.NVC6C0_QMDV03_00_CONSTANT_BUFFER_VALID_TRUE)
-  return arr
-
-def cmdq_push_data(dev, data):
-  dev.cmdq[dev.cmdq_wptr//4] = data
-  dev.cmdq_wptr += 4
-def cmdq_blit_data(dev, data, size):
-  ctypes.memmove(dev.cmdq_page.base + dev.cmdq_wptr, data, size)
-  dev.cmdq_wptr += size
-def cmdq_push_data64(dev, data):
-  cmdq_push_data(dev, data >> 32)
-  cmdq_push_data(dev, data & 0xFFFFFFFF)
-def cmdq_push_data64_le(dev, data):
-  cmdq_push_data(dev, data & 0xFFFFFFFF)
-  cmdq_push_data(dev, data >> 32)
-def cmdq_push_method(dev, subc, mthd, size, typ=2): cmdq_push_data(dev, (typ << 28) | (size << 16) | (subc << 13) | (mthd >> 2)) 
+def nvmethod(subc, mthd, size, typ=2): return (typ << 28) | (size << 16) | (subc << 13) | (mthd >> 2)
+def nvdata64(data): return (data >> 32, data & 0xFFFFFFFF)
+def nvdata64_le(data): return (data & 0xFFFFFFFF, data >> 32)
 
 class NVCompiler(Compiler):
   compiler_opts = CompilerOptions("NV", global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024], shared_max=49152)
   def __init__(self, arch:str):
     self.arch = arch
-    # NVCompiler.compiler_opts = NVCompiler.compiler_opts._replace(has_tensor_cores=int(arch[3:]) >= 80)
+    NVCompiler.compiler_opts = NVCompiler.compiler_opts._replace(has_tensor_cores=int(arch[3:]) >= 80)
     cuda_check(cuda.nvrtcVersion((nvrtcMajor := ctypes.c_int()), (nvrtcMinor := ctypes.c_int())))
     self.compile_options = [f'--gpu-architecture={arch}', "-I/usr/local/cuda/include", "-I/usr/include", "-I/opt/cuda/include/"]
     if (nvrtcMajor.value, nvrtcMinor.value) >= (12, 4): self.compile_options.append("--minimal")
@@ -135,6 +79,69 @@ class NVCompiler(Compiler):
 
     if status != 0: raise RuntimeError(f"compile failed: {_get_bytes(prog, cuda.nvrtcGetProgramLog, cuda.nvrtcGetProgramLogSize, cuda_check).decode()}")
     return _get_bytes(prog, cuda.nvrtcGetCUBIN, cuda.nvrtcGetCUBINSize, cuda_check)
+
+class HWComputeQueue:
+  def __init__(self): self.q = []
+  def copy_from_cpu(self, gpuaddr, data):
+    self.q += [nvmethod(1, nvqcmd.NVC6C0_OFFSET_OUT_UPPER, 2), *nvdata64(gpuaddr)]
+    self.q += [nvmethod(1, nvqcmd.NVC6C0_LINE_LENGTH_IN, 2), len(data)*4, 0x1]
+    self.q += [nvmethod(1, nvqcmd.NVC6C0_LAUNCH_DMA, 1), 0x41]
+    self.q += [nvmethod(1, nvqcmd.NVC6C0_LOAD_INLINE_DATA, len(data), typ=6)] + [x for x in data]
+    return self
+
+  def exec(self, prg:NVProgram, qmd_ptr, kernargs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), completion_signal=None):
+    prg.qmd.cta_raster_width, prg.qmd.cta_raster_height, prg.qmd.cta_raster_depth = global_size
+    prg.qmd.cta_thread_dimension0, prg.qmd.cta_thread_dimension1, prg.qmd.cta_thread_dimension2 = local_size
+    prg.qmd.constant_buffer_addr_lower_0 = kernargs & 0xffffffff
+    prg.qmd.constant_buffer_addr_upper_0 = kernargs >> 32
+    if completion_signal is not None:
+      prg.qmd.release0_address_lower = (NVDevice.semaphores_page.base + completion_signal * 16) & 0xffffffff
+      prg.qmd.release0_address_upper = (NVDevice.semaphores_page.base + completion_signal * 16) >> 32
+      prg.qmd.release0_enable = 1
+      prg.qmd.release0_reduction_enable = 1
+      prg.qmd.release0_payload_lower = 1
+      prg.qmd.release0_structure_size = 1
+      prg.qmd.release0_membar_type = 1
+    self.q += [nvmethod(1, nvqcmd.NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI, 1), (1 << 12) | (1 << 4) | (1 << 0)]
+    self.q += [nvmethod(1, nvqcmd.NVC6C0_SET_INLINE_QMD_ADDRESS_A, 0x42), *nvdata64(qmd_ptr >> 8)]
+    self.q += [x for x in to_mv(ctypes.addressof(prg.qmd), ctypes.sizeof(prg.qmd)).cast("I")]
+    return self
+
+  def signal(self, signal_id:int):
+    self.q += [nvmethod(1, nvqcmd.NVC6C0_SET_REPORT_SEMAPHORE_A, 4), *nvdata64(NVDevice.semaphores_page.base + signal_id * 16), 0x1, (1 << 3)]
+    return self
+
+  def submit(self, dev:NVDevice):
+    for i,packet in enumerate(self.q): dev.cmdq[dev.cmdq_wptr//4 + i] = packet
+    fifo_entry = dev.compute_put_value % dev.compute_gpfifo_entries
+    dev.compute_gpu_ring[fifo_entry] = ((dev.cmdq_page.base+dev.cmdq_wptr)//4 << 2) | (len(self.q) << 42) | (1 << 41) | (1 << 63)
+    dev.compute_gpu_ring_controls.GPPut = (dev.compute_put_value + 1) % dev.compute_gpfifo_entries
+    dev.compute_put_value += 1
+    dev.gpu_mmio[0x90 // 4] = dev.compute_gpfifo_token
+    dev.cmdq_wptr += len(self.q) * 4
+
+class HWCopyQueue:
+  def __init__(self): self.q = []
+
+  def copy(self, dest, src, copy_size):
+    self.q += [nvmethod(4, nvqcmd.NVC6B5_OFFSET_IN_UPPER, 4), *nvdata64(src), *nvdata64(dest)]
+    self.q += [nvmethod(4, nvqcmd.NVC6B5_LINE_LENGTH_IN, 1), copy_size]
+    self.q += [nvmethod(4, nvqcmd.NVC6B5_LAUNCH_DMA, 1), (2 << 0) | (1 << 2) | (1 << 25) | (1 << 7) | (1 << 8)]
+    return self
+
+  def signal(self, signal_id:int):
+    self.q += [nvmethod(4, nvqcmd.NVC6B5_SET_SEMAPHORE_A, 3), *nvdata64(NVDevice.semaphores_page.base + signal_id * 16), 0x1]
+    self.q += [nvmethod(4, nvqcmd.NVC6B5_LAUNCH_DMA, 1), (1 << 19) | (5 << 14) | 0x14]
+    return self
+
+  def submit(self, dev:NVDevice):
+    for i,packet in enumerate(self.q): dev.cmdq[dev.cmdq_wptr//4 + i] = packet
+    fifo_entry = dev.dma_put_value % dev.dma_gpfifo_entries
+    dev.dma_gpu_ring[fifo_entry] = ((dev.cmdq_page.base+dev.cmdq_wptr)//4 << 2) | (len(self.q) << 42) | (1 << 41) | (1 << 63)
+    dev.dma_gpu_ring_controls.GPPut = (dev.dma_put_value + 1) % dev.dma_gpfifo_entries
+    dev.dma_put_value += 1
+    dev.gpu_mmio[0x90 // 4] = dev.dma_gpfifo_token
+    dev.cmdq_wptr += len(self.q) * 4
 
 SHT_PROGBITS, SHT_NOBITS, SHF_ALLOC, SHF_EXECINSTR = 0x1, 0x8, 0x2, 0x4
 class NVProgram:
@@ -149,195 +156,74 @@ class NVProgram:
 
     _phoff, _shoff, _flags, _ehsize, _phentsize, _phnum, _shentsize, _shnum, _shstrndx = struct.unpack_from("<QQIHHHHHH", self.lib, 0x20)
     sections = [struct.unpack_from("<IIQQQQIIQ", self.lib, _shoff + i * _shentsize) for i in range(_shnum)]
+    shstrtab = memoryview(bytearray(self.lib[sections[_shstrndx][4]:sections[_shstrndx][4]+sections[_shstrndx][5]]))
 
-    lib_gpu_size = round_up(max(sh[5] for sh in sections if sh[1] == SHT_PROGBITS and sh[2] & SHF_EXECINSTR), 0x100)
     self.shmem_usage = 0
     self.registers_usage = 0
-    self.constant_buffer = None
-    self.lib_gpu = self.device.progs_ptr
-    self.device.progs_ptr += lib_gpu_size
-    assert self.device.progs_ptr < self.device.progs_page.base + self.device.progs_page.length
-
-    cnt = 0
-    lib_gpu_view = to_mv(self.lib_gpu, lib_gpu_size)
-    for _, sh_type, sh_flags, sh_addr, sh_offset, sh_size, _, sh_info, _ in sections:
-      if sh_type == SHT_NOBITS and sh_flags & SHF_ALLOC: self.shmem_usage = sh_size # sharedmem section
+    self.constant_buffers = {}
+    constant_buffers_data = {}
+    for sh_name, sh_type, sh_flags, _, sh_offset, sh_size, _, sh_info, _ in sections:
+      if sh_type == SHT_NOBITS and sh_flags & SHF_ALLOC: self.shmem_usage = sh_size
       if sh_type == SHT_PROGBITS and sh_flags & SHF_ALLOC and sh_flags & SHF_EXECINSTR:
-        lib_gpu_view[:sh_size] = self.lib[sh_offset:sh_offset+sh_size]
+        self.program = memoryview(bytearray(self.lib[sh_offset:sh_offset+sh_size])).cast("I")
         self.registers_usage = sh_info >> 24
       if sh_type == SHT_PROGBITS and sh_flags & SHF_ALLOC and not(sh_flags & SHF_EXECINSTR):
-        if sh_size < 360: self.constant_buffer = memoryview(bytearray(self.lib[sh_offset:sh_offset+sh_size]))
-        cnt += 1
-        # print(sh_info)
-        # print(sh_type, sh_flags, sh_addr, sh_offset, sh_size, sh_info)
-    # assert cnt <= 2
+        section_name = shstrtab[sh_name:].tobytes().split(b'\0', 1)[0].decode('utf-8')
+        if match := re.match(r'\.nv\.constant(\d+)', section_name):
+          constant_buffers_data[int(match.group(1))] = memoryview(bytearray(self.lib[sh_offset:sh_offset+sh_size])).cast("I")
+
+    # constant buffer 0 is filled for each program, no need to copy it from elf (it's just zeroes)
+    if 0 in constant_buffers_data: constant_buffers_data.pop(0)
+
+    # Load program and constant buffers (if any)
+    self.lib_sz = round_up(round_up(self.program.nbytes, 128) + sum([round_up(x.nbytes, 128) for i,x in constant_buffers_data.items()]), 0x1000)
+    self.lib_gpu = self.device.allocator.alloc(self.lib_sz)
+
+    for start in range(0, len(self.program), 1000): # split, cannot send more than 1024 packets (?)
+      HWComputeQueue().copy_from_cpu(self.lib_gpu.base+start*4, self.program[start:start+1000]).signal(0).submit(self.device)
+
+    off = round_up(self.program.nbytes, 128)
+    for i,data in constant_buffers_data.items():
+      self.constant_buffers[i] = (self.lib_gpu.base + off, data.nbytes)
+      HWComputeQueue().copy_from_cpu(self.lib_gpu.base + off, data).signal(0).submit(self.device)
+      off += round_up(data.nbytes, 128)
+    self.device.synchronize() # TODO: remove once well tested
+
+    self.constbuffer_0 = [0] * 88
+    self.constbuffer_0[6:12] = [*nvdata64_le(self.device.shared_mem_window), *nvdata64_le(self.device.local_mem_window), *nvdata64_le(0xfffdc0)]
+
+    smem_config = max(8 * 1024, min(96 * 1024, round_up(self.shmem_usage, 8 * 1024))) // 4096 + 1
+    self.qmd = qmd_struct_t(qmd_group_id=0x3f, sm_global_caching_enable=1, invalidate_texture_header_cache=1, invalidate_texture_sampler_cache=1,
+                            invalidate_texture_data_cache=1, invalidate_shader_data_cache=1, api_visible_call_limit=1, sampler_index=1,
+                            cwd_membar_type=nvqcmd.NVC6C0_QMDV03_00_CWD_MEMBAR_TYPE_L1_SYSMEMBAR, qmd_major_version=3,
+                            shared_memory_size=max(0x400, round_up(self.shmem_usage, 0x100)), min_sm_config_shared_mem_size=0x3,
+                            max_sm_config_shared_mem_size=0x1a, register_count_v=self.registers_usage, target_sm_config_shared_mem_size=smem_config,
+                            barrier_count=1, shader_local_memory_high_size=0x640, program_prefetch_size=0x10, sass_version=0x89,
+                            program_address_lower=self.lib_gpu.base&0xffffffff, program_address_upper=self.lib_gpu.base>>32,
+                            program_prefetch_addr_lower_shifted=self.lib_gpu.base>>8, program_prefetch_addr_upper_shifted=self.lib_gpu.base>>40,
+                            constant_buffer_size_shifted4_0=0x190, constant_buffer_valid_0=1, constant_buffer_invalidate_0=1)
+
+    for i,(addr,sz) in self.constant_buffers.items():
+      self.qmd.__setattr__(f'constant_buffer_addr_upper_{i}', addr >> 32)
+      self.qmd.__setattr__(f'constant_buffer_addr_lower_{i}', addr & 0xffffffff)
+      self.qmd.__setattr__(f'constant_buffer_size_shifted4_{i}', sz)
+      self.qmd.__setattr__(f'constant_buffer_valid_{i}', 1)
+
+  def __del__(self):
+    if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu, self.lib_sz)
 
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
-    if not hasattr(self, "args_struct_t"):
-      self.args_struct_t = init_c_struct_t(tuple([(f'f{i}', ctypes.c_void_p) for i in range(len(args))] +
-                                                [(f'v{i}', ctypes.c_int) for i in range(len(vals))]))
+    qmd_ptr = self.device.qmd_ptr
+    kernargs_ptr = self.device.kernargs_ptr
 
-    # ctypes.memset(self.device.kernargs_ptr, 0x0, 0x160)
-    # args_st = self.args_struct_t.from_address(self.device.kernargs_ptr + 0x160)
-    # for i in range(len(args)): args_st.__setattr__(f'f{i}', args[i])
-    # for i in range(len(vals)): args_st.__setattr__(f'v{i}', vals[i])
+    kernargs = []
+    for i in range(len(args)): kernargs += [*nvdata64_le(args[i].base)]
+    for i in range(len(vals)): kernargs += [vals[i]]
 
-    # TODO: precalculate this
-    qmd = cmd_compute(self.lib_gpu, 0x0, 0x190, self.registers_usage, self.shmem_usage, (1,1,1), (1,1,1))
-    set_bits_in_array(qmd, *nvqcmd.NVC6C0_QMDV03_00_CONSTANT_BUFFER_ADDR_UPPER(0), self.device.kernargs_ptr>>32)
-    set_bits_in_array(qmd, *nvqcmd.NVC6C0_QMDV03_00_CONSTANT_BUFFER_ADDR_LOWER(0), self.device.kernargs_ptr&0xffffffff)
-    set_bits_in_array(qmd, *nvqcmd.NVC6C0_QMDV03_00_CTA_RASTER_WIDTH, global_size[0])
-    set_bits_in_array(qmd, *nvqcmd.NVC6C0_QMDV03_00_CTA_RASTER_HEIGHT, global_size[1])
-    set_bits_in_array(qmd, *nvqcmd.NVC6C0_QMDV03_00_CTA_RASTER_DEPTH, global_size[2])
-    set_bits_in_array(qmd, *nvqcmd.NVC6C0_QMDV03_00_CTA_THREAD_DIMENSION0, local_size[0])
-    set_bits_in_array(qmd, *nvqcmd.NVC6C0_QMDV03_00_CTA_THREAD_DIMENSION1, local_size[1])
-    set_bits_in_array(qmd, *nvqcmd.NVC6C0_QMDV03_00_CTA_THREAD_DIMENSION2, local_size[2])
-    set_bits_in_array(qmd, *nvqcmd.NVC6C0_QMDV03_00_RELEASE0_ADDRESS_LOWER, self.device.semaphores_page.base&0xffffffff)
-    set_bits_in_array(qmd, *nvqcmd.NVC6C0_QMDV03_00_RELEASE0_ADDRESS_UPPER, self.device.semaphores_page.base>>32)
-    set_bits_in_array(qmd, *nvqcmd.NVC6C0_QMDV03_00_RELEASE0_ENABLE, 0x1)
-    set_bits_in_array(qmd, *nvqcmd.NVC6C0_QMDV03_00_RELEASE0_REDUCTION_OP, 0x0)
-    set_bits_in_array(qmd, *nvqcmd.NVC6C0_QMDV03_00_RELEASE0_REDUCTION_ENABLE, 0x1)
-    set_bits_in_array(qmd, *nvqcmd.NVC6C0_QMDV03_00_RELEASE0_PAYLOAD_LOWER, 0x1)
-    set_bits_in_array(qmd, *nvqcmd.NVC6C0_QMDV03_00_RELEASE0_STRUCTURE_SIZE, 0x1)
-    set_bits_in_array(qmd, *nvqcmd.NVC6C0_QMDV03_00_RELEASE0_MEMBAR_TYPE, 0x1)
-
-    # set_bits_in_array(qmd, *nvqcmd.NVC6C0_QMDV03_00_CONSTANT_BUFFER_ADDR_UPPER(1), self.device.kernargs_ptr>>32)
-    # set_bits_in_array(qmd, *nvqcmd.NVC6C0_QMDV03_00_CONSTANT_BUFFER_ADDR_LOWER(1), self.device.kernargs_ptr&0xffffffff)
-    # set_bits_in_array(qmd, *nvqcmd.NVC6C0_QMDV03_00_CONSTANT_BUFFER_SIZE_SHIFTED4(1), 0x90)
-    # set_bits_in_array(qmd, *nvqcmd.NVC6C0_QMDV03_00_CONSTANT_BUFFER_VALID(1), nvqcmd.NVC6C0_QMDV03_00_CONSTANT_BUFFER_VALID_TRUE)
-
-    if self.constant_buffer is not None:
-      ctypes.memmove(self.device.constbuf_ptr, from_mv(self.constant_buffer), self.constant_buffer.nbytes)
-      set_bits_in_array(qmd, *nvqcmd.NVC6C0_QMDV03_00_CONSTANT_BUFFER_ADDR_UPPER(2), self.device.constbuf_ptr>>32)
-      set_bits_in_array(qmd, *nvqcmd.NVC6C0_QMDV03_00_CONSTANT_BUFFER_ADDR_LOWER(2), self.device.constbuf_ptr&0xffffffff)
-      set_bits_in_array(qmd, *nvqcmd.NVC6C0_QMDV03_00_CONSTANT_BUFFER_SIZE_SHIFTED4(2), self.constant_buffer.nbytes)
-      set_bits_in_array(qmd, *nvqcmd.NVC6C0_QMDV03_00_CONSTANT_BUFFER_VALID(2), nvqcmd.NVC6C0_QMDV03_00_CONSTANT_BUFFER_VALID_TRUE)
-
-    cmdq_start_wptr = self.device.cmdq_wptr
-
-    # COPY PROG
-    # cmdq_push_method(self.device, 1, nvqcmd.NVC6C0_OFFSET_OUT_UPPER, 2)
-    # cmdq_push_data64(self.device, self.handle)
-    # cmdq_push_method(self.device, 1, nvqcmd.NVC6C0_LINE_LENGTH_IN, 2)
-    # cmdq_push_data(self.device, self.gpuprog.nbytes)
-    # cmdq_push_data(self.device, 0x1)
-    # cmdq_push_method(self.device, 1, nvqcmd.NVC6C0_LAUNCH_DMA, 1)
-    # cmdq_push_data(self.device, 0x41)
-    # print("BYTES", self.gpuprog.nbytes)
-    # cmdq_push_method(self.device, 1, nvqcmd.NVC6C0_LOAD_INLINE_DATA, (self.gpuprog.nbytes + 3) // 4, typ=6)
-    # for w in range((self.gpuprog.nbytes + 3) // 4): cmdq_push_data(self.device, self.gpuprog[w])
-
-    # INV CACHE
-    cmdq_push_method(self.device, 1, nvqcmd.NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI, 1)
-    cmdq_push_data(self.device, (1 << 12) | (1 << 4) | (1 << 0))
-
-    self.device.inc += 1
-
-    # CONSTBUFFER FILLUP
-    cmdq_push_method(self.device, 1, nvqcmd.NVC6C0_OFFSET_OUT_UPPER, 2)
-    cmdq_push_data64(self.device, self.device.kernargs_ptr)
-    cmdq_push_method(self.device, 1, nvqcmd.NVC6C0_LINE_LENGTH_IN, 2)
-    cmdq_push_data(self.device, 0x160)
-    cmdq_push_data(self.device, 0x1)
-    cmdq_push_method(self.device, 1, nvqcmd.NVC6C0_LAUNCH_DMA, 1)
-    cmdq_push_data(self.device, 0x41)
-    cmdq_push_method(self.device, 1, nvqcmd.NVC6C0_LOAD_INLINE_DATA, 0x160 // 4, typ=6)
-    cmdq_push_data(self.device, global_size[0])
-    cmdq_push_data(self.device, global_size[1])
-    cmdq_push_data(self.device, global_size[2])
-    cmdq_push_data(self.device, local_size[0])
-    cmdq_push_data(self.device, local_size[1])
-    cmdq_push_data(self.device, local_size[2])
-    cmdq_push_data64_le(self.device, self.device.NVC6C0_SHADER_SHARED_MEMORY_WINDOW)
-    cmdq_push_data64_le(self.device, self.device.NVC6C0_SHADER_LOCAL_MEMORY_WINDOW)
-    cmdq_push_data64_le(self.device, 0xfffdc0)
-    cmdq_push_data64_le(self.device, self.device.inc) # TODO: change this
-    cmdq_push_data64_le(self.device, self.device.unknown_buffer_1) # ???
-    cmdq_push_data64_le(self.device, self.device.kernargs_ptr) # constant buffer 0
-    cmdq_push_data64_le(self.device, 0x0) # cuda sets constant buffer 1, something uses it? what's there?
-    for i in range(7): cmdq_push_data64_le(self.device, 0x0) # don't have any other const buffers
-    cmdq_push_data64_le(self.device, 0x37a2f08) # always the same, flags?
-    for i in range(2): cmdq_push_data64_le(self.device, 0x0)
-    cmdq_push_data64_le(self.device, 0x1) # always the same
-    for i in range(12): cmdq_push_data64_le(self.device, 0x0)
-    cmdq_push_data(self.device, 0x0)
-    cmdq_push_data(self.device, 0x80)
-    cmdq_push_data(self.device, 0x0)
-    cmdq_push_data(self.device, 0x400)
-    for i in range(2): cmdq_push_data(self.device, 0xf)
-    cmdq_push_data(self.device, 0x120)
-    for i in range(2): cmdq_push_data(self.device, 0x0)
-    cmdq_push_data(self.device, 0x160 + len(args)*8 + len(vals)*4)
-    for i in range(2): cmdq_push_data(self.device, 0x0)
-    cmdq_push_data64_le(self.device, self.device.unknown_buffer_2) # ???
-    cmdq_push_data64_le(self.device, self.lib_gpu)
-    cmdq_push_data64_le(self.device, 0x400) # shared mem
-    for i in range(2): cmdq_push_data64_le(self.device, 0x0)
-
-    cmdq_push_method(self.device, 1, nvqcmd.NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI, 1)
-    cmdq_push_data(self.device, (1 << 12) | (1 << 4) | (1 << 0))
-
-    # # self.device._cmdq_insert_progress_semaphore(subc=1)
-    # packets_written = (self.device.cmdq_wptr - cmdq_start_wptr) // 4
-    # # hexdump(to_mv(self.device.cmdq_page.base, packets_written * 4))
-    # self.device.compute_gpu_ring[self.device.compute_gpu_ring_controls.GPPut] = (((self.device.cmdq_page.base+cmdq_start_wptr)//4) << 2) | (packets_written << 42) | (1 << 63)
-    # self.device.compute_gpu_ring_controls.GPPut += 1
-    # # _dump_gpfifo(f"KERNEL_EXEC {self.device.kernargs_ptr}")
-    # self.device._cmdq_ring_doorbell(self.device.compute_gpfifo_token)
-    # # print("P1.5-WILL")
-    # self.device.synchronize() # TODO: remove
-    # # print("P1.5-DONE")
-    # cmdq_start_wptr = self.device.cmdq_wptr
-
-    cmdq_push_method(self.device, 1, nvqcmd.NVC6C0_OFFSET_OUT_UPPER, 2)
-    cmdq_push_data64(self.device, self.device.kernargs_ptr + 0x160)
-    cmdq_push_method(self.device, 1, nvqcmd.NVC6C0_LINE_LENGTH_IN, 2)
-    cmdq_push_data(self.device, len(args)*8 + len(vals)*4)
-    cmdq_push_data(self.device, 0x1)
-    cmdq_push_method(self.device, 1, nvqcmd.NVC6C0_LAUNCH_DMA, 1)
-    cmdq_push_data(self.device, 0x41)
-    cmdq_push_method(self.device, 1, nvqcmd.NVC6C0_LOAD_INLINE_DATA, len(args)*2 + len(vals), typ=6)
-    for i in range(len(args)): cmdq_push_data64_le(self.device, args[i].base)
-    for i in range(len(vals)): cmdq_push_data(self.device, vals[i])
-
-    # INV CACHE
-    # cmdq_push_method(self.device, 1, nvqcmd.NVC6C0_INVALIDATE_SHADER_CACHES, 1)
-    # cmdq_push_data(self.device, (1 << 0) | (1 << 1) | (1 << 2) | (1 << 4) | (1 << 12))
-  
-    cmdq_push_method(self.device, 1, nvqcmd.NVC6C0_SET_INLINE_QMD_ADDRESS_A, 0x42)
-    # print(hex(self.device.qmd))
-    cmdq_push_data64(self.device, self.device.qmd_ptr>>8)
-    cmdq_blit_data(self.device, qmd, 0x40 * 4)
-    # for i in range(0x40): cmdq_push_data(self.device, qmd[i])
-
-    # self.device.qmd_ptr += 8 << 8
-    # if self.device.qmd_ptr - self.device.qmd_base_addr >= 0x800000:
-    #   self.device.qmd_ptr = self.device.qmd_base_addr
-
-    # self.device._cmdq_insert_progress_semaphore(subc=1)
-    # cmdq_push_method(self.device, 1, nvqcmd.NVC6C0_SET_REPORT_SEMAPHORE_A, 4)
-    # cmdq_push_data64(self.device, self.device.semaphores_addr)
-    # cmdq_push_data(self.device, 0x1)
-    # cmdq_push_data(self.device, (1 << 3))
-
-    packets_written = (self.device.cmdq_wptr - cmdq_start_wptr) // 4
-    self.device.compute_gpu_ring[self.device.compute_put_value % self.device.compute_gpfifo_entries] = ((self.device.cmdq_page.base+cmdq_start_wptr)//4 << 2) | (packets_written << 42) | (1 << 41) | (1 << 63)
-    self.device.compute_put_value += 1
-    self.device.compute_gpu_ring_controls.GPPut = self.device.compute_put_value % self.device.compute_gpfifo_entries
-    self.device._cmdq_ring_doorbell(self.device.compute_gpfifo_token)
-    # print("DAL", self.device.compute_put_value)
-    # import time
-    # time.sleep(0.09)
+    queue = HWComputeQueue()
+    queue.copy_from_cpu(kernargs_ptr, self.constbuffer_0 + kernargs)
+    queue.exec(self, qmd_ptr, kernargs_ptr, global_size, local_size, completion_signal=0).submit(self.device)
     self.device.synchronize() # TODO: remove
-    # print("EXIT")
-    # import time
-    # time.sleep(1)
-
-    # print("II")
-    # for a in args:
-    #   hexdump(to_mv(a, 0x20))
-    #   print()
-    # assert to_mv(args[0], 0x20)[0x10] != 0
 
 class NVAllocator(LRUAllocator):
   def __init__(self, device:NVDevice):
@@ -356,12 +242,14 @@ class NVAllocator(LRUAllocator):
     host_mem = self.alloc(src.nbytes, BufferOptions(host=True))
     self.device.pending_copyin.append((host_mem, src.nbytes, BufferOptions(host=True)))
     ctypes.memmove(host_mem, from_mv(src), src.nbytes)
-    self.device._cmdq_dma_copy(dest.base, host_mem, src.nbytes)
+    HWCopyQueue().copy(dest.base, host_mem, src.nbytes).signal(2).submit(self.device)
+    self.device.synchronize()
 
   def copyout(self, dest:memoryview, src):
     host_mem = self.alloc(dest.nbytes, BufferOptions(host=True))
     self.device.pending_copyin.append((host_mem, dest.nbytes, BufferOptions(host=True)))
-    self.device._cmdq_dma_copy(host_mem, src.base, dest.nbytes)
+    HWCopyQueue().copy(host_mem, src.base, dest.nbytes).signal(2).submit(self.device)
+    self.device.synchronize()
     ctypes.memmove(from_mv(dest), host_mem, dest.nbytes)
 
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
@@ -370,6 +258,8 @@ class NVDevice(Compiled):
   fd_ctl:int = -1
   fd_uvm:int = -1
   fd_uvm_2:int = -1
+  semaphores_page = None
+  semaphores = None
 
   def _new_gpu_fd(self):
     fd_dev0 = os.open(f"/dev/nvidia{self.device_id}", os.O_RDWR | os.O_CLOEXEC)
@@ -524,8 +414,8 @@ class NVDevice(Compiled):
     self.cmdq = to_mv(self.cmdq_page.base, 0x1a00000).cast("I")
     self.cmdq_wptr = 0 # in bytes
 
-    self.semaphores_page = self._gpu_alloc2(0x4000, map_to_cpu=True)
-    self.semaphores = to_mv(self.semaphores_page.base, 0x4000).cast("Q")
+    NVDevice.semaphores_page = self._gpu_alloc2(0x4000, map_to_cpu=True)
+    NVDevice.semaphores = to_mv(self.semaphores_page.base, 0x4000).cast("Q")
 
     self.kernargs_page = self._gpu_alloc2(0x200000, map_to_cpu=True)
     self.kernargs_ptr = self.kernargs_page.base
@@ -535,9 +425,6 @@ class NVDevice(Compiled):
 
     self.qmd_page = self._gpu_alloc2(0x800000, map_to_cpu=True)
     self.qmd_ptr = self.qmd_page.base
-
-    self.progs_page = self._gpu_alloc2(0x6000000, map_to_cpu=True)
-    self.progs_ptr = self.progs_page.base
 
     self.arch = 'sm_89' # TODO: fix
     self.inc = 0
@@ -552,7 +439,7 @@ class NVDevice(Compiled):
     sem_value = self.semaphores[0]
     while sem_value != self.compute_put_value: sem_value = self.semaphores[0]
     sem_value = self.semaphores[4]
-    while sem_value != (self.dma_put_value if USE_DMA_FIFO else self.compute_put_value): sem_value = self.semaphores[4]
+    while sem_value != self.dma_put_value: sem_value = self.semaphores[4]
 
     self.cmdq_wptr = 0
 
@@ -584,108 +471,21 @@ class NVDevice(Compiled):
     return ws_token_params.workSubmitToken
 
   def _cmdq_setup_compute_gpfifo(self):
-    start = self._gpu_alloc2(0x8000000, huge_page=True, contig=True).base
-    self.NVC6C0_SHADER_LOCAL_MEMORY_WINDOW = self._gpu_alloc2(0x12c00000, huge_page=True, contig=True).base
-    self.NVC6C0_SHADER_LOCAL_MEMORY = self._gpu_alloc2(0x12c00000, huge_page=True, contig=True).base
-    self.NVC6C0_SHADER_SHARED_MEMORY_WINDOW = start + 0x2000000
-    self.unknown_buffer_1 = 0xffffffffffffffff
-    self.unknown_buffer_2 = 0xffffffffffffffff
+    self.local_mem_window = self._gpu_alloc2(256 << 20, huge_page=True, contig=True).base
+    self.shader_local_mem = self._gpu_alloc2(256 << 20, huge_page=True, contig=True).base
+    self.shared_mem_window = self._gpu_alloc2(256 << 20, huge_page=True, contig=True).base
 
-    cmdq_start_wptr = self.cmdq_wptr
-    cmdq_push_method(self, 1, nvqcmd.NVC6C0_SET_OBJECT, 1)
-    cmdq_push_data(self, nvcls.ADA_COMPUTE_A)
-    cmdq_push_method(self, 1, nvqcmd.NVC6C0_SET_SHADER_LOCAL_MEMORY_A, 2)
-    cmdq_push_data64(self, self.NVC6C0_SHADER_LOCAL_MEMORY)
-    cmdq_push_method(self, 1, nvqcmd.NVC6C0_SET_SHADER_SHARED_MEMORY_WINDOW_A, 1)
-    cmdq_push_data(self, (self.NVC6C0_SHADER_SHARED_MEMORY_WINDOW >> 32))
-    cmdq_push_method(self, 1, nvqcmd.NVC6C0_SET_SHADER_SHARED_MEMORY_WINDOW_B, 1)
-    cmdq_push_data(self, (self.NVC6C0_SHADER_SHARED_MEMORY_WINDOW & 0xffffffff))
-    cmdq_push_method(self, 1, nvqcmd.NVC6C0_SET_SHADER_LOCAL_MEMORY_NON_THROTTLED_A, 1)
-    cmdq_push_data(self, 0x0)
-    cmdq_push_method(self, 1, nvqcmd.NVC6C0_SET_SHADER_LOCAL_MEMORY_NON_THROTTLED_B, 1)
-    cmdq_push_data(self, 0x4b0000)
-    cmdq_push_method(self, 1, nvqcmd.NVC6C0_SET_SHADER_LOCAL_MEMORY_WINDOW_A, 1)
-    cmdq_push_data(self, (self.NVC6C0_SHADER_LOCAL_MEMORY_WINDOW >> 32))
-    cmdq_push_method(self, 1, nvqcmd.NVC6C0_SET_SHADER_LOCAL_MEMORY_WINDOW_B, 1)
-    cmdq_push_data(self, (self.NVC6C0_SHADER_LOCAL_MEMORY_WINDOW & 0xffffffff))
-
-    cmdq_push_method(self, 1, nvqcmd.NVC6C0_SET_SPA_VERSION, 1)
-    cmdq_push_data(self, 0x809)
-    cmdq_push_method(self, 1, nvqcmd.NVC6C0_SET_RESERVED_SW_METHOD07, 1)
-    cmdq_push_data(self, 0x1)
-    cmdq_push_method(self, 1, nvqcmd.NVC6C0_SET_VALID_SPAN_OVERFLOW_AREA_A, 3)
-    cmdq_push_data(self, 0x2)
-    cmdq_push_data(self, 0x0)
-    cmdq_push_data(self, 0x300000)
-    cmdq_push_method(self, 1, nvqcmd.NVC6C0_SET_SHADER_LOCAL_MEMORY_NON_THROTTLED_C, 1)
-    cmdq_push_data(self, 0x40)
-    cmdq_push_method(self, 4, nvqcmd.NVC6C0_SET_OBJECT, 1)
-    cmdq_push_data(self, nvcls.AMPERE_DMA_COPY_B)
-
-    cmdq_push_method(self, 1, nvqcmd.NVC6C0_SET_REPORT_SEMAPHORE_A, 4)
-    cmdq_push_data64(self, self.semaphores_page.base)
-    cmdq_push_data(self, 0x1)
-    cmdq_push_data(self, (1 << 3))
-    
-    packets_written = (self.cmdq_wptr - cmdq_start_wptr) // 4
-    self.compute_gpu_ring[self.compute_put_value % self.compute_gpfifo_entries] = ((self.cmdq_page.base+cmdq_start_wptr)//4 << 2) | (packets_written << 42) | (1 << 63)
-    self.compute_put_value += 1
-    self.compute_gpu_ring_controls.GPPut = self.compute_put_value % self.compute_gpfifo_entries
-    self._cmdq_ring_doorbell(self.compute_gpfifo_token)
+    queue = HWComputeQueue()
+    queue.q += [nvmethod(1, nvqcmd.NVC6C0_SET_OBJECT, 1), nvcls.ADA_COMPUTE_A]
+    queue.q += [nvmethod(1, nvqcmd.NVC6C0_SET_SHADER_LOCAL_MEMORY_A, 2), *nvdata64(self.shader_local_mem)]
+    queue.q += [nvmethod(1, nvqcmd.NVC6C0_SET_SHADER_LOCAL_MEMORY_NON_THROTTLED_A, 3), *nvdata64(0x4b0000), 0x40]
+    queue.q += [nvmethod(1, nvqcmd.NVC6C0_SET_SHADER_LOCAL_MEMORY_WINDOW_A, 2), *nvdata64(self.local_mem_window)]
+    queue.q += [nvmethod(1, nvqcmd.NVC6C0_SET_SHADER_SHARED_MEMORY_WINDOW_A, 2), *nvdata64(self.shared_mem_window)]
+    queue.signal(0).submit(self)
     self.synchronize() # TODO: remove
   
   def _cmdq_setup_dma_gpfifo(self):
-    if not USE_DMA_FIFO: return
-    cmdq_start_wptr = self.cmdq_wptr
-    cmdq_push_method(self, 4, nvqcmd.NVC6C0_SET_OBJECT, 1)
-    cmdq_push_data(self, nvcls.AMPERE_DMA_COPY_B)
-
-    cmdq_push_method(self, 4, nvqcmd.NVC6B5_SET_SEMAPHORE_A, 3)
-    cmdq_push_data64(self, self.semaphores_page.base+0x20)
-    cmdq_push_data(self, 1)
-    cmdq_push_method(self, 4, nvqcmd.NVC6B5_LAUNCH_DMA, 1)
-    cmdq_push_data(self, 0x14) # TODO: flags...
-
-    packets_written = (self.cmdq_wptr - cmdq_start_wptr) // 4
-    self.dma_gpu_ring[self.dma_put_value % self.dma_gpfifo_entries] = ((self.cmdq_page.base+cmdq_start_wptr)//4 << 2) | (packets_written << 42) | (1 << 63)
-    self.dma_put_value += 1
-    self.dma_gpu_ring_controls.GPPut = self.dma_put_value % self.dma_gpfifo_entries
-    self._cmdq_ring_doorbell(self.dma_gpfifo_token)
+    queue = HWCopyQueue()
+    queue.q += [nvmethod(4, nvqcmd.NVC6C0_SET_OBJECT, 1), nvcls.AMPERE_DMA_COPY_B]
+    queue.signal(2).submit(self)
     self.synchronize() # TODO: remove
-    # pass
-    # TODO: really need a spe queue?
-    # self.dma_gpu_ring = self.compute_gpu_ring
-    # self.dma_gpu_ring_controls = self.compute_gpu_ring_controls
-    # self.dma_gpfifo_token = self.compute_gpfifo_token
-  
-  def _cmdq_dma_copy(self, dst, src, sz):
-    cmdq_start_wptr = self.cmdq_wptr
-
-    cmdq_push_method(self, 4, nvqcmd.NVC6B5_OFFSET_IN_UPPER, 4)
-    cmdq_push_data64(self, src)
-    cmdq_push_data64(self, dst)
-    cmdq_push_method(self, 4, nvqcmd.NVC6B5_LINE_LENGTH_IN, 1)
-    cmdq_push_data(self, sz)
-    cmdq_push_method(self, 4, nvqcmd.NVC6B5_LAUNCH_DMA, 1)
-    cmdq_push_data(self, (2 << 0) | (1 << 2) | (1 << 25) | (1 << 7) | (1 << 8)) # TODO: flags...
-    cmdq_push_method(self, 4, nvqcmd.NVC6B5_SET_SEMAPHORE_A, 3)
-    cmdq_push_data64(self, self.semaphores_page.base+(0x20 if USE_DMA_FIFO else 0x0))
-    cmdq_push_data(self, 0x1)
-    cmdq_push_method(self, 4, nvqcmd.NVC6B5_LAUNCH_DMA, 1)
-    cmdq_push_data(self, (1 << 19) | (5 << 14) | 0x14) # TODO: flags...
-
-    packets_written = (self.cmdq_wptr - cmdq_start_wptr) // 4
-    if USE_DMA_FIFO:
-      self.dma_gpu_ring[self.dma_put_value % self.dma_gpfifo_entries] = ((self.cmdq_page.base+cmdq_start_wptr)//4 << 2) | (packets_written << 42) | (1 << 41) | (1 << 63)
-      self.dma_put_value += 1
-      self.dma_gpu_ring_controls.GPPut = self.dma_put_value % self.dma_gpfifo_entries
-      self._cmdq_ring_doorbell(self.dma_gpfifo_token)
-    else:
-      self.compute_gpu_ring[self.compute_put_value % self.compute_gpfifo_entries] = ((self.cmdq_page.base+cmdq_start_wptr)//4 << 2) | (packets_written << 42) | (1 << 41) | (1 << 63)
-      self.compute_put_value += 1
-      self.compute_gpu_ring_controls.GPPut = self.compute_put_value % self.compute_gpfifo_entries
-      self._cmdq_ring_doorbell(self.compute_gpfifo_token)
-
-    self.synchronize() # TODO: remove
-
-  def _cmdq_ring_doorbell(self, token): self.gpu_mmio[0x90 // 4] = token # TODO: this is bad...
