@@ -69,8 +69,8 @@ def update_stats(name:str, op_estimate:sint, mem_estimate:sint, var_vals: Option
 
 class BufferCopy(JITRunner):
   def copy(self, dest, src):
-    if src.device.startswith("DISK") and hasattr(dest.allocator, 'copy_from_fd') and src.nbytes >= 4096 and src._buf.ud.fd is not None:
-      dest.allocator.copy_from_fd(dest._buf, src._buf.ud.fd, src._buf.offset, src.nbytes)
+    if src.device.startswith("DISK") and hasattr(dest.allocator, 'copy_from_fd') and src.nbytes >= 4096 and hasattr(src.allocator.device, 'fd'):
+      dest.allocator.copy_from_fd(dest._buf, src.allocator.device.fd, src._buf.offset, src.nbytes)
     elif src.device.startswith("DISK") and hasattr(dest.allocator, 'as_buffer'):
       # fast(ish) path, uses readinto in diskbuffers
       src.allocator.copyout(dest.allocator.as_buffer(dest._buf), src._buf)
