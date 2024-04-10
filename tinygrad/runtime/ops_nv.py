@@ -109,7 +109,7 @@ def cmdq_push_data(dev, data):
   dev.cmdq[dev.cmdq_wptr//4] = data
   dev.cmdq_wptr += 4
 def cmdq_blit_data(dev, data, size):
-  ctypes.memmove(dev.cmdq_addr + dev.cmdq_wptr, data, size)
+  ctypes.memmove(dev.cmdq_page.base + dev.cmdq_wptr, data, size)
   dev.cmdq_wptr += size
 def cmdq_push_data64(dev, data):
   cmdq_push_data(dev, data >> 32)
@@ -279,8 +279,8 @@ class NVProgram:
 
     # # self.device._cmdq_insert_progress_semaphore(subc=1)
     # packets_written = (self.device.cmdq_wptr - cmdq_start_wptr) // 4
-    # # hexdump(to_mv(self.device.cmdq_addr, packets_written * 4))
-    # self.device.compute_gpu_ring[self.device.compute_gpu_ring_controls.GPPut] = (((self.device.cmdq_addr+cmdq_start_wptr)//4) << 2) | (packets_written << 42) | (1 << 63)
+    # # hexdump(to_mv(self.device.cmdq_page.base, packets_written * 4))
+    # self.device.compute_gpu_ring[self.device.compute_gpu_ring_controls.GPPut] = (((self.device.cmdq_page.base+cmdq_start_wptr)//4) << 2) | (packets_written << 42) | (1 << 63)
     # self.device.compute_gpu_ring_controls.GPPut += 1
     # # _dump_gpfifo(f"KERNEL_EXEC {self.device.kernargs_ptr}")
     # self.device._cmdq_ring_doorbell(self.device.compute_gpfifo_token)
@@ -321,7 +321,7 @@ class NVProgram:
     # cmdq_push_data(self.device, (1 << 3))
 
     packets_written = (self.device.cmdq_wptr - cmdq_start_wptr) // 4
-    self.device.compute_gpu_ring[self.device.compute_put_value % self.device.compute_gpfifo_entries] = ((self.device.cmdq_addr+cmdq_start_wptr)//4 << 2) | (packets_written << 42) | (1 << 41) | (1 << 63)
+    self.device.compute_gpu_ring[self.device.compute_put_value % self.device.compute_gpfifo_entries] = ((self.device.cmdq_page.base+cmdq_start_wptr)//4 << 2) | (packets_written << 42) | (1 << 41) | (1 << 63)
     self.device.compute_put_value += 1
     self.device.compute_gpu_ring_controls.GPPut = self.device.compute_put_value % self.device.compute_gpfifo_entries
     self.device._cmdq_ring_doorbell(self.device.compute_gpfifo_token)
@@ -346,7 +346,6 @@ class NVAllocator(LRUAllocator):
     super().__init__()
 
   def _alloc(self, size:int, options:BufferOptions):
-    size = round_up(size, 2 << 20)
     if options.host: return self.device._gpu_host_alloc(size)
     else: return self.device._gpu_alloc2(size)
 
@@ -356,15 +355,15 @@ class NVAllocator(LRUAllocator):
 
   def copyin(self, dest, src: memoryview):
     host_mem = self.alloc(src.nbytes, BufferOptions(host=True))
-    self.device.pending_copyin.append((self.trasnf_buf, src.nbytes, BufferOptions(host=True)))
-    ctypes.memmove(self.trasnf_buf, from_mv(src), src.nbytes)
-    self.device._cmdq_dma_copy(dest.base, self.trasnf_buf, src.nbytes)
+    self.device.pending_copyin.append((host_mem, src.nbytes, BufferOptions(host=True)))
+    ctypes.memmove(host_mem, from_mv(src), src.nbytes)
+    self.device._cmdq_dma_copy(dest.base, host_mem, src.nbytes)
 
   def copyout(self, dest:memoryview, src):
     host_mem = self.alloc(dest.nbytes, BufferOptions(host=True))
-    self.device.pending_copyin.append((self.trasnf_buf, dest.nbytes, BufferOptions(host=True)))
-    self.device._cmdq_dma_copy(self.trasnf_buf, src.base, dest.nbytes)
-    ctypes.memmove(from_mv(dest), self.trasnf_buf, dest.nbytes)
+    self.device.pending_copyin.append((host_mem, dest.nbytes, BufferOptions(host=True)))
+    self.device._cmdq_dma_copy(host_mem, src.base, dest.nbytes)
+    ctypes.memmove(from_mv(dest), host_mem, dest.nbytes)
 
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
 class NVDevice(Compiled):
@@ -416,23 +415,25 @@ class NVDevice(Compiled):
     if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
     if made.params.status != 0: raise RuntimeError(f"mmap_object returned {made.params.status}")
     return libc.mmap(target, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if target is not None else 0), fd_dev0, 0)
-  
-  def _gpu_alloc2(self, size:int, contig=False, va_addr=None, map_to_cpu=False, map_flags=0):
-    # size = round_up(size, 2 << 20)
-    attr = ((nvesc.NVOS32_ATTR_PAGE_SIZE_HUGE << 23) |
+
+  def _gpu_alloc2(self, size:int, contig=False, huge_page=False, va_addr=None, map_to_cpu=False, map_flags=0):
+    # TODO: need hugepage option?
+    size = round_up(size, alignment:=((4 << 10) if huge_page else (2 << 20)))
+    attr = (((nvesc.NVOS32_ATTR_PAGE_SIZE_HUGE << 23) if huge_page else 0) |
             ((nvesc.NVOS32_ATTR_PHYSICALITY_CONTIGUOUS if contig else nvesc.NVOS32_ATTR_PHYSICALITY_ALLOW_NONCONTIGUOUS) << 27))
-    attr2 = (nvesc.NVOS32_ATTR2_ZBC_PREFER_NO_ZBC << 0) | (nvesc.NVOS32_ATTR2_PAGE_SIZE_HUGE_2MB << 20) | (nvesc.NVOS32_ATTR2_GPU_CACHEABLE_YES << 2)
+    attr2 = ((nvesc.NVOS32_ATTR2_ZBC_PREFER_NO_ZBC << 0) | (nvesc.NVOS32_ATTR2_GPU_CACHEABLE_YES << 2) |
+             ((nvesc.NVOS32_ATTR2_PAGE_SIZE_HUGE_2MB << 20) if huge_page else 0))
     flags = (nvesc.NVOS32_ALLOC_FLAGS_ALIGNMENT_FORCE | nvesc.NVOS32_ALLOC_FLAGS_PERSISTENT_VIDMEM | nvesc.NVOS32_ALLOC_FLAGS_IGNORE_BANK_PLACEMENT |
              nvesc.NVOS32_ALLOC_FLAGS_MAP_NOT_REQUIRED | nvesc.NVOS32_ALLOC_FLAGS_MEMORY_HANDLE_PROVIDED)
 
     alloc_params = nvesc.NV_MEMORY_ALLOCATION_PARAMS(owner=self.root, flags=flags, attr=attr, attr2=attr2, format=6, size=size,
-                                                     alignment=(2 << 20), offset=0, limit=size-1)
+                                                     alignment=alignment, offset=0, limit=size-1)
     mem_handle = rm_alloc(self.fd_ctl, nvcls.NV1_MEMORY_USER, self.root, self.device, alloc_params).hObjectNew
 
+    if va_addr is None: va_addr = self._alloc_gpu_vaddr(size, cpu_mapping=map_to_cpu)
     if map_to_cpu: va_base = self._gpu_map_to_cpu(mem_handle, size, target=va_addr, flags=map_flags)
-    else:
-      va_base = libc.mmap(self.next_gpu_vaddr, size, 0, 34 | MAP_FIXED, -1, 0) # gpu address TODO: remove it?
-      self.next_gpu_vaddr += size
+    else: va_base = va_addr #libc.mmap(va_addr, size, 0, 34 | MAP_FIXED, -1, 0) # gpu address TODO: remove it?
+
     return self._gpu_uvm_map2(va_base, size, mem_handle)
 
   def _gpu_uvm_map(self, mem_handle, size:int, cpu_visible=False, fixed_address=None, map_flags=0):
@@ -444,24 +445,20 @@ class NVDevice(Compiled):
     return self._gpu_uvm_map2(va_base, size, mem_handle).base
 
   def _gpu_host_alloc(self, size):
-    assert size % (2<<20) == 0
-    va_base = libc.mmap(self.next_gpu_vaddr, size, mmap.PROT_READ|mmap.PROT_WRITE, MAP_FIXED|mmap.MAP_SHARED|mmap.MAP_ANONYMOUS, -1, 0) # gpu address
-    self.next_gpu_vaddr += size
-    size = round_up(size, 2<<20)
+    size = round_up(size, 4 << 10)
+    va_base = libc.mmap(self._alloc_gpu_vaddr(size, cpu_mapping=True), size, mmap.PROT_READ|mmap.PROT_WRITE, MAP_FIXED|mmap.MAP_SHARED|mmap.MAP_ANONYMOUS, -1, 0) # gpu address
     return self._gpu_map_to_gpu(va_base, size)
 
   def _gpu_map_to_gpu(self, va_base, size):
-    assert size % (2<<20) == 0
     fd_dev0 = self._new_gpu_fd()
-    # hClass=113 - NV01_MEMORY_SYSTEM_OS_DESCRIPTOR
-    # TODO: flags
     self.host_mem_object_enumerator += 1
-    made = nvesc.nv_ioctl_nvos02_parameters_with_fd(fd=-1,
-      params=nvesc.NVOS02_PARAMETERS(hRoot=self.root, hObjectParent=self.device, hObjectNew=self.host_mem_object_enumerator, hClass=113, flags=1073745936, pMemory=va_base, limit=size-1))
+    flags = ((nvesc.NVOS02_FLAGS_PHYSICALITY_NONCONTIGUOUS << 4) | (nvesc.NVOS02_FLAGS_COHERENCY_CACHED << 12) |
+             (nvesc.NVOS02_FLAGS_MAPPING_NO_MAP << 30))
+    made = nvesc.nv_ioctl_nvos02_parameters_with_fd(params=nvesc.NVOS02_PARAMETERS(hRoot=self.root, hObjectParent=self.device,
+      hObjectNew=self.host_mem_object_enumerator, hClass=nvcls.NV01_MEMORY_SYSTEM_OS_DESCRIPTOR, flags=flags, pMemory=va_base, limit=size-1), fd=-1)
     ret = fcntl.ioctl(fd_dev0, _IOWR(ord('F'), nvesc.NV_ESC_RM_ALLOC_MEMORY, ctypes.sizeof(made)), made)
     if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
     if made.params.status != 0: raise RuntimeError(f"_gpu_host_alloc returned {made.params.status}")
-    # print(made.params.hObjectNew)
     return self._gpu_uvm_map2(va_base, size, made.params.hObjectNew).base
 
   def _gpu_uvm_map2(self, va_base, size, mem_handle):
@@ -479,7 +476,7 @@ class NVDevice(Compiled):
     return map_ext_params
 
   def _gpu_free(self, mem):
-    made = nvesc.NVOS00_PARAMETERS(hRoot=self.root, hObjectParent=self.device, hObjecOld=mem.hMemory)
+    made = nvesc.NVOS00_PARAMETERS(hRoot=self.root, hObjectParent=self.device, hObjectOld=mem.hMemory)
     ret = fcntl.ioctl(self.fd_ctl, _IOWR(ord('F'), nvesc.NV_ESC_RM_FREE, ctypes.sizeof(made)), made)
     if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
     if made.status != 0: raise RuntimeError(f"_gpu_host_alloc returned {made.status}")
@@ -489,6 +486,12 @@ class NVDevice(Compiled):
     free_params = nvuvm.UVM_FREE_PARAMS(base=va_base, length=size)
     uvm_ioctl(self.fd_uvm, int(nvuvm.UVM_FREE[2]), free_params)
     if free_params.rmStatus != 0: raise RuntimeError(f"_gpu_uvm_free returned {free_params.rmStatus}")
+
+  def _alloc_gpu_vaddr(self, size, cpu_mapping=False):
+    va_addr = self.next_mmaped_gpu_vaddr if cpu_mapping else self.next_gpu_vaddr
+    if cpu_mapping: self.next_mmaped_gpu_vaddr += round_up(size, 2 << 20)
+    else: self.next_gpu_vaddr += round_up(size, 2 << 20)
+    return va_addr
 
   def __init__(self, device:str=""):
     if NVDevice.root is None:
@@ -504,9 +507,8 @@ class NVDevice(Compiled):
     self.fd_dev = os.open(f"/dev/nvidia{self.device_id}", os.O_RDWR | os.O_CLOEXEC)
     self.host_mem_object_enumerator = 0x1000 + 0x400 * self.device_id # start 
 
-    self.next_gpu_vaddr = 0x1000000000
-    # 0x10_bda00000
-    # 0x10_00000000
+    self.next_gpu_vaddr = 0x5000000000
+    self.next_mmaped_gpu_vaddr = 0x1000000000
 
     device_params = nvcls.NV0080_ALLOC_PARAMETERS(deviceId=self.device_id, hClientShare=self.root, vaMode=nvesc.NV_DEVICE_ALLOCATION_VAMODE_MULTIPLE_VASPACES)
     self.device = rm_alloc(self.fd_ctl, nvcls.NV01_DEVICE_0, self.root, self.root, device_params).hObjectNew
@@ -533,7 +535,7 @@ class NVDevice(Compiled):
     channel_params = nvesc.NV_CHANNEL_GROUP_ALLOCATION_PARAMETERS(engineType=nvcls.NV2080_ENGINE_TYPE_GRAPHICS)
     channel_group = rm_alloc(self.fd_ctl, nvcls.KEPLER_CHANNEL_GROUP_A, self.root, self.device, channel_params).hObjectNew
 
-    gpfifo = self._gpu_alloc2(0x200000, contig=True, va_addr=0x200400000 + 0x10000000 * self.device_id, map_to_cpu=True, map_flags=0x10d0000)
+    gpfifo = self._gpu_alloc2(0x200000, contig=True, huge_page=True, va_addr=0x200400000 + 0x10000000 * self.device_id, map_to_cpu=True, map_flags=0x10d0000)
 
     ctxshare_params = nvesc.NV_CTXSHARE_ALLOCATION_PARAMETERS(hVASpace=vaspace, flags=nvesc.NV_CTXSHARE_ALLOCATION_FLAGS_SUBCONTEXT_ASYNC)
     ctxshare = rm_alloc(self.fd_ctl, nvcls.FERMI_CONTEXT_SHARE_A, self.root, channel_group, ctxshare_params).hObjectNew
@@ -555,24 +557,23 @@ class NVDevice(Compiled):
     self.dma_put_value = 0
     self.gpu_mmio = to_mv(gpu_mmio_ptr, 0x10000).cast("I")
 
-    cmdq_mem_handle = self._gpu_alloc(0x1a00000, huge_page=True, contig=True)
-    self.cmdq_addr = self._gpu_uvm_map(cmdq_mem_handle, 0x1a00000, cpu_visible=True, fixed_address=0x400700000 + 0x10000000 * self.device_id)
-    self.cmdq = to_mv(self.cmdq_addr, 0x1a00000).cast("I")
+    self.cmdq_page = self._gpu_alloc2(0x1a00000, map_to_cpu=True, huge_page=True)
+    self.cmdq = to_mv(self.cmdq_page.base, 0x1a00000).cast("I")
     self.cmdq_wptr = 0 # in bytes
 
-    self.semaphores_page = self._gpu_alloc2(0x200000, map_to_cpu=True, va_addr=0x300800000 + 0x10000000 * self.device_id)
-    self.semaphores = to_mv(self.semaphores_page.base, 0x200000).cast("Q")
+    self.semaphores_page = self._gpu_alloc2(0x4000, map_to_cpu=True)
+    self.semaphores = to_mv(self.semaphores_page.base, 0x4000).cast("Q")
 
-    self.kernargs_page = self._gpu_alloc2(0x200000, map_to_cpu=True, va_addr=0x300a00000 + 0x10000000 * self.device_id)
+    self.kernargs_page = self._gpu_alloc2(0x200000, map_to_cpu=True)
     self.kernargs_ptr = self.kernargs_page.base
 
-    self.constbuf_page = self._gpu_alloc2(0x200000, map_to_cpu=True, va_addr=0x300c00000 + 0x10000000 * self.device_id)
+    self.constbuf_page = self._gpu_alloc2(0x200000, map_to_cpu=True)
     self.constbuf_ptr = self.constbuf_page.base
 
-    self.qmd_page = self._gpu_alloc2(0x800000, map_to_cpu=True, va_addr=0x300e00000 + 0x10000000 * self.device_id)
+    self.qmd_page = self._gpu_alloc2(0x800000, map_to_cpu=True)
     self.qmd_ptr = self.qmd_page.base
 
-    self.progs_page = self._gpu_alloc2(0x600000, map_to_cpu=True)
+    self.progs_page = self._gpu_alloc2(0x6000000, map_to_cpu=True)
     self.progs_ptr = self.progs_page.base
 
     self.arch = 'sm_89' # TODO: fix
@@ -667,7 +668,7 @@ class NVDevice(Compiled):
     cmdq_push_data(self, (1 << 3))
     
     packets_written = (self.cmdq_wptr - cmdq_start_wptr) // 4
-    self.compute_gpu_ring[self.compute_put_value % self.compute_gpfifo_entries] = ((self.cmdq_addr+cmdq_start_wptr)//4 << 2) | (packets_written << 42) | (1 << 63)
+    self.compute_gpu_ring[self.compute_put_value % self.compute_gpfifo_entries] = ((self.cmdq_page.base+cmdq_start_wptr)//4 << 2) | (packets_written << 42) | (1 << 63)
     self.compute_put_value += 1
     self.compute_gpu_ring_controls.GPPut = self.compute_put_value % self.compute_gpfifo_entries
     self._cmdq_ring_doorbell(self.compute_gpfifo_token)
@@ -686,7 +687,7 @@ class NVDevice(Compiled):
     cmdq_push_data(self, 0x14) # TODO: flags...
 
     packets_written = (self.cmdq_wptr - cmdq_start_wptr) // 4
-    self.dma_gpu_ring[self.dma_put_value % self.dma_gpfifo_entries] = ((self.cmdq_addr+cmdq_start_wptr)//4 << 2) | (packets_written << 42) | (1 << 63)
+    self.dma_gpu_ring[self.dma_put_value % self.dma_gpfifo_entries] = ((self.cmdq_page.base+cmdq_start_wptr)//4 << 2) | (packets_written << 42) | (1 << 63)
     self.dma_put_value += 1
     self.dma_gpu_ring_controls.GPPut = self.dma_put_value % self.dma_gpfifo_entries
     self._cmdq_ring_doorbell(self.dma_gpfifo_token)
@@ -715,12 +716,12 @@ class NVDevice(Compiled):
 
     packets_written = (self.cmdq_wptr - cmdq_start_wptr) // 4
     if USE_DMA_FIFO:
-      self.dma_gpu_ring[self.dma_put_value % self.dma_gpfifo_entries] = ((self.cmdq_addr+cmdq_start_wptr)//4 << 2) | (packets_written << 42) | (1 << 41) | (1 << 63)
+      self.dma_gpu_ring[self.dma_put_value % self.dma_gpfifo_entries] = ((self.cmdq_page.base+cmdq_start_wptr)//4 << 2) | (packets_written << 42) | (1 << 41) | (1 << 63)
       self.dma_put_value += 1
       self.dma_gpu_ring_controls.GPPut = self.dma_put_value % self.dma_gpfifo_entries
       self._cmdq_ring_doorbell(self.dma_gpfifo_token)
     else:
-      self.compute_gpu_ring[self.compute_put_value % self.compute_gpfifo_entries] = ((self.cmdq_addr+cmdq_start_wptr)//4 << 2) | (packets_written << 42) | (1 << 41) | (1 << 63)
+      self.compute_gpu_ring[self.compute_put_value % self.compute_gpfifo_entries] = ((self.cmdq_page.base+cmdq_start_wptr)//4 << 2) | (packets_written << 42) | (1 << 41) | (1 << 63)
       self.compute_put_value += 1
       self.compute_gpu_ring_controls.GPPut = self.compute_put_value % self.compute_gpfifo_entries
       self._cmdq_ring_doorbell(self.compute_gpfifo_token)
