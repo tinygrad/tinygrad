@@ -5,8 +5,9 @@ from tinygrad.engine.jit import TinyJit
 from tinygrad.nn.state import get_state_dict
 from tinygrad.dtype import dtypes
 import json
+import struct
 
-EXPORT_SUPPORTED_DEVICE = ["WEBGPU", "WEBGL", "CLANG", "CUDA", "GPU"]
+EXPORT_SUPPORTED_DEVICE = ["WEBGPU", "WEBGL", "CLANG", "CUDA", "GPU", "RUST"]
 web_utils = {
   "getTensorBuffer":
   """const getTensorBuffer = (safetensorBuffer, tensorMetadata) => {
@@ -63,13 +64,14 @@ def jit_model(model, *args) -> Tuple[TinyJit,Dict[int,str]]:
     special_names[id(output.lazydata.base.realized)] = f'output{i}'
   return run, special_names
 
-def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,int,int]], bufs:Dict[str,Tuple[str,int,int]], bufs_to_save:Dict[str,Tensor], input_names:List[str], output_names:List[str]) -> str:
+def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,int,int]], bufs:Dict[str,Tuple[str,int,int]], bufs_to_save:Dict[str,Tensor], input_names:List[str], output_names:List[str], encoded_weights:bool=True) -> str:
   from tinygrad.runtime.ops_clang import CLANG_PROG_HEADER
   cprog = [CLANG_PROG_HEADER]
 
   for name,cl in bufs_to_save.items():
     weight = ''.join(["\\x%02X"%x for x in bytes(cl._buf)])
-    cprog.append(f"unsigned char {name}_data[] = \"{weight}\";")
+    if encoded_weights: cprog.append(f"unsigned char {name}_data[] = \"{weight}\";")
+    else: cprog.append(f"unsigned char {name}_data[{len(bytes(cl._buf))}];")
 
   inputs = ", ".join([f'float* {input}' for input in input_names])
   outputs = ", ".join([f'float* {output}' for output in output_names])
@@ -77,6 +79,50 @@ def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,in
   cprog += list(functions.values())
   cprog += [f"void net({inputs}, {outputs}) {{"] + [f"{name}({', '.join(args)});" for (name, args, _global_size, _local_size) in statements] + ["}"]
   return '\n'.join(cprog)
+
+def export_model_rust(functions:Dict[str,str], statements:Dict[str,Tuple[str,int,int]], bufs:Dict[str,Tuple[str,int,int]], bufs_to_save:Dict[str,Tensor], input_names:List[str], output_names:List[str], encoded_weights:bool=True) -> str:
+  from tinygrad.runtime.ops_rust import RUST_TYPE_MAP as type_map
+  def for_bufs(lda, name_filter=[]):
+    codeblock = []
+    for name,(len,dtype,_key) in bufs.items():
+      if name not in input_names+output_names+name_filter: codeblock.append(lda(name,len,dtype))
+    return codeblock
+
+  # main struct definition
+  rs_struct = ["pub struct Net {"] + for_bufs(lambda name,len,dtype: f"  {name}: [{type_map[dtype][0]}; {int(len/type_map[dtype][1])}],") +  ["}"]
+  #   new() init fn
+  if encoded_weights: l = lambda name,len,dtype: f"      {name}: {name.upper()}_DATA,"
+  else: l = lambda name,len,dtype: f"      {name}: [0.0; {int(len/type_map[dtype][1])}],"
+  rs_new = ["  pub fn new() -> Self {","    Net {",] + for_bufs(l) + ["    }","  }"]
+  #   weights both a fn to load and optional static arrays
+  rs_weights = []
+  if encoded_weights:
+    rs_weights += ["// Encoded Weights"]
+    l = lambda name,len,dtype: f"const {name.upper()}_DATA: [{type_map[dtype][0]}; {int(len/type_map[dtype][1])}] = [0.0; {int(len/type_map[dtype][1])}];"
+    rs_weights += for_bufs(l,list(bufs_to_save.keys()))
+  rs_initw = ["  #[allow(dead_code)]",f"  pub fn initialize_weights(&mut self, weights: &[{type_map[bufs_to_save[list(bufs_to_save.keys())[0]].dtype][0]}]) {{"]
+  weights = bytes()
+  for name,cl in bufs_to_save.items():
+    rs_initw += [f"    self.{name}.copy_from_slice(&weights[{len(weights)//type_map[cl.dtype][1]}..{len(weights)//type_map[cl.dtype][1]+cl.size}]);"]
+    weight = bytes(cl._buf)
+    if encoded_weights:
+      rs_weights += [f"const {name.upper()}_DATA: [{type_map[cl.dtype][0]}; {cl.size}] = [{','.join([str(struct.unpack('f', weight[i:i+4])[0]) for i in range(0, len(weight), type_map[cl.dtype][1])])}];"]
+    weights += weight
+  rs_initw += ["  }"]
+  #   fn to run the network
+  inputs = ", ".join([f"{name}: &[{type_map[dtype][0]}; {int(len/type_map[dtype][1])}]" for name, (len, dtype, _key) in bufs.items() if name in input_names])
+  outputs = ", ".join([f"{name}: &mut [{type_map[dtype][0]}; {int(len/type_map[dtype][1])}]" for name, (len, dtype, _key) in bufs.items() if name in output_names])
+  rs_run = [f"  pub fn run(&mut self, {inputs}, {outputs}) {{"]
+  for (name, args, _, _) in statements:
+    params = ['&self.'+arg if arg not in input_names+output_names else arg for arg in args]
+    params[0] = params[0].replace('&self.', '&mut self.') # first arg is mutable
+    rs_run += [f"    {name}({', '.join(params)});"]
+  rs_run += ["  }"]
+  rs_impl = ["impl Net {"] + rs_new + [""] + rs_initw + [""] + rs_run + ["}"]
+  fns = []
+  for f in functions.values(): fns += [f, ""]
+  rsprog = fns + rs_weights + [""] + rs_struct + [""] + rs_impl + [""]
+  return '\n'.join(rsprog)
 
 def export_model_webgl(functions, statements, bufs, bufs_to_save, weight_names, input_names, output_names) -> str:
   header = f"""
@@ -309,8 +355,8 @@ const setupNet = async (device, safetensor) => {{
 }}
   """ + f"\n\nconst loadNet = async (device) => {{ return await fetch('net.safetensors').then(x => x.arrayBuffer()).then(x => setupNet(device, new Uint8Array(x))); }}"
 
-def export_model(model, target:str, *inputs):
-  assert Device.DEFAULT in EXPORT_SUPPORTED_DEVICE, "only WEBGPU, WEBGL, CLANG, CUDA, GPU, METAL are supported"
+def export_model(model, target:str, *inputs, encoded_weights=True):
+  assert Device.DEFAULT in EXPORT_SUPPORTED_DEVICE, "only WEBGPU, WEBGL, CLANG, RUST, CUDA, GPU, METAL are supported"
   run,special_names = jit_model(model, *inputs)
   functions, statements, bufs, bufs_to_save = compile_net(run, special_names)
   state = get_state_dict(model)
@@ -319,7 +365,9 @@ def export_model(model, target:str, *inputs):
   output_names = [name for _,name in special_names.items() if "output" in name]
   prg = ""
   if target == "clang":
-    prg = export_model_clang(functions, statements, bufs, bufs_to_save, input_names, output_names)
+    prg = export_model_clang(functions, statements, bufs, bufs_to_save, input_names, output_names, encoded_weights=encoded_weights)
+  elif target == "rust":
+    prg = export_model_rust(functions, statements, bufs, bufs_to_save, input_names, output_names, encoded_weights=encoded_weights)
   elif target == "webgpu":
     prg = export_model_webgpu(functions, statements, bufs, bufs_to_save, weight_names, input_names, output_names)
   elif target == "webgl":
