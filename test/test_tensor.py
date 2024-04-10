@@ -6,6 +6,7 @@ from tinygrad import Tensor, Device, dtypes
 from tinygrad.helpers import temp, CI
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
+from test.helpers import is_dtype_supported
 
 settings.register_profile("my_profile", max_examples=200, deadline=None)
 settings.load_profile("my_profile")
@@ -345,6 +346,7 @@ class TestMoveTensor(unittest.TestCase):
   d0, d1 = f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"
   @given(strat.sampled_from([d0, d1]), strat.sampled_from([d0, d1]),
          strat.sampled_from([dtypes.float16, dtypes.float32]), strat.sampled_from([True, False, None]))
+  @unittest.skipUnless(is_dtype_supported(dtypes.float16), "float16/half not supported")
   def test_to_preserves(self, src, dest, dtype, requires_grad):
     s = Tensor([1, 2, 3], device=src, dtype=dtype, requires_grad=requires_grad)
     if requires_grad: s.sum().backward()
