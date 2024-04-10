@@ -133,7 +133,7 @@ class _MallocAllocator(LRUAllocator):
   def copy_from_fd(self, dest, fd, offset, size):
     with io.FileIO(fd, "a+b", closefd=False) as fo:
       fo.seek(offset)
-      fo.readinto(to_mv(dest))
+      fo.readinto(to_mv(dest, size))
 MallocAllocator = _MallocAllocator()
 
 # **************** for Compiled Devices ****************
