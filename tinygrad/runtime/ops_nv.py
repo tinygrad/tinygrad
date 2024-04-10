@@ -342,7 +342,6 @@ class NVProgram:
 class NVAllocator(LRUAllocator):
   def __init__(self, device:NVDevice):
     self.device = device
-    # self.trasnf_buf = self.device._gpu_host_alloc((64 << 20))
     super().__init__()
 
   def _alloc(self, size:int, options:BufferOptions):
@@ -378,34 +377,6 @@ class NVDevice(Compiled):
     ret = fcntl.ioctl(fd_dev0, _IOWR(ord('F'), nvesc.NV_ESC_REGISTER_FD, ctypes.sizeof(made)), made)
     if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
     return fd_dev0
-  
-  def _gpu_alloc(self, size:int, coherent=False, huge_page=False, contig=False, system=False):
-    attr, attr2, flags, alignment = 0, nvesc.NVOS32_ATTR2_ZBC_PREFER_NO_ZBC, 0, 4<<10
-
-    flags |= nvesc.NVOS32_ALLOC_FLAGS_IGNORE_BANK_PLACEMENT | nvesc.NVOS32_ALLOC_FLAGS_MEMORY_HANDLE_PROVIDED | nvesc.NVOS32_ALLOC_FLAGS_MAP_NOT_REQUIRED
-
-    if coherent:
-      attr |= nvesc.NVOS32_ATTR_LOCATION_PCI << 25
-      attr2 |= nvesc.NVOS32_ATTR2_GPU_CACHEABLE_NO << 2
-    else:
-      attr2 |= nvesc.NVOS32_ATTR2_GPU_CACHEABLE_YES << 2
-      flags |= nvesc.NVOS32_ALLOC_FLAGS_PERSISTENT_VIDMEM
-
-    if contig: attr |= nvesc.NVOS32_ATTR_PHYSICALITY_CONTIGUOUS << 27
-    else: attr |= nvesc.NVOS32_ATTR_PHYSICALITY_ALLOW_NONCONTIGUOUS << 27
-
-    if huge_page:
-      attr |= nvesc.NVOS32_ATTR_PAGE_SIZE_HUGE << 23
-      attr2 |= nvesc.NVOS32_ATTR2_PAGE_SIZE_HUGE_2MB << 20
-      flags |= nvesc.NVOS32_ALLOC_FLAGS_ALIGNMENT_FORCE
-      alignment = 2 << 20
-    else:
-      attr |= nvesc.NVOS32_ATTR_PAGE_SIZE_4KB << 23
-
-    size = round_up(size, alignment)
-    alloc_params = nvesc.NV_MEMORY_ALLOCATION_PARAMS(owner=self.root, flags=flags, attr=attr, attr2=attr2, format=6, size=size, alignment=alignment, offset=0, limit=size-1)
-    mem_handle = rm_alloc(self.fd_ctl, nvcls.NV1_MEMORY_SYSTEM if system else nvcls.NV1_MEMORY_USER, self.root, self.device, alloc_params).hObjectNew
-    return mem_handle
 
   def _gpu_map_to_cpu(self, memory_handle, size, target=None, flags=0):
     fd_dev0 = self._new_gpu_fd()
@@ -417,7 +388,7 @@ class NVDevice(Compiled):
     return libc.mmap(target, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if target is not None else 0), fd_dev0, 0)
 
   def _gpu_alloc2(self, size:int, contig=False, huge_page=False, va_addr=None, map_to_cpu=False, map_flags=0):
-    # TODO: need hugepage option?
+    # TODO: need hugepage option, any speedup?
     size = round_up(size, alignment:=((4 << 10) if huge_page else (2 << 20)))
     attr = (((nvesc.NVOS32_ATTR_PAGE_SIZE_HUGE << 23) if huge_page else 0) |
             ((nvesc.NVOS32_ATTR_PHYSICALITY_CONTIGUOUS if contig else nvesc.NVOS32_ATTR_PHYSICALITY_ALLOW_NONCONTIGUOUS) << 27))
@@ -432,17 +403,9 @@ class NVDevice(Compiled):
 
     if va_addr is None: va_addr = self._alloc_gpu_vaddr(size, cpu_mapping=map_to_cpu)
     if map_to_cpu: va_base = self._gpu_map_to_cpu(mem_handle, size, target=va_addr, flags=map_flags)
-    else: va_base = va_addr #libc.mmap(va_addr, size, 0, 34 | MAP_FIXED, -1, 0) # gpu address TODO: remove it?
+    else: va_base = va_addr
 
     return self._gpu_uvm_map2(va_base, size, mem_handle)
-
-  def _gpu_uvm_map(self, mem_handle, size:int, cpu_visible=False, fixed_address=None, map_flags=0):
-    assert size % (2<<20) == 0
-    if cpu_visible: va_base = self._gpu_map_to_cpu(mem_handle, size, target=fixed_address, flags=map_flags)
-    else:
-      va_base = libc.mmap(self.next_gpu_vaddr, size, 0, 34 | MAP_FIXED, -1, 0) # gpu address
-      self.next_gpu_vaddr += size
-    return self._gpu_uvm_map2(va_base, size, mem_handle).base
 
   def _gpu_host_alloc(self, size):
     size = round_up(size, 4 << 10)
@@ -597,7 +560,12 @@ class NVDevice(Compiled):
     self.pending_copyin.clear()
 
   def _gpu_fifo_setup(self, gpfifo, ctxshare, channel_group, offset, entries=0x400):
-    notifier = self._gpu_alloc(50331648, coherent=True, system=True)
+    alloc_params = nvesc.NV_MEMORY_ALLOCATION_PARAMS(owner=self.root,
+      flags=nvesc.NVOS32_ALLOC_FLAGS_IGNORE_BANK_PLACEMENT | nvesc.NVOS32_ALLOC_FLAGS_MEMORY_HANDLE_PROVIDED | nvesc.NVOS32_ALLOC_FLAGS_MAP_NOT_REQUIRED,
+      attr=(nvesc.NVOS32_ATTR_PHYSICALITY_ALLOW_NONCONTIGUOUS << 27) | (nvesc.NVOS32_ATTR_LOCATION_PCI << 25),
+      attr2=(nvesc.NVOS32_ATTR2_ZBC_PREFER_NO_ZBC << 0) | (nvesc.NVOS32_ATTR2_GPU_CACHEABLE_NO << 2),
+      format=6, size=(sz:=48<<20), alignment=(4<<10), offset=0, limit=sz-1)
+    notifier = rm_alloc(self.fd_ctl, nvcls.NV1_MEMORY_SYSTEM, self.root, self.device, alloc_params).hObjectNew
 
     gpfifo_params = nvesc.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS(hObjectError=notifier, hObjectBuffer=gpfifo.hMemory, gpFifoOffset=gpfifo.base+offset,
       gpFifoEntries=entries, hContextShare=ctxshare, hUserdMemory=(ctypes.c_uint32*8)(gpfifo.hMemory), userdOffset=(ctypes.c_uint64*8)(entries*8+offset))
@@ -616,15 +584,9 @@ class NVDevice(Compiled):
     return ws_token_params.workSubmitToken
 
   def _cmdq_setup_compute_gpfifo(self):
-    shared_mem_handle = self._gpu_alloc(0x8000000, huge_page=True, contig=True)
-    start = self._gpu_uvm_map(shared_mem_handle, 0x8000000)
-    local_mem_window_handle = self._gpu_alloc(0x12c00000, huge_page=True, contig=True)
-    self.NVC6C0_SHADER_LOCAL_MEMORY_WINDOW = self._gpu_uvm_map(local_mem_window_handle, 0x12c00000)
-    local_mem_handle = self._gpu_alloc(0x12c00000, huge_page=True, contig=True)
-    self.NVC6C0_SHADER_LOCAL_MEMORY = self._gpu_uvm_map(local_mem_handle, 0x12c00000)
-    # print(hex(self.NVC6C0_SHADER_LOCAL_MEMORY_WINDOW))
-    # start = 0x7f7d55000000
-    # self.NVC6C0_SHADER_LOCAL_MEMORY_WINDOW = start
+    start = self._gpu_alloc2(0x8000000, huge_page=True, contig=True).base
+    self.NVC6C0_SHADER_LOCAL_MEMORY_WINDOW = self._gpu_alloc2(0x12c00000, huge_page=True, contig=True).base
+    self.NVC6C0_SHADER_LOCAL_MEMORY = self._gpu_alloc2(0x12c00000, huge_page=True, contig=True).base
     self.NVC6C0_SHADER_SHARED_MEMORY_WINDOW = start + 0x2000000
     self.unknown_buffer_1 = 0xffffffffffffffff
     self.unknown_buffer_2 = 0xffffffffffffffff
@@ -632,10 +594,8 @@ class NVDevice(Compiled):
     cmdq_start_wptr = self.cmdq_wptr
     cmdq_push_method(self, 1, nvqcmd.NVC6C0_SET_OBJECT, 1)
     cmdq_push_data(self, nvcls.ADA_COMPUTE_A)
-    cmdq_push_method(self, 1, nvqcmd.NVC6C0_SET_SHADER_LOCAL_MEMORY_A, 1)
-    cmdq_push_data(self, (self.NVC6C0_SHADER_LOCAL_MEMORY >> 32))
-    cmdq_push_method(self, 1, nvqcmd.NVC6C0_SET_SHADER_LOCAL_MEMORY_B, 1)
-    cmdq_push_data(self, (self.NVC6C0_SHADER_LOCAL_MEMORY & 0xffffffff))
+    cmdq_push_method(self, 1, nvqcmd.NVC6C0_SET_SHADER_LOCAL_MEMORY_A, 2)
+    cmdq_push_data64(self, self.NVC6C0_SHADER_LOCAL_MEMORY)
     cmdq_push_method(self, 1, nvqcmd.NVC6C0_SET_SHADER_SHARED_MEMORY_WINDOW_A, 1)
     cmdq_push_data(self, (self.NVC6C0_SHADER_SHARED_MEMORY_WINDOW >> 32))
     cmdq_push_method(self, 1, nvqcmd.NVC6C0_SET_SHADER_SHARED_MEMORY_WINDOW_B, 1)
@@ -725,8 +685,7 @@ class NVDevice(Compiled):
       self.compute_put_value += 1
       self.compute_gpu_ring_controls.GPPut = self.compute_put_value % self.compute_gpfifo_entries
       self._cmdq_ring_doorbell(self.compute_gpfifo_token)
-    # print("DMA", hex(src), hex(dst))
+
     self.synchronize() # TODO: remove
-    # print("EXIT")
 
   def _cmdq_ring_doorbell(self, token): self.gpu_mmio[0x90 // 4] = token # TODO: this is bad...
