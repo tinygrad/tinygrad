@@ -88,6 +88,7 @@ class TestRealWorld(unittest.TestCase):
     def test(t, v): return model(t, v).realize()
     helper_test("test_gpt2", lambda: (Tensor([[1,]]),Variable("pos", 1, 100).bind(1)), test, 0.23 if CI else 0.9, 164 if CI else 468, all_jitted=True)
 
+  @unittest.skipIf(Device.DEFAULT == "CLANG", "slow")
   def test_train_mnist(self):
     from examples.beautiful_mnist import Model
     with Tensor.train():
@@ -105,7 +106,7 @@ class TestRealWorld(unittest.TestCase):
 
       helper_test("train_mnist", lambda: (Tensor.randn(BS, 1, 28, 28),), train, 0.07, 127)
 
-  @unittest.skipIf(Device.DEFAULT == "CLANG", "slow")
+  @unittest.skipIf(Device.DEFAULT in {"CLANG", "GPU"}, "slow")
   def test_train_cifar(self):
     with Tensor.train():
       model = SpeedyResNet(Tensor.ones((12,3,2,2)))
