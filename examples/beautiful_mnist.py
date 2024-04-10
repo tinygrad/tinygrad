@@ -2,7 +2,7 @@
 from typing import List, Callable
 from tinygrad import Tensor, TinyJit, nn, GlobalCounters
 from tinygrad.helpers import getenv, colored
-from extra.datasets import fetch_mnist
+from tinygrad.features.datasets import mnist
 from tqdm import trange
 
 class Model:
@@ -19,7 +19,7 @@ class Model:
   def __call__(self, x:Tensor) -> Tensor: return x.sequential(self.layers)
 
 if __name__ == "__main__":
-  X_train, Y_train, X_test, Y_test = fetch_mnist(tensors=True)
+  X_train, Y_train, X_test, Y_test = mnist()
 
   model = Model()
   opt = nn.optim.Adam(nn.state.get_parameters(model))
