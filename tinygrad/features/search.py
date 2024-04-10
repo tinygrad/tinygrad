@@ -64,7 +64,7 @@ def _try_compile_linearized_w_idx(x:Tuple[int,Linearizer], compiler:Compiler):
 # workers should ignore ctrl c
 def _init_worker(): signal.signal(signal.SIGINT, signal.SIG_IGN)
 
-def _ensure_buffer_alloc(bufs:List[Buffer]) -> List[Buffer]: return [buf if hasattr(buf, "_buf") else buf.allocate() for buf in bufs]
+def _ensure_buffer_alloc(bufs:List[Buffer]) -> List[Buffer]: return [buf.ensure_allocated() for buf in bufs]
 
 # *** external API ***
 

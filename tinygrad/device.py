@@ -240,7 +240,7 @@ class Compiled:
         k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
         if getenv("BEAM_COMPARE", 1):
           # TODO: move the HC/TC/BEAM compare to beam_search so it can be optionally cached which choice is better
-          lins = [(f"beam{BEAM.value}", k), (("tc" if used_tensor_cores else "hc"), k_opt)]
+          lins: List[Tuple[str, Linearizer]] = [(f"beam{BEAM.value}", k), (("tc" if used_tensor_cores else "hc"), k_opt)]
           if used_tensor_cores:
             lins.append(("hc", Linearizer(*ast, opts=self.compiler.compiler_opts)))
             lins[-1][1].hand_coded_optimizations()
