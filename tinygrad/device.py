@@ -1,7 +1,7 @@
 from __future__ import annotations
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any, List, Optional, Dict, Tuple, ClassVar, NamedTuple
-import importlib, inspect, functools, pathlib, time, ctypes, os
+import importlib, inspect, functools, pathlib, time, ctypes, os, io
 from tinygrad.helpers import ansilen, prod, getenv, colored, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put
 from tinygrad.helpers import DEBUG, CACHECOLLECTING, BEAM, NOOPT, GlobalCounters
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
@@ -130,6 +130,10 @@ class _MallocAllocator(LRUAllocator):
   def as_buffer(self, src) -> memoryview: return flat_mv(memoryview(src))
   def copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
   def copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
+  def copy_from_fd(self, dest, fd, offset, size):
+    with io.FileIO(fd, "a+b", closefd=False) as fo:
+      fo.seek(offset)
+      fo.readinto(dest)
 MallocAllocator = _MallocAllocator()
 
 # **************** for Compiled Devices ****************
