@@ -5,7 +5,7 @@ import sys
 cwd = Path.cwd()
 sys.path.append(cwd.as_posix())
 sys.path.append((cwd / 'test').as_posix())
-from extra.datasets import fetch_mnist
+from tinygrad.features.datasets import mnist
 from tqdm import trange
 
 def augment_img(X, rotate=10, px=3):
@@ -22,7 +22,7 @@ def augment_img(X, rotate=10, px=3):
 
 if __name__ == "__main__":
   import matplotlib.pyplot as plt
-  X_train, Y_train, X_test, Y_test = fetch_mnist()
+  X_train, Y_train, X_test, Y_test = mnist()
   X_train = X_train.reshape(-1, 28, 28).astype(np.uint8)
   X_test = X_test.reshape(-1, 28, 28).astype(np.uint8)
   X = np.vstack([X_train[:1]]*10+[X_train[1:2]]*10)

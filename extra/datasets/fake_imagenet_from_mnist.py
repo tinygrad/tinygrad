@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 import pathlib, json
 from tqdm import trange
-from extra.datasets import fetch_mnist
+from tinygrad.features.datasets import mnist
 from PIL import Image
 import numpy as np
 from multiprocessing import Pool
 
-X_train, Y_train, X_test, Y_test = fetch_mnist()
+X_train, Y_train, X_test, Y_test = mnist()
 
 def act(arg):
   (basedir, i, train) = arg

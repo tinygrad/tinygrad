@@ -7,7 +7,7 @@ from tinygrad.nn.state import get_parameters
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv
 from tinygrad.nn import optim
-from extra.datasets import fetch_mnist
+from tinygrad.features.datasets import mnist
 
 class LinearGen:
   def __init__(self):
@@ -72,7 +72,7 @@ def train_generator(optimizer, data_fake):
 
 if __name__ == "__main__":
   # data for training and validation
-  images_real = np.vstack(fetch_mnist()[::2])
+  images_real = np.vstack(mnist()[::2])
   ds_noise = Tensor.randn(64, 128, requires_grad=False)
   # parameters
   epochs, batch_size, k = 300, 512, 1

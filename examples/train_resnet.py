@@ -7,7 +7,7 @@ from tinygrad.nn import optim
 from tinygrad.helpers import getenv
 from extra.training import train, evaluate
 from extra.models.resnet import ResNet
-from extra.datasets import fetch_mnist
+from tinygrad.features.datasets import mnist
 
 
 class ComposeTransforms:
@@ -20,7 +20,7 @@ class ComposeTransforms:
     return x
 
 if __name__ == "__main__":
-  X_train, Y_train, X_test, Y_test = fetch_mnist()
+  X_train, Y_train, X_test, Y_test = mnist()
   X_train = X_train.reshape(-1, 28, 28).astype(np.uint8)
   X_test = X_test.reshape(-1, 28, 28).astype(np.uint8)
   classes = 10
