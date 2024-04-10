@@ -42,8 +42,6 @@ def gen_func_call(signature: str):
   call = f"{name}(" + ",".join([f"{i}" for i in map(lambda x: x.split(" ")[-1], params)]) + ");"
   return "\n".join(lines) + "\n" + call
 
-HEXAGON_SDK_PATH = getenv("HEXAGON_SDK_PATH", "/home/terafo/Qualcomm/Hexagon_SDK/3.5.4/tools/HEXAGON_Tools/8.3.07/Tools/bin")
-
 class HexagonCompiler(Compiler):
   compiler_opts = CompilerOptions("HEXAGON", supports_float4=False, has_local=False)
   def render(self, name:str, uops) -> str:
@@ -53,12 +51,12 @@ class HexagonCompiler(Compiler):
     with tempfile.NamedTemporaryFile(delete=False, suffix='.hexagon.elf') as outelf, tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.hexagon.c') as outc:
       outc.write(src+HEXAGON_FOOTER.format(CALL = gen_func_call(src.splitlines()[11])))
       outc.flush()
-      print("Put generated C code here:", outc.name)
+      #print("Put generated C code here:", outc.name)
       cc = f'hexagon-clang'
       cmd= f'{cc} {outc.name} -mhvx -mv65 -O2 -Wall -lm -o {outelf.name} '
-      print(cmd)
-      subprocess.check_output(args=cmd.split())
-      print("Finished compiling")
+      if DEBUG>=4: print(cmd)
+      subprocess.check_output(args=cmd.split(), stderr=subprocess.DEVNULL if DEBUG<3 else None)
+      #print("Finished compiling")
       return pathlib.Path(outelf.name).read_bytes()
 
 
@@ -77,17 +75,17 @@ class HexagonProgram:
       f = tempfile.NamedTemporaryFile(delete=False, suffix=f'.{str(i)}.data.buf')
       f.write(ctypes.string_at(ctypes.addressof(buf), ctypes.sizeof(buf)))
       files.append(f)
-      print("buffer size:", ctypes.sizeof(buf))
+      #print("buffer size:", ctypes.sizeof(buf))
       cmd += f' {f.name} '
     fbl = ctypes.sizeof(bufs[0])
     for f in files: f.flush(); f.close()
-    print("Vals:", vals)
+    #print("Vals:", vals)
     for val in vals: cmd += f' {val} '
-    print(cmd)
+    #print(cmd)
     r = pathlib.Path(files[0].name).read_bytes()
-    subprocess.check_output(args=cmd.split())
+    subprocess.check_output(args=cmd.split(), stderr=subprocess.DEVNULL if DEBUG<2 else None)
     r = pathlib.Path(files[0].name).read_bytes()
-    print("length of output: ", len(r))
+    #print("length of output: ", len(r))
     assert len(r) == fbl, f"expected {fbl} bytes, got {len(r)}"
     ctypes.memmove(ctypes.addressof(bufs[0]), r, len(r))
 
