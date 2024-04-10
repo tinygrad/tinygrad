@@ -186,6 +186,8 @@ def LayerNormalization(x: Tensor, scale, bias, axis=-1, epsilon=1e-05, stash_typ
   mean = x.mean(axis=axis, keepdim=True)
   return x.layernorm(axis, epsilon).mul(scale).add(bias), mean, (x.sub(mean)).pow(2).mean(axis=axis, keepdim=True).add(epsilon).rsqrt()
 
+# TODO: current implmentation fails tests and tried copying onnx's implementation but got poor accuracy
+# https://github.com/onnx/onnx/blob/main/onnx/backend/test/case/node/groupnormalization.py#L13
 def GroupNormalization(x: Tensor, scale: Tensor, bias: Tensor, num_groups, epsilon=1e-05):
   return x.reshape(x.shape[0], num_groups, -1).layernorm(axis=-1, eps=epsilon).mul(scale.unsqueeze(-1)).add(bias.unsqueeze(-1)).reshape(x.shape)
 
@@ -262,6 +264,7 @@ def AveragePool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_i
 
 def MaxPool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1, pads=None, storage_order=0, strides=1):
   pixel_axes = tuple(range(2, X.ndim))
+  # if auto_pad == "NOTSET": ret = _padded(X, pads, auto_pad, constant_value=-math.inf, axes=pixel_axes, strides=strides, kernel_shape=kernel_shape, dilations=dilations, ceil_mode=0)
   ret = _padded(X, pads, auto_pad, constant_value=-math.inf, axes=pixel_axes, strides=strides, kernel_shape=kernel_shape, dilations=dilations, ceil_mode=ceil_mode)
   ret = ret.max_pool2d(kernel_shape, stride=strides, dilation=dilations).cast(X.dtype)
   ret_len, X_len = ret.numel(), X.numel()
@@ -541,10 +544,16 @@ def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)
 def IsInf(x: Tensor, detect_negative=1, detect_positive=1):
   return (x == float("inf")) * bool(detect_positive) + (x == float("-inf")) * bool(detect_negative)
 
-def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point: Union[Tensor, int] = 0, axis=1):
+def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point: Union[Tensor, int] = 0, axis=1, block_size=0):
+  def numpy_repeat(t: Tensor, axis, repeats, out_shape):
+    t = t.reshape(tuple(-1 if i == axis-1 else 1 if i == axis else sh for i,sh in enumerate(t.shape)))
+    return t.repeat([repeats if i == axis else 1 for i in range(t.ndim)]).reshape(out_shape)
   if axis < 0: axis += x.ndim
-  x_sc = x_scale.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim))
-  x_zer = x_zero_point.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim)) if isinstance(x_zero_point, Tensor) else x_zero_point
+  if block_size:
+    x_zer, x_sc = numpy_repeat(x_zero_point, axis, block_size, x.shape), numpy_repeat(x_scale, axis, block_size, x.shape)
+  else:
+    x_sc = x_scale.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim))
+    x_zer = x_zero_point.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim)) if isinstance(x_zero_point, Tensor) else x_zero_point
   return ((x.float() - x_zer) * x_sc).cast(x_scale.dtype)
 
 def IsNaN(x: Tensor): return x != x
