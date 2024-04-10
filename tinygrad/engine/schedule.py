@@ -235,7 +235,9 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
   # confirm everything was scheduled correctly
   if not all(degree == 0 for degree in in_degree.values()) or len(prescheduled) != len(schedule):
     raise RuntimeError(f"cycle detected in graph, prescheduled {len(prescheduled)} but only scheduled {len(schedule)}")
-  return schedule, var_vals
+
+  # LoadOps.EMPTY should never appear in real schedules
+  return [x for x in schedule if x.ast[0].op != LoadOps.EMPTY], var_vals
 
 def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> List[ScheduleItem]:
   schedule, var_vals = create_schedule_with_vars(outs, seen)

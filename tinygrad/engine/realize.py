@@ -1,7 +1,7 @@
 from typing import List, Dict, Optional
-from tinygrad.helpers import getenv, colored
+from tinygrad.helpers import getenv
 from tinygrad.ops import ScheduleItem, BufferOps, LoadOps
-from tinygrad.device import JITRunner, Device, BufferCopy, BufferXfer, update_stats
+from tinygrad.device import JITRunner, Device, BufferCopy, BufferXfer
 from tinygrad.buffer import Buffer
 from tinygrad.shape.symbolic import Variable
 
@@ -11,7 +11,7 @@ class CustomOp(JITRunner):
     super().__init__()
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False): self.fxn(*rawbufs)
 
-def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
+def lower_schedule_item(si:ScheduleItem) -> JITRunner:
   assert len(set(x.device for x in si.outputs+si.inputs)) == 1 or si.ast[0].op is LoadOps.COPY
   if si.ast[0].op is BufferOps.STORE: return Device[si.outputs[0].device].get_runner(*si.ast)
   assert len(si.ast) == 1 and len(si.outputs) == 1, "only ASTRunner supports multioutput"
@@ -20,7 +20,7 @@ def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
     if hasattr(Device[out.device].allocator, 'transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]: return BufferXfer()
     return BufferCopy()
   if ast.op is LoadOps.CUSTOM: return CustomOp(ast.arg)
-  return None
+  raise Exception(f"can't lower {ast.op}")
 
 logops = open(getenv("LOGOPS", ""), "a") if getenv("LOGOPS", "") else None
 def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[Variable, int]] = None):
@@ -36,6 +36,4 @@ def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[Variable, i
       if out.size > 0 and not (out.device.startswith("DISK") and si.ast[0].op is BufferOps.STORE) and not hasattr(out, "_buf"): out.allocate()
 
     # run the function (put it in JIT)
-    real_buffers = [x for x in si.outputs+si.inputs if x.size != 0]
-    if prg: prg.exec(real_buffers, var_vals if var_vals is not None else {})
-    elif (out:=si.outputs[0]).size > 0: update_stats(colored(f"empty {out.size:10d} {out.dtype}", "yellow"), 0, 0, {}, None, 1, device=out.device)
+    prg.exec(list(si.outputs+si.inputs), var_vals if var_vals is not None else {})
