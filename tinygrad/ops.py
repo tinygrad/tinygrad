@@ -41,7 +41,6 @@ class ScheduleItem:
   ast: Tuple[LazyOp, ...]
   outputs: Tuple[Buffer, ...]
   inputs: Tuple[Buffer, ...]
-  var_vals: Dict[Variable, int]
 
 @dataclass(frozen=True, eq=False)
 class LazyOp:
