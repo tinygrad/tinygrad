@@ -19,7 +19,7 @@ class CLCompiler(Compiler):
   def __init__(self, device:CLDevice, compile_key:str):
     self.device = device
     super().__init__(f"compile_cl_{compile_key}")
-  def render(self, name:str, uops) -> str: return OpenCLRenderer(name, uops)
+  def render(self, name:str, uops, bufsz=[]) -> str: return OpenCLRenderer(name, uops)
   def compile(self, src:str) -> bytes:
     program = checked(cl.clCreateProgramWithSource(self.device.context, 1, to_char_p_p([prg_bytes := src.encode()]),
                                                   ctypes.byref(ctypes.c_size_t(len(prg_bytes))), ctypes.byref(status := ctypes.c_int32())), status)

@@ -11,7 +11,7 @@ class LLVMCompiler(Compiler):
   def __init__(self, device:LLVMDevice):
     self.device = device
     super().__init__("compile_llvm")
-  def render(self, name:str, uops) -> str: return uops_to_llvm_ir(name, uops)
+  def render(self, name:str, uops, bufsz=[]) -> str: return uops_to_llvm_ir(name, uops)
   def compile(self, src:str) -> bytes:
     mod = llvm.parse_assembly(src)
     mod.verify()

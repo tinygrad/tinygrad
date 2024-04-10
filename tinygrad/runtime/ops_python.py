@@ -181,7 +181,7 @@ class PythonCompiler(Compiler):
   compiler_opts = CompilerOptions("METAL", has_tensor_cores=True) if getenv("EMULATE_METAL") else \
     (CompilerOptions("HSA", has_tensor_cores=True) if getenv("EMULATE_HSA") else \
     (CompilerOptions("CUDA", has_tensor_cores=True) if getenv("EMULATE_CUDA") else CompilerOptions("PYTHON")))
-  def render(self, name:str, uops:UOpGraph) -> str:
+  def render(self, name:str, uops:UOpGraph, bufsz:List=[]) -> str:
     lops = [(u.uop, u.dtype, [uops.uops.index(v) for v in u.vin], u.arg) for u in uops]
     return base64.b64encode(pickle.dumps(lops)).decode()
   def compile(self, src:str) -> bytes: return base64.b64decode(src)

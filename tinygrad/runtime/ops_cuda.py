@@ -59,7 +59,7 @@ class PTXCompiler(Compiler):
     self.version = "7.8" if arch >= "sm_89" else "7.5"
     PTXCompiler.compiler_opts = PTXCompiler.compiler_opts._replace(has_tensor_cores=int(arch[3:]) >= 80)
     super().__init__(f"compile_ptx_{self.arch}")
-  def render(self, name:str, uops) -> str: return PTXRenderer(name, uops).replace("TARGET", self.arch).replace("VERSION", self.version)
+  def render(self, name:str, uops, bufsz=[]) -> str: return PTXRenderer(name, uops).replace("TARGET", self.arch).replace("VERSION", self.version)
   def compile(self, src:str) -> bytes: return src.encode()
 
 class CUDACompiler(Compiler):
@@ -71,7 +71,7 @@ class CUDACompiler(Compiler):
     self.compile_options = [f'--gpu-architecture={arch}', "-I/usr/local/cuda/include", "-I/usr/include", "-I/opt/cuda/include/"]
     if (nvrtcMajor.value, nvrtcMinor.value) >= (12, 4): self.compile_options.append("--minimal")
     super().__init__(f"compile_cuda_{self.arch}")
-  def render(self, name:str, uops) -> str: return CUDARenderer(name, uops)
+  def render(self, name:str, uops, bufsz=[]) -> str: return CUDARenderer(name, uops)
   def compile(self, src:str) -> bytes:
     check(cuda.nvrtcCreateProgram(ctypes.byref(prog := cuda.nvrtcProgram()), src.encode(), "<null>".encode(), 0, None, None))
     status = cuda.nvrtcCompileProgram(prog, len(self.compile_options), to_char_p_p([o.encode() for o in self.compile_options]))

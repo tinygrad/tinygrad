@@ -16,7 +16,7 @@ class MetalCompiler(Compiler):
   def __init__(self, device:Optional[MetalDevice]):
     self.device = device
     super().__init__("compile_metal")
-  def render(self, name:str, uops) -> str: return MetalRenderer(name, uops)
+  def render(self, name:str, uops, bufsz=[]) -> str: return MetalRenderer(name, uops)
   def compile(self, src:str) -> bytes:
     if self.device is None:
       # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode

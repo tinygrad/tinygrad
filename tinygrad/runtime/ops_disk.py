@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, mmap, _posixshmem, io, functools
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 from tinygrad.helpers import prod, OSX
 from tinygrad.device import Compiled, Allocator, JITRunner, Buffer
 from tinygrad.ops import UnaryOps, LazyOp, BufferOps
@@ -85,6 +85,6 @@ class DiskDevice(Compiled):
       os.close(self.fd)
       self.size = None
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
-  def get_runner(self, *ast:LazyOp):
+  def get_runner(self, *ast:LazyOp, iobufs:Tuple=()):
     assert len(ast) == 1, "DiskRunner doesn't support multioutput kernels."
     return DiskRunner(ast[0])
