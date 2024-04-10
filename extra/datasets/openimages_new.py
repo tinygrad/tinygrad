@@ -203,7 +203,7 @@ def iterate(coco, bs=8):
     i= i+bs+rem
 
 def iterate_val(coco, bs=8):
-  for i in range(0, len(coco.ids), bs):
+  for i in range(0, len(coco.ids)-bs, bs):
   # for i in range(0, 10, bs):
     X, targets = [], []
     for img_id in coco.ids[i:i+bs]:

@@ -312,6 +312,7 @@ def train_retinanet():
         ANCHORS = anchor_generator(X, b)
         ANCHORS = [a.realize() for a in ANCHORS]
         ANCHORS = Tensor.stack(ANCHORS)
+        mdlrun.reset()
         # mdl_reg_loss_jit = TinyJit(lambda r, y, m: model.head.regression_head.loss(r,y,ANCHORS, m).realize())
         # mdl_class_loss_jit = TinyJit(lambda c, y,m: model.head.classification_head.loss(c,y,m).realize())
         mdl_reg_loss = lambda r, y, m: model.head.regression_head.loss(r,y,ANCHORS, m)
@@ -344,6 +345,10 @@ def train_retinanet():
       # print(o_s)
       sub_t = time.time()
       b,r,c = mdlrun(X)
+      if cnt==0 and epoch==0:
+        ANCHORS_VAL = anchor_generator(X, b)
+        ANCHORS_VAL = [a.realize() for a in ANCHORS_VAL]
+        ANCHORS_VAL = Tensor.stack(ANCHORS_VAL).realize()
       num_anchors_per_level = [xx.shape[2] * xx.shape[3] for xx in b]
       HW = 0
       for v in num_anchors_per_level:
@@ -353,7 +358,7 @@ def train_retinanet():
       num_anchors_per_level = [hw * A for hw in num_anchors_per_level]
       c_split = list(c.sigmoid().split(num_anchors_per_level, dim=1))
       r_split = list(r.split(num_anchors_per_level, dim=1))
-      split_anchors = [list(a.split(num_anchors_per_level)) for a in ANCHORS]
+      split_anchors = [list(a.split(num_anchors_per_level)) for a in ANCHORS_VAL]
       c_split = [c.realize() for c in c_split]
       c_split = [r.realize() for r in r_split]
       for aa in split_anchors:
