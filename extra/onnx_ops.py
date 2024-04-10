@@ -186,6 +186,8 @@ def LayerNormalization(x: Tensor, scale, bias, axis=-1, epsilon=1e-05, stash_typ
   mean = x.mean(axis=axis, keepdim=True)
   return x.layernorm(axis, epsilon).mul(scale).add(bias), mean, (x.sub(mean)).pow(2).mean(axis=axis, keepdim=True).add(epsilon).rsqrt()
 
+# TODO: current implmentation fails tests and tried copying onnx's implementation but got poor accuracy
+# https://github.com/onnx/onnx/blob/main/onnx/backend/test/case/node/groupnormalization.py#L13
 def GroupNormalization(x: Tensor, scale: Tensor, bias: Tensor, num_groups, epsilon=1e-05):
   return x.reshape(x.shape[0], num_groups, -1).layernorm(axis=-1, eps=epsilon).mul(scale.unsqueeze(-1)).add(bias.unsqueeze(-1)).reshape(x.shape)
 
@@ -203,12 +205,17 @@ def _format_padding(onnx_pads, ndims=None, axes=None):
 
 def _padded(X: Tensor, pads=None, auto_pad="NOTSET", axes=None, constant_value=0., strides=None, kernel_shape=None, dilations=None, ceil_mode=0):
   if auto_pad != "NOTSET": pads = _auto_pad(X, auto_pad, strides, kernel_shape, dilations)
-  elif ceil_mode and auto_pad=="NOTSET": # stupid ceil_mode case
+  elif ceil_mode:
     if strides is not None: strides = [strides]*len(kernel_shape) if isinstance(strides, int) else strides if strides else [1]*len(kernel_shape)
     if dilations is not None: dilations = [1]*len(kernel_shape) if dilations == 1 else dilations
     out_spatial_shape = [math.ceil((sh - dil * (ker-1)-1)/st + 1) if ceil_mode else math.floor((sh - dil * (ker-1)-1)/st + 1) for sh, st, ker, dil in zip(X.shape[-len(kernel_shape):], strides, kernel_shape, dilations)]
     pad_shape = [(osh-1)*st+((ks-1)*dil+1)-ish for osh, st, ks, dil, ish in zip(out_spatial_shape, strides, kernel_shape, dilations, X.shape[-len(kernel_shape):])]
-    pad_shape = flatten([[sh//2, sh-sh//2] for sh in pad_shape])
+    pad_shape = [[sh//2, sh-sh//2] for sh in pad_shape]
+    # ceil_mode case follows NOTE in https://pytorch.org/docs/stable/generated/torch.nn.MaxPool2d.html#torch.nn.MaxPool2d
+    # so if any kernels start in right padded region, we decrease right pads to omit that kernel. Only omitting 1 kernel now.
+    pad_shape = [[start,end-rpad] if (rpad := ks + st%(st-(((start+xs)%st)))) <= end else [start,end]
+                 for (start,end), ks, st, xs in zip(pad_shape, kernel_shape, strides, X.shape[-len(kernel_shape):])]
+    pad_shape = flatten(pad_shape)
     pads = pad_shape[::2] + pad_shape[1::2]
   if pads is None: return X
   pads = _format_padding(pads, ndims=len(X.shape), axes=axes)
@@ -541,10 +548,16 @@ def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)
 def IsInf(x: Tensor, detect_negative=1, detect_positive=1):
   return (x == float("inf")) * bool(detect_positive) + (x == float("-inf")) * bool(detect_negative)
 
-def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point: Union[Tensor, int] = 0, axis=1):
+def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point: Union[Tensor, int] = 0, axis=1, block_size=0):
+  def numpy_repeat(t: Tensor, axis, repeats, out_shape):
+    t = t.reshape(tuple(-1 if i == axis-1 else 1 if i == axis else sh for i,sh in enumerate(t.shape)))
+    return t.repeat([repeats if i == axis else 1 for i in range(t.ndim)]).reshape(out_shape)
   if axis < 0: axis += x.ndim
-  x_sc = x_scale.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim))
-  x_zer = x_zero_point.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim)) if isinstance(x_zero_point, Tensor) else x_zero_point
+  if block_size:
+    x_zer, x_sc = numpy_repeat(x_zero_point, axis, block_size, x.shape), numpy_repeat(x_scale, axis, block_size, x.shape)
+  else:
+    x_sc = x_scale.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim))
+    x_zer = x_zero_point.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim)) if isinstance(x_zero_point, Tensor) else x_zero_point
   return ((x.float() - x_zer) * x_sc).cast(x_scale.dtype)
 
 def IsNaN(x: Tensor): return x != x
