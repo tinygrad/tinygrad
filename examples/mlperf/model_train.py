@@ -235,12 +235,15 @@ def train_retinanet():
   from contextlib import redirect_stdout
   import numpy as np
   EPOCHS = 10
-  BS = 2
-  BS_EVAL = 2
+  BS = 2*4
+  BS_EVAL = 2*8
   WARMUP_EPOCHS = 1
   WARMUP_FACTOR = 0.001
   LR = 0.0001
   MAP_TARGET = 0.34
+  GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
+  print(f"Training on {GPUS}")
+  for x in GPUS: Device[x]
   from extra.models.retinanetNew import RetinaNet, AnchorGenerator
   from examples.mlperf.lr_schedulers import Retina_LR
   anchor_sizes = tuple((x, int(x * 2 ** (1.0 / 3)), int(x * 2 ** (2.0 / 3))) for x in [32, 64, 128, 256, 512])
@@ -265,6 +268,7 @@ def train_retinanet():
 
   parameters = []
   for k, x in get_state_dict(model).items():
+    # x.realize().to_(GPUS)
     if 'head' in k and ('clas' in k or 'reg' in k ):
       print(k)
       x.requires_grad = True
@@ -295,8 +299,8 @@ def train_retinanet():
 
   for epoch in range(EPOCHS):
     print(colored(f'EPOCH {epoch}/{EPOCHS}:', 'cyan'))
-    train_step.reset()
-    mdlrun_false.reset()
+    # train_step.reset()
+    # mdlrun_false.reset()
     lr_sched = None
     if epoch < WARMUP_EPOCHS:
       start_iter = epoch*len(coco_train.ids)//BS
@@ -310,7 +314,7 @@ def train_retinanet():
       if(cnt==0 and epoch==0):
         # INIT LOSS FUNC
         b,_,_ = mdlrun(X)
-        ANCHORS = anchor_generator(X, b)
+        ANCHORS = anchor_generator(X.shape, b)
         ANCHORS = [a.realize() for a in ANCHORS]
         ANCHORS = Tensor.stack(ANCHORS)
         mdlrun.reset()
@@ -318,88 +322,91 @@ def train_retinanet():
         # mdl_class_loss_jit = TinyJit(lambda c, y,m: model.head.classification_head.loss(c,y,m).realize())
         mdl_reg_loss = lambda r, y, m: model.head.regression_head.loss(r,y,ANCHORS, m)
         mdl_class_loss = lambda c, y,m: model.head.classification_head.loss(c,y,m)
-
+      # X = X.shard(GPUS, axis=0).realize()
+      # Y_boxes_p = Y_boxes_p.shard(GPUS, axis=0).realize()
+      # Y_labels_p = Y_labels_p.shard(GPUS, axis=0).realize()
       st = time.time()
       cnt+=1
       # matcher_gen not jittable for now
       matched_idxs = model.matcher_gen(ANCHORS, Y_boxes).realize()
+      # matched_idxs.to_(GPUS)
       loss = train_step(X, Y_boxes_p, Y_labels_p, matched_idxs)
       if lr_sched is not None:
         lr_sched.step()
 
       print(colored(f'{cnt} STEP {loss.numpy()} || {time.time()-st} || LR: {optimizer.lr.item()}', 'magenta'))
-      if cnt>5: 
-        train_step.reset()
-        break
-    # ****EVAL STEP
-    print(colored(f'{epoch} START EVAL', 'cyan'))
-    coco_eval = COCOeval(coco_val.coco, iouType="bbox")
-    Tensor.training = False
-    train_step.reset()
-    st = time.time()
-    coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
-    cnt = 0
-    for X, targets in iterate_val(coco_val, BS_EVAL):
-      orig_shapes= []
-      for tt in targets:
-        orig_shapes.append(list(tt['image_size']))
-      # print(orig_shapes)
-      sub_t = time.time()
-      b,r,c = mdlrun(X)
-      m_t = time.time()-sub_t
-      print('MODEL_RUN_JIT', m_t)
-      if cnt==0 and epoch==0:
-        ANCHORS_VAL = anchor_generator(X, b)
-        ANCHORS_VAL = [a.realize() for a in ANCHORS_VAL]
-        ANCHORS_VAL = Tensor.stack(ANCHORS_VAL)
-        num_anchors_per_level = [xx.shape[2] * xx.shape[3] for xx in b]
-        HW = 0
-        for v in num_anchors_per_level:
-          HW += v
-        HWA = c.shape[1]
-        A = HWA // HW
-        num_anchors_per_level = [hw * A for hw in num_anchors_per_level]
-        split_anchors = [list(a.split(num_anchors_per_level)) for a in ANCHORS_VAL]
-        sa = []
-        for aa in split_anchors:
-          s_temp = []
-          for a in aa:
-            s_temp.append(a.numpy())
-          sa.append(s_temp)
-        split_anchors = sa
-      c_split = list(c.sigmoid().split(num_anchors_per_level, dim=1))
-      r_split = list(r.split(num_anchors_per_level, dim=1))
-      c_split = [cc.numpy() for cc in c_split]
-      r_split = [rr.numpy() for rr in r_split]
-      ps_t = time.time() - m_t-sub_t
-      print('POST_SPLITS', ps_t)
-      # print(split_anchors)
-      # print('PRE_POST_PROCESS')
-      predictions = model.postprocess_detections_val(c_split, r_split, split_anchors, orig_shapes)
-      # out = mdlrun_false(X).numpy()
-      # out = r.cat(c.sigmoid(), dim=-1).numpy()
-      # predictions = model.postprocess_detections(out, orig_image_sizes=[t["image_size"] for t in targets])
-      # print(predictions)
-      img_ids = [t["image_id"] for t in targets]
-      coco_results  = [{"image_id": targets[i]["image_id"], "category_id": label, "bbox": box.tolist(), "score": score} for i, prediction in enumerate(predictions) for box, score, label in zip(*prediction.values())]
+    #   if cnt>50: 
+    #     train_step.reset()
+    #     break
+    # # ****EVAL STEP
+    # print(colored(f'{epoch} START EVAL', 'cyan'))
+    # coco_eval = COCOeval(coco_val.coco, iouType="bbox")
+    # Tensor.training = False
+    # train_step.reset()
+    # st = time.time()
+    # coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
+    # cnt = 0
+    # for X, targets in iterate_val(coco_val, BS_EVAL):
+    #   # orig_shapes= []
+    #   # for tt in targets:
+    #   #   orig_shapes.append(list(tt['image_size']))
+    #   # # print(orig_shapes)
+    #   # sub_t = time.time()
+    #   # b,r,c = mdlrun(X)
+    #   # m_t = time.time()-sub_t
+    #   # print('MODEL_RUN_JIT', m_t)
+    #   # if cnt==0 and epoch==0:
+    #   #   ANCHORS_VAL = anchor_generator(X, b)
+    #   #   ANCHORS_VAL = [a.realize() for a in ANCHORS_VAL]
+    #   #   ANCHORS_VAL = Tensor.stack(ANCHORS_VAL)
+    #   #   num_anchors_per_level = [xx.shape[2] * xx.shape[3] for xx in b]
+    #   #   HW = 0
+    #   #   for v in num_anchors_per_level:
+    #   #     HW += v
+    #   #   HWA = c.shape[1]
+    #   #   A = HWA // HW
+    #   #   num_anchors_per_level = [hw * A for hw in num_anchors_per_level]
+    #   #   split_anchors = [list(a.split(num_anchors_per_level)) for a in ANCHORS_VAL]
+    #   #   sa = []
+    #   #   for aa in split_anchors:
+    #   #     s_temp = []
+    #   #     for a in aa:
+    #   #       s_temp.append(a.numpy())
+    #   #     sa.append(s_temp)
+    #   #   split_anchors = sa
+    #   # c_split = list(c.sigmoid().split(num_anchors_per_level, dim=1))
+    #   # r_split = list(r.split(num_anchors_per_level, dim=1))
+    #   # c_split = [cc.numpy() for cc in c_split]
+    #   # r_split = [rr.numpy() for rr in r_split]
+    #   # ps_t = time.time() - m_t-sub_t
+    #   # print('POST_SPLITS', ps_t)
+    #   # # print(split_anchors)
+    #   # # print('PRE_POST_PROCESS')
+    #   # predictions = model.postprocess_detections_val(c_split, r_split, split_anchors, orig_shapes)
+    #   out = mdlrun_false(X).numpy()
+    #   # out = r.cat(c.sigmoid(), dim=-1).numpy()
+    #   predictions = model.postprocess_detections(out, orig_image_sizes=[t["image_size"] for t in targets])
+    #   # print(predictions)
+    #   img_ids = [t["image_id"] for t in targets]
+    #   coco_results  = [{"image_id": targets[i]["image_id"], "category_id": label, "bbox": box.tolist(), "score": score} for i, prediction in enumerate(predictions) for box, score, label in zip(*prediction.values())]
 
-      # print('coco_results',len(coco_results))
-      with redirect_stdout(None):
-        coco_eval.cocoDt = coco_val.coco.loadRes(coco_results)
-        coco_eval.params.imgIds = img_ids
-        coco_eval.evaluate()
-      evaluated_imgs.extend(img_ids)
-      coco_evalimgs.append(np.array(coco_eval.evalImgs).reshape(ncats, narea, len(img_ids)))
-      print(colored(f'{cnt} EVAL_STEP || {time.time()-sub_t}', 'red'))
-      cnt=cnt+1
-    coco_eval.params.imgIds = evaluated_imgs
-    coco_eval._paramsEval.imgIds = evaluated_imgs
-    coco_eval.evalImgs = list(np.concatenate(coco_evalimgs, -1).flatten())
-    coco_eval.accumulate()
-    coco_eval.summarize()
-    eval_acc = coco_eval.stats[0]
-    print(colored(f'{epoch} EVAL_ACC {eval_acc} || {time.time()-st}', 'green'))
-    mdlrun.reset()
+    #   # print('coco_results',len(coco_results))
+    #   with redirect_stdout(None):
+    #     coco_eval.cocoDt = coco_val.coco.loadRes(coco_results)
+    #     coco_eval.params.imgIds = img_ids
+    #     coco_eval.evaluate()
+    #   evaluated_imgs.extend(img_ids)
+    #   coco_evalimgs.append(np.array(coco_eval.evalImgs).reshape(ncats, narea, len(img_ids)))
+    #   print(colored(f'{cnt} EVAL_STEP || {time.time()-sub_t}', 'red'))
+    #   cnt=cnt+1
+    # coco_eval.params.imgIds = evaluated_imgs
+    # coco_eval._paramsEval.imgIds = evaluated_imgs
+    # coco_eval.evalImgs = list(np.concatenate(coco_evalimgs, -1).flatten())
+    # coco_eval.accumulate()
+    # coco_eval.summarize()
+    # eval_acc = coco_eval.stats[0]
+    # print(colored(f'{epoch} EVAL_ACC {eval_acc} || {time.time()-st}', 'green'))
+    # mdlrun.reset()
 
       
 def train_unet3d():

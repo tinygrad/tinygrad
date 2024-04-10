@@ -300,16 +300,16 @@ class AnchorGenerator:
       )
     return anchors
 
-  def forward(self, image_list: Tensor, feature_maps: List[Tensor]) -> List[Tensor]:
+  def forward(self, image_list_shape, feature_maps: List[Tensor]) -> List[Tensor]:
     grid_sizes = [feature_map.shape[-2:] for feature_map in feature_maps]
-    image_size = image_list.shape[-2:]
-    dtype = feature_maps[0].dtype
+    image_size = image_list_shape[-2:]
+    # dtype = feature_maps[0].dtype
     strides = [[Tensor(image_size[0] // g[0], dtype=dtypes.int64),
                 Tensor(image_size[1] // g[1], dtype=dtypes.int64)] for g in grid_sizes]
-    self.set_cell_anchors(dtype)
+    # self.set_cell_anchors(dtype)
     anchors_over_all_feature_maps = self.grid_anchors(grid_sizes, strides)
     anchors: List[List[Tensor]] = []
-    for _ in range(image_list.shape[0]):
+    for _ in range(image_list_shape[0]):
       anchors_in_image = [anchors_per_feature_map for anchors_per_feature_map in anchors_over_all_feature_maps]
       anchors.append(anchors_in_image)
     anchors = [Tensor.cat(*anchors_per_image) for anchors_per_image in anchors]
@@ -635,6 +635,11 @@ class ClassificationHead:
     for tl, m in zip(T_l, matched_idxs):
       labels_temp.append(tl[m])
     labels_temp = Tensor.stack(labels_temp)
+    # idx = Tensor.arange(T_l.shape[0])
+    # print('T_L', T_l.shape)
+    # print('idx', idx.numpy())
+    # print(matched_idxs.shape, matched_idxs.numpy())
+    # labels_temp = T_l[idx, matched_idxs]
     labels_temp = (labels_temp+1)*foreground_idxs-1
     # print('LAbels_temp:', labels_temp.shape)
     gt_classes_target = labels_temp.one_hot(logits_class.shape[-1])
