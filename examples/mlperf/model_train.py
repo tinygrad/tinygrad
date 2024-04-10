@@ -296,7 +296,7 @@ def train_unet3d():
     scale = current_epoch / warmup_epochs
     optim.lr.assign(Tensor([init_lr + (lr - init_lr) * scale], device=GPUS))
 
-  @TinyJit
+  # @TinyJit
   def train_step(model, x, y):
     optim.zero_grad()
 
@@ -307,7 +307,7 @@ def train_unet3d():
     optim.step()
     return loss.realize()
 
-  @TinyJit
+  # @TinyJit
   def eval_step(model, x, y):
     y_hat, y = sliding_window_inference(model, x, y, gpus=GPUS)
     y_hat, y = Tensor(y_hat), Tensor(y, requires_grad=False)
@@ -345,7 +345,7 @@ def train_unet3d():
       st = pt
 
     if epoch == next_eval_at:
-      train_step.reset()
+      # train_step.reset()
 
       Tensor.training = False
 
@@ -358,7 +358,7 @@ def train_unet3d():
         eval_loss.append(eval_loss_value)
         scores.append(score)
 
-      eval_step.reset()
+      # eval_step.reset()
 
       scores = Tensor.mean(Tensor.stack(scores, dim=0), axis=0).numpy()
       eval_loss = Tensor.mean(Tensor.stack(eval_loss, dim=0), axis=0).numpy()
