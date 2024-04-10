@@ -261,7 +261,7 @@ def train_retinanet():
 
   model = RetinaNet(ResNeXt50_32X4D(), num_anchors=anchor_generator.num_anchors_per_location()[0])
   mdlrun = TinyJit(lambda x: model(x, True))
-  mdlrun_false = TinyJit(lambda x: model(x, False))
+  mdlrun_false = TinyJit(lambda x: model(x, False).realize())
 
   parameters = []
   for k, x in get_state_dict(model).items():
@@ -296,6 +296,7 @@ def train_retinanet():
   for epoch in range(EPOCHS):
     print(colored(f'EPOCH {epoch}/{EPOCHS}:', 'cyan'))
     train_step.reset()
+    mdlrun_false.reset()
     lr_sched = None
     if epoch < WARMUP_EPOCHS:
       start_iter = epoch*len(coco_train.ids)//BS
@@ -327,10 +328,10 @@ def train_retinanet():
         lr_sched.step()
 
       print(colored(f'{cnt} STEP {loss.numpy()} || {time.time()-st} || LR: {optimizer.lr.item()}', 'magenta'))
-      # if cnt>5: 
-      #   train_step.reset()
-      #   break
-# ****EVAL STEP
+      if cnt>5: 
+        train_step.reset()
+        break
+    # ****EVAL STEP
     print(colored(f'{epoch} START EVAL', 'cyan'))
     coco_eval = COCOeval(coco_val.coco, iouType="bbox")
     Tensor.training = False
@@ -339,36 +340,48 @@ def train_retinanet():
     coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
     cnt = 0
     for X, targets in iterate_val(coco_val, BS_EVAL):
-      o_s = []
+      orig_shapes= []
       for tt in targets:
-        o_s.append(list(tt['image_size']))
-      # print(o_s)
+        orig_shapes.append(list(tt['image_size']))
+      # print(orig_shapes)
       sub_t = time.time()
       b,r,c = mdlrun(X)
+      m_t = time.time()-sub_t
+      print('MODEL_RUN_JIT', m_t)
       if cnt==0 and epoch==0:
         ANCHORS_VAL = anchor_generator(X, b)
         ANCHORS_VAL = [a.realize() for a in ANCHORS_VAL]
-        ANCHORS_VAL = Tensor.stack(ANCHORS_VAL).realize()
-      num_anchors_per_level = [xx.shape[2] * xx.shape[3] for xx in b]
-      HW = 0
-      for v in num_anchors_per_level:
-        HW += v
-      HWA = c.shape[1]
-      A = HWA // HW
-      num_anchors_per_level = [hw * A for hw in num_anchors_per_level]
+        ANCHORS_VAL = Tensor.stack(ANCHORS_VAL)
+        num_anchors_per_level = [xx.shape[2] * xx.shape[3] for xx in b]
+        HW = 0
+        for v in num_anchors_per_level:
+          HW += v
+        HWA = c.shape[1]
+        A = HWA // HW
+        num_anchors_per_level = [hw * A for hw in num_anchors_per_level]
+        split_anchors = [list(a.split(num_anchors_per_level)) for a in ANCHORS_VAL]
+        sa = []
+        for aa in split_anchors:
+          s_temp = []
+          for a in aa:
+            s_temp.append(a.numpy())
+          sa.append(s_temp)
+        split_anchors = sa
       c_split = list(c.sigmoid().split(num_anchors_per_level, dim=1))
       r_split = list(r.split(num_anchors_per_level, dim=1))
-      split_anchors = [list(a.split(num_anchors_per_level)) for a in ANCHORS_VAL]
-      c_split = [c.realize() for c in c_split]
-      c_split = [r.realize() for r in r_split]
-      for aa in split_anchors:
-        for a in aa:
-          a.realize()
+      c_split = [cc.numpy() for cc in c_split]
+      r_split = [rr.numpy() for rr in r_split]
+      ps_t = time.time() - m_t-sub_t
+      print('POST_SPLITS', ps_t)
       # print(split_anchors)
       # print('PRE_POST_PROCESS')
-      predictions = model.postprocess_detections_val(c_split, r_split, split_anchors, o_s)
-      img_ids = [t["image_id"].item() for t in targets]
-      coco_results  = [{"image_id": targets[i]["image_id"].item(), "category_id": label, "bbox": box.tolist(), "score": score} for i, prediction in enumerate(predictions) for box, score, label in zip(*prediction.values())]
+      predictions = model.postprocess_detections_val(c_split, r_split, split_anchors, orig_shapes)
+      # out = mdlrun_false(X).numpy()
+      # out = r.cat(c.sigmoid(), dim=-1).numpy()
+      # predictions = model.postprocess_detections(out, orig_image_sizes=[t["image_size"] for t in targets])
+      # print(predictions)
+      img_ids = [t["image_id"] for t in targets]
+      coco_results  = [{"image_id": targets[i]["image_id"], "category_id": label, "bbox": box.tolist(), "score": score} for i, prediction in enumerate(predictions) for box, score, label in zip(*prediction.values())]
 
       # print('coco_results',len(coco_results))
       with redirect_stdout(None):

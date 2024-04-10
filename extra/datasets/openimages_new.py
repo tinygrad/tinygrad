@@ -214,5 +214,6 @@ def iterate_val(coco, bs=8):
       bbox = t['boxes']
       t['boxes'] = resize_boxes(bbox, x_orig.size, SIZE).numpy()
       t['labels'] = t['labels'].numpy()
+      t['image_id'] = t['image_id'].item()
       targets.append(t)
     yield Tensor.stack(X), targets

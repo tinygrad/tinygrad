@@ -402,7 +402,8 @@ class RetinaNet:
       # return l 
       return b, r, c
     else: 
-      return r.cat(c.sigmoid(), dim=-1)
+      c = c.sigmoid().realize()
+      return r.cat(c, dim=-1)
   def forward(self, x):
     return self.head(self.backbone(x))
   def loss_temp(self, logits_reg, logits_class, y, anchors) -> Tensor:
@@ -483,8 +484,8 @@ class RetinaNet:
     num_images = len(image_shapes)
     detections: List[Dict[str, Tensor]] = []
     for index in range(num_images):
-      box_regression_per_image = [br[index].numpy() for br in logits_reg]
-      logits_per_image = [cl[index].numpy() for cl in logits_class]
+      box_regression_per_image = [br[index] for br in logits_reg]
+      logits_per_image = [cl[index] for cl in logits_class]
       anchors_per_image, image_shape = anchors[index], image_shapes[index]
 
       image_boxes = []
@@ -509,7 +510,7 @@ class RetinaNet:
         anchor_idxs = topk_idxs // num_classes
         labels_per_level = topk_idxs % num_classes
         # print('anchors_per_level', anchors_per_level.shape, anchors_per_image.shape, anchors.shape, anchor_idxs.shape)
-        boxes_per_level = decode_single(box_regression_per_level[anchor_idxs], anchors_per_level.numpy()[anchor_idxs])
+        boxes_per_level = decode_single(box_regression_per_level[anchor_idxs], anchors_per_level[anchor_idxs])
 
         clipped_x = boxes_per_level[:, 0::2].clip(0, w)
         clipped_y = boxes_per_level[:, 1::2].clip(0, h)
