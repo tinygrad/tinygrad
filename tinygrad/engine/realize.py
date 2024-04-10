@@ -33,7 +33,7 @@ def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[Variable, i
 
     for out in si.outputs:
       # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
-      if out.size > 0 and not (out.device.startswith("DISK") and si.ast[0].op is BufferOps.STORE) and not hasattr(out, "_buf"): out.allocate()
+      if out.size > 0 and not hasattr(out, "_buf"): out.allocate()
 
     # run the function (put it in JIT)
     real_buffers = [x for x in si.outputs+si.inputs if x.size != 0]
