@@ -206,7 +206,7 @@ def graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Default
   graph: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
   in_degree: DefaultDict[LazyBuffer, int] = defaultdict(int)
   for key, lsi in prescheduled.items():
-    in_degree[key] = 0
+    if key not in in_degree: in_degree[key] = 0
     # realize outputs after all parents are realized
     scheduled_parents = set(schedule_targets[x].outputs[0] for x in lsi.inputs if x in schedule_targets)
     for x in scheduled_parents:
