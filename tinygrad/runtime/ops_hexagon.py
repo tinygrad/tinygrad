@@ -1,6 +1,6 @@
-import time, ctypes, subprocess, pathlib, tempfile, re
+import time, ctypes, subprocess, pathlib, tempfile
 from tinygrad.device import Compiled, Compiler, MallocAllocator
-from tinygrad.codegen.kernel import LinearizerOptions
+from tinygrad.device import CompilerOptions
 from tinygrad.helpers import DEBUG, getenv
 from tinygrad.renderer.cstyle import HVXLanguage, uops_to_cstyle
 
@@ -33,7 +33,8 @@ def gen_func_call(signature: str):
   name = signature.split("(")[0].split(" ")[-1]
   params = signature.split("(")[1].split(")")[0].split(",")
   symbolic = list(i.split(" ")[-1] for i in filter(lambda x: "const int " in x, params))
-  types = ["float", "unsigned int", "int", "unsigned long long", "long long", "unsigned long", "long", "half", "unsigned char", "uchar", "bool", "char", "unsigned short", "short"]
+  types: list[str] = ["float", "unsigned int", "int", "unsigned long long", "long long", "unsigned long", "long", 
+           "half", "unsigned char", "uchar", "bool", "char", "unsigned short", "short"]
   types = [next(filter(lambda x: x in p, types)) for p in params]
   lines = [f"{types[0]}* data0 = ({types[0]}*)malloc(sz0);"]
   lines += [f"{types[i]}* data{i} = ({types[i]}*)load(argv[{i+1}]);" for i in range(1, len(params) - len(symbolic))]
@@ -44,7 +45,7 @@ def gen_func_call(signature: str):
 HEXAGON_SDK_PATH = getenv("HEXAGON_SDK_PATH", "/home/terafo/Qualcomm/Hexagon_SDK/3.5.4/tools/HEXAGON_Tools/8.3.07/Tools/bin")
 
 class HexagonCompiler(Compiler):
-  linearizer_opts = LinearizerOptions("HEXAGON", supports_float4=False, has_local=False)
+  compiler_opts = CompilerOptions("HEXAGON", supports_float4=False, has_local=False)
   def render(self, name:str, uops) -> str:
     return uops_to_cstyle(HVXLanguage(), name, uops)
   def compile(self, src:str) -> bytes:
