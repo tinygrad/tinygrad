@@ -13,10 +13,10 @@ class CustomOp(JITRunner):
 
 def maybe_zerocopy(si: ScheduleItem) -> bool:
   if not (all([len(x) == 1 for x in [si.outputs, si.inputs, si.ast]]) and si.outputs[0].device.startswith("DISK")): return False
-  ast, o, i = si.ast[0], si.outputs[0], si.inputs[0]
+  ast, out, inp = si.ast[0], si.outputs[0], si.inputs[0]
   top_src = ast.src[0].src[0] if ast.src[0].op is UnaryOps.CAST and ast.src[0].arg[1] else ast.src[0]
-  if not (top_src.op is BufferOps.LOAD and top_src.arg.st.consecutive and ast.arg.st.contiguous) or hasattr(o, "_buf"): return False
-  o.base, o.offset = (i.base or i), i.offset+(top_src.arg.st.views[0].offset*i.dtype.itemsize)
+  if not (top_src.op is BufferOps.LOAD and top_src.arg.st.consecutive and ast.arg.st.contiguous) or hasattr(out, "_buf"): return False
+  out.base, out.offset = (inp.base or inp), inp.offset+(top_src.arg.st.views[0].offset*inp.dtype.itemsize)
   return True
 
 def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:

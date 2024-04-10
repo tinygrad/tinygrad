@@ -33,7 +33,7 @@ class Buffer:
     if not self.device.startswith("DISK") and self.base is None: GlobalCounters.mem_used += self.nbytes
     return self
   def view(self, offset:int=0, size:Optional[int]=None, dtype:Optional[DType]=None) -> Buffer:
-    dtype, base, size = dtype or self.dtype, (self.base or self), self.nbytes if size is None else size
+    dtype, base, size = dtype or self.dtype, self.base or self, self.nbytes if size is None else size
     assert self.nbytes >= offset + size and size % dtype.itemsize == 0, "wrong size for dtype"
     return Buffer(self.device, size//dtype.itemsize, dtype, self.options, base=base, offset=self.offset+offset)
   def __reduce__(self):
