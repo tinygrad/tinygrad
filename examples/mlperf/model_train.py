@@ -296,7 +296,6 @@ def train_retinanet():
   for epoch in range(EPOCHS):
     print(colored(f'EPOCH {epoch}/{EPOCHS}:', 'cyan'))
     train_step.reset()
-    mdlrun_false.reset()
     lr_sched = None
     if epoch < WARMUP_EPOCHS:
       start_iter = epoch*len(coco_train.ids)//BS
@@ -327,15 +326,14 @@ def train_retinanet():
         lr_sched.step()
 
       print(colored(f'{cnt} STEP {loss.numpy()} || {time.time()-st} || LR: {optimizer.lr.item()}', 'magenta'))
-      if cnt>5: 
-        train_step.reset()
-        break
+      # if cnt>5: 
+      #   train_step.reset()
+      #   break
 # ****EVAL STEP
     print(colored(f'{epoch} START EVAL', 'cyan'))
     coco_eval = COCOeval(coco_val.coco, iouType="bbox")
     Tensor.training = False
     train_step.reset()
-    mdlrun_false.reset()
     st = time.time()
     coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
     cnt = 0
@@ -356,16 +354,18 @@ def train_retinanet():
       c_split = list(c.sigmoid().split(num_anchors_per_level, dim=1))
       r_split = list(r.split(num_anchors_per_level, dim=1))
       split_anchors = [list(a.split(num_anchors_per_level)) for a in ANCHORS]
+      c_split = [c.realize() for c in c_split]
+      c_split = [r.realize() for r in r_split]
+      for aa in split_anchors:
+        for a in aa:
+          a.realize()
+      # print(split_anchors)
+      # print('PRE_POST_PROCESS')
       predictions = model.postprocess_detections_val(c_split, r_split, split_anchors, o_s)
-      # out = mdlrun_false(X).numpy()
-      # print('outs', out.shape)
-      # predictions = model.postprocess_detections(out, input_size=X.shape[1:3], 
-      #                                            orig_image_sizes=[t["image_size"] for t in targets],score_thresh=0.5,
-      #                                            )
       img_ids = [t["image_id"].item() for t in targets]
       coco_results  = [{"image_id": targets[i]["image_id"].item(), "category_id": label, "bbox": box.tolist(), "score": score} for i, prediction in enumerate(predictions) for box, score, label in zip(*prediction.values())]
 
-      print('coco_results',len(coco_results))
+      # print('coco_results',len(coco_results))
       with redirect_stdout(None):
         coco_eval.cocoDt = coco_val.coco.loadRes(coco_results)
         coco_eval.params.imgIds = img_ids
@@ -373,6 +373,7 @@ def train_retinanet():
       evaluated_imgs.extend(img_ids)
       coco_evalimgs.append(np.array(coco_eval.evalImgs).reshape(ncats, narea, len(img_ids)))
       print(colored(f'{cnt} EVAL_STEP || {time.time()-sub_t}', 'red'))
+      cnt=cnt+1
     coco_eval.params.imgIds = evaluated_imgs
     coco_eval._paramsEval.imgIds = evaluated_imgs
     coco_eval.evalImgs = list(np.concatenate(coco_evalimgs, -1).flatten())
@@ -380,6 +381,7 @@ def train_retinanet():
     coco_eval.summarize()
     eval_acc = coco_eval.stats[0]
     print(colored(f'{epoch} EVAL_ACC {eval_acc} || {time.time()-st}', 'green'))
+    mdlrun.reset()
 
       
 def train_unet3d():
