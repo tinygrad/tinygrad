@@ -180,7 +180,7 @@ def iterate(coco, bs=8):
         bbox = t['boxes']
         # print('ITERATE_PRE_RESIZE', bbox.shape)
         # bbox = resize_boxes(bbox, (x_orig.size[1],x_orig.size[0]), SIZE)
-        bbox = resize_boxes(bbox, x_orig.size, SIZE)
+        bbox = resize_boxes(bbox, x_orig.size[::-1], SIZE)
         # print('ITERATE_POST_RESIZE', bbox.shape)
         t['boxes'] = bbox.realize()
         # max_pad = 120087
@@ -211,9 +211,11 @@ def iterate_val(coco, bs=8):
       xNew_tor = F.resize(x_orig, size=SIZE)
       xNew = normalize(Tensor(np.array(xNew_tor)))
       X.append(xNew)
-      bbox = t['boxes']
-      t['boxes'] = resize_boxes(bbox, x_orig.size, SIZE).numpy()
-      t['labels'] = t['labels'].numpy()
-      t['image_id'] = t['image_id'].item()
-      targets.append(t)
+      # bbox = t['boxes']
+      # t['boxes'] = resize_boxes(bbox, x_orig.size, SIZE).numpy()
+      # t['labels'] = t['labels'].numpy()
+      # t['image_id'] = t['image_id'].item()
+      tNew = {'image_size' : t['image_size'][::-1], 
+              'image_id' : t['image_id'].item()}
+      targets.append(tNew)
     yield Tensor.stack(X), targets
