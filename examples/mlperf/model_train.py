@@ -232,11 +232,15 @@ def train_resnet():
         safe_save(get_training_state(model, optimizer_group, scheduler_group), fn)
 
 def train_retinanet():
+  from contextlib import redirect_stdout
+  import numpy as np
   EPOCHS = 10
   BS = 2
+  BS_EVAL = 2
   WARMUP_EPOCHS = 1
   WARMUP_FACTOR = 0.001
   LR = 0.0001
+  MAP_TARGET = 0.34
   from extra.models.retinanetNew import RetinaNet, AnchorGenerator
   from examples.mlperf.lr_schedulers import Retina_LR
   anchor_sizes = tuple((x, int(x * 2 ** (1.0 / 3)), int(x * 2 ** (2.0 / 3))) for x in [32, 64, 128, 256, 512])
@@ -246,14 +250,18 @@ def train_retinanet():
   )
   from extra.models.resnet import ResNeXt50_32X4D
   from tinygrad.nn.optim import Adam
-  from extra.datasets.openimages_new import iterate
+  from extra.datasets.openimages_new import iterate, iterate_val
   from extra.datasets.openimages_new import get_openimages
+  from pycocotools.cocoeval import COCOeval
   ROOT = 'extra/datasets/open-images-v6TEST'
   NAME = 'openimages-mlperf'
-  coco = get_openimages(NAME,ROOT, 'train')
+  coco_train = get_openimages(NAME,ROOT, 'train')
+  coco_val = get_openimages(NAME,ROOT, 'val')
+  # coco_eval = COCOeval(coco_val.coco, iouType="bbox")
 
   model = RetinaNet(ResNeXt50_32X4D(), num_anchors=anchor_generator.num_anchors_per_location()[0])
   mdlrun = TinyJit(lambda x: model(x, True))
+  mdlrun_false = TinyJit(lambda x: model(x, False))
 
   parameters = []
   for k, x in get_state_dict(model).items():
@@ -287,15 +295,18 @@ def train_retinanet():
 
   for epoch in range(EPOCHS):
     print(colored(f'EPOCH {epoch}/{EPOCHS}:', 'cyan'))
+    train_step.reset()
+    mdlrun_false.reset()
     lr_sched = None
     if epoch < WARMUP_EPOCHS:
-      start_iter = epoch*len(coco.ids)//BS
-      warmup_iters = WARMUP_EPOCHS*len(coco.ids)//BS
+      start_iter = epoch*len(coco_train.ids)//BS
+      warmup_iters = WARMUP_EPOCHS*len(coco_train.ids)//BS
       lr_sched = Retina_LR(optimizer, start_iter, warmup_iters, WARMUP_FACTOR, LR)
+    else:
+      optimizer.lr.assign(Tensor([LR]))
     cnt = 0
-    # for X,Y in iterate(coco, BS):
-    for X, Y_boxes, Y_labels, Y_boxes_p, Y_labels_p in iterate(coco, BS):
-    # for X in iterate(coco, BS):
+
+    for X, Y_boxes, Y_labels, Y_boxes_p, Y_labels_p in iterate(coco_train, BS):
       if(cnt==0 and epoch==0):
         # INIT LOSS FUNC
         b,_,_ = mdlrun(X)
@@ -309,13 +320,67 @@ def train_retinanet():
 
       st = time.time()
       cnt+=1
-      # not jittable for now
-
+      # matcher_gen not jittable for now
       matched_idxs = model.matcher_gen(ANCHORS, Y_boxes).realize()
       loss = train_step(X, Y_boxes_p, Y_labels_p, matched_idxs)
       if lr_sched is not None:
         lr_sched.step()
+
       print(colored(f'{cnt} STEP {loss.numpy()} || {time.time()-st} || LR: {optimizer.lr.item()}', 'magenta'))
+      if cnt>5: 
+        train_step.reset()
+        break
+# ****EVAL STEP
+    print(colored(f'{epoch} START EVAL', 'cyan'))
+    coco_eval = COCOeval(coco_val.coco, iouType="bbox")
+    Tensor.training = False
+    train_step.reset()
+    mdlrun_false.reset()
+    st = time.time()
+    coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
+    cnt = 0
+    for X, targets in iterate_val(coco_val, BS_EVAL):
+      o_s = []
+      for tt in targets:
+        o_s.append(list(tt['image_size']))
+      # print(o_s)
+      sub_t = time.time()
+      b,r,c = mdlrun(X)
+      num_anchors_per_level = [xx.shape[2] * xx.shape[3] for xx in b]
+      HW = 0
+      for v in num_anchors_per_level:
+        HW += v
+      HWA = c.shape[1]
+      A = HWA // HW
+      num_anchors_per_level = [hw * A for hw in num_anchors_per_level]
+      c_split = list(c.sigmoid().split(num_anchors_per_level, dim=1))
+      r_split = list(r.split(num_anchors_per_level, dim=1))
+      split_anchors = [list(a.split(num_anchors_per_level)) for a in ANCHORS]
+      predictions = model.postprocess_detections_val(c_split, r_split, split_anchors, o_s)
+      # out = mdlrun_false(X).numpy()
+      # print('outs', out.shape)
+      # predictions = model.postprocess_detections(out, input_size=X.shape[1:3], 
+      #                                            orig_image_sizes=[t["image_size"] for t in targets],score_thresh=0.5,
+      #                                            )
+      img_ids = [t["image_id"].item() for t in targets]
+      coco_results  = [{"image_id": targets[i]["image_id"].item(), "category_id": label, "bbox": box.tolist(), "score": score} for i, prediction in enumerate(predictions) for box, score, label in zip(*prediction.values())]
+
+      print('coco_results',len(coco_results))
+      with redirect_stdout(None):
+        coco_eval.cocoDt = coco_val.coco.loadRes(coco_results)
+        coco_eval.params.imgIds = img_ids
+        coco_eval.evaluate()
+      evaluated_imgs.extend(img_ids)
+      coco_evalimgs.append(np.array(coco_eval.evalImgs).reshape(ncats, narea, len(img_ids)))
+      print(colored(f'{cnt} EVAL_STEP || {time.time()-sub_t}', 'red'))
+    coco_eval.params.imgIds = evaluated_imgs
+    coco_eval._paramsEval.imgIds = evaluated_imgs
+    coco_eval.evalImgs = list(np.concatenate(coco_evalimgs, -1).flatten())
+    coco_eval.accumulate()
+    coco_eval.summarize()
+    eval_acc = coco_eval.stats[0]
+    print(colored(f'{epoch} EVAL_ACC {eval_acc} || {time.time()-st}', 'green'))
+
       
 def train_unet3d():
   # TODO: Unet3d

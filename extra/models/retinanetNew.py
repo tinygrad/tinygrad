@@ -1,6 +1,6 @@
 import math
 import sys
-from typing import List
+from typing import List, Dict
 from tinygrad import Tensor, dtypes, TinyJit
 from tinygrad.helpers import colored, flatten, get_child
 import tinygrad.nn as nn
@@ -92,7 +92,47 @@ def nms(boxes, scores, thresh=0.5):
     iou = inter_area / (areas[cur] + areas[to_process] - inter_area)
     to_process = to_process[np.where(iou <= thresh)[0]]
   return keep
+def decode_single(rel_codes, boxes, weights = (1.0,1.0,1.0,1.0), bbox_xform_clip=math.log(1000. / 16)):
 
+  widths = boxes[:, 2] - boxes[:, 0]
+  heights = boxes[:, 3] - boxes[:, 1]
+  ctr_x = boxes[:, 0] + 0.5 * widths
+  ctr_y = boxes[:, 1] + 0.5 * heights
+
+  wx, wy, ww, wh = weights
+  dx = rel_codes[:, 0::4] / wx
+  dy = rel_codes[:, 1::4] / wy
+  dw = rel_codes[:, 2::4] / ww
+  dh = rel_codes[:, 3::4] / wh
+
+  # Prevent sending too large values into torch.exp()
+  # dw = torch.clamp(dw, max=self.bbox_xform_clip)
+  # dh = torch.clamp(dh, max=self.bbox_xform_clip)
+  dw = dw.clip(max=bbox_xform_clip)
+  dh = dh.clip(max=bbox_xform_clip)
+
+  pred_ctr_x = dx * widths[:, None] + ctr_x[:, None]
+  pred_ctr_y = dy * heights[:, None] + ctr_y[:, None]
+  # pred_w = torch.exp(dw) * widths[:, None]
+  # pred_h = torch.exp(dh) * heights[:, None]
+  pred_w = np.exp(dw) * widths[:, None]
+  pred_h = np.exp(dh) * heights[:, None]
+
+  # Distance from center to box's corner.
+  # c_to_c_h = torch.tensor(0.5, dtype=pred_ctr_y.dtype, device=pred_h.device) * pred_h
+  # c_to_c_w = torch.tensor(0.5, dtype=pred_ctr_x.dtype, device=pred_w.device) * pred_w
+  c_to_c_h = 0.5 * pred_h
+  c_to_c_w = 0.5 * pred_w
+
+  pred_boxes1 = pred_ctr_x - c_to_c_w
+  pred_boxes2 = pred_ctr_y - c_to_c_h
+  pred_boxes3 = pred_ctr_x + c_to_c_w
+  pred_boxes4 = pred_ctr_y + c_to_c_h
+  pred_boxes = np.stack((pred_boxes1, pred_boxes2, pred_boxes3, pred_boxes4), axis=2) #.flatten(1)
+  # print('pred boxes', pred_boxes.shape)
+  B,T,C = pred_boxes.shape
+  pred_boxes= pred_boxes.reshape(B,T*C)
+  return pred_boxes
 def decode_bbox(offsets, anchors):
   dx, dy, dw, dh = np.rollaxis(offsets, 1)
   widths, heights = anchors[:, 2] - anchors[:, 0], anchors[:, 3] - anchors[:, 1]
@@ -436,7 +476,73 @@ class RetinaNet:
       dat = v.detach().numpy()
       assert obj.shape == dat.shape, (k, obj.shape, dat.shape)
       obj.assign(dat)
+  def postprocess_detections_val(self, logits_class, logits_reg, anchors, image_shapes, 
+                                 tensor_image_shape=(800,800), topk_candidates=1000, score_thresh=0.001,
+                                 nms_thresh=0.5):
+    h,w = tensor_image_shape
+    num_images = len(image_shapes)
+    detections: List[Dict[str, Tensor]] = []
+    for index in range(num_images):
+      box_regression_per_image = [br[index].numpy() for br in logits_reg]
+      logits_per_image = [cl[index].numpy() for cl in logits_class]
+      anchors_per_image, image_shape = anchors[index], image_shapes[index]
 
+      image_boxes = []
+      image_scores = []
+      image_labels = []
+      for box_regression_per_level, logits_per_level, anchors_per_level in \
+                    zip(box_regression_per_image, logits_per_image, anchors_per_image):
+        num_classes = logits_per_level.shape[-1]
+
+        scores_per_level = logits_per_level.flatten()
+        keep_idxs = scores_per_level > score_thresh
+        # print('Keep_IDXS', keep_idxs.shape, keep_idxs.sum(), keep_idxs)
+        scores_per_level = scores_per_level[keep_idxs]
+
+        # keep topk
+        topk_idxs = np.where(keep_idxs)[0]
+        num_topk = min(len(topk_idxs), topk_candidates)
+        sort_idxs = scores_per_level.argsort()[-num_topk:][::-1]
+        topk_idxs, scores_per_level = topk_idxs[sort_idxs], scores_per_level[sort_idxs]
+
+        # bbox coords from offsets
+        anchor_idxs = topk_idxs // num_classes
+        labels_per_level = topk_idxs % num_classes
+        # print('anchors_per_level', anchors_per_level.shape, anchors_per_image.shape, anchors.shape, anchor_idxs.shape)
+        boxes_per_level = decode_single(box_regression_per_level[anchor_idxs], anchors_per_level.numpy()[anchor_idxs])
+
+        clipped_x = boxes_per_level[:, 0::2].clip(0, w)
+        clipped_y = boxes_per_level[:, 1::2].clip(0, h)
+        boxes_per_level = np.stack([clipped_x, clipped_y], axis=2).reshape(-1, 4)
+
+        image_boxes.append(boxes_per_level)
+        image_scores.append(scores_per_level)
+        image_labels.append(labels_per_level)
+
+      image_boxes = np.concatenate(image_boxes)
+      image_scores = np.concatenate(image_scores)
+      image_labels = np.concatenate(image_labels)
+
+      # nms for each class
+      keep_mask = np.zeros_like(image_scores, dtype=bool)
+      for class_id in np.unique(image_labels):
+        curr_indices = np.where(image_labels == class_id)[0]
+        curr_keep_indices = nms(image_boxes[curr_indices], image_scores[curr_indices], nms_thresh)
+        keep_mask[curr_indices[curr_keep_indices]] = True
+      keep = np.where(keep_mask)[0]
+      keep = keep[image_scores[keep].argsort()[::-1]]
+
+      # resize bboxes back to original size
+      image_boxes = image_boxes[keep]
+      if image_shapes is not None:
+        resized_x = image_boxes[:, 0::2] * image_shape[1] / w
+        resized_y = image_boxes[:, 1::2] * image_shape[0] / h
+        image_boxes = np.stack([resized_x, resized_y], axis=2).reshape(-1, 4)
+      # xywh format
+      image_boxes = np.concatenate([image_boxes[:, :2], image_boxes[:, 2:] - image_boxes[:, :2]], axis=1)
+
+      detections.append({"boxes":image_boxes, "scores":image_scores[keep], "labels":image_labels[keep]})
+    return detections
   # predictions: (BS, (H1W1+...+HmWm)A, 4 + K)
   def postprocess_detections(self, predictions, input_size=(800, 800), image_sizes=None, orig_image_sizes=None, score_thresh=0.05, topk_candidates=1000, nms_thresh=0.5):
     anchors = self.anchor_gen(input_size)

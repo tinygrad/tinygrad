@@ -76,6 +76,7 @@ class CocoDetection:
     id = self.ids[index]
     img = self._load_image(id)
     orig_size = img.size
+    # print('iterate orig size', orig_size, id)
     # sys.exit()
     target = self._load_target(id)
 
@@ -85,6 +86,7 @@ class CocoDetection:
     image_id = self.ids[index]
     target = dict(image_id=image_id, annotations=target)
     if self._transforms is not None:
+      # print('HIT')
       img, target = self._transforms(img, target)
       target['image_size'] = orig_size
     return img, target
@@ -199,3 +201,18 @@ def iterate(coco, bs=8):
 
     yield Tensor.stack(X), target_boxes, target_labels, Tensor.stack(target_boxes_padded), Tensor.stack(target_labels_padded)
     i= i+bs+rem
+
+def iterate_val(coco, bs=8):
+  # for i in range(0, len(coco.ids), bs):
+  for i in range(0, 10, bs):
+    X, targets = [], []
+    for img_id in coco.ids[i:i+bs]:
+      x_orig, t = coco.__getitem__(img_id)
+      xNew_tor = F.resize(x_orig, size=SIZE)
+      xNew = normalize(Tensor(np.array(xNew_tor)))
+      X.append(xNew)
+      bbox = t['boxes']
+      t['boxes'] = resize_boxes(bbox, x_orig.size, SIZE).numpy()
+      t['labels'] = t['labels'].numpy()
+      targets.append(t)
+    yield Tensor.stack(X), targets
