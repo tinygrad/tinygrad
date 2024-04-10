@@ -38,3 +38,4 @@ class DiskAllocator(Allocator):
 
 class DiskDevice(Compiled):
   def __init__(self, device:str): super().__init__(device, DiskAllocator(device[len("disk:"):]), None, None)
+  def get_runner(self, *ast): raise RuntimeError("DISK backend only supports offset buffers")

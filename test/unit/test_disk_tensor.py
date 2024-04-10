@@ -251,6 +251,14 @@ class TestDiskTensor(unittest.TestCase):
 
     np.testing.assert_array_equal(t.numpy(), np.array([3] * 10))
 
+  def test_doesnt_compute(self):
+    t = Tensor.empty(10, device=f'disk:{temp("dt8")}', dtype=dtypes.float16)
+    # RuntimeError: DISK backend only supports offset buffers
+    with self.assertRaises(RuntimeError):
+      t.sqrt().realize()
+    with self.assertRaises(RuntimeError):
+      t.add(1.0).realize()
+
   @unittest.skipIf(Device.DEFAULT == "RHIP", "no real HIP device exists in CI")
   def test_bf16_disk_write_read(self):
     t = Tensor([10000, -1, -1000, -10000, 20], dtype=dtypes.float32)
