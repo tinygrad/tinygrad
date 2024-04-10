@@ -20,9 +20,7 @@ class Buffer:
     if initial_value is not None:
       self.allocate()
       self.copyin(memoryview(initial_value))
-  def ensure_allocated(self) -> Buffer:
-    if not hasattr(self, '_buf'): self.allocate()
-    return self
+  def ensure_allocated(self) -> Buffer: return self.allocate() if not hasattr(self, '_buf') else self
   def allocate(self, opaque=None) -> Buffer:
     assert not hasattr(self, '_buf'), "can't allocate already allocated buffer"
     from tinygrad.device import Device
