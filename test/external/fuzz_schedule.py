@@ -2,7 +2,7 @@ from collections import defaultdict
 from typing import DefaultDict, List, Set, TypeVar, Dict
 from tinygrad.buffer import Buffer
 from tinygrad.engine.realize import run_schedule
-from tinygrad.helpers import DEBUG, colored
+from tinygrad.helpers import DEBUG, colored, getenv
 from tinygrad.lazy import LazyBuffer
 from tinygrad.engine.schedule import graph_schedule
 from tinygrad.ops import ScheduleItem
@@ -49,6 +49,7 @@ def find_all_sorts(graph:DefaultDict[T, List[T]], in_degree:DefaultDict[T, int])
       path.append(v)
       visited.add(v)
       recurse_paths(path)
+      if len(ret) >= getenv("FUZZ_SCHEDULE_MAX_PATHS", 500): return
       # backtrack
       for u in graph[v]: in_degree[u] += 1
       path.pop()
