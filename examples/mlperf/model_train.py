@@ -236,8 +236,10 @@ def train_retinanet():
   import numpy as np
   EPOCHS = 100
   # BS = 40 # A100x2 
-  BS = 2*6*2
+  BS = 5*8
+  # BS = 2
   BS_EVAL = 2*15
+  # BS_EVAL = 2
   WARMUP_EPOCHS = 1
   WARMUP_FACTOR = 0.001
   LR = 0.0001
@@ -268,8 +270,14 @@ def train_retinanet():
 
   parameters = []
   for k, x in get_state_dict(model).items():
+    # print(k)
     x.realize().to_(GPUS)
     if 'head' in k and ('clas' in k or 'reg' in k ):
+      print(k)
+      x.requires_grad = True
+      parameters.append(x)
+    # elif k.split('.')[2] in ["layer4", "layer3", "layer2"]:
+    elif k.split('.')[2] in ["layer4"] and 'bn' not in k and 'down' not in k:
       print(k)
       x.requires_grad = True
       parameters.append(x)
@@ -351,15 +359,16 @@ def train_retinanet():
         lr_sched.step()
 
       print(colored(f'{cnt} STEP {loss.numpy()} || {time.time()-st} || LR: {optimizer.lr.item()}', 'magenta'))
-      # if cnt>10: 
-      #   train_step.reset()
-      #   break
-    # ****EVAL STEP
+    #   if cnt>2: 
+    #     train_step.reset()
+    #     break
+    # # ****EVAL STEP
     # print(colored(f'{epoch} START EVAL', 'cyan'))
     # coco_eval = COCOeval(coco_val.coco, iouType="bbox")
 
     # Tensor.training = False
     # # model.load_from_pretrained()
+    # model.load_checkpoint("./ckpts/retinanet_E23.safe")
     # mdlrun_false.reset()
     # train_step.reset()
     

@@ -4,6 +4,7 @@ import sys
 from typing import List, Dict
 from tinygrad import Tensor, dtypes, TinyJit
 from tinygrad.helpers import colored, flatten, get_child
+from tinygrad.nn.state import safe_load, load_state_dict
 import tinygrad.nn as nn
 from extra.models.resnet import ResNet
 import numpy as np
@@ -419,6 +420,9 @@ class RetinaNet:
       dat = v.detach().numpy()
       assert obj.shape == dat.shape, (k, obj.shape, dat.shape)
       obj.assign(dat)
+  def load_checkpoint(self, fn):
+    d = safe_load(fn)
+    load_state_dict(self, d)
 
   # predictions: (BS, (H1W1+...+HmWm)A, 4 + K)
   def postprocess_detections(self, predictions, input_size=(800, 800), image_sizes=None, orig_image_sizes=None, score_thresh=0.05, topk_candidates=1000, nms_thresh=0.5):
