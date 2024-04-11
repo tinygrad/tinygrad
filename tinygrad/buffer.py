@@ -34,7 +34,7 @@ class Buffer:
         self.base.allocate()
         return self # no reentrancy
       assert hasattr(self.allocator, "offset"), "device doesn't support offsets"
-      opaque = self.allocator.offset(self.base._buf, self.offset, self.nbytes)
+      opaque = self.allocator.offset(self.base._buf, self.offset, self.nbytes) # type: ignore
     self._buf = opaque if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
     if not self.device.startswith("DISK") and self.base is None: GlobalCounters.mem_used += self.nbytes
     for x in self.views: x.allocate()
