@@ -51,8 +51,6 @@ def train_resnet():
   lr_warmup_epochs  = config["lr_warmup_epochs"]  = getenv("WARMUP_EPOCHS", 5)
   decay             = config["decay"]             = getenv("DECAY", 2e-4)
 
-  loss_scaler       = config["LOSS_SCALER"]       = getenv("LOSS_SCALER", 128.0 if dtypes.default_float == dtypes.float16 else 1.0)
-
   target, achieved  = getenv("TARGET", 0.759), False
   eval_start_epoch  = getenv("EVAL_START_EPOCH", 0)
   eval_epochs       = getenv("EVAL_EPOCHS", 1)
@@ -60,7 +58,6 @@ def train_resnet():
   steps_in_train_epoch  = config["steps_in_train_epoch"]  = (len(get_train_files()) // BS)
   steps_in_val_epoch    = config["steps_in_val_epoch"]    = (len(get_val_files()) // EVAL_BS)
 
-  config["DEFAULT_FLOAT"] = dtypes.default_float.name
   config["BEAM"]    = BEAM.value
   config["WINO"]    = WINO.value
   config["SYNCBN"]  = getenv("SYNCBN")
@@ -88,6 +85,13 @@ def train_resnet():
     load_training_state(model, optimizer_group, scheduler_group, safe_load(ckpt))
     start_epoch = int(scheduler.epoch_counter.numpy().item() / steps_in_train_epoch)
     print(f"resuming from {ckpt} at epoch {start_epoch}")
+
+  # ** fp16 training with fp32 master
+  # we want to do initializations in fp32 and calculations in specified float
+  FLOAT = config["DEFAULT_FLOAT"] = getenv("FLOAT", "float32")
+  dtypes.default_float = getattr(dtypes, FLOAT.lower())
+  assert dtypes.is_float(dtypes.default_float), f"{FLOAT} is not a float dtype"
+  loss_scaler       = config["LOSS_SCALER"]       = getenv("LOSS_SCALER", 128.0 if dtypes.default_float in [dtypes.float16, dtypes.bfloat16] else 1.0)
 
   # ** init wandb **
   WANDB = getenv("WANDB")
