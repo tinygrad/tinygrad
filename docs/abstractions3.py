@@ -58,15 +58,39 @@ for si in schedule: print(str(si)[:80])
 # *****
 # 4. Lower a schedule.
 
-from tinygrad.device import JITRunner
+from tinygrad.device import JITRunner, Device, Compiled
 from tinygrad.shape.symbolic import sint
-from tinygrad.engine.realize import lower_schedule_item
+from tinygrad.ops import LoadOps, BufferOps
+from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.helpers import to_function_name
 
 @dataclass(frozen=True)
 class ExecItem:
-  prg: JITRunner         # wrapper class does [x._buf for x in ei.buffers], [sym_infer(x, var_vals) for x in vals]
-  buffers: List[Buffer]  # NOTE: this can have some outputs/inputs removed and will always be deduped
-  vals: List[sint]       # NOTE: this includes global_size and local_size as the first 6
+  prg: JITRunner               # wrapper class does [x._buf for x in ei.buffers], [sym_infer(x, var_vals) for x in vals]
+  buffers: Tuple[Buffer, ...]  # NOTE: this can have some outputs/inputs removed and will always be deduped
+  vals: Tuple[sint, ...]       # NOTE: this includes global_size and local_size as the first 6
+
+class CompiledKernel(JITRunner):
+  def __init__(self, name:str, prg:str, dname:str, op_estimate:sint=0, mem_estimate:sint=0):
+    super().__init__()
+
+def lower_schedule_item(si:ScheduleItem) -> ExecItem:
+  assert len(set(x.device for x in si.outputs+si.inputs)) == 1 or si.ast[0].op is LoadOps.COPY
+  dname = si.outputs[0].device
+  if si.ast[0].op is BufferOps.STORE:
+    k = Linearizer(*si.ast, opts=Device[dname].compiler.compiler_opts)
+    k.hand_coded_optimizations()
+    k.linearize()
+    ck = CompiledKernel(k.name, Device[dname].compiler.render(to_function_name(k.name), k.uops), dname, *k.uops.flops_mem())
+    return ExecItem(ck, list(si.outputs+si.inputs), k.global_size+k.local_size+k.uops.vars())
+  out, ast = si.outputs[0], si.ast[0]
+  if ast.op is LoadOps.COPY:
+    if hasattr(Device[out.device].allocator, 'transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]: return BufferXfer()
+    return BufferCopy()
+  if ast.op is LoadOps.CUSTOM: return CustomOp(ast.arg)
+  if ast.op is LoadOps.EMPTY: return EmptyOp()
+  raise RuntimeError(f"don't know how to lower {ast}")
+
 
 # To call: ei.prg(ei.buffers, ei.vals, var_vals: Dict[Variable, int])
 lowered: List[ExecItem] = [lower_schedule_item(si) for si in schedule]
