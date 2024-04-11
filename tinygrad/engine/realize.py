@@ -10,7 +10,8 @@ from tinygrad.shape.symbolic import Variable
 class ExecItem:
   prg: JITRunner
   rawbufs: List[Optional[Buffer]]
-  def run(self, var_vals:Dict[Variable, int]): self.prg.exec([cast(Buffer, x).ensure_allocated() for x in self.rawbufs], var_vals)
+  def run(self, var_vals:Optional[Dict[Variable, int]]=None):
+    self.prg.exec([cast(Buffer, x).ensure_allocated() for x in self.rawbufs], var_vals if var_vals is not None else {})
 
 class CustomOp(JITRunner):
   def __init__(self, fxn):
@@ -35,7 +36,6 @@ def lower_schedule_item(si:ScheduleItem) -> JITRunner:
   raise RuntimeError(f"don't know how to lower {ast}")
 
 def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[Variable, int]] = None):
-  if var_vals is None: var_vals = {}
   while len(schedule):
     si = schedule.pop(0)
     ExecItem(lower_schedule_item(si), list(si.outputs+si.inputs)).run(var_vals)
