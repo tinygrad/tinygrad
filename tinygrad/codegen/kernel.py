@@ -468,10 +468,14 @@ class Kernel:
       self.dont_use_locals = True
     elif opt.op is OptOps.PADTO:
       check(not self.vars, "does not work with symbolic shape")
-      check(axis < self.first_reduce, "cannot pad a reduce axis")
+      # ok to pad SUM if all parent ops have f(0) = 0
+      SAFE_OPS = {UnaryOps.SIN, UnaryOps.CAST, UnaryOps.NEG, UnaryOps.SQRT, BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL, *BufferOps}
+      if self.first_reduce <= axis < self.shape_len - self.upcasted:
+        check(self.reduceop.op is ReduceOps.SUM and all(op.op in SAFE_OPS for ops in self.reduceop.src for op in ops.lazyops), "cannot pad")
       padded = False
       for i,st in enumerate(self.sts):
-        check(self.sts[i].shape[axis] > amt//2, "pad adds more than double the work")
+        if self.sts[i].shape[axis] == 1: continue  # reduced
+        check(self.sts[i].shape[axis] > amt//2, f"pad adds more than double the work {self.sts[i].shape[axis]=} > {amt//2=}")
         if (ru := round_up(cast(int, self.sts[i].shape[axis]), cast(int, amt)) - self.sts[i].shape[axis]):
           # pad right seems to be faster
           self.sts[i] = st.pad(((0,0),) * axis + ((0,ru),) + ((0,0),) * (len(st.shape)-axis-1))
