@@ -1,7 +1,7 @@
 from __future__ import annotations
 import math, itertools
 from typing import NamedTuple, Optional, List, Tuple, cast, Dict, Union
-from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps
+from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, UNSAFE_PAD_OPS
 from tinygrad.device import Device, CompilerOptions
 from tinygrad.dtype import dtypes, ImageDType, DType
 from tinygrad.helpers import colored, ansilen, dedup, flatten, getenv, prod, DEBUG, round_up, all_int, get_contraction
@@ -469,9 +469,8 @@ class Kernel:
     elif opt.op is OptOps.PADTO:
       check(not self.vars, "does not work with symbolic shape")
       # ok to pad SUM if all parent ops have f(0) = 0
-      SAFE_OPS = {UnaryOps.SIN, UnaryOps.CAST, UnaryOps.NEG, UnaryOps.SQRT, BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL, *BufferOps}
       if self.first_reduce <= axis < self.shape_len - self.upcasted:
-        check(self.reduceop.op is ReduceOps.SUM and all(op.op in SAFE_OPS for ops in self.reduceop.src for op in ops.lazyops), "cannot pad")
+        check(self.reduceop.op is ReduceOps.SUM and all(op.op not in UNSAFE_PAD_OPS for ops in self.reduceop.src for op in ops.lazyops), "cannot pad")
       padded = False
       for i,st in enumerate(self.sts):
         if self.sts[i].shape[axis] == 1: continue  # reduced
