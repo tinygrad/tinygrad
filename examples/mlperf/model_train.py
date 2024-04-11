@@ -60,6 +60,7 @@ def train_resnet():
   steps_in_train_epoch  = config["steps_in_train_epoch"]  = (len(get_train_files()) // BS)
   steps_in_val_epoch    = config["steps_in_val_epoch"]    = (len(get_val_files()) // EVAL_BS)
 
+  config["DEFAULT_FLOAT"] = dtypes.default_float.name
   config["BEAM"]    = BEAM.value
   config["WINO"]    = WINO.value
   config["SYNCBN"]  = getenv("SYNCBN")
