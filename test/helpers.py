@@ -1,6 +1,6 @@
 import sys
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.device import JITRunner
+from tinygrad.device import Runner
 from tinygrad.dtype import DType
 from tinygrad.nn.state import get_parameters
 from tinygrad.helpers import Context, CI, OSX, getenv
@@ -14,7 +14,7 @@ def derandomize_model(model):
 def assert_jit_cache_len(fxn, expected_len):
   assert len(fxn.jit_cache) > 0
   # until we have a better way of typing the prg in ExecItem
-  if issubclass(type(fxn.jit_cache[0].prg), JITRunner) and not type(fxn.jit_cache[0].prg).__name__.endswith('Graph'):
+  if issubclass(type(fxn.jit_cache[0].prg), Runner) and not type(fxn.jit_cache[0].prg).__name__.endswith('Graph'):
     assert len(fxn.jit_cache) == expected_len
   else:
     assert len(fxn.jit_cache) == 1
