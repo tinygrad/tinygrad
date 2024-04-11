@@ -3,6 +3,7 @@ from typing import Any, Optional
 from dataclasses import dataclass
 from tinygrad.helpers import GlobalCounters, flat_mv
 from tinygrad.dtype import DType, ImageDType
+from weakref import WeakSet
 
 @dataclass(frozen=True, eq=True)
 class BufferOptions:
@@ -17,7 +18,9 @@ class Buffer:
     assert isinstance(dtype, DType)
     if isinstance(dtype, ImageDType): options = BufferOptions(image=dtype) # TODO: image hack shouldn't be here. where should it be?
     self.device, self.size, self.dtype, self.options, self.base, self.offset = device, size, dtype, options, base, offset
-    if opaque is not None: self.allocate(opaque)
+    self.views: WeakSet[Buffer] = WeakSet()
+    if self.base is not None: self.base.views.add(self)
+    if opaque is not None or (self.base is not None and hasattr(self.base, "_buf")): self.allocate(opaque)
     if initial_value is not None:
       self.allocate()
       self.copyin(memoryview(initial_value))
@@ -27,11 +30,14 @@ class Buffer:
     from tinygrad.device import Device
     self.allocator = Device[self.device].allocator
     if self.base is not None:
-      assert hasattr(self.base, "_buf"), "attempting to allocate a view of not yet allocated Buffer"
+      if not hasattr(self.base, "_buf"):
+        self.base.allocate()
+        return self # no reentrancy
       assert hasattr(self.allocator, "offset"), "device doesn't support offsets"
-      opaque = self.allocator.offset(self.base._buf, self.offset, self.nbytes) # type: ignore # mypy bug (?)
+      opaque = self.allocator.offset(self.base._buf, self.offset, self.nbytes)
     self._buf = opaque if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
     if not self.device.startswith("DISK") and self.base is None: GlobalCounters.mem_used += self.nbytes
+    for x in self.views: x.allocate()
     return self
   def view(self, offset:int=0, size:Optional[int]=None, dtype:Optional[DType]=None) -> Buffer:
     dtype, base, size = dtype or self.dtype, self.base or self, self.nbytes if size is None else size
@@ -49,6 +55,7 @@ class Buffer:
   def __del__(self):
     if not hasattr(self, '_buf') or self.base is not None: return
     if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
+    assert len(self.views) == 0, "attempted to free base that has views" # this should never ever happen because views hold strong ref to their base
     self.allocator.free(self._buf, self.nbytes, self.options)
   def __repr__(self):
     return f"<buf real:{hasattr(self, '_buf')} device:{self.device} size:{self.size} dtype:{self.dtype}" + \
