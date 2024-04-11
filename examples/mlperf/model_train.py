@@ -235,7 +235,7 @@ def train_retinanet():
   from contextlib import redirect_stdout
   import numpy as np
   EPOCHS = 10
-  BS = 2*32
+  BS = 2*20
   BS_EVAL = 2*15
   WARMUP_EPOCHS = 1
   WARMUP_FACTOR = 0.001
@@ -341,8 +341,8 @@ def train_retinanet():
       labels_temp = Tensor.stack(labels_temp)
       # print('matched_IDXS', matched_idxs.shape, len(Y_boxes))
       matched_idxs.shard_(GPUS, axis=0)
-      Y_boxes_p.shard_(GPUS, axis=0)
-      Y_labels_p.shard_(GPUS, axis=0)
+      # Y_boxes_p.shard_(GPUS, axis=0)
+      # Y_labels_p.shard_(GPUS, axis=0)
       boxes_temp.shard_(GPUS, axis=0)
       labels_temp.shard_(GPUS, axis=0)
       loss = train_step(X, Y_boxes_p, Y_labels_p, matched_idxs, boxes_temp, labels_temp)
