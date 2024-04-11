@@ -71,21 +71,29 @@ class ExecItem:
   prg: JITRunner               # wrapper class does [x._buf for x in ei.buffers], [sym_infer(x, var_vals) for x in vals]
   buffers: List[Buffer]        # NOTE: this can have some outputs/inputs removed and will always be deduped
   vals: Tuple[sint, ...] = ()  # NOTE: this includes global_size and local_size as the first 6
+  op_estimate: sint = 0
+  mem_estimate: sint = 0
 
 class CompiledKernel(JITRunner):
-  def __init__(self, name:str, prg:str, dname:str, op_estimate:sint=0, mem_estimate:sint=0, precompiled:Optional[bytes]=None, has_gl=False):
+  def __init__(self, name:str, prg:str, dname:str, op_estimate:sint=0, mem_estimate:sint=0, precompiled:Optional[bytes]=None):
     super().__init__()
-    self.name, self.prg, self.dname, self.op_estimate, self.mem_estimate, self.has_gl = name, prg, dname, op_estimate, mem_estimate, has_gl
+    self.name, self.prg, self.dname, self.op_estimate, self.mem_estimate, self.has_gl = name, prg, dname, op_estimate, mem_estimate
     self.lib = precompiled if precompiled is not None else Device[dname].compiler.compile_cached(prg)
     self.clprg = Device[dname].runtime(to_function_name(name), self.lib)
+    self.has_gl = Device[dname].compiler.compiler_opts.has_local
     self.first_run = True
+  def __reduce__(self): return self.__class__, (self.name, self.prg, self.dname, self.op_estimate, self.mem_estimate, self.lib)
   def __call__(self, rawbufs: List[Buffer], vals: List[int], wait=False, jit=False, do_update_stats=True) -> Optional[float]:
-    if self.has_gl: et = self.clprg(*[x._buf for x in rawbufs], global_size=vals[0:3], local_size=vals[3:6], vals=vals[6:], wait=wait or DEBUG>=2)
-    else: et = self.clprg(*[x._buf for x in rawbufs], vals=vals, wait=wait or DEBUG>=2)
+    internal_buffers = [x._buf for x in rawbufs]
+    if self.has_gl: et = self.clprg(*internal_buffers, global_size=vals[0:3], local_size=vals[3:6], vals=vals[6:], wait=wait or DEBUG>=2)
+    else: et = self.clprg(*internal_buffers, vals=vals, wait=wait or DEBUG>=2)
     if do_update_stats:
+      # TODO: remove var_vals from here
       update_stats(self.name, self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit, device=self.dname, first_run=self.first_run)
     self.first_run = False
     return et
+
+def pad_if_not_none(x, val=None, cnt=0): return [] if x is None else (x + [val]*max(0, cnt-len(x)))
 
 def lower_schedule_item(si:ScheduleItem) -> ExecItem:
   assert len(set(x.device for x in si.outputs+si.inputs)) == 1 or si.ast[0].op is LoadOps.COPY
@@ -95,12 +103,8 @@ def lower_schedule_item(si:ScheduleItem) -> ExecItem:
     k.hand_coded_optimizations()
     k.linearize()
     prg = Device[dname].compiler.render(to_function_name(k.name), k.uops)
-    ck = CompiledKernel(k.name, prg, dname, *k.uops.flops_mem(), has_gl=k.global_size is not None)
-    # TODO: move to linearizer?
-    gl_vals = []
-    if k.global_size is not None: gl_vals += k.global_size + [1]*(3-len(k.global_size))
-    if k.local_size is not None: gl_vals += k.local_size + [1]*(3-len(k.local_size))
-    return ExecItem(ck, buffers, gl_vals + k.uops.vars())
+    ck = CompiledKernel(k.name, prg, dname)
+    return ExecItem(ck, buffers, pad_if_not_none(k.global_size, 1, 3)+pad_if_not_none(k.local_size, 1, 3)+k.uops.vars(), *k.uops.flops_mem())
   out, ast = si.outputs[0], si.ast[0]
   if ast.op is LoadOps.COPY:
     use_xfer = hasattr(Device[out.device].allocator, 'transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]
