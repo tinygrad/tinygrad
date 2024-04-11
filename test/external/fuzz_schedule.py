@@ -6,6 +6,7 @@ from tinygrad.helpers import DEBUG, colored
 from tinygrad.lazy import LazyBuffer
 from tinygrad.engine.schedule import graph_schedule
 from tinygrad.ops import ScheduleItem
+from tinygrad.tensor import Tensor
 
 def fuzz_schedule(outs: List[LazyBuffer]):
   graph, in_degree, prescheduled = graph_schedule(outs, seen:=set())
@@ -22,7 +23,10 @@ def fuzz_schedule(outs: List[LazyBuffer]):
       schedules[i].append(si:=ScheduleItem(ps.ast, tuple(rawbufs_map[x] for x in ps.outputs if x.size != 0), inputs))
       fuzz_items[key].append(si)
 
+  # seed is the same between runs
+  seed = Tensor._seed
   for i, schedule in enumerate(schedules):
+    Tensor.manual_seed(seed)
     if DEBUG >= 2: print(f"toposort permutation {i}")
     run_schedule(schedule)
 
