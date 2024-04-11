@@ -236,10 +236,10 @@ def train_retinanet():
   import numpy as np
   EPOCHS = 100
   # BS = 40 # A100x2 
-  BS = 5*8
-  # BS = 2
-  BS_EVAL = 2*15
-  # BS_EVAL = 2
+  # BS = 5*8
+  BS = 20
+  # BS_EVAL = 2*15
+  BS_EVAL = 2*4
   WARMUP_EPOCHS = 1
   WARMUP_FACTOR = 0.001
   LR = 0.0001
@@ -276,8 +276,20 @@ def train_retinanet():
       print(k)
       x.requires_grad = True
       parameters.append(x)
-    # elif k.split('.')[2] in ["layer4", "layer3", "layer2"]:
-    elif k.split('.')[2] in ["layer4"] and 'bn' not in k and 'down' not in k:
+    elif k.split('.')[2] in ["layer4", "layer3", "layer2"] and 'bn' not in k and 'weight' in k:
+    # elif k.split('.')[2] in ["layer4"] and 'bn' not in k and 'down' not in k:
+      if 'downsample' in k:
+        if 'downsample.0' in k:
+          print(k)
+          x.requires_grad = True
+          parameters.append(x)
+        else:
+          x.requires_grad = False
+      else:
+        print(k)
+        x.requires_grad = True
+        parameters.append(x)
+    elif 'fpn' in k:
       print(k)
       x.requires_grad = True
       parameters.append(x)
@@ -364,18 +376,18 @@ def train_retinanet():
     #     break
     # # ****EVAL STEP
     # print(colored(f'{epoch} START EVAL', 'cyan'))
-    # coco_eval = COCOeval(coco_val.coco, iouType="bbox")
+    # coco_eval = COCOeval(coco_train.coco, iouType="bbox")
 
     # Tensor.training = False
-    # # model.load_from_pretrained()
-    # model.load_checkpoint("./ckpts/retinanet_E23.safe")
+    # model.load_from_pretrained()
+    # # model.load_checkpoint("./ckpts/retinanet_E98.safe")
     # mdlrun_false.reset()
     # train_step.reset()
     
     # st = time.time()
     # coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
     # cnt = 0
-    # for X, targets in iterate_val(coco_val, BS_EVAL):
+    # for X, targets in iterate_val(coco_train, BS_EVAL):
     #   X.shard_(GPUS, axis=0)
     #   orig_shapes= []
     #   for tt in targets:
@@ -396,7 +408,7 @@ def train_retinanet():
     #   # IF COCO_RESULTS LOWER THAN THRESH, ERROR IN EVAL
     #   # REFERNCE ASSUMES AFTER ONE EPOCH, THRESH WILL BE MET
     #   with redirect_stdout(None):
-    #     coco_eval.cocoDt = coco_val.coco.loadRes(coco_results)
+    #     coco_eval.cocoDt = coco_train.coco.loadRes(coco_results)
     #     coco_eval.params.imgIds = img_ids
     #     coco_eval.evaluate()
     #   evaluated_imgs.extend(img_ids)
@@ -412,6 +424,7 @@ def train_retinanet():
     # print(colored(f'{epoch} EVAL_ACC {eval_acc} || {time.time()-st}', 'green'))
     # mdlrun.reset()
     # mdlrun_false.reset()
+    # sys.exit()
 
     if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
     fn = f"./ckpts/retinanet_E{epoch}.safe"
