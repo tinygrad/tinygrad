@@ -2,14 +2,14 @@ from collections import defaultdict
 from typing import DefaultDict, List, Set, TypeVar, Dict
 from tinygrad.buffer import Buffer
 from tinygrad.engine.realize import run_schedule
-from tinygrad.helpers import DEBUG, colored, getenv
+from tinygrad.helpers import DEBUG, GlobalCounters, colored, getenv
 from tinygrad.lazy import LazyBuffer
-from tinygrad.engine.schedule import graph_schedule
+from tinygrad.engine.schedule import _graph_schedule
 from tinygrad.ops import ScheduleItem
 from tinygrad.tensor import Tensor
 
 def fuzz_schedule(outs: List[LazyBuffer]):
-  graph, in_degree, prescheduled = graph_schedule(outs, seen:=set())
+  graph, in_degree, prescheduled = _graph_schedule(outs, seen:=set())
   sorts = find_all_sorts(graph, in_degree)
   if DEBUG >= 2: print(colored(f"fuzzing {len(sorts)} toposorts", "yellow"))
   schedules: List[List[ScheduleItem]] = [[] for _ in sorts]
@@ -29,12 +29,12 @@ def fuzz_schedule(outs: List[LazyBuffer]):
     Tensor.manual_seed(seed)
     if DEBUG >= 2: print(f"toposort permutation {i}")
     run_schedule(schedule)
+    GlobalCounters.reset()
 
   for items in fuzz_items.values():
     raw_outs = [[out.as_buffer().tobytes() for out in si.outputs] for si in items]
     assert all(o == raw_outs[0] for o in raw_outs)
   if DEBUG >= 2: print(colored("all toposorts passed", "green"))
-
 
 T = TypeVar("T")
 def find_all_sorts(graph:DefaultDict[T, List[T]], in_degree:DefaultDict[T, int]) -> List[List[T]]:
