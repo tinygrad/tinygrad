@@ -5,8 +5,8 @@ from tinygrad.buffer import Buffer, BufferOptions
 from tinygrad.device import Compiled, CompiledASTRunner, BufferXfer, MultiDeviceJITGraph, update_stats, Device
 from tinygrad.shape.symbolic import Variable
 from tinygrad.runtime.ops_hsa import HSADevice, PROFILE, Profiler
-from tinygrad.engine.jit import JitItem, get_input_replace, get_jit_stats, \
-                                  get_jc_idxs_with_updatable_launch_dims, get_jc_idxs_with_updatable_var_vals
+from tinygrad.engine.realize import ExecItem
+from tinygrad.engine.jit import get_input_replace, get_jit_stats, get_jc_idxs_with_updatable_launch_dims, get_jc_idxs_with_updatable_var_vals
 import tinygrad.runtime.autogen.hsa as hsa
 from tinygrad.runtime.driver.hsa import check, AQLQueue, AQL_PACKET_SIZE, EMPTY_SIGNAL
 
@@ -26,7 +26,7 @@ class VirtAQLQueue(AQLQueue):
     self.available_packet_slots -= 1
 
 class HSAGraph(MultiDeviceJITGraph):
-  def __init__(self, jit_cache: List[JitItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
+  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
     self.jit_cache = jit_cache
     self.input_replace = get_input_replace(jit_cache, input_rawbuffers)
     self.op_estimate, self.mem_estimate = get_jit_stats(jit_cache) #type:ignore
