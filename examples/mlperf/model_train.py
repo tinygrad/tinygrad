@@ -109,12 +109,12 @@ def train_resnet():
     X = normalize(X)
     out = model.forward(X)
     loss = out.cast(dtypes.float32).sparse_categorical_crossentropy(Y, label_smoothing=0.1)
-    top_1 = (out.detach().argmax(-1) == Y).sum()
+    top_1 = (out.argmax(-1) == Y).sum()
     (loss * loss_scaler).backward()
     for t in optimizer_group.params: t.grad = t.grad.contiguous() / loss_scaler
     optimizer_group.step()
     scheduler_group.step()
-    return loss.detach().realize(), top_1.realize()
+    return loss.realize(), top_1.realize()
   @TinyJit
   def eval_step(X, Y):
     X = normalize(X)
@@ -183,7 +183,6 @@ def train_resnet():
       eval_times = []
       eval_top_1_acc = []
       Tensor.training = False
-      Tensor.no_grad = True
 
       it = iter(tqdm(batch_load_resnet(batch_size=EVAL_BS, val=True, shuffle=False), total=steps_in_val_epoch))
       proc = data_get(it)
@@ -206,7 +205,6 @@ def train_resnet():
         et = time.time()
         eval_times.append(et - st)
 
-      Tensor.no_grad = False
       eval_step.reset()
       total_loss = sum(eval_loss) / len(eval_loss)
       total_top_1 = sum(eval_top_1_acc) / len(eval_top_1_acc)
