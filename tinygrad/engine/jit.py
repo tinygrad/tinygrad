@@ -4,48 +4,43 @@ import functools, itertools, operator
 from tinygrad.nn.state import get_parameters
 from tinygrad.dtype import DType
 from tinygrad.helpers import DEBUG, merge_dicts, getenv, all_int, Context, GRAPH, flatten, GraphException
-from tinygrad.device import Compiled, JITRunner, CompiledASTRunner, Buffer, BufferXfer, MultiDeviceJITGraph, Device
+from tinygrad.device import Compiled, Runner, CompiledASTRunner, Buffer, BufferXfer, MultiDeviceJITGraph, Device
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
 from tinygrad.features.multi import MultiLazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, sint
+from tinygrad.engine.realize import ExecItem
 from weakref import ref, WeakKeyDictionary
-from dataclasses import dataclass
 
-@dataclass(frozen=True)
-class JitItem:
-  prg: JITRunner  # or a graph executor like MetalGraph
-  rawbufs: List[Optional[Buffer]]
-
-def get_jit_stats(jit_cache: List[JitItem]) -> Tuple[sint, int]:
+def get_jit_stats(jit_cache: List[ExecItem]) -> Tuple[sint, int]:
   return functools.reduce(operator.add, [ji.prg.op_estimate for ji in jit_cache if isinstance(ji.prg, CompiledASTRunner)], 0), \
          functools.reduce(operator.add, [ji.prg.mem_estimate for ji in jit_cache if isinstance(ji.prg, CompiledASTRunner)], 0)
-def get_input_replace(jit_cache: List[JitItem], input_rawbuffers:List[Buffer]) -> Dict[Tuple[int, int], int]:
+def get_input_replace(jit_cache: List[ExecItem], input_rawbuffers:List[Buffer]) -> Dict[Tuple[int, int], int]:
   input_replace: Dict[Tuple[int, int], int] = {}
   for j,ji in enumerate(jit_cache):
     for i,a in enumerate(ji.rawbufs):
       if a in input_rawbuffers:
         input_replace[(j,i)] = input_rawbuffers.index(a)
   return input_replace
-def get_jc_idxs_with_updatable_launch_dims(jit_cache: List[JitItem]) -> List[int]:
+def get_jc_idxs_with_updatable_launch_dims(jit_cache: List[ExecItem]) -> List[int]:
   return [j for j,ji in enumerate(jit_cache) if isinstance(ji.prg, CompiledASTRunner) and ((ji.prg.global_size and not all_int(ji.prg.global_size)) or (ji.prg.local_size and not all_int(ji.prg.local_size)))]  # noqa: E501
-def get_jc_idxs_with_updatable_var_vals(jit_cache: List[JitItem]) -> List[int]:
+def get_jc_idxs_with_updatable_var_vals(jit_cache: List[ExecItem]) -> List[int]:
   return [j for j,ji in enumerate(jit_cache) if isinstance(ji.prg, CompiledASTRunner) and ji.prg.vars]
 
-def apply_graph_to_jit(jit_cache: List[JitItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]) -> List[JitItem]:
+def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]) -> List[ExecItem]:
   # Split JIT cache into batches for faster graph execution.
   # This allows the accelerator to run some batches while subsequent graphs are still being updated.
   max_batch_size = getenv("JIT_BATCH_SIZE", 32)
-  graphed_jit_cache: List[JitItem] = []
-  current_batch: List[JitItem] = []
+  graphed_jit_cache: List[ExecItem] = []
+  current_batch: List[ExecItem] = []
   current_device: Optional[Compiled] = None
 
   def flush_batch():
     nonlocal current_batch, current_device, max_batch_size
     try:
       if len(current_batch) <= 1 or current_device is None: raise GraphException("only one kernel doesn't graph")
-      graphed_jit_cache.append(JitItem(current_device.graph(current_batch, input_rawbuffers, var_vals), cast(List[Optional[Buffer]], input_rawbuffers))) # noqa: E501
+      graphed_jit_cache.append(ExecItem(current_device.graph(current_batch, input_rawbuffers, var_vals), cast(List[Optional[Buffer]], input_rawbuffers))) # noqa: E501
       max_batch_size *= 2
       if DEBUG >= 2: print(f"\tJIT GRAPHing batch with {len(current_batch)} kernels on device {current_device}")
     except GraphException as e:
@@ -82,7 +77,7 @@ class TinyJit(Generic[ReturnType]):
     self.reset()
 
   def reset(self):
-    self.jit_cache: List[JitItem] = []
+    self.jit_cache: List[ExecItem] = []
     self.input_replace: Dict[Tuple[int, int], int] = {}
     self.cnt: int = 0
     self.ret: Optional[ReturnType] = None
@@ -162,7 +157,7 @@ class PlaceHolder:
 
 class _CacheCollector:
   def __init__(self):
-    self.cache: Optional[List[Tuple[JITRunner, List[Union[Buffer, PlaceHolder]]]]] = None
+    self.cache: Optional[List[Tuple[Runner, List[Union[Buffer, PlaceHolder]]]]] = None
 
   def start(self, var_vals:Optional[Dict[Variable, int]]=None):
     self.cache = []
@@ -179,9 +174,9 @@ class _CacheCollector:
 
     self.cache.append((prg, [self.placeholders.get(x, x) if isinstance(x, Buffer) else x for x in rawbufs]))
 
-  def finish(self) -> List[JitItem]:
+  def finish(self) -> List[ExecItem]:
     if self.cache is None: return []
     buffer_cache: Dict[PlaceHolder, Buffer] = {}
     saved_cache, self.cache = self.cache, None
-    return [JitItem(prg, [x.alloc_if_needed(buffer_cache) if isinstance(x, PlaceHolder) else x for x in pl]) for prg, pl in saved_cache]
+    return [ExecItem(prg, [x.alloc_if_needed(buffer_cache) if isinstance(x, PlaceHolder) else x for x in pl]) for prg, pl in saved_cache]
 CacheCollector = _CacheCollector()

@@ -3,12 +3,13 @@ import Metal
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import dedup, unwrap2, GraphException
 from tinygrad.device import Buffer, CompiledASTRunner, update_stats
-from tinygrad.engine.jit import JitItem, get_input_replace, get_jit_stats, get_jc_idxs_with_updatable_launch_dims
+from tinygrad.engine.realize import ExecItem
+from tinygrad.engine.jit import get_input_replace, get_jit_stats, get_jc_idxs_with_updatable_launch_dims
 from tinygrad.shape.symbolic import Variable
 from tinygrad.runtime.ops_metal import MetalDevice, wait_check
 
 class MetalGraph:
-  def __init__(self, device:MetalDevice, jit_cache: List[JitItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
+  def __init__(self, device:MetalDevice, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
     if not all(isinstance(ji.prg, CompiledASTRunner) for ji in jit_cache): raise GraphException
 
     self.jit_cache = jit_cache
