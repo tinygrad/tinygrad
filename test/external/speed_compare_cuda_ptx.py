@@ -1,6 +1,6 @@
 import itertools
 from tinygrad import Device
-from tinygrad.device import CompiledASTRunner
+from tinygrad.device import CompiledRunner
 from tinygrad.helpers import to_function_name, getenv, colored
 from extra.optimization.helpers import load_worlds, ast_str_to_lin
 from tinygrad.features.search import bufs_from_lin
@@ -38,7 +38,7 @@ if __name__ == "__main__":
     lin.linearize()
     ptx_src = ptx.render(to_function_name(lin.name), lin.uops)
     try:
-      ptx_prg = CompiledASTRunner(lin.name, ptx_src, "CUDA", lin.global_size, lin.local_size, lin.uops.vars(), precompiled=ptx.compile(ptx_src))
+      ptx_prg = CompiledRunner(lin.name, ptx_src, "CUDA", lin.global_size, lin.local_size, lin.uops.vars(), precompiled=ptx.compile(ptx_src))
     except RuntimeError:
       print("PTX FAIL")
       continue

@@ -4,7 +4,7 @@ import functools, itertools, operator
 from tinygrad.nn.state import get_parameters
 from tinygrad.dtype import DType
 from tinygrad.helpers import DEBUG, merge_dicts, getenv, all_int, Context, GRAPH, flatten, GraphException
-from tinygrad.device import Compiled, Runner, CompiledASTRunner, Buffer, BufferXfer, MultiDeviceJITGraph, Device
+from tinygrad.device import Compiled, Runner, CompiledRunner, Buffer, BufferXfer, MultiDeviceJITGraph, Device
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
 from tinygrad.features.multi import MultiLazyBuffer
@@ -14,8 +14,8 @@ from tinygrad.engine.realize import ExecItem
 from weakref import ref, WeakKeyDictionary
 
 def get_jit_stats(jit_cache: List[ExecItem]) -> Tuple[sint, int]:
-  return functools.reduce(operator.add, [ji.prg.op_estimate for ji in jit_cache if isinstance(ji.prg, CompiledASTRunner)], 0), \
-         functools.reduce(operator.add, [ji.prg.mem_estimate for ji in jit_cache if isinstance(ji.prg, CompiledASTRunner)], 0)
+  return functools.reduce(operator.add, [ji.prg.op_estimate for ji in jit_cache if isinstance(ji.prg, CompiledRunner)], 0), \
+         functools.reduce(operator.add, [ji.prg.mem_estimate for ji in jit_cache if isinstance(ji.prg, CompiledRunner)], 0)
 def get_input_replace(jit_cache: List[ExecItem], input_rawbuffers:List[Buffer]) -> Dict[Tuple[int, int], int]:
   input_replace: Dict[Tuple[int, int], int] = {}
   for j,ji in enumerate(jit_cache):
@@ -24,9 +24,9 @@ def get_input_replace(jit_cache: List[ExecItem], input_rawbuffers:List[Buffer]) 
         input_replace[(j,i)] = input_rawbuffers.index(a)
   return input_replace
 def get_jc_idxs_with_updatable_launch_dims(jit_cache: List[ExecItem]) -> List[int]:
-  return [j for j,ji in enumerate(jit_cache) if isinstance(ji.prg, CompiledASTRunner) and ((ji.prg.global_size and not all_int(ji.prg.global_size)) or (ji.prg.local_size and not all_int(ji.prg.local_size)))]  # noqa: E501
+  return [j for j,ji in enumerate(jit_cache) if isinstance(ji.prg, CompiledRunner) and ((ji.prg.global_size and not all_int(ji.prg.global_size)) or (ji.prg.local_size and not all_int(ji.prg.local_size)))]  # noqa: E501
 def get_jc_idxs_with_updatable_var_vals(jit_cache: List[ExecItem]) -> List[int]:
-  return [j for j,ji in enumerate(jit_cache) if isinstance(ji.prg, CompiledASTRunner) and ji.prg.vars]
+  return [j for j,ji in enumerate(jit_cache) if isinstance(ji.prg, CompiledRunner) and ji.prg.vars]
 
 def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]) -> List[ExecItem]:
   # Split JIT cache into batches for faster graph execution.
@@ -51,7 +51,7 @@ def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]
 
   for ji in jit_cache:
     ji_graph_dev: Optional[Compiled] = None # device on which the ji will be graphed. Not graphed if None.
-    if isinstance(ji.prg, CompiledASTRunner): ji_graph_dev = ji.prg.device
+    if isinstance(ji.prg, CompiledRunner): ji_graph_dev = ji.prg.device
     elif isinstance(ji.prg, BufferXfer) and ji.rawbufs[0] and ji.rawbufs[0].device.split(":", 1)[0] in {"HSA", "CUDA"}:
       ji_graph_dev = Device[ji.rawbufs[0].device]
 
@@ -169,7 +169,7 @@ class _CacheCollector:
     for k,v in var_vals.items(): assert k in self.var_vals and self.var_vals[k] == v, f"var_vals {k} mismatch {v} != {self.var_vals.get(k)}"
 
     # Buffer optimization is allowed only for kernel operations. Avoids for copies (prevents parallelism) and syncs (incorrect buffer reuse).
-    if isinstance(prg, CompiledASTRunner):
+    if isinstance(prg, CompiledRunner):
       for i in range(prg.outcount): self.placeholders[rawbufs[i]] = PlaceHolder(rawbufs[i])
 
     self.cache.append((prg, [self.placeholders.get(x, x) if isinstance(x, Buffer) else x for x in rawbufs]))
