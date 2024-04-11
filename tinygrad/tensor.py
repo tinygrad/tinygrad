@@ -7,8 +7,7 @@ from collections import defaultdict
 import numpy as np
 
 from tinygrad.dtype import DType, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype
-from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, fully_flatten, flat_mv, argsort
-from tinygrad.helpers import IMAGE, DEBUG, WINO, THREEFRY
+from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, fully_flatten, argsort, IMAGE, DEBUG, WINO, THREEFRY
 from tinygrad.lazy import LazyBuffer
 from tinygrad.features.multi import MultiLazyBuffer
 from tinygrad.ops import LoadOps
@@ -16,7 +15,7 @@ from tinygrad.buffer import Buffer, BufferOptions
 from tinygrad.device import Device
 from tinygrad.shape.symbolic import sint
 from tinygrad.engine.realize import run_schedule
-from tinygrad.engine.schedule import create_schedule
+from tinygrad.engine.schedule import create_schedule_with_vars
 
 # **** start with two base classes, Tensor and Function ****
 
@@ -45,9 +44,9 @@ def _loadop(op, shape:Tuple[sint,...], dtype:DType, device:Union[str, Tuple[str,
   return MultiLazyBuffer([LazyBuffer.loadop(op, shape, dtype, d, arg, src) for d in device], None)
 
 def _fromcpu(x: np.ndarray) -> LazyBuffer:
-  ret = LazyBuffer.loadop(LoadOps.EMPTY, x.shape, dtypes.from_np(x.dtype), "EXT")
+  ret = LazyBuffer.loadop(LoadOps.EMPTY, x.shape, dtypes.from_np(x.dtype), "NPY")
   # fake realize
-  ret.buffer.allocate((memoryview(bytearray()), None) if x.size == 0 else (flat_mv(np.require(x, requirements='C').data), x))
+  ret.buffer.allocate(x)
   del ret.srcs
   return ret
 
@@ -139,7 +138,7 @@ class Tensor:
 
   @staticmethod
   def corealize(lst:Iterable[Tensor]):
-    run_schedule(create_schedule(flatten([x.lazydata.lbs if isinstance(x.lazydata, MultiLazyBuffer) else [x.lazydata] for x in lst])))
+    run_schedule(*create_schedule_with_vars(flatten([x.lazydata.lbs if isinstance(x.lazydata, MultiLazyBuffer) else [x.lazydata] for x in lst])))
 
   def realize(self) -> Tensor:
     Tensor.corealize([self])
@@ -155,7 +154,7 @@ class Tensor:
   def assign(self, x) -> Tensor:
     # TODO: this is a hack for writing to DISK. remove with working assign
     if isinstance(self.device, str) and self.device.startswith("DISK"):
-      if x.__class__ is not Tensor: x = Tensor(x, device="EXT", dtype=self.dtype)
+      if x.__class__ is not Tensor: x = Tensor(x, device="NPY", dtype=self.dtype)
       self.contiguous().realize().lazydata.base.realized.copyin(x.numpy().data)
       return self
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
@@ -405,9 +404,10 @@ class Tensor:
   #   3. None indexing (no copy)
   #     - reshape (inject) a dim at the dim where there's None
   #   4. Tensor indexing (copy)
-  #     - use Tensor.arange == tensor_index to create a mask
-  #     - apply mask to self by mask * self for dims where index is a tensor
-  #     - (mask * self).sum(dim) to reduce to correct shape
+  #     - use Tensor.arange == tensor_index to create masks for dims with Tensors (adds a dim for each mask)
+  #     - combine masks together with mul
+  #     - apply mask to self by mask * self
+  #     - sum reduce away the extra dims added from creating masks
   # Tiny Things:
   #   1. Supported indices: Union[int, slice, Tensor, None, List, Tuple, Ellipsis]
   #     - for any list, List[Union[List, Tuple, int]], must have homogeneous shape
@@ -489,32 +489,38 @@ class Tensor:
 
       # track tensor_dim and tensor_index using a dict
       # calc_dim to get dim and use that to normalize the negative tensor indices
-      idx: Dict[int,Tensor] = {(dim := calc_dim(td)):(tensor<0).where(ret.shape[dim],0) + tensor for td,tensor in zip(type_dim[Tensor],tensor_index)}
+      idx: Dict[int,Tensor] = {(dim := calc_dim(td)):(tensor<0).where(ret.shape[dim],0) + tensor for td,tensor in zip(type_dim[Tensor], tensor_index)}
 
-      # compute sum_dim, arange, and idx
-      max_idx_dim, first_dim, last_dim = max(i.ndim for i in idx.values()), min(idx.keys()), max(idx.keys())
-      sum_dim = tuple(d if n==0 else d+max_idx_dim-n for n,d in enumerate(idx.keys()))
-      arange = [Tensor.arange(ret.shape[d], requires_grad=False, device=self.device).reshape(ret.shape[d], *[1]*(ret.ndim+max_idx_dim-n-sd-1)) \
-                for n,(sd,d) in enumerate(zip(sum_dim, idx.keys()))]
-      reshaped_idx = [i.reshape(i.shape + (1,)*(ret.ndim - first_dim - (n or 1))) for n,i in enumerate(idx.values())]
-      ret = ret.reshape(ret.shape[:first_dim+1] + (1,)*max_idx_dim + ret.shape[first_dim+1:])
+      masks, first_dim, last_dim = [], min(idx.keys()), max(idx.keys())
+      pre_reduce_shape = ret.shape[:first_dim] + (big_shape := broadcast_shape(*(t.shape for t in idx.values()))) + ret.shape[first_dim:]
 
-      # iteratively eq -> mul -> sum fancy index
-      try:
-        for a,i,sd in zip(arange, reshaped_idx, sum_dim): ret = (a==i).mul(ret).sum(sd)
-      except ValueError as exc: raise IndexError("cannot broadcast indices") from exc
+      # create masks
+      for dim, i in idx.items():
+        try: i = i.reshape(i.shape + (1,)*(ret.ndim - first_dim)).expand(pre_reduce_shape)
+        except ValueError as exc: raise IndexError("cannot broadcast indices") from exc
+        a = Tensor.arange(ret.shape[dim], device=self.device, requires_grad=False).reshape((ret.shape[dim],) + (1,)*(ret.ndim - dim - 1))
+        masks.append(i == a)
+
+      # reduce masks to 1 mask
+      mask = functools.reduce(lambda x,y: x.mul(y), masks)
+
+      # inject 1's for the extra dims added in create masks
+      sh = ret.shape[:first_dim] + (1,) * len(big_shape) + ret.shape[first_dim:]
+      # sum reduce the extra dims introduced in create masks
+      ret = (ret.reshape(sh) * mask).sum(tuple(i + len(big_shape) for i in idx.keys()))
 
       # special permute case
       if first_dim != 0 and len(idx) != 1 and tuple(idx.keys()) != tuple(range(first_dim, last_dim+1)):
-        ret_dims = list(range(ret.ndim))
-        ret = ret.permute(ret_dims[first_dim:first_dim+max_idx_dim] + ret_dims[:first_dim] + ret_dims[first_dim+max_idx_dim:])
+        ret = ret.permute(*range(first_dim, first_dim+len(big_shape)), *range(0, first_dim), *range(first_dim+len(big_shape), ret.ndim))
     return ret
 
-  def __setitem__(self, indices, v:Tensor):
+  def __setitem__(self, indices, v:Union[Tensor, ConstType]):
     if isinstance(self.device, str) and self.device.startswith("DISK"): return self.__getitem__(indices).assign(v)
-    # TODO: support python const v
     # TODO: broadcast v to the shape here, refactor for const v and one way broadcast_shape
-    assign_to = self.__getitem__(indices)
+    if not isinstance(v, Tensor): v = Tensor(v, self.device, self.dtype)
+    assign_to = self.realize().__getitem__(indices)
+    # NOTE: we check that indices is valid first
+    assert self.lazydata.contiguous(), "setitem target needs to be contiguous"
     # NOTE: contiguous to prevent const folding.
     return assign_to.assign(v._broadcast_to(broadcast_shape(assign_to.shape, v.shape)).contiguous()).realize()
 
@@ -836,6 +842,7 @@ class Tensor:
   def floor(self: Tensor) -> Tensor: return (self < (b := self.trunc())).where(b-1, b)
   def round(self: Tensor) -> Tensor:
     return ((self > 0) == ((b := self.cast(dtypes.int32) / 2.0).cast(dtypes.int32) == b)).where((self - 0.5).ceil(), (self + 0.5).floor())
+  def lerp(self, end: Tensor, weight: Union[Tensor, float]) -> Tensor: return self + (end - self) * weight
 
   def square(self): return self*self
   def clip(self, min_, max_): return self.maximum(min_).minimum(max_)
