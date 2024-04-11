@@ -234,8 +234,9 @@ def train_resnet():
 def train_retinanet():
   from contextlib import redirect_stdout
   import numpy as np
-  EPOCHS = 10
-  BS = 2*20
+  EPOCHS = 100
+  # BS = 40 # A100x2 
+  BS = 2*6*2
   BS_EVAL = 2*15
   WARMUP_EPOCHS = 1
   WARMUP_FACTOR = 0.001
@@ -306,7 +307,7 @@ def train_retinanet():
       warmup_iters = WARMUP_EPOCHS*len(coco_train.ids)//BS
       lr_sched = Retina_LR(optimizer, start_iter, warmup_iters, WARMUP_FACTOR, LR)
     else:
-      optimizer.lr.assign(Tensor([LR]))
+      optimizer.lr.assign(Tensor([LR], device = GPUS))
     cnt = 0
 
     for X, Y_boxes, Y_labels, Y_boxes_p, Y_labels_p in iterate(coco_train, BS):
@@ -354,54 +355,59 @@ def train_retinanet():
       #   train_step.reset()
       #   break
     # ****EVAL STEP
-    print(colored(f'{epoch} START EVAL', 'cyan'))
-    coco_eval = COCOeval(coco_val.coco, iouType="bbox")
+    # print(colored(f'{epoch} START EVAL', 'cyan'))
+    # coco_eval = COCOeval(coco_val.coco, iouType="bbox")
 
-    Tensor.training = False
-    # model.load_from_pretrained()
-    mdlrun_false.reset()
-    train_step.reset()
+    # Tensor.training = False
+    # # model.load_from_pretrained()
+    # mdlrun_false.reset()
+    # train_step.reset()
     
-    st = time.time()
-    coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
-    cnt = 0
-    for X, targets in iterate_val(coco_val, BS_EVAL):
-      X.shard_(GPUS, axis=0)
-      orig_shapes= []
-      for tt in targets:
-        orig_shapes.append(tt['image_size'])
-      # print('orig_shapes', orig_shapes)
-      # print(orig_shapes)
-      sub_t = time.time()
-      out = mdlrun_false(X).numpy()
-      predictions = model.postprocess_detections(out, orig_image_sizes=orig_shapes)
-      # print(predictions)
-      img_ids = [t["image_id"] for t in targets]
-      coco_results  = [{"image_id": targets[i]["image_id"], "category_id": label, "bbox": box.tolist(),
-                         "score": score} for i, prediction in enumerate(predictions) 
-                         for box, score, label in zip(*prediction.values())]
+    # st = time.time()
+    # coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
+    # cnt = 0
+    # for X, targets in iterate_val(coco_val, BS_EVAL):
+    #   X.shard_(GPUS, axis=0)
+    #   orig_shapes= []
+    #   for tt in targets:
+    #     orig_shapes.append(tt['image_size'])
+    #   # print('orig_shapes', orig_shapes)
+    #   # print(orig_shapes)
+    #   sub_t = time.time()
+    #   out = mdlrun_false(X).numpy()
+    #   predictions = model.postprocess_detections(out, orig_image_sizes=orig_shapes)
+    #   # print(predictions)
+    #   img_ids = [t["image_id"] for t in targets]
+    #   coco_results  = [{"image_id": targets[i]["image_id"], "category_id": label, "bbox": box.tolist(),
+    #                      "score": score} for i, prediction in enumerate(predictions) 
+    #                      for box, score, label in zip(*prediction.values())]
 
-      # print('coco_results',len(coco_results))
+    #   # print('coco_results',len(coco_results))
 
-      # IF COCO_RESULTS LOWER THAN THRESH, ERROR IN EVAL
-      # REFERNCE ASSUMES AFTER ONE EPOCH, THRESH WILL BE MET
-      with redirect_stdout(None):
-        coco_eval.cocoDt = coco_val.coco.loadRes(coco_results)
-        coco_eval.params.imgIds = img_ids
-        coco_eval.evaluate()
-      evaluated_imgs.extend(img_ids)
-      coco_evalimgs.append(np.array(coco_eval.evalImgs).reshape(ncats, narea, len(img_ids)))
-      print(colored(f'{cnt} EVAL_STEP || {time.time()-sub_t}', 'red'))
-      cnt=cnt+1
-    coco_eval.params.imgIds = evaluated_imgs
-    coco_eval._paramsEval.imgIds = evaluated_imgs
-    coco_eval.evalImgs = list(np.concatenate(coco_evalimgs, -1).flatten())
-    coco_eval.accumulate()
-    coco_eval.summarize()
-    eval_acc = coco_eval.stats[0]
-    print(colored(f'{epoch} EVAL_ACC {eval_acc} || {time.time()-st}', 'green'))
-    mdlrun.reset()
-    mdlrun_false.reset()
+    #   # IF COCO_RESULTS LOWER THAN THRESH, ERROR IN EVAL
+    #   # REFERNCE ASSUMES AFTER ONE EPOCH, THRESH WILL BE MET
+    #   with redirect_stdout(None):
+    #     coco_eval.cocoDt = coco_val.coco.loadRes(coco_results)
+    #     coco_eval.params.imgIds = img_ids
+    #     coco_eval.evaluate()
+    #   evaluated_imgs.extend(img_ids)
+    #   coco_evalimgs.append(np.array(coco_eval.evalImgs).reshape(ncats, narea, len(img_ids)))
+    #   print(colored(f'{cnt} EVAL_STEP || {time.time()-sub_t}', 'red'))
+    #   cnt=cnt+1
+    # coco_eval.params.imgIds = evaluated_imgs
+    # coco_eval._paramsEval.imgIds = evaluated_imgs
+    # coco_eval.evalImgs = list(np.concatenate(coco_evalimgs, -1).flatten())
+    # coco_eval.accumulate()
+    # coco_eval.summarize()
+    # eval_acc = coco_eval.stats[0]
+    # print(colored(f'{epoch} EVAL_ACC {eval_acc} || {time.time()-st}', 'green'))
+    # mdlrun.reset()
+    # mdlrun_false.reset()
+
+    if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
+    fn = f"./ckpts/retinanet_E{epoch}.safe"
+    safe_save(get_state_dict(model), fn)
+    print(f" *** Model saved to {fn} ***")
       
 def train_unet3d():
   # TODO: Unet3d
