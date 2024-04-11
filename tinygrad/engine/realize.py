@@ -1,9 +1,16 @@
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, cast
+from dataclasses import dataclass
 from tinygrad.helpers import colored
 from tinygrad.ops import ScheduleItem, BufferOps, LoadOps
 from tinygrad.device import JITRunner, Device, BufferCopy, BufferXfer, update_stats
 from tinygrad.buffer import Buffer
 from tinygrad.shape.symbolic import Variable
+
+@dataclass(frozen=True)
+class ExecItem:
+  prg: JITRunner
+  rawbufs: List[Optional[Buffer]]
+  def run(self, var_vals:Dict[Variable, int]): self.prg.exec([cast(Buffer, x).ensure_allocated() for x in self.rawbufs], var_vals)
 
 class CustomOp(JITRunner):
   def __init__(self, fxn):
@@ -28,14 +35,7 @@ def lower_schedule_item(si:ScheduleItem) -> JITRunner:
   raise RuntimeError(f"don't know how to lower {ast}")
 
 def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[Variable, int]] = None):
+  if var_vals is None: var_vals = {}
   while len(schedule):
     si = schedule.pop(0)
-
-    # get the program
-    prg = lower_schedule_item(si)
-
-    # allocate output buffers
-    for out in si.outputs: out.ensure_allocated()
-
-    # run the function (put it in JIT)
-    prg.exec(list(si.outputs+si.inputs), var_vals if var_vals is not None else {})
+    ExecItem(lower_schedule_item(si), list(si.outputs+si.inputs)).run(var_vals)

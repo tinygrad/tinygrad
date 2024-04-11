@@ -10,13 +10,8 @@ from tinygrad.lazy import LazyBuffer
 from tinygrad.features.multi import MultiLazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, sint
+from tinygrad.engine.realize import ExecItem
 from weakref import ref, WeakKeyDictionary
-from dataclasses import dataclass
-
-@dataclass(frozen=True)
-class ExecItem:
-  prg: JITRunner  # or a graph executor like MetalGraph
-  rawbufs: List[Optional[Buffer]]
 
 def get_jit_stats(jit_cache: List[ExecItem]) -> Tuple[sint, int]:
   return functools.reduce(operator.add, [ji.prg.op_estimate for ji in jit_cache if isinstance(ji.prg, CompiledASTRunner)], 0), \
