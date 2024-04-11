@@ -235,7 +235,7 @@ def train_retinanet():
   from contextlib import redirect_stdout
   import numpy as np
   EPOCHS = 10
-  BS = 2*4
+  BS = 2*32
   BS_EVAL = 2*15
   WARMUP_EPOCHS = 1
   WARMUP_FACTOR = 0.001
@@ -260,7 +260,6 @@ def train_retinanet():
   NAME = 'openimages-mlperf'
   coco_train = get_openimages(NAME,ROOT, 'train')
   coco_val = get_openimages(NAME,ROOT, 'val')
-  # coco_eval = COCOeval(coco_val.coco, iouType="bbox")
 
   model = RetinaNet(ResNeXt50_32X4D(), num_anchors=anchor_generator.num_anchors_per_location()[0])
   mdlrun = TinyJit(lambda x: model(x, True))
@@ -268,7 +267,7 @@ def train_retinanet():
 
   parameters = []
   for k, x in get_state_dict(model).items():
-    # x.realize().to_(GPUS)
+    x.realize().to_(GPUS)
     if 'head' in k and ('clas' in k or 'reg' in k ):
       print(k)
       x.requires_grad = True
@@ -279,15 +278,15 @@ def train_retinanet():
   optimizer = Adam(parameters, lr=LR)
 
   @TinyJit
-  def train_step(X, Y_b_P, Y_l_P, matched_idxs):
+  def train_step(X, Y_b_P, Y_l_P, matched_idxs, boxes_temp, labels_temp):
     Tensor.training = True
     optimizer.zero_grad()
 
     # b,r,c = mdlrun(X)
     b,r,c = model(X, True)
 
-    loss_reg = mdl_reg_loss(r, Y_b_P, matched_idxs)
-    loss_class = mdl_class_loss(c, Y_l_P, matched_idxs)
+    loss_reg = mdl_reg_loss(r, Y_b_P, matched_idxs, boxes_temp)
+    loss_class = mdl_class_loss(c, Y_l_P, matched_idxs, labels_temp)
     loss = loss_reg+loss_class
 
     # print(colored(f'loss_reg {loss_reg.numpy()}', 'green'))
@@ -311,26 +310,42 @@ def train_retinanet():
     cnt = 0
 
     for X, Y_boxes, Y_labels, Y_boxes_p, Y_labels_p in iterate(coco_train, BS):
+      X.shard_(GPUS, axis=0)
       if(cnt==0 and epoch==0):
         # INIT LOSS FUNC
         b,_,_ = mdlrun(X)
         ANCHORS = anchor_generator(X.shape, b)
         ANCHORS = [a.realize() for a in ANCHORS]
-        ANCHORS = Tensor.stack(ANCHORS)
+        ANCHORS_STACK = Tensor.stack(ANCHORS)
+        ANCHORS_STACK.shard_(GPUS, axis=0)
         mdlrun.reset()
         # mdl_reg_loss_jit = TinyJit(lambda r, y, m: model.head.regression_head.loss(r,y,ANCHORS, m).realize())
         # mdl_class_loss_jit = TinyJit(lambda c, y,m: model.head.classification_head.loss(c,y,m).realize())
-        mdl_reg_loss = lambda r, y, m: model.head.regression_head.loss(r,y,ANCHORS, m)
-        mdl_class_loss = lambda c, y,m: model.head.classification_head.loss(c,y,m)
-      # X = X.shard(GPUS, axis=0).realize()
-      # Y_boxes_p = Y_boxes_p.shard(GPUS, axis=0).realize()
-      # Y_labels_p = Y_labels_p.shard(GPUS, axis=0).realize()
+        mdl_reg_loss = lambda r, y, m, b_t: model.head.regression_head.loss(r,y,ANCHORS_STACK, m, b_t)
+        mdl_class_loss = lambda c, y,m, l_t: model.head.classification_head.loss(c,y,m, l_t)
+
       st = time.time()
       cnt+=1
       # matcher_gen not jittable for now
       matched_idxs = model.matcher_gen(ANCHORS, Y_boxes).realize()
-      # matched_idxs.to_(GPUS)
-      loss = train_step(X, Y_boxes_p, Y_labels_p, matched_idxs)
+
+      # Work around for zipping a sharded tensor
+      # Need to think of clean way to execute
+      boxes_temp = []
+      for tb, m in zip(Y_boxes_p, matched_idxs):
+        boxes_temp.append(tb[m])
+      boxes_temp = Tensor.stack(boxes_temp)
+      labels_temp = []
+      for tl, m in zip(Y_labels_p, matched_idxs):
+        labels_temp.append(tl[m])
+      labels_temp = Tensor.stack(labels_temp)
+      # print('matched_IDXS', matched_idxs.shape, len(Y_boxes))
+      matched_idxs.shard_(GPUS, axis=0)
+      Y_boxes_p.shard_(GPUS, axis=0)
+      Y_labels_p.shard_(GPUS, axis=0)
+      boxes_temp.shard_(GPUS, axis=0)
+      labels_temp.shard_(GPUS, axis=0)
+      loss = train_step(X, Y_boxes_p, Y_labels_p, matched_idxs, boxes_temp, labels_temp)
       if lr_sched is not None:
         lr_sched.step()
 
@@ -351,6 +366,7 @@ def train_retinanet():
     coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
     cnt = 0
     for X, targets in iterate_val(coco_val, BS_EVAL):
+      X.shard_(GPUS, axis=0)
       orig_shapes= []
       for tt in targets:
         orig_shapes.append(tt['image_size'])
@@ -366,6 +382,7 @@ def train_retinanet():
                          for box, score, label in zip(*prediction.values())]
 
       # print('coco_results',len(coco_results))
+
       # IF COCO_RESULTS LOWER THAN THRESH, ERROR IN EVAL
       # REFERNCE ASSUMES AFTER ONE EPOCH, THRESH WILL BE MET
       with redirect_stdout(None):
