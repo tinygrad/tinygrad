@@ -113,12 +113,12 @@ def train_resnet():
     X = normalize(X)
     out = model.forward(X)
     loss = out.cast(dtypes.float32).sparse_categorical_crossentropy(Y, label_smoothing=0.1)
-    top_1 = (out.argmax(-1) == Y).sum()
+    top_1 = (out.detach().argmax(-1) == Y).sum()
     (loss * loss_scaler).backward()
     for t in optimizer_group.params: t.grad = t.grad.contiguous() / loss_scaler
     optimizer_group.step()
     scheduler_group.step()
-    return loss.realize(), top_1.realize()
+    return loss.detach().realize(), top_1.realize()
   @TinyJit
   def eval_step(X, Y):
     X = normalize(X)
