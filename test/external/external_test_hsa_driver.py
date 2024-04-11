@@ -4,7 +4,7 @@ from tinygrad.device import Device, Buffer, BufferXfer
 from tinygrad.dtype import dtypes
 from tinygrad.runtime.driver.hsa import AQLQueue
 from tinygrad.runtime.graph.hsa import VirtAQLQueue, HSAGraph
-from tinygrad.engine.jit import JitItem
+from tinygrad.engine.realize import ExecItem
 
 def get_hsa_inc_prog(dev, inc=1):
   prg = f"""
@@ -102,7 +102,7 @@ class TestHSADriver(unittest.TestCase):
     test_buf1.copyin(memoryview(bytearray(1*4)))
     test_buf2.copyin(memoryview(bytearray(1*4)))
 
-    jit_cache = [JitItem(BufferXfer(), [test_buf0, test_buf2]), JitItem(BufferXfer(), [test_buf2, test_buf1])]
+    jit_cache = [ExecItem(BufferXfer(), [test_buf0, test_buf2]), ExecItem(BufferXfer(), [test_buf2, test_buf1])]
     graph = HSAGraph(jit_cache, [], {})
 
     for i in range(10000):
