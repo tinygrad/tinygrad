@@ -2,7 +2,7 @@ import sys
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import Tuple, List, Dict, Optional, Set, DefaultDict
-from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, LazyOp, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS
+from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, LazyOp, UnaryOps, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS
 from tinygrad.features.graph import log_lazybuffer, realized_lazybuffer
 from tinygrad.helpers import GRAPH, DEBUG, GlobalCounters, prod, dedup, all_int, merge_dicts, getenv
 from tinygrad.shape.symbolic import Variable
@@ -128,6 +128,14 @@ def _is_padding_okay(buf:LazyBuffer, realizes:Set[LazyBuffer]) -> bool:
   if buf.op in UNSAFE_PAD_OPS: return False
   return all(_is_padding_okay(x.base, realizes) for x in buf.srcs)
 
+def maybe_zerocopy(si: ScheduleItem) -> ScheduleItem:
+  if not (all([len(x) == 1 for x in [si.outputs, si.inputs, si.ast]]) and len(si.ast[0].src)>0 and si.outputs[0].device.startswith("DISK")): return si
+  ast, out, inp = si.ast[0], si.outputs[0], si.inputs[0]
+  top_src = ast.src[0].src[0] if ast.src[0].op is UnaryOps.CAST and ast.src[0].arg[1] else ast.src[0]
+  if not (top_src.op is BufferOps.LOAD and top_src.arg.st.consecutive and ast.arg.st.contiguous) or hasattr(out, "_buf"): return si
+  out.base, out.offset = (inp.base or inp), inp.offset+(top_src.arg.st.views[0].offset*inp.dtype.itemsize)
+  return ScheduleItem((LazyOp(LoadOps.ZERO_COPY, (), ()),), si.outputs, si.inputs)
+
 def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
   if seen is None: seen = set()
 
@@ -229,7 +237,8 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
       kernel_number += 1
       for out in ps.outputs: realized_lazybuffer(out, kernel_number)
     var_vals = merge_dicts([var_vals, ps.var_vals])
-    schedule.append(si:=ScheduleItem(ps.ast, tuple(x.buffer for x in ps.outputs if x.size != 0), tuple(x.buffer for x in ps.inputs if x.size != 0)))
+    si = maybe_zerocopy(ScheduleItem(ps.ast, tuple(x.buffer for x in ps.outputs if x.size != 0), tuple(x.buffer for x in ps.inputs if x.size != 0)))
+    schedule.append(si)
     if logops and si.ast[0].op not in LoadOps and not any(i.device.startswith("DISK:") for i in si.inputs): logops.write(str(si.ast)+"\n")
     for x in graph[ps.outputs[0]]:
       in_degree[x] -= 1

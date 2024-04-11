@@ -1,10 +1,8 @@
 from __future__ import annotations
-import os, mmap, _posixshmem, io, functools
-from typing import Dict, List, Any, Optional
-from tinygrad.helpers import prod, OSX
-from tinygrad.device import Compiled, Allocator, JITRunner, Buffer
-from tinygrad.ops import UnaryOps, LazyOp, BufferOps
-from tinygrad.shape.view import strides_for_shape
+import os, mmap, _posixshmem, io
+from typing import Optional
+from tinygrad.helpers import OSX
+from tinygrad.device import Compiled, Allocator
 
 class DiskBuffer:
   def __init__(self, device:DiskDevice, size:int, offset=0):
@@ -31,31 +29,7 @@ class DiskAllocator(Allocator):
         fo.readinto(dest)
     else:
       dest[:] = src._buf()
-
-class DiskRunner(JITRunner):
-  def __init__(self, ast:LazyOp):
-    # two ASTs are allowed here.
-    assert ast.op is BufferOps.STORE, "output of AST must be store"
-    assert ast.arg.st.contiguous, "shapetracker must be contiguous"
-    # TODO: there shouldn't actually be casts here, bitcasts should fold into the load
-    if ast.src[0].op is UnaryOps.CAST:
-      top_src = ast.src[0].src[0]
-      assert ast.src[0].arg[1], "disk only supports bitcasts, not normal casts"
-      self.new_dtype = ast.src[0].arg[0]
-    else:
-      top_src = ast.src[0]
-      self.new_dtype = top_src.arg.dtype
-    assert top_src.op is BufferOps.LOAD, "top of AST must be load"
-    assert len(top_src.arg.st.views) == 1, "shapetracker must have 1 view"
-    view = top_src.arg.st.views[0]
-    assert view.mask is None, "view cannot have a mask"
-    assert strides_for_shape(view.shape) == view.strides, "disk tensors don't support strides"
-    self.new_size = prod(view.shape)
-    self.new_offset = view.offset * top_src.arg.dtype.itemsize
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Any, int], wait=False, jit=False):
-    assert len(rawbufs) == 2
-    # TODO: this is a terrible hack that should be moved to lazy.py
-    rawbufs[0]._buf.offset = rawbufs[1]._buf.offset+self.new_offset
+  def offset(self, buffer:DiskBuffer, offset:int, size:int): return DiskBuffer(buffer.device, size, buffer.offset+offset)
 
 class DiskDevice(Compiled):
   def __init__(self, device:str):
@@ -84,7 +58,5 @@ class DiskDevice(Compiled):
     if self.count == 0:
       os.close(self.fd)
       self.size = None
-  @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
-  def get_runner(self, *ast:LazyOp):
-    assert len(ast) == 1, "DiskRunner doesn't support multioutput kernels."
-    return DiskRunner(ast[0])
+  def get_runner(self, *ast): raise RuntimeError("DISK backend only supports offset buffers")
+

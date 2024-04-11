@@ -15,6 +15,10 @@ class EmptyOp(JITRunner):
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False):
     update_stats(colored(f"empty {rawbufs[0].size:10d} {rawbufs[0].dtype}", "yellow"), 0, 0, {}, jit, 1, device=rawbufs[0].device)
 
+class ZeroCopyOp(JITRunner):
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False):
+    update_stats(colored(f"zero copy {rawbufs[0].size:10d} {rawbufs[0].dtype}", "yellow"), 0, 0, {}, jit, 1, device=rawbufs[0].device)
+
 def lower_schedule_item(si:ScheduleItem) -> JITRunner:
   assert len(set(x.device for x in si.outputs+si.inputs)) == 1 or si.ast[0].op is LoadOps.COPY
   if si.ast[0].op is BufferOps.STORE: return Device[si.outputs[0].device].get_runner(*si.ast)
@@ -25,6 +29,7 @@ def lower_schedule_item(si:ScheduleItem) -> JITRunner:
     return BufferCopy()
   if ast.op is LoadOps.CUSTOM: return CustomOp(ast.arg)
   if ast.op is LoadOps.EMPTY: return EmptyOp()
+  if ast.op is LoadOps.ZERO_COPY: return ZeroCopyOp()
   raise RuntimeError(f"don't know how to lower {ast}")
 
 def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[Variable, int]] = None):
