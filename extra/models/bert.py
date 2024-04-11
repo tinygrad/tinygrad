@@ -1,8 +1,8 @@
 from pathlib import Path
 from tinygrad.tensor import Tensor
-from tinygrad import nn
+from tinygrad import nn, dtypes
 from tinygrad.helpers import fetch, get_child
-from examples.mlperf.initializers import LinearBert, EmbeddingBert
+from examples.mlperf.initializers import LinearBert, LayerNormBert
 
 Linear = nn.Linear
 Embedding = nn.Embedding
@@ -58,11 +58,11 @@ class BertForMLPerf:
     # for lm:
     self.linear = LinearBert(hidden_size, hidden_size)
     self.activation2 = Tensor.gelu
-    self.norm = Tensor.layernorm
+    self.norm = LayerNormBert(hidden_size, eps=1e-12)
 
     self.decoder = LinearBert(hidden_size, vocab_size, bias=False)
     self.decoder.weight = self.model.embeddings.word_embeddings.weight
-    self.decoder_bias = Tensor.zeros(vocab_size)
+    self.decoder_bias = Tensor.zeros(vocab_size, dtype=dtypes.float32)
   
   def __call__(self, input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor, masked_positions:Tensor):
     output = self.model(input_ids, attention_mask, segment_ids)
