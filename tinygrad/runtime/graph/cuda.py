@@ -2,7 +2,7 @@ import ctypes, collections
 from typing import Any, Optional, Tuple, Dict, List, cast
 import tinygrad.runtime.autogen.cuda as cuda
 from tinygrad.helpers import init_c_var, GraphException, getenv
-from tinygrad.device import CompiledASTRunner, update_stats, Buffer, MultiDeviceJITGraph, BufferXfer, Device, BufferOptions
+from tinygrad.device import CompiledRunner, update_stats, Buffer, MultiDeviceJITGraph, BufferXfer, Device, BufferOptions
 from tinygrad.runtime.ops_cuda import CUDADevice, check, encode_args, cu_time_execution
 from tinygrad.shape.symbolic import Variable
 from tinygrad.engine.realize import ExecItem
@@ -11,7 +11,7 @@ from tinygrad.engine.jit import get_input_replace, get_jit_stats, get_jc_idxs_wi
 class CUDAGraph(MultiDeviceJITGraph):
   def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
     # Check all jit items are compatible.
-    if not all(isinstance(ji.prg, CompiledASTRunner) or isinstance(ji.prg, BufferXfer) for ji in jit_cache): raise GraphException
+    if not all(isinstance(ji.prg, CompiledRunner) or isinstance(ji.prg, BufferXfer) for ji in jit_cache): raise GraphException
 
     self.jit_cache = jit_cache
     self.input_replace = get_input_replace(jit_cache, input_rawbuffers)
@@ -27,7 +27,7 @@ class CUDAGraph(MultiDeviceJITGraph):
     self.cpu_buffers = []
 
     for j,ji in enumerate(self.jit_cache):
-      if isinstance(ji.prg, CompiledASTRunner):
+      if isinstance(ji.prg, CompiledRunner):
         global_size, local_size = ji.prg.launch_dims(var_vals)
 
         new_node = cuda.CUgraphNode()
@@ -81,12 +81,12 @@ class CUDAGraph(MultiDeviceJITGraph):
 
     # Update var_vals in the c_args struct.
     for j in self.jc_idxs_with_updatable_var_vals:
-      for i,v in enumerate(cast(CompiledASTRunner, self.jit_cache[j].prg).vars):
+      for i,v in enumerate(cast(CompiledRunner, self.jit_cache[j].prg).vars):
         setattr(self.updatable_nodes[j][2], f'v{i}', var_vals[v])
 
     # Update launch dims in the kern_params struct.
     for j in self.jc_idxs_with_updatable_launch_dims:
-      self.set_kernel_node_launch_dims(self.updatable_nodes[j][1], *cast(CompiledASTRunner, self.jit_cache[j].prg).launch_dims(var_vals))
+      self.set_kernel_node_launch_dims(self.updatable_nodes[j][1], *cast(CompiledRunner, self.jit_cache[j].prg).launch_dims(var_vals))
 
     # Update graph nodes with the updated structs.
     for node, c_node_params, c_args, is_copy in self.updatable_nodes.values():

@@ -2,7 +2,7 @@ from typing import List, Any, Dict, cast, Optional
 import Metal
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import dedup, unwrap2, GraphException
-from tinygrad.device import Buffer, CompiledASTRunner, update_stats
+from tinygrad.device import Buffer, CompiledRunner, update_stats
 from tinygrad.engine.realize import ExecItem
 from tinygrad.engine.jit import get_input_replace, get_jit_stats, get_jc_idxs_with_updatable_launch_dims
 from tinygrad.shape.symbolic import Variable
@@ -10,7 +10,7 @@ from tinygrad.runtime.ops_metal import MetalDevice, wait_check
 
 class MetalGraph:
   def __init__(self, device:MetalDevice, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
-    if not all(isinstance(ji.prg, CompiledASTRunner) for ji in jit_cache): raise GraphException
+    if not all(isinstance(ji.prg, CompiledRunner) for ji in jit_cache): raise GraphException
 
     self.jit_cache = jit_cache
     self.input_replace = get_input_replace(jit_cache, input_rawbuffers)
@@ -30,7 +30,7 @@ class MetalGraph:
     if len(var_vals): self.int_buf = self.device.allocator.alloc(len(var_vals)*dtypes.int32.itemsize)
     all_resources = [self.int_buf] if len(var_vals) else []
     for j,ji in enumerate(self.jit_cache):
-      prg: CompiledASTRunner = cast(CompiledASTRunner, ji.prg)
+      prg: CompiledRunner = cast(CompiledRunner, ji.prg)
       descriptor = Metal.MTLComputePipelineDescriptor.new()
       descriptor.setComputeFunction_(prg.clprg.fxn)
       descriptor.setSupportIndirectCommandBuffers_(True)
@@ -62,7 +62,7 @@ class MetalGraph:
     for (j,i),input_idx in self.input_replace.items():
       self.icb.indirectComputeCommandAtIndex_(j).setKernelBuffer_offset_atIndex_(input_rawbuffers[input_idx]._buf, 0, i)
     for j in self.jc_idx_with_updatable_launch_dims:
-      global_size, local_size = cast(CompiledASTRunner, self.jit_cache[j].prg).launch_dims(var_vals)
+      global_size, local_size = cast(CompiledRunner, self.jit_cache[j].prg).launch_dims(var_vals)
       self.icb.indirectComputeCommandAtIndex_(j).concurrentDispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))  # noqa: E501
     for j, value in enumerate(var_vals.values()): self.int_buf_view[j] = value
     command_buffer = self.device.mtl_queue.commandBuffer()
