@@ -104,7 +104,7 @@ def eval_retinanet():
   from tinygrad.engine.jit import TinyJit
   mdlrun = TinyJit(lambda x: mdl(input_fixup(x)).realize())
 
-  n, bs = 0, 2
+  n, bs = 0, 20 #14.6GB
   st = time.perf_counter()
   for x, targets in iterate(coco, bs):
     # print(x.shape, type(x))
@@ -241,8 +241,8 @@ def eval_mrcnn():
 
 if __name__ == "__main__":
   # inference only
-  Tensor.training = True
-  # Tensor.no_grad = True
+  Tensor.training = False
+  Tensor.no_grad = True
 
   models = getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,mrcnn").split(",")
   for m in models:

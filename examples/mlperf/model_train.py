@@ -237,9 +237,9 @@ def train_retinanet():
   EPOCHS = 100
   # BS = 40 # A100x2 
   # BS = 5*8
-  BS = 20
-  # BS_EVAL = 2*15
-  BS_EVAL = 2*4
+  BS = 2*4
+  BS_EVAL = 20
+  # BS_EVAL = 2*4
   WARMUP_EPOCHS = 1
   WARMUP_FACTOR = 0.001
   LR = 0.0001
@@ -259,6 +259,7 @@ def train_retinanet():
   from extra.datasets.openimages_new import iterate, iterate_val
   from extra.datasets.openimages_new import get_openimages
   from pycocotools.cocoeval import COCOeval
+  from pycocotools.coco import COCO
   ROOT = 'extra/datasets/open-images-v6TEST'
   NAME = 'openimages-mlperf'
   coco_train = get_openimages(NAME,ROOT, 'train')
@@ -266,7 +267,7 @@ def train_retinanet():
 
   model = RetinaNet(ResNeXt50_32X4D(), num_anchors=anchor_generator.num_anchors_per_location()[0])
   mdlrun = TinyJit(lambda x: model(x, True))
-  mdlrun_false = TinyJit(lambda x: model(x, False).realize())
+  # mdlrun_false = TinyJit(lambda x: model(x, False).realize())
 
   parameters = []
   for k, x in get_state_dict(model).items():
@@ -316,7 +317,11 @@ def train_retinanet():
     loss.backward()
     optimizer.step()
     return loss.realize()
-
+  @TinyJit
+  def val_step(X):
+    Tensor.training = False
+    out = model(X)
+    return out.realize()
   for epoch in range(EPOCHS):
     print(colored(f'EPOCH {epoch}/{EPOCHS}:', 'cyan'))
     # train_step.reset()
@@ -374,62 +379,63 @@ def train_retinanet():
     #   if cnt>2: 
     #     train_step.reset()
     #     break
-    # # ****EVAL STEP
-    # print(colored(f'{epoch} START EVAL', 'cyan'))
-    # coco_eval = COCOeval(coco_train.coco, iouType="bbox")
-
-    # Tensor.training = False
-    # model.load_from_pretrained()
-    # # model.load_checkpoint("./ckpts/retinanet_E98.safe")
-    # mdlrun_false.reset()
-    # train_step.reset()
-    
-    # st = time.time()
-    # coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
-    # cnt = 0
-    # for X, targets in iterate_val(coco_train, BS_EVAL):
-    #   X.shard_(GPUS, axis=0)
-    #   orig_shapes= []
-    #   for tt in targets:
-    #     orig_shapes.append(tt['image_size'])
-    #   # print('orig_shapes', orig_shapes)
-    #   # print(orig_shapes)
-    #   sub_t = time.time()
-    #   out = mdlrun_false(X).numpy()
-    #   predictions = model.postprocess_detections(out, orig_image_sizes=orig_shapes)
-    #   # print(predictions)
-    #   img_ids = [t["image_id"] for t in targets]
-    #   coco_results  = [{"image_id": targets[i]["image_id"], "category_id": label, "bbox": box.tolist(),
-    #                      "score": score} for i, prediction in enumerate(predictions) 
-    #                      for box, score, label in zip(*prediction.values())]
-
-    #   # print('coco_results',len(coco_results))
-
-    #   # IF COCO_RESULTS LOWER THAN THRESH, ERROR IN EVAL
-    #   # REFERNCE ASSUMES AFTER ONE EPOCH, THRESH WILL BE MET
-    #   with redirect_stdout(None):
-    #     coco_eval.cocoDt = coco_train.coco.loadRes(coco_results)
-    #     coco_eval.params.imgIds = img_ids
-    #     coco_eval.evaluate()
-    #   evaluated_imgs.extend(img_ids)
-    #   coco_evalimgs.append(np.array(coco_eval.evalImgs).reshape(ncats, narea, len(img_ids)))
-    #   print(colored(f'{cnt} EVAL_STEP || {time.time()-sub_t}', 'red'))
-    #   cnt=cnt+1
-    # coco_eval.params.imgIds = evaluated_imgs
-    # coco_eval._paramsEval.imgIds = evaluated_imgs
-    # coco_eval.evalImgs = list(np.concatenate(coco_evalimgs, -1).flatten())
-    # coco_eval.accumulate()
-    # coco_eval.summarize()
-    # eval_acc = coco_eval.stats[0]
-    # print(colored(f'{epoch} EVAL_ACC {eval_acc} || {time.time()-st}', 'green'))
-    # mdlrun.reset()
-    # mdlrun_false.reset()
-    # sys.exit()
 
     if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
     fn = f"./ckpts/retinanet_E{epoch}.safe"
     safe_save(get_state_dict(model), fn)
     print(f" *** Model saved to {fn} ***")
+
+    # ****EVAL STEP
+    train_step.reset()
+    print(colored(f'{epoch} START EVAL', 'cyan'))
+    coco_eval = COCOeval(coco_val.coco, iouType="bbox")
+
+    Tensor.training = False
+    # model.load_from_pretrained()
+    # model.load_checkpoint("./ckpts/retinanet_E8.safe")
+
+    st = time.time()
+    coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
+    cnt = 0
+    for X, targets in iterate_val(coco_val, BS_EVAL):
+      X.shard_(GPUS, axis=0)
+      orig_shapes= []
+      for tt in targets:
+        orig_shapes.append(tt['image_size'])
+      # print('orig_shapes', orig_shapes)
+      # print(orig_shapes)
+      sub_t = time.time()
+      # out = mdlrun_false(X).numpy()
+      out = val_step(X).numpy()
+      predictions = model.postprocess_detections(out, orig_image_sizes=orig_shapes)
+      # print(predictions)
+      img_ids = [t["image_id"] for t in targets]
+      # print('img_ids', img_ids)
+      coco_results  = [{"image_id": targets[i]["image_id"], "category_id": label, "bbox": box.tolist(),
+                         "score": score} for i, prediction in enumerate(predictions) 
+                         for box, score, label in zip(*prediction.values())]
+
+      # IF COCO_RESULTS LOWER THAN THRESH, ERROR IN EVAL
+      # REFERNCE PUSHES EMPTY COCO OBJ
+      with redirect_stdout(None):
+        coco_eval.cocoDt = coco_val.loadRes(coco_results) if coco_results else COCO()
+        coco_eval.params.imgIds = img_ids
+        coco_eval.evaluate()
+      evaluated_imgs.extend(img_ids)
+      coco_evalimgs.append(np.array(coco_eval.evalImgs).reshape(ncats, narea, len(img_ids)))
+      print(colored(f'{cnt} EVAL_STEP || {time.time()-sub_t}', 'red'))
+      cnt=cnt+1
+    coco_eval.params.imgIds = evaluated_imgs
+    coco_eval._paramsEval.imgIds = evaluated_imgs
+    coco_eval.evalImgs = list(np.concatenate(coco_evalimgs, -1).flatten())
+    coco_eval.accumulate()
+    coco_eval.summarize()
+    eval_acc = coco_eval.stats[0]
+    print(colored(f'{epoch} EVAL_ACC {eval_acc} || {time.time()-st}', 'green'))
+
+    val_step.reset()
+    # sys.exit()
+
       
 def train_unet3d():
   # TODO: Unet3d
@@ -449,9 +455,10 @@ def train_maskrcnn():
 
 if __name__ == "__main__":
   multiprocessing.set_start_method('spawn')
-  with Tensor.train():
-    for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn").split(","):
-      nm = f"train_{m}"
-      if nm in globals():
-        print(f"training {m}")
-        globals()[nm]()
+  # with Tensor.train():
+  Tensor.training = True
+  for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn").split(","):
+    nm = f"train_{m}"
+    if nm in globals():
+      print(f"training {m}")
+      globals()[nm]()
