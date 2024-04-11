@@ -28,7 +28,7 @@ class Conv2dHeNormal(nn.Conv2d):
 class Linear(nn.Linear):
   def __init__(self, in_features, out_features, bias=True):
     super().__init__(in_features, out_features, bias=bias)
-    self.weight = Tensor.normal((out_features, in_features), mean=0.0, std=0.01, dtypes=dtypes.float32)
-    if bias: self.bias = Tensor.zeros(out_features, dtypes=dtypes.float32)
+    self.weight = Tensor.normal((out_features, in_features), mean=0.0, std=0.01, dtype=dtypes.float32)
+    if bias: self.bias = Tensor.zeros(out_features, dtype=dtypes.float32)
   def __call__(self, x:Tensor):
     return x.linear(self.weight.cast(dtypes.default_float).transpose(), self.bias.cast(dtypes.default_float) if self.bias is not None else None)
