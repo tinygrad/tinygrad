@@ -602,6 +602,13 @@ class TestAutoCastType(unittest.TestCase):
 
     dtypes.default_float = old_default_float
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  def test_backward_sum_acc_dtype(self):
+    # test acc of sum in the backward is upcasted to float
+    t = Tensor([5, -5], dtype=dtypes.half, requires_grad=True)
+    t.reshape(2, 1).expand(2, 10001).max().backward()
+    np.testing.assert_allclose(t.grad.numpy(), [1, 0])
+
 class TestImplicitFunctionTypeChange(unittest.TestCase):
   def test_functions(self):
     result = []
