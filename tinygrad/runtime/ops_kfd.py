@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Tuple, Any
+from typing import Tuple, List, Any
 import os, fcntl, ctypes, functools, re, pathlib, mmap, struct, errno
 from tinygrad.device import Compiled, LRUAllocator, Compiler, CompilerOptions
 from tinygrad.buffer import BufferOptions
@@ -17,7 +17,12 @@ libc.mmap.restype = ctypes.c_void_p
 libc.munmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
 libc.munmap.restype = ctypes.c_int
 
-def node_sysfs_path(node_id, file): return f"/sys/devices/virtual/kfd/kfd/topology/nodes/{node_id}/{file}"
+def is_usable_gpu(gpu_id):
+  try:
+    with gpu_id.open() as f:
+      return int(f.read()) != 0
+  except OSError:
+    return False
 
 def kfd_ioctl(idir, nr, user_struct, fd, made_struct=None, **kwargs):
   made = made_struct or user_struct(**kwargs)
@@ -307,6 +312,7 @@ class KFDDevice(Compiled):
   event_page:Any = None  # TODO: fix types in kfd, Optional[kfd.struct_kfd_ioctl_alloc_memory_of_gpu_args]
   signals_page:Any = None
   signal_number:int = 16
+  gpus:List[pathlib.Path] = []
 
   def _gpu_map(self, mem):
     if self.gpu_id in getattr(mem, "mapped_gpu_ids", []): return
@@ -361,12 +367,15 @@ class KFDDevice(Compiled):
     if ret.wait_result != 0: raise RuntimeError(f"wait_result: {ret.wait_result}, {timeout} ms TIMEOUT!")
 
   def __init__(self, device:str=""):
-    if KFDDevice.kfd == -1: KFDDevice.kfd = os.open("/dev/kfd", os.O_RDWR)
+    if KFDDevice.kfd == -1:
+      KFDDevice.kfd = os.open("/dev/kfd", os.O_RDWR)
+      KFDDevice.gpus = [g.parent for g in pathlib.Path("/sys/devices/virtual/kfd/kfd/topology/nodes").glob("*/gpu_id") if is_usable_gpu(g)]
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
-    with open(node_sysfs_path(self.device_id+1, "gpu_id"), "r") as f: self.gpu_id = int(f.read())
-    with open(node_sysfs_path(self.device_id+1, "properties"), "r") as f: self.properties = {line.split()[0]: int(line.split()[1]) for line in f}
+    with open(f"{KFDDevice.gpus[self.device_id]}/gpu_id", "r") as f: self.gpu_id = int(f.read())
+    with open(f"{KFDDevice.gpus[self.device_id]}/properties", "r") as f: self.properties = {line.split()[0]: int(line.split()[1]) for line in f}
     self.drm_fd = os.open(f"/dev/dri/renderD{self.properties['drm_render_minor']}", os.O_RDWR)
-    self.arch = f"gfx{self.properties['gfx_target_version']//100}"
+    target = int(self.properties['gfx_target_version'])
+    self.arch = "gfx%d%x%x" % (target // 10000, (target // 100) % 100, target % 100)
     kio.acquire_vm(KFDDevice.kfd, drm_fd=self.drm_fd, gpu_id=self.gpu_id)
 
     if KFDDevice.event_page is None:

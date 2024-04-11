@@ -517,7 +517,7 @@ def helper_linearizer_opt(r:Tensor, opts=[], apply_tc=False, atol=1e-4, rtol=1e-
     prg = to_prg(k)
     real_bufs[0].copyin(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np).data) # Zero to check that all values are filled
     prg.exec(real_bufs)
-    np.testing.assert_allclose(wanna_output, np.frombuffer(real_bufs[0].as_buffer(), real_bufs[0].dtype.np), atol=atol, rtol=rtol)
+    np.testing.assert_allclose(np.frombuffer(real_bufs[0].as_buffer(), real_bufs[0].dtype.np), wanna_output, atol=atol, rtol=rtol)
 
   # Get baseline, which is not optimized at all.
   k = Linearizer(realized_ast)
@@ -712,14 +712,56 @@ class TestKernelOpts(unittest.TestCase):
     helper_linearizer_opt(a@b, [
       [Opt(OptOps.PADTO, 0, 32)],
       [Opt(OptOps.PADTO, 1, 32)],
+      [Opt(OptOps.PADTO, 2, 32)],
       [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32)],
+      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32), Opt(OptOps.PADTO, 2, 32)],
       # can optimize further post PADTO
       [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32), Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.UPCAST, 1, 2),],
     ])
 
+  def test_padto_sum_ok(self):
+    N = 18 * 18
+    # NOTE: this setup prevents 17 * 17 contiguous merged into one dimension
+    a = Tensor.rand(N, N).shrink(((0, 17), (0, 17))) * 100
+
+    helper_linearizer_opt(a.sum(0), [
+      [Opt(OptOps.PADTO, 0, 32)],
+      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],
+    ])
+    helper_linearizer_opt(a.sum(1), [
+      [Opt(OptOps.PADTO, 0, 32)],
+      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],
+    ])
+
+    # can pad sum reduce axis if there's no unsafe ops prior to sum
+    helper_linearizer_opt(a.sum(), [[Opt(OptOps.PADTO, 0, 32)],])
+    helper_linearizer_opt(a.sum(0), [[Opt(OptOps.PADTO, 1, 32)],])
+
+    # having unsafe ops after sum is fine
+    helper_linearizer_opt(a.sum().exp(), [[Opt(OptOps.PADTO, 0, 32)],])
+    helper_linearizer_opt(a.sum(0).exp(), [[Opt(OptOps.PADTO, 1, 32)],])
+
+  def test_padto_sum_not_ok(self):
+    N = 18 * 18
+    # NOTE: this setup prevents 17 * 17 contiguous merged into one dimension
+    a = Tensor.rand(N, N).shrink(((0, 17), (0, 17))).exp()
+    # exp is not safe to pad
+    with self.assertRaises(KernelOptError):
+      helper_linearizer_opt(a.exp().sum(), [[Opt(OptOps.PADTO, 0, 32)],])
+    with self.assertRaises(KernelOptError):
+      helper_linearizer_opt(a.exp().sum(0), [[Opt(OptOps.PADTO, 1, 32)],])
+
+    b = a < -1
+    # lt is not safe to pad
+    with self.assertRaises(KernelOptError):
+      helper_linearizer_opt(b.sum(), [[Opt(OptOps.PADTO, 0, 32)],])
+    with self.assertRaises(KernelOptError):
+      helper_linearizer_opt(b.sum(0), [[Opt(OptOps.PADTO, 1, 32)],])
+
   def test_padto_max(self):
-    N = 17 * 17
-    a = -Tensor.rand(N, N)
+    N = 18 * 18
+    # NOTE: this setup prevents 17 * 17 contiguous merged into one axis
+    a = -Tensor.rand(N, N).shrink(((0, 17), (0, 17))) * 100
 
     helper_linearizer_opt(a.max(0), [
       [Opt(OptOps.PADTO, 0, 32)],
@@ -730,7 +772,7 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],
     ])
 
-    # cannot pad a reduce axis
+    # cannot pad max kernel on reduce
     with self.assertRaises(KernelOptError):
       helper_linearizer_opt(a.max(), [[Opt(OptOps.PADTO, 0, 32)],])
     with self.assertRaises(KernelOptError):

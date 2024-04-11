@@ -69,8 +69,8 @@ def update_stats(name:str, op_estimate:sint, mem_estimate:sint, var_vals: Option
 
 class BufferCopy(JITRunner):
   def copy(self, dest, src):
-    if src.device.startswith("DISK") and hasattr(dest.allocator, 'copy_from_fd') and src.nbytes >= 4096 and src._buf.fd is not None:
-      dest.allocator.copy_from_fd(dest._buf, src._buf.fd, src._buf.offset, src.nbytes)
+    if src.device.startswith("DISK") and hasattr(dest.allocator, 'copy_from_fd') and src.nbytes >= 4096 and hasattr(src.allocator.device, 'fd'):
+      dest.allocator.copy_from_fd(dest._buf, src.allocator.device.fd, src._buf.offset, src.nbytes)
     elif src.device.startswith("DISK") and hasattr(dest.allocator, 'as_buffer'):
       # fast(ish) path, uses readinto in diskbuffers
       src.allocator.copyout(dest.allocator.as_buffer(dest._buf), src._buf)
@@ -241,7 +241,7 @@ class Compiled:
         k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
         if getenv("BEAM_COMPARE", 1):
           # TODO: move the HC/TC/BEAM compare to beam_search so it can be optionally cached which choice is better
-          lins = [(f"beam{BEAM.value}", k), (("tc" if used_tensor_cores else "hc"), k_opt)]
+          lins: List[Tuple[str, Linearizer]] = [(f"beam{BEAM.value}", k), (("tc" if used_tensor_cores else "hc"), k_opt)]
           if used_tensor_cores:
             lins.append(("hc", Linearizer(*ast, opts=self.compiler.compiler_opts)))
             lins[-1][1].hand_coded_optimizations()
