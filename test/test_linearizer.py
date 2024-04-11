@@ -733,9 +733,13 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],
     ])
 
-    # can pad sum reduce axis if there's no unsafe ops
+    # can pad sum reduce axis if there's no unsafe ops prior to sum
     helper_linearizer_opt(a.sum(), [[Opt(OptOps.PADTO, 0, 32)],])
     helper_linearizer_opt(a.sum(0), [[Opt(OptOps.PADTO, 1, 32)],])
+
+    # having unsafe ops after sum is fine
+    helper_linearizer_opt(a.sum().exp(), [[Opt(OptOps.PADTO, 0, 32)],])
+    helper_linearizer_opt(a.sum(0).exp(), [[Opt(OptOps.PADTO, 1, 32)],])
 
   def test_padto_sum_not_ok(self):
     N = 18 * 18
