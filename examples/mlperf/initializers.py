@@ -1,6 +1,6 @@
 import math
 
-from tinygrad import Tensor, nn
+from tinygrad import Tensor, nn, dtypes
 from tinygrad.helpers import prod, argfix
 
 # rejection sampling truncated randn
@@ -19,9 +19,14 @@ def he_normal(*shape, a: float = 0.00, **kwargs) -> Tensor:
 class Conv2dHeNormal(nn.Conv2d):
   def initialize_weight(self, out_channels, in_channels, groups):
     return he_normal(out_channels, in_channels//groups, *self.kernel_size, a=0.0)
+  def __call__(self, x: Tensor):
+    return x.conv2d(self.weight.cast(dtypes.default_float), self.bias.cast(dtypes.default_float) if self.bias is not None else None,
+                    padding=self.padding, stride=self.stride, dilation=self.dilation, groups=self.groups)
 
 class Linear(nn.Linear):
   def __init__(self, in_features, out_features, bias=True):
     super().__init__(in_features, out_features, bias=bias)
     self.weight = Tensor.normal((out_features, in_features), mean=0.0, std=0.01)
     if bias: self.bias = Tensor.zeros(out_features)
+  def __call__(self, x:Tensor):
+    return x.linear(self.weight.cast(dtypes.default_float).transpose(), self.bias.cast(dtypes.default_float) if self.bias is not None else None)
