@@ -187,6 +187,7 @@ def train_resnet():
       eval_times = []
       eval_top_1_acc = []
       Tensor.training = False
+      Tensor.no_grad = True
 
       it = iter(tqdm(batch_load_resnet(batch_size=EVAL_BS, val=True, shuffle=False), total=steps_in_val_epoch))
       proc = data_get(it)
@@ -209,6 +210,7 @@ def train_resnet():
         et = time.time()
         eval_times.append(et - st)
 
+      Tensor.no_grad = False
       eval_step.reset()
       total_loss = sum(eval_loss) / len(eval_loss)
       total_top_1 = sum(eval_top_1_acc) / len(eval_top_1_acc)
