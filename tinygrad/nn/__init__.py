@@ -44,15 +44,12 @@ class Conv2d:
   def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
     self.kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
     self.stride, self.padding, self.dilation, self.groups = stride, padding, dilation, groups
-    self.weight = self.initialize_weight(out_channels, in_channels, groups)
+    self.weight = Tensor.kaiming_uniform(out_channels, in_channels//groups, *self.kernel_size, a=math.sqrt(5))
     bound = 1 / math.sqrt(cast(int, prod(self.weight.shape[1:])))  # weight shape is always ints but mypy cannot tell
     self.bias = Tensor.uniform(out_channels, low=-bound, high=bound) if bias else None
 
   def __call__(self, x:Tensor):
     return x.conv2d(self.weight, self.bias, padding=self.padding, stride=self.stride, dilation=self.dilation, groups=self.groups)
-
-  def initialize_weight(self, out_channels, in_channels, groups):
-    return Tensor.kaiming_uniform(out_channels, in_channels//groups, *self.kernel_size, a=math.sqrt(5))
 
 def ConvTranspose1d(in_channels, out_channels, kernel_size, stride=1, padding=0, output_padding=0, dilation=1, groups=1, bias=True):
   return ConvTranspose2d(in_channels, out_channels, (kernel_size,), stride, padding, output_padding, dilation, groups, bias)
