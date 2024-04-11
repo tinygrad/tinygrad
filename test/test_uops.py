@@ -4,7 +4,7 @@ import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv
 from tinygrad.dtype import dtypes, DType, PtrDType
-from tinygrad.device import Buffer, Device, CompiledASTRunner
+from tinygrad.device import Buffer, Device, CompiledRunner
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.codegen.linearizer import UOps, UOp
@@ -14,7 +14,7 @@ from test.helpers import is_dtype_supported
 def _uops_to_prg(uops):
   src = Device[Device.DEFAULT].compiler.render("test", uops)
   has_local = Device[Device.DEFAULT].compiler.compiler_opts.has_local
-  return CompiledASTRunner("test", src, Device.DEFAULT, [1] if has_local else None, [1] if has_local else None)
+  return CompiledRunner("test", src, Device.DEFAULT, [1] if has_local else None, [1] if has_local else None)
 
 def uop(uops:List[UOp], uop:UOps, dtype:Optional[DType], vin:Tuple[UOp, ...], arg:Any=None) -> UOp:
   uops.append(UOp(uop, dtype, tuple(vin), arg))
