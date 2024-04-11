@@ -13,12 +13,12 @@ def derandomize_model(model):
 
 def assert_jit_cache_len(fxn, expected_len):
   assert len(fxn.jit_cache) > 0
-  # until we have a better way of typing the prg in JitItem
+  # until we have a better way of typing the prg in ExecItem
   if issubclass(type(fxn.jit_cache[0].prg), JITRunner) and not type(fxn.jit_cache[0].prg).__name__.endswith('Graph'):
     assert len(fxn.jit_cache) == expected_len
   else:
     assert len(fxn.jit_cache) == 1
-    # until we have a better way of typing the prg in JitItem
+    # until we have a better way of typing the prg in ExecItem
     assert type(fxn.jit_cache[0].prg).__name__.endswith('Graph')
     assert len(fxn.jit_cache[0].prg.jit_cache) == expected_len
 
