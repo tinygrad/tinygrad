@@ -282,6 +282,9 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,35)], lambda x: x.round(), forward_only=True)
     helper_test_op(None, lambda x: x.round(), vals=[[1.499, 1.5, 1.501, 1.0, 2.1, 0.0, -5.0, -2.499, -2.5, -2.501]], forward_only=True)
     helper_test_op(None, lambda x: x.round(), vals=[[2.5, -1.5]], forward_only=True)
+  def test_lerp(self):
+    helper_test_op([(45,35), (45,35), (45,35)], lambda x,y,z: x.lerp(y,z))
+    helper_test_op(None, lambda x,y,z: x.lerp(y,z), vals=[[1.,2.,3.], [4.,5.,6.], 0.5])
 
   def test_tril(self):
     helper_test_op([(3,3)], lambda x: x.tril())
@@ -907,6 +910,11 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,3,3)], lambda x: x[1:2, 1:2, None, -1])
     helper_test_op([(3,3,3)], lambda x: x[None, None, 1, None, 2, 0:2])
 
+  def test_slice_with_const_tensor(self):
+    t = Tensor.zeros(1, dtype=dtypes.int)
+    helper_test_op([(3,3,3)], lambda x: x[:, [0], :], lambda x: x[:, t, :])
+    helper_test_op([(3,3,3)], lambda x: x[:, [0], :], lambda x: x[:, t.contiguous(), :])
+
   def test_slice_one_endpoint_out_of_bounds(self):
     helper_test_op([(3,3,3)], lambda x: x[0:4])
     helper_test_op([(3,3,3)], lambda x: x[-6:4])
@@ -1084,7 +1092,16 @@ class TestOps(unittest.TestCase):
   def test_expand(self):
     helper_test_op([(4,3,1,6)], lambda x: x.expand((4,3,2,6)))
     helper_test_op([(1,1,1,1)], lambda x: x.expand((4,3,2,6)))
+    helper_test_op([(4,3,1,6)], lambda x: x.expand((6,1,4,3,2,6)))
+    helper_test_op([(4,3,1,6)], lambda x: x.expand((0,1,4,3,2,6)))
+    helper_test_op([(4,3,1,6)], lambda x: x.expand((4,3,0,6)))
+    helper_test_op([()], lambda x: x.expand((4,3,2,6)))
     helper_test_op([()], lambda x: x.expand([]))
+
+    with self.assertRaises((ValueError, RuntimeError)): Tensor.ones(4,3,1,6).expand(4,1,1,6)
+    with self.assertRaises((ValueError, RuntimeError)): Tensor.ones(4,3,1,6).expand(4,6,1,6)
+    with self.assertRaises((ValueError, RuntimeError)): Tensor.ones(4,3,1,6).expand(3,1,6)
+    with self.assertRaises((ValueError, RuntimeError)): Tensor.ones(4,3,2,6).expand(4,3,0,6)
 
   @unittest.skip("very slow")
   def test_sd_big_conv(self):
@@ -1426,6 +1443,13 @@ class TestOps(unittest.TestCase):
         helper_test_op([(32,2,110,28)],
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(2,2), stride=stride),
           lambda x: Tensor.max_pool2d(x, kernel_size=(2,2), stride=stride))
+
+  def test_maxpool2d_bigger_stride_dilation(self):
+    for stride, dilation in zip([(2,3), (3,2), 2, 3, 4], [(3,2), (2,3), 2, 3, 6]):
+      with self.subTest(stride=stride):
+        helper_test_op([(32,2,110,28)],
+          lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(2,2), stride=stride, dilation=dilation),
+          lambda x: Tensor.max_pool2d(x, kernel_size=(2,2), stride=stride, dilation=dilation))
 
   @unittest.skipIf(Device.DEFAULT == "CUDA", "CUDA fails on this")
   def test_maxpool2d_unit_stride(self):

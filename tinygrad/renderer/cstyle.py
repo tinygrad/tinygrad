@@ -4,7 +4,7 @@ from collections import defaultdict, Counter
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import strip_parens, getenv, prod
-from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
+from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, ConstType
 from tinygrad.codegen.uops import UOpGraph
 
 class CStyleLanguage(NamedTuple):
@@ -41,13 +41,12 @@ class CStyleLanguage(NamedTuple):
     return f"{self.float4.replace('float4', self.render_dtype(var_dtype))}({','.join(x)})"
 
   # returns a str expression of the const with the given type
-  def render_const(self, x:Union[float,int,bool], var_dtype:DType) -> str:
+  def render_const(self, x:ConstType, dtype:DType) -> str:
     if math.isnan(x): val = "NAN"
     elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
-    elif var_dtype == dtypes.float64: val = f"{x}"
-    else: val = f"{x}f" if dtypes.is_float(var_dtype) else f"{x}" if dtypes.is_int(var_dtype) else f"{x}".lower()
-    return (self.render_cast([val]*var_dtype.count, var_dtype)
-      if var_dtype.count > 1 or var_dtype not in [dtypes.float, dtypes.int, dtypes.bool] else val)
+    elif dtype == dtypes.float64: val = f"{x}"
+    else: val = f"{x}f" if dtypes.is_float(dtype) else f"{x}" if dtypes.is_int(dtype) else f"{x}".lower()
+    return (self.render_cast([val] * dtype.count, dtype) if dtype.count > 1 or dtype not in [dtypes.float, dtypes.int, dtypes.bool] else val)
 
   # returns a str expression of the loaded value with the output type
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
@@ -96,7 +95,8 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str
 
   c: DefaultDict[str, int] = defaultdict(int)
   r: Dict[UOp, str] = {}
-  def ssa(u, prefix="t"):
+
+  def ssa(prefix:str, u:Optional[UOp]=None):
     nonlocal c, r
     ret = f"{prefix}{c[prefix]}"
     if u is not None: r[u] = ret
@@ -122,7 +122,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str
     else:
       assert dtype is not None, f"None dtype for uop {uop}"
       if uop is UOps.LOOP:
-        kk(f"for (int {(expr := ssa(u,'ridx'))} = {r[vin[0]]}; {expr} < {r[vin[1]]}; {expr}++) {{")
+        kk(f"for (int {(expr := ssa('ridx',u))} = {r[vin[0]]}; {expr} < {r[vin[1]]}; {expr}++) {{")
         depth += 1
       elif uop is UOps.ALU:
         # remove parens if ALU types are the same. TODO: can do more here
@@ -132,7 +132,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str
         assert child_count[u] != 0, f"childless ALU op found {u}"
         # TODO: fix index rendering issue. fix clang nested max macro issue
         if child_count[u] <= 1 and args is not BinaryOps.MAX and not getenv("EXPAND_SSA"): r[u] = val
-        else: kk(f"{lang.render_dtype(dtype)} {ssa(u,'alu')} = {val};")
+        else: kk(f"{lang.render_dtype(dtype)} {ssa('alu',u)} = {val};")
       elif uop is UOps.SPECIAL:
         kk(f"int {args[1]} = {lang.code_for_workitem[args[1][0]](args[0])}; /* {args[2]} */")
         r[u] = args[1]
@@ -140,20 +140,20 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str
         val = lang.render_load(dtype, r[vin[0]], vin[0].dtype, strip_parens(r[vin[1]]), vin[0].uop is UOps.DEFINE_LOCAL)
         # NOTE: this relies on the load not happening if it's in the unselected branch
         if len(vin) > 3: val = lang.code_for_op[TernaryOps.WHERE](r[vin[2]], val, r[vin[3]], dtype)
-        kk(f"{lang.render_dtype(dtype)} {ssa(u,'val')} = {val};")
+        kk(f"{lang.render_dtype(dtype)} {ssa('val',u)} = {val};")
       elif uop is UOps.PHI:
         kk(f"{r[vin[0]]} = {r[vin[1]]};")
         r[u] = r[vin[0]]
       elif uop in {UOps.CAST, UOps.BITCAST}:
         if uop is UOps.BITCAST:
           assert len(vin) == 1
-          precast = ssa(None,'precast')
+          precast = ssa('precast')
           kk(f"{lang.render_dtype(cast(DType, vin[0].dtype))} {precast} = {r[vin[0]]};")
           val = lang.render_cast([precast], dtype, bitcast=True)
         else:
           val = lang.render_cast([r[x] for x in vin], dtype, bitcast=False)
         if child_count[u] <= 1: r[u] = val
-        else: kk(f"{lang.render_dtype(dtype)} {ssa(u,'cast')} = {val};")
+        else: kk(f"{lang.render_dtype(dtype)} {ssa('cast',u)} = {val};")
       elif uop is UOps.DEFINE_LOCAL:
         kk(lang.render_local(args[0], dtype, args[1]))
         r[u] = args[0]
@@ -164,8 +164,8 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str
         assert len(bufs) == args[0], f"missed a global buffer {len(bufs)} {args}"
         bufs.append((args[1], (dtype,args[2])))
         r[u] = args[1]
-      elif uop is UOps.WMMA: kk(f"{lang.render_dtype(dtype)} {ssa(u, 'wmma')} = __{args[0]}({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")
-      elif uop is UOps.DEFINE_ACC: kk(f"{lang.render_dtype(dtype)} {ssa(u,'acc')} = {lang.render_const(args, dtype)};")
+      elif uop is UOps.WMMA: kk(f"{lang.render_dtype(dtype)} {ssa('wmma',u)} = __{args[0]}({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")
+      elif uop is UOps.DEFINE_ACC: kk(f"{lang.render_dtype(dtype)} {ssa('acc',u)} = {lang.render_const(args, dtype)};")
       elif uop is UOps.CONST: r[u] = lang.render_const(args, dtype) if args >= 0 else f"({lang.render_const(args, dtype)})"
       elif uop is UOps.GEP:
         assert vin[0].dtype is not None

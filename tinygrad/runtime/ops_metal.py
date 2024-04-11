@@ -36,6 +36,7 @@ class MetalProgram:
         shader.write(lib)
         shader.flush()
         os.system(f"cd {pathlib.Path(__file__).parents[2]}/disassemblers/applegpu && python3 compiler_explorer.py {shader.name}")
+    assert lib[:4] == b"MTLB", "Invalid Metal library. Could be due to using conda. Try system python or METAL_XCODE=1 DISABLE_COMPILER_CACHE=1."
     data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
     self.library = unwrap2(self.device.device.newLibraryWithData_error_(data, None))
     self.fxn = self.library.newFunctionWithName_(name)
@@ -70,7 +71,8 @@ class MetalAllocator(LRUAllocator):
     ret = self.device.device.newBufferWithLength_options_(size, Metal.MTLResourceStorageModeShared)
     if ret is None: raise MemoryError(f"Metal OOM while allocating {size=}")
     return ret
-  def transfer(self, dest:Any, src:Any, sz:int, **kwargs):
+  def transfer(self, dest:Any, src:Any, sz:int, src_dev: MetalDevice, **kwargs):
+    src_dev.synchronize()
     command_buffer = self.device.mtl_queue.commandBuffer()
     encoder = command_buffer.blitCommandEncoder()
     encoder.copyFromBuffer_sourceOffset_toBuffer_destinationOffset_size_(src, 0, dest, 0, sz)

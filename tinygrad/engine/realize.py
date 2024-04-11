@@ -1,7 +1,8 @@
 from typing import List, Dict, Optional
-from tinygrad.ops import LoadOps, ScheduleItem, BufferOps
-from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, JITRunner, update_stats
-from tinygrad.helpers import colored, getenv, cpu_time_execution, DEBUG
+from tinygrad.helpers import getenv, colored
+from tinygrad.ops import ScheduleItem, BufferOps, LoadOps
+from tinygrad.device import JITRunner, Device, BufferCopy, BufferXfer, update_stats
+from tinygrad.buffer import Buffer
 from tinygrad.shape.symbolic import Variable
 
 class CustomOp(JITRunner):
@@ -9,14 +10,6 @@ class CustomOp(JITRunner):
     self.fxn = fxn
     super().__init__()
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False): self.fxn(*rawbufs)
-
-class SyncOp(JITRunner):
-  def __init__(self, device):
-    self.device, self.dname = Device[device], device
-    super().__init__()
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False):
-    et = cpu_time_execution(self.device.synchronize, enable=wait or DEBUG >= 1)
-    update_stats(colored("synchronize", "RED"), 0, 0, {}, et, 1, device=self.dname)
 
 def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
   assert len(set(x.device for x in si.outputs+si.inputs)) == 1 or si.ast[0].op is LoadOps.COPY
@@ -27,25 +20,22 @@ def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
     if hasattr(Device[out.device].allocator, 'transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]: return BufferXfer()
     return BufferCopy()
   if ast.op is LoadOps.CUSTOM: return CustomOp(ast.arg)
-  if ast.op is LoadOps.SYNC: return SyncOp(out.device)
   return None
 
 logops = open(getenv("LOGOPS", ""), "a") if getenv("LOGOPS", "") else None
-def run_schedule(schedule:List[ScheduleItem]):
+def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[Variable, int]] = None):
   while len(schedule):
     si = schedule.pop(0)
     if logops and si.ast[0].op not in LoadOps and not any(i.device.startswith("DISK:") for i in si.inputs): logops.write(str(si.ast)+"\n")
 
     # get the program
     prg = lower_schedule_item(si)
-    dont_allocate = getattr(prg, "skip_allocation", False)
 
     for out in si.outputs:
       # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
-      if out.size > 0 and not dont_allocate and not hasattr(out, "_buf"): out.allocate()
+      if out.size > 0 and not (out.device.startswith("DISK") and si.ast[0].op is BufferOps.STORE) and not hasattr(out, "_buf"): out.allocate()
 
     # run the function (put it in JIT)
     real_buffers = [x for x in si.outputs+si.inputs if x.size != 0]
-    assert dont_allocate or all(hasattr(x, "_buf") for x in real_buffers), f"can't run, some inputs aren't realized {real_buffers}"
-    if prg: prg.exec(real_buffers, si.var_vals)
+    if prg: prg.exec(real_buffers, var_vals if var_vals is not None else {})
     elif (out:=si.outputs[0]).size > 0: update_stats(colored(f"empty {out.size:10d} {out.dtype}", "yellow"), 0, 0, {}, None, 1, device=out.device)

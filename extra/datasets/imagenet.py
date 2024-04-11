@@ -5,17 +5,29 @@ from PIL import Image
 import functools, pathlib
 from tinygrad.helpers import diskcache, getenv
 
-BASEDIR = pathlib.Path(__file__).parent / "imagenet"
-
 @functools.lru_cache(None)
 def get_imagenet_categories():
   ci = json.load(open(BASEDIR / "imagenet_class_index.json"))
   return {v[0]: int(k) for k,v in ci.items()}
 
-@diskcache
-def get_train_files():
-  if not (files:=glob.glob(p:=str(BASEDIR / "train/*/*"))): raise FileNotFoundError(f"No training files in {p}")
-  return files
+if getenv("MNISTMOCK"):
+  BASEDIR = pathlib.Path(__file__).parent / "mnist"
+
+  @functools.lru_cache(None)
+  def get_train_files():
+    if not BASEDIR.exists():
+      from extra.datasets.fake_imagenet_from_mnist import create_fake_mnist_imagenet
+      create_fake_mnist_imagenet(BASEDIR)
+
+    if not (files:=glob.glob(p:=str(BASEDIR / "train/*/*"))): raise FileNotFoundError(f"No training files in {p}")
+    return files
+else:
+  BASEDIR = pathlib.Path(__file__).parent / "imagenet"
+
+  @diskcache
+  def get_train_files():
+    if not (files:=glob.glob(p:=str(BASEDIR / "train/*/*"))): raise FileNotFoundError(f"No training files in {p}")
+    return files
 
 @functools.lru_cache(None)
 def get_val_files():

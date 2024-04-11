@@ -1,9 +1,11 @@
 # model based off https://towardsdatascience.com/going-beyond-99-mnist-handwritten-digits-recognition-cfff96337392
 from typing import List, Callable
-from tinygrad import Tensor, TinyJit, nn, GlobalCounters
+from tinygrad import Tensor, TinyJit, nn, GlobalCounters, Device
 from tinygrad.helpers import getenv, colored
-from tinygrad.features.datasets import mnist
+from extra.datasets import fetch_mnist
 from tqdm import trange
+
+GPUS = [f'{Device.DEFAULT}:{i}' for i in range(getenv("GPUS", 2))]
 
 class Model:
   def __init__(self):
@@ -19,12 +21,13 @@ class Model:
   def __call__(self, x:Tensor) -> Tensor: return x.sequential(self.layers)
 
 if __name__ == "__main__":
-  X_train, Y_train, X_test, Y_test = mnist()
-
-  # TODO: remove this when HIP is fixed
-  X_train, X_test = X_train.float(), X_test.float()
+  X_train, Y_train, X_test, Y_test = fetch_mnist(tensors=True)
+  # we shard the test data on axis 0
+  X_test.shard_(GPUS, axis=0)
+  Y_test.shard_(GPUS, axis=0)
 
   model = Model()
+  for k, x in nn.state.get_state_dict(model).items(): x.to_(GPUS)  # we put a copy of the model on every GPU
   opt = nn.optim.Adam(nn.state.get_parameters(model))
 
   @TinyJit
@@ -32,8 +35,9 @@ if __name__ == "__main__":
     with Tensor.train():
       opt.zero_grad()
       samples = Tensor.randint(512, high=X_train.shape[0])
+      Xt, Yt = X_train[samples].shard_(GPUS, axis=0), Y_train[samples].shard_(GPUS, axis=0)  # we shard the data on axis 0
       # TODO: this "gather" of samples is very slow. will be under 5s when this is fixed
-      loss = model(X_train[samples]).sparse_categorical_crossentropy(Y_train[samples]).backward()
+      loss = model(Xt).sparse_categorical_crossentropy(Yt).backward()
       opt.step()
       return loss
 

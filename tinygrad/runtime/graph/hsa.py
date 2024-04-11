@@ -1,7 +1,8 @@
 import ctypes, collections, time, itertools
 from typing import List, Any, Dict, cast, Optional, Union, Tuple
 from tinygrad.helpers import GraphException, init_c_var, round_up
-from tinygrad.device import Compiled, Buffer, BufferOptions, CompiledASTRunner, BufferXfer, MultiDeviceJITGraph, update_stats, Device
+from tinygrad.buffer import Buffer, BufferOptions
+from tinygrad.device import Compiled, CompiledASTRunner, BufferXfer, MultiDeviceJITGraph, update_stats, Device
 from tinygrad.shape.symbolic import Variable
 from tinygrad.runtime.ops_hsa import HSADevice, PROFILE, Profiler
 from tinygrad.engine.jit import JitItem, get_input_replace, get_jit_stats, \
@@ -110,6 +111,9 @@ class HSAGraph(MultiDeviceJITGraph):
     # Zero signals to allow graph to start and execute.
     for sig in self.signals_to_reset: hsa.hsa_signal_silent_store_relaxed(sig, 0)
     hsa.hsa_signal_silent_store_relaxed(self.finish_signal, 0)
+
+    # clear jit inputs to allow their memory to be freed/reused
+    for (j,i) in self.input_replace.keys(): self.jit_cache[j].rawbufs[i] = None
 
   def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     # Wait and restore signals

@@ -45,7 +45,6 @@ class DiskAllocator(Allocator):
       dest[:] = src._buf()
 
 class DiskRunner(JITRunner):
-  skip_allocation = True
   def __init__(self, ast:LazyOp):
     # two ASTs are allowed here.
     assert ast.op is BufferOps.STORE, "output of AST must be store"
