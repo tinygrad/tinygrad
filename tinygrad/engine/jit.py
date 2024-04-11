@@ -117,6 +117,7 @@ class TinyJit(Generic[ReturnType]):
         f"mismatch of input tensors, expected {self.expected_name_sts_dtype_device} got {expected_name_sts_dtype_device}"
       for (j,i),input_idx in self.input_replace.items(): self.jit_cache[j].rawbufs[i] = input_rawbuffers[input_idx]
       for ji in self.jit_cache: ji.prg(cast(List[Buffer], ji.rawbufs), var_vals, wait=DEBUG>=2, jit=True)
+      if DEBUG >= 1: print(f"jit execs {len(self.jit_cache)} kernels")
     elif self.cnt == 1:
       # jit capture
       self.expected_vals, self.expected_name_sts_dtype_device = expected_vals, expected_name_sts_dtype_device
