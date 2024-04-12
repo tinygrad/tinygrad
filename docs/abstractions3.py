@@ -30,7 +30,7 @@ optim = SGD([l1, l2])
 X, Y = X_train[samples:=Tensor.randint(128, high=X_train.shape[0])], Y_train[samples]
 optim.zero_grad()
 model(X).sparse_categorical_crossentropy(Y).backward()
-optim._step()
+optim._step()   # this will step the optimizer without running realize
 
 # *****
 # 3. Create a schedule.
@@ -38,8 +38,9 @@ optim._step()
 # The weight Tensors have been assigned to, but not yet realized. Everything is still lazy at this point
 # l1.lazydata and l2.lazydata define a computation graph
 
-from tinygrad.engine.schedule import create_schedule_with_vars
-schedule, var_vals = create_schedule_with_vars([l1.lazydata, l2.lazydata])
+from tinygrad.ops import ScheduleItem
+from tinygrad.engine.schedule import create_schedule
+schedule: List[ScheduleItem] = create_schedule([l1.lazydata, l2.lazydata])
 
 print(f"The schedule contains {len(schedule)} items.")
 for si in schedule: print(str(si)[:80])
@@ -53,7 +54,7 @@ lowered: List[ExecItem] = [ExecItem(lower_schedule_item(si), list(si.outputs+si.
 # *****
 # 5. Run the schedule
 
-for ei in lowered: ei.run(var_vals)
+for ei in tqdm(lowered): ei.run()
 
 # *****
 # 6. Print the weight change
