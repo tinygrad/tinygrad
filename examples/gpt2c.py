@@ -1,10 +1,12 @@
 # Inspired by https://github.com/karpathy/llm.c
 import argparse
+import tiktoken
 from tinygrad import Tensor, Variable
-from examples.gpt2 import GPT2, Transformer
+from examples.gpt2 import Transformer
 from extra.export_model import export_model
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, fetch, prod
 from tinygrad.runtime.ops_clang import ClangCompiler, ClangProgram
+from tinygrad.nn.state import torch_load
 
 MAX_CONTEXT = getenv("MAX_CONTEXT", 128)
 
@@ -15,6 +17,32 @@ MODEL_PARAMS = {
   'gpt2-large':   dict(n_layers=36, n_heads=20, dim=1280, norm_eps=1e-5, vocab_size=VOCAB_SIZE),  # 774M params
   'gpt2-xl':      dict(n_layers=48, n_heads=25, dim=1600, norm_eps=1e-5, vocab_size=VOCAB_SIZE),  # 1558M params
 }
+class GPT2:
+  @staticmethod
+  def build(model_size="gpt2"):
+    tokenizer = tiktoken.get_encoding("gpt2")
+
+    model = Transformer(**MODEL_PARAMS[model_size])
+    weights = torch_load(fetch(f"https://huggingface.co/{model_size}/resolve/main/pytorch_model.bin", name="gpt2_124M"))
+    s = Tensor([prod(t.shape) for t in weights.values()]).sum()
+    print("weights", len(weights.keys()), s.numpy())
+    # special treatment for the Conv1D weights we need to transpose
+    transposed = ('attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight')
+    for k in weights:
+      if k.endswith(transposed):
+        weights[k] = weights[k].T
+    # lm head and wte are tied
+    weights['lm_head.weight'] = weights['wte.weight']
+
+    s = Tensor([prod(t.shape) for t in weights.values()]).sum()
+    print("weights", len(weights.keys()), s.numpy())
+
+    # TODO: write model
+
+    return GPT2(model)
+
+  def __init__(self, model):
+    self.model = model
 
 if __name__ == "__main__":
   mode = "clang"
@@ -75,6 +103,6 @@ if __name__ == "__main__":
 
   # CLANG=1 python3 examples/gpt2c.py --model_size gpt2 | clang -O2 -lm -x c - -o gpt2 && ./gpt2
   src = '\n'.join(cprog)
-  print(src[-10000:])
+  print(src[-100000:])
   p = ClangProgram("main", ClangCompiler().compile(src))
   p()

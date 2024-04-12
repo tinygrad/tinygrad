@@ -126,10 +126,7 @@ class GPT2:
     tokenizer = tiktoken.get_encoding("gpt2")
 
     model = Transformer(**MODEL_PARAMS[model_size])
-    weights = torch_load(fetch(f"https://huggingface.co/{model_size}/resolve/main/pytorch_model.bin", name="gpt2_124M"))
-    from tinygrad.helpers import prod
-    s = Tensor([prod(t.shape) for t in weights.values()]).sum()
-    print("weights", len(weights.keys()), s.numpy())
+    weights = torch_load(fetch(f"https://huggingface.co/{model_size}/resolve/main/pytorch_model.bin"))
     # special treatment for the Conv1D weights we need to transpose
     transposed = ('attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight')
     for k in weights:
@@ -137,9 +134,6 @@ class GPT2:
         weights[k] = weights[k].T
     # lm head and wte are tied
     weights['lm_head.weight'] = weights['wte.weight']
-
-    s = Tensor([prod(t.shape) for t in weights.values()]).sum()
-    print("weights", len(weights.keys()), s.numpy())
 
     load_state_dict(model, weights)
 
