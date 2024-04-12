@@ -1,7 +1,8 @@
 from typing import Tuple, Dict, List
+from tinygrad.buffer import Buffer 
 from tinygrad.dtype import DType
 from tinygrad.tensor import Device, Tensor
-from tinygrad.engine.jit import TinyJit
+from tinygrad.engine.jit import TinyJit, CompiledASTRunner
 from tinygrad.nn.state import get_state_dict
 from tinygrad.dtype import dtypes
 import json
@@ -19,23 +20,28 @@ web_utils = {
   };"""
 }
 
-def compile_net(run:TinyJit, special_names:Dict[int,str]) -> Tuple[Dict[str,str],List[Tuple[str,List[str],List[int]]],Dict[str,Tuple[int,DType,int]],Dict[str,Tensor]]:
+def compile_net(run, special_names:Dict[int,str]):
   functions, bufs, bufs_to_save, statements, bufnum = {}, {}, {}, [], 0
+  size = 0
   for ji in run.jit_cache:
-    fxn = ji.prg
+    fxn: CompiledASTRunner = ji.prg
+    if not hasattr(fxn, 'name'): continue # FIXME: hack for custom op
     functions[fxn.name] = fxn.prg   # NOTE: this assumes all with the same name are the same
     cargs = []
     for i,arg in enumerate(ji.rawbufs):
+      if arg is None: continue
       key = id(arg)
       if key not in bufs:
         if key in special_names:
           bufs[key] = (special_names[key], arg.size*arg.dtype.itemsize, arg.dtype, key)
         else:
+          size += arg.size
           bufs[key] = (f"buf_{bufnum}", arg.size*arg.dtype.itemsize, arg.dtype, key)
           bufnum += 1
           if i > 0: bufs_to_save[bufs[key][0]] = arg   # if first usage of a buffer is not an output, and it's not a special name
       cargs.append(bufs[key][0])
     statements.append((fxn.name, cargs, fxn.global_size, fxn.local_size))
+  print("size", size)
 
   return functions, statements, {name:(size, dtype, key) for (name,size,dtype,key) in bufs.values()}, bufs_to_save
 
@@ -63,19 +69,41 @@ def jit_model(model, *args) -> Tuple[TinyJit,Dict[int,str]]:
     special_names[id(output.lazydata.base.realized)] = f'output{i}'
   return run, special_names
 
-def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,int,int]], bufs:Dict[str,Tuple[str,int,int]], bufs_to_save:Dict[str,Tensor], input_names:List[str], output_names:List[str]) -> str:
+def fread_net(bufs: Dict[str,Buffer]):
+  cprog = []
+  cprog.append("#include <stdio.h>")
+  cprog.append("void fread_net() {")
+  cprog.append("FILE *model_file = fopen(\"~/Library/Caches/tinygrad/downloads/gpt2_124)\", \"rb\");")
+
+  for name, cl in bufs.items():
+    cprog.append(f"fread({name}_data, sizeof(float), {cl.size}, model_file);")
+
+  cprog.append("fclose(model_file);")
+  cprog.append("}")
+  return cprog
+
+
+def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,int,int]], bufs:Dict[str,Tuple[str,int,int]], bufs_to_save:Dict[str,Buffer], input_names:List[str], output_names:List[str]) -> str:
   from tinygrad.runtime.ops_clang import CLANG_PROGRAM_HEADER
   cprog = [CLANG_PROGRAM_HEADER]
 
+  size = 0
   for name,cl in bufs_to_save.items():
-    weight = ''.join(["\\x%02X"%x for x in bytes(cl._buf)])
-    cprog.append(f"unsigned char {name}_data[] = \"{weight}\";")
+    size += cl.nbytes
+    # print(name, cl.size)
+    # weight = ''.join(["\\x%02X"%x for x in bytes(cl._buf)])
+    # print(weight)
+    # weight = "0"
+    # cprog.append(f"unsigned char {name}_data[] = \"{weight}\";")
+    cprog.append(f"unsigned char {name}_data[{cl.size*4}];")
+  print("weights bytes", size)
 
   inputs = ", ".join([f'float* {input}' for input in input_names])
   outputs = ", ".join([f'float* {output}' for output in output_names])
   cprog += [f"float {name}[{len}];" if name not in bufs_to_save else f"float *{name} = (float *){name}_data;" for name,(len,dtype,_key) in bufs.items() if name not in ['input', 'outputs']]
   cprog += list(functions.values())
   cprog += [f"void net({inputs}, {outputs}) {{"] + [f"{name}({', '.join(args)});" for (name, args, _global_size, _local_size) in statements] + ["}"]
+  cprog += fread_net(bufs_to_save);
   return '\n'.join(cprog)
 
 def export_model_webgl(functions, statements, bufs, bufs_to_save, weight_names, input_names, output_names) -> str:
@@ -314,6 +342,9 @@ def export_model(model, target:str, *inputs):
   run,special_names = jit_model(model, *inputs)
   functions, statements, bufs, bufs_to_save = compile_net(run, special_names)
   state = get_state_dict(model)
+  from tinygrad.helpers import prod
+  s = Tensor([prod(t.shape) for t in state.values()]).sum()
+  print("state", len(state.keys()), s.numpy())
   weight_names = {id(x.lazydata.base.realized): name for name, x in state.items()}
   input_names = [name for _,name in special_names.items() if "input" in name]
   output_names = [name for _,name in special_names.items() if "output" in name]
