@@ -239,7 +239,7 @@ class NVProgram:
     for i in range(len(vals)): kernargs += [vals[i]]
 
     queue = HWComputeQueue()
-    queue.wait(0, self.device.compute_put_value).copy_from_cpu(kernargs_ptr, self.constbuffer_0 + kernargs)
+    queue.wait(self.device.compute_signal, self.device.compute_put_value).copy_from_cpu(kernargs_ptr, self.constbuffer_0 + kernargs)
     queue.exec(self, qmd_ptr, kernargs_ptr, global_size, local_size).signal(self.device.compute_signal).submit(self.device)
 
 class NVAllocator(LRUAllocator):
