@@ -357,7 +357,7 @@ class NVDevice(Compiled):
       hObjectNew=self.host_mem_object_enumerator, hClass=nvcls.NV01_MEMORY_SYSTEM_OS_DESCRIPTOR, flags=flags, pMemory=va_base, limit=size-1), fd=-1)
     ret = fcntl.ioctl(fd_dev0, _IOWR(ord('F'), nvesc.NV_ESC_RM_ALLOC_MEMORY, ctypes.sizeof(made)), made)
     if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
-    if made.params.status != 0: raise RuntimeError(f"_gpu_host_alloc returned {made.params.status}")
+    if made.params.status != 0: raise RuntimeError(f"_gpu_map_to_gpu returned {made.params.status}")
     return self._gpu_uvm_map2(va_base, size, made.params.hObjectNew).base
 
   def _gpu_uvm_map2(self, va_base, size, mem_handle, create_range=True):
@@ -381,7 +381,7 @@ class NVDevice(Compiled):
     if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
     if made.status != 0: raise RuntimeError(f"_gpu_host_alloc returned {made.status}")
     self._gpu_uvm_free(mem.base, mem.length)
-  
+
   def _gpu_uvm_free(self, va_base, size):
     free_params = nvuvm.UVM_FREE_PARAMS(base=va_base, length=size)
     uvm_ioctl(self.fd_uvm, int(nvuvm.UVM_FREE[2]), free_params)
@@ -428,7 +428,7 @@ class NVDevice(Compiled):
     register_gpu = nvuvm.UVM_REGISTER_GPU_PARAMS(rmCtrlFd=-1, gpu_uuid=nvuvm.struct_nv_uuid(uuid=self.gpu_uuid))
     uvm_ioctl(self.fd_uvm, int(nvuvm.UVM_REGISTER_GPU[2]), register_gpu)
 
-    register_vaspace = nvuvm.UVM_REGISTER_GPU_VASPACE_PARAMS(gpuUuid=nvuvm.struct_nv_uuid(uuid=self.gpu_uuid), 
+    register_vaspace = nvuvm.UVM_REGISTER_GPU_VASPACE_PARAMS(gpuUuid=nvuvm.struct_nv_uuid(uuid=self.gpu_uuid),
       rmCtrlFd=self.fd_ctl, hClient=self.root, hVaSpace=vaspace)
     uvm_ioctl(self.fd_uvm, int(nvuvm.UVM_REGISTER_GPU_VASPACE[2]), register_vaspace)
 
