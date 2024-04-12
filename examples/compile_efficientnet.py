@@ -5,6 +5,8 @@ from tinygrad.nn.state import safe_save
 from extra.export_model import export_model
 from tinygrad.helpers import getenv, fetch
 import ast
+from tinygrad.runtime.ops_clang import ClangCompiler, ClangProgram
+from ctypes import c_char_p
 
 if __name__ == "__main__":
   model = EfficientNet(0)
@@ -34,11 +36,11 @@ if __name__ == "__main__":
     # buffers (empty + weights)
     cprog.append("""
   int main(int argc, char* argv[]) {
-    int DEBUG = getenv("DEBUG") != NULL ? atoi(getenv("DEBUG")) : 0;
+    //int DEBUG = getenv("DEBUG") != NULL ? atoi(getenv("DEBUG")) : 0;
     int X=0, Y=0, chan=0;
     stbi_uc *image = (argc > 1) ? stbi_load(argv[1], &X, &Y, &chan, 3) : stbi_load_from_file(stdin, &X, &Y, &chan, 3);
     assert(image != NULL);
-    if (DEBUG) printf("loaded image %dx%d channels %d\\n", X, Y, chan);
+    //if (DEBUG) printf("loaded image %dx%d channels %d\\n", X, Y, chan);
     assert(chan == 3);
     // resize to input[1,3,224,224] and rescale
     for (int y = 0; y < 224; y++) {
@@ -60,10 +62,15 @@ if __name__ == "__main__":
         best_idx = i;
       }
     }
-    if (DEBUG) printf("category : %d (%s) with %f\\n", best_idx, lbls[best_idx], best);
-    else printf("%s\\n", lbls[best_idx]);
+    //if (DEBUG) printf("category : %d (%s) with %f\\n", best_idx, lbls[best_idx], best);
+    //else printf("%s\\n", lbls[best_idx]);
+    printf("category : %d (%s) with %f\\n", best_idx, lbls[best_idx], best);
   }""")
 
     # CLANG=1 python3 examples/compile_efficientnet.py | clang -O2 -lm -x c - -o recognize && DEBUG=1 time ./recognize docs/showcase/stable_diffusion_by_tinygrad.jpg
     # category : 281 (tabby, tabby cat) with 9.452788
-    print('\n'.join(cprog))
+    # print('\n'.join(cprog))
+
+    src = '\n'.join(cprog)
+    p = ClangProgram("main", ClangCompiler().compile(src))
+    p(2, (c_char_p * 2)(b'', b'docs/showcase/stable_diffusion_by_tinygrad.jpg'))
