@@ -213,5 +213,5 @@ def rand_balanced_crop(image, label, patch_size=(128, 128, 128), oversampling=0.
   return image, label
 
 if __name__ == "__main__":
-  for X, Y in iterate(cache_preprocessed_data=getenv("CACHE_PREPROCESSED_DATA")):
+  for X, Y in iterate():
     print(X.shape, Y.shape)
