@@ -246,7 +246,7 @@ def train_retinanet():
   MAP_TARGET = 0.34
   GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
   SYNCBN = False
-  dtypes.default_float = dtypes.bfloat16
+  # dtypes.default_float = dtypes.bfloat16
   loss_scaler = 128.0 if dtypes.default_float in [dtypes.float16, dtypes.bfloat16] else 1.0
 
   print(f"Training on {GPUS}")
