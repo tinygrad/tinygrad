@@ -89,7 +89,6 @@ class DiskDevice(Compiled):
       os.close(self.fd)
       self.fd = None
       self.size = None
-    if self.mem: self.mem.close()
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
   def get_runner(self, *ast:LazyOp):
     assert len(ast) == 1, "DiskRunner doesn't support multioutput kernels."
