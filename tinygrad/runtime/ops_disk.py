@@ -2,7 +2,7 @@ from __future__ import annotations
 import os, mmap, _posixshmem, io, functools
 from typing import Dict, List, Any, Optional
 from tinygrad.helpers import prod, OSX
-from tinygrad.device import Compiled, Allocator, Runner, Buffer
+from tinygrad.device import Compiled, Allocator, Runner, Buffer, BufferOptions
 from tinygrad.ops import UnaryOps, LazyOp, BufferOps
 from tinygrad.shape.view import strides_for_shape
 
@@ -16,15 +16,17 @@ class DiskBuffer:
 
 MAP_LOCKED, MAP_POPULATE = 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000)
 class DiskAllocator(Allocator):
-  def __init__(self, device:DiskDevice): self.device = device
+  def __init__(self, device:DiskDevice):
+    self.device = device
+    super().__init__()
   def _alloc(self, size:int, options):
     self.device._might_open(size)
     return DiskBuffer(self.device, size)
-  def _free(self, buf, options): self.device._might_close()
+  def _free(self, opaque, options:Optional[BufferOptions]=None): return self.device._might_close() if isinstance(opaque, DiskBuffer) else None
   def as_buffer(self, src:DiskBuffer): return src._buf()
   def copyin(self, dest:DiskBuffer, src:memoryview): dest._buf()[:] = src
   def copyout(self, dest:memoryview, src:DiskBuffer):
-    if OSX and hasattr(self.device, 'fd'):
+    if OSX and hasattr(self.device, 'fd') and self.device.fd is not None:
       # OSX doesn't seem great at mmap, this is faster
       with io.FileIO(self.device.fd, "a+b", closefd=False) as fo:
         fo.seek(src.offset)
@@ -34,6 +36,7 @@ class DiskAllocator(Allocator):
 
 class DiskRunner(Runner):
   def __init__(self, ast:LazyOp):
+    super().__init__()
     # two ASTs are allowed here.
     assert ast.op is BufferOps.STORE, "output of AST must be store"
     assert ast.arg.st.contiguous, "shapetracker must be contiguous"
@@ -60,6 +63,7 @@ class DiskRunner(Runner):
 class DiskDevice(Compiled):
   def __init__(self, device:str):
     self.size: Optional[int] = None
+    self.fd: Optional[int] = None
     self.count = 0
     super().__init__(device, DiskAllocator(self), None, None)
   def _might_open(self, size):
@@ -81,9 +85,11 @@ class DiskDevice(Compiled):
     if (hp := getattr(mmap, "MADV_HUGEPAGE", None)) is not None: self.mem.madvise(hp) # type: ignore
   def _might_close(self):
     self.count -= 1
-    if self.count == 0:
+    if self.count == 0 and self.fd is not None:
       os.close(self.fd)
+      self.fd = None
       self.size = None
+    if self.mem: self.mem.close()
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
   def get_runner(self, *ast:LazyOp):
     assert len(ast) == 1, "DiskRunner doesn't support multioutput kernels."
