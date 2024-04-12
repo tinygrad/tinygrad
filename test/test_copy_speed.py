@@ -10,17 +10,22 @@ class TestCopySpeed(unittest.TestCase):
   def setUpClass(cls): Device[Device.DEFAULT].synchronize()
 
   def testCopySHMtoDefault(self):
-    s = shared_memory.SharedMemory(name="test_X", create=True, size=N*N*4)
-    s.close()
+    name = "test_X"
+    size = N * N * 4
+    try:
+      s = shared_memory.SharedMemory(name=name, create=True, size=size)
+    except FileExistsError:
+      s = shared_memory.SharedMemory(name=name, create=False, size=size)
     if CI and not OSX:
-      t = Tensor.empty(N, N, device="disk:/dev/shm/test_X").realize()
+      t = Tensor.empty(N, N, device=f"disk:/dev/shm/{name}").realize()
     else:
-      t = Tensor.empty(N, N, device="disk:shm:test_X").realize()
+      t = Tensor.empty(N, N, device=f"disk:shm:{name}").realize()
     for _ in range(3):
       with Timing("sync:  ", on_exit=lambda ns: f" @ {t.nbytes()/ns:.2f} GB/s"):
         with Timing("queue: "):
           t.to(Device.DEFAULT).realize()
         Device[Device.DEFAULT].synchronize()
+    s.close()
     s.unlink()
 
   def testCopyCPUtoDefault(self):
