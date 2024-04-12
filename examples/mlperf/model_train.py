@@ -268,6 +268,20 @@ def train_unet3d():
   EVALUATE_EVERY = getenv("EVALUATE_EVERY", ceil(20 * TRAIN_DATASET_SIZE / (TRAIN_DATASET_SIZE * BS)))
   PREPROCESSED_DIR = BASEDIR / ".." / "preprocessed"
 
+  config = {
+    "num_epochs": NUM_EPOCHS,
+    "batch_size": BS,
+    "learning_rate": LR,
+    "learning_rate_warmup_epochs": LR_WARMUP_EPOCHS,
+    "learning_rate_warmup_init": LR_WARMUP_INIT_LR,
+    "start_eval_at": START_EVAL_AT,
+    "evaluate_every": EVALUATE_EVERY,
+    "beam": BEAM.value,
+    "wino": WINO.value,
+    "gpus": GPUS,
+    "default_float": dtypes.default_float.name
+  }
+
   if WANDB:
     try:
       import wandb
@@ -275,23 +289,11 @@ def train_unet3d():
       raise "Need to install wandb to use it"
 
   if SEED:
+    config["seed"] = SEED
+
     Tensor.manual_seed(SEED)
     np.random.seed(SEED)
     random.seed(SEED)
-
-  config = {
-    "num_epochs": NUM_EPOCHS,
-    "batch_size": BS,
-    "learning_rate": LR,
-    "learning_rate_warmup_epochs": LR_WARMUP_EPOCHS,
-    "learning_rate_warmup_init": LR_WARMUP_INIT_LR,
-    "seed": SEED,
-    "start_eval_at": START_EVAL_AT,
-    "evaluate_every": EVALUATE_EVERY,
-    "beam": getenv("BEAM"),
-    "gpus": GPUS,
-    "default_float": dtypes.default_float.name
-  }
 
   model = UNet3D()
   params = get_parameters(model)
@@ -325,7 +327,6 @@ def train_unet3d():
     optim.step()
     return loss.realize()
   
-  @TinyJit
   def eval_step(model, x, y):
     y_hat, y = sliding_window_inference(model, x, y, gpus=GPUS)
     y_hat, y = Tensor(y_hat), Tensor(y, requires_grad=False)
@@ -369,8 +370,6 @@ def train_unet3d():
       st = pt
 
     if epoch == next_eval_at:
-      train_step.reset()
-
       Tensor.training = False
 
       next_eval_at += evaluate_every
@@ -381,8 +380,6 @@ def train_unet3d():
         eval_loss_value, score = eval_step(model, x, y)
         eval_loss.append(eval_loss_value)
         scores.append(score)
-
-      eval_step.reset()
 
       scores = Tensor.mean(Tensor.stack(scores, dim=0), axis=0).numpy()
       eval_loss = Tensor.mean(Tensor.stack(eval_loss, dim=0), axis=0).numpy()
