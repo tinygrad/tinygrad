@@ -41,7 +41,7 @@ class LazyBuffer:
       self._base = base
 
   def __repr__(self) -> str:
-    return f"<LB {self.device} {self.shape} contig:{self.st.contiguous} {self.st if self.base != self else (self.op, self.realized)}>"
+    return f"<LB {self.device} {self.shape} {str(self.dtype)[7:]} {self.st if self.base != self else (self.op, self.realized)}>"
 
   @property
   def realized(self) -> Optional[Buffer]:
