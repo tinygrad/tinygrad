@@ -167,7 +167,7 @@ def iterate(coco, bs=8):
         # xNew_pre = normalize(Tensor(np.array(x_orig)))
         xNew_tor = F.resize(x_orig, size=SIZE)
         # print('X_NEW', xNew.shape)
-        xNew = normalize(Tensor(np.array(xNew_tor)))
+        xNew = normalize(Tensor(np.array(xNew_tor)).cast(dtypes.default_float))
 
         # print('X_MEAN_NORM',xNew.shape, xNew.mean().numpy())
         X.append(xNew)
