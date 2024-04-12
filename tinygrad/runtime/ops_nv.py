@@ -402,6 +402,10 @@ class NVDevice(Compiled):
       uvm_ioctl(self.fd_uvm, int(nvuvm.UVM_INITIALIZE), nvuvm.UVM_INITIALIZE_PARAMS())
       uvm_ioctl(self.fd_uvm_2, int(nvuvm.UVM_MM_INITIALIZE[2]), nvuvm.UVM_MM_INITIALIZE_PARAMS(uvmFd=self.fd_uvm))
 
+      NVDevice.gpus_info = (nvesc.nv_ioctl_card_info_t*16)()
+      ret = fcntl.ioctl(NVDevice.fd_ctl, _IOWR(ord('F'), nvesc.NV_ESC_CARD_INFO, ctypes.sizeof(NVDevice.gpus_info)), NVDevice.gpus_info)
+      if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
+
     # TODO: Get classes from NV0080_CTRL_CMD_GPU_GET_CLASSLIST_V2
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
     self.fd_dev = os.open(f"/dev/nvidia{self.device_id}", os.O_RDWR | os.O_CLOEXEC)
@@ -409,7 +413,11 @@ class NVDevice(Compiled):
     self.next_gpu_vaddr = 0x8000000000 + 0x1000000000 * self.device_id
     self.next_mmaped_gpu_vaddr = 0x1000000000 + 0x1000000000 * self.device_id
 
-    device_params = nvcls.NV0080_ALLOC_PARAMETERS(deviceId=self.device_id, hClientShare=self.root, vaMode=nvesc.NV_DEVICE_ALLOCATION_VAMODE_MULTIPLE_VASPACES)
+    assert NVDevice.gpus_info[self.device_id].valid
+    gpu_info = nvctrl.NV0000_CTRL_GPU_GET_ID_INFO_V2_PARAMS(gpuId=NVDevice.gpus_info[self.device_id].gpu_id)
+    rm_control(self.fd_ctl, nvctrl.NV0000_CTRL_CMD_GPU_GET_ID_INFO_V2, self.root, self.root, gpu_info)
+
+    device_params = nvcls.NV0080_ALLOC_PARAMETERS(deviceId=gpu_info.deviceInstance, hClientShare=self.root, vaMode=nvesc.NV_DEVICE_ALLOCATION_VAMODE_MULTIPLE_VASPACES)
     self.device = rm_alloc(self.fd_ctl, nvcls.NV01_DEVICE_0, self.root, self.root, device_params).hObjectNew
     self.subdevice = rm_alloc(self.fd_ctl, nvcls.NV20_SUBDEVICE_0, self.root, self.device, None).hObjectNew
     self.usermode = rm_alloc(self.fd_ctl, nvcls.TURING_USERMODE_A, self.root, self.subdevice, None).hObjectNew
