@@ -129,7 +129,7 @@ def _is_padding_okay(buf:LazyBuffer, realizes:Set[LazyBuffer]) -> bool:
   return all(_is_padding_okay(x.base, realizes) for x in buf.srcs)
 
 def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[DefaultDict[LazyBuffer, List[LazyBuffer]], DefaultDict[LazyBuffer, int],
-                                                                          Dict[LazyBuffer, _LBScheduleItem]]:
+                                                                    Dict[LazyBuffer, _LBScheduleItem]]:
   # start by just realizing the buffers passed in
   realizes: Set[LazyBuffer] = set([x.base for x in outs if not x.base.realized])
   allbufs: Dict[LazyBuffer, None] = {}

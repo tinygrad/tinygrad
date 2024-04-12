@@ -142,8 +142,8 @@ class Tensor:
     outs = flatten([x.lazydata.lbs if isinstance(x.lazydata, MultiLazyBuffer) else [x.lazydata] for x in lst])
     if getenv("FUZZ_SCHEDULE"):
       from test.external.fuzz_schedule import fuzz_schedule
-      fuzz_schedule(outs)
-    else: run_schedule(*create_schedule_with_vars(outs))
+      return fuzz_schedule(outs)
+    run_schedule(*create_schedule_with_vars(outs))
 
   def realize(self) -> Tensor:
     Tensor.corealize([self])

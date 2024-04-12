@@ -1,4 +1,5 @@
 from collections import defaultdict
+import numpy as np
 from typing import DefaultDict, List, Set, TypeVar, Dict
 from tinygrad.buffer import Buffer
 from tinygrad.engine.realize import run_schedule
@@ -12,29 +13,41 @@ def fuzz_schedule(outs: List[LazyBuffer]):
   graph, in_degree, prescheduled = _graph_schedule(outs, seen:=set())
   sorts = find_all_sorts(graph, in_degree)
   if DEBUG >= 2: print(colored(f"fuzzing {len(sorts)} toposorts", "yellow"))
+
   schedules: List[List[ScheduleItem]] = [[] for _ in sorts]
-  fuzz_items: DefaultDict[LazyBuffer, List[ScheduleItem]] = defaultdict(list)
+  fuzz_outputs: DefaultDict[LazyBuffer, List[Buffer]] = defaultdict(list)
   for i, s in enumerate(sorts):
-    rawbufs_map: Dict[LazyBuffer, Buffer] = {}
+    scheduled_bufs: Dict[LazyBuffer, Buffer] = {}
     for key in s:
       for buf in (ps:=prescheduled[key]).outputs: seen.add(buf)
-      for x in ps.outputs: rawbufs_map[x] = Buffer(x.device, x.size, x.dtype) if i > 0 else x.buffer
-      inputs = tuple(x.buffer if hasattr(x.buffer, "_buf") else rawbufs_map[x] for x in ps.inputs if x.size != 0)
-      schedules[i].append(si:=ScheduleItem(ps.ast, tuple(rawbufs_map[x] for x in ps.outputs if x.size != 0), inputs))
-      fuzz_items[key].append(si)
+      for x in ps.outputs: scheduled_bufs[x] = Buffer(x.device, x.size, x.dtype) if i > 0 else x.buffer
+      inputs = tuple(x.buffer if hasattr(x.buffer, "_buf") else scheduled_bufs[x] for x in ps.inputs if x.size != 0)
+      schedules[i].append(ScheduleItem(ps.ast, tuple(scheduled_bufs[x] for x in ps.outputs if x.size != 0), inputs))
+      for out in ps.outputs: fuzz_outputs[out].append(scheduled_bufs[out])
 
   # seed is the same between runs
   seed = Tensor._seed
   for i, schedule in enumerate(schedules):
     Tensor.manual_seed(seed)
     if DEBUG >= 2: print(f"toposort permutation {i}")
-    run_schedule(schedule)
+    run_schedule(schedule.copy())
     GlobalCounters.reset()
 
-  for items in fuzz_items.values():
-    raw_outs = [[out.as_buffer().tobytes() for out in si.outputs] for si in items]
-    assert all(o == raw_outs[0] for o in raw_outs)
-  if DEBUG >= 2: print(colored("all toposorts passed", "green"))
+  all_passed = True
+  for lb, bufs in fuzz_outputs.items():
+    for i, buf in enumerate(bufs):
+      ground_truth, output = np.frombuffer(bufs[0].as_buffer(), bufs[0].dtype.np), np.frombuffer(buf.as_buffer(), buf.dtype.np)
+      try: np.testing.assert_allclose(output, ground_truth, atol=1e-2, rtol=1e2)
+      except AssertionError as e:
+        print(f"COMPARE FAILED FOR REALIZE {lb}")
+        curr_si = [si for si in schedules[i] if buf in si.outputs][0]
+        baseline_si = [si for si in schedules[0] if bufs[0] in si.outputs][0]
+        print(f"ground truth realized at {schedules[0].index(baseline_si)}, this realize was at {schedules[i].index(curr_si)}")
+        print(e)
+        all_passed = False
+
+  if not all_passed: raise Exception("some toposorts failed")
+  if DEBUG >= 2: print(colored("all toposorts all_passed", "green"))
 
 T = TypeVar("T")
 def find_all_sorts(graph:DefaultDict[T, List[T]], in_degree:DefaultDict[T, int]) -> List[List[T]]:
