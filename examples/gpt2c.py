@@ -68,42 +68,37 @@ if __name__ == "__main__":
   prompt_tokens = gpt2.tokenizer.encode(args.prompt, allowed_special={"<|endoftext|>"})
   toks = [prompt_tokens[:] for _ in range(args.batch_size)]
   tokens = Tensor([x[start_pos:] for x in toks])
-  prg, inp_sizes, out_sizes, state = export_model(gpt2.model, mode, tokens, Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT).bind(start_pos), args.temperature, fread_model=True)
+  prg, inputs, outputs, state = export_model(gpt2.model, mode, tokens, Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT).bind(start_pos), args.temperature, fread_model=True)
   cprog = [prg]
 
-  # print(inp_sizes)
-  # print(out_sizes)
-
-  inputs = "\n".join([f"float {inp}[{inp_size}];" for inp,inp_size in inp_sizes.items()])
-  outputs = "\n".join([f"float {out}[{out_size}];" for out,out_size in out_sizes.items()])
+  inputs = "\n".join([f"{dtype.name} {name}[{sz}];" for name,(sz,dtype,is_pointer) in inputs.items()])
+  outputs = "\n".join([f"{dtype.name} {name}[{sz}];" for name,(sz,dtype,is_pointer) in outputs.items()])
   cprog.append(inputs)
   cprog.append(outputs)
 
   cprog.append("""
   int main(int argc, char* argv[]) {
     printf("inside");
-    fread_net();
-    int max_length = 100;
-    int toks[max_length];
-    int start_pos = 0;
-    float temp = 0.8;
+    //fread_net();
+    //int max_length = 100;
+    //int toks[max_length];
+    //int start_pos = 0;
+    //float temp = 0.8;
 
-    for (int t = 0; t < max_length; t++) {
-      input0[0] = toks[start_pos];
-      input0[1] = start_pos;
-      input0[2] = temp;
-      net(input0, output0);
-      toks[start_pos+t] = output0[0];
-      start_pos += 1;
-    }
-    for (int t = 0; t < max_length; t++) {
-      printf("%d ", toks[t]);
-    }
+    //for (int t = 0; t < max_length; t++) {
+     // input0[0] = toks[start_pos];
+      //net(input0, start_pos, output0);
+      //toks[start_pos+t] = output0[0];
+      //start_pos += 1;
+    //}
+    //for (int t = 0; t < max_length; t++) {
+     // printf("%d ", toks[t]);
+    //}
     return 0;
   }""")
 
   # CLANG=1 python3 examples/gpt2c.py --model_size gpt2 | clang -O2 -lm -x c - -o gpt2 && ./gpt2
   src = '\n'.join(cprog)
-  print(src[-100000:])
+  print(src[-1000:])
   p = ClangProgram("main", ClangCompiler().compile(src))
   p()

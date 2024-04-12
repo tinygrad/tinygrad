@@ -1,8 +1,9 @@
-from typing import Tuple, Dict, List
+from typing import Tuple, Dict, List, Union
 from tinygrad.buffer import Buffer 
 from tinygrad.dtype import DType
 from tinygrad.tensor import Device, Tensor
-from tinygrad.engine.jit import TinyJit, CompiledASTRunner
+from tinygrad.engine.jit import TinyJit, CompiledRunner 
+from tinygrad.engine.realize import CustomOp
 from tinygrad.nn.state import get_state_dict
 from tinygrad.dtype import dtypes
 import json
@@ -20,12 +21,11 @@ web_utils = {
   };"""
 }
 
-def compile_net(run, special_names:Dict[int,str]):
+def compile_net(run: TinyJit, special_names:Dict[int,str]):
   functions, bufs, bufs_to_save, statements, bufnum = {}, {}, {}, [], 0
-  size = 0
   for ji in run.jit_cache:
-    fxn: CompiledASTRunner = ji.prg
-    if not hasattr(fxn, 'name'): continue # FIXME: hack for custom op
+    fxn = ji.prg
+    if not hasattr(fxn, 'name'): continue # TODO: is this the correct handling for CustomOp?
     functions[fxn.name] = fxn.prg   # NOTE: this assumes all with the same name are the same
     cargs = []
     for i,arg in enumerate(ji.rawbufs):
@@ -33,15 +33,17 @@ def compile_net(run, special_names:Dict[int,str]):
       key = id(arg)
       if key not in bufs:
         if key in special_names:
-          bufs[key] = (special_names[key], arg.size*arg.dtype.itemsize, arg.dtype, key)
+          bufs[key] = (special_names[key][0], arg.size*arg.dtype.itemsize, arg.dtype, key)
         else:
-          size += arg.size
           bufs[key] = (f"buf_{bufnum}", arg.size*arg.dtype.itemsize, arg.dtype, key)
           bufnum += 1
           if i > 0: bufs_to_save[bufs[key][0]] = arg   # if first usage of a buffer is not an output, and it's not a special name
       cargs.append(bufs[key][0])
+    for v in fxn.vars:
+      key = v.hash
+      bufs[key] = (special_names[key][0], dtypes.int.itemsize, dtypes.int, key)
+      cargs.append(bufs[key][0])
     statements.append((fxn.name, cargs, fxn.global_size, fxn.local_size))
-  print("size", size)
 
   return functions, statements, {name:(size, dtype, key) for (name,size,dtype,key) in bufs.values()}, bufs_to_save
 
@@ -55,18 +57,21 @@ def jit_model(model, *args) -> Tuple[TinyJit,Dict[int,str]]:
     return [o.realize() for o in out]
 
   # twice to run the JIT
-  for _ in range(2): the_output = run(*args)
+  for _ in range(2): output = run(*args)
   special_names = {}
 
   # hack to put the inputs back
   for (j,i),idx in run.input_replace.items():
     realized_input = args[idx].lazydata.base.realized
     run.jit_cache[j].rawbufs[i] = realized_input
-    special_names[id(realized_input)] = f'input{idx}'
+    special_names[id(realized_input)] = (f"input{idx}", realized_input.dtype, True)
 
+  for v in run.expected_vals:
+    special_names[v.hash] = (f"input_{v.expr}", dtypes.int, False)
+     
   # TODO: fetch this from the jit in self.input_replace and self.ret (hint: use get_parameters on self.ret)
-  for i, output in enumerate(the_output):
-    special_names[id(output.lazydata.base.realized)] = f'output{i}'
+  for i, out in enumerate(output):
+    special_names[id(out.lazydata.base.realized)] = (f"output{i}", out.dtype, True)
   return run, special_names
 
 def fread_model(fp: str, bufs: Dict[str,Buffer]):
@@ -83,7 +88,7 @@ def fread_model(fp: str, bufs: Dict[str,Buffer]):
   return cprog
 
 
-def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,int,int]], bufs:Dict[str,Tuple[str,int,int]], bufs_to_save:Dict[str,Buffer], input_names:List[str], output_names:List[str], load_model) -> str:
+def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,int,int]], bufs:Dict[str,Tuple[int,DType,int]], bufs_to_save:Dict[str,Buffer], net_inputs:List[Tuple[str, DType]], net_outputs:List[Tuple[str, DType]], load_model) -> str:
   from tinygrad.runtime.ops_clang import CLANG_PROGRAM_HEADER
   cprog = [CLANG_PROGRAM_HEADER]
 
@@ -96,10 +101,16 @@ def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,in
 
   if load_model:
     cprog += fread_model("~/Library/Caches/tinygrad/downloads/gpt2_124", bufs_to_save)
-  inputs = ", ".join([f'float* {input}' for input in input_names])
-  outputs = ", ".join([f'float* {output}' for output in output_names])
-  cprog += [f"float {name}[{len}];" if name not in bufs_to_save else f"float *{name} = (float *){name}_data;" for name,(len,dtype,_key) in bufs.items() if name not in ['input', 'outputs']]
+
+  for name,(len,dtype,_) in bufs.items():
+    # if 'input' in name or 'output' in name: continue
+    if name in bufs_to_save: cprog += [f"{dtype.name} *{name} = ({dtype.name} *){name}_data;"]
+    else: cprog += [f"{dtype.name} {name}[{len}];"]
+
   cprog += list(functions.values())
+
+  inputs = ", ".join([f'{dtype.name}{"*" if is_pointer else ""} {input}' for input,dtype,is_pointer in net_inputs])
+  outputs = ", ".join([f'{dtype.name}{"*" if is_pointer else ""} {output}' for output,dtype,is_pointer in net_outputs])
   cprog += [f"void net({inputs}, {outputs}) {{"] + [f"{name}({', '.join(args)});" for (name, args, _global_size, _local_size) in statements] + ["}"]
   return '\n'.join(cprog)
 
@@ -343,11 +354,11 @@ def export_model(model, target:str, *inputs, fread_model=False):
   s = Tensor([prod(t.shape) for t in state.values()]).sum()
   print("state", len(state.keys()), s.numpy())
   weight_names = {id(x.lazydata.base.realized): name for name, x in state.items()}
-  input_names = [name for _,name in special_names.items() if "input" in name]
-  output_names = [name for _,name in special_names.items() if "output" in name]
+  net_inputs = [(name,dtype,is_pointer) for name,dtype,is_pointer in special_names.values() if "input" in name]
+  net_outputs = [(name,dtype,is_pointer) for name,dtype,is_pointer in special_names.values() if "output" in name]
   prg = ""
   if target == "clang":
-    prg = export_model_clang(functions, statements, bufs, bufs_to_save, input_names, output_names, fread_model)
+    prg = export_model_clang(functions, statements, bufs, bufs_to_save, net_inputs, net_outputs, fread_model)
   elif target == "webgpu":
     prg = export_model_webgpu(functions, statements, bufs, bufs_to_save, weight_names, input_names, output_names)
   elif target == "webgl":
@@ -379,4 +390,4 @@ def export_model(model, target:str, *inputs, fread_model=False):
       }
     })
 
-  return prg, {input:bufs[input][0] for input in input_names}, {output:bufs[output][0] for output in output_names}, state
+  return prg, {name:(bufs[name][0],dtype,is_pointer) for name,dtype,is_pointer in net_inputs}, {name:(bufs[name][0],dtype,is_pointer) for name,dtype,is_pointer in net_outputs}, state
