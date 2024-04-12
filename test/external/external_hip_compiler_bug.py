@@ -1,6 +1,6 @@
 # [<buf device:HIP size:1605632 dtype:dtypes.float>, <buf device:HIP size:301506 dtype:dtypes.float>, <buf device:HIP size:9408 dtype:dtypes.float>]
 from tinygrad import Device, dtypes
-from tinygrad.device import Buffer, CompiledASTRunner
+from tinygrad.device import Buffer, CompiledRunner
 
 import ctypes
 import gpuctypes.hip as hip
@@ -216,8 +216,8 @@ b2 = Buffer(dev, 9408, dtypes.float)
 print(hex(b0._buf.value), hex(b0._buf.value+1605632*4))
 print(hex(b1._buf.value))
 print(hex(b2._buf.value))
-#prg = CompiledASTRunner("r_2_8_7_7_4_8_3_7_7_4_4_2_2", "", dev, [7, 1, 1], [8, 4, 1], precompiled=lib)
-prg = CompiledASTRunner("r_2_8_7_7_4_8_3_7_7_4_4_2_2", "", dev, [49, 8, 2], [8, 4, 1], precompiled=lib)
+#prg = CompiledRunner("r_2_8_7_7_4_8_3_7_7_4_4_2_2", "", dev, [7, 1, 1], [8, 4, 1], precompiled=lib)
+prg = CompiledRunner("r_2_8_7_7_4_8_3_7_7_4_4_2_2", "", dev, [49, 8, 2], [8, 4, 1], precompiled=lib)
 print("compiled")
 prg([b0, b1, b2], {})
 print("ran")
