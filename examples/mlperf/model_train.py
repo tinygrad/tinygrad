@@ -246,7 +246,7 @@ def train_retinanet():
   MAP_TARGET = 0.34
   GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
   SYNCBN = False
-  # dtypes.default_float = dtypes.bfloat16
+  dtypes.default_float = dtypes.bfloat16
   loss_scaler = 128.0 if dtypes.default_float in [dtypes.float16, dtypes.bfloat16] else 1.0
 
   print(f"Training on {GPUS}")
@@ -348,6 +348,7 @@ def train_retinanet():
     cnt = 0
     data_end = time.perf_counter()
     for X, Y_boxes, Y_labels, Y_boxes_p, Y_labels_p in iterate(coco_train, BS):
+      # print('Global reset')
       GlobalCounters.reset()
       data_time = time.perf_counter() - data_end
       st = time.perf_counter()
@@ -390,8 +391,9 @@ def train_retinanet():
       if lr_sched is not None:
         lr_sched.step()
       et = time.perf_counter()-st
-      print(colored(f'{cnt} STEP {loss.numpy():.5f}, time: {et*1000.0:7.2f} ms run, '
-                    f'data: {data_time*1000.0:7.2f} ms|| LR: {optimizer.lr.item():.6f}, '
+      print('hit')
+      print(colored(f'{cnt} STEP {loss.item():.5f}, time: {et*1000.0:7.2f} ms run, '
+                    f'data: {data_time*1000.0:7.2f} ms|| LR: {optimizer.lr.numpy().item():.6f}, '
                     f'mem: {GlobalCounters.mem_used / 1e9:.4f} GB used, '
                     f'GFLOPS: {GlobalCounters.global_ops * 1e-9 / et:7.2f}', 'magenta'))
       data_end = time.perf_counter()

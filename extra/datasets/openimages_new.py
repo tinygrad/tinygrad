@@ -48,12 +48,6 @@ class ConvertCocoPolysToMask(object):
     target["labels"] = Tensor(classes, requires_grad=False)#.realize()
     target["image_id"] = image_id
 
-    # for conversion to coco api
-    area = Tensor([obj["area"] for obj in anno])
-    iscrowd = Tensor([obj["iscrowd"] for obj in anno])
-    target["area"] = area
-    target["iscrowd"] = iscrowd
-
     return image, target
 
 class CocoDetection:
