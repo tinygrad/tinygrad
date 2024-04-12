@@ -90,11 +90,6 @@ class MultiLazyBuffer:
   def assign(self, x:MultiLazyBuffer): return MultiLazyBuffer([s.assign(d) for s,d in zip(self.lbs, x.lbs)], self.axis, self.real)
   def contiguous(self): return MultiLazyBuffer([x.contiguous() for x in self.lbs], self.axis, self.real)
 
-  def set_arange(self, val): [lb.set_arange(val) for lb in self.lbs]
-  def arange_data(self):
-    data = set([lb.arange_data() for lb in self.lbs])
-    return list(data)[0] if len(data) == 1 else None
-
   # elementwise is simple
   def e(self, op:Union[LoadOps, UnaryOps, BinaryOps, TernaryOps], *in_srcs:MultiLazyBuffer, arg:Optional[Any]=None) -> MultiLazyBuffer:
     msrcs = (self,)+in_srcs

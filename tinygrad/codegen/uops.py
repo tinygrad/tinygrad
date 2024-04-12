@@ -374,7 +374,6 @@ class UOpGraph:
     # uops optimization
     while self.uops_optimization(get_recursive_parents): pass
     self.simplify_phi_loops(get_recursive_parents)
-    [self.optimize_arange_loops(get_recursive_parents, x) for x in self.uops if x.uop is UOps.DEFINE_GLOBAL and x.arg[3]]
     # for x in self.one_hot_cmpeq: self.optimize_one_hot_reduce_loops(get_recursive_parents, x)
 
     # (recursively) remove childless uops
