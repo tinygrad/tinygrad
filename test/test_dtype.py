@@ -443,8 +443,14 @@ class TestTypeSpec(unittest.TestCase):
   def test_tensor_indexing_returns_same_dtype(self, data_dtype, indices_dtype):
     X_data =  Tensor.rand(60000, 1, 28, 28, dtype=data_dtype)
     indices =  Tensor.randint(512, high=X_data.shape[0]).cast(indices_dtype)
-    X = X_data[indices]
-    assert X.dtype == X_data.dtype
+    assert X_data[indices].dtype == X_data.dtype
+
+  @given(strat.sampled_from(core_dtypes), strat.sampled_from(dtype_ints))
+  def test_gather_returns_same_dtype(self, data_dtype, indices_dtype):
+    X_data = Tensor([[1, 0], [0, 1]], dtype=data_dtype)
+    indices = Tensor([[0, 0], [1, 0]], dtype=indices_dtype)
+    assert X_data.gather(indices, 0).dtype == X_data.dtype
+    assert X_data.gather(indices, 1).dtype == X_data.dtype
 
 class TestTypePromotion(unittest.TestCase):
   @given(strat.sampled_from(core_dtypes))
