@@ -604,11 +604,11 @@ class ResNetFPN:
 class ExtraFPNBlock:
   def __init__(self, in_channels, out_channels):
     self.p6 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=2, padding=1)
-    # self.p6.weight = Tensor.kaiming_uniform(self.p6.weight.shape, a=1).realize()
-    # self.p6.bias = Tensor.full(self.p6.bias.shape, 0.0).realize()
+    self.p6.weight = Tensor.kaiming_uniform(self.p6.weight.shape, a=1).realize()
+    self.p6.bias = Tensor.full(self.p6.bias.shape, 0.0).realize()
     self.p7 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=2, padding=1)
-    # self.p7.weight = Tensor.kaiming_uniform(self.p7.weight.shape, a=1).realize()
-    # self.p7.bias = Tensor.full(self.p7.bias.shape, 0.0).realize()
+    self.p7.weight = Tensor.kaiming_uniform(self.p7.weight.shape, a=1).realize()
+    self.p7.bias = Tensor.full(self.p7.bias.shape, 0.0).realize()
     self.use_P5 = in_channels == out_channels
 
   def __call__(self, p, c):
