@@ -346,10 +346,11 @@ def train_retinanet():
     else:
       optimizer.lr.assign(Tensor([LR], device = GPUS))
     cnt = 0
-    data_end = time.time()
+    data_end = time.perf_counter()
     for X, Y_boxes, Y_labels, Y_boxes_p, Y_labels_p in iterate(coco_train, BS):
       GlobalCounters.reset()
-      data_time = time.time() - data_end
+      data_time = time.perf_counter() - data_end
+      st = time.perf_counter()
       X.shard_(GPUS, axis=0)
       if(cnt==0 and epoch==0):
         # INIT LOSS FUNC
@@ -364,7 +365,7 @@ def train_retinanet():
         mdl_reg_loss = lambda r, y, m, b_t: model.head.regression_head.loss(r,y,ANCHORS_STACK, m, b_t)
         mdl_class_loss = lambda c, y,m, l_t: model.head.classification_head.loss(c,y,m, l_t)
 
-      st = time.time()
+      
       cnt+=1
       # matcher_gen not jittable for now
       matched_idxs = model.matcher_gen(ANCHORS, Y_boxes).realize()
@@ -388,12 +389,12 @@ def train_retinanet():
       loss = train_step(X, Y_boxes_p, Y_labels_p, matched_idxs, boxes_temp, labels_temp)
       if lr_sched is not None:
         lr_sched.step()
-      et = time.time()-st
-      print(colored(f'{cnt} STEP {loss.numpy():.5f}, time: {et:.4f}, '
-                    f'data: {data_time:.4f}|| LR: {optimizer.lr.item():.6f}, '
+      et = time.perf_counter()-st
+      print(colored(f'{cnt} STEP {loss.numpy():.5f}, time: {et*1000.0:7.2f} ms run, '
+                    f'data: {data_time*1000.0:7.2f} ms|| LR: {optimizer.lr.item():.6f}, '
                     f'mem: {GlobalCounters.mem_used / 1e9:.4f} GB used, '
-                    f'GFLOPS: {GlobalCounters.global_ops * 1e-9 / et:9.2f}', 'magenta'))
-      data_end = time.time()
+                    f'GFLOPS: {GlobalCounters.global_ops * 1e-9 / et:7.2f}', 'magenta'))
+      data_end = time.perf_counter()
     #   if cnt>2: 
     #     train_step.reset()
     #     break
