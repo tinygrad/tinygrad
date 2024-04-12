@@ -69,11 +69,11 @@ def jit_model(model, *args) -> Tuple[TinyJit,Dict[int,str]]:
     special_names[id(output.lazydata.base.realized)] = f'output{i}'
   return run, special_names
 
-def fread_net(bufs: Dict[str,Buffer]):
+def fread_model(fp: str, bufs: Dict[str,Buffer]):
   cprog = []
   cprog.append("#include <stdio.h>")
   cprog.append("void fread_net() {")
-  cprog.append("FILE *model_file = fopen(\"~/Library/Caches/tinygrad/downloads/gpt2_124)\", \"rb\");")
+  cprog.append(f"FILE *model_file = fopen(\"{fp}\", \"rb\");")
 
   for name, cl in bufs.items():
     cprog.append(f"fread({name}_data, sizeof(float), {cl.size}, model_file);")
@@ -83,27 +83,24 @@ def fread_net(bufs: Dict[str,Buffer]):
   return cprog
 
 
-def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,int,int]], bufs:Dict[str,Tuple[str,int,int]], bufs_to_save:Dict[str,Buffer], input_names:List[str], output_names:List[str]) -> str:
+def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,int,int]], bufs:Dict[str,Tuple[str,int,int]], bufs_to_save:Dict[str,Buffer], input_names:List[str], output_names:List[str], load_model) -> str:
   from tinygrad.runtime.ops_clang import CLANG_PROGRAM_HEADER
   cprog = [CLANG_PROGRAM_HEADER]
 
-  size = 0
   for name,cl in bufs_to_save.items():
-    size += cl.nbytes
-    # print(name, cl.size)
-    # weight = ''.join(["\\x%02X"%x for x in bytes(cl._buf)])
-    # print(weight)
-    # weight = "0"
-    # cprog.append(f"unsigned char {name}_data[] = \"{weight}\";")
-    cprog.append(f"unsigned char {name}_data[{cl.size*4}];")
-  print("weights bytes", size)
+    if load_model:
+      cprog.append(f"unsigned char {name}_data[{cl.size}];")
+    else:
+      weight = ''.join(["\\x%02X"%x for x in bytes(cl._buf)])
+      cprog.append(f"unsigned char {name}_data[] = \"{weight}\";")
 
+  if load_model:
+    cprog += fread_model("~/Library/Caches/tinygrad/downloads/gpt2_124", bufs_to_save)
   inputs = ", ".join([f'float* {input}' for input in input_names])
   outputs = ", ".join([f'float* {output}' for output in output_names])
   cprog += [f"float {name}[{len}];" if name not in bufs_to_save else f"float *{name} = (float *){name}_data;" for name,(len,dtype,_key) in bufs.items() if name not in ['input', 'outputs']]
   cprog += list(functions.values())
   cprog += [f"void net({inputs}, {outputs}) {{"] + [f"{name}({', '.join(args)});" for (name, args, _global_size, _local_size) in statements] + ["}"]
-  cprog += fread_net(bufs_to_save);
   return '\n'.join(cprog)
 
 def export_model_webgl(functions, statements, bufs, bufs_to_save, weight_names, input_names, output_names) -> str:
@@ -337,7 +334,7 @@ const setupNet = async (device, safetensor) => {{
 }}
   """ + f"\n\nconst loadNet = async (device) => {{ return await fetch('net.safetensors').then(x => x.arrayBuffer()).then(x => setupNet(device, new Uint8Array(x))); }}"
 
-def export_model(model, target:str, *inputs):
+def export_model(model, target:str, *inputs, fread_model=False):
   assert Device.DEFAULT in EXPORT_SUPPORTED_DEVICE, "only WEBGPU, WEBGL, CLANG, CUDA, GPU, METAL are supported"
   run,special_names = jit_model(model, *inputs)
   functions, statements, bufs, bufs_to_save = compile_net(run, special_names)
@@ -350,7 +347,7 @@ def export_model(model, target:str, *inputs):
   output_names = [name for _,name in special_names.items() if "output" in name]
   prg = ""
   if target == "clang":
-    prg = export_model_clang(functions, statements, bufs, bufs_to_save, input_names, output_names)
+    prg = export_model_clang(functions, statements, bufs, bufs_to_save, input_names, output_names, fread_model)
   elif target == "webgpu":
     prg = export_model_webgpu(functions, statements, bufs, bufs_to_save, weight_names, input_names, output_names)
   elif target == "webgl":

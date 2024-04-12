@@ -39,10 +39,11 @@ class GPT2:
 
     # TODO: write model
 
-    return GPT2(model)
+    return GPT2(model, tokenizer)
 
-  def __init__(self, model):
+  def __init__(self, model, tokenizer):
     self.model = model
+    self.tokenizer = tokenizer
 
 if __name__ == "__main__":
   mode = "clang"
@@ -67,7 +68,7 @@ if __name__ == "__main__":
   prompt_tokens = gpt2.tokenizer.encode(args.prompt, allowed_special={"<|endoftext|>"})
   toks = [prompt_tokens[:] for _ in range(args.batch_size)]
   tokens = Tensor([x[start_pos:] for x in toks])
-  prg, inp_sizes, out_sizes, state = export_model(gpt2.model, mode, tokens, Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT).bind(start_pos), args.temperature)
+  prg, inp_sizes, out_sizes, state = export_model(gpt2.model, mode, tokens, Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT).bind(start_pos), args.temperature, fread_model=True)
   cprog = [prg]
 
   # print(inp_sizes)
