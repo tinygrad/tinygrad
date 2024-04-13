@@ -75,6 +75,10 @@ class LazyOp:
   def vars(self) -> List[Variable]:
     return sorted(set.union(*[x.arg.st.vars() for x in self.lazyops if x.op in BufferOps], set()), key=lambda x: str(x.expr))
 
+def copy_ast(sz) -> LazyOp:
+  rd = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.uint8, st:=ShapeTracker.from_shape((sz,))))
+  return LazyOp(BufferOps.STORE, (rd,), MemBuffer(0, dtypes.uint8, st))
+
 # **************** independent FlopCounter ****************
 
 @dataclass
