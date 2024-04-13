@@ -1,17 +1,19 @@
 from __future__ import annotations
-from typing import TypeVar, Generic, Callable, List, Tuple, Union, Dict, cast
+from typing import TypeVar, Generic, Callable, List, Tuple, Union, Dict, cast, Optional
 import functools, itertools, operator
 from dataclasses import dataclass
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, BEAM, getenv, all_int
-from tinygrad.device import Buffer, Runner, CompiledRunner
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, BEAM, getenv, all_int, GraphException
+from tinygrad.device import Buffer, Runner, CompiledRunner, BufferXfer, Compiled, MultiDeviceJITGraph, Device
 from tinygrad.dtype import DType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, sint
-from tinygrad.engine.realize import ExecItem
+from tinygrad.engine.realize import ExecItem, capturing
 from tinygrad.nn.state import get_parameters
 from weakref import ref, WeakKeyDictionary
+
+# TODO: these graph functions probably shouldn't exist here
 
 def get_jit_stats(jit_cache: List[ExecItem]) -> Tuple[sint, int]:
   return functools.reduce(operator.add, [ji.prg.op_estimate for ji in jit_cache if isinstance(ji.prg, CompiledRunner)], 0), \
@@ -21,6 +23,45 @@ def get_jc_idxs_with_updatable_launch_dims(jit_cache: List[ExecItem]) -> List[in
           ((ji.prg.global_size and not all_int(ji.prg.global_size)) or (ji.prg.local_size and not all_int(ji.prg.local_size)))]
 def get_jc_idxs_with_updatable_var_vals(jit_cache: List[ExecItem]) -> List[int]:
   return [j for j,ji in enumerate(jit_cache) if isinstance(ji.prg, CompiledRunner) and ji.prg.vars]
+def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]) -> List[ExecItem]:
+  # Split JIT cache into batches for faster graph execution.
+  # This allows the accelerator to run some batches while subsequent graphs are still being updated.
+  max_batch_size = getenv("JIT_BATCH_SIZE", 32)
+  graphed_jit_cache: List[ExecItem] = []
+  current_batch: List[ExecItem] = []
+  current_device: Optional[Compiled] = None
+
+  def flush_batch():
+    nonlocal current_batch, current_device, max_batch_size
+    try:
+      if len(current_batch) <= 1 or current_device is None: raise GraphException("only one kernel doesn't graph")
+      graphed_jit_cache.append(ExecItem(current_device.graph(current_batch, input_rawbuffers, var_vals), cast(List[Optional[Buffer]], input_rawbuffers))) # noqa: E501
+      max_batch_size *= 2
+      if DEBUG >= 2: print(f"\tJIT GRAPHing batch with {len(current_batch)} kernels on device {current_device}")
+    except GraphException as e:
+      graphed_jit_cache.extend(current_batch)
+      if DEBUG >= 2: print(f"\tJIT GRAPHing failed batch with {len(current_batch)} kernels on device {current_device}: {e}")
+    current_batch = []
+    current_device = None
+
+  for ji in jit_cache:
+    ji_graph_dev: Optional[Compiled] = None # device on which the ji will be graphed. Not graphed if None.
+    if isinstance(ji.prg, CompiledRunner): ji_graph_dev = ji.prg.device
+    elif isinstance(ji.prg, BufferXfer) and ji.rawbufs[0] and ji.rawbufs[0].device.split(":", 1)[0] in {"HSA", "CUDA"}:
+      ji_graph_dev = Device[ji.rawbufs[0].device]
+
+    can_be_graphed = ji_graph_dev and ji_graph_dev.graph
+    can_extend_graph_batch = can_be_graphed and len(current_batch) < max_batch_size and (ji_graph_dev == current_device or
+      (isinstance(ji_graph_dev.graph, type) and issubclass(ji_graph_dev.graph, MultiDeviceJITGraph) and type(ji_graph_dev) == type(current_device))) #type:ignore
+    if not can_extend_graph_batch and len(current_batch) > 0: flush_batch()
+
+    if can_be_graphed: current_batch.append(ji)
+    else: graphed_jit_cache.append(ji)
+
+    current_device = ji_graph_dev
+
+  if len(current_batch) > 0: flush_batch()
+  return graphed_jit_cache
 
 def get_input_replace(jit_cache: List[ExecItem], input_rawbuffers:List[Buffer]) -> Dict[Tuple[int, int], int]:
   input_replace: Dict[Tuple[int, int], int] = {}
@@ -54,8 +95,6 @@ class PlaceHolder:
 class WeakExecItem:
   prg: Runner
   rawbufs: List[Union[PlaceHolder, Buffer]]
-
-capturing: List[TinyJit] = []
 
 ReturnType = TypeVar('ReturnType')
 class TinyJit(Generic[ReturnType]):
@@ -100,12 +139,18 @@ class TinyJit(Generic[ReturnType]):
         self.ret = self.fxn(*args, **kwargs)
         Tensor.corealize(get_parameters(self.ret))
         capturing.clear()
+      assert len(self._cc), "didn't JIT anything!"
       buffer_cache: Dict[PlaceHolder, Buffer] = {}
       self.jit_cache = \
         [ExecItem(ei.prg, [x.alloc_if_needed(buffer_cache) if isinstance(x, PlaceHolder) else x for x in ei.rawbufs]) for ei in self._cc]
       del self._cc
       if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
+
+      # Condense the items into a graph executor.
+      if getenv("JIT") != 2: self.jit_cache = apply_graph_to_jit(self.jit_cache, input_rawbuffers, var_vals)
+
       self.input_replace = get_input_replace(self.jit_cache, input_rawbuffers)
+      if DEBUG >= 1 and len(set(self.input_replace.values())) != len(input_rawbuffers): print("WARNING: some input tensors not found")
     elif self.cnt == 0:
       # jit ignore
       self.ret = self.fxn(*args, **kwargs)
