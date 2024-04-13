@@ -1,17 +1,26 @@
 from __future__ import annotations
 from typing import TypeVar, Generic, Callable, List, Tuple, Union, Dict, cast
-import functools, itertools
+import functools, itertools, operator
 from dataclasses import dataclass
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, BEAM, getenv
-from tinygrad.device import Buffer, Runner
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, BEAM, getenv, all_int
+from tinygrad.device import Buffer, Runner, CompiledRunner
 from tinygrad.dtype import DType
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.symbolic import Variable
+from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.engine.realize import ExecItem
 from tinygrad.nn.state import get_parameters
 from weakref import ref, WeakKeyDictionary
+
+def get_jit_stats(jit_cache: List[ExecItem]) -> Tuple[sint, int]:
+  return functools.reduce(operator.add, [ji.prg.op_estimate for ji in jit_cache if isinstance(ji.prg, CompiledRunner)], 0), \
+         functools.reduce(operator.add, [ji.prg.mem_estimate for ji in jit_cache if isinstance(ji.prg, CompiledRunner)], 0)
+def get_jc_idxs_with_updatable_launch_dims(jit_cache: List[ExecItem]) -> List[int]:
+  return [j for j,ji in enumerate(jit_cache) if isinstance(ji.prg, CompiledRunner) and \
+          ((ji.prg.global_size and not all_int(ji.prg.global_size)) or (ji.prg.local_size and not all_int(ji.prg.local_size)))]
+def get_jc_idxs_with_updatable_var_vals(jit_cache: List[ExecItem]) -> List[int]:
+  return [j for j,ji in enumerate(jit_cache) if isinstance(ji.prg, CompiledRunner) and ji.prg.vars]
 
 def get_input_replace(jit_cache: List[ExecItem], input_rawbuffers:List[Buffer]) -> Dict[Tuple[int, int], int]:
   input_replace: Dict[Tuple[int, int], int] = {}
@@ -72,7 +81,8 @@ class TinyJit(Generic[ReturnType]):
     lbs: List[LazyBuffer] = flatten([v.lazydata.lbs for _,v in input_tensors])
     expected_sts_var_dtype_device = [(*x.st.unbind(), x.dtype, x.device) for x in lbs]
     input_rawbuffers: List[Buffer] = [v.base.realized for v in lbs if v.base.realized is not None]
-    var_vals: Dict[Variable, int] = merge_dicts([x[1] for x in expected_sts_var_dtype_device])
+    var_vals: Dict[Variable, int] = merge_dicts([x[1] for x in expected_sts_var_dtype_device] + \
+                                                [dict(x.unbind() for x in itertools.chain(args, kwargs.values()) if isinstance(x, Variable))])
 
     expected_names, expected_lbs = [x[0] for x in input_tensors], [(x[0], tuple(x[1].keys()), x[2], x[3]) for x in expected_sts_var_dtype_device]
     if self.cnt >= 2:
