@@ -264,8 +264,9 @@ def train_unet3d():
   SEED = getenv("SEED")
   TRAIN_DATASET_SIZE = len(get_train_files())
   VAL_DATASET_SIZE = len(get_val_files())
-  START_EVAL_AT = getenv("START_EVAL_AT", ceil(1000 * TRAIN_DATASET_SIZE / (TRAIN_DATASET_SIZE * BS)))
-  EVALUATE_EVERY = getenv("EVALUATE_EVERY", ceil(20 * TRAIN_DATASET_SIZE / (TRAIN_DATASET_SIZE * BS)))
+  SAMPLES_PER_EPOCH = TRAIN_DATASET_SIZE // BS
+  START_EVAL_AT = getenv("START_EVAL_AT", ceil(1000 * TRAIN_DATASET_SIZE / (SAMPLES_PER_EPOCH * BS)))
+  EVALUATE_EVERY = getenv("EVALUATE_EVERY", ceil(20 * TRAIN_DATASET_SIZE / (SAMPLES_PER_EPOCH * BS)))
   PREPROCESSED_DIR = BASEDIR / ".." / "preprocessed"
 
   config = {
@@ -354,7 +355,7 @@ def train_unet3d():
 
     st = time.perf_counter()
 
-    for i, (x, y) in enumerate(tqdm(iterate(val=False, shuffle=True, bs=BS), total=TRAIN_DATASET_SIZE // BS, desc=f"epoch {epoch}"), start=1):
+    for i, (x, y) in enumerate(tqdm(iterate(val=False, shuffle=True, bs=BS), total=SAMPLES_PER_EPOCH, desc=f"epoch {epoch}"), start=1):
       GlobalCounters.reset()
 
       x, y = Tensor(x).realize().shard(GPUS, axis=0), Tensor(y, requires_grad=False).shard(GPUS, axis=0)
