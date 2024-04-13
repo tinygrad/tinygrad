@@ -38,7 +38,7 @@ def lower_schedule_item(si:ScheduleItem) -> Runner:
 def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, None]:
   while len(schedule): yield ExecItem(lower_schedule_item(si:=schedule.pop(0)), list(si.outputs+si.inputs))
 
-capturing: List = []  # List[TinyJit], but that's a circular import
+capturing: List = []  # put classes with an add method in here
 
 def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[Variable, int]]=None):
   for ei in lower_schedule(schedule):
