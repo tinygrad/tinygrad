@@ -169,11 +169,15 @@ class CompiledRunner(Runner):
     self.vars: List[Variable] = [] if variables is None else variables
     self.op_estimate, self.mem_estimate = op_estimate, mem_estimate
 
+  def to_other_device(self, dname:str):
+    return CompiledRunner(self.display_name, self.prg, dname, self.global_size, self.local_size, self.vars,
+                          self.op_estimate, self.mem_estimate, self.lib, self.outcount)
+
   @property
   def device(self): return Device[self.dname]
 
   def __reduce__(self):
-    return self.__class__, (self.name, self.prg, self.dname, self.global_size, self.local_size,
+    return self.__class__, (self.display_name, self.prg, self.dname, self.global_size, self.local_size,
                             self.vars, self.op_estimate, self.mem_estimate, self.lib)
 
   def launch_dims(self, var_vals):
@@ -201,6 +205,8 @@ class MultiDeviceJITGraph(Runner):
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     raise NotImplementedError("override this")
 
+method_cache = {}
+base_method_cache = {}
 logkern, logkern_level = open(getenv("LOGKERN", ""), "a") if getenv("LOGKERN", "") else None, getenv("LOGKERN_LEVEL", 1)
 class Compiled:
   def __init__(self, device:str, allocator:Allocator, compiler:Optional[Compiler], runtime, graph=None):
@@ -215,7 +221,7 @@ class Compiled:
     run_count = prod((k.global_size if k.global_size else []) + (k.local_size if k.local_size else []))
     # NOTE: we use min here to ignore the indexing FLOPS
     ret = CompiledRunner(k.name, self.compiler.render(to_function_name(k.name), k.uops), self.dname, k.global_size, k.local_size,
-                            k.uops.vars(), min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count), outcount=len(k.outbufs))
+                         k.uops.vars(), min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count), outcount=len(k.outbufs))
     return ret
 
   def get_linearizer(self, *ast:LazyOp) -> Linearizer:
@@ -249,5 +255,12 @@ class Compiled:
     if DEBUG >= 4: print((k.ast, k.applied_opts)) # print here to show final applied_opts for all kernels instead of just in beam_search
     return k
 
-  @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
-  def get_runner(self, *ast:LazyOp) -> CompiledRunner: return self.to_program(self.get_linearizer(*ast))
+  #@functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
+  def get_runner(self, *ast:LazyOp) -> CompiledRunner:
+    if cret:=method_cache.get((self.dname, ast)): return cret
+    if bret:=base_method_cache.get((self.dname.split(":")[0], ast)):
+      method_cache[(self.dname, ast)] = ret = bret.to_other_device(self.dname)
+      return ret
+    base_method_cache[(self.dname.split(":")[0], ast)] = method_cache[(self.dname, ast)] = ret = self.to_program(self.get_linearizer(*ast))
+    return ret
+
