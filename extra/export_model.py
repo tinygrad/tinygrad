@@ -47,7 +47,7 @@ def compile_net(run: TinyJit, special_names:Dict[int,str]):
 
   return functions, statements, {name:(size, dtype, key) for (name,size,dtype,key) in bufs.values()}, bufs_to_save
 
-def jit_model(model, fread_weights=False, *args) -> Tuple[TinyJit,Dict[int,str]]:
+def jit_model(model, *args, fread_weights=None) -> Tuple[TinyJit,Dict[int,str]]:
   assert hasattr(model, "forward") or callable(model), "model needs a forward function"
   @TinyJit
   def run(*x):
@@ -71,7 +71,7 @@ def jit_model(model, fread_weights=False, *args) -> Tuple[TinyJit,Dict[int,str]]
 
   # capture model weights
   net_keys = set()
-  if fread_weights:
+  if fread_weights is not None:
     for p in get_parameters(model):
       net_keys.add(id(p.lazydata.realized))
   
@@ -118,19 +118,19 @@ def fread_model_weights(fp: str, bufs: Dict[str,Buffer], net_keys):
   cprog.append("}")
   return cprog
 
-def export_model_clang(functions, statements, bufs, bufs_to_save, net_inputs, net_outputs, load_model, net_keys) -> str:
+def export_model_clang(functions, statements, bufs, bufs_to_save, net_inputs, net_outputs, net_keys, fread_weights=None) -> str:
   from tinygrad.runtime.ops_clang import CLANG_PROGRAM_HEADER
   cprog = [CLANG_PROGRAM_HEADER]
 
   for name,(cl,key) in bufs_to_save.items():
-    if load_model and key in net_keys:
+    if fread_weights is not None and key in net_keys:
       cprog.append(f"float {name}_data[{cl.size}];")
     else:
       weight = ''.join(["\\x%02X"%x for x in bytes(cl._buf)])
       cprog.append(f"unsigned char {name}_data[] = \"{weight}\";")
 
-  if load_model:
-    cprog += fread_model_weights("gpt2_124M.bin", bufs_to_save, net_keys)
+  if fread_weights is not None:
+    cprog += fread_model_weights(fread_weights, bufs_to_save, net_keys)
 
   for name,(len,dtype,_) in bufs.items():
     # if 'input' in name or 'output' in name: continue
@@ -375,9 +375,9 @@ const setupNet = async (device, safetensor) => {{
 }}
   """ + f"\n\nconst loadNet = async (device) => {{ return await fetch('net.safetensors').then(x => x.arrayBuffer()).then(x => setupNet(device, new Uint8Array(x))); }}"
 
-def export_model(model, target:str, *inputs, fread_weights=False):
+def export_model(model, target:str, *inputs, fread_weights=None):
   assert Device.DEFAULT in EXPORT_SUPPORTED_DEVICE, "only WEBGPU, WEBGL, CLANG, CUDA, GPU, METAL are supported"
-  run,special_names,net_keys = jit_model(model, fread_weights, *inputs)
+  run,special_names,net_keys = jit_model(model, *inputs, fread_weights=fread_weights)
   functions, statements, bufs, bufs_to_save = compile_net(run, special_names)
   state = get_state_dict(model)
   from tinygrad.helpers import prod
@@ -387,7 +387,7 @@ def export_model(model, target:str, *inputs, fread_weights=False):
   net_outputs = [(name,dtype,is_pointer) for name,dtype,is_pointer in special_names.values() if "output" in name]
   prg = ""
   if target == "clang":
-    prg = export_model_clang(functions, statements, bufs, bufs_to_save, net_inputs, net_outputs, fread_weights, net_keys)
+    prg = export_model_clang(functions, statements, bufs, bufs_to_save, net_inputs, net_outputs, net_keys, fread_weights)
   elif target == "webgpu":
     prg = export_model_webgpu(functions, statements, bufs, bufs_to_save, weight_names, input_names, output_names)
   elif target == "webgl":

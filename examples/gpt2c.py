@@ -1,7 +1,7 @@
 # Inspired by https://github.com/karpathy/llm.c
 import argparse
 import tiktoken
-from tinygrad import Tensor, Variable
+from tinygrad import Tensor, Variable, dtypes, Device
 from examples.gpt2 import Transformer
 from extra.export_model import export_model
 from tinygrad.helpers import getenv, fetch, prod, flatten
@@ -18,43 +18,40 @@ MODEL_PARAMS = {
   'gpt2-large':   dict(n_layers=36, n_heads=20, dim=1280, norm_eps=1e-5, vocab_size=VOCAB_SIZE),  # 774M params
   'gpt2-xl':      dict(n_layers=48, n_heads=25, dim=1600, norm_eps=1e-5, vocab_size=VOCAB_SIZE),  # 1558M params
 }
+def write_fp32(tensor: Tensor, file):
+  file.write(tensor.cast(dtypes.float32).to(Device.DEFAULT).numpy().tobytes())
+
 class GPT2:
   @staticmethod
   def build(model_size="gpt2"):
     tokenizer = tiktoken.get_encoding("gpt2")
-
     model = Transformer(**MODEL_PARAMS[model_size])
-    # weights = torch_load(fetch(f"https://huggingface.co/{model_size}/resolve/main/pytorch_model.bin", name="gpt2_124M"))
-    # s = Tensor([prod(t.shape) for t in weights.values()]).sum()
-    # print("weights", len(weights.keys()), s.numpy())
-    # # special treatment for the Conv1D weights we need to transpose
-    # transposed = ('attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight')
-    # for k in weights:
-    #   if k.endswith(transposed):
-    #     weights[k] = weights[k].T
-    # # lm head and wte are tied
-    # weights['lm_head.weight'] = weights['wte.weight']
-
-    # s = Tensor([prod(t.shape) for t in weights.values()]).sum()
-    # print("weights", len(weights.keys()), s.numpy())
-
-    # load_state_dict(model, weights)
-
-    # TODO: write model
-
     return GPT2(model, tokenizer)
   
+  @staticmethod
   def write_model(model_size="gpt2"):
-    weights = torch_load(fetch(f"https://huggingface.co/{model_size}/resolve/main/pytorch_model.bin", name="gpt2_124M"))
+    weights = torch_load(fetch(f"https://huggingface.co/{model_size}/resolve/main/pytorch_model.bin"))
     transposed = ('attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight')
     for k in weights:
       if k.endswith(transposed):
         weights[k] = weights[k].T
     # lm head and wte are tied
     weights['lm_head.weight'] = weights['wte.weight']
-    # s = sorted([(k,v.numel()) for k,v in weights.items()], key=lambda x: x[1])
-    # print(s, sum(v for k,v in s), len(s))
-    # exit(0)
+
+    with open(f"{model_size}.bin", "wb") as file:
+      write_fp32(weights['wpe.weight'], file)
+      write_fp32(weights['wte.weight'], file)
+      # TODO: layernorm not used in clang, investigate
+      for i in range(12):
+        write_fp32(weights[f'h.{i}.attn.c_attn.weight'], file)
+        write_fp32(weights[f'h.{i}.attn.c_attn.bias'], file)
+        write_fp32(weights[f'h.{i}.attn.c_proj.weight'], file)
+        write_fp32(weights[f'h.{i}.attn.c_proj.bias'], file)
+        write_fp32(weights[f'h.{i}.mlp.c_fc.weight'], file)
+        write_fp32(weights[f'h.{i}.mlp.c_fc.bias'], file)
+        write_fp32(weights[f'h.{i}.mlp.c_proj.weight'], file)
+        write_fp32(weights[f'h.{i}.mlp.c_proj.bias'], file)
+      write_fp32(weights['lm_head.weight'], file)
 
   def __init__(self, model, tokenizer):
     self.model = model
@@ -77,16 +74,16 @@ if __name__ == "__main__":
   parser.add_argument('--noshow', action='store_true', help="Don't show the output")
   args = parser.parse_args()
 
-  # print(f"using {args.model_size}")
+  print(f"using {args.model_size}")
   gpt2 = GPT2.build(args.model_size)
-  gpt2.write_model()
+  gpt2.write_model(args.model_size)
   start_pos = 0
   start_pos_v = Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT).bind(start_pos)
   prompt_tokens = gpt2.tokenizer.encode(args.prompt, allowed_special={"<|endoftext|>"})
   toks = [prompt_tokens[:] for _ in range(args.batch_size)]
   tokens = Tensor([x[start_pos:] for x in toks])
 
-  prg, inputs, outputs, state = export_model(gpt2.model, mode, tokens, start_pos_v, args.temperature, fread_weights=True)
+  prg, inputs, outputs, state = export_model(gpt2.model, mode, tokens, start_pos_v, args.temperature, fread_weights=f"{args.model_size}.bin")
   cprog = [prg]
 
   inputs = "\n".join([f"{dtype.name} {name}[{sz}];" for name,(sz,dtype,is_pointer) in inputs.items()])
@@ -98,8 +95,8 @@ if __name__ == "__main__":
 #include <string.h>
 int main(int argc, char* argv[]) {
   int max_length = 100;
-  //int toks[max_length];
-  //int start_pos = 0;
+  int toks[max_length];
+  int start_pos = 0;
   //float temp = 0.8;
 
   for (int i = 0; i < argc-1; i++) {
@@ -110,12 +107,13 @@ int main(int argc, char* argv[]) {
   fread_net();
 
   for (int t = 0; t < max_length; t++) {
-    net(input0, 0, output0);
-    //toks[t] = output0[0];
-    //start_pos += 1;
+    printf("generating token %d\\n", t);
+    net(input0, start_pos, output0);
+    toks[t] = output0[0];
+    start_pos += 1;
   }
   for (int t = 0; t < max_length; t++) {
-    //printf("%d ", toks[t]);
+    printf("%d ", toks[t]);
   }
   return 0;
 }""")
