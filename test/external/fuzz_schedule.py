@@ -1,9 +1,9 @@
-from collections import defaultdict
 import numpy as np
+from collections import defaultdict
 from typing import DefaultDict, Dict, List, Set, TypeVar
 from tinygrad.buffer import Buffer
-from tinygrad.engine.realize import run_schedule
-from tinygrad.helpers import getenv
+from tinygrad.engine.realize import CustomOp, lower_schedule
+from tinygrad.helpers import DEBUG, colored, getenv
 from tinygrad.lazy import LazyBuffer
 from tinygrad.engine.schedule import _graph_schedule
 from tinygrad.ops import LoadOps, ScheduleItem
@@ -12,55 +12,50 @@ from tinygrad.tensor import Tensor
 def fuzz_schedule(outs: List[LazyBuffer]):
   graph, in_degree, prescheduled = _graph_schedule(outs, seen:=set())
   toposorts = find_all_toposorts(graph, in_degree)
+  if DEBUG >= 2: print(colored(f"fuzzing {len(toposorts)} schedule permutations", "yellow"))
 
-  fuzz_outputs: DefaultDict[LazyBuffer, List[Buffer]] = defaultdict(list)
+  # setup ground truth
+  schedules: List[List[ScheduleItem]] = [[] for _ in range(len(toposorts))]
+  outputs: DefaultDict[LazyBuffer, List[Buffer]] = defaultdict(list)
+  for key in toposorts[0]:
+    for out in (ps:=prescheduled[key]).outputs:
+      seen.add(out)
+      outputs[out].append(out.buffer)
+    schedules[0].append(ScheduleItem(ps.ast, tuple(x.buffer for x in ps.outputs if x.size != 0), tuple(x.buffer for x in ps.inputs if x.size != 0)))
 
-  ts = toposorts[0]
-  schedule: List[ScheduleItem] = []
-  for key in ts:
-    ps = prescheduled[key]
-    outbufs = tuple(x.buffer for x in ps.outputs if x.size != 0)
-    inbufs = tuple(x.buffer for x in ps.inputs if x.size != 0)
-    schedule.append(ScheduleItem(ps.ast, outbufs, inbufs))
-    for x in ps.outputs: fuzz_outputs[x].append(x.buffer)
+  # create new Buffers for each permutation
+  for i, ts in enumerate(toposorts[1:]):
+    rawbufs: Dict[LazyBuffer, Buffer] = {}
+    for key in ts:
+      for out in (ps:=prescheduled[key]).outputs:
+        rawbufs[out] = Buffer(out.buffer.device, out.buffer.size, out.buffer.dtype)
+        if out.op is LoadOps.ASSIGN: rawbufs[out].ensure_allocated().copyin(out.buffer.as_buffer())
+        outputs[out].append(rawbufs[out])
 
-  schedule_copy: List[ScheduleItem] = []
-  realizes: Dict[LazyBuffer, Buffer] = {}
-  for key in ts:
-    ps = prescheduled[key]
-    outputs: List[Buffer] = []
-    for x in ps.outputs:
-      if x.op is LoadOps.ASSIGN: 
-        rawbuf = Buffer(x.buffer.device, x.buffer.size, x.buffer.dtype, initial_value=x.buffer.as_buffer())
-      else:
-        assert x not in realizes
-        rawbuf = Buffer(x.buffer.device, x.buffer.size, x.buffer.dtype).allocate()
-        rawbuf.copyin(np.zeros((x.buffer.size, ), x.buffer.dtype.np).data)
-      realizes[x] = rawbuf
-      outputs.append(rawbuf)
-      fuzz_outputs[x].append(rawbuf)
+      for x in ps.inputs:
+        if x not in rawbufs:
+          if x.device == "NPY": rawbufs[x] = x.buffer
+          # copy the pre realized input
+          else: rawbufs[x] = Buffer(x.buffer.device, x.buffer.size, x.buffer.dtype, initial_value=x.buffer.as_buffer())
+      schedules[i+1].append(ScheduleItem(ps.ast, tuple(rawbufs[x] for x in ps.outputs if x.size != 0),
+                                         tuple(rawbufs[x] for x in ps.inputs if x.size != 0)))
 
-    inputs: List[Buffer] = []
-    for x in ps.inputs:
-      if hasattr(x.buffer, "_buf") and x.op is not LoadOps.ASSIGN:
-        if x.device == "NPY": rawbuf = x.buffer
-        else: rawbuf = Buffer(x.buffer.device, x.buffer.size, x.buffer.dtype, initial_value=x.buffer.as_buffer())
-      else: rawbuf = realizes[x]
-      inputs.append(rawbuf)
-    schedule_copy.append(ScheduleItem(ps.ast, tuple(outputs), tuple(inputs)))
-
+  # run all schedules with the same seed
   seed = Tensor._seed
-  run_schedule(schedule.copy())
-  Tensor.manual_seed(seed)
-  run_schedule(schedule_copy.copy())
+  for i, schedule in enumerate(schedules):
+    if DEBUG >= 2: print(colored(f"testing premutation {i}", "yellow"))
+    for ei in lower_schedule(schedule):
+      if isinstance(ei.prg, CustomOp): Tensor._seed = seed
+      ei.run()
 
-  for lb, rawbufs in fuzz_outputs.items():
-    ground_truth = np.frombuffer(rawbufs[0].as_buffer(), rawbufs[0].dtype.np)
-    print(lb)
-    for buf in rawbufs[1:]:
-      print(ground_truth[:4])
-      print(np.frombuffer(buf.as_buffer(), buf.dtype.np)[:4])
-      np.testing.assert_allclose(ground_truth, np.frombuffer(buf.as_buffer(), buf.dtype.np), atol=1e-2, rtol=1e-2)
+  # assert all LazyBuffers realized correctly
+  for lb, bufs in outputs.items():
+    ground_truth = np.frombuffer(bufs[0].as_buffer(), bufs[0].dtype.np)
+    for buf in bufs[1:]:
+      try: np.testing.assert_allclose(np.frombuffer(buf.as_buffer(), buf.dtype.np), ground_truth, atol=1e-2, rtol=1e-2)
+      except AssertionError as e:
+        print(f"COMPARE FAILED FOR {lb}")
+        raise e
 
 T = TypeVar("T")
 def find_all_toposorts(graph:DefaultDict[T, List[T]], in_degree:DefaultDict[T, int]) -> List[List[T]]:
