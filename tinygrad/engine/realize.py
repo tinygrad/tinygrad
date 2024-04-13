@@ -39,4 +39,7 @@ def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, Non
   while len(schedule): yield ExecItem(lower_schedule_item(si:=schedule.pop(0)), list(si.outputs+si.inputs))
 
 def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[Variable, int]]=None):
-  for ei in lower_schedule(schedule): ei.run(var_vals)
+  from tinygrad.engine.jit import capturing
+  for ei in lower_schedule(schedule):
+    if len(capturing): capturing[0].add(ei)
+    ei.run(var_vals)
