@@ -135,6 +135,8 @@ class UOpGraph:
     # global uop cache
     self.saved_exprs: Dict[Tuple, UOp] = dict()
 
+    self.one_hot_cmpeq: Set[UOp] = set()
+
   def __iter__(self): return iter(self.uops)
 
   def vars(self) -> List[Variable]: return [x.arg for x in self.uops if x.uop is UOps.DEFINE_VAR]
@@ -302,24 +304,21 @@ class UOpGraph:
           self.replace_op(alu_with_accum, next(op for op in alu_with_accum.vin if op != accumulator))
       get_recursive_parents.cache_clear()
 
-  def optimize_arange_loops(self, get_recursive_parents, arange_buf):
-    if (arange_data:=arange_buf.arg[3])[0] != 0 or arange_data[2] != 1: return
-    # look for sum reduction loops which can only be true on one iteration of the loop
-    load = next((u for u in self.uops if u.uop is UOps.LOAD and u.vin[0] is arange_buf and u.vin[1].uop is UOps.LOOP), None)
-    if not load: return
-    cmpeq = next((u for u in self.uops if u.arg is BinaryOps.CMPEQ and load in [v.vin[0] if v.uop is UOps.CAST else v for v in u.vin]), None)
-    phi = next((u for u in self.get_recursive_children(load) if u.uop is UOps.PHI), None)
-    if not cmpeq or not phi: return
-    phi_op, accum = phi.vin[1], phi.vin[0]
-    calc = [x for x in (self.get_recursive_children(cmpeq).intersection(get_recursive_parents(phi)) - {cmpeq, phi}) if x.uop is not UOps.CAST]
-    if len(calc) == 2 and set([x.arg for x in calc]) == {BinaryOps.MUL, BinaryOps.ADD} and phi_op.arg is BinaryOps.ADD and accum in phi_op.vin:
-      self.replace_op(load, (loop:=load.vin[1]))
-      val_to_sum = next(v for x in calc for v in x.vin if x.arg is BinaryOps.MUL and cmpeq not in get_recursive_parents(v))
-      idx = next(v for v in cmpeq.vin if load not in get_recursive_parents(v))
-      index_casted = self.add(UOps.CAST, loop.dtype, (idx,), loop.dtype, insert_before=self.uops.index(idx)+1) if idx.dtype != loop.dtype else idx
-      for u in get_recursive_parents(val_to_sum):
+
+  def optimize_one_hot_reduce_loops(self, get_recursive_parents, cmpeq):
+    phi = next((op for op in self.get_recursive_children(cmpeq) if op.uop is UOps.PHI), None)
+    alus = [op for op in self.get_recursive_children(cmpeq) if op.uop is UOps.ALU]
+    if not phi or len(alus) != 3 and set([x.arg for x in alus]) != {BinaryOps.MUL, BinaryOps.ADD, BinaryOps.CMPEQ}: return
+    arange = next(x for x in cmpeq.vin if (loop:=phi.vin[2]) in get_recursive_parents(x))
+    if arange.uop is UOps.LOAD and arange.vin[1].uop is not UOps.LOOP: return
+    index = next(x for x in cmpeq.vin if x != arange)
+    index_casted = self.add(UOps.CAST, loop.dtype, (index,), insert_before=self.uops.index(index)+1) if loop.dtype != arange.dtype else index
+    mul_op = next(x for x in self.get_recursive_children(cmpeq) if x.arg is BinaryOps.MUL)
+    val_to_sum = next(op for op in mul_op.vin if cmpeq not in get_recursive_parents(op))
+    for u in get_recursive_parents(val_to_sum):
+      if loop in u.vin:
         u.vin = tuple([index_casted if vin is loop else vin for vin in list(u.vin)])
-      self.replace_op(phi, val_to_sum)
+    self.replace_op(phi, val_to_sum)
 
   def fix_to_store_directly(self):
     replaced_stores: Dict[UOp,UOp] = {}
@@ -374,7 +373,7 @@ class UOpGraph:
     # uops optimization
     while self.uops_optimization(get_recursive_parents): pass
     self.simplify_phi_loops(get_recursive_parents)
-    # for x in self.one_hot_cmpeq: self.optimize_one_hot_reduce_loops(get_recursive_parents, x)
+    for x in self.one_hot_cmpeq: self.optimize_one_hot_reduce_loops(get_recursive_parents, x)
 
     # (recursively) remove childless uops
     # TODO: remove DEFINE_GLOBAL from here

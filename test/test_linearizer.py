@@ -46,7 +46,7 @@ class TestLinearizer(unittest.TestCase):
     lin.linearize()
 
     stores = [u for u in lin.uops if u.uop is UOps.STORE]
-    mutable_bufs = [u for u in lin.uops if u.uop is UOps.DEFINE_GLOBAL and u.arg[2]]
+    mutable_bufs = [u for u in lin.uops if u.uop is UOps.DEFINE_GLOBAL and u.arg[-1]]
     assert len(mutable_bufs) == len(stores) == 2
     assert [u.arg[0] for u in mutable_bufs] == [0, 1]
 
