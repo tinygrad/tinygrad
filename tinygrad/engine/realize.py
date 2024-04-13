@@ -1,12 +1,8 @@
 from typing import List, Dict, Optional, cast, Generator
 from dataclasses import dataclass
-from tinygrad.helpers import colored
+from tinygrad.helpers import colored, getenv
 from tinygrad.ops import ScheduleItem, BufferOps, LoadOps
-<<<<<<< HEAD
-from tinygrad.device import JITRunner, Device, BufferCopy, BufferXfer, update_stats, CopyKernel
-=======
-from tinygrad.device import Runner, Device, BufferCopy, BufferXfer, update_stats
->>>>>>> origin/master
+from tinygrad.device import Runner, Device, BufferCopy, BufferXfer, update_stats, CopyKernel
 from tinygrad.buffer import Buffer
 from tinygrad.shape.symbolic import Variable
 
