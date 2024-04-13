@@ -100,6 +100,8 @@ jobs:
       run: |
         PYTHONPATH="." python test/external/fuzz_shapetracker.py
         PYTHONPATH="." python test/external/fuzz_shapetracker_math.py
+    - name: Fuzz test models schedule
+      run: FUZZ_SCHEDULE=1 FUZZ_SCHEDULE_MAX_PATHS=5 python -m pytest test/models/test_train.py test/models/test_end2end.py
     - name: Test to_movement_ops
       run: PYTHONPATH="." python extra/to_movement_ops.py
     - name: Use as an external package
