@@ -31,6 +31,10 @@ def infer(model, img):
   img = img.resize((int(224*max(aspect_ratio,1.0)), int(224*max(1.0/aspect_ratio,1.0))))
 
   img = np.array(img)
+
+  if len(img.shape) == 2: # handle grayscale image as well
+    img = img[...,np.newaxis].repeat(3,-1)
+
   y0,x0=(np.asarray(img.shape)[:2]-224)//2
   retimg = img = img[y0:y0+224, x0:x0+224]
 
