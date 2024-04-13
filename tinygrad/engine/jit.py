@@ -4,14 +4,14 @@ import functools, itertools
 from dataclasses import dataclass
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, getenv
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, BEAM, getenv
 from tinygrad.device import Buffer, Runner
 from tinygrad.dtype import DType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable
 from tinygrad.engine.realize import ExecItem
 from tinygrad.nn.state import get_parameters
-from weakref import ref
+from weakref import ref, WeakKeyDictionary
 
 def get_input_replace(jit_cache: List[ExecItem], input_rawbuffers:List[Buffer]) -> Dict[Tuple[int, int], int]:
   input_replace: Dict[Tuple[int, int], int] = {}
@@ -22,11 +22,19 @@ def get_input_replace(jit_cache: List[ExecItem], input_rawbuffers:List[Buffer]) 
   return input_replace
 
 class PlaceHolder:
+  placeholders: WeakKeyDictionary[Buffer, PlaceHolder] = WeakKeyDictionary()
   def __init__(self, buf:Buffer):
     self.size, self.dtype, self.device, self.ref, self.bufid, self.options = buf.size, buf.dtype, buf.device, ref(buf), id(buf._buf), buf.options
   def to_tuple(self): return (self.size, self.dtype, self.device, self.bufid, self.options)
   def __hash__(self): return hash(self.to_tuple())
   def __eq__(self, x): return isinstance(x, PlaceHolder) and self.to_tuple() == x.to_tuple()
+  @staticmethod
+  def create_if_needed(buf:Buffer) -> Union[PlaceHolder, Buffer]:
+    if found:=PlaceHolder.placeholders.get(buf, None): return found
+    if hasattr(buf, '_buf'): return buf
+    PlaceHolder.placeholders[buf] = ret = PlaceHolder(buf.ensure_allocated())  # TODO: do I need to allocate here?
+    return ret
+
   def alloc_if_needed(self, buffer_cache: Dict[PlaceHolder, Buffer]) -> Buffer:
     ret = self.ref()
     if ret: return ret
@@ -47,7 +55,7 @@ class TinyJit(Generic[ReturnType]):
     self.reset()
 
   def add(self, ei:ExecItem):
-    self._cc.append(WeakExecItem(ei.prg, [PlaceHolder(buf) if hasattr(buf, "_buf") else buf for buf in ei.rawbufs if buf is not None]))
+    self._cc.append(WeakExecItem(ei.prg, [PlaceHolder.create_if_needed(buf) for buf in ei.rawbufs if buf is not None]))
 
   def reset(self):
     self._cc: List[WeakExecItem] = []
@@ -77,7 +85,7 @@ class TinyJit(Generic[ReturnType]):
       # jit capture
       self.expected_names: List[Union[int, str]] = expected_names
       self.expected_lbs: List[Tuple[ShapeTracker, Tuple[Variable, ...], DType, str]] = expected_lbs
-      with Context(GRAPH=getenv("JITGRAPH", GRAPH.value)):
+      with Context(GRAPH=getenv("JITGRAPH", GRAPH.value), BEAM=getenv("JITBEAM", BEAM.value)):
         capturing.append(self)
         self.ret = self.fxn(*args, **kwargs)
         Tensor.corealize(get_parameters(self.ret))
