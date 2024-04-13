@@ -439,6 +439,19 @@ class TestTypeSpec(unittest.TestCase):
     assert Tensor([0, 1], dtype=dtype).argmin().dtype == dtypes.int32
     assert Tensor([0, 1], dtype=dtype).multinomial().dtype == dtypes.int32
 
+  @given(strat.sampled_from(core_dtypes), strat.sampled_from(dtype_ints))
+  def test_tensor_indexing_returns_same_dtype(self, data_dtype, indices_dtype):
+    X_data =  Tensor.rand(60000, 1, 28, 28, dtype=data_dtype)
+    indices =  Tensor.randint(512, high=X_data.shape[0]).cast(indices_dtype)
+    assert X_data[indices].dtype == X_data.dtype
+
+  @given(strat.sampled_from(core_dtypes), strat.sampled_from(dtype_ints))
+  def test_gather_returns_same_dtype(self, data_dtype, indices_dtype):
+    X_data = Tensor([[1, 0], [0, 1]], dtype=data_dtype)
+    indices = Tensor([[0, 0], [1, 0]], dtype=indices_dtype)
+    assert X_data.gather(indices, 0).dtype == X_data.dtype
+    assert X_data.gather(indices, 1).dtype == X_data.dtype
+
 class TestTypePromotion(unittest.TestCase):
   @given(strat.sampled_from(core_dtypes))
   def test_self_promo_to_self(self, dtype):
@@ -601,6 +614,13 @@ class TestAutoCastType(unittest.TestCase):
         np.testing.assert_allclose(a.grad.numpy(), [5, 5, 5])
 
     dtypes.default_float = old_default_float
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  def test_backward_sum_acc_dtype(self):
+    # test acc of sum in the backward is upcasted to float
+    t = Tensor([5, -5], dtype=dtypes.half, requires_grad=True)
+    t.reshape(2, 1).expand(2, 10001).max().backward()
+    np.testing.assert_allclose(t.grad.numpy(), [1, 0])
 
 class TestImplicitFunctionTypeChange(unittest.TestCase):
   def test_functions(self):
