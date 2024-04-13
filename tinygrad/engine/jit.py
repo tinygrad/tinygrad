@@ -120,6 +120,7 @@ class TinyJit(Generic[ReturnType]):
     lbs: List[LazyBuffer] = flatten([v.lazydata.lbs for _,v in input_tensors])
     expected_sts_var_dtype_device = [(*x.st.unbind(), x.dtype, x.device) for x in lbs]
     input_rawbuffers: List[Buffer] = [v.base.realized for v in lbs if v.base.realized is not None]
+    assert len(set(input_rawbuffers)) == len(input_rawbuffers), "duplicate inputs to JIT"
     var_vals: Dict[Variable, int] = merge_dicts([x[1] for x in expected_sts_var_dtype_device] + \
                                                 [dict(x.unbind() for x in itertools.chain(args, kwargs.values()) if isinstance(x, Variable))])
 
