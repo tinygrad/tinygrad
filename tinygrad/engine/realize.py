@@ -10,8 +10,8 @@ from tinygrad.shape.symbolic import Variable
 class ExecItem:
   prg: Runner
   rawbufs: List[Optional[Buffer]]
-  def run(self, var_vals:Optional[Dict[Variable, int]]=None):
-    self.prg.exec([cast(Buffer, x).ensure_allocated() for x in self.rawbufs], var_vals if var_vals is not None else {})
+  def run(self, var_vals:Optional[Dict[Variable, int]]=None, wait=False, jit=False):
+    self.prg([cast(Buffer, x).ensure_allocated() for x in self.rawbufs], var_vals if var_vals is not None else {}, wait=wait, jit=jit)
 
 class CustomOp(Runner):
   def __init__(self, fxn):
@@ -38,5 +38,9 @@ def lower_schedule_item(si:ScheduleItem) -> Runner:
 def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, None]:
   while len(schedule): yield ExecItem(lower_schedule_item(si:=schedule.pop(0)), list(si.outputs+si.inputs))
 
+capturing: List = []  # put classes with an add method in here
+
 def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[Variable, int]]=None):
-  for ei in lower_schedule(schedule): ei.run(var_vals)
+  for ei in lower_schedule(schedule):
+    if len(capturing): capturing[0].add(ei)
+    ei.run(var_vals)

@@ -3,7 +3,7 @@ from collections import defaultdict
 from typing import TYPE_CHECKING, Any, List, Optional, Dict, Tuple, ClassVar, NamedTuple
 import importlib, inspect, functools, pathlib, time, ctypes, os
 from tinygrad.helpers import ansilen, prod, getenv, colored, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put
-from tinygrad.helpers import DEBUG, CACHECOLLECTING, BEAM, NOOPT, GlobalCounters
+from tinygrad.helpers import DEBUG, BEAM, NOOPT, GlobalCounters
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.ops import LazyOp, get_lazyop_info
 from tinygrad.buffer import Buffer, BufferOptions
@@ -44,11 +44,7 @@ class Runner:
     self.op_estimate:sint = 0
     self.mem_estimate:sint = 0
   def exec(self, rawbufs:List[Buffer], var_vals:Optional[Dict[Variable, int]]=None) -> Optional[float]:
-    var_vals = var_vals if var_vals is not None else {}
-    from tinygrad.engine.jit import CacheCollector
-    et = self(rawbufs, var_vals)
-    if CACHECOLLECTING: CacheCollector.add(self, rawbufs, var_vals)
-    return et
+    return self(rawbufs, {} if var_vals is None else var_vals)
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     raise NotImplementedError("override this")
 
