@@ -205,8 +205,8 @@ class MultiDeviceJITGraph(Runner):
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     raise NotImplementedError("override this")
 
-method_cache = {}
-base_method_cache = {}
+method_cache: Dict[Tuple[str, Tuple[LazyOp, ...]], CompiledRunner] = {}
+base_method_cache: Dict[Tuple[str, Tuple[LazyOp, ...]], CompiledRunner]  = {}
 logkern, logkern_level = open(getenv("LOGKERN", ""), "a") if getenv("LOGKERN", "") else None, getenv("LOGKERN_LEVEL", 1)
 class Compiled:
   def __init__(self, device:str, allocator:Allocator, compiler:Optional[Compiler], runtime, graph=None):
@@ -255,12 +255,11 @@ class Compiled:
     if DEBUG >= 4: print((k.ast, k.applied_opts)) # print here to show final applied_opts for all kernels instead of just in beam_search
     return k
 
-  #@functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
   def get_runner(self, *ast:LazyOp) -> CompiledRunner:
     if cret:=method_cache.get((self.dname, ast)): return cret
     if bret:=base_method_cache.get((self.dname.split(":")[0], ast)):
       method_cache[(self.dname, ast)] = ret = bret.to_other_device(self.dname)
-      return ret
-    base_method_cache[(self.dname.split(":")[0], ast)] = method_cache[(self.dname, ast)] = ret = self.to_program(self.get_linearizer(*ast))
+    else:
+      base_method_cache[(self.dname.split(":")[0], ast)] = method_cache[(self.dname, ast)] = ret = self.to_program(self.get_linearizer(*ast))
     return ret
 
