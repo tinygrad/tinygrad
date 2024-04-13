@@ -170,15 +170,15 @@ class CompiledRunner(Runner):
     self.op_estimate, self.mem_estimate = op_estimate, mem_estimate
 
   def to_other_device(self, dname:str):
-    return CompiledRunner(self.display_name, self.prg, dname, self.global_size, self.local_size, self.vars,
-                          self.op_estimate, self.mem_estimate, self.lib, self.outcount)
+    return CompiledRunner(self.display_name, self.prg, dname, self.global_size, self.local_size,
+                          self.vars, self.op_estimate, self.mem_estimate, self.lib, self.outcount)
 
   @property
   def device(self): return Device[self.dname]
 
   def __reduce__(self):
     return self.__class__, (self.display_name, self.prg, self.dname, self.global_size, self.local_size,
-                            self.vars, self.op_estimate, self.mem_estimate, self.lib)
+                            self.vars, self.op_estimate, self.mem_estimate, self.lib, self.outcount)
 
   def launch_dims(self, var_vals):
     global_size = [sym_infer(sz, var_vals) for sz in self.global_size] if self.global_size is not None else self.global_size
