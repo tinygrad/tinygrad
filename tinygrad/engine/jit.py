@@ -6,6 +6,8 @@ from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, getenv
 from tinygrad.device import Buffer, Runner
+from tinygrad.dtype import DType
+from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable
 from tinygrad.engine.realize import ExecItem
 from tinygrad.nn.state import get_parameters
@@ -44,7 +46,8 @@ class TinyJit(Generic[ReturnType]):
     self.fxn = fxn
     self.reset()
 
-  def add(self, ei:ExecItem): self._cc.append(WeakExecItem(ei.prg, [PlaceHolder(buf) if hasattr(buf, "_buf") else buf for buf in ei.rawbufs]))
+  def add(self, ei:ExecItem):
+    self._cc.append(WeakExecItem(ei.prg, [PlaceHolder(buf) if hasattr(buf, "_buf") else buf for buf in ei.rawbufs if buf is not None]))
 
   def reset(self):
     self._cc: List[WeakExecItem] = []
@@ -56,8 +59,8 @@ class TinyJit(Generic[ReturnType]):
 
   def __call__(self, *args, **kwargs) -> ReturnType:
     input_tensors: List[Tuple[Union[int, str], Tensor]] = \
-      [(k,v) for k,v in itertools.chain(enumerate(args), sorted(kwargs.items())) if v.__class__ is Tensor]
-    Tensor.corealize(input_tensors)
+      [(cast(Union[int, str], k),v) for k,v in itertools.chain(enumerate(args), sorted(kwargs.items())) if v.__class__ is Tensor]
+    Tensor.corealize([x[1] for x in input_tensors])
     lbs: List[LazyBuffer] = flatten([v.lazydata.lbs for _,v in input_tensors])
     expected_sts_var_dtype_device = [(*x.st.unbind(), x.dtype, x.device) for x in lbs]
     input_rawbuffers: List[Buffer] = [v.base.realized for v in lbs if v.base.realized is not None]
@@ -69,10 +72,11 @@ class TinyJit(Generic[ReturnType]):
       assert self.expected_names == expected_names and self.expected_lbs == expected_lbs, "args mismatch in JIT"
       for (j,i),input_idx in self.input_replace.items(): self.jit_cache[j].rawbufs[i] = input_rawbuffers[input_idx]
       if DEBUG >= 1: print(f"jit execs {len(self.jit_cache)} kernels")
-      for ei in self.jit_cache: ei.run(var_vals)
+      for ei in self.jit_cache: ei.run(var_vals, jit=True)
     elif self.cnt == 1:
       # jit capture
-      self.expected_names, self.expected_lbs = expected_names, expected_lbs
+      self.expected_names: List[Union[int, str]] = expected_names
+      self.expected_lbs: List[Tuple[ShapeTracker, Tuple[Variable, ...], DType, str]] = expected_lbs
       with Context(GRAPH=getenv("JITGRAPH", GRAPH.value)):
         capturing.append(self)
         self.ret = self.fxn(*args, **kwargs)
@@ -93,4 +97,4 @@ class TinyJit(Generic[ReturnType]):
     for (j,i) in self.input_replace.keys(): self.jit_cache[j].rawbufs[i] = None
 
     self.cnt += 1
-    return cast(ReturnType, self.ret)
+    return self.ret

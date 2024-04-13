@@ -10,8 +10,8 @@ from tinygrad.shape.symbolic import Variable
 class ExecItem:
   prg: Runner
   rawbufs: List[Optional[Buffer]]
-  def run(self, var_vals:Optional[Dict[Variable, int]]=None):
-    self.prg.exec([cast(Buffer, x).ensure_allocated() for x in self.rawbufs], var_vals if var_vals is not None else {})
+  def run(self, var_vals:Optional[Dict[Variable, int]]=None, wait=False, jit=False):
+    self.prg([cast(Buffer, x).ensure_allocated() for x in self.rawbufs], var_vals if var_vals is not None else {}, wait=wait, jit=jit)
 
 class CustomOp(Runner):
   def __init__(self, fxn):
