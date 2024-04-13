@@ -236,11 +236,11 @@ def train_retinanet():
   import numpy as np
   HOSTNAME = getenv('SLURM_STEP_NODELIST', 'other')
   EPOCHS = 100
-  BS = 16//2 # A100x2 
+  BS = 16 # A100x2 
   # BS = 3*6
   # BS = 5*8
   # BS = 2*4
-  BS_EVAL = 16//2
+  BS_EVAL = 16
   # BS_EVAL = 2*4
   WARMUP_EPOCHS = 1
   WARMUP_FACTOR = 0.001
@@ -248,7 +248,7 @@ def train_retinanet():
   MAP_TARGET = 0.34
   GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
   SYNCBN = False
-  # SYNCBN = True
+  SYNCBN = True
   # dtypes.default_float = dtypes.bfloat16
   loss_scaler = 128.0 if dtypes.default_float in [dtypes.float16, dtypes.bfloat16] else 1.0
 
@@ -283,40 +283,7 @@ def train_retinanet():
   parameters = []
   # model.load_from_pretrained()
   # model.load_checkpoint("./ckpts/retinanet_B16_E10.safe")
-  # for k, x in get_state_dict(model).items():
-  #   # print(k)
-  #   # x.realize().to_(GPUS)
-  #   if 'head' in k and ('clas' in k or 'reg' in k ):
-  #     print(k)
-  #     x.requires_grad = True
-  #     parameters.append(x)
-  #   elif k.split('.')[2] in ["layer4", "layer3", "layer2"] and 'bn' not in k and 'weight' in k:
-  #   # elif k.split('.')[2] in ["layer4"] and 'bn' not in k and 'down' not in k:
-  #     if 'downsample' in k:
-  #       if 'downsample.0' in k:
-  #         print(k)
-  #         x.requires_grad = True
-  #         parameters.append(x)
-  #       else:
-  #         x.requires_grad = False
-  #     else:
-  #       print(k)
-  #       x.requires_grad = True
-  #       parameters.append(x)
-  #   elif 'fpn' in k:
-  #     print(k)
-  #     x.requires_grad = True
-  #     parameters.append(x)
-  #   else:
-  #     x.requires_grad = False
-  #   # if not SYNCBN and ("running_mean" in k or "running_var" in k):
-  #   #   x.realize().shard_(GPUS, axis=0)
-  #   # else:
-  #   #   x.realize().to_(GPUS)
-  #   # x.realize().to_(GPUS)
-  #   # pass
-  # model.load_from_pretrained()
-  # model.backbone.body.fc = None
+
   for k, v in get_state_dict(model).items():
     # print(k)
     if 'head' in k and ('clas' in k or 'reg' in k ):
@@ -337,7 +304,11 @@ def train_retinanet():
       v.requires_grad = True
     else:
       v.requires_grad = False
-  # elif
+    if not SYNCBN and ("running_mean" in k or "running_var" in k):
+      v.realize().shard_(GPUS, axis=0)
+    else:
+      v.realize().to_(GPUS)
+
   for k, v in get_state_dict(model).items():
     if v.requires_grad:
       print(k)
@@ -378,7 +349,7 @@ def train_retinanet():
       warmup_iters = WARMUP_EPOCHS*len(coco_train.ids)//BS
       lr_sched = Retina_LR(optimizer, start_iter, warmup_iters, WARMUP_FACTOR, LR)
     else:
-      optimizer.lr.assign(Tensor([LR]))
+      optimizer.lr.assign(Tensor([LR], device=GPUS))
     cnt = 0
     data_end = time.perf_counter()
     for X, Y_boxes, Y_labels, Y_boxes_p, Y_labels_p in iterate(coco_train, BS):
@@ -386,14 +357,14 @@ def train_retinanet():
       GlobalCounters.reset()
       data_time = time.perf_counter() - data_end
       st = time.perf_counter()
-      # X.shard_(GPUS, axis=0)
+      X.shard_(GPUS, axis=0)
       if(cnt==0 and epoch==0):
         # INIT LOSS FUNC
         b,_,_ = mdlrun(X)
         ANCHORS = anchor_generator(X.shape, b)
         ANCHORS = [a.realize() for a in ANCHORS]
         ANCHORS_STACK = Tensor.stack(ANCHORS)
-        # ANCHORS_STACK.shard_(GPUS, axis=0)
+        ANCHORS_STACK.shard_(GPUS, axis=0)
         mdlrun.reset()
         # mdl_reg_loss_jit = TinyJit(lambda r, y, m: model.head.regression_head.loss(r,y,ANCHORS, m).realize())
         # mdl_class_loss_jit = TinyJit(lambda c, y,m: model.head.classification_head.loss(c,y,m).realize())
@@ -416,20 +387,21 @@ def train_retinanet():
         labels_temp.append(tl[m])
       labels_temp = Tensor.stack(labels_temp)
       # print('matched_IDXS', matched_idxs.shape, len(Y_boxes))
-      # matched_idxs.shard_(GPUS, axis=0)
+      matched_idxs.shard_(GPUS, axis=0)
       # # Y_boxes_p.shard_(GPUS, axis=0)
       # # Y_labels_p.shard_(GPUS, axis=0)
-      # boxes_temp.shard_(GPUS, axis=0)
-      # labels_temp.shard_(GPUS, axis=0)
+      boxes_temp.shard_(GPUS, axis=0)
+      labels_temp.shard_(GPUS, axis=0)
       loss = train_step(X, Y_boxes_p, Y_labels_p, matched_idxs, boxes_temp, labels_temp)
       if lr_sched is not None:
         lr_sched.step()
       et = time.perf_counter()-st
-      print('hit')
-      print(colored(f'{cnt} STEP {loss.item():.5f}, time: {et*1000.0:7.2f} ms run, '
-                    f'data: {data_time*1000.0:7.2f} ms|| LR: {optimizer.lr.numpy().item():.6f}, '
-                    f'mem: {GlobalCounters.mem_used / 1e9:.4f} GB used, '
-                    f'GFLOPS: {GlobalCounters.global_ops * 1e-9 / et:7.2f}', 'magenta'))
+      if cnt%10==0:
+        print('hit')
+        print(colored(f'{cnt} STEP {loss.item():.5f}, time: {et*1000.0:7.2f} ms run, '
+                      f'data: {data_time*1000.0:7.2f} ms|| LR: {optimizer.lr.numpy().item():.6f}, '
+                      f'mem: {GlobalCounters.mem_used / 1e9:.4f} GB used, '
+                      f'GFLOPS: {GlobalCounters.global_ops * 1e-9 / et:7.2f}', 'magenta'))
       data_end = time.perf_counter()
       # if cnt>4 and epoch==0: 
       #   # train_step.reset()
@@ -443,7 +415,7 @@ def train_retinanet():
     print(f" *** Model saved to {fn} ***")
 
     # ****EVAL STEP
-    train_step.reset()
+    # train_step.reset()
     print(colored(f'{epoch} START EVAL', 'cyan'))
     coco_eval = COCOeval(coco_val.coco, iouType="bbox")
 
@@ -459,7 +431,7 @@ def train_retinanet():
     coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
     cnt = 0
     for X, targets in iterate_val(coco_val, BS_EVAL):
-      # X.shard_(GPUS, axis=0)
+      X.shard_(GPUS, axis=0)
       orig_shapes= []
       for tt in targets:
         orig_shapes.append(tt['image_size'])
@@ -494,7 +466,7 @@ def train_retinanet():
     eval_acc = coco_eval.stats[0]
     print(colored(f'{epoch} EVAL_ACC {eval_acc} || {time.time()-st}', 'green'))
 
-    val_step.reset()
+    # val_step.reset()
     # sys.exit()
 
       
