@@ -97,7 +97,7 @@ class LazyBuffer:
   def is_unrealized_unmasked_const(self): return self.is_unrealized_const() and all(v.mask is None for v in self.st.views)
 
   def _copy(self, device:str) -> LazyBuffer:
-    return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, None, (self,), enable_cache=False)
+    return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, self.buffer.nbytes, (self,), enable_cache=False)
 
   def copy_to_device(self, device:str, force: bool = False) -> LazyBuffer:
     # no COPY

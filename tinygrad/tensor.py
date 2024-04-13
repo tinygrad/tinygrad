@@ -138,7 +138,7 @@ class Tensor:
 
   @staticmethod
   def corealize(lst:Iterable[Tensor]):
-    run_schedule(*create_schedule_with_vars(flatten([x.lazydata.lbs if isinstance(x.lazydata, MultiLazyBuffer) else [x.lazydata] for x in lst])))
+    run_schedule(*create_schedule_with_vars(flatten([x.lazydata.lbs for x in lst])))
 
   def realize(self) -> Tensor:
     Tensor.corealize([self])

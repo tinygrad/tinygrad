@@ -1,7 +1,7 @@
 from typing import List, Dict, Optional, cast, Generator
 from dataclasses import dataclass
-from tinygrad.helpers import colored
-from tinygrad.ops import ScheduleItem, BufferOps, LoadOps
+from tinygrad.helpers import colored, getenv
+from tinygrad.ops import ScheduleItem, BufferOps, LoadOps, copy_ast
 from tinygrad.device import Runner, Device, BufferCopy, BufferXfer, update_stats
 from tinygrad.buffer import Buffer
 from tinygrad.shape.symbolic import Variable
@@ -29,7 +29,8 @@ def lower_schedule_item(si:ScheduleItem) -> Runner:
   assert len(si.ast) == 1 and len(si.outputs) == 1, "only ASTRunner supports multioutput"
   out, ast = si.outputs[0], si.ast[0]
   if ast.op is LoadOps.COPY:
-    if hasattr(Device[out.device].allocator, 'transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]: return BufferXfer()
+    if hasattr(Device[out.device].allocator, 'transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]:
+      return Device[si.outputs[0].device].get_runner(copy_ast(ast.arg)) if getenv("USE_COPY_KERNEL") else BufferXfer()
     return BufferCopy()
   if ast.op is LoadOps.CUSTOM: return CustomOp(ast.arg)
   if ast.op is LoadOps.EMPTY: return EmptyOp()
