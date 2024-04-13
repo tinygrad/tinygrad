@@ -2,7 +2,7 @@ import numpy as np
 from collections import defaultdict
 from typing import DefaultDict, Dict, List, Set, TypeVar
 from tinygrad.buffer import Buffer
-from tinygrad.engine.realize import CustomOp, lower_schedule
+from tinygrad.engine.realize import CustomOp, lower_schedule, capturing
 from tinygrad.helpers import DEBUG, colored, getenv
 from tinygrad.lazy import LazyBuffer
 from tinygrad.engine.schedule import _graph_schedule
@@ -45,6 +45,7 @@ def fuzz_schedule(outs: List[LazyBuffer]):
   for i, schedule in enumerate(schedules):
     if DEBUG >= 2: print(colored(f"testing premutation {i}", "yellow"))
     for ei in lower_schedule(schedule):
+      if len(capturing): capturing[0].add(ei)
       if isinstance(ei.prg, CustomOp): Tensor._seed = seed
       ei.run()
 
