@@ -1,8 +1,10 @@
 from collections import defaultdict
+import random, pickle
 import numpy as np
-from typing import DefaultDict, List, Set, TypeVar
+from typing import DefaultDict, Dict, List, Set, Tuple, TypeVar
 from tinygrad.buffer import Buffer
-from tinygrad.engine.realize import run_schedule
+from tinygrad.device import CompiledRunner
+from tinygrad.engine.realize import lower_schedule_item, run_schedule
 from tinygrad.helpers import DEBUG, GlobalCounters, colored, getenv
 from tinygrad.lazy import LazyBuffer
 from tinygrad.engine.schedule import _graph_schedule
@@ -16,21 +18,26 @@ def fuzz_schedule(outs: List[LazyBuffer]):
 
   schedules: List[List[ScheduleItem]] = [[] for _ in toposorts]
   fuzz_outputs: DefaultDict[LazyBuffer, List[Buffer]] = defaultdict(list)
+  realize_order: List[List[Tuple[LazyBuffer, ScheduleItem]]] = []
   for i, ts in enumerate(toposorts):
+    realizes: List[Tuple[LazyBuffer, ScheduleItem]] = []
     for key in ts:
       for out in (ps:=prescheduled[key]).outputs:
         seen.add(out)
         # the first ts changes the LazyBuffer's .buffer
         fuzz_outputs[out].append(out.buffer if i == 0 else Buffer(out.device, out.size, out.dtype))
       inputs = (x.buffer if hasattr(x.buffer, "_buf") else fuzz_outputs[x][i] for x in ps.inputs if x.size != 0)
-      schedules[i].append(ScheduleItem(ps.ast, tuple(fuzz_outputs[x][i] for x in ps.outputs if x.size != 0), tuple(inputs)))
+      schedules[i].append(si:=ScheduleItem(ps.ast, tuple(fuzz_outputs[x][i] for x in ps.outputs if x.size != 0), tuple(inputs)))
+      for x in ps.outputs: realizes.append((x,si))
+    realize_order.append(realizes)
 
   # seed is the same between runs
   seed = Tensor._seed
   for i, schedule in enumerate(schedules):
     Tensor.manual_seed(seed)
     if DEBUG >= 2: print(f"toposort permutation {i}")
-    run_schedule(schedule)
+    # keep the permutation in memory
+    run_schedule(schedule.copy())
     GlobalCounters.reset()
 
   all_passed = True
@@ -43,8 +50,26 @@ def fuzz_schedule(outs: List[LazyBuffer]):
         print(e)
         all_passed = False
 
-  if not all_passed: raise Exception("some toposorts failed")
+  if not all_passed:
+    _graph_fuzz(realize_order)
+    raise Exception("some toposorts failed")
   if DEBUG >= 2: print(colored("all toposorts all_passed", "green"))
+
+def _graph_fuzz(realize_order: List[List[Tuple[LazyBuffer, ScheduleItem]]]):
+  color: Dict[LazyBuffer, str] = {}
+  toposorts = {"nodes": [], "edges": []}
+  for sort_idx, realizes in enumerate(realize_order):
+    for realize_idx, (r,si) in enumerate(realizes):
+      if r not in color: color[r] = _random_hex()
+      runner = lower_schedule_item(si)
+      code = runner.prg if isinstance(runner, CompiledRunner) else ""
+      toposorts["nodes"].append({"id": (node_id:=f"{sort_idx}_{realize_idx}"), "fill": color[r], "lb": f"{r.op} {r.shape} {r.device}", "code": code})
+      if realize_idx < len(realizes)-1:
+        toposorts["edges"].append({"id": f"{node_id}_{realize_idx+1}", "source": node_id, "target": f"{sort_idx}_{realize_idx+1}"})
+  pickle.dump(toposorts, open(fp:="/Users/qazal/toposorts.tiny", "wb"))
+  print(f"saved toposorts to {fp}")
+
+def _random_hex(): return f'#{random.randint(0, 0xFFFFFF):06x}'
 
 T = TypeVar("T")
 def find_all_toposorts(graph:DefaultDict[T, List[T]], in_degree:DefaultDict[T, int]) -> List[List[T]]:
