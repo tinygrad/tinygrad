@@ -6,7 +6,7 @@ from examples.gpt2 import Transformer
 from extra.export_model import export_model
 from tinygrad.helpers import getenv, fetch, prod, flatten
 from tinygrad.runtime.ops_clang import ClangCompiler, ClangProgram
-from tinygrad.nn.state import torch_load, load_state_dict
+from tinygrad.nn.state import torch_load
 from ctypes import c_char_p
 
 MAX_CONTEXT = getenv("MAX_CONTEXT", 128)
@@ -52,9 +52,9 @@ class GPT2:
         weights[k] = weights[k].T
     # lm head and wte are tied
     weights['lm_head.weight'] = weights['wte.weight']
-    s = sorted([(k,v.numel()) for k,v in weights.items()], key=lambda x: x[1])
-    print(s, sum(v for k,v in s), len(s))
-    exit(0)
+    # s = sorted([(k,v.numel()) for k,v in weights.items()], key=lambda x: x[1])
+    # print(s, sum(v for k,v in s), len(s))
+    # exit(0)
 
   def __init__(self, model, tokenizer):
     self.model = model
@@ -81,11 +81,12 @@ if __name__ == "__main__":
   gpt2 = GPT2.build(args.model_size)
   gpt2.write_model()
   start_pos = 0
+  start_pos_v = Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT).bind(start_pos)
   prompt_tokens = gpt2.tokenizer.encode(args.prompt, allowed_special={"<|endoftext|>"})
   toks = [prompt_tokens[:] for _ in range(args.batch_size)]
   tokens = Tensor([x[start_pos:] for x in toks])
-  
-  prg, inputs, outputs, state = export_model(gpt2.model, mode, tokens, Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT).bind(start_pos), args.temperature, fread_model=True)
+
+  prg, inputs, outputs, state = export_model(gpt2.model, mode, True, tokens, start_pos_v, args.temperature)
   cprog = [prg]
 
   inputs = "\n".join([f"{dtype.name} {name}[{sz}];" for name,(sz,dtype,is_pointer) in inputs.items()])
@@ -122,8 +123,7 @@ int main(int argc, char* argv[]) {
   # CLANG=1 python3 examples/gpt2c.py --model_size gpt2 | clang -O2 -lm -x c - -o gpt2 && ./gpt2
   src = '\n'.join(cprog)
   print(src[-1000:])
-  # p = ClangProgram("main", ClangCompiler().compile(src))
+  p = ClangProgram("main", ClangCompiler().compile(src))
   # # NOTE: only works for batch_size 1 right now
-  # toks = flatten(toks)
-  # print(toks)
-  # p(1+len(toks), (c_char_p * (1+len(toks)))(b'', *[bytes(str(t), 'utf-8') for t in toks]))
+  toks = flatten(toks)
+  p(1+len(toks), (c_char_p * (1+len(toks)))(b'', *[bytes(str(t), 'utf-8') for t in toks]))
