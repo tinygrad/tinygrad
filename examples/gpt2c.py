@@ -86,7 +86,7 @@ if __name__ == "__main__":
   toks = [prompt_tokens[:] for _ in range(args.batch_size)]
   tokens = Tensor([x[start_pos:] for x in toks])
 
-  prg, inputs, outputs, state = export_model(gpt2.model, mode, True, tokens, start_pos_v, args.temperature)
+  prg, inputs, outputs, state = export_model(gpt2.model, mode, tokens, start_pos_v, args.temperature, fread_weights=True)
   cprog = [prg]
 
   inputs = "\n".join([f"{dtype.name} {name}[{sz}];" for name,(sz,dtype,is_pointer) in inputs.items()])

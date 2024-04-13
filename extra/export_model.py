@@ -375,7 +375,7 @@ const setupNet = async (device, safetensor) => {{
 }}
   """ + f"\n\nconst loadNet = async (device) => {{ return await fetch('net.safetensors').then(x => x.arrayBuffer()).then(x => setupNet(device, new Uint8Array(x))); }}"
 
-def export_model(model, target:str, fread_weights=False, *inputs):
+def export_model(model, target:str, *inputs, fread_weights=False):
   assert Device.DEFAULT in EXPORT_SUPPORTED_DEVICE, "only WEBGPU, WEBGL, CLANG, CUDA, GPU, METAL are supported"
   run,special_names,net_keys = jit_model(model, fread_weights, *inputs)
   functions, statements, bufs, bufs_to_save = compile_net(run, special_names)
