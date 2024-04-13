@@ -1,7 +1,7 @@
 import unittest, functools, random
 from typing import List
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit
-from tinygrad.device import BufferCopy
+from tinygrad.device import BufferCopy, CompiledRunner
 from tinygrad.ops import LoadOps, ReduceOps
 from tinygrad.helpers import CI, prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
@@ -48,10 +48,9 @@ class TestMultiTensor(unittest.TestCase):
     sched = create_schedule(out.lazydata.lbs)
     names = []
     for si, ei in zip(sched[:], lower_schedule(sched)):
-      names.append(ei.prg.name)
+      if isinstance(ei.prg, CompiledRunner): names.append(ei.prg.name)
       ei.run()
-    assert names[-4] == names[-3]
-    assert names[-2] == names[-1]
+    assert names[-2] == names[-1], "function was relinearized"
 
   def test_sharded_memory(self):
     # Buffer may be stuck in track_cross_buffer
