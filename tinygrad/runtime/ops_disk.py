@@ -18,11 +18,10 @@ MAP_LOCKED, MAP_POPULATE = 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0
 class DiskAllocator(Allocator):
   def __init__(self, device:DiskDevice):
     self.device = device
-    super().__init__()
   def _alloc(self, size:int, options):
     self.device._might_open(size)
     return DiskBuffer(self.device, size)
-  def _free(self, opaque, options:Optional[BufferOptions]=None): return self.device._might_close() if isinstance(opaque, DiskBuffer) else None
+  def _free(self, opaque, options:Optional[BufferOptions]=None): self.device._might_close()
   def as_buffer(self, src:DiskBuffer): return src._buf()
   def copyin(self, dest:DiskBuffer, src:memoryview): dest._buf()[:] = src
   def copyout(self, dest:memoryview, src:DiskBuffer):
@@ -36,7 +35,6 @@ class DiskAllocator(Allocator):
 
 class DiskRunner(Runner):
   def __init__(self, ast:LazyOp):
-    super().__init__()
     # two ASTs are allowed here.
     assert ast.op is BufferOps.STORE, "output of AST must be store"
     assert ast.arg.st.contiguous, "shapetracker must be contiguous"
@@ -63,7 +61,7 @@ class DiskRunner(Runner):
 class DiskDevice(Compiled):
   def __init__(self, device:str):
     self.size: Optional[int] = None
-    self.fd: Optional[int] = None
+    self.fd: Optional[int] = None  # File descriptor
     self.count = 0
     super().__init__(device, DiskAllocator(self), None, None)
   def _might_open(self, size):
