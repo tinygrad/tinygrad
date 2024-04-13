@@ -52,6 +52,10 @@ class LazyBuffer:
   @property
   def base(self) -> LazyBuffer: return self._base if self._base is not None else self
 
+  # same API as multi
+  @property
+  def lbs(self) -> List[LazyBuffer]: return [self]
+
   @staticmethod
   def loadop(op, shape:Tuple[sint,...], dtype:DType, device:str, arg=None, src:Tuple[LazyBuffer, ...]=(), enable_cache=False) -> LazyBuffer:
     assert isinstance(src, tuple)
