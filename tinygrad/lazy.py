@@ -52,6 +52,10 @@ class LazyBuffer:
   @property
   def base(self) -> LazyBuffer: return self._base if self._base is not None else self
 
+  # same API as multi
+  @property
+  def lbs(self) -> List[LazyBuffer]: return [self]
+
   @staticmethod
   def loadop(op, shape:Tuple[sint,...], dtype:DType, device:str, arg=None, src:Tuple[LazyBuffer, ...]=(), enable_cache=False) -> LazyBuffer:
     assert isinstance(src, tuple)
@@ -80,9 +84,6 @@ class LazyBuffer:
     if self.device.startswith("DISK") and not bitcast: raise RuntimeError("attempted to cast disk buffer (bitcast only)")
     if self.is_unrealized_unmasked_const() and not bitcast:
       return create_lazybuffer(self.device, self.st, dtype, LoadOps.CONST, dtypes.as_const(self.base.arg, dtype))
-    # TODO: applying this makes gpt2 slower
-    if getenv("CAST_BEFORE_VIEW", 1) and dtype.itemsize <= self.dtype.itemsize and self != self.base:
-      return self.base.cast(dtype, bitcast)._view(self.st)
     new_shape = self.shape
     if bitcast and self.dtype.itemsize != dtype.itemsize:
       if not self.device.startswith("DISK"): raise RuntimeError("shape changing bitcast only supported on DISK right now")
@@ -96,7 +97,7 @@ class LazyBuffer:
   def is_unrealized_unmasked_const(self): return self.is_unrealized_const() and all(v.mask is None for v in self.st.views)
 
   def _copy(self, device:str) -> LazyBuffer:
-    return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, None, (self,), enable_cache=False)
+    return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, self.buffer.nbytes, (self,), enable_cache=False)
 
   def copy_to_device(self, device:str, force: bool = False) -> LazyBuffer:
     # no COPY
