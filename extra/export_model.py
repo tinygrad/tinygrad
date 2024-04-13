@@ -25,7 +25,7 @@ def compile_net(run: TinyJit, special_names:Dict[int,str]):
   functions, bufs, bufs_to_save, statements, bufnum = {}, {}, {}, [], 0
   for ji in run.jit_cache:
     fxn = ji.prg
-    if not hasattr(fxn, 'name'): continue # TODO: is this the correct handling for CustomOp?
+    if not hasattr(fxn, 'name'): continue # TODO: handle customop correctly
     functions[fxn.name] = fxn.prg   # NOTE: this assumes all with the same name are the same
     cargs = []
     for i,arg in enumerate(ji.rawbufs):
@@ -68,7 +68,7 @@ def jit_model(model, *args) -> Tuple[TinyJit,Dict[int,str]]:
 
   for v in run.expected_vals:
     special_names[v.hash] = (f"input_{v.expr}", dtypes.int, False)
-     
+  
   # TODO: fetch this from the jit in self.input_replace and self.ret (hint: use get_parameters on self.ret)
   for i, out in enumerate(output):
     special_names[id(out.lazydata.base.realized)] = (f"output{i}", out.dtype, True)
@@ -76,17 +76,39 @@ def jit_model(model, *args) -> Tuple[TinyJit,Dict[int,str]]:
 
 def fread_model(fp: str, bufs: Dict[str,Buffer]):
   cprog = []
-  cprog.append("#include <stdio.h>")
+  cprog.append("#include <stdio.h>\n#include <stdlib.h>\n#include <assert.h>")
   cprog.append("void fread_net() {")
   cprog.append(f"FILE *model_file = fopen(\"{fp}\", \"rb\");")
+  cprog.append("if (model_file == NULL) { printf(\"Error opening model file\\n\"); exit(1); }")
+  cprog.append("printf(\"file opened\\n\");")
+  cprog.append("size_t s = 0;")
 
+  size = 0
+  limit = 500_000
   for name, cl in bufs.items():
-    cprog.append(f"fread({name}_data, sizeof(float), {cl.size}, model_file);")
+    # break fread into chunks
+    if cl.size > limit:
+      s = 0
+      for chunk in range(cl.size//limit):
+        cprog.append(f"s = fread({name}_data+{chunk*limit}, sizeof(float), {limit}, model_file);")
+        cprog.append(f"assert(s == {limit});")
+        s += limit
+      if (rem := cl.size%limit) > 0:
+        cprog.append(f"s = fread({name}_data+{limit*(cl.size//limit)}, sizeof(float), {rem}, model_file);")
+        cprog.append(f"assert(s == {rem});")
+        s += rem
+      assert(s == cl.size), f"{s=} {cl.size=}"
+    else:
+      cprog.append(f"s = fread({name}_data, sizeof(float), {cl.size}, model_file);")
+      cprog.append(f"assert(s == {cl.size});")
+    size += cl.size
+    # printf("pos %ld\n", ftell(model_file));
+  print(size)
 
   cprog.append("fclose(model_file);")
+  cprog.append("printf(\"done reading file\\n\");")
   cprog.append("}")
   return cprog
-
 
 def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,int,int]], bufs:Dict[str,Tuple[int,DType,int]], bufs_to_save:Dict[str,Buffer], net_inputs:List[Tuple[str, DType]], net_outputs:List[Tuple[str, DType]], load_model) -> str:
   from tinygrad.runtime.ops_clang import CLANG_PROGRAM_HEADER
@@ -94,13 +116,13 @@ def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,in
 
   for name,cl in bufs_to_save.items():
     if load_model:
-      cprog.append(f"unsigned char {name}_data[{cl.size}];")
+      cprog.append(f"float {name}_data[{cl.size}];")
     else:
       weight = ''.join(["\\x%02X"%x for x in bytes(cl._buf)])
       cprog.append(f"unsigned char {name}_data[] = \"{weight}\";")
 
   if load_model:
-    cprog += fread_model("~/Library/Caches/tinygrad/downloads/gpt2_124", bufs_to_save)
+    cprog += fread_model("gpt2_124M.bin", bufs_to_save)
 
   for name,(len,dtype,_) in bufs.items():
     # if 'input' in name or 'output' in name: continue
@@ -111,7 +133,7 @@ def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,in
 
   inputs = ", ".join([f'{dtype.name}{"*" if is_pointer else ""} {input}' for input,dtype,is_pointer in net_inputs])
   outputs = ", ".join([f'{dtype.name}{"*" if is_pointer else ""} {output}' for output,dtype,is_pointer in net_outputs])
-  cprog += [f"void net({inputs}, {outputs}) {{"] + [f"{name}({', '.join(args)});" for (name, args, _global_size, _local_size) in statements] + ["}"]
+  cprog += [f"void net({inputs}, {outputs}) {{"] + [f"  {name}({', '.join(args)});" for (name, args, _global_size, _local_size) in statements] + ["}"]
   return '\n'.join(cprog)
 
 def export_model_webgl(functions, statements, bufs, bufs_to_save, weight_names, input_names, output_names) -> str:

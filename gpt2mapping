@@ -1,0 +1,121 @@
+[('h.0.ln_1.weight', 768), ('h.0.ln_1.bias', 768), ('h.0.attn.c_proj.bias', 768), ('h.0.ln_2.weight', 768), ('h.0.ln_2.bias', 768), ('h.0.mlp.c_proj.bias', 768), ('h.1.ln_1.weight', 768), ('h.1.ln_1.bias', 768), ('h.1.attn.c_proj.bias', 768), ('h.1.ln_2.weight', 768), ('h.1.ln_2.bias', 768), ('h.1.mlp.c_proj.bias', 768), ('h.2.ln_1.weight', 768), ('h.2.ln_1.bias', 768), ('h.2.attn.c_proj.bias', 768), ('h.2.ln_2.weight', 768), ('h.2.ln_2.bias', 768), ('h.2.mlp.c_proj.bias', 768), ('h.3.ln_1.weight', 768), ('h.3.ln_1.bias', 768), ('h.3.attn.c_proj.bias', 768), ('h.3.ln_2.weight', 768), ('h.3.ln_2.bias', 768), ('h.3.mlp.c_proj.bias', 768), ('h.4.ln_1.weight', 768), ('h.4.ln_1.bias', 768), ('h.4.attn.c_proj.bias', 768), ('h.4.ln_2.weight', 768), ('h.4.ln_2.bias', 768), ('h.4.mlp.c_proj.bias', 768), ('h.5.ln_1.weight', 768), ('h.5.ln_1.bias', 768), ('h.5.attn.c_proj.bias', 768), ('h.5.ln_2.weight', 768), ('h.5.ln_2.bias', 768), ('h.5.mlp.c_proj.bias', 768), ('h.6.ln_1.weight', 768), ('h.6.ln_1.bias', 768), ('h.6.attn.c_proj.bias', 768), ('h.6.ln_2.weight', 768), ('h.6.ln_2.bias', 768), ('h.6.mlp.c_proj.bias', 768), ('h.7.ln_1.weight', 768), ('h.7.ln_1.bias', 768), ('h.7.attn.c_proj.bias', 768), ('h.7.ln_2.weight', 768), ('h.7.ln_2.bias', 768), ('h.7.mlp.c_proj.bias', 768), ('h.8.ln_1.weight', 768), ('h.8.ln_1.bias', 768), ('h.8.attn.c_proj.bias', 768), ('h.8.ln_2.weight', 768), ('h.8.ln_2.bias', 768), ('h.8.mlp.c_proj.bias', 768), ('h.9.ln_1.weight', 768), ('h.9.ln_1.bias', 768), ('h.9.attn.c_proj.bias', 768), ('h.9.ln_2.weight', 768), ('h.9.ln_2.bias', 768), ('h.9.mlp.c_proj.bias', 768), ('h.10.ln_1.weight', 768), ('h.10.ln_1.bias', 768), ('h.10.attn.c_proj.bias', 768), ('h.10.ln_2.weight', 768), ('h.10.ln_2.bias', 768), ('h.10.mlp.c_proj.bias', 768), ('h.11.ln_1.weight', 768), ('h.11.ln_1.bias', 768), ('h.11.attn.c_proj.bias', 768), ('h.11.ln_2.weight', 768), ('h.11.ln_2.bias', 768), ('h.11.mlp.c_proj.bias', 768), ('ln_f.weight', 768), ('ln_f.bias', 768), ('h.0.attn.c_attn.bias', 2304), ('h.1.attn.c_attn.bias', 2304), ('h.2.attn.c_attn.bias', 2304), ('h.3.attn.c_attn.bias', 2304), ('h.4.attn.c_attn.bias', 2304), ('h.5.attn.c_attn.bias', 2304), ('h.6.attn.c_attn.bias', 2304), ('h.7.attn.c_attn.bias', 2304), ('h.8.attn.c_attn.bias', 2304), ('h.9.attn.c_attn.bias', 2304), ('h.10.attn.c_attn.bias', 2304), ('h.11.attn.c_attn.bias', 2304), ('h.0.mlp.c_fc.bias', 3072), ('h.1.mlp.c_fc.bias', 3072), ('h.2.mlp.c_fc.bias', 3072), ('h.3.mlp.c_fc.bias', 3072), ('h.4.mlp.c_fc.bias', 3072), ('h.5.mlp.c_fc.bias', 3072), ('h.6.mlp.c_fc.bias', 3072), ('h.7.mlp.c_fc.bias', 3072), ('h.8.mlp.c_fc.bias', 3072), ('h.9.mlp.c_fc.bias', 3072), ('h.10.mlp.c_fc.bias', 3072), ('h.11.mlp.c_fc.bias', 3072), ('h.0.attn.c_proj.weight', 589824), ('h.1.attn.c_proj.weight', 589824), ('h.2.attn.c_proj.weight', 589824), ('h.3.attn.c_proj.weight', 589824), ('h.4.attn.c_proj.weight', 589824), ('h.5.attn.c_proj.weight', 589824), ('h.6.attn.c_proj.weight', 589824), ('h.7.attn.c_proj.weight', 589824), ('h.8.attn.c_proj.weight', 589824), ('h.9.attn.c_proj.weight', 589824), ('h.10.attn.c_proj.weight', 589824), ('h.11.attn.c_proj.weight', 589824), ('wpe.weight', 786432), ('h.0.attn.bias', 1048576), ('h.1.attn.bias', 1048576), ('h.2.attn.bias', 1048576), ('h.3.attn.bias', 1048576), ('h.4.attn.bias', 1048576), ('h.5.attn.bias', 1048576), ('h.6.attn.bias', 1048576), ('h.7.attn.bias', 1048576), ('h.8.attn.bias', 1048576), ('h.9.attn.bias', 1048576), ('h.10.attn.bias', 1048576), ('h.11.attn.bias', 1048576), ('h.0.attn.c_attn.weight', 1769472), ('h.1.attn.c_attn.weight', 1769472), ('h.2.attn.c_attn.weight', 1769472), ('h.3.attn.c_attn.weight', 1769472), ('h.4.attn.c_attn.weight', 1769472), ('h.5.attn.c_attn.weight', 1769472), ('h.6.attn.c_attn.weight', 1769472), ('h.7.attn.c_attn.weight', 1769472), ('h.8.attn.c_attn.weight', 1769472), ('h.9.attn.c_attn.weight', 1769472), ('h.10.attn.c_attn.weight', 1769472), ('h.11.attn.c_attn.weight', 1769472), ('h.0.mlp.c_fc.weight', 2359296), ('h.0.mlp.c_proj.weight', 2359296), ('h.1.mlp.c_fc.weight', 2359296), ('h.1.mlp.c_proj.weight', 2359296), ('h.2.mlp.c_fc.weight', 2359296), ('h.2.mlp.c_proj.weight', 2359296), ('h.3.mlp.c_fc.weight', 2359296), ('h.3.mlp.c_proj.weight', 2359296), ('h.4.mlp.c_fc.weight', 2359296), ('h.4.mlp.c_proj.weight', 2359296), ('h.5.mlp.c_fc.weight', 2359296), ('h.5.mlp.c_proj.weight', 2359296), ('h.6.mlp.c_fc.weight', 2359296), ('h.6.mlp.c_proj.weight', 2359296), ('h.7.mlp.c_fc.weight', 2359296), ('h.7.mlp.c_proj.weight', 2359296), ('h.8.mlp.c_fc.weight', 2359296), ('h.8.mlp.c_proj.weight', 2359296), ('h.9.mlp.c_fc.weight', 2359296), ('h.9.mlp.c_proj.weight', 2359296), ('h.10.mlp.c_fc.weight', 2359296), ('h.10.mlp.c_proj.weight', 2359296), ('h.11.mlp.c_fc.weight', 2359296), ('h.11.mlp.c_proj.weight', 2359296), ('wte.weight', 38597376), ('lm_head.weight', 38597376)] 175620096 161
+
+
+
+float buf_1_data[128];          -> context?
+float buf_2_data[1024];         -> max seq len?
+
+float buf_3_data[786432];       -> wpe.weight
+float buf_5_data[50257];        -> vocab size?
+float buf_6_data[38597376];     -> wte.weight
+
+float buf_11_data[1769472];     -> h.0.attn.c_attn.weight
+float buf_12_data[2304];        -> h.0.attn.c_attn.bias
+float buf_23_data[589824];      -> h.0.attn.c_proj.weight
+float buf_24_data[768];         -> h.0.attn.c_proj.bias
+float buf_27_data[2359296];     -> h.0.mlp.c_fc.weight
+float buf_28_data[3072];        -> h.0.mlp.c_fc.bias
+float buf_29_data[2359296];     -> h.0.mlp.c_proj.weight 
+float buf_30_data[768];         -> h.0.mlp.c_proj.bias
+
+float buf_31_data[1769472];     -> h.1.attn.c_attn.weight
+float buf_32_data[2304];        -> h.1.attn.c_attn.bias
+float buf_34_data[589824];      -> h.1.attn.c_proj.weight 
+float buf_35_data[768];
+float buf_36_data[2359296];
+float buf_37_data[3072];
+float buf_38_data[2359296];
+float buf_39_data[768];
+
+float buf_40_data[1769472];     -> h.2.attn.c_attn.weight
+float buf_41_data[2304];
+float buf_43_data[589824];
+float buf_44_data[768];
+float buf_45_data[2359296];
+float buf_46_data[3072];
+float buf_47_data[2359296];
+float buf_48_data[768];
+
+float buf_49_data[1769472];     -> h.3.attn.c_attn.weight
+float buf_50_data[2304];
+float buf_52_data[589824];
+float buf_53_data[768];
+float buf_54_data[2359296];
+float buf_55_data[3072];
+float buf_56_data[2359296];
+float buf_57_data[768];
+
+float buf_58_data[1769472];     -> h.4.attn.c_attn.weight
+float buf_59_data[2304];
+float buf_61_data[589824];
+float buf_62_data[768];
+float buf_63_data[2359296];
+float buf_64_data[3072];
+float buf_65_data[2359296];
+float buf_66_data[768];
+
+float buf_67_data[1769472];     -> h.5.attn.c_attn.weight
+float buf_68_data[2304];
+float buf_70_data[589824];
+float buf_71_data[768];
+float buf_72_data[2359296];
+float buf_73_data[3072];
+float buf_74_data[2359296];
+float buf_75_data[768];
+
+float buf_76_data[1769472];     -> h.6.attn.c_attn.weight
+float buf_77_data[2304];
+float buf_79_data[589824];
+float buf_80_data[768];
+float buf_81_data[2359296];
+float buf_82_data[3072];
+float buf_83_data[2359296];
+float buf_84_data[768];
+
+float buf_85_data[1769472];     -> h.7.attn.c_attn.weight
+float buf_86_data[2304];
+float buf_88_data[589824];
+float buf_89_data[768];
+float buf_90_data[2359296];
+float buf_91_data[3072];
+float buf_92_data[2359296];
+float buf_93_data[768];
+
+float buf_94_data[1769472];     -> h.8.attn.c_attn.weight
+float buf_95_data[2304];
+float buf_97_data[589824];
+float buf_98_data[768];
+float buf_99_data[2359296];
+float buf_100_data[3072];
+float buf_101_data[2359296];
+float buf_102_data[768];
+
+float buf_103_data[1769472];     -> h.9.attn.c_attn.weight
+float buf_104_data[2304];
+float buf_106_data[589824];
+float buf_107_data[768];
+float buf_108_data[2359296];
+float buf_109_data[3072];
+float buf_110_data[2359296];
+float buf_111_data[768];
+
+float buf_112_data[1769472];     -> h.10.attn.c_attn.weight
+float buf_113_data[2304];
+float buf_115_data[589824];
+float buf_116_data[768];
+float buf_117_data[2359296];
+float buf_118_data[3072];
+float buf_119_data[2359296];
+float buf_120_data[768];
+
+float buf_121_data[1769472];     -> h.11.attn.c_attn.weight
+float buf_122_data[2304];
+float buf_124_data[589824];
+float buf_125_data[768];
+float buf_126_data[2359296];
+float buf_127_data[3072];
+float buf_128_data[2359296];
+float buf_129_data[768];
+
+float buf_131_data[38597376]; -> lm_head.weight
+float buf_137_data[1];

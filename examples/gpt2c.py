@@ -4,9 +4,10 @@ import tiktoken
 from tinygrad import Tensor, Variable
 from examples.gpt2 import Transformer
 from extra.export_model import export_model
-from tinygrad.helpers import getenv, fetch, prod
+from tinygrad.helpers import getenv, fetch, prod, flatten
 from tinygrad.runtime.ops_clang import ClangCompiler, ClangProgram
-from tinygrad.nn.state import torch_load
+from tinygrad.nn.state import torch_load, load_state_dict
+from ctypes import c_char_p
 
 MAX_CONTEXT = getenv("MAX_CONTEXT", 128)
 
@@ -23,23 +24,37 @@ class GPT2:
     tokenizer = tiktoken.get_encoding("gpt2")
 
     model = Transformer(**MODEL_PARAMS[model_size])
+    # weights = torch_load(fetch(f"https://huggingface.co/{model_size}/resolve/main/pytorch_model.bin", name="gpt2_124M"))
+    # s = Tensor([prod(t.shape) for t in weights.values()]).sum()
+    # print("weights", len(weights.keys()), s.numpy())
+    # # special treatment for the Conv1D weights we need to transpose
+    # transposed = ('attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight')
+    # for k in weights:
+    #   if k.endswith(transposed):
+    #     weights[k] = weights[k].T
+    # # lm head and wte are tied
+    # weights['lm_head.weight'] = weights['wte.weight']
+
+    # s = Tensor([prod(t.shape) for t in weights.values()]).sum()
+    # print("weights", len(weights.keys()), s.numpy())
+
+    # load_state_dict(model, weights)
+
+    # TODO: write model
+
+    return GPT2(model, tokenizer)
+  
+  def write_model(model_size="gpt2"):
     weights = torch_load(fetch(f"https://huggingface.co/{model_size}/resolve/main/pytorch_model.bin", name="gpt2_124M"))
-    s = Tensor([prod(t.shape) for t in weights.values()]).sum()
-    print("weights", len(weights.keys()), s.numpy())
-    # special treatment for the Conv1D weights we need to transpose
     transposed = ('attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight')
     for k in weights:
       if k.endswith(transposed):
         weights[k] = weights[k].T
     # lm head and wte are tied
     weights['lm_head.weight'] = weights['wte.weight']
-
-    s = Tensor([prod(t.shape) for t in weights.values()]).sum()
-    print("weights", len(weights.keys()), s.numpy())
-
-    # TODO: write model
-
-    return GPT2(model, tokenizer)
+    s = sorted([(k,v.numel()) for k,v in weights.items()], key=lambda x: x[1])
+    print(s, sum(v for k,v in s), len(s))
+    exit(0)
 
   def __init__(self, model, tokenizer):
     self.model = model
@@ -64,10 +79,12 @@ if __name__ == "__main__":
 
   # print(f"using {args.model_size}")
   gpt2 = GPT2.build(args.model_size)
+  gpt2.write_model()
   start_pos = 0
   prompt_tokens = gpt2.tokenizer.encode(args.prompt, allowed_special={"<|endoftext|>"})
   toks = [prompt_tokens[:] for _ in range(args.batch_size)]
   tokens = Tensor([x[start_pos:] for x in toks])
+  
   prg, inputs, outputs, state = export_model(gpt2.model, mode, tokens, Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT).bind(start_pos), args.temperature, fread_model=True)
   cprog = [prg]
 
@@ -77,28 +94,36 @@ if __name__ == "__main__":
   cprog.append(outputs)
 
   cprog.append("""
-  int main(int argc, char* argv[]) {
-    printf("inside");
-    //fread_net();
-    //int max_length = 100;
-    //int toks[max_length];
-    //int start_pos = 0;
-    //float temp = 0.8;
+#include <string.h>
+int main(int argc, char* argv[]) {
+  int max_length = 100;
+  //int toks[max_length];
+  //int start_pos = 0;
+  //float temp = 0.8;
 
-    //for (int t = 0; t < max_length; t++) {
-     // input0[0] = toks[start_pos];
-      //net(input0, start_pos, output0);
-      //toks[start_pos+t] = output0[0];
-      //start_pos += 1;
-    //}
-    //for (int t = 0; t < max_length; t++) {
-     // printf("%d ", toks[t]);
-    //}
-    return 0;
-  }""")
+  for (int i = 0; i < argc-1; i++) {
+    input0[i] = atoi(argv[i+1]);
+  }
+  assert(input0 != NULL);
+
+  fread_net();
+
+  for (int t = 0; t < max_length; t++) {
+    net(input0, 0, output0);
+    //toks[t] = output0[0];
+    //start_pos += 1;
+  }
+  for (int t = 0; t < max_length; t++) {
+    //printf("%d ", toks[t]);
+  }
+  return 0;
+}""")
 
   # CLANG=1 python3 examples/gpt2c.py --model_size gpt2 | clang -O2 -lm -x c - -o gpt2 && ./gpt2
   src = '\n'.join(cprog)
   print(src[-1000:])
-  p = ClangProgram("main", ClangCompiler().compile(src))
-  p()
+  # p = ClangProgram("main", ClangCompiler().compile(src))
+  # # NOTE: only works for batch_size 1 right now
+  # toks = flatten(toks)
+  # print(toks)
+  # p(1+len(toks), (c_char_p * (1+len(toks)))(b'', *[bytes(str(t), 'utf-8') for t in toks]))
