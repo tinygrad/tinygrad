@@ -2,7 +2,7 @@ import sys
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import Tuple, List, Dict, Optional, Set, DefaultDict
-from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, LazyOp, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS
+from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, LazyOp, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps
 from tinygrad.features.graph import log_lazybuffer, realized_lazybuffer
 from tinygrad.helpers import GRAPH, DEBUG, GlobalCounters, prod, dedup, all_int, merge_dicts, getenv
 from tinygrad.shape.symbolic import Variable
@@ -75,19 +75,21 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outbufs:Tuple[Laz
     LazyOp(buf.op, tuple(_recursive_lazyop(x, inputs, outbufs, var_vals, st, realizes, cache, assign_to, assign_idx) for x in buf.srcs), buf.arg)
   return ret
 
-def _schedule_one(out:LazyBuffer, realizes:Set[LazyBuffer], reduce_for_op: Dict[LazyBuffer, LazyBuffer]) -> _LBScheduleItem:
+def _schedule_group(outs:Tuple[LazyBuffer, ...], realizes:Set[LazyBuffer], reduce_for_op: Dict[LazyBuffer, LazyBuffer]) -> _LBScheduleItem:
   inputs: List[LazyBuffer] = []
-  var_vals: Dict[Variable, int] = out.st.var_vals.copy()
-  if out.op in {LoadOps.CUSTOM, LoadOps.COPY, LoadOps.EMPTY}:
-    op, inputs = LazyOp(out.op, (), out.arg), list(out.srcs)
+  ast: List[LazyOp] = []
+  var_vals: Dict[Variable, int] = merge_dicts([out.st.var_vals.copy() for out in outs])
+  if outs[0].op in {LoadOps.CUSTOM, LoadOps.COPY, LoadOps.EMPTY}:
+    ast, inputs = [LazyOp(outs[0].op, (), outs[0].arg)], list(outs[0].srcs)
   else:
-    output_st = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape)
-    output_view = out.arg[0] if out.op is LoadOps.ASSIGN and out.arg else output_st
-    op = _recursive_lazyop(out, inputs, (out, ), var_vals, output_st, realizes, cache={})
-    output_view, vv = output_view.simplify().unbind()
-    if vv: var_vals.update(vv)
-    op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_view))
-  return _LBScheduleItem((op,), (out,), tuple(inputs), var_vals)
+    for i, out in enumerate(outs):
+      output_st = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape)
+      output_view = out.arg[0] if out.op is LoadOps.ASSIGN and out.arg else output_st
+      op = _recursive_lazyop(out, inputs, outs, var_vals, output_st, realizes, cache={})
+      output_view, vv = output_view.simplify().unbind()
+      if vv: var_vals.update(vv)
+      ast.append(LazyOp(BufferOps.STORE, (op, ), MemBuffer(i, out.dtype, output_view)))
+  return _LBScheduleItem(tuple(ast), outs, tuple(inputs), var_vals)
 
 # recursively search the entire graph for all LazyBuffers, insert realizes after expands
 def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffer, None],
@@ -158,13 +160,24 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
       for tr,st in child_set.items():
         if tr in realizes:
           realized_children[tr] = st
-          # can only have one output buffer
           # can only reduce contiguous
           # max one reduceop per kernel
-          if len(realized_children) > 1 or not st.contiguous or st.size != r.st.size or (tr in reduce_for_op and reduce_for_op[tr] != r):
+          if not st.contiguous or st.size != r.st.size or (tr in reduce_for_op and reduce_for_op[tr] != r):
             can_chase = tr not in reduce_for_op or reduce_for_op[tr] == r
             forced_realize = True
             break
+          if len(realized_children) > 1:
+            for rc in realized_children:
+              queue = deque(x.base for x in rc.srcs)
+              while queue:
+                if (e:=queue.pop()).realized or e.op is LoadOps.CONST: continue
+                if e is r: continue
+                # max one reduceop per kernel
+                if e.op in ReduceOps:
+                  can_chase = tr not in reduce_for_op or reduce_for_op[tr] == r
+                  forced_realize = True
+                  break
+                for x in e.srcs: queue.append(x.base)
           continue
         for tr_next in children[tr].keys():
           if not tr_next.realized:
@@ -193,12 +206,15 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
           tr = tr_next
         reduce_for_op[tr] = r
       realizes.add(tr)
-    else:
-      assert len(realized_children) == 1
-      reduce_for_op[next(iter(realized_children.keys()))] = r
+    else: reduce_for_op.update((tr, r) for tr in realized_children)
+
+  output_groups: DefaultDict[Tuple, List[LazyBuffer]] = defaultdict(list)
+  for r in realizes:
+    if r.realized is not None or r.op is LoadOps.CONST or r in seen: continue
+    output_groups[(reduce_for_op[r], ) if r in reduce_for_op else (r, )].append(r)
 
   # preschedule all buffers in realizes
-  prescheduled = {x:_schedule_one(x, realizes, reduce_for_op) for x in realizes if x not in seen and x.realized is None and x.op is not LoadOps.CONST}
+  prescheduled = {group[0]:_schedule_group(tuple(group), realizes, reduce_for_op) for group in output_groups.values()}
   schedule_targets = {out:ps for ps in prescheduled.values() for out in ps.outputs}
   assign_targets = {x.srcs[1]:x for x in realizes if x.op is LoadOps.ASSIGN and x not in seen and x.realized is None}
 
