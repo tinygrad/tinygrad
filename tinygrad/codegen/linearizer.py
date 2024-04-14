@@ -170,12 +170,12 @@ class Linearizer(Kernel):
         self.const(x.max+1) if isinstance(x.max, int) else cast(Node, x.max+1).render(self.render_ops, self)), cachable=False) for x in xx if not isinstance(x, NumNode) and x.expr is not None}  # noqa: E501
       self.loop_uops.update(new_loops)
       return tuple(new_loops.values())
-  
-  def render_reduceop(self, reduceop, global_idxs, local_idxs, upcast_idxs, full_upcast_idxs):
+
+  def render_reduceop(self, reduceop: LazyOp, global_idxs, local_idxs, upcast_idxs, full_upcast_idxs):
     # define indecies
     reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+self.group_for_reduces, self.shape_len-self.upcasted)]  # noqa: E501
     fake_reduce_idxs = [x*0 for x in reduce_idxs]
-      
+
     # define accumulator
     out_buf = -1 if self.group_for_reduces else 0
     acc = self.global_load(out_buf, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, self.get_reduce_acc(reduceop))
@@ -415,12 +415,10 @@ class Linearizer(Kernel):
     if x.op in BufferOps: return self.loaded_buffers[x.arg]
     if x.op is UnaryOps.CAST: return [self.uops.add(UOps.BITCAST if x.arg[1] else UOps.CAST, self.get_base_dtype(x.arg[0]), (u,), x.arg[0]) \
                                       for u in self.ast_parse(x.src[0], acc, offs)]
-    # print(f"x.op in ReduceOps ({x.op in ReduceOps}) and not do_reduce {not do_reduce}")
     if x.op in ReduceOps and not do_reduce:
       assert offs is None, "not available if we aren't doing reduce"
       return acc
 
-    # print("values for: ", x)
     values = [self.ast_parse(v, acc, offs, loop_ctx=loop_ctx, cache=cache) for v in x.src]
     ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}
     if x.op in ops:
