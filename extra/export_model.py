@@ -72,11 +72,12 @@ def jit_model(model, *args, fread_weights=None) -> Tuple[TinyJit,Dict[int,str]]:
   if fread_weights is not None:
     for p in get_parameters(model):
       net_keys.add(id(p.lazydata.realized))
+  print("net keys", len(net_keys))
   
   # TODO: fetch this from the jit in self.input_replace and self.ret (hint: use get_parameters on self.ret)
   for i, out in enumerate(output):
     special_names[id(out.lazydata.base.realized)] = (f"output{i}", out.dtype, True)
-  return run, special_names, net_keys
+  return run, special_names
 
 def fread_model_weights(fp: str, bufs, bufs_to_save):
   cprog = []
@@ -119,7 +120,7 @@ def export_model_clang(functions, statements, bufs, bufs_to_save, net_inputs, ne
   cprog += [f"void net({inputs}, {outputs}) {{"] + [f"  {name}({', '.join(args)});" for (name, args, _global_size, _local_size) in statements] + ["}"]
   return '\n'.join(cprog)
 
-def export_model_webgl(functions, statements, bufs, bufs_to_save, weight_names, input_names, output_names) -> str:
+def export_model_webgl(functions, statements, bufs, bufs_to_save, weight_names) -> str:
   header = f"""
   function setupNet(gl, safetensor) {{
     function createShaderProgram(gl, code) {{
@@ -269,13 +270,13 @@ def export_model_webgl(functions, statements, bufs, bufs_to_save, weight_names, 
     const metadata = getTensorMetadata(safetensor);
   """
 
-  textures = '\n    '.join([f"const {name} = " + (f"createTexture(gl, {size/(2 if dtype == dtypes.half else 4)}, {'true' if dtype == dtypes.half else 'false'});" if _key not in weight_names else f"createTexture(gl, {size/(2 if dtype == dtypes.half else 4)}, {'true' if dtype == dtypes.half else 'false'}, getTensorBuffer(safetensor, metadata['{weight_names[_key]}']))") + ";"  for name,(size,dtype,_key) in bufs.items()])
+  textures = '\n    '.join([f"const {name} = " + (f"createTexture(gl, {size/(2 if dtype == dtypes.half else 4)}, {'true' if dtype == dtypes.half else 'false'});" if _key not in weight_names else f"createTexture(gl, {size/(2 if dtype == dtypes.half else 4)}, {'true' if dtype == dtypes.half else 'false'}, getTensorBuffer(safetensor, metadata['{weight_names[_key]}']))") + ";"  for _key,(name,_,size_,dtype,_) in bufs.items()])
   kernels = '\n\n'.join([f"const {key} = `{code.replace(key, 'main').replace('version 330', 'version 300 es')}`;" for key, code in functions.items()])
   kernel_names = ', '.join([name for (name, _args, _global_size, _local_size) in statements])
   kernel_calls = '\n        '.join([f"runProgram(gl, '{name}', programs[{i}], [{', '.join(args)}]);" for i, (name, args, _global_size, _local_size) in enumerate(statements) ])
-  copy_inputs = "\n".join([f'updateTextureData(gl, {name}, _{name}, {"true" if dtype == dtypes.half else "false"});' for name,(size,dtype,_key) in bufs.items() if "input" in name])
+  copy_inputs = "\n".join([f'updateTextureData(gl, {name}, _{name}, {"true" if dtype == dtypes.half else "false"});' for name,size,_,dtype,_ in bufs.values() if "input" in name])
   entry_point = f"""
-    return function({",".join([f"_{name}" for name,(size,dtype,_key) in bufs.items() if "input" in name])}) {{
+    return function({",".join([f"_{name}" for name,_,size,dtype,_ in bufs.values() if "input" in name])}) {{
       const ext = gl.getExtension('EXT_color_buffer_float');
       {copy_inputs}
       {kernel_calls}
@@ -290,7 +291,7 @@ def export_model_webgpu(functions, statements, bufs, bufs_to_save, weight_names,
   kernel_code = '\n\n'.join([f"const {key} = `{code.replace(key, 'main')}`;" for key, code in functions.items()])
   kernel_names = ', '.join([name for (name, _args, _global_size, _local_size) in statements])
   kernel_calls = '\n        '.join([f"addComputePass(device, commandEncoder, piplines[{i}], [{', '.join(args)}], {global_size});" for i, (_name, args, global_size, _local_size) in enumerate(statements) ])
-  _bufs =  '\n    '.join([f"const {name} = " + (f"createEmptyBuf(device, {size});" if _key not in weight_names else f"createWeightBuf(device, {size}, getTensorBuffer(safetensor, metadata['{weight_names[_key]}']))") + ";"  for name,(size,dtype,_key) in bufs.items()])
+  _bufs =  '\n    '.join([f"const {name} = " + (f"createEmptyBuf(device, {size});" if _key not in weight_names else f"createWeightBuf(device, {size}, getTensorBuffer(safetensor, metadata['{weight_names[_key]}']))") + ";"  for _key,(name,_,size,dtype,_) in bufs.items()])
   gpu_write_bufs =  '\n    '.join([f"const gpuWriteBuffer{i} = device.createBuffer({{size:{input_name}.size, usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.MAP_WRITE }});" for i,input_name in enumerate(input_names)])
   input_writers = '\n    '.join([f"await gpuWriteBuffer{i}.mapAsync(GPUMapMode.WRITE);\n        new Float32Array(gpuWriteBuffer{i}.getMappedRange()).set(" + f'_{inp_name});' + f"\n        gpuWriteBuffer{i}.unmap();\n        commandEncoder.copyBufferToBuffer(gpuWriteBuffer{i}, 0, {inp_name}, 0, gpuWriteBuffer{i}.size);"  for i,inp_name in enumerate(input_names)])
   gpu_read_bufs = '\n    '.join([f"const gpuReadBuffer{i} = device.createBuffer({{size:{output_name}.size, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }});" for i,output_name in enumerate(output_names)])
@@ -352,30 +353,30 @@ const setupNet = async (device, safetensor) => {{
 
 def export_model(model, target:str, *inputs, fread_weights=None):
   assert Device.DEFAULT in EXPORT_SUPPORTED_DEVICE, "only WEBGPU, WEBGL, CLANG, CUDA, GPU, METAL are supported"
-  run, special_names, net_keys = jit_model(model, *inputs, fread_weights=fread_weights)
+  run, special_names = jit_model(model, *inputs, fread_weights=fread_weights)
   functions, statements, bufs, bufs_to_save = compile_net(run, special_names)
   state = get_state_dict(model)
-  weight_names = {id(x.lazydata.base.realized): name for name, x in state.items()}
+  weight_names = {id(x.lazydata.realized): name for name, x in state.items()}
   net_inputs = list(filter(lambda x: "input" in x[0], bufs.values()))
   net_outputs = list(filter(lambda x: "output" in x[0], bufs.values()))
   prg = ""
   if target == "clang":
-    prg = export_model_clang(functions, statements, bufs, bufs_to_save, net_inputs, net_outputs, net_keys, fread_weights)
+    prg = export_model_clang(functions, statements, bufs, bufs_to_save, net_inputs, net_outputs, weight_names, fread_weights)
   elif target == "webgpu":
-    prg = export_model_webgpu(functions, statements, bufs, bufs_to_save, weight_names, input_names, output_names)
+    prg = export_model_webgpu(functions, statements, bufs, bufs_to_save, weight_names)
   elif target == "webgl":
-    prg = export_model_webgl(functions, statements, bufs, bufs_to_save, weight_names, input_names, output_names)
+    prg = export_model_webgl(functions, statements, bufs, bufs_to_save, weight_names, [name for name,_,_,_,_ in net_inputs], [name for name,_,_,_,_ in net_outputs.values()])
   else:
     prg = json.dumps({
       "backend": Device.DEFAULT,
       "inputs": [{
         "size": bufs[name][0],
         "dtype": bufs[name][1].name
-      } for name in input_names],
+      } for name,_,_,_,_ in net_inputs.values()],
       "outputs": [{
         "size": bufs[name][0],
         "dtype": bufs[name][1].name
-      } for name in output_names],
+      } for name,_,_,_,_ in net_outputs],
       "functions": functions,
       "statements": [{
         "kernel": kernel,
@@ -388,7 +389,7 @@ def export_model(model, target:str, *inputs, fread_weights=None):
           "size": size,
           "dtype": dtype.name,
           "id": weight_names[_key] if _key in weight_names else ""
-        } for name, (size,dtype,_key) in bufs.items() if name not in ["input", "outputs"]
+        } for _key,(name,_,size,_,dtype,_) in bufs.items() if name not in ["input", "outputs"]
       }
     })
 

@@ -80,22 +80,29 @@ if __name__ == "__main__":
   start_pos = 0
   start_pos_v = Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT).bind(start_pos)
   prompt_tokens = gpt2.tokenizer.encode(args.prompt, allowed_special={"<|endoftext|>"})
+  # res = [int(e) for e in "262 13 262 262 262 262 29372 262 262 29372 262 262 47490 262 262 262 47490 47490 262 262 47490 262 47490 47490 47490 47490 47490 47490 47490 47490 262 47490 262 262 262 262 262 262 262 262 262 262 47490 11 262 262 39655 262 262 262 262 47490 21457 47490 47490 47490 47490 47490 47490 47490 30979 11897 17555 47490 39458 836 8772 20132 262 1035 262 41221 24271 2511 5909 262 7601 262 9020 262 262 277 300 262 262 262 287 262 366 530 262 635 555 773 780 477 909 1141 1036 1334".split()]
+  # print(res)
+  # r = [gpt2.tokenizer.decode(x) for x in res]
+  # print(r)
+  # res = [11, 11, 11, 11, 11, 11, 11, 4322, 11, 11]
+  # print(gpt2.tokenizer.decode(res))
+  # exit(0)
   toks = [prompt_tokens[:] for _ in range(args.batch_size)]
   tokens = Tensor([x[start_pos:] for x in toks])
 
   prg, inputs, outputs, state = export_model(gpt2.model, mode, tokens, start_pos_v, args.temperature, fread_weights=f"{args.model_size}.bin")
   cprog = [prg]
 
-  inputs = "\n".join([f"{dtype.name} {name}[{sz}];" for name,(sz,dtype,is_pointer) in inputs.items()])
-  outputs = "\n".join([f"{dtype.name} {name}[{sz}];" for name,(sz,dtype,is_pointer) in outputs.items()])
-  cprog.append(inputs)
-  cprog.append(outputs)
+  # inputs = "\n".join([f"{dtype.name} {name}[{sz}];" for name,sz,dtype,is_pointer in inputs.values()])
+  # outputs = "\n".join([f"{dtype.name} {name}[{sz}];" for name,sz,dtype,is_pointer in outputs.values()])
+  # cprog.append(inputs)
+  # cprog.append(outputs)
 
   cprog.append("""
 #include <string.h>
 int main(int argc, char* argv[]) {
-  int max_length = 100;
-  int toks[max_length];
+  int max_length = 10;
+  int toks[4][max_length];
   int start_pos = 0;
   //float temp = 0.8;
 
@@ -108,12 +115,18 @@ int main(int argc, char* argv[]) {
 
   for (int t = 0; t < max_length; t++) {
     printf("generating token %d\\n", t);
-    net(input0, start_pos, output0);
-    toks[t] = output0[0];
-    start_pos += 1;
+    // input0 = toks[0][start_pos];
+    net(start_pos, input0, output0);
+    for (int i = 0; i < 4; i++) {
+      toks[i][t] = output0[i];
+      if (i == 0) { start_pos = t; }
+    }
   }
-  for (int t = 0; t < max_length; t++) {
-    printf("%d ", toks[t]);
+  for (int i = 0; i < 4; i++) {
+    for (int t = 0; t < max_length; t++) {
+      printf("%d ", toks[i][t]);
+    }
+    printf("\\n");
   }
   return 0;
 }""")
