@@ -27,7 +27,7 @@ class GPT2:
     tokenizer = tiktoken.get_encoding("gpt2")
     model = Transformer(**MODEL_PARAMS[model_size])
     return GPT2(model, tokenizer)
-  
+
   @staticmethod
   def write_model(file_path, model_size="gpt2"):
     weights = torch_load(fetch(f"https://huggingface.co/{model_size}/resolve/main/pytorch_model.bin"))
@@ -86,8 +86,8 @@ if __name__ == "__main__":
   prg, net_inputs, net_outputs, state = export_model(gpt2.model, mode, tokens, start_pos_v, args.temperature, fread_weights=file_path)
   cprog = [prg]
 
-  inputs = "\n".join([f"{dtype.name} {name}[{sz+args.count}];" for name,sz,dtype,_,_ in net_inputs])
-  outputs = "\n".join([f"{dtype.name} {name}[{sz}];" for name,sz,dtype,_,_ in net_outputs])
+  inputs = "\n".join([f"{dtype.name} {name}[{sz+args.count}];" for name,sz,dtype,_,_ in net_inputs.values()])
+  outputs = "\n".join([f"{dtype.name} {name}[{sz}];" for name,sz,dtype,_,_ in net_outputs.values()])
   cprog.append(inputs)
   cprog.append(outputs)
 

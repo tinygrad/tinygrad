@@ -28,19 +28,19 @@ if __name__ == "__main__":
     lbls = ast.literal_eval(fetch("https://gist.githubusercontent.com/yrevar/942d3a0ac09ec9e5eb3a/raw/238f720ff059c1f82f368259d1ca4ffa5dd8f9f5/imagenet1000_clsidx_to_labels.txt").read_text())
     lbls = ['"'+lbls[i]+'"' for i in range(1000)]
     cprog.append(f"char *lbls[] = {{{','.join(lbls)}}};")
-    inputs = "\n".join([f"{dtype.name} {name}[{sz}];" for name,sz,dtype,_,_ in net_inputs])
-    outputs = "\n".join([f"{dtype.name} {name}[{sz}];" for name,sz,dtype,_,_ in net_outputs])
+    inputs = "\n".join([f"{dtype.name} {name}[{sz}];" for name,sz,dtype,_,_ in net_inputs.values()])
+    outputs = "\n".join([f"{dtype.name} {name}[{sz}];" for name,sz,dtype,_,_ in net_outputs.values()])
     cprog.append(inputs)
     cprog.append(outputs)
 
     # buffers (empty + weights)
     cprog.append("""
   int main(int argc, char* argv[]) {
-    //int DEBUG = getenv("DEBUG") != NULL ? atoi(getenv("DEBUG")) : 0;
+    int DEBUG = getenv("DEBUG") != NULL ? atoi(getenv("DEBUG")) : 0;
     int X=0, Y=0, chan=0;
     stbi_uc *image = (argc > 1) ? stbi_load(argv[1], &X, &Y, &chan, 3) : stbi_load_from_file(stdin, &X, &Y, &chan, 3);
     assert(image != NULL);
-    //if (DEBUG) printf("loaded image %dx%d channels %d\\n", X, Y, chan);
+    if (DEBUG) printf("loaded image %dx%d channels %d\\n", X, Y, chan);
     assert(chan == 3);
     // resize to input[1,3,224,224] and rescale
     for (int y = 0; y < 224; y++) {
@@ -62,16 +62,16 @@ if __name__ == "__main__":
         best_idx = i;
       }
     }
-    //if (DEBUG) printf("category : %d (%s) with %f\\n", best_idx, lbls[best_idx], best);
-    //else printf("%s\\n", lbls[best_idx]);
+    if (DEBUG) printf("category : %d (%s) with %f\\n", best_idx, lbls[best_idx], best);
+    else printf("%s\\n", lbls[best_idx]);
     printf("category : %d (%s) with %f\\n", best_idx, lbls[best_idx], best);
   }""")
 
     # CLANG=1 python3 examples/compile_efficientnet.py | clang -O2 -lm -x c - -o recognize && DEBUG=1 time ./recognize docs/showcase/stable_diffusion_by_tinygrad.jpg
     # category : 281 (tabby, tabby cat) with 9.452788
-    # print('\n'.join(cprog))
-    # above method includes any stdin
+    print('\n'.join(cprog))
 
-    src = '\n'.join(cprog)
-    p = ClangProgram("main", ClangCompiler().compile(src))
-    p(2, (c_char_p * 2)(b'', b'docs/showcase/stable_diffusion_by_tinygrad.jpg'))
+    # above method includes any stdin
+    # src = '\n'.join(cprog)
+    # p = ClangProgram("main", ClangCompiler().compile(src))
+    # p(2, (c_char_p * 2)(b'', b'docs/showcase/stable_diffusion_by_tinygrad.jpg'))

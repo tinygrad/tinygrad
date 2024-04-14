@@ -126,7 +126,7 @@ class GPT2:
     tokenizer = tiktoken.get_encoding("gpt2")
 
     model = Transformer(**MODEL_PARAMS[model_size])
-    weights = torch_load(fetch(f"https://huggingface.co/{model_size}/resolve/main/pytorch_model.bin"))
+    weights = torch_load(fetch(f'https://huggingface.co/{model_size}/resolve/main/pytorch_model.bin'))
     # special treatment for the Conv1D weights we need to transpose
     transposed = ('attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight')
     for k in weights:

@@ -1,6 +1,6 @@
-from typing import Tuple, Dict, List, Union
-from tinygrad import Device, Tensor, Variable
-from tinygrad.engine.jit import TinyJit, CompiledRunner 
+from typing import Tuple, Dict, List
+from tinygrad import Device, Tensor
+from tinygrad.engine.jit import TinyJit
 from tinygrad.engine.realize import CustomOp
 from tinygrad.nn.state import get_state_dict, get_parameters
 from tinygrad.dtype import dtypes
@@ -19,7 +19,7 @@ web_utils = {
   };"""
 }
 
-def compile_net(run: TinyJit, special_names:Dict[int,str], weight_names):
+def compile_net(run: TinyJit, special_names: Dict[int,str], weight_names):
   functions, bufs, bufs_to_save, statements, bufnum = {}, {}, [], [], 0
   for ei in run.jit_cache:
     runner, cargs = ei.prg, []
@@ -108,8 +108,8 @@ def export_model_clang(functions, statements, bufs, bufs_to_save, net_inputs, ne
 
   cprog += list(functions.values())
 
-  inputs = ", ".join([f"{dtype.name}{"*" if is_pointer else ""} {name}" for name,_,dtype,_,is_pointer in net_inputs])
-  outputs = ", ".join([f"{dtype.name}{"*" if is_pointer else ""} {name}" for name,_,dtype,_,is_pointer in net_outputs])
+  inputs = ", ".join([f"{dtype.name}{'*' if is_pointer else ''} {name}" for name,_,dtype,_,is_pointer in net_inputs.values()])
+  outputs = ", ".join([f"{dtype.name}{'*' if is_pointer else ''} {name}" for name,_,dtype,_,is_pointer in net_outputs.values()])
   cprog += [f"void net({inputs}, {outputs}) {{"] + [f"  {name}({', '.join(args)});" for (name, args, _global_size, _local_size) in statements] + ["}"]
   return '\n'.join(cprog)
 
@@ -350,26 +350,26 @@ def export_model(model, target:str, *inputs, fread_weights=None):
   state = get_state_dict(model)
   weight_names = {id(x.lazydata.realized): name.replace(".", "_") for name, x in state.items()}
   functions, statements, bufs, bufs_to_save = compile_net(run, special_names, weight_names)
-  net_inputs = list(filter(lambda x: "input" in x[0], bufs.values()))
-  net_outputs = list(filter(lambda x: "output" in x[0], bufs.values()))
+  net_inputs = dict(filter(lambda x: "input" in x[1][0], bufs.items()))
+  net_outputs = dict(filter(lambda x: "output" in x[1][0], bufs.items()))
   prg = ""
   if target == "clang":
     prg = export_model_clang(functions, statements, bufs, bufs_to_save, net_inputs, net_outputs, weight_names, fread_weights)
   elif target == "webgpu":
     prg = export_model_webgpu(functions, statements, bufs, weight_names)
   elif target == "webgl":
-    prg = export_model_webgl(functions, statements, bufs, weight_names, [name for name,_,_,_,_ in net_inputs], [name for name,_,_,_,_ in net_outputs.values()])
+    prg = export_model_webgl(functions, statements, bufs, weight_names, [x[0] for x in net_inputs.values()], [x[0]for x in net_outputs.values()])
   else:
     prg = json.dumps({
       "backend": Device.DEFAULT,
       "inputs": [{
-        "size": bufs[name][0],
-        "dtype": bufs[name][1].name
-      } for name,_,_,_,_ in net_inputs.values()],
+        "size": bufs[key][0],
+        "dtype": bufs[key][2].name
+      } for key in net_inputs.keys()],
       "outputs": [{
-        "size": bufs[name][0],
-        "dtype": bufs[name][1].name
-      } for name,_,_,_,_ in net_outputs],
+        "size": bufs[key][0],
+        "dtype": bufs[key][2].name
+      } for key in net_outputs.keys()],
       "functions": functions,
       "statements": [{
         "kernel": kernel,
@@ -382,7 +382,7 @@ def export_model(model, target:str, *inputs, fread_weights=None):
           "size": size,
           "dtype": dtype.name,
           "id": weight_names[_key] if _key in weight_names else ""
-        } for _key,(name,size,_,dtype,_,_) in bufs.items() if name not in ["input", "outputs"]
+        } for _key,(name,size,dtype,_,_) in bufs.items() if name not in ["input", "outputs"]
       }
     })
 
