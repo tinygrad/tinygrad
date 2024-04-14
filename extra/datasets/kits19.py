@@ -97,7 +97,7 @@ def iterate(val=True, shuffle=False, bs=1):
       yield np.stack(X_preprocessed, axis=0), np.stack(Y_preprocessed, axis=0)
 
 def gaussian_kernel(n, std):
-  gaussian_1d = scipy.signal.gaussian(n, std)
+  gaussian_1d = scipy.signal.windows.gaussian(n, std)
   gaussian_2d = np.outer(gaussian_1d, gaussian_1d)
   gaussian_3d = np.outer(gaussian_2d, gaussian_1d)
   gaussian_3d = gaussian_3d.reshape(n, n, n)
