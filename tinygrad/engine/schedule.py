@@ -82,6 +82,7 @@ def _schedule_group(outs:Tuple[LazyBuffer, ...], realizes:Set[LazyBuffer], reduc
   if outs[0].op in {LoadOps.CUSTOM, LoadOps.COPY, LoadOps.EMPTY}:
     ast, inputs = [LazyOp(outs[0].op, (), outs[0].arg)], list(outs[0].srcs)
   else:
+    if len(outs) > 1: outs = tuple(sorted(outs, key=lambda x: x.key))
     for i, out in enumerate(outs):
       output_st = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape)
       output_view = out.arg[0] if out.op is LoadOps.ASSIGN and out.arg else output_st
