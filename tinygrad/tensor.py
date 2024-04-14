@@ -138,7 +138,7 @@ class Tensor:
 
   @staticmethod
   def corealize(lst:Iterable[Tensor]):
-    run_schedule(*create_schedule_with_vars(flatten([x.lazydata.lbs if isinstance(x.lazydata, MultiLazyBuffer) else [x.lazydata] for x in lst])))
+    run_schedule(*create_schedule_with_vars(flatten([x.lazydata.lbs for x in lst])))
 
   def realize(self) -> Tensor:
     Tensor.corealize([self])
@@ -502,12 +502,12 @@ class Tensor:
         masks.append(i == a)
 
       # reduce masks to 1 mask
-      mask = functools.reduce(lambda x,y: x.mul(y), masks)
+      mask: Tensor = functools.reduce(lambda x,y: x.mul(y), masks)
 
       # inject 1's for the extra dims added in create masks
       sh = ret.shape[:first_dim] + (1,) * len(big_shape) + ret.shape[first_dim:]
       # sum reduce the extra dims introduced in create masks
-      ret = (ret.reshape(sh) * mask).sum(tuple(i + len(big_shape) for i in idx.keys()))
+      ret = (ret.reshape(sh) * mask).sum(tuple(i + len(big_shape) for i in idx.keys()), acc_dtype=ret.dtype)
 
       # special permute case
       if first_dim != 0 and len(idx) != 1 and tuple(idx.keys()) != tuple(range(first_dim, last_dim+1)):
@@ -534,11 +534,11 @@ class Tensor:
     assert idx.ndim == self.ndim, "self.ndim must equal idx.ndim"
     assert all(s >= i for s,i in zip(self.shape, idx.shape)), "all dim of idx.shape must be smaller than self.shape"
     dim = self._resolve_dim(dim)
-    idx = idx.to(self.device).transpose(ax1=dim, ax2=0).unsqueeze(-1)
+    idx = idx.to(self.device).transpose(0, dim).unsqueeze(-1)
     permarg = list(range(self.ndim))
     permarg = permarg[1:dim] + [permarg[0]] + permarg[dim+1:] + [permarg[dim]] if dim != 0 else permarg[1:] + [permarg[0]]
     return ((idx == Tensor.arange(self.shape[dim], requires_grad=False, device=self.device)) * self.permute(*permarg).shrink(
-      tuple([*[(0,sh) for sh in idx.shape[1:-1]], (0,self.shape[dim])])).unsqueeze(0)).sum(-1).transpose(ax1=0, ax2=dim)
+      tuple([*[(0,sh) for sh in idx.shape[1:-1]], None])).unsqueeze(0)).sum(-1, acc_dtype=self.dtype).transpose(0, dim)
 
   def cat(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
     dim = self._resolve_dim(dim)
@@ -610,21 +610,14 @@ class Tensor:
 
   # ***** reduce ops *****
 
-  def _reduce(self, fxn:Type[Function], axis:Optional[Union[int, Tuple[int, ...]]]=None, keepdim=False) -> Tensor:
+  def _reduce(self, fxn:Type[Function], axis:Optional[Union[int, Tuple[int, ...]]]=None, keepdim=False, acc_dtype:Optional[DType]=None) -> Tensor:
     axis_: Tuple[int, ...] = tuple(range(len(self.shape))) if axis is None else ((axis,) if isinstance(axis, int) else tuple(axis))
     axis_ = tuple(x if x >= 0 else x+len(self.shape) for x in axis_)
     shape = tuple(s for i,s in enumerate(self.shape) if i not in axis_)
-    ret = fxn.apply(self, axis=axis_)
-    return ret if keepdim else ret.reshape(shape=shape)
+    ret = fxn.apply(self, axis=axis_, acc_dtype=acc_dtype)
+    return ret if keepdim else ret.reshape(shape)
 
-  def sum(self, axis=None, keepdim=False, acc_dtype:Optional[DType]=None):
-    if acc_dtype is None: acc_dtype = least_upper_dtype(self.dtype, dtypes.uint) if dtypes.is_unsigned(self.dtype) else \
-                                      least_upper_dtype(self.dtype, dtypes.int) if (dtypes.is_int(self.dtype) or self.dtype==dtypes.bool) else \
-                                      least_upper_dtype(self.dtype, dtypes.float)
-    # cast back to float16 or bfloat16 to match torch / jax behavior, but we use float for acc
-    output_dtype = self.dtype if self.dtype in (dtypes.float16, dtypes.bfloat16) else acc_dtype
-    return self.cast(acc_dtype)._reduce(F.Sum, axis, keepdim).cast(output_dtype)
-
+  def sum(self, axis=None, keepdim=False, acc_dtype:Optional[DType]=None): return self._reduce(F.Sum, axis, keepdim, acc_dtype)
   def max(self, axis=None, keepdim=False): return self._reduce(F.Max, axis, keepdim)
   def min(self, axis=None, keepdim=False): return -((-self).max(axis=axis, keepdim=keepdim))
 

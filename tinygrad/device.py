@@ -3,7 +3,7 @@ from collections import defaultdict
 from typing import TYPE_CHECKING, Any, List, Optional, Dict, Tuple, ClassVar, NamedTuple
 import importlib, inspect, functools, pathlib, time, ctypes, os
 from tinygrad.helpers import ansilen, prod, getenv, colored, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put
-from tinygrad.helpers import DEBUG, CACHECOLLECTING, BEAM, NOOPT, GlobalCounters
+from tinygrad.helpers import DEBUG, BEAM, NOOPT, GlobalCounters
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.ops import LazyOp, get_lazyop_info
 from tinygrad.buffer import Buffer, BufferOptions
@@ -39,16 +39,12 @@ Device = _Device()
 
 # **************** base Runner + helpers ****************
 
-class JITRunner:
+class Runner:
   def __init__(self):
     self.op_estimate:sint = 0
     self.mem_estimate:sint = 0
   def exec(self, rawbufs:List[Buffer], var_vals:Optional[Dict[Variable, int]]=None) -> Optional[float]:
-    var_vals = var_vals if var_vals is not None else {}
-    from tinygrad.engine.jit import CacheCollector
-    et = self(rawbufs, var_vals)
-    if CACHECOLLECTING: CacheCollector.add(self, rawbufs, var_vals)
-    return et
+    return self(rawbufs, {} if var_vals is None else var_vals)
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     raise NotImplementedError("override this")
 
@@ -67,7 +63,7 @@ def update_stats(name:str, op_estimate:sint, mem_estimate:sint, var_vals: Option
 
 # **************** Buffer / Allocator ****************
 
-class BufferCopy(JITRunner):
+class BufferCopy(Runner):
   def copy(self, dest, src):
     if src.device.startswith("DISK") and hasattr(dest.allocator, 'copy_from_fd') and src.nbytes >= 4096 and hasattr(src.allocator.device, 'fd'):
       dest.allocator.copy_from_fd(dest._buf, src.allocator.device.fd, src._buf.offset, src.nbytes)
@@ -158,7 +154,7 @@ class Compiler:
       if self.cachekey is not None: diskcache_put(self.cachekey, src, lib)
     return lib
 
-class CompiledASTRunner(JITRunner):
+class CompiledRunner(Runner):
   def __init__(self, name:str, prg:str, dname:str, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None,
                variables:Optional[List[Variable]]=None, op_estimate:sint=0, mem_estimate:sint=0, precompiled:Optional[bytes]=None, outcount:int=1):
     super().__init__()
@@ -173,12 +169,16 @@ class CompiledASTRunner(JITRunner):
     self.vars: List[Variable] = [] if variables is None else variables
     self.op_estimate, self.mem_estimate = op_estimate, mem_estimate
 
+  def to_other_device(self, dname:str):
+    return CompiledRunner(self.display_name, self.prg, dname, self.global_size, self.local_size,
+                          self.vars, self.op_estimate, self.mem_estimate, self.lib, self.outcount)
+
   @property
   def device(self): return Device[self.dname]
 
   def __reduce__(self):
-    return self.__class__, (self.name, self.prg, self.dname, self.global_size, self.local_size,
-                            self.vars, self.op_estimate, self.mem_estimate, self.lib)
+    return self.__class__, (self.display_name, self.prg, self.dname, self.global_size, self.local_size,
+                            self.vars, self.op_estimate, self.mem_estimate, self.lib, self.outcount)
 
   def launch_dims(self, var_vals):
     global_size = [sym_infer(sz, var_vals) for sz in self.global_size] if self.global_size is not None else self.global_size
@@ -201,25 +201,26 @@ class CompiledASTRunner(JITRunner):
     self.first_run = False
     return et
 
-class MultiDeviceJITGraph(JITRunner):
+class MultiDeviceJITGraph(Runner):
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     raise NotImplementedError("override this")
 
+method_cache: Dict[Tuple[str, Tuple[LazyOp, ...], bool], CompiledRunner] = {}
 logkern, logkern_level = open(getenv("LOGKERN", ""), "a") if getenv("LOGKERN", "") else None, getenv("LOGKERN_LEVEL", 1)
 class Compiled:
   def __init__(self, device:str, allocator:Allocator, compiler:Optional[Compiler], runtime, graph=None):
     self.dname, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler, runtime, graph
   def synchronize(self): pass  # override this in your device
 
-  def to_program(self, k:Linearizer) -> CompiledASTRunner:
+  def to_program(self, k:Linearizer) -> CompiledRunner:
     assert self.compiler is not None, "compiler is required to run AST"
     k.linearize()
     info = get_lazyop_info(k.ast[0])
     ops, mem = k.uops.flops_mem()
     run_count = prod((k.global_size if k.global_size else []) + (k.local_size if k.local_size else []))
     # NOTE: we use min here to ignore the indexing FLOPS
-    ret = CompiledASTRunner(k.name, self.compiler.render(to_function_name(k.name), k.uops), self.dname, k.global_size, k.local_size,
-                            k.uops.vars(), min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count), outcount=len(k.outbufs))
+    ret = CompiledRunner(k.name, self.compiler.render(to_function_name(k.name), k.uops), self.dname, k.global_size, k.local_size,
+                         k.uops.vars(), min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count), outcount=len(k.outbufs))
     return ret
 
   def get_linearizer(self, *ast:LazyOp) -> Linearizer:
@@ -253,5 +254,11 @@ class Compiled:
     if DEBUG >= 4: print((k.ast, k.applied_opts)) # print here to show final applied_opts for all kernels instead of just in beam_search
     return k
 
-  @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
-  def get_runner(self, *ast:LazyOp) -> CompiledASTRunner: return self.to_program(self.get_linearizer(*ast))
+  def get_runner(self, *ast:LazyOp) -> CompiledRunner:
+    if cret:=method_cache.get((self.dname, ast, False)): return cret
+    if bret:=method_cache.get((self.dname.split(":")[0], ast, True)):
+      method_cache[(self.dname, ast, False)] = ret = bret.to_other_device(self.dname)
+    else:
+      method_cache[(self.dname.split(":")[0], ast, True)] = method_cache[(self.dname, ast, False)] = ret = self.to_program(self.get_linearizer(*ast))
+    return ret
+

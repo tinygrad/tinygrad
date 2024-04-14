@@ -1,17 +1,17 @@
 import ctypes, collections
 from typing import Any, Optional, Tuple, Dict, List, cast
 import tinygrad.runtime.autogen.cuda as cuda
-from tinygrad.helpers import init_c_var, GraphException
-from tinygrad.device import CompiledASTRunner, update_stats, Buffer, MultiDeviceJITGraph, BufferXfer, Device, BufferOptions
+from tinygrad.helpers import init_c_var, GraphException, getenv
+from tinygrad.device import CompiledRunner, update_stats, Buffer, MultiDeviceJITGraph, BufferXfer, Device, BufferOptions
 from tinygrad.runtime.ops_cuda import CUDADevice, check, encode_args, cu_time_execution
 from tinygrad.shape.symbolic import Variable
-from tinygrad.engine.jit import JitItem, get_input_replace, get_jit_stats, \
-                                  get_jc_idxs_with_updatable_launch_dims, get_jc_idxs_with_updatable_var_vals
+from tinygrad.engine.realize import ExecItem
+from tinygrad.engine.jit import get_input_replace, get_jit_stats, get_jc_idxs_with_updatable_launch_dims, get_jc_idxs_with_updatable_var_vals
 
 class CUDAGraph(MultiDeviceJITGraph):
-  def __init__(self, jit_cache: List[JitItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
+  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
     # Check all jit items are compatible.
-    if not all(isinstance(ji.prg, CompiledASTRunner) or isinstance(ji.prg, BufferXfer) for ji in jit_cache): raise GraphException
+    if not all(isinstance(ji.prg, CompiledRunner) or isinstance(ji.prg, BufferXfer) for ji in jit_cache): raise GraphException
 
     self.jit_cache = jit_cache
     self.input_replace = get_input_replace(jit_cache, input_rawbuffers)
@@ -27,7 +27,7 @@ class CUDAGraph(MultiDeviceJITGraph):
     self.cpu_buffers = []
 
     for j,ji in enumerate(self.jit_cache):
-      if isinstance(ji.prg, CompiledASTRunner):
+      if isinstance(ji.prg, CompiledRunner):
         global_size, local_size = ji.prg.launch_dims(var_vals)
 
         new_node = cuda.CUgraphNode()
@@ -43,23 +43,27 @@ class CUDAGraph(MultiDeviceJITGraph):
       elif isinstance(ji.prg, BufferXfer):
         dest, src = [cast(Buffer, x) for x in ji.rawbufs[0:2]]
         src_dev, dest_dev = cast(CUDADevice, Device[src.device]), cast(CUDADevice, Device[dest.device])
-        cpu_buffer = Buffer(device=src.device, dtype=src.dtype, size=src.size, options=BufferOptions(host=True)).allocate()
-        self.cpu_buffers.append(cpu_buffer)
-
-        node_to = cuda.CUgraphNode()
         node_from = cuda.CUgraphNode()
         deps = self.access_resources(read=[src], write=[dest], new_dependency=node_from)
         c_deps = (cuda.CUgraphNode*len(deps))(*deps) if deps else None
+        if getenv("CUDA_P2P", int(CUDADevice.peer_access)):
+          cp_params = cuda.CUDA_MEMCPY3D_v2(srcMemoryType=cuda.CU_MEMORYTYPE_DEVICE, srcDevice=src._buf, srcPitch=src.nbytes, srcHeight=1,
+                                            dstMemoryType=cuda.CU_MEMORYTYPE_DEVICE, dstDevice=dest._buf, dstPitch=dest.nbytes, dstHeight=1,
+                                            WidthInBytes=dest.nbytes, Height=1, Depth=1)
+          check(cuda.cuGraphAddMemcpyNode(ctypes.byref(node_from), self.graph, c_deps, len(deps), ctypes.byref(cp_params), src_dev.context))
+        else:
+          self.cpu_buffers.append(cpu_buffer:=Buffer(device=src.device, dtype=src.dtype, size=src.size, options=BufferOptions(host=True)).allocate())
 
-        cp_params = cuda.CUDA_MEMCPY3D_v2(srcMemoryType=cuda.CU_MEMORYTYPE_DEVICE, srcDevice=src._buf, srcPitch=src.nbytes, srcHeight=1,
-                                          dstMemoryType=cuda.CU_MEMORYTYPE_HOST, dstHost=cpu_buffer._buf, dstPitch=dest.nbytes, dstHeight=1,
-                                          WidthInBytes=dest.nbytes, Height=1, Depth=1)
-        check(cuda.cuGraphAddMemcpyNode(ctypes.byref(node_to), self.graph, c_deps, len(deps), ctypes.byref(cp_params), src_dev.context))
-        cp_params = cuda.CUDA_MEMCPY3D_v2(srcMemoryType=cuda.CU_MEMORYTYPE_HOST, srcHost=cpu_buffer._buf, srcPitch=src.nbytes, srcHeight=1,
-                                          dstMemoryType=cuda.CU_MEMORYTYPE_DEVICE, dstDevice=dest._buf, dstPitch=dest.nbytes, dstHeight=1,
-                                          WidthInBytes=dest.nbytes, Height=1, Depth=1)
-        check(cuda.cuGraphAddMemcpyNode(ctypes.byref(node_from), self.graph, (cuda.CUgraphNode*1)(node_to), 1,
-                                        ctypes.byref(cp_params), dest_dev.context))
+          node_to = cuda.CUgraphNode()
+          cp_params = cuda.CUDA_MEMCPY3D_v2(srcMemoryType=cuda.CU_MEMORYTYPE_DEVICE, srcDevice=src._buf, srcPitch=src.nbytes, srcHeight=1,
+                                            dstMemoryType=cuda.CU_MEMORYTYPE_HOST, dstHost=cpu_buffer._buf, dstPitch=dest.nbytes, dstHeight=1,
+                                            WidthInBytes=dest.nbytes, Height=1, Depth=1)
+          check(cuda.cuGraphAddMemcpyNode(ctypes.byref(node_to), self.graph, c_deps, len(deps), ctypes.byref(cp_params), src_dev.context))
+          cp_params = cuda.CUDA_MEMCPY3D_v2(srcMemoryType=cuda.CU_MEMORYTYPE_HOST, srcHost=cpu_buffer._buf, srcPitch=src.nbytes, srcHeight=1,
+                                            dstMemoryType=cuda.CU_MEMORYTYPE_DEVICE, dstDevice=dest._buf, dstPitch=dest.nbytes, dstHeight=1,
+                                            WidthInBytes=dest.nbytes, Height=1, Depth=1)
+          check(cuda.cuGraphAddMemcpyNode(ctypes.byref(node_from), self.graph, (cuda.CUgraphNode*1)(node_to), 1,
+                                          ctypes.byref(cp_params), dest_dev.context))
         if j in self.jc_idxs_with_updatable_rawbufs: self.updatable_nodes[j] = (node_from, cp_params, src_dev.context, True)
 
     self.instance = init_c_var(cuda.CUgraphExec(), lambda x: check(cuda.cuGraphInstantiate_v2(ctypes.byref(x), self.graph, None, None, 0)))
@@ -77,12 +81,12 @@ class CUDAGraph(MultiDeviceJITGraph):
 
     # Update var_vals in the c_args struct.
     for j in self.jc_idxs_with_updatable_var_vals:
-      for i,v in enumerate(cast(CompiledASTRunner, self.jit_cache[j].prg).vars):
+      for i,v in enumerate(cast(CompiledRunner, self.jit_cache[j].prg).vars):
         setattr(self.updatable_nodes[j][2], f'v{i}', var_vals[v])
 
     # Update launch dims in the kern_params struct.
     for j in self.jc_idxs_with_updatable_launch_dims:
-      self.set_kernel_node_launch_dims(self.updatable_nodes[j][1], *cast(CompiledASTRunner, self.jit_cache[j].prg).launch_dims(var_vals))
+      self.set_kernel_node_launch_dims(self.updatable_nodes[j][1], *cast(CompiledRunner, self.jit_cache[j].prg).launch_dims(var_vals))
 
     # Update graph nodes with the updated structs.
     for node, c_node_params, c_args, is_copy in self.updatable_nodes.values():
