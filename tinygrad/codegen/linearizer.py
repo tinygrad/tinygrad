@@ -180,9 +180,6 @@ class Linearizer(Kernel):
     # global uop cache
     self.saved_exprs: Dict[Tuple, UOp] = dict()
 
-    # limit dims if we need to
-    if self.opts.global_max and self.opts.local_max: self.limit_dims_to_max(self.opts.global_max, self.opts.local_max)
-
     # uops
     self.uops:UOpGraph = UOpGraph()
     self.buf_uops: List[Optional[UOp]] = [None]*len(self.bufs)
