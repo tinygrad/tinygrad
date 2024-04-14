@@ -24,7 +24,7 @@ class DiskAllocator(Allocator):
   def as_buffer(self, src:DiskBuffer): return src._buf()
   def copyin(self, dest:DiskBuffer, src:memoryview): dest._buf()[:] = src
   def copyout(self, dest:memoryview, src:DiskBuffer):
-    if OSX and hasattr(self.device, 'fd'):
+    if OSX and hasattr(self.device, 'fd') and self.device.fd is not None:
       # OSX doesn't seem great at mmap, this is faster
       with io.FileIO(self.device.fd, "a+b", closefd=False) as fo:
         fo.seek(src.offset)
@@ -60,9 +60,10 @@ class DiskRunner(Runner):
 class DiskDevice(Compiled):
   def __init__(self, device:str):
     self.size: Optional[int] = None
+    self.fd: Optional[int] = None
     self.count = 0
     super().__init__(device, DiskAllocator(self), None, None)
-  def _might_open(self, size):
+  def _might_open(self, size:int):
     self.count += 1
     assert self.size is None or size <= self.size, f"can't reopen Disk tensor with larger size, opened with {self.size}, tried to open with {size}"
     if self.size is not None: return
@@ -81,7 +82,7 @@ class DiskDevice(Compiled):
     if (hp := getattr(mmap, "MADV_HUGEPAGE", None)) is not None: self.mem.madvise(hp) # type: ignore
   def _might_close(self):
     self.count -= 1
-    if self.count == 0:
+    if self.count == 0 and self.fd is not None:
       os.close(self.fd)
       self.size = None
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
