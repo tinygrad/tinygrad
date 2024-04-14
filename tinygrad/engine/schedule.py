@@ -168,16 +168,16 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
             break
           if len(realized_children) > 1:
             for rc in realized_children:
-              queue = deque(x.base for x in rc.srcs)
-              while queue:
-                if (e:=queue.pop()).realized or e.op is LoadOps.CONST: continue
-                if e is r: continue
+              rc_parents = deque(x.base for x in rc.srcs)
+              while rc_parents:
+                if (p:=rc_parents.pop()).realized or p.op is LoadOps.CONST: continue
+                if p is r: continue
                 # max one reduceop per kernel
-                if e.op in ReduceOps:
+                if p.op in ReduceOps:
                   can_chase = tr not in reduce_for_op or reduce_for_op[tr] == r
                   forced_realize = True
                   break
-                for x in e.srcs: queue.append(x.base)
+                for x in p.srcs: rc_parents.append(x.base)
           continue
         for tr_next in children[tr].keys():
           if not tr_next.realized:
@@ -214,8 +214,8 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
     output_groups[(reduce_for_op[r], ) if r in reduce_for_op else (r, )].append(r)
 
   # bufs should fuse in the same order
-  for key, group in output_groups.items():
-    if len(group) > 1: output_groups[key] = list(sorted(group, key=lambda x: x.key))
+  for k, group in output_groups.items():
+    if len(group) > 1: output_groups[k] = list(sorted(group, key=lambda x: x.key))
 
   # preschedule all buffers in realizes
   prescheduled = {group[0]:_schedule_group(tuple(group), realizes, reduce_for_op) for group in output_groups.values()}
