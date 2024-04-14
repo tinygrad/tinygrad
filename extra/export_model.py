@@ -22,30 +22,28 @@ web_utils = {
 }
 
 def compile_net(run: TinyJit, special_names:Dict[int,str]):
-  functions, bufs, bufs_to_save, statements, bufnum = {}, {}, {}, [], 0
+  functions, bufs, bufs_to_save, statements, bufnum = {}, {}, [], [], 0
   for ji in run.jit_cache:
-    fxn = ji.prg
-    if not hasattr(fxn, 'name'): continue # TODO: handle customop correctly
-    functions[fxn.name] = fxn.prg   # NOTE: this assumes all with the same name are the same
-    cargs = []
-    for i,arg in enumerate(ji.rawbufs):
-      if arg is None: continue
-      key = id(arg)
-      if key not in bufs:
+    fxn, cargs = ji.prg, []
+    if not hasattr(fxn, 'name'): continue # TODO: handle customop correctly?
+    functions[fxn.name] = fxn.prg # NOTE: this assumes all with the same name are the same
+    for i, buf in enumerate(ji.rawbufs):
+      if buf is None: continue
+      if (key := id(buf)) not in bufs:
         if key in special_names:
-          bufs[key] = (special_names[key][0], arg.size*arg.dtype.itemsize, arg.dtype, key)
+          bufs[key] = (special_names[key][0], buf, buf.size*buf.dtype.itemsize, buf.dtype, special_names[key][1])
         else:
-          bufs[key] = (f"buf_{bufnum}", arg.size*arg.dtype.itemsize, arg.dtype, key)
+          bufs[key] = (f"buf_{bufnum}", buf, buf.size*buf.dtype.itemsize, buf.dtype, True)
           bufnum += 1
-          if i > 0: bufs_to_save[bufs[key][0]] = (arg, key)   # if first usage of a buffer is not an output, and it's not a special name
+          if i > 0: bufs_to_save.append(key) # if first usage of a buffer is not an output, and it's not a special name
       cargs.append(bufs[key][0])
     for v in fxn.vars:
       key = v.hash
-      bufs[key] = (special_names[key][0], dtypes.int.itemsize, dtypes.int, key)
+      bufs[key] = (special_names[key][0], None, dtypes.int.itemsize, dtypes.int, special_names[key][1])
       cargs.append(bufs[key][0])
     statements.append((fxn.name, cargs, fxn.global_size, fxn.local_size))
 
-  return functions, statements, {name:(size, dtype, key) for (name,size,dtype,key) in bufs.values()}, bufs_to_save
+  return functions, statements, bufs, bufs_to_save
 
 def jit_model(model, *args, fread_weights=None) -> Tuple[TinyJit,Dict[int,str]]:
   assert hasattr(model, "forward") or callable(model), "model needs a forward function"
@@ -64,10 +62,10 @@ def jit_model(model, *args, fread_weights=None) -> Tuple[TinyJit,Dict[int,str]]:
   for (j,i),idx in run.input_replace.items():
     realized_input = args[idx].lazydata.base.realized
     run.jit_cache[j].rawbufs[i] = realized_input
-    special_names[id(realized_input)] = (f"input{idx}", realized_input.dtype, True)
+    special_names[id(realized_input)] = (f"input{idx}", True)
 
   for v in run.expected_vals:
-    special_names[v.hash] = (f"input_{v.expr}", dtypes.int, False)
+    special_names[v.hash] = (f"input_{v.expr}", False)
 
   # capture model weights
   net_keys = set()
@@ -80,41 +78,19 @@ def jit_model(model, *args, fread_weights=None) -> Tuple[TinyJit,Dict[int,str]]:
     special_names[id(out.lazydata.base.realized)] = (f"output{i}", out.dtype, True)
   return run, special_names, net_keys
 
-def fread_model_weights(fp: str, bufs: Dict[str,Buffer], net_keys):
-  print("net keys", net_keys)
+def fread_model_weights(fp: str, bufs, bufs_to_save):
   cprog = []
   cprog.append("#include <stdio.h>\n#include <stdlib.h>\n#include <assert.h>")
   cprog.append("void fread_net() {")
-  cprog.append(f"FILE *model_file = fopen(\"{fp}\", \"rb\");")
-  cprog.append("if (model_file == NULL) { printf(\"Error opening model file\\n\"); exit(1); }")
-  cprog.append("printf(\"file opened\\n\");")
-  cprog.append("size_t s = 0;")
+  cprog.append(f"  FILE *model_file = fopen(\"{fp}\", \"rb\");")
+  cprog.append("  if (model_file == NULL) { printf(\"Error opening model file\\n\"); exit(1); }")
+  cprog.append("  size_t s = 0;")
 
-  size = 0
-  limit = 500_000
-  for name, (cl,key) in bufs.items():
-    if key not in net_keys: continue
-    # break fread into chunks
-    if cl.size > limit:
-      s = 0
-      for chunk in range(cl.size//limit):
-        cprog.append(f"s = fread({name}_data+{chunk*limit}, sizeof(float), {limit}, model_file);")
-        cprog.append(f"assert(s == {limit});")
-        s += limit
-      if (rem := cl.size%limit) > 0:
-        cprog.append(f"s = fread({name}_data+{limit*(cl.size//limit)}, sizeof(float), {rem}, model_file);")
-        cprog.append(f"assert(s == {rem});")
-        s += rem
-      assert(s == cl.size), f"{s=} {cl.size=}"
-    else:
-      cprog.append(f"s = fread({name}_data, sizeof(float), {cl.size}, model_file);")
-      cprog.append(f"assert(s == {cl.size});")
-    size += cl.size
-    # printf("pos %ld\n", ftell(model_file));
-  print(size)
+  for key in bufs_to_save:
+    cprog.append(f"  s = fread({bufs[key][0]}_data, sizeof(float), {bufs[key][1].size}, model_file);")
+    cprog.append(f"  assert(s == {bufs[key][1].size});")
 
-  cprog.append("fclose(model_file);")
-  cprog.append("printf(\"done reading file\\n\");")
+  cprog.append("  fclose(model_file);")
   cprog.append("}")
   return cprog
 
@@ -122,25 +98,24 @@ def export_model_clang(functions, statements, bufs, bufs_to_save, net_inputs, ne
   from tinygrad.runtime.ops_clang import CLANG_PROGRAM_HEADER
   cprog = [CLANG_PROGRAM_HEADER]
 
-  for name,(cl,key) in bufs_to_save.items():
+  for key in bufs_to_save:
     if fread_weights is not None and key in net_keys:
-      cprog.append(f"float {name}_data[{cl.size}];")
+      cprog.append(f"float {bufs[key][0]}_data[{bufs[key][1].size}];")
     else:
-      weight = ''.join(["\\x%02X"%x for x in bytes(cl._buf)])
-      cprog.append(f"unsigned char {name}_data[] = \"{weight}\";")
+      weight = ''.join(["\\x%02X"%x for x in bytes(bufs[key][1]._buf)])
+      cprog.append(f"unsigned char {bufs[key][0]}_data[] = \"{weight}\";")
 
   if fread_weights is not None:
-    cprog += fread_model_weights(fread_weights, bufs_to_save, net_keys)
+    cprog += fread_model_weights(fread_weights, bufs, list(filter(lambda x: x in net_keys, bufs_to_save)))
 
-  for name,(len,dtype,_) in bufs.items():
-    # if 'input' in name or 'output' in name: continue
-    if name in bufs_to_save: cprog += [f"{dtype.name} *{name} = ({dtype.name} *){name}_data;"]
+  for key,(name,buf,len,dtype,_) in bufs.items():
+    if key in bufs_to_save: cprog += [f"{dtype.name} *{name} = ({dtype.name} *){name}_data;"]
     else: cprog += [f"{dtype.name} {name}[{len}];"]
 
   cprog += list(functions.values())
 
-  inputs = ", ".join([f'{dtype.name}{"*" if is_pointer else ""} {input}' for input,dtype,is_pointer in net_inputs])
-  outputs = ", ".join([f'{dtype.name}{"*" if is_pointer else ""} {output}' for output,dtype,is_pointer in net_outputs])
+  inputs = ", ".join([f"{dtype.name}{"*" if is_pointer else ""} {name}" for name,_,_,dtype,is_pointer in net_inputs])
+  outputs = ", ".join([f"{dtype.name}{"*" if is_pointer else ""} {name}" for name,_,_,dtype,is_pointer in net_outputs])
   cprog += [f"void net({inputs}, {outputs}) {{"] + [f"  {name}({', '.join(args)});" for (name, args, _global_size, _local_size) in statements] + ["}"]
   return '\n'.join(cprog)
 
@@ -377,14 +352,12 @@ const setupNet = async (device, safetensor) => {{
 
 def export_model(model, target:str, *inputs, fread_weights=None):
   assert Device.DEFAULT in EXPORT_SUPPORTED_DEVICE, "only WEBGPU, WEBGL, CLANG, CUDA, GPU, METAL are supported"
-  run,special_names,net_keys = jit_model(model, *inputs, fread_weights=fread_weights)
+  run, special_names, net_keys = jit_model(model, *inputs, fread_weights=fread_weights)
   functions, statements, bufs, bufs_to_save = compile_net(run, special_names)
   state = get_state_dict(model)
-  from tinygrad.helpers import prod
-  s = Tensor([prod(t.shape) for t in state.values()]).sum()
   weight_names = {id(x.lazydata.base.realized): name for name, x in state.items()}
-  net_inputs = [(name,dtype,is_pointer) for name,dtype,is_pointer in special_names.values() if "input" in name]
-  net_outputs = [(name,dtype,is_pointer) for name,dtype,is_pointer in special_names.values() if "output" in name]
+  net_inputs = list(filter(lambda x: "input" in x[0], bufs.values()))
+  net_outputs = list(filter(lambda x: "output" in x[0], bufs.values()))
   prg = ""
   if target == "clang":
     prg = export_model_clang(functions, statements, bufs, bufs_to_save, net_inputs, net_outputs, net_keys, fread_weights)
@@ -419,4 +392,4 @@ def export_model(model, target:str, *inputs, fread_weights=None):
       }
     })
 
-  return prg, {name:(bufs[name][0],dtype,is_pointer) for name,dtype,is_pointer in net_inputs}, {name:(bufs[name][0],dtype,is_pointer) for name,dtype,is_pointer in net_outputs}, state
+  return prg, net_inputs, net_outputs, state

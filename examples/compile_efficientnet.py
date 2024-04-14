@@ -27,11 +27,7 @@ if __name__ == "__main__":
     # imagenet labels, move to datasets?
     lbls = ast.literal_eval(fetch("https://gist.githubusercontent.com/yrevar/942d3a0ac09ec9e5eb3a/raw/238f720ff059c1f82f368259d1ca4ffa5dd8f9f5/imagenet1000_clsidx_to_labels.txt").read_text())
     lbls = ['"'+lbls[i]+'"' for i in range(1000)]
-    inputs = "\n".join([f"{dtype.name} {inp}[{sz}];" for inp,(sz,dtype,_) in inp_sizes.items()])
-    outputs = "\n".join([f"{dtype.name} {out}[{sz}];" for out,(sz,dtype,_) in out_sizes.items()])
     cprog.append(f"char *lbls[] = {{{','.join(lbls)}}};")
-    cprog.append(inputs)
-    cprog.append(outputs)
 
     # buffers (empty + weights)
     cprog.append("""
