@@ -29,7 +29,7 @@ def compile_net(run: TinyJit, special_names:Dict[int,str], weight_names):
       if buf is None: continue
       if (key := id(buf)) not in bufs:
         if key in special_names:
-          bufs[key] = (special_names[key][0], buf.size*buf.dtype.itemsize, buf.dtype, buf, special_names[key][1])
+          bufs[key] = (special_names[key][0], buf.size, buf.dtype, buf, special_names[key][1])
         else:
           bufs[key] = (f"{weight_names[key]}" if key in weight_names else f"buf_{bufnum}", buf.size*buf.dtype.itemsize, buf.dtype, buf, True)
           bufnum += 0 if key in weight_names else 1
@@ -71,11 +71,11 @@ def jit_model(model, *args) -> Tuple[TinyJit,Dict[int,str]]:
     special_names[id(out.lazydata.base.realized)] = (f"output{i}", out.dtype, True)
   return run, special_names
 
-def fread_model_weights(fp: str, bufs, bufs_to_save):
+def fread_model_weights(file_path, bufs, bufs_to_save):
   cprog = []
   cprog.append("#include <stdio.h>\n#include <stdlib.h>\n#include <assert.h>")
   cprog.append("void fread_net() {")
-  cprog.append(f"  FILE *model_file = fopen(\"{fp}\", \"rb\");")
+  cprog.append(f"  FILE *model_file = fopen(\"{file_path}\", \"rb\");")
   cprog.append("  if (model_file == NULL) { printf(\"Error opening model file\\n\"); exit(1); }")
   cprog.append("  size_t s = 0;")
 
@@ -102,6 +102,7 @@ def export_model_clang(functions, statements, bufs, bufs_to_save, net_inputs, ne
     cprog += fread_model_weights(fread_weights, bufs, list(filter(lambda x: x in net_keys, bufs_to_save)))
 
   for key,(name,len,dtype,_,_) in bufs.items():
+    if "input" in name or "output" in name: continue
     if key in bufs_to_save: cprog += [f"{dtype.name} *{name} = ({dtype.name} *){name}_data;"]
     else: cprog += [f"{dtype.name} {name}[{len}];"]
 

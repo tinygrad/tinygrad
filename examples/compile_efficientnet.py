@@ -12,7 +12,7 @@ if __name__ == "__main__":
   model = EfficientNet(0)
   model.load_from_pretrained()
   mode = "clang" if getenv("CLANG", "") != "" else "webgpu" if getenv("WEBGPU", "") != "" else "webgl" if getenv("WEBGL", "") != "" else ""
-  prg, inp_sizes, out_sizes, state = export_model(model, mode, Tensor.randn(1,3,224,224))
+  prg, net_inputs, net_outputs, state = export_model(model, mode, Tensor.randn(1,3,224,224))
   dirname = Path(__file__).parent
   if getenv("CLANG", "") == "":
     safe_save(state, (dirname / "net.safetensors").as_posix())
@@ -28,6 +28,10 @@ if __name__ == "__main__":
     lbls = ast.literal_eval(fetch("https://gist.githubusercontent.com/yrevar/942d3a0ac09ec9e5eb3a/raw/238f720ff059c1f82f368259d1ca4ffa5dd8f9f5/imagenet1000_clsidx_to_labels.txt").read_text())
     lbls = ['"'+lbls[i]+'"' for i in range(1000)]
     cprog.append(f"char *lbls[] = {{{','.join(lbls)}}};")
+    inputs = "\n".join([f"{dtype.name} {name}[{sz}];" for name,sz,dtype,_,_ in net_inputs])
+    outputs = "\n".join([f"{dtype.name} {name}[{sz}];" for name,sz,dtype,_,_ in net_outputs])
+    cprog.append(inputs)
+    cprog.append(outputs)
 
     # buffers (empty + weights)
     cprog.append("""

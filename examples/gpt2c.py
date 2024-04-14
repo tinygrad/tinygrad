@@ -41,7 +41,7 @@ class GPT2:
     with open(file_path, "wb") as file:
       write_fp32(weights['wpe.weight'], file)
       write_fp32(weights['wte.weight'], file)
-      # TODO: layernorm not used in clang, investigate
+      # TODO: layernorm weights not used in clang, investigate
       for i in range(12):
         write_fp32(weights[f'h.{i}.attn.c_attn.weight'], file)
         write_fp32(weights[f'h.{i}.attn.c_attn.bias'], file)
@@ -59,7 +59,6 @@ class GPT2:
 
 if __name__ == "__main__":
   mode = "clang"
-  # default_prompt = "<|endoftext|>"
   default_prompt = "What is the answer to life, the universe, and everything?"
 
   parser = argparse.ArgumentParser(description='Run GPT2 in tinygrad', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -81,26 +80,23 @@ if __name__ == "__main__":
   start_pos = 0
   start_pos_v = Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT).bind(start_pos)
   prompt_tokens = gpt2.tokenizer.encode(args.prompt, allowed_special={"<|endoftext|>"})
-  # res = [int(e) for e in "262 13 262 262 262 262 29372 262 262 29372 262 262 47490 262 262 262 47490 47490 262 262 47490 262 47490 47490 47490 47490 47490 47490 47490 47490 262 47490 262 262 262 262 262 262 262 262 262 262 47490 11 262 262 39655 262 262 262 262 47490 21457 47490 47490 47490 47490 47490 47490 47490 30979 11897 17555 47490 39458 836 8772 20132 262 1035 262 41221 24271 2511 5909 262 7601 262 9020 262 262 277 300 262 262 262 287 262 366 530 262 635 555 773 780 477 909 1141 1036 1334".split()]
-  # print(res)
-  # r = [gpt2.tokenizer.decode(x) for x in res]
-  # print(r)
-  # res = [11, 11, 11, 11, 11, 11, 11, 4322, 11, 11]
-  # print(gpt2.tokenizer.decode(res))
-  # exit(0)
   toks = [prompt_tokens[:] for _ in range(args.batch_size)]
   tokens = Tensor([x[start_pos:] for x in toks])
 
-  prg, inputs, outputs, state = export_model(gpt2.model, mode, tokens, start_pos_v, args.temperature, fread_weights=file_path)
+  prg, net_inputs, net_outputs, state = export_model(gpt2.model, mode, tokens, start_pos_v, args.temperature, fread_weights=file_path)
   cprog = [prg]
+
+  inputs = "\n".join([f"{dtype.name} {name}[{sz+args.count}];" for name,sz,dtype,_,_ in net_inputs])
+  outputs = "\n".join([f"{dtype.name} {name}[{sz}];" for name,sz,dtype,_,_ in net_outputs])
+  cprog.append(inputs)
+  cprog.append(outputs)
 
   cprog.append("""
 #include <string.h>
 int main(int argc, char* argv[]) {
-  int max_length = 10;
-  int toks[4][max_length];
-  int start_pos = 0;
-  //float temp = 0.8;
+  int max_length = 100;
+  int toks[max_length];
+  int start_pos = argc-1;
 
   for (int i = 0; i < argc-1; i++) {
     input0[i] = atoi(argv[i+1]);
@@ -111,26 +107,22 @@ int main(int argc, char* argv[]) {
 
   for (int t = 0; t < max_length; t++) {
     printf("generating token %d\\n", t);
-    // input0 = toks[0][start_pos];
     net(start_pos, input0, output0);
-    for (int i = 0; i < 4; i++) {
-      toks[i][t] = output0[i];
-      if (i == 0) { start_pos = t; }
-    }
+    toks[t] = output0[0];
+    input0[t+1] = output0[0];
+    start_pos += 1;
   }
-  for (int i = 0; i < 4; i++) {
-    for (int t = 0; t < max_length; t++) {
-      printf("%d ", toks[i][t]);
-    }
-    printf("\\n");
+  for (int t = 0; t < max_length; t++) {
+    printf("%d ", toks[t]);
   }
+  printf("\\n");
   return 0;
 }""")
 
   # CLANG=1 python3 examples/gpt2c.py --model_size gpt2 | clang -O2 -lm -x c - -o gpt2 && ./gpt2
   src = '\n'.join(cprog)
-  with open("output.c", "w") as f:
-    f.write(src)
+  # with open("output.c", "w") as f:
+  #   f.write(src)
   p = ClangProgram("main", ClangCompiler().compile(src))
   # # NOTE: only works for batch_size 1 right now
   toks = flatten(toks)
