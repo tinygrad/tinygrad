@@ -4,7 +4,7 @@ import tiktoken
 from tinygrad import Tensor, Variable, dtypes, Device
 from examples.gpt2 import Transformer
 from extra.export_model import export_model
-from tinygrad.helpers import getenv, fetch, prod, flatten
+from tinygrad.helpers import getenv, fetch, prod, flatten, _cache_dir
 from tinygrad.runtime.ops_clang import ClangCompiler, ClangProgram
 from tinygrad.nn.state import torch_load
 from ctypes import c_char_p
@@ -29,7 +29,7 @@ class GPT2:
     return GPT2(model, tokenizer)
   
   @staticmethod
-  def write_model(model_size="gpt2"):
+  def write_model(file_path, model_size="gpt2"):
     weights = torch_load(fetch(f"https://huggingface.co/{model_size}/resolve/main/pytorch_model.bin"))
     transposed = ('attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight')
     for k in weights:
@@ -38,7 +38,7 @@ class GPT2:
     # lm head and wte are tied
     weights['lm_head.weight'] = weights['wte.weight']
 
-    with open(f"{model_size}.bin", "wb") as file:
+    with open(file_path, "wb") as file:
       write_fp32(weights['wpe.weight'], file)
       write_fp32(weights['wte.weight'], file)
       # TODO: layernorm not used in clang, investigate
@@ -76,7 +76,8 @@ if __name__ == "__main__":
 
   print(f"using {args.model_size}")
   gpt2 = GPT2.build(args.model_size)
-  gpt2.write_model(args.model_size)
+  file_path = _cache_dir + f"/tinygrad/downloads/{args.model_size}.bin"
+  gpt2.write_model(file_path, args.model_size)
   start_pos = 0
   start_pos_v = Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT).bind(start_pos)
   prompt_tokens = gpt2.tokenizer.encode(args.prompt, allowed_special={"<|endoftext|>"})
@@ -90,13 +91,8 @@ if __name__ == "__main__":
   toks = [prompt_tokens[:] for _ in range(args.batch_size)]
   tokens = Tensor([x[start_pos:] for x in toks])
 
-  prg, inputs, outputs, state = export_model(gpt2.model, mode, tokens, start_pos_v, args.temperature, fread_weights=f"{args.model_size}.bin")
+  prg, inputs, outputs, state = export_model(gpt2.model, mode, tokens, start_pos_v, args.temperature, fread_weights=file_path)
   cprog = [prg]
-
-  # inputs = "\n".join([f"{dtype.name} {name}[{sz}];" for name,sz,dtype,is_pointer in inputs.values()])
-  # outputs = "\n".join([f"{dtype.name} {name}[{sz}];" for name,sz,dtype,is_pointer in outputs.values()])
-  # cprog.append(inputs)
-  # cprog.append(outputs)
 
   cprog.append("""
 #include <string.h>
@@ -133,7 +129,8 @@ int main(int argc, char* argv[]) {
 
   # CLANG=1 python3 examples/gpt2c.py --model_size gpt2 | clang -O2 -lm -x c - -o gpt2 && ./gpt2
   src = '\n'.join(cprog)
-  print(src[-1000:])
+  with open("output.c", "w") as f:
+    f.write(src)
   p = ClangProgram("main", ClangCompiler().compile(src))
   # # NOTE: only works for batch_size 1 right now
   toks = flatten(toks)

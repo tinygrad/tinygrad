@@ -32,7 +32,7 @@ def compile_net(run: TinyJit, special_names:Dict[int,str], weight_names):
           bufs[key] = (special_names[key][0], buf.size*buf.dtype.itemsize, buf.dtype, buf, special_names[key][1])
         else:
           bufs[key] = (f"{weight_names[key]}" if key in weight_names else f"buf_{bufnum}", buf.size*buf.dtype.itemsize, buf.dtype, buf, True)
-          bufnum += 1
+          bufnum += 0 if key in weight_names else 1
           if i > 0: bufs_to_save.append(key) # if first usage of a buffer is not an output, and it's not a special name
       cargs.append(bufs[key][0])
     for v in runner.vars:
