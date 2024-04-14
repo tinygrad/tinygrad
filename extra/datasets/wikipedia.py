@@ -308,7 +308,7 @@ def instance_to_features(instance, tokenizer):
   }
 
 def process_part(part):
-  tokenizer = Tokenizer(getenv("BASEDIR", Path(__file__).parent / "wiki" / "vocab.txt"))
+  tokenizer = Tokenizer(getenv("BASEDIR", Path(__file__).parent / "wiki") / "vocab.txt")
   os.makedirs(BASEDIR / "train" / str(part), exist_ok=True)
   for i, feature_batch in enumerate(process_iterate(tokenizer, val=False, part=part)):
     with open(BASEDIR / f"train/{str(part)}/{part}_{i}.pkl", "wb") as f:
