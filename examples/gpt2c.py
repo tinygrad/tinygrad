@@ -124,6 +124,6 @@ int main(int argc, char* argv[]) {
   # with open("output.c", "w") as f:
   #   f.write(src)
   p = ClangProgram("main", ClangCompiler().compile(src))
-  # # NOTE: only works for batch_size 1 right now
+  # NOTE: only works for batch_size 1 right now
   toks = flatten(toks)
   p(1+len(toks), (c_char_p * (1+len(toks)))(b'', *[bytes(str(t), 'utf-8') for t in toks]))
