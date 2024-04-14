@@ -750,5 +750,13 @@ class TestShapeTrackerSize(unittest.TestCase):
     st = st.shrink(((0, 100), (0, 50)))
     self.assertEqual(st.real_size(), 9950)    # careful here
 
+class TestIdxs(unittest.TestCase):
+  def test_check_idx_range(self):
+    # generated from: (Tensor.rand(4096,599*64) @ Tensor.rand(599*64,1024)).realize()
+    # TODO: use int64
+    st = ShapeTracker(views=(View(shape=(4096, 1024, 599, 1), strides=(613376, 599, 1, 0), offset=0, mask=None, contiguous=True),))
+    with self.assertRaises(AssertionError):
+      st.expr_idxs()
+
 if __name__ == '__main__':
   unittest.main()
