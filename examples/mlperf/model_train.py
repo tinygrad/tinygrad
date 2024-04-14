@@ -243,11 +243,13 @@ def train_rnnt():
   pass
 
 def train_bert():
+  # NOTE: pip install tensorflow required
   from examples.mlperf.dataloader import batch_load_bert
-  from examples.mlperf.helpers import get_mlperf_bert_model
+  from examples.mlperf.helpers import get_mlperf_bert_model, load_from_tf2_ckpt
   from examples.mlperf.lr_schedulers import PolynomialDecayWithWarmup
 
   config = {}
+  BASEDIR = getenv("BASEDIR", Path(__file__).parent.parents[1] / "extra" / "datasets" / "wiki")
 
   GPUS = config["GPUS"] = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
   print(f"Training on {GPUS}")
@@ -256,7 +258,7 @@ def train_bert():
 
   # ** hyperparameters **
   epochs             = config["epochs"]                 = getenv("EPOCHS", 1)
-  BS                 = config["GLOBAL_BATCH_SIZE"]      = getenv("GLOBAL_BATCH_SIZE", 29 * len(GPUS)) # FP32 6 GPUS -> BS174
+  BS                 = config["GLOBAL_BATCH_SIZE"]      = getenv("GLOBAL_BATCH_SIZE", 29 * len(GPUS)) # FP32 6 GPUS -> BS24
   EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 2)
   max_lr             = config["OPT_BASE_LEARNING_RATE"] = getenv("OPT_BASE_LEARNING_RATE", 1e-4)
 
@@ -267,6 +269,7 @@ def train_bert():
   eval_step_freq     = config["EVAL_STEP_FREQ"]         = int((math.floor(0.05 * (230.23 * BS + 3000000) / 25000) * 25000) / BS) # Round down
   save_ckpt_freq     = config["SAVE_CKPT_FREQ"]         = getenv("SAVE_CKPT_FREQ", 1000)
   keep_ckpt_amount   = config["KEEP_CKPT_AMOUNT"]       = getenv("KEEP_CKPT_AMOUNT", 5)
+  init_ckpt          = config["INIT_CKPT_DIR"]          = getenv("INIT_CKPT_DIR", BASEDIR)
 
   decay              = config["decay"]                  = getenv("DECAY", 0.01)
   poly_power         = config["poly_power"]             = getenv("POLY_POWER", 1.0)
@@ -278,11 +281,19 @@ def train_bert():
 
   Tensor.manual_seed(seed)  # seed for weight initialization
 
-  config_path = getenv("BASEDIR", Path(__file__).parent.parents[1] / "extra" / "datasets" / "wiki") / "bert_config.json"
-  model = get_mlperf_bert_model(config_path)
+  model = get_mlperf_bert_model(BASEDIR / "bert_config.json")
 
   # shard weights and initialize in order
-  for _, x in get_state_dict(model).items():
+  for tinygrad_key, x in get_state_dict(model).items():
+    if init_ckpt and not tinygrad_key.endswith("decoder.weight"): # decoder.weight already is word embedding
+      t = load_from_tf2_ckpt(key=tinygrad_key, ckpt_dir=init_ckpt)
+      if any(k in tinygrad_key for k in ["intermediate.dense.weight", "output.dense.weight", "classifier.weight"]) and "attention" not in tinygrad_key:
+        t = t.transpose() 
+      elif any(k in tinygrad_key for k in ["self", "output.dense", "fc", "linear"]) and "weight" in tinygrad_key:
+        t = t.reshape(*x.shape).transpose()
+      elif all(k in tinygrad_key for k in ["self", "bias"]):
+        t = t.reshape(*x.shape)
+      x.assign(t).realize().to_(GPUS)
     x.realize().to_(GPUS)
   parameters = get_parameters(model)
 

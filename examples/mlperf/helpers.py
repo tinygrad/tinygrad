@@ -1,7 +1,8 @@
 from collections import OrderedDict
-import unicodedata, json
+import unicodedata, json, functools
 import numpy as np
 from tinygrad.nn import state
+from tinygrad.tensor import Tensor
 
 #
 # checkpointing utils
@@ -214,3 +215,63 @@ def get_mlperf_bert_model(config_path:str):
     config["attention_probs_dropout_prob"], 
     config["hidden_dropout_prob"]
   )
+
+@functools.lru_cache(maxsize=None)
+def load_tf_weights_to_dict(checkpoint_path):
+  import tensorflow as tf
+  reader = tf.train.load_checkpoint(checkpoint_path)
+  var_to_shape_map = reader.get_variable_to_shape_map()
+  weights_dict = {}
+
+  for key in sorted(var_to_shape_map):
+    weights_dict[key] = reader.get_tensor(key)
+  return weights_dict
+
+def tt(tf_tensor): return Tensor(tf_tensor)
+
+def load_from_tf2_ckpt(key: str, ckpt_dir: str):
+  p = "model/layer-3/"
+  s = "/.ATTRIBUTES/VARIABLE_VALUE"
+  tf_dict = load_tf_weights_to_dict(ckpt_dir)
+  if key.startswith("model.embeddings"):
+    if key.endswith("word_embeddings.weight"): return tt(tf_dict[p+"layer-1/embeddings"+s])
+    elif key.endswith("position_embeddings.weight"): return tt(tf_dict[p+"layer-3/embeddings"+s])
+    elif key.endswith("token_type_embeddings.weight"): return tt(tf_dict[p+"layer-4/embeddings"+s])
+    elif key.endswith("LayerNorm.weight"): return tt(tf_dict[p+"layer-6/gamma"+s])
+    elif key.endswith("LayerNorm.bias"): return tt(tf_dict[p+"layer-6/beta"+s])
+    else: raise ValueError(f"Unknown key: {key}")
+  elif key.startswith("model.encoder.layer"):
+    l_id = str(int(key.split(".")[3]) + 10)
+    if ".attention." in key:
+      if key.endswith("self.query.weight"): return tt(tf_dict[p+f"layer-{l_id}/_attention_layer/_query_dense/kernel"+s])
+      elif key.endswith("self.query.bias"): return tt(tf_dict[p+f"layer-{l_id}/_attention_layer/_query_dense/bias"+s])
+      elif key.endswith("self.key.weight"): return tt(tf_dict[p+f"layer-{l_id}/_attention_layer/_key_dense/kernel"+s])
+      elif key.endswith("self.key.bias"): return tt(tf_dict[p+f"layer-{l_id}/_attention_layer/_key_dense/bias"+s])
+      elif key.endswith("self.value.weight"): return tt(tf_dict[p+f"layer-{l_id}/_attention_layer/_value_dense/kernel"+s])
+      elif key.endswith("self.value.bias"): return tt(tf_dict[p+f"layer-{l_id}/_attention_layer/_value_dense/bias"+s])
+      # Attention output
+      elif key.endswith("output.dense.weight"): return tt(tf_dict[p+f"layer-{l_id}/_attention_output_dense/kernel"+s])
+      elif key.endswith("output.dense.bias"): return tt(tf_dict[p+f"layer-{l_id}/_attention_output_dense/bias"+s])
+      elif key.endswith("output.LayerNorm.weight"): return tt(tf_dict[p+f"layer-{l_id}/_attention_layer_norm/gamma"+s])
+      elif key.endswith("output.LayerNorm.bias"): return tt(tf_dict[p+f"layer-{l_id}/_attention_layer_norm/beta"+s])
+      else: raise ValueError(f"Unknown key: {key}")
+    elif ".intermediate." in key:
+      if key.endswith("dense.weight"): return tt(tf_dict[p+f"layer-{l_id}/_intermediate_dense/kernel"+s])
+      elif key.endswith("dense.bias"): return tt(tf_dict[p+f"layer-{l_id}/_intermediate_dense/bias"+s])
+      else: raise ValueError(f"Unknown key: {key}")
+    elif ".output." in key:
+      if key.endswith("dense.weight"): return tt(tf_dict[p+f"layer-{l_id}/_output_dense/kernel"+s])
+      elif key.endswith("dense.bias"): return tt(tf_dict[p+f"layer-{l_id}/_output_dense/bias"+s])
+      elif key.endswith("LayerNorm.weight"): return tt(tf_dict[p+f"layer-{l_id}/_output_layer_norm/gamma"+s])
+      elif key.endswith("LayerNorm.bias"): return tt(tf_dict[p+f"layer-{l_id}/_output_layer_norm/beta"+s])
+    else: raise ValueError(f"Unknown key: {key}")
+  elif key.startswith("fc.weight"): return tt(tf_dict[f"model/layer-3/layer-35/kernel"+s])
+  elif key.startswith("fc.bias"): return tt(tf_dict[f"model/layer-3/layer-35/bias"+s])
+  elif key.startswith("classifier.weight"): return tt(tf_dict[f"model/layer-6/layer-1/kernel"+s])
+  elif key.startswith("classifier.bias"): return tt(tf_dict[f"model/layer-6/layer-1/bias"+s])
+  elif key.startswith("linear.weight"): return tt(tf_dict[f"model/layer-5/layer-3/kernel"+s])
+  elif key.startswith("linear.bias"): return tt(tf_dict[f"model/layer-5/layer-3/bias"+s])
+  elif key.startswith("norm.weight"): return tt(tf_dict[f"model/layer-5/layer-4/gamma"+s])
+  elif key.startswith("norm.bias"): return tt(tf_dict[f"model/layer-5/layer-4/beta"+s])
+  elif key.startswith("decoder_bias"): return tt(tf_dict[f"model/layer-5/layer-6/bias"+s])
+  else: raise ValueError(f"Unknown key: {key}")
