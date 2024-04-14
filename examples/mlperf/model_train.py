@@ -170,8 +170,8 @@ def train_resnet():
 
       if i == BENCHMARK:
         median_step_time = sorted(step_times)[(BENCHMARK + 1) // 2]  # in seconds
-        estimated_total_hours = median_step_time * steps_in_train_epoch * epochs / 60 / 60
-        print(f"Estimated training time: {estimated_total_hours:.0f}h{(estimated_total_hours - int(estimated_total_hours)) * 60:.0f}m")
+        estimated_total_minutes = int(median_step_time * steps_in_train_epoch * epochs / 60)
+        print(f"Estimated training time: {estimated_total_minutes // 60}h{estimated_total_minutes % 60}m")
         # if we are doing beam search, run the first eval too
         if BEAM.value and e == start_epoch: break
         return

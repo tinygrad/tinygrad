@@ -46,7 +46,7 @@ class CUDAGraph(MultiDeviceJITGraph):
         node_from = cuda.CUgraphNode()
         deps = self.access_resources(read=[src], write=[dest], new_dependency=node_from)
         c_deps = (cuda.CUgraphNode*len(deps))(*deps) if deps else None
-        if getenv("CUDA_P2P", CUDADevice.peer_access):
+        if getenv("CUDA_P2P", int(CUDADevice.peer_access)):
           cp_params = cuda.CUDA_MEMCPY3D_v2(srcMemoryType=cuda.CU_MEMORYTYPE_DEVICE, srcDevice=src._buf, srcPitch=src.nbytes, srcHeight=1,
                                             dstMemoryType=cuda.CU_MEMORYTYPE_DEVICE, dstDevice=dest._buf, dstPitch=dest.nbytes, dstHeight=1,
                                             WidthInBytes=dest.nbytes, Height=1, Depth=1)
