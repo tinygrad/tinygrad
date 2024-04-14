@@ -19,7 +19,23 @@ web_utils = {
   };"""
 }
 
-def compile_net(run: TinyJit, special_names: Dict[int,str], weight_names):
+def fread_model_weights(file_path, bufs, bufs_to_save):
+  cprog = []
+  cprog.append("#include <stdio.h>\n#include <stdlib.h>\n#include <assert.h>")
+  cprog.append("void fread_net() {")
+  cprog.append(f"  FILE *model_file = fopen(\"{file_path}\", \"rb\");")
+  cprog.append("  if (model_file == NULL) { printf(\"Error opening model file\\n\"); exit(1); }")
+  cprog.append("  size_t s = 0;")
+
+  for key in bufs_to_save:
+    cprog.append(f"  s = fread({bufs[key][0]}_data, sizeof(float), {bufs[key][3].size}, model_file);")
+    cprog.append(f"  assert(s == {bufs[key][3].size});")
+
+  cprog.append("  fclose(model_file);")
+  cprog.append("}")
+  return cprog
+
+def compile_net(run: TinyJit, special_names, weight_names):
   functions, bufs, bufs_to_save, statements, bufnum = {}, {}, [], [], 0
   for ei in run.jit_cache:
     runner, cargs = ei.prg, []
@@ -60,7 +76,7 @@ def jit_model(model, *args) -> Tuple[TinyJit,Dict[int,str]]:
   for (j,i),idx in run.input_replace.items():
     realized_input = args[idx].lazydata.base.realized
     run.jit_cache[j].rawbufs[i] = realized_input
-    special_names[id(realized_input)] = (f"input{idx}", True)
+    special_names[id(realized_input)] = (f"input{idx}", True) # (name, is_pointer)
 
   from tinygrad.engine.jit import get_jc_idxs_with_updatable_var_vals
   for j in get_jc_idxs_with_updatable_var_vals(run.jit_cache):
@@ -68,41 +84,25 @@ def jit_model(model, *args) -> Tuple[TinyJit,Dict[int,str]]:
 
   # TODO: fetch this from the jit in self.input_replace and self.ret (hint: use get_parameters on self.ret)
   for i, out in enumerate(output):
-    special_names[id(out.lazydata.base.realized)] = (f"output{i}", out.dtype, True)
+    special_names[id(out.lazydata.base.realized)] = (f"output{i}", True)
   return run, special_names
 
-def fread_model_weights(file_path, bufs, bufs_to_save):
-  cprog = []
-  cprog.append("#include <stdio.h>\n#include <stdlib.h>\n#include <assert.h>")
-  cprog.append("void fread_net() {")
-  cprog.append(f"  FILE *model_file = fopen(\"{file_path}\", \"rb\");")
-  cprog.append("  if (model_file == NULL) { printf(\"Error opening model file\\n\"); exit(1); }")
-  cprog.append("  size_t s = 0;")
-
-  for key in bufs_to_save:
-    cprog.append(f"  s = fread({bufs[key][0]}_data, sizeof(float), {bufs[key][3].size}, model_file);")
-    cprog.append(f"  assert(s == {bufs[key][3].size});")
-
-  cprog.append("  fclose(model_file);")
-  cprog.append("}")
-  return cprog
-
-def export_model_clang(functions, statements, bufs, bufs_to_save, net_inputs, net_outputs, net_keys, fread_weights=None) -> str:
+def export_model_clang(functions, statements, bufs, bufs_to_save, net_inputs, net_outputs, weight_names, fread_weights=None) -> str:
   from tinygrad.runtime.ops_clang import CLANG_PROGRAM_HEADER
   cprog = [CLANG_PROGRAM_HEADER]
 
   for key in bufs_to_save:
-    if fread_weights is not None and key in net_keys:
+    if fread_weights is not None and key in weight_names:
       cprog.append(f"float {bufs[key][0]}_data[{bufs[key][3].size}];")
     else:
       weight = ''.join(["\\x%02X"%x for x in bytes(bufs[key][3]._buf)])
       cprog.append(f"unsigned char {bufs[key][0]}_data[] = \"{weight}\";")
 
   if fread_weights is not None:
-    cprog += fread_model_weights(fread_weights, bufs, list(filter(lambda x: x in net_keys, bufs_to_save)))
+    cprog += fread_model_weights(fread_weights, bufs, list(filter(lambda x: x in weight_names, bufs_to_save)))
 
   for key,(name,len,dtype,_,_) in bufs.items():
-    if "input" in name or "output" in name: continue
+    if "input" in name or "output" in name: continue # add manually in main file
     if key in bufs_to_save: cprog += [f"{dtype.name} *{name} = ({dtype.name} *){name}_data;"]
     else: cprog += [f"{dtype.name} {name}[{len}];"]
 
@@ -110,7 +110,7 @@ def export_model_clang(functions, statements, bufs, bufs_to_save, net_inputs, ne
 
   inputs = ", ".join([f"{dtype.name}{'*' if is_pointer else ''} {name}" for name,_,dtype,_,is_pointer in net_inputs.values()])
   outputs = ", ".join([f"{dtype.name}{'*' if is_pointer else ''} {name}" for name,_,dtype,_,is_pointer in net_outputs.values()])
-  cprog += [f"void net({inputs}, {outputs}) {{"] + [f"  {name}({', '.join(args)});" for (name, args, _global_size, _local_size) in statements] + ["}"]
+  cprog += [f"void net({inputs}, {outputs}) {{"] + [f"  {name}({', '.join(args)});" for name,args,_,_ in statements] + ["}"]
   return '\n'.join(cprog)
 
 def export_model_webgl(functions, statements, bufs, weight_names) -> str:
