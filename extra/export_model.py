@@ -1,7 +1,5 @@
 from typing import Tuple, Dict, List, Union
-from tinygrad.buffer import Buffer 
-from tinygrad.dtype import DType
-from tinygrad.tensor import Device, Tensor
+from tinygrad import Device, Tensor, Variable
 from tinygrad.engine.jit import TinyJit, CompiledRunner 
 from tinygrad.engine.realize import CustomOp
 from tinygrad.nn.state import get_state_dict, get_parameters
@@ -21,27 +19,27 @@ web_utils = {
   };"""
 }
 
-def compile_net(run: TinyJit, special_names:Dict[int,str]):
+def compile_net(run: TinyJit, special_names:Dict[int,str], weight_names):
   functions, bufs, bufs_to_save, statements, bufnum = {}, {}, [], [], 0
-  for ji in run.jit_cache:
-    fxn, cargs = ji.prg, []
-    if not hasattr(fxn, 'name'): continue # TODO: handle customop correctly?
-    functions[fxn.name] = fxn.prg # NOTE: this assumes all with the same name are the same
-    for i, buf in enumerate(ji.rawbufs):
+  for ei in run.jit_cache:
+    runner, cargs = ei.prg, []
+    if not hasattr(runner, 'name'): continue # TODO: how should customop be handled?
+    functions[runner.name] = runner.prg # NOTE: this assumes all with the same name are the same
+    for i, buf in enumerate(ei.rawbufs):
       if buf is None: continue
       if (key := id(buf)) not in bufs:
         if key in special_names:
           bufs[key] = (special_names[key][0], buf.size*buf.dtype.itemsize, buf.dtype, buf, special_names[key][1])
         else:
-          bufs[key] = (f"buf_{bufnum}", buf.size*buf.dtype.itemsize, buf.dtype, buf, True)
+          bufs[key] = (f"{weight_names[key]}" if key in weight_names else f"buf_{bufnum}", buf.size*buf.dtype.itemsize, buf.dtype, buf, True)
           bufnum += 1
           if i > 0: bufs_to_save.append(key) # if first usage of a buffer is not an output, and it's not a special name
       cargs.append(bufs[key][0])
-    for v in fxn.vars:
+    for v in runner.vars:
       key = v.hash
       bufs[key] = (special_names[key][0], dtypes.int.itemsize, dtypes.int, None, special_names[key][1])
       cargs.append(bufs[key][0])
-    statements.append((fxn.name, cargs, fxn.global_size, fxn.local_size))
+    statements.append((runner.name, cargs, runner.global_size, runner.local_size))
 
   return functions, statements, bufs, bufs_to_save
 
@@ -64,8 +62,9 @@ def jit_model(model, *args) -> Tuple[TinyJit,Dict[int,str]]:
     run.jit_cache[j].rawbufs[i] = realized_input
     special_names[id(realized_input)] = (f"input{idx}", True)
 
-  for v in run.expected_vals:
-    special_names[v.hash] = (f"input_{v.expr}", False)
+  from tinygrad.engine.jit import get_jc_idxs_with_updatable_var_vals
+  for j in get_jc_idxs_with_updatable_var_vals(run.jit_cache):
+    for v in run.jit_cache[j].prg.vars: special_names[v.hash] = (f"input_{v.expr}", False)
 
   # TODO: fetch this from the jit in self.input_replace and self.ret (hint: use get_parameters on self.ret)
   for i, out in enumerate(output):
@@ -347,9 +346,9 @@ const setupNet = async (device, safetensor) => {{
 def export_model(model, target:str, *inputs, fread_weights=None):
   assert Device.DEFAULT in EXPORT_SUPPORTED_DEVICE, "only WEBGPU, WEBGL, CLANG, CUDA, GPU, METAL are supported"
   run, special_names = jit_model(model, *inputs)
-  functions, statements, bufs, bufs_to_save = compile_net(run, special_names)
   state = get_state_dict(model)
-  weight_names = {id(x.lazydata.realized): name for name, x in state.items()}
+  weight_names = {id(x.lazydata.realized): name.replace(".", "_") for name, x in state.items()}
+  functions, statements, bufs, bufs_to_save = compile_net(run, special_names, weight_names)
   net_inputs = list(filter(lambda x: "input" in x[0], bufs.values()))
   net_outputs = list(filter(lambda x: "output" in x[0], bufs.values()))
   prg = ""
