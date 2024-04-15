@@ -12,6 +12,7 @@ from examples.mlperf.initializers import Conv2dHeNormal, Linear
 from examples.hlb_cifar10 import UnsyncedBatchNorm
 
 # benchmark: BEAM=2 DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py
+# benchmark only one layer: BEAM=2 DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py BenchmarkResnetTrain.test_layer1_2
 # inspect:   DEBUG=2 BEAM=2 JITCNT=1 CNT=1 DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py
 # inspect convs:   DEBUG=2 BEAM=2 CONV=1 JITCNT=1 CNT=1 DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py
 # inspect convs with batchnorm: DEBUG=2 BEAM=2 CONV=1 BN=1 JITCNT=1 CNT=1 DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py
