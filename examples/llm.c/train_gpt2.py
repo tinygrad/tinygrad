@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-import os, math
+import os, math, time
 import numpy as np
-from tinygrad import Tensor, nn, fetch
+from tinygrad import Tensor, nn, fetch, Device
 from dataclasses import dataclass
 
 @dataclass
@@ -23,7 +23,8 @@ class CausalSelfAttention:
     self.n_head = config.n_head
     self.n_embd = config.n_embd
     # not really a 'bias', more of a mask, but following the OpenAI/HF naming though
-    self.bias = Tensor.ones(1, 1, config.block_size, config.block_size, requires_grad=False).tril()
+    self.bias = Tensor.ones(1, 1, config.block_size, config.block_size).tril()
+    self.bias.requires_grad = False
 
   def __call__(self, x:Tensor):
     B, T, C = x.shape
@@ -79,7 +80,7 @@ class GPT:
     transposed = ('attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight')
     for k in weights:
       if k.endswith(transposed):
-        weights[k] = weights[k].T
+        weights[k] = weights[k].to(Device.DEFAULT).T.contiguous()
     # lm head and wte are tied
     weights['lm_head.weight'] = weights['wte.weight']
     nn.state.load_state_dict(self, weights)
@@ -113,7 +114,15 @@ class GPT:
     return logits, loss
 
 if __name__ == "__main__":
-  import tiktoken
+  import tiktoken, argparse
+
+  parser = argparse.ArgumentParser()
+  parser.add_argument("--num_iterations", type=int, default=10, help="number of iterations to run")
+  parser.add_argument("--batch_size", type=int, default=4, help="batch size")
+  parser.add_argument("--sequence_length", type=int, default=64, help="sequence length")
+  args = parser.parse_args()
+  B, T = args.batch_size, args.sequence_length
+  assert 1 <= T <= 1024
 
   model = GPT(GPTConfig(n_layer=12, n_head=12, n_embd=768))
   model.load_pretrained()
@@ -122,7 +131,6 @@ if __name__ == "__main__":
   enc = tiktoken.get_encoding("gpt2")
   encode = lambda s: enc.encode(s, allowed_special={"<|endoftext|>"})
   decode = lambda l: enc.decode(l)
-
 
   # load the tokens
   # prefer to use tiny_shakespeare if it's available, otherwise use tiny_stories
@@ -135,6 +143,34 @@ if __name__ == "__main__":
   print(f"loading cached tokens in {tokens_bin}")
   with open(tokens_bin, "rb") as f:
     tokens = np.frombuffer(f.read(), dtype=np.int32)
+  tokens = Tensor(tokens)
+
+  # lightweight dataloader
+  def get_batch():
+    assert B*T+1 <= len(tokens), "not enough tokens"
+    # for 338,025 tokens. E.g. with B=8 T=1024, this will yield 41 batches before looping
+    i = 0
+    while True:
+      x = tokens[i:i+B*T].view(B, T)
+      y = tokens[i+1:i+B*T+1].view(B, T)
+      yield x, y
+      i += B*T
+      if i + B*T + 1 >= len(tokens):
+        i = 0 # in prod we'd want to randomize the start point a bit
+
+  # forward backward for a few iterations
+  data_iter = iter(get_batch())
+  x, y = next(data_iter) # we'll overfit this batch below
+  optimizer = nn.optim.Adam(nn.state.get_parameters(model), lr=1e-4)
+  for i in range(args.num_iterations):
+    t0 = time.time()
+    logits, loss = model(x, y)
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+    Device[Device.DEFAULT].synchronize()
+    t1 = time.time()
+    print(f"iteration {i}, loss: {loss.item()}, time: {(t1-t0)*1000:.3f}ms")
 
   start = "<|endoftext|>"
   start_ids = encode(start)
