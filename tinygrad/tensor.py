@@ -126,8 +126,7 @@ class Tensor:
 
   def __bool__(self): raise TypeError("__bool__ on Tensor is not defined")
 
-  # TOOD: does this match pytorch?
-  def __len__(self): return prod(self.shape)
+  def __len__(self): return self.shape[0] if len(self.shape) else 1
 
   @property
   def device(self) -> Union[str, Tuple[str, ...]]: return self.lazydata.device
