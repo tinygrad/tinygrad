@@ -385,7 +385,7 @@ def train_unet3d():
       scores = Tensor.mean(Tensor.stack(scores, dim=0), axis=0).numpy()
       eval_loss = Tensor.mean(Tensor.stack(eval_loss, dim=0), axis=0).numpy()
 
-      l1_dice, l2_dice = scores[-2], scores[-1]
+      l1_dice, l2_dice = scores[0][-2], scores[0][-1]
       mean_dice = (l2_dice + l1_dice) / 2
 
       tqdm.write(f"{l1_dice} L1 dice, {l2_dice} L2 dice, {mean_dice:.3f} mean_dice, {eval_loss:5.2f} eval_loss")

@@ -44,7 +44,7 @@ def dice_score(prediction, target, channel_axis=1, smooth_nr=1e-6, smooth_dr=1e-
   target_sum = target.sum(axis=reduce_axis)
   prediction_sum = prediction.sum(axis=reduce_axis)
   result = (2.0 * intersection + smooth_nr) / (target_sum + prediction_sum + smooth_dr)
-  return result[0]
+  return result
 
 def normalize_string(s):
   s = "".join(c for c in s.lower() if c not in string.punctuation)
