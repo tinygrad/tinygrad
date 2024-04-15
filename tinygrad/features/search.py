@@ -48,7 +48,7 @@ def _time_program(variables:List[Variable], outcount:int, rdev:Compiled, lib:byt
 def _compile_linearizer(compiler:Compiler, lin:Linearizer, name:Optional[str]=None, enforce_max:bool=False) \
   -> Tuple[bytes, Optional[List[int]], Optional[List[int]], List[Variable], int, float, int]:
   lin.linearize()
-  if (uops_max:=getenv("BEAM_UOPS_MAX", 3000)) > 0 and len(lin.uops.uops) >= uops_max and enforce_max: raise Exception("too many uops")
+  if enforce_max and len(lin.uops.uops) >= getenv("BEAM_UOPS_MAX", 3000) > 0: raise RuntimeError("too many uops")
   src = compiler.render(name if name is not None else to_function_name(lin.name), lin.uops)   # NOTE: these all have the same name for deduping
   if DEBUG >= 5: print(src)
   st = time.perf_counter()
@@ -113,7 +113,7 @@ def beam_search(lin:Linearizer, rawbufs:List[Buffer], amt:int, allow_test_size=T
 
   default_parallel, min_progress_micros = 1 if lin.opts.device in {"CUDA", "HSA", "KFD"} else 0, getenv("BEAM_MIN_PROGRESS",0.01)
   if beam_pool is None and getenv("PARALLEL", default_parallel):
-    beam_pool = multiprocessing.get_context("spawn").Pool(multiprocessing.cpu_count(), _init_worker, (), getenv("BEAM_MAX_TASKS_PER_CHILD", 4))
+    beam_pool = multiprocessing.get_context("spawn").Pool(multiprocessing.cpu_count(), _init_worker, (), getenv("BEAM_MAX_TASKS_PER_CHILD", 16))
 
   try:
     rawbufs = _ensure_buffer_alloc(rawbufs)
