@@ -70,20 +70,20 @@ class BenchmarkResnetTrain(unittest.TestCase):
       best_tm = tm if best_tm is None or tm < best_tm else best_tm
     print(f"\r{name:42s}: {best_tm * 1000: 4.2f} ms, {flops / 10**12 / tm: 3.2f} tflops")
 
-  def test_layer1_in(self): self._test_layer(*self._get_layer(0, 0))
-  def test_layer1(self): self._test_layer(*self._get_layer(0, 1))
+  def test_layer1_1(self): self._test_layer(*self._get_layer(0, 0))
+  def test_layer1_2(self): self._test_layer(*self._get_layer(0, 1))
 
-  def test_layer2_in(self): self._test_layer(*self._get_layer(1, 0))
+  def test_layer2_1(self): self._test_layer(*self._get_layer(1, 0))
 
-  def test_layer2(self): self._test_layer(*self._get_layer(1, 1))
+  def test_layer2_2(self): self._test_layer(*self._get_layer(1, 1))
 
-  def test_layer3_in(self): self._test_layer(*self._get_layer(2, 0))
+  def test_layer3_1(self): self._test_layer(*self._get_layer(2, 0))
 
-  def test_layer3(self): self._test_layer(*self._get_layer(2, 1))
+  def test_layer3_2(self): self._test_layer(*self._get_layer(2, 1))
 
-  def test_layer4_in(self): self._test_layer(*self._get_layer(3, 0))
+  def test_layer4_1(self): self._test_layer(*self._get_layer(3, 0))
 
-  def test_layer4(self): self._test_layer(*self._get_layer(3, 1))
+  def test_layer4_2(self): self._test_layer(*self._get_layer(3, 1))
 
 if __name__ == '__main__':
   unittest.main()
