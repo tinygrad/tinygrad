@@ -213,10 +213,6 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
     if r.realized is not None or r.op is LoadOps.CONST or r in seen: continue
     output_groups[(reduce_for_op[r], ) if r in reduce_for_op else (r, )].append(r)
 
-  # bufs should fuse in the same order
-  for k, group in output_groups.items():
-    if len(group) > 1: output_groups[k] = list(sorted(group, key=lambda x: x.key))
-
   # preschedule all buffers in realizes
   prescheduled = {group[0]:_schedule_group(tuple(group), realizes, reduce_for_op) for group in output_groups.values()}
   schedule_targets = {out:ps for ps in prescheduled.values() for out in ps.outputs}
