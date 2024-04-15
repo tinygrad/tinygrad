@@ -4,7 +4,6 @@ import unittest
 
 from tinygrad import Tensor, TinyJit
 from tinygrad.helpers import getenv, GlobalCounters
-from tinygrad import nn
 from tinygrad.nn.optim import SGD
 from tinygrad.nn.state import get_parameters
 
