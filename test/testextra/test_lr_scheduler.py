@@ -12,7 +12,7 @@ from tinygrad.features.datasets import mnist
 np.random.seed(1337)
 Tensor.manual_seed(1337)
 
-prepro = lambda a,b,c,d: (a.flatten(1),b,c.flatten(1),d)
+def prepro(x_tr,y_tr,x_te,y_te): return (x_tr.flatten(1),y_tr,x_te.flatten(1),y_te)
 X_train, Y_train, X_test, Y_test = tuple(map(Tensor.numpy, prepro(*mnist())))
 
 class TinyBobNet:
