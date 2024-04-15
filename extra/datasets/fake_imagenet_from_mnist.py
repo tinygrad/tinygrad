@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 import pathlib, json
 from tqdm import trange
-from extra.datasets import fetch_mnist
+from tinygrad.features.datasets import mnist
+from tinygrad.tensor import Tensor
 from PIL import Image
 import numpy as np
 from multiprocessing import Pool
 
-X_train, Y_train, X_test, Y_test = fetch_mnist()
+prepro = lambda a,b,c,d: (a.flatten(1),b,c.flatten(1),d)
+X_train, Y_train, X_test, Y_test = tuple(map(Tensor.numpy, prepro(*mnist())))
 
 def act(arg):
   (basedir, i, train) = arg

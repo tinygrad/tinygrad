@@ -5,7 +5,7 @@ import numpy as np
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.nn import optim, Linear, Conv2d, BatchNorm2d
 from tinygrad.tensor import Tensor
-from extra.datasets import fetch_mnist
+from tinygrad.features.datasets import mnist
 from tinygrad.helpers import CI
 
 def compare_tiny_torch(model, model_torch, X, Y):
@@ -55,7 +55,8 @@ def compare_tiny_torch(model, model_torch, X, Y):
       np.testing.assert_allclose(model_state_dict[k].numpy(), v.detach().numpy(), atol=1e-3, err_msg=f'weight mismatch {k}')
 
 def get_mnist_data():
-  _X_train, _Y_train, X_test, Y_test = fetch_mnist()
+  prepro = lambda a,b,c,d: (a.flatten(1),b,c.flatten(1),d)
+  _X_train, _Y_train, X_test, Y_test = tuple(map(Tensor.numpy, prepro(*mnist())))
   BS = 32
   num_classes = 10
   X = Tensor(X_test[0:BS].astype(np.float32))

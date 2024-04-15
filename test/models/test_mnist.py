@@ -6,10 +6,11 @@ from tinygrad.helpers import CI
 from tinygrad.nn.state import get_parameters
 from tinygrad.nn import optim, BatchNorm2d
 from extra.training import train, evaluate
-from extra.datasets import fetch_mnist
+from tinygrad.features.datasets import mnist
 
 # load the mnist dataset
-X_train, Y_train, X_test, Y_test = fetch_mnist()
+prepro = lambda a,b,c,d: (a.flatten(1),b,c.flatten(1),d)
+X_train, Y_train, X_test, Y_test = tuple(map(Tensor.numpy, prepro(*mnist())))
 
 # create a model
 class TinyBobNet:
