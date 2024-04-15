@@ -12,7 +12,7 @@ from tinygrad.tensor import Tensor
 def fuzz_schedule(outs: List[LazyBuffer]):
   graph, in_degree, prescheduled = _graph_schedule(outs, seen:=set())
   toposorts = find_all_toposorts(graph, in_degree)
-  if DEBUG >= 2: print(colored(f"fuzzing {len(toposorts)} schedule permutations", "yellow"))
+  if DEBUG >= 1: print(colored(f"fuzzing {len(toposorts)} schedule permutation", "yellow"))
 
   # setup ground truth
   schedules: List[List[ScheduleItem]] = [[] for _ in range(len(toposorts))]
@@ -43,7 +43,7 @@ def fuzz_schedule(outs: List[LazyBuffer]):
   # run all schedules with the same seed
   seed = Tensor._seed
   for i, schedule in enumerate(schedules):
-    if DEBUG >= 2: print(colored(f"testing premutation {i}", "yellow"))
+    if DEBUG >= 1: print(colored(f"testing permutation {i}", "yellow"))
     for ei in lower_schedule(schedule):
       if len(capturing): capturing[0].add(ei)
       if isinstance(ei.prg, CustomOp): Tensor._seed = seed
