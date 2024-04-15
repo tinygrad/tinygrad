@@ -268,6 +268,8 @@ jobs:
       run: time HSA=1 DEFAULT_FLOAT=HALF STEPS=350 BS=1536 GPUS=6 TARGET_EVAL_ACC_PCT=93.3 python3 examples/hlb_cifar10.py | tee train_cifar_six_gpu.txt
     - name: Run MLPerf resnet eval on training data
       run: time HSA=1 MODEL=resnet python3 examples/mlperf/model_eval.py
+    - name: Run single MLPerf resnet training layers with BEAM
+      run: DEBUG=0 JITCNT=10 BEAM=2 DEFAULT_FLOAT=HALF CNT=5 python test/external/external_benchmark_resnet.py BenchmarkResnetTrain.test_layer1 BenchmarkResnetTrain.test_layer2_in
     - name: Run 10 MLPerf ResNet50 training steps (1 gpu)
       run: HSA=1 BENCHMARK=10 BS=128 GPUS=1 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet_one_gpu.txt
     - name: Run 10 MLPerf ResNet50 training steps (6 gpu)
