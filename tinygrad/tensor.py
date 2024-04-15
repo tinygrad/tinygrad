@@ -70,11 +70,7 @@ def _pad_left(*shps:Tuple[sint, ...], v=1): return tuple((v,) * (max(len(i_) for
 def broadcast_shape(*shps:Tuple[sint, ...]): return tuple(0 if any(sh_ == 0 for sh_ in sh) else max(sh) for sh in zip(*_pad_left(*shps)))
 
 class Tensor:
-  """
-  A `Tensor` is a multi-dimensional matrix containing elements of a single data type.
-
-  Everything in this class is syntactic sugar around function.py, imported here as `F`
-  """
+  """A `Tensor` is a multi-dimensional matrix containing elements of a single data type."""
   __slots__ = "lazydata", "requires_grad", "grad", "_ctx"
   __deletable__ = ('_ctx',)
   training: ClassVar[bool] = False

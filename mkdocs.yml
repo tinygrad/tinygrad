@@ -3,6 +3,10 @@ site_name: tinygrad docs
 site_url: https://docs.tinygrad.org/
 nav:
 - Home: index.md
+- Tensor: tensor.md
+- dtypes: dtypes.md
+- Neural Networks: nn.md
+- Function: function.md
 #- tinygrad: reference/
 
 #extra_css:
@@ -44,7 +48,7 @@ plugins:
           docstring_section_style: list
           filters: ["!^_"]
           heading_level: 3
-          inherited_members: true
+          inherited_members: false
           merge_init_into_class: true
           separate_signature: true
           show_root_heading: true
