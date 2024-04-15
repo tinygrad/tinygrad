@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import os, math, time
 import numpy as np
-from tinygrad import Tensor, nn, fetch, Device
+from tinygrad import Tensor, nn, fetch, Device, TinyJit, GlobalCounters
 from dataclasses import dataclass
 
 @dataclass
@@ -162,12 +162,19 @@ if __name__ == "__main__":
   data_iter = iter(get_batch())
   x, y = next(data_iter) # we'll overfit this batch below
   optimizer = nn.optim.Adam(nn.state.get_parameters(model), lr=1e-4)
-  for i in range(args.num_iterations):
-    t0 = time.time()
-    logits, loss = model(x, y)
+
+  @TinyJit
+  def step(x, y):
+    _, loss = model(x, y)
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
+    return loss
+
+  for i in range(args.num_iterations):
+    GlobalCounters.reset()
+    t0 = time.time()
+    loss = step(x.contiguous(), y.contiguous())
     Device[Device.DEFAULT].synchronize()
     t1 = time.time()
     print(f"iteration {i}, loss: {loss.item()}, time: {(t1-t0)*1000:.3f}ms")
