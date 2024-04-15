@@ -11,6 +11,12 @@ from extra.models import resnet
 from examples.mlperf.initializers import Conv2dHeNormal, Linear
 from examples.hlb_cifar10 import UnsyncedBatchNorm
 
+# benchmark: BEAM=2 JITCNT=10 CNT=5 DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py
+# inspect:   DEBUG=2 BEAM=2 JITCNT=1 CNT=1 DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py
+# inspect convs:   DEBUG=2 BEAM=2 CONV=1 JITCNT=1 CNT=1 DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py
+# inspect convs with batchnorm: DEBUG=2 BEAM=2 CONV=1 BN=1 JITCNT=1 CNT=1 DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py
+# etc
+
 bs = getenv("BS", 64)
 
 class BenchmarkResnetTrain(unittest.TestCase):
@@ -33,14 +39,14 @@ class BenchmarkResnetTrain(unittest.TestCase):
 
     # get specific conv (0 or 1)
     if conv:
-      if bn: f = lambda x: layer.bn2(layer.conv2(x))
-      else: f = layer.conv2
+      if bn: f = [layer.conv2, layer.bn2]
+      else: f = [layer.conv2]
       cin = layer.conv2.in_channels
       xy = xy // layer.conv1.stride
-      return f"{name} conv2 x{(bs, cin, xy, xy)} k{layer.conv1.weight.shape}" + (" bn" if bn else ""), f, cin, xy
+      return f"{name} conv2 x{str((bs, cin, xy, xy)):20s} k{str(layer.conv2.weight.shape):20s}" + (" bn" if bn else ""), f, cin, xy
 
     cin = layer.conv1.in_channels
-    return f"{name} x{(bs, cin, xy, xy)}", layer, cin, xy
+    return f"{name} x{(bs, cin, xy, xy)}", [layer], cin, xy
   def _test_layer(self, name, layer, cin, xy):
     optim = SGD(get_parameters(layer), bs / 128 * 1.0)  # need sgd for some params but not consequential for benchmarking
 
@@ -48,7 +54,7 @@ class BenchmarkResnetTrain(unittest.TestCase):
     @TinyJit
     def step(x):
       for _ in range(JITCNT):
-        y = layer(x).relu()
+        y = x.sequential(layer).relu()
         y.mean().backward()
         optim.step([y, x.grad])
       return y.detach()
