@@ -6,6 +6,8 @@ nav:
 - Tensor: tensor.md
 - dtypes: dtypes.md
 - Neural Networks: nn.md
+- Quickstart: quickstart.md
+- Showcase: showcase.md
 - Developer: developer.md
 - Function: function.md
 #- tinygrad: reference/
