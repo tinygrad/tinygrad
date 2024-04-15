@@ -1,8 +1,3 @@
-"""This is the frontend of tinygrad.
-
-It's very [PyTorch](https://pytorch.org/docs/stable/index.html) like
-"""
-
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
 import time, math, itertools, functools
@@ -75,7 +70,10 @@ def _pad_left(*shps:Tuple[sint, ...], v=1): return tuple((v,) * (max(len(i_) for
 def broadcast_shape(*shps:Tuple[sint, ...]): return tuple(0 if any(sh_ == 0 for sh_ in sh) else max(sh) for sh in zip(*_pad_left(*shps)))
 
 class Tensor:
-  """A `Tensor` is a multi-dimensional matrix containing elements of a single data type.
+  """
+  A `Tensor` is a multi-dimensional matrix containing elements of a single data type.
+
+  Everything in this class is syntactic sugar around function.py, imported here as `F`
   """
   __slots__ = "lazydata", "requires_grad", "grad", "_ctx"
   __deletable__ = ('_ctx',)
@@ -235,9 +233,7 @@ class Tensor:
     return Tensor(LazyBuffer.loadop(op, shape, dtype or dtypes.default_float, Device.canonicalize(device), arg), device, dtype, **kwargs)
 
   @staticmethod
-  def empty(*shape, **kwargs) -> Tensor:
-    """Returns a tensor filled with uninitialized data."""
-    return Tensor._loadop(LoadOps.EMPTY, argfix(*shape), **kwargs)
+  def empty(*shape, **kwargs): return Tensor._loadop(LoadOps.EMPTY, argfix(*shape), **kwargs)
 
   _seed: int = int(time.time())
   _rng_counter: Optional[Tensor] = None
@@ -246,7 +242,6 @@ class Tensor:
 
   @staticmethod
   def rand(*shape, device:Optional[Union[Tuple[str, ...], str]]=None, dtype:Optional[DType]=None, **kwargs):
-    """Returns a tensor filled with random numbers from a uniform distribution on the interval [0,1)"""
     if Tensor._rng_counter is None: Tensor._rng_counter = Tensor([0], dtype=dtypes.uint32, requires_grad=False)
     if not THREEFRY.value:
       # for bfloat16, numpy rand passes buffer in float
@@ -275,18 +270,13 @@ class Tensor:
 
   @staticmethod
   def full(shape:Tuple[sint, ...], fill_value:ConstType, **kwargs):
-    """Creates a tensor filled with fill_value."""
     return Tensor(fill_value, **kwargs).reshape((1, )*len(new_shape := argfix(shape))).expand(new_shape)
 
   @staticmethod
-  def zeros(*shape, **kwargs):
-    """Returns a tensor filled with the scalar value 0."""
-    return Tensor.full(argfix(*shape), 0.0, **kwargs)
+  def zeros(*shape, **kwargs): return Tensor.full(argfix(*shape), 0.0, **kwargs)
 
   @staticmethod
-  def ones(*shape, **kwargs):
-    """Returns a tensor filled with the scalar value 1."""
-    return Tensor.full(argfix(*shape), 1.0, **kwargs)
+  def ones(*shape, **kwargs): return Tensor.full(argfix(*shape), 1.0, **kwargs)
 
   @staticmethod
   def arange(start, stop=None, step=1, **kwargs):
@@ -851,7 +841,6 @@ class Tensor:
   def round(self: Tensor) -> Tensor:
     return ((self > 0) == ((b := self.cast(dtypes.int32) / 2.0).cast(dtypes.int32) == b)).where((self - 0.5).ceil(), (self + 0.5).floor())
   def lerp(self, end: Tensor, weight: Union[Tensor, float]) -> Tensor: return self + (end - self) * weight
-
   def square(self): return self*self
   def clip(self, min_, max_): return self.maximum(min_).minimum(max_)
   def abs(self): return self.relu() + (-self).relu()
