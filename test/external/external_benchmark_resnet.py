@@ -74,7 +74,7 @@ class BenchmarkResnetTrain(unittest.TestCase):
       if mem_used is None: mem_used = GlobalCounters.mem_used
       tm = (et-st) / JITCNT
       best_tm = tm if best_tm is None or tm < best_tm else best_tm
-    print(f"\r{name:42s}: {best_tm * 1000:>8.2f} ms, {flops / 10**12 / tm:>7.2f} tflops, {mem_used / 10**9: 7.2f} GB used")
+    print(f"\r{name:42s}: {best_tm * 1000:>9.2f} ms, {flops / 10**12 / tm:>7.2f} tflops, {mem_used / 10**9: 7.2f} GB used")
 
   def test_layer1_1(self): self._test_layer(*self._get_layer(0, 0))
   def test_layer1_2(self): self._test_layer(*self._get_layer(0, 1))
