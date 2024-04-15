@@ -1,0 +1,24 @@
+# pip install mkdocs mkdocs-material mkdocstrings[python]
+site_name: tinygrad docs
+site_url: https://docs.tinygrad.org/
+nav:
+- Home: index.md
+- tinygrad: reference/
+theme:
+  name: material
+  palette:
+    scheme: default
+plugins:
+- mkdocstrings:
+    handlers:
+      python:
+        paths: [tinygrad]
+        options:
+          show_source: true
+          show_root_heading: yes
+          heading_level: 0
+- gen-files:
+    scripts:
+      - docs/gen_ref_pages.py
+- literate-nav:
+    nav_file: SUMMARY.md
