@@ -56,7 +56,7 @@ class BenchmarkResnetTrain(unittest.TestCase):
 
     CNT = getenv("CNT", 5)
     best_tm = None
-    flops = None
+    flops, mem_used = None, None
     for i in range(CNT):
       x = Tensor.randn(bs, cin, xy, xy, requires_grad=True).realize()
       GlobalCounters.reset()
@@ -66,9 +66,10 @@ class BenchmarkResnetTrain(unittest.TestCase):
       et = time.perf_counter()
 
       if flops is None: flops = GlobalCounters.global_ops
+      if mem_used is None: mem_used = GlobalCounters.mem_used
       tm = (et-st) / JITCNT
       best_tm = tm if best_tm is None or tm < best_tm else best_tm
-    print(f"\r{name:42s}: {best_tm * 1000: 4.2f} ms, {flops / 10**12 / tm: 3.2f} tflops")
+    print(f"\r{name:42s}: {best_tm * 1000: 4.2f} ms, {flops / 10**12 / tm: 3.2f} tflops, {mem_used / 10**9: 2.2f} GB used")
 
   def test_layer1_1(self): self._test_layer(*self._get_layer(0, 0))
   def test_layer1_2(self): self._test_layer(*self._get_layer(0, 1))
