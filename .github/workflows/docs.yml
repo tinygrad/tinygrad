@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - master
+      - mkdocs
 permissions:
   contents: write
 jobs:
