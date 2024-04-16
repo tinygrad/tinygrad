@@ -19,6 +19,8 @@ from examples.hlb_cifar10 import UnsyncedBatchNorm
 # inspect convs with batchnorm:     DEBUG=2 BEAM=2 CONV=1 BN=1 JITCNT=1 CNT=1 DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py
 # etc
 
+# memory will be slightly high with JITCNT > 1
+
 bs = getenv("BS", 64)
 
 class BenchmarkResnetTrain(unittest.TestCase):
