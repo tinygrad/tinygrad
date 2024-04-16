@@ -456,18 +456,18 @@ class TestSchedule(unittest.TestCase):
     sched = check_schedule(a, 2)
     for si in sched[:-1]: assert all(out.dtype is dtypes.half for out in si.outputs)
 
-    # parallel reduce
-    # a = x.sum().half().float() * y.sum().half().float()
-    # b = a + 1
-    # c = a + 2
-    # sched = check_schedule([b, c], 4)
-    # doesn't store in half because it doesn't chase
-
     # expand
     # expand will realize just after the .float(), so requires change to realize-before-expand
     # normal = (x.sum().half().float().reshape(1) * y).sum()
     # sched = check_schedule(normal, 2)
     # for si in sched[:-1]: assert all(out.dtype == dtypes.half for out in si.outputs[:-1])
+
+    # parallel reduce
+    # a = x.sum().half().float() * y.sum().half().float()
+    # b = a + 1
+    # c = a + 2
+    # sched = check_schedule([b, c], 4)
+    # doesn't store either in half because it doesn't chase
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
