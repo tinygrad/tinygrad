@@ -430,5 +430,11 @@ class TestSchedule(unittest.TestCase):
     out = x.contiguous() + y.contiguous()
     check_schedule(out, 2)
 
+  def test_prefer_half_buffer(self):
+    x = Tensor.ones(4).contiguous().realize()
+    dummy = x.sum().half().float().contiguous()
+    # should not create extra kernel if output will be realized anyways
+    check_schedule(dummy, 1)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
