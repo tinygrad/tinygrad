@@ -12,40 +12,47 @@ from tinygrad.tensor import Tensor
 def fuzz_schedule(outs: List[LazyBuffer]):
   graph, in_degree, prescheduled = _graph_schedule(outs, seen:=set())
   toposorts = find_all_toposorts(graph, in_degree)
-  if DEBUG >= 1: print(colored(f"fuzzing {len(toposorts)} schedule permutation", "yellow"))
+  if DEBUG >= 1: print(colored(f"fuzzing {len(toposorts)} schedule permutations", "yellow"))
 
   # setup ground truth
   ground_truth: Dict[LazyBuffer, Buffer] = {}
+  assign_bufs: Dict[LazyBuffer, memoryview] = {}
+  seed = Tensor._seed
   for key in toposorts[0]:
     for out in (ps:=prescheduled[key]).outputs:
       seen.add(out)
       ground_truth[out] = out.buffer
+      # freeze assign state before exec
+      if out.op is LoadOps.ASSIGN: assign_bufs[out] = out.buffer.as_buffer()
     si = ScheduleItem(ps.ast, tuple(x.buffer for x in ps.outputs if x.size != 0), tuple(x.buffer for x in ps.inputs if x.size != 0))
     ei = ExecItem(lower_schedule_item(si), list(si.outputs+si.inputs))
     if len(capturing): capturing[0].add(ei)
+    if isinstance(ei.prg, CustomOp): Tensor._seed = seed
     ei.run()
 
-  for lb, rawbuf in ground_truth.items():
-    print(np.frombuffer(rawbuf.as_buffer(), rawbuf.dtype.np)[:10])
-
-  """
   # create new Buffers for each permutation
   for i, ts in enumerate(toposorts[1:]):
+    if DEBUG >= 1: print(colored(f"testing permutation {i}", "yellow"))
     rawbufs: Dict[LazyBuffer, Buffer] = {}
     for key in ts:
       for out in (ps:=prescheduled[key]).outputs:
         rawbufs[out] = Buffer(out.buffer.device, out.buffer.size, out.buffer.dtype)
-        if out.op is LoadOps.ASSIGN: rawbufs[out].ensure_allocated().copyin(out.buffer.as_buffer())
-        outputs[out].append(rawbufs[out])
-
+        if out in assign_bufs: rawbufs[out].ensure_allocated().copyin(assign_bufs[out])
       for x in ps.inputs:
         if x not in rawbufs:
           if x.device == "NPY": rawbufs[x] = x.buffer
           # copy the pre realized input
           else: rawbufs[x] = Buffer(x.buffer.device, x.buffer.size, x.buffer.dtype, initial_value=x.buffer.as_buffer())
-      schedules[i+1].append(ScheduleItem(ps.ast, tuple(rawbufs[x] for x in ps.outputs if x.size != 0),
-                                         tuple(rawbufs[x] for x in ps.inputs if x.size != 0)))
-  """
+      si = ScheduleItem(ps.ast, tuple(rawbufs[x] for x in ps.outputs if x.size != 0), tuple(rawbufs[x] for x in ps.inputs if x.size != 0))
+      ei = ExecItem(lower_schedule_item(si), list(si.outputs+si.inputs))
+      if len(capturing): capturing[0].add(ei)
+      if isinstance(ei.prg, CustomOp): Tensor._seed = seed
+      ei.run()
+      for out in ps.outputs:
+        gt = np.frombuffer(ground_truth[out].as_buffer(), out.dtype.np)
+        buf = np.frombuffer(rawbufs[out].as_buffer(), out.dtype.np)
+        np.testing.assert_allclose(gt, buf, atol=1e-2, rtol=1e-2)
+        del rawbufs[out]
 
 T = TypeVar("T")
 def find_all_toposorts(graph:DefaultDict[T, List[T]], in_degree:DefaultDict[T, int]) -> List[List[T]]:
