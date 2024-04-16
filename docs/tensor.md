@@ -16,6 +16,11 @@
 ::: tinygrad.Tensor.realize
 ::: tinygrad.Tensor.replace
 ::: tinygrad.Tensor.assign
+::: tinygrad.Tensor.detach
+::: tinygrad.Tensor.to
+::: tinygrad.Tensor.to_
+::: tinygrad.Tensor.shard
+::: tinygrad.Tensor.shard_
 ::: tinygrad.Tensor.contiguous
 ::: tinygrad.Tensor.contiguous_backward
 
@@ -38,6 +43,13 @@
 ::: tinygrad.Tensor.glorot_uniform
 ::: tinygrad.Tensor.kaiming_uniform
 ::: tinygrad.Tensor.kaiming_normal
+
+## Data Access
+
+::: tinygrad.Tensor.data
+::: tinygrad.Tensor.item
+::: tinygrad.Tensor.tolist
+::: tinygrad.Tensor.numpy
 
 ## Movement (low level)
 

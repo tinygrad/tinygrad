@@ -2,6 +2,14 @@ Welcome to the docs for tinygrad. This page is for users of the tinygrad library
 
 tinygrad is not 1.0 yet, but it will be soon. The API has been pretty stable for a while.
 
+While you can `pip install tinygrad`, we encourage you to install from source:
+
+```bash
+git clone https://github.com/tinygrad/tinygrad.git
+cd tinygrad
+python3 -m pip install -e .
+```
+
 ## tinygrad Usage
 
 The main class you will interact with is [Tensor](tensor.md). It functions very similarly to PyTorch, but has a bit more of a functional style. tinygrad supports [many datatypes](dtypes.md).  All operations in tinygrad are lazy, meaning they won't do anything until you realize.
@@ -16,21 +24,19 @@ We have a [quickstart guide](quickstart.md) and a [showcase](showcase.md)
 
 ## Differences from PyTorch
 
-If you are migrating from PyTorch, welcome. We hope you will find tinygrad both familiar and somehow more "correct feeling"
+If you are migrating from PyTorch, welcome. Most of the API is the same. We hope you will find tinygrad both familiar and somehow more "correct feeling"
 
 ### tinygrad doesn't have nn.Module
 
-There's nothing special about a "Module" class in tinygrad, it's just a normal class. `get_parameter`
+There's nothing special about a "Module" class in tinygrad, it's just a normal class. [`nn.state.get_parameters`](nn/#tinygrad.nn.state.get_parameters) can be used to recursively search normal claases for valid tensors. Instead of the `forward` method in PyTorch, tinygrad just uses `__call__`
 
 ### tinygrad is functional
 
-<!-- link these methods -->
-
-In tinygrad, you can do `x.conv2d(w, b)` or `x.sparse_categorical_cross_entropy(y)`
+In tinygrad, you can do [`x.conv2d(w, b)`](tensor/#tinygrad.Tensor.conv2d) or [`x.sparse_categorical_cross_entropy(y)`](tensor/#tinygrad.Tensor.sparse_categorical_crossentropy). We do also have a [`Conv2D`](nn/#tinygrad.nn.Conv2d) class like PyTorch if you want a place to keep the state, but all stateless operations don't have classes.
 
 ### tinygrad is lazy
 
-When you do `a+b` in tinygrad, nothing happens.
+When you do `a+b` in tinygrad, nothing happens. It's not until you [`realize`](tensor/#tinygrad.Tensor.realize) the Tensor that the computation actually runs.
 
 ### tinygrad requires @TinyJIT to be fast
 
