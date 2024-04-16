@@ -3,7 +3,7 @@
 # NOTE: this has overlap with external_test_opt.py
 
 import unittest
-from typing import List, Optional
+from typing import List, Optional, Union
 from tinygrad.tensor import Tensor
 from tinygrad.ops import LoadOps
 from tinygrad.helpers import DEBUG, GRAPH
@@ -11,8 +11,9 @@ from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.graph import print_tree, realized_lazybuffer
 from tinygrad.engine.schedule import create_schedule
 from tinygrad import nn, dtypes
+from test.helpers import is_dtype_supported
 
-def check_schedule(t:Tensor, allowed:int, to_prerealize:Optional[List[Tensor]]=None, filter_loadops=True):
+def check_schedule(t:Union[Tensor, List[Tensor]], allowed:int, to_prerealize:Optional[List[Tensor]]=None, filter_loadops=True):
   seen = set()
   if to_prerealize:
     for pre in to_prerealize:
@@ -20,7 +21,7 @@ def check_schedule(t:Tensor, allowed:int, to_prerealize:Optional[List[Tensor]]=N
         for i,out in enumerate(s.outputs):
           if GRAPH: realized_lazybuffer(out, 0)
           seen.add(out)
-  sched = create_schedule([t.lazydata], seen)
+  sched = create_schedule([t_.lazydata for t_ in ([t] if isinstance(t, Tensor) else t)], seen)
   if GRAPH:
     for i,s in enumerate(sched):
       for out in s.outputs: realized_lazybuffer(out, i+1)
@@ -37,6 +38,7 @@ def check_schedule(t:Tensor, allowed:int, to_prerealize:Optional[List[Tensor]]=N
     l = Linearizer(*s.ast)
     l.hand_coded_optimizations()
     l.linearize()
+  return sched
 
 class TestSchedule(unittest.TestCase):
   def test_basic_binop_fusion(self):
@@ -429,6 +431,43 @@ class TestSchedule(unittest.TestCase):
     y = Tensor(2) + Tensor(2)
     out = x.contiguous() + y.contiguous()
     check_schedule(out, 2)
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  def test_prefer_half_buffer(self):
+    x = Tensor.ones(4).contiguous().realize()
+    # y = Tensor.ones(4).contiguous().realize()
+    z = Tensor.ones(4, 4).contiguous().realize()
+
+    # should not create extra kernel if output will be realized anyways
+    dummy = x.sum().half().float()
+    check_schedule(dummy, 1)
+    dummy = x.sum().half().float().contiguous() + 1
+    check_schedule(dummy, 2)
+
+    # shared between two outputs
+    shared = x.sum().half().float()
+    a = shared * 2
+    b = shared * 3
+    sched = check_schedule([a, b], 3)
+    for si in sched[:-2]: assert all(out.dtype is dtypes.half for out in si.outputs)
+
+    # reduce
+    a = z.sum(axis=0).half().float().sum(axis=0)
+    sched = check_schedule(a, 2)
+    for si in sched[:-1]: assert all(out.dtype is dtypes.half for out in si.outputs)
+
+    # expand
+    # expand will realize just after the .float(), so requires change to realize-before-expand
+    # normal = (x.sum().half().float().reshape(1) * y).sum()
+    # sched = check_schedule(normal, 2)
+    # for si in sched[:-1]: assert all(out.dtype == dtypes.half for out in si.outputs[:-1])
+
+    # parallel reduce
+    # a = x.sum().half().float() * y.sum().half().float()
+    # b = a + 1
+    # c = a + 2
+    # sched = check_schedule([b, c], 4)
+    # doesn't store either in half because it doesn't chase
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
