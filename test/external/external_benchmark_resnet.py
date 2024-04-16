@@ -2,8 +2,8 @@ import functools
 import time
 import unittest
 
-from tinygrad import Tensor, TinyJit
-from tinygrad.helpers import getenv, GlobalCounters
+from tinygrad import Tensor, TinyJit, GlobalCounters
+from tinygrad.helpers import getenv
 from tinygrad.nn.optim import SGD
 from tinygrad.nn.state import get_parameters
 
@@ -82,22 +82,16 @@ class BenchmarkResnetTrain(unittest.TestCase):
       mem_used = GlobalCounters.mem_used  # a little high with JITCNT > 1 fsr
       kernels = GlobalCounters.kernel_count // JITCNT
       tm = (et-st) / JITCNT
-      best_tm = tm if best_tm is None or tm < best_tm else best_tm
+      if best_tm is None or tm < best_tm: best_tm = tm
     print(f"\r{name:42s}: {best_tm * 1000:>9.2f} ms, {flops / 10**12 / tm:>7.2f} tflops, {mem_used / 10**9: 7.2f} GB used, {kernels:>6d} kernels")
 
   def test_layer1_1(self): self._test_layer(*self._get_layer(0, 0))
   def test_layer1_2(self): self._test_layer(*self._get_layer(0, 1))
-
   def test_layer2_1(self): self._test_layer(*self._get_layer(1, 0))
-
   def test_layer2_2(self): self._test_layer(*self._get_layer(1, 1))
-
   def test_layer3_1(self): self._test_layer(*self._get_layer(2, 0))
-
   def test_layer3_2(self): self._test_layer(*self._get_layer(2, 1))
-
   def test_layer4_1(self): self._test_layer(*self._get_layer(3, 0))
-
   def test_layer4_2(self): self._test_layer(*self._get_layer(3, 1))
 
 if __name__ == '__main__':
