@@ -76,9 +76,9 @@ class BenchmarkResnetTrain(unittest.TestCase):
       step(x)._data()
       et = time.perf_counter()
 
-      if flops is None: flops = GlobalCounters.global_ops
-      mem_used = GlobalCounters.mem_used
-      kernels = GlobalCounters.kernel_count
+      if flops is None: flops = GlobalCounters.global_ops / JITCNT
+      mem_used = GlobalCounters.mem_used  # a little high with JITCNT > 1 fsr
+      kernels = GlobalCounters.kernel_count // JITCNT
       tm = (et-st) / JITCNT
       best_tm = tm if best_tm is None or tm < best_tm else best_tm
     print(f"\r{name:42s}: {best_tm * 1000:>9.2f} ms, {flops / 10**12 / tm:>7.2f} tflops, {mem_used / 10**9: 7.2f} GB used, {kernels:>6d} kernels")
