@@ -79,6 +79,9 @@ class Kernel:
     loadops = [BufferOps.LOAD, BufferOps.CONST]
     self.bufs: List[Union[MemBuffer, ConstBuffer, LocalBuffer]] = self.outbufs + dedup([x.arg for x in self.lazyops if x.op in loadops])
 
+    extra_bufs = dedup(flatten([x.extra_bufs for x in self.lazyops if x.extra_bufs is not None]))
+    self.bufs = self.bufs + [x.arg for x in extra_bufs]
+
     # get earlybufs, before the one reduce op
     self.earlybufs = [x.arg for x in self.reduceop.lazyops if x.op in BufferOps] if self.reduceop else []
     self.full_buf_index: int = self.bufs.index(self.earlybufs[0]) if self.earlybufs else 0

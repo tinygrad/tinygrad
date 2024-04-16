@@ -68,8 +68,11 @@ def _recursive_lazyop(buf:LazyBuffer, membufs:List[LazyBuffer], outbufs:Tuple[La
     st = ShapeTracker.from_shape(buf.srcs[0].shape)
 
   # otherwise we fuse it like normal
+  # st_var_bufs = [var.tensor.lazydata for var in st.vars() if var.tensor is not None]
   cache[(buf, st)] = ret = \
-    LazyOp(buf.op, tuple(_recursive_lazyop(x, membufs, outbufs, var_vals, st, realizes, cache, assign_to, assign_idx) for x in buf.srcs), buf.arg)
+    LazyOp(buf.op, tuple(_recursive_lazyop(x, membufs, outbufs, var_vals, st, realizes, cache, assign_to, assign_idx)
+                         for x in buf.srcs), buf.arg,
+           extra_bufs=[_recursive_lazyop(var.tensor.lazydata, membufs, outbufs, var_vals, st, realizes, cache, assign_to, assign_idx) for var in st.vars() if var.tensor is not None])
   return ret
 
 def _schedule_one(out:LazyBuffer, realizes:Set[LazyBuffer], reduce_for_op: Dict[LazyBuffer, LazyBuffer]) -> _LBScheduleItem:
@@ -83,7 +86,7 @@ def _schedule_one(out:LazyBuffer, realizes:Set[LazyBuffer], reduce_for_op: Dict[
     op = _recursive_lazyop(out, membufs, (out, ), var_vals, output_st, realizes, cache={})
     output_view, vv = output_view.simplify().unbind()
     if vv: var_vals.update(vv)
-    op, inputs = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_view)), membufs[1:]
+    op, inputs = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_view)), membufs[1:]+[vals[1].lazydata._base for vals in var_vals.values() if vals[1] is not None]
   return _LBScheduleItem((op,), (out,), tuple(inputs), var_vals)
 
 # recursively search the entire graph for all LazyBuffers, insert realizes after expands

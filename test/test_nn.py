@@ -319,6 +319,15 @@ class TestNN(unittest.TestCase):
     torch_z = torch_layer(torch_x)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-3, rtol=5e-3)
 
+  def test_embedding_tiny(self):
+    B, T, embed_size, vocab_size = 4, 3, 20, 28
+
+    # create in tinygrad
+    layer = Embedding(vocab_size, embed_size)
+    x = Tensor(np.random.randint(0, vocab_size, (B, T))).realize() # TODO fix so this doesn't need to be realized before loading in the var
+    layer(x).realize()
+    print(layer(x).numpy())
+
   def test_embedding(self):
     B, T, embed_size, vocab_size = 4, 10, 20, 28
 

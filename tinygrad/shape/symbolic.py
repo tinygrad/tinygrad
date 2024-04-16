@@ -121,17 +121,24 @@ class Variable(Node):
   def __init__(self, expr:str, nmin:int, nmax:sint):
     self.expr, self.min, self.max = expr, nmin, nmax
     self._val: Optional[int] = None
+    self._tensor = None
   @property
   def val(self):
     assert self._val is not None, f"Variable isn't bound, can't access val of {self}"
     return self._val
+  @property
+  def tensor(self): return self._tensor
   def bind(self, val):
     assert self._val is None and self.min<=val<=self.max, f"cannot bind {val} to {self}"
     self._val = val
     return self
+  def bind_tensor(self, tensor, idx):
+    self._val = idx
+    self._tensor = tensor
+    return self
   def unbind(self) -> Tuple[Variable, int]:
     assert self.val is not None, f"cannot unbind {self}"
-    return Variable(self.expr, self.min, self.max), self.val
+    return Variable(self.expr, self.min, self.max), (self.val, self.tensor)
   def vars(self): return {self}
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node: return var_vals.get(self, self)
 
