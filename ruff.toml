@@ -28,6 +28,7 @@ line-length = 150
 exclude = [
   "disassemblers/",
   "docs/",
+  "docs-legacy/",
   "examples/",
   "extra/",
   "openpilot/",
