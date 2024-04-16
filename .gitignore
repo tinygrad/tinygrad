@@ -24,8 +24,9 @@ disassemblers/cuda_ioctl_sniffer
 extra/datasets/cifar-10-python.tar.gz
 extra/datasets/librispeech/
 extra/datasets/imagenet/
-extra/datasets/wiki/
+extra/datasets/kits19
 extra/datasets/kits19/
+extra/datasets/wiki/
 extra/datasets/squad/
 extra/datasets/img_align_celeba*
 extra/datasets/open-images-v6-mlperf
@@ -51,3 +52,4 @@ quickstart.py
 .hypothesis
 weights
 *.lprof
+site/

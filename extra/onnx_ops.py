@@ -428,7 +428,7 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
       y_out = roi[-2][0] * (X.shape[-2] - 1) + y_out * ((roi[-2][1] - roi[-2][0]) * (X.shape[-2] - 1) / (output_shape[-2] - 1)) if output_shape[-2] > 1 else Tensor([0.5 * (roi[-2][0] + roi[-2][1]) * (X.shape[-2] - 1)])
     return x_out.clip(0, X.shape[-1]-1), y_out.clip(0, X.shape[-2]-1)
   if roi is not None:
-    roi = safe_numpy(roi)
+    roi = safe_numpy(roi).tolist()
     roi = [(st,ed) for st, ed in zip(roi[:len(roi)//2], roi[len(roi)//2:])]
     roi_ = [(1,1)] * 4
     if axes is not None:
@@ -691,7 +691,7 @@ def Adagrad(R, T, *inputs, decay_factor=0.0, epsilon=0.0, norm_coefficient=0.0):
     X.grad.requires_grad, H.requires_grad = False, False # TODO manually turning off requires_grad, see TODO under (domain == "ai.onnx.preview.training") in onnx.py
     H.assign(H.detach() + X.grad * X.grad).realize()
     H_adaptive = H.sqrt() + epsilon
-    X.assign(X.detach() - r * X.grad / H_adaptive)
+    X.assign(X.detach() - r.tolist() * X.grad / H_adaptive)
     ret.extend([X, H])
   ret = ret[::2] + ret[1::2]
   return tuple(ret)
@@ -699,7 +699,7 @@ def Adagrad(R, T, *inputs, decay_factor=0.0, epsilon=0.0, norm_coefficient=0.0):
 def Momentum(R, T, *inputs, alpha, beta, mode, norm_coefficient):
   groups = len(inputs) // 3
   grouped_inputs = [inputs[i::groups] for i in range(groups)]
-  T, R = safe_numpy(T), safe_numpy(R)
+  T, R.requires_grad = T.item(), False
   beta_adjusted = beta if T > 0 else 1
   ret = []
   for X, G, V in grouped_inputs:
@@ -716,7 +716,7 @@ def Momentum(R, T, *inputs, alpha, beta, mode, norm_coefficient):
 def Adam(R, T, *inputs, alpha=0.9, beta=0.999, epsilon=0.0, norm_coefficient=0.0, norm_coefficient_post=0.0):
   groups = len(inputs) // 4
   grouped_inputs = [inputs[i::groups] for i in range(groups)]
-  T, R = safe_numpy(T), safe_numpy(R)
+  T, R.requires_grad = T.item(), False
   ret = []
   for X, G, V, H in grouped_inputs:
     X.grad = (norm_coefficient * X + G).realize()
