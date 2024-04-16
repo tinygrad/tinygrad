@@ -16,6 +16,7 @@ class CStyleLanguage(NamedTuple):
   smem_prefix_for_cast: bool = True
   arg_int_prefix: str = "const int"
   barrier: str = ""
+  first_loop_prefix: str = ""
   code_for_workitem: Dict[Union[Literal["g"], Literal["l"], Literal["i"]], Callable] = {}
   global_max: List[int] = []
   local_max: List[int] = []
@@ -122,6 +123,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str
     else:
       assert dtype is not None, f"None dtype for uop {uop}"
       if uop is UOps.LOOP:
+        if depth is 1: kk(lang.first_loop_prefix.format(nloops=sum(u.uop is UOps.LOOP for u in uops)))
         kk(f"for (int {(expr := ssa('ridx',u))} = {r[vin[0]]}; {expr} < {r[vin[1]]}; {expr}++) {{")
         depth += 1
       elif uop is UOps.ALU:
