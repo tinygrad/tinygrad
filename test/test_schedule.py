@@ -464,7 +464,7 @@ class TestSchedule(unittest.TestCase):
     # doesn't store in half...
 
     # expand
-    # expand will realize just after the .float(), so requires a different change
+    # expand will realize just after the .float(), so requires change to realize-before-expand
     # normal = (x.sum().half().float().reshape(1) * y).sum()
     # sched = check_schedule(normal, 2)
     # for si in sched[:-1]: assert all(out.dtype == dtypes.half for out in si.outputs[:-1])
