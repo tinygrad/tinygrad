@@ -435,7 +435,7 @@ class TestSchedule(unittest.TestCase):
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_prefer_half_buffer(self):
     x = Tensor.ones(4).contiguous().realize()
-    y = Tensor.ones(4).contiguous().realize()
+    # y = Tensor.ones(4).contiguous().realize()
     z = Tensor.ones(4, 4).contiguous().realize()
 
     # should not create extra kernel if output will be realized anyways
