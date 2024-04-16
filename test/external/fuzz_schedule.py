@@ -1,5 +1,6 @@
 import numpy as np
 from typing import DefaultDict, Dict, List, Set, TypeVar
+from tinygrad.buffer import Buffer
 from tinygrad.engine.realize import CustomOp, ExecItem, capturing, lower_schedule_item
 from tinygrad.helpers import DEBUG, colored, getenv
 from tinygrad.lazy import LazyBuffer
@@ -24,29 +25,33 @@ def fuzz_schedule(outs: List[LazyBuffer]):
       if out.op is LoadOps.ASSIGN: prerealized[out] = out.buffer.as_buffer()
     for x in ps.inputs:
       if x not in ground_truth and x.device != "NPY": prerealized[x] = x.buffer.as_buffer()
-    _exec_si(ps, seed)
+    si = ScheduleItem(ps.ast, tuple(x.buffer for x in ps.outputs if x.size != 0), tuple(x.buffer for x in ps.inputs if x.size != 0))
+    _exec_si(si, seed)
     for out in ps.outputs: ground_truth[out] = out.buffer.as_buffer()
 
-  # exec and validate each permutation with clean Buffers
-  for i, ts in enumerate(toposorts):
-    if i == 0: continue
+  # exec and validate each permutation with new Buffers
+  for i, ts in enumerate(toposorts[1:]):
     if DEBUG >= 1: print(colored(f"testing permutation {i}", "yellow"))
+    rawbufs: Dict[LazyBuffer, Buffer] = {}
     for key in ts:
       for out in (ps:=prescheduled[key]).outputs:
-        if out.op is LoadOps.ASSIGN: out.buffer.copyin(prerealized[out])
-        else: out.buffer.copyin(np.zeros((out.size, ), dtype=out.dtype.np).data)
+        rawbufs[out] = Buffer(out.buffer.device, out.buffer.size, out.buffer.dtype)
+        if out.op is LoadOps.ASSIGN: rawbufs[out].ensure_allocated().copyin(prerealized[out])
       for x in ps.inputs:
-        if x in prerealized and x.op is not LoadOps.ASSIGN: x.buffer.copyin(prerealized[x])
-      _exec_si(ps, seed)
+        if x not in rawbufs:
+          if x.device == "NPY": rawbufs[x] = x.buffer
+          # copy the pre realized input
+          else: rawbufs[x] = Buffer(x.buffer.device, x.buffer.size, x.buffer.dtype, initial_value=prerealized[x])
+      si = ScheduleItem(ps.ast, tuple(rawbufs[x] for x in ps.outputs if x.size != 0), tuple(rawbufs[x] for x in ps.inputs if x.size != 0))
+      _exec_si(si, seed)
       for out in ps.outputs:
-        outbuf = np.frombuffer(out.buffer.as_buffer(), out.dtype.np)
+        outbuf = np.frombuffer(rawbufs[out].as_buffer(), out.dtype.np)
         try: np.testing.assert_allclose(outbuf, np.frombuffer(ground_truth[out], out.dtype.np), atol=1e-2, rtol=1e-2)
         except Exception as e:
           print(f"FAILED FOR {out}")
           raise e
 
-def _exec_si(ps, seed):
-  si = ScheduleItem(ps.ast, tuple(x.buffer for x in ps.outputs if x.size != 0), tuple(x.buffer for x in ps.inputs if x.size != 0))
+def _exec_si(si: ScheduleItem, seed:int):
   ei = ExecItem(lower_schedule_item(si), list(si.outputs+si.inputs))
   if len(capturing): capturing[0].add(ei)
   if isinstance(ei.prg, CustomOp): Tensor._seed = seed
