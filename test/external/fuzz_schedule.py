@@ -1,8 +1,7 @@
 import numpy as np
-from collections import defaultdict
 from typing import DefaultDict, Dict, List, Set, TypeVar
 from tinygrad.buffer import Buffer
-from tinygrad.engine.realize import CustomOp, ExecItem, lower_schedule, capturing, lower_schedule_item
+from tinygrad.engine.realize import CustomOp, ExecItem, capturing, lower_schedule_item
 from tinygrad.helpers import DEBUG, colored, getenv
 from tinygrad.lazy import LazyBuffer
 from tinygrad.engine.schedule import _graph_schedule
@@ -15,13 +14,12 @@ def fuzz_schedule(outs: List[LazyBuffer]):
   if DEBUG >= 1: print(colored(f"fuzzing {len(toposorts)} schedule permutations", "yellow"))
 
   # setup ground truth
-  ground_truth: Dict[LazyBuffer, Buffer] = {}
+  ground_truth: Dict[LazyBuffer, memoryview] = {}
   assign_bufs: Dict[LazyBuffer, memoryview] = {}
   seed = Tensor._seed
   for key in toposorts[0]:
     for out in (ps:=prescheduled[key]).outputs:
       seen.add(out)
-      ground_truth[out] = out.buffer
       # freeze assign state before exec
       if out.op is LoadOps.ASSIGN: assign_bufs[out] = out.buffer.as_buffer()
     si = ScheduleItem(ps.ast, tuple(x.buffer for x in ps.outputs if x.size != 0), tuple(x.buffer for x in ps.inputs if x.size != 0))
@@ -29,6 +27,7 @@ def fuzz_schedule(outs: List[LazyBuffer]):
     if len(capturing): capturing[0].add(ei)
     if isinstance(ei.prg, CustomOp): Tensor._seed = seed
     ei.run()
+    for out in ps.outputs: ground_truth[out] = out.buffer.as_buffer()
 
   # create new Buffers for each permutation
   for i, ts in enumerate(toposorts[1:]):
@@ -49,10 +48,12 @@ def fuzz_schedule(outs: List[LazyBuffer]):
       if isinstance(ei.prg, CustomOp): Tensor._seed = seed
       ei.run()
       for out in ps.outputs:
-        gt = np.frombuffer(ground_truth[out].as_buffer(), out.dtype.np)
-        buf = np.frombuffer(rawbufs[out].as_buffer(), out.dtype.np)
-        np.testing.assert_allclose(gt, buf, atol=1e-2, rtol=1e-2)
-        del rawbufs[out]
+        gt = np.frombuffer(ground_truth[out], out.dtype.np)
+        outbuf = np.frombuffer(rawbufs[out].as_buffer(), out.dtype.np)
+        try: np.testing.assert_allclose(gt, outbuf, atol=1e-2, rtol=1e-2)
+        except Exception as e:
+          print(f"FAILED FOR {out}")
+          raise e
 
 T = TypeVar("T")
 def find_all_toposorts(graph:DefaultDict[T, List[T]], in_degree:DefaultDict[T, int]) -> List[List[T]]:
