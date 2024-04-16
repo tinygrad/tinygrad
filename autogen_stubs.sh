@@ -78,7 +78,7 @@ generate_nv() {
   if [ ! -d "$NVKERN_SRC" ]; then
     git clone https://github.com/tinygrad/open-gpu-kernel-modules $NVKERN_SRC
     pushd .
-    cd $NVKERN_SRC || exit
+    cd $NVKERN_SRC
     git reset --hard $NVKERN_COMMIT_HASH
     popd
   fi
@@ -111,6 +111,7 @@ generate_nv() {
     $NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl/ctrla06c.h \
     --clang-args="-include $NVKERN_SRC/src/common/sdk/nvidia/inc/nvtypes.h -I$NVKERN_SRC/src/common/inc -I$NVKERN_SRC/kernel-open/nvidia-uvm -I$NVKERN_SRC/kernel-open/common/inc -I$NVKERN_SRC/src/common/sdk/nvidia/inc -I$NVKERN_SRC/src/nvidia/arch/nvalloc/unix/include -I$NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl" \
     -o $BASE/nv_gpu.py -k cdefstum
+  fixup $BASE/nv_gpu.py
   sed -i "s\(0000000001)\1\g" $BASE/nv_gpu.py
   sed -i "s\import ctypes\import ctypes, os\g" $BASE/nv_gpu.py
   sed -i 's/#\?\s\([A-Za-z0-9_]\+\) = MW ( \([0-9]\+\) : \([0-9]\+\) )/\1 = (\2 , \3)/' $BASE/nv_gpu.py # NVC6C0_QMDV03_00 processing
@@ -118,7 +119,6 @@ generate_nv() {
   sed -i 's/#\s*return MW(\([0-9i()*+]\+\):\([0-9i()*+]\+\))/    return (\1 , \2)/' $BASE/nv_gpu.py
   sed -i 's/#\?\s*\(.*\)\s*=\s*\(NV\)\?BIT\(32\)\?\s*(\s*\([0-9]\+\)\s*)/\1 = (1 << \4)/' $BASE/nv_gpu.py # name = BIT(x) -> name = (1 << x)
   sed -i "s/UVM_\([A-Za-z0-9_]\+\) = \['i', '(', '\([0-9]\+\)', ')'\]/UVM_\1 = \2/" $BASE/nv_gpu.py # UVM_name = ['i', '(', '<num>', ')'] -> UVM_name = <num>
-  fixup $BASE/nv_gpu.py
   python3 -c "import tinygrad.runtime.autogen.nv_gpu"
 }
 
