@@ -1,3 +1,4 @@
+# mypy: ignore-errors
 # -*- coding: utf-8 -*-
 #
 # TARGET arch is: ['-include', '/tmp/open-gpu-kernel-modules-d6b75a34094b0f56c2ccadf14e5d0bd515ed1ab6/src/common/sdk/nvidia/inc/nvtypes.h', '-I/tmp/open-gpu-kernel-modules-d6b75a34094b0f56c2ccadf14e5d0bd515ed1ab6/src/common/inc', '-I/tmp/open-gpu-kernel-modules-d6b75a34094b0f56c2ccadf14e5d0bd515ed1ab6/kernel-open/nvidia-uvm', '-I/tmp/open-gpu-kernel-modules-d6b75a34094b0f56c2ccadf14e5d0bd515ed1ab6/kernel-open/common/inc', '-I/tmp/open-gpu-kernel-modules-d6b75a34094b0f56c2ccadf14e5d0bd515ed1ab6/src/common/sdk/nvidia/inc', '-I/tmp/open-gpu-kernel-modules-d6b75a34094b0f56c2ccadf14e5d0bd515ed1ab6/src/nvidia/arch/nvalloc/unix/include', '-I/tmp/open-gpu-kernel-modules-d6b75a34094b0f56c2ccadf14e5d0bd515ed1ab6/src/common/sdk/nvidia/inc/ctrl']
@@ -254,7 +255,7 @@ NVC6C0_QMDV02_03_CTA_THREAD_DIMENSION0 = (607 , 592) # macro
 NVC6C0_QMDV02_03_CTA_THREAD_DIMENSION1 = (623 , 608) # macro
 NVC6C0_QMDV02_03_CTA_THREAD_DIMENSION2 = (639 , 624) # macro
 def NVC6C0_QMDV02_03_CONSTANT_BUFFER_VALID(i):  # macro
-    return ((640+(i)*1) , (640+(i)*1))  
+    return ((640+(i)*1) , (640+(i)*1))
 NVC6C0_QMDV02_03_CONSTANT_BUFFER_VALID_FALSE = 0x00000000 # macro
 NVC6C0_QMDV02_03_CONSTANT_BUFFER_VALID_TRUE = 0x00000001 # macro
 NVC6C0_QMDV02_03_REGISTER_COUNT_V = (656 , 648) # macro
@@ -318,19 +319,19 @@ NVC6C0_QMDV02_03_PROGRAM_PREFETCH_SIZE = (1009 , 1001) # macro
 NVC6C0_QMDV02_03_QMD_RESERVED_A = (1015 , 1010) # macro
 NVC6C0_QMDV02_03_SASS_VERSION = (1023 , 1016) # macro
 def NVC6C0_QMDV02_03_CONSTANT_BUFFER_ADDR_LOWER(i):  # macro
-    return ((1055+(i)*64) , (1024+(i)*64))  
+    return ((1055+(i)*64) , (1024+(i)*64))
 def NVC6C0_QMDV02_03_CONSTANT_BUFFER_ADDR_UPPER(i):  # macro
-    return ((1072+(i)*64) , (1056+(i)*64))  
+    return ((1072+(i)*64) , (1056+(i)*64))
 def NVC6C0_QMDV02_03_CONSTANT_BUFFER_PREFETCH_POST(i):  # macro
-    return ((1073+(i)*64) , (1073+(i)*64))  
+    return ((1073+(i)*64) , (1073+(i)*64))
 NVC6C0_QMDV02_03_CONSTANT_BUFFER_PREFETCH_POST_FALSE = 0x00000000 # macro
 NVC6C0_QMDV02_03_CONSTANT_BUFFER_PREFETCH_POST_TRUE = 0x00000001 # macro
 def NVC6C0_QMDV02_03_CONSTANT_BUFFER_INVALIDATE(i):  # macro
-    return ((1074+(i)*64) , (1074+(i)*64))  
+    return ((1074+(i)*64) , (1074+(i)*64))
 NVC6C0_QMDV02_03_CONSTANT_BUFFER_INVALIDATE_FALSE = 0x00000000 # macro
 NVC6C0_QMDV02_03_CONSTANT_BUFFER_INVALIDATE_TRUE = 0x00000001 # macro
 def NVC6C0_QMDV02_03_CONSTANT_BUFFER_SIZE_SHIFTED4(i):  # macro
-    return ((1087+(i)*64) , (1075+(i)*64))  
+    return ((1087+(i)*64) , (1075+(i)*64))
 NVC6C0_QMDV02_03_PROGRAM_ADDRESS_LOWER = (1567 , 1536) # macro
 NVC6C0_QMDV02_03_PROGRAM_ADDRESS_UPPER = (1584 , 1568) # macro
 NVC6C0_QMDV02_03_QMD_RESERVED_S = (1599 , 1585) # macro
@@ -482,7 +483,7 @@ NVC6C0_QMDV02_04_CTA_THREAD_DIMENSION0 = (607 , 592) # macro
 NVC6C0_QMDV02_04_CTA_THREAD_DIMENSION1 = (623 , 608) # macro
 NVC6C0_QMDV02_04_CTA_THREAD_DIMENSION2 = (639 , 624) # macro
 def NVC6C0_QMDV02_04_CONSTANT_BUFFER_VALID(i):  # macro
-    return ((640+(i)*1) , (640+(i)*1))  
+    return ((640+(i)*1) , (640+(i)*1))
 NVC6C0_QMDV02_04_CONSTANT_BUFFER_VALID_FALSE = 0x00000000 # macro
 NVC6C0_QMDV02_04_CONSTANT_BUFFER_VALID_TRUE = 0x00000001 # macro
 NVC6C0_QMDV02_04_REGISTER_COUNT_V = (656 , 648) # macro
@@ -549,19 +550,19 @@ NVC6C0_QMDV02_04_PROGRAM_PREFETCH_TYPE_PREFTECH_POST = 0x00000001 # macro
 NVC6C0_QMDV02_04_QMD_RESERVED_A = (1015 , 1012) # macro
 NVC6C0_QMDV02_04_SASS_VERSION = (1023 , 1016) # macro
 def NVC6C0_QMDV02_04_CONSTANT_BUFFER_ADDR_LOWER(i):  # macro
-    return ((1055+(i)*64) , (1024+(i)*64))  
+    return ((1055+(i)*64) , (1024+(i)*64))
 def NVC6C0_QMDV02_04_CONSTANT_BUFFER_ADDR_UPPER(i):  # macro
-    return ((1072+(i)*64) , (1056+(i)*64))  
+    return ((1072+(i)*64) , (1056+(i)*64))
 def NVC6C0_QMDV02_04_CONSTANT_BUFFER_PREFETCH_POST(i):  # macro
-    return ((1073+(i)*64) , (1073+(i)*64))  
+    return ((1073+(i)*64) , (1073+(i)*64))
 NVC6C0_QMDV02_04_CONSTANT_BUFFER_PREFETCH_POST_FALSE = 0x00000000 # macro
 NVC6C0_QMDV02_04_CONSTANT_BUFFER_PREFETCH_POST_TRUE = 0x00000001 # macro
 def NVC6C0_QMDV02_04_CONSTANT_BUFFER_INVALIDATE(i):  # macro
-    return ((1074+(i)*64) , (1074+(i)*64))  
+    return ((1074+(i)*64) , (1074+(i)*64))
 NVC6C0_QMDV02_04_CONSTANT_BUFFER_INVALIDATE_FALSE = 0x00000000 # macro
 NVC6C0_QMDV02_04_CONSTANT_BUFFER_INVALIDATE_TRUE = 0x00000001 # macro
 def NVC6C0_QMDV02_04_CONSTANT_BUFFER_SIZE_SHIFTED4(i):  # macro
-    return ((1087+(i)*64) , (1075+(i)*64))  
+    return ((1087+(i)*64) , (1075+(i)*64))
 NVC6C0_QMDV02_04_PROGRAM_ADDRESS_LOWER = (1567 , 1536) # macro
 NVC6C0_QMDV02_04_PROGRAM_ADDRESS_UPPER = (1584 , 1568) # macro
 NVC6C0_QMDV02_04_QMD_RESERVED_S = (1599 , 1585) # macro
@@ -709,7 +710,7 @@ NVC6C0_QMDV03_00_CTA_THREAD_DIMENSION0 = (607 , 592) # macro
 NVC6C0_QMDV03_00_CTA_THREAD_DIMENSION1 = (623 , 608) # macro
 NVC6C0_QMDV03_00_CTA_THREAD_DIMENSION2 = (639 , 624) # macro
 def NVC6C0_QMDV03_00_CONSTANT_BUFFER_VALID(i):  # macro
-    return ((640+(i)*1) , (640+(i)*1))  
+    return ((640+(i)*1) , (640+(i)*1))
 NVC6C0_QMDV03_00_CONSTANT_BUFFER_VALID_FALSE = 0x00000000 # macro
 NVC6C0_QMDV03_00_CONSTANT_BUFFER_VALID_TRUE = 0x00000001 # macro
 NVC6C0_QMDV03_00_REGISTER_COUNT_V = (656 , 648) # macro
@@ -797,19 +798,19 @@ NVC6C0_QMDV03_00_RELEASE1_STRUCTURE_SIZE_SEMAPHORE_TWO_WORDS = 0x00000002 # macr
 NVC6C0_QMDV03_00_RELEASE1_PAYLOAD_LOWER = (991 , 960) # macro
 NVC6C0_QMDV03_00_RELEASE1_PAYLOAD_UPPER = (1023 , 992) # macro
 def NVC6C0_QMDV03_00_CONSTANT_BUFFER_ADDR_LOWER(i):  # macro
-    return ((1055+(i)*64) , (1024+(i)*64))  
+    return ((1055+(i)*64) , (1024+(i)*64))
 def NVC6C0_QMDV03_00_CONSTANT_BUFFER_ADDR_UPPER(i):  # macro
-    return ((1072+(i)*64) , (1056+(i)*64))  
+    return ((1072+(i)*64) , (1056+(i)*64))
 def NVC6C0_QMDV03_00_CONSTANT_BUFFER_PREFETCH_POST(i):  # macro
-    return ((1073+(i)*64) , (1073+(i)*64))  
+    return ((1073+(i)*64) , (1073+(i)*64))
 NVC6C0_QMDV03_00_CONSTANT_BUFFER_PREFETCH_POST_FALSE = 0x00000000 # macro
 NVC6C0_QMDV03_00_CONSTANT_BUFFER_PREFETCH_POST_TRUE = 0x00000001 # macro
 def NVC6C0_QMDV03_00_CONSTANT_BUFFER_INVALIDATE(i):  # macro
-    return ((1074+(i)*64) , (1074+(i)*64))  
+    return ((1074+(i)*64) , (1074+(i)*64))
 NVC6C0_QMDV03_00_CONSTANT_BUFFER_INVALIDATE_FALSE = 0x00000000 # macro
 NVC6C0_QMDV03_00_CONSTANT_BUFFER_INVALIDATE_TRUE = 0x00000001 # macro
 def NVC6C0_QMDV03_00_CONSTANT_BUFFER_SIZE_SHIFTED4(i):  # macro
-    return ((1087+(i)*64) , (1075+(i)*64))  
+    return ((1087+(i)*64) , (1075+(i)*64))
 NVC6C0_QMDV03_00_PROGRAM_ADDRESS_LOWER = (1567 , 1536) # macro
 NVC6C0_QMDV03_00_PROGRAM_ADDRESS_UPPER = (1584 , 1568) # macro
 NVC6C0_QMDV03_00_SHADER_LOCAL_MEMORY_HIGH_SIZE = (1623 , 1600) # macro
@@ -1085,45 +1086,45 @@ NV2080_NOTIFIERS_INBAND_RESPONSE = (185) # macro
 NV2080_NOTIFIERS_RESERVED_186 = (186) # macro
 NV2080_NOTIFIERS_MAXCOUNT = (187) # macro
 # def NV2080_NOTIFIERS_GR(x):  # macro
-#    return ((x==0)?((12)):((146)+(x-1)))  
+#    return ((x==0)?((12)):((146)+(x-1)))
 # def NV2080_NOTIFIERS_GR_IDX(x):  # macro
-#    return ((x)-(12))  
+#    return ((x)-(12))
 # def NV2080_NOTIFIER_TYPE_IS_GR(x):  # macro
-#    return (((x)==(12))||(((x)>=(146))&&((x)<=(152))))  
+#    return (((x)==(12))||(((x)>=(146))&&((x)<=(152))))
 # def NV2080_NOTIFIERS_CE(x):  # macro
-#    return ((23)+(x))  
+#    return ((23)+(x))
 # def NV2080_NOTIFIERS_CE_IDX(x):  # macro
-#    return ((x)-(23))  
+#    return ((x)-(23))
 # def NV2080_NOTIFIER_TYPE_IS_CE(x):  # macro
-#    return (((x)>=(23))&&((x)<=(32)))  
+#    return (((x)>=(23))&&((x)<=(32)))
 # def NV2080_NOTIFIERS_NVENC(x):  # macro
-#    return ((38)+(x))  
+#    return ((38)+(x))
 # def NV2080_NOTIFIERS_NVENC_IDX(x):  # macro
-#    return ((x)-(38))  
+#    return ((x)-(38))
 # def NV2080_NOTIFIER_TYPE_IS_NVENC(x):  # macro
-#    return (((x)>=(38))&&((x)<=(40)))  
+#    return (((x)>=(38))&&((x)<=(40)))
 # def NV2080_NOTIFIERS_NVDEC(x):  # macro
-#    return ((14)+(x))  
+#    return ((14)+(x))
 # def NV2080_NOTIFIERS_NVDEC_IDX(x):  # macro
-#    return ((x)-(14))  
+#    return ((x)-(14))
 # def NV2080_NOTIFIER_TYPE_IS_NVDEC(x):  # macro
-#    return (((x)>=(14))&&((x)<=(21)))  
+#    return (((x)>=(14))&&((x)<=(21)))
 # def NV2080_NOTIFIERS_NVJPEG(x):  # macro
-#    return ((126)+(x))  
+#    return ((126)+(x))
 # def NV2080_NOTIFIERS_NVJPEG_IDX(x):  # macro
-#    return ((x)-(126))  
+#    return ((x)-(126))
 # def NV2080_NOTIFIER_TYPE_IS_NVJPEG(x):  # macro
-#    return (((x)>=(126))&&((x)<=(133)))  
+#    return (((x)>=(126))&&((x)<=(133)))
 # def NV2080_NOTIFIERS_OFAn(x):  # macro
-#    return ((x==0)?((153)):((187)))  
+#    return ((x==0)?((153)):((187)))
 # def NV2080_NOTIFIERS_OFA_IDX(x):  # macro
-#    return ((x==(153))?(0):(-1))  
+#    return ((x==(153))?(0):(-1))
 # def NV2080_NOTIFIER_TYPE_IS_OFA(x):  # macro
-#    return (((x)==(153)))  
+#    return (((x)==(153)))
 # def NV2080_NOTIFIERS_GPIO_RISING_INTERRUPT(pin):  # macro
-#    return ((47)+(pin))  
+#    return ((47)+(pin))
 # def NV2080_NOTIFIERS_GPIO_FALLING_INTERRUPT(pin):  # macro
-#    return ((79)+(pin))  
+#    return ((79)+(pin))
 NV2080_SUBDEVICE_NOTIFICATION_STATUS_IN_PROGRESS = (0x8000) # macro
 NV2080_SUBDEVICE_NOTIFICATION_STATUS_BAD_ARGUMENT = (0x4000) # macro
 NV2080_SUBDEVICE_NOTIFICATION_STATUS_ERROR_INVALID_STATE = (0x2000) # macro
@@ -1208,43 +1209,43 @@ NV2080_ENGINE_TYPE_NVDEC_SIZE = 8 # macro
 NV2080_ENGINE_TYPE_GR_SIZE = 8 # macro
 NV2080_ENGINE_TYPE_OFA_SIZE = 1 # macro
 # def NV2080_ENGINE_TYPE_COPY(i):  # macro
-#    return ((0x00000009)+(i))  
+#    return ((0x00000009)+(i))
 # def NV2080_ENGINE_TYPE_IS_COPY(i):  # macro
-#    return (((i)>=(0x00000009))&&((i)<=(0x00000012)))  
+#    return (((i)>=(0x00000009))&&((i)<=(0x00000012)))
 # def NV2080_ENGINE_TYPE_COPY_IDX(i):  # macro
-#    return ((i)-(0x00000009))  
+#    return ((i)-(0x00000009))
 # def NV2080_ENGINE_TYPE_NVENC(i):  # macro
-#    return ((0x0000001b)+(i))  
+#    return ((0x0000001b)+(i))
 # def NV2080_ENGINE_TYPE_IS_NVENC(i):  # macro
-#    return (((i)>=(0x0000001b))&&((i)<((0x0000001b)+(i))(3)))  
+#    return (((i)>=(0x0000001b))&&((i)<((0x0000001b)+(i))(3)))
 # def NV2080_ENGINE_TYPE_NVENC_IDX(i):  # macro
-#    return ((i)-(0x0000001b))  
+#    return ((i)-(0x0000001b))
 # def NV2080_ENGINE_TYPE_NVDEC(i):  # macro
-#    return ((0x00000013)+(i))  
+#    return ((0x00000013)+(i))
 # def NV2080_ENGINE_TYPE_IS_NVDEC(i):  # macro
-#    return (((i)>=(0x00000013))&&((i)<((0x00000013)+(i))(8)))  
+#    return (((i)>=(0x00000013))&&((i)<((0x00000013)+(i))(8)))
 # def NV2080_ENGINE_TYPE_NVDEC_IDX(i):  # macro
-#    return ((i)-(0x00000013))  
+#    return ((i)-(0x00000013))
 # def NV2080_ENGINE_TYPE_NVJPEG(i):  # macro
-#    return ((0x0000002b)+(i))  
+#    return ((0x0000002b)+(i))
 # def NV2080_ENGINE_TYPE_IS_NVJPEG(i):  # macro
-#    return (((i)>=(0x0000002b))&&((i)<((0x0000002b)+(i))(8)))  
+#    return (((i)>=(0x0000002b))&&((i)<((0x0000002b)+(i))(8)))
 # def NV2080_ENGINE_TYPE_NVJPEG_IDX(i):  # macro
-#    return ((i)-(0x0000002b))  
+#    return ((i)-(0x0000002b))
 # def NV2080_ENGINE_TYPE_GR(i):  # macro
-#    return ((0x00000001)+(i))  
+#    return ((0x00000001)+(i))
 # def NV2080_ENGINE_TYPE_IS_GR(i):  # macro
-#    return (((i)>=(0x00000001))&&((i)<((0x00000001)+(i))(8)))  
+#    return (((i)>=(0x00000001))&&((i)<((0x00000001)+(i))(8)))
 # def NV2080_ENGINE_TYPE_GR_IDX(i):  # macro
-#    return ((i)-(0x00000001))  
+#    return ((i)-(0x00000001))
 # def NV2080_ENGINE_TYPE_OFAn(i):  # macro
-#    return ((i==0)?((0x00000033)):((0x00000040)))  
+#    return ((i==0)?((0x00000033)):((0x00000040)))
 # def NV2080_ENGINE_TYPE_IS_OFA(i):  # macro
-#    return (((i)==(0x00000033)))  
+#    return (((i)==(0x00000033)))
 # def NV2080_ENGINE_TYPE_OFA_IDX(i):  # macro
-#    return ((i==(0x00000033))?(0):(-1))  
+#    return ((i==(0x00000033))?(0):(-1))
 # def NV2080_ENGINE_TYPE_IS_VALID(i):  # macro
-#    return (((i)>((0x00000000)))&&((i)<((0x00000040))))  
+#    return (((i)>((0x00000000)))&&((i)<((0x00000040))))
 NV2080_CLIENT_TYPE_TEX = (0x00000001) # macro
 NV2080_CLIENT_TYPE_COLOR = (0x00000002) # macro
 NV2080_CLIENT_TYPE_DEPTH = (0x00000003) # macro
@@ -2288,7 +2289,7 @@ NVC6C0_SET_INLINE_QMD_ADDRESS_A_QMD_ADDRESS_SHIFTED8_UPPER = ['31', ':', '0'] # 
 NVC6C0_SET_INLINE_QMD_ADDRESS_B = 0x031c # macro
 NVC6C0_SET_INLINE_QMD_ADDRESS_B_QMD_ADDRESS_SHIFTED8_LOWER = ['31', ':', '0'] # macro
 # def NVC6C0_LOAD_INLINE_QMD_DATA(i):  # macro
-#    return (0x0320+(i)*4)  
+#    return (0x0320+(i)*4)
 NVC6C0_LOAD_INLINE_QMD_DATA_V = ['31', ':', '0'] # macro
 NVC6C0_SET_FALCON00 = 0x0500 # macro
 NVC6C0_SET_FALCON00_V = ['31', ':', '0'] # macro
@@ -2335,7 +2336,7 @@ NVC6C0_SET_SHADER_CACHE_CONTROL_ICACHE_PREFETCH_ENABLE = ['0', ':', '0'] # macro
 NVC6C0_SET_SHADER_CACHE_CONTROL_ICACHE_PREFETCH_ENABLE_FALSE = 0x00000000 # macro
 NVC6C0_SET_SHADER_CACHE_CONTROL_ICACHE_PREFETCH_ENABLE_TRUE = 0x00000001 # macro
 # def NVC6C0_SET_SCG_COMPUTE_SCHEDULING_PARAMETERS(i):  # macro
-#    return (0x0da0+(i)*4)  
+#    return (0x0da0+(i)*4)
 NVC6C0_SET_SCG_COMPUTE_SCHEDULING_PARAMETERS_V = ['31', ':', '0'] # macro
 NVC6C0_SET_SM_TIMEOUT_INTERVAL = 0x0de4 # macro
 NVC6C0_SET_SM_TIMEOUT_INTERVAL_COUNTER_BIT = ['5', ':', '0'] # macro
@@ -2464,26 +2465,26 @@ NVC6C0_SET_TRAP_HANDLER_B_ADDRESS_LOWER = ['31', ':', '0'] # macro
 NVC6C0_SET_BINDLESS_TEXTURE = 0x2608 # macro
 NVC6C0_SET_BINDLESS_TEXTURE_CONSTANT_BUFFER_SLOT_SELECT = ['2', ':', '0'] # macro
 # def NVC6C0_SET_SHADER_PERFORMANCE_SNAPSHOT_COUNTER_VALUE(i):  # macro
-#    return (0x32f4+(i)*4)  
+#    return (0x32f4+(i)*4)
 NVC6C0_SET_SHADER_PERFORMANCE_SNAPSHOT_COUNTER_VALUE_V = ['31', ':', '0'] # macro
 # def NVC6C0_SET_SHADER_PERFORMANCE_SNAPSHOT_COUNTER_VALUE_UPPER(i):  # macro
-#    return (0x3314+(i)*4)  
+#    return (0x3314+(i)*4)
 NVC6C0_SET_SHADER_PERFORMANCE_SNAPSHOT_COUNTER_VALUE_UPPER_V = ['31', ':', '0'] # macro
 NVC6C0_ENABLE_SHADER_PERFORMANCE_SNAPSHOT_COUNTER = 0x3334 # macro
 NVC6C0_ENABLE_SHADER_PERFORMANCE_SNAPSHOT_COUNTER_V = ['0', ':', '0'] # macro
 NVC6C0_DISABLE_SHADER_PERFORMANCE_SNAPSHOT_COUNTER = 0x3338 # macro
 NVC6C0_DISABLE_SHADER_PERFORMANCE_SNAPSHOT_COUNTER_V = ['0', ':', '0'] # macro
 # def NVC6C0_SET_SHADER_PERFORMANCE_COUNTER_VALUE_UPPER(i):  # macro
-#    return (0x333c+(i)*4)  
+#    return (0x333c+(i)*4)
 NVC6C0_SET_SHADER_PERFORMANCE_COUNTER_VALUE_UPPER_V = ['31', ':', '0'] # macro
 # def NVC6C0_SET_SHADER_PERFORMANCE_COUNTER_VALUE(i):  # macro
-#    return (0x335c+(i)*4)  
+#    return (0x335c+(i)*4)
 NVC6C0_SET_SHADER_PERFORMANCE_COUNTER_VALUE_V = ['31', ':', '0'] # macro
 # def NVC6C0_SET_SHADER_PERFORMANCE_COUNTER_EVENT(i):  # macro
-#    return (0x337c+(i)*4)  
+#    return (0x337c+(i)*4)
 NVC6C0_SET_SHADER_PERFORMANCE_COUNTER_EVENT_EVENT = ['7', ':', '0'] # macro
 # def NVC6C0_SET_SHADER_PERFORMANCE_COUNTER_CONTROL_A(i):  # macro
-#    return (0x339c+(i)*4)  
+#    return (0x339c+(i)*4)
 NVC6C0_SET_SHADER_PERFORMANCE_COUNTER_CONTROL_A_EVENT0 = ['1', ':', '0'] # macro
 NVC6C0_SET_SHADER_PERFORMANCE_COUNTER_CONTROL_A_BIT_SELECT0 = ['4', ':', '2'] # macro
 NVC6C0_SET_SHADER_PERFORMANCE_COUNTER_CONTROL_A_EVENT1 = ['6', ':', '5'] # macro
@@ -2498,7 +2499,7 @@ NVC6C0_SET_SHADER_PERFORMANCE_COUNTER_CONTROL_A_EVENT5 = ['26', ':', '25'] # mac
 NVC6C0_SET_SHADER_PERFORMANCE_COUNTER_CONTROL_A_BIT_SELECT5 = ['29', ':', '27'] # macro
 NVC6C0_SET_SHADER_PERFORMANCE_COUNTER_CONTROL_A_SPARE = ['31', ':', '30'] # macro
 # def NVC6C0_SET_SHADER_PERFORMANCE_COUNTER_CONTROL_B(i):  # macro
-#    return (0x33bc+(i)*4)  
+#    return (0x33bc+(i)*4)
 NVC6C0_SET_SHADER_PERFORMANCE_COUNTER_CONTROL_B_EDGE = ['0', ':', '0'] # macro
 NVC6C0_SET_SHADER_PERFORMANCE_COUNTER_CONTROL_B_MODE = ['2', ':', '1'] # macro
 NVC6C0_SET_SHADER_PERFORMANCE_COUNTER_CONTROL_B_WINDOWED = ['3', ':', '3'] # macro
@@ -2514,7 +2515,7 @@ NVC6C0_SET_SHADER_PERFORMANCE_COUNTER_SCTL_FILTER_V = ['31', ':', '0'] # macro
 NVC6C0_SET_SHADER_PERFORMANCE_COUNTER_CORE_MIO_FILTER = 0x33ec # macro
 NVC6C0_SET_SHADER_PERFORMANCE_COUNTER_CORE_MIO_FILTER_V = ['31', ':', '0'] # macro
 # def NVC6C0_SET_MME_SHADOW_SCRATCH(i):  # macro
-#    return (0x3400+(i)*4)  
+#    return (0x3400+(i)*4)
 NVC6C0_SET_MME_SHADOW_SCRATCH_V = ['31', ':', '0'] # macro
 _clc6b5_h_ = True # macro
 NVC6B5_NOP = (0x00000100) # macro
@@ -2834,7 +2835,7 @@ struct__clc6b5_tag0._fields_ = [
 ampere_dma_copy_aControlPio = struct__clc6b5_tag0
 _UVM_IOCTL_H = True # macro
 # def UVM_IOCTL_BASE(i):  # macro
-#    return i  
+#    return i
 UVM_RESERVE_VA = 1 # macro
 UVM_RELEASE_VA = 2 # macro
 UVM_REGION_COMMIT = 3 # macro
@@ -4029,7 +4030,7 @@ NV_ESC_EXPORT_TO_DMABUF_FD = (200+17) # macro
 NV_ESC_WAIT_OPEN_COMPLETE = (200+18) # macro
 NV_IOCTL_NUMA_H = True # macro
 # def __aligned(n):  # macro
-#    return __attribute__((aligned(n)))  
+#    return __attribute__((aligned(n)))
 NV_ESC_NUMA_INFO = (200+15) # macro
 NV_ESC_SET_NUMA_STATUS = (200+16) # macro
 NV_IOCTL_NUMA_INFO_MAX_OFFLINE_ADDRESSES = 64 # macro
@@ -6066,7 +6067,7 @@ struct_c__SA_nv_ioctl_nvos33_parameters_with_fd._fields_ = [
 
 nv_ioctl_nvos33_parameters_with_fd = struct_c__SA_nv_ioctl_nvos33_parameters_with_fd
 # def NV0000_CTRL_CMD(cat, idx):  # macro
-#    return NVXXXX_CTRL_CMD(0x0000,NV0000_CTRL_##cat,idx)  
+#    return NVXXXX_CTRL_CMD(0x0000,NV0000_CTRL_##cat,idx)
 NV0000_CTRL_RESERVED = (0x00) # macro
 NV0000_CTRL_SYSTEM = (0x01) # macro
 NV0000_CTRL_GPU = (0x02) # macro
@@ -6659,9 +6660,9 @@ NV0000_CTRL_CMD_SYSTEM_GPS_DATA_PING_SBIOS_FOR_EVENT = (0x0321) # macro
 NV0000_CTRL_CMD_SYSTEM_GPS_LOCALE_INVALID = (0xFFFF) # macro
 NV0000_CTRL_CMD_SYSTEM_GPS_LOCALE_SYSTEM = (0x0000) # macro
 # def NV0000_CTRL_CMD_SYSTEM_GPS_LOCALE_CPU(i):  # macro
-#    return (0x0100+((i)%0x100))  
+#    return (0x0100+((i)%0x100))
 # def NV0000_CTRL_CMD_SYSTEM_GPS_LOCALE_GPU(i):  # macro
-#    return (0x0200+((i)%0x100))  
+#    return (0x0200+((i)%0x100))
 NV0000_CTRL_CMD_SYSTEM_GPS_CMD_DEF_INVALID = (0x80000000) # macro
 NV0000_CTRL_CMD_SYSTEM_GPS_CMD_DEF_INIT_NO = (0x00000000) # macro
 NV0000_CTRL_CMD_SYSTEM_GPS_CMD_DEF_INIT_YES = (0x00000001) # macro
@@ -7031,9 +7032,9 @@ NV0000_CTRL_CMD_SYSTEM_PFM_REQ_HNDLR_DATA_PING_SBIOS_FOR_EVENT = (0x0321) # macr
 NV0000_CTRL_CMD_SYSTEM_PFM_REQ_HNDLR_LOCALE_INVALID = (0xFFFF) # macro
 NV0000_CTRL_CMD_SYSTEM_PFM_REQ_HNDLR_LOCALE_SYSTEM = (0x0000) # macro
 # def NV0000_CTRL_CMD_SYSTEM_PFM_REQ_HNDLR_LOCALE_CPU(i):  # macro
-#    return (0x0100+((i)%0x100))  
+#    return (0x0100+((i)%0x100))
 # def NV0000_CTRL_CMD_SYSTEM_PFM_REQ_HNDLR_LOCALE_GPU(i):  # macro
-#    return (0x0200+((i)%0x100))  
+#    return (0x0200+((i)%0x100))
 NV0000_CTRL_CMD_SYSTEM_PFM_REQ_HNDLR_CMD_DEF_INVALID = (0x80000000) # macro
 NV0000_CTRL_CMD_SYSTEM_PFM_REQ_HNDLR_CMD_DEF_INIT_NO = (0x00000000) # macro
 NV0000_CTRL_CMD_SYSTEM_PFM_REQ_HNDLR_CMD_DEF_INIT_YES = (0x00000001) # macro
@@ -8357,11 +8358,11 @@ NV0000_CTRL_CMD_NVD_RCERR_RPT_FLAGS_POS_LAST = 0x00000002 # macro
 NV0000_CTRL_CMD_NVD_RCERR_RPT_FLAGS_RANGE_VALID = 0x00000004 # macro
 NV0000_CTRL_CMD_NVD_RCERR_RPT_FLAGS_DATA_VALID = 0x00000008 # macro
 # def TPC_REG_ATTR(gpcId, tpcId):  # macro
-#    return ((gpcId<<8)|(tpcId))  
+#    return ((gpcId<<8)|(tpcId))
 # def ROP_REG_ATTR(gpcId, ropId):  # macro
-#    return ((gpcId<<8)|(ropId))  
+#    return ((gpcId<<8)|(ropId))
 # def SM_REG_ATTR(gpcId, tpcId, smId):  # macro
-#    return ((((gpcId)<<16)|((tpcId)<<8))|(smId))  
+#    return ((((gpcId)<<16)|((tpcId)<<8))|(smId))
 NV0000_CTRL_CMD_NVD_RCERR_RPT_ANY_PROCESS_ID = 0x00000000 # macro
 NV0000_CTRL_CMD_NVD_RCERR_RPT_ANY_OWNER_ID = 0xFFFFFFFF # macro
 NV0000_CTRL_CMD_NVD_GET_RCERR_RPT_PARAMS_MESSAGE_ID = (0x7) # macro
@@ -8748,7 +8749,7 @@ struct_NV0000_CTRL_OS_UNIX_IMPORT_OBJECTS_FROM_FD_PARAMS._fields_ = [
 
 NV0000_CTRL_OS_UNIX_IMPORT_OBJECTS_FROM_FD_PARAMS = struct_NV0000_CTRL_OS_UNIX_IMPORT_OBJECTS_FROM_FD_PARAMS
 # def NV2080_CTRL_CMD(cat, idx):  # macro
-#    return NVXXXX_CTRL_CMD(0x2080,NV2080_CTRL_##cat,idx)  
+#    return NVXXXX_CTRL_CMD(0x2080,NV2080_CTRL_##cat,idx)
 NV2080_CTRL_RESERVED = (0x00) # macro
 NV2080_CTRL_GPU = (0x01) # macro
 NV2080_CTRL_GPU_LEGACY_NON_PRIVILEGED = (0x81) # macro
@@ -8813,7 +8814,7 @@ NV2080_CTRL_OS_MACOS = (0x3E) # macro
 NV2080_CTRL_OS_UNIX = (0x3D) # macro
 NV2080_CTRL_CMD_NULL = (0x20800000) # macro
 # def NV0080_CTRL_CMD(cat, idx):  # macro
-#    return NVXXXX_CTRL_CMD(0x0080,NV0080_CTRL_##cat,idx)  
+#    return NVXXXX_CTRL_CMD(0x0080,NV0080_CTRL_##cat,idx)
 NV0080_CTRL_RESERVED = (0x00) # macro
 NV0080_CTRL_BIF = (0x01) # macro
 NV0080_CTRL_GPU = (0x02) # macro
@@ -8836,11 +8837,11 @@ NV0080_CTRL_INTERNAL = (0x20) # macro
 NV0080_CTRL_NVLINK = (0x21) # macro
 NV0080_CTRL_CMD_NULL = (0x800000) # macro
 # def NV0080_CTRL_GET_CAP(cat, tbl, c):  # macro
-#    return NV0080_CTRL_##cat##_GET_CAP(tbl,NV0080_CTRL_##cat##_CAPS_##c)  
+#    return NV0080_CTRL_##cat##_GET_CAP(tbl,NV0080_CTRL_##cat##_CAPS_##c)
 NV0080_CTRL_CMD_GR_GET_CAPS = (0x801102) # macro
 NV0080_CTRL_GR_GET_CAPS_PARAMS_MESSAGE_ID = (0x2) # macro
 # def NV0080_CTRL_GR_GET_CAP(tbl, c):  # macro
-#    return (((NvU8)tbl[(1?c)])&(0?c))  
+#    return (((NvU8)tbl[(1?c)])&(0?c))
 NV0080_CTRL_GR_CAPS_TBL_SIZE = 23 # macro
 NV0080_CTRL_GR_INFO_INDEX_MAXCLIPS = (0x00000000) # macro
 NV0080_CTRL_GR_INFO_INDEX_MIN_ATTRS_BUG_261894 = (0x00000001) # macro
@@ -9561,17 +9562,17 @@ NV2080_CTRL_GPU_PARTITION_FLAG_PLACE_AT_SPAN = ['31', ':', '31'] # macro
 NV2080_CTRL_GPU_PARTITION_FLAG_PLACE_AT_SPAN_DISABLE = 0 # macro
 NV2080_CTRL_GPU_PARTITION_FLAG_PLACE_AT_SPAN_ENABLE = 1 # macro
 # def NV2080_CTRL_GPU_PARTITION_FLAG_FULL_GPU(DRF_DEF(2080, _CTRL_GPU_PARTITION_FLAG, _MEMORY_SIZE, _FULL):  # macro
-#    return |DRF_DEF(2080,_CTRL_GPU_PARTITION_FLAG,_COMPUTE_SIZE,_FULL))  
+#    return |DRF_DEF(2080,_CTRL_GPU_PARTITION_FLAG,_COMPUTE_SIZE,_FULL))
 # def NV2080_CTRL_GPU_PARTITION_FLAG_ONE_HALF_GPU(DRF_DEF(2080, _CTRL_GPU_PARTITION_FLAG, _MEMORY_SIZE, _HALF):  # macro
-#    return |DRF_DEF(2080,_CTRL_GPU_PARTITION_FLAG,_COMPUTE_SIZE,_HALF))  
+#    return |DRF_DEF(2080,_CTRL_GPU_PARTITION_FLAG,_COMPUTE_SIZE,_HALF))
 # def NV2080_CTRL_GPU_PARTITION_FLAG_ONE_MINI_HALF_GPU(DRF_DEF(2080, _CTRL_GPU_PARTITION_FLAG, _MEMORY_SIZE, _HALF):  # macro
-#    return |DRF_DEF(2080,_CTRL_GPU_PARTITION_FLAG,_COMPUTE_SIZE,_MINI_HALF))  
+#    return |DRF_DEF(2080,_CTRL_GPU_PARTITION_FLAG,_COMPUTE_SIZE,_MINI_HALF))
 # def NV2080_CTRL_GPU_PARTITION_FLAG_ONE_QUARTER_GPU(DRF_DEF(2080, _CTRL_GPU_PARTITION_FLAG, _MEMORY_SIZE, _QUARTER):  # macro
-#    return |DRF_DEF(2080,_CTRL_GPU_PARTITION_FLAG,_COMPUTE_SIZE,_QUARTER))  
+#    return |DRF_DEF(2080,_CTRL_GPU_PARTITION_FLAG,_COMPUTE_SIZE,_QUARTER))
 # def NV2080_CTRL_GPU_PARTITION_FLAG_ONE_MINI_QUARTER_GPU(DRF_DEF(2080, _CTRL_GPU_PARTITION_FLAG, _MEMORY_SIZE, _QUARTER):  # macro
-#    return |DRF_DEF(2080,_CTRL_GPU_PARTITION_FLAG,_COMPUTE_SIZE,_MINI_QUARTER))  
+#    return |DRF_DEF(2080,_CTRL_GPU_PARTITION_FLAG,_COMPUTE_SIZE,_MINI_QUARTER))
 # def NV2080_CTRL_GPU_PARTITION_FLAG_ONE_EIGHTHED_GPU(DRF_DEF(2080, _CTRL_GPU_PARTITION_FLAG, _MEMORY_SIZE, _EIGHTH):  # macro
-#    return |DRF_DEF(2080,_CTRL_GPU_PARTITION_FLAG,_COMPUTE_SIZE,_EIGHTH))  
+#    return |DRF_DEF(2080,_CTRL_GPU_PARTITION_FLAG,_COMPUTE_SIZE,_EIGHTH))
 NV2080_CTRL_GPU_SET_PARTITIONS_PARAMS_MESSAGE_ID = (0x74) # macro
 NV2080_CTRL_CMD_GPU_SET_PARTITIONS = (0x20800174) # macro
 NV2080_CTRL_GPU_GET_PARTITIONS_PARAMS_MESSAGE_ID = (0x75) # macro
@@ -11972,7 +11973,7 @@ NV0080_CTRL_CMD_DMA_GET_CAPS = (0x80180d) # macro
 NV0080_CTRL_DMA_CAPS_TBL_SIZE = 8 # macro
 NV0080_CTRL_DMA_GET_CAPS_PARAMS_MESSAGE_ID = (0xD) # macro
 # def NV0080_CTRL_DMA_GET_CAP(tbl, c):  # macro
-#    return (((NvU8)tbl[(1?c)])&(0?c))  
+#    return (((NvU8)tbl[(1?c)])&(0?c))
 NV0080_CTRL_DMA_CAPS_32BIT_POINTER_ENFORCED = ['0', ':', '0x01'] # macro
 NV0080_CTRL_DMA_CAPS_SHADER_ACCESS_SUPPORTED = ['0', ':', '0x04'] # macro
 NV0080_CTRL_DMA_CAPS_SPARSE_VIRTUAL_SUPPORTED = ['0', ':', '0x08'] # macro
@@ -12292,7 +12293,7 @@ NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS = struct_NV0080_CTRL_DMA_UNSET_PAGE_
 NV0080_CTRL_CMD_FB_GET_CAPS = (0x801301) # macro
 NV0080_CTRL_FB_GET_CAPS_PARAMS_MESSAGE_ID = (0x1) # macro
 # def NV0080_CTRL_FB_GET_CAP(tbl, c):  # macro
-#    return (((NvU8)tbl[(1?c)])&(0?c))  
+#    return (((NvU8)tbl[(1?c)])&(0?c))
 NV0080_CTRL_FB_CAPS_SUPPORT_RENDER_TO_SYSMEM = ['0', ':', '0x01'] # macro
 NV0080_CTRL_FB_CAPS_BLOCKLINEAR = ['0', ':', '0x02'] # macro
 NV0080_CTRL_FB_CAPS_SUPPORT_SCANOUT_FROM_SYSMEM = ['0', ':', '0x04'] # macro
@@ -12396,7 +12397,7 @@ NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY = ctypes.c_uint32 # enum
 NV0080_CTRL_CMD_FIFO_GET_CAPS = (0x801701) # macro
 NV0080_CTRL_FIFO_GET_CAPS_PARAMS_MESSAGE_ID = (0x1) # macro
 # def NV0080_CTRL_FIFO_GET_CAP(tbl, c):  # macro
-#    return (((NvU8)tbl[(1?c)])&(0?c))  
+#    return (((NvU8)tbl[(1?c)])&(0?c))
 NV0080_CTRL_FIFO_CAPS_SUPPORT_SCHED_EVENT = ['0', ':', '0x01'] # macro
 NV0080_CTRL_FIFO_CAPS_SUPPORT_PCI_PB = ['0', ':', '0x02'] # macro
 NV0080_CTRL_FIFO_CAPS_SUPPORT_VID_PB = ['0', ':', '0x04'] # macro
@@ -12902,7 +12903,7 @@ NV0080_CTRL_GPU_GET_VGPU_HETEROGENEOUS_MODE_PARAMS = struct_NV0080_CTRL_GPU_GET_
 NV0080_CTRL_CMD_HOST_GET_CAPS = (0x801401) # macro
 NV0080_CTRL_HOST_GET_CAPS_PARAMS_MESSAGE_ID = (0x1) # macro
 # def NV0080_CTRL_HOST_GET_CAP(tbl, c):  # macro
-#    return (((NvU8)tbl[(1?c)])&(0?c))  
+#    return (((NvU8)tbl[(1?c)])&(0?c))
 NV0080_CTRL_HOST_CAPS_SEMA_ACQUIRE_BUG_105665 = ['0', ':', '0x01'] # macro
 NV0080_CTRL_HOST_CAPS_DUP_CMPLT_BUG_126020 = ['0', ':', '0x02'] # macro
 NV0080_CTRL_HOST_CAPS_GPU_COHERENT_MAPPING_SUPPORTED = ['0', ':', '0x04'] # macro
@@ -14126,7 +14127,7 @@ NV2080_CTRL_CE_GET_CAPS_PARAMS_MESSAGE_ID = (0x1) # macro
 NV2080_CTRL_CMD_CE_GET_CAPS_V2 = (0x20802a03) # macro
 NV2080_CTRL_CE_GET_CAPS_V2_PARAMS_MESSAGE_ID = (0x3) # macro
 # def NV2080_CTRL_CE_GET_CAP(tbl, c):  # macro
-#    return (((NvU8)tbl[(1?c)])&(0?c))  
+#    return (((NvU8)tbl[(1?c)])&(0?c))
 NV2080_CTRL_CE_CAPS_CE_GRCE = ['0', ':', '0x01'] # macro
 NV2080_CTRL_CE_CAPS_CE_SHARED = ['0', ':', '0x02'] # macro
 NV2080_CTRL_CE_CAPS_CE_SYSMEM_READ = ['0', ':', '0x04'] # macro
@@ -14260,7 +14261,7 @@ NV2080_CTRL_CE_GET_ALL_PHYSICAL_CAPS_PARAMS = struct_NV2080_CTRL_CE_GET_ALL_CAPS
 NV2080_CTRL_GPUMON_SAMPLE_TYPE_PWR_MONITOR_STATUS = 0x00000001 # macro
 NV2080_CTRL_GPUMON_SAMPLE_TYPE_PERFMON_UTIL = 0x00000002 # macro
 # def NV2080_GPUMON_PID_INVALID((NvU32):  # macro
-#    return (~0))  
+#    return (~0))
 class struct_NV2080_CTRL_GPUMON_SAMPLE(Structure):
     pass
 
@@ -14858,7 +14859,7 @@ NV2080_CTRL_CMD_FB_GET_COMPBITCOPY_CONSTRUCT_INFO = (0x2080133d) # macro
 NV2080_CTRL_CMD_FB_GET_COMPBITCOPY_CONSTRUCT_INFO_PARAMS_MESSAGE_ID = (0x3D) # macro
 NV2080_CTRL_CMD_FB_SET_RRD = (0x2080133e) # macro
 # def NV2080_CTRL_FB_SET_RRD_RESET_VALUE(~((NvU32):  # macro
-#    return 0))  
+#    return 0))
 NV2080_CTRL_FB_SET_RRD_PARAMS_MESSAGE_ID = (0x3E) # macro
 NV2080_CTRL_FB_SET_READ_WRITE_LIMIT_RESET_VALUE = (0xff) # macro
 NV2080_CTRL_CMD_FB_SET_READ_LIMIT = (0x2080133f) # macro
@@ -19954,7 +19955,7 @@ class struct_NV2080_CTRL_CMD_NVD_INSERT_NOCAT_JOURNAL_RECORD_PARAMS(Structure):
 NV2080_CTRL_CMD_NVD_INSERT_NOCAT_JOURNAL_RECORD_PARAMS = struct_NV2080_CTRL_CMD_NVD_INSERT_NOCAT_JOURNAL_RECORD_PARAMS
 NV2080_CTRL_CMD_NVLINK_GET_NVLINK_CAPS_PARAMS_MESSAGE_ID = (0x1) # macro
 # def NV2080_CTRL_NVLINK_GET_CAP(tbl, c):  # macro
-#    return (((NvU8)tbl[(1?c)])&(0?c))  
+#    return (((NvU8)tbl[(1?c)])&(0?c))
 NV2080_CTRL_NVLINK_CAPS_SUPPORTED = ['0', ':', '0x01'] # macro
 NV2080_CTRL_NVLINK_CAPS_P2P_SUPPORTED = ['0', ':', '0x02'] # macro
 NV2080_CTRL_NVLINK_CAPS_SYSMEM_ACCESS = ['0', ':', '0x04'] # macro
@@ -20057,9 +20058,9 @@ NV2080_CTRL_NVLINK_REFCLK_TYPE_PEX = (0x02) # macro
 NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_MESSAGE_ID = (0x2) # macro
 NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS = (0x20803002) # macro
 # def NV2080_CTRL_NVLINK_GET_TL_ERRLOG_BIT(intr, i):  # macro
-#    return (((1<<i)&(intr))>>i)  
+#    return (((1<<i)&(intr))>>i)
 # def NV2080_CTRL_NVLINK_GET_TL_INTEN_BIT(intr, i):  # macro
-#    return (((1<<i)&(intr))>>i)(intr,i)  
+#    return (((1<<i)&(intr))>>i)(intr,i)
 NV2080_CTRL_NVLINK_TL_ERRLOG_TRUE = (0x00000001) # macro
 NV2080_CTRL_NVLINK_TL_ERRLOG_FALSE = (0x00000000) # macro
 NV2080_CTRL_NVLINK_TL_INTEN_TRUE = (0x00000001) # macro
@@ -20115,7 +20116,7 @@ NV2080_CTRL_NVLINK_COUNTER_TL_RX0 = 0x00000004 # macro
 NV2080_CTRL_NVLINK_COUNTER_TL_RX1 = 0x00000008 # macro
 NV2080_CTRL_NVLINK_LP_COUNTERS_DL = 0x00000010 # macro
 # def NV2080_CTRL_NVLINK_COUNTER_DL_RX_ERR_ECC_LANE_L(i):  # macro
-#    return (1<<(i+8))  
+#    return (1<<(i+8))
 NV2080_CTRL_NVLINK_COUNTER_DL_RX_ERR_ECC_LANE__SIZE = 4 # macro
 NV2080_CTRL_NVLINK_COUNTER_DL_RX_ERR_ECC_LANE_L0 = 0x00000100 # macro
 NV2080_CTRL_NVLINK_COUNTER_DL_RX_ERR_ECC_LANE_L1 = 0x00000200 # macro
@@ -20123,7 +20124,7 @@ NV2080_CTRL_NVLINK_COUNTER_DL_RX_ERR_ECC_LANE_L2 = 0x00000400 # macro
 NV2080_CTRL_NVLINK_COUNTER_DL_RX_ERR_ECC_LANE_L3 = 0x00000800 # macro
 NV2080_CTRL_NVLINK_COUNTER_DL_RX_ERR_CRC_FLIT = 0x00010000 # macro
 # def NV2080_CTRL_NVLINK_COUNTER_DL_RX_ERR_CRC_LANE_L(i):  # macro
-#    return (1<<(i+17))  
+#    return (1<<(i+17))
 NV2080_CTRL_NVLINK_COUNTER_DL_RX_ERR_CRC_LANE__SIZE = 8 # macro
 NV2080_CTRL_NVLINK_COUNTER_DL_RX_ERR_CRC_LANE_L0 = 0x00020000 # macro
 NV2080_CTRL_NVLINK_COUNTER_DL_RX_ERR_CRC_LANE_L1 = 0x00040000 # macro
@@ -20230,7 +20231,7 @@ NV2080_CTRL_NVLINK_FATAL_ERROR_TYPE_DL_LTSSM_FAULT_UP = 61 # macro
 NV2080_CTRL_NVLINK_FATAL_ERROR_TYPE_DL_LTSSM_FAULT_DOWN = 62 # macro
 NV2080_CTRL_NVLINK_NUM_FATAL_ERROR_TYPES = 63 # macro
 # def NV2080_CTRL_NVLINK_IS_FATAL_ERROR_COUNT_VALID(count, supportedCounts):  # macro
-#    return (!!((supportedCounts)&NVBIT64(count)))  
+#    return (!!((supportedCounts)&NVBIT64(count)))
 NV2080_CTRL_NVLINK_GET_LINK_FATAL_ERROR_COUNTS_PARAMS_MESSAGE_ID = (0x9) # macro
 NV2080_CTRL_CMD_NVLINK_GET_LINK_NONFATAL_ERROR_RATES = (0x2080300a) # macro
 NV2080_CTRL_NVLINK_NONFATAL_ERROR_RATE_ENTRIES = 5 # macro
@@ -22892,7 +22893,7 @@ struct_NV2080_CTRL_VGPU_MGR_INTERNAL_FREE_STATES_PARAMS._fields_ = [
 
 NV2080_CTRL_VGPU_MGR_INTERNAL_FREE_STATES_PARAMS = struct_NV2080_CTRL_VGPU_MGR_INTERNAL_FREE_STATES_PARAMS
 # def NV83DE_CTRL_CMD(cat, idx):  # macro
-#    return NVXXXX_CTRL_CMD(0x83DE,NV83DE_CTRL_##cat,idx)  
+#    return NVXXXX_CTRL_CMD(0x83DE,NV83DE_CTRL_##cat,idx)
 NV83DE_CTRL_RESERVED = (0x00) # macro
 NV83DE_CTRL_GR = (0x01) # macro
 NV83DE_CTRL_FIFO = (0x02) # macro
@@ -22967,7 +22968,7 @@ NV83DE_CTRL_CMD_DEBUG_SET_SINGLE_SM_SINGLE_STEP = (0x83de0321) # macro
 NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_MESSAGE_ID = (0x21) # macro
 NV83DE_CTRL_CMD_DEBUG_SET_SINGLE_SM_STOP_TRIGGER = (0x83de0322) # macro
 # def NV83DE_CTRL_DEBUG_SET_SINGLE_SM_STOP_TRIGGER_BROADCAST((NvU32):  # macro
-#    return ~0)  
+#    return ~0)
 NV83DE_CTRL_DEBUG_SET_SINGLE_SM_STOP_TRIGGER_PARAMS_MESSAGE_ID = (0x22) # macro
 NV83DE_CTRL_CMD_DEBUG_SET_SINGLE_SM_RUN_TRIGGER = (0x83de0323) # macro
 NV83DE_CTRL_DEBUG_SET_SINGLE_SM_RUN_TRIGGER_PARAMS_MESSAGE_ID = (0x23) # macro
@@ -23338,7 +23339,7 @@ struct_NV83DE_CTRL_DEBUG_READ_MMU_FAULT_INFO_PARAMS._fields_ = [
 
 NV83DE_CTRL_DEBUG_READ_MMU_FAULT_INFO_PARAMS = struct_NV83DE_CTRL_DEBUG_READ_MMU_FAULT_INFO_PARAMS
 # def NVC36F_CTRL_CMD(cat, idx):  # macro
-#    return NVXXXX_CTRL_CMD(0xC36F,NVC36F_CTRL_##cat,idx)  
+#    return NVXXXX_CTRL_CMD(0xC36F,NVC36F_CTRL_##cat,idx)
 NVC36F_CTRL_RESERVED = (0x00) # macro
 NVC36F_CTRL_GPFIFO = (0x01) # macro
 NVC36F_CTRL_EVENT = (0x02) # macro
@@ -23461,7 +23462,7 @@ struct_NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS._fields_ = [
 
 NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS = struct_NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS
 # def NV_CONF_COMPUTE_CTRL_CMD(cat, idx):  # macro
-#    return NVXXXX_CTRL_CMD(0xCB33,NVCB33_CTRL_##cat,idx)  
+#    return NVXXXX_CTRL_CMD(0xCB33,NVCB33_CTRL_##cat,idx)
 NVCB33_CTRL_RESERVED = (0x00) # macro
 NVCB33_CTRL_CONF_COMPUTE = (0x01) # macro
 NV_CONF_COMPUTE_CTRL_CMD_NULL = (0xcb330000) # macro
@@ -23607,7 +23608,7 @@ struct_NV_CONF_COMPUTE_CTRL_CMD_GPU_GET_NUM_SECURE_CHANNELS_PARAMS._fields_ = [
 
 NV_CONF_COMPUTE_CTRL_CMD_GPU_GET_NUM_SECURE_CHANNELS_PARAMS = struct_NV_CONF_COMPUTE_CTRL_CMD_GPU_GET_NUM_SECURE_CHANNELS_PARAMS
 # def NVA06C_CTRL_CMD(cat, idx):  # macro
-#    return NVXXXX_CTRL_CMD(0xA06C,NVA06C_CTRL_##cat,idx)  
+#    return NVXXXX_CTRL_CMD(0xA06C,NVA06C_CTRL_##cat,idx)
 NVA06C_CTRL_RESERVED = (0x00) # macro
 NVA06C_CTRL_GPFIFO = (0x01) # macro
 NVA06C_CTRL_INTERNAL = (0x02) # macro

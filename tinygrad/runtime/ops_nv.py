@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, ctypes, pathlib, re, fcntl, functools, mmap, struct, tempfile, hashlib, subprocess
-from typing import Tuple
+from typing import Tuple, List, Any
 from tinygrad.device import Compiled, LRUAllocator, Compiler, BufferOptions, CompilerOptions
 from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up, to_char_p_p, DEBUG
 from tinygrad.renderer.cstyle import CUDARenderer
@@ -22,14 +22,14 @@ def nv_iowr(fd, nr, args):
 
 def rm_alloc(fd, clss, root, parant, params):
   made = nv_gpu.NVOS21_PARAMETERS(hRoot=root, hObjectParent=parant, hClass=clss,
-                                  pAllocParms=ctypes.cast(ctypes.byref(params) if params else None, ctypes.POINTER(None)))
+                                  pAllocParms=ctypes.cast(ctypes.byref(params), ctypes.POINTER(None)) if params else None) # type: ignore
   nv_iowr(fd, nv_gpu.NV_ESC_RM_ALLOC, made)
   if made.status != 0: raise RuntimeError(f"rm_alloc returned {made.status}")
   return made
 
 def rm_control(fd, cmd, client, obj, params):
   made = nv_gpu.NVOS54_PARAMETERS(hClient=client, hObject=obj, cmd=cmd, paramsSize=ctypes.sizeof(params),
-                                  params=ctypes.cast(ctypes.byref(params) if params else None, ctypes.POINTER(None)))
+                                  params=ctypes.cast(ctypes.byref(params), ctypes.POINTER(None)) if params else None) # type: ignore
   nv_iowr(fd, nv_gpu.NV_ESC_RM_CONTROL, made)
   if made.status != 0: raise RuntimeError(f"rm_control returned {made.status}")
   return made
@@ -97,8 +97,8 @@ class HWComputeQueue:
     prg.qmd.constant_buffer_addr_lower_0 = kernargs & 0xffffffff
     prg.qmd.constant_buffer_addr_upper_0 = kernargs >> 32
     if completion_signal is not None:
-      prg.qmd.release0_address_lower = (NVDevice.semaphores_page.base + completion_signal * 16) & 0xffffffff
-      prg.qmd.release0_address_upper = (NVDevice.semaphores_page.base + completion_signal * 16) >> 32
+      prg.qmd.release0_address_lower = (ctypes.addressof(completion_signal)) & 0xffffffff
+      prg.qmd.release0_address_upper = (ctypes.addressof(completion_signal)) >> 32
       prg.qmd.release0_enable = 1
       prg.qmd.release0_reduction_enable = 1
       prg.qmd.release0_payload_lower = 1
@@ -109,13 +109,12 @@ class HWComputeQueue:
     self.q += [x for x in to_mv(ctypes.addressof(prg.qmd), ctypes.sizeof(prg.qmd)).cast("I")]
     return self
 
-  def wait(self, signal_id:int, value=0):
-    self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(NVDevice.semaphores_page.base + signal_id * 16), value, 0x0,
-               (3 << 0) | (1 << 12) | (1 << 24)]
+  def wait(self, signal, value=0):
+    self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(ctypes.addressof(signal)), value, 0x0, (3 << 0) | (1 << 12) | (1 << 24)]
     return self
 
-  def signal(self, signal_id:int, value=0):
-    self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(NVDevice.semaphores_page.base + signal_id * 16), 0x1, 0x0,
+  def signal(self, signal, value=0):
+    self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(ctypes.addressof(signal)), 0x1, 0x0,
                (6 << 0) | (1 << 20) | (1 << 24) | (5 << 27)]
     self.q += [nvmethod(0, nv_gpu.NVC56F_NON_STALL_INTERRUPT, 1), 0x0]
     return self
@@ -138,13 +137,12 @@ class HWCopyQueue:
     self.q += [nvmethod(4, nv_gpu.NVC6B5_LAUNCH_DMA, 1), 0x182]
     return self
 
-  def wait(self, signal_id:int, value=0):
-    self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(NVDevice.semaphores_page.base + signal_id * 16), value, 0x0,
-               (3 << 0) | (1 << 12) | (1 << 24)]
+  def wait(self, signal, value=0):
+    self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(ctypes.addressof(signal)), value, 0x0, (3 << 0) | (1 << 12) | (1 << 24)]
     return self
 
-  def signal(self, signal_id:int):
-    self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(NVDevice.semaphores_page.base + signal_id * 16), 0x1, 0x0,
+  def signal(self, signal):
+    self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(ctypes.addressof(signal)), 0x1, 0x0,
                (6 << 0) | (1 << 20) | (1 << 24) | (5 << 27)]
     self.q += [nvmethod(0, nv_gpu.NVC56F_NON_STALL_INTERRUPT, 1), 0x0]
     return self
@@ -290,10 +288,10 @@ class NVDevice(Compiled):
   fd_ctl:int = -1
   fd_uvm:int = -1
   fd_uvm_2:int = -1
+  gpus_info = None
   semaphores_page = None
-  semaphores = None
   signal_number = -1
-  devices = []
+  devices: List[NVDevice] = []
 
   def _new_gpu_fd(self):
     fd_dev = os.open(f"/dev/nvidia{self.device_id}", os.O_RDWR | os.O_CLOEXEC)
@@ -370,18 +368,12 @@ class NVDevice(Compiled):
     if made.params.status != 0: raise RuntimeError(f"_map_to_gpu returned {made.params.status}")
     return self._gpu_uvm_map(va_base, size, made.params.hObjectNew)
 
-  def _gpu_uvm_map(self, va_base, size, mem_handle, create_range=True):
+  def _gpu_uvm_map(self, va_base, size, mem_handle, create_range=True) -> nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS:
     if create_range: uvm.create_external_range(self.fd_uvm, base=va_base, length=size)
     gpu_attrs = (nv_gpu.struct_c__SA_UvmGpuMappingAttributes*256)(
       nv_gpu.struct_c__SA_UvmGpuMappingAttributes(gpuUuid=nv_gpu.struct_nv_uuid(uuid=self.gpu_uuid), gpuMappingType = 1))
     return uvm.map_external_allocation(self.fd_uvm, base=va_base, length=size, rmCtrlFd=self.fd_ctl, hClient=self.root, hMemory=mem_handle,
                                        gpuAttributesCount=1, perGpuAttributes=gpu_attrs)
-
-  def _gpu_free(self, mem):
-    made = nv_gpu.NVOS00_PARAMETERS(hRoot=self.root, hObjectParent=self.device, hObjectOld=mem.hMemory)
-    nv_iowr(self.fd_ctl, nv_gpu.NV_ESC_RM_FREE, made)
-    if made.status != 0: raise RuntimeError(f"_gpu_free returned {made.status}")
-    uvm.free(self.fd_uvm, base=mem.base, length=mem.length)
 
   def _alloc_gpu_vaddr(self, size, cpu_mapping=False):
     va_addr = self.next_mmaped_gpu_vaddr if cpu_mapping else self.next_gpu_vaddr
@@ -444,41 +436,38 @@ class NVDevice(Compiled):
     ctxshare_params = nv_gpu.NV_CTXSHARE_ALLOCATION_PARAMETERS(hVASpace=vaspace, flags=nv_gpu.NV_CTXSHARE_ALLOCATION_FLAGS_SUBCONTEXT_ASYNC)
     ctxshare = rm_alloc(self.fd_ctl, nv_gpu.FERMI_CONTEXT_SHARE_A, self.root, channel_group, ctxshare_params).hObjectNew
 
-    self.compute_gpfifo_entries = 0x400
-    self.compute_gpfifo_token = self._gpu_fifo_setup(gpfifo, ctxshare, channel_group, offset=0, entries=self.compute_gpfifo_entries)
-    self.compute_gpu_ring = to_mv(gpfifo.base, self.compute_gpfifo_entries * 8).cast("Q")
+    self.compute_gpfifo_entries: int = 0x400
+    self.compute_gpfifo_token: int = self._gpu_fifo_setup(gpfifo, ctxshare, channel_group, offset=0, entries=self.compute_gpfifo_entries)
+    self.compute_gpu_ring: memoryview = to_mv(gpfifo.base, self.compute_gpfifo_entries * 8).cast("Q")
     self.compute_gpu_ring_controls = nv_gpu.AmpereAControlGPFifo.from_address(gpfifo.base + self.compute_gpfifo_entries * 8)
-    self.compute_put_value = 0
+    self.compute_put_value: int = 0
     self.compute_signal = NVDevice._get_signal()
 
-    self.dma_gpfifo_entries = 0x400
-    self.dma_gpfifo_token = self._gpu_fifo_setup(gpfifo, ctxshare, channel_group, offset=0x100000, entries=self.dma_gpfifo_entries)
-    self.dma_gpu_ring = to_mv(gpfifo.base + 0x100000, self.dma_gpfifo_entries * 8).cast("Q")
+    self.dma_gpfifo_entries: int = 0x400
+    self.dma_gpfifo_token: int = self._gpu_fifo_setup(gpfifo, ctxshare, channel_group, offset=0x100000, entries=self.dma_gpfifo_entries)
+    self.dma_gpu_ring: memoryview = to_mv(gpfifo.base + 0x100000, self.dma_gpfifo_entries * 8).cast("Q")
     self.dma_gpu_ring_controls = nv_gpu.AmpereAControlGPFifo.from_address(gpfifo.base + 0x100000 + self.dma_gpfifo_entries * 8)
-    self.dma_put_value = 0
+    self.dma_put_value: int = 0
     self.dma_signal = NVDevice._get_signal()
 
     en_fifo_params = nv_gpu.NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS(bEnable=1)
     rm_control(self.fd_ctl, nv_gpu.NVA06C_CTRL_CMD_GPFIFO_SCHEDULE, self.root, channel_group, en_fifo_params)
 
-    self.cmdq_page = self._gpu_alloc(0x200000, map_to_cpu=True, huge_page=True)
-    self.cmdq = to_mv(self.cmdq_page.base, 0x200000).cast("I")
-    self.cmdq_wptr = 0 # in bytes
+    self.cmdq_page: nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS = self._gpu_alloc(0x200000, map_to_cpu=True, huge_page=True)
+    self.cmdq: memoryview = to_mv(self.cmdq_page.base, 0x200000).cast("I")
+    self.cmdq_wptr: int = 0 # in bytes
 
-    if NVDevice.semaphores_page is None:
-      NVDevice.semaphores_page = self._gpu_system_alloc(0x10000, map_to_cpu=True)
-      NVDevice.semaphores = to_mv(self.semaphores_page.base, 0x10000).cast("Q")
-    else:
-      self._gpu_uvm_map(NVDevice.semaphores_page.base, NVDevice.semaphores_page.length, NVDevice.semaphores_page.hMemory, create_range=False)
+    if NVDevice.semaphores_page is None: NVDevice.semaphores_page = self._gpu_system_alloc(0x10000, map_to_cpu=True)
+    else: self._gpu_uvm_map(NVDevice.semaphores_page.base, NVDevice.semaphores_page.length, NVDevice.semaphores_page.hMemory, create_range=False) # type: ignore
 
-    self.kernargs_page = self._gpu_alloc(0x1000000)
-    self.kernargs_ptr = self.kernargs_page.base
+    self.kernargs_page: nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS = self._gpu_alloc(0x1000000)
+    self.kernargs_ptr: int = self.kernargs_page.base
 
-    self.qmd_page = self._gpu_alloc(0x1000000)
-    self.qmd_ptr = self.qmd_page.base
+    self.qmd_page: nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS = self._gpu_alloc(0x1000000)
+    self.qmd_ptr: int = self.qmd_page.base
 
-    self.arch = 'sm_89' # TODO: fix
-    self.pending_copyin = []
+    self.arch: str = 'sm_89' # TODO: fix
+    self.pending_copyin: List[Any] = []
 
     super().__init__(device, NVAllocator(self), NVCompiler(self.arch), functools.partial(NVProgram, self))
 
@@ -496,17 +485,17 @@ class NVDevice(Compiled):
     self.pending_copyin.clear()
 
   @classmethod
-  def _get_signal(self) -> int:
+  def _get_signal(self) -> memoryview:
     self.signal_number += 1
-    if self.semaphores_page and self.signal_number * 16 >= self.semaphores_page.length:
-      for i in range(16, NVDevice.signal_number): self.semaphores[i * 2] = 0
-      self.signal_number = 16
-    return self.signal_number
+    if self.semaphores_page and self.signal_number * 16 >= self.semaphores_page.length: self.signal_number = 16
+    sig = to_mv(self.semaphores_page.base + self.signal_number * 16, 16).cast("Q") # type: ignore
+    sig[0] = 0
+    return sig
 
   @classmethod
-  def _wait_signal(self, id, value=0):
-    sem_value = self.semaphores[id * 2]
-    while sem_value != value: sem_value = self.semaphores[id * 2]
+  def _wait_signal(self, signal, value=0):
+    sem_value = signal[0]
+    while sem_value != value: sem_value = signal[0]
 
   def _gpu_fifo_setup(self, gpfifo, ctxshare, channel_group, offset, entries=0x400):
     notifier = self._gpu_system_alloc(48<<20)
