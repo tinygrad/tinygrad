@@ -73,7 +73,15 @@ generate_cuda() {
 }
 
 generate_nv() {
-  NVKERN_SRC=/home/nimlgen/open-gpu-kernel-modules
+  NVKERN_COMMIT_HASH=d6b75a34094b0f56c2ccadf14e5d0bd515ed1ab6
+  NVKERN_SRC=/tmp/open-gpu-kernel-modules-$NVKERN_COMMIT_HASH
+  if [ ! -d "$NVKERN_SRC" ]; then
+    git clone https://github.com/tinygrad/open-gpu-kernel-modules $NVKERN_SRC
+    pushd .
+    cd $NVKERN_SRC || exit
+    git reset --hard $NVKERN_COMMIT_HASH
+    popd
+  fi
 
   clang2py \
     extra/nv_gpu_driver/clc6c0qmd.h \

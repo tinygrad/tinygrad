@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# TARGET arch is: ['-include', '/home/nimlgen/open-gpu-kernel-modules/src/common/sdk/nvidia/inc/nvtypes.h', '-I/home/nimlgen/open-gpu-kernel-modules/src/common/inc', '-I/home/nimlgen/open-gpu-kernel-modules/kernel-open/nvidia-uvm', '-I/home/nimlgen/open-gpu-kernel-modules/kernel-open/common/inc', '-I/home/nimlgen/open-gpu-kernel-modules/src/common/sdk/nvidia/inc', '-I/home/nimlgen/open-gpu-kernel-modules/src/nvidia/arch/nvalloc/unix/include', '-I/home/nimlgen/open-gpu-kernel-modules/src/common/sdk/nvidia/inc/ctrl']
+# TARGET arch is: ['-include', '/tmp/open-gpu-kernel-modules-d6b75a34094b0f56c2ccadf14e5d0bd515ed1ab6/src/common/sdk/nvidia/inc/nvtypes.h', '-I/tmp/open-gpu-kernel-modules-d6b75a34094b0f56c2ccadf14e5d0bd515ed1ab6/src/common/inc', '-I/tmp/open-gpu-kernel-modules-d6b75a34094b0f56c2ccadf14e5d0bd515ed1ab6/kernel-open/nvidia-uvm', '-I/tmp/open-gpu-kernel-modules-d6b75a34094b0f56c2ccadf14e5d0bd515ed1ab6/kernel-open/common/inc', '-I/tmp/open-gpu-kernel-modules-d6b75a34094b0f56c2ccadf14e5d0bd515ed1ab6/src/common/sdk/nvidia/inc', '-I/tmp/open-gpu-kernel-modules-d6b75a34094b0f56c2ccadf14e5d0bd515ed1ab6/src/nvidia/arch/nvalloc/unix/include', '-I/tmp/open-gpu-kernel-modules-d6b75a34094b0f56c2ccadf14e5d0bd515ed1ab6/src/common/sdk/nvidia/inc/ctrl']
 # WORD_SIZE is: 8
 # POINTER_SIZE is: 8
 # LONGDOUBLE_SIZE is: 16
