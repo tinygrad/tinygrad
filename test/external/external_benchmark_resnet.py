@@ -11,11 +11,12 @@ from extra.models import resnet
 from examples.mlperf.initializers import Conv2dHeNormal, Linear
 from examples.hlb_cifar10 import UnsyncedBatchNorm
 
-# benchmark: BEAM=2 DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py
-# benchmark only one layer: BEAM=2 DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py BenchmarkResnetTrain.test_layer1_2
-# inspect:   DEBUG=2 BEAM=2 JITCNT=1 CNT=1 DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py
-# inspect convs:   DEBUG=2 BEAM=2 CONV=1 JITCNT=1 CNT=1 DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py
-# inspect convs with batchnorm: DEBUG=2 BEAM=2 CONV=1 BN=1 JITCNT=1 CNT=1 DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py
+# benchmark memory or kernel count: DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py
+# benchmark speed:                  BEAM=2 JITCNT=10 DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py
+# benchmark only one layer:         BEAM=2 DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py BenchmarkResnetTrain.test_layer1_2
+# inspect:                          DEBUG=2 BEAM=2 CNT=1 DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py
+# inspect convs:                    DEBUG=2 BEAM=2 CONV=1 CNT=1 DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py
+# inspect convs with batchnorm:     DEBUG=2 BEAM=2 CONV=1 BN=1 JITCNT=1 CNT=1 DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py
 # etc
 
 bs = getenv("BS", 64)
@@ -51,12 +52,14 @@ class BenchmarkResnetTrain(unittest.TestCase):
   def _test_layer(self, name, layer, cin, xy):
     optim = SGD(get_parameters(layer), bs / 128 * 1.0)  # need sgd for some params but not consequential for benchmarking
 
-    JITCNT = getenv("JITCNT", 10)
+    JITCNT = getenv("JITCNT", 1)
     Tensor.training = True
     @TinyJit
     def step(x):
       for _ in range(JITCNT):
         optim.zero_grad()
+        x.grad = None
+
         y = x.sequential(layer).relu()
         y.sum().backward()
         optim.step([y, x.grad])
