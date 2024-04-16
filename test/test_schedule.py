@@ -436,6 +436,7 @@ class TestSchedule(unittest.TestCase):
   def test_prefer_half_buffer(self):
     x = Tensor.ones(4).contiguous().realize()
     y = Tensor.ones(4).contiguous().realize()
+    z = Tensor.ones(4, 4).contiguous().realize()
 
     # should not create extra kernel if output will be realized anyways
     dummy = x.sum().half().float()
@@ -445,10 +446,22 @@ class TestSchedule(unittest.TestCase):
 
     # shared between two outputs
     shared = x.sum().half().float()
-    a = shared * x
-    b = shared * y
+    a = shared * 2
+    b = shared * 3
     sched = check_schedule([a, b], 3)
     for si in sched[:-2]: assert all(out.dtype is dtypes.half for out in si.outputs)
+
+    # reduce
+    a = z.sum(axis=0).half().float().sum(axis=0)
+    sched = check_schedule(a, 2)
+    for si in sched[:-1]: assert all(out.dtype is dtypes.half for out in si.outputs)
+
+    # parallel reduce
+    a = x.sum().half().float() * y.sum().half().float()
+    b = a + 1
+    c = a + 2
+    sched = check_schedule([b, c], 4)
+    # doesn't store in half...
 
     # expand
     # expand will realize just after the .float(), so requires a different change
