@@ -1,12 +1,10 @@
 import numpy as np
 from typing import DefaultDict, Dict, List, Set, TypeVar
 from tinygrad.buffer import Buffer
-from tinygrad.device import Device
-from tinygrad.dtype import dtypes
 from tinygrad.engine.realize import CustomOp, ExecItem, capturing, lower_schedule_item
 from tinygrad.helpers import DEBUG, colored, getenv
 from tinygrad.lazy import LazyBuffer
-from tinygrad.engine.schedule import _graph_schedule, create_schedule
+from tinygrad.engine.schedule import _graph_schedule
 from tinygrad.ops import LoadOps, ScheduleItem
 from tinygrad.tensor import Tensor
 
@@ -49,30 +47,13 @@ def fuzz_schedule(outs: List[LazyBuffer]):
       if len(capturing): capturing[0].add(ei)
       if isinstance(ei.prg, CustomOp): Tensor._seed = seed
       ei.run()
-      a = Tensor.empty((ps.outputs[0].size,), dtype=ps.outputs[0].dtype)
-      b = Tensor.empty((ps.outputs[0].size,), dtype=ps.outputs[0].dtype)
-      ast = assert_allclose_ast(a, b)
       for out in ps.outputs:
-        prg = Device[Device.DEFAULT].get_runner(*ast)
-        ret_buf = Buffer(Device.DEFAULT, 1, dtypes.bool).allocate()
-        gt = Buffer(Device.DEFAULT, out.size, out.dtype, initial_value=ground_truth[out])
-        prg.exec([ret_buf, gt, rawbufs[out]])
-        try:
-          assert np.frombuffer(ret_buf.as_buffer(), dtypes.bool.np)
+        gt = np.frombuffer(ground_truth[out], out.dtype.np)
+        outbuf = np.frombuffer(rawbufs[out].as_buffer(), out.dtype.np)
+        try: np.testing.assert_allclose(gt, outbuf, atol=1e-2, rtol=1e-2)
         except Exception as e:
-          gt = np.frombuffer(ground_truth[out], out.dtype.np)
-          outbuf = np.frombuffer(rawbufs[out].as_buffer(), out.dtype.np)
-          print(gt, outbuf)
           print(f"FAILED FOR {out}")
           raise e
-
-def assert_allclose_ast(a:Tensor, b:Tensor, atol=1e-2, rtol=1e-2):
-  if dtypes.is_float(a.dtype):
-    tol = atol + rtol * b.abs()
-    diff = (a - b).abs() > tol
-  else: diff = a - b
-  ret = diff.sum() == 0
-  return create_schedule([ret.lazydata])[-1].ast
 
 T = TypeVar("T")
 def find_all_toposorts(graph:DefaultDict[T, List[T]], in_degree:DefaultDict[T, int]) -> List[List[T]]:
