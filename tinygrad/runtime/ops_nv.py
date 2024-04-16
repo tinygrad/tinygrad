@@ -22,14 +22,14 @@ def nv_iowr(fd, nr, args):
 
 def rm_alloc(fd, clss, root, parant, params):
   made = nv_gpu.NVOS21_PARAMETERS(hRoot=root, hObjectParent=parant, hClass=clss,
-                                  pAllocParms=ctypes.cast(ctypes.byref(params), ctypes.POINTER(None)) if params else None) # type: ignore
+                                  pAllocParms=ctypes.cast(ctypes.byref(params), ctypes.POINTER(None)) if params is not None else None) # type: ignore
   nv_iowr(fd, nv_gpu.NV_ESC_RM_ALLOC, made)
   if made.status != 0: raise RuntimeError(f"rm_alloc returned {made.status}")
   return made
 
 def rm_control(fd, cmd, client, obj, params):
   made = nv_gpu.NVOS54_PARAMETERS(hClient=client, hObject=obj, cmd=cmd, paramsSize=ctypes.sizeof(params),
-                                  params=ctypes.cast(ctypes.byref(params), ctypes.POINTER(None)) if params else None) # type: ignore
+                                  params=ctypes.cast(ctypes.byref(params), ctypes.POINTER(None)) if params is not None else None) # type: ignore
   nv_iowr(fd, nv_gpu.NV_ESC_RM_CONTROL, made)
   if made.status != 0: raise RuntimeError(f"rm_control returned {made.status}")
   return made
@@ -97,8 +97,8 @@ class HWComputeQueue:
     prg.qmd.constant_buffer_addr_lower_0 = kernargs & 0xffffffff
     prg.qmd.constant_buffer_addr_upper_0 = kernargs >> 32
     if completion_signal is not None:
-      prg.qmd.release0_address_lower = (ctypes.addressof(completion_signal)) & 0xffffffff
-      prg.qmd.release0_address_upper = (ctypes.addressof(completion_signal)) >> 32
+      prg.qmd.release0_address_lower = (ctypes.addressof(from_mv(completion_signal).contents)) & 0xffffffff
+      prg.qmd.release0_address_upper = (ctypes.addressof(from_mv(completion_signal).contents)) >> 32
       prg.qmd.release0_enable = 1
       prg.qmd.release0_reduction_enable = 1
       prg.qmd.release0_payload_lower = 1
@@ -110,11 +110,12 @@ class HWComputeQueue:
     return self
 
   def wait(self, signal, value=0):
-    self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(ctypes.addressof(signal)), value, 0x0, (3 << 0) | (1 << 12) | (1 << 24)]
+    self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(ctypes.addressof(from_mv(signal).contents)), value, 0x0,
+               (3 << 0) | (1 << 12) | (1 << 24)]
     return self
 
   def signal(self, signal, value=0):
-    self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(ctypes.addressof(signal)), 0x1, 0x0,
+    self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(ctypes.addressof(from_mv(signal).contents)), 0x1, 0x0,
                (6 << 0) | (1 << 20) | (1 << 24) | (5 << 27)]
     self.q += [nvmethod(0, nv_gpu.NVC56F_NON_STALL_INTERRUPT, 1), 0x0]
     return self
@@ -138,11 +139,12 @@ class HWCopyQueue:
     return self
 
   def wait(self, signal, value=0):
-    self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(ctypes.addressof(signal)), value, 0x0, (3 << 0) | (1 << 12) | (1 << 24)]
+    self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(ctypes.addressof(from_mv(signal).contents)), value, 0x0,
+               (3 << 0) | (1 << 12) | (1 << 24)]
     return self
 
   def signal(self, signal):
-    self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(ctypes.addressof(signal)), 0x1, 0x0,
+    self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(ctypes.addressof(from_mv(signal).contents)), 0x1, 0x0,
                (6 << 0) | (1 << 20) | (1 << 24) | (5 << 27)]
     self.q += [nvmethod(0, nv_gpu.NVC56F_NON_STALL_INTERRUPT, 1), 0x0]
     return self
@@ -428,6 +430,9 @@ class NVDevice(Compiled):
     for dev in self.devices:
       uvm.enable_peer_access(self.fd_uvm, gpuUuidA=nv_gpu.struct_nv_uuid(uuid=self.gpu_uuid), gpuUuidB=nv_gpu.struct_nv_uuid(uuid=dev.gpu_uuid))
 
+    if NVDevice.semaphores_page is None: NVDevice.semaphores_page = self._gpu_system_alloc(0x10000, map_to_cpu=True)
+    else: self._gpu_uvm_map(NVDevice.semaphores_page.base, NVDevice.semaphores_page.length, NVDevice.semaphores_page.hMemory, create_range=False) # type: ignore
+
     channel_params = nv_gpu.NV_CHANNEL_GROUP_ALLOCATION_PARAMETERS(engineType=nv_gpu.NV2080_ENGINE_TYPE_GRAPHICS)
     channel_group = rm_alloc(self.fd_ctl, nv_gpu.KEPLER_CHANNEL_GROUP_A, self.root, self.device, channel_params).hObjectNew
 
@@ -456,9 +461,6 @@ class NVDevice(Compiled):
     self.cmdq_page: nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS = self._gpu_alloc(0x200000, map_to_cpu=True, huge_page=True)
     self.cmdq: memoryview = to_mv(self.cmdq_page.base, 0x200000).cast("I")
     self.cmdq_wptr: int = 0 # in bytes
-
-    if NVDevice.semaphores_page is None: NVDevice.semaphores_page = self._gpu_system_alloc(0x10000, map_to_cpu=True)
-    else: self._gpu_uvm_map(NVDevice.semaphores_page.base, NVDevice.semaphores_page.length, NVDevice.semaphores_page.hMemory, create_range=False) # type: ignore
 
     self.kernargs_page: nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS = self._gpu_alloc(0x1000000)
     self.kernargs_ptr: int = self.kernargs_page.base
