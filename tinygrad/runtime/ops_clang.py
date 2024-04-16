@@ -3,8 +3,8 @@ from tinygrad.device import Compiled, MallocAllocator, Compiler, CompilerOptions
 from tinygrad.helpers import cpu_time_execution, getenv
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
 
-CLANG_PROGRAM_HEADER = '#include <omp.h>\n#include <stdbool.h>\n#include <tgmath.h>\n#define max(x,y) ((x>y)?x:y)\n#define half __fp16\n'
-OMP_PRAGMA, OMP_FLAGS = ("#pragma omp parallel for collapse({nloops})", "-Xpreprocessor -fopenmp -lomp") if getenv("OMP", 1) else ("", "")
+OMP_HEADER, OMP_PRAGMA, OMP_FLAGS = ("#include <omp.h>\n", "#pragma omp parallel for collapse({nloops})", "-Xpreprocessor -fopenmp -lomp") if getenv("OMP", 1) else ("", "", "")
+CLANG_PROGRAM_HEADER = OMP_HEADER +'#include <stdbool.h>\n#include <tgmath.h>\n#define max(x,y) ((x>y)?x:y)\n#define half __fp16\n'
 
 class ClangCompiler(Compiler):
   compiler_opts = CompilerOptions("CLANG", supports_float4=False, has_local=False)
