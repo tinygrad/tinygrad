@@ -52,17 +52,19 @@ class BenchmarkResnetTrain(unittest.TestCase):
     optim = SGD(get_parameters(layer), bs / 128 * 1.0)  # need sgd for some params but not consequential for benchmarking
 
     JITCNT = getenv("JITCNT", 10)
+    Tensor.training = True
     @TinyJit
     def step(x):
       for _ in range(JITCNT):
+        optim.zero_grad()
         y = x.sequential(layer).relu()
-        y.mean().backward()
+        y.sum().backward()
         optim.step([y, x.grad])
       return y.detach()
 
     CNT = getenv("CNT", 5)
     best_tm = None
-    flops, mem_used = None, None
+    flops, mem_used, kernels = None, None, None
     for i in range(CNT):
       x = Tensor.randn(bs, cin, xy, xy, requires_grad=True).realize()
       GlobalCounters.reset()
@@ -72,10 +74,11 @@ class BenchmarkResnetTrain(unittest.TestCase):
       et = time.perf_counter()
 
       if flops is None: flops = GlobalCounters.global_ops
-      if mem_used is None: mem_used = GlobalCounters.mem_used
+      mem_used = GlobalCounters.mem_used
+      kernels = GlobalCounters.kernel_count
       tm = (et-st) / JITCNT
       best_tm = tm if best_tm is None or tm < best_tm else best_tm
-    print(f"\r{name:42s}: {best_tm * 1000:>9.2f} ms, {flops / 10**12 / tm:>7.2f} tflops, {mem_used / 10**9: 7.2f} GB used")
+    print(f"\r{name:42s}: {best_tm * 1000:>9.2f} ms, {flops / 10**12 / tm:>7.2f} tflops, {mem_used / 10**9: 7.2f} GB used, {kernels:>6d} kernels")
 
   def test_layer1_1(self): self._test_layer(*self._get_layer(0, 0))
   def test_layer1_2(self): self._test_layer(*self._get_layer(0, 1))
