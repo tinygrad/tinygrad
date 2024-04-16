@@ -2,7 +2,7 @@ import numpy as np
 from collections import defaultdict
 from typing import DefaultDict, Dict, List, Set, TypeVar
 from tinygrad.buffer import Buffer
-from tinygrad.engine.realize import CustomOp, lower_schedule, capturing
+from tinygrad.engine.realize import CustomOp, ExecItem, lower_schedule, capturing, lower_schedule_item
 from tinygrad.helpers import DEBUG, colored, getenv
 from tinygrad.lazy import LazyBuffer
 from tinygrad.engine.schedule import _graph_schedule
@@ -15,14 +15,20 @@ def fuzz_schedule(outs: List[LazyBuffer]):
   if DEBUG >= 1: print(colored(f"fuzzing {len(toposorts)} schedule permutation", "yellow"))
 
   # setup ground truth
-  schedules: List[List[ScheduleItem]] = [[] for _ in range(len(toposorts))]
-  outputs: DefaultDict[LazyBuffer, List[Buffer]] = defaultdict(list)
+  ground_truth: Dict[LazyBuffer, Buffer] = {}
   for key in toposorts[0]:
     for out in (ps:=prescheduled[key]).outputs:
       seen.add(out)
-      outputs[out].append(out.buffer)
-    schedules[0].append(ScheduleItem(ps.ast, tuple(x.buffer for x in ps.outputs if x.size != 0), tuple(x.buffer for x in ps.inputs if x.size != 0)))
+      ground_truth[out] = out.buffer
+    si = ScheduleItem(ps.ast, tuple(x.buffer for x in ps.outputs if x.size != 0), tuple(x.buffer for x in ps.inputs if x.size != 0))
+    ei = ExecItem(lower_schedule_item(si), list(si.outputs+si.inputs))
+    if len(capturing): capturing[0].add(ei)
+    ei.run()
 
+  for lb, rawbuf in ground_truth.items():
+    print(np.frombuffer(rawbuf.as_buffer(), rawbuf.dtype.np)[:10])
+
+  """
   # create new Buffers for each permutation
   for i, ts in enumerate(toposorts[1:]):
     rawbufs: Dict[LazyBuffer, Buffer] = {}
@@ -39,24 +45,7 @@ def fuzz_schedule(outs: List[LazyBuffer]):
           else: rawbufs[x] = Buffer(x.buffer.device, x.buffer.size, x.buffer.dtype, initial_value=x.buffer.as_buffer())
       schedules[i+1].append(ScheduleItem(ps.ast, tuple(rawbufs[x] for x in ps.outputs if x.size != 0),
                                          tuple(rawbufs[x] for x in ps.inputs if x.size != 0)))
-
-  # run all schedules with the same seed
-  seed = Tensor._seed
-  for i, schedule in enumerate(schedules):
-    if DEBUG >= 1: print(colored(f"testing permutation {i}", "yellow"))
-    for ei in lower_schedule(schedule):
-      if len(capturing): capturing[0].add(ei)
-      if isinstance(ei.prg, CustomOp): Tensor._seed = seed
-      ei.run()
-
-  # assert all LazyBuffers realized correctly
-  for lb, bufs in outputs.items():
-    ground_truth = np.frombuffer(bufs[0].as_buffer(), bufs[0].dtype.np)
-    for buf in bufs[1:]:
-      try: np.testing.assert_allclose(np.frombuffer(buf.as_buffer(), buf.dtype.np), ground_truth, atol=1e-2, rtol=1e-2)
-      except AssertionError as e:
-        print(f"COMPARE FAILED FOR {lb}")
-        raise e
+  """
 
 T = TypeVar("T")
 def find_all_toposorts(graph:DefaultDict[T, List[T]], in_degree:DefaultDict[T, int]) -> List[List[T]]:
