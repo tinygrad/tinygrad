@@ -1695,6 +1695,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data), 8).type(torch.int32),
                        lambda: Tensor(data).one_hot(8), forward_only=True)
 
+  def test_masked_fill(self):
+    helper_test_op([(32,10)], lambda x: x.masked_fill((x>0.1).detach(), -math.inf))
+    helper_test_op([(32,10)], lambda x: x.masked_fill((x<0.1).detach(), -math.inf))
+
 if __name__ == '__main__':
   np.random.seed(1337)
   unittest.main(verbosity=2)

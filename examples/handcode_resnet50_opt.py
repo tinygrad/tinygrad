@@ -1,7 +1,7 @@
 from typing import List
 from extra.models.resnet import ResNet50
 from tinygrad.tensor import Tensor
-from tinygrad.ops import LoadOps
+from tinygrad.ops import LoadOps, get_lazyop_info
 from tinygrad.device import Device, Compiled
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.search import time_linearizer, beam_search, bufs_from_lin
@@ -62,7 +62,7 @@ if __name__ == "__main__":
     choices = []
     for lin in lins:
       tm = time_linearizer(lin, rawbufs, allow_test_size=False, cnt=10)
-      gflops = sym_infer(lin.info.flops, {k:k.min for k in lin.ast[0].vars()})*1e-9/tm
+      gflops = sym_infer(get_lazyop_info(lin.ast[0]).flops, {k:k.min for k in lin.ast[0].vars()})*1e-9/tm
       choices.append((tm, gflops, lin.linearize()))
 
       # print all kernels
