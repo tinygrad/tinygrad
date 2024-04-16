@@ -19,6 +19,7 @@ def he_normal(*shape, a: float = 0.00, **kwargs) -> Tensor:
 class Conv2dHeNormal(nn.Conv2d):
   def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
     super().__init__(in_channels, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation, groups=groups, bias=bias)
+    self.in_channels, self.out_channels = in_channels, out_channels  # for testing
     self.weight = he_normal(out_channels, in_channels//groups, *self.kernel_size, a=0.0, dtype=dtypes.float32)
     if bias: self.bias = self.bias.cast(dtypes.float32)
   def __call__(self, x: Tensor):
