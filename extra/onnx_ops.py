@@ -428,7 +428,7 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
       y_out = roi[-2][0] * (X.shape[-2] - 1) + y_out * ((roi[-2][1] - roi[-2][0]) * (X.shape[-2] - 1) / (output_shape[-2] - 1)) if output_shape[-2] > 1 else Tensor([0.5 * (roi[-2][0] + roi[-2][1]) * (X.shape[-2] - 1)])
     return x_out.clip(0, X.shape[-1]-1), y_out.clip(0, X.shape[-2]-1)
   if roi is not None:
-    roi = roi.tolist()
+    roi = safe_numpy(roi).tolist()
     roi = [(st,ed) for st, ed in zip(roi[:len(roi)//2], roi[len(roi)//2:])]
     roi_ = [(1,1)] * 4
     if axes is not None:
@@ -436,7 +436,7 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
         roi_[a] = r
       roi = roi_
   if scales is not None:
-    scales = scales.tolist()
+    scales = safe_numpy(scales).tolist()
     if axes is not None:
       scales_ = [1]*X.ndim
       for a,s in zip(axes, scales):
