@@ -638,5 +638,11 @@ class TestImplicitFunctionTypeChange(unittest.TestCase):
 
     assert all(result)
 
+  @given(strat.sampled_from(core_dtypes))
+  def test_abs_diff(self, dt):
+    a, b = Tensor([2], dtype=dt), Tensor([1], dtype=dt)
+    ret = (a - b).abs()
+    np.testing.assert_allclose(ret.numpy(), np.abs(a.numpy()-b.numpy()))
+
 if __name__ == '__main__':
   unittest.main()
