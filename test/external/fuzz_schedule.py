@@ -15,13 +15,15 @@ def fuzz_schedule(outs: List[LazyBuffer]):
 
   # setup ground truth
   ground_truth: Dict[LazyBuffer, memoryview] = {}
-  assign_bufs: Dict[LazyBuffer, memoryview] = {}
+  prerealized: Dict[LazyBuffer, memoryview] = {}
   seed = Tensor._seed
   for key in toposorts[0]:
     for out in (ps:=prescheduled[key]).outputs:
       seen.add(out)
       # freeze assign state before exec
-      if out.op is LoadOps.ASSIGN: assign_bufs[out] = out.buffer.as_buffer()
+      if out.op is LoadOps.ASSIGN: prerealized[out] = out.buffer.as_buffer()
+    for x in ps.inputs:
+      if x not in ground_truth and x.device != "NPY": prerealized[x] = x.buffer.as_buffer()
     si = ScheduleItem(ps.ast, tuple(x.buffer for x in ps.outputs if x.size != 0), tuple(x.buffer for x in ps.inputs if x.size != 0))
     ei = ExecItem(lower_schedule_item(si), list(si.outputs+si.inputs))
     if len(capturing): capturing[0].add(ei)
@@ -36,12 +38,12 @@ def fuzz_schedule(outs: List[LazyBuffer]):
     for key in ts:
       for out in (ps:=prescheduled[key]).outputs:
         rawbufs[out] = Buffer(out.buffer.device, out.buffer.size, out.buffer.dtype)
-        if out in assign_bufs: rawbufs[out].ensure_allocated().copyin(assign_bufs[out])
+        if out.op is LoadOps.ASSIGN: rawbufs[out].ensure_allocated().copyin(prerealized[out])
       for x in ps.inputs:
         if x not in rawbufs:
           if x.device == "NPY": rawbufs[x] = x.buffer
           # copy the pre realized input
-          else: rawbufs[x] = Buffer(x.buffer.device, x.buffer.size, x.buffer.dtype, initial_value=x.buffer.as_buffer())
+          else: rawbufs[x] = Buffer(x.buffer.device, x.buffer.size, x.buffer.dtype, initial_value=prerealized[x])
       si = ScheduleItem(ps.ast, tuple(rawbufs[x] for x in ps.outputs if x.size != 0), tuple(rawbufs[x] for x in ps.inputs if x.size != 0))
       ei = ExecItem(lower_schedule_item(si), list(si.outputs+si.inputs))
       if len(capturing): capturing[0].add(ei)
