@@ -52,3 +52,9 @@ quickstart.py
 weights
 *.lprof
 site/
+extra/accel/amx/tests/perf
+extra/accel/amx/tests/a.out.dSYM/Contents/Info.plist
+extra/accel/amx/tests/a.out.dSYM/Contents/Resources/Relocations/aarch64/a.out.yml
+extra/accel/amx/tests/perf.dSYM/Contents/Info.plist
+extra/accel/amx/tests/perf.dSYM/Contents/Resources/DWARF/perf
+extra/accel/amx/tests/perf.dSYM/Contents/Resources/Relocations/aarch64/perf.yml
