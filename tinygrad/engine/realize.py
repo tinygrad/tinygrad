@@ -44,25 +44,50 @@ def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, Non
 capturing: List = []  # put classes with an add method in here
 
 def _internal_memory_planner(buffers:List[Iterable[Buffer]], debug_prefix="") -> Dict[Buffer, Buffer]:
-  last_appearance = {}
+  first_appearance, last_appearance = {}, {}
   for i,u in enumerate(buffers):
-    for buf in u: last_appearance[buf] = i
+    for buf in u: 
+      if buf not in first_appearance: first_appearance[buf] = i
+      last_appearance[buf] = i
 
-  # LRU algorithm
+  # Sort buffer by len, process requests starting from the biggest buffers, since it's 100% to allocate.
+  # Choose any buffer from already allocated buffers which does not intersect with the new usage segment or allocate a new buffer.
+  # TODO: Time complexity should be better
   assigned: Dict[Buffer, Buffer] = {}
-  local_cache: DefaultDict[Tuple[str, int, DType], List[Buffer]] = defaultdict(list)
-  for i,u in enumerate(buffers):
-    for buf in u:
-      # all unallocated unparented buffers are fair game to replace
+  if getenv("NEW_MEMPLANNER", 1):
+    buffer_requests: List[Tuple[int, int, int]] = []
+    for buf in first_appearance.keys():
       if buf.is_allocated() or buf.lb_refcount > 0: continue
-      key = (buf.device, buf.size, buf.dtype)
-      if buf not in assigned:
-        if len(ll:=local_cache[key]): assigned[buf] = ll.pop()
-        else: assigned[buf] = Buffer(*key)
-      if i == last_appearance[buf]:
-        local_cache[key].append(assigned[buf])
+      buffer_requests.append((buf.nbytes, (first_appearance[buf], last_appearance[buf]), buf))
 
-  if DEBUG >= 1 and len(ak:=dedup(assigned.keys())) != len(av:=dedup(assigned.values())):
+    buffer_pool = []
+    buffer_requests = sorted(buffer_requests, key=lambda x: x[0], reverse=True)
+    for _, seg, buf in buffer_requests:
+      found_buf = None
+      for i,(reuse_buf, used_segments) in enumerate(buffer_pool):
+        if not any(seg[0] <= useg[1] and seg[1] >= useg[0] for useg in used_segments):
+          found_buf = i
+          break
+      if found_buf is None:
+        buffer_pool.append((Buffer(buf.device, buf.size, buf.dtype), []))
+        found_buf = -1
+      assigned[buf] = buffer_pool[found_buf][0]
+      buffer_pool[found_buf][1].append(seg)
+  else:
+    # LRU algorithm
+    local_cache: DefaultDict[Tuple[str, int, DType], List[Buffer]] = defaultdict(list)
+    for i,u in enumerate(buffers):
+      for buf in u:
+        # all unallocated unparented buffers are fair game to replace
+        if buf.is_allocated() or buf.lb_refcount > 0: continue
+        key = (buf.device, buf.size, buf.dtype)
+        if buf not in assigned:
+          if len(ll:=local_cache[key]): assigned[buf] = ll.pop()
+          else: assigned[buf] = Buffer(*key)
+        if i == last_appearance[buf]:
+          local_cache[key].append(assigned[buf])
+
+  if DEBUG >= 0 and len(ak:=dedup(assigned.keys())) != len(av:=dedup(assigned.values())):
     print(debug_prefix+f"memory reduced from {sum([x.nbytes for x in ak])/1e6:.2f} MB to {sum([x.nbytes for x in av])/1e6:.2f} MB")
   return assigned
 
