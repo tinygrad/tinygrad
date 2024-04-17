@@ -3,7 +3,7 @@ from typing import TypeVar, Generic, Callable, List, Tuple, Union, Dict, cast, O
 import functools, itertools, operator
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, BEAM, getenv, all_int, GraphException, dedup
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, BEAM, getenv, all_int, GraphException
 from tinygrad.device import Buffer, CompiledRunner, BufferXfer, Compiled, MultiDeviceJITGraph, Device
 from tinygrad.dtype import DType
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -76,12 +76,14 @@ class TinyJit(Generic[ReturnType]):
     self.fxn = fxn
     self.reset()
 
+  def add_buffer(self, b:Buffer) -> Buffer:
+    if found:=self.buffer_replace.get(b, None): return found
+    if b.is_allocated() or b.lb_refcount > 0: return b
+    self.buffer_replace[b] = ret = Buffer(b.device, b.size, b.dtype, options=b.options)
+    return ret
+
   def add(self, ei:ExecItem):
-    for b in ei.rawbufs:
-      assert b is not None
-      if b not in self.buffer_replace and not b.is_allocated() and b.lb_refcount == 0:
-        self.buffer_replace[b] = Buffer(b.device, b.size, b.dtype, options=b.options)
-    self.jit_cache.append(ExecItem(ei.prg, [self.buffer_replace.get(buf, buf) for buf in ei.rawbufs if buf is not None]))
+    self.jit_cache.append(ExecItem(ei.prg, [self.add_buffer(buf) for buf in ei.rawbufs if buf is not None]))
 
   def reset(self):
     self.jit_cache: List[ExecItem] = []
@@ -118,13 +120,13 @@ class TinyJit(Generic[ReturnType]):
         self.ret = self.fxn(*args, **kwargs)
         Tensor.corealize(get_parameters(self.ret))
         capturing.clear()
-      assert len(self.jit_cache), "didn't JIT anything!"
       del self.buffer_replace
-      assigned = _internal_memory_planner([cast(List[Buffer], x.rawbufs) for x in self.jit_cache])
-      if DEBUG >= 1 and len(ak:=dedup(assigned.keys())) != len(av:=dedup(assigned.values())):
-        print(f"JIT memory reduced from {sum([x.nbytes for x in ak])/1e6:.2f} MB to {sum([x.nbytes for x in av])/1e6:.2f} MB")
-      self.jit_cache = [ExecItem(ei.prg, [assigned.get(x,x).ensure_allocated() for x in ei.rawbufs if x is not None]) for ei in self.jit_cache]
+      assert len(self.jit_cache), "didn't JIT anything!"
       if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
+
+      # memory planning (optional)
+      assigned = _internal_memory_planner([cast(List[Buffer], x.rawbufs) for x in self.jit_cache], debug_prefix="JIT ")
+      self.jit_cache = [ExecItem(ei.prg, [assigned.get(x,x).ensure_allocated() for x in ei.rawbufs if x is not None]) for ei in self.jit_cache]
 
       # Condense the items into a graph executor.
       if getenv("JIT") != 2: self.jit_cache = apply_graph_to_jit(self.jit_cache, input_rawbuffers, var_vals)

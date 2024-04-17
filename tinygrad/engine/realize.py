@@ -43,7 +43,7 @@ def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, Non
 
 capturing: List = []  # put classes with an add method in here
 
-def _internal_memory_planner(buffers:List[Iterable[Buffer]]) -> Dict[Buffer, Buffer]:
+def _internal_memory_planner(buffers:List[Iterable[Buffer]], debug_prefix="") -> Dict[Buffer, Buffer]:
   last_appearance = {}
   for i,u in enumerate(buffers):
     for buf in u: last_appearance[buf] = i
@@ -62,12 +62,12 @@ def _internal_memory_planner(buffers:List[Iterable[Buffer]]) -> Dict[Buffer, Buf
       if i == last_appearance[buf]:
         local_cache[key].append(assigned[buf])
 
+  if DEBUG >= 1 and len(ak:=dedup(assigned.keys())) != len(av:=dedup(assigned.values())):
+    print(debug_prefix+f"memory reduced from {sum([x.nbytes for x in ak])/1e6:.2f} MB to {sum([x.nbytes for x in av])/1e6:.2f} MB")
   return assigned
 
 def memory_planner(schedule:List[ScheduleItem]) -> List[ScheduleItem]:
   assigned = _internal_memory_planner([si.outputs+si.inputs for si in schedule])
-  if DEBUG >= 1 and len(ak:=dedup(assigned.keys())) != len(av:=dedup(assigned.values())):
-    print(f"memory reduced from {sum([x.nbytes for x in ak])/1e6:.2f} MB to {sum([x.nbytes for x in av])/1e6:.2f} MB")
   return [ScheduleItem(si.ast, tuple(assigned.get(x, x) for x in si.outputs),
                                tuple(assigned.get(x, x) for x in si.inputs)) for si in schedule]
 
