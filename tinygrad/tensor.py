@@ -545,7 +545,8 @@ class Tensor:
   @staticmethod
   def scaled_uniform(*shape, **kwargs) -> Tensor:
     """
-    Creates a tensor with the given shape, filled with random values from a uniform distribution with a mean of zero and a standard deviation of `(prod(shape)**-0.5`.
+    Creates a tensor with the given shape, filled with random values
+    from a uniform distribution with a mean of zero and a standard deviation of `(prod(shape)**-0.5`.
 
     You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
     Additionally, all other keyword arguments are passed to the constructor of the tensor.
