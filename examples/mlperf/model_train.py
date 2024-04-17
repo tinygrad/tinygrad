@@ -488,10 +488,9 @@ def train_maskrcnn():
 
 if __name__ == "__main__":
   multiprocessing.set_start_method('spawn')
-  # with Tensor.train():
-  Tensor.training = True
-  for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn").split(","):
-    nm = f"train_{m}"
-    if nm in globals():
-      print(f"training {m}")
-      globals()[nm]()
+  with Tensor.train():
+    for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn").split(","):
+      nm = f"train_{m}"
+      if nm in globals():
+        print(f"training {m}")
+        globals()[nm]()
