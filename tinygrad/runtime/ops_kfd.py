@@ -115,11 +115,6 @@ regCOMPUTE_DISPATCH_INTERLEAVE = 0x1bcf - SUB
 regBIF_BX_PF1_GPU_HDP_FLUSH_REQ = 0x0106
 regBIF_BX_PF1_GPU_HDP_FLUSH_DONE = 0x0107
 
-#define regBIF_BX_PF1_GPU_HDP_FLUSH_REQ                                                                 0x0106
-#define regBIF_BX_PF1_GPU_HDP_FLUSH_REQ_BASE_IDX                                                        2
-#define regBIF_BX_PF1_GPU_HDP_FLUSH_DONE                                                                0x0107
-#define regBIF_BX_PF1_GPU_HDP_FLUSH_DONE_BASE_IDX                                                       2
-
 # VGT_EVENT_TYPE in navi10_enum.h
 CACHE_FLUSH_AND_INV_TS_EVENT = 0x14
 CS_PARTIAL_FLUSH = 0x7
@@ -175,23 +170,11 @@ class HWPM4Queue:
   def __init__(self): self.q = []
 
   def hdp_flush(self):
-    # gfx_v11_0_wait_reg_mem(ring, reg_mem_engine, 0, 1,
-		# 	       adev->nbio.funcs->get_hdp_flush_req_offset(adev),
-		# 	       adev->nbio.funcs->get_hdp_flush_done_offset(adev),
-		# 	       ref_and_mask, ref_and_mask, 0x20);
-
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_WAIT_REG_MEM, 5),
       amd_gpu.WAIT_REG_MEM_MEM_SPACE(0) | amd_gpu.WAIT_REG_MEM_OPERATION(1) | amd_gpu.WAIT_REG_MEM_FUNCTION(3) | amd_gpu.WAIT_REG_MEM_ENGINE(0),
       regBIF_BX_PF1_GPU_HDP_FLUSH_REQ, regBIF_BX_PF1_GPU_HDP_FLUSH_DONE, 0x0, 0x0, 0x20]
-    # self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_ACQUIRE_MEM, 6), 0, #0x80000000,
-    #            sz & 0xffffffff, (sz >> 32) & 0xff, addr & 0xffffffff, (addr >> 32) & 0xffffff, 0,
-    #            amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLI_INV(gli) | amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLK_INV(glk) | \
-    #            amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLV_INV(glv) | amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL1_INV(gl1) | \
-    #            amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL2_INV(gl2)]
 
   def invalidate_cache(self):
-    self.hdp_flush()
-
     #self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_NOP, 0), 0]
     # overkill?
     addr=0x0
@@ -209,6 +192,7 @@ class HWPM4Queue:
     return self
 
   def exec(self, prg:KFDProgram, kernargs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), completion_signal=None):
+    self.hdp_flush()
     self.invalidate_cache()
     code = hsa.amd_kernel_code_t.from_address(prg.handle)  # NOTE: this is wrong, it's not this object
     # kernel_code_properties:0x408
@@ -222,8 +206,6 @@ class HWPM4Queue:
     #print(hex(code.compute_pgm_rsrc1), hex(code.compute_pgm_rsrc2))
     rsrc1, rsrc2 = code.compute_pgm_rsrc1, code.compute_pgm_rsrc2
     #print(hex(code.compute_pgm_rsrc1), hex(code.compute_pgm_rsrc2))
-    user_sgrps = (rsrc2 >> 1) & 0b1111
-    print("user_sgrps", user_sgrps, global_size, local_size)
 
     #print("group_segment_size", prg.group_segment_size)
     # this is required
@@ -239,30 +221,8 @@ class HWPM4Queue:
     # rsrc2 |= ((prg.group_segment_size+31)//64) << 15
     # rsrc2 |= (prg.group_segment_size//32) << 15
     # user_sgpr = 
-
-    if prg.private_segment_size:
-      rsrc2 |= 1
     
-    num_cu = 96
-    num_se = 6
-    num_cu_per_se = num_cu // num_se
-    compute_resource_limits = 0
-    threads_per_threadgroup = prod(local_size)
-    waves_per_threadgroup = (threads_per_threadgroup + 31) // 32
-    threadgroups_per_cu = 1
-    if waves_per_threadgroup == 1: threadgroups_per_cu = 2
-    # print(waves_per_threadgroup)
-
-    compute_resource_limits = 0
-    compute_resource_limits |= ((waves_per_threadgroup % 4) == 0) << 22
-    if (num_cu_per_se % 4 and waves_per_threadgroup == 1): compute_resource_limits |= (1 << 23)
-    compute_resource_limits |= (2 << 0) | ((threadgroups_per_cu - 1) << 24)
-
-    # print("scratch", rsrc1, rsrc2, prg.group_segment_size, prg.private_segment_size)
-
     shiftedIsaAddr = (prg.handle + code.kernel_code_entry_byte_offset) >> 8
-    # print("kernel_code_entry_byte_offset", code.kernel_code_entry_byte_offset)
-    assert (shiftedIsaAddr << 8) == prg.handle + code.kernel_code_entry_byte_offset
 
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 6), regCOMPUTE_PGM_LO, shiftedIsaAddr&0xFFFFFFFF, shiftedIsaAddr>>32, 0, 0,
                (prg.device.scratch.va_addr>>8)&0xFFFFFFFF, prg.device.scratch.va_addr>>40]
@@ -275,9 +235,7 @@ class HWPM4Queue:
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), regCOMPUTE_USER_DATA_0, kernargs&0xFFFFFFFF, kernargs>>32]
     # self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 4), regCOMPUTE_USER_DATA_0+user_sgrps*4, *prg.device.amd_aql_queue.scratch_resource_descriptor]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 8), regCOMPUTE_START_X, 0,0,0, local_size[0],local_size[1],local_size[2],0,0]
-    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), regCOMPUTE_RESOURCE_LIMITS, compute_resource_limits]
-    # self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), regCOMPUTE_DISPATCH_INTERLEAVE, 64]
-    # self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), regCOMPUTE_RESOURCE_LIMITS, 0]
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), regCOMPUTE_RESOURCE_LIMITS, 0]
     # self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), regCOMPUTE_RESOURCE_LIMITS, 1]
     # self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), regCOMPUTE_RESOURCE_LIMITS, (1<<16) | (1 << 23)]
     # self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), regCOMPUTE_RESOURCE_LIMITS, (1<<23) | (1 << 12)]
