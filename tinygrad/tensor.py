@@ -8,6 +8,7 @@ import numpy as np
 
 from tinygrad.dtype import DType, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype
 from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, fully_flatten, argsort, IMAGE, DEBUG, WINO, THREEFRY
+from tinygrad.helpers import getenv
 from tinygrad.lazy import LazyBuffer
 from tinygrad.features.multi import MultiLazyBuffer
 from tinygrad.ops import LoadOps
@@ -141,6 +142,9 @@ class Tensor:
 
   @staticmethod
   def corealize(lst:Iterable[Tensor]):
+    if getenv("FUZZ_SCHEDULE"):
+      from test.external.fuzz_schedule import fuzz_schedule
+      fuzz_schedule(flatten([x.lazydata.lbs for x in lst]))
     run_schedule(*create_schedule_with_vars(flatten([x.lazydata.lbs for x in lst])))
 
   def realize(self) -> Tensor:
