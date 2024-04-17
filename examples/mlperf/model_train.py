@@ -393,7 +393,7 @@ def train_bert():
     Tensor.training = True
     train_it = iter(tqdm(batch_load_bert(BS, val=False), total=train_steps, disable=BENCHMARK))
     i, data = 0, data_get(train_it)
-    while data is not None and i < train_steps:
+    while data is not None and i < train_steps and not achieved:
       st = time.perf_counter()
       GlobalCounters.reset()
       loss = train_step(data["input_ids"], data["segment_ids"], data["input_mask"], data["masked_lm_positions"], \

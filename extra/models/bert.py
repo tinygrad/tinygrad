@@ -57,7 +57,7 @@ class BertForMLPerf:
 
     # for lm:
     self.linear = LinearBert(hidden_size, hidden_size)
-    self.activation2 = Tensor.gelu
+    self.activation2 = Tensor.gelu # NOTE: Change to BERT gelu
     self.norm = LayerNormBert(hidden_size, eps=1e-12)
 
     self.decoder = LinearBert(hidden_size, vocab_size, bias=False)
@@ -66,7 +66,7 @@ class BertForMLPerf:
   
   def __call__(self, input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor, masked_positions:Tensor):
     output = self.model(input_ids, attention_mask, segment_ids)
-    clsf_logits = self.classifier(self.activation1(self.fc(output[:, 0]))) # TODO: Fix for BS=1
+    clsf_logits = self.classifier(self.activation1(self.fc(output[:, 0]))).cast(dtypes.float32) # TODO: Fix for BS=1
 
     masked_positions = masked_positions[:, :, None].expand(-1, -1, output.shape[-1])
     h_masked = Tensor.gather(output, masked_positions, 1)

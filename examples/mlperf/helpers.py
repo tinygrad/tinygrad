@@ -2,6 +2,7 @@ from collections import OrderedDict
 import unicodedata, json, functools
 import numpy as np
 from tinygrad.nn import state
+from tinygrad.dtype import dtypes
 from tinygrad.tensor import Tensor
 
 #
@@ -227,7 +228,7 @@ def load_tf_weights_to_dict(checkpoint_path):
     weights_dict[key] = reader.get_tensor(key)
   return weights_dict
 
-def tt(tf_tensor): return Tensor(tf_tensor)
+def tt(tf_tensor): return Tensor(tf_tensor, dtype=dtypes.float32)
 
 def load_from_tf2_ckpt(key: str, ckpt_dir: str):
   p = "model/layer-3/"
