@@ -4,9 +4,10 @@ os.environ["NOOPT"] = "1"
 from tinygrad import Device, nn, Tensor, dtypes
 Device.DEFAULT = "CLANG"
 from train_gpt2 import GPT, GPTConfig
-from tinygrad.helpers import dedup
+from tinygrad.helpers import dedup, to_function_name
 from tinygrad.engine.schedule import create_schedule
-from tinygrad.ops import BufferOps
+from tinygrad.ops import BufferOps, LoadOps
+from tinygrad.runtime.ops_clang import CLANG_PROGRAM_HEADER
 
 if __name__ == "__main__":
   model = GPT(GPTConfig(n_layer=12, n_head=12, n_embd=768))
@@ -25,9 +26,14 @@ if __name__ == "__main__":
   print(len(sched))
   ast_dedup = dedup([si.ast for si in sched if si.ast[0].op is BufferOps.STORE])
   print(len(ast_dedup))
+  srcs = {}
   for ast in ast_dedup:
-    runner = Device["CLANG"].get_runner(*ast)
-    print(runner.prg)
+    k = Device["CLANG"].get_linearizer(*ast)
+    k.linearize()
+    src = Device["CLANG"].compiler.render(to_function_name(k.name), k.uops).strip(CLANG_PROGRAM_HEADER)
+    srcs[ast] = (k.name, src)
+  print(len(srcs))
 
-
-
+  for si in sched:
+    if si.ast[0].op == LoadOps.EMPTY: continue
+    print(srcs[si.ast][0])

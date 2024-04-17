@@ -165,7 +165,7 @@ class CompiledRunner(Runner):
       to_function_name(name), name, prg, dname, global_size, local_size, True
     assert self.device.compiler is not None, "compiler is required to make an AST kernel"
     lib:bytes = precompiled if precompiled is not None else self.device.compiler.compile_cached(prg)
-    self.lib, self.outcount = lib, outcount
+    self.lib, self.clprg, self.outcount = lib, self.device.runtime(self.name, lib), outcount
     self.vars: List[Variable] = [] if variables is None else variables
     self.op_estimate, self.mem_estimate = op_estimate, mem_estimate
 
@@ -186,7 +186,6 @@ class CompiledRunner(Runner):
     return global_size, local_size
 
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False, do_update_stats=True) -> Optional[float]:
-    if not hasattr(self, 'clprg'): self.clprg = self.device.runtime(self.name, self.lib)
     global_size, local_size = self.launch_dims(var_vals)
     if global_size is not None and local_size is None and all_int(self.global_size): # type: ignore[arg-type]
       # TODO: this is copied from get_program

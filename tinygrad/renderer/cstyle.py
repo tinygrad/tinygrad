@@ -234,18 +234,6 @@ def _make_cuda_dtype(base_type, name, cnt):
   vec, elems, header = f"{name}{cnt}", ', '.join(_nms[:cnt]), ', '.join([f"{base_type} {x}" for x in _nms[:cnt]])
   return f"struct {vec} {{ {base_type} {elems}; }}; __device__ {vec} make_{vec}({header}) {{ {vec} r={{{elems}}}; return r; }}"
 
-class ClangLanguage(CStyleLanguage):
-  buffer_suffix=" restrict"
-  def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
-    prefix = []
-    if any(uop.dtype == dtypes.bool for uop in uops): prefix += ["#include <stdbool.h>"]
-    if any(uop.dtype == dtypes.half for uop in uops): prefix += ["#define half __fp16"]
-    if any(uop.arg == BinaryOps.MAX for uop in uops): prefix += ["#define max(x,y) ((x>y)?x:y)"]
-    if any(uop.arg in [UnaryOps.SQRT, UnaryOps.EXP2, UnaryOps.LOG2, math.inf, -math.inf] for uop in uops): prefix += ["#include <tgmath.h>"]
-    return super().render_kernel(function_name, kernel, bufs, uops, prefix=prefix)
-
-ClangRenderer = functools.partial(uops_to_cstyle, ClangLanguage())
-
 class CUDALanguage(CStyleLanguage):
   kernel_prefix = "extern \"C\" __global__ "
   smem_prefix = "__shared__ "
