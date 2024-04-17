@@ -53,6 +53,11 @@ setup(name='tinygrad',
             "networkx",
             "hypothesis",
         ],
+        'docs': [
+            "mkdocs-material",
+            "mkdocstrings[python]",
+            "markdown-callouts",
+        ],
         'testing_tf': [
             "tensorflow==2.15.1",
             "tensorflow_addons",
