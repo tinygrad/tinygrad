@@ -3,6 +3,7 @@ from collections import defaultdict
 from extra.optimization.helpers import kern_str_to_lin
 from test.external.fuzz_linearizer import compare_linearizer
 from tinygrad.helpers import colored
+from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.graph import print_tree
 from tinygrad.features.search import time_linearizer
 
@@ -43,7 +44,9 @@ if __name__ == "__main__":
       print_tree(op)
       print(op)
     print(test_lin.applied_opts)
-    print(test_lin.colored_shape())
+    unoptimized_lin = Linearizer(*test_lin.ast)
+    unoptimized_lin.required_optimizations()
+    print(f"{unoptimized_lin.colored_shape()} -> {test_lin.colored_shape()}")
     (msg,rb,vv,gt) = compare_linearizer(test_lin, None, None, None, rtol=args.rtol, atol=args.atol)
     if msg != "PASS":
       failed_ids.append(i)
