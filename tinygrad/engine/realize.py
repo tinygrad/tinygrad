@@ -1,6 +1,8 @@
-from typing import List, Dict, Optional, cast, Generator
+from typing import List, Dict, Optional, cast, Generator, DefaultDict, Tuple, Iterable
+from collections import defaultdict
 from dataclasses import dataclass
-from tinygrad.helpers import colored, getenv
+from tinygrad.dtype import DType
+from tinygrad.helpers import colored, getenv, dedup, DEBUG
 from tinygrad.ops import ScheduleItem, BufferOps, LoadOps, copy_ast
 from tinygrad.device import Runner, Device, BufferCopy, BufferXfer, update_stats
 from tinygrad.buffer import Buffer
@@ -40,6 +42,34 @@ def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, Non
   while len(schedule): yield ExecItem(lower_schedule_item(si:=schedule.pop(0)), list(si.outputs+si.inputs))
 
 capturing: List = []  # put classes with an add method in here
+
+def _internal_memory_planner(buffers:List[Iterable[Buffer]], debug_prefix="") -> Dict[Buffer, Buffer]:
+  last_appearance = {}
+  for i,u in enumerate(buffers):
+    for buf in u: last_appearance[buf] = i
+
+  # LRU algorithm
+  assigned: Dict[Buffer, Buffer] = {}
+  local_cache: DefaultDict[Tuple[str, int, DType], List[Buffer]] = defaultdict(list)
+  for i,u in enumerate(buffers):
+    for buf in u:
+      # all unallocated unparented buffers are fair game to replace
+      if buf.is_allocated() or buf.lb_refcount > 0: continue
+      key = (buf.device, buf.size, buf.dtype)
+      if buf not in assigned:
+        if len(ll:=local_cache[key]): assigned[buf] = ll.pop()
+        else: assigned[buf] = Buffer(*key)
+      if i == last_appearance[buf]:
+        local_cache[key].append(assigned[buf])
+
+  if DEBUG >= 1 and len(ak:=dedup(assigned.keys())) != len(av:=dedup(assigned.values())):
+    print(debug_prefix+f"memory reduced from {sum([x.nbytes for x in ak])/1e6:.2f} MB to {sum([x.nbytes for x in av])/1e6:.2f} MB")
+  return assigned
+
+def memory_planner(schedule:List[ScheduleItem]) -> List[ScheduleItem]:
+  assigned = _internal_memory_planner([si.outputs+si.inputs for si in schedule])
+  return [ScheduleItem(si.ast, tuple(assigned.get(x, x) for x in si.outputs),
+                               tuple(assigned.get(x, x) for x in si.inputs)) for si in schedule]
 
 def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[Variable, int]]=None):
   for ei in lower_schedule(schedule):

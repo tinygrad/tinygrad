@@ -12,14 +12,16 @@ class BufferOptions:
   nolru: bool = False
 
 class Buffer:
-  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferOptions]=None, initial_value:Optional[bytes]=None):
+  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferOptions]=None,
+               initial_value:Optional[bytes]=None, lb_refcount=0):
     assert isinstance(dtype, DType)
     if isinstance(dtype, ImageDType): options = BufferOptions(image=dtype) # TODO: image hack shouldn't be here. where should it be?
-    self.device, self.size, self.dtype, self.options = device, size, dtype, options
+    self.device, self.size, self.dtype, self.options, self.lb_refcount = device, size, dtype, options, lb_refcount
     if opaque is not None: self.allocate(opaque)
     if initial_value is not None:
       self.allocate()
       self.copyin(memoryview(initial_value))
+  def is_allocated(self) -> bool: return hasattr(self, '_buf')
   def ensure_allocated(self) -> Buffer: return self.allocate() if not hasattr(self, '_buf') else self
   def allocate(self, opaque=None) -> Buffer:
     assert not hasattr(self, '_buf'), "can't allocate already allocated buffer"
@@ -30,11 +32,11 @@ class Buffer:
     return self
   def __reduce__(self):
     buf = None
-    if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options)
-    if hasattr(self, '_buf'):
+    if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options, None, self.lb_refcount)
+    if self.is_allocated():
       buf = bytearray(self.nbytes)
       self.copyout(memoryview(buf))
-    return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf)
+    return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf, self.lb_refcount)
   @property
   def nbytes(self): return self.size*self.dtype.itemsize
   def __del__(self):
@@ -52,10 +54,12 @@ class Buffer:
   def copyin(self, mv:memoryview):
     mv = flat_mv(mv)
     assert len(mv) == self.nbytes, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
+    assert self.is_allocated(), "can't copyin to unallocated buffer"
     self.allocator.copyin(self._buf, mv)
     return self
   def copyout(self, mv:memoryview) -> memoryview:
     mv = flat_mv(mv)
     assert len(mv) == self.nbytes, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
+    assert self.is_allocated(), "can't copyout unallocated buffer"
     self.allocator.copyout(mv, self._buf)
     return mv
