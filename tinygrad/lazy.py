@@ -33,12 +33,16 @@ class LazyBuffer:
       self.op, self.arg, self.srcs = op, arg, srcs  # this is a LazyOp, except the src is LazyBuffers and not LazyOps
       assert self.op is not LoadOps.ASSIGN or srcs[1].base.realized is not None, "assign target must be realized"
       self.buffer: Buffer = srcs[1].base.buffer if self.op is LoadOps.ASSIGN else Buffer(device, self.size, dtype)
+      self.buffer.lb_refcount += 1
       self.contiguous_child: Optional[Tuple[ReferenceType[LazyBuffer], ShapeTracker]] = None
       self.forced_realize = False
     else:
       # properties on view
       assert base.base == base, "base must be a base itself"
       self._base = base
+
+  def __del__(self):
+    if hasattr(self, 'buffer'): self.buffer.lb_refcount -= 1
 
   def __repr__(self) -> str:
     return f"<LB {self.device} {self.shape} {str(self.dtype)[7:]} {self.st if self.base != self else (self.op, self.realized)}>"
