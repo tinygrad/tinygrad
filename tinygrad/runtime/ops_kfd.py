@@ -174,7 +174,6 @@ class HWPM4Queue:
       regBIF_BX_PF1_GPU_HDP_FLUSH_REQ, regBIF_BX_PF1_GPU_HDP_FLUSH_DONE, 0x0, 0x0, 0x20]
 
   def invalidate_cache(self):
-    #self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_NOP, 0), 0]
     # overkill?
     addr=0x0
     sz=(1 << 64)-1
@@ -194,7 +193,6 @@ class HWPM4Queue:
     self.hdp_flush()
     self.invalidate_cache()
     code = hsa.amd_kernel_code_t.from_address(prg.handle)  # NOTE: this is wrong, it's not this object
-    # kernel_code_properties:0x408
     assert code.kernel_code_properties == 0x408  # ENABLE_WAVEFRONT_SIZE32 | ENABLE_SGPR_KERNARG_SEGMENT_PTR
     assert code.workitem_private_segment_byte_size == 0
     assert code.max_scratch_backing_memory_byte_size == 0
@@ -204,9 +202,7 @@ class HWPM4Queue:
     #for s in format_struct(code): print(s)
     #print(hex(code.compute_pgm_rsrc1), hex(code.compute_pgm_rsrc2))
     rsrc1, rsrc2 = code.compute_pgm_rsrc1, code.compute_pgm_rsrc2
-    #print(hex(code.compute_pgm_rsrc1), hex(code.compute_pgm_rsrc2))
 
-    #print("group_segment_size", prg.group_segment_size)
     # this is required
     lds_size = ((prg.group_segment_size+63)//64)&0x1FF
     assert lds_size <= 0x80  # larger numbers stall the GPU
@@ -221,9 +217,8 @@ class HWPM4Queue:
     # rsrc2 |= (prg.group_segment_size//32) << 15
     # user_sgpr = 
     
-    shiftedIsaAddr = (prg.handle + code.kernel_code_entry_byte_offset) >> 8
-
-    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 6), regCOMPUTE_PGM_LO, shiftedIsaAddr&0xFFFFFFFF, shiftedIsaAddr>>32, 0, 0,
+    prog_addr = (prg.handle + code.kernel_code_entry_byte_offset) >> 8
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 6), regCOMPUTE_PGM_LO, prog_addr&0xFFFFFFFF, prog_addr>>32, 0, 0,
                (prg.device.scratch.va_addr>>8)&0xFFFFFFFF, prg.device.scratch.va_addr>>40]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), regCOMPUTE_PGM_RSRC1, rsrc1, rsrc2 | (lds_size << 15)]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), regCOMPUTE_TMPRING_SIZE, 0x00200200] # (waveSize << 12) | (numWaves)
@@ -232,12 +227,8 @@ class HWPM4Queue:
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), regCOMPUTE_STATIC_THREAD_MGMT_SE2, 0xFFFFFFFF,0xFFFFFFFF]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 4), regCOMPUTE_STATIC_THREAD_MGMT_SE4, 0xFFFFFFFF,0xFFFFFFFF,0xFFFFFFFF,0xFFFFFFFF]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), regCOMPUTE_USER_DATA_0, kernargs&0xFFFFFFFF, kernargs>>32]
-    # self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 4), regCOMPUTE_USER_DATA_0+user_sgrps*4, *prg.device.amd_aql_queue.scratch_resource_descriptor]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 8), regCOMPUTE_START_X, 0,0,0, local_size[0],local_size[1],local_size[2],0,0]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), regCOMPUTE_RESOURCE_LIMITS, 0]
-    # self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), regCOMPUTE_RESOURCE_LIMITS, 1]
-    # self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), regCOMPUTE_RESOURCE_LIMITS, (1<<16) | (1 << 23)]
-    # self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), regCOMPUTE_RESOURCE_LIMITS, (1<<23) | (1 << 12)]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_DISPATCH_DIRECT, 3), global_size[0],global_size[1],global_size[2], CS_W32_EN | FORCE_START_AT_000 | COMPUTE_SHADER_EN]
 
     # have to self wait since flush doesn't work
@@ -433,12 +424,6 @@ class KFDProgram:
     args_st = self.args_struct_t.from_address(self.device.kernargs_ptr)
     for i in range(len(args)): args_st.__setattr__(f'f{i}', args[i].va_addr)
     for i in range(len(vals)): args_st.__setattr__(f'v{i}', vals[i])
-
-    # self.device.synchronize()
-    # if ctypes.sizeof(args_st) != 0:
-    #   print("load")
-    #   self.device.allocator.copyin(self.device.kernargs, to_mv(ctypes.addressof(args_st), ctypes.sizeof(args_st)))
-    #   self.device.synchronize()
 
     if getenv("PM4"):
       HWPM4Queue().exec(self, self.device.kernargs_ptr, global_size, local_size,
