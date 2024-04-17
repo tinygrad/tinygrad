@@ -176,11 +176,3 @@ BS | [8, 16, 32, 64, 128] | batch size to use
 Variable | Possible Value(s) | Description
 ---|---|---
 IMGNET_TRAIN | [1] | download also training data with imagenet
-
-### extra/datasets/wikipedia_download.py
-
-Variable | Possible Value(s) | Description
----|---|---
-WIKI_TRAIN | [1] | download also training data with wikipedia
-VERIFY_CHECKSUM | [1] | verify the checksum of the downloaded files
-BASEDIR | [/path/to] | the base directory to download the files to

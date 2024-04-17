@@ -35,6 +35,7 @@ def verify_checksum(folder_path:str, checksum_path:str):
   return True
 
 def download_wikipedia(path:str):
+  # Links from: https://github.com/mlcommons/training/blob/master/language_model/tensorflow/bert/dataset.md
   os.makedirs(path, exist_ok=True)
   gdrive_download("https://drive.google.com/uc?id=1fbGClQMi2CoMv7fwrwTC5YYPooQBdcFW", os.path.join(path, "bert_config.json"))
   gdrive_download("https://drive.google.com/uc?id=1USK108J6hMM_d27xCHi738qBL8_BT1u1", os.path.join(path, "vocab.txt"))
