@@ -277,6 +277,8 @@ def train_unet3d():
   START_EVAL_AT = getenv("START_EVAL_AT", ceil(1000 * TRAIN_DATASET_SIZE / (SAMPLES_PER_EPOCH * BS)))
   EVALUATE_EVERY = getenv("EVALUATE_EVERY", ceil(20 * TRAIN_DATASET_SIZE / (SAMPLES_PER_EPOCH * BS)))
   PREPROCESSED_DIR = BASEDIR / ".." / "preprocessed"
+  TRAIN_BEAM = getenv("TRAIN_BEAM", BEAM.value)
+  EVAL_BEAM = getenv("EVAL_BEAM", BEAM.value)
 
   config = {
     "num_epochs": NUM_EPOCHS,
@@ -286,7 +288,8 @@ def train_unet3d():
     "learning_rate_warmup_init": LR_WARMUP_INIT_LR,
     "start_eval_at": START_EVAL_AT,
     "evaluate_every": EVALUATE_EVERY,
-    "beam": BEAM.value,
+    "train_beam": TRAIN_BEAM,
+    "eval_beam": EVAL_BEAM,
     "wino": WINO.value,
     "gpus": GPUS,
     "default_float": dtypes.default_float.name
@@ -328,21 +331,23 @@ def train_unet3d():
 
   @TinyJit
   def train_step(model, x, y):
-    optim.zero_grad()
+    with Context(BEAM=TRAIN_BEAM):
+      optim.zero_grad()
 
-    y_hat = model(x)
-    loss = dice_ce_loss(y_hat, y)
+      y_hat = model(x)
+      loss = dice_ce_loss(y_hat, y)
 
-    loss.backward()
-    optim.step()
-    return loss.realize()
+      loss.backward()
+      optim.step()
+      return loss.realize()
   
   def eval_step(model, x, y):
-    y_hat, y = sliding_window_inference(model, x, y, gpus=GPUS)
-    y_hat, y = Tensor(y_hat), Tensor(y, requires_grad=False)
-    loss = dice_ce_loss(y_hat, y)
-    score = dice_score(y_hat, y)
-    return loss.realize(), score.realize()
+    with Context(BEAM=EVAL_BEAM):
+      y_hat, y = sliding_window_inference(model, x, y, gpus=GPUS)
+      y_hat, y = Tensor(y_hat), Tensor(y, requires_grad=False)
+      loss = dice_ce_loss(y_hat, y)
+      score = dice_score(y_hat, y)
+      return loss.realize(), score.realize()
   
   if WANDB: wandb.init(config=config, project=PROJ_NAME)
 
