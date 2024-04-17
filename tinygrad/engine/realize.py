@@ -1,41 +1,47 @@
-from typing import List, Dict, Optional
-from tinygrad.helpers import getenv, colored
-from tinygrad.ops import ScheduleItem, BufferOps, LoadOps
-from tinygrad.device import JITRunner, Device, BufferCopy, BufferXfer, update_stats
+from typing import List, Dict, Optional, cast, Generator
+from dataclasses import dataclass
+from tinygrad.helpers import colored, getenv
+from tinygrad.ops import ScheduleItem, BufferOps, LoadOps, copy_ast
+from tinygrad.device import Runner, Device, BufferCopy, BufferXfer, update_stats
 from tinygrad.buffer import Buffer
 from tinygrad.shape.symbolic import Variable
 
-class CustomOp(JITRunner):
+@dataclass(frozen=True)
+class ExecItem:
+  prg: Runner
+  rawbufs: List[Optional[Buffer]]
+  def run(self, var_vals:Optional[Dict[Variable, int]]=None, wait=False, jit=False):
+    self.prg([cast(Buffer, x).ensure_allocated() for x in self.rawbufs], var_vals if var_vals is not None else {}, wait=wait, jit=jit)
+
+class CustomOp(Runner):
   def __init__(self, fxn):
     self.fxn = fxn
     super().__init__()
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False): self.fxn(*rawbufs)
 
-def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
+class EmptyOp(Runner):
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False):
+    update_stats(colored(f"empty {rawbufs[0].size:10d} {rawbufs[0].dtype}", "yellow"), 0, 0, {}, jit, 1, device=rawbufs[0].device)
+
+def lower_schedule_item(si:ScheduleItem) -> Runner:
   assert len(set(x.device for x in si.outputs+si.inputs)) == 1 or si.ast[0].op is LoadOps.COPY
   if si.ast[0].op is BufferOps.STORE: return Device[si.outputs[0].device].get_runner(*si.ast)
   assert len(si.ast) == 1 and len(si.outputs) == 1, "only ASTRunner supports multioutput"
   out, ast = si.outputs[0], si.ast[0]
   if ast.op is LoadOps.COPY:
-    if hasattr(Device[out.device].allocator, 'transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]: return BufferXfer()
+    if hasattr(Device[out.device].allocator, 'transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]:
+      return Device[si.outputs[0].device].get_runner(copy_ast(ast.arg)) if getenv("USE_COPY_KERNEL") else BufferXfer()
     return BufferCopy()
   if ast.op is LoadOps.CUSTOM: return CustomOp(ast.arg)
-  return None
+  if ast.op is LoadOps.EMPTY: return EmptyOp()
+  raise RuntimeError(f"don't know how to lower {ast}")
 
-logops = open(getenv("LOGOPS", ""), "a") if getenv("LOGOPS", "") else None
-def run_schedule(schedule:List[ScheduleItem]):
-  while len(schedule):
-    si = schedule.pop(0)
-    if logops and si.ast[0].op not in LoadOps and not any(i.device.startswith("DISK:") for i in si.inputs): logops.write(str(si.ast)+"\n")
+def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, None]:
+  while len(schedule): yield ExecItem(lower_schedule_item(si:=schedule.pop(0)), list(si.outputs+si.inputs))
 
-    # get the program
-    prg = lower_schedule_item(si)
+capturing: List = []  # put classes with an add method in here
 
-    for out in si.outputs:
-      # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
-      if out.size > 0 and not (out.device.startswith("DISK") and si.ast[0].op is BufferOps.STORE) and not hasattr(out, "_buf"): out.allocate()
-
-    # run the function (put it in JIT)
-    real_buffers = [x for x in si.outputs+si.inputs if x.size != 0]
-    if prg: prg.exec(real_buffers, si.var_vals)
-    elif (out:=si.outputs[0]).size > 0: update_stats(colored(f"empty {out.size:10d} {out.dtype}", "yellow"), 0, 0, {}, None, 1, device=out.device)
+def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[Variable, int]]=None):
+  for ei in lower_schedule(schedule):
+    if len(capturing): capturing[0].add(ei)
+    ei.run(var_vals)

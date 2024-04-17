@@ -24,6 +24,9 @@ class LoadOps(Enum): EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS =
 Op = Union[UnaryOps, BinaryOps, ReduceOps, LoadOps, TernaryOps, BufferOps]
 OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[LoadOps], Type[TernaryOps], Type[BufferOps]]
 
+# do not preserve f(0) = 0
+UNSAFE_PAD_OPS = {BinaryOps.DIV, BinaryOps.CMPLT, BinaryOps.CMPEQ, UnaryOps.LOG2, UnaryOps.EXP2}
+
 @dataclass(frozen=True)
 class MemBuffer:
   idx: int
@@ -41,7 +44,6 @@ class ScheduleItem:
   ast: Tuple[LazyOp, ...]
   outputs: Tuple[Buffer, ...]
   inputs: Tuple[Buffer, ...]
-  var_vals: Dict[Variable, int]
 
 @dataclass(frozen=True, eq=False)
 class LazyOp:
@@ -73,6 +75,10 @@ class LazyOp:
   def lazyops(self) -> List[LazyOp]: return dedup([self] + [item for x in self.src for item in x.lazyops])
   def vars(self) -> List[Variable]:
     return sorted(set.union(*[x.arg.st.vars() for x in self.lazyops if x.op in BufferOps], set()), key=lambda x: str(x.expr))
+
+def copy_ast(sz) -> LazyOp:
+  rd = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.uint8, st:=ShapeTracker.from_shape((sz,))))
+  return LazyOp(BufferOps.STORE, (rd,), MemBuffer(0, dtypes.uint8, st))
 
 # **************** independent FlopCounter ****************
 

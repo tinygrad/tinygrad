@@ -1,3 +1,4 @@
+"""This is where the forwards and backwards passes live."""
 import math
 from typing import Tuple, Optional
 from tinygrad.helpers import argsort
@@ -145,14 +146,14 @@ class Where(Function):
 # ************* reduce ops *************
 
 class Sum(Function):
-  def forward(self, x:LazyBuffer, axis:Tuple[int, ...]) -> LazyBuffer:
+  def forward(self, x:LazyBuffer, axis:Tuple[int, ...], acc_dtype:Optional[DType]=None) -> LazyBuffer:
     self.input_shape = x.shape
-    return x.r(ReduceOps.SUM, axis)
+    return x.r(ReduceOps.SUM, axis, acc_dtype)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.expand(self.input_shape)
 
 class Max(Function):
-  def forward(self, x:LazyBuffer, axis:Tuple[int, ...]) -> LazyBuffer:
+  def forward(self, x:LazyBuffer, axis:Tuple[int, ...], acc_dtype:Optional[DType]=None) -> LazyBuffer:
     self.x, self.ret, self.axis = x, x.r(ReduceOps.MAX, axis), axis
     return self.ret
 
