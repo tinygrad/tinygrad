@@ -3,7 +3,7 @@ from typing import Tuple, Any
 import os, fcntl, ctypes, functools, re, pathlib, mmap, struct, errno, subprocess, time
 from tinygrad.device import Compiled, LRUAllocator, Compiler, CompilerOptions
 from tinygrad.buffer import BufferOptions
-from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up, DEBUG, prod
+from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up, DEBUG
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.runtime.driver.hip_comgr import compile_hip
 import tinygrad.runtime.autogen.kfd as kfd
@@ -110,7 +110,6 @@ regCOMPUTE_RESTART_X = 0x1bbb - SUB
 regCOMPUTE_STATIC_THREAD_MGMT_SE0 = 0x1bb6 - SUB
 regCOMPUTE_STATIC_THREAD_MGMT_SE2 = 0x1bb9 - SUB
 regCOMPUTE_STATIC_THREAD_MGMT_SE4 = 0x1bcb - SUB
-regCOMPUTE_DISPATCH_INTERLEAVE = 0x1bcf - SUB
 
 regBIF_BX_PF1_GPU_HDP_FLUSH_REQ = 0x0106
 regBIF_BX_PF1_GPU_HDP_FLUSH_DONE = 0x0107
@@ -240,12 +239,11 @@ class HWPM4Queue:
     # self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), regCOMPUTE_RESOURCE_LIMITS, (1<<16) | (1 << 23)]
     # self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), regCOMPUTE_RESOURCE_LIMITS, (1<<23) | (1 << 12)]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_DISPATCH_DIRECT, 3), global_size[0],global_size[1],global_size[2], CS_W32_EN | FORCE_START_AT_000 | COMPUTE_SHADER_EN]
-    
+
     # have to self wait since flush doesn't work
     self.signal(sig:=KFDDevice._get_signal())
     self.wait(sig)
 
-    self.invalidate_cache()
     if completion_signal: self.signal(completion_signal)
     return self
 
