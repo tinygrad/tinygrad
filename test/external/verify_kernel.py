@@ -39,7 +39,10 @@ if __name__ == "__main__":
   for i, kern_str in enumerate(kern_strs):
     print(f"testing kernel {i}")
     test_lin = kern_str_to_lin(kern_str)
-    for op in test_lin.ast: print_tree(op)
+    for op in test_lin.ast:
+      print_tree(op)
+      print(op)
+    print(test_lin.applied_opts)
     print(test_lin.colored_shape())
     (msg,rb,vv,gt) = compare_linearizer(test_lin, None, None, None, rtol=args.rtol, atol=args.atol)
     if msg != "PASS":
