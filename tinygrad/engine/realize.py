@@ -1,6 +1,8 @@
-from typing import List, Dict, Optional, cast, Generator
+from typing import List, Dict, Optional, cast, Generator, DefaultDict, Tuple
+from collections import defaultdict
 from dataclasses import dataclass
-from tinygrad.helpers import colored, getenv
+from tinygrad.dtype import DType
+from tinygrad.helpers import colored, getenv, dedup, DEBUG
 from tinygrad.ops import ScheduleItem, BufferOps, LoadOps, copy_ast
 from tinygrad.device import Runner, Device, BufferCopy, BufferXfer, update_stats
 from tinygrad.buffer import Buffer
@@ -41,7 +43,33 @@ def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, Non
 
 capturing: List = []  # put classes with an add method in here
 
+def central_memory_planner(schedule:List[ScheduleItem]) -> List[ScheduleItem]:
+  # all unallocated unparented buffers are fair game to replace
+  unallocated = [[x for x in (si.outputs+si.inputs) if not x.is_allocated() and x.lb_refcount == 0] for si in schedule]
+  last_appearance = {}
+  for i,u in enumerate(unallocated):
+    for buf in u: last_appearance[buf] = i
+
+  # LRU algorithm
+  assigned: Dict[Buffer, Buffer] = {}
+  local_cache: DefaultDict[Tuple[str, int, DType], List[Buffer]] = defaultdict(list)
+  for i,u in enumerate(unallocated):
+    for buf in u:
+      key = (buf.device, buf.size, buf.dtype)
+      if buf not in assigned:
+        if len(ll:=local_cache[key]): assigned[buf] = ll.pop()
+        else: assigned[buf] = Buffer(*key)
+      if i == last_appearance[buf]:
+        local_cache[key].append(assigned[buf])
+
+  if DEBUG >= 1: print(f"memory reduced from {sum([x.nbytes for x in dedup(assigned.keys())])/1e9:.2f} GB",
+                       f"to {sum([x.nbytes for x in dedup(assigned.values())])/1e9:.2f} GB")
+
+  # do the buffer replacements in the schedule
+  return [ScheduleItem(si.ast, tuple(assigned.get(x, x) for x in si.outputs),
+                               tuple(assigned.get(x, x) for x in si.inputs)) for si in schedule]
+
 def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[Variable, int]]=None):
-  for ei in lower_schedule(schedule):
+  for ei in lower_schedule(central_memory_planner(schedule)):
     if len(capturing): capturing[0].add(ei)
     ei.run(var_vals)

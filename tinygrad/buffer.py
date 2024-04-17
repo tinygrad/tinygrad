@@ -15,11 +15,12 @@ class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferOptions]=None, initial_value:Optional[bytes]=None):
     assert isinstance(dtype, DType)
     if isinstance(dtype, ImageDType): options = BufferOptions(image=dtype) # TODO: image hack shouldn't be here. where should it be?
-    self.device, self.size, self.dtype, self.options = device, size, dtype, options
+    self.device, self.size, self.dtype, self.options, self.lb_refcount = device, size, dtype, options, 0
     if opaque is not None: self.allocate(opaque)
     if initial_value is not None:
       self.allocate()
       self.copyin(memoryview(initial_value))
+  def is_allocated(self) -> bool: return hasattr(self, '_buf')
   def ensure_allocated(self) -> Buffer: return self.allocate() if not hasattr(self, '_buf') else self
   def allocate(self, opaque=None) -> Buffer:
     assert not hasattr(self, '_buf'), "can't allocate already allocated buffer"
