@@ -2,7 +2,7 @@ import sys
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import Tuple, List, Dict, Optional, Set, DefaultDict
-from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, LazyOp, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS
+from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, LazyOp, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps
 from tinygrad.features.graph import log_lazybuffer, realized_lazybuffer
 from tinygrad.helpers import GRAPH, DEBUG, GlobalCounters, prod, dedup, all_int, merge_dicts, getenv
 from tinygrad.shape.symbolic import Variable
@@ -128,9 +128,8 @@ def _is_padding_okay(buf:LazyBuffer, realizes:Dict[LazyBuffer, None]) -> bool:
   if buf.op in UNSAFE_PAD_OPS: return False
   return all(_is_padding_okay(x.base, realizes) for x in buf.srcs)
 
-def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
-  if seen is None: seen = set()
-
+def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[DefaultDict[LazyBuffer, List[LazyBuffer]], DefaultDict[LazyBuffer, int],
+                                                                    Dict[LazyBuffer, _LBScheduleItem]]:
   # start by just realizing the buffers passed in
   realizes: Dict[LazyBuffer, None] = {x.base: None for x in outs if not x.base.realized}
   allbufs: Dict[LazyBuffer, None] = {}
@@ -191,6 +190,9 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
           st = st + st_childs[0].st
           if not st.contiguous or tr_next.op in ReduceOps: break
           tr = tr_next
+        # don't cast to higher size before store (tr cannot be realized if forced_realize)
+        if tr.op is UnaryOps.CAST and tr.arg[0].itemsize > tr.srcs[0].dtype.itemsize:
+          tr = tr.srcs[0].base
         reduce_for_op[tr] = r
       realizes[tr] = None
     else:
@@ -206,6 +208,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
   graph: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
   in_degree: DefaultDict[LazyBuffer, int] = defaultdict(int)
   for key, lsi in prescheduled.items():
+    if key not in in_degree: in_degree[key] = 0
     # realize outputs after all parents are realized
     scheduled_parents = set(schedule_targets[x].outputs[0] for x in lsi.inputs if x in schedule_targets)
     for x in scheduled_parents:
@@ -218,6 +221,11 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
       in_degree[assign] += 1
     for out in lsi.outputs: del out.srcs  # can only schedule once
 
+  return graph, in_degree, prescheduled
+
+def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
+  if seen is None: seen = set()
+  graph, in_degree, prescheduled = _graph_schedule(outs, seen)
   queue = deque(si for key, si in prescheduled.items() if in_degree[key] == 0)
   schedule: List[ScheduleItem] = []
   var_vals: Dict[Variable, int] = {}
