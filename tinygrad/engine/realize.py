@@ -65,6 +65,7 @@ def _internal_memory_planner(buffers:List[Iterable[Buffer]], debug_prefix="") ->
     for _, seg, buf in buffer_requests:
       found_buf = None
       for i,(reuse_buf, used_segments) in enumerate(buffer_pool):
+        if reuse_buf.device != buf.device or reuse_buf.dtype != buf.dtype: continue
         if not any(seg[0] <= useg[1] and seg[1] >= useg[0] for useg in used_segments):
           found_buf = i
           break
