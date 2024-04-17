@@ -193,7 +193,7 @@ class HWPM4Queue:
     self.hdp_flush()
     self.invalidate_cache()
     code = hsa.amd_kernel_code_t.from_address(prg.handle)  # NOTE: this is wrong, it's not this object
-    assert code.kernel_code_properties == 0x408  # ENABLE_WAVEFRONT_SIZE32 | ENABLE_SGPR_KERNARG_SEGMENT_PTR
+    assert code.kernel_code_properties & 0x400 == 0x400 # ENABLE_WAVEFRONT_SIZE32
     assert code.workitem_private_segment_byte_size == 0
     assert code.max_scratch_backing_memory_byte_size == 0
     assert code.kernel_code_prefetch_byte_size == 0
@@ -253,7 +253,7 @@ class HWPM4Queue:
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_RELEASE_MEM, 6),
         # event_index__mec_release_mem__end_of_pipe = 5
         # event_index__mec_release_mem__shader_done = 6
-        amd_gpu.PACKET3_RELEASE_MEM_EVENT_TYPE(CACHE_FLUSH_AND_INV_TS_EVENT) | amd_gpu.PACKET3_RELEASE_MEM_EVENT_INDEX(6) | \
+        amd_gpu.PACKET3_RELEASE_MEM_EVENT_TYPE(CACHE_FLUSH_AND_INV_TS_EVENT) | amd_gpu.PACKET3_RELEASE_MEM_EVENT_INDEX(5) | \
           amd_gpu.PACKET3_RELEASE_MEM_GCR_GLV_INV | amd_gpu.PACKET3_RELEASE_MEM_GCR_GL1_INV | amd_gpu.PACKET3_RELEASE_MEM_GCR_GL2_INV | \
           amd_gpu.PACKET3_RELEASE_MEM_GCR_GLM_WB | \
           amd_gpu.PACKET3_RELEASE_MEM_GCR_GLM_INV | amd_gpu.PACKET3_RELEASE_MEM_GCR_GL2_WB | amd_gpu.PACKET3_RELEASE_MEM_GCR_SEQ,
@@ -649,7 +649,7 @@ class KFDDevice(Compiled):
 
     # PM4 Queue
     self.pm4_ctx_save_restore_address = self._gpu_alloc(0x2C02000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
-    self.eop_pm4_buffer = self._gpu_alloc(0x100000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
+    self.eop_pm4_buffer = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
     self.gart_pm4 = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
     self.pm4_ring = self._gpu_alloc(0x100000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
     self.pm4_queue = kio.create_queue(KFDDevice.kfd, ring_base_address=self.pm4_ring.va_addr, ring_size=self.pm4_ring.size, gpu_id=self.gpu_id,
@@ -706,11 +706,8 @@ class KFDDevice(Compiled):
   def synchronize(self):
     if getenv("PM4"):
       HWPM4Queue().signal(self.completion_signal).submit(self)
-      # print("cm",self.pm4_write_pointer[0], self.pm4_read_pointer[0], self.completion_signal.value)
-      # print(self.completion_signal.value)
       self._wait_signal(self.completion_signal)
-      # print(self.pm4_write_pointer[0], self.pm4_read_pointer[0])
-      # print("comp", self.completion_signal.value)
+      # print(self.pm4_write_pointer[0]%(self.pm4_ring.size//4), self.pm4_read_pointer[0])
       #for _ in range(10): time.sleep(0.01)
       #time.sleep(0.01)
       #assert (wp:=(self.pm4_write_pointer[0]%(self.pm4_ring.size//4))) == (rp:=self.pm4_read_pointer[0]), f"didn't run {wp} != {rp} len {self.pm4_ring.size//4}"
