@@ -12,10 +12,11 @@ class BufferOptions:
   nolru: bool = False
 
 class Buffer:
-  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferOptions]=None, initial_value:Optional[bytes]=None):
+  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferOptions]=None,
+               initial_value:Optional[bytes]=None, lb_refcount=0):
     assert isinstance(dtype, DType)
     if isinstance(dtype, ImageDType): options = BufferOptions(image=dtype) # TODO: image hack shouldn't be here. where should it be?
-    self.device, self.size, self.dtype, self.options, self.lb_refcount = device, size, dtype, options, 0
+    self.device, self.size, self.dtype, self.options, self.lb_refcount = device, size, dtype, options, lb_refcount
     if opaque is not None: self.allocate(opaque)
     if initial_value is not None:
       self.allocate()
@@ -31,11 +32,11 @@ class Buffer:
     return self
   def __reduce__(self):
     buf = None
-    if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options)
+    if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options, None, self.lb_refcount)
     if self.is_allocated():
       buf = bytearray(self.nbytes)
       self.copyout(memoryview(buf))
-    return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf)
+    return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf, self.lb_refcount)
   @property
   def nbytes(self): return self.size*self.dtype.itemsize
   def __del__(self):
