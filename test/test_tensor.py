@@ -244,6 +244,7 @@ class TestTinygrad(unittest.TestCase):
     with self.assertRaises(IndexError): t2.size(2)
 
   def test_tolist(self):
+    # NOTE: float16 Tensor.tolist() requires python 3.12
     for val in [[1,2,3], [1.5,2,3], [[1,2,3], [4,5,6]], 3]:
       assert Tensor(val).tolist() == torch.tensor(val).tolist() == val
 
