@@ -1,7 +1,7 @@
 from __future__ import annotations
-import functools
+import functools, itertools
 from math import gcd
-from tinygrad.helpers import partition
+from tinygrad.helpers import partition, prod
 from typing import List, Dict, Callable, Tuple, Type, Union, Optional, Any, Set, Mapping
 
 # NOTE: Python has different behavior for negative mod and floor div than c
@@ -273,7 +273,23 @@ class SumNode(RedNode):
         _gcd = 1
     if _gcd > 1: return Node.sum(fully_divided) + Node.sum(rest).__floordiv__(_gcd) // (b//_gcd)
     if divisor > 1: return Node.sum(fully_divided) + Node.sum(rest).__floordiv__(divisor) // (b//divisor)
-    return Node.sum(fully_divided) + Node.__floordiv__(Node.sum(rest), b)
+
+    # HACK: check if terms in rest can be removed and does not change output
+    sum_rest = Node.sum(rest)
+    if isinstance(sum_rest.max, int) and isinstance(sum_rest.min, int):
+      for s in rest:
+        if isinstance(s, NumNode) or not isinstance(s.max, int) or not isinstance(s.min, int) or s.max - s.min >= b: continue
+        rem = sum_rest - s
+        vs = list(rem.vars())
+        if not vs or prod(v.max - v.min for v in vs) > 20: continue
+        for vals in itertools.product(*[list(range(v.min, v.max+1)) for v in vs]):
+          var_vals = dict(zip(vs, (NumNode(val) for val in vals)))
+          n = rem.substitute(var_vals).b
+          if (n + s.min) // b != (n + s.max) // b: break
+        else:
+          sum_rest = sum_rest - s
+
+    return Node.sum(fully_divided) + Node.__floordiv__(sum_rest, b)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def __mod__(self, b: Union[Node, int]):

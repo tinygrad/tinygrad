@@ -470,5 +470,12 @@ class TestSymbolicRealWorld(unittest.TestCase):
     # NOTE: this used to have 13,151,129,600 in the output which is out of int32 range.
     assert idx.render() == "((((1+lidx5)%16)*49)+(((1+lidx5)//16)*802816)+(gidx0*3211264)+(gidx1*784)+(gidx2*8)+(lidx4*100352)+2207744+lidx3)"
 
+  def test_conv_backward_simplify(self):
+    idx2 = Variable("idx2", 0, 57)
+    idx5 = Variable("idx5", 0, 2)
+    a = ((idx5 * 61) + 3 + idx2) // 62
+    b = ((idx5 * 61) + 3) // 62
+    assert a == b
+
 if __name__ == '__main__':
   unittest.main()
