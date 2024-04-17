@@ -112,6 +112,14 @@ regCOMPUTE_STATIC_THREAD_MGMT_SE2 = 0x1bb9 - SUB
 regCOMPUTE_STATIC_THREAD_MGMT_SE4 = 0x1bcb - SUB
 regCOMPUTE_DISPATCH_INTERLEAVE = 0x1bcf - SUB
 
+regBIF_BX_PF1_GPU_HDP_FLUSH_REQ = 0x0106
+regBIF_BX_PF1_GPU_HDP_FLUSH_DONE = 0x0107
+
+#define regBIF_BX_PF1_GPU_HDP_FLUSH_REQ                                                                 0x0106
+#define regBIF_BX_PF1_GPU_HDP_FLUSH_REQ_BASE_IDX                                                        2
+#define regBIF_BX_PF1_GPU_HDP_FLUSH_DONE                                                                0x0107
+#define regBIF_BX_PF1_GPU_HDP_FLUSH_DONE_BASE_IDX                                                       2
+
 # VGT_EVENT_TYPE in navi10_enum.h
 CACHE_FLUSH_AND_INV_TS_EVENT = 0x14
 CS_PARTIAL_FLUSH = 0x7
@@ -166,7 +174,24 @@ regCOMPUTE_RESOURCE_LIMITS 0 0x1bb5 6 0 0
 class HWPM4Queue:
   def __init__(self): self.q = []
 
+  def hdp_flush(self):
+    # gfx_v11_0_wait_reg_mem(ring, reg_mem_engine, 0, 1,
+		# 	       adev->nbio.funcs->get_hdp_flush_req_offset(adev),
+		# 	       adev->nbio.funcs->get_hdp_flush_done_offset(adev),
+		# 	       ref_and_mask, ref_and_mask, 0x20);
+
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_WAIT_REG_MEM, 5),
+      amd_gpu.WAIT_REG_MEM_MEM_SPACE(0) | amd_gpu.WAIT_REG_MEM_OPERATION(1) | amd_gpu.WAIT_REG_MEM_FUNCTION(3) | amd_gpu.WAIT_REG_MEM_ENGINE(0),
+      regBIF_BX_PF1_GPU_HDP_FLUSH_REQ, regBIF_BX_PF1_GPU_HDP_FLUSH_DONE, 0x0, 0x0, 0x20]
+    # self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_ACQUIRE_MEM, 6), 0, #0x80000000,
+    #            sz & 0xffffffff, (sz >> 32) & 0xff, addr & 0xffffffff, (addr >> 32) & 0xffffff, 0,
+    #            amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLI_INV(gli) | amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLK_INV(glk) | \
+    #            amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLV_INV(glv) | amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL1_INV(gl1) | \
+    #            amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL2_INV(gl2)]
+
   def invalidate_cache(self):
+    self.hdp_flush()
+
     #self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_NOP, 0), 0]
     # overkill?
     addr=0x0
@@ -259,8 +284,8 @@ class HWPM4Queue:
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_DISPATCH_DIRECT, 3), global_size[0],global_size[1],global_size[2], CS_W32_EN | FORCE_START_AT_000 | COMPUTE_SHADER_EN]
     
     # have to self wait since flush doesn't work
-    self.signal(sig:=KFDDevice._get_signal(), value=4)
-    self.wait(sig, value=4)
+    self.signal(sig:=KFDDevice._get_signal())
+    self.wait(sig)
 
     self.invalidate_cache()
     if completion_signal: self.signal(completion_signal)
