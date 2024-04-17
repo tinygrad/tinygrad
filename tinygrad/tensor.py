@@ -186,7 +186,7 @@ class Tensor:
   def data(self) -> memoryview:
     assert self.dtype.fmt is not None, f"no fmt dtype for {self.dtype}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
-    return self._data().cast(self.dtype.fmt, self.shape if len(self.shape) else (1,))
+    return self._data().cast(self.dtype.fmt, self.shape)
   def item(self) -> ConstType:
     """Returns the value of this tensor as a standard Python number."""
     assert self.dtype.fmt is not None, f"no fmt dtype for {self.dtype}"
