@@ -206,7 +206,7 @@ class MultiDeviceJITGraph(Runner):
     raise NotImplementedError("override this")
 
 method_cache: Dict[Tuple[str, Tuple[LazyOp, ...], bool], CompiledRunner] = {}
-logkern, logkern_level = open(getenv("LOGKERN", ""), "a") if getenv("LOGKERN", "") else None, getenv("LOGKERN_LEVEL", 1)
+logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS", "") else None, getenv("LOGKERNS_LEVEL", 1)
 class Compiled:
   def __init__(self, device:str, allocator:Allocator, compiler:Optional[Compiler], runtime, graph=None):
     self.dname, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler, runtime, graph
@@ -248,9 +248,9 @@ class Compiled:
           timed = sorted([(nm, tk, time_linearizer(tk, rawbufs, allow_test_size=False, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
           if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
           k = timed[0][1]
-          if logkern is not None and logkern_level > 1: logkern.writelines([f"{(lin.ast, lin.applied_opts)}\n" for (_,lin,_) in timed[1:]])
+          if logkerns is not None and logkerns_level > 1: logkerns.writelines([f"{(lin.ast, lin.applied_opts)}\n" for (_,lin,_) in timed[1:]])
     # TODO: check the correctness inline once compare_linearizer is in core
-    if logkern is not None: logkern.writelines([f"{(k.ast, k.applied_opts)}\n"])
+    if logkerns is not None: logkerns.writelines([f"{(k.ast, k.applied_opts)}\n"])
     if DEBUG >= 4: print((k.ast, k.applied_opts)) # print here to show final applied_opts for all kernels instead of just in beam_search
     return k
 

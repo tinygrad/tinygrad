@@ -25,11 +25,12 @@ class UnsyncedBatchNorm:
     self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
     self.num_devices = num_devices
 
-    if affine: self.weight, self.bias = Tensor.ones(sz), Tensor.zeros(sz)
+    if affine: self.weight, self.bias = Tensor.ones(sz, dtype=dtypes.float32), Tensor.zeros(sz, dtype=dtypes.float32)
     else: self.weight, self.bias = None, None
 
-    self.running_mean, self.running_var = Tensor.zeros(num_devices, sz, requires_grad=False), Tensor.ones(num_devices, sz, requires_grad=False)
-    self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
+    self.running_mean = Tensor.zeros(num_devices, sz, dtype=dtypes.float32, requires_grad=False)
+    self.running_var = Tensor.ones(num_devices, sz, dtype=dtypes.float32, requires_grad=False)
+    self.num_batches_tracked = Tensor.zeros(1, dtype=dtypes.int, requires_grad=False)
 
   def __call__(self, x:Tensor):
     if isinstance(x.lazydata, MultiLazyBuffer): assert x.lazydata.axis is None or x.lazydata.axis == 0 and len(x.lazydata.lbs) == self.num_devices
