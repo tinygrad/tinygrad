@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional, cast, Generator, DefaultDict, Tuple
+from typing import List, Dict, Optional, cast, Generator, DefaultDict, Tuple, Iterable
 from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.dtype import DType
@@ -43,19 +43,18 @@ def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, Non
 
 capturing: List = []  # put classes with an add method in here
 
-# NOTE: currently this behavior is the same as PlaceHolder, however, we can be more aggressive here with different size buffers
-def central_memory_planner(schedule:List[ScheduleItem]) -> List[ScheduleItem]:
-  # all unallocated unparented buffers are fair game to replace
-  unallocated = [[x for x in (si.outputs+si.inputs) if not x.is_allocated() and x.lb_refcount == 0] for si in schedule]
+def _internal_memory_planner(buffers:List[Iterable[Buffer]]) -> Dict[Buffer, Buffer]:
   last_appearance = {}
-  for i,u in enumerate(unallocated):
+  for i,u in enumerate(buffers):
     for buf in u: last_appearance[buf] = i
 
   # LRU algorithm
   assigned: Dict[Buffer, Buffer] = {}
   local_cache: DefaultDict[Tuple[str, int, DType], List[Buffer]] = defaultdict(list)
-  for i,u in enumerate(unallocated):
+  for i,u in enumerate(buffers):
     for buf in u:
+      # all unallocated unparented buffers are fair game to replace
+      if buf.is_allocated() or buf.lb_refcount > 0: continue
       key = (buf.device, buf.size, buf.dtype)
       if buf not in assigned:
         if len(ll:=local_cache[key]): assigned[buf] = ll.pop()
@@ -63,10 +62,12 @@ def central_memory_planner(schedule:List[ScheduleItem]) -> List[ScheduleItem]:
       if i == last_appearance[buf]:
         local_cache[key].append(assigned[buf])
 
+  return assigned
+
+def memory_planner(schedule:List[ScheduleItem]) -> List[ScheduleItem]:
+  assigned = _internal_memory_planner([si.outputs+si.inputs for si in schedule])
   if DEBUG >= 1 and len(ak:=dedup(assigned.keys())) != len(av:=dedup(assigned.values())):
     print(f"memory reduced from {sum([x.nbytes for x in ak])/1e6:.2f} MB to {sum([x.nbytes for x in av])/1e6:.2f} MB")
-
-  # do the buffer replacements in the schedule
   return [ScheduleItem(si.ast, tuple(assigned.get(x, x) for x in si.outputs),
                                tuple(assigned.get(x, x) for x in si.inputs)) for si in schedule]
 
