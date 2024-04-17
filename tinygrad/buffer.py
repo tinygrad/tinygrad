@@ -32,7 +32,7 @@ class Buffer:
   def __reduce__(self):
     buf = None
     if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options)
-    if hasattr(self, '_buf'):
+    if self.is_allocated():
       buf = bytearray(self.nbytes)
       self.copyout(memoryview(buf))
     return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf)
@@ -53,10 +53,12 @@ class Buffer:
   def copyin(self, mv:memoryview):
     mv = flat_mv(mv)
     assert len(mv) == self.nbytes, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
+    assert self.is_allocated(), "can't copyin to unallocated buffer"
     self.allocator.copyin(self._buf, mv)
     return self
   def copyout(self, mv:memoryview) -> memoryview:
     mv = flat_mv(mv)
     assert len(mv) == self.nbytes, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
+    assert self.is_allocated(), "can't copyout unallocated buffer"
     self.allocator.copyout(mv, self._buf)
     return mv
