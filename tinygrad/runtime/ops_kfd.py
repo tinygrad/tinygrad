@@ -233,9 +233,12 @@ class HWPM4Queue:
     if (num_cu_per_se % 4 and waves_per_threadgroup == 1): compute_resource_limits |= (1 << 23)
     compute_resource_limits |= (2 << 0) | ((threadgroups_per_cu - 1) << 24)
 
-    print("scratch", rsrc1, rsrc2, prg.group_segment_size, prg.private_segment_size)
+    # print("scratch", rsrc1, rsrc2, prg.group_segment_size, prg.private_segment_size)
 
     shiftedIsaAddr = (prg.handle + code.kernel_code_entry_byte_offset) >> 8
+    # print("kernel_code_entry_byte_offset", code.kernel_code_entry_byte_offset)
+    assert (shiftedIsaAddr << 8) == prg.handle + code.kernel_code_entry_byte_offset
+
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 6), regCOMPUTE_PGM_LO, shiftedIsaAddr&0xFFFFFFFF, shiftedIsaAddr>>32, 0, 0,
                (prg.device.scratch.va_addr>>8)&0xFFFFFFFF, prg.device.scratch.va_addr>>40]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), regCOMPUTE_PGM_RSRC1, rsrc1, rsrc2 | (lds_size << 15)]
@@ -255,6 +258,8 @@ class HWPM4Queue:
     # self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), regCOMPUTE_RESOURCE_LIMITS, (1<<23) | (1 << 12)]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_DISPATCH_DIRECT, 3), global_size[0],global_size[1],global_size[2], CS_W32_EN | FORCE_START_AT_000 | COMPUTE_SHADER_EN]
 
+    # self.invalidate_cache()
+    
     # have to self wait since flush doesn't work
     self.signal(sig:=KFDDevice._get_signal())
     self.wait(sig)
@@ -271,13 +276,15 @@ class HWPM4Queue:
     return self
 
   def signal(self, signal:hsa.amd_signal_t):
+    # print("cum")
+    assert signal.value == 0
     signal.value = 1
     # NOTE: this needs an EOP buffer on the queue or it will NULL pointer
     addr = ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_RELEASE_MEM, 6),
         # event_index__mec_release_mem__end_of_pipe = 5
         # event_index__mec_release_mem__shader_done = 6
-        amd_gpu.PACKET3_RELEASE_MEM_EVENT_TYPE(CACHE_FLUSH_AND_INV_TS_EVENT) | amd_gpu.PACKET3_RELEASE_MEM_EVENT_INDEX(5) | \
+        amd_gpu.PACKET3_RELEASE_MEM_EVENT_TYPE(CACHE_FLUSH_AND_INV_TS_EVENT) | amd_gpu.PACKET3_RELEASE_MEM_EVENT_INDEX(6) | \
           amd_gpu.PACKET3_RELEASE_MEM_GCR_GLV_INV | amd_gpu.PACKET3_RELEASE_MEM_GCR_GL1_INV | amd_gpu.PACKET3_RELEASE_MEM_GCR_GL2_INV | \
           amd_gpu.PACKET3_RELEASE_MEM_GCR_GLM_WB | \
           amd_gpu.PACKET3_RELEASE_MEM_GCR_GLM_INV | amd_gpu.PACKET3_RELEASE_MEM_GCR_GL2_WB | amd_gpu.PACKET3_RELEASE_MEM_GCR_SEQ,
@@ -388,6 +395,7 @@ class HWCopyQueue:
     return self
 
   def signal(self, signal:hsa.amd_signal_t):
+    assert signal.value == 0
     signal.value = 1
     self.q.append(sdma_pkts.atomic(op=amd_gpu.SDMA_OP_ATOMIC, operation=amd_gpu.SDMA_ATOMIC_ADD64,
                                    addr=ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET, src_data=(1<<64)-1))
@@ -444,21 +452,22 @@ class KFDProgram:
                                                  [(f'v{i}', ctypes.c_int) for i in range(len(vals))]))
       if ctypes.sizeof(self.args_struct_t) != self.kernargs_segment_size:
         raise RuntimeError(f"HSAProgram.__call__: incorrect args struct size {ctypes.sizeof(self.args_struct_t)} != {self.kernargs_segment_size}")
-    args_st = self.args_struct_t()#.from_address(self.device.kernargs_ptr)
+    args_st = self.args_struct_t.from_address(self.device.kernargs_ptr)
     for i in range(len(args)): args_st.__setattr__(f'f{i}', args[i].va_addr)
     for i in range(len(vals)): args_st.__setattr__(f'v{i}', vals[i])
 
-    self.device.synchronize()
-    if ctypes.sizeof(args_st) != 0:
-      print("load")
-      self.device.allocator.copyin(self.device.kernargs, to_mv(ctypes.addressof(args_st), ctypes.sizeof(args_st)))
-      self.device.synchronize()
+    # self.device.synchronize()
+    # if ctypes.sizeof(args_st) != 0:
+    #   print("load")
+    #   self.device.allocator.copyin(self.device.kernargs, to_mv(ctypes.addressof(args_st), ctypes.sizeof(args_st)))
+    #   self.device.synchronize()
 
     if getenv("PM4"):
-      self.device.synchronize()
+      # self.device.synchronize()
       HWPM4Queue().exec(self, self.device.kernargs_ptr, global_size, local_size,
-                        None).signal(self.device.completion_signal).submit(self.device)
-      self.device.synchronize()
+                        self.device.completion_signal).submit(self.device)
+      # self.device.synchronize()
+      self.device._wait_signal(self.device.completion_signal)
     else:
       HWComputeQueue().exec(self, self.device.kernargs_ptr, global_size, local_size,
                             self.device.completion_signal if wait else None).submit(self.device)
@@ -580,7 +589,7 @@ class KFDDevice(Compiled):
       if KFDDevice.signal_number == SIGNAL_COUNT: KFDDevice.signal_number = 16
     #print("signal", num)
     ret = hsa.amd_signal_t.from_address(KFDDevice.signals_page.va_addr + SIGNAL_SIZE*num)
-    ret.value = 1
+    ret.value = 0
     ret.kind = hsa.AMD_SIGNAL_KIND_USER
     if sync_event is not None:
       ret.event_mailbox_ptr = KFDDevice.event_page.va_addr + sync_event.event_slot_index*8
@@ -589,11 +598,16 @@ class KFDDevice(Compiled):
 
   @classmethod
   def _wait_signal(self, signal:hsa.amd_signal_t, timeout=10000):
+    if signal.value == 0: return
     assert signal.event_id != 0, "can't wait on this signal"
     evt_arr = (kfd.struct_kfd_event_data * 1)()
     evt_arr[0].event_id = signal.event_id
     ret = kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=timeout)
     if ret.wait_result != 0: raise RuntimeError(f"wait_result: {ret.wait_result}, {timeout} ms TIMEOUT!")
+
+    val = signal.value
+    while val != 0: val = signal.value
+    assert signal.value == 0, f"not set to 0, but {signal.value}"
 
   def __init__(self, device:str=""):
     if KFDDevice.kfd == -1: KFDDevice.kfd = os.open("/dev/kfd", os.O_RDWR)
@@ -714,6 +728,7 @@ class KFDDevice(Compiled):
   def _submit_cache_inv(self, addr=0x0, sz=(1 << 64)-1, gli=0, glv=0, glk=0, gl1=0, gl2=0):
     if getenv("PM4"):
       HWPM4Queue().invalidate_cache().signal(self.completion_signal).submit(self)
+      self._wait_signal(self.completion_signal)
     else:
       pm4_buffer_view = to_mv(self.pm4_indirect_buf.va_addr, 0x1000).cast("I")
       pm4_cmd = [amd_gpu.PACKET3(amd_gpu.PACKET3_ACQUIRE_MEM, 6), 0,
@@ -731,11 +746,11 @@ class KFDDevice(Compiled):
   def synchronize(self):
     if getenv("PM4"):
       HWPM4Queue().signal(self.completion_signal).submit(self)
-      print("cm",self.pm4_write_pointer[0], self.pm4_read_pointer[0], self.completion_signal.value)
-      print(self.completion_signal.value)
-      if self.completion_signal.value != 0: self._wait_signal(self.completion_signal)
+      # print("cm",self.pm4_write_pointer[0], self.pm4_read_pointer[0], self.completion_signal.value)
+      # print(self.completion_signal.value)
+      self._wait_signal(self.completion_signal)
       # print(self.pm4_write_pointer[0], self.pm4_read_pointer[0])
-      print("comp", self.completion_signal.value)
+      # print("comp", self.completion_signal.value)
       #for _ in range(10): time.sleep(0.01)
       #time.sleep(0.01)
       #assert (wp:=(self.pm4_write_pointer[0]%(self.pm4_ring.size//4))) == (rp:=self.pm4_read_pointer[0]), f"didn't run {wp} != {rp} len {self.pm4_ring.size//4}"
