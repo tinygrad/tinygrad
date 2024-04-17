@@ -81,7 +81,7 @@ def eval_unet3d():
 def eval_retinanet():
   # RetinaNet with ResNeXt50_32X4D
   from extra.models.resnet import ResNeXt50_32X4D
-  from extra.models.retinanetNew import RetinaNet
+  from extra.models.retinanet import RetinaNet
   mdl = RetinaNet(ResNeXt50_32X4D())
   mdl.load_from_pretrained()
 
@@ -104,10 +104,9 @@ def eval_retinanet():
   from tinygrad.engine.jit import TinyJit
   mdlrun = TinyJit(lambda x: mdl(input_fixup(x)).realize())
 
-  n, bs = 0, 20 #14.6GB
+  n, bs = 0, 8
   st = time.perf_counter()
   for x, targets in iterate(coco, bs):
-    # print(x.shape, type(x))
     dat = Tensor(x.astype(np.float32))
     mt = time.perf_counter()
     if dat.shape[0] == bs:
