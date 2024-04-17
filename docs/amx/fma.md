@@ -85,7 +85,7 @@ In matrix mode, performs a fused-multiply-add (or simplification thereof) outer-
 
 ## Emulation code
 
-See [fma.c](fma.c). Note the code in [test.c](test.c) to set the DN bit of `fpcr`.
+See [fma.c](../extra/accel/amx/tests/fma.c). Note the code in [test.c](../extra/accel/amx/tests/test.c) to set the DN bit of `fpcr`.
 
 A representative sample is:
 ```c

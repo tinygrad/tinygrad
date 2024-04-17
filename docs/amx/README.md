@@ -20,7 +20,7 @@ In terms of available data types, the general pattern is:
 - On M2 hardware, bf16 multiplicands, accumulating onto bf16 or IEEE754 f32
 - Integer 8-bit or 16-bit multiplicands, accumulating onto 16 or 32 bits (in various signednesses)
 
-This repository provides:
+This provides:
 - [A tiny header for accessing AMX instructions](aarch64.h) (use at your own risk)
 - [A description of the register file](RegisterFile.md)
 - [A full description of every instruction](Instructions.md)

@@ -130,7 +130,7 @@ On M2, when 26=1, the whole operation can optionally be repeated multiple times,
 
 ## Emulation code
 
-See [extr.c](extr.c).
+See [extr.c](../extra/accel/amx/tests/extr.c).
 
 A representative sample is:
 ```c

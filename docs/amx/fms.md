@@ -85,7 +85,7 @@ In matrix mode, performs a fused-multiply-subtract (or simplification thereof) o
 
 ## Emulation code
 
-See [fms.c](fms.c). Note the code in [test.c](test.c) to set the DN bit of `fpcr`.
+See [fms.c](../extra/accel/amx/tests/fms.c). Note the code in [test.c](../extra/accel/amx/tests/test.c) to set the DN bit of `fpcr`.
 
 A representative sample is:
 ```c
