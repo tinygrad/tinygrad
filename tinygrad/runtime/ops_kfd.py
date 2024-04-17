@@ -257,12 +257,10 @@ class HWPM4Queue:
     # self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), regCOMPUTE_RESOURCE_LIMITS, (1<<16) | (1 << 23)]
     # self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), regCOMPUTE_RESOURCE_LIMITS, (1<<23) | (1 << 12)]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_DISPATCH_DIRECT, 3), global_size[0],global_size[1],global_size[2], CS_W32_EN | FORCE_START_AT_000 | COMPUTE_SHADER_EN]
-
-    # self.invalidate_cache()
     
     # have to self wait since flush doesn't work
-    self.signal(sig:=KFDDevice._get_signal())
-    self.wait(sig)
+    self.signal(sig:=KFDDevice._get_signal(), value=4)
+    self.wait(sig, value=4)
 
     self.invalidate_cache()
     if completion_signal: self.signal(completion_signal)
@@ -275,8 +273,7 @@ class HWPM4Queue:
       addr&0xFFFFFFFF, addr>>32, value, 0xffffffff, 4]
     return self
 
-  def signal(self, signal:hsa.amd_signal_t):
-    # print("cum")
+  def signal(self, signal:hsa.amd_signal_t, value=0):
     assert signal.value == 0
     signal.value = 1
     # NOTE: this needs an EOP buffer on the queue or it will NULL pointer
@@ -290,7 +287,7 @@ class HWPM4Queue:
           amd_gpu.PACKET3_RELEASE_MEM_GCR_GLM_INV | amd_gpu.PACKET3_RELEASE_MEM_GCR_GL2_WB | amd_gpu.PACKET3_RELEASE_MEM_GCR_SEQ,
         amd_gpu.PACKET3_RELEASE_MEM_DATA_SEL(1) | amd_gpu.PACKET3_RELEASE_MEM_INT_SEL(2) | amd_gpu.PACKET3_RELEASE_MEM_DST_SEL(0),
         addr&0xFFFFFFFF, addr>>32,
-        0, 0, 0]
+        value&0xFFFFFFFF, value>>32, 0]
     if signal.event_mailbox_ptr != 0:
       self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_RELEASE_MEM, 6),
         # event_index__mec_release_mem__end_of_pipe = 5
@@ -463,11 +460,8 @@ class KFDProgram:
     #   self.device.synchronize()
 
     if getenv("PM4"):
-      # self.device.synchronize()
       HWPM4Queue().exec(self, self.device.kernargs_ptr, global_size, local_size,
-                        self.device.completion_signal).submit(self.device)
-      # self.device.synchronize()
-      self.device._wait_signal(self.device.completion_signal)
+                        self.device.completion_signal if wait else None).submit(self.device)
     else:
       HWComputeQueue().exec(self, self.device.kernargs_ptr, global_size, local_size,
                             self.device.completion_signal if wait else None).submit(self.device)
