@@ -197,6 +197,8 @@ class Tensor:
     assert self.dtype.fmt is not None, f"no fmt dtype for {self.dtype}"
     assert self.numel() == 1, "must have one element for item"
     return self._data().cast(self.dtype.fmt)[0]
+  # TODO: should be Tensor.tolist() -> List[ConstType] but mypy expects memoryview.tolist() -> list[int]
+  # src: https://github.com/python/mypy/blob/release-1.6/mypy/typeshed/stdlib/builtins.pyi#L803
   def tolist(self) -> Sequence[ConstType]: return self.data().tolist()
   def numpy(self) -> np.ndarray:
     if self.dtype == dtypes.bfloat16: return self.float().numpy()
