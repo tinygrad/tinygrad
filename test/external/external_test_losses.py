@@ -1,6 +1,5 @@
 from tinygrad import Tensor
 from test.external.mlperf_unet3d.dice import DiceCELoss
-from extra.datasets.kits19 import load_pair
 from examples.mlperf.losses import dice_ce_loss
 
 import nibabel as nib

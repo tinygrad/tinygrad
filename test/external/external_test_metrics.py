@@ -1,6 +1,5 @@
 from tinygrad import Tensor
 from test.external.mlperf_unet3d.dice import DiceScore
-from extra.datasets.kits19 import load_pair
 from examples.mlperf.metrics import dice_score
 
 import nibabel as nib
