@@ -1,5 +1,5 @@
 from typing import Dict, List, Optional, NamedTuple, Tuple, Union, DefaultDict, cast, Literal, Callable
-import math, functools
+import math, functools, itertools
 from collections import defaultdict, Counter
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
@@ -123,7 +123,8 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str
     else:
       assert dtype is not None, f"None dtype for uop {uop}"
       if uop is UOps.LOOP:
-        if depth is 1: kk(lang.first_loop_prefix.format(nloops=sum(u.uop is UOps.LOOP for u in uops)))
+        if depth is 1 and (collapse:=sum(1 for u in itertools.takewhile(lambda u: u.uop is not UOps.DEFINE_ACC, uops) if u.uop is UOps.LOOP)) != 0:
+          kk(lang.first_loop_prefix.format(collapse))
         kk(f"for (int {(expr := ssa('ridx',u))} = {r[vin[0]]}; {expr} < {r[vin[1]]}; {expr}++) {{")
         depth += 1
       elif uop is UOps.ALU:
