@@ -30,9 +30,8 @@ def verify_checksum(folder_path:str, checksum_path:str):
       with open(file_path, 'rb') as f:
         for buf in iter(lambda: f.read(4096), b''): hasher.update(buf)
       if hasher.hexdigest() != expected_checksum:
-        print(f"Checksum does not match for file: {folder_path}")
-        return False
-  return True
+        raise ValueError(f"Checksum does not match for file: {file_path}")
+  print("All checksums match.")
 
 def download_wikipedia(path:str):
   # Links from: https://github.com/mlcommons/training/blob/master/language_model/tensorflow/bert/dataset.md
@@ -48,10 +47,7 @@ def download_wikipedia(path:str):
     wikipedia_uncompress_and_extract(os.path.join(path, "results_text.tar.gz"), path)
     if getenv("VERIFY_CHECKSUM", 0):
       print("Verifying checksum...")
-      if not verify_checksum(os.path.join(path, "results4"), os.path.join(path, "bert_reference_results_text_md5.txt")):
-        raise Exception("Checksum does not match downloaded dataset.")
-      else: 
-        print(f"Checksums match.")
+      verify_checksum(os.path.join(path, "results4"), os.path.join(path, "bert_reference_results_text_md5.txt")):
 
 if __name__ == "__main__": 
   download_wikipedia(getenv("BASEDIR", os.path.join(Path(__file__).parent / "wiki")))
