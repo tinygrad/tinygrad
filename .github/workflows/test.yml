@@ -356,7 +356,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [llvm, clang, gpu, cuda, hip, ptx] #, triton]
+        backend: [llvm, clang, clang-omp, gpu, cuda, hip, ptx] #, triton]
 
     name: Tests on (${{ matrix.backend }})
     runs-on: ubuntu-latest
@@ -380,7 +380,12 @@ jobs:
           path: ~/.cache/tinygrad/downloads/
           key: downloads-cache-${{ matrix.backend }}-${{ env.DOWNLOAD_CACHE_VERSION }}
       - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'cuda' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\n' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nPTX=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas' || matrix.backend == 'hip' && 'RHIP=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
+        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'clang-omp' && 'CLANG=1 OMP=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'cuda' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\n' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nPTX=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas' || matrix.backend == 'hip' && 'RHIP=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
+      - name: Install OpenMP
+        if: matrix.backend == 'clang-omp'
+        run: |
+          sudo apt update -y
+          sudo apt install -y libomp-dev
       - name: Install OpenCL
         if: matrix.backend == 'gpu'
         run: |
