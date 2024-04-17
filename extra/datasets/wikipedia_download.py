@@ -22,6 +22,7 @@ def wikipedia_uncompress_and_extract(file:str, path:str, small:bool=False):
         for member in tqdm(iterable=tar.getmembers(), total=len(tar.getmembers())): tar.extract(path=path, member=member)
 
 def verify_checksum(folder_path:str, checksum_path:str):
+  print("Verifying checksums...")
   with open(checksum_path, 'r') as f:
     for line in f:
       expected_checksum, folder_name = line.split()
@@ -45,9 +46,8 @@ def download_wikipedia(path:str):
     gdrive_download("https://drive.google.com/uc?id=1tmMgLwoBvbEJEHXh77sqrXYw5RpqT8R_", os.path.join(path, "bert_reference_results_text_md5.txt"))
     gdrive_download("https://drive.google.com/uc?id=14xV2OUGSQDG_yDBrmbSdcDC-QGeqpfs_", os.path.join(path, "results_text.tar.gz"))
     wikipedia_uncompress_and_extract(os.path.join(path, "results_text.tar.gz"), path)
-    if getenv("VERIFY_CHECKSUM", 0):
-      print("Verifying checksum...")
-      verify_checksum(os.path.join(path, "results4"), os.path.join(path, "bert_reference_results_text_md5.txt")):
+    if getenv("VERIFY_CHECKSUM", 0): 
+      verify_checksum(os.path.join(path, "results4"), os.path.join(path, "bert_reference_results_text_md5.txt"))
 
 if __name__ == "__main__": 
   download_wikipedia(getenv("BASEDIR", os.path.join(Path(__file__).parent / "wiki")))
