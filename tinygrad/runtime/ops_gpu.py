@@ -17,6 +17,9 @@ def checked(ret, status): return (check(status.value), ret)[1]
 class CLCompiler(Compiler):
   compiler_opts = CompilerOptions("GPU")
   def __init__(self, device:CLDevice, compile_key:str):
+    #TODO: search CL_DEVICE_EXTENSIONS for cl_intel_subgroup_matrix_multiply_accumulate?
+    if "A770" in device.device_name:
+      CLCompiler.compiler_opts = CLCompiler.compiler_opts._replace(device="INTEL", has_tensor_cores=True)
     self.device = device
     super().__init__(f"compile_cl_{compile_key}")
   def render(self, name:str, uops) -> str: return OpenCLRenderer(name, uops)

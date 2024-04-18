@@ -176,7 +176,8 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str
   return lang.render_kernel(function_name, kernel, bufs, uops)
 
 class OpenCLLanguage(CStyleLanguage):
-  kernel_prefix = "__kernel "
+  #TODO: changes here should be intel specific
+  kernel_prefix = "__attribute__((intel_reqd_sub_group_size(8)))\n" + "__kernel "
   buffer_prefix = "__global "
   smem_align = "__attribute__ ((aligned (16))) "
   smem_prefix = "__local "
@@ -190,6 +191,12 @@ class OpenCLLanguage(CStyleLanguage):
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     if any(uop.dtype == dtypes.half for uop in uops): prefix = ["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"]
+
+    for arg in set([uop.arg for uop in uops if uop.uop is UOps.WMMA]):
+      prefix.append(f"""{arg[3].name}8 __{arg[0]}({arg[2].name}16 a, {arg[2].name}16 b, {arg[3].name}8 c) {{
+  int8 *a_pk = (int8 *)(&a); int8 *b_pk = (int8 *)(&b);
+  return intel_sub_group_f16_f16_matrix_mad_k16(*a_pk, *b_pk, c);\n}}""")
+
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 OpenCLRenderer = functools.partial(uops_to_cstyle, OpenCLLanguage())
 
