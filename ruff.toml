@@ -34,4 +34,5 @@ exclude = [
   "openpilot/",
   "tinygrad/runtime/autogen",
   "test/external/mlperf_resnet",
+  "test/external/mlperf_unet3d",
 ]
