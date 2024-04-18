@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 import os
-os.environ["NOOPT"] = "1"
+if "NOOPT" not in os.environ: os.environ["NOOPT"] = "1"
 from tinygrad import Device, nn, Tensor, dtypes
 Device.DEFAULT = "CLANG"
 from train_gpt2 import GPT, GPTConfig
-from tinygrad.helpers import dedup, to_function_name, flatten, getenv, GRAPH, GlobalCounters, ansilen
+from tinygrad.helpers import dedup, to_function_name, flatten, getenv, GRAPH, GlobalCounters, ansilen, to_function_name
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import memory_planner, run_schedule
 from tinygrad.ops import BufferOps, LoadOps
@@ -62,12 +62,26 @@ if __name__ == "__main__":
     state_dict["adam_v_"+nm] = v
   named_buffers = {v.lazydata.base.buffer:k.replace(".", "_") for k,v in state_dict.items()}
 
+  c_code = [CLANG_PROGRAM_HEADER]
+  c_code += [x[1] for x in srcs.values()]
+
+  main = ["int main() {"]
+  all_bufs = []
   for i,si in enumerate(sched):
-    bufs = [named_buffers.get(b, f"b{numbered_bufs[b]}") for b in si.outputs+si.inputs]
+    bufs = [(named_buffers.get(b, f"b{numbered_bufs[b]}"), b) for b in si.outputs+si.inputs]
+    all_bufs += bufs
     if si.ast[0].op is not BufferOps.STORE:
       print(f"// {si.ast[0].op}", bufs)
     else:
-      call = f"{srcs[si.ast][0]}({', '.join(bufs)})"
-      call += " "*(80-ansilen(call))
-      print(f"{call} // {i+1}")
+      print(f"{srcs[si.ast][0]}({', '.join([x[0] for x in bufs])})")
+      main.append(f"  {to_function_name(srcs[si.ast][0])}({', '.join([x[0] for x in bufs])});")
+      #call = f"{srcs[si.ast][0]}({', '.join(bufs)})"
+      #call += " "*(80-ansilen(call))
+      #print(f"{call} // {i+1}")
       #print(srcs[si.ast][1])
+  main.append("}")
+
+  for n,b in dedup(all_bufs):
+    c_code.append(f"{b.dtype.name} {n}[{b.size}];")
+
+  with open("out.c", "w") as f: f.write('\n'.join(c_code+main))
