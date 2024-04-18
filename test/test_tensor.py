@@ -228,6 +228,26 @@ class TestTinygrad(unittest.TestCase):
     assert Tensor([]).numel() == 0
     assert Tensor.randn(1,0,2,5).numel() == 0
 
+  def test_len(self):
+    assert len(torch.zeros(7)) == len(Tensor.zeros(7))
+    assert len(torch.zeros(10,20)) == len(Tensor.zeros(10,20))
+    assert len(torch.zeros(10,20)) == len(Tensor.zeros(10,20,30))
+    assert len(torch.zeros(1).flatten()) == len(Tensor.zeros(1).flatten())
+
+  def test_size(self):
+    t1, t2 = torch.zeros(10,20), Tensor.zeros(10,20)
+    assert t1.size() == t2.size()
+    assert t1.size(0) == t2.size(0)
+    assert t1.size(1) == t2.size(1)
+    assert t1.size(-1) == t2.size(-1)
+    assert t1.size(-2) == t2.size(-2)
+    with self.assertRaises(IndexError): t2.size(2)
+
+  def test_tolist(self):
+    # NOTE: float16 Tensor.tolist() requires python 3.12
+    for arr in [[1,2,3], [1.5,2,3], [[1,2,3], [4,5,6]], 3]:
+      assert Tensor(arr).tolist() == torch.tensor(arr).tolist() == arr
+
   def test_element_size(self):
     for _, dtype in dtypes.fields().items():
       assert dtype.itemsize == Tensor.randn(3, dtype=dtype).element_size(), f"Tensor.element_size() not matching Tensor.dtype.itemsize for {dtype}"

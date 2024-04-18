@@ -2,7 +2,7 @@ from __future__ import annotations
 import os, mmap, _posixshmem, io, functools
 from typing import Dict, List, Any, Optional
 from tinygrad.helpers import prod, OSX
-from tinygrad.device import Compiled, Allocator, JITRunner, Buffer
+from tinygrad.device import Compiled, Allocator, Runner, Buffer
 from tinygrad.ops import UnaryOps, LazyOp, BufferOps
 from tinygrad.shape.view import strides_for_shape
 
@@ -32,7 +32,7 @@ class DiskAllocator(Allocator):
     else:
       dest[:] = src._buf()
 
-class DiskRunner(JITRunner):
+class DiskRunner(Runner):
   def __init__(self, ast:LazyOp):
     # two ASTs are allowed here.
     assert ast.op is BufferOps.STORE, "output of AST must be store"
@@ -82,7 +82,7 @@ class DiskDevice(Compiled):
   def _might_close(self):
     self.count -= 1
     if self.count == 0:
-      os.close(self.fd)
+      if hasattr(self, 'fd'): os.close(self.fd)
       self.size = None
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
   def get_runner(self, *ast:LazyOp):
