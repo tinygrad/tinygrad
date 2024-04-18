@@ -63,7 +63,8 @@ def _internal_memory_planner(buffers:List[Iterable[Buffer]], debug_prefix="") ->
         local_cache[key].append(assigned[buf])
 
   if DEBUG >= 1 and len(ak:=dedup(assigned.keys())) != len(av:=dedup(assigned.values())):
-    print(debug_prefix+f"memory reduced from {sum([x.nbytes for x in ak])/1e6:.2f} MB to {sum([x.nbytes for x in av])/1e6:.2f} MB")
+    print(debug_prefix+f"memory reduced from {sum([x.nbytes for x in ak])/1e6:.2f} MB -> {sum([x.nbytes for x in av])/1e6:.2f} MB,",
+          f"{len(ak)} -> {len(av)} bufs")
   return assigned
 
 def memory_planner(schedule:List[ScheduleItem]) -> List[ScheduleItem]:
