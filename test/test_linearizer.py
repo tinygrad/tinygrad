@@ -50,6 +50,27 @@ class TestLinearizer(unittest.TestCase):
     assert len(mutable_bufs) == len(stores) == 2
     assert [u.arg[0] for u in mutable_bufs] == [0, 1]
 
+  def test_multireduce(self):
+    def check(shape, axis, fuse):
+      x = np.random.rand(*shape)
+      xtg = Tensor(x, dtype=dtypes.float64).realize()
+      y = x.std(axis, ddof=1)
+      ytg = xtg.std(axis=axis)
+      schdl = create_schedule([ytg.lazydata])
+      if fuse: assert len(schdl) == 1, f"Reduction of shape {shape} should fuse, but generated {len(schdl)} kernels instead"
+      else: assert len(schdl) > 1, f"Reduction of shape {shape} should not fuse"
+
+    check([32], 0, True)
+    check([32, 4], 1, True)
+    check([32, 64], 1, True)
+    check([4, 32, 64], 1, True)
+    check([2, 2*getenv("REDUCEOP_SPLIT_THRESHOLD", 32768)], 1, False)
+
+    x = Tensor.rand(2, 32, 64)
+    y = (x + x.mean(-1, keepdim=True)).mean(-2, keepdim=True)
+    schdl = create_schedule([y.lazydata])
+    assert len(schdl) > 1, f"Reductions of different shapes should not fuse (got {len(schdl)} kernels)"
+
   def test_load_dedup(self):
     # for different leaves in the AST, the same loads may occur.
 
