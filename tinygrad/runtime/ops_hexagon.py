@@ -78,7 +78,7 @@ class HexagonProgram:
       #print("buffer size:", ctypes.sizeof(buf))
       cmd += f' {f.name} '
     fbl = ctypes.sizeof(bufs[0])
-    for f in files: 
+    for f in files:
       f.flush()
       f.close()
     #print("Vals:", vals)
