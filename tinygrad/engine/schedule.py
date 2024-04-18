@@ -161,7 +161,6 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
           if tr.op == r.op and tr.st.shape == r.st.shape and tr.srcs[0].st.shape == r.srcs[0].st.shape \
             and prod(tr.srcs[0].st.shape) < getenv("REDUCEOP_SPLIT_THRESHOLD", 32768): backtoback_reductions[r] = tr
           else: forced_realize = True
-
         if tr in realizes:
           realized_children[tr] = st
           # can only reduce contiguous

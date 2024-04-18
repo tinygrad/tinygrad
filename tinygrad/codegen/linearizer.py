@@ -305,7 +305,6 @@ class Linearizer(Kernel):
         endif = self.uops.add(UOps.ENDIF, None, (barrier,), cachable=False)
         barrier = self.uops.add(UOps.BARRIER, None, (endif, *stores), cachable=False)
         self.reduce_acc[reduceop] = acc = self.global_load(-1, [NumNode(0)]*len(self.sts[-1].shape), barrier=barrier)
-
       # all local indices which were used for group_for_reduce are not valid any more and should be replaced with fake NumNode(0), since they have
       # been rewritten with fake end_local_idxs.
     return (acc, loaded_buffers, fake_reduce_idxs, local_idxs[:self.local_dims] + [NumNode(0) for i in range(self.group_for_reduces)], upcast_idxs)
