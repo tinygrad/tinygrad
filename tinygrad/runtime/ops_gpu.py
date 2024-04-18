@@ -17,8 +17,7 @@ def checked(ret, status): return (check(status.value), ret)[1]
 class CLCompiler(Compiler):
   compiler_opts = CompilerOptions("GPU")
   def __init__(self, device:CLDevice, compile_key:str):
-    #TODO: search CL_DEVICE_EXTENSIONS for cl_intel_subgroup_matrix_multiply_accumulate?
-    if "A770" in device.device_name:
+    if "cl_intel_subgroup_matrix_multiply_accumulate" in device.device_exts:
       CLCompiler.compiler_opts = CLCompiler.compiler_opts._replace(device="INTEL", has_tensor_cores=True)
     self.device = device
     super().__init__(f"compile_cl_{compile_key}")
@@ -98,6 +97,7 @@ class CLDevice(Compiled):
     self.device_id = CLDevice.device_ids[0 if ":" not in device else int(device.split(":")[1])]
     self.device_name = (cl.clGetDeviceInfo(self.device_id, cl.CL_DEVICE_NAME, 256, ctypes.byref(buf := ctypes.create_string_buffer(256)), ctypes.byref(total := ctypes.c_size_t())), ctypes.string_at(buf, size=total.value).decode())[1]  # noqa: E501
     self.driver_version = (cl.clGetDeviceInfo(self.device_id, cl.CL_DRIVER_VERSION, 256, ctypes.byref(buf := ctypes.create_string_buffer(256)), ctypes.byref(total := ctypes.c_size_t())), ctypes.string_at(buf, size=total.value).decode())[1]  # noqa: E501
+    self.device_exts = (cl.clGetDeviceInfo(self.device_id, cl.CL_DEVICE_EXTENSIONS, 4096, ctypes.byref(buf := ctypes.create_string_buffer(4096)), ctypes.byref(total := ctypes.c_size_t())), ctypes.string_at(buf, size=total.value).decode())[1]  # noqa: E501
     self.context = checked(cl.clCreateContext(None, 1, ctypes.byref(self.device_id), cl.clCreateContext.argtypes[3](), None, ctypes.byref(status := ctypes.c_int32())), status)  # noqa: E501
     self.queue = checked(cl.clCreateCommandQueue(self.context, self.device_id, cl.CL_QUEUE_PROFILING_ENABLE, ctypes.byref(status)), status)
     self.pending_copyin: List[memoryview] = []
