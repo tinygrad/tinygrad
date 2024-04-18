@@ -1,8 +1,12 @@
 from tinygrad.tensor import Tensor
-from tinygrad.nn import Linear, LayerNorm, Embedding
+from tinygrad import nn
 from tinygrad.helpers import fetch, get_child
 from pathlib import Path
 
+# allow for monkeypatching
+Embedding = nn.Embedding
+Linear = nn.Linear
+LayerNorm = nn.LayerNorm
 
 class BertForQuestionAnswering:
   def __init__(self, hidden_size=1024, intermediate_size=4096, max_position_embeddings=512, num_attention_heads=16, num_hidden_layers=24, type_vocab_size=2, vocab_size=30522, attention_probs_dropout_prob=0.1, hidden_dropout_prob=0.1):
