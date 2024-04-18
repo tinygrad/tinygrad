@@ -70,7 +70,6 @@ class CStyleLanguage(NamedTuple):
     prg = ''.join([f"{self.kernel_prefix}void {self.get_kernel_modifier(uops)}{function_name}(",] +
     [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
     [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])
-    print(prg if prefix is None else "\n".join(prefix)+f"\n{prg}")
     return prg if prefix is None else "\n".join(prefix)+f"\n{prg}"
 
   # returns a str statement that does the store

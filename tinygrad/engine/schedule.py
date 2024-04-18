@@ -164,7 +164,6 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
         if tr in realizes:
           realized_children[tr] = st
           # can only reduce contiguous
-          # max one reduceop per kernel
           if (not st.contiguous or st.size != r.st.size or (tr in reduce_for_op and reduce_for_op[tr] != r)) \
               and not (r in backtoback_reductions and tr in reduce_for_op and reduce_for_op[tr] == backtoback_reductions[r]):
             can_chase = tr not in reduce_for_op or reduce_for_op[tr] == r

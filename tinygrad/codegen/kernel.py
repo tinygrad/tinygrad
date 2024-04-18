@@ -70,7 +70,7 @@ class Kernel:
     self.ast = ast
     self.lazyops = flatten([op.lazyops for op in self.ast])
 
-    # there's only allowed to be one reduceop
+    # there's only allowed to be unique reduceops
     self.reduceops: List[LazyOp] = []
     for x in self.lazyops:
       if(x.op in ReduceOps and x not in self.reduceops): self.reduceops.append(x)
