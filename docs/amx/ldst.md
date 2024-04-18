@@ -75,7 +75,7 @@ In other words, the even Z register contains the even lanes from memory, and the
 
 ## Emulation code
 
-See [ldst.c](../extra/accel/amx/tests/ldst.c).
+See [ldst.c](../../extra/accel/amx/tests/ldst.c).
 
 A representative sample is:
 ```c

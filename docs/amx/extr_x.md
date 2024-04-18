@@ -31,7 +31,7 @@ Copies an entire register from Y to X.
 
 ## Emulation code
 
-See [extr.c](../extra/accel/amx/tests/extr.c).
+See [extr.c](../../extra/accel/amx/tests/extr.c).
 
 A representative sample is:
 ```c

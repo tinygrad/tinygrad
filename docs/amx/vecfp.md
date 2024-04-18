@@ -98,7 +98,7 @@ On M2, the whole operation can optionally be repeated multiple times, by setting
 
 ## Emulation code
 
-See [vecfp.c](../extra/accel/amx/tests/vecfp.c). Note the code in [test.c](../extra/accel/amx/tests/test.c) to set the DN bit of `fpcr`.
+See [vecfp.c](../../extra/accel/amx/tests/vecfp.c). Note the code in [test.c](../../extra/accel/amx/tests/test.c) to set the DN bit of `fpcr`.
 
 A representative sample is:
 ```c

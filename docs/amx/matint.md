@@ -146,7 +146,7 @@ When 47=8, M3 also supports 8-bit X, 16-bit Y, 32-bit Z, with each 4 by 4 block 
 
 ## Emulation code
 
-See [matint.c](../extra/accel/amx/tests/matint.c), and [vecint.c](../extra/accel/amx/tests/vecint.c) for the shared ALU.
+See [matint.c](../../extra/accel/amx/tests/matint.c), and [vecint.c](../../extra/accel/amx/tests/vecint.c) for the shared ALU.
 
 A representative sample is:
 ```c
