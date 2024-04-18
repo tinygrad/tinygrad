@@ -1,7 +1,7 @@
 import time, ctypes, subprocess, pathlib, tempfile
 from tinygrad.device import Compiled, Compiler, MallocAllocator
 from tinygrad.device import CompilerOptions
-from tinygrad.helpers import DEBUG, getenv
+from tinygrad.helpers import DEBUG
 from tinygrad.renderer.cstyle import HVXLanguage, uops_to_cstyle
 
 
@@ -14,7 +14,7 @@ char* load(char* path){{
   char* data = malloc(sz);
   fseek(fp, 0, SEEK_SET);
   fread(data, sz, 1, fp);
-  return data;  
+  return data;
 }}
 
 int main(int argc, char** argv) {{
@@ -33,7 +33,7 @@ def gen_func_call(signature: str):
   name = signature.split("(")[0].split(" ")[-1]
   params = signature.split("(")[1].split(")")[0].split(",")
   symbolic = list(i.split(" ")[-1] for i in filter(lambda x: "const int " in x, params))
-  types: list[str] = ["float", "unsigned int", "int", "unsigned long long", "long long", "unsigned long", "long", 
+  types: list[str] = ["float", "unsigned int", "int", "unsigned long long", "long long", "unsigned long", "long",
            "half", "unsigned char", "uchar", "bool", "char", "unsigned short", "short"]
   types = [next(filter(lambda x: x in p, types)) for p in params]
   lines = [f"{types[0]}* data0 = ({types[0]}*)malloc(sz0);"]
@@ -48,11 +48,11 @@ class HexagonCompiler(Compiler):
     return uops_to_cstyle(HVXLanguage(), name, uops)
   def compile(self, src:str) -> bytes:
     # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.hexagon.elf') as outelf, tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.hexagon.c') as outc:
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.hexagon.elf') as outelf, tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.hexagon.c') as outc:  # noqa: E501
       outc.write(src+HEXAGON_FOOTER.format(CALL = gen_func_call(src.splitlines()[11])))
       outc.flush()
       #print("Put generated C code here:", outc.name)
-      cc = f'hexagon-clang'
+      cc = 'hexagon-clang'
       cmd= f'{cc} {outc.name} -mhvx -mv65 -O2 -Wall -lm -o {outelf.name} '
       if DEBUG>=4: print(cmd)
       subprocess.check_output(args=cmd.split(), stderr=subprocess.DEVNULL if DEBUG<3 else None)
@@ -78,7 +78,9 @@ class HexagonProgram:
       #print("buffer size:", ctypes.sizeof(buf))
       cmd += f' {f.name} '
     fbl = ctypes.sizeof(bufs[0])
-    for f in files: f.flush(); f.close()
+    for f in files: 
+      f.flush()
+      f.close()
     #print("Vals:", vals)
     for val in vals: cmd += f' {val} '
     #print(cmd)
