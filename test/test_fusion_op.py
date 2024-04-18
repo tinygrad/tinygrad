@@ -19,7 +19,7 @@ class TestFusionOp(unittest.TestCase):
     out = (bt*2).expand(10,10).sum(1)
     sched = create_schedule([out.lazydata], None)
     run_schedule(sched)
-    outd = out.data().tolist()
+    outd = out.tolist()
     assert all(x == 20.0 for x in outd)
 
   def test_recursive_add(self):

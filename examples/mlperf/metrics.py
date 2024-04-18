@@ -1,7 +1,6 @@
 import re
 import string
 from collections import Counter
-from tinygrad import dtypes, Device
 
 def levenshtein(a, b):
   n, m = len(a), len(b)
