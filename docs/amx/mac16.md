@@ -88,7 +88,7 @@ In matrix mode, takes an X vector of type i8 or i16, a Y vector of type i8 or i1
 
 ## Emulation code
 
-See [mac16.c](mac16.c).
+See [mac16.c](../extra/accel/amx/tests/mac16.c).
 
 A representative sample is:
 ```c

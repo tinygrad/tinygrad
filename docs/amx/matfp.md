@@ -78,7 +78,7 @@ Performs a fused-multiply-add (or other ALU operation) outer-product between an 
 
 ## Emulation code
 
-See [matfp.c](matfp.c), and [vecfp.c](vecfp.c) for the shared ALU. Note the code in [test.c](test.c) to set the DN bit of `fpcr`.
+See [matfp.c](../extra/accel/amx/tests/matfp.c), and [vecfp.c](../extra/accel/amx/tests/vecfp.c) for the shared ALU. Note the code in [test.c](../extra/accel/amx/tests/test.c) to set the DN bit of `fpcr`.
 
 A representative sample is:
 ```c

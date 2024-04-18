@@ -68,7 +68,7 @@ By using _generate_ followed by _lookup_ (into a different table), unary functio
 
 ## Emulation code
 
-See [genlut.c](genlut.c).
+See [genlut.c](../amx/extra/accel/amx/tests/genlut.c).
 
 A representative sample is:
 ```c

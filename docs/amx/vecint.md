@@ -128,7 +128,7 @@ On M2, the whole operation can optionally be repeated multiple times, by setting
 
 ## Emulation code
 
-See [vecint.c](vecint.c).
+See [vecint.c](../extra/accel/amx/tests/vecint.c).
 
 A representative sample is:
 ```c
