@@ -12,9 +12,10 @@ from tinygrad.runtime.ops_clang import CLANG_PROGRAM_HEADER
 
 if __name__ == "__main__":
   model = GPT(GPTConfig(n_layer=12, n_head=12, n_embd=768))
+  #model.load_pretrained()
   seen = set()
-  #early_sched = create_schedule([x.lazydata for x in nn.state.get_parameters(model)], seen)
-  #print(f"built model {len(early_sched)}")
+  early_sched = create_schedule([x.lazydata for x in nn.state.get_parameters(model)], seen)
+  print(f"built model {len(early_sched)}")
 
   optimizer = nn.optim.Adam(nn.state.get_parameters(model), lr=1e-4)
   for i in range(3):  # TODO: why does it take three and not two to stablize
@@ -23,8 +24,8 @@ if __name__ == "__main__":
     _, loss = model(x, y)
     optimizer.zero_grad()
     loss.backward()
-    tensors = optimizer._step()
-    sched = create_schedule([loss.lazydata] + [x.lazydata for x in tensors], seen)
+    tensors = optimizer.schedule_step()
+    sched = create_schedule([loss.lazydata] + [x.lazydata for x in optimizer.params+optimizer.buffers+tensors], seen)
     print(f"calls {i}:", len(sched))
     #run_schedule(sched[:])
   del seen  # free the LazyBuffers
@@ -40,13 +41,13 @@ if __name__ == "__main__":
   numbered_bufs = {x:i for i,x in enumerate(dedup(flatten([si.outputs+si.inputs for si in sched])))}
   print("buffers:", len(numbered_bufs))
 
-  # TODO: why don't the buffer names work
+  # TODO: why don't the buffer names work for X and Y
   state_dict = nn.state.get_state_dict(model)
   named_buffers = {v.lazydata.base.buffer:k.replace(".", "_") for k,v in state_dict.items()}
   named_buffers['X'] = x.lazydata.base.buffer
   named_buffers['Y'] = y.lazydata.base.buffer
 
   for si in sched:
-    if si.ast[0].op == LoadOps.EMPTY: continue
+    if si.ast[0].op is not BufferOps.STORE: continue
     bufs = [named_buffers.get(b, f"b{numbered_bufs[b]}") for b in si.outputs+si.inputs]
-    print(srcs[si.ast][0], bufs)
+    print(f"{srcs[si.ast][0]}({', '.join(bufs)})")
