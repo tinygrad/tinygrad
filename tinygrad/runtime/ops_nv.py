@@ -441,14 +441,14 @@ class NVDevice(Compiled):
     ctxshare_params = nv_gpu.NV_CTXSHARE_ALLOCATION_PARAMETERS(hVASpace=vaspace, flags=nv_gpu.NV_CTXSHARE_ALLOCATION_FLAGS_SUBCONTEXT_ASYNC)
     ctxshare = rm_alloc(self.fd_ctl, nv_gpu.FERMI_CONTEXT_SHARE_A, self.root, channel_group, ctxshare_params).hObjectNew
 
-    self.compute_gpfifo_entries: int = 0x400
+    self.compute_gpfifo_entries: int = 0x10000
     self.compute_gpfifo_token: int = self._gpu_fifo_setup(gpfifo, ctxshare, channel_group, offset=0, entries=self.compute_gpfifo_entries)
     self.compute_gpu_ring: memoryview = to_mv(gpfifo.base, self.compute_gpfifo_entries * 8).cast("Q")
     self.compute_gpu_ring_controls = nv_gpu.AmpereAControlGPFifo.from_address(gpfifo.base + self.compute_gpfifo_entries * 8)
     self.compute_put_value: int = 0
     self.compute_signal = NVDevice._get_signal()
 
-    self.dma_gpfifo_entries: int = 0x400
+    self.dma_gpfifo_entries: int = 0x10000
     self.dma_gpfifo_token: int = self._gpu_fifo_setup(gpfifo, ctxshare, channel_group, offset=0x100000, entries=self.dma_gpfifo_entries)
     self.dma_gpu_ring: memoryview = to_mv(gpfifo.base + 0x100000, self.dma_gpfifo_entries * 8).cast("Q")
     self.dma_gpu_ring_controls = nv_gpu.AmpereAControlGPFifo.from_address(gpfifo.base + 0x100000 + self.dma_gpfifo_entries * 8)
