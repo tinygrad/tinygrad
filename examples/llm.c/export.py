@@ -2,7 +2,7 @@
 import os
 os.environ["NOOPT"] = "1"
 from tinygrad import Device, nn, Tensor, dtypes
-#Device.DEFAULT = "CLANG"
+Device.DEFAULT = "CLANG"
 from train_gpt2 import GPT, GPTConfig
 from tinygrad.helpers import dedup, to_function_name, flatten, getenv, GRAPH, GlobalCounters, ansilen
 from tinygrad.engine.schedule import create_schedule
@@ -12,7 +12,9 @@ from tinygrad.runtime.ops_clang import CLANG_PROGRAM_HEADER
 
 if __name__ == "__main__":
   model = GPT(GPTConfig(n_layer=getenv("NLAYER", 12), n_head=12, n_embd=768))
-  model.load_pretrained()
+  #model.load_pretrained()
+  for p in nn.state.get_parameters(model): p.replace(Tensor.empty(p.shape, dtype=p.dtype)) # fake load pretrained
+
   seen = set()
   early_sched = create_schedule([x.lazydata for x in nn.state.get_parameters(model)], seen)
   print(f"built model {len(early_sched)}")
