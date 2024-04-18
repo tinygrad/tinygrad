@@ -16,12 +16,13 @@ if __name__ == "__main__":
   for p in nn.state.get_parameters(model): p.replace(Tensor.empty(p.shape, dtype=p.dtype)) # fake load pretrained
 
   seen = set()
-  early_sched = create_schedule([x.lazydata for x in nn.state.get_parameters(model)], seen)
-  print(f"built model {len(early_sched)}")
+  #early_sched = create_schedule([x.lazydata for x in nn.state.get_parameters(model)], seen)
+  #print(f"built model {len(early_sched)}")
 
   optimizer = nn.optim.Adam(nn.state.get_parameters(model), lr=1e-4)
-  for i in range(3):  # TODO: why does it take three and not two to stablize
-    if i == 2: GRAPH.value = getenv("LATEGRAPH")
+  warmup_count = getenv("WARMUP", 3)
+  for i in range(warmup_count):  # TODO: why does it take three and not two to stablize
+    if i == warmup_count-1: GRAPH.value = getenv("LATEGRAPH")
     GlobalCounters.reset()
     X = Tensor.empty(4, 64, dtype=dtypes.int)
     Y = Tensor.empty(4, 64, dtype=dtypes.int)
