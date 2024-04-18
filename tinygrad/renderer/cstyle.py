@@ -368,5 +368,5 @@ class HVXLanguage(CStyleLanguage):
     #casting short to half always results in zero on Hexagon v65(fixed in v68), so to avoid that we go through long
     if len(x) == 1 and var_dtype == dtypes.half: return f"({self.render_dtype(var_dtype)})(long)({x[0]})"
     if len(x) == 1: return f"({self.render_dtype(var_dtype)})({x[0]})"
-    assert len(x) == var_dtype.sz, f"cast is wrong size {len(x)} != {var_dtype.sz}"
+    assert len(x) == var_dtype.count, f"cast is wrong size {len(x)} != {var_dtype.count}"
     return f"({self.render_dtype(var_dtype)})({x[0]})"

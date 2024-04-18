@@ -1,4 +1,5 @@
 import time, ctypes, subprocess, pathlib, tempfile
+from typing import List
 from tinygrad.device import Compiled, Compiler, MallocAllocator
 from tinygrad.device import CompilerOptions
 from tinygrad.helpers import DEBUG
@@ -33,7 +34,7 @@ def gen_func_call(signature: str):
   name = signature.split("(")[0].split(" ")[-1]
   params = signature.split("(")[1].split(")")[0].split(",")
   symbolic = list(i.split(" ")[-1] for i in filter(lambda x: "const int " in x, params))
-  types: list[str] = ["float", "unsigned int", "int", "unsigned long long", "long long", "unsigned long", "long",
+  types: List[str] = ["float", "unsigned int", "int", "unsigned long long", "long long", "unsigned long", "long",
            "half", "unsigned char", "uchar", "bool", "char", "unsigned short", "short"]
   types = [next(filter(lambda x: x in p, types)) for p in params]
   lines = [f"{types[0]}* data0 = ({types[0]}*)malloc(sz0);"]
