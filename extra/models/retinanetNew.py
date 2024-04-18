@@ -391,6 +391,13 @@ class RetinaNet:
       # print(colored(f'PROP MATCHER {matched_idxs[-1].shape} {matched_idxs[-1].numpy()}', 'magenta'))
     matched_idxs = Tensor.stack(matched_idxs)
     return matched_idxs
+  def matcher_gen_per_img(self, anchors, target_box):
+    if target_box.numel() == 0:
+      print('NUMEL==0 HIT!!!')
+      return Tensor.full((anchors.shape[0],), -1, dtype=dtypes.int64,)
+                                      # device=anchors_per_image.device))
+      # continue
+    return self.proposal_matcher(box_iou(target_box, anchors))
   # def matcher_gen(self, anchors, target_boxes):
   #   # idx = Tensor.arange(anchors.shape[0])
   #   # matched_idxs = []
@@ -527,7 +534,7 @@ class ClassificationHead:
     valid_idxs = matched_idxs != Matcher.BETWEEN_THRESHOLDS
     s = sigmoid_focal_loss(logits_class, 
                                        gt_classes_target, 
-                                       valid_idxs.reshape(batch_size,-1,1)).realize()
+                                       valid_idxs.reshape(batch_size,-1,1)) #.realize()
     # print('sig_loss:', s.shape)
     a = s/num_foreground
     return a.mean()

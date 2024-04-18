@@ -243,9 +243,10 @@ def train_resnet():
 def train_retinanet():
   from contextlib import redirect_stdout
   import numpy as np
-  HOSTNAME = getenv('SLURM_STEP_NODELIST', 'other')
+  HOSTNAME = getenv('SLURM_STEP_NODELIST', '3080')
   EPOCHS = 100
-  BS = 16 # A100x2 
+  BS = 16 # A100x2
+  BS=2 
   # BS = 3*6
   # BS = 5*8
   # BS = 2*4
@@ -274,7 +275,7 @@ def train_retinanet():
   from extra.models import resnet
   from examples.hlb_cifar10 import UnsyncedBatchNorm
   from tinygrad.nn.optim import Adam
-  from extra.datasets.openimages_new import iterate, iterate_val
+  from extra.datasets.openimages_new import iterate, iterate_val, MATCHER_FUNC
   from extra.datasets.openimages_new import get_openimages
   from pycocotools.cocoeval import COCOeval
   from pycocotools.coco import COCO
@@ -348,6 +349,7 @@ def train_retinanet():
     Tensor.training = False
     out = model(X)
     return out.realize()
+  func = None
   for epoch in range(EPOCHS):
     print(colored(f'EPOCH {epoch}/{EPOCHS}:', 'cyan'))
     # train_step.reset()
@@ -361,122 +363,152 @@ def train_retinanet():
       optimizer.lr.assign(Tensor([LR], device=GPUS))
     cnt = 0
     data_end = time.perf_counter()
-    for X, Y_boxes, Y_labels, Y_boxes_p, Y_labels_p in iterate(coco_train, BS):
+    for X, Y_boxes, Y_labels, Y_boxes_p, Y_labels_p, M_IDXS in iterate(coco_train, BS, func):
       # print('Global reset')
       GlobalCounters.reset()
       data_time = time.perf_counter() - data_end
       st = time.perf_counter()
-      X.shard_(GPUS, axis=0)
+      X = X.shard(GPUS, axis=0)
       if(cnt==0 and epoch==0):
+        # o_x, oyb, oyl, omi = X, Y_boxes_p, Y_labels_p, M_IDXS
         # INIT LOSS FUNC
         b,_,_ = mdlrun(X)
+        for bb in b:
+          print(bb.shape)
         ANCHORS = anchor_generator(X.shape, b)
         ANCHORS = [a.realize() for a in ANCHORS]
         ANCHORS_STACK = Tensor.stack(ANCHORS)
-        ANCHORS_STACK.shard_(GPUS, axis=0)
+        # print('ANCHOR_STACK', ANCHORS[0].shape)
+        # sys.exit()
+        ANCHORS_STACK = ANCHORS_STACK.shard(GPUS, axis=0)
+        func = lambda x: model.matcher_gen_per_img(ANCHORS[0], x)
+        # print(func)
         mdlrun.reset()
         # mdl_reg_loss_jit = TinyJit(lambda r, y, m: model.head.regression_head.loss(r,y,ANCHORS, m).realize())
         # mdl_class_loss_jit = TinyJit(lambda c, y,m: model.head.classification_head.loss(c,y,m).realize())
         mdl_reg_loss = lambda r, y, m, b_t: model.head.regression_head.loss(r,y,ANCHORS_STACK, m, b_t)
         mdl_class_loss = lambda c, y,m, l_t: model.head.classification_head.loss(c,y,m, l_t)
+        break
 
-      
+      else:
+        # print('ANCHORS', len(ANCHORS), ANCHORS[0].mean().item(), ANCHORS[1].mean().item())
+        # matcher_gen not jittable for now
+        pre_match = time.perf_counter()
+        # matched_idxs = model.matcher_gen(ANCHORS, Y_boxes) #.realize()
+        # matched_idxs = Tensor.stack(M_IDXS).realize()
+        matched_idxs = M_IDXS
+        # print('MATCHED_IDX', matched_idxs.mean().item())
+        pre_zip = time.perf_counter()
+
+        # Work around for zipping a sharded tensor
+        # Need to think of clean way to execute
+        # boxes_temp = []
+        # for tb, m in zip(Y_boxes_p, matched_idxs):
+        #   boxes_temp.append(tb[m].realize())
+        # boxes_temp = Tensor.stack(boxes_temp)
+        # labels_temp = []
+        # for tl, m in zip(Y_labels_p, matched_idxs):
+        #   labels_temp.append(tl[m].realize())
+        # labels_temp = Tensor.stack(labels_temp)
+        # boxes_temp = Tensor.stack(Y_boxes_p).realize()
+        # labels_temp = Tensor.stack(Y_labels_p).realize()
+        boxes_temp = Y_boxes_p
+        labels_temp = Y_labels_p
+        # print('matched_IDXS', matched_idxs.shape, len(Y_boxes))
+        pre_shard = time.perf_counter()
+        # print('MATH_DEVICE', matched_idxs.device)
+        matched_idxs = matched_idxs.shard(GPUS, axis=0)
+        # print('POST_MATH_DEVICE', matched_idxs.device)
+        # # Y_boxes_p.shard_(GPUS, axis=0)
+        # # Y_labels_p.shard_(GPUS, axis=0)
+        boxes_temp = boxes_temp.shard(GPUS, axis=0)
+        labels_temp = labels_temp.shard(GPUS, axis=0)
+        post_shard = time.perf_counter() - pre_shard
+        jit_t = time.perf_counter()
+        loss = train_step(X, None, None, matched_idxs, boxes_temp, labels_temp)
+        jitted_time = time.perf_counter()-jit_t
+        if lr_sched is not None:
+          lr_sched.step()
+        et = time.perf_counter()-st
+        if cnt%1==0:
+          print(f'hit {(pre_zip-pre_match)*1000.0} {(pre_shard-pre_zip)*1000.0}'
+                f' {jitted_time*1000.0} {post_shard*1000.0}')
+          # print(X.shape, matched_idxs.shape, boxes_temp.shape, labels_temp.shape)
+          # print(colored(f'{cnt} STEP {loss.item():.5f}, time: {et*1000.0:7.2f} ms run, '
+          #               f'data: {data_time*1000.0:7.2f} ms|| LR: {optimizer.lr.numpy().item():.6f}, '
+          #               f'mem: {GlobalCounters.mem_used / 1e9:.4f} GB used, '
+          #               f'GFLOPS: {GlobalCounters.global_ops * 1e-9 / et:7.2f}', 'magenta'))
+          print(colored(f'{cnt} STEP {loss.shape}, time: {et*1000.0:7.2f} ms run, '
+                        f'data: {data_time*1000.0:7.2f} ms|| '
+                        f'mem: {GlobalCounters.mem_used / 1e9:.4f} GB used, '
+                        f'GFLOPS: {GlobalCounters.global_ops * 1e-9 / et:7.2f}', 'magenta'))
+        data_end = time.perf_counter()
+        # if cnt>5 and epoch==0: 
+        #   # train_step.reset()
+        #   break
       cnt+=1
-      # matcher_gen not jittable for now
-      matched_idxs = model.matcher_gen(ANCHORS, Y_boxes).realize()
 
-      # Work around for zipping a sharded tensor
-      # Need to think of clean way to execute
-      boxes_temp = []
-      for tb, m in zip(Y_boxes_p, matched_idxs):
-        boxes_temp.append(tb[m])
-      boxes_temp = Tensor.stack(boxes_temp)
-      labels_temp = []
-      for tl, m in zip(Y_labels_p, matched_idxs):
-        labels_temp.append(tl[m])
-      labels_temp = Tensor.stack(labels_temp)
-      # print('matched_IDXS', matched_idxs.shape, len(Y_boxes))
-      matched_idxs.shard_(GPUS, axis=0)
-      # # Y_boxes_p.shard_(GPUS, axis=0)
-      # # Y_labels_p.shard_(GPUS, axis=0)
-      boxes_temp.shard_(GPUS, axis=0)
-      labels_temp.shard_(GPUS, axis=0)
-      loss = train_step(X, Y_boxes_p, Y_labels_p, matched_idxs, boxes_temp, labels_temp)
-      if lr_sched is not None:
-        lr_sched.step()
-      et = time.perf_counter()-st
-      if cnt%10==0:
-        print('hit')
-        print(colored(f'{cnt} STEP {loss.item():.5f}, time: {et*1000.0:7.2f} ms run, '
-                      f'data: {data_time*1000.0:7.2f} ms|| LR: {optimizer.lr.numpy().item():.6f}, '
-                      f'mem: {GlobalCounters.mem_used / 1e9:.4f} GB used, '
-                      f'GFLOPS: {GlobalCounters.global_ops * 1e-9 / et:7.2f}', 'magenta'))
-      data_end = time.perf_counter()
-      # if cnt>4 and epoch==0: 
-      #   # train_step.reset()
-      #   break
+    # if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
+    # fn = f"./ckpts/retinanet_{HOSTNAME}_B{BS}_E{epoch}.safe"
+    # state_dict = get_state_dict(model)
+    # # print(state_dict.keys())
+    # safe_save(state_dict, fn)
+    # print(f" *** Model saved to {fn} ***")
 
-    if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
-    fn = f"./ckpts/retinanet_{HOSTNAME}_B{BS}_E{epoch}.safe"
-    state_dict = get_state_dict(model)
-    # print(state_dict.keys())
-    safe_save(state_dict, fn)
-    print(f" *** Model saved to {fn} ***")
+    # # ****EVAL STEP
+    # # train_step.reset()
+    # print(colored(f'{epoch} START EVAL', 'cyan'))
+    # coco_eval = COCOeval(coco_val.coco, iouType="bbox")
 
-    # ****EVAL STEP
-    # train_step.reset()
-    print(colored(f'{epoch} START EVAL', 'cyan'))
-    coco_eval = COCOeval(coco_val.coco, iouType="bbox")
+    # Tensor.training = False
+    # # print('rand',model.head.regression_head.bbox_reg.weight.mean().numpy(),model.head.regression_head.bbox_reg.weight.shape)
+    # # model.load_from_pretrained()
+    # # model.backbone.body.fc = None
+    # # print('pre_train',model.head.regression_head.bbox_reg.weight.mean().numpy(),model.head.regression_head.bbox_reg.weight.shape)
+    # # model.load_checkpoint("./ckpts/retinanet_B16_E10.safe")
+    # # print('ckpt',model.head.regression_head.bbox_reg.weight.mean().numpy(), model.head.regression_head.bbox_reg.weight.shape)
 
-    Tensor.training = False
-    # print('rand',model.head.regression_head.bbox_reg.weight.mean().numpy(),model.head.regression_head.bbox_reg.weight.shape)
-    # model.load_from_pretrained()
-    # model.backbone.body.fc = None
-    # print('pre_train',model.head.regression_head.bbox_reg.weight.mean().numpy(),model.head.regression_head.bbox_reg.weight.shape)
-    # model.load_checkpoint("./ckpts/retinanet_B16_E10.safe")
-    # print('ckpt',model.head.regression_head.bbox_reg.weight.mean().numpy(), model.head.regression_head.bbox_reg.weight.shape)
+    # st = time.time()
+    # coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
+    # cnt = 0
+    # for X, targets in iterate_val(coco_val, BS_EVAL):
+    #   X.shard_(GPUS, axis=0)
+    #   orig_shapes= []
+    #   for tt in targets:
+    #     orig_shapes.append(tt['image_size'])
+    #   # print('orig_shapes', orig_shapes)
+    #   # print(orig_shapes)
+    #   sub_t = time.time()
+    #   # out = mdlrun_false(X).numpy()
+    #   out = val_step(X).numpy()
+    #   predictions = model.postprocess_detections(out, orig_image_sizes=orig_shapes)
+    #   # print(predictions)
+    #   img_ids = [t["image_id"] for t in targets]
+    #   # print('img_ids', img_ids)
+    #   coco_results  = [{"image_id": targets[i]["image_id"], "category_id": label, "bbox": box.tolist(),
+    #                      "score": score} for i, prediction in enumerate(predictions) 
+    #                      for box, score, label in zip(*prediction.values())]
+    #   print('len_reults', len(coco_results))
+    #   # IF COCO_RESULTS LOWER THAN THRESH, ERROR IN EVAL
+    #   # REFERNCE PUSHES EMPTY COCO OBJ
+    #   with redirect_stdout(None):
+    #     coco_eval.cocoDt = coco_val.coco.loadRes(coco_results) if coco_results else COCO()
+    #     coco_eval.params.imgIds = img_ids
+    #     coco_eval.evaluate()
+    #   evaluated_imgs.extend(img_ids)
+    #   coco_evalimgs.append(np.array(coco_eval.evalImgs).reshape(ncats, narea, len(img_ids)))
+    #   print(colored(f'{cnt} EVAL_STEP || {time.time()-sub_t}', 'red'))
+    #   cnt=cnt+1
+    # coco_eval.params.imgIds = evaluated_imgs
+    # coco_eval._paramsEval.imgIds = evaluated_imgs
+    # coco_eval.evalImgs = list(np.concatenate(coco_evalimgs, -1).flatten())
+    # coco_eval.accumulate()
+    # coco_eval.summarize()
+    # eval_acc = coco_eval.stats[0]
+    # print(colored(f'{epoch} EVAL_ACC {eval_acc} || {time.time()-st}', 'green'))
 
-    st = time.time()
-    coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
-    cnt = 0
-    for X, targets in iterate_val(coco_val, BS_EVAL):
-      X.shard_(GPUS, axis=0)
-      orig_shapes= []
-      for tt in targets:
-        orig_shapes.append(tt['image_size'])
-      # print('orig_shapes', orig_shapes)
-      # print(orig_shapes)
-      sub_t = time.time()
-      # out = mdlrun_false(X).numpy()
-      out = val_step(X).numpy()
-      predictions = model.postprocess_detections(out, orig_image_sizes=orig_shapes)
-      # print(predictions)
-      img_ids = [t["image_id"] for t in targets]
-      # print('img_ids', img_ids)
-      coco_results  = [{"image_id": targets[i]["image_id"], "category_id": label, "bbox": box.tolist(),
-                         "score": score} for i, prediction in enumerate(predictions) 
-                         for box, score, label in zip(*prediction.values())]
-      print('len_reults', len(coco_results))
-      # IF COCO_RESULTS LOWER THAN THRESH, ERROR IN EVAL
-      # REFERNCE PUSHES EMPTY COCO OBJ
-      with redirect_stdout(None):
-        coco_eval.cocoDt = coco_val.coco.loadRes(coco_results) if coco_results else COCO()
-        coco_eval.params.imgIds = img_ids
-        coco_eval.evaluate()
-      evaluated_imgs.extend(img_ids)
-      coco_evalimgs.append(np.array(coco_eval.evalImgs).reshape(ncats, narea, len(img_ids)))
-      print(colored(f'{cnt} EVAL_STEP || {time.time()-sub_t}', 'red'))
-      cnt=cnt+1
-    coco_eval.params.imgIds = evaluated_imgs
-    coco_eval._paramsEval.imgIds = evaluated_imgs
-    coco_eval.evalImgs = list(np.concatenate(coco_evalimgs, -1).flatten())
-    coco_eval.accumulate()
-    coco_eval.summarize()
-    eval_acc = coco_eval.stats[0]
-    print(colored(f'{epoch} EVAL_ACC {eval_acc} || {time.time()-st}', 'green'))
-
-    # val_step.reset()
-    # sys.exit()
+    # # val_step.reset()
+    # # sys.exit()
 
       
 def train_unet3d():
