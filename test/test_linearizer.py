@@ -52,9 +52,7 @@ class TestLinearizer(unittest.TestCase):
 
   def test_multireduce(self):
     def check(shape, axis, fuse):
-      x = np.random.rand(*shape)
       xtg = Tensor(x, dtype=dtypes.float64).realize()
-      y = x.std(axis, ddof=1)
       ytg = xtg.std(axis=axis)
       schdl = create_schedule([ytg.lazydata])
       if fuse: assert len(schdl) == 1, f"Reduction of shape {shape} should fuse, but generated {len(schdl)} kernels instead"
