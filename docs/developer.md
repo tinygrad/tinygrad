@@ -4,4 +4,5 @@ Everything in [Tensor](tensor.md) is syntactic sugar around [function.py](functi
 
 ::: tinygrad.lazy.LazyBuffer
     options:
+        heading_level: 2
         show_source: false
