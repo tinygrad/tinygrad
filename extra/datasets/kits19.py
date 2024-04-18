@@ -3,7 +3,7 @@ import functools
 from pathlib import Path
 import numpy as np
 import nibabel as nib
-from scipy import signal
+from scipy import signal, ndimage
 import os
 import torch
 import torch.nn.functional as F
@@ -181,7 +181,7 @@ def _rand_foreg_cropb(image, label, patch_size):
     return low, high
 
   cl = np.random.choice(np.unique(label[label > 0]))
-  foreg_slices = scipy.ndimage.find_objects(scipy.ndimage.measurements.label(label==cl)[0])
+  foreg_slices = ndimage.find_objects(ndimage.measurements.label(label==cl)[0])
   foreg_slices = [x for x in foreg_slices if x is not None]
   slice_volumes = [np.prod([s.stop - s.start for s in sl]) for sl in foreg_slices]
   slice_idx = np.argsort(slice_volumes)[-2:]
