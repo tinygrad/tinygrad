@@ -1,4 +1,6 @@
-Welcome to the docs for tinygrad. This page is for users of the tinygrad library. We also have [developer docs](developer.md)
+# Home
+
+Welcome to the tinygrad documentation! Here, you will find all the information you need to use the tinygrad library effectively. For details on how tinygrad is developed and maintained, check out the [developer documentation](developer.md). Enjoy exploring the docs!
 
 tinygrad is not 1.0 yet, but it will be soon. The API has been pretty stable for a while.
 
