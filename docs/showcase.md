@@ -7,10 +7,13 @@ Despite being a tiny library, tinygrad is capable of doing a lot of things. From
 ### EfficientNet
 
 You can either pass in the URL of a picture to discover what it is:
+
 ```sh
 python3 examples/efficientnet.py ./test/models/efficientnet/Chicken.jpg
-```
+````
+
 Or, if you have a camera and OpenCV installed, you can detect what is in front of you:
+
 ```sh
 python3 examples/efficientnet.py webcam
 ```
@@ -54,6 +57,7 @@ python3 examples/stable_diffusion.py
 You will need to download and put the weights into the `weights/LLaMA` directory, which may need to be created.
 
 Then you can have a chat with Stacy:
+
 ```sh
 python3 examples/llama.py
 ```
