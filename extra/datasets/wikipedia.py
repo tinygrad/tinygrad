@@ -178,7 +178,7 @@ def create_instances_from_document(rng:random.Random, tokenizer:Tokenizer, doc:l
   max_num_tokens = getenv('MAX_SEQ_LENGTH', 512) - 3 # [CLS] + 2 * [SEP]
 
   target_seq_length = max_num_tokens
-  if rng.random() < 0.1:
+  if rng.random() < getenv("SHORT_SEQ_PROB", 0.1):
     target_seq_length = rng.randint(2, max_num_tokens)
 
   instances = []
