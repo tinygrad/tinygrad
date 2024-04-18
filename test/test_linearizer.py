@@ -52,6 +52,7 @@ class TestLinearizer(unittest.TestCase):
 
   def test_multireduce(self):
     def check(shape, axis, fuse):
+      x = np.random.rand(*shape)
       xtg = Tensor(x, dtype=dtypes.float64).realize()
       ytg = xtg.std(axis=axis)
       schdl = create_schedule([ytg.lazydata])
