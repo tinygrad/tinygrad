@@ -1,17 +1,16 @@
 from __future__ import annotations
 from typing import TypeVar, Generic, Callable, List, Tuple, Union, Dict, cast, Optional
 import functools, itertools, operator
-from dataclasses import dataclass
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, BEAM, getenv, all_int, GraphException
-from tinygrad.device import Buffer, Runner, CompiledRunner, BufferXfer, Compiled, MultiDeviceJITGraph, Device
+from tinygrad.device import Buffer, CompiledRunner, BufferXfer, Compiled, MultiDeviceJITGraph, Device
 from tinygrad.dtype import DType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, sint
-from tinygrad.engine.realize import ExecItem, capturing
+from tinygrad.engine.realize import ExecItem, capturing, _internal_memory_planner
 from tinygrad.nn.state import get_parameters
-from weakref import ref, WeakKeyDictionary
+from weakref import WeakKeyDictionary
 
 # TODO: these graph functions probably shouldn't exist here
 
@@ -71,44 +70,25 @@ def get_input_replace(jit_cache: List[ExecItem], input_rawbuffers:List[Buffer]) 
         input_replace[(j,i)] = input_rawbuffers.index(a)
   return input_replace
 
-class PlaceHolder:
-  placeholders: WeakKeyDictionary[Buffer, PlaceHolder] = WeakKeyDictionary()
-  def __init__(self, buf:Buffer):
-    self.size, self.dtype, self.device, self.ref, self.bufid, self.options = buf.size, buf.dtype, buf.device, ref(buf), id(buf._buf), buf.options
-  def to_tuple(self): return (self.size, self.dtype, self.device, self.bufid, self.options)
-  def __hash__(self): return hash(self.to_tuple())
-  def __eq__(self, x): return isinstance(x, PlaceHolder) and self.to_tuple() == x.to_tuple()
-  @staticmethod
-  def create_if_needed(buf:Buffer) -> Union[PlaceHolder, Buffer]:
-    if found:=PlaceHolder.placeholders.get(buf, None): return found
-    if hasattr(buf, '_buf'): return buf
-    PlaceHolder.placeholders[buf] = ret = PlaceHolder(buf.ensure_allocated())  # TODO: do I need to allocate here?
-    return ret
-
-  def alloc_if_needed(self, buffer_cache: Dict[PlaceHolder, Buffer]) -> Buffer:
-    ret = self.ref()
-    if ret: return ret
-    if self not in buffer_cache: buffer_cache[self] = Buffer(self.device, self.size, self.dtype, options=self.options).allocate()
-    return buffer_cache[self]
-
-@dataclass(frozen=True)
-class WeakExecItem:
-  prg: Runner
-  rawbufs: List[Union[PlaceHolder, Buffer]]
-
 ReturnType = TypeVar('ReturnType')
 class TinyJit(Generic[ReturnType]):
   def __init__(self, fxn:Callable[..., ReturnType]):
     self.fxn = fxn
     self.reset()
 
+  def add_buffer(self, b:Buffer) -> Buffer:
+    if found:=self.buffer_replace.get(b, None): return found
+    if b.is_allocated() or b.lb_refcount > 0: return b
+    self.buffer_replace[b] = ret = Buffer(b.device, b.size, b.dtype, options=b.options)
+    return ret
+
   def add(self, ei:ExecItem):
-    self._cc.append(WeakExecItem(ei.prg, [PlaceHolder.create_if_needed(buf) for buf in ei.rawbufs if buf is not None]))
+    self.jit_cache.append(ExecItem(ei.prg, [self.add_buffer(buf) for buf in ei.rawbufs if buf is not None]))
 
   def reset(self):
-    self._cc: List[WeakExecItem] = []
     self.jit_cache: List[ExecItem] = []
     self.input_replace: Dict[Tuple[int, int], int] = {}
+    self.buffer_replace: WeakKeyDictionary[Buffer, Buffer] = WeakKeyDictionary()
     self.cnt: int = 0
 
   def __get__(self, obj, objtype): return functools.partial(self.__call__, obj) # add support for instance methods
@@ -140,12 +120,13 @@ class TinyJit(Generic[ReturnType]):
         self.ret = self.fxn(*args, **kwargs)
         Tensor.corealize(get_parameters(self.ret))
         capturing.clear()
-      assert len(self._cc), "didn't JIT anything!"
-      buffer_cache: Dict[PlaceHolder, Buffer] = {}
-      self.jit_cache = \
-        [ExecItem(ei.prg, [x.alloc_if_needed(buffer_cache) if isinstance(x, PlaceHolder) else x for x in ei.rawbufs]) for ei in self._cc]
-      del self._cc
+      del self.buffer_replace
+      assert len(self.jit_cache), "didn't JIT anything!"
       if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
+
+      # memory planning (optional)
+      assigned = _internal_memory_planner([cast(List[Buffer], x.rawbufs) for x in self.jit_cache], debug_prefix="JIT ")
+      self.jit_cache = [ExecItem(ei.prg, [assigned.get(x,x).ensure_allocated() for x in ei.rawbufs if x is not None]) for ei in self.jit_cache]
 
       # Condense the items into a graph executor.
       if getenv("JIT") != 2: self.jit_cache = apply_graph_to_jit(self.jit_cache, input_rawbuffers, var_vals)
