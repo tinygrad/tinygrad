@@ -210,7 +210,7 @@ class UOpGraph:
         self.add(UOps.ENDLOOP, None, (u,), cachable=False, insert_before=insert_before)
       elif u.uop is UOps.IF:
         # END any if statements at the end of the uops
-        self.add(UOps.ENDIF, None, (u,), cachable=False)
+        if all([not(x.uop is UOps.ENDIF and x.vin[0] == u) for x in self.uops]): self.add(UOps.ENDIF, None, (u,), cachable=False)
 
   def fix_loop_scope(self, get_recursive_parents:Callable[..., Set[UOp]]):
     loop_stack: List[List[UOp]] = [[]]

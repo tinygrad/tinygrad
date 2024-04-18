@@ -66,9 +66,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outbufs:Tuple[Laz
     return _recursive_lazyop(buf.srcs[0], inputs, outbufs, var_vals, st, realizes, cache, assign_to=buf.srcs[1], assign_idx=outbufs.index(buf))
 
   # if it's a reduce, we have to change the shapetracker
-  if buf.op in ReduceOps:
-    assert st.contiguous, "ReduceOps late fusion must be contiguous"
-    st = ShapeTracker.from_shape(buf.srcs[0].shape)
+  if buf.op in ReduceOps: st = ShapeTracker.from_shape(buf.srcs[0].shape)
 
   # otherwise we fuse it like normal
   cache[(buf, st)] = ret = \
@@ -111,7 +109,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
       if len(buf.st.views) == 1 and buf.st.views[-1].mask and all_int(buf.base.st.shape) and \
           prod(buf.base.st.shape) >= prod([y-x for x,y in buf.st.views[-1].mask]):
         simple_pads.add(buf.base)
-      else:
+      elif all([x.op not in ReduceOps for x in buf.base.srcs if hasattr(x, "op")]):
         realizes[buf.base] = None
     return _recurse_lb(buf.base, realizes, allbufs, simple_pads, children)
   if buf.forced_realize: realizes[buf] = None
@@ -146,6 +144,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
 
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: Dict[LazyBuffer, LazyBuffer] = {}
+  backtoback_reductions:  Dict[LazyBuffer, LazyBuffer] = {}
   for r in allbufs.keys():
     if r != r.base or r.op not in ReduceOps or r in realizes: continue
 
@@ -157,11 +156,18 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
     while not forced_realize and len(child_set):
       next_child_set = {}
       for tr,st in child_set.items():
+        if tr.op in ReduceOps and not tr == r:
+          # fused reductions have to be along a linear path and the same shape
+          if tr.op == r.op and tr.st.shape == r.st.shape and tr.srcs[0].st.shape == r.srcs[0].st.shape \
+            and prod(tr.srcs[0].st.shape) < getenv("REDUCEOP_SPLIT_THRESHOLD", 32768): backtoback_reductions[r] = tr
+          else: forced_realize = True
+
         if tr in realizes:
           realized_children[tr] = st
           # can only reduce contiguous
           # max one reduceop per kernel
-          if not st.contiguous or st.size != r.st.size or (tr in reduce_for_op and reduce_for_op[tr] != r):
+          if (not st.contiguous or st.size != r.st.size or (tr in reduce_for_op and reduce_for_op[tr] != r)) \
+              and not (r in backtoback_reductions and tr in reduce_for_op and reduce_for_op[tr] == backtoback_reductions[r]):
             can_chase = tr not in reduce_for_op or reduce_for_op[tr] == r
             forced_realize = True
             break
@@ -180,10 +186,6 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
           continue
         for tr_next in children[tr].keys():
           if not tr_next.realized:
-            # max one reduceop per kernel
-            if tr_next.op in ReduceOps:
-              forced_realize = True
-              break
             st_childs = dedup([s for s in tr_next.srcs if s.base == tr])
             if len(st_childs) > 1:
               forced_realize = True
