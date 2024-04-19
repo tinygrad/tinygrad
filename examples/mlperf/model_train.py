@@ -279,6 +279,7 @@ def train_unet3d():
   PREPROCESSED_DIR = BASEDIR / ".." / "preprocessed"
   TRAIN_BEAM = getenv("TRAIN_BEAM", BEAM.value)
   EVAL_BEAM = getenv("EVAL_BEAM", BEAM.value)
+  BENCHMARK = getenv("BENCHMARK")
 
   config = {
     "num_epochs": NUM_EPOCHS,
@@ -351,6 +352,7 @@ def train_unet3d():
   
   if WANDB: wandb.init(config=config, project=PROJ_NAME)
 
+  step_times, start_epoch = [], 0
   is_successful, diverged = False, False
   start_eval_at, evaluate_every = START_EVAL_AT, EVALUATE_EVERY
   next_eval_at = start_eval_at
@@ -369,7 +371,7 @@ def train_unet3d():
 
     st = time.perf_counter()
 
-    for i, (x, y) in enumerate(tqdm(iterate(val=False, shuffle=True, bs=BS), total=SAMPLES_PER_EPOCH, desc=f"epoch {epoch}"), start=1):
+    for i, (x, y) in enumerate(tqdm(iterate(val=False, shuffle=True, bs=BS), total=SAMPLES_PER_EPOCH, desc=f"epoch {epoch}", disable=BENCHMARK), start=1):
       GlobalCounters.reset()
 
       x, y = Tensor(x).realize().shard(GPUS, axis=0), Tensor(y, requires_grad=False).shard(GPUS, axis=0)
@@ -378,11 +380,30 @@ def train_unet3d():
       pt = time.perf_counter()
 
       loss = loss.numpy().item()
+      cl = time.perf_counter()
 
-      tqdm.write(f"{i:5} {loss:5.2f} loss, {optim.lr.numpy()[0]:.6f} LR, {(pt - st) * 1000.0:7.2f} ms python, {GlobalCounters.mem_used / 1e9:.2f} GB used")
+      if BENCHMARK:
+        step_times.append(cl - st)
 
-      if WANDB: wandb.log({"lr": optim.lr.numpy(), "train/loss": loss, "train/python_time": pt - st})
-      st = pt
+      tqdm.write(
+        f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(pt - st) * 1000.0:7.2f} ms python, "
+        f"{loss:5.3f} loss, {optim.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used,"
+        f"{GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS"
+      )
+
+      if WANDB:
+        wandb.log({"lr": optim.lr.numpy(), "train/loss": loss, "train/step_time": cl - st, "train/python_time": pt - st,
+                   "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": epoch + (i + 1) / SAMPLES_PER_EPOCH})
+
+      st = cl
+
+      if i == BENCHMARK:
+        median_step_time = sorted(step_times)[(BENCHMARK + 1) // 2]  # in seconds
+        estimated_total_minutes = int(median_step_time * SAMPLES_PER_EPOCH * NUM_EPOCHS / 60)
+        print(f"Estimated training time: {estimated_total_minutes // 60}h{estimated_total_minutes % 60}m")
+        # if we are doing beam search, run the first eval too
+        if (TRAIN_BEAM or EVAL_BEAM) and epoch == start_epoch: break
+        return
 
     if epoch == next_eval_at:
       Tensor.training = False
