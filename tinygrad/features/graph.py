@@ -102,5 +102,8 @@ def graph_uops(uops:List[UOp]):
 SCHEDULES: List[ScheduleItem] = []
 def graph_schedule(schedule:List[ScheduleItem]):
   global SCHEDULES
-  if len(SCHEDULES): atexit.register(lambda: pickle.dump(SCHEDULES, open(f"{GRAPHPATH}.schedule.pkl", "wb")))
+  def _save():
+    print(f"saving {len(SCHEDULES)} schedule items to", fp:=f"{GRAPHPATH}.schedule.pkl")
+    pickle.dump(SCHEDULES, open(fp, "wb"))
+  if len(SCHEDULES) == 0: atexit.register(_save)
   SCHEDULES.extend(schedule)
