@@ -4,7 +4,7 @@ from PIL import Image
 from typing import Any, Callable, List, Optional, Tuple, Union
 
 import numpy as np
-import torch
+# import torch
 
 from tinygrad import Tensor, dtypes
 
@@ -330,7 +330,7 @@ def loader_process(q_in, q_out, X:Tensor, seed, coco):
 
       # faster
       X[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = img.tobytes()
-
+      
       # ideal
       #X[idx].assign(img.tobytes())   # NOTE: this is slow!
       q_out.put(idx)
@@ -343,6 +343,10 @@ def batch_load_retinanet(coco, bs=8, shuffle=False, seed=None, val = False):
   def enqueue_batch(num):
     for idx in range(num*bs, (num+1)*bs):
       img_idx = next(gen)
+      img,target = coco.__getitem__(img_idx)
+      if target['boxes'].numel() == 0:
+        # need to skip for train loops
+        img_idx = 7
       q_in.put((idx, img_idx, val))
       Y_IDX[idx] = img_idx
 
@@ -398,7 +402,6 @@ def batch_load_retinanet(coco, bs=8, shuffle=False, seed=None, val = False):
     for p in procs: p.join()
     shm.close()
     shm.unlink()
-
 if __name__ == '__main__':
   from extra.datasets.openimages_new import get_openimages, iterate
   ROOT = 'extra/datasets/open-images-v6TEST'
@@ -406,8 +409,10 @@ if __name__ == '__main__':
   coco_train = get_openimages(NAME,ROOT, 'train')
   with tqdm(total=len(coco_train)) as pbar:
     for x,y,c in batch_load_retinanet(coco_train):
+      x = x.to('cuda')
       pbar.update(x.shape[0])
-      print(x.shape, x.dtype, x.device)
+      # print(x.shape, x.dtype, x.device)
+      print(x.device)
       print(y)
       # for i in y:
 
