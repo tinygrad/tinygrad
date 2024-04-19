@@ -107,12 +107,12 @@ class HWComputeQueue:
 
   def wait(self, signal, value=0):
     self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(ctypes.addressof(from_mv(signal).contents)), *nvdata64_le(value),
-               (3 << 0) | (1 << 12) | (1 << 24)]
+               (3 << 0) | (1 << 12) | (1 << 24)] # ACQUIRE | ACQUIRE_SWITCH_TSG | PAYLOAD_SIZE_64BIT
     return self
 
-  def signal(self, signal, value=0):
+  def signal(self, signal, value=0, timestamp=False):
     self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(ctypes.addressof(from_mv(signal).contents)), *nvdata64_le(value),
-               (1 << 0) | (1 << 20) | (1 << 24)]
+               (1 << 0) | (1 << 20) | (1 << 24) | ((1 << 25) if timestamp else 0)] # RELEASE | RELEASE_WFI | PAYLOAD_SIZE_64BIT | RELEASE_TIMESTAMP
     self.q += [nvmethod(0, nv_gpu.NVC56F_NON_STALL_INTERRUPT, 1), 0x0]
     return self
 
@@ -121,7 +121,7 @@ class HWComputeQueue:
     self.signal(dev.compute_progress_signal, dev.compute_put_value + 1)
     for i,packet in enumerate(self.q): dev.cmdq[dev.cmdq_wptr//4 + i] = packet
     fifo_entry = dev.compute_put_value % dev.compute_gpfifo_entries
-    dev.compute_gpu_ring[fifo_entry] = ((dev.cmdq_page.base+dev.cmdq_wptr)//4 << 2) | (len(self.q) << 42) | (1 << 41) # | (1 << 63)
+    dev.compute_gpu_ring[fifo_entry] = ((dev.cmdq_page.base+dev.cmdq_wptr)//4 << 2) | (len(self.q) << 42) | (1 << 41)
     dev.compute_gpu_ring_controls.GPPut = (dev.compute_put_value + 1) % dev.compute_gpfifo_entries
     dev.compute_put_value += 1
     dev.gpu_mmio[0x90 // 4] = dev.compute_gpfifo_token
@@ -133,17 +133,17 @@ class HWCopyQueue:
   def copy(self, dest, src, copy_size):
     self.q += [nvmethod(4, nv_gpu.NVC6B5_OFFSET_IN_UPPER, 4), *nvdata64(src), *nvdata64(dest)]
     self.q += [nvmethod(4, nv_gpu.NVC6B5_LINE_LENGTH_IN, 1), copy_size]
-    self.q += [nvmethod(4, nv_gpu.NVC6B5_LAUNCH_DMA, 1), 0x182]
+    self.q += [nvmethod(4, nv_gpu.NVC6B5_LAUNCH_DMA, 1), 0x182] # TRANSFER_TYPE_NON_PIPELINED | DST_MEMORY_LAYOUT_PITCH | SRC_MEMORY_LAYOUT_PITCH
     return self
 
   def wait(self, signal, value=0):
     self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(ctypes.addressof(from_mv(signal).contents)), value, 0x0,
-               (3 << 0) | (1 << 12) | (1 << 24)]
+               (3 << 0) | (1 << 12) | (1 << 24)] # ACQUIRE | ACQUIRE_SWITCH_TSG | PAYLOAD_SIZE_64BIT
     return self
 
-  def signal(self, signal, value=0):
+  def signal(self, signal, value=0, timestamp=False):
     self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(ctypes.addressof(from_mv(signal).contents)), *nvdata64_le(value),
-               (1 << 0) | (1 << 20) | (1 << 24)]
+               (1 << 0) | (1 << 20) | (1 << 24) | ((1 << 25) if timestamp else 0)] # RELEASE | RELEASE_WFI | PAYLOAD_SIZE_64BIT | RELEASE_TIMESTAMP
     self.q += [nvmethod(0, nv_gpu.NVC56F_NON_STALL_INTERRUPT, 1), 0x0]
     return self
 
@@ -151,7 +151,7 @@ class HWCopyQueue:
     self.signal(dev.dma_progress_signal, dev.dma_put_value + 1)
     for i,packet in enumerate(self.q): dev.cmdq[dev.cmdq_wptr//4 + i] = packet
     fifo_entry = dev.dma_put_value % dev.dma_gpfifo_entries
-    dev.dma_gpu_ring[fifo_entry] = ((dev.cmdq_page.base+dev.cmdq_wptr)//4 << 2) | (len(self.q) << 42) #| (1 << 41) # | (1 << 63)
+    dev.dma_gpu_ring[fifo_entry] = ((dev.cmdq_page.base+dev.cmdq_wptr)//4 << 2) | (len(self.q) << 42)
     dev.dma_gpu_ring_controls.GPPut = (dev.dma_put_value + 1) % dev.dma_gpfifo_entries
     dev.dma_put_value += 1
     dev.gpu_mmio[0x90 // 4] = dev.dma_gpfifo_token
@@ -238,11 +238,18 @@ class NVProgram:
     for i in range(len(args)): kernargs += [*nvdata64_le(args[i].base)]
     for i in range(len(vals)): kernargs += [vals[i]]
 
+    st, en = self.device._get_signal(), self.device._get_signal()
     queue = HWComputeQueue()
     queue.wait(self.device.dma_progress_signal, self.device.dma_put_value)
     queue.wait(self.device.compute_progress_signal, self.device.compute_put_value)
+    if wait: queue.signal(st, timestamp=True)
     queue.copy_from_cpu(kernargs_ptr + QMD_SIZE, self.constbuffer_0 + kernargs)
-    queue.exec(self, kernargs_ptr, global_size, local_size).submit(self.device)
+    queue.exec(self, kernargs_ptr, global_size, local_size)
+    if wait: queue.signal(en, timestamp=True)
+    queue.submit(self.device)
+    if wait:
+      self.device._wait_signal(self.device.compute_progress_signal, self.device.compute_put_value)
+      return (en[1]-st[1])/1e9
 
 class NVAllocator(LRUAllocator):
   def __init__(self, device:NVDevice):
