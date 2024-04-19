@@ -52,4 +52,5 @@ quickstart.py
 .hypothesis
 weights
 *.lprof
+*.pkl
 site/
