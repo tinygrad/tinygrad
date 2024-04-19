@@ -6,7 +6,7 @@ from typing import Any, Callable, List, Optional, Tuple, Union
 import numpy as np
 # import torch
 
-from tinygrad import Tensor, dtypes
+from tinygrad import Tensor, dtypes, Device
 
 from pycocotools import mask as coco_mask
 from pycocotools.coco import COCO
@@ -38,7 +38,7 @@ class ConvertCocoPolysToMask(object):
     boxes[:, 1::2] = boxes[:, 1::2].clip(0, h)
     # print('BOXES:POSTPOST', boxes)
     classes = [obj["category_id"] for obj in anno]
-    classes = np.array(classes, dtype=np.int64)
+    classes = np.array(classes, dtype=np.int16)
 
     keep = (boxes[:, 3] > boxes[:, 1]) & (boxes[:, 2] > boxes[:, 0])
     boxes = boxes[keep]
@@ -47,9 +47,20 @@ class ConvertCocoPolysToMask(object):
 
     target = {}
     # print('CONVERTINGTTTT')
-    target["boxes"] = Tensor(boxes, requires_grad=False)#.realize()
-    # print('BOXES:TENSCONV', target["boxes"].numpy())
-    target["labels"] = Tensor(classes, requires_grad=False)#.realize()
+    # target["boxes"] = Tensor(boxes, requires_grad=False)#.realize()
+    # # print('BOXES:TENSCONV', target["boxes"].numpy())
+    # target["labels"] = Tensor(classes, requires_grad=False)#.realize()
+ # max_pad = 500
+        # n = bbox.shape[0]
+        # boxes_padded = bbox.pad((((0,max_pad-n), None)),0)
+        # labels_padded = t['labels'].reshape(-1,1).pad((((0,max_pad-n), None)),-1).reshape(-1)
+    # print(boxes.shape, classes.shape)
+    boxes = resize_boxes_np(boxes,image.size[::-1], (800,800))
+    pad_sz = MAX_PAD - boxes.shape[0]
+    boxes = np.pad(boxes, pad_width=((0,pad_sz), (0,0)))
+    classes = np.pad(classes, pad_width=(0,pad_sz), constant_values=-1)
+    target["boxes"] = boxes
+    target["labels"] = classes
     target["image_id"] = image_id
     # print('FINISHED_CONVERTING')
 
@@ -135,6 +146,27 @@ def resize_boxes(boxes: Tensor, original_size: List[int], new_size: List[int]) -
   ans = Tensor.stack((xmin, ymin, xmax, ymax), dim=1)#.cast(dtypes.float32)
   # print('RESIZE_ANS', ans.shape)
   ans.requires_grad = False
+  return ans
+def resize_boxes_np(boxes, original_size: List[int], new_size: List[int]):
+  ratios = [
+      s / s_orig
+      for s, s_orig in zip(new_size, original_size)
+  ]
+  ratio_height, ratio_width = ratios
+
+  xmin, ymin, xmax, ymax = boxes[:, 0], boxes[:, 1], \
+                          boxes[:, 2], boxes[:, 3]
+
+  xmin = xmin * ratio_width
+  xmax = xmax * ratio_width
+  ymin = ymin * ratio_height
+  ymax = ymax * ratio_height
+  # print('UNBIND SHAPE_POST:', xmin.shape, xmax.shape, ymin.shape, ymax.shape)
+  # ans = Tensor.stack((xmin, ymin, xmax, ymax), dim=1)#.cast(dtypes.float32)
+  ans = np.stack((xmin, ymin, xmax, ymax), axis=1)
+
+  # print('RESIZE_ANS', ans.shape)
+  # ans.requires_grad = False
   return ans
 
 import torchvision.transforms.functional as F
@@ -267,6 +299,7 @@ from multiprocessing import Queue, Process, shared_memory, connection, Lock, cpu
 import pickle, random
 from tinygrad.helpers import getenv, prod, Timing, Context
 from tqdm import tqdm
+MAX_PAD = 500
 class MyQueue:
   def __init__(self, multiple_readers=True, multiple_writers=True):
     self._reader, self._writer = connection.Pipe(duplex=False)
@@ -295,7 +328,7 @@ def shuffled_indices(n, seed=None):
 
 def resize_img(img):
   return img.resize(SIZE, resample = Image.BILINEAR)
-def loader_process(q_in, q_out, X:Tensor, seed, coco):
+def loader_process(q_in, q_out, X:Tensor, seed, coco, YB:Tensor, YL:Tensor):
   import signal
   signal.signal(signal.SIGINT, lambda _, __: exit(0))
 
@@ -330,7 +363,8 @@ def loader_process(q_in, q_out, X:Tensor, seed, coco):
 
       # faster
       X[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = img.tobytes()
-      
+      YB[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = target['boxes'].tobytes()
+      YL[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = target['labels'].tobytes()
       # ideal
       #X[idx].assign(img.tobytes())   # NOTE: this is slow!
       q_out.put(idx)
@@ -344,7 +378,7 @@ def batch_load_retinanet(coco, bs=8, shuffle=False, seed=None, val = False):
     for idx in range(num*bs, (num+1)*bs):
       img_idx = next(gen)
       img,target = coco.__getitem__(img_idx)
-      if target['boxes'].numel() == 0:
+      if target['boxes'].size == 0:
         # need to skip for train loops
         img_idx = 7
       q_in.put((idx, img_idx, val))
@@ -364,24 +398,33 @@ def batch_load_retinanet(coco, bs=8, shuffle=False, seed=None, val = False):
       gotten[num] += 1
       if gotten[num] == bs: break
     gotten[num] = 0
-    return X[num*bs:(num+1)*bs], Y_IDX[num*bs:(num+1)*bs], Cookie(num)
+    return X[num*bs:(num+1)*bs], Y_IDX[num*bs:(num+1)*bs], YB[num*bs:(num+1)*bs], YL[num*bs:(num+1)*bs], Cookie(num)
     # return X[num*bs:(num+1)*bs], Cookie(num)
   
   q_in, q_out = Queue(), Queue()
   sz = (bs*BATCH_COUNT, 800, 800, 3)
+  bsz = (bs*BATCH_COUNT, MAX_PAD, 4)
+  lsz = (bs*BATCH_COUNT, MAX_PAD)
   if os.path.exists("/dev/shm/retinanet_X"): os.unlink("/dev/shm/retinanet_X")
   shm = shared_memory.SharedMemory(name="retinanet_X", create=True, size=prod(sz))
+  if os.path.exists("/dev/shm/retinanet_YB"): os.unlink("/dev/shm/retinanet_YB")
+  bshm = shared_memory.SharedMemory(name="retinanet_YB", create=True, size=prod(bsz))
+  if os.path.exists("/dev/shm/retinanet_YL"): os.unlink("/dev/shm/retinanet_YL")
+  lshm = shared_memory.SharedMemory(name="retinanet_YL", create=True, size=prod(lsz))
+
   procs = []
 
   try:
     # disk:shm is slower
     #X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:shm:{shm.name}")
     X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:/dev/shm/retinanet_X")
+    YB = Tensor.empty(*bsz, dtype=dtypes.default_float, device=f"disk:/dev/shm/retinanet_YB")
+    YL = Tensor.empty(*lsz, dtype=dtypes.int16, device=f"disk:/dev/shm/retinanet_YL")
     Y_IDX = [None] * (bs*BATCH_COUNT)
     # Y = [None] * (bs*BATCH_COUNT)
 
     for _ in range(cpu_count()):
-      p = Process(target=loader_process, args=(q_in, q_out, X, seed, coco))
+      p = Process(target=loader_process, args=(q_in, q_out, X, seed, coco, YB, YL))
       p.daemon = True
       p.start()
       procs.append(p)
@@ -402,18 +445,26 @@ def batch_load_retinanet(coco, bs=8, shuffle=False, seed=None, val = False):
     for p in procs: p.join()
     shm.close()
     shm.unlink()
+    bshm.close()
+    bshm.unlink()
+    lshm.close()
+    lshm.unlink()
 if __name__ == '__main__':
   from extra.datasets.openimages_new import get_openimages, iterate
   ROOT = 'extra/datasets/open-images-v6TEST'
   NAME = 'openimages-mlperf'
   coco_train = get_openimages(NAME,ROOT, 'train')
+  GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
+  print(f"Training on {GPUS}")
+  for x in GPUS: Device[x]
   with tqdm(total=len(coco_train)) as pbar:
-    for x,y,c in batch_load_retinanet(coco_train):
-      x = x.to('cuda')
+    for x, y, yb, yl, c in batch_load_retinanet(coco_train, bs=2):
+      x = x.shard(GPUS,axis=0).realize()
+      yb = yb.shard(GPUS,axis=0).realize()
       pbar.update(x.shape[0])
       # print(x.shape, x.dtype, x.device)
-      print(x.device)
-      print(y)
+      # print(x.device)
+      # print(y)
       # for i in y:
 
 

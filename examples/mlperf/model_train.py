@@ -359,11 +359,28 @@ def train_retinanet():
     x /= image_std
     return x#.realize()
   def data_get(it, coco):
-    print('DATA_GET_START')
-    x, y, cookie = next(it)
+    # print('DATA_GET_START')
+    x, y, yb, yl, cookie = next(it)
+    mi_TEMP = Tensor.zeros((2,120087), dtype=dtypes.int)
+    return x.shard(GPUS, axis=0), yl.shard(GPUS, axis=0)[(Tensor.arange(BS).reshape(-1,1), mi_TEMP)], \
+      yb.shard(GPUS, axis=0)[(Tensor.arange(BS).reshape(-1,1), mi_TEMP)],\
+        mi_TEMP.shard(GPUS, axis=0), cookie
+    match_idxs, labels, boxes = [], [], []
+    for box, label in zip(yb.to(GPUS[0]), yl.to(GPUS[0])):
+      m_idx = func(box).realize()
+      print('midx', m_idx.shape)
+      tbm = box[m_idx]
+      tlm = label[m_idx]
+      match_idxs.append(m_idx)
+      boxes.append(tbm)
+      labels.append(tlm)
+    return x.shard(GPUS, axis=0), Tensor.stack(labels).shard(GPUS, axis=0), \
+    Tensor.stack(boxes).shard(GPUS, axis=0), Tensor.stack(match_idxs).shard(GPUS, axis=0), cookie
     x.realize()
     print('DATA_NEXT_ITER')
     match_idxs, labels, boxes = [], [], []
+    for bb, ll, i in zip(yb, yl, y):
+      pass
     for i in y:
       print('get_item')
       img, target = coco.__getitem__(i)
@@ -408,7 +425,7 @@ def train_retinanet():
       mdl_reg_loss = lambda r, y, m, b_t: model.head.regression_head.loss(r,y,ANCHORS_STACK, m, b_t)
       mdl_class_loss = lambda c, y,m, l_t: model.head.classification_head.loss(c,y,m, l_t)
     batch_loader_train = batch_load_retinanet(coco_train, bs=BS, val=False, shuffle=False)
-    it = iter(tqdm(batch_loader_train, total=len(coco_train), desc=f"epoch {epoch}"))
+    it = iter(tqdm(batch_loader_train, total=len(coco_train)//BS, desc=f"epoch {epoch}"))
     i, proc = 0, data_get(it, coco_train)
     st = time.perf_counter()
     while proc is not None:
