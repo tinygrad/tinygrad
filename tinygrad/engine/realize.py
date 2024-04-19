@@ -13,7 +13,7 @@ class ExecItem:
   prg: Runner
   rawbufs: List[Optional[Buffer]]
   def run(self, var_vals:Optional[Dict[Variable, int]]=None, wait=False, jit=False, do_update_stats=True) -> Optional[float]:
-    et = self.prg([cast(Buffer, x).ensure_allocated() for x in self.rawbufs], var_vals if var_vals is not None else {}, wait=wait)
+    et = self.prg([cast(Buffer, x).ensure_allocated() for x in self.rawbufs], var_vals if var_vals is not None else {}, wait=wait or DEBUG >= 2)
     if do_update_stats:
       GlobalCounters.kernel_count += 1
       GlobalCounters.global_ops += (op_estimate:=sym_infer(self.prg.op_estimate, var_vals))

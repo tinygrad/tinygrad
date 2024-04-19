@@ -66,7 +66,7 @@ class BufferCopy(Runner):
     assert dest.size == src.size and dest.dtype == src.dtype, f"buffer copy mismatch, {dest.size} != {src.size}, {dest.dtype} != {src.dtype}"
     st = time.perf_counter()
     self.copy(dest, src)
-    if wait or DEBUG >= 2:
+    if wait:
       Device[dest.device].synchronize()
       return time.perf_counter() - st
 
@@ -177,7 +177,7 @@ class CompiledRunner(Runner):
     lra = {}
     if global_size: lra['global_size'] = global_size
     if local_size: lra['local_size'] = local_size
-    return self.clprg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k] for k in self.vars), wait=wait or DEBUG>=2)
+    return self.clprg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k] for k in self.vars), wait=wait)
 
 class MultiDeviceJITGraph(Runner):
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False) -> Optional[float]:
