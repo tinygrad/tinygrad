@@ -2,28 +2,39 @@ from typing import List, Dict, Optional, cast, Generator, DefaultDict, Tuple, It
 from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.dtype import DType
-from tinygrad.helpers import colored, getenv, dedup, DEBUG
+from tinygrad.helpers import colored, getenv, dedup, DEBUG, GlobalCounters, ansilen
 from tinygrad.ops import ScheduleItem, BufferOps, LoadOps, copy_ast
-from tinygrad.device import Runner, Device, BufferCopy, BufferXfer, update_stats
+from tinygrad.device import Runner, Device, BufferCopy, BufferXfer
 from tinygrad.buffer import Buffer
-from tinygrad.shape.symbolic import Variable
+from tinygrad.shape.symbolic import Variable, sym_infer
 
 @dataclass(frozen=True)
 class ExecItem:
   prg: Runner
   rawbufs: List[Optional[Buffer]]
-  def run(self, var_vals:Optional[Dict[Variable, int]]=None, wait=False, jit=False):
-    self.prg([cast(Buffer, x).ensure_allocated() for x in self.rawbufs], var_vals if var_vals is not None else {}, wait=wait, jit=jit)
+  def run(self, var_vals:Optional[Dict[Variable, int]]=None, wait=False, jit=False, do_update_stats=True) -> Optional[float]:
+    et = self.prg([cast(Buffer, x).ensure_allocated() for x in self.rawbufs], var_vals if var_vals is not None else {}, wait=wait or DEBUG >= 2)
+    if do_update_stats:
+      GlobalCounters.kernel_count += 1
+      GlobalCounters.global_ops += (op_estimate:=sym_infer(self.prg.op_estimate, var_vals))
+      GlobalCounters.global_mem += (mem_estimate:=sym_infer(self.prg.mem_estimate, var_vals))
+      if et is not None: GlobalCounters.time_sum_s += et
+      if DEBUG >= 2:
+        ptm = (colored(f"{et*1e3:9.2f}ms", "yellow") if et > 0.01 else f"{et*1e6:9.2f}us") if et is not None else ""
+        print(f"{colored(f'*** {self.prg.dname[:7]:7s} {GlobalCounters.kernel_count:4d}', 'magenta' if jit else ('green' if self.prg.first_run else None))} {self.prg.display_name+' '*(38-ansilen(self.prg.display_name))} arg {len(self.rawbufs):3d} mem {GlobalCounters.mem_used/1e9:5.2f} GB " +  # noqa: E501
+              (str() if et is None else f"tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))  # noqa: E501
+      self.prg.first_run = False
+    return et
 
 class CustomOp(Runner):
   def __init__(self, fxn):
     self.fxn = fxn
-    super().__init__()
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False): self.fxn(*rawbufs)
+    super().__init__(self.fxn.__name__, "CUSTOM", 0, 0)
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False): self.fxn(*rawbufs)
 
 class EmptyOp(Runner):
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False):
-    update_stats(colored(f"empty {rawbufs[0].size:10d} {rawbufs[0].dtype}", "yellow"), 0, 0, {}, jit, 1, device=rawbufs[0].device)
+  def __init__(self, buf:Buffer): super().__init__(colored(f"empty {buf.size:10d} {buf.dtype}", "yellow"), buf.device)
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False): pass
 
 def lower_schedule_item(si:ScheduleItem) -> Runner:
   assert len(set(x.device for x in si.outputs+si.inputs)) == 1 or si.ast[0].op is LoadOps.COPY
@@ -31,11 +42,13 @@ def lower_schedule_item(si:ScheduleItem) -> Runner:
   assert len(si.ast) == 1 and len(si.outputs) == 1, "only ASTRunner supports multioutput"
   out, ast = si.outputs[0], si.ast[0]
   if ast.op is LoadOps.COPY:
+    kernel_type = BufferCopy
     if hasattr(Device[out.device].allocator, 'transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]:
-      return Device[si.outputs[0].device].get_runner(copy_ast(ast.arg)) if getenv("USE_COPY_KERNEL") else BufferXfer()
-    return BufferCopy()
+      if getenv("USE_COPY_KERNEL"): return Device[out.device].get_runner(copy_ast(ast.arg))
+      kernel_type = BufferXfer
+    return kernel_type(ast.arg, out.device, si.inputs[0].device)
   if ast.op is LoadOps.CUSTOM: return CustomOp(ast.arg)
-  if ast.op is LoadOps.EMPTY: return EmptyOp()
+  if ast.op is LoadOps.EMPTY: return EmptyOp(out)
   raise RuntimeError(f"don't know how to lower {ast}")
 
 def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, None]:
