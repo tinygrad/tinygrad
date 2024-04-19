@@ -91,7 +91,8 @@ def _schedule_group(outs:Tuple[LazyBuffer, ...], realizes:Dict[LazyBuffer, None]
       output_view, vv = output_view.simplify().unbind()
       if vv: var_vals.update(vv)
       ast.append(LazyOp(BufferOps.STORE, (op, ), MemBuffer(i, out.dtype, output_view)))
-  return _LBScheduleItem(tuple(ast), outs, tuple(inputs), var_vals, [x[0].metadata for x in cache if x[0].metadata is not None])
+  return _LBScheduleItem(tuple(ast), outs, tuple(inputs), var_vals,
+                         [x[0].metadata for x in cache if x[0].metadata is not None and x[0] not in inputs])
 
 # recursively search the entire graph for all LazyBuffers, insert realizes after expands
 def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[LazyBuffer, None],
