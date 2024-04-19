@@ -55,6 +55,7 @@ class BenchmarkResnetTrain(unittest.TestCase):
     return f"{name} x{(bs, cin, xy, xy)}", [layer], cin, xy
   def _test_layer(self, name, layer, cin, xy):
     optim = SGD(get_parameters(layer), bs / 128 * 1.0)  # need sgd for some params but not consequential for benchmarking
+    Tensor.corealize([t.assign(t) for t in get_parameters(layer)])
 
     JITCNT = getenv("JITCNT", 1)
     Tensor.training = True
