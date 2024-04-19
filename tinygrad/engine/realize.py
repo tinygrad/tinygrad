@@ -29,7 +29,7 @@ class ExecItem:
 class CustomOp(Runner):
   def __init__(self, fxn):
     self.fxn = fxn
-    super().__init__(self.fxn.__name__, "", 0, 0)
+    super().__init__(self.fxn.__name__, "CUSTOM", 0, 0)
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False): self.fxn(*rawbufs)
 
 class EmptyOp(Runner):
