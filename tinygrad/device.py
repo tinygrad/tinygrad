@@ -1,9 +1,8 @@
 from __future__ import annotations
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any, List, Optional, Dict, Tuple, ClassVar, NamedTuple
+from typing import TYPE_CHECKING, Any, List, Optional, Dict, Tuple, ClassVar, NamedTuple, cast
 import importlib, inspect, functools, pathlib, time, ctypes, os
-from tinygrad.helpers import ansilen, prod, getenv, colored, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put
-from tinygrad.helpers import DEBUG, BEAM, NOOPT, GlobalCounters
+from tinygrad.helpers import prod, getenv, colored, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put, DEBUG, BEAM, NOOPT
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.ops import LazyOp, get_lazyop_info
 from tinygrad.buffer import Buffer, BufferOptions
@@ -40,30 +39,20 @@ Device = _Device()
 # **************** base Runner + helpers ****************
 
 class Runner:
-  def __init__(self):
-    self.op_estimate:sint = 0
-    self.mem_estimate:sint = 0
+  def __init__(self, display_name:str, dname:str, op_estimate:sint=0, mem_estimate:sint=0):
+    self.first_run, self.display_name, self.dname, self.op_estimate, self.mem_estimate = True, display_name, dname, op_estimate, mem_estimate
   def exec(self, rawbufs:List[Buffer], var_vals:Optional[Dict[Variable, int]]=None) -> Optional[float]:
     return self(rawbufs, {} if var_vals is None else var_vals)
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False) -> Optional[float]:
     raise NotImplementedError("override this")
-
-def update_stats(name:str, op_estimate:sint, mem_estimate:sint, var_vals: Optional[Dict[Variable, int]], et: Optional[float], buf_count:int, jit=False, num_kernels=1, lra: Optional[Dict]=None, device:str="", first_run=False):  # noqa: E501
-  if var_vals is None: var_vals = {}
-  op_estimate = sym_infer(op_estimate, var_vals)
-  mem_estimate = sym_infer(mem_estimate, var_vals)
-  GlobalCounters.kernel_count += num_kernels
-  GlobalCounters.global_ops += op_estimate
-  GlobalCounters.global_mem += mem_estimate
-  if et is not None: GlobalCounters.time_sum_s += et
-  if DEBUG >= 2:
-    ptm = (colored(f"{et*1e3:9.2f}ms", "yellow") if et > 0.01 else f"{et*1e6:9.2f}us") if et is not None else ""
-    print(f"{colored(f'*** {device[:7]:7s} {GlobalCounters.kernel_count:4d}', ('magenta' if num_kernels == 1 else 'CYAN') if jit else ('green' if first_run else None))} {name+' '*(38-ansilen(name))} arg {buf_count:3d} mem {GlobalCounters.mem_used/1e9:5.2f} GB " +  # noqa: E501
-          (str() if et is None else f"tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))  # noqa: E501
 
 # **************** Buffer / Allocator ****************
 
 class BufferCopy(Runner):
+  def __init__(self, total_sz, dest_device, src_device):
+    if total_sz >= 1e6: name = f"{type(self).__name__[6:].lower()} {total_sz/1e6:7.2f}M, {dest_device[:7]:>7s} <- {src_device[:7]:7s}"
+    else: name = f"{type(self).__name__[6:].lower()} {total_sz:8d}, {dest_device[:7]:>7s} <- {src_device[:7]:7s}"
+    super().__init__(colored(name, "yellow"), dest_device, 0, total_sz)
   def copy(self, dest, src):
     if src.device.startswith("DISK") and hasattr(dest.allocator, 'copy_from_fd') and src.nbytes >= 4096 and hasattr(src.allocator.device, 'fd'):
       dest.allocator.copy_from_fd(dest._buf, src.allocator.device.fd, src._buf.offset, src.nbytes)
@@ -72,19 +61,14 @@ class BufferCopy(Runner):
       src.allocator.copyout(dest.allocator.as_buffer(dest._buf), src._buf)
     else:
       dest.copyin(src.as_buffer(allow_zero_copy=True))  # may allocate a CPU buffer depending on allow_zero_copy
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False):
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False):
     dest, src = rawbufs[0:2]
     assert dest.size == src.size and dest.dtype == src.dtype, f"buffer copy mismatch, {dest.size} != {src.size}, {dest.dtype} != {src.dtype}"
     st = time.perf_counter()
     self.copy(dest, src)
-    et = None
-    if wait or DEBUG >= 2:
+    if wait:
       Device[dest.device].synchronize()
-      et = time.perf_counter() - st
-    total_sz = dest.size*dest.dtype.itemsize
-    if total_sz >= 1e6: name = f"{type(self).__name__[6:].lower()} {total_sz/1e6:7.2f}M, {dest.device[:7]:>7s} <- {src.device[:7]:7s}"
-    else: name = f"{type(self).__name__[6:].lower()} {total_sz:8d}, {dest.device[:7]:>7s} <- {src.device[:7]:7s}"
-    update_stats(colored(name, "yellow"), 0, total_sz, {}, et, 2, jit, device=dest.device)
+      return time.perf_counter() - st
 
 class BufferXfer(BufferCopy):
   def copy(self, dest, src):
@@ -157,17 +141,15 @@ class Compiler:
 class CompiledRunner(Runner):
   def __init__(self, name:str, prg:str, dname:str, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None,
                variables:Optional[List[Variable]]=None, op_estimate:sint=0, mem_estimate:sint=0, precompiled:Optional[bytes]=None, outcount:int=1):
-    super().__init__()
     if DEBUG >= 4: print(prg)
     if global_size is not None: global_size = global_size + [1]*(3-len(global_size))
     if local_size is not None: local_size = local_size + [1]*(3-len(local_size))
-    self.name, self.display_name, self.prg, self.dname, self.global_size, self.local_size, self.first_run = \
-      to_function_name(name), name, prg, dname, global_size, local_size, True
-    assert self.device.compiler is not None, "compiler is required to make an AST kernel"
-    lib:bytes = precompiled if precompiled is not None else self.device.compiler.compile_cached(prg)
-    self.lib, self.clprg, self.outcount = lib, self.device.runtime(self.name, lib), outcount
+    self.name, self.prg, self.global_size, self.local_size, self.first_run = \
+      to_function_name(name), prg, global_size, local_size, True
+    lib:bytes = precompiled if precompiled is not None else cast(Compiler, Device[dname].compiler).compile_cached(prg)
+    self.lib, self.clprg, self.outcount = lib, Device[dname].runtime(self.name, lib), outcount
     self.vars: List[Variable] = [] if variables is None else variables
-    self.op_estimate, self.mem_estimate = op_estimate, mem_estimate
+    super().__init__(name, dname, op_estimate, mem_estimate)
 
   def to_other_device(self, dname:str):
     return CompiledRunner(self.display_name, self.prg, dname, self.global_size, self.local_size,
@@ -185,7 +167,7 @@ class CompiledRunner(Runner):
     local_size = [sym_infer(sz, var_vals) for sz in self.local_size] if self.local_size is not None else self.local_size
     return global_size, local_size
 
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False, do_update_stats=True) -> Optional[float]:
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False) -> Optional[float]:
     global_size, local_size = self.launch_dims(var_vals)
     if global_size is not None and local_size is None and all_int(self.global_size): # type: ignore[arg-type]
       # TODO: this is copied from get_program
@@ -195,14 +177,10 @@ class CompiledRunner(Runner):
     lra = {}
     if global_size: lra['global_size'] = global_size
     if local_size: lra['local_size'] = local_size
-    et = self.clprg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k] for k in self.vars), wait=wait or DEBUG>=2)
-    if do_update_stats: update_stats(self.display_name, self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit,
-                                     lra=lra, device=self.dname, first_run=self.first_run)
-    self.first_run = False
-    return et
+    return self.clprg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k] for k in self.vars), wait=wait)
 
 class MultiDeviceJITGraph(Runner):
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False) -> Optional[float]:
     raise NotImplementedError("override this")
 
 method_cache: Dict[Tuple[str, Tuple[LazyOp, ...], bool], CompiledRunner] = {}

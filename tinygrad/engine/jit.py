@@ -109,7 +109,7 @@ class TinyJit(Generic[ReturnType]):
       # jit exec
       assert self.expected_names == expected_names and self.expected_lbs == expected_lbs, "args mismatch in JIT"
       for (j,i),input_idx in self.input_replace.items(): self.jit_cache[j].rawbufs[i] = input_rawbuffers[input_idx]
-      if DEBUG >= 1: print(f"jit execs {len(self.jit_cache)} kernels")
+      if DEBUG >= 1 and len(self.jit_cache) >= 10: print(f"jit execs {len(self.jit_cache)} kernels")
       for ei in self.jit_cache: ei.run(var_vals, jit=True)
     elif self.cnt == 1:
       # jit capture

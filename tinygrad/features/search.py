@@ -41,7 +41,7 @@ def _time_program(variables:List[Variable], outcount:int, rdev:Compiled, lib:byt
   for _ in range(cnt):
     if clear_l2:
       with Context(DEBUG=0, BEAM=0, CACHECOLLECTING=0): Tensor.ones(1024,1024).contiguous().realize()
-    tms.append(cast(float, car(rawbufs, var_vals, wait=True, do_update_stats=False))*factor)
+    tms.append(cast(float, car(rawbufs, var_vals, wait=True))*factor)
     if early_stop is not None and early_stop < tms[-1]: break
   return tms
 
