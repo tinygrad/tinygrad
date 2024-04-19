@@ -13,7 +13,7 @@ class ExecItem:
   prg: Runner
   rawbufs: List[Optional[Buffer]]
   def run(self, var_vals:Optional[Dict[Variable, int]]=None, wait=False, jit=False, do_update_stats=True) -> Optional[float]:
-    et = self.prg([cast(Buffer, x).ensure_allocated() for x in self.rawbufs], var_vals if var_vals is not None else {}, wait=wait, jit=jit)
+    et = self.prg([cast(Buffer, x).ensure_allocated() for x in self.rawbufs], var_vals if var_vals is not None else {}, wait=wait)
     if do_update_stats:
       GlobalCounters.kernel_count += 1
       GlobalCounters.global_ops += (op_estimate:=sym_infer(self.prg.op_estimate, var_vals))
@@ -30,11 +30,11 @@ class CustomOp(Runner):
   def __init__(self, fxn):
     self.fxn = fxn
     super().__init__(self.fxn.__name__, "CUSTOM", 0, 0)
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False): self.fxn(*rawbufs)
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False): self.fxn(*rawbufs)
 
 class EmptyOp(Runner):
   def __init__(self, buf:Buffer): super().__init__(colored(f"empty {buf.size:10d} {buf.dtype}", "yellow"), buf.device)
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False): pass
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False): pass
 
 def lower_schedule_item(si:ScheduleItem) -> Runner:
   assert len(set(x.device for x in si.outputs+si.inputs)) == 1 or si.ast[0].op is LoadOps.COPY

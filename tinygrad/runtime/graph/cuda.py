@@ -71,7 +71,7 @@ class CUDAGraph(MultiDeviceJITGraph):
     for (j,i) in self.input_replace.keys(): self.jit_cache[j].rawbufs[i] = None
     super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), "CUDA", *get_jit_stats(jit_cache))
 
-  def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
+  def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False) -> Optional[float]:
     # Update rawbuffers in the c_args struct.
     for (j,i),input_idx in self.input_replace.items():
       if not self.updatable_nodes[j][3]: setattr(self.updatable_nodes[j][2], f'f{i}', input_rawbuffers[input_idx]._buf)

@@ -55,7 +55,7 @@ class MetalGraph(Runner):
     for (j,i) in self.input_replace.keys(): self.jit_cache[j].rawbufs[i] = None
     super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), device.dname, *get_jit_stats(jit_cache))
 
-  def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
+  def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False) -> Optional[float]:
     # NOTE: you at least can't update the ints if this is running
     if self.command_buffer is not None and self.command_buffer in self.device.mtl_buffers_in_flight: wait_check(self.command_buffer)
     all_resources = self.all_resources + [x._buf for x in input_rawbuffers]

@@ -115,7 +115,7 @@ class HSAGraph(MultiDeviceJITGraph):
     for (j,i) in self.input_replace.keys(): self.jit_cache[j].rawbufs[i] = None
     super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), "HSA", *get_jit_stats(jit_cache))
 
-  def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
+  def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False) -> Optional[float]:
     # Wait and restore signals
     hsa.hsa_signal_wait_scacquire(self.finish_signal, hsa.HSA_SIGNAL_CONDITION_LT, 1, (1 << 64) - 1, hsa.HSA_WAIT_STATE_ACTIVE)
     for sig in self.signals_to_reset: hsa.hsa_signal_silent_store_relaxed(sig, 1)
