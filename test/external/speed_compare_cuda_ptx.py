@@ -3,7 +3,7 @@ from tinygrad import Device
 from tinygrad.device import CompiledRunner
 from tinygrad.helpers import to_function_name, getenv, colored
 from extra.optimization.helpers import load_worlds, ast_str_to_lin
-from tinygrad.features.search import bufs_from_lin
+from tinygrad.codegen.search import bufs_from_lin
 from tinygrad.runtime.ops_cuda import PTXCompiler
 
 # move to helpers?

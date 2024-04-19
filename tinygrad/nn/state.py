@@ -5,7 +5,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap, GlobalCounters
 from tinygrad.shape.view import strides_for_shape
-from tinygrad.features.multi import MultiLazyBuffer
+from tinygrad.multi import MultiLazyBuffer
 
 safe_dtypes = {"BOOL":dtypes.bool, "I8":dtypes.int8, "U8":dtypes.uint8, "I16":dtypes.int16, "U16":dtypes.uint16, "I32":dtypes.int, "U32":dtypes.uint,
                "I64":dtypes.int64, "U64":dtypes.uint64, "F16":dtypes.float16, "BF16":dtypes.bfloat16, "F32":dtypes.float32, "F64":dtypes.float64}

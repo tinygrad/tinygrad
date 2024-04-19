@@ -10,7 +10,7 @@ from tinygrad.dtype import DType, dtypes, ImageDType, ConstType, least_upper_flo
 from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, fully_flatten, argsort, IMAGE, DEBUG, WINO, THREEFRY
 from tinygrad.helpers import getenv
 from tinygrad.lazy import LazyBuffer
-from tinygrad.features.multi import MultiLazyBuffer
+from tinygrad.multi import MultiLazyBuffer
 from tinygrad.ops import LoadOps
 from tinygrad.buffer import Buffer, BufferOptions
 from tinygrad.device import Device
@@ -1067,7 +1067,7 @@ for device in Device._devices: setattr(Tensor, f"{device.lower()}", functools.pa
 
 if IMAGE:
   # if IMAGE>0 we install these replacement functions in Tensor (hack!)
-  from tinygrad.features.image import image_conv2d, image_dot
+  from tinygrad.image import image_conv2d, image_dot
   setattr(Tensor, "conv2d", image_conv2d)
   setattr(Tensor, "dot", image_dot)
 

@@ -4,7 +4,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.ops import LoadOps, get_lazyop_info
 from tinygrad.device import Device, Compiled
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.features.search import time_linearizer, beam_search, bufs_from_lin
+from tinygrad.codegen.search import time_linearizer, beam_search, bufs_from_lin
 from tinygrad.helpers import ansilen, DEBUG, getenv
 from tinygrad.shape.symbolic import sym_infer
 from tinygrad.dtype import dtypes

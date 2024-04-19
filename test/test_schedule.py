@@ -8,7 +8,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.ops import LoadOps
 from tinygrad.helpers import DEBUG, GRAPH, flatten
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.features.graph import print_tree, realized_lazybuffer
+from tinygrad.engine.graph import print_tree, realized_lazybuffer
 from tinygrad.engine.schedule import create_schedule
 from tinygrad import nn, dtypes
 from test.helpers import is_dtype_supported
@@ -286,7 +286,7 @@ class TestSchedule(unittest.TestCase):
   # this is the failing case in openpilot...it's very simple like this
   @unittest.skip("failing in old lazy")
   def test_image_conv_fusion(self):
-    from tinygrad.features.image import image_conv2d
+    from tinygrad.image import image_conv2d
     w1 = Tensor.empty(16, 16, 1, 1)
     b1 = Tensor.empty(16)
     w2 = Tensor.empty(16, 16, 1, 1)

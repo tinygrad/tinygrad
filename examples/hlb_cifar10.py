@@ -12,7 +12,7 @@ from tinygrad import nn, dtypes, Tensor, Device, GlobalCounters, TinyJit
 from tinygrad.nn.state import get_state_dict, get_parameters
 from tinygrad.nn import optim
 from tinygrad.helpers import Context, BEAM, WINO, getenv, colored, prod
-from tinygrad.features.multi import MultiLazyBuffer
+from tinygrad.multi import MultiLazyBuffer
 
 BS, STEPS = getenv("BS", 512), getenv("STEPS", 1000)
 EVAL_BS = getenv("EVAL_BS", BS)

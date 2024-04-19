@@ -2,7 +2,7 @@ import time
 from tinygrad import Tensor, Device, GlobalCounters, TinyJit
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import ReduceOps
-from tinygrad.features.multi import MultiLazyBuffer, all_reduce
+from tinygrad.multi import MultiLazyBuffer, all_reduce
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
 from tinygrad.helpers import getenv, Context, RING

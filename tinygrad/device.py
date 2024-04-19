@@ -171,7 +171,7 @@ class CompiledRunner(Runner):
     global_size, local_size = self.launch_dims(var_vals)
     if global_size is not None and local_size is None and all_int(self.global_size): # type: ignore[arg-type]
       # TODO: this is copied from get_program
-      from tinygrad.features.search import optimize_local_size
+      from tinygrad.codegen.search import optimize_local_size
       local_size = self.local_size = optimize_local_size(self.clprg, global_size, rawbufs)
       global_size = self.global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
     lra = {}
@@ -204,7 +204,7 @@ class Compiled:
   def get_linearizer(self, *ast:LazyOp) -> Linearizer:
     assert self.compiler is not None, "compiler is required to build AST"
     if DEBUG >= 3:
-      from tinygrad.features.graph import print_tree
+      from tinygrad.engine.graph import print_tree
       for op in ast: print_tree(op)
     from tinygrad.codegen.linearizer import Linearizer
     k = Linearizer(*ast, opts=self.compiler.compiler_opts)
@@ -212,7 +212,7 @@ class Compiled:
     if not NOOPT:
       if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
       if BEAM >= 1:
-        from tinygrad.features.search import beam_search, time_linearizer, bufs_from_lin
+        from tinygrad.codegen.search import beam_search, time_linearizer, bufs_from_lin
         kb, k_opt = Linearizer(*ast, opts=self.compiler.compiler_opts), k
         kb.required_optimizations()
         rawbufs = bufs_from_lin(kb, allocate=False)
