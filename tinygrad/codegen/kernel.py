@@ -357,7 +357,7 @@ class Kernel:
 
         s0, s1 = axis_choices[-(axis+1)][0][0], axis_choices[-(axis+1)][1][0] # s0 is n, s1 is m
         axis_pads = [(x, tc.dims[i]) for i, x in enumerate([s0, s1, self.first_reduce]) if self.full_shape[x]%tc.dims[i] != 0]
-        if axis_pads and (opt_level < 1): continue
+        if axis_pads and (opt_level < 2): continue
 
         # tensor core -- unroll the reduce dim, upcast input, then create the correct thread pattern
         if DEBUG >= 3: print("TENSOR CORES", axis_buf0, axis_buf1, tc)
