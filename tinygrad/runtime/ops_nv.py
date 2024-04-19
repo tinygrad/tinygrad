@@ -177,14 +177,17 @@ class NVProgram:
     self.constant_buffers = {}
     constant_buffers_data = {}
     for sh_name, sh_type, sh_flags, _, sh_offset, sh_size, _, sh_info, _ in sections:
+      section_name = shstrtab[sh_name:].tobytes().split(b'\0', 1)[0].decode('utf-8')
       if sh_type == SHT_NOBITS and sh_flags & SHF_ALLOC: self.shmem_usage = sh_size
-      if sh_type == SHT_PROGBITS and sh_flags & SHF_ALLOC and sh_flags & SHF_EXECINSTR:
+      elif sh_type == SHT_PROGBITS and sh_flags & SHF_ALLOC and sh_flags & SHF_EXECINSTR:
         self.program = memoryview(bytearray(self.lib[sh_offset:sh_offset+sh_size])).cast("I")
         self.registers_usage = sh_info >> 24
-      if sh_type == SHT_PROGBITS and sh_flags & SHF_ALLOC and not(sh_flags & SHF_EXECINSTR):
-        section_name = shstrtab[sh_name:].tobytes().split(b'\0', 1)[0].decode('utf-8')
-        if match := re.match(r'\.nv\.constant(\d+)', section_name):
-          constant_buffers_data[int(match.group(1))] = memoryview(bytearray(self.lib[sh_offset:sh_offset+sh_size])).cast("I")
+      if match := re.match(r'\.nv\.constant(\d+)', section_name):
+        constant_buffers_data[int(match.group(1))] = memoryview(bytearray(self.lib[sh_offset:sh_offset+sh_size])).cast("I")
+      if section_name == ".nv.info":
+        section_data = memoryview(bytearray(self.lib[sh_offset:sh_offset+sh_size])).cast("I")
+        for i in range(sh_size // 12):
+          if section_data[i * 3 + 0] & 0xffff == 0x1204 and section_data[i * 3 + 2] > 0x640: raise RuntimeError("too high local memory")
 
     # constant buffer 0 is filled for each program, no need to copy it from elf (it's just zeroes)
     if 0 in constant_buffers_data: constant_buffers_data.pop(0)
