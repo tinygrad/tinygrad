@@ -52,6 +52,7 @@ class DiskRunner(Runner):
     assert strides_for_shape(view.shape) == view.strides, "disk tensors don't support strides"
     self.new_size = prod(view.shape)
     self.new_offset = view.offset * top_src.arg.dtype.itemsize
+    super().__init__(f"sz 0x{self.new_size:X} offset 0x{self.new_offset:X}", "DISK")
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Any, int], wait=False, jit=False):
     assert len(rawbufs) == 2
     # TODO: this is a terrible hack that should be moved to lazy.py
