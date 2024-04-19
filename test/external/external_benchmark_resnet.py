@@ -3,7 +3,7 @@ import time
 import unittest
 
 from tinygrad import Tensor, TinyJit, GlobalCounters
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, Context
 from tinygrad.nn.optim import SGD
 from tinygrad.nn.state import get_parameters
 
@@ -55,7 +55,7 @@ class BenchmarkResnetTrain(unittest.TestCase):
     return f"{name} x{(bs, cin, xy, xy)}", [layer], cin, xy
   def _test_layer(self, name, layer, cin, xy):
     optim = SGD(get_parameters(layer), bs / 128 * 1.0)  # need sgd for some params but not consequential for benchmarking
-    Tensor.corealize([t.assign(t) for t in get_parameters(layer)])
+    with Context(SAVE_SCHEDULE=0): Tensor.corealize([t.assign(t) for t in get_parameters(layer)])
 
     JITCNT = getenv("JITCNT", 1)
     Tensor.training = True
@@ -75,11 +75,12 @@ class BenchmarkResnetTrain(unittest.TestCase):
     best_tm = None
     flops, mem_used, kernels = None, None, None
     for i in range(CNT):
-      x = Tensor.randn(bs, cin, xy, xy, requires_grad=True).realize()
+      with Context(SAVE_SCHEDULE=0): x = Tensor.randn(bs, cin, xy, xy, requires_grad=True).realize()
       GlobalCounters.reset()
 
       st = time.perf_counter()
-      step(x)._data()
+      out = step(x)
+      with Context(SAVE_SCHEDULE=0): out._data()
       et = time.perf_counter()
 
       if flops is None: flops = GlobalCounters.global_ops / JITCNT
