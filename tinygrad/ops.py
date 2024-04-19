@@ -3,7 +3,7 @@ from typing import Union, Type, Tuple, Any, List, Dict, Callable
 import functools, hashlib, math, operator, ctypes
 from enum import Enum, auto
 from dataclasses import dataclass
-from tinygrad.helpers import prod, dedup
+from tinygrad.helpers import prod, dedup, Metadata
 from tinygrad.dtype import dtypes, DType, ConstType
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -44,6 +44,7 @@ class ScheduleItem:
   ast: Tuple[LazyOp, ...]
   outputs: Tuple[Buffer, ...]
   inputs: Tuple[Buffer, ...]
+  metadata: List[Metadata]
 
 @dataclass(frozen=True, eq=False)
 class LazyOp:

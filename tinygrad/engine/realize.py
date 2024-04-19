@@ -70,7 +70,7 @@ def _internal_memory_planner(buffers:List[Iterable[Buffer]], debug_prefix="") ->
 def memory_planner(schedule:List[ScheduleItem]) -> List[ScheduleItem]:
   assigned = _internal_memory_planner([si.outputs+si.inputs for si in schedule])
   return [ScheduleItem(si.ast, tuple(assigned.get(x, x) for x in si.outputs),
-                               tuple(assigned.get(x, x) for x in si.inputs)) for si in schedule]
+                               tuple(assigned.get(x, x) for x in si.inputs), si.metadata) for si in schedule]
 
 def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[Variable, int]]=None):
   for ei in lower_schedule(schedule):

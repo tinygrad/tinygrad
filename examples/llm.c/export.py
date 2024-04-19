@@ -79,17 +79,16 @@ if __name__ == "__main__":
     if si.ast[0].op is not BufferOps.STORE:
       print(f"// {si.ast[0].op}", bufs)
     else:
-      print(f"{srcs[si.ast][0]}({', '.join([x[0] for x in bufs])})")
+      metadata = dedup([(t.tname, t.backward) for t in si.metadata])
+      call = f"{srcs[si.ast][0]}({', '.join([x[0] for x in bufs])})"
+      call += " "*(80-ansilen(call))
+      print(f"{call} // {i+1} {metadata}")
       main.append(f"  {to_function_name(srcs[si.ast][0])}({', '.join([x[0] for x in bufs])});")
       main.append(f"  struct timespec tm{i+1}; clock_gettime(CLOCK_MONOTONIC, &tm{i+1});")
       main.append(f"  printf(\"%10.2f ms + %7.2f ms @ {to_function_name(srcs[si.ast][0])}\\n\"," +\
                   f"((tm{i+1}.tv_sec-tm{0}.tv_sec) + (tm{i+1}.tv_nsec-tm{0}.tv_nsec) / 1e9) * 1e3," +\
                   f"((tm{i+1}.tv_sec-tm{lst}.tv_sec) + (tm{i+1}.tv_nsec-tm{lst}.tv_nsec) / 1e9) * 1e3);")
       lst = i+1
-      #call = f"{srcs[si.ast][0]}({', '.join(bufs)})"
-      #call += " "*(80-ansilen(call))
-      #print(f"{call} // {i+1}")
-      #print(srcs[si.ast][1])
   main.append("}")
 
   mallocs = [f"{b.dtype.name}* {n} = ({b.dtype.name}*)malloc({b.nbytes});" for n,b in dedup(all_bufs)]

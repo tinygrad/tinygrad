@@ -1,14 +1,15 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
-import time, math, itertools, functools
+import time, math, itertools, functools, traceback
 from contextlib import ContextDecorator
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Iterable, Dict, DefaultDict, cast, get_args
 from collections import defaultdict
 import numpy as np
+from dataclasses import replace
 
 from tinygrad.dtype import DType, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype
 from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, fully_flatten, argsort, IMAGE, DEBUG, WINO, THREEFRY
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, _METADATA, Metadata
 from tinygrad.lazy import LazyBuffer
 from tinygrad.features.multi import MultiLazyBuffer
 from tinygrad.ops import LoadOps
@@ -21,10 +22,11 @@ from tinygrad.engine.schedule import create_schedule_with_vars
 # **** start with two base classes, Tensor and Function ****
 
 class Function:
-  def __init__(self, device:Union[str, Tuple[str, ...]], *tensors:Tensor):
+  def __init__(self, device:Union[str, Tuple[str, ...]], *tensors:Tensor, metadata=None):
     self.device = device
     self.needs_input_grad = [t.requires_grad for t in tensors]
     self.requires_grad = True if any(self.needs_input_grad) else None if None in self.needs_input_grad else False
+    self.metadata = metadata
     if self.requires_grad: self.parents = tensors
 
   def forward(self, *args, **kwargs): raise NotImplementedError(f"forward not implemented for {type(self)}")
@@ -32,9 +34,14 @@ class Function:
 
   @classmethod
   def apply(fxn:Type[Function], *x:Tensor, **kwargs) -> Tensor:
-    ctx = fxn(x[0].device, *x)
+    fs = None
+    for fs in traceback.extract_stack():
+      if fs.filename.endswith("tinygrad/tensor.py") and fs.name not in ["sequential", "<lambda>"]: break
+    ctx = fxn(x[0].device, *x, metadata=Metadata(fxn.__name__, fs.name if fs is not None else ""))
     ret = Tensor.__new__(Tensor)
+    token = _METADATA.set(ctx.metadata)
     ret.lazydata, ret.requires_grad, ret.grad = ctx.forward(*[t.lazydata for t in x], **kwargs), ctx.requires_grad, None
+    _METADATA.reset(token)
     ret._ctx = ctx if ctx.requires_grad and not Tensor.no_grad else None  # used by autograd engine
     return ret
 
@@ -370,7 +377,9 @@ class Tensor:
 
     for t0 in reversed(self.deepwalk()):
       if t0.grad is None: raise RuntimeError(f"tensor {t0} has no grad")
+      token = _METADATA.set(replace(t0._ctx.metadata, backward=True))
       grads = t0._ctx.backward(t0.grad.lazydata)
+      _METADATA.reset(token)
       grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
         for g in ([grads] if len(t0._ctx.parents) == 1 else grads)]
       for t, g in zip(t0._ctx.parents, grads):
