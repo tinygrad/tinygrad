@@ -117,7 +117,7 @@ class HWComputeQueue:
     return self
 
   def submit(self, dev:NVDevice):
-    assert len(self.q) < (1 << 21) - 1
+    assert len(self.q) < (1 << 21)
     self.signal(dev.compute_progress_signal, dev.compute_put_value + 1)
     for i,packet in enumerate(self.q): dev.cmdq[dev.cmdq_wptr//4 + i] = packet
     fifo_entry = dev.compute_put_value % dev.compute_gpfifo_entries
