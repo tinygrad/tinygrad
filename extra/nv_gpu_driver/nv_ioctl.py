@@ -63,9 +63,10 @@ nvcmds = {getattr(nv_gpu, x):(x, getattr(nv_gpu, "struct_"+x+"_PARAMS", getattr(
           x.startswith("NV") and x[6:].startswith("_CTRL_") and isinstance(getattr(nv_gpu, x), int)}
 
 def get_classes():
-  hdrpy = (pathlib.Path(__file__).parent / "g_allclasses.h").read_text()
-  pattern = r'#define ([0-9a-zA-Z_]*)\s+\((0x[0-9a-fA-F]+)\)'
-  matches = re.findall(pattern, hdrpy, re.MULTILINE)
+  hdrpy = (pathlib.Path(__file__).parent.parent.parent / "tinygrad/runtime/autogen/nv_gpu.py").read_text()
+  clss = re.search(r'NV01_ROOT.*?NV_SEMAPHORE_SURFACE = \(0x000000da\) # macro', hdrpy, re.DOTALL).group()
+  pattern = r'([0-9a-zA-Z_]*) = +\((0x[0-9a-fA-F]+)\)'
+  matches = re.findall(pattern, clss, re.MULTILINE)
   return {int(num, base=16):name for name, num in matches}
 nvclasses = get_classes()
 nvuvms = {getattr(nv_gpu, x):x for x in dir(nv_gpu) if x.startswith("UVM_") and nv_gpu.__dict__.get(x+"_PARAMS")}
