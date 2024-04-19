@@ -70,7 +70,7 @@ def get_classes():
   return {int(num, base=16):name for name, num in matches}
 nvclasses = get_classes()
 nvuvms = {getattr(nv_gpu, x):x for x in dir(nv_gpu) if x.startswith("UVM_") and nv_gpu.__dict__.get(x+"_PARAMS")}
-nvqcmds = {int(getattr(nv_gpu, x)):x for x in dir(nv_gpu) if x.startswith("NVC6C0_QMDV03_00_") and isinstance(getattr(nv_gpu, x), int)}
+nvqcmds = {int(getattr(nv_gpu, x)):x for x in dir(nv_gpu) if x[:7] in {"NVC6C0_", "NVC56F_", "NVC6B5_"} and isinstance(getattr(nv_gpu, x), int)}
 
 global_ioctl_id = 0
 gpus_user_modes = []
@@ -194,9 +194,9 @@ def _dump_qmd(address, packets):
     print(f"\t\t{method_name}, {typ=} {size=} {subc=} {mthd=}")
     for j in range(size): print(f"\t\t\t{j}: {gpfifo[i+j+1]} | 0x{gpfifo[i+j+1]:x}")
     if mthd == 792:
-      for x in dir(QMD):
+      for x in dir(nv_gpu):
         if x.startswith("NVC6C0_QMDV03_00_"):
-          vv = getattr(QMD, x)
+          vv = getattr(nv_gpu, x)
           bits = None
           if isinstance(vv, tuple) and len(vv) == 2:
             bits = vv

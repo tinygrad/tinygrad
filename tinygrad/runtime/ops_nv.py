@@ -504,7 +504,7 @@ class NVDevice(Compiled):
     return sig
 
   @classmethod
-  def _wait_signal(self, signal, value=0, timeout=(1<<63)):
+  def _wait_signal(self, signal, value=0, timeout=10000):
     start_time = time.time()
     sem_value = signal[0]
     while sem_value != value:
