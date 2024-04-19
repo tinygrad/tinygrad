@@ -19,6 +19,8 @@ from examples.hlb_cifar10 import UnsyncedBatchNorm
 # inspect convs with batchnorm:     DEBUG=2 BEAM=2 CONV=1 BN=1 DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py
 # etc
 
+# use ASSIGN=0 to disable batchnorm/optimizer assigns
+
 # memory will be slightly high with JITCNT > 1
 
 bs = getenv("BS", 64)
@@ -43,8 +45,8 @@ class BenchmarkResnetTrain(unittest.TestCase):
 
     # get specific conv (0 or 1)
     if conv:
-      if bn: f = [layer.conv2, layer.bn2]
-      else: f = [layer.conv2]
+      if bn: f = [layer.conv2, layer.bn2, Tensor.relu]
+      else: f = [layer.conv2, Tensor.relu]
       cin = layer.conv2.in_channels
       xy = xy // layer.conv1.stride
       return f"{name} conv2 x{str((bs, cin, xy, xy)):20s} k{str(layer.conv2.weight.shape):20s}" + (" bn" if bn else ""), f, cin, xy
@@ -62,9 +64,10 @@ class BenchmarkResnetTrain(unittest.TestCase):
         optim.zero_grad()
         x.grad = None
 
-        y = x.sequential(layer).relu()
+        y = x.sequential(layer).contiguous().contiguous_backward()
         y.sum().backward()
-        optim.step([y, x.grad])
+        if getenv("ASSIGN", 1): optim.step([y, x.grad])
+        else: Tensor.corealize([y, x.grad] + [t.grad for t in optim.params])
       return y.detach()
 
     CNT = getenv("CNT", 5)
