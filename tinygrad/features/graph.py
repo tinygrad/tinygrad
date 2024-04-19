@@ -1,7 +1,7 @@
-import os, atexit, functools
+import os, atexit, functools, pickle
 from collections import defaultdict
 from typing import List, Any, DefaultDict, TYPE_CHECKING
-from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LoadOps, BufferOps, TernaryOps, LazyOp
+from tinygrad.ops import ScheduleItem, UnaryOps, BinaryOps, ReduceOps, LoadOps, BufferOps, TernaryOps, LazyOp
 from tinygrad.device import Device
 from tinygrad.helpers import GRAPHPATH, DEBUG, GlobalCounters, getenv
 from tinygrad.codegen.linearizer import UOps, UOp
@@ -98,3 +98,9 @@ def graph_uops(uops:List[UOp]):
     G.add_node(uops.index(u), label=f"{str(u.uop)[5:]}{(' '+str(u.arg)) if u.arg is not None else ''}\n{str(u.dtype)}", style="filled", fillcolor=colors.get(u.uop, "#ffffff"))  # noqa: E501
     for v in u.vin: G.add_edge(uops.index(v), uops.index(u))
   save_graph(G, f'{GRAPHPATH}.uops', '-Grankdir=LR')
+
+SCHEDULES: List[ScheduleItem] = []
+def graph_schedule(schedule:List[ScheduleItem]):
+  global SCHEDULES
+  if len(SCHEDULES): atexit.register(lambda: pickle.dump(SCHEDULES, open(f"{GRAPHPATH}.schedule.pkl", "wb")))
+  SCHEDULES.extend(schedule)
