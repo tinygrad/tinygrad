@@ -12,12 +12,12 @@ from tinygrad.tensor import Tensor
 ctx_vars = { MULTIOUTPUT: (0, 1) }
 
 def fuzz_schedule(outs: List[LazyBuffer]):
+  # find toposorts across all tunable params
   unique_ts: Dict[Tuple[LazyBuffer, ...], Tuple[Dict, Dict[LazyBuffer, _LBScheduleItem]]] = {}
   for combination in itertools.product(*ctx_vars.values()):
     for var, val in zip(ctx_vars, combination): var.value = val
     graph, in_degree, prescheduled = _graph_schedule(outs, set())
-    for ts in find_all_toposorts(graph, in_degree):
-      if ts not in unique_ts: unique_ts[ts] = (dict(zip([v.key for v in ctx_vars], combination)), prescheduled)
+    for ts in find_all_toposorts(graph, in_degree): unique_ts[ts] = (dict(zip([v.key for v in ctx_vars], combination)), prescheduled)
   toposorts = list(unique_ts.items())
   if DEBUG >= 1: print(colored(f"fuzzing {len(toposorts)} schedule permutations", "yellow"))
 
@@ -85,7 +85,7 @@ def find_all_toposorts(graph:DefaultDict[T, List[T]], in_degree:DefaultDict[T, i
       for u in graph[v]: in_degree[u] += 1
       path.pop()
       visited.remove(v)
-    if len(path) == len(in_degree): ret.append(tuple([*path]))
+    if len(path) == len(in_degree): ret.append(tuple(path))
   recurse_paths(path)
 
   if len(ret) == 0: raise RuntimeError("detected cycle in the graph")
