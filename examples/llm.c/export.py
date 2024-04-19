@@ -62,10 +62,12 @@ if __name__ == "__main__":
     state_dict["adam_v_"+nm] = v
   named_buffers = {v.lazydata.base.buffer:k.replace(".", "_") for k,v in state_dict.items()}
 
-  c_code = [CLANG_PROGRAM_HEADER]
+  c_code = [CLANG_PROGRAM_HEADER, "#include <stdio.h>", "#include <time.h>"]
   c_code += [x[1] for x in srcs.values()]
 
   main = ["int main() {"]
+  main += ["struct timespec start; clock_gettime(CLOCK_MONOTONIC, &start);"]
+
   all_bufs = []
   for i,si in enumerate(sched):
     bufs = [(named_buffers.get(b, f"b{numbered_bufs[b]}"), b) for b in si.outputs+si.inputs]
@@ -75,6 +77,8 @@ if __name__ == "__main__":
     else:
       print(f"{srcs[si.ast][0]}({', '.join([x[0] for x in bufs])})")
       main.append(f"  {to_function_name(srcs[si.ast][0])}({', '.join([x[0] for x in bufs])});")
+      main.append(f"  struct timespec tm{i}; clock_gettime(CLOCK_MONOTONIC, &tm{i});")
+      main.append(f"  printf(\"%8.2f ms @ {to_function_name(srcs[si.ast][0])}\\n\", ((tm{i}.tv_sec-start.tv_sec) + (tm{i}.tv_nsec-start.tv_nsec) / 1e9) * 1e3);")
       #call = f"{srcs[si.ast][0]}({', '.join(bufs)})"
       #call += " "*(80-ansilen(call))
       #print(f"{call} // {i+1}")
