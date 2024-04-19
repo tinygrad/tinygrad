@@ -50,14 +50,16 @@ void r_256_3072_768(float* restrict data0, const float* restrict data1, const fl
 
 
 int main() {
-  struct timespec t1, t2, t3;
-  clock_gettime(CLOCK_MONOTONIC, &t1);
-  r_256_3072_768(b52, b49, h_0_mlp_c_fc_weight, h_0_mlp_c_fc_bias);
-  clock_gettime(CLOCK_MONOTONIC, &t2);
-  matmul_forward(b52, b49, h_0_mlp_c_fc_weight, h_0_mlp_c_fc_bias, 4, 64, 768, 3072);
-  clock_gettime(CLOCK_MONOTONIC, &t3);
-  double time_gen = (t2.tv_sec - t1.tv_sec) + (t2.tv_nsec - t1.tv_nsec) / 1e9;
-  double time_real = (t3.tv_sec - t2.tv_sec) + (t3.tv_nsec - t2.tv_nsec) / 1e9;
-  printf("%.2f ms vs %.2f ms\n", time_gen*1e3, time_real*1e3);
+  for (int i = 0; i < 5; i++) {
+    struct timespec t1, t2, t3;
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    r_256_3072_768(b52, b49, h_0_mlp_c_fc_weight, h_0_mlp_c_fc_bias);
+    clock_gettime(CLOCK_MONOTONIC, &t2);
+    matmul_forward(b52, b49, h_0_mlp_c_fc_weight, h_0_mlp_c_fc_bias, 4, 64, 768, 3072);
+    clock_gettime(CLOCK_MONOTONIC, &t3);
+    double time_gen = (t2.tv_sec - t1.tv_sec) + (t2.tv_nsec - t1.tv_nsec) / 1e9;
+    double time_real = (t3.tv_sec - t2.tv_sec) + (t3.tv_nsec - t2.tv_nsec) / 1e9;
+    printf("%.2f ms gen vs %.2f ms reference\n", time_gen*1e3, time_real*1e3);
+  }
 }
 
