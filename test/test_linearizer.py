@@ -196,6 +196,39 @@ class TestLinearizer(unittest.TestCase):
       else: tc_atol, tc_rtol = 5e-3, 1e-4
       np.testing.assert_allclose(np_c, out, atol=tc_atol, rtol=tc_rtol)
 
+  def test_tensor_cores_padded(self):
+    if not Device[Device.DEFAULT].compiler.compiler_opts.has_tensor_cores:
+      self.skipTest("device doesn't have tensor cores")
+    for tc in tensor_cores[Device[Device.DEFAULT].compiler.compiler_opts.device]:
+      if getenv("EMULATE_CUDA") and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
+      pad = 1
+      a, b = Tensor.rand(tc.dims[1]+pad, tc.dims[2]+pad, dtype=tc.dtype_in), Tensor.rand(tc.dims[2]+pad, tc.dims[0]+pad, dtype=tc.dtype_in)
+      r = a.matmul(b, acc_dtype=tc.dtype_out)
+      sched = create_schedule([r.lazydata])
+      realized_ast = sched[-1].ast[0]
+
+      # check that TC is triggered for TC_OPT=2
+      k = Linearizer(realized_ast)
+      k.apply_tensor_cores(1, tc_opt=2)
+      k.linearize()
+      assert len([uop for uop in k.uops if uop.uop is UOps.WMMA]) > 1, "tensor core not triggered"
+      assert len([x for x in k.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
+
+      # check that TC is not triggered for TC_OPT<2
+      k = Linearizer(realized_ast)
+      k.apply_tensor_cores(1, tc_opt=1)
+      k.linearize()
+      assert len([uop for uop in k.uops if uop.uop is UOps.WMMA]) == 0, "tensor core is incorrectly triggered"
+      assert len([x for x in k.applied_opts if x.op is OptOps.TC]) == 0, "tensor core opt is incorrectly included"
+
+      # check correctness
+      a, b = Tensor.rand(tc.dims[1]+pad, tc.dims[2]+pad, dtype=tc.dtype_in), Tensor.rand(tc.dims[2]+pad, tc.dims[0]+pad, dtype=tc.dtype_in)
+      r = a.matmul(b, acc_dtype=tc.dtype_out)
+      (atol, rtol) = ((0.25, 0.01) if tc.dtype_out == dtypes.half else (3e-2, 1e-3)) if tc.dtype_in == dtypes.half else (1e-4, 1e-4)
+      helper_linearizer_opt(r, [
+        [Opt(OptOps.TC, axis=0, amt=2)],
+      ], atol=atol, rtol=rtol)
+
   def test_limit_dims_to_max_5d_global(self):
     t = Tensor.empty(3, 4, 5, 6, 7).pad(((1, 1), (1, 1), (1, 1), (1, 1), (1, 1))) + 1
     sched = [si for si in create_schedule([t.lazydata]) if si.ast[0].op not in LoadOps]
