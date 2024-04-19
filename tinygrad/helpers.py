@@ -84,10 +84,11 @@ class Context(contextlib.ContextDecorator):
 class ContextVar:
   _cache: ClassVar[Dict[str, ContextVar]] = {}
   value: int
+  key: str
   def __new__(cls, key, default_value):
     if key in ContextVar._cache: return ContextVar._cache[key]
     instance = ContextVar._cache[key] = super().__new__(cls)
-    instance.value = getenv(key, default_value)
+    instance.value, instance.key = getenv(key, default_value), key
     return instance
   def __bool__(self): return bool(self.value)
   def __ge__(self, x): return self.value >= x

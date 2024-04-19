@@ -1,16 +1,22 @@
+import itertools
 import numpy as np
-from typing import DefaultDict, Dict, List, Set, TypeVar
+from typing import DefaultDict, Dict, List, Set, Tuple, TypeVar
 from tinygrad.buffer import Buffer
 from tinygrad.engine.realize import CustomOp, ExecItem, capturing, lower_schedule_item
-from tinygrad.helpers import DEBUG, colored, getenv
+from tinygrad.helpers import DEBUG, MULTIOUTPUT, colored, getenv
 from tinygrad.lazy import LazyBuffer
-from tinygrad.engine.schedule import _graph_schedule
+from tinygrad.engine.schedule import _graph_schedule, _LBScheduleItem
 from tinygrad.ops import LoadOps, ScheduleItem
 from tinygrad.tensor import Tensor
 
+ctx_vars = { MULTIOUTPUT: (0, 1) }
+
 def fuzz_schedule(outs: List[LazyBuffer]):
-  graph, in_degree, prescheduled = _graph_schedule(outs, seen:=set())
-  toposorts = find_all_toposorts(graph, in_degree)
+  toposorts: List[Tuple[Dict, List[LazyBuffer], Dict[LazyBuffer, _LBScheduleItem]]]  = []
+  for combination in itertools.product(*ctx_vars.values()):
+    for var, val in zip(ctx_vars, combination): var.value = val
+    graph, in_degree, prescheduled = _graph_schedule(outs, set())
+    for ts in find_all_toposorts(graph, in_degree): toposorts.append((dict(zip([v.key for v in ctx_vars], combination)), ts, prescheduled))
   if DEBUG >= 1: print(colored(f"fuzzing {len(toposorts)} schedule permutations", "yellow"))
 
   # setup ground truth
@@ -18,9 +24,8 @@ def fuzz_schedule(outs: List[LazyBuffer]):
   # IMPORTANT: freeze prerealized bufs before ScheduleItem exec
   prerealized: Dict[LazyBuffer, memoryview] = {}
   seed = Tensor._seed
-  for key in toposorts[0]:
-    for out in (ps:=prescheduled[key]).outputs:
-      seen.add(out)
+  for key in toposorts[0][1]:
+    for out in (ps:=toposorts[0][2][key]).outputs:
       # freeze assign state before exec
       if out.op is LoadOps.ASSIGN: prerealized[out] = out.buffer.as_buffer()
     for x in ps.inputs:
@@ -30,8 +35,8 @@ def fuzz_schedule(outs: List[LazyBuffer]):
     for out in ps.outputs: ground_truth[out] = out.buffer.as_buffer()
 
   # exec and validate each permutation with new Buffers
-  for i, ts in enumerate(toposorts[1:]):
-    if DEBUG >= 1: print(colored(f"testing permutation {i}", "yellow"))
+  for i, (ctx, ts, prescheduled) in enumerate(toposorts[1:]):
+    if DEBUG >= 1: print(colored(f"testing permutation {i} {ctx}", "yellow"))
     rawbufs: Dict[LazyBuffer, Buffer] = {}
     for key in ts:
       for out in (ps:=prescheduled[key]).outputs:
@@ -45,6 +50,7 @@ def fuzz_schedule(outs: List[LazyBuffer]):
       si = ScheduleItem(ps.ast, tuple(rawbufs[x] for x in ps.outputs if x.size != 0), tuple(rawbufs[x] for x in ps.inputs if x.size != 0))
       _exec_si(si, seed)
       for out in ps.outputs:
+        if hasattr(out, "srcs"): del out.srcs  # can only schedule once
         outbuf = np.frombuffer(rawbufs[out].as_buffer(), out.dtype.np)
         try: np.testing.assert_allclose(outbuf, np.frombuffer(ground_truth[out], out.dtype.np), atol=1e-2, rtol=1e-2)
         except Exception as e:
