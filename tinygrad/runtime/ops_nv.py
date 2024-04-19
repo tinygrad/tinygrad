@@ -238,7 +238,7 @@ class NVProgram:
     for i in range(len(args)): kernargs += [*nvdata64_le(args[i].base)]
     for i in range(len(vals)): kernargs += [vals[i]]
 
-    st, en = self.device._get_signal(), self.device._get_signal()
+    if wait: st, en = self.device._get_signal(), self.device._get_signal()
     queue = HWComputeQueue()
     queue.wait(self.device.dma_progress_signal, self.device.dma_put_value)
     queue.wait(self.device.compute_progress_signal, self.device.compute_put_value)
@@ -298,7 +298,7 @@ class NVDevice(Compiled):
   fd_uvm_2:int = -1
   gpus_info = None
   semaphores_page = None
-  signal_number = -1
+  signal_number = 32
   devices: List[NVDevice] = []
 
   def _new_gpu_fd(self):
@@ -452,14 +452,14 @@ class NVDevice(Compiled):
     self.compute_gpu_ring: memoryview = to_mv(gpfifo.base, self.compute_gpfifo_entries * 8).cast("Q")
     self.compute_gpu_ring_controls = nv_gpu.AmpereAControlGPFifo.from_address(gpfifo.base + self.compute_gpfifo_entries * 8)
     self.compute_put_value: int = 0
-    self.compute_progress_signal = NVDevice._get_signal()
+    self.compute_progress_signal = NVDevice._get_signal(self.device_id * 2)
 
     self.dma_gpfifo_entries: int = 0x10000
     self.dma_gpfifo_token: int = self._gpu_fifo_setup(gpfifo, ctxshare, channel_group, offset=0x100000, entries=self.dma_gpfifo_entries)
     self.dma_gpu_ring: memoryview = to_mv(gpfifo.base + 0x100000, self.dma_gpfifo_entries * 8).cast("Q")
     self.dma_gpu_ring_controls = nv_gpu.AmpereAControlGPFifo.from_address(gpfifo.base + 0x100000 + self.dma_gpfifo_entries * 8)
     self.dma_put_value: int = 0
-    self.dma_progress_signal = NVDevice._get_signal()
+    self.dma_progress_signal = NVDevice._get_signal(self.device_id * 2 + 1)
 
     en_fifo_params = nv_gpu.NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS(bEnable=1)
     rm_control(self.fd_ctl, nv_gpu.NVA06C_CTRL_CMD_GPFIFO_SCHEDULE, self.root, channel_group, en_fifo_params)
@@ -494,10 +494,12 @@ class NVDevice(Compiled):
     for d in NVDevice.devices: d.synchronize()
 
   @classmethod
-  def _get_signal(self) -> memoryview:
-    self.signal_number += 1
-    if self.semaphores_page and self.signal_number * 16 >= self.semaphores_page.length: self.signal_number = 16
-    sig = to_mv(self.semaphores_page.base + self.signal_number * 16, 16).cast("Q") # type: ignore
+  def _get_signal(self, num=None) -> memoryview:
+    if num is None:
+      self.signal_number += 1
+      if self.semaphores_page and self.signal_number * 16 >= self.semaphores_page.length: self.signal_number = 32
+      num = self.signal_number
+    sig = to_mv(self.semaphores_page.base + num * 16, 16).cast("Q") # type: ignore
     sig[0] = 0
     return sig
 
