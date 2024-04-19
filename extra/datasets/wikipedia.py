@@ -1,4 +1,14 @@
 # Preprocessing of downloaded text from Wikipedia for MLPerf BERT training
+# This is a modified version of the original script:
+# https://github.com/mlcommons/training/blob/master/language_model/tensorflow/bert/cleanup_scripts/create_pretraining_data.py
+# ENV VARS:
+# MAX_SEQ_LENGTH          - Maximum sequence length
+# MAX_PREDICTIONS_PER_SEQ - Maximum number of masked LM predictions per sequence
+# RANDOM_SEED             - Random seed
+# DUPE_FACTOR             - Number of times to duplicate the input data with different masks
+# MASKED_LM_PROB          - Probability of masking a token
+# SHORT_SEQ_PROB          - Probability of picking a sequence shorter than MAX_SEQ_LENGTH
+
 import os, sys, pickle, random, unicodedata
 from pathlib import Path
 import numpy as np
@@ -142,7 +152,7 @@ def create_masked_lm_predictions(tokens:list[str], tokenizer:Tokenizer, rng:rand
 
   rng.shuffle(cand_indices)
   output_tokens = list(tokens)
-  num_to_predict = min(getenv('MAX_PREDICTIONS_PER_SEQ', 76), max(1, int(round(len(tokens) * 0.15))))
+  num_to_predict = min(getenv('MAX_PREDICTIONS_PER_SEQ', 76), max(1, int(round(len(tokens) * getenv("MASKED_LM_PROB", 0.15)))))
 
   masked_lms = []
   covered_indices = set()
@@ -317,7 +327,7 @@ def process_part(part:int):
       pickle.dump(feature_batch, f)
 
 def process_iterate(tokenizer:Tokenizer, val:bool=False, part:int=0) -> list[dict]: # Convert raw text to masked NSP samples
-  rng = random.Random(getenv('SEED', 12345))
+  rng = random.Random(getenv('RANDOM_SEED', 12345))
 
   if val:
     tqdm.write("Getting samples from dataset")
@@ -336,7 +346,7 @@ def process_iterate(tokenizer:Tokenizer, val:bool=False, part:int=0) -> list[dic
     instances = get_instances(rng, tokenizer, documents)
 
     while len(instances) > 0:
-      batch_size = min(1000, len(instances))
+      batch_size = min(1000, len(instances)) # We batch 1000 samples to one file
       batch = instances[:batch_size]
       del instances[:batch_size]
       yield [instance_to_features(instance, tokenizer) for instance in batch]
@@ -351,7 +361,7 @@ if __name__ == "__main__":
 
   assert len(sys.argv) > 1, "Usage: python wikipedia.py pre-eval|pre-train [part]|all"
 
-  if sys.argv[1] == "pre-eval": # Generate 100000 eval samples
+  if sys.argv[1] == "pre-eval": # Generate 10000 eval samples
     os.makedirs(BASEDIR / "eval", exist_ok=True)
 
     for i, feature_batch in tqdm(enumerate(process_iterate(tokenizer, val=True)), total=10):
