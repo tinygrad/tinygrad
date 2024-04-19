@@ -379,7 +379,7 @@ class Kernel:
   def apply_tensor_cores(self, use_tensor_cores=1, extra_opts:Optional[List[Opt]]=None) -> bool:
     if not self.opts.has_tensor_cores and use_tensor_cores != 2: return False
     try: # check TC first and apply hand-coded opts if successful
-      self.apply_opt(Opt(OptOps.TC, 0, 0))
+      self.apply_opt(Opt(OptOps.TC, 0, getenv("TC_OPT")))
 
       if (tc_opts:=self.tensor_core_opts) is not None:
         if extra_opts is not None:

@@ -38,6 +38,8 @@ jobs:
       run: |
         DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
         DEBUG=2 HALF=1 python3 extra/gemm/simple_matmul.py | tee matmul_half.txt
+    - name: Fuzz Padded Tensor Core GEMM
+      run: METAL=1 M_START=6 M_STOP=10 M_STEP=1 N_START=6 N_STOP=10 N_STEP=1 K_START=6 K_STOP=24 K_STEP=1 TC_OPT=1 DEBUG=2 python3 ./extra/gemm/fuzz_matmul.py
     - name: Run LLaMA
       run: |
         JIT=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
@@ -116,6 +118,8 @@ jobs:
         CUDA=1 BFLOAT16=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_bfloat16.txt
     - name: Run Tensor Core GEMM (PTX)
       run: CUDA=1 PTX=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_ptx.txt
+    - name: Fuzz Padded Tensor Core GEMM(CUDA)
+      run: CUDA=1 M_START=12 M_STOP=20 M_STEP=1 N_START=6 N_STOP=10 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=1 python3 ./extra/gemm/fuzz_matmul.py
     - name: Run LLaMA
       run: |
         CUDA=1 JIT=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
