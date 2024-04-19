@@ -12,21 +12,23 @@ from tinygrad.tensor import Tensor
 ctx_vars = { MULTIOUTPUT: (0, 1) }
 
 def fuzz_schedule(outs: List[LazyBuffer]):
-  toposorts: Dict[Tuple[LazyBuffer, ...], Tuple[Dict, Dict[LazyBuffer, _LBScheduleItem]]] = {}
+  unique_ts: Dict[Tuple[LazyBuffer, ...], Tuple[Dict, Dict[LazyBuffer, _LBScheduleItem]]] = {}
   for combination in itertools.product(*ctx_vars.values()):
     for var, val in zip(ctx_vars, combination): var.value = val
     graph, in_degree, prescheduled = _graph_schedule(outs, set())
     for ts in find_all_toposorts(graph, in_degree):
-      if ts not in toposorts: toposorts[ts] = (dict(zip([v.key for v in ctx_vars], combination)), prescheduled)
+      if ts not in unique_ts: unique_ts[ts] = (dict(zip([v.key for v in ctx_vars], combination)), prescheduled)
+  toposorts = list(unique_ts.items())
   if DEBUG >= 1: print(colored(f"fuzzing {len(toposorts)} schedule permutations", "yellow"))
 
   # setup ground truth
   ground_truth: Dict[LazyBuffer, memoryview] = {}
   # IMPORTANT: freeze prerealized bufs before ScheduleItem exec
   prerealized: Dict[LazyBuffer, memoryview] = {}
-  seed, first = Tensor._seed, list(toposorts.items())[0]
-  for key in first[0]:
-    for out in (ps:=first[1][1][key]).outputs:
+  seed = Tensor._seed
+  ts, (_, prescheduled) = toposorts[0]
+  for key in ts:
+    for out in (ps:=prescheduled[key]).outputs:
       # freeze assign state before exec
       if out.op is LoadOps.ASSIGN: prerealized[out] = out.buffer.as_buffer()
     for x in ps.inputs:
@@ -38,8 +40,7 @@ def fuzz_schedule(outs: List[LazyBuffer]):
       del out.srcs # only schedule the LazyBuffer in this fuzz run
 
   # exec and validate each permutation with new Buffers
-  for i, (ts, (ctx, prescheduled)) in enumerate(toposorts.items()):
-    if i == 0: continue
+  for i, (ts, (ctx, prescheduled)) in enumerate(toposorts[1:]):
     if DEBUG >= 1: print(colored(f"testing permutation {i} {ctx}", "yellow"))
     rawbufs: Dict[LazyBuffer, Buffer] = {}
     for key in ts:
