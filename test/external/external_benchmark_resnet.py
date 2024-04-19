@@ -66,7 +66,7 @@ class BenchmarkResnetTrain(unittest.TestCase):
 
         y = x.sequential(layer).contiguous().contiguous_backward()
         y.sum().backward()
-        if getenv("ASSIGN", 1): optim.step([y, x.grad])
+        if getenv("ASSIGN", 1): Tensor.corealize([y, x.grad] + optim.schedule_step())
         else: Tensor.corealize([y, x.grad] + [t.grad for t in optim.params])
       return y.detach()
 
