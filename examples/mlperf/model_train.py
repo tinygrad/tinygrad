@@ -354,6 +354,12 @@ def train_retinanet():
     out = model(X)
     return out.realize()
   func = None
+  # b SHAPE for anchor_gen
+  # (44, 256, 100, 100)
+  # (44, 256, 50, 50)
+  # (44, 256, 25, 25)
+  # (44, 256, 13, 13)
+  # (44, 256, 7, 7)
   for epoch in range(EPOCHS):
     print(colored(f'EPOCH {epoch}/{EPOCHS}:', 'cyan'))
     # train_step.reset()
