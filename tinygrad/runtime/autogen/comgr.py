@@ -27,6 +27,7 @@ def char_pointer_cast(string, encoding='utf-8'):
     return ctypes.cast(string, ctypes.POINTER(ctypes.c_char))
 
 
+
 _libraries = {}
 _libraries['libamd_comgr.so'] = ctypes.CDLL(os.getenv('ROCM_PATH')+'/lib/libamd_comgr.so' if os.getenv('ROCM_PATH') else ctypes.util.find_library('amd_comgr'))
 c_int128 = ctypes.c_ubyte*16
