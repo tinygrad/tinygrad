@@ -187,7 +187,8 @@ class NVProgram:
       if section_name == ".nv.info":
         section_data = memoryview(bytearray(self.lib[sh_offset:sh_offset+sh_size])).cast("I")
         for i in range(sh_size // 12):
-          if section_data[i * 3 + 0] & 0xffff == 0x1204 and section_data[i * 3 + 2] > 0x640: raise RuntimeError("too high local memory")
+          if section_data[i * 3 + 0] & 0xffff == 0x1204 and section_data[i * 3 + 2] > self.device.slm_per_thread:
+            raise RuntimeError("too high local memory")
 
     # constant buffer 0 is filled for each program, no need to copy it from elf (it's just zeroes)
     if 0 in constant_buffers_data: constant_buffers_data.pop(0)
@@ -209,13 +210,14 @@ class NVProgram:
     self.constbuffer_0 = [0] * 88
     self.constbuffer_0[6:12] = [*nvdata64_le(self.device.shared_mem_window), *nvdata64_le(self.device.local_mem_window), *nvdata64_le(0xfffdc0)]
 
-    smem_config = max(8 * 1024, min(96 * 1024, round_up(self.shmem_usage, 8 * 1024))) // 4096 + 1
+    self.shmem_usage = min(shmem_config * 1024 for shmem_config in [8, 16, 32, 64, 96] if shmem_config * 1024 >= self.shmem_usage)
+    smem_config = self.shmem_usage // 4096 + 1
     self.qmd = qmd_struct_t(qmd_group_id=0x3f, sm_global_caching_enable=1, invalidate_texture_header_cache=1, invalidate_texture_sampler_cache=1,
                             invalidate_texture_data_cache=1, invalidate_shader_data_cache=1, api_visible_call_limit=1, sampler_index=1,
                             cwd_membar_type=nv_gpu.NVC6C0_QMDV03_00_CWD_MEMBAR_TYPE_L1_SYSMEMBAR, qmd_major_version=3,
                             shared_memory_size=max(0x400, round_up(self.shmem_usage, 0x100)), min_sm_config_shared_mem_size=smem_config,
                             max_sm_config_shared_mem_size=0x1a, register_count_v=self.registers_usage, target_sm_config_shared_mem_size=smem_config,
-                            barrier_count=1, shader_local_memory_high_size=0x640, program_prefetch_size=0x10, sass_version=0x89,
+                            barrier_count=1, shader_local_memory_high_size=self.device.slm_per_thread, program_prefetch_size=0x10, sass_version=0x89,
                             program_address_lower=self.lib_gpu.base&0xffffffff, program_address_upper=self.lib_gpu.base>>32,
                             program_prefetch_addr_lower_shifted=self.lib_gpu.base>>8, program_prefetch_addr_upper_shifted=self.lib_gpu.base>>40,
                             constant_buffer_size_shifted4_0=0x190, constant_buffer_valid_0=1, constant_buffer_invalidate_0=1)
@@ -534,14 +536,18 @@ class NVDevice(Compiled):
     return ws_token_params.workSubmitToken
 
   def _cmdq_setup_compute_gpfifo(self):
-    self.local_mem_window = self._gpu_alloc(256 << 20, huge_page=True, contig=True).base
-    self.shader_local_mem = self._gpu_alloc(256 << 20, huge_page=True, contig=True).base
-    self.shared_mem_window = self._gpu_alloc(256 << 20, huge_page=True, contig=True).base
+    self.slm_per_thread = 0x900
+    bytes_per_warp = round_up(self.slm_per_thread * 32, 0x200)
+    bytes_per_tpc = round_up(bytes_per_warp * 48 * 2, 0x8000)
+    self.shader_local_mem = self._gpu_alloc(round_up(bytes_per_tpc * 64, 0x20000), huge_page=True, contig=True).base
+
+    # Set windows addresses to not collide with other allocated buffers.
+    self.shared_mem_window, self.local_mem_window = 0xfe000000, 0xff000000
 
     queue = HWComputeQueue()
     queue.q += [nvmethod(1, nv_gpu.NVC6C0_SET_OBJECT, 1), nv_gpu.ADA_COMPUTE_A]
     queue.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_A, 2), *nvdata64(self.shader_local_mem)]
-    queue.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_NON_THROTTLED_A, 3), *nvdata64(0x4b0000), 0x40]
+    queue.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_NON_THROTTLED_A, 3), *nvdata64(bytes_per_tpc), 0x40]
     queue.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_WINDOW_A, 2), *nvdata64(self.local_mem_window)]
     queue.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_SHARED_MEMORY_WINDOW_A, 2), *nvdata64(self.shared_mem_window)]
     queue.submit(self)
