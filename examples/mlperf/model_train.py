@@ -354,6 +354,19 @@ def train_retinanet():
     out = model(X)
     return out.realize()
   func = None
+  X = Tensor.rand((BS, 3, 800, 800)).shard(GPUS, axis=0)
+  b,_,_ = model(X, True)
+  for bb in b:
+    print(bb.shape)
+  ANCHORS = anchor_generator(X.shape, b)
+  ANCHORS = [a.realize() for a in ANCHORS]
+  ANCHORS_STACK = Tensor.stack(ANCHORS)
+  # print('ANCHOR_STACK', ANCHORS[0].shape)
+  # sys.exit()
+  ANCHORS_STACK = ANCHORS_STACK.shard(GPUS, axis=0)
+  func = lambda x: model.matcher_gen_per_img(ANCHORS[0], x)
+  mdl_reg_loss = lambda r, y, m, b_t: model.head.regression_head.loss(r,y,ANCHORS_STACK, m, b_t)
+  mdl_class_loss = lambda c, y,m, l_t: model.head.classification_head.loss(c,y,m, l_t)
   for epoch in range(EPOCHS):
     print(colored(f'EPOCH {epoch}/{EPOCHS}:', 'cyan'))
     # train_step.reset()
@@ -373,87 +386,66 @@ def train_retinanet():
       data_time = time.perf_counter() - data_end
       st = time.perf_counter()
       X = X.shard(GPUS, axis=0)
-      if(cnt==0 and epoch==0):
-        # o_x, oyb, oyl, omi = X, Y_boxes_p, Y_labels_p, M_IDXS
-        # INIT LOSS FUNC
-        b,_,_ = mdlrun(X)
-        for bb in b:
-          print(bb.shape)
-        ANCHORS = anchor_generator(X.shape, b)
-        ANCHORS = [a.realize() for a in ANCHORS]
-        ANCHORS_STACK = Tensor.stack(ANCHORS)
-        # print('ANCHOR_STACK', ANCHORS[0].shape)
-        # sys.exit()
-        ANCHORS_STACK = ANCHORS_STACK.shard(GPUS, axis=0)
-        func = lambda x: model.matcher_gen_per_img(ANCHORS[0], x)
-        # print(func)
-        mdlrun.reset()
-        # mdl_reg_loss_jit = TinyJit(lambda r, y, m: model.head.regression_head.loss(r,y,ANCHORS, m).realize())
-        # mdl_class_loss_jit = TinyJit(lambda c, y,m: model.head.classification_head.loss(c,y,m).realize())
-        mdl_reg_loss = lambda r, y, m, b_t: model.head.regression_head.loss(r,y,ANCHORS_STACK, m, b_t)
-        mdl_class_loss = lambda c, y,m, l_t: model.head.classification_head.loss(c,y,m, l_t)
-        break
 
-      else:
-        # print('ANCHORS', len(ANCHORS), ANCHORS[0].mean().item(), ANCHORS[1].mean().item())
-        # matcher_gen not jittable for now
-        pre_match = time.perf_counter()
-        # matched_idxs = model.matcher_gen(ANCHORS, Y_boxes) #.realize()
-        # matched_idxs = Tensor.stack(M_IDXS).realize()
-        matched_idxs = M_IDXS
-        # print('MATCHED_IDX', matched_idxs.mean().item())
-        pre_zip = time.perf_counter()
+      # print('ANCHORS', len(ANCHORS), ANCHORS[0].mean().item(), ANCHORS[1].mean().item())
+      # matcher_gen not jittable for now
+      pre_match = time.perf_counter()
+      # matched_idxs = model.matcher_gen(ANCHORS, Y_boxes) #.realize()
+      # matched_idxs = Tensor.stack(M_IDXS).realize()
+      matched_idxs = M_IDXS
+      # print('MATCHED_IDX', matched_idxs.mean().item())
+      pre_zip = time.perf_counter()
 
-        # Work around for zipping a sharded tensor
-        # Need to think of clean way to execute
-        # boxes_temp = []
-        # for tb, m in zip(Y_boxes_p, matched_idxs):
-        #   boxes_temp.append(tb[m].realize())
-        # boxes_temp = Tensor.stack(boxes_temp)
-        # labels_temp = []
-        # for tl, m in zip(Y_labels_p, matched_idxs):
-        #   labels_temp.append(tl[m].realize())
-        # labels_temp = Tensor.stack(labels_temp)
-        # boxes_temp = Tensor.stack(Y_boxes_p).realize()
-        # labels_temp = Tensor.stack(Y_labels_p).realize()
-        boxes_temp = Y_boxes_p
-        labels_temp = Y_labels_p
-        # print('matched_IDXS', matched_idxs.shape, len(Y_boxes))
-        pre_shard = time.perf_counter()
-        # print('MATH_DEVICE', matched_idxs.device)
-        matched_idxs = matched_idxs.shard(GPUS, axis=0)
-        # print('POST_MATH_DEVICE', matched_idxs.device)
-        # # Y_boxes_p.shard_(GPUS, axis=0)
-        # # Y_labels_p.shard_(GPUS, axis=0)
-        boxes_temp = boxes_temp.shard(GPUS, axis=0)
-        labels_temp = labels_temp.shard(GPUS, axis=0)
-        post_shard = time.perf_counter() - pre_shard
-        jit_t = time.perf_counter()
-        loss = train_step(X, None, None, matched_idxs, boxes_temp, labels_temp)
-        jitted_time = time.perf_counter()-jit_t
-        if lr_sched is not None:
-          lr_sched.step()
-        et = time.perf_counter()-st
-        if cnt%1==0:
-          # print(f'hit {(pre_zip-pre_match)*1000.0} {(pre_shard-pre_zip)*1000.0}'
-          #       f' {jitted_time*1000.0} {post_shard*1000.0}')
-          # print(X.shape, matched_idxs.shape, boxes_temp.shape, labels_temp.shape)
-          # print(colored(f'{cnt} STEP {loss.item():.5f}, time: {et*1000.0:7.2f} ms run, '
-          #               f'data: {data_time*1000.0:7.2f} ms|| LR: {optimizer.lr.numpy().item():.6f}, '
-          #               f'mem: {GlobalCounters.mem_used / 1e9:.4f} GB used, '
-          #               f'GFLOPS: {GlobalCounters.global_ops * 1e-9 / et:7.2f}', 'magenta'))
-          print(colored(f'{cnt} STEP {loss.shape}, time: {et*1000.0:7.2f} ms run, '
-                        f'data: {data_time*1000.0:7.2f} ms|| '
-                        f'mem: {GlobalCounters.mem_used / 1e9:.4f} GB used, '
-                        f'GFLOPS: {GlobalCounters.global_ops * 1e-9 / et:7.2f}', 'magenta'))
-        if cnt%5==0:
-          ll = loss.item()
-          print(f'LOSS: {ll:.5f}')
-          wandb.log({'train/loss':ll})
-        data_end = time.perf_counter()
-        # if cnt>5 and epoch==0: 
-        #   # train_step.reset()
-        #   break
+      # Work around for zipping a sharded tensor
+      # Need to think of clean way to execute
+      # boxes_temp = []
+      # for tb, m in zip(Y_boxes_p, matched_idxs):
+      #   boxes_temp.append(tb[m].realize())
+      # boxes_temp = Tensor.stack(boxes_temp)
+      # labels_temp = []
+      # for tl, m in zip(Y_labels_p, matched_idxs):
+      #   labels_temp.append(tl[m].realize())
+      # labels_temp = Tensor.stack(labels_temp)
+      # boxes_temp = Tensor.stack(Y_boxes_p).realize()
+      # labels_temp = Tensor.stack(Y_labels_p).realize()
+      boxes_temp = Y_boxes_p
+      labels_temp = Y_labels_p
+      # print('matched_IDXS', matched_idxs.shape, len(Y_boxes))
+      pre_shard = time.perf_counter()
+      # print('MATH_DEVICE', matched_idxs.device)
+      matched_idxs = matched_idxs.shard(GPUS, axis=0)
+      # print('POST_MATH_DEVICE', matched_idxs.device)
+      # # Y_boxes_p.shard_(GPUS, axis=0)
+      # # Y_labels_p.shard_(GPUS, axis=0)
+      boxes_temp = boxes_temp.shard(GPUS, axis=0)
+      labels_temp = labels_temp.shard(GPUS, axis=0)
+      post_shard = time.perf_counter() - pre_shard
+      jit_t = time.perf_counter()
+      loss = train_step(X, None, None, matched_idxs, boxes_temp, labels_temp)
+      jitted_time = time.perf_counter()-jit_t
+      if lr_sched is not None:
+        lr_sched.step()
+      et = time.perf_counter()-st
+      if cnt%1==0:
+        # print(f'hit {(pre_zip-pre_match)*1000.0} {(pre_shard-pre_zip)*1000.0}'
+        #       f' {jitted_time*1000.0} {post_shard*1000.0}')
+        # print(X.shape, matched_idxs.shape, boxes_temp.shape, labels_temp.shape)
+        # print(colored(f'{cnt} STEP {loss.item():.5f}, time: {et*1000.0:7.2f} ms run, '
+        #               f'data: {data_time*1000.0:7.2f} ms|| LR: {optimizer.lr.numpy().item():.6f}, '
+        #               f'mem: {GlobalCounters.mem_used / 1e9:.4f} GB used, '
+        #               f'GFLOPS: {GlobalCounters.global_ops * 1e-9 / et:7.2f}', 'magenta'))
+        print(colored(f'{cnt} STEP {loss.shape}, time: {et*1000.0:7.2f} ms run, '
+                      f'data: {data_time*1000.0:7.2f} ms|| '
+                      f'mem: {GlobalCounters.mem_used / 1e9:.4f} GB used, '
+                      f'GFLOPS: {GlobalCounters.global_ops * 1e-9 / et:7.2f}', 'magenta'))
+      if cnt%5==0:
+        ll = loss.item()
+        print(f'LOSS: {ll:.5f}')
+        wandb.log({'train/loss':ll})
+      data_end = time.perf_counter()
+      # if cnt>5 and epoch==0: 
+      #   # train_step.reset()
+      #   break
       cnt+=1
       if cnt%50==0:
         if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
