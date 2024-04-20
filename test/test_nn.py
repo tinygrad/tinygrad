@@ -88,7 +88,8 @@ class TestNN(unittest.TestCase):
         np.testing.assert_allclose(bn.running_var.flatten().numpy(), tbn.running_var.detach().numpy(), rtol=1e-5, atol=1e-6)
 
         # trial
-        inn = Tensor.randn(256, sz, 112, 112)
+        sample_means = Tensor.randn(256, sz, 1, 1) * 2
+        inn = Tensor.randn(256, sz, 112, 112) + sample_means
 
         # in tinygrad
         outt = bn(inn)
