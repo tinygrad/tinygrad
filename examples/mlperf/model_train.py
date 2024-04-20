@@ -243,10 +243,12 @@ def train_resnet():
 def train_retinanet():
   from contextlib import redirect_stdout
   import numpy as np
+  WANDB = True
   HOSTNAME = getenv('SLURM_STEP_NODELIST', '3080')
   EPOCHS = 100
   BS = 16 # A100x2
-  BS=2 
+  BS=2*4*4
+  BS=44
   # BS = 3*6
   # BS = 5*8
   # BS = 2*4
@@ -261,7 +263,9 @@ def train_retinanet():
   SYNCBN = True
   # dtypes.default_float = dtypes.bfloat16
   loss_scaler = 128.0 if dtypes.default_float in [dtypes.float16, dtypes.bfloat16] else 1.0
-
+  if WANDB:
+    import wandb
+    wandb.init(project='RetinaNet')
   print(f"Training on {GPUS}")
   for x in GPUS: Device[x]
   from extra.models.retinanetNew import RetinaNet, AnchorGenerator
@@ -431,8 +435,8 @@ def train_retinanet():
           lr_sched.step()
         et = time.perf_counter()-st
         if cnt%1==0:
-          print(f'hit {(pre_zip-pre_match)*1000.0} {(pre_shard-pre_zip)*1000.0}'
-                f' {jitted_time*1000.0} {post_shard*1000.0}')
+          # print(f'hit {(pre_zip-pre_match)*1000.0} {(pre_shard-pre_zip)*1000.0}'
+          #       f' {jitted_time*1000.0} {post_shard*1000.0}')
           # print(X.shape, matched_idxs.shape, boxes_temp.shape, labels_temp.shape)
           # print(colored(f'{cnt} STEP {loss.item():.5f}, time: {et*1000.0:7.2f} ms run, '
           #               f'data: {data_time*1000.0:7.2f} ms|| LR: {optimizer.lr.numpy().item():.6f}, '
@@ -442,18 +446,22 @@ def train_retinanet():
                         f'data: {data_time*1000.0:7.2f} ms|| '
                         f'mem: {GlobalCounters.mem_used / 1e9:.4f} GB used, '
                         f'GFLOPS: {GlobalCounters.global_ops * 1e-9 / et:7.2f}', 'magenta'))
+        if cnt%5==0:
+          ll = loss.item()
+          print(f'LOSS: {ll:.5f}')
+          wandb.log({'train/loss':ll})
         data_end = time.perf_counter()
         # if cnt>5 and epoch==0: 
         #   # train_step.reset()
         #   break
       cnt+=1
-
-    # if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
-    # fn = f"./ckpts/retinanet_{HOSTNAME}_B{BS}_E{epoch}.safe"
-    # state_dict = get_state_dict(model)
-    # # print(state_dict.keys())
-    # safe_save(state_dict, fn)
-    # print(f" *** Model saved to {fn} ***")
+      if cnt%50==0:
+        if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
+        fn = f"./ckpts/retinanet_{len(GPUS)}x{HOSTNAME}_B{BS}_E{epoch}_{cnt}.safe"
+        state_dict = get_state_dict(model)
+        # print(state_dict.keys())
+        safe_save(state_dict, fn)
+        print(f" *** Model saved to {fn} ***")
 
     # # ****EVAL STEP
     # # train_step.reset()

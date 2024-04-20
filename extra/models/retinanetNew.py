@@ -314,7 +314,8 @@ class Matcher(object):
     matches = match_quality_matrix.argmax(axis=0)
     if self.allow_low_quality_matches:
       # all_matches = matches.clone()
-      all_matches = Tensor(matches.numpy())
+      # all_matches = Tensor(matches.numpy())
+      all_matches = matches
     else:
       all_matches = None
 
