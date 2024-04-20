@@ -249,8 +249,249 @@ def train_unet3d():
   pass
 
 def train_rnnt():
-  # TODO: RNN-T
-  pass
+  traint0 = time.time()
+  import numpy as np
+  import sentencepiece
+  import gc
+  from extra.datasets import librispeech2
+  from extra.models.rnnt2 import RNNT
+  import math
+
+  seed = 0
+  print(f"{seed=}")
+
+  n_classes = 1024
+  in_feats = 256
+  enc_n_hid = 1024
+  enc_pre_rnn_layers = 2
+  enc_post_rnn_layers = 3
+  enc_dropout = 0.1
+  pred_dropout = 0.3
+  joint_dropout = 0.3
+
+  pred_n_hid = 512
+  pred_rnn_layers = 2
+  joint_n_hid = 512
+  batch_size = 32
+
+  forget_gate_bias = 1.0
+  weights_init_scale = 0.45
+
+  maxT = 642
+  maxU = 126
+
+  opt_eps=1e-9
+  wd=1e-3
+  ema=0.994
+  opt_b1 = 0.9
+  opt_b2 = 0.9985
+  lr=0.0062
+  min_lr=1e-5
+  lr_exp_gamma=0.915
+  max_global_norm=1.0
+
+  epochs = 60
+  warmup_epochs=1
+  hold_epochs=11
+  eval_epochs =1
+
+  samples_per_step = 512
+
+  gpus = [f"cuda:{i}" for i in range(2)]
+  # gpus = [f"cuda:{i}" for i in range(1)]
+  librispeech2.download_and_process_alldata(remove_notfinal_files=True)
+  train_loader = librispeech2.DataLoader(batch_size=batch_size,gpus=gpus,eval=False,shuffle=True,seed=seed)
+
+  Tensor.manual_seed(seed)
+  dtype=dtypes.float32
+
+  model = RNNT(gpus,
+  nclasses = n_classes,
+  enc_input_size = in_feats,
+  enc_hid_size = enc_n_hid,
+  enc1_layers = enc_pre_rnn_layers,
+  enc2_layers = enc_post_rnn_layers,
+  pred_layers = pred_rnn_layers,
+  batch_size = batch_size,
+  pred_input_size = pred_n_hid,
+  pred_hid_size = pred_n_hid,
+  lin_outputsize = joint_n_hid,
+  enc_dropout = enc_dropout,
+  pred_dropout = pred_dropout,
+  joint_dropout = joint_dropout,
+  forget_gate_bias = forget_gate_bias,
+  weights_init_scale = weights_init_scale,
+  maxT=maxT,maxU=maxU,
+  opt_eps=opt_eps,
+  wd=wd,
+  ema=ema,
+  opt_b1 = opt_b1,
+  opt_b2 = opt_b2,
+  lr=lr,
+  min_lr=min_lr,
+  max_global_norm=max_global_norm,
+  lr_exp_gamma=lr_exp_gamma,
+  grad_accumulation_factor=1/int(samples_per_step/(batch_size*len(gpus))),
+  warmup_epochs=warmup_epochs,
+  hold_epochs=hold_epochs,
+  beam=16, debug=0,dtype=dtype)
+
+  assert samples_per_step % (len(gpus)*batch_size) == 0
+
+  acc_steps_per_epoch = math.floor(len(train_loader.active_data)/(samples_per_step))
+  batch_steps_per_step = int(samples_per_step/(len(gpus)*batch_size))
+  model.opt_steps_per_epoch = acc_steps_per_epoch
+  print(f"all files {len(train_loader.filedata)}, within maxduration {len(train_loader.active_data)}, minibatch count {len(train_loader.iter)}, files per epoch {samples_per_step*acc_steps_per_epoch}")
+  print(f"{epochs=} {hold_epochs=} {warmup_epochs=} {acc_steps_per_epoch=} {batch_steps_per_step=} {samples_per_step=} {batch_size=}")
+
+  def warmup():
+    for lrtens in model.lrtens:
+      lrtens.assign(Tensor.zeros_like(lrtens).contiguous()).realize()
+    for len_a, len_t in ((8,8),(maxT,maxU-1)):
+      audio = [Tensor.ones(len_a,batch_size,in_feats, device=gpu, dtype=dtype).pad(((0,model.maxT-len_a),None,None)).contiguous().realize() for gpu in gpus]
+      audio_len = [Tensor.full(shape=(batch_size,), fill_value=len_a, device=gpu, dtype=dtypes.int32).contiguous().realize() for gpu in gpus]
+      txt = [Tensor.ones(batch_size,len_t, device=gpu, dtype=dtypes.int32).pad((None,(0,model.maxU-1-len_t))).contiguous().realize() for gpu in gpus]
+      txt_len = [Tensor.full(batch_size,fill_value=len_t, device=gpu).contiguous().realize() for gpu in gpus]
+      loss = model.forward(audio,audio_len,txt,txt_len)
+      model.backward()
+      model.step()
+      model.zero_grads()
+  warmup()
+
+  def levenshtein(a, b):
+    n, m = len(a), len(b)
+    if n > m:
+        a, b = b, a
+        n, m = m, n
+
+    current = list(range(n + 1))
+    for i in range(1, m + 1):
+        previous, current = current, [i] + [0] * n
+        for j in range(1, n + 1):
+            add, delete = previous[j] + 1, current[j - 1] + 1
+            change = previous[j - 1]
+            if a[j - 1] != b[i - 1]:
+                change = change + 1
+            current[j] = min(add, delete, change)
+
+    return current[n]
+  def evaluate():
+    model.del_joint_bufs()
+
+    batch_size = 120
+
+    model_eval = RNNT(gpus,
+      nclasses = n_classes,
+      enc_input_size = in_feats,
+      enc_hid_size = enc_n_hid,
+      enc1_layers = enc_pre_rnn_layers,
+      enc2_layers = enc_post_rnn_layers,
+      pred_layers = pred_rnn_layers,
+      batch_size = batch_size,
+      pred_input_size = pred_n_hid,
+      pred_hid_size = pred_n_hid,
+      lin_outputsize = joint_n_hid,
+      enc_dropout = 0,
+      pred_dropout = 0,
+      joint_dropout = 0,
+      maxT=1092,maxU=189,
+      beam=2, debug=0,dtype=dtype,eval=True)
+    model_eval.copy_parameters(model_eval.parameters,model.ema_parameters)
+    # model_eval.load_parameters(f"{librispeech2.basedir}/weights_wer12.66.dat")
+
+    sent = sentencepiece.SentencePieceProcessor(model_file="/datasets/LibriSpeech/librispeech1023.model")
+    import torch
+
+    loader = librispeech2.DataLoader(batch_size,gpus=gpus,eval=True,shuffle=False,seed=seed)
+    words_tot, scores_tot = 0,0
+    maxn = math.ceil(len(loader.iter)/len(gpus))
+    t2 = time.time()
+    for n in range(maxn):
+      t1 = time.time()
+      if n == maxn-1:
+        n2 = len(loader.iter) % len(gpus)
+        if n2 == 0: n2 = len(gpus)
+        data = [next(loader) for _ in range(n2)]
+        for _ in range(n2,len(gpus)):
+          data += [[torch.zeros_like(el) for el in data[0]]]
+      else:
+        data = [next(loader) for _ in range(len(gpus))]
+
+      audio, audio_len, txt, txt_len=list(zip(*data))
+      topad = batch_size-audio_len[0].shape[0]
+      audio = [Tensor(audio.cpu().numpy(), device=gpu).pad((None,(0,topad),None)).contiguous().realize() for audio,gpu in zip(audio,gpus)]
+      audio_len = [Tensor(audio_len.cpu().numpy(), device=gpu).pad(((0,topad),)).contiguous().realize() for audio_len,gpu in zip(audio_len,gpus)]
+      txt = [Tensor(txt.cpu().numpy(), device=gpu).pad(((0,topad),None)).contiguous().realize() for txt,gpu in zip(txt,gpus)]
+      txt_len = [Tensor(txt_len.cpu().numpy(), device=gpu).pad(((0,topad),)).contiguous().realize() for txt_len,gpu in zip(txt_len,gpus)]
+
+      token_pred = model_eval.evaluate_batch(audio,audio_len)
+
+      pred = sent.decode(token_pred)
+
+      alltxt = np.concatenate([el.numpy() for el in txt])
+      alltxt_len = np.concatenate([el.numpy() for el in txt_len])
+      res = sent.decode([el[:len].tolist() for el,len in zip(alltxt, alltxt_len)])
+
+      words = 0
+      scores = 0
+      for p,r in zip(pred,res):
+        words += len(r.split())
+        scores += levenshtein(p.split(), r.split())
+      words_tot += words
+      scores_tot += scores
+      wer = scores/words
+      print(f"{(t:=time.time())-traint0:>5.1f}s {t-t1:.2f}s {n:>3}/{math.ceil(len(loader.iter)/len(gpus))} wer {wer*100:>6.3f}% words {words:>4} scores {scores:>3} samples {batch_size*len(gpus)}, speed {10**3*(t-t1)/(batch_size*len(gpus)):>3.0f} ms/s")
+
+    wer = scores_tot/words_tot
+    print(f"{(t:=time.time())-t2:>5.1f}s total wer {wer*100:.3f}% words {words_tot} scores {scores_tot}")
+
+    del model_eval, loader, data, audio, audio_len, txt, txt_len
+    gc.collect()
+
+    for gpu in gpus: Device[gpu].allocator.free_cache()
+    model.remake_joint_bufs()
+
+    return wer
+
+  # evaluate()
+
+  lossacc = 0
+  for epoch in range(epochs):
+    epochtime = time.time()
+    for n1 in range(acc_steps_per_epoch):
+      t2 = time.time()
+      for n2 in range(batch_steps_per_step):
+        t1 = time.time()
+        data = [next(train_loader) for _ in range(len(gpus))]
+        audio, audio_len, txt, txt_len=list(zip(*data))
+        audio = [Tensor(audio.cpu().numpy(), device=gpu).realize() for audio,gpu in zip(audio,gpus)]
+        audio_len = [Tensor(audio_len.cpu().numpy(), device=gpu).realize() for audio_len,gpu in zip(audio_len,gpus)]
+        txt = [Tensor(txt.cpu().numpy(), device=gpu).realize() for txt,gpu in zip(txt,gpus)]
+        txt_len = [Tensor(txt_len.cpu().numpy(), device=gpu).realize() for txt_len,gpu in zip(txt_len,gpus)]
+
+        losses = model.forward(audio,audio_len,txt,txt_len)
+        loss = np.concatenate([el.numpy() for el in losses]).sum().item()
+        lossacc += loss
+        model.backward()
+        model.synchronize()
+
+        # print(f"{(t:=time.time())-traint0:.3f}s epoch {epoch+1} {(n1*(batch_steps_per_step)+n2+1)}/{math.floor(len(train_loader.active_data)/(samples_per_step))*batch_steps_per_step} {t-t1:.3f}s, loss {loss:.4e}, {10**3*(t-t1)/(len(gpus)*batch_size):.2f} ms/s, {len(gpus)*batch_size/(t-t1):.1f} s/sec")
+
+      model.step(epoch,n1)
+      model.zero_grads()
+      model.apply_ema(*model.ema_parameters,*model.parameters)
+      print(f"{(t:=time.time())-traint0:.3f}s epoch {epoch+1} stepped {n1+1}/{acc_steps_per_epoch}, {t-t2:.3f}s, loss {lossacc:.3f}, {10**3*(t-t2)/(len(gpus)*batch_size*batch_steps_per_step):.2f} ms/s, lr {model.lrlast:.5f}")
+      # print()
+
+      lossacc = 0
+    for data in train_loader:
+      pass
+    train_loader.iter.reset()
+    model.save_parameters(filename=f"{librispeech2.basedir}/LibriSpeech/parameters_ema.dat", ema=True)
+    model.save_parameters(filename=f"{librispeech2.basedir}/LibriSpeech/parameters_opt.dat", ema=False,opt_parameters=True)
+    print(f"{(t:=time.time())-traint0:.3f}s epoch time {time.time()-epochtime:.3f}s")
+    if (epoch+1) % eval_epochs == 0:
+      evaluate()
 
 def train_bert():
   # TODO: BERT
@@ -261,10 +502,11 @@ def train_maskrcnn():
   pass
 
 if __name__ == "__main__":
-  multiprocessing.set_start_method('spawn')
-  with Tensor.train():
-    for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn").split(","):
-      nm = f"train_{m}"
-      if nm in globals():
-        print(f"training {m}")
-        globals()[nm]()
+  train_rnnt()
+  # multiprocessing.set_start_method('spawn')
+  # with Tensor.train():
+  #   for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn").split(","):
+  #     nm = f"train_{m}"
+  #     if nm in globals():
+  #       print(f"training {m}")
+  #       globals()[nm]()
