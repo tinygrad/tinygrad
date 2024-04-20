@@ -68,7 +68,8 @@ class CUDACompiler(Compiler):
     self.arch = arch
     CUDACompiler.compiler_opts = CUDACompiler.compiler_opts._replace(has_tensor_cores=int(arch[3:]) >= 80)
     check(cuda.nvrtcVersion((nvrtcMajor := ctypes.c_int()), (nvrtcMinor := ctypes.c_int())))
-    self.compile_options = [f'--gpu-architecture={arch}', "-I/usr/local/cuda/include", "-I/usr/include", "-I/opt/cuda/include/"]
+    self.compile_options = [f'--gpu-architecture={arch}', "-I/usr/local/cuda/include", "-I/usr/include", "-I/opt/cuda/include/",
+                            '-I/home/nr620/.local/lib/python3.9/site-packages/nvidia/cuda_runtime/include']
     if (nvrtcMajor.value, nvrtcMinor.value) >= (12, 4): self.compile_options.append("--minimal")
     super().__init__(f"compile_cuda_{self.arch}")
   def render(self, name:str, uops) -> str: return CUDARenderer(name, uops)
