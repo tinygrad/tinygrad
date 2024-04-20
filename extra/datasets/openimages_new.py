@@ -18,7 +18,7 @@ class ConvertCocoPolysToMask(object):
 
   def __call__(self, image, target):
     # w, h = image.size
-    h, w = image.size
+    w,h = image.size
 
     image_id = target["image_id"]
     image_id = Tensor([image_id], requires_grad=False)
