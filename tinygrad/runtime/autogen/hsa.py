@@ -6,8 +6,7 @@
 # POINTER_SIZE is: 8
 # LONGDOUBLE_SIZE is: 16
 #
-import ctypes, os
-from ctypes.util import find_library
+import ctypes, ctypes.util, os
 
 
 def string_cast(char_pointer, encoding='utf-8', errors='strict'):
@@ -30,11 +29,7 @@ def char_pointer_cast(string, encoding='utf-8'):
 
 
 _libraries = {}
-_libraries['libhsa-runtime64.so'] = ctypes.CDLL(
-    os.getenv('ROCM_PATH')+'/lib/libhsa-runtime64.so'
-    if os.getenv('ROCM_PATH')
-    else find_library('hsa-runtime64')
-)
+_libraries['libhsa-runtime64.so'] = ctypes.CDLL(os.getenv('ROCM_PATH')+'/lib/libhsa-runtime64.so' if os.getenv('ROCM_PATH') else ctypes.util.find_library('hsa-runtime64'))
 class AsDictMixin:
     @classmethod
     def as_dict(cls, self):
