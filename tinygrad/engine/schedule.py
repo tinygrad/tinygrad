@@ -210,10 +210,34 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
       realizes[tr] = None
     else: reduce_for_op.update((tr, r) for tr in realized_children)
 
+  group_for_output: Dict[LazyBuffer, LazyBuffer] = {}
+  for r in realizes:
+    if r in reduce_for_op or r.op in ReduceOps or r in group_for_output: continue
+    r_parents = deque([r])
+    realized_parents: Set[LazyBuffer] = set()
+    while r_parents:
+      if (p:=r_parents.pop()).realized or p.op in LoadOps: continue
+      if p in realizes and p is not r:
+        if not p.forced_realize and p not in reduce_for_op and p.shape == r.shape and p.op not in LoadOps: realized_parents.add(p)
+        continue
+      for next_p in p.srcs: r_parents.append(next_p.base)
+
+    for rp in realized_parents:
+      can_group = True
+      rp_children = deque(children[rp])
+      while rp_children and can_group:
+        if (c:=rp_children.pop()).realized or c.op is LoadOps.CONST: continue
+        if c in realizes and c is not r:
+          can_group = False
+          break
+        for next_c in children[c]: rp_children.append(next_c.base)
+      if can_group: group_for_output[rp] = r
+
   output_groups: DefaultDict[Tuple, List[LazyBuffer]] = defaultdict(list)
   for r in realizes:
     if r.realized is not None or r.op is LoadOps.CONST or r in seen: continue
-    output_groups[(reduce_for_op[r], ) if r in reduce_for_op and MULTIOUTPUT else (r, )].append(r)
+    group_key = reduce_for_op[r] if r in reduce_for_op else group_for_output[r] if r in group_for_output else None
+    output_groups[(group_key if MULTIOUTPUT and group_key is not None else r, )].append(r)
 
   # preschedule all buffers in realizes
   prescheduled = {group[0]:_schedule_group(tuple(group), realizes, reduce_for_op) for group in output_groups.values()}
