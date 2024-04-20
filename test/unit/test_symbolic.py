@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import unittest, pickle
-from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, LtNode, ModNode, Node, sym_render, sym_infer, create_lt_node, create_ge_node
+from tinygrad.shape.symbolic import MeanNode, MulNode, SumNode, Variable, NumNode, LtNode, ModNode, Node, sym_render, sym_infer, create_lt_node, create_ge_node
 
 class TestSymbolicPickle(unittest.TestCase):
   def _test_pickle_unpickle(self, x): self.assertEqual(x, pickle.loads(pickle.dumps(x)))
@@ -247,6 +247,18 @@ class TestSymbolic(unittest.TestCase):
 
   def test_div_into_mod(self):
     self.helper_test_variable((Variable("idx", 0, 16)*4)%8//4, 0, 1, "(idx%2)")
+
+  def test_mean_node(self):
+    mean_node = MeanNode.mean([Variable("a", 1, 5), Variable("b", 2, 6),  Variable("c", 3, 7)])
+    self.assertIsInstance(mean_node, MeanNode)
+    self.assertEqual(mean_node.get_bounds(), (2, 6))
+    # substituted = mean_node.substitute({"a": NumNode(5), "b": NumNode(5), "c": NumNode(5)})
+    # self.assertIsInstance(substituted, NumNode)
+    # self.assertEqual(substituted.b, 5)
+
+  def test_mean_node_render(self):
+    mean_node = MeanNode.mean([Variable("a", 1, 10), Variable("b", 1, 10),  Variable("c", 1, 10)])
+    self.assertEqual(mean_node.render(), "mean([a, b, c])")
 
 class TestSymbolicNumeric(unittest.TestCase):
   def helper_test_numeric(self, f):

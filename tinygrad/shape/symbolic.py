@@ -299,6 +299,19 @@ class AndNode(RedNode):
       subed.append(sub)
     return Node.ands(subed)
 
+class MeanNode(RedNode):
+  def get_bounds(self) -> Tuple[int, sint]:
+    return (sum([x.min for x in self.nodes]) // len(self.nodes),
+            sum([x.max for x in self.nodes]) // len(self.nodes))
+
+  def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node:
+    return self.mean([node.substitute(var_vals) for node in self.nodes])
+
+  @staticmethod
+  def mean(nodes:List[Node]) -> Node:
+    if len(nodes) == 1: return nodes[0]
+    return MeanNode(nodes)
+
 def sym_render(a: Union[Node, int], ops=None, ctx=None) -> str: return str(a) if isinstance(a, int) else a.render(ops, ctx)
 def sym_infer(a: Union[Node, int], var_vals: Optional[Dict[Variable, int]]) -> int:
   if isinstance(a, (int, float)): return a
@@ -326,4 +339,5 @@ render_python: Dict[Type, Callable[..., str]] = {
   LtNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}<{sym_render(self.b,ops,ctx)})",
   SumNode: lambda self,ops,ctx: f"({'+'.join(sorted([x.render(ops,ctx) for x in self.nodes]))})",
   AndNode: lambda self,ops,ctx: f"({' and '.join(sorted([x.render(ops,ctx) for x in self.nodes]))})",
+  MeanNode: lambda self, ops, ctx: f"mean([{', '.join([x.render(ops, ctx) for x in self.nodes])}])",
 }

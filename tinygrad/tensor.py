@@ -635,10 +635,14 @@ class Tensor:
   def max(self, axis=None, keepdim=False): return self._reduce(F.Max, axis, keepdim)
   def min(self, axis=None, keepdim=False): return -((-self).max(axis=axis, keepdim=keepdim))
 
-  def mean(self, axis=None, keepdim=False):
-    assert all_int(self.shape), "does not support symbolic shape"
+  def mean(self, axis: Optional[Union[int, tuple]] = None, keepdim: bool = False) -> "Tensor":
+    axis = (axis,) if isinstance(axis, int) else axis
+    assert axis is None or all(-len(self.shape) <= a < len(self.shape) for a in axis), "axis out of range"
+    axis = tuple(a if a >= 0 else a + len(self.shape) for a in axis) if axis else None
     out = self.sum(axis=axis, keepdim=keepdim)
-    return out.div(prod(self.shape) / prod(out.shape)) if 0 not in out.shape else out
+    shape_prod = prod([self.shape[a] for a in axis]) if axis else prod(self.shape)
+    return out.div(shape_prod) if 0 not in out.shape else out
+
   def var(self, axis=None, keepdim=False, correction=1):
     assert all_int(self.shape), "does not support symbolic shape"
     square_sum = ((self - self.mean(axis=axis, keepdim=True)).square()).sum(axis=axis, keepdim=keepdim)
