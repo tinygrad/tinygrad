@@ -47,11 +47,11 @@ class Sin(Function):
 # NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = x.e(BinaryOps.MAX, x.const(0))
-    return self.ret
+    self.x = x
+    return x.e(BinaryOps.MAX, x.const(0))
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return self.ret.const(0).e(BinaryOps.CMPLT, self.ret).cast(grad_output.dtype).e(BinaryOps.MUL, grad_output)
+    return self.x.const(0).e(BinaryOps.CMPLT, self.x).cast(grad_output.dtype).e(BinaryOps.MUL, grad_output)
 
 class Log(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
