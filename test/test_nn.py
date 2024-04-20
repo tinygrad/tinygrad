@@ -62,6 +62,44 @@ class TestNN(unittest.TestCase):
         np.testing.assert_allclose(outt.numpy(), toutt.detach().numpy(), rtol=5e-4, atol=1e-6)
         np.testing.assert_allclose(bn.running_mean.numpy(), tbn.running_mean.detach().numpy(), rtol=1e-5, atol=1e-6)
         np.testing.assert_allclose(bn.running_var.numpy(), tbn.running_var.detach().numpy(), rtol=1e-5, atol=1e-6)
+  def test_unsynced_batchnorm2d(self, training=True):
+    from examples.hlb_cifar10 import UnsyncedBatchNorm
+    with Tensor.train(training):
+      szs = [64]
+      for sz in szs:
+        # create in tinygrad
+        bn = UnsyncedBatchNorm(sz, eps=1e-5, track_running_stats=training, num_devices=1)
+        bn.weight = Tensor.randn( sz)
+        bn.bias = Tensor.randn( sz)
+        bn.running_mean = Tensor.randn(1, sz)
+        bn.running_var = Tensor.randn(1, sz)
+        bn.running_var.numpy()[bn.running_var.numpy() < 0] = 0
+
+        # create in torch
+        with torch.no_grad():
+          tbn = torch.nn.BatchNorm2d(sz).eval()
+          tbn.training = training
+          tbn.weight[:] = torch.tensor(bn.weight.numpy())
+          tbn.bias[:] = torch.tensor(bn.bias.numpy())
+          tbn.running_mean[:] = torch.tensor(bn.running_mean.flatten().numpy())
+          tbn.running_var[:] = torch.tensor(bn.running_var.flatten().numpy())
+
+        np.testing.assert_allclose(bn.running_mean.flatten().numpy(), tbn.running_mean.detach().numpy(), rtol=1e-5, atol=1e-6)
+        np.testing.assert_allclose(bn.running_var.flatten().numpy(), tbn.running_var.detach().numpy(), rtol=1e-5, atol=1e-6)
+
+        # trial
+        inn = Tensor.randn(256, sz, 112, 112)
+
+        # in tinygrad
+        outt = bn(inn)
+
+        # in torch
+        toutt = tbn(torch.tensor(inn.numpy()))
+
+        # close
+        np.testing.assert_allclose(outt.numpy(), toutt.detach().numpy(), rtol=5e-4, atol=1e-6)
+        np.testing.assert_allclose(bn.running_mean.flatten().numpy(), tbn.running_mean.detach().numpy(), rtol=1e-5, atol=1e-6)
+        np.testing.assert_allclose(bn.running_var.flatten().numpy(), tbn.running_var.detach().numpy(), rtol=1e-5, atol=1e-6)
 
   def test_batchnorm2d_training(self):
     self.test_batchnorm2d(True)

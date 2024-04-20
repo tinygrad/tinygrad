@@ -48,15 +48,26 @@ class UnsyncedBatchNorm:
       # This requires two full memory accesses to x
       # https://github.com/pytorch/pytorch/blob/c618dc13d2aa23625cb0d7ada694137532a4fa33/aten/src/ATen/native/cuda/Normalization.cuh
       # There's "online" algorithms that fix this, like https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_Online_algorithm
-      batch_mean = x.mean(axis=(1,3,4))
-      y = (x - batch_mean.reshape(shape=[batch_mean.shape[0], 1, -1, 1, 1]))
-      batch_var = (y*y).mean(axis=(1,3,4))
+      print(x.shape)
+      subbatch_mean = x.mean(axis=(3,4), keepdim=True)
+      subbatch_y = x - subbatch_mean
+      subbatch_ex2 = (subbatch_y * subbatch_y).sum(axis=(3,4), keepdim=True)
+      print(subbatch_mean.shape, subbatch_ex2.shape)
+
+      batch_mean = subbatch_mean.mean(axis=(1,), keepdim=True)
+      delta = batch_mean - subbatch_mean
+      batch_var = (subbatch_ex2 + prod(x.shape[3:]) * delta * delta).sum(axis=(1,), keepdim=True) / prod([x.shape[1], x.shape[3], x.shape[4]])
+      print(batch_mean.shape, batch_var.shape)
+
+      batch_mean = batch_mean.reshape(shape=[x.shape[0], -1])
+      batch_var = batch_var.reshape(shape=[x.shape[0], -1])
+
       batch_invstd = batch_var.add(self.eps).pow(-0.5)
 
       # NOTE: wow, this is done all throughout training in most PyTorch models
       if self.track_running_stats:
         self.running_mean.assign((1-self.momentum) * self.running_mean + self.momentum * batch_mean.detach().cast(self.running_mean.dtype))
-        batch_var_adjust = prod(y.shape[1:])/(prod(y.shape[1:])-y.shape[2])
+        batch_var_adjust = prod(x.shape[1:])/(prod(x.shape[1:])-x.shape[2])
         self.running_var.assign((1-self.momentum) * self.running_var + self.momentum * batch_var_adjust * batch_var.detach().cast(self.running_var.dtype))
         self.num_batches_tracked += 1
     else:
