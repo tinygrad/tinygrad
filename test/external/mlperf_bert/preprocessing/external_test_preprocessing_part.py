@@ -47,11 +47,11 @@ def load_dataset(file_path, max_seq_length=512, max_predictions_per_seq=76):
   return dataset.map(parse_function)
 
 if __name__ == "__main__":
-  parser = argparse.ArgumentParser(description="Verify the correctness of the preprocessing script for specific part", 
+  parser = argparse.ArgumentParser(description="Verify the correctness of the preprocessing script for specific part",
                                    formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-  parser.add_argument("--preprocessed_part_dir", type=str, default=None, 
+  parser.add_argument("--preprocessed_part_dir", type=str, default=None,
                       help="Path to dir with preprocessed samples from `wikipedia.py`")
-  parser.add_argument("--tf_records", type=str, default=None, 
+  parser.add_argument("--tf_records", type=str, default=None,
                       help="Path to TFRecords file from `create_pretraining_data.py` (Reference implementation)")
   parser.add_argument("--max_seq_length", type=int, default=512, help="Max sequence length. For MLPerf keep it as 512")
   parser.add_argument("--max_predictions_per_seq", type=int, default=76, help="Max predictions per sequence. For MLPerf keep it as 76")
