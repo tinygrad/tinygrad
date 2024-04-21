@@ -305,6 +305,8 @@ class NVDevice(Compiled):
   semaphores_page = None
   signal_number = 32
   devices: List[NVDevice] = []
+  uvm_vaddr = 0x1000000000
+  host_object_enumerator = 0x1000
 
   def _new_gpu_fd(self):
     fd_dev = os.open(f"/dev/nvidia{self.device_id}", os.O_RDWR | os.O_CLOEXEC)
@@ -320,8 +322,7 @@ class NVDevice(Compiled):
     return libc.mmap(target, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if target is not None else 0), fd_dev, 0)
 
   def _gpu_alloc(self, size:int, contig=False, huge_page=False, va_addr=None, map_to_cpu=False, map_to_all_gpus=False, map_flags=0):
-    # TODO: need hugepage option, any speedup?
-    size = round_up(size, alignment:=((4 << 10) if huge_page else (2 << 20)))
+    size = round_up(size, align:=((4 << 10) if huge_page else (2 << 20))) # TODO: need hugepage option, any speedup?
     attr = (((nv_gpu.NVOS32_ATTR_PAGE_SIZE_HUGE << 23) if huge_page else 0) |
             ((nv_gpu.NVOS32_ATTR_PHYSICALITY_CONTIGUOUS if contig else nv_gpu.NVOS32_ATTR_PHYSICALITY_ALLOW_NONCONTIGUOUS) << 27))
     attr2 = ((nv_gpu.NVOS32_ATTR2_ZBC_PREFER_NO_ZBC << 0) | (nv_gpu.NVOS32_ATTR2_GPU_CACHEABLE_YES << 2) |
@@ -330,10 +331,10 @@ class NVDevice(Compiled):
              nv_gpu.NVOS32_ALLOC_FLAGS_IGNORE_BANK_PLACEMENT | nv_gpu.NVOS32_ALLOC_FLAGS_MEMORY_HANDLE_PROVIDED)
 
     alloc_params = nv_gpu.NV_MEMORY_ALLOCATION_PARAMS(owner=self.root, flags=flags, attr=attr, attr2=attr2, format=6, size=size,
-                                                     alignment=alignment, offset=0, limit=size-1)
+                                                     alignment=align, offset=0, limit=size-1)
     mem_handle = rm_alloc(self.fd_ctl, nv_gpu.NV1_MEMORY_USER, self.root, self.device, alloc_params).hObjectNew
 
-    if va_addr is None: va_addr = self._alloc_gpu_vaddr(size, cpu_mapping=map_to_cpu)
+    if va_addr is None: va_addr = self._alloc_gpu_vaddr(size, alignment=align)
     if map_to_cpu: va_base = self._gpu_map_to_cpu(mem_handle, size, target=va_addr, flags=map_flags)
     else: va_base = va_addr
 
@@ -350,14 +351,14 @@ class NVDevice(Compiled):
       flags=(nv_gpu.NVOS32_ALLOC_FLAGS_IGNORE_BANK_PLACEMENT | nv_gpu.NVOS32_ALLOC_FLAGS_MEMORY_HANDLE_PROVIDED |
              nv_gpu.NVOS32_ALLOC_FLAGS_MAP_NOT_REQUIRED), format=6, size=size, alignment=(4<<10), offset=0, limit=size-1)
     mem_handle = rm_alloc(self.fd_ctl, nv_gpu.NV1_MEMORY_SYSTEM, self.root, self.device, alloc_params).hObjectNew
-    if va_addr is None: va_addr = self._alloc_gpu_vaddr(size, cpu_mapping=map_to_cpu)
+    if va_addr is None: va_addr = self._alloc_gpu_vaddr(size)
     if map_to_cpu: va_base = self._gpu_map_to_cpu(mem_handle, size, target=va_addr, flags=map_flags, system=True)
     else: va_base = va_addr
 
     return self._gpu_uvm_map(va_base, size, mem_handle)
 
   def _gpu_host_alloc(self, size):
-    va_base = self._alloc_gpu_vaddr(sz:=round_up(size, 4 << 10), cpu_mapping=True)
+    va_base = self._alloc_gpu_vaddr(sz:=round_up(size, 4 << 10))
     libc.mmap(va_base, sz, mmap.PROT_READ|mmap.PROT_WRITE, MAP_FIXED|mmap.MAP_SHARED|mmap.MAP_ANONYMOUS, -1, 0)
     return self._map_to_gpu(va_base, sz)
 
@@ -372,11 +373,11 @@ class NVDevice(Compiled):
     libc.munmap(mem.base, mem.length)
 
   def _map_to_gpu(self, va_base, size):
-    self.host_mem_object_enumerator += 1
+    NVDevice.host_object_enumerator += 1
     flags = ((nv_gpu.NVOS02_FLAGS_PHYSICALITY_NONCONTIGUOUS << 4) | (nv_gpu.NVOS02_FLAGS_COHERENCY_CACHED << 12) |
              (nv_gpu.NVOS02_FLAGS_MAPPING_NO_MAP << 30))
-    made = nv_gpu.nv_ioctl_nvos02_parameters_with_fd(params=nv_gpu.NVOS02_PARAMETERS(hRoot=self.root, hObjectParent=self.device,
-      hObjectNew=self.host_mem_object_enumerator, hClass=nv_gpu.NV01_MEMORY_SYSTEM_OS_DESCRIPTOR, flags=flags, pMemory=va_base, limit=size-1), fd=-1)
+    made = nv_gpu.nv_ioctl_nvos02_parameters_with_fd(params=nv_gpu.NVOS02_PARAMETERS(hRoot=self.root, hObjectParent=self.device, flags=flags,
+      hObjectNew=NVDevice.host_object_enumerator, hClass=nv_gpu.NV01_MEMORY_SYSTEM_OS_DESCRIPTOR, pMemory=va_base, limit=size-1), fd=-1)
     nv_iowr(self.fd_dev, nv_gpu.NV_ESC_RM_ALLOC_MEMORY, made)
     if made.params.status != 0: raise RuntimeError(f"_map_to_gpu returned {made.params.status}")
     return self._gpu_uvm_map(va_base, size, made.params.hObjectNew)
@@ -388,11 +389,9 @@ class NVDevice(Compiled):
     return uvm.map_external_allocation(self.fd_uvm, base=va_base, length=size, rmCtrlFd=self.fd_ctl, hClient=self.root, hMemory=mem_handle,
                                        gpuAttributesCount=1, perGpuAttributes=gpu_attrs)
 
-  def _alloc_gpu_vaddr(self, size, cpu_mapping=False):
-    va_addr = self.next_mmaped_gpu_vaddr if cpu_mapping else self.next_gpu_vaddr
-    if cpu_mapping: self.next_mmaped_gpu_vaddr += round_up(size, 2 << 20)
-    else: self.next_gpu_vaddr += round_up(size, 2 << 20)
-    return va_addr
+  def _alloc_gpu_vaddr(self, size, alignment=(4 << 10)):
+    NVDevice.uvm_vaddr = (res_va:=round_up(NVDevice.uvm_vaddr, alignment)) + size
+    return res_va
 
   def __init__(self, device:str=""):
     if NVDevice.root is None:
@@ -409,9 +408,6 @@ class NVDevice(Compiled):
     # TODO: Get classes from NV0080_CTRL_CMD_GPU_GET_CLASSLIST_V2
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
     self.fd_dev = self._new_gpu_fd()
-    self.host_mem_object_enumerator = 0x1000 + 0x400 * self.device_id
-    self.next_gpu_vaddr = 0x8000000000 + 0x1000000000 * self.device_id
-    self.next_mmaped_gpu_vaddr = 0x1000000000 + 0x1000000000 * self.device_id
 
     assert NVDevice.gpus_info[self.device_id].valid
     gpu_info = nv_gpu.NV0000_CTRL_GPU_GET_ID_INFO_V2_PARAMS(gpuId=NVDevice.gpus_info[self.device_id].gpu_id)
@@ -517,7 +513,7 @@ class NVDevice(Compiled):
       if time.time() - start_time > timeout // 1000: raise RuntimeError(f"wait_result: {timeout} ms TIMEOUT!")
 
   def _gpu_fifo_setup(self, gpfifo, ctxshare, channel_group, offset, entries=0x400):
-    notifier = self._gpu_system_alloc(48<<20)
+    notifier = self._gpu_system_alloc(48 << 20)
     params = nv_gpu.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS(hObjectError=notifier.hMemory, hObjectBuffer=gpfifo.hMemory,
       gpFifoOffset=gpfifo.base+offset, gpFifoEntries=entries, hContextShare=ctxshare,
       hUserdMemory=(ctypes.c_uint32*8)(gpfifo.hMemory), userdOffset=(ctypes.c_uint64*8)(entries*8+offset))
