@@ -263,6 +263,8 @@ def train_retinanet():
   GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
   SYNCBN = False
   SYNCBN = True
+  TRAIN_BEAM = getenv("TRAIN_BEAM", BEAM.value)
+  EVAL_BEAM = getenv("EVAL_BEAM", BEAM.value)
   # dtypes.default_float = dtypes.bfloat16
   loss_scaler = 128.0 if dtypes.default_float in [dtypes.float16, dtypes.bfloat16] else 1.0
   if WANDB:
@@ -329,28 +331,26 @@ def train_retinanet():
   parameters = get_parameters(model)
   optimizer = Adam(parameters, lr=LR)
 
-  image_std = Tensor([0.229, 0.224, 0.225], device=GPUS).reshape(1,-1,1,1)
-  image_mean = Tensor([0.485, 0.456, 0.406], device=GPUS).reshape(1,-1,1,1)
+  image_std = Tensor([0.229, 0.224, 0.225], device=GPUS, dtype=dtypes.float32).reshape(1,-1,1,1)
+  image_mean = Tensor([0.485, 0.456, 0.406], device=GPUS, dtype=dtypes.float32).reshape(1,-1,1,1)
   def normalize(x):
     x = x.permute((0,3,1,2)) / 255.0
     x -= image_mean
     x /= image_std
-    return x#.realize()
+    return x.cast(dtypes.default_float)#.realize()
   @TinyJit
   def train_step(X, boxes_temp, labels_temp, matched_idxs):
-    Tensor.training = True
-    optimizer.zero_grad()
-
-    b,r,c = model(normalize(X), True)
-
-    loss_reg = mdl_reg_loss(r, matched_idxs, boxes_temp)
-    loss_class = mdl_class_loss(c, matched_idxs, labels_temp)
-    loss = (loss_reg+loss_class)*loss_scaler
-
-    loss.backward()
-    for t in optimizer.params: t.grad = t.grad.contiguous() / loss_scaler
-    optimizer.step()
-    return loss.realize()
+    with Context(BEAM=TRAIN_BEAM):
+      Tensor.training = True
+      optimizer.zero_grad()
+      b,r,c = model(normalize(X), True)
+      loss_reg = mdl_reg_loss(r, matched_idxs, boxes_temp)
+      loss_class = mdl_class_loss(c, matched_idxs, labels_temp)
+      loss = (loss_reg+loss_class)*loss_scaler
+      loss.backward()
+      for t in optimizer.params: t.grad = t.grad.contiguous() / loss_scaler
+      optimizer.step()
+      return loss.realize()
   @TinyJit
   def val_step(X):
     Tensor.training = False
@@ -365,8 +365,6 @@ def train_retinanet():
   # ANCHORS = [a.realize() for a in ANCHORS]
   ANCHORS_STACK = Tensor.stack(ANCHORS)
   ANCHORS_STACK = ANCHORS_STACK.shard(GPUS, axis=0)
-  # ANCHORS[0] = ANCHORS[0].to(GPUS)
-  # func = lambda x: model.matcher_gen_per_img(ANCHORS[0], x)
   ANCHOR_NP = ANCHORS[0].numpy()
   mdl_reg_loss = lambda r, m, b_t: model.head.regression_head.loss(r,ANCHORS_STACK, m, b_t)
   mdl_class_loss = lambda c, m, l_t: model.head.classification_head.loss(c,m, l_t)
@@ -386,6 +384,7 @@ def train_retinanet():
   # (52, 256, 13, 13)
   # (52, 256, 7, 7)
   for epoch in range(EPOCHS):
+    Tensor.training = True
     print(colored(f'EPOCH {epoch}/{EPOCHS}:', 'cyan'))
     # train_step.reset()
     # mdlrun_false.reset()
@@ -443,6 +442,7 @@ def train_retinanet():
 
     # # ****EVAL STEP
     # # train_step.reset()
+    # Tensor.training = False
     # print(colored(f'{epoch} START EVAL', 'cyan'))
     # coco_eval = COCOeval(coco_val.coco, iouType="bbox")
 
