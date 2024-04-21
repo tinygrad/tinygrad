@@ -72,23 +72,22 @@ def preprocess(file_path):
   image, label = pad_to_min_shape(image, label)
   return image, label
 
-def preprocess_dataset(filenames, val):
+def preprocess_dataset(filenames, preprocessed_dataset_dir, val):
   for fn in tqdm(filenames, desc=f"preprocessing {'validation' if val else 'training'}"):
     case = os.path.basename(fn)
     image, label = preprocess(fn)
     image, label = image.astype(np.float32), label.astype(np.uint8)
-    np.save(PREPROCESSED_DIR / f"{case}_x.npy", image, allow_pickle=False)
-    np.save(PREPROCESSED_DIR / f"{case}_y.npy", label, allow_pickle=False)
+    np.save(preprocessed_dataset_dir / f"{case}_x.npy", image, allow_pickle=False)
+    np.save(preprocessed_dataset_dir / f"{case}_y.npy", label, allow_pickle=False)
 
 def iterate(val=True, shuffle=False, bs=1):
   files = get_val_files() if val else get_train_files()
   order = list(range(0, len(files)))
 
-  # TODO: separate out between preprocessed train/val
-  # and then do a count check everytime it hits this path to make sure lengths do match with get_{train|val}_files()
-  if not PREPROCESSED_DIR.is_dir():
-    PREPROCESSED_DIR.mkdir()
-    preprocess_dataset(files, val)
+  preprocessed_dataset_dir = (PREPROCESSED_DIR / ("val" if val else "train"))
+  if not PREPROCESSED_DIR.is_dir() or not preprocessed_dataset_dir.is_dir():
+    os.makedirs(preprocessed_dataset_dir)
+    preprocess_dataset(files, preprocessed_dataset_dir, val)
 
   if shuffle: random.shuffle(order)
   for i in range(0, len(files), bs):
