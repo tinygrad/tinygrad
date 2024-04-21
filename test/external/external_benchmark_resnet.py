@@ -3,7 +3,7 @@ import time
 import unittest
 
 from tinygrad import Tensor, TinyJit, GlobalCounters
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, Context
 from tinygrad.nn.optim import SGD
 from tinygrad.nn.state import get_parameters
 
@@ -18,6 +18,8 @@ from examples.hlb_cifar10 import UnsyncedBatchNorm
 # inspect convs:                    DEBUG=2 BEAM=2 CONV=1 DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py
 # inspect convs with batchnorm:     DEBUG=2 BEAM=2 CONV=1 BN=1 DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py
 # etc
+
+# use ASSIGN=0 to disable batchnorm/optimizer assigns
 
 # memory will be slightly high with JITCNT > 1
 
@@ -43,8 +45,8 @@ class BenchmarkResnetTrain(unittest.TestCase):
 
     # get specific conv (0 or 1)
     if conv:
-      if bn: f = [layer.conv2, layer.bn2]
-      else: f = [layer.conv2]
+      if bn: f = [layer.conv2, layer.bn2, Tensor.relu]
+      else: f = [layer.conv2, Tensor.relu]
       cin = layer.conv2.in_channels
       xy = xy // layer.conv1.stride
       return f"{name} conv2 x{str((bs, cin, xy, xy)):20s} k{str(layer.conv2.weight.shape):20s}" + (" bn" if bn else ""), f, cin, xy
@@ -53,6 +55,7 @@ class BenchmarkResnetTrain(unittest.TestCase):
     return f"{name} x{(bs, cin, xy, xy)}", [layer], cin, xy
   def _test_layer(self, name, layer, cin, xy):
     optim = SGD(get_parameters(layer), bs / 128 * 1.0)  # need sgd for some params but not consequential for benchmarking
+    with Context(SAVE_SCHEDULE=0): Tensor.corealize([t.assign(t) for t in get_parameters(layer)])
 
     JITCNT = getenv("JITCNT", 1)
     Tensor.training = True
@@ -62,20 +65,22 @@ class BenchmarkResnetTrain(unittest.TestCase):
         optim.zero_grad()
         x.grad = None
 
-        y = x.sequential(layer).relu()
+        y = x.sequential(layer).contiguous().contiguous_backward()
         y.sum().backward()
-        optim.step([y, x.grad])
+        if getenv("ASSIGN", 1): Tensor.corealize([y, x.grad] + optim.schedule_step())
+        else: Tensor.corealize([y, x.grad] + [t.grad for t in optim.params])
       return y.detach()
 
     CNT = getenv("CNT", 5)
     best_tm = None
     flops, mem_used, kernels = None, None, None
     for i in range(CNT):
-      x = Tensor.randn(bs, cin, xy, xy, requires_grad=True).realize()
+      with Context(SAVE_SCHEDULE=0): x = Tensor.randn(bs, cin, xy, xy, requires_grad=True).realize()
       GlobalCounters.reset()
 
       st = time.perf_counter()
-      step(x)._data()
+      out = step(x)
+      with Context(SAVE_SCHEDULE=0): out._data()
       et = time.perf_counter()
 
       if flops is None: flops = GlobalCounters.global_ops / JITCNT
