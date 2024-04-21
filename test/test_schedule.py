@@ -479,6 +479,14 @@ class TestSchedule(unittest.TestCase):
     r = b.sum() + 1
     check_schedule([a, b, r, out], 3) # (a, out), (b), (r)
 
+  def test_parents_midreduce_group(self):
+    a = Tensor.empty(4, 4) + 2
+    b = Tensor.empty(4, 4) + 3
+
+    r = (a + b).sum()
+    out = r + a + b
+    check_schedule(out, 2) # (r2_), (out)
+
   def test_contiguous_parent_nofuse(self):
     a = Tensor.empty(4).expand(4, 4) + 4
     b = Tensor.empty(4).expand(4, 4) + 4

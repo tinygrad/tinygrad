@@ -223,8 +223,9 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
         if not p.forced_realize and p not in reduce_for_op and p.shape == r.shape: realized_parents.add(p)
         continue
       for next_p in p.srcs: r_parents.append(next_p.base)
-    visited.clear()
+
     for rp in realized_parents:
+      visited.clear()
       rp_children, can_group = deque(children[rp]), True
       while rp_children and can_group:
         if (c:=rp_children.pop()).realized or c.op is LoadOps.CONST or c in visited: continue
