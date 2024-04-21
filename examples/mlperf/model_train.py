@@ -293,7 +293,7 @@ def train_retinanet():
 
   parameters = []
   # model.load_from_pretrained()
-  model.load_checkpoint("./ckpts/retinanet_4xgpu020_B52_E0_15550.safe")
+  # model.load_checkpoint("./ckpts/retinanet_4xgpu020_B52_E0_15550.safe")
 
   for k, v in get_state_dict(model).items():
     # print(k)
