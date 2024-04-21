@@ -243,19 +243,15 @@ def train_resnet():
 def train_retinanet():
   from contextlib import redirect_stdout
   import numpy as np
-  WANDB = True
+  WANDB = getenv('WANDB')
   # WANDB = False
   HOSTNAME = getenv('SLURM_STEP_NODELIST', '3080')
   EPOCHS = 100
-  BS = 16 # A100x2
-  BS=2*4*4
-  BS=44
-  BS = 52
-  # BS = 3*6
-  # BS = 5*8
-  # BS = 2*4
-  BS_EVAL = 52
-  # BS_EVAL = 2*4
+
+  BS = getenv('BS', 52)
+
+  BS_EVAL = getenv('BS_EVAL', 52)
+  
   WARMUP_EPOCHS = 1
   WARMUP_FACTOR = 0.001
   LR = 0.0001
@@ -389,61 +385,61 @@ def train_retinanet():
     
     print(colored(f'EPOCH {epoch}/{EPOCHS}:', 'cyan'))
 
-    # # **********TRAIN***************
-    # Tensor.training = True
-    # # train_step.reset()
-    # # mdlrun_false.reset()
-    # lr_sched = None
-    # # if epoch < WARMUP_EPOCHS:
-    # #   start_iter = epoch*len(coco_train.ids)//BS
-    # #   warmup_iters = WARMUP_EPOCHS*len(coco_train.ids)//BS
-    # #   lr_sched = Retina_LR(optimizer, start_iter, warmup_iters, WARMUP_FACTOR, LR)
-    # # else:
-    # #   optimizer.lr.assign(Tensor([LR], device=GPUS))
-    # batch_loader = batch_load_retinanet(coco_train, bs=BS, val=False, shuffle=False, anchor_np=ANCHOR_NP)
-    # it = iter(tqdm(batch_loader, total=len(coco_train)//BS, desc=f"epoch {epoch}"))
-    # cnt, proc = 0, data_get(it)
+    # **********TRAIN***************
+    Tensor.training = True
+    # train_step.reset()
+    # mdlrun_false.reset()
+    lr_sched = None
+    # if epoch < WARMUP_EPOCHS:
+    #   start_iter = epoch*len(coco_train.ids)//BS
+    #   warmup_iters = WARMUP_EPOCHS*len(coco_train.ids)//BS
+    #   lr_sched = Retina_LR(optimizer, start_iter, warmup_iters, WARMUP_FACTOR, LR)
+    # else:
+    #   optimizer.lr.assign(Tensor([LR], device=GPUS))
+    batch_loader = batch_load_retinanet(coco_train, bs=BS, val=False, shuffle=False, anchor_np=ANCHOR_NP)
+    it = iter(tqdm(batch_loader, total=len(coco_train)//BS, desc=f"epoch {epoch}"))
+    cnt, proc = 0, data_get(it)
 
-    # st = time.perf_counter()
-    # while proc is not None:
-    #   GlobalCounters.reset()
-    #   loss, proc = train_step(proc[0], proc[1], proc[2], proc[3]), proc[4]
+    st = time.perf_counter()
+    while proc is not None:
+      GlobalCounters.reset()
+      loss, proc = train_step(proc[0], proc[1], proc[2], proc[3]), proc[4]
 
-    #   pt = time.perf_counter()
-    #   try:
-    #     next_proc = data_get(it)
-    #   except StopIteration:
-    #     next_proc = None
+      pt = time.perf_counter()
+      try:
+        next_proc = data_get(it)
+      except StopIteration:
+        next_proc = None
 
-    #   dt = time.perf_counter()
+      dt = time.perf_counter()
 
-    #   device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
-    #   loss = loss.numpy().item()
-    #   if lr_sched is not None:
-    #     lr_sched.step()
+      device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
+      loss = loss.numpy().item()
+      if lr_sched is not None:
+        lr_sched.step()
 
-    #   cl = time.perf_counter()
+      cl = time.perf_counter()
 
-    #   tqdm.write(
-    #     f"{cnt:5} {((cl - st)) * 1000.0:7.2f} ms run, {(pt - st) * 1000.0:7.2f} ms python, {(dt - pt) * 1000.0:6.2f} ms fetch data, "
-    #     f"{(cl - dt) * 1000.0:7.2f} ms {device_str}, {loss:5.2f} loss, {optimizer.lr.numpy()[0]:.6f} LR, "
-    #     f"{GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS")
-    #   if WANDB:
-    #     wandb.log({"lr": optimizer.lr.numpy(), "train/loss": loss, "train/step_time": cl - st,
-    #                "train/python_time": pt - st, "train/data_time": dt - pt, "train/cl_time": cl - dt,
-    #                "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": epoch + (cnt + 1) / (len(coco_train)//BS)})
+      tqdm.write(
+        f"{cnt:5} {((cl - st)) * 1000.0:7.2f} ms run, {(pt - st) * 1000.0:7.2f} ms python, {(dt - pt) * 1000.0:6.2f} ms fetch data, "
+        f"{(cl - dt) * 1000.0:7.2f} ms {device_str}, {loss:5.2f} loss, {optimizer.lr.numpy()[0]:.6f} LR, "
+        f"{GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS")
+      if WANDB:
+        wandb.log({"lr": optimizer.lr.numpy(), "train/loss": loss, "train/step_time": cl - st,
+                   "train/python_time": pt - st, "train/data_time": dt - pt, "train/cl_time": cl - dt,
+                   "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": epoch + (cnt + 1) / (len(coco_train)//BS)})
 
-    #   st = cl
-    #   proc, next_proc = next_proc, None  # return old cookie
-    #   cnt+=1
+      st = cl
+      proc, next_proc = next_proc, None  # return old cookie
+      cnt+=1
 
-    #   if cnt%50==0:
-    #     if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
-    #     fn = f"./ckpts/retinanet_{len(GPUS)}x{HOSTNAME}_B{BS}_E{epoch}_{cnt}.safe"
-    #     state_dict = get_state_dict(model)
-    #     # print(state_dict.keys())
-    #     safe_save(state_dict, fn)
-    #     print(f" *** Model saved to {fn} ***")
+      if cnt%50==0:
+        if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
+        fn = f"./ckpts/retinanet_{len(GPUS)}x{HOSTNAME}_B{BS}_E{epoch}_{cnt}.safe"
+        state_dict = get_state_dict(model)
+        # print(state_dict.keys())
+        safe_save(state_dict, fn)
+        print(f" *** Model saved to {fn} ***")
     # ***********EVAL******************
     bt = time.time()
     train_step.reset()
