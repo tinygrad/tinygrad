@@ -116,23 +116,15 @@ def resize_boxes(boxes: Tensor, original_size: List[int], new_size: List[int]) -
   ]
   ratio_height, ratio_width = ratios
 
-  # print('resize_boxes boxes.shape:',boxes.shape, original_size, new_size)
-  # print(boxes.numpy())
-
-  # bnp = boxes.numpy()
-  # xmin, ymin, xmax, ymax = Tensor(bnp[:, 0]), Tensor(bnp[:, 1]), \
-  #                         Tensor(bnp[:, 2]), Tensor(bnp[:, 3])
   xmin, ymin, xmax, ymax = boxes[:, 0], boxes[:, 1], \
                           boxes[:, 2], boxes[:, 3]
-  # print('temp t LEN:',t)
-  # print('UNBIND SHAPE_PRE:', xmin.shape, xmin.numpy())
 
   xmin = xmin * ratio_width
   xmax = xmax * ratio_width
   ymin = ymin * ratio_height
   ymax = ymax * ratio_height
   # print('UNBIND SHAPE_POST:', xmin.shape, xmax.shape, ymin.shape, ymax.shape)
-  ans = Tensor.stack((xmin, ymin, xmax, ymax), dim=1)#.cast(dtypes.float32)
+  ans = Tensor.stack((xmin, ymin, xmax, ymax), dim=1)
   # print('RESIZE_ANS', ans.shape)
   ans.requires_grad = False
   return ans
@@ -161,37 +153,21 @@ def iterate(coco, bs=8, func =None):
     rem =0
     X, target_boxes, target_labels, target_boxes_padded, target_labels_padded, matched_idxs, orig_sizes = [], [], [], [], [], [], []
     while(i_sub<bs and i+bs+rem<len(coco.ids)):
-      # print(i_sub)
       x_orig,t = coco.__getitem__(i+i_sub+rem)
-      # x_tens = Tensor.empty((SIZE[0], SIZE[1], 3), dtype=dtypes.uint8)
-      # print('X_ORIG_SIZE', x_orig.size)
-      # print('DATLOAD_ITER', t['boxes'].shape)
 
       # Training not done on empty targets
       if(t['boxes'].shape[0]<=0):
         print(colored(f'EMPTY BOZES {i+i_sub+rem}', 'cyan'))
         rem+=1
       else:
-        # xNew_pre = normalize(Tensor(np.array(x_orig)))
-        # print(np.array(x_orig).shape)
-        # xNew_tor = F.resize(torch.tensor(np.array(x_orig), device='cpu').permute(2,0,1), size=SIZE)
+
         xNew_tor = x_orig.resize(SIZE, resample = Image.BILINEAR)
         # print('xNEW_TOR', xNew_tor.shape)
         # print('X_NEW', xNew.shape)
         # print('PIL_TO_NP_CONV')
-        x_np = np.array(xNew_tor)#.reshape(800,800,3)
-        # print('NP_TENS_CONV', x_np.dtype)
+        x_np = np.array(xNew_tor)
 
-        xNew = Tensor(x_np)#.realize()
-        # x_tens.contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = xNew_tor.tobytes()
-        # x_tens.assign(x_np).realize()
-        # x_tens.contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = x_np.tobytes()
-        # print('NORMALIZIMG', x_tens.dtype)
-        # xNew = normalize(x_tens)#.realize()
-        # print('Finished_NORMAL')
-        # xNew = Tensor(np.array(xNew_tor)).permute(2,0,1)
-
-        # print('X_MEAN_NORM',xNew.shape, xNew.mean().numpy())
+        xNew = Tensor(x_np)
         X.append(xNew)
         bbox = t['boxes']
         # print('ITERATE_PRE_RESIZE', bbox.shape)
