@@ -467,36 +467,35 @@ class TestSchedule(unittest.TestCase):
     check_schedule([out0, out1], 1)
 
   def test_group_parents(self):
-    a = Tensor.empty(4).expand(4, 4) + 4
-    b = Tensor.empty(4).expand(4, 4) + 4
-    out = a + b
-    check_schedule([a, b, out], 1)
+    a = Tensor.empty(4, 4) + 4
+    b = Tensor.empty(4, 4) + 2
+    c = a + b
+    check_schedule([a, b, c], 1)
 
   def test_group_parents_reduce_child(self):
-    a = Tensor.empty(4).expand(4, 4) + 4
-    b = Tensor.empty(4).expand(4, 4) + 4
+    a = Tensor.empty(4, 4) + 4
+    b = Tensor.empty(4, 4) + 2
     out = a + b
     r = b.sum() + 1
     check_schedule([a, b, r, out], 3) # (a, out), (b), (r)
 
   def test_parents_midreduce_group(self):
-    a = Tensor.empty(4, 4) + 2
-    b = Tensor.empty(4, 4) + 3
-
+    a = Tensor.empty(4, 4) + 4
+    b = Tensor.empty(4, 4) + 2
     r = (a + b).sum()
     out = r + a + b
     check_schedule(out, 2) # (r2_), (out)
 
   def test_contiguous_parent_nofuse(self):
-    a = Tensor.empty(4).expand(4, 4) + 4
-    b = Tensor.empty(4).expand(4, 4) + 4
+    a = Tensor.empty(4, 4) + 4
+    b = Tensor.empty(4, 4) + 2
     out = a + b.contiguous()
     check_schedule([a, b, out], 2) # (a, out), (b)
 
   @unittest.skip("todo")
   def test_group_multiple_children(self):
-    a = Tensor.empty(4).expand(4, 4) + 4
-    b = Tensor.empty(4).expand(4, 4) + 4
+    a = Tensor.empty(4, 4) + 4
+    b = Tensor.empty(4, 4) + 2
     out0 = a + b
     out1 = a * b
     check_schedule([out0, out1], 1)
