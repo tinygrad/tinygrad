@@ -501,6 +501,120 @@ def batch_load_retinanet(coco, bs=8, shuffle=False, seed=None, val = False, anch
     mshm.close()
     mshm.unlink()
 
+def loader_process_val(q_in, q_out, X:Tensor, seed, coco):
+  import signal
+  signal.signal(signal.SIGINT, lambda _, __: exit(0))
+
+  # from extra.datasets.imagenet import center_crop, preprocess_train
+
+  with Context(DEBUG=0):
+    while (_recv := q_in.get()) is not None:
+      idx, img_idx, val = _recv
+      img, target = coco.__getitem__(img_idx)
+      # img = Image.open(fn)
+      # img = img.convert('RGB') if img.mode != "RGB" else img
+
+      if val:
+        pass
+        # eval: 76.08%, load in 0m7.366s (0m5.301s with simd)
+        # sudo apt-get install libjpeg-dev
+        # CC="cc -mavx2" pip install -U --force-reinstall pillow-simd
+        # img = center_crop(img)
+        # img = np.array(img)
+        img = np.array(resize_img(img))
+      else:
+        pass
+        # reseed rng for determinism
+        # if seed is not None:
+        #   np.random.seed(seed * 2 ** 20 + idx)
+        #   random.seed(seed * 2 ** 20 + idx)
+        # img = preprocess_train(img)
+        # img = np.array(resize_img(img))
+        # midx = matcher_iou_func(target['boxes'], Anchor)
+        # m_temp = np.clip(midx, 0, None)
+        # tb = target['boxes'][m_temp]
+        # tl = target['labels'][m_temp]
+        # del target, m_temp
+
+      # broken out
+      #img_tensor = Tensor(img.tobytes(), device='CPU')
+      #storage_tensor = X[idx].contiguous().realize().lazydata.realized
+      #storage_tensor._copyin(img_tensor.numpy())
+
+      # faster
+      X[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = img.tobytes()
+
+
+      # ideal
+      #X[idx].assign(img.tobytes())   # NOTE: this is slow!
+      q_out.put(idx)
+    q_out.put(None)
+def batch_load_retinanet_val(coco, bs=8, shuffle=False, seed=None, val = True):
+  DATA_LEN = len(coco)
+  BATCH_COUNT = min(32, DATA_LEN//bs)
+  gen = shuffled_indices(DATA_LEN, seed=seed) if shuffle else iter(range(DATA_LEN))
+
+  def enqueue_batch(num):
+    for idx in range(num*bs, (num+1)*bs):
+      img_idx = next(gen)
+      q_in.put((idx, img_idx, val))
+      Y_IDX[idx] = img_idx
+
+  shutdown = False
+  class Cookie:
+    def __init__(self, num): self.num = num
+    def __del__(self):
+      if not shutdown:
+        try: enqueue_batch(self.num)
+        except StopIteration: pass
+  gotten = [0]*BATCH_COUNT
+  def receive_batch():
+    while 1:
+      num = q_out.get()//bs
+      gotten[num] += 1
+      if gotten[num] == bs: break
+    gotten[num] = 0
+    return X[num*bs:(num+1)*bs], Y_IDX[num*bs:(num+1)*bs], Cookie(num)
+    # return X[num*bs:(num+1)*bs], Cookie(num)
+  
+  q_in, q_out = Queue(), Queue()
+  sz = (bs*BATCH_COUNT, 800, 800, 3)
+  if os.path.exists("/dev/shm/retinanet_X_val"): os.unlink("/dev/shm/retinanet_X_val")
+  shm = shared_memory.SharedMemory(name="retinanet_X_val", create=True, size=prod(sz))
+  procs = []
+
+  try:
+    # disk:shm is slower
+    #X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:shm:{shm.name}")
+    X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:/dev/shm/retinanet_X_val")
+    Y_IDX = [None] * (bs*BATCH_COUNT)
+
+    # for _ in range(cpu_count()):
+    for _ in range(4):
+      print('hit*************')
+      p = Process(target=loader_process_val, args=(q_in, q_out, X, seed, coco))
+      p.daemon = True
+      p.start()
+      procs.append(p)
+
+    for bn in range(BATCH_COUNT): enqueue_batch(bn)
+
+    # NOTE: this is batch aligned, last ones are ignored
+    for _ in range(0, DATA_LEN//bs): yield receive_batch()
+  finally:
+    shutdown = True
+    # empty queues
+    for _ in procs: q_in.put(None)
+    q_in.close()
+    for _ in procs:
+      while q_out.get() is not None: pass
+    q_out.close()
+    # shutdown processes
+    for p in procs: p.join()
+    shm.close()
+    shm.unlink()
+
+
 if __name__ == '__main__':
   from extra.datasets.openimages_new import get_openimages, iterate
   ROOT = 'extra/datasets/open-images-v6TEST'
