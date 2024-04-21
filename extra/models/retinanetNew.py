@@ -19,14 +19,9 @@ def sigmoid_focal_loss(
     alpha: float = 0.25,
     gamma: float = 2,
 ):
-  # print('SFLOSSS: ', inputs.shape, targets.shape, mask.shape)
-  # print(colored(f'ENTERED SIMOID_LOSS {mask.shape} {mask.sum().numpy()} {inputs.shape} {targets.shape}', 'magenta'))
-  # print(inputs.numpy())
-  # print(mask.numpy())
-  # p = inputs.sigmoid()
+
   p = Tensor.sigmoid(inputs) * mask
-  # ce_loss = inputs.binary_crossentropy_logits(targets)
-  # print('Cross_ENT_LOSS START')
+
   ce_loss = cust_bin_cross_logits(inputs, targets).realize() #* mask
   
   # print('ce_loss', ce_loss.shape)
@@ -40,12 +35,9 @@ def sigmoid_focal_loss(
     alpha_t = alpha * targets + (1 - alpha) * (1 - targets)
     loss = alpha_t * loss
   loss=loss.realize()
-  # print('Cross_ENT_LOSS EEENNNDDDD')
-  # print(colored(f'ENTERED SIMOID_LOSS {loss.shape}', 'green'))
-  # print(f'SIg_LOSS_PRE_MASK {loss.shape} {mask.shape}')
+
   loss = loss * mask
-  # print(f'SIg_LOSS_PPOOOSSSSTTT_MASK {loss.shape} {mask.shape}')
-  # Reducing with sum instead of mean
+
   loss = loss.sum(-1)
   loss = loss.sum(-1)
 
@@ -105,21 +97,6 @@ def decode_bbox(offsets, anchors):
   pred_x2, pred_y2 = pred_cx + 0.5 * pred_w, pred_cy + 0.5 * pred_h
   return np.stack([pred_x1, pred_y1, pred_x2, pred_y2], axis=1, dtype=np.float32)
 def encode_boxes(reference_boxes, proposals, weights = (1.0,1.0,1.0,1.0)):
-  # print('Encode BOx', reference_boxes.shape, proposals.shape)
-  # print(reference_boxes.numpy())
-  # print(proposals.numpy())
-  
-  # sys.exit()
-  # type: (Tensor, Tensor, Tensor) -> Tensor
-  """
-  Encode a set of proposals with respect to some
-  reference boxes
-
-  Args:
-      reference_boxes (Tensor): reference boxes
-      proposals (Tensor): boxes to be encoded
-      weights (Tensor[4]): the weights for ``(x, y, w, h)``
-  """
 
   # perform some unpacking to make it JIT-fusion friendly
   wx = weights[0]
@@ -279,63 +256,6 @@ class AnchorGenerator:
   def __call__(self, image_list, feature_maps: List[Tensor]):
     return self.forward(image_list, feature_maps)
 
-class Matcher(object):
-
-  BELOW_LOW_THRESHOLD = -1
-  BETWEEN_THRESHOLDS = -2
-
-  __annotations__ = {'BELOW_LOW_THRESHOLD': int, 'BETWEEN_THRESHOLDS': int }
-
-  def __init__(self, high_threshold, low_threshold, allow_low_quality_matches=False):
-    # type: (float, float, bool) -> None
-    self.BELOW_LOW_THRESHOLD = -1
-    self.BETWEEN_THRESHOLDS = -2
-    assert low_threshold <= high_threshold
-    self.high_threshold = high_threshold
-    self.low_threshold = low_threshold
-    self.allow_low_quality_matches = allow_low_quality_matches
-
-  def __call__(self, match_quality_matrix):   
-    # print('MATCHER ARG SIZE:', match_quality_matrix.shape)
-    if match_quality_matrix.numel() == 0:
-      # empty targets or proposals not supported during training
-      if match_quality_matrix.shape[0] == 0:
-        raise ValueError(
-            "No ground-truth boxes available for one of the images "
-            "during training")
-      else:
-        raise ValueError(
-            "No proposal boxes available for one of the images "
-            "during training")
-
-    # match_quality_matrix is M (gt) x N (predicted)
-    # Max over gt elements (dim 0) to find best gt candidate for each prediction
-    matched_vals = match_quality_matrix.max(axis=0)
-    matches = match_quality_matrix.argmax(axis=0)
-    if self.allow_low_quality_matches:
-      # all_matches = matches.clone()
-      # all_matches = Tensor(matches.numpy())
-      all_matches = matches
-    else:
-      all_matches = None
-
-    # Assign candidate matches with low quality to negative (unassigned) values
-    below_low_threshold = matched_vals < self.low_threshold
-    between_thresholds = (matched_vals >= self.low_threshold) * (
-        matched_vals < self.high_threshold
-    )
-
-    matches = Tensor.where(below_low_threshold, self.BELOW_LOW_THRESHOLD, matches)
-    matches = Tensor.where(between_thresholds, self.BETWEEN_THRESHOLDS, matches)
-
-    if self.allow_low_quality_matches:
-      assert all_matches is not None
-      highest_quality_foreach_gt = match_quality_matrix.max(axis=1)
-      gt_quality = match_quality_matrix == highest_quality_foreach_gt.unsqueeze(1)
-      gt_quality = gt_quality.sum(0)
-      # print('TENs_MATCHER', gt_quality.shape, all_matches.shape, matches.shape)
-      matches = Tensor.where(gt_quality, all_matches, matches)
-    return matches
 
 class RetinaNet:
   def __init__(self, backbone: ResNet, num_classes=264, num_anchors=9, scales=None, aspect_ratios=None,
@@ -369,50 +289,6 @@ class RetinaNet:
       return r.cat(c, dim=-1)
   def forward(self, x):
     return self.head(self.backbone(x))
-  def loss_temp(self, logits_reg, logits_class, y, anchors) -> Tensor:
-    temp = 0
-    for yy in y:
-      temp+=yy['boxes'].shape[0]
-    return logits_reg.mean()+logits_class.mean()+temp
-  def loss_dummy(self, r, c):
-    return r.argmax()+c.argmax()
-  def matcher_gen(self, anchors, target_boxes):
-    matched_idxs = []
-    for anchors_per_image, tb in zip(anchors, target_boxes):
-      if tb.numel() == 0:
-        print('NUMEL==0 HIT!!!')
-        matched_idxs.append(Tensor.full((anchors_per_image.shape[0],), -1, dtype=dtypes.int64,))
-                                        # device=anchors_per_image.device))
-        continue
-      match_quality_matrix = box_iou(tb, anchors_per_image)
-      # print(colored(f'BOX_IOU {match_quality_matrix.shape} {match_quality_matrix.numpy()}', 'green'))
-      # print('match_quality_matrix', match_quality_matrix.shape)
-      # print(match_quality_matrix.numpy())
-      matched_idxs.append(self.proposal_matcher(match_quality_matrix))
-      # print(colored(f'PROP MATCHER {matched_idxs[-1].shape} {matched_idxs[-1].numpy()}', 'magenta'))
-    matched_idxs = Tensor.stack(matched_idxs)
-    return matched_idxs
-  def matcher_gen_per_img(self, anchors, target_box):
-    if target_box.numel() == 0:
-      print('NUMEL==0 HIT!!!')
-      return Tensor.full((anchors.shape[0],), -1, dtype=dtypes.int64,)
-                                      # device=anchors_per_image.device))
-      # continue
-    return self.proposal_matcher(box_iou(target_box, anchors))
-  # def matcher_gen(self, anchors, target_boxes):
-  #   # idx = Tensor.arange(anchors.shape[0])
-  #   # matched_idxs = []
-  #   # for i in idx:
-  #   #   match_quality_matrix = box_iou(target_boxes[i.item()], anchors[i])
-  #   #   matched_idxs.append(self.proposal_matcher(match_quality_matrix))
-  #   # matched_idxs = Tensor.stack(matched_idxs)
-  #   # return matched_idxs
-  #   matched_idxs = []
-  #   for i, tb in enumerate(target_boxes):
-  #     match_quality_matrix = box_iou(tb, anchors[i])
-  #     matched_idxs.append(self.proposal_matcher(match_quality_matrix))
-  #   matched_idxs = Tensor.stack(matched_idxs)
-  #   return matched_idxs
 
   def load_from_pretrained(self):
     model_urls = {
