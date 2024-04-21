@@ -367,8 +367,8 @@ def process_iterate(tokenizer:Tokenizer, val:bool=False, part:int=0) -> list[dic
     tqdm.write(f"There are {len(instances)} samples in the dataset")
     tqdm.write(f"Picking 10000 samples")
 
-    pick_ratio = len(instances) // 10000
-    picks = [instance_to_features(instances[inst*pick_ratio], tokenizer) for inst in range(10000)]
+    pick_ratio = len(instances) / 10000
+    picks = [instance_to_features(instances[int(inst*pick_ratio)], tokenizer) for inst in range(10000)]
     for batch in range(10):
       yield picks[batch*1000:(batch+1)*1000]
   else:
