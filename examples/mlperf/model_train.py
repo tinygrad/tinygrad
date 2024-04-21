@@ -394,10 +394,11 @@ def train_retinanet():
       data_time = time.perf_counter() - data_end
       st = time.perf_counter()
       X = X.shard_(GPUS, axis=0).realize()
-
+      xt = time.perf_counter()
       matched_idxs = matched_idxs.shard_(GPUS, axis=0).realize()
-
+      mt = time.perf_counter()
       Y_boxes_p = Y_boxes_p.shard_(GPUS, axis=0).realize()
+      bpt = time.perf_counter()
       Y_labels_p = Y_labels_p.shard_(GPUS, axis=0).realize()
       pst = time.perf_counter()
       loss = train_step(X, None, None, matched_idxs, Y_boxes_p, Y_labels_p)
@@ -409,6 +410,7 @@ def train_retinanet():
       lit = time.perf_counter()
       et = time.perf_counter()-st
       if cnt%1==0:
+        print(f'x: {(xt-st)*1000.0:7.2f} m: {(mt-xt)*1000.0:7.2f} bp: {(bpt-mt)*1000.0:7.2f} lp: {(pst-bpt)*1000.0:7.2f}')
         print(f'JIT: {(jt-pst)*1000.0:7.2f} LIT: {(lit-jt)*1000.0:7.2f} SHARD: {(pst-st)*1000.0:7.2f}')
         print(colored(f'{cnt} STEP {ll:.5f}, time: {et*1000.0:7.2f} ms run, '
                       f'data: {data_time*1000.0:7.2f} ms|| '
