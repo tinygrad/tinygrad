@@ -393,45 +393,32 @@ def train_retinanet():
       GlobalCounters.reset()
       data_time = time.perf_counter() - data_end
       st = time.perf_counter()
-      X = X.shard_(GPUS, axis=0)
+      X = X.shard_(GPUS, axis=0).realize()
 
-      boxes_temp = Y_boxes_p
-      labels_temp = Y_labels_p
-      # print('matched_IDXS', matched_idxs.shape, len(Y_boxes))
-      pre_shard = time.perf_counter()
-      # print('MATH_DEVICE', matched_idxs.device)
-      matched_idxs = matched_idxs.shard_(GPUS, axis=0)
-      # print('POST_MATH_DEVICE', matched_idxs.device)
+      matched_idxs = matched_idxs.shard_(GPUS, axis=0).realize()
 
-      boxes_temp = boxes_temp.shard_(GPUS, axis=0)
-      labels_temp = labels_temp.shard_(GPUS, axis=0)
-      post_shard = time.perf_counter() - pre_shard
-      jit_t = time.perf_counter()
-      loss = train_step(X, None, None, matched_idxs, boxes_temp, labels_temp)
-      jitted_time = time.perf_counter()-jit_t
+      Y_boxes_p = Y_boxes_p.shard_(GPUS, axis=0).realize()
+      Y_labels_p = Y_labels_p.shard_(GPUS, axis=0).realize()
+      pst = time.perf_counter()
+      loss = train_step(X, None, None, matched_idxs, Y_boxes_p, Y_labels_p)
+      jt = time.perf_counter()
+
       if lr_sched is not None:
         lr_sched.step()
+      ll = loss.item()
+      lit = time.perf_counter()
       et = time.perf_counter()-st
       if cnt%1==0:
-        # print(f'hit {(pre_zip-pre_match)*1000.0} {(pre_shard-pre_zip)*1000.0}'
-        #       f' {jitted_time*1000.0} {post_shard*1000.0}')
-        # print(X.shape, matched_idxs.shape, boxes_temp.shape, labels_temp.shape)
-        # print(colored(f'{cnt} STEP {loss.item():.5f}, time: {et*1000.0:7.2f} ms run, '
-        #               f'data: {data_time*1000.0:7.2f} ms|| LR: {optimizer.lr.numpy().item():.6f}, '
-        #               f'mem: {GlobalCounters.mem_used / 1e9:.4f} GB used, '
-        #               f'GFLOPS: {GlobalCounters.global_ops * 1e-9 / et:7.2f}', 'magenta'))
-        print(colored(f'{cnt} STEP {loss.shape}, time: {et*1000.0:7.2f} ms run, '
+        print(f'JIT: {(jt-pst)*1000.0:7.2f} LIT: {(lit-jt)*1000.0:7.2f} SHARD: {(pst-st)*1000.0:7.2f}')
+        print(colored(f'{cnt} STEP {ll:.5f}, time: {et*1000.0:7.2f} ms run, '
                       f'data: {data_time*1000.0:7.2f} ms|| '
                       f'mem: {GlobalCounters.mem_used / 1e9:.4f} GB used, '
                       f'GFLOPS: {GlobalCounters.global_ops * 1e-9 / et:7.2f}', 'magenta'))
-      if cnt%5==0:
-        ll = loss.item()
-        print(f'LOSS: {ll:.5f}')
         if WANDB: wandb.log({'train/loss':ll})
-      
-      # if cnt>5 and epoch==0: 
-      #   # train_step.reset()
-      #   break
+        # print(f'hit {(pre_zip-pre_match)*1000.0} {(pre_shard-pre_zip)*1000.0}'
+        #       f' {jitted_time*1000.0} {post_shard*1000.0}')
+
+
       cnt+=1
       if cnt%50==0:
         if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
