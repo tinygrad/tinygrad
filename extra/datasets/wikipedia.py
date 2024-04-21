@@ -40,6 +40,18 @@ def _is_punctuation(char:str) -> bool:
     return True
   return unicodedata.category(char).startswith("P")
 
+def _is_chinese_char(cp:int) -> bool:
+  if ((cp >= 0x4E00 and cp <= 0x9FFF) or
+      (cp >= 0x3400 and cp <= 0x4DBF) or
+      (cp >= 0x20000 and cp <= 0x2A6DF) or
+      (cp >= 0x2A700 and cp <= 0x2B73F) or
+      (cp >= 0x2B740 and cp <= 0x2B81F) or
+      (cp >= 0x2B820 and cp <= 0x2CEAF) or
+      (cp >= 0xF900 and cp <= 0xFAFF) or
+      (cp >= 0x2F800 and cp <= 0x2FA1F)):
+    return True
+  return False
+
 def _run_split_on_punc(text:str) -> list[str]:
   if text in ("[UNK]", "[SEP]", "[PAD]", "[CLS]", "[MASK]"):
     return [text]
@@ -69,6 +81,22 @@ def _clean_text(text:str) -> str:
     if not ((cp := ord(char)) == 0 or cp == 0xfffd or _is_control(char)):
       output.append(" " if _is_whitespace(char) else char)
   return "".join(output)
+
+def _tokenize_chinese_chars(text:str) -> str:
+  output = []
+  for char in text:
+    cp = ord(char)
+    if _is_chinese_char(cp):
+      output.append(" ")
+      output.append(char)
+      output.append(" ")
+    else:
+      output.append(char)
+  return "".join(output)
+
+def whitespace_tokenize(text):
+  if not (text := text.strip()): return []
+  return text.split()
 
 def _wordpiece_tokenize(text:str, vocab:dict[str, int]) -> list[str]:
   text = text.decode("utf-8", "ignore") if isinstance(text, bytes) else text
@@ -112,10 +140,9 @@ class Tokenizer:
     self.inv_vocab = {v: k for k, v in self.vocab.items()}
 
   def tokenize(self, text:str) -> list[str]:
-    text = _clean_text(text.decode("utf-8", "ignore") if isinstance(text, bytes) else text)
     # BasicTokenizer
     split_tokens = []
-    for token in text.strip().split():
+    for token in whitespace_tokenize(_tokenize_chinese_chars(_clean_text(text.decode("utf-8", "ignore") if isinstance(text, bytes) else text))):
       split_tokens.extend(_run_split_on_punc(_run_strip_accents(token.lower())))
     split_tokens = " ".join(split_tokens).strip().split()
     # WordpieceTokenizer
@@ -235,6 +262,9 @@ def create_instances_from_document(rng:random.Random, tokenizer:Tokenizer, doc:l
             tokens_b.extend(current_chunk[j])
         truncate_seq_pair(tokens_a, tokens_b, max_num_tokens, rng)
 
+        assert len(tokens_a) >= 1
+        assert len(tokens_b) >= 1
+
         tokens = []
         segment_ids = []
         tokens.append("[CLS]")
@@ -350,6 +380,8 @@ def process_iterate(tokenizer:Tokenizer, val:bool=False, part:int=0) -> list[dic
       batch = instances[:batch_size]
       del instances[:batch_size]
       yield [instance_to_features(instance, tokenizer) for instance in batch]
+
+##################### Load files #####################
 
 def get_val_files(): return sorted(list((BASEDIR / "eval/").glob("*.pkl")))
 
