@@ -9,7 +9,7 @@
 # 2.1 For eval: --input_file=/path/to/eval.txt and
 #     Command: python3 pick_eval_samples.py --input_tfrecord=/path/to/eval.tfrecord --output_tfrecord=/path/to/output_eval.tfrecord
 
-# 3.  Run `wikipedia.py` to preprocess the data with tinygrad
+# 3.  Run `wikipedia.py` to preprocess the data with tinygrad (Use python > 3.7)
 #     Command: BASEDIR=/path/to/basedir python3 wikipedia.py pre-train XXX (NOTE: part number needs to match part of step 2)
 #
 # 3.1 For eval:
