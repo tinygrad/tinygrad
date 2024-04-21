@@ -269,20 +269,12 @@ class RetinaNet:
     self.backbone = ResNetFPN(backbone)
     self.head = RetinaHead(self.backbone.out_channels, num_anchors=num_anchors, num_classes=num_classes)
     self.anchor_gen = lambda input_size: generate_anchors(input_size, self.backbone.compute_grid_sizes(input_size), scales, aspect_ratios)
-    self.proposal_matcher =  Matcher(
-                    fg_iou_thresh,
-                    bg_iou_thresh,
-                    allow_low_quality_matches=True,
-                )
+
   def __call__(self, x, train=False):
     
     b = self.backbone(x)
     r, c = self.head(b)
-    # if Tensor.training:
     if train:
-      # l = self.loss_temp(c)
-      # l = self.loss(r, c, Y, anchor_gen(x, b))
-      # return l 
       return b, r, c
     else: 
       c = c.sigmoid().realize()
@@ -400,7 +392,7 @@ class ClassificationHead:
     # print('LAbels_temp:', labels_temp.shape)
     gt_classes_target = labels_temp.one_hot(logits_class.shape[-1])
     # print('gt_classes_target', gt_classes_target.shape)
-    valid_idxs = matched_idxs != Matcher.BETWEEN_THRESHOLDS
+    valid_idxs = matched_idxs != -2
     s = sigmoid_focal_loss(logits_class, 
                                        gt_classes_target, 
                                        valid_idxs.reshape(batch_size,-1,1)) #.realize()
