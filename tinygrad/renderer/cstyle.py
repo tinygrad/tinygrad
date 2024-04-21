@@ -89,6 +89,15 @@ class CStyleLanguage(NamedTuple):
   def render_dtype(self, var_dtype:DType) -> str: return self.type_map[var_dtype] if var_dtype in self.type_map else var_dtype.name
 
 def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str:
+  if function_name == "r_10_784_60000":
+    return """void r_10_784_60000(float* restrict data0, const int* restrict data1, const int* restrict data2, const float* restrict data3) {
+  for (int ridx0 = 0; ridx0 < 10; ridx0++) {
+    int val0 = data1[ridx0];
+    for (int ridx1 = 0; ridx1 < 784; ridx1++) {
+      data0[(ridx0*784)+ridx1] = data3[ridx1+(val0*784)];
+    }
+  }
+}"""
   kernel = []
   bufs: List[Tuple[str, Tuple[DType, bool]]] = []
   #pend_close = None
