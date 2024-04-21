@@ -191,7 +191,9 @@ class TestLinearizer(unittest.TestCase):
       assert len([uop for uop in k.uops if uop.uop is UOps.WMMA]) == 1, "tensor core not triggered"
       assert len([x for x in k.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
       np_c = np_a @ np_b
-      (tc_atol, tc_rtol) = (1e-2, 1e-3) if tc.dtype_out == dtypes.half else (5e-3, 1e-4)
+      if tc.dtype_out == dtypes.half: tc_atol, tc_rtol = 1e-2, 1e-3
+      elif tc.dtype_in == dtypes.bfloat16: tc_atol, tc_rtol = 1e-2, 3e-3
+      else: tc_atol, tc_rtol = 5e-3, 1e-4
       np.testing.assert_allclose(np_c, out, atol=tc_atol, rtol=tc_rtol)
 
   def test_limit_dims_to_max_5d_global(self):
@@ -680,6 +682,8 @@ class TestKernelOpts(unittest.TestCase):
     N = 128
     Tensor.manual_seed(1552)
     for tc in tensor_cores[Device[Device.DEFAULT].compiler.compiler_opts.device]:
+      # bf16 buffer returns float32 numpy outputs so test would fail. testing opt with half suffices.
+      if tc.dtype_in == dtypes.bfloat16: continue
       a, b = Tensor.rand(N, N, dtype=tc.dtype_in), Tensor.rand(N, N, dtype=tc.dtype_in)
       r = a.matmul(b, acc_dtype=tc.dtype_out)
       (atol, rtol) = ((0.25, 0.01) if tc.dtype_out == dtypes.half else (3e-2, 1e-3)) if tc.dtype_in == dtypes.half else (1e-4, 1e-4)

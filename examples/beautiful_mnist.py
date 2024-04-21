@@ -2,7 +2,7 @@
 from typing import List, Callable
 from tinygrad import Tensor, TinyJit, nn, GlobalCounters
 from tinygrad.helpers import getenv, colored
-from tinygrad.features.datasets import mnist
+from tinygrad.nn.datasets import mnist
 from tqdm import trange
 
 class Model:
