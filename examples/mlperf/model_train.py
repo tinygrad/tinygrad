@@ -181,7 +181,8 @@ def train_resnet():
         median_step_time = sorted(step_times)[(BENCHMARK + 1) // 2]  # in seconds
         estimated_total_minutes = int(median_step_time * steps_in_train_epoch * epochs / 60)
         print(f"Estimated training time: {estimated_total_minutes // 60}h{estimated_total_minutes % 60}m")
-        print(f"{GlobalCounters.global_ops=:_}, {GlobalCounters.global_mem=:_}")
+        print(f"epoch global_ops: {steps_in_train_epoch * GlobalCounters.global_ops:_}, "
+              f"epoch global_mem: {steps_in_train_epoch * GlobalCounters.global_mem:_}")
         # if we are doing beam search, run the first eval too
         if (TRAIN_BEAM or EVAL_BEAM) and e == start_epoch: break
         return
