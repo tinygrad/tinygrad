@@ -159,7 +159,7 @@ def iterate(coco, bs=8, func =None):
     # print('iterate', i)
     i_sub = 0
     rem =0
-    X, target_boxes, target_labels, target_boxes_padded, target_labels_padded, matched_idxs = [], [], [], [], [], []
+    X, target_boxes, target_labels, target_boxes_padded, target_labels_padded, matched_idxs, orig_sizes = [], [], [], [], [], [], []
     while(i_sub<bs and i+bs+rem<len(coco.ids)):
       # print(i_sub)
       x_orig,t = coco.__getitem__(i+i_sub+rem)
@@ -182,12 +182,12 @@ def iterate(coco, bs=8, func =None):
         x_np = np.array(xNew_tor)#.reshape(800,800,3)
         # print('NP_TENS_CONV', x_np.dtype)
 
-        x_tens = Tensor(x_np).realize()
+        xNew = Tensor(x_np)#.realize()
         # x_tens.contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = xNew_tor.tobytes()
         # x_tens.assign(x_np).realize()
         # x_tens.contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = x_np.tobytes()
         # print('NORMALIZIMG', x_tens.dtype)
-        xNew = normalize(x_tens).realize()
+        # xNew = normalize(x_tens)#.realize()
         # print('Finished_NORMAL')
         # xNew = Tensor(np.array(xNew_tor)).permute(2,0,1)
 
@@ -196,6 +196,7 @@ def iterate(coco, bs=8, func =None):
         bbox = t['boxes']
         # print('ITERATE_PRE_RESIZE', bbox.shape)
         # bbox = resize_boxes(bbox, (x_orig.size[1],x_orig.size[0]), SIZE)
+        orig_sizes.append(x_orig.size[::-1])
         bbox = resize_boxes(bbox, x_orig.size[::-1], SIZE) #.realize()
         # print('ITERATE_POST_RESIZE', bbox.shape)
         # t['boxes'] = bbox.realize()
@@ -236,8 +237,8 @@ def iterate(coco, bs=8, func =None):
 
     # yield Tensor.stack(X), target_boxes, target_labels, target_boxes_padded, target_labels_padded, matched_idxs
     if func is not None:
-      yield Tensor.stack(X).realize(), None, None, Tensor.stack(target_boxes_padded).realize(), \
-        Tensor.stack(target_labels_padded).realize(), Tensor.stack(matched_idxs).realize()
+      yield Tensor.stack(X), None, None, Tensor.stack(target_boxes_padded), \
+        Tensor.stack(target_labels_padded), Tensor.stack(matched_idxs)
     else:
       yield Tensor.stack(X), None, None, target_boxes_padded, \
         target_labels_padded, matched_idxs
