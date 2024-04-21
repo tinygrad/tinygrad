@@ -1,4 +1,4 @@
-# https://github.com/mlcommons/training/blob/master/language_model/tensorflow/bert/cleanup_scripts/create_pretraining_data.py
+# https://github.com/mlcommons/training/blob/1c8a098ae3e70962a4f7422c0b0bd35ae639e357/language_model/tensorflow/bert/cleanup_scripts/create_pretraining_data.py
 # NOTE: This is a direct copy of the original script
 # NOTE: With python 3.7.12, pip install tensorflow=1.15.5
 """Create masked LM/next sentence masked_lm TF examples for BERT."""

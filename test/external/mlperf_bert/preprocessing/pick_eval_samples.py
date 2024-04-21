@@ -1,4 +1,4 @@
-# https://github.com/mlcommons/training/blob/master/language_model/tensorflow/bert/cleanup_scripts/pick_eval_samples.py
+# https://github.com/mlcommons/training/blob/1c8a098ae3e70962a4f7422c0b0bd35ae639e357/language_model/tensorflow/bert/cleanup_scripts/pick_eval_samples.py
 # NOTE: This is a direct copy of the original script
 """Script for picking certain number of sampels.
 """
