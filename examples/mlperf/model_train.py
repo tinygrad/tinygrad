@@ -283,7 +283,6 @@ def train_retinanet():
   from extra.models import resnet
   from examples.hlb_cifar10 import UnsyncedBatchNorm
   from tinygrad.nn.optim import Adam
-  from extra.datasets.openimages_new import iterate, iterate_val, MATCHER_FUNC
   from extra.datasets.openimages_new import get_openimages, batch_load_retinanet, batch_load_retinanet_val
   from pycocotools.cocoeval import COCOeval
   from pycocotools.coco import COCO

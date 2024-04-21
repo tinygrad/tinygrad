@@ -75,12 +75,8 @@ class CocoDetection:
     id = self.ids[index]
     img = self._load_image(id)
     orig_size = img.size
-    # print('iterate orig size', orig_size, id)
-    # sys.exit()
-    target = self._load_target(id)
 
-    # if self.transforms is not None:
-    #   img, target = self.transforms(img, target)
+    target = self._load_target(id)
 
     image_id = self.ids[index]
     target = dict(image_id=image_id, annotations=target)
@@ -98,10 +94,6 @@ def get_openimages(name, root, image_set, transforms=None):
 
   t = ConvertCocoPolysToMask(filter_iscrowd=False)
 
-  # if transforms is not None:
-  #     t.append(transforms)
-  # transforms = T.Compose(t)
-
   img_folder = os.path.join(PATHS[image_set], "data")
   ann_file = os.path.join(PATHS[image_set], "labels", f"{name}.json")
 
@@ -109,143 +101,7 @@ def get_openimages(name, root, image_set, transforms=None):
 
   return dataset
 
-def resize_boxes(boxes: Tensor, original_size: List[int], new_size: List[int]) -> Tensor:
-  ratios = [
-      Tensor(s, dtype=dtypes.float32) / Tensor(s_orig, dtype=dtypes.float32)
-      for s, s_orig in zip(new_size, original_size)
-  ]
-  ratio_height, ratio_width = ratios
-
-  xmin, ymin, xmax, ymax = boxes[:, 0], boxes[:, 1], \
-                          boxes[:, 2], boxes[:, 3]
-
-  xmin = xmin * ratio_width
-  xmax = xmax * ratio_width
-  ymin = ymin * ratio_height
-  ymax = ymax * ratio_height
-  # print('UNBIND SHAPE_POST:', xmin.shape, xmax.shape, ymin.shape, ymax.shape)
-  ans = Tensor.stack((xmin, ymin, xmax, ymax), dim=1)
-  # print('RESIZE_ANS', ans.shape)
-  ans.requires_grad = False
-  return ans
-
-import torchvision.transforms.functional as F
-# SIZE = (400,400)
 SIZE = (800, 800)
-
-image_std = Tensor([0.229, 0.224, 0.225]).reshape(-1,1,1)
-image_mean = Tensor([0.485, 0.456, 0.406]).reshape(-1,1,1)
-def normalize(x):
-  x = x.permute((2,0,1)) / 255.0
-  # x = x /255.0
-  # x = x.permute((2,1,0)) / 255.0
-  x -= image_mean
-  x /= image_std
-  return x#.realize()
-MATCHER_FUNC = None  
-def iterate(coco, bs=8, func =None):
-  i = 0
-  i_sub = 0
-  rem =0
-  while(i+bs+rem<len(coco.ids)):
-    # print('iterate', i)
-    i_sub = 0
-    rem =0
-    X, target_boxes, target_labels, target_boxes_padded, target_labels_padded, matched_idxs, orig_sizes = [], [], [], [], [], [], []
-    idx_list = []
-    while(i_sub<bs and i+bs+rem<len(coco.ids)):
-      x_orig,t = coco.__getitem__(i+i_sub+rem)
-
-      # Training not done on empty targets
-      if(t['boxes'].shape[0]<=0):
-        print(colored(f'EMPTY BOZES {i+i_sub+rem}', 'cyan'))
-        rem+=1
-      else:
-
-        xNew_tor = x_orig.resize(SIZE, resample = Image.BILINEAR)
-        # print('xNEW_TOR', xNew_tor.shape)
-        # print('X_NEW', xNew.shape)
-        # print('PIL_TO_NP_CONV')
-        x_np = np.array(xNew_tor)
-
-        xNew = Tensor(x_np)
-        X.append(xNew)
-        bbox = t['boxes']
-        # print('ITERATE_PRE_RESIZE', bbox.shape)
-        # bbox = resize_boxes(bbox, (x_orig.size[1],x_orig.size[0]), SIZE)
-        orig_sizes.append(x_orig.size[::-1])
-        bbox = resize_boxes(bbox, x_orig.size[::-1], SIZE) #.realize()
-        # print('ITERATE_POST_RESIZE', bbox.shape)
-        # t['boxes'] = bbox.realize()
-        # max_pad = 120087
-
-        # max_pad = 500
-        # n = bbox.shape[0]
-        # boxes_padded = bbox.pad((((0,max_pad-n), None)),0)
-        # labels_padded = t['labels'].reshape(-1,1).pad((((0,max_pad-n), None)),-1).reshape(-1)
-
-        # print('ITERATE', xNew.shape, t['boxes'].shape, t['labels'].shape)
-        # print('ITERATE_PADDED', xNew.shape, boxes_padded.shape, labels_padded.shape)
-
-        # target_boxes.append(bbox) #.realize())
-        # target_labels.append(t['labels']) #.realize())
-        
-        # print('lABEL LOAD CHEK', target_labels[-1].shape)
-        # print('PADDING LOGIC', labels_padded.numpy())
-        # print(boxes_padded.numpy())
-        # target_boxes_padded.append(boxes_padded.realize())
-        # target_labels_padded.append(labels_padded.realize())
-        i_sub+=1
-        # if MATCHER_FUNC is not None:
-        # if i>0:
-        if func is not None:
-          # print('MATCHER_FUNC_HIT')
-          # print(func)
-          m_idx = func(bbox) #.realize()
-          # tbm = boxes_padded[m_idx] #.realize()
-          # tlm = labels_padded[m_idx] #.realize()
-          tbm = bbox[m_idx] #.realize()
-          tlm = t['labels'][m_idx] #.realize()
-          target_boxes.append(tbm)
-          target_labels.append(tlm)
-          matched_idxs.append(m_idx)
-        else:
-          max_pad = 500
-          n = bbox.shape[0]
-          bd = bbox.pad((((0,max_pad-n), None)),0)
-          ld = t['labels'].reshape(-1,1).pad((((0,max_pad-n), None)),-1).reshape(-1)
-          target_boxes_padded.append(bd)
-          target_labels_padded.append(ld)
-          idx_list.append(n)
-
-    if func is not None:
-      yield Tensor.stack(X), Tensor.stack(target_boxes), \
-        Tensor.stack(target_labels), Tensor.stack(matched_idxs)
-    else:
-      yield Tensor.stack(X), Tensor.stack(target_boxes_padded), \
-        Tensor.stack(target_labels_padded), idx_list
-
-    # yield Tensor.stack(X), None, None, target_boxes_padded, \
-    #     target_labels_padded, matched_idxs
-    i= i+bs+rem
-
-def iterate_val(coco, bs=8):
-  for i in range(0, len(coco.ids)-bs, bs):
-  # for i in range(0, 10, bs):
-    X, targets = [], []
-    for img_id in coco.ids[i:i+bs]:
-      x_orig, t = coco.__getitem__(img_id)
-      xNew_tor = F.resize(x_orig, size=SIZE)
-      xNew = normalize(Tensor(np.array(xNew_tor)))
-      X.append(xNew)
-      # bbox = t['boxes']
-      # t['boxes'] = resize_boxes(bbox, x_orig.size, SIZE).numpy()
-      # t['labels'] = t['labels'].numpy()
-      # t['image_id'] = t['image_id'].item()
-      tNew = {'image_size' : t['image_size'][::-1], 
-              'image_id' : t['image_id'].item()}
-      targets.append(tNew)
-    yield Tensor.stack(X), targets
 
 def resize_img(img:Image.Image):
   return img.resize(SIZE, resample = Image.BILINEAR)
@@ -373,28 +229,15 @@ def loader_process(q_in, q_out, X:Tensor, seed, coco, YB:Tensor, YL:Tensor, YM:T
   import signal
   signal.signal(signal.SIGINT, lambda _, __: exit(0))
 
-  # from extra.datasets.imagenet import center_crop, preprocess_train
-
   with Context(DEBUG=0):
     while (_recv := q_in.get()) is not None:
       idx, img_idx, val = _recv
       img, target = coco.__getitem__(img_idx)
-      # img = Image.open(fn)
-      # img = img.convert('RGB') if img.mode != "RGB" else img
 
       if val:
         pass
-        # eval: 76.08%, load in 0m7.366s (0m5.301s with simd)
-        # sudo apt-get install libjpeg-dev
-        # CC="cc -mavx2" pip install -U --force-reinstall pillow-simd
-        # img = center_crop(img)
-        # img = np.array(img)
       else:
-        # reseed rng for determinism
-        # if seed is not None:
-        #   np.random.seed(seed * 2 ** 20 + idx)
-        #   random.seed(seed * 2 ** 20 + idx)
-        # img = preprocess_train(img)
+
         img = np.array(resize_img(img))
         midx = matcher_iou_func(target['boxes'], Anchor)
         m_temp = np.clip(midx, 0, None)
@@ -426,7 +269,6 @@ def batch_load_retinanet(coco, bs=8, shuffle=False, seed=None, val = False, anch
     for idx in range(num*bs, (num+1)*bs):
       img_idx = next(gen)
       q_in.put((idx, img_idx, val))
-      # Y_IDX[idx] = img_idx
 
   shutdown = False
   class Cookie:
@@ -435,6 +277,7 @@ def batch_load_retinanet(coco, bs=8, shuffle=False, seed=None, val = False, anch
       if not shutdown:
         try: enqueue_batch(self.num)
         except StopIteration: pass
+
   gotten = [0]*BATCH_COUNT
   def receive_batch():
     while 1:
@@ -443,7 +286,6 @@ def batch_load_retinanet(coco, bs=8, shuffle=False, seed=None, val = False, anch
       if gotten[num] == bs: break
     gotten[num] = 0
     return X[num*bs:(num+1)*bs], YB[num*bs:(num+1)*bs], YL[num*bs:(num+1)*bs], YM[num*bs:(num+1)*bs], Cookie(num)
-    # return X[num*bs:(num+1)*bs], Cookie(num)
   
   q_in, q_out = Queue(), Queue()
   sz = (bs*BATCH_COUNT, 800, 800, 3)
@@ -467,8 +309,7 @@ def batch_load_retinanet(coco, bs=8, shuffle=False, seed=None, val = False, anch
     YB = Tensor.empty(*bsz, dtype=dtypes.float32, device=f"disk:/dev/shm/retinanet_YB")
     YL = Tensor.empty(*lsz, dtype=dtypes.int16, device=f"disk:/dev/shm/retinanet_YL")
     YM = Tensor.empty(*msz, dtype=dtypes.int64, device=f"disk:/dev/shm/retinanet_YM")
-    # Y_IDX = [None] * (bs*BATCH_COUNT)
-    # Y = [None] * (bs*BATCH_COUNT)
+
 
     # for _ in range(cpu_count()):
     for _ in range(4):
@@ -505,36 +346,14 @@ def loader_process_val(q_in, q_out, X:Tensor, seed, coco):
   import signal
   signal.signal(signal.SIGINT, lambda _, __: exit(0))
 
-  # from extra.datasets.imagenet import center_crop, preprocess_train
-
   with Context(DEBUG=0):
     while (_recv := q_in.get()) is not None:
       idx, img_idx, val = _recv
       img, target = coco.__getitem__(img_idx)
-      # img = Image.open(fn)
-      # img = img.convert('RGB') if img.mode != "RGB" else img
-
       if val:
-        pass
-        # eval: 76.08%, load in 0m7.366s (0m5.301s with simd)
-        # sudo apt-get install libjpeg-dev
-        # CC="cc -mavx2" pip install -U --force-reinstall pillow-simd
-        # img = center_crop(img)
-        # img = np.array(img)
         img = np.array(resize_img(img))
       else:
         pass
-        # reseed rng for determinism
-        # if seed is not None:
-        #   np.random.seed(seed * 2 ** 20 + idx)
-        #   random.seed(seed * 2 ** 20 + idx)
-        # img = preprocess_train(img)
-        # img = np.array(resize_img(img))
-        # midx = matcher_iou_func(target['boxes'], Anchor)
-        # m_temp = np.clip(midx, 0, None)
-        # tb = target['boxes'][m_temp]
-        # tl = target['labels'][m_temp]
-        # del target, m_temp
 
       # broken out
       #img_tensor = Tensor(img.tobytes(), device='CPU')
@@ -567,6 +386,7 @@ def batch_load_retinanet_val(coco, bs=8, shuffle=False, seed=None, val = True):
       if not shutdown:
         try: enqueue_batch(self.num)
         except StopIteration: pass
+
   gotten = [0]*BATCH_COUNT
   def receive_batch():
     while 1:
@@ -575,7 +395,6 @@ def batch_load_retinanet_val(coco, bs=8, shuffle=False, seed=None, val = True):
       if gotten[num] == bs: break
     gotten[num] = 0
     return X[num*bs:(num+1)*bs], Y_IDX[num*bs:(num+1)*bs], Cookie(num)
-    # return X[num*bs:(num+1)*bs], Cookie(num)
   
   q_in, q_out = Queue(), Queue()
   sz = (bs*BATCH_COUNT, 800, 800, 3)
