@@ -117,6 +117,7 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None):
     Y = [None] * (batch_size*BATCH_COUNT)
 
     for _ in range(cpu_count()):
+      print('hit**************************************')
       p = Process(target=loader_process, args=(q_in, q_out, X, seed))
       p.daemon = True
       p.start()

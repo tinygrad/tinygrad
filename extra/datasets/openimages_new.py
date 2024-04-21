@@ -4,7 +4,7 @@ from PIL import Image
 from typing import Any, Callable, List, Optional, Tuple, Union
 
 import numpy as np
-import torch
+# import torch
 
 from tinygrad import Tensor, dtypes
 
@@ -21,7 +21,7 @@ class ConvertCocoPolysToMask(object):
     w,h = image.size
 
     image_id = target["image_id"]
-    image_id = Tensor([image_id], requires_grad=False)
+    # image_id = image_id
 
     anno = target["annotations"]
 
@@ -38,7 +38,7 @@ class ConvertCocoPolysToMask(object):
     boxes[:, 1::2] = boxes[:, 1::2].clip(0, h)
     # print('BOXES:POSTPOST', boxes)
     classes = [obj["category_id"] for obj in anno]
-    classes = np.array(classes, dtype=np.int64)
+    classes = np.array(classes, dtype=np.int16)
 
     keep = (boxes[:, 3] > boxes[:, 1]) & (boxes[:, 2] > boxes[:, 0])
     boxes = boxes[keep]
@@ -47,9 +47,9 @@ class ConvertCocoPolysToMask(object):
 
     target = {}
     # print('CONVERTINGTTTT')
-    target["boxes"] = Tensor(boxes, requires_grad=False)#.realize()
+    target["boxes"] = resize_boxes_np(boxes, image.size[::-1], (800, 800))
     # print('BOXES:TENSCONV', target["boxes"].numpy())
-    target["labels"] = Tensor(classes, requires_grad=False)#.realize()
+    target["labels"] = classes
     target["image_id"] = image_id
     # print('FINISHED_CONVERTING')
 
@@ -152,6 +152,7 @@ def iterate(coco, bs=8, func =None):
     i_sub = 0
     rem =0
     X, target_boxes, target_labels, target_boxes_padded, target_labels_padded, matched_idxs, orig_sizes = [], [], [], [], [], [], []
+    idx_list = []
     while(i_sub<bs and i+bs+rem<len(coco.ids)):
       x_orig,t = coco.__getitem__(i+i_sub+rem)
 
@@ -205,19 +206,25 @@ def iterate(coco, bs=8, func =None):
           # tlm = labels_padded[m_idx] #.realize()
           tbm = bbox[m_idx] #.realize()
           tlm = t['labels'][m_idx] #.realize()
-          target_boxes_padded.append(tbm)
-          target_labels_padded.append(tlm)
+          target_boxes.append(tbm)
+          target_labels.append(tlm)
           matched_idxs.append(m_idx)
-      # x_orig.close()
-      # del t
+        else:
+          max_pad = 500
+          n = bbox.shape[0]
+          bd = bbox.pad((((0,max_pad-n), None)),0)
+          ld = t['labels'].reshape(-1,1).pad((((0,max_pad-n), None)),-1).reshape(-1)
+          target_boxes_padded.append(bd)
+          target_labels_padded.append(ld)
+          idx_list.append(n)
 
-    # yield Tensor.stack(X), target_boxes, target_labels, target_boxes_padded, target_labels_padded, matched_idxs
     if func is not None:
-      yield Tensor.stack(X), None, None, Tensor.stack(target_boxes_padded), \
-        Tensor.stack(target_labels_padded), Tensor.stack(matched_idxs)
+      yield Tensor.stack(X), Tensor.stack(target_boxes), \
+        Tensor.stack(target_labels), Tensor.stack(matched_idxs)
     else:
-      yield Tensor.stack(X), None, None, target_boxes_padded, \
-        target_labels_padded, matched_idxs
+      yield Tensor.stack(X), Tensor.stack(target_boxes_padded), \
+        Tensor.stack(target_labels_padded), idx_list
+
     # yield Tensor.stack(X), None, None, target_boxes_padded, \
     #     target_labels_padded, matched_idxs
     i= i+bs+rem
@@ -239,6 +246,97 @@ def iterate_val(coco, bs=8):
               'image_id' : t['image_id'].item()}
       targets.append(tNew)
     yield Tensor.stack(X), targets
+
+def resize_img(img:Image.Image):
+  return img.resize(SIZE, resample = Image.BILINEAR)
+def resize_boxes_np(boxes, original_size: List[int], new_size: List[int]):
+  ratios = [
+      s / s_orig
+      for s, s_orig in zip(new_size, original_size)
+  ]
+  ratio_height, ratio_width = ratios
+
+  xmin, ymin, xmax, ymax = boxes[:, 0], boxes[:, 1], \
+                          boxes[:, 2], boxes[:, 3]
+
+  xmin = xmin * ratio_width
+  xmax = xmax * ratio_width
+  ymin = ymin * ratio_height
+  ymax = ymax * ratio_height
+  # print('UNBIND SHAPE_POST:', xmin.shape, xmax.shape, ymin.shape, ymax.shape)
+  return np.stack((xmin, ymin, xmax, ymax), axis=1)
+
+def box_iou_np(boxes1:np.ndarray, boxes2:np.ndarray):
+  def box_area(boxes): return (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+  area1 = box_area(boxes1)
+  area2 = box_area(boxes2)
+  
+  lt = np.maximum(boxes1[:, None, :2], boxes2[:, :2])  # [N,M,2]
+  rb = np.minimum(boxes1[:, None, 2:], boxes2[:, 2:])  # [N,M,2]
+  wh = (rb-lt).clip(min=0)
+  inter = wh[:, :, 0] * wh[:, :, 1]
+  union = area1[:, None] + area2 - inter
+  return inter / union
+class Matcher_np(object):
+  BELOW_LOW_THRESHOLD = -1
+  BETWEEN_THRESHOLDS = -2
+  def __init__(self, high_threshold, low_threshold, allow_low_quality_matches=False):
+
+    self.BELOW_LOW_THRESHOLD = -1
+    self.BETWEEN_THRESHOLDS = -2
+    assert low_threshold <= high_threshold
+    self.high_threshold = high_threshold
+    self.low_threshold = low_threshold
+    self.allow_low_quality_matches = allow_low_quality_matches
+
+  def __call__(self, match_quality_matrix:np.ndarray):
+
+    if match_quality_matrix.size == 0:
+      # empty targets or proposals not supported during training
+      if match_quality_matrix.shape[0] == 0:
+        raise ValueError(
+            "No ground-truth boxes available for one of the images "
+            "during training")
+      else:
+        raise ValueError(
+            "No proposal boxes available for one of the images "
+            "during training")
+
+    # match_quality_matrix is M (gt) x N (predicted)
+    # Max over gt elements (dim 0) to find best gt candidate for each prediction
+    matched_vals, matches = match_quality_matrix.max(axis=0), match_quality_matrix.argmax(axis=0)
+
+    if self.allow_low_quality_matches:
+      all_matches = np.copy(matches)
+    else:
+      all_matches = None
+
+    # Assign candidate matches with low quality to negative (unassigned) values
+    below_low_threshold = matched_vals < self.low_threshold
+    between_thresholds = (matched_vals >= self.low_threshold) & (
+        matched_vals < self.high_threshold
+    )
+
+    matches[below_low_threshold] = self.BELOW_LOW_THRESHOLD
+    matches[between_thresholds] = self.BETWEEN_THRESHOLDS
+    if self.allow_low_quality_matches:
+      assert all_matches is not None
+      self.set_low_quality_matches_(matches, all_matches, match_quality_matrix)
+    return matches
+
+  def set_low_quality_matches_(self, matches:np.ndarray, all_matches:np.ndarray, match_quality_matrix:np.ndarray):
+    # For each gt, find the prediction with which it has highest quality
+    highest_quality_foreach_gt= match_quality_matrix.max(axis=1)
+    # Find highest quality match available, even if it is low, including ties
+    gt_pred_pairs_of_highest_quality = np.nonzero(
+        match_quality_matrix == highest_quality_foreach_gt[:, None]
+    )
+    pred_inds_to_update = gt_pred_pairs_of_highest_quality[1]
+    matches[pred_inds_to_update] = all_matches[pred_inds_to_update]
+
+def matcher_iou_func(box, anchor):
+  M_NP = Matcher_np(0.5, 0.4, True)
+  return M_NP(box_iou_np(box, anchor))
 
 from multiprocessing import Queue, Process, shared_memory, connection, Lock, cpu_count
 import pickle, random
@@ -270,9 +368,8 @@ def shuffled_indices(n, seed=None):
     yield indices[i]
     del indices[i]
 
-def resize_img(img):
-  return img.resize(SIZE, resample = Image.BILINEAR)
-def loader_process(q_in, q_out, X:Tensor, seed, coco):
+
+def loader_process(q_in, q_out, X:Tensor, seed, coco, YB:Tensor, YL:Tensor, YM:Tensor, Anchor):
   import signal
   signal.signal(signal.SIGINT, lambda _, __: exit(0))
 
@@ -299,6 +396,11 @@ def loader_process(q_in, q_out, X:Tensor, seed, coco):
         #   random.seed(seed * 2 ** 20 + idx)
         # img = preprocess_train(img)
         img = np.array(resize_img(img))
+        midx = matcher_iou_func(target['boxes'], Anchor)
+        m_temp = np.clip(midx, 0, None)
+        tb = target['boxes'][m_temp]
+        tl = target['labels'][m_temp]
+        del target, m_temp
 
       # broken out
       #img_tensor = Tensor(img.tobytes(), device='CPU')
@@ -307,21 +409,24 @@ def loader_process(q_in, q_out, X:Tensor, seed, coco):
 
       # faster
       X[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = img.tobytes()
+      YB[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = tb.tobytes()
+      YL[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = tl.tobytes()
+      YM[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = midx.tobytes()
 
       # ideal
       #X[idx].assign(img.tobytes())   # NOTE: this is slow!
       q_out.put(idx)
     q_out.put(None)
-def batch_load_retinanet(coco, bs=8, shuffle=False, seed=None, val = False):
+def batch_load_retinanet(coco, bs=8, shuffle=False, seed=None, val = False, anchor_np=[1,2,3,4]):
   DATA_LEN = len(coco)
-  BATCH_COUNT = DATA_LEN//bs
+  BATCH_COUNT = min(32, DATA_LEN//bs)
   gen = shuffled_indices(DATA_LEN, seed=seed) if shuffle else iter(range(DATA_LEN))
 
   def enqueue_batch(num):
     for idx in range(num*bs, (num+1)*bs):
       img_idx = next(gen)
       q_in.put((idx, img_idx, val))
-      Y_IDX[idx] = img_idx
+      # Y_IDX[idx] = img_idx
 
   shutdown = False
   class Cookie:
@@ -337,24 +442,38 @@ def batch_load_retinanet(coco, bs=8, shuffle=False, seed=None, val = False):
       gotten[num] += 1
       if gotten[num] == bs: break
     gotten[num] = 0
-    return X[num*bs:(num+1)*bs], Y_IDX[num*bs:(num+1)*bs], Cookie(num)
+    return X[num*bs:(num+1)*bs], YB[num*bs:(num+1)*bs], YL[num*bs:(num+1)*bs], YM[num*bs:(num+1)*bs], Cookie(num)
     # return X[num*bs:(num+1)*bs], Cookie(num)
   
   q_in, q_out = Queue(), Queue()
   sz = (bs*BATCH_COUNT, 800, 800, 3)
   if os.path.exists("/dev/shm/retinanet_X"): os.unlink("/dev/shm/retinanet_X")
   shm = shared_memory.SharedMemory(name="retinanet_X", create=True, size=prod(sz))
+  bsz = (bs*BATCH_COUNT, 120087, 4)
+  if os.path.exists("/dev/shm/retinanet_YB"): os.unlink("/dev/shm/retinanet_YB")
+  bshm = shared_memory.SharedMemory(name="retinanet_YB", create=True, size=prod(bsz))
+  lsz = (bs*BATCH_COUNT, 120087)
+  if os.path.exists("/dev/shm/retinanet_YL"): os.unlink("/dev/shm/retinanet_YL")
+  lshm = shared_memory.SharedMemory(name="retinanet_YL", create=True, size=prod(lsz))
+  msz = (bs*BATCH_COUNT, 120087)
+  if os.path.exists("/dev/shm/retinanet_YM"): os.unlink("/dev/shm/retinanet_YM")
+  mshm = shared_memory.SharedMemory(name="retinanet_YM", create=True, size=prod(msz))
   procs = []
 
   try:
     # disk:shm is slower
     #X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:shm:{shm.name}")
     X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:/dev/shm/retinanet_X")
-    Y_IDX = [None] * (bs*BATCH_COUNT)
+    YB = Tensor.empty(*bsz, dtype=dtypes.float32, device=f"disk:/dev/shm/retinanet_YB")
+    YL = Tensor.empty(*lsz, dtype=dtypes.int16, device=f"disk:/dev/shm/retinanet_YL")
+    YM = Tensor.empty(*msz, dtype=dtypes.int64, device=f"disk:/dev/shm/retinanet_YM")
+    # Y_IDX = [None] * (bs*BATCH_COUNT)
     # Y = [None] * (bs*BATCH_COUNT)
 
-    for _ in range(cpu_count()):
-      p = Process(target=loader_process, args=(q_in, q_out, X, seed, coco))
+    # for _ in range(cpu_count()):
+    for _ in range(4):
+      print('hit*************')
+      p = Process(target=loader_process, args=(q_in, q_out, X, seed, coco, YB, YL, YM, anchor_np))
       p.daemon = True
       p.start()
       procs.append(p)
@@ -375,6 +494,12 @@ def batch_load_retinanet(coco, bs=8, shuffle=False, seed=None, val = False):
     for p in procs: p.join()
     shm.close()
     shm.unlink()
+    bshm.close()
+    bshm.unlink()
+    lshm.close()
+    lshm.unlink()
+    mshm.close()
+    mshm.unlink()
 
 if __name__ == '__main__':
   from extra.datasets.openimages_new import get_openimages, iterate

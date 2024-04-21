@@ -7,7 +7,7 @@ from tinygrad.helpers import colored, flatten, get_child
 from tinygrad.nn.state import safe_load, load_state_dict
 import tinygrad.nn as nn
 from extra.models.resnet import ResNet
-import numpy as np
+# import numpy as np
 
 def cust_bin_cross_logits(inputs, targets):
   return inputs.maximum(0) - targets * inputs + (1 + inputs.abs().neg().exp()).log()
@@ -79,31 +79,31 @@ def box_iou(boxes1: Tensor, boxes2: Tensor) -> Tensor:
 
   return iou
 
-def nms(boxes, scores, thresh=0.5):
-  x1, y1, x2, y2 = np.rollaxis(boxes, 1)
-  areas = (x2 - x1 + 1) * (y2 - y1 + 1)
-  to_process, keep = scores.argsort()[::-1], []
-  while to_process.size > 0:
-    cur, to_process = to_process[0], to_process[1:]
-    keep.append(cur)
-    inter_x1 = np.maximum(x1[cur], x1[to_process])
-    inter_y1 = np.maximum(y1[cur], y1[to_process])
-    inter_x2 = np.minimum(x2[cur], x2[to_process])
-    inter_y2 = np.minimum(y2[cur], y2[to_process])
-    inter_area = np.maximum(0, inter_x2 - inter_x1 + 1) * np.maximum(0, inter_y2 - inter_y1 + 1)
-    iou = inter_area / (areas[cur] + areas[to_process] - inter_area)
-    to_process = to_process[np.where(iou <= thresh)[0]]
-  return keep
+# def nms(boxes, scores, thresh=0.5):
+#   x1, y1, x2, y2 = np.rollaxis(boxes, 1)
+#   areas = (x2 - x1 + 1) * (y2 - y1 + 1)
+#   to_process, keep = scores.argsort()[::-1], []
+#   while to_process.size > 0:
+#     cur, to_process = to_process[0], to_process[1:]
+#     keep.append(cur)
+#     inter_x1 = np.maximum(x1[cur], x1[to_process])
+#     inter_y1 = np.maximum(y1[cur], y1[to_process])
+#     inter_x2 = np.minimum(x2[cur], x2[to_process])
+#     inter_y2 = np.minimum(y2[cur], y2[to_process])
+#     inter_area = np.maximum(0, inter_x2 - inter_x1 + 1) * np.maximum(0, inter_y2 - inter_y1 + 1)
+#     iou = inter_area / (areas[cur] + areas[to_process] - inter_area)
+#     to_process = to_process[np.where(iou <= thresh)[0]]
+#   return keep
 
-def decode_bbox(offsets, anchors):
-  dx, dy, dw, dh = np.rollaxis(offsets, 1)
-  widths, heights = anchors[:, 2] - anchors[:, 0], anchors[:, 3] - anchors[:, 1]
-  cx, cy = anchors[:, 0] + 0.5 * widths, anchors[:, 1] + 0.5 * heights
-  pred_cx, pred_cy = dx * widths + cx, dy * heights + cy
-  pred_w, pred_h = np.exp(dw) * widths, np.exp(dh) * heights
-  pred_x1, pred_y1 = pred_cx - 0.5 * pred_w, pred_cy - 0.5 * pred_h
-  pred_x2, pred_y2 = pred_cx + 0.5 * pred_w, pred_cy + 0.5 * pred_h
-  return np.stack([pred_x1, pred_y1, pred_x2, pred_y2], axis=1, dtype=np.float32)
+# def decode_bbox(offsets, anchors):
+#   dx, dy, dw, dh = np.rollaxis(offsets, 1)
+#   widths, heights = anchors[:, 2] - anchors[:, 0], anchors[:, 3] - anchors[:, 1]
+#   cx, cy = anchors[:, 0] + 0.5 * widths, anchors[:, 1] + 0.5 * heights
+#   pred_cx, pred_cy = dx * widths + cx, dy * heights + cy
+#   pred_w, pred_h = np.exp(dw) * widths, np.exp(dh) * heights
+#   pred_x1, pred_y1 = pred_cx - 0.5 * pred_w, pred_cy - 0.5 * pred_h
+#   pred_x2, pred_y2 = pred_cx + 0.5 * pred_w, pred_cy + 0.5 * pred_h
+#   return np.stack([pred_x1, pred_y1, pred_x2, pred_y2], axis=1, dtype=np.float32)
 def encode_boxes(reference_boxes, proposals, weights = (1.0,1.0,1.0,1.0)):
   # print('Encode BOx', reference_boxes.shape, proposals.shape)
   # print(reference_boxes.numpy())
@@ -161,23 +161,23 @@ def encode_boxes(reference_boxes, proposals, weights = (1.0,1.0,1.0,1.0)):
   targets = Tensor.cat(*(targets_dx, targets_dy, targets_dw, targets_dh), dim=2)#.realize()
   # print('Encode BOX RETURN', targets.shape)
   return targets
-def generate_anchors(input_size, grid_sizes, scales, aspect_ratios):
-  assert len(scales) == len(aspect_ratios) == len(grid_sizes)
-  anchors = []
-  for s, ar, gs in zip(scales, aspect_ratios, grid_sizes):
-    s, ar = np.array(s), np.array(ar)
-    h_ratios = np.sqrt(ar)
-    w_ratios = 1 / h_ratios
-    ws = (w_ratios[:, None] * s[None, :]).reshape(-1)
-    hs = (h_ratios[:, None] * s[None, :]).reshape(-1)
-    base_anchors = (np.stack([-ws, -hs, ws, hs], axis=1) / 2).round()
-    stride_h, stride_w = input_size[0] // gs[0], input_size[1] // gs[1]
-    shifts_x, shifts_y = np.meshgrid(np.arange(gs[1]) * stride_w, np.arange(gs[0]) * stride_h)
-    shifts_x = shifts_x.reshape(-1)
-    shifts_y = shifts_y.reshape(-1)
-    shifts = np.stack([shifts_x, shifts_y, shifts_x, shifts_y], axis=1, dtype=np.float32)
-    anchors.append((shifts[:, None] + base_anchors[None, :]).reshape(-1, 4))
-  return anchors
+# def generate_anchors(input_size, grid_sizes, scales, aspect_ratios):
+#   assert len(scales) == len(aspect_ratios) == len(grid_sizes)
+#   anchors = []
+#   for s, ar, gs in zip(scales, aspect_ratios, grid_sizes):
+#     s, ar = np.array(s), np.array(ar)
+#     h_ratios = np.sqrt(ar)
+#     w_ratios = 1 / h_ratios
+#     ws = (w_ratios[:, None] * s[None, :]).reshape(-1)
+#     hs = (h_ratios[:, None] * s[None, :]).reshape(-1)
+#     base_anchors = (np.stack([-ws, -hs, ws, hs], axis=1) / 2).round()
+#     stride_h, stride_w = input_size[0] // gs[0], input_size[1] // gs[1]
+#     shifts_x, shifts_y = np.meshgrid(np.arange(gs[1]) * stride_w, np.arange(gs[0]) * stride_h)
+#     shifts_x = shifts_x.reshape(-1)
+#     shifts_y = shifts_y.reshape(-1)
+#     shifts = np.stack([shifts_x, shifts_y, shifts_x, shifts_y], axis=1, dtype=np.float32)
+#     anchors.append((shifts[:, None] + base_anchors[None, :]).reshape(-1, 4))
+#   return anchors
 def cust_meshgrid(x:Tensor, y:Tensor):
   xs = x.shape[0]
   ys = y.shape[0]
@@ -341,7 +341,7 @@ class RetinaNet:
   def __init__(self, backbone: ResNet, num_classes=264, num_anchors=9, scales=None, aspect_ratios=None,
                fg_iou_thresh=0.5, bg_iou_thresh=0.4):
     assert isinstance(backbone, ResNet)
-    scales = tuple((i, int(i*2**(1/3)), int(i*2**(2/3))) for i in 2**np.arange(5, 10)) if scales is None else scales
+    scales = tuple((i, int(i*2**(1/3)), int(i*2**(2/3))) for i in [32,  64, 128, 256, 512]) if scales is None else scales
     aspect_ratios = ((0.5, 1.0, 2.0),) * len(scales) if aspect_ratios is None else aspect_ratios
     self.num_anchors, self.num_classes = num_anchors, num_classes
     assert len(scales) == len(aspect_ratios) and all(self.num_anchors == len(s) * len(ar) for s, ar in zip(scales, aspect_ratios))
@@ -432,69 +432,69 @@ class RetinaNet:
     d = safe_load(fn)
     load_state_dict(self, d)
 
-  # predictions: (BS, (H1W1+...+HmWm)A, 4 + K)
-  def postprocess_detections(self, predictions, input_size=(800, 800), image_sizes=None, orig_image_sizes=None, score_thresh=0.05, topk_candidates=1000, nms_thresh=0.5):
-    anchors = self.anchor_gen(input_size)
-    grid_sizes = self.backbone.compute_grid_sizes(input_size)
-    split_idx = np.cumsum([int(self.num_anchors * sz[0] * sz[1]) for sz in grid_sizes[:-1]])
-    detections = []
-    for i, predictions_per_image in enumerate(predictions):
-      h, w = input_size if image_sizes is None else image_sizes[i]
+  # # predictions: (BS, (H1W1+...+HmWm)A, 4 + K)
+  # def postprocess_detections(self, predictions, input_size=(800, 800), image_sizes=None, orig_image_sizes=None, score_thresh=0.05, topk_candidates=1000, nms_thresh=0.5):
+  #   anchors = self.anchor_gen(input_size)
+  #   grid_sizes = self.backbone.compute_grid_sizes(input_size)
+  #   split_idx = np.cumsum([int(self.num_anchors * sz[0] * sz[1]) for sz in grid_sizes[:-1]])
+  #   detections = []
+  #   for i, predictions_per_image in enumerate(predictions):
+  #     h, w = input_size if image_sizes is None else image_sizes[i]
 
-      predictions_per_image = np.split(predictions_per_image, split_idx)
-      offsets_per_image = [br[:, :4] for br in predictions_per_image]
-      scores_per_image = [cl[:, 4:] for cl in predictions_per_image]
+  #     predictions_per_image = np.split(predictions_per_image, split_idx)
+  #     offsets_per_image = [br[:, :4] for br in predictions_per_image]
+  #     scores_per_image = [cl[:, 4:] for cl in predictions_per_image]
 
-      image_boxes, image_scores, image_labels = [], [], []
-      for offsets_per_level, scores_per_level, anchors_per_level in zip(offsets_per_image, scores_per_image, anchors):
-        # remove low scoring boxes
-        scores_per_level = scores_per_level.flatten()
-        keep_idxs = scores_per_level > score_thresh
-        scores_per_level = scores_per_level[keep_idxs]
+  #     image_boxes, image_scores, image_labels = [], [], []
+  #     for offsets_per_level, scores_per_level, anchors_per_level in zip(offsets_per_image, scores_per_image, anchors):
+  #       # remove low scoring boxes
+  #       scores_per_level = scores_per_level.flatten()
+  #       keep_idxs = scores_per_level > score_thresh
+  #       scores_per_level = scores_per_level[keep_idxs]
 
-        # keep topk
-        topk_idxs = np.where(keep_idxs)[0]
-        num_topk = min(len(topk_idxs), topk_candidates)
-        sort_idxs = scores_per_level.argsort()[-num_topk:][::-1]
-        topk_idxs, scores_per_level = topk_idxs[sort_idxs], scores_per_level[sort_idxs]
+  #       # keep topk
+  #       topk_idxs = np.where(keep_idxs)[0]
+  #       num_topk = min(len(topk_idxs), topk_candidates)
+  #       sort_idxs = scores_per_level.argsort()[-num_topk:][::-1]
+  #       topk_idxs, scores_per_level = topk_idxs[sort_idxs], scores_per_level[sort_idxs]
 
-        # bbox coords from offsets
-        anchor_idxs = topk_idxs // self.num_classes
-        labels_per_level = topk_idxs % self.num_classes
-        boxes_per_level = decode_bbox(offsets_per_level[anchor_idxs], anchors_per_level[anchor_idxs])
-        # clip to image size
-        clipped_x = boxes_per_level[:, 0::2].clip(0, w)
-        clipped_y = boxes_per_level[:, 1::2].clip(0, h)
-        boxes_per_level = np.stack([clipped_x, clipped_y], axis=2).reshape(-1, 4)
+  #       # bbox coords from offsets
+  #       anchor_idxs = topk_idxs // self.num_classes
+  #       labels_per_level = topk_idxs % self.num_classes
+  #       boxes_per_level = decode_bbox(offsets_per_level[anchor_idxs], anchors_per_level[anchor_idxs])
+  #       # clip to image size
+  #       clipped_x = boxes_per_level[:, 0::2].clip(0, w)
+  #       clipped_y = boxes_per_level[:, 1::2].clip(0, h)
+  #       boxes_per_level = np.stack([clipped_x, clipped_y], axis=2).reshape(-1, 4)
 
-        image_boxes.append(boxes_per_level)
-        image_scores.append(scores_per_level)
-        image_labels.append(labels_per_level)
+  #       image_boxes.append(boxes_per_level)
+  #       image_scores.append(scores_per_level)
+  #       image_labels.append(labels_per_level)
 
-      image_boxes = np.concatenate(image_boxes)
-      image_scores = np.concatenate(image_scores)
-      image_labels = np.concatenate(image_labels)
+  #     image_boxes = np.concatenate(image_boxes)
+  #     image_scores = np.concatenate(image_scores)
+  #     image_labels = np.concatenate(image_labels)
 
-      # nms for each class
-      keep_mask = np.zeros_like(image_scores, dtype=bool)
-      for class_id in np.unique(image_labels):
-        curr_indices = np.where(image_labels == class_id)[0]
-        curr_keep_indices = nms(image_boxes[curr_indices], image_scores[curr_indices], nms_thresh)
-        keep_mask[curr_indices[curr_keep_indices]] = True
-      keep = np.where(keep_mask)[0]
-      keep = keep[image_scores[keep].argsort()[::-1]]
+  #     # nms for each class
+  #     keep_mask = np.zeros_like(image_scores, dtype=bool)
+  #     for class_id in np.unique(image_labels):
+  #       curr_indices = np.where(image_labels == class_id)[0]
+  #       curr_keep_indices = nms(image_boxes[curr_indices], image_scores[curr_indices], nms_thresh)
+  #       keep_mask[curr_indices[curr_keep_indices]] = True
+  #     keep = np.where(keep_mask)[0]
+  #     keep = keep[image_scores[keep].argsort()[::-1]]
 
-      # resize bboxes back to original size
-      image_boxes = image_boxes[keep]
-      if orig_image_sizes is not None:
-        resized_x = image_boxes[:, 0::2] * orig_image_sizes[i][1] / w
-        resized_y = image_boxes[:, 1::2] * orig_image_sizes[i][0] / h
-        image_boxes = np.stack([resized_x, resized_y], axis=2).reshape(-1, 4)
-      # xywh format
-      image_boxes = np.concatenate([image_boxes[:, :2], image_boxes[:, 2:] - image_boxes[:, :2]], axis=1)
+  #     # resize bboxes back to original size
+  #     image_boxes = image_boxes[keep]
+  #     if orig_image_sizes is not None:
+  #       resized_x = image_boxes[:, 0::2] * orig_image_sizes[i][1] / w
+  #       resized_y = image_boxes[:, 1::2] * orig_image_sizes[i][0] / h
+  #       image_boxes = np.stack([resized_x, resized_y], axis=2).reshape(-1, 4)
+  #     # xywh format
+  #     image_boxes = np.concatenate([image_boxes[:, :2], image_boxes[:, 2:] - image_boxes[:, :2]], axis=1)
 
-      detections.append({"boxes":image_boxes, "scores":image_scores[keep], "labels":image_labels[keep]})
-    return detections
+  #     detections.append({"boxes":image_boxes, "scores":image_scores[keep], "labels":image_labels[keep]})
+  #   return detections
 
 class ClassificationHead:
   def __init__(self, in_channels, num_anchors, num_classes, prior_probability=0.01):
@@ -515,18 +515,10 @@ class ClassificationHead:
     out = [self.cls_logits(feat.sequential(self.conv)).permute(0, 2, 3, 1).reshape(feat.shape[0], -1, self.num_classes) for feat in x]
     return out[0].cat(*out[1:], dim=1)#.sigmoid()
   # @TinyJit
-  def loss(self, logits_class, T_l, matched_idxs, labels_temp):
+  def loss(self, logits_class, matched_idxs, labels_temp):
     batch_size = logits_class.shape[0]
     foreground_idxs = matched_idxs >= 0
     num_foreground = foreground_idxs.sum(-1)
-    # labels_temp = []
-    # for tl, m in zip(T_l, matched_idxs):
-    #   labels_temp.append(tl[m])
-    # labels_temp = Tensor.stack(labels_temp)
-    # idx = Tensor.arange(T_l.shape[0])
-    # print('T_L', T_l.shape)
-    # print('idx', idx.numpy())
-    # print(matched_idxs.shape, matched_idxs.numpy())
 
     labels_temp = (labels_temp+1)*foreground_idxs-1
     # print('LAbels_temp:', labels_temp.shape)
@@ -556,16 +548,12 @@ class RegressionHead:
   def __call__(self, x):
     out = [self.bbox_reg(feat.sequential(self.conv)).permute(0, 2, 3, 1).reshape(feat.shape[0], -1, 4) for feat in x]
     return out[0].cat(*out[1:], dim=1)
-  # @TinyJit
-  def loss(self, logits_reg, T_b, anchors, matched_idxs,boxes_temp):
+
+  def loss(self, logits_reg, anchors, matched_idxs,boxes_temp):
     batch_size = logits_reg.shape[0]
     foreground_idxs = matched_idxs >= 0
     num_foreground = foreground_idxs.sum(-1)
-    # boxes_temp = []
-    # for tb, m in zip(T_b, matched_idxs):
-    #   boxes_temp.append(tb[m])
-    # boxes_temp = Tensor.stack(boxes_temp)
-    # print('boxes_temp', boxes_temp.shape)
+
     matched_gt_boxes = boxes_temp * foreground_idxs.reshape(batch_size,-1,1)
     bbox_reg = logits_reg * foreground_idxs.reshape(batch_size,-1,1)
     anchors = anchors*foreground_idxs.reshape(batch_size,-1,1)
@@ -586,8 +574,6 @@ class RetinaHead:
   def __call__(self, x):
     pred_bbox, pred_class = self.regression_head(x), self.classification_head(x)
     return pred_bbox, pred_class
-    out = pred_bbox.cat(pred_class, dim=-1)
-    return out
 
 class ResNetFPN:
   def __init__(self, resnet, out_channels=256, returned_layers=[2, 3, 4]):
@@ -597,8 +583,8 @@ class ResNetFPN:
     self.fpn = FPN(in_channels_list, out_channels)
 
   # this is needed to decouple inference from postprocessing (anchors generation)
-  def compute_grid_sizes(self, input_size):
-    return np.ceil(np.array(input_size)[None, :] / 2 ** np.arange(3, 8)[:, None])
+  # def compute_grid_sizes(self, input_size):
+  #   return np.ceil(np.array(input_size)[None, :] / 2 ** np.arange(3, 8)[:, None])
 
   def __call__(self, x):
     out = self.body.bn1(self.body.conv1(x)).relu()

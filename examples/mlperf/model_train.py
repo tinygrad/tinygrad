@@ -241,10 +241,10 @@ def train_resnet():
         safe_save(get_training_state(model, optimizer_group, scheduler_group), fn)
 
 def train_retinanet():
-  from contextlib import redirect_stdout
-  import numpy as np
+  # from contextlib import redirect_stdout
+  # import numpy as np
   WANDB = True
-  WANDB = False
+  # WANDB = False
   HOSTNAME = getenv('SLURM_STEP_NODELIST', '3080')
   EPOCHS = 100
   BS = 16 # A100x2
@@ -282,7 +282,7 @@ def train_retinanet():
   from examples.hlb_cifar10 import UnsyncedBatchNorm
   from tinygrad.nn.optim import Adam
   from extra.datasets.openimages_new import iterate, iterate_val, MATCHER_FUNC
-  from extra.datasets.openimages_new import get_openimages
+  from extra.datasets.openimages_new import get_openimages, batch_load_retinanet
   from pycocotools.cocoeval import COCOeval
   from pycocotools.coco import COCO
   ROOT = 'extra/datasets/open-images-v6TEST'
@@ -337,14 +337,14 @@ def train_retinanet():
     x /= image_std
     return x#.realize()
   @TinyJit
-  def train_step(X, Y_b_P, Y_l_P, matched_idxs, boxes_temp, labels_temp):
+  def train_step(X, boxes_temp, labels_temp, matched_idxs):
     Tensor.training = True
     optimizer.zero_grad()
 
     b,r,c = model(normalize(X), True)
 
-    loss_reg = mdl_reg_loss(r, Y_b_P, matched_idxs, boxes_temp)
-    loss_class = mdl_class_loss(c, Y_l_P, matched_idxs, labels_temp)
+    loss_reg = mdl_reg_loss(r, matched_idxs, boxes_temp)
+    loss_class = mdl_class_loss(c, matched_idxs, labels_temp)
     loss = (loss_reg+loss_class)*loss_scaler
 
     loss.backward()
@@ -356,7 +356,7 @@ def train_retinanet():
     Tensor.training = False
     out = model(X)
     return out.realize()
-  func = None
+
   X = Tensor.rand((BS, 3, 800, 800)).shard_(GPUS, axis=0)
   b,_,_ = model(X, True)
   for bb in b:
@@ -364,17 +364,27 @@ def train_retinanet():
   ANCHORS = anchor_generator(X.shape, b)
   # ANCHORS = [a.realize() for a in ANCHORS]
   ANCHORS_STACK = Tensor.stack(ANCHORS)
-  ANCHORS_STACK = ANCHORS_STACK.shard_(GPUS, axis=0)
+  ANCHORS_STACK = ANCHORS_STACK.shard(GPUS, axis=0)
   # ANCHORS[0] = ANCHORS[0].to(GPUS)
-  func = lambda x: model.matcher_gen_per_img(ANCHORS[0], x)
-  mdl_reg_loss = lambda r, y, m, b_t: model.head.regression_head.loss(r,y,ANCHORS_STACK, m, b_t)
-  mdl_class_loss = lambda c, y,m, l_t: model.head.classification_head.loss(c,y,m, l_t)
+  # func = lambda x: model.matcher_gen_per_img(ANCHORS[0], x)
+  ANCHOR_NP = ANCHORS[0].numpy()
+  mdl_reg_loss = lambda r, m, b_t: model.head.regression_head.loss(r,ANCHORS_STACK, m, b_t)
+  mdl_class_loss = lambda c, m, l_t: model.head.classification_head.loss(c,m, l_t)
+  def data_get(it):
+    x, yb, yl, ym, cookie = next(it)
+    return x.shard(GPUS, axis=0), yb.shard(GPUS, axis=0), yl.shard(GPUS, axis=0), ym.shard(GPUS, axis=0), cookie 
   # b SHAPE for anchor_gen
   # (44, 256, 100, 100)
   # (44, 256, 50, 50)
   # (44, 256, 25, 25)
   # (44, 256, 13, 13)
   # (44, 256, 7, 7)
+
+  # (52, 256, 100, 100)
+  # (52, 256, 50, 50)
+  # (52, 256, 25, 25)
+  # (52, 256, 13, 13)
+  # (52, 256, 7, 7)
   for epoch in range(EPOCHS):
     print(colored(f'EPOCH {epoch}/{EPOCHS}:', 'cyan'))
     # train_step.reset()
@@ -386,42 +396,43 @@ def train_retinanet():
     #   lr_sched = Retina_LR(optimizer, start_iter, warmup_iters, WARMUP_FACTOR, LR)
     # else:
     #   optimizer.lr.assign(Tensor([LR], device=GPUS))
-    cnt = 0
-    data_end = time.perf_counter()
-    for X, Y_boxes, Y_labels, Y_boxes_p, Y_labels_p, matched_idxs in iterate(coco_train, BS, func):
-      # print('Global reset')
-      GlobalCounters.reset()
-      data_time = time.perf_counter() - data_end
-      st = time.perf_counter()
-      X = X.shard_(GPUS, axis=0).realize()
-      xt = time.perf_counter()
-      matched_idxs = matched_idxs.shard_(GPUS, axis=0).realize()
-      mt = time.perf_counter()
-      Y_boxes_p = Y_boxes_p.shard_(GPUS, axis=0).realize()
-      bpt = time.perf_counter()
-      Y_labels_p = Y_labels_p.shard_(GPUS, axis=0).realize()
-      pst = time.perf_counter()
-      loss = train_step(X, None, None, matched_idxs, Y_boxes_p, Y_labels_p)
-      jt = time.perf_counter()
+    batch_loader = batch_load_retinanet(coco_train, bs=BS, val=False, shuffle=False, anchor_np=ANCHOR_NP)
+    it = iter(tqdm(batch_loader, total=len(coco_train)//BS, desc=f"epoch {epoch}"))
+    cnt, proc = 0, data_get(it)
 
+    st = time.perf_counter()
+    while proc is not None:
+      GlobalCounters.reset()
+      loss, proc = train_step(proc[0], proc[1], proc[2], proc[3]), proc[4]
+
+      pt = time.perf_counter()
+      try:
+        next_proc = data_get(it)
+      except StopIteration:
+        next_proc = None
+
+      dt = time.perf_counter()
+
+      device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
+      loss = loss.numpy().item()
       if lr_sched is not None:
         lr_sched.step()
-      ll = loss.item()
-      lit = time.perf_counter()
-      et = time.perf_counter()-st
-      if cnt%1==0:
-        print(f'x: {(xt-st)*1000.0:7.2f} m: {(mt-xt)*1000.0:7.2f} bp: {(bpt-mt)*1000.0:7.2f} lp: {(pst-bpt)*1000.0:7.2f}')
-        print(f'JIT: {(jt-pst)*1000.0:7.2f} LIT: {(lit-jt)*1000.0:7.2f} SHARD: {(pst-st)*1000.0:7.2f}')
-        print(colored(f'{cnt} STEP {ll:.5f}, time: {et*1000.0:7.2f} ms run, '
-                      f'data: {data_time*1000.0:7.2f} ms|| '
-                      f'mem: {GlobalCounters.mem_used / 1e9:.4f} GB used, '
-                      f'GFLOPS: {GlobalCounters.global_ops * 1e-9 / et:7.2f}', 'magenta'))
-        if WANDB: wandb.log({'train/loss':ll})
-        # print(f'hit {(pre_zip-pre_match)*1000.0} {(pre_shard-pre_zip)*1000.0}'
-        #       f' {jitted_time*1000.0} {post_shard*1000.0}')
 
+      cl = time.perf_counter()
 
+      tqdm.write(
+        f"{cnt:5} {((cl - st)) * 1000.0:7.2f} ms run, {(pt - st) * 1000.0:7.2f} ms python, {(dt - pt) * 1000.0:6.2f} ms fetch data, "
+        f"{(cl - dt) * 1000.0:7.2f} ms {device_str}, {loss:5.2f} loss, {optimizer.lr.numpy()[0]:.6f} LR, "
+        f"{GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS")
+      if WANDB:
+        wandb.log({"lr": optimizer.lr.numpy(), "train/loss": loss, "train/step_time": cl - st,
+                   "train/python_time": pt - st, "train/data_time": dt - pt, "train/cl_time": cl - dt,
+                   "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": epoch + (cnt + 1) / (len(coco_train)//BS)})
+
+      st = cl
+      proc, next_proc = next_proc, None  # return old cookie
       cnt+=1
+
       if cnt%50==0:
         if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
         fn = f"./ckpts/retinanet_{len(GPUS)}x{HOSTNAME}_B{BS}_E{epoch}_{cnt}.safe"
@@ -429,7 +440,7 @@ def train_retinanet():
         # print(state_dict.keys())
         safe_save(state_dict, fn)
         print(f" *** Model saved to {fn} ***")
-      data_end = time.perf_counter()
+
     # # ****EVAL STEP
     # # train_step.reset()
     # print(colored(f'{epoch} START EVAL', 'cyan'))
