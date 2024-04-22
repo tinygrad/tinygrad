@@ -1,4 +1,4 @@
-import ctypes, subprocess, pathlib, tempfile, math, mmap as mmap_flags
+import ctypes, subprocess, pathlib, tempfile, mmap as mmap_flags
 from tinygrad.device import Compiled, MallocAllocator, Compiler, CompilerOptions
 from tinygrad.helpers import cpu_time_execution
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
@@ -32,11 +32,10 @@ class ClangCompiler(Compiler):
 class ClangProgram:
   def __init__(self, name:str, lib:bytes):
     self.name, self.lib = name, lib
-    mmap_size = 2**math.ceil(math.log2(len(lib))+1)
-    code_addr = mmap(None, mmap_size, mmap_flags.PROT_READ | mmap_flags.PROT_WRITE, mmap_flags.MAP_ANON | mmap_flags.MAP_PRIVATE, -1, 0)
+    code_addr = mmap(None, len(lib), mmap_flags.PROT_READ | mmap_flags.PROT_WRITE, mmap_flags.MAP_ANON | mmap_flags.MAP_PRIVATE, -1, 0)
     if code_addr == -1: raise OSError('mmap failed to allocate memory')
     ctypes.memmove(code_addr, lib, len(lib))
-    if mprotect(code_addr, mmap_size, mmap_flags.PROT_READ | mmap_flags.PROT_EXEC, 0) < 0: raise OSError('mprotect failed to make memory executable')
+    if mprotect(code_addr, len(lib), mmap_flags.PROT_READ | mmap_flags.PROT_EXEC, 0) < 0: raise OSError('mprotect failed to make memory executable')
     self.fxn = ctypes.CFUNCTYPE(None)(code_addr + 0x0000000000003e44) # TODO: just get offset from symbol table?
 
   def __call__(self, *bufs, vals=(), wait=False): return cpu_time_execution(lambda: self.fxn(*bufs, *vals), enable=wait)
