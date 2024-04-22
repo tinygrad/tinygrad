@@ -5,8 +5,6 @@ import json
 import numpy as np
 from PIL import Image
 import pathlib
-
-from tinygrad import Tensor
 import boto3, botocore
 from tinygrad.helpers import fetch
 from tqdm import tqdm
@@ -140,13 +138,9 @@ def image_load(fn):
   import torchvision.transforms.functional as F
   ret = F.resize(img, size=(800, 800))
   ret = np.array(ret)
-  # print('image_load', ret.shape, img.size)
   return ret, img.size[::-1]
 
-# def convert_coco_to_mask()
-def prepare_target(annotations, img_id, img_size, filter_crowded=False,train=False):
-  if filter_crowded:
-    annotations = [obj for obj in annotations if obj['iscrowd'] == 0]
+def prepare_target(annotations, img_id, img_size):
   boxes = [annot["bbox"] for annot in annotations]
   boxes = np.array(boxes, dtype=np.float32).reshape(-1, 4)
   boxes[:, 2:] += boxes[:, :2]
@@ -157,12 +151,9 @@ def prepare_target(annotations, img_id, img_size, filter_crowded=False,train=Fal
   classes = [annot["category_id"] for annot in annotations]
   classes = np.array(classes, dtype=np.int64)
   classes = classes[keep]
-  if train:
-    return {"boxes": Tensor(boxes).realize(), "labels": Tensor(classes).realize(), "image_id": img_id, "image_size": img_size}
-  else:
-    return {"boxes": boxes, "labels": classes, "image_id": img_id, "image_size": img_size}
+  return {"boxes": boxes, "labels": classes, "image_id": img_id, "image_size": img_size}
 
-def iterate(coco, bs=8, train=False):
+def iterate(coco, bs=8):
   image_ids = sorted(coco.imgs.keys())
   for i in range(0, len(image_ids), bs):
     X, targets  = [], []
@@ -170,8 +161,5 @@ def iterate(coco, bs=8, train=False):
       x, original_size = image_load(coco.loadImgs(img_id)[0]["file_name"])
       X.append(x)
       annotations = coco.loadAnns(coco.getAnnIds(img_id))
-      targets.append(prepare_target(annotations, img_id, original_size, train=train))
-    if train:
-      yield Tensor(X), targets
-    else:
-      yield np.array(X), targets
+      targets.append(prepare_target(annotations, img_id, original_size))
+    yield np.array(X), targets
