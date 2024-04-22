@@ -1,9 +1,8 @@
 import unittest, ctypes, struct, time
 from tinygrad import Device, Tensor, dtypes
-from tinygrad.helpers import getenv
 from tinygrad.buffer import Buffer, BufferOptions
 from tinygrad.engine.schedule import create_schedule
-from tinygrad.runtime.ops_kfd import KFDDevice, HWCopyQueue, HWComputeQueue, HWPM4Queue
+from tinygrad.runtime.ops_kfd import KFDDevice, HWCopyQueue, HWPM4Queue
 
 def _time_queue(q, d):
   st = time.perf_counter()
@@ -27,7 +26,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.addr2 = struct.pack("QQ", TestHCQ.a.lazydata.buffer._buf.va_addr, TestHCQ.b.lazydata.buffer._buf.va_addr)
     ctypes.memmove(TestHCQ.d0.kernargs_ptr, TestHCQ.addr, len(TestHCQ.addr))
     ctypes.memmove(TestHCQ.d0.kernargs_ptr+len(TestHCQ.addr), TestHCQ.addr2, len(TestHCQ.addr2))
-    TestHCQ.compute_queue = HWPM4Queue if getenv("PM4") else HWComputeQueue
+    TestHCQ.compute_queue = HWPM4Queue
 
   def setUp(self):
     TestHCQ.a.lazydata.buffer.copyin(memoryview(bytearray(struct.pack("ff", 0, 1))))
