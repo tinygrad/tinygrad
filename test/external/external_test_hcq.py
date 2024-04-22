@@ -72,7 +72,7 @@ class TestHCQ(unittest.TestCase):
       TestHCQ.d0._wait_signal(TestHCQ.d0.completion_signal, timeout=50)
     # clean up
     TestHCQ.d0.completion_signal.value = 0
-    TestHCQ.d0._wait_signal(TestHCQ.d0.completion_signal, timeout=1000)
+    TestHCQ.d0._wait_signal(TestHCQ.d0.completion_signal, timeout=1000, skip_check=True)
 
   def test_wait_copy_signal(self):
     TestHCQ.d0.completion_signal.value = 1
@@ -81,7 +81,7 @@ class TestHCQ(unittest.TestCase):
       TestHCQ.d0._wait_signal(TestHCQ.d0.completion_signal, timeout=50)
     # clean up
     TestHCQ.d0.completion_signal.value = 0
-    TestHCQ.d0._wait_signal(TestHCQ.d0.completion_signal, timeout=1000)
+    TestHCQ.d0._wait_signal(TestHCQ.d0.completion_signal, timeout=1000, skip_check=True)
 
   def test_run_normal(self):
     q = TestHCQ.compute_queue()

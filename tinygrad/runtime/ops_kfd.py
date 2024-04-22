@@ -515,7 +515,7 @@ class KFDDevice(Compiled):
     return ret
 
   @classmethod
-  def _wait_signal(self, signal:hsa.amd_signal_t, timeout=10000):
+  def _wait_signal(self, signal:hsa.amd_signal_t, timeout=10000, skip_check=False):
     assert signal.event_id != 0, "can't wait on this signal"
     evt_arr = (kfd.struct_kfd_event_data * 1)()
     evt_arr[0].event_id = signal.event_id
@@ -524,8 +524,7 @@ class KFDDevice(Compiled):
 
     #val = signal.value
     #while val != 0: val = signal.value
-    # SDMA sets it to -1
-    assert signal.value in [0, -1], f"not set to 0, but {signal.value}"
+    assert skip_check or signal.value == 0, f"not set to 0, but {signal.value}"
 
   def __init__(self, device:str=""):
     if KFDDevice.kfd == -1:
