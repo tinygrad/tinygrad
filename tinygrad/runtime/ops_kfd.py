@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Tuple, List, Any
-import os, fcntl, ctypes, functools, re, pathlib, mmap, struct, errno, subprocess, time
+import os, fcntl, ctypes, functools, re, pathlib, mmap, struct, errno, subprocess
 from tinygrad.device import Compiled, LRUAllocator, Compiler, CompilerOptions
 from tinygrad.buffer import BufferOptions
 from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up, DEBUG
@@ -220,8 +220,8 @@ class HWPM4Queue:
 
     # rsrc2 |= ((prg.group_segment_size+31)//64) << 15
     # rsrc2 |= (prg.group_segment_size//32) << 15
-    # user_sgpr = 
-    
+    # user_sgpr =
+
     prog_addr = (prg.handle + code.kernel_code_entry_byte_offset) >> 8
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 6), regCOMPUTE_PGM_LO, prog_addr&0xFFFFFFFF, prog_addr>>32, 0, 0,
                (prg.device.scratch.va_addr>>8)&0xFFFFFFFF, prg.device.scratch.va_addr>>40]
@@ -234,7 +234,8 @@ class HWPM4Queue:
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), regCOMPUTE_USER_DATA_0, kernargs&0xFFFFFFFF, kernargs>>32]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 8), regCOMPUTE_START_X, 0,0,0, local_size[0],local_size[1],local_size[2],0,0]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), regCOMPUTE_RESOURCE_LIMITS, 0]
-    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_DISPATCH_DIRECT, 3), global_size[0],global_size[1],global_size[2], CS_W32_EN | FORCE_START_AT_000 | COMPUTE_SHADER_EN]
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_DISPATCH_DIRECT, 3),
+               global_size[0],global_size[1],global_size[2], CS_W32_EN | FORCE_START_AT_000 | COMPUTE_SHADER_EN]
 
     # have to self wait since flush doesn't work
     self.signal(sig:=KFDDevice._get_signal())
@@ -276,7 +277,7 @@ class HWPM4Queue:
         amd_gpu.PACKET3_RELEASE_MEM_DATA_SEL(1) | amd_gpu.PACKET3_RELEASE_MEM_INT_SEL(2) | amd_gpu.PACKET3_RELEASE_MEM_DST_SEL(0),
         signal.event_mailbox_ptr&0xFFFFFFFF, signal.event_mailbox_ptr>>32,
         signal.event_id&0xFFFFFFFF, signal.event_id>>32,
-        signal.event_id]      
+        signal.event_id]
     return self
 
   def submit(self, device:KFDDevice):
@@ -719,7 +720,8 @@ class KFDDevice(Compiled):
       # print(self.pm4_write_pointer[0]%(self.pm4_ring.size//4), self.pm4_read_pointer[0])
       #for _ in range(10): time.sleep(0.01)
       #time.sleep(0.01)
-      #assert (wp:=(self.pm4_write_pointer[0]%(self.pm4_ring.size//4))) == (rp:=self.pm4_read_pointer[0]), f"didn't run {wp} != {rp} len {self.pm4_ring.size//4}"
+      #assert (wp:=(self.pm4_write_pointer[0]%(self.pm4_ring.size//4))) ==
+      # (rp:=self.pm4_read_pointer[0]), f"didn't run {wp} != {rp} len {self.pm4_ring.size//4}"
     else:
       HWComputeQueue().signal(self.completion_signal).submit(self)
       self._wait_signal(self.completion_signal)
