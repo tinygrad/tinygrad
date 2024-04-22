@@ -217,18 +217,14 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
     realized_parents: Set[LazyBuffer] = set()
     visited: Set[LazyBuffer] = set()
     while r_parents:
-      if (p:=r_parents.pop()).realized:
-        realized_parents.add(p)
-        continue
-      if (p.op in LoadOps and p.op is not LoadOps.ASSIGN) or p in visited: continue
-      visited.add(p)
-      if p in realizes and p is not r:
-        if not p.forced_realize and p not in reduce_for_op and p.shape == r.shape: realized_parents.add(p)
-        continue
-      if p.op is LoadOps.ASSIGN:
-        r_parents.append(r.srcs[0].base)
-        continue
-      for next_p in p.srcs: r_parents.append(next_p.base)
+      if (p:=r_parents.pop()).realized: realized_parents.add(p)
+      else:
+        if (p.op in LoadOps and p.op is not LoadOps.ASSIGN) or p in visited: continue
+        visited.add(p)
+        if p in realizes and p is not r:
+          if not p.forced_realize and p not in reduce_for_op and p.shape == r.shape: realized_parents.add(p)
+          continue
+        for next_p in p.srcs: r_parents.append(next_p.base)
 
     for rp in realized_parents:
       if rp.realized is not None: continue
