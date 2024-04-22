@@ -390,12 +390,12 @@ def train_retinanet():
     # train_step.reset()
     # mdlrun_false.reset()
     lr_sched = None
-    # if epoch < WARMUP_EPOCHS:
-    #   start_iter = epoch*len(coco_train.ids)//BS
-    #   warmup_iters = WARMUP_EPOCHS*len(coco_train.ids)//BS
-    #   lr_sched = Retina_LR(optimizer, start_iter, warmup_iters, WARMUP_FACTOR, LR)
-    # else:
-    #   optimizer.lr.assign(Tensor([LR], device=GPUS))
+    if epoch < WARMUP_EPOCHS:
+      start_iter = epoch*len(coco_train.ids)//BS
+      warmup_iters = WARMUP_EPOCHS*len(coco_train.ids)//BS
+      lr_sched = Retina_LR(optimizer, start_iter, warmup_iters, WARMUP_FACTOR, LR)
+    else:
+      optimizer.lr.assign(Tensor([LR], device=GPUS))
     batch_loader = batch_load_retinanet(coco_train, bs=BS, val=False, shuffle=False, anchor_np=ANCHOR_NP)
     it = iter(tqdm(batch_loader, total=len(coco_train)//BS, desc=f"epoch {epoch}"))
     cnt, proc = 0, data_get(it)
@@ -433,13 +433,19 @@ def train_retinanet():
       proc, next_proc = next_proc, None  # return old cookie
       cnt+=1
 
-      if cnt%50==0:
+      if cnt%1000==0:
         if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
         fn = f"./ckpts/retinanet_{len(GPUS)}x{HOSTNAME}_B{BS}_E{epoch}_{cnt}.safe"
         state_dict = get_state_dict(model)
         # print(state_dict.keys())
         safe_save(state_dict, fn)
         print(f" *** Model saved to {fn} ***")
+    if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
+    fn = f"./ckpts/retinanet_{len(GPUS)}x{HOSTNAME}_B{BS}_E{epoch}_{cnt}.safe"
+    state_dict = get_state_dict(model)
+    # print(state_dict.keys())
+    safe_save(state_dict, fn)
+    print(f" *** Model saved to {fn} ***")
     # ***********EVAL******************
     bt = time.time()
     train_step.reset()
