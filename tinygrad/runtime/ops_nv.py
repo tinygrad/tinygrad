@@ -37,8 +37,7 @@ def rm_control(fd, cmd, client, obj, params):
   return made
 
 def uvm_ioctl(cmd, sttyp, fd, **kwargs):
-  made = sttyp(**kwargs)
-  ret = fcntl.ioctl(fd, cmd, made)
+  ret = fcntl.ioctl(fd, cmd, made:=sttyp(**kwargs))
   if ret != 0: raise RuntimeError(f"uvm_ioctl returned {ret}")
   if made.rmStatus != 0: raise RuntimeError(f"uvm_ioctl struct returned {made.rmStatus}")
   return made
@@ -289,13 +288,13 @@ class NVAllocator(LRUAllocator):
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
 class NVDevice(Compiled):
   root = None
-  fd_ctl:int = -1
-  fd_uvm:int = -1
+  fd_ctl: int = -1
+  fd_uvm: int = -1
   gpus_info = None
-  semaphores_page = None
-  signal_number = 32
-  uvm_vaddr = 0x1000000000
-  host_object_enumerator = 0x1000
+  signals_page:Any = None
+  signal_number: int = 32
+  uvm_vaddr: int = 0x1000000000
+  host_object_enumerator: int = 0x1000
   devices: List[NVDevice] = []
 
   def _new_gpu_fd(self):
@@ -313,22 +312,19 @@ class NVDevice(Compiled):
 
   def _gpu_alloc(self, size:int, contig=False, huge_page=False, va_addr=None, map_to_cpu=False, map_to_all_gpus=False, map_flags=0):
     size = round_up(size, align:=((4 << 10) if huge_page else (2 << 20))) # TODO: need hugepage option, any speedup?
-    attr = (((nv_gpu.NVOS32_ATTR_PAGE_SIZE_HUGE << 23) if huge_page else 0) |
-            ((nv_gpu.NVOS32_ATTR_PHYSICALITY_CONTIGUOUS if contig else nv_gpu.NVOS32_ATTR_PHYSICALITY_ALLOW_NONCONTIGUOUS) << 27))
-    attr2 = ((nv_gpu.NVOS32_ATTR2_ZBC_PREFER_NO_ZBC << 0) | (nv_gpu.NVOS32_ATTR2_GPU_CACHEABLE_YES << 2) |
-             ((nv_gpu.NVOS32_ATTR2_PAGE_SIZE_HUGE_2MB << 20) if huge_page else 0))
-    flags = (nv_gpu.NVOS32_ALLOC_FLAGS_ALIGNMENT_FORCE | nv_gpu.NVOS32_ALLOC_FLAGS_PERSISTENT_VIDMEM | nv_gpu.NVOS32_ALLOC_FLAGS_MAP_NOT_REQUIRED |
-             nv_gpu.NVOS32_ALLOC_FLAGS_IGNORE_BANK_PLACEMENT | nv_gpu.NVOS32_ALLOC_FLAGS_MEMORY_HANDLE_PROVIDED)
-
-    alloc_params = nv_gpu.NV_MEMORY_ALLOCATION_PARAMS(owner=self.root, flags=flags, attr=attr, attr2=attr2, format=6, size=size,
-                                                     alignment=align, offset=0, limit=size-1)
+    alloc_params = nv_gpu.NV_MEMORY_ALLOCATION_PARAMS(owner=self.root, alignment=align, offset=0, limit=size-1, format=6, size=size,
+      attr=(((nv_gpu.NVOS32_ATTR_PAGE_SIZE_HUGE << 23) if huge_page else 0) |
+            ((nv_gpu.NVOS32_ATTR_PHYSICALITY_CONTIGUOUS if contig else nv_gpu.NVOS32_ATTR_PHYSICALITY_ALLOW_NONCONTIGUOUS) << 27)),
+      attr2=((nv_gpu.NVOS32_ATTR2_ZBC_PREFER_NO_ZBC << 0) | (nv_gpu.NVOS32_ATTR2_GPU_CACHEABLE_YES << 2) |
+             ((nv_gpu.NVOS32_ATTR2_PAGE_SIZE_HUGE_2MB << 20) if huge_page else 0)),
+      flags=(nv_gpu.NVOS32_ALLOC_FLAGS_ALIGNMENT_FORCE | nv_gpu.NVOS32_ALLOC_FLAGS_PERSISTENT_VIDMEM | nv_gpu.NVOS32_ALLOC_FLAGS_MAP_NOT_REQUIRED |
+             nv_gpu.NVOS32_ALLOC_FLAGS_IGNORE_BANK_PLACEMENT | nv_gpu.NVOS32_ALLOC_FLAGS_MEMORY_HANDLE_PROVIDED))
     mem_handle = rm_alloc(self.fd_ctl, nv_gpu.NV1_MEMORY_USER, self.root, self.device, alloc_params).hObjectNew
 
     if va_addr is None: va_addr = self._alloc_gpu_vaddr(size, alignment=align)
-    if map_to_cpu: va_base = self._gpu_map_to_cpu(mem_handle, size, target=va_addr, flags=map_flags)
-    else: va_base = va_addr
+    if map_to_cpu: va_addr = self._gpu_map_to_cpu(mem_handle, size, target=va_addr, flags=map_flags)
 
-    handle = self._gpu_uvm_map(va_base, size, mem_handle)
+    handle = self._gpu_uvm_map(va_addr, size, mem_handle)
     if map_to_all_gpus:
       for dev in NVDevice.devices:
         if dev != self: dev._gpu_uvm_map(handle.base, handle.length, handle.hMemory, create_range=False)
@@ -341,11 +337,11 @@ class NVDevice(Compiled):
       flags=(nv_gpu.NVOS32_ALLOC_FLAGS_IGNORE_BANK_PLACEMENT | nv_gpu.NVOS32_ALLOC_FLAGS_MEMORY_HANDLE_PROVIDED |
              nv_gpu.NVOS32_ALLOC_FLAGS_MAP_NOT_REQUIRED), format=6, size=size, alignment=(4<<10), offset=0, limit=size-1)
     mem_handle = rm_alloc(self.fd_ctl, nv_gpu.NV1_MEMORY_SYSTEM, self.root, self.device, alloc_params).hObjectNew
-    if va_addr is None: va_addr = self._alloc_gpu_vaddr(size)
-    if map_to_cpu: va_base = self._gpu_map_to_cpu(mem_handle, size, target=va_addr, flags=map_flags, system=True)
-    else: va_base = va_addr
 
-    return self._gpu_uvm_map(va_base, size, mem_handle)
+    if va_addr is None: va_addr = self._alloc_gpu_vaddr(size)
+    if map_to_cpu: va_addr = self._gpu_map_to_cpu(mem_handle, size, target=va_addr, flags=map_flags, system=True)
+
+    return self._gpu_uvm_map(va_addr, size, mem_handle)
 
   def _gpu_host_alloc(self, size):
     va_base = self._alloc_gpu_vaddr(sz:=round_up(size, 4 << 10))
@@ -417,8 +413,7 @@ class NVDevice(Compiled):
 
     gpu_uuid_params = nv_gpu.NV2080_CTRL_GPU_GET_GID_INFO_PARAMS(flags=nv_gpu.NV2080_GPU_CMD_GPU_GET_GID_FLAGS_FORMAT_BINARY, length=16)
     rm_control(self.fd_ctl, nv_gpu.NV2080_CTRL_CMD_GPU_GET_GID_INFO, self.root, self.subdevice, gpu_uuid_params)
-    self.gpu_uuid = (ctypes.c_ubyte*16)()
-    for i in range(16): self.gpu_uuid[i] = gpu_uuid_params.data[i]
+    self.gpu_uuid = (ctypes.c_ubyte*16)(*[gpu_uuid_params.data[i] for i in range(16)])
 
     uvm.register_gpu(self.fd_uvm, rmCtrlFd=-1, gpu_uuid=nv_gpu.struct_nv_uuid(uuid=self.gpu_uuid))
     uvm.register_gpu_vaspace(self.fd_uvm, gpuUuid=nv_gpu.struct_nv_uuid(uuid=self.gpu_uuid), rmCtrlFd=self.fd_ctl,
@@ -427,8 +422,8 @@ class NVDevice(Compiled):
     for dev in self.devices:
       uvm.enable_peer_access(self.fd_uvm, gpuUuidA=nv_gpu.struct_nv_uuid(uuid=self.gpu_uuid), gpuUuidB=nv_gpu.struct_nv_uuid(uuid=dev.gpu_uuid))
 
-    if NVDevice.semaphores_page is None: NVDevice.semaphores_page = self._gpu_system_alloc(0x10000, map_to_cpu=True)
-    else: self._gpu_uvm_map(NVDevice.semaphores_page.base, NVDevice.semaphores_page.length, NVDevice.semaphores_page.hMemory, create_range=False) # type: ignore
+    if NVDevice.signals_page is None: NVDevice.signals_page = self._gpu_system_alloc(0x10000, map_to_cpu=True)
+    else: self._gpu_uvm_map(NVDevice.signals_page.base, NVDevice.signals_page.length, NVDevice.signals_page.hMemory, create_range=False) # type: ignore
 
     channel_params = nv_gpu.NV_CHANNEL_GROUP_ALLOCATION_PARAMETERS(engineType=nv_gpu.NV2080_ENGINE_TYPE_GRAPHICS)
     channel_group = rm_alloc(self.fd_ctl, nv_gpu.KEPLER_CHANNEL_GROUP_A, self.root, self.device, channel_params).hObjectNew
@@ -488,9 +483,9 @@ class NVDevice(Compiled):
   def _get_signal(self, num=None) -> memoryview:
     if num is None:
       self.signal_number += 1
-      if self.semaphores_page and self.signal_number * 16 >= self.semaphores_page.length: self.signal_number = 32
+      if self.signals_page and self.signal_number * 16 >= self.signals_page.length: self.signal_number = 32
       num = self.signal_number
-    sig = to_mv(self.semaphores_page.base + num * 16, 16).cast("Q") # type: ignore
+    sig = to_mv(self.signals_page.base + num * 16, 16).cast("Q") # type: ignore
     sig[0] = 0
     return sig
 
