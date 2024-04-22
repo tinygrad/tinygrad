@@ -57,6 +57,7 @@ def uop_alu_resolve(u:UOp) -> sint:
   elif u.uop is UOps.DEFINE_VAR: return u.arg
   elif u.uop is UOps.ALU and u.arg == BinaryOps.MUL: return uop_alu_resolve(u.vin[0]) * uop_alu_resolve(u.vin[1])
   elif u.uop is UOps.ALU and u.arg == BinaryOps.ADD: return uop_alu_resolve(u.vin[0]) + uop_alu_resolve(u.vin[1])
+  else: raise RuntimeError(f"ALU resolve fail @ {u.uop}")
 
 def _match(uop:UOp, pattern:Dict[str, Any], store:Dict[str, UOp]) -> bool:
   for k,v in pattern.items():
@@ -210,7 +211,6 @@ class UOpGraph:
     loop_dependancies = {u: self.get_recursive_children(u) for u in loops}
 
     accs = [u for u in self.uops if u.uop is UOps.DEFINE_ACC]
-    # acc_children = {u: [e for e in self.uops if u in e.vin] for u in accs}
     acc_children = {u: self.get_recursive_children(u, include_phi=True) for u in accs}
     uops_to_remove = []
     # For each loop find its
@@ -477,16 +477,8 @@ class UOpGraph:
       self.replace_cast_bools_with_consts()
 
   def combine_ifs(self, ifs):
-    if_conds = []
-    for u in ifs:
-      if_conds.append(u.vin[0])
-      # self.uops.remove(u)
-    
-    endifs = []
-    for u in self.uops:
-      if u.uop is UOps.ENDIF:
-        endifs.append(u)
-        # self.uops.remove(u)
+    if_conds = [u.vin[0] for u in ifs]
+    endifs = [u for u in self.uops if u.uop is UOps.ENDIF]
       
     if_cond_idx = max([self.uops.index(e) for e in if_conds])
     or_conds = []
