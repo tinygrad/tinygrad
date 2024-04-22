@@ -1,4 +1,4 @@
-import sys, pickle, atexit
+import sys, pickle
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import Tuple, List, Dict, Optional, Set, DefaultDict
@@ -238,7 +238,6 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
 
   return graph, in_degree, prescheduled
 
-SCHEDULES: List[ScheduleItem] = []
 def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
   if seen is None: seen = set()
   graph, in_degree, prescheduled = _graph_schedule(outs, seen)
@@ -265,11 +264,8 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
     raise RuntimeError(f"cycle detected in graph, prescheduled {len(prescheduled)} but only scheduled {len(schedule)}")
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
   if SAVE_SCHEDULE:
-    def _save():
-      print(f"saving {len(SCHEDULES)} schedule items to", fp:="schedule.pkl")
-      pickle.dump(SCHEDULES, open(fp, "wb"))
-    if len(SCHEDULES) == 0: atexit.register(_save)
-    SCHEDULES.extend(schedule)
+    print(f"saving {len(schedule)} schedule items to", fp:="schedule.pkl")
+    pickle.dump((graph, prescheduled), open(fp, "wb"))
   return schedule, var_vals
 
 def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> List[ScheduleItem]:
