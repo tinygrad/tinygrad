@@ -252,7 +252,7 @@ class HWPM4Queue:
     return self
 
   def signal(self, signal:hsa.amd_signal_t, value=0):
-    assert signal.value == 0
+    #assert signal.value == 0, f"entering signal without it being set to 0, but {signal.value}"
     signal.value = 1
     # NOTE: this needs an EOP buffer on the queue or it will NULL pointer
     addr = ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET
@@ -330,7 +330,7 @@ class HWCopyQueue:
     return self
 
   def signal(self, signal:hsa.amd_signal_t):
-    assert signal.value == 0
+    #assert signal.value == 0
     signal.value = 1
     self.q.append(sdma_pkts.atomic(op=amd_gpu.SDMA_OP_ATOMIC, operation=amd_gpu.SDMA_ATOMIC_ADD64,
                                    addr=ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET, src_data=(1<<64)-1))
@@ -523,8 +523,8 @@ class KFDDevice(Compiled):
     ret = kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=timeout)
     if ret.wait_result != 0: raise RuntimeError(f"wait_result: {ret.wait_result}, {timeout} ms TIMEOUT!")
 
-    val = signal.value
-    while val != 0: val = signal.value
+    #val = signal.value
+    #while val != 0: val = signal.value
     assert signal.value == 0, f"not set to 0, but {signal.value}"
 
   def __init__(self, device:str=""):

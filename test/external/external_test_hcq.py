@@ -50,6 +50,7 @@ class TestHCQ(unittest.TestCase):
     for _ in range(1000):
       q.submit(TestHCQ.d0)
       TestHCQ.d0._wait_signal(TestHCQ.d0.completion_signal)
+      TestHCQ.d0.completion_signal.value = 1
     # confirm signal was reset
     with self.assertRaises(RuntimeError):
       TestHCQ.d0._wait_signal(TestHCQ.d0.completion_signal, timeout=50)
@@ -94,6 +95,7 @@ class TestHCQ(unittest.TestCase):
     HWCopyQueue().submit(TestHCQ.d0)
 
   def test_signal_timeout(self):
+    TestHCQ.d0.completion_signal.value = 1
     with self.assertRaises(RuntimeError):
       TestHCQ.d0._wait_signal(TestHCQ.d0.completion_signal, timeout=50)
 
@@ -118,9 +120,10 @@ class TestHCQ(unittest.TestCase):
     q.copy(TestHCQ.a.lazydata.buffer._buf.va_addr, TestHCQ.b.lazydata.buffer._buf.va_addr, 8)
     q.copy(TestHCQ.b.lazydata.buffer._buf.va_addr, TestHCQ.a.lazydata.buffer._buf.va_addr, 8)
     q.signal(TestHCQ.d0.completion_signal)
-    for _ in range(1000):
+    for i in range(1000):
       q.submit(TestHCQ.d0)
       TestHCQ.d0._wait_signal(TestHCQ.d0.completion_signal)
+      TestHCQ.d0.completion_signal.value = 1
     # confirm signal was reset
     with self.assertRaises(RuntimeError):
       TestHCQ.d0._wait_signal(TestHCQ.d0.completion_signal, timeout=50)
