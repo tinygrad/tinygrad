@@ -226,7 +226,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
         if not p.forced_realize and p not in reduce_for_op and p.shape == r.shape: realized_parents.add(p)
         continue
       if p.op is LoadOps.ASSIGN:
-        r_parents.append(r.srcs[1])
+        r_parents.append(r.srcs[0].base)
         continue
       for next_p in p.srcs: r_parents.append(next_p.base)
 
@@ -268,8 +268,9 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
     # realize outputs before a parent is assigned to
     parents_assigns = set(schedule_targets[assign_targets[x]].outputs[0] for x in lsi.inputs if x in assign_targets)
     for assign in parents_assigns:
-      graph[key].append(assign)
-      in_degree[assign] += 1
+      if assign not in lsi.outputs:
+        graph[key].append(assign)
+        in_degree[assign] += 1
 
   return graph, in_degree, prescheduled
 
