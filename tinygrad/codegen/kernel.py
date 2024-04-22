@@ -360,11 +360,12 @@ class Kernel:
         if axis_pads and (opt_level < 2): continue
 
         # tensor core -- unroll the reduce dim, upcast input, then create the correct thread pattern
-        if DEBUG >= 3: print("TENSOR CORES", axis_buf0, axis_buf1, tc)
         self.tensor_core_opts = (tc_opts:=TensorCoreOptions(bufs=(buf0, buf1), axes=[s0, s1], axes_exist=[True, True]))
 
-        # pad the tensor axes that require it
-        for axis, dim in axis_pads: self.apply_opt(Opt(OptOps.PADTO, axis, dim), append_opt=False) # PADTO might fail
+        # attempt to pad the tensor axes that require it
+        try:
+          for axis, dim in axis_pads: self.apply_opt(Opt(OptOps.PADTO, axis, dim), append_opt=False) # PADTO might fail
+        except KernelOptError: continue
         self.apply_opt(Opt(OptOps.UNROLL, 0, tc.dims[2]), append_opt=False)
         for i, sz in enumerate([prod(x) for x in [[x[1] for x in tc.threads if x[0]==dim] for dim in range(2)]]): # upcast non-local'd N, M
           if tc.dims[i] > sz: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[i], tc.dims[i]//sz), append_opt=False)
@@ -372,11 +373,27 @@ class Kernel:
           self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
 
         # assert tensor core
+        if DEBUG >= 3: print("TENSOR CORES", axis_buf0, axis_buf1, tc)
         if use_tensor_cores == 1: self.tensor_core = tc # TC=2 will do the shape ops without the WMMA
         return True
     return False
 
+
   def apply_tensor_cores(self, use_tensor_cores=1, extra_opts:Optional[List[Opt]]=None, tc_opt:Optional[int]=getenv("TC_OPT")) -> bool:
+    """ Attempts to apply a tensor core optimization to the kernel.  If one exists and applies properly, return true, otherwise return false.
+    Tensor cores are optimized instructions that matrix multiply-accumulate across a wave of threads: D(M, N) = A(M, K) * B(K, N) + C(M, N).
+
+    Keyword arguments:
+    use_tensor_cores -- controls how tensor cores are applied (default 1)
+      0: will disable any tensor core matching
+      1: enable tensor cores
+      2: apply tensor core shape but don't use UOp.WMMA
+    extra_opts -- additional Opt's to apply after the tensor core instead of the hand-coded additional Opt's (default None)
+    tc_opt -- controls which kinds of kernels may be eligible for tensor cores application (default 2 during BEAM, 0 otherwise)
+      0: applies to only kernels with a single reduce axis and direct BufferOps.LOAD into BinaryOps.MUL
+      1: allows kernels with multiple reduce axes and also multiplication of UnaryOps.CAST'd buffers
+      2: allows kernels with M, N, K axes that are not multiples of the tensor core dimensions by applying padding those axes as needed
+    """
     if not self.opts.has_tensor_cores and use_tensor_cores != 2: return False
     try: # check TC first and apply hand-coded opts if successful
       self.apply_opt(Opt(OptOps.TC, 0, tc_opt))

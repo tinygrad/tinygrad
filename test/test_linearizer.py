@@ -202,24 +202,34 @@ class TestLinearizer(unittest.TestCase):
     for tc in tensor_cores[Device[Device.DEFAULT].compiler.compiler_opts.device]:
       if getenv("EMULATE_CUDA") and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
       pad = 1
-      a, b = Tensor.rand(tc.dims[1]+pad, tc.dims[2]+pad, dtype=tc.dtype_in), Tensor.rand(tc.dims[2]+pad, tc.dims[0]+pad, dtype=tc.dtype_in)
-      r = a.matmul(b, acc_dtype=tc.dtype_out)
-      sched = create_schedule([r.lazydata])
-      realized_ast = sched[-1].ast[0]
+
+      def ensure_uops_and_opts_count(m:int, k:int, n:int, tc_opt:int, ensure_triggered:bool=True):
+        a, b = Tensor.rand(m, k, dtype=tc.dtype_in), Tensor.rand(k, n, dtype=tc.dtype_in)
+        r = a.matmul(b, acc_dtype=tc.dtype_out)
+        sched = create_schedule([r.lazydata])
+        realized_ast = sched[-1].ast[0]
+        k = Linearizer(realized_ast)
+        k.apply_tensor_cores(1, tc_opt=tc_opt)
+        k.linearize()
+        wmmas = len([uop for uop in k.uops if uop.uop is UOps.WMMA])
+        tcs = len([x for x in k.applied_opts if x.op is OptOps.TC])
+        if ensure_triggered:
+          assert wmmas > 0, "tensor core not triggered"
+          assert tcs == 1, "tensor core opt not included"
+        else:
+          assert wmmas == 0, "tensor core is incorrectly triggered"
+          assert tcs == 0, "tensor core opt is incorrectly included"
 
       # check that TC is triggered for TC_OPT=2
-      k = Linearizer(realized_ast)
-      k.apply_tensor_cores(1, tc_opt=2)
-      k.linearize()
-      assert len([uop for uop in k.uops if uop.uop is UOps.WMMA]) > 1, "tensor core not triggered"
-      assert len([x for x in k.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
+      ensure_uops_and_opts_count(tc.dims[0]+pad, tc.dims[2]+pad, tc.dims[1]+pad, tc_opt=2, ensure_triggered=True)
 
       # check that TC is not triggered for TC_OPT<2
-      k = Linearizer(realized_ast)
-      k.apply_tensor_cores(1, tc_opt=1)
-      k.linearize()
-      assert len([uop for uop in k.uops if uop.uop is UOps.WMMA]) == 0, "tensor core is incorrectly triggered"
-      assert len([x for x in k.applied_opts if x.op is OptOps.TC]) == 0, "tensor core opt is incorrectly included"
+      ensure_uops_and_opts_count(tc.dims[0]+pad, tc.dims[2]+pad, tc.dims[1]+pad, tc_opt=1, ensure_triggered=False)
+
+      # check excessive padding doesn't trigger padded TC in TC_OPT=2
+      ensure_uops_and_opts_count(tc.dims[0]//2, tc.dims[2], tc.dims[1], tc_opt=2, ensure_triggered=False)
+      ensure_uops_and_opts_count(tc.dims[0], tc.dims[2]//2, tc.dims[1], tc_opt=2, ensure_triggered=False)
+      ensure_uops_and_opts_count(tc.dims[0], tc.dims[2], tc.dims[1]//2, tc_opt=2, ensure_triggered=False)
 
       # check correctness
       a, b = Tensor.rand(tc.dims[1]+pad, tc.dims[2]+pad, dtype=tc.dtype_in), Tensor.rand(tc.dims[2]+pad, tc.dims[0]+pad, dtype=tc.dtype_in)
