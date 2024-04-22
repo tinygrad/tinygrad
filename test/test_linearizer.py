@@ -9,9 +9,8 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.shape.symbolic import MulNode, Variable, NumNode, Node
 from tinygrad.tensor import Tensor
-from tinygrad.engine.jit import CacheCollector
 from tinygrad.engine.schedule import create_schedule
-from tinygrad.engine.realize import run_schedule
+from tinygrad.engine.realize import run_schedule, lower_schedule
 from tinygrad.helpers import prod, Context, getenv
 from tinygrad.dtype import DType, dtypes
 from tinygrad.codegen.uops import UOpGraph
@@ -20,9 +19,10 @@ class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
     a, b = Tensor.randn(4), Tensor.randn(4)
     np_a, np_b = a.numpy(), b.numpy()
-    CacheCollector.start()
-    c = ((a.shrink(((0, 2),)) - a.shrink(((2, 4),))) - (b.shrink(((0, 2),)) - b.shrink(((2, 4),)))).realize()
-    rawbufs = CacheCollector.finish()[0].rawbufs
+    c = ((a.shrink(((0, 2),)) - a.shrink(((2, 4),))) - (b.shrink(((0, 2),)) - b.shrink(((2, 4),))))
+    lowered = list(lower_schedule(create_schedule([c.lazydata])))
+    for ei in lowered: ei.run()
+    rawbufs = lowered[-1].rawbufs
     assert len(rawbufs) == 3 and set(rawbufs[1:]) == {a.lazydata.base.realized, b.lazydata.base.realized}
     np_c = (np_a[:2] - np_a[2:]) - (np_b[:2] - np_b[2:])
     np.testing.assert_allclose(np_c, c.numpy(), atol=1e-4, rtol=1e-4)
@@ -191,7 +191,9 @@ class TestLinearizer(unittest.TestCase):
       assert len([uop for uop in k.uops if uop.uop is UOps.WMMA]) == 1, "tensor core not triggered"
       assert len([x for x in k.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
       np_c = np_a @ np_b
-      (tc_atol, tc_rtol) = (1e-2, 1e-3) if tc.dtype_out == dtypes.half else (5e-3, 1e-4)
+      if tc.dtype_out == dtypes.half: tc_atol, tc_rtol = 1e-2, 1e-3
+      elif tc.dtype_in == dtypes.bfloat16: tc_atol, tc_rtol = 1e-2, 3e-3
+      else: tc_atol, tc_rtol = 5e-3, 1e-4
       np.testing.assert_allclose(np_c, out, atol=tc_atol, rtol=tc_rtol)
 
   def test_limit_dims_to_max_5d_global(self):
@@ -517,7 +519,7 @@ def helper_linearizer_opt(r:Tensor, opts=[], apply_tc=False, atol=1e-4, rtol=1e-
     prg = to_prg(k)
     real_bufs[0].copyin(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np).data) # Zero to check that all values are filled
     prg.exec(real_bufs)
-    np.testing.assert_allclose(wanna_output, np.frombuffer(real_bufs[0].as_buffer(), real_bufs[0].dtype.np), atol=atol, rtol=rtol)
+    np.testing.assert_allclose(np.frombuffer(real_bufs[0].as_buffer(), real_bufs[0].dtype.np), wanna_output, atol=atol, rtol=rtol)
 
   # Get baseline, which is not optimized at all.
   k = Linearizer(realized_ast)
@@ -680,6 +682,8 @@ class TestKernelOpts(unittest.TestCase):
     N = 128
     Tensor.manual_seed(1552)
     for tc in tensor_cores[Device[Device.DEFAULT].compiler.compiler_opts.device]:
+      # bf16 buffer returns float32 numpy outputs so test would fail. testing opt with half suffices.
+      if tc.dtype_in == dtypes.bfloat16: continue
       a, b = Tensor.rand(N, N, dtype=tc.dtype_in), Tensor.rand(N, N, dtype=tc.dtype_in)
       r = a.matmul(b, acc_dtype=tc.dtype_out)
       (atol, rtol) = ((0.25, 0.01) if tc.dtype_out == dtypes.half else (3e-2, 1e-3)) if tc.dtype_in == dtypes.half else (1e-4, 1e-4)
@@ -712,14 +716,56 @@ class TestKernelOpts(unittest.TestCase):
     helper_linearizer_opt(a@b, [
       [Opt(OptOps.PADTO, 0, 32)],
       [Opt(OptOps.PADTO, 1, 32)],
+      [Opt(OptOps.PADTO, 2, 32)],
       [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32)],
+      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32), Opt(OptOps.PADTO, 2, 32)],
       # can optimize further post PADTO
       [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32), Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.UPCAST, 1, 2),],
     ])
 
+  def test_padto_sum_ok(self):
+    N = 18 * 18
+    # NOTE: this setup prevents 17 * 17 contiguous merged into one dimension
+    a = Tensor.rand(N, N).shrink(((0, 17), (0, 17))) * 100
+
+    helper_linearizer_opt(a.sum(0), [
+      [Opt(OptOps.PADTO, 0, 32)],
+      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],
+    ])
+    helper_linearizer_opt(a.sum(1), [
+      [Opt(OptOps.PADTO, 0, 32)],
+      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],
+    ])
+
+    # can pad sum reduce axis if there's no unsafe ops prior to sum
+    helper_linearizer_opt(a.sum(), [[Opt(OptOps.PADTO, 0, 32)],])
+    helper_linearizer_opt(a.sum(0), [[Opt(OptOps.PADTO, 1, 32)],])
+
+    # having unsafe ops after sum is fine
+    helper_linearizer_opt(a.sum().exp(), [[Opt(OptOps.PADTO, 0, 32)],])
+    helper_linearizer_opt(a.sum(0).exp(), [[Opt(OptOps.PADTO, 1, 32)],])
+
+  def test_padto_sum_not_ok(self):
+    N = 18 * 18
+    # NOTE: this setup prevents 17 * 17 contiguous merged into one dimension
+    a = Tensor.rand(N, N).shrink(((0, 17), (0, 17))).exp()
+    # exp is not safe to pad
+    with self.assertRaises(KernelOptError):
+      helper_linearizer_opt(a.exp().sum(), [[Opt(OptOps.PADTO, 0, 32)],])
+    with self.assertRaises(KernelOptError):
+      helper_linearizer_opt(a.exp().sum(0), [[Opt(OptOps.PADTO, 1, 32)],])
+
+    b = a < -1
+    # lt is not safe to pad
+    with self.assertRaises(KernelOptError):
+      helper_linearizer_opt(b.sum(), [[Opt(OptOps.PADTO, 0, 32)],])
+    with self.assertRaises(KernelOptError):
+      helper_linearizer_opt(b.sum(0), [[Opt(OptOps.PADTO, 1, 32)],])
+
   def test_padto_max(self):
-    N = 17 * 17
-    a = -Tensor.rand(N, N)
+    N = 18 * 18
+    # NOTE: this setup prevents 17 * 17 contiguous merged into one axis
+    a = -Tensor.rand(N, N).shrink(((0, 17), (0, 17))) * 100
 
     helper_linearizer_opt(a.max(0), [
       [Opt(OptOps.PADTO, 0, 32)],
@@ -730,7 +776,7 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],
     ])
 
-    # cannot pad a reduce axis
+    # cannot pad max kernel on reduce
     with self.assertRaises(KernelOptError):
       helper_linearizer_opt(a.max(), [[Opt(OptOps.PADTO, 0, 32)],])
     with self.assertRaises(KernelOptError):

@@ -23,8 +23,8 @@ if __name__ == '__main__':
     with open(args.file, 'r') as file:
      ast_strs = file.readlines()
 
-  for ast_str in ast_strs:
-    print(f"optimizing ast={ast_str}")
+  for i, ast_str in enumerate(ast_strs):
+    print(f"optimizing {i}/{len(ast_strs)}\nast={ast_str}")
     lin = ast_str_to_lin(ast_str, opts=device.compiler.compiler_opts)
     rawbufs = bufs_from_lin(lin)
     lin = beam_search(lin, rawbufs, getenv("BEAM", 8), bool(getenv("BEAM_ESTIMATE", 1)))

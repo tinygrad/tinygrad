@@ -1,7 +1,7 @@
 from __future__ import annotations
 import math, itertools
 from typing import NamedTuple, Optional, List, Tuple, cast, Dict, Union
-from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps
+from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, UNSAFE_PAD_OPS
 from tinygrad.device import Device, CompilerOptions
 from tinygrad.dtype import dtypes, ImageDType, DType
 from tinygrad.helpers import colored, ansilen, dedup, flatten, getenv, prod, DEBUG, round_up, all_int, get_contraction
@@ -53,6 +53,7 @@ tensor_cores: Dict[str, List[TensorCore]] = {
   "HSA": [TensorCore(dims=(16,16,16), threads=[(0,8),(0,2),(1,2)], thread_local_sizes=[[16],[16],[4,2]], thread_local_aliases=[ [[2],[0],[0],[-1],[1]], [[0],[2],[1],[-1],[0]], [[-2],[2],[1],[0],[3,-1]] ], dtype_in=di, dtype_out=do) for (di, do) in [(dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]],  # noqa: E501
   "CUDA": [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(0,2)], thread_local_sizes=[[2,2,2],[2,2],[2,2]], thread_local_aliases=[ [[0],[-2],[5],[0],[0],[-1,1,2,-3],[3,4]], [[5],[0],[0],[4],[3],[-1,1,2,-2],[0]], [[2],[-2],[5],[1],[-1],[0],[3,4]] ], dtype_in=di, dtype_out=do) for (di, do) in ([(dtypes.half, dtypes.float)] if getenv("PTX") else [(dtypes.half, dtypes.float), (dtypes.bfloat16, dtypes.float)])],  # noqa: E501
 }
+tensor_cores["KFD"] = tensor_cores["HSA"]
 
 class LocalBuffer(NamedTuple):
   name: str
@@ -112,7 +113,7 @@ class Kernel:
     ret = type(self).__new__(type(self))
 
     # base linearizer params
-    ret.opts, ret.ast = self.opts, self.ast
+    ret.opts, ret.ast, ret.lazyops = self.opts, self.ast, self.lazyops
 
     # things downstream of the AST
     ret.reduceop, ret.outbufs, ret.vars, ret.bufs, ret.earlybufs, ret.full_buf_index = \
@@ -468,10 +469,13 @@ class Kernel:
       self.dont_use_locals = True
     elif opt.op is OptOps.PADTO:
       check(not self.vars, "does not work with symbolic shape")
-      check(axis < self.first_reduce, "cannot pad a reduce axis")
+      # ok to pad SUM if all parent ops have f(0) = 0
+      if self.first_reduce <= axis < self.shape_len - self.upcasted:
+        check(self.reduceop.op is ReduceOps.SUM and all(op.op not in UNSAFE_PAD_OPS for ops in self.reduceop.src for op in ops.lazyops), "cannot pad")
       padded = False
       for i,st in enumerate(self.sts):
-        check(self.sts[i].shape[axis] > amt//2, "pad adds more than double the work")
+        if self.sts[i].shape[axis] == 1: continue  # reduced
+        check(self.sts[i].shape[axis] > amt//2, f"pad adds more than double the work {self.sts[i].shape[axis]=} > {amt//2=}")
         if (ru := round_up(cast(int, self.sts[i].shape[axis]), cast(int, amt)) - self.sts[i].shape[axis]):
           # pad right seems to be faster
           self.sts[i] = st.pad(((0,0),) * axis + ((0,ru),) + ((0,0),) * (len(st.shape)-axis-1))

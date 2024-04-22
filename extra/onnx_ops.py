@@ -1,7 +1,7 @@
 import functools, io, math
 from typing import Union, Tuple, Optional, List, Any
-from tinygrad import Tensor, dtypes
-from tinygrad.dtype import ImageDType
+from tinygrad.tensor import Tensor, broadcast_shape
+from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.helpers import prod, flatten
 from extra.onnx import safe_numpy, DTYPE_MAP
 import numpy as np
@@ -82,6 +82,7 @@ def Size(data: Tensor): return prod(data if isinstance(data, list) else data.sha
 def Flatten(x: Tensor, axis=1): return x.reshape(prod(x.shape[0:axis]), -1)
 def Reshape(data: Tensor, shape: Tensor, allowzero=0):
   return data.reshape([int(x) if x != 0 else (0 if allowzero else data.shape[i]) for i,x in enumerate(safe_numpy(shape))])
+def Expand(x: Tensor, shape:Tensor): return x.expand(broadcast_shape(x.shape, tuple(int(x) for x in safe_numpy(shape))))
 def Shrink(x: Tensor, bias=0.0, lambd=0.5): return (x < -lambd)*(x+bias) + (x > lambd)*(x-bias)
 def And(x:Tensor, y:Tensor): return (x==y).where(x, False)
 def Or(x:Tensor, y:Tensor): return (x==y).where(x, True)
@@ -135,14 +136,6 @@ def ConstantOfShape(x, value:Tensor=None):
   shape = [int(x) for x in safe_numpy(x)]
   return Tensor.ones(*shape, dtype=value.dtype) * (value if shape[0]!=0 else 1)
 
-# TODO: abstract out the broadcast logic in tensor
-def Expand(x: Tensor, shape):
-  x_shape, y_shape = x.shape, [int(x) for x in safe_numpy(shape)]
-  # copied from _broadcasted
-  x_shape, y_shape = [([1]*(max(len(x_shape), len(y_shape))-len(t_shape)) + list(t_shape)) for t_shape in [x_shape, y_shape]]
-  shape_ret = tuple(max(sx, sy) for sx,sy in zip(x_shape, y_shape))
-  return x.reshape(x_shape).expand(shape_ret)
-
 # **************** Complex Ops ****************
 
 def Gemm(A: Tensor, B: Tensor, C: Tensor=None, alpha=1.0, beta=1.0, transA=0, transB=0, broadcast=0):
@@ -193,6 +186,8 @@ def LayerNormalization(x: Tensor, scale, bias, axis=-1, epsilon=1e-05, stash_typ
   mean = x.mean(axis=axis, keepdim=True)
   return x.layernorm(axis, epsilon).mul(scale).add(bias), mean, (x.sub(mean)).pow(2).mean(axis=axis, keepdim=True).add(epsilon).rsqrt()
 
+# TODO: current implmentation fails tests and tried copying onnx's implementation but got poor accuracy
+# https://github.com/onnx/onnx/blob/main/onnx/backend/test/case/node/groupnormalization.py#L13
 def GroupNormalization(x: Tensor, scale: Tensor, bias: Tensor, num_groups, epsilon=1e-05):
   return x.reshape(x.shape[0], num_groups, -1).layernorm(axis=-1, eps=epsilon).mul(scale.unsqueeze(-1)).add(bias.unsqueeze(-1)).reshape(x.shape)
 
@@ -210,12 +205,17 @@ def _format_padding(onnx_pads, ndims=None, axes=None):
 
 def _padded(X: Tensor, pads=None, auto_pad="NOTSET", axes=None, constant_value=0., strides=None, kernel_shape=None, dilations=None, ceil_mode=0):
   if auto_pad != "NOTSET": pads = _auto_pad(X, auto_pad, strides, kernel_shape, dilations)
-  elif ceil_mode and auto_pad=="NOTSET": # stupid ceil_mode case
+  elif ceil_mode:
     if strides is not None: strides = [strides]*len(kernel_shape) if isinstance(strides, int) else strides if strides else [1]*len(kernel_shape)
     if dilations is not None: dilations = [1]*len(kernel_shape) if dilations == 1 else dilations
     out_spatial_shape = [math.ceil((sh - dil * (ker-1)-1)/st + 1) if ceil_mode else math.floor((sh - dil * (ker-1)-1)/st + 1) for sh, st, ker, dil in zip(X.shape[-len(kernel_shape):], strides, kernel_shape, dilations)]
     pad_shape = [(osh-1)*st+((ks-1)*dil+1)-ish for osh, st, ks, dil, ish in zip(out_spatial_shape, strides, kernel_shape, dilations, X.shape[-len(kernel_shape):])]
-    pad_shape = flatten([[sh//2, sh-sh//2] for sh in pad_shape])
+    pad_shape = [[sh//2, sh-sh//2] for sh in pad_shape]
+    # ceil_mode case follows NOTE in https://pytorch.org/docs/stable/generated/torch.nn.MaxPool2d.html#torch.nn.MaxPool2d
+    # so if any kernels start in right padded region, we decrease right pads to omit that kernel. Only omitting 1 kernel now.
+    pad_shape = [[start,end-rpad] if (rpad := ks + st%(st-(((start+xs)%st)))) <= end else [start,end]
+                 for (start,end), ks, st, xs in zip(pad_shape, kernel_shape, strides, X.shape[-len(kernel_shape):])]
+    pad_shape = flatten(pad_shape)
     pads = pad_shape[::2] + pad_shape[1::2]
   if pads is None: return X
   pads = _format_padding(pads, ndims=len(X.shape), axes=axes)
@@ -428,7 +428,7 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
       y_out = roi[-2][0] * (X.shape[-2] - 1) + y_out * ((roi[-2][1] - roi[-2][0]) * (X.shape[-2] - 1) / (output_shape[-2] - 1)) if output_shape[-2] > 1 else Tensor([0.5 * (roi[-2][0] + roi[-2][1]) * (X.shape[-2] - 1)])
     return x_out.clip(0, X.shape[-1]-1), y_out.clip(0, X.shape[-2]-1)
   if roi is not None:
-    roi = safe_numpy(roi)
+    roi = safe_numpy(roi).tolist()
     roi = [(st,ed) for st, ed in zip(roi[:len(roi)//2], roi[len(roi)//2:])]
     roi_ = [(1,1)] * 4
     if axes is not None:
@@ -548,10 +548,16 @@ def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)
 def IsInf(x: Tensor, detect_negative=1, detect_positive=1):
   return (x == float("inf")) * bool(detect_positive) + (x == float("-inf")) * bool(detect_negative)
 
-def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point: Union[Tensor, int] = 0, axis=1):
+def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point: Union[Tensor, int] = 0, axis=1, block_size=0):
+  def numpy_repeat(t: Tensor, axis, repeats, out_shape):
+    t = t.reshape(tuple(-1 if i == axis-1 else 1 if i == axis else sh for i,sh in enumerate(t.shape)))
+    return t.repeat([repeats if i == axis else 1 for i in range(t.ndim)]).reshape(out_shape)
   if axis < 0: axis += x.ndim
-  x_sc = x_scale.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim))
-  x_zer = x_zero_point.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim)) if isinstance(x_zero_point, Tensor) else x_zero_point
+  if block_size:
+    x_zer, x_sc = numpy_repeat(x_zero_point, axis, block_size, x.shape), numpy_repeat(x_scale, axis, block_size, x.shape)
+  else:
+    x_sc = x_scale.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim))
+    x_zer = x_zero_point.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim)) if isinstance(x_zero_point, Tensor) else x_zero_point
   return ((x.float() - x_zer) * x_sc).cast(x_scale.dtype)
 
 def IsNaN(x: Tensor): return x != x
@@ -685,7 +691,7 @@ def Adagrad(R, T, *inputs, decay_factor=0.0, epsilon=0.0, norm_coefficient=0.0):
     X.grad.requires_grad, H.requires_grad = False, False # TODO manually turning off requires_grad, see TODO under (domain == "ai.onnx.preview.training") in onnx.py
     H.assign(H.detach() + X.grad * X.grad).realize()
     H_adaptive = H.sqrt() + epsilon
-    X.assign(X.detach() - r * X.grad / H_adaptive)
+    X.assign(X.detach() - r.tolist() * X.grad / H_adaptive)
     ret.extend([X, H])
   ret = ret[::2] + ret[1::2]
   return tuple(ret)
@@ -693,7 +699,7 @@ def Adagrad(R, T, *inputs, decay_factor=0.0, epsilon=0.0, norm_coefficient=0.0):
 def Momentum(R, T, *inputs, alpha, beta, mode, norm_coefficient):
   groups = len(inputs) // 3
   grouped_inputs = [inputs[i::groups] for i in range(groups)]
-  T, R = safe_numpy(T), safe_numpy(R)
+  T, R.requires_grad = T.item(), False
   beta_adjusted = beta if T > 0 else 1
   ret = []
   for X, G, V in grouped_inputs:
@@ -710,7 +716,7 @@ def Momentum(R, T, *inputs, alpha, beta, mode, norm_coefficient):
 def Adam(R, T, *inputs, alpha=0.9, beta=0.999, epsilon=0.0, norm_coefficient=0.0, norm_coefficient_post=0.0):
   groups = len(inputs) // 4
   grouped_inputs = [inputs[i::groups] for i in range(groups)]
-  T, R = safe_numpy(T), safe_numpy(R)
+  T, R.requires_grad = T.item(), False
   ret = []
   for X, G, V, H in grouped_inputs:
     X.grad = (norm_coefficient * X + G).realize()

@@ -1,7 +1,7 @@
 from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable
 import itertools, functools, random, math, time, multiprocessing, traceback, signal
 from collections import defaultdict
-from tinygrad.device import Device, Compiled, Buffer, CompiledASTRunner, Compiler
+from tinygrad.device import Device, Compiled, Buffer, CompiledRunner, Compiler
 from tinygrad.ops import MemBuffer
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, to_function_name
 from tinygrad.dtype import ImageDType
@@ -35,19 +35,20 @@ def _time_program(variables:List[Variable], outcount:int, rdev:Compiled, lib:byt
   factor = 1
   if global_size is not None and max_global_size is not None:
     global_size, factor = _get_test_global_size(global_size, max_global_size, var_vals)
-  try: car = CompiledASTRunner(name, "", rdev.dname, global_size, local_size, variables=variables, precompiled=lib, outcount=outcount)
+  try: car = CompiledRunner(name, "", rdev.dname, global_size, local_size, variables=variables, precompiled=lib, outcount=outcount)
   except AssertionError: return [math.inf] * cnt
   tms = []
   for _ in range(cnt):
     if clear_l2:
       with Context(DEBUG=0, BEAM=0, CACHECOLLECTING=0): Tensor.ones(1024,1024).contiguous().realize()
-    tms.append(cast(float, car(rawbufs, var_vals, wait=True, do_update_stats=False))*factor)
+    tms.append(cast(float, car(rawbufs, var_vals, wait=True))*factor)
     if early_stop is not None and early_stop < tms[-1]: break
   return tms
 
-def _compile_linearizer(compiler:Compiler, lin:Linearizer, name:Optional[str]=None) -> Tuple[bytes, Optional[List[int]], Optional[List[int]],
-                                                                                             List[Variable], int, float, int]:
+def _compile_linearizer(compiler:Compiler, lin:Linearizer, name:Optional[str]=None, enforce_max:bool=False) \
+  -> Tuple[bytes, Optional[List[int]], Optional[List[int]], List[Variable], int, float, int]:
   lin.linearize()
+  if enforce_max and len(lin.uops.uops) >= getenv("BEAM_UOPS_MAX", 3000) > 0: raise RuntimeError("too many uops")
   src = compiler.render(name if name is not None else to_function_name(lin.name), lin.uops)   # NOTE: these all have the same name for deduping
   if DEBUG >= 5: print(src)
   st = time.perf_counter()
@@ -56,7 +57,7 @@ def _compile_linearizer(compiler:Compiler, lin:Linearizer, name:Optional[str]=No
   return prog, lin.global_size, lin.local_size, lin.uops.vars(), len(lin.outbufs), et, len(lin.uops.uops)
 
 def _try_compile_linearized_w_idx(x:Tuple[int,Linearizer], compiler:Compiler):
-  try: return x[0], _compile_linearizer(compiler, x[1], "test")
+  try: return x[0], _compile_linearizer(compiler, x[1], "test", enforce_max=True)
   except Exception:
     if DEBUG >= 4: traceback.print_exc()
     return x[0], None
@@ -64,17 +65,19 @@ def _try_compile_linearized_w_idx(x:Tuple[int,Linearizer], compiler:Compiler):
 # workers should ignore ctrl c
 def _init_worker(): signal.signal(signal.SIGINT, signal.SIG_IGN)
 
+def _ensure_buffer_alloc(bufs:List[Buffer]) -> List[Buffer]: return [buf.ensure_allocated() for buf in bufs]
+
 # *** external API ***
 
 # get (scrap) buffers for timing the linearizer
-def bufs_from_lin(lin:Linearizer) -> List[Buffer]:
+def bufs_from_lin(lin:Linearizer, allocate:bool=True) -> List[Buffer]:
   bufsts:DefaultDict[int, List[MemBuffer]] = defaultdict(list)
   for x in lin.membufs: bufsts[x.idx].append(x)
   rawbufs:List[Optional[Buffer]] = [None]*len(bufsts)
   for k,lx in bufsts.items():
     buf_size = prod(lx[0].dtype.shape) if isinstance(lx[0].dtype, ImageDType) else max(y.st.real_size() for y in lx)
     if buf_size == 0: buf_size = 1  # create a size 1 buffer if no cell is accessed in kernel. # TODO: remove from kernel input in this case.
-    rawbufs[k] = Buffer(lin.opts.device, buf_size, lx[0].dtype).allocate()
+    rawbufs[k] = Buffer(lin.opts.device, buf_size, lx[0].dtype).allocate() if allocate else Buffer(lin.opts.device, buf_size, lx[0].dtype)
   assert all(r is not None for r in rawbufs)
   return cast(List[Buffer], rawbufs)
 
@@ -97,7 +100,7 @@ def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Lineariz
   return acted_lins
 
 beam_pool = None
-def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linearizer:
+def beam_search(lin:Linearizer, rawbufs:List[Buffer], amt:int, allow_test_size=True) -> Linearizer:
   global beam_pool
   key = {"ast": lin.ast[0].key, "amt": amt, "allow_test_size": allow_test_size, "device": lin.opts.device, "suffix": lin.opts.suffix}
   if (val:=diskcache_get("beam_search", key)) is not None and not getenv("IGNORE_BEAM_CACHE") and CACHELEVEL >= 1:
@@ -113,6 +116,7 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
     beam_pool = multiprocessing.get_context("spawn").Pool(multiprocessing.cpu_count(), _init_worker, (), getenv("BEAM_MAX_TASKS_PER_CHILD", 16))
 
   try:
+    rawbufs = _ensure_buffer_alloc(rawbufs)
     var_vals = {k:(k.max+k.min)//2 for k in lin.ast[0].vars()}
     exiting, st = False, time.perf_counter()
     dev = Device[lin.opts.device]
@@ -129,7 +133,7 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
         try: tms = _time_program(vars, outcount, dev, lib, global_size, local_size, var_vals, rawbufs, early_stop=beam[0][1]*3 if len(beam) else 1.0)
         except RuntimeError: continue # for runtime issues
         timed_lins.append((acted_lins[i], min(tms)))
-        if getenv("BEAM_LOG", 0) > 0: print(f"{time.perf_counter() - st:7.2f}s: {i:5d} {num_uops:5d} uops {compile_et*1e6:12.2f} us compile/{timed_lins[-1][1]*1e6:12.2f} us run       {len(timed_lins):4d}/{len(acted_lins):4d}         {timed_lins[-1][0].colored_shape()}")  # noqa: E501
+        if getenv("BEAM_LOG") > 0: print(f"{time.perf_counter() - st:7.2f}s: {i:5d} {num_uops:5d} uops {compile_et*1e6:12.2f} us compile/{timed_lins[-1][1]*1e6:12.2f} us run       {len(timed_lins):4d}/{len(acted_lins):4d}         {timed_lins[-1][0].colored_shape()}")  # noqa: E501
         elif DEBUG >= 2: print(f"\r{time.perf_counter() - st:7.2f}s: {timed_lins[-1][1]*1e6:12.2f} us       {len(timed_lins):4d}/{len(acted_lins):4d}         {timed_lins[-1][0].colored_shape()}\033[K", end="")  # noqa: E501
 
       # done
@@ -137,14 +141,13 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
       exiting = len(opts) == 0 or (len(beam) > 0 and ((beam[0][1]-opts[0][1])*1e6 < min_progress_micros))
       if not exiting: beam = opts[:amt]
       elif len(opts) > 0 and opts[0][1] < beam[0][1]: beam = opts[:1]
-      assert len(beam) > 0, "no BEAM items succeeded?!?"
+      assert len(beam) > 0, "no BEAM items succeeded?!?" # this asserts in unet3d multi-gpu, need to figure out why
       if DEBUG >= 2: print(f"\r{time.perf_counter() - st:7.2f}s:", colored(f"{beam[0][1]*1e6:12.2f} us", "green" if exiting else None), f"from {len(acted_lins):3d} -> {len(opts):3d} actions\033[K", beam[0][0].colored_shape())  # noqa: E501
   except KeyboardInterrupt as e:
     if beam_pool is not None: beam_pool.terminate()
     raise e
 
   if CACHELEVEL >= 1: diskcache_put("beam_search", key, beam[0][0].applied_opts)
-  if DEBUG >= 3: print(beam[0][0].applied_opts)
   return beam[0][0]
 
 def optimize_local_size(clprg:Callable, global_size:List[int], rawbufs:List[Buffer]) -> List[int]:
@@ -166,6 +169,7 @@ def time_linearizer(lin:Linearizer, rawbufs:List[Buffer], allow_test_size=True, 
   dev = Device[lin.opts.device]
   assert dev.compiler is not None
 
+  rawbufs = _ensure_buffer_alloc(rawbufs)
   var_vals = {k:(k.max+k.min)//2 for k in lin.ast[0].vars()}
   lib, global_size, local_size, vars, outcount, _, _ = _compile_linearizer(dev.compiler, lin)
   tms = _time_program(vars, outcount, dev, lib, global_size, local_size, var_vals, rawbufs, max_global_size=max_global_size if allow_test_size else None, clear_l2=clear_l2, cnt=cnt, name=to_function_name(lin.name))  # noqa: E501

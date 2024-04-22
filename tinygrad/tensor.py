@@ -7,16 +7,16 @@ from collections import defaultdict
 import numpy as np
 
 from tinygrad.dtype import DType, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype
-from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, fully_flatten, flat_mv, argsort
-from tinygrad.helpers import IMAGE, DEBUG, WINO, THREEFRY
+from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, fully_flatten, argsort, IMAGE, DEBUG, WINO, THREEFRY
+from tinygrad.helpers import getenv
 from tinygrad.lazy import LazyBuffer
 from tinygrad.features.multi import MultiLazyBuffer
 from tinygrad.ops import LoadOps
 from tinygrad.buffer import Buffer, BufferOptions
 from tinygrad.device import Device
 from tinygrad.shape.symbolic import sint
-from tinygrad.engine.realize import run_schedule
-from tinygrad.engine.schedule import create_schedule
+from tinygrad.engine.realize import run_schedule, memory_planner
+from tinygrad.engine.schedule import create_schedule_with_vars
 
 # **** start with two base classes, Tensor and Function ****
 
@@ -45,9 +45,9 @@ def _loadop(op, shape:Tuple[sint,...], dtype:DType, device:Union[str, Tuple[str,
   return MultiLazyBuffer([LazyBuffer.loadop(op, shape, dtype, d, arg, src) for d in device], None)
 
 def _fromcpu(x: np.ndarray) -> LazyBuffer:
-  ret = LazyBuffer.loadop(LoadOps.EMPTY, x.shape, dtypes.from_np(x.dtype), "EXT")
+  ret = LazyBuffer.loadop(LoadOps.EMPTY, x.shape, dtypes.from_np(x.dtype), "NPY")
   # fake realize
-  ret.buffer.allocate((memoryview(bytearray()), None) if x.size == 0 else (flat_mv(np.require(x, requirements='C').data), x))
+  ret.buffer.allocate(x)
   del ret.srcs
   return ret
 
@@ -67,7 +67,17 @@ def _apply_winograd_matrix(mat, t:Tensor, dims:int) -> Tensor:
   assert isinstance(ret, Tensor), "sum didn't return a Tensor"
   return ret
 
+def _pad_left(*shps:Tuple[sint, ...], v=1): return tuple((v,) * (max(len(i_) for i_ in shps) - len(i)) + i for i in shps)
+def broadcast_shape(*shps:Tuple[sint, ...]): return tuple(0 if any(sh_ == 0 for sh_ in sh) else max(sh) for sh in zip(*_pad_left(*shps)))
+
 class Tensor:
+  """
+  A `Tensor` is a multi-dimensional matrix containing elements of a single data type.
+
+  ```python exec="true" session="tensor"
+  from tinygrad import Tensor
+  ```
+  """
   __slots__ = "lazydata", "requires_grad", "grad", "_ctx"
   __deletable__ = ('_ctx',)
   training: ClassVar[bool] = False
@@ -123,6 +133,8 @@ class Tensor:
 
   def __bool__(self): raise TypeError("__bool__ on Tensor is not defined")
 
+  def __len__(self): return self.shape[0] if len(self.shape) else 1
+
   @property
   def device(self) -> Union[str, Tuple[str, ...]]: return self.lazydata.device
 
@@ -136,9 +148,14 @@ class Tensor:
 
   @staticmethod
   def corealize(lst:Iterable[Tensor]):
-    run_schedule(create_schedule(flatten([x.lazydata.lbs if isinstance(x.lazydata, MultiLazyBuffer) else [x.lazydata] for x in lst])))
+    if getenv("FUZZ_SCHEDULE"):
+      from test.external.fuzz_schedule import fuzz_schedule
+      fuzz_schedule(flatten([x.lazydata.lbs for x in lst]))
+    schedule, var_vals = create_schedule_with_vars(flatten([x.lazydata.lbs for x in lst]))
+    run_schedule(memory_planner(schedule), var_vals)
 
   def realize(self) -> Tensor:
+    """Trigger the computation needed to create this Tensor. This is a light wrapper around corealize."""
     Tensor.corealize([self])
     return self
 
@@ -152,7 +169,7 @@ class Tensor:
   def assign(self, x) -> Tensor:
     # TODO: this is a hack for writing to DISK. remove with working assign
     if isinstance(self.device, str) and self.device.startswith("DISK"):
-      if x.__class__ is not Tensor: x = Tensor(x, device="EXT", dtype=self.dtype)
+      if x.__class__ is not Tensor: x = Tensor(x, device="NPY", dtype=self.dtype)
       self.contiguous().realize().lazydata.base.realized.copyin(x.numpy().data)
       return self
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
@@ -180,12 +197,42 @@ class Tensor:
   def data(self) -> memoryview:
     assert self.dtype.fmt is not None, f"no fmt dtype for {self.dtype}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
-    return self._data().cast(self.dtype.fmt, self.shape if len(self.shape) else (1,))
+    return self._data().cast(self.dtype.fmt, self.shape)
   def item(self) -> ConstType:
+    """
+    Returns the value of this tensor as a standard Python number.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor(42)
+    print(t.item())
+    ```
+    """
     assert self.dtype.fmt is not None, f"no fmt dtype for {self.dtype}"
     assert self.numel() == 1, "must have one element for item"
     return self._data().cast(self.dtype.fmt)[0]
+  # TODO: should be Tensor.tolist() -> Union[List[ConstType], ConstType]. The List is Sequence because mypy expects memoryview.tolist() -> list[int]
+  # src: https://github.com/python/mypy/blob/release-1.6/mypy/typeshed/stdlib/builtins.pyi#L803
+  def tolist(self) -> Union[Sequence[ConstType], ConstType]:
+    """
+    Returns the value of this tensor as a nested list.
+
+    Currently this only works for flattened tensors.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3, 4])
+    print(t.tolist())
+    ```
+    """
+    return self.data().tolist()
   def numpy(self) -> np.ndarray:
+    """
+    Returns the value of this tensor as a numpy array.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3, 4])
+    print(t.numpy())
+    ```
+    """
     if self.dtype == dtypes.bfloat16: return self.float().numpy()
     assert self.dtype.np is not None, f"no np dtype for {self.dtype}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
@@ -226,15 +273,48 @@ class Tensor:
     return Tensor(LazyBuffer.loadop(op, shape, dtype or dtypes.default_float, Device.canonicalize(device), arg), device, dtype, **kwargs)
 
   @staticmethod
-  def empty(*shape, **kwargs): return Tensor._loadop(LoadOps.EMPTY, argfix(*shape), **kwargs)
+  def empty(*shape, **kwargs):
+    """
+    Creates an empty tensor with the given shape.
+
+    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
+    Additionally, all other keyword arguments are passed to the constructor of the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.empty(2, 3)
+    print(t.shape)
+    ```
+    """
+    return Tensor._loadop(LoadOps.EMPTY, argfix(*shape), **kwargs)
 
   _seed: int = int(time.time())
   _rng_counter: Optional[Tensor] = None
   @staticmethod
-  def manual_seed(seed=0): Tensor._seed, Tensor._rng_counter = seed, Tensor([0], dtype=dtypes.uint32, requires_grad=False)
+  def manual_seed(seed=0):
+    """
+    Sets the seed for random operations.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    print(Tensor._seed)
+    ```
+    """
+    Tensor._seed, Tensor._rng_counter = seed, Tensor([0], dtype=dtypes.uint32, requires_grad=False)
 
   @staticmethod
   def rand(*shape, device:Optional[Union[Tuple[str, ...], str]]=None, dtype:Optional[DType]=None, **kwargs):
+    """
+    Creates a tensor with the given shape, filled with random values between the interval `[0, 1)`.
+
+    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
+    Additionally, all other keyword arguments are passed to the constructor of the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.rand(2, 3)
+    print(t.numpy())
+    ```
+    """
     if Tensor._rng_counter is None: Tensor._rng_counter = Tensor([0], dtype=dtypes.uint32, requires_grad=False)
     if not THREEFRY.value:
       # for bfloat16, numpy rand passes buffer in float
@@ -263,66 +343,275 @@ class Tensor:
 
   @staticmethod
   def full(shape:Tuple[sint, ...], fill_value:ConstType, **kwargs):
+    """
+    Creates a tensor with the given shape, filled with the given value.
+
+    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
+    Additionally, all other keyword arguments are passed to the constructor of the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.full((2, 3), 42)
+    print(t.numpy())
+    ```
+    """
     return Tensor(fill_value, **kwargs).reshape((1, )*len(new_shape := argfix(shape))).expand(new_shape)
 
   @staticmethod
-  def zeros(*shape, **kwargs): return Tensor.full(argfix(*shape), 0.0, **kwargs)
+  def zeros(*shape, **kwargs):
+    """
+    Creates a tensor with the given shape, filled with zeros.
+
+    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
+    Additionally, all other keyword arguments are passed to the constructor of the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.zeros(2, 3)
+    print(t.numpy())
+    ```
+    """
+    return Tensor.full(argfix(*shape), 0.0, **kwargs)
 
   @staticmethod
-  def ones(*shape, **kwargs): return Tensor.full(argfix(*shape), 1.0, **kwargs)
+  def ones(*shape, **kwargs):
+    """
+    Creates a tensor with the given shape, filled with ones.
+
+    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
+    Additionally, all other keyword arguments are passed to the constructor of the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.ones(2, 3)
+    print(t.numpy())
+    ```
+    """
+    return Tensor.full(argfix(*shape), 1.0, **kwargs)
 
   @staticmethod
   def arange(start, stop=None, step=1, **kwargs):
+    """
+    If `stop` is not specified, creates a tensor with the given shape, filled with values from `0` to `start` with the given step size.
+
+    If `stop` is specified, creates a tensor with the given shape, filled with values from `start` to `stop` with the given step size.
+
+    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
+    Additionally, all other keyword arguments are passed to the constructor of the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(5)
+    print(t.numpy())
+    ```
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(5, 10)
+    print(t.numpy())
+    ```
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(5, 10, 2)
+    print(t.numpy())
+    ```
+    """
     if stop is None: stop, start = start, 0
-    assert all(isinstance(s, (int, float)) for s in (start, stop, step)), "symbolic arange not supported"
+    assert all(isinstance(s, (int, float)) for s in (start, stop, step)), f"symbolic arange not supported {start=}, {stop=}, {step=}"
     dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
     return (Tensor.full((math.ceil((stop-start)/step),), step, dtype=dtype, **kwargs)._cumsum() + (start - step)).cast(dtype)
 
   @staticmethod
   def eye(dim:int, **kwargs):
+    """
+    Creates an identity matrix of the given dimension.
+
+    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
+    Additionally, all other keyword arguments are passed to the constructor of the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.eye(3)
+    print(t.numpy())
+    ```
+    """
     return Tensor.ones((dim,1),**kwargs).pad((None,(0,dim))).flatten().shrink(((0,dim*dim),)).reshape(dim, dim)
 
   def full_like(self, fill_value:ConstType, **kwargs):
+    """
+    Creates a tensor with the same shape as `tensor`, filled with the given value.
+    If `dtype` is not specified, the dtype of `tensor` is used.
+
+    You can pass in the `device` keyword argument to control device of the tensor.
+    Additionally, all other keyword arguments are passed to the constructor of the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    ot = Tensor.ones(2, 3)
+    t = Tensor.full_like(ot, 42)
+    print(t.numpy())
+    ```
+    """
     return Tensor.full(self.shape, fill_value, dtype=kwargs.pop("dtype", self.dtype), device=kwargs.pop("device", self.device), **kwargs)
-  def zeros_like(self, **kwargs): return self.full_like(0, **kwargs)
-  def ones_like(self, **kwargs): return self.full_like(1, **kwargs)
+  def zeros_like(self, **kwargs):
+    """
+    Creates a tensor with the same shape as `tensor`, filled with zeros.
+
+    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
+    Additionally, all other keyword arguments are passed to the constructor of the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    ot = Tensor.ones(2, 3)
+    t = Tensor.zeros_like(ot)
+    print(t.numpy())
+    ```
+    """
+    return self.full_like(0, **kwargs)
+  def ones_like(self, **kwargs):
+    """
+    Creates a tensor with the same shape as `tensor`, filled with ones.
+
+    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
+    Additionally, all other keyword arguments are passed to the constructor of the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    ot = Tensor.zeros(2, 3)
+    t = Tensor.ones_like(ot)
+    print(t.numpy())
+    ```
+    """
+    return self.full_like(1, **kwargs)
 
   # ***** rng hlops *****
 
   @staticmethod
   def randn(*shape, dtype:Optional[DType]=None, **kwargs) -> Tensor:
+    """
+    Creates a tensor with the given shape, filled with random values from a normal distribution with mean `0` and standard deviation `1`.
+    If `dtype` is not specified, the default type is used.
+
+    You can pass in the `device` keyword argument to control device of the tensor.
+    Additionally, all other keyword arguments are passed to the constructor of the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(2, 3)
+    print(t.numpy())
+    ```
+    """
     # https://en.wikipedia.org/wiki/Box%E2%80%93Muller_transform
     src = Tensor.rand((2, *argfix(*shape)), **{**kwargs, "dtype": dtypes.float32})
     return src[0].mul(2*math.pi).cos().mul((1 - src[1]).log().mul(-2).sqrt()).cast(dtype or dtypes.default_float)
 
   @staticmethod
-  def randint(*shape, low=0, high=10, **kwargs) -> Tensor: return Tensor.uniform(*shape, low=low, high=high, dtype=dtypes.int32, **kwargs)
+  def randint(*shape, low=0, high=10, **kwargs) -> Tensor:
+    """
+    Creates a tensor with the given shape, filled with random integer values from the interval `[low, high)`.
+    If `dtype` is not specified, the default type is used.
+
+    You can pass in the `device` keyword argument to control device of the tensor.
+    Additionally, all other keyword arguments are passed to the constructor of the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randint(2, 3, low=5, high=10)
+    print(t.numpy())
+    """
+    return Tensor.uniform(*shape, low=low, high=high, dtype=dtypes.int32, **kwargs)
 
   @staticmethod
-  def normal(*shape, mean=0.0, std=1.0, **kwargs) -> Tensor: return (std * Tensor.randn(*shape, **kwargs)) + mean
+  def normal(*shape, mean=0.0, std=1.0, **kwargs) -> Tensor:
+    """
+    Creates a tensor with the given shape, filled with random values from a normal distribution with the given mean and standard deviation.
+
+    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
+    Additionally, all other keyword arguments are passed to the constructor of the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.normal(2, 3, mean=10, std=2)
+    print(t.numpy())
+    ```
+    """
+    return (std * Tensor.randn(*shape, **kwargs)) + mean
 
   @staticmethod
   def uniform(*shape, low=0.0, high=1.0, **kwargs) -> Tensor:
+    """
+    Creates a tensor with the given shape, filled with random values from a uniform distribution with the given lower and upper bounds.
+
+    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
+    Additionally, all other keyword arguments are passed to the constructor of the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.uniform(2, 3, low=2, high=10)
+    print(t.numpy())
+    ```
+    """
     dtype = kwargs.pop("dtype", dtypes.default_float)
     return ((high-low) * Tensor.rand(*shape, **kwargs)).cast(dtype) + low
 
   @staticmethod
-  def scaled_uniform(*shape, **kwargs) -> Tensor: return Tensor.uniform(*shape, low=-1.0, high=1.0, **kwargs).mul(prod(argfix(*shape))**-0.5)
+  def scaled_uniform(*shape, **kwargs) -> Tensor:
+    """
+    Creates a tensor with the given shape, filled with random values
+    from a uniform distribution with a mean of zero and a standard deviation of `(prod(shape)**-0.5`.
+
+    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
+    Additionally, all other keyword arguments are passed to the constructor of the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.scaled_uniform(2, 3)
+    print(t.numpy())
+    ```
+    """
+    return Tensor.uniform(*shape, low=-1.0, high=1.0, **kwargs).mul(prod(argfix(*shape))**-0.5)
 
   # https://www.tensorflow.org/api_docs/python/tf/keras/initializers/GlorotUniform
   @staticmethod
   def glorot_uniform(*shape, **kwargs) -> Tensor:
+    """
+    <https://www.tensorflow.org/api_docs/python/tf/keras/initializers/GlorotUniform>
+
+    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
+    Additionally, all other keyword arguments are passed to the constructor of the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.glorot_uniform(2, 3)
+    print(t.numpy())
+    ```
+    """
     return Tensor.uniform(*shape, low=-1.0, high=1.0, **kwargs).mul((6/(argfix(*shape)[0]+prod(argfix(*shape)[1:])))**0.5)
 
   # https://pytorch.org/docs/stable/_modules/torch/nn/init.html#kaiming_uniform_
   @staticmethod
   def kaiming_uniform(*shape, a:float = 0.01, **kwargs) -> Tensor:
+    """
+    <https://pytorch.org/docs/stable/_modules/torch/nn/init.html#kaiming_uniform_>
+
+    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
+    Additionally, all other keyword arguments are passed to the constructor of the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.kaiming_uniform(2, 3)
+    print(t.numpy())
+    ```
+    """
     bound = math.sqrt(3.0) * math.sqrt(2.0 / (1 + a ** 2)) / math.sqrt(prod(argfix(*shape)[1:]))
     return Tensor.uniform(*shape, low=-bound, high=bound, **kwargs)
 
   # https://pytorch.org/docs/stable/_modules/torch/nn/init.html#kaiming_normal_
   @staticmethod
   def kaiming_normal(*shape, a:float = 0.01, **kwargs) -> Tensor:
+    """
+    <https://pytorch.org/docs/stable/_modules/torch/nn/init.html#kaiming_normal_>
+
+    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
+    Additionally, all other keyword arguments are passed to the constructor of the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.kaiming_normal(2, 3)
+    print(t.numpy())
+    ```
+    """
     std = math.sqrt(2.0 / (1 + a ** 2)) / math.sqrt(prod(argfix(*shape)[1:]))
     return Tensor.normal(*shape, mean=0.0, std=std, **kwargs)
 
@@ -354,7 +643,7 @@ class Tensor:
     self.grad = Tensor(1.0, dtype=self.dtype, device=self.device, requires_grad=False)
 
     for t0 in reversed(self.deepwalk()):
-      if t0.grad is None: raise RuntimeError("tensor has no grad")
+      if t0.grad is None: raise RuntimeError(f"tensor {t0} has no grad")
       grads = t0._ctx.backward(t0.grad.lazydata)
       grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
         for g in ([grads] if len(t0._ctx.parents) == 1 else grads)]
@@ -367,13 +656,13 @@ class Tensor:
 
   # ***** movement mlops *****
 
+  def view(self, *shape) -> Tensor: return self.reshape(shape)  # in tinygrad, view and reshape are the same thing
   def reshape(self, shape, *args) -> Tensor:
     new_shape = argfix(shape, *args)
     new_shape = tuple([-prod(self.shape) // prod(new_shape) if s == -1 else (s if s is not None else self.shape[i]) for i,s in enumerate(new_shape)])
     return F.Reshape.apply(self, shape=new_shape) if new_shape != self.shape else self
   def expand(self, shape, *args) -> Tensor:
-    new_shape = tuple([x if x != -1 and x is not None else s for s,x in zip(self.shape, argfix(shape, *args))])
-    return F.Expand.apply(self, shape=new_shape) if new_shape != self.shape else self
+    return self._broadcast_to(tuple(sh if s==-1 or s is None else s for s, sh in zip(*(_pad_left(argfix(shape, *args), self.shape)))))
   def permute(self, order, *args) -> Tensor: return F.Permute.apply(self, order=argfix(order, *args))
   def flip(self, axis, *args) -> Tensor: return F.Flip.apply(self, axis=[x if x >= 0 else x+len(self.shape) for x in argfix(axis, *args)])
   def shrink(self, arg:Tuple[Optional[Tuple[sint, sint]], ...]) -> Tensor:
@@ -403,9 +692,10 @@ class Tensor:
   #   3. None indexing (no copy)
   #     - reshape (inject) a dim at the dim where there's None
   #   4. Tensor indexing (copy)
-  #     - use Tensor.arange == tensor_index to create a mask
-  #     - apply mask to self by mask * self for dims where index is a tensor
-  #     - (mask * self).sum(dim) to reduce to correct shape
+  #     - use Tensor.arange == tensor_index to create masks for dims with Tensors (adds a dim for each mask)
+  #     - combine masks together with mul
+  #     - apply mask to self by mask * self
+  #     - sum reduce away the extra dims added from creating masks
   # Tiny Things:
   #   1. Supported indices: Union[int, slice, Tensor, None, List, Tuple, Ellipsis]
   #     - for any list, List[Union[List, Tuple, int]], must have homogeneous shape
@@ -487,30 +777,40 @@ class Tensor:
 
       # track tensor_dim and tensor_index using a dict
       # calc_dim to get dim and use that to normalize the negative tensor indices
-      idx: Dict[int,Tensor] = {(dim := calc_dim(td)):(tensor<0).where(ret.shape[dim],0) + tensor for td,tensor in zip(type_dim[Tensor],tensor_index)}
+      idx: Dict[int,Tensor] = {(dim := calc_dim(td)):(tensor<0).where(ret.shape[dim],0) + tensor for td,tensor in zip(type_dim[Tensor], tensor_index)}
 
-      # compute sum_dim, arange, and idx
-      max_idx_dim, first_dim, last_dim = max(i.ndim for i in idx.values()), min(idx.keys()), max(idx.keys())
-      sum_dim = tuple(d if n==0 else d+max_idx_dim-n for n,d in enumerate(idx.keys()))
-      arange = [Tensor.arange(ret.shape[d], requires_grad=False, device=self.device).reshape(ret.shape[d], *[1]*(ret.ndim+max_idx_dim-n-sd-1)) \
-                for n,(sd,d) in enumerate(zip(sum_dim, idx.keys()))]
-      reshaped_idx = [i.reshape(i.shape + (1,)*(ret.ndim - first_dim - (n or 1))) for n,i in enumerate(idx.values())]
-      ret = ret.reshape(ret.shape[:first_dim+1] + (1,)*max_idx_dim + ret.shape[first_dim+1:])
+      masks, first_dim, last_dim = [], min(idx.keys()), max(idx.keys())
+      pre_reduce_shape = ret.shape[:first_dim] + (big_shape := broadcast_shape(*(t.shape for t in idx.values()))) + ret.shape[first_dim:]
 
-      # iteratively eq -> mul -> sum fancy index
-      try:
-        for a,i,sd in zip(arange, reshaped_idx, sum_dim): ret = (a==i).mul(ret).sum(sd)
-      except AssertionError as exc: raise IndexError("cannot broadcast indices") from exc
+      # create masks
+      for dim, i in idx.items():
+        try: i = i.reshape(i.shape + (1,)*(ret.ndim - first_dim)).expand(pre_reduce_shape)
+        except ValueError as exc: raise IndexError("cannot broadcast indices") from exc
+        a = Tensor.arange(ret.shape[dim], device=self.device, requires_grad=False).reshape((ret.shape[dim],) + (1,)*(ret.ndim - dim - 1))
+        masks.append(i == a)
+
+      # reduce masks to 1 mask
+      mask: Tensor = functools.reduce(lambda x,y: x.mul(y), masks)
+
+      # inject 1's for the extra dims added in create masks
+      sh = ret.shape[:first_dim] + (1,) * len(big_shape) + ret.shape[first_dim:]
+      # sum reduce the extra dims introduced in create masks
+      ret = (ret.reshape(sh) * mask).sum(tuple(i + len(big_shape) for i in idx.keys()), acc_dtype=ret.dtype)
 
       # special permute case
       if first_dim != 0 and len(idx) != 1 and tuple(idx.keys()) != tuple(range(first_dim, last_dim+1)):
-        ret_dims = list(range(ret.ndim))
-        ret = ret.permute(ret_dims[first_dim:first_dim+max_idx_dim] + ret_dims[:first_dim] + ret_dims[first_dim+max_idx_dim:])
+        ret = ret.permute(*range(first_dim, first_dim+len(big_shape)), *range(0, first_dim), *range(first_dim+len(big_shape), ret.ndim))
     return ret
 
-  def __setitem__(self,indices,v):
+  def __setitem__(self, indices, v:Union[Tensor, ConstType]):
     if isinstance(self.device, str) and self.device.startswith("DISK"): return self.__getitem__(indices).assign(v)
-    raise NotImplementedError("not implemented yet")
+    # TODO: broadcast v to the shape here, refactor for const v and one way broadcast_shape
+    if not isinstance(v, Tensor): v = Tensor(v, self.device, self.dtype)
+    assign_to = self.realize().__getitem__(indices)
+    # NOTE: we check that indices is valid first
+    assert self.lazydata.contiguous(), "setitem target needs to be contiguous"
+    # NOTE: contiguous to prevent const folding.
+    return assign_to.assign(v._broadcast_to(broadcast_shape(assign_to.shape, v.shape)).contiguous()).realize()
 
   # NOTE: using slice is discouraged and things should migrate to pad and shrink
   def slice(self, arg:Sequence[Optional[Tuple[int, sint]]], value:float=0) -> Tensor:
@@ -522,11 +822,11 @@ class Tensor:
     assert idx.ndim == self.ndim, "self.ndim must equal idx.ndim"
     assert all(s >= i for s,i in zip(self.shape, idx.shape)), "all dim of idx.shape must be smaller than self.shape"
     dim = self._resolve_dim(dim)
-    idx = idx.to(self.device).transpose(ax1=dim, ax2=0).unsqueeze(-1)
+    idx = idx.to(self.device).transpose(0, dim).unsqueeze(-1)
     permarg = list(range(self.ndim))
     permarg = permarg[1:dim] + [permarg[0]] + permarg[dim+1:] + [permarg[dim]] if dim != 0 else permarg[1:] + [permarg[0]]
     return ((idx == Tensor.arange(self.shape[dim], requires_grad=False, device=self.device)) * self.permute(*permarg).shrink(
-      tuple([*[(0,sh) for sh in idx.shape[1:-1]], (0,self.shape[dim])])).unsqueeze(0)).sum(-1).transpose(ax1=0, ax2=dim)
+      tuple([*[(0,sh) for sh in idx.shape[1:-1]], None])).unsqueeze(0)).sum(-1, acc_dtype=self.dtype).transpose(0, dim)
 
   def cat(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
     dim = self._resolve_dim(dim)
@@ -598,21 +898,14 @@ class Tensor:
 
   # ***** reduce ops *****
 
-  def _reduce(self, fxn:Type[Function], axis:Optional[Union[int, Tuple[int, ...]]]=None, keepdim=False) -> Tensor:
+  def _reduce(self, fxn:Type[Function], axis:Optional[Union[int, Tuple[int, ...]]]=None, keepdim=False, acc_dtype:Optional[DType]=None) -> Tensor:
     axis_: Tuple[int, ...] = tuple(range(len(self.shape))) if axis is None else ((axis,) if isinstance(axis, int) else tuple(axis))
     axis_ = tuple(x if x >= 0 else x+len(self.shape) for x in axis_)
     shape = tuple(s for i,s in enumerate(self.shape) if i not in axis_)
-    ret = fxn.apply(self, axis=axis_)
-    return ret if keepdim else ret.reshape(shape=shape)
+    ret = fxn.apply(self, axis=axis_, acc_dtype=acc_dtype)
+    return ret if keepdim else ret.reshape(shape)
 
-  def sum(self, axis=None, keepdim=False, acc_dtype:Optional[DType]=None):
-    if acc_dtype is None: acc_dtype = least_upper_dtype(self.dtype, dtypes.uint) if dtypes.is_unsigned(self.dtype) else \
-                                      least_upper_dtype(self.dtype, dtypes.int) if (dtypes.is_int(self.dtype) or self.dtype==dtypes.bool) else \
-                                      least_upper_dtype(self.dtype, dtypes.float)
-    # cast back to float16 or bfloat16 to match torch / jax behavior, but we use float for acc
-    output_dtype = self.dtype if self.dtype in (dtypes.float16, dtypes.bfloat16) else acc_dtype
-    return self.cast(acc_dtype)._reduce(F.Sum, axis, keepdim).cast(output_dtype)
-
+  def sum(self, axis=None, keepdim=False, acc_dtype:Optional[DType]=None): return self._reduce(F.Sum, axis, keepdim, acc_dtype)
   def max(self, axis=None, keepdim=False): return self._reduce(F.Max, axis, keepdim)
   def min(self, axis=None, keepdim=False): return -((-self).max(axis=axis, keepdim=keepdim))
 
@@ -830,7 +1123,7 @@ class Tensor:
   def floor(self: Tensor) -> Tensor: return (self < (b := self.trunc())).where(b-1, b)
   def round(self: Tensor) -> Tensor:
     return ((self > 0) == ((b := self.cast(dtypes.int32) / 2.0).cast(dtypes.int32) == b)).where((self - 0.5).ceil(), (self + 0.5).floor())
-
+  def lerp(self, end: Tensor, weight: Union[Tensor, float]) -> Tensor: return self + (end - self) * weight
   def square(self): return self*self
   def clip(self, min_, max_): return self.maximum(min_).minimum(max_)
   def abs(self): return self.relu() + (-self).relu()
@@ -860,6 +1153,11 @@ class Tensor:
   def softsign(self): return self / (1 + self.abs())
 
   # ***** broadcasted elementwise mlops *****
+  def _broadcast_to(self, shape:Tuple[sint, ...]):
+    reshape_arg, _ = _pad_left(self.shape, shape)
+    if self.ndim > len(shape) or not all(sh in {s,1} or (s==0 and sh==1) for sh,s in zip(reshape_arg, shape)):
+      raise ValueError(f"cannot broadcast tensor with shape={self.shape} to {shape=}")
+    return F.Expand.apply(self.reshape(reshape_arg), shape=shape) if shape != self.shape else self
 
   def _broadcasted(self, y:Union[Tensor, ConstType], reverse:bool=False, match_dtype:bool=True) -> Tuple[Tensor, Tensor]:
     x: Tensor = self
@@ -876,12 +1174,9 @@ class Tensor:
 
     if reverse: x, y = y, x
 
-    # left pad shape with 1s
-    if len(y.shape) < len(x.shape): y = y.reshape((1,) * (len(x.shape) - len(y.shape)) + y.shape)
-    elif len(x.shape) < len(y.shape): x = x.reshape((1,) * (len(y.shape) - len(x.shape)) + x.shape)
-
-    broadcasted_shape = tuple(0 if xi==0 or yi==0 else max(xi, yi) for xi, yi in zip(x.shape, y.shape))
-    return x.expand(broadcasted_shape), y.expand(broadcasted_shape)
+    # broadcast
+    out_shape = broadcast_shape(x.shape, y.shape)
+    return x._broadcast_to(out_shape), y._broadcast_to(out_shape)
 
   def _to_const_val(self, x:Union[Tensor, ConstType]) -> Union[Tensor, ConstType]:
     # TODO: update with multi
@@ -929,6 +1224,8 @@ class Tensor:
     x_,y = self._broadcasted(input_, match_dtype=False)
     x,z = x_._broadcasted(other, match_dtype=False)
     return F.Where.apply(x.cast(dtypes.bool), *y._broadcasted(z))
+
+  def masked_fill(self:Tensor, mask:Tensor, value:Union[Tensor, ConstType]): return mask.where(value, self)
 
   # ***** op wrappers (wasted lines to make the typechecker happy) *****
 
@@ -1037,6 +1334,7 @@ class Tensor:
   def element_size(self) -> int: return self.dtype.itemsize
   def nbytes(self) -> int: return self.numel() * self.element_size()
   def is_floating_point(self) -> bool: return dtypes.is_float(self.dtype)
+  def size(self, dim=None) -> Union[sint, Tuple[sint, ...]]: return self.shape if dim is None else self.shape[dim]
 
 # register functions to move between devices
 for device in Device._devices: setattr(Tensor, f"{device.lower()}", functools.partialmethod(Tensor.to, device))
@@ -1050,7 +1348,6 @@ if IMAGE:
 # TODO: eventually remove this
 def custom_random(out:Buffer):
   Tensor._seed += 1
-  if DEBUG >= 2: print(f"*** {out.device}   rand  seed {Tensor._seed} size {out.size:<15d} dtype {out.dtype}")
   rng = np.random.default_rng(Tensor._seed)
   if out.dtype == dtypes.half: rng_np_buffer = (rng.integers(low=0, high=2047, size=out.size) / 2048).astype(np.half, copy=False)
   else: rng_np_buffer = rng.random(size=out.size, dtype=np.float32).astype(dtype=out.dtype.np, copy=False)

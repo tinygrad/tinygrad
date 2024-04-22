@@ -1,11 +1,12 @@
 import unittest, functools, random
 from typing import List
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit
-from tinygrad.device import BufferCopy
+from tinygrad.device import BufferCopy, CompiledRunner
 from tinygrad.ops import LoadOps, ReduceOps
 from tinygrad.helpers import CI, prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.schedule import create_schedule
+from tinygrad.engine.realize import lower_schedule
 from tinygrad.features.multi import all_reduce, MultiLazyBuffer
 from random import randint
 import numpy as np
@@ -40,18 +41,32 @@ class TestMultiTensor(unittest.TestCase):
       assert lb.shape == (128,)
     (X + X).realize()
 
-  @unittest.skipIf(Device.DEFAULT == "METAL", "metal multi-device is fake")
+  def test_shard_no_recompile(self):
+    X = Tensor.ones(256).contiguous().realize()
+    X.shard_((d0, d1), 0)
+    out = (X + X)
+    sched = create_schedule(out.lazydata.lbs)
+    names = []
+    for si, ei in zip(sched[:], lower_schedule(sched)):
+      if isinstance(ei.prg, CompiledRunner): names.append(ei.prg.name)
+      ei.run()
+    assert names[-2] == names[-1], "function was relinearized"
+
   def test_sharded_memory(self):
+    # Buffer may be stuck in track_cross_buffer
+    for x in (d_zero, d0, d1, d2, d3): Device[x].synchronize()
     mem_base = GlobalCounters.mem_used
 
     X = Tensor.ones(256).contiguous().realize()
     assert GlobalCounters.mem_used-mem_base== X.dtype.itemsize * 256, GlobalCounters.mem_used-mem_base
     X.shard_((d0, d1, d2, d3)).realize()
+    for x in (d_zero, d0, d1, d2, d3): Device[x].synchronize()
     assert GlobalCounters.mem_used-mem_base == X.dtype.itemsize * 256 * 4, GlobalCounters.mem_used-mem_base
 
     X = Tensor.ones(256).contiguous().realize()
     assert GlobalCounters.mem_used-mem_base == X.dtype.itemsize * 256, GlobalCounters.mem_used-mem_base
     X.shard_((d0, d1, d2, d3), axis=0).realize()
+    for x in (d_zero, d0, d1, d2, d3): Device[x].synchronize()
     assert GlobalCounters.mem_used-mem_base == X.dtype.itemsize * 256, GlobalCounters.mem_used-mem_base
 
     X = Tensor.ones(256).realize()
