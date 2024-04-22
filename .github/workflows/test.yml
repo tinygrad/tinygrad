@@ -458,8 +458,11 @@ jobs:
         if: matrix.backend == 'cuda'
         run: |
           cp tinygrad/runtime/autogen/cuda.py /tmp/cuda.py.bak
+          cp tinygrad/runtime/autogen/nv_gpu.py /tmp/nv_gpu.py.bak
           ./autogen_stubs.sh cuda
+          ./autogen_stubs.sh nv
           diff /tmp/cuda.py.bak tinygrad/runtime/autogen/cuda.py
+          diff /tmp/nv_gpu.py.bak tinygrad/runtime/autogen/nv_gpu.py
       - name: Verify HIP autogen
         if: matrix.backend == 'hip'
         run: |
