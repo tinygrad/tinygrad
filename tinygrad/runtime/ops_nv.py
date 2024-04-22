@@ -230,12 +230,9 @@ class NVProgram:
     if self.device.kernargs_ptr >= (self.device.kernargs_page.base + self.device.kernargs_page.length - kernargs_size):
       self.device.kernargs_ptr = self.device.kernargs_page.base
 
+    kernargs = [arg_half for arg in args for arg_half in nvdata64_le(arg.base)] + [val for val in vals]
     kernargs_ptr = self.device.kernargs_ptr
     self.device.kernargs_ptr += kernargs_size
-
-    kernargs = []
-    for i in range(len(args)): kernargs += [*nvdata64_le(args[i].base)]
-    for i in range(len(vals)): kernargs += [vals[i]]
 
     if wait: st, en = self.device._get_signal(), self.device._get_signal()
     queue = HWComputeQueue()
