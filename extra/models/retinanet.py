@@ -9,6 +9,10 @@ import tinygrad.nn as nn
 from extra.models.resnet import ResNet
 import numpy as np
 
+Conv2dNormal = nn.Conv2d
+Conv2dNormal_prior_prob = nn.Conv2d
+Conv2dKaiming = nn.Conv2d
+
 def cust_bin_cross_logits(inputs, targets):
   return inputs.maximum(0) - targets * inputs + (1 + inputs.abs().neg().exp()).log()
 # @TinyJit
@@ -369,14 +373,10 @@ class ClassificationHead:
     self.num_classes = num_classes
     self.conv = []
     for _ in range(4):
-      c = nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1)
-      c.weight = Tensor.normal(c.weight.shape, std=0.01).realize()
-      c.bias = Tensor.full(c.bias.shape, 0.0).realize()
+      c = Conv2dNormal(in_channels, in_channels, kernel_size=3, padding=1)
       self.conv.append(c)
       self.conv.append(Tensor.relu)
-    self.cls_logits = nn.Conv2d(in_channels, num_anchors * num_classes, kernel_size=3, padding=1)
-    self.cls_logits.weight = Tensor.normal(self.cls_logits.weight.shape, std=0.01).realize()
-    self.cls_logits.bias = Tensor.full(self.cls_logits.bias.shape, -math.log((1 - prior_probability) / prior_probability)).realize()
+    self.cls_logits = Conv2dNormal_prior_prob(in_channels, num_anchors * num_classes, kernel_size=3, padding=1)
 
 
   def __call__(self, x):
@@ -404,14 +404,11 @@ class RegressionHead:
   def __init__(self, in_channels, num_anchors):
     self.conv = []
     for _ in range(4):
-      c = nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1)
-      c.weight = Tensor.normal(c.weight.shape, std=0.01).realize()
-      c.bias = Tensor.full(c.bias.shape, 0.0).realize()
+      c = Conv2dNormal(in_channels, in_channels, kernel_size=3, padding=1)
       self.conv.append(c)
       self.conv.append(Tensor.relu)
-    self.bbox_reg = nn.Conv2d(in_channels, num_anchors * 4, kernel_size=3, padding=1)
-    self.bbox_reg.weight = Tensor.normal(self.bbox_reg.weight.shape, std=0.01).realize()
-    self.bbox_reg.bias = Tensor.full(self.bbox_reg.bias.shape, 0.0).realize()
+    self.bbox_reg = Conv2dNormal(in_channels, num_anchors * 4, kernel_size=3, padding=1)
+
     
   def __call__(self, x):
     out = [self.bbox_reg(feat.sequential(self.conv)).permute(0, 2, 3, 1).reshape(feat.shape[0], -1, 4) for feat in x]
@@ -465,12 +462,8 @@ class ResNetFPN:
 
 class ExtraFPNBlock:
   def __init__(self, in_channels, out_channels):
-    self.p6 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=2, padding=1)
-    self.p6.weight = Tensor.kaiming_uniform(self.p6.weight.shape, a=1).realize()
-    self.p6.bias = Tensor.full(self.p6.bias.shape, 0.0).realize()
-    self.p7 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=2, padding=1)
-    self.p7.weight = Tensor.kaiming_uniform(self.p7.weight.shape, a=1).realize()
-    self.p7.bias = Tensor.full(self.p7.bias.shape, 0.0).realize()
+    self.p6 = Conv2dKaiming(in_channels, out_channels, kernel_size=3, stride=2, padding=1)
+    self.p7 = Conv2dKaiming(out_channels, out_channels, kernel_size=3, stride=2, padding=1)
     self.use_P5 = in_channels == out_channels
 
   def __call__(self, p, c):
@@ -485,13 +478,9 @@ class FPN:
   def __init__(self, in_channels_list, out_channels, extra_blocks=None):
     self.inner_blocks, self.layer_blocks = [], []
     for in_channels in in_channels_list:
-      c1 = nn.Conv2d(in_channels, out_channels, kernel_size=1)
-      c1.weight = Tensor.kaiming_uniform(c1.weight.shape, a=1).realize()
-      c1.bias = Tensor.full(c1.bias.shape, 0.0).realize()
+      c1 = Conv2dKaiming(in_channels, out_channels, kernel_size=1)
       self.inner_blocks.append(c1)
-      c2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
-      c2.weight = Tensor.kaiming_uniform(c2.weight.shape, a=1).realize()
-      c2.bias = Tensor.full(c2.bias.shape, 0.0).realize()
+      c2 = Conv2dKaiming(out_channels, out_channels, kernel_size=3, padding=1)
       self.layer_blocks.append(c2)
     self.extra_blocks = ExtraFPNBlock(256, 256) if extra_blocks is None else extra_blocks
 

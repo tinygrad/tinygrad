@@ -245,6 +245,7 @@ def train_resnet():
 def train_retinanet():
   from contextlib import redirect_stdout
   import numpy as np
+  import math
   WANDB = getenv('WANDB')
   # WANDB = False
   HOSTNAME = getenv('SLURM_STEP_NODELIST', '3080')
@@ -265,12 +266,21 @@ def train_retinanet():
   EVAL_BEAM = getenv("EVAL_BEAM", BEAM.value)
   # dtypes.default_float = dtypes.bfloat16
   loss_scaler = 128.0 if dtypes.default_float in [dtypes.float16, dtypes.bfloat16] else 1.0
+  print('LOSS_SCALER', loss_scaler)
   if WANDB:
     import wandb
     wandb.init(project='RetinaNet')
   print(f"Training on {GPUS}")
   for x in GPUS: Device[x]
-  from extra.models.retinanet import RetinaNet, AnchorGenerator
+  from extra.models import retinanet
+  from examples.mlperf.initializers import Conv2dNormal, Conv2dKaiming
+
+  prior_probability=0.01
+  retinanet.Conv2dNormal = Conv2dNormal
+  retinanet.Conv2dNormal_prior_prob = functools.partial(Conv2dNormal, b=-math.log((1 - prior_probability) / prior_probability))
+  retinanet.Conv2dKaiming = Conv2dKaiming
+
+  from extra.models.retinanet import AnchorGenerator
   from examples.mlperf.lr_schedulers import Retina_LR
   anchor_sizes = tuple((x, int(x * 2 ** (1.0 / 3)), int(x * 2 ** (2.0 / 3))) for x in [32, 64, 128, 256, 512])
   aspect_ratios = ((0.5, 1.0, 2.0),) * len(anchor_sizes)
@@ -290,7 +300,7 @@ def train_retinanet():
   coco_val = get_openimages(NAME,ROOT, 'val')
 
   if not SYNCBN: resnet.BatchNorm = functools.partial(UnsyncedBatchNorm, num_devices=len(GPUS))
-  model = RetinaNet(resnet.ResNeXt50_32X4D(), num_anchors=anchor_generator.num_anchors_per_location()[0])
+  model = retinanet.RetinaNet(resnet.ResNeXt50_32X4D(), num_anchors=anchor_generator.num_anchors_per_location()[0])
   model.backbone.body.fc = None
 
   parameters = []
@@ -331,6 +341,7 @@ def train_retinanet():
   image_std = Tensor([0.229, 0.224, 0.225], device=GPUS, dtype=dtypes.float32).reshape(1,-1,1,1)
   image_mean = Tensor([0.485, 0.456, 0.406], device=GPUS, dtype=dtypes.float32).reshape(1,-1,1,1)
   def normalize(x):
+    return (((x.permute((0,3,1,2)) / 255.0) - image_mean)/image_std).cast(dtypes.default_float)
     x = x.permute((0,3,1,2)) / 255.0
     x -= image_mean
     x /= image_std
@@ -343,8 +354,8 @@ def train_retinanet():
       b,r,c = model(normalize(X), True)
       loss_reg = mdl_reg_loss(r, matched_idxs, boxes_temp)
       loss_class = mdl_class_loss(c, matched_idxs, labels_temp)
-      loss = (loss_reg+loss_class)*loss_scaler
-      loss.backward()
+      loss = loss_reg+loss_class
+      (loss*loss_scaler).backward()
       for t in optimizer.params: t.grad = t.grad.contiguous() / loss_scaler
       optimizer.step()
       return loss.realize()
