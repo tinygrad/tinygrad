@@ -329,11 +329,10 @@ class HWCopyQueue:
     self.q.append(sdma_cache_wb)
     return self
 
-  def signal(self, signal:hsa.amd_signal_t):
+  def signal(self, signal:hsa.amd_signal_t, value=0):
     #assert signal.value == 0
     signal.value = 1
-    self.q.append(sdma_pkts.atomic(op=amd_gpu.SDMA_OP_ATOMIC, operation=amd_gpu.SDMA_ATOMIC_ADD64,
-                                   addr=ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET, src_data=(1<<64)-1))
+    self.q.append(sdma_pkts.fence(op=amd_gpu.SDMA_OP_FENCE, mtype=3, addr=ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET, data=value))
     if signal.event_mailbox_ptr != 0:
       self.q.append(sdma_pkts.fence(op=amd_gpu.SDMA_OP_FENCE, mtype=3, addr=signal.event_mailbox_ptr, data=signal.event_id))
       self.q.append(sdma_pkts.trap(op=amd_gpu.SDMA_OP_TRAP, int_ctx=signal.event_id))
