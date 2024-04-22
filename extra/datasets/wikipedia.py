@@ -383,10 +383,10 @@ def process_iterate(tokenizer:Tokenizer, val:bool=False, part:int=0) -> list[dic
 
 ##################### Load files #####################
 
-def get_val_files(): return sorted(list((BASEDIR / "eval/").glob("*.pkl")))
+def get_wiki_val_files(): return sorted(list((BASEDIR / "eval/").glob("*.pkl")))
 
 @diskcache
-def get_train_files(): return sorted(list((BASEDIR / "train/").glob("*/*.pkl")))
+def get_wiki_train_files(): return sorted(list((BASEDIR / "train/").glob("*/*.pkl")))
 
 if __name__ == "__main__":
   tokenizer = Tokenizer(getenv("BASEDIR", Path(__file__).parent / "wiki") / "vocab.txt")
