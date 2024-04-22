@@ -36,7 +36,7 @@ class ClangProgram:
     if code_addr == -1: raise OSError('mmap failed to allocate memory')
     ctypes.memmove(code_addr, lib, len(lib))
     if mprotect(code_addr, len(lib), mmap_flags.PROT_READ | mmap_flags.PROT_EXEC, 0) < 0: raise OSError('mprotect failed to make memory executable')
-    self.fxn = ctypes.CFUNCTYPE(None)(code_addr + 0x0000000000003e44) # TODO: just get offset from symbol table?
+    self.fxn = ctypes.CFUNCTYPE(None)(code_addr + 0x0000000000003e44) # TODO: how to best get the function offset?
 
   def __call__(self, *bufs, vals=(), wait=False): return cpu_time_execution(lambda: self.fxn(*bufs, *vals), enable=wait)
 
