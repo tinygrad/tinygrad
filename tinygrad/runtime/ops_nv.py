@@ -423,7 +423,7 @@ class NVDevice(Compiled):
       uvm.enable_peer_access(self.fd_uvm, gpuUuidA=nv_gpu.struct_nv_uuid(uuid=self.gpu_uuid), gpuUuidB=nv_gpu.struct_nv_uuid(uuid=dev.gpu_uuid))
 
     if NVDevice.signals_page is None: NVDevice.signals_page = self._gpu_system_alloc(0x10000, map_to_cpu=True)
-    else: self._gpu_uvm_map(NVDevice.signals_page.base, NVDevice.signals_page.length, NVDevice.signals_page.hMemory, create_range=False) # type: ignore
+    else: self._gpu_uvm_map(NVDevice.signals_page.base, NVDevice.signals_page.length, NVDevice.signals_page.hMemory, create_range=False)
 
     channel_params = nv_gpu.NV_CHANNEL_GROUP_ALLOCATION_PARAMETERS(engineType=nv_gpu.NV2080_ENGINE_TYPE_GRAPHICS)
     channel_group = rm_alloc(self.fd_ctl, nv_gpu.KEPLER_CHANNEL_GROUP_A, self.root, self.device, channel_params).hObjectNew
@@ -485,7 +485,7 @@ class NVDevice(Compiled):
       self.signal_number += 1
       if self.signals_page and self.signal_number * 16 >= self.signals_page.length: self.signal_number = 32
       num = self.signal_number
-    sig = to_mv(self.signals_page.base + num * 16, 16).cast("Q") # type: ignore
+    sig = to_mv(self.signals_page.base + num * 16, 16).cast("Q")
     sig[0] = 0
     return sig
 
