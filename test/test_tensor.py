@@ -244,12 +244,9 @@ class TestTinygrad(unittest.TestCase):
     with self.assertRaises(IndexError): t2.size(2)
 
   def test_tolist(self):
-    assert Tensor([1,2,3]).tolist() == [1,2,3]
-    assert Tensor([1.5,2,3]).tolist() == [1.5,2,3]
-
-    # TODO: match torch here
-    # NotImplementedError: multi-dimensional sub-views are not implemented
-    #assert Tensor([[1,2,3], [4,5,6]]).tolist() == [[1,2,3], [4,5,6]]
+    # NOTE: float16 Tensor.tolist() requires python 3.12
+    for arr in [[1,2,3], [1.5,2,3], [[1,2,3], [4,5,6]], 3]:
+      assert Tensor(arr).tolist() == torch.tensor(arr).tolist() == arr
 
   def test_element_size(self):
     for _, dtype in dtypes.fields().items():

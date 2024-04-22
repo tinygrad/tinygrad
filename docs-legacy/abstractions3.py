@@ -6,7 +6,7 @@ from tinygrad.helpers import DEBUG
 # *****
 # 0. Load mnist on the device
 
-from tinygrad.features.datasets import mnist
+from tinygrad.nn.datasets import mnist
 X_train, Y_train, _, _ = mnist()
 X_train = X_train.float()
 X_train -= X_train.mean()

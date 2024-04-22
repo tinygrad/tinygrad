@@ -47,12 +47,12 @@ def train_resnet():
   parameters = get_parameters(model)
 
   # ** hyperparameters **
-  epochs            = config["epochs"]            = getenv("EPOCHS", 41)
+  epochs            = config["epochs"]            = getenv("EPOCHS", 37)
   BS                = config["BS"]                = getenv("BS", 104 * len(GPUS))  # fp32 GPUS<=6 7900xtx can fit BS=112
   EVAL_BS           = config["EVAL_BS"]           = getenv("EVAL_BS", BS)
-  base_lr           = config["base_lr"]           = getenv("LR", 8.5 * (BS/2048))
-  lr_warmup_epochs  = config["lr_warmup_epochs"]  = getenv("WARMUP_EPOCHS", 5)
-  decay             = config["decay"]             = getenv("DECAY", 2e-4)
+  base_lr           = config["base_lr"]           = getenv("LR", 7.4 * (BS/1632))
+  lr_warmup_epochs  = config["lr_warmup_epochs"]  = getenv("WARMUP_EPOCHS", 2)
+  decay             = config["decay"]             = getenv("DECAY", 5e-5)
 
   loss_scaler       = config["LOSS_SCALER"]       = getenv("LOSS_SCALER", 128.0 if dtypes.default_float == dtypes.float16 else 1.0)
 
@@ -243,15 +243,15 @@ def train_resnet():
 def train_retinanet():
   from contextlib import redirect_stdout
   import numpy as np
+  WANDB = getenv('WANDB')
+  # WANDB = False
   HOSTNAME = getenv('SLURM_STEP_NODELIST', '3080')
   EPOCHS = 100
-  BS = 16 # A100x2
-  BS=2 
-  # BS = 3*6
-  # BS = 5*8
-  # BS = 2*4
-  BS_EVAL = 16
-  # BS_EVAL = 2*4
+
+  BS = getenv('BS', 52)
+
+  BS_EVAL = getenv('BS_EVAL', 52)
+  
   WARMUP_EPOCHS = 1
   WARMUP_FACTOR = 0.001
   LR = 0.0001
@@ -259,9 +259,13 @@ def train_retinanet():
   GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
   SYNCBN = False
   SYNCBN = True
+  TRAIN_BEAM = getenv("TRAIN_BEAM", BEAM.value)
+  EVAL_BEAM = getenv("EVAL_BEAM", BEAM.value)
   # dtypes.default_float = dtypes.bfloat16
   loss_scaler = 128.0 if dtypes.default_float in [dtypes.float16, dtypes.bfloat16] else 1.0
-
+  if WANDB:
+    import wandb
+    wandb.init(project='RetinaNet')
   print(f"Training on {GPUS}")
   for x in GPUS: Device[x]
   from extra.models.retinanetNew import RetinaNet, AnchorGenerator
@@ -271,12 +275,11 @@ def train_retinanet():
   anchor_generator = AnchorGenerator(
       anchor_sizes, aspect_ratios
   )
-  # from extra.models.resnet import ResNeXt50_32X4D
+
   from extra.models import resnet
   from examples.hlb_cifar10 import UnsyncedBatchNorm
   from tinygrad.nn.optim import Adam
-  from extra.datasets.openimages_new import iterate, iterate_val, MATCHER_FUNC, batch_load_retinanet
-  from extra.datasets.openimages_new import get_openimages, resize_boxes
+  from extra.datasets.openimages_new import get_openimages, batch_load_retinanet, batch_load_retinanet_val
   from pycocotools.cocoeval import COCOeval
   from pycocotools.coco import COCO
   ROOT = 'extra/datasets/open-images-v6TEST'
@@ -287,12 +290,10 @@ def train_retinanet():
   if not SYNCBN: resnet.BatchNorm = functools.partial(UnsyncedBatchNorm, num_devices=len(GPUS))
   model = RetinaNet(resnet.ResNeXt50_32X4D(), num_anchors=anchor_generator.num_anchors_per_location()[0])
   model.backbone.body.fc = None
-  mdlrun = TinyJit(lambda x: model(x, True))
-  # mdlrun_false = TinyJit(lambda x: model(x, False).realize())
 
   parameters = []
   # model.load_from_pretrained()
-  # model.load_checkpoint("./ckpts/retinanet_B16_E10.safe")
+  # model.load_checkpoint("./ckpts/retinanet_4xgpu020_B52_E0_15550.safe")
 
   for k, v in get_state_dict(model).items():
     # print(k)
@@ -325,301 +326,177 @@ def train_retinanet():
   parameters = get_parameters(model)
   optimizer = Adam(parameters, lr=LR)
 
+  image_std = Tensor([0.229, 0.224, 0.225], device=GPUS, dtype=dtypes.float32).reshape(1,-1,1,1)
+  image_mean = Tensor([0.485, 0.456, 0.406], device=GPUS, dtype=dtypes.float32).reshape(1,-1,1,1)
+  def normalize(x):
+    x = x.permute((0,3,1,2)) / 255.0
+    x -= image_mean
+    x /= image_std
+    return x.cast(dtypes.default_float)#.realize()
   @TinyJit
-  def train_step(X, Y_b_P, Y_l_P, matched_idxs, boxes_temp, labels_temp):
-    Tensor.training = True
-    optimizer.zero_grad()
-
-    # b,r,c = mdlrun(X)
-    b,r,c = model(normalize(X), True)
-
-    loss_reg = mdl_reg_loss(r, Y_b_P, matched_idxs, boxes_temp)
-    loss_class = mdl_class_loss(c, Y_l_P, matched_idxs, labels_temp)
-    loss = (loss_reg+loss_class)*loss_scaler
-
-    # print(colored(f'loss_reg {loss_reg.numpy()}', 'green'))
-    # print(colored(f'loss_class {loss_class.numpy()}', 'green'))
-
-    loss.backward()
-    for t in optimizer.params: t.grad = t.grad.contiguous() / loss_scaler
-    optimizer.step()
-    return loss.realize()
+  def train_step(X, boxes_temp, labels_temp, matched_idxs):
+    with Context(BEAM=TRAIN_BEAM):
+      Tensor.training = True
+      optimizer.zero_grad()
+      b,r,c = model(normalize(X), True)
+      loss_reg = mdl_reg_loss(r, matched_idxs, boxes_temp)
+      loss_class = mdl_class_loss(c, matched_idxs, labels_temp)
+      loss = (loss_reg+loss_class)*loss_scaler
+      loss.backward()
+      for t in optimizer.params: t.grad = t.grad.contiguous() / loss_scaler
+      optimizer.step()
+      return loss.realize()
   @TinyJit
   def val_step(X):
     Tensor.training = False
-    out = model(X)
+    out = model(normalize(X))
     return out.realize()
-  image_std = Tensor([0.229, 0.224, 0.225], device=GPUS).reshape(1,-1,1,1)#.to(GPUS)
-  image_mean = Tensor([0.485, 0.456, 0.406], device=GPUS).reshape(1,-1,1,1)#.to(GPUS)
-  def normalize(x):
-    x = x.permute((0,3,1,2)) / 255.0
-    # x = x /255.0
-    # x = x.permute((2,1,0)) / 255.0
-    x -= image_mean
-    x /= image_std
-    return x#.realize()
-  def data_get(it, coco):
-    # print('DATA_GET_START')
-    x, y, yb, yl, cookie = next(it)
-    mi_TEMP = Tensor.zeros((2,120087), dtype=dtypes.int)
-    return x.shard(GPUS, axis=0), yl.shard(GPUS, axis=0)[(Tensor.arange(BS).reshape(-1,1), mi_TEMP)], \
-      yb.shard(GPUS, axis=0)[(Tensor.arange(BS).reshape(-1,1), mi_TEMP)],\
-        mi_TEMP.shard(GPUS, axis=0), cookie
-    match_idxs, labels, boxes = [], [], []
-    for box, label in zip(yb.to(GPUS[0]), yl.to(GPUS[0])):
-      m_idx = func(box).realize()
-      print('midx', m_idx.shape)
-      tbm = box[m_idx]
-      tlm = label[m_idx]
-      match_idxs.append(m_idx)
-      boxes.append(tbm)
-      labels.append(tlm)
-    return x.shard(GPUS, axis=0), Tensor.stack(labels).shard(GPUS, axis=0), \
-    Tensor.stack(boxes).shard(GPUS, axis=0), Tensor.stack(match_idxs).shard(GPUS, axis=0), cookie
-    x.realize()
-    print('DATA_NEXT_ITER')
-    match_idxs, labels, boxes = [], [], []
-    for bb, ll, i in zip(yb, yl, y):
-      pass
-    for i in y:
-      print('get_item')
-      img, target = coco.__getitem__(i)
-      # target = coco._load_target(coco.ids[i])
-      print('PRE_BOX_GET')
-      box = target['boxes'].realize()
-      print('PRE_RESIZE')
-      bbox = resize_boxes(box, img.size[::-1], (800,800)).realize()
-      print('POST_RESIZE')
-      m_idx = func(bbox)
-      print('FUNC_POST')
-      tbm = bbox[m_idx]
-      print('PRE_LABELS')
-      tlm = target['labels'][m_idx]
-      print('POST_LABELS')
-      match_idxs.append(m_idx)
-      labels.append(tlm)
-      boxes.append(tbm)
-    print('data_get end')
-    return x.shard(GPUS, axis=0).realize(), Tensor.stack(labels).shard(GPUS, axis=0),\
-    Tensor.stack(boxes).shard(GPUS, axis=0), Tensor.stack(match_idxs).shard(GPUS, axis=0), cookie
 
+  X = Tensor.rand((BS, 3, 800, 800)).shard_(GPUS, axis=0)
+  b,_,_ = model(X, True)
+  for bb in b:
+    print(bb.shape)
+  ANCHORS = anchor_generator(X.shape, b)
+  # ANCHORS = [a.realize() for a in ANCHORS]
+  ANCHORS_STACK = Tensor.stack(ANCHORS)
+  ANCHORS_STACK = ANCHORS_STACK.shard(GPUS, axis=0)
+  ANCHOR_NP = ANCHORS[0].numpy()
+  mdl_reg_loss = lambda r, m, b_t: model.head.regression_head.loss(r,ANCHORS_STACK, m, b_t)
+  mdl_class_loss = lambda c, m, l_t: model.head.classification_head.loss(c,m, l_t)
+  def data_get(it):
+    x, yb, yl, ym, cookie = next(it)
+    return x.shard(GPUS, axis=0), yb.shard(GPUS, axis=0), yl.shard(GPUS, axis=0), ym.shard(GPUS, axis=0), cookie 
+  def data_get_val(it):
+    x, Y_idx, cookie = next(it)
+    return x.shard(GPUS, axis=0), Y_idx, cookie
+  # b SHAPE for anchor_gen
+  # (44, 256, 100, 100)
+  # (44, 256, 50, 50)
+  # (44, 256, 25, 25)
+  # (44, 256, 13, 13)
+  # (44, 256, 7, 7)
+
+  # (52, 256, 100, 100)
+  # (52, 256, 50, 50)
+  # (52, 256, 25, 25)
+  # (52, 256, 13, 13)
+  # (52, 256, 7, 7)
   for epoch in range(EPOCHS):
+    
     print(colored(f'EPOCH {epoch}/{EPOCHS}:', 'cyan'))
+
+    # **********TRAIN***************
+    Tensor.training = True
+    # train_step.reset()
+    # mdlrun_false.reset()
     lr_sched = None
-    if epoch < WARMUP_EPOCHS:
-      start_iter = epoch*len(coco_train.ids)//BS
-      warmup_iters = WARMUP_EPOCHS*len(coco_train.ids)//BS
-      lr_sched = Retina_LR(optimizer, start_iter, warmup_iters, WARMUP_FACTOR, LR)
-    else:
-      optimizer.lr.assign(Tensor([LR], device=GPUS))
-    cnt = 0
-    if epoch==0:
-      x_fake = Tensor.rand((BS,3,800,800)).shard(GPUS, axis=0)
-      b,_,_ = mdlrun(x_fake)
-      ANCHORS = anchor_generator(x_fake.shape, b)
-      ANCHORS = [a.realize() for a in ANCHORS]
-      ANCHORS_STACK = Tensor.stack(ANCHORS)
-      ANCHORS_STACK = ANCHORS_STACK.shard(GPUS, axis=0)
-      func = lambda x: model.matcher_gen_per_img(ANCHORS[0], x)
-      mdlrun.reset()
-      mdl_reg_loss = lambda r, y, m, b_t: model.head.regression_head.loss(r,y,ANCHORS_STACK, m, b_t)
-      mdl_class_loss = lambda c, y,m, l_t: model.head.classification_head.loss(c,y,m, l_t)
-    batch_loader_train = batch_load_retinanet(coco_train, bs=BS, val=False, shuffle=False)
-    it = iter(tqdm(batch_loader_train, total=len(coco_train)//BS, desc=f"epoch {epoch}"))
-    i, proc = 0, data_get(it, coco_train)
+    # if epoch < WARMUP_EPOCHS:
+    #   start_iter = epoch*len(coco_train.ids)//BS
+    #   warmup_iters = WARMUP_EPOCHS*len(coco_train.ids)//BS
+    #   lr_sched = Retina_LR(optimizer, start_iter, warmup_iters, WARMUP_FACTOR, LR)
+    # else:
+    #   optimizer.lr.assign(Tensor([LR], device=GPUS))
+    batch_loader = batch_load_retinanet(coco_train, bs=BS, val=False, shuffle=False, anchor_np=ANCHOR_NP)
+    it = iter(tqdm(batch_loader, total=len(coco_train)//BS, desc=f"epoch {epoch}"))
+    cnt, proc = 0, data_get(it)
+
     st = time.perf_counter()
     while proc is not None:
       GlobalCounters.reset()
-      # print(proc[0].shape, proc[3].shape, proc[2].shape, proc[1].shape)
-      loss, proc = train_step(proc[0], None, None, proc[3], proc[2], proc[1]), proc[4]
-      
-      
+      loss, proc = train_step(proc[0], proc[1], proc[2], proc[3]), proc[4]
+
       pt = time.perf_counter()
       try:
-        next_proc = data_get(it, coco_train)
+        next_proc = data_get(it)
       except StopIteration:
         next_proc = None
+
       dt = time.perf_counter()
+
       device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
-      loss = loss.item()
+      loss = loss.numpy().item()
       if lr_sched is not None:
-          lr_sched.step()
+        lr_sched.step()
+
       cl = time.perf_counter()
 
-      if cnt%1 == 0:
-         tqdm.write(
-           f'{cnt} {((cl - st)) * 1000.0:7.2f} ms run, {(pt - st) * 1000.0:7.2f} ms python, {(dt - pt) * 1000.0:6.2f} ms fetch data, '
-           f"{(cl - dt) * 1000.0:7.2f} ms {device_str}, {loss:5.2f} loss, {optimizer.lr.numpy().item():.6f} LR, "
-         )
-        #  print(colored(f'{cnt} STEP {loss.item():.5f}, time: {et*1000.0:7.2f} ms run, '
-        #                 f'data: {data_time*1000.0:7.2f} ms|| LR: {optimizer.lr.numpy().item():.6f}, '
-        #                 f'mem: {GlobalCounters.mem_used / 1e9:.4f} GB used, '
-        #                 f'GFLOPS: {GlobalCounters.global_ops * 1e-9 / et:7.2f}', 'magenta'))
+      tqdm.write(
+        f"{cnt:5} {((cl - st)) * 1000.0:7.2f} ms run, {(pt - st) * 1000.0:7.2f} ms python, {(dt - pt) * 1000.0:6.2f} ms fetch data, "
+        f"{(cl - dt) * 1000.0:7.2f} ms {device_str}, {loss:5.2f} loss, {optimizer.lr.numpy()[0]:.6f} LR, "
+        f"{GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS")
+      if WANDB:
+        wandb.log({"lr": optimizer.lr.numpy(), "train/loss": loss, "train/step_time": cl - st,
+                   "train/python_time": pt - st, "train/data_time": dt - pt, "train/cl_time": cl - dt,
+                   "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": epoch + (cnt + 1) / (len(coco_train)//BS)})
+
       st = cl
       proc, next_proc = next_proc, None  # return old cookie
-      cnt += 1
-      # if cnt>5 and epoch==0:
-      #   proc = None
-  # func = None
-  # for epoch in range(EPOCHS):
-  #   print(colored(f'EPOCH {epoch}/{EPOCHS}:', 'cyan'))
-  #   # train_step.reset()
-  #   # mdlrun_false.reset()
-  #   lr_sched = None
-  #   if epoch < WARMUP_EPOCHS:
-  #     start_iter = epoch*len(coco_train.ids)//BS
-  #     warmup_iters = WARMUP_EPOCHS*len(coco_train.ids)//BS
-  #     lr_sched = Retina_LR(optimizer, start_iter, warmup_iters, WARMUP_FACTOR, LR)
-  #   else:
-  #     optimizer.lr.assign(Tensor([LR], device=GPUS))
-  #   cnt = 0
-  #   data_end = time.perf_counter()
-  #   for X, Y_boxes, Y_labels, Y_boxes_p, Y_labels_p, M_IDXS in iterate(coco_train, BS, func):
-  #     # print('Global reset')
-  #     GlobalCounters.reset()
-  #     data_time = time.perf_counter() - data_end
-  #     st = time.perf_counter()
-  #     X = X.shard(GPUS, axis=0)
-  #     if(cnt==0 and epoch==0):
-  #       # o_x, oyb, oyl, omi = X, Y_boxes_p, Y_labels_p, M_IDXS
-  #       # INIT LOSS FUNC
-  #       b,_,_ = mdlrun(X)
-  #       for bb in b:
-  #         print(bb.shape)
-  #       ANCHORS = anchor_generator(X.shape, b)
-  #       ANCHORS = [a.realize() for a in ANCHORS]
-  #       ANCHORS_STACK = Tensor.stack(ANCHORS)
-  #       # print('ANCHOR_STACK', ANCHORS[0].shape)
-  #       # sys.exit()
-  #       ANCHORS_STACK = ANCHORS_STACK.shard(GPUS, axis=0)
-  #       func = lambda x: model.matcher_gen_per_img(ANCHORS[0], x)
-  #       # print(func)
-  #       mdlrun.reset()
-  #       # mdl_reg_loss_jit = TinyJit(lambda r, y, m: model.head.regression_head.loss(r,y,ANCHORS, m).realize())
-  #       # mdl_class_loss_jit = TinyJit(lambda c, y,m: model.head.classification_head.loss(c,y,m).realize())
-  #       mdl_reg_loss = lambda r, y, m, b_t: model.head.regression_head.loss(r,y,ANCHORS_STACK, m, b_t)
-  #       mdl_class_loss = lambda c, y,m, l_t: model.head.classification_head.loss(c,y,m, l_t)
-  #       break
+      cnt+=1
 
-  #     else:
-  #       # print('ANCHORS', len(ANCHORS), ANCHORS[0].mean().item(), ANCHORS[1].mean().item())
-  #       # matcher_gen not jittable for now
-  #       pre_match = time.perf_counter()
-  #       # matched_idxs = model.matcher_gen(ANCHORS, Y_boxes) #.realize()
-  #       # matched_idxs = Tensor.stack(M_IDXS).realize()
-  #       matched_idxs = M_IDXS
-  #       # print('MATCHED_IDX', matched_idxs.mean().item())
-  #       pre_zip = time.perf_counter()
+      if cnt%50==0:
+        if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
+        fn = f"./ckpts/retinanet_{len(GPUS)}x{HOSTNAME}_B{BS}_E{epoch}_{cnt}.safe"
+        state_dict = get_state_dict(model)
+        # print(state_dict.keys())
+        safe_save(state_dict, fn)
+        print(f" *** Model saved to {fn} ***")
+    # ***********EVAL******************
+    bt = time.time()
+    train_step.reset()
+    Tensor.training = False
+    print(colored(f'{epoch} START EVAL', 'cyan'))
+    coco_eval = COCOeval(coco_val.coco, iouType="bbox")
+    eval_times = []
+    coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
 
-  #       # Work around for zipping a sharded tensor
-  #       # Need to think of clean way to execute
-  #       # boxes_temp = []
-  #       # for tb, m in zip(Y_boxes_p, matched_idxs):
-  #       #   boxes_temp.append(tb[m].realize())
-  #       # boxes_temp = Tensor.stack(boxes_temp)
-  #       # labels_temp = []
-  #       # for tl, m in zip(Y_labels_p, matched_idxs):
-  #       #   labels_temp.append(tl[m].realize())
-  #       # labels_temp = Tensor.stack(labels_temp)
-  #       # boxes_temp = Tensor.stack(Y_boxes_p).realize()
-  #       # labels_temp = Tensor.stack(Y_labels_p).realize()
-  #       boxes_temp = Y_boxes_p
-  #       labels_temp = Y_labels_p
-  #       # print('matched_IDXS', matched_idxs.shape, len(Y_boxes))
-  #       pre_shard = time.perf_counter()
-  #       # print('MATH_DEVICE', matched_idxs.device)
-  #       matched_idxs = matched_idxs.shard(GPUS, axis=0)
-  #       # print('POST_MATH_DEVICE', matched_idxs.device)
-  #       # # Y_boxes_p.shard_(GPUS, axis=0)
-  #       # # Y_labels_p.shard_(GPUS, axis=0)
-  #       boxes_temp = boxes_temp.shard(GPUS, axis=0)
-  #       labels_temp = labels_temp.shard(GPUS, axis=0)
-  #       post_shard = time.perf_counter() - pre_shard
-  #       jit_t = time.perf_counter()
-  #       loss = train_step(X, None, None, matched_idxs, boxes_temp, labels_temp)
-  #       jitted_time = time.perf_counter()-jit_t
-  #       if lr_sched is not None:
-  #         lr_sched.step()
-  #       et = time.perf_counter()-st
-  #       if cnt%1==0:
-  #         print(f'hit {(pre_zip-pre_match)*1000.0} {(pre_shard-pre_zip)*1000.0}'
-  #               f' {jitted_time*1000.0} {post_shard*1000.0}')
-  #         # print(X.shape, matched_idxs.shape, boxes_temp.shape, labels_temp.shape)
-  #         # print(colored(f'{cnt} STEP {loss.item():.5f}, time: {et*1000.0:7.2f} ms run, '
-  #         #               f'data: {data_time*1000.0:7.2f} ms|| LR: {optimizer.lr.numpy().item():.6f}, '
-  #         #               f'mem: {GlobalCounters.mem_used / 1e9:.4f} GB used, '
-  #         #               f'GFLOPS: {GlobalCounters.global_ops * 1e-9 / et:7.2f}', 'magenta'))
-  #         print(colored(f'{cnt} STEP {loss.shape}, time: {et*1000.0:7.2f} ms run, '
-  #                       f'data: {data_time*1000.0:7.2f} ms|| '
-  #                       f'mem: {GlobalCounters.mem_used / 1e9:.4f} GB used, '
-  #                       f'GFLOPS: {GlobalCounters.global_ops * 1e-9 / et:7.2f}', 'magenta'))
-  #       data_end = time.perf_counter()
-  #       # if cnt>5 and epoch==0: 
-  #       #   # train_step.reset()
-  #       #   break
-  #     cnt+=1
+    batch_loader = batch_load_retinanet_val(coco_val, bs=BS_EVAL, val=True, shuffle=False)
+    it = iter(tqdm(batch_loader, total=len(coco_val)//BS_EVAL, desc=f"epoch_val {epoch}"))
+    cnt, proc = 0, data_get_val(it)
 
-    # if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
-    # fn = f"./ckpts/retinanet_{HOSTNAME}_B{BS}_E{epoch}.safe"
-    # state_dict = get_state_dict(model)
-    # # print(state_dict.keys())
-    # safe_save(state_dict, fn)
-    # print(f" *** Model saved to {fn} ***")
+    while proc is not None:
+      GlobalCounters.reset()
+      st = time.time()
+      y_idxs = proc[1]
+      orig_shapes = []
+      img_ids = []
+      for i in y_idxs:
+        img_ids.append(coco_val.ids[i])
+        orig_shapes.append(coco_val.__getitem__(i)[0].size[::-1])
 
-    # # ****EVAL STEP
-    # # train_step.reset()
-    # print(colored(f'{epoch} START EVAL', 'cyan'))
-    # coco_eval = COCOeval(coco_val.coco, iouType="bbox")
+      out, proc = val_step(proc[0]), proc[2]
 
-    # Tensor.training = False
-    # # print('rand',model.head.regression_head.bbox_reg.weight.mean().numpy(),model.head.regression_head.bbox_reg.weight.shape)
-    # # model.load_from_pretrained()
-    # # model.backbone.body.fc = None
-    # # print('pre_train',model.head.regression_head.bbox_reg.weight.mean().numpy(),model.head.regression_head.bbox_reg.weight.shape)
-    # # model.load_checkpoint("./ckpts/retinanet_B16_E10.safe")
-    # # print('ckpt',model.head.regression_head.bbox_reg.weight.mean().numpy(), model.head.regression_head.bbox_reg.weight.shape)
+      try:
+        next_proc = data_get_val(it)
+      except StopIteration:
+        next_proc = None
 
-    # st = time.time()
-    # coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
-    # cnt = 0
-    # for X, targets in iterate_val(coco_val, BS_EVAL):
-    #   X.shard_(GPUS, axis=0)
-    #   orig_shapes= []
-    #   for tt in targets:
-    #     orig_shapes.append(tt['image_size'])
-    #   # print('orig_shapes', orig_shapes)
-    #   # print(orig_shapes)
-    #   sub_t = time.time()
-    #   # out = mdlrun_false(X).numpy()
-    #   out = val_step(X).numpy()
-    #   predictions = model.postprocess_detections(out, orig_image_sizes=orig_shapes)
-    #   # print(predictions)
-    #   img_ids = [t["image_id"] for t in targets]
-    #   # print('img_ids', img_ids)
-    #   coco_results  = [{"image_id": targets[i]["image_id"], "category_id": label, "bbox": box.tolist(),
-    #                      "score": score} for i, prediction in enumerate(predictions) 
-    #                      for box, score, label in zip(*prediction.values())]
-    #   print('len_reults', len(coco_results))
-    #   # IF COCO_RESULTS LOWER THAN THRESH, ERROR IN EVAL
-    #   # REFERNCE PUSHES EMPTY COCO OBJ
-    #   with redirect_stdout(None):
-    #     coco_eval.cocoDt = coco_val.coco.loadRes(coco_results) if coco_results else COCO()
-    #     coco_eval.params.imgIds = img_ids
-    #     coco_eval.evaluate()
-    #   evaluated_imgs.extend(img_ids)
-    #   coco_evalimgs.append(np.array(coco_eval.evalImgs).reshape(ncats, narea, len(img_ids)))
-    #   print(colored(f'{cnt} EVAL_STEP || {time.time()-sub_t}', 'red'))
-    #   cnt=cnt+1
-    # coco_eval.params.imgIds = evaluated_imgs
-    # coco_eval._paramsEval.imgIds = evaluated_imgs
-    # coco_eval.evalImgs = list(np.concatenate(coco_evalimgs, -1).flatten())
-    # coco_eval.accumulate()
-    # coco_eval.summarize()
-    # eval_acc = coco_eval.stats[0]
-    # print(colored(f'{epoch} EVAL_ACC {eval_acc} || {time.time()-st}', 'green'))
+      out = out.numpy()
+      predictions = model.postprocess_detections(out, orig_image_sizes=orig_shapes)
 
-    # # val_step.reset()
-    # # sys.exit()
+      coco_results  = [{"image_id": img_ids[i], "category_id": label, "bbox": box.tolist(),
+                         "score": score} for i, prediction in enumerate(predictions) 
+                         for box, score, label in zip(*prediction.values())]
+      # print('len_reults', len(coco_results))
+      # IF COCO_RESULTS LOWER THAN THRESH, ERROR IN EVAL
+      # REFERNCE PUSHES EMPTY COCO OBJ
+      with redirect_stdout(None):
+        coco_eval.cocoDt = coco_val.coco.loadRes(coco_results) if coco_results else COCO()
+        coco_eval.params.imgIds = img_ids
+        coco_eval.evaluate()
+      evaluated_imgs.extend(img_ids)
+      coco_evalimgs.append(np.array(coco_eval.evalImgs).reshape(ncats, narea, len(img_ids)))
+      print(colored(f'{cnt} EVAL_STEP || {time.time()-st}', 'red'))
+      cnt=cnt+1
+      proc, next_proc = next_proc, None  # return old cookie
+      if cnt>30: break
+    coco_eval.params.imgIds = evaluated_imgs
+    coco_eval._paramsEval.imgIds = evaluated_imgs
+    coco_eval.evalImgs = list(np.concatenate(coco_evalimgs, -1).flatten())
+    coco_eval.accumulate()
+    coco_eval.summarize()
+    eval_acc = coco_eval.stats[0]
+    print(colored(f'{epoch} EVAL_ACC {eval_acc} || {time.time()-bt}', 'green'))
+    val_step.reset()
 
       
 def train_unet3d():

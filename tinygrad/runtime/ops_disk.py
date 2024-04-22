@@ -52,7 +52,8 @@ class DiskRunner(Runner):
     assert strides_for_shape(view.shape) == view.strides, "disk tensors don't support strides"
     self.new_size = prod(view.shape)
     self.new_offset = view.offset * top_src.arg.dtype.itemsize
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Any, int], wait=False, jit=False):
+    super().__init__(f"sz 0x{self.new_size:X} offset 0x{self.new_offset:X}", "DISK")
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Any, int], wait=False):
     assert len(rawbufs) == 2
     # TODO: this is a terrible hack that should be moved to lazy.py
     rawbufs[0]._buf.offset = rawbufs[1]._buf.offset+self.new_offset
@@ -78,7 +79,7 @@ class DiskDevice(Compiled):
       except OSError: self.fd = os.open(filename, os.O_RDWR|os.O_CREAT)
       if os.fstat(self.fd).st_size < self.size: os.ftruncate(self.fd, self.size)
       self.mem = mmap.mmap(self.fd, self.size)
-    if (hp := getattr(mmap, "MADV_HUGEPAGE", None)) is not None: self.mem.madvise(hp) # type: ignore
+    # if (hp := getattr(mmap, "MADV_HUGEPAGE", None)) is not None: self.mem.madvise(hp) # type: ignore
   def _might_close(self):
     self.count -= 1
     if self.count == 0:

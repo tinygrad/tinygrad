@@ -18,10 +18,10 @@ class ConvertCocoPolysToMask(object):
 
   def __call__(self, image, target):
     # w, h = image.size
-    h, w = image.size
+    w,h = image.size
 
     image_id = target["image_id"]
-    image_id = Tensor([image_id], requires_grad=False)
+    # image_id = image_id
 
     anno = target["annotations"]
 
@@ -47,19 +47,8 @@ class ConvertCocoPolysToMask(object):
 
     target = {}
     # print('CONVERTINGTTTT')
-    # target["boxes"] = Tensor(boxes, requires_grad=False)#.realize()
-    # # print('BOXES:TENSCONV', target["boxes"].numpy())
-    # target["labels"] = Tensor(classes, requires_grad=False)#.realize()
- # max_pad = 500
-        # n = bbox.shape[0]
-        # boxes_padded = bbox.pad((((0,max_pad-n), None)),0)
-        # labels_padded = t['labels'].reshape(-1,1).pad((((0,max_pad-n), None)),-1).reshape(-1)
-    # print(boxes.shape, classes.shape)
-    boxes = resize_boxes_np(boxes,image.size[::-1], (800,800))
-    pad_sz = MAX_PAD - boxes.shape[0]
-    boxes = np.pad(boxes, pad_width=((0,pad_sz), (0,0)))
-    classes = np.pad(classes, pad_width=(0,pad_sz), constant_values=-1)
-    target["boxes"] = boxes
+    target["boxes"] = resize_boxes_np(boxes, image.size[::-1], (800, 800))
+    # print('BOXES:TENSCONV', target["boxes"].numpy())
     target["labels"] = classes
     target["image_id"] = image_id
     # print('FINISHED_CONVERTING')
@@ -86,12 +75,8 @@ class CocoDetection:
     id = self.ids[index]
     img = self._load_image(id)
     orig_size = img.size
-    # print('iterate orig size', orig_size, id)
-    # sys.exit()
-    target = self._load_target(id)
 
-    # if self.transforms is not None:
-    #   img, target = self.transforms(img, target)
+    target = self._load_target(id)
 
     image_id = self.ids[index]
     target = dict(image_id=image_id, annotations=target)
@@ -109,10 +94,6 @@ def get_openimages(name, root, image_set, transforms=None):
 
   t = ConvertCocoPolysToMask(filter_iscrowd=False)
 
-  # if transforms is not None:
-  #     t.append(transforms)
-  # transforms = T.Compose(t)
-
   img_folder = os.path.join(PATHS[image_set], "data")
   ann_file = os.path.join(PATHS[image_set], "labels", f"{name}.json")
 
@@ -120,33 +101,10 @@ def get_openimages(name, root, image_set, transforms=None):
 
   return dataset
 
-def resize_boxes(boxes: Tensor, original_size: List[int], new_size: List[int]) -> Tensor:
-  ratios = [
-      Tensor(s, dtype=dtypes.float32) / Tensor(s_orig, dtype=dtypes.float32)
-      for s, s_orig in zip(new_size, original_size)
-  ]
-  ratio_height, ratio_width = ratios
+SIZE = (800, 800)
 
-  # print('resize_boxes boxes.shape:',boxes.shape, original_size, new_size)
-  # print(boxes.numpy())
-
-  # bnp = boxes.numpy()
-  # xmin, ymin, xmax, ymax = Tensor(bnp[:, 0]), Tensor(bnp[:, 1]), \
-  #                         Tensor(bnp[:, 2]), Tensor(bnp[:, 3])
-  xmin, ymin, xmax, ymax = boxes[:, 0], boxes[:, 1], \
-                          boxes[:, 2], boxes[:, 3]
-  # print('temp t LEN:',t)
-  # print('UNBIND SHAPE_PRE:', xmin.shape, xmin.numpy())
-
-  xmin = xmin * ratio_width
-  xmax = xmax * ratio_width
-  ymin = ymin * ratio_height
-  ymax = ymax * ratio_height
-  # print('UNBIND SHAPE_POST:', xmin.shape, xmax.shape, ymin.shape, ymax.shape)
-  ans = Tensor.stack((xmin, ymin, xmax, ymax), dim=1)#.cast(dtypes.float32)
-  # print('RESIZE_ANS', ans.shape)
-  ans.requires_grad = False
-  return ans
+def resize_img(img:Image.Image):
+  return img.resize(SIZE, resample = Image.BILINEAR)
 def resize_boxes_np(boxes, original_size: List[int], new_size: List[int]):
   ratios = [
       s / s_orig
@@ -162,138 +120,79 @@ def resize_boxes_np(boxes, original_size: List[int], new_size: List[int]):
   ymin = ymin * ratio_height
   ymax = ymax * ratio_height
   # print('UNBIND SHAPE_POST:', xmin.shape, xmax.shape, ymin.shape, ymax.shape)
-  # ans = Tensor.stack((xmin, ymin, xmax, ymax), dim=1)#.cast(dtypes.float32)
-  ans = np.stack((xmin, ymin, xmax, ymax), axis=1)
+  return np.stack((xmin, ymin, xmax, ymax), axis=1)
 
-  # print('RESIZE_ANS', ans.shape)
-  # ans.requires_grad = False
-  return ans
+def box_iou_np(boxes1:np.ndarray, boxes2:np.ndarray):
+  def box_area(boxes): return (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+  area1 = box_area(boxes1)
+  area2 = box_area(boxes2)
+  
+  lt = np.maximum(boxes1[:, None, :2], boxes2[:, :2])  # [N,M,2]
+  rb = np.minimum(boxes1[:, None, 2:], boxes2[:, 2:])  # [N,M,2]
+  wh = (rb-lt).clip(min=0)
+  inter = wh[:, :, 0] * wh[:, :, 1]
+  union = area1[:, None] + area2 - inter
+  return inter / union
+class Matcher_np(object):
+  BELOW_LOW_THRESHOLD = -1
+  BETWEEN_THRESHOLDS = -2
+  def __init__(self, high_threshold, low_threshold, allow_low_quality_matches=False):
 
-import torchvision.transforms.functional as F
-# SIZE = (400,400)
-SIZE = (800, 800)
+    self.BELOW_LOW_THRESHOLD = -1
+    self.BETWEEN_THRESHOLDS = -2
+    assert low_threshold <= high_threshold
+    self.high_threshold = high_threshold
+    self.low_threshold = low_threshold
+    self.allow_low_quality_matches = allow_low_quality_matches
 
-image_std = Tensor([0.229, 0.224, 0.225]).reshape(-1,1,1)
-image_mean = Tensor([0.485, 0.456, 0.406]).reshape(-1,1,1)
-def normalize(x):
-  x = x.permute((2,0,1)) / 255.0
-  # x = x /255.0
-  # x = x.permute((2,1,0)) / 255.0
-  x -= image_mean
-  x /= image_std
-  return x#.realize()
-MATCHER_FUNC = None  
-def iterate(coco, bs=8, func =None):
-  i = 0
-  i_sub = 0
-  rem =0
-  while(i+bs+rem<len(coco.ids)):
-    # print('iterate', i)
-    i_sub = 0
-    rem =0
-    X, target_boxes, target_labels, target_boxes_padded, target_labels_padded, matched_idxs = [], [], [], [], [], []
-    while(i_sub<bs and i+bs+rem<len(coco.ids)):
-      # print(i_sub)
-      x_orig,t = coco.__getitem__(i+i_sub+rem)
-      # x_tens = Tensor.empty((SIZE[0], SIZE[1], 3), dtype=dtypes.uint8)
-      # print('X_ORIG_SIZE', x_orig.size)
-      # print('DATLOAD_ITER', t['boxes'].shape)
+  def __call__(self, match_quality_matrix:np.ndarray):
 
-      # Training not done on empty targets
-      if(t['boxes'].shape[0]<=0):
-        print(colored(f'EMPTY BOZES {i+i_sub+rem}', 'cyan'))
-        rem+=1
+    if match_quality_matrix.size == 0:
+      # empty targets or proposals not supported during training
+      if match_quality_matrix.shape[0] == 0:
+        raise ValueError(
+            "No ground-truth boxes available for one of the images "
+            "during training")
       else:
-        # xNew_pre = normalize(Tensor(np.array(x_orig)))
-        # print(np.array(x_orig).shape)
-        # xNew_tor = F.resize(torch.tensor(np.array(x_orig), device='cpu').permute(2,0,1), size=SIZE)
-        xNew_tor = x_orig.resize(SIZE, resample = Image.BILINEAR)
-        # print('xNEW_TOR', xNew_tor.shape)
-        # print('X_NEW', xNew.shape)
-        # print('PIL_TO_NP_CONV')
-        x_np = np.array(xNew_tor)#.reshape(800,800,3)
-        # print('NP_TENS_CONV', x_np.dtype)
+        raise ValueError(
+            "No proposal boxes available for one of the images "
+            "during training")
 
-        x_tens = Tensor(x_np).realize()
-        # x_tens.contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = xNew_tor.tobytes()
-        # x_tens.assign(x_np).realize()
-        # x_tens.contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = x_np.tobytes()
-        # print('NORMALIZIMG', x_tens.dtype)
-        xNew = normalize(x_tens).realize()
-        # print('Finished_NORMAL')
-        # xNew = Tensor(np.array(xNew_tor)).permute(2,0,1)
+    # match_quality_matrix is M (gt) x N (predicted)
+    # Max over gt elements (dim 0) to find best gt candidate for each prediction
+    matched_vals, matches = match_quality_matrix.max(axis=0), match_quality_matrix.argmax(axis=0)
 
-        # print('X_MEAN_NORM',xNew.shape, xNew.mean().numpy())
-        X.append(xNew)
-        bbox = t['boxes']
-        # print('ITERATE_PRE_RESIZE', bbox.shape)
-        # bbox = resize_boxes(bbox, (x_orig.size[1],x_orig.size[0]), SIZE)
-        bbox = resize_boxes(bbox, x_orig.size[::-1], SIZE) #.realize()
-        # print('ITERATE_POST_RESIZE', bbox.shape)
-        # t['boxes'] = bbox.realize()
-        # max_pad = 120087
-
-        # max_pad = 500
-        # n = bbox.shape[0]
-        # boxes_padded = bbox.pad((((0,max_pad-n), None)),0)
-        # labels_padded = t['labels'].reshape(-1,1).pad((((0,max_pad-n), None)),-1).reshape(-1)
-
-        # print('ITERATE', xNew.shape, t['boxes'].shape, t['labels'].shape)
-        # print('ITERATE_PADDED', xNew.shape, boxes_padded.shape, labels_padded.shape)
-
-        # target_boxes.append(bbox) #.realize())
-        # target_labels.append(t['labels']) #.realize())
-        
-        # print('lABEL LOAD CHEK', target_labels[-1].shape)
-        # print('PADDING LOGIC', labels_padded.numpy())
-        # print(boxes_padded.numpy())
-        # target_boxes_padded.append(boxes_padded.realize())
-        # target_labels_padded.append(labels_padded.realize())
-        i_sub+=1
-        # if MATCHER_FUNC is not None:
-        # if i>0:
-        if func is not None:
-          # print('MATCHER_FUNC_HIT')
-          # print(func)
-          m_idx = func(bbox) #.realize()
-          # tbm = boxes_padded[m_idx] #.realize()
-          # tlm = labels_padded[m_idx] #.realize()
-          tbm = bbox[m_idx] #.realize()
-          tlm = t['labels'][m_idx] #.realize()
-          target_boxes_padded.append(tbm)
-          target_labels_padded.append(tlm)
-          matched_idxs.append(m_idx)
-      # x_orig.close()
-      # del t
-
-    # yield Tensor.stack(X), target_boxes, target_labels, target_boxes_padded, target_labels_padded, matched_idxs
-    if func is not None:
-      yield Tensor.stack(X).realize(), None, None, Tensor.stack(target_boxes_padded).realize(), \
-        Tensor.stack(target_labels_padded).realize(), Tensor.stack(matched_idxs).realize()
+    if self.allow_low_quality_matches:
+      all_matches = np.copy(matches)
     else:
-      yield Tensor.stack(X), None, None, target_boxes_padded, \
-        target_labels_padded, matched_idxs
-    # yield Tensor.stack(X), None, None, target_boxes_padded, \
-    #     target_labels_padded, matched_idxs
-    i= i+bs+rem
+      all_matches = None
 
-def iterate_val(coco, bs=8):
-  for i in range(0, len(coco.ids)-bs, bs):
-  # for i in range(0, 10, bs):
-    X, targets = [], []
-    for img_id in coco.ids[i:i+bs]:
-      x_orig, t = coco.__getitem__(img_id)
-      xNew_tor = F.resize(x_orig, size=SIZE)
-      xNew = normalize(Tensor(np.array(xNew_tor)))
-      X.append(xNew)
-      # bbox = t['boxes']
-      # t['boxes'] = resize_boxes(bbox, x_orig.size, SIZE).numpy()
-      # t['labels'] = t['labels'].numpy()
-      # t['image_id'] = t['image_id'].item()
-      tNew = {'image_size' : t['image_size'][::-1], 
-              'image_id' : t['image_id'].item()}
-      targets.append(tNew)
-    yield Tensor.stack(X), targets
+    # Assign candidate matches with low quality to negative (unassigned) values
+    below_low_threshold = matched_vals < self.low_threshold
+    between_thresholds = (matched_vals >= self.low_threshold) & (
+        matched_vals < self.high_threshold
+    )
+
+    matches[below_low_threshold] = self.BELOW_LOW_THRESHOLD
+    matches[between_thresholds] = self.BETWEEN_THRESHOLDS
+    if self.allow_low_quality_matches:
+      assert all_matches is not None
+      self.set_low_quality_matches_(matches, all_matches, match_quality_matrix)
+    return matches
+
+  def set_low_quality_matches_(self, matches:np.ndarray, all_matches:np.ndarray, match_quality_matrix:np.ndarray):
+    # For each gt, find the prediction with which it has highest quality
+    highest_quality_foreach_gt= match_quality_matrix.max(axis=1)
+    # Find highest quality match available, even if it is low, including ties
+    gt_pred_pairs_of_highest_quality = np.nonzero(
+        match_quality_matrix == highest_quality_foreach_gt[:, None]
+    )
+    pred_inds_to_update = gt_pred_pairs_of_highest_quality[1]
+    matches[pred_inds_to_update] = all_matches[pred_inds_to_update]
+
+def matcher_iou_func(box, anchor):
+  M_NP = Matcher_np(0.5, 0.4, True)
+  return M_NP(box_iou_np(box, anchor))
 
 from multiprocessing import Queue, Process, shared_memory, connection, Lock, cpu_count
 import pickle, random
@@ -326,35 +225,26 @@ def shuffled_indices(n, seed=None):
     yield indices[i]
     del indices[i]
 
-def resize_img(img):
-  return img.resize(SIZE, resample = Image.BILINEAR)
-def loader_process(q_in, q_out, X:Tensor, seed, coco, YB:Tensor, YL:Tensor):
+
+def loader_process(q_in, q_out, X:Tensor, seed, coco, YB:Tensor, YL:Tensor, YM:Tensor, Anchor):
   import signal
   signal.signal(signal.SIGINT, lambda _, __: exit(0))
-
-  # from extra.datasets.imagenet import center_crop, preprocess_train
 
   with Context(DEBUG=0):
     while (_recv := q_in.get()) is not None:
       idx, img_idx, val = _recv
       img, target = coco.__getitem__(img_idx)
-      # img = Image.open(fn)
-      # img = img.convert('RGB') if img.mode != "RGB" else img
 
       if val:
         pass
-        # eval: 76.08%, load in 0m7.366s (0m5.301s with simd)
-        # sudo apt-get install libjpeg-dev
-        # CC="cc -mavx2" pip install -U --force-reinstall pillow-simd
-        # img = center_crop(img)
-        # img = np.array(img)
       else:
-        # reseed rng for determinism
-        # if seed is not None:
-        #   np.random.seed(seed * 2 ** 20 + idx)
-        #   random.seed(seed * 2 ** 20 + idx)
-        # img = preprocess_train(img)
+
         img = np.array(resize_img(img))
+        midx = matcher_iou_func(target['boxes'], Anchor)
+        m_temp = np.clip(midx, 0, None)
+        tb = target['boxes'][m_temp]
+        tl = target['labels'][m_temp]
+        del target, m_temp
 
       # broken out
       #img_tensor = Tensor(img.tobytes(), device='CPU')
@@ -363,26 +253,23 @@ def loader_process(q_in, q_out, X:Tensor, seed, coco, YB:Tensor, YL:Tensor):
 
       # faster
       X[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = img.tobytes()
-      YB[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = target['boxes'].tobytes()
-      YL[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = target['labels'].tobytes()
+      YB[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = tb.tobytes()
+      YL[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = tl.tobytes()
+      YM[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = midx.tobytes()
+
       # ideal
       #X[idx].assign(img.tobytes())   # NOTE: this is slow!
       q_out.put(idx)
     q_out.put(None)
-def batch_load_retinanet(coco, bs=8, shuffle=False, seed=None, val = False):
+def batch_load_retinanet(coco, bs=8, shuffle=False, seed=None, val = False, anchor_np=[1,2,3,4]):
   DATA_LEN = len(coco)
-  BATCH_COUNT = DATA_LEN//bs
+  BATCH_COUNT = min(32, DATA_LEN//bs)
   gen = shuffled_indices(DATA_LEN, seed=seed) if shuffle else iter(range(DATA_LEN))
 
   def enqueue_batch(num):
     for idx in range(num*bs, (num+1)*bs):
       img_idx = next(gen)
-      img,target = coco.__getitem__(img_idx)
-      if target['boxes'].size == 0:
-        # need to skip for train loops
-        img_idx = 7
       q_in.put((idx, img_idx, val))
-      Y_IDX[idx] = img_idx
 
   shutdown = False
   class Cookie:
@@ -391,6 +278,7 @@ def batch_load_retinanet(coco, bs=8, shuffle=False, seed=None, val = False):
       if not shutdown:
         try: enqueue_batch(self.num)
         except StopIteration: pass
+
   gotten = [0]*BATCH_COUNT
   def receive_batch():
     while 1:
@@ -398,33 +286,36 @@ def batch_load_retinanet(coco, bs=8, shuffle=False, seed=None, val = False):
       gotten[num] += 1
       if gotten[num] == bs: break
     gotten[num] = 0
-    return X[num*bs:(num+1)*bs], Y_IDX[num*bs:(num+1)*bs], YB[num*bs:(num+1)*bs], YL[num*bs:(num+1)*bs], Cookie(num)
-    # return X[num*bs:(num+1)*bs], Cookie(num)
+    return X[num*bs:(num+1)*bs], YB[num*bs:(num+1)*bs], YL[num*bs:(num+1)*bs], YM[num*bs:(num+1)*bs], Cookie(num)
   
   q_in, q_out = Queue(), Queue()
   sz = (bs*BATCH_COUNT, 800, 800, 3)
-  bsz = (bs*BATCH_COUNT, MAX_PAD, 4)
-  lsz = (bs*BATCH_COUNT, MAX_PAD)
   if os.path.exists("/dev/shm/retinanet_X"): os.unlink("/dev/shm/retinanet_X")
   shm = shared_memory.SharedMemory(name="retinanet_X", create=True, size=prod(sz))
+  bsz = (bs*BATCH_COUNT, 120087, 4)
   if os.path.exists("/dev/shm/retinanet_YB"): os.unlink("/dev/shm/retinanet_YB")
   bshm = shared_memory.SharedMemory(name="retinanet_YB", create=True, size=prod(bsz))
+  lsz = (bs*BATCH_COUNT, 120087)
   if os.path.exists("/dev/shm/retinanet_YL"): os.unlink("/dev/shm/retinanet_YL")
   lshm = shared_memory.SharedMemory(name="retinanet_YL", create=True, size=prod(lsz))
-
+  msz = (bs*BATCH_COUNT, 120087)
+  if os.path.exists("/dev/shm/retinanet_YM"): os.unlink("/dev/shm/retinanet_YM")
+  mshm = shared_memory.SharedMemory(name="retinanet_YM", create=True, size=prod(msz))
   procs = []
 
   try:
     # disk:shm is slower
     #X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:shm:{shm.name}")
     X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:/dev/shm/retinanet_X")
-    YB = Tensor.empty(*bsz, dtype=dtypes.default_float, device=f"disk:/dev/shm/retinanet_YB")
+    YB = Tensor.empty(*bsz, dtype=dtypes.float32, device=f"disk:/dev/shm/retinanet_YB")
     YL = Tensor.empty(*lsz, dtype=dtypes.int16, device=f"disk:/dev/shm/retinanet_YL")
-    Y_IDX = [None] * (bs*BATCH_COUNT)
-    # Y = [None] * (bs*BATCH_COUNT)
+    YM = Tensor.empty(*msz, dtype=dtypes.int64, device=f"disk:/dev/shm/retinanet_YM")
 
-    for _ in range(cpu_count()):
-      p = Process(target=loader_process, args=(q_in, q_out, X, seed, coco, YB, YL))
+
+    # for _ in range(cpu_count()):
+    for _ in range(4):
+      print('hit*************')
+      p = Process(target=loader_process, args=(q_in, q_out, X, seed, coco, YB, YL, YM, anchor_np))
       p.daemon = True
       p.start()
       procs.append(p)
@@ -449,6 +340,213 @@ def batch_load_retinanet(coco, bs=8, shuffle=False, seed=None, val = False):
     bshm.unlink()
     lshm.close()
     lshm.unlink()
+    mshm.close()
+    mshm.unlink()
+
+def loader_process_val(q_in, q_out, X:Tensor, seed, coco):
+  import signal
+  signal.signal(signal.SIGINT, lambda _, __: exit(0))
+
+  with Context(DEBUG=0):
+    while (_recv := q_in.get()) is not None:
+      idx, img_idx, val = _recv
+      img, target = coco.__getitem__(img_idx)
+      if val:
+        img = np.array(resize_img(img))
+      else:
+        pass
+
+      # broken out
+      #img_tensor = Tensor(img.tobytes(), device='CPU')
+      #storage_tensor = X[idx].contiguous().realize().lazydata.realized
+      #storage_tensor._copyin(img_tensor.numpy())
+
+      # faster
+      X[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = img.tobytes()
+
+
+      # ideal
+      #X[idx].assign(img.tobytes())   # NOTE: this is slow!
+      q_out.put(idx)
+    q_out.put(None)
+def batch_load_retinanet_val(coco, bs=8, shuffle=False, seed=None, val = True):
+  DATA_LEN = len(coco)
+  BATCH_COUNT = min(32, DATA_LEN//bs)
+  gen = shuffled_indices(DATA_LEN, seed=seed) if shuffle else iter(range(DATA_LEN))
+
+  def enqueue_batch(num):
+    for idx in range(num*bs, (num+1)*bs):
+      img_idx = next(gen)
+      q_in.put((idx, img_idx, val))
+
+  shutdown = False
+  class Cookie:
+    def __init__(self, num): self.num = num
+    def __del__(self):
+      if not shutdown:
+        try: enqueue_batch(self.num)
+        except StopIteration: pass
+
+  gotten = [0]*BATCH_COUNT
+  def receive_batch():
+    while 1:
+      num = q_out.get()//bs
+      gotten[num] += 1
+      if gotten[num] == bs: break
+    gotten[num] = 0
+    return X[num*bs:(num+1)*bs], YB[num*bs:(num+1)*bs], YL[num*bs:(num+1)*bs], YM[num*bs:(num+1)*bs], Cookie(num)
+  
+  q_in, q_out = Queue(), Queue()
+  sz = (bs*BATCH_COUNT, 800, 800, 3)
+  if os.path.exists("/dev/shm/retinanet_X"): os.unlink("/dev/shm/retinanet_X")
+  shm = shared_memory.SharedMemory(name="retinanet_X", create=True, size=prod(sz))
+  bsz = (bs*BATCH_COUNT, 120087, 4)
+  if os.path.exists("/dev/shm/retinanet_YB"): os.unlink("/dev/shm/retinanet_YB")
+  bshm = shared_memory.SharedMemory(name="retinanet_YB", create=True, size=prod(bsz))
+  lsz = (bs*BATCH_COUNT, 120087)
+  if os.path.exists("/dev/shm/retinanet_YL"): os.unlink("/dev/shm/retinanet_YL")
+  lshm = shared_memory.SharedMemory(name="retinanet_YL", create=True, size=prod(lsz))
+  msz = (bs*BATCH_COUNT, 120087)
+  if os.path.exists("/dev/shm/retinanet_YM"): os.unlink("/dev/shm/retinanet_YM")
+  mshm = shared_memory.SharedMemory(name="retinanet_YM", create=True, size=prod(msz))
+  procs = []
+
+  try:
+    # disk:shm is slower
+    #X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:shm:{shm.name}")
+    X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:/dev/shm/retinanet_X")
+    YB = Tensor.empty(*bsz, dtype=dtypes.float32, device=f"disk:/dev/shm/retinanet_YB")
+    YL = Tensor.empty(*lsz, dtype=dtypes.int16, device=f"disk:/dev/shm/retinanet_YL")
+    YM = Tensor.empty(*msz, dtype=dtypes.int64, device=f"disk:/dev/shm/retinanet_YM")
+
+
+    # for _ in range(cpu_count()):
+    for _ in range(4):
+      print('hit*************')
+      p = Process(target=loader_process, args=(q_in, q_out, X, seed, coco, YB, YL, YM, anchor_np))
+      p.daemon = True
+      p.start()
+      procs.append(p)
+
+    for bn in range(BATCH_COUNT): enqueue_batch(bn)
+
+    # NOTE: this is batch aligned, last ones are ignored
+    for _ in range(0, DATA_LEN//bs): yield receive_batch()
+  finally:
+    shutdown = True
+    # empty queues
+    for _ in procs: q_in.put(None)
+    q_in.close()
+    for _ in procs:
+      while q_out.get() is not None: pass
+    q_out.close()
+    # shutdown processes
+    for p in procs: p.join()
+    shm.close()
+    shm.unlink()
+    bshm.close()
+    bshm.unlink()
+    lshm.close()
+    lshm.unlink()
+    mshm.close()
+    mshm.unlink()
+
+def loader_process_val(q_in, q_out, X:Tensor, seed, coco):
+  import signal
+  signal.signal(signal.SIGINT, lambda _, __: exit(0))
+
+  with Context(DEBUG=0):
+    while (_recv := q_in.get()) is not None:
+      idx, img_idx, val = _recv
+      img, target = coco.__getitem__(img_idx)
+      if val:
+        img = np.array(resize_img(img))
+      else:
+        pass
+
+      # broken out
+      #img_tensor = Tensor(img.tobytes(), device='CPU')
+      #storage_tensor = X[idx].contiguous().realize().lazydata.realized
+      #storage_tensor._copyin(img_tensor.numpy())
+
+      # faster
+      X[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = img.tobytes()
+
+
+      # ideal
+      #X[idx].assign(img.tobytes())   # NOTE: this is slow!
+      q_out.put(idx)
+    q_out.put(None)
+def batch_load_retinanet_val(coco, bs=8, shuffle=False, seed=None, val = True):
+  DATA_LEN = len(coco)
+  BATCH_COUNT = min(32, DATA_LEN//bs)
+  gen = shuffled_indices(DATA_LEN, seed=seed) if shuffle else iter(range(DATA_LEN))
+
+  def enqueue_batch(num):
+    for idx in range(num*bs, (num+1)*bs):
+      img_idx = next(gen)
+      img,target = coco.__getitem__(img_idx)
+      if target['boxes'].size == 0:
+        # need to skip for train loops
+        img_idx = 7
+      q_in.put((idx, img_idx, val))
+      Y_IDX[idx] = img_idx
+
+  shutdown = False
+  class Cookie:
+    def __init__(self, num): self.num = num
+    def __del__(self):
+      if not shutdown:
+        try: enqueue_batch(self.num)
+        except StopIteration: pass
+
+  gotten = [0]*BATCH_COUNT
+  def receive_batch():
+    while 1:
+      num = q_out.get()//bs
+      gotten[num] += 1
+      if gotten[num] == bs: break
+    gotten[num] = 0
+    return X[num*bs:(num+1)*bs], Y_IDX[num*bs:(num+1)*bs], Cookie(num)
+  
+  q_in, q_out = Queue(), Queue()
+  sz = (bs*BATCH_COUNT, 800, 800, 3)
+  if os.path.exists("/dev/shm/retinanet_X_val"): os.unlink("/dev/shm/retinanet_X_val")
+  shm = shared_memory.SharedMemory(name="retinanet_X_val", create=True, size=prod(sz))
+  procs = []
+
+  try:
+    # disk:shm is slower
+    #X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:shm:{shm.name}")
+    X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:/dev/shm/retinanet_X_val")
+    Y_IDX = [None] * (bs*BATCH_COUNT)
+
+    # for _ in range(cpu_count()):
+    for _ in range(4):
+      print('hit*************')
+      p = Process(target=loader_process_val, args=(q_in, q_out, X, seed, coco))
+      p.daemon = True
+      p.start()
+      procs.append(p)
+
+    for bn in range(BATCH_COUNT): enqueue_batch(bn)
+
+    # NOTE: this is batch aligned, last ones are ignored
+    for _ in range(0, DATA_LEN//bs): yield receive_batch()
+  finally:
+    shutdown = True
+    # empty queues
+    for _ in procs: q_in.put(None)
+    q_in.close()
+    for _ in procs:
+      while q_out.get() is not None: pass
+    q_out.close()
+    # shutdown processes
+    for p in procs: p.join()
+    shm.close()
+    shm.unlink()
+
+
 if __name__ == '__main__':
   from extra.datasets.openimages_new import get_openimages, iterate
   ROOT = 'extra/datasets/open-images-v6TEST'

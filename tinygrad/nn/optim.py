@@ -1,5 +1,5 @@
 # sorted in order of increasing complexity
-from typing import List, Optional
+from typing import List
 from tinygrad.helpers import dedup, flatten, getenv
 from tinygrad.tensor import Tensor
 
@@ -18,10 +18,8 @@ class Optimizer:
   def zero_grad(self):
     for param in self.params: param.grad = None
 
-  def realize(self, extra=None):
-    Tensor.corealize(extra + self.params + self.buffers if extra is not None else self.params + self.buffers)
-
-  def step(self, extra:Optional[List[Tensor]]=None): self.realize(self._step() + (extra if extra is not None else []))
+  def step(self): Tensor.corealize(self.schedule_step())
+  def schedule_step(self) -> List[Tensor]: return self._step()+self.params+self.buffers
   def _step(self) -> List[Tensor]: raise NotImplementedError
 
 class OptimizerGroup(Optimizer):

@@ -191,13 +191,15 @@ class Tensor:
   def data(self) -> memoryview:
     assert self.dtype.fmt is not None, f"no fmt dtype for {self.dtype}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
-    return self._data().cast(self.dtype.fmt, self.shape if len(self.shape) else (1,))
+    return self._data().cast(self.dtype.fmt, self.shape)
   def item(self) -> ConstType:
     """Returns the value of this tensor as a standard Python number."""
     assert self.dtype.fmt is not None, f"no fmt dtype for {self.dtype}"
     assert self.numel() == 1, "must have one element for item"
     return self._data().cast(self.dtype.fmt)[0]
-  def tolist(self) -> List[ConstType]: return list(self.data())
+  # TODO: should be Tensor.tolist() -> Union[List[ConstType], ConstType]. The List is Sequence because mypy expects memoryview.tolist() -> list[int]
+  # src: https://github.com/python/mypy/blob/release-1.6/mypy/typeshed/stdlib/builtins.pyi#L803
+  def tolist(self) -> Union[Sequence[ConstType], ConstType]: return self.data().tolist()
   def numpy(self) -> np.ndarray:
     if self.dtype == dtypes.bfloat16: return self.float().numpy()
     assert self.dtype.np is not None, f"no np dtype for {self.dtype}"
@@ -1072,7 +1074,6 @@ if IMAGE:
 # TODO: eventually remove this
 def custom_random(out:Buffer):
   Tensor._seed += 1
-  if DEBUG >= 2: print(f"*** {out.device}   rand  seed {Tensor._seed} size {out.size:<15d} dtype {out.dtype}")
   rng = np.random.default_rng(Tensor._seed)
   if out.dtype == dtypes.half: rng_np_buffer = (rng.integers(low=0, high=2047, size=out.size) / 2048).astype(np.half, copy=False)
   else: rng_np_buffer = rng.random(size=out.size, dtype=np.float32).astype(dtype=out.dtype.np, copy=False)
