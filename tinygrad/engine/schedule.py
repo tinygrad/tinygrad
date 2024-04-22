@@ -217,20 +217,28 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
     realized_parents: Set[LazyBuffer] = set()
     visited: Set[LazyBuffer] = set()
     while r_parents:
-      if (p:=r_parents.pop()).realized or (p.op in LoadOps and p.op is not LoadOps.ASSIGN) or p in visited: continue
+      if (p:=r_parents.pop()).realized:
+        realized_parents.add(p)
+        continue
+      if (p.op in LoadOps and p.op is not LoadOps.ASSIGN) or p in visited: continue
       visited.add(p)
       if p in realizes and p is not r:
         if not p.forced_realize and p not in reduce_for_op and p.shape == r.shape: realized_parents.add(p)
         continue
+      if p.op is LoadOps.ASSIGN:
+        r_parents.append(r.srcs[1])
+        continue
       for next_p in p.srcs: r_parents.append(next_p.base)
 
     for rp in realized_parents:
+      if rp.realized is not None: continue
+      if rp.op is LoadOps.ASSIGN and rp.srcs[1] in realized_parents: continue
       visited.clear()
       rp_children, can_group = deque(children[rp]), True
       while rp_children and can_group:
         if (c:=rp_children.pop()).realized or c.op is LoadOps.CONST or c in visited: continue
         visited.add(c)
-        if c in realizes and c is not r:
+        if c in realizes and c is not r and c.op not in LoadOps:
           can_group = False
           break
         for next_c in children[c]: rp_children.append(next_c.base)
@@ -260,9 +268,8 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
     # realize outputs before a parent is assigned to
     parents_assigns = set(schedule_targets[assign_targets[x]].outputs[0] for x in lsi.inputs if x in assign_targets)
     for assign in parents_assigns:
-      if assign not in lsi.outputs:
-        graph[key].append(assign)
-        in_degree[assign] += 1
+      graph[key].append(assign)
+      in_degree[assign] += 1
 
   return graph, in_degree, prescheduled
 
