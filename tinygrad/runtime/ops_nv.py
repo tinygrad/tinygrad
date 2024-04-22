@@ -173,8 +173,6 @@ class NVProgram:
     shstrtab = memoryview(bytearray(self.lib[sections[_shstrndx][4]:sections[_shstrndx][4]+sections[_shstrndx][5]]))
 
     self.shmem_usage = 0
-    self.registers_usage = 0
-    self.constant_buffers = {}
     constant_buffers_data = {}
     for sh_name, sh_type, sh_flags, _, sh_offset, sh_size, _, sh_info, _ in sections:
       section_name = shstrtab[sh_name:].tobytes().split(b'\0', 1)[0].decode('utf-8')
@@ -190,22 +188,11 @@ class NVProgram:
           if section_data[i * 3 + 0] & 0xffff == 0x1204 and section_data[i * 3 + 2] + 0x240 > self.device.slm_per_thread:
             raise RuntimeError("too high local memory")
 
-    # constant buffer 0 is filled for each program, no need to copy it from elf (it's just zeroes)
-    if 0 in constant_buffers_data: constant_buffers_data.pop(0)
-
     # Load program and constant buffers (if any)
     self.lib_sz = round_up(round_up(self.program.nbytes, 128) + sum([round_up(x.nbytes, 128) for i,x in constant_buffers_data.items()]), 0x1000)
     self.lib_gpu = self.device.allocator.alloc(self.lib_sz)
-
     for st in range(0, len(self.program), 4096):
       HWComputeQueue().copy_from_cpu(self.lib_gpu.base+st*4, self.program[st:st+4096]).submit(self.device)
-
-    off = round_up(self.program.nbytes, 128)
-    for i,data in constant_buffers_data.items():
-      self.constant_buffers[i] = (self.lib_gpu.base + off, data.nbytes)
-      HWComputeQueue().copy_from_cpu(self.lib_gpu.base + off, data).submit(self.device)
-      off += round_up(data.nbytes, 128)
-    self.device.synchronize()
 
     self.constbuffer_0 = [0] * 88
     self.constbuffer_0[6:12] = [*nvdata64_le(self.device.shared_mem_window), *nvdata64_le(self.device.local_mem_window), *nvdata64_le(0xfffdc0)]
@@ -222,11 +209,19 @@ class NVProgram:
                             program_prefetch_addr_lower_shifted=self.lib_gpu.base>>8, program_prefetch_addr_upper_shifted=self.lib_gpu.base>>40,
                             constant_buffer_size_shifted4_0=0x190, constant_buffer_valid_0=1, constant_buffer_invalidate_0=1)
 
-    for i,(addr,sz) in self.constant_buffers.items():
-      self.qmd.__setattr__(f'constant_buffer_addr_upper_{i}', addr >> 32)
-      self.qmd.__setattr__(f'constant_buffer_addr_lower_{i}', addr & 0xffffffff)
-      self.qmd.__setattr__(f'constant_buffer_size_shifted4_{i}', sz)
+    # constant buffer 0 is filled for each program, no need to copy it from elf (it's just zeroes)
+    if 0 in constant_buffers_data: constant_buffers_data.pop(0)
+
+    off = round_up(self.program.nbytes, 128)
+    for i,data in constant_buffers_data.items():
+      self.qmd.__setattr__(f'constant_buffer_addr_upper_{i}', (self.lib_gpu.base + off) >> 32)
+      self.qmd.__setattr__(f'constant_buffer_addr_lower_{i}', (self.lib_gpu.base + off) & 0xffffffff)
+      self.qmd.__setattr__(f'constant_buffer_size_shifted4_{i}', data.nbytes)
       self.qmd.__setattr__(f'constant_buffer_valid_{i}', 1)
+
+      HWComputeQueue().copy_from_cpu(self.lib_gpu.base + off, data).submit(self.device)
+      off += round_up(data.nbytes, 128)
+    self.device.synchronize()
 
   def __del__(self):
     if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu, self.lib_sz)
@@ -254,7 +249,7 @@ class NVProgram:
     queue.submit(self.device)
     if wait:
       self.device._wait_signal(self.device.compute_progress_signal, self.device.compute_put_value)
-      return (en[1]-st[1])/1e9
+      return (en[1]-st[1]) / 1e9
 
 class NVAllocator(LRUAllocator):
   def __init__(self, device:NVDevice):
@@ -300,13 +295,12 @@ class NVDevice(Compiled):
   root = None
   fd_ctl:int = -1
   fd_uvm:int = -1
-  fd_uvm_2:int = -1
   gpus_info = None
   semaphores_page = None
   signal_number = 32
-  devices: List[NVDevice] = []
   uvm_vaddr = 0x1000000000
   host_object_enumerator = 0x1000
+  devices: List[NVDevice] = []
 
   def _new_gpu_fd(self):
     fd_dev = os.open(f"/dev/nvidia{self.device_id}", os.O_RDWR | os.O_CLOEXEC)
@@ -397,10 +391,10 @@ class NVDevice(Compiled):
     if NVDevice.root is None:
       NVDevice.fd_ctl = os.open("/dev/nvidiactl", os.O_RDWR | os.O_CLOEXEC)
       NVDevice.fd_uvm = os.open("/dev/nvidia-uvm", os.O_RDWR | os.O_CLOEXEC)
-      NVDevice.fd_uvm_2 = os.open("/dev/nvidia-uvm", os.O_RDWR | os.O_CLOEXEC)
+      fd_uvm_2 = os.open("/dev/nvidia-uvm", os.O_RDWR | os.O_CLOEXEC)
       NVDevice.root = rm_alloc(self.fd_ctl, nv_gpu.NV01_ROOT_CLIENT, 0, 0, None).hObjectNew
       uvm.initialize(self.fd_uvm)
-      uvm.mm_initialize(self.fd_uvm_2, uvmFd=self.fd_uvm)
+      uvm.mm_initialize(fd_uvm_2, uvmFd=self.fd_uvm)
 
       NVDevice.gpus_info = (nv_gpu.nv_ioctl_card_info_t*16)()
       nv_iowr(NVDevice.fd_ctl, nv_gpu.NV_ESC_CARD_INFO, NVDevice.gpus_info)
