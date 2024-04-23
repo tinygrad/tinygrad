@@ -338,7 +338,7 @@ class UOpGraph:
           self.replace_op(u, new)
           return True
 
-  def uoptimize(self):
+  def optimize_loops(self):
     # get PHI node loop scope, link anything using a DEFINE_ACC to the loop as a "parent"
     acc_scope: DefaultDict[UOp, List[UOp]] = defaultdict(list)
     for u in self.uops:
@@ -355,6 +355,9 @@ class UOpGraph:
     # uops optimization
     while self.uops_optimization(get_recursive_parents): pass
     self.simplify_phi_loops(get_recursive_parents)
+
+  def uoptimize(self):
+    self.optimize_loops()
 
     # (recursively) remove childless uops
     # TODO: remove DEFINE_GLOBAL from here
