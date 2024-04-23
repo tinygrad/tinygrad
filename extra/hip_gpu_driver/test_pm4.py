@@ -5,7 +5,7 @@ import tinygrad.runtime.autogen.amd_gpu as amd_gpu
 import tinygrad.runtime.autogen.kfd as kfd
 import tinygrad.runtime.autogen.hsa as hsa
 from tinygrad.engine.schedule import create_schedule
-from tinygrad.runtime.ops_kfd import kio, KFDProgram
+from tinygrad.runtime.ops_amd import kio, KFDProgram
 from tinygrad.helpers import to_mv
 
 DISPATCH_INIT_VALUE = 0x21 | 0x8000

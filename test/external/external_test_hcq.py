@@ -2,7 +2,7 @@ import unittest, ctypes, struct, time
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.buffer import Buffer, BufferOptions
 from tinygrad.engine.schedule import create_schedule
-from tinygrad.runtime.ops_kfd import KFDDevice, HWCopyQueue, HWPM4Queue
+from tinygrad.runtime.ops_amd import AMDDevice, HWCopyQueue, HWPM4Queue
 
 def _time_queue(q, d):
   st = time.perf_counter()
@@ -14,8 +14,8 @@ def _time_queue(q, d):
 class TestHCQ(unittest.TestCase):
   @classmethod
   def setUpClass(self):
-    TestHCQ.d0: KFDDevice = Device["KFD"]
-    #TestHCQ.d1: KFDDevice = Device["KFD:1"]
+    TestHCQ.d0: AMDDevice = Device["KFD"]
+    #TestHCQ.d1: AMDDevice = Device["KFD:1"]
     TestHCQ.a = Tensor([0.,1.], device="KFD").realize()
     TestHCQ.b = self.a + 1
     si = create_schedule([self.b.lazydata])[-1]
@@ -165,7 +165,7 @@ class TestHCQ(unittest.TestCase):
     q = TestHCQ.compute_queue()
     qc = HWCopyQueue()
     q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size)  # b = [1, 2]
-    q.signal(sig:=KFDDevice._get_signal(10))
+    q.signal(sig:=AMDDevice._get_signal(10))
     qc.wait(sig)
     qc.copy(TestHCQ.a.lazydata.buffer._buf.va_addr, TestHCQ.b.lazydata.buffer._buf.va_addr, 8)
     qc.signal(TestHCQ.d0.completion_signal)

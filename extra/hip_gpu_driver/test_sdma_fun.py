@@ -1,21 +1,21 @@
 import ctypes, mmap, time
-from tinygrad.runtime.ops_kfd import KFDDevice, kio, sdma_pkts, libc
+from tinygrad.runtime.ops_amd import AMDDevice, kio, sdma_pkts, libc
 import tinygrad.runtime.autogen.amd_sdma as amd_sdma
 import tinygrad.runtime.autogen.kfd as kfd
 from tinygrad.helpers import to_mv
 
 if __name__ == "__main__":
-  dev = KFDDevice()
+  dev = AMDDevice()
 
   sdma_ring = dev._gpu_alloc(1 << 22, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, uncached=True)
   gart = dev._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
-  sdma_queue = kio.create_queue(KFDDevice.kfd,
+  sdma_queue = kio.create_queue(AMDDevice.kfd,
     ring_base_address=sdma_ring.va_addr, ring_size=sdma_ring.size, gpu_id=dev.gpu_id,
     queue_type=kfd.KFD_IOC_QUEUE_TYPE_SDMA, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE, queue_priority=kfd.KFD_MAX_QUEUE_PRIORITY,
     write_pointer_address=gart.va_addr + 0x100, read_pointer_address=gart.va_addr + 0x108)
 
   doorbells_base = sdma_queue.doorbell_offset & (~0xfff)
-  doorbells = libc.mmap(0, 8192, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, KFDDevice.kfd, doorbells_base)
+  doorbells = libc.mmap(0, 8192, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, AMDDevice.kfd, doorbells_base)
 
   sdma_read_pointer = to_mv(sdma_queue.read_pointer_address, 8).cast("Q")
   sdma_write_pointer = to_mv(sdma_queue.write_pointer_address, 8).cast("Q")
