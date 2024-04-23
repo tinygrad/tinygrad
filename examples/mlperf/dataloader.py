@@ -77,14 +77,19 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None):
   files = get_val_files() if val else get_train_files()
   from extra.datasets.imagenet import get_imagenet_categories
   cir = get_imagenet_categories()
-  BATCH_COUNT = min(32, len(files) // batch_size)
+  FIRST_BATCH_PAD = -len(files) % batch_size  # python % is mod
+  BATCH_COUNT = min(32, (len(files) + FIRST_BATCH_PAD) // batch_size)
 
   gen = shuffled_indices(len(files), seed=seed) if shuffle else iter(range(len(files)))
   def enqueue_batch(num):
     for idx in range(num*batch_size, (num+1)*batch_size):
-      fn = files[next(gen)]
-      q_in.put((idx, fn, val))
-      Y[idx] = cir[fn.split("/")[-2]]
+      if idx < FIRST_BATCH_PAD:
+        Y[idx] = -1
+        gotten[num] += 1
+      else:
+        fn = files[next(gen)]
+        q_in.put((idx, fn, val))
+        Y[idx] = cir[fn.split("/")[-2]]
 
   shutdown = False
   class Cookie:
