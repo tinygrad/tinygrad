@@ -183,7 +183,7 @@ class MultiDeviceJITGraph(Runner):
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False) -> Optional[float]:
     raise NotImplementedError("override this")
 
-method_cache: Dict[Tuple[str, Tuple[LazyOp, ...], bool], CompiledRunner] = {}
+method_cache: Dict[Tuple[str, Tuple[LazyOp, ...], int, bool], CompiledRunner] = {}
 logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS", "") else None, getenv("LOGKERNS_LEVEL", 1)
 class Compiled:
   def __init__(self, device:str, allocator:Allocator, compiler:Optional[Compiler], runtime, graph=None):
@@ -233,10 +233,12 @@ class Compiled:
     return k
 
   def get_runner(self, *ast:LazyOp) -> CompiledRunner:
-    if cret:=method_cache.get((self.dname, ast, False)): return cret
-    if bret:=method_cache.get((self.dname.split(":")[0], ast, True)):
-      method_cache[(self.dname, ast, False)] = ret = bret.to_other_device(self.dname)
+    ckey = (self.dname, ast, BEAM.value, False)
+    if cret:=method_cache.get(ckey): return cret
+    bkey = (self.dname.split(":")[0], ast, BEAM.value, True)
+    if bret:=method_cache.get(bkey):
+      method_cache[ckey] = ret = bret.to_other_device(self.dname)
     else:
-      method_cache[(self.dname.split(":")[0], ast, True)] = method_cache[(self.dname, ast, False)] = ret = self.to_program(self.get_linearizer(*ast))
+      method_cache[ckey] = method_cache[bkey] = ret = self.to_program(self.get_linearizer(*ast))
     return ret
 
