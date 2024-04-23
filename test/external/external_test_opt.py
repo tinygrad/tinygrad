@@ -144,7 +144,7 @@ class TestOptReduceLoop(unittest.TestCase):
 
 @unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
 class TestOptWChild(unittest.TestCase):
-  @unittest.skip("this no longer happens, use corealize")
+  @unittest.skip("this no longer happens, use realize")
   def test_unrealized_child(self):
     a = Tensor.randn(16, 16)
     b = Tensor.randn(16, 16)
