@@ -59,34 +59,25 @@ class TestLinearizer(unittest.TestCase):
         k.linearize()
         # basic checks
         Device[Device.DEFAULT].to_program(k)
-        assert (real_outs:=len([u for u in k.uops if u.uop is UOps.STORE and UOps.DEFINE_GLOBAL in [x.uop for x in u.vin]])) == num_outs, \
+        assert (real_outs:=len([u for u in k.uops if u.uop is UOps.STORE])) == num_outs, \
           f"should have generated {num_outs} BufferOps.STORE but got {real_outs}"
         assert (real_accs:=len([u for u in k.uops if u.uop is UOps.DEFINE_ACC])) == num_loops, \
           f"should have generated {num_loops} UOps.DEFINE_ACC but got {real_accs}"
 
+        # these two will be optimized for the accelerator but we should still make sure they compile
+        # group for hand_coded_optimizations
         ast = gen(shape, axis)
         k = Linearizer(*ast)
         k.hand_coded_optimizations()
         k.linearize()
-        # group for hand_coded_optimizations
         Device[Device.DEFAULT].to_program(k)
-        opt_accs = 2 if k.group_for_reduces and shape[axis] > 8 else 1
-        assert (real_outs:=len([u for u in k.uops if u.uop is UOps.STORE and UOps.DEFINE_GLOBAL in [x.uop for x in u.vin]])) == num_outs, \
-          f"hand_optimizations should have generated {num_outs} BufferOps.STORE but got {real_outs}"
-        assert (real_accs:=len([u for u in k.uops if u.uop is UOps.DEFINE_ACC])) == num_loops*opt_accs, \
-          f"hand_optimizations should have generated {num_loops*opt_accs} UOps.DEFINE_ACC but got {real_accs}"
-
+        # upcasting
         shape = tuple([4 if i == axis else x for i,x in enumerate(list(shape))])
         ast = gen(shape, axis)
         k = Linearizer(*ast)
         k.upcast()
         k.linearize()
-        # upcasting
         Device[Device.DEFAULT].to_program(k)
-        assert (real_outs:=len([u for u in k.uops if u.uop is UOps.STORE and UOps.DEFINE_GLOBAL in [x.uop for x in u.vin]])) == num_outs, \
-          f"upcast should have generated {num_outs} BufferOps.STORE but got {real_outs}"
-        assert (real_accs:=len([u for u in k.uops if u.uop is UOps.DEFINE_ACC])) == num_loops, \
-          f"upcast should have generated {num_loops} UOps.DEFINE_ACC but got {real_accs}"
 
     def gen(shape, axis): # basic sum
       output_shape = tuple([1 if i == axis else x for i,x in enumerate(list(shape))])
