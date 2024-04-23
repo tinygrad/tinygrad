@@ -18,7 +18,7 @@ class Optimizer:
   def zero_grad(self):
     for param in self.params: param.grad = None
 
-  def step(self): Tensor.corealize(self.schedule_step())
+  def step(self): Tensor.realize(*self.schedule_step())
   def schedule_step(self) -> List[Tensor]: return self._step()+self.params+self.buffers
   def _step(self) -> List[Tensor]: raise NotImplementedError
 

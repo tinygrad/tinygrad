@@ -12,7 +12,7 @@
 
 ## tinygrad ops
 
-::: tinygrad.Tensor.corealize
+::: tinygrad.Tensor.schedule
 ::: tinygrad.Tensor.realize
 ::: tinygrad.Tensor.replace
 ::: tinygrad.Tensor.assign

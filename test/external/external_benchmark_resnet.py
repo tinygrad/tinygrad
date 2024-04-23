@@ -55,7 +55,7 @@ class BenchmarkResnetTrain(unittest.TestCase):
     return f"{name} x{(bs, cin, xy, xy)}", [layer], cin, xy
   def _test_layer(self, name, layer, cin, xy):
     optim = SGD(get_parameters(layer), bs / 128 * 1.0)  # need sgd for some params but not consequential for benchmarking
-    with Context(SAVE_SCHEDULE=0): Tensor.corealize([t.assign(t) for t in get_parameters(layer)])
+    with Context(SAVE_SCHEDULE=0): Tensor.realize(*[t.assign(t) for t in get_parameters(layer)])
 
     JITCNT = getenv("JITCNT", 1)
     Tensor.training = True
@@ -67,8 +67,8 @@ class BenchmarkResnetTrain(unittest.TestCase):
 
         y = x.sequential(layer).contiguous().contiguous_backward()
         y.sum().backward()
-        if getenv("ASSIGN", 1): Tensor.corealize([y, x.grad] + optim.schedule_step())
-        else: Tensor.corealize([y, x.grad] + [t.grad for t in optim.params])
+        if getenv("ASSIGN", 1): Tensor.realize(y, x.grad, *optim.schedule_step())
+        else: Tensor.realize(y, x.grad, *[t.grad for t in optim.params])
       return y.detach()
 
     CNT = getenv("CNT", 5)
