@@ -71,7 +71,7 @@ class Linearizer(Kernel):
 
   def global_load(self, i:int, idxs:List[Node], acc=None, barrier:Optional[UOp]=None, reduceop:Optional[LazyOp]=None) -> List[UOp]:
     buf = self.bufs[i]
-    localtype = self.get_base_dtype(buf.dtype if acc is None else reduceop.dtype)
+    localtype = self.get_base_dtype(buf.dtype if acc is None else cast(LazyOp, reduceop).dtype)
     const = buf.val if isinstance(buf, ConstBuffer) else acc
 
     expand_vars = expand_idxs(idxs)
@@ -217,7 +217,7 @@ class Linearizer(Kernel):
       for n in range(len(replace_acc_idxs)-len(tc.threads)):
         upcast_idxs[n] = replace_acc_idxs[len(tc.threads)+n] # replace upcasts
       if DEBUG >= 3: print(f"store alias: sts={self.sts[0]} idxs={global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs}")
-    self.reduce_acc[reduceop] = acc = self.global_load(out_buf, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, self.get_reduce_acc(reduceop), reduceop=reduceop)
+    self.reduce_acc[reduceop] = acc = self.global_load(out_buf, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, self.get_reduce_acc(reduceop), reduceop=reduceop) # noqa: E501
 
     # reduce loop
     loop_ctx = self.render_loop(reduce_idxs)
@@ -284,7 +284,7 @@ class Linearizer(Kernel):
       # NOTE: this structure is the same as the reduce op above
 
       # define late accumulator
-      self.reduce_acc[reduceop] = acc = self.global_load(0, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, self.get_reduce_acc(reduceop), reduceop=reduceop)
+      self.reduce_acc[reduceop] = acc = self.global_load(0, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, self.get_reduce_acc(reduceop), reduceop=reduceop) # noqa: E501
 
       # late reduce loop
       loop_ctx = self.render_loop(end_local_idxs)
@@ -300,7 +300,7 @@ class Linearizer(Kernel):
 
       # if there are more reduceops, store the final value into the temp buffer, the load it back into all threads
       if self.reduceops.index(reduceop) < len(self.reduceops)-1:
-        for j in self.upcast_in_mid_reduce_axes: 
+        for j in self.upcast_in_mid_reduce_axes:
           self.upcasted -= 1
           self.group_for_reduces += 1
         reduce_buf_uop = self.buf_uops[-1]
@@ -357,7 +357,7 @@ class Linearizer(Kernel):
     if self.group_for_reduces:
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker.from_shape(tuple([1] * self.global_dims + list(self.full_shape[self.global_dims:self.global_dims+self.local_dims+self.group_for_reduces]) + [1] * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))  # noqa: E501
-      temp_dtype = self.get_base_dtype(self.reduceop.dtype)
+      temp_dtype = self.get_base_dtype(cast(LazyOp, self.reduceop).dtype)
       self.bufs.append(LocalBuffer("temp", self.sts[-1].size, temp_dtype))
       self.buf_uops.append(self.uops.add(UOps.DEFINE_LOCAL, PtrDType(temp_dtype), (), ("temp", self.sts[-1].size)))
 
@@ -425,8 +425,8 @@ class Linearizer(Kernel):
     self.applied_opts_cache = self.applied_opts[:]
     return self
 
-  def in_recursive_children(self, of, child):
-    return child in of.vin or any([self.in_recursive_children(x, child) for x in of.vin])
+  def in_recursive_children(self, of, child: UOp):
+    return self.uops.uops.index(child) < self.uops.uops.index(of) or child is of or any([self.in_recursive_children(x, child) for x in list(of.vin)])
 
   def ast_parse(self, x:LazyOp, acc: List[UOp], offs:Optional[List[int]], loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]], do_reduce=False, loop_ctx=tuple(), cache=None) -> List[UOp]: # noqa: E501
     if cache is None: cache = {}
@@ -448,9 +448,9 @@ class Linearizer(Kernel):
         if input_acc[off] != acc[off]:
           acc[off] = self.uops.add(UOps.PHI, input_acc[off].dtype, (input_acc[off], acc[off]) + tuple(loop_ctx))
     else:
-      # insert_before = [self.uops.uops.index(loop) if not any([self.in_recursive_children(v, loop) for v in [v for val in values for v in val]]) else None for loop in loop_ctx]
-      # insert_before = [x for x in insert_before if x is not None]
-      # insert_before = min(insert_before) if len(insert_before) > 0 else None
-      ret = [self.uops.add(UOps.ALU, dtypes.bool if x.op in {BinaryOps.CMPLT, BinaryOps.CMPEQ} else val[-1].dtype, val, x.op) for val in zip(*values)]
+      insert_before=[loop if not any([self.in_recursive_children(v,loop) for v in [v for val in values for v in val]]) else None for loop in loop_ctx]
+      insert_before=[x for x in insert_before if x is not None]
+      ret = [self.uops.add(UOps.ALU, dtypes.bool if x.op in {BinaryOps.CMPLT, BinaryOps.CMPEQ} else val[-1].dtype, val, x.op, \
+                           insert_before=self.uops.uops.index(insert_before[0]) if len(insert_before) > 0 else None) for val in zip(*values)]
     cache[x] = ret
     return ret

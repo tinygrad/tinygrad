@@ -76,7 +76,7 @@ class Kernel:
     self.reduceops = []
     while len(children_of_reducees) > 0:
       for r in list(children_of_reducees.keys()):
-        if all([r == x or r not in children_of_reducees[x] for x in children_of_reducees]): 
+        if all([r == x or r not in children_of_reducees[x] for x in children_of_reducees]):
           self.reduceops.append(r)
           del children_of_reducees[r]
 
@@ -478,7 +478,7 @@ class Kernel:
       check(not self.vars, "does not work with symbolic shape")
       # ok to pad SUM if all parent ops have f(0) = 0
       if self.first_reduce <= axis < self.shape_len - self.upcasted:
-        check(self.reduceop.op is ReduceOps.SUM and all(op.op not in UNSAFE_PAD_OPS for ops in self.reduceop.src for op in ops.lazyops), "cannot pad")
+        check(cast(LazyOp, self.reduceop).op is ReduceOps.SUM and all(op.op not in UNSAFE_PAD_OPS for ops in cast(LazyOp, self.reduceop).src for op in ops.lazyops), "cannot pad") # noqa: E501
       padded = False
       for i,st in enumerate(self.sts):
         if self.sts[i].shape[axis] == 1: continue  # reduced
