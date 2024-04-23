@@ -233,11 +233,12 @@ class Compiled:
     return k
 
   def get_runner(self, *ast:LazyOp) -> CompiledRunner:
-    if cret:=method_cache.get((self.dname, ast, BEAM.value, False)): return cret
-    if bret:=method_cache.get((self.dname.split(":")[0], ast, BEAM.value, True)):
-      method_cache[(self.dname, ast, BEAM.value, False)] = ret = bret.to_other_device(self.dname)
+    ckey = (self.dname, ast, BEAM.value, False)
+    if cret:=method_cache.get(ckey): return cret
+    bkey = (self.dname.split(":")[0], ast, BEAM.value, True)
+    if bret:=method_cache.get(bkey):
+      method_cache[ckey] = ret = bret.to_other_device(self.dname)
     else:
-      ret = self.to_program(self.get_linearizer(*ast))
-      method_cache[(self.dname.split(":")[0], ast, BEAM.value, True)] = method_cache[(self.dname, ast, BEAM.value, False)] = ret
+      method_cache[ckey] = method_cache[bkey] = ret = self.to_program(self.get_linearizer(*ast))
     return ret
 
