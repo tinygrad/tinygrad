@@ -128,6 +128,7 @@ generate_hsa() {
     /opt/rocm/include/hsa/hsa_ext_amd.h \
     /opt/rocm/include/hsa/amd_hsa_signal.h \
     /opt/rocm/include/hsa/amd_hsa_queue.h \
+    /opt/rocm/include/hsa/amd_hsa_kernel_code.h \
     /opt/rocm/include/hsa/hsa_ext_finalize.h /opt/rocm/include/hsa/hsa_ext_image.h \
     /opt/rocm/include/hsa/hsa_ven_amd_aqlprofile.h \
     --clang-args="-I/opt/rocm/include" \
