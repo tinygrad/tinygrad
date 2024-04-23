@@ -809,12 +809,13 @@ class Tensor:
     return ret
 
   def __setitem__(self, indices, v:Union[Tensor, ConstType]) -> None:
+    assert self.lazydata.st.contiguous if isinstance(self.lazydata, LazyBuffer) else all(lb.st.contiguous for lb in self.lazydata.lbs), \
+      "setitem target needs to be contiguous"
     if isinstance(self.device, str) and self.device.startswith("DISK"): self.__getitem__(indices).assign(v)
     # TODO: broadcast v to the shape here, refactor for const v and one way broadcast_shape
     if not isinstance(v, Tensor): v = Tensor(v, self.device, self.dtype)
     assign_to = self.realize().__getitem__(indices)
     # NOTE: we check that indices is valid first
-    assert cast(LazyBuffer, self.lazydata).st.contiguous, "setitem target needs to be contiguous"
     # NOTE: contiguous to prevent const folding.
     assign_to.assign(v._broadcast_to(broadcast_shape(assign_to.shape, v.shape)).contiguous()).realize()
 
