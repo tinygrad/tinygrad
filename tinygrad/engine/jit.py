@@ -107,13 +107,14 @@ class TinyJit(Generic[ReturnType]):
     expected_names, expected_lbs = [x[0] for x in input_tensors], [(x[0], tuple(x[1].keys()), x[2], x[3]) for x in expected_sts_var_dtype_device]
     if self.cnt == 0:
       # jit ignore
-      self.ret = self.fxn(*args, **kwargs)
-      if len(params:=get_parameters(self.ret)): Tensor.realize(params[0], *params[1:])
+      with Context(BEAM=0 if getenv("IGNORE_JIT_FIRST_BEAM") else BEAM.value):
+        self.ret = self.fxn(*args, **kwargs)
+        if len(params:=get_parameters(self.ret)): Tensor.realize(params[0], *params[1:])
     elif self.cnt == 1:
       # jit capture
       self.expected_names: List[Union[int, str]] = expected_names
       self.expected_lbs: List[Tuple[ShapeTracker, Tuple[Variable, ...], DType, str]] = expected_lbs
-      with Context(GRAPH=getenv("JITGRAPH", GRAPH.value), BEAM=getenv("JITBEAM", BEAM.value)):
+      with Context(GRAPH=getenv("JITGRAPH", GRAPH.value)):
         capturing.append(self)
         self.ret = self.fxn(*args, **kwargs)
         if len(params:=get_parameters(self.ret)): Tensor.realize(params[0], *params[1:])
