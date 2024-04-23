@@ -808,15 +808,13 @@ class Tensor:
         ret = ret.permute(*range(first_dim, first_dim+len(big_shape)), *range(0, first_dim), *range(first_dim+len(big_shape), ret.ndim))
     return ret
 
-  def __setitem__(self, indices, v:Union[Tensor, ConstType]):
-    if isinstance(self.device, str) and self.device.startswith("DISK"): return self.__getitem__(indices).assign(v)
+  def __setitem__(self, indices, v:Union[Tensor, ConstType]) -> None:
+    if isinstance(self.device, str) and self.device.startswith("DISK"): self.__getitem__(indices).assign(v)
     # TODO: broadcast v to the shape here, refactor for const v and one way broadcast_shape
     if not isinstance(v, Tensor): v = Tensor(v, self.device, self.dtype)
-    assign_to = self.realize().__getitem__(indices)
-    # NOTE: we check that indices is valid first
-    assert self.lazydata.contiguous(), "setitem target needs to be contiguous"
+    assign_to = self.contiguous().realize().__getitem__(indices)
     # NOTE: contiguous to prevent const folding.
-    return assign_to.assign(v._broadcast_to(broadcast_shape(assign_to.shape, v.shape)).contiguous()).realize()
+    assign_to.assign(v._broadcast_to(broadcast_shape(assign_to.shape, v.shape)).contiguous()).realize()
 
   # NOTE: using slice is discouraged and things should migrate to pad and shrink
   def slice(self, arg:Sequence[Optional[Tuple[int, sint]]], value:float=0) -> Tensor:
