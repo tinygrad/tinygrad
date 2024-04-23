@@ -115,14 +115,22 @@ class TestAssign(unittest.TestCase):
     new = a + old_a
     np.testing.assert_allclose(new.numpy(), 4)
 
-  def test_assign_diamond(self):
+  def test_assign_diamond_cycle(self):
     # NOTE: should *not* raise AssertionError from numpy
     with self.assertRaises(RuntimeError):
       a = Tensor.ones(4).contiguous().realize()
       times_a = a*3
       a.assign(Tensor.full((4,), 2.).contiguous())
-      new = a + times_a
-      np.testing.assert_allclose(new.numpy(), 5)
+      new = a + (times_a-1)
+      np.testing.assert_allclose(new.numpy(), 4)
+
+  def test_assign_diamond_contiguous_cycle(self):
+    with self.assertRaises(RuntimeError):
+      a = Tensor.ones(4).contiguous().realize()
+      times_a = a*3
+      a.assign(Tensor.full((4,), 2.))
+      new = a.contiguous() + times_a-1
+      np.testing.assert_allclose(new.numpy(), 4)
 
   def test_assign_diamond_possible(self):
     a = Tensor.ones(4).contiguous().realize()
@@ -136,6 +144,13 @@ class TestAssign(unittest.TestCase):
     times_a = a*3
     a.assign(Tensor.full((4,), 2.).contiguous())
     new = a + (times_a-1).contiguous()
+    np.testing.assert_allclose(new.numpy(), 4)
+
+  def test_assign_diamond_both_contiguous(self):
+    a = Tensor.ones(4).contiguous().realize()
+    times_a = a*3
+    a.assign(Tensor.full((4,), 2.))
+    new = a.contiguous() + (times_a-1).contiguous()
     np.testing.assert_allclose(new.numpy(), 4)
 
   def test_assign_diamond_alt(self):
@@ -156,7 +171,7 @@ class TestAssign(unittest.TestCase):
     b = Tensor.full((4,), 3).contiguous().realize()
     a += b
     b += a
-    Tensor.corealize([a,b])
+    Tensor.realize(a,b)
     np.testing.assert_allclose(a.numpy(), 5)
     np.testing.assert_allclose(b.numpy(), 8)
 
@@ -168,7 +183,7 @@ class TestAssign(unittest.TestCase):
       c = a+9
       a += b
       b += c
-      Tensor.corealize([a,b])
+      Tensor.realize(a,b)
       np.testing.assert_allclose(a.numpy(), 2+3)
       np.testing.assert_allclose(b.numpy(), 3+2+9)
 

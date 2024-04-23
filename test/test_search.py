@@ -6,6 +6,8 @@ from tinygrad.features.search import time_linearizer, bufs_from_lin
 from tinygrad.device import Device, Buffer
 from tinygrad.ops import LoadOps, BufferOps
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import Context
+from tinygrad.engine.realize import capturing
 
 class TestTimeLinearizer(unittest.TestCase):
   def test_reasonable_time(self):
@@ -24,6 +26,21 @@ class TestTimeLinearizer(unittest.TestCase):
     assert all(isinstance(r, Buffer) for r in rawbufs)
     assert all(r.size > 0 for r in rawbufs)
 
+class TestBEAM(unittest.TestCase):
+  def test_dynamic_beam(self):
+    # TODO: make this infra globally usable
+    class Capture:
+      def __init__(self): self.captured = []
+      def add(self, x): self.captured.append(x)
+    capturing.append(Capture())
+    with Context(BEAM=1): Tensor.zeros(16).contiguous().realize()
+    k_beam_1 = capturing[0].captured
+    capturing.clear()
+    capturing.append(Capture())
+    with Context(BEAM=0): Tensor.zeros(16).contiguous().realize()
+    k_beam_0 = capturing[0].captured
+    capturing.clear()
+    assert k_beam_0[-1].prg.prg != k_beam_1[-1].prg.prg
 
 if __name__ == '__main__':
   unittest.main()
