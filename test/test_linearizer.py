@@ -3,7 +3,7 @@ import unittest
 
 from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError, tensor_cores
 from tinygrad.codegen.linearizer import Linearizer, UOp, UOps, expand_node, expand_idxs
-from tinygrad.device import Device, Buffer, _Device
+from tinygrad.device import Device, Buffer
 from tinygrad.ops import BinaryOps, BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, TernaryOps, ReduceOps, UnaryOps
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
@@ -63,6 +63,8 @@ class TestLinearizer(unittest.TestCase):
           f"should have generated {num_outs} BufferOps.STORE but got {real_outs}"
         assert (real_accs:=len([u for u in k.uops if u.uop is UOps.DEFINE_ACC])) == num_loops, \
           f"should have generated {num_loops} UOps.DEFINE_ACC but got {real_accs}"
+        assert (real_loops:=len([u for u in k.uops if u.uop is UOps.LOOP])) == num_loops, \
+          f"should have generated {num_loops} UOps.LOOP but got {real_loops}"
 
         ast = gen(shape, axis)
         k = Linearizer(*ast)
@@ -72,10 +74,13 @@ class TestLinearizer(unittest.TestCase):
         Device[Device.DEFAULT].to_program(k)
         opt_outs = num_outs+num_loops+(num_loops-1) if shape[axis] > 8 else num_outs
         opt_accs = 2 if k.group_for_reduces and shape[axis] > 8 else 1
+        opt_loops = 2 if k.group_for_reduces and shape[axis] > 8 else 0
         assert (real_outs:=len([u for u in k.uops if u.uop is UOps.STORE])) == opt_outs, \
           f"hand_optimizations should have generated {opt_outs} BufferOps.STORE but got {real_outs}"
         assert (real_accs:=len([u for u in k.uops if u.uop is UOps.DEFINE_ACC])) == num_loops*opt_accs, \
           f"hand_optimizations should have generated {num_loops*opt_accs} UOps.DEFINE_ACC but got {real_accs}"
+        assert (real_loops:=len([u for u in k.uops if u.uop is UOps.LOOP])) == num_loops*opt_loops, \
+          f"hand_optimizations should have generated {num_loops*opt_loops} UOps.LOOP but got {real_loops}"
 
         shape = tuple([4 if i == axis else x for i,x in enumerate(list(shape))])
         ast = gen(shape, axis)
@@ -88,6 +93,8 @@ class TestLinearizer(unittest.TestCase):
           f"upcast should have generated {num_outs} BufferOps.STORE but got {real_outs}"
         assert (real_accs:=len([u for u in k.uops if u.uop is UOps.DEFINE_ACC])) == num_loops, \
           f"upcast should have generated {num_loops} UOps.DEFINE_ACC but got {real_accs}"
+        assert (real_loops:=len([u for u in k.uops if u.uop is UOps.LOOP])) == 0, \
+          f"upcast should have generated 0 UOps.LOOP but got {real_loops}"
 
     def gen(shape, axis): # basic sum
       output_shape = tuple([1 if i == axis else x for i,x in enumerate(list(shape))])
@@ -95,7 +102,7 @@ class TestLinearizer(unittest.TestCase):
       store = MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=output_shape, strides=strides_for_shape(output_shape), offset=0, mask=None, contiguous=True),))) # noqa: E501
       ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=load),), arg=((axis,), dtypes.float)),), arg=store) # noqa: E501
       return [ast]
-    check_fusion(gen, (4, 32, 64), 1, 1)
+    check_fusion(gen, (4, 48, 64), 1, 1)
 
     def gen(shape, axis): # consecutive sums (with a binary op to expand the buffer back to full_shape)
       output_shape = tuple([1 if i == axis else x for i,x in enumerate(list(shape))])
@@ -103,7 +110,7 @@ class TestLinearizer(unittest.TestCase):
       store = MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=output_shape, strides=strides_for_shape(output_shape), offset=0, mask=None, contiguous=False),))) # noqa: E501
       ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.SUB, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=load),LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=load),), arg=((axis,), dtypes.float))), arg=None),), arg=((axis,), dtypes.float)),), arg=store) # noqa: E501
       return [ast]
-    check_fusion(gen, (4,32,64), 1, 2)
+    check_fusion(gen, (4,48,64), 1, 2)
 
     def gen(shape, axis): # consecutive sums (with an intermediate op in output_shape)
       output_shape = tuple([1 if i == axis else x for i,x in enumerate(list(shape))])
@@ -112,7 +119,7 @@ class TestLinearizer(unittest.TestCase):
       store = MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=output_shape, strides=strides_for_shape(output_shape), offset=0, mask=None, contiguous=False),))) # noqa: E501
       ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.SUB, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=load),LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, arg=load),), arg=((axis,), dtypes.float)),LazyOp(op=BufferOps.CONST, arg=const)))), arg=None),), arg=((axis,), dtypes.float)),), arg=store) # noqa: E501
       return [ast]
-    check_fusion(gen, (4,32,64), 1, 2)
+    check_fusion(gen, (4,48,64), 1, 2)
 
     def gen(shape, axis): # consecutive sums (with an intermediate load of full_shape)
       output_shape = tuple([1 if i == axis else x for i,x in enumerate(list(shape))])
@@ -122,7 +129,7 @@ class TestLinearizer(unittest.TestCase):
       store = MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=output_shape, strides=strides_for_shape(output_shape), offset=0, mask=None, contiguous=False),))) # noqa: E501
       ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BufferOps.CONST, arg=const),LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BufferOps.LOAD, arg=load1),LazyOp(op=BinaryOps.SUB, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=load1),LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.CONST, arg=load0),), arg=((axis,), dtypes.float)),LazyOp(op=BufferOps.CONST, arg=const)))), arg=None),)),)),), arg=((axis,), dtypes.float)),), arg=store) # noqa: E501
       return [ast]
-    check_fusion(gen, (4,32,64), 1, 2)
+    check_fusion(gen, (4,48,64), 1, 2)
 
     def gen(shape, axis): # standard deviation
       output_shape = tuple([1 if i == axis else x for i,x in enumerate(list(shape))])
@@ -131,7 +138,7 @@ class TestLinearizer(unittest.TestCase):
       store = MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=output_shape, strides=strides_for_shape(output_shape), offset=0, mask=None, contiguous=False),))) # noqa: E501
       ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BufferOps.CONST, arg=const),LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.SUB, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=load),LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, arg=load),), arg=((axis,), dtypes.float)),LazyOp(op=BufferOps.CONST, arg=const),)),), arg=None),), arg=((axis,), dtypes.float)),)),), arg=store) # noqa: E501
       return [ast]
-    check_fusion(gen, (4,32,64), 1, 2)
+    check_fusion(gen, (4,48,64), 1, 2)
 
     def gen(shape, axis): # standard deviation w/ multioutput
       output_shape = tuple([1 if i == axis else x for i,x in enumerate(list(shape))])
@@ -143,7 +150,7 @@ class TestLinearizer(unittest.TestCase):
       mean_out = LazyOp(op=BufferOps.STORE, src=(mean_ast,), arg=store0)
       ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BufferOps.CONST, arg=const),LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.SUB, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=load),mean_ast,), arg=None),), arg=((axis,), dtypes.float)),)),), arg=store1) # noqa: E501
       return [mean_out, ast]
-    check_fusion(gen, (4,32,64), 2, 2)
+    check_fusion(gen, (4,48,64), 2, 2)
 
     def gen(shape, axis):
       output_shape = tuple([1 if i == axis else x for i,x in enumerate(list(shape))])
