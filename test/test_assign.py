@@ -171,7 +171,7 @@ class TestAssign(unittest.TestCase):
     b = Tensor.full((4,), 3).contiguous().realize()
     a += b
     b += a
-    Tensor.corealize([a,b])
+    Tensor.realize(a,b)
     np.testing.assert_allclose(a.numpy(), 5)
     np.testing.assert_allclose(b.numpy(), 8)
 
@@ -183,7 +183,7 @@ class TestAssign(unittest.TestCase):
       c = a+9
       a += b
       b += c
-      Tensor.corealize([a,b])
+      Tensor.realize(a,b)
       np.testing.assert_allclose(a.numpy(), 2+3)
       np.testing.assert_allclose(b.numpy(), 3+2+9)
 
