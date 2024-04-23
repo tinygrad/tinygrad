@@ -2,7 +2,7 @@
 from __future__ import annotations
 import time, math, itertools, functools
 from contextlib import ContextDecorator
-from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Dict, DefaultDict, cast, get_args
+from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Dict, DefaultDict, cast, get_args, Set
 from collections import defaultdict
 import numpy as np
 
@@ -146,17 +146,23 @@ class Tensor:
 
   # ***** data handlers ****
 
-  def schedule(self, *lst:Tensor) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
-    """Create the schedule needed to realize these Tensor(s)."""
+  def schedule_with_vars(self, *lst:Tensor, seen:Optional[Set[LazyBuffer]]=None) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
+    """Create the schedule needed to realize these Tensor(s), with Variables."""
     if getenv("FUZZ_SCHEDULE"):
       from test.external.fuzz_schedule import fuzz_schedule
       fuzz_schedule(flatten([x.lazydata.lbs for x in (self,)+lst]))
-    schedule, var_vals = create_schedule_with_vars(flatten([x.lazydata.lbs for x in (self,)+lst]))
+    schedule, var_vals = create_schedule_with_vars(flatten([x.lazydata.lbs for x in (self,)+lst]), seen)
     return memory_planner(schedule), var_vals
+
+  def schedule(self, *lst:Tensor, seen:Optional[Set[LazyBuffer]]=None) -> List[ScheduleItem]:
+    """Create the schedule needed to realize these Tensor(s)."""
+    schedule, var_vals = self.schedule_with_vars(*lst, seen=seen)
+    assert len(var_vals) == 0
+    return schedule
 
   def realize(self, *lst:Tensor) -> Tensor:
     """Trigger the computation needed to create these Tensor(s)."""
-    run_schedule(*self.schedule(*lst))
+    run_schedule(*self.schedule_with_vars(*lst))
     return self
 
   def replace(self, x:Tensor) -> Tensor:
