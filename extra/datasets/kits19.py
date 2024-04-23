@@ -72,7 +72,9 @@ def preprocess(file_path):
   image, label = pad_to_min_shape(image, label)
   return image, label
 
-def preprocess_dataset(filenames, preprocessed_dataset_dir, val):
+def preprocess_dataset(filenames, preprocessed_dir, val):
+  preprocessed_dataset_dir = (preprocessed_dir / ("val" if val else "train")) if preprocessed_dir is not None else None
+  if not preprocessed_dataset_dir.is_dir(): os.makedirs(preprocessed_dataset_dir)
   for fn in tqdm(filenames, desc=f"preprocessing {'validation' if val else 'training'}"):
     case = os.path.basename(fn)
     image, label = preprocess(fn)
@@ -80,21 +82,17 @@ def preprocess_dataset(filenames, preprocessed_dataset_dir, val):
     np.save(preprocessed_dataset_dir / f"{case}_x.npy", image, allow_pickle=False)
     np.save(preprocessed_dataset_dir / f"{case}_y.npy", label, allow_pickle=False)
 
-def iterate(val=True, shuffle=False, bs=1):
-  files = get_val_files() if val else get_train_files()
+def iterate(files, preprocessed_dir=None, val=True, shuffle=False, bs=1):
   order = list(range(0, len(files)))
-
-  preprocessed_dataset_dir = (PREPROCESSED_DIR / ("val" if val else "train"))
-  if not PREPROCESSED_DIR.is_dir() or not preprocessed_dataset_dir.is_dir():
-    os.makedirs(preprocessed_dataset_dir)
-    preprocess_dataset(files, preprocessed_dataset_dir, val)
-
+  preprocessed_dataset_dir = (preprocessed_dir / ("val" if val else "train")) if preprocessed_dir is not None else None
   if shuffle: random.shuffle(order)
   for i in range(0, len(files), bs):
     samples = []
     for i in order[i:i+bs]:
-      x_cached_path, y_cached_path = PREPROCESSED_DIR / f"{os.path.basename(files[i])}_x.npy", PREPROCESSED_DIR / f"{os.path.basename(files[i])}_y.npy"
-      if x_cached_path.exists() and y_cached_path.exists(): samples += [(np.load(x_cached_path), np.load(y_cached_path))]
+      if preprocessed_dataset_dir is not None:
+        x_cached_path, y_cached_path = preprocessed_dataset_dir / f"{os.path.basename(files[i])}_x.npy", preprocessed_dataset_dir / f"{os.path.basename(files[i])}_y.npy"
+        if x_cached_path.exists() and y_cached_path.exists():
+          samples += [(np.load(x_cached_path), np.load(y_cached_path))]
       else: samples += [preprocess(files[i])]
     X, Y = [x[0] for x in samples], [x[1] for x in samples]
     if val:
@@ -196,7 +194,7 @@ def _rand_foreg_cropb(image, label, patch_size):
     return low, high
 
   cl = np.random.choice(np.unique(label[label > 0]))
-  foreg_slices = ndimage.find_objects(ndimage.measurements.label(label==cl)[0])
+  foreg_slices = ndimage.find_objects(ndimage.label(label==cl)[0])
   foreg_slices = [x for x in foreg_slices if x is not None]
   slice_volumes = [np.prod([s.stop - s.start for s in sl]) for sl in foreg_slices]
   slice_idx = np.argsort(slice_volumes)[-2:]
@@ -228,5 +226,5 @@ def rand_balanced_crop(image, label, patch_size=(128, 128, 128), oversampling=0.
   return image, label
 
 if __name__ == "__main__":
-  for X, Y in iterate():
+  for X, Y in iterate(get_val_files()):
     print(X.shape, Y.shape)
