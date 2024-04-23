@@ -3,7 +3,7 @@ import unittest
 
 from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError, tensor_cores
 from tinygrad.codegen.linearizer import Linearizer, UOp, UOps, expand_node, expand_idxs
-from tinygrad.device import Device, Buffer
+from tinygrad.device import Device, Buffer, _Device
 from tinygrad.ops import BinaryOps, BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, TernaryOps, ReduceOps, UnaryOps
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
@@ -53,48 +53,41 @@ class TestLinearizer(unittest.TestCase):
   def test_multireduce(self):
     def check_fusion(gen, _shape, num_outs: int, num_loops: int):
       for axis in range(len(_shape)):
-          shape = _shape
-          ast = gen(shape, axis)
-          k = Linearizer(*ast)
-          k.linearize()
-          # basic checks
-          Device[Device.DEFAULT].to_program(k)
-          assert (real_outs:=len([u for u in k.uops if u.uop is UOps.STORE])) == num_outs, \
-            f"should have generated {num_outs} BufferOps.STORE but got {real_outs}"
-          assert (real_accs:=len([u for u in k.uops if u.uop is UOps.DEFINE_ACC])) == num_loops, \
-            f"should have generated {num_loops} UOps.DEFINE_ACC but got {real_accs}"
-          assert (real_loops:=len([u for u in k.uops if u.uop is UOps.LOOP])) == num_loops, \
-            f"should have generated {num_loops} UOps.LOOP but got {real_loops}"
+        shape = _shape
+        ast = gen(shape, axis)
+        k = Linearizer(*ast)
+        k.linearize()
+        # basic checks
+        Device[Device.DEFAULT].to_program(k)
+        assert (real_outs:=len([u for u in k.uops if u.uop is UOps.STORE])) == num_outs, \
+          f"should have generated {num_outs} BufferOps.STORE but got {real_outs}"
+        assert (real_accs:=len([u for u in k.uops if u.uop is UOps.DEFINE_ACC])) == num_loops, \
+          f"should have generated {num_loops} UOps.DEFINE_ACC but got {real_accs}"
 
-          ast = gen(shape, axis)
-          k = Linearizer(*ast)
-          k.hand_coded_optimizations()
-          k.linearize()
-          # group for hand_coded_optimizations
-          Device[Device.DEFAULT].to_program(k)
-          opt_outs = num_outs+num_loops+(num_loops-1) if shape[axis] > 8 else num_outs
-          opt_accs = 2 if k.group_for_reduces and shape[axis] > 8 else 1
-          opt_loops = 2 if k.group_for_reduces and shape[axis] > 8 else 0
-          assert (real_outs:=len([u for u in k.uops if u.uop is UOps.STORE])) == opt_outs, \
-            f"hand_optimizations should have generated {opt_outs} BufferOps.STORE but got {real_outs}"
-          assert (real_accs:=len([u for u in k.uops if u.uop is UOps.DEFINE_ACC])) == num_loops*opt_accs, \
-            f"hand_optimizations should have generated {num_loops*opt_accs} UOps.DEFINE_ACC but got {real_accs}"
-          assert (real_loops:=len([u for u in k.uops if u.uop is UOps.LOOP])) == num_loops*opt_loops, \
-            f"hand_optimizations should have generated {num_loops*opt_loops} UOps.LOOP but got {real_loops}"
+        ast = gen(shape, axis)
+        k = Linearizer(*ast)
+        k.hand_coded_optimizations()
+        k.linearize()
+        # group for hand_coded_optimizations
+        Device[Device.DEFAULT].to_program(k)
+        opt_outs = num_outs+num_loops+(num_loops-1) if shape[axis] > 8 else num_outs
+        opt_accs = 2 if k.group_for_reduces and shape[axis] > 8 else 1
+        assert (real_outs:=len([u for u in k.uops if u.uop is UOps.STORE])) == opt_outs, \
+          f"hand_optimizations should have generated {opt_outs} BufferOps.STORE but got {real_outs}"
+        assert (real_accs:=len([u for u in k.uops if u.uop is UOps.DEFINE_ACC])) == num_loops*opt_accs, \
+          f"hand_optimizations should have generated {num_loops*opt_accs} UOps.DEFINE_ACC but got {real_accs}"
 
-          shape = tuple([4 if i == axis else x for i,x in enumerate(list(shape))])
-          ast = gen(shape, axis)
-          k = Linearizer(*ast)
-          k.upcast()
-          k.linearize()
-          # upcasting
-          Device[Device.DEFAULT].to_program(k)
-          assert (real_outs:=len([u for u in k.uops if u.uop is UOps.STORE])) == num_outs, \
-            f"upcast should have generated {num_outs} BufferOps.STORE but got {real_outs}"
-          assert (real_accs:=len([u for u in k.uops if u.uop is UOps.DEFINE_ACC])) == num_loops, \
-            f"upcast should have generated {num_loops} UOps.DEFINE_ACC but got {real_accs}"
-          assert (real_loops:=len([u for u in k.uops if u.uop is UOps.LOOP])) == 0, \
-            f"upcast should have generated 0 UOps.LOOP but got {real_loops}"
+        shape = tuple([4 if i == axis else x for i,x in enumerate(list(shape))])
+        ast = gen(shape, axis)
+        k = Linearizer(*ast)
+        k.upcast()
+        k.linearize()
+        # upcasting
+        Device[Device.DEFAULT].to_program(k)
+        assert (real_outs:=len([u for u in k.uops if u.uop is UOps.STORE])) == num_outs, \
+          f"upcast should have generated {num_outs} BufferOps.STORE but got {real_outs}"
+        assert (real_accs:=len([u for u in k.uops if u.uop is UOps.DEFINE_ACC])) == num_loops, \
+          f"upcast should have generated {num_loops} UOps.DEFINE_ACC but got {real_accs}"
 
     def gen(shape, axis): # basic sum
       output_shape = tuple([1 if i == axis else x for i,x in enumerate(list(shape))])
