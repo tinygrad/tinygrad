@@ -12,7 +12,8 @@
 
 ## tinygrad ops
 
-::: tinygrad.Tensor.corealize
+::: tinygrad.Tensor.schedule_with_vars
+::: tinygrad.Tensor.schedule
 ::: tinygrad.Tensor.realize
 ::: tinygrad.Tensor.replace
 ::: tinygrad.Tensor.assign

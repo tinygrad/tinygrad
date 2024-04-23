@@ -96,7 +96,7 @@ class TinyJit(Generic[ReturnType]):
   def __call__(self, *args, **kwargs) -> ReturnType:
     input_tensors: List[Tuple[Union[int, str], Tensor]] = \
       [(cast(Union[int, str], k),v) for k,v in itertools.chain(enumerate(args), sorted(kwargs.items())) if v.__class__ is Tensor]
-    Tensor.corealize([x[1] for x in input_tensors])
+    if len(input_tensors): Tensor.realize(*[x[1] for x in input_tensors])
     lbs: List[LazyBuffer] = flatten([v.lazydata.lbs for _,v in input_tensors])
     expected_sts_var_dtype_device = [(*x.st.unbind(), x.dtype, x.device) for x in lbs]
     input_rawbuffers: List[Buffer] = [v.base.realized for v in lbs if v.base.realized is not None]
@@ -105,12 +105,10 @@ class TinyJit(Generic[ReturnType]):
                                                 [dict(x.unbind() for x in itertools.chain(args, kwargs.values()) if isinstance(x, Variable))])
 
     expected_names, expected_lbs = [x[0] for x in input_tensors], [(x[0], tuple(x[1].keys()), x[2], x[3]) for x in expected_sts_var_dtype_device]
-    if self.cnt >= 2:
-      # jit exec
-      assert self.expected_names == expected_names and self.expected_lbs == expected_lbs, "args mismatch in JIT"
-      for (j,i),input_idx in self.input_replace.items(): self.jit_cache[j].rawbufs[i] = input_rawbuffers[input_idx]
-      if DEBUG >= 1 and len(self.jit_cache) >= 10: print(f"jit execs {len(self.jit_cache)} kernels")
-      for ei in self.jit_cache: ei.run(var_vals, jit=True)
+    if self.cnt == 0:
+      # jit ignore
+      self.ret = self.fxn(*args, **kwargs)
+      if len(params:=get_parameters(self.ret)): Tensor.realize(params[0], *params[1:])
     elif self.cnt == 1:
       # jit capture
       self.expected_names: List[Union[int, str]] = expected_names
@@ -118,7 +116,7 @@ class TinyJit(Generic[ReturnType]):
       with Context(GRAPH=getenv("JITGRAPH", GRAPH.value), BEAM=getenv("JITBEAM", BEAM.value)):
         capturing.append(self)
         self.ret = self.fxn(*args, **kwargs)
-        Tensor.corealize(get_parameters(self.ret))
+        if len(params:=get_parameters(self.ret)): Tensor.realize(params[0], *params[1:])
         capturing.clear()
       del self.buffer_replace
       assert len(self.jit_cache), "didn't JIT anything!"
@@ -133,10 +131,12 @@ class TinyJit(Generic[ReturnType]):
 
       self.input_replace = get_input_replace(self.jit_cache, input_rawbuffers)
       if DEBUG >= 1 and len(set(self.input_replace.values())) != len(input_rawbuffers): print("WARNING: some input tensors not found")
-    elif self.cnt == 0:
-      # jit ignore
-      self.ret = self.fxn(*args, **kwargs)
-      Tensor.corealize(get_parameters(self.ret))
+    elif self.cnt >= 2:
+      # jit exec
+      assert self.expected_names == expected_names and self.expected_lbs == expected_lbs, "args mismatch in JIT"
+      for (j,i),input_idx in self.input_replace.items(): self.jit_cache[j].rawbufs[i] = input_rawbuffers[input_idx]
+      if DEBUG >= 1 and len(self.jit_cache) >= 10: print(f"jit execs {len(self.jit_cache)} kernels")
+      for ei in self.jit_cache: ei.run(var_vals, jit=True)
 
     # clear jit inputs
     for (j,i) in self.input_replace.keys(): self.jit_cache[j].rawbufs[i] = None
