@@ -157,6 +157,7 @@ def process_batch_bert(data: List[dict]) -> dict[str, Tensor]:
 
 # For train: Stop when we run through all data
 # For val: Wrap around val dataset and never stop
+#     Reference: https://github.com/mlcommons/training/blob/1c8a098ae3e70962a4f7422c0b0bd35ae639e357/language_model/tensorflow/bert/run_pretraining.py, Line 420
 def batch_load_bert(BS:int, val=False):
   from extra.datasets.wikipedia import get_wiki_train_files, get_wiki_val_files
   files = get_wiki_val_files() if val else get_wiki_train_files()
