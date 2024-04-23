@@ -2,8 +2,8 @@
 # 1.  Download raw text data with `wikipedia_download.py`
 
 # 2.  Install python==3.7.12 and tensorflow==1.15.5
-#     Run `create_pretraining_data.py` to create TFRecords on specific part
-#     Command: python3 python3 create_pretraining_data.py --input_file=/path/to/part-00XXX-of-00500 --vocab_file=/path/to/vocab.txt \
+#     Run `create_pretraining_data.py` to create TFRecords on specific part (This will take some time)
+#     Command: python3 create_pretraining_data.py --input_file=/path/to/part-00XXX-of-00500 --vocab_file=/path/to/vocab.txt \
 #                              --output_file=/path/to/output.tfrecord --max_seq_length=512 --max_predictions_per_seq=76
 #
 # 2.1 For eval: --input_file=/path/to/eval.txt and
@@ -11,9 +11,11 @@
 
 # 3.  Run `wikipedia.py` to preprocess the data with tinygrad (Use python > 3.7)
 #     Command: BASEDIR=/path/to/basedir python3 wikipedia.py pre-train XXX (NOTE: part number needs to match part of step 2)
+#     This will output to /path/to/basedir/train/XXX
 #
 # 3.1 For eval:
 #     Command: BASEDIR=/path/to/basedir python3 wikipedia.py pre-eval
+#     This will output to /path/to/basedir/eval
 
 # 4.  Run this script to verify the correctness of the preprocessing script for specific part
 #     Command: python3 external_test_preprocessing_part.py --preprocessed_part_dir=/path/to/basedir/part --tf_records=/path/to/output.tfrecord
@@ -75,6 +77,6 @@ if __name__ == "__main__":
   for i, (reference_example, preprocessed_sample) in tqdm(enumerate(zip(dataset, preprocessed_samples)), desc="Checking samples", total=len(preprocessed_samples)): # noqa: E501
     feature_keys = ["input_ids", "input_mask", "segment_ids", "masked_lm_positions", "masked_lm_ids", "masked_lm_weights", "next_sentence_labels"]
     for key in feature_keys:
-        reference_example_feature = reference_example[key].numpy()
-        assert (reference_example_feature == preprocessed_sample[key]).all(), \
-        f"{key} are not equal at index {i}\nReference: {reference_example_feature}\nPreprocessed: {preprocessed_sample[key]}"
+      reference_example_feature = reference_example[key].numpy()
+      assert (reference_example_feature == preprocessed_sample[key]).all(), \
+      f"{key} are not equal at index {i}\nReference: {reference_example_feature}\nPreprocessed: {preprocessed_sample[key]}"
