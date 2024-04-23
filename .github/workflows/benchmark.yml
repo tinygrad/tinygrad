@@ -35,9 +35,7 @@ jobs:
     - name: Test speed vs torch
       run: BIG=2 MPS=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
     - name: Test tensor cores
-      run: |
-        METAL=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores
-        METAL=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores_padded
+      run: METAL=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
     - name: Run Tensor Core GEMM
       run: |
         DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
@@ -118,10 +116,8 @@ jobs:
       run: CUDA=1 BIG=2 TORCHCUDA=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
     - name: Test tensor cores
       run: |
-        CUDA=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores
-        CUDA=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores_padded
-        PTX=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores
-        PTX=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores_padded
+        CUDA=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
+        PTX=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
     - name: Run Tensor Core GEMM (CUDA)
       run: |
         CUDA=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
@@ -209,10 +205,8 @@ jobs:
     #    LD_PRELOAD="/opt/rocm/lib/libhsa-runtime64.so" HSA=1 BIG=2 TORCHCUDA=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
     - name: Test tensor cores
       run: |
-        HSA=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores
-        HSA=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores_padded
-        KFD=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores
-        KFD=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores_padded
+        HSA=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
+        KFD=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
     - name: Run Tensor Core GEMM (HSA)
       run: HSA=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
     - name: Run Tensor Core GEMM (KFD)
