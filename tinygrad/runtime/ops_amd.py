@@ -68,8 +68,8 @@ def create_sdma_packets():
   return type("SDMA_PKTS", (object, ), structs)
 sdma_pkts = create_sdma_packets()
 
-class KFDCompiler(Compiler):
-  compiler_opts = CompilerOptions("KFD", has_tensor_cores=True, shared_max=65536)
+class AMDCompiler(Compiler):
+  compiler_opts = CompilerOptions("AMD", has_tensor_cores=True, shared_max=65536)
   def __init__(self, arch:str):
     self.arch = arch
     super().__init__(f"compile_hip_{self.arch}")
@@ -238,7 +238,7 @@ class HWPM4Queue:
                global_size[0],global_size[1],global_size[2], CS_W32_EN | FORCE_START_AT_000 | COMPUTE_SHADER_EN]
 
     # have to self wait since flush doesn't work
-    self.signal(sig:=KFDDevice._get_signal())
+    self.signal(sig:=AMDDevice._get_signal())
     self.wait(sig)
 
     if completion_signal: self.signal(completion_signal)
@@ -280,7 +280,7 @@ class HWPM4Queue:
         signal.event_id]
     return self
 
-  def submit(self, device:KFDDevice):
+  def submit(self, device:AMDDevice):
     wptr = device.pm4_write_pointer[0]
     pm4_buffer_view = to_mv(device.pm4_ring.va_addr, device.pm4_ring.size).cast("I")
     for i, value in enumerate(self.q): pm4_buffer_view[(wptr+i)%(device.pm4_ring.size//4)] = value
@@ -299,7 +299,7 @@ sdma_cache_wb = sdma_pkts.gcr(op=amd_gpu.SDMA_OP_GCR, sub_op=amd_gpu.SDMA_SUBOP_
 class HWCopyQueue:
   def __init__(self): self.q = []
 
-  def submit(self, device:KFDDevice):
+  def submit(self, device:AMDDevice):
     read_ptr = device.sdma_read_pointer[0]
     if (device.sdma_doorbell_value-read_ptr) > device.sdma_ring.size: raise RuntimeError("SDMA queue overrun")
     for cmd in self.q:
@@ -345,7 +345,7 @@ class HWCopyQueue:
     return self
 
 class KFDProgram:
-  def __init__(self, device:KFDDevice, name:str, lib:bytes):
+  def __init__(self, device:AMDDevice, name:str, lib:bytes):
     # TODO; this API needs the type signature of the function and global_size/local_size
     self.device, self.name, self.lib = device, name, lib
 
@@ -399,8 +399,8 @@ class KFDProgram:
       #assert (wp:=self.device.amd_aql_queue.write_dispatch_id) == (rp:=self.device.amd_aql_queue.read_dispatch_id), f"didn't run {wp} != {rp}"
       return (self.device.completion_signal.end_ts-self.device.completion_signal.start_ts)/1e8
 
-class KFDAllocator(LRUAllocator):
-  def __init__(self, device:KFDDevice):
+class AMDAllocator(LRUAllocator):
+  def __init__(self, device:AMDDevice):
     self.device = device
     # NOTE: KFD_IOC_ALLOC_MEM_FLAGS_GTT doesn't work here for readinto
     self.b = [self.device._gpu_alloc(SDMA_MAX_COPY_SIZE*4, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, public=True) for _ in range(2)]
@@ -452,15 +452,15 @@ class KFDAllocator(LRUAllocator):
       self.device._wait_signal(self.device.signal_sdma)
       ctypes.memmove(from_mv(dest[i:]), self.b[0].va_addr, lsize)
 
-  def transfer(self, dest, src, sz:int, src_dev:KFDDevice, dest_dev:KFDDevice):
+  def transfer(self, dest, src, sz:int, src_dev:AMDDevice, dest_dev:AMDDevice):
     dest_dev._gpu_map(src)
-    q = HWPM4Queue().signal(sig := KFDDevice._get_signal())
-    HWCopyQueue().wait(sig).copy(dest.va_addr, src.va_addr, sz).signal(sigc := KFDDevice._get_signal()).submit(dest_dev)
+    q = HWPM4Queue().signal(sig := AMDDevice._get_signal())
+    HWCopyQueue().wait(sig).copy(dest.va_addr, src.va_addr, sz).signal(sigc := AMDDevice._get_signal()).submit(dest_dev)
     HWPM4Queue().wait(sigc).submit(dest_dev)
     q.wait(sigc).submit(src_dev)
 
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
-class KFDDevice(Compiled):
+class AMDDevice(Compiled):
   kfd:int = -1
   event_page:Any = None  # TODO: fix types in kfd, Optional[kfd.struct_kfd_ioctl_alloc_memory_of_gpu_args]
   signals_page:Any = None
@@ -501,15 +501,15 @@ class KFDDevice(Compiled):
   @classmethod
   def _get_signal(self, num=None, sync_event=None) -> hsa.amd_signal_t:
     if num is None:
-      num = KFDDevice.signal_number
-      KFDDevice.signal_number += 1
-      if KFDDevice.signal_number == SIGNAL_COUNT: KFDDevice.signal_number = 16
+      num = AMDDevice.signal_number
+      AMDDevice.signal_number += 1
+      if AMDDevice.signal_number == SIGNAL_COUNT: AMDDevice.signal_number = 16
     #print("signal", num)
-    ret = hsa.amd_signal_t.from_address(KFDDevice.signals_page.va_addr + SIGNAL_SIZE*num)
+    ret = hsa.amd_signal_t.from_address(AMDDevice.signals_page.va_addr + SIGNAL_SIZE*num)
     ret.value = 0
     ret.kind = hsa.AMD_SIGNAL_KIND_USER
     if sync_event is not None:
-      ret.event_mailbox_ptr = KFDDevice.event_page.va_addr + sync_event.event_slot_index*8
+      ret.event_mailbox_ptr = AMDDevice.event_page.va_addr + sync_event.event_slot_index*8
       ret.event_id = sync_event.event_id
     return ret
 
@@ -518,7 +518,7 @@ class KFDDevice(Compiled):
     assert signal.event_id != 0, "can't wait on this signal"
     evt_arr = (kfd.struct_kfd_event_data * 1)()
     evt_arr[0].event_id = signal.event_id
-    ret = kio.wait_events(KFDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=timeout)
+    ret = kio.wait_events(AMDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=timeout)
     if ret.wait_result != 0: raise RuntimeError(f"wait_result: {ret.wait_result}, {timeout} ms TIMEOUT!")
 
     #val = signal.value
@@ -526,28 +526,28 @@ class KFDDevice(Compiled):
     assert skip_check or signal.value == 0, f"not set to 0, but {signal.value}"
 
   def __init__(self, device:str=""):
-    if KFDDevice.kfd == -1:
-      KFDDevice.kfd = os.open("/dev/kfd", os.O_RDWR)
-      KFDDevice.gpus = [g.parent for g in pathlib.Path("/sys/devices/virtual/kfd/kfd/topology/nodes").glob("*/gpu_id") if is_usable_gpu(g)]
+    if AMDDevice.kfd == -1:
+      AMDDevice.kfd = os.open("/dev/kfd", os.O_RDWR)
+      AMDDevice.gpus = [g.parent for g in pathlib.Path("/sys/devices/virtual/kfd/kfd/topology/nodes").glob("*/gpu_id") if is_usable_gpu(g)]
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
-    with open(f"{KFDDevice.gpus[self.device_id]}/gpu_id", "r") as f: self.gpu_id = int(f.read())
-    with open(f"{KFDDevice.gpus[self.device_id]}/properties", "r") as f: self.properties = {line.split()[0]: int(line.split()[1]) for line in f}
+    with open(f"{AMDDevice.gpus[self.device_id]}/gpu_id", "r") as f: self.gpu_id = int(f.read())
+    with open(f"{AMDDevice.gpus[self.device_id]}/properties", "r") as f: self.properties = {line.split()[0]: int(line.split()[1]) for line in f}
     self.drm_fd = os.open(f"/dev/dri/renderD{self.properties['drm_render_minor']}", os.O_RDWR)
     target = int(self.properties['gfx_target_version'])
     self.arch = "gfx%d%x%x" % (target // 10000, (target // 100) % 100, target % 100)
-    kio.acquire_vm(KFDDevice.kfd, drm_fd=self.drm_fd, gpu_id=self.gpu_id)
+    kio.acquire_vm(AMDDevice.kfd, drm_fd=self.drm_fd, gpu_id=self.gpu_id)
 
-    if KFDDevice.event_page is None:
-      KFDDevice.signals_page = self._gpu_alloc(SIGNAL_SIZE*SIGNAL_COUNT, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
-      KFDDevice.event_page = self._gpu_alloc(0x8000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
-      sync_event = kio.create_event(KFDDevice.kfd, event_page_offset=KFDDevice.event_page.handle, auto_reset=1)
+    if AMDDevice.event_page is None:
+      AMDDevice.signals_page = self._gpu_alloc(SIGNAL_SIZE*SIGNAL_COUNT, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
+      AMDDevice.event_page = self._gpu_alloc(0x8000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
+      sync_event = kio.create_event(AMDDevice.kfd, event_page_offset=AMDDevice.event_page.handle, auto_reset=1)
     else:
-      self._gpu_map(KFDDevice.signals_page)
-      self._gpu_map(KFDDevice.event_page)
-      sync_event = kio.create_event(KFDDevice.kfd, auto_reset=1)
+      self._gpu_map(AMDDevice.signals_page)
+      self._gpu_map(AMDDevice.event_page)
+      sync_event = kio.create_event(AMDDevice.kfd, auto_reset=1)
 
-    self.completion_signal = KFDDevice._get_signal(self.device_id*2, sync_event=sync_event)
-    self.signal_sdma = KFDDevice._get_signal(self.device_id*2+1, sync_event=kio.create_event(KFDDevice.kfd, auto_reset=1))
+    self.completion_signal = AMDDevice._get_signal(self.device_id*2, sync_event=sync_event)
+    self.signal_sdma = AMDDevice._get_signal(self.device_id*2+1, sync_event=kio.create_event(AMDDevice.kfd, auto_reset=1))
 
     self.gart_aql = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
     self.aql_ring = self._gpu_alloc(0x100000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
@@ -567,13 +567,13 @@ class KFDDevice(Compiled):
     # SDMA Queue
     self.gart_sdma = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
     self.sdma_ring = self._gpu_alloc(0x100000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
-    self.sdma_queue = kio.create_queue(KFDDevice.kfd, ring_base_address=self.sdma_ring.va_addr, ring_size=self.sdma_ring.size, gpu_id=self.gpu_id,
+    self.sdma_queue = kio.create_queue(AMDDevice.kfd, ring_base_address=self.sdma_ring.va_addr, ring_size=self.sdma_ring.size, gpu_id=self.gpu_id,
       queue_type=kfd.KFD_IOC_QUEUE_TYPE_SDMA, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE, queue_priority=kfd.KFD_MAX_QUEUE_PRIORITY,
       write_pointer_address=self.gart_sdma.va_addr, read_pointer_address=self.gart_sdma.va_addr+8)
 
     # doorbell page
     self.doorbells_base = self.sdma_queue.doorbell_offset & (~0x1fff)  # doorbell is two pages
-    self.doorbells = libc.mmap(0, 0x2000, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, KFDDevice.kfd, self.doorbells_base)
+    self.doorbells = libc.mmap(0, 0x2000, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, AMDDevice.kfd, self.doorbells_base)
 
     self.sdma_read_pointer = to_mv(self.sdma_queue.read_pointer_address, 8).cast("Q")
     self.sdma_write_pointer = to_mv(self.sdma_queue.write_pointer_address, 8).cast("Q")
@@ -585,7 +585,7 @@ class KFDDevice(Compiled):
     self.eop_pm4_buffer = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
     self.gart_pm4 = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
     self.pm4_ring = self._gpu_alloc(0x100000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
-    self.pm4_queue = kio.create_queue(KFDDevice.kfd, ring_base_address=self.pm4_ring.va_addr, ring_size=self.pm4_ring.size, gpu_id=self.gpu_id,
+    self.pm4_queue = kio.create_queue(AMDDevice.kfd, ring_base_address=self.pm4_ring.va_addr, ring_size=self.pm4_ring.size, gpu_id=self.gpu_id,
       queue_type=kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE, queue_priority=kfd.KFD_MAX_QUEUE_PRIORITY,
       eop_buffer_address=self.eop_pm4_buffer.va_addr, eop_buffer_size=self.eop_pm4_buffer.size,
       # TODO: are these needed? (i know eop is)
@@ -597,7 +597,7 @@ class KFDDevice(Compiled):
     self.pm4_write_pointer = to_mv(self.pm4_queue.write_pointer_address, 8).cast("Q")
     self.pm4_doorbell = to_mv(self.doorbells + self.pm4_queue.doorbell_offset - self.doorbells_base, 4).cast("I")
 
-    super().__init__(device, KFDAllocator(self), KFDCompiler(self.arch), functools.partial(KFDProgram, self))
+    super().__init__(device, AMDAllocator(self), AMDCompiler(self.arch), functools.partial(KFDProgram, self))
 
   def _submit_sdma(self, dest, src, copy_size, wait_signals=None, completion_signal=None):
     q = HWCopyQueue()
