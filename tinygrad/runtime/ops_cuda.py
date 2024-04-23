@@ -101,7 +101,7 @@ class CUDAProgram:
       if status != 0:
         del self.module
         cuda_disassemble(lib, device.arch)
-        raise RuntimeError("module load failed")
+        raise RuntimeError(f"module load failed with status code {status}: {cuda.cudaError_enum__enumvalues[status]}")
       check(cuda.cuModuleGetFunction(ctypes.byref(prg := cuda.CUfunction()), self.module, name.encode("utf-8")))
       self.prg = prg #type: ignore
 

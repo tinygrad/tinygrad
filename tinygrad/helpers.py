@@ -84,10 +84,11 @@ class Context(contextlib.ContextDecorator):
 class ContextVar:
   _cache: ClassVar[Dict[str, ContextVar]] = {}
   value: int
+  key: str
   def __new__(cls, key, default_value):
     if key in ContextVar._cache: return ContextVar._cache[key]
     instance = ContextVar._cache[key] = super().__new__(cls)
-    instance.value = getenv(key, default_value)
+    instance.value, instance.key = getenv(key, default_value), key
     return instance
   def __bool__(self): return bool(self.value)
   def __ge__(self, x): return self.value >= x
@@ -96,7 +97,8 @@ class ContextVar:
 
 DEBUG, IMAGE, BEAM, NOOPT = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0)
 WINO, THREEFRY, CACHECOLLECTING = ContextVar("WINO", 0), ContextVar("THREEFRY", 0), ContextVar("CACHECOLLECTING", 1)
-GRAPH, GRAPHPATH, RING = ContextVar("GRAPH", 0), getenv("GRAPHPATH", "/tmp/net"), ContextVar("RING", 1)
+GRAPH, GRAPHPATH, SAVE_SCHEDULE, RING = ContextVar("GRAPH", 0), getenv("GRAPHPATH", "/tmp/net"), ContextVar("SAVE_SCHEDULE", 0), ContextVar("RING", 1)
+MULTIOUTPUT = ContextVar("MULTIOUTPUT", 1)
 
 # **************** global state Counters ****************
 
@@ -143,7 +145,7 @@ _cache_dir: str = getenv("XDG_CACHE_HOME", os.path.expanduser("~/Library/Caches"
 CACHEDB: str = getenv("CACHEDB", os.path.abspath(os.path.join(_cache_dir, "tinygrad", "cache.db")))
 CACHELEVEL = getenv("CACHELEVEL", 2)
 
-VERSION = 14
+VERSION = 15
 _db_connection = None
 def db_connection():
   global _db_connection

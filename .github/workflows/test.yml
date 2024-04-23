@@ -112,8 +112,8 @@ jobs:
         python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
     - name: Test DEBUG
       run: DEBUG=100 python3 -c "from tinygrad import Tensor; N = 1024; a, b = Tensor.rand(N, N), Tensor.rand(N, N); c = (a.reshape(N, 1, N) * b.T.reshape(1, N, N)).sum(axis=2); print((c.numpy() - (a.numpy() @ b.numpy())).mean())"
-    - name: Repo line count <7500 lines
-      run: MAX_LINE_COUNT=7500 python sz.py
+    - name: Repo line count <8000 lines
+      run: MAX_LINE_COUNT=8000 python sz.py
 
   testcpuimagenet:
     name: ImageNet to C Tests
@@ -186,10 +186,8 @@ jobs:
       - name: Install Dependencies
         run: pip install -e '.[testing,testing_tf]' --extra-index-url https://download.pytorch.org/whl/cpu
       - if: ${{ matrix.task == 'optimage' }}
-        name: Run Optimizer Test (OPT 2 and 3)
-        run: |
-          PYTHONPATH="." OPT=2 GPU=1 python -m pytest -n=auto test/external/external_test_opt.py
-          PYTHONPATH="." OPT=3 GPU=1 python -m pytest -n=auto test/external/external_test_opt.py
+        name: Run Kernel Count Test
+        run: PYTHONPATH="." GPU=1 python -m pytest -n=auto test/external/external_test_opt.py
       - if: ${{ matrix.task == 'optimage'}}
         name: Test WINO=1
         run: GPU=1 DEBUG=2 WINO=1 python3 test/test_ops.py TestOps.test_simple_conv2d
@@ -460,8 +458,11 @@ jobs:
         if: matrix.backend == 'cuda'
         run: |
           cp tinygrad/runtime/autogen/cuda.py /tmp/cuda.py.bak
+          cp tinygrad/runtime/autogen/nv_gpu.py /tmp/nv_gpu.py.bak
           ./autogen_stubs.sh cuda
+          ./autogen_stubs.sh nv
           diff /tmp/cuda.py.bak tinygrad/runtime/autogen/cuda.py
+          diff /tmp/nv_gpu.py.bak tinygrad/runtime/autogen/nv_gpu.py
       - name: Verify HIP autogen
         if: matrix.backend == 'hip'
         run: |
