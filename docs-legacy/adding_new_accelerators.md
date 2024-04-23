@@ -7,10 +7,10 @@ It's pretty easy to add a new accelerator to tinygrad. All you need to do is imp
 These are the ops that you must implement for your accelerator of choice.
 ```
 Buffer                                                       # class of memory on this device
-unary_op  (NOOP, EXP2, LOG2, CAST, SIN, SQRT)                # A -> A
-reduce_op (SUM, MAX)                                         # A -> B (smaller size, B has 1 in shape)
-binary_op (ADD, SUB, MUL, DIV, CMPEQ, MAX)                   # A + A -> A (all the same size)
-load_op   (EMPTY, CONST, FROM, CONTIGUOUS, CUSTOM)           # -> A   (initialize data on device)
+unary_op   (NOOP, CAST, EXP2, LOG2, SIN, SQRT)               # A -> A
+reduce_op  (SUM, MAX)                                        # A -> B (smaller size, B has 1 in shape)
+binary_op  (ADD, SUB, MUL, DIV, CMPEQ, CMPLT, MAX)           # A + A -> A (all the same size)
+load_op    (EMPTY, CONST, FROM, CONTIGUOUS, CUSTOM)          # -> A   (initialize data on device)
 ternary_op (WHERE)                                           # A, A, A -> A
 ```
 
@@ -20,11 +20,11 @@ These are the mid level ops that handle the derivatives.
 ```
 Relu, Log, Exp, Sin                            # unary ops
 Sum, Max                                       # reduce ops (with axis argument)
-Maximum, Add, Sub, Mul, Pow, Div, Equal        # binary ops (no broadcasting, use expand)
+Add, Sub, Mul, Div, Eq                         # binary ops (no broadcasting, use expand)
 Expand, Reshape, Permute, Pad, Shrink, Flip    # movement ops
 Where                                          # ternary ops
 ```
-These are implemented in [mlops.py](/tinygrad/mlops.py).
+These are implemented in [function.py](/tinygrad/function.py).
 
 ## hlops
 
