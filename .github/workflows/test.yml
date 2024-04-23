@@ -68,6 +68,9 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}
+        fetch-depth: 0
     - name: Set up Python 3.8
       uses: actions/setup-python@v5
       with:
@@ -85,6 +88,24 @@ jobs:
       run: |
         pip3 install --upgrade --force-reinstall ruff
         python3 -m ruff check . --preview
+    - name: Lint no new noqa E501
+      run: |
+        has_noqa=false
+        git remote add tinygrad https://github.com/tinygrad/tinygrad
+        git fetch tinygrad master
+        git diff tinygrad/master...${{ github.event.pull_request.head.sha }} -- tinygrad/ --unified=0 | grep -E '^\+|^\-' | while read -r line; do
+          if [[ $line == \-* ]]; then
+            if [[ "$line" == *"# noqa: E501"* ]]; then
+              has_noqa=true
+            fi
+          else
+            if [[ "$line" == *"# noqa: E501"* && "$has_noqa" == "false" ]]; then
+              echo "found a new # noqa: E501"
+              exit 1
+            fi
+            has_noqa=false
+          fi
+        done
     - name: Lint tinygrad with pylint
       run: python -m pylint tinygrad/
     - name: Run mypy
