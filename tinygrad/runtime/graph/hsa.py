@@ -1,8 +1,8 @@
 import ctypes, collections, time, itertools
 from typing import List, Any, Dict, cast, Optional, Union, Tuple
-from tinygrad.helpers import GraphException, init_c_var, round_up
+from tinygrad.helpers import GraphException, init_c_var, round_up, colored
 from tinygrad.buffer import Buffer, BufferOptions
-from tinygrad.device import Compiled, CompiledRunner, BufferXfer, MultiDeviceJITGraph, update_stats, Device
+from tinygrad.device import Compiled, CompiledRunner, BufferXfer, MultiDeviceJITGraph, Device
 from tinygrad.shape.symbolic import Variable
 from tinygrad.runtime.ops_hsa import HSADevice, PROFILE, Profiler
 from tinygrad.engine.realize import ExecItem
@@ -29,7 +29,6 @@ class HSAGraph(MultiDeviceJITGraph):
   def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
     self.jit_cache = jit_cache
     self.input_replace = get_input_replace(jit_cache, input_rawbuffers)
-    self.op_estimate, self.mem_estimate = get_jit_stats(jit_cache) #type:ignore
     self.jc_idxs_with_updatable_launch_dims = get_jc_idxs_with_updatable_launch_dims(jit_cache)
     self.jc_idxs_with_updatable_var_vals = get_jc_idxs_with_updatable_var_vals(jit_cache)
 
@@ -114,8 +113,9 @@ class HSAGraph(MultiDeviceJITGraph):
 
     # clear jit inputs to allow their memory to be freed/reused
     for (j,i) in self.input_replace.keys(): self.jit_cache[j].rawbufs[i] = None
+    super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), "HSA", *get_jit_stats(jit_cache))
 
-  def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
+  def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False) -> Optional[float]:
     # Wait and restore signals
     hsa.hsa_signal_wait_scacquire(self.finish_signal, hsa.HSA_SIGNAL_CONDITION_LT, 1, (1 << 64) - 1, hsa.HSA_WAIT_STATE_ACTIVE)
     for sig in self.signals_to_reset: hsa.hsa_signal_silent_store_relaxed(sig, 1)
@@ -158,8 +158,6 @@ class HSAGraph(MultiDeviceJITGraph):
       et = time.perf_counter() - st
 
     for profdev,profdata in self.profile_info.items(): Profiler.tracked_signals[profdev] += profdata
-    update_stats(f"<batched {len(self.jit_cache)}>", self.op_estimate, self.mem_estimate, var_vals, et, buf_count=len(input_rawbuffers),
-                 jit=jit, num_kernels=len(self.jit_cache), device="HSA")
     return et
 
   def alloc_signal(self, reset_on_start=False, wait_on=None):

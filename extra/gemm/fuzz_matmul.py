@@ -40,3 +40,5 @@ if __name__ == "__main__":
           pass
   print(f"failed sizes: {failed}")
   print(f"num failures: {len(failed)}")
+  if len(failed) > 0:
+    raise RuntimeError(f"failed on {len(failed)} kernels")
