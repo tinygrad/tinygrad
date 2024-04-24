@@ -4,13 +4,13 @@ Here you will find documentation for tinygrad, as well as some examples and tuto
 
 ## Getting Started
 
-Read the quick start guide [here](/docs-legacy/quickstart.md).
+Read the quick start guide [here](/docs/quickstart.md).
 
 Or if you want to jump right in to how tinygrad works, you can read the [abstraction stack](/docs-legacy/abstractions2.py) documentation.
 
 Or if you want to see some examples, you can look at the examples in the [examples](/examples) directory.
 
-Or if you just want to see some of the things tinygrad can do, check out the [showcase](/docs-legacy/showcase.md).
+Or if you just want to see some of the things tinygrad can do, check out the [showcase](/docs/showcase.md).
 
 ## API
 
