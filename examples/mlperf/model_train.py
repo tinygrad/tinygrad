@@ -271,8 +271,8 @@ def train_bert():
 
   # ** hyperparameters **
   epochs             = config["epochs"]                 = getenv("EPOCHS", 1)
-  BS                 = config["GLOBAL_BATCH_SIZE"]      = getenv("BS", 4 * len(GPUS)) # FP32 6 GPUS -> BS24
-  EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 8)
+  BS                 = config["GLOBAL_BATCH_SIZE"]      = getenv("BS", 4 * len(GPUS)) # FP32 4090: 6 GPUS -> BS24
+  EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 4 * len(GPUS))
   max_lr             = config["OPT_BASE_LEARNING_RATE"] = getenv("OPT_BASE_LEARNING_RATE", 0.002/256 * BS)
 
   train_steps        = config["TRAIN_STEPS"]            = getenv("TRAIN_STEPS", 3000000 // BS)

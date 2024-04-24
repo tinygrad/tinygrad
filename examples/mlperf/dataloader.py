@@ -1,4 +1,4 @@
-import os, random, pickle
+import os, random, pickle, functools, itertools
 from typing import List, Tuple
 from pathlib import Path
 import numpy as np
@@ -7,8 +7,6 @@ from tqdm import tqdm
 from tinygrad import dtypes, Tensor
 from tinygrad.helpers import getenv, prod, Timing, Context
 from multiprocessing import Queue, Process, shared_memory, connection, Lock, cpu_count, Pool
-from functools import lru_cache
-from itertools import chain
 
 class MyQueue:
   def __init__(self, multiple_readers=True, multiple_writers=True):
@@ -142,7 +140,7 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None):
     shm.close()
     shm.unlink()
 
-@lru_cache(maxsize=128)
+@functools.lru_cache(maxsize=128)
 def load_bert_file(fn:str) -> List[dict]:
   with open(fn, "rb") as f: data = pickle.load(f)
   return data
@@ -159,21 +157,29 @@ def process_batch_bert(data: List[dict]) -> dict[str, Tensor]:
   }
 
 def shuffle_parts(file_paths: List[str]) -> List[str]:
-  parts = list(set(map(lambda f: int(Path(f).name.split('_')[0]), file_paths))) # Unique part ids (e.g. 0-499)
+  parts = {}
+  for f in file_paths:
+    part = Path(f).stem.split('_')[0]
+    if part not in parts: parts[part] = []
+    parts[part].append(f)
+  
+  part_ids = list(parts.keys())
   random.Random().shuffle(parts)
-  shuffled_parts = []
-  for p in parts:
-    shuffled_parts.extend([f for f in file_paths if int(Path(f).name.split("_")[0]) == p])
-  return shuffled_parts
+
+  shuffled_files = []
+  for p in part_ids:
+    parts[p].sort(key=lambda x: int(Path(x).stem.split('_')[1]))
+    shuffled_files.extend(parts[p])
+  return shuffled_files
 
 def random_sample(data: List[str]):
   index = random.randint(0, len(data) - 1)
   selected_sample = data[index]
   return selected_sample, index
 
-def load_datasample(fn:Tuple[str, int]) -> List[dict]:
-  data = load_bert_file(fn[0])
-  return data[fn[1]]
+def load_datasample(file_and_offset:Tuple[str, int]) -> List[dict]:
+  data = load_bert_file(file_and_offset[0])
+  return data[file_and_offset[1]]
 
 # Reference: https://github.com/mlcommons/training/blob/1c8a098ae3e70962a4f7422c0b0bd35ae639e357/language_model/tensorflow/bert/run_pretraining.py, Line 394
 def batch_load_train_bert(BS:int):
@@ -181,7 +187,7 @@ def batch_load_train_bert(BS:int):
   files = shuffle_parts(get_wiki_train_files())
   dataset = []
   for f in files: 
-    lists = [(f, o) for o in range(int(Path(f).name.split("_")[3].split(".")[0]))]
+    lists = [(f, o) for o in range(int(Path(f).stem.split("_")[3].split(".")[0]))]
     dataset.extend(lists)
   while dataset:
     blob = []
@@ -195,7 +201,7 @@ def batch_load_train_bert(BS:int):
 def batch_load_val_bert(BS:int):
   from extra.datasets.wikipedia import get_wiki_val_files
   files = get_wiki_val_files()
-  dataset = list(chain.from_iterable([load_bert_file(f) for f in files]))
+  dataset = list(itertools.chain.from_iterable([load_bert_file(f) for f in files]))
   idx = 0
   while True:
     start_idx = (idx * BS) % len(dataset)
