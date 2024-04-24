@@ -1,13 +1,12 @@
-import functools
-import os
-import time
+import os, time, math, functools
+from pathlib import Path
 from tqdm import tqdm
 import multiprocessing
 
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
 from tinygrad.helpers import getenv, BEAM, WINO, Context
 from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_save
-from tinygrad.nn.optim import LARS, SGD, OptimizerGroup
+from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup
 
 from extra.lr_scheduler import LRSchedulerGroup
 from examples.mlperf.helpers import get_training_state, load_training_state
@@ -257,8 +256,255 @@ def train_rnnt():
   pass
 
 def train_bert():
-  # TODO: BERT
-  pass
+  # NOTE: pip install tensorflow required
+  from examples.mlperf.dataloader import batch_load_bert
+  from examples.mlperf.helpers import get_mlperf_bert_model, load_from_tf2_ckpt
+  from examples.mlperf.lr_schedulers import PolynomialDecayWithWarmup
+
+  config = {}
+  BASEDIR = getenv("BASEDIR", Path(__file__).parent.parents[1] / "extra" / "datasets" / "wiki")
+
+  GPUS = config["GPUS"] = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
+  print(f"Training on {GPUS}")
+  for x in GPUS: Device[x]
+  seed = config["seed"] = getenv("SEED", 12345)
+
+  TRAIN_BEAM = getenv("TRAIN_BEAM", BEAM.value)
+  EVAL_BEAM = getenv("EVAL_BEAM", BEAM.value)
+
+  # ** hyperparameters **
+  epochs             = config["epochs"]                 = getenv("EPOCHS", 1)
+  BS                 = config["GLOBAL_BATCH_SIZE"]      = getenv("GLOBAL_BATCH_SIZE", 4 * len(GPUS)) # FP32 6 GPUS -> BS24
+  EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 2)
+  max_lr             = config["OPT_BASE_LEARNING_RATE"] = getenv("OPT_BASE_LEARNING_RATE", 0.00035/256 * BS)
+
+  train_steps        = config["TRAIN_STEPS"]            = getenv("TRAIN_STEPS", 125000 // BS)
+  warmup_steps       = config["NUM_WARMUP_STEPS"]       = getenv("NUM_WARMUP_STEPS", train_steps // 10)
+  max_eval_steps     = config["MAX_EVAL_STEPS"]         = getenv("MAX_EVAL_STEPS", 100)
+  eval_step_freq     = config["EVAL_STEP_FREQ"]         = int((math.floor(0.05 * (230.23 * BS + 3000000) / 25000) * 25000) / BS) # Round down
+  save_ckpt_freq     = config["SAVE_CKPT_FREQ"]         = getenv("SAVE_CKPT_FREQ", 1000)
+  keep_ckpt_amount   = config["KEEP_CKPT_AMOUNT"]       = getenv("KEEP_CKPT_AMOUNT", 5)
+  init_ckpt          = config["INIT_CKPT_DIR"]          = getenv("INIT_CKPT_DIR", BASEDIR)
+
+  decay              = config["decay"]                  = getenv("DECAY", 0.01)
+  poly_power         = config["poly_power"]             = getenv("POLY_POWER", 1.0)
+
+  target, achieved                                      = getenv("TARGET", 0.72), False
+
+  config["DEFAULT_FLOAT"] = dtypes.default_float.name
+  config["TRAIN_BEAM"]    = TRAIN_BEAM
+  config["EVAL_BEAM"]     = EVAL_BEAM
+
+  Tensor.manual_seed(seed)  # seed for weight initialization
+
+  model = get_mlperf_bert_model(BASEDIR / "bert_config.json")
+
+  # shard weights and initialize in order
+  for tinygrad_key, x in get_state_dict(model).items():
+    if init_ckpt and not tinygrad_key.endswith("lm_output.weight"): # lm_output.weight already is word embedding
+      t = load_from_tf2_ckpt(key=tinygrad_key, ckpt_dir=init_ckpt)
+      if any(k in tinygrad_key for k in ["intermediate.dense.weight", "output.dense.weight", "clsf_output.weight"]) and "attention" not in tinygrad_key:
+        t = t.transpose() 
+      elif any(k in tinygrad_key for k in ["self", "output.dense", "clsf_pooler", "lm_transform"]) and "weight" in tinygrad_key:
+        t = t.reshape(*x.shape).transpose()
+      elif all(k in tinygrad_key for k in ["self", "bias"]):
+        t = t.reshape(*x.shape)
+      x.assign(t).realize().to_(GPUS)
+    x.realize().to_(GPUS)
+  parameters = get_parameters(model)
+
+  assert 800 % EVAL_BS == 0, "Evaluation batch size must divide 800 without remainder"
+
+  # ** Log hparams **
+  for key, value in config.items():
+    print(f'HParam: "{key}": {value}')
+
+  # ** Optimizer **
+  skip_list = [v for k, v in get_state_dict(model).items() if "bias" in k or "LayerNorm" in k]
+  parameters = [x for x in parameters if x not in set(skip_list)]
+  optimizer = LAMB(parameters, 1 / warmup_steps, eps=1e-6, wd=decay, adam=False)
+  optimizer_skip = LAMB(skip_list, 1 / warmup_steps, eps=1e-6, wd=0.0, adam=False)
+  optimizer_group = OptimizerGroup(optimizer, optimizer_skip)
+
+  # ** LR scheduler **
+  scheduler = PolynomialDecayWithWarmup(optimizer, max_lr, 0, train_steps, warmup_steps, power=poly_power)
+  print(f"Training with batch size {BS} for {epochs} epochs with each {train_steps} steps")
+
+  # ** resume from checkpointing **
+  start_step = 0
+  if ckpt:=getenv("RESUME", ""):
+    load_training_state(model, optimizer_group, scheduler, safe_load(ckpt))
+    start_step = scheduler.epoch_counter.numpy().item()
+    print(f"resuming from {ckpt} at step {start_step}")
+
+  # ** init wandb **
+  WANDB = getenv("WANDB")
+  if WANDB:
+    import wandb
+    wandb_args = {"id": wandb_id, "resume": "must"} if (wandb_id := getenv("WANDB_RESUME", "")) else {}
+    wandb.init(config=config, **wandb_args, project="MLPerf")
+
+  BENCHMARK = getenv("BENCHMARK")
+
+  @TinyJit
+  def train_step(input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor, masked_positions:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
+    with Context(BEAM=TRAIN_BEAM):
+      lm_logits, clsf_logits = model(input_ids, segment_ids, attention_mask, masked_positions)
+      lm_loss = lm_logits.sparse_categorical_crossentropy(masked_lm_ids, ignore_index=masked_lm_weights)
+      clsf_loss = clsf_logits.binary_crossentropy_logits(next_sentence_labels)
+      loss = lm_loss + clsf_loss
+
+      if not getenv('DISABLE_BACKWARD', 0):
+        optimizer_group.zero_grad()
+        loss.backward()
+
+        optimizer_group.step()
+        scheduler.step()
+      return loss.realize()
+
+  @TinyJit
+  def eval_step(input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor, masked_positions:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
+    with Context(BEAM=EVAL_BEAM):
+      lm_logits, clsf_logits = model(input_ids, segment_ids, attention_mask, masked_positions)
+
+      clsf_predictions = clsf_logits.log_softmax().argmax(-1)
+      clsf_accuracy = (clsf_predictions == next_sentence_labels).float().mean()
+
+      mlm_predictions = lm_logits.log_softmax().argmax(-1)
+      mask = (masked_lm_weights == 1.0)
+      mlm_accuracy = (mlm_predictions == masked_lm_ids).where(mask, 0).sum() / mask.float().sum()
+
+      lm_loss = lm_logits.sparse_categorical_crossentropy(masked_lm_ids, ignore_index=masked_lm_weights)
+      clsf_loss = clsf_logits.binary_crossentropy_logits(next_sentence_labels)
+      return {
+        "masked_lm_accuracy": mlm_accuracy.realize(), 
+        "masked_lm_loss": lm_loss.realize(), 
+        "next_sentence_accuracy": clsf_accuracy.realize(), 
+        "next_sentence_loss": clsf_loss.realize()
+        }
+
+  def data_get(it, eval=False):
+    data: dict[str, Tensor] = next(it)
+    for key in data.keys():
+        if not eval:
+            data[key].shard_(GPUS, axis=0)
+        else:
+            eval_gpus = GPUS[:max(2, min(len(GPUS), 8) // 2 * 2)]
+            data[key].shard_(eval_gpus, axis=0)
+    return data
+  
+  eval_it = iter(batch_load_bert(EVAL_BS, val=True))
+
+  step_times = []
+  # ** train loop **
+  wc_start = time.perf_counter()
+  Tensor.training = True
+  train_it = iter(tqdm(batch_load_bert(BS, val=False), total=train_steps, disable=BENCHMARK))
+  i, data = 0, data_get(train_it)
+  while data is not None and i < train_steps and not achieved:
+    st = time.perf_counter()
+    GlobalCounters.reset()
+    loss = train_step(data["input_ids"], data["segment_ids"], data["input_mask"], data["masked_lm_positions"], \
+                      data["masked_lm_ids"], data["masked_lm_weights"], data["next_sentence_labels"])
+
+    pt = time.perf_counter()
+
+    try:
+      next_data = data_get(train_it)
+    except StopIteration:
+      next_data = None
+
+    dt = time.perf_counter()
+
+    device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
+    loss = loss.numpy().item()
+
+    cl = time.perf_counter()
+    if BENCHMARK: step_times.append(cl - st)
+
+    tqdm.write(
+      f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(pt - st) * 1000.0:7.2f} ms python, {(dt - pt) * 1000.0:6.2f} ms fetch data, "
+      f"{(cl - dt) * 1000.0:7.2f} ms {device_str}, {loss:5.2f} loss, {optimizer.lr.numpy()[0]:.6f} LR, "
+      f"{GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS")
+    if WANDB:
+      wandb.log({"lr": optimizer.lr.numpy(), "train/loss": loss, "train/step_time": cl - st,
+                  "train/python_time": pt - st, "train/data_time": dt - pt, "train/cl_time": cl - dt,
+                  "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st)})
+
+    data, next_data = next_data, None
+    i += 1
+
+    if i == BENCHMARK:
+      median_step_time = sorted(step_times)[(BENCHMARK + 1) // 2]  # in seconds
+      estimated_total_hours = median_step_time * train_steps * epochs / 60 / 60
+      print(f"Estimated training time: {estimated_total_hours:.0f}h{(estimated_total_hours - int(estimated_total_hours)) * 60:.0f}m")
+      return
+
+    # ** eval loop **
+    if i % eval_step_freq == 0 or i == 1:
+      train_step.reset()  # free the train step memory :(
+      eval_loss = []
+      eval_accuracy = []
+      eval_times = []
+      Tensor.training = False
+
+      for _ in tqdm(range((max_eval_steps * 8) // EVAL_BS), desc="Evaluating", total=(max_eval_steps * 8) // EVAL_BS, disable=BENCHMARK):
+        data = data_get(eval_it, eval=True)
+        GlobalCounters.reset()
+        st = time.time()
+
+        eval_result: dict[str, Tensor] = eval_step(data["input_ids"], data["segment_ids"], data["input_mask"], data["masked_lm_positions"], \
+                                                  data["masked_lm_ids"], data["masked_lm_weights"], data["next_sentence_labels"])
+
+        lm_loss, clsf_loss  = eval_result["masked_lm_loss"].numpy().item(), eval_result["next_sentence_loss"].numpy().item()
+        mlm_accuracy, clsf_accuracy = eval_result["masked_lm_accuracy"].numpy().item(), eval_result["next_sentence_accuracy"].numpy().item()
+        eval_loss.append([lm_loss, clsf_loss])
+        eval_accuracy.append([mlm_accuracy, clsf_accuracy])
+
+        et = time.time()
+        eval_times.append(et - st)
+
+      eval_step.reset()
+      total_lm_loss = sum(pair[0] for pair in eval_loss) / len(eval_loss)
+      total_clsf_loss = sum(pair[1] for pair in eval_loss) / len(eval_loss)
+      total_lm_accuracy = sum(pair[0] for pair in eval_accuracy) / len(eval_accuracy)
+      total_clsf_accuracy = sum(pair[1] for pair in eval_accuracy) / len(eval_accuracy)
+      total_fw_time = sum(eval_times) / len(eval_times)
+      tqdm.write(f"eval lm loss: {total_lm_loss:.2f}, eval clsf loss: {total_clsf_loss:.2f}, eval lm accuracy: {total_lm_accuracy:.6f}, \
+                  eval clsf accuracy: {total_clsf_accuracy:.2f}, eval time: {total_fw_time:.2f}")
+      if WANDB:
+        wandb.log({"eval/lm_loss": total_lm_loss, "eval/clsf_loss": total_clsf_loss, "eval/lm_accuracy": total_lm_accuracy, \
+                    "eval/clsf_accuracy": total_clsf_accuracy, "eval/forward_time": total_fw_time})
+
+      # save model if achieved target
+      if not achieved and total_lm_accuracy >= target:
+        wc_end = time.perf_counter()
+        if not os.path.exists(ckpt_dir := getenv('CKPT_DIR', "./ckpts")): os.mkdir(ckpt_dir)
+        fn = f"{ckpt_dir}/bert-large.safe"
+        safe_save(get_state_dict(model), fn)
+        print(f" *** Model saved to {fn} ***")
+
+        total_seconds = wc_end - wc_start
+        hours = int(total_seconds // 3600)
+        minutes = int((total_seconds % 3600) // 60)
+        seconds = total_seconds % 60
+        print(f"Reference Convergence point reached after {i * BS} datasamples and {hours}h{minutes}m{seconds:.2f}s.")
+        achieved = True
+
+    if getenv("CKPT") and i % save_ckpt_freq == 0:
+      if not os.path.exists(ckpt_dir := getenv('CKPT_DIR', "./ckpts")): os.mkdir(ckpt_dir)
+      if WANDB and wandb.run is not None:
+        fn = f"{ckpt_dir}/{time.strftime('%Y%m%d_%H%M%S')}_{wandb.run.id}.safe"
+      else:
+        fn = f"{ckpt_dir}/{time.strftime('%Y%m%d_%H%M%S')}.safe"
+      print(f"saving ckpt to {fn}")
+      safe_save(get_training_state(model, optimizer_group, scheduler), fn)
+      ckpt_files = [f for f in os.listdir(ckpt_dir) if os.path.isfile(os.path.join(ckpt_dir, f))]
+      ckpt_files.sort(key=lambda x: os.path.getmtime(os.path.join(ckpt_dir, x)))
+      while len(ckpt_files) > keep_ckpt_amount:
+        last = ckpt_files.pop(0)
+        print(f"Removing old ckpt {last}")
+        os.remove(os.path.join(ckpt_dir, last))
 
 def train_maskrcnn():
   # TODO: Mask RCNN
