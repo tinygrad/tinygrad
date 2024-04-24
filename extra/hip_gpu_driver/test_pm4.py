@@ -5,7 +5,7 @@ import tinygrad.runtime.autogen.amd_gpu as amd_gpu
 import tinygrad.runtime.autogen.kfd as kfd
 import tinygrad.runtime.autogen.hsa as hsa
 from tinygrad.engine.schedule import create_schedule
-from tinygrad.runtime.ops_amd import kio, KFDProgram
+from tinygrad.runtime.ops_amd import kio, AMDProgram
 from tinygrad.helpers import to_mv
 
 DISPATCH_INIT_VALUE = 0x21 | 0x8000
@@ -51,7 +51,7 @@ if __name__ == "__main__":
   b.lazydata.buffer.allocate()
   si = create_schedule([b.lazydata])[-1]
   runner = dev.get_runner(*si.ast)
-  prg: KFDProgram = runner.clprg
+  prg: AMDProgram = runner.clprg
   print("device initted")
 
   # Compute Queue

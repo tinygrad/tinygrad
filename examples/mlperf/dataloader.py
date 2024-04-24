@@ -1,4 +1,5 @@
 import os, random
+from typing import List
 import numpy as np
 from PIL import Image
 from tqdm import tqdm
@@ -138,6 +139,38 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None):
     for p in procs: p.join()
     shm.close()
     shm.unlink()
+
+def load_bert_file(fn:str) -> List[dict]:
+  with open(fn, "rb") as f: data = pickle.load(f)
+  return data
+
+def process_batch_bert(data: List[dict]) -> dict[str, Tensor]:
+  return {
+    "input_ids": Tensor(np.concatenate([s["input_ids"] for s in data], axis=0), dtype=dtypes.float32),
+    "input_mask": Tensor(np.concatenate([s["input_mask"] for s in data], axis=0), dtype=dtypes.float32),
+    "segment_ids": Tensor(np.concatenate([s["segment_ids"] for s in data], axis=0), dtype=dtypes.float32),
+    "masked_lm_positions": Tensor(np.concatenate([s["masked_lm_positions"] for s in data], axis=0), dtype=dtypes.float32),
+    "masked_lm_ids": Tensor(np.concatenate([s["masked_lm_ids"] for s in data], axis=0), dtype=dtypes.float32),
+    "masked_lm_weights": Tensor(np.concatenate([s["masked_lm_weights"] for s in data], axis=0), dtype=dtypes.float32),
+    "next_sentence_labels": Tensor(np.concatenate([s["next_sentence_labels"] for s in data], axis=0), dtype=dtypes.float32),
+  }
+
+# For train: Stop when we run through all data
+# For val: Wrap around val dataset and never stop
+#     Reference: https://github.com/mlcommons/training/blob/1c8a098ae3e70962a4f7422c0b0bd35ae639e357/language_model/tensorflow/bert/run_pretraining.py, Line 420
+def batch_load_bert(BS:int, val=False):
+  from extra.datasets.wikipedia import get_wiki_train_files, get_wiki_val_files
+  files = get_wiki_val_files() if val else get_wiki_train_files()
+  blob, end = [], False
+  while files: # As long as there is data, keep going
+    while len(blob) < BS and not end: # Fill blob until there is enough for next step
+      blob.extend(load_bert_file(files.pop(0)))
+      if not files: 
+        if val: files = get_val_files()
+        else: end = True # End of train data - avoid pop on empty file list
+    if len(blob) >= BS: # if last train step does not have enough for a full batch
+      yield process_batch_bert(blob[:BS])
+      blob = blob[BS:]
 
 if __name__ == "__main__":
   from extra.datasets.imagenet import get_train_files, get_val_files

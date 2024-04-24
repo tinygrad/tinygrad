@@ -1,6 +1,7 @@
 from __future__ import annotations
 import subprocess, hashlib, tempfile, ctypes, ctypes.util, functools, re
 from pathlib import Path
+from dataclasses import replace
 from typing import Tuple, Optional, List
 import tinygrad.runtime.autogen.cuda as cuda
 from tinygrad.helpers import DEBUG, getenv, from_mv, to_char_p_p, init_c_var, init_c_struct_t, colored, cpu_time_execution
@@ -57,7 +58,7 @@ class PTXCompiler(Compiler):
   def __init__(self, arch:str):
     self.arch = arch
     self.version = "7.8" if arch >= "sm_89" else "7.5"
-    PTXCompiler.compiler_opts = PTXCompiler.compiler_opts._replace(has_tensor_cores=int(arch[3:]) >= 80)
+    PTXCompiler.compiler_opts = replace(PTXCompiler.compiler_opts, has_tensor_cores=int(arch[3:]) >= 80)
     super().__init__(f"compile_ptx_{self.arch}")
   def render(self, name:str, uops) -> str: return PTXRenderer(name, uops).replace("TARGET", self.arch).replace("VERSION", self.version)
   def compile(self, src:str) -> bytes: return src.encode()
@@ -66,7 +67,7 @@ class CUDACompiler(Compiler):
   compiler_opts = CompilerOptions("CUDA", global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024], shared_max=49152)
   def __init__(self, arch:str):
     self.arch = arch
-    CUDACompiler.compiler_opts = CUDACompiler.compiler_opts._replace(has_tensor_cores=int(arch[3:]) >= 80)
+    CUDACompiler.compiler_opts = replace(CUDACompiler.compiler_opts, has_tensor_cores=int(arch[3:]) >= 80)
     check(cuda.nvrtcVersion((nvrtcMajor := ctypes.c_int()), (nvrtcMinor := ctypes.c_int())))
     self.compile_options = [f'--gpu-architecture={arch}', "-I/usr/local/cuda/include", "-I/usr/include", "-I/opt/cuda/include/"]
     if (nvrtcMajor.value, nvrtcMinor.value) >= (12, 4): self.compile_options.append("--minimal")
