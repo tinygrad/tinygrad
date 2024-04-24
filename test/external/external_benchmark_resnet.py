@@ -75,7 +75,7 @@ class BenchmarkResnetTrain(unittest.TestCase):
 
     CNT = getenv("CNT", 5)
     best_tm = None
-    flops, mem_used, kernels = None, None, None
+    flops, mem_used, mem, kernels = None, None, None, None
     for i in range(CNT):
       with Context(SAVE_SCHEDULE=0): x = Tensor.randn(bs, cin, xy, xy, requires_grad=True).realize()
       GlobalCounters.reset()
@@ -85,21 +85,38 @@ class BenchmarkResnetTrain(unittest.TestCase):
       Device[Device.DEFAULT].synchronize()
       et = time.perf_counter()
 
-      if flops is None: flops = GlobalCounters.global_ops / JITCNT
+      flops = GlobalCounters.global_ops / JITCNT
       mem_used = GlobalCounters.mem_used  # a little high with JITCNT > 1 fsr
-      kernels = GlobalCounters.kernel_count // JITCNT
+      mem = GlobalCounters.global_mem / JITCNT
+      if kernels is None: kernels = GlobalCounters.kernel_count // JITCNT
       tm = (et-st) / JITCNT
       if best_tm is None or tm < best_tm: best_tm = tm
-    print(f"\r{name:42s}: {best_tm * 1000:>9.2f} ms, {flops / 10**12 / tm:>7.2f} tflops, {mem_used / 10**9: 7.2f} GB used, {kernels:>6d} kernels")
+    print(f"\r{name:42s}: {best_tm * 1000:>9.2f} ms, {flops / 10**12 / best_tm:>7.2f} tflops, {mem_used / 10**9: 7.2f} GB used, {kernels:>6d} kernels")
+    return best_tm, flops, mem, kernels
 
-  def test_layer1_1(self): self._test_layer(*self._get_layer(0, 0))
-  def test_layer1_2(self): self._test_layer(*self._get_layer(0, 1))
-  def test_layer2_1(self): self._test_layer(*self._get_layer(1, 0))
-  def test_layer2_2(self): self._test_layer(*self._get_layer(1, 1))
-  def test_layer3_1(self): self._test_layer(*self._get_layer(2, 0))
-  def test_layer3_2(self): self._test_layer(*self._get_layer(2, 1))
-  def test_layer4_1(self): self._test_layer(*self._get_layer(3, 0))
-  def test_layer4_2(self): self._test_layer(*self._get_layer(3, 1))
+  def test_layer1_1(self): self._est(*self._test_layer(*self._get_layer(0, 0)), 1)
+  def test_layer1_2(self): self._est(*self._test_layer(*self._get_layer(0, 1)), 2)
+  def test_layer2_1(self): self._est(*self._test_layer(*self._get_layer(1, 0)), 1)
+  def test_layer2_2(self): self._est(*self._test_layer(*self._get_layer(1, 1)), 3)
+  def test_layer3_1(self): self._est(*self._test_layer(*self._get_layer(2, 0)), 1)
+  def test_layer3_2(self): self._est(*self._test_layer(*self._get_layer(2, 1)), 5)
+  def test_layer4_1(self): self._est(*self._test_layer(*self._get_layer(3, 0)), 1)
+  def test_layer4_2(self): self._est(*self._test_layer(*self._get_layer(3, 1)), 2)
+
+  est_tm, est_flops, est_mem, est_kernels = 0, 0, 0, 0
+
+  @classmethod
+  def _est(cls, tm, flops, mem, kernels, mult):
+    cls.est_tm += tm * mult
+    cls.est_flops += flops * mult
+    cls.est_mem += mem * mult
+    cls.est_kernels += kernels * mult
+
+  @classmethod
+  def tearDownClass(cls):
+    print(f"estimated step tm: {cls.est_tm * 1000.0:.2f} ms, {cls.est_flops / 10 ** 12 / cls.est_tm:.3f} tflops, "
+          f"{cls.est_mem / 10 ** 9 / cls.est_tm:.2f} GB/s, {cls.est_kernels} kernels")
+
 
 if __name__ == '__main__':
   unittest.main()
