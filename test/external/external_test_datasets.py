@@ -37,7 +37,7 @@ class ExternalTestDatasets(unittest.TestCase):
     np.save(lbl_path, lbl, allow_pickle=False)
 
     return img_path, lbl_path
-  
+
   def test_kits19_training_set(self):
     sample_pth = self._create_sample()
     tinygrad_img, tinygrad_lbl = next(iterate([sample_pth], val=False))
