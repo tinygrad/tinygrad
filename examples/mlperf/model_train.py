@@ -333,7 +333,7 @@ def train_retinanet():
       v.to_(GPUS)
   # model.load_checkpoint("./ckpts/retinanet_4xgpu020_B100_E0_11703.safe")
 
-  model.load_checkpoint("./ckpts/retinanet_4xgpu020_B52_E0x75.safe")
+  # model.load_checkpoint("./ckpts/retinanet_4xgpu020_B52_E0x75.safe")
   # model.load_from_pretrained()
   for k, v in get_state_dict(model).items():
     if v.requires_grad:
