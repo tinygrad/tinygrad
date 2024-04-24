@@ -36,8 +36,7 @@ def ptr_ar(root, uops):
 from tinygrad.helpers import DEBUG
 def optimize_gated_loads(uops: UOpGraph):
   gated_loads = list(filter(lambda u:u.uop is UOps.LOAD and len(u.vin)>3, uops.uops))
-  def successors(uop):
-    return list(filter(lambda u: uop in u.vin, uops.uops))
+  def successors(uop): return list(filter(lambda u: uop in u.vin, uops.uops))
   while gated_loads:
     same_gate = list(filter(lambda u: u.vin[2] == gated_loads[0].vin[2], gated_loads))
     for u in reversed(same_gate): uops.uops.insert(uops.uops.index(same_gate[-1]), uops.uops.pop(uops.uops.index(u)))
@@ -45,8 +44,7 @@ def optimize_gated_loads(uops: UOpGraph):
     same_gate = list(reversed(same_gate))
     pred_2 = uops.add(UOps.ALU, dtypes.bool, (same_gate[0].vin[2],), arg=UnaryOps.NEG, insert_before=uops.uops.index(same_gate[0]))
     gate = uops.add(UOps.IF, None, (pred_2,), insert_before=min(indices()), cachable=False)
-    alts = [(ld, ld.vin[3]) for ld in same_gate]
-    end = uops.add(UOps.ENDIF, None, (gate,), arg=tuple(alts), insert_before=max(indices())+1, cachable=False)
+    end = uops.add(UOps.ENDIF, None, (gate,), arg=tuple([(ld, ld.vin[3]) for ld in same_gate]), insert_before=max(indices())+1, cachable=False)
     for u in reversed(uops.uops.copy()[:uops.uops.index(gate)]):
       if (u.uop not in [UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL, UOps.ENDIF, UOps.ENDLOOP] and
           all([uops.uops.index(s)>uops.uops.index(gate) and uops.uops.index(s)<uops.uops.index(end) for s in successors(u)])):
@@ -57,16 +55,12 @@ def optimize_gated_loads(uops: UOpGraph):
         uops.uops.insert(uops.uops.index(end), uops.uops.pop(uops.uops.index(u)))
     mov_outside=[]
     for u in reversed(uops.uops[uops.uops.index(gate)+1:uops.uops.index(end)]):
-      if u.uop is UOps.GEP: mov_outside.append(u)
       if u in same_gate or all([uops.uops.index(s)>uops.uops.index(gate) and uops.uops.index(s)<uops.uops.index(end) and s not in mov_outside for s in successors(u)]): continue
       mov_outside.append(u)
       if DEBUG>4: print("restored", u, uops.uops.index(u))
     for u in reversed(mov_outside):
       uops.uops.insert(uops.uops.index(gate), uops.uops.pop(uops.uops.index(u)))
     gated_loads = [gl for gl in gated_loads if gl not in same_gate]
-  for u in reversed(uops.uops):
-    if u.uop is UOps.GEP:
-      uops.uops.insert(uops.uops.index(u.vin[0])+1, uops.uops.pop(uops.uops.index(u)))
 
 class AssemblyLanguage(NamedTuple):
   kernel_prefix: str = ""
