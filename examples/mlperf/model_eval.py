@@ -63,13 +63,13 @@ def eval_resnet():
 def eval_unet3d():
   # UNet3D
   from extra.models.unet3d import UNet3D
-  from extra.datasets.kits19 import iterate, sliding_window_inference
+  from extra.datasets.kits19 import iterate, sliding_window_inference, get_val_files
   from examples.mlperf.metrics import dice_score
   mdl = UNet3D()
   mdl.load_from_pretrained()
   s = 0
   st = time.perf_counter()
-  for i, (image, label) in enumerate(iterate(), start=1):
+  for i, (image, label) in enumerate(iterate(get_val_files()), start=1):
     mt = time.perf_counter()
     pred, label = sliding_window_inference(mdl, image, label)
     et = time.perf_counter()
