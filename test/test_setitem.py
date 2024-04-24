@@ -22,10 +22,17 @@ class TestSetitem(unittest.TestCase):
       t[slc] = Tensor(val.tolist()) if isinstance(val, np.ndarray) else val
       np.testing.assert_allclose(t.numpy(), n)
 
-  def test_setitem_into_realized(self):
-    t = Tensor.arange(4).reshape(2, 2).realize()
+  def test_setitem_into_unrealized(self):
+    t = Tensor.arange(4).reshape(2, 2)
     t[1] = 5
     np.testing.assert_allclose(t.numpy(), [[0, 1], [5, 5]])
+
+  def test_setitem_dtype(self):
+    for dt in (dtypes.int, dtypes.float, dtypes.bool):
+      for v in (5., 5, True):
+        t = Tensor.ones(6,6, dtype=dt).contiguous()
+        t[1] = v
+        assert t.dtype == dt
 
   def test_setitem_into_noncontiguous(self):
     t = Tensor.ones(4)

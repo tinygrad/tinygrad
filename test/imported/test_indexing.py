@@ -848,7 +848,7 @@ class TestIndexing(unittest.TestCase):
     res = x[:, ind_int]
     numpy_testing_assert_equal_helper(ref, res)
     # no repeating indices for index_put
-    # TODO setitem
+    # TODO fancy setitem
     '''
     src = Tensor.randn(4)
     ind_long = Tensor.arange(4, dtype=dtypes.int64)
@@ -861,7 +861,7 @@ class TestIndexing(unittest.TestCase):
       numpy_testing_assert_equal_helper(inp_ref, inp_res)
     '''
 
-  # TODO setitem
+  # TODO empty setitem
   '''
   def test_index_put_accumulate_empty(self):
     # Regression test for https://github.com/pytorch/pytorch/issues/94667
@@ -958,7 +958,7 @@ class TestIndexing(unittest.TestCase):
     idx = Tensor([], dtype=dtypes.int64)
     numpy_testing_assert_equal_helper(x[idx].numel(), 0)
 
-    # TODO setitem
+    # TODO empty setitem
     '''
     # empty assignment should have no effect but not throw an exception
     y = clone(x)
@@ -1134,7 +1134,7 @@ class TestIndexing(unittest.TestCase):
     numpy_testing_assert_equal_helper(x, unmodified)
 
     # But assignment should modify the original
-    # TODO setitem
+    # TODO fancy setitem
     '''
     unmodified = clone(x)
     x[1:2, [1, 2]] = 0
@@ -1555,7 +1555,7 @@ class TestNumpy(unittest.TestCase):
     numpy_testing_assert_equal_helper(a, expected)
   '''
 
-  # TODO setitem
+  # TODO fancy setitem
   '''
   def test_truncate_leading_1s(self):
     col_max = Tensor.randn(1, 4)
