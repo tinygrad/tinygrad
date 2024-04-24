@@ -147,7 +147,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: Dict[LazyBuffer, LazyBuffer] = {}
   for r in allbufs.keys():
-    if r != r.base or r.op not in ReduceOps or r in realizes: continue
+    if r != r.base or r.op not in ReduceOps or r.realized is not None or r.forced_realize: continue
 
     # follow the reduce down
     child_set: Dict[LazyBuffer, ShapeTracker] = {r: r.st}
@@ -157,11 +157,11 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
     while not forced_realize and len(child_set):
       next_child_set = {}
       for tr,st in child_set.items():
-        if tr in realizes:
+        if tr in realizes and tr is not r:
           realized_children[tr] = st
           # can only reduce contiguous
           # max one reduceop per kernel
-          if not st.contiguous or st.size != r.st.size or (tr in reduce_for_op and reduce_for_op[tr] != r):
+          if not st.contiguous or st.size != r.st.size or (tr in reduce_for_op and reduce_for_op[tr] != r) or tr.device != r.device:
             can_chase = tr not in reduce_for_op or reduce_for_op[tr] == r
             forced_realize = True
             break
@@ -190,7 +190,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
               break
             next_child_set[tr_next] = st + st_childs[0].st
       child_set = next_child_set
-    if forced_realize:
+    if forced_realize and r not in realizes:
       tr = r
       if can_chase:
         # can chase this down to contiguous children
@@ -208,7 +208,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
           tr = tr.srcs[0].base
         reduce_for_op[tr] = r
       realizes[tr] = None
-    else: reduce_for_op.update((tr, r) for tr in realized_children)
+    elif not forced_realize: reduce_for_op.update((tr, r) for tr in realized_children)
 
   output_groups: DefaultDict[Tuple, List[LazyBuffer]] = defaultdict(list)
   for r in realizes:
@@ -233,8 +233,10 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
     # realize outputs before a parent is assigned to
     parents_assigns = set(schedule_targets[assign_targets[x]].outputs[0] for x in lsi.inputs if x in assign_targets)
     for assign in parents_assigns:
-      graph[key].append(assign)
-      in_degree[assign] += 1
+      # assign happens outside of the fused graph
+      if assign not in lsi.outputs:
+        graph[key].append(assign)
+        in_degree[assign] += 1
 
   return graph, in_degree, prescheduled
 
