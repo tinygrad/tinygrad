@@ -42,8 +42,7 @@ class ConstBuffer:
 @dataclass(frozen=True)
 class ScheduleItem:
   ast: Tuple[LazyOp, ...]
-  outputs: Tuple[Buffer, ...]
-  inputs: Tuple[Buffer, ...]
+  bufs: Tuple[Buffer, ...]
 
 @dataclass(frozen=True, eq=False)
 class LazyOp:

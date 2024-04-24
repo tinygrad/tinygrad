@@ -37,22 +37,23 @@ class EmptyOp(Runner):
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False): pass
 
 def lower_schedule_item(si:ScheduleItem) -> Runner:
-  assert len(set(x.device for x in si.outputs+si.inputs)) == 1 or si.ast[0].op is LoadOps.COPY
-  if si.ast[0].op is BufferOps.STORE: return Device[si.outputs[0].device].get_runner(*si.ast)
-  assert len(si.ast) == 1 and len(si.outputs) == 1, "only ASTRunner supports multioutput"
-  out, ast = si.outputs[0], si.ast[0]
+  assert len(set(x.device for x in si.bufs)) == 1 or si.ast[0].op is LoadOps.COPY
+  if si.ast[0].op is BufferOps.STORE: return Device[si.bufs[0].device].get_runner(*si.ast)
+  assert len(si.ast) == 1, "only ASTRunner supports multioutput"
+  out, ast = si.bufs[0], si.ast[0]
   if ast.op is LoadOps.COPY:
+    assert len(si.bufs) == 2, "copy is between a pair of buffers"
     kernel_type = BufferCopy
-    if hasattr(Device[out.device].allocator, 'transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]:
+    if hasattr(Device[out.device].allocator, 'transfer') and out.device.split(":")[0] == si.bufs[1].device.split(":")[0]:
       if getenv("USE_COPY_KERNEL"): return Device[out.device].get_runner(copy_ast(ast.arg))
       kernel_type = BufferXfer
-    return kernel_type(ast.arg, out.device, si.inputs[0].device)
+    return kernel_type(ast.arg, out.device, si.bufs[1].device)
   if ast.op is LoadOps.CUSTOM: return CustomOp(ast.arg)
   if ast.op is LoadOps.EMPTY: return EmptyOp(out)
   raise RuntimeError(f"don't know how to lower {ast}")
 
 def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, None]:
-  while len(schedule): yield ExecItem(lower_schedule_item(si:=schedule.pop(0)), list(si.outputs+si.inputs))
+  while len(schedule): yield ExecItem(lower_schedule_item(si:=schedule.pop(0)), list(si.bufs))
 
 capturing: List = []  # put classes with an add method in here
 
@@ -81,9 +82,8 @@ def _internal_memory_planner(buffers:List[Iterable[Buffer]], debug_prefix="") ->
   return assigned
 
 def memory_planner(schedule:List[ScheduleItem]) -> List[ScheduleItem]:
-  assigned = _internal_memory_planner([si.outputs+si.inputs for si in schedule])
-  return [ScheduleItem(si.ast, tuple(assigned.get(x, x) for x in si.outputs),
-                               tuple(assigned.get(x, x) for x in si.inputs)) for si in schedule]
+  assigned = _internal_memory_planner([si.bufs for si in schedule])
+  return [ScheduleItem(si.ast, tuple(assigned.get(x, x) for x in si.bufs)) for si in schedule]
 
 def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[Variable, int]]=None):
   for ei in lower_schedule(schedule):

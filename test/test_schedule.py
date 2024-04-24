@@ -19,13 +19,13 @@ def check_schedule(t:Union[Tensor, List[Tensor]], allowed:int, to_prerealize:Opt
   if to_prerealize:
     for pre in to_prerealize:
       for s in pre.schedule(seen=seen.copy()):
-        for i,out in enumerate(s.outputs):
+        for i,out in enumerate(s.bufs):
           if GRAPH: realized_lazybuffer(out, 0)
           seen.add(out)
   sched = create_schedule(flatten([r.lazydata.lbs for r in t]), seen)
   if GRAPH:
     for i,s in enumerate(sched):
-      for out in s.outputs: realized_lazybuffer(out, i+1)
+      for out in s.bufs: realized_lazybuffer(out, i+1)
   if filter_loadops: sched = [s for s in sched if s.ast[0].op not in LoadOps]
   if len(sched) != allowed: print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
   if len(sched) != allowed or DEBUG >= 3:
@@ -503,12 +503,12 @@ class TestSchedule(unittest.TestCase):
     a = shared * 2
     b = shared * 3
     sched = check_schedule([a, b], 1)
-    for si in sched[:-2]: assert all(out.dtype is dtypes.half for out in si.outputs)
+    for si in sched[:-2]: assert all(out.dtype is dtypes.half for out in si.bufs[0:len(si.ast)])
 
     # reduce
     a = z.sum(axis=0).half().float().sum(axis=0)
     sched = check_schedule(a, 2)
-    for si in sched[:-1]: assert all(out.dtype is dtypes.half for out in si.outputs)
+    for si in sched[:-1]: assert all(out.dtype is dtypes.half for out in si.bufs[0:len(si.ast)])
 
     # expand
     # expand will realize just after the .float(), so requires change to realize-before-expand

@@ -12,9 +12,9 @@ from tinygrad.engine.realize import capturing
 class TestTimeLinearizer(unittest.TestCase):
   def test_reasonable_time(self):
     si = [i for i in create_schedule([Tensor([1,2,3,4]).add(1).lazydata]) if i.ast[0].op not in LoadOps][0]
-    out = Buffer(Device.DEFAULT, si.outputs[0].size, si.outputs[0].dtype).allocate()
+    out = Buffer(Device.DEFAULT, si.bufs[0].size, si.bufs[0].dtype).allocate()
     memops = {x.arg.idx:x.arg.st.real_size() for x in si.ast[0].lazyops if x.op is BufferOps.LOAD}
-    rawbufs = [out] + [Buffer(Device.DEFAULT, memops[i], x.dtype).allocate() for i,x in enumerate(si.inputs, start=len(si.outputs))]
+    rawbufs = [out] + [Buffer(Device.DEFAULT, memops[i], x.dtype).allocate() for i,x in enumerate(si.bufs[1:], start=1)]
     tm = time_linearizer(Linearizer(*si.ast), rawbufs, allow_test_size=False, cnt=10)
     assert tm > 0 and tm != float('inf')
 
