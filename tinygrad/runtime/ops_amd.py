@@ -208,18 +208,8 @@ class HWPM4Queue:
     rsrc1, rsrc2 = code.compute_pgm_rsrc1, code.compute_pgm_rsrc2
 
     # this is required
-    lds_size = ((prg.group_segment_size+63)//64)&0x1FF
-    assert lds_size <= 0x80  # larger numbers stall the GPU
-
-    # lds_size = 0x1ff
-
-    # rsrc2 |= ((((prg.group_segment_size+63)//64)&0x1FF) << 15)
-    # rsrc2 |= 0x7f << 15
-    # rsrc2 |= 0x1ff << 15
-
-    # rsrc2 |= ((prg.group_segment_size+31)//64) << 15
-    # rsrc2 |= (prg.group_segment_size//32) << 15
-    # user_sgpr =
+    lds_size = ((prg.group_segment_size + 511) // 512) & 0x1FF
+    assert lds_size <= 0x80 # larger numbers stall the GPU
 
     prog_addr = (prg.handle + code.kernel_code_entry_byte_offset) >> 8
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 6), regCOMPUTE_PGM_LO, prog_addr&0xFFFFFFFF, prog_addr>>32, 0, 0,
