@@ -3,13 +3,12 @@ from tinygrad.device import Compiled, MallocAllocator, Compiler, CompilerOptions
 from tinygrad.helpers import cpu_time_execution, getenv
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
 
-OMP_HEADER, OMP_PRAGMA, OMP_FLAGS = ("#include <omp.h>\n", "#pragma omp parallel for collapse({})", "-Xpreprocessor -fopenmp -lomp") if getenv("OMP", 0) else ("", None, "")  # noqa: E501
+OMP_HEADER, OMP_FLAGS = ("#include <omp.h>\n", "-Xpreprocessor -fopenmp -lomp") if (OMP_SET:=getenv("OMP", 0)) else ("", "")
 CLANG_PROGRAM_HEADER = OMP_HEADER +'#include <stdbool.h>\n#include <tgmath.h>\n#define max(x,y) ((x>y)?x:y)\n#define half __fp16\n'
 
 class ClangCompiler(Compiler):
-  compiler_opts = CompilerOptions("CLANG", supports_float4=False, has_local=False)
-  def render(self, name:str, uops) -> str:
-    return CLANG_PROGRAM_HEADER + uops_to_cstyle(CStyleLanguage(buffer_suffix=" restrict", first_loop_prefix=OMP_PRAGMA), name, uops)
+  compiler_opts = CompilerOptions("CLANG", supports_float4=False, has_local=OMP_SET)
+  def render(self, name:str, uops) -> str: return CLANG_PROGRAM_HEADER + uops_to_cstyle(CStyleLanguage(buffer_suffix=" restrict"), name, uops)
   def compile(self, src:str) -> bytes:
     # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here
     with tempfile.NamedTemporaryFile(delete=True) as output_file:
@@ -25,7 +24,7 @@ class ClangProgram:
       pathlib.Path(cached_file_path.name).write_bytes(lib)
       self.fxn = ctypes.CDLL(str(cached_file_path.name))[name]
 
-  def __call__(self, *bufs, vals=(), wait=False): return cpu_time_execution(lambda: self.fxn(*bufs, *vals), enable=wait)
+  def __call__(self, *bufs, global_size=(1,1,1), local_size=(1,1,1), vals=(), wait=False): return cpu_time_execution(lambda: self.fxn(*bufs, *vals), enable=wait)
 
 class ClangDevice(Compiled):
   def __init__(self, device:str): super().__init__(device, MallocAllocator, ClangCompiler("compile_clang"), ClangProgram)
