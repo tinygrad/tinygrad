@@ -81,20 +81,24 @@ def bufs_from_lin(lin:Linearizer, allocate:bool=True) -> List[Buffer]:
   assert all(r is not None for r in rawbufs)
   return cast(List[Buffer], rawbufs)
 
+def _count_upcast_local(lin:Linearizer):
+  up, lcl, tc_up = 1, 1, prod(tc.dims)//prod([x[1] for x in tc.threads]) if (tc:=lin.tensor_core) else 1
+  for s,c in zip(lin.full_shape, lin.colors()):
+    if c in {"magenta", "yellow"}: up *= s
+    elif c in {"cyan", "green", "white"}: lcl *= s
+  return up//tc_up, lcl
+
 # get dictionary of all possible actions
 def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Linearizer]:
   acted_lins, max_up, max_lcl = {0:lin} if include_0 else {}, getenv("BEAM_UPCAST_MAX", 256), getenv("BEAM_LOCAL_MAX", 256)
   for i,a in enumerate(actions):
+    if _count_upcast_local(lin)[1] == 1 and a.op in [OptOps.UPCAST, OptOps.UNROLL, OptOps.PADTO]: continue # add threads first to save running time
     if a.axis is not None and a.axis >= lin.shape_len: continue
     if a.axis is not None and lin.full_shape[a.axis] == a.amt and Opt(a.op, a.axis, 0) in actions: continue
     lin2 = lin.copy()
     try:
       lin2.apply_opt(a)
-      up, lcl, tc_up = 1, 1, prod(tc.dims)//prod([x[1] for x in tc.threads]) if (tc:=lin2.tensor_core) else 1
-      for s,c in zip(lin2.full_shape, lin2.colors()):
-        if c in {"magenta", "yellow"}: up *= s
-        elif c in {"cyan", "green", "white"}: lcl *= s
-      if up//tc_up > max_up or lcl > max_lcl: continue
+      if _count_upcast_local(lin2) > (max_up, max_lcl): continue
       acted_lins[i+1] = lin2
     except KernelOptError: pass
   return acted_lins
