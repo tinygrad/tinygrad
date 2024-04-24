@@ -543,6 +543,20 @@ class TestSchedule(unittest.TestCase):
     c1(img).elu().sum().backward()
     check_schedule(opt.schedule_step(), 7)
 
+  def test_nofuse_midexpand(self):
+    a = Tensor.empty((32, 32, 32))
+    b = Tensor.empty((1, 16))
+    c = a.sum() + 4
+    d = a.sum() + b
+    check_schedule([a, c, d], 4)
+
+  def test_nofuse_midreduce_unrealized(self):
+    a = Tensor.empty((32, 32))
+    b = Tensor.empty((4, 4)).sum()
+    c = a.sum() + 4
+    d = a.sum() + b
+    check_schedule([a, c, d], 3)
+
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_prefer_half_buffer(self):
     x = Tensor.ones(4).contiguous().realize()
