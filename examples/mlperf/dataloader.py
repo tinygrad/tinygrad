@@ -164,7 +164,7 @@ def shuffle_parts(file_paths: List[str]) -> List[str]:
     parts[part].append(f)
   
   part_ids = list(parts.keys())
-  random.Random().shuffle(parts)
+  random.shuffle(part_ids)
 
   shuffled_files = []
   for p in part_ids:
