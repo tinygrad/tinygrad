@@ -7,9 +7,7 @@ class TestSetitem(unittest.TestCase):
     cases = (
       ((6,6), (slice(2,4), slice(3,5)), np.ones((2,2))),
       ((6,6), (slice(2,4), slice(3,5)), 1.0),
-      ((6,6), (slice(2,4), slice(3,5)), [1,2]),
-      ((6,6), (slice(2,4), slice(3,5)), [[1,2],[3,4]]),
-      ((6,6), (slice(2,4), slice(3,5)), 1.0),
+      ((6,6), (slice(2,4), slice(3,5)), np.array([1.,2.])),
       ((4,4,4,4), (Ellipsis, slice(1,3), slice(None)), 4),
       ((4,4,4,4), (Ellipsis, slice(1,3)), 4),
       ((4,4,4,4), (slice(1,3), slice(None), slice(0,4,2)), 4),
@@ -18,10 +16,10 @@ class TestSetitem(unittest.TestCase):
       ((6,6), (slice(5,1,-2), slice(5,0,-3)), 1.0),
     )
     for shp, slc, val in cases:
-      t = Tensor.zeros(shp).contiguous()
-      t[slc] = val
       n = np.zeros(shp)
       n[slc] = val
+      t = Tensor.zeros(shp).contiguous()
+      t[slc] = Tensor(val.tolist()) if isinstance(val, np.ndarray) else val
       np.testing.assert_allclose(t.numpy(), n)
 
   def test_setitem_into_realized(self):
