@@ -16,8 +16,9 @@ from examples.hlb_cifar10 import UnsyncedBatchNorm
 # benchmark speed:                  BEAM=2 JITCNT=10 DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py
 # benchmark only one layer:         BEAM=2 DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py BenchmarkResnetTrain.test_layer1_2
 # inspect:                          DEBUG=2 BEAM=2 DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py
-# inspect convs:                    DEBUG=2 BEAM=2 CONV=1 DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py
-# inspect convs with batchnorm:     DEBUG=2 BEAM=2 CONV=1 BN=1 DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py
+# inspect 1x1 convs:                DEBUG=2 BEAM=2 CONV=2 DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py
+# inspect 3x3 convs:                DEBUG=2 BEAM=2 CONV=2 DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py
+# inspect 3x3 convs with batchnorm: DEBUG=2 BEAM=2 CONV=2 BN=1 DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py
 # etc
 
 # use ASSIGN=0 to disable batchnorm/optimizer assigns
@@ -44,13 +45,16 @@ class BenchmarkResnetTrain(unittest.TestCase):
     xy >>= (1 if slice_i > 0 or layer_i == 0 else 0)  # layer 1 is preceded by maxpool2d
     name = f"layer{layer_i+1} slice{slice_i+1}"
 
-    # get specific conv (0 or 1)
+    # get specific conv
     if conv:
-      if bn: f = [layer.conv2, layer.bn2, Tensor.relu]
-      else: f = [layer.conv2, Tensor.relu]
-      cin = layer.conv2.in_channels
-      xy = xy // layer.conv1.stride
-      return f"{name} conv2 x{str((bs, cin, xy, xy)):20s} k{str(layer.conv2.weight.shape):20s}" + (" bn" if bn else ""), f, cin, xy
+      convs = [layer.conv1, layer.conv2, layer.conv3] + ([layer.downsample[0]] if layer.downsample else [])
+      bns = [layer.bn1, layer.bn2, layer.bn3] + ([layer.downsample[1]] if layer.downsample else [])
+      f = [convs[conv-1]]
+      if bn: f.append(bns[conv-1])
+      f.append(Tensor.relu)
+      cin = f[0].in_channels
+      if conv == 3: xy //= convs[1].stride
+      return f"{name} conv{conv} x{str((bs, cin, xy, xy)):20s} k{str(f[0].weight.shape):20s}" + (" bn" if bn else ""), f, cin, xy
 
     cin = layer.conv1.in_channels
     return f"{name} x{(bs, cin, xy, xy)}", [layer], cin, xy
