@@ -257,7 +257,7 @@ def train_rnnt():
 
 def train_bert():
   # NOTE: pip install tensorflow required
-  from examples.mlperf.dataloader import batch_load_bert
+  from examples.mlperf.dataloader import batch_load_train_bert, batch_load_val_bert
   from examples.mlperf.helpers import get_mlperf_bert_model, load_from_tf2_ckpt
   from examples.mlperf.lr_schedulers import PolynomialDecayWithWarmup
 
@@ -269,18 +269,15 @@ def train_bert():
   for x in GPUS: Device[x]
   seed = config["seed"] = getenv("SEED", 12345)
 
-  TRAIN_BEAM = getenv("TRAIN_BEAM", BEAM.value)
-  EVAL_BEAM = getenv("EVAL_BEAM", BEAM.value)
-
   # ** hyperparameters **
   epochs             = config["epochs"]                 = getenv("EPOCHS", 1)
-  BS                 = config["GLOBAL_BATCH_SIZE"]      = getenv("GLOBAL_BATCH_SIZE", 4 * len(GPUS)) # FP32 6 GPUS -> BS24
-  EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 2)
-  max_lr             = config["OPT_BASE_LEARNING_RATE"] = getenv("OPT_BASE_LEARNING_RATE", 0.00035/256 * BS)
+  BS                 = config["GLOBAL_BATCH_SIZE"]      = getenv("BS", 4 * len(GPUS)) # FP32 6 GPUS -> BS24
+  EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 8)
+  max_lr             = config["OPT_BASE_LEARNING_RATE"] = getenv("OPT_BASE_LEARNING_RATE", 0.002/256 * BS)
 
-  train_steps        = config["TRAIN_STEPS"]            = getenv("TRAIN_STEPS", 125000 // BS)
+  train_steps        = config["TRAIN_STEPS"]            = getenv("TRAIN_STEPS", 3000000 // BS)
   warmup_steps       = config["NUM_WARMUP_STEPS"]       = getenv("NUM_WARMUP_STEPS", train_steps // 10)
-  max_eval_steps     = config["MAX_EVAL_STEPS"]         = getenv("MAX_EVAL_STEPS", 100)
+  max_eval_steps     = config["MAX_EVAL_STEPS"]         = getenv("MAX_EVAL_STEPS", (10000 + EVAL_BS - 1) // EVAL_BS) # EVAL_BS * MAX_EVAL_STEPS >= 10000
   eval_step_freq     = config["EVAL_STEP_FREQ"]         = int((math.floor(0.05 * (230.23 * BS + 3000000) / 25000) * 25000) / BS) # Round down
   save_ckpt_freq     = config["SAVE_CKPT_FREQ"]         = getenv("SAVE_CKPT_FREQ", 1000)
   keep_ckpt_amount   = config["KEEP_CKPT_AMOUNT"]       = getenv("KEEP_CKPT_AMOUNT", 5)
@@ -292,8 +289,8 @@ def train_bert():
   target, achieved                                      = getenv("TARGET", 0.72), False
 
   config["DEFAULT_FLOAT"] = dtypes.default_float.name
-  config["TRAIN_BEAM"]    = TRAIN_BEAM
-  config["EVAL_BEAM"]     = EVAL_BEAM
+  config["TRAIN_BEAM"]    = TRAIN_BEAM = getenv("TRAIN_BEAM", BEAM.value)
+  config["EVAL_BEAM"]     = EVAL_BEAM  = getenv("EVAL_BEAM", BEAM.value)
 
   Tensor.manual_seed(seed)  # seed for weight initialization
 
@@ -313,7 +310,7 @@ def train_bert():
     x.realize().to_(GPUS)
   parameters = get_parameters(model)
 
-  assert 800 % EVAL_BS == 0, "Evaluation batch size must divide 800 without remainder"
+  assert 10000 <= (EVAL_BS * max_eval_steps), "Evaluation batchsize * max_eval_steps must greater or equal 10000 to iterate over full eval dataset"
 
   # ** Log hparams **
   for key, value in config.items():
@@ -383,29 +380,24 @@ def train_bert():
         "next_sentence_loss": clsf_loss.realize()
         }
 
-  def data_get(it, eval=False):
+  def data_get(it):
     data: dict[str, Tensor] = next(it)
-    for key in data.keys():
-        if not eval:
-            data[key].shard_(GPUS, axis=0)
-        else:
-            eval_gpus = GPUS[:max(2, min(len(GPUS), 8) // 2 * 2)]
-            data[key].shard_(eval_gpus, axis=0)
+    for key in data.keys(): data[key].shard_(GPUS, axis=0)
     return data
   
-  eval_it = iter(batch_load_bert(EVAL_BS, val=True))
+  eval_it = iter(batch_load_val_bert(EVAL_BS))
+  train_it = iter(tqdm(batch_load_train_bert(BS), total=train_steps, disable=BENCHMARK))
 
   step_times = []
   # ** train loop **
   wc_start = time.perf_counter()
   Tensor.training = True
-  train_it = iter(tqdm(batch_load_bert(BS, val=False), total=train_steps, disable=BENCHMARK))
-  i, data = 0, data_get(train_it)
-  while data is not None and i < train_steps and not achieved:
+  i, train_data = 0, data_get(train_it)
+  while train_data is not None and i < train_steps and not achieved:
     st = time.perf_counter()
     GlobalCounters.reset()
-    loss = train_step(data["input_ids"], data["segment_ids"], data["input_mask"], data["masked_lm_positions"], \
-                      data["masked_lm_ids"], data["masked_lm_weights"], data["next_sentence_labels"])
+    loss = train_step(train_data["input_ids"], train_data["segment_ids"], train_data["input_mask"], train_data["masked_lm_positions"], \
+                      train_data["masked_lm_ids"], train_data["masked_lm_weights"], train_data["next_sentence_labels"])
 
     pt = time.perf_counter()
 
@@ -431,7 +423,7 @@ def train_bert():
                   "train/python_time": pt - st, "train/data_time": dt - pt, "train/cl_time": cl - dt,
                   "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st)})
 
-    data, next_data = next_data, None
+    train_data, next_data = next_data, None
     i += 1
 
     if i == BENCHMARK:
@@ -448,13 +440,13 @@ def train_bert():
       eval_times = []
       Tensor.training = False
 
-      for _ in tqdm(range((max_eval_steps * 8) // EVAL_BS), desc="Evaluating", total=(max_eval_steps * 8) // EVAL_BS, disable=BENCHMARK):
-        data = data_get(eval_it, eval=True)
+      for _ in tqdm(range(max_eval_steps), desc="Evaluating", total=max_eval_steps, disable=BENCHMARK):
+        eval_data = data_get(eval_it)
         GlobalCounters.reset()
         st = time.time()
 
-        eval_result: dict[str, Tensor] = eval_step(data["input_ids"], data["segment_ids"], data["input_mask"], data["masked_lm_positions"], \
-                                                  data["masked_lm_ids"], data["masked_lm_weights"], data["next_sentence_labels"])
+        eval_result: dict[str, Tensor] = eval_step(eval_data["input_ids"], eval_data["segment_ids"], eval_data["input_mask"], eval_data["masked_lm_positions"], \
+                                                  eval_data["masked_lm_ids"], eval_data["masked_lm_weights"], eval_data["next_sentence_labels"])
 
         lm_loss, clsf_loss  = eval_result["masked_lm_loss"].numpy().item(), eval_result["next_sentence_loss"].numpy().item()
         mlm_accuracy, clsf_accuracy = eval_result["masked_lm_accuracy"].numpy().item(), eval_result["next_sentence_accuracy"].numpy().item()
@@ -471,7 +463,7 @@ def train_bert():
       total_clsf_accuracy = sum(pair[1] for pair in eval_accuracy) / len(eval_accuracy)
       total_fw_time = sum(eval_times) / len(eval_times)
       tqdm.write(f"eval lm loss: {total_lm_loss:.2f}, eval clsf loss: {total_clsf_loss:.2f}, eval lm accuracy: {total_lm_accuracy:.6f}, \
-                  eval clsf accuracy: {total_clsf_accuracy:.2f}, eval time: {total_fw_time:.2f}")
+                  eval clsf accuracy: {total_clsf_accuracy:.2f}, avg eval step time: {total_fw_time:.2f}")
       if WANDB:
         wandb.log({"eval/lm_loss": total_lm_loss, "eval/clsf_loss": total_clsf_loss, "eval/lm_accuracy": total_lm_accuracy, \
                     "eval/clsf_accuracy": total_clsf_accuracy, "eval/forward_time": total_fw_time})

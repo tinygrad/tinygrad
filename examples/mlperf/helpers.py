@@ -1,5 +1,5 @@
 from collections import OrderedDict
-import unicodedata, json, functools
+import os, unicodedata, json, functools
 import numpy as np
 from tinygrad.nn import state
 from tinygrad.tensor import Tensor
@@ -220,6 +220,7 @@ def get_mlperf_bert_model(config_path:str):
 
 @functools.lru_cache(maxsize=None)
 def load_tf_weights_to_dict(checkpoint_path):
+  os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
   import tensorflow as tf
   reader = tf.train.load_checkpoint(checkpoint_path)
   var_to_shape_map = reader.get_variable_to_shape_map()

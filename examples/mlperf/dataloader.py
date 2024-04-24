@@ -1,12 +1,14 @@
-import os, random
-from typing import List
+import os, random, pickle
+from typing import List, Tuple
+from pathlib import Path
 import numpy as np
 from PIL import Image
 from tqdm import tqdm
-import pickle
 from tinygrad import dtypes, Tensor
 from tinygrad.helpers import getenv, prod, Timing, Context
-from multiprocessing import Queue, Process, shared_memory, connection, Lock, cpu_count
+from multiprocessing import Queue, Process, shared_memory, connection, Lock, cpu_count, Pool
+from functools import lru_cache
+from itertools import chain
 
 class MyQueue:
   def __init__(self, multiple_readers=True, multiple_writers=True):
@@ -140,6 +142,7 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None):
     shm.close()
     shm.unlink()
 
+@lru_cache(maxsize=128)
 def load_bert_file(fn:str) -> List[dict]:
   with open(fn, "rb") as f: data = pickle.load(f)
   return data
@@ -155,22 +158,53 @@ def process_batch_bert(data: List[dict]) -> dict[str, Tensor]:
     "next_sentence_labels": Tensor(np.concatenate([s["next_sentence_labels"] for s in data], axis=0), dtype=dtypes.float32),
   }
 
-# For train: Stop when we run through all data
-# For val: Wrap around val dataset and never stop
-#     Reference: https://github.com/mlcommons/training/blob/1c8a098ae3e70962a4f7422c0b0bd35ae639e357/language_model/tensorflow/bert/run_pretraining.py, Line 420
-def batch_load_bert(BS:int, val=False):
-  from extra.datasets.wikipedia import get_wiki_train_files, get_wiki_val_files
-  files = get_wiki_val_files() if val else get_wiki_train_files()
-  blob, end = [], False
-  while files: # As long as there is data, keep going
-    while len(blob) < BS and not end: # Fill blob until there is enough for next step
-      blob.extend(load_bert_file(files.pop(0)))
-      if not files: 
-        if val: files = get_val_files()
-        else: end = True # End of train data - avoid pop on empty file list
-    if len(blob) >= BS: # if last train step does not have enough for a full batch
-      yield process_batch_bert(blob[:BS])
-      blob = blob[BS:]
+def shuffle_parts(file_paths: List[str]) -> List[str]:
+  parts = list(set(map(lambda f: int(Path(f).name.split('_')[0]), file_paths))) # Unique part ids (e.g. 0-499)
+  random.Random().shuffle(parts)
+  shuffled_parts = []
+  for p in parts:
+    shuffled_parts.extend([f for f in file_paths if int(Path(f).name.split("_")[0]) == p])
+  return shuffled_parts
+
+def random_sample(data: List[str]):
+  index = random.randint(0, len(data) - 1)
+  selected_sample = data[index]
+  return selected_sample, index
+
+def load_datasample(fn:Tuple[str, int]) -> List[dict]:
+  data = load_bert_file(fn[0])
+  return data[fn[1]]
+
+# Reference: https://github.com/mlcommons/training/blob/1c8a098ae3e70962a4f7422c0b0bd35ae639e357/language_model/tensorflow/bert/run_pretraining.py, Line 394
+def batch_load_train_bert(BS:int):
+  from extra.datasets.wikipedia import get_wiki_train_files
+  files = shuffle_parts(get_wiki_train_files())
+  dataset = []
+  for f in files: 
+    lists = [(f, o) for o in range(int(Path(f).name.split("_")[3].split(".")[0]))]
+    dataset.extend(lists)
+  while dataset:
+    blob = []
+    for _ in range(BS):
+      sample, index = random_sample(dataset[:1000]) # Random sample from first 1000 entries
+      dataset.pop(index)
+      blob.append(sample)
+    yield process_batch_bert([load_datasample(sample) for sample in blob])
+
+# Reference: https://github.com/mlcommons/training/blob/1c8a098ae3e70962a4f7422c0b0bd35ae639e357/language_model/tensorflow/bert/run_pretraining.py, Line 416
+def batch_load_val_bert(BS:int):
+  from extra.datasets.wikipedia import get_wiki_val_files
+  files = get_wiki_val_files()
+  dataset = list(chain.from_iterable([load_bert_file(f) for f in files]))
+  idx = 0
+  while True:
+    start_idx = (idx * BS) % len(dataset)
+    end_idx = ((idx + 1) * BS) % len(dataset)
+    if start_idx < end_idx:
+        yield process_batch_bert(dataset[start_idx:end_idx])
+    else:  # wrap around the end to the beginning of the dataset
+        yield process_batch_bert(dataset[start_idx:] + dataset[:end_idx])
+    idx += 1
 
 if __name__ == "__main__":
   from extra.datasets.imagenet import get_train_files, get_val_files

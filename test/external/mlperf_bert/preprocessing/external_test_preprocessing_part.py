@@ -64,7 +64,7 @@ if __name__ == "__main__":
   assert os.path.isfile(args.tf_records), f"The specified TFRecords file {args.tf_records} does not exist."
 
   preprocessed_samples = []
-  for file_name in sorted(os.listdir(args.preprocessed_part_dir), key=lambda x: int(x.split("_")[1].split(".")[0]) if not args.is_eval else int(x.split(".")[0])): # 0_3.pkl -> 3 # noqa: E501
+  for file_name in sorted(os.listdir(args.preprocessed_part_dir), key=lambda x: int(x.split("_")[1]) if not args.is_eval else int(x.split(".")[0])): # 0_3.pkl -> 3 # noqa: E501
     with open(os.path.join(args.preprocessed_part_dir, file_name), 'rb') as f:
       samples = pickle.load(f)
       preprocessed_samples.extend(samples)

@@ -353,7 +353,7 @@ def process_part(part:int):
   tokenizer = Tokenizer(getenv("BASEDIR", Path(__file__).parent / "wiki") / "vocab.txt")
   os.makedirs(BASEDIR / "train" / str(part), exist_ok=True)
   for i, feature_batch in enumerate(process_iterate(tokenizer, val=False, part=part)):
-    with open(BASEDIR / f"train/{str(part)}/{part}_{i}.pkl", "wb") as f:
+    with open(BASEDIR / f"train/{str(part)}/{part}_{i}_of_{len(feature_batch)}.pkl", "wb") as f:
       pickle.dump(feature_batch, f)
 
 def process_iterate(tokenizer:Tokenizer, val:bool=False, part:int=0) -> list[dict]: # Convert raw text to masked NSP samples
@@ -407,5 +407,5 @@ if __name__ == "__main__":
       part = int(sys.argv[2])
       os.makedirs(BASEDIR / "train" / str(part), exist_ok=True)
       for i, feature_batch in tqdm(enumerate(process_iterate(tokenizer, val=False, part=part))):
-        with open(BASEDIR / f"train/{str(part)}/{part}_{i}.pkl", "wb") as f:
+        with open(BASEDIR / f"train/{str(part)}/{part}_{i}_of_{len(feature_batch)}.pkl", "wb") as f:
           pickle.dump(feature_batch, f)
