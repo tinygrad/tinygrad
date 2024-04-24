@@ -289,6 +289,7 @@ def train_bert():
   target, achieved                                      = getenv("TARGET", 0.72), False
 
   config["DEFAULT_FLOAT"] = dtypes.default_float.name
+  config["BEAM"]          = BEAM.value
   config["TRAIN_BEAM"]    = TRAIN_BEAM = getenv("TRAIN_BEAM", BEAM.value)
   config["EVAL_BEAM"]     = EVAL_BEAM  = getenv("EVAL_BEAM", BEAM.value)
 
@@ -345,40 +346,38 @@ def train_bert():
 
   @TinyJit
   def train_step(input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor, masked_positions:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
-    with Context(BEAM=TRAIN_BEAM):
-      lm_logits, clsf_logits = model(input_ids, segment_ids, attention_mask, masked_positions)
-      lm_loss = lm_logits.sparse_categorical_crossentropy(masked_lm_ids, ignore_index=masked_lm_weights)
-      clsf_loss = clsf_logits.binary_crossentropy_logits(next_sentence_labels)
-      loss = lm_loss + clsf_loss
+    lm_logits, clsf_logits = model(input_ids, segment_ids, attention_mask, masked_positions)
+    lm_loss = lm_logits.sparse_categorical_crossentropy(masked_lm_ids, ignore_index=masked_lm_weights)
+    clsf_loss = clsf_logits.binary_crossentropy_logits(next_sentence_labels)
+    loss = lm_loss + clsf_loss
 
-      if not getenv('DISABLE_BACKWARD', 0):
-        optimizer_group.zero_grad()
-        loss.backward()
+    if not getenv('DISABLE_BACKWARD', 0):
+      optimizer_group.zero_grad()
+      loss.backward()
 
-        optimizer_group.step()
-        scheduler.step()
-      return loss.realize()
+      optimizer_group.step()
+      scheduler.step()
+    return loss.realize()
 
   @TinyJit
   def eval_step(input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor, masked_positions:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
-    with Context(BEAM=EVAL_BEAM):
-      lm_logits, clsf_logits = model(input_ids, segment_ids, attention_mask, masked_positions)
+    lm_logits, clsf_logits = model(input_ids, segment_ids, attention_mask, masked_positions)
 
-      clsf_predictions = clsf_logits.log_softmax().argmax(-1)
-      clsf_accuracy = (clsf_predictions == next_sentence_labels).float().mean()
+    clsf_predictions = clsf_logits.log_softmax().argmax(-1)
+    clsf_accuracy = (clsf_predictions == next_sentence_labels).float().mean()
 
-      mlm_predictions = lm_logits.log_softmax().argmax(-1)
-      mask = (masked_lm_weights == 1.0)
-      mlm_accuracy = (mlm_predictions == masked_lm_ids).where(mask, 0).sum() / mask.float().sum()
+    mlm_predictions = lm_logits.log_softmax().argmax(-1)
+    mask = (masked_lm_weights == 1.0)
+    mlm_accuracy = (mlm_predictions == masked_lm_ids).where(mask, 0).sum() / mask.float().sum()
 
-      lm_loss = lm_logits.sparse_categorical_crossentropy(masked_lm_ids, ignore_index=masked_lm_weights)
-      clsf_loss = clsf_logits.binary_crossentropy_logits(next_sentence_labels)
-      return {
-        "masked_lm_accuracy": mlm_accuracy.realize(), 
-        "masked_lm_loss": lm_loss.realize(), 
-        "next_sentence_accuracy": clsf_accuracy.realize(), 
-        "next_sentence_loss": clsf_loss.realize()
-        }
+    lm_loss = lm_logits.sparse_categorical_crossentropy(masked_lm_ids, ignore_index=masked_lm_weights)
+    clsf_loss = clsf_logits.binary_crossentropy_logits(next_sentence_labels)
+    return {
+      "masked_lm_accuracy": mlm_accuracy.realize(), 
+      "masked_lm_loss": lm_loss.realize(), 
+      "next_sentence_accuracy": clsf_accuracy.realize(), 
+      "next_sentence_loss": clsf_loss.realize()
+      }
 
   def data_get(it):
     data: dict[str, Tensor] = next(it)
@@ -392,6 +391,7 @@ def train_bert():
   # ** train loop **
   wc_start = time.perf_counter()
   Tensor.training = True
+  BEAM.value = TRAIN_BEAM
   i, train_data = 0, data_get(train_it)
   while train_data is not None and i < train_steps and not achieved:
     st = time.perf_counter()
@@ -439,6 +439,7 @@ def train_bert():
       eval_accuracy = []
       eval_times = []
       Tensor.training = False
+      BEAM.value = EVAL_BEAM
 
       for _ in tqdm(range(max_eval_steps), desc="Evaluating", total=max_eval_steps, disable=BENCHMARK):
         eval_data = data_get(eval_it)
