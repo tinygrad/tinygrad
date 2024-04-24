@@ -351,17 +351,16 @@ def train_retinanet():
     return x.cast(dtypes.default_float)#.realize()
   @TinyJit
   def train_step(X, boxes_temp, labels_temp, matched_idxs):
-    with Context(BEAM=TRAIN_BEAM):
-      Tensor.training = True
-      optimizer.zero_grad()
-      b,r,c = model(normalize(X), True)
-      loss_reg = mdl_reg_loss(r, matched_idxs, boxes_temp)
-      loss_class = mdl_class_loss(c, matched_idxs, labels_temp)
-      loss = loss_reg+loss_class
-      (loss*loss_scaler).backward()
-      for t in optimizer.params: t.grad = t.grad.contiguous() / loss_scaler
-      optimizer.step()
-      return loss.realize()
+    Tensor.training = True
+    optimizer.zero_grad()
+    b,r,c = model(normalize(X), True)
+    loss_reg = mdl_reg_loss(r, matched_idxs, boxes_temp)
+    loss_class = mdl_class_loss(c, matched_idxs, labels_temp)
+    loss = loss_reg+loss_class
+    (loss*loss_scaler).backward()
+    for t in optimizer.params: t.grad = t.grad.contiguous() / loss_scaler
+    optimizer.step()
+    return loss.realize()
   @TinyJit
   def val_step(X):
     Tensor.training = False
@@ -403,15 +402,16 @@ def train_retinanet():
 
     # **********TRAIN***************
     Tensor.training = True
+    BEAM.value = TRAIN_BEAM
     # train_step.reset()
     # mdlrun_false.reset()
     lr_sched = None
-    if epoch < WARMUP_EPOCHS:
-      start_iter = epoch*len(coco_train.ids)//BS
-      warmup_iters = WARMUP_EPOCHS*len(coco_train.ids)//BS
-      lr_sched = Retina_LR(optimizer, start_iter, warmup_iters, WARMUP_FACTOR, LR)
-    else:
-      optimizer.lr.assign(Tensor([LR], device=GPUS))
+    # if epoch < WARMUP_EPOCHS:
+    #   start_iter = epoch*len(coco_train.ids)//BS
+    #   warmup_iters = WARMUP_EPOCHS*len(coco_train.ids)//BS
+    #   lr_sched = Retina_LR(optimizer, start_iter, warmup_iters, WARMUP_FACTOR, LR)
+    # else:
+    #   optimizer.lr.assign(Tensor([LR], device=GPUS))
     batch_loader = batch_load_retinanet(coco_train, bs=BS, val=False, shuffle=False, anchor_np=ANCHOR_NP)
     it = iter(tqdm(batch_loader, total=len(coco_train)//BS, desc=f"epoch {epoch}"))
     cnt, proc = 0, data_get(it)
@@ -431,8 +431,8 @@ def train_retinanet():
 
       device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
       loss = loss.numpy().item()
-      if lr_sched is not None:
-        lr_sched.step()
+      # if lr_sched is not None:
+      #   lr_sched.step()
 
       cl = time.perf_counter()
 
@@ -466,6 +466,7 @@ def train_retinanet():
     bt = time.time()
     train_step.reset()
     Tensor.training = False
+    BEAM.value = EVAL_BEAM
     print(colored(f'{epoch} START EVAL', 'cyan'))
     coco_eval = COCOeval(coco_val.coco, iouType="bbox")
     eval_times = []
