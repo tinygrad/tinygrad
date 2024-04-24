@@ -50,7 +50,7 @@ def train_resnet():
   epochs            = config["epochs"]            = getenv("EPOCHS", 37)
   BS                = config["BS"]                = getenv("BS", 104 * len(GPUS))  # fp32 GPUS<=6 7900xtx can fit BS=112
   EVAL_BS           = config["EVAL_BS"]           = getenv("EVAL_BS", BS)
-  base_lr           = config["base_lr"]           = getenv("LR", 7.4 * (BS/1632))
+  base_lr           = config["base_lr"]           = getenv("LR", 7.4 * (BS/1536))
   lr_warmup_epochs  = config["lr_warmup_epochs"]  = getenv("WARMUP_EPOCHS", 2)
   decay             = config["decay"]             = getenv("DECAY", 5e-5)
 
@@ -196,7 +196,7 @@ def train_resnet():
       BEAM.value = EVAL_BEAM
 
       it = iter(tqdm(batch_load_resnet(batch_size=EVAL_BS, val=True, shuffle=False), total=steps_in_val_epoch))
-      proc = data_get(it)
+      i, proc = 0, data_get(it)
       while proc is not None:
         GlobalCounters.reset()
         st = time.time()
@@ -212,6 +212,8 @@ def train_resnet():
         eval_loss.append(loss)
         eval_top_1_acc.append(top_1_acc)
         proc, next_proc = next_proc, None  # return old cookie
+        i += 1
+        if i == BENCHMARK: return
 
         et = time.time()
         eval_times.append(et - st)

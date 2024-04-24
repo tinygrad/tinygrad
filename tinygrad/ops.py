@@ -42,8 +42,15 @@ class ConstBuffer:
 @dataclass(frozen=True)
 class ScheduleItem:
   ast: Tuple[LazyOp, ...]
-  outputs: Tuple[Buffer, ...]
-  inputs: Tuple[Buffer, ...]
+  bufs: Tuple[Buffer, ...]
+  @property
+  def outputs(self) -> Tuple[Buffer, ...]:
+    """Read/write or write only buffers in the schedule."""
+    return self.bufs[:len(self.ast)]
+  @property
+  def inputs(self) -> Tuple[Buffer, ...]:
+    """Read only buffers in the schedule."""
+    return self.bufs[len(self.ast):]
 
 @dataclass(frozen=True, eq=False)
 class LazyOp:

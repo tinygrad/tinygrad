@@ -1,6 +1,7 @@
 from __future__ import annotations
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any, List, Optional, Dict, Tuple, ClassVar, NamedTuple, cast
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, List, Optional, Dict, Tuple, ClassVar, cast
 import importlib, inspect, functools, pathlib, time, ctypes, os
 from tinygrad.helpers import prod, getenv, colored, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put, DEBUG, BEAM, NOOPT
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
@@ -114,7 +115,8 @@ MallocAllocator = _MallocAllocator()
 
 # **************** for Compiled Devices ****************
 
-class CompilerOptions(NamedTuple):
+@dataclass(frozen=True)
+class CompilerOptions:
   device: str = ""
   suffix: str = ""
   # TODO: make this generic with a list of supported types

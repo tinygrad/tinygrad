@@ -49,7 +49,7 @@ if __name__ == "__main__":
     src = Device["CLANG"].compiler.render(to_function_name(k.name), k.uops).strip(CLANG_PROGRAM_HEADER)
     srcs[ast] = (k.name, src)
   print("functions:", len(srcs))
-  used_buffers = dedup(flatten([si.outputs+si.inputs for si in sched]))
+  used_buffers = dedup(flatten([si.bufs for si in sched]))
   numbered_bufs = {x:i for i,x in enumerate(used_buffers)}
   print("buffers:", len(numbered_bufs))
 
@@ -74,7 +74,7 @@ if __name__ == "__main__":
 
   all_bufs = []
   for i,si in enumerate(sched):
-    bufs = [(named_buffers.get(b, f"b{numbered_bufs[b]}"), b) for b in si.outputs+si.inputs]
+    bufs = [(named_buffers.get(b, f"b{numbered_bufs[b]}"), b) for b in si.bufs]
     all_bufs += bufs
     if si.ast[0].op is not BufferOps.STORE:
       print(f"// {si.ast[0].op}", bufs)
