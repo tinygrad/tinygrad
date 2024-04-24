@@ -21,7 +21,7 @@ class ExternalTestDatasets(unittest.TestCase):
     img, lbl = np.random.rand(190, 392, 392).astype(np.float32), np.ones((190, 392, 392)).astype(np.uint8)
     img, lbl = nib.Nifti1Image(img, np.eye(4)), nib.Nifti1Image(lbl, np.eye(4))
 
-    os.makedirs(tempfile.gettempdir() + "case_0000", exist_ok=True)
+    os.makedirs(tempfile.gettempdir() + "/case_0000", exist_ok=True)
     nib.save(img, temp("case_0000/imaging.nii.gz"))
     nib.save(lbl, temp("case_0000/segmentation.nii.gz"))
 
