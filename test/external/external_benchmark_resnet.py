@@ -2,10 +2,11 @@ import functools
 import time
 import unittest
 
-from tinygrad import Tensor, TinyJit, GlobalCounters
+from tinygrad import Tensor, TinyJit, GlobalCounters, Device
 from tinygrad.helpers import getenv, Context
 from tinygrad.nn.optim import SGD
 from tinygrad.nn.state import get_parameters
+from tinygrad.engine.realize import run_schedule
 
 from extra.models import resnet
 from examples.mlperf.initializers import Conv2dHeNormal, Linear
@@ -40,7 +41,7 @@ class BenchmarkResnetTrain(unittest.TestCase):
 
     layer = self.layers[layer_i][slice_i]
     xy = 112 >> layer_i
-    if layer_i > 0: xy >>= (1 if slice_i > 0 else 0)
+    xy >>= (1 if slice_i > 0 or layer_i == 0 else 0)  # layer 1 is preceded by maxpool2d
     name = f"layer{layer_i+1} slice{slice_i+1}"
 
     # get specific conv (0 or 1)
@@ -55,21 +56,22 @@ class BenchmarkResnetTrain(unittest.TestCase):
     return f"{name} x{(bs, cin, xy, xy)}", [layer], cin, xy
   def _test_layer(self, name, layer, cin, xy):
     optim = SGD(get_parameters(layer), bs / 128 * 1.0)  # need sgd for some params but not consequential for benchmarking
-    with Context(SAVE_SCHEDULE=0): Tensor.realize(*[t.assign(t) for t in get_parameters(layer)])
+    with Context(SAVE_SCHEDULE=0): Tensor.realize(*[t.assign(t.detach().contiguous()) for t in get_parameters(optim)])
 
     JITCNT = getenv("JITCNT", 1)
     Tensor.training = True
     @TinyJit
     def step(x):
-      for _ in range(JITCNT):
-        optim.zero_grad()
-        x.grad = None
+      optim.zero_grad()
+      x.grad = None
 
-        y = x.sequential(layer).contiguous().contiguous_backward()
-        y.sum().backward()
-        if getenv("ASSIGN", 1): Tensor.realize(y, x.grad, *optim.schedule_step())
-        else: Tensor.realize(y, x.grad, *[t.grad for t in optim.params])
-      return y.detach()
+      y = x.sequential(layer).contiguous().contiguous_backward()
+      y.sum().backward()
+      if getenv("ASSIGN", 1): sched, _ = Tensor.schedule_with_vars(y, x.grad, *optim.schedule_step())
+      else: sched, _ = Tensor.schedule_with_vars(y, x.grad, *[t.grad for t in optim.params])
+
+      for _ in range(JITCNT):
+        run_schedule([si for si in sched])
 
     CNT = getenv("CNT", 5)
     best_tm = None
@@ -79,8 +81,8 @@ class BenchmarkResnetTrain(unittest.TestCase):
       GlobalCounters.reset()
 
       st = time.perf_counter()
-      out = step(x)
-      with Context(SAVE_SCHEDULE=0): out._data()
+      step(x)
+      Device[Device.DEFAULT].synchronize()
       et = time.perf_counter()
 
       if flops is None: flops = GlobalCounters.global_ops / JITCNT
