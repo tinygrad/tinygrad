@@ -58,7 +58,7 @@ class TestLinearizer(unittest.TestCase):
     c = ((a.shrink(((0, 2),)) - a.shrink(((2, 4),))) - (b.shrink(((0, 2),)) - b.shrink(((2, 4),))))
     lowered = list(lower_schedule(create_schedule([c.lazydata])))
     for ei in lowered: ei.run()
-    rawbufs = lowered[-1].rawbufs
+    rawbufs = lowered[-1].bufs
     assert len(rawbufs) == 3 and set(rawbufs[1:]) == {a.lazydata.base.realized, b.lazydata.base.realized}
     np_c = (np_a[:2] - np_a[2:]) - (np_b[:2] - np_b[2:])
     np.testing.assert_allclose(np_c, c.numpy(), atol=1e-4, rtol=1e-4)
