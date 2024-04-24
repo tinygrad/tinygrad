@@ -25,7 +25,7 @@ def compile_net(run:TinyJit, special_names:Dict[int,str]) -> Tuple[Dict[str,str]
     fxn = ji.prg
     functions[fxn.name] = fxn.prg   # NOTE: this assumes all with the same name are the same
     cargs = []
-    for i,arg in enumerate(ji.rawbufs):
+    for i,arg in enumerate(ji.bufs):
       key = id(arg)
       if key not in bufs:
         if key in special_names:
@@ -55,7 +55,7 @@ def jit_model(model, *args) -> Tuple[TinyJit,Dict[int,str]]:
   # hack to put the inputs back
   for (j,i),idx in run.input_replace.items():
     realized_input = args[idx].lazydata.base.realized
-    run.jit_cache[j].rawbufs[i] = realized_input
+    run.jit_cache[j].bufs[i] = realized_input
     special_names[id(realized_input)] = f'input{idx}'
 
   # TODO: fetch this from the jit in self.input_replace and self.ret (hint: use get_parameters on self.ret)

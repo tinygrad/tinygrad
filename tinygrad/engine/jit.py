@@ -46,8 +46,8 @@ def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]
   for ji in jit_cache:
     ji_graph_dev: Optional[Compiled] = None # device on which the ji will be graphed. Not graphed if None.
     if isinstance(ji.prg, CompiledRunner): ji_graph_dev = ji.prg.device
-    elif isinstance(ji.prg, BufferXfer) and ji.rawbufs[0] and ji.rawbufs[0].device.split(":", 1)[0] in {"HSA", "CUDA"}:
-      ji_graph_dev = Device[ji.rawbufs[0].device]
+    elif isinstance(ji.prg, BufferXfer) and ji.bufs[0] and ji.bufs[0].device.split(":", 1)[0] in {"HSA", "CUDA"}:
+      ji_graph_dev = Device[ji.bufs[0].device]
 
     can_be_graphed = ji_graph_dev and ji_graph_dev.graph
     can_extend_graph_batch = can_be_graphed and len(current_batch) < max_batch_size and (ji_graph_dev == current_device or
@@ -65,7 +65,7 @@ def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]
 def get_input_replace(jit_cache: List[ExecItem], input_rawbuffers:List[Buffer]) -> Dict[Tuple[int, int], int]:
   input_replace: Dict[Tuple[int, int], int] = {}
   for j,ji in enumerate(jit_cache):
-    for i,a in enumerate(ji.rawbufs):
+    for i,a in enumerate(ji.bufs):
       if a in input_rawbuffers:
         input_replace[(j,i)] = input_rawbuffers.index(a)
   return input_replace
@@ -83,7 +83,7 @@ class TinyJit(Generic[ReturnType]):
     return ret
 
   def add(self, ei:ExecItem):
-    self.jit_cache.append(ExecItem(ei.prg, [self.add_buffer(buf) for buf in ei.rawbufs if buf is not None]))
+    self.jit_cache.append(ExecItem(ei.prg, [self.add_buffer(buf) for buf in ei.bufs if buf is not None]))
 
   def reset(self):
     self.jit_cache: List[ExecItem] = []
@@ -96,7 +96,7 @@ class TinyJit(Generic[ReturnType]):
   def __call__(self, *args, **kwargs) -> ReturnType:
     input_tensors: List[Tuple[Union[int, str], Tensor]] = \
       [(cast(Union[int, str], k),v) for k,v in itertools.chain(enumerate(args), sorted(kwargs.items())) if v.__class__ is Tensor]
-    Tensor.corealize([x[1] for x in input_tensors])
+    if len(input_tensors): Tensor.realize(*[x[1] for x in input_tensors])
     lbs: List[LazyBuffer] = flatten([v.lazydata.lbs for _,v in input_tensors])
     expected_sts_var_dtype_device = [(*x.st.unbind(), x.dtype, x.device) for x in lbs]
     input_rawbuffers: List[Buffer] = [v.base.realized for v in lbs if v.base.realized is not None]
@@ -105,41 +105,42 @@ class TinyJit(Generic[ReturnType]):
                                                 [dict(x.unbind() for x in itertools.chain(args, kwargs.values()) if isinstance(x, Variable))])
 
     expected_names, expected_lbs = [x[0] for x in input_tensors], [(x[0], tuple(x[1].keys()), x[2], x[3]) for x in expected_sts_var_dtype_device]
-    if self.cnt >= 2:
-      # jit exec
-      assert self.expected_names == expected_names and self.expected_lbs == expected_lbs, "args mismatch in JIT"
-      for (j,i),input_idx in self.input_replace.items(): self.jit_cache[j].rawbufs[i] = input_rawbuffers[input_idx]
-      if DEBUG >= 1 and len(self.jit_cache) >= 10: print(f"jit execs {len(self.jit_cache)} kernels")
-      for ei in self.jit_cache: ei.run(var_vals, jit=True)
+    if self.cnt == 0:
+      # jit ignore
+      with Context(BEAM=0 if getenv("IGNORE_JIT_FIRST_BEAM") else BEAM.value):
+        self.ret = self.fxn(*args, **kwargs)
+        if len(params:=get_parameters(self.ret)): Tensor.realize(params[0], *params[1:])
     elif self.cnt == 1:
       # jit capture
       self.expected_names: List[Union[int, str]] = expected_names
       self.expected_lbs: List[Tuple[ShapeTracker, Tuple[Variable, ...], DType, str]] = expected_lbs
-      with Context(GRAPH=getenv("JITGRAPH", GRAPH.value), BEAM=getenv("JITBEAM", BEAM.value)):
+      with Context(GRAPH=getenv("JITGRAPH", GRAPH.value)):
         capturing.append(self)
         self.ret = self.fxn(*args, **kwargs)
-        Tensor.corealize(get_parameters(self.ret))
+        if len(params:=get_parameters(self.ret)): Tensor.realize(params[0], *params[1:])
         capturing.clear()
       del self.buffer_replace
       assert len(self.jit_cache), "didn't JIT anything!"
       if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
 
       # memory planning (optional)
-      assigned = _internal_memory_planner([cast(List[Buffer], x.rawbufs) for x in self.jit_cache], debug_prefix="JIT ")
-      self.jit_cache = [ExecItem(ei.prg, [assigned.get(x,x).ensure_allocated() for x in ei.rawbufs if x is not None]) for ei in self.jit_cache]
+      assigned = _internal_memory_planner([cast(List[Buffer], x.bufs) for x in self.jit_cache], debug_prefix="JIT ")
+      self.jit_cache = [ExecItem(ei.prg, [assigned.get(x,x).ensure_allocated() for x in ei.bufs if x is not None]) for ei in self.jit_cache]
 
       # Condense the items into a graph executor.
       if getenv("JIT") != 2: self.jit_cache = apply_graph_to_jit(self.jit_cache, input_rawbuffers, var_vals)
 
       self.input_replace = get_input_replace(self.jit_cache, input_rawbuffers)
       if DEBUG >= 1 and len(set(self.input_replace.values())) != len(input_rawbuffers): print("WARNING: some input tensors not found")
-    elif self.cnt == 0:
-      # jit ignore
-      self.ret = self.fxn(*args, **kwargs)
-      Tensor.corealize(get_parameters(self.ret))
+    elif self.cnt >= 2:
+      # jit exec
+      assert self.expected_names == expected_names and self.expected_lbs == expected_lbs, "args mismatch in JIT"
+      for (j,i),input_idx in self.input_replace.items(): self.jit_cache[j].bufs[i] = input_rawbuffers[input_idx]
+      if DEBUG >= 1 and len(self.jit_cache) >= 10: print(f"jit execs {len(self.jit_cache)} kernels")
+      for ei in self.jit_cache: ei.run(var_vals, jit=True)
 
     # clear jit inputs
-    for (j,i) in self.input_replace.keys(): self.jit_cache[j].rawbufs[i] = None
+    for (j,i) in self.input_replace.keys(): self.jit_cache[j].bufs[i] = None
 
     self.cnt += 1
     return self.ret
