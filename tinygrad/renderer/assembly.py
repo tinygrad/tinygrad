@@ -33,7 +33,6 @@ def ptr_ar(root, uops):
       fptr = uops.add(UOps.ALU, dtypes.uint64, (root.vin[0], bptr), arg=BinaryOps.ADD, insert_before=uops.uops.index(root))
       root.vin = (fptr, zero) + root.vin[2:]
 
-from tinygrad.helpers import DEBUG
 def optimize_gated_loads(uops: UOpGraph):
   gated_loads = list(filter(lambda u:u.uop is UOps.LOAD and len(u.vin)>3, uops.uops))
   def successors(uop): return list(filter(lambda u: uop in u.vin, uops.uops))
@@ -41,25 +40,23 @@ def optimize_gated_loads(uops: UOpGraph):
     same_gate = list(filter(lambda u: u.vin[2] == gated_loads[0].vin[2], gated_loads))
     for u in reversed(same_gate): uops.uops.insert(uops.uops.index(same_gate[-1]), uops.uops.pop(uops.uops.index(u)))
     def indices(): return [uops.uops.index(u) for u in same_gate]
-    same_gate = list(reversed(same_gate))
-    pred_2 = uops.add(UOps.ALU, dtypes.bool, (same_gate[0].vin[2],), arg=UnaryOps.NEG, insert_before=uops.uops.index(same_gate[0]))
+    pred_2 = uops.add(UOps.ALU, dtypes.bool, (same_gate[-1].vin[2],), arg=UnaryOps.NEG, insert_before=uops.uops.index(same_gate[-1]))
     gate = uops.add(UOps.IF, None, (pred_2,), insert_before=min(indices()), cachable=False)
     end = uops.add(UOps.ENDIF, None, (gate,), arg=tuple([(ld, ld.vin[3]) for ld in same_gate]), insert_before=max(indices())+1, cachable=False)
+    #if a uop has no successors outside of the if statement it can go inside
     for u in reversed(uops.uops.copy()[:uops.uops.index(gate)]):
       if (u.uop not in [UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL, UOps.ENDIF, UOps.ENDLOOP] and
           all([uops.uops.index(s)>uops.uops.index(gate) and uops.uops.index(s)<uops.uops.index(end) for s in successors(u)])):
-        pre_idx = uops.uops.index(u)
         uops.uops.insert(uops.uops.index(gate), uops.uops.pop(uops.uops.index(u)))
-        if DEBUG>4:print("moved", u, pre_idx, uops.uops.index(u))
       elif any([sg in u.vin for sg in same_gate]):
         uops.uops.insert(uops.uops.index(end), uops.uops.pop(uops.uops.index(u)))
-    mov_outside=[]
+    #if a uop is inside but has successors outside of the if statement move it outside
+    mov_out=[]
     for u in reversed(uops.uops[uops.uops.index(gate)+1:uops.uops.index(end)]):
-      if u in same_gate or all([uops.uops.index(s)>uops.uops.index(gate) and uops.uops.index(s)<uops.uops.index(end) and s not in mov_outside for s in successors(u)]): continue
-      mov_outside.append(u)
-      if DEBUG>4: print("restored", u, uops.uops.index(u))
-    for u in reversed(mov_outside):
-      uops.uops.insert(uops.uops.index(gate), uops.uops.pop(uops.uops.index(u)))
+      if u in same_gate or all(
+        [uops.uops.index(s)>uops.uops.index(gate) and uops.uops.index(s)<uops.uops.index(end) and s not in mov_out for s in successors(u)]): continue
+      mov_out.append(u)
+    for u in reversed(mov_out): uops.uops.insert(uops.uops.index(gate), uops.uops.pop(uops.uops.index(u)))
     gated_loads = [gl for gl in gated_loads if gl not in same_gate]
 
 class AssemblyLanguage(NamedTuple):
@@ -79,7 +76,7 @@ class AssemblyLanguage(NamedTuple):
   def render_local(self, dest, name, size, dtype) -> List[str]: raise NotImplementedError()
 
   def render_loop(self, idx, start, label, acc=None) -> List[str]: raise NotImplementedError()
-  def render_bra(self, b1, pred=None, b2=None) -> List[str]: raise NotImplementedError()
+  def render_bra(self, b1, pred=None) -> List[str]: raise NotImplementedError()
   def render_gep(self, loc, base, offset, dtype, gate=None) -> List[str]: raise NotImplementedError()
   def render_load(self, loc, dest, dtype, gate=None, alt=None, ss="", offset=0) -> List[str]: raise NotImplementedError()
   def render_store(self, loc, val, dtype, gate=None, ss="", offset=0) -> List[str]: raise NotImplementedError()
@@ -118,13 +115,11 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
   # here we do a pretransform on UOps to fix some shortcomings of PTX
   # all uops must be a register
   matcher.rewrite_graph(uops)
-  if DEBUG>4: uops.print()
 
   for pointer_op in list(filter(lambda uop: uop.uop in [UOps.LOAD, UOps.STORE], uops.uops)): ptr_ar(pointer_op, uops)
   uops.remove_childless(set(x for x in uops if x.uop in {UOps.DEFINE_GLOBAL, UOps.PHI, UOps.ENDIF, UOps.ENDLOOP, UOps.STORE}))
   uops.optimize_loops()
   optimize_gated_loads(uops)
-  if DEBUG>4: uops.print()
 
   def kk(*s: str): kernel.append("\n".join(s))
 
@@ -162,14 +157,14 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
     uop,dtype,vin,args = u.uop,u.dtype,u.vin,u.arg
     if uop is UOps.IF:
       assert vin[0].dtype is not None
-      kk(*lang.render_bra(lb:=ssa_label('if', u), _cast(r[vin[0]], dtypes.bool, vin[0].dtype, u=u, pred=True)))
+      kk(*lang.render_bra(ssa_label('if', u), _cast(r[vin[0]], dtypes.bool, vin[0].dtype, u=u, pred=True)))
     elif uop is UOps.BARRIER and lang.barrier: kk(lang.barrier)
     elif uop is UOps.ENDLOOP:
       kk(lang.asm_for_op[BinaryOps.ADD](r[vin[0]], r[vin[0]], "1", dtypes.int, lang.types[dtypes.int]),
           lang.asm_for_op[BinaryOps.CMPLT](pred:=ssa("pred", dtype="pred"), r[vin[0]], r[vin[0].vin[1]], dtypes.int, lang.types[dtypes.int]))
       kk(*lang.render_bra(r_label[vin[0]], pred))
     elif uop == UOps.ENDIF:
-      kk(f"@!{_cast(r[vin[0].vin[0]], dtypes.bool, vin[0].vin[0].dtype, u=u, pred=True)} bra {r_label[vin[0]]}_true;")
+      kk(f"bra {r_label[vin[0]]}_true;")
       kk(f"{r_label[vin[0]]}:")
       if args:
         for dest, alt in args:
@@ -215,8 +210,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
           r[u] = [ssa('val', dtype=lang.types[dtype.scalar()]) for _ in range(dtype.count)]
           kk(f"ld{u.arg}.v{dtype.count}.{lang.mem_type(dtype.scalar())} {{{', '.join(r[u])}}}, [{r[vin[0]]}+{vin[1].arg}];")
         else:
-          kk(*lang.render_load(r[vin[0]], ssa('val', u), dtype, gate=r[vin[2]] if len(vin) > 3 else None,
-                              alt=r[vin[3]] if len(vin) > 3 else None, ss=u.arg, offset=vin[1].arg))
+          kk(*lang.render_load(r[vin[0]], ssa('val', u), dtype, ss=u.arg, offset=vin[1].arg))
       elif uop is UOps.PHI:
         kk(f"mov.b{lang.types[dtype][1:]} {r[vin[0]]}, {r[vin[1]]};")
         r[u] = r[vin[0]]
@@ -297,13 +291,12 @@ class PTXLanguage(AssemblyLanguage):
 
   def render_loop(self, idx, start, label, acc=None) -> List[str]: return [f"mov.u32 {idx}, {start};", f"{label}:"]
 
-  def render_bra(self, b1, pred=None, b2=None) -> List[str]: return [f"@{pred} bra {b1};"] + ([f"@!{pred} bra {b2};"] if b2 else []) if pred else [f"bra {b1};"]
+  def render_bra(self, b1, pred=None) -> List[str]: return [f"@{pred} bra {b1};"] if pred else [f"bra {b1};"]
 
   def mem_type(self, dtype): return 's8' if dtype.itemsize == 1 else 'b16' if dtype == dtypes.float16 else self.types[dtype]
 
   def render_load(self, loc, dest, dtype, gate=None, alt=None, ss="", offset=0) -> List[str]:
     assert dtype is not dtypes.bool
-    # if gate: return [f"@{gate} ld{ss}.{self.mem_type(dtype)} {dest}, [{loc}+{offset}];", f"@!{gate} mov.b{self.types[dtype][1:]} {dest}, {alt};"]
     return [f"ld{ss}.{self.mem_type(dtype)} {dest}, [{loc}+{offset}];"]
 
   def render_store(self, loc, val, dtype, gate=None, ss="", offset=0) -> List[str]:
