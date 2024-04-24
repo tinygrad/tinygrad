@@ -238,7 +238,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
 
   return graph, in_degree, prescheduled
 
-SCHEDULES: List[ScheduleItem] = []
+SCHEDULES: List = []
 def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
   if seen is None: seen = set()
   graph, in_degree, prescheduled = _graph_schedule(outs, seen)
@@ -266,10 +266,10 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
   if SAVE_SCHEDULE:
     def _save():
-      print(f"saving {len(SCHEDULES)} schedule items to", fp:="schedule.pkl")
+      print(f"saving {len(SCHEDULES)} schedule graphs to", fp:="schedule.pkl")
       pickle.dump(SCHEDULES, open(fp, "wb"))
     if len(SCHEDULES) == 0: atexit.register(_save)
-    SCHEDULES.extend(schedule)
+    SCHEDULES.append((graph, prescheduled))
   return schedule, var_vals
 
 def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> List[ScheduleItem]:
