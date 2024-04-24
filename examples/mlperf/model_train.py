@@ -304,10 +304,10 @@ def train_retinanet():
   model.backbone.body.fc = None
 
   parameters = []
-  # model.load_from_pretrained()
-  # model.load_checkpoint("./ckpts/retinanet_4xgpu020_B52_E0_15550.safe")
 
   for k, v in get_state_dict(model).items():
+    # print(k, v.shape)
+    # print(v.dtype)
     # print(k)
     if 'head' in k and ('clas' in k or 'reg' in k ):
       v.requires_grad = True
@@ -328,10 +328,13 @@ def train_retinanet():
     else:
       v.requires_grad = False
     if not SYNCBN and ("running_mean" in k or "running_var" in k):
-      v.realize().shard_(GPUS, axis=0)
+      v.shard_(GPUS, axis=0)
     else:
-      v.realize().to_(GPUS)
+      v.to_(GPUS)
+  # model.load_checkpoint("./ckpts/retinanet_4xgpu020_B100_E0_11703.safe")
 
+  model.load_checkpoint("./ckpts/retinanet_4xgpu020_B52_E0x75.safe")
+  # model.load_from_pretrained()
   for k, v in get_state_dict(model).items():
     if v.requires_grad:
       print(k)
@@ -362,7 +365,7 @@ def train_retinanet():
   @TinyJit
   def val_step(X):
     Tensor.training = False
-    out = model(normalize(X))
+    out = model(normalize(X)).cast(dtypes.float32)
     return out.realize()
 
   X = Tensor.rand((BS, 3, 800, 800)).shard_(GPUS, axis=0)
