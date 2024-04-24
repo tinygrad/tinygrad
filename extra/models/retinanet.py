@@ -243,8 +243,8 @@ class AnchorGenerator:
       )
     return anchors
 
-  def forward(self, image_list_shape, feature_maps: List[Tensor]) -> List[Tensor]:
-    grid_sizes = [feature_map.shape[-2:] for feature_map in feature_maps]
+  def forward(self, image_list_shape, feature_maps) -> List[Tensor]:
+    grid_sizes = [feature_map for feature_map in feature_maps]
     image_size = image_list_shape[-2:]
     # dtype = feature_maps[0].dtype
     strides = [[Tensor(image_size[0] // g[0], dtype=dtypes.int64),
@@ -257,7 +257,7 @@ class AnchorGenerator:
       anchors.append(anchors_in_image)
     anchors = [Tensor.cat(*anchors_per_image) for anchors_per_image in anchors]
     return anchors
-  def __call__(self, image_list, feature_maps: List[Tensor]):
+  def __call__(self, image_list, feature_maps):
     return self.forward(image_list, feature_maps)
 
 

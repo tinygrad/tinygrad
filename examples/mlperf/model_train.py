@@ -367,11 +367,8 @@ def train_retinanet():
     out = model(normalize(X)).cast(dtypes.float32)
     return out.realize()
 
-  X = Tensor.rand((BS, 3, 800, 800)).shard_(GPUS, axis=0)
-  b,_,_ = model(X, True)
-  for bb in b:
-    print(bb.shape)
-  ANCHORS = anchor_generator(X.shape, b)
+  feature_shapes = [(100, 100), (50, 50), (25, 25), (13, 13), (7, 7)]
+  ANCHORS = anchor_generator((BS,3,800,800), feature_shapes)
   # ANCHORS = [a.realize() for a in ANCHORS]
   ANCHORS_STACK = Tensor.stack(ANCHORS)
   ANCHORS_STACK = ANCHORS_STACK.shard(GPUS, axis=0)
