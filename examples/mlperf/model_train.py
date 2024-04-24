@@ -196,7 +196,7 @@ def train_resnet():
       BEAM.value = EVAL_BEAM
 
       it = iter(tqdm(batch_load_resnet(batch_size=EVAL_BS, val=True, shuffle=False), total=steps_in_val_epoch))
-      proc = data_get(it)
+      i, proc = 0, data_get(it)
       while proc is not None:
         GlobalCounters.reset()
         st = time.time()
@@ -212,6 +212,8 @@ def train_resnet():
         eval_loss.append(loss)
         eval_top_1_acc.append(top_1_acc)
         proc, next_proc = next_proc, None  # return old cookie
+        i += 1
+        if i == BENCHMARK: return
 
         et = time.time()
         eval_times.append(et - st)
