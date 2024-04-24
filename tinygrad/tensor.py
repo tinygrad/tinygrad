@@ -2,7 +2,7 @@
 from __future__ import annotations
 import time, math, itertools, functools
 from contextlib import ContextDecorator
-from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Iterable, Dict, DefaultDict, cast, get_args
+from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Dict, DefaultDict, cast, get_args, Set
 from collections import defaultdict
 import numpy as np
 
@@ -11,10 +11,10 @@ from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up
 from tinygrad.helpers import getenv
 from tinygrad.lazy import LazyBuffer
 from tinygrad.features.multi import MultiLazyBuffer
-from tinygrad.ops import LoadOps
+from tinygrad.ops import LoadOps, ScheduleItem
 from tinygrad.buffer import Buffer, BufferOptions
 from tinygrad.device import Device
-from tinygrad.shape.symbolic import sint
+from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.engine.realize import run_schedule, memory_planner
 from tinygrad.engine.schedule import create_schedule_with_vars
 
@@ -146,17 +146,23 @@ class Tensor:
 
   # ***** data handlers ****
 
-  @staticmethod
-  def corealize(lst:Iterable[Tensor]):
+  def schedule_with_vars(self, *lst:Tensor, seen:Optional[Set[LazyBuffer]]=None) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
+    """Create the schedule needed to realize these Tensor(s), with Variables."""
     if getenv("FUZZ_SCHEDULE"):
       from test.external.fuzz_schedule import fuzz_schedule
-      fuzz_schedule(flatten([x.lazydata.lbs for x in lst]))
-    schedule, var_vals = create_schedule_with_vars(flatten([x.lazydata.lbs for x in lst]))
-    run_schedule(memory_planner(schedule), var_vals)
+      fuzz_schedule(flatten([x.lazydata.lbs for x in (self,)+lst]))
+    schedule, var_vals = create_schedule_with_vars(flatten([x.lazydata.lbs for x in (self,)+lst]), seen)
+    return memory_planner(schedule), var_vals
 
-  def realize(self) -> Tensor:
-    """Trigger the computation needed to create this Tensor. This is a light wrapper around corealize."""
-    Tensor.corealize([self])
+  def schedule(self, *lst:Tensor, seen:Optional[Set[LazyBuffer]]=None) -> List[ScheduleItem]:
+    """Create the schedule needed to realize these Tensor(s)."""
+    schedule, var_vals = self.schedule_with_vars(*lst, seen=seen)
+    assert len(var_vals) == 0
+    return schedule
+
+  def realize(self, *lst:Tensor) -> Tensor:
+    """Trigger the computation needed to create these Tensor(s)."""
+    run_schedule(*self.schedule_with_vars(*lst))
     return self
 
   def replace(self, x:Tensor) -> Tensor:
@@ -802,15 +808,18 @@ class Tensor:
         ret = ret.permute(*range(first_dim, first_dim+len(big_shape)), *range(0, first_dim), *range(first_dim+len(big_shape), ret.ndim))
     return ret
 
-  def __setitem__(self, indices, v:Union[Tensor, ConstType]):
-    if isinstance(self.device, str) and self.device.startswith("DISK"): return self.__getitem__(indices).assign(v)
-    # TODO: broadcast v to the shape here, refactor for const v and one way broadcast_shape
-    if not isinstance(v, Tensor): v = Tensor(v, self.device, self.dtype)
+  def __setitem__(self, indices, v:Union[Tensor, ConstType]) -> None:
+    if isinstance(self.device, str) and self.device.startswith("DISK"):
+      self.__getitem__(indices).assign(v)
+      return
+    # NOTE: check that setitem target is valid first
+    assert all(lb.st.contiguous for lb in self.lazydata.lbs), "setitem target needs to be contiguous"
+    if not isinstance(v, (Tensor, float, int, bool)): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
+    if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
     assign_to = self.realize().__getitem__(indices)
-    # NOTE: we check that indices is valid first
-    assert self.lazydata.contiguous(), "setitem target needs to be contiguous"
     # NOTE: contiguous to prevent const folding.
-    return assign_to.assign(v._broadcast_to(broadcast_shape(assign_to.shape, v.shape)).contiguous()).realize()
+    v = v._broadcast_to(broadcast_shape(assign_to.shape, v.shape)).contiguous()
+    assign_to.assign(v).realize()
 
   # NOTE: using slice is discouraged and things should migrate to pad and shrink
   def slice(self, arg:Sequence[Optional[Tuple[int, sint]]], value:float=0) -> Tensor:
