@@ -3,7 +3,9 @@
 # NOTE: this has overlap with external_test_opt.py
 
 import unittest
+import numpy as np
 from typing import List, Optional, Union
+from tinygrad.engine.realize import run_schedule
 from tinygrad.tensor import Tensor
 from tinygrad.ops import LoadOps, ReduceOps
 from tinygrad.helpers import DEBUG, GRAPH, flatten
@@ -485,6 +487,48 @@ class TestSchedule(unittest.TestCase):
     out0 = a.sum() + b[0]
     out1 = a.sum() + 2
     check_schedule([out0, out1], 1)
+
+  def test_group_realizes_simple(self):
+    r = Tensor.empty(4, 4).sum()
+    a = r + 2
+    check_schedule([r, a], 1)
+
+  def test_group_contiguous_nofuse(self):
+    r = Tensor.empty(4, 4).sum()
+    a = r.contiguous() + 2
+    check_schedule([r, a], 2)
+
+  def test_midreduce_nofuse(self):
+    r0 = Tensor.empty(4, 4).sum()
+    r1 = Tensor.empty(8, 8).sum()
+    a = r0 + 2
+    b = r0 + r1
+    check_schedule([r0, r1, a, b], 3) # (r0), (r1, b), (a)
+
+  def test_fuse_local_assign(self):
+    a = Tensor.ones(4, 4).contiguous().realize()
+    b = Tensor.ones(1, 1).contiguous().realize()
+    b_prev = b + 4
+    r = a.sum(keepdim=True)
+    # overrides the assign target
+    b += r
+    # uses the assign_target
+    c = r + b + b_prev
+    schedule = check_schedule([r, b, c], 1)
+    run_schedule(schedule)
+    np.testing.assert_equal(r.numpy(), 16)
+    np.testing.assert_equal(b.numpy(), 17)
+    np.testing.assert_equal(c.numpy(), 16+17+5)
+
+  def test_assign_fuse_before_expand(self):
+    a = Tensor.ones(4, 4).contiguous().realize()
+    b = Tensor.ones(1, 1).contiguous().realize()
+    c = Tensor.ones(8, 8).contiguous().realize()
+    b_prev = b + 4
+    r = a.sum(keepdim=True)
+    b += r
+    c += r + b + b_prev
+    check_schedule([r, b, c], 2)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_prefer_half_buffer(self):
