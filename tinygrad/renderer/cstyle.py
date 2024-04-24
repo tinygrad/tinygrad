@@ -134,12 +134,11 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str
         if child_count[u] <= 1 and args is not BinaryOps.MAX and not getenv("EXPAND_SSA"): r[u] = val
         else: kk(f"{lang.render_dtype(dtype)} {ssa('alu',u)} = {val};")
       elif uop is UOps.SPECIAL:
-        # TODO: clang/omp will put loop here. gpu stuff does workitem thang
-        # kk(f"int {args[1]} = {lang.code_for_workitem[args[1][0]](args[0])}; /* {args[2]} */")
-        collapse = sum(u.uop is UOps.SPECIAL for u in uops)
-        if depth == 1: kk(f"#pragma omp parallel for collapse({collapse})")
-        kk(f"for (int {(expr := args[1])} = 0; {expr} < {args[2]}; {expr}++) {{")
-        depth += 1
+        if lang.code_for_workitem: kk(f"int {args[1]} = {lang.code_for_workitem[args[1][0]](args[0])}; /* {args[2]} */")
+        else:
+          if depth == 1: kk(f"#pragma omp parallel for collapse({sum(u.uop is UOps.SPECIAL for u in uops)})")
+          kk(f"for (int {(expr := args[1])} = 0; {expr} < {args[2]}; {expr}++) {{")
+          depth += 1
         r[u] = args[1]
       elif uop is UOps.LOAD:
         val = lang.render_load(dtype, r[vin[0]], vin[0].dtype, strip_parens(r[vin[1]]), vin[0].uop is UOps.DEFINE_LOCAL)
@@ -177,8 +176,12 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str
         from_ssa = vin[0].uop in {UOps.LOAD, UOps.WMMA, UOps.DEFINE_ACC}
         r[u] = (r[vin[0]] if from_ssa else f"{(r[vin[0]])}") + (f"[{args}]" if vin[0].dtype.count > 4 else f".{'xyzw'[args]}")
       else: raise RuntimeError(f"failed to render {uop}")
-  
-  for _ in range(sum(u.uop is UOps.SPECIAL for u in uops)): kk("}") # TODO: HACKS but for proof of concept
+
+  # TODO: hacky
+  if not lang.code_for_workitem:
+    for _ in range(sum(u.uop is UOps.SPECIAL for u in uops)):
+      kk("}")
+      depth -= 1
 
   return lang.render_kernel(function_name, kernel, bufs, uops)
 
