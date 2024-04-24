@@ -24,7 +24,8 @@ class ClangProgram:
       pathlib.Path(cached_file_path.name).write_bytes(lib)
       self.fxn = ctypes.CDLL(str(cached_file_path.name))[name]
 
-  def __call__(self, *bufs, global_size=(1,1,1), local_size=(1,1,1), vals=(), wait=False): return cpu_time_execution(lambda: self.fxn(*bufs, *vals), enable=wait)
+  def __call__(self, *bufs, global_size=None, local_size=None, vals=(), wait=False):
+    return cpu_time_execution(lambda: self.fxn(*bufs, *vals), enable=wait)
 
 class ClangDevice(Compiled):
   def __init__(self, device:str): super().__init__(device, MallocAllocator, ClangCompiler("compile_clang"), ClangProgram)

@@ -1,5 +1,5 @@
 from typing import Dict, List, Optional, NamedTuple, Tuple, Union, DefaultDict, cast, Literal, Callable
-import math, functools, itertools
+import math, functools
 from collections import defaultdict, Counter
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
@@ -177,7 +177,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str
         r[u] = (r[vin[0]] if from_ssa else f"{(r[vin[0]])}") + (f"[{args}]" if vin[0].dtype.count > 4 else f".{'xyzw'[args]}")
       else: raise RuntimeError(f"failed to render {uop}")
 
-  # TODO: hacky
+  # TODO: hacky, not good but its not immediately obvious what to do here
   if not lang.code_for_workitem:
     for _ in range(sum(u.uop is UOps.SPECIAL for u in uops)):
       kk("}")
