@@ -29,7 +29,11 @@ The code in [realize](/tinygrad/engine/realize.py) lowers `ScheduleItem` to `Exe
 
 There's a ton of complexity hidden behind this, see the `codegen/` directory.
 
-First we lower the AST to UOps, which is a linear list of the compute to be run, then we lower the UOps to code, then we compile the code.
+First we lower the AST to UOps, which is a linear list of the compute to be run. This is where the BEAM search happens. The UOps can be changed by `CompilerOptions`.
+
+::: tinygrad.device.CompilerOptions
+
+Then we render the UOps into code, then we compile the code to binary.
 
 ## Execution
 
