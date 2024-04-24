@@ -6,9 +6,11 @@ import unittest
 import numpy as np
 from typing import List, Optional, Union
 from tinygrad.engine.realize import run_schedule
+from tinygrad.nn import optim
+from tinygrad.nn.state import get_parameters
 from tinygrad.tensor import Tensor
 from tinygrad.ops import LoadOps, ReduceOps
-from tinygrad.helpers import DEBUG, GRAPH, flatten
+from tinygrad.helpers import DEBUG, GRAPH, dedup, flatten
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.graph import print_tree, realized_lazybuffer
 from tinygrad.engine.schedule import create_schedule
@@ -503,7 +505,10 @@ class TestSchedule(unittest.TestCase):
     r1 = Tensor.empty(8, 8).sum()
     a = r0 + 2
     b = r0 + r1
-    check_schedule([r0, r1, a, b], 3) # (r0), (r1, b), (a)
+    schedule = check_schedule([r0, r1, a, b], 3) # (r0), (r1, b), (a)
+    # reduces should be cached
+    reduceops = dedup([x for si in schedule for out in si.ast for x in out.lazyops if x.op in ReduceOps])
+    assert len(reduceops) == 2
 
   def test_fuse_local_assign(self):
     a = Tensor.ones(4, 4).contiguous().realize()
@@ -529,6 +534,14 @@ class TestSchedule(unittest.TestCase):
     b += r
     c += r + b + b_prev
     check_schedule([r, b, c], 2)
+
+  def test_nofuse_sgd_conv_backward(self):
+    img = Tensor.rand(2,3,64,64)
+    c1 = nn.Conv2d(3,32,3)
+    opt = optim.SGD(get_parameters(c1))
+    opt.zero_grad()
+    c1(img).elu().sum().backward()
+    check_schedule(opt.schedule_step(), 7)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_prefer_half_buffer(self):
