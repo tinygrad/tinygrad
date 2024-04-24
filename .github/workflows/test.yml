@@ -162,7 +162,6 @@ jobs:
         uses: actions/checkout@v4
       - name: Install OpenCL
         run: |
-          echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
           echo "deb [ allow-insecure=yes ] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
           sudo apt update
           sudo apt install --allow-unauthenticated -y --no-install-recommends \
@@ -390,7 +389,6 @@ jobs:
       - name: Install OpenCL
         if: matrix.backend == 'gpu'
         run: |
-          echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
           echo "deb [ allow-insecure=yes ] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
           sudo apt update
           sudo apt install --allow-unauthenticated -y --no-install-recommends opencl-headers \
@@ -400,7 +398,6 @@ jobs:
       - name: Install packages (cuda)
         if: matrix.backend == 'cuda' || matrix.backend == 'ptx' || matrix.backend == 'triton'
         run: |
-          echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
           sudo apt update -y
           sudo apt install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev \
             flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc libzstd-dev
@@ -431,7 +428,6 @@ jobs:
       - name: Install packages (hip)
         if: matrix.backend == 'hip'
         run: |
-          echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
           wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
           sudo tee /etc/apt/sources.list.d/rocm.list <<'EOF'
           deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/6.0.2 jammy main
