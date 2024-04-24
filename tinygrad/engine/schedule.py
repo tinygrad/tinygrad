@@ -254,7 +254,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
       for out in ps.outputs: realized_lazybuffer(out, kernel_number)
     var_vals = merge_dicts([var_vals, ps.var_vals])
     for out in ps.outputs: del out.srcs  # can only schedule once
-    schedule.append(si:=ScheduleItem(ps.ast, tuple(x.buffer for x in ps.outputs if x.size != 0), tuple(x.buffer for x in ps.inputs if x.size != 0)))
+    schedule.append(si:=ScheduleItem(ps.ast, tuple(x.buffer for x in (ps.outputs+ps.inputs) if x.size != 0)))
     if logops and si.ast[0].op not in LoadOps and not any(i.device.startswith("DISK:") for i in si.inputs): logops.write(str(si.ast)+"\n")
     for x in graph[ps.outputs[0]]:
       in_degree[x] -= 1

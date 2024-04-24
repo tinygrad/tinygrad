@@ -33,7 +33,7 @@ def fuzz_schedule(outs: List[LazyBuffer]):
       if out.op is LoadOps.ASSIGN: prerealized[out] = out.buffer.as_buffer()
     for x in ps.inputs:
       if x not in ground_truth and x.device != "NPY": prerealized[x] = x.buffer.as_buffer()
-    si = ScheduleItem(ps.ast, tuple(x.buffer for x in ps.outputs if x.size != 0), tuple(x.buffer for x in ps.inputs if x.size != 0))
+    si = ScheduleItem(ps.ast, tuple(x.buffer for x in (ps.outputs+ps.inputs) if x.size != 0))
     _exec_si(si, seed)
     for out in ps.outputs:
       ground_truth[out] = out.buffer.as_buffer()
@@ -52,7 +52,7 @@ def fuzz_schedule(outs: List[LazyBuffer]):
           if x.device == "NPY": rawbufs[x] = x.buffer
           # copy the pre realized input
           else: rawbufs[x] = Buffer(x.buffer.device, x.buffer.size, x.buffer.dtype, initial_value=prerealized[x])
-      si = ScheduleItem(ps.ast, tuple(rawbufs[x] for x in ps.outputs if x.size != 0), tuple(rawbufs[x] for x in ps.inputs if x.size != 0))
+      si = ScheduleItem(ps.ast, tuple(rawbufs[x] for x in (ps.outputs+ps.inputs) if x.size != 0))
       _exec_si(si, seed)
       for out in ps.outputs:
         outbuf = np.frombuffer(rawbufs[out].as_buffer(), out.dtype.np)
@@ -62,7 +62,7 @@ def fuzz_schedule(outs: List[LazyBuffer]):
           raise e
 
 def _exec_si(si: ScheduleItem, seed:int):
-  ei = ExecItem(lower_schedule_item(si), list(si.outputs+si.inputs))
+  ei = ExecItem(lower_schedule_item(si), list(si.bufs))
   if len(capturing): capturing[0].add(ei)
   if isinstance(ei.prg, CustomOp): Tensor._seed = seed
   ei.run()
