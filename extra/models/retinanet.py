@@ -26,7 +26,7 @@ def sigmoid_focal_loss(
 
   p = Tensor.sigmoid(inputs) * mask
 
-  ce_loss = cust_bin_cross_logits(inputs, targets).realize() #* mask
+  ce_loss = cust_bin_cross_logits(inputs, targets) #* mask
   
   # print('ce_loss', ce_loss.shape)
   p_t = p * targets + (1 - p) * (1 - targets)
@@ -38,7 +38,7 @@ def sigmoid_focal_loss(
   if alpha >= 0:
     alpha_t = alpha * targets + (1 - alpha) * (1 - targets)
     loss = alpha_t * loss
-  loss=loss.realize()
+  loss=loss
 
   loss = loss * mask
 
