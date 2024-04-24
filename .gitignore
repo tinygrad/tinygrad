@@ -56,4 +56,4 @@ weights
 *.pkl
 site/
 ckpts
-test.py
+testpad.py
