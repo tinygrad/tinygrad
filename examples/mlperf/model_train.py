@@ -115,7 +115,7 @@ def train_resnet():
       X = normalize(X)
       out = model.forward(X)
       loss = out.cast(dtypes.float32).sparse_categorical_crossentropy(Y, label_smoothing=0.1)
-      top_1 = (out.argmax(-1) == Y).sum()
+      top_1 = (out.argmax(-1) == Y).sum() / (Y != -1).sum()
       (loss * loss_scaler).backward()
       for t in optimizer_group.params: t.grad = t.grad.contiguous() / loss_scaler
       optimizer_group.step()
@@ -128,7 +128,7 @@ def train_resnet():
       X = normalize(X)
       out = model.forward(X)
       loss = out.cast(dtypes.float32).sparse_categorical_crossentropy(Y, label_smoothing=0.1)
-      top_1 = (out.argmax(-1) == Y).sum()
+      top_1 = (out.argmax(-1) == Y).sum() / (Y != -1).sum()
       return loss.realize(), top_1.realize()
 
   def data_get(it):
@@ -158,7 +158,7 @@ def train_resnet():
       dt = time.perf_counter()
 
       device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
-      loss, top_1_acc = loss.numpy().item(), top_1_acc.numpy().item() / BS
+      loss, top_1_acc = loss.numpy().item(), top_1_acc.numpy().item()
 
       cl = time.perf_counter()
       if BENCHMARK:
@@ -208,7 +208,7 @@ def train_resnet():
         except StopIteration:
           next_proc = None
 
-        loss, top_1_acc = loss.numpy().item(), top_1_acc.numpy().item() / EVAL_BS
+        loss, top_1_acc = loss.numpy().item(), top_1_acc.numpy().item()
         eval_loss.append(loss)
         eval_top_1_acc.append(top_1_acc)
         proc, next_proc = next_proc, None  # return old cookie
