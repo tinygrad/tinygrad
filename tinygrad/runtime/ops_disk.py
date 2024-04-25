@@ -79,7 +79,7 @@ class DiskDevice(Compiled):
       except OSError: self.fd = os.open(filename, os.O_RDWR|os.O_CREAT)
       if os.fstat(self.fd).st_size < self.size: os.ftruncate(self.fd, self.size)
       self.mem = mmap.mmap(self.fd, self.size)
-    # if (hp := getattr(mmap, "MADV_HUGEPAGE", None)) is not None: self.mem.madvise(hp) # type: ignore
+    if (hp := getattr(mmap, "MADV_HUGEPAGE", None)) is not None: self.mem.madvise(hp) # type: ignore
   def _might_close(self):
     self.count -= 1
     if self.count == 0:
