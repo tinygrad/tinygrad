@@ -6,23 +6,23 @@ from tinygrad.nn import optim, state  # noqa: F401
 from tinygrad.dtype import least_upper_float
 
 class BatchNorm2d:
-  def __init__(self, sz:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1, num_devices=1, dtype=None):
+  def __init__(self, sz:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1, num_devices=None, dtype=None):
     self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
     self.num_devices = num_devices
 
     if affine: self.weight, self.bias = Tensor.ones(sz, dtype=dtype), Tensor.zeros(sz, dtype=dtype)
     else: self.weight, self.bias = None, None
 
-    self.running_mean = Tensor.zeros(num_devices, sz, dtype=dtype, requires_grad=False)
-    self.running_var = Tensor.ones(num_devices, sz, dtype=dtype, requires_grad=False)
+    self.running_mean = Tensor.zeros(*([num_devices] if num_devices is not None else []), sz, dtype=dtype, requires_grad=False)
+    self.running_var = Tensor.ones(*([num_devices] if num_devices is not None else []), sz, dtype=dtype, requires_grad=False)
     self.num_batches_tracked = Tensor.zeros(1, dtype=dtype, requires_grad=False)
 
   def __call__(self, x:Tensor):
-    xr = x.reshape(self.num_devices, -1, *x.shape[1:]).cast(least_upper_float(x.dtype))
+    xr = x.reshape(self.num_devices or 1, -1, *x.shape[1:]).cast(least_upper_float(x.dtype))
     batch_mean, batch_invstd = self.calc_stats(xr)
     ret = xr.batchnorm(
-      self.weight.reshape(1, -1).expand((self.num_devices, -1)),
-      self.bias.reshape(1, -1).expand((self.num_devices, -1)),
+      self.weight.reshape(1, -1).expand((self.num_devices or 1, -1)),
+      self.bias.reshape(1, -1).expand((self.num_devices or 1, -1)),
       batch_mean, batch_invstd, axis=(0, 2))
     return ret.reshape(x.shape).cast(x.dtype)
 
@@ -38,14 +38,16 @@ class BatchNorm2d:
 
       # NOTE: wow, this is done all throughout training in most PyTorch models
       if self.track_running_stats:
-        self.running_mean.assign((1-self.momentum) * self.running_mean + self.momentum * batch_mean.detach().cast(self.running_mean.dtype))
+        self.running_mean.assign((1-self.momentum) * self.running_mean +
+                                 self.momentum * batch_mean.detach().reshape(self.running_mean.shape).cast(self.running_mean.dtype))
         batch_var_adjust = prod(y.shape[1:]) / (prod(y.shape[1:]) - y.shape[2])
-        self.running_var.assign((1-self.momentum) * self.running_var + self.momentum * batch_var_adjust * batch_var.detach().cast(self.running_var.dtype))
+        self.running_var.assign((1-self.momentum) * self.running_var +
+                                self.momentum * batch_var_adjust * batch_var.detach().reshape(self.running_var.shape).cast(self.running_var.dtype))
         self.num_batches_tracked += 1
     else:
-      batch_mean = self.running_mean
+      batch_mean = self.running_mean.reshape(x.shape[0], 1, x.shape[2], 1, 1)
       # NOTE: this can be precomputed for static inference. we expand it here so it fuses
-      batch_invstd = self.running_var.reshape(self.running_var.shape[0], 1, self.running_var.shape[1], 1, 1).expand(x.shape).add(self.eps).rsqrt()
+      batch_invstd = self.running_var.reshape(x.shape[0], 1, x.shape[2], 1, 1).expand(x.shape).add(self.eps).rsqrt()
     return batch_mean, batch_invstd
 
 # TODO: these Conv lines are terrible
