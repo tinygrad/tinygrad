@@ -1,9 +1,10 @@
 import numpy as np
 import torch
 import unittest
-from tinygrad import Tensor, Device
+from tinygrad import Tensor, Device, dtypes
 from tinygrad.nn.optim import Adam, SGD, AdamW
 from tinygrad.helpers import CI
+from test.helpers import is_dtype_supported
 
 np.random.seed(1337)
 x_init = np.random.randn(1,4).astype(np.float32)
@@ -104,6 +105,15 @@ class TestOptim(unittest.TestCase):
         losses.append(loss.numpy())
 
       np.testing.assert_allclose(losses[0], losses[1], atol=1e-4, rtol=0)
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  def test_mixed_precision(self):
+    old_default_float, dtypes.default_float = dtypes.default_float, dtypes.half
+    # weight update would overflow without upcasting
+    self._test_sgd(10, {'lr': 1e10}, 1e-6, 3e-4)
+    self._test_adam(1, {'lr': 1e10}, 1e-4, 1e-4)
+    self._test_adamw(1, {'lr': 1e10}, 1e-4, 1e-4)
+    dtypes.default_float = old_default_float
 
 if __name__ == '__main__':
   unittest.main()
