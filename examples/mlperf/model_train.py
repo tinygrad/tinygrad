@@ -506,7 +506,7 @@ def train_retinanet():
       print(colored(f'{cnt} EVAL_STEP || {time.time()-st}', 'red'))
       cnt=cnt+1
       proc, next_proc = next_proc, None  # return old cookie
-      if cnt>30: break
+      # if cnt>30: break
     coco_eval.params.imgIds = evaluated_imgs
     coco_eval._paramsEval.imgIds = evaluated_imgs
     coco_eval.evalImgs = list(np.concatenate(coco_evalimgs, -1).flatten())
