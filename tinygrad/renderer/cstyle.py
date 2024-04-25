@@ -16,7 +16,7 @@ class CStyleLanguage(NamedTuple):
   smem_prefix_for_cast: bool = True
   arg_int_prefix: str = "const int"
   barrier: str = ""
-  code_for_workitem: Dict[Union[Literal["g"], Literal["l"], Literal["i"]], Callable] = {}
+  workitem_is_loop: bool = True
   global_max: List[int] = []
   local_max: List[int] = []
   extra_args: List[str] = []
@@ -31,6 +31,10 @@ class CStyleLanguage(NamedTuple):
     BinaryOps.DIV: lambda a,b,dtype: f"({a}/{b})", BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})", BinaryOps.MOD: lambda a,b,dtype: f"({a}%{b})",
     BinaryOps.CMPLT: lambda a,b,dtype: f"({a}<{b})", BinaryOps.CMPEQ: lambda a,b,dtype: f"({a}=={b})", BinaryOps.XOR: lambda a,b,dtype: f"({a}^{b})",
     TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})"}
+  
+  def workitem_code(self, idx, access, size, n_workitems):
+    code = [f"#pragma omp parallel for collapse({n_workitems})"] if idx[0] in ["g","i"] and idx[-1] == "0" else []
+    return code + [f"for(int {idx} = 0; {idx} < {size}; {idx}++) {{"]
 
   # returns a str expression of the casted xs with the given type
   def render_cast(self, x:List[str], var_dtype:DType, bitcast=False) -> str:
@@ -93,6 +97,11 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str
   depth = 1
   def kk(s): kernel.append("  "*depth+s)
 
+  def end_scope():
+    nonlocal depth
+    depth -= 1
+    kk("}")
+
   c: DefaultDict[str, int] = defaultdict(int)
   r: Dict[UOp, str] = {}
 
@@ -112,9 +121,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str
       kk(f"if ({r[vin[0]]}) {{")
       depth += 1
     elif uop is UOps.BARRIER: kk(lang.barrier)
-    elif uop in {UOps.ENDLOOP, UOps.ENDIF}:
-      depth -= 1
-      kk("}")
+    elif uop in {UOps.ENDLOOP, UOps.ENDIF}: end_scope()
     elif uop is UOps.STORE:
       assert vin[0].dtype is not None and vin[2].dtype is not None
       rendered_store = lang.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, strip_parens(r[vin[1]]), vin[0].uop is UOps.DEFINE_LOCAL)
@@ -134,11 +141,8 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str
         if child_count[u] <= 1 and args is not BinaryOps.MAX and not getenv("EXPAND_SSA"): r[u] = val
         else: kk(f"{lang.render_dtype(dtype)} {ssa('alu',u)} = {val};")
       elif uop is UOps.SPECIAL:
-        if lang.code_for_workitem: kk(f"int {args[1]} = {lang.code_for_workitem[args[1][0]](args[0])}; /* {args[2]} */")
-        else:
-          if depth == 1: kk(f"#pragma omp parallel for collapse({sum(u.uop is UOps.SPECIAL for u in uops)})")
-          kk(f"for (int {(expr := args[1])} = 0; {expr} < {args[2]}; {expr}++) {{")
-          depth += 1
+        for line in lang.workitem_code(args[1], args[0], args[2], sum(u.uop is UOps.SPECIAL for u in uops)): kk(line)
+        if lang.workitem_is_loop: depth += 1
         r[u] = args[1]
       elif uop is UOps.LOAD:
         val = lang.render_load(dtype, r[vin[0]], vin[0].dtype, strip_parens(r[vin[1]]), vin[0].uop is UOps.DEFINE_LOCAL)
@@ -177,13 +181,11 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str
         r[u] = (r[vin[0]] if from_ssa else f"{(r[vin[0]])}") + (f"[{args}]" if vin[0].dtype.count > 4 else f".{'xyzw'[args]}")
       else: raise RuntimeError(f"failed to render {uop}")
 
-  # TODO: hacky, not good but its not immediately obvious what to do here
-  if not lang.code_for_workitem:
-    for _ in range(sum(u.uop is UOps.SPECIAL for u in uops)):
-      kk("}")
-      depth -= 1
+  while depth > 1: end_scope()
 
   return lang.render_kernel(function_name, kernel, bufs, uops)
+
+def _gpu_workitem(idx, d, size): return [f"int {idx} = {d[idx[0]]}; /* {size} */"]
 
 class OpenCLLanguage(CStyleLanguage):
   kernel_prefix = "__kernel "
@@ -211,7 +213,7 @@ class MetalLanguage(CStyleLanguage):
   barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);"
   float4 = "float4"
   uses_ptr_arithmetic = True
-  code_for_workitem = {"g": lambda x: f"gid.{chr(120+x)}", "l": lambda x: f"lid.{chr(120+x)}"}
+  workitem_is_loop = False
   extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
   type_map = {dtypes.bfloat16: "bfloat"}
   code_for_op = {**CStyleLanguage().code_for_op,
@@ -220,6 +222,8 @@ class MetalLanguage(CStyleLanguage):
     UnaryOps.EXP2: lambda x,dtype: f"(bfloat)exp2({x})" if dtype == dtypes.bfloat16 else f"exp2({x})",
     UnaryOps.LOG2: lambda x,dtype: f"(bfloat)log2({x})" if dtype == dtypes.bfloat16 else f"log2({x})",
     UnaryOps.SIN: lambda x,dtype: f"(bfloat)sin({x})" if dtype == dtypes.bfloat16 else f"sin({x})",}
+
+  def workitem_code(self, idx, access, size, _): return _gpu_workitem(idx, {"g": f"gid.{chr(120+access)}", "l": f"lid.{chr(120+access)}"}, size)
 
   def render_cast(self, x: List[str], var_dtype: DType, bitcast=False) -> str:
     return f"as_type<{self.render_dtype(var_dtype)}>({x[0]})" if bitcast else super().render_cast(x, var_dtype)
