@@ -259,7 +259,7 @@ def train_retinanet():
   
   WARMUP_EPOCHS = 1
   WARMUP_FACTOR = 0.001
-  LR = 0.0001
+  LR = 0.000085
   MAP_TARGET = 0.34
   GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
   SYNCBN = False
