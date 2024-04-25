@@ -164,7 +164,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
           lang.asm_for_op[BinaryOps.CMPLT](pred:=ssa("pred", dtype="pred"), r[vin[0]], r[vin[0].vin[1]], dtypes.int, lang.types[dtypes.int]))
       kk(*lang.render_bra(r_label[vin[0]], pred))
     elif uop == UOps.ENDIF:
-      kk(f"bra {r_label[vin[0]]}_true;")
+      kk(f"@!{_cast(r[vin[0].vin[0]], dtypes.bool, vin[0].vin[0].dtype, u=u, pred=True)} bra {r_label[vin[0]]}_true;")
       kk(f"{r_label[vin[0]]}:")
       if args:
         for dest, alt in args:
