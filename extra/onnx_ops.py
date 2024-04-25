@@ -3,7 +3,7 @@ from typing import Union, Tuple, Optional, List, Any
 from tinygrad.tensor import Tensor, broadcast_shape
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.helpers import prod, flatten
-from extra.onnx import safe_numpy, DTYPE_MAP, safe_python
+from extra.onnx import DTYPE_MAP, safe_python
 import numpy as np
 
 tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu", "Sigmoid", "MatMul",
@@ -474,18 +474,18 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
         x_floor, y_floor = int(x), int(y)
         y_shrink = (y_floor, math.ceil(y)+1)
         x_shrink = (x_floor, math.ceil(x)+1)
-        corners = safe_numpy(X.shrink((None, None, y_shrink, x_shrink)))
+        corners = safe_python(X.shrink((None, None, y_shrink, x_shrink)))[0][0]
 
         wx, wy = math.ceil(x) - x, math.ceil(y) - y
         if x == x_floor and y == y_floor:
-          weighted = corners[0,0,0,0]
+          weighted = corners[0][0]
         elif x == x_floor:
-          weighted = corners[0,0,0,0] * wy + corners[0,0,1,0] * (1-wy)
+          weighted = corners[0][0] * wy + corners[1][0] * (1-wy)
         elif y == y_floor:
-          weighted = corners[0,0,0,0] * wx + corners[0,0,0,1] * (1-wx)
+          weighted = corners[0][0] * wx + corners[0][1] * (1-wx)
         else:
-          weighted = (corners[0,0,0,0] * wx + corners[0,0,0,1] * (1-wx)) * wy + \
-                     (corners[0,0,1,0] * (wx) + corners[0,0,1,1] * (1-wx)) * (1-wy)
+          weighted = (corners[0][0] * wx + corners[0][1] * (1-wx)) * wy + \
+                     (corners[1][0] * (wx) + corners[1][1] * (1-wx)) * (1-wy)
         ret.append(weighted)
     return Tensor(ret).reshape(output_shape)
   if mode == "cubic":
@@ -681,15 +681,14 @@ def Attention(x:Tensor, weights, bias:Optional[Tensor]=None, mask_index:Optional
 def Adagrad(R, T, *inputs, decay_factor=0.0, epsilon=0.0, norm_coefficient=0.0):
   groups = len(inputs) // 3
   grouped_inputs = [inputs[i::groups] for i in range(groups)]
-  T, R = safe_numpy(T), safe_numpy(R)
-  r = R / (1 + T * decay_factor)
+  r = safe_python(R / (1 + T * decay_factor))
   ret = []
   for X, G, H in grouped_inputs:
     X.grad = norm_coefficient * X + G
     X.grad.requires_grad, H.requires_grad = False, False # TODO manually turning off requires_grad, see TODO under (domain == "ai.onnx.preview.training") in onnx.py
     H.assign(H.detach() + X.grad * X.grad).realize()
     H_adaptive = H.sqrt() + epsilon
-    X.assign(X.detach() - r.tolist() * X.grad / H_adaptive)
+    X.assign(X.detach() - r * X.grad / H_adaptive)
     ret.extend([X, H])
   ret = ret[::2] + ret[1::2]
   return tuple(ret)
@@ -697,7 +696,7 @@ def Adagrad(R, T, *inputs, decay_factor=0.0, epsilon=0.0, norm_coefficient=0.0):
 def Momentum(R, T, *inputs, alpha, beta, mode, norm_coefficient):
   groups = len(inputs) // 3
   grouped_inputs = [inputs[i::groups] for i in range(groups)]
-  T, R.requires_grad = T.item(), False
+  T, R.requires_grad = safe_python(T), False
   beta_adjusted = beta if T > 0 else 1
   ret = []
   for X, G, V in grouped_inputs:
@@ -714,7 +713,7 @@ def Momentum(R, T, *inputs, alpha, beta, mode, norm_coefficient):
 def Adam(R, T, *inputs, alpha=0.9, beta=0.999, epsilon=0.0, norm_coefficient=0.0, norm_coefficient_post=0.0):
   groups = len(inputs) // 4
   grouped_inputs = [inputs[i::groups] for i in range(groups)]
-  T, R.requires_grad = T.item(), False
+  T, R.requires_grad = safe_python(T), False
   ret = []
   for X, G, V, H in grouped_inputs:
     X.grad = (norm_coefficient * X + G).realize()

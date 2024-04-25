@@ -14,17 +14,6 @@ except ImportError:
   from onnx.mapping import TENSOR_TYPE_TO_NP_TYPE
   tensor_dtype_to_np_dtype = lambda x: TENSOR_TYPE_TO_NP_TYPE[x]
 
-# global numpy cache for parameters
-numpy_cache = {}
-def safe_numpy(t) -> np.ndarray:
-  if not isinstance(t, Tensor): return t
-  global numpy_cache
-  if t not in numpy_cache:
-    if DEBUG >= 3: print("numpy cache miss", t)
-    tmp = t.numpy()
-    numpy_cache[t] = tmp
-  return numpy_cache[t]
-
 # global Tensor -> list cache for parameters
 to_python_cache = {}
 def safe_python(t, tobytes=False) -> ConstType:
