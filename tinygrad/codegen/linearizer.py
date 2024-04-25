@@ -399,7 +399,7 @@ class Linearizer(Kernel):
 
     # load latebufs & consts
     loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs) \
-                           for i,b in enumerate(self.bufs) if b.__class__ is not LocalBuffer})
+                           for i,b in enumerate(self.bufs) if b.__class__ is ConstBuffer or b not in self.earlybufs and b.__class__ is not LocalBuffer})
 
     # run late AST (without the store)
     for op in self.ast:
