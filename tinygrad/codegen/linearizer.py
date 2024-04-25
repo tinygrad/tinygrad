@@ -138,7 +138,6 @@ class Linearizer(Kernel):
     store_offset = dict(zip(_idxs, store))
 
     # float4 grouping
-
     if len(upcast_dim := self.get_float4_upcast_dim(i)) == 1 and len(float4_expand := expand_node(idxs[upcast_dim[0]])) in [2,4]:
       grouped_store_offset = defaultdict(list)
       for k in store_offset:
@@ -172,6 +171,7 @@ class Linearizer(Kernel):
     self.loop_uops.update(new_loops)
     return tuple(new_loops.values())
 
+  # helper function, the actual render_reduceop function will get initialize once the indexes get initilized
   def _render_reduceop(self, reduceop: LazyOp, loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]], \
                        global_idxs, local_idxs, reduce_idxs, upcast_idxs, full_upcast_idxs):
     # define indicies
@@ -428,9 +428,13 @@ class Linearizer(Kernel):
                                       for u in self.ast_parse(x.src[0], acc, offs, loaded_buffers)]
     if x.op in ReduceOps and not do_reduce:
       if x in self.reduce_acc: return [self.reduce_acc[x][i] for i in offs] if offs else self.reduce_acc[x]
+      # store a copy of the current parse state 
       cursor_copy, load_cache_copy = self.uops.cursor, self.load_cache
+      # go back to before this for loop / if statement begins
       self.uops.cursor,self.load_cache=self.uops.uops[min([self.uops.uops.index(ctx) for ctx in loop_ctx+if_ctx])] if loop_ctx or if_ctx else None,{}
+      # render the reduceop
       self.reduce_acc[x] = self.render_reduceop(x, loaded_buffers)
+      # reload the parse state & continue
       self.uops.cursor, self.load_cache = cursor_copy, load_cache_copy
       return [self.reduce_acc[x][i] for i in offs] if offs else self.reduce_acc[x]
 
