@@ -428,7 +428,7 @@ class Linearizer(Kernel):
                                       for u in self.ast_parse(x.src[0], acc, offs, loaded_buffers)]
     if x.op in ReduceOps and not do_reduce:
       if x in self.reduce_acc: return [self.reduce_acc[x][i] for i in offs] if offs else self.reduce_acc[x]
-      # store a copy of the current parse state 
+      # store a copy of the current parse state
       cursor_copy, load_cache_copy = self.uops.cursor, self.load_cache
       # go back to before this for loop / if statement begins
       self.uops.cursor,self.load_cache=self.uops.uops[min([self.uops.uops.index(ctx) for ctx in loop_ctx+if_ctx])] if loop_ctx or if_ctx else None,{}

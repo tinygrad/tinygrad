@@ -131,7 +131,7 @@ class UOpGraph:
   def __init__(self, start_uops:Optional[List[UOp]]=None):
     # list of uops
     self.uops: List[UOp] = [] if start_uops is None else start_uops
-    # from where uops.add will add new uops, None will to the end of the graph
+    # from where uops.add will add new uops, a value of None will to the end of the graph
     self.cursor: Optional[UOp] = None
 
     # global uop cache
