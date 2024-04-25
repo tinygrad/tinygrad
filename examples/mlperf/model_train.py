@@ -251,7 +251,7 @@ def train_retinanet():
   WANDB = getenv('WANDB')
   # WANDB = False
   HOSTNAME = getenv('SLURM_STEP_NODELIST', '3080')
-  EPOCHS = 100
+  EPOCHS = 5
 
   BS = getenv('BS', 52)
 
