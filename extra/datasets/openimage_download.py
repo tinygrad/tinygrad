@@ -65,7 +65,7 @@ dataset = foz.load_zoo_dataset(
     label_types=["detections"],
     dataset_name="open-images",
     dataset_dir=dir,
-    max_samples=1000,
+    # max_samples=1000,
 )
 
 print("Converting dataset to coco format ...")
