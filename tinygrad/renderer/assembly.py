@@ -1,11 +1,10 @@
 from typing import Callable, DefaultDict, Dict, List, Union, NamedTuple, Optional, cast
-import functools, struct
+import functools, struct, copy
 from collections import defaultdict
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op
 from tinygrad.dtype import dtypes, DType, PtrDType, ConstType, INVERSE_DTYPES_DICT
 from tinygrad.codegen.uops import UOpGraph, PatternMatcher
-import copy
 
 def render_val(x, dtype):
   if dtypes.is_float(dtype):
