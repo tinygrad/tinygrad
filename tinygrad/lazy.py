@@ -186,13 +186,14 @@ class LazyBuffer:
     # cap output buffer to 2**22: heuristic number of global outputs to achieve max occupancy with enough locals+upcasts for gemm
     #   ~2**10 should be enough if GROUP is used
     # 256 split maximum should be "negligible reduce" for low prod(new_shape), 8 split minimum.
+    # split is moved to the end to provide maximum locality for the second phase reduce.
     self_real_strides = self.st.real_strides(ignore_valid=True)
     split_candidates = [(i, x) for i in axis for x in range(min(256,2**getenv("SPLIT_OUT_MAX",22)//prod(new_shape)),8-1,-1)
                         if self.shape[i] % x == 0 and self_real_strides[i] != 0]
     if not split_candidates: return self._reduce_op(op, axis)
     dim_to_split, divisor = split_candidates[0]
     splitted_shape = self.shape[:dim_to_split] + (divisor,) + (self.shape[dim_to_split]//divisor,) + self.shape[dim_to_split+1:]
-    splitted = self.reshape(splitted_shape).permute(tuple([x for x in range(len(splitted_shape)) if x != dim_to_split]+[dim_to_split]))  # move split to end
+    splitted = self.reshape(splitted_shape).permute(tuple([x for x in range(len(splitted_shape)) if x != dim_to_split]+[dim_to_split]))
     if DEBUG >= 3: print(f"split {divisor}: {self.shape} -> {splitted.shape} -> {new_shape}")
     return splitted._reduce_op(op, axis)._reduce_op(op, (len(new_shape),)).reshape(new_shape)  # reduce original axes, then split
 
