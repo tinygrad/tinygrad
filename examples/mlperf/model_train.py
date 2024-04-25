@@ -255,7 +255,7 @@ def train_retinanet():
 
   BS = getenv('BS', 52)
 
-  BS_EVAL = getenv('BS_EVAL', 52)
+  BS_EVAL = getenv('BS_EVAL', BS)
   
   WARMUP_EPOCHS = 1
   WARMUP_FACTOR = 0.001
