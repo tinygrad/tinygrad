@@ -5,6 +5,7 @@ from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op
 from tinygrad.dtype import dtypes, DType, PtrDType, ConstType, INVERSE_DTYPES_DICT
 from tinygrad.codegen.uops import UOpGraph, PatternMatcher
+import copy
 
 def render_val(x, dtype):
   if dtypes.is_float(dtype):
@@ -59,7 +60,9 @@ class AssemblyLanguage(NamedTuple):
   def render_kernel(self, kernel, function_name, bufs, regs) -> str: raise NotImplementedError()
   def mem_type(self, dtype) -> str: raise NotImplementedError()
 
-def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
+def uops_to_asm(lang:AssemblyLanguage, function_name:str, _uops:UOpGraph) -> str:
+  # editing the uops breaks beam search
+  uops = copy.deepcopy(_uops)
   kernel:List[str] = []
   bufs = []
 
