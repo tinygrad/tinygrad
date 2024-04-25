@@ -248,15 +248,12 @@ def train_retinanet():
   from contextlib import redirect_stdout
   import numpy as np
   import math
+
   WANDB = getenv('WANDB')
-  # WANDB = False
-  HOSTNAME = getenv('SLURM_STEP_NODELIST', '3080')
+  HOSTNAME = getenv('SLURM_STEP_NODELIST', 'other')
   EPOCHS = 5
-
   BS = getenv('BS', 52)
-
   BS_EVAL = getenv('BS_EVAL', BS)
-  
   WARMUP_EPOCHS = 1
   WARMUP_FACTOR = 0.001
   LR = 0.000085
@@ -266,12 +263,12 @@ def train_retinanet():
   SYNCBN = True
   TRAIN_BEAM = getenv("TRAIN_BEAM", BEAM.value)
   EVAL_BEAM = getenv("EVAL_BEAM", BEAM.value)
-  # dtypes.default_float = dtypes.bfloat16
   loss_scaler = 128.0 if dtypes.default_float in [dtypes.float16, dtypes.bfloat16] else 1.0
-  print('LOSS_SCALER', loss_scaler)
+
   if WANDB:
     import wandb
     wandb.init(project='RetinaNet')
+  
   print(f"Training on {GPUS}")
   for x in GPUS: Device[x]
   from extra.models import retinanet
@@ -308,24 +305,17 @@ def train_retinanet():
   parameters = []
 
   for k, v in get_state_dict(model).items():
-    # print(k, v.shape)
-    # print(v.dtype)
-    # print(k)
     if 'head' in k and ('clas' in k or 'reg' in k ):
       v.requires_grad = True
     elif k.split('.')[2] in ["layer4", "layer3", "layer2"] and 'bn' not in k and 'weight' in k:
-    # elif k.split('.')[2] in ["layer4"] and 'bn' not in k and 'down' not in k:
       if 'downsample' in k:
         if 'downsample.0' in k:
-          # print(k)
           v.requires_grad = True
         else:
           v.requires_grad = False
       else:
-        # print(k)
         v.requires_grad = True
     elif 'fpn' in k:
-      # print(k)
       v.requires_grad = True
     else:
       v.requires_grad = False
@@ -333,8 +323,8 @@ def train_retinanet():
       v.shard_(GPUS, axis=0)
     else:
       v.to_(GPUS)
+  
   # model.load_checkpoint("./ckpts/retinanet_4xgpu020_B100_E0_11703.safe")
-
   # model.load_checkpoint("./ckpts/retinanet_4xgpu020_B52_E0x75.safe")
   # model.load_from_pretrained()
   for k, v in get_state_dict(model).items():
@@ -347,10 +337,7 @@ def train_retinanet():
   image_mean = Tensor([0.485, 0.456, 0.406], device=GPUS, dtype=dtypes.float32).reshape(1,-1,1,1)
   def normalize(x):
     return (((x.permute((0,3,1,2)) / 255.0) - image_mean)/image_std).cast(dtypes.default_float)
-    x = x.permute((0,3,1,2)) / 255.0
-    x -= image_mean
-    x /= image_std
-    return x.cast(dtypes.default_float)#.realize()
+
   @TinyJit
   def train_step(X, boxes_temp, labels_temp, matched_idxs):
     Tensor.training = True
@@ -371,30 +358,19 @@ def train_retinanet():
 
   feature_shapes = [(100, 100), (50, 50), (25, 25), (13, 13), (7, 7)]
   ANCHORS = anchor_generator((BS,3,800,800), feature_shapes)
-  # ANCHORS = [a.realize() for a in ANCHORS]
   ANCHORS_STACK = Tensor.stack(ANCHORS)
   ANCHORS_STACK = ANCHORS_STACK.shard(GPUS, axis=0)
   ANCHOR_NP = ANCHORS[0].numpy()
   mdl_reg_loss = lambda r, m, b_t: model.head.regression_head.loss(r,ANCHORS_STACK, m, b_t)
   mdl_class_loss = lambda c, m, l_t: model.head.classification_head.loss(c,m, l_t)
+
   def data_get(it):
     x, yb, yl, ym, cookie = next(it)
     return x.shard(GPUS, axis=0), yb.shard(GPUS, axis=0), yl.shard(GPUS, axis=0), ym.shard(GPUS, axis=0), cookie 
   def data_get_val(it):
     x, Y_idx, cookie = next(it)
     return x.shard(GPUS, axis=0), Y_idx, cookie
-  # b SHAPE for anchor_gen
-  # (44, 256, 100, 100)
-  # (44, 256, 50, 50)
-  # (44, 256, 25, 25)
-  # (44, 256, 13, 13)
-  # (44, 256, 7, 7)
 
-  # (52, 256, 100, 100)
-  # (52, 256, 50, 50)
-  # (52, 256, 25, 25)
-  # (52, 256, 13, 13)
-  # (52, 256, 7, 7)
   for epoch in range(EPOCHS):
     
     print(colored(f'EPOCH {epoch}/{EPOCHS}:', 'cyan'))
@@ -402,8 +378,6 @@ def train_retinanet():
     # **********TRAIN***************
     Tensor.training = True
     BEAM.value = TRAIN_BEAM
-    # train_step.reset()
-    # mdlrun_false.reset()
     lr_sched = None
     # if epoch < WARMUP_EPOCHS:
     #   start_iter = epoch*len(coco_train.ids)//BS
@@ -411,7 +385,7 @@ def train_retinanet():
     #   lr_sched = Retina_LR(optimizer, start_iter, warmup_iters, WARMUP_FACTOR, LR)
     # else:
     #   optimizer.lr.assign(Tensor([LR], device=GPUS))
-    batch_loader = batch_load_retinanet(coco_train, bs=BS, val=False, shuffle=False, anchor_np=ANCHOR_NP)
+    batch_loader = batch_load_retinanet(coco_train, bs=BS, shuffle=False, anchor_np=ANCHOR_NP)
     it = iter(tqdm(batch_loader, total=len(coco_train)//BS, desc=f"epoch {epoch}"))
     cnt, proc = 0, data_get(it)
 
@@ -448,15 +422,14 @@ def train_retinanet():
       proc, next_proc = next_proc, None  # return old cookie
       cnt+=1
 
-
     if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
     fn = f"./ckpts/retinanet_{len(GPUS)}x{HOSTNAME}_B{BS}_E{epoch}.safe"
     state_dict = get_state_dict(model)
     for k,v in state_dict.items():
       state_dict[k] = v.cast(dtypes.float32)
-    # print(state_dict.keys())
     safe_save(state_dict, fn)
     print(f" *** Model saved to {fn} ***")
+
     # ***********EVAL******************
     bt = time.time()
     train_step.reset()
@@ -467,7 +440,7 @@ def train_retinanet():
     eval_times = []
     coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
 
-    batch_loader = batch_load_retinanet_val(coco_val, bs=BS_EVAL, val=True, shuffle=False)
+    batch_loader = batch_load_retinanet_val(coco_val, bs=BS_EVAL, shuffle=False)
     it = iter(tqdm(batch_loader, total=len(coco_val)//BS_EVAL, desc=f"epoch_val {epoch}"))
     cnt, proc = 0, data_get_val(it)
 
@@ -490,11 +463,10 @@ def train_retinanet():
 
       out = out.numpy()
       predictions = model.postprocess_detections(out, orig_image_sizes=orig_shapes)
-
       coco_results  = [{"image_id": img_ids[i], "category_id": label, "bbox": box.tolist(),
                          "score": score} for i, prediction in enumerate(predictions) 
                          for box, score, label in zip(*prediction.values())]
-      # print('len_reults', len(coco_results))
+
       # IF COCO_RESULTS LOWER THAN THRESH, ERROR IN EVAL
       # REFERNCE PUSHES EMPTY COCO OBJ
       with redirect_stdout(None):
@@ -507,6 +479,7 @@ def train_retinanet():
       cnt=cnt+1
       proc, next_proc = next_proc, None  # return old cookie
       # if cnt>30: break
+
     coco_eval.params.imgIds = evaluated_imgs
     coco_eval._paramsEval.imgIds = evaluated_imgs
     coco_eval.evalImgs = list(np.concatenate(coco_evalimgs, -1).flatten())

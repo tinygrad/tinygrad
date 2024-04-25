@@ -51,12 +51,9 @@ parser.add_argument('--classes', default=MLPERF_CLASSES, nargs='+', type=str,
 parser.add_argument('--output-labels', default='openimages-mlperf.json', type=str,
                     help='Classes to download. default to all classes')
 args = parser.parse_args()
-# os.mkdir(args.dataset_dir)
-# os.chdir('D:\\Code/tinygrad/extra/datasets')
+
 dir = os.path.join(os.getcwd(), args.dataset_dir[1:])
-print(dir)
-print(os.getcwd())
-# sys.exit()
+
 print("Downloading open-images dataset ...")
 dataset = foz.load_zoo_dataset(
     name="open-images-v6",

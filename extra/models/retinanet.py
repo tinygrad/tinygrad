@@ -1,9 +1,7 @@
 import math
-import time
-import sys
-from typing import List, Dict
-from tinygrad import Tensor, dtypes, TinyJit
-from tinygrad.helpers import colored, flatten, get_child
+from typing import List
+from tinygrad import Tensor, dtypes
+from tinygrad.helpers import get_child
 from tinygrad.nn.state import safe_load, load_state_dict
 import tinygrad.nn as nn
 from extra.models.resnet import ResNet
@@ -15,7 +13,7 @@ Conv2dKaiming = nn.Conv2d
 
 def cust_bin_cross_logits(inputs, targets):
   return inputs.maximum(0) - targets * inputs + (1 + inputs.abs().neg().exp()).log()
-# @TinyJit
+
 def sigmoid_focal_loss(
     inputs: Tensor,
     targets: Tensor,
@@ -23,56 +21,36 @@ def sigmoid_focal_loss(
     alpha: float = 0.25,
     gamma: float = 2,
 ):
-
   p = Tensor.sigmoid(inputs) * mask
-
-  ce_loss = cust_bin_cross_logits(inputs, targets) #* mask
-  
-  # print('ce_loss', ce_loss.shape)
+  ce_loss = cust_bin_cross_logits(inputs, targets)
   p_t = p * targets + (1 - p) * (1 - targets)
-  # print('P_T', p_t.shape)
   loss = ce_loss * ((1 - p_t) ** gamma)
-  # loss = ce_loss * ((1 - p_t).exp2())
-  
-  # print(f'SIg_LOSS_POS_EXP {loss.shape}')
+
   if alpha >= 0:
     alpha_t = alpha * targets + (1 - alpha) * (1 - targets)
     loss = alpha_t * loss
-  loss=loss
 
   loss = loss * mask
-
   loss = loss.sum(-1)
   loss = loss.sum(-1)
-
-  # print('sigmoid_focal_loss:', loss.shape)
   return loss
 
 def l1_loss(x1:Tensor, x2:Tensor) -> Tensor:
-  # print('l1 loss inputs', x1.numpy(), x2.numpy())
   # https://pytorch.org/docs/stable/_modules/torch/nn/functional.html#l1_loss
   ans = (x1 - x2).abs().sum(-1)
   ans = ans.sum(-1)
-  # print('l1 loss', ans.numpy())
   return ans
 
 def box_iou(boxes1: Tensor, boxes2: Tensor) -> Tensor:
-  # print('BOX_IOU Arguements', boxes1.shape, boxes2.shape)
-
   def box_area(boxes): return (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
   area1 = box_area(boxes1)
   area2 = box_area(boxes2)
   lt = Tensor.maximum(boxes1[:, :2].unsqueeze(1), boxes2[:, :2])  # [N,M,2]
   rb = Tensor.minimum(boxes1[:, 2:].unsqueeze(1), boxes2[:, 2:])  # [N,M,2]
-  # wh = (rb - lt).clip(min_=0)  # [N,M,2]
   wh = (rb - lt).maximum(0)  # [N,M,2]
   inter = wh[:, :, 0] * wh[:, :, 1]  # [N,M]
-  # union = area1[:, None] + area2 - inter
   union = area1.unsqueeze(1) + area2 - inter
   iou = inter / union
-  # print('BOx_IOU Ret Shape:', iou.shape, boxes1.shape, boxes2.shape)
-  # print(iou[-1].numpy(), iou[-1].sum().numpy())
-
   return iou
 
 def nms(boxes, scores, thresh=0.5):
@@ -100,9 +78,8 @@ def decode_bbox(offsets, anchors):
   pred_x1, pred_y1 = pred_cx - 0.5 * pred_w, pred_cy - 0.5 * pred_h
   pred_x2, pred_y2 = pred_cx + 0.5 * pred_w, pred_cy + 0.5 * pred_h
   return np.stack([pred_x1, pred_y1, pred_x2, pred_y2], axis=1, dtype=np.float32)
-def encode_boxes(reference_boxes, proposals, weights = (1.0,1.0,1.0,1.0)):
 
-  # perform some unpacking to make it JIT-fusion friendly
+def encode_boxes(reference_boxes, proposals, weights = (1.0,1.0,1.0,1.0)):
   wx = weights[0]
   wy = weights[1]
   ww = weights[2]
@@ -112,22 +89,16 @@ def encode_boxes(reference_boxes, proposals, weights = (1.0,1.0,1.0,1.0)):
   proposals_y1 = proposals[:,:, 1].unsqueeze(-1)
   proposals_x2 = proposals[:,:, 2].unsqueeze(-1)
   proposals_y2 = proposals[:,:, 3].unsqueeze(-1)
-  # print('proposals:', proposals_x1.numpy(), proposals_x2.numpy(), proposals_y1.numpy(),
-  #       proposals_y2.numpy())
 
   reference_boxes_x1 = reference_boxes[:,:, 0].unsqueeze(-1)
   reference_boxes_y1 = reference_boxes[:,:, 1].unsqueeze(-1)
   reference_boxes_x2 = reference_boxes[:,:, 2].unsqueeze(-1)
   reference_boxes_y2 = reference_boxes[:,:, 3].unsqueeze(-1)
-  # print('reference boxes:', reference_boxes_x1.numpy(), reference_boxes_x2.numpy(),
-        # reference_boxes_y1.numpy(), reference_boxes_y2.numpy())
 
-  # implementation starts here
   ex_widths = proposals_x2 - proposals_x1
   ex_heights = proposals_y2 - proposals_y1
   ex_ctr_x = proposals_x1 + 0.5 * ex_widths
   ex_ctr_y = proposals_y1 + 0.5 * ex_heights
-  # print('exw,exh,excx,excy:',ex_widths.numpy(),ex_heights.numpy(),ex_ctr_x.numpy(),ex_ctr_y.numpy())
 
   gt_widths = reference_boxes_x2 - reference_boxes_x1
   gt_heights = reference_boxes_y2 - reference_boxes_y1
@@ -139,9 +110,9 @@ def encode_boxes(reference_boxes, proposals, weights = (1.0,1.0,1.0,1.0)):
   targets_dw = ww * (gt_widths / ex_widths).log()
   targets_dh = wh * (gt_heights / ex_heights).log()
 
-  targets = Tensor.cat(*(targets_dx, targets_dy, targets_dw, targets_dh), dim=2)#.realize()
-  # print('Encode BOX RETURN', targets.shape)
+  targets = Tensor.cat(*(targets_dx, targets_dy, targets_dw, targets_dh), dim=2)
   return targets
+
 def generate_anchors(input_size, grid_sizes, scales, aspect_ratios):
   assert len(scales) == len(aspect_ratios) == len(grid_sizes)
   anchors = []
@@ -159,14 +130,15 @@ def generate_anchors(input_size, grid_sizes, scales, aspect_ratios):
     shifts = np.stack([shifts_x, shifts_y, shifts_x, shifts_y], axis=1, dtype=np.float32)
     anchors.append((shifts[:, None] + base_anchors[None, :]).reshape(-1, 4))
   return anchors
+
 def cust_meshgrid(x:Tensor, y:Tensor):
   xs = x.shape[0]
   ys = y.shape[0]
   y = Tensor.stack([y]*xs)
   x = x.reshape(xs, 1).expand((xs,ys))
   return x, y
-class AnchorGenerator:
 
+class AnchorGenerator:
   def __init__(
     self,
     sizes=((128, 256, 512),),
@@ -212,7 +184,6 @@ class AnchorGenerator:
     anchors = []
     cell_anchors = self.cell_anchors
     assert cell_anchors is not None
-
     if not (len(grid_sizes) == len(strides) == len(cell_anchors)):
       raise ValueError("Anchors should be Tuple[Tuple[int]] because each feature "
                         "map could potentially have different sizes and aspect ratios. "
@@ -224,8 +195,6 @@ class AnchorGenerator:
     ):
       grid_height, grid_width = size
       stride_height, stride_width = stride
-      # device = base_anchors.device
-      # For output anchor, compute [x_center, y_center, x_center, y_center]
       shifts_x = Tensor.arange(
           0, grid_width, dtype=dtypes.float) * stride_width
       shifts_y = Tensor.arange(
@@ -237,7 +206,6 @@ class AnchorGenerator:
 
       # For every (base anchor, output anchor) pair,
       # offset each zero-centered base anchor by the center of the output anchor.
-      # print('trying anchor append')
       anchors.append(
         (shifts.reshape(-1, 1, 4) + base_anchors.reshape(1, -1, 4)).reshape(-1, 4)
       )
@@ -246,24 +214,24 @@ class AnchorGenerator:
   def forward(self, image_list_shape, feature_maps) -> List[Tensor]:
     grid_sizes = [feature_map for feature_map in feature_maps]
     image_size = image_list_shape[-2:]
-    # dtype = feature_maps[0].dtype
+
     strides = [[Tensor(image_size[0] // g[0], dtype=dtypes.int64),
                 Tensor(image_size[1] // g[1], dtype=dtypes.int64)] for g in grid_sizes]
-    # self.set_cell_anchors(dtype)
+    
     anchors_over_all_feature_maps = self.grid_anchors(grid_sizes, strides)
     anchors: List[List[Tensor]] = []
+
     for _ in range(image_list_shape[0]):
       anchors_in_image = [anchors_per_feature_map for anchors_per_feature_map in anchors_over_all_feature_maps]
       anchors.append(anchors_in_image)
     anchors = [Tensor.cat(*anchors_per_image) for anchors_per_image in anchors]
     return anchors
+
   def __call__(self, image_list, feature_maps):
     return self.forward(image_list, feature_maps)
 
-
 class RetinaNet:
-  def __init__(self, backbone: ResNet, num_classes=264, num_anchors=9, scales=None, aspect_ratios=None,
-               fg_iou_thresh=0.5, bg_iou_thresh=0.4):
+  def __init__(self, backbone: ResNet, num_classes=264, num_anchors=9, scales=None, aspect_ratios=None):
     assert isinstance(backbone, ResNet)
     scales = tuple((i, int(i*2**(1/3)), int(i*2**(2/3))) for i in [32,  64, 128, 256, 512]) if scales is None else scales
     aspect_ratios = ((0.5, 1.0, 2.0),) * len(scales) if aspect_ratios is None else aspect_ratios
@@ -300,6 +268,7 @@ class RetinaNet:
       dat = v.detach().numpy()
       assert obj.shape == dat.shape, (k, obj.shape, dat.shape)
       obj.assign(dat)
+
   def load_checkpoint(self, fn):
     d = safe_load(fn)
     load_state_dict(self, d)
@@ -369,7 +338,7 @@ class RetinaNet:
     return detections
 
 class ClassificationHead:
-  def __init__(self, in_channels, num_anchors, num_classes, prior_probability=0.01):
+  def __init__(self, in_channels, num_anchors, num_classes):
     self.num_classes = num_classes
     self.conv = []
     for _ in range(4):
@@ -381,24 +350,20 @@ class ClassificationHead:
 
   def __call__(self, x):
     out = [self.cls_logits(feat.sequential(self.conv)).permute(0, 2, 3, 1).reshape(feat.shape[0], -1, self.num_classes) for feat in x]
-    return out[0].cat(*out[1:], dim=1)#.sigmoid()
-  # @TinyJit
+    return out[0].cat(*out[1:], dim=1)
+
   def loss(self, logits_class, matched_idxs, labels_temp):
     batch_size = logits_class.shape[0]
     foreground_idxs = matched_idxs >= 0
     num_foreground = foreground_idxs.sum(-1)
 
     labels_temp = (labels_temp+1)*foreground_idxs-1
-    # print('LAbels_temp:', labels_temp.shape)
     gt_classes_target = labels_temp.one_hot(logits_class.shape[-1])
-    # print('gt_classes_target', gt_classes_target.shape)
     valid_idxs = matched_idxs != -2
     s = sigmoid_focal_loss(logits_class, 
-                                       gt_classes_target, 
-                                       valid_idxs.reshape(batch_size,-1,1)) #.realize()
-    # print('sig_loss:', s.shape)
-    a = s/num_foreground
-    return a.mean()
+                            gt_classes_target, 
+                            valid_idxs.reshape(batch_size,-1,1))/num_foreground
+    return s.mean()
 
 class RegressionHead:
   def __init__(self, in_channels, num_anchors):
@@ -424,18 +389,17 @@ class RegressionHead:
     anchors = anchors*foreground_idxs.reshape(batch_size,-1,1)
     target_regression = encode_boxes(matched_gt_boxes, anchors)
     target_regression = target_regression * foreground_idxs.reshape(batch_size,-1,1)
-    # print('l1_LOSS', bbox_reg.shape, target_regression.shape, num_foreground.shape)
     l = l1_loss(
         bbox_reg,
         target_regression,
       ) / num_foreground
-    # print('l1_POST',l.shape, l.numpy())
     return l.mean()
 
 class RetinaHead:
   def __init__(self, in_channels, num_anchors, num_classes):
     self.classification_head = ClassificationHead(in_channels, num_anchors, num_classes)
     self.regression_head = RegressionHead(in_channels, num_anchors)
+
   def __call__(self, x):
     pred_bbox, pred_class = self.regression_head(x), self.classification_head(x)
     return pred_bbox, pred_class
