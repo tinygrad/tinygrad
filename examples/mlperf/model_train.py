@@ -18,7 +18,7 @@ def train_resnet():
   from extra.datasets.imagenet import get_train_files, get_val_files
   from examples.mlperf.lr_schedulers import PolynomialDecayWithWarmup
   from examples.mlperf.initializers import Conv2dHeNormal, Linear
-  from examples.hlb_cifar10 import UnsyncedBatchNorm
+  from tinygrad.nn import BatchNorm2d
 
   config = {}
   seed = config["seed"] = getenv("SEED", 42)
@@ -35,7 +35,7 @@ def train_resnet():
   num_classes = 1000
   resnet.Conv2d = Conv2dHeNormal
   resnet.Linear = Linear
-  if not getenv("SYNCBN"): resnet.BatchNorm = functools.partial(UnsyncedBatchNorm, num_devices=len(GPUS))
+  if not getenv("SYNCBN"): resnet.BatchNorm = functools.partial(BatchNorm2d, num_devices=len(GPUS))
   model = resnet.ResNet50(num_classes)
 
   # shard weights and initialize in order

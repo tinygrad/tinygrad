@@ -4,12 +4,12 @@ import unittest
 
 from tinygrad import Tensor, TinyJit, GlobalCounters
 from tinygrad.helpers import getenv, Context
+from tinygrad.nn import BatchNorm2d
 from tinygrad.nn.optim import SGD
 from tinygrad.nn.state import get_parameters
 
 from extra.models import resnet
 from examples.mlperf.initializers import Conv2dHeNormal, Linear
-from examples.hlb_cifar10 import UnsyncedBatchNorm
 
 # benchmark memory or kernel count: DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py
 # benchmark speed:                  BEAM=2 JITCNT=10 DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py
@@ -34,7 +34,7 @@ class BenchmarkResnetTrain(unittest.TestCase):
     if not hasattr(self, 'model'):
       resnet.Conv2d = Conv2dHeNormal
       resnet.Linear = Linear
-      if not getenv("SYNCBN"): resnet.BatchNorm = functools.partial(UnsyncedBatchNorm, num_devices=1)
+      resnet.BatchNorm = functools.partial(BatchNorm2d, num_devices=1)
       self.model = resnet.ResNet50()
       self.layers = [self.model.layer1, self.model.layer2, self.model.layer3, self.model.layer4]
 
