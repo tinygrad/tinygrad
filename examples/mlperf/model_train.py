@@ -515,6 +515,9 @@ def train_retinanet():
     eval_acc = coco_eval.stats[0]
     print(colored(f'{epoch} EVAL_ACC {eval_acc} || {time.time()-bt}', 'green'))
     val_step.reset()
+    if eval_acc>MAP_TARGET:
+      print('SUCCESSFULLY TRAINED TO TARGET: EPOCH', epoch)
+      break
 
       
 def train_unet3d():
