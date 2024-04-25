@@ -1,4 +1,4 @@
-import os, random
+import os, random, itertools
 from typing import List
 import numpy as np
 from PIL import Image
@@ -81,13 +81,16 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None):
   BATCH_COUNT = min(32, (len(files) + FIRST_BATCH_PAD) // batch_size)
 
   gen = shuffled_indices(len(files), seed=seed) if shuffle else iter(range(len(files)))
+  gen = itertools.chain([-1] * FIRST_BATCH_PAD, gen)
   def enqueue_batch(num):
     for idx in range(num*batch_size, (num+1)*batch_size):
-      if idx < FIRST_BATCH_PAD:
+      sample_i = next(gen)
+      if sample_i == -1:
+        # padding
         Y[idx] = -1
         gotten[num] += 1
       else:
-        fn = files[next(gen)]
+        fn = files[sample_i]
         q_in.put((idx, fn, val))
         Y[idx] = cir[fn.split("/")[-2]]
 
