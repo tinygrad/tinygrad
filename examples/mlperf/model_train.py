@@ -5,7 +5,7 @@ from tqdm import tqdm
 import multiprocessing
 
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
-from tinygrad.helpers import colored, getenv, BEAM, WINO, Context
+from tinygrad.helpers import colored, getenv, BEAM, WINO
 from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_save
 from tinygrad.nn.optim import LARS, SGD, OptimizerGroup
 
