@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import unittest
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.nn.optim import Adam, SGD, AdamW, Optimizer
+from tinygrad.nn.optim import Adam, SGD, AdamW
 from tinygrad.helpers import CI
 from test.helpers import is_dtype_supported
 
@@ -31,7 +31,7 @@ class TinyNet:
     out = out.mul(self.m).add(self.m).sum()
     return out
 
-def step(tensor, optim:Optimizer, steps=1, teeny=False, **kwargs):
+def step(tensor, optim, steps=1, teeny=False, **kwargs):
   net = TeenyNet(tensor) if teeny else TinyNet(tensor)
   optim = optim([net.x, net.W], **kwargs)
   for _ in range(steps):
