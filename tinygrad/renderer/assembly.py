@@ -1,5 +1,5 @@
 from typing import Callable, DefaultDict, Dict, List, Union, NamedTuple, Optional, cast
-import functools, struct
+import functools, struct, copy
 from collections import defaultdict
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op
@@ -59,7 +59,9 @@ class AssemblyLanguage(NamedTuple):
   def render_kernel(self, kernel, function_name, bufs, regs) -> str: raise NotImplementedError()
   def mem_type(self, dtype) -> str: raise NotImplementedError()
 
-def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
+def uops_to_asm(lang:AssemblyLanguage, function_name:str, _uops:UOpGraph) -> str:
+  # editing the uops breaks beam search
+  uops = copy.deepcopy(_uops)
   kernel:List[str] = []
   bufs = []
 
