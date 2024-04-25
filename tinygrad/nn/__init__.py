@@ -21,8 +21,8 @@ class BatchNorm2d:
     xr = x.reshape(self.num_devices or 1, -1, *x.shape[1:]).cast(least_upper_float(x.dtype))
     batch_mean, batch_invstd = self.calc_stats(xr)
     ret = xr.batchnorm(
-      self.weight.reshape(1, -1).expand((self.num_devices or 1, -1)),
-      self.bias.reshape(1, -1).expand((self.num_devices or 1, -1)),
+      self.weight.reshape(1, -1).expand((self.num_devices or 1, -1)) if self.weight is not None else None,
+      self.bias.reshape(1, -1).expand((self.num_devices or 1, -1)) if self.bias is not None else None,
       batch_mean, batch_invstd, axis=(0, 2))
     return ret.reshape(x.shape).cast(x.dtype)
 
