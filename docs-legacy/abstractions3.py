@@ -39,8 +39,7 @@ optim._step()   # this will step the optimizer without running realize
 # l1.lazydata and l2.lazydata define a computation graph
 
 from tinygrad.ops import ScheduleItem
-from tinygrad.engine.schedule import create_schedule
-schedule: List[ScheduleItem] = create_schedule([l1.lazydata, l2.lazydata])
+schedule: List[ScheduleItem] = Tensor.schedule(l1, l2)
 
 print(f"The schedule contains {len(schedule)} items.")
 for si in schedule: print(str(si)[:80])
@@ -49,7 +48,7 @@ for si in schedule: print(str(si)[:80])
 # 4. Lower a schedule.
 
 from tinygrad.engine.realize import lower_schedule_item, ExecItem
-lowered: List[ExecItem] = [ExecItem(lower_schedule_item(si), list(si.outputs+si.inputs)) for si in tqdm(schedule)]
+lowered: List[ExecItem] = [ExecItem(lower_schedule_item(si), list(si.bufs)) for si in tqdm(schedule)]
 
 # *****
 # 5. Run the schedule

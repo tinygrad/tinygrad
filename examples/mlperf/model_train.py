@@ -5,7 +5,7 @@ from tqdm import tqdm
 import multiprocessing
 
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
-from tinygrad.helpers import getenv, BEAM, WINO, Context
+from tinygrad.helpers import getenv, BEAM, WINO
 from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_save
 from tinygrad.nn.optim import LARS, SGD, OptimizerGroup
 
@@ -50,7 +50,7 @@ def train_resnet():
   epochs            = config["epochs"]            = getenv("EPOCHS", 37)
   BS                = config["BS"]                = getenv("BS", 104 * len(GPUS))  # fp32 GPUS<=6 7900xtx can fit BS=112
   EVAL_BS           = config["EVAL_BS"]           = getenv("EVAL_BS", BS)
-  base_lr           = config["base_lr"]           = getenv("LR", 7.4 * (BS/1632))
+  base_lr           = config["base_lr"]           = getenv("LR", 7.4 * (BS/1536))
   lr_warmup_epochs  = config["lr_warmup_epochs"]  = getenv("WARMUP_EPOCHS", 2)
   decay             = config["decay"]             = getenv("DECAY", 5e-5)
 
@@ -110,26 +110,24 @@ def train_resnet():
   def normalize(x): return (x.permute([0, 3, 1, 2]) - input_mean).cast(dtypes.default_float)
   @TinyJit
   def train_step(X, Y):
-    with Context(BEAM=TRAIN_BEAM):
-      optimizer_group.zero_grad()
-      X = normalize(X)
-      out = model.forward(X)
-      loss = out.cast(dtypes.float32).sparse_categorical_crossentropy(Y, label_smoothing=0.1)
-      top_1 = (out.argmax(-1) == Y).sum()
-      (loss * loss_scaler).backward()
-      for t in optimizer_group.params: t.grad = t.grad.contiguous() / loss_scaler
-      optimizer_group.step()
-      scheduler_group.step()
-      return loss.realize(), top_1.realize()
+    optimizer_group.zero_grad()
+    X = normalize(X)
+    out = model.forward(X)
+    loss = out.cast(dtypes.float32).sparse_categorical_crossentropy(Y, label_smoothing=0.1)
+    top_1 = (out.argmax(-1) == Y).sum()
+    (loss * loss_scaler).backward()
+    for t in optimizer_group.params: t.grad = t.grad.contiguous() / loss_scaler
+    optimizer_group.step()
+    scheduler_group.step()
+    return loss.realize(), top_1.realize()
 
   @TinyJit
   def eval_step(X, Y):
-    with Context(BEAM=EVAL_BEAM):
-      X = normalize(X)
-      out = model.forward(X)
-      loss = out.cast(dtypes.float32).sparse_categorical_crossentropy(Y, label_smoothing=0.1)
-      top_1 = (out.argmax(-1) == Y).sum()
-      return loss.realize(), top_1.realize()
+    X = normalize(X)
+    out = model.forward(X)
+    loss = out.cast(dtypes.float32).sparse_categorical_crossentropy(Y, label_smoothing=0.1)
+    top_1 = (out.argmax(-1) == Y).sum()
+    return loss.realize(), top_1.realize()
 
   def data_get(it):
     x, y, cookie = next(it)
@@ -140,6 +138,7 @@ def train_resnet():
   for e in range(start_epoch, epochs):
     # ** train loop **
     Tensor.training = True
+    BEAM.value = TRAIN_BEAM
     batch_loader = batch_load_resnet(batch_size=BS, val=False, shuffle=True, seed=seed*epochs + e)
     it = iter(tqdm(batch_loader, total=steps_in_train_epoch, desc=f"epoch {e}", disable=BENCHMARK))
     i, proc = 0, data_get(it)
@@ -194,9 +193,10 @@ def train_resnet():
       eval_times = []
       eval_top_1_acc = []
       Tensor.training = False
+      BEAM.value = EVAL_BEAM
 
       it = iter(tqdm(batch_load_resnet(batch_size=EVAL_BS, val=True, shuffle=False), total=steps_in_val_epoch))
-      proc = data_get(it)
+      i, proc = 0, data_get(it)
       while proc is not None:
         GlobalCounters.reset()
         st = time.time()
@@ -212,6 +212,8 @@ def train_resnet():
         eval_loss.append(loss)
         eval_top_1_acc.append(top_1_acc)
         proc, next_proc = next_proc, None  # return old cookie
+        i += 1
+        if i == BENCHMARK: return
 
         et = time.time()
         eval_times.append(et - st)

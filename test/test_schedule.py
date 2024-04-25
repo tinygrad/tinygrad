@@ -18,7 +18,7 @@ def check_schedule(t:Union[Tensor, List[Tensor]], allowed:int, to_prerealize:Opt
   seen = set()
   if to_prerealize:
     for pre in to_prerealize:
-      for s in create_schedule([pre.lazydata], seen.copy()):
+      for s in pre.schedule(seen=seen.copy()):
         for i,out in enumerate(s.outputs):
           if GRAPH: realized_lazybuffer(out, 0)
           seen.add(out)
