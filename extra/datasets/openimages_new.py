@@ -343,32 +343,6 @@ def batch_load_retinanet(coco, bs=8, shuffle=False, seed=None, val = False, anch
     mshm.close()
     mshm.unlink()
 
-def loader_process_val(q_in, q_out, X:Tensor, seed, coco):
-  import signal
-  signal.signal(signal.SIGINT, lambda _, __: exit(0))
-
-  with Context(DEBUG=0):
-    while (_recv := q_in.get()) is not None:
-      idx, img_idx, val = _recv
-      img, target = coco.__getitem__(img_idx)
-      if val:
-        img = np.array(resize_img(img))
-      else:
-        pass
-
-      # broken out
-      #img_tensor = Tensor(img.tobytes(), device='CPU')
-      #storage_tensor = X[idx].contiguous().realize().lazydata.realized
-      #storage_tensor._copyin(img_tensor.numpy())
-
-      # faster
-      X[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = img.tobytes()
-
-
-      # ideal
-      #X[idx].assign(img.tobytes())   # NOTE: this is slow!
-      q_out.put(idx)
-    q_out.put(None)
 
 def loader_process_val(q_in, q_out, X:Tensor, seed, coco):
   import signal
