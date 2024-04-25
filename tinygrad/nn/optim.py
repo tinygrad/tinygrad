@@ -2,6 +2,7 @@
 from typing import List
 from tinygrad.helpers import dedup, flatten, getenv
 from tinygrad.tensor import Tensor
+from tinygrad.dtype import dtypes, least_upper_dtype
 
 class Optimizer:
   def __init__(self, params: List[Tensor], lr: float):
@@ -13,7 +14,8 @@ class Optimizer:
     assert len(self.params) != 0, "optimizer must have at least one param"
     self.device = self.params[0].device
     self.buffers: List[Tensor] = dedup([x for x in params if not x.requires_grad])   # buffers are still realized
-    self.lr = lr if getenv("CONST_LR") else Tensor([lr], requires_grad=False, device=self.device).contiguous()
+    self.lr = lr if getenv("CONST_LR") else \
+      Tensor([lr], requires_grad=False, device=self.device, dtype=least_upper_dtype(dtypes.default_float, dtypes.float)).contiguous()
 
   def zero_grad(self):
     for param in self.params: param.grad = None
@@ -47,9 +49,9 @@ class LARS(Optimizer):
       # TODO: fix this in lazy.py
       g = t.grad.contiguous()
       if self.tcoef != 0:
-        r1 = t.detach().square().sum().sqrt()
-        r2 = g.square().sum().sqrt()
-        r = (r1 > 0).where((r2 > 0).where(self.tcoef * r1 / (r2 + self.wd * r1), 1.0), 1.0)
+        r1 = t.detach().float().square().sum().sqrt()
+        r2 = g.float().square().sum().sqrt()
+        r = ((r1 > 0) * (r2 > 0)).where(self.tcoef / (r2 / r1 + self.wd), 1.0)
       else: r = 1.0
       g = g + self.wd * t.detach()
       # classic momentum does post learning rate update
