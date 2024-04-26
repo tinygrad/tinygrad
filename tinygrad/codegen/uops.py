@@ -85,7 +85,7 @@ class PatternMatcher:
       while queue:
         if all([qq in uops.uops for qq in queue[-1].vin]):
           q = queue.pop()
-          new = uops.add(q.uop, q.dtype, q.vin, q.arg, insert_before=uops.uops[max([0]+[uops.uops.index(vv) for vv in q.vin])+1])
+          new = uops.add(q.uop, q.dtype, q.vin, q.arg, insert_before=max([0]+[uops.uops.index(vv) for vv in q.vin])+1)
           for vv in uops.uops + queue: vv.vin = tuple(new if x is q else x for x in vv.vin)
         else: queue.extend([qq for qq in queue[-1].vin if qq not in uops.uops])
       if not any([o in u.vin for u in uops]): uops.uops.remove(o)
@@ -150,13 +150,14 @@ class UOpGraph:
 
   def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None, cachable=True, insert_before:Optional[UOp|int]=None,
           simplify=True) -> UOp:
-    if isinstance(insert_before, int): insert_before = self.uops[insert_before]
+    
     ret = UOp(uop, dtype, vin, arg) if uop is not UOps.CONST else UOp.const(dtype, arg)
     if simplify and (rewritten:=constant_folder.rewrite(ret)) is not None:
       if rewritten in self.uops: return rewritten  # ignore cachable
       ret = rewritten
     key = (ret.uop, ret.dtype, ret.vin, ret.arg)
-    insert_idx = self.uops.index(insert_before) if insert_before is not None else len(self.uops)
+    if isinstance(insert_before, int): insert_idx = insert_before
+    else: insert_idx = self.uops.index(insert_before) if insert_before is not None else len(self.uops)
     # check if the cached expr is valid with the given insert place.
     if cachable and (expr:=self.saved_exprs.get(key, None)) is not None and self.uops.index(expr) <= insert_idx: return expr
     self.uops.insert(insert_idx, ret)
