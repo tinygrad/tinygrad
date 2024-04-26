@@ -176,7 +176,6 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str
   return lang.render_kernel(function_name, kernel, bufs, uops)
 
 class OpenCLLanguage(CStyleLanguage):
-  #TODO: changes here should be intel specific
   kernel_prefix = "__attribute__((intel_reqd_sub_group_size(8)))\n" + "__kernel "
   buffer_prefix = "__global "
   smem_align = "__attribute__ ((aligned (16))) "
@@ -191,14 +190,20 @@ class OpenCLLanguage(CStyleLanguage):
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     if any(uop.dtype == dtypes.half for uop in uops): prefix = ["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"]
-
-    for arg in set([uop.arg for uop in uops if uop.uop is UOps.WMMA]):
-      prefix.append(f"""{arg[3].name}8 __{arg[0]}({arg[2].name}16 a, {arg[2].name}16 b, {arg[3].name}8 c) {{
-  int8 *a_pk = (int8 *)(&a); int8 *b_pk = (int8 *)(&b);
-  return intel_sub_group_f16_f16_matrix_mad_k16(*a_pk, *b_pk, c);\n}}""")
-
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 OpenCLRenderer = functools.partial(uops_to_cstyle, OpenCLLanguage())
+
+# TODO: device name already part of UOp.WMMA, cast to/from bfloat can be done similarily
+class IntelLanguage(OpenCLLanguage):
+  kernel_prefix = "__attribute__((intel_reqd_sub_group_size(8)))\n" + OpenCLLanguage.kernel_prefix
+  type_map = {**OpenCLLanguage.type_map, dtypes.bfloat16: "ushort"}
+  def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
+    if any(uop.dtype == dtypes.half for uop in uops): prefix = ["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"]
+    for arg in set([uop.arg for uop in uops if uop.uop is UOps.WMMA]):
+      prefix.append(f"""{arg[3].name}8 __{arg[0]}({arg[2].name}16 a, {arg[2].name}16 b, {arg[3].name}8 c) {{
+  return intel_sub_group_f16_f16_matrix_mad_k16(as_int8(a), as_int8(b), c);\n}}""")
+    return super(OpenCLLanguage, self).render_kernel(function_name, kernel, bufs, uops, prefix)
+IntelRenderer = functools.partial(uops_to_cstyle, IntelLanguage())
 
 class MetalLanguage(CStyleLanguage):
   kernel_prefix = "kernel "

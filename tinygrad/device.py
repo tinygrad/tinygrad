@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 # **************** Device ****************
 
 class _Device:
+  specialized_cl_devs = ["INTEL"]
   def __init__(self) -> None: self._devices: List[str] = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]  # noqa: E501
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def _canonicalize(self, device:str) -> str: return (device.split(":", 1)[0].upper() + ((":"+device.split(":", 1)[1]) if ':' in device else '')).replace(":0", "")   # noqa: E501
@@ -25,6 +26,7 @@ class _Device:
   def __get_canonicalized_item(self, ix:str) -> Compiled:
     if DEBUG >= 1: print(f"opening device {ix} from pid:{os.getpid()}")
     x = ix.split(":")[0].upper()
+    x = "GPU" if x in self.specialized_cl_devs else x
     return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._devices][0](ix)  # noqa: E501
   @functools.cached_property
   def DEFAULT(self) -> str:

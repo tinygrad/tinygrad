@@ -3,7 +3,7 @@ from typing import Tuple, Optional, List, cast
 import ctypes, functools, hashlib
 import tinygrad.runtime.autogen.opencl as cl
 from tinygrad.helpers import init_c_var, to_char_p_p, from_mv, OSX, DEBUG
-from tinygrad.renderer.cstyle import OpenCLRenderer
+from tinygrad.renderer.cstyle import OpenCLRenderer, IntelRenderer
 from tinygrad.buffer import BufferOptions
 from tinygrad.device import Compiled, LRUAllocator, Compiler, CompilerOptions
 
@@ -17,8 +17,6 @@ def checked(ret, status): return (check(status.value), ret)[1]
 class CLCompiler(Compiler):
   compiler_opts = CompilerOptions("GPU")
   def __init__(self, device:CLDevice, compile_key:str):
-    if "cl_intel_subgroup_matrix_multiply_accumulate" in device.device_exts:
-      CLCompiler.compiler_opts = CLCompiler.compiler_opts._replace(device="INTEL", has_tensor_cores=True)
     self.device = device
     super().__init__(f"compile_cl_{compile_key}")
   def render(self, name:str, uops) -> str: return OpenCLRenderer(name, uops)
@@ -34,6 +32,10 @@ class CLCompiler(Compiler):
     binary = init_c_var(ctypes.create_string_buffer(binary_sizes[0]), lambda x: check(cl.clGetProgramInfo(program, cl.CL_PROGRAM_BINARIES, ctypes.sizeof(ctypes.c_void_p), ctypes.byref((ctypes.c_void_p * 1)(ctypes.addressof(x))), None)))  # noqa: E501
     check(cl.clReleaseProgram(program))
     return bytes(binary)
+
+class IntelCompiler(CLCompiler):
+  compiler_opts = CompilerOptions("INTEL", has_tensor_cores=True)
+  def render(self, name:str, uops) -> str: return IntelRenderer(name, uops)
 
 class CLProgram:
   def __init__(self, device:CLDevice, name:str, lib:bytes):
@@ -96,14 +98,14 @@ class CLDevice(Compiled):
 
     self.device_id = CLDevice.device_ids[0 if ":" not in device else int(device.split(":")[1])]
     self.device_name = (cl.clGetDeviceInfo(self.device_id, cl.CL_DEVICE_NAME, 256, ctypes.byref(buf := ctypes.create_string_buffer(256)), ctypes.byref(total := ctypes.c_size_t())), ctypes.string_at(buf, size=total.value).decode())[1]  # noqa: E501
+    if DEBUG >=1: print(f"CLDevice: {self.device_name}")
     self.driver_version = (cl.clGetDeviceInfo(self.device_id, cl.CL_DRIVER_VERSION, 256, ctypes.byref(buf := ctypes.create_string_buffer(256)), ctypes.byref(total := ctypes.c_size_t())), ctypes.string_at(buf, size=total.value).decode())[1]  # noqa: E501
-    self.device_exts = (cl.clGetDeviceInfo(self.device_id, cl.CL_DEVICE_EXTENSIONS, 4096, ctypes.byref(buf := ctypes.create_string_buffer(4096)), ctypes.byref(total := ctypes.c_size_t())), ctypes.string_at(buf, size=total.value).decode())[1]  # noqa: E501
     self.context = checked(cl.clCreateContext(None, 1, ctypes.byref(self.device_id), cl.clCreateContext.argtypes[3](), None, ctypes.byref(status := ctypes.c_int32())), status)  # noqa: E501
     self.queue = checked(cl.clCreateCommandQueue(self.context, self.device_id, cl.CL_QUEUE_PROFILING_ENABLE, ctypes.byref(status)), status)
     self.pending_copyin: List[memoryview] = []
 
     compile_key = hashlib.md5(self.device_name.encode() + self.driver_version.encode()).hexdigest()
-    super().__init__(device, CLAllocator(self), CLCompiler(self, f"compile_cl_{compile_key}"), functools.partial(CLProgram, self))
+    super().__init__(device, CLAllocator(self), (IntelCompiler if "Intel" in self.device_name else CLCompiler)(self, f"compile_cl_{compile_key}"), functools.partial(CLProgram, self))
   def synchronize(self):
     check(cl.clFinish(self.queue))
     self.pending_copyin.clear()
