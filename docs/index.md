@@ -1,6 +1,4 @@
-Welcome to the docs for tinygrad. This page is for users of the tinygrad library. We also have [developer docs](developer.md)
-
-tinygrad is not 1.0 yet, but it will be soon. The API has been pretty stable for a while.
+Welcome to the docs for tinygrad. This page is for users of the tinygrad library. tinygrad is not 1.0 yet, but it will be soon. The API has been pretty stable for a while.
 
 While you can `pip install tinygrad`, we encourage you to install from source:
 
@@ -9,6 +7,10 @@ git clone https://github.com/tinygrad/tinygrad.git
 cd tinygrad
 python3 -m pip install -e .
 ```
+
+After you have installed tinygrad, try the [MNIST tutorial](mnist.md)
+
+We also have [developer docs](developer.md), and Di Zhu has created a [bunch of tutorials](https://mesozoic-egg.github.io/tinygrad-notes/) to help understand how tinygrad works.
 
 ## tinygrad Usage
 

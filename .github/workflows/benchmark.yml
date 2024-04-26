@@ -61,9 +61,9 @@ jobs:
     - name: Train MNIST
       run: time PYTHONPATH=. TARGET_EVAL_ACC_PCT=97.3 python3 examples/beautiful_mnist.py | tee beautiful_mnist.txt
     - name: Run 10 CIFAR training steps
-      run: STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
+      run: JIT=2 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
     - name: Run 10 CIFAR training steps w HALF
-      run: STEPS=10 DEFAULT_FLOAT=HALF python3 examples/hlb_cifar10.py | tee train_cifar_half.txt
+      run: JIT=2 STEPS=10 DEFAULT_FLOAT=HALF python3 examples/hlb_cifar10.py | tee train_cifar_half.txt
     #- name: Run 10 CIFAR training steps w BF16
     #  run: STEPS=10 DEFAULT_FLOAT=BFLOAT16 python3 examples/hlb_cifar10.py | tee train_cifar_bf16.txt
     # TODO: this is flaky too
@@ -126,6 +126,8 @@ jobs:
       run: CUDA=1 PTX=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_ptx.txt
     - name: Fuzz Padded Tensor Core GEMM(CUDA)
       run: CUDA=1 M_START=12 M_STOP=20 M_STEP=1 N_START=6 N_STOP=10 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 python3 ./extra/gemm/fuzz_matmul.py
+    - name: Fuzz Padded Tensor Core GEMM(PTX)
+      run: CUDA=1 PTX=1 M_START=12 M_STOP=20 M_STEP=1 N_START=6 N_STOP=10 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 python3 ./extra/gemm/fuzz_matmul.py
     - name: Run LLaMA
       run: |
         CUDA=1 JIT=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
@@ -206,11 +208,11 @@ jobs:
     - name: Test tensor cores
       run: |
         HSA=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
-        KFD=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
+        AMD=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
     - name: Run Tensor Core GEMM (HSA)
       run: HSA=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
-    - name: Run Tensor Core GEMM (KFD)
-      run: KFD=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_kfd.txt
+    - name: Run Tensor Core GEMM (AMD)
+      run: AMD=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_kfd.txt
     # TODO: AMD compiler bug causes this to fail
     #- name: Fuzz Padded Tensor Core GEMM
     #  run: HSA=1 M_START=12 M_STOP=20 M_STEP=1 N_START=12 N_STOP=20 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 DEBUG=2 python3 ./extra/gemm/fuzz_matmul.py
@@ -290,9 +292,9 @@ jobs:
     - name: Run MLPerf resnet eval on training data
       run: time HSA=1 MODEL=resnet python3 examples/mlperf/model_eval.py
     - name: Run 10 MLPerf ResNet50 training steps (1 gpu)
-      run: HSA=1 BENCHMARK=10 BS=128 GPUS=1 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet_one_gpu.txt
+      run: HSA=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=256 GPUS=1 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet_one_gpu.txt
     - name: Run 10 MLPerf ResNet50 training steps (6 gpu)
-      run: HSA=1 BENCHMARK=10 BS=768 GPUS=6 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet.txt
+      run: HSA=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=1536 GPUS=6 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet.txt
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (AMD Training)

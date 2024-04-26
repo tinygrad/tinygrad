@@ -1,5 +1,5 @@
 from typing import Callable, DefaultDict, Dict, List, Union, NamedTuple, Optional, cast
-import functools, struct
+import functools, struct, copy
 from collections import defaultdict
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op
@@ -70,7 +70,9 @@ class AssemblyLanguage(NamedTuple):
   def render_kernel(self, kernel, function_name, bufs, regs) -> str: raise NotImplementedError()
   def mem_type(self, dtype) -> str: raise NotImplementedError()
 
-def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
+def uops_to_asm(lang:AssemblyLanguage, function_name:str, _uops:UOpGraph) -> str:
+  # editing the uops breaks beam search
+  uops = copy.deepcopy(_uops)
   kernel:List[str] = []
   bufs = []
 
@@ -94,7 +96,8 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:UOpGraph) -> str:
      lambda root,z: UOp(root.uop, root.dtype, root.vin[:2] + (UOp(UOps.CAST, dtypes.uint8, (z,), None),), root.arg)),
     ({"__name__": "root", "uop": UOps.STORE, "vin": ({},{},{"__name__": "z","dtype": dtypes.bool})},
      lambda root,z: UOp(root.uop, root.dtype, root.vin[:2] + (UOp(UOps.CAST, dtypes.uint8, (z,), None),), root.arg)),
-
+    ({"__name__": "root", "uop": UOps.STORE, "vin": ({},{},{},{"__name__": "g"})},
+     lambda root,g: UOp(root.uop, root.dtype, root.vin[:3] + (UOp(UOps.CAST, dtypes.bool, (g,), root.arg),))),
   ])
 
   # here we do a pretransform on UOps to fix some shortcomings of PTX

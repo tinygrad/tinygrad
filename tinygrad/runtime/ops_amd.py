@@ -76,7 +76,6 @@ class AMDCompiler(Compiler):
   def render(self, name:str, uops) -> str: return HIPRenderer(name, uops)
   def compile(self, src:str) -> bytes: return compile_hip(src, self.arch)
 
-AQL_PACKET_SIZE = ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t)
 SDMA_MAX_COPY_SIZE = 0x400000
 PAGE_SIZE = 0x1000
 
@@ -194,7 +193,7 @@ class HWPM4Queue:
                amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL2_INV(gl2)]
     return self
 
-  def exec(self, prg:KFDProgram, kernargs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), completion_signal=None):
+  def exec(self, prg:AMDProgram, kernargs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1)):
     self.hdp_flush()
     self.invalidate_cache()
     code = hsa.amd_kernel_code_t.from_address(prg.handle)  # NOTE: this is wrong, it's not this object
@@ -209,18 +208,8 @@ class HWPM4Queue:
     rsrc1, rsrc2 = code.compute_pgm_rsrc1, code.compute_pgm_rsrc2
 
     # this is required
-    lds_size = ((prg.group_segment_size+63)//64)&0x1FF
-    assert lds_size <= 0x80  # larger numbers stall the GPU
-
-    # lds_size = 0x1ff
-
-    # rsrc2 |= ((((prg.group_segment_size+63)//64)&0x1FF) << 15)
-    # rsrc2 |= 0x7f << 15
-    # rsrc2 |= 0x1ff << 15
-
-    # rsrc2 |= ((prg.group_segment_size+31)//64) << 15
-    # rsrc2 |= (prg.group_segment_size//32) << 15
-    # user_sgpr =
+    lds_size = ((prg.group_segment_size + 511) // 512) & 0x1FF
+    assert lds_size <= 0x80 # larger numbers stall the GPU
 
     prog_addr = (prg.handle + code.kernel_code_entry_byte_offset) >> 8
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 6), regCOMPUTE_PGM_LO, prog_addr&0xFFFFFFFF, prog_addr>>32, 0, 0,
@@ -240,8 +229,6 @@ class HWPM4Queue:
     # have to self wait since flush doesn't work
     self.signal(sig:=AMDDevice._get_signal())
     self.wait(sig)
-
-    if completion_signal: self.signal(completion_signal)
     return self
 
   def wait(self, signal:hsa.amd_signal_t, value=0):
@@ -249,6 +236,15 @@ class HWPM4Queue:
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_WAIT_REG_MEM, 5),
       amd_gpu.WAIT_REG_MEM_MEM_SPACE(1) | amd_gpu.WAIT_REG_MEM_OPERATION(0) | amd_gpu.WAIT_REG_MEM_FUNCTION(3) | amd_gpu.WAIT_REG_MEM_ENGINE(0),
       addr&0xFFFFFFFF, addr>>32, value, 0xffffffff, 4]
+    return self
+
+  def timestamp(self, addr):
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_RELEASE_MEM, 6),
+      # event_index__mec_release_mem__end_of_pipe = 5
+      amd_gpu.PACKET3_RELEASE_MEM_EVENT_TYPE(CACHE_FLUSH_AND_INV_TS_EVENT) | amd_gpu.PACKET3_RELEASE_MEM_EVENT_INDEX(5),
+      # * 3 - send 64bit GPU counter value
+      amd_gpu.PACKET3_RELEASE_MEM_DATA_SEL(3) | amd_gpu.PACKET3_RELEASE_MEM_INT_SEL(0) | amd_gpu.PACKET3_RELEASE_MEM_DST_SEL(0),
+      addr&0xFFFFFFFF, addr>>32, 0, 0, 0]
     return self
 
   def signal(self, signal:hsa.amd_signal_t, value=0):
@@ -344,7 +340,7 @@ class HWCopyQueue:
                                         value=0, mask=0xffffffff, interval=0x04, retry_count=0xfff))
     return self
 
-class KFDProgram:
+class AMDProgram:
   def __init__(self, device:AMDDevice, name:str, lib:bytes):
     # TODO; this API needs the type signature of the function and global_size/local_size
     self.device, self.name, self.lib = device, name, lib
@@ -390,8 +386,13 @@ class KFDProgram:
     for i in range(len(args)): args_st.__setattr__(f'f{i}', args[i].va_addr)
     for i in range(len(vals)): args_st.__setattr__(f'v{i}', vals[i])
 
-    HWPM4Queue().exec(self, self.device.kernargs_ptr, global_size, local_size,
-                      self.device.completion_signal if wait else None).submit(self.device)
+    q = HWPM4Queue()
+    if wait: q.timestamp(ctypes.addressof(self.device.completion_signal) + getattr(hsa.amd_signal_t, 'start_ts').offset)
+    q.exec(self, self.device.kernargs_ptr, global_size, local_size)
+    if wait:
+      q.timestamp(ctypes.addressof(self.device.completion_signal) + getattr(hsa.amd_signal_t, 'end_ts').offset)
+      q.signal(self.device.completion_signal)
+    q.submit(self.device)
     self.device.kernargs_ptr += self.kernargs_segment_size
 
     if wait:
@@ -549,8 +550,6 @@ class AMDDevice(Compiled):
     self.completion_signal = AMDDevice._get_signal(self.device_id*2, sync_event=sync_event)
     self.signal_sdma = AMDDevice._get_signal(self.device_id*2+1, sync_event=kio.create_event(AMDDevice.kfd, auto_reset=1))
 
-    self.gart_aql = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
-    self.aql_ring = self._gpu_alloc(0x100000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
     self.eop_buffer = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
     self.kernargs = self._gpu_alloc(0x1000000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
     self.kernargs_ptr = self.kernargs.va_addr
@@ -597,7 +596,7 @@ class AMDDevice(Compiled):
     self.pm4_write_pointer = to_mv(self.pm4_queue.write_pointer_address, 8).cast("Q")
     self.pm4_doorbell = to_mv(self.doorbells + self.pm4_queue.doorbell_offset - self.doorbells_base, 4).cast("I")
 
-    super().__init__(device, AMDAllocator(self), AMDCompiler(self.arch), functools.partial(KFDProgram, self))
+    super().__init__(device, AMDAllocator(self), AMDCompiler(self.arch), functools.partial(AMDProgram, self))
 
   def _submit_sdma(self, dest, src, copy_size, wait_signals=None, completion_signal=None):
     q = HWCopyQueue()

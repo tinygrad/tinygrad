@@ -14,9 +14,9 @@ def _time_queue(q, d):
 class TestHCQ(unittest.TestCase):
   @classmethod
   def setUpClass(self):
-    TestHCQ.d0: AMDDevice = Device["KFD"]
-    #TestHCQ.d1: AMDDevice = Device["KFD:1"]
-    TestHCQ.a = Tensor([0.,1.], device="KFD").realize()
+    TestHCQ.d0: AMDDevice = Device["AMD"]
+    #TestHCQ.d1: AMDDevice = Device["AMD:1"]
+    TestHCQ.a = Tensor([0.,1.], device="AMD").realize()
     TestHCQ.b = self.a + 1
     si = create_schedule([self.b.lazydata])[-1]
     TestHCQ.runner = TestHCQ.d0.get_runner(*si.ast)
@@ -46,7 +46,7 @@ class TestHCQ(unittest.TestCase):
     q = TestHCQ.compute_queue()
     q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size)
     q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr+len(TestHCQ.addr), TestHCQ.runner.global_size,
-           TestHCQ.runner.local_size, TestHCQ.d0.completion_signal)
+           TestHCQ.runner.local_size).signal(TestHCQ.d0.completion_signal)
     for _ in range(1000):
       q.submit(TestHCQ.d0)
       TestHCQ.d0._wait_signal(TestHCQ.d0.completion_signal)
@@ -60,7 +60,7 @@ class TestHCQ(unittest.TestCase):
     q = TestHCQ.compute_queue()
     q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size)
     q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr+len(TestHCQ.addr), TestHCQ.runner.global_size, TestHCQ.runner.local_size)
-    q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size, TestHCQ.d0.completion_signal)
+    q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size).signal(TestHCQ.d0.completion_signal)
     q.submit(TestHCQ.d0)
     TestHCQ.d0._wait_signal(TestHCQ.d0.completion_signal)
     assert (val:=TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[0]) == 3.0, f"got val {val}"
@@ -85,7 +85,8 @@ class TestHCQ(unittest.TestCase):
 
   def test_run_normal(self):
     q = TestHCQ.compute_queue()
-    q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size, TestHCQ.d0.completion_signal)
+    q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size)
+    q.signal(TestHCQ.d0.completion_signal)
     q.submit(TestHCQ.d0)
     TestHCQ.d0._wait_signal(TestHCQ.d0.completion_signal)
     assert (val:=TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[0]) == 1.0, f"got val {val}"
@@ -140,8 +141,8 @@ class TestHCQ(unittest.TestCase):
   def test_copy_bandwidth(self):
     # THEORY: the bandwidth is low here because it's only using one SDMA queue. I suspect it's more stable like this at least.
     SZ = 2_000_000_000
-    a = Buffer("KFD", SZ, dtypes.uint8, options=BufferOptions(nolru=True)).allocate()
-    b = Buffer("KFD", SZ, dtypes.uint8, options=BufferOptions(nolru=True)).allocate()
+    a = Buffer("AMD", SZ, dtypes.uint8, options=BufferOptions(nolru=True)).allocate()
+    b = Buffer("AMD", SZ, dtypes.uint8, options=BufferOptions(nolru=True)).allocate()
     q = HWCopyQueue()
     q.copy(a._buf.va_addr, b._buf.va_addr, SZ)
     et = _time_queue(q, TestHCQ.d0)
@@ -151,8 +152,8 @@ class TestHCQ(unittest.TestCase):
 
   def test_cross_device_copy_bandwidth(self):
     SZ = 2_000_000_000
-    b = Buffer("KFD:1", SZ, dtypes.uint8, options=BufferOptions(nolru=True)).allocate()
-    a = Buffer("KFD", SZ, dtypes.uint8, options=BufferOptions(nolru=True)).allocate()
+    b = Buffer("AMD:1", SZ, dtypes.uint8, options=BufferOptions(nolru=True)).allocate()
+    a = Buffer("AMD", SZ, dtypes.uint8, options=BufferOptions(nolru=True)).allocate()
     TestHCQ.d0._gpu_map(b._buf)
     q = HWCopyQueue()
     q.copy(a._buf.va_addr, b._buf.va_addr, SZ)
@@ -177,7 +178,7 @@ class TestHCQ(unittest.TestCase):
     assert (val:=TestHCQ.a.lazydata.buffer.as_buffer().cast("f")[0]) == 1.0, f"got val {val}"
 
   def test_cross_device_signal(self):
-    d1 = Device["KFD:1"]
+    d1 = Device["AMD:1"]
     q1 = TestHCQ.compute_queue()
     q2 = TestHCQ.compute_queue()
     q1.signal(TestHCQ.d0.completion_signal)
