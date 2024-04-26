@@ -171,11 +171,10 @@ class Linearizer(Kernel):
     self.loop_uops.update(new_loops)
     return tuple(new_loops.values())
 
-  def render_reduceop(self, reduceop: LazyOp, loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]], \
-                      global_idxs, local_idxs, upcast_idxs):
+  def _render_reduceop(self, reduceop: LazyOp, loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]], \
+                      global_idxs, local_idxs, upcast_idxs, reduce_idxs):
     # define indicies
     full_upcast_idxs = [Variable(f"_uidx{i}", 0, s-1) for i, s in enumerate(self.full_shape[self.shape_len-self.upcasted:])]
-    reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+self.group_for_reduces, self.shape_len-self.upcasted)]  # noqa: E501
     fake_reduce_idxs = [x*0 for x in reduce_idxs]
 
     def calc_tc_idxs(local_sizes: List[int], aliases: List[List[int]]):
@@ -300,7 +299,7 @@ class Linearizer(Kernel):
 
       # all local indices which were used for group_for_reduce are not valid any more and should be replaced with fake NumNode(0), since they have
       # been rewritten with fake end_local_idxs.
-    return (acc, loaded_buffers, fake_reduce_idxs, local_idxs[:self.local_dims] + [NumNode(0) for i in range(self.group_for_reduces)], upcast_idxs)
+    return acc
 
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
   def linearize(self):
@@ -363,6 +362,7 @@ class Linearizer(Kernel):
     global_idxs, loop_global_idxs = get_grouped_dims("gidx", 0, self.full_shape[:self.global_dims], 3 if self.opts.has_local else 0)
     local_idxs, loop_local_idxs = get_grouped_dims("lidx", self.global_dims, self.full_shape[self.global_dims:self.first_reduce+self.group_for_reduces], 3 if self.opts.has_local else 0)  # noqa: E501
     upcast_idxs = [Variable(f"_uidx{i}", 0, s-1) for i, s in enumerate(self.output_shape[self.shape_len-self.upcasted:])]
+    reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+self.group_for_reduces, self.shape_len-self.upcasted)]  # noqa: E501
 
     # set global/local size
     self.global_size: Optional[List[int]] = None
@@ -383,9 +383,12 @@ class Linearizer(Kernel):
     self.load_cache: Dict[str, UOp] = {}
 
     # reduce op
-    fake_reduce_idxs: List[Variable] = []
-    for reduceop in [self.reduceop] if self.reduceop is not None else []:
-      acc,loaded_buffers,fake_reduce_idxs,local_idxs,upcast_idxs = self.render_reduceop(reduceop,loaded_buffers,global_idxs,local_idxs,upcast_idxs)
+    self.reduce_accs = {} # track the ends of reduces
+    fake_reduce_idxs = [x*0 for x in reduce_idxs]
+    # initialize the render_reduceop function w/ indecies
+    self.render_reduceop = lambda x, loaded_bufs: self._render_reduceop(x, loaded_bufs, global_idxs, local_idxs, upcast_idxs, reduce_idxs)
+    # for reduceop in [self.reduceop] if self.reduceop is not None else []:
+    #   acc,loaded_buffers,fake_reduce_idxs,local_idxs,upcast_idxs = self.render_reduceop(reduceop,loaded_buffers,global_idxs,local_idxs,upcast_idxs)
 
     # load latebufs
     loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs) \
@@ -410,15 +413,23 @@ class Linearizer(Kernel):
     self.applied_opts_cache = self.applied_opts[:]
     return self
 
-  def ast_parse(self, x:LazyOp, acc: List[UOp], offs:Optional[List[int]], loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]], do_reduce=False, loop_ctx=tuple(), cache=None) -> List[UOp]: # noqa: E501
+  def ast_parse(self, x:LazyOp, acc: List[UOp], offs:Optional[List[int]], loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]], do_reduce=False, loop_ctx=tuple(), if_ctx=tuple(), cache=None) -> List[UOp]: # noqa: E501
     if cache is None: cache = {}
     if x in cache: return cache[x]
     if x.op in BufferOps: return loaded_buffers[x.arg]
     if x.op is UnaryOps.CAST: return [self.uops.add(UOps.BITCAST if x.arg[1] else UOps.CAST, self.get_base_dtype(x.arg[0]), (u,), x.arg[0]) \
                                       for u in self.ast_parse(x.src[0], acc, offs, loaded_buffers)]
     if x.op in ReduceOps and not do_reduce:
-      assert offs is None, "not available if we aren't doing reduce"
-      return acc
+      if x not in self.reduce_accs:
+        # store a copy of the current parser state
+        cursor_copy,load_cache_copy = self.uops.cursor,self.load_cache
+        # go back to before this for loop / if statement begins
+        self.uops.cursor,self.load_cache=self.uops.uops[min([self.uops.uops.index(ctx) for ctx in loop_ctx+if_ctx])] if loop_ctx+if_ctx else None,{}
+        # render the reduceop
+        self.reduce_accs[x] = self.render_reduceop(x, loaded_buffers)
+        # restore the parse state & continue
+        self.uops.cursor,self.load_cache = cursor_copy,load_cache_copy
+      return [self.reduce_accs[x][i] for i in offs] if offs else self.reduce_accs[x]
 
     values = [self.ast_parse(v, acc, offs, loaded_buffers, loop_ctx=loop_ctx, cache=cache) for v in x.src]
     ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}
