@@ -8,7 +8,7 @@ from tinygrad.helpers import colored, DEBUG, prod, getenv, to_function_name
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ConstBuffer, MemBuffer, BufferOps
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, create_lt_node
-from tinygrad.codegen.kernel import LocalBuffer, Kernel, TensorCore
+from tinygrad.codegen.kernel import LocalBuffer, Kernel
 from tinygrad.features.image import to_image_idx
 
 from tinygrad.codegen.uops import UOps, UOp, UOpGraph
