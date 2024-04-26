@@ -355,7 +355,8 @@ def train_retinanet():
   @TinyJit
   def val_step(X):
     Tensor.training = False
-    out = model(normalize(X)).cast(dtypes.float32)
+    b,r,c = model(normalize(X), True)
+    out = r.cat(c, dim=-1).cast(dtypes.float32)
     return out.realize()
 
   feature_shapes = [(100, 100), (50, 50), (25, 25), (13, 13), (7, 7)]
