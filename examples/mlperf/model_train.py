@@ -233,6 +233,7 @@ def train_resnet():
         safe_save(get_state_dict(model), fn)
         print(f" *** Model saved to {fn} ***")
         achieved = True
+        break
 
       # checkpoint every time we eval
       if getenv("CKPT"):
