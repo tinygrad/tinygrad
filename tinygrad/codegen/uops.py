@@ -131,6 +131,8 @@ class UOpGraph:
   def __init__(self, start_uops:Optional[List[UOp]]=None):
     # list of uops
     self.uops: List[UOp] = [] if start_uops is None else start_uops
+    # if set, UOpGraph.add will add new uops before this cursor
+    self.cursor: Optional[UOp] = None
 
     # global uop cache
     self.saved_exprs: Dict[Tuple, UOp] = dict()
@@ -155,7 +157,7 @@ class UOpGraph:
       if rewritten in self.uops: return rewritten  # ignore cachable
       ret = rewritten
     key = (ret.uop, ret.dtype, ret.vin, ret.arg)
-    if insert_before is None: insert_before = len(self.uops)
+    if insert_before is None: insert_before = self.uops.index(self.cursor) if self.cursor else len(self.uops)
     # check if the cached expr is valid with the given insert place.
     if cachable and (expr:=self.saved_exprs.get(key, None)) is not None and self.uops.index(expr) <= insert_before: return expr
     self.uops.insert(insert_before, ret)
