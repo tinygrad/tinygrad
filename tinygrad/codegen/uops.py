@@ -148,9 +148,9 @@ class UOpGraph:
       print(f"{self.uops.index(u):4d} {str(u.uop):20s}: {str(u.dtype) if u.dtype is not None else '':25s} "
             f"{str([self.uops.index(x) for x in u.vin]):32s} {u.arg}")
 
-  def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None, cachable=True, insert_before:Optional[UOp|int]=None,
-          simplify=True) -> UOp:
-    
+  def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None, cachable=True, \
+          insert_before:Optional[UOp|int]=None, simplify=True) -> UOp:
+
     ret = UOp(uop, dtype, vin, arg) if uop is not UOps.CONST else UOp.const(dtype, arg)
     if simplify and (rewritten:=constant_folder.rewrite(ret)) is not None:
       if rewritten in self.uops: return rewritten  # ignore cachable
