@@ -425,13 +425,13 @@ def train_retinanet():
       proc, next_proc = next_proc, None  # return old cookie
       cnt+=1
 
-    if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
-    fn = f"./ckpts/retinanet_{len(GPUS)}x{HOSTNAME}_B{BS}_E{epoch}.safe"
-    state_dict = get_state_dict(model)
-    for k,v in state_dict.items():
-      state_dict[k] = v.cast(dtypes.float32)
-    safe_save(state_dict, fn)
-    print(f" *** Model saved to {fn} ***")
+    # if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
+    # fn = f"./ckpts/retinanet_{len(GPUS)}x{HOSTNAME}_B{BS}_E{epoch}.safe"
+    # state_dict = get_state_dict(model)
+    # for k,v in state_dict.items():
+    #   state_dict[k] = v.cast(dtypes.float32)
+    # safe_save(state_dict, fn)
+    # print(f" *** Model saved to {fn} ***")
 
     # ***********EVAL******************
     bt = time.time()
