@@ -46,19 +46,5 @@ class TestUOpGraph(unittest.TestCase):
     self.assertEqual(out.uop, UOps.CONST)
     self.assertEqual(out.arg, 0)
 
-  def test_cursor(self):
-    g = UOpGraph()
-    one = g.add(UOps.CONST, dtypes.int, arg=1)
-    four = g.add(UOps.CONST, dtypes.int, arg=4)
-    g.cursor = one
-    g.add(UOps.CONST, dtypes.int, arg=0)
-    g.cursor = four
-    g.add(UOps.CONST, dtypes.int, arg=2)
-    g.add(UOps.CONST, dtypes.int, arg=3)
-    g.cursor = None
-    g.add(UOps.CONST, dtypes.int, arg=5)
-    for i,u in enumerate(g.uops): self.assertEqual(u.arg, i)
-
-
 if __name__ == '__main__':
   unittest.main(verbosity=2)

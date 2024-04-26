@@ -85,7 +85,7 @@ class PatternMatcher:
       while queue:
         if all([qq in uops.uops for qq in queue[-1].vin]):
           q = queue.pop()
-          new = uops.add(q.uop, q.dtype, q.vin, q.arg, insert_before=max([0]+[uops.uops.index(vv) for vv in q.vin])+1)
+          new = uops.add(q.uop, q.dtype, q.vin, q.arg, insert_before=uops.uops[max([0]+[uops.uops.index(vv) for vv in q.vin])+1])
           for vv in uops.uops + queue: vv.vin = tuple(new if x is q else x for x in vv.vin)
         else: queue.extend([qq for qq in queue[-1].vin if qq not in uops.uops])
       if not any([o in u.vin for u in uops]): uops.uops.remove(o)
@@ -131,8 +131,6 @@ class UOpGraph:
   def __init__(self, start_uops:Optional[List[UOp]]=None):
     # list of uops
     self.uops: List[UOp] = [] if start_uops is None else start_uops
-    # if set, UOpGraph.add will add new uops before this cursor
-    self.cursor: Optional[UOp] = None
 
     # global uop cache
     self.saved_exprs: Dict[Tuple, UOp] = dict()
@@ -150,17 +148,18 @@ class UOpGraph:
       print(f"{self.uops.index(u):4d} {str(u.uop):20s}: {str(u.dtype) if u.dtype is not None else '':25s} "
             f"{str([self.uops.index(x) for x in u.vin]):32s} {u.arg}")
 
-  def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None, cachable=True, insert_before=None,
+  def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None, cachable=True, insert_before:Optional[UOp|int]=None,
           simplify=True) -> UOp:
+    if isinstance(insert_before, int): insert_before = self.uops[insert_before]
     ret = UOp(uop, dtype, vin, arg) if uop is not UOps.CONST else UOp.const(dtype, arg)
     if simplify and (rewritten:=constant_folder.rewrite(ret)) is not None:
       if rewritten in self.uops: return rewritten  # ignore cachable
       ret = rewritten
     key = (ret.uop, ret.dtype, ret.vin, ret.arg)
-    if insert_before is None: insert_before = self.uops.index(self.cursor) if self.cursor else len(self.uops)
+    insert_idx = self.uops.index(insert_before) if insert_before is not None else len(self.uops)
     # check if the cached expr is valid with the given insert place.
-    if cachable and (expr:=self.saved_exprs.get(key, None)) is not None and self.uops.index(expr) <= insert_before: return expr
-    self.uops.insert(insert_before, ret)
+    if cachable and (expr:=self.saved_exprs.get(key, None)) is not None and self.uops.index(expr) <= insert_idx: return expr
+    self.uops.insert(insert_idx, ret)
     if cachable: self.saved_exprs[key] = ret
     return ret
 
@@ -209,7 +208,7 @@ class UOpGraph:
       if u.uop is UOps.LOOP:
         # add END of loops after the last thing that (recursively) depends on them
         insert_before = self.uops.index(sorted(list(self.get_recursive_children(u)), key=self.uops.index)[-1])+1
-        self.add(UOps.ENDLOOP, None, (u,), cachable=False, insert_before=insert_before)
+        self.add(UOps.ENDLOOP, None, (u,), cachable=False, insert_before=self.uops[insert_before] if insert_before < len(self.uops) else None)
       elif u.uop is UOps.IF:
         # END any if statements at the end of the uops
         self.add(UOps.ENDIF, None, (u,), cachable=False)
@@ -284,7 +283,7 @@ class UOpGraph:
       loop_length = loop_op.vin[1].arg - loop_op.vin[0].arg
       for u in self.uops:
         if u.arg is BinaryOps.ADD and len(wheres.intersection(get_recursive_parents(u))) and len(phis.intersection(self.get_recursive_children(u))):
-          u.vin = tuple([const(vin.arg*loop_length, insert_before=self.uops.index(u)) if vin.uop is UOps.CONST else vin for vin in list(u.vin)])
+          u.vin = tuple([const(vin.arg*loop_length, insert_before=u) if vin.uop is UOps.CONST else vin for vin in list(u.vin)])
       for where in sorted(wheres, key=lambda x: self.uops.index(x)):
         comp_lt, comp_gt = where.vin[0].vin[0], where.vin[0].vin[1]
         factored = loop_factor(comp_lt, NumNode(int(comp_gt.arg)), loop_op, round_up=(comp_gt.arg > 0))
@@ -333,10 +332,10 @@ class UOpGraph:
           del self.saved_exprs[(u.uop, u.dtype, u.vin, u.arg)]
           # NOTE: assuming u.vin[2].vin[1] and u.vin[2].vin[0] have the same dtype
           loop_len = self.add(UOps.ALU, u.vin[2].vin[1].dtype, (u.vin[2].vin[1], u.vin[2].vin[0]), BinaryOps.SUB,
-                              insert_before=self.uops.index(u))
+                              insert_before=u)
           if loop_len.dtype != u.dtype: loop_len = self.add(UOps.CAST, u.dtype, (loop_len,),
-                                                            insert_before=self.uops.index(u))
-          new = self.add(UOps.ALU, u.dtype, (u.vin[1], loop_len,), BinaryOps.MUL, insert_before=self.uops.index(u))
+                                                            insert_before=u)
+          new = self.add(UOps.ALU, u.dtype, (u.vin[1], loop_len,), BinaryOps.MUL, insert_before=u)
           self.replace_op(u, new)
           return True
 
