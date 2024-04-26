@@ -330,6 +330,7 @@ def train_retinanet():
   # model.load_checkpoint("./ckpts/retinanet_4xgpu020_B52_E0x75.safe")
   # model.load_from_pretrained()
   for k, v in get_state_dict(model).items():
+    # v.cast(dtypes.default_float)#.realize()
     if v.requires_grad:
       print(k)
   parameters = get_parameters(model)
@@ -435,7 +436,7 @@ def train_retinanet():
 
     # ***********EVAL******************
     bt = time.time()
-    train_step.reset()
+    if getenv("RESET_STEP", 1): train_step.reset()
     Tensor.training = False
     BEAM.value = EVAL_BEAM
     print(colored(f'{epoch} START EVAL', 'cyan'))
@@ -456,8 +457,8 @@ def train_retinanet():
       for i in y_idxs:
         img_ids.append(coco_val.ids[i])
         orig_shapes.append(coco_val.__getitem__(i)[0].size[::-1])
-
-      out, proc = val_step(proc[0]), proc[2]
+      with Tensor.inference_mode():
+        out, proc = val_step(proc[0]), proc[2]
 
       try:
         next_proc = data_get_val(it)
@@ -490,7 +491,7 @@ def train_retinanet():
     coco_eval.summarize()
     eval_acc = coco_eval.stats[0]
     print(colored(f'{epoch} EVAL_ACC {eval_acc} || {time.time()-bt}', 'green'))
-    val_step.reset()
+    if getenv("RESET_STEP", 1): val_step.reset()
     if eval_acc>MAP_TARGET:
       print('SUCCESSFULLY TRAINED TO TARGET: EPOCH', epoch)
       break
