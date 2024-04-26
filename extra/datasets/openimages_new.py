@@ -283,7 +283,7 @@ def batch_load_retinanet(coco, bs=8, shuffle=False, seed=None, anchor_np=[1,2,3,
 
     for _ in range(cpu_count()):
     # for _ in range(4):
-      print('hit*************')
+      # print('hit*************')
       p = Process(target=loader_process, args=(q_in, q_out, X, seed, coco, YB, YL, YM, anchor_np))
       p.daemon = True
       p.start()
@@ -367,7 +367,7 @@ def batch_load_retinanet_val(coco, bs=8, shuffle=False, seed=None):
 
     for _ in range(cpu_count()):
     # for _ in range(4):
-      print('hit*************')
+      # print('hit*************')
       p = Process(target=loader_process_val, args=(q_in, q_out, X, seed, coco))
       p.daemon = True
       p.start()

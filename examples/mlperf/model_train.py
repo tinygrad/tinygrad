@@ -322,9 +322,9 @@ def train_retinanet():
     else:
       v.requires_grad = False
     if not SYNCBN and ("running_mean" in k or "running_var" in k):
-      v.shard_(GPUS, axis=0)
+      v.realize().shard_(GPUS, axis=0)
     else:
-      v.to_(GPUS)
+      v.realize().to_(GPUS)
   
   # model.load_checkpoint("./ckpts/retinanet_4xgpu020_B100_E0_11703.safe")
   # model.load_checkpoint("./ckpts/retinanet_4xgpu020_B52_E0x75.safe")
@@ -356,7 +356,7 @@ def train_retinanet():
   def val_step(X):
     Tensor.training = False
     b,r,c = model(normalize(X), True)
-    out = r.cat(c, dim=-1).cast(dtypes.float32)
+    out = (r.cat(c.sigmoid(), dim=-1)).cast(dtypes.float32)
     return out.realize()
 
   feature_shapes = [(100, 100), (50, 50), (25, 25), (13, 13), (7, 7)]
