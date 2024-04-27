@@ -471,7 +471,7 @@ class TestSchedule(unittest.TestCase):
     out0 = a.sum() + 2
     # b.sum() is not a descendant of the fused nodes
     out1 = a.sum() + b.sum() + 4
-    check_schedule([out0, out1], 3) # TODO: this can fuse
+    check_schedule([out0, out1], 2)
 
   def test_reduce_multiple_paths_fuse(self):
     a = Tensor.empty(4, 4)
@@ -504,7 +504,7 @@ class TestSchedule(unittest.TestCase):
     b = Tensor.empty((4, 4))
     out0 = a.sum() + 2
     out1 = a.sum() + b.sum() + 4
-    check_schedule([out0, out1], 3)
+    check_schedule([out0, out1], 2)
 
   def test_group_midexpand_nofuse(self):
     a = Tensor.empty((32, 32, 32))
