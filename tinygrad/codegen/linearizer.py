@@ -44,7 +44,7 @@ class Linearizer(Kernel):
     return self.uops.add(UOps.ALU, dtype, (a, render_b), op)
 
   # NOTE: the consts have to be cached for deduping of downstream uops to work
-  def const(self, b:ConstType, dtype:DType=dtypes.int32, insert_before=None) -> UOp:
+  def const(self, b:ConstType, dtype:DType=dtypes.int32, insert_before:Optional[UOp|int]=None) -> UOp:
     return self.uops.add(UOps.CONST, dtype, tuple(), b, insert_before=insert_before)
 
   def cast(self, val: UOp, dtype) -> UOp: return self.uops.add(UOps.CAST, dtype, (val,)) if val.dtype != dtype else val
@@ -98,16 +98,16 @@ class Linearizer(Kernel):
         if acc is not None:
           self.load_cache[key] = self.uops.add(UOps.DEFINE_ACC, localtype, (), dtypes.as_const(this_const, localtype), cachable=False, insert_before=insert_before) # noqa: E501
         elif this_const is not None:
-          self.load_cache[key] = self.const(this_const, localtype, insert_before=insert_before)
+          self.load_cache[key] = self.const(this_const, localtype, insert_before)
           if valid.min == 0 and valid.max == 1:
             valid_rendered = valid.render(self.render_ops, self)
-            self.load_cache[key] = self.uops.add(UOps.ALU, localtype, (valid_rendered, self.load_cache[key], self.const(invalid_value, localtype)), TernaryOps.WHERE)  # noqa: E501
+            self.load_cache[key] = self.uops.add(UOps.ALU, localtype, (valid_rendered, self.load_cache[key], self.const(invalid_value, localtype, insert_before)), TernaryOps.WHERE)  # noqa: E501
         elif isinstance(buf.dtype, ImageDType):
           buf_uop = self.buf_uops[i]
           assert buf_uop is not None, f"buffer {i} wasn't UOped"
           image_idx, valid = to_image_idx(buf.dtype.shape, idx, valid)
-          rendered_idx=self.uops.add(UOps.CAST,dtypes.int.vec(2),tuple(x.render(self.render_ops,self) for x in image_idx),insert_before=insert_before)
-          valid_tuple = (valid.render(self.render_ops, self), self.const(invalid_value, buf.dtype.base.vec(4))) if valid.min == 0 else tuple()
+          rendered_idx = self.uops.add(UOps.CAST, dtypes.int.vec(2), tuple(x.render(self.render_ops, self) for x in image_idx), None, insert_before)
+          valid_tuple = (valid.render(self.render_ops, self), self.const(invalid_value, buf.dtype.base.vec(4), insert_before)) if valid.min == 0 else tuple() # noqa: E501
           self.load_cache[key] = self.uops.add(UOps.LOAD, buf.dtype.base.vec(4),
                                                (buf_uop, rendered_idx) + valid_tuple + ((barrier,) if barrier else ()))
           if localtype == localtype.scalar():
@@ -116,14 +116,14 @@ class Linearizer(Kernel):
             out = self.uops.add(UOps.GEP, localtype, (self.load_cache[key],), idx_small.max, insert_before=insert_before)
             for ix in range(idx_small.max, idx_small.min, -1):
               rvv = self.uops.add(UOps.GEP, localtype, (self.load_cache[key],), ix-1, insert_before=insert_before)
-              sel = self.uops.add(UOps.ALU, dtypes.bool, (res, self.const(ix)), BinaryOps.CMPLT, insert_before=insert_before)
+              sel = self.uops.add(UOps.ALU, dtypes.bool, (res, self.const(ix)), BinaryOps.CMPLT, insert_before)
               out = self.uops.add(UOps.ALU, localtype, (sel, rvv, out), TernaryOps.WHERE, insert_before=insert_before)
             self.load_cache[key] = out
         else:
           buf_uop = self.buf_uops[i]
           assert buf_uop is not None, f"buffer {i} wasn't UOped"
           rendered_idx = idx.render(self.render_ops, self)
-          valid_tuple = (valid.render(self.render_ops, self), self.const(invalid_value, localtype, insert_before=insert_before)) if valid.min == 0 else tuple() # noqa: E501
+          valid_tuple = (valid.render(self.render_ops, self), self.const(invalid_value, localtype, insert_before)) if valid.min == 0 else tuple()
           self.load_cache[key] = self.uops.add(UOps.LOAD, localtype, (buf_uop, rendered_idx) + valid_tuple + ((barrier,) if barrier else ()), insert_before=insert_before) # noqa: E501
       ret.append(self.uops.add(UOps.GEP, localtype.scalar(), (self.load_cache[key],), rep_idx[dim], insert_before=insert_before) if dim is not None else self.load_cache[key]) # noqa: E501
     return ret
@@ -156,18 +156,19 @@ class Linearizer(Kernel):
       idx, valid = self.sts[i].expr_idxs(_idx)
       if isinstance(buf.dtype, ImageDType):
         image_idx, valid = to_image_idx(buf.dtype.shape, idx, valid)
-        rendered_idx = self.uops.add(UOps.CAST,dtypes.int.vec(2),tuple(x.render(self.render_ops,self) for x in image_idx),insert_before=insert_before)
+        rendered_idx = self.uops.add(UOps.CAST, dtypes.int.vec(2), tuple(x.render(self.render_ops, self) for x in image_idx), None, insert_before)
       else:
         rendered_idx = idx.render(self.render_ops, self)
-      if valid.min == 1: stores.append(self.uops.add(UOps.STORE, None, (buf_uop, rendered_idx, var), insert_before=insert_before))
-      else: stores.append(self.uops.add(UOps.STORE,None,(buf_uop,rendered_idx,var,valid.render(self.render_ops, self)),insert_before=insert_before))
+      if valid.min == 1: stores.append(self.uops.add(UOps.STORE, None, (buf_uop, rendered_idx, var), None, insert_before))
+      else: stores.append(self.uops.add(UOps.STORE, None, (buf_uop, rendered_idx, var, valid.render(self.render_ops, self)), None, insert_before))
     return stores
 
   # render loop
   def render_loop(self, xx:List[Variable], insert_before:Optional[UOp]=None) -> Tuple[UOp, ...]:
     new_loops = {x.expr:self.uops.add(UOps.LOOP, dtypes.int32, (
-      self.const(x.min, insert_before=insert_before) if isinstance(x.min, int) else cast(Node, x.min).render(self.render_ops, self),
-      self.const(x.max+1, insert_before=insert_before) if isinstance(x.max, int) else cast(Node, x.max+1).render(self.render_ops, self)), cachable=False, insert_before=insert_before) for x in xx if not isinstance(x, NumNode) and x.expr is not None}  # noqa: E501
+      self.const(x.min, dtypes.int32, insert_before) if isinstance(x.min, int) else cast(Node, x.min).render(self.render_ops, self),
+      self.const(x.max+1,  dtypes.int32,insert_before) if isinstance(x.max, int) else cast(Node, x.max+1).render(self.render_ops, self)
+    ), cachable=False, insert_before=insert_before) for x in xx if not isinstance(x, NumNode) and x.expr is not None}
     self.loop_uops.update(new_loops)
     return tuple(new_loops.values())
 
@@ -251,7 +252,8 @@ class Linearizer(Kernel):
         global_idxs+local_idxs+reduce_idxs+full_upcast_idxs,insert_before=insert_before) for i,b in enumerate(self.bufs) if b in self.earlybufs})
 
       # run early AST (with reduce)
-      self.ast_parse(reduceop,acc,self.acc_offsets(self.full_buf_index),loaded_buffers,do_reduce=True,loop_ctx=loop_ctx,insert_before=insert_before)
+      self.ast_parse(reduceop, acc, self.acc_offsets(self.full_buf_index), loaded_buffers, \
+                     do_reduce=True, loop_ctx=loop_ctx, insert_before=insert_before)
 
     # end the reduce loop
     self.load_cache.clear()
