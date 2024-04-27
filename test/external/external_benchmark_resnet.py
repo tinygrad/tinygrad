@@ -95,8 +95,8 @@ class BenchmarkResnetTrain(unittest.TestCase):
       if kernels is None: kernels = GlobalCounters.kernel_count // JITCNT
       tm = (et-st) / JITCNT
       if best_tm is None or tm < best_tm: best_tm = tm
-    print(f"\r{name:42s}: {best_tm * 1000:>9.2f} ms, {flops / 10**12 / best_tm:>7.2f} tflops, "
-          f"{mem_used / 10**9: 7.2f} GB used, {kernels:>6d} kernels")
+    print(f"\r{name:38s}: {best_tm * 1000:>9.2f} ms, {flops / 10**12 / best_tm:>6.2f} tflops, {mem / 10**9 / best_tm:>5.0f} GB/s, "
+          f"{mem_used / 10**9: 6.2f} GB used, {kernels:>5d} kernels")
     return best_tm, flops, mem, kernels
 
   def test_layer1_1(self): self._est(*self._test_layer(*self._get_layer(0, 0)), 1)
