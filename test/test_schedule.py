@@ -10,6 +10,7 @@ from tinygrad.helpers import DEBUG, GRAPH, flatten
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.graph import print_tree, realized_lazybuffer
 from tinygrad.engine.schedule import create_schedule
+from tinygrad.engine.realize import run_schedule
 from tinygrad import nn, dtypes
 from test.helpers import is_dtype_supported
 
@@ -519,6 +520,12 @@ class TestSchedule(unittest.TestCase):
     out0 = a.sum() + b[0]
     out1 = a.sum() + 2
     check_schedule([out0, out1], 1)
+
+  def test_fuse1(self):
+    a = Tensor.empty(32, )
+    b = a.std(axis=0)
+    schedule = check_schedule(b, 1)
+    run_schedule(schedule)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_prefer_half_buffer(self):
