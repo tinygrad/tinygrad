@@ -46,8 +46,8 @@ def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]
   for ji in jit_cache:
     ji_graph_dev: Optional[Compiled] = None # device on which the ji will be graphed. Not graphed if None.
     if isinstance(ji.prg, CompiledRunner): ji_graph_dev = ji.prg.device
-    elif isinstance(ji.prg, BufferXfer) and ji.rawbufs[0] and ji.rawbufs[0].device.split(":", 1)[0] in {"HSA", "CUDA"}:
-      ji_graph_dev = Device[ji.rawbufs[0].device]
+    elif isinstance(ji.prg, BufferXfer) and ji.bufs[0] and ji.bufs[0].device.split(":", 1)[0] in {"HSA", "CUDA"}:
+      ji_graph_dev = Device[ji.bufs[0].device]
 
     can_be_graphed = ji_graph_dev and ji_graph_dev.graph
     can_extend_graph_batch = can_be_graphed and len(current_batch) < max_batch_size and (ji_graph_dev == current_device or
@@ -65,7 +65,7 @@ def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]
 def get_input_replace(jit_cache: List[ExecItem], input_rawbuffers:List[Buffer]) -> Dict[Tuple[int, int], int]:
   input_replace: Dict[Tuple[int, int], int] = {}
   for j,ji in enumerate(jit_cache):
-    for i,a in enumerate(ji.rawbufs):
+    for i,a in enumerate(ji.bufs):
       if a in input_rawbuffers:
         input_replace[(j,i)] = input_rawbuffers.index(a)
   return input_replace
@@ -83,7 +83,7 @@ class TinyJit(Generic[ReturnType]):
     return ret
 
   def add(self, ei:ExecItem):
-    self.jit_cache.append(ExecItem(ei.prg, [self.add_buffer(buf) for buf in ei.rawbufs if buf is not None]))
+    self.jit_cache.append(ExecItem(ei.prg, [self.add_buffer(buf) for buf in ei.bufs if buf is not None]))
 
   def reset(self):
     self.jit_cache: List[ExecItem] = []
@@ -124,8 +124,8 @@ class TinyJit(Generic[ReturnType]):
       if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
 
       # memory planning (optional)
-      assigned = _internal_memory_planner([cast(List[Buffer], x.rawbufs) for x in self.jit_cache], debug_prefix="JIT ")
-      self.jit_cache = [ExecItem(ei.prg, [assigned.get(x,x).ensure_allocated() for x in ei.rawbufs if x is not None]) for ei in self.jit_cache]
+      assigned = _internal_memory_planner([cast(List[Buffer], x.bufs) for x in self.jit_cache], debug_prefix="JIT ")
+      self.jit_cache = [ExecItem(ei.prg, [assigned.get(x,x).ensure_allocated() for x in ei.bufs if x is not None]) for ei in self.jit_cache]
 
       # Condense the items into a graph executor.
       if getenv("JIT") != 2: self.jit_cache = apply_graph_to_jit(self.jit_cache, input_rawbuffers, var_vals)
@@ -135,12 +135,12 @@ class TinyJit(Generic[ReturnType]):
     elif self.cnt >= 2:
       # jit exec
       assert self.expected_names == expected_names and self.expected_lbs == expected_lbs, "args mismatch in JIT"
-      for (j,i),input_idx in self.input_replace.items(): self.jit_cache[j].rawbufs[i] = input_rawbuffers[input_idx]
+      for (j,i),input_idx in self.input_replace.items(): self.jit_cache[j].bufs[i] = input_rawbuffers[input_idx]
       if DEBUG >= 1 and len(self.jit_cache) >= 10: print(f"jit execs {len(self.jit_cache)} kernels")
       for ei in self.jit_cache: ei.run(var_vals, jit=True)
 
     # clear jit inputs
-    for (j,i) in self.input_replace.keys(): self.jit_cache[j].rawbufs[i] = None
+    for (j,i) in self.input_replace.keys(): self.jit_cache[j].bufs[i] = None
 
     self.cnt += 1
     return self.ret

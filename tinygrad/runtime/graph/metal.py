@@ -36,13 +36,13 @@ class MetalGraph(Runner):
       pipeline_state = unwrap2(self.device.device.newComputePipelineStateWithDescriptor_options_reflection_error_(descriptor, Metal.MTLPipelineOption(0), None, None))  # noqa: E501
       icb_command = self.icb.indirectComputeCommandAtIndex_(j)
       icb_command.setComputePipelineState_(pipeline_state)
-      for i,b in enumerate(ji.rawbufs):
+      for i,b in enumerate(ji.bufs):
         if b is not None:
           icb_command.setKernelBuffer_offset_atIndex_(b._buf, 0, i)
           all_resources.append(b._buf)
       var_vals_keys = list(var_vals.keys())
       for i,v in enumerate(prg.vars):
-        icb_command.setKernelBuffer_offset_atIndex_(self.int_buf, var_vals_keys.index(v)*4, len(ji.rawbufs)+i)
+        icb_command.setKernelBuffer_offset_atIndex_(self.int_buf, var_vals_keys.index(v)*4, len(ji.bufs)+i)
       if j not in self.jc_idx_with_updatable_launch_dims:
         global_size, local_size = prg.launch_dims(var_vals)
         icb_command.concurrentDispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
@@ -52,7 +52,7 @@ class MetalGraph(Runner):
     if len(var_vals): self.int_buf_view = self.int_buf.contents().as_buffer(self.int_buf.length()).cast('i')
 
     # clear jit inputs to allow their memory to be freed/reused
-    for (j,i) in self.input_replace.keys(): self.jit_cache[j].rawbufs[i] = None
+    for (j,i) in self.input_replace.keys(): self.jit_cache[j].bufs[i] = None
     super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), device.dname, *get_jit_stats(jit_cache))
 
   def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False) -> Optional[float]:

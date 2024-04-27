@@ -30,17 +30,17 @@ class CUDAGraph(MultiDeviceJITGraph):
         global_size, local_size = ji.prg.launch_dims(var_vals)
 
         new_node = cuda.CUgraphNode()
-        deps = self.access_resources(ji.rawbufs[(outs:=ji.prg.outcount):], ji.rawbufs[:outs], new_dependency=new_node)
+        deps = self.access_resources(ji.bufs[(outs:=ji.prg.outcount):], ji.bufs[:outs], new_dependency=new_node)
         c_deps = (cuda.CUgraphNode*len(deps))(*deps) if deps else None
 
-        c_args, vargs = encode_args([cast(Buffer, x)._buf for x in ji.rawbufs], [var_vals[x] for x in ji.prg.vars])
+        c_args, vargs = encode_args([cast(Buffer, x)._buf for x in ji.bufs], [var_vals[x] for x in ji.prg.vars])
         kern_params = cuda.CUDA_KERNEL_NODE_PARAMS(ji.prg.clprg.prg, *global_size, *local_size, 0, None, vargs)
         check(cuda.cuGraphAddKernelNode(ctypes.byref(new_node), self.graph, c_deps, len(deps), ctypes.byref(kern_params)))
 
         if j in self.jc_idxs_with_updatable_launch_dims or j in self.jc_idxs_with_updatable_var_vals or j in self.jc_idxs_with_updatable_rawbufs:
           self.updatable_nodes[j] = (new_node, kern_params, c_args, False)
       elif isinstance(ji.prg, BufferXfer):
-        dest, src = [cast(Buffer, x) for x in ji.rawbufs[0:2]]
+        dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
         src_dev, dest_dev = cast(CUDADevice, Device[src.device]), cast(CUDADevice, Device[dest.device])
         node_from = cuda.CUgraphNode()
         deps = self.access_resources(read=[src], write=[dest], new_dependency=node_from)
@@ -68,7 +68,7 @@ class CUDAGraph(MultiDeviceJITGraph):
     self.instance = init_c_var(cuda.CUgraphExec(), lambda x: check(cuda.cuGraphInstantiate_v2(ctypes.byref(x), self.graph, None, None, 0)))
 
     # clear jit inputs to allow their memory to be freed/reused
-    for (j,i) in self.input_replace.keys(): self.jit_cache[j].rawbufs[i] = None
+    for (j,i) in self.input_replace.keys(): self.jit_cache[j].bufs[i] = None
     super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), "CUDA", *get_jit_stats(jit_cache))
 
   def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False) -> Optional[float]:
