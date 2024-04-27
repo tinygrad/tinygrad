@@ -113,15 +113,15 @@ class MultiLazyBuffer:
   def _shape_to_single_shard(self, shape:Tuple[sint, ...], lb:LazyBuffer) -> Tuple[sint, ...]:
     return tuple(lb.shape[self.axis] if a == self.axis else s for a,s in enumerate(shape))
 
-  def r(self, op:ReduceOps, axis:Tuple[int, ...], acc_dt:Optional[DType]=None) -> MultiLazyBuffer:
+  def r(self, op:ReduceOps, axis:Tuple[int, ...], acc_dt:Optional[DType]=None, downcast_half:bool=True) -> MultiLazyBuffer:
     if self.axis is not None and self.axis in axis:
       # all-reduce on sharded axes
       new_shape = tuple(1 if i in axis else s for i,s in enumerate(self.shape))
-      reduced_parts = [x.r(op, axis, acc_dt) if r else x.const(0, shape=new_shape) for x,r in zip(self.lbs, self.real)]
+      reduced_parts = [x.r(op, axis, acc_dt, downcast_half) if r else x.const(0, shape=new_shape) for x,r in zip(self.lbs, self.real)]
       if all(self.real): return MultiLazyBuffer(all_reduce(op, reduced_parts), None)
       return MultiLazyBuffer(reduced_parts, None, self.real)
     # reduce on non sharded axes, piecewise is fine. if axis is None this is also correct
-    return MultiLazyBuffer([x.r(op, axis, acc_dt) for x in self.lbs], self.axis, self.real)
+    return MultiLazyBuffer([x.r(op, axis, acc_dt, downcast_half) for x in self.lbs], self.axis, self.real)
 
   # *** movement ops ***
 
