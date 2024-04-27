@@ -55,6 +55,5 @@ class TestUOpGraph(unittest.TestCase):
     g.add(UOps.CONST, dtypes.int, arg=4)
     for i,uop in enumerate(g.uops): self.assertEqual(i, uop.arg)
 
-
 if __name__ == '__main__':
   unittest.main(verbosity=2)
