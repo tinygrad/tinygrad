@@ -169,7 +169,7 @@ regCOMPUTE_RESOURCE_LIMITS 0 0x1bb5 6 0 0
 	CU_GROUP_COUNT 24 26
 """
 
-class HWComputeQueue:
+class HWPM4Queue:
   def __init__(self): self.q = []
 
   def hdp_flush(self):
@@ -386,7 +386,7 @@ class AMDProgram:
     for i in range(len(args)): args_st.__setattr__(f'f{i}', args[i].va_addr)
     for i in range(len(vals)): args_st.__setattr__(f'v{i}', vals[i])
 
-    q = HWComputeQueue()
+    q = HWPM4Queue()
     if wait: q.timestamp(ctypes.addressof(self.device.completion_signal) + getattr(hsa.amd_signal_t, 'start_ts').offset)
     q.exec(self, self.device.kernargs_ptr, global_size, local_size)
     if wait:
@@ -455,9 +455,9 @@ class AMDAllocator(LRUAllocator):
 
   def transfer(self, dest, src, sz:int, src_dev:AMDDevice, dest_dev:AMDDevice):
     dest_dev._gpu_map(src)
-    q = HWComputeQueue().signal(sig := AMDDevice._get_signal())
+    q = HWPM4Queue().signal(sig := AMDDevice._get_signal())
     HWCopyQueue().wait(sig).copy(dest.va_addr, src.va_addr, sz).signal(sigc := AMDDevice._get_signal()).submit(dest_dev)
-    HWComputeQueue().wait(sigc).submit(dest_dev)
+    HWPM4Queue().wait(sigc).submit(dest_dev)
     q.wait(sigc).submit(src_dev)
 
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
@@ -610,13 +610,13 @@ class AMDDevice(Compiled):
     q.submit(self)
 
   def _submit_cache_inv(self, addr=0x0, sz=(1 << 64)-1, gli=0, glv=0, glk=0, gl1=0, gl2=0):
-    HWComputeQueue().invalidate_cache().signal(self.completion_signal).submit(self)
+    HWPM4Queue().invalidate_cache().signal(self.completion_signal).submit(self)
     self._wait_signal(self.completion_signal)
     assert (wp:=(self.pm4_write_pointer[0]%(self.pm4_ring.size//4))) == (rp:=self.pm4_read_pointer[0]), \
       f"didn't run {wp} != {rp} len {self.pm4_ring.size//4}"
 
   def synchronize(self):
-    HWComputeQueue().signal(self.completion_signal).submit(self)
+    HWPM4Queue().signal(self.completion_signal).submit(self)
     self._wait_signal(self.completion_signal)
     assert (wp:=(self.pm4_write_pointer[0]%(self.pm4_ring.size//4))) == (rp:=self.pm4_read_pointer[0]), \
       f"didn't run {wp} != {rp} len {self.pm4_ring.size//4}"
