@@ -66,9 +66,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outbufs:Tuple[Laz
     return _recursive_lazyop(buf.srcs[0], inputs, outbufs, var_vals, st, realizes, cache, assign_to=buf.srcs[1], assign_idx=outbufs.index(buf))
 
   # if it's a reduce, we have to change the shapetracker
-  if buf.op in ReduceOps:
-    assert st.contiguous, "ReduceOps late fusion must be contiguous"
-    st = ShapeTracker.from_shape(buf.srcs[0].shape)
+  if buf.op in ReduceOps: st = ShapeTracker.from_shape(buf.srcs[0].shape)
 
   # otherwise we fuse it like normal
   cache[(buf, st)] = ret = \
@@ -161,29 +159,12 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
           realized_children[tr] = st
           # can only reduce contiguous
           # max one reduceop per kernel
-          if not st.contiguous or st.size != r.st.size or (tr in reduce_for_op and reduce_for_op[tr] != r):
+          if not st.contiguous or st.size != r.st.size:
             can_chase = tr not in reduce_for_op or reduce_for_op[tr] == r
             forced_realize = True
             break
-          if len(realized_children) > 1:
-            for rc in realized_children:
-              rc_parents = deque(x.base for x in rc.srcs)
-              while rc_parents:
-                if (p:=rc_parents.pop()).realized or p.op is LoadOps.CONST: continue
-                if p is r: continue
-                # max one reduceop per kernel
-                if p.op in ReduceOps:
-                  can_chase = tr not in reduce_for_op or reduce_for_op[tr] == r
-                  forced_realize = True
-                  break
-                for x in p.srcs: rc_parents.append(x.base)
-          continue
         for tr_next in children[tr].keys():
           if not tr_next.realized:
-            # max one reduceop per kernel
-            if tr_next.op in ReduceOps:
-              forced_realize = True
-              break
             st_childs = dedup([s for s in tr_next.srcs if s.base == tr])
             if len(st_childs) > 1:
               forced_realize = True
