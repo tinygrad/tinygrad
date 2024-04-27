@@ -194,6 +194,16 @@ class TestOpt(unittest.TestCase):
         opt.step()
         assert cache.count == 5, f"optimizer didn't fold conv-backward SGD, got {cache.count}"
 
+  def test_fold_conv_adam(self):
+    with Tensor.train():
+      img = Tensor.ones(2,3,4,4)
+      c1 = nn.Conv2d(3,32,3)
+      opt = optim.Adam(get_parameters(c1))
+      with CLCache(allowed=10):
+        opt.zero_grad()
+        c1(img).relu().sum().backward()
+        opt.step()
+
   def test_fold_2convs_sgd(self):
     with Tensor.train():
       img = Tensor.ones(2,3,64,64)
