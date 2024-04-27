@@ -109,7 +109,7 @@ class Linearizer(Kernel):
           assert buf_uop is not None, f"buffer {i} wasn't UOped"
           image_idx, valid = to_image_idx(buf.dtype.shape, idx, valid)
           rendered_idx = self.cast(tuple(x.render(self.render_ops, self) for x in image_idx), dtypes.int.vec(2), insert_before)
-          valid_tuple = valid.render(self.render_ops, self), self.const(invalid_value, buf.dtype.base.vec(4), insert_before) if valid.min == 0 else ()
+          valid_tuple = () if valid.min else (valid.render(self.render_ops, self), self.const(invalid_value, buf.dtype.base.vec(4), insert_before))
           self.load_cache[key] = self.uops.add(UOps.LOAD, buf.dtype.base.vec(4), \
                           (buf_uop, rendered_idx) + valid_tuple + ((barrier,) if barrier else ()), insert_before=insert_before)
           if localtype == localtype.scalar():
@@ -125,7 +125,7 @@ class Linearizer(Kernel):
           buf_uop = self.buf_uops[i]
           assert buf_uop is not None, f"buffer {i} wasn't UOped"
           rendered_idx = idx.render(self.render_ops, self)
-          valid_tuple = (valid.render(self.render_ops, self), self.const(invalid_value, localtype, insert_before)) if valid.min == 0 else ()
+          valid_tuple = () if valid.min else (valid.render(self.render_ops, self), self.const(invalid_value, localtype, insert_before))
           self.load_cache[key] = \
             self.uops.add(UOps.LOAD, localtype, (buf_uop, rendered_idx) + valid_tuple + ((barrier,) if barrier else ()), None, insert_before)
       ret.append(self.uops.add(UOps.GEP, localtype.scalar(), (self.load_cache[key],), rep_idx[dim], insert_before=insert_before) if dim is not None else self.load_cache[key]) # noqa: E501
