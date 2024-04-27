@@ -3,6 +3,7 @@
 # NOTE: this has overlap with external_test_opt.py
 
 import unittest
+import numpy as np
 from typing import List, Optional, Union
 from tinygrad.tensor import Tensor
 from tinygrad.ops import LoadOps, ReduceOps
@@ -526,6 +527,27 @@ class TestSchedule(unittest.TestCase):
     b = a.std(axis=0)
     schedule = check_schedule(b, 1)
     run_schedule(schedule)
+  
+  def test_fuse2(self):
+    x = Tensor.empty(32, 32)
+    y = Tensor.empty(1, 32)
+    r0 = x.sum(axis=0, keepdim=True)
+    out0 = r0 + y
+    r1 = (x - out0).sum(axis=0, keepdim=True)
+    out1 = r1 * 10
+    schedule = check_schedule([out0, out1], 1)
+    run_schedule(schedule)
+
+  def test_fuse3(self):
+    x = Tensor.randn(32, 32).realize()
+    y = Tensor.randn(32, 32).realize()
+
+    tc0 = x.matmul(y) + 2
+    tc1 = y.matmul(tc0) * 3
+    schedule = check_schedule([tc0, tc1], 1)
+    run_schedule(schedule)
+    np.testing.assert_allclose(tc0.numpy(), x.numpy()@y.numpy()+2)
+    np.testing.assert_allclose(tc1.numpy(), y.numpy()@(x.numpy()@y.numpy()+2)*3)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_prefer_half_buffer(self):
