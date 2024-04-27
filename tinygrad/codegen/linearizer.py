@@ -426,11 +426,12 @@ class Linearizer(Kernel):
       ret: List[UOp] = []
       input_acc = acc[:]
       for val, off in zip(zip(*values), cast(List[int], offs)):
-        acc[off] = val if acc[off] == input_acc[off] else (self.uops.add(UOps.ALU, input_acc[off].dtype, vin=val+acc[off], arg=ops[cast(ReduceOps, x.op)]),)
+        assert(len(val)==1)
+        acc[off] = val[0] if acc[off] in input_acc else self.uops.add(UOps.ALU, acc[off].dtype, vin=val+(acc[off],), arg=ops[cast(ReduceOps, x.op)])
         ret.append(acc[off])
       for off in range(len(acc)):
         if input_acc[off] != acc[off]:
-          ret.append(self.uops.add(UOps.ALU, input_acc[off].dtype, acc[off] +(input_acc[off],), arg=ops[cast(ReduceOps, x.op)]))
+          ret.append(self.uops.add(UOps.ALU, input_acc[off].dtype, (acc[off], input_acc[off]), arg=ops[cast(ReduceOps, x.op)]))
           acc[off] = self.uops.add(UOps.PHI, input_acc[off].dtype, (input_acc[off], ret[-1]) + tuple(loop_ctx))
     else:
       ret = [self.uops.add(UOps.ALU, dtypes.bool if x.op in {BinaryOps.CMPLT, BinaryOps.CMPEQ} else val[-1].dtype, val, x.op) for val in zip(*values)]
