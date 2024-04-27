@@ -2,7 +2,16 @@ import unittest, ctypes, struct, time
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.buffer import Buffer, BufferOptions
 from tinygrad.engine.schedule import create_schedule
-from tinygrad.runtime.ops_amd import AMDDevice, HWCopyQueue, HWPM4Queue
+from tinygrad.helpers import getenv
+
+if getenv("NV"):
+  from tinygrad.runtime.ops_nv import HWCopyQueue, HWComputeQueue
+  from tinygrad.runtime.ops_nv import NVDevice as RealDevice
+  dev = "NV"
+else:
+  from tinygrad.runtime.ops_amd import HWCopyQueue, HWComputeQueue
+  from tinygrad.runtime.ops_amd import AMDDevice as RealDevice
+  dev = "AMD"
 
 def _time_queue(q, d):
   st = time.perf_counter()
@@ -14,9 +23,8 @@ def _time_queue(q, d):
 class TestHCQ(unittest.TestCase):
   @classmethod
   def setUpClass(self):
-    TestHCQ.d0: AMDDevice = Device["AMD"]
-    #TestHCQ.d1: AMDDevice = Device["AMD:1"]
-    TestHCQ.a = Tensor([0.,1.], device="AMD").realize()
+    TestHCQ.d0:RealDevice = Device[dev]
+    TestHCQ.a = Tensor([0.,1.], device=dev).realize()
     TestHCQ.b = self.a + 1
     si = create_schedule([self.b.lazydata])[-1]
     TestHCQ.runner = TestHCQ.d0.get_runner(*si.ast)
@@ -26,14 +34,13 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.addr2 = struct.pack("QQ", TestHCQ.a.lazydata.buffer._buf.va_addr, TestHCQ.b.lazydata.buffer._buf.va_addr)
     ctypes.memmove(TestHCQ.d0.kernargs_ptr, TestHCQ.addr, len(TestHCQ.addr))
     ctypes.memmove(TestHCQ.d0.kernargs_ptr+len(TestHCQ.addr), TestHCQ.addr2, len(TestHCQ.addr2))
-    TestHCQ.compute_queue = HWPM4Queue
 
   def setUp(self):
     TestHCQ.a.lazydata.buffer.copyin(memoryview(bytearray(struct.pack("ff", 0, 1))))
     TestHCQ.b.lazydata.buffer.copyin(memoryview(bytearray(struct.pack("ff", 0, 0))))
 
   def test_run_1000_times_one_submit(self):
-    q = TestHCQ.compute_queue()
+    q = HWComputeQueue()
     for _ in range(1000):
       q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size)
       q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr+len(TestHCQ.addr), TestHCQ.runner.global_size, TestHCQ.runner.local_size)
@@ -43,7 +50,7 @@ class TestHCQ(unittest.TestCase):
     assert (val:=TestHCQ.a.lazydata.buffer.as_buffer().cast("f")[0]) == 2000.0, f"got val {val}"
 
   def test_run_1000_times(self):
-    q = TestHCQ.compute_queue()
+    q = HWComputeQueue()
     q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size)
     q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr+len(TestHCQ.addr), TestHCQ.runner.global_size,
            TestHCQ.runner.local_size).signal(TestHCQ.d0.completion_signal)
@@ -57,7 +64,7 @@ class TestHCQ(unittest.TestCase):
     assert (val:=TestHCQ.a.lazydata.buffer.as_buffer().cast("f")[0]) == 2000.0, f"got val {val}"
 
   def test_run_to_3(self):
-    q = TestHCQ.compute_queue()
+    q = HWComputeQueue()
     q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size)
     q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr+len(TestHCQ.addr), TestHCQ.runner.global_size, TestHCQ.runner.local_size)
     q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size).signal(TestHCQ.d0.completion_signal)
@@ -67,7 +74,7 @@ class TestHCQ(unittest.TestCase):
 
   def test_wait_signal(self):
     TestHCQ.d0.completion_signal.value = 1
-    TestHCQ.compute_queue().wait(TestHCQ.d0.completion_signal).signal(TestHCQ.d0.completion_signal).submit(TestHCQ.d0)
+    HWComputeQueue().wait(TestHCQ.d0.completion_signal).signal(TestHCQ.d0.completion_signal).submit(TestHCQ.d0)
     with self.assertRaises(RuntimeError):
       TestHCQ.d0._wait_signal(TestHCQ.d0.completion_signal, timeout=50)
     # clean up
@@ -84,7 +91,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0._wait_signal(TestHCQ.d0.completion_signal, timeout=1000, skip_check=True)
 
   def test_run_normal(self):
-    q = TestHCQ.compute_queue()
+    q = HWComputeQueue()
     q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size)
     q.signal(TestHCQ.d0.completion_signal)
     q.submit(TestHCQ.d0)
@@ -92,7 +99,7 @@ class TestHCQ(unittest.TestCase):
     assert (val:=TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[0]) == 1.0, f"got val {val}"
 
   def test_submit_empty_queues(self):
-    TestHCQ.compute_queue().submit(TestHCQ.d0)
+    HWComputeQueue().submit(TestHCQ.d0)
     HWCopyQueue().submit(TestHCQ.d0)
 
   def test_signal_timeout(self):
@@ -101,7 +108,7 @@ class TestHCQ(unittest.TestCase):
       TestHCQ.d0._wait_signal(TestHCQ.d0.completion_signal, timeout=50)
 
   def test_signal(self):
-    TestHCQ.compute_queue().signal(TestHCQ.d0.completion_signal).submit(TestHCQ.d0)
+    HWComputeQueue().signal(TestHCQ.d0.completion_signal).submit(TestHCQ.d0)
     TestHCQ.d0._wait_signal(TestHCQ.d0.completion_signal)
 
   def test_copy_signal(self):
@@ -109,7 +116,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0._wait_signal(TestHCQ.d0.completion_signal)
 
   def test_run_signal(self):
-    q = TestHCQ.compute_queue()
+    q = HWComputeQueue()
     q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size)
     q.signal(TestHCQ.d0.completion_signal)
     q.submit(TestHCQ.d0)
@@ -141,8 +148,8 @@ class TestHCQ(unittest.TestCase):
   def test_copy_bandwidth(self):
     # THEORY: the bandwidth is low here because it's only using one SDMA queue. I suspect it's more stable like this at least.
     SZ = 2_000_000_000
-    a = Buffer("AMD", SZ, dtypes.uint8, options=BufferOptions(nolru=True)).allocate()
-    b = Buffer("AMD", SZ, dtypes.uint8, options=BufferOptions(nolru=True)).allocate()
+    a = Buffer(dev, SZ, dtypes.uint8, options=BufferOptions(nolru=True)).allocate()
+    b = Buffer(dev, SZ, dtypes.uint8, options=BufferOptions(nolru=True)).allocate()
     q = HWCopyQueue()
     q.copy(a._buf.va_addr, b._buf.va_addr, SZ)
     et = _time_queue(q, TestHCQ.d0)
@@ -152,8 +159,8 @@ class TestHCQ(unittest.TestCase):
 
   def test_cross_device_copy_bandwidth(self):
     SZ = 2_000_000_000
-    b = Buffer("AMD:1", SZ, dtypes.uint8, options=BufferOptions(nolru=True)).allocate()
-    a = Buffer("AMD", SZ, dtypes.uint8, options=BufferOptions(nolru=True)).allocate()
+    b = Buffer(dev+":1", SZ, dtypes.uint8, options=BufferOptions(nolru=True)).allocate()
+    a = Buffer(dev, SZ, dtypes.uint8, options=BufferOptions(nolru=True)).allocate()
     TestHCQ.d0._gpu_map(b._buf)
     q = HWCopyQueue()
     q.copy(a._buf.va_addr, b._buf.va_addr, SZ)
@@ -163,10 +170,10 @@ class TestHCQ(unittest.TestCase):
     assert gb_s > 2 and gb_s < 50
 
   def test_interleave_compute_and_copy(self):
-    q = TestHCQ.compute_queue()
+    q = HWComputeQueue()
     qc = HWCopyQueue()
     q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size)  # b = [1, 2]
-    q.signal(sig:=AMDDevice._get_signal(10))
+    q.signal(sig:=RealDevice._get_signal(10))
     qc.wait(sig)
     qc.copy(TestHCQ.a.lazydata.buffer._buf.va_addr, TestHCQ.b.lazydata.buffer._buf.va_addr, 8)
     qc.signal(TestHCQ.d0.completion_signal)
@@ -178,9 +185,9 @@ class TestHCQ(unittest.TestCase):
     assert (val:=TestHCQ.a.lazydata.buffer.as_buffer().cast("f")[0]) == 1.0, f"got val {val}"
 
   def test_cross_device_signal(self):
-    d1 = Device["AMD:1"]
-    q1 = TestHCQ.compute_queue()
-    q2 = TestHCQ.compute_queue()
+    d1 = Device[dev]
+    q1 = HWComputeQueue()
+    q2 = HWComputeQueue()
     q1.signal(TestHCQ.d0.completion_signal)
     q2.wait(TestHCQ.d0.completion_signal)
     q2.submit(TestHCQ.d0)
