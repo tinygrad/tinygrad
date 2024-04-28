@@ -568,7 +568,7 @@ class TestMaskedShapeTracker(unittest.TestCase):
     self.st1 = CheckingShapeTracker((2,2))
     self.st1.pad(((1,1), (1,1)))
     self.st1.assert_same()
-  
+
   def test_pad_reshape(self):
     st1 = CheckingShapeTracker((1, 2))
     st1.pad(((1, 0), (0, 1)))
