@@ -85,7 +85,7 @@ class PatternMatcher:
       while queue:
         if all([qq in uops.uops for qq in queue[-1].vin]):
           q = queue.pop()
-          new = uops.add(q.uop, q.dtype, q.vin, q.arg, insert_before=max([0]+[uops.uops.index(vv) for vv in q.vin])+1)
+          new = uops.add(q.uop, q.dtype, q.vin, max([0]+[uops.uops.index(vv) for vv in q.vin])+1, q.arg)
           for vv in uops.uops + queue: vv.vin = tuple(new if x is q else x for x in vv.vin)
         else: queue.extend([qq for qq in queue[-1].vin if qq not in uops.uops])
       if not any([o in u.vin for u in uops]): uops.uops.remove(o)
@@ -148,8 +148,8 @@ class UOpGraph:
       print(f"{self.uops.index(u):4d} {str(u.uop):20s}: {str(u.dtype) if u.dtype is not None else '':25s} "
             f"{str([self.uops.index(x) for x in u.vin]):32s} {u.arg}")
 
-  def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None, cachable=True, insert_before=None,
-          simplify=True) -> UOp:
+  def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), insert_before:Optional[int|UOp]=None, \
+          arg:Any=None, cachable=True, simplify=True) -> UOp:
     ret = UOp(uop, dtype, vin, arg) if uop is not UOps.CONST else UOp.const(dtype, arg)
     if simplify and (rewritten:=constant_folder.rewrite(ret)) is not None:
       if rewritten in self.uops: return rewritten  # ignore cachable
@@ -208,7 +208,7 @@ class UOpGraph:
       if u.uop is UOps.LOOP:
         # add END of loops after the last thing that (recursively) depends on them
         insert_before = self.uops.index(sorted(list(self.get_recursive_children(u)), key=self.uops.index)[-1])+1
-        self.add(UOps.ENDLOOP, None, (u,), cachable=False, insert_before=insert_before)
+        self.add(UOps.ENDLOOP, None, (u,), insert_before, cachable=False)
       elif u.uop is UOps.IF:
         # END any if statements at the end of the uops
         self.add(UOps.ENDIF, None, (u,), cachable=False)
@@ -256,12 +256,12 @@ class UOpGraph:
         non_loop = to_symbolic(next(v for v in with_loop.vin if v != next_with_loop and loop_op not in get_recursive_parents(v)))
         if round_up and with_loop.arg is BinaryOps.MUL: factored = factored + (non_loop - 1)
         return loop_factor(next_with_loop, alu_opposite(with_loop.arg, factored, non_loop), loop_op)
-    def const(x, insert_before=None): return self.add(UOps.CONST, dtypes.int32, tuple(), x, insert_before=insert_before)
-    def neg(x): return self.add(UOps.ALU, dtypes.int32, (x,), UnaryOps.NEG)
-    def max(x, y): return self.add(UOps.ALU, dtypes.int32, (x, y), BinaryOps.MAX)
+    def const(x, insert_before=None): return self.add(UOps.CONST, dtypes.int32, tuple(), insert_before, x)
+    def neg(x): return self.add(UOps.ALU, dtypes.int32, (x,), arg=UnaryOps.NEG)
+    def max(x, y): return self.add(UOps.ALU, dtypes.int32, (x, y), arg=BinaryOps.MAX)
     def uop_alu_idx(a: UOp, b, op, dtype=dtypes.int32):
       render_b: UOp = cast(UOp, (NumNode(b) if not isinstance(b, Node) else b).render(render_ops))
-      return self.add(UOps.ALU, dtype, (a, render_b), op)
+      return self.add(UOps.ALU, dtype, (a, render_b), arg=op)
     seen_vars: Dict[UOp,str] = {}
     render_ops = {Variable: lambda self, ops, _: next(op for op, name in seen_vars.items() if name == self.expr),
                   NumNode: lambda self, ops, _: const(self.b),
@@ -293,7 +293,7 @@ class UOpGraph:
         min_clamped = max(rendered, const(0)) if (final_value.min < 0) else rendered
         max_clamped = neg(max(const(-1*loop_length), neg(min_clamped))) if (final_value.max > loop_length) else min_clamped
         maybe_cast = self.add(UOps.CAST, where.dtype, (max_clamped,)) if where.dtype != dtypes.int32 else max_clamped
-        final_op = self.add(UOps.ALU, where.dtype, (maybe_cast, where.vin[1]), BinaryOps.MUL)
+        final_op = self.add(UOps.ALU, where.dtype, (maybe_cast, where.vin[1]), arg=BinaryOps.MUL)
         self.uops = self.uops + after_split_ops
         self.replace_op(where, final_op)
       for phi in phis:
@@ -331,11 +331,9 @@ class UOpGraph:
           if DEBUG >= 4: print(f"removing PHI node {u}")
           del self.saved_exprs[(u.uop, u.dtype, u.vin, u.arg)]
           # NOTE: assuming u.vin[2].vin[1] and u.vin[2].vin[0] have the same dtype
-          loop_len = self.add(UOps.ALU, u.vin[2].vin[1].dtype, (u.vin[2].vin[1], u.vin[2].vin[0]), BinaryOps.SUB,
-                              insert_before=u)
-          if loop_len.dtype != u.dtype: loop_len = self.add(UOps.CAST, u.dtype, (loop_len,),
-                                                            insert_before=u)
-          new = self.add(UOps.ALU, u.dtype, (u.vin[1], loop_len,), BinaryOps.MUL, insert_before=u)
+          loop_len = self.add(UOps.ALU, u.vin[2].vin[1].dtype, (u.vin[2].vin[1], u.vin[2].vin[0]), u, BinaryOps.SUB)
+          if loop_len.dtype != u.dtype: loop_len = self.add(UOps.CAST, u.dtype, (loop_len,), u)
+          new = self.add(UOps.ALU, u.dtype, (u.vin[1], loop_len,), u, BinaryOps.MUL)
           self.replace_op(u, new)
           return True
 
