@@ -135,15 +135,18 @@ def train_resnet():
     x, y, cookie = next(it)
     return x.shard(GPUS, axis=0).realize(), Tensor(y, requires_grad=False).shard(GPUS, axis=0), cookie
 
+  train_loader = batch_load_resnet(batch_size=BS, val=False, shuffle=True, seed=seed, epochs=epochs, start_epoch=start_epoch)
+  train_it = iter(train_tqdm:=tqdm(train_loader, total=steps_in_train_epoch * epochs, initial=steps_in_train_epoch * start_epoch, disable=BENCHMARK))
+
   # ** epoch loop **
   step_times = []
   for e in range(start_epoch, epochs):
     # ** train loop **
     Tensor.training = True
-    batch_loader = batch_load_resnet(batch_size=BS, val=False, shuffle=True, seed=seed*epochs + e)
-    it = iter(tqdm(batch_loader, total=steps_in_train_epoch, desc=f"epoch {e}", disable=BENCHMARK))
-    i, proc = 0, data_get(it)
+    train_tqdm.set_description(f"epoch {e}")
+    i, proc = 0, data_get(train_it)
     st = time.perf_counter()
+    stop = False
     while proc is not None:
       GlobalCounters.reset()
       (loss, top_1_acc), proc = train_step(proc[0], proc[1]), proc[2]
@@ -151,7 +154,10 @@ def train_resnet():
       pt = time.perf_counter()
 
       try:
-        next_proc = data_get(it)
+        if stop: next_proc = None
+        else:
+          next_proc = data_get(train_it)
+          if next_proc[-1] != e: stop = True
       except StopIteration:
         next_proc = None
 
@@ -195,7 +201,7 @@ def train_resnet():
       eval_top_1_acc = []
       Tensor.training = False
 
-      it = iter(tqdm(batch_load_resnet(batch_size=EVAL_BS, val=True, shuffle=False), total=steps_in_val_epoch))
+      it = iter(tqdm(batch_load_resnet(batch_size=EVAL_BS, val=True, shuffle=False, pad_first_batch=True), total=steps_in_val_epoch))
       proc = data_get(it)
       while proc is not None:
         GlobalCounters.reset()

@@ -72,7 +72,7 @@ def loader_process(q_in, q_out, X:Tensor, seed):
       q_out.put(idx)
     q_out.put(None)
 
-def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None, pad_first_batch=False):
+def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None, pad_first_batch=False, epochs=1, start_epoch=0):
   from extra.datasets.imagenet import get_train_files, get_val_files
   files = get_val_files() if val else get_train_files()
   from extra.datasets.imagenet import get_imagenet_categories
@@ -81,13 +81,21 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None, pad_fir
     FIRST_BATCH_PAD = -len(files) % batch_size  # python % is mod
   else:
     FIRST_BATCH_PAD = 0
-  BATCH_COUNT = min(32, (len(files) + FIRST_BATCH_PAD) // batch_size)
+  files_per_epoch = (len(files) + FIRST_BATCH_PAD)
+  BATCH_COUNT = min(32, files_per_epoch * epochs // batch_size)
 
-  gen = shuffled_indices(len(files), seed=seed) if shuffle else iter(range(len(files)))
-  gen = itertools.chain([-1] * FIRST_BATCH_PAD, gen)
+  gen = itertools.chain(zip(
+    itertools.chain([-1] * FIRST_BATCH_PAD, shuffled_indices(len(files), seed=seed * epochs + epoch) if shuffle else iter(range(len(files)))),
+    itertools.repeat(epoch)) for epoch in range(start_epoch, epochs))
+
+  start_skip = (start_epoch * files_per_epoch) % batch_size
+  for _ in range(start_skip): next(gen)
+  num_batches = (files_per_epoch * (epochs - start_epoch) - start_skip) // batch_size
+
   def enqueue_batch(num):
     for idx in range(num*batch_size, (num+1)*batch_size):
-      sample_i = next(gen)
+      sample_i, epoch_i = next(gen)
+      data_epoch[idx] = epoch_i
       if sample_i == -1:
         # first-batch padding
         Y[idx] = -1
@@ -112,7 +120,7 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None, pad_fir
       gotten[num] += 1
       if gotten[num] == batch_size: break
     gotten[num] = 0
-    return X[num*batch_size:(num+1)*batch_size], Y[num*batch_size:(num+1)*batch_size], Cookie(num)
+    return X[num*batch_size:(num+1)*batch_size], Y[num*batch_size:(num+1)*batch_size], Cookie(num), data_epoch[num*batch_size:(num+1)*batch_size]
 
   #q_in, q_out = MyQueue(multiple_writers=False), MyQueue(multiple_readers=False)
   q_in, q_out = Queue(), Queue()
@@ -127,6 +135,7 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None, pad_fir
     #X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:shm:{shm.name}")
     X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:/dev/shm/resnet_X")
     Y = [None] * (batch_size*BATCH_COUNT)
+    data_epoch = [None] * (batch_size*BATCH_COUNT)
 
     for _ in range(cpu_count()):
       p = Process(target=loader_process, args=(q_in, q_out, X, seed))
@@ -137,7 +146,7 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None, pad_fir
     for bn in range(BATCH_COUNT): enqueue_batch(bn)
 
     # NOTE: this is batch aligned, last ones are ignored unless pad_first_batch=True
-    for _ in range(0, (len(files) + FIRST_BATCH_PAD)//batch_size): yield receive_batch()
+    for _ in range(num_batches): yield receive_batch()
   finally:
     shutdown = True
     # empty queues
