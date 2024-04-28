@@ -141,5 +141,41 @@ class TestSymbolicOps(unittest.TestCase):
       expected = a.shrink(((3,5),(i,i+2))).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
+  def test_symbolic_mean(self):
+    # Create a non-symbolic tensor
+    tensor = Tensor.rand(2, 3)
+
+    # Compute the mean
+    expected = tensor.mean().item()
+
+    # Make the tensor symbolic
+    i = Variable("i", 1, 5).bind(2)
+    j = Variable("j", 1, 5).bind(3)
+    tensor = tensor.reshape(i, j)
+
+    # Compute the symbolic mean
+    symbolic = tensor.mean().item()
+
+    # Check if the result is correct
+    assert np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
+
+  def test_symbolic_var(self):
+    # Create a non-symbolic tensor
+    tensor = Tensor.rand(2, 3)
+
+    # Compute the var
+    expected = tensor.var().item()
+
+    # Make the tensor symbolic
+    i = Variable("i", 1, 5).bind(2)
+    j = Variable("j", 1, 5).bind(3)
+    tensor = tensor.reshape(i, j)
+
+    # Compute the symbolic var
+    symbolic = tensor.var().item()
+
+    # Check if the result is correct
+    assert np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
+
 if __name__ == '__main__':
   unittest.main()

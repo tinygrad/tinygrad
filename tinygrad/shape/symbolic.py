@@ -107,6 +107,24 @@ class Node:
     nodes = [x for x in nodes if x.min != x.max]
     return create_node(AndNode(nodes)) if len(nodes) > 1 else (nodes[0] if len(nodes) == 1 else NumNode(1))
 
+  # Define symbolic prod of the shape
+  @staticmethod
+  def prod(nodes:List[Node]) -> Node:
+    if not nodes:
+      raise ValueError("Cannot take the product of an empty list")
+    if not all(isinstance(x, Node) for x in nodes):
+      raise TypeError("All elements in the list must be of type Node")
+
+    if len(nodes) == 1: return nodes[0]
+    # If any of the nodes are 0, the product is 0
+    if any(x == 0 for x in nodes): return NumNode(0)
+
+    result = nodes[0]
+    for node in nodes[1:]:
+      result = create_node(MulNode(result, node))
+
+    return result
+
 # 4 basic node types
 
 class Variable(Node):

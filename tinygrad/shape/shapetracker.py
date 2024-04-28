@@ -2,7 +2,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Set, Iterable, cast
-from tinygrad.helpers import merge_dicts, getenv
+from tinygrad.helpers import all_int, merge_dicts, getenv, prod
 from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, NumNode, create_lt_node, create_ge_node, sint
 from tinygrad.shape.view import View
 
@@ -49,6 +49,21 @@ class ShapeTracker:
     if not isinstance(ret, int): ret = ret.max  # might be represent by symbolic shape, take one more max for int max
     assert isinstance(ret, int), f"ret must be integer, {ret=} isn't"
     return ret+1
+
+  @staticmethod
+  def symbolic_prod(shape:Tuple[sint, ...]) -> int:
+    if all_int(shape): return prod(shape)
+    shape = ShapeTracker.from_shape(shape)
+    nodes = []
+    for dim in shape.shape:
+      if isinstance(dim, Node): nodes.append(dim)
+      elif isinstance(dim, int): nodes.append(NumNode(dim))
+      else: raise ValueError(f"dim must be Node or int, {dim=} isn't")
+    result = Node.prod(nodes)
+    # Return needs to be int, not Node
+    if isinstance(result, NumNode): return result.val
+    elif isinstance(result, MulNode): return result.a.val * result.b.val
+    return result
 
   def vars(self) -> Set[Variable]: return set.union(*[v.vars() for v in self.views], set())
 

@@ -17,6 +17,7 @@ from tinygrad.device import Device
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.engine.realize import run_schedule, memory_planner
 from tinygrad.engine.schedule import create_schedule_with_vars
+from tinygrad.shape.shapetracker import ShapeTracker
 
 # **** start with two base classes, Tensor and Function ****
 
@@ -919,13 +920,11 @@ class Tensor:
   def min(self, axis=None, keepdim=False): return -((-self).max(axis=axis, keepdim=keepdim))
 
   def mean(self, axis=None, keepdim=False):
-    assert all_int(self.shape), "does not support symbolic shape"
     out = self.sum(axis=axis, keepdim=keepdim)
-    return out.div(prod(self.shape) / prod(out.shape)) if 0 not in out.shape else out
+    return out.div(ShapeTracker.symbolic_prod(self.shape) / ShapeTracker.symbolic_prod(out.shape)) if 0 not in out.shape else out
   def var(self, axis=None, keepdim=False, correction=1):
-    assert all_int(self.shape), "does not support symbolic shape"
     square_sum = ((self - self.mean(axis=axis, keepdim=True)).square()).sum(axis=axis, keepdim=keepdim)
-    return square_sum.div(max(0, prod(self.shape)/prod(square_sum.shape)-correction))
+    return square_sum.div(max(0, ShapeTracker.symbolic_prod(self.shape)/ShapeTracker.symbolic_prod(square_sum.shape)-correction))
   def std(self, axis=None, keepdim=False, correction=1): return self.var(axis, keepdim, correction).sqrt()
 
   def _softmax(self, axis):
