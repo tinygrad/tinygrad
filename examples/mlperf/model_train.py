@@ -265,7 +265,7 @@ def train_retinanet():
   SYNCBN = True
   TRAIN_BEAM = getenv("TRAIN_BEAM", BEAM.value)
   EVAL_BEAM = getenv("EVAL_BEAM", BEAM.value)
-  loss_scaler = 128.0 if dtypes.default_float in [dtypes.float16, dtypes.bfloat16] else 1.0
+  loss_scaler = 128.0 if dtypes.default_float in [dtypes.float16] else 1.0
 
   if WANDB:
     import wandb
