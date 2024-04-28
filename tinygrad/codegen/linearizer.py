@@ -174,7 +174,7 @@ class Linearizer(Kernel):
     new_loops = {x.expr:self.uops.add(UOps.LOOP, dtypes.int32, (
       self.const(x.min, insert_before=insert_before) if isinstance(x.min, int) else cast(Node, x.min).render(self.render_ops, self),
       self.const(x.max+1,  insert_before=insert_before) if isinstance(x.max, int) else cast(Node, x.max+1).render(self.render_ops, self)
-    ), insert_before, cachable=True) for x in xx if not isinstance(x, NumNode) and x.expr is not None}
+    ), insert_before, cachable=False) for x in xx if not isinstance(x, NumNode) and x.expr is not None}
     self.loop_uops.update(new_loops)
     return tuple(new_loops.values())
 
