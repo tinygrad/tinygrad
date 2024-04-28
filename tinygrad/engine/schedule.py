@@ -238,7 +238,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
 
   return graph, in_degree, prescheduled
 
-SCHEDULES: List[ScheduleItem] = []
+SCHEDULES: List = []
 def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
   if seen is None: seen = set()
   graph, in_degree, prescheduled = _graph_schedule(outs, seen)
@@ -254,22 +254,22 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
       for out in ps.outputs: realized_lazybuffer(out, kernel_number)
     var_vals = merge_dicts([var_vals, ps.var_vals])
     for out in ps.outputs: del out.srcs  # can only schedule once
-    schedule.append(si:=ScheduleItem(ps.ast, tuple(x.buffer for x in ps.outputs if x.size != 0), tuple(x.buffer for x in ps.inputs if x.size != 0)))
+    schedule.append(si:=ScheduleItem(ps.ast, tuple(x.buffer for x in (ps.outputs+ps.inputs) if x.size != 0)))
     if logops and si.ast[0].op not in LoadOps and not any(i.device.startswith("DISK:") for i in si.inputs): logops.write(str(si.ast)+"\n")
     for x in graph[ps.outputs[0]]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(prescheduled[x])
 
+  if SAVE_SCHEDULE:
+    def _save():
+      print(f"saving {len(SCHEDULES)} schedule graphs to", fp:="schedule.pkl")
+      pickle.dump(SCHEDULES, open(fp, "wb"))
+    if len(SCHEDULES) == 0: atexit.register(_save)
+    SCHEDULES.append((graph, prescheduled))
   # confirm everything was scheduled correctly
   if not all(degree == 0 for degree in in_degree.values()) or len(prescheduled) != len(schedule):
     raise RuntimeError(f"cycle detected in graph, prescheduled {len(prescheduled)} but only scheduled {len(schedule)}")
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
-  if SAVE_SCHEDULE:
-    def _save():
-      print(f"saving {len(SCHEDULES)} schedule items to", fp:="schedule.pkl")
-      pickle.dump(SCHEDULES, open(fp, "wb"))
-    if len(SCHEDULES) == 0: atexit.register(_save)
-    SCHEDULES.extend(schedule)
   return schedule, var_vals
 
 def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> List[ScheduleItem]:

@@ -3,7 +3,7 @@ import os, ctypes, pathlib, re, fcntl, functools, mmap, struct, tempfile, hashli
 from typing import Tuple, List, Any
 from dataclasses import replace
 from tinygrad.device import Compiled, LRUAllocator, Compiler, BufferOptions, CompilerOptions
-from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up, to_char_p_p, DEBUG
+from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up, to_char_p_p, DEBUG, prod
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.runtime.ops_cuda import check as cuda_check, _get_bytes
 import tinygrad.runtime.autogen.cuda as cuda
@@ -226,6 +226,8 @@ class NVProgram:
     if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu, self.lib_sz)
 
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
+    if prod(local_size) > 1024 or self.registers_usage * prod(local_size) > 65536: raise RuntimeError("Too many resources requsted for launch")
+
     kernargs_size = round_up(QMD_SIZE + 0x160 + len(args) * 8 + len(vals) * 4, 1 << 8)
     if self.device.kernargs_ptr >= (self.device.kernargs_page.base + self.device.kernargs_page.length - kernargs_size):
       self.device.kernargs_ptr = self.device.kernargs_page.base

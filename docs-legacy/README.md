@@ -6,7 +6,7 @@ Here you will find documentation for tinygrad, as well as some examples and tuto
 
 Read the quick start guide [here](/docs/quickstart.md).
 
-Or if you want to jump right in to how tinygrad works, you can read the [abstraction stack](/docs/abstractions2.py) documentation.
+Or if you want to jump right in to how tinygrad works, you can read the [abstraction stack](/docs-legacy/abstractions2.py) documentation.
 
 Or if you want to see some examples, you can look at the examples in the [examples](/examples) directory.
 
@@ -20,11 +20,11 @@ This is currently a big work in progress.
 
 ### Environment Variables
 
-[env_vars.md](/docs/env_vars.md)
+[env_vars.md](/docs-legacy/env_vars.md)
 
 ### Adding New Accelerators
 
-[adding_new_accelerators.md](/docs/adding_new_accelerators.md)
+[adding_new_accelerators.md](/docs-legacy/adding_new_accelerators.md)
 
 ### Community
 
