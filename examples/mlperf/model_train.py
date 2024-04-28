@@ -255,9 +255,9 @@ def train_unet3d():
   from examples.mlperf.metrics import dice_score
   from extra.models.unet3d import UNet3D
   from extra.datasets.kits19 import iterate, get_train_files, get_val_files, sliding_window_inference, preprocess, BASEDIR
-  from tinygrad import Device, Tensor
+  from tinygrad import Device, Tensor, GlobalCounters
+  from tinygrad.helpers import Context
   from tinygrad.nn.optim import SGD
-  from tinygrad import GlobalCounters
   from math import ceil
 
   import numpy as np
@@ -271,8 +271,8 @@ def train_unet3d():
   TARGET_METRIC = 0.908
   NUM_EPOCHS = getenv("NUM_EPOCHS", 4000)
   BS = getenv("BS", 1 * len(GPUS))
-  LR = getenv("LR", 0.8 * (BS / 2))
-  LR_WARMUP_EPOCHS = getenv("LR_WARMUP_EPOCHS", 200)
+  LR = getenv("LR", 2.0 * (BS / 28))
+  LR_WARMUP_EPOCHS = getenv("LR_WARMUP_EPOCHS", 1000)
   LR_WARMUP_INIT_LR = getenv("LR_WARMUP_INIT_LR", 0.0001)
   WANDB = getenv("WANDB")
   PROJ_NAME = getenv("PROJ_NAME", "tinygrad_unet3d_mlperf")
@@ -358,7 +358,7 @@ def train_unet3d():
   
   if WANDB: wandb.init(config=config, project=PROJ_NAME)
 
-  step_times, start_epoch = [], 0
+  step_times, start_epoch = [], 1
   is_successful, diverged = False, False
   start_eval_at, evaluate_every = START_EVAL_AT, EVALUATE_EVERY
   next_eval_at = start_eval_at
@@ -412,6 +412,8 @@ def train_unet3d():
         return
 
     if epoch == next_eval_at:
+      train_step.reset()
+
       Tensor.training = False
 
       next_eval_at += evaluate_every
