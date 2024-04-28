@@ -2,6 +2,7 @@
 from typing import List
 from tinygrad.helpers import dedup, flatten, getenv
 from tinygrad.tensor import Tensor
+from tinygrad.dtype import dtypes, least_upper_dtype
 
 class Optimizer:
   def __init__(self, params: List[Tensor], lr: float):
@@ -13,7 +14,9 @@ class Optimizer:
     assert len(self.params) != 0, "optimizer must have at least one param"
     self.device = self.params[0].device
     self.buffers: List[Tensor] = dedup([x for x in params if not x.requires_grad])   # buffers are still realized
-    self.lr = lr if getenv("CONST_LR") else Tensor([lr], requires_grad=False, device=self.device).contiguous()
+    # store lr in at least float32 precision
+    self.lr = Tensor(lr if getenv("CONST_LR") else [lr], requires_grad=False, device=self.device,
+                     dtype=least_upper_dtype(dtypes.default_float, dtypes.float32))
 
   def zero_grad(self):
     for param in self.params: param.grad = None
@@ -59,7 +62,7 @@ class LARS(Optimizer):
         g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
       # popular momentum does pre learning rate update
       if not self.classic: g = g * r * self.lr
-      t.assign(t.detach() - g)
+      t.assign((t.detach() - g).cast(t.dtype))
     return self.b
 
 # LAMB is essentially just the trust ratio part of LARS applied to Adam/W so if we just set the trust ratio to 1.0 its just Adam/W.
@@ -89,5 +92,5 @@ class LAMB(Optimizer):
         r = Tensor.where(r1 > 0, Tensor.where(r2 > 0, r1 / r2, 1.0), 1.0)
       else:
         r = 1.0
-      t.assign(t.detach() - self.lr * r * up)
+      t.assign((t.detach() - self.lr * r * up).cast(t.dtype))
     return [self.t] + self.m + self.v
