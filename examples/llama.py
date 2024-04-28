@@ -520,7 +520,7 @@ After you are done speaking, output [EOS]. You are not Chad.
       ("1", "7B"): "Hello. I'm a 20 year old male",
       ("2", "7B"): "Hello. I'm a 20 year old girl",
       ("2", "70B"): "Hello. I am a 20 year old female.",
-      ("3", "8B"): "Hello. I am a 20 year old female", # No dot
+      ("3", "8B"): "Hello. I am a 20 year old female. I",
     }
     try:
       assert text == expected[key], f"invalid output: `{colored(text, 'red')}` != `{expected[key]}`"
