@@ -61,9 +61,9 @@ jobs:
     - name: Train MNIST
       run: time PYTHONPATH=. TARGET_EVAL_ACC_PCT=97.3 python3 examples/beautiful_mnist.py | tee beautiful_mnist.txt
     - name: Run 10 CIFAR training steps
-      run: STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
+      run: JIT=2 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
     - name: Run 10 CIFAR training steps w HALF
-      run: STEPS=10 DEFAULT_FLOAT=HALF python3 examples/hlb_cifar10.py | tee train_cifar_half.txt
+      run: JIT=2 STEPS=10 DEFAULT_FLOAT=HALF python3 examples/hlb_cifar10.py | tee train_cifar_half.txt
     #- name: Run 10 CIFAR training steps w BF16
     #  run: STEPS=10 DEFAULT_FLOAT=BFLOAT16 python3 examples/hlb_cifar10.py | tee train_cifar_bf16.txt
     # TODO: this is flaky too
@@ -292,9 +292,9 @@ jobs:
     - name: Run MLPerf resnet eval on training data
       run: time HSA=1 MODEL=resnet python3 examples/mlperf/model_eval.py
     - name: Run 10 MLPerf ResNet50 training steps (1 gpu)
-      run: HSA=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=128 GPUS=1 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet_one_gpu.txt
+      run: HSA=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=256 GPUS=1 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet_one_gpu.txt
     - name: Run 10 MLPerf ResNet50 training steps (6 gpu)
-      run: HSA=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=768 GPUS=6 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet.txt
+      run: HSA=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=1536 GPUS=6 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet.txt
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (AMD Training)

@@ -10,6 +10,8 @@ from tinygrad.engine.realize import memory_planner, run_schedule
 from tinygrad.ops import BufferOps, LoadOps
 from tinygrad.runtime.ops_clang import CLANG_PROGRAM_HEADER
 
+TIMING = getenv("TIMING")
+
 if __name__ == "__main__":
   model = GPT(GPTConfig(n_layer=getenv("NLAYER", 12), n_head=12, n_embd=768))
   #model.load_pretrained()
@@ -55,8 +57,11 @@ if __name__ == "__main__":
 
   state_dict = nn.state.get_state_dict(model)
   state_dict.update({'X': X, 'Y': Y, 'loss': loss})
+  grad_state_dict = {}
   for k,v in state_dict.items():
     if v.lazydata.base.buffer not in used_buffers: print(f"UNUSED: {k}")
+    if v.grad is not None: grad_state_dict['grad_'+k] = v.grad
+  state_dict.update(grad_state_dict)
   state_dict.update({'adam_b1': optimizer.b1, 'adam_b2': optimizer.b2, 'adam_t': optimizer.t, 'adam_lr': optimizer.lr})
   inverse_state_dict = {v:k for k,v in state_dict.items()}
   for p,m,v in zip(optimizer.params, optimizer.m, optimizer.v):
@@ -65,12 +70,17 @@ if __name__ == "__main__":
     state_dict["adam_v_"+nm] = v
   named_buffers = {v.lazydata.base.buffer:k.replace(".", "_") for k,v in state_dict.items()}
 
-  c_code = [CLANG_PROGRAM_HEADER, "#include <stdio.h>", "#include <time.h>", "#include <stdlib.h>"]
-  c_code += [x[1] for x in srcs.values()]
+  if TIMING:
+    c_code = [CLANG_PROGRAM_HEADER, "#include <stdio.h>", "#include <time.h>", "#include <stdlib.h>"]
+  else:
+    c_code = ["#include <stdlib.h>", CLANG_PROGRAM_HEADER]
+  c_code += [x[1].replace(" restrict ", " ")+"\n" for x in srcs.values()]
 
-  main = ["int main() {"]
-  main += ["  struct timespec tm0; clock_gettime(CLOCK_MONOTONIC, &tm0);"]
+  premain = ["int main() {"]
+  if TIMING:
+    premain += ["  struct timespec tm0; clock_gettime(CLOCK_MONOTONIC, &tm0);"]
   lst = 0
+  main = []
 
   all_bufs = []
   for i,si in enumerate(sched):
@@ -81,10 +91,11 @@ if __name__ == "__main__":
     else:
       print(f"{srcs[si.ast][0]}({', '.join([x[0] for x in bufs])})")
       main.append(f"  {to_function_name(srcs[si.ast][0])}({', '.join([x[0] for x in bufs])});")
-      main.append(f"  struct timespec tm{i+1}; clock_gettime(CLOCK_MONOTONIC, &tm{i+1});")
-      main.append(f"  printf(\"%10.2f ms + %7.2f ms @ {to_function_name(srcs[si.ast][0])}\\n\"," +\
-                  f"((tm{i+1}.tv_sec-tm{0}.tv_sec) + (tm{i+1}.tv_nsec-tm{0}.tv_nsec) / 1e9) * 1e3," +\
-                  f"((tm{i+1}.tv_sec-tm{lst}.tv_sec) + (tm{i+1}.tv_nsec-tm{lst}.tv_nsec) / 1e9) * 1e3);")
+      if TIMING:
+        main.append(f"  struct timespec tm{i+1}; clock_gettime(CLOCK_MONOTONIC, &tm{i+1});")
+        main.append(f"  printf(\"%10.2f ms + %7.2f ms @ {to_function_name(srcs[si.ast][0])}\\n\"," +\
+                    f"((tm{i+1}.tv_sec-tm{0}.tv_sec) + (tm{i+1}.tv_nsec-tm{0}.tv_nsec) / 1e9) * 1e3," +\
+                    f"((tm{i+1}.tv_sec-tm{lst}.tv_sec) + (tm{i+1}.tv_nsec-tm{lst}.tv_nsec) / 1e9) * 1e3);")
       lst = i+1
       #call = f"{srcs[si.ast][0]}({', '.join(bufs)})"
       #call += " "*(80-ansilen(call))
@@ -92,6 +103,6 @@ if __name__ == "__main__":
       #print(srcs[si.ast][1])
   main.append("}")
 
-  mallocs = [f"{b.dtype.name}* {n} = ({b.dtype.name}*)malloc({b.nbytes});" for n,b in dedup(all_bufs)]
+  mallocs = [f"  {b.dtype.name}* {n} = ({b.dtype.name}*)malloc({b.nbytes});" for n,b in dedup(all_bufs)]
 
-  with open("out.c", "w") as f: f.write('\n'.join(c_code+main[0:2]+mallocs+main[2:]))
+  with open("out.c", "w") as f: f.write('\n'.join(c_code+premain+mallocs+main))
