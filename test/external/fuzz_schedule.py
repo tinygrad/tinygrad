@@ -52,7 +52,8 @@ def fuzz_schedule(outs: List[LazyBuffer]):
         if out.op is LoadOps.ASSIGN: rawbufs[out].ensure_allocated().copyin(prerealized[out])
       for x in ps.inputs:
         if x not in rawbufs:
-          if x in assign_targets: rawbufs[x] = rawbufs[assign_targets[x]]
+          # override the assign_target after ASSIGN
+          if x in assign_targets and assign_targets[x] in rawbufs: rawbufs[x] = rawbufs[assign_targets[x]]
           elif x.device == "NPY": rawbufs[x] = x.buffer
           # copy the pre realized input
           else: rawbufs[x] = Buffer(x.buffer.device, x.buffer.size, x.buffer.dtype, initial_value=prerealized[x])
@@ -60,8 +61,7 @@ def fuzz_schedule(outs: List[LazyBuffer]):
       _exec_si(si, seed)
       for out in ps.outputs:
         outbuf = np.frombuffer(rawbufs[out].as_buffer(), out.dtype.np)
-        truth = np.frombuffer(ground_truth[out], out.dtype.np)
-        try: np.testing.assert_allclose(outbuf, truth, atol=1e-2, rtol=1e-2)
+        try: np.testing.assert_allclose(outbuf, np.frombuffer(ground_truth[out], out.dtype.np), atol=1e-2, rtol=1e-2)
         except Exception as e:
           print(f"FAILED FOR {out}")
           raise e
