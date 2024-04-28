@@ -128,7 +128,7 @@ class Linearizer(Kernel):
           rendered_idx = idx.render(self.render_ops, self)
           valid_tuple = () if valid.min else (valid.render(self.render_ops, self), self.const(invalid_value, localtype, insert_before))
           self.load_cache[key] = \
-            self.uops.add(UOps.LOAD, localtype, (buf_uop, rendered_idx) + valid_tuple + ((barrier,) if barrier else ()), None, insert_before)
+            self.uops.add(UOps.LOAD, localtype, (buf_uop, rendered_idx) + valid_tuple + ((barrier,) if barrier else ()), insert_before=insert_before)
       ret.append(self.uops.add(UOps.GEP, localtype.scalar(), (self.load_cache[key],), rep_idx[dim], insert_before=insert_before) if dim is not None else self.load_cache[key]) # noqa: E501
     return ret
 
