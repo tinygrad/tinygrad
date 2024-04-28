@@ -171,7 +171,7 @@ def get_run_onnx(onnx_model: ModelProto):
           starts, ends = inp[1:3]
           axes = list(range(inp[0].ndim)) if len(inp) <= 3 else safe_python(inp[3].cast(dtypes.int32))
           steps = inp[4].cast(dtypes.int32).tolist() if len(inp) > 4 else [1]*inp[0].ndim
-          starts, ends = safe_python(starts.ceil().cast(dtypes.int32)), safe_python(ends.ceil().cast(dtypes.int32))
+          starts, ends = safe_python(starts), safe_python(ends)
         arg = [(0,x,1) for x in inp[0].shape]
         for i, axis in enumerate(axes):
           axis = int(axis) + inp[0].ndim if axis < 0 else int(axis)
