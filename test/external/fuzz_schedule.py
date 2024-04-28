@@ -23,6 +23,7 @@ def fuzz_schedule(outs: List[LazyBuffer]):
 
   # setup ground truth
   ground_truth: Dict[LazyBuffer, memoryview] = {}
+  assign_targets: Dict[LazyBuffer, LazyBuffer] = {}
   # IMPORTANT: freeze prerealized bufs before ScheduleItem exec
   prerealized: Dict[LazyBuffer, memoryview] = {}
   seed = Tensor._seed
@@ -30,7 +31,9 @@ def fuzz_schedule(outs: List[LazyBuffer]):
   for key in ts:
     for out in (ps:=prescheduled[key]).outputs:
       # freeze assign state before exec
-      if out.op is LoadOps.ASSIGN: prerealized[out] = out.buffer.as_buffer()
+      if out.op is LoadOps.ASSIGN:
+        prerealized[out] = out.buffer.as_buffer()
+        assign_targets[out.srcs[1]] = out
     for x in ps.inputs:
       if x not in ground_truth and x.device != "NPY": prerealized[x] = x.buffer.as_buffer()
     si = ScheduleItem(ps.ast, tuple(x.buffer for x in (ps.outputs+ps.inputs) if x.size != 0))
@@ -49,14 +52,16 @@ def fuzz_schedule(outs: List[LazyBuffer]):
         if out.op is LoadOps.ASSIGN: rawbufs[out].ensure_allocated().copyin(prerealized[out])
       for x in ps.inputs:
         if x not in rawbufs:
-          if x.device == "NPY": rawbufs[x] = x.buffer
+          if x in assign_targets: rawbufs[x] = rawbufs[assign_targets[x]]
+          elif x.device == "NPY": rawbufs[x] = x.buffer
           # copy the pre realized input
           else: rawbufs[x] = Buffer(x.buffer.device, x.buffer.size, x.buffer.dtype, initial_value=prerealized[x])
       si = ScheduleItem(ps.ast, tuple(rawbufs[x] for x in (ps.outputs+ps.inputs) if x.size != 0))
       _exec_si(si, seed)
       for out in ps.outputs:
         outbuf = np.frombuffer(rawbufs[out].as_buffer(), out.dtype.np)
-        try: np.testing.assert_allclose(outbuf, np.frombuffer(ground_truth[out], out.dtype.np), atol=1e-2, rtol=1e-2)
+        truth = np.frombuffer(ground_truth[out], out.dtype.np)
+        try: np.testing.assert_allclose(outbuf, truth, atol=1e-2, rtol=1e-2)
         except Exception as e:
           print(f"FAILED FOR {out}")
           raise e
@@ -69,6 +74,9 @@ def _exec_si(si: ScheduleItem, seed:int):
 
 T = TypeVar("T")
 def find_all_toposorts(graph:DefaultDict[T, List[T]], in_degree:DefaultDict[T, int]) -> List[Tuple[T, ...]]:
+  # correct: MUL -> ASSIGN -> ADD
+  # wrong: ASSIGN -> MUL -> ADD
+
   visited: Set[T] = set()
   ret: List[Tuple[T, ...]] = []
   path: List[T] = []
@@ -91,4 +99,5 @@ def find_all_toposorts(graph:DefaultDict[T, List[T]], in_degree:DefaultDict[T, i
   if len(ret) == 0: raise RuntimeError("detected cycle in the graph")
   # verify all paths are unique
   assert len(ret) == len(set(ret))
-  return ret
+  if len(r:=ret[0]) == 3 and MULTIOUTPUT: r = tuple([r[1], r[0], r[2]])
+  return [r]
