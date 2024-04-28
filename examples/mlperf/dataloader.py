@@ -6,6 +6,7 @@ from PIL import Image
 from tqdm import tqdm
 from tinygrad import dtypes, Tensor
 from tinygrad.helpers import getenv, prod, Timing, Context
+from collections import deque
 from multiprocessing import Queue, Process, shared_memory, connection, Lock, cpu_count, Pool
 
 class MyQueue:
@@ -189,12 +190,20 @@ def batch_load_train_bert(BS:int):
   for f in files: 
     lists = [(f, o) for o in range(int(Path(f).stem.split("_")[3].split(".")[0]))]
     dataset.extend(lists)
+  
+  active_set = deque(dataset[:1000])
+  remaining_set = deque(dataset[1000:])
+
   while dataset:
     blob = []
     for _ in range(BS):
-      sample, index = random_sample(dataset[:1000]) # Random sample from first 1000 entries
-      dataset.pop(index)
-      blob.append(sample)
+      if active_set:
+        index = random.randint(0, len(active_set) - 1)
+        sample = active_set[index]
+        active_set.remove(sample)
+        blob.append(sample)
+        if remaining_set:
+            active_set.append(remaining_set.popleft())
     yield process_batch_bert([load_datasample(sample) for sample in blob])
 
 # Reference: https://github.com/mlcommons/training/blob/1c8a098ae3e70962a4f7422c0b0bd35ae639e357/language_model/tensorflow/bert/run_pretraining.py, Line 416
