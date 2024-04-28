@@ -560,14 +560,14 @@ class TestShapeTrackerFuzzFailures(unittest.TestCase):
 
 class TestMaskedShapeTracker(unittest.TestCase):
   def test_pad_1x1(self):
-    self.st1 = CheckingShapeTracker((1,1))
-    self.st1.pad(((1,1), (1,1)))
-    self.st1.assert_same()
+    self.st = CheckingShapeTracker((1,1))
+    self.st.pad(((1,1), (1,1)))
+    self.st.assert_same()
 
   def test_pad_2x2(self):
-    self.st1 = CheckingShapeTracker((2,2))
-    self.st1.pad(((1,1), (1,1)))
-    self.st1.assert_same()
+    self.st = CheckingShapeTracker((2,2))
+    self.st.pad(((1,1), (1,1)))
+    self.st.assert_same()
 
   def test_pad_reshape(self):
     st1 = CheckingShapeTracker((1, 2))
