@@ -160,7 +160,7 @@ class LazyBuffer:
     new_shape = tuple(1 if i in axis else s for i,s in enumerate(self.shape))
     return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), self.dtype, op, (axis, acc_dt), (self,))
 
-  def r(self, op:ReduceOps, axis:Tuple[int, ...], acc_dt:Optional[DType]=None) -> LazyBuffer:
+  def r(self, op:ReduceOps, axis:Tuple[int, ...], acc_dt:Optional[DType]=None, downcast_half:bool=True) -> LazyBuffer:
     new_shape = tuple(1 if i in axis else s for i,s in enumerate(self.shape))
     # TODO: this logic should move to the scheduler
     if self.size == 0 and 0 not in new_shape: return self.const({ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[op], new_shape)
@@ -175,7 +175,7 @@ class LazyBuffer:
                least_upper_dtype(self.dtype, dtypes.float)
     if acc_dt is not None and acc_dt != self.dtype:
       # cast back to float16 or bfloat16 to match torch / jax behavior
-      return self.cast(acc_dt).r(op, axis, acc_dt).cast(self.dtype if self.dtype in [dtypes.float16, dtypes.bfloat16] else acc_dt)
+      return self.cast(acc_dt).r(op, axis, acc_dt).cast(self.dtype if downcast_half and self.dtype in [dtypes.float16, dtypes.bfloat16] else acc_dt)
 
     # TODO: can we split symbolic shape if the reduce axis is not symbolic?
     if not getenv("SPLIT_REDUCEOP", 1) or not all_int(self.shape) or (0 in self.shape) or \
