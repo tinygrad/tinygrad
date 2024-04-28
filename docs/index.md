@@ -8,6 +8,8 @@ cd tinygrad
 python3 -m pip install -e .
 ```
 
+After you have installed tinygrad, try the [MNIST tutorial](mnist.md)
+
 We also have [developer docs](developer.md), and Di Zhu has created a [bunch of tutorials](https://mesozoic-egg.github.io/tinygrad-notes/) to help understand how tinygrad works.
 
 ## tinygrad Usage
@@ -28,7 +30,7 @@ If you are migrating from PyTorch, welcome. Most of the API is the same. We hope
 
 ### tinygrad doesn't have nn.Module
 
-There's nothing special about a "Module" class in tinygrad, it's just a normal class. [`nn.state.get_parameters`](nn/#tinygrad.nn.state.get_parameters) can be used to recursively search normal claases for valid tensors. Instead of the `forward` method in PyTorch, tinygrad just uses `__call__`
+There's nothing special about a "Module" class in tinygrad, it's just a normal class. [`nn.state.get_parameters`](nn/#tinygrad.nn.state.get_parameters) can be used to recursively search normal classes for valid tensors. Instead of the `forward` method in PyTorch, tinygrad just uses `__call__`
 
 ### tinygrad is functional
 
