@@ -285,6 +285,7 @@ def train_unet3d():
   TRAIN_BEAM = getenv("TRAIN_BEAM", BEAM.value)
   EVAL_BEAM = getenv("EVAL_BEAM", BEAM.value)
   BENCHMARK = getenv("BENCHMARK")
+  CKPT = getenv("CKPT")
 
   config = {
     "num_epochs": NUM_EPOCHS,
@@ -334,6 +335,11 @@ def train_unet3d():
   def lr_warm_up(optim, init_lr, lr, current_epoch, warmup_epochs):
     scale = current_epoch / warmup_epochs
     optim.lr.assign(Tensor([init_lr + (lr - init_lr) * scale], device=GPUS))
+
+  def save_checkpoint(state_dict, fn):
+    if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
+    print(f"saving checkpoint to {fn}")
+    safe_save(state_dict, fn)
 
   @TinyJit
   def train_step(model, x, y):
@@ -437,14 +443,18 @@ def train_unet3d():
 
       if mean_dice >= TARGET_METRIC:
         is_successful = True
-
-        if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
-        fn = f"./ckpts/unet3d.safe"
-        safe_save(get_state_dict(model), fn)
-        print(f" *** Model saved to {fn} ***")
+        save_checkpoint(get_state_dict(model), f"./ckpts/unet3d.safe")
       elif mean_dice < 1e-6:
         print("Model diverging. Aborting.")
         diverged = True
+
+      if CKPT:
+        if WANDB and wandb.run is not None:
+          fn = f"./ckpts/{time.strftime('%Y%m%d_%H%M%S')}_{wandb.run.id}_e{epoch}.safe"
+        else:
+          fn = f"./ckpts/{time.strftime('%Y%m%d_%H%M%S')}_e{epoch}.safe"
+
+        save_checkpoint(get_state_dict(model), fn)
 
     if is_successful or diverged:
       break
