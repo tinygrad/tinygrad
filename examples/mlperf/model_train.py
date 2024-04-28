@@ -256,7 +256,7 @@ def train_rnnt():
   pass
 
 def train_bert():
-  # NOTE: pip install tensorflow required
+  # NOTE: pip install tensorflow, wandb required
   from examples.mlperf.dataloader import batch_load_train_bert, batch_load_val_bert
   from examples.mlperf.helpers import get_mlperf_bert_model, load_from_tf2_ckpt
   from examples.mlperf.lr_schedulers import PolynomialDecayWithWarmup
@@ -273,9 +273,9 @@ def train_bert():
   epochs             = config["epochs"]                 = getenv("EPOCHS", 1)
   BS                 = config["GLOBAL_BATCH_SIZE"]      = getenv("BS", 4 * len(GPUS)) # FP32 4090: 6 GPUS -> BS24
   EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 4 * len(GPUS))
-  max_lr             = config["OPT_BASE_LEARNING_RATE"] = getenv("OPT_BASE_LEARNING_RATE", 0.002/256 * BS)
+  max_lr             = config["OPT_BASE_LEARNING_RATE"] = getenv("OPT_BASE_LEARNING_RATE", 0.000004166 * BS)
 
-  train_steps        = config["TRAIN_STEPS"]            = getenv("TRAIN_STEPS", 3000000 // BS)
+  train_steps        = config["TRAIN_STEPS"]            = getenv("TRAIN_STEPS", 4800000 // BS)
   warmup_steps       = config["NUM_WARMUP_STEPS"]       = getenv("NUM_WARMUP_STEPS", train_steps // 10)
   max_eval_steps     = config["MAX_EVAL_STEPS"]         = getenv("MAX_EVAL_STEPS", (10000 + EVAL_BS - 1) // EVAL_BS) # EVAL_BS * MAX_EVAL_STEPS >= 10000
   eval_step_freq     = config["EVAL_STEP_FREQ"]         = int((math.floor(0.05 * (230.23 * BS + 3000000) / 25000) * 25000) / BS) # Round down
@@ -289,7 +289,6 @@ def train_bert():
   target, achieved                                      = getenv("TARGET", 0.72), False
 
   config["DEFAULT_FLOAT"] = dtypes.default_float.name
-  config["BEAM"]          = BEAM.value
   config["TRAIN_BEAM"]    = TRAIN_BEAM = getenv("TRAIN_BEAM", BEAM.value)
   config["EVAL_BEAM"]     = EVAL_BEAM  = getenv("EVAL_BEAM", BEAM.value)
 
@@ -463,8 +462,11 @@ def train_bert():
       total_lm_accuracy = sum(pair[0] for pair in eval_accuracy) / len(eval_accuracy)
       total_clsf_accuracy = sum(pair[1] for pair in eval_accuracy) / len(eval_accuracy)
       total_fw_time = sum(eval_times) / len(eval_times)
-      tqdm.write(f"eval lm loss: {total_lm_loss:.2f}, eval clsf loss: {total_clsf_loss:.2f}, eval lm accuracy: {total_lm_accuracy:.6f}, \
-                  eval clsf accuracy: {total_clsf_accuracy:.2f}, avg eval step time: {total_fw_time:.2f}")
+      results = f"eval lm loss: {total_lm_loss:.2f}, eval clsf loss: {total_clsf_loss:.2f}, eval lm accuracy: {total_lm_accuracy:.6f}, \
+                  eval clsf accuracy: {total_clsf_accuracy:.2f}, avg eval step time: {total_fw_time:.2f}"
+      tqdm.write(results)
+      with open(getenv("EVAL_LOG", "./eval_log.txt"), "a") as file: file.write(results + "\n")
+
       if WANDB:
         wandb.log({"eval/lm_loss": total_lm_loss, "eval/clsf_loss": total_clsf_loss, "eval/lm_accuracy": total_lm_accuracy, \
                     "eval/clsf_accuracy": total_clsf_accuracy, "eval/forward_time": total_fw_time})
