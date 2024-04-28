@@ -256,7 +256,6 @@ def train_unet3d():
   from extra.models.unet3d import UNet3D
   from extra.datasets.kits19 import iterate, get_train_files, get_val_files, sliding_window_inference, preprocess, BASEDIR
   from tinygrad import Device, Tensor, GlobalCounters
-  from tinygrad.helpers import Context
   from tinygrad.nn.optim import SGD
   from math import ceil
 
@@ -338,23 +337,21 @@ def train_unet3d():
 
   @TinyJit
   def train_step(model, x, y):
-    with Context(BEAM=TRAIN_BEAM):
-      optim.zero_grad()
+    optim.zero_grad()
 
-      y_hat = model(x)
-      loss = dice_ce_loss(y_hat, y)
+    y_hat = model(x)
+    loss = dice_ce_loss(y_hat, y)
 
-      loss.backward()
-      optim.step()
-      return loss.realize()
+    loss.backward()
+    optim.step()
+    return loss.realize()
   
   def eval_step(model, x, y):
-    with Context(BEAM=EVAL_BEAM):
-      y_hat, y = sliding_window_inference(model, x, y, gpus=GPUS)
-      y_hat, y = Tensor(y_hat), Tensor(y, requires_grad=False)
-      loss = dice_ce_loss(y_hat, y)
-      score = dice_score(y_hat, y)
-      return loss.realize(), score.realize()
+    y_hat, y = sliding_window_inference(model, x, y, gpus=GPUS)
+    y_hat, y = Tensor(y_hat), Tensor(y, requires_grad=False)
+    loss = dice_ce_loss(y_hat, y)
+    score = dice_score(y_hat, y)
+    return loss.realize(), score.realize()
   
   if WANDB: wandb.init(config=config, project=PROJ_NAME)
 
@@ -370,6 +367,7 @@ def train_unet3d():
     preprocess_dataset(get_val_files(), is_val=True)
 
   for epoch in range(1, NUM_EPOCHS + 1):
+    BEAM.value = TRAIN_BEAM
     Tensor.training = True
 
     if epoch <= LR_WARMUP_EPOCHS and LR_WARMUP_EPOCHS > 0:
@@ -414,6 +412,7 @@ def train_unet3d():
     if epoch == next_eval_at:
       train_step.reset()
 
+      BEAM.value = EVAL_BEAM
       Tensor.training = False
 
       next_eval_at += evaluate_every
