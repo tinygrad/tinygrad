@@ -72,12 +72,15 @@ def loader_process(q_in, q_out, X:Tensor, seed):
       q_out.put(idx)
     q_out.put(None)
 
-def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None):
+def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None, pad_first_batch=False):
   from extra.datasets.imagenet import get_train_files, get_val_files
   files = get_val_files() if val else get_train_files()
   from extra.datasets.imagenet import get_imagenet_categories
   cir = get_imagenet_categories()
-  FIRST_BATCH_PAD = -len(files) % batch_size  # python % is mod
+  if pad_first_batch:
+    FIRST_BATCH_PAD = -len(files) % batch_size  # python % is mod
+  else:
+    FIRST_BATCH_PAD = 0
   BATCH_COUNT = min(32, (len(files) + FIRST_BATCH_PAD) // batch_size)
 
   gen = shuffled_indices(len(files), seed=seed) if shuffle else iter(range(len(files)))
@@ -86,7 +89,7 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None):
     for idx in range(num*batch_size, (num+1)*batch_size):
       sample_i = next(gen)
       if sample_i == -1:
-        # padding
+        # first-batch padding
         Y[idx] = -1
         gotten[num] += 1
       else:
@@ -133,8 +136,8 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None):
 
     for bn in range(BATCH_COUNT): enqueue_batch(bn)
 
-    # NOTE: this is batch aligned, last ones are ignored
-    for _ in range(0, len(files)//batch_size): yield receive_batch()
+    # NOTE: this is batch aligned, last ones are ignored unless pad_first_batch=True
+    for _ in range(0, (len(files) + FIRST_BATCH_PAD)//batch_size): yield receive_batch()
   finally:
     shutdown = True
     # empty queues
