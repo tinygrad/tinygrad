@@ -74,9 +74,6 @@ def _exec_si(si: ScheduleItem, seed:int):
 
 T = TypeVar("T")
 def find_all_toposorts(graph:DefaultDict[T, List[T]], in_degree:DefaultDict[T, int]) -> List[Tuple[T, ...]]:
-  # correct: MUL -> ASSIGN -> ADD
-  # wrong: ASSIGN -> MUL -> ADD
-
   visited: Set[T] = set()
   ret: List[Tuple[T, ...]] = []
   path: List[T] = []
@@ -99,5 +96,4 @@ def find_all_toposorts(graph:DefaultDict[T, List[T]], in_degree:DefaultDict[T, i
   if len(ret) == 0: raise RuntimeError("detected cycle in the graph")
   # verify all paths are unique
   assert len(ret) == len(set(ret))
-  if len(r:=ret[0]) == 3 and MULTIOUTPUT: r = tuple([r[1], r[0], r[2]])
-  return [r]
+  return ret
