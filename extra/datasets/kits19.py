@@ -161,9 +161,11 @@ def sliding_window_inference(model, inputs, labels, roi_shape=(128, 128, 128), o
   return result, labels
 
 def rand_flip(image, label, axis=(1, 2, 3)):
-  if random.random() < 1 / len(axis):
-    image = np.flip(image, axis=axis).copy()
-    label = np.flip(label, axis=axis).copy()
+  prob = 1 / len(axis)
+  for ax in axis:
+    if random.random() < prob:
+      image = np.flip(image, axis=ax).copy()
+      label = np.flip(label, axis=ax).copy()
   return image, label
 
 def random_brightness_augmentation(image, factor=0.3, prob=0.1):
