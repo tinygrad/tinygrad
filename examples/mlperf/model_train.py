@@ -307,8 +307,6 @@ def train_retinanet():
   model = retinanet.RetinaNet(resnet.ResNeXt50_32X4D(), num_anchors=anchor_generator.num_anchors_per_location()[0])
   model.backbone.body.fc = None
 
-  parameters = []
-
   for k, v in get_state_dict(model).items():
     if 'head' in k and ('clas' in k or 'reg' in k ):
       v.requires_grad = True
@@ -332,10 +330,7 @@ def train_retinanet():
   # model.load_checkpoint("./ckpts/retinanet_4xgpu020_B100_E0_11703.safe")
   # model.load_checkpoint("./ckpts/retinanet_4xgpu020_B52_E0x75.safe")
   # model.load_from_pretrained()
-  for k, v in get_state_dict(model).items():
-    # v.cast(dtypes.default_float)#.realize()
-    if v.requires_grad:
-      print(k)
+
   parameters = get_parameters(model)
   optimizer = Adam(parameters, lr=LR)
 
@@ -379,19 +374,10 @@ def train_retinanet():
     return x.shard(GPUS, axis=0), Y_idx, cookie
 
   for epoch in range(EPOCHS):
-    
     print(colored(f'EPOCH {epoch}/{EPOCHS}:', 'cyan'))
-
     # **********TRAIN***************
     Tensor.training = True
     BEAM.value = TRAIN_BEAM
-    lr_sched = None
-    # if epoch < WARMUP_EPOCHS:
-    #   start_iter = epoch*len(coco_train.ids)//BS
-    #   warmup_iters = WARMUP_EPOCHS*len(coco_train.ids)//BS
-    #   lr_sched = Retina_LR(optimizer, start_iter, warmup_iters, WARMUP_FACTOR, LR)
-    # else:
-    #   optimizer.lr.assign(Tensor([LR], device=GPUS))
     batch_loader = batch_load_retinanet(coco_train, bs=BS, seed=SEED, shuffle=False, anchor_np=ANCHOR_NP)
     it = iter(tqdm(batch_loader, total=len(coco_train)//BS, desc=f"epoch {epoch}"))
     cnt, proc = 0, data_get(it)
@@ -411,31 +397,19 @@ def train_retinanet():
 
       device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
       loss = loss.numpy().item()
-      # if lr_sched is not None:
-      #   lr_sched.step()
-
       cl = time.perf_counter()
 
       tqdm.write(
         f"{cnt:5} {((cl - st)) * 1000.0:7.2f} ms run, {(pt - st) * 1000.0:7.2f} ms python, {(dt - pt) * 1000.0:6.2f} ms fetch data, "
         f"{(cl - dt) * 1000.0:7.2f} ms {device_str}, {loss:5.2f} loss, {optimizer.lr.numpy()[0]:.6f} LR, "
         f"{GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS")
-      if WANDB:
-        wandb.log({"lr": optimizer.lr.numpy(), "train/loss": loss, "train/step_time": cl - st,
+      if WANDB: wandb.log({"lr": optimizer.lr.numpy(), "train/loss": loss, "train/step_time": cl - st,
                    "train/python_time": pt - st, "train/data_time": dt - pt, "train/cl_time": cl - dt,
                    "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": epoch + (cnt + 1) / (len(coco_train)//BS)})
 
       st = cl
       proc, next_proc = next_proc, None  # return old cookie
       cnt+=1
-
-    # if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
-    # fn = f"./ckpts/retinanet_{len(GPUS)}x{HOSTNAME}_B{BS}_E{epoch}.safe"
-    # state_dict = get_state_dict(model)
-    # for k,v in state_dict.items():
-    #   state_dict[k] = v.cast(dtypes.float32)
-    # safe_save(state_dict, fn)
-    # print(f" *** Model saved to {fn} ***")
 
     # ***********EVAL******************
     bt = time.time()
@@ -482,7 +456,8 @@ def train_retinanet():
         coco_eval.evaluate()
       evaluated_imgs.extend(img_ids)
       coco_evalimgs.append(np.array(coco_eval.evalImgs).reshape(ncats, narea, len(img_ids)))
-      # print(colored(f'{cnt} EVAL_STEP || {time.time()-st}', 'red'))
+      eval_times.append(time.time()-st)
+      # print(colored(f'{cnt} EVAL_STEP || {eval_times[-1]}', 'red'))
       cnt=cnt+1
       proc, next_proc = next_proc, None  # return old cookie
       # if cnt>30: break
@@ -497,8 +472,13 @@ def train_retinanet():
     if getenv("RESET_STEP", 1): val_step.reset()
     if eval_acc>MAP_TARGET:
       print('SUCCESSFULLY TRAINED TO TARGET: EPOCH', epoch)
-      break
-
+      if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
+      fn = f"./ckpts/retinanet_{len(GPUS)}x{HOSTNAME}_B{BS}_E{epoch}.safe"
+      state_dict = get_state_dict(model)
+      for k,v in state_dict.items():
+        state_dict[k] = v.cast(dtypes.float32)
+      safe_save(state_dict, fn)
+      print(f" *** Model saved to {fn} ***")
       
 def train_unet3d():
   # TODO: Unet3d
