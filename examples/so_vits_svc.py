@@ -7,7 +7,7 @@ from typing import Tuple, Optional, Type
 from tinygrad import nn, dtypes, Tensor
 from tinygrad.helpers import getenv
 from tinygrad.nn.state import torch_load
-from examples.vits import ResidualCouplingBlock, PosteriorEncoder, Encoder, ResBlock1, ResBlock2, LRELU_SLOPE, sequence_mask, split, download_if_not_present, get_hparams_from_file, load_checkpoint, weight_norm, HParams
+from examples.vits import ResidualCouplingBlock, PosteriorEncoder, Encoder, ResBlock1, ResBlock2, LRELU_SLOPE, sequence_mask, split, get_hparams_from_file, load_checkpoint, weight_norm, HParams
 from examples.sovits_helpers import preprocess
 import soundfile
 
@@ -18,6 +18,10 @@ F0_MAX = 1100.0
 F0_MIN = 50.0
 F0_MEL_MIN = 1127 * np.log(1 + F0_MIN / 700)
 F0_MEL_MAX = 1127 * np.log(1 + F0_MAX / 700)
+
+def download_if_not_present(file_path: Path, url: str):
+  if not os.path.isfile(file_path): download_file(url, file_path)
+  return file_path
 
 class SpeechEncoder:
   def __init__(self, hidden_dim, model:ContentVec): self.hidden_dim, self.model = hidden_dim, model

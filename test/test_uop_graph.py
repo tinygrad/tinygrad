@@ -46,5 +46,14 @@ class TestUOpGraph(unittest.TestCase):
     self.assertEqual(out.uop, UOps.CONST)
     self.assertEqual(out.arg, 0)
 
+  def test_insert_before(self):
+    g = UOpGraph()
+    g.add(UOps.CONST, dtypes.int, arg=0)
+    three = g.add(UOps.CONST, dtypes.int, arg=3)
+    g.add(UOps.CONST, dtypes.int, arg=1, insert_before=three)
+    g.add(UOps.CONST, dtypes.int, arg=2, insert_before=three)
+    g.add(UOps.CONST, dtypes.int, arg=4)
+    for i,uop in enumerate(g.uops): self.assertEqual(i, uop.arg)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
