@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# pip3 install sentencepiece
+# pip3 install sentencepiece tiktoken blobfile
 #import typeguard.importhook
 #typeguard.importhook.install_import_hook('tinygrad')
 
@@ -13,8 +13,51 @@ from tinygrad import Tensor, Device, GlobalCounters, dtypes, nn
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
 from extra.models.llama import Transformer, convert_from_huggingface, fix_bf16
 from sentencepiece import SentencePieceProcessor
+import tiktoken
+from tiktoken.load import load_tiktoken_bpe
 
 MAX_CONTEXT = getenv("MAX_CONTEXT", 4096)
+
+class TikToken:
+  num_reserved_special_tokens: int = 256
+  pat_str: str =  r"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"  # noqa: E501
+
+  def __init__(self, model_file):
+    mergeable_ranks = load_tiktoken_bpe(model_file)
+    self.num_base_tokens = len(mergeable_ranks)
+
+    special_tokens = [
+        "<|begin_of_text|>",
+        "<|end_of_text|>",
+        "<|reserved_special_token_0|>",
+        "<|reserved_special_token_1|>",
+        "<|reserved_special_token_2|>",
+        "<|reserved_special_token_3|>",
+        "<|start_header_id|>",
+        "<|end_header_id|>",
+        "<|reserved_special_token_4|>",
+        "<|eot_id|>",  # end of turn
+      ] + [
+        f"<|reserved_special_token_{i}|>"
+        for i in range(5, self.num_reserved_special_tokens - 5)
+      ]
+    self.special_tokens = {
+        token: self.num_base_tokens + i for i, token in enumerate(special_tokens)
+    }
+
+    self.model = tiktoken.Encoding(
+      name=model_file,
+      pat_str=self.pat_str,
+      mergeable_ranks=mergeable_ranks,
+      special_tokens=self.special_tokens,
+    )
+
+  def decode(self, toks): return self.model.decode([t for t in toks if t < self.num_base_tokens])
+  def encode(self, s): return self.model.encode(s)
+
+  def bos_id(self): return self.special_tokens["<|begin_of_text|>"]
+  def eos_id(self): return self.special_tokens["<|end_of_text|>"]
+  def vocab_size(self): return self.model.n_vocab
 
 # calculating params:
 # traditionally, the MLP in the transformer architecture has hidden_dim = dim*4 [arxiv/1706.03762, 3.3]
@@ -38,6 +81,7 @@ MODEL_PARAMS = {
       "args": {"dim": 8192, "n_heads": 64, "n_layers": 80, "norm_eps": 1e-05, "vocab_size": 32000, "hidden_dim": 22016},
       "files": 8,
     },
+    "tokenizer": SentencePieceProcessor,
   },
   "2": {
     "7B": {
@@ -52,6 +96,26 @@ MODEL_PARAMS = {
       "args": {"dim": 8192, "n_heads": 64, "n_kv_heads": 8, "n_layers": 80, "norm_eps": 1e-05, "vocab_size": 32000, "hidden_dim": 28672},
       "files": 8,
     },
+    "tokenizer": SentencePieceProcessor,
+  },
+  "3": {
+    "8B": {
+      "args": {"dim": 4096, "n_heads": 32, "n_kv_heads": 8, "n_layers": 32, "norm_eps": 1e-05, "rope_theta": 500000, "vocab_size": 128256,  "hidden_dim": 14336},
+      "files": 1,
+    },
+    "8B-Chat": {
+      "args": {"dim": 4096, "n_heads": 32, "n_kv_heads": 8, "n_layers": 32, "norm_eps": 1e-05, "rope_theta": 500000, "vocab_size": 128256,  "hidden_dim": 14336},
+      "files": 1,
+    },
+    "70B": {
+      "args": {"dim": 8192, "n_heads": 64, "n_kv_heads": 8, "n_layers": 80, "norm_eps": 1e-05, "rope_theta": 500000, "vocab_size": 128256,  "hidden_dim": 28672},
+      "files": 8,
+    },
+    "70B-Chat": {
+      "args": {"dim": 8192, "n_heads": 64, "n_kv_heads": 8, "n_layers": 80, "norm_eps": 1e-05, "rope_theta": 500000, "vocab_size": 128256,  "hidden_dim": 28672},
+      "files": 8,
+    },
+    "tokenizer": TikToken,
   },
   "code": {
     "7B": {
@@ -90,6 +154,7 @@ MODEL_PARAMS = {
       "args": {"dim": 8192, "n_layers": 48, "n_heads": 64, "n_kv_heads": 8, "norm_eps": 1e-05, "rope_theta": 1000000, "vocab_size": 32000, "hidden_dim": 22016},
       "files": 4,
     },
+    "tokenizer": SentencePieceProcessor,
   },
   "tiny": {
     "1B": {
@@ -99,10 +164,10 @@ MODEL_PARAMS = {
     "1B-Chat": {
       "args": {"dim": 2048, "n_layers": 22, "n_heads": 32, "n_kv_heads": 4, "norm_eps": 1e-05, "vocab_size": 32003, "hidden_dim": 5632},
       "files": 1,
-    }
+    },
+    "tokenizer": SentencePieceProcessor,
   }
 }
-
 
 # **** helper functions ****
 def concat_weights(models, device=None):
@@ -152,8 +217,8 @@ class LLaMa:
   @staticmethod
   def build(model_path, tokenizer_path, model_gen="1", model_size="7B", quantize=False, device=None):
     params = MODEL_PARAMS[model_gen][model_size]
-    sp_model = SentencePieceProcessor(model_file=str(tokenizer_path))
-    assert sp_model.vocab_size() == params["args"]["vocab_size"], f"{sp_model.vocab_size()=} not equal to {params['args']['vocab_size']}"
+    tokenizer = MODEL_PARAMS[model_gen]['tokenizer'](model_file=str(tokenizer_path))
+    assert tokenizer.vocab_size() == params["args"]["vocab_size"], f"{tokenizer.vocab_size()=} not equal to {params['args']['vocab_size']}"
 
     jit = bool(getenv("JIT", 1))
     model = Transformer(**params["args"], linear=AbsmaxQuantizedLinear, max_context=MAX_CONTEXT, jit=jit) if quantize else Transformer(**params["args"], max_context=MAX_CONTEXT, jit=jit)
@@ -185,11 +250,11 @@ class LLaMa:
 
     load_state_dict(model, weights, strict=False, consume=True)
 
-    return LLaMa(model, sp_model)
+    return LLaMa(model, tokenizer)
 
   def __init__(self, model, tokenizer):
     self.model = model
-    self.tokenizer: SentencePieceProcessor = tokenizer
+    self.tokenizer = tokenizer
 
   def greedy_until(self, prompt:str, until, max_length, temperature):
     toks = [self.tokenizer.bos_id()] + self.tokenizer.encode(prompt)
@@ -379,7 +444,7 @@ After you are done speaking, output [EOS]. You are not Chad.
 
   # *** prompt engineers stop here ****
 
-  LLAMA_SUFFIX = {"1": "", "2": "-2", "code": "-code", "tiny": "-tiny"}[args.gen]
+  LLAMA_SUFFIX = {"1": "", "2": "-2", "3": "-3", "code": "-code", "tiny": "-tiny"}[args.gen]
   MODEL_PATH = args.model or Path(__file__).parents[1] / f"weights/LLaMA{LLAMA_SUFFIX}/{args.size}"
   TOKENIZER_PATH = (MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model"
   print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
@@ -455,6 +520,7 @@ After you are done speaking, output [EOS]. You are not Chad.
       ("1", "7B"): "Hello. I'm a 20 year old male",
       ("2", "7B"): "Hello. I'm a 20 year old girl",
       ("2", "70B"): "Hello. I am a 20 year old female.",
+      ("3", "8B"): "Hello. I am a 20 year old female", # No dot
     }
     try:
       assert text == expected[key], f"invalid output: `{colored(text, 'red')}` != `{expected[key]}`"
