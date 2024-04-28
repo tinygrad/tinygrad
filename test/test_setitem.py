@@ -6,10 +6,13 @@ class TestSetitem(unittest.TestCase):
   def test_simple_setitem(self):
     cases = (
       ((6,6), (slice(2,4), slice(3,5)), Tensor.ones(2,2)),
-      ((6,6), (slice(2,4), slice(3,5)), 1.0),
       ((6,6), (slice(2,4), slice(3,5)), Tensor([1.,2.])),
+      ((6,6), (slice(2,4), slice(3,5)), 1.0),
+      ((6,6), (3, 4), 1.0),
+      ((6,6), (3, None, 4, None), 1.0),
       ((4,4,4,4), (Ellipsis, slice(1,3), slice(None)), Tensor(4)),
       ((4,4,4,4), (Ellipsis, slice(1,3)), 4),
+      ((4,4,4,4), (2, slice(1,3), None, 1), 4),
       ((4,4,4,4), (slice(1,3), slice(None), slice(0,4,2)), 4),
       ((4,4,4,4), (slice(1,3), slice(None), slice(None), slice(0,3)), 4),
       ((6,6), (slice(1,5,2), slice(0,5,3)), 1.0),
