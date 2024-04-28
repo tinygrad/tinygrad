@@ -162,7 +162,7 @@ class Linearizer(Kernel):
       idx, valid = self.sts[i].expr_idxs(_idx)
       if isinstance(buf.dtype, ImageDType):
         image_idx, valid = to_image_idx(buf.dtype.shape, idx, valid)
-        rendered_idx = rendered_idx = self.uops.add(UOps.CAST, dtypes.int.vec(2), \
+        rendered_idx = self.uops.add(UOps.CAST, dtypes.int.vec(2), \
                       tuple(x.render(self.render_ops, self) for x in image_idx), insert_before=insert_before)
       else:
         rendered_idx = idx.render(self.render_ops, self)
