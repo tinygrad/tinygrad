@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Tensor
 from tinygrad import Device
-from tinygrad.helpers import Timing, CI, OSX
+from tinygrad.helpers import Timing, CI, OSX, flatten
 import multiprocessing.shared_memory as shared_memory
 
 N = 4096 if CI else 16384
@@ -53,7 +53,7 @@ class TestCopySpeed(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT != "GPU", "only test this on GPU")
   def testCopyCPUto6GPUs(self):
     from tinygrad.runtime.ops_gpu import CLDevice
-    if len(CLDevice.device_ids) != 6: raise unittest.SkipTest("computer doesn't have 6 GPUs")
+    if len(flatten(CLDevice.device_ids.values())) != 6: raise unittest.SkipTest("computer doesn't have 6 GPUs")
     t = Tensor.rand(N, N, device="clang").realize()
     print(f"buffer: {t.nbytes()*1e-9:.2f} GB")
     for _ in range(3):

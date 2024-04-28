@@ -1,8 +1,9 @@
 from __future__ import annotations
 from typing import Tuple, Optional, List, cast
+from collections import defaultdict
 import ctypes, functools, hashlib
 import tinygrad.runtime.autogen.opencl as cl
-from tinygrad.helpers import init_c_var, to_char_p_p, from_mv, OSX, DEBUG
+from tinygrad.helpers import init_c_var, to_char_p_p, from_mv, OSX, DEBUG, flatten
 from tinygrad.renderer.cstyle import OpenCLRenderer, IntelRenderer
 from tinygrad.buffer import BufferOptions
 from tinygrad.device import Compiled, LRUAllocator, Compiler, CompilerOptions
@@ -84,28 +85,33 @@ class CLAllocator(LRUAllocator):
     self.device.synchronize()
 
 class CLDevice(Compiled):
-  device_ids = None                 # this is global and only initted once
+  platforms, device_ids = ["INTEL"], defaultdict(list)
   def __init__(self, device:str=""):
-    if CLDevice.device_ids is None:
+    if not CLDevice.device_ids:
       num_platforms = init_c_var(ctypes.c_uint32(), lambda x: check(cl.clGetPlatformIDs(0, None, ctypes.byref(x))))
       platform_ids = init_c_var((cl.cl_platform_id * num_platforms.value)(), lambda x: check(cl.clGetPlatformIDs(num_platforms.value, x, None)))
-      for device_type in [cl.CL_DEVICE_TYPE_GPU, cl.CL_DEVICE_TYPE_DEFAULT]:
-        num_devices = ctypes.c_uint32()
-        err = cl.clGetDeviceIDs(platform_ids[0], device_type, 0, None, ctypes.byref(num_devices))
-        if err == 0 and num_devices.value != 0: break
-      if DEBUG >= 1: print(f"CLDevice: got {num_platforms.value} platforms and {num_devices.value} devices")
-      CLDevice.device_ids = init_c_var((cl.cl_device_id * num_devices.value)(), lambda x: check(cl.clGetDeviceIDs(platform_ids[0], device_type, num_devices, x, None)))  # noqa: E501
+      for pfid in platform_ids:
+        check(cl.clGetPlatformInfo(pfid, cl.CL_PLATFORM_NAME, 256, pfname := ctypes.create_string_buffer(256), None))
+        for device_type in [cl.CL_DEVICE_TYPE_GPU, cl.CL_DEVICE_TYPE_DEFAULT]:
+          num_devices = ctypes.c_uint32()
+          err = cl.clGetDeviceIDs(pfid, device_type, 0, None, ctypes.byref(num_devices))
+          if err == 0 and num_devices.value != 0: break
+        if num_devices.value == 0: continue
+        pfk = next((pf for pf in CLDevice.platforms if pf in pfname.value.decode().upper()), "MISC")
+        CLDevice.device_ids[pfk].extend(list(init_c_var((cl.cl_device_id * num_devices.value)(), lambda x: check(cl.clGetDeviceIDs(pfid, device_type, num_devices, x, None)))))  # noqa: E501
+      if DEBUG >= 1: print(f"CLDevice: got {num_platforms.value} platforms and {len(flatten(CLDevice.device_ids.values()))} devices")
 
-    self.device_id = CLDevice.device_ids[0 if ":" not in device else int(device.split(":")[1])]
+    dev, idx = device.split(":")[0], 0 if ":" not in device else int(device.split(":")[1])
+    self.device_id = CLDevice.device_ids.get(dev, flatten(CLDevice.device_ids.values()))[idx]
     self.device_name = (cl.clGetDeviceInfo(self.device_id, cl.CL_DEVICE_NAME, 256, ctypes.byref(buf := ctypes.create_string_buffer(256)), ctypes.byref(total := ctypes.c_size_t())), ctypes.string_at(buf, size=total.value).decode())[1]  # noqa: E501
-    if DEBUG >=1: print(f"CLDevice: {self.device_name}")
+    if DEBUG >= 1: print(f"CLDevice: {self.device_name}")
     self.driver_version = (cl.clGetDeviceInfo(self.device_id, cl.CL_DRIVER_VERSION, 256, ctypes.byref(buf := ctypes.create_string_buffer(256)), ctypes.byref(total := ctypes.c_size_t())), ctypes.string_at(buf, size=total.value).decode())[1]  # noqa: E501
     self.context = checked(cl.clCreateContext(None, 1, ctypes.byref(self.device_id), cl.clCreateContext.argtypes[3](), None, ctypes.byref(status := ctypes.c_int32())), status)  # noqa: E501
     self.queue = checked(cl.clCreateCommandQueue(self.context, self.device_id, cl.CL_QUEUE_PROFILING_ENABLE, ctypes.byref(status)), status)
     self.pending_copyin: List[memoryview] = []
 
     compile_key = hashlib.md5(self.device_name.encode() + self.driver_version.encode()).hexdigest()
-    super().__init__(device, CLAllocator(self), (IntelCompiler if "Intel" in self.device_name else CLCompiler)(self, f"compile_cl_{compile_key}"), functools.partial(CLProgram, self))
+    super().__init__(device, CLAllocator(self), (IntelCompiler if dev == "INTEL" else CLCompiler)(self, f"compile_cl_{compile_key}"), functools.partial(CLProgram, self)) # noqa: E501
   def synchronize(self):
     check(cl.clFinish(self.queue))
     self.pending_copyin.clear()
