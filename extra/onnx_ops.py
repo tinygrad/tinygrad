@@ -285,9 +285,9 @@ def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Optional[Tensor]=None, kernel_sh
   xT = xT.flatten().unsqueeze(1).expand(None, outlength)
   ret = ((xI == arange) * xT).sum(0).reshape([1, 1] + out_sh)
   if outshape is not None and (outshape := safe_python(outshape)) != ret.shape:
-      diff = [outshape[2] - ret.shape[2], outshape[3] - ret.shape[3]]
-      pad_args = [diff[0]//2, diff[1]//2, diff[0]-diff[0]//2, diff[1]-diff[1]//2]
-      ret = ret.pad2d((pad_args[1], pad_args[3], pad_args[0], pad_args[2]))
+    diff = [outshape[2] - ret.shape[2], outshape[3] - ret.shape[3]]
+    pad_args = [diff[0]//2, diff[1]//2, diff[0]-diff[0]//2, diff[1]-diff[1]//2]
+    ret = ret.pad2d((pad_args[1], pad_args[3], pad_args[0], pad_args[2]))
   return ret
 
 def Conv(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
