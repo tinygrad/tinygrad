@@ -14,13 +14,8 @@ Conv2dKaiming = nn.Conv2d
 def cust_bin_cross_logits(inputs, targets):
   return inputs.maximum(0) - targets * inputs + (1 + inputs.abs().neg().exp()).log()
 
-def sigmoid_focal_loss(
-    inputs: Tensor,
-    targets: Tensor,
-    mask: Tensor,
-    alpha: float = 0.25,
-    gamma: float = 2,
-):
+def sigmoid_focal_loss(inputs: Tensor, targets: Tensor, mask: Tensor,
+    alpha: float = 0.25, gamma: float = 2):
   p = Tensor.sigmoid(inputs) * mask
   ce_loss = cust_bin_cross_logits(inputs, targets)
   p_t = p * targets + (1 - p) * (1 - targets)
@@ -50,8 +45,7 @@ def box_iou(boxes1: Tensor, boxes2: Tensor) -> Tensor:
   wh = (rb - lt).maximum(0)  # [N,M,2]
   inter = wh[:, :, 0] * wh[:, :, 1]  # [N,M]
   union = area1.unsqueeze(1) + area2 - inter
-  iou = inter / union
-  return iou
+  return inter / union
 
 def nms(boxes, scores, thresh=0.5):
   x1, y1, x2, y2 = np.rollaxis(boxes, 1)
@@ -85,14 +79,12 @@ def encode_boxes(reference_boxes, proposals, weights = (1.0,1.0,1.0,1.0)):
   ex_ctr = proposals[:, :, 0:2] + 0.5 * (proposals[:, :, 2:4] - proposals[:, :, 0:2])
   gt_ctr = reference_boxes[:, :, 0:2] + 0.5 * (reference_boxes[:, :, 2:4] - reference_boxes[:, :, 0:2])
 
-  targets = Tensor.stack([
+  return Tensor.stack([
     wx * (gt_ctr[:, :, 0] - ex_ctr[:, :, 0]) / (proposals[:, :, 2] - proposals[:, :, 0]),
     wy * (gt_ctr[:, :, 1] - ex_ctr[:, :, 1]) / (proposals[:, :, 3] - proposals[:, :, 1]),
     ww * ((reference_boxes[:, :, 2] - reference_boxes[:, :, 0]) / (proposals[:, :, 2] - proposals[:, :, 0])).log(),
     wh * ((reference_boxes[:, :, 3] - reference_boxes[:, :, 1]) / (proposals[:, :, 3] - proposals[:, :, 1])).log()
   ], dim=2)
-
-  return targets
 
 def generate_anchors(input_size, grid_sizes, scales, aspect_ratios):
   assert len(scales) == len(aspect_ratios) == len(grid_sizes)
@@ -120,17 +112,12 @@ def cust_meshgrid(x:Tensor, y:Tensor):
   return x, y
 
 class AnchorGenerator:
-  def __init__(
-    self,
-    sizes=((128, 256, 512),),
-    aspect_ratios=((0.5, 1.0, 2.0),),
-  ):
+  def __init__(self, sizes=((128, 256, 512),), aspect_ratios=((0.5, 1.0, 2.0),)):
     if not isinstance(sizes[0], (list, tuple)):
       # TODO change this
       sizes = tuple((s,) for s in sizes)
     if not isinstance(aspect_ratios[0], (list, tuple)):
       aspect_ratios = (aspect_ratios,) * len(sizes)
-
     assert len(sizes) == len(aspect_ratios)
 
     self.sizes = sizes
@@ -172,14 +159,11 @@ class AnchorGenerator:
                         "feature maps passed and the number of sizes / aspect ratios specified.")
 
     for size, stride, base_anchors in zip(
-        grid_sizes, strides, cell_anchors
-    ):
+        grid_sizes, strides, cell_anchors):
       grid_height, grid_width = size
       stride_height, stride_width = stride
-      shifts_x = Tensor.arange(
-          0, grid_width, dtype=dtypes.float) * stride_width
-      shifts_y = Tensor.arange(
-          0, grid_height, dtype=dtypes.float) * stride_height
+      shifts_x = Tensor.arange(0, grid_width, dtype=dtypes.float) * stride_width
+      shifts_y = Tensor.arange(0, grid_height, dtype=dtypes.float) * stride_height
       shift_y, shift_x = cust_meshgrid(shifts_y, shifts_x)
       shift_x = shift_x.reshape(-1)
       shift_y = shift_y.reshape(-1)
@@ -187,9 +171,7 @@ class AnchorGenerator:
 
       # For every (base anchor, output anchor) pair,
       # offset each zero-centered base anchor by the center of the output anchor.
-      anchors.append(
-        (shifts.reshape(-1, 1, 4) + base_anchors.reshape(1, -1, 4)).reshape(-1, 4)
-      )
+      anchors.append((shifts.reshape(-1, 1, 4) + base_anchors.reshape(1, -1, 4)).reshape(-1, 4))
     return anchors
 
   def forward(self, image_list_shape, feature_maps) -> List[Tensor]:
@@ -224,14 +206,11 @@ class RetinaNet:
     self.anchor_gen = lambda input_size: generate_anchors(input_size, self.backbone.compute_grid_sizes(input_size), scales, aspect_ratios)
 
   def __call__(self, x, train=False):
-    
     b = self.backbone(x)
     r, c = self.head(b)
-    if train:
-      return b, r, c
-    else: 
-      c = c.sigmoid().realize()
-      return r.cat(c, dim=-1)
+    if train: return b, r, c
+    else: return r.cat(c.sigmoid(), dim=-1)
+
   def forward(self, x):
     return self.head(self.backbone(x))
 
@@ -323,8 +302,7 @@ class ClassificationHead:
     self.num_classes = num_classes
     self.conv = []
     for _ in range(4):
-      c = Conv2dNormal(in_channels, in_channels, kernel_size=3, padding=1)
-      self.conv.append(c)
+      self.conv.append(Conv2dNormal(in_channels, in_channels, kernel_size=3, padding=1))
       self.conv.append(Tensor.relu)
     self.cls_logits = Conv2dNormal_prior_prob(in_channels, num_anchors * num_classes, kernel_size=3, padding=1)
 
@@ -341,17 +319,14 @@ class ClassificationHead:
     labels_temp = (labels_temp+1)*foreground_idxs-1
     gt_classes_target = labels_temp.one_hot(logits_class.shape[-1])
     valid_idxs = matched_idxs != -2
-    s = sigmoid_focal_loss(logits_class, 
-                            gt_classes_target, 
-                            valid_idxs.reshape(batch_size,-1,1))/num_foreground
-    return s.mean()
+    return (sigmoid_focal_loss(logits_class, gt_classes_target, 
+                            valid_idxs.reshape(batch_size,-1,1))/num_foreground).mean()
 
 class RegressionHead:
   def __init__(self, in_channels, num_anchors):
     self.conv = []
     for _ in range(4):
-      c = Conv2dNormal(in_channels, in_channels, kernel_size=3, padding=1)
-      self.conv.append(c)
+      self.conv.append(Conv2dNormal(in_channels, in_channels, kernel_size=3, padding=1))
       self.conv.append(Tensor.relu)
     self.bbox_reg = Conv2dNormal(in_channels, num_anchors * 4, kernel_size=3, padding=1)
 
@@ -370,11 +345,7 @@ class RegressionHead:
     anchors = anchors*foreground_idxs.reshape(batch_size,-1,1)
     target_regression = encode_boxes(matched_gt_boxes, anchors)
     target_regression = target_regression * foreground_idxs.reshape(batch_size,-1,1)
-    l = l1_loss(
-        bbox_reg,
-        target_regression,
-      ) / num_foreground
-    return l.mean()
+    return (l1_loss(bbox_reg, target_regression) / num_foreground).mean()
 
 class RetinaHead:
   def __init__(self, in_channels, num_anchors, num_classes):
@@ -423,10 +394,8 @@ class FPN:
   def __init__(self, in_channels_list, out_channels, extra_blocks=None):
     self.inner_blocks, self.layer_blocks = [], []
     for in_channels in in_channels_list:
-      c1 = Conv2dKaiming(in_channels, out_channels, kernel_size=1)
-      self.inner_blocks.append(c1)
-      c2 = Conv2dKaiming(out_channels, out_channels, kernel_size=3, padding=1)
-      self.layer_blocks.append(c2)
+      self.inner_blocks.append(Conv2dKaiming(in_channels, out_channels, kernel_size=1))
+      self.layer_blocks.append(Conv2dKaiming(out_channels, out_channels, kernel_size=3, padding=1))
     self.extra_blocks = ExtraFPNBlock(256, 256) if extra_blocks is None else extra_blocks
 
   def __call__(self, x):
