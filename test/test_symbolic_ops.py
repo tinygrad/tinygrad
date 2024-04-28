@@ -157,7 +157,7 @@ class TestSymbolicOps(unittest.TestCase):
     symbolic = tensor.mean().item()
 
     # Check if the result is correct
-    assert np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
+    np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
   def test_symbolic_var(self):
     # Create a non-symbolic tensor
@@ -175,7 +175,7 @@ class TestSymbolicOps(unittest.TestCase):
     symbolic = tensor.var().item()
 
     # Check if the result is correct
-    assert np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
+    np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
 if __name__ == '__main__':
   unittest.main()
