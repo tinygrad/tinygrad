@@ -251,6 +251,9 @@ def train_retinanet():
   import numpy as np
   import math
 
+  SEED = getenv("SEED", 42)
+  Tensor.manual_seed(SEED)
+  np.random.seed(SEED)
   WANDB = getenv('WANDB')
   HOSTNAME = getenv('SLURM_STEP_NODELIST', 'other')
   EPOCHS = 5
@@ -389,7 +392,7 @@ def train_retinanet():
     #   lr_sched = Retina_LR(optimizer, start_iter, warmup_iters, WARMUP_FACTOR, LR)
     # else:
     #   optimizer.lr.assign(Tensor([LR], device=GPUS))
-    batch_loader = batch_load_retinanet(coco_train, bs=BS, shuffle=False, anchor_np=ANCHOR_NP)
+    batch_loader = batch_load_retinanet(coco_train, bs=BS, seed=SEED, shuffle=False, anchor_np=ANCHOR_NP)
     it = iter(tqdm(batch_loader, total=len(coco_train)//BS, desc=f"epoch {epoch}"))
     cnt, proc = 0, data_get(it)
 
@@ -444,7 +447,7 @@ def train_retinanet():
     eval_times = []
     coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
 
-    batch_loader = batch_load_retinanet_val(coco_val, bs=BS_EVAL, shuffle=False)
+    batch_loader = batch_load_retinanet_val(coco_val, bs=BS_EVAL, shuffle=False, seed=SEED)
     it = iter(tqdm(batch_loader, total=len(coco_val)//BS_EVAL, desc=f"epoch_val {epoch}"))
     cnt, proc = 0, data_get_val(it)
 

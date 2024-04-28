@@ -3,6 +3,7 @@ import os
 from PIL import Image
 from typing import Any, List
 import numpy as np
+import random
 from tinygrad import Tensor, dtypes, Device
 from pycocotools.coco import COCO
 
@@ -217,11 +218,16 @@ def loader_process(q_in, q_out, X:Tensor, seed, coco, YB:Tensor, YL:Tensor, YM:T
     while (_recv := q_in.get()) is not None:
       idx, img_idx= _recv
       img, target = coco.__getitem__(img_idx)
-
+      random.seed(seed * 2 ** 20 + idx)
+      r = random.random() < 0.5
       img = np.array(resize_img(img))
-      midx = matcher_iou_func(target['boxes'], Anchor)
+      b = target['boxes']
+      if r:
+        img = np.flip(img, axis=2)
+        b[:, [0, 2]] = 800 - b[:, [2, 0]]
+      midx = matcher_iou_func(b, Anchor)
       m_temp = np.clip(midx, 0, None)
-      tb = target['boxes'][m_temp]
+      tb = b[m_temp]
       tl = target['labels'][m_temp]
       del target, m_temp
 
