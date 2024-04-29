@@ -63,6 +63,6 @@ class LayerNormBert:
 
   def __call__(self, x:Tensor):
     assert self.normalized_shape == x.shape[-len(self.normalized_shape):], f"last dimensions of {x.shape} must match {self.normalized_shape}"
-    xn = x.float().layernorm(eps=self.eps, axis=self.axis)
+    xn = x.cast(dtypes.float32).layernorm(eps=self.eps, axis=self.axis).cast(dtypes.default_float)
     if not self.elementwise_affine: return xn.cast(x.dtype)
-    return (xn * self.weight + self.bias).cast(x.dtype)
+    return (xn * self.weight.cast(dtypes.default_float) + self.bias.cast(dtypes.default_float))
