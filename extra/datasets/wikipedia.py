@@ -402,7 +402,7 @@ if __name__ == "__main__":
   elif sys.argv[1] == "pre-train":
     os.makedirs(BASEDIR / "train", exist_ok=True)
     if sys.argv[2] == "all": # Use all 500 parts for training generation
-      process_map(process_part, [part for part in range(500)], max_workers=getenv('NUM_WORKERS', os.cpu_count()), chunksize=1)
+      process_map(process_part, [part for part in range(500)], max_workers=getenv('NUM_WORKERS', min(os.cpu_count(), 32)), chunksize=1)
     else: # Use a specific part for training generation
       part = int(sys.argv[2])
       os.makedirs(BASEDIR / "train" / str(part), exist_ok=True)
