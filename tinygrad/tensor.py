@@ -920,7 +920,7 @@ class Tensor:
 
   def mean(self, axis=None, keepdim=False):
     assert all_int(self.shape), "does not support symbolic shape"
-    out = self.sum(axis=axis, keepdim=keepdim, downcast_half=True)
+    out = self.sum(axis=axis, keepdim=keepdim, downcast_half=False)
     return out.div(prod(self.shape) / prod(out.shape)).cast(self.dtype) if 0 not in out.shape else out.cast(self.dtype)
   def var(self, axis=None, keepdim=False, correction=1):
     assert all_int(self.shape), "does not support symbolic shape"
