@@ -132,8 +132,8 @@ def train_resnet():
       return loss.realize(), top_1.realize()
 
   def data_get(it):
-    x, y, cookie = next(it)
-    return x.shard(GPUS, axis=0).realize(), Tensor(y, requires_grad=False).shard(GPUS, axis=0), cookie
+    x, y, cookie, batch_nums = next(it)
+    return x.shard(GPUS, axis=0).realize(), Tensor(y, requires_grad=False).shard(GPUS, axis=0), cookie, batch_nums
 
   train_loader = batch_load_resnet(batch_size=BS, val=False, shuffle=True, seed=seed, epochs=epochs, start_epoch=start_epoch)
   train_it = iter(train_tqdm:=tqdm(train_loader, total=steps_in_train_epoch * epochs, initial=steps_in_train_epoch * start_epoch, disable=BENCHMARK))
@@ -157,7 +157,7 @@ def train_resnet():
         if stop: next_proc = None
         else:
           next_proc = data_get(train_it)
-          if next_proc[-1] != e: stop = True
+          if next_proc[-1][-1] != e: stop = True
       except StopIteration:
         next_proc = None
 

@@ -84,9 +84,9 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None, pad_fir
   files_per_epoch = (len(files) + FIRST_BATCH_PAD)
   BATCH_COUNT = min(32, files_per_epoch * epochs // batch_size)
 
-  gen = itertools.chain(zip(
+  gen = itertools.chain(*(zip(
     itertools.chain([-1] * FIRST_BATCH_PAD, shuffled_indices(len(files), seed=seed * epochs + epoch) if shuffle else iter(range(len(files)))),
-    itertools.repeat(epoch)) for epoch in range(start_epoch, epochs))
+    itertools.repeat(epoch)) for epoch in range(start_epoch, epochs)))
 
   start_skip = (start_epoch * files_per_epoch) % batch_size
   for _ in range(start_skip): next(gen)
