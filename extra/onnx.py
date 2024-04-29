@@ -17,15 +17,15 @@ except ImportError:
 
 cache_misses = 0
 @lru_cache(None)
-def _cached_safe_python(t:Tensor, tobytes): return t.data().tobytes() if tobytes else t.tolist()
+def _cached_to_python_const(t:Tensor, tobytes): return t.data().tobytes() if tobytes else t.tolist()
 
 # Tensor -> python value cache for parameters
-def safe_python(t, tobytes=False) -> Union[List[ConstType], List[bytes], Union[ConstType, bytes]]:
+def to_python_const(t, tobytes=False) -> Union[List[ConstType], List[bytes], Union[ConstType, bytes]]:
   if not isinstance(t, Tensor): return t
-  ret = _cached_safe_python(t, tobytes)
-  if (info := _cached_safe_python.cache_info()).misses > cache_misses and DEBUG >= 3:
+  global cache_misses
+  ret = _cached_to_python_const(t, tobytes)
+  if (info := _cached_to_python_const.cache_info()).misses > cache_misses and DEBUG >= 3:
     print(f"Cache miss for {t}, {tobytes=}")
-    global cache_misses
     cache_misses = info.misses
   return ret
 
@@ -154,7 +154,7 @@ def get_run_onnx(onnx_model: ModelProto):
         ret = getattr(Tensor, n.op_type.lower())(*inp, **opt)
       elif n.op_type == "Split":
         axis = opt.get("axis", 0)
-        split = None if len(inp) == 1 else safe_python(inp[1])
+        split = None if len(inp) == 1 else to_python_const(inp[1])
         if split is None:
           split = [inp[0].shape[axis] // len(n.output)] * len(n.output)
           for i in range(inp[0].shape[axis] % len(n.output)):
@@ -173,9 +173,9 @@ def get_run_onnx(onnx_model: ModelProto):
           axes, ends, starts, steps = list(opt.get("axes", range(inp[0].ndim))), list(opt["ends"]), list(opt["starts"]), [1]*inp[0].ndim
         else:
           starts, ends = inp[1:3]
-          axes = list(range(inp[0].ndim)) if len(inp) <= 3 else safe_python(inp[3].cast(dtypes.int32))
+          axes = list(range(inp[0].ndim)) if len(inp) <= 3 else to_python_const(inp[3].cast(dtypes.int32))
           steps = inp[4].cast(dtypes.int32).tolist() if len(inp) > 4 else [1]*inp[0].ndim
-          starts, ends = safe_python(starts), safe_python(ends)
+          starts, ends = to_python_const(starts), to_python_const(ends)
         arg = [(0,x,1) for x in inp[0].shape]
         for i, axis in enumerate(axes):
           axis = int(axis) + inp[0].ndim if axis < 0 else int(axis)
