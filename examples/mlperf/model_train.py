@@ -326,7 +326,7 @@ def train_bert():
 
   # ** LR scheduler **
   scheduler = PolynomialDecayWithWarmup(optimizer, max_lr, 0, train_steps, warmup_steps, power=poly_power)
-  print(f"Training with batch size {BS} for 1 epoch with each {train_steps} steps")
+  print(f"Training with batch size {BS} for one epoch with {train_steps} steps")
 
   # ** resume from checkpointing **
   start_step = 0
