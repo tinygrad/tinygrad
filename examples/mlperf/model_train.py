@@ -411,7 +411,6 @@ def train_unet3d():
         median_step_time = sorted(step_times)[(BENCHMARK + 1) // 2]  # in seconds
         estimated_total_minutes = int(median_step_time * SAMPLES_PER_EPOCH * NUM_EPOCHS / 60)
         print(f"Estimated training time: {estimated_total_minutes // 60}h{estimated_total_minutes % 60}m")
-        # if we are doing beam search, run the first eval too
         if (TRAIN_BEAM or EVAL_BEAM) and epoch == start_epoch: break
         return
 
