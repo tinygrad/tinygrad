@@ -4,6 +4,7 @@ from tinygrad.engine.schedule import create_schedule
 from tinygrad.helpers import CI
 from tinygrad.ops import BufferOps
 import numpy as np
+from test.helpers import is_dtype_supported
 
 def _check_ast_count(desired_count:int, t:Tensor):
   # NOTE: this has side effect because everything can be scheduled only once
@@ -134,6 +135,13 @@ class TestReduceOpsConstFolding(unittest.TestCase):
     np.testing.assert_equal(Tensor.ones(4, 5, 6).max().numpy(), 1)
     _check_ast_count(0, Tensor(4).max())
     np.testing.assert_equal(Tensor(4).max().numpy(), 4)
+
+  def test_sum_output_dtype(self):
+    # sum output dtype can be different from input
+    for dt in dtypes.fields().values():
+      if is_dtype_supported(dt):
+        t = Tensor.ones(16, dtype=dt).reshape(4, 4)
+        assert t.sum().dtype == t.contiguous().sum().dtype
 
 @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
 class TestMultiConstFolding(unittest.TestCase):

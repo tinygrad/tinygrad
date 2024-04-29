@@ -50,7 +50,7 @@ def to_sharded(lbs:List[LazyBuffer], axis:int) -> List[LazyBuffer]:
 class MultiLazyBuffer:
   def __init__(self, lbs:List[LazyBuffer], axis:Optional[int], real:Optional[List[bool]]=None):
     assert all(isinstance(x, LazyBuffer) for x in lbs) and len(lbs), "all lbs must be LazyBuffers, and we need at least one of them"
-    #assert all_same([(x.shape, x.dtype, x.st) for x in lbs]), "all multilazybuffer needs same shape, dtype, and st"
+    assert all_same([x.dtype for x in lbs]), f"all multilazybuffer needs same dtype, getting {[x.dtype for x in lbs]}"
     self.lbs, self.axis, self.dtype, self.device, self.real = lbs, axis, lbs[0].dtype, tuple(x.device for x in lbs), real or [True]*len(lbs)
     if axis is not None:
       splits = list(itertools.accumulate([lb.shape[axis] for lb in lbs], initial=0))
@@ -116,8 +116,7 @@ class MultiLazyBuffer:
   def r(self, op:ReduceOps, axis:Tuple[int, ...], acc_dt:Optional[DType]=None, downcast_half:bool=True) -> MultiLazyBuffer:
     if self.axis is not None and self.axis in axis:
       # all-reduce on sharded axes
-      new_shape = tuple(1 if i in axis else s for i,s in enumerate(self.shape))
-      reduced_parts = [x.r(op, axis, acc_dt, downcast_half) if r else x.const(0, shape=new_shape) for x,r in zip(self.lbs, self.real)]
+      reduced_parts = [(x if r else x.const(0)).r(op, axis, acc_dt, downcast_half) for x,r in zip(self.lbs, self.real)]
       if all(self.real): return MultiLazyBuffer(all_reduce(op, reduced_parts), None)
       return MultiLazyBuffer(reduced_parts, None, self.real)
     # reduce on non sharded axes, piecewise is fine. if axis is None this is also correct
