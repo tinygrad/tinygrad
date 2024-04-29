@@ -431,7 +431,7 @@ class Linearizer(Kernel):
     if cache is None: cache = {}
     if x in cache: return cache[x]
     if x.op in BufferOps: return loaded_buffers[x.arg]
-    if x.op is UnaryOps.CAST: return [self.uops.add(UOps.BITCAST if x.arg[1] else UOps.CAST, self.get_base_dtype(x.arg[0]), (u,), x.arg[0],\
+    if x.op is UnaryOps.CAST: return [self.uops.add(UOps.BITCAST if x.arg[1] else UOps.CAST, self.get_base_dtype(x.arg[0]), (u,), x.arg[0], \
                   insert_before=insert_before) for u in self.ast_parse(x.src[0], acc, offs, loaded_buffers, insert_before=insert_before)]
     if x.op in ReduceOps and not do_reduce:
       assert offs is None, "not available if we aren't doing reduce"
@@ -444,7 +444,7 @@ class Linearizer(Kernel):
       input_acc = acc[:]
       for val, off in zip(zip(*values), cast(List[int], offs)):
         assert(len(val)==1)
-        acc[off] = val[0] if acc[off] in input_acc else self.uops.add(UOps.ALU, acc[off].dtype, vin=val+(acc[off],),\
+        acc[off] = val[0] if acc[off] in input_acc else self.uops.add(UOps.ALU, acc[off].dtype, vin=val+(acc[off],), \
                                                                       arg=ops[cast(ReduceOps, x.op)], insert_before=insert_before)
         ret.append(acc[off])
       for off in range(len(acc)):
