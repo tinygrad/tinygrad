@@ -222,8 +222,6 @@ class Tensor:
     """
     Returns the value of this tensor as a nested list.
 
-    Currently this only works for flattened tensors.
-
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([1, 2, 3, 4])
     print(t.tolist())
