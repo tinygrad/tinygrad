@@ -567,14 +567,20 @@ class TestSchedule(unittest.TestCase):
     # sched = check_schedule([b, c], 4)
     # doesn't store either in half because it doesn't chase
 
-  def test_fuse_contiguous_children(self):
+  def test_fuse_contiguous_child(self):
     a = Tensor.empty(4, 4, 4)
     b = Tensor.empty(4, 4)
     r = a.sum(axis=0) * b * 10
     out0 = r.sum(axis=0) + 2
     out1 = r.sum(axis=1) + 4
-    sched = check_schedule([out0, out1], 3)
-    assert sched[0].ast[0].src[0].op is BinaryOps.MUL
+    schedule = check_schedule([out0, out1], 3)
+    assert schedule[0].ast[0].src[0].op is BinaryOps.MUL
+
+  def test_contiguous_child_midreduce_nofuse(self):
+    a = Tensor.empty(32, 32)
+    b = (a.sum(0) + a.max(1)) + 2
+    schedule = check_schedule(b, 2)
+    assert schedule[0].ast[0].src[0].op is ReduceOps.MAX
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
