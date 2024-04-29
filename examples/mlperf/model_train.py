@@ -285,7 +285,6 @@ def train_retinanet():
   retinanet.Conv2dKaiming = Conv2dKaiming
 
   from extra.models.retinanet import AnchorGenerator
-  from examples.mlperf.lr_schedulers import Retina_LR
   anchor_sizes = tuple((x, int(x * 2 ** (1.0 / 3)), int(x * 2 ** (2.0 / 3))) for x in [32, 64, 128, 256, 512])
   aspect_ratios = ((0.5, 1.0, 2.0),) * len(anchor_sizes)
   anchor_generator = AnchorGenerator(
