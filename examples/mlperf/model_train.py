@@ -272,7 +272,6 @@ def train_bert():
   seed = config["seed"] = getenv("SEED", 12345)
 
   # ** hyperparameters **
-  epochs             = config["epochs"]                 = getenv("EPOCHS", 1)
   BS                 = config["GLOBAL_BATCH_SIZE"]      = getenv("BS", 4 * len(GPUS)) # FP32 4090: 6 GPUS -> BS24
   EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 4 * len(GPUS))
   max_lr             = config["OPT_BASE_LEARNING_RATE"] = getenv("OPT_BASE_LEARNING_RATE", 0.000004166 * BS)
@@ -327,7 +326,7 @@ def train_bert():
 
   # ** LR scheduler **
   scheduler = PolynomialDecayWithWarmup(optimizer, max_lr, 0, train_steps, warmup_steps, power=poly_power)
-  print(f"Training with batch size {BS} for {epochs} epochs with each {train_steps} steps")
+  print(f"Training with batch size {BS} for 1 epoch with each {train_steps} steps")
 
   # ** resume from checkpointing **
   start_step = 0
@@ -429,8 +428,10 @@ def train_bert():
 
     if i == BENCHMARK:
       median_step_time = sorted(step_times)[(BENCHMARK + 1) // 2]  # in seconds
-      estimated_total_hours = median_step_time * train_steps * epochs / 60 / 60
-      print(f"Estimated training time: {estimated_total_hours:.0f}h{(estimated_total_hours - int(estimated_total_hours)) * 60:.0f}m")
+      estimated_total_minutes = int(median_step_time * train_steps / 60)
+      print(f"Estimated training time: {estimated_total_minutes // 60}h{estimated_total_minutes % 60}m")
+      print(f"epoch global_ops: {train_steps * GlobalCounters.global_ops:_}, "
+            f"epoch global_mem: {train_steps * GlobalCounters.global_mem:_}")
       return
 
     # ** eval loop **
