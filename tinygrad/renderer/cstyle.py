@@ -33,7 +33,7 @@ class CStyleLanguage(NamedTuple):
     TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})"}
 
   # returns a str expression of the casted xs with the given type
-  def render_cast(self, x:List[str], var_dtype:DType, bitcast=False) -> str:
+  def render_cast(self, x:List[str], var_dtype:DType, from_dtype:Optional[DType]=None, bitcast=False) -> str:
     if bitcast: return f"(*(({self.buffer_prefix}{self.render_dtype(var_dtype)}*)&{x[0]}))"
     if len(x) == 1: return f"({self.render_dtype(var_dtype)})({x[0]})"
     assert len(x) == var_dtype.count, f"cast is wrong size {len(x)} != {var_dtype.count}"
@@ -151,7 +151,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str
           kk(f"{lang.render_dtype(cast(DType, vin[0].dtype))} {precast} = {r[vin[0]]};")
           val = lang.render_cast([precast], dtype, bitcast=True)
         else:
-          val = lang.render_cast([r[x] for x in vin], dtype, bitcast=False)
+          val = lang.render_cast([r[x] for x in vin], dtype, from_dtype=vin[0].dtype, bitcast=False)
         if child_count[u] <= 1: r[u] = val
         else: kk(f"{lang.render_dtype(dtype)} {ssa('cast',u)} = {val};")
       elif uop is UOps.DEFINE_LOCAL:
@@ -176,7 +176,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str
   return lang.render_kernel(function_name, kernel, bufs, uops)
 
 class OpenCLLanguage(CStyleLanguage):
-  kernel_prefix = "__attribute__((intel_reqd_sub_group_size(8)))\n" + "__kernel "
+  kernel_prefix = "__kernel "
   buffer_prefix = "__global "
   smem_align = "__attribute__ ((aligned (16))) "
   smem_prefix = "__local "
@@ -184,24 +184,28 @@ class OpenCLLanguage(CStyleLanguage):
   float4 = "(float4)"
   code_for_workitem = {"g": lambda x: f"get_group_id({x})", "l": lambda x: f"get_local_id({x})", "i": lambda x: f"get_global_id({x})"}
   uses_vload = True
-  type_map = { dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong" }
-  def render_cast(self, x, var_dtype, bitcast=False) -> str:
+  type_map = { dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong", dtypes.bfloat16: "ushort" }
+  def render_cast(self, x, var_dtype, from_dtype=None,  bitcast=False) -> str:
     return f"as_{self.render_dtype(var_dtype)}({x[0]})" if bitcast else super().render_cast(x, var_dtype)
-
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
-    if any(uop.dtype == dtypes.half for uop in uops): prefix = ["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"]
-    return super().render_kernel(function_name, kernel, bufs, uops, prefix)
+      if any(uop.dtype == dtypes.half for uop in uops): prefix = ["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"]
+      return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 OpenCLRenderer = functools.partial(uops_to_cstyle, OpenCLLanguage())
 
-# TODO: device name already part of UOp.WMMA, cast to/from bfloat can be done similarily
 class IntelLanguage(OpenCLLanguage):
   kernel_prefix = "__attribute__((intel_reqd_sub_group_size(8)))\n" + OpenCLLanguage.kernel_prefix
-  type_map = {**OpenCLLanguage.type_map, dtypes.bfloat16: "ushort"}
+  def render_dtype(self, var_dtype:DType) -> str:
+    return f"ushort{var_dtype.count}" if "bfloat16" in var_dtype.name else super().render_dtype(var_dtype)
+  def render_cast(self, x, var_dtype, from_dtype=None, bitcast=False) -> str:
+    return f"intel_convert_bfloat16_as_ushort({x[0]})" if (var_dtype, from_dtype) == (dtypes.bfloat16, dtypes.float) else \
+      (f"intel_convert_as_bfloat16_float({x[0]})" if (var_dtype, from_dtype) == (dtypes.float, dtypes.bfloat16) else \
+      super().render_cast(x, var_dtype, bitcast))
+
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
-    if any(uop.dtype == dtypes.half for uop in uops): prefix = ["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"]
     for arg in set([uop.arg for uop in uops if uop.uop is UOps.WMMA]):
-      prefix.append(f"""{arg[3].name}8 __{arg[0]}({arg[2].name}16 a, {arg[2].name}16 b, {arg[3].name}8 c) {{
-  return intel_sub_group_f16_f16_matrix_mad_k16(as_int8(a), as_int8(b), c);\n}}""")
+      dt_in = ("ushort", "bf16") if arg[2] == dtypes.bfloat16 else (arg[2].name, "f16")
+      prefix = [f"""{arg[3].name}8 __{arg[0]}({dt_in[0]}16 a, {dt_in[0]}16 b, {arg[3].name}8 c) {{
+  return intel_sub_group_{dt_in[1]}_{dt_in[1]}_matrix_mad_k16(as_int8(a), as_int8(b), c);\n}}"""]
     return super(OpenCLLanguage, self).render_kernel(function_name, kernel, bufs, uops, prefix)
 IntelRenderer = functools.partial(uops_to_cstyle, IntelLanguage())
 
@@ -223,7 +227,7 @@ class MetalLanguage(CStyleLanguage):
     UnaryOps.LOG2: lambda x,dtype: f"(bfloat)log2({x})" if dtype == dtypes.bfloat16 else f"log2({x})",
     UnaryOps.SIN: lambda x,dtype: f"(bfloat)sin({x})" if dtype == dtypes.bfloat16 else f"sin({x})",}
 
-  def render_cast(self, x: List[str], var_dtype: DType, bitcast=False) -> str:
+  def render_cast(self, x: List[str], var_dtype: DType, from_dtype=None, bitcast=False) -> str:
     return f"as_type<{self.render_dtype(var_dtype)}>({x[0]})" if bitcast else super().render_cast(x, var_dtype)
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):

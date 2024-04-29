@@ -1,12 +1,12 @@
 from __future__ import annotations
-from typing import Tuple, Optional, List, cast
+from typing import Tuple, Optional, List, cast, DefaultDict
 from collections import defaultdict
 import ctypes, functools, hashlib
 import tinygrad.runtime.autogen.opencl as cl
 from tinygrad.helpers import init_c_var, to_char_p_p, from_mv, OSX, DEBUG, flatten
 from tinygrad.renderer.cstyle import OpenCLRenderer, IntelRenderer
 from tinygrad.buffer import BufferOptions
-from tinygrad.device import Compiled, LRUAllocator, Compiler, CompilerOptions
+from tinygrad.device import Compiled, LRUAllocator, Compiler, CompilerOptions, Device
 
 # see test/external/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
 OSX_TIMING_RATIO = (125/3) if OSX else 1.0
@@ -85,7 +85,7 @@ class CLAllocator(LRUAllocator):
     self.device.synchronize()
 
 class CLDevice(Compiled):
-  platforms, device_ids = ["INTEL"], defaultdict(list)
+  device_ids: DefaultDict = defaultdict(list)
   def __init__(self, device:str=""):
     if not CLDevice.device_ids:
       num_platforms = init_c_var(ctypes.c_uint32(), lambda x: check(cl.clGetPlatformIDs(0, None, ctypes.byref(x))))
@@ -97,7 +97,7 @@ class CLDevice(Compiled):
           err = cl.clGetDeviceIDs(pfid, device_type, 0, None, ctypes.byref(num_devices))
           if err == 0 and num_devices.value != 0: break
         if num_devices.value == 0: continue
-        pfk = next((pf for pf in CLDevice.platforms if pf in pfname.value.decode().upper()), "MISC")
+        pfk = next((pf for pf in Device.specialized_cl_devs if pf in pfname.value.decode().upper()), "MISC")
         CLDevice.device_ids[pfk].extend(list(init_c_var((cl.cl_device_id * num_devices.value)(), lambda x: check(cl.clGetDeviceIDs(pfid, device_type, num_devices, x, None)))))  # noqa: E501
       if DEBUG >= 1: print(f"CLDevice: got {num_platforms.value} platforms and {len(flatten(CLDevice.device_ids.values()))} devices")
 
