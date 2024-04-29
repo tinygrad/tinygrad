@@ -5,7 +5,7 @@
 import unittest
 from typing import List, Optional, Union
 from tinygrad.tensor import Tensor
-from tinygrad.ops import LoadOps, ReduceOps
+from tinygrad.ops import BinaryOps, LoadOps, ReduceOps
 from tinygrad.helpers import DEBUG, GRAPH, flatten
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.graph import print_tree, realized_lazybuffer
@@ -566,6 +566,15 @@ class TestSchedule(unittest.TestCase):
     # c = a + 2
     # sched = check_schedule([b, c], 4)
     # doesn't store either in half because it doesn't chase
+
+  def test_fuse_contiguous_children(self):
+    a = Tensor.empty(4, 4, 4)
+    b = Tensor.empty(4, 4)
+    r = a.sum(axis=0) * b * 10
+    out0 = r.sum(axis=0) + 2
+    out1 = r.sum(axis=1) + 4
+    sched = check_schedule([out0, out1], 3)
+    assert sched[0].ast[0].src[0].op is BinaryOps.MUL
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
