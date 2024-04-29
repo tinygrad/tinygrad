@@ -242,9 +242,9 @@ class TestLinearizer(unittest.TestCase):
                                            tc.dtype_in, tc.dtype_out, tc_opt=0, ensure_triggered=False)
 
       # check excessive padding doesn't trigger padded TC in TC_OPT=2
-      helper_tc_ensure_uops_and_opts_count(tc.dims[0]//2, tc.dims[2], tc.dims[1], tc.dtype_in, tc.dtype_out, tc_opt=2, ensure_triggered=False)
-      helper_tc_ensure_uops_and_opts_count(tc.dims[0], tc.dims[2]//2, tc.dims[1], tc.dtype_in, tc.dtype_out, tc_opt=2, ensure_triggered=False)
-      helper_tc_ensure_uops_and_opts_count(tc.dims[0], tc.dims[2], tc.dims[1]//2, tc.dtype_in, tc.dtype_out, tc_opt=2, ensure_triggered=False)
+      helper_tc_ensure_uops_and_opts_count(tc.dims[0]//4, tc.dims[2], tc.dims[1], tc.dtype_in, tc.dtype_out, tc_opt=2, ensure_triggered=False)
+      helper_tc_ensure_uops_and_opts_count(tc.dims[0], tc.dims[2]//4, tc.dims[1], tc.dtype_in, tc.dtype_out, tc_opt=2, ensure_triggered=False)
+      helper_tc_ensure_uops_and_opts_count(tc.dims[0], tc.dims[2], tc.dims[1]//4, tc.dtype_in, tc.dtype_out, tc_opt=2, ensure_triggered=False)
 
       # check correctness
       helper_tc_allclose(tc.dims[1]+pad, tc.dims[2]+pad, tc.dims[0]+pad, tc.dtype_in, tc.dtype_out, tc_opt=2)
