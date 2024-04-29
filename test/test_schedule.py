@@ -582,5 +582,19 @@ class TestSchedule(unittest.TestCase):
     schedule = check_schedule(b, 2)
     assert schedule[0].ast[0].src[0].op is ReduceOps.MAX
 
+  def test_contiguous_child_midreduce_nofuse2(self):
+    a = Tensor.empty(32, 32)
+    b = (a.sum(0) + a.max(1)) + 2
+    c = (a.sum(0) + a.max(1)) + 4
+    Tensor.realize(b, c)
+
+  def test_contiguous_child_always_chase_multioutput(self):
+    a = Tensor.empty(32, 32)
+    c = Tensor.empty(32, 32)
+    out0 = (a.sum(axis=0) + 4) - c.sum(axis=0)
+    out1 = (a.sum(axis=0) + 4) * c.sum(axis=0)
+    schedule = check_schedule([out0, out1], 4)
+    assert schedule[0].ast[0].src[0].op is BinaryOps.ADD
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
