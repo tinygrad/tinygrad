@@ -1,11 +1,12 @@
 from __future__ import annotations
 from google.protobuf.internal.containers import RepeatedCompositeFieldContainer
 import importlib
+from functools import lru_cache
 import numpy as np
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.helpers import getenv, DEBUG, CI, OSX
 from tinygrad.dtype import ConstType
-from typing import List, Dict
+from typing import List, Dict, Union
 from onnx import AttributeProto, ModelProto, TensorProto, TypeProto
 try:
   from onnx.helper import tensor_dtype_to_np_dtype
@@ -14,16 +15,19 @@ except ImportError:
   from onnx.mapping import TENSOR_TYPE_TO_NP_TYPE
   tensor_dtype_to_np_dtype = lambda x: TENSOR_TYPE_TO_NP_TYPE[x]
 
-# global Tensor -> list cache for parameters
-to_python_cache = {}
-def safe_python(t, tobytes=False) -> ConstType:
+cache_misses = 0
+@lru_cache(None)
+def _cached_safe_python(t:Tensor, tobytes): return t.data().tobytes() if tobytes else t.tolist()
+
+# Tensor -> python value cache for parameters
+def safe_python(t, tobytes=False) -> Union[List[ConstType], List[bytes], Union[ConstType, bytes]]:
   if not isinstance(t, Tensor): return t
-  global to_python_cache
-  if (t, tobytes) not in to_python_cache:
-    if DEBUG >= 3: print("list cache miss", t)
-    tmp = t.data().tobytes() if tobytes else t.tolist()
-    to_python_cache[(t, tobytes)] = tmp
-  return to_python_cache[(t, tobytes)]
+  ret = _cached_safe_python(t, tobytes)
+  if (info := _cached_safe_python.cache_info()).misses > cache_misses and DEBUG >= 3:
+    print(f"Cache miss for {t}, {tobytes=}")
+    global cache_misses
+    cache_misses = info.misses
+  return ret
 
 # copied from helpers.py
 def is_dtype_supported(dtype, device: str = Device.DEFAULT):
