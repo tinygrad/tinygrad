@@ -168,9 +168,9 @@ def rand_flip(image, label, axis=(1, 2, 3)):
       label = np.flip(label, axis=ax).copy()
   return image, label
 
-def random_brightness_augmentation(image, factor=0.3, prob=0.1):
+def random_brightness_augmentation(image, low=0.7, high=1.3, prob=0.1):
   if random.random() < prob:
-    factor = np.random.uniform(low=1.0-factor, high=1.0+factor, size=1)
+    factor = np.random.uniform(low=low, high=high, size=1)
     image = (image * (1 + factor)).astype(image.dtype)
   return image
 

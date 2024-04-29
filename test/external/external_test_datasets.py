@@ -18,7 +18,7 @@ class ExternalTestDatasets(unittest.TestCase):
   def _create_sample(self):
     self._set_seed()
 
-    img, lbl = np.random.rand(190, 392, 392).astype(np.float32), np.random.randint(0, high=1024, size=(190, 392, 392)).astype(np.uint8)
+    img, lbl = np.random.rand(190, 392, 392).astype(np.float32), np.random.randint(0, 100, size=(190, 392, 392)).astype(np.uint8)
     img, lbl = nib.Nifti1Image(img, np.eye(4)), nib.Nifti1Image(lbl, np.eye(4))
 
     os.makedirs(tempfile.gettempdir() + "/case_0000", exist_ok=True)
