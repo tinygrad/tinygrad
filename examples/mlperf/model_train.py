@@ -460,6 +460,7 @@ def train_bert():
         eval_times.append(et - st)
 
       eval_step.reset()
+      Tensor.training = True
       total_lm_loss = sum(pair[0] for pair in eval_loss) / len(eval_loss)
       total_clsf_loss = sum(pair[1] for pair in eval_loss) / len(eval_loss)
       total_lm_accuracy = sum(pair[0] for pair in eval_accuracy) / len(eval_accuracy)
