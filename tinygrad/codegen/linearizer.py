@@ -449,7 +449,7 @@ class Linearizer(Kernel):
         ret.append(acc[off])
       for off in range(len(acc)):
         if input_acc[off] != acc[off]:
-          ret.append(self.uops.add(UOps.ALU, input_acc[off].dtype, (acc[off], input_acc[off]),
+          ret.append(self.uops.add(UOps.ALU, input_acc[off].dtype, (acc[off], input_acc[off]), \
                                    arg=ops[cast(ReduceOps, x.op)], insert_before=insert_before))
           acc[off] = self.uops.add(UOps.PHI, input_acc[off].dtype, (input_acc[off], ret[-1]) + tuple(loop_ctx), insert_before=insert_before)
     else:
