@@ -413,7 +413,6 @@ class TestTypeSpec(unittest.TestCase):
     # _assert_eq(Tensor.ones((2,3,0), dtype=dtypes.default_int).sum(2), dtypes.default_int, np.zeros((2, 3)))
     _assert_eq(Tensor.ones((2,3,0), dtype=dtypes.int32).sum(2), dtypes.int32, np.zeros((2, 3)))
 
-  @unittest.skipIf(Device.DEFAULT=="RHIP", "failed in HIP CI")
   @given(strat.sampled_from(dtype_ints), strat.sampled_from(dtype_floats))
   def test_arange(self, default_int, default_float):
     dtypes.default_int, dtypes.default_float = default_int, default_float
@@ -621,6 +620,11 @@ class TestAutoCastType(unittest.TestCase):
     t = Tensor([5, -5], dtype=dtypes.half, requires_grad=True)
     t.reshape(2, 1).expand(2, 10001).max().backward()
     np.testing.assert_allclose(t.grad.numpy(), [1, 0])
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  def test_mean_half_precision(self):
+    t = Tensor([60000, 60000, 60000], dtype=dtypes.half)
+    np.testing.assert_allclose(t.mean().numpy(), 60000)
 
 class TestImplicitFunctionTypeChange(unittest.TestCase):
   def test_functions(self):
