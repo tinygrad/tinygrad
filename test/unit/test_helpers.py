@@ -143,7 +143,7 @@ class TestRoundUp(unittest.TestCase):
 
 class TestFetch(unittest.TestCase):
   def test_fetch_bad_http(self):
-    self.assertRaises(Exception, fetch, 'http://www.google.com/404')
+    self.assertRaises(Exception, fetch, 'http://www.google.com/404', allow_caching=False)
 
   @unittest.skipIf(not CI, "pre commit tests should run offline")
   def test_fetch_small(self):
