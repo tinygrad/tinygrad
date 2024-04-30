@@ -15,7 +15,7 @@ actions += [Opt(op=OptOps.UNROLL, axis=axis, amt=amt) for amt in [0,4,7] for axi
 actions += [Opt(op=OptOps.LOCAL, axis=axis, amt=amt) for amt in [2,3,4,8,13,16,29] for axis in range(5)]
 actions += [Opt(op=OptOps.GROUPTOP, axis=axis, amt=amt) for amt in [13,16,28,29,32,49,64,256] for axis in range(3)]
 actions += [Opt(op=OptOps.GROUP, axis=axis, amt=amt) for amt in [0,4,8,16] for axis in range(3)]
-actions += [Opt(op=OptOps.PADTO, axis=axis, amt=amt) for amt in [32] for axis in range(7)]
+if getenv("BEAM_PADTO", 1): actions += [Opt(op=OptOps.PADTO, axis=axis, amt=amt) for amt in [32] for axis in range(7)]
 actions += [Opt(op=OptOps.LOCAL, axis=0, amt=32), Opt(op=OptOps.UPCASTMID, axis=1, amt=4), Opt(op=OptOps.TC, axis=0, amt=0)]
 actions += [Opt(op=OptOps.TC, axis=axis, amt=getenv("TC_OPT", 2)) for axis in range(9)] # covers resnet kernels (3 global * 3 reduce)
 if getenv("NOLOCALS"): actions += [Opt(op=OptOps.NOLOCALS)]
@@ -85,8 +85,8 @@ def bufs_from_lin(lin:Linearizer, allocate:bool=True) -> List[Buffer]:
 def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Linearizer]:
   acted_lins, max_up, max_lcl = {0:lin} if include_0 else {}, getenv("BEAM_UPCAST_MAX", 256), getenv("BEAM_LOCAL_MAX", 256)
   for i,a in enumerate(actions):
-    if a.axis is not None and a.op is not OptOps.TC and a.axis >= lin.shape_len: continue
-    if a.axis is not None and a.op is not OptOps.TC and lin.full_shape[a.axis] == a.amt and Opt(a.op, a.axis, 0) in actions: continue
+    if a.axis is not None and a.op is not OptOps.TC:
+      if (a.axis >= lin.shape_len) or (lin.full_shape[a.axis] == a.amt and Opt(a.op, a.axis, 0) in actions): continue
     lin2 = lin.copy()
     try:
       lin2.apply_opt(a)

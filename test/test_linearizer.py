@@ -23,7 +23,7 @@ def helper_realized_ast(r:Tensor):
   output_buffer = Buffer((out:=s[-1].outputs[0]).device, out.size, out.dtype).allocate()
   return s[-1].ast[0], [output_buffer] + list(s[-1].inputs)
 
-def helper_tc_allclose(m:int, k:int, n:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_opt:int=0):
+def helper_tc_allclose(n:int, m:int, k:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_opt:int=0):
   a, b = Tensor.rand(m, k, dtype=dtype_in), Tensor.rand(k, n, dtype=dtype_in)
   np_a, np_b = a.numpy(), b.numpy()
   r = a.matmul(b, acc_dtype=dtype_out)
@@ -42,7 +42,7 @@ def helper_tc_allclose(m:int, k:int, n:int, dtype_in:DType, dtype_out:DType, axi
   else: tc_atol, tc_rtol = 5e-3, 1e-4
   np.testing.assert_allclose(np_c, out, atol=tc_atol, rtol=tc_rtol)
 
-def helper_tc_ensure_uops_and_opts_count(m:int, k:int, n:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_opt:int=0, ensure_triggered:bool=True):
+def helper_tc_ensure_uops_and_opts_count(n: int, m:int, k:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_opt:int=0, ensure_triggered:bool=True):
   a, b = Tensor.rand(m, k, dtype=dtype_in), Tensor.rand(k, n, dtype=dtype_in)
   r = a.matmul(b, acc_dtype=dtype_out)
   sched = create_schedule([r.lazydata])
@@ -222,7 +222,7 @@ class TestLinearizer(unittest.TestCase):
       self.skipTest("device doesn't have tensor cores")
     for tc in tensor_cores[Device[Device.DEFAULT].compiler.compiler_opts.device]:
       if getenv("EMULATE_CUDA") and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
-      helper_tc_allclose(tc.dims[1], tc.dims[2], tc.dims[0], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
+      helper_tc_allclose(tc.dims[0], tc.dims[1], tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
 
   def test_tensor_cores_padded(self):
     if not Device[Device.DEFAULT].compiler.compiler_opts.has_tensor_cores:
@@ -232,22 +232,22 @@ class TestLinearizer(unittest.TestCase):
       pad = 1
 
       # check that TC is triggered for TC_OPT=2
-      helper_tc_ensure_uops_and_opts_count(tc.dims[0]+pad, tc.dims[2]+pad, tc.dims[1]+pad,
+      helper_tc_ensure_uops_and_opts_count(tc.dims[0]+pad, tc.dims[1]+pad, tc.dims[2]+pad,
                                            tc.dtype_in, tc.dtype_out, tc_opt=2, ensure_triggered=True)
 
       # check that TC is not triggered for TC_OPT<2
-      helper_tc_ensure_uops_and_opts_count(tc.dims[0]+pad, tc.dims[2]+pad, tc.dims[1]+pad,
+      helper_tc_ensure_uops_and_opts_count(tc.dims[0]+pad, tc.dims[1]+pad, tc.dims[2]+pad,
                                            tc.dtype_in, tc.dtype_out, tc_opt=1, ensure_triggered=False)
-      helper_tc_ensure_uops_and_opts_count(tc.dims[0]+pad, tc.dims[2]+pad, tc.dims[1]+pad,
+      helper_tc_ensure_uops_and_opts_count(tc.dims[0]+pad, tc.dims[1]+pad, tc.dims[2]+pad,
                                            tc.dtype_in, tc.dtype_out, tc_opt=0, ensure_triggered=False)
 
       # check excessive padding doesn't trigger padded TC in TC_OPT=2
-      helper_tc_ensure_uops_and_opts_count(tc.dims[0]//2, tc.dims[2], tc.dims[1], tc.dtype_in, tc.dtype_out, tc_opt=2, ensure_triggered=False)
-      helper_tc_ensure_uops_and_opts_count(tc.dims[0], tc.dims[2]//2, tc.dims[1], tc.dtype_in, tc.dtype_out, tc_opt=2, ensure_triggered=False)
-      helper_tc_ensure_uops_and_opts_count(tc.dims[0], tc.dims[2], tc.dims[1]//2, tc.dtype_in, tc.dtype_out, tc_opt=2, ensure_triggered=False)
+      helper_tc_ensure_uops_and_opts_count(tc.dims[0]//4, tc.dims[1], tc.dims[2], tc.dtype_in, tc.dtype_out, tc_opt=2, ensure_triggered=False)
+      helper_tc_ensure_uops_and_opts_count(tc.dims[0], tc.dims[1]//4, tc.dims[2], tc.dtype_in, tc.dtype_out, tc_opt=2, ensure_triggered=False)
+      helper_tc_ensure_uops_and_opts_count(tc.dims[0], tc.dims[1], tc.dims[2]//4, tc.dtype_in, tc.dtype_out, tc_opt=2, ensure_triggered=False)
 
       # check correctness
-      helper_tc_allclose(tc.dims[1]+pad, tc.dims[2]+pad, tc.dims[0]+pad, tc.dtype_in, tc.dtype_out, tc_opt=2)
+      helper_tc_allclose(tc.dims[0]+pad, tc.dims[1]+pad, tc.dims[2]+pad, tc.dtype_in, tc.dtype_out, tc_opt=2)
 
   @unittest.skipIf(Device.DEFAULT == "RHIP", "RHIP is really slow here")
   def test_tensor_cores_multi_reduce(self):
