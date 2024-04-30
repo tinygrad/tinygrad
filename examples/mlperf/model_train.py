@@ -257,6 +257,41 @@ def train_rnnt():
   # TODO: RNN-T
   pass
 
+@TinyJit
+def train_step_bert(model, optimizer, scheduler, input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor, masked_positions:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
+  lm_logits, clsf_logits = model(input_ids, segment_ids, attention_mask, masked_positions)
+  lm_loss = lm_logits.sparse_categorical_crossentropy(masked_lm_ids, ignore_index=masked_lm_weights)
+  clsf_loss = clsf_logits.binary_crossentropy_logits(next_sentence_labels)
+  loss = lm_loss + clsf_loss
+
+  if not getenv('DISABLE_BACKWARD', 0):
+    optimizer.zero_grad()
+    loss.backward()
+
+    optimizer.step()
+    scheduler.step()
+  return loss.realize()
+
+@TinyJit
+def eval_step_bert(model, input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor, masked_positions:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
+  lm_logits, clsf_logits = model(input_ids, segment_ids, attention_mask, masked_positions)
+
+  clsf_predictions = clsf_logits.log_softmax().argmax(-1)
+  clsf_accuracy = (clsf_predictions == next_sentence_labels).float().mean()
+
+  mlm_predictions = lm_logits.log_softmax().argmax(-1)
+  mask = (masked_lm_weights == 1.0)
+  mlm_accuracy = (mlm_predictions == masked_lm_ids).where(mask, 0).sum() / mask.float().sum()
+
+  lm_loss = lm_logits.sparse_categorical_crossentropy(masked_lm_ids, ignore_index=masked_lm_weights)
+  clsf_loss = clsf_logits.binary_crossentropy_logits(next_sentence_labels)
+  return {
+    "masked_lm_accuracy": mlm_accuracy.realize(), 
+    "masked_lm_loss": lm_loss.realize(), 
+    "next_sentence_accuracy": clsf_accuracy.realize(), 
+    "next_sentence_loss": clsf_loss.realize()
+    }
+
 def train_bert():
   # NOTE: pip install tensorflow, wandb required
   from examples.mlperf.dataloader import batch_load_train_bert, batch_load_val_bert
@@ -335,41 +370,6 @@ def train_bert():
 
   BENCHMARK = getenv("BENCHMARK")
 
-  @TinyJit
-  def train_step(input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor, masked_positions:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
-    lm_logits, clsf_logits = model(input_ids, segment_ids, attention_mask, masked_positions)
-    lm_loss = lm_logits.sparse_categorical_crossentropy(masked_lm_ids, ignore_index=masked_lm_weights)
-    clsf_loss = clsf_logits.binary_crossentropy_logits(next_sentence_labels)
-    loss = lm_loss + clsf_loss
-
-    if not getenv('DISABLE_BACKWARD', 0):
-      optimizer_group.zero_grad()
-      loss.backward()
-
-      optimizer_group.step()
-      scheduler.step()
-    return loss.realize()
-
-  @TinyJit
-  def eval_step(input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor, masked_positions:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
-    lm_logits, clsf_logits = model(input_ids, segment_ids, attention_mask, masked_positions)
-
-    clsf_predictions = clsf_logits.log_softmax().argmax(-1)
-    clsf_accuracy = (clsf_predictions == next_sentence_labels).float().mean()
-
-    mlm_predictions = lm_logits.log_softmax().argmax(-1)
-    mask = (masked_lm_weights == 1.0)
-    mlm_accuracy = (mlm_predictions == masked_lm_ids).where(mask, 0).sum() / mask.float().sum()
-
-    lm_loss = lm_logits.sparse_categorical_crossentropy(masked_lm_ids, ignore_index=masked_lm_weights)
-    clsf_loss = clsf_logits.binary_crossentropy_logits(next_sentence_labels)
-    return {
-      "masked_lm_accuracy": mlm_accuracy.realize(), 
-      "masked_lm_loss": lm_loss.realize(), 
-      "next_sentence_accuracy": clsf_accuracy.realize(), 
-      "next_sentence_loss": clsf_loss.realize()
-      }
-
   def data_get(it):
     data: dict[str, Tensor] = next(it)
     for key in data.keys(): data[key].shard_(GPUS, axis=0)
@@ -387,7 +387,7 @@ def train_bert():
   while train_data is not None and i < train_steps and not achieved:
     st = time.perf_counter()
     GlobalCounters.reset()
-    loss = train_step(train_data["input_ids"], train_data["segment_ids"], train_data["input_mask"], train_data["masked_lm_positions"], \
+    loss = train_step_bert(model, optimizer_group, scheduler, train_data["input_ids"], train_data["segment_ids"], train_data["input_mask"], train_data["masked_lm_positions"], \
                       train_data["masked_lm_ids"], train_data["masked_lm_weights"], train_data["next_sentence_labels"])
 
     pt = time.perf_counter()
@@ -427,7 +427,7 @@ def train_bert():
 
     # ** eval loop **
     if i % eval_step_freq == 0 or i == 1:
-      train_step.reset()  # free the train step memory :(
+      train_step_bert.reset()  # free the train step memory :(
       eval_loss = []
       eval_accuracy = []
       eval_times = []
@@ -439,7 +439,7 @@ def train_bert():
         GlobalCounters.reset()
         st = time.time()
 
-        eval_result: dict[str, Tensor] = eval_step(eval_data["input_ids"], eval_data["segment_ids"], eval_data["input_mask"], eval_data["masked_lm_positions"], \
+        eval_result: dict[str, Tensor] = eval_step_bert(model, eval_data["input_ids"], eval_data["segment_ids"], eval_data["input_mask"], eval_data["masked_lm_positions"], \
                                                   eval_data["masked_lm_ids"], eval_data["masked_lm_weights"], eval_data["next_sentence_labels"])
 
         lm_loss, clsf_loss  = eval_result["masked_lm_loss"].numpy().item(), eval_result["next_sentence_loss"].numpy().item()
@@ -450,7 +450,7 @@ def train_bert():
         et = time.time()
         eval_times.append(et - st)
 
-      eval_step.reset()
+      eval_step_bert.reset()
       Tensor.training = True
       total_lm_loss = sum(pair[0] for pair in eval_loss) / len(eval_loss)
       total_clsf_loss = sum(pair[1] for pair in eval_loss) / len(eval_loss)
