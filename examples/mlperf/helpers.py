@@ -4,6 +4,7 @@ import numpy as np
 from tinygrad.nn import state
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
+from tinygrad.nn.state import get_state_dict
 
 #
 # checkpointing utils
@@ -216,6 +217,23 @@ def get_mlperf_bert_model(config_path:str):
     config["attention_probs_dropout_prob"], 
     config["hidden_dropout_prob"]
   )
+
+def init_bert_from_checkpoint(model, ckpt_dir:str):
+  for tinygrad_key, x in get_state_dict(model).items():
+    if not tinygrad_key.endswith("lm_output.weight"): # lm_output.weight already is word embedding
+      t = load_from_tf2_ckpt(key=tinygrad_key, ckpt_dir=ckpt_dir)
+      if any(k in tinygrad_key for k in ["intermediate.dense.weight", "output.dense.weight", "clsf_output.weight"]) and "attention" not in tinygrad_key:
+        t = t.transpose() 
+      elif any(k in tinygrad_key for k in ["self", "output.dense", "clsf_pooler", "lm_transform"]) and "weight" in tinygrad_key:
+        t = t.reshape(*x.shape).transpose()
+      elif all(k in tinygrad_key for k in ["self", "bias"]):
+        t = t.reshape(*x.shape)
+      x.assign(t)
+
+def get_data_bert(GPUS:list[str], it):
+  data: dict[str, Tensor] = next(it)
+  for key in data.keys(): data[key].shard_(GPUS, axis=0)
+  return data
 
 @functools.lru_cache(maxsize=None)
 def load_tf_weights_to_dict(checkpoint_path):
