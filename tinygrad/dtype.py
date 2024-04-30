@@ -3,8 +3,9 @@ from dataclasses import dataclass
 import numpy as np  # TODO: remove numpy
 import functools
 from tinygrad.helpers import getenv
+from tinygrad.shape.symbolic import Variable
 
-ConstType = Union[float, int, bool]
+ConstType = Union[float, int, bool, Variable]
 
 @dataclass(frozen=True, order=True)
 class DType:
