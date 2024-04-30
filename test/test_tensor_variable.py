@@ -1,4 +1,5 @@
 import unittest
+import numpy as np
 from tinygrad import Tensor, Variable
 
 class TestTensorVariable(unittest.TestCase):
@@ -30,6 +31,24 @@ class TestTensorVariable(unittest.TestCase):
     t = Tensor.ones(2, 2).contiguous().reshape(2, vv)
     ret = t.mean().item()
     assert ret == 1
+
+  def test_symbolic_mean_2d(self):
+    vv = Variable("a", 1, 10)
+    vv.bind(2)
+    vv2 = Variable("b", 1, 10)
+    vv2.bind(2)
+    t = Tensor.ones(2, 2).contiguous().reshape(vv2, vv)
+    ret = t.mean().item()
+    assert ret == 1
+
+  def test_symbolic_mean_2d_axis_1(self):
+    vv = Variable("a", 1, 10)
+    vv.bind(2)
+    vv2 = Variable("b", 1, 10)
+    vv2.bind(2)
+    t = Tensor.ones(2, 2).contiguous().reshape(vv2, vv)
+    ret = t.mean(axis=1).reshape(2, 1).numpy()
+    assert np.all(ret == 1)
 
   @unittest.skip("symbolic arange isn't supported")
   def test_symbolic_arange(self):

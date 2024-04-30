@@ -271,8 +271,8 @@ class Tensor:
   @staticmethod
   def from_node(y:Node, **kwargs) -> Tensor:
     if isinstance(y, MulNode): return Tensor.from_node(y.a, **kwargs) * y.b
-    elif isinstance(y, Variable): return Tensor(y, **kwargs, requires_grad=False)
-    raise Exception(f"unhandled Node {y}")
+    if isinstance(y, Variable): return Tensor(y, **kwargs, requires_grad=False)
+    raise RuntimeError(f"unhandled Node {y}")
 
   # ***** creation llop entrypoint *****
 
