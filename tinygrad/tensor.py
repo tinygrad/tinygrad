@@ -785,28 +785,39 @@ class Tensor:
       # calc_dim to get dim and use that to normalize the negative tensor indices
       idx: Dict[int,Tensor] = {(dim := calc_dim(td)):(tensor<0).where(ret.shape[dim],0) + tensor for td,tensor in zip(type_dim[Tensor], tensor_index)}
 
-      masks, first_dim, last_dim = [], min(idx.keys()), max(idx.keys())
-      pre_reduce_shape = ret.shape[:first_dim] + (big_shape := broadcast_shape(*(t.shape for t in idx.values()))) + ret.shape[first_dim:]
+      from tinygrad.shape.view import IndexedView
+      from tinygrad.shape.shapetracker import ShapeTracker
+      # NOTE: both shape and strides can be predetermined using shapes of idxs and self, even for fancy too
+      idx_lbs = tuple(i.lazydata for i in idx.values())
+      idx_dts = tuple(i.dtype for i in idx.values())
+      self.lazydata = self.lazydata._view(self.lazydata.st + ShapeTracker(views=(IndexedView(idxs=idx_lbs, dims=(0,),
+                                                                                             dtype=idx_dts, shape=(2,), strides=(1,)),)))
+      return self
+      # self.realize()
+      # idx
 
-      # create masks
-      for dim, i in idx.items():
-        try: i = i.reshape(i.shape + (1,)*(ret.ndim - first_dim)).expand(pre_reduce_shape)
-        except ValueError as exc: raise IndexError("cannot broadcast indices") from exc
-        a = Tensor.arange(ret.shape[dim], device=self.device, requires_grad=False).reshape((ret.shape[dim],) + (1,)*(ret.ndim - dim - 1))
-        masks.append(i == a)
+    #   masks, first_dim, last_dim = [], min(idx.keys()), max(idx.keys())
+    #   pre_reduce_shape = ret.shape[:first_dim] + (big_shape := broadcast_shape(*(t.shape for t in idx.values()))) + ret.shape[first_dim:]
 
-      # reduce masks to 1 mask
-      mask: Tensor = functools.reduce(lambda x,y: x.mul(y), masks)
+    #   # create masks
+    #   for dim, i in idx.items():
+    #     try: i = i.reshape(i.shape + (1,)*(ret.ndim - first_dim)).expand(pre_reduce_shape)
+    #     except ValueError as exc: raise IndexError("cannot broadcast indices") from exc
+    #     a = Tensor.arange(ret.shape[dim], device=self.device, requires_grad=False).reshape((ret.shape[dim],) + (1,)*(ret.ndim - dim - 1))
+    #     masks.append(i == a)
 
-      # inject 1's for the extra dims added in create masks
-      sh = ret.shape[:first_dim] + (1,) * len(big_shape) + ret.shape[first_dim:]
-      # sum reduce the extra dims introduced in create masks
-      ret = (ret.reshape(sh) * mask).sum(tuple(i + len(big_shape) for i in idx.keys()), acc_dtype=ret.dtype)
+    #   # reduce masks to 1 mask
+    #   mask: Tensor = functools.reduce(lambda x,y: x.mul(y), masks)
 
-      # special permute case
-      if first_dim != 0 and len(idx) != 1 and tuple(idx.keys()) != tuple(range(first_dim, last_dim+1)):
-        ret = ret.permute(*range(first_dim, first_dim+len(big_shape)), *range(0, first_dim), *range(first_dim+len(big_shape), ret.ndim))
-    return ret
+    #   # inject 1's for the extra dims added in create masks
+    #   sh = ret.shape[:first_dim] + (1,) * len(big_shape) + ret.shape[first_dim:]
+    #   # sum reduce the extra dims introduced in create masks
+    #   ret = (ret.reshape(sh) * mask).sum(tuple(i + len(big_shape) for i in idx.keys()), acc_dtype=ret.dtype)
+
+    #   # special permute case
+    #   if first_dim != 0 and len(idx) != 1 and tuple(idx.keys()) != tuple(range(first_dim, last_dim+1)):
+    #     ret = ret.permute(*range(first_dim, first_dim+len(big_shape)), *range(0, first_dim), *range(first_dim+len(big_shape), ret.ndim))
+    # return ret
 
   def __setitem__(self, indices, v:Union[Tensor, ConstType]) -> None:
     if isinstance(self.device, str) and self.device.startswith("DISK"):
@@ -816,6 +827,19 @@ class Tensor:
     assert all(lb.st.contiguous for lb in self.lazydata.lbs), "setitem target needs to be contiguous"
     if not isinstance(v, (Tensor, float, int, bool)): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
+    # TODO: implement IndexedView
+    # t = Tensor.zeros(6).contiguous().realize()
+    # t[Tensor([2.,3.])] = 1
+
+    # if not isinstance(indices, tuple): indices = (indices,)
+    # if isinstance(indices[0], Tensor):
+    #   from tinygrad.shape.view import IndexedView
+    #   from tinygrad.shape.symbolic import Index
+    #   from tinygrad.shape.shapetracker import ShapeTracker
+    #   idx = tuple(Index('v', 0, self.shape[i]).bind(idx, i) for i,idx in enumerate(indices))
+    #   self.lazydata.st = self.lazydata.st + ShapeTracker(views=(IndexedView(idxs=idx, shape=(6,), strides=(1,)),))
+    #   self.realize()
+    #   return
     assign_to = self.realize().__getitem__(indices)
     # NOTE: contiguous to prevent const folding.
     v = v._broadcast_to(broadcast_shape(assign_to.shape, v.shape)).contiguous()

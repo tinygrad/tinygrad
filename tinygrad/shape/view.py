@@ -1,9 +1,10 @@
 from __future__ import annotations
 import functools, operator, itertools, math
-from dataclasses import dataclass
-from typing import Tuple, List, Optional, Dict, Set, cast
+from dataclasses import dataclass, field
+from typing import Tuple, List, Optional, Dict, Set, cast, Any
+from tinygrad.dtype import DType
 from tinygrad.helpers import prod, all_int, argsort
-from tinygrad.shape.symbolic import Node, NumNode, Variable, sint
+from tinygrad.shape.symbolic import Node, NumNode, Variable, sint, Index
 
 @functools.lru_cache(maxsize=None)
 def canonicalize_strides(shape:Tuple[sint, ...], strides:Tuple[sint, ...]) -> Tuple[sint, ...]:
@@ -294,3 +295,35 @@ class View:
         return View.create(new_shape, new_strides, self.offset + extra_offset, new_mask)
 
     return None
+
+# NOTE: NOT NO COPY DUH
+@dataclass(frozen=True)
+class IndexedView(View):
+  # TODO: Any is LazyBuffer but circular import bleh
+  idxs: Tuple[Any, ...] = field(default_factory=tuple)
+  dims: Tuple[int, ...] = field(default_factory=tuple)
+  dtype: Tuple[DType, ...] = field(default_factory=tuple)
+  shape: Tuple[sint, ...]
+  strides: Tuple[sint, ...]
+
+  offset:sint = 0
+  mask:Optional[Tuple[Tuple[sint, sint], ...]] = None
+  contiguous:bool = True
+
+  def unbind(self): return self, {}
+
+# @dataclass(frozen=True)
+# class IndexedView(View):
+#   idxs: Tuple[Index, ...] = field(default_factory=tuple)
+#   shape:Tuple[sint, ...]
+#   strides:Tuple[sint, ...]
+#
+#   offset:sint = 0
+#   mask:Optional[Tuple[Tuple[sint, sint], ...]] = None
+#   contiguous:bool = True
+#
+#   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
+#   def unbind(self): return self, dict(i.unbind() for i in self.idxs)
+#   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
+#   def vars(self) -> Set[Index]:
+#     return set(self.idxs)

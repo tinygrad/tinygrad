@@ -7,6 +7,7 @@ from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, ConstType
 from tinygrad.helpers import colored, DEBUG, prod, getenv, to_function_name
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ConstBuffer, MemBuffer, BufferOps
 from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.shape.view import IndexedView
 from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, create_lt_node
 from tinygrad.codegen.kernel import LocalBuffer, Kernel
 from tinygrad.features.image import to_image_idx
@@ -320,6 +321,8 @@ class Linearizer(Kernel):
 
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
   def linearize(self):
+    print("BUFSBUFSBUFSBUFSBUFSBUFSBUFSBUFSBUFS", self.bufs)
+    print("VARSVARSVARSVARSVARSVARSVARSVARS", self.vars)
     # no new opts and we already ran? skip relinearizing
     if self.applied_opts == self.applied_opts_cache: return self
 
@@ -349,6 +352,20 @@ class Linearizer(Kernel):
         self.buf_uops[i] = self.uops.add(UOps.DEFINE_GLOBAL,
                                          buf.dtype if isinstance(buf.dtype, ImageDType) else PtrDType(buf.dtype), (),
                                          (buf.idx, f"data{buf.idx}", any(buf.idx == x.idx for x in self.outbufs)))
+
+    # add global buffers for indexed buffers
+    global_buf_uop_to_idx_bufs_uop = defaultdict(list)
+    for i,buf in enumerate(self.bufs):
+      if isinstance(buf, MemBuffer):
+        for v in buf.st.views:
+          if isinstance(v, IndexedView):
+            for idx, dim, dt in zip(v.idxs, v.dims, v.dtype):
+              idx_buf_uop = self.uops.add(UOps.DEFINE_GLOBAL, PtrDType(dt), (), (len(self.buf_uops), f"idx{dim}", False))
+              global_buf_uop_to_idx_bufs_uop[buf].append(idx_buf_uop)
+              self.buf_uops.append(idx_buf_uop)
+              self.bufs.append(MemBuffer(len(self.buf_uops), dt, idx.st))
+              self.sts.append(idx.st)
+
     # add var vals
     for i,var in enumerate(self.vars):
       assert var.expr is not None
@@ -405,11 +422,31 @@ class Linearizer(Kernel):
 
     # load latebufs
     loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs) \
-                           for i,b in enumerate(self.bufs) if b not in self.earlybufs and b.__class__ is not LocalBuffer})
+                           for i,b in enumerate(self.bufs) if b not in self.earlybufs and b.__class__ is not LocalBuffer and \
+                            not any(isinstance(v, IndexedView) for v in b.st.views)})
+
+    loaded_idx_uop = defaultdict(list)
+    for i,b in enumerate(self.bufs):
+      if any(isinstance(v, IndexedView) for v in b.st.views):
+        # 0 here cuz idk only 1 idx easy
+        uop = global_buf_uop_to_idx_bufs_uop[b][0]
+        idx_load = self.global_load(self.buf_uops.index(uop), global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs)
+        loaded_buffers.update({b:idx_load})
+
+        for v in b.st.views:
+          if isinstance(v, IndexedView):
+            for idx, dim, dt in zip(v.idxs, v.dims, v.dtype):
+              loaded_uop = self.uops.add(UOps.LOAD, dt, (self.buf_uops[i], idx_load[0]))
+              loaded_idx_uop[b].append(loaded_uop)
 
     # run late AST (without the store)
     for op in self.ast:
       val = self.ast_parse(op.src[0], acc, None, loaded_buffers)
+
+      for view in op.src[0].arg.st.views:
+        if isinstance(view, IndexedView):
+          val = loaded_idx_uop[op.src[0].arg]
+
       self.global_store(op.arg.idx, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val)
 
     # optimize the uops

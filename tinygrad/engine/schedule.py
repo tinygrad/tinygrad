@@ -9,6 +9,7 @@ from tinygrad.shape.symbolic import Variable
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.shape.view import IndexedView
 
 # creation can recurse a lot
 sys.setrecursionlimit(10000)
@@ -28,6 +29,8 @@ class _LBScheduleItem:
 def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outbufs:Tuple[LazyBuffer, ...], var_vals:Dict[Variable, int], st:ShapeTracker,
                       realizes:Dict[LazyBuffer, None], cache, assign_to:Optional[LazyBuffer]=None, assign_idx:Optional[int]=None) -> LazyOp:
   if (buf, st) in cache: return cache[(buf, st)]
+  indexed_views = tuple(i for i in buf.st.views if isinstance(i, IndexedView))
+  # TODO this is adding an extra st at the end of indexedview
   if buf != buf.base:
     st = buf.st + st
     buf = buf.base
@@ -53,6 +56,8 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outbufs:Tuple[Laz
           raise RuntimeError(f"must be contiguous for assign {unbound_st}")
       return LazyOp(BufferOps.LOAD, (), MemBuffer(assign_idx, buf.dtype, unbound_st))
     if buf not in inputs: inputs.append(buf)
+    for view in indexed_views:
+      for idx in view.idxs: inputs.append(idx)
     return LazyOp(BufferOps.LOAD, (), MemBuffer(len(outbufs)+inputs.index(buf), buf.dtype, unbound_st))
 
   # if a CONTIGUOUS or ASSIGN made it all the way here, just skip it

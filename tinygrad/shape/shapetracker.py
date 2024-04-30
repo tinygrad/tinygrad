@@ -1,10 +1,10 @@
 # ShapeTracker allows movement operations to a buffer that don't require a copy to be made.
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, Dict, Set, Iterable, cast
+from typing import Tuple, List, Optional, Dict, Set, Iterable, cast, Union
 from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, NumNode, create_lt_node, create_ge_node, sint
-from tinygrad.shape.view import View
+from tinygrad.shape.view import View, IndexedView
 
 def _expr_view(view:View, idxs:List[Node], valid:Optional[Node]=None) -> Tuple[Node, Node]:
   assert len(idxs) == len(view.shape), f"need an idx for all dimensions {idxs} vs {view.shape}"
@@ -17,11 +17,12 @@ def _expr_view(view:View, idxs:List[Node], valid:Optional[Node]=None) -> Tuple[N
 
 @dataclass(frozen=True)
 class ShapeTracker:
-  views: Tuple[View, ...]
+  views: Tuple[Union[View, IndexedView], ...]
 
   def __add__(self, st:ShapeTracker) -> ShapeTracker:
     ret = self
-    for v in st.views: ret = ShapeTracker(ret.views + (v,)).simplify() # one view at a time = better simplification
+    # for v in st.views: ret = ShapeTracker(ret.views + (v,)).simplify() # one view at a time = better simplification
+    for v in st.views: ret = ShapeTracker(ret.views + (v,))
     return ret
 
   def invert(self, out_shape:Tuple[sint, ...]) -> Optional[ShapeTracker]:
@@ -98,8 +99,9 @@ class ShapeTracker:
     return f'idx{axis}' in [v.expr for v in valid.vars()]
 
   def simplify(self) -> ShapeTracker:
-    if len(self.views) >= 2 and (new_view := self.views[-2] + self.views[-1]) is not None:
-      return ShapeTracker(self.views[:-2] + (new_view,)).simplify()
+    print('simplify: ', self)
+    # if len(self.views) >= 2 and (new_view := self.views[-2] + self.views[-1]) is not None:
+      # return ShapeTracker(self.views[:-2] + (new_view,)).simplify()
     return self
 
   # *** under this line are the movement ops ***
