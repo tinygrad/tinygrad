@@ -36,9 +36,9 @@ def eval_step(input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor, maske
   lm_loss = lm_logits.sparse_categorical_crossentropy(masked_lm_ids, ignore_index=masked_lm_weights)
   clsf_loss = clsf_logits.binary_crossentropy_logits(next_sentence_labels)
   return {
-    "masked_lm_accuracy": mlm_accuracy.realize(), 
-    "masked_lm_loss": lm_loss.realize(), 
-    "next_sentence_accuracy": clsf_accuracy.realize(), 
+    "masked_lm_accuracy": mlm_accuracy.realize(),
+    "masked_lm_loss": lm_loss.realize(),
+    "next_sentence_accuracy": clsf_accuracy.realize(),
     "next_sentence_loss": clsf_loss.realize()
     }
 
