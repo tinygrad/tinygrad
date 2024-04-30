@@ -8,11 +8,21 @@ class TestTensorVariable(unittest.TestCase):
     ret = (Tensor(vv) + 3).item()
     assert ret == 4
 
-  def test_inner_tvar(self):
+  def test_inner_tvar_node(self):
     vv = Variable("w", 0, 10)
     vv.bind(2)
     ret = Tensor.from_node(vv * 4).item()
     assert ret == 8
+
+  def test_inner_tvar_mul(self):
+    vv = Variable("w", 0, 10)
+    vv.bind(2)
+    assert (Tensor(3) * vv).item() == 6
+
+  def test_inner_tvar_mul_node(self):
+    vv = Variable("w", 0, 10)
+    vv.bind(2)
+    assert (Tensor(3) * (vv * 4)).item() == 24
 
   def test_symbolic_mean(self):
     vv = Variable("a", 1, 10)
