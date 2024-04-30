@@ -222,8 +222,6 @@ class Tensor:
     """
     Returns the value of this tensor as a nested list.
 
-    Currently this only works for flattened tensors.
-
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([1, 2, 3, 4])
     print(t.tolist())
@@ -516,7 +514,8 @@ class Tensor:
     t = Tensor.randint(2, 3, low=5, high=10)
     print(t.numpy())
     """
-    return Tensor.uniform(*shape, low=low, high=high, dtype=dtypes.int32, **kwargs)
+    assert dtypes.is_int(dtype := kwargs.pop("dtype", dtypes.int32)), f"Unsupported dtype {dtype} for randint"
+    return Tensor.uniform(*shape, low=low, high=high, dtype=dtype, **kwargs)
 
   @staticmethod
   def normal(*shape, mean=0.0, std=1.0, **kwargs) -> Tensor:

@@ -1,4 +1,5 @@
 import math
+from typing import Union, Tuple
 
 from tinygrad import Tensor, nn, dtypes
 from tinygrad.helpers import prod, argfix
@@ -33,3 +34,35 @@ class Linear(nn.Linear):
     if bias: self.bias = Tensor.zeros(out_features, dtype=dtypes.float32)
   def __call__(self, x:Tensor):
     return x.linear(self.weight.cast(dtypes.default_float).transpose(), self.bias.cast(dtypes.default_float) if self.bias is not None else None)
+
+class LinearBert(nn.Linear):
+  def __init__(self, in_features, out_features, bias=True, std=0.02):
+    self.weight = std * rand_truncn(out_features, in_features, dtype=dtypes.float32)
+    self.bias = Tensor.zeros(out_features, dtype=dtypes.float32) if bias else None
+  
+  def __call__(self, x:Tensor):
+    return x.linear(self.weight.cast(dtypes.default_float).transpose(), self.bias.cast(dtypes.default_float) if self.bias is not None else None)
+
+class EmbeddingBert(nn.Embedding):
+  def __init__(self, vocab_size:int, embed_size:int, std=0.02):
+    self.vocab_sz, self.embed_sz = vocab_size, embed_size
+    self.weight = std * rand_truncn(vocab_size, embed_size, dtype=dtypes.float32)
+
+  def __call__(self, idx:Tensor) -> Tensor:
+    if idx.numel() == 0: return Tensor.empty(idx.shape+(self.embed_sz,), dtype=self.weight.dtype, device=self.weight.device)
+    arange_shp, weight_shp, big_shp = (1, 1, self.vocab_sz, 1), (1, 1, self.vocab_sz, self.embed_sz), idx.shape+(self.vocab_sz, self.embed_sz,)
+    if not hasattr(self, 'arange'): self.arange = Tensor.arange(self.vocab_sz, requires_grad=False, device=self.weight.device).reshape(arange_shp)
+    arange, idx, vals = self.arange.expand(big_shp), idx.reshape(idx.shape+(1, 1,)).expand(big_shp), self.weight.cast(dtypes.default_float).reshape(weight_shp).expand(big_shp)
+    return (arange == idx).mul(vals).sum(2, acc_dtype=vals.dtype)
+
+class LayerNormBert:
+  def __init__(self, normalized_shape:Union[int, Tuple[int, ...]], eps:float=1e-12, elementwise_affine:bool=True):
+    self.normalized_shape = (normalized_shape,) if isinstance(normalized_shape, int) else tuple(normalized_shape)
+    self.axis, self.eps, self.elementwise_affine = tuple(-1-i for i in range(len(self.normalized_shape))), eps, elementwise_affine
+    self.weight, self.bias = (Tensor.ones(*self.normalized_shape, dtype=dtypes.float32), Tensor.zeros(*self.normalized_shape, dtype=dtypes.float32)) if elementwise_affine else (None, None)
+
+  def __call__(self, x:Tensor):
+    assert self.normalized_shape == x.shape[-len(self.normalized_shape):], f"last dimensions of {x.shape} must match {self.normalized_shape}"
+    xn = x.cast(dtypes.float32).layernorm(eps=self.eps, axis=self.axis).cast(x.dtype)
+    if not self.elementwise_affine: return xn
+    return (xn * self.weight.cast(dtypes.default_float) + self.bias.cast(dtypes.default_float))
