@@ -249,6 +249,7 @@ class TestLinearizer(unittest.TestCase):
       # check correctness
       helper_tc_allclose(tc.dims[1]+pad, tc.dims[2]+pad, tc.dims[0]+pad, tc.dtype_in, tc.dtype_out, tc_opt=2)
 
+  @unittest.skipIf(Device.DEFAULT == "RHIP", "RHIP is really slow here")
   def test_tensor_cores_multi_reduce(self):
     if not Device[Device.DEFAULT].compiler.compiler_opts.has_tensor_cores:
       self.skipTest("device doesn't have tensor cores")
@@ -273,8 +274,15 @@ class TestLinearizer(unittest.TestCase):
         prg.exec(real_bufs)
         result = np.frombuffer(real_bufs[0].as_buffer(), real_bufs[0].dtype.np)
 
+        # ensure the results for each choice of axis matches
         if golden_result is None: golden_result = np.frombuffer(real_bufs[0].as_buffer(), real_bufs[0].dtype.np)
         np.testing.assert_allclose(result, golden_result, atol=0.1, rtol=0.15)
+
+      # check that get_linearizer_actions produces all 9 options
+      from tinygrad.features.search import get_linearizer_actions
+      tc_actions = [k for i, k in get_linearizer_actions(Linearizer(realized_ast), False).items() if k.applied_opts[0].op == OptOps.TC]
+      assert len(tc_actions) == 9, f"get_linearizer_actions should contain 9 possible TC actions, only got {len(tc_actions)}"
+
 
   def test_limit_dims_to_max_5d_global(self):
     t = Tensor.empty(3, 4, 5, 6, 7).pad(((1, 1), (1, 1), (1, 1), (1, 1), (1, 1))) + 1

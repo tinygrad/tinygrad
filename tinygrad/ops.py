@@ -13,11 +13,18 @@ from tinygrad.buffer import Buffer
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
 # NOTE: MOD, CMPLT don't have to be implemented on vectors, just scalars
 # NOTE: many GPUs don't have DIV, but UnaryOps.RECIP doesn't work for integer division
-class UnaryOps(Enum): EXP2 = auto(); LOG2 = auto(); CAST = auto(); SIN = auto(); SQRT = auto(); NEG = auto() # noqa: E702
+class UnaryOps(Enum):
+  """A -> A (elementwise)"""
+  EXP2 = auto(); LOG2 = auto(); CAST = auto(); SIN = auto(); SQRT = auto(); NEG = auto() # noqa: E702
 class BinaryOps(Enum):
+  """A + A -> A (elementwise)"""
   ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); CMPEQ = auto(); XOR = auto() # noqa: E702
-class TernaryOps(Enum): WHERE = auto(); MULACC = auto() # noqa: E702
-class ReduceOps(Enum): SUM = auto(); MAX = auto() # noqa: E702
+class TernaryOps(Enum):
+  """A + A + A -> A (elementwise)"""
+  WHERE = auto(); MULACC = auto() # noqa: E702
+class ReduceOps(Enum):
+  """A -> B (reduce)"""
+  SUM = auto(); MAX = auto() # noqa: E702
 class BufferOps(Enum): LOAD = auto(); CONST = auto(); STORE = auto() # noqa: E702
 class LoadOps(Enum): EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); CUSTOM = auto(); ASSIGN = auto() # noqa: E702
 
