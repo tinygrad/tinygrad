@@ -789,9 +789,9 @@ class Tensor:
       # NOTE: both shape and strides can be predetermined using shapes of idxs and self, even for fancy too
       idx_lbs = tuple(i.lazydata for i in idx.values())
       idx_dts = tuple(i.dtype for i in idx.values())
-      self.lazydata = self.lazydata._view(self.lazydata.st + ShapeTracker(views=(IndexedView(idxs=idx_lbs, dims=(0,),
+      ret.lazydata = ret.lazydata._view(ret.lazydata.st + ShapeTracker(views=(IndexedView(idxs=idx_lbs, dims=(0,),
                                                                                              dtype=idx_dts, shape=(2,), strides=(1,)),)))
-      return self
+    return ret
       # self.realize()
       # idx
 
