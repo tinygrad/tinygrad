@@ -6,8 +6,6 @@ from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.nn.state import get_state_dict
 
-from extra.models.bert import BertForMLPerf
-
 #
 # checkpointing utils
 #
@@ -220,7 +218,7 @@ def get_mlperf_bert_model(config_path:str):
     config["hidden_dropout_prob"]
   )
 
-def init_bert_from_checkpoint(model:BertForMLPerf, ckpt_dir:str):
+def init_bert_from_checkpoint(model, ckpt_dir:str):
   for tinygrad_key, x in get_state_dict(model).items():
     if not tinygrad_key.endswith("lm_output.weight"): # lm_output.weight already is word embedding
       t = load_from_tf2_ckpt(key=tinygrad_key, ckpt_dir=ckpt_dir)

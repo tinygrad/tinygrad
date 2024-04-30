@@ -291,6 +291,11 @@ def eval_step_bert(model, input_ids:Tensor, segment_ids:Tensor, attention_mask:T
     "next_sentence_accuracy": clsf_accuracy.realize(), 
     "next_sentence_loss": clsf_loss.realize()
     }
+  
+def get_data_bert(GPUS:list[str], it):
+  data: dict[str, Tensor] = next(it)
+  for key in data.keys(): data[key].shard_(GPUS, axis=0)
+  return data
 
 def train_bert():
   # NOTE: pip install tensorflow, wandb required
@@ -370,11 +375,6 @@ def train_bert():
 
   BENCHMARK = getenv("BENCHMARK")
 
-  def data_get(it):
-    data: dict[str, Tensor] = next(it)
-    for key in data.keys(): data[key].shard_(GPUS, axis=0)
-    return data
-  
   eval_it = iter(batch_load_val_bert(EVAL_BS))
   train_it = iter(tqdm(batch_load_train_bert(BS), total=train_steps, disable=BENCHMARK))
 
@@ -383,7 +383,7 @@ def train_bert():
   wc_start = time.perf_counter()
   Tensor.training = True
   BEAM.value = TRAIN_BEAM
-  i, train_data = 0, data_get(train_it)
+  i, train_data = 0, get_data_bert(GPUS, train_it)
   while train_data is not None and i < train_steps and not achieved:
     st = time.perf_counter()
     GlobalCounters.reset()
@@ -393,7 +393,7 @@ def train_bert():
     pt = time.perf_counter()
 
     try:
-      next_data = data_get(train_it)
+      next_data = get_data_bert(GPUS, train_it)
     except StopIteration:
       next_data = None
 
