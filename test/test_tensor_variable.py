@@ -21,5 +21,12 @@ class TestTensorVariable(unittest.TestCase):
     ret = t.mean().item()
     assert ret == 1
 
+  @unittest.skip("symbolic arange isn't supported")
+  def test_symbolic_arange(self):
+    vv = Variable("a", 1, 10)
+    vv.bind(2)
+    ret = Tensor.arange(0, vv)
+    ret.realize()
+
 if __name__ == '__main__':
   unittest.main()
