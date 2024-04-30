@@ -14,7 +14,7 @@ from tinygrad.features.multi import MultiLazyBuffer
 from tinygrad.ops import LoadOps, ScheduleItem
 from tinygrad.buffer import Buffer, BufferOptions
 from tinygrad.device import Device
-from tinygrad.shape.symbolic import sint, Variable
+from tinygrad.shape.symbolic import sint, Variable, MulNode, Node
 from tinygrad.engine.realize import run_schedule, memory_planner
 from tinygrad.engine.schedule import create_schedule_with_vars
 
@@ -267,6 +267,12 @@ class Tensor:
   def shard_(self, devices:Tuple[str, ...], axis:Optional[int]=None):
     self.lazydata = self.shard(devices, axis).lazydata
     return self
+
+  @staticmethod
+  def from_node(y:Node, **kwargs) -> Tensor:
+    if isinstance(y, MulNode): return Tensor.from_node(y.a, **kwargs) * y.b
+    elif isinstance(y, Variable): return Tensor(y, **kwargs, requires_grad=False)
+    raise Exception(f"unhandled Node {y}")
 
   # ***** creation llop entrypoint *****
 
@@ -921,9 +927,8 @@ class Tensor:
   def min(self, axis=None, keepdim=False): return -((-self).max(axis=axis, keepdim=keepdim))
 
   def mean(self, axis=None, keepdim=False):
-    assert all_int(self.shape), "does not support symbolic shape"
     out = self.sum(axis=axis, keepdim=keepdim, downcast_half=False)
-    return out.div(prod(self.shape) / prod(out.shape)).cast(self.dtype) if 0 not in out.shape else out.cast(self.dtype)
+    return out.div(prod(self.shape)).mul(prod(out.shape)).cast(self.dtype) if 0 not in out.shape else out.cast(self.dtype)
   def var(self, axis=None, keepdim=False, correction=1):
     assert all_int(self.shape), "does not support symbolic shape"
     square_sum = ((self - self.mean(axis=axis, keepdim=True)).square()).sum(axis=axis, keepdim=keepdim)
@@ -1174,10 +1179,11 @@ class Tensor:
     x: Tensor = self
     if not isinstance(y, Tensor):
       # make y a Tensor
-      assert isinstance(y, (float, int, bool)), f"{type(y)=}, {y=}"
+      assert isinstance(y, (float, int, bool, Node)), f"{type(y)=}, {y=}"
       if isinstance(self.dtype, ImageDType) or dtypes.is_float(x.dtype) or (dtypes.is_int(x.dtype) and isinstance(y, int)): y_dtype = x.dtype
       else: y_dtype = dtypes.from_py(y)
-      y = Tensor(dtypes.as_const(y, y_dtype), self.device, y_dtype, requires_grad=False)
+      if isinstance(y, Node): y = Tensor.from_node(y, device=self.device)
+      else: y = Tensor(dtypes.as_const(y, y_dtype), self.device, y_dtype, requires_grad=False)
 
     if match_dtype:
       output_dtype = least_upper_dtype(x.dtype, y.dtype)
