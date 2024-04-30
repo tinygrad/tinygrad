@@ -595,8 +595,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_fuse_contiguous_child(self):
     a = Tensor.empty(4, 4, 4)
-    b = Tensor.empty(4, 4)
-    r = a.sum(axis=0) * b * 10
+    r = a.sum(axis=0) * 10
     out0 = r.sum(axis=0) + 2
     out1 = r.sum(axis=1) + 4
     schedule = check_schedule([out0, out1], 3)
@@ -610,6 +609,13 @@ class TestSchedule(unittest.TestCase):
 
   def test_contiguous_child_midreduce_nofuse2(self):
     a = Tensor.empty(32, 32)
+    b = (a.sum(0) * a.max(1)) + 2
+    c = (a.sum(0) * a.max(1)) + 4
+    schedule = check_schedule([b, c], 4) # TODO fuse a.sum(),b,c
+    assert schedule[0].ast[0].src[0].op is ReduceOps.MAX
+
+  def test_contiguous_child_one_midreduce_nofuse(self):
+    a = Tensor.empty(32, 32)
     b = (a.sum(0) + a.max(1)) + 2
     c = (a.sum(0) + a.max(1)) + 4
     Tensor.realize(b, c)
@@ -621,6 +627,19 @@ class TestSchedule(unittest.TestCase):
     out1 = (a.sum(axis=0) + 4) * c.sum(axis=0)
     schedule = check_schedule([out0, out1], 4)
     assert schedule[0].ast[0].src[0].op is BinaryOps.ADD
+
+  # TODO
+  def test_fuse_contiguous_children_contiguous(self):
+    a = Tensor.empty(4, 4, 4)
+    b = Tensor.empty(4, 4)
+    c = a.sum(1) + b * 8
+    d = c + a.sum(1).T + 2
+
+  def test_fuse_contiguous_children_expanded(self):
+    pass
+
+  def test_fuse_contiguous_children_reduce(self):
+    pass
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
