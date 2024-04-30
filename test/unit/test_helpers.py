@@ -1,6 +1,6 @@
 import unittest
 from PIL import Image
-from tinygrad.helpers import Context, ContextVar, merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, get_contraction
+from tinygrad.helpers import Context, ContextVar, merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, get_contraction, CI
 from tinygrad.shape.symbolic import Variable, NumNode
 
 VARIABLE = ContextVar("VARIABLE", 0)
@@ -145,6 +145,7 @@ class TestFetch(unittest.TestCase):
   def test_fetch_bad_http(self):
     self.assertRaises(Exception, fetch, 'http://www.google.com/404')
 
+  @unittest.skipIf(not CI, "pre commit tests should run offline")
   def test_fetch_small(self):
     assert(len(fetch('https://google.com', allow_caching=False).read_bytes())>0)
 
