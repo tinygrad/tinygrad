@@ -260,7 +260,7 @@ def train_rnnt():
 def train_bert():
   # NOTE: pip install tensorflow, wandb required
   from examples.mlperf.dataloader import batch_load_train_bert, batch_load_val_bert
-  from examples.mlperf.helpers import get_mlperf_bert_model, load_from_tf2_ckpt
+  from examples.mlperf.helpers import get_mlperf_bert_model, init_bert_from_checkpoint
   from examples.mlperf.lr_schedulers import PolynomialDecayWithWarmup
 
   config = {}
@@ -296,18 +296,9 @@ def train_bert():
   Tensor.manual_seed(seed)  # seed for weight initialization
 
   model = get_mlperf_bert_model(BASEDIR / "bert_config.json")
-
-  # shard weights and initialize in order
-  for tinygrad_key, x in get_state_dict(model).items():
-    if init_ckpt and not tinygrad_key.endswith("lm_output.weight"): # lm_output.weight already is word embedding
-      t = load_from_tf2_ckpt(key=tinygrad_key, ckpt_dir=init_ckpt)
-      if any(k in tinygrad_key for k in ["intermediate.dense.weight", "output.dense.weight", "clsf_output.weight"]) and "attention" not in tinygrad_key:
-        t = t.transpose() 
-      elif any(k in tinygrad_key for k in ["self", "output.dense", "clsf_pooler", "lm_transform"]) and "weight" in tinygrad_key:
-        t = t.reshape(*x.shape).transpose()
-      elif all(k in tinygrad_key for k in ["self", "bias"]):
-        t = t.reshape(*x.shape)
-      x.assign(t).realize().to_(GPUS)
+  if init_ckpt: init_bert_from_checkpoint(model, init_ckpt)
+  
+  for _, x in get_state_dict(model).items():
     x.realize().to_(GPUS)
   parameters = get_parameters(model)
 
