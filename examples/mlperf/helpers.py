@@ -230,6 +230,11 @@ def init_bert_from_checkpoint(model, ckpt_dir:str):
         t = t.reshape(*x.shape)
       x.assign(t)
 
+def get_data_bert(GPUS:list[str], it):
+  data: dict[str, Tensor] = next(it)
+  for key in data.keys(): data[key].shard_(GPUS, axis=0)
+  return data
+
 @functools.lru_cache(maxsize=None)
 def load_tf_weights_to_dict(checkpoint_path):
   os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'

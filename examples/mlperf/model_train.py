@@ -291,16 +291,11 @@ def eval_step_bert(model, input_ids:Tensor, segment_ids:Tensor, attention_mask:T
     "next_sentence_accuracy": clsf_accuracy.realize(), 
     "next_sentence_loss": clsf_loss.realize()
     }
-  
-def get_data_bert(GPUS:list[str], it):
-  data: dict[str, Tensor] = next(it)
-  for key in data.keys(): data[key].shard_(GPUS, axis=0)
-  return data
 
 def train_bert():
   # NOTE: pip install tensorflow, wandb required
   from examples.mlperf.dataloader import batch_load_train_bert, batch_load_val_bert
-  from examples.mlperf.helpers import get_mlperf_bert_model, init_bert_from_checkpoint
+  from examples.mlperf.helpers import get_mlperf_bert_model, init_bert_from_checkpoint, get_data_bert
   from examples.mlperf.lr_schedulers import PolynomialDecayWithWarmup
 
   config = {}
@@ -435,7 +430,7 @@ def train_bert():
       BEAM.value = EVAL_BEAM
 
       for _ in tqdm(range(max_eval_steps), desc="Evaluating", total=max_eval_steps, disable=BENCHMARK):
-        eval_data = data_get(eval_it)
+        eval_data = get_data_bert(GPUS, eval_it)
         GlobalCounters.reset()
         st = time.time()
 
