@@ -93,7 +93,7 @@ jobs:
 
   testnvidiabenchmark:
     name: NVIDIA Benchmark
-    runs-on: [self-hosted, Linux, CUDA]
+    runs-on: [self-hosted, Linux, tinyboxgreen]
     defaults:
       run:
         shell: bash -o pipefail {0}
