@@ -107,7 +107,7 @@ from tinygrad import TinyJit
 jit_step = TinyJit(step)
 ```
 
-NOTE: it can also be used as a decorator `@TinyJit`
+NOTE: It can also be used as a decorator `@TinyJit`
 
 Now when we time it:
 

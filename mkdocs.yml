@@ -5,6 +5,7 @@ nav:
 - Home: index.md
 - Tensor: tensor.md
 - dtypes: dtypes.md
+- MNIST Tutorial: mnist.md
 - Neural Networks: nn.md
 - Quickstart: quickstart.md
 - Showcase: showcase.md
