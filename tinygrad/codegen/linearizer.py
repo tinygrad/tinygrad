@@ -321,8 +321,6 @@ class Linearizer(Kernel):
 
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
   def linearize(self):
-    print("BUFSBUFSBUFSBUFSBUFSBUFSBUFSBUFSBUFS", self.bufs)
-    print("VARSVARSVARSVARSVARSVARSVARSVARS", self.vars)
     # no new opts and we already ran? skip relinearizing
     if self.applied_opts == self.applied_opts_cache: return self
 
@@ -436,7 +434,7 @@ class Linearizer(Kernel):
         for v in b.st.views:
           if isinstance(v, IndexedView):
             for idx, dim, dt in zip(v.idxs, v.dims, v.dtype):
-              loaded_uop = self.uops.add(UOps.LOAD, dt, (self.buf_uops[i], idx_load[0]))
+              loaded_uop = self.uops.add(UOps.LOAD, b.dtype, (self.buf_uops[i], idx_load[0]))
               loaded_idx_uop[b].append(loaded_uop)
 
     # run late AST (without the store)
