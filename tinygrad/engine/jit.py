@@ -3,7 +3,7 @@ from typing import TypeVar, Generic, Callable, List, Tuple, Union, Dict, cast, O
 import functools, itertools
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, BEAM, getenv, all_int, GraphException, colored, dedup
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, BEAM, getenv, all_int, GraphException, colored
 from tinygrad.device import Buffer, CompiledRunner, BufferXfer, Compiled, Device, Runner
 from tinygrad.dtype import DType
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -24,7 +24,8 @@ def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]
     nonlocal current_batch, current_device, max_batch_size
     try:
       if len(current_batch) <= 1 or current_device is None: raise GraphException("only one kernel doesn't graph")
-      graphed_jit_cache.append(ExecItem(current_device.graph(current_batch, input_rawbuffers), cast(List[Optional[Buffer]], input_rawbuffers)))
+      graphed_jit_cache.append(ExecItem(current_device.graph(current_batch, input_rawbuffers, var_vals),
+                                        cast(List[Optional[Buffer]], input_rawbuffers)))
       max_batch_size *= 2
       if DEBUG >= 2: print(f"\tJIT GRAPHing batch with {len(current_batch)} kernels on device {current_device}")
     except GraphException as e:
@@ -61,25 +62,22 @@ def get_input_replace(jit_cache: List[ExecItem], input_rawbuffers:List[Buffer]) 
   return input_replace
 
 class GraphRunner(Runner):  # pylint: disable=abstract-method
-  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]):
+  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
     self.jit_cache = jit_cache
     self.input_replace = get_input_replace(jit_cache, input_rawbuffers)
     for (j,i) in self.input_replace.keys(): self.jit_cache[j].bufs[i] = None # clear jit inputs to allow their memory to be freed/reused
     self.jc_idx_with_updatable_launch_dims = []
     self.jc_idx_with_updatable_var_vals = []
-    all_vars: List[Variable] = []
     op_estimate: sint = 0
     mem_estimate: sint = 0
     for j,ji in enumerate(jit_cache):
       op_estimate += ji.prg.op_estimate
       mem_estimate += ji.prg.mem_estimate
       if isinstance(ji.prg, CompiledRunner):
-        if ji.prg.vars:
-          all_vars.extend(ji.prg.vars)
-          self.jc_idx_with_updatable_var_vals.append(j)
+        if ji.prg.vars: self.jc_idx_with_updatable_var_vals.append(j)
         if (ji.prg.global_size and not all_int(ji.prg.global_size)) or (ji.prg.local_size and not all_int(ji.prg.local_size)):
           self.jc_idx_with_updatable_launch_dims.append(j)
-    self.vars = dedup(all_vars)
+    self.vars = list(var_vals.keys())
     super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), jit_cache[0].prg.dname.split(":")[0], op_estimate, mem_estimate)
 
 class MultiGraphRunner(GraphRunner): pass # pylint: disable=abstract-method

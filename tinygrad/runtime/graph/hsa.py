@@ -26,8 +26,8 @@ class VirtAQLQueue(AQLQueue):
     self.available_packet_slots -= 1
 
 class HSAGraph(MultiGraphRunner):
-  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]):
-    super().__init__(jit_cache, input_rawbuffers)
+  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
+    super().__init__(jit_cache, input_rawbuffers, var_vals)
 
     # Check all jit items are compatible.
     compiled_devices = set()
@@ -53,6 +53,7 @@ class HSAGraph(MultiGraphRunner):
       self.ji_kargs_structs[j] = ji.prg.clprg.args_struct_t.from_address(kernargs_ptrs[ji.prg.device])
       kernargs_ptrs[ji.prg.device] += round_up(ctypes.sizeof(ji.prg.clprg.args_struct_t), 16)
       for i in range(len(ji.bufs)): self.ji_kargs_structs[j].__setattr__(f'f{i}', cast(Buffer, ji.bufs[i])._buf)
+      for i in range(len(ji.prg.vars)): self.ji_kargs_structs[j].__setattr__(f'v{i}', var_vals[ji.prg.vars[i]])
 
     # Build queues.
     self.virt_aql_queues: Dict[Compiled, VirtAQLQueue] = {dev:VirtAQLQueue(dev, 2*len(self.jit_cache)+16) for dev in self.devices}
@@ -77,7 +78,7 @@ class HSAGraph(MultiGraphRunner):
         self.packets[j] = hsa.hsa_kernel_dispatch_packet_t.from_address(self.virt_aql_queues[ji.prg.device].write_addr)
 
         sync_signal = self.alloc_signal(reset_on_start=True) if PROFILE else None
-        self.virt_aql_queues[ji.prg.device].submit_kernel(ji.prg.clprg, *ji.prg.launch_dims({}), #type:ignore
+        self.virt_aql_queues[ji.prg.device].submit_kernel(ji.prg.clprg, *ji.prg.launch_dims(var_vals), #type:ignore
                                                           ctypes.addressof(self.ji_kargs_structs[j]), completion_signal=sync_signal)
         if PROFILE: self.profile_info[ji.prg.device].append((sync_signal, ji.prg.clprg.name, False))
       elif isinstance(ji.prg, BufferXfer):

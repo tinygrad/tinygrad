@@ -9,8 +9,8 @@ from tinygrad.shape.symbolic import Variable
 from tinygrad.runtime.ops_metal import wait_check
 
 class MetalGraphRunner(GraphRunner):
-  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]):
-    super().__init__(jit_cache, input_rawbuffers)
+  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
+    super().__init__(jit_cache, input_rawbuffers, var_vals)
     if not all(isinstance(ji.prg, CompiledRunner) for ji in jit_cache): raise GraphException
 
     # create metal batch exec
@@ -40,7 +40,7 @@ class MetalGraphRunner(GraphRunner):
           all_resources.append(b._buf)
       for i,v in enumerate(prg.vars): icb_command.setKernelBuffer_offset_atIndex_(self.int_buf, self.vars.index(v)*4, len(ji.bufs)+i)
       if j not in self.jc_idx_with_updatable_launch_dims:
-        global_size, local_size = prg.launch_dims({})
+        global_size, local_size = prg.launch_dims(var_vals)
         icb_command.concurrentDispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
       icb_command.setBarrier()
 
