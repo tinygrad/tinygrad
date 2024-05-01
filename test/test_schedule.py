@@ -600,7 +600,14 @@ class TestSchedule(unittest.TestCase):
       bn.weight.requires_grad = bn.bias.requires_grad = x.requires_grad = True
       fw = bn(x).contiguous_backward().relu().contiguous()
       fw.sum().backward()
+      # we want to minimize number of passes over buffers of same size as x
+      # start: 12 kernels (some extraneous from constructing this test case)
       # easy case: merge 4 reduces in backward into 1
+      # double reduce case: merge stat calculations from 2 to 1 (be careful of long reduces!)
+      # sum(x - \bar{x}): one kernel just calculates this, can be eliminated
+      # pre-expand fusion: is it fast? -2 kernels possible, 1 fw, 1 bw
+      # merge reduce into previous conv: -2 kernels on top of the above. requires big linearizer change.
+      # ideal case: the foward + backward pass is just 3 convs and some small reduces!
       check_schedule([x.grad, bn.weight.grad, bn.bias.grad, fw], 9)
 
 if __name__ == '__main__':
