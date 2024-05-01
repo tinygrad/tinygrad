@@ -176,6 +176,7 @@ def train_resnet():
       i += 1
 
       if i == BENCHMARK:
+        assert not math.isnan(loss)
         median_step_time = sorted(step_times)[(BENCHMARK + 1) // 2]  # in seconds
         estimated_total_minutes = int(median_step_time * steps_in_train_epoch * epochs / 60)
         print(f"Estimated training time: {estimated_total_minutes // 60}h{estimated_total_minutes % 60}m")
