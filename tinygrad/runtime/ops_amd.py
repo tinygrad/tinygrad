@@ -255,11 +255,13 @@ class HWPM4Queue:
     return self
 
   def submit(self, device:AMDDevice):
+    self.signal(device.compute_progress_signal, device.compute_put_value + 1)
     wptr = device.pm4_write_pointer[0]
     pm4_buffer_view = to_mv(device.pm4_ring.va_addr, device.pm4_ring.size).cast("I")
     for i, value in enumerate(self.q): pm4_buffer_view[(wptr+i)%(device.pm4_ring.size//4)] = value
     device.pm4_write_pointer[0] = wptr + len(self.q)
     device.pm4_doorbell[0] = wptr + len(self.q)
+    device.compute_put_value += 1
     return self
 
 # prebuilt sdma packets
@@ -452,6 +454,8 @@ class AMDDevice(Compiled):
   kfd:int = -1
   event_page:Any = None  # TODO: fix types in kfd, Optional[kfd.struct_kfd_ioctl_alloc_memory_of_gpu_args]
   signals_page:Any = None
+  signal_pool:List[hsa.amd_signal_t] = []
+  signal_to_reset:List[hsa.amd_signal_t] = []
   signal_number:int = 16
   gpus:List[pathlib.Path] = []
 
@@ -502,6 +506,7 @@ class AMDDevice(Compiled):
     if sync_event is not None:
       ret.event_mailbox_ptr = AMDDevice.event_page.va_addr + sync_event.event_slot_index*8
       ret.event_id = sync_event.event_id
+    if reset: AMDDevice.signal_to_reset.append(ret)
     return ret
 
   @classmethod
@@ -529,6 +534,7 @@ class AMDDevice(Compiled):
 
     if AMDDevice.event_page is None:
       AMDDevice.signals_page = self._gpu_alloc(SIGNAL_SIZE*SIGNAL_COUNT, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
+      AMDDevice.signal_pool = [hsa.amd_signal_t.from_address(AMDDevice.signals_page.va_addr + SIGNAL_SIZE*i) for i in range(SIGNAL_COUNT)]
       AMDDevice.event_page = self._gpu_alloc(0x8000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
       sync_event = kio.create_event(AMDDevice.kfd, event_page_offset=AMDDevice.event_page.handle, auto_reset=1)
     else:
@@ -584,7 +590,8 @@ class AMDDevice(Compiled):
     self.pm4_write_pointer = to_mv(self.pm4_queue.write_pointer_address, 8).cast("Q")
     self.pm4_doorbell = to_mv(self.doorbells + self.pm4_queue.doorbell_offset - self.doorbells_base, 8).cast("Q")
 
-    super().__init__(device, AMDAllocator(self), AMDCompiler(self.arch), functools.partial(AMDProgram, self))
+    from tinygrad.runtime.graph.hcq import HCQGraph
+    super().__init__(device, AMDAllocator(self), AMDCompiler(self.arch), functools.partial(AMDProgram, self), HCQGraph)
 
   def synchronize(self):
     AMDDevice._wait_signal(self.timeline_signal, self.timeline_value - 1)
