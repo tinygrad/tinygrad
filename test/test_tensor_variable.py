@@ -32,6 +32,14 @@ class TestTensorVariable(unittest.TestCase):
     ret = t.mean().item()
     assert ret == 1
 
+  @unittest.skip("symbolic var isn't supported")
+  def test_symbolic_var(self):
+    vv = Variable("a", 1, 10)
+    vv.bind(2)
+    t = Tensor.ones(2, 2).contiguous().reshape(2, vv)
+    ret = t.var().item()
+    assert ret == 0
+
   def test_symbolic_mean_2d(self):
     vv = Variable("a", 1, 10)
     vv.bind(2)
