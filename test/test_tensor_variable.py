@@ -57,13 +57,13 @@ class TestTensorVariable(unittest.TestCase):
     assert np.array_equal(ret.numpy(), np.array([0,1]))
 
   def test_symbolic_arange(self):
-    vv = Variable("a", 0, 10)
-    vv.bind(2)
+    stop = Variable("a", 0, 10)
+    stop.bind(2)
     start = Variable("b",0, 5)
     start.bind(0)
     step = Variable("c",0,10)
     step.bind(1)
-    ret = Tensor.arange(start, vv, step)
+    ret = Tensor.arange(start, stop, step)
     assert np.array_equal(ret.numpy(), np.array([0,1]))
 
 if __name__ == '__main__':
