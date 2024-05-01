@@ -419,6 +419,7 @@ class AMDAllocator(LRUAllocator):
   #  self.device._wait_signal(self.device.signal_sdma)
 
   def copyin(self, dest, src: memoryview):
+    self.device.synchronize()
     for i in range(0, src.nbytes, self.b[0].size):
       self.b_next = (self.b_next + 1) % len(self.b)
       AMDDevice._wait_signal(self.device.timeline_signal, self.b_timeline[self.b_next])

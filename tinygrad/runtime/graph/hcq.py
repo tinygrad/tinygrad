@@ -59,13 +59,13 @@ class HCQGraph(Runner):
     for j,ji in enumerate(self.jit_cache):
       if isinstance(ji.prg, CompiledRunner):
         # self.comp_queues_list.append((j,ji))
-        # if j in self.jc_idxs_with_updatable_launch_dims:
-        #   if ji.prg.device in self.comp_queues: self.comp_queues_list.append((ji.prg.device, self.comp_queues.pop(ji.prg.device)))
-        #   self.comp_queues_list.append((j,ji))
-        # else: self.comp_queues[ji.prg.device].exec(ji.prg.clprg, self.kargs_addrs[j], *ji.prg.launch_dims(var_vals))
-        self.comp_queues[ji.prg.device].wait(signal=self.chain_signal, value=j)
-        self.comp_queues[ji.prg.device].exec(ji.prg.clprg, self.kargs_addrs[j], *ji.prg.launch_dims(var_vals))
-        self.comp_queues[ji.prg.device].signal(signal=self.chain_signal, value=j+1)
+        if j in self.jc_idxs_with_updatable_launch_dims:
+          if ji.prg.device in self.comp_queues: self.comp_queues_list.append((ji.prg.device, self.comp_queues.pop(ji.prg.device)))
+          self.comp_queues_list.append((j,ji))
+        else:
+          self.comp_queues[ji.prg.device].wait(signal=self.chain_signal, value=j)
+          self.comp_queues[ji.prg.device].exec(ji.prg.clprg, self.kargs_addrs[j], *ji.prg.launch_dims(var_vals))
+          self.comp_queues[ji.prg.device].signal(signal=self.chain_signal, value=j+1)
       # elif isinstance(ji.prg, BufferXfer):
       #   dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
       #   self.comp_queues[Device[src.device]].copy(dest._buf, src._buf, dest.nbytes)
@@ -91,10 +91,14 @@ class HCQGraph(Runner):
       for i,v in enumerate(cast(CompiledRunner, self.jit_cache[j].prg).vars):
         self.ji_kargs_structs[j].__setattr__(f'v{i}', var_vals[v])
 
+    HWPM4Queue().wait(self.devices[0].compute_progress_signal, self.devices[0].compute_put_value).submit(self.devices[0])
     for dev,q in self.comp_queues_list:
       if not isinstance(q, HWPM4Queue):
         j,ji = dev,q
-        q = HWPM4Queue().exec(ji.prg.clprg, self.kargs_addrs[j], *ji.prg.launch_dims(var_vals))
+        q = HWPM4Queue()
+        q.wait(signal=self.chain_signal, value=j)
+        q.exec(ji.prg.clprg, self.kargs_addrs[j], *ji.prg.launch_dims(var_vals))
+        q.signal(signal=self.chain_signal, value=j+1)
         dev = ji.prg.device
       q.submit(dev)
 
