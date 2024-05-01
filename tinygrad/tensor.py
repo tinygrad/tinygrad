@@ -423,9 +423,7 @@ class Tensor:
     ```
     """
     if stop is None: stop, start = start, 0
-    if isinstance(start, Variable): start = start.val
-    if isinstance(stop, Variable): stop = stop.val
-    if isinstance(step, Variable): step = step.val
+    start, stop, step = [arg.val if isinstance(arg, Variable) else arg for arg in [start, stop, step]]
     dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
     return (Tensor.full((math.ceil((stop-start)/step),), step, dtype=dtype, **kwargs)._cumsum() + (start - step)).cast(dtype)
 
