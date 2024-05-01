@@ -9,6 +9,7 @@ from tinygrad.engine.jit import get_input_replace, get_jit_stats, get_jc_idxs_wi
 
 class HCQGraph(Runner):
   def __init__(self, device_t, comp_q_t, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
+    self.device_t, self.comp_q_t = device_t, comp_q_t
     self.jit_cache = jit_cache
     self.input_replace = get_input_replace(jit_cache, input_rawbuffers)
     self.jc_idxs_with_updatable_launch_dims = get_jc_idxs_with_updatable_launch_dims(jit_cache)
@@ -21,7 +22,7 @@ class HCQGraph(Runner):
       elif isinstance(ji.prg, BufferXfer):
         for x in ji.bufs[0:2]: compiled_devices.add(Device[cast(Buffer, x).device])
       else: raise GraphException
-    if any(not isinstance(d, device_t) for d in compiled_devices): raise GraphException
+    if any(not isinstance(d, self.device_t) for d in compiled_devices): raise GraphException
 
     self.devices: List[Compiled] = list(set(list(compiled_devices))) #type:ignore
 
@@ -29,7 +30,7 @@ class HCQGraph(Runner):
     kernargs_size: Dict[Compiled, int] = collections.defaultdict(int)
     for ji in self.jit_cache:
       if isinstance(ji.prg, CompiledRunner): kernargs_size[ji.prg.device] += round_up(ji.prg.clprg.kernargs_segment_size, 16)
-    kernargs_ptrs: Dict[Compiled, int] = {dev:dev.allocator._alloc(sz, BufferOptions()).va_addr for dev,sz in kernargs_size.items()}
+    kernargs_ptrs: Dict[Compiled, int] = {dev:dev.allocator._alloc(sz, BufferOptions(host=True)).va_addr for dev,sz in kernargs_size.items()}
 
     # Fill initial arguments.
     self.kargs_addrs: Dict[int, ctypes.Structure] = {}
@@ -44,7 +45,7 @@ class HCQGraph(Runner):
       for i in range(len(ji.prg.vars)): self.ji_kargs_structs[j].__setattr__(f'v{i}', var_vals[ji.prg.vars[i]])
 
     # Build queues.
-    self.comp_queues: Dict[Compiled, comp_q_t] = collections.defaultdict(comp_q_t)
+    self.comp_queues: Dict[Compiled, self.comp_q_t] = collections.defaultdict(self.comp_q_t)
     # self.copy_queues: Dict[Compiled, HWCopyQueue] = {dev:[] for dev in self.devices}
 
     # signal_size = ctypes.sizeof(hsa.amd_signal_t)
@@ -79,7 +80,7 @@ class HCQGraph(Runner):
 
   def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False) -> Optional[float]:
     # Kick graph
-    self.chain_signal.value = 0
+    self.device_t._set_signal_value(self.chain_signal, 0)
 
     # Update rawbuffers
     for (j,i),input_idx in self.input_replace.items():
@@ -90,11 +91,11 @@ class HCQGraph(Runner):
       for i,v in enumerate(cast(CompiledRunner, self.jit_cache[j].prg).vars):
         self.ji_kargs_structs[j].__setattr__(f'v{i}', var_vals[v])
 
-    comp_q_t().wait(self.devices[0].compute_progress_signal, self.devices[0].compute_put_value).submit(self.devices[0])
+    self.comp_q_t().wait(self.devices[0].compute_progress_signal, self.devices[0].compute_put_value).submit(self.devices[0])
     for dev,q in self.comp_queues_list:
-      if not isinstance(q, comp_q_t):
+      if not isinstance(q, self.comp_q_t):
         j,ji = dev,q
-        q = comp_q_t()
+        q = self.comp_q_t()
         q.wait(signal=self.chain_signal, value=j)
         q.exec(ji.prg.clprg, self.kargs_addrs[j], *ji.prg.launch_dims(var_vals))
         q.signal(signal=self.chain_signal, value=j+1)

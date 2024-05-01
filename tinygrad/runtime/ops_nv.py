@@ -214,6 +214,7 @@ class NVProgram:
 
     # constant buffer 0 is filled for each program, no need to copy it from elf (it's just zeroes)
     if 0 in constant_buffers_data: constant_buffers_data.pop(0)
+    self.program_args_offset = QMD_SIZE + 0x160
 
     off = round_up(self.program.nbytes, 128)
     for i,data in constant_buffers_data.items():
@@ -524,6 +525,9 @@ class NVDevice(Compiled):
     sig = to_mv(self.signals_page.base + num * 16, 16).cast("Q")
     sig[0] = value
     return sig
+  
+  @classmethod
+  def _set_signal_value(self, sig, value): sig[0] = value
 
   @classmethod
   def _wait_signal(self, signal, value=0, timeout=10000):
