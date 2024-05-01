@@ -165,6 +165,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
             can_chase = tr not in reduce_for_op or reduce_for_op[tr] == r
             forced_realize = True
             break
+          if tr.device != r.device: continue
           realized_children[tr] = st
         for tr_next in children[tr].keys():
           if not tr_next.realized:
