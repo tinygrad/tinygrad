@@ -592,7 +592,8 @@ class AMDDevice(Compiled):
     self.pm4_doorbell = to_mv(self.doorbells + self.pm4_queue.doorbell_offset - self.doorbells_base, 8).cast("Q")
 
     from tinygrad.runtime.graph.hcq import HCQGraph
-    super().__init__(device, AMDAllocator(self), AMDCompiler(self.arch), functools.partial(AMDProgram, self), HCQGraph)
+    super().__init__(device, AMDAllocator(self), AMDCompiler(self.arch), functools.partial(AMDProgram, self),
+                     functools.partial(HCQGraph, AMDDevice, HWPM4Queue))
 
   def synchronize(self):
     AMDDevice._wait_signal(self.timeline_signal, self.timeline_value - 1)

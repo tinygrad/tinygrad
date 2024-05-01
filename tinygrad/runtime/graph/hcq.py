@@ -4,12 +4,11 @@ from tinygrad.helpers import GraphException, init_c_var, round_up, colored
 from tinygrad.buffer import Buffer, BufferOptions
 from tinygrad.device import Compiled, CompiledRunner, BufferXfer, MultiDeviceJITGraph, Device, Runner
 from tinygrad.shape.symbolic import Variable
-from tinygrad.runtime.ops_amd import AMDDevice, HWPM4Queue, HWCopyQueue, SIGNAL_SIZE
 from tinygrad.engine.realize import ExecItem
 from tinygrad.engine.jit import get_input_replace, get_jit_stats, get_jc_idxs_with_updatable_launch_dims, get_jc_idxs_with_updatable_var_vals
 
 class HCQGraph(Runner):
-  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
+  def __init__(self, device_t, comp_q_t, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
     self.jit_cache = jit_cache
     self.input_replace = get_input_replace(jit_cache, input_rawbuffers)
     self.jc_idxs_with_updatable_launch_dims = get_jc_idxs_with_updatable_launch_dims(jit_cache)
@@ -22,7 +21,7 @@ class HCQGraph(Runner):
       elif isinstance(ji.prg, BufferXfer):
         for x in ji.bufs[0:2]: compiled_devices.add(Device[cast(Buffer, x).device])
       else: raise GraphException
-    if any(not isinstance(d, AMDDevice) for d in compiled_devices): raise GraphException
+    if any(not isinstance(d, device_t) for d in compiled_devices): raise GraphException
 
     self.devices: List[Compiled] = list(set(list(compiled_devices))) #type:ignore
 
@@ -45,16 +44,16 @@ class HCQGraph(Runner):
       for i in range(len(ji.prg.vars)): self.ji_kargs_structs[j].__setattr__(f'v{i}', var_vals[ji.prg.vars[i]])
 
     # Build queues.
-    self.comp_queues: Dict[Compiled, HWPM4Queue] = collections.defaultdict(HWPM4Queue)
+    self.comp_queues: Dict[Compiled, comp_q_t] = collections.defaultdict(comp_q_t)
     # self.copy_queues: Dict[Compiled, HWCopyQueue] = {dev:[] for dev in self.devices}
 
     # signal_size = ctypes.sizeof(hsa.amd_signal_t)
-    # signals = AMDDevice.signals_page = dev._gpu_alloc(SIGNAL_SIZE*SIGNAL_COUNT, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
-    # self.signals_pool = [hsa.amd_signal_t.from_address(AMDDevice.signals_page.va_addr + SIGNAL_SIZE*i) for i in range(SIGNAL_COUNT)]
-    # AMDDevice.signals_page = self._gpu_alloc(SIGNAL_SIZE*64, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
-    # AMDDevice.signal_pool = [hsa.amd_signal_t.from_address(AMDDevice.signals_page.va_addr + SIGNAL_SIZE*i) for i in range(SIGNAL_COUNT)]
+    # signals = device_t.signals_page = dev._gpu_alloc(SIGNAL_SIZE*SIGNAL_COUNT, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
+    # self.signals_pool = [hsa.amd_signal_t.from_address(device_t.signals_page.va_addr + SIGNAL_SIZE*i) for i in range(SIGNAL_COUNT)]
+    # device_t.signals_page = self._gpu_alloc(SIGNAL_SIZE*64, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
+    # device_t.signal_pool = [hsa.amd_signal_t.from_address(device_t.signals_page.va_addr + SIGNAL_SIZE*i) for i in range(SIGNAL_COUNT)]
     self.comp_queues_list: List[Any] = []
-    self.chain_signal = AMDDevice._get_signal()
+    self.chain_signal = device_t._get_signal()
 
     for j,ji in enumerate(self.jit_cache):
       if isinstance(ji.prg, CompiledRunner):
@@ -91,11 +90,11 @@ class HCQGraph(Runner):
       for i,v in enumerate(cast(CompiledRunner, self.jit_cache[j].prg).vars):
         self.ji_kargs_structs[j].__setattr__(f'v{i}', var_vals[v])
 
-    HWPM4Queue().wait(self.devices[0].compute_progress_signal, self.devices[0].compute_put_value).submit(self.devices[0])
+    comp_q_t().wait(self.devices[0].compute_progress_signal, self.devices[0].compute_put_value).submit(self.devices[0])
     for dev,q in self.comp_queues_list:
-      if not isinstance(q, HWPM4Queue):
+      if not isinstance(q, comp_q_t):
         j,ji = dev,q
-        q = HWPM4Queue()
+        q = comp_q_t()
         q.wait(signal=self.chain_signal, value=j)
         q.exec(ji.prg.clprg, self.kargs_addrs[j], *ji.prg.launch_dims(var_vals))
         q.signal(signal=self.chain_signal, value=j+1)
