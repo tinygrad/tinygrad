@@ -70,14 +70,14 @@ def get_input_replace(jit_cache: List[ExecItem], input_rawbuffers:List[Buffer]) 
         input_replace[(j,i)] = input_rawbuffers.index(a)
   return input_replace
 
-class GraphRunner(Runner):
+class GraphRunner(Runner):  # pylint: disable=abstract-method
   def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]):
     self.jit_cache = jit_cache
     self.input_replace = get_input_replace(jit_cache, input_rawbuffers)
     for (j,i) in self.input_replace.keys(): self.jit_cache[j].bufs[i] = None # clear jit inputs to allow their memory to be freed/reused
     self.jc_idx_with_updatable_launch_dims = []
     self.jc_idx_with_updatable_var_vals = []
-    vars: List[Variable] = []
+    all_vars: List[Variable] = []
     op_estimate: sint = 0
     mem_estimate: sint = 0
     for j,ji in enumerate(jit_cache):
@@ -85,11 +85,11 @@ class GraphRunner(Runner):
       mem_estimate += ji.prg.mem_estimate
       if isinstance(ji.prg, CompiledRunner):
         if ji.prg.vars:
-          vars.extend(ji.prg.vars)
+          all_vars.extend(ji.prg.vars)
           self.jc_idx_with_updatable_var_vals.append(j)
         if (ji.prg.global_size and not all_int(ji.prg.global_size)) or (ji.prg.local_size and not all_int(ji.prg.local_size)):
           self.jc_idx_with_updatable_launch_dims.append(j)
-    self.vars = dedup(vars)
+    self.vars = dedup(all_vars)
     super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), jit_cache[0].prg.dname.split(":")[0], op_estimate, mem_estimate)
 
 ReturnType = TypeVar('ReturnType')
