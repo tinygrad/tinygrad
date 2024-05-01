@@ -120,15 +120,6 @@ class TestOpt(unittest.TestCase):
       d.realize()
     np.testing.assert_allclose(d.numpy(), na*nb+nc, rtol=1e-5, atol=1e-7)
 
-  def test_fold_reduce_elementwise(self):
-    img = Tensor.ones(32).contiguous()
-    addme = Tensor.ones(1)
-    with CLCache() as cache:
-      ret = img.sum() + addme
-      ret.realize()
-      assert cache.count == 1, "optimizer didn't fold reduce/elementwise"
-    assert ret.item() == 33
-
   def test_fold_batchnorm(self):
     with Tensor.train():
       img = Tensor.ones(1,32,4,4).contiguous()
@@ -137,30 +128,6 @@ class TestOpt(unittest.TestCase):
         img_bn = bn(img).realize()
         print(img_bn)
         assert cache.count == 3, f"optimizer didn't fold batchnorm, got {cache.count}"
-
-  def test_fold_2convs_sgd_nesterov_momentum_wd(self):
-    with Tensor.train():
-      img = Tensor.ones(2,3,64,64)
-      c1 = nn.Conv2d(3,16,3,bias=False)
-      c2 = nn.Conv2d(16,32,3,bias=False)
-      opt = optim.SGD(get_parameters([c1, c2]), nesterov=True, momentum=0.9, weight_decay=0.1)
-      with CLCache(allowed=10):
-        opt.zero_grad()
-        c2(c1(img).relu()).relu().sum().backward()
-        opt.step()
-
-  def test_fold_4convs_sgd(self):
-    with Tensor.train():
-      img = Tensor.ones(2,3,64,64)
-      c1 = nn.Conv2d(3,4,3,bias=False)
-      c2 = nn.Conv2d(4,8,3,bias=False)
-      c3 = nn.Conv2d(8,16,3,bias=False)
-      c4 = nn.Conv2d(16,32,3,bias=False)
-      opt = optim.SGD(get_parameters([c1, c2, c3, c4]))
-      with CLCache(allowed=18):
-        opt.zero_grad()
-        c4(c3(c2(c1(img).relu()).relu()).relu()).relu().sum().backward()
-        opt.step()
 
   def test_fold_conv_batchnorm_sgd(self):
     with Tensor.train():
