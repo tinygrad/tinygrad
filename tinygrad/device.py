@@ -42,6 +42,8 @@ Device = _Device()
 class Runner:
   def __init__(self, display_name:str, dname:str, op_estimate:sint=0, mem_estimate:sint=0):
     self.first_run, self.display_name, self.dname, self.op_estimate, self.mem_estimate = True, display_name, dname, op_estimate, mem_estimate
+  @property
+  def device(self): return Device[self.dname]
   def exec(self, rawbufs:List[Buffer], var_vals:Optional[Dict[Variable, int]]=None) -> Optional[float]:
     return self(rawbufs, {} if var_vals is None else var_vals)
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False) -> Optional[float]:
@@ -156,9 +158,6 @@ class CompiledRunner(Runner):
   def to_other_device(self, dname:str):
     return CompiledRunner(self.display_name, self.prg, dname, self.global_size, self.local_size,
                           self.vars, self.op_estimate, self.mem_estimate, self.lib, self.outcount)
-
-  @property
-  def device(self): return Device[self.dname]
 
   def __reduce__(self):
     return self.__class__, (self.display_name, self.prg, self.dname, self.global_size, self.local_size,
