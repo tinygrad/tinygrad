@@ -159,7 +159,11 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None, pad_fir
     # shutdown processes
     for p in procs: p.join()
     shm.close()
-    shm.unlink()
+    try:
+      shm.unlink()
+    except FileNotFoundError:
+      # happens with BENCHMARK set
+      pass
 
 @functools.lru_cache(maxsize=128)
 def load_bert_file(fn:str) -> List[dict]:

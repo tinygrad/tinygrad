@@ -24,7 +24,7 @@ def train_resnet():
   Tensor.manual_seed(seed)  # seed for weight initialization
 
   GPUS = config["GPUS"] = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
-  print(f"Training on {GPUS}")
+  print(f"training on {GPUS}")
   for x in GPUS: Device[x]
 
   TRAIN_BEAM = getenv("TRAIN_BEAM", BEAM.value)
@@ -130,7 +130,7 @@ def train_resnet():
 
   def data_get(it):
     x, y, cookie = next(it)
-    return x.shard(GPUS, axis=0).realize(), Tensor(y, requires_grad=False).shard(GPUS, axis=0), cookie
+    return x.shard(GPUS, axis=0).realize(), Tensor(y, requires_grad=False).shard(GPUS, axis=0), y, cookie
 
   # ** epoch loop **
   step_times = []
@@ -144,7 +144,8 @@ def train_resnet():
     st = time.perf_counter()
     while proc is not None:
       GlobalCounters.reset()
-      (loss, top_1_acc), proc = train_step(proc[0], proc[1]), proc[2]
+      # TODO: pad training data
+      (loss, top_1), _, proc = train_step(proc[0], proc[1]), proc[2], proc[3]
 
       pt = time.perf_counter()
 
@@ -156,7 +157,7 @@ def train_resnet():
       dt = time.perf_counter()
 
       device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
-      loss, top_1_acc = loss.numpy().item(), top_1_acc.numpy().item() / BS
+      loss, top_1_acc = loss.numpy().item(), top_1.numpy().item() / BS
 
       cl = time.perf_counter()
       if BENCHMARK:
@@ -189,28 +190,31 @@ def train_resnet():
     # ** eval loop **
     if (e + 1 - eval_start_epoch) % eval_epochs == 0 and steps_in_val_epoch > 0:
       if getenv("RESET_STEP", 1): train_step.reset()  # free the train step memory :(
-      eval_loss = []
       eval_times = []
-      eval_top_1_acc = []
+      eval_loss = 0.0
+      eval_top_1 = 0
+      eval_num_samples = 0
       Tensor.training = False
       BEAM.value = EVAL_BEAM
 
-      it = iter(tqdm(batch_load_resnet(batch_size=EVAL_BS, val=True, shuffle=False), total=steps_in_val_epoch))
+      it = iter(tqdm(batch_load_resnet(batch_size=EVAL_BS, val=True, shuffle=False, pad_first_batch=True), total=steps_in_val_epoch))
       i, proc = 0, data_get(it)
       while proc is not None:
         GlobalCounters.reset()
         st = time.time()
 
-        (loss, top_1_acc), proc = eval_step(proc[0], proc[1]), proc[2]  # drop inputs, keep cookie
+        (loss, top_1), y, proc = eval_step(proc[0], proc[1]), proc[2], proc[3]  # drop inputs, keep cookie
 
         try:
           next_proc = data_get(it)
         except StopIteration:
           next_proc = None
 
-        loss, top_1_acc = loss.numpy().item(), top_1_acc.numpy().item() / EVAL_BS
-        eval_loss.append(loss)
-        eval_top_1_acc.append(top_1_acc)
+        loss, top_1 = loss.numpy().item(), top_1.numpy().item()
+        num_samples = sum(yi != -1 for yi in y)
+        eval_loss += loss * num_samples
+        eval_top_1 += top_1
+        eval_num_samples += num_samples
         proc, next_proc = next_proc, None  # return old cookie
         i += 1
         if i == BENCHMARK: return
@@ -219,8 +223,10 @@ def train_resnet():
         eval_times.append(et - st)
 
       if getenv("RESET_STEP", 1): eval_step.reset()
-      total_loss = sum(eval_loss) / len(eval_loss)
-      total_top_1 = sum(eval_top_1_acc) / len(eval_top_1_acc)
+      if not BENCHMARK:
+        assert eval_num_samples == len(get_val_files()), f"eval sample count mismatched. {eval_num_samples=} != {len(get_val_files())}"
+      total_loss = eval_loss / eval_num_samples
+      total_top_1 = eval_top_1 / eval_num_samples
       total_fw_time = sum(eval_times) / len(eval_times)
       tqdm.write(f"eval loss: {total_loss:.2f}, eval time: {total_fw_time:.2f}, eval top 1 acc: {total_top_1:.3f}")
       if WANDB:
