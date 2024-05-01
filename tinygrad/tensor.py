@@ -272,7 +272,7 @@ class Tensor:
   def from_node(y:Node, **kwargs) -> Tensor:
     if isinstance(y, MulNode): return Tensor.from_node(y.a, **kwargs) * y.b
     if isinstance(y, Variable): return Tensor(y, **kwargs, requires_grad=False)
-    raise RuntimeError(f"unhandled Node {y}")
+    raise RuntimeError(f"unhandled Node {type(y)} {y}")
 
   # ***** creation llop entrypoint *****
 
@@ -423,7 +423,9 @@ class Tensor:
     ```
     """
     if stop is None: stop, start = start, 0
-    assert all(isinstance(s, (int, float)) for s in (start, stop, step)), f"symbolic arange not supported {start=}, {stop=}, {step=}"
+    if isinstance(start, Variable): start = start.val
+    if isinstance(stop, Variable): stop = stop.val
+    if isinstance(step, Variable): step = step.val
     dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
     return (Tensor.full((math.ceil((stop-start)/step),), step, dtype=dtype, **kwargs)._cumsum() + (start - step)).cast(dtype)
 

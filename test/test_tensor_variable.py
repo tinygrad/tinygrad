@@ -50,12 +50,21 @@ class TestTensorVariable(unittest.TestCase):
     ret = t.mean(axis=1).reshape(2, 1).numpy()
     assert np.all(ret == 1)
 
-  @unittest.skip("symbolic arange isn't supported")
-  def test_symbolic_arange(self):
+  def test_symbolic_arange_simple(self):
     vv = Variable("a", 1, 10)
     vv.bind(2)
     ret = Tensor.arange(0, vv)
-    ret.realize()
+    assert np.array_equal(ret.numpy(), np.array([0,1]))
+
+  def test_symbolic_arange(self):
+    vv = Variable("a", 0, 10)
+    vv.bind(2)
+    start = Variable("b",0, 5)
+    start.bind(0)
+    step = Variable("c",0,10)
+    step.bind(1)
+    ret = Tensor.arange(start, vv, step)
+    assert np.array_equal(ret.numpy(), np.array([0,1]))
 
 if __name__ == '__main__':
   unittest.main()
