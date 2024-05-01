@@ -5,7 +5,7 @@
 
 from pathlib import Path
 from typing import List
-import sys, argparse, json
+import argparse, json
 import numpy as np
 np.set_printoptions(linewidth=200)
 from tinygrad.helpers import Timing, Profiling, getenv, DEBUG, colored
@@ -452,23 +452,14 @@ After you are done speaking, output [EOS]. You are not Chad.
   llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, quantize=args.quantize, device=device)
   param_bytes = sum(x.lazydata.size * x.dtype.itemsize for x in get_parameters(llama.model))
 
+  outputted = pre_prompt if chatbot else args.prompt
+  start_pos, toks = 0, [llama.tokenizer.bos_id()] + llama.tokenizer.encode(outputted)
   if chatbot:
-    # encode pre prompt
-    toks = [llama.tokenizer.bos_id()] + llama.tokenizer.encode(pre_prompt)
-
     print(f"Preparing KV cache for chatbot with personality {args.personality}...")
+    start_pos = len(toks)
     with Timing():
       llama.model(Tensor([toks], device=device), 0, args.temperature).realize()  # NOTE: outputs are not used
-    start_pos = len(toks)
-  else:
-    # non chat bot mode
-    toks = [llama.tokenizer.bos_id()] + llama.tokenizer.encode(args.prompt)
-    start_pos = 0
-
-  # print prompt
-  outputted = llama.tokenizer.decode(toks)
-  sys.stdout.write(outputted)
-  sys.stdout.flush()
+  print(outputted, end='', flush=True)
 
   # chatbot loop
   while 1:
@@ -476,13 +467,8 @@ After you are done speaking, output [EOS]. You are not Chad.
     if chatbot:
       user_prompt = user_delim + input(user_delim) + "\n"
       outputted += user_prompt
+      toks.extend(llama.tokenizer.encode(user_prompt))
 
-    new_toks = [llama.tokenizer.bos_id()] + llama.tokenizer.encode(outputted)
-    assert toks == new_toks[:len(toks)]
-    toks = new_toks
-    assert outputted == llama.tokenizer.decode(toks)
-
-    last_break = len(outputted)
     for i in range(args.count):
       GlobalCounters.reset()
 
@@ -502,11 +488,9 @@ After you are done speaking, output [EOS]. You are not Chad.
       # add the new token
       toks.append(tok)
 
-      # TODO: this is a hack to deal with spaces. i think the decode is fast though, so who cares?
-      cur = llama.tokenizer.decode(toks)
-      sys.stdout.write(cur[len(outputted):])
-      sys.stdout.flush()
-      outputted = cur
+      cur = llama.tokenizer.decode([tok])
+      outputted += cur
+      print(cur, end='', flush=True)
 
       # stop after you have your answer
       if chatbot and outputted.endswith(end_delim): break
