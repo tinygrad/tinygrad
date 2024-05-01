@@ -4,9 +4,13 @@
 
 import unittest
 from typing import List, Optional, Union
+from extra.models.convnext import ConvNeXt
+from extra.models.efficientnet import EfficientNet
+from extra.models.resnet import ResNet18
+from extra.models.vit import ViT
 from tinygrad.tensor import Tensor
 from tinygrad.ops import LoadOps, ReduceOps
-from tinygrad.helpers import DEBUG, GRAPH, flatten
+from tinygrad.helpers import DEBUG, GRAPH, flatten, getenv
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.graph import print_tree, realized_lazybuffer
 from tinygrad.engine.schedule import create_schedule
@@ -556,6 +560,44 @@ class TestSchedule(unittest.TestCase):
     layer(x).relu().sum().backward()
     check_schedule(opt.schedule_step(), 14)
 
+  def test_adam_conv_fuse(self):
+    with Tensor.train():
+      img = Tensor.empty(2,3,4,4)
+      c1 = nn.Conv2d(3,32,3)
+      opt = nn.optim.Adam(nn.state.get_parameters(c1), lr=1e-4)
+      opt.zero_grad()
+      c1(img).relu().sum().backward()
+      check_schedule(opt.schedule_step(), 14)
+
+  def test_adam_2convs_fuse(self):
+    with Tensor.train():
+      img = Tensor.empty(2,3,4,4)
+      c1 = nn.Conv2d(3,16,3,bias=False)
+      c2 = nn.Conv2d(16,32,3,bias=False)
+      opt = nn.optim.Adam(nn.state.get_parameters([c1, c2]), lr=1e-4)
+      opt.zero_grad()
+      c2(c1(img).relu()).relu().sum().backward()
+      check_schedule(opt.schedule_step(), 15)
+
+  def test_sgd_conv_fuse(self):
+    with Tensor.train():
+      img = Tensor.empty(2,3,4,4)
+      c1 = nn.Conv2d(3,32,3)
+      opt = nn.optim.SGD(nn.state.get_parameters(c1))
+      opt.zero_grad()
+      c1(img).relu().sum().backward()
+      check_schedule(opt.schedule_step(), 7)
+
+  def test_sgd_2convs_fuse(self):
+    with Tensor.train():
+      img = Tensor.empty(2,3,4,4)
+      c1 = nn.Conv2d(3,16,3,bias=False)
+      c2 = nn.Conv2d(16,32,3,bias=False)
+      opt = nn.optim.SGD(nn.state.get_parameters([c1, c2]))
+      opt.zero_grad()
+      c2(c1(img).relu()).relu().sum().backward()
+      check_schedule(opt.schedule_step(), 7)
+
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_prefer_half_buffer(self):
     x = Tensor.ones(4).contiguous().realize()
@@ -592,6 +634,38 @@ class TestSchedule(unittest.TestCase):
     # c = a + 2
     # sched = check_schedule([b, c], 4)
     # doesn't store either in half because it doesn't chase
+
+  def test_convnext(self):
+    model = ConvNeXt()
+    for p in nn.state.get_parameters(model): p.assign(Tensor.zeros(p.shape, dtype=p.dtype).contiguous().realize())
+    img = Tensor.randn(1, 3, 224, 224)
+    check_schedule(model(img), 144)
+
+  def test_enet(self):
+    model = EfficientNet(getenv("ENET_NUM", 0), has_se=False)
+    for p in nn.state.get_parameters(model): p.assign(Tensor.zeros(p.shape, dtype=p.dtype).contiguous().realize())
+    img = Tensor.randn(1, 3, 224, 224).realize()
+    check_schedule(model.forward(img), 51)
+
+  def test_enet_se(self):
+    model = EfficientNet(getenv("ENET_NUM", 0), has_se=True)
+    for p in nn.state.get_parameters(model): p.assign(Tensor.zeros(p.shape, dtype=p.dtype).contiguous().realize())
+    img = Tensor.randn(1, 3, 224, 224).realize()
+    # TODO: this seems very high
+    check_schedule(model.forward(img), 115)
+
+  def test_resnet(self):
+    model = ResNet18()
+    for p in nn.state.get_parameters(model): p.assign(Tensor.zeros(p.shape, dtype=p.dtype).contiguous().realize())
+    img = Tensor.randn(1, 3, 224, 224).realize()
+    check_schedule(model.forward(img), 23)
+
+  def test_vit(self):
+    model = ViT(embed_dim=192, num_heads=3)
+    for p in nn.state.get_parameters(model): p.assign(Tensor.zeros(p.shape, dtype=p.dtype).contiguous().realize())
+    img = Tensor.randn(1, 3, 224, 224).realize()
+    # NOTE: this is way too high
+    check_schedule(model.forward(img), 209)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
