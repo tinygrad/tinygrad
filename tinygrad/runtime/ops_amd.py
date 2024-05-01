@@ -201,10 +201,9 @@ class HWPM4Queue:
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), regCOMPUTE_STATIC_THREAD_MGMT_SE2, 0xFFFFFFFF,0xFFFFFFFF]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 4), regCOMPUTE_STATIC_THREAD_MGMT_SE4, 0xFFFFFFFF,0xFFFFFFFF,0xFFFFFFFF,0xFFFFFFFF]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), regCOMPUTE_USER_DATA_0, kernargs&0xFFFFFFFF, kernargs>>32]
-    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 8), regCOMPUTE_START_X, 0,0,0, local_size[0],local_size[1],local_size[2],0,0]
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 8), regCOMPUTE_START_X, 0, 0, 0, *local_size, 0, 0]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), regCOMPUTE_RESOURCE_LIMITS, 0]
-    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_DISPATCH_DIRECT, 3),
-               global_size[0],global_size[1],global_size[2], CS_W32_EN | FORCE_START_AT_000 | COMPUTE_SHADER_EN]
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_DISPATCH_DIRECT, 3), *global_size, CS_W32_EN | FORCE_START_AT_000 | COMPUTE_SHADER_EN]
 
     # have to self wait since flush doesn't work
     self.signal(sig:=AMDDevice._get_signal())
@@ -229,7 +228,7 @@ class HWPM4Queue:
 
   def signal(self, signal:hsa.amd_signal_t, value=0):
     #assert signal.value == 0, f"entering signal without it being set to 0, but {signal.value}"
-    signal.value = 1
+    # signal.value = 1
     # NOTE: this needs an EOP buffer on the queue or it will NULL pointer
     addr = ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_RELEASE_MEM, 6),
@@ -422,13 +421,17 @@ class AMDAllocator(LRUAllocator):
     for i in range(0, src.nbytes, self.b[0].size):
       ctypes.memmove(self.b[1].va_addr, from_mv(src[i:]), lsize:=min(self.b[0].size, src.nbytes-i))
       if i != 0: self.device._wait_signal(self.device.signal_sdma)
+      self.device.signal_sdma.value = 1
       self.b = self.b[::-1]
+      # HWCopyQueue().copy(dest.va_addr+i, self.b[0].va_addr, lsize).signal(self.device.signal_sdma).submit(self.device)
       self.device._submit_sdma(dest.va_addr+i, self.b[0].va_addr, lsize, completion_signal=self.device.signal_sdma)
     self.device._wait_signal(self.device.signal_sdma)
 
   def copyout(self, dest:memoryview, src):
     self.device.synchronize()
     for i in range(0, dest.nbytes, self.b[0].size):
+      self.device.signal_sdma.value = 1
+      # HWCopyQueue().copy(self.b[0].va_addr, src.va_addr+i, sz:=min(self.b[0].size, dest.nbytes-i)).signal(self.device.signal_sdma).submit(self.device)
       self.device._submit_sdma(self.b[0].va_addr, src.va_addr+i, lsize:=min(self.b[0].size, dest.nbytes-i), completion_signal=self.device.signal_sdma)
       self.device._wait_signal(self.device.signal_sdma)
       ctypes.memmove(from_mv(dest[i:]), self.b[0].va_addr, lsize)
@@ -480,14 +483,14 @@ class AMDDevice(Compiled):
     kio.free_memory_of_gpu(self.kfd, handle=mem.handle)
 
   @classmethod
-  def _get_signal(self, num=None, sync_event=None) -> hsa.amd_signal_t:
+  def _get_signal(self, value=1, num=None, sync_event=None) -> hsa.amd_signal_t:
     if num is None:
       num = AMDDevice.signal_number
       AMDDevice.signal_number += 1
       if AMDDevice.signal_number == SIGNAL_COUNT: AMDDevice.signal_number = 16
     #print("signal", num)
     ret = hsa.amd_signal_t.from_address(AMDDevice.signals_page.va_addr + SIGNAL_SIZE*num)
-    ret.value = 0
+    ret.value = value
     ret.kind = hsa.AMD_SIGNAL_KIND_USER
     if sync_event is not None:
       ret.event_mailbox_ptr = AMDDevice.event_page.va_addr + sync_event.event_slot_index*8
@@ -495,16 +498,16 @@ class AMDDevice(Compiled):
     return ret
 
   @classmethod
-  def _wait_signal(self, signal:hsa.amd_signal_t, timeout=10000, skip_check=False):
+  def _wait_signal(self, signal:hsa.amd_signal_t, value=0, timeout=10000):
     assert signal.event_id != 0, "can't wait on this signal"
     evt_arr = (kfd.struct_kfd_event_data * 1)()
     evt_arr[0].event_id = signal.event_id
     ret = kio.wait_events(AMDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=timeout)
     if ret.wait_result != 0: raise RuntimeError(f"wait_result: {ret.wait_result}, {timeout} ms TIMEOUT!")
 
-    #val = signal.value
-    #while val != 0: val = signal.value
-    assert skip_check or signal.value == 0, f"not set to 0, but {signal.value}"
+    val = signal.value
+    while val != value: val = signal.value
+    assert signal.value == value, f"not set to {value}, but {signal.value}"
 
   def __init__(self, device:str=""):
     if AMDDevice.kfd == -1:
@@ -564,10 +567,8 @@ class AMDDevice(Compiled):
     self.pm4_ring = self._gpu_alloc(0x100000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
     self.pm4_queue = kio.create_queue(AMDDevice.kfd, ring_base_address=self.pm4_ring.va_addr, ring_size=self.pm4_ring.size, gpu_id=self.gpu_id,
       queue_type=kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE, queue_priority=kfd.KFD_MAX_QUEUE_PRIORITY,
-      eop_buffer_address=self.eop_pm4_buffer.va_addr, eop_buffer_size=self.eop_pm4_buffer.size,
-      # TODO: are these needed? (i know eop is)
+      eop_buffer_address=self.eop_pm4_buffer.va_addr, eop_buffer_size=self.eop_pm4_buffer.size, ctl_stack_size = 0xa000,
       ctx_save_restore_address=self.pm4_ctx_save_restore_address.va_addr, ctx_save_restore_size=self.pm4_ctx_save_restore_address.size,
-      ctl_stack_size = 0xa000,
       write_pointer_address=self.gart_pm4.va_addr, read_pointer_address=self.gart_pm4.va_addr+8)
 
     self.pm4_read_pointer = to_mv(self.pm4_queue.read_pointer_address, 8).cast("Q")
@@ -588,16 +589,14 @@ class AMDDevice(Compiled):
     q.submit(self)
 
   def _submit_cache_inv(self, addr=0x0, sz=(1 << 64)-1, gli=0, glv=0, glk=0, gl1=0, gl2=0):
-    HWPM4Queue().invalidate_cache().signal(self.completion_signal).submit(self)
-    self._wait_signal(self.completion_signal)
-    assert (wp:=(self.pm4_write_pointer[0]%(self.pm4_ring.size//4))) == (rp:=self.pm4_read_pointer[0]), \
-      f"didn't run {wp} != {rp} len {self.pm4_ring.size//4}"
+    HWPM4Queue().invalidate_cache().submit(self)
+    self.synchronize()
 
   def synchronize(self):
     HWPM4Queue().signal(self.completion_signal).submit(self)
     self._wait_signal(self.completion_signal)
-    assert (wp:=(self.pm4_write_pointer[0]%(self.pm4_ring.size//4))) == (rp:=self.pm4_read_pointer[0]), \
-      f"didn't run {wp} != {rp} len {self.pm4_ring.size//4}"
+    # assert (wp:=(self.pm4_write_pointer[0]%(self.pm4_ring.size//4))) == (rp:=self.pm4_read_pointer[0]), \
+    #   f"didn't run {wp} != {rp} len {self.pm4_ring.size//4}"
 
     # reset kernargs
     self.kernargs_ptr = self.kernargs.va_addr
