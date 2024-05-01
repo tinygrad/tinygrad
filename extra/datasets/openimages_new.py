@@ -6,6 +6,7 @@ import numpy as np
 import random
 from tinygrad import Tensor, dtypes, Device
 from pycocotools.coco import COCO
+# 608566/1170301
 
 class ConvertCocoPolysToMask(object):
   def __init__(self, filter_iscrowd=True):
@@ -19,7 +20,8 @@ class ConvertCocoPolysToMask(object):
       anno = [obj for obj in anno if obj['iscrowd'] == 0]
 
     boxes = [obj["bbox"] for obj in anno]
-
+    if len(boxes) == 0:
+      print('ZERO_BOX', image_id, boxes)
     # guard against no boxes via resizing
     boxes = np.array(boxes, dtype=np.float32).reshape(-1, 4)
     boxes[:, 2:] += boxes[:, :2]
@@ -289,7 +291,6 @@ def batch_load_retinanet(coco, bs=8, shuffle=False, seed=None, anchor_np=[1,2,3,
 
     for _ in range(cpu_count()):
     # for _ in range(4):
-      # print('hit*************')
       p = Process(target=loader_process, args=(q_in, q_out, X, seed, coco, YB, YL, YM, anchor_np))
       p.daemon = True
       p.start()
@@ -373,7 +374,6 @@ def batch_load_retinanet_val(coco, bs=8, shuffle=False, seed=None):
 
     for _ in range(cpu_count()):
     # for _ in range(4):
-      # print('hit*************')
       p = Process(target=loader_process_val, args=(q_in, q_out, X, seed, coco))
       p.daemon = True
       p.start()
@@ -398,6 +398,16 @@ def batch_load_retinanet_val(coco, bs=8, shuffle=False, seed=None):
 
 
 if __name__ == '__main__':
+  BS=2
+  from extra.models.retinanet import AnchorGenerator
+  anchor_sizes = tuple((x, int(x * 2 ** (1.0 / 3)), int(x * 2 ** (2.0 / 3))) for x in [32, 64, 128, 256, 512])
+  aspect_ratios = ((0.5, 1.0, 2.0),) * len(anchor_sizes)
+  anchor_generator = AnchorGenerator(
+      anchor_sizes, aspect_ratios
+  )
+  feature_shapes = [(100, 100), (50, 50), (25, 25), (13, 13), (7, 7)]
+  ANCHORS = anchor_generator((BS,3,800,800), feature_shapes)
+  ANCHOR_NP = ANCHORS[0].numpy()
   from extra.datasets.openimages_new import get_openimages
   ROOT = 'extra/datasets/open-images-v6TEST'
   NAME = 'openimages-mlperf'
@@ -406,9 +416,9 @@ if __name__ == '__main__':
   print(f"Training on {GPUS}")
   for x in GPUS: Device[x]
   with tqdm(total=len(coco_train)) as pbar:
-    for x, y, yb, yl, c in batch_load_retinanet(coco_train, bs=2):
-      x = x.shard(GPUS,axis=0).realize()
-      yb = yb.shard(GPUS,axis=0).realize()
+    for x, y, yb, yl, c in batch_load_retinanet(coco_train, bs=BS, seed=42, anchor_np=ANCHOR_NP):
+      # x = x.shard(GPUS,axis=0).realize()
+      # yb = yb.shard(GPUS,axis=0).realize()
       pbar.update(x.shape[0])
 
   
