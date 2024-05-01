@@ -593,53 +593,37 @@ class TestSchedule(unittest.TestCase):
     # sched = check_schedule([b, c], 4)
     # doesn't store either in half because it doesn't chase
 
-  def test_fuse_contiguous_child(self):
+  def test_reduce_simple_chase(self):
     a = Tensor.empty(4, 4, 4)
-    r = a.sum(axis=0) * 10
-    out0 = r.sum(axis=0) + 2
-    out1 = r.sum(axis=1) + 4
-    schedule = check_schedule([out0, out1], 3)
-    assert schedule[0].ast[0].src[0].op is BinaryOps.MUL
+    r = a.sum(0) + 6
+    b = r.sum(0) * 4
+    c = r.sum(1) * 2
+    schedule = check_schedule([b, c], 3)
+    assert schedule[0].ast[0].src[0].op is BinaryOps.ADD
 
-  def test_contiguous_child_midreduce_nofuse(self):
-    a = Tensor.empty(32, 32)
+  def test_push_permute_chase(self):
+    a = Tensor.empty(4, 4, 4)
+    b = Tensor.empty(4, 4)
+    r = a.sum(2) + b
+    d = r.T * 4
+    e = r * d
+    schedule = check_schedule([d, e], 3)
+    assert schedule[0].ast[0].src[0].op is BinaryOps.ADD
+
+  def test_push_shrink_chase(self):
+    a = Tensor.empty(16, 16)
+    b = Tensor.empty(4)
+    c = Tensor.empty(16, )
+    r = a.sum(1) + c
+    d = r[:4] * b
+    schedule = check_schedule(d, 2)
+    assert schedule[0].ast[0].src[0].op is BinaryOps.ADD
+
+  def test_midreduce_nochase(self):
+    a = Tensor.empty(16, 16)
     b = (a.sum(0) + a.max(1)) + 2
     schedule = check_schedule(b, 2)
     assert schedule[0].ast[0].src[0].op is ReduceOps.MAX
-
-  def test_contiguous_child_midreduce_nofuse2(self):
-    a = Tensor.empty(32, 32)
-    b = (a.sum(0) * a.max(1)) + 2
-    c = (a.sum(0) * a.max(1)) + 4
-    schedule = check_schedule([b, c], 4) # TODO fuse a.sum(),b,c
-    assert schedule[0].ast[0].src[0].op is ReduceOps.MAX
-
-  def test_contiguous_child_one_midreduce_nofuse(self):
-    a = Tensor.empty(32, 32)
-    b = (a.sum(0) + a.max(1)) + 2
-    c = (a.sum(0) + a.max(1)) + 4
-    Tensor.realize(b, c)
-
-  def test_contiguous_child_always_chase_multioutput(self):
-    a = Tensor.empty(32, 32)
-    c = Tensor.empty(32, 32)
-    out0 = (a.sum(axis=0) + 4) - c.sum(axis=0)
-    out1 = (a.sum(axis=0) + 4) * c.sum(axis=0)
-    schedule = check_schedule([out0, out1], 4)
-    assert schedule[0].ast[0].src[0].op is BinaryOps.ADD
-
-  # TODO
-  def test_fuse_contiguous_children_contiguous(self):
-    a = Tensor.empty(4, 4, 4)
-    b = Tensor.empty(4, 4)
-    c = a.sum(1) + b * 8
-    d = c + a.sum(1).T + 2
-
-  def test_fuse_contiguous_children_expanded(self):
-    pass
-
-  def test_fuse_contiguous_children_reduce(self):
-    pass
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
