@@ -593,5 +593,15 @@ class TestSchedule(unittest.TestCase):
     # sched = check_schedule([b, c], 4)
     # doesn't store either in half because it doesn't chase
 
+  def test_batchnorm_train_backward_fusion(self):
+    with Tensor.train():
+      x = Tensor.empty((2, 16, 8, 8)).contiguous()
+      bn = nn.BatchNorm2d(16)
+      bn.weight.requires_grad = bn.bias.requires_grad = x.requires_grad = True
+      fw = bn(x).contiguous_backward().relu().contiguous()
+      fw.sum().backward()
+      # easy case: merge 4 reduces in backward into 1
+      check_schedule([x.grad, bn.weight.grad, bn.bias.grad, fw], 9)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
