@@ -92,7 +92,7 @@ jobs:
           train_cifar_wino.txt
 
   testnvidiabenchmark:
-    name: NVIDIA Benchmark
+    name: tinybox green Benchmark
     runs-on: [self-hosted, Linux, tinyboxgreen]
     defaults:
       run:
@@ -202,7 +202,7 @@ jobs:
           train_resnet_one_gpu.txt
 
   testamdbenchmark:
-    name: tinybox Benchmark
+    name: tinybox red Benchmark
     runs-on: [self-hosted, Linux, tinybox]
     defaults:
       run:
@@ -283,7 +283,7 @@ jobs:
           mixtral.txt
 
   testmoreamdbenchmark:
-    name: tinybox Training
+    name: tinybox red Training Benchmark
     runs-on: [self-hosted, Linux, tinybox]
     defaults:
       run:
