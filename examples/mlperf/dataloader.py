@@ -61,7 +61,8 @@ def loader_process(q_in, q_out, X:Tensor, seed):
             random.seed(seed * 2 ** 20 + idx)
           img = preprocess_train(img)
       else:
-        img = np.empty((224, 224, 3), dtype=np.uint8)
+        # pad zeros
+        img = np.zeros((224, 224, 3), dtype=np.uint8)
 
       # broken out
       #img_tensor = Tensor(img.tobytes(), device='CPU')
