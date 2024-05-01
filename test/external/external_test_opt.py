@@ -4,6 +4,7 @@ import numpy as np
 import torch
 
 from tinygrad import nn, GlobalCounters, Tensor, Device
+from tinygrad.helpers import getenv
 from tinygrad.nn.state import get_parameters
 from tinygrad.engine.realize import capturing
 
@@ -29,6 +30,11 @@ class CLCache:
     if self.allowed is not None:
       assert self.count == self.allowed, f"{self.count} != {self.allowed}"
 
+from extra.models.convnext import ConvNeXt
+from extra.models.efficientnet import EfficientNet
+from extra.models.resnet import ResNet18
+from extra.models.vit import ViT
+
 @unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
 class TestInferenceMinKernels(unittest.TestCase):
   def setUp(self):
@@ -36,6 +42,45 @@ class TestInferenceMinKernels(unittest.TestCase):
     Tensor.training = False
   def tearDown(self):
     Tensor.training = self.training_old
+
+  @unittest.skipIf(not PUSH_PERMUTES, "this test requires PUSH_PERMUTES")
+  def test_convnext(self):
+    model = ConvNeXt()
+    for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
+    img = Tensor.randn(1, 3, 224, 224)
+    with CLCache(129):
+      model(img).realize()
+
+  def test_enet(self):
+    model = EfficientNet(getenv("ENET_NUM", 0), has_se=False)
+    for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
+    img = Tensor.randn(1, 3, 224, 224)
+    with CLCache(51):
+      model.forward(img).realize()
+
+  def test_enet_se(self):
+    model = EfficientNet(getenv("ENET_NUM", 0), has_se=True)
+    for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
+    img = Tensor.randn(1, 3, 224, 224)
+    # TODO: this seems very high
+    with CLCache(115):
+      model.forward(img).realize()
+
+  def test_resnet(self):
+    model = ResNet18()
+    for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
+    img = Tensor.randn(1, 3, 224, 224)
+    with CLCache(23):
+      model.forward(img).realize()
+
+  def test_vit(self):
+    model = ViT(embed_dim=192, num_heads=3)
+    for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
+    img = Tensor.randn(1, 3, 224, 224)
+    with CLCache(209) as cache: # NOTE: this is way too high
+      out = model.forward(img)
+      assert cache.count == 0, "ViT prerealized?"
+      out.realize()
 
   @unittest.skip("llama is fp16 but CI does not have fp16")
   def test_llama(self):
