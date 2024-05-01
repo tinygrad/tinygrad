@@ -229,6 +229,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
 
 SCHEDULES: List = []
 def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
+  if DEBUG >= 1: print(f"scheduling {len(outs)} outputs")
   if seen is None: seen = set()
   graph, in_degree, prescheduled = _graph_schedule(outs, seen)
   queue = deque(si for key, si in prescheduled.items() if in_degree[key] == 0)
@@ -254,9 +255,11 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
       print(f"saving {len(SCHEDULES)} schedule graphs to", fp:="schedule.pkl")
       pickle.dump(SCHEDULES, open(fp, "wb"))
     if len(SCHEDULES) == 0: atexit.register(_save)
+    SCHEDULES.clear()
     SCHEDULES.append((graph, prescheduled))
   # confirm everything was scheduled correctly
   if not all(degree == 0 for degree in in_degree.values()) or len(prescheduled) != len(schedule):
+    print("couldn't schedule", [key for key, degree in in_degree.items() if degree != 0])
     raise RuntimeError(f"cycle detected in graph, prescheduled {len(prescheduled)} but only scheduled {len(schedule)}")
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
   return schedule, var_vals

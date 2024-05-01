@@ -33,9 +33,6 @@ class Buffer:
   def __reduce__(self):
     buf = None
     if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options, None, self.lb_refcount)
-    if self.is_allocated():
-      buf = bytearray(self.nbytes)
-      self.copyout(memoryview(buf))
     return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf, self.lb_refcount)
   @property
   def nbytes(self): return self.size*self.dtype.itemsize
