@@ -97,6 +97,9 @@ class MetalDevice(Compiled):
     self.mtl_buffers_in_flight: List[Any] = []
     self.mv_in_metal: List[memoryview] = []
     self.track_cross_buffer: List[Any] = []
+    if getenv("CONDA_SHLVL") > 0:
+      os.environ["METAL_XCODE"] = "1"
+      print("Using Metal from Xcode SDK due to Conda targeting an unsupported macOS version(11.0).")
     from tinygrad.runtime.graph.metal import MetalGraph
     super().__init__(device, MetalAllocator(self), MetalCompiler(None if getenv("METAL_XCODE") else self),
                      functools.partial(MetalProgram, self), functools.partial(MetalGraph, self))
