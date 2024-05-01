@@ -623,8 +623,10 @@ class TestAutoCastType(unittest.TestCase):
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_mean_half_precision(self):
-    t = Tensor([60000, 60000, 60000], dtype=dtypes.half)
+    t = Tensor([60000, 60000, 60000], dtype=dtypes.half, requires_grad=True)
     np.testing.assert_allclose(t.mean().numpy(), 60000)
+    t.square().mean().backward()
+    np.testing.assert_allclose(t.grad.numpy(), [60000 * 2 / 3] * 3)
 
 class TestImplicitFunctionTypeChange(unittest.TestCase):
   def test_functions(self):
