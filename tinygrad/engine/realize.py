@@ -50,7 +50,7 @@ def lower_schedule_item(si:ScheduleItem) -> ExecItem:
     if hasattr(Device[out.device].allocator, 'transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]:
       if getenv("USE_COPY_KERNEL"): return lower_runner(Device[out.device].get_runner(copy_ast(ast.arg)), si.bufs)
       kernel_type = BufferXfer
-    return ExecItem(kernel_type(ast.arg, out.device, si.inputs[0].device), list(si.bufs))
+    return ExecItem(kernel_type(ast.arg[0], ast.arg[1], out.device, si.inputs[0].device), list(si.bufs))
   if ast.op is LoadOps.CUSTOM: return ExecItem(CustomOp(ast.arg), list(si.bufs))
   if ast.op is LoadOps.EMPTY: return ExecItem(EmptyOp(out), list(si.bufs))
   raise RuntimeError(f"don't know how to lower {ast}")

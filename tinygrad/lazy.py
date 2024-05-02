@@ -101,7 +101,8 @@ class LazyBuffer:
   def is_unrealized_unmasked_const(self): return self.is_unrealized_const() and all(v.mask is None for v in self.st.views)
 
   def _copy(self, device:str) -> LazyBuffer:
-    return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, self.buffer.nbytes, (self,), enable_cache=False)
+    return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY,
+      (prod(self.shape)*self.dtype.itemsize, self.st.views[0].offset*self.dtype.itemsize), (self.base,), enable_cache=False)
 
   def copy_to_device(self, device:str, force: bool = False) -> LazyBuffer:
     # no COPY
@@ -116,7 +117,9 @@ class LazyBuffer:
       return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, device, arg=self.base.arg)._view(self.st)
 
     # if it's a shrink, do the shrink before the copy with CONTIGUOUS
-    if prod(self.st.shape) < prod(self.base.st.shape): return self.contiguous()._copy(device)
+    if prod(self.st.shape) < prod(self.base.st.shape):
+      if self.device.startswith("DISK"): return self._copy(device)
+      return self.contiguous()._copy(device)
 
     # copy the base and apply the shapetracker on the new device
     return self.base._copy(device)._view(self.st)

@@ -52,10 +52,13 @@ class Runner:
 # **************** Buffer / Allocator ****************
 
 class BufferCopy(Runner):
-  def __init__(self, total_sz, dest_device, src_device):
-    if total_sz >= 1e6: name = f"{type(self).__name__[6:].lower()} {total_sz/1e6:7.2f}M, {dest_device[:7]:>7s} <- {src_device[:7]:7s}"
-    else: name = f"{type(self).__name__[6:].lower()} {total_sz:8d}, {dest_device[:7]:>7s} <- {src_device[:7]:7s}"
-    super().__init__(colored(name, "yellow"), dest_device, 0, total_sz)
+  def __init__(self, total_sz, offset, dest_device, src_device):
+    name = [f"{type(self).__name__[6:].lower()} "]
+    name.append(f"{total_sz/1e6:7.2f}M" if total_sz >= 1e6 else f"{total_sz:8d}")
+    name.append(f" + {offset/total_sz:3.1f}" if offset else "      ")
+    name.append(f" {dest_device[:7]:>7s} <- {src_device[:7]:7s}")
+    self.offset = offset
+    super().__init__(colored(''.join(name), "yellow"), dest_device, 0, total_sz)
   def copy(self, dest, src):
     if src.device.startswith("DISK") and hasattr(dest.allocator, 'copy_from_fd') and src.nbytes >= 4096 and hasattr(src.allocator.device, 'fd'):
       dest.allocator.copy_from_fd(dest._buf, src.allocator.device.fd, src._buf.offset, src.nbytes)
@@ -66,7 +69,7 @@ class BufferCopy(Runner):
       dest.copyin(src.as_buffer(allow_zero_copy=True))  # may allocate a CPU buffer depending on allow_zero_copy
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False):
     dest, src = rawbufs[0:2]
-    assert dest.size == src.size and dest.dtype == src.dtype, f"buffer copy mismatch, {dest.size} != {src.size}, {dest.dtype} != {src.dtype}"
+    #assert dest.size == src.size and dest.dtype == src.dtype, f"buffer copy mismatch, {dest.size} != {src.size}, {dest.dtype} != {src.dtype}"
     st = time.perf_counter()
     self.copy(dest, src)
     if wait:
