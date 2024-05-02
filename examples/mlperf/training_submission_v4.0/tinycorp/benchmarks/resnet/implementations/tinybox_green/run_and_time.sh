@@ -1,3 +1,5 @@
+#!/bin/bash
+
 export PYTHONPATH="."
 export MODEL="resnet"
 export SUBMISSION_PLATFORM="tinybox_green"
@@ -10,8 +12,12 @@ export TRAIN_BEAM=3 IGNORE_JIT_FIRST_BEAM=1 BEAM_UOPS_MAX=1500 BEAM_UPCAST_MAX=1
 # pip install -e ".[mlperf]"
 export LOGMLPERF=1
 
+export SEED=$RANDOM
+DATETIME=$(date "+%m%d%H%M")
+LOGFILE="resnet_green_${DATETIME}_${SEED}.log"
+
 # init
-BENCHMARK=10 INITMLPERF=1 python3 examples/mlperf/model_train.py | tee resnet.log
+BENCHMARK=10 INITMLPERF=1 python3 examples/mlperf/model_train.py | tee $LOGFILE
 
 # run
-WANDB=1 PARALLEL=0 RUNMLPERF=1 python3 examples/mlperf/model_train.py | tee -a resnet.log
+WANDB=1 PARALLEL=0 RUNMLPERF=1 python3 examples/mlperf/model_train.py | tee -a $LOGFILE
