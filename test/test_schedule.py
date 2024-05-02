@@ -609,6 +609,7 @@ class TestSchedule(unittest.TestCase):
       # merge reduce into previous conv: -2 kernels on top of the above. requires big linearizer change.
       # ideal case: the foward + backward pass is just 3 convs and some small reduces!
       check_schedule([x.grad, bn.weight.grad, bn.bias.grad, fw], 9)
+
   def test_parallel_reduce_fusion(self):
     x = Tensor.empty(16, 16).contiguous()
     y = Tensor.empty(16, 16).contiguous()
