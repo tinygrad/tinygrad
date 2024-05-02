@@ -23,11 +23,11 @@ class DiskAllocator(Allocator):
   def _free(self, buf, options): self.device._might_close()
   def as_buffer(self, src:DiskBuffer): return src._buf()
   def copyin(self, dest:DiskBuffer, src:memoryview): dest._buf()[:] = src
-  def copyout(self, dest:memoryview, src:DiskBuffer):
+  def copyout(self, dest:memoryview, src:DiskBuffer, src_offset:int):
     if OSX and hasattr(self.device, 'fd'):
       # OSX doesn't seem great at mmap, this is faster
       with io.FileIO(self.device.fd, "a+b", closefd=False) as fo:
-        fo.seek(src.offset)
+        fo.seek(src.offset + src_offset)
         fo.readinto(dest)
     else:
       dest[:] = src._buf()
