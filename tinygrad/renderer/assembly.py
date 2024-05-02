@@ -94,7 +94,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, _uops:UOpGraph) -> str
   matcher.rewrite_graph(uops)
 
   for pointer_op in list(filter(lambda uop: uop.uop in [UOps.LOAD, UOps.STORE], uops.uops)): ptr_ar(pointer_op, uops)
-  uops.remove_childless(set(x for x in uops if x.uop in {UOps.DEFINE_GLOBAL, UOps.PHI, UOps.ENDIF, UOps.ENDLOOP, UOps.STORE}))
+  uops.remove_childless(set(x for x in uops if x.uop in {UOps.PHI, UOps.ENDIF, UOps.ENDLOOP, UOps.STORE}))
   uops.optimize_loops()
 
   def kk(*s: str): kernel.append("\n".join(s))
