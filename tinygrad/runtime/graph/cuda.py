@@ -44,19 +44,21 @@ class CUDAGraph(MultiGraphRunner):
         deps = self.access_resources(read=[src], write=[dest], new_dependency=node_from)
         c_deps = (cuda.CUgraphNode*len(deps))(*deps) if deps else None
         if getenv("CUDA_P2P", int(CUDADevice.peer_access)):
-          cp_params = cuda.CUDA_MEMCPY3D_v2(srcMemoryType=cuda.CU_MEMORYTYPE_DEVICE, srcDevice=src._buf, srcPitch=src.nbytes, srcHeight=1,
+          cp_params = cuda.CUDA_MEMCPY3D_v2(srcMemoryType=cuda.CU_MEMORYTYPE_DEVICE, srcDevice=src._buf + ji.prg.offset,
+                                            srcPitch=src.nbytes, srcHeight=1,
                                             dstMemoryType=cuda.CU_MEMORYTYPE_DEVICE, dstDevice=dest._buf, dstPitch=dest.nbytes, dstHeight=1,
                                             WidthInBytes=dest.nbytes, Height=1, Depth=1)
           check(cuda.cuGraphAddMemcpyNode(ctypes.byref(node_from), self.graph, c_deps, len(deps), ctypes.byref(cp_params), src_dev.context))
         else:
-          self.cpu_buffers.append(cpu_buffer:=Buffer(device=src.device, dtype=src.dtype, size=src.size, options=BufferOptions(host=True)).allocate())
+          self.cpu_buffers.append(cpu_buf:=Buffer(device=dest.device, dtype=dest.dtype, size=dest.size, options=BufferOptions(host=True)).allocate())
 
           node_to = cuda.CUgraphNode()
-          cp_params = cuda.CUDA_MEMCPY3D_v2(srcMemoryType=cuda.CU_MEMORYTYPE_DEVICE, srcDevice=src._buf, srcPitch=src.nbytes, srcHeight=1,
-                                            dstMemoryType=cuda.CU_MEMORYTYPE_HOST, dstHost=cpu_buffer._buf, dstPitch=dest.nbytes, dstHeight=1,
+          cp_params = cuda.CUDA_MEMCPY3D_v2(srcMemoryType=cuda.CU_MEMORYTYPE_DEVICE, srcDevice=src._buf + ji.prg.offset,
+                                            srcPitch=src.nbytes, srcHeight=1,
+                                            dstMemoryType=cuda.CU_MEMORYTYPE_HOST, dstHost=cpu_buf._buf, dstPitch=dest.nbytes, dstHeight=1,
                                             WidthInBytes=dest.nbytes, Height=1, Depth=1)
           check(cuda.cuGraphAddMemcpyNode(ctypes.byref(node_to), self.graph, c_deps, len(deps), ctypes.byref(cp_params), src_dev.context))
-          cp_params = cuda.CUDA_MEMCPY3D_v2(srcMemoryType=cuda.CU_MEMORYTYPE_HOST, srcHost=cpu_buffer._buf, srcPitch=src.nbytes, srcHeight=1,
+          cp_params = cuda.CUDA_MEMCPY3D_v2(srcMemoryType=cuda.CU_MEMORYTYPE_HOST, srcHost=cpu_buf._buf, srcPitch=src.nbytes, srcHeight=1,
                                             dstMemoryType=cuda.CU_MEMORYTYPE_DEVICE, dstDevice=dest._buf, dstPitch=dest.nbytes, dstHeight=1,
                                             WidthInBytes=dest.nbytes, Height=1, Depth=1)
           check(cuda.cuGraphAddMemcpyNode(ctypes.byref(node_from), self.graph, (cuda.CUgraphNode*1)(node_to), 1,

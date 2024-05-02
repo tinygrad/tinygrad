@@ -119,7 +119,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
   allbufs[buf] = None
   if buf.op in LoadOps: realizes[buf.base] = None
   if buf.op is LoadOps.COPY:
-    assert buf.srcs[0].st.contiguous and buf.srcs[0].size == buf.srcs[0].base.size, "can only copy contig"
+    assert buf.srcs[0].st.consecutive, "can only copy consecutive"
     realizes[buf.srcs[0].base] = None
   for x in buf.srcs:
     children[x.base][buf] = None
