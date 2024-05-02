@@ -49,5 +49,5 @@ if __name__ == "__main__":
 
   # verify eval acc
   if target := getenv("TARGET_EVAL_ACC_PCT", 0.0):
-    if test_acc >= target: print(colored(f"{test_acc=} >= {target}", "green"))
+    if test_acc >= target and test_acc != 100.0: print(colored(f"{test_acc=} >= {target}", "green"))
     else: raise ValueError(colored(f"{test_acc=} < {target}", "red"))

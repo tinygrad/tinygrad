@@ -131,7 +131,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: torch.eye(1), lambda: Tensor.eye(1), forward_only=True)
     helper_test_op([], lambda: torch.eye(0), lambda: Tensor.eye(0), forward_only=True)
 
-  @unittest.skipIf(Device.DEFAULT=="RHIP", "broken in HIP CI")
   def test_split(self):
     def tensor(s): return torch.arange(math.prod(s), dtype=torch.int32).reshape(s), Tensor.arange(math.prod(s)).reshape(s)
     test_cases = [

@@ -233,6 +233,9 @@ jobs:
         name: Test MLPerf metrics
         run: GPU=1 python -m pytest -n=auto test/external/external_test_metrics.py --durations=20
       - if: ${{ matrix.task == 'onnx' }}
+        name: Test MLPerf datasets
+        run: GPU=1 python -m pytest -n=auto test/external/external_test_datasets.py --durations=20
+      - if: ${{ matrix.task == 'onnx' }}
         name: Test THREEFRY
         run: PYTHONPATH=. THREEFRY=1 GPU=1 python3 -m pytest test/test_randomness.py test/test_jit.py
 
