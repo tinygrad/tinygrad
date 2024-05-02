@@ -42,6 +42,8 @@ Device = _Device()
 class Runner:
   def __init__(self, display_name:str, dname:str, op_estimate:sint=0, mem_estimate:sint=0):
     self.first_run, self.display_name, self.dname, self.op_estimate, self.mem_estimate = True, display_name, dname, op_estimate, mem_estimate
+  @property
+  def device(self): return Device[self.dname]
   def exec(self, rawbufs:List[Buffer], var_vals:Optional[Dict[Variable, int]]=None) -> Optional[float]:
     return self(rawbufs, {} if var_vals is None else var_vals)
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False) -> Optional[float]:
@@ -157,9 +159,6 @@ class CompiledRunner(Runner):
     return CompiledRunner(self.display_name, self.prg, dname, self.global_size, self.local_size,
                           self.vars, self.op_estimate, self.mem_estimate, self.lib, self.outcount)
 
-  @property
-  def device(self): return Device[self.dname]
-
   def __reduce__(self):
     return self.__class__, (self.display_name, self.prg, self.dname, self.global_size, self.local_size,
                             self.vars, self.op_estimate, self.mem_estimate, self.lib, self.outcount)
@@ -180,10 +179,6 @@ class CompiledRunner(Runner):
     if global_size: lra['global_size'] = global_size
     if local_size: lra['local_size'] = local_size
     return self.clprg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k] for k in self.vars), wait=wait)
-
-class MultiDeviceJITGraph(Runner):
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False) -> Optional[float]:
-    raise NotImplementedError("override this")
 
 method_cache: Dict[Tuple[str, Tuple[LazyOp, ...], int, bool], CompiledRunner] = {}
 logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS", "") else None, getenv("LOGKERNS_LEVEL", 1)
