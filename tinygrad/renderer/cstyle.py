@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, NamedTuple, Tuple, Union, DefaultDict, cast, Literal, Callable
+from typing import Dict, List, Optional, NamedTuple, Tuple, DefaultDict, cast
 import math, functools
 from collections import defaultdict, Counter
 from tinygrad.codegen.linearizer import UOps, UOp
@@ -31,7 +31,7 @@ class CStyleLanguage(NamedTuple):
     BinaryOps.DIV: lambda a,b,dtype: f"({a}/{b})", BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})", BinaryOps.MOD: lambda a,b,dtype: f"({a}%{b})",
     BinaryOps.CMPLT: lambda a,b,dtype: f"({a}<{b})", BinaryOps.CMPEQ: lambda a,b,dtype: f"({a}=={b})", BinaryOps.XOR: lambda a,b,dtype: f"({a}^{b})",
     TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})"}
-  
+
   def workitem_code(self, idx, access, size, n_workitems):
     code = [f"#pragma omp parallel for collapse({n_workitems})"] if idx[0] in ["g","i"] and idx[-1] == "0" else []
     return code + [f"for(int {idx} = 0; {idx} < {size}; {idx}++) {{"]
