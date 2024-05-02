@@ -87,7 +87,9 @@ class LazyOp:
   @functools.cached_property
   def lazyops(self) -> List[LazyOp]: return dedup([self] + [item for x in self.src for item in x.lazyops])
   def vars(self) -> List[Variable]:
-    return sorted(set.union(*[x.arg.st.vars() for x in self.lazyops if x.op in BufferOps], set()), key=lambda x: str(x.expr))
+    extract_vars = [x.arg.st.vars() for x in self.lazyops if x.op in BufferOps]
+    const_vars = [x.arg.val.unbind()[0] for x in self.lazyops if x.op is BufferOps.CONST and isinstance(x.arg.val, Variable)]
+    return sorted(set.union(*extract_vars, set(const_vars)), key=lambda x: str(x.expr))
 
 def copy_ast(sz) -> LazyOp:
   rd = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.uint8, st:=ShapeTracker.from_shape((sz,))))
