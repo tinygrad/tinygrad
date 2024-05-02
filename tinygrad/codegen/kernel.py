@@ -27,7 +27,11 @@ class Opt:
   axis: Optional[int] = None
   amt: Optional[int] = None
   def __repr__(self): return f"Opt(op={self.op}, axis={self.axis}, amt={self.amt})"
-  def real_axis(self, k:Kernel): return self.axis + (k.first_reduce if self.op is OptOps.UNROLL else (k.first_reduce+k.group_for_reduces if self.op in [OptOps.GROUP, OptOps.GROUPTOP] else 0)) if self.axis is not None else -1 # noqa: E501
+  def real_axis(self, k:Kernel):
+    if self.axis is None: return -1
+    if self.op is OptOps.UNROLL: return k.first_reduce+self.axis
+    if self.op in {OptOps.GROUP, OptOps.GROUPTOP}: return k.first_reduce+k.group_for_reduces+self.axis
+    return self.axis
 
 @dataclass(frozen=True)
 class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x N)
