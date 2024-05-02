@@ -61,8 +61,6 @@ class HSAGraph(MultiGraphRunner):
     self.transfers = []
     self.ji_to_transfer: Dict[int, int] = {} # faster to store transfers as list and update using this mapping table.
     self.signals_to_reset: List[hsa.hsa_signal_t] = []
-    self.w_dependency_map: Dict[Any, Union[hsa.hsa_signal_t, int]] = {}
-    self.r_dependency_map: Dict[Any, List[Union[hsa.hsa_signal_t, int]]] = collections.defaultdict(list)
     self.signals_to_devices: Dict[ctypes.c_uint64, List[HSADevice]] = {}
     self.profile_info: Dict[Compiled, List[Tuple[Any, ...]]] = collections.defaultdict(list)
 
@@ -168,8 +166,6 @@ class HSAGraph(MultiGraphRunner):
 
   def access_resources(self, read, write, new_dependency, sync_with_aql_packets=False):
     rdeps = self._access_resources(read, write, new_dependency)
-    signal_deps, aql_deps = [x for x in rdeps if isinstance(x, hsa.hsa_signal_t)], [x for x in rdeps if isinstance(x, int)]
-    deps = signal_deps + ([max(aql_deps)] if len(aql_deps) > 0 else [])
-    wait_signals = [self.dependency_as_signal(dep, sync_with_aql_packets=sync_with_aql_packets) for dep in deps]
+    wait_signals = [self.dependency_as_signal(dep, sync_with_aql_packets=sync_with_aql_packets) for dep in rdeps]
     if sync_with_aql_packets: wait_signals += [self.kickoff_signals[cast(HSADevice, Device[rawbuf.device])] for rawbuf in read+write]
     return dedup_signals(wait_signals)
