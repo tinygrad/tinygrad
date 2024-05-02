@@ -14,7 +14,7 @@ export LOGMLPERF=1
 
 export SEED=$RANDOM
 DATETIME=$(date "+%m%d%H%M")
-LOGFILE="resnet_green_${DATETIME}_${SEED}.log"
+LOGFILE="resnet_red_${DATETIME}_${SEED}.log"
 
 # init
 BENCHMARK=10 INITMLPERF=1 python3 examples/mlperf/model_train.py | tee $LOGFILE
