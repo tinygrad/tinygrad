@@ -1,5 +1,5 @@
 import ctypes, collections, time, itertools
-from typing import List, Any, Dict, cast, Optional, Union, Tuple
+from typing import List, Any, Dict, cast, Optional, Tuple
 from tinygrad.helpers import GraphException, init_c_var, round_up
 from tinygrad.buffer import Buffer, BufferOptions
 from tinygrad.device import Compiled, CompiledRunner, BufferXfer, Device
