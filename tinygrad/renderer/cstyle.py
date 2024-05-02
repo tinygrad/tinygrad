@@ -15,8 +15,7 @@ class CStyleLanguage(NamedTuple):
   smem_prefix: str = ""
   smem_prefix_for_cast: bool = True
   arg_int_prefix: str = "const int"
-  barrier: str = ""
-  workitem_is_loop: bool = True
+  barrier: str = "#pragma omp barrier"
   global_max: List[int] = []
   local_max: List[int] = []
   extra_args: List[str] = []
@@ -32,9 +31,15 @@ class CStyleLanguage(NamedTuple):
     BinaryOps.CMPLT: lambda a,b,dtype: f"({a}<{b})", BinaryOps.CMPEQ: lambda a,b,dtype: f"({a}=={b})", BinaryOps.XOR: lambda a,b,dtype: f"({a}^{b})",
     TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})"}
 
-  def workitem_code(self, idx, access, size, n_workitems):
-    code = [f"#pragma omp parallel for collapse({n_workitems})"] if idx[0] in ["g","i"] and idx[-1] == "0" else []
-    return code + [f"for(int {idx} = 0; {idx} < {size}; {idx}++) {{"]
+  def workitem_code(self, idx, access, size, n_workitems, depth, locals):
+    if idx[0] == "g":
+      return ([f"for(int {idx} = 0; {idx} < {size}; {idx}++) {{"], depth+1)
+    elif idx[0] == "l":
+      code = [f"#pragma omp parallel private({','.join(locals)})", f"{{ int {idx} = omp_get_thread_num(); /* {size} */"] if idx[-1] == "1" else []
+      return (code, depth+1)
+    elif idx[0] == "i":
+      code = [f"#pragma omp parallel for collapse({n_workitems})"] if idx[-1] == "0" else []
+      return (code + [f"for(int {idx} = 0; {idx} < {size}; {idx}++) {{"], depth+1)
 
   # returns a str expression of the casted xs with the given type
   def render_cast(self, x:List[str], var_dtype:DType, bitcast=False) -> str:
@@ -141,8 +146,9 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str
         if child_count[u] <= 1 and args is not BinaryOps.MAX and not getenv("EXPAND_SSA"): r[u] = val
         else: kk(f"{lang.render_dtype(dtype)} {ssa('alu',u)} = {val};")
       elif uop is UOps.SPECIAL:
-        for line in lang.workitem_code(args[1], args[0], args[2], sum(u.uop is UOps.SPECIAL for u in uops)): kk(line)
-        if lang.workitem_is_loop: depth += 1
+        code, d = lang.workitem_code(args[1], args[0], args[2], sum(u.uop is UOps.SPECIAL for u in uops), depth, list(u.arg[0] for u in uops if u.uop is UOps.DEFINE_LOCAL))
+        for line in code: kk(line)
+        depth = d
         r[u] = args[1]
       elif uop is UOps.LOAD:
         val = lang.render_load(dtype, r[vin[0]], vin[0].dtype, strip_parens(r[vin[1]]), vin[0].uop is UOps.DEFINE_LOCAL)
@@ -181,11 +187,11 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str
         r[u] = (r[vin[0]] if from_ssa else f"{(r[vin[0]])}") + (f"[{args}]" if vin[0].dtype.count > 4 else f".{'xyzw'[args]}")
       else: raise RuntimeError(f"failed to render {uop}")
 
-  while depth > 1: end_scope() # end of workitem loops
+  while depth > 1: end_scope() # end of workitem loop
 
   return lang.render_kernel(function_name, kernel, bufs, uops)
 
-def _gpu_workitem(idx, d, size): return [f"int {idx} = {d[idx[0]]}; /* {size} */"]
+def _gpu_workitem(idx, d, size, depth): return ([f"int {idx} = {d[idx[0]]}; /* {size} */"], depth)
 
 class OpenCLLanguage(CStyleLanguage):
   kernel_prefix = "__kernel "
@@ -194,11 +200,12 @@ class OpenCLLanguage(CStyleLanguage):
   smem_prefix = "__local "
   barrier = "barrier(CLK_LOCAL_MEM_FENCE);"
   float4 = "(float4)"
-  workitem_is_loop = False
   uses_vload = True
   type_map = { dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong" }
-  def workitem_code(self, idx, access, size, _):
-    return _gpu_workitem(idx, {"g": f"get_group_id({access})", "l": f"get_local_id({access})", "i": f"get_global_id({access})"}, size)
+
+  def workitem_code(self, idx, access, size, _, depth):
+    return _gpu_workitem(idx, {"g": f"get_group_id({access})", "l": f"get_local_id({access})", "i": f"get_global_id({access})"}, size, depth)
+
   def render_cast(self, x, var_dtype, bitcast=False) -> str:
     return f"as_{self.render_dtype(var_dtype)}({x[0]})" if bitcast else super().render_cast(x, var_dtype)
 
@@ -215,7 +222,6 @@ class MetalLanguage(CStyleLanguage):
   barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);"
   float4 = "float4"
   uses_ptr_arithmetic = True
-  workitem_is_loop = False
   extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
   type_map = {dtypes.bfloat16: "bfloat"}
   code_for_op = {**CStyleLanguage().code_for_op,
@@ -224,7 +230,7 @@ class MetalLanguage(CStyleLanguage):
     UnaryOps.EXP2: lambda x,dtype: f"(bfloat)exp2({x})" if dtype == dtypes.bfloat16 else f"exp2({x})",
     UnaryOps.LOG2: lambda x,dtype: f"(bfloat)log2({x})" if dtype == dtypes.bfloat16 else f"log2({x})",
     UnaryOps.SIN: lambda x,dtype: f"(bfloat)sin({x})" if dtype == dtypes.bfloat16 else f"sin({x})",}
-  def workitem_code(self, idx, access, size, _): return _gpu_workitem(idx, {"g": f"gid.{chr(120+access)}", "l": f"lid.{chr(120+access)}"}, size)
+  def workitem_code(self, idx, access, size, _, depth): return _gpu_workitem(idx, {"g": f"gid.{chr(120+access)}", "l": f"lid.{chr(120+access)}"}, size, depth)
 
   def render_cast(self, x: List[str], var_dtype: DType, bitcast=False) -> str:
     return f"as_type<{self.render_dtype(var_dtype)}>({x[0]})" if bitcast else super().render_cast(x, var_dtype)
@@ -259,9 +265,9 @@ class CUDALanguage(CStyleLanguage):
   code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_half}
   type_map = {dtypes.bfloat16: "nv_bfloat16"}
 
-  def workitem_code(self, idx, access, size, _):
+  def workitem_code(self, idx, access, size, _, depth):
     return _gpu_workitem(idx, {"g": f"blockIdx.{chr(120+access)}", "l": f"threadIdx.{chr(120+access)}",
-                               "i": f"(blockIdx.{chr(120+access)}*blockDim.{chr(120+access)}+threadIdx.{chr(120+access)})"}, size)
+                               "i": f"(blockIdx.{chr(120+access)}*blockDim.{chr(120+access)}+threadIdx.{chr(120+access)})"}, size, depth)
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
     # TODO: why is dtypes.bfloat16.name == "__bf16"? would be easier not override dtypes.name
@@ -329,9 +335,9 @@ f"""  __attribute__((device)) __attribute__((const)) {dt} __ocml_fmax_f{n}({dt},
   uses_ptr_arithmetic = False  # NOTE: this fixes TestLinearizerOverflowAlt
   type_map = {dtypes.bfloat16: "hip_bfloat16"}
 
-  def workitem_code(self, idx, access, size, _):
+  def workitem_code(self, idx, access, size, _, depth):
     return _gpu_workitem(idx, {"g": f"__ockl_get_group_id({access})", "l": f"__ockl_get_local_id({access})",
-                               "i": f"(__ockl_get_group_id({access})*__ockl_get_local_size({access})+__ockl_get_local_id({access}))"}, size)
+                               "i": f"(__ockl_get_group_id({access})*__ockl_get_local_size({access})+__ockl_get_local_id({access}))"}, size, depth)
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     prefix = ["#define INFINITY (__builtin_inff())", "#define NAN (__builtin_nanf(\"\"))", "typedef long unsigned int size_t;"]
