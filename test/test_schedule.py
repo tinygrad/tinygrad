@@ -617,7 +617,7 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.empty(1, 16)
     b = Tensor.empty(1, 16)
 
-    # we want to fuse reduces where the inputs of "signficant" size of one reduce
+    # we want to fuse reduces where the inputs of "significant" size of one reduce
     # are a superset of the significant inputs of another reduce
 
     # should fuse reduces that share common input, indexing on larger inputs
