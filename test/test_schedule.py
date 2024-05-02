@@ -32,7 +32,7 @@ def check_schedule(t:Union[Tensor, List[Tensor]], allowed:int, to_prerealize:Opt
     for i, s in enumerate(sched):
       print("kernel", i+1)
       for op in s.ast: print_tree(op)
-  assert len(sched) == allowed
+  assert len(sched) == allowed, f"{len(sched)}, {allowed}"
   # test the (non loadops) ops linearize
   for s in sched:
     if s.ast[0].op in LoadOps: continue
@@ -611,13 +611,11 @@ class TestSchedule(unittest.TestCase):
       check_schedule([x.grad, bn.weight.grad, bn.bias.grad, fw], 9)
 
   def test_parallel_reduce_fusion(self):
-    x = Tensor.empty(16, 16).contiguous()
-    y = Tensor.empty(16, 16).contiguous()
-    z = Tensor.empty(16, 16).contiguous()
-    a = Tensor.empty(1, 16).contiguous()
-    b = Tensor.empty(1, 16).contiguous()
-
-    check_schedule([x, y, z, a, b], 5)  # schedule inputs so they are "allocated"
+    x = Tensor.empty(16, 16)
+    y = Tensor.empty(16, 16)
+    z = Tensor.empty(16, 16)
+    a = Tensor.empty(1, 16)
+    b = Tensor.empty(1, 16)
 
     # we want to fuse reduces where the inputs of "signficant" size of one reduce
     # are a superset of the significant inputs of another reduce
@@ -655,12 +653,12 @@ class TestSchedule(unittest.TestCase):
     check_schedule([stat, ((x + b) * stat + y)], 1)
 
   def test_preconv_e_fusion(self):
-    x = Tensor.empty(16, 16).contiguous()
-    y = Tensor.empty(16, 16).contiguous()
-    a = Tensor.empty(1, 16).contiguous()
+    x = Tensor.empty(16, 16)
+    y = Tensor.empty(16, 16)
+    a = Tensor.empty(1, 16)
     conv = nn.Conv2d(16, 16, 3)
-
-    check_schedule([x, y, a, conv.weight, conv.bias], 5)  # schedule inputs so they are "allocated"
+    conv.weight = Tensor.empty(conv.weight.shape)
+    conv.bias = Tensor.empty(conv.bias.shape)
 
     # fuse when the input has 1 big buffer
     check_schedule([conv(x + a)], 1)
