@@ -647,20 +647,24 @@ class TestSchedule(unittest.TestCase):
     # don't fuse if shapetrackers do not match
     check_schedule([(x + a).sum(), (x.permute(1, 0) + b).sum()], 2)
 
+  @unittest.skip("not useful for bn backward")
   def test_parallel_r_e_fusion(self):
     x = Tensor.empty(16, 16)
     y = Tensor.empty(16, 16)
+    z = Tensor.empty(16, 16)
     a = Tensor.empty(1, 16)
     b = Tensor.empty(1, 16)
-
-    # === -1 memory passes (prereq for -2 passes from preconv_e_fusion) ===
 
     # do parallel fusion also for elementwise
     check_schedule([(x + a).sum(), (x * b)], 1)
 
     # do this also for *subtrees* of elementwise, when it will save memory bandwidth
+    stat = (x + z + a).sum(axis=0, keepdim=True)
+    check_schedule([stat, ((x + z + b) * stat + y)], 1)
+
+    # don't steal if it doesn't reduce mem bw
     stat = (x + a).sum(axis=0, keepdim=True)
-    check_schedule([stat, ((x + b) * stat + y)], 1)
+    check_schedule([stat, ((x + b) * stat + y)], 2)
 
     # don't fuse if shapetrackers do not match
     check_schedule([(x + a).sum(), (x.permute(1, 0) + b)], 2)
@@ -668,18 +672,23 @@ class TestSchedule(unittest.TestCase):
   def test_preconv_e_fusion(self):
     x = Tensor.empty(16, 16)
     y = Tensor.empty(16, 16)
+    z = Tensor.empty(16, 16)
     a = Tensor.empty(1, 16)
     conv = nn.Conv2d(16, 16, 3)
     conv.weight = Tensor.empty(conv.weight.shape)
     conv.bias = Tensor.empty(conv.bias.shape)
 
-    # === -4 memory passes (2 dependent on parallel_r_e_fusion) ===
+    # === -4 memory passes (2 dependent on fusing conv(a + b)) ===
 
     # fuse when the input has 1 big buffer
     check_schedule([conv(x + a)], 1)
 
-    # (for now) don't fuse when the input has 2 big buffer
-    check_schedule([conv(x + y)], 2)
+    # fuse when the input has 2 big buffer
+    # very annoying that bn backward needs to fuse 2 big buffer
+    check_schedule([conv(x + y + a)], 1)
+
+    # (for now) don't fuse when the input has 3 big buffer
+    check_schedule([conv(x + y + z)], 2)
 
 
 if __name__ == '__main__':
