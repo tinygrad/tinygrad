@@ -443,9 +443,9 @@ class Linearizer(Kernel):
     if x.op in ops:
       ret: List[UOp] = []
       input_acc = acc[:]
-      for val, off in zip(zip(*values), cast(List[int], offs)):
-        assert(len(val)==1, "BinaryOps requires exactly two inputs")
-        acc[off] = val[0] if acc[off] in input_acc else self.uops.add(UOps.ALU, acc[off].dtype, vin=val+(acc[off],), \
+      assert len(values) == 1, "BinaryOps requires exactly two inputs"
+      for val, off in zip(values[0], cast(List[int], offs)):
+        acc[off] = val if acc[off] in input_acc else self.uops.add(UOps.ALU, acc[off].dtype, vin=(acc[off],val), \
                                                                       arg=ops[cast(ReduceOps, x.op)], insert_before=insert_before)
         ret.append(acc[off])
       for off in range(len(acc)):
