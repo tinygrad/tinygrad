@@ -53,8 +53,8 @@ class Runner:
 
 class BufferCopy(Runner):
   def __init__(self, total_sz, offset, dest_device, src_device):
-    if total_sz >= 1e6: name = f"{type(self).__name__[6:].lower()} {total_sz/1e6:7.2f}M, {dest_device[:7]:>7s} <- {src_device[:7]:7s}"
-    else: name = f"{type(self).__name__[6:7].lower()} {total_sz:7d}@{offset:7d}, {dest_device[:7]:>7s} <- {src_device[:7]:7s}"
+    if total_sz >= 1e6: name = f"{type(self).__name__[6:7].lower()} {total_sz/1e6:7.2f}M@{offset:7d}, {dest_device[:7]:>7s} <- {src_device[:7]:7s}"
+    else: name = f"{type(self).__name__[6:7].lower()} {total_sz:8d}@{offset:7d}, {dest_device[:7]:>7s} <- {src_device[:7]:7s}"
     self.offset = offset
     super().__init__(colored(name, "yellow"), dest_device, 0, total_sz)
   def copy(self, dest, src):

@@ -44,7 +44,7 @@ class CUDAGraph(MultiGraphRunner):
         deps = self.access_resources(read=[src], write=[dest], new_dependency=node_from)
         c_deps = (cuda.CUgraphNode*len(deps))(*deps) if deps else None
         if getenv("CUDA_P2P", int(CUDADevice.peer_access)):
-          cp_params = cuda.CUDA_MEMCPY3D_v2(srcMemoryType=cuda.CU_MEMORYTYPE_DEVICE, srcDevice=src._buf + ji.prg.offset,
+          cp_params = cuda.CUDA_MEMCPY3D_v2(srcMemoryType=cuda.CU_MEMORYTYPE_DEVICE, srcDevice=src._buf.value+ji.prg.offset,
                                             srcPitch=src.nbytes, srcHeight=1,
                                             dstMemoryType=cuda.CU_MEMORYTYPE_DEVICE, dstDevice=dest._buf, dstPitch=dest.nbytes, dstHeight=1,
                                             WidthInBytes=dest.nbytes, Height=1, Depth=1)
@@ -53,7 +53,7 @@ class CUDAGraph(MultiGraphRunner):
           self.cpu_buffers.append(cpu_buf:=Buffer(device=dest.device, dtype=dest.dtype, size=dest.size, options=BufferOptions(host=True)).allocate())
 
           node_to = cuda.CUgraphNode()
-          cp_params = cuda.CUDA_MEMCPY3D_v2(srcMemoryType=cuda.CU_MEMORYTYPE_DEVICE, srcDevice=src._buf + ji.prg.offset,
+          cp_params = cuda.CUDA_MEMCPY3D_v2(srcMemoryType=cuda.CU_MEMORYTYPE_DEVICE, srcDevice=src._buf.value+ji.prg.offset,
                                             srcPitch=src.nbytes, srcHeight=1,
                                             dstMemoryType=cuda.CU_MEMORYTYPE_HOST, dstHost=cpu_buf._buf, dstPitch=dest.nbytes, dstHeight=1,
                                             WidthInBytes=dest.nbytes, Height=1, Depth=1)

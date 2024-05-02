@@ -144,7 +144,7 @@ class CUDAAllocator(LRUAllocator):
   def transfer(self, dest, src, sz:int, src_dev, dest_dev, src_offset=0):
     check(cuda.cuCtxSetCurrent(src_dev.context))
     check(cuda.cuEventCreate(ctypes.byref(sync_event := cuda.CUevent()), 0))
-    check(cuda.cuMemcpyDtoDAsync_v2(dest, src+src_offset, sz, None))
+    check(cuda.cuMemcpyDtoDAsync_v2(dest, src.value+src_offset, sz, None))
     check(cuda.cuEventRecord(sync_event, None))
     check(cuda.cuCtxSetCurrent(dest_dev.context))
     check(cuda.cuStreamWaitEvent(None, sync_event, 0)) # sync the default stream on the dest dev

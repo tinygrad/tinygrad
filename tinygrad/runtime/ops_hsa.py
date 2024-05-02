@@ -182,7 +182,7 @@ class HSAAllocator(LRUAllocator):
     src_dev.hw_queue.submit_barrier([], sync_signal_1 := src_dev.alloc_signal(reusable=True))
     dest_dev.hw_queue.submit_barrier([], sync_signal_2 := dest_dev.alloc_signal(reusable=True))
     c_wait_signal = (hsa.hsa_signal_t*2)(sync_signal_1, sync_signal_2)
-    check(hsa.hsa_amd_memory_async_copy_on_engine(dest, dest_dev.agent, src+src_offset, src_dev.agent, sz, 2, c_wait_signal,
+    check(hsa.hsa_amd_memory_async_copy_on_engine(dest, dest_dev.agent, src.value+src_offset, src_dev.agent, sz, 2, c_wait_signal,
                                                   copy_signal := dest_dev.alloc_signal(reusable=False), hsa.HSA_AMD_SDMA_ENGINE_0, True))
     src_dev.hw_queue.submit_barrier([copy_signal])
     dest_dev.hw_queue.submit_barrier([copy_signal])
