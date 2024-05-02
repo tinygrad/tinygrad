@@ -616,7 +616,7 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.empty(1, 16).contiguous()
     b = Tensor.empty(1, 16).contiguous()
 
-    check_schedule([x, y, z, a, b], 4)  # schedule inputs so they are "allocated"
+    check_schedule([x, y, z, a, b], 5)  # schedule inputs so they are "allocated"
 
     # we want to fuse reduces where the inputs of "signficant" size of one reduce
     # are a superset of the significant inputs of another reduce
@@ -652,6 +652,20 @@ class TestSchedule(unittest.TestCase):
     # do this also for *subtrees* of elementwise, when it will save memory bandwidth
     stat = (x + a).sum(axis=0, keepdim=True)
     check_schedule([stat, ((x + b) * stat + y)], 1)
+
+  def test_preconv_e_fusion(self):
+    x = Tensor.empty(16, 16).contiguous()
+    y = Tensor.empty(16, 16).contiguous()
+    a = Tensor.empty(1, 16).contiguous()
+    conv = nn.Conv2d(16, 16, 3)
+
+    check_schedule([x, y, a, conv.weight, conv.bias], 5)  # schedule inputs so they are "allocated"
+
+    # fuse when the input has 1 big buffer
+    check_schedule([conv(x + a)], 1)
+
+    # (for now) don't fuse when the input has 2 big buffer
+    check_schedule([conv(x + y)], 2)
 
 
 if __name__ == '__main__':
