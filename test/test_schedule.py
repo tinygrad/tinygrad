@@ -647,7 +647,7 @@ class TestSchedule(unittest.TestCase):
     check_schedule([(x + a).sum(), (x.permute(1, 0) + b).sum()], 2)
 
     # do this also for elementwise
-    check_schedule([(x + a).sum(), (x * 3)], 1)
+    check_schedule([(x + a).sum(), (x * b)], 1)
 
     # do this also for *subtrees* of elementwise, when it will save memory bandwidth
     stat = (x + a).sum(axis=0, keepdim=True)
