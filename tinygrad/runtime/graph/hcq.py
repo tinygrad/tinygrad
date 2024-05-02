@@ -2,18 +2,15 @@ import ctypes, collections, time, itertools
 from typing import List, Any, Dict, cast, Optional, Union, Tuple
 from tinygrad.helpers import GraphException, init_c_var, round_up, colored
 from tinygrad.buffer import Buffer, BufferOptions
-from tinygrad.device import Compiled, CompiledRunner, BufferXfer, MultiDeviceJITGraph, Device, Runner
+from tinygrad.device import Compiled, CompiledRunner, BufferXfer, Device
 from tinygrad.shape.symbolic import Variable
 from tinygrad.engine.realize import ExecItem
-from tinygrad.engine.jit import get_input_replace, get_jit_stats, get_jc_idxs_with_updatable_launch_dims, get_jc_idxs_with_updatable_var_vals
+from tinygrad.engine.jit import GraphRunner, MultiGraphRunner
 
-class HCQGraph(Runner):
-  def __init__(self, device_t, comp_q_t, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
-    self.device_t, self.comp_q_t = device_t, comp_q_t
-    self.jit_cache = jit_cache
-    self.input_replace = get_input_replace(jit_cache, input_rawbuffers)
-    self.jc_idxs_with_updatable_launch_dims = get_jc_idxs_with_updatable_launch_dims(jit_cache)
-    self.jc_idxs_with_updatable_var_vals = get_jc_idxs_with_updatable_var_vals(jit_cache)
+class HCQGraph(MultiGraphRunner):
+  def __init__(self, device_t, comp_hcq_t, copy_hcq_t, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
+    self.device_t, self.comp_hcq_t, self.copy_hcq_t = device_t, comp_hcq_t, copy_hcq_t
+    super().__init__(jit_cache, input_rawbuffers, var_vals)
 
     # Check all jit items are compatible.
     compiled_devices = set()
@@ -45,62 +42,78 @@ class HCQGraph(Runner):
       for i in range(len(ji.prg.vars)): self.ji_kargs_structs[j].__setattr__(f'v{i}', var_vals[ji.prg.vars[i]])
 
     # Build queues.
-    self.comp_queues: Dict[Compiled, self.comp_q_t] = collections.defaultdict(self.comp_q_t)
-    # self.copy_queues: Dict[Compiled, HWCopyQueue] = {dev:[] for dev in self.devices}
+    self.queues_list: List[Any] = []
+    self.comp_queues: Dict[Compiled, self.comp_hcq_t] = collections.defaultdict(self.comp_hcq_t)
+    self.comp_signal = {dev: dev._get_signal() for dev in self.devices}
+    self.comp_signal_val = {dev: 0 for dev in self.devices}
 
-    # signal_size = ctypes.sizeof(hsa.amd_signal_t)
-    # signals = device_t.signals_page = dev._gpu_alloc(SIGNAL_SIZE*SIGNAL_COUNT, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
-    # self.signals_pool = [hsa.amd_signal_t.from_address(device_t.signals_page.va_addr + SIGNAL_SIZE*i) for i in range(SIGNAL_COUNT)]
-    # device_t.signals_page = self._gpu_alloc(SIGNAL_SIZE*64, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
-    # device_t.signal_pool = [hsa.amd_signal_t.from_address(device_t.signals_page.va_addr + SIGNAL_SIZE*i) for i in range(SIGNAL_COUNT)]
-    self.comp_queues_list: List[Any] = []
-    self.chain_signal = device_t._get_signal()
+    self.copy_queues: Dict[Compiled, self.copy_hcq_t] = collections.defaultdict(self.copy_hcq_t)
+    self.copy_signal = {dev: dev._get_signal() for dev in self.devices}
+    self.copy_signal_val = {dev: 0 for dev in self.devices}
+
+    # Signal dma to allow execution.
+    for dev in self.devices: self.comp_queues[dev].signal(self.copy_signal[dev], value=0)
 
     for j,ji in enumerate(self.jit_cache):
       if isinstance(ji.prg, CompiledRunner):
-        # self.comp_queues_list.append((j,ji))
-        if j in self.jc_idxs_with_updatable_launch_dims:
-          if ji.prg.device in self.comp_queues: self.comp_queues_list.append((ji.prg.device, self.comp_queues.pop(ji.prg.device)))
-          self.comp_queues_list.append((j,ji))
+        deps = self.access_resources(ji.bufs[(outs:=ji.prg.outcount):], ji.bufs[:outs], (self.comp_signal[ji.prg.device], sig_val:=j+1))
+        deps.append((self.comp_signal[ji.prg.device], self.comp_signal_val[ji.prg.device]))
+        if j in self.jc_idx_with_updatable_launch_dims:
+          # Rebuilt this runner dynamicaly.
+          if ji.prg.device in self.comp_queues: self.queues_list.append((self.comp_queues.pop(ji.prg.device), ji.prg.device))
+          self.queues_list.append((j, ji, deps))
         else:
-          self.comp_queues[ji.prg.device].wait(signal=self.chain_signal, value=j)
+          for sig, val in deps: self.comp_queues[ji.prg.device].wait(sig, val)
           self.comp_queues[ji.prg.device].exec(ji.prg.clprg, self.kargs_addrs[j], *ji.prg.launch_dims(var_vals))
-          self.comp_queues[ji.prg.device].signal(signal=self.chain_signal, value=j+1)
-      # elif isinstance(ji.prg, BufferXfer):
-      #   dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
-      #   self.comp_queues[Device[src.device]].copy(dest._buf, src._buf, dest.nbytes)
+          self.comp_queues[ji.prg.device].signal(self.comp_signal[ji.prg.device], value=sig_val)
+        self.comp_signal_val[ji.prg.device] = sig_val
+      elif isinstance(ji.prg, BufferXfer):        
+        # pass
+        dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
+        src_dev = Device[src.device]
+        deps = self.access_resources([src], [dest], (self.copy_signal[src_dev], sig_val:=j+1))
+        deps.append((self.copy_signal[src_dev], self.copy_signal_val[src_dev]))
+        for sig,val in deps: self.copy_queues[src_dev].wait(sig, val)
+        self.copy_queues[src_dev].copy(dest._buf.va_addr, src._buf.va_addr, dest.nbytes)
+        self.copy_queues[src_dev].signal(self.copy_signal[src_dev], value=sig_val)
+        self.copy_signal_val[src_dev] = sig_val
 
     for dev in self.devices:
-      self.comp_queues[dev].wait(signal=self.chain_signal, value=len(self.jit_cache)) # need this?
-      if dev in self.comp_queues: self.comp_queues_list.append((dev, self.comp_queues.pop(dev)))
-
-    # clear jit inputs to allow their memory to be freed/reused
-    for (j,i) in self.input_replace.keys(): self.jit_cache[j].bufs[i] = None
-    super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), "HCQ", *get_jit_stats(jit_cache))
+      self.comp_queues[dev].wait(self.comp_signal[dev], value=self.comp_signal_val[dev])
+      if dev in self.copy_queues: self.comp_queues[dev].wait(self.copy_signal[dev], value=self.copy_signal_val[dev])
+      self.queues_list.append((self.comp_queues.pop(dev), dev))
+      if dev in self.copy_queues: self.queues_list.append((self.copy_queues.pop(dev), dev))
 
   def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False) -> Optional[float]:
     # Kick graph
-    self.device_t._set_signal_value(self.chain_signal, 0)
+    for dev in self.devices: dev._set_signal_value(self.comp_signal[dev], 0)
 
     # Update rawbuffers
     for (j,i),input_idx in self.input_replace.items():
       self.ji_kargs_structs[j].__setattr__(f'f{i}', input_rawbuffers[input_idx]._buf.va_addr)
 
     # Update var_vals
-    for j in self.jc_idxs_with_updatable_var_vals:
+    for j in self.jc_idx_with_updatable_var_vals:
       for i,v in enumerate(cast(CompiledRunner, self.jit_cache[j].prg).vars):
         self.ji_kargs_structs[j].__setattr__(f'v{i}', var_vals[v])
 
-    self.comp_q_t().wait(self.devices[0].compute_progress_signal, self.devices[0].compute_put_value).submit(self.devices[0])
-    for dev,q in self.comp_queues_list:
-      if not isinstance(q, self.comp_q_t):
-        j,ji = dev,q
-        q = self.comp_q_t()
-        q.wait(signal=self.chain_signal, value=j)
+    for dev in self.devices: self.comp_hcq_t().wait(dev.compute_progress_signal, dev.compute_put_value).submit(dev)
+    for pack in self.queues_list:
+      if not isinstance(pack[0], self.comp_hcq_t) and not isinstance(pack[0], self.copy_hcq_t):
+        j, ji, deps = pack
+        q = self.comp_hcq_t()
+        for sig, val in deps: q.wait(sig, val)
         q.exec(ji.prg.clprg, self.kargs_addrs[j], *ji.prg.launch_dims(var_vals))
-        q.signal(signal=self.chain_signal, value=j+1)
+        q.signal(self.comp_signal[ji.prg.device], value=j+1)
         dev = ji.prg.device
+      else: q, dev = pack
       q.submit(dev)
+
+    for dev in self.devices: dev.synchronize()
 
     et = None
     return et
+
+  def access_resources(self, read, write, new_dependency):
+    deps = self._access_resources(read, write, new_dependency)
+    return [(k, max(v for x, v in deps if id(x) == idk)) for idk, k in {id(x[0]): x[0] for x in deps}.items()]

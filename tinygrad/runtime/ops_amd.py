@@ -593,7 +593,7 @@ class AMDDevice(Compiled):
 
     from tinygrad.runtime.graph.hcq import HCQGraph
     super().__init__(device, AMDAllocator(self), AMDCompiler(self.arch), functools.partial(AMDProgram, self),
-                     functools.partial(HCQGraph, AMDDevice, HWPM4Queue))
+                     functools.partial(HCQGraph, AMDDevice, HWPM4Queue, HWCopyQueue))
 
   def synchronize(self):
     AMDDevice._wait_signal(self.timeline_signal, self.timeline_value - 1)
