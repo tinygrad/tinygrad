@@ -100,35 +100,37 @@ class LazyBuffer:
   def is_unrealized_const(self): return self.base.realized is None and self.base.op is LoadOps.CONST and not isinstance(self.base.arg, Variable)
   def is_unrealized_unmasked_const(self): return self.is_unrealized_const() and all(v.mask is None for v in self.st.views)
 
-  def _copy(self, device:str, dtype:DType) -> LazyBuffer:
-    return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), dtype, LoadOps.COPY,
+  def _copy(self, device:str) -> LazyBuffer:
+    return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY,
       (prod(self.shape)*self.dtype.itemsize, self.st.views[0].offset*self.dtype.itemsize), (self.base,), enable_cache=False)
 
-  def copy_to_device(self, device:str, force:bool=False, override_dtype:Optional[DType]=None) -> LazyBuffer:
+  def copy_to_device(self, device:str, force:bool=False) -> LazyBuffer:
     # no COPY
     if self.device == device: return self
-    if override_dtype is None: override_dtype = self.dtype
 
-    # bitcast can be ignored
-    if self.base.realized is None and self.base.op == UnaryOps.CAST and self.base.arg[1] is True:
-      return self.base.srcs[0].copy_to_device(device, force, override_dtype=self.dtype)
+    # bitcast can be put inside copy
+    if self.base.realized is None and self.base.op is UnaryOps.CAST and self.base.arg[1] is True:
+      assert self.base.srcs[0].st.consecutive, "base needs to be consecutive"
+      base_offset = self.base.srcs[0].st.views[0].offset*self.base.srcs[0].dtype.itemsize
+      return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.base.arg[0], LoadOps.COPY,
+                               (prod(self.shape)*self.dtype.itemsize, base_offset+self.st.views[0].offset*self.dtype.itemsize),
+                               (self.base.srcs[0].base,), enable_cache=False)
 
     # double COPY = one COPY (same args)
     if not force and self.st.contiguous and self.size == self.base.size and self.base.realized is None and self.base.op is LoadOps.COPY:
-      return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), override_dtype, LoadOps.COPY,
+      return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY,
                                self.arg, (self.base.srcs[0],), enable_cache=False)
 
     # const doesn't have to be copied (issues with disk tensor)
-    if self.is_unrealized_const():
-      return LazyBuffer.loadop(LoadOps.CONST, tuple(), override_dtype, device, arg=self.base.arg)._view(self.st)
+    if self.is_unrealized_const(): return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, device, arg=self.base.arg)._view(self.st)
 
     # if it's a shrink, do the shrink before the copy with CONTIGUOUS
     if prod(self.st.shape) < prod(self.base.st.shape):
-      if self.st.consecutive: return self._copy(device, override_dtype)
-      else: return self.contiguous()._copy(device, override_dtype)
+      if self.st.consecutive: return self._copy(device)
+      return self.contiguous()._copy(device)
 
     # copy the base and apply the shapetracker on the new device
-    return self.base._copy(device, override_dtype)._view(self.st)
+    return self.base._copy(device)._view(self.st)
 
   def e(self, op:Union[LoadOps, UnaryOps, BinaryOps, TernaryOps], *in_srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
     srcs: List[LazyBuffer] = []
