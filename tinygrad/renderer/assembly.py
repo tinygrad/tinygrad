@@ -199,8 +199,8 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, _uops:UOpGraph) -> str
         r[u] = f"%{args.expr}"
         if lang.load_global: kk(*lang.render_load(args.expr, ssa('dat', u, lang.types[dtype]), dtype, ss=".param"))
       elif uop is UOps.DEFINE_GLOBAL:
-        bufs.append((args[1], dtype))
-        r[u] = f"%{args[1]}"
+        bufs.append((nm:=f"data{args[0]}", dtype))
+        r[u] = f"%{nm}"
         if lang.load_global:
           dt = dtypes.ulong if dtype.__class__ == PtrDType else dtype
           kk(*lang.render_load(args[1], ssa('dat', u, lang.types[dt]), dt, ss=".param"))

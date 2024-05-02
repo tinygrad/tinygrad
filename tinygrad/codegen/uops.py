@@ -138,7 +138,7 @@ class UOpGraph:
   def __iter__(self): return iter(self.uops)
 
   def vars(self) -> List[Variable]: return [x.arg for x in self.uops if x.uop is UOps.DEFINE_VAR]
-  def globals(self) -> List[Tuple[int, bool]]: return [(x.arg[0], x.arg[2]) for x in self.uops if x.uop is UOps.DEFINE_GLOBAL]
+  def globals(self) -> List[Tuple[int, bool]]: return [x.arg for x in self.uops if x.uop is UOps.DEFINE_GLOBAL]
 
   def graph(self):
     from tinygrad.features.graph import graph_uops
@@ -362,7 +362,6 @@ class UOpGraph:
     self.optimize_loops()
 
     # (recursively) remove childless uops
-    # TODO: remove DEFINE_GLOBAL from here
     self.remove_childless(set(x for x in self.uops if x.uop is UOps.STORE))
 
     # store float4 upcasts directly if possible

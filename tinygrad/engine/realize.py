@@ -37,6 +37,7 @@ class EmptyOp(Runner):
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False): pass
 
 def lower_runner(runner:Runner, bufs) -> ExecItem:
+  # TODO: globals isn't on the stupid diskrunner, remove the need for it
   return ExecItem(runner, [bufs[x[0]] for x in runner.globals] if hasattr(runner, 'globals') else bufs)
 
 def lower_schedule_item(si:ScheduleItem) -> ExecItem:
