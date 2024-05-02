@@ -662,6 +662,9 @@ class TestSchedule(unittest.TestCase):
     stat = (x + a).sum(axis=0, keepdim=True)
     check_schedule([stat, ((x + b) * stat + y)], 1)
 
+    # don't fuse if shapetrackers do not match
+    check_schedule([(x + a).sum(), (x.permute(1, 0) + b)], 2)
+
   def test_preconv_e_fusion(self):
     x = Tensor.empty(16, 16)
     y = Tensor.empty(16, 16)
