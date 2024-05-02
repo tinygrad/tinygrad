@@ -1,4 +1,4 @@
-import ctypes, collections
+import ctypes
 from typing import Any, Optional, Tuple, Dict, List, cast
 import tinygrad.runtime.autogen.cuda as cuda
 from tinygrad.helpers import init_c_var, GraphException, getenv
@@ -19,8 +19,6 @@ class CUDAGraph(MultiGraphRunner):
     self.updatable_nodes: Dict[int, Tuple[Any, Any, Any, bool]] = {} # Dict[jc index] = tuple(graph node, node params, input kernel params, is memcpy)
 
     self.graph = init_c_var(cuda.CUgraph(), lambda x: check(cuda.cuGraphCreate(ctypes.byref(x), 0)))
-    self.w_dependency_map: Dict[Any, Any] = {}
-    self.r_dependency_map: Dict[Any, List[Any]] = collections.defaultdict(list)
     self.cpu_buffers = []
 
     for j,ji in enumerate(self.jit_cache):
@@ -28,7 +26,7 @@ class CUDAGraph(MultiGraphRunner):
         global_size, local_size = ji.prg.launch_dims(var_vals)
 
         new_node = cuda.CUgraphNode()
-        deps = self.access_resources(ji.bufs[(outs:=ji.prg.outcount):], ji.bufs[:outs], new_dependency=new_node)
+        deps = self._access_resources(ji.bufs[(outs:=ji.prg.outcount):], ji.bufs[:outs], new_dependency=new_node)
         c_deps = (cuda.CUgraphNode*len(deps))(*deps) if deps else None
 
         c_args, vargs = encode_args([cast(Buffer, x)._buf for x in ji.bufs], [var_vals[x] for x in ji.prg.vars])
@@ -41,7 +39,7 @@ class CUDAGraph(MultiGraphRunner):
         dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
         src_dev, dest_dev = cast(CUDADevice, Device[src.device]), cast(CUDADevice, Device[dest.device])
         node_from = cuda.CUgraphNode()
-        deps = self.access_resources(read=[src], write=[dest], new_dependency=node_from)
+        deps = self._access_resources(read=[src], write=[dest], new_dependency=node_from)
         c_deps = (cuda.CUgraphNode*len(deps))(*deps) if deps else None
         if getenv("CUDA_P2P", int(CUDADevice.peer_access)):
           cp_params = cuda.CUDA_MEMCPY3D_v2(srcMemoryType=cuda.CU_MEMORYTYPE_DEVICE, srcDevice=src._buf, srcPitch=src.nbytes, srcHeight=1,
@@ -95,16 +93,3 @@ class CUDAGraph(MultiGraphRunner):
 
   def set_kernel_node_launch_dims(self, node, global_size: Tuple[int, int, int], local_size: Tuple[int, int, int]):
     node.blockDimX, node.blockDimY, node.blockDimZ, node.gridDimX, node.gridDimY, node.gridDimZ = *local_size, *global_size
-
-  def access_resources(self, read, write, new_dependency):
-    wait_nodes = []
-
-    for rawbuf in read + write:
-      if rawbuf._buf.value in self.w_dependency_map: wait_nodes.append(self.w_dependency_map[rawbuf._buf.value])
-    for rawbuf in write:
-      if rawbuf._buf.value in self.r_dependency_map: wait_nodes.extend(self.r_dependency_map.pop(rawbuf._buf.value))
-
-    if new_dependency is not None:
-      for rawbuf in read: self.r_dependency_map[rawbuf._buf.value].append(new_dependency)
-      for rawbuf in write: self.w_dependency_map[rawbuf._buf.value] = new_dependency
-    return {id(x):x for x in wait_nodes}.values()
