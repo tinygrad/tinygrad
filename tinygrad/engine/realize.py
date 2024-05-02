@@ -36,23 +36,27 @@ class EmptyOp(Runner):
   def __init__(self, buf:Buffer): super().__init__(colored(f"empty {buf.size:10d} {buf.dtype}", "yellow"), buf.device)
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False): pass
 
-def lower_schedule_item(si:ScheduleItem) -> Runner:
+def lower_runner(runner:Runner, bufs) -> ExecItem:
+  # TODO: globals isn't on the stupid diskrunner, remove the need for it
+  return ExecItem(runner, [bufs[x[0]] for x in runner.globals] if hasattr(runner, 'globals') else bufs)
+
+def lower_schedule_item(si:ScheduleItem) -> ExecItem:
   assert len(set(x.device for x in si.bufs)) == 1 or si.ast[0].op is LoadOps.COPY
-  if si.ast[0].op is BufferOps.STORE: return Device[si.outputs[0].device].get_runner(*si.ast)
+  if si.ast[0].op is BufferOps.STORE: return lower_runner(Device[si.outputs[0].device].get_runner(*si.ast), si.bufs)
   assert len(si.ast) == 1 and len(si.outputs) == 1, "only ASTRunner supports multioutput"
   out, ast = si.outputs[0], si.ast[0]
   if ast.op is LoadOps.COPY:
     kernel_type = BufferCopy
     if hasattr(Device[out.device].allocator, 'transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]:
-      if getenv("USE_COPY_KERNEL"): return Device[out.device].get_runner(copy_ast(ast.arg))
+      if getenv("USE_COPY_KERNEL"): return lower_runner(Device[out.device].get_runner(copy_ast(ast.arg)), si.bufs)
       kernel_type = BufferXfer
-    return kernel_type(ast.arg, out.device, si.inputs[0].device)
-  if ast.op is LoadOps.CUSTOM: return CustomOp(ast.arg)
-  if ast.op is LoadOps.EMPTY: return EmptyOp(out)
+    return ExecItem(kernel_type(ast.arg, out.device, si.inputs[0].device), list(si.bufs))
+  if ast.op is LoadOps.CUSTOM: return ExecItem(CustomOp(ast.arg), list(si.bufs))
+  if ast.op is LoadOps.EMPTY: return ExecItem(EmptyOp(out), list(si.bufs))
   raise RuntimeError(f"don't know how to lower {ast}")
 
 def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, None]:
-  while len(schedule): yield ExecItem(lower_schedule_item(si:=schedule.pop(0)), list(si.bufs))
+  while len(schedule): yield lower_schedule_item(schedule.pop(0))
 
 capturing: List = []  # put classes with an add method in here
 

@@ -3,7 +3,7 @@ import os, ctypes, pathlib, re, fcntl, functools, mmap, struct, tempfile, hashli
 from typing import Tuple, List, Any
 from dataclasses import replace
 from tinygrad.device import Compiled, LRUAllocator, Compiler, BufferOptions, CompilerOptions
-from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up, to_char_p_p, DEBUG
+from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up, to_char_p_p, DEBUG, prod
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.runtime.ops_cuda import check as cuda_check, _get_bytes
 import tinygrad.runtime.autogen.cuda as cuda
@@ -226,6 +226,8 @@ class NVProgram:
     if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu, self.lib_sz)
 
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
+    if prod(local_size) > 1024 or self.registers_usage * prod(local_size) > 65536: raise RuntimeError("Too many resources requsted for launch")
+
     kernargs_size = round_up(QMD_SIZE + 0x160 + len(args) * 8 + len(vals) * 4, 1 << 8)
     if self.device.kernargs_ptr >= (self.device.kernargs_page.base + self.device.kernargs_page.length - kernargs_size):
       self.device.kernargs_ptr = self.device.kernargs_page.base
@@ -387,9 +389,12 @@ class NVDevice(Compiled):
       fd_uvm_2 = os.open("/dev/nvidia-uvm", os.O_RDWR | os.O_CLOEXEC)
       NVDevice.root = rm_alloc(self.fd_ctl, nv_gpu.NV01_ROOT_CLIENT, 0, 0, None).hObjectNew
       uvm.initialize(self.fd_uvm)
-      uvm.mm_initialize(fd_uvm_2, uvmFd=self.fd_uvm)
+      try:
+        uvm.mm_initialize(fd_uvm_2, uvmFd=self.fd_uvm)
+      except RuntimeError:
+        pass  # this error is okay, CUDA hits it too
 
-      NVDevice.gpus_info = (nv_gpu.nv_ioctl_card_info_t*16)()
+      NVDevice.gpus_info = (nv_gpu.nv_ioctl_card_info_t*64)()
       nv_iowr(NVDevice.fd_ctl, nv_gpu.NV_ESC_CARD_INFO, NVDevice.gpus_info)
 
     # TODO: Get classes from NV0080_CTRL_CMD_GPU_GET_CLASSLIST_V2
@@ -399,6 +404,8 @@ class NVDevice(Compiled):
     assert NVDevice.gpus_info[self.device_id].valid
     gpu_info = nv_gpu.NV0000_CTRL_GPU_GET_ID_INFO_V2_PARAMS(gpuId=NVDevice.gpus_info[self.device_id].gpu_id)
     rm_control(self.fd_ctl, nv_gpu.NV0000_CTRL_CMD_GPU_GET_ID_INFO_V2, self.root, self.root, gpu_info)
+    device_id = NVDevice.gpus_info[self.device_id].pci_info.device_id
+    self.compute_type = nv_gpu.AMPERE_COMPUTE_B if device_id in [0x2204, 0x2206] else nv_gpu.ADA_COMPUTE_A
 
     device_params = nv_gpu.NV0080_ALLOC_PARAMETERS(deviceId=gpu_info.deviceInstance, hClientShare=self.root,
                                                    vaMode=nv_gpu.NV_DEVICE_ALLOCATION_VAMODE_MULTIPLE_VASPACES)
@@ -504,7 +511,7 @@ class NVDevice(Compiled):
       gpFifoOffset=gpfifo.base+offset, gpFifoEntries=entries, hContextShare=ctxshare,
       hUserdMemory=(ctypes.c_uint32*8)(gpfifo.hMemory), userdOffset=(ctypes.c_uint64*8)(entries*8+offset))
     gpfifo = rm_alloc(self.fd_ctl, nv_gpu.AMPERE_CHANNEL_GPFIFO_A, self.root, channel_group, params).hObjectNew
-    rm_alloc(self.fd_ctl, nv_gpu.ADA_COMPUTE_A, self.root, gpfifo, None)
+    rm_alloc(self.fd_ctl, self.compute_type, self.root, gpfifo, None)
     rm_alloc(self.fd_ctl, nv_gpu.AMPERE_DMA_COPY_B, self.root, gpfifo, None)
 
     ws_token_params = nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS(workSubmitToken=-1)
@@ -527,7 +534,7 @@ class NVDevice(Compiled):
     self.shared_mem_window, self.local_mem_window = 0xfe000000, 0xff000000
 
     queue = HWComputeQueue()
-    queue.q += [nvmethod(1, nv_gpu.NVC6C0_SET_OBJECT, 1), nv_gpu.ADA_COMPUTE_A]
+    queue.q += [nvmethod(1, nv_gpu.NVC6C0_SET_OBJECT, 1), self.compute_type]
     queue.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_A, 2), *nvdata64(self.shader_local_mem)]
     queue.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_NON_THROTTLED_A, 3), *nvdata64(bytes_per_tpc), 0x40]
     queue.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_WINDOW_A, 2), *nvdata64(self.local_mem_window)]

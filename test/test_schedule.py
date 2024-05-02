@@ -190,6 +190,26 @@ class TestSchedule(unittest.TestCase):
       out = bn(img)
       check_schedule(out, 3)
 
+  def test_fold_conv_batchnorm(self):
+    with Tensor.train():
+      img = Tensor.empty(1,3,8,8)
+      c1 = nn.Conv2d(3,32,3)
+      bn = nn.BatchNorm2d(32, track_running_stats=False)
+      out = bn(c1(img)).relu()
+      check_schedule(out, 4, [c1.weight, c1.bias])
+
+  def test_fold_conv_batchnorm_sgd(self):
+    with Tensor.train():
+      img = Tensor.ones(1,3,4,4)
+      c1 = nn.Conv2d(3,32,3)
+      bn = nn.BatchNorm2d(32, track_running_stats=False)
+      opt = nn.optim.SGD(nn.state.get_parameters([c1, bn]))
+      img_bn = bn(c1(img)).elu().sum()
+      opt.zero_grad()
+      img_bn.backward()
+      # this is too high
+      check_schedule(opt.schedule_step(), 18)
+
   def test_fold_conv_relu(self):
     c1 = nn.Conv2d(3,16,3)
 
@@ -197,6 +217,13 @@ class TestSchedule(unittest.TestCase):
     img = Tensor.ones(2,3,64,64)
     out = c1(img).relu()
     check_schedule(out, 1, [c1.weight, c1.bias])
+
+  def test_fold_conv_relu_nobias(self):
+    img = Tensor.ones(1,4,8,8)
+    c1 = nn.Conv2d(4, 4, kernel_size=3, bias=False)
+    c2 = nn.Conv2d(4, 4, kernel_size=3, bias=False)
+    out = img.sequential([c1, Tensor.relu, c2, Tensor.relu])
+    check_schedule(out, 2, [c1.weight, c2.weight, img])
 
   def test_fold_conv_elu(self):
     c1 = nn.Conv2d(3,16,3)
@@ -453,32 +480,27 @@ class TestSchedule(unittest.TestCase):
     out = x.contiguous() + y.contiguous()
     check_schedule(out, 2)
 
-  def test_group_fuse(self):
-    a = Tensor.empty((4, 4))
+  def test_reduce_same_size(self):
+    a = Tensor.empty(4, 4)
     out0 = a.sum() + 2
     out1 = a.sum() + 4
-    check_schedule([out0, out1], 1)
+    out2 = out0 * out1
+    check_schedule([out0, out1, out2], 2)
 
-  def test_group_inner_deps_fuse(self):
-    a = Tensor.empty((4, 4))
-    out0 = a.sum() + 2
-    out1 = a.sum() + out0 + 4
-    check_schedule([out0, out1], 1)
-
-  def test_group_outside_reduce(self):
-    a = Tensor.empty((4, 4))
-    b = Tensor.empty((4, 4))
-    out0 = a.sum() + 2
-    # b.sum() is not a descendant of the fused nodes
-    out1 = a.sum() + b.sum() + 4
-    check_schedule([out0, out1], 3) # TODO: this can fuse
-
-  def test_reduce_multiple_paths_fuse(self):
+  def test_reduce_multiple_paths(self):
     a = Tensor.empty(4, 4)
     out0 = a.sum().exp2()
     # out1 has two paths to a.sum()
     out1 = a.sum() + out0
     check_schedule([out0, out1], 1)
+
+  def test_reduce_ext_reduce_child(self):
+    a = Tensor.empty((4, 4))
+    b = Tensor.empty((4, 4))
+    # b.sum() is not a descendant of the fused nodes
+    out0 = a.sum() + b.sum() + 2
+    out1 = a.sum() + b.sum() + 4
+    check_schedule([out0, out1], 4)
 
   def test_reduce_multiple_paths_midreduce(self):
     a = Tensor.empty(4, 4)
@@ -488,6 +510,14 @@ class TestSchedule(unittest.TestCase):
     out1 = (a - out0).max()
     out2 = r + out1
     check_schedule([r, out0, out1, out2], 4)
+
+  def test_reduce_multiple_paths_midreduce_fused(self):
+    a = Tensor.empty(4, 4)
+    b = Tensor.empty(4, 4)
+    out0 = a.sum() + 4
+    out1 = b.max() + out0*2
+    out2 = a.sum() + out1
+    check_schedule([out0, out1, out2], 4)
 
   def test_reduce_multiple_paths_midexpand(self):
     a = Tensor.empty(4, 4)
@@ -499,26 +529,119 @@ class TestSchedule(unittest.TestCase):
     out1 = r + e[0][0][0]
     check_schedule([r, out0, out1, e], 4)
 
-  def test_group_midreduce_nofuse(self):
-    a = Tensor.empty((4, 4))
-    b = Tensor.empty((4, 4))
-    out0 = a.sum() + 2
-    out1 = a.sum() + b.sum() + 4
-    check_schedule([out0, out1], 3)
-
-  def test_group_midexpand_nofuse(self):
+  def test_reduce_expand_child(self):
     a = Tensor.empty((32, 32, 32))
     b = Tensor.empty((1, 16))
     out0 = a.sum() + 2
     out1 = a.sum() + b
     check_schedule([out0, out1], 4)
 
-  def test_group_midshrink_fuse(self):
+  def test_reduce_shrink_child(self):
     a = Tensor.empty(100, 100)
     b = Tensor.empty(10,)
-    out0 = a.sum() + b[0]
-    out1 = a.sum() + 2
-    check_schedule([out0, out1], 1)
+    c = a.sum() + b[0]
+    d = a.sum() + 2
+    check_schedule([c, d], 1)
+
+  def test_reduce_multiple_paths_midshrink(self):
+    a = Tensor.empty(4, 4)
+    r = a.sum(axis=1)
+    out0 = r.exp2()
+    out1 = out0[0] + out0
+    check_schedule([r, out0, out1], 3)
+
+  def test_reduce_shrink_output(self):
+    a = Tensor.empty(4, 4)
+    r = a.sum(keepdim=True)
+    out0 = r.exp2()
+    out1 = out0[0] + Tensor.empty(1, )
+    check_schedule([r, out0, out1], 3)
+
+  def test_softmax_fusion(self):
+    out = Tensor.empty(4, 12, 64, 64).softmax()
+    check_schedule(out, 3)
+
+  def test_layernorm_onelayer_fusion(self):
+    layer = nn.LayerNorm([10, 10])
+    x = Tensor.empty(20, 5, 10, 10)
+    check_schedule(layer(x), 3)
+
+  def test_scaled_dot_product_attention_fusion(self):
+    x, y, z, m = (Tensor.empty(32, 8, 16, 16) for _ in range(4))
+    out = Tensor.scaled_dot_product_attention(x, y, z, attn_mask=m)
+    check_schedule(out, 5)
+
+  def test_scaled_dot_product_attention_causal_fusion(self):
+    x, y, z, m = (Tensor.empty(32, 8, 16, 16) for _ in range(4))
+    out = Tensor.scaled_dot_product_attention(x, y, z, attn_mask=m, is_causal=True)
+    check_schedule(out, 7)
+
+  def test_adam_step_fusion(self):
+    x = Tensor.empty(4, 64, 768)
+    layer = nn.Linear(768, 768*4)
+    opt = nn.optim.Adam(nn.state.get_parameters(layer), lr=1e-4)
+    layer(x).relu().sum().backward()
+    check_schedule(opt.schedule_step(), 14)
+
+  def test_adam_conv_fuse(self):
+    with Tensor.train():
+      img = Tensor.empty(2,3,4,4)
+      c1 = nn.Conv2d(3,32,3)
+      opt = nn.optim.Adam(nn.state.get_parameters(c1), lr=1e-4)
+      opt.zero_grad()
+      c1(img).relu().sum().backward()
+      check_schedule(opt.schedule_step(), 14)
+
+  def test_adam_2convs_fuse(self):
+    with Tensor.train():
+      img = Tensor.empty(2,3,4,4)
+      c1 = nn.Conv2d(3,16,3,bias=False)
+      c2 = nn.Conv2d(16,32,3,bias=False)
+      opt = nn.optim.Adam(nn.state.get_parameters([c1, c2]), lr=1e-4)
+      opt.zero_grad()
+      c2(c1(img).relu()).relu().sum().backward()
+      check_schedule(opt.schedule_step(), 15)
+
+  def test_sgd_conv_fuse(self):
+    with Tensor.train():
+      img = Tensor.empty(2,3,4,4)
+      c1 = nn.Conv2d(3,32,3)
+      opt = nn.optim.SGD(nn.state.get_parameters(c1))
+      opt.zero_grad()
+      c1(img).relu().sum().backward()
+      check_schedule(opt.schedule_step(), 7)
+
+  def test_sgd_2convs_fuse(self):
+    with Tensor.train():
+      img = Tensor.empty(2,3,4,4)
+      c1 = nn.Conv2d(3,16,3,bias=False)
+      c2 = nn.Conv2d(16,32,3,bias=False)
+      opt = nn.optim.SGD(nn.state.get_parameters([c1, c2]))
+      opt.zero_grad()
+      c2(c1(img).relu()).relu().sum().backward()
+      check_schedule(opt.schedule_step(), 7)
+
+  def test_fold_2convs_sgd_nesterov_momentum_wd(self):
+    with Tensor.train():
+      img = Tensor.empty(2,3,4,4)
+      c1 = nn.Conv2d(3,16,3,bias=False)
+      c2 = nn.Conv2d(16,32,3,bias=False)
+      opt = nn.optim.SGD(nn.state.get_parameters([c1, c2]), nesterov=True, momentum=0.9, weight_decay=0.1)
+      opt.zero_grad()
+      c2(c1(img).relu()).relu().sum().backward()
+      check_schedule(opt.schedule_step(), 9)
+
+  def test_sgd_4convs_fuse(self):
+    with Tensor.train():
+      img = Tensor.empty(2,3,64,64)
+      c1 = nn.Conv2d(3,4,3,bias=False)
+      c2 = nn.Conv2d(4,8,3,bias=False)
+      c3 = nn.Conv2d(8,16,3,bias=False)
+      c4 = nn.Conv2d(16,32,3,bias=False)
+      opt = nn.optim.SGD(nn.state.get_parameters([c1, c2, c3, c4]))
+      opt.zero_grad()
+      c4(c3(c2(c1(img).relu()).relu()).relu()).relu().sum().backward()
+      check_schedule(opt.schedule_step(), 22)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_prefer_half_buffer(self):

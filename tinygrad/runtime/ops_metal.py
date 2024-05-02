@@ -97,9 +97,9 @@ class MetalDevice(Compiled):
     self.mtl_buffers_in_flight: List[Any] = []
     self.mv_in_metal: List[memoryview] = []
     self.track_cross_buffer: List[Any] = []
-    from tinygrad.runtime.graph.metal import MetalGraph
+    from tinygrad.runtime.graph.metal import MetalGraphRunner
     super().__init__(device, MetalAllocator(self), MetalCompiler(None if getenv("METAL_XCODE") else self),
-                     functools.partial(MetalProgram, self), functools.partial(MetalGraph, self))
+                     functools.partial(MetalProgram, self), MetalGraphRunner)
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight: wait_check(cbuf)
     self.mv_in_metal.clear()

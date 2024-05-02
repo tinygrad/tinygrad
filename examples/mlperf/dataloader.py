@@ -1,12 +1,13 @@
-import os, random
-from typing import List
+import os, random, pickle, functools, itertools
+from typing import List, Tuple
+from pathlib import Path
 import numpy as np
 from PIL import Image
 from tqdm import tqdm
-import pickle
 from tinygrad import dtypes, Tensor
-from tinygrad.helpers import getenv, prod, Timing, Context
-from multiprocessing import Queue, Process, shared_memory, connection, Lock, cpu_count
+from tinygrad.helpers import getenv, prod, Context, round_up
+from collections import deque
+from multiprocessing import Queue, Process, shared_memory, connection, Lock, cpu_count, Pool
 
 class MyQueue:
   def __init__(self, multiple_readers=True, multiple_writers=True):
@@ -43,21 +44,25 @@ def loader_process(q_in, q_out, X:Tensor, seed):
   with Context(DEBUG=0):
     while (_recv := q_in.get()) is not None:
       idx, fn, val = _recv
-      img = Image.open(fn)
-      img = img.convert('RGB') if img.mode != "RGB" else img
+      if fn is not None:
+        img = Image.open(fn)
+        img = img.convert('RGB') if img.mode != "RGB" else img
 
-      if val:
-        # eval: 76.08%, load in 0m7.366s (0m5.301s with simd)
-        # sudo apt-get install libjpeg-dev
-        # CC="cc -mavx2" pip install -U --force-reinstall pillow-simd
-        img = center_crop(img)
-        img = np.array(img)
+        if val:
+          # eval: 76.08%, load in 0m7.366s (0m5.301s with simd)
+          # sudo apt-get install libjpeg-dev
+          # CC="cc -mavx2" pip install -U --force-reinstall pillow-simd
+          img = center_crop(img)
+          img = np.array(img)
+        else:
+          # reseed rng for determinism
+          if seed is not None:
+            np.random.seed(seed * 2 ** 20 + idx)
+            random.seed(seed * 2 ** 20 + idx)
+          img = preprocess_train(img)
       else:
-        # reseed rng for determinism
-        if seed is not None:
-          np.random.seed(seed * 2 ** 20 + idx)
-          random.seed(seed * 2 ** 20 + idx)
-        img = preprocess_train(img)
+        # pad zeros
+        img = np.zeros((224, 224, 3), dtype=np.uint8)
 
       # broken out
       #img_tensor = Tensor(img.tobytes(), device='CPU')
@@ -72,19 +77,35 @@ def loader_process(q_in, q_out, X:Tensor, seed):
       q_out.put(idx)
     q_out.put(None)
 
-def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None):
+def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None, pad_first_batch=False):
   from extra.datasets.imagenet import get_train_files, get_val_files
   files = get_val_files() if val else get_train_files()
   from extra.datasets.imagenet import get_imagenet_categories
   cir = get_imagenet_categories()
-  BATCH_COUNT = min(32, len(files) // batch_size)
 
-  gen = shuffled_indices(len(files), seed=seed) if shuffle else iter(range(len(files)))
+  if pad_first_batch:
+    FIRST_BATCH_PAD = round_up(len(files), batch_size) - len(files)
+  else:
+    FIRST_BATCH_PAD = 0
+  file_count = FIRST_BATCH_PAD + len(files)
+  BATCH_COUNT = min(32, file_count // batch_size)
+
+  def _gen():
+    for _ in range(FIRST_BATCH_PAD): yield -1
+    yield from shuffled_indices(len(files), seed=seed) if shuffle else iter(range(len(files)))
+  gen = iter(_gen())
+
   def enqueue_batch(num):
     for idx in range(num*batch_size, (num+1)*batch_size):
-      fn = files[next(gen)]
-      q_in.put((idx, fn, val))
-      Y[idx] = cir[fn.split("/")[-2]]
+      fidx = next(gen)
+      if fidx != -1:
+        fn = files[fidx]
+        q_in.put((idx, fn, val))
+        Y[idx] = cir[fn.split("/")[-2]]
+      else:
+        # padding
+        q_in.put((idx, None, val))
+        Y[idx] = -1
 
   shutdown = False
   class Cookie:
@@ -125,8 +146,8 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None):
 
     for bn in range(BATCH_COUNT): enqueue_batch(bn)
 
-    # NOTE: this is batch aligned, last ones are ignored
-    for _ in range(0, len(files)//batch_size): yield receive_batch()
+    # NOTE: this is batch aligned, last ones are ignored unless pad_first_batch is True
+    for _ in range(0, file_count//batch_size): yield receive_batch()
   finally:
     shutdown = True
     # empty queues
@@ -138,8 +159,13 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None):
     # shutdown processes
     for p in procs: p.join()
     shm.close()
-    shm.unlink()
+    try:
+      shm.unlink()
+    except FileNotFoundError:
+      # happens with BENCHMARK set
+      pass
 
+@functools.lru_cache(maxsize=128)
 def load_bert_file(fn:str) -> List[dict]:
   with open(fn, "rb") as f: data = pickle.load(f)
   return data
@@ -147,7 +173,7 @@ def load_bert_file(fn:str) -> List[dict]:
 def process_batch_bert(data: List[dict]) -> dict[str, Tensor]:
   return {
     "input_ids": Tensor(np.concatenate([s["input_ids"] for s in data], axis=0), dtype=dtypes.float32),
-    "input_mask": Tensor(np.concatenate([s["input_mask"] for s in data], axis=0), dtype=dtypes.float32),
+    "input_mask": Tensor(np.concatenate([s["input_mask"] for s in data], axis=0), dtype=dtypes.default_float),
     "segment_ids": Tensor(np.concatenate([s["segment_ids"] for s in data], axis=0), dtype=dtypes.float32),
     "masked_lm_positions": Tensor(np.concatenate([s["masked_lm_positions"] for s in data], axis=0), dtype=dtypes.float32),
     "masked_lm_ids": Tensor(np.concatenate([s["masked_lm_ids"] for s in data], axis=0), dtype=dtypes.float32),
@@ -155,22 +181,69 @@ def process_batch_bert(data: List[dict]) -> dict[str, Tensor]:
     "next_sentence_labels": Tensor(np.concatenate([s["next_sentence_labels"] for s in data], axis=0), dtype=dtypes.float32),
   }
 
-# For train: Stop when we run through all data
-# For val: Wrap around val dataset and never stop
-#     Reference: https://github.com/mlcommons/training/blob/1c8a098ae3e70962a4f7422c0b0bd35ae639e357/language_model/tensorflow/bert/run_pretraining.py, Line 420
-def batch_load_bert(BS:int, val=False):
-  from extra.datasets.wikipedia import get_wiki_train_files, get_wiki_val_files
-  files = get_wiki_val_files() if val else get_wiki_train_files()
-  blob, end = [], False
-  while files: # As long as there is data, keep going
-    while len(blob) < BS and not end: # Fill blob until there is enough for next step
-      blob.extend(load_bert_file(files.pop(0)))
-      if not files: 
-        if val: files = get_val_files()
-        else: end = True # End of train data - avoid pop on empty file list
-    if len(blob) >= BS: # if last train step does not have enough for a full batch
-      yield process_batch_bert(blob[:BS])
-      blob = blob[BS:]
+def shuffle_parts(file_paths: List[str]) -> List[str]:
+  parts = {}
+  for f in file_paths:
+    part = Path(f).stem.split('_')[0]
+    if part not in parts: parts[part] = []
+    parts[part].append(f)
+  
+  part_ids = list(parts.keys())
+  random.shuffle(part_ids)
+
+  shuffled_files = []
+  for p in part_ids:
+    parts[p].sort(key=lambda x: int(Path(x).stem.split('_')[1]))
+    shuffled_files.extend(parts[p])
+  return shuffled_files
+
+def random_sample(data: List[str]):
+  index = random.randint(0, len(data) - 1)
+  selected_sample = data[index]
+  return selected_sample, index
+
+def load_datasample(file_and_offset:Tuple[str, int]) -> List[dict]:
+  data = load_bert_file(file_and_offset[0])
+  return data[file_and_offset[1]]
+
+# Reference: https://github.com/mlcommons/training/blob/1c8a098ae3e70962a4f7422c0b0bd35ae639e357/language_model/tensorflow/bert/run_pretraining.py, Line 394
+def batch_load_train_bert(BS:int):
+  from extra.datasets.wikipedia import get_wiki_train_files
+  files = shuffle_parts(get_wiki_train_files())
+  dataset = []
+  for f in files: 
+    lists = [(f, o) for o in range(int(Path(f).stem.split("_")[3].split(".")[0]))]
+    dataset.extend(lists)
+  
+  active_set = deque(dataset[:1000])
+  remaining_set = deque(dataset[1000:])
+
+  while dataset:
+    blob = []
+    for _ in range(BS):
+      if active_set:
+        index = random.randint(0, len(active_set) - 1)
+        sample = active_set[index]
+        active_set.remove(sample)
+        blob.append(sample)
+        if remaining_set:
+            active_set.append(remaining_set.popleft())
+    yield process_batch_bert([load_datasample(sample) for sample in blob])
+
+# Reference: https://github.com/mlcommons/training/blob/1c8a098ae3e70962a4f7422c0b0bd35ae639e357/language_model/tensorflow/bert/run_pretraining.py, Line 416
+def batch_load_val_bert(BS:int):
+  from extra.datasets.wikipedia import get_wiki_val_files
+  files = get_wiki_val_files()
+  dataset = list(itertools.chain.from_iterable([load_bert_file(f) for f in files]))
+  idx = 0
+  while True:
+    start_idx = (idx * BS) % len(dataset)
+    end_idx = ((idx + 1) * BS) % len(dataset)
+    if start_idx < end_idx:
+        yield process_batch_bert(dataset[start_idx:end_idx])
+    else:  # wrap around the end to the beginning of the dataset
+        yield process_batch_bert(dataset[start_idx:] + dataset[:end_idx])
+    idx += 1
 
 if __name__ == "__main__":
   from extra.datasets.imagenet import get_train_files, get_val_files
