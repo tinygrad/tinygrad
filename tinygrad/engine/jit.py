@@ -81,7 +81,7 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
     self.vars = list(var_vals.keys())
     super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), jit_cache[0].prg.dname.split(":")[0], op_estimate, mem_estimate)
 
-class MultiGraphRunner(GraphRunner):
+class MultiGraphRunner(GraphRunner):  # pylint: disable=abstract-method
   def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
     self.w_dependency_map: Dict[Any, Any] = {}
     self.r_dependency_map: Dict[Any, List[Any]] = collections.defaultdict(list)
