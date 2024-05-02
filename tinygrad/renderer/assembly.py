@@ -203,7 +203,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, _uops:UOpGraph) -> str
         r[u] = f"%{nm}"
         if lang.load_global:
           dt = dtypes.ulong if dtype.__class__ == PtrDType else dtype
-          kk(*lang.render_load(args[1], ssa('dat', u, lang.types[dt]), dt, ss=".param"))
+          kk(*lang.render_load(nm, ssa('dat', u, lang.types[dt]), dt, ss=".param"))
       elif uop is UOps.WMMA:
         wmma = []
         for vv in vin[:2]:
