@@ -24,6 +24,7 @@
 ::: tinygrad.Tensor.shard_
 ::: tinygrad.Tensor.contiguous
 ::: tinygrad.Tensor.contiguous_backward
+::: tinygrad.Tensor.backward
 
 ## Creation (basic)
 

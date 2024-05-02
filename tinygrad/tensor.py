@@ -648,6 +648,17 @@ class Tensor:
     return list(_deepwalk(self, set()))
 
   def backward(self) -> Tensor:
+    """
+    Propagates the gradient of a tensor backwards through the computation graph.
+    Must be used on a scalar tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(6, requires_grad=True)
+    t2 = t.sum()
+    t2.backward()
+    print(t.grad.numpy())
+    ```
+    """
     assert self.shape == tuple(), f"backward can only be called for scalar tensors, but it has shape {self.shape})"
 
     # fill in the first grad with one. don't use Tensor.ones because we don't need contiguous
@@ -695,7 +706,19 @@ class Tensor:
     ```
     """
     return self._broadcast_to(tuple(sh if s==-1 or s is None else s for s, sh in zip(*(_pad_left(argfix(shape, *args), self.shape)))))
-  def permute(self, order, *args) -> Tensor: return F.Permute.apply(self, order=argfix(order, *args))
+  def permute(self, order, *args) -> Tensor:
+    """
+    Returns a new tensor that is a permutation of the original tensor.
+    The new tensor has the same data as the original tensor but with the dimensions permuted according to the order specified.
+    order can be passed as a tuple or as separate arguments.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(6).reshape(2, 3)
+    print(t.numpy(), "->")
+    print(t.permute(1, 0).numpy())
+    ```
+    """
+    return F.Permute.apply(self, order=argfix(order, *args))
   def flip(self, axis, *args) -> Tensor: return F.Flip.apply(self, axis=[x if x >= 0 else x+len(self.shape) for x in argfix(axis, *args)])
   def shrink(self, arg:Tuple[Optional[Tuple[sint, sint]], ...]) -> Tensor:
     if all(x is None or x == (0,s) for x,s in zip(arg, self.shape)): return self
@@ -940,7 +963,11 @@ class Tensor:
     ret = fxn.apply(self, axis=axis_, acc_dtype=acc_dtype)
     return ret if keepdim else ret.reshape(shape)
 
-  def sum(self, axis=None, keepdim=False, acc_dtype:Optional[DType]=None): return self._reduce(F.Sum, axis, keepdim, acc_dtype)
+  def sum(self, axis=None, keepdim=False, acc_dtype:Optional[DType]=None):
+    """
+    Returns the sum of elements
+    """
+    return self._reduce(F.Sum, axis, keepdim, acc_dtype)
   def max(self, axis=None, keepdim=False): return self._reduce(F.Max, axis, keepdim)
   def min(self, axis=None, keepdim=False): return -((-self).max(axis=axis, keepdim=keepdim))
 
