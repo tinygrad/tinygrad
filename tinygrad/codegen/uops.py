@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 # bottom ones are asm only
 class UOps(Enum):
-  LOOP = auto(); IF = auto(); ENDLOOP = auto(); SPECIAL = auto() # loops can be global, local, or other # noqa: E702
+  LOOP = auto(); IF = auto(); ENDLOOP = auto(); ENDIF = auto(); SPECIAL = auto() # loops can be global, local, or other # noqa: E702
   DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # this defines buffers # noqa: E702
   LOAD = auto(); STORE = auto(); CONST = auto(); BARRIER = auto(); PHI = auto() # noqa: E702
   ALU = auto(); WMMA = auto(); CAST = auto(); BITCAST = auto(); GEP = auto(); NOOP = auto() # noqa: E702
@@ -208,6 +208,9 @@ class UOpGraph:
         # add END of loops after the last thing that (recursively) depends on them
         insert_before = self.uops.index(sorted(list(self.get_recursive_children(u)), key=self.uops.index)[-1])+1
         self.add(UOps.ENDLOOP, None, (u,), cachable=False, insert_before=insert_before)
+      elif u.uop is UOps.IF:
+        # END any if statements at the end of the uops
+        self.add(UOps.ENDIF, None, (u,), cachable=False)
 
   def fix_loop_scope(self, get_recursive_parents:Callable[..., Set[UOp]]):
     loop_stack: List[List[UOp]] = [[]]
