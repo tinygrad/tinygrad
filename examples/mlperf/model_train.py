@@ -4,7 +4,7 @@ from tqdm import tqdm
 import multiprocessing
 
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
-from tinygrad.helpers import getenv, BEAM, WINO
+from tinygrad.helpers import getenv, BEAM, WINO, round_up
 from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_save
 from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup
 
@@ -80,7 +80,7 @@ def train_resnet():
   eval_epochs       = getenv("EVAL_EPOCHS", 1)
 
   steps_in_train_epoch  = config["steps_in_train_epoch"]  = (len(get_train_files()) // BS)
-  steps_in_val_epoch    = config["steps_in_val_epoch"]    = (len(get_val_files()) // EVAL_BS)
+  steps_in_val_epoch    = config["steps_in_val_epoch"]    = (round_up(len(get_val_files()), EVAL_BS) // EVAL_BS)
 
   config["DEFAULT_FLOAT"] = dtypes.default_float.name
   config["BEAM"]          = BEAM.value

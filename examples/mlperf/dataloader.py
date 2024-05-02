@@ -57,8 +57,8 @@ def loader_process(q_in, q_out, X:Tensor, seed):
         else:
           # reseed rng for determinism
           if seed is not None:
-            np.random.seed(seed * 2 ** 20 + idx)
-            random.seed(seed * 2 ** 20 + idx)
+            np.random.seed(seed * 2 ** 10 + idx)
+            random.seed(seed * 2 ** 10 + idx)
           img = preprocess_train(img)
       else:
         # pad zeros
