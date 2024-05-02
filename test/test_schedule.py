@@ -638,11 +638,20 @@ class TestSchedule(unittest.TestCase):
     # this is because adding significant inputs is not free when doing gemms, since
     # there is limited L1 cache space. it is probably OK to fuse when there is at most
     # one expand axis.
-    check_schedule([(x + a).sum(), (x + b).sum()], 2)
-    check_schedule([(x + a).sum(), (x + b).sum(), (x + y).sum()], 2)
+    check_schedule([(x + y).sum(), (x + z).sum()], 2)
+
+    # pick someone to fuse into if there is ambiguity
+    check_schedule([(x + y).sum(), (x + z).sum(), (x + a).sum()], 2)
 
     # don't fuse if shapetrackers do not match
     check_schedule([(x + a).sum(), (x.permute(1, 0) + b).sum()], 2)
+
+    # do this also for elementwise
+    check_schedule([(x + a).sum(), (x * 3)], 1)
+
+    # do this also for *subtrees* of elementwise, when it will save memory bandwidth
+    stat = (x - y + a).sum()
+    check_schedule([stat, ((x - y) * stat)], 1)
 
 
 if __name__ == '__main__':
