@@ -100,7 +100,7 @@ class MultiGraphRunner(GraphRunner):
     if new_dependency is not None:
       for rawbuf in read: self.r_dependency_map[id(rawbuf._buf)].append(new_dependency)
       for rawbuf in write: self.w_dependency_map[id(rawbuf._buf)] = new_dependency
-    return {id(x):x for x in wait_nodes}.values()
+    return list({id(x):x for x in wait_nodes}.values())
 
 ReturnType = TypeVar('ReturnType')
 class TinyJit(Generic[ReturnType]):

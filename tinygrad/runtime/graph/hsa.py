@@ -166,9 +166,10 @@ class HSAGraph(MultiGraphRunner):
       return packet.completion_signal
     return None
 
-  def access_resources(self, read, write, new_dependency=None, sync_with_aql_packets=False):
+  def access_resources(self, read, write, new_dependency, sync_with_aql_packets=False):
     rdeps = self._access_resources(read, write, new_dependency)
     signal_deps, aql_deps = [x for x in rdeps if isinstance(x, hsa.hsa_signal_t)], [x for x in rdeps if isinstance(x, int)]
     deps = signal_deps + ([max(aql_deps)] if len(aql_deps) > 0 else [])
     wait_signals = [self.dependency_as_signal(dep, sync_with_aql_packets=sync_with_aql_packets) for dep in deps]
+    if sync_with_aql_packets: wait_signals += [self.kickoff_signals[cast(HSADevice, Device[rawbuf.device])] for rawbuf in read+write]
     return dedup_signals(wait_signals)
