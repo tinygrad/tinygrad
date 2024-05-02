@@ -42,5 +42,14 @@ class TestBEAM(unittest.TestCase):
     capturing.clear()
     assert k_beam_0[-1].prg.prg != k_beam_1[-1].prg.prg
 
+  def test_get_linearizer_actions(self):
+    from test.test_linearizer import helper_realized_ast
+    a = Tensor.rand(4, 3)
+    b = Tensor.rand(3)
+    realized_ast, _ = helper_realized_ast(a @ b)
+    from tinygrad.features.search import get_linearizer_actions
+    lins = get_linearizer_actions(Linearizer(realized_ast), False).values()
+    assert len(lins) == 6, f"should have 6 actions, got {len(lins)}"
+
 if __name__ == '__main__':
   unittest.main()
