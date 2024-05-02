@@ -167,26 +167,8 @@ class HSAGraph(MultiGraphRunner):
     return None
 
   def access_resources(self, read, write, new_dependency=None, sync_with_aql_packets=False):
-    # To synchronize access to resources, we monitor the necessary prerequisites for accessing each resource,
-    # whether for write or read operations. A resource can be accessed by either a single writer or multiple readers.
-    # The tracked dependencies are either hsa signals or ints that reference a specific aql packet.
-    wait_signals: List[Optional[hsa.hsa_signal_t]] = []
-
-    if sync_with_aql_packets: wait_signals += [self.kickoff_signals[cast(HSADevice, Device[rawbuf.device])] for rawbuf in read+write]
-    for rawbuf in read:
-      wait_signals.append(self.dependency_as_signal(self.w_dependency_map.get(rawbuf._buf), sync_with_aql_packets=sync_with_aql_packets))
-    for rawbuf in write:
-      wait_signals.append(self.dependency_as_signal(self.w_dependency_map.get(rawbuf._buf), sync_with_aql_packets=sync_with_aql_packets))
-      if rawbuf._buf in self.r_dependency_map:
-        rdeps = self.r_dependency_map.pop(rawbuf._buf)
-
-        # When synchronizing to aql packets, we only need to sync to the latest one, as they are executed in order.
-        signal_deps, aql_deps = [x for x in rdeps if isinstance(x, hsa.hsa_signal_t)], [x for x in rdeps if isinstance(x, int)]
-        deps = signal_deps + ([max(aql_deps)] if len(aql_deps) > 0 else [])
-        for dep in deps: wait_signals.append(self.dependency_as_signal(dep, sync_with_aql_packets=sync_with_aql_packets))
-
-    if new_dependency is not None:
-      for rawbuf in read: self.r_dependency_map[rawbuf._buf].append(new_dependency)
-      for rawbuf in write: self.w_dependency_map[rawbuf._buf] = new_dependency
-
+    rdeps = self._access_resources(read, write, new_dependency)
+    signal_deps, aql_deps = [x for x in rdeps if isinstance(x, hsa.hsa_signal_t)], [x for x in rdeps if isinstance(x, int)]
+    deps = signal_deps + ([max(aql_deps)] if len(aql_deps) > 0 else [])
+    wait_signals = [self.dependency_as_signal(dep, sync_with_aql_packets=sync_with_aql_packets) for dep in deps]
     return dedup_signals(wait_signals)
