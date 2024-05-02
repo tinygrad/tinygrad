@@ -650,8 +650,8 @@ class TestSchedule(unittest.TestCase):
     check_schedule([(x + a).sum(), (x * 3)], 1)
 
     # do this also for *subtrees* of elementwise, when it will save memory bandwidth
-    stat = (x - y + a).sum()
-    check_schedule([stat, ((x - y) * stat)], 1)
+    stat = (x + a).sum(axis=0, keepdim=True)
+    check_schedule([stat, ((x + b) * stat + y)], 1)
 
 
 if __name__ == '__main__':
