@@ -620,6 +620,8 @@ class TestSchedule(unittest.TestCase):
     # we want to fuse reduces where the inputs of "significant" size of one reduce
     # are a superset of the significant inputs of another reduce
 
+    # === -4 memory passes ===
+
     # should fuse reduces that share common input, indexing on larger inputs
     check_schedule([(x + a).sum(), (x + b).sum()], 1)
 
@@ -645,7 +647,15 @@ class TestSchedule(unittest.TestCase):
     # don't fuse if shapetrackers do not match
     check_schedule([(x + a).sum(), (x.permute(1, 0) + b).sum()], 2)
 
-    # do this also for elementwise
+  def test_parallel_r_e_fusion(self):
+    x = Tensor.empty(16, 16)
+    y = Tensor.empty(16, 16)
+    a = Tensor.empty(1, 16)
+    b = Tensor.empty(1, 16)
+
+    # === -1 memory passes (prereq for -2 passes from preconv_e_fusion) ===
+
+    # do parallel fusion also for elementwise
     check_schedule([(x + a).sum(), (x * b)], 1)
 
     # do this also for *subtrees* of elementwise, when it will save memory bandwidth
@@ -659,6 +669,8 @@ class TestSchedule(unittest.TestCase):
     conv = nn.Conv2d(16, 16, 3)
     conv.weight = Tensor.empty(conv.weight.shape)
     conv.bias = Tensor.empty(conv.bias.shape)
+
+    # === -4 memory passes (2 dependent on parallel_r_e_fusion) ===
 
     # fuse when the input has 1 big buffer
     check_schedule([conv(x + a)], 1)
