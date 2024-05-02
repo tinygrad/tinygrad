@@ -121,7 +121,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str
       kk(f"if ({r[vin[0]]}) {{")
       depth += 1
     elif uop is UOps.BARRIER: kk(lang.barrier)
-    elif uop is UOps.ENDLOOP: end_scope()
+    elif uop in {UOps.ENDLOOP, UOps.ENDIF}: end_scope()
     elif uop is UOps.STORE:
       assert vin[0].dtype is not None and vin[2].dtype is not None
       rendered_store = lang.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, strip_parens(r[vin[1]]), vin[0].uop is UOps.DEFINE_LOCAL)
@@ -181,7 +181,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str
         r[u] = (r[vin[0]] if from_ssa else f"{(r[vin[0]])}") + (f"[{args}]" if vin[0].dtype.count > 4 else f".{'xyzw'[args]}")
       else: raise RuntimeError(f"failed to render {uop}")
 
-  while depth > 1: end_scope() # End of if statements and SPECIAL loops
+  while depth > 1: end_scope() # end of workitem loops
 
   return lang.render_kernel(function_name, kernel, bufs, uops)
 
