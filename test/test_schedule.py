@@ -609,6 +609,41 @@ class TestSchedule(unittest.TestCase):
       # merge reduce into previous conv: -2 kernels on top of the above. requires big linearizer change.
       # ideal case: the foward + backward pass is just 3 convs and some small reduces!
       check_schedule([x.grad, bn.weight.grad, bn.bias.grad, fw], 9)
+  def test_parallel_reduce_fusion(self):
+    x = Tensor.empty(16, 16).contiguous()
+    y = Tensor.empty(16, 16).contiguous()
+    z = Tensor.empty(16, 16).contiguous()
+    a = Tensor.empty(1, 16).contiguous()
+    b = Tensor.empty(1, 16).contiguous()
+
+    check_schedule([x, y, z, a, b], 4)  # schedule inputs so they are "allocated"
+
+    # we want to fuse reduces where the inputs of "signficant" size of one reduce
+    # are a superset of the significant inputs of another reduce
+
+    # should fuse reduces that share common input, indexing on larger inputs
+    check_schedule([(x + a).sum(), (x + b).sum()], 1)
+
+    # same as above, except one of the sums has 2 big buffers
+    check_schedule([(x + y + a).sum(), (x + b).sum()], 1)
+
+    # same as above, except both sums have 2 big buffers
+    check_schedule([(x + y + a).sum(), (x + y + b).sum()], 1)
+
+    # same as above, except with 3 sums
+    # do not necessarily require the (x, a) (x, b) (a, b) case
+    check_schedule([(x + y + a).sum(), (x + b).sum(), (y + b).sum()], 1)
+
+    # for now, we only want to do this fusion when no significant inputs are added
+    # this is because adding significant inputs is not free when doing gemms, since
+    # there is limited L1 cache space. it is probably OK to fuse when there is at most
+    # one expand axis.
+    check_schedule([(x + a).sum(), (x + b).sum()], 2)
+    check_schedule([(x + a).sum(), (x + b).sum(), (x + y).sum()], 2)
+
+    # don't fuse if shapetrackers do not match
+    check_schedule([(x + a).sum(), (x.permute(1, 0) + b).sum()], 2)
+
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
