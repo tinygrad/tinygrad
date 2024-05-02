@@ -71,11 +71,11 @@ class MetalAllocator(LRUAllocator):
     ret = self.device.device.newBufferWithLength_options_(size, Metal.MTLResourceStorageModeShared)
     if ret is None: raise MemoryError(f"Metal OOM while allocating {size=}")
     return ret
-  def transfer(self, dest:Any, src:Any, sz:int, src_dev: MetalDevice, **kwargs):
+  def transfer(self, dest:Any, src:Any, sz:int, src_dev: MetalDevice, src_offset:int=0, **kwargs):
     src_dev.synchronize()
     command_buffer = self.device.mtl_queue.commandBuffer()
     encoder = command_buffer.blitCommandEncoder()
-    encoder.copyFromBuffer_sourceOffset_toBuffer_destinationOffset_size_(src, 0, dest, 0, sz)
+    encoder.copyFromBuffer_sourceOffset_toBuffer_destinationOffset_size_(src, src_offset, dest, 0, sz)
     encoder.endEncoding()
     command_buffer.commit()
     self.device.mtl_buffers_in_flight.append(command_buffer)
@@ -88,7 +88,7 @@ class MetalAllocator(LRUAllocator):
     self.device.synchronize()
     return src.contents().as_buffer(src.length())
   def copyin(self, dest:Any, src:memoryview): self.as_buffer(dest)[:] = src
-  def copyout(self, dest:memoryview, src:Any): dest[:] = self.as_buffer(src)
+  def copyout(self, dest:memoryview, src:Any, src_offset:int): dest[:] = self.as_buffer(src)[src_offset:src_offset+len(dest)]
 
 class MetalDevice(Compiled):
   def __init__(self, device:str):

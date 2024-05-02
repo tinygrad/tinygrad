@@ -67,6 +67,7 @@ class BufferCopy(Runner):
       # fast(ish) path, uses readinto in diskbuffers
       src.allocator.copyout(dest.allocator.as_buffer(dest._buf), src._buf, self.offset)
     else:
+      assert self.offset == 0
       dest.copyin(src.as_buffer(allow_zero_copy=True))  # may allocate a CPU buffer depending on allow_zero_copy
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False):
     dest, src = rawbufs[0:2]
@@ -82,7 +83,7 @@ class BufferXfer(BufferCopy):
     if hasattr(dest.allocator.device, "track_cross_buffer") and hasattr(src.allocator, "track_cross_device"):
       dest.allocator.device.track_cross_buffer.append(src)
       src.allocator.track_cross_device.add(dest.allocator.device)
-    dest.allocator.transfer(dest._buf, src._buf, dest.nbytes, src_dev=src.allocator.device, dest_dev=dest.allocator.device)
+    dest.allocator.transfer(dest._buf, src._buf, dest.nbytes, src_dev=src.allocator.device, dest_dev=dest.allocator.device, src_offset=self.offset)
 
 # TODO: size, dest, src are the same type. can we enforce this?
 class Allocator:
@@ -94,7 +95,7 @@ class Allocator:
     self._free(opaque, options if options is not None else BufferOptions())
   def _free(self, opaque, options:BufferOptions): pass  # if opaque is a Python object, you don't need a free
   def copyin(self, dest, src:memoryview): raise NotImplementedError("need copyin")
-  def copyout(self, dest:memoryview, src): raise NotImplementedError("need copyout")
+  def copyout(self, dest:memoryview, src, src_offset:int): raise NotImplementedError("need copyout")
 
 class LRUAllocator(Allocator):  # pylint: disable=abstract-method
   def __init__(self): self.cache: Dict[Tuple[int, Optional[BufferOptions]], Any] = defaultdict(list)
