@@ -117,9 +117,7 @@ class LazyBuffer:
       return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, device, arg=self.base.arg)._view(self.st)
 
     # if it's a shrink, do the shrink before the copy with CONTIGUOUS
-    if prod(self.st.shape) < prod(self.base.st.shape):
-      if self.device.startswith("DISK"): return self._copy(device)
-      return self.contiguous()._copy(device)
+    if prod(self.st.shape) < prod(self.base.st.shape): return self.contiguous()._copy(device)
 
     # copy the base and apply the shapetracker on the new device
     return self.base._copy(device)._view(self.st)
