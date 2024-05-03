@@ -57,12 +57,12 @@ def loader_process(q_in, q_out, X:Tensor, seed):
         else:
           # reseed rng for determinism
           if seed is not None:
-            np.random.seed(seed * 2 ** 20 + idx)
-            random.seed(seed * 2 ** 20 + idx)
+            np.random.seed(seed * 2 ** 10 + idx)
+            random.seed(seed * 2 ** 10 + idx)
           img = preprocess_train(img)
       else:
-        # pad zeros
-        img = np.zeros((224, 224, 3), dtype=np.uint8)
+        # pad data with training mean
+        img = np.tile(np.array([[[123.68, 116.78, 103.94]]], dtype=np.uint8), (224, 224, 1))
 
       # broken out
       #img_tensor = Tensor(img.tobytes(), device='CPU')
@@ -159,7 +159,11 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None, pad_fir
     # shutdown processes
     for p in procs: p.join()
     shm.close()
-    shm.unlink()
+    try:
+      shm.unlink()
+    except FileNotFoundError:
+      # happens with BENCHMARK set
+      pass
 
 @functools.lru_cache(maxsize=128)
 def load_bert_file(fn:str) -> List[dict]:

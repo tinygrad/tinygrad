@@ -1,10 +1,10 @@
 from __future__ import annotations
-from typing import TypeVar, Generic, Callable, List, Tuple, Union, Dict, cast, Optional
-import functools, itertools, operator
+from typing import TypeVar, Generic, Callable, List, Tuple, Union, Dict, cast, Optional, Any
+import functools, itertools, collections
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, BEAM, getenv, all_int, GraphException
-from tinygrad.device import Buffer, CompiledRunner, BufferXfer, Compiled, MultiDeviceJITGraph, Device
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, BEAM, getenv, all_int, GraphException, colored
+from tinygrad.device import Buffer, CompiledRunner, BufferXfer, Compiled, Device, Runner
 from tinygrad.dtype import DType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, sint
@@ -12,16 +12,6 @@ from tinygrad.engine.realize import ExecItem, capturing, _internal_memory_planne
 from tinygrad.nn.state import get_parameters
 from weakref import WeakKeyDictionary
 
-# TODO: these graph functions probably shouldn't exist here
-
-def get_jit_stats(jit_cache: List[ExecItem]) -> Tuple[sint, int]:
-  return functools.reduce(operator.add, [ji.prg.op_estimate for ji in jit_cache if isinstance(ji.prg, CompiledRunner)], 0), \
-         functools.reduce(operator.add, [ji.prg.mem_estimate for ji in jit_cache if isinstance(ji.prg, CompiledRunner)], 0)
-def get_jc_idxs_with_updatable_launch_dims(jit_cache: List[ExecItem]) -> List[int]:
-  return [j for j,ji in enumerate(jit_cache) if isinstance(ji.prg, CompiledRunner) and \
-          ((ji.prg.global_size and not all_int(ji.prg.global_size)) or (ji.prg.local_size and not all_int(ji.prg.local_size)))]
-def get_jc_idxs_with_updatable_var_vals(jit_cache: List[ExecItem]) -> List[int]:
-  return [j for j,ji in enumerate(jit_cache) if isinstance(ji.prg, CompiledRunner) and ji.prg.vars]
 def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]) -> List[ExecItem]:
   # Split JIT cache into batches for faster graph execution.
   # This allows the accelerator to run some batches while subsequent graphs are still being updated.
@@ -34,7 +24,10 @@ def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]
     nonlocal current_batch, current_device, max_batch_size
     try:
       if len(current_batch) <= 1 or current_device is None: raise GraphException("only one kernel doesn't graph")
-      graphed_jit_cache.append(ExecItem(current_device.graph(current_batch, input_rawbuffers, var_vals), cast(List[Optional[Buffer]], input_rawbuffers))) # noqa: E501
+      graph_runner = current_device.graph(current_batch, input_rawbuffers, var_vals)
+      # clear jit inputs to allow their memory to be freed/reused
+      for (j,i) in graph_runner.input_replace.keys(): graph_runner.jit_cache[j].bufs[i] = None
+      graphed_jit_cache.append(ExecItem(graph_runner, cast(List[Optional[Buffer]], input_rawbuffers)))
       max_batch_size *= 2
       if DEBUG >= 2: print(f"\tJIT GRAPHing batch with {len(current_batch)} kernels on device {current_device}")
     except GraphException as e:
@@ -51,7 +44,7 @@ def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]
 
     can_be_graphed = ji_graph_dev and ji_graph_dev.graph
     can_extend_graph_batch = can_be_graphed and len(current_batch) < max_batch_size and (ji_graph_dev == current_device or
-      (isinstance(ji_graph_dev.graph, type) and issubclass(ji_graph_dev.graph, MultiDeviceJITGraph) and type(ji_graph_dev) == type(current_device))) #type:ignore
+      (isinstance(ji_graph_dev.graph, type) and issubclass(ji_graph_dev.graph, MultiGraphRunner) and type(ji_graph_dev) == type(current_device))) #type:ignore
     if not can_extend_graph_batch and len(current_batch) > 0: flush_batch()
 
     if can_be_graphed: current_batch.append(ji)
@@ -69,6 +62,44 @@ def get_input_replace(jit_cache: List[ExecItem], input_rawbuffers:List[Buffer]) 
       if a in input_rawbuffers:
         input_replace[(j,i)] = input_rawbuffers.index(a)
   return input_replace
+
+class GraphRunner(Runner):  # pylint: disable=abstract-method
+  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
+    self.jit_cache = jit_cache
+    self.input_replace = get_input_replace(jit_cache, input_rawbuffers)
+    self.jc_idx_with_updatable_launch_dims = []
+    self.jc_idx_with_updatable_var_vals = []
+    op_estimate: sint = 0
+    mem_estimate: sint = 0
+    for j,ji in enumerate(jit_cache):
+      op_estimate += ji.prg.op_estimate
+      mem_estimate += ji.prg.mem_estimate
+      if isinstance(ji.prg, CompiledRunner):
+        if ji.prg.vars: self.jc_idx_with_updatable_var_vals.append(j)
+        if (ji.prg.global_size and not all_int(ji.prg.global_size)) or (ji.prg.local_size and not all_int(ji.prg.local_size)):
+          self.jc_idx_with_updatable_launch_dims.append(j)
+    self.vars = list(var_vals.keys())
+    super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), jit_cache[0].prg.dname.split(":")[0], op_estimate, mem_estimate)
+
+class MultiGraphRunner(GraphRunner):  # pylint: disable=abstract-method
+  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
+    self.w_dependency_map: Dict[Any, Any] = {}
+    self.r_dependency_map: Dict[Any, List[Any]] = collections.defaultdict(list)
+    super().__init__(jit_cache, input_rawbuffers, var_vals)
+
+  def _access_resources(self, read, write, new_dependency:Any):
+    # To synchronize access to resources, we monitor the necessary prerequisites for accessing each resource,
+    # whether for write or read operations. A resource can be accessed by either a single writer or multiple readers.
+    wait_nodes = []
+
+    for rawbuf in read + write:
+      if id(rawbuf._buf) in self.w_dependency_map: wait_nodes.append(self.w_dependency_map[id(rawbuf._buf)])
+    for rawbuf in write:
+      if id(rawbuf._buf) in self.r_dependency_map: wait_nodes.extend(self.r_dependency_map.pop(id(rawbuf._buf)))
+
+    for rawbuf in read: self.r_dependency_map[id(rawbuf._buf)].append(new_dependency)
+    for rawbuf in write: self.w_dependency_map[id(rawbuf._buf)] = new_dependency
+    return list({id(x):x for x in wait_nodes}.values())
 
 ReturnType = TypeVar('ReturnType')
 class TinyJit(Generic[ReturnType]):

@@ -214,6 +214,23 @@ class TestDiskTensor(unittest.TestCase):
     pathlib.Path(temp("dt1")).unlink(missing_ok=True)
     Tensor.empty(100, 100, device=f"disk:{temp('dt1')}")
 
+  def test_simple_read(self):
+    fn = pathlib.Path(temp("dt1"))
+    fn.unlink(missing_ok=True)
+    fn.write_bytes(bytes(range(256)))
+    t = Tensor.empty(16, 16, device=f"disk:{temp('dt1')}", dtype=dtypes.uint8)
+    out = t[1].to(Device.DEFAULT).tolist()
+    assert out == list(range(16, 32))
+
+  def test_simple_read_bitcast(self):
+    fn = pathlib.Path(temp("dt1"))
+    fn.unlink(missing_ok=True)
+    fn.write_bytes(bytes(range(256))*2)
+    t = Tensor.empty(16, 16*2, device=f"disk:{temp('dt1')}", dtype=dtypes.uint8)
+    out = t[1].bitcast(dtypes.uint16).to(Device.DEFAULT).tolist()
+    tout = [(x//256, x%256) for x in out]
+    assert tout == list([(x+1,x) for x in range(32,64,2)])
+
   def test_write_ones(self):
     pathlib.Path(temp("dt2")).unlink(missing_ok=True)
 
