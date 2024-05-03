@@ -13,7 +13,7 @@ class BufferOptions:
 
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferOptions]=None,
-               initial_value:Optional[bytes]=None, lb_refcount=0, base:Optional[Buffer]=None, offset:int=0):
+               initial_value:Optional[bytes]=None, lb_refcount=0, base:Optional[Buffer]=None, offset:int=0, preallocate=False):
     assert isinstance(dtype, DType)
     if isinstance(dtype, ImageDType): options = BufferOptions(image=dtype) # TODO: image hack shouldn't be here. where should it be?
     self.device, self.size, self.dtype, self.options, self.offset = device, size, dtype, options, offset
@@ -26,6 +26,7 @@ class Buffer:
         self.copyin(memoryview(initial_value))
     else:
       self.base = base
+    if preallocate: self.allocate()
   @property
   def lb_refcount(self): return self.base._lb_refcount if hasattr(self, 'base') else self._lb_refcount
   def ref(self, cnt):
@@ -47,6 +48,8 @@ class Buffer:
     return self
   def __reduce__(self):
     buf = None
+    if hasattr(self, 'base'):
+      return self.__class__, (self.device, self.size, self.dtype, None, None, None, 0, self.base, self.offset, hasattr(self, '_buf'))
     if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options, None, self.lb_refcount)
     if self.is_allocated():
       buf = bytearray(self.nbytes)
