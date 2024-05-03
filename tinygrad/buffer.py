@@ -38,6 +38,7 @@ class Buffer:
     self.allocator = Device[self.device].allocator
     if hasattr(self, "base"):
       self.base.ensure_allocated()
+      assert hasattr(self.allocator, "offset"), "offset function required for view"
       self._buf: Any = self.allocator.offset(self.base._buf, self.size, self.offset)
     else:
       self._buf = opaque if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
