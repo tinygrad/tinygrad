@@ -1,5 +1,5 @@
 import ctypes, collections, time, itertools
-from typing import List, Any, Dict, cast, Optional, Union, Tuple
+from typing import List, Any, Dict, cast, Optional, Tuple
 from tinygrad.helpers import GraphException, init_c_var, round_up
 from tinygrad.buffer import Buffer, BufferOptions
 from tinygrad.device import Compiled, CompiledRunner, BufferXfer, Device
@@ -61,8 +61,6 @@ class HSAGraph(MultiGraphRunner):
     self.transfers = []
     self.ji_to_transfer: Dict[int, int] = {} # faster to store transfers as list and update using this mapping table.
     self.signals_to_reset: List[hsa.hsa_signal_t] = []
-    self.w_dependency_map: Dict[Any, Union[hsa.hsa_signal_t, int]] = {}
-    self.r_dependency_map: Dict[Any, List[Union[hsa.hsa_signal_t, int]]] = collections.defaultdict(list)
     self.signals_to_devices: Dict[ctypes.c_uint64, List[HSADevice]] = {}
     self.profile_info: Dict[Compiled, List[Tuple[Any, ...]]] = collections.defaultdict(list)
 
@@ -166,27 +164,8 @@ class HSAGraph(MultiGraphRunner):
       return packet.completion_signal
     return None
 
-  def access_resources(self, read, write, new_dependency=None, sync_with_aql_packets=False):
-    # To synchronize access to resources, we monitor the necessary prerequisites for accessing each resource,
-    # whether for write or read operations. A resource can be accessed by either a single writer or multiple readers.
-    # The tracked dependencies are either hsa signals or ints that reference a specific aql packet.
-    wait_signals: List[Optional[hsa.hsa_signal_t]] = []
-
+  def access_resources(self, read, write, new_dependency, sync_with_aql_packets=False):
+    rdeps = self._access_resources(read, write, new_dependency)
+    wait_signals = [self.dependency_as_signal(dep, sync_with_aql_packets=sync_with_aql_packets) for dep in rdeps]
     if sync_with_aql_packets: wait_signals += [self.kickoff_signals[cast(HSADevice, Device[rawbuf.device])] for rawbuf in read+write]
-    for rawbuf in read:
-      wait_signals.append(self.dependency_as_signal(self.w_dependency_map.get(rawbuf._buf), sync_with_aql_packets=sync_with_aql_packets))
-    for rawbuf in write:
-      wait_signals.append(self.dependency_as_signal(self.w_dependency_map.get(rawbuf._buf), sync_with_aql_packets=sync_with_aql_packets))
-      if rawbuf._buf in self.r_dependency_map:
-        rdeps = self.r_dependency_map.pop(rawbuf._buf)
-
-        # When synchronizing to aql packets, we only need to sync to the latest one, as they are executed in order.
-        signal_deps, aql_deps = [x for x in rdeps if isinstance(x, hsa.hsa_signal_t)], [x for x in rdeps if isinstance(x, int)]
-        deps = signal_deps + ([max(aql_deps)] if len(aql_deps) > 0 else [])
-        for dep in deps: wait_signals.append(self.dependency_as_signal(dep, sync_with_aql_packets=sync_with_aql_packets))
-
-    if new_dependency is not None:
-      for rawbuf in read: self.r_dependency_map[rawbuf._buf].append(new_dependency)
-      for rawbuf in write: self.w_dependency_map[rawbuf._buf] = new_dependency
-
     return dedup_signals(wait_signals)

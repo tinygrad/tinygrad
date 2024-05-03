@@ -1,6 +1,6 @@
 from __future__ import annotations
-from typing import TypeVar, Generic, Callable, List, Tuple, Union, Dict, cast, Optional
-import functools, itertools
+from typing import TypeVar, Generic, Callable, List, Tuple, Union, Dict, cast, Optional, Any
+import functools, itertools, collections
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, BEAM, getenv, all_int, GraphException, colored
@@ -81,7 +81,25 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
     self.vars = list(var_vals.keys())
     super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), jit_cache[0].prg.dname.split(":")[0], op_estimate, mem_estimate)
 
-class MultiGraphRunner(GraphRunner): pass # pylint: disable=abstract-method
+class MultiGraphRunner(GraphRunner):  # pylint: disable=abstract-method
+  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
+    self.w_dependency_map: Dict[Any, Any] = {}
+    self.r_dependency_map: Dict[Any, List[Any]] = collections.defaultdict(list)
+    super().__init__(jit_cache, input_rawbuffers, var_vals)
+
+  def _access_resources(self, read, write, new_dependency:Any):
+    # To synchronize access to resources, we monitor the necessary prerequisites for accessing each resource,
+    # whether for write or read operations. A resource can be accessed by either a single writer or multiple readers.
+    wait_nodes = []
+
+    for rawbuf in read + write:
+      if id(rawbuf._buf) in self.w_dependency_map: wait_nodes.append(self.w_dependency_map[id(rawbuf._buf)])
+    for rawbuf in write:
+      if id(rawbuf._buf) in self.r_dependency_map: wait_nodes.extend(self.r_dependency_map.pop(id(rawbuf._buf)))
+
+    for rawbuf in read: self.r_dependency_map[id(rawbuf._buf)].append(new_dependency)
+    for rawbuf in write: self.w_dependency_map[id(rawbuf._buf)] = new_dependency
+    return list({id(x):x for x in wait_nodes}.values())
 
 ReturnType = TypeVar('ReturnType')
 class TinyJit(Generic[ReturnType]):
