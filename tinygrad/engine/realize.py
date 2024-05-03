@@ -36,6 +36,10 @@ class EmptyOp(Runner):
   def __init__(self, buf:Buffer): super().__init__(colored(f"empty {buf.size:10d} {buf.dtype}", "yellow"), buf.device)
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False): pass
 
+class ViewOp(Runner):
+  def __init__(self, buf:Buffer): super().__init__(colored(f"view {buf.nbytes:8d} @ {buf.offset:<10d}", "yellow"), buf.device)
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False): pass
+
 def lower_runner(runner:Runner, bufs) -> ExecItem:
   # TODO: globals isn't on the stupid diskrunner, remove the need for it
   return ExecItem(runner, [bufs[x[0]] for x in runner.globals] if hasattr(runner, 'globals') else bufs)
@@ -52,7 +56,8 @@ def lower_schedule_item(si:ScheduleItem) -> ExecItem:
       kernel_type = BufferXfer
     return ExecItem(kernel_type(ast.arg, out.device, si.inputs[0].device), list(si.bufs))
   if ast.op is LoadOps.CUSTOM: return ExecItem(CustomOp(ast.arg), list(si.bufs))
-  if ast.op in {LoadOps.EMPTY, LoadOps.CONSECUTIVE}: return ExecItem(EmptyOp(out), list(si.bufs))
+  if ast.op is LoadOps.EMPTY: return ExecItem(EmptyOp(out), list(si.bufs))
+  if ast.op is LoadOps.VIEW: return ExecItem(ViewOp(out), list(si.bufs))
   raise RuntimeError(f"don't know how to lower {ast}")
 
 def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, None]:

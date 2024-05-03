@@ -38,7 +38,7 @@ class LazyBuffer:
           hasattr(Device[device].allocator, "offset"):
         # some LazyBuffers can be processed with only a view, no AST required
         self.buffer: Buffer = srcs[0].base.buffer.view(st.size, dtype, srcs[0].st.views[0].offset * srcs[0].dtype.itemsize)
-        self.op = LoadOps.CONSECUTIVE
+        self.op = LoadOps.VIEW
       else:
         self.buffer = srcs[1].base.buffer if self.op is LoadOps.ASSIGN else Buffer(device, self.size, dtype)
       self.buffer.ref(1)
