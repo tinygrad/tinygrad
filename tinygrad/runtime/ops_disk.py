@@ -31,6 +31,7 @@ class DiskAllocator(Allocator):
         fo.readinto(dest)
     else:
       dest[:] = src._buf()
+  def offset(self, buf:DiskBuffer, size:int, offset:int): return DiskBuffer(buf.device, size, offset)
 
 class DiskRunner(Runner):
   def __init__(self, ast:LazyOp):

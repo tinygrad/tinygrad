@@ -33,7 +33,7 @@ class Buffer:
     self.allocator = Device[self.device].allocator
     if hasattr(self, "base"):
       self.base.ensure_allocated()
-      self._buf: Any = self.allocator.offset(self.base._buf, self.offset, self.size)
+      self._buf: Any = self.allocator.offset(self.base._buf, self.size, self.offset)
     else:
       self._buf = opaque if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
       if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.nbytes
