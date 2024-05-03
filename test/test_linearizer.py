@@ -94,6 +94,22 @@ class TestLinearizer(unittest.TestCase):
     assert len(mutable_bufs) == len(stores) == 2
     assert [u.arg[0] for u in mutable_bufs] == [0, 1]
 
+  def test_multioutput_parallel_r(self):
+    dtype, st, rst = dtypes.int, ShapeTracker.from_shape((8,2)), ShapeTracker.from_shape((1,2))
+    a = LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=2, dtype=dtype, st=st))
+    b = LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=3, dtype=dtype, st=st))
+    c = LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=4, dtype=dtype, st=st))
+    out0 = LazyOp(BufferOps.STORE, (LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.ADD, src=(a,b)),)),), MemBuffer(idx=0, dtype=dtype, st=rst))
+    out1 = LazyOp(BufferOps.STORE, (LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.ADD, src=(a,c)),)),), MemBuffer(idx=1, dtype=dtype, st=rst))
+
+    lin = Linearizer(out0, out1)
+    lin.linearize()
+
+    stores = [u for u in lin.uops if u.uop is UOps.STORE]
+    mutable_bufs = [u for u in lin.uops if u.uop is UOps.DEFINE_GLOBAL and u.arg[-1]]
+    assert len(mutable_bufs) == len(stores) == 2
+    assert [u.arg[0] for u in mutable_bufs] == [0, 1]
+
   def test_load_dedup(self):
     # for different leaves in the AST, the same loads may occur.
 
