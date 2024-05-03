@@ -2,12 +2,11 @@ from typing import List, Dict, Optional, cast, Generator, DefaultDict, Tuple, It
 from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.dtype import DType
-from tinygrad.helpers import colored, getenv, dedup, DEBUG, GlobalCounters, ansilen, prod
-from tinygrad.ops import ScheduleItem, BufferOps, LoadOps, UnaryOps, copy_ast
+from tinygrad.helpers import colored, getenv, dedup, DEBUG, GlobalCounters, ansilen
+from tinygrad.ops import ScheduleItem, BufferOps, LoadOps, copy_ast
 from tinygrad.device import Runner, Device, BufferCopy, BufferXfer
 from tinygrad.buffer import Buffer
 from tinygrad.shape.symbolic import Variable, sym_infer
-from tinygrad.shape.shapetracker import View
 
 @dataclass(frozen=True)
 class ExecItem:
@@ -33,8 +32,8 @@ class CustomOp(Runner):
     super().__init__(self.fxn.__name__, "CUSTOM", 0, 0)
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False): self.fxn(*rawbufs)
 
-class NoOp(Runner):
-  def __init__(self, nm:str, buf:Buffer): super().__init__(colored(f"{nm:<12s} {buf.size:8d} {buf.dtype}", "yellow"), buf.device)
+class EmptyOp(Runner):
+  def __init__(self, buf:Buffer): super().__init__(colored(f"empty {buf.size:10d} {buf.dtype}", "yellow"), buf.device)
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False): pass
 
 def lower_runner(runner:Runner, bufs) -> ExecItem:
@@ -53,8 +52,7 @@ def lower_schedule_item(si:ScheduleItem) -> ExecItem:
       kernel_type = BufferXfer
     return ExecItem(kernel_type(ast.arg, out.device, si.inputs[0].device), list(si.bufs))
   if ast.op is LoadOps.CUSTOM: return ExecItem(CustomOp(ast.arg), list(si.bufs))
-  if ast.op is LoadOps.EMPTY: return ExecItem(NoOp("empty", out), list(si.bufs))
-  if ast.op is LoadOps.CONSECUTIVE: return ExecItem(NoOp("consecutive", out), list(si.bufs))
+  if ast.op in {LoadOps.EMPTY, LoadOps.CONSECUTIVE}: return ExecItem(EmptyOp(out), list(si.bufs))
   raise RuntimeError(f"don't know how to lower {ast}")
 
 def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, None]:
@@ -89,25 +87,6 @@ def _internal_memory_planner(buffers:List[Iterable[Buffer]], debug_prefix="") ->
 def memory_planner(schedule:List[ScheduleItem]) -> List[ScheduleItem]:
   assigned = _internal_memory_planner([si.bufs for si in schedule])
   return [ScheduleItem(si.ast, tuple(assigned.get(x, x) for x in si.bufs)) for si in schedule]
-
-def _use_subbuffer(si:ScheduleItem, replace:Dict[Buffer, Buffer]) -> bool:
-  if len(si.ast) == 1 and len((ast := si.ast[0]).src) == 1 and len(si.bufs) == 2: # and si.bufs[0].lb_refcount == 0:
-    if ast.src[0].op is UnaryOps.CAST and ast.src[0].arg[1] is True:
-      # can skip a bitcast
-      top_src = ast.src[0].src[0]
-      new_dtype = ast.src[0].arg[0]
-    else:
-      top_src = ast.src[0]
-      new_dtype = top_src.arg.dtype
-    if top_src.op is not BufferOps.LOAD or not top_src.arg.st.consecutive: return False
-    view: View = top_src.arg.st.views[0]
-    replace[si.bufs[0]] = si.bufs[1].view(prod(view.shape), new_dtype, view.offset * top_src.arg.dtype.itemsize)
-    return True
-  return False
-
-def use_subbuffer(schedule:List[ScheduleItem]) -> List[ScheduleItem]:
-  replace: Dict[Buffer, Buffer] = {}
-  return [ScheduleItem(si.ast, tuple(replace.get(x,x) for x in si.bufs)) for si in schedule if not _use_subbuffer(si, replace)]
 
 def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[Variable, int]]=None):
   for ei in lower_schedule(schedule):
