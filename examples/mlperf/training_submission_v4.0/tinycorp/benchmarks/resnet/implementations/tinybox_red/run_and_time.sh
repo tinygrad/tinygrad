@@ -1,8 +1,5 @@
 #!/bin/bash
 
-source "$(dirname "$0")/helpers.sh"
-setup
-
 export PYTHONPATH="."
 export MODEL="resnet"
 export SUBMISSION_PLATFORM="tinybox_red"

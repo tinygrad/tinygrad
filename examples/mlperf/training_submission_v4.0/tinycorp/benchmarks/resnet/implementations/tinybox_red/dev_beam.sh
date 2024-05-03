@@ -1,8 +1,5 @@
 #!/bin/bash
 
-source "$(dirname "$0")/helpers.sh"
-setup
-
 export PYTHONPATH="."
 export MODEL="resnet"
 export DEFAULT_FLOAT="HALF" GPUS=6 BS=1536 EVAL_BS=48 LR=7
