@@ -91,7 +91,7 @@ class Allocator:
   def _free(self, opaque, options:BufferOptions): pass  # if opaque is a Python object, you don't need a free
   def copyin(self, dest, src:memoryview): raise NotImplementedError("need copyin")
   def copyout(self, dest:memoryview, src): raise NotImplementedError("need copyout")
-  def offset(self, buf, size:int, offset:int) -> Any: raise NotImplementedError("doesn't have offset support")
+  def offset(self, buf, size:int, offset:int) -> Any: raise NotImplementedError(f"{type(self)} doesn't have offset support")
 
 class LRUAllocator(Allocator):  # pylint: disable=abstract-method
   def __init__(self): self.cache: Dict[Tuple[int, Optional[BufferOptions]], Any] = defaultdict(list)
