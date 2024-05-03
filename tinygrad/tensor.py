@@ -427,7 +427,7 @@ class Tensor:
 
     if all(isinstance(s, (int, float)) for s in (start, stop, step)):
       result = (Tensor.full((math.ceil((stop-start)/step),), step, dtype=dtype, **kwargs)._cumsum() + (start - step)).cast(dtype)
-    else: 
+    else:
       result = Tensor(data=stop, dtype=dtype, **kwargs)
     return result
 
