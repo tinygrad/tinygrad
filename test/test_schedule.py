@@ -737,6 +737,10 @@ class TestSchedule(unittest.TestCase):
     # don't fuse if shapetrackers do not match
     check_schedule([(x + a).sum(), (x.permute(1, 0) + b).sum()], 2)
 
+    # don't fuse if sums do not match
+    check_schedule([(x + a).sum(axis=0), (x + b).sum(axis=1)], 2)
+    check_schedule([(x + a).sum(axis=0), (x + b).sum()], 2)
+
   @unittest.skip("not useful for bn backward")
   def test_parallel_r_e_fusion(self):
     x = Tensor.empty(16, 16)
