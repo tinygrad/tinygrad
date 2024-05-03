@@ -66,6 +66,7 @@ def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, Non
 capturing: List = []  # put classes with an add method in here
 
 def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]]], debug_prefix="") -> Dict[Buffer, Buffer]:
+  if getenv("NO_MEMORY_PLANNER"): return {}
   last_appearance = {}
   for i,u in enumerate(buffers):
     for buf in u: last_appearance[buf] = i
@@ -98,7 +99,6 @@ def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]
   return assigned
 
 def memory_planner(schedule:List[ScheduleItem]) -> List[ScheduleItem]:
-  if getenv("NO_MEMORY_PLANNER"): return schedule
   assigned = _internal_memory_planner([si.bufs for si in schedule])
   return [ScheduleItem(si.ast, tuple(assigned.get(x, x) for x in si.bufs)) for si in schedule]
 

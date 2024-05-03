@@ -120,6 +120,7 @@ class TinyJit(Generic[ReturnType]):
   def reset(self):
     self.jit_cache: List[ExecItem] = []
     self.input_replace: Dict[Tuple[int, int], int] = {}
+    self.extra_view_inputs: List[Tuple[int, int, str, int, DType]] = []
     self.buffer_replace: WeakKeyDictionary[Buffer, Buffer] = WeakKeyDictionary()
     self.cnt: int = 0
 
@@ -155,6 +156,13 @@ class TinyJit(Generic[ReturnType]):
       assert len(self.jit_cache), "didn't JIT anything!"
       if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
 
+      # track inputs that are views of buffers
+      for ji in self.jit_cache:
+        for b in ji.bufs:
+          if hasattr(b, "base") and b.base in input_rawbuffers and b not in input_rawbuffers:
+            input_rawbuffers.append(b)
+            self.extra_view_inputs.append((input_rawbuffers.index(b.base), b.offset, b.device, b.size, b.dtype))
+
       # memory planning (optional)
       assigned = _internal_memory_planner([cast(List[Buffer], x.bufs) for x in self.jit_cache], debug_prefix="JIT ")
       self.jit_cache = [ExecItem(ei.prg, [assigned.get(x,x).ensure_allocated() for x in ei.bufs if x is not None]) for ei in self.jit_cache]
@@ -167,6 +175,7 @@ class TinyJit(Generic[ReturnType]):
     elif self.cnt >= 2:
       # jit exec
       assert self.expected_names == expected_names and self.expected_lbs == expected_lbs, "args mismatch in JIT"
+      for idx, offset, *args in self.extra_view_inputs: input_rawbuffers.append(Buffer(*args, base=input_rawbuffers[idx], offset=offset))
       for (j,i),input_idx in self.input_replace.items(): self.jit_cache[j].bufs[i] = input_rawbuffers[input_idx]
       if DEBUG >= 1 and len(self.jit_cache) >= 10: print(f"jit execs {len(self.jit_cache)} kernels")
       for ei in self.jit_cache: ei.run(var_vals, jit=True)
