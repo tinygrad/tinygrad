@@ -349,7 +349,8 @@ class UOpGraph:
     # graph helper functions
     @functools.lru_cache(None)
     def get_recursive_parents(x:UOp, with_phi=False) -> Set[UOp]:
-      return set.union(set(x.vin), *[get_recursive_parents(p, with_phi) for p in x.vin if p.uop is not UOps.BARRIER], set(acc_scope[x]) if with_phi else set())
+      return set.union(set(x.vin), *[get_recursive_parents(p, with_phi) for p in x.vin if p.uop is not UOps.BARRIER], \
+                       set(acc_scope[x]) if with_phi else set())
 
     # fix loop scope, push uops upward out of loop if it does not depend on the loop
     self.fix_loop_scope(get_recursive_parents)
