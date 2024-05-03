@@ -2,11 +2,12 @@ from typing import List, Dict, Optional, cast, Generator, DefaultDict, Tuple, It
 from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.dtype import DType
-from tinygrad.helpers import colored, getenv, dedup, DEBUG, GlobalCounters, ansilen
-from tinygrad.ops import ScheduleItem, BufferOps, LoadOps, copy_ast
+from tinygrad.helpers import colored, getenv, dedup, DEBUG, GlobalCounters, ansilen, prod
+from tinygrad.ops import ScheduleItem, BufferOps, LoadOps, UnaryOps, copy_ast
 from tinygrad.device import Runner, Device, BufferCopy, BufferXfer
 from tinygrad.buffer import Buffer
 from tinygrad.shape.symbolic import Variable, sym_infer
+from tinygrad.shape.shapetracker import View
 
 @dataclass(frozen=True)
 class ExecItem:
@@ -88,7 +89,26 @@ def memory_planner(schedule:List[ScheduleItem]) -> List[ScheduleItem]:
   assigned = _internal_memory_planner([si.bufs for si in schedule])
   return [ScheduleItem(si.ast, tuple(assigned.get(x, x) for x in si.bufs)) for si in schedule]
 
+def _use_subbuffer(si:ScheduleItem, replace:Dict[Buffer, Buffer]) -> bool:
+  if len(si.ast) == 1 and len((ast := si.ast[0]).src) == 1 and len(si.bufs) == 2: # and si.bufs[0].lb_refcount == 0:
+    if ast.src[0].op is UnaryOps.CAST and ast.src[0].arg[1] is True:
+      # can skip a bitcast
+      top_src = ast.src[0].src[0]
+      new_dtype = ast.src[0].arg[0]
+    else:
+      top_src = ast.src[0]
+      new_dtype = top_src.arg.dtype
+    if top_src.op is not BufferOps.LOAD or not top_src.arg.st.consecutive: return False
+    view: View = top_src.arg.st.views[0]
+    replace[si.bufs[0]] = si.bufs[1].view(prod(view.shape), new_dtype, view.offset * top_src.arg.dtype.itemsize)
+    return True
+  return False
+
+def use_subbuffer(schedule:List[ScheduleItem]) -> List[ScheduleItem]:
+  replace: Dict[Buffer, Buffer] = {}
+  return [ScheduleItem(si.ast, [replace.get(x,x) for x in si.bufs]) for si in schedule if not _use_subbuffer(si, replace)]
+
 def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[Variable, int]]=None):
-  for ei in lower_schedule(schedule):
+  for ei in lower_schedule(use_subbuffer(schedule)):
     if len(capturing): capturing[0].add(ei)
     ei.run(var_vals)
