@@ -262,13 +262,14 @@ def train_resnet():
           next_proc = data_get(it)
         except StopIteration:
           next_proc = None
+        prev_cookie = None  # free previous cookie after gpu work has been enqueued
 
         loss, top_1 = loss.numpy().item(), top_1.numpy().item()
         num_samples = sum(yi != -1 for yi in y)
         eval_loss += loss * num_samples
         eval_top_1 += top_1
         eval_num_samples += num_samples
-        proc, next_proc = next_proc, None  # return old cookie
+        prev_cookie, proc, next_proc = proc, next_proc, None
         i += 1
         if i == BENCHMARK:
           if MLLOGGER and INITMLPERF:
