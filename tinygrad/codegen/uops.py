@@ -210,7 +210,7 @@ class UOpGraph:
         # add END of loops after the last thing that (recursively) depends on them
         insert_before = self.uops.index(sorted(list(self.get_recursive_children(u)), key=self.uops.index)[-1])+1
         self.add(UOps.ENDLOOP, None, (u,), cachable=False, insert_before=insert_before)
-      elif u.uop is UOps.IF:
+      elif u.uop is UOps.IF and not any([x.uop is UOps.ENDIF and x.vin[0] is u for x in self.uops]):
         # END any if statements at the end of the uops
         self.add(UOps.ENDIF, None, (u,), cachable=False)
 
@@ -224,7 +224,7 @@ class UOpGraph:
       else:
         parents = get_recursive_parents(u, with_phi=True)
         # don't push any local buffer because there might have STORE and BARRIER (not considered as parent) between DEFINE_LOCAL and here
-        if any(u.uop is UOps.DEFINE_LOCAL for u in parents): loop_stack[-1].append(u)
+        if any(UOps.DEFINE_LOCAL in [x.uop for x in u.vin] and u.uop is not UOps.LOAD for u in parents): loop_stack[-1].append(u)
         else:
           for i in reversed(range(len(loop_stack))):
             # check backwards and put the uop in the first encounter with some dependency
@@ -349,7 +349,7 @@ class UOpGraph:
     # graph helper functions
     @functools.lru_cache(None)
     def get_recursive_parents(x:UOp, with_phi=False) -> Set[UOp]:
-      return set.union(set(x.vin), *[get_recursive_parents(p, with_phi) for p in x.vin], set(acc_scope[x]) if with_phi else set())
+      return set.union(set(x.vin), *[get_recursive_parents(p, with_phi) for p in x.vin if p.uop is not UOps.BARRIER], set(acc_scope[x]) if with_phi else set())
 
     # fix loop scope, push uops upward out of loop if it does not depend on the loop
     self.fix_loop_scope(get_recursive_parents)
