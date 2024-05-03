@@ -195,11 +195,11 @@ def train_resnet():
 
       pt = time.perf_counter()
 
+      prev_cookie = None  # free previous cookie after gpu work has been enqueued
       try:
         next_proc = data_get(it)
       except StopIteration:
         next_proc = None
-      prev_cookie = None  # free previous cookie after gpu work has been enqueued
 
       dt = time.perf_counter()
 
@@ -258,11 +258,11 @@ def train_resnet():
 
         (loss, top_1), y, proc = eval_step(proc[0], proc[1]), proc[2], proc[3]  # drop inputs, keep cookie
 
+        prev_cookie = None  # free previous cookie after gpu work has been enqueued
         try:
           next_proc = data_get(it)
         except StopIteration:
           next_proc = None
-        prev_cookie = None  # free previous cookie after gpu work has been enqueued
 
         loss, top_1 = loss.numpy().item(), top_1.numpy().item()
         num_samples = sum(yi != -1 for yi in y)
