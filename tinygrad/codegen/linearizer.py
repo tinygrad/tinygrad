@@ -182,7 +182,7 @@ class Linearizer(Kernel):
     return tuple(new_loops.values())
 
   def render_reduceop(self, reduceop: LazyOp, loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]], \
-                      global_idxs, local_idxs, reduce_idxs, upcast_idxs, insert_before:Optional[UOp]=None):
+                      reduced_ops:Dict[LazyOp, List[UOps]], global_idxs, local_idxs, reduce_idxs, upcast_idxs, insert_before:Optional[UOp]=None):
     # define indicies
     full_upcast_idxs = [Variable(f"_uidx{i}", 0, s-1) for i, s in enumerate(self.full_shape[self.shape_len-self.upcasted:])]
     fake_reduce_idxs = [x*0 for x in reduce_idxs]
@@ -264,8 +264,8 @@ class Linearizer(Kernel):
         global_idxs+local_idxs+reduce_idxs+full_upcast_idxs,insert_before=insert_before) for i,b in enumerate(self.bufs) if b in self.earlybufs})
 
       # run early AST (with reduce)
-      self.ast_parse(reduceop, acc, self.acc_offsets(self.full_buf_index), loaded_buffers, \
-                     do_reduce=True, loop_ctx=loop_ctx, insert_before=insert_before)
+      self.ast_parse(reduceop, acc, self.acc_offsets(self.full_buf_index), loaded_buffers, reduced_ops, \
+                     do_reduce=True, loop_ctx=loop_ctx)
 
     # end the reduce loop
     self.load_cache.clear()
@@ -309,12 +309,12 @@ class Linearizer(Kernel):
 
       # there's no AST here (and there's no shape for the reduce LazyOp)
       self.ast_parse(LazyOp(reduceop.op, (LazyOp(BufferOps.LOAD, (), self.bufs[-1]),)), \
-                     acc, self.acc_offsets(-1), loaded_buffers, do_reduce=True, loop_ctx=loop_ctx, insert_before=insert_before)
+                     acc, self.acc_offsets(-1), loaded_buffers, reduced_ops, do_reduce=True, loop_ctx=loop_ctx)
 
       # end the late reduce loop
       self.load_cache.clear()
 
-      if len(self.reduce_accs) < len(self.reduceops)-1:
+      if not reduceop is self.reduceops[-1]:
         for j in self.upcast_in_mid_reduce_axes:
           self.upcasted -= 1
           self.group_for_reduces += 1
@@ -324,9 +324,6 @@ class Linearizer(Kernel):
         endif = self.uops.add(UOps.ENDIF, None, (barrier,), cachable=False)
         barrier = self.uops.add(UOps.BARRIER, None, (endif,), cachable=False)
         acc = self.global_load(-1, [NumNode(0)]*len(self.sts[-1].shape), barrier=barrier)
-
-      # all local indices which were used for group_for_reduce are not valid any more and should be replaced with fake NumNode(0), since they have
-      # been rewritten with fake end_local_idxs.
     return acc, loaded_buffers
 
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
@@ -407,14 +404,12 @@ class Linearizer(Kernel):
 
     # parse AST
     loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]] = {}
-    acc: List[UOp] = []
     self.load_cache: Dict[str, UOp] = {}
 
-    # reduce op
-    self.reduce_accs = {}
+    # reduce ops
+    reduced_ops = {}
     for reduceop in self.reduceops:
-      self.reduce_accs[reduceop],loaded_buffers = self.render_reduceop(reduceop,loaded_buffers,global_idxs,local_idxs,reduce_idxs,upcast_idxs)
-      acc = self.reduce_accs[reduceop]
+      reduced_ops[reduceop],loaded_buffers = self.render_reduceop(reduceop,loaded_buffers,reduced_ops,global_idxs,local_idxs,reduce_idxs,upcast_idxs)
 
     # load latebufs
     fake_reduce_idxs = [x*0 for x in reduce_idxs]
@@ -423,7 +418,7 @@ class Linearizer(Kernel):
 
     # run late AST (without the store)
     for op in self.ast:
-      val = self.ast_parse(op.src[0], acc, None, loaded_buffers)
+      val = self.ast_parse(op.src[0], reduced_ops[self.reduceops[-1]] if self.reduceops else [], None, loaded_buffers, reduced_ops)
       self.global_store(op.arg.idx, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val)
 
     # optimize the uops
@@ -441,28 +436,28 @@ class Linearizer(Kernel):
     return self
 
   def ast_parse(self, x:LazyOp, acc: List[UOp], offs:Optional[List[int]], loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]],\
-                do_reduce=False, loop_ctx=tuple(), cache=None, insert_before:Optional[UOp]=None) -> List[UOp]:
+                reduced_ops={}, do_reduce=False, loop_ctx=tuple(), cache=None) -> List[UOp]:
     if cache is None: cache = {}
     if x in cache: return cache[x]
     if x.op in BufferOps: return loaded_buffers[x.arg]
     if x.op is UnaryOps.CAST: return [self.uops.add(UOps.BITCAST if x.arg[1] else UOps.CAST, self.get_base_dtype(x.arg[0]), (u,), x.arg[0], \
-                  insert_before=insert_before) for u in self.ast_parse(x.src[0], acc, offs, loaded_buffers, insert_before=insert_before)]
+                  reduced_ops) for u in self.ast_parse(x.src[0], acc, offs, loaded_buffers, reduced_ops)]
     if x.op in ReduceOps and not do_reduce:
-      return [self.reduce_accs[x][i] for i in offs] if offs else self.reduce_accs[x]
+      return [reduced_ops[x][i] for i in offs] if offs else reduced_ops[x]
 
-    values = [self.ast_parse(v, acc, offs, loaded_buffers, loop_ctx=loop_ctx, cache=cache, insert_before=insert_before) for v in x.src]
+    values = [self.ast_parse(v, acc, offs, loaded_buffers, reduced_ops, loop_ctx=loop_ctx, cache=cache) for v in x.src]
     ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}
     if x.op in ops:
       ret: List[UOp] = []
       input_acc = acc[:]
       for val, off in zip(zip(*values), cast(List[int], offs)):
-        acc[off] = self.uops.add(UOps.ALU, acc[off].dtype, vin=val+(acc[off],), arg=ops[cast(ReduceOps, x.op)], insert_before=insert_before)
+        acc[off] = self.uops.add(UOps.ALU, acc[off].dtype, vin=val+(acc[off],), arg=ops[cast(ReduceOps, x.op)])
         ret.append(acc[off])
       for off in range(len(acc)):
         if input_acc[off] != acc[off]:
-          acc[off] = self.uops.add(UOps.PHI, input_acc[off].dtype, (input_acc[off], acc[off]) + tuple(loop_ctx), insert_before=insert_before)
+          acc[off] = self.uops.add(UOps.PHI, input_acc[off].dtype, (input_acc[off], acc[off]) + tuple(loop_ctx))
     else:
       ret = [self.uops.add(UOps.ALU, dtypes.bool if x.op in {BinaryOps.CMPLT, BinaryOps.CMPEQ} else val[-1].dtype, \
-        val, x.op, insert_before=insert_before) for val in zip(*values)]
+        val, x.op) for val in zip(*values)]
     cache[x] = ret
     return ret
