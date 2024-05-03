@@ -44,19 +44,29 @@ class HCQGraph(MultiGraphRunner):
     # Build queues.
     self.queues_list: List[Any] = []
     self.comp_queues: Dict[Compiled, self.comp_hcq_t] = collections.defaultdict(self.comp_hcq_t)
-    self.comp_signal = {dev: dev._get_signal() for dev in self.devices}
+    self.comp_signal = {dev: dev._get_signal(value=0) for dev in self.devices}
     self.comp_signal_val = {dev: 0 for dev in self.devices}
 
     self.copy_queues: Dict[Compiled, self.copy_hcq_t] = collections.defaultdict(self.copy_hcq_t)
-    self.copy_signal = {dev: dev._get_signal() for dev in self.devices}
+    self.copy_signal = {dev: dev._get_signal(value=0) for dev in self.devices}
     self.copy_signal_val = {dev: 0 for dev in self.devices}
 
+    self.rdy_signal = {dev: dev._get_signal(value=0) for dev in self.devices}
+    self.copy_rdy_signal = {dev: dev._get_signal(value=0) for dev in self.devices}
+    self.rdy_signal_val = 0
+
     # Signal dma to allow execution.
-    for dev in self.devices: self.comp_queues[dev].signal(self.copy_signal[dev], value=0)
+    # for dev in self.devices:
+    #   self.comp_queues[dev].signal(self.comp_signal[dev], 0)
+    #   for cdev in self.devices:
+    #     if dev != cdev: self.comp_queues[dev].wait(self.comp_signal[cdev], value=0)
+    #   self.comp_queues[dev].signal(self.copy_signal[dev], 0)
+      # self.copy_queues[dev].wait(self.copy_signal[dev], value=len(self.jit_cache) + 1).signal(self.copy_signal[dev], 0)
 
     for j,ji in enumerate(self.jit_cache):
       if isinstance(ji.prg, CompiledRunner):
         deps = self.access_resources(ji.bufs[(outs:=ji.prg.outcount):], ji.bufs[:outs], (self.comp_signal[ji.prg.device], sig_val:=j+1))
+        # deps = []
         deps.append((self.comp_signal[ji.prg.device], self.comp_signal_val[ji.prg.device]))
         if j in self.jc_idx_with_updatable_launch_dims:
           # Rebuilt this runner dynamicaly.
@@ -67,26 +77,35 @@ class HCQGraph(MultiGraphRunner):
           self.comp_queues[ji.prg.device].exec(ji.prg.clprg, self.kargs_addrs[j], *ji.prg.launch_dims(var_vals))
           self.comp_queues[ji.prg.device].signal(self.comp_signal[ji.prg.device], value=sig_val)
         self.comp_signal_val[ji.prg.device] = sig_val
-      elif isinstance(ji.prg, BufferXfer):        
-        # pass
+      elif isinstance(ji.prg, BufferXfer):
         dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
-        src_dev = Device[src.device]
+        src_dev, dest_dev = Device[src.device], Device[dest.device]
+        if dest_dev.dname.startswith("AMD"): src_dev._gpu_map(dest._buf) # TODO: remove this hack
         deps = self.access_resources([src], [dest], (self.copy_signal[src_dev], sig_val:=j+1))
+        # deps = []
         deps.append((self.copy_signal[src_dev], self.copy_signal_val[src_dev]))
         for sig,val in deps: self.copy_queues[src_dev].wait(sig, val)
         self.copy_queues[src_dev].copy(dest._buf.va_addr, src._buf.va_addr, dest.nbytes)
         self.copy_queues[src_dev].signal(self.copy_signal[src_dev], value=sig_val)
         self.copy_signal_val[src_dev] = sig_val
 
+    # for dev in self.devices:
+    #   self.comp_queues[dev].signal(self.comp_signal[dev], len(self.jit_cache) + 1)
+    #   if self.copy_signal_val[dev] > 0: self.copy_queues[dev].signal(self.copy_signal[dev], len(self.jit_cache) + 1)
+
     for dev in self.devices:
-      self.comp_queues[dev].wait(self.comp_signal[dev], value=self.comp_signal_val[dev])
-      if dev in self.copy_queues: self.comp_queues[dev].wait(self.copy_signal[dev], value=self.copy_signal_val[dev])
+      # if dev in self.copy_queues: self.comp_queues[dev].wait(self.copy_signal[dev], value=self.copy_signal_val[dev])
+      # self.comp_queues[dev].wait(self.comp_signal[dev], value=self.comp_signal_val[dev])
+      for cdev in self.devices:
+        if cdev in self.copy_queues: self.comp_queues[dev].wait(self.copy_signal[cdev], value=self.copy_signal_val[cdev])
+      # self.comp_queues[dev].signal(self.comp_signal[dev], 0xffffffff) # finish sign
       self.queues_list.append((self.comp_queues.pop(dev), dev))
-      if dev in self.copy_queues: self.queues_list.append((self.copy_queues.pop(dev), dev))
+      if self.copy_signal_val[dev] > 0: self.queues_list.append((self.copy_queues.pop(dev), dev))
 
   def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False) -> Optional[float]:
+    self.rdy_signal_val += 1
     # Kick graph
-    for dev in self.devices: dev._set_signal_value(self.comp_signal[dev], 0)
+    # for dev in self.devices: dev._set_signal_value(self.comp_signal[dev], 0)
 
     # Update rawbuffers
     for (j,i),input_idx in self.input_replace.items():
@@ -97,7 +116,22 @@ class HCQGraph(MultiGraphRunner):
       for i,v in enumerate(cast(CompiledRunner, self.jit_cache[j].prg).vars):
         self.ji_kargs_structs[j].__setattr__(f'v{i}', var_vals[v])
 
-    for dev in self.devices: self.comp_hcq_t().wait(dev.compute_progress_signal, dev.compute_put_value).submit(dev)
+    qs = []
+    for dev in self.devices:
+      q = self.comp_hcq_t()
+      for cdev in self.devices: q.wait(cdev.compute_progress_signal, cdev.compute_put_value)
+      q.signal(self.comp_signal[dev], 0)
+      if self.copy_signal_val[dev] > 0: q.signal(self.copy_signal[dev], 0)
+      q.signal(self.rdy_signal[dev], self.rdy_signal_val)
+      for cdev in self.devices: 
+        if cdev != dev: q.wait(self.rdy_signal[cdev], self.rdy_signal_val)
+
+      if self.copy_signal_val[dev] > 0:
+        q.signal(self.copy_rdy_signal[dev], self.rdy_signal_val)
+        self.copy_hcq_t().wait(self.copy_rdy_signal[dev], self.rdy_signal_val).submit(dev)
+      qs.append((dev,q))
+    for dev,q in qs: q.submit(dev)
+
     for pack in self.queues_list:
       if not isinstance(pack[0], self.comp_hcq_t) and not isinstance(pack[0], self.copy_hcq_t):
         j, ji, deps = pack
@@ -108,8 +142,14 @@ class HCQGraph(MultiGraphRunner):
         dev = ji.prg.device
       else: q, dev = pack
       q.submit(dev)
+      # print("aft graph", dev.device_id, dev.compute_put_value, dev.dma_put_value)
+    # for dev in self.devices: print(dev.device_id, "will wait", self.copy_signal_val[dev])
+    # print("graph end", len(self.jit_cache))
 
-    for dev in self.devices: dev.synchronize()
+    # for dev in self.devices:
+    #   print("sync", dev.device_id)
+    #   dev.synchronize()
+    # self.devices[0].synchronize_system()
 
     et = None
     return et

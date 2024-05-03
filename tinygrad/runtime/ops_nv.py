@@ -214,7 +214,6 @@ class NVProgram:
 
     # constant buffer 0 is filled for each program, no need to copy it from elf (it's just zeroes)
     if 0 in constant_buffers_data: constant_buffers_data.pop(0)
-    self.program_args_offset = QMD_SIZE + 0x160
 
     off = round_up(self.program.nbytes, 128)
     for i,data in constant_buffers_data.items():
@@ -493,10 +492,13 @@ class NVDevice(Compiled):
 
     from tinygrad.runtime.graph.hcq import HCQGraph
     super().__init__(device, NVAllocator(self), NVCompiler(self.arch), functools.partial(NVProgram, self),
-                     functools.partial(HCQGraph, NVDevice, HWComputeQueue))
+                     functools.partial(HCQGraph, NVDevice, HWComputeQueue, HWCopyQueue))
 
     self._cmdq_setup_compute_gpfifo()
     self._cmdq_setup_dma_gpfifo()
+
+    self.msignst = self._get_signal()
+    self.msignen = self._get_signal()
 
     NVDevice.devices.append(self)
 
@@ -520,7 +522,9 @@ class NVDevice(Compiled):
   def _get_signal(self, num=None, value=0) -> memoryview:
     if num is None:
       self.signal_number += 1
-      if self.signals_page and self.signal_number * 16 >= self.signals_page.length: self.signal_number = 32
+      if self.signals_page and self.signal_number * 16 >= self.signals_page.length: 
+        assert False
+        self.signal_number = 32
       num = self.signal_number
     sig = to_mv(self.signals_page.base + num * 16, 16).cast("Q")
     sig[0] = value
