@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional, cast, Generator, DefaultDict, Tuple, Iterable
+from typing import List, Dict, Optional, cast, Generator, DefaultDict, Tuple, Union
 from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.dtype import DType
@@ -65,7 +65,7 @@ def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, Non
 
 capturing: List = []  # put classes with an add method in here
 
-def _internal_memory_planner(buffers:List[Iterable[Buffer]], debug_prefix="") -> Dict[Buffer, Buffer]:
+def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]]], debug_prefix="") -> Dict[Buffer, Buffer]:
   last_appearance = {}
   for i,u in enumerate(buffers):
     for buf in u: last_appearance[buf] = i
@@ -74,7 +74,7 @@ def _internal_memory_planner(buffers:List[Iterable[Buffer]], debug_prefix="") ->
   assigned: Dict[Buffer, Buffer] = {}
   local_cache: DefaultDict[Tuple[str, int, DType], List[Buffer]] = defaultdict(list)
   for i,u in enumerate(buffers):
-    for buf in u:
+    for buf in reversed(u):
       # all unallocated unparented buffers are fair game to replace
       if buf.is_allocated() or buf.lb_refcount > 0: continue
       # handle view buffers
