@@ -73,20 +73,24 @@ def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]
   # LRU algorithm
   assigned: Dict[Buffer, Buffer] = {}
   local_cache: DefaultDict[Tuple[str, int, DType], List[Buffer]] = defaultdict(list)
+
+  def handle_buffer(buf):
+    key = (buf.device, buf.size, buf.dtype)
+    if buf not in assigned:
+      if len(ll:=local_cache[key]): assigned[buf] = ll.pop()
+      else: assigned[buf] = Buffer(*key)
+    if i == last_appearance[buf]:
+      if assigned[buf] not in local_cache[key]: local_cache[key].append(assigned[buf])
+
   for i,u in enumerate(buffers):
-    for buf in reversed(u):
+    for buf in u:
       # all unallocated unparented buffers are fair game to replace
       if buf.is_allocated() or buf.lb_refcount > 0: continue
       # handle view buffers
       if hasattr(buf, 'base'):
         assigned[buf] = Buffer(buf.device, buf.size, buf.dtype, base=assigned.get(buf.base, buf.base), offset=buf.offset)
-        continue
-      key = (buf.device, buf.size, buf.dtype)
-      if buf not in assigned:
-        if len(ll:=local_cache[key]): assigned[buf] = ll.pop()
-        else: assigned[buf] = Buffer(*key)
-      if i == last_appearance[buf]:
-        local_cache[key].append(assigned[buf])
+      else:
+        handle_buffer(buf)
 
   if DEBUG >= 1 and len(ak:=dedup(assigned.keys())) != len(av:=dedup(assigned.values())):
     print(debug_prefix+f"memory reduced from {sum([x.nbytes for x in ak])/1e6:.2f} MB -> {sum([x.nbytes for x in av])/1e6:.2f} MB,",
