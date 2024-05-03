@@ -78,9 +78,9 @@ class Kernel:
     self.lazyops = flatten([op.lazyops for op in self.ast])
 
     # there's only allowed to be one reduceop
-    reduceops = [x for x in self.lazyops if x.op in ReduceOps]
-    assert len(dedup(reduceops)) <= 1, "max one reduce op in an ast"
-    self.reduceop = reduceops[0] if reduceops else None
+    self.reduceops = [x for x in self.lazyops if x.op in ReduceOps]
+    # assert len(dedup(reduceops)) <= 1, "max one reduce op in an ast"
+    # self.reduceop = reduceops[0] if reduceops else None
 
     self.outbufs, self.vars = [x.arg for x in self.ast], flatten([x.vars() for x in self.ast])
     loadops = [BufferOps.LOAD, BufferOps.CONST]
@@ -122,8 +122,8 @@ class Kernel:
     ret.opts, ret.ast, ret.lazyops = self.opts, self.ast, self.lazyops
 
     # things downstream of the AST
-    ret.reduceop, ret.outbufs, ret.vars, ret.bufs, ret.earlybufs, ret.full_buf_index = \
-      self.reduceop, self.outbufs, self.vars, [x for x in self.bufs if not isinstance(x, LocalBuffer)], self.earlybufs, self.full_buf_index
+    ret.reduceops, ret.outbufs, ret.vars, ret.bufs, ret.earlybufs, ret.full_buf_index = \
+      self.reduceops, self.outbufs, self.vars, [x for x in self.bufs if not isinstance(x, LocalBuffer)], self.earlybufs, self.full_buf_index
     ret.sts = self.sts[:len(ret.bufs)] # NOTE: must redo the local buffers with TC in beam
 
     # parameters for optimizations
@@ -163,6 +163,9 @@ class Kernel:
   @property
   def first_reduce(self) -> int:
     return [x!=y for x,y in zip(self.sts[0].shape[:self.shape_len-self.upcasted]+(0,), self.full_shape[:self.shape_len-self.upcasted]+(1,))].index(True)  # noqa: E501
+
+  @property
+  def reduceop(self) -> Optional[LazyOp]: return self.reduceops[0] if len(self.reduceops) > 0 else None
 
   @property
   def output_shape(self) -> Tuple[sint, ...]: return self.sts[0].shape

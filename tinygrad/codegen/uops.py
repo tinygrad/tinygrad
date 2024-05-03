@@ -159,7 +159,7 @@ class UOpGraph:
     if insert_before is None: insert_before = len(self.uops)
     elif isinstance(insert_before, UOp): insert_before = self.uops.index(insert_before)
     # check if the cached expr is valid with the given insert place.
-    if cachable and (expr:=self.saved_exprs.get(key, None)) is not None and self.uops.index(expr) <= insert_before: return expr
+    if cachable and (expr:=self.saved_exprs.get(key, None)) is not None and expr in self.uops and self.uops.index(expr) <= insert_before: return expr
     self.uops.insert(insert_before, ret)
     if cachable: self.saved_exprs[key] = ret
     return ret
@@ -210,7 +210,7 @@ class UOpGraph:
         # add END of loops after the last thing that (recursively) depends on them
         insert_before = self.uops.index(sorted(list(self.get_recursive_children(u)), key=self.uops.index)[-1])+1
         self.add(UOps.ENDLOOP, None, (u,), cachable=False, insert_before=insert_before)
-      elif u.uop is UOps.IF:
+      elif u.uop is UOps.IF and not any([x.uop is UOps.ENDIF and x.vin[0] is u for x in self.uops]):
         # END any if statements at the end of the uops
         self.add(UOps.ENDIF, None, (u,), cachable=False)
 
