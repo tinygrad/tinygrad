@@ -349,7 +349,7 @@ class Linearizer(Kernel):
       if isinstance(buf, MemBuffer):
         self.buf_uops[i] = self.uops.add(UOps.DEFINE_GLOBAL,
                                          buf.dtype if isinstance(buf.dtype, ImageDType) else PtrDType(buf.dtype), (),
-                                         (buf.idx, f"data{buf.idx}", any(buf.idx == x.idx for x in self.outbufs)))
+                                         (buf.idx, any(buf.idx == x.idx for x in self.outbufs)))
     # add var vals
     for i,var in enumerate(self.vars):
       assert var.expr is not None

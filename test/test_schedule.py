@@ -5,7 +5,7 @@
 import unittest
 from typing import List, Optional, Union
 from tinygrad.tensor import Tensor
-from tinygrad.ops import LoadOps, ReduceOps
+from tinygrad.ops import BinaryOps, LoadOps, ReduceOps
 from tinygrad.helpers import DEBUG, GRAPH, flatten
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.graph import print_tree, realized_lazybuffer
@@ -679,6 +679,73 @@ class TestSchedule(unittest.TestCase):
     # c = a + 2
     # sched = check_schedule([b, c], 4)
     # doesn't store either in half because it doesn't chase
+
+  def test_reduce_simple_chase(self):
+    a = Tensor.empty(4, 4, 4)
+    r = a.sum(0) + 6
+    b = r.sum(0) * 4
+    c = r.sum(1) * 2
+    schedule = check_schedule([b, c], 3)
+    assert schedule[0].ast[0].src[0].op is BinaryOps.ADD
+
+  def test_push_permute_chase(self):
+    a = Tensor.empty(4, 4, 4)
+    b = Tensor.empty(4, 4)
+    r = a.sum(2) + b
+    d = r.T * 4
+    e = r * d
+    schedule = check_schedule([d, e], 3)
+    assert schedule[0].ast[0].src[0].op is BinaryOps.ADD
+
+  def test_push_shrink_chase(self):
+    a = Tensor.empty(16, 16)
+    b = Tensor.empty(4)
+    c = Tensor.empty(16, )
+    r = a.sum(1) + c
+    d = r[:4] * b
+    schedule = check_schedule(d, 2)
+    assert schedule[0].ast[0].src[0].op is BinaryOps.ADD
+
+  def test_midreduce_nochase(self):
+    a = Tensor.empty(16, 16)
+    b = (a.sum(0) + a.max(1)) + 2
+    schedule = check_schedule(b, 2)
+    assert schedule[0].ast[0].src[0].op is ReduceOps.MAX
+
+  # pattern in test_transformer
+  def test_partial_fuse1(self):
+    a = Tensor.empty(16, 16)
+    b = Tensor.empty(16, 16)
+    c = a.sum() + 2
+    d = (a.sum() - b.sum()) * 4
+    check_schedule([c, d], 3)
+
+  # pattern in conv
+  def test_partial_fuse2(self):
+    a = Tensor.empty(16, 16)
+    b = Tensor.empty(16, 16)
+    c = a.sum() + 2
+    d = b.sum() - c
+    check_schedule([c, d], 2)
+
+  # pattern in adam
+  def test_partial_fuse3(self):
+    a = Tensor.empty(16, 16)
+    b = Tensor.empty(16, 16)
+    c = a.sum() + 2
+    d = a.sum() * 2
+    e = c * d
+    f = b.sum() - e
+    check_schedule([c, d, e, f], 3)
+
+  def test_partial_fuse4(self):
+    a = Tensor.empty(16, 16)
+    b = Tensor.empty(16, 16)
+    c = a.sum() + 2
+    d = a.sum() * 2
+    e = c * d
+    f = (b - d).sum() - e
+    check_schedule([c, d, e, f], 3)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
