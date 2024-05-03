@@ -157,7 +157,7 @@ class TestLinearizer(unittest.TestCase):
     assert stores[0].vin[-1].dtype == accs[0].dtype == dtypes.float.vec(4)
 
   def test_upcast_with_locals(self):
-    if not (opts:=Device[Device.DEFAULT].compiler.compiler_opts).has_local or not opts.has_shared or not opts.supports_float4:
+    if not (opts:=Device[Device.DEFAULT].compiler.compiler_opts).has_local or not opts.has_shared:
       self.skipTest("device does not support upcasted reduce with locals")
 
     x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
@@ -167,14 +167,19 @@ class TestLinearizer(unittest.TestCase):
     k.linearize()
 
     accs = [u for u in k.uops if u.uop is UOps.DEFINE_ACC]
-    stores = [u for u in k.uops if u.uop is UOps.STORE]
+    assert len(accs) == 8
 
-    # the first store is to lds and can be upcasted
-    assert accs[0].dtype == stores[0].vin[-1].dtype == dtypes.float.vec(4)
-    assert stores[0].vin[0].uop is UOps.DEFINE_LOCAL
-    # the second store is to gds with no upcasts
-    assert accs[1].dtype == stores[1].vin[-1].dtype == dtypes.float
-    assert stores[1].vin[0].uop is UOps.DEFINE_GLOBAL
+    stores = [u for u in k.uops if u.uop is UOps.STORE]
+    assert len(stores) == 8
+
+    # the first four stores is to lds with no upcasts
+    for i in range(4):
+      assert accs[i].dtype == stores[i].vin[-1].dtype == dtypes.float
+      assert stores[i].vin[0].uop is UOps.DEFINE_LOCAL
+    # the second four store is to gds with no upcasts
+    for i in range(4,8):
+      assert accs[i].dtype == stores[i].vin[-1].dtype == dtypes.float
+      assert stores[i].vin[0].uop is UOps.DEFINE_GLOBAL
 
   def test_zero_fold(self):
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
@@ -1009,26 +1014,6 @@ class TestLinearizerUOptimize(unittest.TestCase):
     # check the children's vins
     assert barrier.vin == tuple(local_stores)
     assert len([u for u in k.uops if u.uop is UOps.IF and u.vin[-1] == barrier]) == 1
-
-  def test_grouped_store_local_only(self):
-    if not Device[Device.DEFAULT].compiler.compiler_opts.has_local or not Device[Device.DEFAULT].compiler.compiler_opts.has_shared or \
-       not Device[Device.DEFAULT].compiler.compiler_opts.supports_float4:
-      self.skipTest("Only Compiled uses linearizer with locals, shared, and float4")
-
-    x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
-    r = (x@y).relu()
-    k = Linearizer(*create_schedule([r.lazydata])[-1].ast)
-    k.hand_coded_optimizations()
-    k.linearize()
-
-    stores = [u for u in k.uops if u.uop is UOps.STORE]
-
-    # the float4 value stores directly in lds and we skip upcast
-    assert stores[0].vin[-1].dtype == dtypes.float.vec(4)
-    assert stores[0].vin[-1].uop is not UOps.CAST
-
-    # the global store doesn't change
-    assert stores[1].vin[-1].dtype == dtypes.float
 
   def test_skip_unmatching_upcasts(self):
     if not Device[Device.DEFAULT].compiler.compiler_opts.has_local or not Device[Device.DEFAULT].compiler.compiler_opts.supports_float4:

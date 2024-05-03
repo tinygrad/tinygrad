@@ -6,7 +6,6 @@ from collections import defaultdict
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, ConstType
 from tinygrad.helpers import colored, DEBUG, prod, getenv, to_function_name
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ConstBuffer, MemBuffer, BufferOps
-from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, create_lt_node
 from tinygrad.codegen.kernel import LocalBuffer, Kernel
 from tinygrad.features.image import to_image_idx
@@ -345,12 +344,16 @@ class Linearizer(Kernel):
     for lb in self.local_alias.values():
       self.buf_uops[self.bufs.index(lb)] = self.uops.add(UOps.DEFINE_LOCAL,
                                                          PtrDType(dtypes.float32), (), (lb.name, self.sts[self.bufs.index(lb)].size))
-    # add a local buffer for multistage reduce. # TODO: use local alias
+    # add a local buffer for multistage reduce.
     if self.group_for_reduces:
-      # TODO: the strides of this can be controlled
-      self.sts.append(ShapeTracker.from_shape(tuple([1] * self.global_dims + list(self.full_shape[self.global_dims:self.global_dims+self.local_dims+self.group_for_reduces]) + [1] * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))  # noqa: E501
-      temp_dtype = self.get_base_dtype(self.reduceop.dtype)
-      self.bufs.append(LocalBuffer("temp", self.sts[-1].size, temp_dtype))
+      group_shape = [1] * self.global_dims + list(self.full_shape[self.global_dims:self.global_dims+self.local_dims+self.group_for_reduces]) + [1] * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)]  # noqa: E501
+      out_strides, group_strides, bst = [0 if x is None else x for x in self.sts[0].real_strides()], [1]*len(group_shape), 1
+      # group shared memory same strides as out, group_for_reduce axes on highest strides
+      group_axes = sorted([(i,sz,out_strides[i]) for i,sz in enumerate(group_shape) if sz>1 and out_strides[i]>0], key=lambda x: x[2])
+      for (i,sz,_) in group_axes + [(i,sz,out_strides[i]) for i,sz in enumerate(group_shape) if sz>1 and out_strides[i]==0]:
+        group_strides[i] = bst
+        bst *= sz
+      self.local_buffer("temp", tuple(group_shape), tuple(group_strides), (temp_dtype:=self.get_base_dtype(self.reduceop.dtype)))
       self.buf_uops.append(self.uops.add(UOps.DEFINE_LOCAL, PtrDType(temp_dtype), (), ("temp", self.sts[-1].size)))
 
     # kernel name (before late upcast)

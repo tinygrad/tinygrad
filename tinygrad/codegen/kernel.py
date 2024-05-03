@@ -322,22 +322,24 @@ class Kernel:
           self.reshape_and_permute(None, order)
           if DEBUG >= 3: print("permuted global dim", order, "due to allocation exceeds global limit")
 
+  def local_buffer(self, name:str, shape:Tuple[sint, ...], strides:Tuple[sint, ...], dtype:DType) -> LocalBuffer:
+    self.sts.append(ShapeTracker((View.create(shape, strides),)))
+    self.bufs.append((lb:=LocalBuffer(name=name, size=self.sts[-1].size, dtype=dtype)))
+    return lb
+
   def alias_buffer(self, i, pattern):
     assert len(pattern) == len(self.sts[i].shape), f"must include a pattern for each shape {pattern} {self.sts[i].shape}"
 
-    bst = 1
     real_strides = self.sts[i].real_strides()
-    shp, stride = [(s if p != 0 else 1) for s,p in zip(self.sts[i].shape, pattern)], [0]*len(pattern)
+    shp, stride, bst = [(s if p != 0 else 1) for s,p in zip(self.sts[i].shape, pattern)], [0]*len(pattern), 1
     for priority in range(1, max(pattern)+1):  # priority. 0 is non local and ignored
       for j,p in enumerate(pattern):
         if priority == p and real_strides[j] != 0:
           stride[j] = bst
           bst *= shp[j]
 
-    self.sts.append(ShapeTracker((View.create(tuple(shp), tuple(stride)),)))
-    self.bufs.append(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size))
     if DEBUG >= 4: print("aliasing buffer", self.sts[i])
-    self.local_alias[i] = cast(LocalBuffer, self.bufs[-1])
+    self.local_alias[i] = self.local_buffer(f"ldata{i}", tuple(shp), tuple(stride), self.bufs[i].dtype)
 
   # ******************** high level optimizers ********************
 
@@ -467,7 +469,6 @@ class Kernel:
     elif opt.op in {OptOps.GROUP, OptOps.GROUPTOP}:   # green
       check(self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem")
       check(axis >= self.first_reduce + self.group_for_reduces and axis < self.shape_len-self.upcasted, "must be reduce axis to group")
-      check(not self.tensor_core, "can't group with tensor cores")
       self.shift_to(axis, amt, top=(opt.op is OptOps.GROUPTOP), insert_before=self.first_reduce + self.group_for_reduces)
       self.group_for_reduces += 1
     elif opt.op is OptOps.UNROLL:                     # purple
