@@ -37,6 +37,7 @@ def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]
     current_device = None
 
   for ji in jit_cache:
+    if ji.prg.__class__ in {EmptyOp, ViewOp}: continue
     ji_graph_dev: Optional[Compiled] = None # device on which the ji will be graphed. Not graphed if None.
     if isinstance(ji.prg, CompiledRunner): ji_graph_dev = ji.prg.device
     elif isinstance(ji.prg, BufferXfer) and ji.bufs[0] and ji.bufs[0].device.split(":", 1)[0] in {"HSA", "CUDA"}:
@@ -110,11 +111,13 @@ class TinyJit(Generic[ReturnType]):
   def add_buffer(self, b:Buffer) -> Buffer:
     if found:=self.buffer_replace.get(b, None): return found
     if b.is_allocated() or b.lb_refcount > 0: return b
-    self.buffer_replace[b] = ret = Buffer(b.device, b.size, b.dtype, options=b.options)
+    if hasattr(b, "base"):
+      self.buffer_replace[b] = ret = Buffer(b.device, b.size, b.dtype, base=self.buffer_replace.get(b.base, b.base), offset=b.offset)
+    else:
+      self.buffer_replace[b] = ret = Buffer(b.device, b.size, b.dtype, options=b.options)
     return ret
 
   def add(self, ei:ExecItem):
-    if ei.prg.__class__ in {EmptyOp, ViewOp}: return
     self.jit_cache.append(ExecItem(ei.prg, [self.add_buffer(buf) for buf in ei.bufs if buf is not None]))
 
   def reset(self):
@@ -159,7 +162,7 @@ class TinyJit(Generic[ReturnType]):
       # track inputs that are views of buffers
       for ji in self.jit_cache:
         for b in ji.bufs:
-          if hasattr(b, "base") and b.base in input_rawbuffers and b not in input_rawbuffers:
+          if hasattr(b, "base") and b.base in input_rawbuffers:
             input_rawbuffers.append(b)
             self.extra_view_inputs.append((input_rawbuffers.index(b.base), b.offset, b.device, b.size, b.dtype))
 
@@ -175,7 +178,8 @@ class TinyJit(Generic[ReturnType]):
     elif self.cnt >= 2:
       # jit exec
       assert self.expected_names == expected_names and self.expected_lbs == expected_lbs, "args mismatch in JIT"
-      for idx, offset, *args in self.extra_view_inputs: input_rawbuffers.append(Buffer(*args, base=input_rawbuffers[idx], offset=offset))
+      for idx, offset, *args in self.extra_view_inputs:
+        input_rawbuffers.append(Buffer(*args, base=input_rawbuffers[idx], offset=offset).ensure_allocated())
       for (j,i),input_idx in self.input_replace.items(): self.jit_cache[j].bufs[i] = input_rawbuffers[input_idx]
       if DEBUG >= 1 and len(self.jit_cache) >= 10: print(f"jit execs {len(self.jit_cache)} kernels")
       for ei in self.jit_cache: ei.run(var_vals, jit=True)

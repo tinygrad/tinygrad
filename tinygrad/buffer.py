@@ -25,6 +25,8 @@ class Buffer:
         self.allocate()
         self.copyin(memoryview(initial_value))
     else:
+      assert not hasattr(base, 'base'), "base can't have a base"
+      assert device == base.device, "base must have the same device"
       self.base = base
     if preallocate: self.allocate()
   @property

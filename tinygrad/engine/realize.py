@@ -13,7 +13,8 @@ class ExecItem:
   prg: Runner
   bufs: List[Optional[Buffer]]
   def run(self, var_vals:Optional[Dict[Variable, int]]=None, wait=False, jit=False, do_update_stats=True) -> Optional[float]:
-    et = self.prg([cast(Buffer, x).ensure_allocated() for x in self.bufs], var_vals if var_vals is not None else {}, wait=wait or DEBUG >= 2)
+    bufs = [cast(Buffer, x) for x in self.bufs] if jit else [cast(Buffer, x).ensure_allocated() for x in self.bufs]
+    et = self.prg(bufs, var_vals if var_vals is not None else {}, wait=wait or DEBUG >= 2)
     if do_update_stats:
       GlobalCounters.kernel_count += 1
       GlobalCounters.global_ops += (op_estimate:=sym_infer(self.prg.op_estimate, var_vals))
@@ -38,7 +39,8 @@ class EmptyOp(Runner):
 
 class ViewOp(Runner):
   def __init__(self, buf:Buffer): super().__init__(colored(f"view {buf.nbytes:8d} @ {buf.offset:<10d}", "yellow"), buf.device)
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False): pass
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False):
+    assert hasattr(rawbufs[0], "base") and rawbufs[0].base == rawbufs[1], f"must be base {rawbufs}"
 
 def lower_runner(runner:Runner, bufs) -> ExecItem:
   # TODO: globals isn't on the stupid diskrunner, remove the need for it
