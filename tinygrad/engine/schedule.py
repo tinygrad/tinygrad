@@ -167,16 +167,11 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
             forced_realize = True
             break
           if len(realized_children) > 1:
-            for rc in realized_children:
-              rc_parents = deque(x.base for x in rc.srcs)
-              while rc_parents:
-                if (p:=rc_parents.pop()).realized or p.op is LoadOps.CONST: continue
-                if p is r: continue
-                # max one reduceop per kernel
-                if p.op in ReduceOps:
-                  forced_realize = True
-                  break
-                for x in p.srcs: rc_parents.append(x.base)
+            rc_parents = deque(realized_children)
+            while rc_parents and not forced_realize:
+              # max one reduceop per kernel
+              if (p:=rc_parents.pop()).op in ReduceOps: forced_realize = True
+              else: rc_parents.extend(x.base for x in p.srcs if x.base.realized is None and x.base is not r)
           continue
         for tr_next in children[tr].keys():
           if not tr_next.realized:
@@ -262,10 +257,10 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
 
   if SAVE_SCHEDULE:
     def _save():
-      print(f"saving {len(SCHEDULES)} schedule graphs to", fp:="schedule.pkl")
+      print(f"saving {len(SCHEDULES)} schedule graphs to", fp:=getenv("SAVE_SCHEDULE_PATH", "schedule.pkl"))
       pickle.dump(SCHEDULES, open(fp, "wb"))
     if len(SCHEDULES) == 0: atexit.register(_save)
-    SCHEDULES.append((graph, prescheduled))
+    SCHEDULES.extend((ps.ast for ps in prescheduled.values()) if getenv("CAPTURE_AST") else [(graph, prescheduled)])
   # confirm everything was scheduled correctly
   if not all(degree == 0 for degree in in_degree.values()) or len(prescheduled) != len(schedule):
     raise RuntimeError(f"cycle detected in graph, prescheduled {len(prescheduled)} but only scheduled {len(schedule)}")
