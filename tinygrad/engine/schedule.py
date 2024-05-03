@@ -166,15 +166,14 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
             can_chase = tr not in reduce_for_op
             forced_realize = True
             break
-          if tr.device != r.device: continue
           if realized_children:
             rc_children = deque((*realized_children, tr))
             while rc_children and not forced_realize:
-              if (c:=rc_children.pop()).realized is not None: continue
+              if (c:=rc_children.pop()).realized is not None or c.device != r.device: continue
               if c.op in ReduceOps or not c.st.contiguous or c.st.size != r.st.size or c in reduce_for_op:
                 forced_realize = True
                 break
-              if c in realizes: realized_children[c] = st
+              if c in realizes and c not in (*realized_children, tr): continue
               rc_children.extend(children[c])
           realized_children[tr] = st
           continue
