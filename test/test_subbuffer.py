@@ -1,5 +1,5 @@
 import unittest
-from tinygrad import Device, dtypes
+from tinygrad import Device, dtypes, Tensor
 from tinygrad.buffer import Buffer
 
 class TestSubBuffer(unittest.TestCase):
@@ -23,6 +23,20 @@ class TestSubBuffer(unittest.TestCase):
     vvbuf = vbuf.view(2, dtypes.uint8, offset=1).ensure_allocated()
     tst = vvbuf.as_buffer().tolist()
     assert tst == [4, 5]
+
+  def test_subbuffer_len(self):
+    vbuf = self.buf.view(5, dtypes.uint8, 2).ensure_allocated()
+    mv = vbuf.as_buffer()
+    assert len(mv) == 5
+    mv = vbuf.as_buffer(allow_zero_copy=True)
+    assert len(mv) == 5
+
+  def test_subbuffer_used(self):
+    t = Tensor.arange(0, 10, dtype=dtypes.uint8).realize()
+    # TODO: why does it needs contiguous
+    vt = t[2:4].contiguous().realize()
+    out = (vt + 100).tolist()
+    assert out == [102, 103]
 
 if __name__ == '__main__':
   unittest.main()

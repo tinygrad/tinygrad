@@ -16,15 +16,16 @@ class Buffer:
                initial_value:Optional[bytes]=None, lb_refcount=0, base:Optional[Buffer]=None, offset:int=0):
     assert isinstance(dtype, DType)
     if isinstance(dtype, ImageDType): options = BufferOptions(image=dtype) # TODO: image hack shouldn't be here. where should it be?
-    self.device, self.size, self.dtype, self.options = device, size, dtype, options
+    self.device, self.size, self.dtype, self.options, self.offset = device, size, dtype, options, offset
     if base is None:
+      assert offset == 0, "base buffers can't have offset"
       self._lb_refcount = lb_refcount
       if opaque is not None: self.allocate(opaque)
       if initial_value is not None:
         self.allocate()
         self.copyin(memoryview(initial_value))
     else:
-      self.base, self.offset = base, offset
+      self.base = base
   @property
   def lb_refcount(self): return self.base._lb_refcount if hasattr(self, 'base') else self._lb_refcount
   def ref(self, cnt):
@@ -60,6 +61,7 @@ class Buffer:
       self.allocator.free(self._buf, self.nbytes, self.options)
   def __repr__(self):
     return f"<buf real:{hasattr(self, '_buf')} device:{self.device} size:{self.size} dtype:{self.dtype}" + \
+           (f" offset:{self.offset}" if hasattr(self, "base") else "") + \
            (">" if self.options is None else f"{self.options=}>")
   def as_buffer(self, allow_zero_copy=False, force_zero_copy=False) -> memoryview:
     # zero copy with as_buffer (disabled by default due to use after free)

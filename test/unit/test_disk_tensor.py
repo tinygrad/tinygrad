@@ -278,6 +278,12 @@ class TestDiskTensor(unittest.TestCase):
 
     np.testing.assert_array_equal(t.numpy(), np.array([3] * 10))
 
+  def test_bitcast(self):
+    with open(temp('bf16'), "wb") as f: f.write(bytes(range(10,20)))
+    t = Tensor.empty(5, dtype=dtypes.int16, device=f"disk:{temp('bf16')}")
+    ret = t.to("CLANG").bitcast(dtypes.uint16) + 1
+    assert ret.tolist() == [2827, 3341, 3855, 4369, 4883]
+
   @unittest.skipIf(Device.DEFAULT == "RHIP", "no real HIP device exists in CI")
   def test_bf16_disk_write_read(self):
     t = Tensor([10000, -1, -1000, -10000, 20], dtype=dtypes.float32)
@@ -288,8 +294,9 @@ class TestDiskTensor(unittest.TestCase):
     adat = b''.join([dat[i+2:i+4] for i in range(0, len(dat), 4)])
     with open(temp('bf16'), "wb") as f: f.write(adat)
 
-    t = Tensor.empty(5, dtype=dtypes.bfloat16, device=f"disk:{temp('bf16')}").llvm_bf16_cast(dtypes.float)
-    assert t.numpy().tolist() == [9984., -1, -1000, -9984, 20]
+    t = Tensor.empty(5, dtype=dtypes.bfloat16, device=f"disk:{temp('bf16')}")
+    ct = t.llvm_bf16_cast(dtypes.float)
+    assert ct.numpy().tolist() == [9984., -1, -1000, -9984, 20]
 
 if __name__ == "__main__":
   unittest.main()

@@ -77,6 +77,10 @@ def _internal_memory_planner(buffers:List[Iterable[Buffer]], debug_prefix="") ->
     for buf in u:
       # all unallocated unparented buffers are fair game to replace
       if buf.is_allocated() or buf.lb_refcount > 0: continue
+      # handle view buffers
+      if hasattr(buf, 'base'):
+        assigned[buf] = Buffer(buf.device, buf.size, buf.dtype, base=assigned.get(buf.base, buf.base), offset=buf.offset)
+        continue
       key = (buf.device, buf.size, buf.dtype)
       if buf not in assigned:
         if len(ll:=local_cache[key]): assigned[buf] = ll.pop()
@@ -90,6 +94,7 @@ def _internal_memory_planner(buffers:List[Iterable[Buffer]], debug_prefix="") ->
   return assigned
 
 def memory_planner(schedule:List[ScheduleItem]) -> List[ScheduleItem]:
+  if getenv("NO_MEMORY_PLANNER"): return schedule
   assigned = _internal_memory_planner([si.bufs for si in schedule])
   return [ScheduleItem(si.ast, tuple(assigned.get(x, x) for x in si.bufs)) for si in schedule]
 
