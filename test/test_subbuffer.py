@@ -1,5 +1,6 @@
 import unittest
 from tinygrad import Device, dtypes, Tensor
+from tinygrad.helpers import CI
 from tinygrad.buffer import Buffer
 from tinygrad.lazy import view_supported_devices
 
@@ -39,6 +40,13 @@ class TestSubBuffer(unittest.TestCase):
     vt = t[2:4].contiguous().realize()
     out = (vt + 100).tolist()
     assert out == [102, 103]
+
+  @unittest.skipIf(Device.DEFAULT != "CUDA" or CI, "only CUDA")
+  def test_subbuffer_transfer(self):
+    t = Tensor.arange(0, 10, dtype=dtypes.uint8).realize()
+    vt = t[2:5].contiguous().realize()
+    out = vt.to("CUDA:1").realize().tolist()
+    assert out == [2, 3, 4]
 
 if __name__ == '__main__':
   unittest.main()

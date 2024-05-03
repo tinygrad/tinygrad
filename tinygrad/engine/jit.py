@@ -8,7 +8,7 @@ from tinygrad.device import Buffer, CompiledRunner, BufferXfer, Compiled, Device
 from tinygrad.dtype import DType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, sint
-from tinygrad.engine.realize import ExecItem, capturing, _internal_memory_planner
+from tinygrad.engine.realize import ExecItem, capturing, _internal_memory_planner, EmptyOp, ViewOp
 from tinygrad.nn.state import get_parameters
 from weakref import WeakKeyDictionary
 
@@ -114,6 +114,7 @@ class TinyJit(Generic[ReturnType]):
     return ret
 
   def add(self, ei:ExecItem):
+    if ei.prg.__class__ in {EmptyOp, ViewOp}: return
     self.jit_cache.append(ExecItem(ei.prg, [self.add_buffer(buf) for buf in ei.bufs if buf is not None]))
 
   def reset(self):
