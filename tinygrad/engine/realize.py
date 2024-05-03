@@ -106,7 +106,7 @@ def _use_subbuffer(si:ScheduleItem, replace:Dict[Buffer, Buffer]) -> bool:
 
 def use_subbuffer(schedule:List[ScheduleItem]) -> List[ScheduleItem]:
   replace: Dict[Buffer, Buffer] = {}
-  return [ScheduleItem(si.ast, [replace.get(x,x) for x in si.bufs]) for si in schedule if not _use_subbuffer(si, replace)]
+  return [ScheduleItem(si.ast, tuple(replace.get(x,x) for x in si.bufs)) for si in schedule if not _use_subbuffer(si, replace)]
 
 def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[Variable, int]]=None):
   for ei in lower_schedule(use_subbuffer(schedule)):

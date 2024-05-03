@@ -73,5 +73,5 @@ class Buffer:
     self.allocator.copyout(mv, self._buf)
     return mv
   def view(self, size:int, dtype:DType, offset:int) -> Buffer:
-    assert not hasattr(self, "base"), "can't take view of a view"
-    return Buffer(self.device, size, dtype, base=self, offset=offset)
+    if hasattr(self, "base"): return Buffer(self.device, size, dtype, base=self.base, offset=self.offset+offset)
+    else: return Buffer(self.device, size, dtype, base=self, offset=offset)
