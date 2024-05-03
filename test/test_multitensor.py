@@ -132,6 +132,20 @@ class TestMultiTensor(unittest.TestCase):
     fn = f(n)
     np.testing.assert_allclose(fX.numpy(), fn, rtol=1e-6, atol=1e-6)
 
+  def _test_allreduce(self):
+    t = Tensor.rand(256, 256)
+    aa = (t[0:64] + t[64:128] + t[128:192] + t[192:256]).repeat([4,1]).numpy()
+    ts = t.shard(tuple([d0, d1, d2, d3]), 0).realize()
+    b = Tensor(MultiLazyBuffer(all_reduce(ReduceOps.SUM, ts.lazydata.lbs), 0))
+    b.realize()
+    np.testing.assert_almost_equal(aa, b.numpy(), decimal=5)
+
+  def test_allreduce_naive(self):
+    with Context(RING=0): self._test_allreduce()
+
+  def test_allreduce_ring(self):
+    with Context(RING=2): self._test_allreduce()
+
   @unittest.skip("slow")
   def test_fuzz_allreduce(self):
     random.seed(41)

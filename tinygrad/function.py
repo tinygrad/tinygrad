@@ -146,15 +146,14 @@ class Where(Function):
 # ************* reduce ops *************
 
 class Sum(Function):
-  def forward(self, x:LazyBuffer, axis:Tuple[int, ...], acc_dtype:Optional[DType]=None, downcast_half:bool=True) -> LazyBuffer:
-    self.input_shape, self.input_dtype = x.shape, x.dtype
-    return x.r(ReduceOps.SUM, axis, acc_dtype, downcast_half)
+  def forward(self, x:LazyBuffer, axis:Tuple[int, ...], acc_dtype:Optional[DType]=None) -> LazyBuffer:
+    self.input_shape = x.shape
+    return x.r(ReduceOps.SUM, axis, acc_dtype)
 
-  # if downcast_half is False, the forward output can have different dtype, and backward needs to cast back to input dtype
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.cast(self.input_dtype).expand(self.input_shape)
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.expand(self.input_shape)
 
 class Max(Function):
-  def forward(self, x:LazyBuffer, axis:Tuple[int, ...], acc_dtype:Optional[DType]=None, downcast_half:bool=True) -> LazyBuffer:
+  def forward(self, x:LazyBuffer, axis:Tuple[int, ...], acc_dtype:Optional[DType]=None) -> LazyBuffer:
     self.x, self.ret, self.axis = x, x.r(ReduceOps.MAX, axis), axis
     return self.ret
 
