@@ -87,6 +87,7 @@ class Linearizer(Kernel):
       if g_idx != (g_idx//amt*amt): dim, amt = None, 1
     if dim is None:
       g_idx, g_valid = self.sts[i].expr_idxs(idxs)
+    if acc is not None: g_valid = NumNode(1)  # store masks applied in global_store
 
     if amt > 1: localtype = localtype.vec(amt)
     e_idxs, e_valids = expand_node(g_idx, expand_vars), expand_node(g_valid, expand_vars)
