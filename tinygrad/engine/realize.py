@@ -33,8 +33,8 @@ class CustomOp(Runner):
     super().__init__(self.fxn.__name__, "CUSTOM", 0, 0)
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False): self.fxn(*rawbufs)
 
-class EmptyOp(Runner):
-  def __init__(self, buf:Buffer): super().__init__(colored(f"empty {buf.size:10d} {buf.dtype}", "yellow"), buf.device)
+class NoOp(Runner):
+  def __init__(self, nm:str, buf:Buffer): super().__init__(colored(f"{nm:<12s} {buf.size:8d} {buf.dtype}", "yellow"), buf.device)
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False): pass
 
 def lower_runner(runner:Runner, bufs) -> ExecItem:
@@ -53,7 +53,8 @@ def lower_schedule_item(si:ScheduleItem) -> ExecItem:
       kernel_type = BufferXfer
     return ExecItem(kernel_type(ast.arg, out.device, si.inputs[0].device), list(si.bufs))
   if ast.op is LoadOps.CUSTOM: return ExecItem(CustomOp(ast.arg), list(si.bufs))
-  if ast.op is LoadOps.EMPTY: return ExecItem(EmptyOp(out), list(si.bufs))
+  if ast.op is LoadOps.EMPTY: return ExecItem(NoOp("empty", out), list(si.bufs))
+  if ast.op is LoadOps.CONSECUTIVE: return ExecItem(NoOp("consecutive", out), list(si.bufs))
   raise RuntimeError(f"don't know how to lower {ast}")
 
 def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, None]:
@@ -109,6 +110,6 @@ def use_subbuffer(schedule:List[ScheduleItem]) -> List[ScheduleItem]:
   return [ScheduleItem(si.ast, tuple(replace.get(x,x) for x in si.bufs)) for si in schedule if not _use_subbuffer(si, replace)]
 
 def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[Variable, int]]=None):
-  for ei in lower_schedule(use_subbuffer(schedule)):
+  for ei in lower_schedule(schedule):
     if len(capturing): capturing[0].add(ei)
     ei.run(var_vals)

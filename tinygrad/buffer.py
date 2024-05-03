@@ -16,15 +16,20 @@ class Buffer:
                initial_value:Optional[bytes]=None, lb_refcount=0, base:Optional[Buffer]=None, offset:int=0):
     assert isinstance(dtype, DType)
     if isinstance(dtype, ImageDType): options = BufferOptions(image=dtype) # TODO: image hack shouldn't be here. where should it be?
-    self.device, self.size, self.dtype = device, size, dtype
+    self.device, self.size, self.dtype, self.options = device, size, dtype, options
     if base is None:
-      self.options, self.lb_refcount = options, lb_refcount
+      self._lb_refcount = lb_refcount
       if opaque is not None: self.allocate(opaque)
       if initial_value is not None:
         self.allocate()
         self.copyin(memoryview(initial_value))
     else:
       self.base, self.offset = base, offset
+  @property
+  def lb_refcount(self): return self.base._lb_refcount if hasattr(self, 'base') else self._lb_refcount
+  def ref(self, cnt):
+    if hasattr(self, 'base'): self.base._lb_refcount += cnt
+    else: self._lb_refcount += cnt
   def is_allocated(self) -> bool: return hasattr(self, '_buf')
   def ensure_allocated(self) -> Buffer: return self.allocate() if not hasattr(self, '_buf') else self
   def allocate(self, opaque=None) -> Buffer:
@@ -73,5 +78,6 @@ class Buffer:
     self.allocator.copyout(mv, self._buf)
     return mv
   def view(self, size:int, dtype:DType, offset:int) -> Buffer:
+    assert offset < self.nbytes, "offset must be less than nbytes"
     if hasattr(self, "base"): return Buffer(self.device, size, dtype, base=self.base, offset=self.offset+offset)
-    else: return Buffer(self.device, size, dtype, base=self, offset=offset)
+    return Buffer(self.device, size, dtype, base=self, offset=offset)
