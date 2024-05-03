@@ -199,6 +199,7 @@ def train_resnet():
         next_proc = data_get(it)
       except StopIteration:
         next_proc = None
+      prev_cookie = None  # free previous cookie after gpu work has been enqueued
 
       dt = time.perf_counter()
 
@@ -220,7 +221,7 @@ def train_resnet():
                    "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": e + (i + 1) / steps_in_train_epoch})
 
       st = cl
-      proc, next_proc = next_proc, None  # return old cookie
+      prev_cookie, proc, next_proc = proc, next_proc, None  # return old cookie
       i += 1
 
       if i == BENCHMARK:
