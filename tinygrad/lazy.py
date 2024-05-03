@@ -34,8 +34,11 @@ class LazyBuffer:
       assert self.op is not LoadOps.ASSIGN or srcs[1].base.realized is not None, "assign target must be realized"
 
       # some LazyBuffers don't need to be realized
-      if self.op is LoadOps.CONTIGUOUS and len(srcs) == 1 and srcs[0].st.consecutive:
-        self.buffer: Buffer = srcs[0].base.buffer.view(prod(srcs[0].shape), srcs[0].dtype, srcs[0].st.views[0].offset * srcs[0].dtype.itemsize)
+      if self.op is LoadOps.CONTIGUOUS and srcs[0].st.consecutive:
+        self.buffer: Buffer = srcs[0].base.buffer.view(st.size, dtype, srcs[0].st.views[0].offset * srcs[0].dtype.itemsize)
+        self.op = LoadOps.CONSECUTIVE
+      elif self.op is UnaryOps.CAST and self.arg[1] is True and srcs[0].st.consecutive:
+        self.buffer: Buffer = srcs[0].base.buffer.view(st.size, self.arg[0], srcs[0].st.views[0].offset * srcs[0].dtype.itemsize)
         self.op = LoadOps.CONSECUTIVE
       else:
         self.buffer: Buffer = srcs[1].base.buffer if self.op is LoadOps.ASSIGN else Buffer(device, self.size, dtype)
