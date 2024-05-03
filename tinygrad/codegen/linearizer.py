@@ -182,7 +182,7 @@ class Linearizer(Kernel):
     return tuple(new_loops.values())
 
   def render_reduceop(self, reduceop: LazyOp, loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]], \
-                      reduced_ops:Dict[LazyOp, List[UOps]], global_idxs, local_idxs, reduce_idxs, upcast_idxs, insert_before:Optional[UOp]=None):
+                      reduced_ops:Dict[LazyOp, List[UOp]], global_idxs, local_idxs, reduce_idxs, upcast_idxs, insert_before:Optional[UOp]=None):
     # define indicies
     full_upcast_idxs = [Variable(f"_uidx{i}", 0, s-1) for i, s in enumerate(self.full_shape[self.shape_len-self.upcasted:])]
     fake_reduce_idxs = [x*0 for x in reduce_idxs]
@@ -314,7 +314,7 @@ class Linearizer(Kernel):
       # end the late reduce loop
       self.load_cache.clear()
 
-      if not reduceop is self.reduceops[-1]:
+      if reduceop is not self.reduceops[-1]:
         for j in self.upcast_in_mid_reduce_axes:
           self.upcasted -= 1
           self.group_for_reduces += 1
@@ -407,7 +407,7 @@ class Linearizer(Kernel):
     self.load_cache: Dict[str, UOp] = {}
 
     # reduce ops
-    reduced_ops = {}
+    reduced_ops: Dict[LazyOp, List[UOp]] = {}
     for reduceop in self.reduceops:
       reduced_ops[reduceop],loaded_buffers = self.render_reduceop(reduceop,loaded_buffers,reduced_ops,global_idxs,local_idxs,reduce_idxs,upcast_idxs)
 
@@ -436,7 +436,7 @@ class Linearizer(Kernel):
     return self
 
   def ast_parse(self, x:LazyOp, acc: List[UOp], offs:Optional[List[int]], loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]],\
-                reduced_ops={}, do_reduce=False, loop_ctx=tuple(), cache=None) -> List[UOp]:
+                reduced_ops: Dict[LazyOp, List[UOp]]={}, do_reduce=False, loop_ctx=tuple(), cache=None) -> List[UOp]:
     if cache is None: cache = {}
     if x in cache: return cache[x]
     if x.op in BufferOps: return loaded_buffers[x.arg]
