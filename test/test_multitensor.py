@@ -149,6 +149,21 @@ class TestMultiTensor(unittest.TestCase):
       a,b = _test_allreduce(Tensor.rand(256, 256))
       np.testing.assert_almost_equal(a.numpy(), b.numpy(), decimal=5)
 
+  def test_copy_jit(self):
+    @TinyJit
+    def copy_tensor(x): return (x.to("CUDA:1") + 1)
+    for _ in range(5):
+      t = Tensor.rand(256).realize()
+      x = copy_tensor(t)
+      np.testing.assert_equal((t+1).numpy(), x.numpy())
+
+  def test_allreduce_naive_jit(self):
+    with Context(RING=0):
+      jit_allreduce = TinyJit(_test_allreduce)
+      for _ in range(5):
+        a,b = jit_allreduce(Tensor.rand(256, 256))
+        np.testing.assert_almost_equal(a.numpy(), b.numpy(), decimal=5)
+
   def test_allreduce_ring_jit(self):
     with Context(RING=2):
       jit_allreduce = TinyJit(_test_allreduce)
