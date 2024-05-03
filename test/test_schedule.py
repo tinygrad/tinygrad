@@ -500,7 +500,7 @@ class TestSchedule(unittest.TestCase):
     # b.sum() is not a descendant of the fused nodes
     out0 = a.sum() + b.sum() + 2
     out1 = a.sum() + b.sum() + 4
-    check_schedule([out0, out1], 2)
+    check_schedule([out0, out1], 4)
 
   def test_reduce_multiple_paths_midreduce(self):
     a = Tensor.empty(4, 4)
@@ -574,7 +574,7 @@ class TestSchedule(unittest.TestCase):
   def test_scaled_dot_product_attention_causal_fusion(self):
     x, y, z, m = (Tensor.empty(32, 8, 16, 16) for _ in range(4))
     out = Tensor.scaled_dot_product_attention(x, y, z, attn_mask=m, is_causal=True)
-    check_schedule(out, 9)
+    check_schedule(out, 7)
 
   def test_adam_step_fusion(self):
     x = Tensor.empty(4, 64, 768)
