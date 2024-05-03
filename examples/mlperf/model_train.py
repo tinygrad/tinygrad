@@ -195,6 +195,7 @@ def train_resnet():
 
       pt = time.perf_counter()
 
+      prev_cookie = None  # free previous cookie after gpu work has been enqueued
       try:
         next_proc = data_get(it)
       except StopIteration:
@@ -220,7 +221,7 @@ def train_resnet():
                    "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": e + (i + 1) / steps_in_train_epoch})
 
       st = cl
-      proc, next_proc = next_proc, None  # return old cookie
+      prev_cookie, proc, next_proc = proc, next_proc, None  # return old cookie
       i += 1
 
       if i == BENCHMARK:
@@ -257,6 +258,7 @@ def train_resnet():
 
         (loss, top_1), y, proc = eval_step(proc[0], proc[1]), proc[2], proc[3]  # drop inputs, keep cookie
 
+        prev_cookie = None  # free previous cookie after gpu work has been enqueued
         try:
           next_proc = data_get(it)
         except StopIteration:
@@ -267,7 +269,7 @@ def train_resnet():
         eval_loss += loss * num_samples
         eval_top_1 += top_1
         eval_num_samples += num_samples
-        proc, next_proc = next_proc, None  # return old cookie
+        prev_cookie, proc, next_proc = proc, next_proc, None
         i += 1
         if i == BENCHMARK:
           if MLLOGGER and INITMLPERF:
