@@ -741,6 +741,9 @@ class TestSchedule(unittest.TestCase):
     check_schedule([(x + a).sum(axis=0), (x + b).sum(axis=1)], 2)
     check_schedule([(x + a).sum(axis=0), (x + b).sum()], 2)
 
+    # maybe don't fuse if is 2-axis expand (gemm) and the early asts do not match?
+    # (because there might be too many accumulators)
+
   @unittest.skip("not useful for bn backward")
   def test_parallel_r_e_fusion(self):
     x = Tensor.empty(16, 16)
