@@ -9,7 +9,7 @@ import torch
 import torch.nn.functional as F
 from tqdm import tqdm
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import fetch, getenv
+from tinygrad.helpers import fetch
 
 BASEDIR = Path(__file__).parent / "kits19" / "data"
 PREPROCESSED_DIR =  Path(__file__).parent / "kits19" / "preprocessed"
