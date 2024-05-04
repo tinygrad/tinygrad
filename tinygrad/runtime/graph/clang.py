@@ -9,7 +9,7 @@ from tinygrad.runtime.ops_clang import ClangProgram
 from tinygrad.renderer.cstyle import ClangLanguage
 render_dtype = ClangLanguage().render_dtype
 
-class ClangGraphRunner(GraphRunner):
+class ClangGraph(GraphRunner):
   def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
     super().__init__(jit_cache, input_rawbuffers, var_vals)
     if not all(isinstance(ji.prg, CompiledRunner) for ji in jit_cache): raise GraphException

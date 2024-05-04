@@ -25,5 +25,5 @@ class ClangProgram:
 
 class ClangDevice(Compiled):
   def __init__(self, device:str):
-    from tinygrad.runtime.graph.clang import ClangGraphRunner
-    super().__init__(device, MallocAllocator, ClangCompiler("compile_clang"), ClangProgram, ClangGraphRunner)
+    from tinygrad.runtime.graph.clang import ClangGraph
+    super().__init__(device, MallocAllocator, ClangCompiler("compile_clang"), ClangProgram, ClangGraph)
