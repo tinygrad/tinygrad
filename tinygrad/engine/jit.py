@@ -162,7 +162,7 @@ class TinyJit(Generic[ReturnType]):
       # track inputs that are views of buffers
       for ji in self.jit_cache:
         for b in ji.bufs:
-          if b._base is not None and b._base in input_rawbuffers:
+          if b is not None and b._base is not None and b._base in input_rawbuffers:
             input_rawbuffers.append(b)
             self.extra_view_inputs.append((input_rawbuffers.index(b.base), b.offset, b.device, b.size, b.dtype))
 
@@ -178,8 +178,8 @@ class TinyJit(Generic[ReturnType]):
     elif self.cnt >= 2:
       # jit exec
       assert self.expected_names == expected_names and self.expected_lbs == expected_lbs, "args mismatch in JIT"
-      for idx, offset, *args in self.extra_view_inputs:
-        input_rawbuffers.append(Buffer(*args, base=input_rawbuffers[idx], offset=offset).ensure_allocated())
+      for idx, offset, device, size, dtype in self.extra_view_inputs:
+        input_rawbuffers.append(Buffer(device, size, dtype, base=input_rawbuffers[idx], offset=offset).ensure_allocated())
       for (j,i),input_idx in self.input_replace.items(): self.jit_cache[j].bufs[i] = input_rawbuffers[input_idx]
       if DEBUG >= 1 and len(self.jit_cache) >= 10: print(f"jit execs {len(self.jit_cache)} kernels")
       for ei in self.jit_cache: ei.run(var_vals, jit=True)

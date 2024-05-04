@@ -1,8 +1,8 @@
 import ctypes
 from typing import Any, Optional, Tuple, Dict, List, cast
 import tinygrad.runtime.autogen.cuda as cuda
-from tinygrad.helpers import init_c_var, GraphException, getenv
-from tinygrad.device import CompiledRunner, Buffer, BufferXfer, Device, BufferOptions
+from tinygrad.helpers import init_c_var, GraphException
+from tinygrad.device import CompiledRunner, Buffer, BufferXfer, Device
 from tinygrad.runtime.ops_cuda import CUDADevice, check, encode_args, cu_time_execution
 from tinygrad.shape.symbolic import Variable
 from tinygrad.engine.realize import ExecItem
@@ -25,8 +25,8 @@ class CUDAGraph(MultiGraphRunner):
         global_size, local_size = ji.prg.launch_dims(var_vals)
 
         new_node = cuda.CUgraphNode()
-        deps = self._access_resources([x.base for x in ji.bufs[ji.prg.outcount:]],
-                                      [x.base for x in ji.bufs[:ji.prg.outcount]], new_dependency=new_node)
+        deps = self._access_resources([x.base for x in ji.bufs[ji.prg.outcount:] if x is not None],
+                                      [x.base for x in ji.bufs[:ji.prg.outcount] if x is not None], new_dependency=new_node)
         c_deps = (cuda.CUgraphNode*len(deps))(*deps) if deps else None
 
         c_args, vargs = encode_args([cast(Buffer, x)._buf for x in ji.bufs], [var_vals[x] for x in ji.prg.vars])
@@ -37,7 +37,7 @@ class CUDAGraph(MultiGraphRunner):
           self.updatable_nodes[j] = (new_node, kern_params, c_args, False)
       elif isinstance(ji.prg, BufferXfer):
         dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
-        src_dev, dest_dev = cast(CUDADevice, Device[src.device]), cast(CUDADevice, Device[dest.device])
+        src_dev = cast(CUDADevice, Device[src.device])
         node_from = cuda.CUgraphNode()
         deps = self._access_resources(read=[src.base], write=[dest.base], new_dependency=node_from)
         c_deps = (cuda.CUgraphNode*len(deps))(*deps) if deps else None

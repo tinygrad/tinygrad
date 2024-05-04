@@ -151,7 +151,7 @@ class TestMultiTensor(unittest.TestCase):
 
   def test_copy_jit(self):
     @TinyJit
-    def copy_tensor(x:Tensor): return (x.to("CUDA:1") + 1)
+    def copy_tensor(x:Tensor): return (x.to(f"{x.device.split(':')[0]}:1") + 1)
     for _ in range(5):
       t = Tensor.rand(256).realize()
       x = copy_tensor(t)
