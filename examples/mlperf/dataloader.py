@@ -1,5 +1,5 @@
 import os, random, pickle, functools, itertools
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 from pathlib import Path
 import numpy as np
 from PIL import Image
@@ -77,22 +77,27 @@ def loader_process(q_in, q_out, X:Tensor, seed):
       q_out.put(idx)
     q_out.put(None)
 
-def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None, pad_first_batch=False):
+def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None, pad_batch:Optional[str]=None):
   from extra.datasets.imagenet import get_train_files, get_val_files
   files = get_val_files() if val else get_train_files()
   from extra.datasets.imagenet import get_imagenet_categories
   cir = get_imagenet_categories()
 
-  if pad_first_batch:
-    FIRST_BATCH_PAD = round_up(len(files), batch_size) - len(files)
+  if pad_batch is not None:
+    assert pad_batch in {"first", "last"}, f"{pad_batch=} is not supported"
+    PAD_AMOUNT = round_up(len(files), batch_size) - len(files)
   else:
-    FIRST_BATCH_PAD = 0
-  file_count = FIRST_BATCH_PAD + len(files)
+    PAD_AMOUNT = 0
+  file_count = PAD_AMOUNT + len(files)
   BATCH_COUNT = min(32, file_count // batch_size)
 
   def _gen():
-    for _ in range(FIRST_BATCH_PAD): yield -1
+    if pad_batch == "first":
+      for _ in range(PAD_AMOUNT): yield -1
     yield from shuffled_indices(len(files), seed=seed) if shuffle else iter(range(len(files)))
+    if pad_batch == "last":
+      for _ in range(PAD_AMOUNT): yield -1
+
   gen = iter(_gen())
 
   def enqueue_batch(num):
@@ -146,7 +151,7 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None, pad_fir
 
     for bn in range(BATCH_COUNT): enqueue_batch(bn)
 
-    # NOTE: this is batch aligned, last ones are ignored unless pad_first_batch is True
+    # NOTE: this is batch aligned, last ones are ignored unless pad_batch is set
     for _ in range(0, file_count//batch_size): yield receive_batch()
   finally:
     shutdown = True

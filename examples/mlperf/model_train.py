@@ -185,7 +185,7 @@ def train_resnet():
       MLLOGGER.start(key=mllog_constants.EPOCH_START, value=e+1, metadata=dict(epoch_num=e+1))
     Tensor.training = True
     BEAM.value = TRAIN_BEAM
-    batch_loader = batch_load_resnet(batch_size=BS, val=False, shuffle=True, seed=seed*epochs + e, pad_first_batch=True)
+    batch_loader = batch_load_resnet(batch_size=BS, val=False, shuffle=True, seed=seed*epochs + e, pad_batch="last")
     it = iter(tqdm(batch_loader, total=steps_in_train_epoch, desc=f"epoch {e}", disable=BENCHMARK))
     i, proc = 0, data_get(it)
     st = time.perf_counter()
@@ -250,7 +250,7 @@ def train_resnet():
       Tensor.training = False
       BEAM.value = EVAL_BEAM
 
-      it = iter(tqdm(batch_load_resnet(batch_size=EVAL_BS, val=True, shuffle=False, pad_first_batch=True), total=steps_in_val_epoch))
+      it = iter(tqdm(batch_load_resnet(batch_size=EVAL_BS, val=True, shuffle=False, pad_batch="last"), total=steps_in_val_epoch))
       i, proc = 0, data_get(it)
       while proc is not None:
         GlobalCounters.reset()

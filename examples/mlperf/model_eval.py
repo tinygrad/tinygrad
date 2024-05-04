@@ -35,7 +35,7 @@ def eval_resnet():
 
   # evaluation on the mlperf classes of the validation set from imagenet
   from examples.mlperf.dataloader import batch_load_resnet
-  iterator = batch_load_resnet(getenv("BS", 128*6), val=getenv("VAL", 1), shuffle=False, pad_first_batch=True)
+  iterator = batch_load_resnet(getenv("BS", 128*6), val=getenv("VAL", 1), shuffle=False, pad_batch="last")
   def data_get():
     x,y,cookie = next(iterator)
     return x.shard(GPUS, axis=0).realize(), y, cookie
