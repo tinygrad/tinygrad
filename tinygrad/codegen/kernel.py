@@ -78,8 +78,8 @@ class Kernel:
     self.lazyops = flatten([op.lazyops for op in self.ast])
 
     # there's only allowed to be one reduceop
-    cached_ordered_lazyops = {}
-    def ordered_lazyops(op): 
+    cached_ordered_lazyops: Dict[LazyOp, List[LazyOp]] = {}
+    def ordered_lazyops(op):
       if op not in cached_ordered_lazyops: cached_ordered_lazyops[op] = dedup([item for x in op.src for item in ordered_lazyops(x)] + [op])
       return cached_ordered_lazyops[op]
     self.reduceops = dedup([x for out in self.ast for x in ordered_lazyops(out) if x.op in ReduceOps])
