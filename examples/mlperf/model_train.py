@@ -375,6 +375,7 @@ def train_unet3d():
   for epoch in range(1, NUM_EPOCHS + 1):
     BEAM.value = TRAIN_BEAM
     Tensor.training = True
+    Tensor.no_grad = False
 
     if epoch <= LR_WARMUP_EPOCHS and LR_WARMUP_EPOCHS > 0:
       lr_warm_up(optim, LR_WARMUP_INIT_LR, LR, epoch, LR_WARMUP_EPOCHS)
@@ -419,6 +420,7 @@ def train_unet3d():
 
       BEAM.value = EVAL_BEAM
       Tensor.training = False
+      Tensor.no_grad = True
 
       next_eval_at += evaluate_every
       eval_loss = []
