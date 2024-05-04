@@ -4,10 +4,9 @@ from tinygrad.tensor import Tensor
 from tinygrad.nn.state import safe_save
 from extra.export_model import export_model
 from tinygrad.helpers import getenv, fetch
-import ast, os
+import ast
 
 if __name__ == "__main__":
-  os.environ["JIT"] = "2"
   model = EfficientNet(0)
   model.load_from_pretrained()
   mode = "clang" if getenv("CLANG", "") != "" else "webgpu" if getenv("WEBGPU", "") != "" else "webgl" if getenv("WEBGL", "") != "" else ""

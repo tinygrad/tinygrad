@@ -4,7 +4,7 @@ from tinygrad.tensor import Device, Tensor
 from tinygrad.engine.jit import TinyJit
 from tinygrad.nn.state import get_state_dict
 from tinygrad.dtype import dtypes
-import json
+import json, os
 
 EXPORT_SUPPORTED_DEVICE = ["WEBGPU", "WEBGL", "CLANG", "CUDA", "GPU"]
 web_utils = {
@@ -310,6 +310,7 @@ const setupNet = async (device, safetensor) => {{
 
 def export_model(model, target:str, *inputs):
   assert Device.DEFAULT in EXPORT_SUPPORTED_DEVICE, "only WEBGPU, WEBGL, CLANG, CUDA, GPU, METAL are supported"
+  os.environ["JIT"] = "2"
   run,special_names = jit_model(model, *inputs)
   functions, statements, bufs, bufs_to_save = compile_net(run, special_names)
   state = get_state_dict(model)
