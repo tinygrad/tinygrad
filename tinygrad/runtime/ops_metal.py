@@ -18,27 +18,19 @@ class MetalCompiler(Compiler):
     super().__init__("compile_metal")
   def render(self, name:str, uops) -> str: return MetalRenderer(name, uops)
   def compile(self, src:str) -> bytes:
-    if self.device is None:
-      # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
-      air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=src.encode('utf-8'))
-      return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
-    else:
-      options = Metal.MTLCompileOptions.new()
-      options.setFastMathEnabled_(getenv("METAL_FAST_MATH"))
-      library = unwrap2(self.device.device.newLibraryWithSource_options_error_(src, options, None))
-      return library.libraryDataContents().bytes().tobytes()
+    return src.encode()
 
 class MetalProgram:
   def __init__(self, device:MetalDevice, name:str, lib:bytes):
     self.device, self.name, self.lib = device, name, lib
-    if DEBUG >= 6:
-      with tempfile.NamedTemporaryFile(delete=True) as shader:
-        shader.write(lib)
-        shader.flush()
-        os.system(f"cd {pathlib.Path(__file__).parents[2]}/disassemblers/applegpu && python3 compiler_explorer.py {shader.name}")
-    assert lib[:4] == b"MTLB", "Invalid Metal library. Could be due to using conda. Try system python or METAL_XCODE=1 DISABLE_COMPILER_CACHE=1."
-    data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
-    self.library = unwrap2(self.device.device.newLibraryWithData_error_(data, None))
+    if self.device is None:
+      # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
+      air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=lib)
+      self.library = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
+    else:
+      options = Metal.MTLCompileOptions.new()
+      options.setFastMathEnabled_(getenv("METAL_FAST_MATH"))
+      self.library = unwrap2(self.device.device.newLibraryWithSource_options_error_(lib.decode(), options, None))
     self.fxn = self.library.newFunctionWithName_(name)
     self.pipeline_state = unwrap2(self.device.device.newComputePipelineStateWithFunction_error_(self.fxn, None))
 
