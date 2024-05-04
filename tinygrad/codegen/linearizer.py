@@ -419,7 +419,7 @@ class Linearizer(Kernel):
     if x in cache: return cache[x]
     if x.op in BufferOps: return loaded_buffers[x.arg]
     if x.op is UnaryOps.CAST: return [self.uops.add(UOps.BITCAST if x.arg[1] else UOps.CAST, self.get_base_dtype(x.arg[0]), (u,), x.arg[0]) \
-                                      for u in self.ast_parse(x.src[0], acc, offs, loaded_buffers)]
+                                      for u in self.ast_parse(x.src[0], accs, offs, loaded_buffers)]
     if x.op in ReduceOps and not do_reduce:
       return [accs[x][i] for i in offs] if offs is not None else accs[x]
 
