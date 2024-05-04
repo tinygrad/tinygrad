@@ -19,12 +19,12 @@ class Buffer:
     self.device, self.size, self.dtype, self.options, self.offset = device, size, dtype, options, offset
     if base is None:
       assert offset == 0, "base buffers can't have offset"
+      self._base = None
       self._lb_refcount = lb_refcount
       if opaque is not None: self.allocate(opaque)
       if initial_value is not None:
         self.allocate()
         self.copyin(memoryview(initial_value))
-      self._base = None
     else:
       assert base._base is None, "base can't have a base"
       assert device == base.device, "base must have the same device"
