@@ -93,12 +93,13 @@ class Linearizer(Kernel):
     e_idxs, e_valids = expand_node(g_idx, expand_vars), expand_node(g_valid, expand_vars)
 
     ret = []
-    invalid_value, acc_const = 0, dtypes.as_const(self.get_reduce_acc(acc), localtype) if acc is not None else None
+    invalid_value = 0
     for idx, valid, rep_idx in zip(e_idxs, e_valids, iter_idxs(expand_vars)):
       this_const, idx, valid = (invalid_value, NumNode(0), NumNode(1)) if valid.max == 0 else (const, idx, valid)
       key = f"{acc is not None}{localtype}{'CONST'+str(this_const) if this_const is not None and acc is None else (buf.idx if isinstance(buf, MemBuffer) else cast(LocalBuffer, buf).name)}{idx.render()}{valid.render()}"  # noqa: E501
       if key not in self.load_cache:
         if acc is not None:
+          acc_const = dtypes.as_const(self.get_reduce_acc(acc), localtype)
           self.load_cache[key] = self.uops.add(UOps.DEFINE_ACC, localtype, (), acc_const, False, insert_before)
         elif this_const is not None:
           self.load_cache[key] = self.const(this_const, localtype, insert_before)
