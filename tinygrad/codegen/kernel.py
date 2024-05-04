@@ -338,10 +338,9 @@ class Kernel:
   def _apply_tc_opt(self, use_tensor_cores:int, axis:int, opt_level:int) -> bool:
     if use_tensor_cores and self.opts.has_local and self.reduceop and self.reduceop.op is ReduceOps.SUM and self.opts.device in tensor_cores:
       for tc in tensor_cores[self.opts.device]:
-        has_cast = tc.dtype_in != tc.dtype_out
-        if has_cast and not(self.reduceop.src[0].op is UnaryOps.CAST and self.reduceop.src[0].arg[0] == tc.dtype_out): continue
+        if self.reduceop.arg[1] != tc.dtype_out: continue
 
-        mul_op = self.reduceop.src[0].src[0] if has_cast else self.reduceop.src[0]
+        mul_op = self.reduceop.src[0].src[0] if self.reduceop.src[0].op is UnaryOps.CAST else self.reduceop.src[0]
         if mul_op.op is not BinaryOps.MUL: continue
 
         def buf_index(src: LazyOp) -> Optional[int]:
