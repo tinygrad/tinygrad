@@ -8,6 +8,7 @@ from tinygrad.helpers import dedup, to_function_name, flatten, getenv, GRAPH, Gl
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import memory_planner, run_schedule
 from tinygrad.ops import BufferOps, LoadOps
+from tinygrad.runtime.ops_clang import CLANG_PROGRAM_HEADER
 
 TIMING = getenv("TIMING")
 
@@ -47,7 +48,7 @@ if __name__ == "__main__":
   for ast in ast_dedup:
     k = Device["CLANG"].get_linearizer(*ast)
     k.linearize()
-    src = Device["CLANG"].compiler.render(to_function_name(k.name), k.uops)
+    src = Device["CLANG"].compiler.render(to_function_name(k.name), k.uops).strip(CLANG_PROGRAM_HEADER)
     srcs[ast] = (k.name, src)
   print("functions:", len(srcs))
   used_buffers = dedup(flatten([si.bufs for si in sched]))
@@ -69,8 +70,10 @@ if __name__ == "__main__":
     state_dict["adam_v_"+nm] = v
   named_buffers = {v.lazydata.base.buffer:k.replace(".", "_") for k,v in state_dict.items()}
 
-  c_code = ["#include <stdlib.h>", "#include <tgmath.h>", "#include <stdbool.h>"]
-  if TIMING: c_code += ["#include <stdio.h>", "#include <time.h>"]
+  if TIMING:
+    c_code = [CLANG_PROGRAM_HEADER, "#include <stdio.h>", "#include <time.h>", "#include <stdlib.h>"]
+  else:
+    c_code = ["#include <stdlib.h>", CLANG_PROGRAM_HEADER]
   c_code += [x[1].replace(" restrict ", " ")+"\n" for x in srcs.values()]
 
   premain = ["int main() {"]
