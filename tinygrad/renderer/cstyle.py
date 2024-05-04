@@ -174,6 +174,11 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str
 
   return lang.render_kernel(function_name, kernel, bufs, uops)
 
+class ClangLanguage(CStyleLanguage):
+  buffer_suffix = " restrict"
+  type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16"}
+ClangRenderer = functools.partial(uops_to_cstyle, ClangLanguage())
+
 class OpenCLLanguage(CStyleLanguage):
   kernel_prefix = "__kernel "
   buffer_prefix = "__global "

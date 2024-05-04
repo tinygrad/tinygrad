@@ -1,18 +1,17 @@
 import ctypes, subprocess, pathlib, tempfile
-from tinygrad.dtype import dtypes
 from tinygrad.device import Compiled, MallocAllocator, Compiler, CompilerOptions
 from tinygrad.helpers import cpu_time_execution
-from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
+from tinygrad.renderer.cstyle import ClangRenderer
 
-ClangLanguage = CStyleLanguage(buffer_suffix=" restrict", type_map={dtypes.bool:"_Bool", dtypes.half:"__fp16"})
 class ClangCompiler(Compiler):
   compiler_opts = CompilerOptions("CLANG", supports_float4=False, has_local=False)
-  def render(self, name:str, uops) -> str: return uops_to_cstyle(ClangLanguage, name, uops)
+  def render(self, name:str, uops) -> str: return ClangRenderer(name, uops)
   def compile(self, src:str) -> bytes:
     # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here
     with tempfile.NamedTemporaryFile(delete=True) as output_file:
-      subprocess.check_output(('clang -include tgmath.h -shared -march=native -O2 -Wall -Werror -x c -fPIC - -o ' + str(output_file.name)).split(),
-                              input=src.encode('utf-8'))
+      subprocess.check_output(['clang', '-Dmax(a,b)=({__typeof__ (a) _a=(a); __typeof__ (b) _b=(b); _a>_b?_a:_b;})',
+                               '-include', 'tgmath.h', '-shared', '-march=native', '-O2', '-Wall', '-Werror', '-x', 'c', '-fPIC', '-',
+                               '-o', str(output_file.name)], input=src.encode('utf-8'))
       return pathlib.Path(output_file.name).read_bytes()
 
 class ClangProgram:
