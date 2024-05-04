@@ -111,8 +111,8 @@ class TinyJit(Generic[ReturnType]):
   def add_buffer(self, b:Buffer) -> Buffer:
     if found:=self.buffer_replace.get(b, None): return found
     if b.is_allocated() or b.lb_refcount > 0: return b
-    if hasattr(b, "base"):
-      self.buffer_replace[b] = ret = Buffer(b.device, b.size, b.dtype, base=self.buffer_replace.get(b.base, b.base), offset=b.offset)
+    if b._base is not None:
+      self.buffer_replace[b] = ret = Buffer(b.device, b.size, b.dtype, base=self.buffer_replace.get(b._base, b._base), offset=b.offset)
     else:
       self.buffer_replace[b] = ret = Buffer(b.device, b.size, b.dtype, options=b.options)
     return ret
@@ -162,7 +162,7 @@ class TinyJit(Generic[ReturnType]):
       # track inputs that are views of buffers
       for ji in self.jit_cache:
         for b in ji.bufs:
-          if hasattr(b, "base") and b.base in input_rawbuffers:
+          if b._base is not None and b._base in input_rawbuffers:
             input_rawbuffers.append(b)
             self.extra_view_inputs.append((input_rawbuffers.index(b.base), b.offset, b.device, b.size, b.dtype))
 

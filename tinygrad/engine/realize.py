@@ -40,7 +40,7 @@ class EmptyOp(Runner):
 class ViewOp(Runner):
   def __init__(self, buf:Buffer): super().__init__(colored(f"view {buf.nbytes:8d} @ {buf.offset:<10d}", "yellow"), buf.device)
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False):
-    assert hasattr(rawbufs[0], "base") and rawbufs[0].base == rawbufs[1], f"must be base {rawbufs}"
+    assert rawbufs[0]._base is not None and rawbufs[0]._base == rawbufs[1], f"must be base {rawbufs}"
 
 def lower_runner(runner:Runner, bufs) -> ExecItem:
   # TODO: globals isn't on the stupid diskrunner, remove the need for it
@@ -90,8 +90,8 @@ def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]
       # all unallocated unparented buffers are fair game to replace
       if buf.is_allocated() or buf.lb_refcount > 0: continue
       # handle view buffers
-      if hasattr(buf, 'base'):
-        assigned[buf] = Buffer(buf.device, buf.size, buf.dtype, base=assigned.get(buf.base, buf.base), offset=buf.offset)
+      if buf._base is not None:
+        assigned[buf] = Buffer(buf.device, buf.size, buf.dtype, base=assigned.get(buf._base, buf._base), offset=buf.offset)
       else:
         handle_buffer(buf)
 

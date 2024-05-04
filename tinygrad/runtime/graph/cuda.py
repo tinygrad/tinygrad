@@ -13,7 +13,7 @@ class CUDAGraph(MultiGraphRunner):
     super().__init__(jit_cache, input_rawbuffers, var_vals)
 
     # Check all jit items are compatible.
-    if not all(isinstance(ji.prg, CompiledRunner) or isinstance(ji.prg, BufferXfer) for ji in jit_cache): raise GraphException
+    if not all(isinstance(ji.prg, (CompiledRunner, BufferXfer)) for ji in jit_cache): raise GraphException
 
     self.jc_idx_with_updatable_rawbufs = list(set([x[0] for x in self.input_replace.keys()]))
     self.updatable_nodes: Dict[int, Tuple[Any, Any, Any, bool]] = {} # Dict[jc index] = tuple(graph node, node params, input kernel params, is memcpy)
@@ -25,7 +25,8 @@ class CUDAGraph(MultiGraphRunner):
         global_size, local_size = ji.prg.launch_dims(var_vals)
 
         new_node = cuda.CUgraphNode()
-        deps = self._access_resources(ji.bufs[(outs:=ji.prg.outcount):], ji.bufs[:outs], new_dependency=new_node)
+        deps = self._access_resources([x.base for x in ji.bufs[ji.prg.outcount:]],
+                                      [x.base for x in ji.bufs[:ji.prg.outcount]], new_dependency=new_node)
         c_deps = (cuda.CUgraphNode*len(deps))(*deps) if deps else None
 
         c_args, vargs = encode_args([cast(Buffer, x)._buf for x in ji.bufs], [var_vals[x] for x in ji.prg.vars])
@@ -38,7 +39,7 @@ class CUDAGraph(MultiGraphRunner):
         dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
         src_dev, dest_dev = cast(CUDADevice, Device[src.device]), cast(CUDADevice, Device[dest.device])
         node_from = cuda.CUgraphNode()
-        deps = self._access_resources(read=[src], write=[dest], new_dependency=node_from)
+        deps = self._access_resources(read=[src.base], write=[dest.base], new_dependency=node_from)
         c_deps = (cuda.CUgraphNode*len(deps))(*deps) if deps else None
         cp_params = cuda.CUDA_MEMCPY3D_v2(srcMemoryType=cuda.CU_MEMORYTYPE_DEVICE, srcDevice=src._buf, srcPitch=src.nbytes, srcHeight=1,
                                           dstMemoryType=cuda.CU_MEMORYTYPE_DEVICE, dstDevice=dest._buf, dstPitch=dest.nbytes, dstHeight=1,

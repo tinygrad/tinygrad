@@ -24,24 +24,25 @@ class Buffer:
       if initial_value is not None:
         self.allocate()
         self.copyin(memoryview(initial_value))
+      self._base = None
     else:
-      assert not hasattr(base, 'base'), "base can't have a base"
+      assert base._base is None, "base can't have a base"
       assert device == base.device, "base must have the same device"
-      self.base = base
+      self._base = base
     if preallocate: self.allocate()
   @property
-  def lb_refcount(self): return self.base._lb_refcount if hasattr(self, 'base') else self._lb_refcount
-  def ref(self, cnt):
-    if hasattr(self, 'base'): self.base._lb_refcount += cnt
-    else: self._lb_refcount += cnt
+  def base(self) -> Buffer: return self._base if self._base is not None else self
+  @property
+  def lb_refcount(self): return self.base._lb_refcount
+  def ref(self, cnt): self.base._lb_refcount += cnt
   def is_allocated(self) -> bool: return hasattr(self, '_buf')
   def ensure_allocated(self) -> Buffer: return self.allocate() if not hasattr(self, '_buf') else self
   def allocate(self, opaque=None) -> Buffer:
     assert not hasattr(self, '_buf'), "can't allocate already allocated buffer"
     from tinygrad.device import Device
     self.allocator = Device[self.device].allocator
-    if hasattr(self, "base"):
-      self.base.ensure_allocated()
+    if self._base is not None:
+      self._base.ensure_allocated()
       assert hasattr(self.allocator, "offset"), "offset function required for view"
       self._buf: Any = self.allocator.offset(self.base._buf, self.nbytes, self.offset)
     else:
@@ -50,7 +51,7 @@ class Buffer:
     return self
   def __reduce__(self):
     buf = None
-    if hasattr(self, 'base'):
+    if self._base is not None:
       return self.__class__, (self.device, self.size, self.dtype, None, None, None, 0, self.base, self.offset, hasattr(self, '_buf'))
     if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options, None, self.lb_refcount)
     if self.is_allocated():
@@ -61,7 +62,7 @@ class Buffer:
   def nbytes(self): return self.size*self.dtype.itemsize
   def __del__(self):
     if not hasattr(self, '_buf'): return
-    if not hasattr(self, "base"):
+    if self._base is None:
       if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
       self.allocator.free(self._buf, self.nbytes, self.options)
   def __repr__(self):
@@ -87,5 +88,5 @@ class Buffer:
     return mv
   def view(self, size:int, dtype:DType, offset:int) -> Buffer:
     assert offset < self.nbytes, "offset must be less than nbytes"
-    if hasattr(self, "base"): return Buffer(self.device, size, dtype, base=self.base, offset=self.offset+offset)
+    if self._base is not None: return Buffer(self.device, size, dtype, base=self._base, offset=self.offset+offset)
     return Buffer(self.device, size, dtype, base=self, offset=offset)
