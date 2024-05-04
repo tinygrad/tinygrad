@@ -3,7 +3,7 @@ import itertools, functools, random, math, time, multiprocessing, traceback, sig
 from collections import defaultdict
 from tinygrad.device import Device, Compiled, Buffer, CompiledRunner, Compiler
 from tinygrad.ops import MemBuffer
-from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, to_function_name, IS_CHILD
+from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, to_function_name
 from tinygrad.dtype import ImageDType
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError
@@ -64,9 +64,7 @@ def _try_compile_linearized_w_idx(x:Tuple[int,Linearizer], compiler:Compiler):
     return x[0], None
 
 # workers should ignore ctrl c
-def _init_worker():
-  IS_CHILD.value = 1
-  signal.signal(signal.SIGINT, signal.SIG_IGN)
+def _init_worker(): signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 def _ensure_buffer_alloc(bufs:List[Buffer]) -> List[Buffer]: return [buf.ensure_allocated() for buf in bufs]
 

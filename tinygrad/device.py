@@ -1,10 +1,10 @@
 from __future__ import annotations
+import multiprocessing
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, List, Optional, Dict, Tuple, ClassVar, cast
 import importlib, inspect, functools, pathlib, time, ctypes, os
-from tinygrad.helpers import prod, getenv, colored, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put
-from tinygrad.helpers import DEBUG, BEAM, NOOPT, IS_CHILD
+from tinygrad.helpers import prod, getenv, colored, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put, DEBUG, BEAM, NOOPT
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.ops import LazyOp, get_lazyop_info
 from tinygrad.buffer import Buffer, BufferOptions
@@ -25,7 +25,7 @@ class _Device:
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def __get_canonicalized_item(self, ix:str) -> Compiled:
     if DEBUG >= 1: print(f"opening device {ix} from pid:{os.getpid()}")
-    assert not IS_CHILD, "can't open devices from children"
+    assert multiprocessing.current_process().name == "MainProcess", "can only open device from parent process"
     x = ix.split(":")[0].upper()
     return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._devices][0](ix)  # noqa: E501
   @functools.cached_property
