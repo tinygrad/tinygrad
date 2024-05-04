@@ -191,7 +191,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
       parents = deque((r, *realized_children))
       while parents and not forced_realize:
         if (p:=parents.pop().base).realized or p in realizes:
-          if p in assign_targets and assign_targets[p] not in realized_children: forced_realize = True
+          if p in assign_targets and assign_targets[p] not in realized_children: forced_realize, can_chase = True, False
           continue
         parents.extend(p.srcs)
     if forced_realize:
