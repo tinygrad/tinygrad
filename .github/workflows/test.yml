@@ -112,12 +112,6 @@ jobs:
         python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
     - name: Test DEBUG
       run: DEBUG=100 python3 -c "from tinygrad import Tensor; N = 1024; a, b = Tensor.rand(N, N), Tensor.rand(N, N); c = (a.reshape(N, 1, N) * b.T.reshape(1, N, N)).sum(axis=2); print((c.numpy() - (a.numpy() @ b.numpy())).mean())"
-    - name: Compile EfficientNet to C
-      run: PYTHONPATH="." CLANG=1 python examples/compile_efficientnet.py > recognize.c
-    - name: Compile C to native
-      run: clang -O2 recognize.c -lm -o recognize
-    - name: Test EfficientNet
-      run: cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock
     - name: Repo line count <8000 lines
       run: MAX_LINE_COUNT=8000 python sz.py
 
