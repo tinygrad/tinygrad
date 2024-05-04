@@ -5,7 +5,7 @@
 import unittest
 from typing import List, Optional, Union
 from tinygrad.tensor import Tensor
-from tinygrad.ops import LoadOps, ReduceOps
+from tinygrad.ops import BinaryOps, LoadOps, ReduceOps
 from tinygrad.helpers import DEBUG, GRAPH, flatten
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.graph import print_tree, realized_lazybuffer
@@ -190,6 +190,26 @@ class TestSchedule(unittest.TestCase):
       out = bn(img)
       check_schedule(out, 3)
 
+  def test_fold_conv_batchnorm(self):
+    with Tensor.train():
+      img = Tensor.empty(1,3,8,8)
+      c1 = nn.Conv2d(3,32,3)
+      bn = nn.BatchNorm2d(32, track_running_stats=False)
+      out = bn(c1(img)).relu()
+      check_schedule(out, 4, [c1.weight, c1.bias])
+
+  def test_fold_conv_batchnorm_sgd(self):
+    with Tensor.train():
+      img = Tensor.ones(1,3,4,4)
+      c1 = nn.Conv2d(3,32,3)
+      bn = nn.BatchNorm2d(32, track_running_stats=False)
+      opt = nn.optim.SGD(nn.state.get_parameters([c1, bn]))
+      img_bn = bn(c1(img)).elu().sum()
+      opt.zero_grad()
+      img_bn.backward()
+      # this is too high
+      check_schedule(opt.schedule_step(), 18)
+
   def test_fold_conv_relu(self):
     c1 = nn.Conv2d(3,16,3)
 
@@ -197,6 +217,13 @@ class TestSchedule(unittest.TestCase):
     img = Tensor.ones(2,3,64,64)
     out = c1(img).relu()
     check_schedule(out, 1, [c1.weight, c1.bias])
+
+  def test_fold_conv_relu_nobias(self):
+    img = Tensor.ones(1,4,8,8)
+    c1 = nn.Conv2d(4, 4, kernel_size=3, bias=False)
+    c2 = nn.Conv2d(4, 4, kernel_size=3, bias=False)
+    out = img.sequential([c1, Tensor.relu, c2, Tensor.relu])
+    check_schedule(out, 2, [c1.weight, c2.weight, img])
 
   def test_fold_conv_elu(self):
     c1 = nn.Conv2d(3,16,3)
@@ -556,6 +583,66 @@ class TestSchedule(unittest.TestCase):
     layer(x).relu().sum().backward()
     check_schedule(opt.schedule_step(), 14)
 
+  def test_adam_conv_fuse(self):
+    with Tensor.train():
+      img = Tensor.empty(2,3,4,4)
+      c1 = nn.Conv2d(3,32,3)
+      opt = nn.optim.Adam(nn.state.get_parameters(c1), lr=1e-4)
+      opt.zero_grad()
+      c1(img).relu().sum().backward()
+      check_schedule(opt.schedule_step(), 14)
+
+  def test_adam_2convs_fuse(self):
+    with Tensor.train():
+      img = Tensor.empty(2,3,4,4)
+      c1 = nn.Conv2d(3,16,3,bias=False)
+      c2 = nn.Conv2d(16,32,3,bias=False)
+      opt = nn.optim.Adam(nn.state.get_parameters([c1, c2]), lr=1e-4)
+      opt.zero_grad()
+      c2(c1(img).relu()).relu().sum().backward()
+      check_schedule(opt.schedule_step(), 15)
+
+  def test_sgd_conv_fuse(self):
+    with Tensor.train():
+      img = Tensor.empty(2,3,4,4)
+      c1 = nn.Conv2d(3,32,3)
+      opt = nn.optim.SGD(nn.state.get_parameters(c1))
+      opt.zero_grad()
+      c1(img).relu().sum().backward()
+      check_schedule(opt.schedule_step(), 7)
+
+  def test_sgd_2convs_fuse(self):
+    with Tensor.train():
+      img = Tensor.empty(2,3,4,4)
+      c1 = nn.Conv2d(3,16,3,bias=False)
+      c2 = nn.Conv2d(16,32,3,bias=False)
+      opt = nn.optim.SGD(nn.state.get_parameters([c1, c2]))
+      opt.zero_grad()
+      c2(c1(img).relu()).relu().sum().backward()
+      check_schedule(opt.schedule_step(), 7)
+
+  def test_fold_2convs_sgd_nesterov_momentum_wd(self):
+    with Tensor.train():
+      img = Tensor.empty(2,3,4,4)
+      c1 = nn.Conv2d(3,16,3,bias=False)
+      c2 = nn.Conv2d(16,32,3,bias=False)
+      opt = nn.optim.SGD(nn.state.get_parameters([c1, c2]), nesterov=True, momentum=0.9, weight_decay=0.1)
+      opt.zero_grad()
+      c2(c1(img).relu()).relu().sum().backward()
+      check_schedule(opt.schedule_step(), 9)
+
+  def test_sgd_4convs_fuse(self):
+    with Tensor.train():
+      img = Tensor.empty(2,3,64,64)
+      c1 = nn.Conv2d(3,4,3,bias=False)
+      c2 = nn.Conv2d(4,8,3,bias=False)
+      c3 = nn.Conv2d(8,16,3,bias=False)
+      c4 = nn.Conv2d(16,32,3,bias=False)
+      opt = nn.optim.SGD(nn.state.get_parameters([c1, c2, c3, c4]))
+      opt.zero_grad()
+      c4(c3(c2(c1(img).relu()).relu()).relu()).relu().sum().backward()
+      check_schedule(opt.schedule_step(), 22)
+
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_prefer_half_buffer(self):
     x = Tensor.ones(4).contiguous().realize()
@@ -592,6 +679,73 @@ class TestSchedule(unittest.TestCase):
     # c = a + 2
     # sched = check_schedule([b, c], 4)
     # doesn't store either in half because it doesn't chase
+
+  def test_reduce_simple_chase(self):
+    a = Tensor.empty(4, 4, 4)
+    r = a.sum(0) + 6
+    b = r.sum(0) * 4
+    c = r.sum(1) * 2
+    schedule = check_schedule([b, c], 3)
+    assert schedule[0].ast[0].src[0].op is BinaryOps.ADD
+
+  def test_push_permute_chase(self):
+    a = Tensor.empty(4, 4, 4)
+    b = Tensor.empty(4, 4)
+    r = a.sum(2) + b
+    d = r.T * 4
+    e = r * d
+    schedule = check_schedule([d, e], 3)
+    assert schedule[0].ast[0].src[0].op is BinaryOps.ADD
+
+  def test_push_shrink_chase(self):
+    a = Tensor.empty(16, 16)
+    b = Tensor.empty(4)
+    c = Tensor.empty(16, )
+    r = a.sum(1) + c
+    d = r[:4] * b
+    schedule = check_schedule(d, 2)
+    assert schedule[0].ast[0].src[0].op is BinaryOps.ADD
+
+  def test_midreduce_nochase(self):
+    a = Tensor.empty(16, 16)
+    b = (a.sum(0) + a.max(1)) + 2
+    schedule = check_schedule(b, 2)
+    assert schedule[0].ast[0].src[0].op is ReduceOps.MAX
+
+  # pattern in test_transformer
+  def test_partial_fuse1(self):
+    a = Tensor.empty(16, 16)
+    b = Tensor.empty(16, 16)
+    c = a.sum() + 2
+    d = (a.sum() - b.sum()) * 4
+    check_schedule([c, d], 3)
+
+  # pattern in conv
+  def test_partial_fuse2(self):
+    a = Tensor.empty(16, 16)
+    b = Tensor.empty(16, 16)
+    c = a.sum() + 2
+    d = b.sum() - c
+    check_schedule([c, d], 2)
+
+  # pattern in adam
+  def test_partial_fuse3(self):
+    a = Tensor.empty(16, 16)
+    b = Tensor.empty(16, 16)
+    c = a.sum() + 2
+    d = a.sum() * 2
+    e = c * d
+    f = b.sum() - e
+    check_schedule([c, d, e, f], 3)
+
+  def test_partial_fuse4(self):
+    a = Tensor.empty(16, 16)
+    b = Tensor.empty(16, 16)
+    c = a.sum() + 2
+    d = a.sum() * 2
+    e = c * d
+    f = (b - d).sum() - e
+    check_schedule([c, d, e, f], 3)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

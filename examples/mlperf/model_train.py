@@ -4,7 +4,7 @@ from tqdm import tqdm
 import multiprocessing
 
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
-from tinygrad.helpers import getenv, BEAM, WINO
+from tinygrad.helpers import getenv, BEAM, WINO, round_up
 from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_save
 from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup
 
@@ -19,12 +19,32 @@ def train_resnet():
   from examples.mlperf.initializers import Conv2dHeNormal, Linear
   from examples.hlb_cifar10 import UnsyncedBatchNorm
 
+  INITMLPERF = getenv("INITMLPERF")
+  RUNMLPERF = getenv("RUNMLPERF")
+  if getenv("LOGMLPERF"):
+    from mlperf_logging import mllog
+    import mlperf_logging.mllog.constants as mllog_constants
+    MLLOGGER = mllog.get_mllogger()
+    if INITMLPERF:
+      # common.yaml
+      MLLOGGER.event(key=mllog_constants.SUBMISSION_ORG, value="tinycorp")
+      MLLOGGER.event(key=mllog_constants.SUBMISSION_PLATFORM, value=getenv("SUBMISSION_PLATFORM", "tinybox"))
+      MLLOGGER.event(key=mllog_constants.SUBMISSION_DIVISION, value=mllog_constants.CLOSED)
+      MLLOGGER.event(key=mllog_constants.SUBMISSION_STATUS, value=mllog_constants.ONPREM)
+      MLLOGGER.event(key=mllog_constants.CACHE_CLEAR, value=True)
+      MLLOGGER.start(key=mllog_constants.INIT_START)
+      # closed_common.yaml
+      MLLOGGER.event(key=mllog_constants.SUBMISSION_BENCHMARK, value=mllog_constants.RESNET)
+      MLLOGGER.event(key=mllog_constants.GRADIENT_ACCUMULATION_STEPS, value=1)
+  else:
+    MLLOGGER = None
+
   config = {}
   seed = config["seed"] = getenv("SEED", 42)
   Tensor.manual_seed(seed)  # seed for weight initialization
 
   GPUS = config["GPUS"] = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
-  print(f"Training on {GPUS}")
+  print(f"training on {GPUS}")
   for x in GPUS: Device[x]
 
   TRAIN_BEAM = getenv("TRAIN_BEAM", BEAM.value)
@@ -57,10 +77,10 @@ def train_resnet():
 
   target, achieved  = getenv("TARGET", 0.759), False
   eval_start_epoch  = getenv("EVAL_START_EPOCH", 0)
-  eval_epochs       = getenv("EVAL_EPOCHS", 1)
+  eval_freq         = getenv("EVAL_FREQ", 1)
 
-  steps_in_train_epoch  = config["steps_in_train_epoch"]  = (len(get_train_files()) // BS)
-  steps_in_val_epoch    = config["steps_in_val_epoch"]    = (len(get_val_files()) // EVAL_BS)
+  steps_in_train_epoch  = config["steps_in_train_epoch"]  = (round_up(len(get_train_files()), BS) // BS)
+  steps_in_val_epoch    = config["steps_in_val_epoch"]    = (round_up(len(get_val_files()), EVAL_BS) // EVAL_BS)
 
   config["DEFAULT_FLOAT"] = dtypes.default_float.name
   config["BEAM"]          = BEAM.value
@@ -85,6 +105,31 @@ def train_resnet():
                                              warmup=lr_warmup_epochs * steps_in_train_epoch)
   scheduler_group = LRSchedulerGroup(scheduler, scheduler_skip)
   print(f"training with batch size {BS} for {epochs} epochs")
+
+  # log mlperf hparams
+  if MLLOGGER:
+    if INITMLPERF:
+      MLLOGGER.start(key=mllog_constants.INIT_START)
+
+      MLLOGGER.event(key=mllog_constants.GLOBAL_BATCH_SIZE, value=BS)
+      from extra.datasets.imagenet import get_train_files, get_val_files
+      MLLOGGER.event(key=mllog_constants.TRAIN_SAMPLES, value=len(get_train_files()))
+      MLLOGGER.event(key=mllog_constants.EVAL_SAMPLES, value=len(get_val_files()))
+
+      MLLOGGER.event(key=mllog_constants.OPT_NAME, value="lars")
+      assert scheduler.initial_lr == scheduler_skip.initial_lr
+      assert scheduler.end_lr == scheduler_skip.end_lr
+      assert scheduler.power == scheduler_skip.power
+      MLLOGGER.event(key=mllog_constants.LARS_OPT_BASE_LEARNING_RATE, value=scheduler.initial_lr)
+      MLLOGGER.event(key=mllog_constants.LARS_OPT_END_LR, value=scheduler.end_lr)
+      MLLOGGER.event(key=mllog_constants.LARS_OPT_LR_DECAY_POLY_POWER, value=scheduler.power)
+      MLLOGGER.event(key=mllog_constants.LARS_OPT_LR_DECAY_STEPS, value=epochs)
+      MLLOGGER.event(key=mllog_constants.LARS_EPSILON, value=0)  # does not support epsilon != 0
+      MLLOGGER.event(key=mllog_constants.LARS_OPT_LEARNING_RATE_WARMUP_EPOCHS, value=lr_warmup_epochs)
+      MLLOGGER.event(key=mllog_constants.LARS_OPT_MOMENTUM, value=optimizer.momentum)
+      MLLOGGER.event(key=mllog_constants.LARS_OPT_WEIGHT_DECAY, value=optimizer.wd)
+    if RUNMLPERF:
+      MLLOGGER.start(key=mllog_constants.RUN_START)
 
   # ** resume from checkpointing **
   start_epoch = 0
@@ -130,24 +175,27 @@ def train_resnet():
 
   def data_get(it):
     x, y, cookie = next(it)
-    return x.shard(GPUS, axis=0).realize(), Tensor(y, requires_grad=False).shard(GPUS, axis=0), cookie
+    return x.shard(GPUS, axis=0).realize(), Tensor(y, requires_grad=False).shard(GPUS, axis=0), y, cookie
 
   # ** epoch loop **
   step_times = []
   for e in range(start_epoch, epochs):
     # ** train loop **
+    if MLLOGGER:
+      MLLOGGER.start(key=mllog_constants.EPOCH_START, value=e+1, metadata=dict(epoch_num=e+1))
     Tensor.training = True
     BEAM.value = TRAIN_BEAM
-    batch_loader = batch_load_resnet(batch_size=BS, val=False, shuffle=True, seed=seed*epochs + e)
+    batch_loader = batch_load_resnet(batch_size=BS, val=False, shuffle=True, seed=seed*epochs + e, pad_first_batch=True)
     it = iter(tqdm(batch_loader, total=steps_in_train_epoch, desc=f"epoch {e}", disable=BENCHMARK))
     i, proc = 0, data_get(it)
     st = time.perf_counter()
     while proc is not None:
       GlobalCounters.reset()
-      (loss, top_1_acc), proc = train_step(proc[0], proc[1]), proc[2]
+      (loss, top_1), y, proc = train_step(proc[0], proc[1]), proc[2], proc[3]
 
       pt = time.perf_counter()
 
+      prev_cookie = None  # free previous cookie after gpu work has been enqueued
       try:
         next_proc = data_get(it)
       except StopIteration:
@@ -156,7 +204,8 @@ def train_resnet():
       dt = time.perf_counter()
 
       device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
-      loss, top_1_acc = loss.numpy().item(), top_1_acc.numpy().item() / BS
+      loss, top_1 = loss.numpy().item(), top_1.numpy().item()
+      top_1_acc = top_1 / sum(yi != -1 for yi in y)
 
       cl = time.perf_counter()
       if BENCHMARK:
@@ -172,10 +221,11 @@ def train_resnet():
                    "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": e + (i + 1) / steps_in_train_epoch})
 
       st = cl
-      proc, next_proc = next_proc, None  # return old cookie
+      prev_cookie, proc, next_proc = proc, next_proc, None  # return old cookie
       i += 1
 
       if i == BENCHMARK:
+        assert not math.isnan(loss)
         median_step_time = sorted(step_times)[(BENCHMARK + 1) // 2]  # in seconds
         estimated_total_minutes = int(median_step_time * steps_in_train_epoch * epochs / 60)
         print(f"Estimated training time: {estimated_total_minutes // 60}h{estimated_total_minutes % 60}m")
@@ -184,46 +234,63 @@ def train_resnet():
         # if we are doing beam search, run the first eval too
         if (TRAIN_BEAM or EVAL_BEAM) and e == start_epoch: break
         return
+    if MLLOGGER and RUNMLPERF:
+      MLLOGGER.event(key=mllog_constants.EPOCH_STOP, value=e+1, metadata=dict(epoch_num=e+1))
 
     # ** eval loop **
-    if (e + 1 - eval_start_epoch) % eval_epochs == 0 and steps_in_val_epoch > 0:
+    # always eval for epoch >= 33 to stop the clock as soon as eval target hits, it can converge in epoch in [33, 37]
+    if steps_in_val_epoch > 0 and ((e + 1 - eval_start_epoch) % eval_freq == 0 or e + 1 >= 33):
+      if MLLOGGER and RUNMLPERF:
+        MLLOGGER.start(key=mllog_constants.EVAL_START, value=e+1, metadata=dict(epoch_num=e+1))
       if getenv("RESET_STEP", 1): train_step.reset()  # free the train step memory :(
-      eval_loss = []
       eval_times = []
-      eval_top_1_acc = []
+      eval_loss = 0.0
+      eval_top_1 = 0
+      eval_num_samples = 0
       Tensor.training = False
       BEAM.value = EVAL_BEAM
 
-      it = iter(tqdm(batch_load_resnet(batch_size=EVAL_BS, val=True, shuffle=False), total=steps_in_val_epoch))
+      it = iter(tqdm(batch_load_resnet(batch_size=EVAL_BS, val=True, shuffle=False, pad_first_batch=True), total=steps_in_val_epoch))
       i, proc = 0, data_get(it)
       while proc is not None:
         GlobalCounters.reset()
         st = time.time()
 
-        (loss, top_1_acc), proc = eval_step(proc[0], proc[1]), proc[2]  # drop inputs, keep cookie
+        (loss, top_1), y, proc = eval_step(proc[0], proc[1]), proc[2], proc[3]  # drop inputs, keep cookie
 
+        prev_cookie = None  # free previous cookie after gpu work has been enqueued
         try:
           next_proc = data_get(it)
         except StopIteration:
           next_proc = None
 
-        loss, top_1_acc = loss.numpy().item(), top_1_acc.numpy().item() / EVAL_BS
-        eval_loss.append(loss)
-        eval_top_1_acc.append(top_1_acc)
-        proc, next_proc = next_proc, None  # return old cookie
+        loss, top_1 = loss.numpy().item(), top_1.numpy().item()
+        num_samples = sum(yi != -1 for yi in y)
+        eval_loss += loss * num_samples
+        eval_top_1 += top_1
+        eval_num_samples += num_samples
+        prev_cookie, proc, next_proc = proc, next_proc, None
         i += 1
-        if i == BENCHMARK: return
+        if i == BENCHMARK:
+          if MLLOGGER and INITMLPERF:
+            MLLOGGER.event(key=mllog_constants.INIT_STOP)
+          return
 
         et = time.time()
         eval_times.append(et - st)
 
       if getenv("RESET_STEP", 1): eval_step.reset()
-      total_loss = sum(eval_loss) / len(eval_loss)
-      total_top_1 = sum(eval_top_1_acc) / len(eval_top_1_acc)
+      if not BENCHMARK:
+        assert eval_num_samples == len(get_val_files()), f"eval sample count mismatched. {eval_num_samples=} != {len(get_val_files())}"
+      total_loss = eval_loss / eval_num_samples
+      total_top_1 = eval_top_1 / eval_num_samples
       total_fw_time = sum(eval_times) / len(eval_times)
       tqdm.write(f"eval loss: {total_loss:.2f}, eval time: {total_fw_time:.2f}, eval top 1 acc: {total_top_1:.3f}")
       if WANDB:
         wandb.log({"eval/loss": total_loss, "eval/top_1_acc": total_top_1, "eval/forward_time": total_fw_time, "epoch": e + 1})
+      if MLLOGGER and RUNMLPERF:
+        MLLOGGER.event(key=mllog_constants.EVAL_ACCURACY, value=total_top_1, metadata=dict(epoch_num=e+1))
+        MLLOGGER.event(key=mllog_constants.EVAL_STOP, value=e+1, metadata=dict(epoch_num=e+1))
 
       # save model if achieved target
       if not achieved and total_top_1 >= target:
@@ -233,6 +300,8 @@ def train_resnet():
         print(f" *** Model saved to {fn} ***")
         achieved = True
         # stop once achieve the target
+        if MLLOGGER and RUNMLPERF:
+          MLLOGGER.event(key=mllog_constants.RUN_STOP, metadata=dict(status="success"))
         break
 
       # checkpoint every time we eval
