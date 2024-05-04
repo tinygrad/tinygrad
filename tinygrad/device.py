@@ -34,7 +34,9 @@ class _Device:
     if device_from_env: return device_from_env
     for device in ["METAL", "HSA", "CUDA", "GPU", "CLANG", "LLVM"]:
       try:
-        if self[device]: return device
+        if self[device]:
+          os.environ[device] = "1"   # we set this in environment for spawned children
+          return device
       except Exception: pass
     raise RuntimeError("no usable devices")
 Device = _Device()
