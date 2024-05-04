@@ -79,6 +79,7 @@ class Kernel:
 
     # there's only allowed to be one reduceop
     self.reduceops = dedup(flatten([reversed([x for x in out.lazyops if x.op in ReduceOps]) for out in self.ast]))
+    assert len(self.reduceops) < 2, "Only one reduceop allowed"
 
     self.outbufs, self.vars = [x.arg for x in self.ast], flatten([x.vars() for x in self.ast])
     loadops = [BufferOps.LOAD, BufferOps.CONST]
