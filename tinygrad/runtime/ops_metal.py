@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, subprocess, ctypes, functools
-import Metal
+import Metal, libdispatch
 from typing import List, Set, Any, Tuple, Optional
 from tinygrad.helpers import prod, getenv, unwrap2
 from tinygrad.device import Compiled, LRUAllocator, Compiler, CompilerOptions
@@ -23,10 +23,12 @@ class MetalCompiler(Compiler):
 class MetalProgram:
   def __init__(self, device:MetalDevice, name:str, lib:bytes):
     self.device, self.name, self.lib = device, name, lib
-    if self.device is None:
+    if getenv("METAL_XCODE"):
       # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
       air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=lib)
-      self.library = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
+      lib_data = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
+      dispatch_data = libdispatch.dispatch_data_create(lib_data, len(lib_data), None, None)
+      self.library = unwrap2(self.device.device.newLibraryWithData_error_(dispatch_data, None))
     else:
       options = Metal.MTLCompileOptions.new()
       options.setFastMathEnabled_(getenv("METAL_FAST_MATH"))
@@ -90,7 +92,7 @@ class MetalDevice(Compiled):
     self.mv_in_metal: List[memoryview] = []
     self.track_cross_buffer: List[Any] = []
     from tinygrad.runtime.graph.metal import MetalGraphRunner
-    super().__init__(device, MetalAllocator(self), MetalCompiler(None if getenv("METAL_XCODE") else self),
+    super().__init__(device, MetalAllocator(self), MetalCompiler(self),
                      functools.partial(MetalProgram, self), MetalGraphRunner)
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight: wait_check(cbuf)
