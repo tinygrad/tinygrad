@@ -99,8 +99,7 @@ class Linearizer(Kernel):
       key = f"{acc is not None}{localtype}{'CONST'+str(this_const) if this_const is not None and acc is None else (buf.idx if isinstance(buf, MemBuffer) else cast(LocalBuffer, buf).name)}{idx.render()}{valid.render()}"  # noqa: E501
       if key not in self.load_cache:
         if acc is not None:
-          acc_const = dtypes.as_const(self.get_reduce_acc(acc), localtype)
-          self.load_cache[key] = self.uops.add(UOps.DEFINE_ACC, localtype, (), acc_const, False, insert_before)
+          self.load_cache[key] = self.uops.add(UOps.DEFINE_ACC, self.get_reduce_acc(acc), (), acc_const, False, insert_before)
         elif this_const is not None:
           self.load_cache[key] = self.const(this_const, localtype, insert_before)
           if valid.min == 0 and valid.max == 1:
