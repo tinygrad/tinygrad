@@ -45,7 +45,8 @@ class CStyleLanguage(NamedTuple):
     if math.isnan(x): val = "NAN"
     elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
     elif dtype == dtypes.float64: val = f"{x}"
-    else: val = f"{x}f" if dtypes.is_float(dtype) else f"{x}" if dtypes.is_int(dtype) else f"{x}".lower()
+    elif dtype == dtypes.bool: val = "1" if x else "0"
+    else: val = f"{x}f" if dtypes.is_float(dtype) else f"{x}"
     return (self.render_cast([val] * dtype.count, dtype) if dtype.count > 1 or dtype not in [dtypes.float, dtypes.int, dtypes.bool] else val)
 
   # returns a str expression of the loaded value with the output type
@@ -173,6 +174,12 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str
       else: raise RuntimeError(f"failed to render {uop}")
 
   return lang.render_kernel(function_name, kernel, bufs, uops)
+
+class ClangLanguage(CStyleLanguage):
+  buffer_suffix = " restrict"
+  type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16"}
+  code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"(({a}>{b})?{a}:{b})"}
+ClangRenderer = functools.partial(uops_to_cstyle, ClangLanguage())
 
 class OpenCLLanguage(CStyleLanguage):
   kernel_prefix = "__kernel "
