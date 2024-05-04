@@ -198,17 +198,19 @@ class TestSchedule(unittest.TestCase):
       out = bn(c1(img)).relu()
       check_schedule(out, 4, [c1.weight, c1.bias])
 
-  def test_fold_conv_batchnorm_sgd(self):
-    with Tensor.train():
-      img = Tensor.ones(1,3,4,4)
-      c1 = nn.Conv2d(3,32,3)
-      bn = nn.BatchNorm2d(32, track_running_stats=False)
-      opt = nn.optim.SGD(nn.state.get_parameters([c1, bn]))
-      img_bn = bn(c1(img)).elu().sum()
-      opt.zero_grad()
-      img_bn.backward()
-      # this is too high
-      check_schedule(opt.schedule_step(), 18)
+  def test_fold_conv_batchnorm_optim(self):
+    # this is too high
+    for optim, cnt in [(nn.optim.Adam, 25), (nn.optim.SGD, 18)]:
+      with self.subTest(optim=optim.__name__):
+        with Tensor.train():
+          img = Tensor.ones(1,3,4,4)
+          c1 = nn.Conv2d(3,32,3)
+          bn = nn.BatchNorm2d(32, track_running_stats=False)
+          opt = optim(nn.state.get_parameters([c1, bn]))
+          img_bn = bn(c1(img)).elu().sum()
+          opt.zero_grad()
+          img_bn.backward()
+          check_schedule(opt.schedule_step(), cnt)
 
   def test_fold_conv_relu(self):
     c1 = nn.Conv2d(3,16,3)
