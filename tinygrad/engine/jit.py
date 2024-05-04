@@ -8,7 +8,7 @@ from tinygrad.device import Buffer, CompiledRunner, BufferXfer, Compiled, Device
 from tinygrad.dtype import DType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, sint
-from tinygrad.engine.realize import ExecItem, capturing, _internal_memory_planner
+from tinygrad.engine.realize import ExecItem, capturing, _internal_memory_planner, EmptyOp, ViewOp
 from tinygrad.nn.state import get_parameters
 from weakref import WeakKeyDictionary
 
@@ -37,6 +37,7 @@ def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]
     current_device = None
 
   for ji in jit_cache:
+    if ji.prg.__class__ in {EmptyOp, ViewOp}: continue
     ji_graph_dev: Optional[Compiled] = None # device on which the ji will be graphed. Not graphed if None.
     if isinstance(ji.prg, CompiledRunner): ji_graph_dev = ji.prg.device
     elif isinstance(ji.prg, BufferXfer) and ji.bufs[0] and ji.bufs[0].device.split(":", 1)[0] in {"HSA", "CUDA"}:
@@ -110,7 +111,10 @@ class TinyJit(Generic[ReturnType]):
   def add_buffer(self, b:Buffer) -> Buffer:
     if found:=self.buffer_replace.get(b, None): return found
     if b.is_allocated() or b.lb_refcount > 0: return b
-    self.buffer_replace[b] = ret = Buffer(b.device, b.size, b.dtype, options=b.options)
+    if b._base is not None:
+      self.buffer_replace[b] = ret = Buffer(b.device, b.size, b.dtype, base=self.buffer_replace.get(b._base, b._base), offset=b.offset)
+    else:
+      self.buffer_replace[b] = ret = Buffer(b.device, b.size, b.dtype, options=b.options)
     return ret
 
   def add(self, ei:ExecItem):
@@ -119,6 +123,7 @@ class TinyJit(Generic[ReturnType]):
   def reset(self):
     self.jit_cache: List[ExecItem] = []
     self.input_replace: Dict[Tuple[int, int], int] = {}
+    self.extra_view_inputs: List[Tuple[int, int, str, int, DType]] = []
     self.buffer_replace: WeakKeyDictionary[Buffer, Buffer] = WeakKeyDictionary()
     self.cnt: int = 0
 
@@ -154,6 +159,13 @@ class TinyJit(Generic[ReturnType]):
       assert len(self.jit_cache), "didn't JIT anything!"
       if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
 
+      # track inputs that are views of buffers
+      for ji in self.jit_cache:
+        for b in ji.bufs:
+          if b is not None and b._base is not None and b._base in input_rawbuffers:
+            input_rawbuffers.append(b)
+            self.extra_view_inputs.append((input_rawbuffers.index(b.base), b.offset, b.device, b.size, b.dtype))
+
       # memory planning (optional)
       assigned = _internal_memory_planner([cast(List[Buffer], x.bufs) for x in self.jit_cache], debug_prefix="JIT ")
       self.jit_cache = [ExecItem(ei.prg, [assigned.get(x,x).ensure_allocated() for x in ei.bufs if x is not None]) for ei in self.jit_cache]
@@ -166,6 +178,8 @@ class TinyJit(Generic[ReturnType]):
     elif self.cnt >= 2:
       # jit exec
       assert self.expected_names == expected_names and self.expected_lbs == expected_lbs, "args mismatch in JIT"
+      for idx, offset, device, size, dtype in self.extra_view_inputs:
+        input_rawbuffers.append(Buffer(device, size, dtype, base=input_rawbuffers[idx], offset=offset).ensure_allocated())
       for (j,i),input_idx in self.input_replace.items(): self.jit_cache[j].bufs[i] = input_rawbuffers[input_idx]
       if DEBUG >= 1 and len(self.jit_cache) >= 10: print(f"jit execs {len(self.jit_cache)} kernels")
       for ei in self.jit_cache: ei.run(var_vals, jit=True)
