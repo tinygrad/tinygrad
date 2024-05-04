@@ -71,10 +71,10 @@ class Linearizer(Kernel):
     AndNode: lambda self,ops,ctx:
       functools.reduce(lambda a,b: ctx.uop_alu_idx(a, b, ops, ctx, BinaryOps.MUL, dtype=dtypes.bool), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
-  def global_load(self, i:int, idxs:List[Node], acc=None, barrier:Optional[UOp]=None, insert_before:Optional[UOp]=None) -> List[UOp]:
+  def global_load(self, i:int, idxs:List[Node], acc:LazyOp=None, barrier:Optional[UOp]=None, insert_before:Optional[UOp]=None) -> List[UOp]:
     buf = self.bufs[i]
-    localtype = self.get_base_dtype(buf.dtype if acc is None else self.reduceop.dtype)
-    const = buf.val if isinstance(buf, ConstBuffer) else acc
+    localtype = self.get_base_dtype(buf.dtype if acc is None else acc.dtype)
+    const = buf.val if isinstance(buf, ConstBuffer) else self.get_reduce_acc(acc)
 
     expand_vars = expand_idxs(idxs)
 
@@ -87,6 +87,7 @@ class Linearizer(Kernel):
       if g_idx != (g_idx//amt*amt): dim, amt = None, 1
     if dim is None:
       g_idx, g_valid = self.sts[i].expr_idxs(idxs)
+    # todo: multioutput test with different output valids to add if acc is None: g_valid = NumNode(1)
 
     if amt > 1: localtype = localtype.vec(amt)
     e_idxs, e_valids = expand_node(g_idx, expand_vars), expand_node(g_valid, expand_vars)
@@ -95,7 +96,7 @@ class Linearizer(Kernel):
     invalid_value = 0
     for idx, valid, rep_idx in zip(e_idxs, e_valids, iter_idxs(expand_vars)):
       this_const, idx, valid = (invalid_value, NumNode(0), NumNode(1)) if valid.max == 0 else (const, idx, valid)
-      key = f"{acc}{localtype}{'CONST'+str(this_const) if this_const is not None and acc is None else (buf.idx if isinstance(buf, MemBuffer) else cast(LocalBuffer, buf).name)}{idx.render()}{valid.render()}"  # noqa: E501
+      key = f"{acc is not None}{localtype}{'CONST'+str(this_const) if this_const is not None and acc is None else (buf.idx if isinstance(buf, MemBuffer) else cast(LocalBuffer, buf).name)}{idx.render()}{valid.render()}"  # noqa: E501
       if key not in self.load_cache:
         if acc is not None:
           self.load_cache[key] = self.uops.add(UOps.DEFINE_ACC, localtype, (), dtypes.as_const(this_const, localtype), False, insert_before)
@@ -227,7 +228,7 @@ class Linearizer(Kernel):
       for n in range(len(replace_acc_idxs)-len(tc.threads)):
         upcast_idxs[n] = replace_acc_idxs[len(tc.threads)+n] # replace upcasts
       if DEBUG >= 3: print(f"store alias: sts={self.sts[0]} idxs={global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs}")
-    acc = self.global_load(out_buf, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, self.get_reduce_acc(reduceop), insert_before=insert_before)
+    acc = self.global_load(out_buf, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop, insert_before=insert_before)
 
     # reduce loop
     loop_ctx = self.render_loop(reduce_idxs, insert_before=insert_before)
@@ -300,7 +301,7 @@ class Linearizer(Kernel):
       # NOTE: this structure is the same as the reduce op above
 
       # define late accumulator
-      acc = self.global_load(0, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, self.get_reduce_acc(reduceop), insert_before=insert_before)
+      acc = self.global_load(0, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop, insert_before=insert_before)
 
       # late reduce loop
       loop_ctx = self.render_loop(end_local_idxs, insert_before=insert_before)
