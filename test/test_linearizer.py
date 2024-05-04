@@ -99,8 +99,8 @@ class TestLinearizer(unittest.TestCase):
     a = LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=2, dtype=dtype, st=st))
     b = LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=3, dtype=dtype, st=st))
     c = LazyOp(BufferOps.LOAD, arg=MemBuffer(idx=4, dtype=dtype, st=st))
-    const2 = LazyOp(BufferOps.CONST, tuple(), arg=2.0)
-    const3 = LazyOp(BufferOps.CONST, tuple(), arg=3.0)
+    const2 = LazyOp(BufferOps.CONST, tuple(), arg=ConstBuffer(2.0, dtype, st))
+    const3 = LazyOp(BufferOps.CONST, tuple(), arg=ConstBuffer(3.0, dtype, st))
     sum1 = LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.ADD, src=(a,b)),))
     sum2 = LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.ADD, src=(a,c)),))
     late1 = LazyOp(op=BinaryOps.ADD, src=(sum1, const2))
@@ -110,6 +110,8 @@ class TestLinearizer(unittest.TestCase):
 
     lin = Linearizer(out0, out1)
     lin.linearize()
+    src = Device[Device.DEFAULT].compiler.render("test", lin.uops)
+    print(src)
 
     stores = [u for u in lin.uops if u.uop is UOps.STORE]
     mutable_bufs = [u for u in lin.uops if u.uop is UOps.DEFINE_GLOBAL and u.arg[-1]]

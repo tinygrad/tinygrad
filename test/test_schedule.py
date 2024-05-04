@@ -744,6 +744,8 @@ class TestSchedule(unittest.TestCase):
     # maybe don't fuse if is 2-axis expand (gemm) and the early asts do not match?
     # (because there might be too many accumulators)
 
+    # what do to about fusing ImageDtype with other dtypes?
+
   @unittest.skip("not useful for bn backward")
   def test_parallel_r_e_fusion(self):
     x = Tensor.empty(16, 16)
@@ -786,6 +788,8 @@ class TestSchedule(unittest.TestCase):
 
     # (for now) don't fuse when the input has 3 big buffer
     check_schedule([conv(x + y + z)], 2)
+
+    # don't fuse downcast
 
   def test_reduce_simple_chase(self):
     a = Tensor.empty(4, 4, 4)
