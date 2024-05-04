@@ -70,7 +70,7 @@ if __name__ == "__main__":
   named_buffers = {v.lazydata.base.buffer:k.replace(".", "_") for k,v in state_dict.items()}
 
   c_code = ["#include <stdlib.h>", "#include <tgmath.h>", "#include <stdbool.h>"]
-  if TIMING: c_code += ["#include <time.h>"]
+  if TIMING: c_code += ["#include <stdio.h>", "#include <time.h>"]
   c_code += [x[1].replace(" restrict ", " ")+"\n" for x in srcs.values()]
 
   premain = ["int main() {"]
