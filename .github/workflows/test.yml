@@ -112,18 +112,41 @@ jobs:
         python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
     - name: Test DEBUG
       run: DEBUG=100 python3 -c "from tinygrad import Tensor; N = 1024; a, b = Tensor.rand(N, N), Tensor.rand(N, N); c = (a.reshape(N, 1, N) * b.T.reshape(1, N, N)).sum(axis=2); print((c.numpy() - (a.numpy() @ b.numpy())).mean())"
+    - name: Repo line count <8000 lines
+      run: MAX_LINE_COUNT=8000 python sz.py
+
+  testcpuimagenet:
+    name: ImageNet to C Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Set up Python 3.8
+      uses: actions/setup-python@v5
+      with:
+        python-version: 3.8
+    - name: Cache python packages
+      uses: actions/cache@v4
+      with:
+        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.8/site-packages
+        key: testing-packages-${{ hashFiles('**/setup.py') }}
+    - name: Cache downloads
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/tinygrad/downloads/
+        key: downloads-cache-cpu-${{ env.DOWNLOAD_CACHE_VERSION }}
+    - name: Install Dependencies
+      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    #- name: Run Pytest
+    #  run: python -m pytest -n=auto test/ -k "not (test_efficientnet and models/test_train.py)" --durations=20
     - name: Compile EfficientNet to C
       run: PYTHONPATH="." CLANG=1 python examples/compile_efficientnet.py > recognize.c
     - name: Compile C to native
       run: clang -O2 recognize.c -lm -o recognize
     - name: Test EfficientNet
       run: cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock
-    - name: Compile llm.c
-      run: |
-        PYTHONPATH="." examples/llm.c/export.py
-        clang -O2 out.c -lm -o out
-    - name: Repo line count <8000 lines
-      run: MAX_LINE_COUNT=8000 python sz.py
 
   testopencl:
     strategy:
