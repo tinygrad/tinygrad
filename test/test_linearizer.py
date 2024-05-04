@@ -4,6 +4,7 @@ import unittest
 from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError, tensor_cores
 from tinygrad.codegen.linearizer import Linearizer, UOp, UOps, expand_node, expand_idxs
 from tinygrad.device import Device, Buffer
+from tinygrad.features.graph import print_tree
 from tinygrad.ops import BinaryOps, BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, TernaryOps, ReduceOps, UnaryOps
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
@@ -78,6 +79,42 @@ class TestLinearizer(unittest.TestCase):
     tb = Tensor.where(Tensor(False), a, b).numpy()
     np.testing.assert_equal(a.numpy(), ta)
     np.testing.assert_equal(b.numpy(), tb)
+
+  def test_multireduce(self):
+    x = Tensor.empty(32)
+    r0 = x.max(axis=0, keepdim=True)
+    r1 = (x - r0).sum(axis=0)
+    out = r1 + 2
+    ast = create_schedule([out.lazydata])[-1].ast
+    for op in ast: print_tree(op)
+    lin = Linearizer(*ast)
+    assert lin.reduceops[0].op is ReduceOps.MAX
+    assert lin.reduceops[1].op is ReduceOps.SUM
+
+    x = Tensor.empty(32, 32)
+    y = Tensor.empty(1, 32)
+    r0 = x.max(axis=0, keepdim=True)
+    out0 = r0 + y
+    out1 = r0 * y
+    r1 = (x - out0).sum(axis=0)
+    out2 = r1 + 10
+    ast = create_schedule([out2.lazydata, out0.lazydata, out1.lazydata])[-1].ast
+    for op in ast: print_tree(op)
+    lin = Linearizer(*ast)
+    assert lin.reduceops[0].op is ReduceOps.MAX
+    assert lin.reduceops[1].op is ReduceOps.SUM
+
+    x = Tensor.empty(32, 32)
+    y = Tensor.empty(1, 32)
+    r0 = x.max(axis=0, keepdim=True)
+    r1 = (x - r0).sum(axis=0)
+    out = r0 + r1
+    ast = create_schedule([out.lazydata])[-1].ast
+    for op in ast: print_tree(op)
+    lin = Linearizer(*ast)
+    assert lin.reduceops[0].op is ReduceOps.MAX
+    assert lin.reduceops[1].op is ReduceOps.SUM
+
 
   def test_multioutput(self):
     dtype, st = dtypes.int, ShapeTracker.from_shape((8,))
@@ -1041,7 +1078,6 @@ class TestLinearizerUOptimize(unittest.TestCase):
 
     out = [u for u in k.uops if u.uop is UOps.STORE][0]
     assert out.vin[-1].uop is UOps.CAST and out.vin[-1].dtype == dtypes.float.vec(2)
-
 
 if __name__ == '__main__':
   unittest.main()
