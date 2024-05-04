@@ -1,6 +1,6 @@
 import unittest, functools, random
 from typing import List
-from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit
+from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes
 from tinygrad.device import BufferCopy, CompiledRunner
 from tinygrad.ops import LoadOps, ReduceOps
 from tinygrad.helpers import CI, prod, Context
@@ -11,6 +11,7 @@ from tinygrad.features.multi import all_reduce, MultiLazyBuffer
 from random import randint
 import numpy as np
 from hypothesis import given, strategies as strat, settings
+from test.helpers import is_dtype_supported
 
 settings.register_profile("my_profile", max_examples=200, deadline=None)
 settings.load_profile("my_profile")
@@ -24,6 +25,13 @@ N = 128
 
 # shard_x is "data parallel"
 # shard_w is "model parallel"
+
+def _test_allreduce(t:Tensor):
+  aa = (t[0:64] + t[64:128] + t[128:192] + t[192:256]).repeat([4,1]).realize()
+  ts = t.shard(tuple([d0, d1, d2, d3]), 0).realize()
+  b = Tensor(MultiLazyBuffer(all_reduce(ReduceOps.SUM, ts.lazydata.lbs), 0))
+  b.realize()
+  return aa, b
 
 @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
 class TestMultiTensor(unittest.TestCase):
@@ -130,6 +138,38 @@ class TestMultiTensor(unittest.TestCase):
     fX = f(X)
     fn = f(n)
     np.testing.assert_allclose(fX.numpy(), fn, rtol=1e-6, atol=1e-6)
+
+  def test_allreduce_naive(self):
+    with Context(RING=0):
+      a,b = _test_allreduce(Tensor.rand(256, 256))
+      np.testing.assert_almost_equal(a.numpy(), b.numpy(), decimal=5)
+
+  def test_allreduce_ring(self):
+    with Context(RING=2):
+      a,b = _test_allreduce(Tensor.rand(256, 256))
+      np.testing.assert_almost_equal(a.numpy(), b.numpy(), decimal=5)
+
+  def test_copy_jit(self):
+    @TinyJit
+    def copy_tensor(x:Tensor): return (x.to(f"{x.device.split(':')[0]}:1") + 1)
+    for _ in range(5):
+      t = Tensor.rand(256).realize()
+      x = copy_tensor(t)
+      np.testing.assert_equal((t+1).numpy(), x.numpy())
+
+  def test_allreduce_naive_jit(self):
+    with Context(RING=0):
+      jit_allreduce = TinyJit(_test_allreduce)
+      for _ in range(5):
+        a,b = jit_allreduce(Tensor.rand(256, 256))
+        np.testing.assert_almost_equal(a.numpy(), b.numpy(), decimal=5)
+
+  def test_allreduce_ring_jit(self):
+    with Context(RING=2):
+      jit_allreduce = TinyJit(_test_allreduce)
+      for _ in range(5):
+        a,b = jit_allreduce(Tensor.rand(256, 256))
+        np.testing.assert_almost_equal(a.numpy(), b.numpy(), decimal=5)
 
   @unittest.skip("slow")
   def test_fuzz_allreduce(self):
@@ -489,7 +529,9 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
     assert p.shape == (8, 8)
     assert p.lazydata.real == [True, True, True, True]
 
-  def test_ops(self):
+  @given(strat.sampled_from([dtypes.float, dtypes.int, dtypes.int64, dtypes.int16]))
+  def test_ops(self, dtype):
+    if not is_dtype_supported(dtype): return
     t = Tensor.arange(64).reshape(8, 8).contiguous().realize()
     t.shard_([f"{Device.DEFAULT}:{i}" for i in range(4)], axis=0)
     for i in range(4):

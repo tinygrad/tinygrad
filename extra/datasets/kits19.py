@@ -7,10 +7,12 @@ from scipy import signal, ndimage
 import os
 import torch
 import torch.nn.functional as F
+from tqdm import tqdm
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import fetch, getenv
 
 BASEDIR = Path(__file__).parent / "kits19" / "data"
+PREPROCESSED_DIR =  Path(__file__).parent / "kits19" / "preprocessed"
 
 """
 To download the dataset:
@@ -70,20 +72,31 @@ def preprocess(file_path):
   image, label = pad_to_min_shape(image, label)
   return image, label
 
-def iterate(val=True, shuffle=False, bs=1):
-  if val: assert bs == 1, "bs has to be 1"
-  files = get_val_files() if val else get_train_files()
+def preprocess_dataset(filenames, preprocessed_dir, val):
+  preprocessed_dataset_dir = (preprocessed_dir / ("val" if val else "train")) if preprocessed_dir is not None else None
+  if not preprocessed_dataset_dir.is_dir(): os.makedirs(preprocessed_dataset_dir)
+  for fn in tqdm(filenames, desc=f"preprocessing {'validation' if val else 'training'}"):
+    case = os.path.basename(fn)
+    image, label = preprocess(fn)
+    image, label = image.astype(np.float32), label.astype(np.uint8)
+    np.save(preprocessed_dataset_dir / f"{case}_x.npy", image, allow_pickle=False)
+    np.save(preprocessed_dataset_dir / f"{case}_y.npy", label, allow_pickle=False)
+
+def iterate(files, preprocessed_dir=None, val=True, shuffle=False, bs=1):
   order = list(range(0, len(files)))
-  preprocessed_path = BASEDIR / ".." / "preprocessed"
+  preprocessed_dataset_dir = (preprocessed_dir / ("val" if val else "train")) if preprocessed_dir is not None else None
   if shuffle: random.shuffle(order)
   for i in range(0, len(files), bs):
     samples = []
     for i in order[i:i+bs]:
-      x_cached_path, y_cached_path = preprocessed_path / f"{os.path.basename(files[i])}_x.npy", preprocessed_path / f"{os.path.basename(files[i])}_y.npy"
-      if x_cached_path.exists() and y_cached_path.exists(): samples += [(np.load(x_cached_path), np.load(y_cached_path))]
+      if preprocessed_dataset_dir is not None:
+        x_cached_path, y_cached_path = preprocessed_dataset_dir / f"{os.path.basename(files[i])}_x.npy", preprocessed_dataset_dir / f"{os.path.basename(files[i])}_y.npy"
+        if x_cached_path.exists() and y_cached_path.exists():
+          samples += [(np.load(x_cached_path), np.load(y_cached_path))]
       else: samples += [preprocess(files[i])]
     X, Y = [x[0] for x in samples], [x[1] for x in samples]
-    if val: yield X[0][None], Y[0]
+    if val:
+      yield X[0][None], Y[0]
     else:
       X_preprocessed, Y_preprocessed = [], []
       for x, y in zip(X, Y):
@@ -155,9 +168,9 @@ def rand_flip(image, label, axis=(1, 2, 3)):
       label = np.flip(label, axis=ax).copy()
   return image, label
 
-def random_brightness_augmentation(image, factor=0.3, prob=0.1):
+def random_brightness_augmentation(image, low=0.7, high=1.3, prob=0.1):
   if random.random() < prob:
-    factor = np.random.uniform(low=1.0-factor, high=1.0+factor, size=1)
+    factor = np.random.uniform(low=low, high=high, size=1)
     image = (image * (1 + factor)).astype(image.dtype)
   return image
 
@@ -183,7 +196,7 @@ def _rand_foreg_cropb(image, label, patch_size):
     return low, high
 
   cl = np.random.choice(np.unique(label[label > 0]))
-  foreg_slices = ndimage.find_objects(ndimage.measurements.label(label==cl)[0])
+  foreg_slices = ndimage.find_objects(ndimage.label(label==cl)[0])
   foreg_slices = [x for x in foreg_slices if x is not None]
   slice_volumes = [np.prod([s.stop - s.start for s in sl]) for sl in foreg_slices]
   slice_idx = np.argsort(slice_volumes)[-2:]
@@ -215,5 +228,5 @@ def rand_balanced_crop(image, label, patch_size=(128, 128, 128), oversampling=0.
   return image, label
 
 if __name__ == "__main__":
-  for X, Y in iterate():
+  for X, Y in iterate(get_val_files()):
     print(X.shape, Y.shape)
