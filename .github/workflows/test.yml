@@ -147,6 +147,10 @@ jobs:
       run: clang -O2 recognize.c -lm -o recognize
     - name: Test EfficientNet
       run: cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock
+    - name: Compile llm.c
+      run: PYTHONPATH="." CLANG=1 examples/llm.c/export.py
+    - name: Compile C to native
+      run: clang -O2 out.c -lm -o out
 
   testopencl:
     strategy:
