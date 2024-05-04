@@ -1,8 +1,8 @@
 from __future__ import annotations
-import os, subprocess, pathlib, ctypes, tempfile, functools
-import Metal, libdispatch
+import os, subprocess, ctypes, functools
+import Metal
 from typing import List, Set, Any, Tuple, Optional
-from tinygrad.helpers import prod, getenv, DEBUG, unwrap2
+from tinygrad.helpers import prod, getenv, unwrap2
 from tinygrad.device import Compiled, LRUAllocator, Compiler, CompilerOptions
 from tinygrad.renderer.cstyle import MetalRenderer
 
