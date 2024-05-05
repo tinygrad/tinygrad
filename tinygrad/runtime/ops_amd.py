@@ -252,13 +252,11 @@ class HWPM4Queue:
     return self
 
   def submit(self, device:AMDDevice):
-    self.signal(device.compute_progress_signal, device.compute_put_value + 1)
     wptr = device.pm4_write_pointer[0]
     pm4_buffer_view = to_mv(device.pm4_ring.va_addr, device.pm4_ring.size).cast("I")
     for i, value in enumerate(self.q): pm4_buffer_view[(wptr+i)%(device.pm4_ring.size//4)] = value
     device.pm4_write_pointer[0] = wptr + len(self.q)
     device.pm4_doorbell[0] = wptr + len(self.q)
-    device.compute_put_value += 1
     return self
 
 # prebuilt sdma packets
@@ -273,7 +271,6 @@ class HWCopyQueue:
   def __init__(self): self.q = []
 
   def submit(self, device:AMDDevice):
-    self.signal(device.copy_progress_signal, device.copy_put_value + 1)
     read_ptr = device.sdma_read_pointer[0]
     if (device.sdma_doorbell_value-read_ptr) > device.sdma_ring.size: raise RuntimeError("SDMA queue overrun")
     for cmd in self.q:
@@ -284,7 +281,6 @@ class HWCopyQueue:
       device.sdma_doorbell_value += cmdsz
     device.sdma_write_pointer[0] = device.sdma_doorbell_value
     device.sdma_doorbell[0] = device.sdma_doorbell_value
-    device.copy_put_value += 1
     return self
 
   def timestamp(self, addr):
@@ -364,23 +360,24 @@ class AMDProgram:
     for i in range(len(vals)): args_st.__setattr__(f'v{i}', vals[i])
 
     q = HWPM4Queue()
-    q.wait(self.device.compute_progress_signal, self.device.compute_put_value)
-    if wait: q.timestamp(ctypes.addressof(self.device.compute_progress_signal) + getattr(hsa.amd_signal_t, 'start_ts').offset)
+    q.wait(self.device.timeline_signal, 0)
+    if wait: q.timestamp(ctypes.addressof(self.device.timeline_signal) + getattr(hsa.amd_signal_t, 'start_ts').offset)
     q.exec(self, self.device.kernargs_ptr, global_size, local_size)
-    if wait:
-      q.timestamp(ctypes.addressof(self.device.compute_progress_signal) + getattr(hsa.amd_signal_t, 'end_ts').offset)
-    q.submit(self.device)
+    if wait: q.timestamp(ctypes.addressof(self.device.timeline_signal) + getattr(hsa.amd_signal_t, 'end_ts').offset)
+    q.signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
+    self.device.timeline_value += 1
     self.device.kernargs_ptr += self.kernargs_segment_size
 
     if wait:
-      self.device._wait_signal(self.device.compute_progress_signal, self.device.compute_put_value)
-      return (self.device.compute_progress_signal.end_ts-self.device.compute_progress_signal.start_ts)/1e8
+      self.device._wait_signal(self.device.timeline_signal, self.device.compute_put_value)
+      return (self.device.timeline_signal.end_ts-self.device.timeline_signal.start_ts)/1e8
 
 class AMDAllocator(LRUAllocator):
   def __init__(self, device:AMDDevice):
     self.device = device
     # NOTE: KFD_IOC_ALLOC_MEM_FLAGS_GTT doesn't work here for readinto
     self.b = [self.device._gpu_alloc(SDMA_MAX_COPY_SIZE*4, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, public=True) for _ in range(2)]
+    self.b_timeline = [0] * len(self.b)
     super().__init__()
 
   def _alloc(self, size:int, options:BufferOptions):
@@ -416,27 +413,34 @@ class AMDAllocator(LRUAllocator):
 
   def copyin(self, dest, src: memoryview):
     for i in range(0, src.nbytes, self.b[0].size):
-      self.b = self.b[::-1]
+      self.b, self.b_timeline = self.b[::-1], self.b_timeline[::-1]
+      AMDDevice._wait_signal(self.device.timeline_signal, self.b_timeline[0])
       ctypes.memmove(self.b[0].va_addr, from_mv(src[i:]), lsize:=min(self.b[0].size, src.nbytes-i))
-      AMDDevice._wait_signal(self.device.copy_progress_signal, self.device.copy_put_value)
-      HWCopyQueue().copy(dest.va_addr+i, self.b[0].va_addr, lsize).submit(self.device)
-    HWPM4Queue().wait(self.device.copy_progress_signal, self.device.copy_put_value).submit(self.device)
+      HWCopyQueue().wait(self.device.timeline_signal, self.device.timeline_value - 1) \
+                   .copy(dest.va_addr+i, self.b[0].va_addr, lsize) \
+                   .signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
+      self.b_timeline[0] = self.device.timeline_value
+      self.device.timeline_value += 1
 
   def copyout(self, dest:memoryview, src):
     self.device.synchronize()
     for i in range(0, dest.nbytes, self.b[0].size):
-      HWCopyQueue().copy(self.b[0].va_addr, src.va_addr+i, lsize:=min(self.b[0].size, dest.nbytes-i)).submit(self.device)
-      AMDDevice._wait_signal(self.device.copy_progress_signal, self.device.copy_put_value)
+      HWCopyQueue().wait(self.device.timeline_signal, self.device.timeline_value - 1) \
+                   .copy(self.b[0].va_addr, src.va_addr+i, lsize:=min(self.b[0].size, dest.nbytes-i)) \
+                   .signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
+      AMDDevice._wait_signal(self.device.timeline_signal, self.device.timeline_value)
+      self.device.timeline_value += 1
+
       ctypes.memmove(from_mv(dest[i:]), self.b[0].va_addr, lsize)
 
   def transfer(self, dest, src, sz:int, src_dev:AMDDevice, dest_dev:AMDDevice):
     src_dev._gpu_map(dest)
-    queue = HWCopyQueue()
-    queue.wait(src_dev.compute_progress_signal, src_dev.compute_put_value)
-    queue.wait(dest_dev.compute_progress_signal, dest_dev.compute_put_value)
-    queue.copy(dest.va_addr, src.va_addr, sz).submit(src_dev)
-    HWPM4Queue().wait(src_dev.copy_progress_signal, src_dev.copy_put_value).submit(src_dev)
-    HWPM4Queue().wait(src_dev.copy_progress_signal, src_dev.copy_put_value).submit(dest_dev)
+    HWCopyQueue().wait(src_dev.timeline_signal, src_dev.timeline_value - 1) \
+                 .wait(dest_dev.timeline_signal, dest_dev.timeline_value - 1) \
+                 .copy(dest.va_addr, src.va_addr, sz) \
+                 .signal(src_dev.timeline_signal, src_dev.timeline_value).submit(src_dev)
+    HWPM4Queue().wait(src_dev.timeline_signal, src_dev.timeline_value).submit(dest_dev)
+    src_dev.timeline_value += 1
 
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
 class AMDDevice(Compiled):
@@ -524,14 +528,8 @@ class AMDDevice(Compiled):
       self._gpu_map(AMDDevice.event_page)
       sync_event = kio.create_event(AMDDevice.kfd, auto_reset=1)
 
-    # self.completion_signal = AMDDevice._get_signal(self.device_id*4, sync_event=sync_event)
-    # self.signal_sdma = AMDDevice._get_signal(self.device_id*4+1, sync_event=kio.create_event(AMDDevice.kfd, auto_reset=1))
-
-    self.compute_put_value: int = 0
-    self.compute_progress_signal = AMDDevice._get_signal(self.device_id*4+2, sync_event=sync_event)
-
-    self.copy_put_value: int = 0
-    self.copy_progress_signal = AMDDevice._get_signal(self.device_id*4+3, sync_event=kio.create_event(AMDDevice.kfd, auto_reset=1))
+    self.timeline_value: int = 1
+    self.timeline_signal = AMDDevice._get_signal(self.device_id*4+1, sync_event=sync_event)
 
     self.kernargs = self._gpu_alloc(0x1000000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
     self.kernargs_ptr = self.kernargs.va_addr
@@ -579,23 +577,8 @@ class AMDDevice(Compiled):
 
     super().__init__(device, AMDAllocator(self), AMDCompiler(self.arch), functools.partial(AMDProgram, self))
 
-  # def _submit_sdma(self, dest, src, copy_size, wait_signals=None, completion_signal=None):
-  #   q = HWCopyQueue()
-  #   if wait_signals is not None:
-  #     # NOTE: we check only low 32 bits to be zeroed, we don't use higher values for signals
-  #     for sig in wait_signals: q.wait(ctypes.addressof(sig) + getattr(hsa.amd_signal_t, 'value').offset)
-  #   if completion_signal is not None: q.timestamp(ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'start_ts').offset)
-  #   q.copy(dest, src, copy_size)
-  #   if completion_signal is not None: q.timestamp(ctypes.addressof(completion_signal) + getattr(hsa.amd_signal_t, 'end_ts').offset)
-  #   if completion_signal is not None: q.signal(completion_signal)
-  #   q.submit(self)
-
-  # def _submit_cache_inv(self, addr=0x0, sz=(1 << 64)-1, gli=0, glv=0, glk=0, gl1=0, gl2=0):
-  #   HWPM4Queue().invalidate_cache().submit(self)
-  #   self.synchronize()
-
   def synchronize(self):
-    AMDDevice._wait_signal(self.compute_progress_signal, self.compute_put_value)
+    AMDDevice._wait_signal(self.timeline_signal, self.timeline_value - 1)
 
     # reset kernargs
     self.kernargs_ptr = self.kernargs.va_addr
