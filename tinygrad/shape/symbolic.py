@@ -1,5 +1,5 @@
 from __future__ import annotations
-import functools, math
+import functools
 import numpy as np
 from math import gcd
 from tinygrad.helpers import partition
@@ -167,10 +167,10 @@ class RangeNode(Node):
 
     if step_min > 0:
       computed_min = start_min
-      computed_max = end_max - 1e-10
+      computed_max = end_max
     else:
       computed_min = start_max
-      computed_max = end_min - 1e-10
+      computed_max = end_min
 
     range_size = int(np.ceil((computed_max - computed_min) / abs(step_max) + 1))
     min_value = computed_min
@@ -189,8 +189,7 @@ class RangeNode(Node):
     end_value = self.end.evaluate() if isinstance(self.end, Node) else self.end
     step_value = self.step.evaluate() if isinstance(self.step, Node) else self.step
 
-    dtype = np.float if any(isinstance(v, float) for v in (start_value, end_value, step_value)) else np.int
-    return np.arange(start_value, end_value, step_value, dtype=dtype)
+    return np.arange(start_value, end_value, step_value)
 
 def symbolic_arange(start: Union[int, Node], end: Union[int, Node], step: Union[int, Node] = 1) -> Node:
   return RangeNode(start, end, step)
