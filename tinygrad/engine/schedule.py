@@ -1,10 +1,10 @@
 import sys, pickle, atexit
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Tuple, List, Dict, Optional, Set, DefaultDict
+from typing import Tuple, List, Dict, Optional, Set, DefaultDict, Deque
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, LazyOp, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps
 from tinygrad.features.graph import log_lazybuffer, realized_lazybuffer
-from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, GlobalCounters, prod, dedup, all_int, merge_dicts, getenv
+from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, GlobalCounters, prod, dedup, all_int, merge_dicts, getenv, flatten
 from tinygrad.shape.symbolic import Variable
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.lazy import LazyBuffer
@@ -91,6 +91,18 @@ def _schedule_group(outs:Tuple[LazyBuffer, ...], realizes:Dict[LazyBuffer, None]
       if vv: var_vals.update(vv)
       ast.append(LazyOp(BufferOps.STORE, (op, ), MemBuffer(i, out.dtype, output_view)))
   return _LBScheduleItem(tuple(ast), outs, tuple(inputs), var_vals)
+
+def _replace_bufis(ast: LazyOp, old_lbs: Tuple[LazyBuffer, ...], new_lbs: Tuple[LazyBuffer, ...]):
+  new_arg = MemBuffer(new_lbs.index(old_lbs[ast.arg.idx]), ast.arg.dtype, ast.arg.st) if ast.op in [BufferOps.LOAD, BufferOps.STORE] else ast.arg
+  return LazyOp(ast.op, tuple(_replace_bufis(x, old_lbs, new_lbs) for x in ast.src), new_arg)
+
+def _merge_prescheduled(prescheduled: List[_LBScheduleItem]):
+  # todo: need to toposort them somewhere
+  inputs: Tuple[LazyBuffer, ...] = tuple(dedup(flatten(psi.inputs for psi in prescheduled)))
+  outputs: Tuple[LazyBuffer, ...] = tuple(dedup(flatten(psi.outputs for psi in prescheduled)))
+  var_vals: Dict[Variable, int] = merge_dicts([psi.var_vals.copy() for psi in prescheduled])
+  ast: Tuple[LazyOp] = tuple(_replace_bufis(ast, psi.inputs+psi.outputs, inputs+outputs) for psi in prescheduled for ast in psi.ast)
+  return _LBScheduleItem(ast, outputs, inputs, var_vals)
 
 # recursively search the entire graph for all LazyBuffers, insert realizes after expands
 def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[LazyBuffer, None],
@@ -235,6 +247,71 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
     for assign in parents_assigns:
       graph[key].append(assign)
       in_degree[assign] += 1
+
+  # todo: this only fuses children of schedule_targets, but we can also fuse children of realized buffers
+  # todo: quite sensitive to toposort order
+  pre_q: Deque[Tuple[int, _LBScheduleItem]] = deque((si.outputs[0].size, si) for key, si in prescheduled.items() if in_degree[key] == 0)
+  preschedule_groups = []
+  pre_in_deg = {k: v for k, v in in_degree.items()}
+  while pre_q:
+    sz, ps = min(pre_q, key=lambda x: x[0])
+    pre_q.remove((sz, ps))
+
+    to_enqueue: List[_LBScheduleItem] = []
+    for x in graph[ps.outputs[0]]:
+      pre_in_deg[x] -= 1
+      if pre_in_deg[x] == 0: to_enqueue.append(prescheduled[x])
+    for nps in to_enqueue:
+      pre_q.append((nps.outputs[0].st.size, nps))
+    # now group these up
+    # only support 1 output for now
+    if len(ps.outputs) == 1:
+      reduced_shapes: DefaultDict[Tuple, List[_LBScheduleItem]] = defaultdict(list)
+      # chase to children with ps as contiguous earlybuf, match by reduced shape
+      for csi in to_enqueue:
+        is_eligible_child, seen_lop = True, set()
+        for ast in csi.ast:
+          for lop in ast.lazyops:
+            if lop in seen_lop: continue
+            seen_lop.add(lop)
+
+            if lop.op is BufferOps.LOAD:
+              membuf: MemBuffer = lop.arg
+              if membuf.idx > len(csi.outputs) and csi.inputs[lop.arg.idx-len(csi.outputs)] == ps.outputs[0]:
+                if membuf.st.shape == csi.outputs[0].st.shape:
+                  print(f"fail shape {membuf.st.shape} == {csi.outputs[0].st.shape}")
+                  is_eligible_child = False  # must be earlybuf (implicitly require reduce)
+                if not membuf.st.contiguous:
+                  print(f"fail contig {membuf.st}")
+                  is_eligible_child = False  # must be contiguous
+        if is_eligible_child:
+          reduced_shapes[csi.outputs[0].st.shape].append(csi)
+      print(ps.outputs[0], reduced_shapes)
+      for lsigroup in reduced_shapes.values():
+        if len(lsigroup) < 2: continue
+        print(f'merging {lsigroup}')
+        preschedule_groups.append(lsigroup)
+
+  # edit the graph with the new groupings
+  for lsigroup in preschedule_groups:
+    merged_lsi = _merge_prescheduled(lsigroup)
+    merged_edges, merged_in_deg = [], 0
+    for k, edges in graph.items():
+      new_edges = [lb for lb in edges if lb not in [lsi.outputs[0] for lsi in lsigroup]]
+      if len(new_edges) != len(edges):
+        assert k not in [lsi.outputs[0] for lsi in lsigroup], "cycle?"
+        new_edges += [merged_lsi.outputs[0]]
+        merged_in_deg += 1
+      graph[k] = new_edges
+
+    for k in [lsi.outputs[0] for lsi in lsigroup]:
+      merged_edges.extend(graph[k])
+      del graph[k]
+      del in_degree[k]
+      del prescheduled[k]
+    graph[merged_lsi.outputs[0]] = merged_edges
+    in_degree[merged_lsi.outputs[0]] = merged_in_deg
+    prescheduled[merged_lsi.outputs[0]] = merged_lsi
 
   return graph, in_degree, prescheduled
 

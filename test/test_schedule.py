@@ -33,6 +33,7 @@ def check_schedule(t:Union[Tensor, List[Tensor]], allowed:int, to_prerealize:Opt
       print("kernel", i+1)
       for op in s.ast: print_tree(op)
   assert len(sched) == allowed, f"{len(sched)}, {allowed}"
+  if getenv("SKIP_LIN"): return sched
   # test the (non loadops) ops linearize
   for s in sched:
     if s.ast[0].op in LoadOps: continue
@@ -744,7 +745,11 @@ class TestSchedule(unittest.TestCase):
     # maybe don't fuse if is 2-axis expand (gemm) and the early asts do not match?
     # (because there might be too many accumulators)
 
+    # match by input + ST and two shapes? start with contigouous input only, check shapes (should determine reduces)
+    # what if same input + st but one is early and another is late?
+
     # todo: no fuse f(expand(reduce(x)), x) "diamonds", or at least make sure it's fused sequential instead of parallel
+    # fused group needs to be contiguous subDAG -- construct with toposort
 
   @unittest.skip("not useful for bn backward")
   def test_parallel_r_e_fusion(self):
