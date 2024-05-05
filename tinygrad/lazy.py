@@ -164,7 +164,7 @@ class LazyBuffer:
   def _reduce_op(self, op:ReduceOps, axis:Tuple[int, ...], acc_dt:Optional[DType]=None) -> LazyBuffer:
     assert all(0 <= x < len(self.shape) for x in axis), f"axis args {axis} out of range for shape {self.shape}"
     if self.base != self and self.base.op == op:
-      if self.base.arg[1] != acc_dt: print(f"WARNING {self.base.arg[1]} != {acc_dt}")
+      #if self.base.arg[1] != acc_dt: print(f"WARNING {self.base.arg[1]} != {acc_dt}")
       input_reduce: LazyBuffer = self.base.srcs[0]
 
       permute_axis = tuple(i for i in range(len(input_reduce.shape)) if i not in self.base.arg[0]) + self.base.arg[0]
