@@ -163,20 +163,21 @@ class LazyBuffer:
 
   def _reduce_op(self, op:ReduceOps, axis:Tuple[int, ...], acc_dt:Optional[DType]=None) -> LazyBuffer:
     assert all(0 <= x < len(self.shape) for x in axis), f"axis args {axis} out of range for shape {self.shape}"
-    if self.base.op in ReduceOps and len(self.base.arg[0]) == 1:
+    if self.base.op == op and self.base.arg[1] == acc_dt:
       input_reduce: LazyBuffer = self.base.srcs[0]
 
       permute_axis = tuple(i for i in range(len(input_reduce.shape)) if i not in self.base.arg[0]) + self.base.arg[0]
       tmp = input_reduce.st.permute(permute_axis)
-      rshape = tmp.shape[-1]
+      rshape = tmp.shape[-len(self.base.arg[0]):]
+      prshape = prod(rshape)
 
       nv: List[View] = []
       for v in self.st.views:
-        nv.append(View.create(v.shape+(rshape,), tuple(x*rshape for x in v.strides)+(1,),
-                              v.offset*rshape, v.mask+((0,rshape),) if v.mask is not None else None))
+        nv.append(View.create(v.shape+rshape, tuple(x*prshape for x in v.strides)+(1,),
+                              v.offset*prshape, v.mask+tuple((0,s) for s in rshape) if v.mask is not None else None))
       st = tmp + ShapeTracker(tuple(nv))
-      ret = input_reduce.base._view(st)._reduce_op(op, axis + (len(st.shape)-1,), acc_dt)
-      return ret.reshape(ret.shape[:-1])
+      ret = input_reduce.base._view(st)._reduce_op(op, axis + tuple(range(len(st.shape)-len(rshape), len(st.shape))), acc_dt)
+      return ret.reshape(ret.shape[:-len(rshape)])
 
     axis = tuple(x for x in axis if self.shape[x] != 1)
     if len(axis) == 0: return self
