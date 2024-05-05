@@ -744,6 +744,8 @@ class TestSchedule(unittest.TestCase):
     # maybe don't fuse if is 2-axis expand (gemm) and the early asts do not match?
     # (because there might be too many accumulators)
 
+    # todo: no fuse f(expand(reduce(x)), x) "diamonds", or at least make sure it's fused sequential instead of parallel
+
   @unittest.skip("not useful for bn backward")
   def test_parallel_r_e_fusion(self):
     x = Tensor.empty(16, 16)

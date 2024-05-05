@@ -116,6 +116,10 @@ class TestLinearizer(unittest.TestCase):
     assert len(mutable_bufs) == len(stores) == 2
     assert [u.arg[0] for u in mutable_bufs] == [0, 1]
 
+    # todo: test different dtype outputs
+    # todo: test different output sts
+
+
   def test_load_dedup(self):
     # for different leaves in the AST, the same loads may occur.
 
