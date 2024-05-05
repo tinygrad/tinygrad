@@ -213,9 +213,7 @@ class TestSchedule(unittest.TestCase):
     # run
     img = Tensor.rand(2,3,64,64, requires_grad=True)
     c1(img).relu().mean().backward()
-    # TODO: this should be 4, not 5
-    # img.grad is requiring two reduces
-    check_schedule([img.grad, c1.weight.grad], 5)
+    check_schedule([img.grad, c1.weight.grad], 4)
 
   def test_fold_conv_relu(self):
     c1 = nn.Conv2d(3,16,3)
@@ -648,7 +646,7 @@ class TestSchedule(unittest.TestCase):
       opt = nn.optim.SGD(nn.state.get_parameters([c1, c2, c3, c4]))
       opt.zero_grad()
       c4(c3(c2(c1(img).relu()).relu()).relu()).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 22)
+      check_schedule(opt.schedule_step(), 19)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_prefer_half_buffer(self):

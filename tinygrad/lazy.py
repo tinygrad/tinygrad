@@ -5,7 +5,7 @@ from tinygrad.dtype import dtypes, DType, ConstType, least_upper_dtype
 from tinygrad.helpers import prod, getenv, all_int, all_same, DEBUG
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op, exec_alu, python_alu
 from tinygrad.shape.symbolic import sint, Variable
-from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.buffer import Buffer
 from weakref import ref, ReferenceType, WeakValueDictionary
 
@@ -163,6 +163,21 @@ class LazyBuffer:
 
   def _reduce_op(self, op:ReduceOps, axis:Tuple[int, ...], acc_dt:Optional[DType]=None) -> LazyBuffer:
     assert all(0 <= x < len(self.shape) for x in axis), f"axis args {axis} out of range for shape {self.shape}"
+    if self.base.op in ReduceOps and len(self.base.arg[0]) == 1:
+      input_reduce: LazyBuffer = self.base.srcs[0]
+
+      permute_axis = self.base.arg[0] + tuple(i for i in range(len(input_reduce.shape)) if i not in self.base.arg[0])
+      tmp = input_reduce.st.permute(permute_axis)
+      new_stride = prod(tmp.shape[len(self.base.arg[0]):])
+
+      nv: List[View] = []
+      for v in self.st.views:
+        nv.append(View.create((tmp.shape[0],)+v.shape, (new_stride,)+v.strides, v.offset, ((0,tmp.shape[0]),)+v.mask if v.mask is not None else None))
+        new_stride = prod(v.shape)
+      st = tmp + ShapeTracker(tuple(nv))
+      ret = input_reduce.base._view(st)._reduce_op(op, (0,)+tuple(x+1 for x in axis), acc_dt)
+      return ret.reshape(ret.shape[1:])
+
     axis = tuple(x for x in axis if self.shape[x] != 1)
     if len(axis) == 0: return self
     new_shape = tuple(1 if i in axis else s for i,s in enumerate(self.shape))
