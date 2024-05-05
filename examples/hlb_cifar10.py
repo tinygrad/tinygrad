@@ -49,7 +49,7 @@ class UnsyncedBatchNorm:
       # https://github.com/pytorch/pytorch/blob/c618dc13d2aa23625cb0d7ada694137532a4fa33/aten/src/ATen/native/cuda/Normalization.cuh
       # There's "online" algorithms that fix this, like https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_Online_algorithm
       batch_mean = x.mean(axis=(1,3,4))
-      y = (x - batch_mean.reshape(shape=[batch_mean.shape[0], 1, -1, 1, 1]))
+      y = (x - batch_mean.detach().reshape(shape=[batch_mean.shape[0], 1, -1, 1, 1]))  # d(var)/d(mean) = 0
       batch_var = (y*y).mean(axis=(1,3,4))
       batch_invstd = batch_var.add(self.eps).pow(-0.5)
 
