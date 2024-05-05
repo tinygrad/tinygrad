@@ -14,7 +14,7 @@ from tinygrad.features.multi import MultiLazyBuffer
 from tinygrad.ops import LoadOps, ScheduleItem
 from tinygrad.buffer import Buffer, BufferOptions
 from tinygrad.device import Device
-from tinygrad.shape.symbolic import sint, Variable, MulNode, Node
+from tinygrad.shape.symbolic import sint, Variable, MulNode, Node, RangeNode, symbolic_arange
 from tinygrad.engine.realize import run_schedule, memory_planner
 from tinygrad.engine.schedule import create_schedule_with_vars
 
@@ -272,7 +272,12 @@ class Tensor:
   def from_node(y:Node, **kwargs) -> Tensor:
     if isinstance(y, MulNode): return Tensor.from_node(y.a, **kwargs) * y.b
     if isinstance(y, Variable): return Tensor(y, **kwargs, requires_grad=False)
+    if isinstance(y, RangeNode): return Tensor._from_range_node(y, **kwargs)
     raise RuntimeError(f"unhandled Node {y}")
+  
+  def _from_range_node(node: RangeNode, **kwargs) -> Tensor:
+    array = node.evaluate()
+    return Tensor(array, **kwargs)
 
   # ***** creation llop entrypoint *****
 
@@ -423,9 +428,11 @@ class Tensor:
     ```
     """
     if stop is None: stop, start = start, 0
-    assert all(isinstance(s, (int, float)) for s in (start, stop, step)), f"symbolic arange not supported {start=}, {stop=}, {step=}"
+    if isinstance(stop, Variable) or isinstance(start, Variable) or isinstance(step, Variable):
+      return Tensor.from_node(symbolic_arange(start, stop, step), **kwargs)
+    assert all(isinstance(s, (int, float)) for s in (start, stop, step)), "Non Symbolic Arange requires numeric start, stop & step"
     dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
-    return (Tensor.full((math.ceil((stop-start)/step),), step, dtype=dtype, **kwargs)._cumsum() + (start - step)).cast(dtype)
+    return (Tensor.full((math.ceil((stop-start)/step),), step, dtype=dtype)._cumsum() + (start - step)).cast(dtype)
 
   @staticmethod
   def eye(dim:int, **kwargs):
