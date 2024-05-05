@@ -274,7 +274,8 @@ class Tensor:
     if isinstance(y, Variable): return Tensor(y, **kwargs, requires_grad=False)
     if isinstance(y, RangeNode): return Tensor._from_range_node(y, **kwargs)
     raise RuntimeError(f"unhandled Node {y}")
-  
+
+  @staticmethod
   def _from_range_node(node: RangeNode, **kwargs) -> Tensor:
     array = node.evaluate()
     return Tensor(array, **kwargs)
@@ -432,7 +433,7 @@ class Tensor:
       return Tensor.from_node(symbolic_arange(start, stop, step), **kwargs)
     assert all(isinstance(s, (int, float)) for s in (start, stop, step)), "Non Symbolic Arange requires numeric start, stop & step"
     dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
-    return (Tensor.full((math.ceil((stop-start)/step),), step, dtype=dtype)._cumsum() + (start - step)).cast(dtype)
+    return (Tensor.full((math.ceil((stop-start)/step),), step, dtype=dtype, **kwargs)._cumsum() + (start - step)).cast(dtype)
 
   @staticmethod
   def eye(dim:int, **kwargs):

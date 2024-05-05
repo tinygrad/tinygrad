@@ -63,7 +63,7 @@ class TestTensorVariable(unittest.TestCase):
     vv.bind(2)
     ret = Tensor.arange(0, vv)
     ret.realize()
-  
+
   def test_symbolic_arange_non_zero_start(self):
     start_var = Variable("start", 1, 10)
     start_var.bind(3)
@@ -82,7 +82,7 @@ class TestTensorVariable(unittest.TestCase):
     expected_length = (start - end_var.val) // abs(step)
     ret = Tensor.arange(start, end_var, step)
     ret.realize()
-    self.assertEqual(len(ret), expected_length, "The length of the Tensor should match the Expected Range Length")  
+    self.assertEqual(len(ret), expected_length, "The length of the Tensor should match the Expected Range Length")
 
   def test_symbolic_arange_variable_step(self):
     start = 1

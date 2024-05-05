@@ -1,5 +1,5 @@
 from __future__ import annotations
-import functools
+import functools, math
 import numpy as np
 from math import gcd
 from tinygrad.helpers import partition
@@ -167,35 +167,31 @@ class RangeNode(Node):
 
     if step_min > 0:
       computed_min = start_min
-      computed_max = end_max
+      computed_max = end_max - 1e-10
     else:
       computed_min = start_max
-      computed_max = end_min
+      computed_max = end_min - 1e-10
 
-    range_size = (computed_max - computed_min) // abs(step_max) + 1
-
+    range_size = int(np.ceil((computed_max - computed_min) / abs(step_max) + 1))
     min_value = computed_min
     max_value = computed_min + (range_size - 1) * step_max
 
     return min_value, max_value
-  
+
   def render(self, ops=None, ctx=None):
     start = self.start if isinstance(self.start, int) else self.start.render(ops, ctx)
     end = self.end if isinstance(self.end, int) else self.end.render(ops, ctx)
     step = self.step if isinstance(self.step, int) else self.step.render(ops, ctx)
     return f"range({start}, {end}, {step})"
-  
+
   def evaluate(self):
     start_value = self.start.evaluate() if isinstance(self.start, Node) else self.start
     end_value = self.end.evaluate() if isinstance(self.end, Node) else self.end
     step_value = self.step.evaluate() if isinstance(self.step, Node) else self.step
 
-    start_value = int(start_value)
-    end_value = int(end_value)
-    step_value = int(step_value)
+    dtype = np.float if any(isinstance(v, float) for v in (start_value, end_value, step_value)) else np.int
+    return np.arange(start_value, end_value, step_value, dtype=dtype)
 
-    return np.arange(start_value, end_value, step_value)
-  
 def symbolic_arange(start: Union[int, Node], end: Union[int, Node], step: Union[int, Node] = 1) -> Node:
   return RangeNode(start, end, step)
 
