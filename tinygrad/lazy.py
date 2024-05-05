@@ -5,7 +5,7 @@ from tinygrad.dtype import dtypes, DType, ConstType, least_upper_dtype
 from tinygrad.helpers import prod, getenv, all_int, all_same, DEBUG
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op, exec_alu, python_alu
 from tinygrad.shape.symbolic import sint, Variable
-from tinygrad.shape.shapetracker import ShapeTracker, View
+from tinygrad.shape.shapetracker import ShapeTracker, View, strides_for_shape
 from tinygrad.buffer import Buffer
 from weakref import ref, ReferenceType, WeakValueDictionary
 
@@ -163,17 +163,18 @@ class LazyBuffer:
 
   def _reduce_op(self, op:ReduceOps, axis:Tuple[int, ...], acc_dt:Optional[DType]=None) -> LazyBuffer:
     assert all(0 <= x < len(self.shape) for x in axis), f"axis args {axis} out of range for shape {self.shape}"
-    if self.base != self and self.base.op == op and self.base.arg[1] == acc_dt and len(self.base.arg[0]) == 1:
+    if self.base != self and self.base.op == op and self.base.arg[1] == acc_dt:
       input_reduce: LazyBuffer = self.base.srcs[0]
 
       permute_axis = tuple(i for i in range(len(input_reduce.shape)) if i not in self.base.arg[0]) + self.base.arg[0]
       tmp = input_reduce.st.permute(permute_axis)
       rshape = tmp.shape[-len(self.base.arg[0]):]
       prshape = prod(rshape)
+      strides = strides_for_shape(rshape)
 
       nv: List[View] = []
       for v in self.st.views:
-        nv.append(View.create(v.shape+rshape, tuple(x*prshape for x in v.strides)+(1,),
+        nv.append(View.create(v.shape+rshape, tuple(x*prshape for x in v.strides)+strides,
                               v.offset*prshape, v.mask+tuple((0,s) for s in rshape) if v.mask is not None else None))
       st = tmp + ShapeTracker(tuple(nv))
       ret = input_reduce.base._view(st)._reduce_op(op, axis + tuple(range(len(st.shape)-len(rshape), len(st.shape))), acc_dt)
