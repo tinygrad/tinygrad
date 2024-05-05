@@ -85,8 +85,8 @@ def _schedule_group(outs:Tuple[LazyBuffer, ...], realizes:Dict[LazyBuffer, None]
   inputs: List[LazyBuffer] = []
   ast: List[LazyOp] = []
   var_vals: Dict[Variable, int] = merge_dicts([out.st.var_vals.copy() for out in outs])
-  if outs[0].op in {LoadOps.CUSTOM, LoadOps.COPY, LoadOps.EMPTY}:
-    ast, inputs = [LazyOp(outs[0].op, (), outs[0].arg)], list(outs[0].srcs)
+  if outs[0].op in {LoadOps.CUSTOM, LoadOps.COPY, LoadOps.EMPTY, LoadOps.VIEW}:
+    ast, inputs = [LazyOp(outs[0].op, (), outs[0].arg)], [x.base for x in outs[0].srcs]
   else:
     for i, out in enumerate(outs):
       output_st = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape)
@@ -126,6 +126,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
   if buf.op is LoadOps.COPY:
     assert buf.srcs[0].st.contiguous and buf.srcs[0].size == buf.srcs[0].base.size, "can only copy contig"
     realizes[buf.srcs[0].base] = None
+  if buf.op is LoadOps.VIEW: realizes[buf.srcs[0].base] = None
   for x in buf.srcs:
     children[x.base][buf] = None
     _recurse_lb(x, realizes, allbufs, simple_pads, children)
@@ -144,6 +145,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
   simple_pads: Set[LazyBuffer] = set()
   children: DefaultDict[LazyBuffer, Dict[LazyBuffer, None]] = defaultdict(dict)
   for out in outs: _recurse_lb(out.base, realizes, allbufs, simple_pads, children, scheduled=True)
+  assign_targets = {x.srcs[1]:x for x in realizes if x.op is LoadOps.ASSIGN and x not in seen and x.realized is None}
 
   # check if we have to realize pads
   for p in simple_pads:
@@ -167,22 +169,24 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
           realized_children[tr] = st
           # can only reduce contiguous
           # max one reduceop per kernel
-          if not st.contiguous or st.size != r.st.size or (tr in reduce_for_op and reduce_for_op[tr] != r):
-            can_chase = tr not in reduce_for_op or reduce_for_op[tr] == r
+          if not st.contiguous or st.size != r.st.size or tr in reduce_for_op:
+            can_chase = tr not in reduce_for_op
             forced_realize = True
             break
           if len(realized_children) > 1:
-            for rc in realized_children:
-              rc_parents = deque(x.base for x in rc.srcs)
-              while rc_parents:
-                if (p:=rc_parents.pop()).realized or p.op is LoadOps.CONST: continue
-                if p is r: continue
-                # max one reduceop per kernel
-                if p.op in ReduceOps:
-                  can_chase = tr not in reduce_for_op or reduce_for_op[tr] == r
-                  forced_realize = True
-                  break
-                for x in p.srcs: rc_parents.append(x.base)
+            rc_parents, rc_children = deque(realized_children), deque(realized_children)
+            while rc_parents and not forced_realize:
+              # max one reduceop per kernel
+              if (p:=rc_parents.pop()).op in ReduceOps: forced_realize = True
+              else: rc_parents.extend(x.base for x in p.srcs if x.base.realized is None and x.base is not r)
+            realized_descendants: Set[LazyBuffer] = set()
+            while rc_children and not forced_realize:
+              if (c:=rc_children.pop()).op in ReduceOps or not c.st.contiguous or c.st.size != r.st.size or c in reduce_for_op:
+                realized_descendants.clear()
+                break
+              if c in realizes and c not in (*realized_children, tr): realized_descendants.add(c)
+              rc_children.extend(x for x in children[c] if x.realized is None and x.device == r.device)
+            realized_children.update((rd, st) for rd in realized_descendants)
           continue
         for tr_next in children[tr].keys():
           if not tr_next.realized:
@@ -196,6 +200,13 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
               break
             next_child_set[tr_next] = st + st_childs[0].st
       child_set = next_child_set
+    if not forced_realize and any(x.op is LoadOps.ASSIGN for x in realized_children):
+      parents = deque((r, *realized_children))
+      while parents and not forced_realize:
+        if (p:=parents.pop().base).realized or p in realizes:
+          if p in assign_targets and assign_targets[p] not in realized_children: forced_realize, can_chase = True, False
+          continue
+        parents.extend(p.srcs)
     if forced_realize:
       tr = r
       if can_chase:
@@ -224,7 +235,6 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
   # preschedule all buffers in realizes
   prescheduled = {group[0]:_schedule_group(tuple(group), realizes, reduce_for_op) for group in output_groups.values()}
   schedule_targets = {out:ps for ps in prescheduled.values() for out in ps.outputs}
-  assign_targets = {x.srcs[1]:x for x in realizes if x.op is LoadOps.ASSIGN and x not in seen and x.realized is None}
 
   # breadth first ordering
   graph: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
@@ -268,10 +278,10 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
 
   if SAVE_SCHEDULE:
     def _save():
-      print(f"saving {len(SCHEDULES)} schedule graphs to", fp:="schedule.pkl")
+      print(f"saving {len(SCHEDULES)} schedule graphs to", fp:=getenv("SAVE_SCHEDULE_PATH", "schedule.pkl"))
       pickle.dump(SCHEDULES, open(fp, "wb"))
     if len(SCHEDULES) == 0: atexit.register(_save)
-    SCHEDULES.append((graph, prescheduled))
+    SCHEDULES.extend((ps.ast for ps in prescheduled.values()) if getenv("CAPTURE_AST") else [(graph, prescheduled)])
   # confirm everything was scheduled correctly
   if not all(degree == 0 for degree in in_degree.values()) or len(prescheduled) != len(schedule):
     raise RuntimeError(f"cycle detected in graph, prescheduled {len(prescheduled)} but only scheduled {len(schedule)}")

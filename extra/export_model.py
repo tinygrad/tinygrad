@@ -64,8 +64,7 @@ def jit_model(model, *args) -> Tuple[TinyJit,Dict[int,str]]:
   return run, special_names
 
 def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,int,int]], bufs:Dict[str,Tuple[str,int,int]], bufs_to_save:Dict[str,Tensor], input_names:List[str], output_names:List[str]) -> str:
-  from tinygrad.runtime.ops_clang import CLANG_PROGRAM_HEADER
-  cprog = [CLANG_PROGRAM_HEADER]
+  cprog = ["#include <tgmath.h>"]
 
   for name,cl in bufs_to_save.items():
     weight = ''.join(["\\x%02X"%x for x in bytes(cl._buf)])

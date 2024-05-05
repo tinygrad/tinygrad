@@ -27,6 +27,11 @@ class Opt:
   axis: Optional[int] = None
   amt: Optional[int] = None
   def __repr__(self): return f"Opt(op={self.op}, axis={self.axis}, amt={self.amt})"
+  def real_axis(self, k:Kernel):
+    if self.axis is None: return -1
+    if self.op is OptOps.UNROLL: return k.first_reduce+self.axis
+    if self.op in {OptOps.GROUP, OptOps.GROUPTOP}: return k.first_reduce+k.group_for_reduces+self.axis
+    return self.axis
 
 @dataclass(frozen=True)
 class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x N)
@@ -54,6 +59,7 @@ tensor_cores: Dict[str, List[TensorCore]] = {
   "CUDA": [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(0,2)], thread_local_sizes=[[2,2,2],[2,2],[2,2]], thread_local_aliases=[ [[0],[-2],[5],[0],[0],[-1,1,2,-3],[3,4]], [[5],[0],[0],[4],[3],[-1,1,2,-2],[0]], [[2],[-2],[5],[1],[-1],[0],[3,4]] ], dtype_in=di, dtype_out=do) for (di, do) in ([(dtypes.half, dtypes.float)] if getenv("PTX") else [(dtypes.half, dtypes.float), (dtypes.bfloat16, dtypes.float)])],  # noqa: E501
 }
 tensor_cores["AMD"] = tensor_cores["HSA"]
+tensor_cores["NV"] = tensor_cores["CUDA"]
 
 class LocalBuffer(NamedTuple):
   name: str
@@ -431,9 +437,7 @@ class Kernel:
       self.applied_opts.append(opt)
       return
 
-    if opt.axis is not None:
-      axis = opt.axis + (self.first_reduce if opt.op is OptOps.UNROLL else (self.first_reduce+self.group_for_reduces if opt.op in [OptOps.GROUP, OptOps.GROUPTOP] else 0))  # noqa: E501
-    else: axis = -1
+    axis = opt.real_axis(self)
     check(axis < len(self.full_shape), "invalid axis")
 
     if opt.amt is not None:
