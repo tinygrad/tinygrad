@@ -45,7 +45,8 @@ class CStyleLanguage(NamedTuple):
     if math.isnan(x): val = "NAN"
     elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
     elif dtype == dtypes.float64: val = f"{x}"
-    else: val = f"{x}f" if dtypes.is_float(dtype) else f"{x}" if dtypes.is_int(dtype) else f"{x}".lower()
+    elif dtype == dtypes.bool: val = "1" if x else "0"
+    else: val = f"{x}f" if dtypes.is_float(dtype) else f"{x}"
     return (self.render_cast([val] * dtype.count, dtype) if dtype.count > 1 or dtype not in [dtypes.float, dtypes.int, dtypes.bool] else val)
 
   # returns a str expression of the loaded value with the output type
@@ -161,9 +162,8 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str
         bufs.append((args.expr, (dtype,False)))
         r[u] = args.expr
       elif uop is UOps.DEFINE_GLOBAL:
-        assert len(bufs) == args[0], f"missed a global buffer {len(bufs)} {args}"
-        bufs.append((args[1], (dtype,args[2])))
-        r[u] = args[1]
+        bufs.append((nm:=f"data{args[0]}", (dtype,args[1])))
+        r[u] = nm
       elif uop is UOps.WMMA: kk(f"{lang.render_dtype(dtype)} {ssa('wmma',u)} = __{args[0]}({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")
       elif uop is UOps.DEFINE_ACC: kk(f"{lang.render_dtype(dtype)} {ssa('acc',u)} = {lang.render_const(args, dtype)};")
       elif uop is UOps.CONST: r[u] = lang.render_const(args, dtype) if args >= 0 else f"({lang.render_const(args, dtype)})"
@@ -174,6 +174,12 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:UOpGraph) -> str
       else: raise RuntimeError(f"failed to render {uop}")
 
   return lang.render_kernel(function_name, kernel, bufs, uops)
+
+class ClangLanguage(CStyleLanguage):
+  buffer_suffix = " restrict"
+  type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16"}
+  code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"(({a}>{b})?{a}:{b})"}
+ClangRenderer = functools.partial(uops_to_cstyle, ClangLanguage())
 
 class OpenCLLanguage(CStyleLanguage):
   kernel_prefix = "__kernel "

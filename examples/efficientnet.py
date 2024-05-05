@@ -83,6 +83,7 @@ if __name__ == "__main__":
     cv2.destroyAllWindows()
   else:
     img = Image.open(fetch(url))
-    with Timing("did inference in "):
-      out, _ = infer(model, img)
-      print(np.argmax(out), np.max(out), lbls[np.argmax(out)])
+    for i in range(getenv("CNT", 1)):
+      with Timing("did inference in "):
+        out, _ = infer(model, img)
+        print(np.argmax(out), np.max(out), lbls[np.argmax(out)])

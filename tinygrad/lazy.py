@@ -4,7 +4,7 @@ from typing import Union, Optional, Any, Tuple, List
 from tinygrad.dtype import dtypes, DType, ConstType, least_upper_dtype
 from tinygrad.helpers import prod, getenv, all_int, all_same, DEBUG
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op, exec_alu, python_alu
-from tinygrad.shape.symbolic import sint
+from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.buffer import Buffer
 from weakref import ref, ReferenceType, WeakValueDictionary
@@ -13,7 +13,7 @@ lazycache: WeakValueDictionary[Any, LazyBuffer] = WeakValueDictionary()
 def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
                       base:Optional[LazyBuffer]=None, enable_cache=bool(getenv("LAZYCACHE", 1))):
   if st.size == 0: op, arg, srcs, base = LoadOps.CONST, 0, (), None
-  if op is LoadOps.CONST: arg, enable_cache = dtypes.as_const(arg, dtype), True
+  if op is LoadOps.CONST: arg, enable_cache = dtypes.as_const(arg, dtype) if not isinstance(arg, Variable) else arg, True
 
   cache_key = (device, st, dtype, op, arg, tuple(ref(x) for x in srcs)) if base is None else (st, ref(base))
   if enable_cache and (rret := lazycache.get(cache_key, None)): return rret
@@ -22,6 +22,7 @@ def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Op]=
   if enable_cache: lazycache[cache_key] = ret
   return ret
 
+view_supported_devices = {"LLVM", "CLANG", "CUDA", "DISK"}
 class LazyBuffer:
   def __init__(self, device:str, st:ShapeTracker, dtype:DType,
                op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
@@ -32,8 +33,15 @@ class LazyBuffer:
       # properties on base
       self.op, self.arg, self.srcs = op, arg, srcs  # this is a LazyOp, except the src is LazyBuffers and not LazyOps
       assert self.op is not LoadOps.ASSIGN or srcs[1].base.realized is not None, "assign target must be realized"
-      self.buffer: Buffer = srcs[1].base.buffer if self.op is LoadOps.ASSIGN else Buffer(device, self.size, dtype)
-      self.buffer.lb_refcount += 1
+
+      if (self.op is LoadOps.CONTIGUOUS or (self.op is UnaryOps.CAST and self.arg[1] is True)) and srcs[0].st.consecutive and \
+          not srcs[0].is_unrealized_const() and device.split(":")[0] in view_supported_devices:
+        # some LazyBuffers can be processed with only a view, no AST required
+        self.buffer: Buffer = srcs[0].base.buffer.view(st.size, dtype, srcs[0].st.views[0].offset * srcs[0].dtype.itemsize)
+        self.op = LoadOps.VIEW
+      else:
+        self.buffer = srcs[1].base.buffer if self.op is LoadOps.ASSIGN else Buffer(device, self.size, dtype)
+      self.buffer.ref(1)
       self.contiguous_child: Optional[Tuple[ReferenceType[LazyBuffer], ShapeTracker]] = None
       self.forced_realize = False
     else:
@@ -42,7 +50,7 @@ class LazyBuffer:
       self._base = base
 
   def __del__(self):
-    if hasattr(self, 'buffer'): self.buffer.lb_refcount -= 1
+    if hasattr(self, 'buffer'): self.buffer.ref(-1)
 
   def __repr__(self) -> str:
     return f"<LB {self.device} {self.shape} {str(self.dtype)[7:]} {self.st if self.base != self else (self.op, self.realized)}>"
@@ -97,7 +105,7 @@ class LazyBuffer:
       new_shape = new_shape[:-1] + ((new_shape[-1]*self.dtype.itemsize) // dtype.itemsize,)
     return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), dtype, UnaryOps.CAST, (dtype, bitcast), (self,))
 
-  def is_unrealized_const(self): return self.base.realized is None and self.base.op is LoadOps.CONST
+  def is_unrealized_const(self): return self.base.realized is None and self.base.op is LoadOps.CONST and not isinstance(self.base.arg, Variable)
   def is_unrealized_unmasked_const(self): return self.is_unrealized_const() and all(v.mask is None for v in self.st.views)
 
   def _copy(self, device:str) -> LazyBuffer:
@@ -165,9 +173,6 @@ class LazyBuffer:
     # TODO: this logic should move to the scheduler
     if self.size == 0 and 0 not in new_shape: return self.const({ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[op], new_shape)
 
-    if self.is_unrealized_unmasked_const():
-      return self.const(self.base.arg * {ReduceOps.SUM: prod(self.shape[i] for i in axis), ReduceOps.MAX: 1}[op], new_shape)
-
     # upcast acc_dt here so if reduce is splitted, the intermediate dtype is upcasted
     if op is ReduceOps.SUM and acc_dt is None:
       acc_dt = least_upper_dtype(self.dtype, dtypes.uint) if dtypes.is_unsigned(self.dtype) else \
@@ -176,6 +181,10 @@ class LazyBuffer:
     if acc_dt is not None and acc_dt != self.dtype:
       # cast back to float16 or bfloat16 to match torch / jax behavior
       return self.cast(acc_dt).r(op, axis, acc_dt).cast(self.dtype if self.dtype in [dtypes.float16, dtypes.bfloat16] else acc_dt)
+
+    # const folding after acc_dt cast to correct output dtype
+    if self.is_unrealized_unmasked_const():
+      return self.const(self.base.arg * {ReduceOps.SUM: prod(self.shape[i] for i in axis), ReduceOps.MAX: 1}[op], new_shape)
 
     # TODO: can we split symbolic shape if the reduce axis is not symbolic?
     if not getenv("SPLIT_REDUCEOP", 1) or not all_int(self.shape) or (0 in self.shape) or \
