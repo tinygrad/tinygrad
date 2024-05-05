@@ -7,7 +7,7 @@ from collections import defaultdict
 import numpy as np
 
 from tinygrad.dtype import DType, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype
-from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, fully_flatten, argsort, IMAGE, DEBUG, WINO, THREEFRY
+from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, fully_flatten, argsort, IMAGE, DEBUG, WINO, THREEFRY, LCG
 from tinygrad.helpers import getenv
 from tinygrad.lazy import LazyBuffer
 from tinygrad.features.multi import MultiLazyBuffer
@@ -327,25 +327,35 @@ class Tensor:
     ```
     """
     if Tensor._rng_counter is None: Tensor._rng_counter = Tensor([0], dtype=dtypes.uint32, requires_grad=False)
-    if not THREEFRY.value:
+    if not THREEFRY.value and not LCG.value:
       # for bfloat16, numpy rand passes buffer in float
       if (dtype or dtypes.default_float) == dtypes.bfloat16:
         return Tensor.rand(*shape, **kwargs, device=device, dtype=dtypes.float).cast(dtypes.bfloat16)
       return Tensor._loadop(LoadOps.CUSTOM, argfix(*shape), arg=custom_random, device=device, dtype=dtype, **kwargs)
 
-    # threefry
     if (num := prod((shape:=argfix(*shape)))) == 0: return Tensor.zeros(shape, device=device, dtype=dtype, **kwargs)
-    counts = (Tensor.arange(num, device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._rng_counter.to(device)).realize().pad(((0,num%2),))
-    Tensor._rng_counter.assign(Tensor._rng_counter + num).realize()
+    if THREEFRY.value: # threefry
+      Tensor._rng_counter.assign(Tensor._rng_counter + num).realize()
+      counts = (Tensor.arange(num, device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._rng_counter.to(device)).realize().pad(((0,num%2),))
 
-    rotations = [[13, 15, 26, 6], [17, 29, 16, 24]]
-    ks = [0x0, Tensor._seed ^ 0x0 ^ 0x1BD11BDA, Tensor._seed]
+      rotations = [[13, 15, 26, 6], [17, 29, 16, 24]]
+      ks = [0x0, Tensor._seed ^ 0x0 ^ 0x1BD11BDA, Tensor._seed]
 
-    x = [(c := counts.chunk(2))[0] + ks[-1], c[1] + ks[0]]
-    for i in range(5):
-      for r in rotations[i % 2]: x[0], x[1] = (x0 := x[0] + x[1]), x0 ^ ((x[1] * (2 ** r)) + (x[1].div(2 ** (32 - r), upcast=False)))
-      x = [(x[0] + ks[i % 3]), (x[1] + ks[(i + 1) % 3] + i + 1)]
-    out = x[0].cat(x[1])[:num].div(2 ** 8, upcast=False).cast(dtypes.float32).div(2 ** 24)
+      x = [(c := counts.chunk(2))[0] + ks[-1], c[1] + ks[0]]
+      for i in range(5):
+        for r in rotations[i % 2]: x[0], x[1] = (x0 := x[0] + x[1]), x0 ^ ((x[1] * (2 ** r)) + (x[1].div(2 ** (32 - r), upcast=False)))
+        x = [(x[0] + ks[i % 3]), (x[1] + ks[(i + 1) % 3] + i + 1)]
+      out = x[0].cat(x[1])[:num].div(2 ** 8, upcast=False).cast(dtypes.float32).div(2 ** 24)
+    else: # Combined LCG
+      Tensor._rng_counter.assign(Tensor._rng_counter + num*2).realize()
+      counts1 = Tensor.arange(num, device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._rng_counter.to(device)
+      counts2 = Tensor.arange(num, num*2, device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._rng_counter.to(device)
+      counts1 = (counts1 * (2 ** 13)) ^ counts1
+      counts2 = (counts2 * (2 ** 13)) ^ counts2
+      m1, m2, a1, a2, b1, b2 = 4294967291, 2147483647, 1664525, 16807, 1013904223, 0
+      seed1 = (x1 := a1 * counts1 + b1) - (x1.div(m1, upcast=False)).floor() * m1
+      seed2 = (x2 := a2 * counts2 + b2) - (x2.div(m2, upcast=False)).floor() * m2
+      out = (seed1 ^ seed2).div(m1, upcast=True)
     out = out.reshape(shape).cast(dtypes.default_float if dtype is None else dtype)
     out.requires_grad = kwargs.get("requires_grad")
     return out.contiguous()
