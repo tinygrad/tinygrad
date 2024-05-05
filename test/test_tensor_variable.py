@@ -58,12 +58,31 @@ class TestTensorVariable(unittest.TestCase):
     ret = t.mean(axis=1).reshape(2, 1).numpy()
     assert np.all(ret == 1)
 
-  @unittest.skip("symbolic arange isn't supported")
   def test_symbolic_arange(self):
     vv = Variable("a", 1, 10)
     vv.bind(2)
     ret = Tensor.arange(0, vv)
     ret.realize()
+  
+  def test_symbolic_arange_non_zero_start(self):
+    start_var = Variable("start", 1, 10)
+    start_var.bind(3)
+    end = 10
+    step = 1
+    expected_length = (end - start_var.val) // step
+    ret = Tensor.arange(start_var, end, step)
+    ret.realize()
+    self.assertEqual(len(ret), expected_length, "The length of the Tensor should match the Expected Length")
+
+  def test_symbolic_arange_negative_step(self):
+    start = 10
+    end_var = Variable("end", 1, 10)
+    end_var.bind(3)
+    step = -1
+    expected_length = (start - end_var.val) // abs(step)
+    ret = Tensor.arange(start, end_var, step)
+    ret.realize()
+    self.assertEqual(len(ret), expected_length, "The length of the Tensor should match the Expected Range Length")  
 
 if __name__ == '__main__':
   unittest.main()
