@@ -529,7 +529,8 @@ class AMDDevice(Compiled):
       sync_event = kio.create_event(AMDDevice.kfd, auto_reset=1)
 
     self.timeline_value: int = 1
-    self.timeline_signal = AMDDevice._get_signal(self.device_id*4+1, sync_event=sync_event)
+    self.timeline_signal = AMDDevice._get_signal(self.device_id*2, sync_event=sync_event)
+    self._shadow_timeline_signal = AMDDevice._get_signal(self.device_id*2+1, sync_event=kio.create_event(AMDDevice.kfd, auto_reset=1))
 
     self.kernargs = self._gpu_alloc(0x1000000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
     self.kernargs_ptr = self.kernargs.va_addr
@@ -582,3 +583,6 @@ class AMDDevice(Compiled):
 
     # reset kernargs
     self.kernargs_ptr = self.kernargs.va_addr
+    if self.timeline_value > (1 << 31):
+      self.timeline_signal, self._shadow_timeline_signal = self._shadow_timeline_signal, self.timeline_signal
+      self.timeline_signal.value, self.timeline_value = 0, 1
