@@ -208,7 +208,7 @@ class TestSchedule(unittest.TestCase):
       opt.zero_grad()
       img_bn.backward()
       # this is too high
-      check_schedule(opt.schedule_step(), 18)
+      check_schedule(opt.schedule_step(), 17)
 
   def test_fold_conv_relu(self):
     c1 = nn.Conv2d(3,16,3)

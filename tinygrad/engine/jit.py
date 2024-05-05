@@ -150,7 +150,7 @@ class TinyJit(Generic[ReturnType]):
       # jit capture
       self.expected_names: List[Union[int, str]] = expected_names
       self.expected_lbs: List[Tuple[ShapeTracker, Tuple[Variable, ...], DType, str]] = expected_lbs
-      with Context(GRAPH=getenv("JITGRAPH", GRAPH.value)):
+      with Context(GRAPH=getenv("JITGRAPH", GRAPH.value), BEAM=getenv("JITBEAM", BEAM.value)):
         capturing.append(self)
         self.ret = self.fxn(*args, **kwargs)
         if len(params:=get_parameters(self.ret)): Tensor.realize(params[0], *params[1:])
