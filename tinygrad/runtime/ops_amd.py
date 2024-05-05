@@ -360,7 +360,7 @@ class AMDProgram:
     for i in range(len(vals)): args_st.__setattr__(f'v{i}', vals[i])
 
     q = HWPM4Queue()
-    q.wait(self.device.timeline_signal, 0)
+    q.wait(self.device.timeline_signal, self.device.timeline_value - 1)
     if wait: q.timestamp(ctypes.addressof(self.device.timeline_signal) + getattr(hsa.amd_signal_t, 'start_ts').offset)
     q.exec(self, self.device.kernargs_ptr, global_size, local_size)
     if wait: q.timestamp(ctypes.addressof(self.device.timeline_signal) + getattr(hsa.amd_signal_t, 'end_ts').offset)
@@ -369,7 +369,7 @@ class AMDProgram:
     self.device.kernargs_ptr += self.kernargs_segment_size
 
     if wait:
-      self.device._wait_signal(self.device.timeline_signal, self.device.compute_put_value)
+      self.device._wait_signal(self.device.timeline_signal, self.device.timeline_value)
       return (self.device.timeline_signal.end_ts-self.device.timeline_signal.start_ts)/1e8
 
 class AMDAllocator(LRUAllocator):
