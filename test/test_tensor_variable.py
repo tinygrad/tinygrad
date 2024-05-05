@@ -84,5 +84,15 @@ class TestTensorVariable(unittest.TestCase):
     ret.realize()
     self.assertEqual(len(ret), expected_length, "The length of the Tensor should match the Expected Range Length")  
 
+  def test_symbolic_arange_variable_step(self):
+    start = 1
+    end = 10
+    step_var = Variable("step", 1, 10)
+    step_var.bind(3)
+    expected_length = (end - start) // step_var.val
+    ret = Tensor.arange(start, end, step_var)
+    ret.realize()
+    self.assertEqual(len(ret), expected_length, "The length of the Tensor should match the Expected Range Length")
+
 if __name__ == '__main__':
   unittest.main()
