@@ -848,7 +848,7 @@ class Tensor:
     #   return
     assign_to = self.realize().__getitem__(indices)
     # NOTE: contiguous to prevent const folding.
-    v = v._broadcast_to(broadcast_shape(assign_to.shape, v.shape)).contiguous()
+    v = v.cast(assign_to.dtype)._broadcast_to(broadcast_shape(assign_to.shape, v.shape)).contiguous()
     assign_to.assign(v).realize()
 
   # NOTE: using slice is discouraged and things should migrate to pad and shrink
