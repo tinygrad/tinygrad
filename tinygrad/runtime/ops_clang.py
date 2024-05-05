@@ -24,4 +24,6 @@ class ClangProgram:
   def __call__(self, *bufs, vals=(), wait=False): return cpu_time_execution(lambda: self.fxn(*bufs, *vals), enable=wait)
 
 class ClangDevice(Compiled):
-  def __init__(self, device:str): super().__init__(device, MallocAllocator, ClangCompiler("compile_clang"), ClangProgram)
+  def __init__(self, device:str):
+    from tinygrad.runtime.graph.clang import ClangGraph
+    super().__init__(device, MallocAllocator, ClangCompiler("compile_clang"), ClangProgram, ClangGraph)
