@@ -369,7 +369,7 @@ class AMDProgram:
     self.device.kernargs_ptr += self.kernargs_segment_size
 
     if wait:
-      self.device._wait_signal(self.device.timeline_signal, self.device.timeline_value)
+      self.device._wait_signal(self.device.timeline_signal, self.device.timeline_value - 1)
       return (self.device.timeline_signal.end_ts-self.device.timeline_signal.start_ts)/1e8
 
 class AMDAllocator(LRUAllocator):
