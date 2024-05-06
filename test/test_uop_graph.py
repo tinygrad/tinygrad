@@ -70,10 +70,12 @@ class TestUOpGraph(unittest.TestCase):
     # first reduction (local)
     store_local0 = g.add(UOps.STORE, dtypes.float, (def_local, idx_local, phi0))
     barrier0 = g.add(UOps.BARRIER, vin=(store_local0,), cachable=False)
-    if_cond0 = g.add(UOps.IF, None, (g.add(UOps.ALU, dtypes.bool, (idx_local, one), arg=BinaryOps.CMPLT), barrier0), cachable=False) # barrier MUST be included in if_cond other it gets optimized away
+    # barrier MUST be included in if_cond other it gets optimized away
+    if_cond0 = g.add(UOps.IF, None, (g.add(UOps.ALU, dtypes.bool, (idx_local, one), arg=BinaryOps.CMPLT), barrier0), cachable=False)
     acc1 = g.add(UOps.DEFINE_ACC, dtypes.float, arg=0.0, cachable=False)
     loop1 = g.add(UOps.LOOP, dtypes.int, (zero, sixteen), cachable=False)
-    load1 = g.add(UOps.LOAD, dtypes.float, (def_local, loop1, if_cond0)) # the if_cond MUST be included in global_load( ... barrier=if_cond), otherwise it gets optimized away
+    # the if_cond MUST be included in global_load( ... barrier=if_cond), otherwise it gets optimized away
+    load1 = g.add(UOps.LOAD, dtypes.float, (def_local, loop1, if_cond0))
     alu1 = g.add(UOps.ALU, dtypes.float, (acc1, load1), arg=BinaryOps.ADD)
     phi1 = g.add(UOps.PHI, dtypes.float, (acc1, alu1, loop1))
 
@@ -113,13 +115,13 @@ class TestUOpGraph(unittest.TestCase):
     acc4 = g.add(UOps.DEFINE_ACC, dtypes.float, arg=0.0, cachable=False)
     loop4 = g.add(UOps.LOOP, dtypes.int, (zero, four), cachable=False)
     load4 = g.add(UOps.LOAD, dtypes.float, (def_global, loop4))
-    alu6 = g.add(UOps.ALU, dtypes.float, (load_local0, N), arg=BinaryOps.MUL) # this should get merged with alu2, since alu2 gets lifted out of the loop 
+    alu6 = g.add(UOps.ALU, dtypes.float, (load_local0, N), arg=BinaryOps.MUL) # should get merged with alu2 since alu2 gets lifted out of the loop
     alu7 = g.add(UOps.ALU, dtypes.float, (load_local1, N), arg=BinaryOps.MUL)
     alu8 = g.add(UOps.ALU, dtypes.float, (load4, alu6), arg=BinaryOps.SUB) # alu3 cannot get lifted out of it's loop, so this should not be merged
     alu9 = g.add(UOps.ALU, dtypes.float, (alu8, alu7), arg=BinaryOps.DIV)
     alu10 = g.add(UOps.ALU, dtypes.float, (acc4, alu9), arg=BinaryOps.ADD)
     phi4 = g.add(UOps.PHI, dtypes.float, (acc4, alu10, loop4))
-    
+
     # third reduction (local)
     store_local4 = g.add(UOps.STORE, dtypes.float, (def_local, idx_local, phi4))
     barrier4 = g.add(UOps.BARRIER, vin=(store_local4,), cachable=False)
@@ -129,7 +131,7 @@ class TestUOpGraph(unittest.TestCase):
     load5 = g.add(UOps.LOAD, dtypes.float, (def_local, loop5, if_cond3)) # ""
     alu11 = g.add(UOps.ALU, dtypes.float, (acc5, load5), arg=BinaryOps.ADD)
     phi5 = g.add(UOps.PHI, dtypes.float, (acc5, alu11, loop5))
-    store_end = g.add(UOps.STORE, dtypes.float, (def_global, zero, phi5))
+    g.add(UOps.STORE, dtypes.float, (def_global, zero, phi5))
 
     g.uoptimize()
 
@@ -140,16 +142,21 @@ class TestUOpGraph(unittest.TestCase):
     self.assertLess(g.uops.index(loop1), g.uops.index(load1), "loading the local buffer must take place within the local loop")
 
     # loading the result of the first local reduction back into every thread
-    self.assertEqual(g.uops[g.uops.index(store_local1)-1].uop, UOps.ENDLOOP, "storing the result of the local reduction should follow the end of the loop")
-    self.assertLess(g.uops.index(store_local1), g.uops.index(endif0), "should store the result of the local reduction before ending the if statement")
+    self.assertEqual(g.uops[g.uops.index(store_local1)-1].uop, UOps.ENDLOOP, \
+                     "storing the result of the local reduction should follow the end of the loop")
+    self.assertLess(g.uops.index(store_local1), g.uops.index(endif0), \
+                    "should store the result of the local reduction before ending the if statement")
     self.assertLess(g.uops.index(endif0), g.uops.index(barrier1), "should put a barrier after the local store and in every thread")
     self.assertLess(g.uops.index(barrier1), g.uops.index(load_local0), "should load back the result of the local reduction after the barrier")
 
     # second reduction
-    self.assertLess(g.uops.index(load_local0), g.uops.index(loop2), "the result of the first reduction should be loaded into every thread before begining any other reductions")
+    self.assertLess(g.uops.index(load_local0), g.uops.index(loop2), \
+                    "the result of the first reduction should be loaded into every thread before begining any other reductions")
     self.assertIn(acc2, g.uops, "There should be individual accumulators for each reduction")
-    self.assertLess(g.uops.index(alu2), g.uops.index(loop2), "uops on the result of a reduction and in the output shape should be lifted out of loops")
-    self.assertLess(g.uops.index(loop2), g.uops.index(alu3), "uops on the result of a reduction but in the full shape shoud NOT get lifted out of loops")
+    self.assertLess(g.uops.index(alu2), g.uops.index(loop2), \
+                    "uops on the result of a reduction and in the output shape should be lifted out of loops")
+    self.assertLess(g.uops.index(loop2), g.uops.index(alu3), \
+                    "uops on the result of a reduction but in the full shape shoud NOT get lifted out of loops")
 
     # second reduction (local)
     self.assertEqual(g.uops[g.uops.index(store_local2)-1].uop, UOps.ENDLOOP, "second store must be outside the end of the second loop")
@@ -159,14 +166,20 @@ class TestUOpGraph(unittest.TestCase):
     self.assertLess(g.uops.index(loop2), g.uops.index(load3), "loading the local buffer must take place within the local loop")
 
     # loading the result of the second local reduction back into every thread
-    self.assertEqual(g.uops[g.uops.index(store_local3)-1].uop, UOps.ENDLOOP, "storing the result of the local reduction should follow the end of the loop")
-    self.assertLess(g.uops.index(store_local3), g.uops.index(endif1), "should store the result of the local reduction before ending the if statement")
-    self.assertLess(g.uops.index(endif1), g.uops.index(barrier3), "should put a barrier after the local store and in every thread")
-    self.assertLess(g.uops.index(barrier3), g.uops.index(load_local1), "should load back the result of the local reduction after the barrier")
+    self.assertEqual(g.uops[g.uops.index(store_local3)-1].uop, UOps.ENDLOOP, \
+                     "storing the result of the local reduction should follow the end of the loop")
+    self.assertLess(g.uops.index(store_local3), g.uops.index(endif1), \
+                    "should store the result of the local reduction before ending the if statement")
+    self.assertLess(g.uops.index(endif1), g.uops.index(barrier3), \
+                    "should put a barrier after the local store and in every thread")
+    self.assertLess(g.uops.index(barrier3), g.uops.index(load_local1), \
+                    "should load back the result of the local reduction after the barrier")
 
     # third reduction
-    self.assertLess(g.uops.index(load_local1), g.uops.index(loop4), "the result of the second reduction should be loaded into every thread before begining any other reductions")
-    self.assertLess(g.uops.index(alu7), g.uops.index(loop4), "uops on the result of a reduction and in the output shape should be lifted out of loops")
+    self.assertLess(g.uops.index(load_local1), g.uops.index(loop4), \
+                    "the result of the second reduction should be loaded into every thread before begining any other reductions")
+    self.assertLess(g.uops.index(alu7), g.uops.index(loop4), \
+                    "uops on the result of a reduction and in the output shape should be lifted out of loops")
     self.assertEqual(alu2, alu6, "alu6 should have been merged with alu2 after it got lifted out of it's loop")
     self.assertNotEqual(alu3, alu8, "alu8 should not get merged with alu3 because alu3 could not get lifted out of it's loop")
     self.assertIn(alu2, alu8.vin, "alu6 should have gotten merged with alu2 and replaced in the inputs for alu8")
