@@ -422,10 +422,16 @@ class Tensor:
     print(t.numpy())
     ```
     """
-    if stop is None: stop, start = start, 0
-    assert all(isinstance(s, (int, float)) for s in (start, stop, step)), f"symbolic arange not supported {start=}, {stop=}, {step=}"
-    dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
-    return (Tensor.full((math.ceil((stop-start)/step),), step, dtype=dtype, **kwargs)._cumsum() + (start - step)).cast(dtype)
+    if stop is None:
+      stop, start = start, 0
+    (stop_val, start_val, step_val) = (x.val if isinstance(x, Variable) else x for x in (stop, start, step))
+    dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start_val, stop_val, step_val)) else dtypes.default_int)
+    length = math.ceil((stop_val - start_val) / step_val)
+    result = Tensor.empty(length, **kwargs)
+    for i in range(length):
+      result[i] = start + i * step
+
+    return result.cast(dtype)
 
   @staticmethod
   def eye(dim:int, **kwargs):
