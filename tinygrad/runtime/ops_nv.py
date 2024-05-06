@@ -188,6 +188,9 @@ class NVProgram:
           if section_data[i * 3 + 0] & 0xffff == 0x1204 and section_data[i * 3 + 2] + 0x240 > self.device.slm_per_thread:
             raise RuntimeError("too high local memory")
 
+    # Registers allocation granularity per warp is 256, warp allocaiton granularity is 4. Register file size is 65536.
+    self.max_threads = ((65536 // round_up(self.registers_usage * 32, 256)) // 4) * 4 * 32
+
     # Load program and constant buffers (if any)
     self.lib_sz = round_up(round_up(self.program.nbytes, 128) + sum([round_up(x.nbytes, 128) for i,x in constant_buffers_data.items()]), 0x1000)
     self.lib_gpu = self.device.allocator.alloc(self.lib_sz)
@@ -226,7 +229,7 @@ class NVProgram:
     if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu, self.lib_sz)
 
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
-    if prod(local_size) > 1024 or self.registers_usage * prod(local_size) > 65536: raise RuntimeError("Too many resources requsted for launch")
+    if prod(local_size) > 1024 or self.max_threads < prod(local_size): raise RuntimeError("Too many resources requsted for launch")
 
     kernargs_size = round_up(QMD_SIZE + 0x160 + len(args) * 8 + len(vals) * 4, 1 << 8)
     if self.device.kernargs_ptr >= (self.device.kernargs_page.base + self.device.kernargs_page.length - kernargs_size):
