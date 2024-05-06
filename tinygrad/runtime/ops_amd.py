@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Tuple, List, Any
+from typing import Tuple, List, Any, cast
 import os, fcntl, ctypes, functools, re, pathlib, mmap, struct, errno, subprocess, time
 from tinygrad.device import Compiled, LRUAllocator, Compiler, CompilerOptions
 from tinygrad.buffer import BufferOptions
@@ -589,4 +589,4 @@ class AMDDevice(Compiled):
     if self.timeline_value > (1 << 31):
       self.timeline_signal, self._shadow_timeline_signal = self._shadow_timeline_signal, self.timeline_signal
       self.timeline_signal.value, self.timeline_value = 0, 1
-      self.allocator.b_timeline = [0] * len(self.allocator.b)
+      cast(AMDAllocator, self.allocator).b_timeline = [0] * len(cast(AMDAllocator, self.allocator).b)
