@@ -6,6 +6,9 @@ from tinygrad.dtype import DType
 from tinygrad.helpers import prod, all_int, argsort
 from tinygrad.shape.symbolic import Node, NumNode, Variable, sint, Index
 
+def basic_strides(shape): return tuple([1 if i==0 else prod(shape[-i:]) for i in range(len(shape))][::-1])
+
+
 @functools.lru_cache(maxsize=None)
 def canonicalize_strides(shape:Tuple[sint, ...], strides:Tuple[sint, ...]) -> Tuple[sint, ...]:
   return tuple(0 if s == 1 else st for s, st in zip(shape, strides))
@@ -296,10 +299,9 @@ class View:
 
     return None
 
-def expand_idx(node:Node): return next((v for v in node.vars() if v.expr.startswith("_uidx")), NumNode(0))
-def expand_idxs(nodes):
-  eidxs = [expand_idx(node) for node in nodes]
-  return tuple([v if v not in eidxs[:j] else NumNode(0) for j, v in enumerate(eidxs)])  # take only first occurrence of expand variable
+  def index(self, arg) -> IndexedView:
+    lbs, dims, dts, shape = arg
+    return IndexedView(lbs=lbs, dims=dims, exprs=tuple(f"idx{d}" for d in dims), dtype=dts, shape=shape, strides=basic_strides(shape))
 
 @dataclass(frozen=True)
 class IndexedView(View):
@@ -318,12 +320,12 @@ class IndexedView(View):
 
 
   def unbind(self): return self, {}
-  def realize_index(self, ridx: List[Node]) -> List[Node]:
+  # def realize_index(self, ridx: List[Node]) -> List[Node]:
 
-    nodes = [Index(ridx[0].expr+'_'+expr, 0, self.shape[d]).bind(ridx[0]) for expr, d in zip(self.exprs, self.dims)]
-    for i in [i for i in range(len(self.shape)) if i not in self.dims][::-1]: nodes.insert(i, NumNode(0))
-    print(nodes)
-    exit(0)
+  #   nodes = [Index(ridx[0].expr+'_'+expr, 0, self.shape[d]).bind(ridx[0]) for expr, d in zip(self.exprs, self.dims)]
+  #   for i in [i for i in range(len(self.shape)) if i not in self.dims][::-1]: nodes.insert(i, NumNode(0))
+  #   print(nodes)
+  #   exit(0)
 
 
 

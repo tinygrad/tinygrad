@@ -220,3 +220,4 @@ class LazyBuffer:
   def permute(self, arg:Tuple[int, ...]): return self._view(self.st.permute(arg))
   def shrink(self, arg:Tuple[Tuple[sint, sint], ...]): return self._view(self.st.shrink(arg))
   def stride(self, arg:Tuple[int, ...]): return self._view(self.st.stride(arg))
+  def index(self, arg): return self._view(self.st.index(arg))

@@ -160,11 +160,7 @@ class CompiledRunner(Runner):
     self.uops = uops
     self.vars: List[Variable] = [] if uops is None else uops.vars()
     self.globals: List[Tuple[int, bool]] = [] if uops is None else uops.globals()
-    print("okokok")
-    print("okokok")
-    print("okokok")
-    print(self.globals)
-    self.lib, self.clprg, self.outcount = lib, Device[dname].runtime(self.name, lib), sum(x[2] for x in self.globals)
+    self.lib, self.clprg, self.outcount = lib, Device[dname].runtime(self.name, lib), sum(x[1] for x in self.globals)
     super().__init__(name, dname, op_estimate, mem_estimate)
 
   def to_other_device(self, dname:str):

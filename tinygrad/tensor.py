@@ -789,7 +789,10 @@ class Tensor:
 
       # track tensor_dim and tensor_index using a dict
       # calc_dim to get dim and use that to normalize the negative tensor indices
-      idx: Dict[int,Tensor] = {(dim := calc_dim(td)):(tensor<0).where(ret.shape[dim],0) + tensor for td,tensor in zip(type_dim[Tensor], tensor_index)}
+      # NOTE: also realize to make sure the shit is not negative
+      # TODO: can handle negative index case in linearizer
+      idx: Dict[int,Tensor] = {(dim := calc_dim(td)):((tensor<0).where(ret.shape[dim],0) + tensor).realize() \
+                               for td,tensor in zip(type_dim[Tensor], tensor_index)}
 
       from tinygrad.shape.view import IndexedView
       from tinygrad.shape.shapetracker import ShapeTracker
@@ -797,9 +800,22 @@ class Tensor:
       idx_lbs = tuple(i.lazydata for i in idx.values())
       idx_dts = tuple(i.dtype for i in idx.values())
       dims = tuple(d for d in idx.keys())
-      ret.lazydata = ret.lazydata._view(ret.lazydata.st + ShapeTracker(views=(IndexedView(lbs=idx_lbs, dims=dims,
-                                                                                          exprs=tuple(f"idx{d}" for d in dims),
-                                                                                          dtype=idx_dts, shape=(2,), strides=(1,)),)))
+
+      masks, first_dim, last_dim = [], min(idx.keys()), max(idx.keys())
+      ret_shape = list(ret.shape)
+      for d in reversed(idx.keys()): ret_shape.pop(d)
+      ret_shape = ret_shape[:first_dim] + (big_shape := list(broadcast_shape(*(t.shape for t in idx.values())))) + ret_shape[first_dim:]
+      # special permute case
+      if first_dim != 0 and len(idx) != 1 and tuple(idx.keys()) != tuple(range(first_dim, last_dim+1)):
+        ret_shape = ret_shape[first_dim:first_dim+len(big_shape)] + ret_shape[:first_dim] + ret_shape[first_dim+len(big_shape):]
+        # ret = ret.permute(*range(first_dim, first_dim+len(big_shape)), *range(0, first_dim), *range(first_dim+len(big_shape), ret.ndim))
+
+      # pre_reduce_shape = ret.shape[:first_dim] + (big_shape := broadcast_shape(*(t.shape for t in idx.values()))) + ret.shape[first_dim:]
+      # for d in reversed()
+
+      ret.lazydata = ret.lazydata.index((idx_lbs, dims, idx_dts, tuple(ret_shape)))
+      # ret.lazydata = ret.lazydata._view(ret.lazydata.st + ShapeTracker(views=(IndexedView(lbs=idx_lbs, dims=dims, exprs=tuple(f"idx{d}" for d in dims), dtype=idx_dts, shape=(2,), strides=(1,)),)))
+      # lbs, dims, dts, shape = arg
     return ret
       # self.realize()
       # idx

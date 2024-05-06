@@ -72,11 +72,32 @@ class Linearizer(Kernel):
     AndNode: lambda self,ops,ctx:
       functools.reduce(lambda a,b: ctx.uop_alu_idx(a, b, ops, ctx, BinaryOps.MUL, dtype=dtypes.bool), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
-  def index(self, indexed_view:IndexedView, ridxs:List[Node], buf_uop, dt):
-    idx_ = ridxs
+  def index(self, indexed_view:IndexedView, ridx:Node, dt:DType):
+    #   0 ━┳ STORE MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 6), strides=(6, 1), offset=0, mask=None, contiguous=True),)))
+    #   1  ┗━━ LOAD MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(7, 6), strides=(6, 1), offset=0, mask=None, contiguous=True), IndexedView(shape=(3, 6), strides=(6, 1), offset=0, mask=None, contiguous=True, lbs=(<LB CLANG (3,) int (<BinaryOps.ADD: 1>, <buf real:True device:CLANG size:3 dtype:dtypes.int offset:0>)>,), exprs=('idx0',), dims=(0,), dtype=(dtypes.int,)), View(shape=(3, 6), strides=(6, 1), offset=0, mask=None, contiguous=True))))
+    # ((LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(7, 6), strides=(6, 1), offset=0, mask=None, contiguous=True), IndexedView(shape=(3, 6), strides=(6, 1), offset=0, mask=None, contiguous=True, lbs=(<LB CLANG (3,) int (<BinaryOps.ADD: 1>, <buf real:True device:CLANG size:3 dtype:dtypes.int offset:0>)>,), exprs=('idx0',), dims=(0,), dtype=(dtypes.int,)), View(shape=(3, 6), strides=(6, 1), offset=0, mask=None, contiguous=True))))),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 6), strides=(6, 1), offset=0, mask=None, contiguous=True),)))),), [])
+    # reduced UOp count from 10 to 9
+    #    0 UOps.DEFINE_GLOBAL  : ptr.dtypes.float          []                               (0, True)
+    #    1 UOps.DEFINE_GLOBAL  : ptr.dtypes.float          []                               (1, False)
+    #    2 UOps.DEFINE_GLOBAL  : ptr.dtypes.int            []                               (2, False)
+    #    3 UOps.CONST          : dtypes.int                []                               0
+    #    4 UOps.CONST          : dtypes.int                []                               18
+    #    5 UOps.LOOP           : dtypes.int                [3, 4]                           None
+    #    6 UOps.LOAD           : dtypes.int                [2, 5]                           None
+    #    7 UOps.LOAD           : dtypes.float              [1, 6]                           None
+    #    8 UOps.STORE          :                           [0, 5, 7]                        None
+    #    9 UOps.ENDLOOP        :                           [5]                              None
+    # void C_18(float* restrict data0, const float* restrict data1, const int* restrict data2) {
+    #   for (int ridx0 = 0; ridx0 < 18; ridx0++) {
+    #     int val0 = data2[ridx0];
+    #     float val1 = data1[val0];
+    #     data0[ridx0] = val1;
+    #   }
+    # }
+    # Segmentation fault: 11
     didx = []
     for dim, expr, dt in zip(indexed_view.dims, indexed_view.exprs, indexed_view.dtype):
-      rendered_idx = idx_.render(self.render_ops, self)
+      rendered_idx = ridx.render(self.render_ops, self)
       # self.index_uops[expr] = self.uops.add(UOps.LOAD, dt, (buf_uop, rendered_idx))
       didx.append((dim, self.uops.add(UOps.LOAD, dt, (self.index_uops[expr], rendered_idx))))
 
@@ -118,8 +139,8 @@ class Linearizer(Kernel):
       # wrap idx with Index if the buf is indexed
       rendered_idx = None
       if buf in self.index_map:
-        i_, indexed_view, define_global = self.index_map[buf][0] # [0] cuz assuming only 1 IndexedView per st for now
-        rendered_idx = self.index(indexed_view, idx, define_global, buf.dtype)
+        _, indexed_view, _ = self.index_map[buf][0] # [0] cuz assuming only 1 IndexedView per st for now
+        rendered_idx = self.index(indexed_view, idx, buf.dtype)
       if key not in self.load_cache:
         if acc is not None:
           self.load_cache[key] = self.uops.add(UOps.DEFINE_ACC, localtype, (), self.get_reduce_acc(acc), cachable=False)
@@ -186,7 +207,6 @@ class Linearizer(Kernel):
                       tuple(x.render(self.render_ops, self) for x in image_idx))
       else:
         rendered_idx = idx.render(self.render_ops, self)
-      # TODO: fix rendered_idx to include symbolic multidimensional index
       if valid.min == 1: stores.append(self.uops.add(UOps.STORE, None, (buf_uop, rendered_idx, var)))
       else: stores.append(self.uops.add(UOps.STORE, None, (buf_uop, rendered_idx, var, valid.render(self.render_ops, self))))
     return stores
@@ -360,7 +380,7 @@ class Linearizer(Kernel):
       if isinstance(buf, MemBuffer):
         self.buf_uops[i] = self.uops.add(UOps.DEFINE_GLOBAL,
                                          buf.dtype if isinstance(buf.dtype, ImageDType) else PtrDType(buf.dtype), (),
-                                         (buf.idx, f"data{buf.idx}", any(buf.idx == x.idx for x in self.outbufs)))
+                                         (buf.idx, any(buf.idx == x.idx for x in self.outbufs)))
 
     # add global buffers for indexed buffers
     self.index_uops: Dict[str, UOp] = {}
@@ -372,13 +392,13 @@ class Linearizer(Kernel):
         for v in buf.st.views:
           if isinstance(v, IndexedView):
             for lb, dt, expr in zip(v.lbs, v.dtype, v.exprs):
-              idx_buf_uop = self.uops.add(UOps.DEFINE_GLOBAL, PtrDType(dt), (), (len(self.buf_uops), expr, False))
+              idx_buf_uop = self.uops.add(UOps.DEFINE_GLOBAL, PtrDType(dt), (), (len(self.buf_uops), False))
               self.index_uops[expr] = idx_buf_uop
               self.buf_uops.append(idx_buf_uop)
               # self.loop_uops[expr] = idx_buf_uop
-              self.bufs.append(MemBuffer(len(self.buf_uops), dt, lb.st))
+              self.bufs.append(MemBuffer(len(self.buf_uops)-1, dt, lb.st))
               self.sts.append(lb.st)
-              self.index_map[buf].append((len(self.bufs), v, idx_buf_uop))
+              self.index_map[buf].append((len(self.bufs)-1, v, idx_buf_uop))
 
     # add var vals
     for i,var in enumerate(self.vars):
