@@ -19,21 +19,19 @@ if __name__ == "__main__":
 
   # the device we are optimizing for
   device: Compiled = Device[Device.DEFAULT]
+  if getenv("BACKWARD"): optim = (nn.optim.LARS if getenv("LARS") else nn.optim.SGD)(nn.state.get_parameters(mdl))
   print(f"optimizing for {Device.DEFAULT}")
 
-  # first model run to init the weights, they are saved in seen
-  create_schedule([mdl(Tensor.empty(64, 3, 224, 224)).lazydata], seen)
-
-  # run model again to get only what changes, these are the kernels of the model
-  x = Tensor.empty(64, 3, 224, 224)
-  if getenv("BACKWARD"): optim = nn.optim.SGD(nn.state.get_parameters(mdl))
-  out = mdl(x)
-  targets = [out.lazydata]
-  if getenv("BACKWARD"):
-    optim.zero_grad()
-    out.mean().backward()
-    targets += [x.lazydata for x in optim.schedule_step()]
-  sched = create_schedule(targets, seen)
+  # run model twice to get only what changes, these are the kernels of the model
+  for i in range(2):
+    out = mdl(Tensor.empty(64, 3, 224, 224))
+    targets = [out.lazydata]
+    if getenv("BACKWARD"):
+      optim.zero_grad()
+      out.sparse_categorical_crossentropy(Tensor.empty(64, dtype=dtypes.int)).backward()
+      targets += [x.lazydata for x in optim.schedule_step()]
+    sched = create_schedule(targets, seen)
+    print(f"schedule length {len(sched)}")
   sched = [x for x in sched if x.ast[0].op not in LoadOps]
 
   # focus on one kernel
