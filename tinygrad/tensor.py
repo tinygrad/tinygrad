@@ -14,7 +14,7 @@ from tinygrad.features.multi import MultiLazyBuffer
 from tinygrad.ops import LoadOps, ScheduleItem
 from tinygrad.buffer import Buffer, BufferOptions
 from tinygrad.device import Device
-from tinygrad.shape.symbolic import sint, Variable, MulNode, Node
+from tinygrad.shape.symbolic import sint, Variable, MulNode, SumNode, NumNode, Node
 from tinygrad.engine.realize import run_schedule, memory_planner
 from tinygrad.engine.schedule import create_schedule_with_vars
 
@@ -271,6 +271,8 @@ class Tensor:
   @staticmethod
   def from_node(y:Node, **kwargs) -> Tensor:
     if isinstance(y, MulNode): return Tensor.from_node(y.a, **kwargs) * y.b
+    if isinstance(y, SumNode): return Tensor.from_node(y.nodes[0], **kwargs) + sum(y.nodes[1:])
+    if isinstance(y, NumNode): return Tensor(y.b, **kwargs, requires_grad=False)
     if isinstance(y, Variable): return Tensor(y, **kwargs, requires_grad=False)
     raise RuntimeError(f"unhandled Node {y}")
 
@@ -931,9 +933,9 @@ class Tensor:
     numerator = self.cast(sum_acc_dtype(self.dtype)).sum(axis=axis, keepdim=keepdim)
     return numerator.div(prod([si for si, so in zip(self.shape, self.sum(axis=axis, keepdim=True).shape) if si != so])).cast(output_dtype)
   def var(self, axis=None, keepdim=False, correction=1):
-    assert all_int(self.shape), "does not support symbolic shape"
-    square_sum = ((self - self.mean(axis=axis, keepdim=True)).square()).sum(axis=axis, keepdim=keepdim)
-    return square_sum.div(max(0, prod(self.shape)/prod(square_sum.shape)-correction))
+    squares = (self - self.mean(axis=axis, keepdim=True)).square()
+    n = prod([si for si, so in zip(self.shape, squares.sum(axis=axis, keepdim=True).shape) if si != so])
+    return squares.sum(axis=axis, keepdim=keepdim).div(max(0, n-correction))
   def std(self, axis=None, keepdim=False, correction=1): return self.var(axis, keepdim, correction).sqrt()
 
   def _softmax(self, axis):
