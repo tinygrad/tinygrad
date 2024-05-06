@@ -3,7 +3,7 @@ from typing import TypeVar, Generic, Callable, List, Tuple, Union, Dict, cast, O
 import functools, itertools, collections
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, BEAM, getenv, all_int, GraphException, colored
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, BEAM, getenv, all_int, GraphException, colored, JIT
 from tinygrad.device import Buffer, CompiledRunner, BufferXfer, Compiled, Device, Runner
 from tinygrad.dtype import DType
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -150,7 +150,7 @@ class TinyJit(Generic[ReturnType]):
       # jit capture
       self.expected_names: List[Union[int, str]] = expected_names
       self.expected_lbs: List[Tuple[ShapeTracker, Tuple[Variable, ...], DType, str]] = expected_lbs
-      with Context(GRAPH=getenv("JITGRAPH", GRAPH.value)):
+      with Context(GRAPH=getenv("JITGRAPH", GRAPH.value), BEAM=getenv("JITBEAM", BEAM.value)):
         capturing.append(self)
         self.ret = self.fxn(*args, **kwargs)
         if len(params:=get_parameters(self.ret)): Tensor.realize(params[0], *params[1:])
@@ -171,7 +171,7 @@ class TinyJit(Generic[ReturnType]):
       self.jit_cache = [ExecItem(ei.prg, [assigned.get(x,x).ensure_allocated() for x in ei.bufs if x is not None]) for ei in self.jit_cache]
 
       # Condense the items into a graph executor.
-      if getenv("JIT") != 2: self.jit_cache = apply_graph_to_jit(self.jit_cache, input_rawbuffers, var_vals)
+      if JIT < 2: self.jit_cache = apply_graph_to_jit(self.jit_cache, input_rawbuffers, var_vals)
 
       self.input_replace = get_input_replace(self.jit_cache, input_rawbuffers)
       if DEBUG >= 1 and len(set(self.input_replace.values())) != len(input_rawbuffers): print("WARNING: some input tensors not found")
