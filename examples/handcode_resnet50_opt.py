@@ -1,6 +1,6 @@
 from typing import List
 from extra.models.resnet import ResNet50
-from tinygrad.tensor import Tensor
+from tinygrad import Tensor, nn
 from tinygrad.ops import LoadOps, get_lazyop_info
 from tinygrad.device import Device, Compiled
 from tinygrad.codegen.linearizer import Linearizer
@@ -26,8 +26,14 @@ if __name__ == "__main__":
 
   # run model again to get only what changes, these are the kernels of the model
   x = Tensor.empty(64, 3, 224, 224)
+  if getenv("BACKWARD"): optim = nn.optim.SGD(nn.state.get_parameters(mdl))
   out = mdl(x)
-  sched = create_schedule([out.lazydata], seen)
+  targets = [out.lazydata]
+  if getenv("BACKWARD"):
+    optim.zero_grad()
+    out.mean().backward()
+    targets += [x.lazydata for x in optim.schedule_step()]
+  sched = create_schedule(targets, seen)
   sched = [x for x in sched if x.ast[0].op not in LoadOps]
 
   # focus on one kernel
