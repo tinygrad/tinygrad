@@ -166,6 +166,7 @@ class LazyBuffer:
     if self.base != self and self.base.op == op:
       #if self.base.arg[1] != acc_dt: print(f"WARNING {self.base.arg[1]} != {acc_dt}")
       input_reduce: LazyBuffer = self.base.srcs[0]
+      setattr(self.base.srcs[0].base, "dont_realize", True)
 
       permute_axis = tuple(i for i in range(len(input_reduce.shape)) if i not in self.base.arg[0]) + self.base.arg[0]
       tmp = input_reduce.st.permute(permute_axis)
@@ -196,7 +197,7 @@ class LazyBuffer:
       acc_dt = least_upper_dtype(self.dtype, dtypes.uint) if dtypes.is_unsigned(self.dtype) else \
                least_upper_dtype(self.dtype, dtypes.int) if (dtypes.is_int(self.dtype) or self.dtype==dtypes.bool) else \
                least_upper_dtype(self.dtype, dtypes.float)
-    if acc_dt is not None and acc_dt != self.dtype:
+    if acc_dt is not None and acc_dt != self.dtype and self.dtype == dtypes.bool:
       # cast back to float16 or bfloat16 to match torch / jax behavior
       return self.cast(acc_dt).r(op, axis, acc_dt).cast(self.dtype if self.dtype in [dtypes.float16, dtypes.bfloat16] else acc_dt)
 
@@ -217,12 +218,12 @@ class LazyBuffer:
     self_real_strides = self.st.real_strides(ignore_valid=True)
     split_candidates = [(i, x) for i in axis for x in range(min(256,2**getenv("REDUCEOP_SPLIT_SIZE",22)//prod(new_shape)),8-1,-1)
                         if self.shape[i] % x == 0 and self_real_strides[i] != 0]
-    if not split_candidates: return self._reduce_op(op, axis)
+    if not split_candidates: return self._reduce_op(op, axis, acc_dt)
     dim_to_split, divisor = split_candidates[0]
     splitted_shape = self.shape[:dim_to_split] + (divisor,) + (self.shape[dim_to_split]//divisor,) + self.shape[dim_to_split+1:]
     splitted = self.reshape(splitted_shape).permute(tuple([x for x in range(len(splitted_shape)) if x != dim_to_split]+[dim_to_split]))
     if DEBUG >= 3: print(f"split {divisor}: {self.shape} -> {splitted.shape} -> {new_shape}")
-    return splitted._reduce_op(op, axis)._reduce_op(op, (len(new_shape),)).reshape(new_shape)  # reduce original axes, then split
+    return splitted._reduce_op(op, axis, acc_dt)._reduce_op(op, (len(new_shape),), acc_dt).reshape(new_shape)  # reduce original axes, then split
 
   # *** movement ops ***
 
