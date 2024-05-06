@@ -6,7 +6,7 @@ from tinygrad.features.search import Opt, OptOps
 from test.test_linearizer_failures import helper_test_lin
 
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.ops import LazyOp, BinaryOps, UnaryOps, ReduceOps, TernaryOps, BufferOps, MemBuffer, ConstBuffer
+from tinygrad.ops import LazyOp, BinaryOps, UnaryOps, ReduceOps, BufferOps, MemBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 
