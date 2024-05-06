@@ -369,7 +369,8 @@ class Kernel:
 
         s0, s1, s2 = axis_choices[-(axis+1)][0][0], axis_choices[-(axis+1)][1][0], axis_choices[-(axis+1)][2]  # s0 is n, s1 is m, s2 is k
         axis_pads = [(x, tc.dims[i]) for i, x in enumerate([s0, s1, s2]) if self.full_shape[x]%tc.dims[i] != 0]
-        if axis_pads and (opt_level < 2): continue
+        # don't try to TC pad small axes - TODO: revisit with a better search algorithm
+        if axis_pads and ((opt_level < 2) or len([x for x, _ in axis_pads if self.full_shape[x] < 4]) != 0): continue
 
         # tensor core -- unroll the reduce dim, upcast input, then create the correct thread pattern
         self.tensor_core_opts = (tc_opts:=TensorCoreOptions(bufs=(buf0, buf1), axes=[s0, s1], axes_exist=[True, True]))
