@@ -209,7 +209,7 @@ class UOpGraph:
         # add END of loops after the last thing that (recursively) depends on them
         insert_before = self.uops.index(sorted(list(self.get_recursive_children(u)), key=self.uops.index)[-1])+1
         self.add(UOps.ENDLOOP, None, (u,), cachable=False, insert_before=insert_before)
-      elif u.uop is UOps.IF:
+      elif u.uop is UOps.IF and all(u not in x.vin for x in self.uops if x.uop is UOps.ENDIF):
         # END any if statements at the end of the uops
         self.add(UOps.ENDIF, None, (u,), cachable=False)
 
