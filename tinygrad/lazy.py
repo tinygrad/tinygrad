@@ -163,14 +163,12 @@ class LazyBuffer:
 
   def _reduce_op(self, op:ReduceOps, axis:Tuple[int, ...], acc_dt:Optional[DType]=None) -> LazyBuffer:
     assert all(0 <= x < len(self.shape) for x in axis), f"axis args {axis} out of range for shape {self.shape}"
-    if self.base != self and self.base.op == op:
-      #if self.base.arg[1] != acc_dt: print(f"WARNING {self.base.arg[1]} != {acc_dt}")
-      input_reduce: LazyBuffer = self.base.srcs[0]
-      setattr(self.base.srcs[0].base, "dont_realize", True)
 
-      permute_axis = tuple(i for i in range(len(input_reduce.shape)) if i not in self.base.arg[0]) + self.base.arg[0]
-      tmp = input_reduce.st.permute(permute_axis)
-      rshape = tmp.shape[-len(self.base.arg[0]):]
+    def handle(input_to_reduce, top_reduce_axes):
+      setattr(input_to_reduce.base, "dont_realize", True)
+      permute_axis = tuple(i for i in range(len(input_to_reduce.shape)) if i not in top_reduce_axes) + top_reduce_axes
+      tmp = input_to_reduce.st.permute(permute_axis)
+      rshape = tmp.shape[-len(top_reduce_axes):]
       prshape = prod(rshape)
       strides = strides_for_shape(rshape)
 
@@ -179,8 +177,18 @@ class LazyBuffer:
         nv.append(View.create(v.shape+rshape, tuple(x*prshape for x in v.strides)+strides,
                               v.offset*prshape, v.mask+tuple((0,s) for s in rshape) if v.mask is not None else None))
       st = tmp + ShapeTracker(tuple(nv))
-      ret = input_reduce.base._view(st)._reduce_op(op, axis + tuple(range(len(st.shape)-len(rshape), len(st.shape))), acc_dt)
+      ret = input_to_reduce.base._view(st)._reduce_op(op, axis + tuple(range(len(st.shape)-len(rshape), len(st.shape))), acc_dt)
       return ret.reshape(ret.shape[:-len(rshape)])
+
+    if self.base.op == UnaryOps.CAST and self.base == self and self.base.srcs[0].base.op == UnaryOps.CAST:
+      input_to_reduce: LazyBuffer = self.srcs[0].base.srcs[0].srcs[0]
+      top_reduce_axes = self.srcs[0].base.srcs[0].arg[0]
+      return handle(input_to_reduce, top_reduce_axes)
+
+    if self.base != self and self.base.op == op:
+      input_to_reduce: LazyBuffer = self.base.srcs[0]
+      top_reduce_axes = self.base.arg[0]
+      return handle(input_to_reduce, top_reduce_axes)
 
     axis = tuple(x for x in axis if self.shape[x] != 1)
     if len(axis) == 0: return self
@@ -197,7 +205,7 @@ class LazyBuffer:
       acc_dt = least_upper_dtype(self.dtype, dtypes.uint) if dtypes.is_unsigned(self.dtype) else \
                least_upper_dtype(self.dtype, dtypes.int) if (dtypes.is_int(self.dtype) or self.dtype==dtypes.bool) else \
                least_upper_dtype(self.dtype, dtypes.float)
-    if acc_dt is not None and acc_dt != self.dtype and self.dtype == dtypes.bool:
+    if acc_dt is not None and acc_dt != self.dtype:
       # cast back to float16 or bfloat16 to match torch / jax behavior
       return self.cast(acc_dt).r(op, axis, acc_dt).cast(self.dtype if self.dtype in [dtypes.float16, dtypes.bfloat16] else acc_dt)
 
