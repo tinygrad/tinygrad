@@ -726,6 +726,9 @@ class TestSchedule(unittest.TestCase):
     # same as above, except with different late ASTs
     check_schedule([(x + y + a).sum() * 2, (x + b).sum() * 3], 1)
 
+    # same as above, except with permuted STs
+    check_schedule([(x.permute(1, 0) + y + a).sum() * 2, (x.permute(1, 0) + b).sum() * 3], 1)
+
     # for now, we only want to do this fusion when no significant inputs are added
     # this is because adding significant inputs is not free when doing gemms, since
     # there is limited L1 cache space. it is probably OK to fuse when there is at most
