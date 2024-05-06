@@ -757,6 +757,8 @@ class TestSchedule(unittest.TestCase):
     sum1 = (x + a).sum()
     check_schedule([sum1, (x + sum1).sum()], 2)
 
+    # todo: test _merge_prescheduled or otherwise verify buffers indexes are correct
+
   @unittest.skip("not useful for bn backward")
   def test_parallel_r_e_fusion(self):
     x = Tensor.empty(16, 16)
