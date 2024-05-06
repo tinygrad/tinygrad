@@ -45,7 +45,8 @@ def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]
 
     can_be_graphed = ji_graph_dev and ji_graph_dev.graph
     can_extend_graph_batch = can_be_graphed and len(current_batch) < max_batch_size and (ji_graph_dev == current_device or
-      (isinstance(ji_graph_dev.graph, type) and issubclass(ji_graph_dev.graph, MultiGraphRunner) and type(ji_graph_dev) == type(current_device))) #type:ignore
+      ((isinstance(ji_graph_dev.graph, type) and issubclass(ji_graph_dev.graph, MultiGraphRunner) or ji.bufs[0].device.split(":", 1)[0] in {"NV", "AMD"}) and
+        type(ji_graph_dev) == type(current_device))) #type:ignore
     if not can_extend_graph_batch and len(current_batch) > 0: flush_batch()
 
     if can_be_graphed: current_batch.append(ji)
