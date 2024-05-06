@@ -279,8 +279,8 @@ class TestDiskTensor(unittest.TestCase):
     np.testing.assert_array_equal(t.numpy(), np.array([3] * 10))
 
   def test_bitcast(self):
-    with open(temp('bf16'), "wb") as f: f.write(bytes(range(10,20)))
-    t = Tensor.empty(5, dtype=dtypes.int16, device=f"disk:{temp('bf16')}")
+    with open(temp('range_1020'), "wb") as f: f.write(bytes(range(10,20)))
+    t = Tensor.empty(5, dtype=dtypes.int16, device=f"disk:{temp('range_1020')}")
     ret = t.to("CLANG").bitcast(dtypes.uint16) + 1
     assert ret.tolist() == [2827, 3341, 3855, 4369, 4883]
 
