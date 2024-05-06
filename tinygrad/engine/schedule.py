@@ -250,47 +250,63 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
 
   # todo: this only fuses children of schedule_targets, but we can also fuse children of realized buffers
   # todo: quite sensitive to toposort order
-  pre_q: Deque[Tuple[int, _LBScheduleItem]] = deque((si.outputs[0].size, si) for key, si in prescheduled.items() if in_degree[key] == 0)
+  pre_q: Deque[_LBScheduleItem] = deque(si for key, si in prescheduled.items() if in_degree[key] == 0)
+  reduce_collector: List[Tuple[_LBScheduleItem, Set[Tuple[LazyBuffer, ShapeTracker, ShapeTracker]]]] = []
   preschedule_groups = []
   pre_in_deg = {k: v for k, v in in_degree.items()}
-  while pre_q:
-    sz, ps = min(pre_q, key=lambda x: x[0])
-    pre_q.remove((sz, ps))
+  while pre_q or reduce_collector:
+    if pre_q:
+      ps = pre_q.popleft()
+    else:
+      ps, bij = reduce_collector.pop(0)
+      print(bij)
+      to_group = []
+      this_group = [ps]
+      best_bij = bij
+      for rci, (ps_, bij_) in enumerate(reduce_collector):
+        print(bij_)
+        if best_bij <= bij_ or bij_ <= best_bij:
+          to_group.append(rci)
+          best_bij = best_bij | bij_
+      for rcoff, rci in enumerate(to_group):
+        ps_, bij_ = reduce_collector.pop(rci - rcoff)
+        this_group.append(ps_)
+        pre_q.append(ps_)
+      print(this_group)
+      if len(this_group) > 1:
+        preschedule_groups.append(this_group)
 
     to_enqueue: List[_LBScheduleItem] = []
     for x in graph[ps.outputs[0]]:
       pre_in_deg[x] -= 1
       if pre_in_deg[x] == 0: to_enqueue.append(prescheduled[x])
-    for nps in to_enqueue:
-      pre_q.append((nps.outputs[0].st.size, nps))
-    # now group these up
-    # only support 1 output for now
-    if len(ps.outputs) == 1:
-      reduced_shapes: DefaultDict[Tuple, List[_LBScheduleItem]] = defaultdict(list)
-      # chase to children with ps as contiguous earlybuf, match by reduced shape
-      for csi in to_enqueue:
-        is_eligible_child, seen_lop = True, set()
-        for ast in csi.ast:
-          for lop in ast.lazyops:
-            if lop in seen_lop: continue
-            seen_lop.add(lop)
+    # chase to children with ps as contiguous earlybuf, match by reduced shape
+    from tinygrad.features.graph import print_tree
+    for csi in to_enqueue:
+      print('visiting')
+      print_tree(csi.ast[0])
+      seen_lop = set()
+      bijectives = []
+      for ast in csi.ast:
+        for lop in ast.lazyops:
+          if lop in seen_lop: continue
+          seen_lop.add(lop)
 
-            if lop.op is BufferOps.LOAD:
-              membuf: MemBuffer = lop.arg
-              if membuf.idx > len(csi.outputs) and csi.inputs[lop.arg.idx-len(csi.outputs)] == ps.outputs[0]:
-                if membuf.st.shape == csi.outputs[0].st.shape:
-                  print(f"fail shape {membuf.st.shape} == {csi.outputs[0].st.shape}")
-                  is_eligible_child = False  # must be earlybuf (implicitly require reduce)
-                if not membuf.st.contiguous:
-                  print(f"fail contig {membuf.st}")
-                  is_eligible_child = False  # must be contiguous
-        if is_eligible_child:
-          reduced_shapes[csi.outputs[0].st.shape].append(csi)
-      print(ps.outputs[0], reduced_shapes)
-      for lsigroup in reduced_shapes.values():
-        if len(lsigroup) < 2: continue
-        print(f'merging {lsigroup}')
-        preschedule_groups.append(lsigroup)
+          if lop.op is BufferOps.LOAD:
+            membuf: MemBuffer = lop.arg
+            if membuf.st.shape == csi.outputs[0].st.shape:
+              print(f'fail reduce {membuf.st.shape} {csi.outputs[0].st.shape}')
+              continue  # check if is reduce
+            if not membuf.st.bijective:
+              print(f'fail bijective {membuf.st}')
+              continue  # extract bijective buffers
+            bijectives.append(((csi.outputs + csi.inputs)[membuf.idx], membuf.st, csi.outputs[0].st))
+      if bijectives:
+        print('writebij', set(bijectives))
+        reduce_collector.append((csi, set(bijectives)))
+      else:
+        print('just queue it')
+        pre_q.append(csi)
 
   # edit the graph with the new groupings
   for lsigroup in preschedule_groups:
@@ -346,7 +362,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffe
   # confirm everything was scheduled correctly
   if not all(degree == 0 for degree in in_degree.values()) or len(prescheduled) != len(schedule):
     raise RuntimeError(f"cycle detected in graph, prescheduled {len(prescheduled)} but only scheduled {len(schedule)}")
-  if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
+  if DEBUG >= 1 and len(schedule) >= 10 or DEBUG >= 3: print(f"scheduled {len(schedule)} kernels")
   return schedule, var_vals
 
 def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> List[ScheduleItem]:

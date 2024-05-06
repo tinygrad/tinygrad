@@ -35,7 +35,10 @@ class ShapeTracker:
   def contiguous(self) -> bool: return len(self.views) == 1 and self.views[0].contiguous
 
   @property
-  def consecutive(self) -> bool: return len(self.views) == 1 and (v:=self.views[0]).mask is None and v.strides == strides_for_shape(v.shape)
+  def bijective(self) -> bool:
+    if len(self.views) != 1 or (v := self.views[0]).mask is not None: return False
+    s_strides, s_shape = zip(*sorted(zip(v.strides, v.shape), reverse=True))
+    return s_strides == strides_for_shape(s_shape)
 
   @property
   def shape(self) -> Tuple[sint, ...]: return self.views[-1].shape

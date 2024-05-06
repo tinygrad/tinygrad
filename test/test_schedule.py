@@ -6,7 +6,7 @@ import unittest
 from typing import List, Optional, Union
 from tinygrad.tensor import Tensor
 from tinygrad.ops import BinaryOps, LoadOps, ReduceOps
-from tinygrad.helpers import DEBUG, GRAPH, flatten
+from tinygrad.helpers import DEBUG, GRAPH, flatten, getenv
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.graph import print_tree, realized_lazybuffer
 from tinygrad.engine.schedule import create_schedule
