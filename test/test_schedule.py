@@ -186,6 +186,14 @@ class TestSchedule(unittest.TestCase):
       out = bn(img)
       check_schedule(out, 3)
 
+  def test_fold_conv_batchnorm_notrain(self):
+    with Tensor.train(False):
+      img = Tensor.empty(1,3,8,8)
+      c1 = nn.Conv2d(3,32,3)
+      bn = nn.BatchNorm2d(32, track_running_stats=False)
+      out = bn(c1(img)).relu()
+      check_schedule(out, 1, [c1.weight, c1.bias])
+
   def test_fold_conv_batchnorm(self):
     with Tensor.train():
       img = Tensor.empty(1,3,8,8)
@@ -596,11 +604,12 @@ class TestSchedule(unittest.TestCase):
     check_schedule(out, 7)
 
   def test_adam_step_fusion(self):
-    x = Tensor.empty(4, 64, 768)
-    layer = nn.Linear(768, 768*4)
-    opt = nn.optim.Adam(nn.state.get_parameters(layer), lr=1e-4)
-    layer(x).relu().sum().backward()
-    check_schedule(opt.schedule_step(), 12)
+    with Tensor.train():
+      x = Tensor.empty(4, 64, 768)
+      layer = nn.Linear(768, 768*4)
+      opt = nn.optim.Adam(nn.state.get_parameters(layer), lr=1e-4)
+      layer(x).relu().sum().backward()
+      check_schedule(opt.schedule_step(), 12)
 
   def test_adam_conv_fuse(self):
     with Tensor.train():
