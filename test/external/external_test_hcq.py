@@ -32,6 +32,7 @@ class TestHCQ(unittest.TestCase):
   def setUp(self):
     TestHCQ.a.lazydata.buffer.copyin(memoryview(bytearray(struct.pack("ff", 0, 1))))
     TestHCQ.b.lazydata.buffer.copyin(memoryview(bytearray(struct.pack("ff", 0, 0))))
+    TestHCQ.d0.synchronize() # wait for copyins to complete
 
   def test_run_1000_times_one_submit(self):
     temp_signal, temp_value = TestHCQ.d0._get_signal(value=0), 0
@@ -192,9 +193,9 @@ class TestHCQ(unittest.TestCase):
     q.signal(sig:=AMDDevice._get_signal(value=0), value=1)
     qc.wait(sig, value=1)
     qc.copy(TestHCQ.a.lazydata.buffer._buf.va_addr, TestHCQ.b.lazydata.buffer._buf.va_addr, 8)
+    qc.signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
     qc.submit(TestHCQ.d0)
     time.sleep(0.02) # give it time for the wait to fail
-    q.signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
     q.submit(TestHCQ.d0)
     TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1

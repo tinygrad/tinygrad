@@ -105,6 +105,9 @@ regBIF_BX_PF1_GPU_HDP_FLUSH_DONE = 0x0107
 CACHE_FLUSH_AND_INV_TS_EVENT = 0x14
 CS_PARTIAL_FLUSH = 0x7
 
+WAIT_REG_MEM_FUNCTION_EQ = 3 # ==
+WAIT_REG_MEM_FUNCTION_GEQ = 5 # >=
+
 COMPUTE_SHADER_EN = 1
 FORCE_START_AT_000 = 1 << 2
 CS_W32_EN = 1 << 15
@@ -157,8 +160,8 @@ class HWPM4Queue:
 
   def hdp_flush(self):
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_WAIT_REG_MEM, 5),
-      amd_gpu.WAIT_REG_MEM_MEM_SPACE(0) | amd_gpu.WAIT_REG_MEM_OPERATION(1) | amd_gpu.WAIT_REG_MEM_FUNCTION(3) | amd_gpu.WAIT_REG_MEM_ENGINE(0),
-      regBIF_BX_PF1_GPU_HDP_FLUSH_REQ, regBIF_BX_PF1_GPU_HDP_FLUSH_DONE, 0x0, 0x0, 0x20]
+      amd_gpu.WAIT_REG_MEM_MEM_SPACE(0) | amd_gpu.WAIT_REG_MEM_OPERATION(1) | amd_gpu.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_EQ) | \
+      amd_gpu.WAIT_REG_MEM_ENGINE(0), regBIF_BX_PF1_GPU_HDP_FLUSH_REQ, regBIF_BX_PF1_GPU_HDP_FLUSH_DONE, 0x0, 0x0, 0x20]
 
   def invalidate_cache(self):
     # overkill?
@@ -211,8 +214,8 @@ class HWPM4Queue:
   def wait(self, signal:hsa.amd_signal_t, value=0):
     addr = ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_WAIT_REG_MEM, 5),
-      amd_gpu.WAIT_REG_MEM_MEM_SPACE(1) | amd_gpu.WAIT_REG_MEM_OPERATION(0) | amd_gpu.WAIT_REG_MEM_FUNCTION(5) | amd_gpu.WAIT_REG_MEM_ENGINE(0),
-      addr&0xFFFFFFFF, addr>>32, value, 0xffffffff, 4]
+      amd_gpu.WAIT_REG_MEM_MEM_SPACE(1) | amd_gpu.WAIT_REG_MEM_OPERATION(0) | amd_gpu.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_GEQ) | \
+      amd_gpu.WAIT_REG_MEM_ENGINE(0), addr&0xFFFFFFFF, addr>>32, value, 0xffffffff, 4]
     return self
 
   def timestamp(self, addr):
@@ -308,7 +311,7 @@ class HWCopyQueue:
     return self
 
   def wait(self, signal:hsa.amd_signal_t, value=0):
-    self.q.append(sdma_pkts.poll_regmem(op=amd_gpu.SDMA_OP_POLL_REGMEM, mem_poll=1, func=0x5,
+    self.q.append(sdma_pkts.poll_regmem(op=amd_gpu.SDMA_OP_POLL_REGMEM, mem_poll=1, func=WAIT_REG_MEM_FUNCTION_GEQ,
                                         addr=ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET,
                                         value=value, mask=0xffffffff, interval=0x04, retry_count=0xfff))
     return self
@@ -586,3 +589,4 @@ class AMDDevice(Compiled):
     if self.timeline_value > (1 << 31):
       self.timeline_signal, self._shadow_timeline_signal = self._shadow_timeline_signal, self.timeline_signal
       self.timeline_signal.value, self.timeline_value = 0, 1
+      self.allocator.b_timeline = [0] * len(self.allocator.b)
