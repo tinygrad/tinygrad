@@ -756,6 +756,12 @@ class TestSchedule(unittest.TestCase):
     # fused group needs to be contiguous subDAG -- construct with toposort
     sum1 = (x + a).sum()
     check_schedule([sum1, (x + sum1).sum()], 2)
+    del sum1
+
+    # super tricky crossing dag case
+    sum1 = (x + a).sum()
+    sum2 = (y + b).sum()
+    check_schedule([(y + sum1).sum(), (x + sum2).sum()], 3)
 
     # todo: test _merge_prescheduled or otherwise verify buffers indexes are correct
 
