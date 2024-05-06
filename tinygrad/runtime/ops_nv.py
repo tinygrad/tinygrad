@@ -418,6 +418,10 @@ class NVDevice(Compiled):
     gpu_mmio_ptr = self._gpu_map_to_cpu(self.usermode, 0x10000, flags=2)
     self.gpu_mmio = to_mv(gpu_mmio_ptr, 0x10000).cast("I")
 
+    boost_params = nv_gpu.struct_NV2080_CTRL_PERF_BOOST_PARAMS(duration=0xffffffff, flags=((nv_gpu.NV2080_CTRL_PERF_BOOST_FLAGS_CUDA_YES << 4) | \
+      (nv_gpu.NV2080_CTRL_PERF_BOOST_FLAGS_CUDA_PRIORITY_HIGH << 6) | (nv_gpu.NV2080_CTRL_PERF_BOOST_FLAGS_CMD_BOOST_TO_MAX << 0)))
+    rm_control(self.fd_ctl, nv_gpu.NV2080_CTRL_CMD_PERF_BOOST, self.root, self.subdevice, boost_params)
+
     vaspace_params = nv_gpu.NV_VASPACE_ALLOCATION_PARAMETERS(vaBase=0x1000, vaSize=0x1fffffb000000,
       flags=nv_gpu.NV_VASPACE_ALLOCATION_FLAGS_ENABLE_PAGE_FAULTING | nv_gpu.NV_VASPACE_ALLOCATION_FLAGS_IS_EXTERNALLY_OWNED)
     vaspace = rm_alloc(self.fd_ctl, nv_gpu.FERMI_VASPACE_A, self.root, self.device, vaspace_params).hObjectNew
