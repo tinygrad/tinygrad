@@ -188,7 +188,7 @@ class NVProgram:
           if section_data[i * 3 + 0] & 0xffff == 0x1204 and section_data[i * 3 + 2] + 0x240 > self.device.slm_per_thread:
             raise RuntimeError("too high local memory")
 
-    # Calulate max thread known registers per thread. Regs allocation granularity per warp is 256, warp allocaiton granularity is 4.
+    # Registers allocation granularity per warp is 256, warp allocaiton granularity is 4. Register file size is 65536.
     self.max_threads = ((65536 // round_up(self.registers_usage * 32, 256)) // 4) * 4 * 32
 
     # Load program and constant buffers (if any)
