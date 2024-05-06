@@ -401,21 +401,24 @@ def train_unet3d():
 
   @TinyJit
   def train_step(model, x, y):
-    optim.zero_grad()
+    with Tensor.train():
+      optim.zero_grad()
 
-    y_hat = model(x)
-    loss = dice_ce_loss(y_hat, y)
+      y_hat = model(x)
+      loss = dice_ce_loss(y_hat, y)
 
-    loss.backward()
-    optim.step()
-    return loss.realize()
+      loss.backward()
+      optim.step()
+      return loss.realize()
   
+  @Tensor.inference_mode()
   def eval_step(model, x, y):
-    y_hat, y = sliding_window_inference(model, x, y, gpus=GPUS)
-    y_hat, y = Tensor(y_hat), Tensor(y, requires_grad=False)
-    loss = dice_ce_loss(y_hat, y)
-    score = dice_score(y_hat, y)
-    return loss.realize(), score.realize()
+    with Tensor.train(mode=False):
+      y_hat, y = sliding_window_inference(model, x, y, gpus=GPUS)
+      y_hat, y = Tensor(y_hat), Tensor(y, requires_grad=False)
+      loss = dice_ce_loss(y_hat, y)
+      score = dice_score(y_hat, y)
+      return loss.realize(), score.realize()
   
   if WANDB: wandb.init(config=config, project=PROJ_NAME)
 
@@ -431,8 +434,6 @@ def train_unet3d():
 
   for epoch in range(1, NUM_EPOCHS + 1):
     BEAM.value = TRAIN_BEAM
-    Tensor.training = True
-    Tensor.no_grad = False
 
     if epoch <= LR_WARMUP_EPOCHS and LR_WARMUP_EPOCHS > 0:
       lr_warm_up(optim, LR_WARMUP_INIT_LR, LR, epoch, LR_WARMUP_EPOCHS)
@@ -476,8 +477,6 @@ def train_unet3d():
       train_step.reset()
 
       BEAM.value = EVAL_BEAM
-      Tensor.training = False
-      Tensor.no_grad = True
 
       next_eval_at += evaluate_every
       eval_loss = []
