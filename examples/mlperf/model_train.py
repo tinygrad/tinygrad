@@ -4,7 +4,7 @@ from tqdm import tqdm
 import multiprocessing
 
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
-from tinygrad.helpers import getenv, BEAM, WINO
+from tinygrad.helpers import getenv, BEAM, WINO, round_up
 from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_save
 from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup
 
@@ -77,10 +77,10 @@ def train_resnet():
 
   target, achieved  = getenv("TARGET", 0.759), False
   eval_start_epoch  = getenv("EVAL_START_EPOCH", 0)
-  eval_epochs       = getenv("EVAL_EPOCHS", 1)
+  eval_freq         = getenv("EVAL_FREQ", 1)
 
-  steps_in_train_epoch  = config["steps_in_train_epoch"]  = (len(get_train_files()) // BS)
-  steps_in_val_epoch    = config["steps_in_val_epoch"]    = (len(get_val_files()) // EVAL_BS)
+  steps_in_train_epoch  = config["steps_in_train_epoch"]  = (round_up(len(get_train_files()), BS) // BS)
+  steps_in_val_epoch    = config["steps_in_val_epoch"]    = (round_up(len(get_val_files()), EVAL_BS) // EVAL_BS)
 
   config["DEFAULT_FLOAT"] = dtypes.default_float.name
   config["BEAM"]          = BEAM.value
@@ -185,17 +185,18 @@ def train_resnet():
       MLLOGGER.start(key=mllog_constants.EPOCH_START, value=e+1, metadata=dict(epoch_num=e+1))
     Tensor.training = True
     BEAM.value = TRAIN_BEAM
-    batch_loader = batch_load_resnet(batch_size=BS, val=False, shuffle=True, seed=seed*epochs + e)
+    batch_loader = batch_load_resnet(batch_size=BS, val=False, shuffle=True, seed=seed*epochs + e, pad_first_batch=True)
     it = iter(tqdm(batch_loader, total=steps_in_train_epoch, desc=f"epoch {e}", disable=BENCHMARK))
     i, proc = 0, data_get(it)
+    prev_cookies = []
     st = time.perf_counter()
     while proc is not None:
       GlobalCounters.reset()
-      # TODO: pad training data
-      (loss, top_1), _, proc = train_step(proc[0], proc[1]), proc[2], proc[3]
+      (loss, top_1), y, proc = train_step(proc[0], proc[1]), proc[2], proc[3]
 
       pt = time.perf_counter()
 
+      if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
       try:
         next_proc = data_get(it)
       except StopIteration:
@@ -204,7 +205,8 @@ def train_resnet():
       dt = time.perf_counter()
 
       device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
-      loss, top_1_acc = loss.numpy().item(), top_1.numpy().item() / BS
+      loss, top_1 = loss.numpy().item(), top_1.numpy().item()
+      top_1_acc = top_1 / sum(yi != -1 for yi in y)
 
       cl = time.perf_counter()
       if BENCHMARK:
@@ -220,6 +222,7 @@ def train_resnet():
                    "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": e + (i + 1) / steps_in_train_epoch})
 
       st = cl
+      prev_cookies.append(proc)
       proc, next_proc = next_proc, None  # return old cookie
       i += 1
 
@@ -237,7 +240,8 @@ def train_resnet():
       MLLOGGER.event(key=mllog_constants.EPOCH_STOP, value=e+1, metadata=dict(epoch_num=e+1))
 
     # ** eval loop **
-    if (e + 1 - eval_start_epoch) % eval_epochs == 0 and steps_in_val_epoch > 0:
+    # always eval for epoch >= 33 to stop the clock as soon as eval target hits, it can converge in epoch in [33, 37]
+    if steps_in_val_epoch > 0 and ((e + 1 - eval_start_epoch) % eval_freq == 0 or e + 1 >= 33):
       if MLLOGGER and RUNMLPERF:
         MLLOGGER.start(key=mllog_constants.EVAL_START, value=e+1, metadata=dict(epoch_num=e+1))
       if getenv("RESET_STEP", 1): train_step.reset()  # free the train step memory :(
@@ -250,12 +254,14 @@ def train_resnet():
 
       it = iter(tqdm(batch_load_resnet(batch_size=EVAL_BS, val=True, shuffle=False, pad_first_batch=True), total=steps_in_val_epoch))
       i, proc = 0, data_get(it)
+      prev_cookies = []
       while proc is not None:
         GlobalCounters.reset()
         st = time.time()
 
         (loss, top_1), y, proc = eval_step(proc[0], proc[1]), proc[2], proc[3]  # drop inputs, keep cookie
 
+        if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
         try:
           next_proc = data_get(it)
         except StopIteration:
@@ -266,7 +272,8 @@ def train_resnet():
         eval_loss += loss * num_samples
         eval_top_1 += top_1
         eval_num_samples += num_samples
-        proc, next_proc = next_proc, None  # return old cookie
+        prev_cookies.append(proc)
+        proc, next_proc = next_proc, None
         i += 1
         if i == BENCHMARK:
           if MLLOGGER and INITMLPERF:

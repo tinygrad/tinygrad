@@ -8,7 +8,7 @@ from tinygrad.engine.jit import GraphRunner
 from tinygrad.shape.symbolic import Variable
 from tinygrad.runtime.ops_metal import wait_check
 
-class MetalGraphRunner(GraphRunner):
+class MetalGraph(GraphRunner):
   def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
     super().__init__(jit_cache, input_rawbuffers, var_vals)
     if not all(isinstance(ji.prg, CompiledRunner) for ji in jit_cache): raise GraphException
