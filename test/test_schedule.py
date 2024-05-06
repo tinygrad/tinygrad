@@ -747,6 +747,7 @@ class TestSchedule(unittest.TestCase):
 
     # maybe don't fuse if is 2-axis expand (gemm) and the early asts do not match?
     # (because there might be too many accumulators)
+    # OK for now since we only fuse for bijective st
 
     # match by input + ST and two shapes? start with contigouous input only, check shapes (should determine reduces)
     # what if same input + st but one is early and another is late?
