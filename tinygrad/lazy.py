@@ -180,7 +180,7 @@ class LazyBuffer:
       ret = input_to_reduce.base._view(st)._reduce_op(op, axis + tuple(range(len(st.shape)-len(rshape), len(st.shape))), acc_dt)
       return ret.reshape(ret.shape[:-len(rshape)])
 
-    if self.base.op == UnaryOps.CAST and self.base == self and self.base.srcs[0].base.op == UnaryOps.CAST and self.srcs[0].base.op == op:
+    if self.base.op == UnaryOps.CAST and self.base == self and self.base.srcs[0].base.op == UnaryOps.CAST and self.srcs[0].base.srcs[0].op == op:
       input_to_reduce: LazyBuffer = self.srcs[0].base.srcs[0].srcs[0]
       top_reduce_axes = self.srcs[0].base.srcs[0].arg[0]
       return handle(input_to_reduce, top_reduce_axes)
