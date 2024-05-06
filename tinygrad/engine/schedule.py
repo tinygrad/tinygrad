@@ -248,10 +248,28 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
       graph[key].append(assign)
       in_degree[assign] += 1
 
+  def get_bijectives(csi):
+    seen_lop = set()
+    bijectives = []
+    for ast in csi.ast:
+      for lop in ast.lazyops:
+        if lop in seen_lop: continue
+        seen_lop.add(lop)
+
+        if lop.op is BufferOps.LOAD:
+          membuf: MemBuffer = lop.arg
+          if membuf.st.shape == csi.outputs[0].st.shape: continue  # check if is reduce
+          if not membuf.st.bijective: continue  # extract bijective buffers
+          bijectives.append(((csi.outputs + csi.inputs)[membuf.idx], membuf.st, csi.outputs[0].st))
+    return bijectives
   # todo: this only fuses children of schedule_targets, but we can also fuse children of realized buffers
   # todo: quite sensitive to toposort order
-  pre_q: Deque[_LBScheduleItem] = deque(si for key, si in prescheduled.items() if in_degree[key] == 0)
+  pre_q: Deque[_LBScheduleItem] = deque()
   reduce_collector: List[Tuple[_LBScheduleItem, Set[Tuple[LazyBuffer, ShapeTracker, ShapeTracker]]]] = []
+  for csi in (si for key, si in prescheduled.items() if in_degree[key] == 0):
+    bijectives = get_bijectives(csi)
+    if bijectives: reduce_collector.append((csi, set(bijectives)))
+    else: pre_q.append(csi)
   preschedule_groups = []
   pre_in_deg = {k: v for k, v in in_degree.items()}
   while pre_q or reduce_collector:
@@ -259,12 +277,10 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
       ps = pre_q.popleft()
     else:
       ps, bij = reduce_collector.pop(0)
-      print(bij)
       to_group = []
       this_group = [ps]
       best_bij = bij
       for rci, (ps_, bij_) in enumerate(reduce_collector):
-        print(bij_)
         if best_bij <= bij_ or bij_ <= best_bij:
           to_group.append(rci)
           best_bij = best_bij | bij_
@@ -272,7 +288,6 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
         ps_, bij_ = reduce_collector.pop(rci - rcoff)
         this_group.append(ps_)
         pre_q.append(ps_)
-      print(this_group)
       if len(this_group) > 1:
         preschedule_groups.append(this_group)
 
@@ -281,32 +296,10 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
       pre_in_deg[x] -= 1
       if pre_in_deg[x] == 0: to_enqueue.append(prescheduled[x])
     # chase to children with ps as contiguous earlybuf, match by reduced shape
-    from tinygrad.features.graph import print_tree
     for csi in to_enqueue:
-      print('visiting')
-      print_tree(csi.ast[0])
-      seen_lop = set()
-      bijectives = []
-      for ast in csi.ast:
-        for lop in ast.lazyops:
-          if lop in seen_lop: continue
-          seen_lop.add(lop)
-
-          if lop.op is BufferOps.LOAD:
-            membuf: MemBuffer = lop.arg
-            if membuf.st.shape == csi.outputs[0].st.shape:
-              print(f'fail reduce {membuf.st.shape} {csi.outputs[0].st.shape}')
-              continue  # check if is reduce
-            if not membuf.st.bijective:
-              print(f'fail bijective {membuf.st}')
-              continue  # extract bijective buffers
-            bijectives.append(((csi.outputs + csi.inputs)[membuf.idx], membuf.st, csi.outputs[0].st))
-      if bijectives:
-        print('writebij', set(bijectives))
-        reduce_collector.append((csi, set(bijectives)))
-      else:
-        print('just queue it')
-        pre_q.append(csi)
+      bijectives = get_bijectives(csi)
+      if bijectives: reduce_collector.append((csi, set(bijectives)))
+      else: pre_q.append(csi)
 
   # edit the graph with the new groupings
   for lsigroup in preschedule_groups:
