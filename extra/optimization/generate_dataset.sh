@@ -18,7 +18,7 @@ python3 examples/beautiful_cartpole.py
 python3 examples/mlperf/model_spec.py
 python3 examples/yolov8.py ./test/models/efficientnet/Chicken.jpg
 openpilot/go.sh
-BIG=1 MPS=1 pytest test/
+BIG=1 MPS=1 pytest test/ --ignore=test/test_fusion_op.py --ignore=test/test_linearizer_failures.py
 
 # sort and uniq
 sort -u /tmp/ops > /tmp/sops
