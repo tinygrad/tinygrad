@@ -107,24 +107,6 @@ class Node:
     nodes = [x for x in nodes if x.min != x.max]
     return create_node(AndNode(nodes)) if len(nodes) > 1 else (nodes[0] if len(nodes) == 1 else NumNode(1))
 
-class Index(Node):
-  def __init__(self, expr:str, nmin:int, nmax:sint):
-    self.expr, self.min, self.max = expr, nmin, nmax
-    self._lb = None
-  def __getnewargs__(self): return (self.expr, self.min, self.max)  # args passed to __new__ when unpickling
-  @property
-  def lb(self):
-    assert self._lb is not None, f"Variable isn't bound, can't access val of {self}"
-    return self._lb
-  def bind(self, lb):
-    self._lb = lb
-    return self
-  def unbind(self) -> Tuple[Variable, int]:
-    assert self.lb is not None, f"cannot unbind {self}"
-    return Index(self.expr, self.min, self.max), self.lb
-  def vars(self): return {self}
-  def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node: return var_vals.get(self, self)
-
 # 4 basic node types
 
 class Variable(Node):
@@ -152,6 +134,28 @@ class Variable(Node):
     return Variable(self.expr, self.min, self.max), self.val
   def vars(self): return {self}
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node: return var_vals.get(self, self)
+
+class Index(Node):
+  def __new__(cls, *args):
+    expr, nmin, nmax = args
+    assert nmin >= 0 and nmin <= nmax, f"invalid Variable {expr=} {nmin=} {nmax=}"
+    if nmin == nmax: return NumNode(nmin)
+    return super().__new__(cls)
+
+  def __getnewargs__(self): return (self.expr, self.min, self.max)  # args passed to __new__ when unpickling
+
+  def __init__(self, expr:str, nmin:int, nmax:sint):
+    self.expr, self.min, self.max = expr, nmin, nmax
+    self._idx: Optional[int] = None
+  @property
+  def idx(self):
+    assert self._idx is not None, f"Variable isn't bound, can't access val of {self}"
+    return self._idx
+  def bind(self, idx:sint):
+    # maybe sint here cuz maybe have to render idx if it's not a realized buffer
+    assert self._idx is None and self.min<=idx<=self.max, f"cannot bind {idx} to {self}"
+    self._idx = idx
+    return self
 
 class NumNode(Node):
   def __init__(self, num:int):
@@ -337,8 +341,7 @@ render_python: Dict[Type, Callable[..., str]] = {
   Variable: lambda self,ops,ctx: f"{self.expr}[{self.min}-{self.max}{'='+str(self.val) if self._val is not None else ''}]" if ctx == "DEBUG" \
     else (f"Variable('{self.expr}', {self.min}, {self.max})"+(f".bind({self.val})" if self._val is not None else '') if ctx == "REPR" \
     else f"{self.expr}"),
-  # Index: lambda self,ops,ctx: f"Index('{self.expr}', {self.min}, {self.max})"+(f".bind({self.tensor}, {self.dim})"),
-  Index: lambda self,ops,ctx: f"{self.expr}-lol",
+  Index: lambda self,ops,ctx: f"{self.expr}[{self.idx if isinstance(self.idx, int) else self.idx.render(ops,ctx)}]",
   NumNode: lambda self,ops,ctx: f"NumNode({self.b})" if ctx == "REPR" else f"{self.b}",
   MulNode: render_mulnode,
   DivNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}//{self.b})",

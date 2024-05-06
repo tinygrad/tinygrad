@@ -58,7 +58,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outbufs:Tuple[Laz
       return LazyOp(BufferOps.LOAD, (), MemBuffer(assign_idx, buf.dtype, unbound_st))
     if buf not in inputs: inputs.append(buf)
     for view in indexed_views:
-      for idx in view.idxs: inputs.append(idx)
+      for lb in view.lbs: inputs.append(lb)
     return LazyOp(BufferOps.LOAD, (), MemBuffer(len(outbufs)+inputs.index(buf), buf.dtype, unbound_st))
 
   # if a CONTIGUOUS or ASSIGN made it all the way here, just skip it

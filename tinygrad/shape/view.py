@@ -296,21 +296,38 @@ class View:
 
     return None
 
-# NOTE: NOT NO COPY DUH
+def expand_idx(node:Node): return next((v for v in node.vars() if v.expr.startswith("_uidx")), NumNode(0))
+def expand_idxs(nodes):
+  eidxs = [expand_idx(node) for node in nodes]
+  return tuple([v if v not in eidxs[:j] else NumNode(0) for j, v in enumerate(eidxs)])  # take only first occurrence of expand variable
+
 @dataclass(frozen=True)
 class IndexedView(View):
   # TODO: Any is LazyBuffer but circular import bleh
-  idxs: Tuple[Any, ...] = field(default_factory=tuple)
+  # TODO: lbs should really just be a Buffer I think
+  lbs: Tuple[Any, ...] = field(default_factory=tuple)
+  exprs: Tuple[Any, ...] = field(default_factory=tuple)
   dims: Tuple[int, ...] = field(default_factory=tuple)
   dtype: Tuple[DType, ...] = field(default_factory=tuple)
-  shape: Tuple[sint, ...]
+  shape: Tuple[int, ...]
   strides: Tuple[sint, ...]
 
   offset:sint = 0
   mask:Optional[Tuple[Tuple[sint, sint], ...]] = None
   contiguous:bool = True
 
+
   def unbind(self): return self, {}
+  def realize_index(self, ridx: List[Node]) -> List[Node]:
+
+    nodes = [Index(ridx[0].expr+'_'+expr, 0, self.shape[d]).bind(ridx[0]) for expr, d in zip(self.exprs, self.dims)]
+    for i in [i for i in range(len(self.shape)) if i not in self.dims][::-1]: nodes.insert(i, NumNode(0))
+    print(nodes)
+    exit(0)
+
+
+
+
 
 # @dataclass(frozen=True)
 # class IndexedView(View):

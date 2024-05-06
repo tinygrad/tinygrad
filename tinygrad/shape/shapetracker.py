@@ -21,8 +21,7 @@ class ShapeTracker:
 
   def __add__(self, st:ShapeTracker) -> ShapeTracker:
     ret = self
-    # for v in st.views: ret = ShapeTracker(ret.views + (v,)).simplify() # one view at a time = better simplification
-    for v in st.views: ret = ShapeTracker(ret.views + (v,))
+    for v in st.views: ret = ShapeTracker(ret.views + (v,)).simplify() # one view at a time = better simplification
     return ret
 
   def invert(self, out_shape:Tuple[sint, ...]) -> Optional[ShapeTracker]:
@@ -87,12 +86,15 @@ class ShapeTracker:
     idx, valid = _expr_view(self.views[-1], idxs)
     for view in reversed(self.views[0:-1]):
       if valid.max == 0: return NumNode(-1), valid
-      view = view.minify()
-      acc, idxs = 1, []
-      for d in reversed(view.shape):
-        idxs.append((idx//acc)%d)
-        acc *= d
-      idx, valid = _expr_view(view, idxs[::-1], valid)
+      if isinstance(view, View):
+        view = view.minify()
+        acc, idxs = 1, []
+        for d in reversed(view.shape):
+          idxs.append((idx//acc)%d)
+          acc *= d
+        idx, valid = _expr_view(view, idxs[::-1], valid)
+      # TODO: ???
+      # if isinstance(view, IndexedView): ...
     assert not isinstance(idx.min, int) or idx.min >= -2**31, f"idx.min too small. {idx=}, {idx.min=}"
     assert not isinstance(idx.max, int) or idx.max < 2**31, f"idx.max too big. {idx=}, {idx.max=}"
     return idx, valid
@@ -102,9 +104,8 @@ class ShapeTracker:
     return f'idx{axis}' in [v.expr for v in valid.vars()]
 
   def simplify(self) -> ShapeTracker:
-    print('simplify: ', self)
-    # if len(self.views) >= 2 and (new_view := self.views[-2] + self.views[-1]) is not None:
-      # return ShapeTracker(self.views[:-2] + (new_view,)).simplify()
+    if len(self.views)>=2 and not any(isinstance(v,IndexedView) for v in self.views[-2:]) and (new_view := self.views[-2]+self.views[-1]) is not None:
+      return ShapeTracker(self.views[:-2] + (new_view,)).simplify()
     return self
 
   # *** under this line are the movement ops ***
