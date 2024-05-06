@@ -22,6 +22,7 @@ def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Op]=
   if enable_cache: lazycache[cache_key] = ret
   return ret
 
+view_supported_devices = {"LLVM", "CLANG", "CUDA", "DISK"}
 class LazyBuffer:
   def __init__(self, device:str, st:ShapeTracker, dtype:DType,
                op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
@@ -32,8 +33,15 @@ class LazyBuffer:
       # properties on base
       self.op, self.arg, self.srcs = op, arg, srcs  # this is a LazyOp, except the src is LazyBuffers and not LazyOps
       assert self.op is not LoadOps.ASSIGN or srcs[1].base.realized is not None, "assign target must be realized"
-      self.buffer: Buffer = srcs[1].base.buffer if self.op is LoadOps.ASSIGN else Buffer(device, self.size, dtype)
-      self.buffer.lb_refcount += 1
+
+      if (self.op is LoadOps.CONTIGUOUS or (self.op is UnaryOps.CAST and self.arg[1] is True)) and srcs[0].st.consecutive and \
+          not srcs[0].is_unrealized_const() and device.split(":")[0] in view_supported_devices:
+        # some LazyBuffers can be processed with only a view, no AST required
+        self.buffer: Buffer = srcs[0].base.buffer.view(st.size, dtype, srcs[0].st.views[0].offset * srcs[0].dtype.itemsize)
+        self.op = LoadOps.VIEW
+      else:
+        self.buffer = srcs[1].base.buffer if self.op is LoadOps.ASSIGN else Buffer(device, self.size, dtype)
+      self.buffer.ref(1)
       self.contiguous_child: Optional[Tuple[ReferenceType[LazyBuffer], ShapeTracker]] = None
       self.forced_realize = False
     else:
@@ -42,7 +50,7 @@ class LazyBuffer:
       self._base = base
 
   def __del__(self):
-    if hasattr(self, 'buffer'): self.buffer.lb_refcount -= 1
+    if hasattr(self, 'buffer'): self.buffer.ref(-1)
 
   def __repr__(self) -> str:
     return f"<LB {self.device} {self.shape} {str(self.dtype)[7:]} {self.st if self.base != self else (self.op, self.realized)}>"

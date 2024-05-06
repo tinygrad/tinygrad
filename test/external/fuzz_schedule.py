@@ -2,7 +2,7 @@ import itertools
 import numpy as np
 from typing import DefaultDict, Dict, List, Set, Tuple, TypeVar
 from tinygrad.buffer import Buffer
-from tinygrad.engine.realize import CustomOp, ExecItem, capturing, lower_schedule_item
+from tinygrad.engine.realize import CustomOp, capturing, lower_schedule_item
 from tinygrad.helpers import DEBUG, MULTIOUTPUT, colored, getenv
 from tinygrad.lazy import LazyBuffer
 from tinygrad.engine.schedule import _graph_schedule, _LBScheduleItem
@@ -67,7 +67,7 @@ def fuzz_schedule(outs: List[LazyBuffer]):
           raise e
 
 def _exec_si(si: ScheduleItem, seed:int):
-  ei = ExecItem(lower_schedule_item(si), list(si.bufs))
+  ei = lower_schedule_item(si)
   if len(capturing): capturing[0].add(ei)
   if isinstance(ei.prg, CustomOp): Tensor._seed = seed
   ei.run()

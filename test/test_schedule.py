@@ -5,10 +5,10 @@
 import unittest
 from typing import List, Optional, Union
 from tinygrad.tensor import Tensor
-from tinygrad.ops import LoadOps, ReduceOps
-from tinygrad.helpers import DEBUG, GRAPH, flatten
+from tinygrad.ops import BinaryOps, LoadOps, ReduceOps
+from tinygrad.helpers import DEBUG, flatten
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.features.graph import print_tree, realized_lazybuffer
+from tinygrad.features.graph import print_tree
 from tinygrad.engine.schedule import create_schedule
 from tinygrad import nn, dtypes
 from test.helpers import is_dtype_supported
@@ -20,19 +20,15 @@ def check_schedule(t:Union[Tensor, List[Tensor]], allowed:int, to_prerealize:Opt
     for pre in to_prerealize:
       for s in pre.schedule(seen=seen.copy()):
         for i,out in enumerate(s.outputs):
-          if GRAPH: realized_lazybuffer(out, 0)
           seen.add(out)
   sched = create_schedule(flatten([r.lazydata.lbs for r in t]), seen)
-  if GRAPH:
-    for i,s in enumerate(sched):
-      for out in s.outputs: realized_lazybuffer(out, i+1)
   if filter_loadops: sched = [s for s in sched if s.ast[0].op not in LoadOps]
   if len(sched) != allowed: print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
   if len(sched) != allowed or DEBUG >= 3:
     for i, s in enumerate(sched):
       print("kernel", i+1)
       for op in s.ast: print_tree(op)
-  assert len(sched) == allowed
+  assert len(sched) == allowed, f"{len(sched)} != {allowed}"
   # test the (non loadops) ops linearize
   for s in sched:
     if s.ast[0].op in LoadOps: continue
@@ -198,17 +194,40 @@ class TestSchedule(unittest.TestCase):
       out = bn(c1(img)).relu()
       check_schedule(out, 4, [c1.weight, c1.bias])
 
-  def test_fold_conv_batchnorm_sgd(self):
+  def test_fold_conv_batchnorm_optim(self):
+    # this is too high
+    for optim, cnt in [(nn.optim.Adam, 20), (nn.optim.SGD, 17)]:
+      with self.subTest(optim=optim.__name__):
+        with Tensor.train():
+          img = Tensor.ones(1,3,4,4)
+          c1 = nn.Conv2d(3,32,3)
+          bn = nn.BatchNorm2d(32, track_running_stats=False)
+          opt = optim(nn.state.get_parameters([c1, bn]))
+          img_bn = bn(c1(img)).elu().sum()
+          opt.zero_grad()
+          img_bn.backward()
+          check_schedule(opt.schedule_step(), cnt)
+
+  def test_fold_conv_relu_backward(self):
+    c1 = nn.Conv2d(3,16,3, bias=False)
+    c1.weight.requires_grad = True
+
+    # run
+    img = Tensor.rand(2,3,64,64, requires_grad=True)
+    c1(img).relu().mean().backward()
+    # TODO: this should be 4, not 5
+    # img.grad is requiring two reduces
+    check_schedule([img.grad, c1.weight.grad], 5)
+
+  def test_fold_batchnorm_backward(self):
     with Tensor.train():
-      img = Tensor.ones(1,3,4,4)
-      c1 = nn.Conv2d(3,32,3)
-      bn = nn.BatchNorm2d(32, track_running_stats=False)
-      opt = nn.optim.SGD(nn.state.get_parameters([c1, bn]))
-      img_bn = bn(c1(img)).elu().sum()
-      opt.zero_grad()
-      img_bn.backward()
-      # this is too high
-      check_schedule(opt.schedule_step(), 18)
+      x = Tensor.empty((2, 16, 8, 8)).contiguous()
+      bn = nn.BatchNorm2d(16)
+      bn.weight.requires_grad = bn.bias.requires_grad = x.requires_grad = True
+      fw = bn(x).contiguous_backward().relu().contiguous()
+      fw.sum().backward()
+      # TODO: this is too many
+      check_schedule([x.grad, bn.weight.grad, bn.bias.grad, fw], 10)
 
   def test_fold_conv_relu(self):
     c1 = nn.Conv2d(3,16,3)
@@ -485,7 +504,7 @@ class TestSchedule(unittest.TestCase):
     out0 = a.sum() + 2
     out1 = a.sum() + 4
     out2 = out0 * out1
-    check_schedule([out0, out1, out2], 2)
+    check_schedule([out0, out1, out2], 1)
 
   def test_reduce_multiple_paths(self):
     a = Tensor.empty(4, 4)
@@ -581,7 +600,7 @@ class TestSchedule(unittest.TestCase):
     layer = nn.Linear(768, 768*4)
     opt = nn.optim.Adam(nn.state.get_parameters(layer), lr=1e-4)
     layer(x).relu().sum().backward()
-    check_schedule(opt.schedule_step(), 14)
+    check_schedule(opt.schedule_step(), 12)
 
   def test_adam_conv_fuse(self):
     with Tensor.train():
@@ -590,7 +609,7 @@ class TestSchedule(unittest.TestCase):
       opt = nn.optim.Adam(nn.state.get_parameters(c1), lr=1e-4)
       opt.zero_grad()
       c1(img).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 14)
+      check_schedule(opt.schedule_step(), 12)
 
   def test_adam_2convs_fuse(self):
     with Tensor.train():
@@ -600,7 +619,7 @@ class TestSchedule(unittest.TestCase):
       opt = nn.optim.Adam(nn.state.get_parameters([c1, c2]), lr=1e-4)
       opt.zero_grad()
       c2(c1(img).relu()).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 15)
+      check_schedule(opt.schedule_step(), 14)
 
   def test_sgd_conv_fuse(self):
     with Tensor.train():
@@ -679,6 +698,73 @@ class TestSchedule(unittest.TestCase):
     # c = a + 2
     # sched = check_schedule([b, c], 4)
     # doesn't store either in half because it doesn't chase
+
+  def test_reduce_simple_chase(self):
+    a = Tensor.empty(4, 4, 4)
+    r = a.sum(0) + 6
+    b = r.sum(0) * 4
+    c = r.sum(1) * 2
+    schedule = check_schedule([b, c], 3)
+    assert schedule[0].ast[0].src[0].op is BinaryOps.ADD
+
+  def test_push_permute_chase(self):
+    a = Tensor.empty(4, 4, 4)
+    b = Tensor.empty(4, 4)
+    r = a.sum(2) + b
+    d = r.T * 4
+    e = r * d
+    schedule = check_schedule([d, e], 3)
+    assert schedule[0].ast[0].src[0].op is BinaryOps.ADD
+
+  def test_push_shrink_chase(self):
+    a = Tensor.empty(16, 16)
+    b = Tensor.empty(4)
+    c = Tensor.empty(16, )
+    r = a.sum(1) + c
+    d = r[:4] * b
+    schedule = check_schedule(d, 2)
+    assert schedule[0].ast[0].src[0].op is BinaryOps.ADD
+
+  def test_midreduce_nochase(self):
+    a = Tensor.empty(16, 16)
+    b = (a.sum(0) + a.max(1)) + 2
+    schedule = check_schedule(b, 2)
+    assert schedule[0].ast[0].src[0].op is ReduceOps.MAX
+
+  # pattern in test_transformer
+  def test_partial_fuse1(self):
+    a = Tensor.empty(16, 16)
+    b = Tensor.empty(16, 16)
+    c = a.sum() + 2
+    d = (a.sum() - b.sum()) * 4
+    check_schedule([c, d], 3)
+
+  # pattern in conv
+  def test_partial_fuse2(self):
+    a = Tensor.empty(16, 16)
+    b = Tensor.empty(16, 16)
+    c = a.sum() + 2
+    d = b.sum() - c
+    check_schedule([c, d], 2)
+
+  # pattern in adam
+  def test_partial_fuse3(self):
+    a = Tensor.empty(16, 16)
+    b = Tensor.empty(16, 16)
+    c = a.sum() + 2
+    d = a.sum() * 2
+    e = c * d
+    f = b.sum() - e
+    check_schedule([c, d, e, f], 2)
+
+  def test_partial_fuse4(self):
+    a = Tensor.empty(16, 16)
+    b = Tensor.empty(16, 16)
+    c = a.sum() + 2
+    d = a.sum() * 2
+    e = c * d
+    f = (b - d).sum() - e
+    check_schedule([c, d, e, f], 3)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

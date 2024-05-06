@@ -554,7 +554,7 @@ class AMDDevice(Compiled):
 
     self.sdma_read_pointer = to_mv(self.sdma_queue.read_pointer_address, 8).cast("Q")
     self.sdma_write_pointer = to_mv(self.sdma_queue.write_pointer_address, 8).cast("Q")
-    self.sdma_doorbell = to_mv(self.doorbells + self.sdma_queue.doorbell_offset - self.doorbells_base, 4).cast("I")
+    self.sdma_doorbell = to_mv(self.doorbells + self.sdma_queue.doorbell_offset - self.doorbells_base, 8).cast("Q")
     self.sdma_doorbell_value = 0
 
     # PM4 Queue
@@ -572,7 +572,7 @@ class AMDDevice(Compiled):
 
     self.pm4_read_pointer = to_mv(self.pm4_queue.read_pointer_address, 8).cast("Q")
     self.pm4_write_pointer = to_mv(self.pm4_queue.write_pointer_address, 8).cast("Q")
-    self.pm4_doorbell = to_mv(self.doorbells + self.pm4_queue.doorbell_offset - self.doorbells_base, 4).cast("I")
+    self.pm4_doorbell = to_mv(self.doorbells + self.pm4_queue.doorbell_offset - self.doorbells_base, 8).cast("Q")
 
     super().__init__(device, AMDAllocator(self), AMDCompiler(self.arch), functools.partial(AMDProgram, self))
 

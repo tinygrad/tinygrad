@@ -1,8 +1,9 @@
 import unittest
 
+from tinygrad.codegen.kernel import Opt, OptOps
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.engine.schedule import create_schedule
-from tinygrad.features.search import time_linearizer, bufs_from_lin
+from tinygrad.features.search import time_linearizer, bufs_from_lin, actions
 from tinygrad.device import Device, Buffer
 from tinygrad.ops import LoadOps, BufferOps
 from tinygrad.tensor import Tensor
@@ -41,6 +42,26 @@ class TestBEAM(unittest.TestCase):
     k_beam_0 = capturing[0].captured
     capturing.clear()
     assert k_beam_0[-1].prg.prg != k_beam_1[-1].prg.prg
+
+  def test_get_linearizer_actions(self):
+    from test.test_linearizer import helper_realized_ast
+    a = Tensor.rand(4, 3)
+    b = Tensor.rand(3)
+    realized_ast, _ = helper_realized_ast(a @ b)
+    from tinygrad.features.search import get_linearizer_actions
+    lins = get_linearizer_actions(Linearizer(realized_ast), False).values()
+
+    # ensure amt=0 are not duplicated
+    if Opt(OptOps.UPCAST, 0, 0) in actions:
+      assert len([x for x in lins if x.applied_opts[0] == Opt(OptOps.UPCAST, axis=0, amt=4)]) == 0, "did not de-dup UPCAST"
+    if Opt(OptOps.LOCAL, 0, 0) in actions:
+      assert len([x for x in lins if x.applied_opts[0] == Opt(OptOps.LOCAL, axis=0, amt=4)]) == 0, "did not de-dup LOCAL"
+    if Opt(OptOps.UNROLL, 0, 0) in actions:
+      assert len([x for x in lins if x.applied_opts[0] == Opt(OptOps.UNROLL, axis=0, amt=3)]) == 0, "did not de-dup UNROLL"
+    if Opt(OptOps.GROUP, 0, 0) in actions:
+      assert len([x for x in lins if x.applied_opts[0] == Opt(OptOps.GROUP, axis=0, amt=3)]) == 0, "did not de-dup GROUP"
+    if Opt(OptOps.GROUPTOP, 0, 0) in actions:
+      assert len([x for x in lins if x.applied_opts[0] == Opt(OptOps.GROUPTOP, axis=0, amt=3)]) == 0, "did not de-dup GROUPTOP"
 
 if __name__ == '__main__':
   unittest.main()

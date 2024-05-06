@@ -1,4 +1,5 @@
 from __future__ import annotations
+import multiprocessing
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, List, Optional, Dict, Tuple, ClassVar, cast
@@ -24,6 +25,7 @@ class _Device:
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def __get_canonicalized_item(self, ix:str) -> Compiled:
     if DEBUG >= 1: print(f"opening device {ix} from pid:{os.getpid()}")
+    assert multiprocessing.current_process().name == "MainProcess" or ix.split(":")[0] in ["DISK", "NPY"], f"can only open device {ix} from parent"
     x = ix.split(":")[0].upper()
     return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._devices][0](ix)  # noqa: E501
   @functools.cached_property
@@ -32,7 +34,9 @@ class _Device:
     if device_from_env: return device_from_env
     for device in ["METAL", "HSA", "CUDA", "GPU", "CLANG", "LLVM"]:
       try:
-        if self[device]: return device
+        if self[device]:
+          os.environ[device] = "1"   # we set this in environment for spawned children
+          return device
       except Exception: pass
     raise RuntimeError("no usable devices")
 Device = _Device()
@@ -113,6 +117,8 @@ class _MallocAllocator(LRUAllocator):
   def as_buffer(self, src) -> memoryview: return flat_mv(memoryview(src))
   def copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
   def copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
+  def offset(self, buf, size:int, offset:int): return from_mv(self.as_buffer(buf)[offset:offset+size])
+
 MallocAllocator = _MallocAllocator()
 
 # **************** for Compiled Devices ****************
@@ -144,24 +150,26 @@ class Compiler:
 
 class CompiledRunner(Runner):
   def __init__(self, name:str, prg:str, dname:str, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None,
-               variables:Optional[List[Variable]]=None, op_estimate:sint=0, mem_estimate:sint=0, precompiled:Optional[bytes]=None, outcount:int=1):
+               uops:Optional[UOpGraph]=None, op_estimate:sint=0, mem_estimate:sint=0, precompiled:Optional[bytes]=None):
     if DEBUG >= 4: print(prg)
     if global_size is not None: global_size = global_size + [1]*(3-len(global_size))
     if local_size is not None: local_size = local_size + [1]*(3-len(local_size))
     self.name, self.prg, self.global_size, self.local_size, self.first_run = \
       to_function_name(name), prg, global_size, local_size, True
     lib:bytes = precompiled if precompiled is not None else cast(Compiler, Device[dname].compiler).compile_cached(prg)
-    self.lib, self.clprg, self.outcount = lib, Device[dname].runtime(self.name, lib), outcount
-    self.vars: List[Variable] = [] if variables is None else variables
+    self.uops = uops
+    self.vars: List[Variable] = [] if uops is None else uops.vars()
+    self.globals: List[Tuple[int, bool]] = [] if uops is None else uops.globals()
+    self.lib, self.clprg, self.outcount = lib, Device[dname].runtime(self.name, lib), sum(x[1] for x in self.globals)
     super().__init__(name, dname, op_estimate, mem_estimate)
 
   def to_other_device(self, dname:str):
     return CompiledRunner(self.display_name, self.prg, dname, self.global_size, self.local_size,
-                          self.vars, self.op_estimate, self.mem_estimate, self.lib, self.outcount)
+                          self.uops, self.op_estimate, self.mem_estimate, self.lib)
 
   def __reduce__(self):
     return self.__class__, (self.display_name, self.prg, self.dname, self.global_size, self.local_size,
-                            self.vars, self.op_estimate, self.mem_estimate, self.lib, self.outcount)
+                            self.uops, self.op_estimate, self.mem_estimate, self.lib)
 
   def launch_dims(self, var_vals):
     global_size = [sym_infer(sz, var_vals) for sz in self.global_size] if self.global_size is not None else self.global_size
@@ -195,7 +203,7 @@ class Compiled:
     run_count = prod((k.global_size if k.global_size else []) + (k.local_size if k.local_size else []))
     # NOTE: we use min here to ignore the indexing FLOPS
     ret = CompiledRunner(k.name, self.compiler.render(to_function_name(k.name), k.uops), self.dname, k.global_size, k.local_size,
-                         k.uops.vars(), min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count), outcount=len(k.outbufs))
+                         k.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))
     return ret
 
   def get_linearizer(self, *ast:LazyOp) -> Linearizer:
