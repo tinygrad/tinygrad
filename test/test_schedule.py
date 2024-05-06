@@ -748,8 +748,11 @@ class TestSchedule(unittest.TestCase):
     # match by input + ST and two shapes? start with contigouous input only, check shapes (should determine reduces)
     # what if same input + st but one is early and another is late?
 
-    # todo: no fuse f(expand(reduce(x)), x) "diamonds", or at least make sure it's fused sequential instead of parallel
+    # no fuse f(expand(reduce(x)), x) "diamonds"
+    # or at least it should be fused sequential instead of parallel
     # fused group needs to be contiguous subDAG -- construct with toposort
+    sum1 = (x + a).sum()
+    check_schedule([sum1, (x + sum1).sum()], 2)
 
   @unittest.skip("not useful for bn backward")
   def test_parallel_r_e_fusion(self):
