@@ -762,6 +762,7 @@ class TestSchedule(unittest.TestCase):
     sum1 = (x + a).sum()
     sum2 = (y + b).sum()
     check_schedule([(y + sum1).sum(), (x + sum2).sum()], 3)
+    del sum1, sum2
 
     # todo: test _merge_prescheduled or otherwise verify buffers indexes are correct
 
