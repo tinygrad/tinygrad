@@ -101,7 +101,7 @@ def _merge_prescheduled(prescheduled: List[_LBScheduleItem]):
   inputs: Tuple[LazyBuffer, ...] = tuple(dedup(flatten(psi.inputs for psi in prescheduled)))
   outputs: Tuple[LazyBuffer, ...] = tuple(dedup(flatten(psi.outputs for psi in prescheduled)))
   var_vals: Dict[Variable, int] = merge_dicts([psi.var_vals.copy() for psi in prescheduled])
-  ast: Tuple[LazyOp] = tuple(_replace_bufis(ast, psi.inputs+psi.outputs, inputs+outputs) for psi in prescheduled for ast in psi.ast)
+  ast: Tuple[LazyOp] = tuple(_replace_bufis(ast, psi.outputs+psi.inputs, outputs+inputs) for psi in prescheduled for ast in psi.ast)
   return _LBScheduleItem(ast, outputs, inputs, var_vals)
 
 # recursively search the entire graph for all LazyBuffers, insert realizes after expands
