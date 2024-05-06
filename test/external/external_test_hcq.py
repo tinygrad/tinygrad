@@ -215,5 +215,19 @@ class TestHCQ(unittest.TestCase):
     d1._wait_signal(d1.timeline_signal, d1.timeline_value)
     d1.timeline_value += 1
 
+  def test_timeline_signal_rollover(self):
+    TestHCQ.d0.timeline_value = (1 << 32) - 20 # close value to reset
+    TestHCQ.compute_queue().signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1).submit(TestHCQ.d0)
+    TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1)
+
+    for _ in range(40):
+      q = TestHCQ.compute_queue()
+      q.wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1)
+      q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size)
+      q.signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
+      TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
+      TestHCQ.d0.timeline_value += 1
+      assert (val:=TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[0]) == 1.0, f"got val {val}"
+
 if __name__ == "__main__":
   unittest.main()

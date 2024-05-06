@@ -370,7 +370,7 @@ class AMDProgram:
 
     if wait:
       self.device._wait_signal(self.device.timeline_signal, self.device.timeline_value - 1)
-      return (self.device.timeline_signal.end_ts-self.device.timeline_signal.start_ts)/1e8
+      return (self.device.timeline_signal.end_ts - self.device.timeline_signal.start_ts) / 1e8
 
 class AMDAllocator(LRUAllocator):
   def __init__(self, device:AMDDevice):
