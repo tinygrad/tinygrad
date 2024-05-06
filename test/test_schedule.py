@@ -750,7 +750,12 @@ class TestSchedule(unittest.TestCase):
     # OK for now since we only fuse for bijective st
 
     # match by input + ST and two shapes? start with contigouous input only, check shapes (should determine reduces)
+
     # what if same input + st but one is early and another is late?
+    check_schedule([x.sum(0, keepdim=True) + a, (a + b).sum()], 2)
+
+    # don't fuse early reduce with elementwise!
+    check_schedule([x.sum(), x + y], 2)
 
     # no fuse f(expand(reduce(x)), x) "diamonds"
     # or at least it should be fused sequential instead of parallel
