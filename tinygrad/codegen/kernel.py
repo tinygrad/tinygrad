@@ -493,8 +493,9 @@ class Kernel:
       self.dont_use_locals = True
     elif opt.op is OptOps.PADTO:
       check(not self.vars, "does not work with symbolic shape")
+      check(axis < self.shape_len - self.upcasted, "cannot pad upcasted")
       # ok to pad SUM if all parent ops have f(0) = 0
-      if self.first_reduce <= axis < self.shape_len - self.upcasted:
+      if self.first_reduce <= axis:
         check(self.reduceop.op is ReduceOps.SUM and all(op.op not in UNSAFE_PAD_OPS for ops in self.reduceop.src for op in ops.lazyops), "cannot pad")
       padded = False
       for i,st in enumerate(self.sts):
