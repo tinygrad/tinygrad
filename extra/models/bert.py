@@ -9,6 +9,8 @@ from examples.mlperf.initializers import LinearBert, LayerNormBert
 Embedding = nn.Embedding
 Linear = nn.Linear
 LayerNorm = nn.LayerNorm
+dropout = Tensor.dropout
+scaled_dot_product_attention = Tensor.scaled_dot_product_attention
 
 class BertForQuestionAnswering:
   def __init__(self, hidden_size=1024, intermediate_size=4096, max_position_embeddings=512, num_attention_heads=16, num_hidden_layers=24, type_vocab_size=2, vocab_size=30522, attention_probs_dropout_prob=0.1, hidden_dropout_prob=0.1):
@@ -86,7 +88,7 @@ class BertEmbeddings:
     self.position_embeddings = Embedding(max_position_embeddings, hidden_size)
     self.token_type_embeddings = Embedding(type_vocab_size, hidden_size)
     self.LayerNorm = LayerNorm(hidden_size, eps=1e-12)
-    self.dropout = hidden_dropout_prob
+    self.hidden_dropout_prob = hidden_dropout_prob
 
   def __call__(self, input_ids, token_type_ids):
     input_shape = input_ids.shape
@@ -99,7 +101,7 @@ class BertEmbeddings:
 
     embeddings = words_embeddings + position_embeddings + token_type_embeddings
     embeddings = self.LayerNorm(embeddings)
-    embeddings = embeddings.dropout(self.dropout)
+    embeddings = dropout(embeddings, self.hidden_dropout_prob)
     return embeddings
 
 class BertEncoder:
@@ -127,11 +129,11 @@ class BertOutput:
   def __init__(self, hidden_size, intermediate_size, hidden_dropout_prob):
     self.dense = Linear(intermediate_size, hidden_size)
     self.LayerNorm = LayerNorm(hidden_size, eps=1e-12)
-    self.dropout = hidden_dropout_prob
+    self.hidden_dropout_prob = hidden_dropout_prob
 
   def __call__(self, hidden_states, input_tensor):
     hidden_states = self.dense(hidden_states)
-    hidden_states = hidden_states.dropout(self.dropout)
+    hidden_states = dropout(hidden_states, self.hidden_dropout_prob)
     hidden_states = self.LayerNorm(hidden_states + input_tensor)
     return hidden_states
 
@@ -172,7 +174,7 @@ class BertSelfAttention:
     self.key = Linear(hidden_size, self.all_head_size)
     self.value = Linear(hidden_size, self.all_head_size)
 
-    self.dropout = attention_probs_dropout_prob
+    self.attention_probs_dropout_prob = attention_probs_dropout_prob
 
   def __call__(self, hidden_states, attention_mask):
     mixed_query_layer = self.query(hidden_states)
@@ -183,7 +185,7 @@ class BertSelfAttention:
     key_layer = self.transpose_for_scores(mixed_key_layer)
     value_layer = self.transpose_for_scores(mixed_value_layer)
 
-    context_layer = Tensor.scaled_dot_product_attention(query_layer, key_layer, value_layer, attention_mask, self.dropout)
+    context_layer = scaled_dot_product_attention(query_layer, key_layer, value_layer, attention_mask, self.attention_probs_dropout_prob)
 
     context_layer = context_layer.transpose(1, 2)
     context_layer = context_layer.reshape(context_layer.shape[0], context_layer.shape[1], self.all_head_size)
@@ -198,10 +200,10 @@ class BertSelfOutput:
   def __init__(self, hidden_size, hidden_dropout_prob):
     self.dense = Linear(hidden_size, hidden_size)
     self.LayerNorm = LayerNorm(hidden_size, eps=1e-12)
-    self.dropout = hidden_dropout_prob
+    self.hidden_dropout_prob = hidden_dropout_prob
 
   def __call__(self, hidden_states, input_tensor):
     hidden_states = self.dense(hidden_states)
-    hidden_states = hidden_states.dropout(self.dropout)
+    hidden_states = dropout(hidden_states, self.hidden_dropout_prob)
     hidden_states = self.LayerNorm(hidden_states + input_tensor)
     return hidden_states

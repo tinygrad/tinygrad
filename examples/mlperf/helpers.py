@@ -196,11 +196,13 @@ def get_bert_qa_prediction(features, example, start_end_logits):
 
 def get_mlperf_bert_model(config_path:str):
   from extra.models import bert
-  from examples.mlperf.initializers import LinearBert, EmbeddingBert, LayerNormBert
+  from examples.mlperf.initializers import LinearBert, EmbeddingBert, LayerNormBert, dropout_bert, scaled_dot_product_attention_bert
 
   bert.Linear = LinearBert
   bert.Embedding = EmbeddingBert 
   bert.LayerNorm = LayerNormBert
+  bert.dropout = dropout_bert
+  bert.scaled_dot_product_attention = scaled_dot_product_attention_bert
 
   from extra.models.bert import BertForMLPerf
 

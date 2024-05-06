@@ -1,8 +1,8 @@
 import math
-from typing import Union, Tuple
+from typing import Union, Tuple, Optional
 
 from tinygrad import Tensor, nn, dtypes
-from tinygrad.helpers import prod, argfix
+from tinygrad.helpers import prod, argfix, all_int
 
 # rejection sampling truncated randn
 def rand_truncn(*shape, dtype=None, truncstds=2, **kwargs) -> Tensor:
@@ -11,6 +11,25 @@ def rand_truncn(*shape, dtype=None, truncstds=2, **kwargs) -> Tensor:
   ctr = Tensor.arange(CNT).reshape((1,) * len(x.shape[:-1]) + (CNT,)).expand(x.shape)
   take = (x.abs() <= truncstds).where(ctr, CNT).min(axis=-1, keepdim=True)  # set to 0 if no good samples
   return (ctr == take).where(x, 0).sum(axis=-1)
+
+# Use combined Linear congruential generator
+def rand_lcg(*shape, device=None, dtype=None, **kwargs):
+  if Tensor._rng_counter is None: Tensor._rng_counter = Tensor([0], dtype=dtypes.uint32, requires_grad=False)
+  if (num := prod((shape:=argfix(*shape)))) == 0: return Tensor.zeros(shape, device=device, dtype=dtype, **kwargs)
+  Tensor._rng_counter.assign(Tensor._rng_counter + num*2).realize()
+  counts1 = Tensor.arange(num, device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._rng_counter.to(device) # Hack: Double arange to fuse
+  counts2 = Tensor.arange(num, num*2, device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._rng_counter.to(device)
+  counts1 = (counts1 * (2 ** 13)) ^ counts1
+  counts2 = (counts2 * (2 ** 13)) ^ counts2
+
+  m1, m2, a1, a2, b1, b2 = 4294967291, 2147483647, 1664525, 16807, 1013904223, 0
+  seed1 = (x1 := a1 * counts1 + b1) - m1 * (x1.div(m1, upcast=False)).floor() # Cannot use %
+  seed2 = (x2 := a2 * counts2 + b2) - m2 * (x2.div(m2, upcast=False)).floor()
+  out = (seed2 ^ seed1).cast(dtypes.float32).div(m1, upcast=False)
+  out = out.reshape(shape).cast(dtypes.default_float if dtype is None else dtype)
+  if (dtype or dtypes.default_float) == dtypes.half: out = out.clip(0, 1 - 0.001) # Avoid overflow
+  out.requires_grad = kwargs.get("requires_grad")
+  return out.contiguous()
 
 # https://github.com/keras-team/keras/blob/v2.15.0/keras/initializers/initializers.py#L1026-L1065
 def he_normal(*shape, a: float = 0.00, **kwargs) -> Tensor:
@@ -66,3 +85,15 @@ class LayerNormBert:
     xn = x.cast(dtypes.float32).layernorm(eps=self.eps, axis=self.axis).cast(x.dtype)
     if not self.elementwise_affine: return xn
     return (xn * self.weight.cast(dtypes.default_float) + self.bias.cast(dtypes.default_float))
+
+def dropout_bert(x: Tensor, p=0.5):
+  if not Tensor.training or p == 0: return x
+  return x * (rand_lcg(*x.shape, requires_grad=False, device=x.device) >= p) * (1/(1.0 - p))
+
+def scaled_dot_product_attention_bert(query:Tensor, key:Tensor, value:Tensor, attn_mask:Optional[Tensor]=None,
+                                  dropout_p:float=0.0, is_causal:bool=False) -> Tensor:
+  assert all_int(query.shape), f"does not support symbolic shape {query.shape}"
+  if is_causal: attn_mask = Tensor.ones(query.shape[-2], key.shape[-2], requires_grad=False, device=query.device).tril(0).cast(dtypes.bool)
+  if attn_mask is not None and attn_mask.dtype == dtypes.bool: attn_mask = (attn_mask == 0).where(-float("inf"), 0)
+  qk = query @ key.transpose(-2,-1) / math.sqrt(query.shape[-1])
+  return dropout_bert(((qk+attn_mask) if attn_mask is not None else qk).softmax(-1), dropout_p) @ value
