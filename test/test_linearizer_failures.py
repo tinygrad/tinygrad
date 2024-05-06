@@ -22,7 +22,7 @@ def helper_test_lin(lin: Linearizer, opts, failed_platforms, rtol=1e-2, atol=1e-
       lin.apply_opt(opt)
     except KernelOptError:
       # it's considered fixed if we invalidated the opts
-      assert Device.DEFAULT not in failed_platforms
+      assert Device.DEFAULT not in failed_platforms, f"unexpected success on {Device.DEFAULT}"
       return
 
   compare_result = compare_linearizer(lin, rtol=rtol, atol=atol)
@@ -234,7 +234,7 @@ class TestLinearizerFailures(unittest.TestCase):
   def test_failure_31(self):
     ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=UnaryOps.EXP2, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BinaryOps.SUB, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 16, 13, 13), strides=(0, 169, 13, 1), offset=0, mask=None, contiguous=True),)))), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 16, 13, 13), strides=(0, 13, 1, 0), offset=0, mask=None, contiguous=False),))))), arg=None), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=1.4426950408889634, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 16, 13, 13), strides=(0, 0, 0, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=None),), arg=((3,), dtypes.float)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 16, 13, 1), strides=(0, 13, 1, 0), offset=0, mask=None, contiguous=True),))))
     opts = [Opt(op=OptOps.UNROLL, axis=0, amt=0), Opt(op=OptOps.PADTO, axis=1, amt=32)]
-    helper_test_lin(Linearizer(ast), opts=opts, failed_platforms=["METAL", "GPU", "HSA", "CUDA", "CLANG", "LLVM"])
+    helper_test_lin(Linearizer(ast), opts=opts, failed_platforms=[])
 
 if __name__ == '__main__':
   unittest.main()
