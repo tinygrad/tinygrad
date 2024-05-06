@@ -824,7 +824,7 @@ class Tensor:
     if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
     assign_to = self.realize().__getitem__(indices)
     # NOTE: contiguous to prevent const folding.
-    v = v._broadcast_to(broadcast_shape(assign_to.shape, v.shape)).contiguous()
+    v = v.cast(assign_to.dtype)._broadcast_to(broadcast_shape(assign_to.shape, v.shape)).contiguous()
     assign_to.assign(v).realize()
 
   # NOTE: using slice is discouraged and things should migrate to pad and shrink
@@ -1324,9 +1324,9 @@ class Tensor:
     # NOTE: self is a logits input
     log_probs, loss_mask = self.log_softmax(), (Y != ignore_index)
     y_counter = Tensor.arange(self.shape[-1], requires_grad=False, device=self.device).unsqueeze(0).expand(Y.numel(), self.shape[-1])
-    y = ((y_counter == Y.flatten().reshape(-1, 1)) * loss_mask.reshape(-1, 1)).reshape(*Y.shape, self.shape[-1])
-    smoothing = label_smoothing * (log_probs.mean(-1) * loss_mask).sum()
-    return -((1 - label_smoothing) * (log_probs * y).sum() + smoothing) / loss_mask.sum()
+    y = ((y_counter == Y.flatten().reshape(-1, 1)).where(-1, 0) * loss_mask.reshape(-1, 1)).reshape(*Y.shape, self.shape[-1])
+    smoothing = -1 * label_smoothing * (log_probs.mean(-1) * loss_mask).sum() / loss_mask.sum()
+    return (1 - label_smoothing) * (log_probs * y).sum() / loss_mask.sum() + smoothing
 
   # ***** cast ops *****
 

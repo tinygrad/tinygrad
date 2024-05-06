@@ -11,7 +11,7 @@ from tinygrad.shape.symbolic import MulNode, Variable, NumNode, Node
 from tinygrad.tensor import Tensor
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule, lower_schedule
-from tinygrad.helpers import prod, Context, getenv
+from tinygrad.helpers import prod, Context, getenv, CI
 from tinygrad.dtype import DType, dtypes
 from tinygrad.codegen.uops import UOpGraph
 
@@ -787,7 +787,7 @@ class TestKernelOpts(unittest.TestCase):
       ], apply_tc=True, atol=atol, rtol=rtol)
 
   def test_padto_matmul(self):
-    if Device.DEFAULT in ["CUDA", "RHIP"]: self.skipTest("super slow on CUDA and RHIP because of the big grid dims")
+    if CI and Device.DEFAULT in ["CUDA", "RHIP"]: self.skipTest("super slow on CUDA and RHIP because of the big grid dims")
     N = 17 * 17
     Tensor.manual_seed(289)
     a = Tensor.rand(N, N)
@@ -801,6 +801,25 @@ class TestKernelOpts(unittest.TestCase):
       # can optimize further post PADTO
       [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32), Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.UPCAST, 1, 2),],
     ])
+
+  def test_padto_upcasted_not_ok(self):
+    N = 4
+    a = Tensor.rand(N, N)
+    b = Tensor.rand(N, N)
+    helper_linearizer_opt(a@b, [
+      [Opt(OptOps.UPCAST, 0, 0)],
+      [Opt(OptOps.UPCAST, 1, 0)],
+      [Opt(OptOps.UNROLL, 0, 0)],
+      [Opt(OptOps.PADTO, 0, 8)],
+      [Opt(OptOps.PADTO, 1, 8)],
+      [Opt(OptOps.PADTO, 2, 8)],
+    ])
+    with self.assertRaises(KernelOptError):
+      helper_linearizer_opt(a@b, [[Opt(OptOps.UPCAST, 0, 0), Opt(OptOps.PADTO, 2, 8)]])
+    with self.assertRaises(KernelOptError):
+      helper_linearizer_opt(a@b, [[Opt(OptOps.UPCAST, 1, 0), Opt(OptOps.PADTO, 2, 8)]])
+    with self.assertRaises(KernelOptError):
+      helper_linearizer_opt(a@b, [[Opt(OptOps.UNROLL, 0, 0), Opt(OptOps.PADTO, 2, 8)]])
 
   def test_padto_sum_ok(self):
     N = 18 * 18
