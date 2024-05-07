@@ -497,9 +497,6 @@ class NVDevice(Compiled):
     self._cmdq_setup_compute_gpfifo()
     self._cmdq_setup_dma_gpfifo()
 
-    self.msignst = self._get_signal()
-    self.msignen = self._get_signal()
-
     NVDevice.devices.append(self)
 
   def synchronize(self):
@@ -522,16 +519,11 @@ class NVDevice(Compiled):
   def _get_signal(self, num=None, value=0) -> memoryview:
     if num is None:
       self.signal_number += 1
-      if self.signals_page and self.signal_number * 16 >= self.signals_page.length: 
-        assert False
-        self.signal_number = 32
+      if self.signals_page and self.signal_number * 16 >= self.signals_page.length: self.signal_number = 32
       num = self.signal_number
     sig = to_mv(self.signals_page.base + num * 16, 16).cast("Q")
     sig[0] = value
     return sig
-  
-  @classmethod
-  def _set_signal_value(self, sig, value): sig[0] = value
 
   @classmethod
   def _wait_signal(self, signal, value=0, timeout=10000):

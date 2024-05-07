@@ -255,13 +255,11 @@ class HWPM4Queue:
     return self
 
   def submit(self, device:AMDDevice):
-    self.signal(device.compute_progress_signal, device.compute_put_value + 1)
     wptr = device.pm4_write_pointer[0]
     pm4_buffer_view = to_mv(device.pm4_ring.va_addr, device.pm4_ring.size).cast("I")
     for i, value in enumerate(self.q): pm4_buffer_view[(wptr+i)%(device.pm4_ring.size//4)] = value
     device.pm4_write_pointer[0] = wptr + len(self.q)
     device.pm4_doorbell[0] = wptr + len(self.q)
-    device.compute_put_value += 1
     return self
 
 # prebuilt sdma packets
@@ -419,7 +417,6 @@ class AMDAllocator(LRUAllocator):
   #  self.device._wait_signal(self.device.signal_sdma)
 
   def copyin(self, dest, src: memoryview):
-    self.device.synchronize()
     for i in range(0, src.nbytes, self.b[0].size):
       self.b_next = (self.b_next + 1) % len(self.b)
       AMDDevice._wait_signal(self.device.timeline_signal, self.b_timeline[self.b_next])
@@ -455,8 +452,6 @@ class AMDDevice(Compiled):
   kfd:int = -1
   event_page:Any = None  # TODO: fix types in kfd, Optional[kfd.struct_kfd_ioctl_alloc_memory_of_gpu_args]
   signals_page:Any = None
-  signal_pool:List[hsa.amd_signal_t] = []
-  signal_to_reset:List[hsa.amd_signal_t] = []
   signal_number:int = 16
   gpus:List[pathlib.Path] = []
 
@@ -507,7 +502,6 @@ class AMDDevice(Compiled):
     if sync_event is not None:
       ret.event_mailbox_ptr = AMDDevice.event_page.va_addr + sync_event.event_slot_index*8
       ret.event_id = sync_event.event_id
-    if reset: AMDDevice.signal_to_reset.append(ret)
     return ret
 
   @classmethod
@@ -535,7 +529,6 @@ class AMDDevice(Compiled):
 
     if AMDDevice.event_page is None:
       AMDDevice.signals_page = self._gpu_alloc(SIGNAL_SIZE*SIGNAL_COUNT, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
-      AMDDevice.signal_pool = [hsa.amd_signal_t.from_address(AMDDevice.signals_page.va_addr + SIGNAL_SIZE*i) for i in range(SIGNAL_COUNT)]
       AMDDevice.event_page = self._gpu_alloc(0x8000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
       sync_event = kio.create_event(AMDDevice.kfd, event_page_offset=AMDDevice.event_page.handle, auto_reset=1)
     else:
