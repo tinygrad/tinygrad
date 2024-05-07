@@ -118,7 +118,6 @@ class HWComputeQueue:
 
   def submit(self, dev:NVDevice):
     assert len(self.q) < (1 << 21)
-    self.signal(dev.compute_progress_signal, dev.compute_put_value + 1)
     for i,packet in enumerate(self.q): dev.cmdq[dev.cmdq_wptr//4 + i] = packet
     fifo_entry = dev.compute_put_value % dev.compute_gpfifo_entries
     dev.compute_gpu_ring[fifo_entry] = ((dev.cmdq_page.base+dev.cmdq_wptr)//4 << 2) | (len(self.q) << 42) | (1 << 41)
@@ -148,7 +147,6 @@ class HWCopyQueue:
     return self
 
   def submit(self, dev:NVDevice):
-    self.signal(dev.dma_progress_signal, dev.dma_put_value + 1)
     for i,packet in enumerate(self.q): dev.cmdq[dev.cmdq_wptr//4 + i] = packet
     fifo_entry = dev.dma_put_value % dev.dma_gpfifo_entries
     dev.dma_gpu_ring[fifo_entry] = ((dev.cmdq_page.base+dev.cmdq_wptr)//4 << 2) | (len(self.q) << 42)
@@ -239,22 +237,25 @@ class NVProgram:
     kernargs_ptr = self.device.kernargs_ptr
     self.device.kernargs_ptr += kernargs_size
 
-    if wait: st, en = self.device._get_signal(), self.device._get_signal()
     queue = HWComputeQueue()
-    queue.wait(self.device.dma_progress_signal, self.device.dma_put_value)
-    queue.wait(self.device.compute_progress_signal, self.device.compute_put_value)
-    if wait: queue.signal(st, timestamp=True)
+    queue.wait(self.device.timeline_signal, self.device.timeline_value - 1)
+    if wait: queue.signal(self.device.time_event_st, timestamp=True)
     queue.copy_from_cpu(kernargs_ptr + QMD_SIZE, self.constbuffer_0 + kernargs)
     queue.exec(self, kernargs_ptr, global_size, local_size)
-    if wait: queue.signal(en, timestamp=True)
-    queue.submit(self.device)
+    if wait: queue.signal(self.device.time_event_en, timestamp=True)
+    queue.signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
+    self.device.timeline_value += 1
+
     if wait:
-      self.device._wait_signal(self.device.compute_progress_signal, self.device.compute_put_value)
-      return (en[1]-st[1]) / 1e9
+      self.device._wait_signal(self.device.timeline_signal, self.device.timeline_value - 1)
+      return (self.device.time_event_en[1] - self.device.time_event_st[1]) / 1e9
 
 class NVAllocator(LRUAllocator):
   def __init__(self, device:NVDevice):
     self.device = device
+    self.b = [self.device._gpu_host_alloc(2 << 20) for _ in range(16)]
+    self.b_timeline = [0] * len(self.b)
+    self.b_next = 0
     super().__init__()
 
   def _alloc(self, size:int, options:BufferOptions):
@@ -267,29 +268,34 @@ class NVAllocator(LRUAllocator):
     else: self.device._gpu_free(gpumem)
 
   def copyin(self, dest, src: memoryview):
-    host_mem = self.alloc(src.nbytes, BufferOptions(host=True))
-    self.device.pending_copyin.append((host_mem, src.nbytes, BufferOptions(host=True)))
-    ctypes.memmove(host_mem.base, from_mv(src), src.nbytes)
-    HWCopyQueue().copy(dest.base, host_mem.base, src.nbytes).submit(self.device)
-    self.device.synchronize()
+    for i in range(0, src.nbytes, self.b[0].length):
+      self.b_next = (self.b_next + 1) % len(self.b)
+      NVDevice._wait_signal(self.device.timeline_signal, self.b_timeline[self.b_next])
+      ctypes.memmove(self.b[self.b_next].va_addr, from_mv(src[i:]), lsize:=min(self.b[self.b_next].length, src.nbytes-i))
+      HWCopyQueue().wait(self.device.timeline_signal, self.device.timeline_value - 1) \
+                   .copy(dest.va_addr+i, self.b[self.b_next].va_addr, lsize) \
+                   .signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
+      self.b_timeline[self.b_next] = self.device.timeline_value
+      self.device.timeline_value += 1
 
   def copyout(self, dest:memoryview, src):
     NVDevice.synchronize_system()
-    host_mem = self.alloc(dest.nbytes, BufferOptions(host=True))
-    self.device.pending_copyin.append((host_mem, dest.nbytes, BufferOptions(host=True)))
-    HWCopyQueue().copy(host_mem.base, src.base, dest.nbytes).submit(self.device)
-    self.device.synchronize()
-    ctypes.memmove(from_mv(dest), host_mem.base, dest.nbytes)
+    for i in range(0, dest.nbytes, self.b[0].length):
+      HWCopyQueue().wait(self.device.timeline_signal, self.device.timeline_value - 1) \
+                   .copy(self.b[0].va_addr, src.va_addr+i, lsize:=min(self.b[0].length, dest.nbytes-i)) \
+                   .signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
+      NVDevice._wait_signal(self.device.timeline_signal, self.device.timeline_value)
+      self.device.timeline_value += 1
+
+      ctypes.memmove(from_mv(dest[i:]), self.b[0].va_addr, lsize)
 
   def transfer(self, dest, src, sz:int, src_dev=None, dest_dev=None):
-    queue = HWCopyQueue()
-    queue.wait(src_dev.dma_progress_signal, src_dev.dma_put_value)
-    queue.wait(src_dev.compute_progress_signal, src_dev.compute_put_value)
-    queue.wait(dest_dev.dma_progress_signal, dest_dev.dma_put_value)
-    queue.wait(dest_dev.compute_progress_signal, dest_dev.compute_put_value)
-    queue.copy(dest.base, src.base, sz).submit(src_dev)
-    HWCopyQueue().wait(src_dev.dma_progress_signal, src_dev.dma_put_value).submit(dest_dev)
-    dest_dev.synchronize()
+    HWCopyQueue().wait(src_dev.timeline_signal, src_dev.timeline_value - 1) \
+                 .wait(dest_dev.timeline_signal, dest_dev.timeline_value - 1) \
+                 .copy(dest.va_addr, src.va_addr, sz) \
+                 .signal(src_dev.timeline_signal, src_dev.timeline_value).submit(src_dev)
+    HWComputeQueue().wait(src_dev.timeline_signal, src_dev.timeline_value).submit(dest_dev)
+    src_dev.timeline_value += 1
 
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
 class NVDevice(Compiled):
@@ -378,8 +384,10 @@ class NVDevice(Compiled):
     if create_range: uvm.create_external_range(self.fd_uvm, base=va_base, length=size)
     gpu_attrs = (nv_gpu.struct_c__SA_UvmGpuMappingAttributes*256)(
       nv_gpu.struct_c__SA_UvmGpuMappingAttributes(gpuUuid=nv_gpu.struct_nv_uuid(uuid=self.gpu_uuid), gpuMappingType = 1))
-    return uvm.map_external_allocation(self.fd_uvm, base=va_base, length=size, rmCtrlFd=self.fd_ctl, hClient=self.root, hMemory=mem_handle,
+    res = uvm.map_external_allocation(self.fd_uvm, base=va_base, length=size, rmCtrlFd=self.fd_ctl, hClient=self.root, hMemory=mem_handle,
                                        gpuAttributesCount=1, perGpuAttributes=gpu_attrs)
+    res.__setattr__('va_addr', va_base)
+    return res
 
   def _alloc_gpu_vaddr(self, size, alignment=(4 << 10)):
     NVDevice.uvm_vaddr = (res_va:=round_up(NVDevice.uvm_vaddr, alignment)) + size
@@ -453,17 +461,20 @@ class NVDevice(Compiled):
     self.compute_gpu_ring: memoryview = to_mv(gpfifo.base, self.compute_gpfifo_entries * 8).cast("Q")
     self.compute_gpu_ring_controls = nv_gpu.AmpereAControlGPFifo.from_address(gpfifo.base + self.compute_gpfifo_entries * 8)
     self.compute_put_value: int = 0
-    self.compute_progress_signal = NVDevice._get_signal(self.device_id * 2)
 
     self.dma_gpfifo_entries: int = 0x10000
     self.dma_gpfifo_token: int = self._gpu_fifo_setup(gpfifo, ctxshare, channel_group, offset=0x100000, entries=self.dma_gpfifo_entries)
     self.dma_gpu_ring: memoryview = to_mv(gpfifo.base + 0x100000, self.dma_gpfifo_entries * 8).cast("Q")
     self.dma_gpu_ring_controls = nv_gpu.AmpereAControlGPFifo.from_address(gpfifo.base + 0x100000 + self.dma_gpfifo_entries * 8)
     self.dma_put_value: int = 0
-    self.dma_progress_signal = NVDevice._get_signal(self.device_id * 2 + 1)
 
     en_fifo_params = nv_gpu.NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS(bEnable=1)
     rm_control(self.fd_ctl, nv_gpu.NVA06C_CTRL_CMD_GPFIFO_SCHEDULE, self.root, channel_group, en_fifo_params)
+
+    self.timeline_value: int = 1
+    self.timeline_signal = NVDevice._get_signal(self.device_id * 2)
+    self._shadow_timeline_signal = NVDevice._get_signal(self.device_id * 2 + 1)
+    self.time_event_st, self.time_event_en = NVDevice._get_signal(), NVDevice._get_signal()
 
     self.cmdq_page: nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS = self._gpu_alloc(0x200000, map_to_cpu=True, huge_page=True)
     self.cmdq: memoryview = to_mv(self.cmdq_page.base, 0x200000).cast("I")
@@ -473,7 +484,6 @@ class NVDevice(Compiled):
     self.kernargs_ptr: int = self.kernargs_page.base
 
     self.arch: str = 'sm_89' # TODO: fix
-    self.pending_copyin: List[Any] = []
 
     super().__init__(device, NVAllocator(self), NVCompiler(self.arch), functools.partial(NVProgram, self))
 
@@ -483,32 +493,33 @@ class NVDevice(Compiled):
     NVDevice.devices.append(self)
 
   def synchronize(self):
-    self._wait_signal(self.compute_progress_signal, self.compute_put_value)
-    self._wait_signal(self.dma_progress_signal, self.dma_put_value)
+    NVDevice._wait_signal(self.timeline_signal, self.timeline_value - 1)
     self.cmdq_wptr = 0
 
-    for opaque,sz,options in self.pending_copyin: self.allocator.free(opaque, sz, options)
-    self.pending_copyin.clear()
+    if self.timeline_value > (1 << 63):
+      self.timeline_signal, self._shadow_timeline_signal = self._shadow_timeline_signal, self.timeline_signal
+      self.timeline_signal.value, self.timeline_value = 0, 1
+      cast(NVAllocator, self.allocator).b_timeline = [0] * len(cast(NVAllocator, self.allocator).b)
 
   @staticmethod
   def synchronize_system():
     for d in NVDevice.devices: d.synchronize()
 
   @classmethod
-  def _get_signal(self, num=None) -> memoryview:
+  def _get_signal(self, num=None, value=0) -> memoryview:
     if num is None:
       self.signal_number += 1
       if self.signals_page and self.signal_number * 16 >= self.signals_page.length: self.signal_number = 32
       num = self.signal_number
     sig = to_mv(self.signals_page.base + num * 16, 16).cast("Q")
-    sig[0] = 0
+    sig[0] = value
     return sig
 
   @classmethod
   def _wait_signal(self, signal, value=0, timeout=10000):
     start_time = time.time()
     sem_value = signal[0]
-    while sem_value != value:
+    while sem_value < value:
       sem_value = signal[0]
       if time.time() - start_time > timeout // 1000: raise RuntimeError(f"wait_result: {timeout} ms TIMEOUT!")
 
