@@ -7,6 +7,8 @@ from tinygrad.helpers import strip_parens, getenv, prod
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, ConstType
 from tinygrad.codegen.uops import UOpGraph
 
+seen_local_special = False
+
 class CStyleLanguage(NamedTuple):
   kernel_prefix: str = ""
   buffer_prefix: str = ""
@@ -30,13 +32,23 @@ class CStyleLanguage(NamedTuple):
     BinaryOps.DIV: lambda a,b,dtype: f"({a}/{b})", BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})", BinaryOps.MOD: lambda a,b,dtype: f"({a}%{b})",
     BinaryOps.CMPLT: lambda a,b,dtype: f"({a}<{b})", BinaryOps.CMPEQ: lambda a,b,dtype: f"({a}=={b})", BinaryOps.XOR: lambda a,b,dtype: f"({a}^{b})",
     TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})"}
-
+  
   def workitem_code(self, idx, access, size, n_workitems, depth, locals):
+    global seen_local_special
     if idx[0] == "g":
-      return ([f"for(int {idx} = 0; {idx} < {size}; {idx}++) {{"], depth+1)
+      return ([f"for (int {idx} = 0; {idx} < {size}; {idx}++) {{"], depth+1)
     elif idx[0] == "l":
-      code = [f"#pragma omp parallel private({','.join(locals)})", f"{{ int {idx} = omp_get_thread_num(); /* {size} */"] if idx[-1] == "1" else []
-      return (code, depth+1)
+      code = []
+      if not seen_local_special:
+        locals = f" private({','.join(locals)})" if locals else ""
+        code.append("#pragma omp parallel"+locals)
+        code.append("{")
+        code.append("  ")
+        seen_local_special = True
+        depth += 1
+      else: code.append("")
+      code[-1] += f"int {idx} = omp_get_thread_num()%{size}; /* {size} */"
+      return (code, depth)
     elif idx[0] == "i":
       code = [f"#pragma omp parallel for collapse({n_workitems})"] if idx[-1] == "0" else []
       return (code + [f"for(int {idx} = 0; {idx} < {size}; {idx}++) {{"], depth+1)
