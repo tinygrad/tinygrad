@@ -97,15 +97,6 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
                 simple_pads:Set[LazyBuffer], children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], scheduled=False):
   if buf in allbufs or buf.base.realized: return
   if GRAPH: log_lazybuffer(buf, scheduled)
-  if isinstance(buf.dtype, ImageDType) and (prod(buf.shape) != prod(buf.dtype.shape) or
-                                            not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
-    if DEBUG >= 3: print(f"forcing image {buf.dtype} with shape {buf.shape} to float32")
-    buf.dtype = dtypes.float32  # NOTE: this is what makes the dtype above not match
-    # hack the underlying buffer too
-    if buf.base is buf:
-      assert not hasattr(buf.buffer, '_buf'), "can't fixup allocated buffer"
-      buf.buffer.dtype = dtypes.float32
-      buf.buffer.options = None
   if buf.base != buf:
     # realize all places where the buffer is expanded
     if prod(buf.base.st.shape) < prod(buf.st.shape):
@@ -223,9 +214,20 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
     else: reduce_for_op.update((tr, r) for tr in realized_children)
 
   output_groups: DefaultDict[Tuple, List[LazyBuffer]] = defaultdict(list)
-  for r in realizes:
-    if r.realized is not None or r.op is LoadOps.CONST or r in seen: continue
-    output_groups[(reduce_for_op[r], ) if r in reduce_for_op and MULTIOUTPUT else (r, )].append(r)
+  for buf in realizes:
+    if buf.realized is not None or buf.op is LoadOps.CONST or buf in seen: continue
+    output_groups[(reduce_for_op[buf], ) if buf in reduce_for_op and MULTIOUTPUT else (buf, )].append(buf)
+
+    # make things that can't be images not images
+    if isinstance(buf.dtype, ImageDType) and (prod(buf.shape) != prod(buf.dtype.shape) or
+                                              not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
+      if DEBUG >= 2: print(f"forcing image {buf.dtype} with shape {buf.shape} to float32")
+      buf.dtype = dtypes.float32
+      # hack the underlying buffer too
+      if buf.base is buf:
+        assert not hasattr(buf.buffer, '_buf'), "can't fixup allocated buffer"
+        buf.buffer.dtype = dtypes.float32
+        buf.buffer.options = None
 
   # preschedule all buffers in realizes
   prescheduled = {group[0]:_schedule_group(tuple(group), realizes, reduce_for_op) for group in output_groups.values()}
