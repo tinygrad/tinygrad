@@ -36,8 +36,7 @@ def ptr_ar(root, uops):
 def optimize_gated_loads(uops: UOpGraph):
   def successors(uop): return list(filter(lambda u: uop in u.vin, uops.uops))
   for gl in list(filter(lambda u:u.uop is UOps.LOAD and len(u.vin)>3, uops.uops)):
-    pred = uops.add(UOps.ALU, dtypes.bool, (gl.vin[2],), arg=UnaryOps.NEG, insert_before=uops.uops.index(gl))
-    gate = uops.add(UOps.IF, None, (pred,), insert_before=uops.uops.index(gl), cachable=False)
+    gate = uops.add(UOps.IF, None, (gl.vin[2],), insert_before=uops.uops.index(gl), cachable=False)
     end = uops.add(UOps.ENDIF, None, (gate,) + (gl, gl.vin[3]), insert_before=uops.uops.index(gl)+1, cachable=False)
     for u in reversed(uops.uops.copy()[:uops.uops.index(gate)]):
       if (u.uop not in [UOps.DEFINE_GLOBAL, UOps.DEFINE_VAR, UOps.DEFINE_LOCAL, UOps.PHI, UOps.STORE, UOps.ENDIF, UOps.ENDLOOP] and
@@ -62,7 +61,7 @@ class AssemblyLanguage(NamedTuple):
   def render_local(self, dest, name, size, dtype) -> List[str]: raise NotImplementedError()
 
   def render_loop(self, idx, start, label, acc=None) -> List[str]: raise NotImplementedError()
-  def render_bra(self, b1, pred=None) -> List[str]: raise NotImplementedError()
+  def render_bra(self, b1, pred=None, neg=False) -> List[str]: raise NotImplementedError()
   def render_gep(self, loc, base, offset, dtype, gate=None) -> List[str]: raise NotImplementedError()
   def render_load(self, loc, dest, dtype, gate=None, alt=None, ss="", offset=0) -> List[str]: raise NotImplementedError()
   def render_store(self, loc, val, dtype, gate=None, ss="", offset=0) -> List[str]: raise NotImplementedError()
@@ -146,14 +145,14 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, _uops:UOpGraph) -> str
     uop,dtype,vin,args = u.uop,u.dtype,u.vin,u.arg
     if uop is UOps.IF:
       assert vin[0].dtype is not None
-      kk(*lang.render_bra(ssa_label('if', u), _cast(r[vin[0]], dtypes.bool, vin[0].dtype, u=u, pred=True)))
+      kk(*lang.render_bra(ssa_label('if', u), _cast(r[vin[0]], dtypes.bool, vin[0].dtype, u=u, pred=True), neg=True))
     elif uop is UOps.BARRIER and lang.barrier: kk(lang.barrier)
     elif uop is UOps.ENDLOOP:
       kk(lang.asm_for_op[BinaryOps.ADD](r[vin[0]], r[vin[0]], "1", dtypes.int, lang.types[dtypes.int]),
           lang.asm_for_op[BinaryOps.CMPLT](pred:=ssa("pred", dtype="pred"), r[vin[0]], r[vin[0].vin[1]], dtypes.int, lang.types[dtypes.int]))
       kk(*lang.render_bra(r_label[vin[0]], pred))
     elif uop == UOps.ENDIF:
-      kk(f"@!{_cast(r[vin[0].vin[0]], dtypes.bool, vin[0].vin[0].dtype, u=u, pred=True)} bra {r_label[vin[0]]}_true;")
+      kk(f"@{_cast(r[vin[0].vin[0]], dtypes.bool, vin[0].vin[0].dtype, u=u, pred=True)} bra {r_label[vin[0]]}_true;")
       kk(f"{r_label[vin[0]]}:")
       if len(vin) > 1 and vin[1].dtype.count > 1:
         kk(*[f"mov.b{lang.types[vin[1].dtype.scalar()][1:]} {dd}, {r[vin[2]][i]};" for i, dd in enumerate(r[vin[1]])])
@@ -278,7 +277,7 @@ class PTXLanguage(AssemblyLanguage):
 
   def render_loop(self, idx, start, label, acc=None) -> List[str]: return [f"mov.u32 {idx}, {start};", f"{label}:"]
 
-  def render_bra(self, b1, pred=None) -> List[str]: return [f"@{pred} bra {b1};"] if pred else [f"bra {b1};"]
+  def render_bra(self, b1, pred=None, neg=False) -> List[str]: return [f"@{'!' if neg else ''}{pred} bra {b1};"] if pred else [f"bra {b1};"]
 
   def mem_type(self, dtype): return 's8' if dtype.itemsize == 1 else 'b16' if dtype == dtypes.float16 else self.types[dtype]
 

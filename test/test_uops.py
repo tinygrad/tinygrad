@@ -272,7 +272,7 @@ class TestAssembly(unittest.TestCase):
     if_op = next(filter(lambda x: x.uop is UOps.IF, uops.uops), None)
     self.assertNotEqual(if_op, None)
     self.assertNotEqual(next(filter(lambda x: x.uop is UOps.ENDIF, uops.uops), None), None)
-    for uu in [u2, u3, u4, u5, u6, u7, u8, u9]:
+    for uu in [u2, u3, u4, u5, u6, u8, u9]:
       self.assertLess(uops.uops.index(if_op), uops.uops.index(uu))
 
 
