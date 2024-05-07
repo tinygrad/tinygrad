@@ -36,7 +36,7 @@ class ShapeTracker:
 
   @property
   def bijective(self) -> bool:
-    if len(self.views) != 1 or (v := self.views[0]).mask is not None: return False
+    if len(self.views) != 1 or (v := self.views[0]).mask is not None or self.views[0].offset: return False
     s_strides, s_shape = zip(*sorted(zip(v.strides, v.shape), reverse=True))
     return s_strides == strides_for_shape(s_shape)
 
