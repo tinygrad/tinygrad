@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Tuple, List, Any, cast
-import os, fcntl, ctypes, functools, re, pathlib, mmap, struct, errno, subprocess, time
+import os, fcntl, ctypes, functools, re, pathlib, mmap, struct, errno, subprocess, time, array
 from tinygrad.device import Compiled, LRUAllocator, Compiler, CompilerOptions
 from tinygrad.buffer import BufferOptions
 from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up, DEBUG
@@ -257,9 +257,16 @@ class HWPM4Queue:
   def submit(self, device:AMDDevice):
     wptr = device.pm4_write_pointer[0]
     pm4_buffer_view = to_mv(device.pm4_ring.va_addr, device.pm4_ring.size).cast("I")
-    for i, value in enumerate(self.q): pm4_buffer_view[(wptr+i)%(device.pm4_ring.size//4)] = value
-    device.pm4_write_pointer[0] = wptr + len(self.q)
-    device.pm4_doorbell[0] = wptr + len(self.q)
+
+    tail_blit_dword = min(((device.pm4_ring.size//4) - wptr % (device.pm4_ring.size//4)), len(self.q))
+    pm4_buffer_view[wptr%(device.pm4_ring.size//4):wptr%(device.pm4_ring.size//4)+tail_blit_dword] = array.array('I', self.q[:tail_blit_dword])
+    wptr += tail_blit_dword
+    if (rem_packet_cnt := len(self.q) - tail_blit_dword) > 0:
+      pm4_buffer_view[wptr%(device.pm4_ring.size//4):wptr%(device.pm4_ring.size//4)+rem_packet_cnt] = array.array('I', self.q[tail_blit_dword:])
+      wptr += rem_packet_cnt
+    device.pm4_write_pointer[0] = wptr
+    device.pm4_doorbell[0] = wptr
+
     return self
 
 # prebuilt sdma packets
