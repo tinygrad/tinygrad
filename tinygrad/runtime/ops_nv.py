@@ -157,6 +157,7 @@ SHT_PROGBITS, SHT_NOBITS, SHF_ALLOC, SHF_EXECINSTR = 0x1, 0x8, 0x2, 0x4
 class NVProgram:
   def __init__(self, device:NVDevice, name:str, lib:bytes):
     self.device, self.name, self.lib = device, name, lib
+    self.device.synchronize()
     if DEBUG >= 6:
       try:
         fn = (pathlib.Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(lib).hexdigest()}").as_posix()
@@ -260,7 +261,7 @@ class NVProgram:
 class NVAllocator(LRUAllocator):
   def __init__(self, device:NVDevice):
     self.device = device
-    self.b = [self.device._gpu_host_alloc(2 << 20) for _ in range(16)]
+    self.b = [self.device._gpu_host_alloc(2 << 20) for _ in range(32)]
     self.b_timeline = [0] * len(self.b)
     self.b_next = 0
     super().__init__()
@@ -484,8 +485,8 @@ class NVDevice(Compiled):
     self._shadow_timeline_signal = NVDevice._get_signal(self.device_id * 2 + 1)
     self.time_event_st, self.time_event_en = NVDevice._get_signal(), NVDevice._get_signal()
 
-    self.cmdq_page: nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS = self._gpu_alloc(0x200000, map_to_cpu=True, huge_page=True)
-    self.cmdq: memoryview = to_mv(self.cmdq_page.base, 0x200000).cast("I")
+    self.cmdq_page: nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS = self._gpu_alloc(0x2000000, map_to_cpu=True, huge_page=True)
+    self.cmdq: memoryview = to_mv(self.cmdq_page.base, 0x2000000).cast("I")
     self.cmdq_wptr: int = 0 # in bytes
 
     self.kernargs_page: nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS = self._gpu_alloc(0x4000000, map_to_cpu=True)
