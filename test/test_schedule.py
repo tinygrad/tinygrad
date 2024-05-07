@@ -225,6 +225,19 @@ class TestSchedule(unittest.TestCase):
     c1(img).relu().mean().backward()
     check_schedule([img.grad, c1.weight.grad], 4)
 
+  def test_fold_conv_relu_backward_half(self):
+    old_float = dtypes.default_float
+    dtypes.default_float = dtypes.float16
+
+    c1 = nn.Conv2d(3,16,3, bias=False)
+    c1.weight.requires_grad = True
+
+    # run
+    img = Tensor.rand(2,3,64,64, requires_grad=True)
+    c1(img).relu().mean().backward()
+    dtypes.default_float = old_float
+    check_schedule([img.grad, c1.weight.grad], 4)
+
   def test_fold_batchnorm_backward(self):
     with Tensor.train():
       x = Tensor.empty((2, 16, 8, 8)).contiguous()
