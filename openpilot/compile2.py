@@ -135,56 +135,58 @@ if __name__ == "__main__":
     for b in ei.bufs:
       if b in seen_buffers: continue
       seen_buffers.add(b)
+      needs_load = b.is_allocated() and b not in input_buffers
       if isinstance(b.dtype, ImageDType):
         base_dtype = dtypes.float16 if b.dtype.fmt == 'e' else dtypes.float32
         row_pitch = (b.dtype.shape[0]*4*base_dtype.itemsize + 63)//64 * 64
         size = row_pitch * b.dtype.shape[1]
         jdat['objects'].append({
-          "id": to_ref(b), "needs_load": b.is_allocated(), "size": size, "arg_type": "image2d_t",
+          "id": to_ref(b), "needs_load": needs_load, "size": size, "arg_type": "image2d_t",
           "width": b.dtype.shape[0], "height": b.dtype.shape[1], "row_pitch": row_pitch, "float32": b.dtype.base == dtypes.float32,
         })
-        if b.is_allocated():
+        if needs_load:
           t = Tensor.empty(b.dtype.shape, dtype=b.dtype)
           t.lazydata.buffer = b
           nb = t.cast(base_dtype).pad(((0, row_pitch//(4*base_dtype.itemsize)-b.dtype.shape[0]), (0,0), (0,0))).contiguous().realize()
           weights.append(nb.lazydata.buffer.as_buffer())
       else:
         jdat['objects'].append({
-          "id": to_ref(b), "arg_type": b.dtype.name + "*", "needs_load": b.is_allocated(), "size": b.size,
+          "id": to_ref(b), "arg_type": b.dtype.name + "*", "needs_load": needs_load, "size": b.nbytes,
         })
-        if b.is_allocated() and b not in input_buffers:
-          weights.append(b.as_buffer())
+        if needs_load: weights.append(b.as_buffer())
 
   saved_binaries = set()
   binaries = []
   GlobalCounters.reset()
-  for ei in eis:
-    prg = cast(CompiledRunner, ei.prg)
-    assert len(prg.vars) == 0
-    if prg.name not in saved_binaries:
-      jdat['binaries'].append({"name":prg.name, "length":len(prg.lib)})
-      binaries.append(prg.lib)
-      saved_binaries.add(prg.name)
-    ei.run()
-    jdat['kernels'].append({
-      "name": prg.name,
-      "work_dim": len(prg.global_size),
-      "global_work_size": prg.global_size,
-      "local_work_size": prg.local_size,
-      "num_args": len(ei.bufs),
-      "args": ''.join(to_ref(b) for b in ei.bufs),
-      "arg_size": len(ei.bufs)*8,
-    })
+  with Context(DEBUG=max(DEBUG.value, 2)):
+    for ei in eis:
+      prg = cast(CompiledRunner, ei.prg)
+      assert len(prg.vars) == 0
+      #print(prg.prg)
+      if prg.name not in saved_binaries:
+        jdat['binaries'].append({"name":prg.name, "length":len(prg.lib)})
+        binaries.append(prg.lib)
+        saved_binaries.add(prg.name)
+      ei.run()
+      jdat['kernels'].append({
+        "name": prg.name,
+        "work_dim": len(prg.global_size),
+        "global_work_size": prg.global_size,
+        "local_work_size": prg.local_size,
+        "num_args": len(ei.bufs),
+        "args": ''.join(to_ref(b) for b in ei.bufs),
+        "arg_size": len(ei.bufs)*8,
+      })
 
   output_fn = sys.argv[2] if len(sys.argv) >= 3 else "/tmp/output.thneed"
-  print(f"saving thneed to {output_fn}")
+  print(f"saving thneed to {output_fn} with {len(weights)} buffers and {len(binaries)} binaries")
   with open(output_fn, "wb") as f:
     j = json.dumps(jdat, ensure_ascii=False).encode('latin_1')
     f.write(struct.pack("I", len(j)))
     f.write(j)
     for w in weights: f.write(w)
     for b in binaries: f.write(b)
-    print("saved", f.tell())
+    print("saved", f.tell(), "bytes")
 
   FLOAT16 = getenv("FLOAT16", 0)
   if FLOAT16 == 0:
