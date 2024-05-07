@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os, sys, io, pathlib, re
+from tqdm import tqdm
 sys.path.insert(0, str(pathlib.Path(__file__).parents[1]))
 
 if "FLOAT16" not in os.environ: os.environ["FLOAT16"] = "1"
@@ -14,7 +15,7 @@ from extra.onnx import get_run_onnx
 from tinygrad import Tensor, Device, GlobalCounters, dtypes
 from tinygrad.dtype import ImageDType
 from tinygrad.helpers import partition, Context, fetch, getenv, DEBUG
-from tinygrad.engine.realize import run_schedule, memory_planner
+from tinygrad.engine.realize import run_schedule, memory_planner, lower_schedule, memory_planner, ExecItem
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.ops import LoadOps, ScheduleItem
 Device.DEFAULT = "GPU"
@@ -49,7 +50,7 @@ def get_schedule(onnx_data) -> Tuple[List[ScheduleItem], List[ScheduleItem]]:
   assert all(si.ast[0].op not in LoadOps or out in input_lb for si in schedule for out in si.outputs), "has loadops, can't compile to Thneed"
   return schedule, schedule_independent, inputs
 
-def test_vs_onnx(onnx_data, schedule:Optional[List[ScheduleItem]], inputs:Dict[str, Tensor]):
+def test_vs_onnx(onnx_data, eis:Optional[List[ExecItem]], inputs:Dict[str, Tensor]):
   import onnx
   #import pyopencl as cl
   #from extra.thneed import Thneed
@@ -75,7 +76,7 @@ def test_vs_onnx(onnx_data, schedule:Optional[List[ScheduleItem]], inputs:Dict[s
     print("got torch outputs")
 
   # if you don't have a schedule
-  if schedule is None:
+  if eis is None:
     run_onnx = get_run_onnx(onnx_model)
     new_tinygrad_out = next(iter(run_onnx(new_inputs).values())).cast(dtypes.float32).numpy()
     np.testing.assert_allclose(new_torch_out, new_tinygrad_out, atol=1e-4, rtol=1e-2)
@@ -87,8 +88,8 @@ def test_vs_onnx(onnx_data, schedule:Optional[List[ScheduleItem]], inputs:Dict[s
 
   # run code (all buffers have been allocated)
   GlobalCounters.reset()
-  output = schedule[-1].outputs[0]
-  run_schedule(schedule)
+  output = eis[-1].bufs[0]
+  for ei in eis: ei.run()
 
   new_tinygrad_out = np.frombuffer(output.as_buffer(), dtype=output.dtype.np)
   np.testing.assert_allclose(new_torch_out.reshape(new_tinygrad_out.shape), new_tinygrad_out, atol=1e-4, rtol=1e-2)
@@ -107,16 +108,18 @@ if __name__ == "__main__":
 
   run_schedule(schedule_independent)
   run_schedule(schedule_input)
-  schedule = memory_planner(schedule)
   with Context(DEBUG=max(DEBUG.value, 2), BEAM=getenv("LATEBEAM")):
+    schedule = memory_planner(schedule)
     image_count = sum(isinstance(out.dtype, ImageDType) for si in schedule for out in si.outputs)
-    print(f"**** running real kernels {image_count}/{len(schedule)} images ****")
+    print(f"**** compiling real kernels {image_count}/{len(schedule)} images ****")
+    eis = list(tqdm(lower_schedule(schedule), total=len(schedule)))
 
-    GlobalCounters.reset()
-    run_schedule(schedule[:])
+  print("kernel count:", len(eis))
+  assert len(eis) <= getenv("ALLOWED_KERNEL_COUNT", 0) or getenv("ALLOWED_KERNEL_COUNT", 0) == 0, "too many kernels!"
 
-  print("kernel count:", len(schedule))
-  assert len(schedule) <= getenv("ALLOWED_KERNEL_COUNT", 0) or getenv("ALLOWED_KERNEL_COUNT", 0) == 0, "too many kernels!"
+  #with Context(DEBUG=max(DEBUG.value, 2)):
+  #  GlobalCounters.reset()
+  #  for ei in eis: ei.run()
 
   # TODO: thneed is broken
   #output_fn = sys.argv[2] if len(sys.argv) >= 3 else "/tmp/output.thneed"
@@ -125,7 +128,7 @@ if __name__ == "__main__":
   FLOAT16 = getenv("FLOAT16", 0)
   if FLOAT16 == 0:
     try:
-      test_vs_onnx(onnx_data, schedule, inputs)
+      test_vs_onnx(onnx_data, eis, inputs)
     except ModuleNotFoundError as e:
       print(f"TEST NOT HAPPENING {e}")
 
