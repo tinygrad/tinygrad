@@ -6,7 +6,7 @@ from tinygrad.helpers import getenv, DEBUG
 from tinygrad.dtype import DType, DTYPES_DICT, ImageDType, PtrDType, least_upper_float, least_upper_dtype
 from tinygrad import Device, Tensor, dtypes
 from hypothesis import given, settings, strategies as strat
-from test.helpers import is_dtype_supported
+from test.helpers import is_dtype_supported, rand_for_dtype
 
 settings.register_profile("my_profile", max_examples=200, deadline=None)
 settings.load_profile("my_profile")
@@ -59,15 +59,7 @@ class TestDType(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
     if not cls.DTYPE or not is_dtype_supported(cls.DTYPE): raise unittest.SkipTest("dtype not supported")
-    DATA_SIZE = 10
-    if dtypes.is_unsigned(cls.DTYPE):
-      cls.DATA = np.random.randint(0, 100, size=DATA_SIZE, dtype=cls.DTYPE.np)
-    elif dtypes.is_int(cls.DTYPE):
-      cls.DATA = np.random.randint(-100, 100, size=DATA_SIZE, dtype=cls.DTYPE.np)
-    elif cls.DTYPE == dtypes.bool:
-      cls.DATA = np.random.choice([True, False], size=DATA_SIZE)
-    else:
-      cls.DATA = np.random.uniform(-10, 10, size=DATA_SIZE).astype(cls.DTYPE.np)
+    cls.DATA = rand_for_dtype(cls.DTYPE, 10)
   def setUp(self):
     if self.DTYPE is None: raise unittest.SkipTest("base class")
 
