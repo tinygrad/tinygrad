@@ -157,7 +157,6 @@ class UOpGraph:
       ret = rewritten
     key = (ret.uop, ret.dtype, ret.vin, ret.arg)
     if insert_before is None: insert_before = len(self.uops)
-    elif isinstance(insert_before, UOp): insert_before = self.uops.index(insert_before)
     # check if the cached expr is valid with the given insert place.
     if cachable and (expr:=self.saved_exprs.get(key, None)) is not None and self.uops.index(expr) <= insert_before: return expr
     self.uops.insert(insert_before, ret)
@@ -284,7 +283,7 @@ class UOpGraph:
       loop_length = loop_op.vin[1].arg - loop_op.vin[0].arg
       for u in self.uops:
         if u.arg is BinaryOps.ADD and len(wheres.intersection(get_recursive_parents(u))) and len(phis.intersection(self.get_recursive_children(u))):
-          u.vin = tuple([const(vin.arg*loop_length, insert_before=u) if vin.uop is UOps.CONST else vin for vin in list(u.vin)])
+          u.vin = tuple([const(vin.arg*loop_length, insert_before=self.uops.index(u)) if vin.uop is UOps.CONST else vin for vin in list(u.vin)])
       for where in sorted(wheres, key=lambda x: self.uops.index(x)):
         comp_lt, comp_gt = where.vin[0].vin[0], where.vin[0].vin[1]
         factored = loop_factor(comp_lt, NumNode(int(comp_gt.arg)), loop_op, round_up=(comp_gt.arg > 0))
@@ -333,10 +332,10 @@ class UOpGraph:
           del self.saved_exprs[(u.uop, u.dtype, u.vin, u.arg)]
           # NOTE: assuming u.vin[2].vin[1] and u.vin[2].vin[0] have the same dtype
           loop_len = self.add(UOps.ALU, u.vin[2].vin[1].dtype, (u.vin[2].vin[1], u.vin[2].vin[0]), BinaryOps.SUB,
-                              insert_before=u)
+                              insert_before=self.uops.index(u))
           if loop_len.dtype != u.dtype: loop_len = self.add(UOps.CAST, u.dtype, (loop_len,),
-                                                            insert_before=u)
-          new = self.add(UOps.ALU, u.dtype, (u.vin[1], loop_len,), BinaryOps.MUL, insert_before=u)
+                                                            insert_before=self.uops.index(u))
+          new = self.add(UOps.ALU, u.dtype, (u.vin[1], loop_len,), BinaryOps.MUL, insert_before=self.uops.index(u))
           self.replace_op(u, new)
           return True
 

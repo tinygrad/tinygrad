@@ -11,7 +11,7 @@ from tinygrad.shape.symbolic import MulNode, Variable, NumNode, Node
 from tinygrad.tensor import Tensor
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule, lower_schedule
-from tinygrad.helpers import prod, Context, getenv
+from tinygrad.helpers import prod, Context, getenv, CI
 from tinygrad.dtype import DType, dtypes
 from tinygrad.codegen.uops import UOpGraph
 
@@ -282,7 +282,6 @@ class TestLinearizer(unittest.TestCase):
       from tinygrad.features.search import get_linearizer_actions
       tc_actions = [k for i, k in get_linearizer_actions(Linearizer(realized_ast), False).items() if k.applied_opts[0].op == OptOps.TC]
       assert len(tc_actions) == 9, f"get_linearizer_actions should contain 9 possible TC actions, only got {len(tc_actions)}"
-
 
   def test_limit_dims_to_max_5d_global(self):
     t = Tensor.empty(3, 4, 5, 6, 7).pad(((1, 1), (1, 1), (1, 1), (1, 1), (1, 1))) + 1
@@ -788,7 +787,7 @@ class TestKernelOpts(unittest.TestCase):
       ], apply_tc=True, atol=atol, rtol=rtol)
 
   def test_padto_matmul(self):
-    if Device.DEFAULT in ["CUDA", "RHIP"]: self.skipTest("super slow on CUDA and RHIP because of the big grid dims")
+    if CI and Device.DEFAULT in ["CUDA", "RHIP"]: self.skipTest("super slow on CUDA and RHIP because of the big grid dims")
     N = 17 * 17
     Tensor.manual_seed(289)
     a = Tensor.rand(N, N)
@@ -802,6 +801,25 @@ class TestKernelOpts(unittest.TestCase):
       # can optimize further post PADTO
       [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32), Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.UPCAST, 1, 2),],
     ])
+
+  def test_padto_upcasted_not_ok(self):
+    N = 4
+    a = Tensor.rand(N, N)
+    b = Tensor.rand(N, N)
+    helper_linearizer_opt(a@b, [
+      [Opt(OptOps.UPCAST, 0, 0)],
+      [Opt(OptOps.UPCAST, 1, 0)],
+      [Opt(OptOps.UNROLL, 0, 0)],
+      [Opt(OptOps.PADTO, 0, 8)],
+      [Opt(OptOps.PADTO, 1, 8)],
+      [Opt(OptOps.PADTO, 2, 8)],
+    ])
+    with self.assertRaises(KernelOptError):
+      helper_linearizer_opt(a@b, [[Opt(OptOps.UPCAST, 0, 0), Opt(OptOps.PADTO, 2, 8)]])
+    with self.assertRaises(KernelOptError):
+      helper_linearizer_opt(a@b, [[Opt(OptOps.UPCAST, 1, 0), Opt(OptOps.PADTO, 2, 8)]])
+    with self.assertRaises(KernelOptError):
+      helper_linearizer_opt(a@b, [[Opt(OptOps.UNROLL, 0, 0), Opt(OptOps.PADTO, 2, 8)]])
 
   def test_padto_sum_ok(self):
     N = 18 * 18
@@ -1033,7 +1051,7 @@ class TestLinearizerUOptimize(unittest.TestCase):
       self.skipTest("Needs locals and float4")
     ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(8, 32, 1, 1), strides=(1, 8, 0, 0), offset=0, mask=None, contiguous=False),)))),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(8, 32, 1, 1), strides=(32, 1, 0, 0), offset=0, mask=None, contiguous=True),)))) # noqa: E501
     opts = [Opt(op=OptOps.LOCAL, axis=1, amt=4), Opt(op=OptOps.UPCAST, axis=2, amt=2), Opt(op=OptOps.LOCAL, axis=1, amt=8),
-            Opt(op=OptOps.UPCAST, axis=2, amt=0), Opt(op=OptOps.UPCAST, axis=1, amt=4), Opt(op=OptOps.LOCAL, axis=0, amt=8),
+            Opt(op=OptOps.UPCAST, axis=1, amt=0), Opt(op=OptOps.UPCAST, axis=1, amt=4), Opt(op=OptOps.LOCAL, axis=0, amt=8),
             Opt(op=OptOps.UPCAST, axis=1, amt=0), Opt(op=OptOps.UPCAST, axis=0, amt=2)]
 
     k = Linearizer(ast)
