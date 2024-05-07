@@ -36,13 +36,14 @@ def ptr_ar(root, uops):
 def optimize_gated_loads(uops: UOpGraph):
   def successors(uop): return list(filter(lambda u: uop in u.vin, uops.uops))
   for gl in list(filter(lambda u:u.uop is UOps.LOAD and len(u.vin)>3, uops.uops)):
-    pred_2 = uops.add(UOps.ALU, dtypes.bool, (gl.vin[2],), arg=UnaryOps.NEG, insert_before=uops.uops.index(gl))
-    gate = uops.add(UOps.IF, None, (pred_2,), insert_before=uops.uops.index(gl), cachable=False)
-    end = uops.add(UOps.ENDIF, None, (gate,), arg=(gl, gl.vin[3]), insert_before=uops.uops.index(gl)+1, cachable=False)
+    pred = uops.add(UOps.ALU, dtypes.bool, (gl.vin[2],), arg=UnaryOps.NEG, insert_before=uops.uops.index(gl))
+    gate = uops.add(UOps.IF, None, (pred,), insert_before=uops.uops.index(gl), cachable=False)
+    end = uops.add(UOps.ENDIF, None, (gate,) + (gl, gl.vin[3]), insert_before=uops.uops.index(gl)+1, cachable=False)
     for u in reversed(uops.uops.copy()[:uops.uops.index(gate)]):
       if (u.uop not in [UOps.DEFINE_GLOBAL, UOps.DEFINE_VAR, UOps.DEFINE_LOCAL, UOps.PHI, UOps.STORE, UOps.ENDIF, UOps.ENDLOOP] and
-          all([uops.uops.index(s)>uops.uops.index(gate) and uops.uops.index(s)<uops.uops.index(end) for s in successors(u)])):
+          all([uops.uops.index(s)>uops.uops.index(gate) and uops.uops.index(s)<=uops.uops.index(end) for s in successors(u)])):
         uops.uops.insert(uops.uops.index(gate), uops.uops.pop(uops.uops.index(u)))
+    gl.vin = gl.vin[:2]
 
 class AssemblyLanguage(NamedTuple):
   kernel_prefix: str = ""
@@ -154,11 +155,10 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, _uops:UOpGraph) -> str
     elif uop == UOps.ENDIF:
       kk(f"@!{_cast(r[vin[0].vin[0]], dtypes.bool, vin[0].vin[0].dtype, u=u, pred=True)} bra {r_label[vin[0]]}_true;")
       kk(f"{r_label[vin[0]]}:")
-      if args:
-        if args[0].dtype.count > 1:
-          kk(*[f"mov.b{lang.types[args[0].dtype.scalar()][1:]} {dd}, {r[args[1]][i]};" for i, dd in enumerate(r[args[0]])])
-        else:
-          kk(*[f"mov.b{lang.types[args[0].dtype][1:]} {r[args[0]]}, {r[args[1]]};" ])
+      if len(vin) > 1 and vin[1].dtype.count > 1:
+        kk(*[f"mov.b{lang.types[vin[1].dtype.scalar()][1:]} {dd}, {r[vin[2]][i]};" for i, dd in enumerate(r[vin[1]])])
+      elif len(vin) > 1:
+        kk(*[f"mov.b{lang.types[vin[1].dtype][1:]} {r[vin[1]]}, {r[vin[2]]};" ])
       kk(f"{r_label[vin[0]]}_true:")
     elif uop is UOps.STORE:
       assert vin[0].dtype is not None and vin[1].dtype is not None and vin[2].dtype is not None
