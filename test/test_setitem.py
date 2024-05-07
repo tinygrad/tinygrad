@@ -4,27 +4,52 @@ import numpy as np
 
 class TestSetitem(unittest.TestCase):
   def test_simple_setitem(self):
-    t = Tensor.zeros(6, 6).contiguous().realize()
-    t[2:4, 3:5] = Tensor.ones(2, 2)
-    n = np.zeros((6, 6))
-    n[2:4, 3:5] = np.ones((2, 2))
-    np.testing.assert_allclose(t.numpy(), n)
-
-    t = Tensor.zeros(6, 6).contiguous().realize()
-    t[2:4, 3:5] = 1.0
-    n = np.zeros((6, 6))
-    n[2:4, 3:5] = 1.0
-    np.testing.assert_allclose(t.numpy(), n)
+    cases = (
+      ((6,6), (slice(2,4), slice(3,5)), Tensor.ones(2,2)),
+      ((6,6), (slice(2,4), slice(3,5)), Tensor([1.,2.])),
+      ((6,6), (slice(2,4), slice(3,5)), 1.0),
+      ((6,6), (3, 4), 1.0),
+      ((6,6), (3, None, 4, None), 1.0),
+      ((4,4,4,4), (Ellipsis, slice(1,3), slice(None)), Tensor(4)),
+      ((4,4,4,4), (Ellipsis, slice(1,3)), 4),
+      ((4,4,4,4), (2, slice(1,3), None, 1), 4),
+      ((4,4,4,4), (slice(1,3), slice(None), slice(0,4,2)), 4),
+      ((4,4,4,4), (slice(1,3), slice(None), slice(None), slice(0,3)), 4),
+      ((6,6), (slice(1,5,2), slice(0,5,3)), 1.0),
+      ((6,6), (slice(5,1,-2), slice(5,0,-3)), 1.0),
+    )
+    for shp, slc, val in cases:
+      t = Tensor.zeros(shp).contiguous()
+      t[slc] = val
+      n = np.zeros(shp)
+      n[slc] = val.numpy() if isinstance(val, Tensor) else val
+      np.testing.assert_allclose(t.numpy(), n)
 
   def test_setitem_into_unrealized(self):
     t = Tensor.arange(4).reshape(2, 2)
     t[1] = 5
     np.testing.assert_allclose(t.numpy(), [[0, 1], [5, 5]])
 
+  def test_setitem_dtype(self):
+    for dt in (dtypes.int, dtypes.float, dtypes.bool):
+      for v in (5., 5, True):
+        t = Tensor.ones(6,6, dtype=dt).contiguous()
+        t[1] = v
+        assert t.dtype == dt
+
   def test_setitem_into_noncontiguous(self):
     t = Tensor.ones(4)
     assert not t.lazydata.st.contiguous
     with self.assertRaises(AssertionError): t[1] = 5
+
+  # TODO: implement fancy setitem
+  @unittest.expectedFailure
+  def test_fancy_setitem(self):
+    t = Tensor.zeros(6,6).contiguous()
+    t[[1,2], [3,2]] = 3
+    n = np.zeros((6,6))
+    n[[1,2], [3,2]] = 3
+    np.testing.assert_allclose(t.numpy(), n)
 
   def test_simple_jit_setitem(self):
     @TinyJit
