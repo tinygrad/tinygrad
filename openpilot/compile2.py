@@ -131,11 +131,13 @@ if __name__ == "__main__":
   jdat["inputs"] = {k:to_ref(v.lazydata.buffer) for k,v in inputs.items()}
   jdat["outputs"] = [to_ref(eis[-1].bufs[0])]
   weights = []
-  for ei in eis:
+  for i,ei in enumerate(eis):
+    #print("***", i)
     for b in ei.bufs:
+      needs_load = b.is_allocated() and b not in input_buffers
+      #print(b, needs_load)
       if b in seen_buffers: continue
       seen_buffers.add(b)
-      needs_load = b.is_allocated() and b not in input_buffers
       if isinstance(b.dtype, ImageDType):
         base_dtype = dtypes.float16 if b.dtype.fmt == 'e' else dtypes.float32
         row_pitch = (b.dtype.shape[0]*4*base_dtype.itemsize + 63)//64 * 64
