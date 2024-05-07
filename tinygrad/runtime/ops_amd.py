@@ -340,6 +340,7 @@ class AMDProgram:
     self.group_segment_size = lib_gpu_view.cast("I")[entry_point//4]
     self.private_segment_size = lib_gpu_view.cast("I")[entry_point//4 + 1]
     self.kernargs_segment_size = lib_gpu_view.cast("I")[entry_point//4 + 2]
+    self.kernargs_offset = 0
     assert self.private_segment_size <= self.device.max_private_segment_size, \
       f"{self.private_segment_size=} > {self.device.max_private_segment_size=}"
 
@@ -484,6 +485,9 @@ class AMDDevice(Compiled):
       assert stm.n_success == len(gpus)
     libc.munmap(mem.va_addr, mem.size)
     kio.free_memory_of_gpu(self.kfd, handle=mem.handle)
+
+  @classmethod
+  def _set_signal(self, sig, value): sig.value = value
 
   @classmethod
   def _get_signal(self, num=None, sync_event=None, value=0) -> hsa.amd_signal_t:
