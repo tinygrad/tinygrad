@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os, sys, io, pathlib, re
+import os, sys, io, pathlib, json, struct
 from tqdm import tqdm
 sys.path.insert(0, str(pathlib.Path(__file__).parents[1]))
 
@@ -10,10 +10,11 @@ if "NOLOCALS" not in os.environ: os.environ["NOLOCALS"] = "1"
 OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx"
 
 import onnx
-from typing import Tuple, List, Optional, Dict
+from typing import Tuple, List, Optional, Dict, cast
 from extra.onnx import get_run_onnx
 from tinygrad import Tensor, Device, GlobalCounters, dtypes
 from tinygrad.dtype import ImageDType
+from tinygrad.device import CompiledRunner
 from tinygrad.helpers import partition, Context, fetch, getenv, DEBUG
 from tinygrad.engine.realize import run_schedule, memory_planner, lower_schedule, memory_planner, ExecItem
 from tinygrad.engine.schedule import create_schedule
@@ -117,13 +118,62 @@ if __name__ == "__main__":
   print("kernel count:", len(eis))
   assert len(eis) <= getenv("ALLOWED_KERNEL_COUNT", 0) or getenv("ALLOWED_KERNEL_COUNT", 0) == 0, "too many kernels!"
 
-  #with Context(DEBUG=max(DEBUG.value, 2)):
-  #  GlobalCounters.reset()
-  #  for ei in eis: ei.run()
+  # new simple thneed
 
-  # TODO: thneed is broken
-  #output_fn = sys.argv[2] if len(sys.argv) >= 3 else "/tmp/output.thneed"
-  #schedule_to_thneed(schedule, output_fn)
+  jdat = {"binaries": [], "programs": {}, "kernels": [], "objects": []}
+  weights = []
+  for ei in eis:
+    for b in ei.bufs:
+      if isinstance(b.dtype, ImageDType):
+        base_dtype = dtypes.float16 if b.dtype.fmt == 'e' else dtypes.float32
+        row_pitch = (b.dtype.shape[0]*4*base_dtype.itemsize + 63)//64 * 64
+        size = row_pitch * b.dtype.shape[1]
+        id_ref = struct.pack("Q", id(b)).decode("latin_1")
+        jdat['objects'].append({
+          "id": id_ref, "needs_load": b.is_allocated(), "size": size, "arg_type": "image2d_t",
+          "width": b.dtype.shape[0], "height": b.dtype.shape[1], "row_pitch": row_pitch, "float32": b.dtype.base == dtypes.float32,
+        })
+        if b.is_allocated():
+          t = Tensor.empty(b.dtype.shape, dtype=b.dtype)
+          t.lazydata.buffer = b
+          nb = t.cast(base_dtype).pad(((0, row_pitch//(4*base_dtype.itemsize)-b.dtype.shape[0]), (0,0), (0,0))).contiguous().realize()
+          weights.append(nb.lazydata.buffer.as_buffer())
+      else:
+        jdat['objects'].append({
+          "id": id_ref, "arg_type": b.dtype.name + "*", "needs_load": b.is_allocated(), "size": b.size,
+        })
+        if b.is_allocated(): weights.append(b.as_buffer())
+
+  saved_binaries = set()
+  binaries = []
+  GlobalCounters.reset()
+  for ei in eis:
+    prg = cast(CompiledRunner, ei.prg)
+    assert len(prg.vars) == 0
+    if prg.name not in saved_binaries:
+      jdat['binaries'].append({"name":prg.name, "length":len(prg.lib)})
+      binaries.append(prg.lib)
+      saved_binaries.add(prg.name)
+    ei.run()
+    jdat['kernels'].append({
+      "name": prg.name,
+      "work_dim": len(prg.global_size),
+      "global_work_size": prg.global_size,
+      "local_work_size": prg.local_size,
+      "num_args": len(ei.bufs),
+      "args": struct.pack("Q"*len(ei.bufs), *[id(b) for b in ei.bufs]).decode("latin_1"),
+      "arg_size": len(ei.bufs)*8,
+    })
+
+  output_fn = sys.argv[2] if len(sys.argv) >= 3 else "/tmp/output.thneed"
+  print(f"saving thneed to {output_fn}")
+  with open(output_fn, "wb") as f:
+    j = json.dumps(jdat, ensure_ascii=False).encode('latin_1')
+    f.write(struct.pack("I", len(j)))
+    f.write(j)
+    for w in weights: f.write(w)
+    for b in binaries: f.write(b)
+    print("saved", f.tell())
 
   FLOAT16 = getenv("FLOAT16", 0)
   if FLOAT16 == 0:
