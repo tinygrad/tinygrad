@@ -13,6 +13,7 @@ import onnx
 from typing import Tuple, List, Optional, Dict, cast
 from extra.onnx import get_run_onnx
 from tinygrad import Tensor, Device, GlobalCounters, dtypes
+from tinygrad.buffer import Buffer
 from tinygrad.dtype import ImageDType
 from tinygrad.device import CompiledRunner
 from tinygrad.helpers import partition, Context, fetch, getenv, DEBUG
@@ -111,6 +112,9 @@ if __name__ == "__main__":
   run_schedule(schedule_input)
   with Context(DEBUG=max(DEBUG.value, 2), BEAM=getenv("LATEBEAM")):
     schedule = memory_planner(schedule)
+    for si in schedule:
+      for b in si.outputs:
+        assert not b.is_allocated(), "output should not be allocated"
     image_count = sum(isinstance(out.dtype, ImageDType) for si in schedule for out in si.outputs)
     print(f"**** compiling real kernels {image_count}/{len(schedule)} images ****")
     eis = list(tqdm(lower_schedule(schedule), total=len(schedule)))
@@ -119,18 +123,24 @@ if __name__ == "__main__":
   assert len(eis) <= getenv("ALLOWED_KERNEL_COUNT", 0) or getenv("ALLOWED_KERNEL_COUNT", 0) == 0, "too many kernels!"
 
   # new simple thneed
+  def to_ref(b:Buffer): return struct.pack("Q", id(b)).decode("latin_1")
 
+  seen_buffers = set()
+  input_buffers = [x.lazydata.buffer for x in inputs.values()]
   jdat = {"binaries": [], "programs": {}, "kernels": [], "objects": []}
+  jdat["inputs"] = {k:to_ref(v.lazydata.buffer) for k,v in inputs.items()}
+  jdat["outputs"] = [to_ref(eis[-1].bufs[0])]
   weights = []
   for ei in eis:
     for b in ei.bufs:
+      if b in seen_buffers: continue
+      seen_buffers.add(b)
       if isinstance(b.dtype, ImageDType):
         base_dtype = dtypes.float16 if b.dtype.fmt == 'e' else dtypes.float32
         row_pitch = (b.dtype.shape[0]*4*base_dtype.itemsize + 63)//64 * 64
         size = row_pitch * b.dtype.shape[1]
-        id_ref = struct.pack("Q", id(b)).decode("latin_1")
         jdat['objects'].append({
-          "id": id_ref, "needs_load": b.is_allocated(), "size": size, "arg_type": "image2d_t",
+          "id": to_ref(b), "needs_load": b.is_allocated(), "size": size, "arg_type": "image2d_t",
           "width": b.dtype.shape[0], "height": b.dtype.shape[1], "row_pitch": row_pitch, "float32": b.dtype.base == dtypes.float32,
         })
         if b.is_allocated():
@@ -140,9 +150,10 @@ if __name__ == "__main__":
           weights.append(nb.lazydata.buffer.as_buffer())
       else:
         jdat['objects'].append({
-          "id": id_ref, "arg_type": b.dtype.name + "*", "needs_load": b.is_allocated(), "size": b.size,
+          "id": to_ref(b), "arg_type": b.dtype.name + "*", "needs_load": b.is_allocated(), "size": b.size,
         })
-        if b.is_allocated(): weights.append(b.as_buffer())
+        if b.is_allocated() and b not in input_buffers:
+          weights.append(b.as_buffer())
 
   saved_binaries = set()
   binaries = []
@@ -161,7 +172,7 @@ if __name__ == "__main__":
       "global_work_size": prg.global_size,
       "local_work_size": prg.local_size,
       "num_args": len(ei.bufs),
-      "args": struct.pack("Q"*len(ei.bufs), *[id(b) for b in ei.bufs]).decode("latin_1"),
+      "args": ''.join(to_ref(b) for b in ei.bufs),
       "arg_size": len(ei.bufs)*8,
     })
 
