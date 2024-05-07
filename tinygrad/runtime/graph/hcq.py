@@ -52,7 +52,7 @@ class HCQGraph(MultiGraphRunner):
     self.kickoff_value = 0
     self.graph_timeline = {dev: 0 for dev in self.devices}
 
-    self.copy_from = {dev: set() for dev in self.devices}
+    self.copy_to_devs = {dev: set() for dev in self.devices}
 
     for j,ji in enumerate(self.jit_cache):
       if isinstance(ji.prg, CompiledRunner):
@@ -67,7 +67,7 @@ class HCQGraph(MultiGraphRunner):
         else:
           for sig, val in deps: self.comp_queues[ji.prg.device].wait(sig, val)
           self.comp_queues[ji.prg.device].exec(ji.prg.clprg, self.kargs_addrs[j], *ji.prg.launch_dims(var_vals)) \
-                                         .signal(self.comp_signal[ji.prg.device], value=sig_val)
+                                         .signal(self.comp_signal[ji.prg.device], sig_val)
       elif isinstance(ji.prg, BufferXfer):
         dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
         Device[src.device]._gpu_map(dest._buf)
@@ -78,12 +78,12 @@ class HCQGraph(MultiGraphRunner):
 
         for sig,val in deps: self.copy_queues[Device[src.device]].wait(sig, val)
         self.copy_queues[Device[src.device]].copy(dest._buf.va_addr, src._buf.va_addr, dest.nbytes) \
-                                            .signal(self.copy_signal[Device[src.device]], value=sig_val)  
-        self.copy_from[Device[dest.device]].add(Device[src.device])
+                                            .signal(self.copy_signal[Device[src.device]], sig_val)
+        self.copy_to_devs[Device[dest.device]].add(Device[src.device])
 
     for dev in self.devices:
       if self.copy_signal_val[dev] > 0: self.comp_queues[dev].wait(self.copy_signal[dev], self.copy_signal_val[dev])
-      for dep_dev in self.copy_from: self.comp_queues[dev].wait(self.copy_signal[dep_dev], self.copy_signal_val[dep_dev])
+      for dep_dev in self.copy_to_devs: self.comp_queues[dev].wait(self.copy_signal[dep_dev], self.copy_signal_val[dep_dev])
 
       self.queue_list.append((self.comp_queues.pop(dev), dev))
       if self.copy_signal_val[dev] > 0: self.queue_list.append((self.copy_queues.pop(dev), dev))
