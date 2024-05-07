@@ -621,7 +621,6 @@ class TestAutoCastType(unittest.TestCase):
     t = Tensor([[x]], dtype=dtypes.half, requires_grad=True).expand(N, N).contiguous()
     np.testing.assert_allclose(t.mean(axis=1).numpy(), np.array([x] * N, dtype=np.float16), rtol=1e-3)
 
-  @unittest.skip("TODO: fix this")
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_mean_half_precision_overflow(self):
     t = Tensor([60000, 60000, 60000], dtype=dtypes.half, requires_grad=True)
