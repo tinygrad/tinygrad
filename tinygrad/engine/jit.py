@@ -3,7 +3,7 @@ from typing import TypeVar, Generic, Callable, List, Tuple, Union, Dict, cast, O
 import functools, itertools, collections
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, BEAM, getenv, all_int, GraphException, colored, JIT
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, BEAM, getenv, all_int, GraphException, colored, JIT, partition
 from tinygrad.device import Buffer, CompiledRunner, BufferXfer, Compiled, Device, Runner
 from tinygrad.dtype import DType
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -165,6 +165,16 @@ class TinyJit(Generic[ReturnType]):
           if b is not None and b._base is not None and b._base in input_rawbuffers:
             input_rawbuffers.append(b)
             self.extra_view_inputs.append((input_rawbuffers.index(b.base), b.offset, b.device, b.size, b.dtype))
+
+      # filter jit cache items that don't depend on the inputs
+      depends = set(input_rawbuffers)
+      for ei in self.jit_cache:
+        if any(b in depends for b in ei.bufs):
+          for b in ei.bufs:
+            if b is not None: depends.add(b)
+      self.jit_cache, jit_cache_independent = partition(self.jit_cache, lambda ei: any(out in depends for out in ei.bufs[ei.prg.outcount:]))
+      for ei in jit_cache_independent: ei.run(var_vals)
+      print(f"{len(self.jit_cache)} schedule items depend on the input, {len(jit_cache_independent)} don't")
 
       # memory planning (optional)
       assigned = _internal_memory_planner([cast(List[Buffer], x.bufs) for x in self.jit_cache], debug_prefix="JIT ")
