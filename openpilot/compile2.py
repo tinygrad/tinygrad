@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os, sys, io, pathlib, json, struct
 from tqdm import tqdm
+import numpy as np
 sys.path.insert(0, str(pathlib.Path(__file__).parents[1]))
 
 if "FLOAT16" not in os.environ: os.environ["FLOAT16"] = "1"
@@ -149,8 +150,10 @@ if __name__ == "__main__":
         if needs_load:
           t = Tensor.empty(b.dtype.shape, dtype=b.dtype)
           t.lazydata.buffer = b
-          nb = t.cast(base_dtype).pad(((0, row_pitch//(4*base_dtype.itemsize)-b.dtype.shape[0]), (0,0), (0,0))).contiguous().realize()
-          weights.append(nb.lazydata.buffer.as_buffer())
+          data = t.cast(dtypes.float32).pad(((0, row_pitch//(4*base_dtype.itemsize)-b.dtype.shape[0]), (0,0), (0,0))).contiguous().numpy()
+          # NOTE: this cast must be done in numpy for platforms that don't support half
+          if base_dtype == dtypes.float16: data = data.astype(np.float16)
+          weights.append(data.tobytes())
       else:
         jdat['objects'].append({
           "id": to_ref(b), "arg_type": b.dtype.name + "*", "needs_load": needs_load, "size": b.nbytes,
