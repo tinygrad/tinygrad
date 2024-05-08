@@ -97,21 +97,14 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
                 simple_pads:Set[LazyBuffer], children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], scheduled=False):
   if buf in allbufs or buf.base.realized: return
   if GRAPH: log_lazybuffer(buf, scheduled)
-  if isinstance(buf.dtype, ImageDType) and (prod(buf.shape) != prod(buf.dtype.shape) or
-                                            not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
-    if DEBUG >= 3: print(f"forcing image {buf.dtype} with shape {buf.shape} to float32")
-    buf.dtype = dtypes.float32  # NOTE: this is what makes the dtype above not match
-    # hack the underlying buffer too
-    if buf.base is buf:
-      assert not hasattr(buf.buffer, '_buf'), "can't fixup allocated buffer"
-      buf.buffer.dtype = dtypes.float32
-      buf.buffer.options = None
   if buf.base != buf:
     # realize all places where the buffer is expanded
     if prod(buf.base.st.shape) < prod(buf.st.shape):
       if len(buf.st.views) == 1 and buf.st.views[-1].mask and all_int(buf.base.st.shape) and \
           prod(buf.base.st.shape) >= prod([y-x for x,y in buf.st.views[-1].mask]):
         simple_pads.add(buf.base)
+      elif buf.base.op is UnaryOps.CAST and isinstance(buf.base.srcs[0].dtype, ImageDType) and isinstance(buf.base.arg[0], ImageDType):
+        pass # don't realize image to image casts. this is part of a larger problem
       else:
         realizes[buf.base] = None
     return _recurse_lb(buf.base, realizes, allbufs, simple_pads, children)
@@ -223,9 +216,20 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
     else: reduce_for_op.update((tr, r) for tr in realized_children)
 
   output_groups: DefaultDict[Tuple, List[LazyBuffer]] = defaultdict(list)
-  for r in realizes:
-    if r.realized is not None or r.op is LoadOps.CONST or r in seen: continue
-    output_groups[(reduce_for_op[r], ) if r in reduce_for_op and MULTIOUTPUT else (r, )].append(r)
+  for buf in realizes:
+    if buf.realized is not None or buf.op is LoadOps.CONST or buf in seen: continue
+    output_groups[(reduce_for_op[buf], ) if buf in reduce_for_op and MULTIOUTPUT else (buf, )].append(buf)
+
+    # make things that can't be images not images
+    if isinstance(buf.dtype, ImageDType) and (prod(buf.shape) != prod(buf.dtype.shape) or
+                                              not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
+      if DEBUG >= 2: print(f"forcing image {buf.dtype} with shape {buf.shape} to float32")
+      buf.dtype = dtypes.float32
+      # hack the underlying buffer too
+      if buf.base is buf:
+        assert not hasattr(buf.buffer, '_buf'), "can't fixup allocated buffer"
+        buf.buffer.dtype = dtypes.float32
+        buf.buffer.options = None
 
   # preschedule all buffers in realizes
   prescheduled = {group[0]:_schedule_group(tuple(group), realizes, reduce_for_op) for group in output_groups.values()}
