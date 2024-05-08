@@ -84,11 +84,11 @@ class PatternMatcher:
       queue = [n]
       while queue:
         if all([qq in uops.uops for qq in queue[-1].vin]):
-          q = queue.pop()
-          new = uops.add(q.uop, q.dtype, q.vin, q.arg, insert_before=max([0]+[uops.uops.index(vv) for vv in q.vin])+1)
-          for vv in uops.uops + queue: vv.vin = tuple(new if x is q else x for x in vv.vin)
+          new = uops.add_op(q:=queue.pop(), insert_before=max([0]+[uops.uops.index(vv) for vv in q.vin])+1)
+          if new != q:
+            for vv in uops.uops + queue: vv.vin = tuple(new if x is q else x for x in vv.vin)
         else: queue.extend([qq for qq in queue[-1].vin if qq not in uops.uops])
-      if not any([o in u.vin for u in uops]): uops.uops.remove(o)
+      if not any([o in u.vin for u in uops.uops[uops.uops.index(o):]]): uops.uops.remove(o)
 
 constant_folder = PatternMatcher([
   # const rules
@@ -151,17 +151,19 @@ class UOpGraph:
 
   def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None, cachable=True, insert_before=None,
           simplify=True) -> UOp:
-    ret = UOp(uop, dtype, vin, arg) if uop is not UOps.CONST else UOp.const(dtype, arg)
-    if simplify and (rewritten:=constant_folder.rewrite(ret)) is not None:
+    return self.add_op(UOp(uop, dtype, vin, arg) if uop is not UOps.CONST else UOp.const(dtype, arg), cachable, insert_before, simplify)
+
+  def add_op(self, op:UOp, cachable=True, insert_before=None, simplify=True) -> UOp:
+    if simplify and (rewritten:=constant_folder.rewrite(op)) is not None:
       if rewritten in self.uops: return rewritten  # ignore cachable
-      ret = rewritten
-    key = (ret.uop, ret.dtype, ret.vin, ret.arg)
+      op = rewritten
+    key = (op.uop, op.dtype, op.vin, op.arg)
     if insert_before is None: insert_before = len(self.uops)
     # check if the cached expr is valid with the given insert place.
     if cachable and (expr:=self.saved_exprs.get(key, None)) is not None and self.uops.index(expr) <= insert_before: return expr
-    self.uops.insert(insert_before, ret)
-    if cachable: self.saved_exprs[key] = ret
-    return ret
+    self.uops.insert(insert_before, op)
+    if cachable: self.saved_exprs[key] = op
+    return op
 
   def remove_childless(self, keep:Set[UOp]):
     while 1:
