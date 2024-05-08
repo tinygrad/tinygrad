@@ -424,7 +424,7 @@ class Linearizer(Kernel):
                                       for u in self.ast_parse(x.src[0], accs, offs, loaded_buffers)]
     if x.op in ReduceOps and do_reduce is None:
       assert offs is None, "not available if we aren't doing reduce"
-      return [accs[x][i] for i in offs] if offs is not None else accs[x]
+      return accs[x]
 
     values = [self.ast_parse(v, accs, offs, loaded_buffers, loop_ctx=loop_ctx, cache=cache) for v in x.src]
     ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}
