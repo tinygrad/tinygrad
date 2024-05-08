@@ -69,9 +69,9 @@ def train_resnet():
   epochs            = config["epochs"]            = getenv("EPOCHS", 37)
   BS                = config["BS"]                = getenv("BS", 104 * len(GPUS))  # fp32 GPUS<=6 7900xtx can fit BS=112
   EVAL_BS           = config["EVAL_BS"]           = getenv("EVAL_BS", BS)
-  base_lr           = config["base_lr"]           = getenv("LR", 7 * (BS/1536))
+  base_lr           = config["base_lr"]           = getenv("LR", 7.2 * (BS/1536))
   lr_warmup_epochs  = config["lr_warmup_epochs"]  = getenv("WARMUP_EPOCHS", 2)
-  decay             = config["decay"]             = getenv("DECAY", 5e-5)
+  decay             = config["decay"]             = getenv("DECAY", 2e-4)
 
   loss_scaler       = config["LOSS_SCALER"]       = getenv("LOSS_SCALER", 128.0 if dtypes.default_float == dtypes.float16 else 1.0)
 
