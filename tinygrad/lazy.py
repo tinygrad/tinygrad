@@ -96,6 +96,9 @@ class LazyBuffer:
     if self.device.startswith("DISK") and not bitcast: raise RuntimeError("attempted to cast disk buffer (bitcast only)")
     if self.is_unrealized_unmasked_const() and not bitcast:
       return create_lazybuffer(self.device, self.st, dtype, LoadOps.CONST, dtypes.as_const(self.base.arg, dtype))
+    # TODO: applying this makes gpt2 slower
+    if getenv("CAST_BEFORE_VIEW", 1) and dtype.itemsize <= self.dtype.itemsize and self != self.base:
+      return self.base.cast(dtype, bitcast)._view(self.st)
     new_shape = self.shape
     if bitcast and self.dtype.itemsize != dtype.itemsize:
       if not self.device.startswith("DISK"): raise RuntimeError("shape changing bitcast only supported on DISK right now")
