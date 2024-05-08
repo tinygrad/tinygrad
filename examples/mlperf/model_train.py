@@ -4,7 +4,7 @@ from tqdm import tqdm
 import multiprocessing
 
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
-from tinygrad.helpers import getenv, BEAM, WINO, round_up
+from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear
 from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_save
 from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup
 
@@ -38,6 +38,7 @@ def train_resnet():
       MLLOGGER.event(key=mllog_constants.SUBMISSION_PLATFORM, value=getenv("SUBMISSION_PLATFORM", "tinybox"))
       MLLOGGER.event(key=mllog_constants.SUBMISSION_DIVISION, value=mllog_constants.CLOSED)
       MLLOGGER.event(key=mllog_constants.SUBMISSION_STATUS, value=mllog_constants.ONPREM)
+      diskcache_clear()
       MLLOGGER.event(key=mllog_constants.CACHE_CLEAR, value=True)
       # closed_common.yaml
       MLLOGGER.event(key=mllog_constants.SUBMISSION_BENCHMARK, value=mllog_constants.RESNET)
