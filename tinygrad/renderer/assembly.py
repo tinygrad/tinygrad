@@ -63,7 +63,7 @@ class AssemblyLanguage(NamedTuple):
   def render_loop(self, idx, start, label, acc=None) -> List[str]: raise NotImplementedError()
   def render_bra(self, b1, pred=None, neg=False) -> List[str]: raise NotImplementedError()
   def render_gep(self, loc, base, offset, dtype, gate=None) -> List[str]: raise NotImplementedError()
-  def render_load(self, loc, dest, dtype, gate=None, alt=None, ss="", offset=0) -> List[str]: raise NotImplementedError()
+  def render_load(self, loc, dest, dtype, ss="", offset=0) -> List[str]: raise NotImplementedError()
   def render_store(self, loc, val, dtype, gate=None, ss="", offset=0) -> List[str]: raise NotImplementedError()
   def render_cast(self, d:str, a:str, dtype:DType, atype:DType, bitcast=False, pred=False) -> List[str]: raise NotImplementedError()
 
@@ -281,7 +281,7 @@ class PTXLanguage(AssemblyLanguage):
 
   def mem_type(self, dtype): return 's8' if dtype.itemsize == 1 else 'b16' if dtype == dtypes.float16 else self.types[dtype]
 
-  def render_load(self, loc, dest, dtype, gate=None, alt=None, ss="", offset=0) -> List[str]:
+  def render_load(self, loc, dest, dtype, ss="", offset=0) -> List[str]:
     assert dtype is not dtypes.bool
     return [f"ld{ss}.{self.mem_type(dtype)} {dest}, [{loc}+{offset}];"]
 
