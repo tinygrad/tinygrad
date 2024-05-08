@@ -153,17 +153,17 @@ class UOpGraph:
           simplify=True) -> UOp:
     return self.add_op(UOp(uop, dtype, vin, arg) if uop is not UOps.CONST else UOp.const(dtype, arg), cachable, insert_before, simplify)
 
-  def add_op(self, op:UOp, cachable=True, insert_before=None, simplify=True) -> UOp:
-    if simplify and (rewritten:=constant_folder.rewrite(op)) is not None:
+  def add_op(self, ret:UOp, cachable=True, insert_before=None, simplify=True) -> UOp:
+    if simplify and (rewritten:=constant_folder.rewrite(ret)) is not None:
       if rewritten in self.uops: return rewritten  # ignore cachable
-      op = rewritten
-    key = (op.uop, op.dtype, op.vin, op.arg)
+      ret = rewritten
+    key = (ret.uop, ret.dtype, ret.vin, ret.arg)
     if insert_before is None: insert_before = len(self.uops)
     # check if the cached expr is valid with the given insert place.
     if cachable and (expr:=self.saved_exprs.get(key, None)) is not None and self.uops.index(expr) <= insert_before: return expr
-    self.uops.insert(insert_before, op)
-    if cachable: self.saved_exprs[key] = op
-    return op
+    self.uops.insert(insert_before, ret)
+    if cachable: self.saved_exprs[key] = ret
+    return ret
 
   def remove_childless(self, keep:Set[UOp]):
     while 1:
