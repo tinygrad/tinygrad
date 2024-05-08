@@ -249,18 +249,14 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
       in_degree[assign] += 1
 
   def get_bijectives(csi):
-    seen_lop = set()
-    bijectives = []
+    bijectives = set()
     for ast in csi.ast:
       for lop in ast.lazyops:
-        if lop in seen_lop: continue
-        seen_lop.add(lop)
-
         if lop.op is BufferOps.LOAD:
           membuf: MemBuffer = lop.arg
           if membuf.st.shape == csi.outputs[0].st.shape: continue  # check if is reduce
           if not membuf.st.bijective: continue  # extract bijective buffers
-          bijectives.append(((csi.outputs + csi.inputs)[membuf.idx], membuf.st, csi.outputs[0].st))
+          bijectives.add(((csi.outputs + csi.inputs)[membuf.idx], membuf.st, csi.outputs[0].st))
     return bijectives
   # todo: this only fuses children of schedule_targets, but we can also fuse children of realized buffers
   # todo: quite sensitive to toposort order
@@ -298,7 +294,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
     # chase to children with ps as contiguous earlybuf, match by reduced shape
     for csi in to_enqueue:
       bijectives = get_bijectives(csi)
-      if bijectives: reduce_collector.append((csi, set(bijectives)))
+      if bijectives: reduce_collector.append((csi, bijectives))
       else: pre_q.append(csi)
 
   # edit the graph with the new groupings
