@@ -148,6 +148,26 @@ class Compiler:
       if self.cachekey is not None: diskcache_put(self.cachekey, src, lib)
     return lib
 
+@dataclass(frozen=True)
+class Program:
+  name:str
+  prg:str
+  dname:str
+  global_size:Optional[List[int]]=None
+  local_size:Optional[List[int]]=None
+  uops:Optional[UOpGraph]=None
+  op_estimate:sint=0
+  mem_estimate:sint=0
+
+  def compile(self, cached=True) -> bytes:
+    compiler = cast(Compiler, Device[self.dname].compiler)
+    return compiler.compile_cached(self.prg) if cached else compiler.compile(self.prg)
+
+  def launch_dims(self, var_vals:Dict[Variable, int]):
+    global_size = [sym_infer(sz, var_vals) for sz in self.global_size] if self.global_size is not None else self.global_size
+    local_size = [sym_infer(sz, var_vals) for sz in self.local_size] if self.local_size is not None else self.local_size
+    return global_size, local_size
+
 class CompiledRunner(Runner):
   def __init__(self, name:str, prg:str, dname:str, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None,
                uops:Optional[UOpGraph]=None, op_estimate:sint=0, mem_estimate:sint=0, precompiled:Optional[bytes]=None):
@@ -156,8 +176,9 @@ class CompiledRunner(Runner):
     if local_size is not None: local_size = local_size + [1]*(3-len(local_size))
     self.name, self.prg, self.global_size, self.local_size, self.first_run = \
       to_function_name(name), prg, global_size, local_size, True
-    lib:bytes = precompiled if precompiled is not None else cast(Compiler, Device[dname].compiler).compile_cached(prg)
     self.uops = uops
+
+    lib:bytes = precompiled if precompiled is not None else cast(Compiler, Device[dname].compiler).compile_cached(prg)
     self.vars: List[Variable] = [] if uops is None else uops.vars()
     self.globals: List[Tuple[int, bool]] = [] if uops is None else uops.globals()
     self.lib, self.clprg, self.outcount = lib, Device[dname].runtime(self.name, lib), sum(x[1] for x in self.globals)
@@ -170,11 +191,6 @@ class CompiledRunner(Runner):
   def __reduce__(self):
     return self.__class__, (self.display_name, self.prg, self.dname, self.global_size, self.local_size,
                             self.uops, self.op_estimate, self.mem_estimate, self.lib)
-
-  def launch_dims(self, var_vals):
-    global_size = [sym_infer(sz, var_vals) for sz in self.global_size] if self.global_size is not None else self.global_size
-    local_size = [sym_infer(sz, var_vals) for sz in self.local_size] if self.local_size is not None else self.local_size
-    return global_size, local_size
 
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False) -> Optional[float]:
     global_size, local_size = self.launch_dims(var_vals)
@@ -201,6 +217,9 @@ class Compiled:
     info = get_lazyop_info(k.ast[0])
     ops, mem = k.uops.flops_mem()
     run_count = prod((k.global_size if k.global_size else []) + (k.local_size if k.local_size else []))
+    return Program(k.name, self.compiler.render(to_function_name(k.name), k.uops), self.dname, k.global_size, k.local_size,
+                   k.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))
+
     # NOTE: we use min here to ignore the indexing FLOPS
     ret = CompiledRunner(k.name, self.compiler.render(to_function_name(k.name), k.uops), self.dname, k.global_size, k.local_size,
                          k.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))
