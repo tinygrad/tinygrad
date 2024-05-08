@@ -254,17 +254,14 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
       for lop in ast.lazyops:
         if lop.op is BufferOps.LOAD:
           membuf: MemBuffer = lop.arg
-          if membuf.st.shape == csi.outputs[0].st.shape: continue  # check if is reduce
-          if not membuf.st.bijective: continue  # extract bijective buffers
+          if membuf.st.shape == csi.outputs[0].st.shape or not membuf.st.bijective: continue  # check if is earlybuf and bijective
           bijectives.add(((csi.outputs + csi.inputs)[membuf.idx], membuf.st, csi.outputs[0].st))
     return bijectives
-  # todo: this only fuses children of schedule_targets, but we can also fuse children of realized buffers
-  # todo: quite sensitive to toposort order
   pre_q: Deque[_LBScheduleItem] = deque()
   reduce_collector: List[Tuple[_LBScheduleItem, Set[Tuple[LazyBuffer, ShapeTracker, ShapeTracker]]]] = []
   for csi in (si for key, si in prescheduled.items() if in_degree[key] == 0):
     bijectives = get_bijectives(csi)
-    if bijectives: reduce_collector.append((csi, set(bijectives)))
+    if bijectives: reduce_collector.append((csi, bijectives))
     else: pre_q.append(csi)
   preschedule_groups = []
   pre_in_deg = {k: v for k, v in in_degree.items()}
