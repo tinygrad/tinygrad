@@ -268,7 +268,7 @@ class NVAllocator(LRUAllocator):
 
   def _alloc(self, size:int, options:BufferOptions):
     if options.host: return self.device._gpu_host_alloc(size)
-    else: return self.device._gpu_alloc(size)
+    else: return self.device._gpu_alloc(size, map_to_cpu=options.cpu_access)
 
   def _free(self, gpumem, options:BufferOptions):
     NVDevice.synchronize_system()
