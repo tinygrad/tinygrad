@@ -154,11 +154,14 @@ if __name__ == "__main__":
           # NOTE: this cast must be done in numpy for platforms that don't support half
           if base_dtype == dtypes.float16: data = data.astype(np.float16)
           weights.append(data.tobytes())
+          assert len(weights[-1]) == size, "wrong size buffer"
       else:
         jdat['objects'].append({
           "id": to_ref(b), "arg_type": b.dtype.name + "*", "needs_load": needs_load, "size": b.nbytes,
         })
-        if needs_load: weights.append(b.as_buffer())
+        if needs_load:
+          weights.append(b.as_buffer())
+          assert len(weights[-1]) == b.nbytes, "wrong size buffer"
 
   saved_binaries = set()
   binaries = []
