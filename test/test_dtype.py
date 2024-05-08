@@ -523,6 +523,21 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([0, 1], dtype=dtypes.float32)).sum().dtype == dtypes.float32
     assert (Tensor([0, 1], dtype=dtypes.float64)).sum().dtype == dtypes.float64
 
+  def test_mean(self):
+    assert (Tensor([0, 1], dtype=dtypes.bool)).mean().dtype == dtypes.float32
+    assert (Tensor([0, 1], dtype=dtypes.int8)).mean().dtype == dtypes.float32
+    assert (Tensor([0, 1], dtype=dtypes.int16)).mean().dtype == dtypes.float32
+    assert (Tensor([0, 1], dtype=dtypes.int32)).mean().dtype == dtypes.float32
+    assert (Tensor([0, 1], dtype=dtypes.int64)).mean().dtype == dtypes.float32
+    assert (Tensor([0, 1], dtype=dtypes.uint8)).mean().dtype == dtypes.float32
+    assert (Tensor([0, 1], dtype=dtypes.uint16)).mean().dtype == dtypes.float32
+    assert (Tensor([0, 1], dtype=dtypes.uint32)).mean().dtype == dtypes.float32
+    assert (Tensor([0, 1], dtype=dtypes.uint64)).mean().dtype == dtypes.float32
+    assert (Tensor([0, 1], dtype=dtypes.float16)).mean().dtype == dtypes.float16
+    #assert (Tensor([0, 1], dtype=dtypes.bfloat16)).mean().dtype == dtypes.bfloat16
+    assert (Tensor([0, 1], dtype=dtypes.float32)).mean().dtype == dtypes.float32
+    assert (Tensor([0, 1], dtype=dtypes.float64)).mean().dtype == dtypes.float64
+
   def test_cumsum(self):
     assert (Tensor([0, 1], dtype=dtypes.bool)).cumsum(0).dtype == dtypes.int32
     assert (Tensor([0, 1], dtype=dtypes.int8)).cumsum(0).dtype == dtypes.int32
@@ -621,13 +636,13 @@ class TestAutoCastType(unittest.TestCase):
     t = Tensor([[x]], dtype=dtypes.half, requires_grad=True).expand(N, N).contiguous()
     np.testing.assert_allclose(t.mean(axis=1).numpy(), np.array([x] * N, dtype=np.float16), rtol=1e-3)
 
-  @unittest.skip("TODO: fix this")
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_mean_half_precision_overflow(self):
-    t = Tensor([60000, 60000, 60000], dtype=dtypes.half, requires_grad=True)
+    N = 256
+    t = Tensor([60000] * N*N, dtype=dtypes.half, requires_grad=True).reshape(N, N)
     np.testing.assert_allclose(t.mean().numpy(), 60000)
     t.square().mean().backward()
-    np.testing.assert_allclose(t.grad.numpy(), [60000 * 2 / 3] * 3)
+    np.testing.assert_allclose(t.grad.numpy().flatten(), [60000 * 2 / (N*N)] * N*N)
 
 class TestImplicitFunctionTypeChange(unittest.TestCase):
   def test_functions(self):

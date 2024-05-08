@@ -68,7 +68,7 @@ class Buffer:
   def __repr__(self):
     return f"<buf real:{hasattr(self, '_buf')} device:{self.device} size:{self.size} dtype:{self.dtype}" + \
            (f" offset:{self.offset}" if hasattr(self, "base") else "") + \
-           (">" if self.options is None else f"{self.options=}>")
+           (">" if self.options is None else f" {self.options=}>")
   def as_buffer(self, allow_zero_copy=False, force_zero_copy=False) -> memoryview:
     # zero copy with as_buffer (disabled by default due to use after free)
     if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, 'as_buffer'): return self.allocator.as_buffer(self._buf)
