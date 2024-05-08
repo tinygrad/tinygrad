@@ -211,9 +211,9 @@ class UOpGraph:
         self.add(UOps.ENDLOOP, None, (u,), cachable=False, insert_before=insert_before)
       elif u.uop is UOps.IF:
         # add END of if after the barrier of the store of the result
-        insert_before = ([i for i in range(self.uops.index(u), len(self.uops)-1) if self.uops[i].uop is UOps.BARRIER and \
-                      self.uops[i+1].uop is UOps.LOAD and all([x.vin[0] in self.uops[i+1].vin for x in self.uops[i].vin])] + [None])[0]
-        self.add(UOps.ENDIF, None, (u,), cachable=False, insert_before=insert_before)
+        barriers = ([i for i in range(self.uops.index(u), len(self.uops)-1) if self.uops[i].uop is UOps.BARRIER \
+                and self.uops[i+1].uop is UOps.LOAD and all([x.vin[0] in self.uops[i+1].vin for x in self.uops[i].vin])] + [None])[0]
+        self.add(UOps.ENDIF, None, (u,), cachable=False, insert_before=barriers)
 
   def fix_loop_scope(self, get_recursive_parents:Callable[..., Set[UOp]]):
     loop_stack: List[List[UOp]] = [[]]
