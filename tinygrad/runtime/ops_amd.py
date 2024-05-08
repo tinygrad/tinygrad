@@ -280,9 +280,29 @@ sdma_cache_wb = sdma_pkts.gcr(op=amd_gpu.SDMA_OP_GCR, sub_op=amd_gpu.SDMA_SUBOP_
 class HWCopyQueue:
   def __init__(self): self.q = []
 
+  def cached(self):
+    if hasattr(self, 'dt'): return self.dt
+    sz = 0
+    for cmd in self.q: sz += ctypes.sizeof(cmd)
+
+    self.dt = memoryview(bytearray(sz))
+    off = 0
+    for cmd in self.q:
+      ctypes.memmove(ctypes.addressof(from_mv(self.dt)) + off, ctypes.addressof(cmd), ctypes.sizeof(cmd))
+      off += ctypes.sizeof(cmd)
+    return self.dt
+
   def submit(self, device:AMDDevice):
     read_ptr = device.sdma_read_pointer[0]
-    if (device.sdma_doorbell_value-read_ptr) > device.sdma_ring.size: raise RuntimeError("SDMA queue overrun")
+    # if (device.sdma_doorbell_value-read_ptr) > device.sdma_ring.size: raise RuntimeError("SDMA queue overrun")
+
+    # x = self.cached()
+    # if x.nbytes > (fill:=device.sdma_ring.size - device.sdma_doorbell_value % device.sdma_ring.size):
+    #   ctypes.memset(device.sdma_ring.va_addr + (device.sdma_doorbell_value % device.sdma_ring.size), 0, fill)
+    #   device.sdma_doorbell_value += fill
+    # ctypes.memmove(device.sdma_ring.va_addr + (device.sdma_doorbell_value % device.sdma_ring.size), from_mv(x), x.nbytes)
+    # device.sdma_doorbell_value += x.nbytes
+
     for cmd in self.q:
       if (cmdsz:=ctypes.sizeof(cmd)) > (fill:=device.sdma_ring.size - device.sdma_doorbell_value % device.sdma_ring.size):
         ctypes.memset(device.sdma_ring.va_addr + (device.sdma_doorbell_value % device.sdma_ring.size), 0, fill)
@@ -560,7 +580,7 @@ class AMDDevice(Compiled):
 
     # SDMA Queue
     self.gart_sdma = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
-    self.sdma_ring = self._gpu_alloc(0x100000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
+    self.sdma_ring = self._gpu_alloc(0x800000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
     self.sdma_queue = kio.create_queue(AMDDevice.kfd, ring_base_address=self.sdma_ring.va_addr, ring_size=self.sdma_ring.size, gpu_id=self.gpu_id,
       queue_type=kfd.KFD_IOC_QUEUE_TYPE_SDMA, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE, queue_priority=kfd.KFD_MAX_QUEUE_PRIORITY,
       write_pointer_address=self.gart_sdma.va_addr, read_pointer_address=self.gart_sdma.va_addr+8)
@@ -578,7 +598,7 @@ class AMDDevice(Compiled):
     self.pm4_ctx_save_restore_address = self._gpu_alloc(0x2C02000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
     self.eop_pm4_buffer = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
     self.gart_pm4 = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
-    self.pm4_ring = self._gpu_alloc(0x100000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
+    self.pm4_ring = self._gpu_alloc(0x800000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
     self.pm4_queue = kio.create_queue(AMDDevice.kfd, ring_base_address=self.pm4_ring.va_addr, ring_size=self.pm4_ring.size, gpu_id=self.gpu_id,
       queue_type=kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE, queue_priority=kfd.KFD_MAX_QUEUE_PRIORITY,
       eop_buffer_address=self.eop_pm4_buffer.va_addr, eop_buffer_size=self.eop_pm4_buffer.size,
