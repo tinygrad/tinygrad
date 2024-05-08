@@ -19,11 +19,17 @@ def train_resnet():
   from examples.mlperf.initializers import Conv2dHeNormal, Linear
   from examples.hlb_cifar10 import UnsyncedBatchNorm
 
+  config = {}
+  seed = config["seed"] = getenv("SEED", 42)
+  Tensor.manual_seed(seed)  # seed for weight initialization
+
   INITMLPERF = getenv("INITMLPERF")
   RUNMLPERF = getenv("RUNMLPERF")
   if getenv("LOGMLPERF"):
     from mlperf_logging import mllog
     import mlperf_logging.mllog.constants as mllog_constants
+    mllog.config(filename=f"result_{seed}.txt")
+    mllog.config(root_dir=Path(__file__).parents[3].as_posix())  # truncate to log this. "file": "tinygrad/examples/mlperf/model_train.py"
     MLLOGGER = mllog.get_mllogger()
     if INITMLPERF:
       # common.yaml
@@ -38,10 +44,6 @@ def train_resnet():
       MLLOGGER.event(key=mllog_constants.GRADIENT_ACCUMULATION_STEPS, value=1)
   else:
     MLLOGGER = None
-
-  config = {}
-  seed = config["seed"] = getenv("SEED", 42)
-  Tensor.manual_seed(seed)  # seed for weight initialization
 
   GPUS = config["GPUS"] = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
   print(f"training on {GPUS}")
@@ -129,6 +131,7 @@ def train_resnet():
       MLLOGGER.event(key=mllog_constants.LARS_OPT_MOMENTUM, value=optimizer.momentum)
       MLLOGGER.event(key=mllog_constants.LARS_OPT_WEIGHT_DECAY, value=optimizer.wd)
     if RUNMLPERF:
+      MLLOGGER.event(key=mllog_constants.SEED, value=seed)
       MLLOGGER.start(key=mllog_constants.RUN_START)
 
   # ** resume from checkpointing **
@@ -305,7 +308,7 @@ def train_resnet():
         achieved = True
         # stop once achieve the target
         if MLLOGGER and RUNMLPERF:
-          MLLOGGER.event(key=mllog_constants.RUN_STOP, metadata=dict(status="success"))
+          MLLOGGER.event(key=mllog_constants.RUN_STOP, metadata=dict(status=mllog_constants.SUCCESS))
         break
 
       # checkpoint every time we eval
