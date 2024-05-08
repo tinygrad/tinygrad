@@ -32,13 +32,13 @@ def train_resnet():
     mllog.config(root_dir=Path(__file__).parents[3].as_posix())  # truncate to log this. "file": "tinygrad/examples/mlperf/model_train.py"
     MLLOGGER = mllog.get_mllogger()
     if INITMLPERF:
+      MLLOGGER.start(key=mllog_constants.INIT_START)
       # common.yaml
       MLLOGGER.event(key=mllog_constants.SUBMISSION_ORG, value="tinycorp")
       MLLOGGER.event(key=mllog_constants.SUBMISSION_PLATFORM, value=getenv("SUBMISSION_PLATFORM", "tinybox"))
       MLLOGGER.event(key=mllog_constants.SUBMISSION_DIVISION, value=mllog_constants.CLOSED)
       MLLOGGER.event(key=mllog_constants.SUBMISSION_STATUS, value=mllog_constants.ONPREM)
       MLLOGGER.event(key=mllog_constants.CACHE_CLEAR, value=True)
-      MLLOGGER.start(key=mllog_constants.INIT_START)
       # closed_common.yaml
       MLLOGGER.event(key=mllog_constants.SUBMISSION_BENCHMARK, value=mllog_constants.RESNET)
       MLLOGGER.event(key=mllog_constants.GRADIENT_ACCUMULATION_STEPS, value=1)
@@ -111,8 +111,6 @@ def train_resnet():
   # log mlperf hparams
   if MLLOGGER:
     if INITMLPERF:
-      MLLOGGER.start(key=mllog_constants.INIT_START)
-
       MLLOGGER.event(key=mllog_constants.GLOBAL_BATCH_SIZE, value=BS)
       from extra.datasets.imagenet import get_train_files, get_val_files
       MLLOGGER.event(key=mllog_constants.TRAIN_SAMPLES, value=len(get_train_files()))
