@@ -184,7 +184,7 @@ def train_resnet():
   step_times = []
   for e in range(start_epoch, epochs):
     # ** train loop **
-    if MLLOGGER:
+    if MLLOGGER and RUNMLPERF:
       MLLOGGER.start(key=mllog_constants.EPOCH_START, value=e+1, metadata=dict(epoch_num=e+1))
     Tensor.training = True
     BEAM.value = TRAIN_BEAM
