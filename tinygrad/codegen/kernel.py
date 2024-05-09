@@ -343,7 +343,7 @@ class Kernel:
     if use_tensor_cores and self.opts.has_local and self.reduceop and self.reduceop.op is ReduceOps.SUM and self.opts.device in tensor_cores:
       for tc in tensor_cores[self.opts.device]:
         has_cast = tc.dtype_in != tc.dtype_out
-        if has_cast and not(self.reduceop.src[0].op is UnaryOps.CAST and self.reduceop.src[0].arg[0] == tc.dtype_out): continue
+        if has_cast and not(self.reduceop.src[0].op in [UnaryOps.CAST, UnaryOps.BITCAST] and self.reduceop.src[0].arg[0] == tc.dtype_out): continue
 
         mul_op = self.reduceop.src[0].src[0] if has_cast else self.reduceop.src[0]
         if mul_op.op is not BinaryOps.MUL: continue
@@ -352,7 +352,7 @@ class Kernel:
           # TODO: apply tc even if the sources are not from LOAD
           if src.op is BufferOps.LOAD and src.arg.dtype == tc.dtype_in: return self.bufs.index(cast(MemBuffer, src.arg))
           try:
-            if opt_level >= 1 and src.op is UnaryOps.CAST and src.arg[0] == tc.dtype_in: return self.bufs.index(cast(MemBuffer, src.src[0].arg))
+            if opt_level >= 1 and src.op in [UnaryOps.CAST, UnaryOps.BITCAST] and src.arg[0] == tc.dtype_in: return self.bufs.index(cast(MemBuffer, src.src[0].arg))
           except ValueError: return None
           return None
         if (buf0:=buf_index(mul_op.src[0])) is None or (buf1:=buf_index(mul_op.src[1])) is None: continue
