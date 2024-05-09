@@ -26,7 +26,7 @@ class ClangGraph(GraphRunner):
           args.append(f"arg{input_rawbuffers.index(buf)}")
         else:
           args.append(f"({render_dtype(buf.dtype)}*)0x{ctypes.addressof(buf._buf):X}")
-      args += [x.expr for x in cast(CompiledRunner, ji.prg).vars]
+      args += [x.expr for x in cast(CompiledRunner, ji.prg).p.vars]
       code.append(f"  {cast(CompiledRunner, ji.prg).p.function_name}({','.join(args)});")
     code.append("}")
     if DEBUG >= 4: print("\n".join(code))

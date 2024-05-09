@@ -174,7 +174,7 @@ if __name__ == "__main__":
       if prg.p.function_name not in saved_binaries:
         jdat['binaries'].append({"name":prg.p.function_name, "length":len(prg.lib)})
         binaries.append(prg.lib)
-        saved_binaries.add(prg.name)
+        saved_binaries.add(prg.p.function_name)
       ei.run()
       jdat['kernels'].append({
         "name": prg.p.function_name,

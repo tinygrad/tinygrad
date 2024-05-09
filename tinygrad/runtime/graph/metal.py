@@ -38,7 +38,7 @@ class MetalGraph(GraphRunner):
         if b is not None:
           icb_command.setKernelBuffer_offset_atIndex_(b._buf, 0, i)
           all_resources.append(b._buf)
-      for i,v in enumerate(prg.vars): icb_command.setKernelBuffer_offset_atIndex_(self.int_buf, self.vars.index(v)*4, len(ji.bufs)+i)
+      for i,v in enumerate(prg.p.vars): icb_command.setKernelBuffer_offset_atIndex_(self.int_buf, self.vars.index(v)*4, len(ji.bufs)+i)
       if j not in self.jc_idx_with_updatable_launch_dims:
         global_size, local_size = prg.p.launch_dims(var_vals)
         icb_command.concurrentDispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))

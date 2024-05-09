@@ -159,7 +159,16 @@ class Program:
   op_estimate:sint=0
   mem_estimate:sint=0
 
-  @property
+  @functools.cached_property
+  def vars(self) -> List[Variable]: return [] if self.uops is None else self.uops.vars()
+
+  @functools.cached_property
+  def globals(self) -> List[Tuple[int, bool]]: return [] if self.uops is None else self.uops.globals()
+
+  @functools.cached_property
+  def outcount(self) -> int: return sum(x[1] for x in self.globals)
+
+  @functools.cached_property
   def function_name(self) -> str: return to_function_name(self.name)
 
   def compile(self, cached=True) -> bytes:
@@ -176,9 +185,6 @@ class CompiledRunner(Runner):
     if DEBUG >= 4: print(p.prg)
     self.p:Program = p
     self.lib:bytes = precompiled if precompiled is not None else self.p.compile()
-    self.vars: List[Variable] = [] if p.uops is None else p.uops.vars()
-    self.globals: List[Tuple[int, bool]] = [] if p.uops is None else p.uops.globals()
-    self.outcount: int = sum(x[1] for x in self.globals)
     self.clprg = Device[p.dname].runtime(p.function_name, self.lib)
     super().__init__(p.name, p.dname, p.op_estimate, p.mem_estimate)
 
@@ -194,7 +200,7 @@ class CompiledRunner(Runner):
     lra = {}
     if global_size: lra['global_size'] = global_size
     if local_size: lra['local_size'] = local_size
-    return self.clprg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k] for k in self.vars), wait=wait)
+    return self.clprg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k] for k in self.p.vars), wait=wait)
 
 method_cache: Dict[Tuple[str, Tuple[LazyOp, ...], int, bool], CompiledRunner] = {}
 logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS", "") else None, getenv("LOGKERNS_LEVEL", 1)
