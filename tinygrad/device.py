@@ -163,7 +163,7 @@ class Program:
     compiler = cast(Compiler, Device[self.dname].compiler)
     return compiler.compile_cached(self.prg) if cached else compiler.compile(self.prg)
 
-  def launch_dims(self, var_vals:Dict[Variable, int]) -> Tuple[Optional[List[int]], Optional[List[int]]]:
+  def launch_dims(self, var_vals:Dict[Variable, int]):
     global_size = [sym_infer(sz, var_vals) for sz in self.global_size] if self.global_size is not None else None
     local_size = [sym_infer(sz, var_vals) for sz in self.local_size] if self.local_size is not None else None
     return global_size, local_size
@@ -184,7 +184,7 @@ class CompiledRunner(Runner):
 
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False) -> Optional[float]:
     global_size, local_size = self.prg.launch_dims(var_vals)
-    if global_size is not None and local_size is None and all_int(self.global_size): # type: ignore[arg-type]
+    if global_size is not None and local_size is None and all_int(self.prg.global_size): # type: ignore[arg-type]
       # TODO: this is copied from get_program
       from tinygrad.features.search import optimize_local_size
       local_size = self.local_size = optimize_local_size(self.clprg, global_size, rawbufs)
@@ -207,8 +207,8 @@ class Compiled:
     info = get_lazyop_info(k.ast[0])
     ops, mem = k.uops.flops_mem()
     run_count = prod((k.global_size if k.global_size else []) + (k.local_size if k.local_size else []))
-    global_size = k.global_size + [1]*(3-len(k.global_size))
-    local_size = k.local_size + [1]*(3-len(k.local_size))
+    global_size = (k.global_size + [1]*(3-len(k.global_size))) if k.global_size is not None else None
+    local_size = (k.local_size + [1]*(3-len(k.local_size))) if k.local_size is not None else None
     # NOTE: we use min here to ignore the indexing FLOPS
     return Program(k.name, self.compiler.render(to_function_name(k.name), k.uops), self.dname, global_size, local_size,
                    k.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))

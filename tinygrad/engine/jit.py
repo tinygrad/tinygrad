@@ -77,7 +77,7 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
       mem_estimate += ji.prg.mem_estimate
       if isinstance(ji.prg, CompiledRunner):
         if ji.prg.vars: self.jc_idx_with_updatable_var_vals.append(j)
-        if (ji.prg.global_size and not all_int(ji.prg.global_size)) or (ji.prg.local_size and not all_int(ji.prg.local_size)):
+        if (ji.prg.prg.global_size and not all_int(ji.prg.prg.global_size)) or (ji.prg.prg.local_size and not all_int(ji.prg.prg.local_size)):
           self.jc_idx_with_updatable_launch_dims.append(j)
     self.vars = list(var_vals.keys())
     super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), jit_cache[0].prg.dname.split(":")[0], op_estimate, mem_estimate)
