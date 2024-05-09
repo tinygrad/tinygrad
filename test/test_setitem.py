@@ -45,6 +45,15 @@ class TestSetitem(unittest.TestCase):
   # TODO: implement fancy setitem
   @unittest.expectedFailure
   def test_fancy_setitem(self):
+    # NOTE: kernel looks correct but the indexing bufs aren't being loaded into bufs after assign
+    # void C_2n1(float* restrict data0, const float* restrict data1, const int* restrict data2, const int* restrict data3) {
+    #   for (int ridx0 = 0; ridx0 < 2; ridx0++) {
+    #     int val0 = data2[ridx0];
+    #     int val1 = data3[ridx0];
+    #     float val2 = data1[ridx0];
+    #     data0[(val0*6)+val1] = val2;
+    #   }
+    # }
     t = Tensor.zeros(6,6).contiguous()
     t[[1,2], [3,2]] = 3
     n = np.zeros((6,6))

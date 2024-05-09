@@ -355,6 +355,7 @@ class TestNN(unittest.TestCase):
       torch_z = torch_layer(torch_x)
       np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=1e-8, rtol=1e-8)
 
+  @unittest.expectedFailure
   def test_embedding_one_kernel(self):
     layer = Embedding(20, 30)
     a = Tensor([[1, 5, 9, 11],

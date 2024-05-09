@@ -8,7 +8,7 @@ from tinygrad.helpers import colored, DEBUG, prod, getenv, to_function_name
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ConstBuffer, MemBuffer, BufferOps
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import IndexedView
-from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, create_lt_node, Index
+from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, create_lt_node
 from tinygrad.codegen.kernel import LocalBuffer, Kernel
 from tinygrad.features.image import to_image_idx
 
@@ -73,40 +73,25 @@ class Linearizer(Kernel):
       functools.reduce(lambda a,b: ctx.uop_alu_idx(a, b, ops, ctx, BinaryOps.MUL, dtype=dtypes.bool), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
   def index(self, indexed_view:IndexedView, ridx:Node, dt:DType):
-    #   0 ━┳ STORE MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 6), strides=(6, 1), offset=0, mask=None, contiguous=True),)))
-    #   1  ┗━━ LOAD MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(7, 6), strides=(6, 1), offset=0, mask=None, contiguous=True), IndexedView(shape=(3, 6), strides=(6, 1), offset=0, mask=None, contiguous=True, lbs=(<LB CLANG (3,) int (<BinaryOps.ADD: 1>, <buf real:True device:CLANG size:3 dtype:dtypes.int offset:0>)>,), exprs=('idx0',), dims=(0,), dtype=(dtypes.int,)), View(shape=(3, 6), strides=(6, 1), offset=0, mask=None, contiguous=True))))
-    # ((LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(7, 6), strides=(6, 1), offset=0, mask=None, contiguous=True), IndexedView(shape=(3, 6), strides=(6, 1), offset=0, mask=None, contiguous=True, lbs=(<LB CLANG (3,) int (<BinaryOps.ADD: 1>, <buf real:True device:CLANG size:3 dtype:dtypes.int offset:0>)>,), exprs=('idx0',), dims=(0,), dtype=(dtypes.int,)), View(shape=(3, 6), strides=(6, 1), offset=0, mask=None, contiguous=True))))),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 6), strides=(6, 1), offset=0, mask=None, contiguous=True),)))),), [])
-    # reduced UOp count from 10 to 9
-    #    0 UOps.DEFINE_GLOBAL  : ptr.dtypes.float          []                               (0, True)
-    #    1 UOps.DEFINE_GLOBAL  : ptr.dtypes.float          []                               (1, False)
-    #    2 UOps.DEFINE_GLOBAL  : ptr.dtypes.int            []                               (2, False)
-    #    3 UOps.CONST          : dtypes.int                []                               0
-    #    4 UOps.CONST          : dtypes.int                []                               18
-    #    5 UOps.LOOP           : dtypes.int                [3, 4]                           None
-    #    6 UOps.LOAD           : dtypes.int                [2, 5]                           None
-    #    7 UOps.LOAD           : dtypes.float              [1, 6]                           None
-    #    8 UOps.STORE          :                           [0, 5, 7]                        None
-    #    9 UOps.ENDLOOP        :                           [5]                              None
-    # void C_18(float* restrict data0, const float* restrict data1, const int* restrict data2) {
-    #   for (int ridx0 = 0; ridx0 < 18; ridx0++) {
-    #     int val0 = data2[ridx0];
-    #     float val1 = data1[val0];
-    #     data0[ridx0] = val1;
-    #   }
-    # }
-    # Segmentation fault: 11
-    didx = []
-    for dim, expr, dt in zip(indexed_view.dims, indexed_view.exprs, indexed_view.dtype):
-      rendered_idx = ridx.render(self.render_ops, self)
-      # self.index_uops[expr] = self.uops.add(UOps.LOAD, dt, (buf_uop, rendered_idx))
-      didx.append((dim, self.uops.add(UOps.LOAD, dt, (self.index_uops[expr], rendered_idx))))
+    dim_offsets = []
+    denominator = None
+    for dim in range(len(indexed_view.orig_shape)):
+      # indexed strided offsets
+      if dim in indexed_view.dims:
+        dim_idx = indexed_view.dims.index(dim)
+        if denominator is None: denominator = prod(indexed_view.shape[dim+1+len(indexed_view.expanded_index_shape)-1:])
+        floored_idx = ((ridx // denominator) % indexed_view.idx_numel[dim_idx]).render(self.render_ops, self)
+        selected_index_uop = self.uops.add(UOps.LOAD, dtypes.int, (self.index_uops[indexed_view.exprs[dim_idx]], floored_idx))
+        stride_uop = self.const(indexed_view.orig_strides[dim])
+        dim_offsets.append(self.uops.add(UOps.ALU, dtypes.int, (selected_index_uop, stride_uop), BinaryOps.MUL))
+      # non-indexed strided offsets
+      else:
+        additional_offset = len(indexed_view.expanded_index_shape) - 1 if any(dim > d for d in indexed_view.dims) else 0
+        denominator_ = prod(indexed_view.shape[dim+1+additional_offset:])
+        node = ((ridx // denominator_) % indexed_view.orig_shape[dim]) * indexed_view.orig_strides[dim]
+        dim_offsets.append(node.render(self.render_ops, self))
 
-    if len(didx) == 1: return didx[0][1]
-
-    from functools import reduce
-    def apply_strides(uop, st): return self.uops.add(UOps.ALU, dtypes.int, (uop, NumNode(st)))
-    return reduce(lambda x, y: self.uops.add(UOps.ALU, dtypes.int, (apply_strides(x[1], indexed_view.strides[x[0]]),
-                                                                   apply_strides(y[1], indexed_view.strides[y[0]]))), didx)[0]
+    return functools.reduce(lambda x,y: self.uops.add(UOps.ALU, dtypes.int, (x, y), BinaryOps.ADD), dim_offsets)
 
 
   def global_load(self, i:int, idxs:List[Node], acc:Optional[LazyOp]=None, barrier:Optional[UOp]=None) -> List[UOp]:
@@ -139,7 +124,7 @@ class Linearizer(Kernel):
       # wrap idx with Index if the buf is indexed
       rendered_idx = None
       if buf in self.index_map:
-        _, indexed_view, _ = self.index_map[buf][0] # [0] cuz assuming only 1 IndexedView per st for now
+        indexed_view = self.index_map[buf][0] # [0] cuz assuming only 1 IndexedView per st for now
         rendered_idx = self.index(indexed_view, idx, buf.dtype)
       if key not in self.load_cache:
         if acc is not None:
@@ -201,12 +186,20 @@ class Linearizer(Kernel):
     stores = []
     for _idx, var in store_offset.items():
       idx, valid = self.sts[i].expr_idxs(_idx)
+
+      # heh this makes setitem just work
+      rendered_idx = None
+      if buf in self.index_map:
+        indexed_view = self.index_map[buf][0] # [0] cuz assuming only 1 IndexedView per st for now
+        rendered_idx = self.index(indexed_view, idx, buf.dtype)
+
       if isinstance(buf.dtype, ImageDType):
         image_idx, valid = to_image_idx(buf.dtype.shape, idx, valid)
         rendered_idx = self.uops.add(UOps.CAST, dtypes.int.vec(2), \
                       tuple(x.render(self.render_ops, self) for x in image_idx))
       else:
-        rendered_idx = idx.render(self.render_ops, self)
+        # TODO: ugly
+        if rendered_idx is None: rendered_idx = idx.render(self.render_ops, self)
       if valid.min == 1: stores.append(self.uops.add(UOps.STORE, None, (buf_uop, rendered_idx, var)))
       else: stores.append(self.uops.add(UOps.STORE, None, (buf_uop, rendered_idx, var, valid.render(self.render_ops, self))))
     return stores
@@ -388,7 +381,7 @@ class Linearizer(Kernel):
     for i,buf in enumerate(self.bufs):
       if isinstance(buf, MemBuffer):
         # TODO: only supports single indexedview now
-        # how the ass cheeks do I do multi indexedview x[[2,3,3,2]][[2,3]] type shit
+        # how the ass cheeks do I do multi indexedview x[[2,3,3,2]][[2,3]] type stuff
         for v in buf.st.views:
           if isinstance(v, IndexedView):
             for lb, dt, expr in zip(v.lbs, v.dtype, v.exprs):
@@ -398,7 +391,7 @@ class Linearizer(Kernel):
               # self.loop_uops[expr] = idx_buf_uop
               self.bufs.append(MemBuffer(len(self.buf_uops)-1, dt, lb.st))
               self.sts.append(lb.st)
-              self.index_map[buf].append((len(self.bufs)-1, v, idx_buf_uop))
+              self.index_map[buf].append(v)
 
     # add var vals
     for i,var in enumerate(self.vars):

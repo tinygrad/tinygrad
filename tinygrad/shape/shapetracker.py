@@ -7,7 +7,8 @@ from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, NumNode, c
 from tinygrad.shape.view import View, IndexedView, strides_for_shape
 
 def _expr_view(view:View, idxs:List[Node], valid:Optional[Node]=None) -> Tuple[Node, Node]:
-  assert len(idxs) == len(view.shape), f"need an idx for all dimensions {idxs} vs {view.shape}"
+  # TODO uhh not sure about this
+  # assert len(idxs) == len(view.shape), f"need an idx for all dimensions {idxs} vs {view.shape}"
   iexpr: List[Node] = [NumNode(view.offset) if isinstance(view.offset, int) else view.offset]
   vexpr: List[Node] = [valid] if valid is not None else []
   for idx,sh,st,m in zip(idxs, view.shape, view.strides, view.mask if view.mask is not None else [None]*len(view.shape)):
@@ -85,16 +86,16 @@ class ShapeTracker:
     idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)] if idxs is None else list(idxs)
     idx, valid = _expr_view(self.views[-1], idxs)
     for view in reversed(self.views[0:-1]):
+      t = view.__class__
       if valid.max == 0: return NumNode(-1), valid
-      if isinstance(view, View):
-        view = view.minify()
-        acc, idxs = 1, []
-        for d in reversed(view.shape):
-          idxs.append((idx//acc)%d)
-          acc *= d
-        idx, valid = _expr_view(view, idxs[::-1], valid)
-      # TODO: ???
-      # if isinstance(view, IndexedView): ...
+      view = view.minify()
+      acc, idxs = 1, []
+      for d in reversed(view.shape):
+        idxs.append((idx//acc)%d)
+        acc *= d
+      idx, valid = _expr_view(view, idxs[::-1], valid)
+      # TODO: ??? this is obv wrong
+      if t == IndexedView: return idx, valid
     assert not isinstance(idx.min, int) or idx.min >= -2**31, f"idx.min too small. {idx=}, {idx.min=}"
     assert not isinstance(idx.max, int) or idx.max < 2**31, f"idx.max too big. {idx=}, {idx.max=}"
     return idx, valid

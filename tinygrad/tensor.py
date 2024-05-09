@@ -789,33 +789,37 @@ class Tensor:
 
       # track tensor_dim and tensor_index using a dict
       # calc_dim to get dim and use that to normalize the negative tensor indices
-      # NOTE: also realize to make sure the shit is not negative
-      # TODO: can handle negative index case in linearizer
+      # TODO: also realize to make sure the shit ins't negative. should handle negative index case in linearizer with symbolic or smth
+      # TODO: support non contiguous stride offset calc
+      ret = ret.contiguous().realize()
       idx: Dict[int,Tensor] = {(dim := calc_dim(td)):((tensor<0).where(ret.shape[dim],0) + tensor).realize() \
                                for td,tensor in zip(type_dim[Tensor], tensor_index)}
 
-      from tinygrad.shape.view import IndexedView
-      from tinygrad.shape.shapetracker import ShapeTracker
       # NOTE: both shape and strides can be predetermined using shapes of idxs and self, even for fancy too
-      idx_lbs = tuple(i.lazydata for i in idx.values())
-      idx_dts = tuple(i.dtype for i in idx.values())
-      dims = tuple(d for d in idx.keys())
-
-      masks, first_dim, last_dim = [], min(idx.keys()), max(idx.keys())
+      first_dim, last_dim = min(idx.keys()), max(idx.keys())
       ret_shape = list(ret.shape)
       for d in reversed(idx.keys()): ret_shape.pop(d)
       ret_shape = ret_shape[:first_dim] + (big_shape := list(broadcast_shape(*(t.shape for t in idx.values())))) + ret_shape[first_dim:]
+
+      # TODO oh dear god
+      idx = {d:t.expand(big_shape).contiguous().realize() for d,t in idx.items()}
+
+      idx_lbs = tuple(i.lazydata for i in idx.values())
+      idx_dts = tuple(i.dtype for i in idx.values())
+      dims = tuple(d for d in idx.keys())
       # special permute case
-      if first_dim != 0 and len(idx) != 1 and tuple(idx.keys()) != tuple(range(first_dim, last_dim+1)):
-        ret_shape = ret_shape[first_dim:first_dim+len(big_shape)] + ret_shape[:first_dim] + ret_shape[first_dim+len(big_shape):]
+      # TODO: special permute case is not handeled in linearizer index()
+      # if first_dim != 0 and len(idx) != 1 and tuple(idx.keys()) != tuple(range(first_dim, last_dim+1)):
+        # ret_shape = ret_shape[first_dim:first_dim+len(big_shape)] + ret_shape[:first_dim] + ret_shape[first_dim+len(big_shape):]
         # ret = ret.permute(*range(first_dim, first_dim+len(big_shape)), *range(0, first_dim), *range(first_dim+len(big_shape), ret.ndim))
 
-      # pre_reduce_shape = ret.shape[:first_dim] + (big_shape := broadcast_shape(*(t.shape for t in idx.values()))) + ret.shape[first_dim:]
-      # for d in reversed()
+      ret.lazydata = ret.lazydata.index((self.lazydata.st.real_strides(), tuple(prod(i.shape) for i in idx_lbs),
+                                         ret.shape, idx_lbs, dims, idx_dts, tuple(ret_shape), tuple(big_shape)))
 
-      ret.lazydata = ret.lazydata.index((idx_lbs, dims, idx_dts, tuple(ret_shape)))
-      # ret.lazydata = ret.lazydata._view(ret.lazydata.st + ShapeTracker(views=(IndexedView(lbs=idx_lbs, dims=dims, exprs=tuple(f"idx{d}" for d in dims), dtype=idx_dts, shape=(2,), strides=(1,)),)))
-      # lbs, dims, dts, shape = arg
+      # TODO: special permute case is not handeled properly
+      if first_dim != 0 and len(idx) != 1 and tuple(idx.keys()) != tuple(range(first_dim, last_dim+1)):
+        ret = ret.contiguous()
+        ret = ret.permute(*range(first_dim, first_dim+len(big_shape)), *range(0, first_dim), *range(first_dim+len(big_shape), ret.ndim))
     return ret
       # self.realize()
       # idx
@@ -851,19 +855,6 @@ class Tensor:
     assert all(lb.st.contiguous for lb in self.lazydata.lbs), "setitem target needs to be contiguous"
     if not isinstance(v, (Tensor, float, int, bool)): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
-    # TODO: implement IndexedView
-    # t = Tensor.zeros(6).contiguous().realize()
-    # t[Tensor([2.,3.])] = 1
-
-    # if not isinstance(indices, tuple): indices = (indices,)
-    # if isinstance(indices[0], Tensor):
-    #   from tinygrad.shape.view import IndexedView
-    #   from tinygrad.shape.symbolic import Index
-    #   from tinygrad.shape.shapetracker import ShapeTracker
-    #   idx = tuple(Index('v', 0, self.shape[i]).bind(idx, i) for i,idx in enumerate(indices))
-    #   self.lazydata.st = self.lazydata.st + ShapeTracker(views=(IndexedView(idxs=idx, shape=(6,), strides=(1,)),))
-    #   self.realize()
-    #   return
     assign_to = self.realize().__getitem__(indices)
     # NOTE: contiguous to prevent const folding.
     v = v.cast(assign_to.dtype)._broadcast_to(broadcast_shape(assign_to.shape, v.shape)).contiguous()

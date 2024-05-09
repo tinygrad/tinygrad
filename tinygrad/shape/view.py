@@ -1,10 +1,11 @@
+# TODO: GOTTA FIX TO SUPPORT 2 TYPES OF VIEWS like view.create only create view not indexed view
 from __future__ import annotations
 import functools, operator, itertools, math
 from dataclasses import dataclass, field
 from typing import Tuple, List, Optional, Dict, Set, cast, Any
 from tinygrad.dtype import DType
 from tinygrad.helpers import prod, all_int, argsort
-from tinygrad.shape.symbolic import Node, NumNode, Variable, sint, Index
+from tinygrad.shape.symbolic import Node, NumNode, Variable, sint
 
 def basic_strides(shape): return tuple([1 if i==0 else prod(shape[-i:]) for i in range(len(shape))][::-1])
 
@@ -300,14 +301,20 @@ class View:
     return None
 
   def index(self, arg) -> IndexedView:
-    lbs, dims, dts, shape = arg
-    return IndexedView(lbs=lbs, dims=dims, exprs=tuple(f"idx{d}" for d in dims), dtype=dts, shape=shape, strides=basic_strides(shape))
+    orig_strides, idx_numel, os, lbs, dims, dts, shape, eis = arg
+    return IndexedView(orig_strides=orig_strides, idx_numel=idx_numel, orig_shape=os,
+                       lbs=lbs, dims=dims, exprs=tuple(f"idx{d}" for d in dims), dtype=dts, shape=shape, strides=basic_strides(shape),
+                       expanded_index_shape=eis)
 
 @dataclass(frozen=True)
 class IndexedView(View):
   # TODO: Any is LazyBuffer but circular import bleh
-  # TODO: lbs should really just be a Buffer I think
+  # TODO: lbs shouldn't be here?
   lbs: Tuple[Any, ...] = field(default_factory=tuple)
+  idx_numel: Tuple[int, ...] = field(default_factory=tuple)
+  orig_shape: Tuple[int, ...] = field(default_factory=tuple)
+  orig_strides: Tuple[int, ...] = field(default_factory=tuple)
+  expanded_index_shape: Tuple[int, ...] = field(default_factory=tuple)
   exprs: Tuple[Any, ...] = field(default_factory=tuple)
   dims: Tuple[int, ...] = field(default_factory=tuple)
   dtype: Tuple[DType, ...] = field(default_factory=tuple)
