@@ -96,6 +96,9 @@ class LazyBuffer:
     if self.device.startswith("DISK") and not bitcast: raise RuntimeError("attempted to cast disk buffer (bitcast only)")
     if self.is_unrealized_unmasked_const() and not bitcast:
       return create_lazybuffer(self.device, self.st, dtype, LoadOps.CONST, dtypes.as_const(self.base.arg, dtype))
+    # TODO: applying this makes gpt2 slower
+    if getenv("CAST_BEFORE_VIEW", 1) and dtype.itemsize <= self.dtype.itemsize and self != self.base:
+      return self.base.cast(dtype, bitcast)._view(self.st)
     new_shape = self.shape
     if bitcast and self.dtype.itemsize != dtype.itemsize:
       if not self.device.startswith("DISK"): raise RuntimeError("shape changing bitcast only supported on DISK right now")
@@ -146,14 +149,17 @@ class LazyBuffer:
     # const folding
     if op in python_alu and all(s.is_unrealized_unmasked_const() for s in srcs):
       return self.cast(out_dtype).const(exec_alu(op, out_dtype, [s.base.arg for s in srcs]))
+    if op is UnaryOps.NEG and self.base.op is UnaryOps.NEG: return self.base.srcs[0]
     if op in BinaryOps: x, y = self, in_srcs[0]
     if op is BinaryOps.ADD:
       if y.is_unrealized_unmasked_const() and y.base.arg == 0: return x
       if x.is_unrealized_unmasked_const() and x.base.arg == 0: return y
     if op is BinaryOps.SUB and y.is_unrealized_unmasked_const() and y.base.arg == 0: return x
     if op is BinaryOps.MUL:
-      if x.is_unrealized_unmasked_const() and (val := x.base.arg) in (1, 0): return {1: y, 0: y.const(0)}[val]
-      if y.is_unrealized_unmasked_const() and (val := y.base.arg) in (1, 0): return {1: x, 0: x.const(0)}[val]
+      if x.is_unrealized_unmasked_const() and (val := x.base.arg) in (1, 0, -1):
+        return y if val == 1 else y.const(0) if val == 0 else y.e(UnaryOps.NEG)
+      if y.is_unrealized_unmasked_const() and (val := float(y.base.arg)) in (1, 0, -1):
+        return x if val == 1 else x.const(0) if val == 0 else x.e(UnaryOps.NEG)
     if op is BinaryOps.DIV and dtypes.is_float(x.dtype) and y.is_unrealized_unmasked_const() and y.base.arg != 0:
       return x.e(BinaryOps.MUL, x.const(1 / y.base.arg))
 
