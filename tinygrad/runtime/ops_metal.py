@@ -12,14 +12,10 @@ def wait_check(cbuf: Any):
     raise RuntimeError(error)
 
 def get_workaround_lib(device):
-    workaround_src = """
-    #include <metal_stdlib>
-    using namespace metal;
-    kernel void workaroundfn(){}"""
     options = Metal.MTLCompileOptions.new()
     options.setLibraryType_(Metal.MTLLibraryTypeDynamic)
     options.setInstallName_("/tmp/workaround.dylib")
-    lib = unwrap2(device.newLibraryWithSource_options_error_(workaround_src, options, None))
+    lib = unwrap2(device.newLibraryWithSource_options_error_("kernel void workaroundfn() {}", options, None))
     workaround_lib = unwrap2(device.newDynamicLibrary_error_(lib, None))
     workaround_lib.serializeToURL_error_(Foundation.NSURL.fileURLWithPath_("/tmp/workaround.dylib"), None)
     return workaround_lib
