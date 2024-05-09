@@ -1,4 +1,4 @@
-#include <stdint.h>
+#include <stdint.h> // only used for int8_t instead of char which is buggy for some reason
 
 double sin(double);
 float sinf(float);

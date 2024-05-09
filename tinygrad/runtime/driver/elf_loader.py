@@ -3,7 +3,7 @@ from tinygrad.helpers import round_up, DEBUG, OSX
 from mmap import PROT_READ, PROT_WRITE, PROT_EXEC, MAP_ANON, MAP_PRIVATE, PAGESIZE
 from typing import Dict, List, Tuple, Callable
 
-ALIGNMENT = 32
+ALIGNMENT = 32 # standartized alignment to simplify everything
 JIT_PAGESIZE = 4*1024*1024 # 4MB. To avoid frequent reallocations
 MAP_JIT = 0x0800 if OSX else 0x0
 
@@ -31,8 +31,8 @@ class _JitAlloc():
     if ensure_only: size = 0
     self.left, self.cursor = self.left - size, self.cursor + size
     return self.cursor-size
-
 JitAlloc = _JitAlloc()
+
 def load_elf(blob: bytes) -> Dict[str, Callable]:
   assert blob[0:7] == b"\x7FELF\x02\x01\x01", "invalid magic (little endian 64 bit ELF v1 expected)"
   e_type, e_machine, _, _, _, e_shoff, _, _, _, _, e_shentsize, e_shnum, _ = struct.unpack("<2HI3QI6H", blob[16:64])
@@ -90,7 +90,7 @@ def load_elf(blob: bytes) -> Dict[str, Callable]:
         tgt_pg, ploc_pg = tgt >> 12, ploc >> 12
         assert (tgt_pg-ploc_pg)>>21 == 0, f"adr out of bounds - {tgt_pg=:#x} {ploc_pg=:#x}"
         lo, hi = (tgt_pg-ploc_pg)&0b11,(tgt_pg-ploc_pg)>>2
-        ctypes.cast(ploc, ctypes.POINTER(ctypes.c_uint32)).contents.value |= lo | hi
+        ctypes.cast(ploc, ctypes.POINTER(ctypes.c_uint32)).contents.value |= lo<<29 | hi<<5
       elif r_type == 0x115:  # R_AARCH64_ADD_ABS_LO12_NC
         ctypes.cast(ploc, ctypes.POINTER(ctypes.c_uint32)).contents.value |= (tgt&0xFFF)<<10
       elif r_type in {0x11a, 0x11b}: # R_AARCH64_CALL26
@@ -115,5 +115,5 @@ def load_elf(blob: bytes) -> Dict[str, Callable]:
     libc.sys_icache_invalidate(ctypes.c_void_p(plt_start), ctypes.c_size_t(alloc_size))
   else:
     # FIXME: linux has clear cache syscall but there isn't a libc wrapper and number changes for x86/arm - maybe there is an easier way?
-    pass
+    raise RuntimeError("linux not supported yet")
   return exports
