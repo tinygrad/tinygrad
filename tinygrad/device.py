@@ -201,7 +201,7 @@ class Compiled:
     self.dname, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler, runtime, graph
   def synchronize(self): pass  # override this in your device
 
-  def to_program(self, k:Linearizer) -> Program:
+  def to_program(self, k:Linearizer) -> CompiledRunner:
     assert self.compiler is not None, "compiler is required to run AST"
     k.linearize()
     info = get_lazyop_info(k.ast[0])
@@ -210,8 +210,8 @@ class Compiled:
     global_size = (k.global_size + [1]*(3-len(k.global_size))) if k.global_size is not None else None
     local_size = (k.local_size + [1]*(3-len(k.local_size))) if k.local_size is not None else None
     # NOTE: we use min here to ignore the indexing FLOPS
-    return Program(k.name, self.compiler.render(to_function_name(k.name), k.uops), self.dname, global_size, local_size,
-                   k.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))
+    return CompiledRunner(Program(k.name, self.compiler.render(to_function_name(k.name), k.uops), self.dname, global_size, local_size,
+                                  k.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count)))
 
   def get_linearizer(self, *ast:LazyOp) -> Linearizer:
     assert self.compiler is not None, "compiler is required to build AST"
@@ -251,6 +251,6 @@ class Compiled:
     if bret:=method_cache.get(bkey):
       method_cache[ckey] = ret = bret.to_other_device(self.dname)
     else:
-      method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(self.to_program(self.get_linearizer(*ast)))
+      method_cache[ckey] = method_cache[bkey] = ret = self.to_program(self.get_linearizer(*ast))
     return ret
 

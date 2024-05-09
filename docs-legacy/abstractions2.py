@@ -38,7 +38,7 @@ DEVICE = "CLANG"   # NOTE: you can change this!
 
 import struct
 from tinygrad.dtype import dtypes
-from tinygrad.device import Buffer, Device, CompiledRunner
+from tinygrad.device import Buffer, Device
 from tinygrad.ops import LazyOp, BufferOps, MemBuffer, BinaryOps
 from tinygrad.shape.shapetracker import ShapeTracker
 
@@ -64,7 +64,7 @@ print(fxn.prg)
 # NOTE: fxn.clprg is the ClangProgram
 
 # run the program
-CompiledRunner(fxn).exec([out, a, b])
+fxn.exec([out, a, b])
 
 # check the data out
 assert out.as_buffer().cast('I')[0] == 5
