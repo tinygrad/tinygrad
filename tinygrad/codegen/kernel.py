@@ -386,10 +386,10 @@ class Kernel:
         for (tc_dim, tc_amt) in tc.threads:
           self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
 
-          # assert tensor core
-          if DEBUG >= 3: print("TENSOR CORES", axis_buf0, axis_buf1, tc)
-          if use_tensor_cores == 1: self.tensor_core = tc # TC=2 will do the shape ops without the WMMA
-          return True
+        # assert tensor core
+        if DEBUG >= 3: print("TENSOR CORES", axis_buf0, axis_buf1, tc)
+        if use_tensor_cores == 1: self.tensor_core = tc # TC=2 will do the shape ops without the WMMA
+        return True
     return False
 
 
