@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, subprocess, pathlib, ctypes, tempfile, functools
-import Metal, libdispatch
+import Metal, libdispatch, Foundation
 from typing import List, Set, Any, Tuple, Optional
 from tinygrad.helpers import prod, getenv, DEBUG, unwrap2
 from tinygrad.device import Compiled, LRUAllocator, Compiler, CompilerOptions
@@ -21,6 +21,7 @@ def get_workaround_lib(device):
     options.setInstallName_("/tmp/workaround.dylib")
     lib = unwrap2(device.newLibraryWithSource_options_error_(workaround_src, options, None))
     workaround_lib = unwrap2(device.newDynamicLibrary_error_(lib, None))
+    workaround_lib.serializeToURL_error_(Foundation.NSURL.fileURLWithPath_("/tmp/workaround.dylib"), None)
     return workaround_lib
 
 class MetalCompiler(Compiler):
