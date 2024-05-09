@@ -159,6 +159,9 @@ class Program:
   op_estimate:sint=0
   mem_estimate:sint=0
 
+  @property
+  def function_name(self) -> str: return to_function_name(self.name)
+
   def compile(self, cached=True) -> bytes:
     compiler = cast(Compiler, Device[self.dname].compiler)
     return compiler.compile_cached(self.prg) if cached else compiler.compile(self.prg)
@@ -176,7 +179,7 @@ class CompiledRunner(Runner):
     self.vars: List[Variable] = [] if p.uops is None else p.uops.vars()
     self.globals: List[Tuple[int, bool]] = [] if p.uops is None else p.uops.globals()
     self.outcount: int = sum(x[1] for x in self.globals)
-    self.clprg = Device[p.dname].runtime(to_function_name(p.name), self.lib)
+    self.clprg = Device[p.dname].runtime(p.function_name, self.lib)
     super().__init__(p.name, p.dname, p.op_estimate, p.mem_estimate)
 
   def __reduce__(self): return self.__class__, (self.p, self.lib)

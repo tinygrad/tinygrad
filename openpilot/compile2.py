@@ -171,13 +171,13 @@ if __name__ == "__main__":
       prg = cast(CompiledRunner, ei.prg)
       assert len(prg.vars) == 0
       #print(prg.prg)
-      if prg.name not in saved_binaries:
-        jdat['binaries'].append({"name":prg.name, "length":len(prg.lib)})
+      if prg.p.function_name not in saved_binaries:
+        jdat['binaries'].append({"name":prg.p.function_name, "length":len(prg.lib)})
         binaries.append(prg.lib)
         saved_binaries.add(prg.name)
       ei.run()
       jdat['kernels'].append({
-        "name": prg.name,
+        "name": prg.p.function_name,
         "work_dim": len(prg.global_size),
         "global_work_size": prg.global_size,
         "local_work_size": prg.local_size,
