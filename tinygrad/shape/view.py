@@ -327,29 +327,3 @@ class IndexedView(View):
 
 
   def unbind(self): return self, {}
-  # def realize_index(self, ridx: List[Node]) -> List[Node]:
-
-  #   nodes = [Index(ridx[0].expr+'_'+expr, 0, self.shape[d]).bind(ridx[0]) for expr, d in zip(self.exprs, self.dims)]
-  #   for i in [i for i in range(len(self.shape)) if i not in self.dims][::-1]: nodes.insert(i, NumNode(0))
-  #   print(nodes)
-  #   exit(0)
-
-
-
-
-
-# @dataclass(frozen=True)
-# class IndexedView(View):
-#   idxs: Tuple[Index, ...] = field(default_factory=tuple)
-#   shape:Tuple[sint, ...]
-#   strides:Tuple[sint, ...]
-#
-#   offset:sint = 0
-#   mask:Optional[Tuple[Tuple[sint, sint], ...]] = None
-#   contiguous:bool = True
-#
-#   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
-#   def unbind(self): return self, dict(i.unbind() for i in self.idxs)
-#   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
-#   def vars(self) -> Set[Index]:
-#     return set(self.idxs)

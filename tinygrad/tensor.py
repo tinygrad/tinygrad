@@ -821,31 +821,6 @@ class Tensor:
         ret = ret.contiguous()
         ret = ret.permute(*range(first_dim, first_dim+len(big_shape)), *range(0, first_dim), *range(first_dim+len(big_shape), ret.ndim))
     return ret
-      # self.realize()
-      # idx
-
-    #   masks, first_dim, last_dim = [], min(idx.keys()), max(idx.keys())
-    #   pre_reduce_shape = ret.shape[:first_dim] + (big_shape := broadcast_shape(*(t.shape for t in idx.values()))) + ret.shape[first_dim:]
-
-    #   # create masks
-    #   for dim, i in idx.items():
-    #     try: i = i.reshape(i.shape + (1,)*(ret.ndim - first_dim)).expand(pre_reduce_shape)
-    #     except ValueError as exc: raise IndexError("cannot broadcast indices") from exc
-    #     a = Tensor.arange(ret.shape[dim], device=self.device, requires_grad=False).reshape((ret.shape[dim],) + (1,)*(ret.ndim - dim - 1))
-    #     masks.append(i == a)
-
-    #   # reduce masks to 1 mask
-    #   mask: Tensor = functools.reduce(lambda x,y: x.mul(y), masks)
-
-    #   # inject 1's for the extra dims added in create masks
-    #   sh = ret.shape[:first_dim] + (1,) * len(big_shape) + ret.shape[first_dim:]
-    #   # sum reduce the extra dims introduced in create masks
-    #   ret = (ret.reshape(sh) * mask).sum(tuple(i + len(big_shape) for i in idx.keys()), acc_dtype=ret.dtype)
-
-    #   # special permute case
-    #   if first_dim != 0 and len(idx) != 1 and tuple(idx.keys()) != tuple(range(first_dim, last_dim+1)):
-    #     ret = ret.permute(*range(first_dim, first_dim+len(big_shape)), *range(0, first_dim), *range(first_dim+len(big_shape), ret.ndim))
-    # return ret
 
   def __setitem__(self, indices, v:Union[Tensor, ConstType]) -> None:
     if isinstance(self.device, str) and self.device.startswith("DISK"):

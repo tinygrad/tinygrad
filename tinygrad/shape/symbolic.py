@@ -135,28 +135,6 @@ class Variable(Node):
   def vars(self): return {self}
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node: return var_vals.get(self, self)
 
-class Index(Node):
-  def __new__(cls, *args):
-    expr, nmin, nmax = args
-    assert nmin >= 0 and nmin <= nmax, f"invalid Variable {expr=} {nmin=} {nmax=}"
-    if nmin == nmax: return NumNode(nmin)
-    return super().__new__(cls)
-
-  def __getnewargs__(self): return (self.expr, self.min, self.max)  # args passed to __new__ when unpickling
-
-  def __init__(self, expr:str, nmin:int, nmax:sint):
-    self.expr, self.min, self.max = expr, nmin, nmax
-    self._idx: Optional[int] = None
-  @property
-  def idx(self):
-    assert self._idx is not None, f"Variable isn't bound, can't access val of {self}"
-    return self._idx
-  def bind(self, idx:sint):
-    # maybe sint here cuz maybe have to render idx if it's not a realized buffer
-    assert self._idx is None and self.min<=idx<=self.max, f"cannot bind {idx} to {self}"
-    self._idx = idx
-    return self
-
 class NumNode(Node):
   def __init__(self, num:int):
     assert isinstance(num, int), f"{num} is not an int"
