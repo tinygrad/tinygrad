@@ -37,15 +37,14 @@ def train_resnet():
       MLLOGGER.event(key=mllog_constants.SUBMISSION_PLATFORM, value=getenv("SUBMISSION_PLATFORM", "tinybox"))
       MLLOGGER.event(key=mllog_constants.SUBMISSION_DIVISION, value=mllog_constants.CLOSED)
       MLLOGGER.event(key=mllog_constants.SUBMISSION_STATUS, value=mllog_constants.ONPREM)
-      diskcache_clear()
-      MLLOGGER.event(key=mllog_constants.CACHE_CLEAR, value=True)
       # closed_common.yaml
       MLLOGGER.event(key=mllog_constants.SUBMISSION_BENCHMARK, value=mllog_constants.RESNET)
-      MLLOGGER.event(key=mllog_constants.GRADIENT_ACCUMULATION_STEPS, value=1)
+      diskcache_clear()
+      MLLOGGER.event(key=mllog_constants.CACHE_CLEAR, value=True)
       MLLOGGER.start(key=mllog_constants.INIT_START)
     if RUNMLPERF:
-      MLLOGGER.event(key=mllog_constants.SEED, value=seed)
       MLLOGGER.start(key=mllog_constants.RUN_START)
+      MLLOGGER.event(key=mllog_constants.SEED, value=seed)
   else:
     MLLOGGER = None
 
@@ -114,12 +113,13 @@ def train_resnet():
 
   # log mlperf hparams
   if MLLOGGER:
-    if INITMLPERF:
+    if RUNMLPERF:
       MLLOGGER.event(key=mllog_constants.GLOBAL_BATCH_SIZE, value=BS)
       from extra.datasets.imagenet import get_train_files, get_val_files
       MLLOGGER.event(key=mllog_constants.TRAIN_SAMPLES, value=len(get_train_files()))
       MLLOGGER.event(key=mllog_constants.EVAL_SAMPLES, value=len(get_val_files()))
 
+      MLLOGGER.event(key=mllog_constants.GRADIENT_ACCUMULATION_STEPS, value=1)
       MLLOGGER.event(key=mllog_constants.OPT_NAME, value="lars")
       assert scheduler.initial_lr == scheduler_skip.initial_lr
       assert scheduler.end_lr == scheduler_skip.end_lr
@@ -278,6 +278,7 @@ def train_resnet():
         proc, next_proc = next_proc, None
         i += 1
         if i == BENCHMARK:
+          # assume INITMLPERF has BENCHMARK set
           if MLLOGGER and INITMLPERF:
             MLLOGGER.event(key=mllog_constants.INIT_STOP)
           return
@@ -300,14 +301,14 @@ def train_resnet():
 
       # save model if achieved target
       if not achieved and total_top_1 >= target:
-        if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
-        fn = f"./ckpts/resnet50.safe"
-        safe_save(get_state_dict(model), fn)
-        print(f" *** Model saved to {fn} ***")
-        achieved = True
         # stop once achieve the target
         if MLLOGGER and RUNMLPERF:
           MLLOGGER.event(key=mllog_constants.RUN_STOP, metadata=dict(status=mllog_constants.SUCCESS))
+        if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
+        fn = f"./ckpts/resnet50_{seed}.safe"
+        safe_save(get_state_dict(model), fn)
+        print(f" *** Model saved to {fn} ***")
+        achieved = True
         break
 
       # checkpoint every time we eval
