@@ -32,7 +32,6 @@ def train_resnet():
     mllog.config(root_dir=Path(__file__).parents[3].as_posix())  # truncate to log this. "file": "tinygrad/examples/mlperf/model_train.py"
     MLLOGGER = mllog.get_mllogger()
     if INITMLPERF:
-      MLLOGGER.start(key=mllog_constants.INIT_START)
       # common.yaml
       MLLOGGER.event(key=mllog_constants.SUBMISSION_ORG, value="tinycorp")
       MLLOGGER.event(key=mllog_constants.SUBMISSION_PLATFORM, value=getenv("SUBMISSION_PLATFORM", "tinybox"))
@@ -43,6 +42,10 @@ def train_resnet():
       # closed_common.yaml
       MLLOGGER.event(key=mllog_constants.SUBMISSION_BENCHMARK, value=mllog_constants.RESNET)
       MLLOGGER.event(key=mllog_constants.GRADIENT_ACCUMULATION_STEPS, value=1)
+      MLLOGGER.start(key=mllog_constants.INIT_START)
+    if RUNMLPERF:
+      MLLOGGER.event(key=mllog_constants.SEED, value=seed)
+      MLLOGGER.start(key=mllog_constants.RUN_START)
   else:
     MLLOGGER = None
 
@@ -129,9 +132,6 @@ def train_resnet():
       MLLOGGER.event(key=mllog_constants.LARS_OPT_LEARNING_RATE_WARMUP_EPOCHS, value=lr_warmup_epochs)
       MLLOGGER.event(key=mllog_constants.LARS_OPT_MOMENTUM, value=optimizer.momentum)
       MLLOGGER.event(key=mllog_constants.LARS_OPT_WEIGHT_DECAY, value=optimizer.wd)
-    if RUNMLPERF:
-      MLLOGGER.event(key=mllog_constants.SEED, value=seed)
-      MLLOGGER.start(key=mllog_constants.RUN_START)
 
   # ** resume from checkpointing **
   start_epoch = 0
