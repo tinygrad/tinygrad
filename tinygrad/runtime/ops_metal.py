@@ -11,13 +11,11 @@ def wait_check(cbuf: Any):
   if (error := cbuf.error()) is not None:
     raise RuntimeError(error)
 
-# conda workaround
-workaround_src = """
-#include <metal_stdlib>
-using namespace metal;
-kernel void workaroundfn(){}"""
-workaround_lib = None
 def get_workaround_lib(device):
+    workaround_src = """
+    #include <metal_stdlib>
+    using namespace metal;
+    kernel void workaroundfn(){}"""
     options = Metal.MTLCompileOptions.new()
     options.setLibraryType_(Metal.MTLLibraryTypeDynamic)
     options.setInstallName_("/tmp/workaround.dylib")
@@ -29,6 +27,7 @@ class MetalCompiler(Compiler):
   compiler_opts = CompilerOptions("METAL", has_tensor_cores=os.uname().machine == "arm64", shared_max=32768)
   def __init__(self, device:Optional[MetalDevice]):
     self.device = device
+    self.workaround_lib = get_workaround_lib(device.device) if device and device.device.supportsDynamicLibraries() else None
     super().__init__("compile_metal")
   def render(self, name:str, uops) -> str: return MetalRenderer(name, uops)
   def compile(self, src:str) -> bytes:
@@ -40,8 +39,7 @@ class MetalCompiler(Compiler):
       options = Metal.MTLCompileOptions.new()
       options.setFastMathEnabled_(getenv("METAL_FAST_MATH"))
       # NOTE: conda workaround, linking with dynamic libraries forces requestType = 13 (usually 3 on conda)
-      if self.device.device.supportsDynamicLibraries():
-          options.setLibraries_([workaround_lib if workaround_lib is not None else get_workaround_lib(self.device.device)])
+      if self.workaround_lib: options.setLibraries_([self.workaround_lib])
       library = unwrap2(self.device.device.newLibraryWithSource_options_error_(src, options, None))
       return library.libraryDataContents().bytes().tobytes()
 
