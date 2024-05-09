@@ -145,7 +145,7 @@ _cache_dir: str = getenv("XDG_CACHE_HOME", os.path.expanduser("~/Library/Caches"
 CACHEDB: str = getenv("CACHEDB", os.path.abspath(os.path.join(_cache_dir, "tinygrad", "cache.db")))
 CACHELEVEL = getenv("CACHELEVEL", 2)
 
-VERSION = 15
+VERSION = 16
 _db_connection = None
 def db_connection():
   global _db_connection
@@ -154,6 +154,11 @@ def db_connection():
     _db_connection = sqlite3.connect(CACHEDB)
     if DEBUG >= 7: _db_connection.set_trace_callback(print)
   return _db_connection
+
+def diskcache_clear():
+  cur = db_connection().cursor()
+  drop_tables = cur.execute("SELECT 'DROP TABLE IF EXISTS ' || quote(name) || ';' FROM sqlite_master WHERE type = 'table';").fetchall()
+  cur.executescript("\n".join([s[0] for s in drop_tables]))
 
 def diskcache_get(table:str, key:Union[Dict, str, int]) -> Any:
   if CACHELEVEL == 0: return None

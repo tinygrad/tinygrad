@@ -43,7 +43,7 @@ def realized_lazybuffer(lb:'LazyBuffer', num):
   init_graph()
   G.nodes[nm(lb)]['style'] = '"filled,bold"'
   G.nodes[nm(lb)]['fillcolor'] = G.nodes[nm(lb)]['fillcolor'][:-2]
-  G.nodes[nm(lb)]['label'] = '"' + G.nodes[nm(lb)]["label"].replace('"', '') + f'\nK:{num} b:{"FAKE" if lb.realized is None else nm(lb.realized)}"'
+  G.nodes[nm(lb)]['label'] = '"' + G.nodes[nm(lb)]["label"].replace('"', '') + f'\nK:{num}"'
 
 top_colors = {LoadOps: '#FFFFa0', UnaryOps: "#c0c0c0", ReduceOps: "#FFA0A0", BinaryOps: "#c0c0c0",
               TernaryOps: "#c0c0c0", BufferOps: '#a0a0ff'}
