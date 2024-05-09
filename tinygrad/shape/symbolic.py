@@ -319,7 +319,6 @@ render_python: Dict[Type, Callable[..., str]] = {
   Variable: lambda self,ops,ctx: f"{self.expr}[{self.min}-{self.max}{'='+str(self.val) if self._val is not None else ''}]" if ctx == "DEBUG" \
     else (f"Variable('{self.expr}', {self.min}, {self.max})"+(f".bind({self.val})" if self._val is not None else '') if ctx == "REPR" \
     else f"{self.expr}"),
-  Index: lambda self,ops,ctx: f"{self.expr}[{self.idx if isinstance(self.idx, int) else self.idx.render(ops,ctx)}]",
   NumNode: lambda self,ops,ctx: f"NumNode({self.b})" if ctx == "REPR" else f"{self.b}",
   MulNode: render_mulnode,
   DivNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}//{self.b})",
