@@ -12,10 +12,11 @@ python3 -m pip install -e ".[mlperf]"
 
 ### tinybox_green
 Install the p2p driver per [README](https://github.com/tinygrad/open-gpu-kernel-modules/blob/550.54.15-p2p/README.md)
+This is the default on production tinybox green.
 
 ### tinybox_red
-
 Disable cwsr
+This is the default on production tinybox red.
 ```
 sudo vi /etc/modprobe.d/amdgpu.conf
 add there "options amdgpu cwsr_enable=0"
@@ -32,4 +33,16 @@ sudo cat /sys/module/amdgpu/parameters/cwsr_enable #= 0
 
 ```
 IMGNET_TRAIN=1 python3 extra/datasets/imagenet_download.py
+```
+
+## Steps for one time setup
+
+### tinybox_red
+```
+examples/mlperf/training_submission_v4.0/tinycorp/benchmarks/resnet/implementations/tinybox_red/setup.sh
+```
+
+## Steps to run benchmark
+```
+examples/mlperf/training_submission_v4.0/tinycorp/benchmarks/resnet/implementations/tinybox_red/run_and_time.sh
 ```
