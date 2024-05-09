@@ -58,7 +58,6 @@ class HCQGraph(MultiGraphRunner):
       if isinstance(ji.prg, CompiledRunner):
         deps = self.access_resources(ji.bufs[(outs:=ji.prg.outcount):], ji.bufs[:outs], (self.comp_signal[ji.prg.device], sig_val:=j+1))
         deps.append((self.comp_signal[ji.prg.device], self.comp_signal_val[ji.prg.device]))
-        # deps = [(k, max(v for x, v in deps if id(x) == idk)) for idk, k in {id(x[0]): x[0] for x in deps}.items()]
         self.comp_signal_val[ji.prg.device] = sig_val
 
         # Rebuilt runners with dynamic launch dims online.
@@ -75,7 +74,6 @@ class HCQGraph(MultiGraphRunner):
 
         deps = self.access_resources([src], [dest], (self.copy_signal[Device[src.device]], sig_val:=j+1))
         deps.append((self.copy_signal[Device[src.device]], self.copy_signal_val[Device[src.device]]))
-        # deps = [(k, max(v for x, v in deps if id(x) == idk)) for idk, k in {id(x[0]): x[0] for x in deps}.items()]
         self.copy_signal_val[Device[src.device]] = sig_val
 
         for sig,val in deps: self.copy_queues[Device[src.device]].wait(sig, val)
@@ -89,20 +87,6 @@ class HCQGraph(MultiGraphRunner):
 
       self.queue_list.append((self.comp_queues.pop(dev), dev))
       if self.copy_signal_val[dev] > 0: self.queue_list.append((self.copy_queues.pop(dev), dev))
-
-    self.waiter1 = {}
-    self.waiter2 = {}
-    self.waiter3 = {}
-    self.comp_hcq_t().signal(dev.timeline_signal, dev.timeline_value).submit(dev)
-    for dev in self.devices:
-      self.waiter1[dev] = self.comp_hcq_t()
-      self.waiter3[dev] = self.comp_hcq_t()
-      self.waiter2[dev] = self.copy_hcq_t()
-      self.waiter1[dev].wait(dev.timeline_signal, dev.timeline_value - 1) \
-                       .wait(self.kickoff_signal, self.kickoff_value).submit(dev)
-      self.waiter2[dev].wait(dev.timeline_signal, dev.timeline_value - 1) \
-                       .wait(self.kickoff_signal, self.kickoff_value).submit(dev)
-      self.waiter3[dev].signal(dev.timeline_signal, dev.timeline_value)
 
   def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False) -> Optional[float]:
     # Wait and restore signals
@@ -123,12 +107,6 @@ class HCQGraph(MultiGraphRunner):
         self.ji_kargs_structs[j].__setattr__(f'v{i}', var_vals[v])
 
     for dev in self.devices:
-      # self.waiter1[dev].q[4] = dev.timeline_value - 1
-      # self.waiter1[dev].q[11] = self.kickoff_value
-      # self.waiter1[dev].submit(dev)
-      # self.waiter2[dev].q[0].value = dev.timeline_value - 1
-      # self.waiter2[dev].q[1].value = self.kickoff_value
-      # self.waiter2[dev].submit(dev)
       self.comp_hcq_t().wait(dev.timeline_signal, dev.timeline_value - 1) \
                        .wait(self.kickoff_signal, self.kickoff_value).submit(dev)
       self.copy_hcq_t().wait(dev.timeline_signal, dev.timeline_value - 1) \
@@ -146,8 +124,6 @@ class HCQGraph(MultiGraphRunner):
       queue.submit(dev)
 
     for dev in self.devices:
-      # self.waiter3[dev].q[5] = dev.timeline_value
-      # self.waiter3[dev].submit(dev)
       self.comp_hcq_t().signal(dev.timeline_signal, dev.timeline_value).submit(dev)
       self.graph_timeline[dev] = dev.timeline_value
       dev.timeline_value += 1
@@ -160,5 +136,4 @@ class HCQGraph(MultiGraphRunner):
 
   def access_resources(self, read, write, new_dependency):
     deps = self._access_resources(read, write, new_dependency)
-    return deps
-    # return [(k, max(v for x, v in deps if id(x) == idk)) for idk, k in {id(x[0]): x[0] for x in deps}.items()]
+    return [(k, max(v for x, v in deps if id(x) == idk)) for idk, k in {id(x[0]): x[0] for x in deps}.items()]
