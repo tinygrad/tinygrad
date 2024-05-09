@@ -1,7 +1,7 @@
 import itertools
 from tinygrad import Device
 from tinygrad.device import CompiledRunner
-from tinygrad.helpers import to_function_name, getenv, colored
+from tinygrad.helpers import getenv, colored
 from extra.optimization.helpers import load_worlds, ast_str_to_lin
 from tinygrad.features.search import bufs_from_lin
 
@@ -40,14 +40,14 @@ if __name__ == "__main__":
     try:
       cuda_prg(cubufs, {}, wait=True)
       for i in range(5): tm_cuda.append(cuda_prg(cubufs, {}, wait=True))
-    except:
+    except RuntimeError:
       print("CUDA FAILED")
       tm_cuda = [1e9]
 
     try:
       nv_prg(nvbufs, {}, wait=True)
       for i in range(5): tm_nv.append(nv_prg(nvbufs, {}, wait=True))
-    except:
+    except RuntimeError:
       print("NV FAILED")
       tm_nv = [1e9]
     average_tm_cuda += min(tm_cuda)
