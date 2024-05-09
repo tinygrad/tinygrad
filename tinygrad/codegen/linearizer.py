@@ -176,8 +176,9 @@ class Linearizer(Kernel):
     return tuple(new_loops.values())
 
   # helper function, the actual render_reduceop function will get initialize once the indexes get initilized
-  def _render_reduceop(self, reduceop: LazyOp, loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]], \
-                       global_idxs, local_idxs, reduce_idxs, upcast_idxs, full_upcast_idxs):
+  def render_reduceop(self, reduceop: LazyOp, accs: Dict[LazyOp, List[UOp]], \
+                       loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]], \
+                      global_idxs, local_idxs, reduce_idxs, upcast_idxs, full_upcast_idxs):
     # define indicies
     fake_reduce_idxs = [x*0 for x in reduce_idxs]
 
@@ -220,7 +221,7 @@ class Linearizer(Kernel):
       for n in range(len(replace_acc_idxs)-len(tc.threads)):
         upcast_idxs[n] = replace_acc_idxs[len(tc.threads)+n] # replace upcasts
       if DEBUG >= 3: print(f"store alias: sts={self.sts[0]} idxs={global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs}")
-    acc = self.global_load(out_buf, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop)
+    accs[reduceop] = self.global_load(out_buf, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop)
 
     # reduce loop
     loop_ctx = self.render_loop(reduce_idxs)
@@ -245,7 +246,7 @@ class Linearizer(Kernel):
                 self.uops.add(UOps.CAST, (dt3:=tc.dtype_out.vec(wmma_sz[2])), tuple(op3:=acc[offs[2]:offs[2]+wmma_sz[2]])))
         ret = self.uops.add(UOps.WMMA, dt3, ops, (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, tuple(map(prod, tc.thread_local_sizes)), dev))
         for z in range(wmma_sz[2]): # TODO: don't need to DEFINE_ACC, pass to WMMA in op3, or PHI accs that are not valid
-          acc[offs[2]+z] = self.uops.add(UOps.PHI, tc.dtype_out, (op3[z], self.uops.add(UOps.GEP, tc.dtype_out, (ret,), z)) + loop_ctx)
+          accs[reduceop][offs[2]+z] = self.uops.add(UOps.PHI, tc.dtype_out, (op3[z], self.uops.add(UOps.GEP, tc.dtype_out, (ret,), z)) + loop_ctx)
     else:
       assert not locals_to_store, "storing locals isn't supported here"
 
@@ -253,7 +254,7 @@ class Linearizer(Kernel):
         global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs})
 
       # run early AST (with reduce)
-      self.ast_parse(reduceop, acc, self.acc_offsets(self.full_buf_index), loaded_buffers, do_reduce=True, loop_ctx=loop_ctx)
+      self.ast_parse(reduceop, accs, self.acc_offsets(self.full_buf_index), loaded_buffers, do_reduce=accs[reduceop], loop_ctx=loop_ctx)
 
     # end the reduce loop
     self.load_cache.clear()
@@ -261,7 +262,7 @@ class Linearizer(Kernel):
     # end the local loop, do the local reduce
     if self.group_for_reduces:
       fake_global_idxs = [x*0 for x in global_idxs]
-      stores = self.global_store(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc)  # store accumulators
+      stores = self.global_store(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, accs[reduceop])  # store accumulators
       barrier = self.uops.add(UOps.BARRIER, None, tuple(stores), cachable=False)
       if self.opts.has_local:
         fake_idxs = [NumNode(0)]*len(self.sts[-1].shape)
@@ -286,7 +287,7 @@ class Linearizer(Kernel):
       # NOTE: this structure is the same as the reduce op above
 
       # define late accumulator
-      acc = self.global_load(0, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop)
+      accs[reduceop] = self.global_load(0, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop)
 
       # late reduce loop
       loop_ctx = self.render_loop(end_local_idxs)
@@ -295,23 +296,22 @@ class Linearizer(Kernel):
       loaded_buffers[self.bufs[-1]] = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, barrier=barrier)
 
       # there's no AST here (and there's no shape for the reduce LazyOp)
-      self.ast_parse(LazyOp(reduceop.op, (LazyOp(BufferOps.LOAD, (), self.bufs[-1]),)), acc, self.acc_offsets(-1), loaded_buffers, do_reduce=True, loop_ctx=loop_ctx, if_ctx=barrier)  # noqa: E501
+      self.ast_parse(LazyOp(reduceop.op, (LazyOp(BufferOps.LOAD, (), self.bufs[-1]),)), accs, self.acc_offsets(-1), loaded_buffers, do_reduce=accs[reduceop], loop_ctx=loop_ctx)  # noqa: E501
 
       # end the late reduce loop
       self.load_cache.clear()
 
       # if there are more reduceops, store the final value into the temp buffer, the load it back into all threads
-      if len(self.reduce_acc) < len(self.reduceops)-1:
+      if reduceop is not self.reduceops[-1]:
         for j in self.upcast_in_mid_reduce_axes:
           self.upcasted -= 1
           self.group_for_reduces += 1
         reduce_buf_uop = self.buf_uops[-1]
         assert reduce_buf_uop is not None, "Local reduce buf must have been uoped at this point"
-        stores = self.global_store(-1, [NumNode(0)]*len(self.sts[-1].shape), acc)
-        endif = self.uops.add(UOps.ENDIF, None, (barrier,), cachable=False)
-        barrier = self.uops.add(UOps.BARRIER, None, (endif, *stores), cachable=False)
-        acc = self.global_load(-1, [NumNode(0)]*len(self.sts[-1].shape), barrier=barrier)
-    return acc
+        stores = self.global_store(-1, [NumNode(0)]*len(self.sts[-1].shape), accs[reduceop])
+        barrier = self.uops.add(UOps.BARRIER, None, stores, cachable=False)
+        accs[reduceop] = self.global_load(-1, [NumNode(0)]*len(self.sts[-1].shape), barrier=barrier)
+    return accs
 
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
   def linearize(self):
@@ -392,13 +392,11 @@ class Linearizer(Kernel):
 
     # parse AST
     loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]] = {}
-    acc: List[UOp] = []
+    accs: Dict[LazyOp, List[UOp]] = {}
     self.load_cache: Dict[str, UOp] = {}
 
-    # reduce ops, initalize up a dict to store the uops of their outputs
-    self.reduce_acc: Dict[LazyOp, List[UOp]] = {}
-    # set up the idxs for the render_reduceop function so that it can be called from within ast_parse
-    self.render_reduceop = lambda x,buffers: self._render_reduceop(x,buffers,global_idxs,local_idxs,reduce_idxs,upcast_idxs,full_upcast_idxs)
+    for reduceop in self.reduceops:
+      accs = self.render_reduceop(reduceop, accs, loaded_buffers, global_idxs, local_idxs, reduce_idxs, upcast_idxs, full_upcast_idxs)
     fake_reduce_idxs = [x*0 for x in reduce_idxs]
 
     # load latebufs & consts
@@ -407,7 +405,7 @@ class Linearizer(Kernel):
 
     # run late AST (without the store)
     for op in self.ast:
-      val = self.ast_parse(op.src[0], acc, None, loaded_buffers)
+      val = self.ast_parse(op.src[0], accs, None, loaded_buffers)
       self.global_store(op.arg.idx, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val)
 
     # optimize the uops
@@ -424,29 +422,20 @@ class Linearizer(Kernel):
     self.applied_opts_cache = self.applied_opts[:]
     return self
 
-  def ast_parse(self, x:LazyOp, acc: List[UOp], offs:Optional[List[int]], loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]], do_reduce=False, loop_ctx=tuple(), if_ctx=tuple(), cache=None) -> List[UOp]: # noqa: E501
+  def ast_parse(self, x:LazyOp, accs: Dict[LazyOp, List[UOp]], offs:Optional[List[int]], loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]], do_reduce:Optional[List[UOp]]=None, loop_ctx=tuple(), cache=None) -> List[UOp]: # noqa: E501
     if cache is None: cache = {}
     if x in cache: return cache[x]
     if x.op in BufferOps: return loaded_buffers[x.arg]
     if x.op is UnaryOps.CAST: return [self.uops.add(UOps.BITCAST if x.arg[1] else UOps.CAST, self.get_base_dtype(x.arg[0]), (u,), x.arg[0]) \
-                                      for u in self.ast_parse(x.src[0], acc, offs, loaded_buffers)]
-    if x.op in ReduceOps and not do_reduce:
-      if x in self.reduce_acc: return [self.reduce_acc[x][i] for i in offs] if offs else self.reduce_acc[x]
-      # store a copy of the current parse state
-      cursor_copy, load_cache_copy = self.uops.cursor, self.load_cache
-      # go back to before this for loop / if statement begins
-      self.uops.cursor,self.load_cache=self.uops.uops[min([self.uops.uops.index(ctx) for ctx in loop_ctx+if_ctx])] if loop_ctx or if_ctx else None,{}
-      # render the reduceop
-      self.reduce_acc[x] = self.render_reduceop(x, loaded_buffers)
-      # reload the parse state & continue
-      self.uops.cursor, self.load_cache = cursor_copy, load_cache_copy
-      return [self.reduce_acc[x][i] for i in offs] if offs else self.reduce_acc[x]
+                                      for u in self.ast_parse(x.src[0], accs, offs, loaded_buffers)]
+    if x.op in ReduceOps and do_reduce is None:
+      return [accs[x][i] for i in offs] if offs else accs[x]
 
-    values = [self.ast_parse(v, acc, offs, loaded_buffers, loop_ctx=loop_ctx, if_ctx=if_ctx, cache=cache) for v in x.src]
+    values = [self.ast_parse(v, accs, offs, loaded_buffers, loop_ctx=loop_ctx, cache=cache) for v in x.src]
     ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}
-    if x.op in ops:
+    if do_reduce is not None:
       ret: List[UOp] = []
-      input_acc = acc[:]
+      acc, input_acc = do_reduce, do_reduce[:]
       for val, off in zip(zip(*values), cast(List[int], offs)):
         acc[off] = self.uops.add(UOps.ALU, acc[off].dtype, vin=val+(acc[off],), arg=ops[cast(ReduceOps, x.op)])
         ret.append(acc[off])
