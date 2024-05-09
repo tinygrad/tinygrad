@@ -4,7 +4,7 @@ After you have installed tinygrad, this is a great first tutorial.
 
 Start up a notebook locally, or use [colab](https://colab.research.google.com/). tinygrad is very lightweight, so it's easy to install anywhere and doesn't need a special colab image, but for speed we recommend a T4 GPU image.
 
-### One-liner to install in colab
+### One-liner to install tinygrad in colab
 
 ```python
 !pip install git+https://github.com/tinygrad/tinygrad.git
@@ -64,12 +64,12 @@ So creating the model and evaluating it is a matter of:
 model = Model()
 acc = (model(X_test).argmax(axis=1) == Y_test).mean()
 # NOTE: tinygrad is lazy, and hasn't actually run anything by this point
-print(acc.item())  # ~10% accuracy, as expected
+print(acc.item())  # ~10% accuracy, as expected from a random model
 ```
 
 ### Training the model
 
-We need an optimizer, and we'll use Adam. The `nn.state.get_parameters` will walk the class and pull out the parameters for the optimizer. Also, in tinygrad, it's typical to write a function to do the training step so it can be jitted.
+We'll use the Adam optimizer. The `nn.state.get_parameters` will walk the model class and pull out the parameters for the optimizer. Also, in tinygrad, it's typical to write a function to do the training step so it can be jitted.
 
 ```python
 optim = nn.optim.Adam(nn.state.get_parameters(model))
@@ -107,7 +107,7 @@ from tinygrad import TinyJit
 jit_step = TinyJit(step)
 ```
 
-NOTE: it can also be used as a decorator `@TinyJit`
+NOTE: It can also be used as a decorator `@TinyJit`
 
 Now when we time it:
 
@@ -123,7 +123,7 @@ timeit.repeat(jit_step, repeat=5, number=1)
 
 1.0 ms is 75x faster! Note that we aren't syncing the GPU, so GPU time may be slower.
 
-The slowness the first two times is the JIT capturing the kernels. And this JIT will not run any Python in the function, it will just replay the tinygrad kernels that were run, so be aware. Randomness functions as expected.
+The slowness the first two times is the JIT capturing the kernels. And this JIT will not run any Python in the function, it will just replay the tinygrad kernels that were run, so be aware that non tinygrad Python operations won't work. Randomness functions as expected.
 
 Unlike other JITs, we JIT everything, including the optimizer. Think of it as a dumb replay on different data.
 

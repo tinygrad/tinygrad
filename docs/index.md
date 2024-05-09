@@ -30,15 +30,15 @@ If you are migrating from PyTorch, welcome. Most of the API is the same. We hope
 
 ### tinygrad doesn't have nn.Module
 
-There's nothing special about a "Module" class in tinygrad, it's just a normal class. [`nn.state.get_parameters`](nn/#tinygrad.nn.state.get_parameters) can be used to recursively search normal claases for valid tensors. Instead of the `forward` method in PyTorch, tinygrad just uses `__call__`
+There's nothing special about a "Module" class in tinygrad, it's just a normal class. [`nn.state.get_parameters`](nn.md/#tinygrad.nn.state.get_parameters) can be used to recursively search normal classes for valid tensors. Instead of the `forward` method in PyTorch, tinygrad just uses `__call__`
 
 ### tinygrad is functional
 
-In tinygrad, you can do [`x.conv2d(w, b)`](tensor/#tinygrad.Tensor.conv2d) or [`x.sparse_categorical_cross_entropy(y)`](tensor/#tinygrad.Tensor.sparse_categorical_crossentropy). We do also have a [`Conv2D`](nn/#tinygrad.nn.Conv2d) class like PyTorch if you want a place to keep the state, but all stateless operations don't have classes.
+In tinygrad, you can do [`x.conv2d(w, b)`](tensor.md/#tinygrad.Tensor.conv2d) or [`x.sparse_categorical_cross_entropy(y)`](tensor.md/#tinygrad.Tensor.sparse_categorical_crossentropy). We do also have a [`Conv2D`](nn.md/#tinygrad.nn.Conv2d) class like PyTorch if you want a place to keep the state, but all stateless operations don't have classes.
 
 ### tinygrad is lazy
 
-When you do `a+b` in tinygrad, nothing happens. It's not until you [`realize`](tensor/#tinygrad.Tensor.realize) the Tensor that the computation actually runs.
+When you do `a+b` in tinygrad, nothing happens. It's not until you [`realize`](tensor.md/#tinygrad.Tensor.realize) the Tensor that the computation actually runs.
 
 ### tinygrad requires @TinyJIT to be fast
 

@@ -84,11 +84,11 @@ class PatternMatcher:
       queue = [n]
       while queue:
         if all([qq in uops.uops for qq in queue[-1].vin]):
-          q = queue.pop()
-          new = uops.add(q.uop, q.dtype, q.vin, q.arg, insert_before=max([0]+[uops.uops.index(vv) for vv in q.vin])+1)
-          for vv in uops.uops + queue: vv.vin = tuple(new if x is q else x for x in vv.vin)
+          new = uops.add_op(q:=queue.pop(), insert_before=max([0]+[uops.uops.index(vv) for vv in q.vin])+1)
+          if new != q:
+            for vv in uops.uops + queue: vv.vin = tuple(new if x is q else x for x in vv.vin)
         else: queue.extend([qq for qq in queue[-1].vin if qq not in uops.uops])
-      if not any([o in u.vin for u in uops]): uops.uops.remove(o)
+      if not any([o in u.vin for u in uops.uops[uops.uops.index(o):]]): uops.uops.remove(o)
 
 constant_folder = PatternMatcher([
   # const rules
@@ -140,6 +140,7 @@ class UOpGraph:
   def __iter__(self): return iter(self.uops)
 
   def vars(self) -> List[Variable]: return [x.arg for x in self.uops if x.uop is UOps.DEFINE_VAR]
+  def globals(self) -> List[Tuple[int, bool]]: return [x.arg for x in self.uops if x.uop is UOps.DEFINE_GLOBAL]
 
   def graph(self):
     from tinygrad.features.graph import graph_uops
@@ -152,7 +153,9 @@ class UOpGraph:
 
   def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None, cachable=True, insert_before=None,
           simplify=True) -> UOp:
-    ret = UOp(uop, dtype, vin, arg) if uop is not UOps.CONST else UOp.const(dtype, arg)
+    return self.add_op(UOp(uop, dtype, vin, arg) if uop is not UOps.CONST else UOp.const(dtype, arg), cachable, insert_before, simplify)
+
+  def add_op(self, ret:UOp, cachable=True, insert_before=None, simplify=True) -> UOp:
     if simplify and (rewritten:=constant_folder.rewrite(ret)) is not None:
       if rewritten in self.uops: return rewritten  # ignore cachable
       ret = rewritten
@@ -362,8 +365,7 @@ class UOpGraph:
     self.optimize_loops()
 
     # (recursively) remove childless uops
-    # TODO: remove DEFINE_GLOBAL from here
-    self.remove_childless(set(x for x in self.uops if x.uop in {UOps.DEFINE_GLOBAL, UOps.STORE}))
+    self.remove_childless(set(x for x in self.uops if x.uop is UOps.STORE))
 
     # store float4 upcasts directly if possible
     self.fix_to_store_directly()
