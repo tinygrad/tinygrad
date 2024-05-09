@@ -22,7 +22,7 @@ class CUDAGraph(MultiGraphRunner):
 
     for j,ji in enumerate(self.jit_cache):
       if isinstance(ji.prg, CompiledRunner):
-        global_size, local_size = ji.prg.prg.launch_dims(var_vals)
+        global_size, local_size = ji.prg.p.launch_dims(var_vals)
 
         new_node = cuda.CUgraphNode()
         deps = self._access_resources([x.base for x in ji.bufs[ji.prg.outcount:] if x is not None],
@@ -64,7 +64,7 @@ class CUDAGraph(MultiGraphRunner):
 
     # Update launch dims in the kern_params struct.
     for j in self.jc_idx_with_updatable_launch_dims:
-      self.set_kernel_node_launch_dims(self.updatable_nodes[j][1], *cast(CompiledRunner, self.jit_cache[j].prg).prg.launch_dims(var_vals))
+      self.set_kernel_node_launch_dims(self.updatable_nodes[j][1], *cast(CompiledRunner, self.jit_cache[j].prg).p.launch_dims(var_vals))
 
     # Update graph nodes with the updated structs.
     for node, c_node_params, c_args, is_copy in self.updatable_nodes.values():

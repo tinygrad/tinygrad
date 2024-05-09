@@ -169,22 +169,21 @@ class Program:
     return global_size, local_size
 
 class CompiledRunner(Runner):
-  def __init__(self, prg:Program, precompiled:Optional[bytes]=None):
-    if DEBUG >= 4: print(prg.prg)
-    self.prg = prg
-    self.lib:bytes = precompiled if precompiled is not None else self.prg.compile()
-    self.vars: List[Variable] = [] if prg.uops is None else prg.uops.vars()
-    self.globals: List[Tuple[int, bool]] = [] if prg.uops is None else prg.uops.globals()
+  def __init__(self, p:Program, precompiled:Optional[bytes]=None):
+    if DEBUG >= 4: print(p.prg)
+    self.p:Program = p
+    self.lib:bytes = precompiled if precompiled is not None else self.p.compile()
+    self.vars: List[Variable] = [] if p.uops is None else p.uops.vars()
+    self.globals: List[Tuple[int, bool]] = [] if p.uops is None else p.uops.globals()
     self.outcount: int = sum(x[1] for x in self.globals)
-    self.clprg = Device[prg.dname].runtime(to_function_name(prg.name), self.lib)
-    super().__init__(prg.name, prg.dname, prg.op_estimate, prg.mem_estimate)
+    self.clprg = Device[p.dname].runtime(to_function_name(p.name), self.lib)
+    super().__init__(p.name, p.dname, p.op_estimate, p.mem_estimate)
 
-  def to_other_device(self, dname:str): return CompiledRunner(replace(self.prg, dname=dname), self.lib)
-  def __reduce__(self): return self.__class__, (self.prg, self.lib)
+  def __reduce__(self): return self.__class__, (self.p, self.lib)
 
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False) -> Optional[float]:
-    global_size, local_size = self.prg.launch_dims(var_vals)
-    if global_size is not None and local_size is None and all_int(self.prg.global_size): # type: ignore[arg-type]
+    global_size, local_size = self.p.launch_dims(var_vals)
+    if global_size is not None and local_size is None and all_int(self.p.global_size): # type: ignore[arg-type]
       # TODO: this is copied from get_program
       from tinygrad.features.search import optimize_local_size
       local_size = self.local_size = optimize_local_size(self.clprg, global_size, rawbufs)
@@ -249,7 +248,7 @@ class Compiled:
     if cret:=method_cache.get(ckey): return cret
     bkey = (self.dname.split(":")[0], ast, BEAM.value, True)
     if bret:=method_cache.get(bkey):
-      method_cache[ckey] = ret = bret.to_other_device(self.dname)
+      method_cache[ckey] = ret = CompiledRunner(replace(bret.p, dname=self.dname), bret.lib)
     else:
       method_cache[ckey] = method_cache[bkey] = ret = self.to_program(self.get_linearizer(*ast))
     return ret

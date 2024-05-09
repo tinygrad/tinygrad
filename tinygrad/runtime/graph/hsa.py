@@ -127,7 +127,7 @@ class HSAGraph(MultiGraphRunner):
 
     # Update launch dims
     for j in self.jc_idx_with_updatable_launch_dims:
-      gl, lc = cast(CompiledRunner, self.jit_cache[j].prg).prg.launch_dims(var_vals)
+      gl, lc = cast(CompiledRunner, self.jit_cache[j].prg).p.launch_dims(var_vals)
       self.packets[j].workgroup_size_x = lc[0]
       self.packets[j].workgroup_size_y = lc[1]
       self.packets[j].workgroup_size_z = lc[2]

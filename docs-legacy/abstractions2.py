@@ -60,7 +60,7 @@ for u in lin.uops: print(u)
 
 # compile a program (and print the source)
 fxn = Device[DEVICE].to_program(lin)
-print(fxn.prg)
+print(fxn.p.prg)
 # NOTE: fxn.clprg is the ClangProgram
 
 # run the program
