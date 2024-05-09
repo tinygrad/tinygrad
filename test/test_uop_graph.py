@@ -46,5 +46,13 @@ class TestUOpGraph(unittest.TestCase):
     self.assertEqual(out.uop, UOps.CONST)
     self.assertEqual(out.arg, 0)
 
+  def test_early_endif(self):
+    g = UOpGraph()
+    g.add(UOps.IF, vin=(g.add(UOps.CONST, dtypes.bool, arg=True),), cachable=False)
+    g.add(UOps.CONST, dtypes.int, arg=0)
+    g.add_ends()
+    self.assertEqual(len([x for x in g.uops if x.uop is UOps.ENDIF]), 1, "UOpGraph.add_ends() should not add any extra ENDIFs")
+    self.assertEqual(g.uops[-1].uop, UOps.ENDIF, "UOpGraph.add_ends() should add ENDIF to the end of the graph")
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
