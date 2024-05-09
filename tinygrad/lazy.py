@@ -106,7 +106,8 @@ class LazyBuffer:
       # https://pytorch.org/docs/stable/generated/torch.Tensor.view.html
       if not (new_shape[-1]*self.dtype.itemsize) % dtype.itemsize == 0: raise RuntimeError("unsupported size in bitcast")
       new_shape = new_shape[:-1] + ((new_shape[-1]*self.dtype.itemsize) // dtype.itemsize,)
-    return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), dtype, UnaryOps.BITCAST if bitcast else UnaryOps.CAST, (dtype,), (self,))
+    cast_op = UnaryOps.BITCAST if bitcast else UnaryOps.CAST
+    return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), dtype, cast_op, (dtype,), (self,))
 
   def is_unrealized_const(self): return self.base.realized is None and self.base.op is LoadOps.CONST and not isinstance(self.base.arg, Variable)
   def is_unrealized_unmasked_const(self): return self.is_unrealized_const() and all(v.mask is None for v in self.st.views)
