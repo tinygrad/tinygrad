@@ -1,7 +1,7 @@
 import itertools
 import numpy as np
 from typing import DefaultDict, Dict, List, Set, Tuple, TypeVar
-from tinygrad.buffer import Buffer
+from tinygrad.device import Buffer
 from tinygrad.engine.realize import CustomOp, capturing, lower_schedule_item
 from tinygrad.helpers import DEBUG, MULTIOUTPUT, colored, getenv
 from tinygrad.lazy import LazyBuffer

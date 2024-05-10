@@ -4,7 +4,7 @@ from tqdm import tqdm
 import multiprocessing
 
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
-from tinygrad.helpers import getenv, BEAM, WINO, round_up
+from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear
 from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_save
 from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup
 
@@ -19,11 +19,17 @@ def train_resnet():
   from examples.mlperf.initializers import Conv2dHeNormal, Linear
   from examples.hlb_cifar10 import UnsyncedBatchNorm
 
+  config = {}
+  seed = config["seed"] = getenv("SEED", 42)
+  Tensor.manual_seed(seed)  # seed for weight initialization
+
   INITMLPERF = getenv("INITMLPERF")
   RUNMLPERF = getenv("RUNMLPERF")
   if getenv("LOGMLPERF"):
     from mlperf_logging import mllog
     import mlperf_logging.mllog.constants as mllog_constants
+    mllog.config(filename=f"result_{seed}.txt")
+    mllog.config(root_dir=Path(__file__).parents[3].as_posix())  # truncate to log this. "file": "tinygrad/examples/mlperf/model_train.py"
     MLLOGGER = mllog.get_mllogger()
     if INITMLPERF:
       # common.yaml
@@ -31,17 +37,16 @@ def train_resnet():
       MLLOGGER.event(key=mllog_constants.SUBMISSION_PLATFORM, value=getenv("SUBMISSION_PLATFORM", "tinybox"))
       MLLOGGER.event(key=mllog_constants.SUBMISSION_DIVISION, value=mllog_constants.CLOSED)
       MLLOGGER.event(key=mllog_constants.SUBMISSION_STATUS, value=mllog_constants.ONPREM)
-      MLLOGGER.event(key=mllog_constants.CACHE_CLEAR, value=True)
-      MLLOGGER.start(key=mllog_constants.INIT_START)
       # closed_common.yaml
       MLLOGGER.event(key=mllog_constants.SUBMISSION_BENCHMARK, value=mllog_constants.RESNET)
-      MLLOGGER.event(key=mllog_constants.GRADIENT_ACCUMULATION_STEPS, value=1)
+      diskcache_clear()
+      MLLOGGER.event(key=mllog_constants.CACHE_CLEAR, value=True)
+      MLLOGGER.start(key=mllog_constants.INIT_START)
+    if RUNMLPERF:
+      MLLOGGER.start(key=mllog_constants.RUN_START)
+      MLLOGGER.event(key=mllog_constants.SEED, value=seed)
   else:
     MLLOGGER = None
-
-  config = {}
-  seed = config["seed"] = getenv("SEED", 42)
-  Tensor.manual_seed(seed)  # seed for weight initialization
 
   GPUS = config["GPUS"] = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
   print(f"training on {GPUS}")
@@ -69,9 +74,9 @@ def train_resnet():
   epochs            = config["epochs"]            = getenv("EPOCHS", 37)
   BS                = config["BS"]                = getenv("BS", 104 * len(GPUS))  # fp32 GPUS<=6 7900xtx can fit BS=112
   EVAL_BS           = config["EVAL_BS"]           = getenv("EVAL_BS", BS)
-  base_lr           = config["base_lr"]           = getenv("LR", 7 * (BS/1536))
+  base_lr           = config["base_lr"]           = getenv("LR", 7.2 * (BS/1536))
   lr_warmup_epochs  = config["lr_warmup_epochs"]  = getenv("WARMUP_EPOCHS", 2)
-  decay             = config["decay"]             = getenv("DECAY", 5e-5)
+  decay             = config["decay"]             = getenv("DECAY", 2e-4)
 
   loss_scaler       = config["LOSS_SCALER"]       = getenv("LOSS_SCALER", 128.0 if dtypes.default_float == dtypes.float16 else 1.0)
 
@@ -108,14 +113,13 @@ def train_resnet():
 
   # log mlperf hparams
   if MLLOGGER:
-    if INITMLPERF:
-      MLLOGGER.start(key=mllog_constants.INIT_START)
-
+    if RUNMLPERF:
       MLLOGGER.event(key=mllog_constants.GLOBAL_BATCH_SIZE, value=BS)
       from extra.datasets.imagenet import get_train_files, get_val_files
       MLLOGGER.event(key=mllog_constants.TRAIN_SAMPLES, value=len(get_train_files()))
       MLLOGGER.event(key=mllog_constants.EVAL_SAMPLES, value=len(get_val_files()))
 
+      MLLOGGER.event(key=mllog_constants.GRADIENT_ACCUMULATION_STEPS, value=1)
       MLLOGGER.event(key=mllog_constants.OPT_NAME, value="lars")
       assert scheduler.initial_lr == scheduler_skip.initial_lr
       assert scheduler.end_lr == scheduler_skip.end_lr
@@ -128,8 +132,6 @@ def train_resnet():
       MLLOGGER.event(key=mllog_constants.LARS_OPT_LEARNING_RATE_WARMUP_EPOCHS, value=lr_warmup_epochs)
       MLLOGGER.event(key=mllog_constants.LARS_OPT_MOMENTUM, value=optimizer.momentum)
       MLLOGGER.event(key=mllog_constants.LARS_OPT_WEIGHT_DECAY, value=optimizer.wd)
-    if RUNMLPERF:
-      MLLOGGER.start(key=mllog_constants.RUN_START)
 
   # ** resume from checkpointing **
   start_epoch = 0
@@ -173,6 +175,11 @@ def train_resnet():
     top_1 = (out.argmax(-1) == Y).sum()
     return loss.realize(), top_1.realize()
 
+  def fake_data_get(batch_size):
+    x = Tensor.zeros(batch_size, 224, 224, 3, dtype=dtypes.uchar).contiguous()
+    y = [0] * batch_size
+    return x.shard(GPUS, axis=0).realize(), Tensor(y, requires_grad=False).shard(GPUS, axis=0), y, None
+
   def data_get(it):
     x, y, cookie = next(it)
     return x.shard(GPUS, axis=0).realize(), Tensor(y, requires_grad=False).shard(GPUS, axis=0), y, cookie
@@ -181,13 +188,18 @@ def train_resnet():
   step_times = []
   for e in range(start_epoch, epochs):
     # ** train loop **
-    if MLLOGGER:
+    if MLLOGGER and RUNMLPERF:
       MLLOGGER.start(key=mllog_constants.EPOCH_START, value=e+1, metadata=dict(epoch_num=e+1))
     Tensor.training = True
     BEAM.value = TRAIN_BEAM
-    batch_loader = batch_load_resnet(batch_size=BS, val=False, shuffle=True, seed=seed*epochs + e, pad_first_batch=True)
-    it = iter(tqdm(batch_loader, total=steps_in_train_epoch, desc=f"epoch {e}", disable=BENCHMARK))
-    i, proc = 0, data_get(it)
+
+    if INITMLPERF:
+      i, proc = 0, fake_data_get(BS)
+    else:
+      batch_loader = batch_load_resnet(batch_size=BS, val=False, shuffle=True, seed=seed*epochs + e, pad_first_batch=True)
+      it = iter(tqdm(batch_loader, total=steps_in_train_epoch, desc=f"epoch {e}", disable=BENCHMARK))
+      i, proc = 0, data_get(it)
+
     prev_cookies = []
     st = time.perf_counter()
     while proc is not None:
@@ -198,7 +210,10 @@ def train_resnet():
 
       if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
       try:
-        next_proc = data_get(it)
+        if INITMLPERF:
+          next_proc = fake_data_get(BS)
+        else:
+          next_proc = data_get(it)
       except StopIteration:
         next_proc = None
 
@@ -252,8 +267,12 @@ def train_resnet():
       Tensor.training = False
       BEAM.value = EVAL_BEAM
 
-      it = iter(tqdm(batch_load_resnet(batch_size=EVAL_BS, val=True, shuffle=False, pad_first_batch=True), total=steps_in_val_epoch))
-      i, proc = 0, data_get(it)
+      if INITMLPERF:
+        i, proc = 0, fake_data_get(EVAL_BS)
+      else:
+        it = iter(tqdm(batch_load_resnet(batch_size=EVAL_BS, val=True, shuffle=False, pad_first_batch=True), total=steps_in_val_epoch))
+        i, proc = 0, data_get(it)
+        
       prev_cookies = []
       while proc is not None:
         GlobalCounters.reset()
@@ -263,7 +282,10 @@ def train_resnet():
 
         if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
         try:
-          next_proc = data_get(it)
+          if INITMLPERF:
+            next_proc = fake_data_get(EVAL_BS)
+          else:
+            next_proc = data_get(it)
         except StopIteration:
           next_proc = None
 
@@ -276,6 +298,7 @@ def train_resnet():
         proc, next_proc = next_proc, None
         i += 1
         if i == BENCHMARK:
+          # assume INITMLPERF has BENCHMARK set
           if MLLOGGER and INITMLPERF:
             MLLOGGER.event(key=mllog_constants.INIT_STOP)
           return
@@ -298,14 +321,14 @@ def train_resnet():
 
       # save model if achieved target
       if not achieved and total_top_1 >= target:
+        # stop once achieve the target
+        if MLLOGGER and RUNMLPERF:
+          MLLOGGER.event(key=mllog_constants.RUN_STOP, metadata=dict(status=mllog_constants.SUCCESS))
         if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
-        fn = f"./ckpts/resnet50.safe"
+        fn = f"./ckpts/resnet50_{seed}.safe"
         safe_save(get_state_dict(model), fn)
         print(f" *** Model saved to {fn} ***")
         achieved = True
-        # stop once achieve the target
-        if MLLOGGER and RUNMLPERF:
-          MLLOGGER.event(key=mllog_constants.RUN_STOP, metadata=dict(status="success"))
         break
 
       # checkpoint every time we eval

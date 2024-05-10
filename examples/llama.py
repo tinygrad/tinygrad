@@ -13,7 +13,7 @@ from tinygrad import Tensor, Device, GlobalCounters, dtypes, nn
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
 from extra.models.llama import Transformer, convert_from_huggingface, fix_bf16
 from sentencepiece import SentencePieceProcessor
-import tiktoken
+import tiktoken, sys
 from tiktoken.load import load_tiktoken_bpe
 
 MAX_CONTEXT = getenv("MAX_CONTEXT", 4096)
@@ -467,7 +467,11 @@ After you are done speaking, output [EOS]. You are not Chad.
     if chatbot:
       user_prompt = user_delim + input(user_delim) + "\n"
       outputted += user_prompt
-      toks.extend(llama.tokenizer.encode(user_prompt))
+
+    new_toks = [llama.tokenizer.bos_id()] + llama.tokenizer.encode(outputted)
+    assert toks == new_toks[:len(toks)]
+    toks = new_toks
+    assert outputted == llama.tokenizer.decode(toks)
 
     for i in range(args.count):
       GlobalCounters.reset()
@@ -488,9 +492,11 @@ After you are done speaking, output [EOS]. You are not Chad.
       # add the new token
       toks.append(tok)
 
-      cur = llama.tokenizer.decode([tok])
-      outputted += cur
-      print(cur, end='', flush=True)
+      # TODO: this is a hack to deal with spaces. i think the decode is fast though, so who cares?
+      cur = llama.tokenizer.decode(toks)
+      sys.stdout.write(cur[len(outputted):])
+      sys.stdout.flush()
+      outputted = cur
 
       # stop after you have your answer
       if chatbot and outputted.endswith(end_delim): break

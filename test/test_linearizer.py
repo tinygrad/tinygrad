@@ -269,7 +269,7 @@ class TestLinearizer(unittest.TestCase):
         assert len([uop for uop in k.uops if uop.uop is UOps.WMMA]) > 0, "tensor core not triggered"
         assert len([x for x in k.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
 
-        prg = Device[Device.DEFAULT].to_program(k)
+        prg = Device[Device.DEFAULT].to_runner(k)
         real_bufs[0].copyin(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np).data) # Zero to check that all values are filled
         prg.exec(real_bufs)
         result = np.frombuffer(real_bufs[0].as_buffer(), real_bufs[0].dtype.np)
@@ -602,19 +602,19 @@ def helper_linearizer_opt(r:Tensor, opts=[], apply_tc=False, atol=1e-4, rtol=1e-
 
   # Get baseline, which is not optimized at all.
   k = Linearizer(realized_ast)
-  prg = Device[Device.DEFAULT].to_program(k)
+  prg = Device[Device.DEFAULT].to_runner(k)
   prg.exec(real_bufs)
   wanna_output = np.frombuffer(real_bufs[0].as_buffer(), real_bufs[0].dtype.np).copy()
 
   # Check correctness of handcoded optimiztions.
   k = Linearizer(realized_ast)
   k.hand_coded_optimizations()
-  prg = Device[Device.DEFAULT].to_program(k)
+  prg = Device[Device.DEFAULT].to_runner(k)
   real_bufs[0].copyin(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np).data) # Zero to check that all values are filled
   prg.exec(real_bufs)
   np.testing.assert_allclose(wanna_output, np.frombuffer(real_bufs[0].as_buffer(), real_bufs[0].dtype.np), atol=atol, rtol=rtol)
   for i, x in enumerate(opts): # Check custom transformations if any.
-    check_opt(x, lambda: Linearizer(realized_ast), Device[Device.DEFAULT].to_program, color_sizes[i] if i < len(color_sizes) else None)
+    check_opt(x, lambda: Linearizer(realized_ast), Device[Device.DEFAULT].to_runner, color_sizes[i] if i < len(color_sizes) else None)
 
 class TestKernelOpts(unittest.TestCase):
   def test_local_and_grouped_reduce(self):
@@ -1051,7 +1051,7 @@ class TestLinearizerUOptimize(unittest.TestCase):
       self.skipTest("Needs locals and float4")
     ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(8, 32, 1, 1), strides=(1, 8, 0, 0), offset=0, mask=None, contiguous=False),)))),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(8, 32, 1, 1), strides=(32, 1, 0, 0), offset=0, mask=None, contiguous=True),)))) # noqa: E501
     opts = [Opt(op=OptOps.LOCAL, axis=1, amt=4), Opt(op=OptOps.UPCAST, axis=2, amt=2), Opt(op=OptOps.LOCAL, axis=1, amt=8),
-            Opt(op=OptOps.UPCAST, axis=2, amt=0), Opt(op=OptOps.UPCAST, axis=1, amt=4), Opt(op=OptOps.LOCAL, axis=0, amt=8),
+            Opt(op=OptOps.UPCAST, axis=1, amt=0), Opt(op=OptOps.UPCAST, axis=1, amt=4), Opt(op=OptOps.LOCAL, axis=0, amt=8),
             Opt(op=OptOps.UPCAST, axis=1, amt=0), Opt(op=OptOps.UPCAST, axis=0, amt=2)]
 
     k = Linearizer(ast)
