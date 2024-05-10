@@ -4,8 +4,7 @@ from tinygrad.codegen.kernel import Opt, OptOps
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.features.search import time_linearizer, bufs_from_lin, actions
-from tinygrad.device import Device
-from tinygrad.buffer import Buffer
+from tinygrad.device import Device, Buffer
 from tinygrad.ops import LoadOps, BufferOps
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import Context

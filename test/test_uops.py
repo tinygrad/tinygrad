@@ -4,8 +4,7 @@ import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv
 from tinygrad.dtype import dtypes, DType, PtrDType
-from tinygrad.buffer import Buffer
-from tinygrad.device import Device
+from tinygrad.device import Device, Buffer
 from tinygrad.engine.realize import CompiledRunner, Program
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.engine.schedule import create_schedule

@@ -2,8 +2,7 @@ from typing import List, Dict, cast
 import ctypes
 from tinygrad.helpers import dedup, cpu_time_execution, GraphException, DEBUG
 from tinygrad.engine.jit import GraphRunner
-from tinygrad.device import Device
-from tinygrad.buffer import Buffer
+from tinygrad.device import Device, Buffer
 from tinygrad.engine.realize import ExecItem, CompiledRunner
 from tinygrad.shape.symbolic import Variable
 from tinygrad.runtime.ops_clang import ClangProgram
