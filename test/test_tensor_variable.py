@@ -58,6 +58,17 @@ class TestTensorVariable(unittest.TestCase):
     ret = t.mean(axis=1).reshape(2, 1).numpy()
     assert np.all(ret == 1)
 
+  def test_symbolic_mean_2d_add(self):
+    add_term = Variable("c", 0, 10)
+    add_term.bind(1)
+    vv = Variable("a", 1, 10)
+    vv.bind(1)
+    vv2 = Variable("b", 1, 10)
+    vv2.bind(1)
+    t = Tensor.ones(2, 2).contiguous().reshape(vv2+add_term, vv+add_term)
+    ret = t.mean().item()
+    assert ret == 1
+
   @unittest.skip("symbolic arange isn't supported")
   def test_symbolic_arange(self):
     vv = Variable("a", 1, 10)
