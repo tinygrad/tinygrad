@@ -1,8 +1,7 @@
 import ctypes, collections, array, time
 from typing import List, Any, Dict, cast, Optional, Tuple, Set
 from tinygrad.helpers import GraphException, round_up, to_mv
-from tinygrad.buffer import Buffer, BufferOptions
-from tinygrad.device import Compiled, Device
+from tinygrad.device import Compiled, Device, Buffer, BufferOptions
 from tinygrad.shape.symbolic import Variable
 from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner
 from tinygrad.engine.jit import MultiGraphRunner

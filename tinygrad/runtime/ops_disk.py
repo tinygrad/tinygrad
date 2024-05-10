@@ -2,8 +2,7 @@ from __future__ import annotations
 import os, mmap, _posixshmem, io
 from typing import Optional
 from tinygrad.helpers import OSX
-from tinygrad.device import Compiled
-from tinygrad.buffer import Allocator
+from tinygrad.device import Compiled, Allocator
 
 class DiskBuffer:
   def __init__(self, device:DiskDevice, size:int, offset=0):

@@ -3,8 +3,7 @@ import time, functools
 from dataclasses import dataclass, replace
 from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, all_int, BEAM, NOOPT, to_function_name, prod
 from tinygrad.ops import ScheduleItem, BufferOps, LoadOps, copy_ast, LazyOp, get_lazyop_info
-from tinygrad.device import Device, CompilerOptions
-from tinygrad.buffer import Buffer
+from tinygrad.device import Device, CompilerOptions, Buffer
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.codegen.uops import UOpGraph

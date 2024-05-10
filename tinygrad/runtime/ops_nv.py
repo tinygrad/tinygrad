@@ -2,8 +2,7 @@ from __future__ import annotations
 import os, ctypes, pathlib, re, fcntl, functools, mmap, struct, tempfile, hashlib, subprocess, time, array
 from typing import Tuple, List, Any, cast
 from dataclasses import replace
-from tinygrad.device import Compiled, Compiler, CompilerOptions
-from tinygrad.buffer import LRUAllocator, BufferOptions
+from tinygrad.device import Compiled, Compiler, CompilerOptions, LRUAllocator, BufferOptions
 from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up, to_char_p_p, DEBUG, prod
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.runtime.ops_cuda import check as cuda_check, _get_bytes
