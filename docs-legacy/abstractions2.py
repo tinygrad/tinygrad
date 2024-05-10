@@ -59,8 +59,8 @@ lin = Device[DEVICE].get_linearizer(st_0).linearize()
 for u in lin.uops: print(u)
 
 # compile a program (and print the source)
-fxn = Device[DEVICE].to_program(lin)
-print(fxn.p.prg)
+fxn = Device[DEVICE].to_runner(lin)
+print(fxn.p.src)
 # NOTE: fxn.clprg is the ClangProgram
 
 # run the program

@@ -29,7 +29,7 @@ class TestFusionOp(unittest.TestCase):
     sched = create_schedule([a.lazydata], None)
     ji = Device[Device.DEFAULT].get_runner(*sched[-1].ast)
     self.assertLess(time.perf_counter()-st, 1.0)
-    assert len(ji.p.prg.splitlines()) < 250
+    assert len(ji.p.src.splitlines()) < 250
 
   def test_recursive_add_cmp(self):
     st = time.perf_counter()

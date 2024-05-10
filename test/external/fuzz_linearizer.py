@@ -55,7 +55,7 @@ def run_linearizer(lin: Linearizer, rawbufs=None, var_vals=None):
 
   # TODO: images needs required_optimization
   try:
-    prg = device.to_program(lin)
+    prg = device.to_runner(lin)
   except Exception:
     traceback.print_exc()
     return "COMPILE_ERROR"
