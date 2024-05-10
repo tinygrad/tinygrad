@@ -4,8 +4,7 @@ import ctypes, functools, hashlib
 import tinygrad.runtime.autogen.opencl as cl
 from tinygrad.helpers import init_c_var, to_char_p_p, from_mv, OSX, DEBUG
 from tinygrad.renderer.cstyle import OpenCLRenderer
-from tinygrad.buffer import BufferOptions, LRUAllocator
-from tinygrad.device import Compiled, Compiler, CompilerOptions
+from tinygrad.device import BufferOptions, LRUAllocator, Compiled, Compiler, CompilerOptions
 
 # see test/external/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
 OSX_TIMING_RATIO = (125/3) if OSX else 1.0

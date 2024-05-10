@@ -14,9 +14,8 @@ import onnx
 from typing import Tuple, List, Optional, Dict, cast
 from extra.onnx import get_run_onnx
 from tinygrad import Tensor, Device, GlobalCounters, dtypes
-from tinygrad.buffer import Buffer
 from tinygrad.dtype import ImageDType
-from tinygrad.device import CompiledRunner
+from tinygrad.device import CompiledRunner, Buffer
 from tinygrad.helpers import partition, Context, fetch, getenv, DEBUG
 from tinygrad.engine.realize import run_schedule, lower_schedule, ExecItem
 from tinygrad.engine.memory import memory_planner

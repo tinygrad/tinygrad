@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen
 from tinygrad.ops import ScheduleItem, BufferOps, LoadOps, copy_ast, LazyOp
 from tinygrad.device import Runner, Device
-from tinygrad.buffer import Buffer
+from tinygrad.device import Buffer
 from tinygrad.shape.symbolic import Variable, sym_infer
 
 # **************** Runners ****************
