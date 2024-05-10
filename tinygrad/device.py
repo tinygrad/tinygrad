@@ -44,8 +44,9 @@ Device = _Device()
 # **************** base Runner + helpers ****************
 
 class Runner:
-  def __init__(self, display_name:str, dname:str, op_estimate:sint=0, mem_estimate:sint=0):
-    self.first_run, self.display_name, self.dname, self.op_estimate, self.mem_estimate = True, display_name, dname, op_estimate, mem_estimate
+  def __init__(self, display_name:str, dname:str, op_estimate:sint=0, mem_estimate:sint=0, outcount=0):
+    self.first_run, self.display_name, self.dname, self.op_estimate, self.mem_estimate, self.outcount = \
+      True, display_name, dname, op_estimate, mem_estimate, outcount
   @property
   def device(self): return Device[self.dname]
   def exec(self, rawbufs:List[Buffer], var_vals:Optional[Dict[Variable, int]]=None) -> Optional[float]:
@@ -59,7 +60,7 @@ class BufferCopy(Runner):
   def __init__(self, total_sz, dest_device, src_device):
     if total_sz >= 1e6: name = f"{type(self).__name__[6:].lower()} {total_sz/1e6:7.2f}M, {dest_device[:7]:>7s} <- {src_device[:7]:7s}"
     else: name = f"{type(self).__name__[6:].lower()} {total_sz:8d}, {dest_device[:7]:>7s} <- {src_device[:7]:7s}"
-    super().__init__(colored(name, "yellow"), dest_device, 0, total_sz)
+    super().__init__(colored(name, "yellow"), dest_device, 0, total_sz, outcount=1)
   def copy(self, dest, src):
     if src.device.startswith("DISK") and hasattr(dest.allocator, 'copy_from_fd') and src.nbytes >= 4096 and hasattr(src.allocator.device, 'fd'):
       dest.allocator.copy_from_fd(dest._buf, src.allocator.device.fd, src._buf.offset, src.nbytes)
@@ -160,8 +161,8 @@ class CompiledRunner(Runner):
     self.uops = uops
     self.vars: List[Variable] = [] if uops is None else uops.vars()
     self.globals: List[Tuple[int, bool]] = [] if uops is None else uops.globals()
-    self.lib, self.clprg, self.outcount = lib, Device[dname].runtime(self.name, lib), sum(x[1] for x in self.globals)
-    super().__init__(name, dname, op_estimate, mem_estimate)
+    self.lib, self.clprg = lib, Device[dname].runtime(self.name, lib)
+    super().__init__(name, dname, op_estimate, mem_estimate, sum(x[1] for x in self.globals))
 
   def to_other_device(self, dname:str):
     return CompiledRunner(self.display_name, self.prg, dname, self.global_size, self.local_size,
