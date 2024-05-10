@@ -1,7 +1,7 @@
 from typing import List, Dict, DefaultDict, Tuple, Union
 from collections import defaultdict
 from tinygrad.dtype import DType
-from tinygrad.buffer import Buffer
+from tinygrad.device import Buffer
 from tinygrad.helpers import getenv, DEBUG, dedup
 from tinygrad.ops import ScheduleItem
 
