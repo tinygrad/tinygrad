@@ -12,13 +12,13 @@ def wait_check(cbuf: Any):
     raise RuntimeError(error)
 
 def get_workaround_lib(device):
-    options = Metal.MTLCompileOptions.new()
-    options.setLibraryType_(Metal.MTLLibraryTypeDynamic)
-    options.setInstallName_("/tmp/workaround.dylib")
-    lib = unwrap2(device.newLibraryWithSource_options_error_("kernel void workaroundfn() {}", options, None))
-    workaround_lib = unwrap2(device.newDynamicLibrary_error_(lib, None))
-    workaround_lib.serializeToURL_error_(Foundation.NSURL.fileURLWithPath_("/tmp/workaround.dylib"), None)
-    return workaround_lib
+  options = Metal.MTLCompileOptions.new()
+  options.setLibraryType_(Metal.MTLLibraryTypeDynamic)
+  options.setInstallName_("/tmp/workaround.dylib")
+  lib = unwrap2(device.newLibraryWithSource_options_error_("kernel void workaroundfn() {}", options, None))
+  workaround_lib = unwrap2(device.newDynamicLibrary_error_(lib, None))
+  workaround_lib.serializeToURL_error_(Foundation.NSURL.fileURLWithPath_("/tmp/workaround.dylib"), None)
+  return workaround_lib
 
 class MetalCompiler(Compiler):
   compiler_opts = CompilerOptions("METAL", has_tensor_cores=os.uname().machine == "arm64", shared_max=32768)
