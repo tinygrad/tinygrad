@@ -1,6 +1,7 @@
 import unittest
 from tinygrad import Tensor, Device
 from tinygrad.engine.schedule import create_schedule
+from tinygrad.engine.realize import get_program, get_linearizer
 
 # TODO: can copy this in here when we remove it
 #from tinygrad.ops import get_lazyop_info
@@ -12,8 +13,9 @@ from tinygrad.engine.schedule import create_schedule
 
 def get_stats(x:Tensor):
   si = create_schedule([x.lazydata])[-1]
-  runner = Device[Device.DEFAULT].get_runner(*si.ast)
-  return runner.op_estimate, runner.mem_estimate
+  opts = Device[Device.DEFAULT].compiler.compiler_opts
+  prg = get_program(opts, get_linearizer(opts, si.ast))
+  return prg.op_estimate, prg.mem_estimate
 
 class TestUOpsStats(unittest.TestCase):
   def test_simple_add(self):

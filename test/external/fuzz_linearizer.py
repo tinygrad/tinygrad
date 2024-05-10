@@ -11,6 +11,7 @@ from tinygrad.features.search import get_linearizer_actions, bufs_from_lin
 from tinygrad.features.graph import print_tree
 from tinygrad.helpers import getenv, from_mv, prod, colored, Context, DEBUG
 from tinygrad.ops import LazyOp, UnaryOps, BufferOps
+from tinygrad.engine.realize import CompiledRunner, get_program
 
 def tuplize_uops(uops:List[UOp]) -> Tuple:
   return tuple([(x.uop, x.dtype, tuple(uops.index(x) for x in x.vin), x.arg) for x in uops])
@@ -55,7 +56,7 @@ def run_linearizer(lin: Linearizer, rawbufs=None, var_vals=None):
 
   # TODO: images needs required_optimization
   try:
-    prg = device.to_runner(lin)
+    prg = CompiledRunner(get_program(device.compiler.compiler_opts, lin))
   except Exception:
     traceback.print_exc()
     return "COMPILE_ERROR"
