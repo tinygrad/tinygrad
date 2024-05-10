@@ -147,22 +147,22 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
 
     # follow the reduce down
     child_set: Dict[LazyBuffer, ShapeTracker] = {r: r.st}
-    realized_children: Dict[LazyBuffer, ShapeTracker] = {}
+    group: Set[LazyBuffer] = set()
     forced_realize = False
     can_chase = True
     while not forced_realize and len(child_set):
       next_child_set = {}
       for tr,st in child_set.items():
         if tr in realizes:
-          realized_children[tr] = st
+          group.add(tr)
           # can only reduce contiguous
           # max one reduceop per kernel
           if not st.contiguous or st.size != r.st.size or tr in reduce_for_op:
             can_chase = tr not in reduce_for_op
             forced_realize = True
             break
-          if len(realized_children) > 1:
-            rc_parents, rc_children = deque(realized_children), deque(realized_children)
+          if len(group) > 1:
+            rc_parents, rc_children = deque(group), deque(group)
             while rc_parents and not forced_realize:
               # max one reduceop per kernel
               if (p:=rc_parents.pop()).op in ReduceOps: forced_realize = True
@@ -172,9 +172,9 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
               if (c:=rc_children.pop()).op in ReduceOps or not c.st.contiguous or c.st.size != r.st.size or c in reduce_for_op:
                 realized_descendants.clear()
                 break
-              if c in realizes and c not in (*realized_children, tr): realized_descendants.add(c)
+              if c in realizes and c not in (*group, tr): realized_descendants.add(c)
               rc_children.extend(x for x in children[c] if x.realized is None and x.device == r.device)
-            realized_children.update((rd, st) for rd in realized_descendants)
+            group.update(realized_descendants)
           continue
         for tr_next in children[tr].keys():
           if not tr_next.realized:
@@ -188,11 +188,11 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
               break
             next_child_set[tr_next] = st + st_childs[0].st
       child_set = next_child_set
-    if not forced_realize and any(x.op is LoadOps.ASSIGN for x in realized_children):
-      parents = deque((r, *realized_children))
+    if not forced_realize and any(x.op is LoadOps.ASSIGN for x in group):
+      parents = deque((r, *group))
       while parents and not forced_realize:
         if (p:=parents.pop().base).realized or p in realizes:
-          if p in assign_targets and assign_targets[p] not in realized_children: forced_realize, can_chase = True, False
+          if p in assign_targets and assign_targets[p] not in group: forced_realize, can_chase = True, False
           continue
         parents.extend(p.srcs)
     if forced_realize:
@@ -213,7 +213,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
           tr = tr.srcs[0].base
         reduce_for_op[tr] = r
       realizes[tr] = None
-    else: reduce_for_op.update((tr, r) for tr in realized_children)
+    else: reduce_for_op.update((tr, r) for tr in group)
 
   output_groups: DefaultDict[Tuple, List[LazyBuffer]] = defaultdict(list)
   for buf in realizes:
