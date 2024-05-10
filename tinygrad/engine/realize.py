@@ -1,8 +1,8 @@
-from typing import List, Dict, Optional, cast, Generator, Tuple
+from typing import List, Dict, Optional, cast, Generator
 import time
 from dataclasses import dataclass
 from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen
-from tinygrad.ops import ScheduleItem, BufferOps, LoadOps, LazyOp
+from tinygrad.ops import ScheduleItem, BufferOps, LoadOps
 from tinygrad.device import Runner, Device
 from tinygrad.device import Buffer
 from tinygrad.shape.symbolic import Variable, sym_infer
