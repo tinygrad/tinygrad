@@ -10,6 +10,7 @@ from tinygrad.dtype import DType, ImageDType
 class BufferOptions:
   image: Optional[ImageDType] = None
   uncached: bool = False
+  cpu_access: bool = False
   host: bool = False
   nolru: bool = False
 
