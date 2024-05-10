@@ -1,7 +1,7 @@
 from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable
 import itertools, functools, random, math, time, multiprocessing, traceback, signal
 from collections import defaultdict
-from tinygrad.device import Device, Compiled, Buffer, CompiledRunner, Compiler
+from tinygrad.device import Device, Compiled, Buffer, CompiledRunner, Compiler, Program
 from tinygrad.ops import MemBuffer
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, to_function_name
 from tinygrad.dtype import ImageDType
@@ -36,7 +36,7 @@ def _time_program(uops, rdev:Compiled, lib:bytes, global_size, local_size, var_v
   factor = 1
   if global_size is not None and max_global_size is not None:
     global_size, factor = _get_test_global_size(global_size, max_global_size, var_vals)
-  try: car = CompiledRunner(name, "", rdev.dname, global_size, local_size, uops, precompiled=lib)
+  try: car = CompiledRunner(Program(name, "", rdev.dname, global_size, local_size, uops), precompiled=lib)
   except AssertionError: return [math.inf] * cnt
   tms = []
   for _ in range(cnt):

@@ -14,7 +14,7 @@ class ClangGraph(GraphRunner):
     super().__init__(jit_cache, input_rawbuffers, var_vals)
     if not all(isinstance(ji.prg, CompiledRunner) for ji in jit_cache): raise GraphException
 
-    prgs = '\n'.join(dedup([cast(CompiledRunner, ji.prg).prg for ji in jit_cache]))
+    prgs = '\n'.join(dedup([cast(CompiledRunner, ji.prg).p.prg for ji in jit_cache]))
     args = [f"{render_dtype(x.dtype)}* arg{i}" for i,x in enumerate(input_rawbuffers)]
     args += [f"int {v.expr}" for v in var_vals]
     code = ["void batched("+','.join(args)+") {"]
@@ -26,8 +26,8 @@ class ClangGraph(GraphRunner):
           args.append(f"arg{input_rawbuffers.index(buf)}")
         else:
           args.append(f"({render_dtype(buf.dtype)}*)0x{ctypes.addressof(buf._buf):X}")
-      args += [x.expr for x in cast(CompiledRunner, ji.prg).vars]
-      code.append(f"  {cast(CompiledRunner, ji.prg).name}({','.join(args)});")
+      args += [x.expr for x in cast(CompiledRunner, ji.prg).p.vars]
+      code.append(f"  {cast(CompiledRunner, ji.prg).p.function_name}({','.join(args)});")
     code.append("}")
     if DEBUG >= 4: print("\n".join(code))
     compiler = Device["CLANG"].compiler
