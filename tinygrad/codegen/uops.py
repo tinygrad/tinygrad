@@ -144,10 +144,73 @@ class UOpGraph:
     from tinygrad.features.graph import graph_uops
     graph_uops(self.uops)
 
+
+  class UOpPrinter():
+    @dataclass
+    class UOpStr:
+      op: UOp
+      name: str
+
+    def __init__(self, uops:List[UOp]):
+      self.counters = dict()
+      self.orig_uops = uops
+      self.indent = ""
+      self.input = []
+      self.names = []
+      self.build_names(uops)
+
+    def format_dtype(self, ty: DType) -> str:
+      s = str(ty).split(".")
+      return f"{s[-1]}{'*' if s[0] == 'ptr' else ''}"
+
+    def build_names(self, ops: List[UOp]):
+      for op in ops:
+        self.counters[op.uop] = self.counters.get(op.uop, -1) + 1
+        if op.uop == UOps.DEFINE_GLOBAL:
+          self.input.append(self.UOpStr(op, f"data{op.arg[0]}"))
+          self.names.append(self.UOpStr(op, f"data{op.arg[0]}"))
+          continue
+        if op.uop == UOps.SPECIAL: self.names.append(self.UOpStr(op, f"{op.arg[1]}")); continue
+        if op.uop == UOps.DEFINE_ACC: self.names.append(self.UOpStr(op, f"acc{self.counters.get(op.uop)}")); continue
+        if op.uop == UOps.CONST: self.names.append(self.UOpStr(op, f"c{self.counters.get(op.uop)}")); continue
+        if op.uop == UOps.LOOP: self.names.append(self.UOpStr(op, f"i{self.counters.get(op.uop)}")); continue
+        if op.uop == UOps.ALU: self.names.append(self.UOpStr(op, f"alu{self.counters.get(op.uop)}")); continue
+        if op.uop == UOps.LOAD: self.names.append(self.UOpStr(op, f"ld{self.counters.get(op.uop)}")); continue
+        if op.uop == UOps.PHI: self.names.append(self.UOpStr(op, f"phi{self.counters.get(op.uop)}")); continue
+        self.names.append(self.UOpStr(op, f""))
+
+    def resolve_args(self, op: UOp) -> List[str]:
+      return [self.names[self.orig_uops.index(x)].name for x in op.vin] if op.vin is not None else []
+
+    def format_alu(self, op: UOp) -> str:
+      if op.arg == BinaryOps.ADD: return "+"
+      if op.arg == BinaryOps.MUL: return "*"
+      if op.arg == BinaryOps.SUB: return "-"
+
+
+    def build_str(self) -> str:
+      print(self.input)
+      out = f"def main({', '.join([u.name + ' : ' + 'const ' + self.format_dtype(u.op.dtype) if not u.op.arg[1] else u.name + ' : ' + self.format_dtype(u.op.dtype) for u in self.input])}):\n"
+      self.indent = "  "
+      for u in self.names:
+        args = self.resolve_args(u.op)
+        out += self.indent if not u.op.uop == UOps.DEFINE_GLOBAL else ''
+        if u.op.uop == UOps.SPECIAL: out += f"{u.name} : {self.format_dtype(u.op.dtype):} # {u.op.arg}\n"; continue
+        if u.op.uop == UOps.DEFINE_ACC: out += f"{u.name} :{self.format_dtype(u.op.dtype)} = {str(u.op.arg)}\n"; continue
+        if u.op.uop == UOps.CONST: out += f"{u.name} : {self.format_dtype(u.op.dtype)} = {str(u.op.arg)}\n"; continue
+        if u.op.uop == UOps.LOOP: out += f"loop ({u.name} in {args[0]}..{args[1]}):\n"; self.indent += "  "; continue
+        if u.op.uop == UOps.ALU: out += f"{u.name} : {self.format_dtype(u.op.dtype)} = {args[0]} {self.format_alu(u.op)} {args[1]}\n"; continue
+        if u.op.uop == UOps.LOAD: out += f"{u.name} : {self.format_dtype(u.op.dtype)} = {args[0]}[{args[1]}]\n"; continue
+        if u.op.uop == UOps.STORE: out += f"{args[0]}[{args[1]}] = {args[2]}\n"; continue
+        if u.op.uop == UOps.PHI: out += f"{u.name} : {self.format_dtype(u.op.dtype)} = {args[1]} if {args[2]} else {args[0]}\n"; continue
+        if u.op.uop == UOps.ENDLOOP: self.indent = self.indent[:-2]; out = out[:-2]; out += "endloop:\n"; continue
+
+      return out
+
   def print(self):
-    for u in self.uops:
-      print(f"{self.uops.index(u):4d} {str(u.uop):20s}: {str(u.dtype) if u.dtype is not None else '':25s} "
-            f"{str([self.uops.index(x) for x in u.vin]):32s} {u.arg}")
+    ctx = self.UOpPrinter(self.uops)
+    print(ctx.build_str())
+
 
   def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None, cachable=True, insert_before=None,
           simplify=True) -> UOp:
