@@ -36,7 +36,7 @@ Device = _Device()
 
 # **************** for Compiled Devices ****************
 
-def fake_renderer(name, uops): raise Exception("needs a renderer")
+def fake_renderer(name, uops): raise NotImplementedError("needs a renderer")
 
 @dataclass(frozen=True)
 class CompilerOptions:

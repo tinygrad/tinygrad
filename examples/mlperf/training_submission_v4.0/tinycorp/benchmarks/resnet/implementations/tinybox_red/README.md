@@ -19,7 +19,9 @@ Disable cwsr
 This is the default on production tinybox red.
 ```
 sudo vi /etc/modprobe.d/amdgpu.conf
-add there "options amdgpu cwsr_enable=0"
+cat <<EOF > /etc/modprobe.d/amdgpu.conf
+options amdgpu cwsr_enable=0
+EOF
 sudo update-initramfs -u
 sudo reboot
 
