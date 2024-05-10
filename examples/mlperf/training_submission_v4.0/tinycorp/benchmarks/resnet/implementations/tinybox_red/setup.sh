@@ -1,11 +1,8 @@
-export PYTHONPATH="."
-export MODEL="resnet"
-export DEFAULT_FLOAT="HALF" GPUS=6 BS=1536 EVAL_BS=48 LR=7
+#!/bin/bash
 
-export SPLIT_REDUCEOP=0 LAZYCACHE=0 RESET_STEP=0
+rocm-smi --setprofile compute
+rocm-smi --setmclk 3
+rocm-smi --setperflevel high
 
-export TRAIN_BEAM=2 IGNORE_JIT_FIRST_BEAM=1 BEAM_UOPS_MAX=1200 BEAM_UPCAST_MAX=64 BEAM_LOCAL_MAX=256 BEAM_MIN_PROGRESS=50
-
-export BENCHMARK=10 DEBUG=2
-
-python3 examples/mlperf/model_train.py
+# power cap to 350W
+echo "350000000" | sudo tee /sys/class/drm/card{1..6}/device/hwmon/hwmon*/power1_cap

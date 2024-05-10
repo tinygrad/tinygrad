@@ -3,7 +3,8 @@ import os, subprocess, pathlib, ctypes, tempfile, functools
 import Metal, libdispatch
 from typing import List, Set, Any, Tuple, Optional
 from tinygrad.helpers import prod, getenv, DEBUG, unwrap2
-from tinygrad.device import Compiled, LRUAllocator, Compiler, CompilerOptions
+from tinygrad.device import Compiled, Compiler, CompilerOptions
+from tinygrad.buffer import LRUAllocator
 from tinygrad.renderer.cstyle import MetalRenderer
 
 def wait_check(cbuf: Any):
@@ -99,7 +100,7 @@ class MetalDevice(Compiled):
     self.track_cross_buffer: List[Any] = []
     from tinygrad.runtime.graph.metal import MetalGraph
     super().__init__(device, MetalAllocator(self), MetalCompiler(None if getenv("METAL_XCODE") else self),
-                     functools.partial(MetalProgram, self), functools.partial(MetalGraph, self))
+                     functools.partial(MetalProgram, self), MetalGraph)
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight: wait_check(cbuf)
     self.mv_in_metal.clear()

@@ -5,7 +5,8 @@ from typing import Tuple, List, Optional, Any, Dict
 import pickle, base64, itertools, time, struct
 from tinygrad.dtype import DType, dtypes, ImageDType
 from tinygrad.helpers import all_same, getenv, flatten
-from tinygrad.device import Compiled, Allocator, Compiler, CompilerOptions
+from tinygrad.device import Compiled, Compiler, CompilerOptions
+from tinygrad.buffer import Allocator
 from tinygrad.codegen.uops import UOpGraph, UOps
 from tinygrad.ops import BinaryOps, TernaryOps, exec_alu
 
@@ -71,7 +72,7 @@ class PythonProgram:
         dl[i] = dtype
         if uop is UOps.DEFINE_GLOBAL:
           assert dtype.fmt is not None
-          ul[i] = [pbufs[arg[0]].cast(dtype.fmt)] * warp_size
+          ul[i] = [pbufs.pop(0).cast(dtype.fmt)] * warp_size
         elif uop is UOps.DEFINE_LOCAL:
           assert dtype.fmt is not None
           lbuf = memoryview(bytearray(arg[1]*dtype.itemsize))

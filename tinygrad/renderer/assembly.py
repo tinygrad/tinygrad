@@ -94,7 +94,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, _uops:UOpGraph) -> str
   matcher.rewrite_graph(uops)
 
   for pointer_op in list(filter(lambda uop: uop.uop in [UOps.LOAD, UOps.STORE], uops.uops)): ptr_ar(pointer_op, uops)
-  uops.remove_childless(set(x for x in uops if x.uop in {UOps.DEFINE_GLOBAL, UOps.PHI, UOps.ENDIF, UOps.ENDLOOP, UOps.STORE}))
+  uops.remove_childless(set(x for x in uops if x.uop in {UOps.PHI, UOps.ENDIF, UOps.ENDLOOP, UOps.STORE}))
   uops.optimize_loops()
 
   def kk(*s: str): kernel.append("\n".join(s))
@@ -199,11 +199,11 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, _uops:UOpGraph) -> str
         r[u] = f"%{args.expr}"
         if lang.load_global: kk(*lang.render_load(args.expr, ssa('dat', u, lang.types[dtype]), dtype, ss=".param"))
       elif uop is UOps.DEFINE_GLOBAL:
-        bufs.append((args[1], dtype))
-        r[u] = f"%{args[1]}"
+        bufs.append((nm:=f"data{args[0]}", dtype))
+        r[u] = f"%{nm}"
         if lang.load_global:
           dt = dtypes.ulong if dtype.__class__ == PtrDType else dtype
-          kk(*lang.render_load(args[1], ssa('dat', u, lang.types[dt]), dt, ss=".param"))
+          kk(*lang.render_load(nm, ssa('dat', u, lang.types[dt]), dt, ss=".param"))
       elif uop is UOps.WMMA:
         wmma = []
         for vv in vin[:2]:

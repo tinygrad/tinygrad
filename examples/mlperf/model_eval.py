@@ -35,7 +35,7 @@ def eval_resnet():
 
   # evaluation on the mlperf classes of the validation set from imagenet
   from examples.mlperf.dataloader import batch_load_resnet
-  iterator = batch_load_resnet(getenv("BS", 128*6), val=getenv("VAL", 1), shuffle=False)
+  iterator = batch_load_resnet(getenv("BS", 128*6), val=getenv("VAL", 1), shuffle=False, pad_first_batch=True)
   def data_get():
     x,y,cookie = next(iterator)
     return x.shard(GPUS, axis=0).realize(), y, cookie
@@ -51,9 +51,10 @@ def eval_resnet():
     try: next_proc = data_get()
     except StopIteration: next_proc = None
     nd = time.perf_counter()
-    proc = proc[0].numpy() == proc[1]  # this realizes the models and frees the cookies
+    y = np.array(proc[1])
+    proc = (proc[0].numpy() == y) & (y != -1)  # this realizes the models and frees the cookies
     n += proc.sum()
-    d += proc.size
+    d += (y != -1).sum()
     et = time.perf_counter()
     tlog(f"****** {n:5d}/{d:5d}  {n*100.0/d:.2f}% -- {(run-st)*1000:7.2f} ms to enqueue, {(et-run)*1000:7.2f} ms to realize ({(nd-run)*1000:7.2f} ms fetching). {(len(proc))/(et-st):8.2f} examples/sec. {GlobalCounters.global_ops*1e-12/(et-st):5.2f} TFLOPS")
     st = et
