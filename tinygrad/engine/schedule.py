@@ -141,6 +141,26 @@ def _recursive_group(tr:LazyBuffer, st:ShapeTracker, r:LazyBuffer, children:Defa
       if len(st_childs:=dedup(s for s in tr_next.srcs if s.base == tr)) > 1: return group.add(r)
       _recursive_group(tr_next, st+st_childs[0].st, r, children, realizes, reduce_for_op, group)
 
+# is r + rest a self-contained DAG within the large graph?
+def _can_localize(realizes:Dict[LazyBuffer, None], r:LazyBuffer, *rest:LazyBuffer) -> bool:
+  ext_srcs: List[LazyBuffer] = []
+  cache: Set[LazyBuffer] = set()
+  def _dfs(x:LazyBuffer, cache):
+    if x.realized is not None or x in rest or x in cache: return
+    if x in realizes: return ext_srcs.append(x)
+    cache.add(x)
+    for next_x in x.srcs: _dfs(next_x.base, cache)
+  for x in r.srcs: _dfs(x.base, cache)
+  # can only fuse if external srcs don't depend on *rest
+  cache.clear()
+  ancestors = deque(xs for x in ext_srcs for xs in x.srcs)
+  while ancestors:
+    if (x:=ancestors.pop().base).realized is not None or x in cache: continue
+    if x in rest: return False
+    cache.add(x)
+    ancestors.extend(x.srcs)
+  return True
+
 def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[DefaultDict[LazyBuffer, List[LazyBuffer]], DefaultDict[LazyBuffer, int],
                                                                     Dict[LazyBuffer, _LBScheduleItem]]:
   # start by just realizing the buffers passed in
