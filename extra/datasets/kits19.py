@@ -4,6 +4,7 @@ from pathlib import Path
 import numpy as np
 import nibabel as nib
 from scipy import signal, ndimage
+import json
 import os
 import torch
 import torch.nn.functional as F
@@ -21,6 +22,7 @@ git clone https://github.com/neheller/kits19
 cd kits19
 pip3 install -r requirements.txt
 python3 -m starter_code.get_imaging
+cp -Rf data/case_00185 data/case_00400 (see https://github.com/mlcommons/inference/blob/87ba8cb8a6a4f6525f26255fa513d902b17ab060/vision/medical_imaging/3d-unet-kits19/Makefile#L96-L102)
 cd ..
 mv kits19 extra/datasets
 ```
@@ -34,6 +36,11 @@ def get_train_files():
 def get_val_files():
   data = fetch("https://raw.githubusercontent.com/mlcommons/training/master/image_segmentation/pytorch/evaluation_cases.txt").read_text()
   return sorted([x for x in BASEDIR.iterdir() if x.stem.split("_")[-1] in data.split("\n")])
+
+@functools.lru_cache(None)
+def get_eval_files():
+  data = json.loads(fetch("https://raw.githubusercontent.com/mlcommons/inference/master/vision/medical_imaging/3d-unet-kits19/meta/inference_cases.json").read_bytes())
+  return sorted([x for x in BASEDIR.iterdir() if x.stem in data])
 
 def load_pair(file_path):
   image, label = nib.load(file_path / "imaging.nii.gz"), nib.load(file_path / "segmentation.nii.gz")
