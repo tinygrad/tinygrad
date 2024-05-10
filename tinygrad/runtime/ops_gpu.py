@@ -15,11 +15,10 @@ def check(status):
 def checked(ret, status): return (check(status.value), ret)[1]
 
 class CLCompiler(Compiler):
-  compiler_opts = CompilerOptions("GPU")
+  compiler_opts = CompilerOptions("GPU", renderer=OpenCLRenderer)
   def __init__(self, device:CLDevice, compile_key:str):
     self.device = device
     super().__init__(f"compile_cl_{compile_key}")
-  def render(self, name:str, uops) -> str: return OpenCLRenderer(name, uops)
   def compile(self, src:str) -> bytes:
     program = checked(cl.clCreateProgramWithSource(self.device.context, 1, to_char_p_p([src.encode()]), None, status := ctypes.c_int32()), status)
     build_status: int = cl.clBuildProgram(program, 1, self.device.device_id, None, cl.clBuildProgram.argtypes[4](), None)

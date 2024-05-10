@@ -12,7 +12,7 @@ from tinygrad.codegen.uops import exec_alu, UOpGraph
 from test.helpers import is_dtype_supported
 
 def _uops_to_prg(uops):
-  src = Device[Device.DEFAULT].compiler.render("test", uops)
+  src = Device[Device.DEFAULT].compiler.compiler_opts.renderer("test", uops)
   has_local = Device[Device.DEFAULT].compiler.compiler_opts.has_local
   return CompiledRunner(Program("test", src, Device.DEFAULT, [1,1,1] if has_local else None, [1,1,1] if has_local else None, uops=uops))
 
