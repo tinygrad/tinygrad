@@ -125,19 +125,19 @@ def _is_padding_okay(buf:LazyBuffer, realizes:Dict[LazyBuffer, None]) -> bool:
   if buf.op in UNSAFE_PAD_OPS: return False
   return all(_is_padding_okay(x.base, realizes) for x in buf.srcs)
 
-def _recursive_group(tr:LazyBuffer, st:ShapeTracker, children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]],
-                     realizes:Dict[LazyBuffer, None], reduce_for_op:Dict[LazyBuffer, LazyBuffer], group:Set[LazyBuffer], can_chase:bool) -> bool:
+def _recursive_group(tr:LazyBuffer, st:ShapeTracker, children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], realizes:Dict[LazyBuffer, None],
+                     reduce_for_op:Dict[LazyBuffer, LazyBuffer], group:Set[LazyBuffer], can_chase:bool) -> bool:
   if tr in realizes:
     group.add(tr)
     can_chase = tr not in reduce_for_op
-    return st.contiguous and st.size == tr.st.size and tr not in reduce_for_op
+    return not st.contiguous or st.size != tr.st.size or tr in reduce_for_op
   for tr_next in children[tr]:
     if not tr_next.realized:
-      if tr_next.op in ReduceOps: return False
+      if tr_next.op in ReduceOps: return True
       st_childs = dedup([s for s in tr_next.srcs if s.base == tr])
-      if len(st_childs) > 1: return False
+      if len(st_childs) > 1: return True
       return _recursive_group(tr_next, st+st_childs[0].st, children, realizes, reduce_for_op, group, can_chase)
-  return True
+  return False
 
 def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[DefaultDict[LazyBuffer, List[LazyBuffer]], DefaultDict[LazyBuffer, int],
                                                                     Dict[LazyBuffer, _LBScheduleItem]]:
@@ -162,6 +162,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
     # follow the reduce down
     group: Set[LazyBuffer] = set()
     forced_realize = _recursive_group(r, r.st, children, realizes, reduce_for_op, group, can_chase:=True)
+    print(forced_realize, group)
     if not forced_realize and len(group) > 1:
       rc_parents, rc_children = deque(group), deque(group)
       while rc_parents and not forced_realize:
