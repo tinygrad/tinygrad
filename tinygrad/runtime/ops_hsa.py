@@ -3,8 +3,7 @@ import ctypes, functools, subprocess, io, atexit, collections, json
 from typing import Tuple, TypeVar, List, Dict, Any
 import tinygrad.runtime.autogen.hsa as hsa
 from tinygrad.helpers import DEBUG, init_c_var, from_mv, round_up, to_mv, init_c_struct_t, getenv
-from tinygrad.device import Compiled, LRUAllocator, Compiler, CompilerOptions
-from tinygrad.buffer import BufferOptions
+from tinygrad.device import Compiled, Compiler, CompilerOptions, BufferOptions, LRUAllocator
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.runtime.driver.hsa import check, scan_agents, find_memory_pool, AQLQueue
 from tinygrad.runtime.driver.hip_comgr import compile_hip
@@ -43,11 +42,10 @@ class HSAProfiler:
 Profiler = HSAProfiler()
 
 class HSACompiler(Compiler):
-  compiler_opts = CompilerOptions("HSA", has_tensor_cores=True, shared_max=65536)
+  compiler_opts = CompilerOptions("HSA", has_tensor_cores=True, shared_max=65536, renderer=HIPRenderer)
   def __init__(self, arch:str):
     self.arch = arch
     super().__init__(f"compile_hip_{self.arch}")
-  def render(self, name:str, uops) -> str: return HIPRenderer(name, uops)
   def compile(self, src:str) -> bytes: return compile_hip(src, self.arch)
 
 class HSAProgram:
