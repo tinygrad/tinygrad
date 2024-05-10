@@ -148,10 +148,19 @@ class Compiler:
       if self.cachekey is not None: diskcache_put(self.cachekey, src, lib)
     return lib
 
+  def to_program(self, k:Linearizer) -> Program:
+    k.linearize()
+    info = get_lazyop_info(k.ast[0])
+    ops, mem = k.uops.flops_mem()
+    run_count = prod((k.global_size if k.global_size else []) + (k.local_size if k.local_size else []))
+    # NOTE: we use min here to ignore the indexing FLOPS
+    return Program(k.name, self.render(to_function_name(k.name), k.uops), self.compiler_opts.device, k.global_size, k.local_size,
+                   k.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))
+
 @dataclass(frozen=True)
 class Program:
   name:str
-  prg:str
+  src:str
   dname:str
   global_size:Optional[List[int]]=None
   local_size:Optional[List[int]]=None
@@ -173,7 +182,7 @@ class Program:
 
   def compile(self, cached=True) -> bytes:
     compiler = cast(Compiler, Device[self.dname].compiler)
-    return compiler.compile_cached(self.prg) if cached else compiler.compile(self.prg)
+    return compiler.compile_cached(self.src) if cached else compiler.compile(self.src)
 
   def launch_dims(self, var_vals:Dict[Variable, int]):
     global_size = [sym_infer(sz, var_vals) for sz in self.global_size] if self.global_size is not None else None
@@ -182,7 +191,7 @@ class Program:
 
 class CompiledRunner(Runner):
   def __init__(self, p:Program, precompiled:Optional[bytes]=None):
-    if DEBUG >= 4: print(p.prg)
+    if DEBUG >= 4: print(p.src)
     self.p:Program = p
     self.lib:bytes = precompiled if precompiled is not None else self.p.compile()
     self.clprg = Device[p.dname].runtime(p.function_name, self.lib)
@@ -213,15 +222,9 @@ class Compiled:
     self.dname, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler, runtime, graph
   def synchronize(self): pass  # override this in your device
 
-  def to_program(self, k:Linearizer) -> CompiledRunner:
+  def to_runner(self, k:Linearizer) -> CompiledRunner:
     assert self.compiler is not None, "compiler is required to run AST"
-    k.linearize()
-    info = get_lazyop_info(k.ast[0])
-    ops, mem = k.uops.flops_mem()
-    run_count = prod((k.global_size if k.global_size else []) + (k.local_size if k.local_size else []))
-    # NOTE: we use min here to ignore the indexing FLOPS
-    return CompiledRunner(Program(k.name, self.compiler.render(to_function_name(k.name), k.uops), self.dname, k.global_size, k.local_size,
-                                  k.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count)))
+    return CompiledRunner(self.compiler.to_program(k))
 
   def get_linearizer(self, *ast:LazyOp) -> Linearizer:
     assert self.compiler is not None, "compiler is required to build AST"
@@ -261,6 +264,6 @@ class Compiled:
     if bret:=method_cache.get(bkey):
       method_cache[ckey] = ret = CompiledRunner(replace(bret.p, dname=self.dname), bret.lib)
     else:
-      method_cache[ckey] = method_cache[bkey] = ret = self.to_program(self.get_linearizer(*ast))
+      method_cache[ckey] = method_cache[bkey] = ret = self.to_runner(self.get_linearizer(*ast))
     return ret
 
