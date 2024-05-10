@@ -198,8 +198,12 @@ class CompiledRunner(Runner):
       local_size = self.local_size = optimize_local_size(self.clprg, global_size, rawbufs)
       global_size = self.global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
     lra = {}
-    if global_size: lra['global_size'] = global_size
-    if local_size: lra['local_size'] = local_size
+    if global_size:
+      lra['global_size'] = global_size
+      assert len(global_size) == 3, "global size must have len 3"
+    if local_size:
+      lra['local_size'] = local_size
+      assert len(local_size) == 3, "local size must have len 3"
     return self.clprg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k] for k in self.p.vars), wait=wait)
 
 method_cache: Dict[Tuple[str, Tuple[LazyOp, ...], int, bool], CompiledRunner] = {}
@@ -215,10 +219,8 @@ class Compiled:
     info = get_lazyop_info(k.ast[0])
     ops, mem = k.uops.flops_mem()
     run_count = prod((k.global_size if k.global_size else []) + (k.local_size if k.local_size else []))
-    global_size = (k.global_size + [1]*(3-len(k.global_size))) if k.global_size is not None else None
-    local_size = (k.local_size + [1]*(3-len(k.local_size))) if k.local_size is not None else None
     # NOTE: we use min here to ignore the indexing FLOPS
-    return CompiledRunner(Program(k.name, self.compiler.render(to_function_name(k.name), k.uops), self.dname, global_size, local_size,
+    return CompiledRunner(Program(k.name, self.compiler.render(to_function_name(k.name), k.uops), self.dname, k.global_size, k.local_size,
                                   k.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count)))
 
   def get_linearizer(self, *ast:LazyOp) -> Linearizer:
