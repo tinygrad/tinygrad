@@ -69,11 +69,10 @@ def create_sdma_packets():
 sdma_pkts = create_sdma_packets()
 
 class AMDCompiler(Compiler):
-  compiler_opts = CompilerOptions("AMD", has_tensor_cores=True, shared_max=65536)
+  compiler_opts = CompilerOptions("AMD", has_tensor_cores=True, shared_max=65536, renderer=HIPRenderer)
   def __init__(self, arch:str):
     self.arch = arch
     super().__init__(f"compile_hip_{self.arch}")
-  def render(self, name:str, uops) -> str: return HIPRenderer(name, uops)
   def compile(self, src:str) -> bytes: return compile_hip(src, self.arch)
 
 SDMA_MAX_COPY_SIZE = 0x400000

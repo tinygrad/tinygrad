@@ -178,13 +178,15 @@ class PythonProgram:
         i += 1
     return time.perf_counter() - st
 
+def python_renderer(name:str, uops:UOpGraph) -> str:
+  lops = [(u.uop, u.dtype, [uops.uops.index(v) for v in u.vin], u.arg) for u in uops]
+  return base64.b64encode(pickle.dumps(lops)).decode()
+
 class PythonCompiler(Compiler):
-  compiler_opts = CompilerOptions("METAL", has_tensor_cores=True) if getenv("EMULATE_METAL") else \
-    (CompilerOptions("HSA", has_tensor_cores=True) if getenv("EMULATE_HSA") else \
-    (CompilerOptions("CUDA", has_tensor_cores=True) if getenv("EMULATE_CUDA") else CompilerOptions("PYTHON")))
-  def render(self, name:str, uops:UOpGraph) -> str:
-    lops = [(u.uop, u.dtype, [uops.uops.index(v) for v in u.vin], u.arg) for u in uops]
-    return base64.b64encode(pickle.dumps(lops)).decode()
+  compiler_opts = CompilerOptions("METAL", has_tensor_cores=True, renderer=python_renderer) if getenv("EMULATE_METAL") else \
+    (CompilerOptions("HSA", has_tensor_cores=True, renderer=python_renderer) if getenv("EMULATE_HSA") else \
+    (CompilerOptions("CUDA", has_tensor_cores=True, renderer=python_renderer) if getenv("EMULATE_CUDA") else \
+     CompilerOptions("PYTHON", renderer=python_renderer)))
   def compile(self, src:str) -> bytes: return base64.b64decode(src)
 
 class PythonAllocator(Allocator):

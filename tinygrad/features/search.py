@@ -2,7 +2,8 @@ from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable
 import itertools, functools, random, math, time, multiprocessing, traceback, signal
 from collections import defaultdict
 from dataclasses import replace
-from tinygrad.device import Device, Buffer, CompiledRunner, Compiler, Program
+from tinygrad.device import Device, Compiler
+from tinygrad.buffer import Buffer
 from tinygrad.ops import MemBuffer
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, to_function_name
 from tinygrad.dtype import ImageDType
@@ -11,6 +12,7 @@ from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError
 from tinygrad.codegen.uops import UOpGraph
 from tinygrad.tensor import Tensor
 from tinygrad.shape.symbolic import sym_infer
+from tinygrad.engine.realize import CompiledRunner, Program
 
 actions = [Opt(op=OptOps.UPCAST, axis=axis, amt=amt) for amt in [0,2,3,4,5,7] for axis in range(6)]
 actions += [Opt(op=OptOps.UNROLL, axis=axis, amt=amt) for amt in [0,4,7] for axis in range(4)]

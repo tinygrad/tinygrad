@@ -8,11 +8,10 @@ from tinygrad.renderer.llvmir import uops_to_llvm_ir
 import llvmlite.binding as llvm
 
 class LLVMCompiler(Compiler):
-  compiler_opts = CompilerOptions("LLVM", supports_float4=False, has_local=False, has_shared=False)
+  compiler_opts = CompilerOptions("LLVM", supports_float4=False, has_local=False, has_shared=False, renderer=uops_to_llvm_ir)
   def __init__(self, device:LLVMDevice):
     self.device = device
     super().__init__("compile_llvm")
-  def render(self, name:str, uops) -> str: return uops_to_llvm_ir(name, uops)
   def compile(self, src:str) -> bytes:
     mod = llvm.parse_assembly(src)
     mod.verify()
