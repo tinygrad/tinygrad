@@ -125,6 +125,20 @@ def _is_padding_okay(buf:LazyBuffer, realizes:Dict[LazyBuffer, None]) -> bool:
   if buf.op in UNSAFE_PAD_OPS: return False
   return all(_is_padding_okay(x.base, realizes) for x in buf.srcs)
 
+def _recursive_group(tr:LazyBuffer, st:ShapeTracker, children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]],
+                     realizes:Dict[LazyBuffer, None], reduce_for_op:Dict[LazyBuffer, LazyBuffer], group:Set[LazyBuffer], can_chase:bool) -> bool:
+  if tr in realizes:
+    group.add(tr)
+    can_chase = tr not in reduce_for_op
+    return st.contiguous and st.size == tr.st.size and tr not in reduce_for_op
+  for tr_next in children[tr]:
+    if not tr_next.realized:
+      if tr_next.op in ReduceOps: return False
+      st_childs = dedup([s for s in tr_next.srcs if s.base == tr])
+      if len(st_childs) > 1: return False
+      return _recursive_group(tr_next, st+st_childs[0].st, children, realizes, reduce_for_op, group, can_chase)
+  return True
+
 def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[DefaultDict[LazyBuffer, List[LazyBuffer]], DefaultDict[LazyBuffer, int],
                                                                     Dict[LazyBuffer, _LBScheduleItem]]:
   # start by just realizing the buffers passed in
@@ -146,33 +160,8 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
     if r != r.base or r.op not in ReduceOps or r in realizes: continue
 
     # follow the reduce down
-    child_set: Dict[LazyBuffer, ShapeTracker] = {r: r.st}
     group: Set[LazyBuffer] = set()
-    forced_realize = False
-    can_chase = True
-    while not forced_realize and len(child_set):
-      next_child_set = {}
-      for tr,st in child_set.items():
-        if tr in realizes:
-          group.add(tr)
-          # can only reduce contiguous
-          # max one reduceop per kernel
-          if not st.contiguous or st.size != r.st.size or tr in reduce_for_op:
-            can_chase = tr not in reduce_for_op
-            forced_realize = True
-          continue
-        for tr_next in children[tr].keys():
-          if not tr_next.realized:
-            # max one reduceop per kernel
-            if tr_next.op in ReduceOps:
-              forced_realize = True
-              continue
-            st_childs = dedup([s for s in tr_next.srcs if s.base == tr])
-            if len(st_childs) > 1:
-              forced_realize = True
-              continue
-            next_child_set[tr_next] = st + st_childs[0].st
-      child_set = next_child_set
+    forced_realize = _recursive_group(r, r.st, children, realizes, reduce_for_op, group, can_chase:=True)
     if not forced_realize and len(group) > 1:
       rc_parents, rc_children = deque(group), deque(group)
       while rc_parents and not forced_realize:
