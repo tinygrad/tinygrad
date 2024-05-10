@@ -28,7 +28,7 @@
   "accelerator_interconnect_topology": "",
   "cooling": "air",
   "hw_notes": "",
-  "framework": "tinygrad, commit 047c7f3e5b7c7dffe3d48b4065562aa77ae6f864",
+  "framework": "tinygrad, commit 0e8aa0e2886bf9a2d3ce093bce87305e182e6d4a",
   "other_software_stack": {
     "python": "3.10.12",
     "ROCm": "6.1"
