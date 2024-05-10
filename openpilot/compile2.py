@@ -169,18 +169,17 @@ if __name__ == "__main__":
   with Context(DEBUG=max(DEBUG.value, 2)):
     for ei in eis:
       prg = cast(CompiledRunner, ei.prg)
-      assert len(prg.vars) == 0
-      #print(prg.prg)
-      if prg.name not in saved_binaries:
-        jdat['binaries'].append({"name":prg.name, "length":len(prg.lib)})
+      assert len(prg.p.vars) == 0
+      if prg.p.function_name not in saved_binaries:
+        jdat['binaries'].append({"name":prg.p.function_name, "length":len(prg.lib)})
         binaries.append(prg.lib)
-        saved_binaries.add(prg.name)
+        saved_binaries.add(prg.p.function_name)
       ei.run()
       jdat['kernels'].append({
-        "name": prg.name,
-        "work_dim": len(prg.global_size),
-        "global_work_size": prg.global_size,
-        "local_work_size": prg.local_size,
+        "name": prg.p.function_name,
+        "work_dim": len(prg.p.global_size),
+        "global_work_size": prg.p.global_size,
+        "local_work_size": prg.p.local_size,
         "num_args": len(ei.bufs),
         "args": [to_ref(b) for b in ei.bufs],
         "arg_size": [8]*len(ei.bufs),

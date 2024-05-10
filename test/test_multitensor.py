@@ -56,7 +56,7 @@ class TestMultiTensor(unittest.TestCase):
     sched = create_schedule(out.lazydata.lbs)
     names = []
     for si, ei in zip(sched[:], lower_schedule(sched)):
-      if isinstance(ei.prg, CompiledRunner): names.append(ei.prg.name)
+      if isinstance(ei.prg, CompiledRunner): names.append(ei.prg.p.name)
       ei.run()
     assert names[-2] == names[-1], "function was relinearized"
 

@@ -44,7 +44,7 @@ class ViewOp(Runner):
 
 def lower_runner(runner:Runner, bufs) -> ExecItem:
   # TODO: globals isn't on the stupid diskrunner, remove the need for it
-  return ExecItem(runner, [bufs[x[0]] for x in runner.globals] if hasattr(runner, 'globals') else bufs)
+  return ExecItem(runner, [bufs[x[0]] for x in runner.p.globals] if hasattr(runner, 'p') else bufs)
 
 def lower_schedule_item(si:ScheduleItem) -> ExecItem:
   assert len(set(x.device for x in si.bufs)) == 1 or si.ast[0].op is LoadOps.COPY
