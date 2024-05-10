@@ -175,6 +175,11 @@ def train_resnet():
     top_1 = (out.argmax(-1) == Y).sum()
     return loss.realize(), top_1.realize()
 
+  def fake_data_get(batch_size):
+    x = Tensor.zeros(batch_size, 224, 224, 3, dtype=dtypes.uchar).contiguous()
+    y = [0] * batch_size
+    return x.shard(GPUS, axis=0).realize(), Tensor(y, requires_grad=False).shard(GPUS, axis=0), y, None
+
   def data_get(it):
     x, y, cookie = next(it)
     return x.shard(GPUS, axis=0).realize(), Tensor(y, requires_grad=False).shard(GPUS, axis=0), y, cookie
@@ -187,9 +192,14 @@ def train_resnet():
       MLLOGGER.start(key=mllog_constants.EPOCH_START, value=e+1, metadata=dict(epoch_num=e+1))
     Tensor.training = True
     BEAM.value = TRAIN_BEAM
-    batch_loader = batch_load_resnet(batch_size=BS, val=False, shuffle=True, seed=seed*epochs + e, pad_first_batch=True)
-    it = iter(tqdm(batch_loader, total=steps_in_train_epoch, desc=f"epoch {e}", disable=BENCHMARK))
-    i, proc = 0, data_get(it)
+
+    if INITMLPERF:
+      i, proc = 0, fake_data_get(BS)
+    else:
+      batch_loader = batch_load_resnet(batch_size=BS, val=False, shuffle=True, seed=seed*epochs + e, pad_first_batch=True)
+      it = iter(tqdm(batch_loader, total=steps_in_train_epoch, desc=f"epoch {e}", disable=BENCHMARK))
+      i, proc = 0, data_get(it)
+
     prev_cookies = []
     st = time.perf_counter()
     while proc is not None:
@@ -200,7 +210,10 @@ def train_resnet():
 
       if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
       try:
-        next_proc = data_get(it)
+        if INITMLPERF:
+          next_proc = fake_data_get(BS)
+        else:
+          next_proc = data_get(it)
       except StopIteration:
         next_proc = None
 
@@ -254,8 +267,11 @@ def train_resnet():
       Tensor.training = False
       BEAM.value = EVAL_BEAM
 
-      it = iter(tqdm(batch_load_resnet(batch_size=EVAL_BS, val=True, shuffle=False, pad_first_batch=True), total=steps_in_val_epoch))
-      i, proc = 0, data_get(it)
+      if INITMLPERF:
+        it = iter(tqdm(batch_load_resnet(batch_size=EVAL_BS, val=True, shuffle=False, pad_first_batch=True), total=steps_in_val_epoch))
+        i, proc = 0, data_get(it)
+      else:
+        i, proc = 0, fake_data_get(EVAL_BS)
       prev_cookies = []
       while proc is not None:
         GlobalCounters.reset()
@@ -265,7 +281,10 @@ def train_resnet():
 
         if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
         try:
-          next_proc = data_get(it)
+          if INITMLPERF:
+            next_proc = fake_data_get(EVAL_BS)
+          else:
+            next_proc = data_get(it)
         except StopIteration:
           next_proc = None
 
