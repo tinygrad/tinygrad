@@ -69,8 +69,7 @@ def get_linearizer(compiler_opts:CompilerOptions, ast:Tuple[LazyOp, ...]) -> Lin
   return k
 
 # NOTE: this is safe to run in child processes
-def get_program(compiler_opts:CompilerOptions, ast:Tuple[LazyOp, ...]) -> Program:
-  k = get_linearizer(compiler_opts, ast)
+def get_program(compiler_opts:CompilerOptions, k:Linearizer) -> Program:
   k.linearize()
   info = get_lazyop_info(k.ast[0])
   ops, mem = k.uops.flops_mem()
@@ -171,7 +170,9 @@ def get_runner(dname:str, ast:Tuple[LazyOp, ...]) -> CompiledRunner:
   if bret:=method_cache.get(bkey):
     method_cache[ckey] = ret = CompiledRunner(replace(bret.p, dname=dname), bret.lib)
   else:
-    method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(get_program(Device[dname].compiler.compiler_opts, ast), dname=dname))
+    compiler_opts = Device[dname].compiler.compiler_opts
+    prg: Program = get_program(compiler_opts, get_linearizer(compiler_opts, ast))
+    method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, dname=dname))
   return ret
 
 # **************** ExecItem functions ****************

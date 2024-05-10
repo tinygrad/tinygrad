@@ -10,7 +10,7 @@ from tinygrad.shape.view import View
 from tinygrad.shape.symbolic import MulNode, Variable, NumNode, Node
 from tinygrad.tensor import Tensor
 from tinygrad.engine.schedule import create_schedule
-from tinygrad.engine.realize import run_schedule, lower_schedule
+from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner, get_program
 from tinygrad.helpers import prod, Context, getenv, CI
 from tinygrad.dtype import DType, dtypes
 from tinygrad.codegen.uops import UOpGraph
@@ -251,9 +251,10 @@ class TestLinearizer(unittest.TestCase):
 
   @unittest.skipIf(Device.DEFAULT == "RHIP", "RHIP is really slow here")
   def test_tensor_cores_multi_reduce(self):
-    if not Device[Device.DEFAULT].compiler.compiler_opts.has_tensor_cores:
+    compiler_opts = Device[Device.DEFAULT].compiler.compiler_opts
+    if not compiler_opts.has_tensor_cores:
       self.skipTest("device doesn't have tensor cores")
-    for tc in tensor_cores[Device[Device.DEFAULT].compiler.compiler_opts.device]:
+    for tc in tensor_cores[compiler_opts.device]:
       if getenv("EMULATE_CUDA") and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
       # this will be a M=G16, N=G32, M=G16, M=G16, K=R16, K=R16, K=R16 with 9 choices of TC MNK axes
       golden_result = None
@@ -269,7 +270,7 @@ class TestLinearizer(unittest.TestCase):
         assert len([uop for uop in k.uops if uop.uop is UOps.WMMA]) > 0, "tensor core not triggered"
         assert len([x for x in k.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
 
-        prg = Device[Device.DEFAULT].to_runner(k)
+        prg = CompiledRunner(get_program(compiler_opts, k))
         real_bufs[0].copyin(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np).data) # Zero to check that all values are filled
         prg.exec(real_bufs)
         result = np.frombuffer(real_bufs[0].as_buffer(), real_bufs[0].dtype.np)
@@ -601,20 +602,22 @@ def helper_linearizer_opt(r:Tensor, opts=[], apply_tc=False, atol=1e-4, rtol=1e-
     np.testing.assert_allclose(np.frombuffer(real_bufs[0].as_buffer(), real_bufs[0].dtype.np), wanna_output, atol=atol, rtol=rtol)
 
   # Get baseline, which is not optimized at all.
+  def to_runner(k): return CompiledRunner(get_program(Device[Device.DEFAULT].compiler.compiler_opts, k))
+
   k = Linearizer(realized_ast)
-  prg = Device[Device.DEFAULT].to_runner(k)
+  prg = to_runner(k)
   prg.exec(real_bufs)
   wanna_output = np.frombuffer(real_bufs[0].as_buffer(), real_bufs[0].dtype.np).copy()
 
   # Check correctness of handcoded optimiztions.
   k = Linearizer(realized_ast)
   k.hand_coded_optimizations()
-  prg = Device[Device.DEFAULT].to_runner(k)
+  prg = to_runner(k)
   real_bufs[0].copyin(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np).data) # Zero to check that all values are filled
   prg.exec(real_bufs)
   np.testing.assert_allclose(wanna_output, np.frombuffer(real_bufs[0].as_buffer(), real_bufs[0].dtype.np), atol=atol, rtol=rtol)
   for i, x in enumerate(opts): # Check custom transformations if any.
-    check_opt(x, lambda: Linearizer(realized_ast), Device[Device.DEFAULT].to_runner, color_sizes[i] if i < len(color_sizes) else None)
+    check_opt(x, lambda: Linearizer(realized_ast), to_runner, color_sizes[i] if i < len(color_sizes) else None)
 
 class TestKernelOpts(unittest.TestCase):
   def test_local_and_grouped_reduce(self):

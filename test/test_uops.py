@@ -8,6 +8,7 @@ from tinygrad.device import Device, Buffer
 from tinygrad.engine.realize import CompiledRunner, Program
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.engine.schedule import create_schedule
+from tinygrad.engine.realize import get_linearizer
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.codegen.uops import exec_alu, UOpGraph
 from test.helpers import is_dtype_supported
@@ -212,7 +213,7 @@ class TestConstantFolding(unittest.TestCase):
     si = create_schedule([t.lazydata])
     assert len(si) == 1
     si = si[0]
-    lin = Device[Device.DEFAULT].get_linearizer(si.ast[0]).linearize()
+    lin = get_linearizer(Device[Device.DEFAULT].compiler.compiler_opts, si.ast).linearize()
     assert any(uop.uop is UOps.BITCAST for uop in lin.uops.uops), f"{[uop.uop for uop in lin.uops.uops]} does not contain bitcast"
 
 class TestLocalAccess(unittest.TestCase):

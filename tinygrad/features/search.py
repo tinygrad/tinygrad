@@ -11,7 +11,7 @@ from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError
 from tinygrad.codegen.uops import UOpGraph
 from tinygrad.tensor import Tensor
 from tinygrad.shape.symbolic import sym_infer
-from tinygrad.engine.realize import CompiledRunner, Program
+from tinygrad.engine.realize import CompiledRunner, Program, get_program
 
 actions = [Opt(op=OptOps.UPCAST, axis=axis, amt=amt) for amt in [0,2,3,4,5,7] for axis in range(6)]
 actions += [Opt(op=OptOps.UNROLL, axis=axis, amt=amt) for amt in [0,4,7] for axis in range(4)]
@@ -52,7 +52,7 @@ def _try_compile_linearized_w_idx(x:Tuple[int,Linearizer], compiler:Compiler) ->
   try:
     x[1].linearize()
     if len(x[1].uops.uops) >= getenv("BEAM_UOPS_MAX", 3000) > 0: raise RuntimeError("too many uops")
-    p = compiler.to_program(x[1])
+    p = get_program(compiler.compiler_opts, x[1])
     st = time.perf_counter()
     prog = compiler.compile(p.src)
     et = time.perf_counter() - st
@@ -175,7 +175,7 @@ def time_linearizer(lin:Linearizer, rawbufs:List[Buffer], allow_test_size=True, 
 
   rawbufs = _ensure_buffer_alloc(rawbufs)
   var_vals = {k:(k.max+k.min)//2 for k in lin.ast[0].vars()}
-  p = dev.compiler.to_program(lin)
+  p = get_program(dev.compiler.compiler_opts, lin)
   tms = _time_program(p, dev.compiler.compile(p.src), var_vals, rawbufs,
                       max_global_size=max_global_size if allow_test_size else None, clear_l2=clear_l2, cnt=cnt, name=to_function_name(lin.name))
 
