@@ -190,4 +190,3 @@ class Compiled:
     else:
       method_cache[ckey] = method_cache[bkey] = ret = self.to_runner(self.get_linearizer(*ast))
     return ret
-
