@@ -64,7 +64,8 @@ class PTXCompiler(Compiler):
   def compile(self, src:str) -> bytes: return src.replace("TARGET", self.arch).replace("VERSION", self.version).encode()
 
 class CUDACompiler(Compiler):
-  compiler_opts = CompilerOptions("CUDA", global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024], shared_max=49152, renderer=CUDARenderer)
+  compiler_opts = CompilerOptions("CUDA", global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024],
+                                  shared_max=49152, renderer=CUDARenderer)
   def __init__(self, arch:str):
     self.arch = arch
     CUDACompiler.compiler_opts = replace(CUDACompiler.compiler_opts, has_tensor_cores=int(arch[3:]) >= 80)
