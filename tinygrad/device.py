@@ -1,7 +1,7 @@
 from __future__ import annotations
 import multiprocessing
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, List, Optional, Dict, Tuple, ClassVar, cast
+from typing import TYPE_CHECKING, List, Optional, Dict, Tuple, ClassVar
 import importlib, inspect, functools, pathlib, time, os
 from tinygrad.helpers import prod, getenv, colored, all_int, to_function_name, diskcache_get, diskcache_put, DEBUG, BEAM, NOOPT
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
@@ -52,7 +52,7 @@ class Runner:
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False) -> Optional[float]:
     raise NotImplementedError("override this")
 
-# **************** Buffer / Allocator ****************
+# **************** Buffer copiers ****************
 
 class BufferCopy(Runner):
   def __init__(self, total_sz, dest_device, src_device):
@@ -83,7 +83,6 @@ class BufferXfer(BufferCopy):
       src.allocator.track_cross_device.add(dest.allocator.device)
     dest.allocator.transfer(dest._buf, src._buf, dest.nbytes, src_dev=src.allocator.device, dest_dev=dest.allocator.device)
 
-
 # **************** for Compiled Devices ****************
 
 @dataclass(frozen=True)
@@ -111,10 +110,19 @@ class Compiler:
       if self.cachekey is not None: diskcache_put(self.cachekey, src, lib)
     return lib
 
+  def to_program(self, k:Linearizer, override_device:Optional[str]=None) -> Program:
+    k.linearize()
+    info = get_lazyop_info(k.ast[0])
+    ops, mem = k.uops.flops_mem()
+    run_count = prod((k.global_size if k.global_size else []) + (k.local_size if k.local_size else []))
+    # NOTE: we use min here to ignore the indexing FLOPS
+    return Program(k.name, self.render(to_function_name(k.name), k.uops), override_device if override_device else self.compiler_opts.device,
+                   k.global_size, k.local_size, k.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))
+
 @dataclass(frozen=True)
 class Program:
   name:str
-  prg:str
+  src:str
   dname:str
   global_size:Optional[List[int]]=None
   local_size:Optional[List[int]]=None
@@ -134,10 +142,6 @@ class Program:
   @functools.cached_property
   def function_name(self) -> str: return to_function_name(self.name)
 
-  def compile(self, cached=True) -> bytes:
-    compiler = cast(Compiler, Device[self.dname].compiler)
-    return compiler.compile_cached(self.prg) if cached else compiler.compile(self.prg)
-
   def launch_dims(self, var_vals:Dict[Variable, int]):
     global_size = [sym_infer(sz, var_vals) for sz in self.global_size] if self.global_size is not None else None
     local_size = [sym_infer(sz, var_vals) for sz in self.local_size] if self.local_size is not None else None
@@ -145,9 +149,9 @@ class Program:
 
 class CompiledRunner(Runner):
   def __init__(self, p:Program, precompiled:Optional[bytes]=None):
-    if DEBUG >= 4: print(p.prg)
+    if DEBUG >= 4: print(p.src)
     self.p:Program = p
-    self.lib:bytes = precompiled if precompiled is not None else self.p.compile()
+    self.lib:bytes = precompiled if precompiled is not None else Device[p.dname].compiler.compile_cached(p.src)
     self.clprg = Device[p.dname].runtime(p.function_name, self.lib)
     super().__init__(p.name, p.dname, p.op_estimate, p.mem_estimate)
 
@@ -173,21 +177,12 @@ method_cache: Dict[Tuple[str, Tuple[LazyOp, ...], int, bool], CompiledRunner] = 
 logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS", "") else None, getenv("LOGKERNS_LEVEL", 1)
 class Compiled:
   def __init__(self, device:str, allocator:Allocator, compiler:Optional[Compiler], runtime, graph=None):
-    self.dname, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler, runtime, graph
+    self.dname, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler if compiler else Compiler(), runtime, graph
   def synchronize(self): pass  # override this in your device
 
-  def to_program(self, k:Linearizer) -> CompiledRunner:
-    assert self.compiler is not None, "compiler is required to run AST"
-    k.linearize()
-    info = get_lazyop_info(k.ast[0])
-    ops, mem = k.uops.flops_mem()
-    run_count = prod((k.global_size if k.global_size else []) + (k.local_size if k.local_size else []))
-    # NOTE: we use min here to ignore the indexing FLOPS
-    return CompiledRunner(Program(k.name, self.compiler.render(to_function_name(k.name), k.uops), self.dname, k.global_size, k.local_size,
-                                  k.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count)))
+  def to_runner(self, k:Linearizer) -> CompiledRunner: return CompiledRunner(self.compiler.to_program(k, override_device=self.dname))
 
   def get_linearizer(self, *ast:LazyOp) -> Linearizer:
-    assert self.compiler is not None, "compiler is required to build AST"
     if DEBUG >= 3:
       from tinygrad.features.graph import print_tree
       for op in ast: print_tree(op)
@@ -224,6 +219,6 @@ class Compiled:
     if bret:=method_cache.get(bkey):
       method_cache[ckey] = ret = CompiledRunner(replace(bret.p, dname=self.dname), bret.lib)
     else:
-      method_cache[ckey] = method_cache[bkey] = ret = self.to_program(self.get_linearizer(*ast))
+      method_cache[ckey] = method_cache[bkey] = ret = self.to_runner(self.get_linearizer(*ast))
     return ret
 

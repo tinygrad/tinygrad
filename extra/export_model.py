@@ -25,7 +25,7 @@ def compile_net(run:TinyJit, special_names:Dict[int,str]) -> Tuple[Dict[str,str]
   functions, bufs, bufs_to_save, statements, bufnum = {}, {}, {}, [], 0
   for ji in run.jit_cache:
     fxn: Program = ji.prg.p
-    functions[fxn.function_name] = fxn.prg   # NOTE: this assumes all with the same name are the same
+    functions[fxn.function_name] = fxn.src   # NOTE: this assumes all with the same name are the same
     cargs = []
     for i,arg in enumerate(ji.bufs):
       key = id(arg)
