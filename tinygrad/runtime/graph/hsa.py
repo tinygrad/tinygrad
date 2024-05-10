@@ -76,7 +76,7 @@ class HSAGraph(MultiGraphRunner):
         self.packets[j] = hsa.hsa_kernel_dispatch_packet_t.from_address(self.virt_aql_queues[ji.prg.device].write_addr)
 
         sync_signal = self.alloc_signal(reset_on_start=True) if PROFILE else None
-        self.virt_aql_queues[ji.prg.device].submit_kernel(ji.prg.clprg, *ji.prg.launch_dims(var_vals), #type:ignore
+        self.virt_aql_queues[ji.prg.device].submit_kernel(ji.prg.clprg, *ji.prg.p.launch_dims(var_vals), #type:ignore
                                                           ctypes.addressof(self.ji_kargs_structs[j]), completion_signal=sync_signal)
         if PROFILE: self.profile_info[ji.prg.device].append((sync_signal, ji.prg.clprg.name, False))
       elif isinstance(ji.prg, BufferXfer):
