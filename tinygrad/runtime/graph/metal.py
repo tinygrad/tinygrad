@@ -2,7 +2,7 @@ from typing import List, Any, Dict, cast, Optional
 import Metal
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import dedup, unwrap2, GraphException
-from tinygrad.buffer import Buffer
+from tinygrad.device import Buffer
 from tinygrad.engine.realize import ExecItem, CompiledRunner
 from tinygrad.engine.jit import GraphRunner
 from tinygrad.shape.symbolic import Variable
