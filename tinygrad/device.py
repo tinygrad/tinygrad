@@ -1,13 +1,12 @@
 from __future__ import annotations
 import multiprocessing
-from collections import defaultdict
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, List, Optional, Dict, Tuple, ClassVar, cast
-import importlib, inspect, functools, pathlib, time, ctypes, os
-from tinygrad.helpers import prod, getenv, colored, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put, DEBUG, BEAM, NOOPT
+from typing import TYPE_CHECKING, List, Optional, Dict, Tuple, ClassVar, cast
+import importlib, inspect, functools, pathlib, time, os
+from tinygrad.helpers import prod, getenv, colored, all_int, to_function_name, diskcache_get, diskcache_put, DEBUG, BEAM, NOOPT
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.ops import LazyOp, get_lazyop_info
-from tinygrad.buffer import Buffer, BufferOptions
+from tinygrad.buffer import Buffer, Allocator
 from tinygrad.codegen.uops import UOpGraph
 
 if TYPE_CHECKING:
@@ -84,42 +83,6 @@ class BufferXfer(BufferCopy):
       src.allocator.track_cross_device.add(dest.allocator.device)
     dest.allocator.transfer(dest._buf, src._buf, dest.nbytes, src_dev=src.allocator.device, dest_dev=dest.allocator.device)
 
-# TODO: size, dest, src are the same type. can we enforce this?
-class Allocator:
-  def alloc(self, size:int, options:Optional[BufferOptions]=None):
-    assert not isinstance(size, int) or size > 0, f"alloc size must be positve, getting {size}"
-    return self._alloc(size, options if options is not None else BufferOptions())
-  def _alloc(self, size:int, options:BufferOptions): raise NotImplementedError("need alloc")
-  def free(self, opaque, size:int, options:Optional[BufferOptions]=None):
-    self._free(opaque, options if options is not None else BufferOptions())
-  def _free(self, opaque, options:BufferOptions): pass  # if opaque is a Python object, you don't need a free
-  def copyin(self, dest, src:memoryview): raise NotImplementedError("need copyin")
-  def copyout(self, dest:memoryview, src): raise NotImplementedError("need copyout")
-
-class LRUAllocator(Allocator):  # pylint: disable=abstract-method
-  def __init__(self): self.cache: Dict[Tuple[int, Optional[BufferOptions]], Any] = defaultdict(list)
-  def alloc(self, size:int, options:Optional[BufferOptions]=None):
-    if len(c := self.cache[(size, options)]): return c.pop()
-    try: return super().alloc(size, options)
-    except (RuntimeError, MemoryError):
-      self.free_cache()
-      return super().alloc(size, options)
-  def free_cache(self):
-    for (sz,options),opaques in self.cache.items():
-      for opaque in opaques: super().free(opaque, sz, options)
-      opaques.clear()
-  def free(self, opaque:Any, size:int, options:Optional[BufferOptions]=None):
-    if getenv("LRU", 1) and (options is None or not options.nolru): self.cache[(size, options)].append(opaque)
-    else: super().free(opaque, size, options)
-
-class _MallocAllocator(LRUAllocator):
-  def _alloc(self, size:int, options:BufferOptions): return (ctypes.c_uint8 * size)()
-  def as_buffer(self, src) -> memoryview: return flat_mv(memoryview(src))
-  def copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
-  def copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
-  def offset(self, buf, size:int, offset:int): return from_mv(self.as_buffer(buf)[offset:offset+size])
-
-MallocAllocator = _MallocAllocator()
 
 # **************** for Compiled Devices ****************
 

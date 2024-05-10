@@ -1,5 +1,6 @@
 import ctypes
-from tinygrad.device import Compiled, MallocAllocator
+from tinygrad.device import Compiled
+from tinygrad.buffer import MallocAllocator
 from tinygrad.runtime.ops_hsa import HSACompiler
 
 rhip = ctypes.CDLL("/usr/local/lib/libremu.so")
