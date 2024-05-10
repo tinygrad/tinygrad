@@ -4,11 +4,12 @@ import functools, itertools, collections
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, BEAM, getenv, all_int, GraphException, colored, JIT
-from tinygrad.device import Buffer, CompiledRunner, BufferXfer, Compiled, Device, Runner
+from tinygrad.device import Buffer, CompiledRunner, Compiled, Device, Runner
 from tinygrad.dtype import DType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, sint
-from tinygrad.engine.realize import ExecItem, capturing, _internal_memory_planner, EmptyOp, ViewOp
+from tinygrad.engine.realize import ExecItem, capturing, EmptyOp, ViewOp, BufferXfer
+from tinygrad.engine.memory import _internal_memory_planner
 from tinygrad.nn.state import get_parameters
 from weakref import WeakKeyDictionary
 

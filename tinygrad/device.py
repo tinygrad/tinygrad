@@ -1,13 +1,12 @@
 from __future__ import annotations
 import multiprocessing
-from collections import defaultdict
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, List, Optional, Dict, Tuple, ClassVar
-import importlib, inspect, functools, pathlib, time, ctypes, os
-from tinygrad.helpers import prod, getenv, colored, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put, DEBUG, BEAM, NOOPT
+from typing import TYPE_CHECKING, List, Optional, Dict, Tuple, ClassVar
+import importlib, inspect, functools, pathlib, os
+from tinygrad.helpers import prod, getenv, all_int, to_function_name, diskcache_get, diskcache_put, DEBUG, BEAM, NOOPT
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.ops import LazyOp, get_lazyop_info
-from tinygrad.buffer import Buffer, BufferOptions
+from tinygrad.buffer import Buffer, Allocator
 from tinygrad.codegen.uops import UOpGraph
 
 if TYPE_CHECKING:
@@ -52,74 +51,6 @@ class Runner:
     return self(rawbufs, {} if var_vals is None else var_vals)
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False) -> Optional[float]:
     raise NotImplementedError("override this")
-
-# **************** Buffer / Allocator ****************
-
-class BufferCopy(Runner):
-  def __init__(self, total_sz, dest_device, src_device):
-    if total_sz >= 1e6: name = f"{type(self).__name__[6:].lower()} {total_sz/1e6:7.2f}M, {dest_device[:7]:>7s} <- {src_device[:7]:7s}"
-    else: name = f"{type(self).__name__[6:].lower()} {total_sz:8d}, {dest_device[:7]:>7s} <- {src_device[:7]:7s}"
-    super().__init__(colored(name, "yellow"), dest_device, 0, total_sz)
-  def copy(self, dest, src):
-    if src.device.startswith("DISK") and hasattr(dest.allocator, 'copy_from_fd') and src.nbytes >= 4096 and hasattr(src.allocator.device, 'fd'):
-      dest.allocator.copy_from_fd(dest._buf, src.allocator.device.fd, src._buf.offset, src.nbytes)
-    elif src.device.startswith("DISK") and hasattr(dest.allocator, 'as_buffer'):
-      # fast(ish) path, uses readinto in diskbuffers
-      src.allocator.copyout(dest.allocator.as_buffer(dest._buf), src._buf)
-    else:
-      dest.copyin(src.as_buffer(allow_zero_copy=True))  # may allocate a CPU buffer depending on allow_zero_copy
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False):
-    dest, src = rawbufs[0:2]
-    assert dest.size == src.size and dest.dtype == src.dtype, f"buffer copy mismatch, {dest.size} != {src.size}, {dest.dtype} != {src.dtype}"
-    st = time.perf_counter()
-    self.copy(dest, src)
-    if wait:
-      Device[dest.device].synchronize()
-      return time.perf_counter() - st
-
-class BufferXfer(BufferCopy):
-  def copy(self, dest, src):
-    if hasattr(dest.allocator.device, "track_cross_buffer") and hasattr(src.allocator, "track_cross_device"):
-      dest.allocator.device.track_cross_buffer.append(src)
-      src.allocator.track_cross_device.add(dest.allocator.device)
-    dest.allocator.transfer(dest._buf, src._buf, dest.nbytes, src_dev=src.allocator.device, dest_dev=dest.allocator.device)
-
-# TODO: size, dest, src are the same type. can we enforce this?
-class Allocator:
-  def alloc(self, size:int, options:Optional[BufferOptions]=None):
-    assert not isinstance(size, int) or size > 0, f"alloc size must be positve, getting {size}"
-    return self._alloc(size, options if options is not None else BufferOptions())
-  def _alloc(self, size:int, options:BufferOptions): raise NotImplementedError("need alloc")
-  def free(self, opaque, size:int, options:Optional[BufferOptions]=None):
-    self._free(opaque, options if options is not None else BufferOptions())
-  def _free(self, opaque, options:BufferOptions): pass  # if opaque is a Python object, you don't need a free
-  def copyin(self, dest, src:memoryview): raise NotImplementedError("need copyin")
-  def copyout(self, dest:memoryview, src): raise NotImplementedError("need copyout")
-
-class LRUAllocator(Allocator):  # pylint: disable=abstract-method
-  def __init__(self): self.cache: Dict[Tuple[int, Optional[BufferOptions]], Any] = defaultdict(list)
-  def alloc(self, size:int, options:Optional[BufferOptions]=None):
-    if len(c := self.cache[(size, options)]): return c.pop()
-    try: return super().alloc(size, options)
-    except (RuntimeError, MemoryError):
-      self.free_cache()
-      return super().alloc(size, options)
-  def free_cache(self):
-    for (sz,options),opaques in self.cache.items():
-      for opaque in opaques: super().free(opaque, sz, options)
-      opaques.clear()
-  def free(self, opaque:Any, size:int, options:Optional[BufferOptions]=None):
-    if getenv("LRU", 1) and (options is None or not options.nolru): self.cache[(size, options)].append(opaque)
-    else: super().free(opaque, size, options)
-
-class _MallocAllocator(LRUAllocator):
-  def _alloc(self, size:int, options:BufferOptions): return (ctypes.c_uint8 * size)()
-  def as_buffer(self, src) -> memoryview: return flat_mv(memoryview(src))
-  def copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
-  def copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
-  def offset(self, buf, size:int, offset:int): return from_mv(self.as_buffer(buf)[offset:offset+size])
-
-MallocAllocator = _MallocAllocator()
 
 # **************** for Compiled Devices ****************
 
@@ -259,4 +190,3 @@ class Compiled:
     else:
       method_cache[ckey] = method_cache[bkey] = ret = self.to_runner(self.get_linearizer(*ast))
     return ret
-

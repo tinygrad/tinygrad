@@ -1,7 +1,9 @@
 from __future__ import annotations
-from typing import Any, Optional
+from typing import Any, Optional, Dict, Tuple
+import ctypes
+from collections import defaultdict
 from dataclasses import dataclass
-from tinygrad.helpers import GlobalCounters, flat_mv
+from tinygrad.helpers import GlobalCounters, flat_mv, from_mv, getenv
 from tinygrad.dtype import DType, ImageDType
 
 @dataclass(frozen=True, eq=True)
@@ -90,3 +92,40 @@ class Buffer:
     assert offset < self.nbytes, "offset must be less than nbytes"
     if self._base is not None: return Buffer(self.device, size, dtype, base=self._base, offset=self.offset+offset)
     return Buffer(self.device, size, dtype, base=self, offset=offset)
+
+# TODO: size, dest, src are the same type. can we enforce this?
+class Allocator:
+  def alloc(self, size:int, options:Optional[BufferOptions]=None):
+    assert not isinstance(size, int) or size > 0, f"alloc size must be positve, getting {size}"
+    return self._alloc(size, options if options is not None else BufferOptions())
+  def _alloc(self, size:int, options:BufferOptions): raise NotImplementedError("need alloc")
+  def free(self, opaque, size:int, options:Optional[BufferOptions]=None):
+    self._free(opaque, options if options is not None else BufferOptions())
+  def _free(self, opaque, options:BufferOptions): pass  # if opaque is a Python object, you don't need a free
+  def copyin(self, dest, src:memoryview): raise NotImplementedError("need copyin")
+  def copyout(self, dest:memoryview, src): raise NotImplementedError("need copyout")
+
+class LRUAllocator(Allocator):  # pylint: disable=abstract-method
+  def __init__(self): self.cache: Dict[Tuple[int, Optional[BufferOptions]], Any] = defaultdict(list)
+  def alloc(self, size:int, options:Optional[BufferOptions]=None):
+    if len(c := self.cache[(size, options)]): return c.pop()
+    try: return super().alloc(size, options)
+    except (RuntimeError, MemoryError):
+      self.free_cache()
+      return super().alloc(size, options)
+  def free_cache(self):
+    for (sz,options),opaques in self.cache.items():
+      for opaque in opaques: super().free(opaque, sz, options)
+      opaques.clear()
+  def free(self, opaque:Any, size:int, options:Optional[BufferOptions]=None):
+    if getenv("LRU", 1) and (options is None or not options.nolru): self.cache[(size, options)].append(opaque)
+    else: super().free(opaque, size, options)
+
+class _MallocAllocator(LRUAllocator):
+  def _alloc(self, size:int, options:BufferOptions): return (ctypes.c_uint8 * size)()
+  def as_buffer(self, src) -> memoryview: return flat_mv(memoryview(src))
+  def copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
+  def copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
+  def offset(self, buf, size:int, offset:int): return from_mv(self.as_buffer(buf)[offset:offset+size])
+
+MallocAllocator = _MallocAllocator()

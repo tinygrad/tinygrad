@@ -1,7 +1,8 @@
 from __future__ import annotations
 import ctypes, functools
 from typing import Tuple
-from tinygrad.device import Compiled, MallocAllocator, Compiler, CompilerOptions
+from tinygrad.device import Compiled, Compiler, CompilerOptions
+from tinygrad.buffer import MallocAllocator
 from tinygrad.helpers import DEBUG, cpu_time_execution
 from tinygrad.renderer.llvmir import uops_to_llvm_ir
 import llvmlite.binding as llvm

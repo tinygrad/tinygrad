@@ -1,5 +1,6 @@
 import ctypes, subprocess, pathlib, tempfile
-from tinygrad.device import Compiled, MallocAllocator, Compiler, CompilerOptions
+from tinygrad.device import Compiled, Compiler, CompilerOptions
+from tinygrad.buffer import MallocAllocator
 from tinygrad.helpers import cpu_time_execution
 from tinygrad.renderer.cstyle import ClangRenderer
 
