@@ -119,7 +119,7 @@ class HCQGraph(MultiGraphRunner):
         j, ji, deps, dev = entry[0], self.jit_cache[entry[0]], entry[1], self.jit_cache[entry[0]].prg.device
         queue = self.comp_hcq_t()
         for sig, val in deps: queue.wait(sig, val)
-        queue.exec(ji.prg.clprg, self.kargs_addrs[j], *ji.prg.launch_dims(var_vals)) \
+        queue.exec(ji.prg.clprg, self.kargs_addrs[j], *ji.prg.p.launch_dims(var_vals)) \
              .signal(self.comp_signal[dev], value=j+1)
       queue.submit(dev)
 
