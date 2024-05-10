@@ -1,7 +1,7 @@
 from __future__ import annotations
 import multiprocessing
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, List, Optional, Dict, Tuple, ClassVar
+from typing import TYPE_CHECKING, List, Optional, Dict, Tuple, ClassVar, Callable
 import importlib, inspect, functools, pathlib, os
 from tinygrad.helpers import prod, getenv, all_int, to_function_name, diskcache_get, diskcache_put, DEBUG, BEAM, NOOPT
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
@@ -54,6 +54,8 @@ class Runner:
 
 # **************** for Compiled Devices ****************
 
+def fake_renderer(name, uops): raise NotImplementedError("needs a renderer")
+
 @dataclass(frozen=True)
 class CompilerOptions:
   device: str = ""
@@ -67,11 +69,11 @@ class CompilerOptions:
   global_max: Optional[List[int]] = None
   local_max: Optional[List[int]] = None
   shared_max: int = 32768
+  renderer: Callable = fake_renderer
 
 class Compiler:
   compiler_opts: ClassVar[CompilerOptions]
   def __init__(self, cachekey:Optional[str]=None): self.cachekey = None if getenv("DISABLE_COMPILER_CACHE") else cachekey
-  def render(self, name:str, uops:UOpGraph) -> str: raise NotImplementedError("need a render function")
   def compile(self, src:str) -> bytes: raise NotImplementedError("need a compile function")
   def compile_cached(self, src:str) -> bytes:
     if self.cachekey is None or (lib := diskcache_get(self.cachekey, src)) is None:
@@ -85,7 +87,8 @@ class Compiler:
     ops, mem = k.uops.flops_mem()
     run_count = prod((k.global_size if k.global_size else []) + (k.local_size if k.local_size else []))
     # NOTE: we use min here to ignore the indexing FLOPS
-    return Program(k.name, self.render(to_function_name(k.name), k.uops), override_device if override_device else self.compiler_opts.device,
+    return Program(k.name, self.compiler_opts.renderer(to_function_name(k.name), k.uops),
+                   override_device if override_device else self.compiler_opts.device,
                    k.global_size, k.local_size, k.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))
 
 @dataclass(frozen=True)

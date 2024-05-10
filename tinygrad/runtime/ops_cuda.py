@@ -54,17 +54,18 @@ def _get_bytes(arg, get_str, get_sz, check) -> bytes:
   return ctypes.string_at(init_c_var(ctypes.create_string_buffer(sz.value), lambda x: check(get_str(arg, x))), size=sz.value)
 
 class PTXCompiler(Compiler):
-  compiler_opts = CompilerOptions("CUDA", suffix="PTX", global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024], shared_max=49152)
+  compiler_opts = CompilerOptions("CUDA", suffix="PTX", global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024],
+                                  shared_max=49152, renderer=PTXRenderer)
   def __init__(self, arch:str):
     self.arch = arch
     self.version = "7.8" if arch >= "sm_89" else "7.5"
     PTXCompiler.compiler_opts = replace(PTXCompiler.compiler_opts, has_tensor_cores=int(arch[3:]) >= 80)
     super().__init__(f"compile_ptx_{self.arch}")
-  def render(self, name:str, uops) -> str: return PTXRenderer(name, uops).replace("TARGET", self.arch).replace("VERSION", self.version)
-  def compile(self, src:str) -> bytes: return src.encode()
+  def compile(self, src:str) -> bytes: return src.replace("TARGET", self.arch).replace("VERSION", self.version).encode()
 
 class CUDACompiler(Compiler):
-  compiler_opts = CompilerOptions("CUDA", global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024], shared_max=49152)
+  compiler_opts = CompilerOptions("CUDA", global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024],
+                                  shared_max=49152, renderer=CUDARenderer)
   def __init__(self, arch:str):
     self.arch = arch
     CUDACompiler.compiler_opts = replace(CUDACompiler.compiler_opts, has_tensor_cores=int(arch[3:]) >= 80)
@@ -72,7 +73,6 @@ class CUDACompiler(Compiler):
     self.compile_options = [f'--gpu-architecture={arch}', "-I/usr/local/cuda/include", "-I/usr/include", "-I/opt/cuda/include/"]
     if (nvrtcMajor.value, nvrtcMinor.value) >= (12, 4): self.compile_options.append("--minimal")
     super().__init__(f"compile_cuda_{self.arch}")
-  def render(self, name:str, uops) -> str: return CUDARenderer(name, uops)
   def compile(self, src:str) -> bytes:
     check(cuda.nvrtcCreateProgram(ctypes.byref(prog := cuda.nvrtcProgram()), src.encode(), "<null>".encode(), 0, None, None))
     status = cuda.nvrtcCompileProgram(prog, len(self.compile_options), to_char_p_p([o.encode() for o in self.compile_options]))
