@@ -1,8 +1,8 @@
-from typing import List, Dict, Optional, cast, Generator, Tuple
+from typing import List, Dict, Optional, cast, Generator
 import time
 from dataclasses import dataclass
 from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen
-from tinygrad.ops import ScheduleItem, BufferOps, LoadOps, copy_ast, LazyOp
+from tinygrad.ops import ScheduleItem, BufferOps, LoadOps
 from tinygrad.device import Runner, Device
 from tinygrad.device import Buffer
 from tinygrad.shape.symbolic import Variable, sym_infer
@@ -74,20 +74,16 @@ class ExecItem:
       self.prg.first_run = False
     return et
 
-def lower_runner(dname:str, ast:Tuple[LazyOp, ...], bufs) -> ExecItem:
-  runner = Device[dname].get_runner(*ast)
-  # TODO: globals isn't on the stupid diskrunner, remove the need for it
-  return ExecItem(runner, [bufs[x[0]] for x in runner.p.globals] if hasattr(runner, 'p') else bufs)
-
 def lower_schedule_item(si:ScheduleItem) -> ExecItem:
-  assert len(set(x.device for x in si.bufs)) == 1 or si.ast[0].op is LoadOps.COPY
-  if si.ast[0].op is BufferOps.STORE: return lower_runner(si.outputs[0].device, si.ast, si.bufs)
+  assert len(set(x.device for x in si.bufs)) == 1 or si.ast[0].op is LoadOps.COPY or getenv("USE_COPY_KERNEL")
+  if si.ast[0].op is BufferOps.STORE:
+    runner = Device[si.outputs[0].device].get_runner(*si.ast)
+    return ExecItem(runner, [si.bufs[x[0]] for x in runner.p.globals])
   assert len(si.ast) == 1 and len(si.outputs) == 1, "only ASTRunner supports multioutput"
   out, ast = si.outputs[0], si.ast[0]
   if ast.op is LoadOps.COPY:
     kernel_type = BufferCopy
     if hasattr(Device[out.device].allocator, 'transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]:
-      if getenv("USE_COPY_KERNEL"): return lower_runner(out.device, (copy_ast(ast.arg),), si.bufs)
       kernel_type = BufferXfer
     return ExecItem(kernel_type(ast.arg, out.device, si.inputs[0].device), list(si.bufs))
   if ast.op is LoadOps.CUSTOM: return ExecItem(CustomOp(ast.arg), list(si.bufs))

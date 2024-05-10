@@ -92,10 +92,6 @@ class LazyOp:
     const_vars = [x.arg.val.unbind()[0] for x in self.lazyops if x.op is BufferOps.CONST and isinstance(x.arg.val, Variable)]
     return sorted(set.union(*extract_vars, set(const_vars)), key=lambda x: str(x.expr))
 
-def copy_ast(sz) -> LazyOp:
-  rd = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.uint8, st:=ShapeTracker.from_shape((sz,))))
-  return LazyOp(BufferOps.STORE, (rd,), MemBuffer(0, dtypes.uint8, st))
-
 # **************** independent FlopCounter ****************
 
 @dataclass
