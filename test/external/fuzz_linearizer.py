@@ -42,7 +42,7 @@ def get_fuzz_rawbufs(lin):
   return rawbufs
 
 def get_fuzz_rawbuf_like(rawbuf, zero=False, size=None):
-  rawbuf = type(rawbuf)(Device.DEFAULT, rawbuf.size if size is None else size, rawbuf.dtype).allocate()
+  rawbuf = type(rawbuf)(rawbuf.device, rawbuf.size if size is None else size, rawbuf.dtype).allocate()
   if zero:
     with Context(DEBUG=0):
       mv = memoryview(bytearray(rawbuf.size * rawbuf.dtype.itemsize))
