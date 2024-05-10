@@ -18,7 +18,8 @@ from tinygrad.buffer import Buffer
 from tinygrad.dtype import ImageDType
 from tinygrad.device import CompiledRunner
 from tinygrad.helpers import partition, Context, fetch, getenv, DEBUG
-from tinygrad.engine.realize import run_schedule, memory_planner, lower_schedule, ExecItem
+from tinygrad.engine.realize import run_schedule, lower_schedule, ExecItem
+from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.ops import LoadOps, ScheduleItem
 Device.DEFAULT = "GPU"
