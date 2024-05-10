@@ -148,14 +148,14 @@ class Compiler:
       if self.cachekey is not None: diskcache_put(self.cachekey, src, lib)
     return lib
 
-  def to_program(self, k:Linearizer) -> Program:
+  def to_program(self, k:Linearizer, override_device:Optional[str]=None) -> Program:
     k.linearize()
     info = get_lazyop_info(k.ast[0])
     ops, mem = k.uops.flops_mem()
     run_count = prod((k.global_size if k.global_size else []) + (k.local_size if k.local_size else []))
     # NOTE: we use min here to ignore the indexing FLOPS
-    return Program(k.name, self.render(to_function_name(k.name), k.uops), self.compiler_opts.device, k.global_size, k.local_size,
-                   k.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))
+    return Program(k.name, self.render(to_function_name(k.name), k.uops), override_device if override_device else self.compiler_opts.device,
+                   k.global_size, k.local_size, k.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))
 
 @dataclass(frozen=True)
 class Program:
@@ -224,7 +224,7 @@ class Compiled:
 
   def to_runner(self, k:Linearizer) -> CompiledRunner:
     assert self.compiler is not None, "compiler is required to run AST"
-    return CompiledRunner(self.compiler.to_program(k))
+    return CompiledRunner(self.compiler.to_program(k, override_device=self.dname))
 
   def get_linearizer(self, *ast:LazyOp) -> Linearizer:
     assert self.compiler is not None, "compiler is required to build AST"
