@@ -2,9 +2,9 @@ import ctypes, collections, array, time
 from typing import List, Any, Dict, cast, Optional, Tuple, Set
 from tinygrad.helpers import GraphException, round_up, to_mv
 from tinygrad.buffer import Buffer, BufferOptions
-from tinygrad.device import Compiled, CompiledRunner, BufferXfer, Device
+from tinygrad.device import Compiled, CompiledRunner, Device
 from tinygrad.shape.symbolic import Variable
-from tinygrad.engine.realize import ExecItem
+from tinygrad.engine.realize import ExecItem, BufferXfer
 from tinygrad.engine.jit import MultiGraphRunner
 
 class HCQGraph(MultiGraphRunner):
@@ -32,7 +32,7 @@ class HCQGraph(MultiGraphRunner):
 
       self.ji_kargs_structs[j] = ji.prg.clprg.args_struct_t.from_address(self.kargs_addrs[j] + ji.prg.clprg.kernargs_offset)
       for i in range(len(ji.bufs)): self.ji_kargs_structs[j].__setattr__(f'f{i}', cast(Buffer, ji.bufs[i])._buf.va_addr)
-      for i in range(len(ji.prg.vars)): self.ji_kargs_structs[j].__setattr__(f'v{i}', var_vals[ji.prg.vars[i]])
+      for i in range(len(ji.prg.p.vars)): self.ji_kargs_structs[j].__setattr__(f'v{i}', var_vals[ji.prg.p.vars[i]])
 
       # NV needs constbuffer to be set
       if ji.prg.device.dname.startswith("NV"): to_mv(self.kargs_addrs[j], 0x160).cast('I')[:] = array.array('I', ji.prg.clprg.constbuffer_0)
@@ -56,7 +56,7 @@ class HCQGraph(MultiGraphRunner):
 
     for j,ji in enumerate(self.jit_cache):
       if isinstance(ji.prg, CompiledRunner):
-        deps = self.access_resources(ji.bufs[(outs:=ji.prg.outcount):], ji.bufs[:outs], (self.comp_signal[ji.prg.device], sig_val:=j+1))
+        deps = self.access_resources(ji.bufs[(outs:=ji.prg.p.outcount):], ji.bufs[:outs], (self.comp_signal[ji.prg.device], sig_val:=j+1))
         deps.append((self.comp_signal[ji.prg.device], self.comp_signal_val[ji.prg.device]))
         self.comp_signal_val[ji.prg.device] = sig_val
 
@@ -66,7 +66,7 @@ class HCQGraph(MultiGraphRunner):
           self.queue_list.append((j, deps))
         else:
           for sig, val in deps: self.comp_queues[ji.prg.device].wait(sig, val)
-          self.comp_queues[ji.prg.device].exec(ji.prg.clprg, self.kargs_addrs[j], *ji.prg.launch_dims(var_vals)) \
+          self.comp_queues[ji.prg.device].exec(ji.prg.clprg, self.kargs_addrs[j], *ji.prg.p.launch_dims(var_vals)) \
                                          .signal(self.comp_signal[ji.prg.device], sig_val)
       elif isinstance(ji.prg, BufferXfer):
         dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
@@ -103,7 +103,7 @@ class HCQGraph(MultiGraphRunner):
 
     # Update var_vals
     for j in self.jc_idx_with_updatable_var_vals:
-      for i,v in enumerate(cast(CompiledRunner, self.jit_cache[j].prg).vars):
+      for i,v in enumerate(cast(CompiledRunner, self.jit_cache[j].prg).p.vars):
         self.ji_kargs_structs[j].__setattr__(f'v{i}', var_vals[v])
 
     for dev in self.devices:
