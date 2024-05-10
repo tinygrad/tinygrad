@@ -1,10 +1,11 @@
 from typing import List, Dict, Optional, cast, Generator, DefaultDict, Tuple, Union
+import time
 from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.dtype import DType
 from tinygrad.helpers import colored, getenv, dedup, DEBUG, GlobalCounters, ansilen
 from tinygrad.ops import ScheduleItem, BufferOps, LoadOps, copy_ast
-from tinygrad.device import Runner, Device, BufferCopy, BufferXfer
+from tinygrad.device import Runner, Device
 from tinygrad.buffer import Buffer
 from tinygrad.shape.symbolic import Variable, sym_infer
 
@@ -41,6 +42,35 @@ class ViewOp(Runner):
   def __init__(self, buf:Buffer): super().__init__(colored(f"view {buf.nbytes:8d} @ {buf.offset:<10d}", "yellow"), buf.device)
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False):
     assert rawbufs[0]._base is not None and rawbufs[0]._base == rawbufs[1].base, f"must be base {rawbufs}"
+
+class BufferCopy(Runner):
+  def __init__(self, total_sz, dest_device, src_device):
+    if total_sz >= 1e6: name = f"{type(self).__name__[6:].lower()} {total_sz/1e6:7.2f}M, {dest_device[:7]:>7s} <- {src_device[:7]:7s}"
+    else: name = f"{type(self).__name__[6:].lower()} {total_sz:8d}, {dest_device[:7]:>7s} <- {src_device[:7]:7s}"
+    super().__init__(colored(name, "yellow"), dest_device, 0, total_sz)
+  def copy(self, dest, src):
+    if src.device.startswith("DISK") and hasattr(dest.allocator, 'copy_from_fd') and src.nbytes >= 4096 and hasattr(src.allocator.device, 'fd'):
+      dest.allocator.copy_from_fd(dest._buf, src.allocator.device.fd, src._buf.offset, src.nbytes)
+    elif src.device.startswith("DISK") and hasattr(dest.allocator, 'as_buffer'):
+      # fast(ish) path, uses readinto in diskbuffers
+      src.allocator.copyout(dest.allocator.as_buffer(dest._buf), src._buf)
+    else:
+      dest.copyin(src.as_buffer(allow_zero_copy=True))  # may allocate a CPU buffer depending on allow_zero_copy
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False):
+    dest, src = rawbufs[0:2]
+    assert dest.size == src.size and dest.dtype == src.dtype, f"buffer copy mismatch, {dest.size} != {src.size}, {dest.dtype} != {src.dtype}"
+    st = time.perf_counter()
+    self.copy(dest, src)
+    if wait:
+      Device[dest.device].synchronize()
+      return time.perf_counter() - st
+
+class BufferXfer(BufferCopy):
+  def copy(self, dest, src):
+    if hasattr(dest.allocator.device, "track_cross_buffer") and hasattr(src.allocator, "track_cross_device"):
+      dest.allocator.device.track_cross_buffer.append(src)
+      src.allocator.track_cross_device.add(dest.allocator.device)
+    dest.allocator.transfer(dest._buf, src._buf, dest.nbytes, src_dev=src.allocator.device, dest_dev=dest.allocator.device)
 
 def lower_runner(runner:Runner, bufs) -> ExecItem:
   # TODO: globals isn't on the stupid diskrunner, remove the need for it

@@ -2,8 +2,8 @@ from __future__ import annotations
 import multiprocessing
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, List, Optional, Dict, Tuple, ClassVar
-import importlib, inspect, functools, pathlib, time, os
-from tinygrad.helpers import prod, getenv, colored, all_int, to_function_name, diskcache_get, diskcache_put, DEBUG, BEAM, NOOPT
+import importlib, inspect, functools, pathlib, os
+from tinygrad.helpers import prod, getenv, all_int, to_function_name, diskcache_get, diskcache_put, DEBUG, BEAM, NOOPT
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.ops import LazyOp, get_lazyop_info
 from tinygrad.buffer import Buffer, Allocator
@@ -51,37 +51,6 @@ class Runner:
     return self(rawbufs, {} if var_vals is None else var_vals)
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False) -> Optional[float]:
     raise NotImplementedError("override this")
-
-# **************** Buffer copiers ****************
-
-class BufferCopy(Runner):
-  def __init__(self, total_sz, dest_device, src_device):
-    if total_sz >= 1e6: name = f"{type(self).__name__[6:].lower()} {total_sz/1e6:7.2f}M, {dest_device[:7]:>7s} <- {src_device[:7]:7s}"
-    else: name = f"{type(self).__name__[6:].lower()} {total_sz:8d}, {dest_device[:7]:>7s} <- {src_device[:7]:7s}"
-    super().__init__(colored(name, "yellow"), dest_device, 0, total_sz)
-  def copy(self, dest, src):
-    if src.device.startswith("DISK") and hasattr(dest.allocator, 'copy_from_fd') and src.nbytes >= 4096 and hasattr(src.allocator.device, 'fd'):
-      dest.allocator.copy_from_fd(dest._buf, src.allocator.device.fd, src._buf.offset, src.nbytes)
-    elif src.device.startswith("DISK") and hasattr(dest.allocator, 'as_buffer'):
-      # fast(ish) path, uses readinto in diskbuffers
-      src.allocator.copyout(dest.allocator.as_buffer(dest._buf), src._buf)
-    else:
-      dest.copyin(src.as_buffer(allow_zero_copy=True))  # may allocate a CPU buffer depending on allow_zero_copy
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False):
-    dest, src = rawbufs[0:2]
-    assert dest.size == src.size and dest.dtype == src.dtype, f"buffer copy mismatch, {dest.size} != {src.size}, {dest.dtype} != {src.dtype}"
-    st = time.perf_counter()
-    self.copy(dest, src)
-    if wait:
-      Device[dest.device].synchronize()
-      return time.perf_counter() - st
-
-class BufferXfer(BufferCopy):
-  def copy(self, dest, src):
-    if hasattr(dest.allocator.device, "track_cross_buffer") and hasattr(src.allocator, "track_cross_device"):
-      dest.allocator.device.track_cross_buffer.append(src)
-      src.allocator.track_cross_device.add(dest.allocator.device)
-    dest.allocator.transfer(dest._buf, src._buf, dest.nbytes, src_dev=src.allocator.device, dest_dev=dest.allocator.device)
 
 # **************** for Compiled Devices ****************
 
