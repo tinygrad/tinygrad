@@ -951,6 +951,10 @@ class Tensor:
     m, _, ss = self._softmax(axis)
     return m - ss.log()
 
+  def logsumexp(self, axis=None, keepdim=False):
+    m = self.max(axis=axis, keepdim=True)
+    return (self - m).exp().sum(axis=axis, keepdim=keepdim).log() + m.squeeze(axis)
+
   def argmax(self, axis=None, keepdim=False):
     # NOTE: return the first index if there are multiple occurrences of the maximum values
     if axis is None:
