@@ -181,43 +181,6 @@ class Runner:
 
 # **************** for Compiled Devices ****************
 
-def fake_renderer(name, uops): raise NotImplementedError("needs a renderer")
-
-@dataclass(frozen=True)
-class CompilerOptions:
-  device: str = ""
-  suffix: str = ""
-  # TODO: make this generic with a list of supported types
-  supports_float4: bool = True
-  has_local: bool = True
-  has_shared: bool = True
-  has_tensor_cores: bool = False
-  # NOTE: these two should be in z,y,x(reversed) order for cstyle backends, they are flipped when kernel is rendered
-  global_max: Optional[List[int]] = None
-  local_max: Optional[List[int]] = None
-  shared_max: int = 32768
-  renderer: Callable = fake_renderer
-
-class Compiler:
-  compiler_opts: ClassVar[CompilerOptions]
-  def __init__(self, cachekey:Optional[str]=None): self.cachekey = None if getenv("DISABLE_COMPILER_CACHE") else cachekey
-  def compile(self, src:str) -> bytes: raise NotImplementedError("need a compile function")
-  def compile_cached(self, src:str) -> bytes:
-    if self.cachekey is None or (lib := diskcache_get(self.cachekey, src)) is None:
-      lib = self.compile(src)
-      if self.cachekey is not None: diskcache_put(self.cachekey, src, lib)
-    return lib
-
-  def to_program(self, k:Linearizer, override_device:Optional[str]=None) -> Program:
-    k.linearize()
-    info = get_lazyop_info(k.ast[0])
-    ops, mem = k.uops.flops_mem()
-    run_count = prod((k.global_size if k.global_size else []) + (k.local_size if k.local_size else []))
-    # NOTE: we use min here to ignore the indexing FLOPS
-    return Program(k.name, self.compiler_opts.renderer(to_function_name(k.name), k.uops),
-                   override_device if override_device else self.compiler_opts.device,
-                   k.global_size, k.local_size, k.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))
-
 @dataclass(frozen=True)
 class Program:
   name:str
@@ -245,6 +208,43 @@ class Program:
     global_size = [sym_infer(sz, var_vals) for sz in self.global_size] if self.global_size is not None else None
     local_size = [sym_infer(sz, var_vals) for sz in self.local_size] if self.local_size is not None else None
     return global_size, local_size
+
+def fake_renderer(name, uops): raise NotImplementedError("needs a renderer")
+
+@dataclass(frozen=True)
+class CompilerOptions:
+  device: str = ""
+  suffix: str = ""
+  # TODO: make this generic with a list of supported types
+  supports_float4: bool = True
+  has_local: bool = True
+  has_shared: bool = True
+  has_tensor_cores: bool = False
+  # NOTE: these two should be in z,y,x(reversed) order for cstyle backends, they are flipped when kernel is rendered
+  global_max: Optional[List[int]] = None
+  local_max: Optional[List[int]] = None
+  shared_max: int = 32768
+  renderer: Callable = fake_renderer
+
+  def to_program(self, k:Linearizer, override_device:Optional[str]=None) -> Program:
+    k.linearize()
+    info = get_lazyop_info(k.ast[0])
+    ops, mem = k.uops.flops_mem()
+    run_count = prod((k.global_size if k.global_size else []) + (k.local_size if k.local_size else []))
+    # NOTE: we use min here to ignore the indexing FLOPS
+    return Program(k.name, self.renderer(to_function_name(k.name), k.uops),
+                   override_device if override_device else self.device,
+                   k.global_size, k.local_size, k.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))
+
+class Compiler:
+  compiler_opts: ClassVar[CompilerOptions]
+  def __init__(self, cachekey:Optional[str]=None): self.cachekey = None if getenv("DISABLE_COMPILER_CACHE") else cachekey
+  def compile(self, src:str) -> bytes: raise NotImplementedError("need a compile function")
+  def compile_cached(self, src:str) -> bytes:
+    if self.cachekey is None or (lib := diskcache_get(self.cachekey, src)) is None:
+      lib = self.compile(src)
+      if self.cachekey is not None: diskcache_put(self.cachekey, src, lib)
+    return lib
 
 class CompiledRunner(Runner):
   def __init__(self, p:Program, precompiled:Optional[bytes]=None):
@@ -280,7 +280,7 @@ class Compiled:
     self.dname, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler if compiler else Compiler(), runtime, graph
   def synchronize(self): pass  # override this in your device
 
-  def to_runner(self, k:Linearizer) -> CompiledRunner: return CompiledRunner(self.compiler.to_program(k, override_device=self.dname))
+  def to_runner(self, k:Linearizer) -> CompiledRunner: return CompiledRunner(self.compiler.compiler_opts.to_program(k, override_device=self.dname))
 
   def get_linearizer(self, *ast:LazyOp) -> Linearizer:
     if DEBUG >= 3:
