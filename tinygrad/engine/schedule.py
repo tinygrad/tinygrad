@@ -82,7 +82,10 @@ def _schedule_group(outs:Tuple[LazyBuffer, ...], realizes:Dict[LazyBuffer, None]
   inputs: List[LazyBuffer] = []
   ast: List[LazyOp] = []
   var_vals: Dict[Variable, int] = merge_dicts([out.st.var_vals.copy() for out in outs])
-  if outs[0].op in {LoadOps.CUSTOM, LoadOps.COPY, LoadOps.EMPTY, LoadOps.VIEW}:
+  if outs[0].op is LoadOps.COPY and getenv("USE_COPY_KERNEL") and outs[0].device.split(":")[0] == outs[0].srcs[0].device.split(":")[0]:
+    rd = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.uint8, st:=ShapeTracker.from_shape((outs[0].arg,))))
+    ast, inputs = [LazyOp(BufferOps.STORE, (rd,), MemBuffer(0, dtypes.uint8, st))], [x.base for x in outs[0].srcs]
+  elif outs[0].op in {LoadOps.CUSTOM, LoadOps.COPY, LoadOps.EMPTY, LoadOps.VIEW}:
     ast, inputs = [LazyOp(outs[0].op, (), outs[0].arg)], [x.base for x in outs[0].srcs]
   else:
     for i, out in enumerate(outs):
