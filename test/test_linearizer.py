@@ -593,8 +593,6 @@ def helper_linearizer_opt_ast(realized_ast:Tuple[LazyOp, ...], real_bufs:List[Bu
   outbufs = [real_bufs[i] for i in range(len(realized_ast))]
 
   def get_prg(k:Linearizer): return CompiledRunner(replace(k.to_program(), dname=Device.DEFAULT))
-  def reset_outbufs():
-    for buf in outbufs: buf.copyin(np.zeros((buf.size, ), dtype=buf.dtype.np).data) # Zero to check that all values are filled
 
   def check_opt(opts, create_k, expected_color_size):
     k = create_k()
@@ -606,7 +604,7 @@ def helper_linearizer_opt_ast(realized_ast:Tuple[LazyOp, ...], real_bufs:List[Bu
     if expected_color_size is not None:
       assert (cs:=[(x,y) for x,y in zip(k.colors(), k.full_shape)]) == expected_color_size, f"expected={expected_color_size} got={cs}"
     prg = get_prg(k)
-    reset_outbufs()
+    for buf in outbufs: buf.copyin(np.zeros((buf.size, ), dtype=buf.dtype.np).data) # Zero to check that all values are filled
     prg.exec(real_bufs)
 
     for i, buf in enumerate(outbufs):
@@ -622,7 +620,7 @@ def helper_linearizer_opt_ast(realized_ast:Tuple[LazyOp, ...], real_bufs:List[Bu
   k = Linearizer(*realized_ast)
   k.hand_coded_optimizations()
   prg = get_prg(k)
-  reset_outbufs()
+  for buf in outbufs: buf.copyin(np.zeros((buf.size, ), dtype=buf.dtype.np).data) # Zero to check that all values are filled
   prg.exec(real_bufs)
   for i, buf in enumerate(outbufs):
     np.testing.assert_allclose(np.frombuffer(buf.as_buffer(), buf.dtype.np), wanna_output[i], atol=atol, rtol=rtol)
