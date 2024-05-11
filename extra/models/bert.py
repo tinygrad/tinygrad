@@ -60,7 +60,7 @@ class BertForMLPerf:
     clsf_logits = self.clsf_output(self.clsf_pooling_activation(self.clsf_pooler(output[:, 0]))).cast(dtypes.float32)
 
     # gather only the masked_positions we care about
-    counter = Tensor.arange(output.shape[1], requires_grad=False).reshape(1, 1, output.shape[1]).expand(*masked_positions.shape, output.shape[1])
+    counter = Tensor.arange(output.shape[1], requires_grad=False, device=output.device).reshape(1, 1, output.shape[1]).expand(*masked_positions.shape, output.shape[1])
     onehot = counter == masked_positions.unsqueeze(2).expand(*masked_positions.shape, output.shape[1])
     h_masked = onehot @ output
 
