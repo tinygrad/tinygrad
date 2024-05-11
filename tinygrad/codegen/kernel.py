@@ -2,7 +2,8 @@ from __future__ import annotations
 import math, itertools
 from typing import NamedTuple, Optional, List, Tuple, cast, Dict, Union
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, UNSAFE_PAD_OPS
-from tinygrad.device import Device, CompilerOptions
+from tinygrad.device import Device
+from tinygrad.renderer import Renderer
 from tinygrad.dtype import dtypes, ImageDType, DType
 from tinygrad.helpers import colored, ansilen, dedup, flatten, getenv, prod, DEBUG, round_up, all_int, get_contraction
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -70,9 +71,8 @@ class LocalBuffer(NamedTuple):
   def __str__(self): return f"localbuffer<{self.name}[{self.size}]>"
 
 class Kernel:
-  def __init__(self, *ast:LazyOp, opts:Optional[CompilerOptions]=None):
-    self.opts = opts if opts is not None else (device.compiler.compiler_opts if (device:=Device[Device.DEFAULT]).compiler is not None else
-                                               CompilerOptions(Device.DEFAULT))
+  def __init__(self, *ast:LazyOp, opts:Optional[Renderer]=None):
+    self.opts = opts if opts is not None else Device[Device.DEFAULT].renderer
     assert all(op.op is BufferOps.STORE for op in ast), f"kernels must have stores as the output, got {ast}"
     assert len(set(op.arg.st.size for op in ast)) == 1, f"all outbufs should have the same size, got {[op.arg.st for op in ast]}"
     self.ast = ast

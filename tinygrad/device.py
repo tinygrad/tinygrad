@@ -2,13 +2,13 @@ from __future__ import annotations
 import multiprocessing
 from dataclasses import dataclass, replace
 from collections import defaultdict
-from typing import TYPE_CHECKING, List, Optional, Dict, Tuple, ClassVar, Callable, Any
+from typing import TYPE_CHECKING, List, Optional, Dict, Tuple, Any
 import importlib, inspect, functools, pathlib, os, ctypes
-from tinygrad.helpers import prod, getenv, all_int, to_function_name, diskcache_get, diskcache_put, DEBUG,BEAM,NOOPT, GlobalCounters, flat_mv, from_mv
-from tinygrad.shape.symbolic import Variable, sym_infer, sint
+from tinygrad.helpers import getenv, all_int, diskcache_get, diskcache_put, DEBUG,BEAM,NOOPT, GlobalCounters, flat_mv, from_mv
+from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.dtype import DType, ImageDType
-from tinygrad.ops import LazyOp, get_lazyop_info
-from tinygrad.codegen.uops import UOpGraph
+from tinygrad.ops import LazyOp
+from tinygrad.renderer import Renderer, Program
 
 if TYPE_CHECKING:
   from tinygrad.codegen.linearizer import Linearizer
@@ -181,63 +181,7 @@ class Runner:
 
 # **************** for Compiled Devices ****************
 
-@dataclass(frozen=True)
-class Program:
-  name:str
-  src:str
-  dname:str
-  global_size:Optional[List[int]]=None
-  local_size:Optional[List[int]]=None
-  uops:Optional[UOpGraph]=None
-  op_estimate:sint=0
-  mem_estimate:sint=0
-
-  @functools.cached_property
-  def vars(self) -> List[Variable]: return [] if self.uops is None else self.uops.vars()
-
-  @functools.cached_property
-  def globals(self) -> List[Tuple[int, bool]]: return [] if self.uops is None else self.uops.globals()
-
-  @functools.cached_property
-  def outcount(self) -> int: return sum(x[1] for x in self.globals)
-
-  @functools.cached_property
-  def function_name(self) -> str: return to_function_name(self.name)
-
-  def launch_dims(self, var_vals:Dict[Variable, int]):
-    global_size = [sym_infer(sz, var_vals) for sz in self.global_size] if self.global_size is not None else None
-    local_size = [sym_infer(sz, var_vals) for sz in self.local_size] if self.local_size is not None else None
-    return global_size, local_size
-
-def fake_renderer(name, uops): raise NotImplementedError("needs a renderer")
-
-@dataclass(frozen=True)
-class CompilerOptions:
-  device: str = ""
-  suffix: str = ""
-  # TODO: make this generic with a list of supported types
-  supports_float4: bool = True
-  has_local: bool = True
-  has_shared: bool = True
-  has_tensor_cores: bool = False
-  # NOTE: these two should be in z,y,x(reversed) order for cstyle backends, they are flipped when kernel is rendered
-  global_max: Optional[List[int]] = None
-  local_max: Optional[List[int]] = None
-  shared_max: int = 32768
-  renderer: Callable = fake_renderer
-
-  def to_program(self, k:Linearizer, override_device:Optional[str]=None) -> Program:
-    k.linearize()
-    info = get_lazyop_info(k.ast[0])
-    ops, mem = k.uops.flops_mem()
-    run_count = prod((k.global_size if k.global_size else []) + (k.local_size if k.local_size else []))
-    # NOTE: we use min here to ignore the indexing FLOPS
-    return Program(k.name, self.renderer(to_function_name(k.name), k.uops),
-                   override_device if override_device else self.device,
-                   k.global_size, k.local_size, k.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))
-
 class Compiler:
-  compiler_opts: ClassVar[CompilerOptions]
   def __init__(self, cachekey:Optional[str]=None): self.cachekey = None if getenv("DISABLE_COMPILER_CACHE") else cachekey
   def compile(self, src:str) -> bytes: raise NotImplementedError("need a compile function")
   def compile_cached(self, src:str) -> bytes:
@@ -276,24 +220,25 @@ class CompiledRunner(Runner):
 method_cache: Dict[Tuple[str, Tuple[LazyOp, ...], int, bool], CompiledRunner] = {}
 logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS", "") else None, getenv("LOGKERNS_LEVEL", 1)
 class Compiled:
-  def __init__(self, device:str, allocator:Allocator, compiler:Optional[Compiler], runtime, graph=None):
+  def __init__(self, device:str, allocator:Allocator, renderer:Optional[Renderer], compiler:Optional[Compiler], runtime, graph=None):
     self.dname, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler if compiler else Compiler(), runtime, graph
+    self.renderer = renderer if renderer else Renderer()
   def synchronize(self): pass  # override this in your device
 
-  def to_runner(self, k:Linearizer) -> CompiledRunner: return CompiledRunner(self.compiler.compiler_opts.to_program(k, override_device=self.dname))
+  def to_runner(self, k:Linearizer) -> CompiledRunner: return CompiledRunner(replace(k.to_program(), dname=self.dname))
 
   def get_linearizer(self, *ast:LazyOp) -> Linearizer:
     if DEBUG >= 3:
       from tinygrad.features.graph import print_tree
       for op in ast: print_tree(op)
     from tinygrad.codegen.linearizer import Linearizer
-    k = Linearizer(*ast, opts=self.compiler.compiler_opts)
+    k = Linearizer(*ast, opts=self.renderer)
     k.required_optimizations()
     if not NOOPT:
       if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
       if BEAM >= 1:
         from tinygrad.features.search import beam_search, time_linearizer, bufs_from_lin
-        kb, k_opt = Linearizer(*ast, opts=self.compiler.compiler_opts), k
+        kb, k_opt = Linearizer(*ast, opts=self.renderer), k
         kb.required_optimizations()
         rawbufs = bufs_from_lin(kb, allocate=False)
         k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
@@ -301,7 +246,7 @@ class Compiled:
           # TODO: move the HC/TC/BEAM compare to beam_search so it can be optionally cached which choice is better
           lins: List[Tuple[str, Linearizer]] = [(f"beam{BEAM.value}", k), (("tc" if used_tensor_cores else "hc"), k_opt)]
           if used_tensor_cores:
-            lins.append(("hc", Linearizer(*ast, opts=self.compiler.compiler_opts)))
+            lins.append(("hc", Linearizer(*ast, opts=self.renderer)))
             lins[-1][1].hand_coded_optimizations()
           timed = sorted([(nm, tk, time_linearizer(tk, rawbufs, allow_test_size=False, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
           if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
