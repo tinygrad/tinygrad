@@ -7,8 +7,10 @@ class ClangCompiler(Compiler):
   def compile(self, src:str) -> bytes:
     # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here
     with tempfile.NamedTemporaryFile(delete=True) as output_file:
-      subprocess.check_output(['clang', '-include', 'tgmath.h', '-shared', '-march=native', '-O2', '-Wall', '-Werror', '-x', 'c', '-fPIC', '-',
-                               '-o', str(output_file.name)], input=src.encode('utf-8'))
+      # '-include', 'tgmath.h',
+      subprocess.check_output(['clang', '-nostdlib', '-shared', '-march=native', '-Ofast', '-Wall', '-Werror', '-x', 'c',
+                               '-include', 'tinygrad/runtime/driver/tinymath.h',
+                               '-fno-builtin', '-ffreestanding', '-fPIC', '-', '-o', str(output_file.name)], input=src.encode('utf-8'))
       return pathlib.Path(output_file.name).read_bytes()
 
 class ClangProgram:
