@@ -10,8 +10,10 @@ from tinygrad.dtype import dtypes
 # *** first, we implement the atan2 op at the lowest level ***
 # `atan2_gpu` for GPUBuffers and `atan2_cpu` for CPUBuffers
 from tinygrad.lazy import Buffer, create_lazybuffer
-from tinygrad.device import CompiledRunner, Device, Program
+from tinygrad.device import Device
 from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.engine.realize import CompiledRunner
+from tinygrad.renderer import Program
 
 # we don't always have GPU support, so the type signature is the abstract CompiledBuffer instead of GPUBuffer
 def atan2_gpu(ret:Buffer, a:Buffer, b:Buffer):

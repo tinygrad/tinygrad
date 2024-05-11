@@ -11,11 +11,10 @@ from tinygrad.codegen.linearizer import Linearizer
 # **************** Program Creation ****************
 
 logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS", "") else None, getenv("LOGKERNS_LEVEL", 1)
-def get_linearizer(renderer:Renderer, ast:LazyOp) -> Linearizer:
+def get_linearizer(renderer:Renderer, ast:Tuple[LazyOp, ...]) -> Linearizer:
   if DEBUG >= 3:
     from tinygrad.features.graph import print_tree
     for op in ast: print_tree(op)
-  from tinygrad.codegen.linearizer import Linearizer
   k = Linearizer(*ast, opts=renderer)
   k.required_optimizations()
   if not NOOPT:
