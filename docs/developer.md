@@ -29,11 +29,9 @@ The code in [realize](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/
 
 There's a ton of complexity hidden behind this, see the `codegen/` directory.
 
-First we lower the AST to UOps, which is a linear list of the compute to be run. This is where the BEAM search happens. The UOps can be changed by `CompilerOptions`.
+First we lower the AST to UOps, which is a linear list of the compute to be run. This is where the BEAM search happens.
 
-::: tinygrad.device.CompilerOptions
-
-Then we render the UOps into code, then we compile the code to binary.
+Then we render the UOps into code with a `Renderer`, then we compile the code to binary with a `Compiler`.
 
 ## Execution
 
