@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Tuple, List, Any, cast
-import os, fcntl, ctypes, functools, re, pathlib, mmap, struct, errno, subprocess, time
+import os, fcntl, ctypes, ctypes.util, functools, re, pathlib, mmap, struct, errno, subprocess, time
 from tinygrad.device import Compiled, Compiler, BufferOptions, LRUAllocator
 from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up, DEBUG
 from tinygrad.renderer.cstyle import HIPRenderer
@@ -10,12 +10,18 @@ import tinygrad.runtime.autogen.kfd as kfd
 import tinygrad.runtime.autogen.hsa as hsa
 import tinygrad.runtime.autogen.amd_gpu as amd_gpu
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401
+if getenv("MOCKGPU"): import extra.mockgpu.mockgpu  # noqa: F401
 
-libc = ctypes.CDLL("libc.so.6")
-libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
-libc.mmap.restype = ctypes.c_void_p
-libc.munmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
-libc.munmap.restype = ctypes.c_int
+libc = ctypes.CDLL(ctypes.util.find_library("c"))
+if getenv("MOCKGPU"):
+  # memoryview = extra.mockgpu.mockgpu._memoryview
+  libc.mmap = extra.mockgpu.mockgpu._mmap
+  libc.munmap = extra.mockgpu.mockgpu._munmap
+else:
+  libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
+  libc.mmap.restype = ctypes.c_void_p
+  libc.munmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+  libc.munmap.restype = ctypes.c_int
 
 def is_usable_gpu(gpu_id):
   try:
@@ -178,7 +184,7 @@ class HWPM4Queue:
     return self
 
   def exec(self, prg:AMDProgram, kernargs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1)):
-    self.hdp_flush()
+    # self.hdp_flush()
     self.invalidate_cache()
 
     code = hsa.amd_kernel_code_t.from_address(prg.handle) # NOTE: this is wrong, it's not this object
@@ -326,7 +332,7 @@ class AMDProgram:
     _phoff, _shoff, _flags, _ehsize, _phentsize, _phnum, _shentsize, _shnum, _shstrndx = struct.unpack_from("<QQIHHHHHH", self.lib, 0x20)
     sections = [struct.unpack_from("<IIQQQQIIQ", self.lib, _shoff + i * _shentsize) for i in range(_shnum)]
 
-    lib_gpu_size = round_up(max(sh[5]+sh[3] for sh in sections if sh[1] == SHT_PROGBITS), 0x1000)
+    lib_gpu_size = round_up(max(sh[5]+sh[3] for sh in sections if sh[1] == SHT_PROGBITS), 0x10000)
     self.lib_gpu = self.device._gpu_alloc(lib_gpu_size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=True)
     lib_gpu_view = to_mv(self.lib_gpu.va_addr, lib_gpu_size)
 
