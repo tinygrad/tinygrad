@@ -126,14 +126,14 @@ class TestLinearizer(unittest.TestCase):
 
   def test_basic_multireduce(self):
     def gen(shape, axis):
-        output_shape = tuple([1 if i == axis else x for i,x in enumerate(list(shape))])
-        load0 = MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker.from_shape(shape))
-        load1 = MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker.from_shape(shape))
-        store = MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape(output_shape))
-        ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.SUB, src=(
-          LazyOp(op=BufferOps.LOAD, src=(), arg=load0),LazyOp(op=ReduceOps.SUM, src=(
-          LazyOp(op=BufferOps.LOAD, src=(), arg=load1),), arg=((axis,), dtypes.float))), arg=None),), arg=((axis,), dtypes.float)),), arg=store)
-        return [ast]
+      output_shape = tuple([1 if i == axis else x for i,x in enumerate(list(shape))])
+      load0 = MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker.from_shape(shape))
+      load1 = MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker.from_shape(shape))
+      store = MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape(output_shape))
+      ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.SUB, src=(
+        LazyOp(op=BufferOps.LOAD, src=(), arg=load0),LazyOp(op=ReduceOps.SUM, src=(
+        LazyOp(op=BufferOps.LOAD, src=(), arg=load1),), arg=((axis,), dtypes.float))), arg=None),), arg=((axis,), dtypes.float)),), arg=store)
+      return [ast]
 
     for axis in [2]:
       ast = gen((4, 32, 64), axis)
@@ -167,15 +167,15 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skip
   def test_multireduce_with_intermediate_calc(self):
     def gen(shape, axis):
-        output_shape = tuple([1 if i == axis else x for i,x in enumerate(list(shape))])
-        load = MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker.from_shape(shape))
-        const = ConstBuffer(val=0.015625, dtype=dtypes.float, st=ShapeTracker.from_shape((1,)))
-        store = MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape(output_shape))
-        ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BufferOps.CONST, arg=const),LazyOp(op=ReduceOps.SUM, src=(
-          LazyOp(op=BinaryOps.SUB, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=load),LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=ReduceOps.SUM, src=(
-          LazyOp(op=BufferOps.LOAD, arg=load),), arg=((axis,), dtypes.float)),LazyOp(op=BufferOps.LOAD, arg=load),)),), arg=None),),
-          arg=((axis,), dtypes.float)),)),), arg=store)
-        return [ast]
+      output_shape = tuple([1 if i == axis else x for i,x in enumerate(list(shape))])
+      load = MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker.from_shape(shape))
+      const = ConstBuffer(val=0.015625, dtype=dtypes.float, st=ShapeTracker.from_shape((1,)))
+      store = MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape(output_shape))
+      ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BufferOps.CONST, arg=const),LazyOp(op=ReduceOps.SUM, src=(
+        LazyOp(op=BinaryOps.SUB, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=load),LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=ReduceOps.SUM, src=(
+        LazyOp(op=BufferOps.LOAD, arg=load),), arg=((axis,), dtypes.float)),LazyOp(op=BufferOps.LOAD, arg=load),)),), arg=None),),
+        arg=((axis,), dtypes.float)),)),), arg=store)
+      return [ast]
 
     for axis in [2]:
       ast = gen((4, 32, 64), axis)
@@ -190,18 +190,18 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skip
   def test_multireduce_multiout(self):
     def gen(shape, axis):
-        output_shape = tuple([1 if i == axis else x for i,x in enumerate(list(shape))])
-        load = MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker.from_shape(shape))
-        const = ConstBuffer(val=0.015625, dtype=dtypes.float, st=ShapeTracker.from_shape((1,)))
-        store0 = MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape(output_shape))
-        store1 = MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker.from_shape(output_shape))
-        mean_ast = LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, arg=load),)),
-                                                 LazyOp(op=BufferOps.CONST, arg=const),))
-        mean_out = LazyOp(op=BufferOps.STORE, src=(mean_ast,), arg=store0)
-        ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BufferOps.CONST, arg=const),LazyOp(op=ReduceOps.SUM, src=(
-          LazyOp(op=BinaryOps.SUB, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=load),mean_ast,), arg=None),), arg=((axis,), dtypes.float)),)),
-          ), arg=store1)
-        return [mean_out, ast]
+      output_shape = tuple([1 if i == axis else x for i,x in enumerate(list(shape))])
+      load = MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker.from_shape(shape))
+      const = ConstBuffer(val=0.015625, dtype=dtypes.float, st=ShapeTracker.from_shape((1,)))
+      store0 = MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape(output_shape))
+      store1 = MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker.from_shape(output_shape))
+      mean_ast = LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, arg=load),)),
+                                                LazyOp(op=BufferOps.CONST, arg=const),))
+      mean_out = LazyOp(op=BufferOps.STORE, src=(mean_ast,), arg=store0)
+      ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BufferOps.CONST, arg=const),LazyOp(op=ReduceOps.SUM, src=(
+        LazyOp(op=BinaryOps.SUB, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=load),mean_ast,), arg=None),), arg=((axis,), dtypes.float)),)),
+        ), arg=store1)
+      return [mean_out, ast]
 
     for axis in [2]:
       for ast in [gen((4, 32, 64), axis), list(reversed(gen((4, 32, 64), axis)))]:
