@@ -107,6 +107,27 @@ class TestLinearizer(unittest.TestCase):
     self.assertEqual(k.uops.uops[-1].uop, UOps.ENDIF)
     self.assertLess(k.uops.uops.index([x for x in k.uops.uops if x.uop is UOps.STORE][-1]), k.uops.uops.index(k.uops.uops[-1]))
 
+  @unittest.expectedFailure
+  def test_early_end_local(self):
+    shape, output_shape = (32,), (1,)
+    load0 = MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker.from_shape(shape))
+    load1 = MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker.from_shape(shape))
+    store = MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape(output_shape))
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.ADD, src=(
+      LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, arg=load0),)),LazyOp(op=BufferOps.LOAD, arg=load1), )),)),), arg=store),
+
+    load0_t = Tensor.randn(shape).realize()
+    load1_t = Tensor.randn(shape).realize()
+    k = helper_linearizer_ast(ast, [load0_t, load1_t], wanna_output=[(load0_t.numpy().sum() + load1_t.numpy()).sum()])[1]
+    self.assertEqual(len(endifs:=[x for x in k.uops.uops if x.uop is UOps.ENDIF]), len(ifs:=[x for x in k.uops.uops if x.uop is UOps.IF]))
+    self.assertEqual(len(barriers:=[x for x in k.uops.uops if x.uop is UOps.BARRIER]), 3)
+    self.assertEqual(k.uops.uops[k.uops.uops.index(endifs[0])-1].uop, UOps.STORE)
+    self.assertEqual(k.uops.uops[k.uops.uops.index(endifs[0])+1], barriers[1])
+    self.assertEqual(k.uops.uops[k.uops.uops.index(endifs[0])+2].uop, UOps.LOAD)
+    self.assertLess(k.uops.uops.index(barriers[0]), k.uops.uops.index(ifs[0]))
+    self.assertLess(k.uops.uops.index(ifs[0]), k.uops.uops.index(endifs[0]))
+    self.assertLess(k.uops.uops.index(barriers[1]), k.uops.uops.index(ifs[1]))
+
   def test_load_dedup(self):
     # for different leaves in the AST, the same loads may occur.
 
