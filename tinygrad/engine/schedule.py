@@ -16,6 +16,8 @@ sys.setrecursionlimit(10000)
 # optionally log the ops to disk
 logops = open(getenv("LOGOPS", ""), "a") if getenv("LOGOPS", "") else None
 
+# *** DAG transformation: List[LazyBuffer] -> ScheduleItem ***
+
 # TODO: it's unfortunate this needs to exist, but because of ASSIGN, we have to retain the LazyBuffer structure until post toposort
 @dataclass(frozen=True)
 class _LBScheduleItem:
@@ -80,7 +82,10 @@ def _schedule_group(outs:Tuple[LazyBuffer, ...], realizes:Dict[LazyBuffer, None]
   inputs: List[LazyBuffer] = []
   ast: List[LazyOp] = []
   var_vals: Dict[Variable, int] = merge_dicts([out.st.var_vals.copy() for out in outs])
-  if outs[0].op in {LoadOps.CUSTOM, LoadOps.COPY, LoadOps.EMPTY, LoadOps.VIEW}:
+  if outs[0].op is LoadOps.COPY and getenv("USE_COPY_KERNEL") and outs[0].device.split(":")[0] == outs[0].srcs[0].device.split(":")[0]:
+    rd = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.uint8, st:=ShapeTracker.from_shape((outs[0].arg,))))
+    ast, inputs = [LazyOp(BufferOps.STORE, (rd,), MemBuffer(0, dtypes.uint8, st))], [x.base for x in outs[0].srcs]
+  elif outs[0].op in {LoadOps.CUSTOM, LoadOps.COPY, LoadOps.EMPTY, LoadOps.VIEW}:
     ast, inputs = [LazyOp(outs[0].op, (), outs[0].arg)], [x.base for x in outs[0].srcs]
   else:
     for i, out in enumerate(outs):
@@ -91,6 +96,8 @@ def _schedule_group(outs:Tuple[LazyBuffer, ...], realizes:Dict[LazyBuffer, None]
       if vv: var_vals.update(vv)
       ast.append(LazyOp(BufferOps.STORE, (op, ), MemBuffer(i, out.dtype, output_view)))
   return _LBScheduleItem(tuple(ast), outs, tuple(inputs), var_vals)
+
+# *** DAG creation: decide which LazyBuffers should realize ***
 
 # recursively search the entire graph for all LazyBuffers, insert realizes after expands
 def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[LazyBuffer, None],
@@ -125,6 +132,22 @@ def _is_padding_okay(buf:LazyBuffer, realizes:Dict[LazyBuffer, None]) -> bool:
   if buf.op in UNSAFE_PAD_OPS: return False
   return all(_is_padding_okay(x.base, realizes) for x in buf.srcs)
 
+# recursively search the LazyBuffer for groupable children, realize the LazyBuffer if a child can't group
+def _recursive_group(tr:LazyBuffer, st:ShapeTracker, r:LazyBuffer, children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]],
+                     realizes:Dict[LazyBuffer, None], reduce_for_op:Dict[LazyBuffer, LazyBuffer], group:Set[LazyBuffer]):
+  if tr in realizes:
+    # can only fuse contiguous
+    # max one reduceop per kernel
+    if not st.contiguous or st.size != r.st.size or tr in reduce_for_op: group.add(r)
+    return group.add(tr)
+  for tr_next in children[tr]:
+    if tr_next.realized is None:
+      # max one reduceop per kernel
+      if tr_next.op in ReduceOps: return group.add(r)
+      # can only fuse contiguous
+      if len(st_childs:=dedup(s for s in tr_next.srcs if s.base == tr)) > 1: return group.add(r)
+      _recursive_group(tr_next, st+st_childs[0].st, r, children, realizes, reduce_for_op, group)
+
 def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[DefaultDict[LazyBuffer, List[LazyBuffer]], DefaultDict[LazyBuffer, int],
                                                                     Dict[LazyBuffer, _LBScheduleItem]]:
   # start by just realizing the buffers passed in
@@ -145,54 +168,31 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
   for r in allbufs.keys():
     if r != r.base or r.op not in ReduceOps or r in realizes: continue
 
-    # follow the reduce down
-    child_set: Dict[LazyBuffer, ShapeTracker] = {r: r.st}
-    realized_children: Dict[LazyBuffer, ShapeTracker] = {}
-    forced_realize = False
-    can_chase = True
-    while not forced_realize and len(child_set):
-      next_child_set = {}
-      for tr,st in child_set.items():
-        if tr in realizes:
-          realized_children[tr] = st
-          # can only reduce contiguous
-          # max one reduceop per kernel
-          if not st.contiguous or st.size != r.st.size or tr in reduce_for_op:
-            can_chase = tr not in reduce_for_op
-            forced_realize = True
-            break
-          if len(realized_children) > 1:
-            rc_parents, rc_children = deque(realized_children), deque(realized_children)
-            while rc_parents and not forced_realize:
-              # max one reduceop per kernel
-              if (p:=rc_parents.pop()).op in ReduceOps: forced_realize = True
-              else: rc_parents.extend(x.base for x in p.srcs if x.base.realized is None and x.base is not r)
-            realized_descendants: Set[LazyBuffer] = set()
-            while rc_children and not forced_realize:
-              if (c:=rc_children.pop()).op in ReduceOps or not c.st.contiguous or c.st.size != r.st.size or c in reduce_for_op:
-                realized_descendants.clear()
-                break
-              if c in realizes and c not in (*realized_children, tr): realized_descendants.add(c)
-              rc_children.extend(x for x in children[c] if x.realized is None and x.device == r.device)
-            realized_children.update((rd, st) for rd in realized_descendants)
-          continue
-        for tr_next in children[tr].keys():
-          if not tr_next.realized:
-            # max one reduceop per kernel
-            if tr_next.op in ReduceOps:
-              forced_realize = True
-              break
-            st_childs = dedup([s for s in tr_next.srcs if s.base == tr])
-            if len(st_childs) > 1:
-              forced_realize = True
-              break
-            next_child_set[tr_next] = st + st_childs[0].st
-      child_set = next_child_set
-    if not forced_realize and any(x.op is LoadOps.ASSIGN for x in realized_children):
-      parents = deque((r, *realized_children))
+    group: Set[LazyBuffer] = set()
+    _recursive_group(r, r.st, r, children, realizes, reduce_for_op, group)
+    # max one reduceop per kernel
+    can_chase = all(tr not in reduce_for_op for tr in group)
+    # TODO: forced_realize exists because the scheduler is incapable of checking for self-contained DAGs
+    forced_realize = r in group
+    if not forced_realize and len(group) > 1:
+      rc_parents, rc_children = deque(group), deque(group)
+      while rc_parents and not forced_realize:
+        # max one reduceop per kernel
+        if (p:=rc_parents.pop()).op in ReduceOps: forced_realize = True
+        else: rc_parents.extend(x.base for x in p.srcs if x.base.realized is None and x.base is not r)
+      realized_descendants: Set[LazyBuffer] = set()
+      while rc_children and not forced_realize:
+        if (c:=rc_children.pop()).op in ReduceOps or not c.st.contiguous or c.st.size != r.st.size or c in reduce_for_op:
+          realized_descendants.clear()
+          break
+        if c in realizes and c not in group: realized_descendants.add(c)
+        rc_children.extend(x for x in children[c] if x.realized is None and x.device == r.device)
+      group.update(realized_descendants)
+    if not forced_realize and any(x.op is LoadOps.ASSIGN for x in group):
+      parents = deque((r, *group))
       while parents and not forced_realize:
         if (p:=parents.pop().base).realized or p in realizes:
-          if p in assign_targets and assign_targets[p] not in realized_children: forced_realize, can_chase = True, False
+          if p in assign_targets and assign_targets[p] not in group: forced_realize, can_chase = True, False
           continue
         parents.extend(p.srcs)
     if forced_realize:
@@ -213,7 +213,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
           tr = tr.srcs[0].base
         reduce_for_op[tr] = r
       realizes[tr] = None
-    else: reduce_for_op.update((tr, r) for tr in realized_children)
+    else: reduce_for_op.update((tr, r) for tr in group)
 
   output_groups: DefaultDict[Tuple, List[LazyBuffer]] = defaultdict(list)
   for buf in realizes:
@@ -235,7 +235,6 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
   prescheduled = {group[0]:_schedule_group(tuple(group), realizes, reduce_for_op) for group in output_groups.values()}
   schedule_targets = {out:ps for ps in prescheduled.values() for out in ps.outputs}
 
-  # breadth first ordering
   graph: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
   in_degree: DefaultDict[LazyBuffer, int] = defaultdict(int)
   for key, lsi in prescheduled.items():
@@ -252,6 +251,8 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
       in_degree[assign] += 1
 
   return graph, in_degree, prescheduled
+
+# *** DAG ordering: breadth first search ***
 
 SCHEDULES: List = []
 def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:

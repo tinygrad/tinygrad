@@ -5,11 +5,12 @@ from collections import defaultdict
 
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, ConstType
 from tinygrad.helpers import colored, DEBUG, prod, getenv, to_function_name
-from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ConstBuffer, MemBuffer, BufferOps
+from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ConstBuffer, MemBuffer, BufferOps, get_lazyop_info
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, create_lt_node
 from tinygrad.codegen.kernel import LocalBuffer, Kernel
 from tinygrad.features.image import to_image_idx
+from tinygrad.renderer import Program
 
 from tinygrad.codegen.uops import UOps, UOp, UOpGraph
 
@@ -380,6 +381,8 @@ class Linearizer(Kernel):
       self.loop_uops.update({x.expr:self.uops.add(UOps.SPECIAL, dtypes.int32, (), (i, x.expr, x.max+1)) for i,x in enumerate(loop_local_idxs)})
     else:
       self.render_loop(loop_global_idxs+loop_local_idxs)
+    if self.global_size is not None: self.global_size += [1]*(3-len(self.global_size))
+    if self.local_size is not None: self.local_size += [1]*(3-len(self.local_size))
 
     # parse AST
     loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]] = {}
@@ -439,3 +442,12 @@ class Linearizer(Kernel):
       ret = [self.uops.add(UOps.ALU, dtypes.bool if x.op in {BinaryOps.CMPLT, BinaryOps.CMPEQ} else val[-1].dtype, val, x.op) for val in zip(*values)]
     cache[x] = ret
     return ret
+
+  def to_program(self) -> Program:
+    self.linearize()
+    info = get_lazyop_info(self.ast[0])
+    ops, mem = self.uops.flops_mem()
+    run_count = prod((self.global_size if self.global_size else []) + (self.local_size if self.local_size else []))
+    # NOTE: we use min here to ignore the indexing FLOPS
+    return Program(self.name, self.opts.render(to_function_name(self.name), self.uops), self.opts.device,
+                   self.global_size, self.local_size, self.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))

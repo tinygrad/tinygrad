@@ -4,7 +4,7 @@ from tqdm import tqdm
 import multiprocessing
 
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
-from tinygrad.helpers import getenv, BEAM, WINO, round_up
+from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear
 from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_save
 from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup
 
@@ -19,11 +19,17 @@ def train_resnet():
   from examples.mlperf.initializers import Conv2dHeNormal, Linear
   from examples.hlb_cifar10 import UnsyncedBatchNorm
 
+  config = {}
+  seed = config["seed"] = getenv("SEED", 42)
+  Tensor.manual_seed(seed)  # seed for weight initialization
+
   INITMLPERF = getenv("INITMLPERF")
   RUNMLPERF = getenv("RUNMLPERF")
   if getenv("LOGMLPERF"):
     from mlperf_logging import mllog
     import mlperf_logging.mllog.constants as mllog_constants
+    mllog.config(filename=f"result_{seed}.txt")
+    mllog.config(root_dir=Path(__file__).parents[3].as_posix())  # truncate to log this. "file": "tinygrad/examples/mlperf/model_train.py"
     MLLOGGER = mllog.get_mllogger()
     if INITMLPERF:
       # common.yaml
@@ -31,17 +37,16 @@ def train_resnet():
       MLLOGGER.event(key=mllog_constants.SUBMISSION_PLATFORM, value=getenv("SUBMISSION_PLATFORM", "tinybox"))
       MLLOGGER.event(key=mllog_constants.SUBMISSION_DIVISION, value=mllog_constants.CLOSED)
       MLLOGGER.event(key=mllog_constants.SUBMISSION_STATUS, value=mllog_constants.ONPREM)
-      MLLOGGER.event(key=mllog_constants.CACHE_CLEAR, value=True)
-      MLLOGGER.start(key=mllog_constants.INIT_START)
       # closed_common.yaml
       MLLOGGER.event(key=mllog_constants.SUBMISSION_BENCHMARK, value=mllog_constants.RESNET)
-      MLLOGGER.event(key=mllog_constants.GRADIENT_ACCUMULATION_STEPS, value=1)
+      diskcache_clear()
+      MLLOGGER.event(key=mllog_constants.CACHE_CLEAR, value=True)
+      MLLOGGER.start(key=mllog_constants.INIT_START)
+    if RUNMLPERF:
+      MLLOGGER.start(key=mllog_constants.RUN_START)
+      MLLOGGER.event(key=mllog_constants.SEED, value=seed)
   else:
     MLLOGGER = None
-
-  config = {}
-  seed = config["seed"] = getenv("SEED", 42)
-  Tensor.manual_seed(seed)  # seed for weight initialization
 
   GPUS = config["GPUS"] = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
   print(f"training on {GPUS}")
@@ -69,9 +74,9 @@ def train_resnet():
   epochs            = config["epochs"]            = getenv("EPOCHS", 37)
   BS                = config["BS"]                = getenv("BS", 104 * len(GPUS))  # fp32 GPUS<=6 7900xtx can fit BS=112
   EVAL_BS           = config["EVAL_BS"]           = getenv("EVAL_BS", BS)
-  base_lr           = config["base_lr"]           = getenv("LR", 7 * (BS/1536))
+  base_lr           = config["base_lr"]           = getenv("LR", 7.2 * (BS/1536))
   lr_warmup_epochs  = config["lr_warmup_epochs"]  = getenv("WARMUP_EPOCHS", 2)
-  decay             = config["decay"]             = getenv("DECAY", 5e-5)
+  decay             = config["decay"]             = getenv("DECAY", 2e-4)
 
   loss_scaler       = config["LOSS_SCALER"]       = getenv("LOSS_SCALER", 128.0 if dtypes.default_float == dtypes.float16 else 1.0)
 
@@ -108,14 +113,13 @@ def train_resnet():
 
   # log mlperf hparams
   if MLLOGGER:
-    if INITMLPERF:
-      MLLOGGER.start(key=mllog_constants.INIT_START)
-
+    if RUNMLPERF:
       MLLOGGER.event(key=mllog_constants.GLOBAL_BATCH_SIZE, value=BS)
       from extra.datasets.imagenet import get_train_files, get_val_files
       MLLOGGER.event(key=mllog_constants.TRAIN_SAMPLES, value=len(get_train_files()))
       MLLOGGER.event(key=mllog_constants.EVAL_SAMPLES, value=len(get_val_files()))
 
+      MLLOGGER.event(key=mllog_constants.GRADIENT_ACCUMULATION_STEPS, value=1)
       MLLOGGER.event(key=mllog_constants.OPT_NAME, value="lars")
       assert scheduler.initial_lr == scheduler_skip.initial_lr
       assert scheduler.end_lr == scheduler_skip.end_lr
@@ -128,8 +132,6 @@ def train_resnet():
       MLLOGGER.event(key=mllog_constants.LARS_OPT_LEARNING_RATE_WARMUP_EPOCHS, value=lr_warmup_epochs)
       MLLOGGER.event(key=mllog_constants.LARS_OPT_MOMENTUM, value=optimizer.momentum)
       MLLOGGER.event(key=mllog_constants.LARS_OPT_WEIGHT_DECAY, value=optimizer.wd)
-    if RUNMLPERF:
-      MLLOGGER.start(key=mllog_constants.RUN_START)
 
   # ** resume from checkpointing **
   start_epoch = 0
@@ -173,6 +175,11 @@ def train_resnet():
     top_1 = (out.argmax(-1) == Y).sum()
     return loss.realize(), top_1.realize()
 
+  def fake_data_get(batch_size):
+    x = Tensor.zeros(batch_size, 224, 224, 3, dtype=dtypes.uchar).contiguous()
+    y = [0] * batch_size
+    return x.shard(GPUS, axis=0).realize(), Tensor(y, requires_grad=False).shard(GPUS, axis=0), y, None
+
   def data_get(it):
     x, y, cookie = next(it)
     return x.shard(GPUS, axis=0).realize(), Tensor(y, requires_grad=False).shard(GPUS, axis=0), y, cookie
@@ -181,13 +188,18 @@ def train_resnet():
   step_times = []
   for e in range(start_epoch, epochs):
     # ** train loop **
-    if MLLOGGER:
+    if MLLOGGER and RUNMLPERF:
       MLLOGGER.start(key=mllog_constants.EPOCH_START, value=e+1, metadata=dict(epoch_num=e+1))
     Tensor.training = True
     BEAM.value = TRAIN_BEAM
-    batch_loader = batch_load_resnet(batch_size=BS, val=False, shuffle=True, seed=seed*epochs + e, pad_first_batch=True)
-    it = iter(tqdm(batch_loader, total=steps_in_train_epoch, desc=f"epoch {e}", disable=BENCHMARK))
-    i, proc = 0, data_get(it)
+
+    if INITMLPERF:
+      i, proc = 0, fake_data_get(BS)
+    else:
+      batch_loader = batch_load_resnet(batch_size=BS, val=False, shuffle=True, seed=seed*epochs + e, pad_first_batch=True)
+      it = iter(tqdm(batch_loader, total=steps_in_train_epoch, desc=f"epoch {e}", disable=BENCHMARK))
+      i, proc = 0, data_get(it)
+
     prev_cookies = []
     st = time.perf_counter()
     while proc is not None:
@@ -198,7 +210,10 @@ def train_resnet():
 
       if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
       try:
-        next_proc = data_get(it)
+        if INITMLPERF:
+          next_proc = fake_data_get(BS)
+        else:
+          next_proc = data_get(it)
       except StopIteration:
         next_proc = None
 
@@ -252,8 +267,12 @@ def train_resnet():
       Tensor.training = False
       BEAM.value = EVAL_BEAM
 
-      it = iter(tqdm(batch_load_resnet(batch_size=EVAL_BS, val=True, shuffle=False, pad_first_batch=True), total=steps_in_val_epoch))
-      i, proc = 0, data_get(it)
+      if INITMLPERF:
+        i, proc = 0, fake_data_get(EVAL_BS)
+      else:
+        it = iter(tqdm(batch_load_resnet(batch_size=EVAL_BS, val=True, shuffle=False, pad_first_batch=True), total=steps_in_val_epoch))
+        i, proc = 0, data_get(it)
+        
       prev_cookies = []
       while proc is not None:
         GlobalCounters.reset()
@@ -263,7 +282,10 @@ def train_resnet():
 
         if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
         try:
-          next_proc = data_get(it)
+          if INITMLPERF:
+            next_proc = fake_data_get(EVAL_BS)
+          else:
+            next_proc = data_get(it)
         except StopIteration:
           next_proc = None
 
@@ -276,6 +298,7 @@ def train_resnet():
         proc, next_proc = next_proc, None
         i += 1
         if i == BENCHMARK:
+          # assume INITMLPERF has BENCHMARK set
           if MLLOGGER and INITMLPERF:
             MLLOGGER.event(key=mllog_constants.INIT_STOP)
           return
@@ -298,14 +321,14 @@ def train_resnet():
 
       # save model if achieved target
       if not achieved and total_top_1 >= target:
+        # stop once achieve the target
+        if MLLOGGER and RUNMLPERF:
+          MLLOGGER.event(key=mllog_constants.RUN_STOP, metadata=dict(status=mllog_constants.SUCCESS))
         if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
-        fn = f"./ckpts/resnet50.safe"
+        fn = f"./ckpts/resnet50_{seed}.safe"
         safe_save(get_state_dict(model), fn)
         print(f" *** Model saved to {fn} ***")
         achieved = True
-        # stop once achieve the target
-        if MLLOGGER and RUNMLPERF:
-          MLLOGGER.event(key=mllog_constants.RUN_STOP, metadata=dict(status="success"))
         break
 
       # checkpoint every time we eval
@@ -375,7 +398,7 @@ def train_bert():
   BASEDIR = getenv("BASEDIR", Path(__file__).parent.parents[1] / "extra" / "datasets" / "wiki")
 
   GPUS = config["GPUS"] = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
-  print(f"Training on {GPUS}")
+  print(f"training on {GPUS}")
   for x in GPUS: Device[x]
   seed = config["seed"] = getenv("SEED", 12345)
 
@@ -387,7 +410,7 @@ def train_bert():
   train_steps        = config["TRAIN_STEPS"]            = getenv("TRAIN_STEPS", 4800000 // BS)
   warmup_steps       = config["NUM_WARMUP_STEPS"]       = getenv("NUM_WARMUP_STEPS", train_steps // 10)
   max_eval_steps     = config["MAX_EVAL_STEPS"]         = getenv("MAX_EVAL_STEPS", (10000 + EVAL_BS - 1) // EVAL_BS) # EVAL_BS * MAX_EVAL_STEPS >= 10000
-  eval_step_freq     = config["EVAL_STEP_FREQ"]         = int((math.floor(0.05 * (230.23 * BS + 3000000) / 25000) * 25000) / BS) # Round down
+  eval_step_freq     = config["EVAL_STEP_FREQ"]         = getenv("EVAL_STEP_FREQ", int((math.floor(0.05 * (230.23 * BS + 3000000) / 25000) * 25000) / BS)) # Round down
   save_ckpt_freq     = config["SAVE_CKPT_FREQ"]         = getenv("SAVE_CKPT_FREQ", 1000)
   keep_ckpt_amount   = config["KEEP_CKPT_AMOUNT"]       = getenv("KEEP_CKPT_AMOUNT", 5)
   init_ckpt          = config["INIT_CKPT_DIR"]          = getenv("INIT_CKPT_DIR", BASEDIR)
@@ -403,7 +426,7 @@ def train_bert():
 
   Tensor.manual_seed(seed)  # seed for weight initialization
 
-  model = get_mlperf_bert_model(BASEDIR / "bert_config.json")
+  model = get_mlperf_bert_model()
   if init_ckpt: init_bert_from_checkpoint(model, init_ckpt)
   
   for _, x in get_state_dict(model).items():
@@ -425,7 +448,7 @@ def train_bert():
 
   # ** LR scheduler **
   scheduler = PolynomialDecayWithWarmup(optimizer, max_lr, 0, train_steps, warmup_steps, power=poly_power)
-  print(f"Training with batch size {BS} for one epoch with {train_steps} steps")
+  print(f"training with batch size {BS} for one epoch with {train_steps} steps")
 
   # ** resume from checkpointing **
   start_step = 0
@@ -449,14 +472,15 @@ def train_bert():
   step_times = []
   # ** train loop **
   wc_start = time.perf_counter()
-  Tensor.training = True
-  BEAM.value = TRAIN_BEAM
   i, train_data = 0, get_data_bert(GPUS, train_it)
   while train_data is not None and i < train_steps and not achieved:
+    Tensor.training = True
+    BEAM.value = TRAIN_BEAM
     st = time.perf_counter()
     GlobalCounters.reset()
-    loss = train_step_bert(model, optimizer_group, scheduler, train_data["input_ids"], train_data["segment_ids"], train_data["input_mask"], train_data["masked_lm_positions"], \
-                      train_data["masked_lm_ids"], train_data["masked_lm_weights"], train_data["next_sentence_labels"])
+    loss = train_step_bert(model, optimizer_group, scheduler,
+      train_data["input_ids"], train_data["segment_ids"], train_data["input_mask"], train_data["masked_lm_positions"], \
+      train_data["masked_lm_ids"], train_data["masked_lm_weights"], train_data["next_sentence_labels"])
 
     pt = time.perf_counter()
 
@@ -496,46 +520,53 @@ def train_bert():
     # ** eval loop **
     if i % eval_step_freq == 0 or i == 1:
       train_step_bert.reset()  # free the train step memory :(
-      eval_loss = []
-      eval_accuracy = []
+      eval_lm_losses = []
+      eval_clsf_losses = []
+      eval_lm_accs = []
+      eval_clsf_accs = []
       eval_times = []
       Tensor.training = False
       BEAM.value = EVAL_BEAM
 
-      for _ in tqdm(range(max_eval_steps), desc="Evaluating", total=max_eval_steps, disable=BENCHMARK):
+      for j in tqdm(range(max_eval_steps), desc="Evaluating", total=max_eval_steps, disable=BENCHMARK):
         eval_data = get_data_bert(GPUS, eval_it)
         GlobalCounters.reset()
         st = time.time()
 
-        eval_result: dict[str, Tensor] = eval_step_bert(model, eval_data["input_ids"], eval_data["segment_ids"], eval_data["input_mask"], eval_data["masked_lm_positions"], \
-                                                  eval_data["masked_lm_ids"], eval_data["masked_lm_weights"], eval_data["next_sentence_labels"])
+        eval_result: dict[str, Tensor] = eval_step_bert(model,
+          eval_data["input_ids"], eval_data["segment_ids"], eval_data["input_mask"], eval_data["masked_lm_positions"],
+          eval_data["masked_lm_ids"], eval_data["masked_lm_weights"], eval_data["next_sentence_labels"])
 
-        lm_loss, clsf_loss  = eval_result["masked_lm_loss"].numpy().item(), eval_result["next_sentence_loss"].numpy().item()
-        mlm_accuracy, clsf_accuracy = eval_result["masked_lm_accuracy"].numpy().item(), eval_result["next_sentence_accuracy"].numpy().item()
-        eval_loss.append([lm_loss, clsf_loss])
-        eval_accuracy.append([mlm_accuracy, clsf_accuracy])
+        lm_loss, clsf_loss  = eval_result["masked_lm_loss"].item(), eval_result["next_sentence_loss"].item()
+        lm_acc, clsf_acc = eval_result["masked_lm_accuracy"].item(), eval_result["next_sentence_accuracy"].item()
+
+        eval_lm_losses.append(lm_loss)
+        eval_clsf_losses.append(clsf_loss)
+        eval_lm_accs.append(lm_acc)
+        eval_clsf_accs.append(clsf_acc)
 
         et = time.time()
         eval_times.append(et - st)
 
+        if BENCHMARK and j == BENCHMARK: break
+
       eval_step_bert.reset()
-      Tensor.training = True
-      total_lm_loss = sum(pair[0] for pair in eval_loss) / len(eval_loss)
-      total_clsf_loss = sum(pair[1] for pair in eval_loss) / len(eval_loss)
-      total_lm_accuracy = sum(pair[0] for pair in eval_accuracy) / len(eval_accuracy)
-      total_clsf_accuracy = sum(pair[1] for pair in eval_accuracy) / len(eval_accuracy)
-      total_fw_time = sum(eval_times) / len(eval_times)
-      results = f"eval lm loss: {total_lm_loss:.2f}, eval clsf loss: {total_clsf_loss:.2f}, eval lm accuracy: {total_lm_accuracy:.6f}, \
-                  eval clsf accuracy: {total_clsf_accuracy:.2f}, avg eval step time: {total_fw_time:.2f}"
+      avg_lm_loss = sum(eval_lm_losses) / len(eval_lm_losses)
+      avg_clsf_loss = sum(eval_clsf_losses) / len(eval_clsf_losses)
+      avg_lm_acc = sum(eval_lm_accs) / len(eval_lm_accs)
+      avg_clsf_acc = sum(eval_clsf_accs) / len(eval_clsf_accs)
+      avg_fw_time = sum(eval_times) / len(eval_times)
+      results = f"eval lm loss: {avg_lm_loss:.2f}, eval clsf loss: {avg_clsf_loss:.2f}, eval lm accuracy: {avg_lm_acc:.6f}, \
+                  eval clsf accuracy: {avg_clsf_acc:.2f}, avg eval step time: {avg_fw_time:.2f}"
       tqdm.write(results)
       with open(getenv("EVAL_LOG", "./eval_log.txt"), "a") as file: file.write(results + "\n")
 
       if WANDB:
-        wandb.log({"eval/lm_loss": total_lm_loss, "eval/clsf_loss": total_clsf_loss, "eval/lm_accuracy": total_lm_accuracy, \
-                    "eval/clsf_accuracy": total_clsf_accuracy, "eval/forward_time": total_fw_time})
+        wandb.log({"eval/lm_loss": avg_lm_loss, "eval/clsf_loss": avg_clsf_loss, "eval/lm_accuracy": avg_lm_acc, \
+                    "eval/clsf_accuracy": avg_clsf_acc, "eval/forward_time": avg_fw_time})
 
       # save model if achieved target
-      if not achieved and total_lm_accuracy >= target:
+      if not achieved and avg_lm_acc >= target:
         wc_end = time.perf_counter()
         if not os.path.exists(ckpt_dir := getenv('CKPT_DIR', "./ckpts")): os.mkdir(ckpt_dir)
         fn = f"{ckpt_dir}/bert-large.safe"
@@ -548,6 +579,8 @@ def train_bert():
         seconds = total_seconds % 60
         print(f"Reference Convergence point reached after {i * BS} datasamples and {hours}h{minutes}m{seconds:.2f}s.")
         achieved = True
+        # stop once hitting the target
+        break
 
     if getenv("CKPT") and i % save_ckpt_freq == 0:
       if not os.path.exists(ckpt_dir := getenv('CKPT_DIR', "./ckpts")): os.mkdir(ckpt_dir)

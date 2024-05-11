@@ -1,5 +1,5 @@
 import os, platform, subprocess
-from tinygrad.device import Compiled, MallocAllocator, Compiler, CompilerOptions
+from tinygrad.device import Compiled, Compiler, MallocAllocator
 from tinygrad.runtime.driver.elf_loader import ElfLoader, addrof
 from tinygrad.helpers import cpu_time_execution
 from tinygrad.renderer.cstyle import ClangRenderer
@@ -7,8 +7,6 @@ from tinygrad.renderer.cstyle import ClangRenderer
 loader = ElfLoader()
 
 class ClangCompiler(Compiler):
-  compiler_opts = CompilerOptions("CLANG", supports_float4=False, has_local=False)
-  def render(self, name:str, uops) -> str: return ClangRenderer(name, uops)
   def compile(self, src:str) -> bytes:
     platspec = ('-ffixed-x18',) if platform.machine() == "arm64" else ('-Xclang=-fnative-half-type', '-Xclang=-fnative-half-arguments-and-returns')
     return subprocess.check_output(('clang', '-x', 'c', '-c', '-target', f'{platform.machine()}-none-unknown-elf', '-march=native', '-fPIC', '-O2',
@@ -28,4 +26,4 @@ class ClangProgram:
 class ClangDevice(Compiled):
   def __init__(self, device:str):
     from tinygrad.runtime.graph.clang import ClangGraph
-    super().__init__(device, MallocAllocator, ClangCompiler("compile_clang_object"), ClangProgram, ClangGraph)
+    super().__init__(device, MallocAllocator, ClangRenderer(), ClangCompiler("compile_clang_object"), ClangProgram, ClangGraph)

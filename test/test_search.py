@@ -41,7 +41,7 @@ class TestBEAM(unittest.TestCase):
     with Context(BEAM=0): Tensor.zeros(16).contiguous().realize()
     k_beam_0 = capturing[0].captured
     capturing.clear()
-    assert k_beam_0[-1].prg.prg != k_beam_1[-1].prg.prg
+    assert k_beam_0[-1].prg.p.src != k_beam_1[-1].prg.p.src
 
   def test_get_linearizer_actions(self):
     from test.test_linearizer import helper_realized_ast

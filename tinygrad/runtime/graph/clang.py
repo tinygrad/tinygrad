@@ -2,19 +2,19 @@ from typing import List, Dict, cast
 import ctypes
 from tinygrad.helpers import dedup, cpu_time_execution, GraphException, DEBUG
 from tinygrad.engine.jit import GraphRunner
-from tinygrad.device import Buffer, Device, CompiledRunner
-from tinygrad.engine.realize import ExecItem
+from tinygrad.device import Buffer, Device
+from tinygrad.engine.realize import ExecItem, CompiledRunner
 from tinygrad.shape.symbolic import Variable
 from tinygrad.runtime.ops_clang import ClangProgram
-from tinygrad.renderer.cstyle import ClangLanguage
-render_dtype = ClangLanguage().render_dtype
+from tinygrad.renderer.cstyle import ClangRenderer
+render_dtype = ClangRenderer().render_dtype
 
 class ClangGraph(GraphRunner):
   def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
     super().__init__(jit_cache, input_rawbuffers, var_vals)
     if not all(isinstance(ji.prg, CompiledRunner) for ji in jit_cache): raise GraphException
 
-    prgs = '\n'.join(dedup([cast(CompiledRunner, ji.prg).prg for ji in jit_cache]))
+    prgs = '\n'.join(dedup([cast(CompiledRunner, ji.prg).p.src for ji in jit_cache]))
     args = [f"{render_dtype(x.dtype)}* arg{i}" for i,x in enumerate(input_rawbuffers)]
     args += [f"int {v.expr}" for v in var_vals]
     code = ["void batched("+','.join(args)+") {"]
@@ -26,8 +26,8 @@ class ClangGraph(GraphRunner):
           args.append(f"arg{input_rawbuffers.index(buf)}")
         else:
           args.append(f"({render_dtype(buf.dtype)}*)0x{ctypes.addressof(buf._buf):X}")
-      args += [x.expr for x in cast(CompiledRunner, ji.prg).vars]
-      code.append(f"  {cast(CompiledRunner, ji.prg).name}({','.join(args)});")
+      args += [x.expr for x in cast(CompiledRunner, ji.prg).p.vars]
+      code.append(f"  {cast(CompiledRunner, ji.prg).p.function_name}({','.join(args)});")
     code.append("}")
     if DEBUG >= 4: print("\n".join(code))
     compiler = Device["CLANG"].compiler

@@ -194,7 +194,22 @@ def get_bert_qa_prediction(features, example, start_end_logits):
     return _get_final_text(tok_text, orig_text)
   return "empty"
 
-def get_mlperf_bert_model(config_path:str):
+def get_mlperf_bert_config():
+  return {
+    "attention_probs_dropout_prob": 0.1,
+    "hidden_act": "gelu",
+    "hidden_dropout_prob": 0.1,
+    "hidden_size": 1024,
+    "initializer_range": 0.02,
+    "intermediate_size": 4096,
+    "max_position_embeddings": 512,
+    "num_attention_heads": 16,
+    "num_hidden_layers": 24,
+    "type_vocab_size": 2,
+    "vocab_size": 30522
+  }
+
+def get_mlperf_bert_model():
   from extra.models import bert
   from examples.mlperf.initializers import LinearBert, EmbeddingBert, LayerNormBert
 
@@ -204,8 +219,7 @@ def get_mlperf_bert_model(config_path:str):
 
   from extra.models.bert import BertForMLPerf
 
-  with open(config_path, "r") as f:
-    config = json.load(f)
+  config = get_mlperf_bert_config()
   return BertForMLPerf(
     config["hidden_size"],
     config["intermediate_size"], 

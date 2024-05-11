@@ -32,7 +32,7 @@ class TestHIPCompileSpeed(unittest.TestCase):
       compile_hip(code)
       return (time.perf_counter() - st) * 1000
 
-    tinygrad_tm = min([time_compile(Device[Device.DEFAULT].compiler.render(f"test{i}", lin.uops)) for i in range(10)])
+    tinygrad_tm = min([time_compile(Device[Device.DEFAULT].renderer.render(f"test{i}", lin.uops)) for i in range(10)])
     ref_tm = min([time_compile(reference.format(name=f"test{i}")) for i in range(10)])
     print(f"tinygrad {tinygrad_tm:6.2f} ms")
     print(f"reference {ref_tm:6.2f} ms")

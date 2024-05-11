@@ -4,17 +4,19 @@ import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv
 from tinygrad.dtype import dtypes, DType, PtrDType
-from tinygrad.device import Buffer, Device, CompiledRunner
+from tinygrad.device import Buffer, Device
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
+from tinygrad.renderer import Program
 from tinygrad.engine.schedule import create_schedule
+from tinygrad.engine.realize import CompiledRunner, lower_schedule_item
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.codegen.uops import exec_alu, UOpGraph
 from test.helpers import is_dtype_supported
 
 def _uops_to_prg(uops):
-  src = Device[Device.DEFAULT].compiler.render("test", uops)
-  has_local = Device[Device.DEFAULT].compiler.compiler_opts.has_local
-  return CompiledRunner("test", src, Device.DEFAULT, [1] if has_local else None, [1] if has_local else None, uops=uops)
+  src = Device[Device.DEFAULT].renderer.render("test", uops)
+  has_local = Device[Device.DEFAULT].renderer.has_local
+  return CompiledRunner(Program("test", src, Device.DEFAULT, [1,1,1] if has_local else None, [1,1,1] if has_local else None, uops=uops))
 
 def uop(uops:List[UOp], uop:UOps, dtype:Optional[DType], vin:Tuple[UOp, ...], arg:Any=None) -> UOp:
   uops.append(UOp(uop, dtype, tuple(vin), arg))
@@ -210,9 +212,8 @@ class TestConstantFolding(unittest.TestCase):
     t = Tensor(1, dtype=dtypes.float).bitcast(dtypes.int)
     si = create_schedule([t.lazydata])
     assert len(si) == 1
-    si = si[0]
-    lin = Device[Device.DEFAULT].get_linearizer(si.ast[0]).linearize()
-    assert any(uop.uop is UOps.BITCAST for uop in lin.uops.uops), f"{[uop.uop for uop in lin.uops.uops]} does not contain bitcast"
+    ji = lower_schedule_item(si[-1])
+    assert any(uop.uop is UOps.BITCAST for uop in ji.prg.p.uops), f"{[uop.uop for uop in ji.prg.p.uops]} does not contain bitcast"
 
 class TestLocalAccess(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT in {"LLVM"}, "device doesn't support local memory")

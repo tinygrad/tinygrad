@@ -1,7 +1,7 @@
 import unittest, ctypes, struct, time, array
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.helpers import to_mv
-from tinygrad.buffer import Buffer, BufferOptions
+from tinygrad.device import Buffer, BufferOptions
 from tinygrad.engine.schedule import create_schedule
 
 def _time_queue(q, d):
