@@ -14,7 +14,7 @@ from tinygrad.engine.realize import lower_schedule_item
 def get_stats(x:Tensor):
   si = create_schedule([x.lazydata])[-1]
   ei = lower_schedule_item(si)
-  return ei.prg.p.op_estimate, ei.prg.p.mem_estimate
+  return ei.prg.op_estimate, ei.prg.mem_estimate
 
 class TestUOpsStats(unittest.TestCase):
   def test_simple_add(self):
