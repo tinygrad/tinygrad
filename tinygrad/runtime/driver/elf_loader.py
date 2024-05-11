@@ -1,4 +1,4 @@
-import struct, ctypes, os, platform, subprocess
+import struct, ctypes, platform
 from tinygrad.helpers import round_up, DEBUG, OSX
 from mmap import PROT_READ, PROT_WRITE, PROT_EXEC, MAP_ANON, MAP_PRIVATE, PAGESIZE
 from typing import Dict, List, Tuple, Callable
@@ -22,7 +22,7 @@ libc = ctypes.CDLL(None)
 libc.mmap.restype = ctypes.c_void_p
 libc.mmap.argtypes = (ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_size_t)
 
-class ElfLoader():
+class ElfLoader:
   def __init__(self):
     self.cursor, self.left = 0, 0
     self.external_symbols = {
