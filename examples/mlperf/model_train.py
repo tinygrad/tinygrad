@@ -268,10 +268,11 @@ def train_resnet():
       BEAM.value = EVAL_BEAM
 
       if INITMLPERF:
+        i, proc = 0, fake_data_get(EVAL_BS)
+      else:
         it = iter(tqdm(batch_load_resnet(batch_size=EVAL_BS, val=True, shuffle=False, pad_first_batch=True), total=steps_in_val_epoch))
         i, proc = 0, data_get(it)
-      else:
-        i, proc = 0, fake_data_get(EVAL_BS)
+        
       prev_cookies = []
       while proc is not None:
         GlobalCounters.reset()
@@ -425,7 +426,7 @@ def train_bert():
 
   Tensor.manual_seed(seed)  # seed for weight initialization
 
-  model = get_mlperf_bert_model(BASEDIR / "bert_config.json")
+  model = get_mlperf_bert_model()
   if init_ckpt: init_bert_from_checkpoint(model, init_ckpt)
   
   for _, x in get_state_dict(model).items():
@@ -471,10 +472,10 @@ def train_bert():
   step_times = []
   # ** train loop **
   wc_start = time.perf_counter()
-  Tensor.training = True
-  BEAM.value = TRAIN_BEAM
   i, train_data = 0, get_data_bert(GPUS, train_it)
   while train_data is not None and i < train_steps and not achieved:
+    Tensor.training = True
+    BEAM.value = TRAIN_BEAM
     st = time.perf_counter()
     GlobalCounters.reset()
     loss = train_step_bert(model, optimizer_group, scheduler, train_data["input_ids"], train_data["segment_ids"], train_data["input_mask"], train_data["masked_lm_positions"], \
@@ -524,7 +525,7 @@ def train_bert():
       Tensor.training = False
       BEAM.value = EVAL_BEAM
 
-      for _ in tqdm(range(max_eval_steps), desc="Evaluating", total=max_eval_steps, disable=BENCHMARK):
+      for j in tqdm(range(max_eval_steps), desc="Evaluating", total=max_eval_steps, disable=BENCHMARK):
         eval_data = get_data_bert(GPUS, eval_it)
         GlobalCounters.reset()
         st = time.time()
@@ -539,6 +540,8 @@ def train_bert():
 
         et = time.time()
         eval_times.append(et - st)
+
+        if BENCHMARK and j == BENCHMARK: break
 
       eval_step_bert.reset()
       Tensor.training = True

@@ -3,8 +3,7 @@ import os, subprocess, pathlib, ctypes, tempfile, functools
 import Metal, libdispatch
 from typing import List, Set, Any, Tuple, Optional
 from tinygrad.helpers import prod, getenv, DEBUG, unwrap2
-from tinygrad.device import Compiled, Compiler, CompilerOptions
-from tinygrad.buffer import LRUAllocator
+from tinygrad.device import Compiled, Compiler, CompilerOptions, LRUAllocator
 from tinygrad.renderer.cstyle import MetalRenderer
 
 def wait_check(cbuf: Any):
@@ -13,11 +12,10 @@ def wait_check(cbuf: Any):
     raise RuntimeError(error)
 
 class MetalCompiler(Compiler):
-  compiler_opts = CompilerOptions("METAL", has_tensor_cores=os.uname().machine == "arm64", shared_max=32768)
+  compiler_opts = CompilerOptions("METAL", has_tensor_cores=os.uname().machine == "arm64", shared_max=32768, renderer=MetalRenderer)
   def __init__(self, device:Optional[MetalDevice]):
     self.device = device
     super().__init__("compile_metal")
-  def render(self, name:str, uops) -> str: return MetalRenderer(name, uops)
   def compile(self, src:str) -> bytes:
     if self.device is None:
       # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode

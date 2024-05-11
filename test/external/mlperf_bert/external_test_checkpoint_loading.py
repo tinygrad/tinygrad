@@ -33,7 +33,7 @@ if __name__ == "__main__":
 
   Tensor.training = False
 
-  model = get_mlperf_bert_model(os.path.join(BASEDIR, "bert_config.json"))
+  model = get_mlperf_bert_model()
   init_bert_from_checkpoint(model, INIT_CKPT_DIR) # Test the actual loading of the checkpoint
 
   for _, x in get_state_dict(model).items():
