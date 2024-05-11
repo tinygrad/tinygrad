@@ -90,7 +90,12 @@ class TestLinearizer(unittest.TestCase):
 
     a_t = Tensor.full(st.shape, 1).contiguous().realize()
     b_t = Tensor.full(st.shape, 2).contiguous().realize()
-    helper_linearizer_ast((out0, out1), [a_t, b_t], wanna_output=[a_t.numpy()+b_t.numpy(), a_t.numpy()*b_t.numpy()])
+    lin = helper_linearizer_ast((out0, out1), [a_t, b_t], wanna_output=[a_t.numpy()+b_t.numpy(), a_t.numpy()*b_t.numpy()])[0]
+
+    stores = [u for u in lin.uops if u.uop is UOps.STORE]
+    mutable_bufs = [u for u in lin.uops if u.uop is UOps.DEFINE_GLOBAL and u.arg[-1]]
+    assert len(mutable_bufs) == len(stores) == 2
+    assert [u.arg[0] for u in mutable_bufs] == [0, 1]
 
   def test_load_dedup(self):
     # for different leaves in the AST, the same loads may occur.
@@ -590,12 +595,14 @@ def helper_linearizer_opt(r:Tensor, opts=[], apply_tc=False, atol=1e-4, rtol=1e-
   return _helper_linearizer_opt_ast((realized_ast, ), real_bufs, opts, apply_tc, atol, rtol, color_sizes, wanna_output)
 
 def _helper_linearizer_opt_ast(realized_ast:Tuple[LazyOp, ...], real_bufs:List[Buffer], opts=[], apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[], wanna_output=[]):
+  lins: List[Linearizer] = []
   outbufs = [real_bufs[i] for i in range(len(realized_ast))]
 
   def get_prg(k:Linearizer): return CompiledRunner(replace(k.to_program(), dname=Device.DEFAULT))
 
   def check_opt(opts, create_k, expected_color_size):
     k = create_k()
+    lins.append(k)
     if apply_tc:
       assert k.apply_tensor_cores(1, extra_opts=opts), "no tensor core triggered"
     else:
@@ -612,6 +619,7 @@ def _helper_linearizer_opt_ast(realized_ast:Tuple[LazyOp, ...], real_bufs:List[B
 
   # Get baseline if it is not provided, which is not optimized at all.
   k = Linearizer(*realized_ast)
+  lins.append(k)
   prg = get_prg(k)
   prg.exec(real_bufs)
   if len(wanna_output) == 0: wanna_output = [np.frombuffer(buf.as_buffer(), buf.dtype.np).copy() for buf in outbufs]
@@ -621,6 +629,7 @@ def _helper_linearizer_opt_ast(realized_ast:Tuple[LazyOp, ...], real_bufs:List[B
 
   # Check correctness of handcoded optimiztions.
   k = Linearizer(*realized_ast)
+  lins.append(k)
   k.hand_coded_optimizations()
   prg = get_prg(k)
   for buf in outbufs: buf.copyin(np.zeros((buf.size, ), dtype=buf.dtype.np).data) # Zero to check that all values are filled
@@ -629,6 +638,7 @@ def _helper_linearizer_opt_ast(realized_ast:Tuple[LazyOp, ...], real_bufs:List[B
     np.testing.assert_allclose(np.frombuffer(buf.as_buffer(), buf.dtype.np), wanna_output[i], atol=atol, rtol=rtol)
   for i, x in enumerate(opts): # Check custom transformations if any.
     check_opt(x, lambda: Linearizer(*realized_ast), color_sizes[i] if i < len(color_sizes) else None)
+  return lins
 
 class TestKernelOpts(unittest.TestCase):
   def test_local_and_grouped_reduce(self):
