@@ -227,10 +227,16 @@ jobs:
       run: HSA=1 JIT=1 BEAM=2 CACHELEVEL=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_beam.txt
     - name: Run LLaMA 7B on 4 GPUs
       run: HSA=1 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_four_gpu.txt
+    - name: Run LLaMA 7B on 4 GPUs and BEAM
+      run: BEAM=2 HSA=1 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 10 --temperature 0  --timing
     - name: Run LLaMA 7B on 6 GPUs
       run: HSA=1 python3 examples/llama.py --gen 1 --size 7B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_six_gpu.txt
+    - name: Run LLaMA 7B on 6 GPUs and BEAM
+      run: BEAM=2 HSA=1 python3 examples/llama.py --gen 1 --size 7B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing
     - name: Run LLaMA-2 70B
       run: HSA=1 python3 examples/llama.py --gen 2 --size 70B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_2_70B.txt
+    - name: Run LLaMA-2 70B and AMD
+      run: AMD=1 python3 examples/llama.py --gen 2 --size 70B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing
     - name: Run Mixtral 8x7B
       run: time HSA=1 python3 examples/mixtral.py --temperature 0 --count 10 --timing | tee mixtral.txt
     - name: Run GPT2
