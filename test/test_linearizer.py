@@ -88,8 +88,8 @@ class TestLinearizer(unittest.TestCase):
     out0 = LazyOp(BufferOps.STORE, (LazyOp(op=BinaryOps.ADD, src=(a,b)),), MemBuffer(idx=0, dtype=dtype, st=st))
     out1 = LazyOp(BufferOps.STORE, (LazyOp(op=BinaryOps.MUL, src=(a,b)),), MemBuffer(idx=1, dtype=dtype, st=st))
 
-    a_t = Tensor.full(st.shape, 1).contiguous().realize()
-    b_t = Tensor.full(st.shape, 2).contiguous().realize()
+    a_t = Tensor.full(st.shape, 2).contiguous().realize()
+    b_t = Tensor.full(st.shape, 3).contiguous().realize()
     lin = helper_linearizer_ast((out0, out1), [a_t, b_t], wanna_output=[a_t.numpy()+b_t.numpy(), a_t.numpy()*b_t.numpy()])[0]
 
     stores = [u for u in lin.uops if u.uop is UOps.STORE]
@@ -594,7 +594,8 @@ def helper_linearizer_opt(r:Tensor, *args, **kwargs):
   realized_ast, real_bufs = helper_realized_ast(r)
   return _helper_linearizer_opt_ast((realized_ast, ), real_bufs, *args, **kwargs)
 
-def _helper_linearizer_opt_ast(realized_ast:Tuple[LazyOp, ...], real_bufs:List[Buffer], opts=[], apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[], wanna_output=[]):
+def _helper_linearizer_opt_ast(realized_ast:Tuple[LazyOp, ...], real_bufs:List[Buffer], opts=[],
+                               apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[], wanna_output=[]) -> List[Linearizer]:
   lins: List[Linearizer] = []
   outbufs = [real_bufs[i] for i in range(len(realized_ast))]
 
