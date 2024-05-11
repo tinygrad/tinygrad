@@ -254,6 +254,7 @@ class CUDARenderer(CStyleLanguage):
   global_max=[65535, 65535, 2147483647]
   local_max=[64, 1024, 1024]
   shared_max=49152
+  has_tensor_cores = True
 
   # language options
   kernel_prefix = "extern \"C\" __global__ "

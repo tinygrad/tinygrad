@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Tuple, List, Any, cast
 import os, fcntl, ctypes, functools, re, pathlib, mmap, struct, errno, subprocess, time
-from tinygrad.device import Compiled, Compiler, CompilerOptions, BufferOptions, LRUAllocator
+from tinygrad.device import Compiled, Compiler, BufferOptions, LRUAllocator
 from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up, DEBUG
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.runtime.driver.hip_comgr import compile_hip
@@ -69,7 +69,6 @@ def create_sdma_packets():
 sdma_pkts = create_sdma_packets()
 
 class AMDCompiler(Compiler):
-  compiler_opts = CompilerOptions("AMD", has_tensor_cores=True, shared_max=65536, renderer=HIPRenderer)
   def __init__(self, arch:str):
     self.arch = arch
     super().__init__(f"compile_hip_{self.arch}")
