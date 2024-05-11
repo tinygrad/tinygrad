@@ -17,9 +17,9 @@ static float fromEncodingF(unsigned int e) {
   return f;
 }
 
-static __fp16 fromEncodingH(unsigned short s) {
-  __fp16 f;
-  // static_assert(sizeof s == sizeof f, "__fp16 and short must have the same
+static _Float16 fromEncodingH(unsigned short s) {
+  _Float16 f;
+  // static_assert(sizeof s == sizeof f, "_Float16 and short must have the same
   // size");
   __builtin_memcpy(&f, &s, sizeof f);
   return f;
@@ -75,7 +75,7 @@ unsigned short __gnu_f2h_ieee(float f) {
 
 #endif
 
-__fp16 __truncdfhf2(double d) {
+_Float16 __truncdfhf2(double d) {
   // You can't just do (half)(float)x, because that makes the result
   // susceptible to double-rounding. Instead we need to make the first
   // rounding use round-to-odd, but that doesn't exist on x86, so we have
