@@ -171,7 +171,7 @@ class CUDADevice(Compiled):
 
     from tinygrad.runtime.graph.cuda import CUDAGraph
     super().__init__(device, CUDAAllocator(self) if not CUDACPU else MallocAllocator,
-                     PTXRenderer() if getenv("PTX") else CUDARenderer(),
+                     PTXRenderer(self.arch) if getenv("PTX") else CUDARenderer(self.arch),
                      PTXCompiler(self.arch) if getenv("PTX") else CUDACompiler(self.arch),
                      functools.partial(CUDAProgram, self), graph=CUDAGraph if not CUDACPU else None)
 

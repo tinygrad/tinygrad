@@ -491,7 +491,7 @@ class NVDevice(Compiled):
     self.arch: str = 'sm_89' # TODO: fix
 
     from tinygrad.runtime.graph.hcq import HCQGraph
-    super().__init__(device, NVAllocator(self), CUDARenderer(), NVCompiler(self.arch), functools.partial(NVProgram, self),
+    super().__init__(device, NVAllocator(self), CUDARenderer(self.arch), NVCompiler(self.arch), functools.partial(NVProgram, self),
                      functools.partial(HCQGraph, NVDevice, HWComputeQueue, HWCopyQueue))
 
     self._cmdq_setup_compute_gpfifo()

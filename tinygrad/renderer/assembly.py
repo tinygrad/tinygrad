@@ -40,7 +40,8 @@ class PTXRenderer(Renderer):
   global_max=[65535, 65535, 2147483647]
   local_max=[64, 1024, 1024]
   shared_max=49152
-  has_tensor_cores = True
+  has_tensor_cores = False
+  def __init__(self, arch:str): self.has_tensor_cores=int(arch[3:]) >= 80
 
   # language options
   kernel_prefix = """.version VERSION
