@@ -12,10 +12,11 @@ from tinygrad.helpers import getenv
 from tinygrad.lazy import LazyBuffer
 from tinygrad.features.multi import MultiLazyBuffer
 from tinygrad.ops import LoadOps, ScheduleItem
-from tinygrad.buffer import Buffer, BufferOptions
+from tinygrad.device import Buffer, BufferOptions
 from tinygrad.device import Device
 from tinygrad.shape.symbolic import sint, Variable, MulNode, Node
-from tinygrad.engine.realize import run_schedule, memory_planner
+from tinygrad.engine.realize import run_schedule
+from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.schedule import create_schedule_with_vars
 
 # **** start with two base classes, Tensor and Function ****
@@ -797,7 +798,7 @@ class Tensor:
       # create masks
       for dim, i in idx.items():
         try: i = i.reshape(i.shape + (1,)*(ret.ndim - first_dim)).expand(pre_reduce_shape)
-        except ValueError as exc: raise IndexError("cannot broadcast indices") from exc
+        except ValueError as e: raise IndexError(f"cannot broadcast indices: {e}") from e
         a = Tensor.arange(ret.shape[dim], device=self.device, requires_grad=False).reshape((ret.shape[dim],) + (1,)*(ret.ndim - dim - 1))
         masks.append(i == a)
 
@@ -914,11 +915,13 @@ class Tensor:
   # ***** reduce ops *****
 
   def _reduce(self, fxn:Type[Function], axis:Optional[Union[int, Tuple[int, ...]]]=None, keepdim=False) -> Tensor:
+    if self.ndim == 0:
+      if axis is not None and axis not in [-1, 0]: raise IndexError(f"{axis=} out of range of [-1, 0]")
+      axis = None
     axis_: Tuple[int, ...] = tuple(range(len(self.shape))) if axis is None else ((axis,) if isinstance(axis, int) else tuple(axis))
-    axis_ = tuple(x if x >= 0 else x+len(self.shape) for x in axis_)
-    shape = tuple(s for i,s in enumerate(self.shape) if i not in axis_)
+    axis_ = tuple(self._resolve_dim(x) for x in axis_)
     ret = fxn.apply(self, axis=axis_)
-    return ret if keepdim else ret.reshape(shape)
+    return ret if keepdim else ret.reshape(tuple(s for i,s in enumerate(self.shape) if i not in axis_))
 
   def sum(self, axis=None, keepdim=False, acc_dtype:Optional[DType]=None):
     ret = self.cast(acc_dtype or sum_acc_dtype(self.dtype))._reduce(F.Sum, axis, keepdim)
@@ -927,8 +930,9 @@ class Tensor:
   def min(self, axis=None, keepdim=False): return -((-self).max(axis=axis, keepdim=keepdim))
 
   def mean(self, axis=None, keepdim=False):
-    out = self.sum(axis=axis, keepdim=keepdim)
-    return out.div(prod([si for si, so in zip(self.shape, self.sum(axis=axis, keepdim=True).shape) if si != so]))
+    output_dtype = self.dtype if dtypes.is_float(self.dtype) else dtypes.float32
+    numerator = self.cast(sum_acc_dtype(self.dtype)).sum(axis=axis, keepdim=keepdim)
+    return numerator.div(prod([si for si, so in zip(self.shape, self.sum(axis=axis, keepdim=True).shape) if si != so])).cast(output_dtype)
   def var(self, axis=None, keepdim=False, correction=1):
     assert all_int(self.shape), "does not support symbolic shape"
     square_sum = ((self - self.mean(axis=axis, keepdim=True)).square()).sum(axis=axis, keepdim=keepdim)
@@ -936,9 +940,6 @@ class Tensor:
   def std(self, axis=None, keepdim=False, correction=1): return self.var(axis, keepdim, correction).sqrt()
 
   def _softmax(self, axis):
-    if len(self.shape) == 0:
-      assert axis in [-1, 0], f"{axis=} out of range of [-1, 0]"
-      axis = None
     m = self - self.max(axis=axis, keepdim=True)
     e = m.exp()
     return m, e, e.sum(axis=axis, keepdim=True)
@@ -950,6 +951,10 @@ class Tensor:
   def log_softmax(self, axis=-1):
     m, _, ss = self._softmax(axis)
     return m - ss.log()
+
+  def logsumexp(self, axis=None, keepdim=False):
+    m = self.max(axis=axis, keepdim=True)
+    return (self - m).exp().sum(axis=axis, keepdim=keepdim).log() + m.squeeze(axis)
 
   def argmax(self, axis=None, keepdim=False):
     # NOTE: return the first index if there are multiple occurrences of the maximum values
@@ -1326,9 +1331,9 @@ class Tensor:
     # NOTE: self is a logits input
     log_probs, loss_mask = self.log_softmax(), (Y != ignore_index)
     y_counter = Tensor.arange(self.shape[-1], requires_grad=False, device=self.device).unsqueeze(0).expand(Y.numel(), self.shape[-1])
-    y = ((y_counter == Y.flatten().reshape(-1, 1)).where(-1, 0) * loss_mask.reshape(-1, 1)).reshape(*Y.shape, self.shape[-1])
-    smoothing = -1 * label_smoothing * (log_probs.mean(-1) * loss_mask).sum() / loss_mask.sum()
-    return (1 - label_smoothing) * (log_probs * y).sum() / loss_mask.sum() + smoothing
+    y = ((y_counter == Y.flatten().reshape(-1, 1)) * loss_mask.reshape(-1, 1)).reshape(*Y.shape, self.shape[-1])
+    smoothing = label_smoothing * (log_probs.mean(-1) * loss_mask).sum()
+    return -((1 - label_smoothing) * (log_probs * y).sum() + smoothing) / loss_mask.sum()
 
   # ***** cast ops *****
 

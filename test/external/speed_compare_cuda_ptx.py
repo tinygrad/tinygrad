@@ -28,7 +28,7 @@ if __name__ == "__main__":
     # cuda compile
     lin = ast_str_to_lin(ast, opts=dev.compiler.compiler_opts)
     lin.hand_coded_optimizations()
-    cuda_prg = dev.to_program(lin)
+    cuda_prg = dev.to_runner(lin)
 
     bufs = bufs_from_lin(lin)
 

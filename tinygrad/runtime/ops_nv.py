@@ -1,8 +1,8 @@
 from __future__ import annotations
-import os, ctypes, pathlib, re, fcntl, functools, mmap, struct, tempfile, hashlib, subprocess, time
+import os, ctypes, pathlib, re, fcntl, functools, mmap, struct, tempfile, hashlib, subprocess, time, array
 from typing import Tuple, List, Any, cast
 from dataclasses import replace
-from tinygrad.device import Compiled, LRUAllocator, Compiler, BufferOptions, CompilerOptions
+from tinygrad.device import Compiled, Compiler, CompilerOptions, LRUAllocator, BufferOptions
 from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up, to_char_p_p, DEBUG, prod
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.runtime.ops_cuda import check as cuda_check, _get_bytes
@@ -65,7 +65,7 @@ def nvdata64(data): return (data >> 32, data & 0xFFFFFFFF)
 def nvdata64_le(data): return (data & 0xFFFFFFFF, data >> 32)
 
 class NVCompiler(Compiler):
-  compiler_opts = CompilerOptions("NV", global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024], shared_max=49152)
+  compiler_opts = CompilerOptions("NV", global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024], shared_max=49152, renderer=CUDARenderer)
   def __init__(self, arch:str):
     self.arch = arch
     NVCompiler.compiler_opts = replace(NVCompiler.compiler_opts, has_tensor_cores=int(arch[3:]) >= 80)
@@ -73,7 +73,6 @@ class NVCompiler(Compiler):
     self.compile_options = [f'--gpu-architecture={arch}', "-I/usr/local/cuda/include", "-I/usr/include", "-I/opt/cuda/include/"]
     if (nvrtcMajor.value, nvrtcMinor.value) >= (12, 4): self.compile_options.append("--minimal")
     super().__init__(f"compile_nv_{self.arch}")
-  def render(self, name:str, uops) -> str: return CUDARenderer(name, uops)
   def compile(self, src:str) -> bytes:
     cuda_check(cuda.nvrtcCreateProgram(ctypes.byref(prog := cuda.nvrtcProgram()), src.encode(), "<null>".encode(), 0, None, None))
     status = cuda.nvrtcCompileProgram(prog, len(self.compile_options), to_char_p_p([o.encode() for o in self.compile_options]))
@@ -97,7 +96,7 @@ class HWComputeQueue:
     prg.qmd.constant_buffer_addr_lower_0 = kernargs & 0xffffffff
     prg.qmd.constant_buffer_addr_upper_0 = kernargs >> 32
     self.q += [nvmethod(1, nv_gpu.NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI, 1), (1 << 12) | (1 << 4) | (1 << 0)]
-    self.q += [nvmethod(1, nv_gpu.NVC6C0_SET_INLINE_QMD_ADDRESS_A, 0x42), *nvdata64((kernargs + round_up(prg.kernargs_segment_size, 1 << 8)) >> 8)]
+    self.q += [nvmethod(1, nv_gpu.NVC6C0_SET_INLINE_QMD_ADDRESS_A, 0x42), *nvdata64((kernargs + round_up(prg.constbuf_0_size, 1 << 8)) >> 8)]
     self.q += [x for x in to_mv(ctypes.addressof(prg.qmd), ctypes.sizeof(prg.qmd)).cast("I")]
     return self
 
@@ -115,7 +114,7 @@ class HWComputeQueue:
   def submit(self, dev:NVDevice):
     if len(self.q) == 0: return
     assert len(self.q) < (1 << 21)
-    for i,packet in enumerate(self.q): dev.cmdq[dev.cmdq_wptr//4 + i] = packet
+    dev.cmdq[dev.cmdq_wptr//4:dev.cmdq_wptr//4+len(self.q)] = array.array('I', self.q)
     fifo_entry = dev.compute_put_value % dev.compute_gpfifo_entries
     dev.compute_gpu_ring[fifo_entry] = ((dev.cmdq_page.base+dev.cmdq_wptr)//4 << 2) | (len(self.q) << 42) | (1 << 41)
     dev.compute_gpu_ring_controls.GPPut = (dev.compute_put_value + 1) % dev.compute_gpfifo_entries
@@ -145,7 +144,7 @@ class HWCopyQueue:
 
   def submit(self, dev:NVDevice):
     if len(self.q) == 0: return
-    for i,packet in enumerate(self.q): dev.cmdq[dev.cmdq_wptr//4 + i] = packet
+    dev.cmdq[dev.cmdq_wptr//4:dev.cmdq_wptr//4+len(self.q)] = array.array('I', self.q)
     fifo_entry = dev.dma_put_value % dev.dma_gpfifo_entries
     dev.dma_gpu_ring[fifo_entry] = ((dev.cmdq_page.base+dev.cmdq_wptr)//4 << 2) | (len(self.q) << 42)
     dev.dma_gpu_ring_controls.GPPut = (dev.dma_put_value + 1) % dev.dma_gpfifo_entries
@@ -196,7 +195,7 @@ class NVProgram:
     self.constbuffer_0 = [0] * 88
     self.constbuffer_0[6:12] = [*nvdata64_le(self.device.shared_mem_window), *nvdata64_le(self.device.local_mem_window), *nvdata64_le(0xfffdc0)]
 
-    smem_config = min(shmem_conf * 1024 for shmem_conf in [8, 16, 32, 64, 96] if shmem_conf * 1024 >= self.shmem_usage) // 4096 + 1
+    smem_config = min(shmem_conf * 1024 for shmem_conf in [32, 64, 100] if shmem_conf * 1024 >= self.shmem_usage) // 4096 + 1
     self.qmd = qmd_struct_t(qmd_group_id=0x3f, sm_global_caching_enable=1, invalidate_texture_header_cache=1, invalidate_texture_sampler_cache=1,
                             invalidate_texture_data_cache=1, invalidate_shader_data_cache=1, api_visible_call_limit=1, sampler_index=1,
                             cwd_membar_type=nv_gpu.NVC6C0_QMDV03_00_CWD_MEMBAR_TYPE_L1_SYSMEMBAR, qmd_major_version=3,
@@ -208,7 +207,8 @@ class NVProgram:
                             constant_buffer_size_shifted4_0=0x190, constant_buffer_valid_0=1, constant_buffer_invalidate_0=1)
 
     # NV's kernargs is constbuffer (size 0x160), then arguments to the kernel follows. Kernargs also appends QMD at the end of the kernel.
-    self.kernargs_segment_size = round_up((0 if constant_buffers_data[0].nbytes in constant_buffers_data else 0), 1 << 8) + (8 << 8)
+    self.constbuf_0_size = constant_buffers_data[0].nbytes if 0 in constant_buffers_data else 0
+    self.kernargs_segment_size = round_up(self.constbuf_0_size, 1 << 8) + (8 << 8)
     self.kernargs_offset = 0x160
 
     # constant buffer 0 is filled for each program, no need to copy it from elf (it's just zeroes)
@@ -233,22 +233,24 @@ class NVProgram:
 
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
     if prod(local_size) > 1024 or self.max_threads < prod(local_size): raise RuntimeError("Too many resources requsted for launch")
+    if not hasattr(self, "args_struct_t"):
+      self.args_struct_t = init_c_struct_t(tuple([(f'f{i}', ctypes.c_void_p) for i in range(len(args))] +
+                                                 [(f'v{i}', ctypes.c_int) for i in range(len(vals))]))
 
     if self.device.kernargs_ptr >= (self.device.kernargs_page.base + self.device.kernargs_page.length - self.kernargs_segment_size):
       self.device.kernargs_ptr = self.device.kernargs_page.base
 
     kernargs = [arg_half for arg in args for arg_half in nvdata64_le(arg.base)] + [val for val in vals]
-    kernargs_ptr = self.device.kernargs_ptr
-    self.device.kernargs_ptr += self.kernargs_segment_size
 
     queue = HWComputeQueue()
     queue.wait(self.device.timeline_signal, self.device.timeline_value - 1)
     if wait: queue.signal(self.device.time_event_st, timestamp=True)
-    queue.copy_from_cpu(kernargs_ptr, self.constbuffer_0 + kernargs)
-    queue.exec(self, kernargs_ptr, global_size, local_size)
+    queue.copy_from_cpu(self.device.kernargs_ptr, self.constbuffer_0 + kernargs)
+    queue.exec(self, self.device.kernargs_ptr, global_size, local_size)
     if wait: queue.signal(self.device.time_event_en, timestamp=True)
     queue.signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
     self.device.timeline_value += 1
+    self.device.kernargs_ptr += self.kernargs_segment_size
 
     if wait:
       self.device._wait_signal(self.device.timeline_signal, self.device.timeline_value - 1)
@@ -264,7 +266,7 @@ class NVAllocator(LRUAllocator):
 
   def _alloc(self, size:int, options:BufferOptions):
     if options.host: return self.device._gpu_host_alloc(size)
-    else: return self.device._gpu_alloc(size)
+    else: return self.device._gpu_alloc(size, map_to_cpu=options.cpu_access)
 
   def _free(self, gpumem, options:BufferOptions):
     NVDevice.synchronize_system()
@@ -490,7 +492,9 @@ class NVDevice(Compiled):
 
     self.arch: str = 'sm_89' # TODO: fix
 
-    super().__init__(device, NVAllocator(self), NVCompiler(self.arch), functools.partial(NVProgram, self))
+    from tinygrad.runtime.graph.hcq import HCQGraph
+    super().__init__(device, NVAllocator(self), NVCompiler(self.arch), functools.partial(NVProgram, self),
+                     functools.partial(HCQGraph, NVDevice, HWComputeQueue, HWCopyQueue))
 
     self._cmdq_setup_compute_gpfifo()
     self._cmdq_setup_dma_gpfifo()

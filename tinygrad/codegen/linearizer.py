@@ -380,6 +380,8 @@ class Linearizer(Kernel):
       self.loop_uops.update({x.expr:self.uops.add(UOps.SPECIAL, dtypes.int32, (), (i, x.expr, x.max+1)) for i,x in enumerate(loop_local_idxs)})
     else:
       self.render_loop(loop_global_idxs+loop_local_idxs)
+    if self.global_size is not None: self.global_size += [1]*(3-len(self.global_size))
+    if self.local_size is not None: self.local_size += [1]*(3-len(self.local_size))
 
     # parse AST
     loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]] = {}
