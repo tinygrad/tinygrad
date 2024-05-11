@@ -1,17 +1,12 @@
 from __future__ import annotations
 import multiprocessing
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from collections import defaultdict
-from typing import TYPE_CHECKING, List, Optional, Dict, Tuple, Any
+from typing import List, Optional, Dict, Tuple, Any
 import importlib, inspect, functools, pathlib, os, ctypes
-from tinygrad.helpers import getenv, all_int, diskcache_get, diskcache_put, DEBUG,BEAM,NOOPT, GlobalCounters, flat_mv, from_mv
-from tinygrad.shape.symbolic import Variable, sint
+from tinygrad.helpers import getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv
 from tinygrad.dtype import DType, ImageDType
-from tinygrad.ops import LazyOp
-from tinygrad.renderer import Renderer, Program
-
-if TYPE_CHECKING:
-  from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.renderer import Renderer
 
 # **************** Device ****************
 
@@ -167,18 +162,6 @@ class _MallocAllocator(LRUAllocator):
 
 MallocAllocator = _MallocAllocator()
 
-# **************** base Runner + helpers ****************
-
-class Runner:
-  def __init__(self, display_name:str, dname:str, op_estimate:sint=0, mem_estimate:sint=0):
-    self.first_run, self.display_name, self.dname, self.op_estimate, self.mem_estimate = True, display_name, dname, op_estimate, mem_estimate
-  @property
-  def device(self): return Device[self.dname]
-  def exec(self, rawbufs:List[Buffer], var_vals:Optional[Dict[Variable, int]]=None) -> Optional[float]:
-    return self(rawbufs, {} if var_vals is None else var_vals)
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False) -> Optional[float]:
-    raise NotImplementedError("override this")
-
 # **************** for Compiled Devices ****************
 
 class Compiler:
@@ -190,79 +173,8 @@ class Compiler:
       if self.cachekey is not None: diskcache_put(self.cachekey, src, lib)
     return lib
 
-class CompiledRunner(Runner):
-  def __init__(self, p:Program, precompiled:Optional[bytes]=None):
-    if DEBUG >= 4: print(p.src)
-    self.p:Program = p
-    self.lib:bytes = precompiled if precompiled is not None else Device[p.dname].compiler.compile_cached(p.src)
-    self.clprg = Device[p.dname].runtime(p.function_name, self.lib)
-    super().__init__(p.name, p.dname, p.op_estimate, p.mem_estimate)
-
-  def __reduce__(self): return self.__class__, (self.p, self.lib)
-
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False) -> Optional[float]:
-    global_size, local_size = self.p.launch_dims(var_vals)
-    if global_size is not None and local_size is None and all_int(self.p.global_size): # type: ignore[arg-type]
-      # TODO: this is copied from get_program
-      from tinygrad.features.search import optimize_local_size
-      local_size = optimize_local_size(self.clprg, global_size, rawbufs)
-      global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
-      self.p = replace(self.p, global_size=global_size, local_size=local_size)
-    lra = {}
-    if global_size:
-      lra['global_size'] = global_size
-      assert len(global_size) == 3, "global size must have len 3"
-    if local_size:
-      lra['local_size'] = local_size
-      assert len(local_size) == 3, "local size must have len 3"
-    return self.clprg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k] for k in self.p.vars), wait=wait)
-
-method_cache: Dict[Tuple[str, Tuple[LazyOp, ...], int, bool], CompiledRunner] = {}
-logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS", "") else None, getenv("LOGKERNS_LEVEL", 1)
 class Compiled:
   def __init__(self, device:str, allocator:Allocator, renderer:Optional[Renderer], compiler:Optional[Compiler], runtime, graph=None):
     self.dname, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler if compiler else Compiler(), runtime, graph
     self.renderer = renderer if renderer else Renderer()
   def synchronize(self): pass  # override this in your device
-
-  def to_runner(self, k:Linearizer) -> CompiledRunner: return CompiledRunner(replace(k.to_program(), dname=self.dname))
-
-  def get_linearizer(self, *ast:LazyOp) -> Linearizer:
-    if DEBUG >= 3:
-      from tinygrad.features.graph import print_tree
-      for op in ast: print_tree(op)
-    from tinygrad.codegen.linearizer import Linearizer
-    k = Linearizer(*ast, opts=self.renderer)
-    k.required_optimizations()
-    if not NOOPT:
-      if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
-      if BEAM >= 1:
-        from tinygrad.features.search import beam_search, time_linearizer, bufs_from_lin
-        kb, k_opt = Linearizer(*ast, opts=self.renderer), k
-        kb.required_optimizations()
-        rawbufs = bufs_from_lin(kb, allocate=False)
-        k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
-        if getenv("BEAM_COMPARE", 1):
-          # TODO: move the HC/TC/BEAM compare to beam_search so it can be optionally cached which choice is better
-          lins: List[Tuple[str, Linearizer]] = [(f"beam{BEAM.value}", k), (("tc" if used_tensor_cores else "hc"), k_opt)]
-          if used_tensor_cores:
-            lins.append(("hc", Linearizer(*ast, opts=self.renderer)))
-            lins[-1][1].hand_coded_optimizations()
-          timed = sorted([(nm, tk, time_linearizer(tk, rawbufs, allow_test_size=False, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
-          if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
-          k = timed[0][1]
-          if logkerns is not None and logkerns_level > 1: logkerns.writelines([f"{(lin.ast, lin.applied_opts)}\n" for (_,lin,_) in timed[1:]])
-    # TODO: check the correctness inline once compare_linearizer is in core
-    if logkerns is not None: logkerns.writelines([f"{(k.ast, k.applied_opts)}\n"])
-    if DEBUG >= 4: print((k.ast, k.applied_opts)) # print here to show final applied_opts for all kernels instead of just in beam_search
-    return k
-
-  def get_runner(self, *ast:LazyOp) -> CompiledRunner:
-    ckey = (self.dname, ast, BEAM.value, False)
-    if cret:=method_cache.get(ckey): return cret
-    bkey = (self.dname.split(":")[0], ast, BEAM.value, True)
-    if bret:=method_cache.get(bkey):
-      method_cache[ckey] = ret = CompiledRunner(replace(bret.p, dname=self.dname), bret.lib)
-    else:
-      method_cache[ckey] = method_cache[bkey] = ret = self.to_runner(self.get_linearizer(*ast))
-    return ret
