@@ -585,14 +585,14 @@ class TestHandCodedOpts(unittest.TestCase):
     assert k.local_dims == 1
     assert k.upcasted == 1
 
-def helper_linearizer_ast(ast:Tuple[LazyOp, ...], inputs:List[Tensor], opts=[], apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[], wanna_output=[]):
+def helper_linearizer_ast(ast:Tuple[LazyOp, ...], inputs:List[Tensor], *args, **kwargs):
   inbufs = [x.lazydata.buffer for x in inputs]
   outbufs = [Buffer(inbufs[-1].device, out.arg.st.size, out.arg.dtype).allocate() for out in ast]
-  return _helper_linearizer_opt_ast(ast, outbufs+inbufs, opts, apply_tc, atol, rtol, color_sizes, wanna_output)
+  return _helper_linearizer_opt_ast(ast, outbufs+inbufs, *args, **kwargs)
 
-def helper_linearizer_opt(r:Tensor, opts=[], apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[], wanna_output=[]):
+def helper_linearizer_opt(r:Tensor, *args, **kwargs):
   realized_ast, real_bufs = helper_realized_ast(r)
-  return _helper_linearizer_opt_ast((realized_ast, ), real_bufs, opts, apply_tc, atol, rtol, color_sizes, wanna_output)
+  return _helper_linearizer_opt_ast((realized_ast, ), real_bufs, *args, **kwargs)
 
 def _helper_linearizer_opt_ast(realized_ast:Tuple[LazyOp, ...], real_bufs:List[Buffer], opts=[], apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[], wanna_output=[]):
   lins: List[Linearizer] = []
