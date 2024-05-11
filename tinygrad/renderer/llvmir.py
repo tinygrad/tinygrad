@@ -72,7 +72,7 @@ class LLVMRenderer(Renderer):
   has_local=False
   has_shared=False
 
-  def render(self, function_name:str, uops:UOpGraph) -> str:
+  def render(self, name:str, uops:UOpGraph) -> str:
     # all llvm stuff goes into a module
     module = ir.Module(name=__file__)
 
@@ -82,7 +82,7 @@ class LLVMRenderer(Renderer):
 
     # create llvm function
     func_dtypes = [(dtype_to_llvm_dtype[dtype],dtype) for dtype in buf_to_dtype.values() if dtype is not None]
-    func = ir.Function(module, ir.FunctionType(ir.VoidType(), [x.as_pointer() if isinstance(dt, PtrDType) else x for x,dt in func_dtypes]), name=function_name)  # noqa: E501
+    func = ir.Function(module, ir.FunctionType(ir.VoidType(), [x.as_pointer() if isinstance(dt, PtrDType) else x for x,dt in func_dtypes]), name=name)
     for a in func.args:
       if a.type.is_pointer: a.add_attribute("noalias")
 
@@ -103,10 +103,11 @@ class LLVMRenderer(Renderer):
       uop,dtype,vin,args = u.uop,u.dtype,u.vin,u.arg
       if uop is UOps.STORE:
         element = cast(bb, lvars[vin[2]], vin[2].dtype, vin[0].dtype)
-        def store_op(): bb[-1].store(element, bb[-1].gep(lvars[vin[0]], [lvars[vin[1]]], inbounds=True))
         if len(vin) > 3:
-          with bb[-1].if_then(lvars[vin[3]]): store_op()
-        else: store_op()
+          with bb[-1].if_then(lvars[vin[3]]):
+            bb[-1].store(element, bb[-1].gep(lvars[vin[0]], [lvars[vin[1]]], inbounds=True))
+        else:
+          bb[-1].store(element, bb[-1].gep(lvars[vin[0]], [lvars[vin[1]]], inbounds=True))
       elif uop is UOps.ENDLOOP:
         loop_entry_bb, phis = loop_blocks.pop()
         idx_p1 = bb[-1].add(lvars[vin[0]], ir.Constant(ir.IntType(32), 1))

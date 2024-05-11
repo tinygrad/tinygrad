@@ -87,7 +87,7 @@ class CStyleLanguage(Renderer):
   def render_local(self, name:str, dtype:DType, size:int): return self.smem_align + self.smem_prefix + f"{self.render_dtype(dtype)} {name}[{size}];"
   def render_dtype(self, var_dtype:DType) -> str: return self.type_map.get(var_dtype, var_dtype.name)
 
-  def render(lang, function_name:str, uops:UOpGraph) -> str:
+  def render(self, name:str, uops:UOpGraph) -> str:
     kernel = []
     bufs: List[Tuple[str, Tuple[DType, bool]]] = []
     depth = 1
@@ -111,13 +111,13 @@ class CStyleLanguage(Renderer):
       if uop is UOps.IF:
         kk(f"if ({r[vin[0]]}) {{")
         depth += 1
-      elif uop is UOps.BARRIER: kk(lang.barrier)
+      elif uop is UOps.BARRIER: kk(self.barrier)
       elif uop in {UOps.ENDLOOP, UOps.ENDIF}:
         depth -= 1
         kk("}")
       elif uop is UOps.STORE:
         assert vin[0].dtype is not None and vin[2].dtype is not None
-        rendered_store = lang.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, strip_parens(r[vin[1]]), vin[0].uop is UOps.DEFINE_LOCAL)
+        rendered_store = self.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, strip_parens(r[vin[1]]), vin[0].uop is UOps.DEFINE_LOCAL)
         kk(f"if ({r[vin[3]]}) {{ {rendered_store} }}" if len(vin) > 3 else rendered_store)
       else:
         assert dtype is not None, f"None dtype for uop {uop}"
@@ -128,19 +128,19 @@ class CStyleLanguage(Renderer):
           # remove parens if ALU types are the same. TODO: can do more here
           if args in {BinaryOps.ADD,BinaryOps.MUL,BinaryOps.XOR}: operands = [strip_parens(r[v]) if v.arg == args else r[v]for v in vin]
           else: operands = [r[v] for v in vin]
-          val = lang.code_for_op[args](*operands, dtype)
+          val = self.code_for_op[args](*operands, dtype)
           assert child_count[u] != 0, f"childless ALU op found {u}"
           # TODO: fix index rendering issue. fix clang nested max macro issue
           if child_count[u] <= 1 and args is not BinaryOps.MAX and not getenv("EXPAND_SSA"): r[u] = val
-          else: kk(f"{lang.render_dtype(dtype)} {ssa('alu',u)} = {val};")
+          else: kk(f"{self.render_dtype(dtype)} {ssa('alu',u)} = {val};")
         elif uop is UOps.SPECIAL:
-          kk(f"int {args[1]} = {lang.code_for_workitem[args[1][0]](args[0])}; /* {args[2]} */")
+          kk(f"int {args[1]} = {self.code_for_workitem[args[1][0]](args[0])}; /* {args[2]} */")
           r[u] = args[1]
         elif uop is UOps.LOAD:
-          val = lang.render_load(dtype, r[vin[0]], vin[0].dtype, strip_parens(r[vin[1]]), vin[0].uop is UOps.DEFINE_LOCAL)
+          val = self.render_load(dtype, r[vin[0]], vin[0].dtype, strip_parens(r[vin[1]]), vin[0].uop is UOps.DEFINE_LOCAL)
           # NOTE: this relies on the load not happening if it's in the unselected branch
-          if len(vin) > 3: val = lang.code_for_op[TernaryOps.WHERE](r[vin[2]], val, r[vin[3]], dtype)
-          kk(f"{lang.render_dtype(dtype)} {ssa('val',u)} = {val};")
+          if len(vin) > 3: val = self.code_for_op[TernaryOps.WHERE](r[vin[2]], val, r[vin[3]], dtype)
+          kk(f"{self.render_dtype(dtype)} {ssa('val',u)} = {val};")
         elif uop is UOps.PHI:
           kk(f"{r[vin[0]]} = {r[vin[1]]};")
           r[u] = r[vin[0]]
@@ -148,14 +148,14 @@ class CStyleLanguage(Renderer):
           if uop is UOps.BITCAST:
             assert len(vin) == 1
             precast = ssa('precast')
-            kk(f"{lang.render_dtype(cast(DType, vin[0].dtype))} {precast} = {r[vin[0]]};")
-            val = lang.render_cast([precast], dtype, bitcast=True)
+            kk(f"{self.render_dtype(cast(DType, vin[0].dtype))} {precast} = {r[vin[0]]};")
+            val = self.render_cast([precast], dtype, bitcast=True)
           else:
-            val = lang.render_cast([r[x] for x in vin], dtype, bitcast=False)
+            val = self.render_cast([r[x] for x in vin], dtype, bitcast=False)
           if child_count[u] <= 1: r[u] = val
-          else: kk(f"{lang.render_dtype(dtype)} {ssa('cast',u)} = {val};")
+          else: kk(f"{self.render_dtype(dtype)} {ssa('cast',u)} = {val};")
         elif uop is UOps.DEFINE_LOCAL:
-          kk(lang.render_local(args[0], dtype, args[1]))
+          kk(self.render_local(args[0], dtype, args[1]))
           r[u] = args[0]
         elif uop is UOps.DEFINE_VAR:
           bufs.append((args.expr, (dtype,False)))
@@ -163,16 +163,16 @@ class CStyleLanguage(Renderer):
         elif uop is UOps.DEFINE_GLOBAL:
           bufs.append((nm:=f"data{args[0]}", (dtype,args[1])))
           r[u] = nm
-        elif uop is UOps.WMMA: kk(f"{lang.render_dtype(dtype)} {ssa('wmma',u)} = __{args[0]}({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")
-        elif uop is UOps.DEFINE_ACC: kk(f"{lang.render_dtype(dtype)} {ssa('acc',u)} = {lang.render_const(args, dtype)};")
-        elif uop is UOps.CONST: r[u] = lang.render_const(args, dtype) if args >= 0 else f"({lang.render_const(args, dtype)})"
+        elif uop is UOps.WMMA: kk(f"{self.render_dtype(dtype)} {ssa('wmma',u)} = __{args[0]}({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")
+        elif uop is UOps.DEFINE_ACC: kk(f"{self.render_dtype(dtype)} {ssa('acc',u)} = {self.render_const(args, dtype)};")
+        elif uop is UOps.CONST: r[u] = self.render_const(args, dtype) if args >= 0 else f"({self.render_const(args, dtype)})"
         elif uop is UOps.GEP:
           assert vin[0].dtype is not None
           from_ssa = vin[0].uop in {UOps.LOAD, UOps.WMMA, UOps.DEFINE_ACC}
           r[u] = (r[vin[0]] if from_ssa else f"{(r[vin[0]])}") + (f"[{args}]" if vin[0].dtype.count > 4 else f".{'xyzw'[args]}")
         else: raise RuntimeError(f"failed to render {uop}")
 
-    return lang.render_kernel(function_name, kernel, bufs, uops)
+    return self.render_kernel(name, kernel, bufs, uops)
 
 class ClangRenderer(CStyleLanguage):
   device = "CLANG"
