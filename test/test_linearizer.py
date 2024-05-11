@@ -128,6 +128,12 @@ class TestLinearizer(unittest.TestCase):
     self.assertLess(k.uops.uops.index(ifs[0]), k.uops.uops.index(endifs[0]))
     self.assertLess(k.uops.uops.index(barriers[1]), k.uops.uops.index(ifs[1]))
 
+  def test_mean_std_multireduce(self): pass
+
+  def test_multireduce_with_intermediate_calc(self): pass
+
+  def test_multireduce_multioutput(self): pass
+
   def test_load_dedup(self):
     # for different leaves in the AST, the same loads may occur.
 
