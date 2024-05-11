@@ -1,5 +1,6 @@
 import numpy as np
 import unittest
+from dataclasses import replace
 
 from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError, tensor_cores
 from tinygrad.codegen.linearizer import Linearizer, UOp, UOps, expand_node, expand_idxs
@@ -586,6 +587,8 @@ def helper_linearizer_opt(r:Tensor, opts=[], apply_tc=False, atol=1e-4, rtol=1e-
   wanna_output = None
   realized_ast, real_bufs = helper_realized_ast(r)
 
+  def get_prg(k:Linearizer): return CompiledRunner(replace(k.to_program(), dname=Device.DEFAULT))
+
   def check_opt(opts, create_k, expected_color_size):
     k = create_k()
     if apply_tc:
@@ -595,21 +598,21 @@ def helper_linearizer_opt(r:Tensor, opts=[], apply_tc=False, atol=1e-4, rtol=1e-
         k.apply_opt(opt)
     if expected_color_size is not None:
       assert (cs:=[(x,y) for x,y in zip(k.colors(), k.full_shape)]) == expected_color_size, f"expected={expected_color_size} got={cs}"
-    prg = CompiledRunner(k.to_program())
+    prg = get_prg(k)
     real_bufs[0].copyin(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np).data) # Zero to check that all values are filled
     prg.exec(real_bufs)
     np.testing.assert_allclose(np.frombuffer(real_bufs[0].as_buffer(), real_bufs[0].dtype.np), wanna_output, atol=atol, rtol=rtol)
 
   # Get baseline, which is not optimized at all.
   k = Linearizer(realized_ast)
-  prg = CompiledRunner(k.to_program())
+  prg = get_prg(k)
   prg.exec(real_bufs)
   wanna_output = np.frombuffer(real_bufs[0].as_buffer(), real_bufs[0].dtype.np).copy()
 
   # Check correctness of handcoded optimiztions.
   k = Linearizer(realized_ast)
   k.hand_coded_optimizations()
-  prg = CompiledRunner(k.to_program())
+  prg = get_prg(k)
   real_bufs[0].copyin(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np).data) # Zero to check that all values are filled
   prg.exec(real_bufs)
   np.testing.assert_allclose(wanna_output, np.frombuffer(real_bufs[0].as_buffer(), real_bufs[0].dtype.np), atol=atol, rtol=rtol)
