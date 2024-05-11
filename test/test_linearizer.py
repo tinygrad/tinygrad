@@ -1,3 +1,4 @@
+from typing import List, Tuple
 import numpy as np
 import unittest
 from dataclasses import replace
@@ -584,8 +585,12 @@ class TestHandCodedOpts(unittest.TestCase):
     assert k.upcasted == 1
 
 def helper_linearizer_opt(r:Tensor, opts=[], apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[]):
-  wanna_output = None
   realized_ast, real_bufs = helper_realized_ast(r)
+  return helper_linearizer_opt_ast((realized_ast, ), real_bufs, opts, apply_tc, atol, rtol, color_sizes)
+
+def helper_linearizer_opt_ast(realized_ast:Tuple[LazyOp, ...], real_bufs:List[Buffer], opts=[], apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[]):
+  wanna_output = []
+  outbufs = [real_bufs[i] for i in range(len(realized_ast))]
 
   def get_prg(k:Linearizer): return CompiledRunner(replace(k.to_program(), dname=Device.DEFAULT))
 
@@ -599,25 +604,28 @@ def helper_linearizer_opt(r:Tensor, opts=[], apply_tc=False, atol=1e-4, rtol=1e-
     if expected_color_size is not None:
       assert (cs:=[(x,y) for x,y in zip(k.colors(), k.full_shape)]) == expected_color_size, f"expected={expected_color_size} got={cs}"
     prg = get_prg(k)
-    real_bufs[0].copyin(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np).data) # Zero to check that all values are filled
+    for buf in outbufs: buf.copyin(np.zeros((buf.size, ), dtype=buf.dtype.np).data) # Zero to check that all values are filled
     prg.exec(real_bufs)
-    np.testing.assert_allclose(np.frombuffer(real_bufs[0].as_buffer(), real_bufs[0].dtype.np), wanna_output, atol=atol, rtol=rtol)
+
+    for i, buf in enumerate(outbufs):
+      np.testing.assert_allclose(np.frombuffer(buf.as_buffer(), buf.dtype.np), wanna_output[i], atol=atol, rtol=rtol)
 
   # Get baseline, which is not optimized at all.
-  k = Linearizer(realized_ast)
+  k = Linearizer(*realized_ast)
   prg = get_prg(k)
   prg.exec(real_bufs)
-  wanna_output = np.frombuffer(real_bufs[0].as_buffer(), real_bufs[0].dtype.np).copy()
+  wanna_output = [np.frombuffer(buf.as_buffer(), buf.dtype.np).copy() for buf in outbufs]
 
   # Check correctness of handcoded optimiztions.
-  k = Linearizer(realized_ast)
+  k = Linearizer(*realized_ast)
   k.hand_coded_optimizations()
   prg = get_prg(k)
-  real_bufs[0].copyin(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np).data) # Zero to check that all values are filled
+  for buf in outbufs: buf.copyin(np.zeros((buf.size, ), dtype=buf.dtype.np).data) # Zero to check that all values are filled
   prg.exec(real_bufs)
-  np.testing.assert_allclose(wanna_output, np.frombuffer(real_bufs[0].as_buffer(), real_bufs[0].dtype.np), atol=atol, rtol=rtol)
+  for i, buf in enumerate(outbufs):
+    np.testing.assert_allclose(np.frombuffer(buf.as_buffer(), buf.dtype.np), wanna_output[i], atol=atol, rtol=rtol)
   for i, x in enumerate(opts): # Check custom transformations if any.
-    check_opt(x, lambda: Linearizer(realized_ast), color_sizes[i] if i < len(color_sizes) else None)
+    check_opt(x, lambda: Linearizer(*realized_ast), color_sizes[i] if i < len(color_sizes) else None)
 
 class TestKernelOpts(unittest.TestCase):
   def test_local_and_grouped_reduce(self):
