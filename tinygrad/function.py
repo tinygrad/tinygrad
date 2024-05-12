@@ -67,7 +67,7 @@ class TaylorSin(Function):
 
     var = pi_half_x.const(1)
     acc = pi_half_x.const(0)
-    for i, coef in enumerate(COEFFICIENTS):
+    for _, coef in enumerate(COEFFICIENTS):
       var = var.e(BinaryOps.MUL, pi_half_x)
       term = var.e(BinaryOps.MUL, pi_half_x.const(coef))
       acc = acc.e(BinaryOps.ADD, term)
@@ -100,6 +100,24 @@ class Exp(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.ret = x.e(BinaryOps.MUL, x.const(1/math.log(2))).e(UnaryOps.EXP2)
     return self.ret
+
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return self.ret.e(BinaryOps.MUL, grad_output)
+
+class TaylorExp2(Function):
+  def forward(self, x:LazyBuffer) -> LazyBuffer:
+    COEFFICIENTS = [1.0, 6.93147181e-01, 2.40226507e-01, 5.55041087e-02, 9.61812911e-03, 1.33335581e-03, \
+                    1.54035304e-04, 1.52527338e-05, 1.32154851e-06, 1.01780830e-07, 7.05498881e-09, \
+                    4.44565287e-10, 2.56586008e-11, 1.36681314e-12, 7.04002307e-14, 3.34938399e-15]
+
+    var = x.const(1)
+    acc = x.const(0)
+    for i, coef in enumerate(COEFFICIENTS):
+      if i > 0: var = var.e(BinaryOps.MUL, x)
+      term = var.e(BinaryOps.MUL, x.const(coef))
+      acc = acc.e(BinaryOps.ADD, term)
+
+    self.ret = acc
+    return acc
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return self.ret.e(BinaryOps.MUL, grad_output)
 
