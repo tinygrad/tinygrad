@@ -52,7 +52,7 @@ class Sin(Function):
 
   def taylor_sin(self, x:LazyBuffer) -> LazyBuffer:
     # x_copy = deepcopy(x)
-    no_terms = 15
+    no_terms = 13
     res = x.const(0)
     term = x
     for i in range(no_terms):
