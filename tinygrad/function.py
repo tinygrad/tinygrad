@@ -54,7 +54,8 @@ class Sin(Function):
     terms = 14
     res = x.const(0)
     # sgn = x.const(1)
-    x_pow = x
+    # x_initial = x._copy
+    x_pow = x._copy()
     fact = x.const(1)
     for i in range(terms):
       if i % 2 == 0:
