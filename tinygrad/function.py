@@ -55,7 +55,7 @@ class Sin(Function):
     x_copy = deepcopy(x)
     no_terms = 20
     res = x.const(0)
-    term = x
+    term = deepcopy(x)
     for i in range(no_terms):
       if i % 2 == 0:
         res = res.e(BinaryOps.ADD, term)
