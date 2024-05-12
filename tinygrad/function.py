@@ -51,7 +51,7 @@ class Sin(Function):
   # return res
 
   def taylor_sin(self, x:LazyBuffer) -> LazyBuffer:
-    terms = 12
+    terms = 14
     res = x.const(0)
     sgn = x.const(1)
     x_pow = x
