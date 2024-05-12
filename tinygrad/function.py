@@ -38,18 +38,6 @@ class Reciprocal(Function):
     return grad_output.e(UnaryOps.NEG).e(BinaryOps.MUL, self.ret).e(BinaryOps.MUL, self.ret)
 
 class Sin(Function):
-  # def taylor_sin(x, n=190):
-  # x %= 2 * math.pi
-  # res = 0.0
-  # sgn = 1
-  # x_pow = x
-  # fact = 1.0
-  # for i in range(n):
-  #   res += sgn * x_pow / fact
-  #   sgn *= -1
-  #   x_pow *= x * x
-  #   fact *= (2 * i + 2) * (2 * i + 3)
-  # return res
 
   def taylor_sin(self, x:LazyBuffer) -> LazyBuffer:
     x_copy = deepcopy(x)
@@ -57,7 +45,6 @@ class Sin(Function):
     res = x.const(0)
     term = x
     for i in range(no_terms):
-      # term = x_pow.e(BinaryOps.DIV, fact)
       if i % 2 == 0:
         res = res.e(BinaryOps.ADD, term)
       else:
@@ -68,13 +55,12 @@ class Sin(Function):
 
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
-    # return self.taylor_sin(x)
 
     return x.e(UnaryOps.SIN)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
-    # return self.taylor_sin(self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)).e(BinaryOps.MUL, grad_output)
+    # return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
+    return self.taylor_sin(self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)).e(BinaryOps.MUL, grad_output)
 
 # NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
