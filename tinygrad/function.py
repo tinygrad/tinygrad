@@ -60,9 +60,8 @@ class Sin(Function):
         res = res.e(BinaryOps.ADD, x_pow.e(BinaryOps.DIV, fact))
       else:
         res = res.e(BinaryOps.SUB, x_pow.e(BinaryOps.DIV, fact))
-      x_pow = x_pow.e(BinaryOps.MUL, x)
-      x_pow = x_pow.e(BinaryOps.MUL, x)
-      fact = fact.e(BinaryOps.MUL, (x.const(2*i+2)).e(BinaryOps.MUL, (x.const(2*i+3))))
+      x_pow = x_pow.e(BinaryOps.MUL, x).e(BinaryOps.MUL, x)
+      fact = fact.e(BinaryOps.MUL, (x.const(2*i+2))).e(BinaryOps.MUL, (x.const(2*i+3)))
     return res
 
   def forward(self, x:LazyBuffer) -> LazyBuffer:
