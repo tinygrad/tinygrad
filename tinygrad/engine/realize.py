@@ -164,7 +164,6 @@ def lower_schedule_item(si:ScheduleItem) -> ExecItem:
   if si.ast[0].op is BufferOps.STORE:
     runner = get_runner(si.outputs[0].device, si.ast)
     return ExecItem(runner, [si.bufs[x[0]] for x in runner.p.globals])
-  assert len(si.ast) == 1 and len(si.outputs) == 1, "only ASTRunner supports multioutput"
   out, ast = si.outputs[0], si.ast[0]
   if ast.op is LoadOps.COPY:
     kernel_type = BufferCopy
