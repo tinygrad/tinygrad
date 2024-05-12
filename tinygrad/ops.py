@@ -113,27 +113,35 @@ def hook_overflow(dv, fxn):
     except OverflowError: return dv
   return wfxn
 
-def taylor_sin(x, n=80):
+def taylor_sin(x, n=200):
   x %= 2 * math.pi
-  res = 0
+  res = 0.0
+  sgn = 1
+  x_pow = x
+  fact = 1.0
   for i in range(n):
-    res += math.pow(-1, i) * math.pow(x, 2 * i + 1) / math.factorial(2 * i + 1)
+    res += sgn * x_pow / fact
+    sgn *= -1
+    x_pow *= x * x
+    fact *= (2 * i + 2) * (2 * i + 3)
   return res
 
 def taylor_log2(x, n=100):
-  mul = 1 / math.log(2)
-  x -= 1
-  res = 0
-  for i in range(1, n):
-    res += math.pow(-1, i + 1) * math.pow(x, i) / i
-  return res * mul
+  return math.log(x) / math.log(2)
+  # mul = 1 / math.log(2)
+  # x -= 1
+  # res = 0
+  # for i in range(1, n):
+  #   res += math.pow(-1, i + 1) * math.pow(x, i) / i
+  # return res * mul
 
 def taylor_exp2(x, n=100):
-  ln2 = math.log(2)
-  res = 1 + ln2 * x
-  for i in range(2, n):
-    res += math.pow(ln2, i) * math.pow(x, i) / math.factorial(i)
-  return res
+  return math.exp2(x)
+  # ln2 = math.log(2)
+  # res = 1 + ln2 * x
+  # for i in range(2, n):
+  #   res += math.pow(ln2, i) * math.pow(x, i) / math.factorial(i)
+  # return res
 
 python_alu = {
   UnaryOps.LOG2: lambda x: taylor_log2(x) if x > 0 else -math.inf if x == 0 else math.nan,
