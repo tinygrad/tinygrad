@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Union, Type, Tuple, Any, List, Dict, Callable, TYPE_CHECKING
+from typing import Union, Tuple, Any, List, Dict, Callable
 import functools, hashlib, math, operator, ctypes
 from enum import Enum, auto
 from dataclasses import dataclass
@@ -7,8 +7,6 @@ from tinygrad.helpers import prod, dedup
 from tinygrad.dtype import dtypes, DType, ConstType
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.shape.shapetracker import ShapeTracker
-if TYPE_CHECKING:
-  from tinygrad.device import Buffer
 
 # these are the llops your accelerator must implement, along with toCpu
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
@@ -30,7 +28,6 @@ class BufferOps(Enum): LOAD = auto(); CONST = auto(); STORE = auto() # noqa: E70
 class LoadOps(Enum): EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); CUSTOM = auto(); ASSIGN = auto(); VIEW = auto() # noqa: E702
 
 Op = Union[UnaryOps, BinaryOps, ReduceOps, LoadOps, TernaryOps, BufferOps]
-OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[LoadOps], Type[TernaryOps], Type[BufferOps]]
 
 # do not preserve f(0) = 0
 UNSAFE_PAD_OPS = {BinaryOps.DIV, BinaryOps.CMPLT, BinaryOps.CMPEQ, UnaryOps.LOG2, UnaryOps.EXP2}
@@ -46,19 +43,6 @@ class ConstBuffer:
   val: ConstType
   dtype: DType
   st: ShapeTracker
-
-@dataclass(frozen=True)
-class ScheduleItem:
-  ast: Tuple[LazyOp, ...]
-  bufs: Tuple[Buffer, ...]
-  @property
-  def outputs(self) -> Tuple[Buffer, ...]:
-    """Read/write or write only buffers in the schedule."""
-    return self.bufs[:len(self.ast)]
-  @property
-  def inputs(self) -> Tuple[Buffer, ...]:
-    """Read only buffers in the schedule."""
-    return self.bufs[len(self.ast):]
 
 @dataclass(frozen=True, eq=False)
 class LazyOp:

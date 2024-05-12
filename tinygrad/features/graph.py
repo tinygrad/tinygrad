@@ -1,12 +1,12 @@
 import os, atexit, functools
 from collections import defaultdict
-from typing import List, Any, DefaultDict, TYPE_CHECKING
+from typing import List, Any, DefaultDict
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LoadOps, BufferOps, TernaryOps, LazyOp
 from tinygrad.device import Device
 from tinygrad.helpers import GRAPHPATH, DEBUG, GlobalCounters, getenv
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.shape.symbolic import NumNode
-if TYPE_CHECKING: from tinygrad.lazy import LazyBuffer
+from tinygrad.lazy import LazyBuffer
 
 try: import networkx as nx
 except ImportError: pass

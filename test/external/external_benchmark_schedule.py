@@ -19,5 +19,15 @@ if __name__ == "__main__":
 
   with Profiling(PROFILE):
     with Timing("***** model lower in "):
-      ei = list(lower_schedule(sched))
+      eis = list(lower_schedule(sched))
+
+  # random makes this slow
+  #with Profiling(PROFILE):
+  #  with Timing("***** model run in "):
+  #    for ei in eis: ei.run()
+
+  # this is all wait
+  #with Profiling(PROFILE):
+  #  with Timing("***** model finish in "):
+  #    out.data()
 

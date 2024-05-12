@@ -1,7 +1,7 @@
 import os, platform, subprocess
 from tinygrad.device import Compiled, Compiler, MallocAllocator
 from tinygrad.runtime.driver.elf_loader import ElfLoader
-from tinygrad.helpers import cpu_time_execution
+from tinygrad.helpers import cpu_time_execution, DEBUG, cpu_objdump
 from tinygrad.renderer.cstyle import ClangRenderer
 
 loader = ElfLoader()
@@ -16,6 +16,7 @@ class ClangCompiler(Compiler):
 
 class ClangProgram:
   def __init__(self, name:str, lib:bytes):
+    if DEBUG >= 6: cpu_objdump(lib)
     self.name, self.lib, self.fxn = name, lib, loader.load_elf(lib)[name]
   def __call__(self, *bufs, vals=(), wait=False): return cpu_time_execution(lambda: self.fxn(*bufs, *vals), enable=wait)
 
