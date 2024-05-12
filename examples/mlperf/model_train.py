@@ -595,6 +595,69 @@ def train_bert():
 
 def train_stable():
   # TODO: Stable Diffusion
+  from examples import stable_diffusion
+
+  BS = 32
+  EPOCHS = 6 #Epoch is 512,000 images
+  GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
+  print(f"training on {GPUS}")
+  for x in GPUS: Device[x]
+  TARGET_FID = 90
+  TARGET_CLIP = 0.15
+  TRAIN_TIMES={}
+
+  model = stable_diffusion.StableDiffusion()
+  # Load model from 'https://huggingface.co/stabilityai/stable-diffusion-2-base/resolve/main/512-base-ema.ckpt' and ignore UNET
+
+  # Freeze all weights but UNET
+
+  st = time.perf_counter()
+  # Spin up dataloader, should only use half of dataset
+
+  # Train for each epoch
+  for e in EPOCHS:
+
+    # Train
+    for s in math.ceil(512000/BS):
+      # Take piece from dataloader and input to model
+
+      # Calculate loss
+
+      # Update grads
+      pass
+    et = time.perf_counter()
+    TRAIN_TIMES[e] = et-st
+    # Save checkpt for later eval
+
+    # Reset Time
+    st = time.perf_counter()
+    pass
+  
+  EVAL_SCORES = {}
+  TOTAL_TRAIN_TIME = 0
+  # Eval for each epoch
+  with Tensor.inference_mode():
+    # Load FID and CLIP models
+    # FID_WEIGHTS_URL='https://github.com/mseitzer/pytorch-fid/releases/download/fid_weights/pt_inception-2015-12-05-6726825d.pth'
+    # CLIP_WEIGHTS_URL="https://huggingface.co/laion/CLIP-ViT-H-14-laion2B-s32B-b79K/resolve/main/open_clip_pytorch_model.bin"
+    # CLIP_CONFIG_URL="https://huggingface.co/laion/CLIP-ViT-H-14-laion2B-s32B-b79K/raw/main/open_clip_config.json"
+
+    for e in EPOCHS:
+      TOTAL_TRAIN_TIME+=TRAIN_TIMES[e]
+      del model
+      model = stable_diffusion.StableDiffusion()
+      # Load proper checkpoint
+      # Calculate FID
+      f_score = 0
+      # Calculate CLIP
+      c_score = 0
+
+      EVAL_SCORES[e] = (f_score, c_score)
+      if (f_score<=TARGET_FID and c_score>=TARGET_CLIP):
+        print(f'Reached target scores on EPOCH:{e} with FID:{f_score} CLIP:{c_score}')
+        print(f'Trained in {TOTAL_TRAIN_TIME} secs')
+
+      pass
   pass
 
 def train_lora():
