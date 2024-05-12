@@ -120,7 +120,6 @@ def taylor_sin(x, n=40):
     res += math.pow(-1, i) * math.pow(x, 2 * i + 1) / math.factorial(2 * i + 1)
   return res
 
-
 def taylor_log2(x, n=40):
   mul = 1 / math.log(2)
   x -= 1
@@ -128,7 +127,6 @@ def taylor_log2(x, n=40):
   for i in range(1, n):
     res += math.pow(-1, i + 1) * math.pow(x, i) / i
   return res * mul
-
 
 def taylor_exp2(x, n=40):
   ln2 = math.log(2)
