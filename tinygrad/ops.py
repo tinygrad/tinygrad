@@ -113,24 +113,11 @@ def hook_overflow(dv, fxn):
     except OverflowError: return dv
   return wfxn
 
-def taylor_sin(x, n=190):
-  x %= 2 * math.pi
-  res = 0.0
-  sgn = 1
-  x_pow = x
-  fact = 1.0
-  for i in range(n):
-    res += sgn * x_pow / fact
-    sgn *= -1
-    x_pow *= x * x
-    fact *= (2 * i + 2) * (2 * i + 3)
-  return res
-
 python_alu = {
   UnaryOps.LOG2: lambda x: math.log2(x) if x > 0 else -math.inf if x == 0 else math.nan,
   UnaryOps.EXP2: hook_overflow(math.inf, lambda x: math.exp(x*math.log(2))),
   UnaryOps.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan,
-  UnaryOps.SIN: taylor_sin,
+  UnaryOps.SIN: math.sin,
   UnaryOps.NEG: lambda x: (not x) if isinstance(x, bool) else -x,
   BinaryOps.MUL: operator.mul, BinaryOps.ADD: operator.add, BinaryOps.SUB: operator.sub, BinaryOps.XOR: operator.xor,
   BinaryOps.MAX: max, BinaryOps.CMPEQ: operator.eq, BinaryOps.CMPLT: operator.lt,
