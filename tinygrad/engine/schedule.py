@@ -98,7 +98,7 @@ def _schedule_group(outs:Tuple[LazyBuffer, ...], realizes:Dict[LazyBuffer, None]
   """create a schedule item from a list of outputs"""
   inputs: List[LazyBuffer] = []
   ast: List[LazyOp] = []
-  var_vals = merge_dicts([out.st.var_vals.copy() for out in outs])
+  var_vals: Dict[Variable, int] = merge_dicts([out.st.var_vals.copy() for out in outs])
   if outs[0].op is LoadOps.COPY and getenv("USE_COPY_KERNEL") and outs[0].device.split(":")[0] == outs[0].srcs[0].device.split(":")[0]:
     rd = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.uint8, st:=ShapeTracker.from_shape((outs[0].arg,))))
     ast, inputs = [LazyOp(BufferOps.STORE, (rd,), MemBuffer(0, dtypes.uint8, st))], [x.base for x in outs[0].srcs]
@@ -169,7 +169,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
                                                                     Dict[LazyBuffer, _LBScheduleItem]]:
   """create a graph for realizing the outputs"""
   # start by just realizing the buffers passed in
-  realizes: Dict[LazyBuffer, None] = {x.base: None for x in outs if x.base.realized is None}
+  realizes: Dict[LazyBuffer, None] = {x.base: None for x in outs if not x.base.realized}
   allbufs: Dict[LazyBuffer, None] = {}
   simple_pads: Set[LazyBuffer] = set()
   children: DefaultDict[LazyBuffer, Dict[LazyBuffer, None]] = defaultdict(dict)
