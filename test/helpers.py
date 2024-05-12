@@ -1,7 +1,7 @@
 import sys
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.device import Runner
+from tinygrad.engine.realize import Runner
 from tinygrad.dtype import DType
 from tinygrad.nn.state import get_parameters
 from tinygrad.helpers import Context, CI, OSX, getenv
