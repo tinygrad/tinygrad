@@ -51,12 +51,12 @@ class Sin(Function):
   # return res
 
   def taylor_sin(self, x:LazyBuffer) -> LazyBuffer:
-    # x_copy = deepcopy(x)
-    # Reduce x to [-pi, pi]
-    x = x.e(BinaryOps.MOD, x.const(2 * math.pi))
     no_terms = 14
     res = x.const(0)
     term = x
+    q = x.e(BinaryOps.DIV, x.const(2 * math.pi))
+    whole = q.e(BinaryOps.MUL, x.const(2 * math.pi))
+    x = x.e(BinaryOps.SUB, whole)
     for i in range(no_terms):
       if i % 2 == 0:
         res = res.e(BinaryOps.ADD, term)
