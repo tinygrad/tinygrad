@@ -1127,8 +1127,10 @@ class Tensor:
   def contiguous_backward(self): return F.ContiguousBackward.apply(self)
   def log(self): return F.Log.apply(self.cast(least_upper_float(self.dtype)))
   def log2(self): return self.log()/math.log(2)
-  def exp(self): return F.Exp.apply(self.cast(least_upper_float(self.dtype)))
-  def exp2(self): return F.Exp.apply(self*math.log(2))
+  #def exp(self): return F.Exp.apply(self.cast(least_upper_float(self.dtype)))
+  def exp(self): return F.Exp2.apply(self*(1/math.log(2)))
+  #def exp2(self): return F.Exp.apply(self*math.log(2))
+  def exp2(self): return F.Exp2.apply(self.cast(least_upper_float(self.dtype)))
   def relu(self): return F.Relu.apply(self)
   def sigmoid(self): return F.Sigmoid.apply(self.cast(least_upper_float(self.dtype)))
   def sin(self): return F.Sin.apply(self.cast(least_upper_float(self.dtype)))
@@ -1136,6 +1138,7 @@ class Tensor:
   def rsqrt(self): return self.reciprocal().sqrt()
   def cos(self): return ((math.pi/2)-self).sin()
   def tan(self): return self.sin() / self.cos()
+
 
   # ***** math functions (unary) *****
 

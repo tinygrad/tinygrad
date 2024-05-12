@@ -36,13 +36,37 @@ class Reciprocal(Function):
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return grad_output.e(UnaryOps.NEG).e(BinaryOps.MUL, self.ret).e(BinaryOps.MUL, self.ret)
 
+#TODO: make this dynamic and remove hardcoding
 class Sin(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
-    return x.e(UnaryOps.SIN)
+    return self._sin(x)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
+    return self._sin(self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)).e(BinaryOps.MUL, grad_output)
+
+  def _sin(self, x:LazyBuffer) -> LazyBuffer:
+    # Constants for the Taylor series expansion
+    x2 = x.e(BinaryOps.MUL, x)
+    x3 = x.e(BinaryOps.MUL, x2)
+    x5 = x3.e(BinaryOps.MUL, x2)
+    x7 = x5.e(BinaryOps.MUL, x2)
+    x9 = x7.e(BinaryOps.MUL, x2)
+    x11 = x9.e(BinaryOps.MUL, x2)
+    x13 = x11.e(BinaryOps.MUL, x2)
+
+    # Coefficients for the Taylor series expansion up to x^13
+    c1 = x3.e(BinaryOps.DIV, x.const(6))
+    c2 = x5.e(BinaryOps.DIV, x.const(120))
+    c3 = x7.e(BinaryOps.DIV, x.const(5040))
+    c4 = x9.e(BinaryOps.DIV, x.const(362880))
+    c5 = x11.e(BinaryOps.DIV, x.const(39916800))
+    c6 = x13.e(BinaryOps.DIV, x.const(6227020800))
+
+    # Compute the Taylor series approximation
+    sin_approx = x.e(BinaryOps.SUB, c1).e(BinaryOps.ADD, c2).e(BinaryOps.SUB, c3).e(BinaryOps.ADD, c4).e(BinaryOps.SUB, c5).e(BinaryOps.ADD, c6)
+
+    return sin_approx
 
 # NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
@@ -53,6 +77,7 @@ class Relu(Function):
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return self.ret.const(0).e(BinaryOps.CMPLT, self.ret).cast(grad_output.dtype).e(BinaryOps.MUL, grad_output)
 
+#TODO: Log2
 class Log(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
@@ -60,12 +85,27 @@ class Log(Function):
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.e(BinaryOps.DIV, self.x)
 
+#TODO: can be deprecated?
 class Exp(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.ret = x.e(BinaryOps.MUL, x.const(1/math.log(2))).e(UnaryOps.EXP2)
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return self.ret.e(BinaryOps.MUL, grad_output)
+
+class Exp2(Function):
+  def forward(self, x:LazyBuffer) -> LazyBuffer:
+    term = 8 #6 is sufficient for Exp2. 8 is needed for Exp
+    self.ret = x.const(1)
+    for i in range(1, term+1):
+      coef = (math.log(2)**i)/math.factorial(i)
+      term = x
+      for _ in range(1, i):
+        term = term.e(BinaryOps.MUL, x)
+      self.ret = self.ret.e(BinaryOps.ADD, term.e(BinaryOps.MUL, self.ret.const(coef)))
+    return self.ret
+
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return self.ret.e(BinaryOps.MUL, grad_output).e(BinaryOps.MUL, self.ret.const(math.log(2)))
 
 class Sqrt(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
