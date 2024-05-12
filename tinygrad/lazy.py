@@ -34,7 +34,7 @@ class LazyBuffer:
       self.op, self.arg, self.srcs = op, arg, srcs  # this is a LazyOp, except the src is LazyBuffers and not LazyOps
       assert self.op is not LoadOps.ASSIGN or srcs[1].base.realized is not None, "assign target must be realized"
 
-      if (self.op is LoadOps.CONTIGUOUS or (self.op is UnaryOps.BITCAST)) and srcs[0].st.consecutive and \
+      if (self.op is LoadOps.CONTIGUOUS or self.op is UnaryOps.BITCAST) and srcs[0].st.consecutive and \
           not srcs[0].is_unrealized_const() and device.split(":")[0] in view_supported_devices:
         # some LazyBuffers can be processed with only a view, no AST required
         self.buffer: Buffer = srcs[0].base.buffer.view(st.size, dtype, srcs[0].st.views[0].offset * srcs[0].dtype.itemsize)
