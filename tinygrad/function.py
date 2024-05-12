@@ -105,7 +105,7 @@ class Exp2(Function):
       self.ret = self.ret.e(BinaryOps.ADD, term.e(BinaryOps.MUL, self.ret.const(coef)))
     return self.ret
 
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: 
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return self.ret.e(BinaryOps.MUL, grad_output).e(BinaryOps.MUL, self.ret.const(math.log(2)))
 
 class Sqrt(Function):
