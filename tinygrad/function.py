@@ -55,8 +55,6 @@ class Sin(Function):
     res = x.const(0)
     # x_pow = x
     # fact = x.const(1)
-    whole_parts = x.e(BinaryOps.DIV, x.const(2 * math.pi))
-    x = x.e(BinaryOps.SUB, whole_parts.e(BinaryOps.MUL, x.const(2 * math.pi)))
     term = x
     for i in range(no_terms):
       # term = x_pow.e(BinaryOps.DIV, fact)
@@ -74,8 +72,8 @@ class Sin(Function):
     # return x.e(UnaryOps.SIN)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
-    # return self.taylor_sin(self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)).e(BinaryOps.MUL, grad_output)
+    # return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
+    return self.taylor_sin(self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)).e(BinaryOps.MUL, grad_output)
 
 # NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
