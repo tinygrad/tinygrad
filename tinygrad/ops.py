@@ -126,7 +126,7 @@ def taylor_sin(x, n=190):
     fact *= (2 * i + 2) * (2 * i + 3)
   return res
 
-def taylor_log2(x, n=1500):
+def taylor_log2(x, n=3000):
   x -= 1.0
   res = 0.0
   x_pow = x
