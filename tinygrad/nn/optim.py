@@ -23,7 +23,7 @@ class Optimizer:
 
   def step(self): Tensor.realize(*self.schedule_step())
   def schedule_step(self) -> List[Tensor]:
-    assert Tensor.training, f"Tensor.training={Tensor.training}, Tensor.training must be enabled to use the optmizer"
+    assert Tensor.training, f"Tensor.training={Tensor.training}, Tensor.training must be enabled to use the optimizer"
     return self._step()+self.params+self.buffers
   def _step(self) -> List[Tensor]: raise NotImplementedError
 
