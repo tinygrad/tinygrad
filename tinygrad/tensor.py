@@ -11,13 +11,13 @@ from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up
 from tinygrad.helpers import getenv
 from tinygrad.lazy import LazyBuffer
 from tinygrad.features.multi import MultiLazyBuffer
-from tinygrad.ops import LoadOps, ScheduleItem
+from tinygrad.ops import LoadOps
 from tinygrad.device import Buffer, BufferOptions
 from tinygrad.device import Device
 from tinygrad.shape.symbolic import sint, Variable, MulNode, Node
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.memory import memory_planner
-from tinygrad.engine.schedule import create_schedule_with_vars
+from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 
 # **** start with two base classes, Tensor and Function ****
 
