@@ -99,11 +99,15 @@ def _schedule_group(outs:Tuple[LazyBuffer, ...], realizes:Dict[LazyBuffer, None]
   inputs: List[LazyBuffer] = []
   ast: List[LazyOp] = []
   var_vals: Dict[Variable, int] = merge_dicts([out.st.var_vals.copy() for out in outs])
-  if outs[0].op is LoadOps.COPY and getenv("USE_COPY_KERNEL") and outs[0].device.split(":")[0] == outs[0].srcs[0].device.split(":")[0]:
-    rd = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.uint8, st:=ShapeTracker.from_shape((outs[0].arg,))))
-    ast, inputs = [LazyOp(BufferOps.STORE, (rd,), MemBuffer(0, dtypes.uint8, st))], [x.base for x in outs[0].srcs]
-  elif outs[0].op in {LoadOps.CUSTOM, LoadOps.COPY, LoadOps.EMPTY, LoadOps.VIEW}:
-    ast, inputs = [LazyOp(outs[0].op, (), outs[0].arg)], [x.base for x in outs[0].srcs]
+  # single output AST
+  if (op:=(out:=outs[0]).op) in {LoadOps.CUSTOM, LoadOps.COPY, LoadOps.EMPTY, LoadOps.VIEW}:
+    assert len(outs) == 1, f"can't schedule a group of {op}"
+    inputs = [x.base for x in out.srcs]
+    if getenv("USE_COPY_KERNEL") and op is LoadOps.COPY and out.device.split(":")[0] == out.srcs[0].device.split(":")[0]:
+      rd = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.uint8, st:=ShapeTracker.from_shape((outs[0].arg,))))
+      ast = [LazyOp(BufferOps.STORE, (rd,), MemBuffer(0, dtypes.uint8, st))]
+    else: ast = [LazyOp(op, arg=out.arg)]
+  # multi output AST
   else:
     for i, out in enumerate(outs):
       output_st = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape)
