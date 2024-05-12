@@ -96,6 +96,25 @@ class Log(Function):
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.e(BinaryOps.DIV, self.x)
 
+class TaylorLog2(Function):
+  def forward(self, x:LazyBuffer) -> LazyBuffer:
+    self.x = x
+
+    COEFFICIENTS = [-3.20924197e+00, 7.04736979e+00, -7.56399675e+00, 6.26651748e+00, -3.74642248e+00, 1.60239493e+00, \
+                    -4.85311137e-01, 1.01566920e-01, -1.39637720e-02, 1.13433645e-03, -4.12458383e-05]
+
+    var = x.const(1)
+    acc = x.const(0)
+    for i, coef in enumerate(COEFFICIENTS):
+      if i > 0: var = var.e(BinaryOps.MUL, x)
+      term = var.e(BinaryOps.MUL, x.const(coef))
+      acc = acc.e(BinaryOps.ADD, term)
+
+    return acc
+
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.e(BinaryOps.DIV, self.x)
+
+
 class Exp(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.ret = x.e(BinaryOps.MUL, x.const(1/math.log(2))).e(UnaryOps.EXP2)
