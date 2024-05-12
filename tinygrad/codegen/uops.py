@@ -49,7 +49,7 @@ class UOpGraph:
 
   def print(self):
     for i,u in enumerate(self):
-      print(f"{i:4d} {str(u.uop):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str([self._uops.index(x) for x in u.vin]):32s} {u.arg}")
+      print(f"{i:4d} {str(u.uop):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str([self.uops.index(x) for x in u.vin]):32s} {u.arg}")
 
   def linearize(self):
     # filter nodes that don't link to a sink
@@ -105,7 +105,9 @@ class UOpGraph:
 
   def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None,
           cachable=True, insert_before=None, simplify=True) -> UOp:
-    if uop is UOps.CONST: arg = dtypes.as_const(arg, dtype) # TODO: this doesn't belong here
+    if uop is UOps.CONST:
+      assert dtype is not None
+      arg = dtypes.as_const(arg, dtype) # TODO: this doesn't belong here
     if found:=self.nodes.get(key:=(uop, dtype, vin, arg)): return found
     self.nodes[key] = ret = UOp(*key)
     return ret
