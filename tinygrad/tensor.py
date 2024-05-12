@@ -1132,7 +1132,7 @@ class Tensor:
   def log(self): return F.Log.apply(self.cast(least_upper_float(self.dtype)))
   def log2(self): return self.log()/math.log(2)
   def exp(self): return F.Exp.apply(self.cast(least_upper_float(self.dtype)))
-  def exp2(self): return F.Exp.apply(self*math.log(2))
+  def exp2(self): return F.TaylorExp2.apply(self.cast(least_upper_float(self.dtype)))
   def relu(self): return F.Relu.apply(self)
   def sigmoid(self): return F.Sigmoid.apply(self.cast(least_upper_float(self.dtype)))
   def sin(self): return F.TaylorSin.apply(self.cast(least_upper_float(self.dtype)))
