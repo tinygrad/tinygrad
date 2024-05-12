@@ -95,9 +95,9 @@ class Exp(Function):
 
 class Exp2(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    term = 8 #6 is sufficient for Exp2. 8 is needed for Exp
+    terms = 8 #6 is sufficient for Exp2. 8 is needed for Exp
     self.ret = x.const(1)
-    for i in range(1, term+1):
+    for i in range(1, terms+1):
       coef = (math.log(2)**i)/math.factorial(i)
       term = x
       for _ in range(1, i):
