@@ -36,7 +36,6 @@ class Reciprocal(Function):
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return grad_output.e(UnaryOps.NEG).e(BinaryOps.MUL, self.ret).e(BinaryOps.MUL, self.ret)
 
-#TODO: make this dynamic and remove hardcoding
 class Sin(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
@@ -46,27 +45,15 @@ class Sin(Function):
     return self._sin(self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)).e(BinaryOps.MUL, grad_output)
 
   def _sin(self, x:LazyBuffer) -> LazyBuffer:
-    # Constants for the Taylor series expansion
-    x2 = x.e(BinaryOps.MUL, x)
-    x3 = x.e(BinaryOps.MUL, x2)
-    x5 = x3.e(BinaryOps.MUL, x2)
-    x7 = x5.e(BinaryOps.MUL, x2)
-    x9 = x7.e(BinaryOps.MUL, x2)
-    x11 = x9.e(BinaryOps.MUL, x2)
-    x13 = x11.e(BinaryOps.MUL, x2)
-
-    # Coefficients for the Taylor series expansion up to x^13
-    c1 = x3.e(BinaryOps.DIV, x.const(6))
-    c2 = x5.e(BinaryOps.DIV, x.const(120))
-    c3 = x7.e(BinaryOps.DIV, x.const(5040))
-    c4 = x9.e(BinaryOps.DIV, x.const(362880))
-    c5 = x11.e(BinaryOps.DIV, x.const(39916800))
-    c6 = x13.e(BinaryOps.DIV, x.const(6227020800))
-
-    # Compute the Taylor series approximation
-    sin_approx = x.e(BinaryOps.SUB, c1).e(BinaryOps.ADD, c2).e(BinaryOps.SUB, c3).e(BinaryOps.ADD, c4).e(BinaryOps.SUB, c5).e(BinaryOps.ADD, c6)
-
-    return sin_approx
+    terms = 14
+    self.ret = x.const(0)
+    for i in range(terms):
+      coef = ((-1)**i)/math.factorial((1+(2*i)))
+      term = x
+      for _ in range((2*i)):
+        term = term.e(BinaryOps.MUL, x)
+      self.ret = self.ret.e(BinaryOps.ADD, term.e(BinaryOps.MUL, self.ret.const(coef)))
+    return self.ret
 
 # NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
@@ -95,7 +82,7 @@ class Exp(Function):
 
 class Exp2(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    terms = 11 #6 is sufficient for Exp2. 8 is needed for Exp #11 is needed for test_dtpe for exp
+    terms = 25 #6 is sufficient for Exp2. 8 is needed for Exp. 25 is needed for test_dtyp TestDoubleDtype.test_float64_increased_precision
     self.ret = x.const(1)
     for i in range(1, terms+1):
       coef = (math.log(2)**i)/math.factorial(i)
