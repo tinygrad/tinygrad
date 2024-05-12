@@ -113,14 +113,14 @@ def hook_overflow(dv, fxn):
     except OverflowError: return dv
   return wfxn
 
-def taylor_sin(x, n=40):
+def taylor_sin(x, n=80):
   x %= 2 * math.pi
   res = 0
   for i in range(n):
     res += math.pow(-1, i) * math.pow(x, 2 * i + 1) / math.factorial(2 * i + 1)
   return res
 
-def taylor_log2(x, n=40):
+def taylor_log2(x, n=100):
   mul = 1 / math.log(2)
   x -= 1
   res = 0
@@ -128,7 +128,7 @@ def taylor_log2(x, n=40):
     res += math.pow(-1, i + 1) * math.pow(x, i) / i
   return res * mul
 
-def taylor_exp2(x, n=40):
+def taylor_exp2(x, n=100):
   ln2 = math.log(2)
   res = 1 + ln2 * x
   for i in range(2, n):
