@@ -126,19 +126,8 @@ def taylor_sin(x, n=190):
     fact *= (2 * i + 2) * (2 * i + 3)
   return res
 
-def taylor_log2(x, n=1000):
-  x -= 1.0
-  res = 0.0
-  x_pow = x
-  sgn = 1
-  for i in range(1, n):
-    res += sgn * x_pow / i
-    x_pow *= x
-    sgn *= -1
-  return res / math.log(2)
-
 python_alu = {
-  UnaryOps.LOG2: lambda x: taylor_log2(x) if x > 0 else -math.inf if x == 0 else math.nan,
+  UnaryOps.LOG2: lambda x: math.log2(x) if x > 0 else -math.inf if x == 0 else math.nan,
   UnaryOps.EXP2: hook_overflow(math.inf, lambda x: math.exp(x*math.log(2))),
   UnaryOps.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan,
   UnaryOps.SIN: taylor_sin,
