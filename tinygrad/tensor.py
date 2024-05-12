@@ -1112,6 +1112,12 @@ class Tensor:
     return fix(ret) + fix(base_add)
 
   @staticmethod
+  def meshgrid(tensors:Sequence[Tensor]) -> Tensor:
+    assert len(tensors)==2, f'Not implemented for more than 2 tensors, got len:{len(tensors)}'
+    xs, ys = tensors[0].shape[0], tensors[1].shape[0]
+    return tensors[0].reshape(xs, 1).expand((xs,ys)), Tensor.stack([tensors[1]]*xs)
+
+  @staticmethod
   def _tri(r:sint, c:sint, k:int=0, **kwargs) -> Tensor:
     assert all_int((r,c)), "does not support symbolic"
     if r == 0: return Tensor.zeros((r, c), **kwargs)

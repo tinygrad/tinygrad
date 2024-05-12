@@ -1717,6 +1717,35 @@ class TestOps(unittest.TestCase):
     helper_test_op([(32,10)], lambda x: x.masked_fill((x>0.1).detach(), -math.inf))
     helper_test_op([(32,10)], lambda x: x.masked_fill((x<0.1).detach(), -math.inf))
 
+  def test_meshgrid_simple(self):
+    x_np = np.random.randint(0,100, 10)
+    y_np = np.random.randint(0,100, 5)
+    x_tor = torch.tensor(x_np)
+    y_tor = torch.tensor(y_np)
+    x_tiny = Tensor(x_np)
+    y_tiny = Tensor(y_np)
+    tor = torch.meshgrid(x_tor,y_tor)
+    tiny = Tensor.meshgrid((x_tiny, y_tiny))
+    np.testing.assert_array_equal(tor[0].numpy(), tiny[0].numpy())
+    np.testing.assert_array_equal(tor[1].numpy(), tiny[1].numpy())
+
+  @unittest.skip('Not implemented yet')
+  def test_meshgrid(self):
+    x_np = np.random.randint(0,100, 10)
+    y_np = np.random.randint(0,100, 5)
+    z_np = np.random.randint(0,100, 10)
+    x_tor = torch.tensor(x_np)
+    y_tor = torch.tensor(y_np)
+    z_tor = torch.tensor(z_np)
+    x_tiny = Tensor(x_np)
+    y_tiny = Tensor(y_np)
+    z_tiny = Tensor(z_np)
+    tor = torch.meshgrid(x_tor,y_tor, z_tor)
+    tiny = Tensor.meshgrid((x_tiny, y_tiny, z_tiny))
+    np.testing.assert_array_equal(tor[0].numpy(), tiny[0].numpy())
+    np.testing.assert_array_equal(tor[1].numpy(), tiny[1].numpy())
+    np.testing.assert_array_equal(tor[2].numpy(), tiny[2].numpy())
+
 if __name__ == '__main__':
   np.random.seed(1337)
   unittest.main(verbosity=2)
