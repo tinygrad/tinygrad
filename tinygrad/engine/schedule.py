@@ -132,8 +132,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
       if len(buf.st.views) == 1 and buf.st.views[-1].mask and all_int(buf.base.st.shape) and \
           prod(buf.base.st.shape) >= prod([y-x for x,y in buf.st.views[-1].mask]):
         simple_pads.add(buf.base)
-      elif buf.base.op in [UnaryOps.CAST, UnaryOps.BITCAST] and isinstance(buf.base.srcs[0].dtype, ImageDType) and \
-          isinstance(buf.base.arg, ImageDType):
+      elif buf.base.op is UnaryOps.CAST and isinstance(buf.base.srcs[0].dtype, ImageDType) and isinstance(buf.base.arg, ImageDType):
         pass # don't realize image to image casts. this is part of a larger problem
       else:
         realizes[buf.base] = None
@@ -236,7 +235,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
           if not st.contiguous or tr_next.op in ReduceOps: break
           tr = tr_next
         # don't cast to higher size before store (tr cannot be realized if forced_realize)
-        if tr.op in [UnaryOps.CAST, UnaryOps.BITCAST] and tr.arg.itemsize > tr.srcs[0].dtype.itemsize:
+        if tr.op is UnaryOps.CAST and tr.arg.itemsize > tr.srcs[0].dtype.itemsize:
           tr = tr.srcs[0].base
         reduce_for_op[tr] = r
       realizes[tr] = None
