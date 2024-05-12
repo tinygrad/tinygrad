@@ -10,7 +10,7 @@ class ClangCompiler(Compiler):
   def compile(self, src:str) -> bytes:
     platspec = ('-ffixed-x18',) if platform.machine() == "arm64" else ('-Xclang=-fnative-half-type', '-Xclang=-fnative-half-arguments-and-returns')
     return subprocess.check_output(('clang', '-x', 'c', '-c', '-target', f'{platform.machine()}-none-unknown-elf', '-march=native', '-fPIC', '-O2',
-                                    '-fno-builtin' ,'-ffreestanding', '-include',
+                                    '-fno-builtin', '-ffreestanding', '-Wall', '-Werror', '-include',
                                     f'{os.path.dirname(__file__)}/autogen/tinymath.h', '-', '-o', '-')+platspec,
                                     input=src.encode('utf-8'))
 
