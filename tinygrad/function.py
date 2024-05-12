@@ -3,7 +3,7 @@ import math
 from typing import Tuple, Optional
 from tinygrad.helpers import argsort
 from tinygrad.dtype import dtypes, DType, sum_acc_dtype
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps
+from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps
 from tinygrad.tensor import Function
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.symbolic import sint
@@ -40,6 +40,42 @@ class Sin(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
     return x.e(UnaryOps.SIN)
+
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
+    return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
+
+class TaylorSin(Function):
+  def forward(self, x:LazyBuffer) -> LazyBuffer:
+    self.x = x
+
+    COEFFICIENTS = [9.99999864e-01, 1.93941370e-06, -1.66678370e-01, 3.69537453e-05, \
+                    8.26603317e-03, 7.34881030e-05, -2.46180608e-04, 1.72542160e-05]
+
+    signs = x.e(BinaryOps.CMPLT, x.const(0))
+    x = signs.e(TernaryOps.WHERE, x.e(UnaryOps.NEG), x)
+
+    less_than_two_pi = x.e(BinaryOps.CMPLT, x.const(2 * math.pi))
+    div = x.e(BinaryOps.DIV, x.const(2 * math.pi)).cast(dtypes.int).cast(dtypes.float)
+    x_mod = x.e(BinaryOps.SUB, div.e(BinaryOps.MUL, x.const(2 * math.pi)))
+    x = less_than_two_pi.e(TernaryOps.WHERE, x, x_mod)
+
+    less_than_pi = x.e(BinaryOps.CMPLT, x.const(math.pi))
+    x = less_than_pi.e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(math.pi)))
+
+    less_than_pi_half = x.e(BinaryOps.CMPLT, x.const(math.pi / 2))
+    x = less_than_pi_half.e(TernaryOps.WHERE, x, x.const(math.pi).e(BinaryOps.SUB, x))
+
+    acc = x.const(0)
+    for i in range(len(COEFFICIENTS)):
+      var = x.const(1)
+      for n in range(i+1): var = var.e(BinaryOps.MUL, x)
+      term = var.e(BinaryOps.MUL, x.const(COEFFICIENTS[i]))
+      acc = term.e(BinaryOps.ADD, acc)
+
+    x = less_than_pi.e(TernaryOps.WHERE, acc, acc.e(UnaryOps.NEG))
+    x = signs.e(TernaryOps.WHERE, acc.e(UnaryOps.NEG), acc)
+
+    return x
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
