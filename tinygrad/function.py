@@ -55,7 +55,7 @@ class Sin(Function):
     res = x.const(0)
     x_pow = x
     fact = x.const(1)
-    for i in range(1, no_terms):
+    for i in range(no_terms):
       term = x_pow.e(BinaryOps.DIV, fact)
       if i % 2 == 0:
         res = res.e(BinaryOps.ADD, term)
