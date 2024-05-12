@@ -242,7 +242,7 @@ def NF4Linear(block_size):
           grouped = v.reshape(-1, block_size)
           scale = (grouped.abs().max(axis=1, keepdim=True))
           coded = ((grouped / scale).unsqueeze(-1) - CODE.to(v.device)).abs().argmin(axis=-1).cast(dtypes.uint8).flatten()
-          new_state_dict[k] = (coded[::2] * 2 ** 4 + coded[1::2])
+          new_state_dict[k] = coded[::2] * 2 ** 4 + coded[1::2]
           new_state_dict[k.replace(".weight", ".scale")] = scale.cast(dtypes.float16)
           if isinstance(device, tuple):
             new_state_dict[k].shard_(device, axis=-1)
