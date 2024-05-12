@@ -1,12 +1,44 @@
 // tinymath - a tiny single-header math library for tinygrad
-// a bunch of stuff here is taken from musl
+// a bunch of stuff here is taken from musl and
+// https://github.com/JuliaMath/openlibm
 #include <stdint.h> // only used for int8_t instead of char which is buggy for some reason
 
 #define NAN __builtin_nanf("")
 #define INFINITY __builtin_inff()
+#define M_PI 3.14159265358979323846
+#define M_PI_2 (M_PI / 2)
 
-double sin(double);
-float sinf(float);
+double floor(double x) {
+#if defined(__aarch64__) || defined(_M_ARM64)
+  __asm__("frintm %d0, %d1" : "=w"(x) : "w"(x));
+#elif defined(__x86_64__) || defined(_M_X64)
+#error todo
+#else
+#error only aarch64 and x86 is supported
+#endif
+  return x;
+}
+double fmod(double x, double mod) { return floor(x / mod) * mod; }
+double fwrap(double x, double lo, double hi) {
+  return x - fmod(x - lo, hi - lo);
+}
+double sin(double x) {
+  double x_norm = fwrap(x, -M_PI, M_PI);
+  double elacc = 1.0, acc = 0.0;
+  for (int i = 1; i < 256; i++) {
+    elacc *= x_norm / i;
+    if (i % 4 == 1) {
+      acc += elacc;
+    } else if (i % 4 == 3) {
+      acc -= elacc;
+    }
+  }
+  return acc;
+}
+float sinf(float x) {
+  // otherwise rounding error accumulates and everything is sad
+  return (float)sin((double)x);
+}
 
 double sqrt(double x) {
 #if defined(__aarch64__) || defined(_M_ARM64)
@@ -29,6 +61,7 @@ float sqrtf(float x) {
 #endif
   return x;
 }
+
 double exp2(double);
 float exp2f(float);
 double log2(double);

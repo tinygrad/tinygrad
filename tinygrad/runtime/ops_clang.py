@@ -1,6 +1,6 @@
 import os, platform, subprocess
 from tinygrad.device import Compiled, Compiler, MallocAllocator
-from tinygrad.runtime.driver.elf_loader import ElfLoader, addrof
+from tinygrad.runtime.driver.elf_loader import ElfLoader
 from tinygrad.helpers import cpu_time_execution
 from tinygrad.renderer.cstyle import ClangRenderer
 
