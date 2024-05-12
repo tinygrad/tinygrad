@@ -37,12 +37,27 @@ class Reciprocal(Function):
     return grad_output.e(UnaryOps.NEG).e(BinaryOps.MUL, self.ret).e(BinaryOps.MUL, self.ret)
 
 class Sin(Function):
-  def forward(self, x:LazyBuffer) -> LazyBuffer:
+  def forward(self, x: LazyBuffer) -> LazyBuffer:
     self.x = x
     return x.e(UnaryOps.SIN)
 
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
+  def backward(self, grad_output: LazyBuffer) -> LazyBuffer:
+    # Using Taylor series approximation for sin(x)
+    grad_input = self.x.const(1.0)
+    term = self.x
+    sign = -1.0
+
+    for i in range(1, 8):  # Including the first 7 terms
+      term = term.e(BinaryOps.MUL, self.x).e(BinaryOps.MUL, self.x)
+      term = term.e(UnaryOps.RECIPROCAL)
+      sign *= -1
+      if i % 2 == 0: continue
+      grad_input = grad_input.e(
+          BinaryOps.ADD,
+          term.e(UnaryOps.NEG if sign < 0 else UnaryOps.POS)
+      )
+
+    return grad_output.e(BinaryOps.MUL, grad_input)
 
 # NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
