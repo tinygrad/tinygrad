@@ -51,7 +51,7 @@ class Sin(Function):
   # return res
 
   def taylor_sin(self, x:LazyBuffer) -> LazyBuffer:
-    no_terms = 50
+    no_terms = 190
     res = x.const(0)
     term = x
     q = x.e(BinaryOps.DIV, x.const(2 * math.pi))
