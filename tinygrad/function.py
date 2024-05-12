@@ -3,7 +3,7 @@ import math
 from typing import Tuple, Optional
 from tinygrad.helpers import argsort
 from tinygrad.dtype import dtypes, DType, sum_acc_dtype
-from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps
+from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps
 from tinygrad.tensor import Function
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.symbolic import sint
@@ -38,25 +38,17 @@ class Reciprocal(Function):
 
 class Sin(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.x = x
-    return x.e(UnaryOps.SIN)
-
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
-
-class TaylorSin(Function):
-  def forward(self, x:LazyBuffer) -> LazyBuffer:
     if not hasattr(self, 'x'):
       self.x = x
 
-    pi, two_pi = x.const(math.pi), x.const(2 * math.pi)
-    COEFFICIENTS = [9.99999864e-01, 1.93941370e-06, -1.66678370e-01, 3.69537453e-05, \
-                    8.26603317e-03, 7.34881030e-05, -2.46180608e-04, 1.72542160e-05]
+    pi, two_pi = x.const(math.pi).cast(x.dtype), x.const(2 * math.pi).cast(x.dtype)
+    COEFFICIENTS = [9.9999999999962507768e-01, -1.6666666666098622906e-01, 8.3333333084297453452e-03, -1.9841265025983067876e-04, \
+                    2.7556840996090994431e-06, -2.5026640042662694496e-08, 1.5365981012558240161e-10]
 
     sign = x.e(BinaryOps.CMPLT, x.const(0))
     positive_x = sign.e(TernaryOps.WHERE, x.e(UnaryOps.NEG), x)
 
-    div = positive_x.e(BinaryOps.DIV, two_pi).cast(dtypes.int).cast(dtypes.float)
+    div = positive_x.e(BinaryOps.DIV, two_pi).cast(dtypes.int).cast(x.dtype)
     two_pi_x = positive_x.e(BinaryOps.SUB, div.e(BinaryOps.MUL, two_pi))
 
     less_than_pi = two_pi_x.e(BinaryOps.CMPLT, pi)
@@ -67,7 +59,8 @@ class TaylorSin(Function):
 
     var = pi_half_x.const(1)
     acc = pi_half_x.const(0)
-    for _, coef in enumerate(COEFFICIENTS):
+    for i, coef in enumerate(COEFFICIENTS):
+      if i > 0: var = var.e(BinaryOps.MUL, pi_half_x)
       var = var.e(BinaryOps.MUL, pi_half_x)
       term = var.e(BinaryOps.MUL, pi_half_x.const(coef))
       acc = acc.e(BinaryOps.ADD, term)
@@ -136,7 +129,7 @@ class TaylorExp2(Function):
       acc = acc.e(BinaryOps.ADD, term)
 
     self.ret = acc
-    return acc
+    return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return self.ret.e(BinaryOps.MUL, grad_output)
 
