@@ -38,18 +38,31 @@ class Reciprocal(Function):
 
 class Sin(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
+    self.x = x
+    return x.e(UnaryOps.SIN)
+
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
+    return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
+
+class _Sin(Function):
+  def floor(self, x:LazyBuffer) -> LazyBuffer:
+    x_dtype = x.dtype
+    return x.cast(dtypes.int).cast(x_dtype)
+
+  def forward(self, x:LazyBuffer) -> LazyBuffer:
+    x = x.cast(dtypes.float) if x.dtype not in (dtypes.double, dtypes.float) else x
     if not hasattr(self, 'x'):
       self.x = x
 
-    pi, two_pi = x.const(math.pi).cast(x.dtype), x.const(2 * math.pi).cast(x.dtype)
-    COEFFICIENTS = [9.9999999999962507768e-01, -1.6666666666098622906e-01, 8.3333333084297453452e-03, -1.9841265025983067876e-04, \
-                    2.7556840996090994431e-06, -2.5026640042662694496e-08, 1.5365981012558240161e-10]
+    pi, two_pi = x.const(math.pi), x.cast(dtypes.double).const(2 * math.pi)
+    COEFFICIENTS = [9.9999999999993782751e-01, -1.6666666666432553012e-01, 8.3333333187754141114e-03, -1.9841266413256992626e-04,
+                    2.7556932047318987798e-06, -2.5029522966723734896e-08, 1.5401222741012872935e-10]
 
     sign = x.e(BinaryOps.CMPLT, x.const(0))
     positive_x = sign.e(TernaryOps.WHERE, x.e(UnaryOps.NEG), x)
 
-    div = positive_x.e(BinaryOps.DIV, two_pi).cast(dtypes.int).cast(x.dtype)
-    two_pi_x = positive_x.e(BinaryOps.SUB, div.e(BinaryOps.MUL, two_pi))
+    floor_div = self.floor(positive_x.cast(dtypes.double).e(BinaryOps.DIV, two_pi))
+    two_pi_x = positive_x.e(BinaryOps.SUB, floor_div.e(BinaryOps.MUL, two_pi))
 
     less_than_pi = two_pi_x.e(BinaryOps.CMPLT, pi)
     pi_x = less_than_pi.e(TernaryOps.WHERE, two_pi_x, two_pi_x.e(BinaryOps.SUB, pi))
@@ -89,12 +102,13 @@ class Log(Function):
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.e(BinaryOps.DIV, self.x)
 
-class TaylorLog2(Function):
+class Log2(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
 
-    COEFFICIENTS = [-3.20924197e+00, 7.04736979e+00, -7.56399675e+00, 6.26651748e+00, -3.74642248e+00, 1.60239493e+00, \
-                    -4.85311137e-01, 1.01566920e-01, -1.39637720e-02, 1.13433645e-03, -4.12458383e-05]
+    COEFFICIENTS = [-6.09678316e+00, 5.16417548e+01, -3.99473655e+02, 2.36000032e+03, -1.00361172e+04,
+                    3.07916095e+04, -6.84925790e+04, 1.10284429e+05, -1.27043116e+05, 1.01934878e+05,
+                    -5.40528412e+04, 1.70129219e+04, -2.40525644e+03]
 
     var = x.const(1)
     acc = x.const(0)
@@ -105,8 +119,8 @@ class TaylorLog2(Function):
 
     return acc
 
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.e(BinaryOps.DIV, self.x)
-
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
+    return grad_output.e(BinaryOps.DIV, self.x.e(BinaryOps.MUL, self.x.const(math.log(2))))
 
 class Exp(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
@@ -115,11 +129,11 @@ class Exp(Function):
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return self.ret.e(BinaryOps.MUL, grad_output)
 
-class TaylorExp2(Function):
+class Exp2(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    COEFFICIENTS = [1.0, 6.93147181e-01, 2.40226507e-01, 5.55041087e-02, 9.61812911e-03, 1.33335581e-03, \
-                    1.54035304e-04, 1.52527338e-05, 1.32154851e-06, 1.01780830e-07, 7.05498881e-09, \
-                    4.44565287e-10, 2.56586008e-11, 1.36681314e-12, 7.04002307e-14, 3.34938399e-15]
+    COEFFICIENTS = [1.00000000081861939449e+00, 6.93147182520959859175e-01, 2.40226495713301319013e-01, 5.55040941978386520583e-02,
+                    9.61815259200062347422e-03, 1.33338111576375667293e-03, 1.54018907490696861651e-04, 1.52360250041314857400e-05,
+                    1.32587007737466412782e-06, 1.06391894003459590264e-07, 6.77776413810625168015e-09]
 
     var = x.const(1)
     acc = x.const(0)
@@ -131,7 +145,8 @@ class TaylorExp2(Function):
     self.ret = acc
     return self.ret
 
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return self.ret.e(BinaryOps.MUL, grad_output)
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
+    return self.ret.e(BinaryOps.MUL, self.ret.const(math.log(2))).e(BinaryOps.MUL, grad_output)
 
 class Sqrt(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
