@@ -51,18 +51,18 @@ class Sin(Function):
   # return res
 
   def taylor_sin(self, x:LazyBuffer) -> LazyBuffer:
-    no_terms = 1000
+    no_terms = 12
     res = x.const(0)
-    x_pow = x
-    fact = x.const(1)
+    # x_pow = x
+    # fact = x.const(1)
+    term = x
     for i in range(no_terms):
-      term = x_pow.e(BinaryOps.DIV, fact)
+      # term = x_pow.e(BinaryOps.DIV, fact)
       if i % 2 == 0:
         res = res.e(BinaryOps.ADD, term)
       else:
         res = res.e(BinaryOps.SUB, term)
-      x_pow = x_pow.e(BinaryOps.MUL, x).e(BinaryOps.MUL, x)
-      fact = fact.e(BinaryOps.MUL, (x.const(2*i+2))).e(BinaryOps.MUL, (x.const(2*i+3)))
+      term = term.e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const(2 * i + 2)).e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const(2 * i + 3))
     return res
 
   def forward(self, x:LazyBuffer) -> LazyBuffer:
