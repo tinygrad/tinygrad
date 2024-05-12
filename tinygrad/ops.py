@@ -113,7 +113,7 @@ def hook_overflow(dv, fxn):
     except OverflowError: return dv
   return wfxn
 
-def taylor_sin(x, n=200):
+def taylor_sin(x, n=190):
   x %= 2 * math.pi
   res = 0.0
   sgn = 1
