@@ -52,22 +52,23 @@ class Sin(Function):
   # return res
 
   def taylor_sin(self, x:LazyBuffer) -> LazyBuffer:
-    x_copy = deepcopy(x)
+    # x_copy = deepcopy(x)
     no_terms = 20
     res = x.const(0)
-    term = deepcopy(x)
+    term = x
     for i in range(no_terms):
       if i % 2 == 0:
         res = res.e(BinaryOps.ADD, term)
       else:
         res = res.e(BinaryOps.SUB, term)
       term = term.e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const(2 * i + 2)).e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const(2 * i + 3))
-    self.x = x_copy
+    # self.x = x_copy
     return res
 
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    if not hasattr(self, 'x'):
-      self.x = x
+    # if not hasattr(self, 'x'):
+    #   self.x = x
+    self.x = self.taylor_sin(x)
     return self.taylor_sin(x)
 
     # return x.e(UnaryOps.SIN)
