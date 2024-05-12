@@ -292,6 +292,7 @@ class Linearizer(Kernel):
       acc = self.global_load(0, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop)
 
       # late reduce loop
+      print(end_local_idxs, "LOCAL")
       loop_ctx = self.render_loop(end_local_idxs)
 
       # load localbufs

@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import Optional, Tuple, Any, Dict, List, DefaultDict, Set
+import functools
 from collections import deque, defaultdict
 from enum import Enum, auto
 from dataclasses import dataclass
@@ -46,16 +47,6 @@ class UOpGraph:
     for i,u in enumerate(self):
       print(f"{i:4d} {str(u.uop):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str([self._uops.index(x) for x in u.vin]):32s} {u.arg}")
 
-  def get_recursive_children(self, x:UOp) -> Set[UOp]:
-    deps = set([x])
-    ssize = 0
-    while ssize != len(deps):
-      ssize = len(deps)
-      for u in self.uops:
-        if len(deps.intersection([x for x in u.vin if x.uop is not UOps.PHI])):
-          deps.add(u)
-    return deps
-
   def linearize(self):
     # BFS toposort
     graph: DefaultDict[UOp, List[UOp]] = defaultdict(list)
@@ -84,8 +75,14 @@ class UOpGraph:
         in_degree[c] -= 1
         if in_degree[c] == 0: queue.append(c)
 
+    @functools.lru_cache(None)
+    def get_recursive_children(x:UOp) -> Set[UOp]:
+      return set.union(set((x,)), *([get_recursive_children(u) for u in graph[x]] if x.uop is not UOps.PHI else []))
+
     for u in loops_pending[::-1]:
-      insert_before = self.uops.index(sorted(list(self.get_recursive_children(u)), key=self.uops.index)[-1])+1
+      # TODO: a dictionary makes index faster
+      #print("loop children", get_recursive_children(u))
+      insert_before = sorted([self._uops.index(x) for x in get_recursive_children(u)])[-1]+1
       self._uops.insert(insert_before, UOp(UOps.ENDLOOP, None, (u,)))
     for u in ifs_pending[::-1]: self._uops.append(UOp(UOps.ENDIF, None, (u,)))
 
