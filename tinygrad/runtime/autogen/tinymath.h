@@ -6,7 +6,6 @@
 #define NAN __builtin_nanf("")
 #define INFINITY __builtin_inff()
 #define M_PI 3.14159265358979323846
-#define M_PI_2 (M_PI / 2)
 
 double floor(double x) {
 #if defined(__aarch64__) || defined(_M_ARM64)
@@ -25,7 +24,7 @@ double fwrap(double x, double lo, double hi) {
 double sin(double x) {
   double x_norm = fwrap(x, -M_PI, M_PI);
   double elacc = 1.0, acc = 0.0;
-  for (int i = 1; i < 256; i++) {
+  for (int i = 1; i < 32; i++) {
     elacc *= x_norm / i;
     if (i % 4 == 1) {
       acc += elacc;
