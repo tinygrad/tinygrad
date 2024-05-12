@@ -47,14 +47,14 @@ class Sin(Function):
     term = self.x
     sign = -1.0
 
-    for i in range(1, 8):  # Including the first 7 terms
+    for i in range(1, 8):
       term = term.e(BinaryOps.MUL, self.x).e(BinaryOps.MUL, self.x)
-      term = term.e(UnaryOps.RECIPROCAL)
+      term = term.e(UnaryOps.Reciprocal)
       sign *= -1
       if i % 2 == 0: continue
       grad_input = grad_input.e(
           BinaryOps.ADD,
-          term.e(UnaryOps.NEG if sign < 0 else UnaryOps.POS)
+          term.e(UnaryOps.NEG if sign < 0 else None)
       )
 
     return grad_output.e(BinaryOps.MUL, grad_input)
