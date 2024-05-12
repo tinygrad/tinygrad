@@ -43,30 +43,47 @@ class UOpGraph:
     if self._uops is None: self.linearize()
     return self._uops
 
+  def graph(self):
+    from tinygrad.features.graph import graph_uops
+    graph_uops(self.uops)
+
   def print(self):
     for i,u in enumerate(self):
       print(f"{i:4d} {str(u.uop):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str([self._uops.index(x) for x in u.vin]):32s} {u.arg}")
 
   def linearize(self):
+    # filter nodes that don't link to a sink
+    nodes: List[UOp] = []
+    @functools.lru_cache(None)
+    def add_parents(u:UOp):
+      nodes.append(u)
+      for x in u.vin: add_parents(x)
+    for u in self.nodes.values():
+      if u.uop is UOps.STORE: add_parents(u)
+
     # BFS toposort
     graph: DefaultDict[UOp, List[UOp]] = defaultdict(list)
     in_degree: DefaultDict[UOp, int] = defaultdict(int)
-    for u in self.nodes.values():
+    for u in nodes:
       for x in u.vin:
         in_degree[u] += 1
         graph[x].append(u)
 
     self._uops = []
-    queue = deque(u for u in self.nodes.values() if in_degree[u] == 0)
+    queue = deque(u for u in nodes if in_degree[u] == 0)
     loops_pending = []
     ifs_pending = []
     while queue:
       x = queue.popleft()
       if x.uop is UOps.LOOP:
         # start loops as late as possible
-        if len(queue) and not all(x.uop is UOps.LOOP for x in queue):
-          queue.append(x)
-          continue
+        if len(queue):
+          # if there's only loops left and we can make some progress with this loop, we run it
+          if all(x.uop is UOps.LOOP for x in queue) and any(all((uu in self._uops or uu is x) for uu in u.vin) for u in graph[x]):
+            pass
+          else:
+            queue.append(x)
+            continue
         loops_pending.append(x)
       if x.uop is UOps.IF:
         ifs_pending.append(x)
