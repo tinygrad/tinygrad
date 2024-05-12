@@ -200,7 +200,7 @@ class Int8Linear:
     return x.dot(self.weight.cast(dtype=dtypes.half).T*self.scale)
 
   @staticmethod
-  def quantize(tensors):
+  def quantize(tensors, device):
     new_tensors = {}
     for name,v in tensors.items():
       if "feed_forward" in name or "attention.w" in name or name == "output.weight":
@@ -209,6 +209,9 @@ class Int8Linear:
         int8_weight = (v.T/scale).T.cast(dtype=dtypes.int8)
         new_tensors[name] = int8_weight
         new_tensors[name.replace('weight', 'scale')] = scale
+        if isinstance(device, tuple):
+          new_tensors[name].shard_(device, axis=-1)
+          new_tensors[name.replace('weight', 'scale')].shard_(device, axis=None)
       else:
         new_tensors[name] = v
     return new_tensors
@@ -233,15 +236,18 @@ def NF4Linear(block_size):
       return x.linear(unscaled.reshape(self.out_features, self.in_features).T)
 
     @staticmethod
-    def quantize(state_dict: dict[str, Tensor]) -> dict[str, Tensor]:
+    def quantize(state_dict: dict[str, Tensor], device) -> dict[str, Tensor]:
       new_state_dict = {}
       for k, v in state_dict.items():
         if "feed_forward" in k or "attention.w" in k or k == "output.weight":
-          grouped = v.to(CODE.device).reshape(-1, block_size)
+          grouped = v.reshape(-1, block_size)
           scale = (grouped.abs().max(axis=1, keepdim=True))
-          coded = ((grouped / scale).unsqueeze(-1) - CODE).abs().argmin(axis=-1).cast(dtypes.uint8).flatten()
+          coded = ((grouped / scale).unsqueeze(-1) - CODE.to(v.device)).abs().argmin(axis=-1).cast(dtypes.uint8).flatten()
           new_state_dict[k] = coded[::2] * 2 ** 4 + coded[1::2]
           new_state_dict[k.replace(".weight", ".scale")] = scale.cast(dtypes.float16)
+          if isinstance(device, tuple):
+            new_state_dict[k].shard_(device, axis=-1)
+            new_state_dict[k.replace('weight', 'scale')].shard_(device, axis=None)
         else:
           new_state_dict[k] = v
       return new_state_dict
@@ -270,7 +276,7 @@ class LLaMa:
 
     if quantize is not None:
       with Context(BEAM=0):
-        weights = model.output.__class__.quantize(weights)
+        weights = model.output.__class__.quantize(weights, device)
         for _,v in weights.items(): v.realize()
 
     if isinstance(device, tuple):
