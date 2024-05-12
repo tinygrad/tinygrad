@@ -67,9 +67,9 @@ class Sin(Function):
 
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
-    return self.taylor_sin(x)
+    # return self.taylor_sin(x)
 
-    # return x.e(UnaryOps.SIN)
+    return x.e(UnaryOps.SIN)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
