@@ -46,39 +46,39 @@ class Sin(Function):
 
 class TaylorSin(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.x = x
+    if not hasattr(self, 'x'):
+      self.x = x
 
+    pi, two_pi = x.const(math.pi), x.const(2 * math.pi)
     COEFFICIENTS = [9.99999864e-01, 1.93941370e-06, -1.66678370e-01, 3.69537453e-05, \
                     8.26603317e-03, 7.34881030e-05, -2.46180608e-04, 1.72542160e-05]
 
-    signs = x.e(BinaryOps.CMPLT, x.const(0))
-    x = signs.e(TernaryOps.WHERE, x.e(UnaryOps.NEG), x)
+    sign = x.e(BinaryOps.CMPLT, x.const(0))
+    positive_x = sign.e(TernaryOps.WHERE, x.e(UnaryOps.NEG), x)
 
-    less_than_two_pi = x.e(BinaryOps.CMPLT, x.const(2 * math.pi))
-    div = x.e(BinaryOps.DIV, x.const(2 * math.pi)).cast(dtypes.int).cast(dtypes.float)
-    x_mod = x.e(BinaryOps.SUB, div.e(BinaryOps.MUL, x.const(2 * math.pi)))
-    x = less_than_two_pi.e(TernaryOps.WHERE, x, x_mod)
+    div = positive_x.e(BinaryOps.DIV, two_pi).cast(dtypes.int).cast(dtypes.float)
+    two_pi_x = positive_x.e(BinaryOps.SUB, div.e(BinaryOps.MUL, two_pi))
 
-    less_than_pi = x.e(BinaryOps.CMPLT, x.const(math.pi))
-    x = less_than_pi.e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(math.pi)))
+    less_than_pi = two_pi_x.e(BinaryOps.CMPLT, pi)
+    pi_x = less_than_pi.e(TernaryOps.WHERE, two_pi_x, two_pi_x.e(BinaryOps.SUB, pi))
 
-    less_than_pi_half = x.e(BinaryOps.CMPLT, x.const(math.pi / 2))
-    x = less_than_pi_half.e(TernaryOps.WHERE, x, x.const(math.pi).e(BinaryOps.SUB, x))
+    less_than_pi_half = pi_x.e(BinaryOps.CMPLT, pi.e(BinaryOps.DIV, pi_x.const(2)))
+    pi_half_x = less_than_pi_half.e(TernaryOps.WHERE, pi_x, pi.e(BinaryOps.SUB, pi_x))
 
-    acc = x.const(0)
-    for i in range(len(COEFFICIENTS)):
-      var = x.const(1)
-      for n in range(i+1): var = var.e(BinaryOps.MUL, x)
-      term = var.e(BinaryOps.MUL, x.const(COEFFICIENTS[i]))
-      acc = term.e(BinaryOps.ADD, acc)
+    var = pi_half_x.const(1)
+    acc = pi_half_x.const(0)
+    for i, coef in enumerate(COEFFICIENTS):
+      var = var.e(BinaryOps.MUL, pi_half_x)
+      term = var.e(BinaryOps.MUL, pi_half_x.const(coef))
+      acc = acc.e(BinaryOps.ADD, term)
 
     x = less_than_pi.e(TernaryOps.WHERE, acc, acc.e(UnaryOps.NEG))
-    x = signs.e(TernaryOps.WHERE, acc.e(UnaryOps.NEG), acc)
+    x = sign.e(TernaryOps.WHERE, x.e(UnaryOps.NEG), x)
 
     return x
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
+    return self.forward(self.x.e(BinaryOps.ADD, self.x.const(math.pi / 2))).e(BinaryOps.MUL, grad_output)
 
 # NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
