@@ -57,7 +57,6 @@ class Sin(Function):
     res = x.const(0)
     term = x
     for i in range(no_terms):
-      # term = x_pow.e(BinaryOps.DIV, fact)
       if i % 2 == 0:
         res = res.e(BinaryOps.ADD, term)
       else:
@@ -67,7 +66,8 @@ class Sin(Function):
     return res
 
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.x = x
+    if not hasattr(self, 'x'):
+      self.x = x
     return self.taylor_sin(x)
 
     # return x.e(UnaryOps.SIN)
