@@ -349,10 +349,6 @@ def train_unet3d():
   # TODO: Unet3d
   pass
 
-def train_rnnt():
-  # TODO: RNN-T
-  pass
-
 @TinyJit
 def train_step_bert(model, optimizer, scheduler, input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor, masked_positions:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
   lm_logits, clsf_logits = model(input_ids, segment_ids, attention_mask, masked_positions)
@@ -597,14 +593,18 @@ def train_bert():
         print(f"Removing old ckpt {last}")
         os.remove(os.path.join(ckpt_dir, last))
 
-def train_maskrcnn():
-  # TODO: Mask RCNN
+def train_stable():
+  # TODO: Stable Diffusion
+  pass
+
+def train_lora():
+  # TODO: Llama2 Lora
   pass
 
 if __name__ == "__main__":
   multiprocessing.set_start_method('spawn')
   with Tensor.train():
-    for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn").split(","):
+    for m in getenv("MODEL", "resnet,retinanet,unet3d,bert,stable,lora").split(","):
       nm = f"train_{m}"
       if nm in globals():
         print(f"training {m}")
