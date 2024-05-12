@@ -123,11 +123,13 @@ class TestOptim(unittest.TestCase):
     t = Tensor.ones((1,1), requires_grad=True)
     optimizer = Adam([t])
     optimizer.zero_grad()
+    old_state = Tensor.training
     t.sum().backward()
     Tensor.training = False
     self.assertRaises(AssertionError, optimizer.step)
     Tensor.training = True
     optimizer.step()
+    Tensor.training = old_state
 
 if __name__ == '__main__':
   unittest.main()
