@@ -64,6 +64,7 @@ class Sin(Function):
     return res
 
   def forward(self, x:LazyBuffer) -> LazyBuffer:
+    self.x = x
     return self.taylor_sin(x)
 
     # return x.e(UnaryOps.SIN)
