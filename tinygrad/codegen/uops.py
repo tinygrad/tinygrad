@@ -64,44 +64,50 @@ class UOpGraph:
     # BFS toposort
     graph: DefaultDict[UOp, List[UOp]] = defaultdict(list)
     in_degree: DefaultDict[UOp, int] = defaultdict(int)
+    loops = []
+    ifs = []
     for u in nodes:
       for x in u.vin:
         in_degree[u] += 1
         graph[x].append(u)
-
-    self._uops = []
-    queue = deque(u for u in nodes if in_degree[u] == 0)
-    loops_pending = []
-    ifs_pending = []
-    while queue:
-      x = queue.popleft()
-      if x.uop is UOps.LOOP:
-        # start loops as late as possible
-        if len(queue):
-          # if there's only loops left and we can make some progress with this loop, we run it
-          if all(x.uop is UOps.LOOP for x in queue) and any(all((uu in self._uops or uu is x) for uu in u.vin) for u in graph[x]):
-            pass
-          else:
-            queue.append(x)
-            continue
-        loops_pending.append(x)
-      if x.uop is UOps.IF:
-        ifs_pending.append(x)
-      self._uops.append(x)
-      for c in graph[x]:
-        in_degree[c] -= 1
-        if in_degree[c] == 0: queue.append(c)
+      if u.uop is UOps.LOOP: loops.append(u)
+      if u.uop is UOps.IF: ifs.append(u)
 
     @functools.lru_cache(None)
     def get_recursive_children(x:UOp) -> Set[UOp]:
       return set.union(set((x,)), *([get_recursive_children(u) for u in graph[x]] if x.uop is not UOps.PHI else []))
+    loops_children = {l:get_recursive_children(l) for l in loops}
 
-    for u in loops_pending[::-1]:
-      # TODO: a dictionary makes index faster
-      #print("loop children", get_recursive_children(u))
-      insert_before = sorted([self._uops.index(x) for x in get_recursive_children(u)])[-1]+1
-      self._uops.insert(insert_before, UOp(UOps.ENDLOOP, None, (u,)))
-    for u in ifs_pending[::-1]: self._uops.append(UOp(UOps.ENDIF, None, (u,)))
+    self._uops = []
+    queue = deque(u for u in nodes if in_degree[u] == 0)
+    open_loops = set()
+    while queue:
+      x = queue.popleft()
+      if x.uop is UOps.LOOP:
+        # start loops as late as possible
+        # if there's only loops left and we can make some progress with this loop, we run it if it's the earliest loop
+        if len(queue) and not (all(x.uop is UOps.LOOP for x in queue) and all(x.arg < u.arg for u in queue)):
+          queue.append(x)
+          continue
+        open_loops.add(x)
+      if len(queue) and len(open_loops) and all(x not in loops_children[u] for u in open_loops):
+        # if it's not a loop child, wait to render it
+        queue.append(x)
+        continue
+      self._uops.append(x)
+      for u, ss in loops_children.items():
+        if x in ss:
+          assert u in open_loops, "loop child found but loop wasn't open"
+          ss.remove(x)
+          if len(ss) == 0:
+            self._uops.append(UOp(UOps.ENDLOOP, None, (u,)))
+            open_loops.remove(u)
+      for c in graph[x]:
+        in_degree[c] -= 1
+        if in_degree[c] == 0: queue.append(c)
+
+    # TODO: ifs should be removed and just the store should be gated
+    for u in ifs[::-1]: self._uops.append(UOp(UOps.ENDIF, None, (u,)))
 
   def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None,
           cachable=True, insert_before=None, simplify=True) -> UOp:
