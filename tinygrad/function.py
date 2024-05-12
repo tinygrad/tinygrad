@@ -7,7 +7,6 @@ from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps
 from tinygrad.tensor import Function
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.symbolic import sint
-from copy import deepcopy
 
 class Contiguous(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer: return x.contiguous()
@@ -53,7 +52,7 @@ class Sin(Function):
 
   def taylor_sin(self, x:LazyBuffer) -> LazyBuffer:
     # x_copy = deepcopy(x)
-    no_terms = 20
+    no_terms = 15
     res = x.const(0)
     term = x
     for i in range(no_terms):
@@ -67,8 +66,7 @@ class Sin(Function):
 
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     # if not hasattr(self, 'x'):
-    #   self.x = x
-    self.x = self.taylor_sin(x)
+    self.x = x
     return self.taylor_sin(x)
 
     # return x.e(UnaryOps.SIN)
