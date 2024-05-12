@@ -113,24 +113,26 @@ def hook_overflow(dv, fxn):
     except OverflowError: return dv
   return wfxn
 
-def taylor_sin(x):
-  x %= 2*math.pi
-  return x - math.pow(x, 3) / 6 + math.pow(x, 5) / 120 - math.pow(x, 7) / 5040 + math.pow(x, 9) / 362880 \
-      - math.pow(x, 11) / 39916800 + math.pow(x, 13) / 6227020800 - math.pow(x, 15) / 1307674368000 \
-      + math.pow(x, 17) / 355687428096000 - math.pow(x, 19) / 121645100408832000 + math.pow(x, 21) / 51090942171709440000
+def taylor_sin(x, n=25):
+    x %= 2 * math.pi
+    res = 0
+    for i in range(n):
+        res += math.pow(-1, i) * math.pow(x, 2 * i + 1) / math.factorial(2 * i + 1)
+    return res
 
-def taylor_log2(x):
-  x -= 1
-  return (x - math.pow(x, 2) / 2 + math.pow(x, 3) / 3 - math.pow(x, 4) / 4 + math.pow(x, 5) / 5 - math.pow(x, 6) / 6 \
-      + math.pow(x, 7) / 7 - math.pow(x, 8) / 8 + math.pow(x, 9) / 9 - math.pow(x, 10) / 10 + math.pow(x, 11) / 11 - math.pow(x, 12) / 12 \
-      + math.pow(x, 13) / 13 - math.pow(x, 14) / 14 + math.pow(x, 15) / 15
-  ) * 1.4426950408889634
+def taylor_log2(x, n=25):
+    x -= 1
+    res = 0
+    for i in range(1, n):
+        res += math.pow(-1, i + 1) * math.pow(x, i) / i
+    return res * 1.4426950408889634
 
-def taylor_exp2(x):
-  ln2 = 0.6931471805599453
-  return 1 + ln2 * x + math.pow(ln2, 2) * math.pow(x, 2) / 2 + math.pow(ln2, 3) * math.pow(x, 3) / 6 \
-      + math.pow(ln2, 4) * math.pow(x, 4) / 24 + math.pow(ln2, 5) * math.pow(x, 5) / 120 \
-      + math.pow(ln2, 6) * math.pow(x, 6) / 720 + math.pow(ln2, 7) * math.pow(x, 7) / 5040
+def taylor_exp2(x, n=25):
+    ln2 = 0.6931471805599453
+    res = 1 + ln2 * x
+    for i in range(2, n):
+        res += math.pow(ln2, i) * math.pow(x, i) / math.factorial(i)
+    return res
 
 python_alu = {
   UnaryOps.LOG2: lambda x: taylor_log2(x) if x > 0 else -math.inf if x == 0 else math.nan,
