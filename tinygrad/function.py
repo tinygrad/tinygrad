@@ -51,7 +51,7 @@ class Sin(Function):
     # x = x.cast(dtypes.float64)
     # x = x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(2 * math.pi)).cast(dtypes.int64).cast(dtypes.float64).e(BinaryOps.MUL, x.const(2 * math.pi)))
     # x = x.e(BinaryOps.SUB, q.e(BinaryOps.MUL, x.const(2 * math.pi)))
-    x = x.const(rem)
+    redx = x.const(rem)
 
     # prec_boost = 1e10
     # x = x.e(BinaryOps.MUL, x.const(prec_boost))
@@ -64,13 +64,13 @@ class Sin(Function):
     no_terms = 20
     # no_terms = 16
     res = x.const(0)
-    term = x
+    term = redx
     for i in range(no_terms):
       if i % 2 == 0:
         res = res.e(BinaryOps.ADD, term)
       else:
         res = res.e(BinaryOps.SUB, term)
-      term = term.e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const(2 * i + 2)).e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const(2 * i + 3))
+      term = term.e(BinaryOps.MUL, redx).e(BinaryOps.DIV, x.const(2 * i + 2)).e(BinaryOps.MUL, redx).e(BinaryOps.DIV, x.const(2 * i + 3))
       # term = term.e(BinaryOps.MUL, x).e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const((2 * i + 2)*(2 * i + 3)))
     # self.x = x_copy
     # res = res.cast(old_dtype)
