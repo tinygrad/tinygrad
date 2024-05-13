@@ -7,6 +7,7 @@ from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps
 from tinygrad.tensor import Function
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.symbolic import sint
+from tinygrad.tensor import Tensor
 
 class Contiguous(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer: return x.contiguous()
@@ -37,21 +38,13 @@ class Reciprocal(Function):
     return grad_output.e(UnaryOps.NEG).e(BinaryOps.MUL, self.ret).e(BinaryOps.MUL, self.ret)
 
 class Sin(Function):
-  # def taylor_sin(x, n=190):
-  # x %= 2 * math.pi
-  # res = 0.0
-  # sgn = 1
-  # x_pow = x
-  # fact = 1.0
-  # for i in range(n):
-  #   res += sgn * x_pow / fact
-  #   sgn *= -1
-  #   x_pow *= x * x
-  #   fact *= (2 * i + 2) * (2 * i + 3)
-  # return res
 
   def taylor_sin(self, x:LazyBuffer) -> LazyBuffer:
-    no_terms = 190
+    # UGLY HACK, need to figure a clean way for reduction to [0, 2pi]
+    q = Tensor(x).numpy()[0] // (2 * math.pi)
+    x = x.e(BinaryOps.SUB, x.const(q * 2 * math.pi))
+
+    no_terms = 14
     res = x.const(0)
     term = x
     q = x.e(BinaryOps.DIV, x.const(2 * math.pi))
@@ -75,8 +68,8 @@ class Sin(Function):
     # return x.e(UnaryOps.SIN)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
-    # return self.taylor_sin(self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)).e(BinaryOps.MUL, grad_output)
+    # return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
+    return self.taylor_sin(self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)).e(BinaryOps.MUL, grad_output)
 
 # NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
