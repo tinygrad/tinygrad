@@ -3,7 +3,7 @@ from typing import Optional, Tuple, Any, Dict, List, DefaultDict, Set
 import functools, itertools
 from collections import deque, defaultdict
 from enum import Enum, auto
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from tinygrad.dtype import dtypes, DType
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, exec_alu
@@ -140,17 +140,21 @@ class UOpGraph:
       print(f"{i:4d} {str(u.uop):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str([self.uops.index(x) for x in u.vin]):32s} {u.arg}")
 
   def linearize(self):
-    # filter nodes that don't link to a sink
-    nodes: List[UOp] = []
-    @functools.lru_cache(None)
-    def add_parents(u:UOp) -> UOp:
-      u = constant_folder.recursive_rewrite(u)
-      u = replace(u, vin=tuple(add_parents(x) for x in u.vin))
-      nodes.append(u)
-      return u
-
+    # constant fold
+    rewrite_map: Dict[UOp, UOp] = {}
+    sinks: List[UOp] = []
     for u in self.nodes.values():
-      if u.uop is UOps.STORE: add_parents(u)
+      rewrite_map[u] = up = constant_folder.recursive_rewrite(u)
+      if up.uop is UOps.STORE: sinks.append(up)
+
+    # filter nodes that don't link to a sink
+    nodes: Dict[UOp, None] = {}
+    def add_parents(u:UOp):
+      if u in nodes: return
+      nodes[u] = None
+      u.vin = tuple(rewrite_map[x] for x in u.vin)
+      for x in u.vin: add_parents(x)
+    for u in sinks: add_parents(u)
 
     # BFS toposort
     graph: DefaultDict[UOp, List[UOp]] = defaultdict(list)
