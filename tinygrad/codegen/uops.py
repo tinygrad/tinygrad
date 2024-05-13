@@ -23,7 +23,8 @@ class UOp:
   vin: Tuple[UOp, ...] = tuple()
   arg: Any = None
   def __lt__(self, x:UOp):
-    if self.uop is UOps.LOOP and x.uop is UOps.LOOP: return self.arg < x.arg
+    if self.uop is x.uop:
+      if self.uop in {UOps.LOOP, UOps.DEFINE_GLOBAL}: return self.arg < x.arg
     return self.uop.value < x.uop.value
   def __repr__(self):
     return f"{str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.uop for x in self.vin]):32s} {self.arg}"
