@@ -11,7 +11,7 @@ from tinygrad.helpers import prod, DEBUG
 
 # the order of these UOps controls the order of the toposort
 class UOps(Enum):
-  SINK = auto(); CONST = auto(); DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); SPECIAL = auto(); NOOP = auto() # noqa: E702
+  SINK = auto(); DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); CONST = auto(); SPECIAL = auto(); NOOP = auto() # noqa: E702
   GEP = auto(); DEFINE_ACC = auto(); LOAD = auto(); STORE = auto(); PHI = auto() # noqa: E702
   ALU = auto(); WMMA = auto(); CAST = auto(); BITCAST = auto() # noqa: E702
   BARRIER = auto(); IF = auto(); LOOP = auto(); ENDLOOP = auto(); ENDIF = auto() # noqa: E702
@@ -181,7 +181,7 @@ class UOpGraph:
     def get_recursive_children(x:UOp, include_self=False) -> Set[UOp]:
       if x.uop is UOps.SINK: return set()
       return set.union(set((x,)) if include_self else set(), *([get_recursive_children(u, True) for u in graph[x]] if x.uop is not UOps.PHI else []))
-    loops_children = {l:get_recursive_children(l) for l in loops}
+    loops_children = {l:get_recursive_children(l) for l in loops[::-1]}
 
     queue: List = []
     def push(u):
