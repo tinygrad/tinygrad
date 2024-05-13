@@ -129,7 +129,7 @@ class TestLinearizer(unittest.TestCase):
     self.assertLess(k.uops.uops.index(ifs[0]), k.uops.uops.index(endifs[0]))
     self.assertLess(k.uops.uops.index(barriers[1]), k.uops.uops.index(ifs[1]))
 
-  @unittest.skip
+  @unittest.expectedFailure
   def test_basic_multireduce(self):
     def gen(shape, axis):
       output_shape = tuple([1 if i == axis else x for i,x in enumerate(list(shape))])
@@ -151,7 +151,7 @@ class TestLinearizer(unittest.TestCase):
       assert (real_accs:=len([u for u in k.uops if u.uop is UOps.DEFINE_ACC])) == 2, f"should have generated 2 UOps.DEFINE_ACC but got {real_accs}"
       assert (real_loops:=len([u for u in k.uops if u.uop is UOps.LOOP])) == 2, f"should have generated 2 UOps.LOOP but got {real_loops}"
 
-  @unittest.skip
+  @unittest.expectedFailure
   def test_multireduce_store_locals(self):
     def gen(shape, axis):
       output_shape = tuple([1 if i == axis else x for i,x in enumerate(list(shape))])
@@ -178,7 +178,7 @@ class TestLinearizer(unittest.TestCase):
       self.assertEqual((real_local_stores[1].vin[1].uop, real_local_stores[1].vin[1].arg), (UOps.CONST, 0))
       self.assertEqual((real_local_loads[1].vin[1].uop, real_local_loads[1].vin[1].arg), (UOps.CONST, 0))
 
-  @unittest.skip
+  @unittest.expectedFailure
   def test_multireduce_upcasting(self):
     shape = (2, 7)
     output_shape = (2, 1)
@@ -198,7 +198,7 @@ class TestLinearizer(unittest.TestCase):
     self.assertEqual(len([u for u in k.uops.uops if u.uop is UOps.ALU and u.arg is BinaryOps.SUB]), 7)
     Device[Device.DEFAULT].to_program(k)
 
-  @unittest.skip
+  @unittest.expectedFailure
   def test_multireduce_loop_scope(self):
     shape = (4, 32, 64)
     axis = 2
@@ -218,7 +218,7 @@ class TestLinearizer(unittest.TestCase):
       elif u.uop is UOps.ENDLOOP and loop in u.vin: loop = None
       else: self.assertIn(loop, get_recursive_children(u), f"Any uop within a loop should depend on the loop: {u}")
 
-  @unittest.skip
+  @unittest.expectedFailure
   def test_multireduce_with_intermediate_calc(self):
     def gen(shape, axis):
       output_shape = tuple([1 if i == axis else x for i,x in enumerate(list(shape))])
@@ -241,7 +241,7 @@ class TestLinearizer(unittest.TestCase):
       assert (real_accs:=len([u for u in k.uops if u.uop is UOps.DEFINE_ACC])) == 2, f"should have generated 2 UOps.DEFINE_ACC but got {real_accs}"
       assert (real_loops:=len([u for u in k.uops if u.uop is UOps.LOOP])) == 2, f"should have generated 2 UOps.LOOP but got {real_loops}"
 
-  @unittest.skip
+  @unittest.expectedFailure
   def test_multireduce_multiout(self):
     def gen(shape, axis):
       output_shape = tuple([1 if i == axis else x for i,x in enumerate(list(shape))])
