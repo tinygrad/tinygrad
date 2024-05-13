@@ -60,7 +60,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
     return LazyOp(BufferOps.CONST, (), ConstBuffer(buf.arg, buf.dtype, unbound_st))
 
   # if we aren't fusing it, it's a load and we add it to the inputs
-  if buf.realized or (buf in realizes and buf not in outputs):
+  if buf.realized is not None or (buf in realizes and buf not in outputs):
     unbound_st, st_var_vals = st.simplify().unbind()
     var_vals.update(st_var_vals)
     if buf in assign_targets:
@@ -149,7 +149,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
     _recurse_lb(x, realizes, allbufs, simple_pads, children)
 
 def _is_padding_okay(buf:LazyBuffer, realizes:Dict[LazyBuffer, None]) -> bool:
-  if buf in realizes or buf.realized: return True
+  if buf in realizes or buf.realized is not None: return True
   # NOTE: this broke to_image_idx and coder with JIT
   if buf.op in UNSAFE_PAD_OPS: return False
   return all(_is_padding_okay(x.base, realizes) for x in buf.srcs)
@@ -227,8 +227,8 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
         # can chase this down to contiguous children
         st = tr.st
         while len(children[tr]) == 1:
-          tr_next = next(iter(children[tr].keys()))
-          st_childs = dedup([s for s in tr_next.srcs if s.base == tr])
+          tr_next = next(iter(children[tr]))
+          st_childs = dedup(s for s in tr_next.srcs if s.base is tr)
           if len(st_childs) > 1: break
           if st.size != st_childs[0].st.size: break
           st = st + st_childs[0].st
