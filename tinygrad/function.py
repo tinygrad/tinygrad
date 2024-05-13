@@ -49,8 +49,8 @@ class Sin(Function):
     x = x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(2 * math.pi)).cast(dtypes.int32).cast(dtypes.float32).e(BinaryOps.MUL, x.const(2 * math.pi)))
     # x = x.e(BinaryOps.SUB, q.e(BinaryOps.MUL, x.const(2 * math.pi)))
 
-    # no_terms = 20
-    no_terms = 16
+    no_terms = 20
+    # no_terms = 16
     res = x.const(0)
     term = x
     for i in range(no_terms):
