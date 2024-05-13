@@ -37,11 +37,11 @@ def ptr_ar(root, uops):
 def optimize_gated_loads(uops: UOpGraph):
   def successors(uop): return list(filter(lambda u: uop in u.vin, uops.uops))
   for gl in list(filter(lambda u:u.uop is UOps.LOAD and len(u.vin)>3, uops.uops)):
-    gate = uops.add(UOps.IF, None, (gl.vin[2],), insert_before=uops.uops.index(gl), cachable=False)
-    end = uops.add(UOps.ENDIF, None, (gate,) + (gl, gl.vin[3]), insert_before=uops.uops.index(gl)+1, cachable=False)
+    uops.uops.insert(uops.uops.index(gl), gate:=UOp(UOps.IF, None, (gl.vin[2],)))
+    uops.uops.insert(uops.uops.index(gl)+1, end:=UOp(UOps.ENDIF, None, (gate,) + (gl, gl.vin[3])))
     for u in reversed(uops.uops.copy()[:uops.uops.index(gate)]):
       if (u.uop not in [UOps.DEFINE_GLOBAL, UOps.DEFINE_VAR, UOps.DEFINE_LOCAL, UOps.PHI, UOps.STORE, UOps.ENDIF, UOps.ENDLOOP] and
-          all([uops.uops.index(s)>uops.uops.index(gate) and uops.uops.index(s)<=uops.uops.index(end) for s in successors(u)])):
+          all(uops.uops.index(s)>uops.uops.index(gate) and uops.uops.index(s)<=uops.uops.index(end) for s in successors(u))):
         uops.uops.insert(uops.uops.index(gate), uops.uops.pop(uops.uops.index(u)))
     gl.vin = gl.vin[:2]
 
