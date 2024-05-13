@@ -775,5 +775,11 @@ class TestSchedule(unittest.TestCase):
     f = (b - d).sum() - e
     check_schedule([c, d, e, f], 3)
 
+  def test_tiny_simple_pads(self):
+    a = Tensor.rand(3, 4, 5).realize()
+    b = Tensor.rand(3, 4, 5).realize()
+    out = (a + b).pad(((0, 1), (0, 1), (0, 1))).sum()
+    check_schedule(out, 1)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
