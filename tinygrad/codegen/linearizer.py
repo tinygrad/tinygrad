@@ -94,13 +94,15 @@ class Linearizer(Kernel):
 
     ret = []
     invalid_value = 0
+    acc_count = 0
     for idx, valid, rep_idx in zip(e_idxs, e_valids, iter_idxs(expand_vars)):
       this_const, idx, valid = (invalid_value, NumNode(0), NumNode(1)) if valid.max == 0 else (const, idx, valid)
       # todo: when multiple reduceops are supported, clearly disambiguate and test acc load keys are unique for each reduceop
       key = f"{acc is not None}{localtype}{'CONST'+str(this_const) if this_const is not None and acc is None else (buf.idx if isinstance(buf, MemBuffer) else cast(LocalBuffer, buf).name)}{idx.render()}{valid.render()}"  # noqa: E501
       if key not in self.load_cache:
         if acc is not None:
-          self.load_cache[key] = self.uops.add(UOps.DEFINE_ACC, localtype, (), self.get_reduce_acc(acc), cachable=False)
+          self.load_cache[key] = self.uops.add(UOps.DEFINE_ACC, localtype, (), (self.get_reduce_acc(acc), i, acc_count), cachable=False)
+          acc_count += 1
         elif this_const is not None:
           self.load_cache[key] = self.const(this_const, localtype)
           if valid.min == 0 and valid.max == 1:
@@ -169,10 +171,10 @@ class Linearizer(Kernel):
     return stores
 
   # render loop
-  def render_loop(self, xx:List[Variable]) -> Tuple[UOp, ...]:
+  def render_loop(self, xx:List[Variable], nm:str) -> Tuple[UOp, ...]:
     new_loops = {x.expr:self.uops.add(UOps.LOOP, dtypes.int32, (
       self.const(x.min) if isinstance(x.min, int) else cast(Node, x.min).render(self.render_ops, self),
-      self.const(x.max+1) if isinstance(x.max, int) else cast(Node, x.max+1).render(self.render_ops, self)), cachable=False) for x in xx if not isinstance(x, NumNode) and x.expr is not None}  # noqa: E501
+      self.const(x.max+1) if isinstance(x.max, int) else cast(Node, x.max+1).render(self.render_ops, self)), arg=(nm,i), cachable=False) for i,x in enumerate(xx) if not isinstance(x, NumNode) and x.expr is not None}  # noqa: E501
     self.loop_uops.update(new_loops)
     return tuple(new_loops.values())
 
@@ -225,7 +227,7 @@ class Linearizer(Kernel):
     acc = self.global_load(out_buf, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop)
 
     # reduce loop
-    loop_ctx = self.render_loop(reduce_idxs)
+    loop_ctx = self.render_loop(reduce_idxs, "2_reduce")
 
     # store local aliases
     locals_to_store = [(localbuf_idx, buf_idxs, self.global_load(i, buf_idxs)) for i, localbuf_idx, buf_idxs in alias_buf_idxs]
@@ -292,7 +294,7 @@ class Linearizer(Kernel):
       acc = self.global_load(0, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop)
 
       # late reduce loop
-      loop_ctx = self.render_loop(end_local_idxs)
+      loop_ctx = self.render_loop(end_local_idxs, "3_late_reduce")
 
       # load localbufs
       loaded_buffers[self.bufs[-1]] = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, barrier=barrier)
@@ -380,7 +382,7 @@ class Linearizer(Kernel):
       self.loop_uops.update({x.expr:self.uops.add(UOps.SPECIAL, dtypes.int32, (), (len(loop_global_idxs)-1-i, x.expr, x.max+1)) for i,x in enumerate(loop_global_idxs)})  # noqa: E501
       self.loop_uops.update({x.expr:self.uops.add(UOps.SPECIAL, dtypes.int32, (), (i, x.expr, x.max+1)) for i,x in enumerate(loop_local_idxs)})
     else:
-      self.render_loop(loop_global_idxs+loop_local_idxs)
+      self.render_loop(loop_global_idxs+loop_local_idxs, "1_global_local")
     if self.global_size is not None: self.global_size += [1]*(3-len(self.global_size))
     if self.local_size is not None: self.local_size += [1]*(3-len(self.local_size))
 

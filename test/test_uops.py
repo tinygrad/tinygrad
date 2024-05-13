@@ -5,12 +5,12 @@ from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.device import Buffer, Device
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
+from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, exec_alu
 from tinygrad.renderer import Program
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item
 from tinygrad.codegen.linearizer import UOps, UOp
-from tinygrad.codegen.uops import exec_alu, UOpGraph
+from tinygrad.codegen.uops import UOpGraph
 from test.helpers import is_dtype_supported
 
 def _uops_to_prg(uops):
