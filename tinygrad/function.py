@@ -1,6 +1,7 @@
 """This is where the forwards and backwards passes live."""
 import math
 from typing import Tuple, Optional
+from tinygrad.device import Device
 from tinygrad.helpers import argsort
 from tinygrad.dtype import dtypes, DType, sum_acc_dtype
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps
@@ -45,24 +46,30 @@ class Sin(Function):
     return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
 
 class _Sin(Function):
-  def floor(self, x:LazyBuffer) -> LazyBuffer:
+  def _floor(self, x:LazyBuffer) -> LazyBuffer:
     x_dtype = x.dtype
-    return x.cast(dtypes.int).cast(x_dtype)
+    return x.cast(dtypes.ulong).cast(x_dtype)
+
+  def _two_pi_mod(self, x:LazyBuffer) -> LazyBuffer:
+    x_dtype = x.dtype
+    if Device.DEFAULT != "METAL": x = x.cast(dtypes.double)
+    two_pi = x.const(math.pi * 2)
+    floor_div = self._floor(x.e(BinaryOps.DIV, two_pi))
+    abs_floor_div = floor_div.e(BinaryOps.CMPLT, floor_div.const(0)).e(TernaryOps.WHERE, floor_div.e(UnaryOps.NEG), floor_div)
+    return x.e(BinaryOps.SUB, abs_floor_div.e(BinaryOps.MUL, two_pi)).cast(x_dtype)
 
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    x = x.cast(dtypes.float) if x.dtype not in (dtypes.double, dtypes.float) else x
     if not hasattr(self, 'x'):
       self.x = x
-
-    pi, two_pi = x.const(math.pi), x.cast(dtypes.double).const(2 * math.pi)
+    print(x.dtype)
+    pi = x.const(math.pi)
     COEFFICIENTS = [9.9999999999993782751e-01, -1.6666666666432553012e-01, 8.3333333187754141114e-03, -1.9841266413256992626e-04,
                     2.7556932047318987798e-06, -2.5029522966723734896e-08, 1.5401222741012872935e-10]
 
     sign = x.e(BinaryOps.CMPLT, x.const(0))
     positive_x = sign.e(TernaryOps.WHERE, x.e(UnaryOps.NEG), x)
 
-    floor_div = self.floor(positive_x.cast(dtypes.double).e(BinaryOps.DIV, two_pi))
-    two_pi_x = positive_x.e(BinaryOps.SUB, floor_div.e(BinaryOps.MUL, two_pi))
+    two_pi_x = self._two_pi_mod(positive_x)
 
     less_than_pi = two_pi_x.e(BinaryOps.CMPLT, pi)
     pi_x = less_than_pi.e(TernaryOps.WHERE, two_pi_x, two_pi_x.e(BinaryOps.SUB, pi))
