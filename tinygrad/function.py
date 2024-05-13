@@ -60,7 +60,7 @@ class Sin(Function):
     x = x.e(BinaryOps.DIV, x.const(prec_boost))
 
     no_terms = 20
-    # no_terms = 16
+    # no_terms = 14
     res = x.const(0)
     term = x
     for i in range(no_terms):
