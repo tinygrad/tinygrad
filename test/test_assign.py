@@ -250,6 +250,14 @@ class TestAssign(unittest.TestCase):
     b.assign(a.contiguous()).realize()
     assert GlobalCounters.kernel_count - kc == 2
 
+  def test_permuted_assignment_possible(self):
+    a = Tensor.arange(4 * 4).reshape(4, 4).contiguous().realize()
+    b = Tensor.arange(4 * 4).reshape(4, 4).contiguous().realize()
+    a = a.permute(1, 0)
+    new_val = a + b
+    a.assign(new_val)
+    np.testing.assert_equal(a.numpy(), np.arange(4 * 4).reshape(4, 4).transpose(1, 0) + np.arange(4 * 4).reshape(4, 4))
+
   def test_permuted_assignment(self):
     a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
     b = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
@@ -280,6 +288,24 @@ class TestAssign(unittest.TestCase):
       # NOTE: don't test that it's assigned
       #assert ba1 == ba2 and ba1 != bb1
       np.testing.assert_allclose(a.numpy(), np.arange(N*N).reshape((N,N)) + np.arange(N*N).reshape((N,N)).transpose(1,0))
+
+  def test_simple_assignment_multioutput(self):
+    a = Tensor.randn(32, 32).realize()
+    b = Tensor.full((32, ), 1.).contiguous().realize()
+    c = Tensor.full((32, ), 2.).contiguous().realize()
+    d = Tensor.full((32, ), 3.).contiguous().realize()
+
+    r = a.sum(axis=1)
+    b.assign(r + b)
+    c.assign(r + c)
+    d.assign(r + d)
+
+    kc = GlobalCounters.kernel_count
+    Tensor.realize(b, c, d)
+    assert GlobalCounters.kernel_count - kc == 1
+    np.testing.assert_allclose(b.numpy(), a.sum(1).numpy()+1)
+    np.testing.assert_allclose(c.numpy(), a.sum(1).numpy()+2)
+    np.testing.assert_allclose(d.numpy(), a.sum(1).numpy()+3)
 
   # TODO: is there a way to sneak in a permute such that it returns the wrong answer?
 
