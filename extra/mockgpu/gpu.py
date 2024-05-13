@@ -198,6 +198,7 @@ class SDMAExecutor(AMDQueue):
 
 class AMDGPU:
   def __init__(self, gpu_id):
+    self.gpu_id = gpu_id
     self.free_phys_memsz = (24 << 30)
     self.mapped_ranges = []
     self.regs = {}

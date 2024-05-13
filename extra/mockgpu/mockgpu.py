@@ -1,6 +1,6 @@
 import ctypes, ctypes.util, struct, platform, pathlib, re, time, os, builtins
 from extra.mockgpu.kdriver import AMDDriver
-from tinygrad.helpers import from_mv
+from tinygrad.helpers import from_mv, to_mv
 start = time.perf_counter()
 
 # *** ioctl lib ***
@@ -9,13 +9,18 @@ libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_i
 libc.mmap.restype = ctypes.c_void_p
 libc.munmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
 libc.munmap.restype = ctypes.c_int
+libc.fdopendir.argtypes = [ctypes.c_int]
+libc.fdopendir.restype = ctypes.c_void_p
 
 processor = platform.processor()
 OPEN_SYSCALL = {"aarch64": None, "x86_64": 2}[processor]
-OPENAT_SYSCALL = {"aarch64": 56, "x86_64": 257}[processor]
+CLOSE_SYSCALL = {"aarch64": 57, "x86_64": 3}[processor]
 READ_SYSCALL = {"aarch64": 63, "x86_64": 0}[processor]
 IOCTL_SYSCALL = {"aarch64": 29, "x86_64": 16}[processor]
 MMAP_SYSCALL = {"aarch64": 222, "x86_64": 9}[processor]
+LSEEK_SYSCALL = {"aarch64": 62, "x86_64": 8}[processor]
+NEWFSTATAT_SYSCALL = {"aarch64": 79, "x86_64": 262}[processor]
+GETDENTS64_SYSCALL = {"aarch64": 61, "x86_64": 217}[processor]
 
 def install_hook(c_function, python_function):
   python_function_addr = ctypes.cast(ctypes.byref(python_function), ctypes.POINTER(ctypes.c_ulong)).contents.value
@@ -49,41 +54,89 @@ def install_hook(c_function, python_function):
   libc.memcpy(ioctl_address.contents, ctypes.create_string_buffer(tramp), len(tramp))
 
 drivers = [AMDDriver()]
-
-libc_open = None
-libc_ioctl = None
+tracked_fds = {}
 
 @ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_ulong)
 def _open(name, flags, mode):
   for d in drivers:
-    if any(re.match(x, name.decode()) for x in d.files):
-      x = d.open(name, flags, mode)
-      return x
+    pyname = name.decode() 
+    for x in d.tracked_files:
+      if pyname == x.path:
+        virtfd = d.open(pyname, flags, mode, x)
+        tracked_fds[virtfd.fd] = virtfd
+        return virtfd.fd
 
+  libc.syscall.argtypes = [ctypes.c_ulong, ctypes.c_char_p, ctypes.c_int, ctypes.c_ulong]
+  libc.syscall.restype = ctypes.c_int
   return libc.syscall(OPEN_SYSCALL, name, flags, mode)
+
+@ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_char_p)
+def _opendir(name):
+  fd = _open(name, os.O_RDONLY| os.O_DIRECTORY, 0)
+  if fd >= 0x80:
+    fake_dirfd = _open(".".encode(), os.O_RDONLY| os.O_DIRECTORY, 0)
+    st = libc.fdopendir(fake_dirfd)
+    to_mv(st, 8).cast('Q')[0] = fd
+    return st
+  else: return libc.fdopendir(fd)
+
+@ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int)
+def _close(fd):
+  if fd in tracked_fds:
+    tracked_fds[fd].close(fd)
+    tracked_fds.pop(fd)
+    return 0
+
+  libc.syscall.argtypes = [ctypes.c_ulong, ctypes.c_int]
+  libc.syscall.restype = ctypes.c_int
+  return libc.syscall(CLOSE_SYSCALL, fd)
+
+@ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)
+def _closedir(st): return 0
 
 @ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_ulong, ctypes.c_void_p)
 def _ioctl(fd, request, argp):
-  for d in drivers:
-    if any(fd == x for x in d.fds):
-      return d.ioctl(fd, request, argp)
+  if fd in tracked_fds: return tracked_fds[fd].ioctl(fd, request, argp)
 
+  libc.syscall.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong, ctypes.c_void_p]
+  libc.syscall.restype = ctypes.c_int
   return libc.syscall(IOCTL_SYSCALL, ctypes.c_int(fd), ctypes.c_ulong(request), ctypes.c_void_p(argp))
 
 @ctypes.CFUNCTYPE(ctypes.c_long, ctypes.c_int, ctypes.c_void_p, ctypes.c_size_t)
 def _read(fd, buf, sz):
-  for d in drivers:
-    if any(fd == x for x in d.fds):
-      return d.read(fd, request, argp)
+  if fd in tracked_fds: return tracked_fds[fd].read(fd, buf, sz)
 
+  libc.syscall.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_void_p, ctypes.c_size_t]
+  libc.syscall.restype = ctypes.c_int
   return libc.syscall(READ_SYSCALL, ctypes.c_int(fd), ctypes.c_void_p(buf), ctypes.c_size_t(sz))
 
-# libc_mmap = None
-def _mmap(start, sz, prot, flags, fd, offset):
-  for d in drivers:
-    if any(fd == x for x in d.fds):
-      return d.mmap(start, sz, prot, flags, fd, offset)
+@ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_ulong, ctypes.c_int)
+def _lseek64(fd, off, whence):
+  if fd in tracked_fds: return tracked_fds[fd].lseek(fd, off, whence)
 
+  libc.syscall.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong, ctypes.c_int]
+  libc.syscall.restype = ctypes.c_int
+  return libc.syscall(LSEEK_SYSCALL, fd, off, whence)
+
+@ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_void_p)
+def _fstat64(fd, buf):
+  if fd in tracked_fds: return tracked_fds[fd].fstat(fd, buf)
+
+  empty_str = (ctypes.c_char*1)()
+  libc.syscall.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_char_p, ctypes.c_void_p, ctypes.c_ulong]
+  libc.syscall.restype = ctypes.c_int
+  return libc.syscall(NEWFSTATAT_SYSCALL, ctypes.c_int(fd), empty_str, ctypes.c_void_p(buf), 0x1000)
+
+@ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_ulong)
+def _getdents64(fd, buf, sz):
+  if fd in tracked_fds: return tracked_fds[fd].getdents(fd, buf, sz)
+
+  libc.syscall.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_void_p, ctypes.c_ulong]
+  libc.syscall.restype = ctypes.c_int
+  return libc.syscall(GETDENTS64_SYSCALL, fd, buf, sz)
+
+def _mmap(start, sz, prot, flags, fd, offset):
+  if fd in tracked_fds: return tracked_fds[fd].mmap(start, sz, prot, flags, fd, offset)
   return libc.mmap(start, sz, prot, flags, fd, offset)
 
 def _munmap(buf, sz):
@@ -117,10 +170,17 @@ def _memoryview(mem):
   if isinstance(mem, int) or isinstance(mem, ctypes.Array):
     addr = ctypes.addressof(mem) if isinstance(mem, ctypes.Array) else mem
     for d in drivers:
-      for st,en,rcb,wcb in d.watched_addresses:
+      for st,en,rcb,wcb in d.tracked_addresses:
         if st <= addr <= en: return WatchedMemoryView(mem, rcb, wcb)
   return orignal_memoryview(mem)
 
 install_hook(libc.open, _open)
+install_hook(libc.opendir, _opendir)
+install_hook(libc.close, _close)
+install_hook(libc.closedir, _closedir)
 install_hook(libc.ioctl, _ioctl)
+install_hook(libc.read, _read)
+install_hook(libc.lseek64, _lseek64)
+install_hook(libc.fstat64, _fstat64)
+install_hook(libc.getdents64, _getdents64)
 builtins.memoryview = _memoryview

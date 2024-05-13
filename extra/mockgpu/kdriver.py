@@ -1,7 +1,10 @@
-import pathlib, re, ctypes, mmap, collections
+import pathlib, re, ctypes, mmap, collections, struct, functools, os
 import tinygrad.runtime.autogen.kfd as kfd
+from typing import Optional, Any
 from tinygrad.helpers import from_mv
 from extra.mockgpu.gpu import AMDGPU
+from extra.mockgpu.virtfile import VirtFileDesc, TextFileDesc, DirFileDesc, VirtFile
+from extra.mockgpu.amdgpu import gpu7900xtx_props
 
 libc = ctypes.CDLL(ctypes.util.find_library("c"))
 libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
@@ -18,30 +21,45 @@ def ioctls_from_header():
 kfd_ioctls, kfd_headers = ioctls_from_header()
 
 class KDriver:
+  def __init__(self):
+    self.tracked_files = [VirtFile('/dev/kfd', functools.partial(KFDFileDesc, driver=self))]
+    self.tracked_addresses = []
+  def track_address(self, staddr, enaddr, rcb, wcb): self.tracked_addresses.append((staddr, enaddr, rcb, wcb))
   def open(self, name, flags, mode): raise NotImplementedError()
   def ioctl(self, fd, request, argp): raise NotImplementedError()
 
-gpus_id = [49600]
+class KFDFileDesc(VirtFileDesc):
+  def __init__(self, fd, driver):
+    super().__init__(fd)
+    self.driver = driver
+
+  def ioctl(self, fd, request, argp): return self.driver.kfd_ioctl(request, argp)
+  def mmap(self, start, sz, prot, flags, fd, offset): return offset
+
+class DRMFileDesc(VirtFileDesc):
+  def __init__(self, fd, driver, gpu):
+    super().__init__(fd)
+    self.driver, self.gpu = driver, gpu
+
+  def mmap(self, start, sz, prot, flags, fd, offset): return libc.mmap(start, sz, prot, flags|mmap.MAP_ANONYMOUS, -1, 0)
+
 class AMDDriver(KDriver):
   def __init__(self, gpus=6):
+    super().__init__()
+
+    self.tracked_files += [VirtFile('/dev/kfd', functools.partial(KFDFileDesc, driver=self))] + \
+      [VirtFile('/sys/devices/virtual/kfd/kfd/topology/nodes', functools.partial(DirFileDesc, child_names=[str(i) for i in range(gpus)]))]
+
     self.gpus = {}
-    self.files = [r'/dev/kfd', r'/dev/dri/renderD*']
-    self.watched_addresses = []
-    self.fds = []
     self.next_fd = 0x80
     self.next_handle = 1
     self.next_event = 1
 
-    self.read_funcs = {}
-    self.ioctl_funcs = {}
-    self.mmap_funcs = {}
-    
     self.object_by_handle = {}
     self.doorbells = {}
     self.next_doorbell = collections.defaultdict(int)
-    self.event_come = []
 
-    for i in gpus_id: self._prepare_gpu(i)
+    for i in range(gpus): self._prepare_gpu(i)
 
   def _alloc_fd(self):
     my_fd = self.next_fd
@@ -66,33 +84,16 @@ class AMDDriver(KDriver):
   def _prepare_gpu(self, gpu_id):
     self.doorbells[gpu_id] = memoryview(bytearray(0x2000))
     self.gpus[gpu_id] = AMDGPU(gpu_id)
+    self.tracked_files += [
+      VirtFile(f'/sys/devices/virtual/kfd/kfd/topology/nodes/{gpu_id}/gpu_id', functools.partial(TextFileDesc, text=f"{gpu_id}")),
+      VirtFile(f'/sys/devices/virtual/kfd/kfd/topology/nodes/{gpu_id}/properties',
+        functools.partial(TextFileDesc, text=gpu7900xtx_props.format(drm_render_minor=gpu_id))),
+      VirtFile(f'/dev/dri/renderD{gpu_id}', functools.partial(DRMFileDesc, driver=self, gpu=f"{self.gpus[gpu_id]}")),
+    ]
 
-  def open(self, name, flags, mode):
-    fd = self._alloc_fd()
-    self.fds.append(fd)
+  def open(self, name, flags, mode, virtfile): return virtfile.fdcls(self._alloc_fd())
 
-    if name.decode() == "/dev/kfd":
-      self.ioctl_funcs[fd] = self._kfd_ioctl
-      self.mmap_funcs[fd] = self._kfd_mmap
-    if name.decode().startswith("/dev/dri/renderD"):
-      self.mmap_funcs[fd] = self._gpu_mmap
-
-    return fd
-
-  def read(self, fd, buf, sz):
-    if fd in self.read_funcs: return self.read_funcs[fd](fd, buf, sz)
-    return -1
-
-  def ioctl(self, fd, request, argp):
-    if fd in self.ioctl_funcs: return self.ioctl_funcs[fd](fd, request, argp)
-    return -1
-
-  def mmap(self, start, sz, prot, flags, fd, offset):
-    if fd in self.mmap_funcs: return self.mmap_funcs[fd](start, sz, prot, flags, fd, offset)
-    return -1
-
-  def _kfd_read(self, fd, buf, sz): return -1
-  def _kfd_ioctl(self, fd, req, argp):
+  def kfd_ioctl(self, req, argp):
     nr = req & 0xFF
     struct = kfd_headers[nr].from_address(argp)
 
@@ -116,12 +117,10 @@ class AMDDriver(KDriver):
       struct.doorbell_offset = self._alloc_doorbell(struct.gpu_id)
       if struct.queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA:
         queue_id = gpu.add_sdma_queue(struct.ring_base_address, struct.ring_size, struct.read_pointer_address, struct.write_pointer_address)
-        self.watched_addresses.append(
-          (struct.doorbell_offset, struct.doorbell_offset + 8, lambda mv,off: None, lambda mv,off: gpu.execute(0)))
+        self.track_address(struct.doorbell_offset, struct.doorbell_offset + 8, lambda mv,off: None, lambda mv,off: gpu.execute(0))
       elif struct.queue_type == kfd.KFD_IOC_QUEUE_TYPE_COMPUTE:
         queue_id = gpu.add_pm4_queue(struct.ring_base_address, struct.ring_size, struct.read_pointer_address, struct.write_pointer_address)
-        self.watched_addresses.append(
-          (struct.doorbell_offset, struct.doorbell_offset + 8, lambda mv,off: None, lambda mv,off: gpu.execute(1)))
+        self.track_address(struct.doorbell_offset, struct.doorbell_offset + 8, lambda mv,off: None, lambda mv,off: gpu.execute(1))
       else: raise RuntimeError("Unsuported, queue")
     elif nr == kfd_ioctls.AMDKFD_IOC_WAIT_EVENTS:
       pass
@@ -131,15 +130,4 @@ class AMDDriver(KDriver):
         if nr == v: name = k
       assert False, f"unknown kfd ioctl, {nr} {name}"
       exit(1)
-
     return 0
-
-  def _kfd_mmap(self, start, sz, prot, flags, fd, offset):
-    return offset
-    # pass
-    # if offset in self.doorbells.values():
-    # return -1
-
-  def _gpu_mmap(self, start, sz, prot, flags, fd, offset):
-    # Fake mmap of gpu
-    return libc.mmap(start, sz, prot, flags|mmap.MAP_ANONYMOUS, -1, 0)
