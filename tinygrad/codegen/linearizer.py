@@ -101,7 +101,7 @@ class Linearizer(Kernel):
       key = f"{acc is not None}{localtype}{'CONST'+str(this_const) if this_const is not None and acc is None else (buf.idx if isinstance(buf, MemBuffer) else cast(LocalBuffer, buf).name)}{idx.render()}{valid.render()}"  # noqa: E501
       if key not in self.load_cache:
         if acc is not None:
-          self.load_cache[key] = self.uops.add(UOps.DEFINE_ACC, localtype, (), (self.get_reduce_acc(acc), i, acc_count), cachable=False)
+          self.load_cache[key] = self.uops.add(UOps.DEFINE_ACC, localtype, (), (self.get_reduce_acc(acc), i, acc_count))
           acc_count += 1
         elif this_const is not None:
           self.load_cache[key] = self.const(this_const, localtype)
@@ -174,7 +174,7 @@ class Linearizer(Kernel):
   def render_loop(self, xx:List[Variable], nm:str) -> Tuple[UOp, ...]:
     new_loops = {x.expr:self.uops.add(UOps.LOOP, dtypes.int32, (
       self.const(x.min) if isinstance(x.min, int) else cast(Node, x.min).render(self.render_ops, self),
-      self.const(x.max+1) if isinstance(x.max, int) else cast(Node, x.max+1).render(self.render_ops, self)), arg=(nm,i), cachable=False) for i,x in enumerate(xx) if not isinstance(x, NumNode) and x.expr is not None}  # noqa: E501
+      self.const(x.max+1) if isinstance(x.max, int) else cast(Node, x.max+1).render(self.render_ops, self)), arg=(nm,i)) for i,x in enumerate(xx) if not isinstance(x, NumNode) and x.expr is not None}  # noqa: E501
     self.loop_uops.update(new_loops)
     return tuple(new_loops.values())
 
@@ -267,12 +267,12 @@ class Linearizer(Kernel):
     if self.group_for_reduces:
       fake_global_idxs = [x*0 for x in global_idxs]
       stores = self.global_store(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc)  # store accumulators
-      barrier = self.uops.add(UOps.BARRIER, None, tuple(stores), cachable=False)
+      barrier = self.uops.add(UOps.BARRIER, None, tuple(stores))
       if self.opts.has_local:
         fake_idxs = [NumNode(0)]*len(self.sts[-1].shape)
         fake_idxs[self.global_dims+self.local_dims:self.global_dims+len(local_idxs)] = local_idxs[self.local_dims:]
         if_cond: UOp = create_lt_node(self.sts[-1].expr_idxs(fake_idxs)[0], 1).render(self.render_ops, self)
-        barrier = self.uops.add(UOps.IF, None, (if_cond, barrier), cachable=False)
+        barrier = self.uops.add(UOps.IF, None, (if_cond, barrier))
 
       # create new late reduce local loops and replace local_idxs that have been used
       end_local_idxs = [Variable(f"tidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce and i not in self.upcast_in_mid_reduce_axes else 0) for i in range(0, self.first_reduce+self.group_for_reduces)]  # noqa: E501
