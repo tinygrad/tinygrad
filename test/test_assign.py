@@ -330,6 +330,21 @@ class TestAssign(unittest.TestCase):
       c.assign(r + b_perm)
       Tensor.realize(b, c)
 
+  def test_permuted_reduceop_multioutput_dual_use_possible(self):
+    a = Tensor.randn(32, 32, 32, dtype=dtypes.int).realize()
+    b = Tensor.arange(32 * 32).reshape(32, 32).realize()
+    c = Tensor.arange(32 * 32).reshape(32, 32).realize()
+
+    kc = GlobalCounters.kernel_count
+    r = a.sum(axis=1)
+    b_perm = b.permute(1, 0)
+    b.assign(r + b)
+    c.assign(r + b_perm.contiguous())
+    Tensor.realize(b, c)
+    assert GlobalCounters.kernel_count - kc == 2
+    np.testing.assert_equal(b.numpy(), a.numpy().sum(1) + np.arange(32 * 32).reshape(32, 32))
+    np.testing.assert_equal(c.numpy(), a.numpy().sum(1) + np.arange(32 * 32).reshape(32, 32).transpose(1, 0))
+
   # TODO: is there a way to sneak in a permute such that it returns the wrong answer?
 
   @unittest.skip("don't use output buffer, and mismatch dtype no longer supported")
