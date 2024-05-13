@@ -48,7 +48,7 @@ class Sin(Function):
     # q = q.cast(dtypes.int32).cast(old_dtype)
     # Hacky way to get the remainder, need to replace
     rem = np.fmod(__import__('tinygrad.tensor', fromlist=['Tensor']).Tensor(x).numpy().astype(np.float64), 2 * math.pi)
-    x = __import__('tinygrad.tensor', fromlist=['Tensor']).Tensor(rem).lazydata
+    x = __import__('tinygrad.tensor', fromlist=['Tensor']).Tensor(rem).lazydata.cast(old_dtype)
     # x = x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(2 * math.pi)).cast(dtypes.int32).cast(old_dtype).e(BinaryOps.MUL, x.const(2 * math.pi)))
     # x = x.cast(dtypes.float64)
     # x = x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(2 * math.pi)).cast(dtypes.int64).cast(dtypes.float64).e(BinaryOps.MUL, x.const(2 * math.pi)))
