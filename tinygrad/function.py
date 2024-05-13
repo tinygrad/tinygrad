@@ -7,7 +7,6 @@ from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps
 from tinygrad.tensor import Function
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.symbolic import sint
-from tinygrad.tensor import Tensor
 
 class Contiguous(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer: return x.contiguous()
@@ -40,16 +39,13 @@ class Reciprocal(Function):
 class Sin(Function):
 
   def taylor_sin(self, x:LazyBuffer) -> LazyBuffer:
-    # UGLY HACK, need to figure a clean way for reduction to [0, 2pi]
-    q = Tensor(x).numpy()[0] // (2 * math.pi)
-    x = x.e(BinaryOps.SUB, x.const(q * 2 * math.pi))
+    # Reduce to [0, 2pi]
+    q = x.e(BinaryOps.DIV, x.const(2 * math.pi)).cast(dtypes.int32).cast(dtypes.float32)
+    x = x.e(BinaryOps.SUB, q.e(BinaryOps.MUL, x.const(2 * math.pi)))
 
     no_terms = 14
     res = x.const(0)
     term = x
-    q = x.e(BinaryOps.DIV, x.const(2 * math.pi))
-    whole = q.e(BinaryOps.MUL, x.const(2 * math.pi))
-    x = x.e(BinaryOps.SUB, whole)
     for i in range(no_terms):
       if i % 2 == 0:
         res = res.e(BinaryOps.ADD, term)
