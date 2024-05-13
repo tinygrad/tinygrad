@@ -1,7 +1,6 @@
 """This is where the forwards and backwards passes live."""
 import math
-from typing import Tuple, Optional
-from tinygrad.device import Device
+from typing import Tuple, List, Optional
 from tinygrad.helpers import argsort
 from tinygrad.dtype import dtypes, DType, sum_acc_dtype
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps
@@ -38,60 +37,58 @@ class Reciprocal(Function):
     return grad_output.e(UnaryOps.NEG).e(BinaryOps.MUL, self.ret).e(BinaryOps.MUL, self.ret)
 
 class Sin(Function):
-  def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.x = x
-    return x.e(UnaryOps.SIN)
+  coefficients =  [0, 9.9999999999993782751e-01, 0, -1.6666666666432553012e-01, 0, 8.3333333187754141114e-03, 0, -1.9841266413256992626e-04,
+                   0, 2.7556932047318987798e-06, 0, -2.5029522966723734896e-08, 0, 1.5401222741012872935e-10]
 
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
-
-class _Sin(Function):
-  def _floor(self, x:LazyBuffer) -> LazyBuffer:
+  def floor(self, x:LazyBuffer) -> LazyBuffer:
     x_dtype = x.dtype
     return x.cast(dtypes.ulong).cast(x_dtype)
 
-  def _two_pi_mod(self, x:LazyBuffer) -> LazyBuffer:
+  def two_pi_mod(self, x:LazyBuffer) -> LazyBuffer:
     x_dtype = x.dtype
-    if Device.DEFAULT != "METAL": x = x.cast(dtypes.double)
+    if self.device != "METAL": x = x.cast(dtypes.double)
+    too_big = x.e(BinaryOps.CMPLT, x.const(10**12 * 2 * math.pi))
+    x = too_big.e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(10**11 * 2 * math.pi)))
     two_pi = x.const(math.pi * 2)
-    floor_div = self._floor(x.e(BinaryOps.DIV, two_pi))
-    abs_floor_div = floor_div.e(BinaryOps.CMPLT, floor_div.const(0)).e(TernaryOps.WHERE, floor_div.e(UnaryOps.NEG), floor_div)
-    return x.e(BinaryOps.SUB, abs_floor_div.e(BinaryOps.MUL, two_pi)).cast(x_dtype)
+    div = x.e(BinaryOps.DIV, two_pi)
+    floor_div = self.floor(div)
+    y = floor_div.e(BinaryOps.MUL, two_pi)
+    subtraction = x.e(BinaryOps.SUB, y)
+    return subtraction.cast(x_dtype)
 
-  def forward(self, x:LazyBuffer) -> LazyBuffer:
-    if not hasattr(self, 'x'):
-      self.x = x
-    print(x.dtype)
+  def normalized_sin(self, x:LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
     pi = x.const(math.pi)
-    COEFFICIENTS = [9.9999999999993782751e-01, -1.6666666666432553012e-01, 8.3333333187754141114e-03, -1.9841266413256992626e-04,
-                    2.7556932047318987798e-06, -2.5029522966723734896e-08, 1.5401222741012872935e-10]
-
-    sign = x.e(BinaryOps.CMPLT, x.const(0))
-    positive_x = sign.e(TernaryOps.WHERE, x.e(UnaryOps.NEG), x)
-
-    two_pi_x = self._two_pi_mod(positive_x)
-
+    signs = x.e(BinaryOps.CMPLT, x.const(0))
+    abs_x = signs.e(TernaryOps.WHERE, x.e(UnaryOps.NEG), x)
+    two_pi_x = self.two_pi_mod(abs_x)
     less_than_pi = two_pi_x.e(BinaryOps.CMPLT, pi)
     pi_x = less_than_pi.e(TernaryOps.WHERE, two_pi_x, two_pi_x.e(BinaryOps.SUB, pi))
-
     less_than_pi_half = pi_x.e(BinaryOps.CMPLT, pi.e(BinaryOps.DIV, pi_x.const(2)))
     pi_half_x = less_than_pi_half.e(TernaryOps.WHERE, pi_x, pi.e(BinaryOps.SUB, pi_x))
+    signs = less_than_pi.e(BinaryOps.XOR, less_than_pi.const(True)).e(BinaryOps.XOR, signs)
+    return (pi_half_x, signs)
 
-    var = pi_half_x.const(1)
-    acc = pi_half_x.const(0)
-    for i, coef in enumerate(COEFFICIENTS):
-      if i > 0: var = var.e(BinaryOps.MUL, pi_half_x)
-      var = var.e(BinaryOps.MUL, pi_half_x)
-      term = var.e(BinaryOps.MUL, pi_half_x.const(coef))
-      acc = acc.e(BinaryOps.ADD, term)
+  def taylor(self, x:LazyBuffer, coefficients:List[float]) -> LazyBuffer:
+    current_term = x.const(1)
+    result = x.const(0)
+    for i, coef in enumerate(coefficients):
+      if i > 0: current_term = current_term.e(BinaryOps.MUL, x)
+      result = result.e(BinaryOps.ADD, current_term.e(BinaryOps.MUL, x.const(coef)))
+    return result
 
-    x = less_than_pi.e(TernaryOps.WHERE, acc, acc.e(UnaryOps.NEG))
-    x = sign.e(TernaryOps.WHERE, x.e(UnaryOps.NEG), x)
-
-    return x
+  def forward(self, x:LazyBuffer) -> LazyBuffer:
+    self.x = x
+    normalized_x, signs = self.normalized_sin(x)
+    result = self.taylor(normalized_x, self.coefficients)
+    signed_result = signs.e(TernaryOps.WHERE, result.e(UnaryOps.NEG), result)
+    return signed_result
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return self.forward(self.x.e(BinaryOps.ADD, self.x.const(math.pi / 2))).e(BinaryOps.MUL, grad_output)
+    x = self.x.e(BinaryOps.ADD, self.x.const(math.pi / 2))
+    normalized_x, signs = self.normalized_sin(x)
+    result = self.taylor(normalized_x, self.coefficients)
+    signed_result = signs.e(TernaryOps.WHERE, result.e(UnaryOps.NEG), result)
+    return signed_result.e(BinaryOps.MUL, grad_output)
 
 # NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
