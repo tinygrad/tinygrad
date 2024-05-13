@@ -250,14 +250,6 @@ class TestAssign(unittest.TestCase):
     b.assign(a.contiguous()).realize()
     assert GlobalCounters.kernel_count - kc == 2
 
-  def test_permuted_assignment_possible(self):
-    a = Tensor.arange(4 * 4).reshape(4, 4).contiguous().realize()
-    b = Tensor.arange(4 * 4).reshape(4, 4).contiguous().realize()
-    a = a.permute(1, 0)
-    new_val = a + b
-    a.assign(new_val)
-    np.testing.assert_equal(a.numpy(), np.arange(4 * 4).reshape(4, 4).transpose(1, 0) + np.arange(4 * 4).reshape(4, 4))
-
   def test_permuted_assignment(self):
     a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
     b = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
@@ -306,6 +298,39 @@ class TestAssign(unittest.TestCase):
     np.testing.assert_allclose(b.numpy(), a.sum(1).numpy()+1)
     np.testing.assert_allclose(c.numpy(), a.sum(1).numpy()+2)
     np.testing.assert_allclose(d.numpy(), a.sum(1).numpy()+3)
+
+  # NOTE: if the assign target is read/write in a single kernel, it should be contiguous
+
+  def test_permuted_assignment_correct(self):
+    a = Tensor.arange(4 * 4).reshape(4, 4).contiguous().realize()
+    b = Tensor.arange(4 * 4).reshape(4, 4).contiguous().realize()
+    # TODO: scheduler limitation, should NOT raise AssertionError from numpy.
+    with self.assertRaises(RuntimeError):
+      a = a.permute(1, 0)
+      new_val = a + b
+      a.assign(new_val)
+      np.testing.assert_equal(a.numpy(), np.arange(4 * 4).reshape(4, 4).transpose(1, 0) + np.arange(4 * 4).reshape(4, 4))
+
+  def test_permuted_reduceop_child_dual_use(self):
+    a = Tensor.randn(32, 32, 32).realize()
+    b = Tensor.full((32, 32), 1.).contiguous().realize()
+    with self.assertRaises(RuntimeError):
+      r = a.sum(axis=1)
+      b.assign(r + b.permute(1, 0))
+      b.realize()
+
+  def test_permuted_reduceop_multioutput_dual_use(self):
+    a = Tensor.randn(32, 32, 32).realize()
+    b = Tensor.full((32, 32), 1.).contiguous().realize()
+    c = Tensor.full((32, 32), 2.).contiguous().realize()
+
+    # TODO: this is failing in cycle error, it should fail earlier.
+    with self.assertRaises(RuntimeError):
+      r = a.sum(axis=1)
+      b_perm = b.permute(1, 0)
+      b.assign(r + b)
+      c.assign(r + b_perm)
+      Tensor.realize(b, c)
 
   # TODO: is there a way to sneak in a permute such that it returns the wrong answer?
 
