@@ -11,7 +11,7 @@ from tinygrad.helpers import prod, DEBUG
 
 # the order of these UOps controls the order of the toposort
 class UOps(Enum):
-  CONST = auto(); DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); SPECIAL = auto(); NOOP = auto() # noqa: E702
+  SINK = auto(); CONST = auto(); DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); SPECIAL = auto(); NOOP = auto() # noqa: E702
   GEP = auto(); DEFINE_ACC = auto(); LOAD = auto(); STORE = auto(); PHI = auto() # noqa: E702
   ALU = auto(); WMMA = auto(); CAST = auto(); BITCAST = auto() # noqa: E702
   BARRIER = auto(); IF = auto(); LOOP = auto(); ENDLOOP = auto(); ENDIF = auto() # noqa: E702
@@ -118,9 +118,10 @@ constant_folder = PatternMatcher([
 # *** uop graph ***
 
 class UOpGraph:
-  def __init__(self):
+  # TODO: remove start_uops
+  def __init__(self, start_uops:Optional[List[UOp]]=None):
     self.nodes: Dict[Tuple, UOp] = {}
-    self._uops: Optional[List[UOp]] = None
+    self._uops: Optional[List[UOp]] = start_uops
 
   def uoptimize(self): pass
 
@@ -149,6 +150,7 @@ class UOpGraph:
     for u in self.nodes.values():
       rewrite_map[u] = up = constant_folder.recursive_rewrite(u)
       if up.uop is UOps.STORE: sinks.append(up)
+      if up.uop is UOps.SINK: sinks.extend(up.vin)
 
     # filter nodes that don't link to a sink
     nodes: Dict[UOp, None] = {}
@@ -157,7 +159,7 @@ class UOpGraph:
       nodes[u] = None
       u.vin = tuple(rewrite_map[x] for x in u.vin)
       for x in u.vin: add_parents(x)
-    for u in sinks: add_parents(u)
+    add_parents(UOp(UOps.SINK, None, tuple(sinks)))
 
     # BFS toposort
     graph: DefaultDict[UOp, List[UOp]] = defaultdict(list)
@@ -200,6 +202,9 @@ class UOpGraph:
       for u in graph[x]:
         in_degree[u] -= 1
         if in_degree[u] == 0: push(u)
+
+    assert self._uops[-1].uop == UOps.SINK, "didn't end with SINK"
+    self._uops = self._uops[:-1]
 
     # TODO: ifs should be removed and just the store should be gated
     for u in ifs[::-1]: self._uops.append(UOp(UOps.ENDIF, None, (u,)))

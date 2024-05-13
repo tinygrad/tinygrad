@@ -9,8 +9,9 @@ class TestUOpGraph(unittest.TestCase):
     c1 = g.add(UOps.CONST, dtypes.float, arg=1.0)
     c2 = g.add(UOps.CONST, dtypes.float, arg=2.0)
     out = g.add(UOps.ALU, dtypes.float, (c1, c2), BinaryOps.ADD)
-    g.remove_childless({out})
+    g.add(UOps.SINK, None, (out,))
     self.assertEqual(len(g.uops), 1)
+    out = g.uops[-1]
     self.assertEqual(out.uop, UOps.CONST)
     self.assertEqual(out.arg, 3.0)
 
@@ -21,8 +22,9 @@ class TestUOpGraph(unittest.TestCase):
     vc = g.add(UOps.ALU, dtypes.bool, (v, c0), BinaryOps.CMPEQ)
     c1 = g.add(UOps.CONST, dtypes.float, arg=1.0)
     out = g.add(UOps.ALU, dtypes.float, (vc, c1, c1), TernaryOps.WHERE)
-    g.remove_childless({out})
+    g.add(UOps.SINK, None, (out,))
     self.assertEqual(len(g.uops), 1)
+    out = g.uops[-1]
     self.assertEqual(out.uop, UOps.CONST)
     self.assertEqual(out.arg, 1.0)
 
@@ -32,8 +34,9 @@ class TestUOpGraph(unittest.TestCase):
     c1 = g.add(UOps.CONST, dtypes.float, arg=1.0)
     c2 = g.add(UOps.CONST, dtypes.float, arg=2.0)
     out = g.add(UOps.ALU, dtypes.float, (bf, c1, c2), TernaryOps.WHERE)
-    g.remove_childless({out})
+    g.add(UOps.SINK, None, (out,))
     self.assertEqual(len(g.uops), 1)
+    out = g.uops[-1]
     self.assertEqual(out.uop, UOps.CONST)
     self.assertEqual(out.arg, 2.0)
 
@@ -41,8 +44,9 @@ class TestUOpGraph(unittest.TestCase):
     g = UOpGraph()
     bf = g.add(UOps.CONST, dtypes.bool, arg=False)
     out = g.add(UOps.CAST, dtypes.int, (bf,))
-    g.remove_childless({out})
+    g.add(UOps.SINK, None, (out,))
     self.assertEqual(len(g.uops), 1)
+    out = g.uops[-1]
     self.assertEqual(out.uop, UOps.CONST)
     self.assertEqual(out.arg, 0)
 
