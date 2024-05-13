@@ -24,16 +24,7 @@ GETDENTS64_SYSCALL = {"aarch64": 61, "x86_64": 217}[processor]
 
 def install_hook(c_function, python_function):
   python_function_addr = ctypes.cast(ctypes.byref(python_function), ctypes.POINTER(ctypes.c_ulong)).contents.value
-  # AARCH64 trampoline to ioctl
-  if processor == "aarch64":
-    # 0x0000000000000000:  70 00 00 10    adr x16, #0xc
-    # 0x0000000000000004:  10 02 40 F9    ldr x16, [x16]
-    # 0x0000000000000008:  00 02 1F D6    br  x16
-    tramp = b"\x70\x00\x00\x10\x10\x02\x40\xf9\x00\x02\x1f\xd6"
-    tramp += struct.pack("Q", python_function_addr)
-  elif processor == "x86_64":
-    # 0x0000000000000000:  49 B8 aa aa aa aa aa aa aa aa    movabs r8, <address>
-    # 0x000000000000000a:  41 FF E0                         jmp    r8
+  if processor == "x86_64":
     # tramp = b"\x49\xB8" + struct.pack("Q", python_function_addr) + b"\x41\xFF\xE0"
     # push r9
     # push r9
@@ -66,7 +57,7 @@ tracked_fds = {}
 @ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_ulong)
 def _open(name, flags, mode):
   for d in drivers:
-    pyname = name.decode() 
+    pyname = name.decode()
     for x in d.tracked_files:
       if pyname == x.path:
         virtfd = d.open(pyname, flags, mode, x)
@@ -124,6 +115,19 @@ def _lseek64(fd, off, whence):
   libc.syscall.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong, ctypes.c_int]
   libc.syscall.restype = ctypes.c_int
   return libc.syscall(LSEEK_SYSCALL, fd, off, whence)
+
+@ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_char_p, ctypes.c_void_p)
+def _stat64(name, buf):
+  for d in drivers:
+    pyname = name.decode()
+    for x in d.tracked_files:
+      if pyname == x.path:
+        virtfd = d.open(pyname, 0, 0, x)
+        return virtfd.fstat(virtfd.fd, buf)
+
+  libc.syscall.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_char_p, ctypes.c_void_p, ctypes.c_ulong]
+  libc.syscall.restype = ctypes.c_int
+  return libc.syscall(NEWFSTATAT_SYSCALL, -100, name, ctypes.c_void_p(buf), 0)
 
 @ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_void_p)
 def _fstat64(fd, buf):
@@ -187,6 +191,7 @@ install_hook(libc.closedir, _closedir)
 install_hook(libc.ioctl, _ioctl)
 install_hook(libc.read, _read)
 install_hook(libc.lseek64, _lseek64)
+install_hook(libc.stat64, _stat64)
 install_hook(libc.fstat64, _fstat64)
 install_hook(libc.getdents64, _getdents64)
 builtins.memoryview = _memoryview # type: ignore
