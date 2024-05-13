@@ -370,7 +370,7 @@ class TestLinearizer(unittest.TestCase):
       lin = Linearizer(ast) # this is a dummy ast
 
       lin.uops = UOpGraph()
-      return lin.uops.add(uop, dtype, vin, arg, cachable=False)
+      return lin.uops.add(uop, dtype, vin, arg)
 
     c0 = UOp(UOps.CONST, dtypes.float, vin=(), arg=0.0)
     assert helper_test_simplify(UOps.ALU, dtypes.float, vin=(UOp(UOps.CONST, dtypes.bool, vin=(), arg=True), c0, c0), arg=TernaryOps.WHERE) == c0

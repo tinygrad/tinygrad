@@ -154,7 +154,7 @@ class UOpGraph:
 
   def add_op(self, ret:UOp, insert_before=None, simplify=True) -> UOp:
     if simplify and (rewritten:=constant_folder.rewrite(ret)) is not None:
-      if rewritten in self.uops: return rewritten  # ignore cachable
+      if rewritten in self.uops: return rewritten
       ret = rewritten
     key = (ret.uop, ret.dtype, ret.vin, ret.arg)
     if insert_before is None: insert_before = len(self.uops)
