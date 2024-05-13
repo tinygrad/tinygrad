@@ -1,4 +1,5 @@
-import ctypes, struct, os
+import ctypes, struct, os, functools
+from typing import Union
 from dataclasses import dataclass
 from tinygrad.helpers import round_up, to_mv
 
@@ -40,10 +41,10 @@ class DirFileDesc(VirtFileDesc):
     super().__init__(fd)
     child_names = ['.', '..'] + child_names
 
-    self.content = b''
+    tmp = b''
     for ino, name in enumerate(child_names):
-      self.content += VirtFile.build_dirent(ino + 1, 0, name)
-    self.content = ctypes.create_string_buffer(self.content)
+      tmp += VirtFile.build_dirent(ino + 1, 0, name)
+    self.content = ctypes.create_string_buffer(tmp)
     self.sz = len(self.content) - 1
 
   def ioctl(self, fd, req, argp): return 0
@@ -70,7 +71,7 @@ class DirFileDesc(VirtFileDesc):
 @dataclass(frozen=True)
 class VirtFile():
   path: str
-  fdcls: VirtFileDesc
+  fdcls: Union[VirtFileDesc, functools.partial[VirtFileDesc]]
 
   @staticmethod
   def build_fstat(st_dev=0x20, st_ino=0x100000, st_mode=0o100777, st_nlink=1, st_uid=0, st_gid=0, st_rdev=0, st_size=0,

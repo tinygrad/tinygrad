@@ -101,7 +101,7 @@ class PM4Executor(AMDQueue):
     ptr = to_mv(addr_lo + (addr_hi << 32), 8)
     if mem_data_sel == 1 or mem_data_sel == 2: ptr.cast('Q')[0] = val
     elif mem_data_sel == 3:
-      if mem_event_type == CACHE_FLUSH_AND_INV_TS_EVENT: ptr.cast('I')[0] = time.perf_counter()
+      if mem_event_type == CACHE_FLUSH_AND_INV_TS_EVENT: ptr.cast('I')[0] = int(time.perf_counter())
       else: raise RuntimeError(f"Unknown {mem_data_sel=} {mem_event_type=}") 
     else: raise RuntimeError(f"Unknown {mem_data_sel=}")
 
