@@ -12,9 +12,9 @@ from tinygrad.helpers import prod, DEBUG
 # the order of these UOps controls the order of the toposort
 class UOps(Enum):
   SINK = auto(); DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); CONST = auto(); SPECIAL = auto(); NOOP = auto() # noqa: E702
-  GEP = auto(); DEFINE_ACC = auto(); LOAD = auto(); STORE = auto(); PHI = auto() # noqa: E702
+  GEP = auto(); LOAD = auto(); STORE = auto(); PHI = auto() # noqa: E702
   ALU = auto(); WMMA = auto(); CAST = auto(); BITCAST = auto() # noqa: E702
-  BARRIER = auto(); IF = auto(); LOOP = auto(); ENDLOOP = auto(); ENDIF = auto() # noqa: E702
+  BARRIER = auto(); IF = auto(); LOOP = auto(); ENDLOOP = auto(); ENDIF = auto(); DEFINE_ACC = auto() # noqa: E702
 
 @dataclass(eq=False)
 class UOp:
@@ -176,6 +176,11 @@ class UOpGraph:
         graph[x].append(u)
       if u.uop is UOps.LOOP: loops.append(u)
       if u.uop is UOps.IF: ifs.append(u)
+      # get PHI node loop scope, link anything using a DEFINE_ACC to the loop as a "parent"
+      if u.uop is UOps.PHI:
+        for t in u.vin[2:]:  # loops
+          in_degree[t] += 1
+          graph[u.vin[0]].append(t)
 
     @functools.lru_cache(None)
     def get_recursive_children(x:UOp, include_self=False) -> Set[UOp]:
