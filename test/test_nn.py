@@ -6,6 +6,7 @@ from tinygrad import Tensor, Device, TinyJit
 from tinygrad.helpers import CI, Context
 from tinygrad.ops import BufferOps
 from tinygrad.nn import BatchNorm2d, Conv1d,ConvTranspose1d, Conv2d,ConvTranspose2d, Linear, GroupNorm, LayerNorm,LayerNorm2d, Embedding, InstanceNorm
+from tinygrad.nn.state import load_state_dict
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
 
@@ -372,6 +373,35 @@ class TestNN(unittest.TestCase):
     self.assertEqual(1, len([item for item in schedule if item.ast[0].op is BufferOps.STORE]), "second run realizes embedding only")
     run_schedule(schedule)
 
+  def test_load_state_dict(self):
+    layer = Conv2d(3, 5, kernel_size=3)
+
+    state_dict = {
+      'weight': Tensor.randn(5, 3, 3, 3),
+      'bias': Tensor.randn(5),
+    }
+    load_state_dict(layer, state_dict)
+
+    np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
+    np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
+
+  @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
+  def test_load_state_dict_sharded(self):
+    devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2")
+
+    layer = Conv2d(3, 5, kernel_size=3)
+    layer.weight.shard_(devices, -1)
+    layer.bias.shard_(devices, None)
+    state_dict = {
+      'weight': Tensor.randn(5, 3, 3, 3).shard(devices, -1),
+      'bias': Tensor.randn(5).shard(devices, None),
+    }
+    load_state_dict(layer, state_dict)
+
+    self.assertEqual(layer.weight.device, devices)
+    self.assertEqual(layer.bias.device, devices)
+    np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
+    np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
 
 if __name__ == '__main__':
   unittest.main()
