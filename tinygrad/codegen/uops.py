@@ -11,10 +11,20 @@ from tinygrad.helpers import prod, DEBUG
 
 # the order of these UOps controls the order of the toposort
 class UOps(Enum):
-  SINK = auto(); DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); CONST = auto(); SPECIAL = auto(); NOOP = auto() # noqa: E702
-  GEP = auto(); LOAD = auto(); STORE = auto(); PHI = auto() # noqa: E702
-  ALU = auto(); WMMA = auto(); CAST = auto(); BITCAST = auto() # noqa: E702
-  BARRIER = auto(); IF = auto(); LOOP = auto(); ENDLOOP = auto(); ENDIF = auto(); DEFINE_ACC = auto() # noqa: E702
+  # ops that aren't rendered
+  SINK = auto()
+  DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto() # noqa: E702
+  CONST = auto(); SPECIAL = auto() # noqa: E702
+  NOOP = auto(); GEP = auto() # noqa: E702
+  # math ops
+  CAST = auto(); BITCAST = auto() # noqa: E702
+  ALU = auto(); WMMA = auto() # noqa: E702
+  # memory/assignment ops
+  LOAD = auto(); STORE = auto(); PHI = auto() # noqa: E702
+  # control flow ops
+  BARRIER = auto(); IF = auto(); LOOP = auto(); ENDLOOP = auto(); ENDIF = auto() # noqa: E702
+  # DEFINE_ACC is last
+  DEFINE_ACC = auto() # noqa: E702
 
 @dataclass(eq=False)
 class UOp:
@@ -22,10 +32,8 @@ class UOp:
   dtype: Optional[DType] = None
   vin: Tuple[UOp, ...] = tuple()
   arg: Any = None
-  def __lt__(self, x:UOp):
-    if self.uop is x.uop:
-      if self.uop in {UOps.LOOP, UOps.DEFINE_GLOBAL}: return self.arg < x.arg
-    return self.uop.value < x.uop.value
+  def cmp_tuple(self): return (self.uop.value, self.dtype, self.arg if self.uop is not UOps.ALU else (type(self.uop), self.uop.value)) #, self.vin)
+  def __lt__(self, x:UOp): return self.cmp_tuple() < x.cmp_tuple()
   def __repr__(self):
     return f"{str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.uop for x in self.vin]):32s} {self.arg}"
   @staticmethod
@@ -180,6 +188,7 @@ class UOpGraph:
       # get PHI node loop scope, link anything using a DEFINE_ACC to the loop as a "parent"
       if u.uop is UOps.PHI:
         for t in u.vin[2:]:  # loops
+          assert t.uop is UOps.LOOP, f"{t}"
           to_insert = u.vin[0].vin[0] if u.vin[0].uop is UOps.GEP else u.vin[0]
           assert to_insert.uop is UOps.DEFINE_ACC, f"{to_insert}"
           loop_to_acc[t].append(to_insert)
@@ -188,7 +197,7 @@ class UOpGraph:
     def get_recursive_children(x:UOp, include_self=False) -> Set[UOp]:
       if x.uop is UOps.SINK: return set()
       return set.union(set((x,)) if include_self else set(), *([get_recursive_children(u, True) for u in graph[x]] if x.uop is not UOps.PHI else []))
-    loops_children = {l:get_recursive_children(l) for l in loops[::-1]}
+    loops_children = {l:set.union(get_recursive_children(l), *[get_recursive_children(x) for x in loop_to_acc[l]]) for l in loops[::-1]}
 
     queue: List = []
     def push(u):
@@ -228,6 +237,8 @@ class UOpGraph:
     # TODO: ifs should be removed and just the store should be gated
     for u in ifs[::-1]: self._uops.append(UOp(UOps.ENDIF, None, (u,)))
 
+    self.type_verify()
+
   def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None,
           cachable=True, insert_before=None, simplify=True) -> UOp:
     if uop is UOps.CONST:
@@ -236,6 +247,8 @@ class UOpGraph:
     if found:=self.nodes.get(key:=(uop, dtype, vin, arg)): return found
     self.nodes[key] = ret = UOp(*key)
     return ret
+
+  # *** checker functions ***
 
   def flops_mem(self) -> Tuple[sint, sint]:
     flops: sint = 0
@@ -260,3 +273,21 @@ class UOpGraph:
         assert u.arg[1] is not None
         flops += 2 * prod(u.arg[1]) // 32 * mults
     return flops, mem
+
+  def type_verify(self):
+    for u in self.uops:
+      uop, arg, vin, dtype = u.uop, u.arg, u.vin, u.dtype
+      if uop in {UOps.CONST, UOps.DEFINE_ACC}:
+        if uop is UOps.DEFINE_ACC: arg = arg[0]
+        assert dtype is not None and type(arg) is type(dtypes.as_const(arg, dtype)), f"type of {arg=} does not match {dtype}"
+      if uop is UOps.ALU:
+        if arg in UnaryOps:
+          assert dtype == vin[0].dtype, f"{arg} dtype mismatch {dtype=} != {vin[0].dtype=}"
+        elif arg in (BinaryOps.CMPLT, BinaryOps.CMPEQ):
+          assert dtype == dtypes.bool, f"{arg} output dtype mismatch {dtype=} != {dtypes.bool}"
+          assert vin[0].dtype == vin[1].dtype, f"{arg} dtype mismatch {dtype=} != {vin[0].dtype=} != {vin[1].dtype=}"
+        elif arg in BinaryOps:
+          assert dtype == vin[0].dtype == vin[1].dtype, f"{arg} dtype mismatch {dtype=} != {vin[0].dtype=} != {vin[1].dtype=}"
+        elif arg == TernaryOps.WHERE:
+          assert vin[0].dtype == dtypes.bool, f"{arg} selector dtype mismatch {vin[0].dtype=} != {dtypes.bool}"
+          assert dtype == vin[1].dtype == vin[2].dtype, f"{arg} choice dtype mismatch {dtype=} != {vin[1].dtype=} != {vin[2].dtype=}"
