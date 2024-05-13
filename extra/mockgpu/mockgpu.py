@@ -189,4 +189,4 @@ install_hook(libc.read, _read)
 install_hook(libc.lseek64, _lseek64)
 install_hook(libc.fstat64, _fstat64)
 install_hook(libc.getdents64, _getdents64)
-builtins.memoryview = _memoryview
+builtins.memoryview = _memoryview # type: ignore

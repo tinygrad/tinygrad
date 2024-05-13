@@ -14,8 +14,8 @@ if getenv("MOCKGPU"): import extra.mockgpu.mockgpu  # noqa: F401
 
 libc = ctypes.CDLL(ctypes.util.find_library("c"))
 if getenv("MOCKGPU"):
-  libc.mmap = extra.mockgpu.mockgpu._mmap
-  libc.munmap = extra.mockgpu.mockgpu._munmap
+  libc.mmap = extra.mockgpu.mockgpu._mmap # type: ignore
+  libc.munmap = extra.mockgpu.mockgpu._munmap # type: ignore
 else:
   libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
   libc.mmap.restype = ctypes.c_void_p
