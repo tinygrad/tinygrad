@@ -90,13 +90,13 @@ class TestWithGrad(unittest.TestCase):
   def test_set_into_requires_grad(self):
     z = Tensor.rand(8, 8, requires_grad=True)
     x = Tensor.rand(8)
-    with self.assertRaises(RuntimeError):
+    with self.assertRaises(NotImplementedError):
       z[:3] = x
 
   def test_set_with_requires_grad(self):
     z = Tensor.rand(8, 8)
     x = Tensor.rand(8, requires_grad=True)
-    with self.assertRaises(RuntimeError):
+    with self.assertRaises(NotImplementedError):
       z[:3] = x
 
 if __name__ == '__main__':
