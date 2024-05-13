@@ -40,13 +40,17 @@ class Sin(Function):
 
   def taylor_sin(self, x:LazyBuffer) -> LazyBuffer:
     # Reduce to [0, 2pi]
-    old_dtype = x.dtype
-    q = x.e(BinaryOps.DIV, x.const(2 * math.pi))
-    q = q.cast(dtypes.int32).cast(old_dtype)
-    # x = x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(2 * math.pi)).cast(dtypes.int32).cast(old_dtype).e(BinaryOps.MUL, x.const(2 * math.pi)))
-    x = x.e(BinaryOps.SUB, q.e(BinaryOps.MUL, x.const(2 * math.pi)))
+    # old_dtype = x.dtype
 
-    no_terms = 20
+    # q = x.e(BinaryOps.DIV, x.const(2 * math.pi))
+    # q = q.cast(dtypes.int32).cast(old_dtype)
+    # x = x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(2 * math.pi)).cast(dtypes.int32).cast(old_dtype).e(BinaryOps.MUL, x.const(2 * math.pi)))
+    x = x.cast(dtypes.float64)
+    x = x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(2 * math.pi)).cast(dtypes.int32).cast(dtypes.float64).e(BinaryOps.MUL, x.const(2 * math.pi)))
+    # x = x.e(BinaryOps.SUB, q.e(BinaryOps.MUL, x.const(2 * math.pi)))
+
+    # no_terms = 20
+    no_terms = 16
     res = x.const(0)
     term = x
     for i in range(no_terms):
