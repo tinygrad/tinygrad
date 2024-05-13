@@ -40,7 +40,8 @@ class Sin(Function):
 
   def taylor_sin(self, x:LazyBuffer) -> LazyBuffer:
     # Reduce to [0, 2pi]
-    q = x.e(BinaryOps.DIV, x.const(2 * math.pi)).cast(dtypes.int32).cast(dtypes.float32)
+    old_dtype = x.dtype
+    q = x.e(BinaryOps.DIV, x.const(2 * math.pi)).cast(dtypes.int32).cast(old_dtype)
     x = x.e(BinaryOps.SUB, q.e(BinaryOps.MUL, x.const(2 * math.pi)))
 
     no_terms = 14
