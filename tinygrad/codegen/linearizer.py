@@ -266,7 +266,7 @@ class Linearizer(Kernel):
     if self.group_for_reduces:
       fake_global_idxs = [x*0 for x in global_idxs]
       stores = self.global_store(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, accs[reduceop])  # store accumulators
-      barrier = self.uops.add(UOps.BARRIER, None, tuple(stores), cachable=False)
+      barrier = self.uops.add(UOps.BARRIER, None, tuple(stores))
       if self.opts.has_local:
         fake_idxs = [NumNode(0)]*len(self.sts[-1].shape)
         fake_idxs[self.global_dims+self.local_dims:self.global_dims+len(local_idxs)] = local_idxs[self.local_dims:]
@@ -312,7 +312,7 @@ class Linearizer(Kernel):
         reduce_buf_uop = self.buf_uops[-1]
         assert reduce_buf_uop is not None, "Local reduce buf must have been uoped at this point"
         stores = self.global_store(-1, [NumNode(0)]*len(self.sts[-1].shape), accs[reduceop])
-        barrier = self.uops.add(UOps.BARRIER, None, tuple(stores), cachable=False)
+        barrier = self.uops.add(UOps.BARRIER, None, tuple(stores))
         accs[reduceop] = self.global_load(-1, [NumNode(0)]*len(self.sts[-1].shape), barrier=barrier)
     return accs
 
