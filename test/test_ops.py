@@ -1723,7 +1723,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(32,10)], lambda x: x.masked_fill((x<0.1).detach(), -math.inf))
 
   def test_meshgrid_simple(self):
-    helper_test_op([(10),(5)], lambda x,y: sum_array(torch.meshgrid(x,y)), lambda x,y: sum_array(Tensor.meshgrid(x,y)))
+    helper_test_op([(10),(5)], lambda x,y: sum_array(torch.meshgrid(x,y, indexing='ij')), lambda x,y: sum_array(Tensor.meshgrid(x,y)))
 
   @unittest.skip('Not implemented yet')
   def test_meshgrid(self):

@@ -1112,8 +1112,9 @@ class Tensor:
     return fix(ret) + fix(base_add)
 
   @staticmethod
-  def meshgrid(*tensors:Sequence[Tensor]) -> Tuple[Tensor, ...]:
+  def meshgrid(*tensors:Sequence[Tensor], indexing='ij') -> Tuple[Tensor, ...]:
     assert len(tensors)==2, f'Not implemented for more than 2 tensors, got len:{len(tensors)}'
+    assert indexing=='ij', f'Implemetation follows ij, requested: {indexing}'
     xs, ys = tensors[0].shape[0], tensors[1].shape[0]
     return tensors[0].reshape(xs, 1).expand((xs,ys)), Tensor.stack([tensors[1]]*xs)
 
