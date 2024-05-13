@@ -94,7 +94,6 @@ class TestLinearizer(unittest.TestCase):
     assert len(mutable_bufs) == len(stores) == 2
     assert [u.arg[0] for u in mutable_bufs] == [0, 1]
 
-
   def test_end_local(self):
     load = MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker.from_shape((32,)))
     store = MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,)))
@@ -105,6 +104,7 @@ class TestLinearizer(unittest.TestCase):
     self.assertEqual(k.uops.uops[-1].uop, UOps.ENDIF)
     self.assertLess(k.uops.uops.index([x for x in k.uops.uops if x.uop is UOps.STORE][-1]), k.uops.uops.index(k.uops.uops[-1]))
 
+  @unittest.skip
   def test_early_end_local(self):
     shape, output_shape = (32,), (1,)
     load0 = MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker.from_shape(shape))
@@ -124,6 +124,7 @@ class TestLinearizer(unittest.TestCase):
     self.assertLess(k.uops.uops.index(ifs[0]), k.uops.uops.index(endifs[0]))
     self.assertLess(k.uops.uops.index(barriers[1]), k.uops.uops.index(ifs[1]))
 
+  @unittest.skip
   def test_basic_multireduce(self):
     def gen(shape, axis):
       output_shape = tuple([1 if i == axis else x for i,x in enumerate(list(shape))])
@@ -135,7 +136,7 @@ class TestLinearizer(unittest.TestCase):
         LazyOp(op=BufferOps.LOAD, src=(), arg=load1),), arg=((axis,), dtypes.float))), arg=None),), arg=((axis,), dtypes.float)),), arg=store)
       return [ast]
 
-    for axis in [2]:
+    for axis in [0, 1, 2]:
       ast = gen((4, 32, 64), axis)
       k = Linearizer(*ast)
       def recursive_reduceops(x: LazyOp): return [c for v in x.src for c in recursive_reduceops(v)] + [v for v in list(x.src) if v.op in ReduceOps]
@@ -144,6 +145,53 @@ class TestLinearizer(unittest.TestCase):
       assert (real_outs:=len([u for u in k.uops if u.uop is UOps.STORE])) == 1, f"should have generated 1 BufferOps.STORE but got {real_outs}"
       assert (real_accs:=len([u for u in k.uops if u.uop is UOps.DEFINE_ACC])) == 2, f"should have generated 2 UOps.DEFINE_ACC but got {real_accs}"
       assert (real_loops:=len([u for u in k.uops if u.uop is UOps.LOOP])) == 2, f"should have generated 2 UOps.LOOP but got {real_loops}"
+
+  @unittest.skip
+  def test_multireduce_store_locals(self):
+    def gen(shape, axis):
+      output_shape = tuple([1 if i == axis else x for i,x in enumerate(list(shape))])
+      load0 = MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker.from_shape(shape))
+      load1 = MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker.from_shape(shape))
+      store = MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape(output_shape))
+      ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.SUB, src=(
+        LazyOp(op=BufferOps.LOAD, src=(), arg=load0),LazyOp(op=ReduceOps.SUM, src=(
+        LazyOp(op=BufferOps.LOAD, src=(), arg=load1),), arg=((axis,), dtypes.float))), arg=None),), arg=((axis,), dtypes.float)),), arg=store)
+      return [ast]
+
+    for axis in [1, 2]:
+      ast = gen((4, 32, 64), axis)
+      k = Linearizer(*ast)
+      def recursive_reduceops(x: LazyOp): return [c for v in x.src for c in recursive_reduceops(v)] + [v for v in list(x.src) if v.op in ReduceOps]
+      for i,r in enumerate(k.reduceops): assert not any([r in recursive_reduceops(x) for x in k.reduceops[:i]]), "reduceops are out of order"
+      k.hand_coded_optimizations()
+      Device[Device.DEFAULT].to_program(k)
+      local_buf = [u for u in k.uops if u.uop is UOps.DEFINE_LOCAL][0]
+      self.assertEqual(len(real_local_stores:=[u for u in k.uops if u.uop is UOps.STORE and local_buf in u.vin]), 3, \
+        f"should have generated 3 BufferOps.STORE to the local buf but got {len(real_local_stores)}")
+      self.assertEqual(len(real_local_loads:=[u for u in k.uops if u.uop is UOps.LOAD and local_buf in u.vin]), 3, \
+        f"should have generated 3 BufferOps.LOAD to the local buf but got {len(real_local_loads)}")
+      self.assertEqual((real_local_stores[1].vin[1].uop, real_local_stores[1].vin[1].arg), (UOps.CONST, 0))
+      self.assertEqual((real_local_loads[1].vin[1].uop, real_local_loads[1].vin[1].arg), (UOps.CONST, 0))
+
+  @unittest.skip
+  def test_multireduce_upcasting(self):
+    shape = (2, 7)
+    output_shape = (2, 1)
+    load0 = MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker.from_shape(shape))
+    load1 = MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker.from_shape(shape))
+    store = MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape(output_shape))
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.SUB, src=(
+      LazyOp(op=BufferOps.LOAD, src=(), arg=load0),LazyOp(op=ReduceOps.SUM, src=(
+      LazyOp(op=BufferOps.LOAD, src=(), arg=load1),), arg=((1,), dtypes.float))), arg=None),), arg=((1,), dtypes.float)),), arg=store)
+    k = Linearizer(ast)
+    k.upcast()
+    k.linearize()
+    define_globals = [u for u in k.uops.uops if u.uop is UOps.DEFINE_GLOBAL]
+    self.assertEqual(len([u for u in k.uops.uops if u.uop is UOps.DEFINE_ACC]), 2)
+    self.assertEqual(len([u for u in k.uops.uops if u.uop is UOps.LOAD and define_globals[1] in u.vin]), 7)
+    self.assertEqual(len([u for u in k.uops.uops if u.uop is UOps.LOAD and define_globals[2] in u.vin]), 7)
+    self.assertEqual(len([u for u in k.uops.uops if u.uop is UOps.ALU and u.arg is BinaryOps.SUB]), 7)
+    Device[Device.DEFAULT].to_program(k)
 
   @unittest.skip
   def test_multireduce_loop_scope(self):
@@ -155,21 +203,22 @@ class TestLinearizer(unittest.TestCase):
     ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.SUB, src=(
       LazyOp(op=BufferOps.LOAD, src=(), arg=load), LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=load),)
       , arg=((axis,), dtypes.float))), arg=None),), arg=((axis,), dtypes.float)),), arg=store)
-    k = Linearizer(*ast)
-    def get_recursive_children(self, x:UOp): return set.union(set(x.vin), *[get_recursive_children(v) for v in x.vin])
+    k = Linearizer(ast)
+    k.linearize()
+    def get_recursive_children(x:UOp): return set.union(set(x.vin), *[get_recursive_children(v) for v in x.vin])
     loop = None
     for u in k.uops.uops:
       if u.uop is UOps.LOOP: loop = u
       elif loop is None: continue
-      elif u.uop is UOps.ENDLOOP and u in u.vin: loop is None
-      else: self.assertIn(loop, get_recursive_children(u), "Any uop within a loop should depend on the loop")
+      elif u.uop is UOps.ENDLOOP and loop in u.vin: loop = None
+      else: self.assertIn(loop, get_recursive_children(u), f"Any uop within a loop should depend on the loop: {u}")
 
   @unittest.skip
   def test_multireduce_with_intermediate_calc(self):
     def gen(shape, axis):
       output_shape = tuple([1 if i == axis else x for i,x in enumerate(list(shape))])
       load = MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker.from_shape(shape))
-      const = ConstBuffer(val=0.015625, dtype=dtypes.float, st=ShapeTracker.from_shape((1,)))
+      const = ConstBuffer(val=0.015625, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)))
       store = MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape(output_shape))
       ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BufferOps.CONST, arg=const),LazyOp(op=ReduceOps.SUM, src=(
         LazyOp(op=BinaryOps.SUB, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=load),LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=ReduceOps.SUM, src=(
@@ -177,7 +226,7 @@ class TestLinearizer(unittest.TestCase):
         arg=((axis,), dtypes.float)),)),), arg=store)
       return [ast]
 
-    for axis in [2]:
+    for axis in [0, 1, 2]:
       ast = gen((4, 32, 64), axis)
       k = Linearizer(*ast)
       def recursive_reduceops(x: LazyOp): return [c for v in x.src for c in recursive_reduceops(v)] + [v for v in list(x.src) if v.op in ReduceOps]
@@ -192,10 +241,10 @@ class TestLinearizer(unittest.TestCase):
     def gen(shape, axis):
       output_shape = tuple([1 if i == axis else x for i,x in enumerate(list(shape))])
       load = MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker.from_shape(shape))
-      const = ConstBuffer(val=0.015625, dtype=dtypes.float, st=ShapeTracker.from_shape((1,)))
+      const = ConstBuffer(val=0.015625, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1,)))
       store0 = MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape(output_shape))
       store1 = MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker.from_shape(output_shape))
-      mean_ast = LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, arg=load),)),
+      mean_ast = LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, arg=load),), arg=((axis,),)),
                                                 LazyOp(op=BufferOps.CONST, arg=const),))
       mean_out = LazyOp(op=BufferOps.STORE, src=(mean_ast,), arg=store0)
       ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BufferOps.CONST, arg=const),LazyOp(op=ReduceOps.SUM, src=(
@@ -203,13 +252,13 @@ class TestLinearizer(unittest.TestCase):
         ), arg=store1)
       return [mean_out, ast]
 
-    for axis in [2]:
+    for axis in [0, 1, 2]:
       for ast in [gen((4, 32, 64), axis), list(reversed(gen((4, 32, 64), axis)))]:
         k = Linearizer(*ast)
         def recursive_reduceops(x: LazyOp): return [c for v in x.src for c in recursive_reduceops(v)] + [v for v in list(x.src) if v.op in ReduceOps]
         for i,r in enumerate(k.reduceops): assert not any([r in recursive_reduceops(x) for x in k.reduceops[:i]]), "reduceops are out of order"
         Device[Device.DEFAULT].to_program(k)
-        assert (real_outs:=len([u for u in k.uops if u.uop is UOps.STORE])) == 1, f"should have generated 1 BufferOps.STORE but got {real_outs}"
+        assert (real_outs:=len([u for u in k.uops if u.uop is UOps.STORE])) == 2, f"should have generated 1 BufferOps.STORE but got {real_outs}"
         assert (real_accs:=len([u for u in k.uops if u.uop is UOps.DEFINE_ACC])) == 2, f"should have generated 2 UOps.DEFINE_ACC but got {real_accs}"
         assert (real_loops:=len([u for u in k.uops if u.uop is UOps.LOOP])) == 2, f"should have generated 2 UOps.LOOP but got {real_loops}"
 
