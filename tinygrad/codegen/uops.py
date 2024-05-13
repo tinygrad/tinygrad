@@ -32,7 +32,7 @@ class UOp:
   dtype: Optional[DType] = None
   vin: Tuple[UOp, ...] = tuple()
   arg: Any = None
-  def cmp_tuple(self): return (self.uop.value, self.dtype, self.arg if self.uop is not UOps.ALU else (type(self.uop), self.uop.value)) #, self.vin)
+  def cmp_tuple(self): return (self.uop.value, self.dtype, self.arg if self.uop is not UOps.ALU else (type(self.uop), self.uop.value), self.vin)
   def __lt__(self, x:UOp): return self.cmp_tuple() < x.cmp_tuple()
   def __repr__(self):
     return f"{str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.uop for x in self.vin]):32s} {self.arg}"
