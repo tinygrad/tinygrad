@@ -168,6 +168,7 @@ class UOpGraph:
     # BFS toposort
     graph: DefaultDict[UOp, List[UOp]] = defaultdict(list)
     in_degree: DefaultDict[UOp, int] = defaultdict(int)
+    loop_to_acc: DefaultDict[UOp, List[UOp]] = defaultdict(list)
     loops = []
     ifs = []
     for u in nodes:
@@ -179,8 +180,9 @@ class UOpGraph:
       # get PHI node loop scope, link anything using a DEFINE_ACC to the loop as a "parent"
       if u.uop is UOps.PHI:
         for t in u.vin[2:]:  # loops
-          in_degree[t] += 1
-          graph[u.vin[0]].append(t)
+          to_insert = u.vin[0].vin[0] if u.vin[0].uop is UOps.GEP else u.vin[0]
+          assert to_insert.uop is UOps.DEFINE_ACC, f"{to_insert}"
+          loop_to_acc[t].append(to_insert)
 
     @functools.lru_cache(None)
     def get_recursive_children(x:UOp, include_self=False) -> Set[UOp]:
@@ -200,18 +202,25 @@ class UOpGraph:
       if in_degree[u] == 0: push(u)
 
     self._uops = []
-    while queue:
-      p,x = heapq.heappop(queue)
-      if DEBUG >= 7: print(p,x)
-      self._uops.append(x)
+    seen = set()
+    def place(uops:List[UOp], x:UOp):
+      if x in seen: return
+      seen.add(x)
+      uops.append(x)
       for u, ss in loops_children.items():
         if x in ss:
           ss.remove(x)
-          if len(ss) == 0:
-            self._uops.append(UOp(UOps.ENDLOOP, None, (u,)))
+          if len(ss) == 0: uops.append(UOp(UOps.ENDLOOP, None, (u,)))
       for u in graph[x]:
         in_degree[u] -= 1
         if in_degree[u] == 0: push(u)
+
+    while queue:
+      p,x = heapq.heappop(queue)
+      if DEBUG >= 7: print(p,x)
+      if x.uop is UOps.LOOP:
+        for a in loop_to_acc[x]: place(self._uops, a)
+      place(self._uops, x)
 
     assert self._uops[-1].uop is UOps.SINK, f"didn't end with SINK, ended with {self._uops[-1]}"
     self._uops = self._uops[:-1]
