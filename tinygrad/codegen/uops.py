@@ -175,6 +175,7 @@ class UOpGraph:
 
     @functools.lru_cache(None)
     def get_recursive_children(x:UOp, include_self=False) -> Set[UOp]:
+      if x.uop is UOps.SINK: return set()
       return set.union(set((x,)) if include_self else set(), *([get_recursive_children(u, True) for u in graph[x]] if x.uop is not UOps.PHI else []))
     loops_children = {l:get_recursive_children(l) for l in loops}
 
@@ -203,7 +204,7 @@ class UOpGraph:
         in_degree[u] -= 1
         if in_degree[u] == 0: push(u)
 
-    assert self._uops[-1].uop == UOps.SINK, "didn't end with SINK"
+    assert self._uops[-1].uop is UOps.SINK, f"didn't end with SINK, ended with {self._uops[-1]}"
     self._uops = self._uops[:-1]
 
     # TODO: ifs should be removed and just the store should be gated
