@@ -182,6 +182,7 @@ class UOpGraph:
     for u in self.uops:
       uop, arg, vin, dtype = u.uop, u.arg, u.vin, u.dtype
       if uop in {UOps.CONST, UOps.DEFINE_ACC}:
+        if uop is UOps.DEFINE_ACC: arg = arg[0]
         assert dtype is not None and type(arg) is type(dtypes.as_const(arg, dtype)), f"type of {arg=} does not match {dtype}"
       if uop is UOps.ALU:
         if arg in UnaryOps:
