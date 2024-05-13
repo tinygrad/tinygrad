@@ -1131,7 +1131,7 @@ class Tensor:
   def exp2(self): return F.Exp.apply(self*math.log(2))
   def relu(self): return F.Relu.apply(self)
   def sigmoid(self): return F.Sigmoid.apply(self.cast(least_upper_float(self.dtype)))
-  def sin(self): return F.Sin.apply(self.cast(least_upper_float(self.dtype)))
+  def sin(self): return F.SinTaylor.apply(self.cast(least_upper_float(self.dtype)))
   def sqrt(self): return F.Sqrt.apply(self.cast(least_upper_float(self.dtype)))
   def rsqrt(self): return self.reciprocal().sqrt()
   def cos(self): return ((math.pi/2)-self).sin()

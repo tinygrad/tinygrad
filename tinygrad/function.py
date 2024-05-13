@@ -86,6 +86,29 @@ class Sigmoid(Function):
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return self.ret.e(BinaryOps.MUL, self.ret.const(1).e(BinaryOps.SUB, self.ret)).e(BinaryOps.MUL, grad_output)
 
+# approximations
+def _taylor_series(x:LazyBuffer, coeffs, a=0.0) -> LazyBuffer:
+  approx = x.const(0)
+  delta = x.e(BinaryOps.SUB, x.const(a))
+  delta_pow = x.const(1)
+  for coeff in coeffs:
+    delta_pow = delta_pow.e(BinaryOps.MUL, delta)
+    approx.e(BinaryOps.ADD, x.const(coeff).e(BinaryOps.MUL, delta_pow))
+  return approx
+
+class SinTaylor(Function):
+  coeffs = [0.0, 0.16666666666666666, -0.0, -0.0001984126984126984, 0.0, 2.505210838544172e-08, -0.0, -7.647163731819816e-13, 0.0, 8.22063524662433e-18, 
+   -0.0, -3.8681701706306835e-23, 0.0, 9.183689863795546e-29, -0.0, -1.2161250415535181e-34, 0.0, 9.67759295863189e-41, -0.0, -4.902469756513544e-47, 0.0]
+
+  def forward(self, x:LazyBuffer) -> LazyBuffer: 
+    self.x = x
+    return _taylor_series(x, self.coeffs)
+
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
+    b = self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)
+    b = _taylor_series(b, self.coeffs)
+    return b.e(BinaryOps.MUL, grad_output)
+
 # ************* binary ops *************
 
 class Less(Function):
