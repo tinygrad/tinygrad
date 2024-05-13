@@ -22,9 +22,11 @@ class UOps(Enum):
   # memory/assignment ops
   LOAD = auto(); STORE = auto(); PHI = auto() # noqa: E702
   # control flow ops
-  BARRIER = auto(); IF = auto(); LOOP = auto(); ENDLOOP = auto(); ENDIF = auto() # noqa: E702
-  # DEFINE_ACC is last
-  DEFINE_ACC = auto() # noqa: E702
+  BARRIER = auto(); IF = auto(); LOOP = auto() # noqa: E702
+  # DEFINE_ACC is last, don't render until you really have to
+  DEFINE_ACC = auto(); ACCESS_ACC = auto() # noqa: E702
+  # these two are not graph nodes
+  ENDLOOP = auto(); ENDIF = auto() # noqa: E702
 
 @dataclass(eq=False)
 class UOp:
@@ -92,7 +94,7 @@ constant_folder = PatternMatcher([
   ({"__name__": "root", "uop": UOps.GEP, "vin": ({"__name__": "c", "uop": UOps.CONST},)}, lambda root, c: UOp.const(root.dtype, c.arg)),
   ({"__name__": "root", "uop": UOps.CAST, "vin": {"__name__": "c", "uop": UOps.CONST}}, lambda root, c: UOp.const(root.dtype, c.arg)),
   # a phi without loops (len(vin)==2) is a noop
-  ({"uop": UOps.PHI, "vin": ({}, {"__name__": "x"})}, lambda x: x),
+  #({"uop": UOps.PHI, "vin": ({}, {"__name__": "x"})}, lambda x: x),
   # x+-y -> x-y
   ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": ({"__name__": "x"}, {"__name__": "my", "uop": UOps.ALU, "arg": UnaryOps.NEG})},
     lambda x, my: UOp(UOps.ALU, x.dtype, (x, my.vin[0]), BinaryOps.SUB)),
@@ -176,7 +178,6 @@ class UOpGraph:
     # BFS toposort
     graph: DefaultDict[UOp, List[UOp]] = defaultdict(list)
     in_degree: DefaultDict[UOp, int] = defaultdict(int)
-    loop_to_acc: DefaultDict[UOp, List[UOp]] = defaultdict(list)
     loops = []
     ifs = []
     for u in nodes:
@@ -185,19 +186,12 @@ class UOpGraph:
         graph[x].append(u)
       if u.uop is UOps.LOOP: loops.append(u)
       if u.uop is UOps.IF: ifs.append(u)
-      # get PHI node loop scope, link anything using a DEFINE_ACC to the loop as a "parent"
-      if u.uop is UOps.PHI:
-        for t in u.vin[2:]:  # loops
-          assert t.uop is UOps.LOOP, f"{t}"
-          to_insert = u.vin[0].vin[0] if u.vin[0].uop is UOps.GEP else u.vin[0]
-          assert to_insert.uop is UOps.DEFINE_ACC, f"{to_insert}"
-          loop_to_acc[t].append(to_insert)
 
     @functools.lru_cache(None)
     def get_recursive_children(x:UOp, include_self=False) -> Set[UOp]:
       if x.uop is UOps.SINK: return set()
       return set.union(set((x,)) if include_self else set(), *([get_recursive_children(u, True) for u in graph[x]] if x.uop is not UOps.PHI else []))
-    loops_children = {l:set.union(get_recursive_children(l), *[get_recursive_children(x) for x in loop_to_acc[l]]) for l in loops[::-1]}
+    loops_children = {l:get_recursive_children(l) for l in loops[::-1]}
 
     queue: List = []
     def push(u):
@@ -211,25 +205,17 @@ class UOpGraph:
       if in_degree[u] == 0: push(u)
 
     self._uops = []
-    seen = set()
-    def place(uops:List[UOp], x:UOp):
-      if x in seen: return
-      seen.add(x)
-      uops.append(x)
-      for u, ss in loops_children.items():
-        if x in ss:
-          ss.remove(x)
-          if len(ss) == 0: uops.append(UOp(UOps.ENDLOOP, None, (u,)))
-      for u in graph[x]:
-        in_degree[u] -= 1
-        if in_degree[u] == 0: push(u)
-
     while queue:
       p,x = heapq.heappop(queue)
       if DEBUG >= 7: print(p,x)
-      if x.uop is UOps.LOOP:
-        for a in loop_to_acc[x]: place(self._uops, a)
-      place(self._uops, x)
+      self._uops.append(x)
+      for u, ss in loops_children.items():
+        if x in ss:
+          ss.remove(x)
+          if len(ss) == 0: self._uops.append(UOp(UOps.ENDLOOP, None, (u,)))
+      for u in graph[x]:
+        in_degree[u] -= 1
+        if in_degree[u] == 0: push(u)
 
     assert self._uops[-1].uop is UOps.SINK, f"didn't end with SINK, ended with {self._uops[-1]}"
     self._uops = self._uops[:-1]
