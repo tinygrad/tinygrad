@@ -54,6 +54,7 @@ class PTXRenderer(Renderer):
   has_tensor_cores = False
   def __init__(self, arch:str): self.has_tensor_cores=int(arch[3:]) >= 80
 
+  # language options
   kernel_prefix = """.version VERSION
 .target TARGET
 .address_size 64
