@@ -7,6 +7,7 @@ from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps
 from tinygrad.tensor import Function
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.symbolic import sint
+import numpy as np
 
 class Contiguous(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer: return x.contiguous()
@@ -46,31 +47,35 @@ class Sin(Function):
     # q = x.e(BinaryOps.DIV, x.const(2 * math.pi))
     # q = q.cast(dtypes.int32).cast(old_dtype)
     # Hacky way to get the remainder, need to replace
-    rem = __import__('tinygrad.tensor', fromlist=['Tensor']).Tensor(x).numpy()[0] % (2 * math.pi)
+    rem = np.fmod(__import__('tinygrad.tensor', fromlist=['Tensor']).Tensor(x).numpy().astype(np.float64), 2 * math.pi)
+    x = __import__('tinygrad.tensor', fromlist=['Tensor']).Tensor(rem).lazydata
     # x = x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(2 * math.pi)).cast(dtypes.int32).cast(old_dtype).e(BinaryOps.MUL, x.const(2 * math.pi)))
     # x = x.cast(dtypes.float64)
     # x = x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(2 * math.pi)).cast(dtypes.int64).cast(dtypes.float64).e(BinaryOps.MUL, x.const(2 * math.pi)))
     # x = x.e(BinaryOps.SUB, q.e(BinaryOps.MUL, x.const(2 * math.pi)))
-    redx = x.const(rem)
+    # redx = x.const(rem)
+    # x = self.reduce_to_2pi(x)
+    # print("reduced x: ")
+    # print(__import__('tinygrad.tensor', fromlist=['Tensor']).Tensor(x).numpy())
 
-    # prec_boost = 1e10
     # x = x.e(BinaryOps.MUL, x.const(prec_boost))
-    # # twopi = x.const(2 * math.pi * 1e10)
-    # q = x.e(BinaryOps.DIV, x.const(2 * math.pi * prec_boost)).cast(dtypes.int32).cast(old_dtype)
-    # # x = x.cast(old_dtype)
-    # x = x.e(BinaryOps.SUB, q.e(BinaryOps.MUL, x.const(2 * math.pi * prec_boost)))
+    # twopi = x.const(2 * math.pi * 1e10)
+    # q = x.e(BinaryOps.DIV, x.const(2 * math.pi)).cast(dtypes.int32).cast(old_dtype)
+    # x = x.cast(old_dtype)
+    # x = x.e(BinaryOps.SUB, q.e(BinaryOps.MUL, x.const(2 * math.pi)))
+    # print(__import__('tinygrad.tensor', fromlist=['Tensor']).Tensor(x).numpy())
     # x = x.e(BinaryOps.DIV, x.const(prec_boost))
 
     no_terms = 20
     # no_terms = 16
     res = x.const(0)
-    term = redx
+    term = x
     for i in range(no_terms):
       if i % 2 == 0:
         res = res.e(BinaryOps.ADD, term)
       else:
         res = res.e(BinaryOps.SUB, term)
-      term = term.e(BinaryOps.MUL, redx).e(BinaryOps.DIV, x.const(2 * i + 2)).e(BinaryOps.MUL, redx).e(BinaryOps.DIV, x.const(2 * i + 3))
+      term = term.e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const(2 * i + 2)).e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const(2 * i + 3))
       # term = term.e(BinaryOps.MUL, x).e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const((2 * i + 2)*(2 * i + 3)))
     # self.x = x_copy
     # res = res.cast(old_dtype)
