@@ -1,13 +1,13 @@
 from __future__ import annotations
 from typing import Optional, Tuple, Any, Dict, List, DefaultDict, Set
-import functools, itertools
-from collections import deque, defaultdict
+import functools, itertools, heapq
+from collections import defaultdict
 from enum import Enum, auto
 from dataclasses import dataclass
 from tinygrad.dtype import dtypes, DType
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, exec_alu
-from tinygrad.helpers import prod
+from tinygrad.helpers import prod, DEBUG
 
 # bottom ones are asm only
 class UOps(Enum):
@@ -22,6 +22,9 @@ class UOp:
   dtype: Optional[DType] = None
   vin: Tuple[UOp, ...] = tuple()
   arg: Any = None
+  def __lt__(self, x:UOp):
+    if self.uop is UOps.LOOP and x.uop is UOps.LOOP: return self.arg < x.arg
+    return self.uop.value < x.uop.value
   def __repr__(self):
     return f"{str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.uop for x in self.vin]):32s} {self.arg}"
   @staticmethod
@@ -173,33 +176,32 @@ class UOpGraph:
       return set.union(set((x,)), *([get_recursive_children(u) for u in graph[x]] if x.uop is not UOps.PHI else []))
     loops_children = {l:get_recursive_children(l) for l in loops}
 
+    queue: List = []
+    def push(u):
+      priority = 0
+      # start loops as late as possible
+      if u.uop is UOps.LOOP: priority = 100
+      # prefer uops that are loop children
+      for ss in loops_children.values():
+        if u in ss: priority -= 1
+      heapq.heappush(queue, (priority, u))
+
+    for u in nodes:
+      if in_degree[u] == 0: push(u)
+
     self._uops = []
-    queue = deque(u for u in nodes if in_degree[u] == 0)
-    open_loops = set()
     while queue:
-      x = queue.popleft()
-      if x.uop is UOps.LOOP:
-        # start loops as late as possible
-        # if there's only loops left and we can make some progress with this loop, we run it if it's the earliest loop
-        if len(queue) and not (all(x.uop is UOps.LOOP for x in queue) and all(x.arg < u.arg for u in queue)):
-          queue.append(x)
-          continue
-        open_loops.add(x)
-      if len(queue) and len(open_loops) and all(x not in loops_children[u] for u in open_loops):
-        # if it's not a loop child, wait to render it
-        queue.append(x)
-        continue
+      p,x = heapq.heappop(queue)
+      if DEBUG >= 7: print(p,x)
       self._uops.append(x)
       for u, ss in loops_children.items():
         if x in ss:
-          assert u in open_loops, "loop child found but loop wasn't open"
           ss.remove(x)
           if len(ss) == 0:
             self._uops.append(UOp(UOps.ENDLOOP, None, (u,)))
-            open_loops.remove(u)
-      for c in graph[x]:
-        in_degree[c] -= 1
-        if in_degree[c] == 0: queue.append(c)
+      for u in graph[x]:
+        in_degree[u] -= 1
+        if in_degree[u] == 0: push(u)
 
     # TODO: ifs should be removed and just the store should be gated
     for u in ifs[::-1]: self._uops.append(UOp(UOps.ENDIF, None, (u,)))
