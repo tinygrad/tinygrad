@@ -711,6 +711,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(16384)], lambda x: x.sum())
   def test_sum_relu(self):
     helper_test_op([(3,4,5)], lambda x: x.relu().sum().relu())
+  def test_sum_tiny(self):
+    helper_test_op([(4,2,2)], lambda x: x.sum(axis=(0,2)))
   def test_sum(self):
     helper_test_op([(45,3)], lambda x: x.sum())
     helper_test_op([(3,4,5,6)], lambda x: x.sum(axis=3))
@@ -809,6 +811,14 @@ class TestOps(unittest.TestCase):
     helper_test_op([(10,10,10)], lambda x: x.log_softmax(0), atol=1e-7, grad_atol=1e-7)
     helper_test_op([(10,10,10)], lambda x: x.log_softmax(1), atol=1e-7, grad_atol=1e-7)
     helper_test_op([(10,10,10)], lambda x: x.log_softmax(2), atol=1e-7, grad_atol=1e-7)
+
+  def test_logsumexp(self):
+    helper_test_op([(45,65)], lambda x: torch.logsumexp(x, dim=0), lambda x: x.logsumexp(0), atol=1e-7, grad_atol=1e-7)
+    helper_test_op([(45,65)], lambda x: torch.logsumexp(x, dim=0, keepdim=True), lambda x: x.logsumexp(0, True), atol=1e-7, grad_atol=1e-7)
+    helper_test_op([(45,65)], lambda x: torch.logsumexp(x, dim=1), lambda x: x.logsumexp(1), atol=1e-7, grad_atol=1e-7)
+    helper_test_op([(45)], lambda x: torch.logsumexp(x, dim=0), lambda x: x.logsumexp(0), atol=1e-7, grad_atol=1e-7)
+    helper_test_op([()], lambda x: torch.logsumexp(x, dim=0), lambda x: x.logsumexp(0), atol=1e-7, grad_atol=1e-7)
+    helper_test_op([()], lambda x: torch.logsumexp(x, dim=-1), lambda x: x.logsumexp(-1), atol=1e-7, grad_atol=1e-7)
 
   def test_sinh(self):
     helper_test_op([(45,65)], lambda x: x.sinh(), grad_atol=1e-6)

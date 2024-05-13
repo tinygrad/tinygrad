@@ -1,11 +1,11 @@
 from __future__ import annotations
 from typing import Tuple, List, Any, cast
 import os, fcntl, ctypes, functools, re, pathlib, mmap, struct, errno, subprocess, time
-from tinygrad.device import Compiled, LRUAllocator, Compiler, CompilerOptions
-from tinygrad.buffer import BufferOptions
+from tinygrad.device import Compiled, Compiler, BufferOptions, LRUAllocator
 from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up, DEBUG
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.runtime.driver.hip_comgr import compile_hip
+from tinygrad.runtime.ops_hsa import HSACompiler
 import tinygrad.runtime.autogen.kfd as kfd
 import tinygrad.runtime.autogen.hsa as hsa
 import tinygrad.runtime.autogen.amd_gpu as amd_gpu
@@ -69,11 +69,9 @@ def create_sdma_packets():
 sdma_pkts = create_sdma_packets()
 
 class AMDCompiler(Compiler):
-  compiler_opts = CompilerOptions("AMD", has_tensor_cores=True, shared_max=65536)
   def __init__(self, arch:str):
     self.arch = arch
     super().__init__(f"compile_hip_{self.arch}")
-  def render(self, name:str, uops) -> str: return HIPRenderer(name, uops)
   def compile(self, src:str) -> bytes: return compile_hip(src, self.arch)
 
 SDMA_MAX_COPY_SIZE = 0x400000
@@ -388,7 +386,7 @@ class AMDAllocator(LRUAllocator):
   def _alloc(self, size:int, options:BufferOptions):
     try:
       if options.host: return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, public=True)
-      else: return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=True)
+      else: return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=options.cpu_access)
     except OSError as e:
       if e.errno == errno.ENOMEM: raise MemoryError("Cannot allocate memory") from e
       else: raise
@@ -584,7 +582,10 @@ class AMDDevice(Compiled):
     self.pm4_write_pointer = to_mv(self.pm4_queue.write_pointer_address, 8).cast("Q")
     self.pm4_doorbell = to_mv(self.doorbells + self.pm4_queue.doorbell_offset - self.doorbells_base, 8).cast("Q")
 
-    super().__init__(device, AMDAllocator(self), AMDCompiler(self.arch), functools.partial(AMDProgram, self))
+    from tinygrad.runtime.graph.hcq import HCQGraph
+    super().__init__(device, AMDAllocator(self), HIPRenderer(), HSACompiler(self.arch),
+                     functools.partial(AMDProgram, self),
+                     functools.partial(HCQGraph, AMDDevice, HWPM4Queue, HWCopyQueue))
 
   def synchronize(self):
     AMDDevice._wait_signal(self.timeline_signal, self.timeline_value - 1)

@@ -11,12 +11,13 @@ from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up
 from tinygrad.helpers import getenv
 from tinygrad.lazy import LazyBuffer
 from tinygrad.features.multi import MultiLazyBuffer
-from tinygrad.ops import LoadOps, ScheduleItem
-from tinygrad.buffer import Buffer, BufferOptions
+from tinygrad.ops import LoadOps
+from tinygrad.device import Buffer, BufferOptions
 from tinygrad.device import Device
 from tinygrad.shape.symbolic import sint, Variable, MulNode, Node
-from tinygrad.engine.realize import run_schedule, memory_planner
-from tinygrad.engine.schedule import create_schedule_with_vars
+from tinygrad.engine.realize import run_schedule
+from tinygrad.engine.memory import memory_planner
+from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 
 # **** start with two base classes, Tensor and Function ****
 
@@ -110,9 +111,9 @@ class Tensor:
     elif isinstance(data, bytes): data = _fromcpu(np.frombuffer(data, np.uint8))
     elif data is None: data = _loadop(LoadOps.EMPTY, (0,), dtype or dtypes.default_float, device)
     elif isinstance(data, list):
-      if (d := fully_flatten(data)) and all(isinstance(s, bool) for s in d): dtype = dtype or dtypes.bool
-      elif d and all_int(d): dtype = dtype or dtypes.default_int
-      else: dtype = dtype or dtypes.default_float
+      if dtype is None:
+        if (d := fully_flatten(data)) and all(isinstance(s, bool) for s in d): dtype = dtypes.bool
+        else: dtype = dtypes.default_int if d and all_int(d) else dtypes.default_float
       if dtype == dtypes.bfloat16: data = Tensor(_fromcpu(np.array(data, np.float32)), device=device).cast(dtypes.bfloat16).lazydata
       else: data = _fromcpu(np.array(data, dtype.np))
     elif isinstance(data, np.ndarray):
@@ -797,7 +798,7 @@ class Tensor:
       # create masks
       for dim, i in idx.items():
         try: i = i.reshape(i.shape + (1,)*(ret.ndim - first_dim)).expand(pre_reduce_shape)
-        except ValueError as exc: raise IndexError("cannot broadcast indices") from exc
+        except ValueError as e: raise IndexError(f"cannot broadcast indices: {e}") from e
         a = Tensor.arange(ret.shape[dim], device=self.device, requires_grad=False).reshape((ret.shape[dim],) + (1,)*(ret.ndim - dim - 1))
         masks.append(i == a)
 
@@ -914,11 +915,13 @@ class Tensor:
   # ***** reduce ops *****
 
   def _reduce(self, fxn:Type[Function], axis:Optional[Union[int, Tuple[int, ...]]]=None, keepdim=False) -> Tensor:
+    if self.ndim == 0:
+      if axis is not None and axis not in [-1, 0]: raise IndexError(f"{axis=} out of range of [-1, 0]")
+      axis = None
     axis_: Tuple[int, ...] = tuple(range(len(self.shape))) if axis is None else ((axis,) if isinstance(axis, int) else tuple(axis))
-    axis_ = tuple(x if x >= 0 else x+len(self.shape) for x in axis_)
-    shape = tuple(s for i,s in enumerate(self.shape) if i not in axis_)
+    axis_ = tuple(self._resolve_dim(x) for x in axis_)
     ret = fxn.apply(self, axis=axis_)
-    return ret if keepdim else ret.reshape(shape)
+    return ret if keepdim else ret.reshape(tuple(s for i,s in enumerate(self.shape) if i not in axis_))
 
   def sum(self, axis=None, keepdim=False, acc_dtype:Optional[DType]=None):
     ret = self.cast(acc_dtype or sum_acc_dtype(self.dtype))._reduce(F.Sum, axis, keepdim)
@@ -937,9 +940,6 @@ class Tensor:
   def std(self, axis=None, keepdim=False, correction=1): return self.var(axis, keepdim, correction).sqrt()
 
   def _softmax(self, axis):
-    if len(self.shape) == 0:
-      assert axis in [-1, 0], f"{axis=} out of range of [-1, 0]"
-      axis = None
     m = self - self.max(axis=axis, keepdim=True)
     e = m.exp()
     return m, e, e.sum(axis=axis, keepdim=True)
@@ -951,6 +951,10 @@ class Tensor:
   def log_softmax(self, axis=-1):
     m, _, ss = self._softmax(axis)
     return m - ss.log()
+
+  def logsumexp(self, axis=None, keepdim=False):
+    m = self.max(axis=axis, keepdim=True)
+    return (self - m).exp().sum(axis=axis, keepdim=keepdim).log() + m.squeeze(axis)
 
   def argmax(self, axis=None, keepdim=False):
     # NOTE: return the first index if there are multiple occurrences of the maximum values

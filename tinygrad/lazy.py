@@ -6,7 +6,7 @@ from tinygrad.helpers import prod, getenv, all_int, all_same, DEBUG
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op, exec_alu, python_alu
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.buffer import Buffer
+from tinygrad.device import Buffer
 from weakref import ref, ReferenceType, WeakValueDictionary
 
 lazycache: WeakValueDictionary[Any, LazyBuffer] = WeakValueDictionary()

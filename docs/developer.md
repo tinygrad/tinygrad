@@ -19,7 +19,7 @@ The `LazyBuffer` graph specifies the compute in terms of low level tinygrad ops.
 
 The [scheduler](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/engine/schedule.py) converts the graph of LazyBuffers into a list of `ScheduleItem`. One `ScheduleItem` is one kernel on the GPU, and the scheduler is responsible for breaking the large compute graph into subgraphs that can fit in a kernel. `ast` specifies what compute to run, and `bufs` specifies what buffers to run it on.
 
-::: tinygrad.ops.ScheduleItem
+::: tinygrad.engine.schedule.ScheduleItem
 
 ## Lowering
 
@@ -29,11 +29,9 @@ The code in [realize](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/
 
 There's a ton of complexity hidden behind this, see the `codegen/` directory.
 
-First we lower the AST to UOps, which is a linear list of the compute to be run. This is where the BEAM search happens. The UOps can be changed by `CompilerOptions`.
+First we lower the AST to UOps, which is a linear list of the compute to be run. This is where the BEAM search happens.
 
-::: tinygrad.device.CompilerOptions
-
-Then we render the UOps into code, then we compile the code to binary.
+Then we render the UOps into code with a `Renderer`, then we compile the code to binary with a `Compiler`.
 
 ## Execution
 
