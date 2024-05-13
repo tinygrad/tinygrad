@@ -2,7 +2,7 @@
 from __future__ import annotations
 import time, math, itertools, functools
 from contextlib import ContextDecorator
-from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Dict, DefaultDict, cast, get_args, Set
+from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Dict, DefaultDict, cast, get_args, Set, no_type_check
 from collections import defaultdict
 import numpy as np
 
@@ -1112,6 +1112,7 @@ class Tensor:
     return fix(ret) + fix(base_add)
 
   @staticmethod
+  @no_type_check
   def meshgrid(*tensors:Sequence[Tensor], indexing='ij') -> Tuple[Tensor, ...]:
     assert len(tensors)==2, f'Not implemented for more than 2 tensors, got len:{len(tensors)}'
     assert indexing=='ij', f'Implemetation follows ij, requested: {indexing}'
