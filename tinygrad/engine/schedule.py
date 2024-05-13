@@ -64,6 +64,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outbufs:Tuple[Laz
     unbound_st, st_var_vals = st.simplify().unbind()
     var_vals.update(st_var_vals)
     if buf in assign_targets:
+      # can only assign to contiguous read+write buffer
       if not unbound_st.contiguous:
         # we also allow masked views. if it has a single view and it's equal when you shrink a contig, it's fine
         if not (len(unbound_st.views) == 1 and unbound_st.views[0].mask is not None and
