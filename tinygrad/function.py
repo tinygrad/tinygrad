@@ -45,22 +45,24 @@ class Sin(Function):
 
     # q = x.e(BinaryOps.DIV, x.const(2 * math.pi))
     # q = q.cast(dtypes.int32).cast(old_dtype)
-    # # x = x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(2 * math.pi)).cast(dtypes.int32).cast(old_dtype).e(BinaryOps.MUL, x.const(2 * math.pi)))
-    # # x = x.cast(dtypes.float64)
-    # # x = x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(2 * math.pi)).cast(dtypes.int64).cast(dtypes.float64).e(BinaryOps.MUL, x.const(2 * math.pi)))
+    # Hacky way to get the remainder, need to replace
+    rem = __import__('tinygrad.tensor', fromlist=['Tensor']).Tensor(x).numpy()[0] % (2 * math.pi)
+    # x = x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(2 * math.pi)).cast(dtypes.int32).cast(old_dtype).e(BinaryOps.MUL, x.const(2 * math.pi)))
+    # x = x.cast(dtypes.float64)
+    # x = x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(2 * math.pi)).cast(dtypes.int64).cast(dtypes.float64).e(BinaryOps.MUL, x.const(2 * math.pi)))
     # x = x.e(BinaryOps.SUB, q.e(BinaryOps.MUL, x.const(2 * math.pi)))
+    x = x.const(rem)
 
-    prec_boost = 1e6
-    # prec_boost = 1
-    x = x.e(BinaryOps.MUL, x.const(prec_boost))
-    # twopi = x.const(2 * math.pi * 1e10)
-    q = x.e(BinaryOps.DIV, x.const(2 * math.pi * prec_boost)).cast(dtypes.int32).cast(old_dtype)
-    # x = x.cast(old_dtype)
-    x = x.e(BinaryOps.SUB, q.e(BinaryOps.MUL, x.const(2 * math.pi * prec_boost)))
-    x = x.e(BinaryOps.DIV, x.const(prec_boost))
+    # prec_boost = 1e10
+    # x = x.e(BinaryOps.MUL, x.const(prec_boost))
+    # # twopi = x.const(2 * math.pi * 1e10)
+    # q = x.e(BinaryOps.DIV, x.const(2 * math.pi * prec_boost)).cast(dtypes.int32).cast(old_dtype)
+    # # x = x.cast(old_dtype)
+    # x = x.e(BinaryOps.SUB, q.e(BinaryOps.MUL, x.const(2 * math.pi * prec_boost)))
+    # x = x.e(BinaryOps.DIV, x.const(prec_boost))
 
     no_terms = 20
-    # no_terms = 14
+    # no_terms = 16
     res = x.const(0)
     term = x
     for i in range(no_terms):
