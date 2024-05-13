@@ -45,10 +45,19 @@ class Sin(Function):
 
     # q = x.e(BinaryOps.DIV, x.const(2 * math.pi))
     # q = q.cast(dtypes.int32).cast(old_dtype)
-    # x = x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(2 * math.pi)).cast(dtypes.int32).cast(old_dtype).e(BinaryOps.MUL, x.const(2 * math.pi)))
-    x = x.cast(dtypes.float64)
-    x = x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(2 * math.pi)).cast(dtypes.int64).cast(dtypes.float64).e(BinaryOps.MUL, x.const(2 * math.pi)))
+    # # x = x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(2 * math.pi)).cast(dtypes.int32).cast(old_dtype).e(BinaryOps.MUL, x.const(2 * math.pi)))
+    # # x = x.cast(dtypes.float64)
+    # # x = x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(2 * math.pi)).cast(dtypes.int64).cast(dtypes.float64).e(BinaryOps.MUL, x.const(2 * math.pi)))
     # x = x.e(BinaryOps.SUB, q.e(BinaryOps.MUL, x.const(2 * math.pi)))
+
+    prec_boost = 1e6
+    # prec_boost = 1
+    x = x.e(BinaryOps.MUL, x.const(prec_boost))
+    # twopi = x.const(2 * math.pi * 1e10)
+    q = x.e(BinaryOps.DIV, x.const(2 * math.pi * prec_boost)).cast(dtypes.int32).cast(old_dtype)
+    # x = x.cast(old_dtype)
+    x = x.e(BinaryOps.SUB, q.e(BinaryOps.MUL, x.const(2 * math.pi * prec_boost)))
+    x = x.e(BinaryOps.DIV, x.const(prec_boost))
 
     no_terms = 20
     # no_terms = 16
@@ -59,10 +68,10 @@ class Sin(Function):
         res = res.e(BinaryOps.ADD, term)
       else:
         res = res.e(BinaryOps.SUB, term)
-      # term = term.e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const(2 * i + 2)).e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const(2 * i + 3))
-      term = term.e(BinaryOps.MUL, x).e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const((2 * i + 2)*(2 * i + 3)))
+      term = term.e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const(2 * i + 2)).e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const(2 * i + 3))
+      # term = term.e(BinaryOps.MUL, x).e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const((2 * i + 2)*(2 * i + 3)))
     # self.x = x_copy
-    res = res.cast(old_dtype)
+    # res = res.cast(old_dtype)
     return res
 
   def forward(self, x:LazyBuffer) -> LazyBuffer:
