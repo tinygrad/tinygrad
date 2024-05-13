@@ -149,12 +149,8 @@ class PTXRenderer(Renderer):
     ])
 
     # here we do a pretransform on UOps to fix some shortcomings of PTX
-    # all uops must be a register
-    matcher.rewrite_graph(uops)
-
     for pointer_op in list(filter(lambda uop: uop.uop in [UOps.LOAD, UOps.STORE], uops.uops)): ptr_ar(pointer_op, uops)
-    uops.remove_childless(set(x for x in uops if x.uop in {UOps.PHI, UOps.ENDIF, UOps.ENDLOOP, UOps.STORE}))
-    uops.optimize_loops()
+    uops.linearize(matcher)
 
     def kk(*s: str): kernel.append("\n".join(s))
 

@@ -144,12 +144,15 @@ class UOpGraph:
     for i,u in enumerate(self):
       print(f"{i:4d} {str(u.uop):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str([self.uops.index(x) for x in u.vin]):32s} {u.arg}")
 
-  def linearize(self):
+  def linearize(self, extra_pm:Optional[PatternMatcher]=None):
+    assert self._uops is None, "already linearized"
+    pm = PatternMatcher(constant_folder.patterns+extra_pm.patterns) if extra_pm is not None else constant_folder
+
     # constant fold
     rewrite_map: Dict[UOp, UOp] = {}
     sinks: List[UOp] = []
     for u in self.nodes.values():
-      rewrite_map[u] = up = constant_folder.recursive_rewrite(u)
+      rewrite_map[u] = up = pm.recursive_rewrite(u)
       if up.uop is UOps.STORE: sinks.append(up)
       if up.uop is UOps.SINK: sinks.extend(up.vin)
 
