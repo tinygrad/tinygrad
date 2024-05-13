@@ -9,12 +9,12 @@ from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, exec_alu
 from tinygrad.helpers import prod, DEBUG
 
-# bottom ones are asm only
+# the order of these UOps controls the order of the toposort
 class UOps(Enum):
-  LOOP = auto(); IF = auto(); ENDLOOP = auto(); ENDIF = auto(); SPECIAL = auto() # loops can be global, local, or other # noqa: E702
-  DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # this defines buffers # noqa: E702
-  LOAD = auto(); STORE = auto(); CONST = auto(); BARRIER = auto(); PHI = auto() # noqa: E702
-  ALU = auto(); WMMA = auto(); CAST = auto(); BITCAST = auto(); GEP = auto(); NOOP = auto() # noqa: E702
+  CONST = auto(); DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); SPECIAL = auto(); NOOP = auto() # noqa: E702
+  GEP = auto(); DEFINE_ACC = auto(); LOAD = auto(); STORE = auto(); PHI = auto() # noqa: E702
+  ALU = auto(); WMMA = auto(); CAST = auto(); BITCAST = auto() # noqa: E702
+  BARRIER = auto(); IF = auto(); LOOP = auto(); ENDLOOP = auto(); ENDIF = auto() # noqa: E702
 
 @dataclass(eq=False)
 class UOp:
@@ -172,18 +172,16 @@ class UOpGraph:
       if u.uop is UOps.IF: ifs.append(u)
 
     @functools.lru_cache(None)
-    def get_recursive_children(x:UOp) -> Set[UOp]:
-      return set.union(set((x,)), *([get_recursive_children(u) for u in graph[x]] if x.uop is not UOps.PHI else []))
+    def get_recursive_children(x:UOp, include_self=False) -> Set[UOp]:
+      return set.union(set((x,)) if include_self else set(), *([get_recursive_children(u, True) for u in graph[x]] if x.uop is not UOps.PHI else []))
     loops_children = {l:get_recursive_children(l) for l in loops}
 
     queue: List = []
     def push(u):
       priority = 0
-      # start loops as late as possible
-      if u.uop is UOps.LOOP: priority = 100
       # prefer uops that are loop children
       for ss in loops_children.values():
-        if u in ss: priority -= 1
+        if u in ss: priority -= 10
       heapq.heappush(queue, (priority, u))
 
     for u in nodes:
