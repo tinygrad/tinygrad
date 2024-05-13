@@ -323,8 +323,7 @@ class TestAssign(unittest.TestCase):
     b = Tensor.full((32, 32), 1.).contiguous().realize()
     c = Tensor.full((32, 32), 2.).contiguous().realize()
 
-    # TODO: this is failing in cycle error, it should fail earlier.
-    with self.assertRaisesRegex(RuntimeError, "cycle"):
+    with self.assertRaisesRegex(RuntimeError, "contiguous"):
       r = a.sum(axis=1)
       b_perm = b.permute(1, 0)
       b.assign(r + b)
