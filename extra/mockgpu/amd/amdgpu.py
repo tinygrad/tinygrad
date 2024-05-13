@@ -1,4 +1,5 @@
 import ctypes
+from extra.mockgpu.gpu import VirtGPU
 from tinygrad.helpers import to_mv, init_c_struct_t
 import tinygrad.runtime.autogen.amd_gpu as amd_gpu
 
@@ -14,10 +15,11 @@ regCOMPUTE_START_X = 0x1ba4 - SUB
 
 CACHE_FLUSH_AND_INV_TS_EVENT = 0x14
 
+WAIT_REG_MEM_FUNCTION_ALWAYS = 0
 WAIT_REG_MEM_FUNCTION_EQ = 3 # ==
 WAIT_REG_MEM_FUNCTION_GEQ = 5 # >=
 
-remu = ctypes.CDLL("/home/nimlgen/remu/target/release/libremu.so")
+remu = ctypes.CDLL("/usr/local/lib/libremu.so")
 remu.run_asm.restype = ctypes.c_uint32
 remu.run_asm.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p]
 
@@ -67,13 +69,16 @@ class PM4Executor(AMDQueue):
       op = (header >> 8) & 0xFF
       n = (header >> 16) & 0x3FFF
       assert packet_type == 3, "Can parse only packet3"
+      cont = True
       if op == amd_gpu.PACKET3_SET_SH_REG: self._exec_set_sh_reg(n) 
       elif op == amd_gpu.PACKET3_ACQUIRE_MEM: self._exec_acquire_mem(n)
       elif op == amd_gpu.PACKET3_RELEASE_MEM: self._exec_release_mem(n)
-      elif op == amd_gpu.PACKET3_WAIT_REG_MEM: self._exec_wait_reg_mem(n)
+      elif op == amd_gpu.PACKET3_WAIT_REG_MEM: cont = self._exec_wait_reg_mem(n)
       elif op == amd_gpu.PACKET3_DISPATCH_DIRECT: self._exec_dispatch_direct(n)
       else: raise RuntimeError(f"PM4: Unknown opcode: {op}")
-    assert self.rptr[0] == self.wptr[0]
+      if not cont:
+        print("BREAKING")
+        break
 
   def _exec_acquire_mem(self, n):
     assert n == 6
@@ -113,16 +118,16 @@ class PM4Executor(AMDQueue):
     mem_space = (info >> 4) & 0b1
     mem_op = (info >> 6) & 0b1
     mem_engine = (info >> 8) & 0b1
-    
-    if mem_space == 0: read_op = lambda: to_mv(addr_lo + (addr_hi << 32), 4).cast('I')[0]
-    elif mem_space == 1: read_op = lambda: val
+
+    if mem_space == 0: read_op = lambda: val
+    elif mem_space == 1: read_op = lambda: to_mv(addr_lo + (addr_hi << 32), 4).cast('I')[0]
 
     if mem_function == WAIT_REG_MEM_FUNCTION_GEQ: cmp = lambda x,y: x >= y
     elif mem_function == WAIT_REG_MEM_FUNCTION_EQ: cmp = lambda x,y: x == y
     else: raise RuntimeError(f"Do not support {mem_function=}")
 
     mval = read_op()
-    while not cmp(mval, val): mval = read_op()
+    return cmp(mval, val)
 
   def _exec_set_sh_reg(self, n):
     reg = self._next_dword()
@@ -139,7 +144,12 @@ class PM4Executor(AMDQueue):
     args_addr = self.gpu.regs[regCOMPUTE_USER_DATA_0] + (self.gpu.regs[regCOMPUTE_USER_DATA_0 + 1] << 32)
     lc = [self.gpu.regs[i] for i in range(regCOMPUTE_START_X+3, regCOMPUTE_START_X+6)]
 
-    remu.run_asm(prg_addr, 0x8000, *gl, *lc, args_addr)
+    prg_sz = 0
+    for st,sz in self.gpu.mapped_ranges:
+      if st <= prg_addr <= st+sz: prg_sz = sz - (prg_addr - st)
+
+    assert prg_sz > 0, "Invalid prg ptr (not found in mapped ranges)"
+    remu.run_asm(prg_addr, prg_sz, *gl, *lc, args_addr)
 
 class SDMAExecutor(AMDQueue):
   def __init__(self, gpu, base, size, rptr, wptr): 
@@ -170,7 +180,20 @@ class SDMAExecutor(AMDQueue):
 
   def _execute_poll_regmem(self):
     struct = sdma_pkts.poll_regmem.from_address(self.base + self.rptr[0] % self.size)
+
+    if struct.mem_poll == 0: read_op = lambda: struct.value
+    elif struct.mem_poll == 1: read_op = lambda: to_mv(struct.addr, 4).cast('I')[0]
+
+    if struct.func == WAIT_REG_MEM_FUNCTION_GEQ: cmp = lambda x,y: x >= y
+    elif struct.func == WAIT_REG_MEM_FUNCTION_EQ: cmp = lambda x,y: x == y
+    elif struct.func == WAIT_REG_MEM_FUNCTION_ALWAYS: cmp = lambda x,y: True
+    else: raise RuntimeError(f"Do not support {struct.func=}")
+
+    mval = read_op() & struct.mask
+    if not cmp(mval, struct.value): return False
+
     self.rptr[0] += ctypes.sizeof(struct)
+    return True
 
   def _execute_gcr(self):
     struct = sdma_pkts.gcr.from_address(self.base + self.rptr[0] % self.size)
@@ -184,22 +207,19 @@ class SDMAExecutor(AMDQueue):
 class AMDGPU(VirtGPU):
   def __init__(self, gpuid):
     super().__init__(gpuid)
-    self.mapped_ranges = []
-    self.queues = {}
-    self.next_queue_id = 0
+    self.mapped_ranges = set()
+    self.queues = []
 
-  def map_range(self, vaddr, size): self.mapped_ranges.append((vaddr, size))
+  def map_range(self, vaddr, size): self.mapped_ranges.add((vaddr, size))
+  def unmap_range(self, vaddr, size): self.mapped_ranges.remove((vaddr, size))
   def add_pm4_queue(self, base, size, rptr, wptr):
-    self.next_queue_id += 1
-    self.queues[self.next_queue_id] = PM4Executor(self, base, size, rptr, wptr)
-    return self.next_queue_id
+    self.queues.append(PM4Executor(self, base, size, rptr, wptr))
+    return len(self.queues) - 1
   def add_sdma_queue(self, base, size, rptr, wptr):
-    self.next_queue_id += 1
-    self.queues[self.next_queue_id] = SDMAExecutor(self, base, size, rptr, wptr)
-    return self.next_queue_id
+    self.queues.append(SDMAExecutor(self, base, size, rptr, wptr))
+    return len(self.queues) - 1
   def execute(self, queue_id):
-    for q in self.queues.values():
-      q.execute()
+    for q in self.queues: q.execute()
 
 gpu_props = """cpu_cores_count 0
 simd_count 192

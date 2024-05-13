@@ -1,4 +1,4 @@
-import ctypes, ctypes.util, struct, platform, pathlib, re, time, os, builtins
+import ctypes, ctypes.util, struct, platform, pathlib, re, time, os, builtins, atexit
 from extra.mockgpu.amd.amddriver import AMDDriver
 from tinygrad.helpers import from_mv, to_mv
 start = time.perf_counter()
@@ -45,13 +45,20 @@ def install_hook(c_function, python_function):
   else:
     raise Exception(f"processor {processor} not supported")
 
+  original_bc = (ctypes.c_char * 64)()
+
   # get real ioctl address
   ioctl_address = ctypes.cast(ctypes.byref(c_function), ctypes.POINTER(ctypes.c_ulong))
 
   # hook ioctl
   ret = libc.mprotect(ctypes.c_ulong((ioctl_address.contents.value//0x1000)*0x1000), 0x2000, 7)
   assert ret == 0
+  libc.memcpy(original_bc, ioctl_address.contents, len(tramp))
   libc.memcpy(ioctl_address.contents, ctypes.create_string_buffer(tramp), len(tramp))
+
+  # Restore correct functions to close libs after python exits
+  def __restore(): libc.memcpy(ioctl_address.contents, original_bc, len(tramp))
+  atexit.register(__restore)
 
 drivers = [AMDDriver()]
 tracked_fds = {}
@@ -154,7 +161,6 @@ class TrackedMemoryView:
 
   def __setitem__(self, index, value):
     self.mv[index] = value
-    print(index, value)
     self.wcb(self.mv, index)
 
   def cast(self, new_type, **kwargs): 

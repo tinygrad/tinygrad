@@ -1,8 +1,8 @@
-import pathlib, re, ctypes, mmap, collections, struct, functools, os
+import pathlib, re, ctypes, mmap, collections, struct, functools, os, copy
 import tinygrad.runtime.autogen.kfd as kfd
 from typing import Optional, Any
 from tinygrad.helpers import from_mv
-from extra.mockgpu.virtfile import VirtFileDesc, TextFileDesc, DirFileDesc, VirtFile
+from extra.mockgpu.driver import VirtDriver, VirtFileDesc, TextFileDesc, DirFileDesc, VirtFile
 from extra.mockgpu.amd.amdgpu import AMDGPU, gpu_props
 
 libc = ctypes.CDLL(ctypes.util.find_library("c"))
@@ -10,7 +10,7 @@ libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_i
 libc.mmap.restype = ctypes.c_void_p
 
 def ioctls_from_header():
-  hdrpy = (pathlib.Path(__file__).parent.parent.parent / "tinygrad" / "runtime" / "autogen" / "kfd.py").read_text()
+  hdrpy = (pathlib.Path(__file__).parent.parent.parent.parent / "tinygrad" / "runtime" / "autogen" / "kfd.py").read_text()
   pattern = r'# (AMDKFD_IOC_[A-Z0-9_]+)\s=\s_(IOW?R?).*\(( 0x[0-9a-fA-F]+) ,\s+struct\s([A-Za-z0-9_]+)\s+\)'
   matches = re.findall(pattern, hdrpy, re.MULTILINE)
   return type("KFD_IOCTLS", (object, ), {name: int(nr, 0x10) for name, _, nr, _ in matches}), \
@@ -32,7 +32,7 @@ class DRMFileDesc(VirtFileDesc):
 
   def mmap(self, start, sz, prot, flags, fd, offset): return libc.mmap(start, sz, prot, flags|mmap.MAP_ANONYMOUS, -1, 0)
 
-class AMDDriver(KDriver):
+class AMDDriver(VirtDriver):
   def __init__(self, gpus=6):
     super().__init__()
 
@@ -40,7 +40,7 @@ class AMDDriver(KDriver):
       [VirtFile('/sys/devices/virtual/kfd/kfd/topology/nodes', functools.partial(DirFileDesc, child_names=[str(i) for i in range(gpus)]))]
 
     self.gpus = {}
-    self.next_fd = 0x80
+    self.next_fd = 0x8000
     self.next_handle = 1
     self.next_event = 1
 
@@ -76,7 +76,7 @@ class AMDDriver(KDriver):
     self.tracked_files += [
       VirtFile(f'/sys/devices/virtual/kfd/kfd/topology/nodes/{gpu_id}/gpu_id', functools.partial(TextFileDesc, text=f"{gpu_id}")),
       VirtFile(f'/sys/devices/virtual/kfd/kfd/topology/nodes/{gpu_id}/properties',
-        functools.partial(TextFileDesc, text=gpu7900xtx_props.format(drm_render_minor=gpu_id))),
+        functools.partial(TextFileDesc, text=gpu_props.format(drm_render_minor=gpu_id))),
       VirtFile(f'/dev/dri/renderD{gpu_id}', functools.partial(DRMFileDesc, driver=self, gpu=f"{self.gpus[gpu_id]}")),
     ]
 
@@ -90,13 +90,22 @@ class AMDDriver(KDriver):
     elif nr == kfd_ioctls.AMDKFD_IOC_ALLOC_MEMORY_OF_GPU:
       if struct.gpu_id not in self.gpus: return -1
       struct.handle = self._alloc_handle()
-      self.object_by_handle[struct.handle] = struct # save memory struct to know what mem it is
+      self.object_by_handle[struct.handle] = copy.deepcopy(struct) # save memory struct to know what mem it is
+    elif nr == kfd_ioctls.AMDKFD_IOC_FREE_MEMORY_OF_GPU:
+      self.object_by_handle.pop(struct.handle)
     elif nr == kfd_ioctls.AMDKFD_IOC_MAP_MEMORY_TO_GPU:
       dev_ids = (ctypes.c_int32 * struct.n_devices).from_address(struct.device_ids_array_ptr)
       for i in range(struct.n_devices):
         gpu = self.gpus[dev_ids[i]]
         mem_obj = self.object_by_handle[struct.handle]
         gpu.map_range(mem_obj.va_addr, mem_obj.size)
+        struct.n_success = i + 1
+    elif nr == kfd_ioctls.AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU:
+      dev_ids = (ctypes.c_int32 * struct.n_devices).from_address(struct.device_ids_array_ptr)
+      for i in range(struct.n_devices):
+        gpu = self.gpus[dev_ids[i]]
+        mem_obj = self.object_by_handle[struct.handle]
+        gpu.unmap_range(mem_obj.va_addr, mem_obj.size)
         struct.n_success = i + 1
     elif nr == kfd_ioctls.AMDKFD_IOC_CREATE_EVENT:
       struct.event_slot_index = self._alloc_next_event_slot()
