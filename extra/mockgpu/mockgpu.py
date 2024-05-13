@@ -1,5 +1,5 @@
 import ctypes, ctypes.util, struct, platform, pathlib, re, time, os, builtins
-from extra.mockgpu.kdriver import AMDDriver
+from extra.mockgpu.amd.amddriver import AMDDriver
 from tinygrad.helpers import from_mv, to_mv
 start = time.perf_counter()
 
@@ -143,7 +143,7 @@ def _munmap(buf, sz):
   return libc.munmap(buf, sz)
 
 orignal_memoryview = builtins.memoryview
-class WatchedMemoryView:
+class TrackedMemoryView:
   def __init__(self, data, rcb, wcb):
     self.mv = orignal_memoryview(data)
     self.rcb, self.wcb = rcb, wcb
@@ -171,7 +171,7 @@ def _memoryview(mem):
     addr = ctypes.addressof(mem) if isinstance(mem, ctypes.Array) else mem
     for d in drivers:
       for st,en,rcb,wcb in d.tracked_addresses:
-        if st <= addr <= en: return WatchedMemoryView(mem, rcb, wcb)
+        if st <= addr <= en: return TrackedMemoryView(mem, rcb, wcb)
   return orignal_memoryview(mem)
 
 install_hook(libc.open, _open)

@@ -14,7 +14,6 @@ if getenv("MOCKGPU"): import extra.mockgpu.mockgpu  # noqa: F401
 
 libc = ctypes.CDLL(ctypes.util.find_library("c"))
 if getenv("MOCKGPU"):
-  # memoryview = extra.mockgpu.mockgpu._memoryview
   libc.mmap = extra.mockgpu.mockgpu._mmap
   libc.munmap = extra.mockgpu.mockgpu._munmap
 else:
@@ -332,7 +331,7 @@ class AMDProgram:
     _phoff, _shoff, _flags, _ehsize, _phentsize, _phnum, _shentsize, _shnum, _shstrndx = struct.unpack_from("<QQIHHHHHH", self.lib, 0x20)
     sections = [struct.unpack_from("<IIQQQQIIQ", self.lib, _shoff + i * _shentsize) for i in range(_shnum)]
 
-    lib_gpu_size = round_up(max(sh[5]+sh[3] for sh in sections if sh[1] == SHT_PROGBITS), 0x10000)
+    lib_gpu_size = round_up(max(sh[5]+sh[3] for sh in sections if sh[1] == SHT_PROGBITS), 0x1000)
     self.lib_gpu = self.device._gpu_alloc(lib_gpu_size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=True)
     lib_gpu_view = to_mv(self.lib_gpu.va_addr, lib_gpu_size)
 
