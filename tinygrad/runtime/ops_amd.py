@@ -183,7 +183,7 @@ class HWPM4Queue:
     return self
 
   def exec(self, prg:AMDProgram, kernargs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1)):
-    # self.hdp_flush()
+    self.hdp_flush()
     self.invalidate_cache()
 
     code = hsa.amd_kernel_code_t.from_address(prg.handle) # NOTE: this is wrong, it's not this object
