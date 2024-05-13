@@ -51,8 +51,9 @@ class Sin(Function):
     # print("x: ")
     # print(__import__('tinygrad.tensor', fromlist=['Tensor']).Tensor(x).numpy())
     # x = x.e(BinaryOps.DIV, x.const(2))
-    rem = __import__('tinygrad.tensor', fromlist=['Tensor']).Tensor(x).numpy()
-    rem = [i % (2 * math.pi) for i in rem]
+    rem = __import__('tinygrad.tensor', fromlist=['Tensor']).Tensor(x).numpy().astype(np.float64)
+    rem = np.mod(rem, 2 * math.pi)
+    rem = rem.astype(np.float32)
     # print("rem: ")
     # print(rem)
     x = __import__('tinygrad.tensor', fromlist=['Tensor']).Tensor(rem).lazydata.cast(old_dtype)
