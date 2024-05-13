@@ -781,5 +781,11 @@ class TestSchedule(unittest.TestCase):
     out = (a + b).pad(((0, 1), (0, 1), (0, 1))).sum()
     check_schedule(out, 1)
 
+  def test_tiny_simple_pads_log2_unsafe(self):
+    Tensor.manual_seed(200)
+    a = Tensor.rand(3, 4, 5).realize()
+    out = a.log2().pad(((0, 1), (0, 1), (0, 1))).sum()
+    check_schedule(out, 2)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
