@@ -8,6 +8,7 @@ from tinygrad.tensor import Function
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.symbolic import sint
 import numpy as np
+from tinygrad.device import Device
 
 class Contiguous(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer: return x.contiguous()
@@ -41,8 +42,10 @@ class Sin(Function):
 
   def taylor_sin(self, x:LazyBuffer) -> LazyBuffer:
     # Reduce to [0, 2pi]
+    beginning_dtype = x.dtype
+    if Device.DEFAULT != "METAL": x = x.cast(dtypes.float64)
     old_dtype = x.dtype
-    x = x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(2 * math.pi)).cast(dtypes.int32).cast(old_dtype).e(BinaryOps.MUL, x.const(2 * math.pi)))
+    x = x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(2 * math.pi)).cast(dtypes.ulong).cast(old_dtype).e(BinaryOps.MUL, x.const(2 * math.pi)))
     # x = x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(math.pi)).cast(dtypes.int32).cast(old_dtype).e(BinaryOps.MUL, x.const(math.pi)))
 
     # x = x.cast(dtypes.float64)
@@ -88,11 +91,11 @@ class Sin(Function):
     old_dtype = x.dtype
     sign = x.e(BinaryOps.CMPLT, x.const(0)).e(TernaryOps.WHERE, x.const(-1), x.const(1))
     x = x.e(BinaryOps.DIV, divisor.e(BinaryOps.MUL, sign))
-    x = x.e(BinaryOps.MUL, sign).cast(dtypes.int32).cast(old_dtype)
+    x = x.e(BinaryOps.MUL, sign).cast(dtypes.ulong).cast(old_dtype)
     # Subtract 1 if x is negative
     is_neg = sign.e(BinaryOps.CMPLT, sign.const(0))
     x = is_neg.e(TernaryOps.WHERE, x.e(BinaryOps.SUB, x.const(1)), x)
-    return x
+    return x.cast(old_dtype)
 
   # def whole_part(self, x:LazyBuffer, divisor:LazyBuffer) -> LazyBuffer:
   #   old_dtype = x.dtype
@@ -109,7 +112,7 @@ class Sin(Function):
     old_dtype = buf.dtype
 
     whole_pi = self.whole_part(buf, buf.const(math.pi))
-    whole_pi_mod_2 = whole_pi.e(BinaryOps.SUB, whole_pi.e(BinaryOps.DIV, buf.const(2.0)).cast(dtypes.int32).cast(old_dtype).e(BinaryOps.MUL, buf.const(2.0)))
+    whole_pi_mod_2 = whole_pi.e(BinaryOps.SUB, whole_pi.e(BinaryOps.DIV, buf.const(2.0)).cast(dtypes.ulong).cast(old_dtype).e(BinaryOps.MUL, buf.const(2.0)))
     whole_pi_mod_2_is_even = whole_pi_mod_2.e(BinaryOps.CMPEQ, buf.const(0))
 
     final_sign =  whole_pi_mod_2_is_even.e(TernaryOps.WHERE, buf.const(1), buf.const(-1))
@@ -125,7 +128,7 @@ class Sin(Function):
     print(__import__('tinygrad').Tensor(angle_rad).numpy())
 
     whole_halfpi = self.whole_part(buf, buf.const(math.pi / 2))
-    whole_halfpi_mod_2 = whole_halfpi.e(BinaryOps.SUB, whole_halfpi.e(BinaryOps.DIV, buf.const(2)).cast(dtypes.int32).cast(old_dtype).e(BinaryOps.MUL, buf.const(2)))
+    whole_halfpi_mod_2 = whole_halfpi.e(BinaryOps.SUB, whole_halfpi.e(BinaryOps.DIV, buf.const(2)).cast(dtypes.ulong).cast(old_dtype).e(BinaryOps.MUL, buf.const(2)))
     whole_halfpi_mod_2_is_even = whole_halfpi_mod_2.e(BinaryOps.CMPEQ, buf.const(0))
     angle_rad = whole_halfpi_mod_2_is_even.e(TernaryOps.WHERE, angle_rad, buf.const(math.pi / 2).e(BinaryOps.SUB, angle_rad))
     # angle_rad = whole_halfpi_mod_2_is_even.e(TernaryOps.WHERE, buf.const(math.pi / 2).e(BinaryOps.SUB, angle_rad), angle_rad)
@@ -171,7 +174,11 @@ class Sin(Function):
 
 
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.x = x.e(UnaryOps.ANG_RED)
+    # x = self.float_mod(x, x.const(2 * math.pi), precision=10**9)
+    self.x = x
+
+    # self.x = x.e(UnaryOps.ANG_RED)
+    # x = x.e(BinaryOps.MUL, x.const(1e))
     print("===")
     print("x: ")
     print(__import__('tinygrad').Tensor(self.x).numpy())
