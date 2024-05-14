@@ -73,6 +73,7 @@ class TestSetitem(unittest.TestCase):
     t = Tensor.arange(4).reshape(2, 2).contiguous()
     t[1] += 2
     t = t.contiguous()
+    # TODO: RuntimeError: must be contiguous for assign
     t[1] -= 1
     np.testing.assert_allclose(t.numpy(), [[0, 1], [3, 4]])
 
