@@ -52,40 +52,6 @@ class Sin(Function):
     temp = divres.cast(dtypes.int64).cast(old_dtype).e(BinaryOps.MUL, x.const(4 * math.pi))
     x = x.e(BinaryOps.SUB, temp)
 
-    # # x = x.cast(dtypes.float64)
-    # # TWOPI = 6.2831853071795864769252867665590057683943387987502
-    # # print(TWOPI)
-    # lt_10p16 = x.e(BinaryOps.CMPLT, x.const(10**16))
-    # d = lt_10p16.e(TernaryOps.WHERE, x.const(4*math.pi), x.const(2**16*math.pi))
-    # # q = x.e(BinaryOps.DIV, x.const(2**16 * math.pi))
-    # q = x.e(BinaryOps.DIV, d)
-    # # print(x.dtype)
-    # # q = x.e(BinaryOps.DIV, x.const(TWOPI))
-    # # print("q: ")
-    # # print(__import__('tinygrad').Tensor(q).numpy())
-    #
-    # # # q = x.e(BinaryOps.DIV, x.const(math.pi))
-    # # print("q: ")
-    # # print(__import__('tinygrad').Tensor(q).numpy()[0])
-    # # q = q.cast(dtypes.float32)
-    # # print("q: ")
-    # # print(__import__('tinygrad').Tensor(q).numpy()[0])
-    # q_floor = q.cast(dtypes.int64).cast(old_dtype)
-    # # q_floor = q.cast(dtypes.ulong).cast(old_dtype)
-    # # print("q_floor: ")
-    # # print(__import__('tinygrad').Tensor(q_floor).numpy())
-    # diff = q.e(BinaryOps.SUB, q_floor)
-    # # print("diff: ")
-    # # print(__import__('tinygrad').Tensor(diff).numpy())
-    # x = diff.e(BinaryOps.MUL, x.const(4 * math.pi))
-    # # x = diff.e(BinaryOps.MUL, x.const(math.pi))
-    #
-    # # Import Tensor from tinygrad
-    # # print("x: ")
-    # # print(__import__('tinygrad').Tensor(x).numpy())
-    # # q = q.e(BinaryOps.MUL, x.const(2 * math.pi))
-    # # x = x.e(BinaryOps.SUB, q)
-    #
     no_terms = 30
     # no_terms = 15
     res = x.const(0)
@@ -101,114 +67,13 @@ class Sin(Function):
       # term = term.e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const((2 * i + 2)*(2 * i + 3))).e(BinaryOps.MUL, x)
     return res.cast(beginning_dtype)
 
-  def whole_part(self, x:LazyBuffer, divisor:LazyBuffer) -> LazyBuffer:
-    beginning_dtype = x.dtype
-    if Device.DEFAULT != "METAL": x = x.cast(dtypes.float64)
-    old_dtype = x.dtype
-    sign = x.e(BinaryOps.CMPLT, x.const(0)).e(TernaryOps.WHERE, x.const(-1), x.const(1))
-    x = x.e(BinaryOps.DIV, divisor.e(BinaryOps.MUL, sign))
-    x = x.e(BinaryOps.MUL, sign).cast(dtypes.int64).cast(old_dtype)
-    # Subtract 1 if x is negative
-    is_neg = sign.e(BinaryOps.CMPLT, sign.const(0))
-    x = is_neg.e(TernaryOps.WHERE, x.e(BinaryOps.SUB, x.const(1)), x)
-    return x.cast(beginning_dtype)
-
-  # def whole_part(self, x:LazyBuffer, divisor:LazyBuffer) -> LazyBuffer:
-  #   old_dtype = x.dtype
-  #   q = x.e(BinaryOps.DIV, divisor)
-  #   q_floor = q.cast(dtypes.int32).cast(old_dtype)
-  #   diff = q.e(BinaryOps.SUB, q_floor)
-  #   return diff
-
-
-  def sin_approx(self, buf:LazyBuffer) -> LazyBuffer:
-    lookup_table = [0.7853981633974483, 0.4636476090008061, 0.24497866312686414, 0.12435499454676144, 0.06241880999595735, 0.031239833430268277, 0.015623728620476831, 0.007812341060101111, 0.0039062301319669718, 0.0019531225164788188, 0.0009765621895593195, 0.0004882812111948983, 0.00024414062014936177, 0.00012207031189367021, 6.103515617420877e-05, 3.0517578115526096e-05, 1.5258789061315762e-05, 7.62939453110197e-06, 3.814697265606496e-06, 1.907348632810187e-06, 9.536743164059608e-07, 4.7683715820308884e-07, 2.3841857910155797e-07, 1.1920928955078068e-07, 5.960464477539055e-08, 2.9802322387695303e-08, 1.4901161193847655e-08, 7.450580596923828e-09, 3.725290298461914e-09, 1.862645149230957e-09, 9.313225746154785e-10, 4.656612873077393e-10, 2.3283064365386963e-10, 1.1641532182693481e-10, 5.820766091346741e-11, 2.9103830456733704e-11, 1.4551915228366852e-11, 7.275957614183426e-12, 3.637978807091713e-12, 1.8189894035458565e-12, 9.094947017729282e-13, 4.547473508864641e-13, 2.2737367544323206e-13, 1.1368683772161603e-13, 5.684341886080802e-14, 2.842170943040401e-14, 1.4210854715202004e-14, 7.105427357601002e-15, 3.552713678800501e-15, 1.7763568394002505e-15]
-    two_neg_pow = [1, 0.5, 0.25, 0.125, 0.0625, 0.03125, 0.015625, 0.0078125, 0.00390625, 0.001953125, 0.0009765625, 0.00048828125, 0.000244140625, 0.0001220703125, 6.103515625e-05, 3.0517578125e-05, 1.52587890625e-05, 7.62939453125e-06, 3.814697265625e-06, 1.9073486328125e-06, 9.5367431640625e-07, 4.76837158203125e-07, 2.384185791015625e-07, 1.1920928955078125e-07, 5.960464477539063e-08, 2.9802322387695312e-08, 1.4901161193847656e-08, 7.450580596923828e-09, 3.725290298461914e-09, 1.862645149230957e-09, 9.313225746154785e-10, 4.656612873077393e-10, 2.3283064365386963e-10, 1.1641532182693481e-10, 5.820766091346741e-11, 2.9103830456733704e-11, 1.4551915228366852e-11, 7.275957614183426e-12, 3.637978807091713e-12, 1.8189894035458565e-12, 9.094947017729282e-13, 4.547473508864641e-13, 2.2737367544323206e-13, 1.1368683772161603e-13, 5.684341886080802e-14, 2.842170943040401e-14, 1.4210854715202004e-14, 7.105427357601002e-15, 3.552713678800501e-15, 1.7763568394002505e-15]
-
-    beginning_dtype = buf.dtype
-    if Device.DEFAULT != "METAL": buf = buf.cast(dtypes.float64)
-    old_dtype = buf.dtype
-
-    whole_pi = self.whole_part(buf, buf.const(math.pi))
-    whole_pi_mod_2 = whole_pi.e(BinaryOps.SUB, whole_pi.e(BinaryOps.DIV, buf.const(2.0)).cast(dtypes.int32).cast(old_dtype).e(BinaryOps.MUL, buf.const(2.0)))
-    whole_pi_mod_2_is_even = whole_pi_mod_2.e(BinaryOps.CMPEQ, buf.const(0))
-
-    final_sign =  whole_pi_mod_2_is_even.e(TernaryOps.WHERE, buf.const(1), buf.const(-1))
-
-    # print("buf: ")
-    # print(__import__('tinygrad').Tensor(buf).numpy())
-    angle_rad_whole_part = self.whole_part(buf, buf.const(math.pi / 2))
-    # print("angle rad whole part: ")
-    # print(__import__('tinygrad').Tensor(angle_rad_whole_part).numpy())
-    angle_rad = buf.e(BinaryOps.SUB, angle_rad_whole_part.e(BinaryOps.MUL, buf.const(math.pi / 2)))
-    # angle_rad = self.modulo_with_precision(buf, buf.const(math.pi * 2), 5).e(BinaryOps.MUL, buf.const(math.pi * 2))
-    # print("angle rad: ")
-    # print(__import__('tinygrad').Tensor(angle_rad).numpy())
-
-    whole_halfpi = self.whole_part(buf, buf.const(math.pi / 2))
-    whole_halfpi_mod_2 = whole_halfpi.e(BinaryOps.SUB, whole_halfpi.e(BinaryOps.DIV, buf.const(2)).cast(dtypes.int32).cast(old_dtype).e(BinaryOps.MUL, buf.const(2)))
-    whole_halfpi_mod_2_is_even = whole_halfpi_mod_2.e(BinaryOps.CMPEQ, buf.const(0))
-    angle_rad = whole_halfpi_mod_2_is_even.e(TernaryOps.WHERE, angle_rad, buf.const(math.pi / 2).e(BinaryOps.SUB, angle_rad))
-    # angle_rad = whole_halfpi_mod_2_is_even.e(TernaryOps.WHERE, buf.const(math.pi / 2).e(BinaryOps.SUB, angle_rad), angle_rad)
-    # print("angle rad: ")
-    # print(__import__('tinygrad').Tensor(angle_rad).numpy())
-    # angle_rad = whole_halfpi_mod_2_is_even.e(TernaryOps.WHERE, buf.const(math.pi / 2).e(BinaryOps.SUB, angle_rad), angle_rad)
-
-    # Initialize variables
-    K = 0.607252935
-    angle_i = angle_rad
-    # x = 1.0
-    # y = 0.0
-    # z = 0.0
-    x = buf.const(1.0)
-    y = buf.const(0.0)
-    z = buf.const(0.0)
-
-    # for i in range(30):
-    for i in range(len(lookup_table)):
-        # if angle_i < 0:
-        #     d = -1
-        # else:
-        #     d = 1
-
-        is_positive = angle_i.e(BinaryOps.CMPLT, buf.const(0))
-        d = is_positive.e(TernaryOps.WHERE, buf.const(-1), buf.const(1))
-        # d = is_positive.e(TernaryOps.WHERE, buf.const(1), buf.const(-1))
-
-        # x_new = x - d * y * two_neg_pow[i]
-        x_new = x.e(BinaryOps.SUB, d.e(BinaryOps.MUL, y).e(BinaryOps.MUL, buf.const(two_neg_pow[i])))
-        # y = y + d * x * two_neg_pow[i]
-        y = y.e(BinaryOps.ADD, d.e(BinaryOps.MUL, x).e(BinaryOps.MUL, buf.const(two_neg_pow[i])))
-        # z = z - d * lookup_table[i]
-        z = z.e(BinaryOps.SUB, d.e(BinaryOps.MUL, buf.const(lookup_table[i])))
-
-        x = x_new
-        # angle_i -= d * lookup_table[i]
-        angle_i = angle_i.e(BinaryOps.SUB, d.e(BinaryOps.MUL, buf.const(lookup_table[i])))
-
-    # return y * K
-    return y.e(BinaryOps.MUL, buf.const(K)).e(BinaryOps.MUL, final_sign).cast(beginning_dtype)
-    # return y.e(BinaryOps.MUL, buf.const(K)).e(BinaryOps.MUL, final_sign)
-
-
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    # x = self.float_mod(x, x.const(2 * math.pi), precision=10**9)
     self.x = x
-
-    # self.x = x.e(UnaryOps.ANG_RED)
-    # x = x.e(BinaryOps.MUL, x.const(1e))
-    # print("===")
-    # print("x: ")
-    # print(__import__('tinygrad').Tensor(self.x).numpy())
-    # print("===")
-    # return self.sin_approx(self.x)
     return self.taylor_sin(x)
-
     # return x.e(UnaryOps.SIN)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     # return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
-    # return self.sin_approx(self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)).e(BinaryOps.MUL, grad_output)
     return self.taylor_sin(self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)).e(BinaryOps.MUL, grad_output)
 
 # NOTE: maximum(x, 0) behaves differently where x=0
