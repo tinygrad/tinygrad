@@ -89,6 +89,9 @@ class Sin(Function):
         # term = term.e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const((2 * i + 2)*(2 * i + 3))).e(BinaryOps.MUL, x)
     return res.cast(beginning_dtype)
 
+  def _sin(self, x:LazyBuffer) -> LazyBuffer:
+    return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 30, x.const(1))
+
   def horner_taylor_sin(self, x:LazyBuffer, xsq:LazyBuffer, n: int, s:LazyBuffer) -> LazyBuffer:
     # if n == 1:
     #   return s.e(BinaryOps.MUL, x)
@@ -136,12 +139,13 @@ class Sin(Function):
     print("reduced x: ")
     print(__import__('tinygrad').Tensor(x).numpy())
     self.x = x
-    return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 30, x.const(1)).cast(beginning_dtype)
+    # return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 30, x.const(1)).cast(beginning_dtype)
+    return self._sin(x).cast(beginning_dtype)
     # return x.e(UnaryOps.SIN)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     # return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
-    return self.horner_taylor_sin(self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)).e(BinaryOps.MUL, grad_output)
+    return self._sin(self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)).e(BinaryOps.MUL, grad_output)
 
 # NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
