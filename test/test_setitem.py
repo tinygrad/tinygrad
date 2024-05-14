@@ -42,6 +42,39 @@ class TestSetitem(unittest.TestCase):
     assert not t.lazydata.st.contiguous
     with self.assertRaises(AssertionError): t[1] = 5
 
+  def test_setitem_assignment_operator(self):
+    t = Tensor.arange(4).reshape(2, 2).contiguous()
+    t[1] += 2
+    np.testing.assert_allclose(t.numpy(), [[0, 1], [4, 5]])
+
+    t = Tensor.arange(4).reshape(2, 2).contiguous()
+    t[1] -= 1
+    np.testing.assert_allclose(t.numpy(), [[0, 1], [1, 2]])
+
+    t = Tensor.arange(4).reshape(2, 2).contiguous()
+    t[1] *= 2
+    np.testing.assert_allclose(t.numpy(), [[0, 1], [4, 6]])
+
+    t = Tensor.arange(4, dtype=dtypes.float).reshape(2, 2).contiguous()
+    t[1] /= 2
+    np.testing.assert_allclose(t.numpy(), [[0, 1], [1, 1.5]])
+
+    t = Tensor.arange(4).reshape(2, 2).contiguous()
+    t[1] **= 2
+    np.testing.assert_allclose(t.numpy(), [[0, 1], [4, 9]])
+
+    t = Tensor.arange(4).reshape(2, 2).contiguous()
+    t[1] ^= 5
+    np.testing.assert_allclose(t.numpy(), [[0, 1], [7, 6]])
+
+  @unittest.expectedFailure
+  def test_setitem_consecutive_assignment_operator(self):
+    t = Tensor.arange(4).reshape(2, 2).contiguous()
+    t[1] += 2
+    t = t.contiguous()
+    t[1] -= 1
+    np.testing.assert_allclose(t.numpy(), [[0, 1], [3, 4]])
+
   # TODO: implement fancy setitem
   @unittest.expectedFailure
   def test_fancy_setitem(self):
