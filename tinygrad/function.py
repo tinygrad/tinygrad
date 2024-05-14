@@ -83,6 +83,28 @@ class Sin(Function):
   #     # term = term.e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const(2 * i + 2)).e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const(2 * i + 3))
   #     term = term.e(BinaryOps.MUL, x).e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const((2 * i + 2)*(2 * i + 3)))
   #   return res
+
+  def whole_part(self, x:LazyBuffer, divisor:LazyBuffer) -> LazyBuffer:
+    # print("X: ")
+    # print(__import__('tinygrad').Tensor(x).numpy())
+    # print("DIVISOR: ")
+    # print(__import__('tinygrad').Tensor(divisor).numpy())
+    sign = x.e(BinaryOps.CMPLT, x.const(0)).e(TernaryOps.WHERE, x.const(-1), x.const(1))
+    # print("SIGN: ")
+    # print(__import__('tinygrad').Tensor(sign).numpy())
+    # sign = x.e(BinaryOps.CMPLT, x.const(0)).e(TernaryOps.WHERE, x.const(1), x.const(-1))
+    x = x.e(BinaryOps.DIV, divisor.e(BinaryOps.MUL, sign))
+    # print("X BEFORE CORR: ")
+    # print(__import__('tinygrad').Tensor(x).numpy())
+    x = x.e(BinaryOps.MUL, sign).cast(dtypes.int32).cast(dtypes.float32)
+    # Subtract 1 if x is negative
+    is_neg = sign.e(BinaryOps.CMPLT, sign.const(0))
+    x = is_neg.e(TernaryOps.WHERE, x.e(BinaryOps.SUB, x.const(1)), x)
+    # x = is_neg.e(TernaryOps.WHERE,x,  x.e(BinaryOps.SUB, x.const(1)))
+    # print("X AFTER CORR: ")
+    # print(__import__('tinygrad').Tensor(x).numpy())
+    return x
+
   def sin_approx(self, buf:LazyBuffer) -> LazyBuffer:
     lookup_table = [0.7853981633974483, 0.4636476090008061, 0.24497866312686414, 0.12435499454676144, 0.06241880999595735, 0.031239833430268277, 0.015623728620476831, 0.007812341060101111, 0.0039062301319669718, 0.0019531225164788188, 0.0009765621895593195, 0.0004882812111948983, 0.00024414062014936177, 0.00012207031189367021, 6.103515617420877e-05, 3.0517578115526096e-05, 1.5258789061315762e-05, 7.62939453110197e-06, 3.814697265606496e-06, 1.907348632810187e-06, 9.536743164059608e-07, 4.7683715820308884e-07, 2.3841857910155797e-07, 1.1920928955078068e-07, 5.960464477539055e-08, 2.9802322387695303e-08, 1.4901161193847655e-08, 7.450580596923828e-09, 3.725290298461914e-09, 1.862645149230957e-09]
     two_neg_pow = [1, 0.5, 0.25, 0.125, 0.0625, 0.03125, 0.015625, 0.0078125, 0.00390625, 0.001953125, 0.0009765625, 0.00048828125, 0.000244140625, 0.0001220703125, 6.103515625e-05, 3.0517578125e-05, 1.52587890625e-05, 7.62939453125e-06, 3.814697265625e-06, 1.9073486328125e-06, 9.5367431640625e-07, 4.76837158203125e-07, 2.384185791015625e-07, 1.1920928955078125e-07, 5.960464477539063e-08, 2.9802322387695312e-08, 1.4901161193847656e-08, 7.450580596923828e-09, 3.725290298461914e-09, 1.862645149230957e-09]
@@ -90,45 +112,65 @@ class Sin(Function):
     old_dtype = buf.dtype
     buf = buf.cast(dtypes.float32)
     # final_sign = buf.const(-1)
-    whole_pi = buf.e(BinaryOps.DIV, buf.const(math.pi)).cast(dtypes.int32).cast(dtypes.float32)
-    print("whole_pi: ")
-    print(__import__('tinygrad').Tensor(whole_pi).numpy())
+    # whole_pi = buf.e(BinaryOps.DIV, buf.const(math.pi)).cast(dtypes.int32).cast(dtypes.float32)
+    whole_pi = self.whole_part(buf, buf.const(math.pi))
+    # print("whole_pi: ")
+    # print(__import__('tinygrad').Tensor(whole_pi).numpy())
     whole_pi_mod_2 = whole_pi.e(BinaryOps.SUB, whole_pi.e(BinaryOps.DIV, buf.const(2.0)).cast(dtypes.int32).cast(dtypes.float32).e(BinaryOps.MUL, buf.const(2.0)))
     # whole_pi_mod_2 = whole_pi.e(BinaryOps.MOD, buf.const(2))
-    print("whole_pi_mod_2: ")
-    print(__import__('tinygrad').Tensor(whole_pi_mod_2).numpy())
+    # print("whole_pi_mod_2: ")
+    # print(__import__('tinygrad').Tensor(whole_pi_mod_2).numpy())
     # if whole_pi % 2 == 0:
     # whole_pi_mod_2_is_even = whole_pi_mod_2.e(BinaryOps.CMPEQ, buf.const(0))
     whole_pi_mod_2_is_even = whole_pi_mod_2.e(BinaryOps.CMPEQ, buf.const(0))
 
-    print(__import__('tinygrad').Tensor(whole_pi_mod_2_is_even).numpy())
+    # print(__import__('tinygrad').Tensor(whole_pi_mod_2_is_even).numpy())
     # exit()
 
     # CHECK TERNARY ORDER IF NOT WORKING
     # final_sign = whole_pi_mod_2.e(TernaryOps.WHERE, whole_pi_mod_2_is_even, buf.const(1), buf.const(-1))
     final_sign =  whole_pi_mod_2_is_even.e(TernaryOps.WHERE, buf.const(1), buf.const(-1))
+    # print("final_sign: ")
+    # print(__import__('tinygrad').Tensor(final_sign).numpy())
 
     # angle_rad = angle % (math.pi / 2)
-    angle_rad = buf.e(BinaryOps.SUB, buf.e(BinaryOps.DIV, buf.const(math.pi / 2)).cast(dtypes.int32).cast(dtypes.float32).e(BinaryOps.MUL, buf.const(math.pi / 2)))
+    # print("buf: ")
+    # print(__import__('tinygrad').Tensor(buf).numpy())
+    # angle_rad_whole_part = buf.e(BinaryOps.DIV, buf.const(math.pi / 2)).cast(dtypes.int32).cast(dtypes.float32)
+    angle_rad_whole_part = self.whole_part(buf, buf.const(math.pi / 2))
+    # print("angle_rad_whole_part: ")
+    # print(__import__('tinygrad').Tensor(angle_rad_whole_part).numpy())
+    # angle_rad = buf.e(BinaryOps.SUB, buf.e(BinaryOps.DIV, buf.const(math.pi / 2)).cast(dtypes.int32).cast(dtypes.float32).e(BinaryOps.MUL, buf.const(math.pi / 2)))
+    angle_rad = buf.e(BinaryOps.SUB, angle_rad_whole_part.e(BinaryOps.MUL, buf.const(math.pi / 2)))
 
-    print("angle rad: ")
-    print(__import__('tinygrad').Tensor(angle_rad).numpy())
+    # print("angle rad: ")
+    # print(__import__('tinygrad').Tensor(angle_rad).numpy())
     # angle_rad = angle_rad.e(BinaryOps.SUB, angle_rad.cast(dtypes.int32).cast(dtypes.float32))
-    print("angle rad: ")
-    print(__import__('tinygrad').Tensor(angle_rad).numpy())
+    # print("angle rad: ")
+    # print(__import__('tinygrad').Tensor(angle_rad).numpy())
 
 
 
-    whole_halfpi = buf.e(BinaryOps.DIV, buf.const(math.pi / 2)).cast(dtypes.int32).cast(dtypes.float32)
+    # whole_halfpi = buf.e(BinaryOps.DIV, buf.const(math.pi / 2)).cast(dtypes.int32).cast(dtypes.float32)
+    whole_halfpi = self.whole_part(buf, buf.const(math.pi / 2))
+    # print("whole_halfpi: ")
+    # print(__import__('tinygrad').Tensor(whole_halfpi).numpy())
     # whole_halfpi_mod_2 = whole_halfpi.e(BinaryOps.MOD, buf.const(2))
-    whole_halfpi_mod_2 = whole_halfpi.e(BinaryOps.DIV, buf.const(2)).cast(dtypes.int32).cast(dtypes.float32)
+    whole_halfpi_mod_2 = whole_halfpi.e(BinaryOps.SUB, whole_halfpi.e(BinaryOps.DIV, buf.const(2)).cast(dtypes.int32).cast(dtypes.float32).e(BinaryOps.MUL, buf.const(2)))
+    # print("whole_halfpi_mod_2: ")
+    # print(__import__('tinygrad').Tensor(whole_halfpi_mod_2).numpy())
     # if whole_halfpi % 2 == 0:
     whole_halfpi_mod_2_is_even = whole_halfpi_mod_2.e(BinaryOps.CMPEQ, buf.const(0))
+    # print("whole_halfpi_mod_2_is_even: ")
+    # print(__import__('tinygrad').Tensor(whole_halfpi_mod_2_is_even).numpy())
 
+    # print("angle rad: ")
+    # print(__import__('tinygrad').Tensor(angle_rad).numpy())
     # CHECK TERNARY ORDER IF NOT WORKING
     angle_rad = whole_halfpi_mod_2_is_even.e(TernaryOps.WHERE, angle_rad, buf.const(math.pi / 2).e(BinaryOps.SUB, angle_rad))
-    print("angle rad: ")
-    print(__import__('tinygrad').Tensor(angle_rad).numpy())
+    # angle_rad = whole_halfpi_mod_2_is_even.e(TernaryOps.WHERE, buf.const(math.pi / 2).e(BinaryOps.SUB, angle_rad), angle_rad)
+    # print("angle rad: ")
+    # print(__import__('tinygrad').Tensor(angle_rad).numpy())
     # angle_rad = whole_halfpi_mod_2_is_even.e(TernaryOps.WHERE, buf.const(math.pi / 2).e(BinaryOps.SUB, angle_rad), angle_rad)
 
     # Initialize variables
