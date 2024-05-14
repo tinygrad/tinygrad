@@ -45,27 +45,28 @@ class Sin(Function):
     beginning_dtype = x.dtype
     if Device.DEFAULT != "METAL": x = x.cast(dtypes.float64)
     old_dtype = x.dtype
-    x = x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(2 * math.pi)).cast(dtypes.ulong).cast(old_dtype).e(BinaryOps.MUL, x.const(2 * math.pi)))
+    # x = x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(2 * math.pi)).cast(dtypes.int32).cast(old_dtype).e(BinaryOps.MUL, x.const(2 * math.pi)))
     # x = x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(math.pi)).cast(dtypes.int32).cast(old_dtype).e(BinaryOps.MUL, x.const(math.pi)))
 
     # x = x.cast(dtypes.float64)
-    # TWOPI = 6.2831853071795864769252867665590057683943387987502
+    TWOPI = 6.2831853071795864769252867665590057683943387987502
     # print(TWOPI)
     # # q = x.e(BinaryOps.DIV, x.const(2 * math.pi))
-    # q = x.e(BinaryOps.DIV, x.const(TWOPI))
+    q = x.e(BinaryOps.DIV, x.const(TWOPI))
+
     # # q = x.e(BinaryOps.DIV, x.const(math.pi))
     # print("q: ")
     # print(__import__('tinygrad').Tensor(q).numpy()[0])
     # q = q.cast(dtypes.float32)
     # print("q: ")
     # print(__import__('tinygrad').Tensor(q).numpy()[0])
-    # q_floor = q.cast(dtypes.int32).cast(old_dtype)
+    q_floor = q.cast(dtypes.int32).cast(old_dtype)
     # print("q_floor: ")
     # print(__import__('tinygrad').Tensor(q_floor).numpy()[0])
-    # diff = q.e(BinaryOps.SUB, q_floor)
+    diff = q.e(BinaryOps.SUB, q_floor)
     # print("diff: ")
     # print(__import__('tinygrad').Tensor(diff).numpy())
-    # x = diff.e(BinaryOps.MUL, x.const(2 * math.pi))
+    x = diff.e(BinaryOps.MUL, x.const(2 * math.pi))
     # x = diff.e(BinaryOps.MUL, x.const(math.pi))
 
     # Import Tensor from tinygrad
@@ -74,8 +75,8 @@ class Sin(Function):
     # q = q.e(BinaryOps.MUL, x.const(2 * math.pi))
     # x = x.e(BinaryOps.SUB, q)
 
-    no_terms = 40
-    # no_terms = 16
+    # no_terms = 70
+    no_terms = 16
     res = x.const(0)
     term = x
     for i in range(no_terms):
@@ -94,7 +95,7 @@ class Sin(Function):
     old_dtype = x.dtype
     sign = x.e(BinaryOps.CMPLT, x.const(0)).e(TernaryOps.WHERE, x.const(-1), x.const(1))
     x = x.e(BinaryOps.DIV, divisor.e(BinaryOps.MUL, sign))
-    x = x.e(BinaryOps.MUL, sign).cast(dtypes.ulong).cast(old_dtype)
+    x = x.e(BinaryOps.MUL, sign).cast(dtypes.int32).cast(old_dtype)
     # Subtract 1 if x is negative
     is_neg = sign.e(BinaryOps.CMPLT, sign.const(0))
     x = is_neg.e(TernaryOps.WHERE, x.e(BinaryOps.SUB, x.const(1)), x)
@@ -117,7 +118,7 @@ class Sin(Function):
     old_dtype = buf.dtype
 
     whole_pi = self.whole_part(buf, buf.const(math.pi))
-    whole_pi_mod_2 = whole_pi.e(BinaryOps.SUB, whole_pi.e(BinaryOps.DIV, buf.const(2.0)).cast(dtypes.ulong).cast(old_dtype).e(BinaryOps.MUL, buf.const(2.0)))
+    whole_pi_mod_2 = whole_pi.e(BinaryOps.SUB, whole_pi.e(BinaryOps.DIV, buf.const(2.0)).cast(dtypes.int32).cast(old_dtype).e(BinaryOps.MUL, buf.const(2.0)))
     whole_pi_mod_2_is_even = whole_pi_mod_2.e(BinaryOps.CMPEQ, buf.const(0))
 
     final_sign =  whole_pi_mod_2_is_even.e(TernaryOps.WHERE, buf.const(1), buf.const(-1))
@@ -133,7 +134,7 @@ class Sin(Function):
     print(__import__('tinygrad').Tensor(angle_rad).numpy())
 
     whole_halfpi = self.whole_part(buf, buf.const(math.pi / 2))
-    whole_halfpi_mod_2 = whole_halfpi.e(BinaryOps.SUB, whole_halfpi.e(BinaryOps.DIV, buf.const(2)).cast(dtypes.ulong).cast(old_dtype).e(BinaryOps.MUL, buf.const(2)))
+    whole_halfpi_mod_2 = whole_halfpi.e(BinaryOps.SUB, whole_halfpi.e(BinaryOps.DIV, buf.const(2)).cast(dtypes.int32).cast(old_dtype).e(BinaryOps.MUL, buf.const(2)))
     whole_halfpi_mod_2_is_even = whole_halfpi_mod_2.e(BinaryOps.CMPEQ, buf.const(0))
     angle_rad = whole_halfpi_mod_2_is_even.e(TernaryOps.WHERE, angle_rad, buf.const(math.pi / 2).e(BinaryOps.SUB, angle_rad))
     # angle_rad = whole_halfpi_mod_2_is_even.e(TernaryOps.WHERE, buf.const(math.pi / 2).e(BinaryOps.SUB, angle_rad), angle_rad)
@@ -194,7 +195,7 @@ class Sin(Function):
     # return x.e(UnaryOps.SIN)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
+    # return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
     return self.sin_approx(self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)).e(BinaryOps.MUL, grad_output)
     # return self.taylor_sin(self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)).e(BinaryOps.MUL, grad_output)
 
