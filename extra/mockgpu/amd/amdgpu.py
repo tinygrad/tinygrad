@@ -218,8 +218,15 @@ class AMDGPU(VirtGPU):
   def add_sdma_queue(self, base, size, rptr, wptr):
     self.queues.append(SDMAExecutor(self, base, size, rptr, wptr))
     return len(self.queues) - 1
-  def execute(self, queue_id):
-    for q in self.queues: q.execute()
+  def execute(self):
+    any_progress = True
+    while any_progress:
+      # Try to progress each queue every step if we can
+      any_progress = False
+      for q in self.queues:
+        if (prev_rptr:=q.rptr[0]) != q.wptr[0]:
+          q.execute()
+          any_progress |= (prev_rptr != q.rptr[0])
 
 gpu_props = """cpu_cores_count 0
 simd_count 192

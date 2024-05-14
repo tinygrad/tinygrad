@@ -4,3 +4,4 @@ class VirtGPU:
     self.regs = {}
   def map_range(self, vaddr, size): raise NotImplementedError()
   def unmap_range(self, vaddr, size): raise NotImplementedError()
+  def execute(self): raise NotImplementedError()

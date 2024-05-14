@@ -40,7 +40,7 @@ class AMDDriver(VirtDriver):
       [VirtFile('/sys/devices/virtual/kfd/kfd/topology/nodes', functools.partial(DirFileDesc, child_names=[str(i) for i in range(gpus)]))]
 
     self.gpus = {}
-    self.next_fd = 0x8000
+    self.next_fd = (1 << 30)
     self.next_handle = 1
     self.next_event = 1
 
@@ -112,14 +112,15 @@ class AMDDriver(VirtDriver):
       struct.event_id = struct.event_slot_index
     elif nr == kfd_ioctls.AMDKFD_IOC_CREATE_QUEUE:
       gpu = self.gpus[struct.gpu_id]
-      struct.doorbell_offset = self._alloc_doorbell(struct.gpu_id)
       if struct.queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA:
-        queue_id = gpu.add_sdma_queue(struct.ring_base_address, struct.ring_size, struct.read_pointer_address, struct.write_pointer_address)
-        self.track_address(struct.doorbell_offset, struct.doorbell_offset + 8, lambda mv,off: None, lambda mv,off: gpu.execute(0))
+        gpu.add_sdma_queue(struct.ring_base_address, struct.ring_size, struct.read_pointer_address, struct.write_pointer_address)
       elif struct.queue_type == kfd.KFD_IOC_QUEUE_TYPE_COMPUTE:
-        queue_id = gpu.add_pm4_queue(struct.ring_base_address, struct.ring_size, struct.read_pointer_address, struct.write_pointer_address)
-        self.track_address(struct.doorbell_offset, struct.doorbell_offset + 8, lambda mv,off: None, lambda mv,off: gpu.execute(1))
+        gpu.add_pm4_queue(struct.ring_base_address, struct.ring_size, struct.read_pointer_address, struct.write_pointer_address)
       else: raise RuntimeError("Unsuported, queue")
+
+      # Track writes to doorbell, calling callback
+      struct.doorbell_offset = self._alloc_doorbell(struct.gpu_id)
+      self.track_address(struct.doorbell_offset, struct.doorbell_offset + 8, lambda mv,off: None, lambda mv, off: gpu.execute())
     elif nr == kfd_ioctls.AMDKFD_IOC_WAIT_EVENTS:
       pass
     else:

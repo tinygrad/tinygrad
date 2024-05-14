@@ -10,17 +10,17 @@ import tinygrad.runtime.autogen.kfd as kfd
 import tinygrad.runtime.autogen.hsa as hsa
 import tinygrad.runtime.autogen.amd_gpu as amd_gpu
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401
-if getenv("MOCKGPU"): import extra.mockgpu.mockgpu  # noqa: F401
 
 libc = ctypes.CDLL(ctypes.util.find_library("c"))
+libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
+libc.mmap.restype = ctypes.c_void_p
+libc.munmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+libc.munmap.restype = ctypes.c_int
+
 if getenv("MOCKGPU"):
+  import extra.mockgpu.mockgpu  # noqa: F401
   libc.mmap = extra.mockgpu.mockgpu._mmap # type: ignore
   libc.munmap = extra.mockgpu.mockgpu._munmap # type: ignore
-else:
-  libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
-  libc.mmap.restype = ctypes.c_void_p
-  libc.munmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
-  libc.munmap.restype = ctypes.c_int
 
 def is_usable_gpu(gpu_id):
   try:

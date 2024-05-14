@@ -90,7 +90,7 @@ def _close(fd):
   return libc.syscall(CLOSE_SYSCALL, fd)
 
 @ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)
-def _closedir(st): return 0
+def _closedir(st): return _close(to_mv(st, 8).cast('Q')[0])
 
 @ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_ulong, ctypes.c_void_p)
 def _ioctl(fd, request, argp):
