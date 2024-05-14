@@ -451,7 +451,7 @@ def train_unet3d():
 
   step_times, start_epoch = [], 1
   is_successful, diverged = False, False
-  start_eval_at, evaluate_every = START_EVAL_AT, EVALUATE_EVERY
+  start_eval_at, evaluate_every = 1 if BENCHMARK else START_EVAL_AT, 1 if BENCHMARK else EVALUATE_EVERY
   next_eval_at = start_eval_at
   print(f"Eval starts at epoch {start_eval_at} and every {evaluate_every} epochs afterwards")
 
