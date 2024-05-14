@@ -23,6 +23,11 @@ class TestUnaryOpsConstFolding(unittest.TestCase):
     _check_ast_count(0, Tensor.ones(4).cast(dtypes.int16))
     _check_ast_count(0, Tensor.full(4, fill_value=-1).cast(dtypes.uint16))
 
+  def test_neg_folding(self):
+    _check_ast_count(0, Tensor([1, 2, 3]).mul(-1).neg())
+    _check_ast_count(0, Tensor([1, 2, 3]).neg().mul(-1))
+    _check_ast_count(0, Tensor([1, 2, 3]).neg().neg())
+
 class TestBinaryOpsConstFolding(unittest.TestCase):
   def test_add_literal_zero(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) + 0)
@@ -55,6 +60,13 @@ class TestBinaryOpsConstFolding(unittest.TestCase):
     _check_ast_count(0, 1 * Tensor([1.0, 2, 3, 4]))
   def test_tensor_one_mul(self):
     _check_ast_count(0, Tensor.ones(4) * Tensor([1.0, 2, 3, 4]))
+
+  def test_bool_tensor_mul_bool(self):
+    _check_ast_count(0, Tensor([True, False]) * True)
+    _check_ast_count(0, Tensor([True, False]) * False)
+  def test_bool_mul_bool_tensor(self):
+    _check_ast_count(0, True * Tensor([True, False]))
+    _check_ast_count(0, False * Tensor([True, False]))
 
   def test_div_literal_one(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) / 1)
@@ -106,12 +118,14 @@ class TestMovedConstFolding(unittest.TestCase):
     _check_ast_count(1, Tensor([1.0, 2, 3, 4]) * Tensor.ones(2).pad(((1, 1),)))
 
   def test_cast_padded(self):
-    _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16))
+    # NOTE: this is folded due to CAST_BEFORE_VIEW
+    _check_ast_count(0, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16))
     np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16).numpy(), [0, 1, 1, 1, 1, 0])
+    _check_ast_count(0, Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16))
+    np.testing.assert_equal(Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16).numpy(), [0, 65535, 65535, 65535, 65535, 0])
+    # not folded
     _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int64))
     np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int64).numpy(), [0, 1, 1, 1, 1, 0])
-    _check_ast_count(1, Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16))
-    np.testing.assert_equal(Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16).numpy(), [0, 65535, 65535, 65535, 65535, 0])
 
 class TestReduceOpsConstFolding(unittest.TestCase):
   def test_const_sum(self):

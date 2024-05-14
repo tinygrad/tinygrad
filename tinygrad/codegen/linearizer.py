@@ -5,23 +5,24 @@ from collections import defaultdict
 
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, ConstType
 from tinygrad.helpers import colored, DEBUG, prod, getenv, to_function_name
-from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ConstBuffer, MemBuffer, BufferOps
+from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ConstBuffer, MemBuffer, BufferOps, get_lazyop_info
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, create_lt_node
 from tinygrad.codegen.kernel import LocalBuffer, Kernel
 from tinygrad.features.image import to_image_idx
+from tinygrad.renderer import Program
 
 from tinygrad.codegen.uops import UOps, UOp, UOpGraph
 
 def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0):
-  local_idxs = loop_local_idxs = [Variable(f"{prefix}{start_dim+i}", 0, s-1) for i,s in enumerate(local_dims[0:maxdim-1] + (prod(local_dims[maxdim-1:]),) if len(local_dims) > maxdim else local_dims)]  # noqa: E501
+  local_idxs = loop_local_idxs = [Variable(f"{prefix}{start_dim+i}", 0, s-1) for i,s in enumerate((prod(local_dims[:-(maxdim-1)]),) + local_dims[-(maxdim-1):] if len(local_dims) > maxdim else local_dims)]  # noqa: E501
   if maxdim != 0 and len(local_dims) > maxdim:
-    dd = local_idxs[maxdim-1]
+    dd = local_idxs[0]
     nli = []
-    for s in local_dims[maxdim-1:][::-1]:
+    for s in local_dims[:-(maxdim-1)]:
       nli.append(dd % s)
       dd //= s
-    local_idxs = local_idxs[0:maxdim-1] + nli[::-1]
+    local_idxs = nli + local_idxs[-(maxdim-1):]
   return local_idxs, [x for x in loop_local_idxs if not isinstance(x, NumNode)]
 
 def expand_idx(node:Node) -> Union[Variable, NumNode]: return next((v for v in node.vars() if v.expr.startswith("_uidx")), NumNode(0))
@@ -93,13 +94,15 @@ class Linearizer(Kernel):
 
     ret = []
     invalid_value = 0
+    acc_count = 0
     for idx, valid, rep_idx in zip(e_idxs, e_valids, iter_idxs(expand_vars)):
       this_const, idx, valid = (invalid_value, NumNode(0), NumNode(1)) if valid.max == 0 else (const, idx, valid)
       # todo: when multiple reduceops are supported, clearly disambiguate and test acc load keys are unique for each reduceop
       key = f"{acc is not None}{localtype}{'CONST'+str(this_const) if this_const is not None and acc is None else (buf.idx if isinstance(buf, MemBuffer) else cast(LocalBuffer, buf).name)}{idx.render()}{valid.render()}"  # noqa: E501
       if key not in self.load_cache:
         if acc is not None:
-          self.load_cache[key] = self.uops.add(UOps.DEFINE_ACC, localtype, (), self.get_reduce_acc(acc), cachable=False)
+          self.load_cache[key] = self.uops.add(UOps.DEFINE_ACC, localtype, (), (self.get_reduce_acc(acc), i, acc_count))
+          acc_count += 1
         elif this_const is not None:
           self.load_cache[key] = self.const(this_const, localtype)
           if valid.min == 0 and valid.max == 1:
@@ -168,10 +171,10 @@ class Linearizer(Kernel):
     return stores
 
   # render loop
-  def render_loop(self, xx:List[Variable]) -> Tuple[UOp, ...]:
+  def render_loop(self, xx:List[Variable], nm:str) -> Tuple[UOp, ...]:
     new_loops = {x.expr:self.uops.add(UOps.LOOP, dtypes.int32, (
       self.const(x.min) if isinstance(x.min, int) else cast(Node, x.min).render(self.render_ops, self),
-      self.const(x.max+1) if isinstance(x.max, int) else cast(Node, x.max+1).render(self.render_ops, self)), cachable=False) for x in xx if not isinstance(x, NumNode) and x.expr is not None}  # noqa: E501
+      self.const(x.max+1) if isinstance(x.max, int) else cast(Node, x.max+1).render(self.render_ops, self)), arg=(nm,i)) for i,x in enumerate(xx) if not isinstance(x, NumNode) and x.expr is not None}  # noqa: E501
     self.loop_uops.update(new_loops)
     return tuple(new_loops.values())
 
@@ -191,7 +194,7 @@ class Linearizer(Kernel):
         full_var, full_var_sz = NumNode(0), 1
         if alias[0] != 0:
           for i in alias:
-            next_var = local_idxs[-i] if i > 0 else thread_idxs[-i-1]
+            next_var = local_idxs[i-1] if i > 0 else thread_idxs[-i-1]
             full_var += next_var * full_var_sz
             full_var_sz *= next_var.max+1
         replace_idxs.append(full_var)
@@ -206,7 +209,7 @@ class Linearizer(Kernel):
         min_alias_idx = min(self.local_alias.keys())
         replace_input_idxs = calc_tc_idxs(tc.thread_local_sizes[i-min_alias_idx], tc.thread_local_aliases[i-min_alias_idx])
         for n in range(len(tc.threads)):
-          buf_idxs[self.first_reduce-len(tc.threads)+n] = replace_input_idxs[n] # replace locals
+          buf_idxs[self.global_dims+n] = replace_input_idxs[n] # replace locals
         for n in range(tc.num_upcasts()):
           buf_idxs[self.shape_len-self.upcasted+n] = replace_input_idxs[len(tc.threads)+n] # replace upcasts
       if DEBUG >= 3: print(f"{localbuf_idx} alias {i}: sts={self.sts[i]} idxs={buf_idxs}")
@@ -217,14 +220,14 @@ class Linearizer(Kernel):
     if (tc:=self.tensor_core):
       replace_acc_idxs = calc_tc_idxs(tc.thread_local_sizes[2], tc.thread_local_aliases[2])
       for n in range(len(tc.threads)):
-        local_idxs[self.local_dims-len(tc.threads)+n] = replace_acc_idxs[n] # replace locals
+        local_idxs[n] = replace_acc_idxs[n] # replace locals
       for n in range(len(replace_acc_idxs)-len(tc.threads)):
         upcast_idxs[n] = replace_acc_idxs[len(tc.threads)+n] # replace upcasts
       if DEBUG >= 3: print(f"store alias: sts={self.sts[0]} idxs={global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs}")
     acc = self.global_load(out_buf, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop)
 
     # reduce loop
-    loop_ctx = self.render_loop(reduce_idxs)
+    loop_ctx = self.render_loop(reduce_idxs, "2_reduce")
 
     # store local aliases
     locals_to_store = [(localbuf_idx, buf_idxs, self.global_load(i, buf_idxs)) for i, localbuf_idx, buf_idxs in alias_buf_idxs]
@@ -264,12 +267,12 @@ class Linearizer(Kernel):
     if self.group_for_reduces:
       fake_global_idxs = [x*0 for x in global_idxs]
       stores = self.global_store(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc)  # store accumulators
-      barrier = self.uops.add(UOps.BARRIER, None, tuple(stores), cachable=False)
+      barrier = self.uops.add(UOps.BARRIER, None, tuple(stores))
       if self.opts.has_local:
         fake_idxs = [NumNode(0)]*len(self.sts[-1].shape)
         fake_idxs[self.global_dims+self.local_dims:self.global_dims+len(local_idxs)] = local_idxs[self.local_dims:]
         if_cond: UOp = create_lt_node(self.sts[-1].expr_idxs(fake_idxs)[0], 1).render(self.render_ops, self)
-        barrier = self.uops.add(UOps.IF, None, (if_cond, barrier), cachable=False)
+        barrier = self.uops.add(UOps.IF, None, (if_cond, barrier))
 
       # create new late reduce local loops and replace local_idxs that have been used
       end_local_idxs = [Variable(f"tidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce and i not in self.upcast_in_mid_reduce_axes else 0) for i in range(0, self.first_reduce+self.group_for_reduces)]  # noqa: E501
@@ -291,7 +294,7 @@ class Linearizer(Kernel):
       acc = self.global_load(0, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop)
 
       # late reduce loop
-      loop_ctx = self.render_loop(end_local_idxs)
+      loop_ctx = self.render_loop(end_local_idxs, "3_late_reduce")
 
       # load localbufs
       loaded_buffers[self.bufs[-1]] = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, barrier=barrier)
@@ -313,7 +316,7 @@ class Linearizer(Kernel):
 
     # late alias the tensor core buffers
     if (tc:=self.tensor_core) and (tc_opts:=self.tensor_core_opts):
-      alias_pattern = [0]*(self.global_dims+(self.local_dims-len(tc.threads))) + [2]*(len(tc.threads)) + [0]*(self.shape_len-self.upcasted-self.first_reduce) + [1]*tc.num_upcasts() + [3]*(self.upcasted-tc.num_upcasts())  # noqa: E501
+      alias_pattern = [0]*(self.global_dims) + [2]*(len(tc.threads)) + [0]*(self.local_dims-len(tc.threads)) + [0]*(self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3]*(self.upcasted-2)  # noqa: E501
       for tc_buf in tc_opts.bufs:
         self.alias_buffer(tc_buf, alias_pattern)
 
@@ -375,11 +378,13 @@ class Linearizer(Kernel):
       self.global_size = [x.max+1 for x in loop_global_idxs][::-1]
       self.loop_uops.update({x.expr:self.uops.add(UOps.SPECIAL, dtypes.int32, (), (len(loop_global_idxs)-1-i, x.expr.replace("gidx", "idx"), x.max+1)) for i,x in enumerate(loop_global_idxs)})  # noqa: E501
     elif self.opts.has_local:
-      self.global_size, self.local_size = [x.max+1 for x in loop_global_idxs][::-1], [x.max+1 for x in loop_local_idxs][::-1]
+      self.global_size, self.local_size = [x.max+1 for x in loop_global_idxs][::-1], [x.max+1 for x in loop_local_idxs]
       self.loop_uops.update({x.expr:self.uops.add(UOps.SPECIAL, dtypes.int32, (), (len(loop_global_idxs)-1-i, x.expr, x.max+1)) for i,x in enumerate(loop_global_idxs)})  # noqa: E501
-      self.loop_uops.update({x.expr:self.uops.add(UOps.SPECIAL, dtypes.int32, (), (len(loop_local_idxs)-1-i, x.expr, x.max+1)) for i,x in enumerate(loop_local_idxs)})  # noqa: E501
+      self.loop_uops.update({x.expr:self.uops.add(UOps.SPECIAL, dtypes.int32, (), (i, x.expr, x.max+1)) for i,x in enumerate(loop_local_idxs)})
     else:
-      self.render_loop(loop_global_idxs+loop_local_idxs)
+      self.render_loop(loop_global_idxs+loop_local_idxs, "1_global_local")
+    if self.global_size is not None: self.global_size += [1]*(3-len(self.global_size))
+    if self.local_size is not None: self.local_size += [1]*(3-len(self.local_size))
 
     # parse AST
     loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]] = {}
@@ -441,3 +446,12 @@ class Linearizer(Kernel):
       ret = [self.uops.add(UOps.ALU, dtypes.bool if x.op in {BinaryOps.CMPLT, BinaryOps.CMPEQ} else val[-1].dtype, val, x.op) for val in zip(*values)]
     cache[x] = ret
     return ret
+
+  def to_program(self) -> Program:
+    self.linearize()
+    info = get_lazyop_info(self.ast[0])
+    ops, mem = self.uops.flops_mem()
+    run_count = prod((self.global_size if self.global_size else []) + (self.local_size if self.local_size else []))
+    # NOTE: we use min here to ignore the indexing FLOPS
+    return Program(self.name, self.opts.render(to_function_name(self.name), self.uops), self.opts.device,
+                   self.global_size, self.local_size, self.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))

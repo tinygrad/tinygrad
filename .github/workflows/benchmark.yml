@@ -55,9 +55,8 @@ jobs:
         JIT=1 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_jitted.txt
     - name: Run GPT2 w HALF
       run: JIT=1 HALF=1 python3 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half.txt
-    # TODO: this is flaky
-    # - name: Run GPT2 w HALF/BEAM
-    #   run: JIT=0 HALF=1 BEAM=2 CACHELEVEL=0 python3 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half_beam.txt
+    - name: Run GPT2 w HALF/BEAM
+      run: JIT=1 HALF=1 BEAM=2 CACHELEVEL=0 CAST_BEFORE_VIEW=0 python3 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half_beam.txt
     - name: Train MNIST
       run: time PYTHONPATH=. TARGET_EVAL_ACC_PCT=97.3 python3 examples/beautiful_mnist.py | tee beautiful_mnist.txt
     - name: Run 10 CIFAR training steps
@@ -142,7 +141,7 @@ jobs:
     - name: Run GPT2 w HALF
       run: CUDA=1 JIT=1 HALF=1 python3 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half.txt
     - name: Run GPT2 w HALF/BEAM
-      run: CUDA=1 JIT=1 HALF=1 BEAM=2 CACHELEVEL=0 JIT_BATCH_SIZE=4 python3 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half_beam.txt
+      run: CUDA=1 JIT=1 HALF=1 BEAM=2 CACHELEVEL=0 CAST_BEFORE_VIEW=0 JIT_BATCH_SIZE=4 python3 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half_beam.txt
     - name: Train MNIST
       run: time PYTHONPATH=. CUDA=1 TARGET_EVAL_ACC_PCT=97.3 python3 examples/beautiful_mnist.py | tee beautiful_mnist.txt
     - name: Run 10 CIFAR training steps

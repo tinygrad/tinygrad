@@ -6,9 +6,10 @@ from extra.optimization.helpers import load_worlds, ast_str_to_lin
 
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.codegen.linearizer import Linearizer, UOp
-from tinygrad.codegen.kernel import Opt
+from tinygrad.codegen.kernel import Opt, OptOps
 from tinygrad.features.search import get_linearizer_actions, bufs_from_lin
 from tinygrad.features.graph import print_tree
+from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import getenv, from_mv, prod, colored, Context, DEBUG
 from tinygrad.ops import LazyOp, UnaryOps, BufferOps
 
@@ -55,7 +56,7 @@ def run_linearizer(lin: Linearizer, rawbufs=None, var_vals=None):
 
   # TODO: images needs required_optimization
   try:
-    prg = device.to_program(lin)
+    prg = CompiledRunner(lin.to_program())
   except Exception:
     traceback.print_exc()
     return "COMPILE_ERROR"
@@ -139,11 +140,15 @@ def fuzz_linearizer(lin: Linearizer, rtol=1e-2, atol=1e-2):
     next_lins = []
     for lin in last_lins:
       actions = get_linearizer_actions(lin, include_0=False)
-      if FUZZ_ALL_ACTIONS: print(f"testing {lin.applied_opts=} with {len(actions)} actions")
       if not actions: continue
+      if depth == 0 and getenv("FUZZ_REQUIRE_TC", 0):
+        tc_acts = {i: k for k in actions.values() if k.applied_opts[0].op == OptOps.TC}
+        if len(tc_acts) == 0: return failures
+        else: actions = tc_acts
 
       test_lins = list(actions.values())
-      if not FUZZ_ALL_ACTIONS: test_lins = [random.choice(test_lins)]
+      if FUZZ_ALL_ACTIONS: print(f"testing {lin.applied_opts=} with {len(actions)} actions")
+      else: test_lins = [random.choice(test_lins)]
 
       for test_lin in test_lins:
         if not FUZZ_ALL_ACTIONS and test_lin.applied_opts: print(f"applied opts: {test_lin.applied_opts}")

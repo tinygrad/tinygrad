@@ -2,10 +2,10 @@ import ctypes
 from typing import Any, Optional, Tuple, Dict, List, cast
 import tinygrad.runtime.autogen.cuda as cuda
 from tinygrad.helpers import init_c_var, GraphException
-from tinygrad.device import CompiledRunner, Buffer, BufferXfer, Device
+from tinygrad.device import Buffer, Device
 from tinygrad.runtime.ops_cuda import CUDADevice, check, encode_args, cu_time_execution
 from tinygrad.shape.symbolic import Variable
-from tinygrad.engine.realize import ExecItem
+from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner
 from tinygrad.engine.jit import MultiGraphRunner
 
 class CUDAGraph(MultiGraphRunner):
@@ -22,14 +22,14 @@ class CUDAGraph(MultiGraphRunner):
 
     for j,ji in enumerate(self.jit_cache):
       if isinstance(ji.prg, CompiledRunner):
-        global_size, local_size = ji.prg.launch_dims(var_vals)
+        global_size, local_size = ji.prg.p.launch_dims(var_vals)
 
         new_node = cuda.CUgraphNode()
-        deps = self._access_resources([x.base for x in ji.bufs[ji.prg.outcount:] if x is not None],
-                                      [x.base for x in ji.bufs[:ji.prg.outcount] if x is not None], new_dependency=new_node)
+        deps = self._access_resources([x.base for x in ji.bufs[ji.prg.p.outcount:] if x is not None],
+                                      [x.base for x in ji.bufs[:ji.prg.p.outcount] if x is not None], new_dependency=new_node)
         c_deps = (cuda.CUgraphNode*len(deps))(*deps) if deps else None
 
-        c_args, vargs = encode_args([cast(Buffer, x)._buf for x in ji.bufs], [var_vals[x] for x in ji.prg.vars])
+        c_args, vargs = encode_args([cast(Buffer, x)._buf for x in ji.bufs], [var_vals[x] for x in ji.prg.p.vars])
         kern_params = cuda.CUDA_KERNEL_NODE_PARAMS(ji.prg.clprg.prg, *global_size, *local_size, 0, None, vargs)
         check(cuda.cuGraphAddKernelNode(ctypes.byref(new_node), self.graph, c_deps, len(deps), ctypes.byref(kern_params)))
 
@@ -59,12 +59,12 @@ class CUDAGraph(MultiGraphRunner):
 
     # Update var_vals in the c_args struct.
     for j in self.jc_idx_with_updatable_var_vals:
-      for i,v in enumerate(cast(CompiledRunner, self.jit_cache[j].prg).vars):
+      for i,v in enumerate(cast(CompiledRunner, self.jit_cache[j].prg).p.vars):
         setattr(self.updatable_nodes[j][2], f'v{i}', var_vals[v])
 
     # Update launch dims in the kern_params struct.
     for j in self.jc_idx_with_updatable_launch_dims:
-      self.set_kernel_node_launch_dims(self.updatable_nodes[j][1], *cast(CompiledRunner, self.jit_cache[j].prg).launch_dims(var_vals))
+      self.set_kernel_node_launch_dims(self.updatable_nodes[j][1], *cast(CompiledRunner, self.jit_cache[j].prg).p.launch_dims(var_vals))
 
     # Update graph nodes with the updated structs.
     for node, c_node_params, c_args, is_copy in self.updatable_nodes.values():

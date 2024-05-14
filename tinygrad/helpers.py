@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string, ctypes
-import itertools, urllib.request
+import itertools, urllib.request, subprocess
 from tqdm import tqdm
 from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Sequence
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
@@ -145,7 +145,7 @@ _cache_dir: str = getenv("XDG_CACHE_HOME", os.path.expanduser("~/Library/Caches"
 CACHEDB: str = getenv("CACHEDB", os.path.abspath(os.path.join(_cache_dir, "tinygrad", "cache.db")))
 CACHELEVEL = getenv("CACHELEVEL", 2)
 
-VERSION = 15
+VERSION = 16
 _db_connection = None
 def db_connection():
   global _db_connection
@@ -219,6 +219,11 @@ def cpu_time_execution(cb, enable):
   if enable: st = time.perf_counter()
   cb()
   if enable: return time.perf_counter()-st
+
+def cpu_objdump(lib):
+  with tempfile.NamedTemporaryFile(delete=True) as f:
+    pathlib.Path(f.name).write_bytes(lib)
+    print(subprocess.check_output(['objdump', '-d', f.name]).decode('utf-8'))
 
 # *** ctypes helpers
 

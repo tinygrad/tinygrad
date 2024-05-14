@@ -1,12 +1,11 @@
 import unittest, functools, random
 from typing import List
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes
-from tinygrad.device import BufferCopy, CompiledRunner
 from tinygrad.ops import LoadOps, ReduceOps
 from tinygrad.helpers import CI, prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.schedule import create_schedule
-from tinygrad.engine.realize import lower_schedule
+from tinygrad.engine.realize import lower_schedule, BufferCopy, CompiledRunner
 from tinygrad.features.multi import all_reduce, MultiLazyBuffer
 from random import randint
 import numpy as np
@@ -56,7 +55,7 @@ class TestMultiTensor(unittest.TestCase):
     sched = create_schedule(out.lazydata.lbs)
     names = []
     for si, ei in zip(sched[:], lower_schedule(sched)):
-      if isinstance(ei.prg, CompiledRunner): names.append(ei.prg.name)
+      if isinstance(ei.prg, CompiledRunner): names.append(ei.prg.p.name)
       ei.run()
     assert names[-2] == names[-1], "function was relinearized"
 
@@ -236,16 +235,17 @@ class TestMultiTensor(unittest.TestCase):
     out.numpy()
 
   def test_backprop_conv(self):
-    conv = nn.Conv2d(3, 16, 3)
-    for p in get_parameters(conv): p.shard_((d0, d1))
-    optim = nn.optim.Adam(get_parameters(conv))
-    fake_image = Tensor.rand((2, 3, 32, 32)).shard((d0, d1), axis=0)
-    out = conv(fake_image)
-    optim.zero_grad()
-    out.mean().backward()
-    #for p in get_parameters(conv): p.grad.realize()
-    optim.step()
-    out.numpy()
+    with Tensor.train():
+      conv = nn.Conv2d(3, 16, 3)
+      for p in get_parameters(conv): p.shard_((d0, d1))
+      optim = nn.optim.Adam(get_parameters(conv))
+      fake_image = Tensor.rand((2, 3, 32, 32)).shard((d0, d1), axis=0)
+      out = conv(fake_image)
+      optim.zero_grad()
+      out.mean().backward()
+      #for p in get_parameters(conv): p.grad.realize()
+      optim.step()
+      out.numpy()
 
   def test_lr_scheduler_OneCycleLR(self):
     from extra.lr_scheduler import OneCycleLR
@@ -628,29 +628,30 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
     np.testing.assert_allclose(output.numpy(), expected)
 
   def test_unsynced_backprop_conv_bn(self):
-    from extra.lr_scheduler import OneCycleLR
+    with Tensor.train():
+      from extra.lr_scheduler import OneCycleLR
 
-    convs = [nn.Conv2d(3, 16, 3), nn.Conv2d(3, 16, 3)]
-    bns = [nn.BatchNorm2d(16), nn.BatchNorm2d(16)]
+      convs = [nn.Conv2d(3, 16, 3), nn.Conv2d(3, 16, 3)]
+      bns = [nn.BatchNorm2d(16), nn.BatchNorm2d(16)]
 
-    for p in get_parameters(convs + bns):
-      p.shard_((d1, d2))
-    optim = nn.optim.Adam(get_parameters(convs + bns))
-    lr_sched = OneCycleLR(optim, max_lr=0.1, pct_start=0.1, div_factor=100, final_div_factor=0.1, total_steps=10)
-    lr_sched.step()
+      for p in get_parameters(convs + bns):
+        p.shard_((d1, d2))
+      optim = nn.optim.Adam(get_parameters(convs + bns))
+      lr_sched = OneCycleLR(optim, max_lr=0.1, pct_start=0.1, div_factor=100, final_div_factor=0.1, total_steps=10)
+      lr_sched.step()
 
-    fake_image = Tensor.rand((8, 3, 32, 32)).shard((d1, d2), axis=0)
+      fake_image = Tensor.rand((8, 3, 32, 32)).shard((d1, d2), axis=0)
 
-    f1 = fake_image.shrink(((0, 4), None, None, None))
-    f2 = fake_image.shrink(((4, 8), None, None, None))
+      f1 = fake_image.shrink(((0, 4), None, None, None))
+      f2 = fake_image.shrink(((4, 8), None, None, None))
 
-    out1 = bns[0](convs[0](f1))
-    out2 = bns[1](convs[1](f2))
-    out = out1.cat(out2)
-    optim.zero_grad()
-    out.mean().backward()
-    optim.step()
-    out.numpy()
+      out1 = bns[0](convs[0](f1))
+      out2 = bns[1](convs[1](f2))
+      out = out1.cat(out2)
+      optim.zero_grad()
+      out.mean().backward()
+      optim.step()
+      out.numpy()
 
   def test_unsynced_backprop_standalone_bn(self):
     from extra.lr_scheduler import OneCycleLR

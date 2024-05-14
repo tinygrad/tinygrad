@@ -3,7 +3,7 @@
 export PYTHONPATH="."
 export MODEL="resnet"
 export SUBMISSION_PLATFORM="tinybox_red"
-export DEFAULT_FLOAT="HALF" GPUS=6 BS=1536 EVAL_BS=48 LR=7
+export DEFAULT_FLOAT="HALF" GPUS=6 BS=1536 EVAL_BS=192
 
 export LAZYCACHE=0 RESET_STEP=0
 
@@ -20,4 +20,4 @@ LOGFILE="resnet_red_${DATETIME}_${SEED}.log"
 BENCHMARK=10 INITMLPERF=1 python3 examples/mlperf/model_train.py | tee $LOGFILE
 
 # run
-WANDB=1 PARALLEL=0 RUNMLPERF=1 EVAL_START_EPOCH=3 EVAL_FREQ=4 python3 examples/mlperf/model_train.py | tee -a $LOGFILE
+PARALLEL=0 RUNMLPERF=1 EVAL_START_EPOCH=3 EVAL_FREQ=4 python3 examples/mlperf/model_train.py | tee -a $LOGFILE

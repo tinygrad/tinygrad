@@ -1,7 +1,8 @@
 from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable
 import itertools, functools, random, math, time, multiprocessing, traceback, signal
 from collections import defaultdict
-from tinygrad.device import Device, Compiled, Buffer, CompiledRunner, Compiler
+from dataclasses import replace
+from tinygrad.device import Device, Buffer, Compiler
 from tinygrad.ops import MemBuffer
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, to_function_name
 from tinygrad.dtype import ImageDType
@@ -10,6 +11,8 @@ from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError
 from tinygrad.codegen.uops import UOpGraph
 from tinygrad.tensor import Tensor
 from tinygrad.shape.symbolic import sym_infer
+from tinygrad.engine.realize import CompiledRunner
+from tinygrad.renderer import Program
 
 actions = [Opt(op=OptOps.UPCAST, axis=axis, amt=amt) for amt in [0,2,3,4,5,7] for axis in range(6)]
 actions += [Opt(op=OptOps.UNROLL, axis=axis, amt=amt) for amt in [0,4,7] for axis in range(4)]
@@ -31,12 +34,12 @@ def _get_test_global_size(global_size, max_global_size, var_vals):
         break
   return test_global_size, factor
 
-def _time_program(uops, rdev:Compiled, lib:bytes, global_size, local_size, var_vals, rawbufs,
-                  early_stop=None, max_global_size=65536, clear_l2=False, cnt=3, name="test"):
+def _time_program(p:Program, lib:bytes, var_vals, rawbufs, early_stop=None, max_global_size=65536, clear_l2=False, cnt=3, name="test"):
   factor = 1
-  if global_size is not None and max_global_size is not None:
-    global_size, factor = _get_test_global_size(global_size, max_global_size, var_vals)
-  try: car = CompiledRunner(name, "", rdev.dname, global_size, local_size, uops, precompiled=lib)
+  if p.global_size is not None and max_global_size is not None:
+    global_size, factor = _get_test_global_size(p.global_size, max_global_size, var_vals)
+    p = replace(p, global_size=global_size)
+  try: car = CompiledRunner(p, precompiled=lib)
   except AssertionError: return [math.inf] * cnt
   tms = []
   for _ in range(cnt):
@@ -46,19 +49,15 @@ def _time_program(uops, rdev:Compiled, lib:bytes, global_size, local_size, var_v
     if early_stop is not None and early_stop < tms[-1]: break
   return tms
 
-def _compile_linearizer(compiler:Compiler, lin:Linearizer, name:Optional[str]=None, enforce_max:bool=False) \
-  -> Tuple[bytes, Optional[List[int]], Optional[List[int]], UOpGraph, float]:
-  lin.linearize()
-  if enforce_max and len(lin.uops.uops) >= getenv("BEAM_UOPS_MAX", 3000) > 0: raise RuntimeError("too many uops")
-  src = compiler.render(name if name is not None else to_function_name(lin.name), lin.uops)   # NOTE: these all have the same name for deduping
-  if DEBUG >= 5: print(src)
-  st = time.perf_counter()
-  prog = compiler.compile(src)
-  et = time.perf_counter() - st
-  return prog, lin.global_size, lin.local_size, lin.uops, et
-
-def _try_compile_linearized_w_idx(x:Tuple[int,Linearizer], compiler:Compiler):
-  try: return x[0], _compile_linearizer(compiler, x[1], "test", enforce_max=True)
+def _try_compile_linearized_w_idx(x:Tuple[int,Linearizer], compiler:Compiler) -> Tuple[int, Optional[Tuple[Program, bytes, float]]]:
+  try:
+    x[1].linearize()
+    if len(x[1].uops.uops) >= getenv("BEAM_UOPS_MAX", 3000) > 0: raise RuntimeError("too many uops")
+    p = x[1].to_program()
+    st = time.perf_counter()
+    prog = compiler.compile(p.src)
+    et = time.perf_counter() - st
+    return x[0], (p, prog, et)
   except Exception:
     if DEBUG >= 4: traceback.print_exc()
     return x[0], None
@@ -131,14 +130,14 @@ def beam_search(lin:Linearizer, rawbufs:List[Buffer], amt:int, allow_test_size=T
       _compile_fn = functools.partial(_try_compile_linearized_w_idx, compiler=dev.compiler)
       for i,proc in (map(_compile_fn, enumerate(acted_lins)) if beam_pool is None else beam_pool.imap_unordered(_compile_fn, enumerate(acted_lins))):
         if proc is None: continue
-        lib, global_size, local_size, uops, compile_et = proc
+        p, lib, compile_et = proc
         if lib in seen_libs: continue
         #print(acted_lins[i].colored_shape(), acted_lins[i].applied_opts)  # for debugging BEAMs that segfault
         seen_libs.add(lib)
-        try: tms = _time_program(uops, dev, lib, global_size, local_size, var_vals, rawbufs, early_stop=beam[0][1]*3 if len(beam) else 1.0)
+        try: tms = _time_program(p, lib, var_vals, rawbufs, early_stop=beam[0][1]*3 if len(beam) else 1.0)
         except RuntimeError: continue # for runtime issues
         timed_lins.append((acted_lins[i], min(tms)))
-        if BEAM_DEBUG > 1: print(f"{time.perf_counter() - st:7.2f}s: {i:5d} {len(uops.uops):5d} uops {compile_et*1e6:12.2f} us compile/{timed_lins[-1][1]*1e6:12.2f} us run       {len(timed_lins):4d}/{len(acted_lins):4d}         {timed_lins[-1][0].colored_shape()}")  # noqa: E501
+        if BEAM_DEBUG > 1: print(f"{time.perf_counter() - st:7.2f}s: {i:5d} {len(cast(UOpGraph, p.uops).uops):5d} uops {compile_et*1e6:12.2f} us compile/{timed_lins[-1][1]*1e6:12.2f} us run       {len(timed_lins):4d}/{len(acted_lins):4d}         {timed_lins[-1][0].colored_shape()}")  # noqa: E501
         elif DEBUG >= 2: print(f"\r{time.perf_counter() - st:7.2f}s: {timed_lins[-1][1]*1e6:12.2f} us       {len(timed_lins):4d}/{len(acted_lins):4d}         {timed_lins[-1][0].colored_shape()}\033[K", end="")  # noqa: E501
 
       # done
@@ -168,7 +167,8 @@ def optimize_local_size(clprg:Callable, global_size:List[int], rawbufs:List[Buff
   return ret[1]
 
 def time_linearizer(lin:Linearizer, rawbufs:List[Buffer], allow_test_size=True, max_global_size=65536, cnt=3, disable_cache=False, clear_l2=False) -> float:  # noqa: E501
-  key = {"ast": lin.ast[0].key, "opts": str(lin.applied_opts), "allow_test_size": allow_test_size, "max_global_size": max_global_size, "clear_l2": clear_l2, "device": lin.opts.device, "suffix": lin.opts.suffix}  # noqa: E501
+  key = {"ast": lin.ast[0].key, "opts": str(lin.applied_opts), "allow_test_size": allow_test_size,
+         "max_global_size": max_global_size, "clear_l2": clear_l2, "device": lin.opts.device, "suffix": lin.opts.suffix}
   if not disable_cache and CACHELEVEL >= 2 and (val:=diskcache_get("time_linearizer", key)) is not None: return min(val)
 
   dev = Device[lin.opts.device]
@@ -176,8 +176,9 @@ def time_linearizer(lin:Linearizer, rawbufs:List[Buffer], allow_test_size=True, 
 
   rawbufs = _ensure_buffer_alloc(rawbufs)
   var_vals = {k:(k.max+k.min)//2 for k in lin.ast[0].vars()}
-  lib, global_size, local_size, uops, _ = _compile_linearizer(dev.compiler, lin)
-  tms = _time_program(uops, dev, lib, global_size, local_size, var_vals, rawbufs, max_global_size=max_global_size if allow_test_size else None, clear_l2=clear_l2, cnt=cnt, name=to_function_name(lin.name))  # noqa: E501
+  p = lin.to_program()
+  tms = _time_program(p, dev.compiler.compile(p.src), var_vals, rawbufs,
+                      max_global_size=max_global_size if allow_test_size else None, clear_l2=clear_l2, cnt=cnt, name=to_function_name(lin.name))
 
   if CACHELEVEL >= 2: diskcache_put("time_linearizer", key, tms)
   return min(tms)
