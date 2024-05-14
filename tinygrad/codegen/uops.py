@@ -38,6 +38,8 @@ class UOp:
     return f"{str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.uop for x in self.vin]):32s} {self.arg}"
   @staticmethod
   def const(dtype, val): return UOp(UOps.CONST, dtype, arg=dtypes.as_const(val, dtype))
+  @functools.cached_property
+  def parents(self) -> Set[UOp]: return set.union(set(self.vin), *[x.parents for x in self.vin])
 
 def uop_alu_resolve(u:UOp) -> sint:
   if u.uop is UOps.CONST: return u.arg
@@ -142,6 +144,12 @@ constant_folder = PatternMatcher([
   ({"__name__": "root", "uop": UOps.CAST, "vin":
     tuple({"uop": UOps.PHI, "vin": ({"uop": UOps.GEP, "vin": ({"__name__": "val"},), "arg": i}, {"__name__": f"v{i}"})} for i in range(2))},
     lambda root, val, v0, v1: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1))))),
+  # sum collapse to mul
+  ({"uop": UOps.PHI, "vin": ({"__name__": "acc", "uop": UOps.DEFINE_ACC, "vin": (
+    {"uop": UOps.LOOP, "__name__": "loop", "vin": ({"__name__": "start"}, {"__name__": "end"})})},
+    {"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"__name__": "acc"}, {"__name__": "val"}]})},
+    lambda acc, start, end, val, loop: None if loop in val.parents else UOp(UOps.ALU, val.dtype,
+                                     (UOp(UOps.CAST, val.dtype, (UOp(UOps.ALU, start.dtype, (end, start), BinaryOps.SUB),)), val), BinaryOps.MUL)),
 ])
 
 # *** uop graph ***
