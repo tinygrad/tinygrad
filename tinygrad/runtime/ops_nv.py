@@ -3,7 +3,7 @@ import os, ctypes, pathlib, re, fcntl, functools, mmap, struct, tempfile, hashli
 from typing import Tuple, List, Any, cast
 from tinygrad.device import Compiled, Compiler, LRUAllocator, BufferOptions
 from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up, to_char_p_p, DEBUG, prod
-from tinygrad.renderer.cstyle import CUDARenderer
+from tinygrad.renderer.cstyle import NVRenderer
 from tinygrad.runtime.ops_cuda import check as cuda_check, _get_bytes
 import tinygrad.runtime.autogen.cuda as cuda
 import tinygrad.runtime.autogen.nv_gpu as nv_gpu
@@ -491,7 +491,7 @@ class NVDevice(Compiled):
     self.arch: str = 'sm_89' # TODO: fix
 
     from tinygrad.runtime.graph.hcq import HCQGraph
-    super().__init__(device, NVAllocator(self), CUDARenderer(self.arch), NVCompiler(self.arch), functools.partial(NVProgram, self),
+    super().__init__(device, NVAllocator(self), NVRenderer(self.arch), NVCompiler(self.arch), functools.partial(NVProgram, self),
                      functools.partial(HCQGraph, NVDevice, HWComputeQueue, HWCopyQueue))
 
     self._cmdq_setup_compute_gpfifo()

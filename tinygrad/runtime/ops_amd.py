@@ -3,7 +3,7 @@ from typing import Tuple, List, Any, cast
 import os, fcntl, ctypes, ctypes.util, functools, re, pathlib, mmap, struct, errno, subprocess, time
 from tinygrad.device import Compiled, Compiler, BufferOptions, LRUAllocator
 from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up, DEBUG
-from tinygrad.renderer.cstyle import HIPRenderer
+from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.runtime.driver.hip_comgr import compile_hip
 from tinygrad.runtime.ops_hsa import HSACompiler
 import tinygrad.runtime.autogen.kfd as kfd
@@ -588,7 +588,7 @@ class AMDDevice(Compiled):
     self.pm4_doorbell = to_mv(self.doorbells + self.pm4_queue.doorbell_offset - self.doorbells_base, 8).cast("Q")
 
     from tinygrad.runtime.graph.hcq import HCQGraph
-    super().__init__(device, AMDAllocator(self), HIPRenderer(), HSACompiler(self.arch),
+    super().__init__(device, AMDAllocator(self), AMDRenderer(), HSACompiler(self.arch),
                      functools.partial(AMDProgram, self),
                      functools.partial(HCQGraph, AMDDevice, HWPM4Queue, HWCopyQueue))
 

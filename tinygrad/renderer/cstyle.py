@@ -378,3 +378,9 @@ static __attribute__((device)) bool operator==(hip_bfloat16 a, hip_bfloat16 b) {
     # https://clang.llvm.org/docs/AttributeReference.html#amdgpu-flat-work-group-size
     # NOTE: this makes hlb_cifar10 twice as fast, there may be more gains in tweaking these parameters
     return f"__attribute__((amdgpu_flat_work_group_size(1, {requiredMaxThreadsPerBlock})))"
+
+class AMDRenderer(HIPRenderer):
+  device = "AMD"
+
+class NVRenderer(CUDARenderer):
+  device = "NV"
