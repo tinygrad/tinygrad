@@ -184,8 +184,8 @@ class Sin(Function):
     y = buf.const(0.0)
     z = buf.const(0.0)
 
-    for i in range(30):
-    # for i in range(len(lookup_table)):
+    # for i in range(30):
+    for i in range(len(lookup_table)):
         # if angle_i < 0:
         #     d = -1
         # else:
