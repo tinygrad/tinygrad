@@ -53,6 +53,8 @@ class Sin(Function):
     # print(TWOPI)
     # # q = x.e(BinaryOps.DIV, x.const(2 * math.pi))
     q = x.e(BinaryOps.DIV, x.const(TWOPI))
+    print("q: ")
+    print(__import__('tinygrad').Tensor(q).numpy()[0])
 
     # # q = x.e(BinaryOps.DIV, x.const(math.pi))
     # print("q: ")
@@ -60,12 +62,12 @@ class Sin(Function):
     # q = q.cast(dtypes.float32)
     # print("q: ")
     # print(__import__('tinygrad').Tensor(q).numpy()[0])
-    q_floor = q.cast(dtypes.int32).cast(old_dtype)
-    # print("q_floor: ")
-    # print(__import__('tinygrad').Tensor(q_floor).numpy()[0])
+    q_floor = q.cast(dtypes.int64).cast(old_dtype)
+    print("q_floor: ")
+    print(__import__('tinygrad').Tensor(q_floor).numpy()[0])
     diff = q.e(BinaryOps.SUB, q_floor)
-    # print("diff: ")
-    # print(__import__('tinygrad').Tensor(diff).numpy())
+    print("diff: ")
+    print(__import__('tinygrad').Tensor(diff).numpy())
     x = diff.e(BinaryOps.MUL, x.const(2 * math.pi))
     # x = diff.e(BinaryOps.MUL, x.const(math.pi))
 
@@ -75,8 +77,8 @@ class Sin(Function):
     # q = q.e(BinaryOps.MUL, x.const(2 * math.pi))
     # x = x.e(BinaryOps.SUB, q)
 
-    no_terms = 70
-    # no_terms = 16
+    # no_terms = 70
+    no_terms = 16
     res = x.const(0)
     term = x
     for i in range(no_terms):
@@ -95,7 +97,7 @@ class Sin(Function):
     old_dtype = x.dtype
     sign = x.e(BinaryOps.CMPLT, x.const(0)).e(TernaryOps.WHERE, x.const(-1), x.const(1))
     x = x.e(BinaryOps.DIV, divisor.e(BinaryOps.MUL, sign))
-    x = x.e(BinaryOps.MUL, sign).cast(dtypes.int32).cast(old_dtype)
+    x = x.e(BinaryOps.MUL, sign).cast(dtypes.int64).cast(old_dtype)
     # Subtract 1 if x is negative
     is_neg = sign.e(BinaryOps.CMPLT, sign.const(0))
     x = is_neg.e(TernaryOps.WHERE, x.e(BinaryOps.SUB, x.const(1)), x)
