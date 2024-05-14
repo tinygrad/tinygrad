@@ -1,12 +1,12 @@
 import itertools
 import numpy as np
 from typing import DefaultDict, Dict, List, Set, Tuple, TypeVar
-from tinygrad.buffer import Buffer
+from tinygrad.device import Buffer
 from tinygrad.engine.realize import CustomOp, capturing, lower_schedule_item
 from tinygrad.helpers import DEBUG, MULTIOUTPUT, colored, getenv
 from tinygrad.lazy import LazyBuffer
-from tinygrad.engine.schedule import _graph_schedule, _LBScheduleItem
-from tinygrad.ops import LoadOps, ScheduleItem
+from tinygrad.engine.schedule import _graph_schedule, _LBScheduleItem, ScheduleItem
+from tinygrad.ops import LoadOps
 from tinygrad.tensor import Tensor
 
 ctx_vars = { MULTIOUTPUT: (0, 1) }

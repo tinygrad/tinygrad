@@ -1,9 +1,9 @@
 from typing import List, Dict, DefaultDict, Tuple, Union
 from collections import defaultdict
 from tinygrad.dtype import DType
-from tinygrad.buffer import Buffer
+from tinygrad.device import Buffer
 from tinygrad.helpers import getenv, DEBUG, dedup
-from tinygrad.ops import ScheduleItem
+from tinygrad.engine.schedule import ScheduleItem
 
 def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]]], debug_prefix="") -> Dict[Buffer, Buffer]:
   if getenv("NO_MEMORY_PLANNER"): return {}

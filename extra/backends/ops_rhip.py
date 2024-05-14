@@ -1,6 +1,6 @@
 import ctypes
-from tinygrad.device import Compiled
-from tinygrad.buffer import MallocAllocator
+from tinygrad.device import Compiled, MallocAllocator
+from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.runtime.ops_hsa import HSACompiler
 
 rhip = ctypes.CDLL("/usr/local/lib/libremu.so")
@@ -15,4 +15,4 @@ class RHIPProgram:
 class RHIPDevice(Compiled):
   def __init__(self, device:str=""):
     self.device = int(device.split(":")[1]) if ":" in device else 0
-    super().__init__(device, MallocAllocator, HSACompiler("gfx1100"), RHIPProgram)
+    super().__init__(device, MallocAllocator, HIPRenderer(), HSACompiler("gfx1100"), RHIPProgram)

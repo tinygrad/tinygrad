@@ -1,12 +1,9 @@
 import ctypes, subprocess, pathlib, tempfile
-from tinygrad.device import Compiled, Compiler, CompilerOptions
-from tinygrad.buffer import MallocAllocator
-from tinygrad.helpers import cpu_time_execution
+from tinygrad.device import Compiled, Compiler, MallocAllocator
+from tinygrad.helpers import cpu_time_execution, DEBUG, cpu_objdump
 from tinygrad.renderer.cstyle import ClangRenderer
 
 class ClangCompiler(Compiler):
-  compiler_opts = CompilerOptions("CLANG", supports_float4=False, has_local=False)
-  def render(self, name:str, uops) -> str: return ClangRenderer(name, uops)
   def compile(self, src:str) -> bytes:
     # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here
     with tempfile.NamedTemporaryFile(delete=True) as output_file:
@@ -16,6 +13,7 @@ class ClangCompiler(Compiler):
 
 class ClangProgram:
   def __init__(self, name:str, lib:bytes):
+    if DEBUG >= 6: cpu_objdump(lib)
     self.name, self.lib = name, lib
     # write to disk so we can load it
     with tempfile.NamedTemporaryFile(delete=True) as cached_file_path:
@@ -27,4 +25,4 @@ class ClangProgram:
 class ClangDevice(Compiled):
   def __init__(self, device:str):
     from tinygrad.runtime.graph.clang import ClangGraph
-    super().__init__(device, MallocAllocator, ClangCompiler("compile_clang"), ClangProgram, ClangGraph)
+    super().__init__(device, MallocAllocator, ClangRenderer(), ClangCompiler("compile_clang"), ClangProgram, ClangGraph)
