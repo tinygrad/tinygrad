@@ -71,7 +71,7 @@ class Linearizer(Kernel):
     AndNode: lambda self,ops,ctx:
       functools.reduce(lambda a,b: ctx.uop_alu_idx(a, b, ops, ctx, BinaryOps.MUL, dtype=dtypes.bool), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
-  def global_load(self, i:int, idxs:List[Node], acc:Optional[LazyOp]=None, barrier:Optional[UOp]=None) -> List[UOp]:
+  def global_load(self, i:int, idxs:List[Node], acc:Optional[LazyOp]=None, barrier:Optional[UOp]=None, loop_ctx:Tuple[UOp, ...]=()) -> List[UOp]:
     buf = self.bufs[i]
     localtype = self.get_base_dtype(buf.dtype if acc is None else acc.dtype)
     const = buf.val if isinstance(buf, ConstBuffer) else None
@@ -101,7 +101,7 @@ class Linearizer(Kernel):
       key = f"{acc is not None}{localtype}{'CONST'+str(this_const) if this_const is not None and acc is None else (buf.idx if isinstance(buf, MemBuffer) else cast(LocalBuffer, buf).name)}{idx.render()}{valid.render()}"  # noqa: E501
       if key not in self.load_cache:
         if acc is not None:
-          self.load_cache[key] = self.uops.add(UOps.DEFINE_ACC, localtype, (), (self.get_reduce_acc(acc), i, acc_count))
+          self.load_cache[key] = self.uops.add(UOps.DEFINE_ACC, localtype, loop_ctx, (self.get_reduce_acc(acc), i, acc_count))
           acc_count += 1
         elif this_const is not None:
           self.load_cache[key] = self.const(this_const, localtype)
@@ -171,13 +171,12 @@ class Linearizer(Kernel):
     return stores
 
   # render loop
-  def render_loop(self, xx:List[Variable], nm:str, acc:Tuple[UOp, ...]=()) -> List[UOp]:
+  def render_loop(self, xx:List[Variable], nm:str) -> Tuple[UOp, ...]:
     new_loops = {x.expr:self.uops.add(UOps.LOOP, dtypes.int32, (
       self.const(x.min) if isinstance(x.min, int) else cast(Node, x.min).render(self.render_ops, self),
-      self.const(x.max+1) if isinstance(x.max, int) else cast(Node, x.max+1).render(self.render_ops, self))+acc, arg=(nm,i)) for i,x in enumerate(xx) if not isinstance(x, NumNode) and x.expr is not None}  # noqa: E501
+      self.const(x.max+1) if isinstance(x.max, int) else cast(Node, x.max+1).render(self.render_ops, self)), arg=(nm,i)) for i,x in enumerate(xx) if not isinstance(x, NumNode) and x.expr is not None}  # noqa: E501
     self.loop_uops.update(new_loops)
-    loop_ctx = tuple(new_loops.values())
-    return [self.uops.add(UOps.ACCESS_ACC, ac.dtype, (ac,)+loop_ctx) for ac in acc]
+    return tuple(new_loops.values())
 
   def render_reduceop(self, reduceop: LazyOp, loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]], \
                       global_idxs, local_idxs, upcast_idxs):
@@ -216,6 +215,9 @@ class Linearizer(Kernel):
       if DEBUG >= 3: print(f"{localbuf_idx} alias {i}: sts={self.sts[i]} idxs={buf_idxs}")
       alias_buf_idxs.append((i, localbuf_idx, buf_idxs,))
 
+    # reduce loop
+    loop_ctx = self.render_loop(reduce_idxs, "2_reduce")
+
     # define accumulator - modify idxs if necessary for TC
     out_buf = -1 if self.group_for_reduces else 0
     if (tc:=self.tensor_core):
@@ -225,10 +227,7 @@ class Linearizer(Kernel):
       for n in range(len(replace_acc_idxs)-len(tc.threads)):
         upcast_idxs[n] = replace_acc_idxs[len(tc.threads)+n] # replace upcasts
       if DEBUG >= 3: print(f"store alias: sts={self.sts[0]} idxs={global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs}")
-    acc = self.global_load(out_buf, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop)
-
-    # reduce loop
-    acc = self.render_loop(reduce_idxs, "2_reduce", tuple(acc))
+    acc = self.global_load(out_buf, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop, loop_ctx=loop_ctx)
 
     # store local aliases
     locals_to_store = [(localbuf_idx, buf_idxs, self.global_load(i, buf_idxs)) for i, localbuf_idx, buf_idxs in alias_buf_idxs]
@@ -291,11 +290,11 @@ class Linearizer(Kernel):
 
       # NOTE: this structure is the same as the reduce op above
 
-      # define late accumulator
-      acc = self.global_load(0, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop)
-
       # late reduce loop
-      acc = self.render_loop(end_local_idxs, "3_late_reduce", tuple(acc))
+      loop_ctx = self.render_loop(end_local_idxs, "3_late_reduce")
+
+      # define late accumulator
+      acc = self.global_load(0, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop, loop_ctx=loop_ctx)
 
       # load localbufs
       loaded_buffers[self.bufs[-1]] = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, barrier=barrier)

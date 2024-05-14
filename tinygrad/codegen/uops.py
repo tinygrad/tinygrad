@@ -13,7 +13,7 @@ from tinygrad.helpers import prod, DEBUG
 class UOps(Enum):
   # ops that aren't rendered
   SINK = auto()
-  DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto() # noqa: E702
+  DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # noqa: E702
   CONST = auto(); SPECIAL = auto() # noqa: E702
   NOOP = auto(); GEP = auto() # noqa: E702
   # math ops
@@ -23,8 +23,6 @@ class UOps(Enum):
   LOAD = auto(); STORE = auto(); PHI = auto() # noqa: E702
   # control flow ops
   BARRIER = auto(); IF = auto(); LOOP = auto() # noqa: E702
-  # DEFINE_ACC is last, don't render until you really have to
-  DEFINE_ACC = auto(); ACCESS_ACC = auto() # noqa: E702
   # these two are not graph nodes
   ENDLOOP = auto(); ENDIF = auto() # noqa: E702
 
@@ -208,7 +206,11 @@ class UOpGraph:
     while queue:
       p,x = heapq.heappop(queue)
       if DEBUG >= 7: print(p,x)
-      self._uops.append(x)
+      if x.uop is UOps.DEFINE_ACC and len(x.vin):
+        idx = min([self._uops.index(l) for l in x.vin])
+        self._uops.insert(idx, x)
+      else:
+        self._uops.append(x)
       for u, ss in loops_children.items():
         if x in ss:
           ss.remove(x)
