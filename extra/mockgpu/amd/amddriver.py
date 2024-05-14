@@ -120,7 +120,7 @@ class AMDDriver(VirtDriver):
 
       # Track writes to doorbell, calling callback
       struct.doorbell_offset = self._alloc_doorbell(struct.gpu_id)
-      self.track_address(struct.doorbell_offset, struct.doorbell_offset + 8, lambda mv,off: None, lambda mv, off: gpu.execute())
+      self.track_address(struct.doorbell_offset, struct.doorbell_offset + 8, lambda mv,off: None, lambda mv, off: self._emulate_execute())
     elif nr == kfd_ioctls.AMDKFD_IOC_WAIT_EVENTS:
       pass
     else:
@@ -130,3 +130,13 @@ class AMDDriver(VirtDriver):
       assert False, f"unknown kfd ioctl, {nr} {name}"
       exit(1)
     return 0
+
+  def _emulate_execute(self):
+    any_progress = True
+    while any_progress:
+      any_progress = False
+      for gpu in self.gpus.values():
+        for q in gpu.queues:
+          if (prev_rptr:=q.rptr[0]) != q.wptr[0]:
+            q.execute()
+            any_progress |= (prev_rptr != q.rptr[0])

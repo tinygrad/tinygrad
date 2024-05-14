@@ -456,7 +456,7 @@ jobs:
         run: python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py test/test_linearizer.py test/test_randomness.py test/imported/test_indexing.py test/external/external_test_hip_compile.py --durations=20
       - name: Run pytest (amd)
         if: matrix.backend=='amd'
-        run: python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py test/test_linearizer.py test/test_randomness.py test/imported/test_indexing.py --durations=20
+        run: python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py test/test_linearizer.py test/test_randomness.py test/imported/test_indexing.py test/external/external_test_hcq.py --durations=20
       - name: Compile EfficientNet to C and test it
         if: matrix.backend=='clang'
         run: |

@@ -76,9 +76,7 @@ class PM4Executor(AMDQueue):
       elif op == amd_gpu.PACKET3_WAIT_REG_MEM: cont = self._exec_wait_reg_mem(n)
       elif op == amd_gpu.PACKET3_DISPATCH_DIRECT: self._exec_dispatch_direct(n)
       else: raise RuntimeError(f"PM4: Unknown opcode: {op}")
-      if not cont:
-        print("BREAKING")
-        break
+      if not cont: break
 
   def _exec_acquire_mem(self, n):
     assert n == 6
@@ -127,7 +125,9 @@ class PM4Executor(AMDQueue):
     else: raise RuntimeError(f"Do not support {mem_function=}")
 
     mval = read_op()
-    return cmp(mval, val)
+    can_cont = cmp(mval, val)
+    if not can_cont: self.rptr[0] = (self.rptr[0] - 7) % (self.size // 4) # revert packet, need to wait again
+    return can_cont
 
   def _exec_set_sh_reg(self, n):
     reg = self._next_dword()
@@ -158,16 +158,17 @@ class SDMAExecutor(AMDQueue):
 
   def execute(self):
     while self.rptr[0] < self.wptr[0]:
+      cont = True
       header = self.queue[(self.rptr[0] // 4) % (self.size // 4)]
       op = (header >> 0) & 0xff
       if op == 0: self.rptr[0] += 4
       elif op == amd_gpu.SDMA_OP_FENCE: self._execute_fence()
       elif op == amd_gpu.SDMA_OP_TRAP: self._execute_trap()
-      elif op == amd_gpu.SDMA_OP_POLL_REGMEM: self._execute_poll_regmem()
+      elif op == amd_gpu.SDMA_OP_POLL_REGMEM: cont = self._execute_poll_regmem()
       elif op == amd_gpu.SDMA_OP_GCR: self._execute_gcr()
       elif op == amd_gpu.SDMA_OP_COPY: self._execute_copy()
       else: raise RuntimeError(f"Unknown SDMA op {op}")
-    assert self.rptr[0] == self.wptr[0]
+      if not cont: return
 
   def _execute_fence(self):
     struct = sdma_pkts.fence.from_address(self.base + self.rptr[0] % self.size)
@@ -218,15 +219,6 @@ class AMDGPU(VirtGPU):
   def add_sdma_queue(self, base, size, rptr, wptr):
     self.queues.append(SDMAExecutor(self, base, size, rptr, wptr))
     return len(self.queues) - 1
-  def execute(self):
-    any_progress = True
-    while any_progress:
-      # Try to progress each queue every step if we can
-      any_progress = False
-      for q in self.queues:
-        if (prev_rptr:=q.rptr[0]) != q.wptr[0]:
-          q.execute()
-          any_progress |= (prev_rptr != q.rptr[0])
 
 gpu_props = """cpu_cores_count 0
 simd_count 192
