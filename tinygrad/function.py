@@ -89,6 +89,7 @@ class Sin(Function):
     # print(__import__('tinygrad').Tensor(x).numpy())
     # print("DIVISOR: ")
     # print(__import__('tinygrad').Tensor(divisor).numpy())
+    old_dtype = x.dtype
     sign = x.e(BinaryOps.CMPLT, x.const(0)).e(TernaryOps.WHERE, x.const(-1), x.const(1))
     # print("SIGN: ")
     # print(__import__('tinygrad').Tensor(sign).numpy())
@@ -96,7 +97,7 @@ class Sin(Function):
     x = x.e(BinaryOps.DIV, divisor.e(BinaryOps.MUL, sign))
     # print("X BEFORE CORR: ")
     # print(__import__('tinygrad').Tensor(x).numpy())
-    x = x.e(BinaryOps.MUL, sign).cast(dtypes.int32).cast(dtypes.float32)
+    x = x.e(BinaryOps.MUL, sign).cast(dtypes.int32).cast(old_dtype)
     # Subtract 1 if x is negative
     is_neg = sign.e(BinaryOps.CMPLT, sign.const(0))
     x = is_neg.e(TernaryOps.WHERE, x.e(BinaryOps.SUB, x.const(1)), x)
@@ -110,13 +111,13 @@ class Sin(Function):
     two_neg_pow = [1, 0.5, 0.25, 0.125, 0.0625, 0.03125, 0.015625, 0.0078125, 0.00390625, 0.001953125, 0.0009765625, 0.00048828125, 0.000244140625, 0.0001220703125, 6.103515625e-05, 3.0517578125e-05, 1.52587890625e-05, 7.62939453125e-06, 3.814697265625e-06, 1.9073486328125e-06, 9.5367431640625e-07, 4.76837158203125e-07, 2.384185791015625e-07, 1.1920928955078125e-07, 5.960464477539063e-08, 2.9802322387695312e-08, 1.4901161193847656e-08, 7.450580596923828e-09, 3.725290298461914e-09, 1.862645149230957e-09, 9.313225746154785e-10, 4.656612873077393e-10, 2.3283064365386963e-10, 1.1641532182693481e-10, 5.820766091346741e-11, 2.9103830456733704e-11, 1.4551915228366852e-11, 7.275957614183426e-12, 3.637978807091713e-12, 1.8189894035458565e-12, 9.094947017729282e-13, 4.547473508864641e-13, 2.2737367544323206e-13, 1.1368683772161603e-13, 5.684341886080802e-14, 2.842170943040401e-14, 1.4210854715202004e-14, 7.105427357601002e-15, 3.552713678800501e-15, 1.7763568394002505e-15]
 
     old_dtype = buf.dtype
-    buf = buf.cast(dtypes.float32)
+    # buf = buf.cast(dtypes.float32)
     # final_sign = buf.const(-1)
     # whole_pi = buf.e(BinaryOps.DIV, buf.const(math.pi)).cast(dtypes.int32).cast(dtypes.float32)
     whole_pi = self.whole_part(buf, buf.const(math.pi))
     # print("whole_pi: ")
     # print(__import__('tinygrad').Tensor(whole_pi).numpy())
-    whole_pi_mod_2 = whole_pi.e(BinaryOps.SUB, whole_pi.e(BinaryOps.DIV, buf.const(2.0)).cast(dtypes.int32).cast(dtypes.float32).e(BinaryOps.MUL, buf.const(2.0)))
+    whole_pi_mod_2 = whole_pi.e(BinaryOps.SUB, whole_pi.e(BinaryOps.DIV, buf.const(2.0)).cast(dtypes.int32).cast(old_dtype).e(BinaryOps.MUL, buf.const(2.0)))
     # whole_pi_mod_2 = whole_pi.e(BinaryOps.MOD, buf.const(2))
     # print("whole_pi_mod_2: ")
     # print(__import__('tinygrad').Tensor(whole_pi_mod_2).numpy())
@@ -156,7 +157,7 @@ class Sin(Function):
     # print("whole_halfpi: ")
     # print(__import__('tinygrad').Tensor(whole_halfpi).numpy())
     # whole_halfpi_mod_2 = whole_halfpi.e(BinaryOps.MOD, buf.const(2))
-    whole_halfpi_mod_2 = whole_halfpi.e(BinaryOps.SUB, whole_halfpi.e(BinaryOps.DIV, buf.const(2)).cast(dtypes.int32).cast(dtypes.float32).e(BinaryOps.MUL, buf.const(2)))
+    whole_halfpi_mod_2 = whole_halfpi.e(BinaryOps.SUB, whole_halfpi.e(BinaryOps.DIV, buf.const(2)).cast(dtypes.int32).cast(old_dtype).e(BinaryOps.MUL, buf.const(2)))
     # print("whole_halfpi_mod_2: ")
     # print(__import__('tinygrad').Tensor(whole_halfpi_mod_2).numpy())
     # if whole_halfpi % 2 == 0:
