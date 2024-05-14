@@ -91,10 +91,14 @@ constant_folder = PatternMatcher([
   # const rules
   ({"__name__": "root", "uop": UOps.GEP, "vin": ({"__name__": "c", "uop": UOps.CONST},)}, lambda root, c: UOp.const(root.dtype, c.arg)),
   ({"__name__": "root", "uop": UOps.CAST, "vin": {"__name__": "c", "uop": UOps.CONST}}, lambda root, c: UOp.const(root.dtype, c.arg)),
-  # a phi on a DEFINE_ACC without loops is a noop. this is for correctness, not just speed
+  # a phi on a DEFINE_ACC without loops or a CONST is a noop. this is for correctness, not just speed
   ({"uop": UOps.PHI, "vin": ({"uop": UOps.DEFINE_ACC, "vin": tuple()}, {"__name__": "x"})}, lambda x: x),
-  # a DEFINE_ACC without inputs is a const (broken)
-  #({"__name__": "root", "uop": UOps.DEFINE_ACC, "vin": tuple()}, lambda root: UOp.const(root.dtype, root.arg[0])),
+  ({"uop": UOps.PHI, "vin": ({"uop": UOps.CONST}, {"__name__": "x"})}, lambda x: x),
+  # a DEFINE_ACC without inputs is a const + GEP on a const is the const
+  ({"__name__": "root", "uop": UOps.DEFINE_ACC, "vin": tuple()}, lambda root: UOp.const(root.dtype, root.arg[0])),
+  ({"__name__": "root", "uop": UOps.GEP, "vin": ({"__name__": "x", "uop": UOps.CONST},)}, lambda root,x: UOp.const(root.dtype, x.arg)),
+  # max -2147483648
+  ({"uop": UOps.ALU, "arg": BinaryOps.MAX, "dtype": dtypes.int, "vin": [{"__name__": "x"}, {"uop": UOps.CONST, "arg": -2147483648}]}, lambda x: x),
   # x+-y -> x-y
   ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": ({"__name__": "x"}, {"__name__": "my", "uop": UOps.ALU, "arg": UnaryOps.NEG})},
     lambda x, my: UOp(UOps.ALU, x.dtype, (x, my.vin[0]), BinaryOps.SUB)),
@@ -158,22 +162,35 @@ class UOpGraph:
     assert self._uops is None, "already linearized"
     pm = PatternMatcher(constant_folder.patterns+extra_pm.patterns) if extra_pm is not None else constant_folder
 
-    # constant fold
-    rewrite_map: Dict[UOp, UOp] = {}
-    sinks: List[UOp] = []
+    # get sink
+    _sinks: List[UOp] = []
     for u in self.nodes.values():
-      rewrite_map[u] = up = pm.recursive_rewrite(u)
-      if up.uop is UOps.STORE: sinks.append(up)
-      if up.uop is UOps.SINK: sinks.extend(up.vin)
+      if u.uop is UOps.STORE: _sinks.append(u)
+      if u.uop is UOps.SINK: _sinks.extend(u.vin)
+    sink = UOp(UOps.SINK, None, tuple(_sinks))
+    del _sinks
+
+    # recursive rewrite
+    while 1:
+      changed = 0
+      @functools.lru_cache
+      def rewrite(u:UOp) -> UOp:
+        nonlocal changed
+        up = pm.recursive_rewrite(u)
+        if up != u: changed += 1
+        up.vin = tuple(rewrite(x) for x in up.vin)
+        return up
+      sink = rewrite(sink)
+      if changed == 0: break
 
     # filter nodes that don't link to a sink
     nodes: Dict[UOp, None] = {}
     def add_parents(u:UOp):
       if u in nodes: return
       nodes[u] = None
-      u.vin = tuple(rewrite_map[x] for x in u.vin)
+      #u.vin = tuple(rewrite_map[x] for x in u.vin)
       for x in u.vin: add_parents(x)
-    add_parents(UOp(UOps.SINK, None, tuple(sinks)))
+    add_parents(sink)
 
     # BFS toposort
     graph: DefaultDict[UOp, List[UOp]] = defaultdict(list)
