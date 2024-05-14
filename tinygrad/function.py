@@ -45,7 +45,8 @@ class Sin(Function):
     beginning_dtype = x.dtype
     if Device.DEFAULT != "METAL": x = x.cast(dtypes.float64)
     old_dtype = x.dtype
-    x = x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(2 * math.pi)).cast(dtypes.int64).cast(old_dtype).e(BinaryOps.MUL, x.const(2 * math.pi)))
+    # x = x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(2 * math.pi)).cast(dtypes.int64).cast(old_dtype).e(BinaryOps.MUL, x.const(2 * math.pi)))
+    x = x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(4*math.pi)).cast(dtypes.int64).cast(old_dtype).e(BinaryOps.MUL, x.const(4*math.pi)))
     # x = x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(math.pi)).cast(dtypes.int32).cast(old_dtype).e(BinaryOps.MUL, x.const(math.pi)))
 
     # # x = x.cast(dtypes.float64)
@@ -78,8 +79,9 @@ class Sin(Function):
     # # q = q.e(BinaryOps.MUL, x.const(2 * math.pi))
     # # x = x.e(BinaryOps.SUB, q)
 
-    no_terms = 70
-    # no_terms = 16
+    # no_terms = 190
+
+    no_terms = 15
     res = x.const(0)
     term = x
     for i in range(no_terms):
@@ -87,8 +89,10 @@ class Sin(Function):
         res = res.e(BinaryOps.ADD, term)
       else:
         res = res.e(BinaryOps.SUB, term)
-      term = term.e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const(2 * i + 2)).e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const(2 * i + 3))
-      # term = term.e(BinaryOps.MUL, x).e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const((2 * i + 2)*(2 * i + 3)))
+      # term = term.e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const(2 * i + 2)).e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const(2 * i + 3))
+      if i != no_terms - 1:
+        term = term.e(BinaryOps.MUL, x).e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const((2 * i + 2)*(2 * i + 3)))
+      # term = term.e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const((2 * i + 2)*(2 * i + 3))).e(BinaryOps.MUL, x)
     return res.cast(beginning_dtype)
 
   def whole_part(self, x:LazyBuffer, divisor:LazyBuffer) -> LazyBuffer:
