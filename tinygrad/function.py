@@ -51,10 +51,20 @@ class Sin(Function):
     d = lt_10p14.e(TernaryOps.WHERE,d, x.const(4*math.pi))
     lt_10p16 = x.e(BinaryOps.CMPLT, x.const(10**16))
     d = lt_10p16.e(TernaryOps.WHERE, d, x.const(2**16*math.pi))
+    print("d: ")
+    # Import Tensor from tinygrad
+    print(__import__('tinygrad').Tensor(d).numpy())
     divres = x.e(BinaryOps.DIV, d)
+    print("divres: ")
+    print(__import__('tinygrad').Tensor(divres).numpy())
     # temp = divres.cast(dtypes.int64).cast(old_dtype).e(BinaryOps.MUL, x.const(2 * math.pi))
     temp = divres.cast(dtypes.int64).cast(old_dtype).e(BinaryOps.MUL, d)
+    print("temp: ")
+    print(__import__('tinygrad').Tensor(temp).numpy())
+    # temp = divres.cast(dtypes.int64).cast(old_dtype).e(BinaryOps.MUL, divres.const(16*math.pi))
     x = x.e(BinaryOps.SUB, temp)
+    print("x: ")
+    print(__import__('tinygrad').Tensor(x).numpy())
 
     # no_terms = 30
     # no_terms = 16
@@ -75,12 +85,12 @@ class Sin(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     # x = x.e(UnaryOps.ANG_RED)
     self.x = x
-    return self.taylor_sin(x)
-    # return x.e(UnaryOps.SIN)
+    # return self.taylor_sin(x)
+    return x.e(UnaryOps.SIN)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    # return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
-    return self.taylor_sin(self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)).e(BinaryOps.MUL, grad_output)
+    return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
+    # return self.taylor_sin(self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)).e(BinaryOps.MUL, grad_output)
 
 # NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
