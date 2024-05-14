@@ -256,6 +256,7 @@ class TestLinearizer(unittest.TestCase):
       a, b = Tensor.rand(8, 8, dtype=tensor_dtype), Tensor.rand(8, 8, dtype=tensor_dtype)
       helper_arg_acc_dtype(a.sum(acc_dtype=acc_dtype), expected_dtype)
       helper_arg_acc_dtype(a.matmul(b, acc_dtype=acc_dtype), expected_dtype)
+      helper_arg_acc_dtype(Tensor.einsum("ki,ij->kj", a, b, acc_dtype=acc_dtype), expected_dtype)
       d, w = Tensor.rand(4, 8, 8, 8, dtype=tensor_dtype), Tensor.rand(8, 8, 2, 2, dtype=tensor_dtype)
       helper_arg_acc_dtype(d.conv2d(w, acc_dtype=acc_dtype), expected_dtype)
 
@@ -291,7 +292,7 @@ class TestLinearizer(unittest.TestCase):
       # check correctness
       helper_tc_allclose(tc.dims[0]+pad, tc.dims[1]+pad, tc.dims[2]+pad, tc.dtype_in, tc.dtype_out, tc_opt=2)
 
-  @unittest.skipIf(Device.DEFAULT == "RHIP", "RHIP is really slow here")
+  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI is really slow here")
   def test_tensor_cores_multi_reduce(self):
     if not Device[Device.DEFAULT].renderer.has_tensor_cores:
       self.skipTest("device doesn't have tensor cores")
@@ -370,7 +371,7 @@ class TestLinearizer(unittest.TestCase):
       lin = Linearizer(ast) # this is a dummy ast
 
       lin.uops = UOpGraph()
-      return lin.uops.add(uop, dtype, vin, arg, cachable=False)
+      return lin.uops.add(uop, dtype, vin, arg)
 
     c0 = UOp(UOps.CONST, dtypes.float, vin=(), arg=0.0)
     assert helper_test_simplify(UOps.ALU, dtypes.float, vin=(UOp(UOps.CONST, dtypes.bool, vin=(), arg=True), c0, c0), arg=TernaryOps.WHERE) == c0
@@ -851,7 +852,7 @@ class TestKernelOpts(unittest.TestCase):
       ], apply_tc=True, atol=atol, rtol=rtol)
 
   def test_padto_matmul(self):
-    if CI and Device.DEFAULT in ["CUDA", "RHIP"]: self.skipTest("super slow on CUDA and RHIP because of the big grid dims")
+    if CI and Device.DEFAULT in ["CUDA", "AMD"]: self.skipTest("super slow on CUDA and AMD because of the big grid dims")
     N = 17 * 17
     Tensor.manual_seed(289)
     a = Tensor.rand(N, N)

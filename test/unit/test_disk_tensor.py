@@ -284,7 +284,6 @@ class TestDiskTensor(unittest.TestCase):
     ret = t.to("CLANG").bitcast(dtypes.uint16) + 1
     assert ret.tolist() == [2827, 3341, 3855, 4369, 4883]
 
-  @unittest.skipIf(Device.DEFAULT == "RHIP", "no real HIP device exists in CI")
   def test_bf16_disk_write_read(self):
     t = Tensor([10000, -1, -1000, -10000, 20], dtype=dtypes.float32)
     t.to(f"disk:{temp('f32')}").realize()
