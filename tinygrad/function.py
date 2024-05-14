@@ -88,34 +88,36 @@ class Sigmoid(Function):
 
 # approximations
 def _taylor_series(x:LazyBuffer, coeffs, a=0.0) -> LazyBuffer:
+  ret_dtype = x.dtype
+  x = x.cast(dtypes.double)
   approx = x.const(coeffs[0])
   delta = x.e(BinaryOps.SUB, x.const(a))
   delta_pow = x.const(1)
   for coeff in coeffs[1:]:
     delta_pow = delta_pow.e(BinaryOps.MUL, delta)
     approx = approx.e(BinaryOps.ADD, x.const(coeff).e(BinaryOps.MUL, delta_pow))
-  return approx
+  return approx.cast(ret_dtype)
 
 class SinTaylor(Function):
-  coeffs = [0.0, 1.0, 0.0, -0.16666666666666666, 0.0, 0.008333333333333333, 0.0, -0.0001984126984126984, 0.0, 2.7557319223985893e-06, 0.0, -2.505210838544172e-08, 0.0, 1.6059043836821613e-10, 0.0, -7.647163731819816e-13, 0.0, 2.8114572543455206e-15, 0.0, -8.22063524662433e-18, 0.0, 1.9572941063391263e-20, 0.0, -3.868170170630684e-23, 0.0, 6.446950284384474e-26, 0.0, -9.183689863795546e-29, 0.0, 1.1309962886447716e-31, 0.0, -1.216125041553518e-34, 0.0, 1.151633562077195e-37]
+  coeffs = [[0,1,0,-1][i%4]/math.factorial(i) for i in range(35)]
 
   @staticmethod
   def reduce_range(x:LazyBuffer) -> LazyBuffer:
     pi_n_half, pi_half, pi, pi_2 = x.const(-math.pi/2), x.const(math.pi/2), x.const(math.pi), x.const(math.pi*2)
     rem = x.e(BinaryOps.DIV, pi_2) # [-oo,oo]
-    rem = rem.e(BinaryOps.SUB, rem.cast(dtypes.int).cast(x.dtype)).e(BinaryOps.MUL, pi_2) # [-2π,2π]
+    rem = rem.e(BinaryOps.SUB, rem.cast(dtypes.ulong).cast(x.dtype)).e(BinaryOps.MUL, pi_2) # [-2π,2π]
     fold = rem.e(BinaryOps.CMPLT, pi_n_half).e(TernaryOps.WHERE, rem.e(UnaryOps.NEG).e(BinaryOps.SUB, pi), rem) # [-π/2,2π]
     fold = fold.e(BinaryOps.CMPLT, pi_half).e(TernaryOps.WHERE, fold, fold.e(UnaryOps.NEG).e(BinaryOps.ADD, pi)) # [-π,π/2]
-    fold = fold.e(BinaryOps.CMPLT, pi_n_half).e(TernaryOps.WHERE, fold.e(UnaryOps.NEG).e(BinaryOps.SUB, pi), fold) # [-π/2,π/2]
-    return fold
+    return fold.e(BinaryOps.CMPLT, pi_n_half).e(TernaryOps.WHERE, fold.e(UnaryOps.NEG).e(BinaryOps.SUB, pi), fold) # [-π/2,π/2]
 
-  def forward(self, x:LazyBuffer) -> LazyBuffer: 
+  def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
-    if x.dtype not in (dtypes.float, dtypes.double):
-      x.cast(dtypes.float)
+    x = x.cast(dtypes.double)
+    # return SinTaylor.reduce_range(x).cast(self.x.dtype)
     return _taylor_series(SinTaylor.reduce_range(x), self.coeffs).cast(self.x.dtype)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
+    pass
     b = self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)
     b = _taylor_series(SinTaylor.reduce_range(b), self.coeffs)
     return b.e(BinaryOps.MUL, grad_output)
