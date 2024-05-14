@@ -78,12 +78,10 @@ class LAMB(Optimizer):
     super().__init__(params, lr)
     self.b1, self.b2, self.eps, self.wd, self.adam = b1, b2, eps, wd, adam
     self.b1_t, self.b2_t = (Tensor([1], dtype=dtypes.float32, device=self.device, requires_grad=False).realize() for _ in [b1, b2])
-    self.t = Tensor([0], dtype=dtypes.int32, device=self.device, requires_grad=False).realize()
     self.m = [Tensor.zeros(*t.shape, dtype=dtypes.float32, device=t.device, requires_grad=False).contiguous() for t in self.params]
     self.v = [Tensor.zeros(*t.shape, dtype=dtypes.float32, device=t.device, requires_grad=False).contiguous() for t in self.params]
 
   def _step(self) -> List[Tensor]:
-    self.t += 1
     self.b1_t *= self.b1
     self.b2_t *= self.b2
     for i, t in enumerate(self.params):
@@ -100,4 +98,4 @@ class LAMB(Optimizer):
       else:
         r = 1.0
       t.assign((t.detach() - self.lr * r * up).cast(t.dtype))
-    return [self.t] + self.m + self.v
+    return [self.b1_t, self.b2_t] + self.m + self.v
