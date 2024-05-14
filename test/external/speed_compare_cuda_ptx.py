@@ -31,7 +31,7 @@ if __name__ == "__main__":
     dev.compiler = CUDACompiler(dev.arch)
     lin = ast_str_to_lin(ast, opts=dev.renderer)
     lin.hand_coded_optimizations()
-    cuda_prg = CompiledRunner(lin.to_program()) 
+    cuda_prg = CompiledRunner(lin.to_program())
 
     bufs = bufs_from_lin(lin)
 
