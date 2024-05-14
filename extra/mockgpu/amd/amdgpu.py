@@ -126,7 +126,7 @@ class PM4Executor(AMDQueue):
 
     mval = read_op()
     can_cont = cmp(mval, val)
-    if not can_cont: self.rptr[0] = (self.rptr[0] - 7) % (self.size // 4) # revert packet, need to wait again
+    if not can_cont: self.rptr[0] = self.rptr[0] - 7 # revert packet, need to wait again
     return can_cont
 
   def _exec_set_sh_reg(self, n):
