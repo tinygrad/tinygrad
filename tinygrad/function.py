@@ -84,7 +84,7 @@ class Sin(Function):
     # q = q.e(BinaryOps.MUL, x.const(2 * math.pi))
     # x = x.e(BinaryOps.SUB, q)
 
-    no_terms = 50
+    no_terms = 30
     # no_terms = 15
     res = x.const(0)
     term = x
