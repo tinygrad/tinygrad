@@ -19,13 +19,13 @@ def rand_lcg(*shape, device=None, dtype=None, **kwargs):
   Tensor._rng_counter.assign(Tensor._rng_counter + num*2).realize()
   counts1 = Tensor.arange(num, device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._rng_counter.to(device) # Hack: Double arange to fuse
   counts2 = Tensor.arange(num, num*2, device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._rng_counter.to(device)
-  counts1 = (counts1 * (2 ** 13)) ^ Tensor._seed
-  counts2 = (counts2 * (2 ** 13)) ^ Tensor._seed
+  counts1 = (counts1 * (2 ** 13) + Tensor._seed) ^ counts1
+  counts2 = (counts2 * (2 ** 13) + Tensor._seed) ^ counts2
 
   m1, m2, a1, a2, b1, b2 = 4294967291, 2147483647, 1664525, 16807, 1013904223, 0
-  seed1 = (x1 := a1 * counts1 + b1) - m1 * (x1.div(m1, upcast=False)).floor() # Cannot use %
-  seed2 = (x2 := a2 * counts2 + b2) - m2 * (x2.div(m2, upcast=False)).floor()
-  out = (seed2 ^ seed1).cast(dtypes.float32).div(m1, upcast=False)
+  counts1 = (x1 := a1 * counts1 + b1) - m1 * (x1.div(m1, upcast=False)).floor() # Cannot use %
+  counts2 =  (x2 := a2 * counts2 + b2) - m2 * (x2.div(m2, upcast=False)).floor()
+  out = (counts1 ^ counts2).cast(dtypes.float32).div(m1, upcast=False)
   out = out.reshape(shape).cast(dtypes.default_float if dtype is None else dtype)
   if (dtype or dtypes.default_float) == dtypes.half: out = out.clip(0, 1 - 0.001) # Avoid overflow
   out.requires_grad = kwargs.get("requires_grad")
