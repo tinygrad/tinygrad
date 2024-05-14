@@ -1,12 +1,144 @@
-from typing import List, Dict, Optional, cast, Generator, DefaultDict, Tuple, Union
-from collections import defaultdict
-from dataclasses import dataclass
-from tinygrad.dtype import DType
-from tinygrad.helpers import colored, getenv, dedup, DEBUG, GlobalCounters, ansilen
-from tinygrad.ops import ScheduleItem, BufferOps, LoadOps, copy_ast
-from tinygrad.device import Runner, Device, BufferCopy, BufferXfer
-from tinygrad.buffer import Buffer
-from tinygrad.shape.symbolic import Variable, sym_infer
+from typing import List, Dict, Optional, cast, Generator, Tuple
+import time
+from dataclasses import dataclass, replace
+from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int
+from tinygrad.ops import BufferOps, LoadOps, LazyOp
+from tinygrad.device import Device, Buffer
+from tinygrad.shape.symbolic import Variable, sym_infer, sint
+from tinygrad.renderer import Renderer, Program
+from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.engine.schedule import ScheduleItem
+
+# **************** Program Creation ****************
+
+logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS", "") else None, getenv("LOGKERNS_LEVEL", 1)
+def get_linearizer(renderer:Renderer, ast:Tuple[LazyOp, ...]) -> Linearizer:
+  if DEBUG >= 3:
+    from tinygrad.features.graph import print_tree
+    for op in ast: print_tree(op)
+  k = Linearizer(*ast, opts=renderer)
+  k.required_optimizations()
+  if not NOOPT:
+    if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
+    if BEAM >= 1:
+      from tinygrad.features.search import beam_search, time_linearizer, bufs_from_lin
+      kb, k_opt = Linearizer(*ast, opts=renderer), k
+      kb.required_optimizations()
+      rawbufs = bufs_from_lin(kb, allocate=False)
+      k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
+      if getenv("BEAM_COMPARE", 1):
+        # TODO: move the HC/TC/BEAM compare to beam_search so it can be optionally cached which choice is better
+        lins: List[Tuple[str, Linearizer]] = [(f"beam{BEAM.value}", k), (("tc" if used_tensor_cores else "hc"), k_opt)]
+        if used_tensor_cores:
+          lins.append(("hc", Linearizer(*ast, opts=renderer)))
+          lins[-1][1].hand_coded_optimizations()
+        timed = sorted([(nm, tk, time_linearizer(tk, rawbufs, allow_test_size=False, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
+        if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
+        k = timed[0][1]
+        if logkerns is not None and logkerns_level > 1: logkerns.writelines([f"{(lin.ast, lin.applied_opts)}\n" for (_,lin,_) in timed[1:]])
+  # TODO: check the correctness inline once compare_linearizer is in core
+  if logkerns is not None: logkerns.writelines([f"{(k.ast, k.applied_opts)}\n"])
+  if DEBUG >= 4: print((k.ast, k.applied_opts)) # print here to show final applied_opts for all kernels instead of just in beam_search
+  return k
+
+# **************** Runners ****************
+
+class Runner:
+  def __init__(self, display_name:str, dname:str, op_estimate:sint=0, mem_estimate:sint=0):
+    self.first_run, self.display_name, self.dname, self.op_estimate, self.mem_estimate = True, display_name, dname, op_estimate, mem_estimate
+  @property
+  def device(self): return Device[self.dname]
+  def exec(self, rawbufs:List[Buffer], var_vals:Optional[Dict[Variable, int]]=None) -> Optional[float]:
+    return self(rawbufs, {} if var_vals is None else var_vals)
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False) -> Optional[float]:
+    raise NotImplementedError("override this")
+
+class CompiledRunner(Runner):
+  def __init__(self, p:Program, precompiled:Optional[bytes]=None):
+    if DEBUG >= 4: print(p.src)
+    self.p:Program = p
+    self.lib:bytes = precompiled if precompiled is not None else Device[p.dname].compiler.compile_cached(p.src)
+    self.clprg = Device[p.dname].runtime(p.function_name, self.lib)
+    super().__init__(p.name, p.dname, p.op_estimate, p.mem_estimate)
+
+  def __reduce__(self): return self.__class__, (self.p, self.lib)
+
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False) -> Optional[float]:
+    global_size, local_size = self.p.launch_dims(var_vals)
+    if global_size is not None and local_size is None and all_int(self.p.global_size): # type: ignore[arg-type]
+      # TODO: this is copied from get_program
+      from tinygrad.features.search import optimize_local_size
+      local_size = optimize_local_size(self.clprg, global_size, rawbufs)
+      global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
+      self.p = replace(self.p, global_size=global_size, local_size=local_size)
+    lra = {}
+    if global_size:
+      lra['global_size'] = global_size
+      assert len(global_size) == 3, "global size must have len 3"
+    if local_size:
+      lra['local_size'] = local_size
+      assert len(local_size) == 3, "local size must have len 3"
+    return self.clprg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k] for k in self.p.vars), wait=wait)
+
+class CustomOp(Runner):
+  def __init__(self, fxn):
+    self.fxn = fxn
+    super().__init__(self.fxn.__name__, "CUSTOM", 0, 0)
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False): self.fxn(*rawbufs)
+
+class EmptyOp(Runner):
+  def __init__(self, buf:Buffer): super().__init__(colored(f"empty {buf.size:10d} {buf.dtype}", "yellow"), buf.device)
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False): pass
+
+class ViewOp(Runner):
+  def __init__(self, buf:Buffer): super().__init__(colored(f"view {buf.nbytes:8d} @ {buf.offset:<10d}", "yellow"), buf.device)
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False):
+    assert rawbufs[0]._base is not None and rawbufs[0]._base == rawbufs[1].base, f"must be base {rawbufs}"
+
+class BufferCopy(Runner):
+  def __init__(self, total_sz, dest_device, src_device):
+    if total_sz >= 1e6: name = f"{type(self).__name__[6:].lower()} {total_sz/1e6:7.2f}M, {dest_device[:7]:>7s} <- {src_device[:7]:7s}"
+    else: name = f"{type(self).__name__[6:].lower()} {total_sz:8d}, {dest_device[:7]:>7s} <- {src_device[:7]:7s}"
+    super().__init__(colored(name, "yellow"), dest_device, 0, total_sz)
+  def copy(self, dest, src):
+    if src.device.startswith("DISK") and hasattr(dest.allocator, 'copy_from_fd') and src.nbytes >= 4096 and hasattr(src.allocator.device, 'fd'):
+      dest.allocator.copy_from_fd(dest._buf, src.allocator.device.fd, src._buf.offset, src.nbytes)
+    elif src.device.startswith("DISK") and hasattr(dest.allocator, 'as_buffer'):
+      # fast(ish) path, uses readinto in diskbuffers
+      src.allocator.copyout(dest.allocator.as_buffer(dest._buf), src._buf)
+    else:
+      dest.copyin(src.as_buffer(allow_zero_copy=True))  # may allocate a CPU buffer depending on allow_zero_copy
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False):
+    dest, src = rawbufs[0:2]
+    assert dest.size == src.size and dest.dtype == src.dtype, f"buffer copy mismatch, {dest.size} != {src.size}, {dest.dtype} != {src.dtype}"
+    st = time.perf_counter()
+    self.copy(dest, src)
+    if wait:
+      Device[dest.device].synchronize()
+      return time.perf_counter() - st
+
+class BufferXfer(BufferCopy):
+  def copy(self, dest, src):
+    if hasattr(dest.allocator.device, "track_cross_buffer") and hasattr(src.allocator, "track_cross_device"):
+      dest.allocator.device.track_cross_buffer.append(src)
+      src.allocator.track_cross_device.add(dest.allocator.device)
+    dest.allocator.transfer(dest._buf, src._buf, dest.nbytes, src_dev=src.allocator.device, dest_dev=dest.allocator.device)
+
+# **************** method cache ****************
+
+method_cache: Dict[Tuple[str, Tuple[LazyOp, ...], int, bool], CompiledRunner] = {}
+def get_runner(dname:str, ast:Tuple[LazyOp, ...]) -> CompiledRunner:
+  ckey = (dname, ast, BEAM.value, False)
+  if cret:=method_cache.get(ckey): return cret
+  bkey = (dname.split(":")[0], ast, BEAM.value, True)
+  if bret:=method_cache.get(bkey):
+    method_cache[ckey] = ret = CompiledRunner(replace(bret.p, dname=dname), bret.lib)
+  else:
+    prg: Program = get_linearizer(Device[dname].renderer, ast).to_program()
+    method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, dname=dname))
+  return ret
+
+# **************** lowering functions ****************
 
 @dataclass(frozen=True)
 class ExecItem:
@@ -27,34 +159,15 @@ class ExecItem:
       self.prg.first_run = False
     return et
 
-class CustomOp(Runner):
-  def __init__(self, fxn):
-    self.fxn = fxn
-    super().__init__(self.fxn.__name__, "CUSTOM", 0, 0)
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False): self.fxn(*rawbufs)
-
-class EmptyOp(Runner):
-  def __init__(self, buf:Buffer): super().__init__(colored(f"empty {buf.size:10d} {buf.dtype}", "yellow"), buf.device)
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False): pass
-
-class ViewOp(Runner):
-  def __init__(self, buf:Buffer): super().__init__(colored(f"view {buf.nbytes:8d} @ {buf.offset:<10d}", "yellow"), buf.device)
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False):
-    assert rawbufs[0]._base is not None and rawbufs[0]._base == rawbufs[1].base, f"must be base {rawbufs}"
-
-def lower_runner(runner:Runner, bufs) -> ExecItem:
-  # TODO: globals isn't on the stupid diskrunner, remove the need for it
-  return ExecItem(runner, [bufs[x[0]] for x in runner.globals] if hasattr(runner, 'globals') else bufs)
-
 def lower_schedule_item(si:ScheduleItem) -> ExecItem:
-  assert len(set(x.device for x in si.bufs)) == 1 or si.ast[0].op is LoadOps.COPY
-  if si.ast[0].op is BufferOps.STORE: return lower_runner(Device[si.outputs[0].device].get_runner(*si.ast), si.bufs)
-  assert len(si.ast) == 1 and len(si.outputs) == 1, "only ASTRunner supports multioutput"
+  assert len(set(x.device for x in si.bufs)) == 1 or si.ast[0].op is LoadOps.COPY or getenv("USE_COPY_KERNEL")
+  if si.ast[0].op is BufferOps.STORE:
+    runner = get_runner(si.outputs[0].device, si.ast)
+    return ExecItem(runner, [si.bufs[x[0]] for x in runner.p.globals])
   out, ast = si.outputs[0], si.ast[0]
   if ast.op is LoadOps.COPY:
     kernel_type = BufferCopy
     if hasattr(Device[out.device].allocator, 'transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]:
-      if getenv("USE_COPY_KERNEL"): return lower_runner(Device[out.device].get_runner(copy_ast(ast.arg)), si.bufs)
       kernel_type = BufferXfer
     return ExecItem(kernel_type(ast.arg, out.device, si.inputs[0].device), list(si.bufs))
   if ast.op is LoadOps.CUSTOM: return ExecItem(CustomOp(ast.arg), list(si.bufs))
@@ -65,44 +178,9 @@ def lower_schedule_item(si:ScheduleItem) -> ExecItem:
 def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, None]:
   while len(schedule): yield lower_schedule_item(schedule.pop(0))
 
+# **************** main run function ****************
+
 capturing: List = []  # put classes with an add method in here
-
-def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]]], debug_prefix="") -> Dict[Buffer, Buffer]:
-  if getenv("NO_MEMORY_PLANNER"): return {}
-  last_appearance = {}
-  for i,u in enumerate(buffers):
-    for buf in u: last_appearance[buf] = i
-
-  # LRU algorithm
-  assigned: Dict[Buffer, Buffer] = {}
-  local_cache: DefaultDict[Tuple[str, int, DType], List[Buffer]] = defaultdict(list)
-
-  def handle_buffer(buf):
-    key = (buf.device, buf.size, buf.dtype)
-    if buf not in assigned:
-      if len(ll:=local_cache[key]): assigned[buf] = ll.pop()
-      else: assigned[buf] = Buffer(*key)
-    if i == last_appearance[buf]:
-      if assigned[buf] not in local_cache[key]: local_cache[key].append(assigned[buf])
-
-  for i,u in enumerate(buffers):
-    for buf in u:
-      # all unallocated unparented buffers are fair game to replace
-      if buf.is_allocated() or buf.lb_refcount > 0: continue
-      # handle view buffers
-      if buf._base is not None:
-        assigned[buf] = Buffer(buf.device, buf.size, buf.dtype, base=assigned.get(buf._base, buf._base), offset=buf.offset)
-      else:
-        handle_buffer(buf)
-
-  if DEBUG >= 1 and len(ak:=dedup(assigned.keys())) != len(av:=dedup(assigned.values())):
-    print(debug_prefix+f"memory reduced from {sum([x.nbytes for x in ak])/1e6:.2f} MB -> {sum([x.nbytes for x in av])/1e6:.2f} MB,",
-          f"{len(ak)} -> {len(av)} bufs")
-  return assigned
-
-def memory_planner(schedule:List[ScheduleItem]) -> List[ScheduleItem]:
-  assigned = _internal_memory_planner([si.bufs for si in schedule])
-  return [ScheduleItem(si.ast, tuple(assigned.get(x, x) for x in si.bufs)) for si in schedule]
 
 def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[Variable, int]]=None):
   for ei in lower_schedule(schedule):

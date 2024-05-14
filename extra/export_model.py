@@ -1,5 +1,6 @@
 from typing import Tuple, Dict, List
 from tinygrad.dtype import DType
+from tinygrad.renderer import Program
 from tinygrad.tensor import Device, Tensor
 from tinygrad.engine.jit import TinyJit
 from tinygrad.nn.state import get_state_dict
@@ -23,8 +24,8 @@ web_utils = {
 def compile_net(run:TinyJit, special_names:Dict[int,str]) -> Tuple[Dict[str,str],List[Tuple[str,List[str],List[int]]],Dict[str,Tuple[int,DType,int]],Dict[str,Tensor]]:
   functions, bufs, bufs_to_save, statements, bufnum = {}, {}, {}, [], 0
   for ji in run.jit_cache:
-    fxn = ji.prg
-    functions[fxn.name] = fxn.prg   # NOTE: this assumes all with the same name are the same
+    fxn: Program = ji.prg.p
+    functions[fxn.function_name] = fxn.src   # NOTE: this assumes all with the same name are the same
     cargs = []
     for i,arg in enumerate(ji.bufs):
       key = id(arg)
@@ -36,7 +37,7 @@ def compile_net(run:TinyJit, special_names:Dict[int,str]) -> Tuple[Dict[str,str]
           bufnum += 1
           if i > 0: bufs_to_save[bufs[key][0]] = arg   # if first usage of a buffer is not an output, and it's not a special name
       cargs.append(bufs[key][0])
-    statements.append((fxn.name, cargs, fxn.global_size, fxn.local_size))
+    statements.append((fxn.function_name, cargs, fxn.global_size, fxn.local_size))
 
   return functions, statements, {name:(size, dtype, key) for (name,size,dtype,key) in bufs.values()}, bufs_to_save
 

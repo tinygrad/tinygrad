@@ -9,6 +9,7 @@ from tinygrad.codegen.linearizer import Linearizer, UOp
 from tinygrad.codegen.kernel import Opt, OptOps
 from tinygrad.features.search import get_linearizer_actions, bufs_from_lin
 from tinygrad.features.graph import print_tree
+from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import getenv, from_mv, prod, colored, Context, DEBUG
 from tinygrad.ops import LazyOp, UnaryOps, BufferOps
 
@@ -55,7 +56,7 @@ def run_linearizer(lin: Linearizer, rawbufs=None, var_vals=None):
 
   # TODO: images needs required_optimization
   try:
-    prg = device.to_program(lin)
+    prg = CompiledRunner(lin.to_program())
   except Exception:
     traceback.print_exc()
     return "COMPILE_ERROR"

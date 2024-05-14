@@ -5,9 +5,10 @@ from typing import Tuple, List, Optional, Any, Dict
 import pickle, base64, itertools, time, struct
 from tinygrad.dtype import DType, dtypes, ImageDType
 from tinygrad.helpers import all_same, getenv, flatten
-from tinygrad.device import Compiled, Allocator, Compiler, CompilerOptions
+from tinygrad.device import Compiled, Compiler, Allocator
 from tinygrad.codegen.uops import UOpGraph, UOps
 from tinygrad.ops import BinaryOps, TernaryOps, exec_alu
+from tinygrad.renderer import Renderer
 
 def _load(m, i):
   if i < 0 or i >= len(m): raise IndexError(f"load out of bounds, size is {len(m)} and access is {i}")
@@ -86,7 +87,7 @@ class PythonProgram:
         elif uop is UOps.CONST:
           ul[i] = [[arg] * warp_size for _ in range(dtype.count)] if dtype.count > 1 else [arg] * warp_size
         elif uop is UOps.DEFINE_ACC:
-          ul[i] = [[arg] * warp_size for _ in range(dtype.count)] if dtype.count > 1 else [arg] * warp_size
+          ul[i] = [[arg[0]] * warp_size for _ in range(dtype.count)] if dtype.count > 1 else [arg[0]] * warp_size
         elif uop is UOps.LOOP:
           if i not in ul: ul[i] = [inp[0][0]] * warp_size
           else:
@@ -177,13 +178,18 @@ class PythonProgram:
         i += 1
     return time.perf_counter() - st
 
-class PythonCompiler(Compiler):
-  compiler_opts = CompilerOptions("METAL", has_tensor_cores=True) if getenv("EMULATE_METAL") else \
-    (CompilerOptions("HSA", has_tensor_cores=True) if getenv("EMULATE_HSA") else \
-    (CompilerOptions("CUDA", has_tensor_cores=True) if getenv("EMULATE_CUDA") else CompilerOptions("PYTHON")))
+class PythonRenderer(Renderer):
+  device = "PYTHON"
+  def __init__(self):
+    if getenv("EMULATE_METAL"): self.device, self.has_tensor_cores = "METAL", True
+    if getenv("EMULATE_HSA"): self.device, self.has_tensor_cores = "HSA", True
+    if getenv("EMULATE_CUDA"): self.device, self.has_tensor_cores = "CUDA", True
+
   def render(self, name:str, uops:UOpGraph) -> str:
     lops = [(u.uop, u.dtype, [uops.uops.index(v) for v in u.vin], u.arg) for u in uops]
     return base64.b64encode(pickle.dumps(lops)).decode()
+
+class PythonCompiler(Compiler):
   def compile(self, src:str) -> bytes: return base64.b64decode(src)
 
 class PythonAllocator(Allocator):
@@ -193,4 +199,4 @@ class PythonAllocator(Allocator):
 
 class PythonDevice(Compiled):
   def __init__(self, device:str):
-    super().__init__(device, PythonAllocator(), PythonCompiler(), PythonProgram)
+    super().__init__(device, PythonAllocator(), PythonRenderer(), PythonCompiler(), PythonProgram)
