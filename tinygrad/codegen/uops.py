@@ -128,6 +128,20 @@ constant_folder = PatternMatcher([
   ({"uop": UOps.STORE, "vin": ({"__name__": "buf"}, {"__name__": "idx"}, {"uop": UOps.ALU, "arg": TernaryOps.WHERE,
                        "vin": ({"__name__": "gate"}, {"__name__": "alt"}, {"uop": UOps.LOAD, "vin": ({"__name__": "buf"}, {"__name__": "idx"})})})},
     lambda buf, idx, gate, alt: UOp(UOps.STORE, None, (buf, idx, alt, gate))),
+  # store float4/float2 directly (remove CAST/GEP)
+  ({"uop": UOps.STORE, "vin": ({"__name__": "buf"}, {"__name__": "idx"}, {"uop": UOps.CAST, "vin":
+                                tuple({"uop": UOps.GEP, "vin": ({"__name__": "val"},), "arg": i} for i in range(4))})},
+   lambda buf,idx,val: UOp(UOps.STORE, None, (buf, idx, val))),
+  ({"uop": UOps.STORE, "vin": ({"__name__": "buf"}, {"__name__": "idx"}, {"uop": UOps.CAST, "vin":
+                                tuple({"uop": UOps.GEP, "vin": ({"__name__": "val"},), "arg": i} for i in range(2))})},
+   lambda buf,idx,val: UOp(UOps.STORE, None, (buf, idx, val))),
+  # CAST-PHI-GEP -> PHI-CAST
+  ({"__name__": "root", "uop": UOps.CAST, "vin":
+    tuple({"uop": UOps.PHI, "vin": ({"uop": UOps.GEP, "vin": ({"__name__": "val"},), "arg": i}, {"__name__": f"v{i}"})} for i in range(4))},
+    lambda root, val, v0, v1, v2, v3: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1, v2, v3))))),
+  ({"__name__": "root", "uop": UOps.CAST, "vin":
+    tuple({"uop": UOps.PHI, "vin": ({"uop": UOps.GEP, "vin": ({"__name__": "val"},), "arg": i}, {"__name__": f"v{i}"})} for i in range(2))},
+    lambda root, val, v0, v1: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1))))),
 ])
 
 # *** uop graph ***
@@ -188,8 +202,8 @@ class UOpGraph:
     def add_parents(u:UOp):
       if u in nodes: return
       nodes[u] = None
-      #u.vin = tuple(rewrite_map[x] for x in u.vin)
       for x in u.vin: add_parents(x)
+    sink = UOp(UOps.SINK, None, tuple(x for x in sink.vin if x.uop is not UOps.NOOP))
     add_parents(sink)
 
     # BFS toposort

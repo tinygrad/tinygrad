@@ -194,9 +194,9 @@ class TestLinearizer(unittest.TestCase):
     k.linearize()
     accs = [u for u in k.uops if u.uop is UOps.DEFINE_ACC]
     stores = [u for u in k.uops if u.uop is UOps.STORE]
-    assert len(accs) == 1
+    assert len(accs) == 0  # it's removed now
     assert len(stores) == 1
-    assert stores[0].vin[-1].dtype == accs[0].dtype == dtypes.float.vec(4)
+    assert stores[0].vin[-1].dtype == dtypes.float.vec(4)
 
   def test_upcast_with_locals(self):
     if not (opts:=Device[Device.DEFAULT].renderer).has_local or not opts.has_shared or not opts.supports_float4:
@@ -371,7 +371,9 @@ class TestLinearizer(unittest.TestCase):
       lin = Linearizer(ast) # this is a dummy ast
 
       lin.uops = UOpGraph()
-      return lin.uops.add(uop, dtype, vin, arg)
+      ret = lin.uops.add(uop, dtype, vin, arg)
+      lin.uops.add(UOps.SINK, None, (ret,))
+      return list(lin.uops.uops)[-1]
 
     c0 = UOp(UOps.CONST, dtypes.float, vin=(), arg=0.0)
     assert helper_test_simplify(UOps.ALU, dtypes.float, vin=(UOp(UOps.CONST, dtypes.bool, vin=(), arg=True), c0, c0), arg=TernaryOps.WHERE) == c0
