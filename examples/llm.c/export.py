@@ -63,7 +63,7 @@ if __name__ == "__main__":
     if v.lazydata.base.buffer not in used_buffers: print(f"UNUSED: {k}")
     if v.grad is not None: grad_state_dict['grad_'+k] = v.grad
   state_dict.update(grad_state_dict)
-  state_dict.update({'adam_b1_t': optimizer.b1_t, 'adam_b1_t': optimizer.b2_t, 'adam_lr': optimizer.lr})
+  state_dict.update({'adam_b1_t': optimizer.b1_t, 'adam_b2_t': optimizer.b2_t, 'adam_lr': optimizer.lr})
   inverse_state_dict = {v:k for k,v in state_dict.items()}
   for p,m,v in zip(optimizer.params, optimizer.m, optimizer.v):
     nm = inverse_state_dict[p]
