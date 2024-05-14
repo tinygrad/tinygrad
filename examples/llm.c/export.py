@@ -16,7 +16,6 @@ if __name__ == "__main__":
   model = GPT(GPTConfig(n_layer=getenv("NLAYER", 12), n_head=12, n_embd=768))
   #model.load_pretrained()
   for p in nn.state.get_parameters(model): p.replace(Tensor.empty(p.shape, dtype=p.dtype)) # fake load pretrained
-  Tensor.training = True
 
   seen = set()
   #early_sched = create_schedule([x.lazydata for x in nn.state.get_parameters(model)], seen)
@@ -25,6 +24,7 @@ if __name__ == "__main__":
   #B, T = Variable("B", 1, 128).bind(4), 64 #Variable("T", 1, 1024).bind(64)
   B, T = 4, 64
 
+  Tensor.training = True
   optimizer = nn.optim.Adam(nn.state.get_parameters(model), lr=1e-4)
   warmup_count = getenv("WARMUP", 3)
   for i in range(warmup_count):  # TODO: why does it take three and not two to stablize
