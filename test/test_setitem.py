@@ -55,6 +55,7 @@ class TestSetitem(unittest.TestCase):
     t[1] *= 2
     np.testing.assert_allclose(t.numpy(), [[0, 1], [4, 6]])
 
+    # NOTE: have to manually cast setitem target to least_upper_float for div
     t = Tensor.arange(4, dtype=dtypes.float).reshape(2, 2).contiguous()
     t[1] /= 2
     np.testing.assert_allclose(t.numpy(), [[0, 1], [1, 1.5]])
