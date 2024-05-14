@@ -47,13 +47,10 @@ class Sin(Function):
 
 class SinApprox(Function):
   def _floor(self, x:LazyBuffer) -> LazyBuffer:
-    x_dtype = x.dtype
-    floor = x.cast(dtypes.long).cast(x_dtype)
-    adjustment = x.e(BinaryOps.CMPLT, floor).cast(x_dtype)
+    floor = x.cast(dtypes.long).cast(x.dtype)
+    adjustment = x.e(BinaryOps.CMPLT, floor).cast(x.dtype)
     return x.e(BinaryOps.CMPLT, x.const(0)).e(TernaryOps.WHERE, floor.e(BinaryOps.SUB, adjustment), floor)
   def _two_pi_mod(self, x:LazyBuffer) -> LazyBuffer:
-    x_dtype = x.dtype
-    if Device.DEFAULT != "METAL": x = x.cast(dtypes.double)
     two_pi = x.const(math.pi * 2)
     floor_div = self._floor(x.e(BinaryOps.DIV, two_pi))
     return x.e(BinaryOps.SUB, floor_div.e(BinaryOps.MUL, two_pi)).cast(x.dtype)
