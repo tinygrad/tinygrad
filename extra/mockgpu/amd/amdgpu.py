@@ -19,9 +19,9 @@ WAIT_REG_MEM_FUNCTION_ALWAYS = 0
 WAIT_REG_MEM_FUNCTION_EQ = 3 # ==
 WAIT_REG_MEM_FUNCTION_GEQ = 5 # >=
 
-remu = ctypes.CDLL("/usr/local/lib/libremu.so")
-remu.run_asm.restype = ctypes.c_uint32
-remu.run_asm.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p]
+# remu = ctypes.CDLL("/usr/local/lib/libremu.so")
+# remu.run_asm.restype = ctypes.c_uint32
+# remu.run_asm.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p]
 
 def create_sdma_packets():
   # TODO: clean up this, if we want to keep it
