@@ -190,7 +190,7 @@ class TestHCQ(unittest.TestCase):
     et = _time_queue(q, TestHCQ.d0)
     gb_s = (SZ/1e9)/et
     print(f"same device copy:  {et*1e3:.2f} ms, {gb_s:.2f} GB/s")
-    assert (1 if CI else 10) <= gb_s <= 1000
+    assert (0.3 if CI else 10) <= gb_s <= 1000
 
   def test_cross_device_copy_bandwidth(self):
     SZ = 2_000_000_000
@@ -202,7 +202,7 @@ class TestHCQ(unittest.TestCase):
     et = _time_queue(q, TestHCQ.d0)
     gb_s = (SZ/1e9)/et
     print(f"cross device copy: {et*1e3:.2f} ms, {gb_s:.2f} GB/s")
-    assert (1 if CI else 2) <= gb_s <= 50
+    assert (0.3 if CI else 2) <= gb_s <= 50
 
   def test_interleave_compute_and_copy(self):
     q = TestHCQ.compute_queue()

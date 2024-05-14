@@ -64,19 +64,19 @@ class PM4Executor(AMDQueue):
 
   def execute(self):
     while self.rptr[0] < self.wptr[0]:
+      cont = True
       header = self._next_dword()
       packet_type = header >> 30
       op = (header >> 8) & 0xFF
       n = (header >> 16) & 0x3FFF
       assert packet_type == 3, "Can parse only packet3"
-      cont = True
       if op == amd_gpu.PACKET3_SET_SH_REG: self._exec_set_sh_reg(n) 
       elif op == amd_gpu.PACKET3_ACQUIRE_MEM: self._exec_acquire_mem(n)
       elif op == amd_gpu.PACKET3_RELEASE_MEM: self._exec_release_mem(n)
       elif op == amd_gpu.PACKET3_WAIT_REG_MEM: cont = self._exec_wait_reg_mem(n)
       elif op == amd_gpu.PACKET3_DISPATCH_DIRECT: self._exec_dispatch_direct(n)
       else: raise RuntimeError(f"PM4: Unknown opcode: {op}")
-      if not cont: break
+      if not cont: return
 
   def _exec_acquire_mem(self, n):
     assert n == 6
