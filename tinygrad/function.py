@@ -47,10 +47,10 @@ class Sin(Function):
     old_dtype = x.dtype
     # x = x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(4*math.pi)).cast(dtypes.int64).cast(old_dtype).e(BinaryOps.MUL, x.const(4*math.pi)))
     d = x.const(2*math.pi)
-    lt_10p16 = x.e(BinaryOps.CMPLT, x.const(10**16))
-    d = lt_10p16.e(TernaryOps.WHERE, d, x.const(2**16*math.pi))
     lt_10p14 = x.e(BinaryOps.CMPLT, x.const(10**14))
     d = lt_10p14.e(TernaryOps.WHERE,d, x.const(4*math.pi))
+    lt_10p16 = x.e(BinaryOps.CMPLT, x.const(10**16))
+    d = lt_10p16.e(TernaryOps.WHERE, d, x.const(2**16*math.pi))
     divres = x.e(BinaryOps.DIV, d)
     # temp = divres.cast(dtypes.int64).cast(old_dtype).e(BinaryOps.MUL, x.const(2 * math.pi))
     temp = divres.cast(dtypes.int64).cast(old_dtype).e(BinaryOps.MUL, d)
