@@ -332,7 +332,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [llvm, clang, gpu, cuda, hip, ptx, amd] #, triton]
+        backend: [llvm, clang, gpu, cuda, ptx, amd] #, triton]
 
     name: Tests on (${{ matrix.backend }})
     runs-on: ubuntu-latest
@@ -356,7 +356,7 @@ jobs:
           path: ~/.cache/tinygrad/downloads/
           key: downloads-cache-${{ matrix.backend }}-${{ env.DOWNLOAD_CACHE_VERSION }}
       - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'cuda' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\n' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nPTX=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas' || matrix.backend == 'hip' && 'RHIP=1\nFORWARD_ONLY=1' || matrix.backend == 'amd' && 'AMD=1\nMOCKGPU=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
+        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'cuda' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\n' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nPTX=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas' || matrix.backend == 'amd' && 'AMD=1\nMOCKGPU=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
       - name: Install OpenCL
         if: matrix.backend == 'gpu'
         run: |
@@ -398,8 +398,8 @@ jobs:
         run: |
           cd ${{ github.workspace }}/gpuocelot/ocelot/build
           sudo ninja install -d explain
-      - name: Install packages (hip)
-        if: matrix.backend == 'hip' || matrix.backend == 'amd'
+      - name: Install packages (amd)
+        if: matrix.backend == 'amd'
         run: |
           echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
           wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
@@ -416,7 +416,7 @@ jobs:
         run: pip install -e '.[testing${{matrix.backend=='llvm'&&',llvm'||matrix.backend=='cuda'&&',cuda'||matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
       - name: Check Device.DEFAULT and print some source
         run: |
-          PYTHONPATH=${{ github.workspace }} python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['LLVM','CLANG','CUDA','GPU','RHIP','AMD'], Device.DEFAULT"
+          PYTHONPATH=${{ github.workspace }} python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['LLVM','CLANG','CUDA','GPU','AMD'], Device.DEFAULT"
           DEBUG=5 PYTHONPATH=${{ github.workspace }} FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
       - name: Verify OpenCL autogen
         if: matrix.backend == 'gpu'
@@ -433,8 +433,8 @@ jobs:
           ./autogen_stubs.sh nv
           diff /tmp/cuda.py.bak tinygrad/runtime/autogen/cuda.py
           diff /tmp/nv_gpu.py.bak tinygrad/runtime/autogen/nv_gpu.py
-      - name: Verify HIP autogen
-        if: matrix.backend == 'hip'
+      - name: Verify AMD autogen
+        if: matrix.backend == 'amd'
         run: |
           cp tinygrad/runtime/autogen/hsa.py /tmp/hsa.py.bak
           cp tinygrad/runtime/autogen/comgr.py /tmp/comgr.py.bak
@@ -442,8 +442,8 @@ jobs:
           ./autogen_stubs.sh comgr
           diff /tmp/hsa.py.bak tinygrad/runtime/autogen/hsa.py
           diff /tmp/comgr.py.bak tinygrad/runtime/autogen/comgr.py
-      - name: Run pytest (not cuda or hip/amd)
-        if: matrix.backend!='cuda' && matrix.backend!='ptx' && matrix.backend!='triton' && matrix.backend != 'hip' && matrix.backend != 'amd'
+      - name: Run pytest (not cuda or amd)
+        if: matrix.backend!='cuda' && matrix.backend!='ptx' && matrix.backend!='triton' && matrix.backend != 'amd'
         run: python -m pytest -n=auto test/ --durations=20
       - name: Run ONNX (only LLVM)
         if: matrix.backend == 'llvm'
@@ -451,9 +451,6 @@ jobs:
       - name: Run pytest (cuda)
         if: matrix.backend=='cuda'||matrix.backend=='ptx'||matrix.backend=='triton'
         run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors)' --ignore=test/external --ignore=test/models --durations=20
-      - name: Run pytest (hip)
-        if: matrix.backend=='hip'
-        run: python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py test/test_linearizer.py test/test_randomness.py test/imported/test_indexing.py test/external/external_test_hip_compile.py --durations=20
       - name: Run pytest (amd)
         if: matrix.backend=='amd'
         run: python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py test/test_linearizer.py test/test_randomness.py test/imported/test_indexing.py test/external/external_test_hcq.py --durations=20
