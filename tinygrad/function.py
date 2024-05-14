@@ -46,8 +46,8 @@ class Sin(Function):
     if Device.DEFAULT != "METAL": x = x.cast(dtypes.float64)
     old_dtype = x.dtype
     # x = x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(4*math.pi)).cast(dtypes.int64).cast(old_dtype).e(BinaryOps.MUL, x.const(4*math.pi)))
-    d = x.const(2*math.pi)
-    lt_10p14 = x.e(BinaryOps.CMPLT, x.const(10**14))
+    d = x.const(2 * math.pi)
+    lt_10p14 = x.e(BinaryOps.CMPLT, x.const(10**13))
     d = lt_10p14.e(TernaryOps.WHERE,d, x.const(4*math.pi))
     lt_10p16 = x.e(BinaryOps.CMPLT, x.const(10**16))
     d = lt_10p16.e(TernaryOps.WHERE, d, x.const(2**16*math.pi))
@@ -57,7 +57,7 @@ class Sin(Function):
     x = x.e(BinaryOps.SUB, temp)
 
     # no_terms = 30
-    # no_terms = 18
+    # no_terms = 16
     no_terms = 17
     res = x.const(0)
     term = x
@@ -69,7 +69,7 @@ class Sin(Function):
       # term = term.e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const(2 * i + 2)).e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const(2 * i + 3))
       if i != no_terms - 1:
         term = term.e(BinaryOps.MUL, x).e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const((2 * i + 2)*(2 * i + 3)))
-      # term = term.e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const((2 * i + 2)*(2 * i + 3))).e(BinaryOps.MUL, x)
+        # term = term.e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const((2 * i + 2)*(2 * i + 3))).e(BinaryOps.MUL, x)
     return res.cast(beginning_dtype)
 
   def forward(self, x:LazyBuffer) -> LazyBuffer:
