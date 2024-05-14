@@ -52,8 +52,8 @@ class Sin(Function):
     temp = divres.cast(dtypes.int64).cast(old_dtype).e(BinaryOps.MUL, x.const(4 * math.pi))
     x = x.e(BinaryOps.SUB, temp)
 
-    no_terms = 30
-    # no_terms = 15
+    # no_terms = 30
+    no_terms = 15
     res = x.const(0)
     term = x
     for i in range(no_terms):
