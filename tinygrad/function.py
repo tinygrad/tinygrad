@@ -73,6 +73,7 @@ class Sin(Function):
     return res.cast(beginning_dtype)
 
   def forward(self, x:LazyBuffer) -> LazyBuffer:
+    x = x.e(UnaryOps.ANG_RED)
     self.x = x
     return self.taylor_sin(x)
     # return x.e(UnaryOps.SIN)
