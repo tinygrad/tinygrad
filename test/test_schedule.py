@@ -792,7 +792,12 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(out, 2))
     np.testing.assert_allclose(out.numpy(), np.pad(np.log2(a.numpy()), ((0, 1), (0, 1), (0, 1)), constant_values=1.0).sum())
 
-  def test_shrink_pad_fuse(self): pass
+  def test_shrink_pad_fuse(self):
+    a = Tensor.ones((3, )).contiguous().realize()
+    b = Tensor.ones((3, )).contiguous().realize()
+    out = (a + b).shrink(((0, 1),)).pad(((0, 1),)).contiguous()
+    run_schedule(check_schedule(out, 1))
+    np.testing.assert_equal(out.numpy(), [2, 0])
 
   # TODO: should not shuffle unsafe pad ops through any pads, even if buffer is shrunk overall (#3437)
   def test_shrink_pad_unsafe_nofuse(self):
