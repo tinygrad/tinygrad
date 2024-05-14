@@ -711,6 +711,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(16384)], lambda x: x.sum())
   def test_sum_relu(self):
     helper_test_op([(3,4,5)], lambda x: x.relu().sum().relu())
+  def test_sum_tiny(self):
+    helper_test_op([(4,2,2)], lambda x: x.sum(axis=(0,2)))
   def test_sum(self):
     helper_test_op([(45,3)], lambda x: x.sum())
     helper_test_op([(3,4,5,6)], lambda x: x.sum(axis=3))
