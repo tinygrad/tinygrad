@@ -1094,6 +1094,8 @@ class TestIndexing(unittest.TestCase):
       r[zero]
     numpy_testing_assert_equal_helper(r, r[...])
 
+  # TODO fancy setitem
+  '''
   def test_setitem_scalars(self):
     zero = Tensor(0, dtype=dtypes.int64)
 
@@ -1121,6 +1123,7 @@ class TestIndexing(unittest.TestCase):
     # TODO: weird inaccuracy Max relative difference: 3.85322971e-08
     # numpy_testing_assert_equal_helper(9.9, r)
     np.testing.assert_allclose(9.9, r, rtol=1e-7)
+  '''
 
   def test_basic_advanced_combined(self):
     # From the NumPy indexing example
@@ -1518,7 +1521,10 @@ class TestNumpy(unittest.TestCase):
   def test_broaderrors_indexing(self):
     a = Tensor.zeros(5, 5)
     self.assertRaises(IndexError, a.__getitem__, ([0, 1], [0, 1, 2]))
+    # TODO: fancy setitem
+    '''
     self.assertRaises(IndexError, a.contiguous().__setitem__, ([0, 1], [0, 1, 2]), 0)
+    '''
 
   # TODO out of bound getitem does not raise error
   '''
