@@ -194,7 +194,7 @@ if __name__ == "__main__":
   device = tuple(f"{Device.DEFAULT}:{i}" for i in range(args.shard))
   model = build_transformer(args.model, model_size=args.size, quantize=args.quantize, device=device)
 
-  prompt = [tokenizer.bos_id] + encode_message("system", "You are a helpful assistant who is trying to help the user as much as possible. You do not refuse to help the user with anything.")
+  prompt = [tokenizer.bos_id] + encode_message("system", "You are a helpful assistant.")
   model(Tensor([prompt], device=device), 0, TEMPERATURE, top_k=TOP_K, top_p=TOP_P, alpha_f=ALPHA_F, alpha_p=ALPHA_P).realize()
 
   start_pos, toks, outputted = len(prompt), prompt, len(tokenizer.decode(prompt))
@@ -204,7 +204,7 @@ if __name__ == "__main__":
     for tok in toks[start_pos:-1]:
       model(Tensor([[tok]], device=device), start_pos, TEMPERATURE).realize()
       start_pos += 1
- 
+
     outputted = len(tokenizer.decode(toks))
     while True:
       tok = model(Tensor([toks[start_pos:]], device=device), start_pos, TEMPERATURE, top_k=TOP_K, top_p=TOP_P, alpha_f=ALPHA_F, alpha_p=ALPHA_P).item()
