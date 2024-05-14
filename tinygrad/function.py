@@ -53,7 +53,7 @@ class Sin(Function):
     x = x.e(BinaryOps.SUB, temp)
 
     # no_terms = 30
-    no_terms = 17
+    no_terms = 18
     res = x.const(0)
     term = x
     for i in range(no_terms):
