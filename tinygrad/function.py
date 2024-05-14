@@ -1,6 +1,5 @@
 """This is where the forwards and backwards passes live."""
 import math
-from tinygrad.device import Device
 from typing import Tuple, Optional
 from tinygrad.helpers import argsort
 from tinygrad.dtype import dtypes, DType, sum_acc_dtype
