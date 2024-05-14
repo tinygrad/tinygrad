@@ -75,8 +75,8 @@ class Sin(Function):
     # q = q.e(BinaryOps.MUL, x.const(2 * math.pi))
     # x = x.e(BinaryOps.SUB, q)
 
-    # no_terms = 70
-    no_terms = 16
+    no_terms = 70
+    # no_terms = 16
     res = x.const(0)
     term = x
     for i in range(no_terms):
@@ -189,15 +189,15 @@ class Sin(Function):
     print("x: ")
     print(__import__('tinygrad').Tensor(self.x).numpy())
     print("===")
-    return self.sin_approx(self.x)
-    # return self.taylor_sin(x)
+    # return self.sin_approx(self.x)
+    return self.taylor_sin(x)
 
     # return x.e(UnaryOps.SIN)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     # return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
-    return self.sin_approx(self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)).e(BinaryOps.MUL, grad_output)
-    # return self.taylor_sin(self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)).e(BinaryOps.MUL, grad_output)
+    # return self.sin_approx(self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)).e(BinaryOps.MUL, grad_output)
+    return self.taylor_sin(self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)).e(BinaryOps.MUL, grad_output)
 
 # NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
