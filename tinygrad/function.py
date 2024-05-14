@@ -85,7 +85,8 @@ class Sin(Function):
         res = res.e(BinaryOps.SUB, term)
       # term = term.e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const(2 * i + 2)).e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const(2 * i + 3))
       term = term.e(BinaryOps.MUL, x).e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const((2 * i + 2)*(2 * i + 3)))
-    return res
+    return res.cast(beginning_dtype)
+    
 
   def whole_part(self, x:LazyBuffer, divisor:LazyBuffer) -> LazyBuffer:
     old_dtype = x.dtype
