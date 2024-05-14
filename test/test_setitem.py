@@ -73,7 +73,7 @@ class TestSetitem(unittest.TestCase):
     t = Tensor.arange(4).reshape(2, 2).contiguous()
     t[1] += 2
     t = t.contiguous()
-    # TODO: RuntimeError: must be contiguous for assign
+    # TODO: RuntimeError: must be contiguous for assign ShapeTracker(views=(View(shape=(2,), strides=(1,), offset=2, mask=None, contiguous=False),))
     t[1] -= 1
     np.testing.assert_allclose(t.numpy(), [[0, 1], [3, 4]])
 
