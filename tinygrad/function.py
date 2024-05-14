@@ -167,9 +167,9 @@ class Exp2Approx(Function):
     self.x = x
     rb = 64
     power = self._floor(x)#.cast(dtypes.long)
-    power = x.e(BinaryOps.CMPEQ, x.const('nan')).e(TernaryOps.WHERE, x.const('nan'), power)
-    power = x.e(BinaryOps.CMPEQ, x.const('-inf')).e(TernaryOps.WHERE, x.const('-inf'), power)
-    power = x.e(BinaryOps.CMPEQ, x.const('inf')).e(TernaryOps.WHERE, x.const('inf'), power)
+    power = x.e(BinaryOps.CMPEQ, x.const(float('nan'))).e(TernaryOps.WHERE, x.const(float('nan')), power)
+    power = x.e(BinaryOps.CMPEQ, x.const(float('-inf'))).e(TernaryOps.WHERE, x.const(float('-inf')), power)
+    power = x.e(BinaryOps.CMPEQ, x.const(float('inf'))).e(TernaryOps.WHERE, x.const(float('inf')), power)
     dx = x.e(BinaryOps.SUB, power.cast(x.dtype))
     multiplier = x.const(1)
     COEFFICIENTS = [1, 0.6931471805599453, 0.2402265069591007, 0.0555041086650001, 0.0096181291071613, 0.0013333554702035,
