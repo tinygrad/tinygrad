@@ -1,10 +1,13 @@
 // tinymath - a tiny single-header math library for tinygrad
 // a bunch of stuff here is taken from musl and
 // https://github.com/JuliaMath/openlibm
-#include <stdint.h> // only used for int8_t instead of char which is buggy for some reason
+#include "common.h"
 
-#define NAN __builtin_nanf("")
-#define INFINITY __builtin_inff()
+double sin(double);
+float sinf(float);
+#include "exp2.h"
+#include "log2.h"
+#include "sqrt.h"
 
 #define __IS_FP(x) (sizeof((x) + 1ULL) == sizeof((x) + 1.0f))
 

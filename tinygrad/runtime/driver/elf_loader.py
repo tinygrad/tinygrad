@@ -27,9 +27,6 @@ class ElfLoader:
     self.cursor, self.left = 0, 0
     self.external_symbols = {
       'sin': addrof(libc.sin), 'sinf': addrof(libc.sinf),
-      'sqrt': addrof(libc.sqrt), 'sqrtf': addrof(libc.sqrtf),
-      'exp2': addrof(libc.exp2), 'exp2f': addrof(libc.exp2f),
-      'log2': addrof(libc.log2), 'log2f': addrof(libc.log2f),
     }
   def alloc(self, size: int, ensure_only: bool=False) -> int:
     size = round_up(size, ALIGNMENT)
