@@ -26,7 +26,7 @@ if __name__ == "__main__":
   average_tm_cuda, average_tm_ptx = 0, 0
   for num,ast in enumerate(ast_strs):
     # cuda compile
-    lin = ast_str_to_lin(ast, opts=dev.compiler.compiler_opts)
+    lin = ast_str_to_lin(ast, opts=dev.renderer)
     lin.hand_coded_optimizations()
     cuda_prg = dev.to_runner(lin)
 

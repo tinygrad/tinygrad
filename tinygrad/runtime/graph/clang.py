@@ -2,12 +2,12 @@ from typing import List, Dict, cast
 import ctypes
 from tinygrad.helpers import dedup, cpu_time_execution, GraphException, DEBUG
 from tinygrad.engine.jit import GraphRunner
-from tinygrad.device import Buffer, Device, CompiledRunner
-from tinygrad.engine.realize import ExecItem
+from tinygrad.device import Buffer, Device
+from tinygrad.engine.realize import ExecItem, CompiledRunner
 from tinygrad.shape.symbolic import Variable
 from tinygrad.runtime.ops_clang import ClangProgram
-from tinygrad.renderer.cstyle import ClangLanguage
-render_dtype = ClangLanguage().render_dtype
+from tinygrad.renderer.cstyle import ClangRenderer
+render_dtype = ClangRenderer().render_dtype
 
 class ClangGraph(GraphRunner):
   def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):

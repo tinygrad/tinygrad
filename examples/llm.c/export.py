@@ -48,7 +48,7 @@ if __name__ == "__main__":
   for ast in ast_dedup:
     k = Device["CLANG"].get_linearizer(*ast)
     k.linearize()
-    src = Device["CLANG"].compiler.compiler_opts.renderer(to_function_name(k.name), k.uops)
+    src = Device["CLANG"].renderer.render(to_function_name(k.name), k.uops)
     srcs[ast] = (k.name, src)
   print("functions:", len(srcs))
   used_buffers = dedup(flatten([si.bufs for si in sched]))

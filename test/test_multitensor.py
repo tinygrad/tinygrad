@@ -1,12 +1,11 @@
 import unittest, functools, random
 from typing import List
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes
-from tinygrad.device import CompiledRunner
 from tinygrad.ops import LoadOps, ReduceOps
 from tinygrad.helpers import CI, prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.schedule import create_schedule
-from tinygrad.engine.realize import lower_schedule, BufferCopy
+from tinygrad.engine.realize import lower_schedule, BufferCopy, CompiledRunner
 from tinygrad.features.multi import all_reduce, MultiLazyBuffer
 from random import randint
 import numpy as np
