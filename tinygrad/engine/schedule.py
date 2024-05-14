@@ -9,11 +9,8 @@ from tinygrad.shape.symbolic import Variable
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
-<<<<<<< HEAD
 from tinygrad.shape.view import IndexedView
-=======
 from tinygrad.device import Buffer
->>>>>>> master
 
 # creation can recurse a lot
 sys.setrecursionlimit(10000)
