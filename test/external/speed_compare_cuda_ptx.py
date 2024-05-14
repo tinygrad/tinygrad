@@ -42,12 +42,12 @@ if __name__ == "__main__":
     lin.linearize()
     ptx_prg = CompiledRunner(lin.to_program())
 
+    # warmup
     try:
       cuda_prg(bufs, {}, wait=True)
     except RuntimeError:
       print("cuda failed ast:", num)
       continue
-
     ptx_prg(bufs, {}, wait=True)
 
     tm_cuda, tm_ptx = [], []
