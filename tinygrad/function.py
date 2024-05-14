@@ -45,45 +45,47 @@ class Sin(Function):
     beginning_dtype = x.dtype
     if Device.DEFAULT != "METAL": x = x.cast(dtypes.float64)
     old_dtype = x.dtype
-    # x = x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(2 * math.pi)).cast(dtypes.int64).cast(old_dtype).e(BinaryOps.MUL, x.const(2 * math.pi)))
     # x = x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(4*math.pi)).cast(dtypes.int64).cast(old_dtype).e(BinaryOps.MUL, x.const(4*math.pi)))
-    # x = x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(2*math.pi)).cast(dtypes.ulong).cast(old_dtype).e(BinaryOps.MUL, x.const(2*math.pi)))
-    # x = x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(math.pi)).cast(dtypes.int32).cast(old_dtype).e(BinaryOps.MUL, x.const(math.pi)))
-
-    # x = x.cast(dtypes.float64)
-    # TWOPI = 6.2831853071795864769252867665590057683943387987502
-    # print(TWOPI)
     lt_10p16 = x.e(BinaryOps.CMPLT, x.const(10**16))
     d = lt_10p16.e(TernaryOps.WHERE, x.const(4*math.pi), x.const(2**16*math.pi))
-    # q = x.e(BinaryOps.DIV, x.const(2**16 * math.pi))
-    q = x.e(BinaryOps.DIV, d)
-    # print(x.dtype)
-    # q = x.e(BinaryOps.DIV, x.const(TWOPI))
-    # print("q: ")
-    # print(__import__('tinygrad').Tensor(q).numpy())
+    divres = x.e(BinaryOps.DIV, d)
+    temp = divres.cast(dtypes.int64).cast(old_dtype).e(BinaryOps.MUL, x.const(4 * math.pi))
+    x = x.e(BinaryOps.SUB, temp)
 
-    # # q = x.e(BinaryOps.DIV, x.const(math.pi))
-    # print("q: ")
-    # print(__import__('tinygrad').Tensor(q).numpy()[0])
-    # q = q.cast(dtypes.float32)
-    # print("q: ")
-    # print(__import__('tinygrad').Tensor(q).numpy()[0])
-    q_floor = q.cast(dtypes.int64).cast(old_dtype)
-    # q_floor = q.cast(dtypes.ulong).cast(old_dtype)
-    # print("q_floor: ")
-    # print(__import__('tinygrad').Tensor(q_floor).numpy())
-    diff = q.e(BinaryOps.SUB, q_floor)
-    # print("diff: ")
-    # print(__import__('tinygrad').Tensor(diff).numpy())
-    x = diff.e(BinaryOps.MUL, x.const(4 * math.pi))
-    # x = diff.e(BinaryOps.MUL, x.const(math.pi))
-
-    # Import Tensor from tinygrad
-    # print("x: ")
-    # print(__import__('tinygrad').Tensor(x).numpy())
-    # q = q.e(BinaryOps.MUL, x.const(2 * math.pi))
-    # x = x.e(BinaryOps.SUB, q)
-
+    # # x = x.cast(dtypes.float64)
+    # # TWOPI = 6.2831853071795864769252867665590057683943387987502
+    # # print(TWOPI)
+    # lt_10p16 = x.e(BinaryOps.CMPLT, x.const(10**16))
+    # d = lt_10p16.e(TernaryOps.WHERE, x.const(4*math.pi), x.const(2**16*math.pi))
+    # # q = x.e(BinaryOps.DIV, x.const(2**16 * math.pi))
+    # q = x.e(BinaryOps.DIV, d)
+    # # print(x.dtype)
+    # # q = x.e(BinaryOps.DIV, x.const(TWOPI))
+    # # print("q: ")
+    # # print(__import__('tinygrad').Tensor(q).numpy())
+    #
+    # # # q = x.e(BinaryOps.DIV, x.const(math.pi))
+    # # print("q: ")
+    # # print(__import__('tinygrad').Tensor(q).numpy()[0])
+    # # q = q.cast(dtypes.float32)
+    # # print("q: ")
+    # # print(__import__('tinygrad').Tensor(q).numpy()[0])
+    # q_floor = q.cast(dtypes.int64).cast(old_dtype)
+    # # q_floor = q.cast(dtypes.ulong).cast(old_dtype)
+    # # print("q_floor: ")
+    # # print(__import__('tinygrad').Tensor(q_floor).numpy())
+    # diff = q.e(BinaryOps.SUB, q_floor)
+    # # print("diff: ")
+    # # print(__import__('tinygrad').Tensor(diff).numpy())
+    # x = diff.e(BinaryOps.MUL, x.const(4 * math.pi))
+    # # x = diff.e(BinaryOps.MUL, x.const(math.pi))
+    #
+    # # Import Tensor from tinygrad
+    # # print("x: ")
+    # # print(__import__('tinygrad').Tensor(x).numpy())
+    # # q = q.e(BinaryOps.MUL, x.const(2 * math.pi))
+    # # x = x.e(BinaryOps.SUB, q)
+    #
     no_terms = 30
     # no_terms = 15
     res = x.const(0)
