@@ -89,6 +89,8 @@ class Sin(Function):
     
 
   def whole_part(self, x:LazyBuffer, divisor:LazyBuffer) -> LazyBuffer:
+    beginning_dtype = x.dtype
+    if Device.DEFAULT != "METAL": x = x.cast(dtypes.float64)
     old_dtype = x.dtype
     sign = x.e(BinaryOps.CMPLT, x.const(0)).e(TernaryOps.WHERE, x.const(-1), x.const(1))
     x = x.e(BinaryOps.DIV, divisor.e(BinaryOps.MUL, sign))
@@ -96,7 +98,7 @@ class Sin(Function):
     # Subtract 1 if x is negative
     is_neg = sign.e(BinaryOps.CMPLT, sign.const(0))
     x = is_neg.e(TernaryOps.WHERE, x.e(BinaryOps.SUB, x.const(1)), x)
-    return x
+    return x.cast(beginning_dtype)
 
   # def whole_part(self, x:LazyBuffer, divisor:LazyBuffer) -> LazyBuffer:
   #   old_dtype = x.dtype
@@ -186,15 +188,15 @@ class Sin(Function):
     print("x: ")
     print(__import__('tinygrad').Tensor(self.x).numpy())
     print("===")
-    # return self.sin_approx(self.x)
-    return self.taylor_sin(x)
+    return self.sin_approx(self.x)
+    # return self.taylor_sin(x)
 
     # return x.e(UnaryOps.SIN)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
-    # return self.sin_approx(self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)).e(BinaryOps.MUL, grad_output)
-    return self.taylor_sin(self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)).e(BinaryOps.MUL, grad_output)
+    return self.sin_approx(self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)).e(BinaryOps.MUL, grad_output)
+    # return self.taylor_sin(self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)).e(BinaryOps.MUL, grad_output)
 
 # NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
