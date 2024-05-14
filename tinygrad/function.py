@@ -142,12 +142,7 @@ class Log2Approx(Function):
     exponents = eq_nan.e(TernaryOps.WHERE, x.const(float('nan')), exponents)
     mantissa = eq_nan.e(TernaryOps.WHERE, x.const(1.0), mantissa)
 
-    #for p in range(-7, 0):
-    #  less_than_power = x.e(BinaryOps.CMPLT, x.const(float(2 ** p)))
-    #  exponents = less_than_power.e(TernaryOps.WHERE, exponents.e(BinaryOps.ADD, x.const(p)), exponents)
-    #  mantissa = less_than_power.e(TernaryOps.WHERE, mantissa.e(BinaryOps.DIV, x.const(float(2 ** p))), mantissa)
     x = mantissa.e(BinaryOps.SUB, x.const(1))
-
     result = x.const(COEFFICIENTS[-1])
     for coeff in COEFFICIENTS[-2::-1]:
       result = result.e(BinaryOps.MUL, x).e(BinaryOps.ADD, x.const(coeff))
