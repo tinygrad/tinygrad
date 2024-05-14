@@ -66,7 +66,7 @@ class SinApprox(Function):
     mpi_pi_x = pi.e(BinaryOps.CMPLT, two_pi_x).e(TernaryOps.WHERE, two_pi_x.e(BinaryOps.SUB, two_pi), two_pi_x)
     mpi_pi2_x = half_pi.e(BinaryOps.CMPLT, mpi_pi_x).e(TernaryOps.WHERE, pi.e(BinaryOps.SUB, mpi_pi_x), mpi_pi_x)
     mpi2_pi2_x = mpi_pi2_x.e(BinaryOps.CMPLT, half_pi.e(UnaryOps.NEG)).e(TernaryOps.WHERE, pi.e(BinaryOps.ADD, mpi_pi2_x).e(UnaryOps.NEG), mpi_pi2_x)
-    
+
     result = mpi2_pi2_x.const(COEFFICIENTS[-1])
     for coeff in COEFFICIENTS[-2::-1]:
       result = result.e(BinaryOps.MUL, mpi2_pi2_x).e(BinaryOps.MUL, mpi2_pi2_x).e(BinaryOps.ADD, mpi2_pi2_x.const(coeff))
@@ -96,31 +96,31 @@ class Log(Function):
 class Log2Approx(Function):
   def forward(self, x: LazyBuffer) -> LazyBuffer:
     self.x = x
-    band = 2
+    band, rb, range_rel_eps = 2, 64, 1e-5
     exponents = x.const(0)
-    pos_powers = range(0, 65)
-    neg_powers = range(-64, 0)
+    pos_powers = range(0, rb + 1)
+    neg_powers = range(-rb, 0)
     ranges = [
-      (band ** (p-1), band ** p)
+      (float(band ** (p-1)), float(band ** p) * (1 + range_rel_eps))
       for p in pos_powers
     ] + [
-      (band ** (p - 1), band ** p)
+      (float(band ** (p - 1)), float(band ** p) * (1 + range_rel_eps))
       for p in neg_powers
     ]
     COEFFICIENTS = [1.4426950408889634, -0.7213475202241454, 0.4808983379134929, -0.3606744438252881, 0.2885380556670273,
                     -0.2400045744858276, 0.2164902844497397, -0.0620352892023374, 0.9800031524195777, 3.5822088209556608,
                     11.5471082527186173, 23.3693016463376679, 31.4508031904777532, 24.6578446521392927, 9.1010085120176569]
     mantissa = x
-    for p in range(-64, 65):
+    for p in range(-rb, rb + 1):
       gridpow = float(band ** p)
       lt_power = x.e(BinaryOps.CMPLT, x.const(float(ranges[p][1])))
       gt_power = x.const(float(ranges[p][0])).e(BinaryOps.CMPLT, x)
       exponents = lt_power.e(BinaryOps.MUL, gt_power).e(TernaryOps.WHERE, x.const(p), exponents)
       mantissa = lt_power.e(BinaryOps.MUL, gt_power).e(TernaryOps.WHERE, mantissa.e(BinaryOps.DIV, x.const(gridpow)), mantissa)
-    
+
     lt_power = x.e(BinaryOps.CMPLT, x.const(float(ranges[-64][0])))
     gt_zero = x.const(0).e(BinaryOps.CMPLT, x)
-    exponents = lt_power.e(BinaryOps.MUL, gt_zero).e(TernaryOps.WHERE, x.const(-64), exponents)
+    exponents = lt_power.e(BinaryOps.MUL, gt_zero).e(TernaryOps.WHERE, x.const(-rb), exponents)
     mantissa = lt_power.e(TernaryOps.WHERE, x.const(1.0), mantissa)
 
     eq_zero = x.e(BinaryOps.CMPEQ, x.const(0))
@@ -129,9 +129,9 @@ class Log2Approx(Function):
     lt_zero = x.e(BinaryOps.CMPLT, x.const(0))
     exponents = lt_zero.e(TernaryOps.WHERE, x.const(float('nan')), exponents)
 
-    gt_power = x.const(float(ranges[64][1])).e(BinaryOps.CMPLT, x)
+    gt_power = x.const(float(ranges[rb][1])).e(BinaryOps.CMPLT, x)
     lt_inf = x.e(BinaryOps.CMPLT, x.const(float('inf')))
-    exponents = gt_power.e(BinaryOps.MUL, lt_inf).e(TernaryOps.WHERE, x.const(64), exponents)
+    exponents = gt_power.e(BinaryOps.MUL, lt_inf).e(TernaryOps.WHERE, x.const(rb), exponents)
     mantissa = gt_power.e(TernaryOps.WHERE, x.const(1.0), mantissa)
     eq_inf = x.e(BinaryOps.CMPEQ, x.const(float('inf')))
     exponents = eq_inf.e(TernaryOps.WHERE, x.const(float('inf')), exponents)
@@ -166,6 +166,7 @@ class Exp2Approx(Function):
 
   def forward(self, x: LazyBuffer) -> LazyBuffer:
     self.x = x
+    rb = 64
     power = self._floor(x)#.cast(dtypes.long)
     power = x.e(BinaryOps.CMPEQ, x.const('nan')).e(TernaryOps.WHERE, x.const('nan'), power)
     power = x.e(BinaryOps.CMPEQ, x.const('-inf')).e(TernaryOps.WHERE, x.const('-inf'), power)
@@ -184,24 +185,24 @@ class Exp2Approx(Function):
       result = result.e(BinaryOps.MUL, dx).e(BinaryOps.ADD, dx.const(coeff))
     result = result.e(BinaryOps.MUL, multiplier)
 
-    for p in range(-64, 65):
+    for p in range(-rb, rb+1):
       condition = power.e(BinaryOps.CMPEQ, power.const(p))
       result = condition.e(TernaryOps.WHERE, result.e(BinaryOps.MUL, result.const(float(2 ** p))), result)
 
-    lt_power = power.e(BinaryOps.CMPLT, power.const(-64))
+    lt_power = power.e(BinaryOps.CMPLT, power.const(-rb))
     gt_minf = power.const(float('-inf')).e(BinaryOps.CMPLT, power)
-    result = lt_power.e(BinaryOps.MUL, gt_minf).e(TernaryOps.WHERE, result.e(BinaryOps.MUL, result.const(float(2 ** (-64)))), result)
-    
+    result = lt_power.e(BinaryOps.MUL, gt_minf).e(TernaryOps.WHERE, result.e(BinaryOps.MUL, result.const(float(2 ** (-rb)))), result)
+
     eq_minf = power.e(BinaryOps.CMPEQ, power.const(float('-inf')))
     result = eq_minf.e(TernaryOps.WHERE, power.const(0), result)
-    
-    gt_power = power.const(64).e(BinaryOps.CMPLT, power)
+
+    gt_power = power.const(rb).e(BinaryOps.CMPLT, power)
     lt_inf = power.e(BinaryOps.CMPLT, result.const(float('inf')))
-    result = gt_power.e(BinaryOps.MUL, lt_inf).e(TernaryOps.WHERE, result.const(float(2 ** 64)), result)
-    
+    result = gt_power.e(BinaryOps.MUL, lt_inf).e(TernaryOps.WHERE, result.const(float(2 ** rb)), result)
+
     eq_inf = power.e(BinaryOps.CMPEQ, x.const(float('inf')))
     result = eq_inf.e(TernaryOps.WHERE, x.const(float('inf')), result)
-    
+
     eq_nan = power.e(BinaryOps.CMPEQ, x.const(float('nan')))
     result = eq_nan.e(TernaryOps.WHERE, x.const(float('nan')), result)
 
