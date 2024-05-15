@@ -6,7 +6,7 @@ from tinygrad.helpers import CI, prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import lower_schedule, BufferCopy, CompiledRunner
-from tinygrad.features.multi import all_reduce, MultiLazyBuffer
+from tinygrad.multi import all_reduce, MultiLazyBuffer
 from random import randint
 import numpy as np
 from hypothesis import given, strategies as strat, settings
