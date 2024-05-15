@@ -807,5 +807,24 @@ class TestSchedule(unittest.TestCase):
     with self.assertRaises(AssertionError):
       np.testing.assert_equal(out.numpy(), [2, 0])
 
+  def test_base_change_shrink_pad(self):
+    a = Tensor.ones(3, 3).contiguous().realize()
+    b = a.exp2()
+    c = b[:-1, :-1]
+    d = c.pad(((0, 1), (0, 1))) * 2
+    with self.assertRaises(AssertionError):
+      np.testing.assert_equal(d.numpy(), np.pad(np.exp2(a.numpy())[:-1, :-1], ((0, 1), (0, 1)))*2)
+
+  def test_base_change_expand_pad(self):
+    a = Tensor.ones(3, 3).contiguous().realize()
+    b = a.exp2()
+    c = b[:, None, :]
+    d = c.pad(((0, 0), (1, 1), (0, 0))) * 2
+    np.testing.assert_equal(d.numpy(), np.pad(np.exp2(a.numpy())[:, None, :], ((0, 0), (1, 1), (0, 0)))*2)
+
+  def test_base_change_expand_expand(self): pass
+
+  def test_base_change_pad_expand(self): pass
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
