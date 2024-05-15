@@ -48,7 +48,7 @@ class Sin(Function):
             x = x.cast(dtypes.float32)
         self.float_precision = x.dtype
 
-        return self._sin(x).cast(self.beginning_dtype)
+        # return self._sin(x).cast(self.beginning_dtype)
         # res = self._averaging_sin(x)
         # return res.cast(self.beginning_dtype)
 
@@ -60,7 +60,7 @@ class Sin(Function):
     def _averaging_sin(self, x: LazyBuffer) -> LazyBuffer:
         # Compute 5 sines and average
         offsets = [-3,-2, -1, 0, 1, 2, 3]
-        sines = [self._sin(x.e(BinaryOps.ADD, x.const(offset*2*math.pi + offset*1e-19))) for offset in offsets]
+        sines = [self._sin(x.e(BinaryOps.ADD, x.const(offset*2*math.pi))) for offset in offsets]
         sum = x.const(0)
         for s in sines:
             print("s: ")
