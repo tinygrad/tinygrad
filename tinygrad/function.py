@@ -53,18 +53,25 @@ class Sin(Function):
         # return res.cast(self.beginning_dtype)
 
         # Compute normal sin if below 4e13, else use averaging
-        res = self._abs(x).e(BinaryOps.CMPLT, x.const(4e13)).e(TernaryOps.WHERE, self._sin(x), self._averaging_sin(x))
+        # res = self._abs(x).e(BinaryOps.CMPLT, x.const(4e13)).e(TernaryOps.WHERE, self._sin(x), self._averaging_sin(x))
+        print("x: ")
+        print(__import__('tinygrad').Tensor(x).numpy())
+        cond = self._abs(x).e(BinaryOps.CMPLT, x.const(3))
+        print("cond: ")
+        print(__import__('tinygrad').Tensor(cond).numpy())
+        res = cond.e(TernaryOps.WHERE, self._sin(x), self._averaging_sin(x))
         return res.cast(self.beginning_dtype)
 
 
     def _averaging_sin(self, x: LazyBuffer) -> LazyBuffer:
         # Compute 5 sines and average
-        offsets = [-3,-2, -1, 0, 1, 2, 3]
+        # offsets = [-3,-2, -1, 0, 1, 2, 3]
+        offsets = [-2, -1, 0, 1, 2]
         sines = [self._sin(x.e(BinaryOps.ADD, x.const(offset*2*math.pi))) for offset in offsets]
         sum = x.const(0)
         for s in sines:
-            # print("s: ")
-            # print(__import__('tinygrad').Tensor(s).numpy())
+            print("s: ")
+            print(__import__('tinygrad').Tensor(s).numpy())
             sum = sum.e(BinaryOps.ADD, s)
         res = sum.e(BinaryOps.DIV, x.const(len(sines)))
         return res
@@ -82,7 +89,7 @@ class Sin(Function):
         # return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 50, x.const(1)).cast(
         #     self.beginning_dtype
         # )
-        return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 50, x.const(1))
+        return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 30, x.const(1))
 
     def horner_taylor_sin(
         self, x: LazyBuffer, xsq: LazyBuffer, n: int, s: LazyBuffer
@@ -130,6 +137,8 @@ class Sin(Function):
         x = lt0.e(TernaryOps.WHERE, x.e(BinaryOps.ADD, x.const(math.pi)), x)
 
         x = self._mod(x, x.const(2 * math.pi))
+        res = x.e(BinaryOps.CMPEQ, x.const(float('inf'))).e(TernaryOps.WHERE, x.const(math.nan), x)
+        res = x.e(BinaryOps.CMPEQ, x.const(float('-inf'))).e(TernaryOps.WHERE, x.const(math.nan), res)
         return x
     
         # # Return mod 2pi if greater than a certain big value
