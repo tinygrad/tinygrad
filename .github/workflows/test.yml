@@ -87,6 +87,10 @@ jobs:
         python3 -m ruff check . --preview
     - name: Lint tinygrad with pylint
       run: python -m pylint tinygrad/
+    - name: Set Up Editor Config Checker
+      uses: editorconfig-checker/action-editorconfig-checker@main
+    - name: Run Editor Config Checker
+      run: editorconfig-checker
     - name: Run mypy
       run: python -m mypy --strict-equality
     - name: Test Docs
