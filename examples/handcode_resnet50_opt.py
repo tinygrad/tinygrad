@@ -4,12 +4,12 @@ from tinygrad import Tensor, nn
 from tinygrad.ops import LoadOps, get_lazyop_info
 from tinygrad.device import Device, Compiled
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.features.search import time_linearizer, beam_search, bufs_from_lin
+from tinygrad.engine.search import time_linearizer, beam_search, bufs_from_lin
 from tinygrad.helpers import ansilen, DEBUG, getenv
 from tinygrad.shape.symbolic import sym_infer
 from tinygrad.dtype import dtypes
 from tinygrad.engine.schedule import create_schedule
-from tinygrad.features.graph import print_tree
+from tinygrad.engine.graph import print_tree
 
 if __name__ == "__main__":
   if getenv("HALF"):
