@@ -1,7 +1,9 @@
 indent-width = 2
+preview = true
+target-version = "py38"
 
 lint.select = [
-  "F",
+  "F",  # Pyflakes
   "W6",
   "E71",
   "E72",

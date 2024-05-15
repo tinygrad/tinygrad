@@ -1,9 +1,0 @@
-root = true
-
-# 2 space indentation
-[{test/*.py, tinygrad/*.py}]
-end_of_line = lf
-trim_trailing_whitespace = true
-charset = utf-8
-indent_style = space
-indent_size = 2
