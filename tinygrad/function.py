@@ -113,13 +113,108 @@ class Sin(Function):
       # print(__import__('tinygrad').Tensor(s).numpy())
     return s.e(BinaryOps.MUL, x)
 
-  def forward(self, x:LazyBuffer) -> LazyBuffer:
-    x = x.e(UnaryOps.ANG_RED)
+  def _abs(self, x:LazyBuffer) -> LazyBuffer:
+    lt0 = x.e(BinaryOps.CMPLT, x.const(0))
+    return lt0.e(TernaryOps.WHERE, x.e(UnaryOps.NEG), x)
+
+  def _is_even(self, x:LazyBuffer) -> LazyBuffer:
+    x = self._abs(x)
+    ev = x.cast(dtypes.uint64)
+    print("ev: ")
+    print(__import__('tinygrad').Tensor(ev).numpy())
+    ev = ev.e(BinaryOps.MOD, ev.const(2))
+    print("ev mod 2: ")
+    print(__import__('tinygrad').Tensor(ev).numpy())
+    return ev.e(BinaryOps.CMPEQ, ev.const(1))
+
+  def _is_4k(self, x:LazyBuffer) -> LazyBuffer:
+    ev = x.cast(dtypes.uint64)
+    print("ev: ")
+    print(__import__('tinygrad').Tensor(ev).numpy())
+    ev = ev.e(BinaryOps.MOD, ev.const(4))
+    print("ev mod 4: ")
+    print(__import__('tinygrad').Tensor(ev).numpy())
+    return ev.e(BinaryOps.CMPEQ, ev.const(0))
+
+
+
+
+  def reduce_angle(self, x:LazyBuffer) -> LazyBuffer:
+    # Reduce to [-pi/2, pi/2]
     beginning_dtype = x.dtype
     if Device.DEFAULT != "METAL": x = x.cast(dtypes.float64)
     else: x = x.cast(dtypes.float32)
     old_dtype = x.dtype
 
+    lt0 = x.e(BinaryOps.CMPLT, x.const(0))
+    # sign = lt0.e(TernaryOps.WHERE, x.const(-1), x.const(1))
+    # print("sign: ")
+    # print(__import__('tinygrad').Tensor(sign).numpy())
+
+    # x = x.e(UnaryOps.ABS)
+
+
+    x = self._abs(x)
+    print("abs x: ")
+    print(__import__('tinygrad').Tensor(x).numpy())
+
+
+    halfpi = x.const(1.5707963267948966)
+    # d = x.const(2 * math.pi)
+    d = halfpi
+    divres = x.e(BinaryOps.DIV, d)
+    print("divres: ")
+    print(__import__('tinygrad').Tensor(divres).numpy())
+
+    # Check if divres is even. If yes, subtract final value from halfpi
+    is_even = self._is_even(divres)
+    # is_4k = self._is_4k(divres)
+    print("is_even: ")
+    print(__import__('tinygrad').Tensor(is_even).numpy())
+    # x = is_even.e(TernaryOps.WHERE, halfpi.e(BinaryOps.SUB, x), x)
+    # x = x.e(BinaryOps.MUL, sign)
+    # x = is_even.e(TernaryOps.WHERE,x.e(UnaryOps.NEG), x)
+
+    divres_pi = x.e(BinaryOps.DIV, x.const(math.pi))
+    is_even_pi = self._is_even(divres_pi)
+    
+    sign = is_even_pi.e(TernaryOps.WHERE, x.const(-1), x.const(1))
+
+    # If negative, add pi
+    x = lt0.e(TernaryOps.WHERE, x.e(BinaryOps.ADD, x.const(math.pi)), x)
+    # sign = is_4k.e(TernaryOps.WHERE, x.const(1), x.const(-1))
+    # sign = is_even.e(TernaryOps.WHERE, x.const(1), x.const(-1))
+    # temp = divres.cast(dtypes.int64).cast(old_dtype).e(BinaryOps.MUL, x.const(2 * math.pi))
+    temp = divres.cast(dtypes.uint64).cast(old_dtype).e(BinaryOps.MUL, d)
+    print("temp: ")
+    print(__import__('tinygrad').Tensor(temp).numpy())
+    x = x.e(BinaryOps.SUB, temp)
+
+
+    x = is_even.e(TernaryOps.WHERE, halfpi.e(BinaryOps.SUB, x), x)
+    # x = is_4k.e(TernaryOps.WHERE, x.e(BinaryOps.ADD, x.const(math.pi)), x)
+    # print("reduced x abs: ")
+    # print(__import__('tinygrad').Tensor(x).numpy())
+    x = x.e(BinaryOps.MUL, sign)
+    print("reduced x: ")
+    print(__import__('tinygrad').Tensor(x).numpy())
+
+
+
+    return x
+
+
+
+
+
+
+  def forward(self, x:LazyBuffer) -> LazyBuffer:
+    # x = x.e(UnaryOps.ANG_RED)
+    beginning_dtype = x.dtype
+    if Device.DEFAULT != "METAL": x = x.cast(dtypes.float64)
+    else: x = x.cast(dtypes.float32)
+    # old_dtype = x.dtype
+    #
     # d = x.const(2 * math.pi)
     # lt_10p14 = x.e(BinaryOps.CMPLT, x.const(10**13))
     # d = lt_10p14.e(TernaryOps.WHERE,d, x.const(4*math.pi))
@@ -136,8 +231,10 @@ class Sin(Function):
     # print(__import__('tinygrad').Tensor(temp).numpy())
     # temp = divres.cast(dtypes.int64).cast(old_dtype).e(BinaryOps.MUL, divres.const(16*math.pi))
     # x = x.e(BinaryOps.SUB, temp)
-    print("reduced x: ")
-    print(__import__('tinygrad').Tensor(x).numpy())
+    # print("reduced x: ")
+    # print(__import__('tinygrad').Tensor(x).numpy())
+
+    x = self.reduce_angle(x)
     self.x = x
     # return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 30, x.const(1)).cast(beginning_dtype)
     return self._sin(x).cast(beginning_dtype)
