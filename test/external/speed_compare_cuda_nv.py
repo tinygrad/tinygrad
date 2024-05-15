@@ -2,7 +2,8 @@ from tinygrad import Device, dtypes
 from tinygrad.helpers import getenv, colored
 from extra.optimization.helpers import load_worlds, ast_str_to_lin
 from test.external.fuzz_linearizer import get_fuzz_rawbufs
-from tinygrad.features.search import bufs_from_lin
+from tinygrad.engine.search import bufs_from_lin
+from tinygrad.engine.realize import CompiledRunner
 import numpy as np
 
 # move to helpers?
@@ -29,13 +30,15 @@ if __name__ == "__main__":
     culin.hand_coded_optimizations()
     has_bf16 = any(b.dtype == dtypes.bfloat16 for b in culin.membufs)
 
-    cuda_prg = cudev.to_runner(culin)
+    cuda_prg = CompiledRunner(culin.to_program())
     cubufs = bufs_from_lin(culin)
     test_cubufs = get_fuzz_rawbufs(culin) if not has_bf16 else cubufs
 
-    nvlin = ast_str_to_lin(ast, opts=nvdev.renderer)
+    rdr = nvdev.renderer
+    rdr.device = "NV"
+    nvlin = ast_str_to_lin(ast, opts=rdr)
     nvlin.hand_coded_optimizations()
-    nv_prg = nvdev.to_runner(nvlin)
+    nv_prg = CompiledRunner(nvlin.to_program())
     nvbufs = bufs_from_lin(nvlin)
     test_nvbufs = get_fuzz_rawbufs(nvlin) if not has_bf16 else nvbufs
     if not has_bf16:
