@@ -53,13 +53,13 @@ class Sin(Function):
         # return res.cast(self.beginning_dtype)
 
         # Compute normal sin if below 4e13, else use averaging
-        # res = self._abs(x).e(BinaryOps.CMPLT, x.const(4e13)).e(TernaryOps.WHERE, self._sin(x), self._averaging_sin(x))
-        print("x: ")
-        print(__import__('tinygrad').Tensor(x).numpy())
-        cond = self._abs(x).e(BinaryOps.CMPLT, x.const(3))
-        print("cond: ")
-        print(__import__('tinygrad').Tensor(cond).numpy())
-        res = cond.e(TernaryOps.WHERE, self._sin(x), self._averaging_sin(x))
+        res = self._abs(x).e(BinaryOps.CMPLT, x.const(4e13)).e(TernaryOps.WHERE, self._sin(x), self._averaging_sin(x))
+        # print("x: ")
+        # print(__import__('tinygrad').Tensor(x).numpy())
+        # cond = self._abs(x).e(BinaryOps.CMPLT, x.const(4e13))
+        # print("cond: ")
+        # print(__import__('tinygrad').Tensor(cond).numpy())
+        # res = cond.e(TernaryOps.WHERE, self._sin(x), self._averaging_sin(x))
         return res.cast(self.beginning_dtype)
 
 
@@ -115,7 +115,7 @@ class Sin(Function):
 
     def _mod(self, x: LazyBuffer, y: LazyBuffer) -> LazyBuffer:
         def v1(x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
-            return x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, y).cast(dtypes.int64).cast(self.float_precision).e(BinaryOps.MUL, y),)
+            return x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, y).cast(dtypes.uint64).cast(self.float_precision).e(BinaryOps.MUL, y),)
 
         def v2(x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
             q = x.e(BinaryOps.DIV, y)
@@ -124,7 +124,7 @@ class Sin(Function):
             x = diff.e(BinaryOps.MUL, y)
             return x
         
-        # Return v1 if x < 1e14, else return v2
+        # Return v1 if x < 1e13, else return v2
         return x.e(BinaryOps.CMPLT, x.const(1e13)).e(TernaryOps.WHERE, v1(x, y), v2(x, y))
         # return x.e(BinaryOps.CMPLT, x.const(1e5)).e(TernaryOps.WHERE, v1(x, y), v2(x, y))
 
@@ -139,7 +139,7 @@ class Sin(Function):
         x = self._mod(x, x.const(2 * math.pi))
         res = x.e(BinaryOps.CMPEQ, x.const(float('inf'))).e(TernaryOps.WHERE, x.const(math.nan), x)
         res = x.e(BinaryOps.CMPEQ, x.const(float('-inf'))).e(TernaryOps.WHERE, x.const(math.nan), res)
-        return x
+        return res
     
         # # Return mod 2pi if greater than a certain big value
         # fallback = self._mod(x, x.const(2*math.pi))
