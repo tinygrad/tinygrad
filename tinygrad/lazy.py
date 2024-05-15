@@ -153,8 +153,8 @@ class LazyBuffer:
     if op is UnaryOps.NEG and self.base.op is UnaryOps.NEG: return self.base.srcs[0]
     if op in BinaryOps: x, y = self, in_srcs[0]
     if op is BinaryOps.ADD:
-      if y.is_unrealized_unmasked_const() and y.base.arg == 0: return x
-      if x.is_unrealized_unmasked_const() and x.base.arg == 0: return y
+      if y.is_unrealized_unmasked_const() and y.base.arg == 0: return x # pylint: disable=possibly-used-before-assignment
+      if x.is_unrealized_unmasked_const() and x.base.arg == 0: return y # pylint: disable=possibly-used-before-assignment
     if op is BinaryOps.SUB and y.is_unrealized_unmasked_const() and y.base.arg == 0: return x
     if op is BinaryOps.MUL:
       if x.is_unrealized_unmasked_const() and (val := x.base.arg) in (1, 0, -1):
