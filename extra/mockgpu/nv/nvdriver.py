@@ -5,17 +5,10 @@ from tinygrad.helpers import from_mv
 from extra.mockgpu.driver import VirtDriver, VirtFileDesc, TextFileDesc, DirFileDesc, VirtFile
 from extra.mockgpu.nv.nvgpu import NVGPU
 
+MAP_FIXED = 0x10
 libc = ctypes.CDLL(ctypes.util.find_library("c"))
 libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
 libc.mmap.restype = ctypes.c_void_p
-
-# def ioctls_from_header():
-#   hdrpy = (pathlib.Path(__file__).parent.parent.parent.parent / "tinygrad" / "runtime" / "autogen" / "kfd.py").read_text()
-#   pattern = r'# (AMDKFD_IOC_[A-Z0-9_]+)\s=\s_(IOW?R?).*\(( 0x[0-9a-fA-F]+) ,\s+struct\s([A-Za-z0-9_]+)\s+\)'
-#   matches = re.findall(pattern, hdrpy, re.MULTILINE)
-#   return type("KFD_IOCTLS", (object, ), {name: int(nr, 0x10) for name, _, nr, _ in matches}), \
-#          {int(nr, 0x10): getattr(kfd, "struct_"+sname) for name, idir, nr, sname in matches}
-# kfd_ioctls, kfd_headers = ioctls_from_header()
 
 NVSubDevice = collections.namedtuple('NVSubDevice', ['device'])
 NVUserMode = collections.namedtuple('NVUserMode', ['subdevice'])
@@ -67,7 +60,7 @@ class NVDriver(VirtDriver):
     self.next_handle = 1
 
     self.object_by_handle = {}
-    self.memobj_mappings = {}
+    # self.memobj_mappings = {}
     self.opened_fds = {}
     self.doorbells = {}
     self.next_doorbell = collections.defaultdict(int)
@@ -204,7 +197,9 @@ class NVDriver(VirtDriver):
       assert any(all(st.gpu_uuid.uuid[i] == gpu.gpu_uuid()[i] for i in range(16)) for gpu in self.gpus.values())
     elif nr == nv_gpu.UVM_REGISTER_GPU_VASPACE: pass
     elif nr == nv_gpu.UVM_ENABLE_PEER_ACCESS: pass # uvm and shared spaced are setup already, no emulation for now
-    elif nr == nv_gpu.UVM_CREATE_EXTERNAL_RANGE: pass
+    elif nr == nv_gpu.UVM_CREATE_EXTERNAL_RANGE: 
+      st = nv_gpu.UVM_CREATE_EXTERNAL_RANGE_PARAMS.from_address(argp)
+      libc.mmap(st.base, st.length, mmap.PROT_READ|mmap.PROT_WRITE, MAP_FIXED|mmap.MAP_SHARED|mmap.MAP_ANONYMOUS, -1, 0)
     elif nr == nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION:
       st = nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS.from_address(argp)
       for gpu_attr_id in range(st.gpuAttributesCount):
@@ -215,12 +210,20 @@ class NVDriver(VirtDriver):
             break
         if gpu is None: return -1
         gpu.map_range(st.base, st.length)
-        self.memobj_mappings[st.hMemory] = (st.base, st.length)
+        # self.memobj_mappings[st.hMemory] = (st.base, st.length)
     elif nr == nv_gpu.UVM_REGISTER_CHANNEL: pass
     else: raise RuntimeError(f"Unknown {nr} to nvidia-uvm")
     return 0
 
   def dev_ioctl(self, dev, req, argp): return 0
   def _gpu_mmio_write(self, mv, off, gpu):
-    queue_token = mv[off]
-    gpu.queues[queue_token].execute()
+    # queue_token = mv[off]
+    # gpu.queues[queue_token].execute()
+    any_progress = True
+    while any_progress:
+      any_progress = False
+      for gpu in self.gpus.values():
+        for q in gpu.queues:
+          if (prev_rptr:=q.ctrl.GPGet) != q.ctrl.GPPut:
+            q.execute()
+            any_progress |= (q.ctrl.GPGet != q.ctrl.GPPut)
