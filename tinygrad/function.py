@@ -90,7 +90,7 @@ class Sin(Function):
     return res.cast(beginning_dtype)
 
   def _sin(self, x:LazyBuffer) -> LazyBuffer:
-    return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 30, x.const(1))
+    return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 30, x.const(1)).cast(self.beginning_dtype)
 
   def horner_taylor_sin(self, x:LazyBuffer, xsq:LazyBuffer, n: int, s:LazyBuffer) -> LazyBuffer:
     # if n == 1:
@@ -177,7 +177,6 @@ class Sin(Function):
 
     divres_pi = x.e(BinaryOps.DIV, x.const(math.pi))
     is_even_pi = self._is_even(divres_pi)
-    
     sign = is_even_pi.e(TernaryOps.WHERE, x.const(-1), x.const(1))
 
     # If negative, add pi
@@ -210,7 +209,8 @@ class Sin(Function):
 
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     # x = x.e(UnaryOps.ANG_RED)
-    beginning_dtype = x.dtype
+    # beginning_dtype = x.dtype
+    self.beginning_dtype = x.dtype
     if Device.DEFAULT != "METAL": x = x.cast(dtypes.float64)
     else: x = x.cast(dtypes.float32)
     # old_dtype = x.dtype
@@ -237,7 +237,7 @@ class Sin(Function):
     x = self.reduce_angle(x)
     self.x = x
     # return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 30, x.const(1)).cast(beginning_dtype)
-    return self._sin(x).cast(beginning_dtype)
+    return self._sin(x)
     # return x.e(UnaryOps.SIN)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
