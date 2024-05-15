@@ -46,10 +46,10 @@ class Sin(Function):
 
 class SinApprox(Function):
   def split_high_low(self, x: LazyBuffer, factor: float) -> Tuple[LazyBuffer, LazyBuffer]:
-      c = x.const(factor)
-      high = x.e(BinaryOps.MUL, c).e(BinaryOps.SUB, (x.e(BinaryOps.MUL, c).e(BinaryOps.SUB, x)))
-      low = x.e(BinaryOps.SUB, high)
-      return high, low
+    c = x.const(factor)
+    high = x.e(BinaryOps.MUL, c).e(BinaryOps.SUB, (x.e(BinaryOps.MUL, c).e(BinaryOps.SUB, x)))
+    low = x.e(BinaryOps.SUB, high)
+    return high, low
   def forward(self, x: LazyBuffer) -> LazyBuffer:
     self.x = x
     xsign = x.e(BinaryOps.CMPLT, x.const(0)).e(TernaryOps.WHERE, x.const(-1), x.const(1))
