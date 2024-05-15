@@ -21,7 +21,7 @@ repos:
         pass_filenames: false
       - id: docs2
         name: docs2
-        entry: python3 docs-legacy/abstractions2.py
+        entry: python3 docs/abstractions2.py
         language: system
         always_run: true
         pass_filenames: false
