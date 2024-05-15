@@ -71,10 +71,24 @@ class Sin(Function):
     return lt0.e(TernaryOps.WHERE, x.e(UnaryOps.NEG), x)
 
   def _is_even(self, x:LazyBuffer) -> LazyBuffer:
-    x = self._abs(x)
-    ev = x.cast(dtypes.uint64)
-    ev = ev.e(BinaryOps.MOD, ev.const(2))
-    return ev.e(BinaryOps.CMPEQ, ev.const(1))
+    # x = self._abs(x)
+    # ev = x.cast(dtypes.uint64)
+    # ev = ev.e(BinaryOps.MOD, ev.const(2))
+    # return ev.e(BinaryOps.CMPEQ, ev.const(1))
+    x = x.cast(dtypes.uint64).cast(self.float_precision)
+    q = x.e(BinaryOps.DIV, x.const(2))
+    # print("q: ")
+    # print(__import__('tinygrad').Tensor(q).numpy())
+    q_floor = q.cast(dtypes.uint64).cast(self.float_precision)
+    # print("q_floor: ")
+    # print(__import__('tinygrad').Tensor(q_floor).numpy())
+    diff = q.e(BinaryOps.SUB, q_floor)
+    # print("diff: ")
+    # print(__import__('tinygrad').Tensor(diff).numpy())
+    is_even = diff.e(BinaryOps.CMPLT, diff.const(1e-14))
+    # print("is_even: ")
+    # print(__import__('tinygrad').Tensor(is_even).numpy())
+    return is_even
 
   def _mod(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
     return x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, y).cast(dtypes.int64).cast(self.float_precision).e(BinaryOps.MUL, y))
@@ -104,14 +118,16 @@ class Sin(Function):
 
     divres_pi = x.e(BinaryOps.DIV, x.const(math.pi))
     is_even_pi = self._is_even(divres_pi)
-    sign = is_even_pi.e(TernaryOps.WHERE, x.const(-1), x.const(1))
+    # sign = is_even_pi.e(TernaryOps.WHERE, x.const(-1), x.const(1))
+    sign = is_even_pi.e(TernaryOps.WHERE, x.const(1), x.const(-1))
 
     # If negative, add pi
     x = lt0.e(TernaryOps.WHERE, x.e(BinaryOps.ADD, x.const(math.pi)), x)
     temp = divres.cast(dtypes.uint64).cast(old_dtype).e(BinaryOps.MUL, d)
     x = x.e(BinaryOps.SUB, temp)
 
-    x = is_even.e(TernaryOps.WHERE, halfpi.e(BinaryOps.SUB, x), x)
+    # x = is_even.e(TernaryOps.WHERE, halfpi.e(BinaryOps.SUB, x), x)
+    x = is_even.e(TernaryOps.WHERE,x, halfpi.e(BinaryOps.SUB, x))
     x = x.e(BinaryOps.MUL, sign)
 
     # return x.cast(beginning_dtype)
