@@ -53,7 +53,7 @@ class Sin(Function):
         # return res.cast(self.beginning_dtype)
 
         # Compute normal sin if below 4e13, else use averaging
-        res = self._abs(x).e(BinaryOps.CMPLT, x.const(4e13)).e(TernaryOps.WHERE, self._sin(x), self._averaging_sin(x))
+        res = self._abs(x).e(BinaryOps.CMPLT, x.const(3e13)).e(TernaryOps.WHERE, self._sin(x), self._averaging_sin(x))
         # print("x: ")
         # print(__import__('tinygrad').Tensor(x).numpy())
         # cond = self._abs(x).e(BinaryOps.CMPLT, x.const(4e13))
@@ -65,8 +65,9 @@ class Sin(Function):
 
     def _averaging_sin(self, x: LazyBuffer) -> LazyBuffer:
         # Compute 5 sines and average
-        # offsets = [-3,-2, -1, 0, 1, 2, 3]
-        offsets = [-2, -1, 0, 1, 2]
+        offsets = [-3,-2, -1, 0, 1, 2, 3]
+        # offsets = [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5]
+        # offsets = [-2, -1, 0, 1, 2]
         sines = [self._sin(x.e(BinaryOps.ADD, x.const(offset*2*math.pi))) for offset in offsets]
         sum = x.const(0)
         for s in sines:
@@ -124,8 +125,8 @@ class Sin(Function):
             x = diff.e(BinaryOps.MUL, y)
             return x
         
-        # Return v1 if x < 1e13, else return v2
-        return x.e(BinaryOps.CMPLT, x.const(1e13)).e(TernaryOps.WHERE, v1(x, y), v2(x, y))
+        # Return v1 if x < 1e14, else return v2
+        return x.e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, v1(x, y), v2(x, y))
         # return x.e(BinaryOps.CMPLT, x.const(1e5)).e(TernaryOps.WHERE, v1(x, y), v2(x, y))
 
 
