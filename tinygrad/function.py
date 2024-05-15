@@ -36,6 +36,14 @@ class Reciprocal(Function):
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return grad_output.e(UnaryOps.NEG).e(BinaryOps.MUL, self.ret).e(BinaryOps.MUL, self.ret)
 
+def _taylor(self, x:LazyBuffer, coefficients:List[float]) -> LazyBuffer:
+  current_term = x.const(1)
+  result = x.const(0)
+  for i, coef in enumerate(coefficients):
+    if i > 0: current_term = current_term.e(BinaryOps.MUL, x)
+    result = result.e(BinaryOps.ADD, current_term.e(BinaryOps.MUL, x.const(coef)))
+  return result
+
 class Sin(Function):
   coefficients =  [0, 9.9999999999993782751e-01, 0, -1.6666666666432553012e-01, 0, 8.3333333187754141114e-03, 0, -1.9841266413256992626e-04,
                    0, 2.7556932047318987798e-06, 0, -2.5029522966723734896e-08, 0, 1.5401222741012872935e-10]
@@ -47,13 +55,10 @@ class Sin(Function):
   def two_pi_mod(self, x:LazyBuffer) -> LazyBuffer:
     x_dtype = x.dtype
     if self.device != "METAL": x = x.cast(dtypes.double)
-    too_big = x.e(BinaryOps.CMPLT, x.const(10**12 * 2 * math.pi))
-    x = too_big.e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(10**11 * 2 * math.pi)))
     two_pi = x.const(math.pi * 2)
     div = x.e(BinaryOps.DIV, two_pi)
     floor_div = self.floor(div)
-    y = floor_div.e(BinaryOps.MUL, two_pi)
-    subtraction = x.e(BinaryOps.SUB, y)
+    subtraction = x.e(BinaryOps.SUB, two_pi.e(BinaryOps.MUL, floor_div))
     return subtraction.cast(x_dtype)
 
   def normalized_sin(self, x:LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
@@ -99,29 +104,33 @@ class Relu(Function):
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return self.ret.const(0).e(BinaryOps.CMPLT, self.ret).cast(grad_output.dtype).e(BinaryOps.MUL, grad_output)
 
-class Log(Function):
-  def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.x = x
-    return x.e(UnaryOps.LOG2).e(BinaryOps.MUL, x.const(math.log(2)))
-
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.e(BinaryOps.DIV, self.x)
-
 class Log2(Function):
+  coefficients = [-3.72162108e+00, 1.01438705e+01, -1.59554068e+01, 1.97155445e+01, -1.78832735e+01, 1.17975216e+01,
+                  -5.59830547e+00, 1.86329583e+00, -4.13182982e-01, 5.48583264e-02, -3.30087854e-03]
+
+  def get_info(self, x:LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
+    if x.dtype is dtypes.double:
+      x = x.cast(dtypes.long, bitcast=True)
+      pow_shift = 2**52
+      sig_shift = 2**9
+      fix = 4607182418800017408
+      bias = 1023
+    elif x.dtype is dtypes.float:
+      x = x.cast(dtypes.int, bitcast=True)
+      pow_shift = 2**23
+      sig_shift = 2**9
+      fix = 1065353216
+      bias = 127
+
+    pow = x.e(BinaryOps.DIV, x.const(pow_shift)).e(BinaryOps.SUB, x.const(bias))
+    sig = x.e(BinaryOps.MUL, x.const(sig_shift)).e(BinaryOps.DIV, x.const(sig_shift))
+    return (pow, sig.e(BinaryOps.ADD, x.const(fix)).cast(dtypes.float, bitcast=True))
+
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
-
-    COEFFICIENTS = [-6.09678316e+00, 5.16417548e+01, -3.99473655e+02, 2.36000032e+03, -1.00361172e+04,
-                    3.07916095e+04, -6.84925790e+04, 1.10284429e+05, -1.27043116e+05, 1.01934878e+05,
-                    -5.40528412e+04, 1.70129219e+04, -2.40525644e+03]
-
-    var = x.const(1)
-    acc = x.const(0)
-    for i, coef in enumerate(COEFFICIENTS):
-      if i > 0: var = var.e(BinaryOps.MUL, x)
-      term = var.e(BinaryOps.MUL, x.const(coef))
-      acc = acc.e(BinaryOps.ADD, term)
-
-    return acc
+    pow, sig = self.get_info(x)
+    x = _taylor(self, sig, self.coefficients).e(BinaryOps.ADD, pow.cast(x.dtype))
+    return x
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return grad_output.e(BinaryOps.DIV, self.x.e(BinaryOps.MUL, self.x.const(math.log(2))))
