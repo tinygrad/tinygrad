@@ -189,7 +189,6 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: Dict[LazyBuffer, LazyBuffer] = {}
   for r in allbufs:
-    assert r is r.base
     if r.op not in ReduceOps or r in realizes: continue
 
     group: Set[LazyBuffer] = set()
