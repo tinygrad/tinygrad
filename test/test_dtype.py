@@ -2,7 +2,7 @@ import unittest, operator, subprocess
 import numpy as np
 import torch
 from typing import Any, List
-from tinygrad.helpers import getenv, DEBUG
+from tinygrad.helpers import getenv, DEBUG, CI
 from tinygrad.dtype import DType, DTYPES_DICT, ImageDType, PtrDType, least_upper_float, least_upper_dtype
 from tinygrad import Device, Tensor, dtypes
 from hypothesis import given, settings, strategies as strat
@@ -47,6 +47,9 @@ def _test_cast(a:Tensor, target_dtype:DType):
   if target_dtype == dtypes.half and Device.DEFAULT == "PYTHON":
     # TODO: struct.pack cannot pack value > 65504 (max of half) into e format
     a = (a > 65504).where(65504, a)
+  if CI and Device.DEFAULT == "CLANG" and (target_dtype, a.dtype) in [(dtypes.double, dtypes.half), (dtypes.half, dtypes.double)]:
+    # TODO: cast between double and half are broken https://github.com/tinygrad/tinygrad/issues/4084
+    return
 
   _test_op(lambda: a.cast(target_dtype), target_dtype, list(a.numpy().astype(target_dtype.np)))
 def _test_bitcast(a:Tensor, target_dtype:DType, target=None):

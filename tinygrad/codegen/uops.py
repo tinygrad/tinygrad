@@ -141,7 +141,7 @@ class UOpGraph:
   def globals(self) -> List[Tuple[int, bool]]: return [x.arg for x in self.uops if x.uop is UOps.DEFINE_GLOBAL]
 
   def graph(self):
-    from tinygrad.features.graph import graph_uops
+    from tinygrad.engine.graph import graph_uops
     graph_uops(self.uops)
 
   def print(self):
