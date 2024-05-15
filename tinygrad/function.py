@@ -1,6 +1,8 @@
 """This is where the forwards and backwards passes live."""
 import math
 from typing import Tuple, List, Optional
+
+from six import binary_type
 from tinygrad.helpers import argsort
 from tinygrad.dtype import dtypes, DType, sum_acc_dtype
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps
@@ -35,6 +37,14 @@ class Reciprocal(Function):
     return self.ret
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return grad_output.e(UnaryOps.NEG).e(BinaryOps.MUL, self.ret).e(BinaryOps.MUL, self.ret)
+
+class OldSin(Function):
+  def forward(self, x:LazyBuffer) -> LazyBuffer:
+    self.x = x
+    return x.e(UnaryOps.SIN)
+
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
+    return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
 
 def _taylor(self, x:LazyBuffer, coefficients:List[float]) -> LazyBuffer:
   current_term = x.const(1)
@@ -108,29 +118,41 @@ class Log2(Function):
   coefficients = [-3.72162108e+00, 1.01438705e+01, -1.59554068e+01, 1.97155445e+01, -1.78832735e+01, 1.17975216e+01,
                   -5.59830547e+00, 1.86329583e+00, -4.13182982e-01, 5.48583264e-02, -3.30087854e-03]
 
-  def get_info(self, x:LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
+  def get_info(self, x:LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer, LazyBuffer]:
     if x.dtype is dtypes.double:
-      x = x.cast(dtypes.long, bitcast=True)
+      b = x.cast(dtypes.ulong, bitcast=True)
+      int_repr = dtypes.long
       pow_shift = 2**52
       sig_shift = 2**9
       fix = 4607182418800017408
       bias = 1023
     elif x.dtype is dtypes.float:
-      x = x.cast(dtypes.int, bitcast=True)
+      b = x.cast(dtypes.uint, bitcast=True)
+      int_repr = dtypes.int
       pow_shift = 2**23
       sig_shift = 2**9
       fix = 1065353216
       bias = 127
 
-    pow = x.e(BinaryOps.DIV, x.const(pow_shift)).e(BinaryOps.SUB, x.const(bias))
-    sig = x.e(BinaryOps.MUL, x.const(sig_shift)).e(BinaryOps.DIV, x.const(sig_shift))
-    return (pow, sig.e(BinaryOps.ADD, x.const(fix)).cast(dtypes.float, bitcast=True))
+    bpow = b.e(BinaryOps.DIV, b.const(pow_shift)).cast(int_repr, bitcast=True)
+    pow = bpow.e(BinaryOps.SUB, b.const(bias).cast(int_repr))
+    bsig = b.e(BinaryOps.MUL, b.const(sig_shift)).e(BinaryOps.DIV, b.const(sig_shift))
+    sig = bsig.e(BinaryOps.ADD, bsig.const(fix)).cast(x.dtype, bitcast=True)
+    nan = bpow.e(BinaryOps.CMPLT, bpow.const(sig_shift/2 - 1))
+    return (pow, sig, nan)
 
   def forward(self, x:LazyBuffer) -> LazyBuffer:
+    x_dtype = x.dtype
     self.x = x
-    pow, sig = self.get_info(x)
-    x = _taylor(self, sig, self.coefficients).e(BinaryOps.ADD, pow.cast(x.dtype))
-    return x
+    if x_dtype in (dtypes.float16, dtypes.bfloat16): x = x.cast(dtypes.float32)
+    pow, sig, nan = self.get_info(x)
+    t = _taylor(self, sig, self.coefficients).e(BinaryOps.ADD, pow.cast(x.dtype))
+    handle_nan = nan.e(TernaryOps.WHERE, t, x.const(math.nan))
+    handle_neg = x.e(BinaryOps.CMPLT, x.const(0.0)).e(TernaryOps.WHERE, handle_nan.const(math.nan), handle_nan)
+    handle_0 = x.e(BinaryOps.CMPEQ, x.const(0.0)).e(TernaryOps.WHERE, handle_neg.const(-math.inf), handle_neg)
+    handle_1 = x.e(BinaryOps.CMPEQ, x.const(1.0)).e(TernaryOps.WHERE, handle_0.const(0.0), handle_0)
+    handle_inf = x.e(BinaryOps.CMPEQ, x.const(math.inf)).e(TernaryOps.WHERE, handle_1.const(math.inf), handle_1)
+    return handle_inf.cast(x_dtype)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return grad_output.e(BinaryOps.DIV, self.x.e(BinaryOps.MUL, self.x.const(math.log(2))))
