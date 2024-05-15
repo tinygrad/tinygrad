@@ -131,8 +131,13 @@ class Sin(Function):
     x = x.e(BinaryOps.MUL, sign)
 
     # return x.cast(beginning_dtype)
-    lt1e14 = orig_x.e(BinaryOps.CMPLT, orig_x.const(1e14))
-    return lt1e14.e(TernaryOps.WHERE, x.cast(beginning_dtype), fallback.cast(beginning_dtype))
+    # 1486116864
+    # 0000000000
+    # 69800000000000
+    # 100000000000000.0
+    ltthresh = orig_x.e(BinaryOps.CMPLT, orig_x.const(69305000000000.0))
+    # ltthresh = orig_x.e(BinaryOps.CMPLT, orig_x.const(1e14))
+    return ltthresh.e(TernaryOps.WHERE, x.cast(beginning_dtype), fallback.cast(beginning_dtype))
 
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
