@@ -97,7 +97,7 @@ class Sin(Function):
         return is_even
 
     def _mod(self, x: LazyBuffer, y: LazyBuffer) -> LazyBuffer:
-        x = x.cast(dtypes.float64)
+        # x = x.cast(dtypes.float64)
         # return x.e(
         #     BinaryOps.SUB,
         #     x.e(BinaryOps.DIV, y)
