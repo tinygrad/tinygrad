@@ -1,7 +1,7 @@
 from tinygrad import Device
 from tinygrad.helpers import getenv, colored
 from extra.optimization.helpers import load_worlds, ast_str_to_lin
-from tinygrad.features.search import bufs_from_lin
+from tinygrad.engine.search import bufs_from_lin
 
 # move to helpers?
 def colorize_float(x):
@@ -23,14 +23,14 @@ if __name__ == "__main__":
   average_tm_cuda, average_tm_nv = 0, 0
   for num,ast in enumerate(ast_strs):
     # cuda compile
-    culin = ast_str_to_lin(ast, opts=cudev.compiler.compiler_opts)
+    culin = ast_str_to_lin(ast, opts=cudev.renderer)
     culin.hand_coded_optimizations()
-    cuda_prg = cudev.to_program(culin)
+    cuda_prg = cudev.to_runner(culin)
     cubufs = bufs_from_lin(culin)
 
-    nvlin = ast_str_to_lin(ast, opts=nvdev.compiler.compiler_opts)
+    nvlin = ast_str_to_lin(ast, opts=nvdev.renderer)
     nvlin.hand_coded_optimizations()
-    nv_prg = nvdev.to_program(nvlin)
+    nv_prg = nvdev.to_runner(nvlin)
     nvbufs = bufs_from_lin(nvlin)
 
     # warmup

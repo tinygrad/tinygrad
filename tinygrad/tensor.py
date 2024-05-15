@@ -11,13 +11,12 @@ from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up
 from tinygrad.helpers import getenv
 from tinygrad.lazy import LazyBuffer
 from tinygrad.features.multi import MultiLazyBuffer
-from tinygrad.ops import LoadOps, ScheduleItem
+from tinygrad.ops import LoadOps
 from tinygrad.device import Buffer, BufferOptions
 from tinygrad.device import Device
 from tinygrad.shape.symbolic import sint, Variable, MulNode, Node
 from tinygrad.engine.realize import run_schedule
-from tinygrad.engine.memory import memory_planner
-from tinygrad.engine.schedule import create_schedule_with_vars
+from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars, memory_planner
 
 # **** start with two base classes, Tensor and Function ****
 
@@ -111,9 +110,9 @@ class Tensor:
     elif isinstance(data, bytes): data = _fromcpu(np.frombuffer(data, np.uint8))
     elif data is None: data = _loadop(LoadOps.EMPTY, (0,), dtype or dtypes.default_float, device)
     elif isinstance(data, list):
-      if (d := fully_flatten(data)) and all(isinstance(s, bool) for s in d): dtype = dtype or dtypes.bool
-      elif d and all_int(d): dtype = dtype or dtypes.default_int
-      else: dtype = dtype or dtypes.default_float
+      if dtype is None:
+        if (d := fully_flatten(data)) and all(isinstance(s, bool) for s in d): dtype = dtypes.bool
+        else: dtype = dtypes.default_int if d and all_int(d) else dtypes.default_float
       if dtype == dtypes.bfloat16: data = Tensor(_fromcpu(np.array(data, np.float32)), device=device).cast(dtypes.bfloat16).lazydata
       else: data = _fromcpu(np.array(data, dtype.np))
     elif isinstance(data, np.ndarray):
@@ -336,17 +335,18 @@ class Tensor:
 
     # threefry
     if (num := prod((shape:=argfix(*shape)))) == 0: return Tensor.zeros(shape, device=device, dtype=dtype, **kwargs)
-    counts = (Tensor.arange(num, device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._rng_counter.to(device)).realize().pad(((0,num%2),))
+    counts1 = (Tensor.arange(math.ceil(num / 2), device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._rng_counter.to(device)).realize()
+    counts2 = counts1 + math.ceil(num / 2)
     Tensor._rng_counter.assign(Tensor._rng_counter + num).realize()
 
     rotations = [[13, 15, 26, 6], [17, 29, 16, 24]]
     ks = [0x0, Tensor._seed ^ 0x0 ^ 0x1BD11BDA, Tensor._seed]
 
-    x = [(c := counts.chunk(2))[0] + ks[-1], c[1] + ks[0]]
+    x = [counts1 + ks[-1], counts2 + ks[0]]
     for i in range(5):
-      for r in rotations[i % 2]: x[0], x[1] = (x0 := x[0] + x[1]), x0 ^ ((x[1] * (2 ** r)) + (x[1].div(2 ** (32 - r), upcast=False)))
+      for r in rotations[i % 2]: x[0], x[1] = (x0 := x[0] + x[1]), x0 ^ ((x[1] << r) + (x[1] >> (32 - r)))
       x = [(x[0] + ks[i % 3]), (x[1] + ks[(i + 1) % 3] + i + 1)]
-    out = x[0].cat(x[1])[:num].div(2 ** 8, upcast=False).cast(dtypes.float32).div(2 ** 24)
+    out = x[0].cat(x[1]).rshift(8).cast(dtypes.float32).div(2 ** 24)[:num]
     out = out.reshape(shape).cast(dtypes.default_float if dtype is None else dtype)
     out.requires_grad = kwargs.get("requires_grad")
     return out.contiguous()
@@ -798,7 +798,7 @@ class Tensor:
       # create masks
       for dim, i in idx.items():
         try: i = i.reshape(i.shape + (1,)*(ret.ndim - first_dim)).expand(pre_reduce_shape)
-        except ValueError as exc: raise IndexError("cannot broadcast indices") from exc
+        except ValueError as e: raise IndexError(f"cannot broadcast indices: {e}") from e
         a = Tensor.arange(ret.shape[dim], device=self.device, requires_grad=False).reshape((ret.shape[dim],) + (1,)*(ret.ndim - dim - 1))
         masks.append(i == a)
 
@@ -823,6 +823,10 @@ class Tensor:
     assert all(lb.st.contiguous for lb in self.lazydata.lbs), "setitem target needs to be contiguous"
     if not isinstance(v, (Tensor, float, int, bool)): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
+    if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
+    if isinstance(indices, (Tensor, list)) or (isinstance(indices, tuple) and any(isinstance(i, (Tensor, list)) for i in indices)):
+      raise NotImplementedError("Advanced indexing setitem is not currently supported")
+
     assign_to = self.realize().__getitem__(indices)
     # NOTE: contiguous to prevent const folding.
     v = v.cast(assign_to.dtype)._broadcast_to(broadcast_shape(assign_to.shape, v.shape)).contiguous()
@@ -968,7 +972,7 @@ class Tensor:
   def argmin(self, axis=None, keepdim=False): return (-self).argmax(axis=axis, keepdim=keepdim)
 
   @staticmethod
-  def einsum(formula:str, *raw_xs) -> Tensor:
+  def einsum(formula:str, *raw_xs, acc_dtype:Optional[DType]=None) -> Tensor:
     xs:Tuple[Tensor] = argfix(*raw_xs)
     formula = formula.replace(" ", "")
     inputs_str, output = formula.split("->") if "->" in formula else (formula, sorted(formula))
@@ -990,7 +994,7 @@ class Tensor:
 
     # sum over all axes that's not in the output, then permute to the output order
     return functools.reduce(lambda a,b:a*b, xs_) \
-      .sum(axis=[axis for axis,(letter,_) in enumerate(letter_val) if letter not in output]).permute(rhs_order)
+      .sum(axis=[axis for axis,(letter,_) in enumerate(letter_val) if letter not in output],acc_dtype=acc_dtype).permute(rhs_order)
 
   # ***** processing ops *****
 
@@ -1214,6 +1218,14 @@ class Tensor:
     return F.Div.apply(numerator, denominator)
   def xor(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor: return F.Xor.apply(*self._broadcasted(x, reverse))
 
+  def lshift(self, x:int):
+    assert dtypes.is_unsigned(self.dtype) and isinstance(x, int) and x >= 0, f"not supported {self.dtype=} {x=}"
+    return self.mul(2 ** x)
+
+  def rshift(self, x:int):
+    assert dtypes.is_unsigned(self.dtype) and isinstance(x, int) and x >= 0, f"not supported {self.dtype=} {x=}"
+    return self.div(2 ** x, upcast=False)
+
   def pow(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     x = self._to_const_val(x)
     if not isinstance(x, Tensor) and not reverse:
@@ -1260,6 +1272,8 @@ class Tensor:
   def __truediv__(self, x) -> Tensor: return self.div(x)
   def __matmul__(self, x) -> Tensor: return self.matmul(x)
   def __xor__(self, x) -> Tensor: return self.xor(x)
+  def __lshift__(self, x) -> Tensor: return self.lshift(x)
+  def __rshift__(self, x) -> Tensor: return self.rshift(x)
 
   def __radd__(self, x) -> Tensor: return self.add(x, True)
   def __rsub__(self, x) -> Tensor: return self.sub(x, True)
@@ -1276,6 +1290,8 @@ class Tensor:
   def __itruediv__(self, x) -> Tensor: return self.assign(self.div(x))
   def __imatmul__(self, x) -> Tensor: return self.assign(self.matmul(x))
   def __ixor__(self, x) -> Tensor: return self.assign(self.xor(x))
+  def __ilshift__(self, x) -> Tensor: return self.assign(self.lshift(x))
+  def __irshift__(self, x) -> Tensor: return self.assign(self.rshift(x))
 
   def __lt__(self, x) -> Tensor: return F.Less.apply(*self._broadcasted(x, False))
   def __gt__(self, x) -> Tensor: return F.Less.apply(*self._broadcasted(x, True))

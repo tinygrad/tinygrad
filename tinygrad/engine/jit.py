@@ -4,12 +4,12 @@ import functools, itertools, collections
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, BEAM, getenv, all_int, GraphException, colored, JIT
-from tinygrad.device import Buffer, CompiledRunner, Compiled, Device, Runner
+from tinygrad.device import Buffer, Compiled, Device
 from tinygrad.dtype import DType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, sint
-from tinygrad.engine.realize import ExecItem, capturing, EmptyOp, ViewOp, BufferXfer
-from tinygrad.engine.memory import _internal_memory_planner
+from tinygrad.engine.realize import ExecItem, capturing, EmptyOp, ViewOp, BufferXfer, CompiledRunner, Runner
+from tinygrad.engine.schedule import _internal_memory_planner
 from tinygrad.nn.state import get_parameters
 from weakref import WeakKeyDictionary
 
@@ -180,7 +180,8 @@ class TinyJit(Generic[ReturnType]):
       if DEBUG >= 1 and len(set(self.input_replace.values())) != len(input_rawbuffers): print("WARNING: some input tensors not found")
     elif self.cnt >= 2:
       # jit exec
-      assert self.expected_names == expected_names and self.expected_lbs == expected_lbs, "args mismatch in JIT"
+      assert self.expected_names == expected_names, f"args mismatch in JIT: {self.expected_names=} != {expected_names}"
+      assert self.expected_lbs == expected_lbs, f"args mismatch in JIT: {self.expected_lbs=} != {expected_lbs=}"
       for idx, offset, device, size, dtype in self.extra_view_inputs:
         input_rawbuffers.append(Buffer(device, size, dtype, base=input_rawbuffers[idx], offset=offset).ensure_allocated())
       for (j,i),input_idx in self.input_replace.items(): self.jit_cache[j].bufs[i] = input_rawbuffers[input_idx]

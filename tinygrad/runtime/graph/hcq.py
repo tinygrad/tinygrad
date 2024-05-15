@@ -2,9 +2,9 @@ import ctypes, collections, array, time
 from typing import List, Any, Dict, cast, Optional, Tuple, Set
 from tinygrad.helpers import GraphException, round_up, to_mv
 from tinygrad.device import Buffer, BufferOptions
-from tinygrad.device import Compiled, CompiledRunner, Device
+from tinygrad.device import Compiled, Device
 from tinygrad.shape.symbolic import Variable
-from tinygrad.engine.realize import ExecItem, BufferXfer
+from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner
 from tinygrad.engine.jit import MultiGraphRunner
 
 class HCQGraph(MultiGraphRunner):
