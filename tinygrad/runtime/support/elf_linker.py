@@ -17,7 +17,7 @@ def fixup_relocations(blob: bytes) -> bytes:
   for i in range(e_shnum):
     off = e_shoff+i*e_shentsize
     sh_name, sh_type, sh_flags, sh_addr, sh_offset, sh_size, sh_link, sh_info, sh_addralign, sh_entsize = struct.unpack("<2I4Q2I2Q", blob[off:off+64])
-    assert sh_addr == 0, f"segments with non-zero load addresses are not supported by this loader"
+    assert sh_addr == 0, "segments with non-zero load addresses are not supported by this linker"
     if sh_type == 0x1: # SHT_PROGBITS
       if sh_flags & 0x2 == 0x2:
         if (extra := len(ret) % sh_addralign) > 0: ret += b'\x00' * (sh_addralign-extra)
