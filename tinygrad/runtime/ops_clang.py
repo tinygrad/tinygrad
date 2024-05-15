@@ -16,7 +16,7 @@ class ClangCompiler(Compiler):
     platspec = ('-ffixed-x18',) if platform.machine() == "arm64" else ('-Xclang=-fnative-half-type', '-Xclang=-fnative-half-arguments-and-returns')
     return fixup_relocations(subprocess.check_output(('clang', '-x', 'c', '-c', '-target', f'{platform.machine()}-none-unknown-elf', '-march=native',
                                                       '-fPIC', '-O2', '-fno-builtin', '-ffreestanding', '-nostdlib', '-fno-math-errno',
-                                                      '-Wall', '-Wno-unused-function', '-Wunused-command-line-argument', '-Werror',
+                                                      '-Wall', '-Wno-unused-function', '-Wno-unused-command-line-argument', '-Werror',
                                                       '-include', f'{os.path.dirname(__file__)}/support/tinymath.h', '-', '-o', '-')+platspec,
                                                       input=src.encode('utf-8')))
 
