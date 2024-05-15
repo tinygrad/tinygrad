@@ -1,12 +1,12 @@
 import sys, pickle, atexit
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Tuple, List, Dict, Optional, Set, DefaultDict
+from typing import Tuple, List, Dict, Optional, Set, DefaultDict, Union
 from tinygrad.ops import LoadOps, BufferOps, LazyOp, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
 from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, GlobalCounters, prod, dedup, all_int, merge_dicts, getenv
 from tinygrad.shape.symbolic import Variable
-from tinygrad.dtype import ImageDType, dtypes
+from tinygrad.dtype import ImageDType, dtypes, DType
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
@@ -318,3 +318,42 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
   schedule, var_vals = create_schedule_with_vars(outs, seen)
   assert len(var_vals) == 0
   return schedule
+
+# *** memory planning ***
+
+def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]]], debug_prefix="") -> Dict[Buffer, Buffer]:
+  if getenv("NO_MEMORY_PLANNER"): return {}
+  last_appearance = {}
+  for i,u in enumerate(buffers):
+    for buf in u: last_appearance[buf] = i
+
+  # LRU algorithm
+  assigned: Dict[Buffer, Buffer] = {}
+  local_cache: DefaultDict[Tuple[str, int, DType], List[Buffer]] = defaultdict(list)
+
+  def handle_buffer(buf):
+    key = (buf.device, buf.size, buf.dtype)
+    if buf not in assigned:
+      if len(ll:=local_cache[key]): assigned[buf] = ll.pop()
+      else: assigned[buf] = Buffer(*key)
+    if i == last_appearance[buf]:
+      if assigned[buf] not in local_cache[key]: local_cache[key].append(assigned[buf])
+
+  for i,u in enumerate(buffers):
+    for buf in u:
+      # all unallocated unparented buffers are fair game to replace
+      if buf.is_allocated() or buf.lb_refcount > 0: continue
+      # handle view buffers
+      if buf._base is not None:
+        assigned[buf] = Buffer(buf.device, buf.size, buf.dtype, base=assigned.get(buf._base, buf._base), offset=buf.offset)
+      else:
+        handle_buffer(buf)
+
+  if DEBUG >= 1 and len(ak:=dedup(assigned.keys())) != len(av:=dedup(assigned.values())):
+    print(debug_prefix+f"memory reduced from {sum([x.nbytes for x in ak])/1e6:.2f} MB -> {sum([x.nbytes for x in av])/1e6:.2f} MB,",
+          f"{len(ak)} -> {len(av)} bufs")
+  return assigned
+
+def memory_planner(schedule:List[ScheduleItem]) -> List[ScheduleItem]:
+  assigned = _internal_memory_planner([si.bufs for si in schedule])
+  return [ScheduleItem(si.ast, tuple(assigned.get(x, x) for x in si.bufs)) for si in schedule]
