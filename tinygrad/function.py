@@ -44,6 +44,7 @@ class Sin(Function):
     self.beginning_dtype = x.dtype
     if Device.DEFAULT != "METAL": x = x.cast(dtypes.float64)
     else: x = x.cast(dtypes.float32)
+    self.float_precision = x.dtype
     x = self.reduce_angle(x)
     return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 30, x.const(1)).cast(self.beginning_dtype)
 
@@ -76,7 +77,7 @@ class Sin(Function):
     return ev.e(BinaryOps.CMPEQ, ev.const(1))
 
   def _mod(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
-    return x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, y).cast(dtypes.int64).cast(dtypes.float64).e(BinaryOps.MUL, y))
+    return x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, y).cast(dtypes.int64).cast(self.float_precision).e(BinaryOps.MUL, y))
 
 
   def reduce_angle(self, x:LazyBuffer) -> LazyBuffer:
