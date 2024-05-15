@@ -155,9 +155,10 @@ class Sin(Function):
             TernaryOps.WHERE, x.cast(beginning_dtype), fallback.cast(beginning_dtype)
         )
 
-        # Return nan if value is infinity
-        is_inf = orig_x.e(BinaryOps.CMPEQ, orig_x.const(math.inf))
-        res = is_inf.e(TernaryOps.WHERE, x.const(math.nan), res)
+        # Return nan if value is inf or -inf
+        # is_inf = orig_x.e(BinaryOps.CMPEQ, orig_x.const(math.inf))
+        res = orig_x.e(BinaryOps.CMPEQ, orig_x.const(float('inf'))).e(TernaryOps.WHERE, x.const(math.nan), res)
+        res = orig_x.e(BinaryOps.CMPEQ, orig_x.const(float('-inf'))).e(TernaryOps.WHERE, x.const(math.nan), res)
         return res
 
 
