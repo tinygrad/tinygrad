@@ -332,11 +332,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-<<<<<<< HEAD
-        backend: [llvm, clang, gpu, cuda, ptx, amd] #, triton]
-=======
-        backend: [llvm, clang, gpu, cuda, hip, ptx, amd, nv] #, triton]
->>>>>>> c00de400 (works)
+        backend: [llvm, clang, gpu, cuda, ptx, amd, nv] #, triton]
 
     name: Tests on (${{ matrix.backend }})
     runs-on: ubuntu-latest
