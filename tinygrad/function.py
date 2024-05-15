@@ -40,17 +40,43 @@ class Reciprocal(Function):
 
 class Sin(Function):
 
-    def _sin(self, x: LazyBuffer) -> LazyBuffer:
+    def _sin_grand(self, x: LazyBuffer) -> LazyBuffer:
         self.beginning_dtype = x.dtype
         if Device.DEFAULT != "METAL":
             x = x.cast(dtypes.float64)
         else:
             x = x.cast(dtypes.float32)
         self.float_precision = x.dtype
+
+        # Compute 5 sines and average
+        offsets = [-3,-2, -1, 0, 1, 2, 3]
+        sines = [self._sin(x.e(BinaryOps.ADD, x.const(offset*2*math.pi))) for offset in offsets]
+
+        sum = x.const(0)
+        for s in sines:
+            # print("sine: ")
+            # print(__import__('tinygrad').Tensor(s).numpy())
+            sum = sum.e(BinaryOps.ADD, s)
+        # print("sum: ")
+        # print(__import__('tinygrad').Tensor(sum).numpy())
+        res = sum.e(BinaryOps.DIV, x.const(len(sines)))
+        # print("res: ")
+        # print(__import__('tinygrad').Tensor(res).numpy())
+        return res.cast(self.beginning_dtype)
+
+    def _sin(self, x: LazyBuffer) -> LazyBuffer:
+        # self.beginning_dtype = x.dtype
+        # if Device.DEFAULT != "METAL":
+        #     x = x.cast(dtypes.float64)
+        # else:
+        #     x = x.cast(dtypes.float32)
+        # self.float_precision = x.dtype
         x = self.reduce_angle(x)
-        return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 30, x.const(1)).cast(
-            self.beginning_dtype
-        )
+        # return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 30, x.const(1)).cast(
+        # return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 50, x.const(1)).cast(
+        #     self.beginning_dtype
+        # )
+        return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 50, x.const(1))
 
     def horner_taylor_sin(
         self, x: LazyBuffer, xsq: LazyBuffer, n: int, s: LazyBuffer
@@ -87,6 +113,7 @@ class Sin(Function):
         
         # Return v1 if x < 1e14, else return v2
         return x.e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, v1(x, y), v2(x, y))
+        # return x.e(BinaryOps.CMPLT, x.const(1e5)).e(TernaryOps.WHERE, v1(x, y), v2(x, y))
 
 
 
@@ -95,6 +122,9 @@ class Sin(Function):
         lt0 = x.e(BinaryOps.CMPLT, x.const(0))
         x = self._abs(x)
         x = lt0.e(TernaryOps.WHERE, x.e(BinaryOps.ADD, x.const(math.pi)), x)
+
+        x = self._mod(x, x.const(2 * math.pi))
+        return x
     
         # # Return mod 2pi if greater than a certain big value
         # fallback = self._mod(x, x.const(2*math.pi))
@@ -140,19 +170,19 @@ class Sin(Function):
         # Return nan if value is inf or -inf
         res = orig_x.e(BinaryOps.CMPEQ, orig_x.const(float('inf'))).e(TernaryOps.WHERE, x.const(math.nan), res)
         res = orig_x.e(BinaryOps.CMPEQ, orig_x.const(float('-inf'))).e(TernaryOps.WHERE, x.const(math.nan), res)
-        print("reduced angle: ")
-        print(__import__('tinygrad').Tensor(res).numpy())
+        # print("reduced angle: ")
+        # print(__import__('tinygrad').Tensor(res).numpy())
         return res
 
 
     def forward(self, x: LazyBuffer) -> LazyBuffer:
         self.x = x
-        return self._sin(x)
+        return self._sin_grand(x)
         # return x.e(UnaryOps.SIN)
 
     def backward(self, grad_output: LazyBuffer) -> LazyBuffer:
         # return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
-        return self._sin(self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)).e(BinaryOps.MUL, grad_output)
+        return self._sin_grand(self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)).e(BinaryOps.MUL, grad_output)
 
 # NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
