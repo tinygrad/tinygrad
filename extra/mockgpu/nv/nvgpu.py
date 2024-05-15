@@ -19,8 +19,7 @@ assert ctypes.sizeof(qmd_struct_t) == 0x40 * 4
 try:
   gpuocelot_lib = ctypes.CDLL(ctypes.util.find_library("gpuocelot"))
   gpuocelot_lib.ptx_run.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]  # noqa: E501
-except Exception:
-  gpuocelot_lib = None
+except Exception: pass
 
 class SchedResult(Enum): CONT = auto(); YIELD = auto() # noqa: E702
 
@@ -37,6 +36,7 @@ class GPFIFO:
     self.buf_ptr = 0
 
   def _next_dword(self):
+    assert self.buf is not None
     x = self.buf[self.buf_ptr]
     self.buf_ptr += 1
     return x
@@ -96,10 +96,10 @@ class GPFIFO:
     args_addr = qmd.constant_buffer_addr_lower_0 + (qmd.constant_buffer_addr_upper_0 << 32) + 0x160
     args = to_mv(args_addr, args_cnt*8).cast('Q')
     vals = to_mv(args_addr + args_cnt*8, vals_cnt*4).cast('I')
-    args = [ctypes.cast(args[i], ctypes.c_void_p) for i in range(args_cnt)] + [ctypes.cast(vals[i], ctypes.c_void_p) for i in range(vals_cnt)]
+    cargs = [ctypes.cast(args[i], ctypes.c_void_p) for i in range(args_cnt)] + [ctypes.cast(vals[i], ctypes.c_void_p) for i in range(vals_cnt)]
     gx, gy, gz = qmd.cta_raster_width, qmd.cta_raster_height, qmd.cta_raster_depth
     lx, ly, lz = qmd.cta_thread_dimension0, qmd.cta_thread_dimension1, qmd.cta_thread_dimension2
-    gpuocelot_lib.ptx_run(ctypes.cast(prg_addr, ctypes.c_char_p), args_cnt+vals_cnt, (ctypes.c_void_p * len(args))(*args), lx, ly, lz, gx, gy, gz, 0)
+    gpuocelot_lib.ptx_run(ctypes.cast(prg_addr, ctypes.c_char_p), args_cnt+vals_cnt, (ctypes.c_void_p*len(cargs))(*cargs), lx, ly, lz, gx, gy, gz, 0)
 
   def execute_cmd(self, cmd) -> SchedResult:
     if cmd == nv_gpu.NVC56F_SEM_EXECUTE: return self._exec_signal()
@@ -119,6 +119,7 @@ class GPFIFO:
       mval = to_mv(signal, 8).cast('Q')[0]
       return SchedResult.CONT if mval >= val else SchedResult.YIELD
     else: raise RuntimeError(f"Unsupported type={typ} in exec wait/signal")
+    return SchedResult.CONT
 
   def _exec_load_inline_qmd(self):
     qmd_addr = self._state64(nv_gpu.NVC6C0_SET_INLINE_QMD_ADDRESS_A) << 8

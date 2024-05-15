@@ -91,7 +91,7 @@ class NVDriver(VirtDriver):
     params_ptr = struct.pAllocParms if struct.pAllocParms else None
     if struct.hClass == nv_gpu.NV01_ROOT_CLIENT: self.root_handle = struct.hObjectNew = self._alloc_handle()
     elif struct.hClass == nv_gpu.NV01_DEVICE_0:
-      params = nv_gpu.NV0080_ALLOC_PARAMETERS.from_address(params_ptr)
+      params:Any = nv_gpu.NV0080_ALLOC_PARAMETERS.from_address(params_ptr)
       assert params.hClientShare == self.root_handle
       struct.hObjectNew = self._alloc_handle()
       self.object_by_handle[struct.hObjectNew] = self.gpus[params.deviceId]
@@ -136,7 +136,7 @@ class NVDriver(VirtDriver):
     struct = nv_gpu.NVOS54_PARAMETERS.from_address(argp)
     params_ptr = struct.params if struct.params else None
     if struct.cmd == nv_gpu.NV0000_CTRL_CMD_GPU_GET_ID_INFO_V2: 
-      params = nv_gpu.NV0000_CTRL_GPU_GET_ID_INFO_V2_PARAMS.from_address(params_ptr)
+      params:Any = nv_gpu.NV0000_CTRL_GPU_GET_ID_INFO_V2_PARAMS.from_address(params_ptr)
       params.deviceInstance = params.gpuId # emulate them to be the same
     elif struct.cmd == nv_gpu.NV2080_CTRL_CMD_GPU_GET_GID_INFO:
       assert struct.hObject in self.object_by_handle and isinstance(self.object_by_handle[struct.hObject], NVSubDevice)
@@ -161,7 +161,7 @@ class NVDriver(VirtDriver):
     elif nr == nv_gpu.NV_ESC_RM_ALLOC_MEMORY: pass
     elif nr == nv_gpu.NV_ESC_RM_CONTROL: return self.rm_control(argp)
     elif nr == nv_gpu.NV_ESC_RM_MAP_MEMORY:
-      st = nv_gpu.nv_ioctl_nvos33_parameters_with_fd.from_address(argp)
+      st:Any = nv_gpu.nv_ioctl_nvos33_parameters_with_fd.from_address(argp)
       obj = self.object_by_handle[st.params.hMemory]
       if isinstance(obj, NVUserMode): 
         file = self.opened_fds[st.fd]
@@ -182,7 +182,7 @@ class NVDriver(VirtDriver):
     if nr == nv_gpu.UVM_INITIALIZE: pass
     elif nr == nv_gpu.UVM_MM_INITIALIZE: pass
     elif nr == nv_gpu.UVM_REGISTER_GPU:
-      st = nv_gpu.UVM_REGISTER_GPU_PARAMS.from_address(argp)
+      st:Any = nv_gpu.UVM_REGISTER_GPU_PARAMS.from_address(argp)
       assert any(all(st.gpu_uuid.uuid[i] == gpu.gpu_uuid()[i] for i in range(16)) for gpu in self.gpus.values())
     elif nr == nv_gpu.UVM_REGISTER_GPU_VASPACE: pass
     elif nr == nv_gpu.UVM_ENABLE_PEER_ACCESS: pass # uvm and shared spaced are setup already, no emulation for now
@@ -201,7 +201,7 @@ class NVDriver(VirtDriver):
         gpu.map_range(st.base, st.length)
     elif nr == nv_gpu.UVM_REGISTER_CHANNEL: pass
     elif nr == nv_gpu.UVM_FREE:
-      gpu.unmap_range(st.base, st.length)
+      st = nv_gpu.UVM_FREE_PARAMS.from_address(argp)
       libc.munmap(st.base, st.length)
     else: raise RuntimeError(f"Unknown {nr} to nvidia-uvm")
     return 0

@@ -23,8 +23,7 @@ try:
   remu = ctypes.CDLL("/usr/local/lib/libremu.so")
   remu.run_asm.restype = ctypes.c_uint32
   remu.run_asm.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p]
-except Exception:
-  remu = None
+except Exception: pass
 
 def create_sdma_packets():
   # TODO: clean up this, if we want to keep it
