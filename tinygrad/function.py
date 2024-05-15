@@ -45,32 +45,41 @@ class Sin(Function):
     return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
 
 class SinApprox(Function):
-  def _floor(self, x:LazyBuffer) -> LazyBuffer:
-    floor = x.cast(dtypes.long).cast(x.dtype)
-    adjustment = x.e(BinaryOps.CMPLT, floor).cast(x.dtype)
-    return x.e(BinaryOps.CMPLT, x.const(0)).e(TernaryOps.WHERE, floor.e(BinaryOps.SUB, adjustment), floor)
-  def _two_pi_mod(self, x:LazyBuffer) -> LazyBuffer:
-    two_pi = x.const(math.pi * 2)
-    floor_div = self._floor(x.e(BinaryOps.DIV, two_pi))
-    return x.e(BinaryOps.SUB, floor_div.e(BinaryOps.MUL, two_pi)).cast(x.dtype)
+  def split_high_low(self, x: LazyBuffer, factor: float) -> Tuple[LazyBuffer, LazyBuffer]:
+      c = x.const(factor)
+      high = x.e(BinaryOps.MUL, c).e(BinaryOps.SUB, (x.e(BinaryOps.MUL, c).e(BinaryOps.SUB, x)))
+      low = x.e(BinaryOps.SUB, high)
+      return high, low
   def forward(self, x: LazyBuffer) -> LazyBuffer:
     self.x = x
+    xsign = x.e(BinaryOps.CMPLT, x.const(0)).e(TernaryOps.WHERE, x.const(-1), x.const(1))
+    x = x.e(BinaryOps.MUL, xsign)
+
+    high_factor = float(2**16 + 1)
     half_pi = x.const(math.pi / 2)
     pi = x.const(math.pi)
     two_pi = x.const(math.pi * 2)
+    two_pi_high = x.const(6.2831854820251465)
+    two_pi_low = x.const(-1.7484555314695172e-07)
     COEFFICIENTS = [1, -0.1666666666666626, 0.0083333333332913, -0.0001984126982654, 0.0000027557316778,
                       -0.0000000250518910, 0.0000000001604841, -0.0000000000007377]
+    high, low = self.split_high_low(x, high_factor)
+    k = (high.e(BinaryOps.ADD, low)).e(BinaryOps.DIV, two_pi).cast(dtypes.long).cast(x.dtype)
+    high_k, low_k = self.split_high_low(k, high_factor)
+    high_rem = high.e(BinaryOps.SUB, high_k.e(BinaryOps.MUL, two_pi_high))
+    low_rem = low.e(BinaryOps.SUB, low_k.e(BinaryOps.MUL, two_pi_high)).e(BinaryOps.SUB, high_k.e(BinaryOps.MUL, two_pi_low))
+    rem = high_rem.e(BinaryOps.ADD, low_rem)
+    rem = rem.e(BinaryOps.CMPLT, x.const(0)).e(TernaryOps.WHERE, rem.e(BinaryOps.ADD, two_pi), rem)
 
-    two_pi_x = self._two_pi_mod(x)
-    mpi_pi_x = pi.e(BinaryOps.CMPLT, two_pi_x).e(TernaryOps.WHERE, two_pi_x.e(BinaryOps.SUB, two_pi), two_pi_x)
-    mpi_pi2_x = half_pi.e(BinaryOps.CMPLT, mpi_pi_x).e(TernaryOps.WHERE, pi.e(BinaryOps.SUB, mpi_pi_x), mpi_pi_x)
-    mpi2_pi2_x = mpi_pi2_x.e(BinaryOps.CMPLT, half_pi.e(UnaryOps.NEG)).e(TernaryOps.WHERE, pi.e(BinaryOps.ADD, mpi_pi2_x).e(UnaryOps.NEG), mpi_pi2_x)
+    rem = pi.e(BinaryOps.CMPLT, rem).e(TernaryOps.WHERE, rem.e(BinaryOps.SUB, two_pi), rem)
+    rsign = rem.e(BinaryOps.CMPLT, x.const(0)).e(TernaryOps.WHERE, x.const(-1), x.const(1))
+    absrem = rem.e(BinaryOps.MUL, rsign)
+    mpi2_pi2_x = half_pi.e(BinaryOps.CMPLT, absrem).e(TernaryOps.WHERE, pi.e(BinaryOps.SUB, absrem).e(BinaryOps.MUL, rsign), rem)
 
-    result = mpi2_pi2_x.const(COEFFICIENTS[-1])
+    result = x.const(COEFFICIENTS[-1])
     for coeff in COEFFICIENTS[-2::-1]:
-      result = result.e(BinaryOps.MUL, mpi2_pi2_x).e(BinaryOps.MUL, mpi2_pi2_x).e(BinaryOps.ADD, mpi2_pi2_x.const(coeff))
-
-    return result.e(BinaryOps.MUL, mpi2_pi2_x)
+      result = result.e(BinaryOps.MUL, mpi2_pi2_x).e(BinaryOps.MUL, mpi2_pi2_x).e(BinaryOps.ADD, x.const(coeff))
+    return result.e(BinaryOps.MUL, mpi2_pi2_x).e(BinaryOps.MUL, xsign)
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return self.forward(self.x.e(BinaryOps.ADD, self.x.const(math.pi / 2))).e(BinaryOps.MUL, grad_output)
 
