@@ -4,7 +4,7 @@ from typing import Tuple, List, Any, cast
 from tinygrad.device import Compiled, Compiler, LRUAllocator, BufferOptions
 from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up, to_char_p_p, DEBUG, prod
 from tinygrad.renderer.cstyle import CUDARenderer
-from tinygrad.runtime.ops_cuda import check as cuda_check, _get_bytes, CUDACompiler, PTXCompiler
+from tinygrad.runtime.ops_cuda import check as cuda_check, _get_bytes, CUDACompiler
 import tinygrad.runtime.autogen.cuda as cuda
 import tinygrad.runtime.autogen.nv_gpu as nv_gpu
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl # noqa: F401
@@ -485,7 +485,7 @@ class NVDevice(Compiled):
 
     en_fifo_params = nv_gpu.NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS(bEnable=1)
     rm_control(self.fd_ctl, nv_gpu.NVA06C_CTRL_CMD_GPFIFO_SCHEDULE, self.root, channel_group, en_fifo_params)
-    
+
     self.timeline_value: int = 1
     self.timeline_signal = NVDevice._get_signal(self.device_id * 2)
     self._shadow_timeline_signal = NVDevice._get_signal(self.device_id * 2 + 1)
