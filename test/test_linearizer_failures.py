@@ -32,7 +32,7 @@ def helper_test_lin(lin: Linearizer, opts, failed_platforms, rtol=1e-2, atol=1e-
   else:
     assert Device.DEFAULT in failed_platforms, f"failed on {Device.DEFAULT} with {compare_result[0]}"
 
-@unittest.skipIf(CI and Device.DEFAULT=="CUDA", "failed on CUDA CI")
+@unittest.skipIf(CI and Device.DEFAULT in {"CUDA", "NV"}, "failed on CUDA CI")
 class TestLinearizerFailures(unittest.TestCase):
   def setUp(self):
     random.seed(42)

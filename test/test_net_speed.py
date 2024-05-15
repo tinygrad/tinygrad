@@ -5,7 +5,7 @@ import torch
 from tinygrad import Tensor, Device
 from tinygrad.helpers import Profiling, CI
 
-@unittest.skipIf(CI and Device.DEFAULT == "CUDA", "slow")
+@unittest.skipIf(CI and Device.DEFAULT in {"CUDA", "NV"}, "slow")
 class TestConvSpeed(unittest.TestCase):
 
   def test_mnist(self):
