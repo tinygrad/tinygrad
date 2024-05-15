@@ -86,7 +86,7 @@ typedef union {
     (d) = sf_u.value;                                                          \
   } while (0)
 
-double copysign(double x, double y) {
+static double copysign(double x, double y) {
   uint32_t hx, hy;
   GET_HIGH_WORD(hx, x);
   GET_HIGH_WORD(hy, y);

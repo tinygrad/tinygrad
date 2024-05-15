@@ -5,7 +5,7 @@ static const double scbn_two54 =
     scbn_twom54 = 5.55111512312578270212e-17,       /* 0x3C900000, 0x00000000 */
     scbn_huge = 1.0e+300, scbn_tiny = 1.0e-300;
 
-double scalbn(double x, int n) {
+static double scalbn(double x, int n) {
   int32_t k, hx, lx;
   EXTRACT_WORDS(hx, lx, x);
   k = (hx & 0x7ff00000) >> 20; /* extract exponent */
@@ -39,7 +39,7 @@ double scalbn(double x, int n) {
   return x * scbn_twom54;
 }
 
-double floor(double x) {
+static double floor(double x) {
 #if defined(__aarch64__) || defined(_M_ARM64)
   __asm__("frintm %d0, %d1" : "=w"(x) : "w"(x));
 #else
@@ -110,7 +110,7 @@ static const double sd_zero = 0.0, sd_one = 1.0,
                         1.67772160000000000000e+07, /* 0x41700000, 0x00000000 */
     twon24 = 5.96046447753906250000e-08;            /* 0x3E700000, 0x00000000 */
 
-int __kernel_rem_pio2(double *x, double *y, int e0, int nx, int prec) {
+static int __kernel_rem_pio2(double *x, double *y, int e0, int nx, int prec) {
   int32_t jz, jx, jv, jp, jk, carry, n, iq[20], i, j, k, m, q0, ih;
   double z, fw, f[20], fq[20], q[20];
 
@@ -304,7 +304,7 @@ static const double rem_pio2_zero =
     pio2_3 = 2.02226624871116645580e-21,            /* 0x3BA3198A, 0x2E000000 */
     pio2_3t = 8.47842766036889956997e-32;           /* 0x397B839A, 0x252049C1 */
 
-int __ieee754_rem_pio2(double x, double *y) {
+static int __ieee754_rem_pio2(double x, double *y) {
   double z, w, t, r, fn;
   double tx[3], ty[2];
   int32_t e0, i, j, nx, n, ix, hx;
@@ -453,7 +453,7 @@ static const double half =
     S5 = -2.50507602534068634195e-08,               /* 0xBE5AE5E6, 0x8A2B9CEB */
     S6 = 1.58969099521155010221e-10;                /* 0x3DE5D93A, 0x5ACFD57C */
 
-double __kernel_sin(double x, double y, int iy) {
+static double __kernel_sin(double x, double y, int iy) {
   double z, r, v, w;
 
   z = x * x;
@@ -475,7 +475,7 @@ static const double one =
     C5 = 2.08757232129817482790e-09,                /* 0x3E21EE9E, 0xBDB4B1C4 */
     C6 = -1.13596475577881948265e-11;               /* 0xBDA8FAE9, 0xBE8838D4 */
 
-double __kernel_cos(double x, double y) {
+static double __kernel_cos(double x, double y) {
   double hz, z, r, w;
 
   z = x * x;
