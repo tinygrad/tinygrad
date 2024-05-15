@@ -96,8 +96,9 @@ class Sin(Function):
 
   def reduce_angle(self, x:LazyBuffer) -> LazyBuffer:
 
-    # Return mod 2pi if greater than 1e14
+    # Return mod 2pi if greater than a certain big value
     fallback = self._mod(x, x.const(2*math.pi))
+    # fallback = self._mod(x, x.const(4*math.pi))
     orig_x = x
 
     # Reduce to [-pi/2, pi/2]
@@ -135,8 +136,8 @@ class Sin(Function):
     # 0000000000
     # 69800000000000
     # 100000000000000.0
-    ltthresh = orig_x.e(BinaryOps.CMPLT, orig_x.const(69305000000000.0))
-    # ltthresh = orig_x.e(BinaryOps.CMPLT, orig_x.const(1e14))
+    # ltthresh = orig_x.e(BinaryOps.CMPLT, orig_x.const(69305000000000.0))
+    ltthresh = orig_x.e(BinaryOps.CMPLT, orig_x.const(1e15))
     return ltthresh.e(TernaryOps.WHERE, x.cast(beginning_dtype), fallback.cast(beginning_dtype))
 
   def forward(self, x:LazyBuffer) -> LazyBuffer:
