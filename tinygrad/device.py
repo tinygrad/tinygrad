@@ -32,7 +32,7 @@ class _Device:
         if self[device]:
           os.environ[device] = "1"   # we set this in environment for spawned children
           return device
-      except Exception: pass
+      except Exception as e: print(f'wtf: {e}')
     raise RuntimeError("no usable devices")
 Device = _Device()
 
