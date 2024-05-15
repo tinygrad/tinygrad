@@ -48,21 +48,25 @@ class Sin(Function):
             x = x.cast(dtypes.float32)
         self.float_precision = x.dtype
 
+        # return self._sin(x).cast(self.beginning_dtype)
+        # res = self._averaging_sin(x)
+        # return res.cast(self.beginning_dtype)
+
+        # Compute normal sin if below 4e13, else use averaging
+        res = x.e(BinaryOps.CMPLT, x.const(4e13)).e(TernaryOps.WHERE, self._sin(x), self._averaging_sin(x))
+        return res.cast(self.beginning_dtype)
+
+
+    def _averaging_sin(self, x: LazyBuffer) -> LazyBuffer:
         # Compute 5 sines and average
         offsets = [-3,-2, -1, 0, 1, 2, 3]
         sines = [self._sin(x.e(BinaryOps.ADD, x.const(offset*2*math.pi))) for offset in offsets]
-
         sum = x.const(0)
         for s in sines:
-            # print("sine: ")
-            # print(__import__('tinygrad').Tensor(s).numpy())
             sum = sum.e(BinaryOps.ADD, s)
-        # print("sum: ")
-        # print(__import__('tinygrad').Tensor(sum).numpy())
         res = sum.e(BinaryOps.DIV, x.const(len(sines)))
-        # print("res: ")
-        # print(__import__('tinygrad').Tensor(res).numpy())
-        return res.cast(self.beginning_dtype)
+        return res
+
 
     def _sin(self, x: LazyBuffer) -> LazyBuffer:
         # self.beginning_dtype = x.dtype
