@@ -53,7 +53,7 @@ class Sin(Function):
         # return res.cast(self.beginning_dtype)
 
         # Compute normal sin if below 4e13, else use averaging
-        res = x.e(BinaryOps.CMPLT, x.const(4e13)).e(TernaryOps.WHERE, self._sin(x), self._averaging_sin(x))
+        res = self._abs(x).e(BinaryOps.CMPLT, x.const(4e13)).e(TernaryOps.WHERE, self._sin(x), self._averaging_sin(x))
         return res.cast(self.beginning_dtype)
 
 
