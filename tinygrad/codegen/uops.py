@@ -104,6 +104,9 @@ constant_folder = PatternMatcher([
   # x+-y -> x-y
   ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": ({"__name__": "x"}, {"__name__": "my", "uop": UOps.ALU, "arg": UnaryOps.NEG})},
     lambda x, my: UOp(UOps.ALU, x.dtype, (x, my.vin[0]), BinaryOps.SUB)),
+  # -1*x -> -x
+  ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{"__name__": "x"}, {"uop": UOps.CONST, "arg": -1}]},
+    lambda x: UOp(UOps.ALU, x.dtype, (x,), UnaryOps.NEG)),
   # bool < False is always false, True < bool is always false
   ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": ({}, {"__name__": "x", "uop": UOps.CONST, "dtype": dtypes.bool, "arg": False})}, lambda x: x),
   ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": ({"__name__": "x", "uop": UOps.CONST, "dtype": dtypes.bool, "arg": True}, {})},
@@ -150,6 +153,18 @@ constant_folder = PatternMatcher([
     {"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"__name__": "acc"}, {"__name__": "val"}]})},
     lambda acc, start, end, val, loop: None if loop in val.parents else UOp(UOps.ALU, val.dtype,
                                      (UOp(UOps.CAST, val.dtype, (UOp(UOps.ALU, start.dtype, (end, start), BinaryOps.SUB),)), val), BinaryOps.MUL)),
+  # x*y + x*z -> x*(y+z)
+  # NOTE: you need two rules here because the matcher can't backtrack
+  ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": ({"__name__": "x"}, {"__name__": "y"})},
+                                                   {"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{"__name__": "z"}, {"__name__": "x"}]})},
+                                            lambda x,y,z: UOp(UOps.ALU, x.dtype, (x, UOp(UOps.ALU, x.dtype, (y,z), BinaryOps.ADD)), BinaryOps.MUL)),
+  ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": ({"__name__": "y"}, {"__name__": "x"})},
+                                                   {"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{"__name__": "z"}, {"__name__": "x"}]})},
+                                            lambda x,y,z: UOp(UOps.ALU, x.dtype, (x, UOp(UOps.ALU, x.dtype, (y,z), BinaryOps.ADD)), BinaryOps.MUL)),
+  # NEG/CMPLT -> CMPLT
+  ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": ({"uop": UOps.ALU, "arg": UnaryOps.NEG, "vin": ({"__name__": "x"},)},
+                                                     {"__name__": "c", "uop": UOps.CONST, "dtype": dtypes.int})},
+    lambda c,x: UOp(UOps.ALU, dtypes.bool, (UOp.const(c.dtype, -c.arg), x), BinaryOps.CMPLT)),
 ])
 
 # *** uop graph ***
