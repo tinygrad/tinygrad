@@ -7,6 +7,7 @@
 
 #define NAN __builtin_nanf("")
 #define INFINITY __builtin_inff()
+static const double toint = 1 / 2.22044604925031308085e-16;
 
 #define STRICT_ASSIGN(type, lval, rval) ((lval) = (rval))
 

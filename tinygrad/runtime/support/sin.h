@@ -42,10 +42,27 @@ double scalbn(double x, int n) {
 double floor(double x) {
 #if defined(__aarch64__) || defined(_M_ARM64)
   __asm__("frintm %d0, %d1" : "=w"(x) : "w"(x));
-#elif defined(__x86_64__) || defined(_M_X64)
-#error todo
 #else
-#error only aarch64 and x86 is supported
+  union {
+    double f;
+    uint64_t i;
+  } u = {x};
+  int e = u.i >> 52 & 0x7ff;
+  double y;
+
+  if (e >= 0x3ff + 52 || x == 0)
+    return x;
+  /* y = int(x) - x, where int(x) is an integer neighbor of x */
+  if (u.i >> 63)
+    y = x - toint + toint - x;
+  else
+    y = x + toint - toint - x;
+  /* special case because of non-nearest rounding modes */
+  if (e <= 0x3ff - 1) {
+    return u.i >> 63 ? -1 : 0;
+  }
+  if (y > 0)
+    return x + y - 1;
 #endif
   return x;
 }
