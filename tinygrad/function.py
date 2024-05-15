@@ -40,114 +40,137 @@ class Reciprocal(Function):
 
 class Sin(Function):
 
-  def _sin(self, x:LazyBuffer) -> LazyBuffer:
-    self.beginning_dtype = x.dtype
-    if Device.DEFAULT != "METAL": x = x.cast(dtypes.float64)
-    else: x = x.cast(dtypes.float32)
-    self.float_precision = x.dtype
-    x = self.reduce_angle(x)
-    return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 30, x.const(1)).cast(self.beginning_dtype)
+    def _sin(self, x: LazyBuffer) -> LazyBuffer:
+        self.beginning_dtype = x.dtype
+        if Device.DEFAULT != "METAL":
+            x = x.cast(dtypes.float64)
+        else:
+            x = x.cast(dtypes.float32)
+        self.float_precision = x.dtype
+        x = self.reduce_angle(x)
+        return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 30, x.const(1)).cast(
+            self.beginning_dtype
+        )
 
-  def horner_taylor_sin(self, x:LazyBuffer, xsq:LazyBuffer, n: int, s:LazyBuffer) -> LazyBuffer:
-    for i in range(n, 1, -1):
-      # s = s.const(1).e(BinaryOps.SUB, s.e(BinaryOps.MUL, xsq.e(BinaryOps.DIV, x.const((2*n-1)*(2*n-2)))))
-      # s = s.const(1).e(BinaryOps.SUB, xsq.e(BinaryOps.DIV, x.const((2*n-1)*(2*n-2))).e(BinaryOps.MUL, s))
-      # print("xsq: ")
-      # print(__import__('tinygrad').Tensor(xsq).numpy())
-      # print("(2*i-1) * (2*i - 2): ", (2*i-1)*(2*i-2))
-      xsqdivided = xsq.e(BinaryOps.DIV, x.const((2*i-1)*(2*i-2)))
-      # print("xsqdivided: ")
-      # print(__import__('tinygrad').Tensor(xsqdivided).numpy())
-      stxsqdivided = xsqdivided.e(BinaryOps.MUL, s)
-      # print("stxsqdivided: ")
-      # print(__import__('tinygrad').Tensor(stxsqdivided).numpy())
-      s = s.const(1).e(BinaryOps.SUB, stxsqdivided)
-      # print("s: ")
-      # print(__import__('tinygrad').Tensor(s).numpy())
-    return s.e(BinaryOps.MUL, x)
+    def horner_taylor_sin(
+        self, x: LazyBuffer, xsq: LazyBuffer, n: int, s: LazyBuffer
+    ) -> LazyBuffer:
+        for i in range(n, 1, -1):
+            # s = s.const(1).e(BinaryOps.SUB, s.e(BinaryOps.MUL, xsq.e(BinaryOps.DIV, x.const((2*n-1)*(2*n-2)))))
+            # s = s.const(1).e(BinaryOps.SUB, xsq.e(BinaryOps.DIV, x.const((2*n-1)*(2*n-2))).e(BinaryOps.MUL, s))
+            # print("xsq: ")
+            # print(__import__('tinygrad').Tensor(xsq).numpy())
+            # print("(2*i-1) * (2*i - 2): ", (2*i-1)*(2*i-2))
+            xsqdivided = xsq.e(BinaryOps.DIV, x.const((2 * i - 1) * (2 * i - 2)))
+            # print("xsqdivided: ")
+            # print(__import__('tinygrad').Tensor(xsqdivided).numpy())
+            stxsqdivided = xsqdivided.e(BinaryOps.MUL, s)
+            # print("stxsqdivided: ")
+            # print(__import__('tinygrad').Tensor(stxsqdivided).numpy())
+            s = s.const(1).e(BinaryOps.SUB, stxsqdivided)
+            # print("s: ")
+            # print(__import__('tinygrad').Tensor(s).numpy())
+        return s.e(BinaryOps.MUL, x)
 
-  def _abs(self, x:LazyBuffer) -> LazyBuffer:
-    lt0 = x.e(BinaryOps.CMPLT, x.const(0))
-    return lt0.e(TernaryOps.WHERE, x.e(UnaryOps.NEG), x)
+    def _abs(self, x: LazyBuffer) -> LazyBuffer:
+        lt0 = x.e(BinaryOps.CMPLT, x.const(0))
+        return lt0.e(TernaryOps.WHERE, x.e(UnaryOps.NEG), x)
 
-  def _is_even(self, x:LazyBuffer) -> LazyBuffer:
-    # x = self._abs(x)
-    # ev = x.cast(dtypes.uint64)
-    # ev = ev.e(BinaryOps.MOD, ev.const(2))
-    # return ev.e(BinaryOps.CMPEQ, ev.const(1))
-    x = x.cast(dtypes.uint64).cast(self.float_precision)
-    q = x.e(BinaryOps.DIV, x.const(2))
-    # print("q: ")
-    # print(__import__('tinygrad').Tensor(q).numpy())
-    q_floor = q.cast(dtypes.uint64).cast(self.float_precision)
-    # print("q_floor: ")
-    # print(__import__('tinygrad').Tensor(q_floor).numpy())
-    diff = q.e(BinaryOps.SUB, q_floor)
-    # print("diff: ")
-    # print(__import__('tinygrad').Tensor(diff).numpy())
-    is_even = diff.e(BinaryOps.CMPLT, diff.const(1e-14))
-    # print("is_even: ")
-    # print(__import__('tinygrad').Tensor(is_even).numpy())
-    return is_even
+    def _is_even(self, x: LazyBuffer) -> LazyBuffer:
+        # x = self._abs(x)
+        # ev = x.cast(dtypes.uint64)
+        # ev = ev.e(BinaryOps.MOD, ev.const(2))
+        # return ev.e(BinaryOps.CMPEQ, ev.const(1))
+        x = x.cast(dtypes.uint64).cast(self.float_precision)
+        q = x.e(BinaryOps.DIV, x.const(2))
+        # print("q: ")
+        # print(__import__('tinygrad').Tensor(q).numpy())
+        q_floor = q.cast(dtypes.uint64).cast(self.float_precision)
+        # print("q_floor: ")
+        # print(__import__('tinygrad').Tensor(q_floor).numpy())
+        diff = q.e(BinaryOps.SUB, q_floor)
+        # print("diff: ")
+        # print(__import__('tinygrad').Tensor(diff).numpy())
+        is_even = diff.e(BinaryOps.CMPLT, diff.const(1e-14))
+        # print("is_even: ")
+        # print(__import__('tinygrad').Tensor(is_even).numpy())
+        return is_even
 
-  def _mod(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
-    return x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, y).cast(dtypes.int64).cast(self.float_precision).e(BinaryOps.MUL, y))
+    def _mod(self, x: LazyBuffer, y: LazyBuffer) -> LazyBuffer:
+        return x.e(
+            BinaryOps.SUB,
+            x.e(BinaryOps.DIV, y)
+            .cast(dtypes.int64)
+            .cast(self.float_precision)
+            .e(BinaryOps.MUL, y),
+        )
+
+    def reduce_angle(self, x: LazyBuffer) -> LazyBuffer:
+
+        # Return mod 2pi if greater than a certain big value
+        # fallback = self._mod(x, x.const(2*math.pi))
+        fallback = self._mod(x, x.const(4 * math.pi))
+        orig_x = x
+
+        # Reduce to [-pi/2, pi/2]
+        beginning_dtype = x.dtype
+        if Device.DEFAULT != "METAL":
+            x = x.cast(dtypes.float64)
+        else:
+            x = x.cast(dtypes.float32)
+        old_dtype = x.dtype
+
+        lt0 = x.e(BinaryOps.CMPLT, x.const(0))
+        x = self._abs(x)
+
+        halfpi = x.const(1.5707963267948966)
+        d = halfpi
+        divres = x.e(BinaryOps.DIV, d)
+
+        # Check if divres is even. If yes, subtract final value from halfpi
+        is_even = self._is_even(divres)
+
+        divres_pi = x.e(BinaryOps.DIV, x.const(math.pi))
+        is_even_pi = self._is_even(divres_pi)
+        # sign = is_even_pi.e(TernaryOps.WHERE, x.const(-1), x.const(1))
+        sign = is_even_pi.e(TernaryOps.WHERE, x.const(1), x.const(-1))
+
+        # If negative, add pi
+        x = lt0.e(TernaryOps.WHERE, x.e(BinaryOps.ADD, x.const(math.pi)), x)
+        temp = divres.cast(dtypes.uint64).cast(old_dtype).e(BinaryOps.MUL, d)
+        x = x.e(BinaryOps.SUB, temp)
+
+        # x = is_even.e(TernaryOps.WHERE, halfpi.e(BinaryOps.SUB, x), x)
+        x = is_even.e(TernaryOps.WHERE, x, halfpi.e(BinaryOps.SUB, x))
+        x = x.e(BinaryOps.MUL, sign)
+
+        # return x.cast(beginning_dtype)
+        # 1486116864
+        # 0000000000
+        # 69800000000000
+        # 100000000000000.0
+        # ltthresh = orig_x.e(BinaryOps.CMPLT, orig_x.const(69305000000000.0))
+        ltthresh = orig_x.e(BinaryOps.CMPLT, orig_x.const(1e14))
+        res = ltthresh.e(
+            TernaryOps.WHERE, x.cast(beginning_dtype), fallback.cast(beginning_dtype)
+        )
+
+        # Return nan if value is infinity
+        is_inf = orig_x.e(BinaryOps.CMPEQ, orig_x.const(math.inf))
+        res = is_inf.e(TernaryOps.WHERE, x.const(math.nan), res)
+        return res
 
 
-  def reduce_angle(self, x:LazyBuffer) -> LazyBuffer:
+    def forward(self, x: LazyBuffer) -> LazyBuffer:
+        self.x = x
+        return self._sin(x)
+        # return x.e(UnaryOps.SIN)
 
-    # Return mod 2pi if greater than a certain big value
-    # fallback = self._mod(x, x.const(2*math.pi))
-    fallback = self._mod(x, x.const(4*math.pi))
-    orig_x = x
-
-    # Reduce to [-pi/2, pi/2]
-    beginning_dtype = x.dtype
-    if Device.DEFAULT != "METAL": x = x.cast(dtypes.float64)
-    else: x = x.cast(dtypes.float32)
-    old_dtype = x.dtype
-
-    lt0 = x.e(BinaryOps.CMPLT, x.const(0))
-    x = self._abs(x)
-
-    halfpi = x.const(1.5707963267948966)
-    d = halfpi
-    divres = x.e(BinaryOps.DIV, d)
-
-    # Check if divres is even. If yes, subtract final value from halfpi
-    is_even = self._is_even(divres)
-
-    divres_pi = x.e(BinaryOps.DIV, x.const(math.pi))
-    is_even_pi = self._is_even(divres_pi)
-    # sign = is_even_pi.e(TernaryOps.WHERE, x.const(-1), x.const(1))
-    sign = is_even_pi.e(TernaryOps.WHERE, x.const(1), x.const(-1))
-
-    # If negative, add pi
-    x = lt0.e(TernaryOps.WHERE, x.e(BinaryOps.ADD, x.const(math.pi)), x)
-    temp = divres.cast(dtypes.uint64).cast(old_dtype).e(BinaryOps.MUL, d)
-    x = x.e(BinaryOps.SUB, temp)
-
-    # x = is_even.e(TernaryOps.WHERE, halfpi.e(BinaryOps.SUB, x), x)
-    x = is_even.e(TernaryOps.WHERE,x, halfpi.e(BinaryOps.SUB, x))
-    x = x.e(BinaryOps.MUL, sign)
-
-    # return x.cast(beginning_dtype)
-    # 1486116864
-    # 0000000000
-    # 69800000000000
-    # 100000000000000.0
-    # ltthresh = orig_x.e(BinaryOps.CMPLT, orig_x.const(69305000000000.0))
-    ltthresh = orig_x.e(BinaryOps.CMPLT, orig_x.const(1e14))
-    return ltthresh.e(TernaryOps.WHERE, x.cast(beginning_dtype), fallback.cast(beginning_dtype))
-
-  def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.x = x
-    return self._sin(x)
-    # return x.e(UnaryOps.SIN)
-
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    # return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
-    return self._sin(self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)).e(BinaryOps.MUL, grad_output)
+    def backward(self, grad_output: LazyBuffer) -> LazyBuffer:
+        # return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
+        return self._sin(self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)).e(
+            BinaryOps.MUL, grad_output
+        )
 
 # NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
