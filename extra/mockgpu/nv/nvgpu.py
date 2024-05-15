@@ -16,8 +16,11 @@ def make_qmd_struct_type():
 qmd_struct_t = make_qmd_struct_type()
 assert ctypes.sizeof(qmd_struct_t) == 0x40 * 4
 
-gpuocelot_lib = ctypes.CDLL(ctypes.util.find_library("gpuocelot"))
-gpuocelot_lib.ptx_run.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]  # noqa: E501
+try:
+  gpuocelot_lib = ctypes.CDLL(ctypes.util.find_library("gpuocelot"))
+  gpuocelot_lib.ptx_run.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]  # noqa: E501
+except Exception:
+  gpuocelot_lib = None
 
 class SchedResult(Enum): CONT = auto(); YIELD = auto() # noqa: E702
 
@@ -28,13 +31,14 @@ class GPFIFO:
     self.ctrl = nv_gpu.AmpereAControlGPFifo.from_address(self.base + self.entries_cnt * 8)
     self.state = {}
 
-    # Exec state
+    # Buf exec state
     self.buf = None
-    self.off = 0
+    self.buf_sz = 0
+    self.buf_ptr = 0
 
   def _next_dword(self):
-    x = self.buf[self.off]
-    self.off += 1
+    x = self.buf[self.buf_ptr]
+    self.buf_ptr += 1
     return x
 
   def _next_header(self):
@@ -49,111 +53,82 @@ class GPFIFO:
   def _state64(self, reg): return (self.state[reg] << 32) + self.state[reg + 4]
   def _state64_le(self, reg): return (self.state[reg + 4] << 32) + self.state[reg]
   
-  def execute(self):
+  def _reset_buf_state(self): self.buf, self.buf_ptr = None, 0
+  def _set_buf_state(self, gpfifo_entry):
+    ptr = ((gpfifo_entry >> 2) & 0xfffffffff) << 2
+    sz = ((gpfifo_entry >> 42) & 0x1fffff) << 2
+    self.buf = to_mv(ptr, sz).cast("I")
+    self.buf_sz = sz // 4
+
+  def execute(self) -> bool:
+    initial_off = self.buf_ptr
     while self.ctrl.GPGet != self.ctrl.GPPut:
-      entry = self.gpfifo[self.ctrl.GPGet]
-      ptr = ((entry >> 2) & 0xfffffffff) << 2
-      sz = ((entry >> 42) & 0x1fffff) << 2
-      # print("gpfifo", hex(ptr), sz // 4, entry, self.ctrl.GPGet, self.ctrl.GPPut, self.off)
-      buf = to_mv(ptr, sz).cast("I")
-      # print("comp rcv", [x for x in buf])
-      finished = self.execute_buf(buf, sz // 4)
-      if not finished: 
-        # print("early exi")
-        return
-      # print("gpfifio saveexi")
-      self.off = 0
+      self._set_buf_state(self.gpfifo[self.ctrl.GPGet])
+
+      if not self.execute_buf():
+        # Buffer isn't executed fully, check if any progress and report.
+        # Do not move GPGet in this case, will continue from the same state next time.
+        return self.buf_ptr != initial_off
+
       self.ctrl.GPGet = (self.ctrl.GPGet + 1) % self.entries_cnt
+      self._reset_buf_state()
+    return True
 
-  def execute_cmd(self, cmd) -> SchedResult:
-    # print("execute_cmd", cmd, nv_gpu.NVC56F_SEM_EXECUTE, nv_gpu.NVC6C0_LAUNCH_DMA, nv_gpu.NVC6C0_LOAD_INLINE_DATA)
-    if cmd == nv_gpu.NVC56F_SEM_EXECUTE: return self._exec_signal()
-    elif cmd == nv_gpu.NVC6C0_LAUNCH_DMA: return self._exec_nvc6c0_dma()
-    elif cmd == nv_gpu.NVC6B5_LAUNCH_DMA: return self._exec_nvc6b5_dma()
-    elif cmd == 0x0320: return self._exec_load_inline_qmd() # NVC6C0_LOAD_INLINE_QMD_DATA
-    else: 
-      self.state[cmd] = self._next_dword() # just state update
-      # if cmd == nv_gpu.NVC56F_SEM_ADDR_LO: print("set lo sig", cmd, self.state[cmd])
-      # elif cmd == nv_gpu.NVC56F_SEM_ADDR_HI: print("set hi sig", cmd, self.state[cmd])
-    return SchedResult.CONT
-
-  def execute_buf(self, buf, entries):
-    self.buf = buf
-    # print("init buf", self.off, entries)
-    # assert self.off == 0
-    
-    # from hexdump import hexdump
-    # hexdump(self.buf)
-
-    while self.off < entries:
-      init_off = self.off
+  def execute_buf(self) -> bool:
+    while self.buf_ptr < self.buf_sz:
+      init_off = self.buf_ptr
       typ, size, subc, mthd = self._next_header()
-      cmd_end_off = self.off + size
-      # print("hrd", mthd, size, self.off)
-      # assert mthd != 0 or (mthd == 0 and size == 0x1)
+      cmd_end_off = self.buf_ptr + size
 
-      while self.off < cmd_end_off:
+      while self.buf_ptr < cmd_end_off:
         res = self.execute_cmd(mthd)
         if res == SchedResult.YIELD:
-          # assert False
-          # print("abort running, need to wait")
-          self.off = init_off # just revert to the header
+          self.buf_ptr = init_off # just revert to the header
           return False
         mthd += 4
     return True
 
   def execute_qmd(self, qmd_addr):
     qmd = qmd_struct_t.from_address(qmd_addr)
-    # print("exec", hex(qmd_addr))
-
     prg_addr = qmd.program_address_lower + (qmd.program_address_upper << 32)
     const0 = to_mv(qmd.constant_buffer_addr_lower_0 + (qmd.constant_buffer_addr_upper_0 << 32), 0x160).cast('I')
     args_cnt, vals_cnt = const0[0], const0[1]
-    # print([x for x in const0])
-    # print("cost0", hex(qmd.constant_buffer_addr_lower_0 + (qmd.constant_buffer_addr_upper_0 << 32)))
-    # print(args_cnt, vals_cnt)
     args_addr = qmd.constant_buffer_addr_lower_0 + (qmd.constant_buffer_addr_upper_0 << 32) + 0x160
     args = to_mv(args_addr, args_cnt*8).cast('Q')
     vals = to_mv(args_addr + args_cnt*8, vals_cnt*4).cast('I')
-    ocelot_args = [ctypes.cast(args[i], ctypes.c_void_p) for i in range(args_cnt)] + [ctypes.cast(vals[i], ctypes.c_void_p) for i in range(vals_cnt)]
+    args = [ctypes.cast(args[i], ctypes.c_void_p) for i in range(args_cnt)] + [ctypes.cast(vals[i], ctypes.c_void_p) for i in range(vals_cnt)]
     gx, gy, gz = qmd.cta_raster_width, qmd.cta_raster_height, qmd.cta_raster_depth
     lx, ly, lz = qmd.cta_thread_dimension0, qmd.cta_thread_dimension1, qmd.cta_thread_dimension2
-    # print(hex(prg_addr), args_cnt + vals_cnt, ocelot_args)
-    # print([x for x in to_mv(prg_addr, 0x100)])
-    # prg_addr.append("0x0")
-    # assert vals_cnt == 0
-    gpuocelot_lib.ptx_run(ctypes.cast(prg_addr, ctypes.c_char_p), args_cnt + vals_cnt, (ctypes.c_void_p * len(ocelot_args))(*ocelot_args), lx, ly, lz, gx, gy, gz, 0)
+    gpuocelot_lib.ptx_run(ctypes.cast(prg_addr, ctypes.c_char_p), args_cnt+vals_cnt, (ctypes.c_void_p * len(args))(*args), lx, ly, lz, gx, gy, gz, 0)
+
+  def execute_cmd(self, cmd) -> SchedResult:
+    if cmd == nv_gpu.NVC56F_SEM_EXECUTE: return self._exec_signal()
+    elif cmd == nv_gpu.NVC6C0_LAUNCH_DMA: return self._exec_nvc6c0_dma()
+    elif cmd == nv_gpu.NVC6B5_LAUNCH_DMA: return self._exec_nvc6b5_dma()
+    elif cmd == 0x0320: return self._exec_load_inline_qmd() # NVC6C0_LOAD_INLINE_QMD_DATA
+    else: self.state[cmd] = self._next_dword() # just state update
+    return SchedResult.CONT
 
   def _exec_signal(self) -> SchedResult:
     signal = self._state64_le(nv_gpu.NVC56F_SEM_ADDR_LO)
     val = self._state64_le(nv_gpu.NVC56F_SEM_PAYLOAD_LO)
     flags = self._next_dword()
     typ = (flags >> 0) & 0b111
-    # print(typ)
-    if typ == 1:
-      # print("signal sig", hex(signal), val)
-      # print("exec signal")
-      to_mv(signal, 8).cast('Q')[0] = val
+    if typ == 1: to_mv(signal, 8).cast('Q')[0] = val
     elif typ == 3:
-      # print("signal wait", hex(signal),val)
       mval = to_mv(signal, 8).cast('Q')[0]
-      # print("YELD", mval >= val)
-      assert mval >= val
       return SchedResult.CONT if mval >= val else SchedResult.YIELD
     else: raise RuntimeError(f"Unsupported type={typ} in exec wait/signal")
 
   def _exec_load_inline_qmd(self):
-    # print('_exec_load_inline_qmd')
     qmd_addr = self._state64(nv_gpu.NVC6C0_SET_INLINE_QMD_ADDRESS_A) << 8
     assert qmd_addr != 0x0, f"invalid qmd address {qmd_addr}"
     qmd_data = [self._next_dword() for _ in range(0x40)]
     cdata = (ctypes.c_uint32 * len(qmd_data))(*qmd_data)
-    # print("qmd", hex(qmd_addr))
     ctypes.memmove(qmd_addr, cdata, 0x40 * 4)
     self.execute_qmd(qmd_addr)
 
   def _exec_nvc6c0_dma(self):
-    # print('_exec_nvc6c0_dma')
     addr = self._state64(nv_gpu.NVC6C0_OFFSET_OUT_UPPER)
     sz = self._state(nv_gpu.NVC6C0_LINE_LENGTH_IN)
     lanes = self._state(nv_gpu.NVC6C0_LINE_COUNT)
@@ -164,15 +139,10 @@ class GPFIFO:
     assert typ == 6 and mthd == nv_gpu.NVC6C0_LOAD_INLINE_DATA, f"Expected inline data not found after nvc6c0_dma, {typ=} {mthd=}"
     copy_data = [self._next_dword() for _ in range(dsize)]
     assert len(copy_data) * 4 == sz, f"different copy sizes in _exec_nvc6c0_dma: {len(copy_data) * 4} != {sz}"
-    # print("inline", hex(addr), copy_data)
     cdata = (ctypes.c_uint32 * len(copy_data))(*copy_data)
-    # print(cdata[0])
     ctypes.memmove(addr, cdata, sz)
-    # print([x for x in to_mv(addr, 0x160).cast('I')])
-    # print(to_mv(addr, 8).cast('I')[0])
 
   def _exec_nvc6b5_dma(self):
-    # print('_exec_nvc6b5_dma')
     src = self._state64(nv_gpu.NVC6B5_OFFSET_IN_UPPER)
     dst = self._state64(nv_gpu.NVC6B5_OFFSET_OUT_UPPER)
     sz = self._state(nv_gpu.NVC6B5_LINE_LENGTH_IN)

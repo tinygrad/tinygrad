@@ -83,7 +83,6 @@ class NVCompiler(Compiler):
     if status != 0:
       raise RuntimeError(f"compile failed: {_get_bytes(prog, cuda.nvrtcGetProgramLog, cuda.nvrtcGetProgramLogSize, cuda_check).decode()}")
     return _get_bytes(prog, cuda.nvrtcGetCUBIN, cuda.nvrtcGetCUBINSize, cuda_check)
-if getenv("MOCKGPU"): NVCompiler = PTXCompiler
 
 class HWComputeQueue:
   def __init__(self): self.q = []
@@ -250,6 +249,7 @@ class NVProgram:
     if self.device.kernargs_ptr >= (self.device.kernargs_page.base + self.device.kernargs_page.length - self.kernargs_segment_size):
       self.device.kernargs_ptr = self.device.kernargs_page.base
 
+    # HACK: Save counts of args and vars to "unused" constbuffer for later extraction in mockgpu to pass into gpuocelot.
     if MOCKGPU: self.constbuffer_0[0:2] = [len(args), len(vals)]
     kernargs = [arg_half for arg in args for arg_half in nvdata64_le(arg.base)] + [val for val in vals]
 

@@ -9,6 +9,8 @@ MAP_FIXED = 0x10
 libc = ctypes.CDLL(ctypes.util.find_library("c"))
 libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
 libc.mmap.restype = ctypes.c_void_p
+libc.munmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+libc.munmap.restype = ctypes.c_int
 
 NVSubDevice = collections.namedtuple('NVSubDevice', ['device'])
 NVUserMode = collections.namedtuple('NVUserMode', ['subdevice'])
@@ -54,15 +56,13 @@ class NVDriver(VirtDriver):
                            VirtFile('/dev/nvidia-uvm', functools.partial(NVUVMFileDesc, driver=self))]
 
     self.root_handle = None
-    
+
     self.gpus = {}
     self.next_fd = (1 << 30)
     self.next_handle = 1
 
     self.object_by_handle = {}
-    # self.memobj_mappings = {}
     self.opened_fds = {}
-    self.doorbells = {}
     self.next_doorbell = collections.defaultdict(int)
 
     for i in range(gpus): self._prepare_gpu(i)
@@ -77,18 +77,7 @@ class NVDriver(VirtDriver):
     self.next_handle += 1
     return handle
 
-  def _alloc_next_event_slot(self):
-    ev = self.next_event
-    self.next_event += 1
-    return ev
-
-  def _alloc_doorbell(self, gpu_id):
-    x = ctypes.addressof(from_mv(self.doorbells[gpu_id])) + self.next_doorbell[gpu_id] * 8
-    self.next_doorbell[gpu_id] += 1
-    return x
-
   def _prepare_gpu(self, gpu_id):
-    self.doorbells[gpu_id] = memoryview(bytearray(0x2000))
     self.gpus[gpu_id] = NVGPU(gpu_id)
     self.tracked_files += [VirtFile(f'/dev/nvidia{gpu_id}', functools.partial(NVDevFileDesc, driver=self, gpu=self.gpus[gpu_id]))]
 
@@ -169,8 +158,7 @@ class NVDriver(VirtDriver):
   def ctl_ioctl(self, req, argp):
     nr = req & 0xff
     if nr == nv_gpu.NV_ESC_RM_ALLOC: return self.rm_alloc(argp)
-    elif nr == nv_gpu.NV_ESC_RM_ALLOC_MEMORY:
-      print("NV_ESC_RM_ALLOC_MEMORY")
+    elif nr == nv_gpu.NV_ESC_RM_ALLOC_MEMORY: pass
     elif nr == nv_gpu.NV_ESC_RM_CONTROL: return self.rm_control(argp)
     elif nr == nv_gpu.NV_ESC_RM_MAP_MEMORY:
       st = nv_gpu.nv_ioctl_nvos33_parameters_with_fd.from_address(argp)
@@ -180,7 +168,8 @@ class NVDriver(VirtDriver):
         assert isinstance(file, NVDevFileDesc)
         file._mapping_userland = True
     elif nr == nv_gpu.NV_ESC_RM_FREE:
-      print("NV_ESC_RM_FREE")
+      st = nv_gpu.NVOS00_PARAMETERS.from_address(argp)
+      self.object_by_handle.pop(st.hObjectOld)
     elif nr == nv_gpu.NV_ESC_CARD_INFO:
       for i,gpu in enumerate(self.gpus.values()):
         st = nv_gpu.nv_ioctl_card_info_t.from_address(argp + i * ctypes.sizeof(nv_gpu.nv_ioctl_card_info_t))
@@ -210,20 +199,19 @@ class NVDriver(VirtDriver):
             break
         if gpu is None: return -1
         gpu.map_range(st.base, st.length)
-        # self.memobj_mappings[st.hMemory] = (st.base, st.length)
     elif nr == nv_gpu.UVM_REGISTER_CHANNEL: pass
+    elif nr == nv_gpu.UVM_FREE:
+      gpu.unmap_range(st.base, st.length)
+      libc.munmap(st.base, st.length)
     else: raise RuntimeError(f"Unknown {nr} to nvidia-uvm")
     return 0
 
   def dev_ioctl(self, dev, req, argp): return 0
   def _gpu_mmio_write(self, mv, off, gpu):
-    # queue_token = mv[off]
-    # gpu.queues[queue_token].execute()
     any_progress = True
     while any_progress:
       any_progress = False
       for gpu in self.gpus.values():
         for q in gpu.queues:
           if (prev_rptr:=q.ctrl.GPGet) != q.ctrl.GPPut:
-            q.execute()
-            any_progress |= (q.ctrl.GPGet != q.ctrl.GPPut)
+            any_progress |= q.execute()
