@@ -5,12 +5,12 @@ from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.device import Buffer, Device
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
+from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, exec_alu
 from tinygrad.renderer import Program
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item
 from tinygrad.codegen.linearizer import UOps, UOp
-from tinygrad.codegen.uops import exec_alu, UOpGraph
+from tinygrad.codegen.uops import UOpGraph
 from test.helpers import is_dtype_supported
 
 def _uops_to_prg(uops):
@@ -256,6 +256,26 @@ class TestAssembly(unittest.TestCase):
     self.assertEqual(u9.vin[1].arg, u5.arg*dtypes.float.itemsize)
     self.assertEqual(u10.vin[1].uop, UOps.CONST)
     self.assertEqual(u10.vin[1].arg, u6.arg*dtypes.float.itemsize)
+
+  def test_gated_load(self):
+    from tinygrad.renderer.assembly import optimize_gated_loads
+    uops = UOpGraph()
+    u1 = uops.add(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), tuple(), (0, 'data0', True))
+    u2 = uops.add(UOps.SPECIAL, dtypes.int, tuple(), (0, 'gidx0', 9))
+    u3 = uops.add(UOps.CONST, dtypes.int, tuple(), arg=42)
+    u4 = uops.add(UOps.ALU, dtypes.int, (u2, u3), BinaryOps.MUL)
+    u5 = uops.add(UOps.CONST, dtypes.int, tuple(), arg=0)
+    u6 = uops.add(UOps.CONST, dtypes.int, tuple(), arg=1)
+    u7 = uops.add(UOps.CONST, dtypes.bool, tuple(), arg=1)
+    u8 = uops.add(UOps.ALU, dtypes.int, (u4, u5), BinaryOps.ADD)
+    u9 = uops.add(UOps.LOAD, dtypes.int, (u1, u8, u7, u6))
+    optimize_gated_loads(uops)
+    if_op = next(filter(lambda x: x.uop is UOps.IF, uops.uops), None)
+    self.assertNotEqual(if_op, None)
+    self.assertNotEqual(next(filter(lambda x: x.uop is UOps.ENDIF, uops.uops), None), None)
+    for uu in [u2, u3, u4, u5, u6, u8, u9]:
+      self.assertLess(uops.uops.index(if_op), uops.uops.index(uu))
+
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

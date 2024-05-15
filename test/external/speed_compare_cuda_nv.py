@@ -1,7 +1,7 @@
 from tinygrad import Device
 from tinygrad.helpers import getenv, colored
 from extra.optimization.helpers import load_worlds, ast_str_to_lin
-from tinygrad.features.search import bufs_from_lin
+from tinygrad.engine.search import bufs_from_lin
 
 # move to helpers?
 def colorize_float(x):

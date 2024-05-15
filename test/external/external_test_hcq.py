@@ -1,8 +1,9 @@
 import unittest, ctypes, struct, time, array
 from tinygrad import Device, Tensor, dtypes
-from tinygrad.helpers import to_mv
+from tinygrad.helpers import to_mv, CI
 from tinygrad.device import Buffer, BufferOptions
 from tinygrad.engine.schedule import create_schedule
+from tinygrad.engine.realize import get_runner
 
 def _time_queue(q, d):
   st = time.perf_counter()
@@ -21,7 +22,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.a = Tensor([0.,1.], device=Device.DEFAULT).realize()
     TestHCQ.b = self.a + 1
     si = create_schedule([self.b.lazydata])[-1]
-    TestHCQ.runner = TestHCQ.d0.get_runner(*si.ast)
+    TestHCQ.runner = get_runner(TestHCQ.d0.dname, si.ast)
     TestHCQ.b.lazydata.buffer.allocate()
     # wow that's a lot of abstraction layers
     TestHCQ.addr = struct.pack("QQ", TestHCQ.b.lazydata.buffer._buf.va_addr, TestHCQ.a.lazydata.buffer._buf.va_addr)
@@ -53,11 +54,11 @@ class TestHCQ(unittest.TestCase):
     temp_signal, temp_value = TestHCQ.d0._get_signal(value=0), 0
     q = TestHCQ.compute_queue()
     for _ in range(1000):
-      q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size)
+      q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size)
       q.signal(temp_signal, temp_value + 1).wait(temp_signal, temp_value + 1)
       temp_value += 1
 
-      q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr+TestHCQ.kernargs_size, TestHCQ.runner.global_size, TestHCQ.runner.local_size)
+      q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr+TestHCQ.kernargs_size, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size)
       q.signal(temp_signal, temp_value + 1).wait(temp_signal, temp_value + 1)
       temp_value += 1
 
@@ -70,10 +71,10 @@ class TestHCQ(unittest.TestCase):
   def test_run_1000_times(self):
     temp_signal = TestHCQ.d0._get_signal(value=0)
     q = TestHCQ.compute_queue()
-    q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size)
+    q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size)
     q.signal(temp_signal, 2).wait(temp_signal, 2)
-    q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr+TestHCQ.kernargs_size, TestHCQ.runner.global_size,
-           TestHCQ.runner.local_size)
+    q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr+TestHCQ.kernargs_size, TestHCQ.runner.p.global_size,
+           TestHCQ.runner.p.local_size)
     for _ in range(1000):
       TestHCQ.d0._set_signal(temp_signal, 1)
       q.submit(TestHCQ.d0)
@@ -85,16 +86,17 @@ class TestHCQ(unittest.TestCase):
   def test_run_to_3(self):
     temp_signal = TestHCQ.d0._get_signal(value=0)
     q = TestHCQ.compute_queue()
-    q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size)
+    q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size)
     q.signal(temp_signal, 1).wait(temp_signal, 1)
-    q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr+TestHCQ.kernargs_size, TestHCQ.runner.global_size, TestHCQ.runner.local_size)
+    q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr+TestHCQ.kernargs_size, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size)
     q.signal(temp_signal, 2).wait(temp_signal, 2)
-    q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size)
+    q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size)
     q.signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
     TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
     assert (val:=TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[0]) == 3.0, f"got val {val}"
 
+  @unittest.skipIf(CI, "Can't handle async update on CPU")
   def test_wait_signal(self):
     temp_signal = TestHCQ.d0._get_signal(value=0)
     TestHCQ.compute_queue().wait(temp_signal, value=1).signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
@@ -105,6 +107,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value, timeout=100)
     TestHCQ.d0.timeline_value += 1
 
+  @unittest.skipIf(CI, "Can't handle async update on CPU")
   def test_wait_copy_signal(self):
     temp_signal = TestHCQ.d0._get_signal(value=0)
     TestHCQ.copy_queue().wait(temp_signal, value=1).signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
@@ -117,7 +120,7 @@ class TestHCQ(unittest.TestCase):
 
   def test_run_normal(self):
     q = TestHCQ.compute_queue()
-    q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size)
+    q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size)
     q.signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
     TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
@@ -147,7 +150,7 @@ class TestHCQ(unittest.TestCase):
 
   def test_run_signal(self):
     q = TestHCQ.compute_queue()
-    q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size)
+    q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size)
     q.signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
     q.submit(TestHCQ.d0)
     TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
@@ -187,7 +190,7 @@ class TestHCQ(unittest.TestCase):
     et = _time_queue(q, TestHCQ.d0)
     gb_s = (SZ/1e9)/et
     print(f"same device copy:  {et*1e3:.2f} ms, {gb_s:.2f} GB/s")
-    assert gb_s > 10 and gb_s < 1000
+    assert (0.3 if CI else 10) <= gb_s <= 1000
 
   def test_cross_device_copy_bandwidth(self):
     SZ = 2_000_000_000
@@ -199,12 +202,12 @@ class TestHCQ(unittest.TestCase):
     et = _time_queue(q, TestHCQ.d0)
     gb_s = (SZ/1e9)/et
     print(f"cross device copy: {et*1e3:.2f} ms, {gb_s:.2f} GB/s")
-    assert gb_s > 2 and gb_s < 50
+    assert (0.3 if CI else 2) <= gb_s <= 50
 
   def test_interleave_compute_and_copy(self):
     q = TestHCQ.compute_queue()
     qc = TestHCQ.copy_queue()
-    q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size)  # b = [1, 2]
+    q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size)  # b = [1, 2]
     q.signal(sig:=TestHCQ.d0._get_signal(value=0), value=1)
     qc.wait(sig, value=1)
     qc.copy(TestHCQ.a.lazydata.buffer._buf.va_addr, TestHCQ.b.lazydata.buffer._buf.va_addr, 8)
@@ -240,7 +243,7 @@ class TestHCQ(unittest.TestCase):
     for _ in range(40):
       q = TestHCQ.compute_queue()
       q.wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1)
-      q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.global_size, TestHCQ.runner.local_size)
+      q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size)
       q.signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
       TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
       TestHCQ.d0.timeline_value += 1

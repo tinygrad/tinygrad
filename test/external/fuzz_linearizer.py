@@ -7,8 +7,8 @@ from extra.optimization.helpers import load_worlds, ast_str_to_lin
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.codegen.linearizer import Linearizer, UOp
 from tinygrad.codegen.kernel import Opt, OptOps
-from tinygrad.features.search import get_linearizer_actions, bufs_from_lin
-from tinygrad.features.graph import print_tree
+from tinygrad.engine.search import get_linearizer_actions, bufs_from_lin
+from tinygrad.engine.graph import print_tree
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import getenv, from_mv, prod, colored, Context, DEBUG
 from tinygrad.ops import LazyOp, UnaryOps, BufferOps

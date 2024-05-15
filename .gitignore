@@ -18,9 +18,8 @@ pandecode.dump
 vertex.bin
 recognize*
 .idea
-disassemblers/applegpu
-disassemblers/cuda_ioctl_sniffer
 *.prof
+extra/disassemblers/applegpu
 extra/datasets/cifar-10-python.tar.gz
 extra/datasets/librispeech/
 extra/datasets/imagenet/

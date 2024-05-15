@@ -4,8 +4,8 @@ from extra.optimization.helpers import kern_str_to_lin
 from test.external.fuzz_linearizer import compare_linearizer
 from tinygrad.helpers import colored
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.features.graph import print_tree
-from tinygrad.features.search import time_linearizer
+from tinygrad.engine.graph import print_tree
+from tinygrad.engine.search import time_linearizer
 
 # Use this with the LOGKERN options to verify that all executed kernels are valid and evaluate to the same ground truth results
 

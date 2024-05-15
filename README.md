@@ -1,9 +1,8 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="/docs-legacy/logo_tiny_dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="/docs-legacy/logo_tiny_light.svg">
-  <img alt="tiny corp logo" src="/docs-legacy/logo_tiny_light.svg" width="50%" height="50%">
+  <source media="(prefers-color-scheme: light)" srcset="/docs/logo_tiny_light.svg">
+  <img alt="tiny corp logo" src="/docs/logo_tiny_dark.svg" width="50%" height="50%">
 </picture>
 
 tinygrad: For something between [PyTorch](https://github.com/pytorch/pytorch) and [karpathy/micrograd](https://github.com/karpathy/micrograd). Maintained by [tiny corp](https://tinygrad.org).
@@ -88,7 +87,7 @@ tinygrad already supports numerous accelerators, including:
 - [x] [HSA](tinygrad/runtime/ops_hsa.py)
 
 And it is easy to add more! Your accelerator of choice only needs to support a total of ~25 low level ops.
-More information can be found in the [documentation for adding new accelerators](/docs-legacy/adding_new_accelerators.md).
+More information can be found in the [documentation for adding new accelerators](/docs/adding_new_accelerators.md).
 
 ## Installation
 

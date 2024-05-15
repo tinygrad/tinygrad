@@ -3,8 +3,8 @@ import unittest
 from tinygrad import dtypes, Device
 from tinygrad.helpers import CI
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.features.search import Opt, OptOps
-from tinygrad.features.search import time_linearizer, bufs_from_lin
+from tinygrad.engine.search import Opt, OptOps
+from tinygrad.engine.search import time_linearizer, bufs_from_lin
 
 # stuff needed to unpack a kernel
 from tinygrad.ops import LazyOp, BinaryOps, UnaryOps, ReduceOps, BufferOps, MemBuffer, ConstBuffer

@@ -25,7 +25,6 @@ def st_shape(draw) -> tuple[int, ...]:
   assume(prod([d for d in s if d]) <= 1024 ** 4)
   return s
 
-
 def tensors_for_shape(s:tuple[int, ...]) -> tuple[torch.tensor, Tensor]:
   x = np.arange(prod(s)).reshape(s)
   return torch.from_numpy(x), Tensor(x)
@@ -50,7 +49,6 @@ class TestShapeOps(unittest.TestCase):
 
     assert len(tor) == len(ten)
     assert all([np.array_equal(tor.numpy(), ten.numpy()) for (tor, ten) in zip(tor, ten)])
-
 
   @settings.get_profile(__file__)
   @given(st_shape(), st_int32, st_int32)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Tuple, List, Any, cast
-import os, fcntl, ctypes, functools, re, pathlib, mmap, struct, errno, subprocess, time
+import os, fcntl, ctypes, ctypes.util, functools, re, pathlib, mmap, struct, errno, subprocess, time
 from tinygrad.device import Compiled, Compiler, BufferOptions, LRUAllocator
 from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up, DEBUG
 from tinygrad.renderer.cstyle import HIPRenderer
@@ -11,11 +11,16 @@ import tinygrad.runtime.autogen.hsa as hsa
 import tinygrad.runtime.autogen.amd_gpu as amd_gpu
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401
 
-libc = ctypes.CDLL("libc.so.6")
+libc = ctypes.CDLL(ctypes.util.find_library("c"))
 libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
 libc.mmap.restype = ctypes.c_void_p
 libc.munmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
 libc.munmap.restype = ctypes.c_int
+
+if getenv("MOCKGPU"):
+  import extra.mockgpu.mockgpu  # noqa: F401
+  libc.mmap = extra.mockgpu.mockgpu._mmap # type: ignore
+  libc.munmap = extra.mockgpu.mockgpu._munmap # type: ignore
 
 def is_usable_gpu(gpu_id):
   try:
@@ -74,16 +79,12 @@ class AMDCompiler(Compiler):
     super().__init__(f"compile_hip_{self.arch}")
   def compile(self, src:str) -> bytes: return compile_hip(src, self.arch)
 
-SDMA_MAX_COPY_SIZE = 0x400000
 PAGE_SIZE = 0x1000
 SIGNAL_SIZE, SIGNAL_COUNT = ctypes.sizeof(hsa.amd_signal_t), 16384
-SHT_PROGBITS, SHF_ALLOC = 0x1, 0x2
-EMPTY_SIGNAL = hsa.hsa_signal_t()
 SIGNAL_VALUE_OFFSET = getattr(hsa.amd_signal_t, 'value').offset
 
 BASE_ADDR = 0x00001260
-PACKET3_SET_SH_REG_START = 0x2c00
-SUB = PACKET3_SET_SH_REG_START - BASE_ADDR
+SUB = amd_gpu.PACKET3_SET_SH_REG_START - BASE_ADDR
 
 regCOMPUTE_PGM_LO = 0x1bac - SUB
 regCOMPUTE_PGM_RSRC1 = 0x1bb2 - SUB
@@ -109,49 +110,6 @@ WAIT_REG_MEM_FUNCTION_GEQ = 5 # >=
 COMPUTE_SHADER_EN = 1
 FORCE_START_AT_000 = 1 << 2
 CS_W32_EN = 1 << 15
-
-def format_struct(s):
-  sdats = []
-  for field_name, field_type in s._fields_:
-    dat = getattr(s, field_name)
-    if isinstance(dat, int): sdats.append(f"{field_name}:0x{dat:X}")
-    else: sdats.append(f"{field_name}:{dat}")
-  return sdats
-
-"""
-regCOMPUTE_PGM_RSRC1 0 0x1bb2 12 0 0
-	VGPRS 0 5
-	SGPRS 6 9
-	PRIORITY 10 11
-	FLOAT_MODE 12 19
-	PRIV 20 20
-	DX10_CLAMP 21 21
-	IEEE_MODE 23 23
-	BULKY 24 24
-	FP16_OVFL 26 26
-	WGP_MODE 29 29
-	MEM_ORDERED 30 30
-	FWD_PROGRESS 31 31
-regCOMPUTE_PGM_RSRC2 0 0x1bb3 11 0 0
-	SCRATCH_EN 0 0
-	USER_SGPR 1 5
-	TRAP_PRESENT 6 6
-	TGID_X_EN 7 7
-	TGID_Y_EN 8 8
-	TGID_Z_EN 9 9
-	TG_SIZE_EN 10 10
-	TIDIG_COMP_CNT 11 12
-	EXCP_EN_MSB 13 14
-	LDS_SIZE 15 23
-	EXCP_EN 24 30
-regCOMPUTE_RESOURCE_LIMITS 0 0x1bb5 6 0 0
-	WAVES_PER_SH 0 9
-	TG_PER_CU 12 15
-	LOCK_THRESHOLD 16 21
-	SIMD_DEST_CNTL 22 22
-	FORCE_SIMD_DIST 23 23
-	CU_GROUP_COUNT 24 26
-"""
 
 class HWPM4Queue:
   def __init__(self): self.q = []
@@ -202,11 +160,9 @@ class HWPM4Queue:
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), regCOMPUTE_STATIC_THREAD_MGMT_SE2, 0xFFFFFFFF,0xFFFFFFFF]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 4), regCOMPUTE_STATIC_THREAD_MGMT_SE4, 0xFFFFFFFF,0xFFFFFFFF,0xFFFFFFFF,0xFFFFFFFF]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), regCOMPUTE_USER_DATA_0, kernargs&0xFFFFFFFF, kernargs>>32]
-    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 8), regCOMPUTE_START_X, 0,0,0, local_size[0],local_size[1],local_size[2],0,0]
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 8), regCOMPUTE_START_X, 0, 0, 0, *local_size, 0, 0]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), regCOMPUTE_RESOURCE_LIMITS, 0]
-    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_DISPATCH_DIRECT, 3),
-               global_size[0],global_size[1],global_size[2], CS_W32_EN | FORCE_START_AT_000 | COMPUTE_SHADER_EN]
-
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_DISPATCH_DIRECT, 3), *global_size, CS_W32_EN | FORCE_START_AT_000 | COMPUTE_SHADER_EN]
     return self
 
   def wait(self, signal:hsa.amd_signal_t, value=0):
@@ -268,6 +224,7 @@ sdma_cache_inv = sdma_pkts.gcr(op=amd_gpu.SDMA_OP_GCR, sub_op=amd_gpu.SDMA_SUBOP
 sdma_cache_wb = sdma_pkts.gcr(op=amd_gpu.SDMA_OP_GCR, sub_op=amd_gpu.SDMA_SUBOP_USER_GCR, GCR_CONTROL_GL2_WB=1, GCR_CONTROL_GLK_WB=1,
                               GCR_CONTROL_GL2_RANGE=0)
 
+SDMA_MAX_COPY_SIZE = 0x400000
 class HWCopyQueue:
   def __init__(self): self.q = []
 
@@ -314,6 +271,7 @@ class HWCopyQueue:
                                         value=value, mask=0xffffffff, interval=0x04, retry_count=0xfff))
     return self
 
+SHT_PROGBITS, SHF_ALLOC = 0x1, 0x2
 class AMDProgram:
   def __init__(self, device:AMDDevice, name:str, lib:bytes):
     # TODO; this API needs the type signature of the function and global_size/local_size

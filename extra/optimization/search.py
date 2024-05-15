@@ -5,7 +5,7 @@ from tinygrad import dtypes
 from tinygrad.helpers import BEAM, getenv
 from tinygrad.device import Device, Compiled
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.features.search import time_linearizer, beam_search, bufs_from_lin
+from tinygrad.engine.search import time_linearizer, beam_search, bufs_from_lin
 
 
 if __name__ == '__main__':

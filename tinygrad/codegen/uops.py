@@ -141,7 +141,7 @@ class UOpGraph:
   def globals(self) -> List[Tuple[int, bool]]: return [x.arg for x in self.uops if x.uop is UOps.DEFINE_GLOBAL]
 
   def graph(self):
-    from tinygrad.features.graph import graph_uops
+    from tinygrad.engine.graph import graph_uops
     graph_uops(self.uops)
 
   def print(self):
@@ -149,20 +149,19 @@ class UOpGraph:
       print(f"{self.uops.index(u):4d} {str(u.uop):20s}: {str(u.dtype) if u.dtype is not None else '':25s} "
             f"{str([self.uops.index(x) for x in u.vin]):32s} {u.arg}")
 
-  def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None, cachable=True, insert_before=None,
-          simplify=True) -> UOp:
-    return self.add_op(UOp(uop, dtype, vin, arg) if uop is not UOps.CONST else UOp.const(dtype, arg), cachable, insert_before, simplify)
+  def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None, insert_before=None, simplify=True) -> UOp:
+    return self.add_op(UOp(uop, dtype, vin, arg) if uop is not UOps.CONST else UOp.const(dtype, arg), insert_before, simplify)
 
-  def add_op(self, ret:UOp, cachable=True, insert_before=None, simplify=True) -> UOp:
+  def add_op(self, ret:UOp, insert_before=None, simplify=True) -> UOp:
     if simplify and (rewritten:=constant_folder.rewrite(ret)) is not None:
-      if rewritten in self.uops: return rewritten  # ignore cachable
+      if rewritten in self.uops: return rewritten
       ret = rewritten
     key = (ret.uop, ret.dtype, ret.vin, ret.arg)
     if insert_before is None: insert_before = len(self.uops)
     # check if the cached expr is valid with the given insert place.
-    if cachable and (expr:=self.saved_exprs.get(key, None)) is not None and self.uops.index(expr) <= insert_before: return expr
+    if (expr:=self.saved_exprs.get(key, None)) is not None and self.uops.index(expr) <= insert_before: return expr
     self.uops.insert(insert_before, ret)
-    if cachable: self.saved_exprs[key] = ret
+    self.saved_exprs[key] = ret
     return ret
 
   def remove_childless(self, keep:Set[UOp]):
@@ -182,6 +181,7 @@ class UOpGraph:
     for u in self.uops:
       uop, arg, vin, dtype = u.uop, u.arg, u.vin, u.dtype
       if uop in {UOps.CONST, UOps.DEFINE_ACC}:
+        if uop is UOps.DEFINE_ACC: arg = arg[0]
         assert dtype is not None and type(arg) is type(dtypes.as_const(arg, dtype)), f"type of {arg=} does not match {dtype}"
       if uop is UOps.ALU:
         if arg in UnaryOps:
@@ -210,10 +210,10 @@ class UOpGraph:
       if u.uop is UOps.LOOP:
         # add END of loops after the last thing that (recursively) depends on them
         insert_before = self.uops.index(sorted(list(self.get_recursive_children(u)), key=self.uops.index)[-1])+1
-        self.add(UOps.ENDLOOP, None, (u,), cachable=False, insert_before=insert_before)
+        self.add(UOps.ENDLOOP, None, (u,), insert_before=insert_before)
       elif u.uop is UOps.IF:
         # END any if statements at the end of the uops
-        self.add(UOps.ENDIF, None, (u,), cachable=False)
+        self.add(UOps.ENDIF, None, (u,))
 
   def fix_loop_scope(self, get_recursive_parents:Callable[..., Set[UOp]]):
     loop_stack: List[List[UOp]] = [[]]

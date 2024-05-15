@@ -23,7 +23,9 @@ class Optimizer:
 
   def step(self): Tensor.realize(*self.schedule_step())
   def schedule_step(self) -> List[Tensor]:
-    assert Tensor.training, "Tensor.training should be set in the optimizer"
+    assert Tensor.training, (
+            f"""Tensor.training={Tensor.training}, Tensor.training must be enabled to use the optimizer.
+                - help: Consider setting Tensor.training=True before calling Optimizer.step().""")
     return self._step()+self.params+self.buffers
   def _step(self) -> List[Tensor]: raise NotImplementedError
 
@@ -74,19 +76,20 @@ def Adam(params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8): return LAM
 class LAMB(Optimizer):
   def __init__(self, params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, wd=0.0, adam=False):
     super().__init__(params, lr)
-    self.eps, self.wd, self.adam = eps, wd, adam
-    self.b1, self.b2, self.t = (Tensor([x], device=self.device, requires_grad=False).realize() for x in [b1, b2, 0])
-    self.m = [Tensor.zeros(*t.shape, dtype=t.dtype, device=t.device, requires_grad=False).contiguous() for t in self.params]
-    self.v = [Tensor.zeros(*t.shape, dtype=t.dtype, device=t.device, requires_grad=False).contiguous() for t in self.params]
+    self.b1, self.b2, self.eps, self.wd, self.adam = b1, b2, eps, wd, adam
+    self.b1_t, self.b2_t = (Tensor([1], dtype=dtypes.float32, device=self.device, requires_grad=False).realize() for _ in [b1, b2])
+    self.m = [Tensor.zeros(*t.shape, dtype=dtypes.float32, device=t.device, requires_grad=False).contiguous() for t in self.params]
+    self.v = [Tensor.zeros(*t.shape, dtype=dtypes.float32, device=t.device, requires_grad=False).contiguous() for t in self.params]
 
   def _step(self) -> List[Tensor]:
-    self.t.assign(self.t + 1)
+    self.b1_t *= self.b1
+    self.b2_t *= self.b2
     for i, t in enumerate(self.params):
       assert t.grad is not None
       self.m[i].assign(self.b1 * self.m[i] + (1.0 - self.b1) * t.grad)
       self.v[i].assign(self.b2 * self.v[i] + (1.0 - self.b2) * (t.grad * t.grad))
-      m_hat = self.m[i] / (1.0 - self.b1 ** self.t)
-      v_hat = self.v[i] / (1.0 - self.b2 ** self.t)
+      m_hat = self.m[i] / (1.0 - self.b1_t)
+      v_hat = self.v[i] / (1.0 - self.b2_t)
       up = (m_hat / (v_hat.sqrt() + self.eps)) + self.wd * t.detach()
       if not self.adam:
         r1 = t.detach().square().sum().sqrt()
@@ -95,4 +98,4 @@ class LAMB(Optimizer):
       else:
         r = 1.0
       t.assign((t.detach() - self.lr * r * up).cast(t.dtype))
-    return [self.t] + self.m + self.v
+    return [self.b1_t, self.b2_t] + self.m + self.v
