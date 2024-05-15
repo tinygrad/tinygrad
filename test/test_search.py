@@ -3,7 +3,7 @@ import unittest
 from tinygrad.codegen.kernel import Opt, OptOps
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.engine.schedule import create_schedule
-from tinygrad.features.search import time_linearizer, bufs_from_lin, actions
+from tinygrad.engine.search import time_linearizer, bufs_from_lin, actions
 from tinygrad.device import Device, Buffer
 from tinygrad.ops import LoadOps, BufferOps
 from tinygrad.tensor import Tensor
@@ -48,7 +48,7 @@ class TestBEAM(unittest.TestCase):
     a = Tensor.rand(4, 3)
     b = Tensor.rand(3)
     realized_ast, _ = helper_realized_ast(a @ b)
-    from tinygrad.features.search import get_linearizer_actions
+    from tinygrad.engine.search import get_linearizer_actions
     lins = get_linearizer_actions(Linearizer(realized_ast), False).values()
 
     # ensure amt=0 are not duplicated
