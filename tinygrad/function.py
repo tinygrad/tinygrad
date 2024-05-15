@@ -76,7 +76,7 @@ class Sin(Function):
 
     def _mod(self, x: LazyBuffer, y: LazyBuffer) -> LazyBuffer:
         def v1(x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
-            return x.e( BinaryOps.SUB, x.e(BinaryOps.DIV, y) .cast(dtypes.int64) .cast(self.float_precision) .e(BinaryOps.MUL, y),)
+            return x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, y).cast(dtypes.int64).cast(self.float_precision).e(BinaryOps.MUL, y),)
 
         def v2(x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
             q = x.e(BinaryOps.DIV, y)
@@ -92,37 +92,17 @@ class Sin(Function):
 
 
     def reduce_angle(self, x: LazyBuffer) -> LazyBuffer:
-        # print("x: ")
-        # print(__import__('tinygrad').Tensor(x).numpy())
-        # reductor = x.const(6283185307.179586410522461)
-        # reductor = x.const(62831853071795.86410522461)
-        # reductor = x.const(139633841143804.75)
-
         lt0 = x.e(BinaryOps.CMPLT, x.const(0))
         x = self._abs(x)
         x = lt0.e(TernaryOps.WHERE, x.e(BinaryOps.ADD, x.const(math.pi)), x)
     
-        # x = x.e(BinaryOps.SUB, reductor)
-        # print("x: ")
-        # print(__import__('tinygrad').Tensor(x).numpy())
-        # x = self._mod(x, x.const(2*math.pi))
-        # return x
-        # print("x: ")
-        # print(__import__('tinygrad').Tensor(x).numpy())
-        # return x
-
-
-        # Return mod 2pi if greater than a certain big value
+        # # Return mod 2pi if greater than a certain big value
         # fallback = self._mod(x, x.const(2*math.pi))
-        fallback = self._mod(x, x.const(4 * math.pi))
+        # # fallback = self._mod(x, x.const(4 * math.pi))
         orig_x = x
 
         # Reduce to [-pi/2, pi/2]
         beginning_dtype = x.dtype
-        # if Device.DEFAULT != "METAL":
-        #     x = x.cast(dtypes.float64)
-        # else:
-        #     x = x.cast(dtypes.float32)
         old_dtype = x.dtype
 
         lt0 = x.e(BinaryOps.CMPLT, x.const(0))
@@ -142,34 +122,26 @@ class Sin(Function):
 
         # If negative, add pi
         x = lt0.e(TernaryOps.WHERE, x.e(BinaryOps.ADD, x.const(math.pi)), x)
-        temp = divres.cast(dtypes.uint64).cast(old_dtype).e(BinaryOps.MUL, d)
-        x = x.e(BinaryOps.SUB, temp)
+        # temp = divres.cast(dtypes.uint64).cast(old_dtype).e(BinaryOps.MUL, d)
+        # x = x.e(BinaryOps.SUB, temp)
+        x = divres.e(BinaryOps.SUB, divres.cast(dtypes.uint64).cast(old_dtype)).e(BinaryOps.MUL, d)
 
-        # x = is_even.e(TernaryOps.WHERE, halfpi.e(BinaryOps.SUB, x), x)
         x = is_even.e(TernaryOps.WHERE, x, halfpi.e(BinaryOps.SUB, x))
-        # x = x.e(BinaryOps.MUL, sign)
-        # If sign is -1, negate
 
+        # If sign is -1, negate
         x = sign.e(BinaryOps.CMPEQ, x.const(1)).e(TernaryOps.WHERE, x, x.e(UnaryOps.NEG))
 
-        # return x.cast(beginning_dtype)
-        # 1486116864
-        # 0000000000
-        # 69800000000000
-        # 100000000000000.0
-        # return x
-        ltthresh = orig_x.e(BinaryOps.CMPLT, orig_x.const(69309000000000.0))
         # ltthresh = orig_x.e(BinaryOps.CMPLT, orig_x.const(1e14))
-        res = ltthresh.e(
-            TernaryOps.WHERE, x.cast(beginning_dtype), fallback.cast(beginning_dtype)
-        )
+        # res = ltthresh.e(
+        #     TernaryOps.WHERE, x.cast(beginning_dtype), fallback.cast(beginning_dtype)
+        # )
+        res = x.cast(beginning_dtype)
 
         # Return nan if value is inf or -inf
-        # is_inf = orig_x.e(BinaryOps.CMPEQ, orig_x.const(math.inf))
         res = orig_x.e(BinaryOps.CMPEQ, orig_x.const(float('inf'))).e(TernaryOps.WHERE, x.const(math.nan), res)
         res = orig_x.e(BinaryOps.CMPEQ, orig_x.const(float('-inf'))).e(TernaryOps.WHERE, x.const(math.nan), res)
-        # print("reduced angle: ")
-        # print(__import__('tinygrad').Tensor(res).numpy())
+        print("reduced angle: ")
+        print(__import__('tinygrad').Tensor(res).numpy())
         return res
 
 
@@ -180,9 +152,7 @@ class Sin(Function):
 
     def backward(self, grad_output: LazyBuffer) -> LazyBuffer:
         # return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
-        return self._sin(self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)).e(
-            BinaryOps.MUL, grad_output
-        )
+        return self._sin(self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)).e(BinaryOps.MUL, grad_output)
 
 # NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
