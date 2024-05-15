@@ -114,10 +114,10 @@ class Sin(Function):
 
         # Reduce to [-pi/2, pi/2]
         beginning_dtype = x.dtype
-        if Device.DEFAULT != "METAL":
-            x = x.cast(dtypes.float64)
-        else:
-            x = x.cast(dtypes.float32)
+        # if Device.DEFAULT != "METAL":
+        #     x = x.cast(dtypes.float64)
+        # else:
+        #     x = x.cast(dtypes.float32)
         old_dtype = x.dtype
 
         lt0 = x.e(BinaryOps.CMPLT, x.const(0))
@@ -149,8 +149,8 @@ class Sin(Function):
         # 0000000000
         # 69800000000000
         # 100000000000000.0
-        # ltthresh = orig_x.e(BinaryOps.CMPLT, orig_x.const(69305000000000.0))
-        ltthresh = orig_x.e(BinaryOps.CMPLT, orig_x.const(1e14))
+        ltthresh = orig_x.e(BinaryOps.CMPLT, orig_x.const(69309000000000.0))
+        # ltthresh = orig_x.e(BinaryOps.CMPLT, orig_x.const(1e14))
         res = ltthresh.e(
             TernaryOps.WHERE, x.cast(beginning_dtype), fallback.cast(beginning_dtype)
         )
