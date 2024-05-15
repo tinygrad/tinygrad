@@ -120,7 +120,7 @@ class HWComputeQueue:
     assert len(self.q) < (1 << 21)
     dev.cmdq[dev.cmdq_wptr//4:dev.cmdq_wptr//4+len(self.q)] = array.array('I', self.q)
     fifo_entry = dev.compute_put_value % dev.compute_gpfifo_entries
-    print("submit", hex(dev.cmdq_page.base+dev.cmdq_wptr), len(self.q))
+    # print("submit", hex(dev.cmdq_page.base+dev.cmdq_wptr), len(self.q))
     dev.compute_gpu_ring[fifo_entry] = ((dev.cmdq_page.base+dev.cmdq_wptr)//4 << 2) | (len(self.q) << 42) | (1 << 41)
     dev.compute_gpu_ring_controls.GPPut = (dev.compute_put_value + 1) % dev.compute_gpfifo_entries
     dev.compute_put_value += 1
@@ -152,7 +152,7 @@ class HWCopyQueue:
     dev.cmdq[dev.cmdq_wptr//4:dev.cmdq_wptr//4+len(self.q)] = array.array('I', self.q)
     fifo_entry = dev.dma_put_value % dev.dma_gpfifo_entries
     dev.dma_gpu_ring[fifo_entry] = ((dev.cmdq_page.base+dev.cmdq_wptr)//4 << 2) | (len(self.q) << 42)
-    print("submit", hex(dev.cmdq_page.base+dev.cmdq_wptr), len(self.q))
+    # print("submit", hex(dev.cmdq_page.base+dev.cmdq_wptr), len(self.q))
     dev.dma_gpu_ring_controls.GPPut = (dev.dma_put_value + 1) % dev.dma_gpfifo_entries
     dev.dma_put_value += 1
     dev.gpu_mmio[0x90 // 4] = dev.dma_gpfifo_token
