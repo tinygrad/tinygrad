@@ -108,7 +108,7 @@ class TestLinearizer(unittest.TestCase):
     self.assertEqual(k.uops.uops[-1].uop, UOps.ENDIF)
     self.assertLess(k.uops.uops.index([x for x in k.uops.uops if x.uop is UOps.STORE][-1]), k.uops.uops.index(k.uops.uops[-1]))
 
-  # @unittest.skip
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_early_end_local(self):
     shape, output_shape = (32,), (1,)
     load0 = MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker.from_shape(shape))
@@ -129,7 +129,7 @@ class TestLinearizer(unittest.TestCase):
     self.assertLess(k.uops.uops.index(ifs[0]), k.uops.uops.index(endifs[0]))
     self.assertLess(k.uops.uops.index(barriers[1]), k.uops.uops.index(ifs[1]))
 
-  # @unittest.skip
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_basic_multireduce(self):
     def gen(shape, axis):
       output_shape = tuple([1 if i == axis else x for i,x in enumerate(list(shape))])
@@ -151,7 +151,7 @@ class TestLinearizer(unittest.TestCase):
       assert (real_accs:=len([u for u in k.uops if u.uop is UOps.DEFINE_ACC])) == 2, f"should have generated 2 UOps.DEFINE_ACC but got {real_accs}"
       assert (real_loops:=len([u for u in k.uops if u.uop is UOps.LOOP])) == 2, f"should have generated 2 UOps.LOOP but got {real_loops}"
 
-  # @unittest.skip
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_multireduce_store_locals(self):
     def gen(shape, axis):
       output_shape = tuple([1 if i == axis else x for i,x in enumerate(list(shape))])
@@ -178,7 +178,7 @@ class TestLinearizer(unittest.TestCase):
       self.assertEqual((real_local_stores[1].vin[1].uop, real_local_stores[1].vin[1].arg), (UOps.CONST, 0))
       self.assertEqual((real_local_loads[1].vin[1].uop, real_local_loads[1].vin[1].arg), (UOps.CONST, 0))
 
-  # @unittest.skip
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "device does not support upcast")
   def test_multireduce_upcasting(self):
     shape = (2, 7)
     output_shape = (2, 1)
@@ -198,7 +198,7 @@ class TestLinearizer(unittest.TestCase):
     self.assertEqual(len([u for u in k.uops.uops if u.uop is UOps.LOAD and define_globals[2] in u.vin]), 7)
     self.assertEqual(len([u for u in k.uops.uops if u.uop is UOps.ALU and u.arg is BinaryOps.SUB]), 7)
 
-  # @unittest.skip
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_multireduce_loop_scope(self):
     shape = (4, 32, 64)
     axis = 2
@@ -266,7 +266,7 @@ class TestLinearizer(unittest.TestCase):
               wanna_output=[(load_t.numpy().sum(axis, keepdims=True)*0.015625).reshape(-1),
                             ((load_t.numpy() - load_t.numpy().sum(axis, keepdims=True)*0.015625).sum(axis)*0.015625).reshape(-1),])
 
-  # @unittest.skip
+  @unittest.skip
   def test_mean_std_multireduce(self):
     ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=UnaryOps.SQRT, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BinaryOps.SUB, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(15, 25, 35), strides=(875, 35, 1), offset=0, mask=None, contiguous=True),)))), LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(15, 25, 35), strides=(875, 35, 1), offset=0, mask=None, contiguous=True),)))),), arg=(0, 1, 2)), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=7.619047619047618e-05, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(15, 25, 35), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),))))), arg=None)), arg=None), LazyOp(op=BinaryOps.SUB, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(15, 25, 35), strides=(875, 35, 1), offset=0, mask=None, contiguous=True),)))), LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(15, 25, 35), strides=(875, 35, 1), offset=0, mask=None, contiguous=True),)))),), arg=(0, 1, 2)), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=7.619047619047618e-05, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(15, 25, 35), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),))))), arg=None)), arg=None)), arg=None),), arg=(0, 1, 2)), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=7.619628162145687e-05, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 1, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=True),))))), arg=None),), arg=None),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 1, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=True),)))), # noqa: E501
 
