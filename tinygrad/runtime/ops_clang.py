@@ -13,7 +13,7 @@ MAP_JIT = 0x0800 if OSX else 0x0
 
 class ClangCompiler(Compiler):
   def compile(self, src:str) -> bytes:
-    platspec = ('-ffixed-x18',) if platform.machine() == "arm64" else ()
+    platspec = ('-ffixed-x18',) if platform.machine() == "arm64" else ('-Xclang=-fnative-half-type', '-Xclang=-fnative-half-arguments-and-returns')
     return fixup_relocations(subprocess.check_output(('clang', '-x', 'c', '-c', '-target', f'{platform.machine()}-none-unknown-elf', '-march=native',
                                                       '-fPIC', '-O2', '-fno-builtin', '-ffreestanding', '-nostdlib', '-fno-math-errno',
                                                       '-Wall', '-Wno-unused-function', '-Werror',
