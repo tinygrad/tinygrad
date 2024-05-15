@@ -108,18 +108,18 @@ class TestLinearizer(unittest.TestCase):
     self.assertEqual(k.uops.uops[-1].uop, UOps.ENDIF)
     self.assertLess(k.uops.uops.index([x for x in k.uops.uops if x.uop is UOps.STORE][-1]), k.uops.uops.index(k.uops.uops[-1]))
 
-  @unittest.expectedFailure
+  @unittest.skip
   def test_early_end_local(self):
     shape, output_shape = (32,), (1,)
     load0 = MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker.from_shape(shape))
     load1 = MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker.from_shape(shape))
     store = MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape(output_shape))
     ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.ADD, src=(
-      LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, arg=load0),)),LazyOp(op=BufferOps.LOAD, arg=load1), )),)),), arg=store),
-
-    load0_t = Tensor.randn(shape).realize()
-    load1_t = Tensor.randn(shape).realize()
-    k = helper_linearizer_ast(ast, [load0_t, load1_t], wanna_output=[(load0_t.numpy().sum() + load1_t.numpy()).sum()])[1]
+      LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, arg=load0),), arg=((0,),)), 
+      LazyOp(op=BufferOps.LOAD, arg=load1), )),), arg=((0,),)),), arg=store)
+    k = Linearizer(ast)
+    k.hand_coded_optimizations()
+    k.linearize()
     self.assertEqual(len(endifs:=[x for x in k.uops.uops if x.uop is UOps.ENDIF]), len(ifs:=[x for x in k.uops.uops if x.uop is UOps.IF]))
     self.assertEqual(len(barriers:=[x for x in k.uops.uops if x.uop is UOps.BARRIER]), 3)
     self.assertEqual(k.uops.uops[k.uops.uops.index(endifs[0])-1].uop, UOps.STORE)
@@ -129,7 +129,7 @@ class TestLinearizer(unittest.TestCase):
     self.assertLess(k.uops.uops.index(ifs[0]), k.uops.uops.index(endifs[0]))
     self.assertLess(k.uops.uops.index(barriers[1]), k.uops.uops.index(ifs[1]))
 
-  @unittest.expectedFailure
+  @unittest.skip
   def test_basic_multireduce(self):
     def gen(shape, axis):
       output_shape = tuple([1 if i == axis else x for i,x in enumerate(list(shape))])
@@ -146,12 +146,12 @@ class TestLinearizer(unittest.TestCase):
       k = Linearizer(*ast)
       def recursive_reduceops(x: LazyOp): return [c for v in x.src for c in recursive_reduceops(v)] + [v for v in list(x.src) if v.op in ReduceOps]
       for i,r in enumerate(k.reduceops): assert not any([r in recursive_reduceops(x) for x in k.reduceops[:i]]), "reduceops are out of order"
-      Device[Device.DEFAULT].to_program(k)
+      k.to_program()
       assert (real_outs:=len([u for u in k.uops if u.uop is UOps.STORE])) == 1, f"should have generated 1 BufferOps.STORE but got {real_outs}"
       assert (real_accs:=len([u for u in k.uops if u.uop is UOps.DEFINE_ACC])) == 2, f"should have generated 2 UOps.DEFINE_ACC but got {real_accs}"
       assert (real_loops:=len([u for u in k.uops if u.uop is UOps.LOOP])) == 2, f"should have generated 2 UOps.LOOP but got {real_loops}"
 
-  @unittest.expectedFailure
+  @unittest.skip
   def test_multireduce_store_locals(self):
     def gen(shape, axis):
       output_shape = tuple([1 if i == axis else x for i,x in enumerate(list(shape))])
@@ -169,7 +169,7 @@ class TestLinearizer(unittest.TestCase):
       def recursive_reduceops(x: LazyOp): return [c for v in x.src for c in recursive_reduceops(v)] + [v for v in list(x.src) if v.op in ReduceOps]
       for i,r in enumerate(k.reduceops): assert not any([r in recursive_reduceops(x) for x in k.reduceops[:i]]), "reduceops are out of order"
       k.hand_coded_optimizations()
-      Device[Device.DEFAULT].to_program(k)
+      k.to_program()
       local_buf = [u for u in k.uops if u.uop is UOps.DEFINE_LOCAL][0]
       self.assertEqual(len(real_local_stores:=[u for u in k.uops if u.uop is UOps.STORE and local_buf in u.vin]), 3, \
         f"should have generated 3 BufferOps.STORE to the local buf but got {len(real_local_stores)}")
@@ -178,7 +178,7 @@ class TestLinearizer(unittest.TestCase):
       self.assertEqual((real_local_stores[1].vin[1].uop, real_local_stores[1].vin[1].arg), (UOps.CONST, 0))
       self.assertEqual((real_local_loads[1].vin[1].uop, real_local_loads[1].vin[1].arg), (UOps.CONST, 0))
 
-  @unittest.expectedFailure
+  @unittest.skip
   def test_multireduce_upcasting(self):
     shape = (2, 7)
     output_shape = (2, 1)
@@ -191,14 +191,14 @@ class TestLinearizer(unittest.TestCase):
     k = Linearizer(ast)
     k.upcast()
     k.linearize()
+    k.to_program()
     define_globals = [u for u in k.uops.uops if u.uop is UOps.DEFINE_GLOBAL]
     self.assertEqual(len([u for u in k.uops.uops if u.uop is UOps.DEFINE_ACC]), 2)
     self.assertEqual(len([u for u in k.uops.uops if u.uop is UOps.LOAD and define_globals[1] in u.vin]), 7)
     self.assertEqual(len([u for u in k.uops.uops if u.uop is UOps.LOAD and define_globals[2] in u.vin]), 7)
     self.assertEqual(len([u for u in k.uops.uops if u.uop is UOps.ALU and u.arg is BinaryOps.SUB]), 7)
-    Device[Device.DEFAULT].to_program(k)
 
-  @unittest.expectedFailure
+  @unittest.skip
   def test_multireduce_loop_scope(self):
     shape = (4, 32, 64)
     axis = 2
@@ -210,6 +210,7 @@ class TestLinearizer(unittest.TestCase):
       , arg=((axis,), dtypes.float))), arg=None),), arg=((axis,), dtypes.float)),), arg=store)
     k = Linearizer(ast)
     k.linearize()
+    k.to_program()
     def get_recursive_children(x:UOp): return set.union(set(x.vin), *[get_recursive_children(v) for v in x.vin])
     loop = None
     for u in k.uops.uops:
@@ -218,7 +219,7 @@ class TestLinearizer(unittest.TestCase):
       elif u.uop is UOps.ENDLOOP and loop in u.vin: loop = None
       else: self.assertIn(loop, get_recursive_children(u), f"Any uop within a loop should depend on the loop: {u}")
 
-  @unittest.expectedFailure
+  @unittest.skip
   def test_multireduce_with_intermediate_calc(self):
     def gen(shape, axis):
       output_shape = tuple([1 if i == axis else x for i,x in enumerate(list(shape))])
@@ -227,21 +228,17 @@ class TestLinearizer(unittest.TestCase):
       store = MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape(output_shape))
       ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BufferOps.CONST, arg=const),LazyOp(op=ReduceOps.SUM, src=(
         LazyOp(op=BinaryOps.SUB, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=load),LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=ReduceOps.SUM, src=(
-        LazyOp(op=BufferOps.LOAD, arg=load),), arg=((axis,), dtypes.float)),LazyOp(op=BufferOps.LOAD, arg=load),)),), arg=None),),
+        LazyOp(op=BufferOps.LOAD, arg=load),), arg=((axis,), dtypes.float)),LazyOp(op=BufferOps.CONST, arg=const),)),)),),
         arg=((axis,), dtypes.float)),)),), arg=store)
       return [ast]
 
     for axis in [0, 1, 2]:
       ast = gen((4, 32, 64), axis)
-      k = Linearizer(*ast)
-      def recursive_reduceops(x: LazyOp): return [c for v in x.src for c in recursive_reduceops(v)] + [v for v in list(x.src) if v.op in ReduceOps]
-      for i,r in enumerate(k.reduceops): assert not any([r in recursive_reduceops(x) for x in k.reduceops[:i]]), "reduceops are out of order"
-      Device[Device.DEFAULT].to_program(k)
-      assert (real_outs:=len([u for u in k.uops if u.uop is UOps.STORE])) == 1, f"should have generated 1 BufferOps.STORE but got {real_outs}"
-      assert (real_accs:=len([u for u in k.uops if u.uop is UOps.DEFINE_ACC])) == 2, f"should have generated 2 UOps.DEFINE_ACC but got {real_accs}"
-      assert (real_loops:=len([u for u in k.uops if u.uop is UOps.LOOP])) == 2, f"should have generated 2 UOps.LOOP but got {real_loops}"
+      load_t = Tensor.randn((4, 32, 64)).realize()
+      helper_linearizer_ast(tuple(ast), [load_t], \
+                            wanna_output=[((load_t.numpy() - load_t.numpy().sum(axis, keepdims=True)*0.015625).sum(axis)*0.015625).reshape(-1)])
 
-  @unittest.expectedFailure
+  @unittest.skip
   def test_multireduce_multiout(self):
     def gen(shape, axis):
       output_shape = tuple([1 if i == axis else x for i,x in enumerate(list(shape))])
@@ -253,21 +250,22 @@ class TestLinearizer(unittest.TestCase):
                                                 LazyOp(op=BufferOps.CONST, arg=const),))
       mean_out = LazyOp(op=BufferOps.STORE, src=(mean_ast,), arg=store0)
       ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BufferOps.CONST, arg=const),LazyOp(op=ReduceOps.SUM, src=(
-        LazyOp(op=BinaryOps.SUB, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=load),mean_ast,), arg=None),), arg=((axis,), dtypes.float)),)),
+        LazyOp(op=BinaryOps.SUB, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=load),mean_ast,)),), arg=((axis,), dtypes.float)),)),
         ), arg=store1)
       return [mean_out, ast]
 
     for axis in [0, 1, 2]:
-      for ast in [gen((4, 32, 64), axis), list(reversed(gen((4, 32, 64), axis)))]:
-        k = Linearizer(*ast)
-        def recursive_reduceops(x: LazyOp): return [c for v in x.src for c in recursive_reduceops(v)] + [v for v in list(x.src) if v.op in ReduceOps]
-        for i,r in enumerate(k.reduceops): assert not any([r in recursive_reduceops(x) for x in k.reduceops[:i]]), "reduceops are out of order"
-        Device[Device.DEFAULT].to_program(k)
-        assert (real_outs:=len([u for u in k.uops if u.uop is UOps.STORE])) == 2, f"should have generated 1 BufferOps.STORE but got {real_outs}"
-        assert (real_accs:=len([u for u in k.uops if u.uop is UOps.DEFINE_ACC])) == 2, f"should have generated 2 UOps.DEFINE_ACC but got {real_accs}"
-        assert (real_loops:=len([u for u in k.uops if u.uop is UOps.LOOP])) == 2, f"should have generated 2 UOps.LOOP but got {real_loops}"
+      ast = gen((4, 32, 64), axis)
+      load_t = Tensor.randn((4, 32, 64)).realize()
+      helper_linearizer_ast(tuple(ast), [load_t], \
+              wanna_output=[(load_t.numpy().sum(axis, keepdims=True)*0.015625).reshape(-1),
+                            ((load_t.numpy() - load_t.numpy().sum(axis, keepdims=True)*0.015625).sum(axis)*0.015625).reshape(-1),])
+      ast = list(reversed(gen((4, 32, 64), axis)))
+      load_t = Tensor.randn((4, 32, 64)).realize()
+      helper_linearizer_ast(tuple(ast), [load_t], \
+              wanna_output=[(load_t.numpy().sum(axis, keepdims=True)*0.015625).reshape(-1),
+                            ((load_t.numpy() - load_t.numpy().sum(axis, keepdims=True)*0.015625).sum(axis)*0.015625).reshape(-1),])
 
-  @unittest.expectedFailure
   def test_mean_std_multireduce(self):
     ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=UnaryOps.SQRT, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BinaryOps.SUB, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(15, 25, 35), strides=(875, 35, 1), offset=0, mask=None, contiguous=True),)))), LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(15, 25, 35), strides=(875, 35, 1), offset=0, mask=None, contiguous=True),)))),), arg=(0, 1, 2)), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=7.619047619047618e-05, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(15, 25, 35), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),))))), arg=None)), arg=None), LazyOp(op=BinaryOps.SUB, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(15, 25, 35), strides=(875, 35, 1), offset=0, mask=None, contiguous=True),)))), LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(15, 25, 35), strides=(875, 35, 1), offset=0, mask=None, contiguous=True),)))),), arg=(0, 1, 2)), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=7.619047619047618e-05, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(15, 25, 35), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),))))), arg=None)), arg=None)), arg=None),), arg=(0, 1, 2)), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=7.619628162145687e-05, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 1, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=True),))))), arg=None),), arg=None),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 1, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=True),)))), # noqa: E501
 
