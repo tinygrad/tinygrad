@@ -16,8 +16,7 @@ from tinygrad.device import Buffer, BufferOptions
 from tinygrad.device import Device
 from tinygrad.shape.symbolic import sint, Variable, MulNode, Node
 from tinygrad.engine.realize import run_schedule
-from tinygrad.engine.memory import memory_planner
-from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
+from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars, memory_planner
 
 # **** start with two base classes, Tensor and Function ****
 
