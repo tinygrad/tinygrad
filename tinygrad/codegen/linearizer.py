@@ -3,6 +3,8 @@ from typing import List, Tuple, Any, Optional, cast, DefaultDict, Dict, Union, F
 import itertools, math, functools
 from collections import defaultdict
 
+import random
+
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, ConstType
 from tinygrad.helpers import colored, DEBUG, prod, getenv, to_function_name
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ConstBuffer, MemBuffer, BufferOps, get_lazyop_info
@@ -103,10 +105,11 @@ class Linearizer(Kernel):
     for idx, valid, rep_idx in zip(e_idxs, e_valids, iter_idxs(expand_vars)):
       this_const, idx, valid = (invalid_value, NumNode(0), NumNode(1)) if valid.max == 0 else (const, idx, valid)
       # todo: when multiple reduceops are supported, clearly disambiguate and test acc load keys are unique for each reduceop
-      key = f"{acc is not None}{localtype}{'CONST'+str(this_const) if this_const is not None and acc is None else (buf.idx if isinstance(buf, MemBuffer) else cast(LocalBuffer, buf).name)}{idx.render()}{valid.render()}"  # noqa: E501
+      key = f"{self.reduceops.index(acc) if acc is not None else None}{localtype}{'CONST'+str(this_const) if this_const is not None and acc is None else (buf.idx if isinstance(buf, MemBuffer) else cast(LocalBuffer, buf).name)}{idx.render()}{valid.render()}"  # noqa: E501
       if key not in self.load_cache:
         if acc is not None:
-          self.load_cache[key] = self.uops.add(UOps.DEFINE_ACC, localtype, ((barrier,) if barrier else ()), (self.get_reduce_acc(acc), i, acc_count))
+          id = self.reduceops.index(acc)*2 + (0 if self.bufs[i].__class__ is LocalBuffer else 1)
+          self.load_cache[key] = self.uops.add(UOps.DEFINE_ACC, localtype, (), (self.get_reduce_acc(acc), id, acc_count))
           acc_count += 1
         elif this_const is not None:
           self.load_cache[key] = self.const(this_const, localtype)
@@ -229,8 +232,7 @@ class Linearizer(Kernel):
       for n in range(len(replace_acc_idxs)-len(tc.threads)):
         upcast_idxs[n] = replace_acc_idxs[len(tc.threads)+n] # replace upcasts
       if DEBUG >= 3: print(f"store alias: sts={self.sts[0]} idxs={global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs}")
-    lastphi = accs[self.reduceops[idx-1]][-1] if (idx:=self.reduceops.index(reduceop)) > 0 else None
-    accs[reduceop] = self.global_load(out_buf, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop, barrier=lastphi)
+    accs[reduceop] = self.global_load(out_buf, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop)
 
     # reduce loop
     loop_ctx = self.render_loop(reduce_idxs, f"{nm}_reduce")
@@ -296,7 +298,7 @@ class Linearizer(Kernel):
       # NOTE: this structure is the same as the reduce op above
 
       # define late accumulator
-      accs[reduceop] = self.global_load(0, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop, barrier=lastphi)
+      accs[reduceop] = self.global_load(0, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop)
 
       # late reduce loop
       loop_ctx = self.render_loop(end_local_idxs, f"{nm}_late_reduce")
