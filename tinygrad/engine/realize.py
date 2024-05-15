@@ -1,7 +1,7 @@
 from typing import List, Dict, Optional, cast, Generator, Tuple
 import time
 from dataclasses import dataclass, replace
-from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int
+from tinygrad.helpers import colored, getenv, DEBUG, NOSTATS, GlobalCounters, ansilen, BEAM, NOOPT, all_int
 from tinygrad.ops import BufferOps, LoadOps, LazyOp
 from tinygrad.device import Device, Buffer
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
@@ -147,7 +147,7 @@ class ExecItem:
   def run(self, var_vals:Optional[Dict[Variable, int]]=None, wait=False, jit=False, do_update_stats=True) -> Optional[float]:
     bufs = [cast(Buffer, x) for x in self.bufs] if jit else [cast(Buffer, x).ensure_allocated() for x in self.bufs]
     et = self.prg(bufs, var_vals if var_vals is not None else {}, wait=wait or DEBUG >= 2)
-    if do_update_stats:
+    if do_update_stats and not NOSTATS:
       GlobalCounters.kernel_count += 1
       GlobalCounters.global_ops += (op_estimate:=sym_infer(self.prg.op_estimate, var_vals))
       GlobalCounters.global_mem += (mem_estimate:=sym_infer(self.prg.mem_estimate, var_vals))
