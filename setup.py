@@ -59,8 +59,7 @@ setup(name='tinygrad',
             "mkdocs-material",
             "mkdocstrings[python]",
             "markdown-callouts",
-            "markdown-exec[ansi]",
-            "black"
+            "markdown-exec[ansi]"
         ],
         'testing_tf': [
             "tensorflow==2.15.1",
