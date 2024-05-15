@@ -1,9 +1,8 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="/docs-legacy/logo_tiny_dark.svg">
   <source media="(prefers-color-scheme: light)" srcset="/docs-legacy/logo_tiny_light.svg">
-  <img alt="tiny corp logo" src="/docs-legacy/logo_tiny_light.svg" width="50%" height="50%">
+  <img alt="tiny corp logo" src="/docs-legacy/logo_tiny_dark.svg" width="50%" height="50%">
 </picture>
 
 tinygrad: For something between [PyTorch](https://github.com/pytorch/pytorch) and [karpathy/micrograd](https://github.com/karpathy/micrograd). Maintained by [tiny corp](https://tinygrad.org).

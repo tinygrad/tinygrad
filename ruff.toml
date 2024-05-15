@@ -26,12 +26,10 @@ lint.select = [
 line-length = 150
 
 exclude = [
-  "disassemblers/",
   "docs/",
   "docs-legacy/",
   "examples/",
   "extra/",
-  "openpilot/",
   "tinygrad/runtime/autogen",
   "test/external/mlperf_resnet",
   "test/external/mlperf_unet3d",
