@@ -71,8 +71,8 @@ class Sin(Function):
         sines = [self._sin(x.e(BinaryOps.ADD, x.const(offset*2*math.pi))) for offset in offsets]
         sum = x.const(0)
         for s in sines:
-            print("s: ")
-            print(__import__('tinygrad').Tensor(s).numpy())
+            # print("s: ")
+            # print(__import__('tinygrad').Tensor(s).numpy())
             sum = sum.e(BinaryOps.ADD, s)
         res = sum.e(BinaryOps.DIV, x.const(len(sines)))
         return res
