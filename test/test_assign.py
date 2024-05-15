@@ -354,6 +354,13 @@ class TestAssign(unittest.TestCase):
     assert GlobalCounters.kernel_count - kc == 1
     np.testing.assert_equal(a.numpy(), np.ones((4, 4))+np.pad(np.ones((4, 4))[:, 0:2], ((0, 0), (0, 2)), constant_values=2))
 
+  def test_permuted_assignment_masked_view_not_contiguous(self):
+    a = Tensor.ones(4, 4).contiguous().realize()
+    with self.assertRaisesRegex(RuntimeError, "contiguous"):
+      b = a.shrink((None, (0, 2))).pad((None, (0, 2)), 2).permute(1, 0)
+      a.assign(a + b)
+      a.realize()
+
   # TODO: is there a way to sneak in a permute such that it returns the wrong answer?
 
   @unittest.skip("don't use output buffer, and mismatch dtype no longer supported")
