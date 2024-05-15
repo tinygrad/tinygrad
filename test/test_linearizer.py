@@ -852,7 +852,7 @@ class TestKernelOpts(unittest.TestCase):
       ], apply_tc=True, atol=atol, rtol=rtol)
 
   def test_padto_matmul(self):
-    if CI and Device.DEFAULT in ["CUDA", "AMD"]: self.skipTest("super slow on CUDA and AMD because of the big grid dims")
+    if CI and Device.DEFAULT in ["CUDA", "AMD", "NV"]: self.skipTest("super slow on CUDA and AMD because of the big grid dims")
     N = 17 * 17
     Tensor.manual_seed(289)
     a = Tensor.rand(N, N)

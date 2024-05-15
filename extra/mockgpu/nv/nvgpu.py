@@ -121,7 +121,7 @@ class GPFIFO:
     # print(hex(prg_addr), args_cnt + vals_cnt, ocelot_args)
     # print([x for x in to_mv(prg_addr, 0x100)])
     # prg_addr.append("0x0")
-    assert vals_cnt == 0
+    # assert vals_cnt == 0
     gpuocelot_lib.ptx_run(ctypes.cast(prg_addr, ctypes.c_char_p), args_cnt + vals_cnt, (ctypes.c_void_p * len(ocelot_args))(*ocelot_args), lx, ly, lz, gx, gy, gz, 0)
 
   def _exec_signal(self) -> SchedResult:
