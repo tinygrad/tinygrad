@@ -40,63 +40,14 @@ class Reciprocal(Function):
 
 class Sin(Function):
 
-
-
-  def taylor_sin(self, x:LazyBuffer) -> LazyBuffer:
-    # Reduce to [0, 2pi]
-    beginning_dtype = x.dtype
-    if Device.DEFAULT != "METAL": x = x.cast(dtypes.float64)
-    old_dtype = x.dtype
-    # x = x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(4*math.pi)).cast(dtypes.int64).cast(old_dtype).e(BinaryOps.MUL, x.const(4*math.pi)))
-    d = x.const(2 * math.pi)
-    lt_10p14 = x.e(BinaryOps.CMPLT, x.const(10**13))
-    d = lt_10p14.e(TernaryOps.WHERE,d, x.const(4*math.pi))
-    lt_10p16 = x.e(BinaryOps.CMPLT, x.const(10**16))
-    d = lt_10p16.e(TernaryOps.WHERE, d, x.const(2**16*math.pi))
-    # print("d: ")
-    # print(__import__('tinygrad').Tensor(d).numpy())
-    divres = x.e(BinaryOps.DIV, d)
-    # print("divres: ")
-    # print(__import__('tinygrad').Tensor(divres).numpy())
-    # temp = divres.cast(dtypes.int64).cast(old_dtype).e(BinaryOps.MUL, x.const(2 * math.pi))
-    temp = divres.cast(dtypes.int64).cast(old_dtype).e(BinaryOps.MUL, d)
-    # print("temp: ")
-    # print(__import__('tinygrad').Tensor(temp).numpy())
-    # temp = divres.cast(dtypes.int64).cast(old_dtype).e(BinaryOps.MUL, divres.const(16*math.pi))
-    x = x.e(BinaryOps.SUB, temp)
-    # print("x: ")
-    # print(__import__('tinygrad').Tensor(x).numpy())
-
-    # no_terms = 30
-    # no_terms = 16
-    facts = [1.0, 0.16666666666666666, 0.008333333333333333, 0.0001984126984126984, 2.7557319223985893e-06, 2.505210838544172e-08, 1.6059043836821613e-10, 7.647163731819816e-13, 2.8114572543455206e-15, 8.22063524662433e-18, 1.9572941063391263e-20 , 3.868170170630684e-23, 6.446950284384474e-26, 9.183689863795546e-29, 1.1309962886447716e-31, 1.216125041553518e-34, 1.151633562077195e-37, 9.67759295863189e-41, 7.265460179153071e-44, 4.902469756513544e-47]
-    # no_terms = 17
-    no_terms = 13
-    res = x.const(0)
-    term = x
-    xpow = x
-    for i in range(no_terms):
-      if i % 2 == 0:
-        res = res.e(BinaryOps.ADD, term)
-      else:
-        res = res.e(BinaryOps.SUB, term)
-      # term = term.e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const(2 * i + 2)).e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const(2 * i + 3))
-      if i != no_terms - 1:
-        # term = term.e(BinaryOps.MUL, x).e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const((2 * i + 2)*(2 * i + 3)))
-        term = term.e(BinaryOps.MUL, x).e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const(2 * i * (2 * i + 1)))
-        # xpow = xpow.e(BinaryOps.MUL, x.e(BinaryOps.MUL))
-        # term = xpow.e(BinaryOps.MUL, x.const(facts[i+1]))
-        # term = term.e(BinaryOps.MUL, x).e(BinaryOps.DIV, x.const((2 * i + 2)*(2 * i + 3))).e(BinaryOps.MUL, x)
-    return res.cast(beginning_dtype)
-
   def _sin(self, x:LazyBuffer) -> LazyBuffer:
+    self.beginning_dtype = x.dtype
+    if Device.DEFAULT != "METAL": x = x.cast(dtypes.float64)
+    else: x = x.cast(dtypes.float32)
+    x = self.reduce_angle(x)
     return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 30, x.const(1)).cast(self.beginning_dtype)
 
   def horner_taylor_sin(self, x:LazyBuffer, xsq:LazyBuffer, n: int, s:LazyBuffer) -> LazyBuffer:
-    # if n == 1:
-    #   return s.e(BinaryOps.MUL, x)
-    # s = s.const(1).e(BinaryOps.SUB, s.e(BinaryOps.MUL, xsq.e(BinaryOps.DIV, x.const((2*n-1)*(2*n-2)))))
-    # return self.horner_taylor_sin(x, xsq, n-1, s)
     for i in range(n, 1, -1):
       # s = s.const(1).e(BinaryOps.SUB, s.e(BinaryOps.MUL, xsq.e(BinaryOps.DIV, x.const((2*n-1)*(2*n-2)))))
       # print("xsq: ")
@@ -147,33 +98,14 @@ class Sin(Function):
     old_dtype = x.dtype
 
     lt0 = x.e(BinaryOps.CMPLT, x.const(0))
-    # sign = lt0.e(TernaryOps.WHERE, x.const(-1), x.const(1))
-    # print("sign: ")
-    # print(__import__('tinygrad').Tensor(sign).numpy())
-
-    # x = x.e(UnaryOps.ABS)
-
-
     x = self._abs(x)
-    print("abs x: ")
-    print(__import__('tinygrad').Tensor(x).numpy())
-
 
     halfpi = x.const(1.5707963267948966)
-    # d = x.const(2 * math.pi)
     d = halfpi
     divres = x.e(BinaryOps.DIV, d)
-    print("divres: ")
-    print(__import__('tinygrad').Tensor(divres).numpy())
 
     # Check if divres is even. If yes, subtract final value from halfpi
     is_even = self._is_even(divres)
-    # is_4k = self._is_4k(divres)
-    print("is_even: ")
-    print(__import__('tinygrad').Tensor(is_even).numpy())
-    # x = is_even.e(TernaryOps.WHERE, halfpi.e(BinaryOps.SUB, x), x)
-    # x = x.e(BinaryOps.MUL, sign)
-    # x = is_even.e(TernaryOps.WHERE,x.e(UnaryOps.NEG), x)
 
     divres_pi = x.e(BinaryOps.DIV, x.const(math.pi))
     is_even_pi = self._is_even(divres_pi)
@@ -181,60 +113,15 @@ class Sin(Function):
 
     # If negative, add pi
     x = lt0.e(TernaryOps.WHERE, x.e(BinaryOps.ADD, x.const(math.pi)), x)
-    # sign = is_4k.e(TernaryOps.WHERE, x.const(1), x.const(-1))
-    # sign = is_even.e(TernaryOps.WHERE, x.const(1), x.const(-1))
-    # temp = divres.cast(dtypes.int64).cast(old_dtype).e(BinaryOps.MUL, x.const(2 * math.pi))
     temp = divres.cast(dtypes.uint64).cast(old_dtype).e(BinaryOps.MUL, d)
-    print("temp: ")
-    print(__import__('tinygrad').Tensor(temp).numpy())
     x = x.e(BinaryOps.SUB, temp)
 
 
     x = is_even.e(TernaryOps.WHERE, halfpi.e(BinaryOps.SUB, x), x)
-    # x = is_4k.e(TernaryOps.WHERE, x.e(BinaryOps.ADD, x.const(math.pi)), x)
-    # print("reduced x abs: ")
-    # print(__import__('tinygrad').Tensor(x).numpy())
     x = x.e(BinaryOps.MUL, sign)
-    print("reduced x: ")
-    print(__import__('tinygrad').Tensor(x).numpy())
-
-
 
     return x
-
-
-
-
-
-
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    # x = x.e(UnaryOps.ANG_RED)
-    # beginning_dtype = x.dtype
-    self.beginning_dtype = x.dtype
-    if Device.DEFAULT != "METAL": x = x.cast(dtypes.float64)
-    else: x = x.cast(dtypes.float32)
-    # old_dtype = x.dtype
-    #
-    # d = x.const(2 * math.pi)
-    # lt_10p14 = x.e(BinaryOps.CMPLT, x.const(10**13))
-    # d = lt_10p14.e(TernaryOps.WHERE,d, x.const(4*math.pi))
-    # lt_10p16 = x.e(BinaryOps.CMPLT, x.const(10**16))
-    # d = lt_10p16.e(TernaryOps.WHERE, d, x.const(2**16*math.pi))
-    # # print("d: ")
-    # # print(__import__('tinygrad').Tensor(d).numpy())
-    # divres = x.e(BinaryOps.DIV, d)
-    # # print("divres: ")
-    # # print(__import__('tinygrad').Tensor(divres).numpy())
-    # # temp = divres.cast(dtypes.int64).cast(old_dtype).e(BinaryOps.MUL, x.const(2 * math.pi))
-    # temp = divres.cast(dtypes.int64).cast(old_dtype).e(BinaryOps.MUL, d)
-    # print("temp: ")
-    # print(__import__('tinygrad').Tensor(temp).numpy())
-    # temp = divres.cast(dtypes.int64).cast(old_dtype).e(BinaryOps.MUL, divres.const(16*math.pi))
-    # x = x.e(BinaryOps.SUB, temp)
-    # print("reduced x: ")
-    # print(__import__('tinygrad').Tensor(x).numpy())
-
-    x = self.reduce_angle(x)
     self.x = x
     # return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 30, x.const(1)).cast(beginning_dtype)
     return self._sin(x)
