@@ -115,7 +115,7 @@ class TestLinearizer(unittest.TestCase):
     load1 = MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker.from_shape(shape))
     store = MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape(output_shape))
     ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.ADD, src=(
-      LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, arg=load0),), arg=((0,),)), 
+      LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, arg=load0),), arg=((0,),)),
       LazyOp(op=BufferOps.LOAD, arg=load1), )),), arg=((0,),)),), arg=store)
     k = Linearizer(ast)
     k.hand_coded_optimizations()

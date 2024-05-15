@@ -101,7 +101,7 @@ class Linearizer(Kernel):
       key = f"{acc is not None}{localtype}{'CONST'+str(this_const) if this_const is not None and acc is None else (buf.idx if isinstance(buf, MemBuffer) else cast(LocalBuffer, buf).name)}{idx.render()}{valid.render()}"  # noqa: E501
       if key not in self.load_cache:
         if acc is not None:
-          self.load_cache[key] = self.uops.add(UOps.DEFINE_ACC, localtype, (tuple(barrier) if barrier else ()), (self.get_reduce_acc(acc), i, acc_count))
+          self.load_cache[key] = self.uops.add(UOps.DEFINE_ACC, localtype, ((barrier,) if barrier else ()), (self.get_reduce_acc(acc), i, acc_count))
           acc_count += 1
         elif this_const is not None:
           self.load_cache[key] = self.const(this_const, localtype)
@@ -224,7 +224,7 @@ class Linearizer(Kernel):
       for n in range(len(replace_acc_idxs)-len(tc.threads)):
         upcast_idxs[n] = replace_acc_idxs[len(tc.threads)+n] # replace upcasts
       if DEBUG >= 3: print(f"store alias: sts={self.sts[0]} idxs={global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs}")
-    lastphi = (accs[self.reduceops[idx-1]]) if (idx:=self.reduceops.index(reduceop)) > 0 else None
+    lastphi = accs[self.reduceops[idx-1]][-1] if (idx:=self.reduceops.index(reduceop)) > 0 else None
     accs[reduceop] = self.global_load(out_buf, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop, barrier=lastphi)
 
     # reduce loop
