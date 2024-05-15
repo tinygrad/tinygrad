@@ -5,7 +5,7 @@ from tinygrad.nn import Linear
 from tinygrad.tensor import Tensor
 from tinygrad.nn.optim import Adam
 from tinygrad.nn.state import get_parameters, get_state_dict, safe_save, safe_load, load_state_dict
-from tinygrad.features.search import actions
+from tinygrad.engine.search import actions
 from extra.optimization.helpers import load_worlds, ast_str_to_lin, lin_to_feats, assert_same_lin
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.helpers import getenv

@@ -93,7 +93,7 @@ sched = create_schedule([out])
 for si in sched: print(si.ast[0].op)  # NOTE: the first two convert it to CLANG
 
 # DEBUGGING: print the compute ast as a tree
-from tinygrad.features.graph import print_tree
+from tinygrad.engine.graph import print_tree
 print_tree(sched[-1].ast[0])
 # NOTE: sched[-1].ast is the same as st_0 above
 

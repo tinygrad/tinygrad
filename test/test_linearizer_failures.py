@@ -3,7 +3,7 @@ import unittest, random
 import numpy as np
 from tinygrad.codegen.kernel import KernelOptError
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.features.search import Opt, OptOps
+from tinygrad.engine.search import Opt, OptOps
 from tinygrad import Device, dtypes, Tensor
 from tinygrad.helpers import CI
 from test.external.fuzz_linearizer import compare_linearizer
