@@ -84,7 +84,7 @@ jobs:
     - name: Lint with ruff
       run: |
         pip3 install --upgrade --force-reinstall ruff
-        python3 -m ruff check . --preview
+        python3 -m ruff check .
     - name: Lint tinygrad with pylint
       run: python -m pylint tinygrad/
     - name: Run mypy
