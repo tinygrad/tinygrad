@@ -55,6 +55,8 @@ class Sin(Function):
     def horner_taylor_sin(
         self, x: LazyBuffer, xsq: LazyBuffer, n: int, s: LazyBuffer
     ) -> LazyBuffer:
+        # print("x: ")
+        # print(__import__('tinygrad').Tensor(x).numpy())
         for i in range(n, 1, -1):
             # s = s.const(1).e(BinaryOps.SUB, s.e(BinaryOps.MUL, xsq.e(BinaryOps.DIV, x.const((2*n-1)*(2*n-2)))))
             # s = s.const(1).e(BinaryOps.SUB, xsq.e(BinaryOps.DIV, x.const((2*n-1)*(2*n-2))).e(BinaryOps.MUL, s))
@@ -97,6 +99,8 @@ class Sin(Function):
         return is_even
 
     def _mod(self, x: LazyBuffer, y: LazyBuffer) -> LazyBuffer:
+        # lt0 = x.e(BinaryOps.CMPLT, x.const(0))
+        # x = self._abs(x)
         # x = x.cast(dtypes.float64)
         # return x.e(
         #     BinaryOps.SUB,
@@ -105,6 +109,10 @@ class Sin(Function):
         #     .cast(self.float_precision)
         #     .e(BinaryOps.MUL, y),
         # )
+        # print("x: ")
+        # print(__import__('tinygrad').Tensor(x).numpy())
+        # print("y: ")
+        # print(__import__('tinygrad').Tensor(y).numpy())
         q = x.e(BinaryOps.DIV, y)
         # print("q: ")
         # print(__import__('tinygrad').Tensor(q).numpy())
@@ -114,7 +122,7 @@ class Sin(Function):
         diff = q.e(BinaryOps.SUB, q_floor)
         # print("diff: ")
         # print(__import__('tinygrad').Tensor(diff).numpy())
-        x = diff.e(BinaryOps.MUL, q.const(2*math.pi))
+        x = diff.e(BinaryOps.MUL, y)
         # print("x: ")
         # print(__import__('tinygrad').Tensor(x).numpy())
         return x
@@ -123,18 +131,22 @@ class Sin(Function):
 
 
     def reduce_angle(self, x: LazyBuffer) -> LazyBuffer:
-        print("x: ")
-        print(__import__('tinygrad').Tensor(x).numpy())
+        # print("x: ")
+        # print(__import__('tinygrad').Tensor(x).numpy())
         # reductor = x.const(6283185307.179586410522461)
         # reductor = x.const(62831853071795.86410522461)
         # reductor = x.const(139633841143804.75)
+
+        lt0 = x.e(BinaryOps.CMPLT, x.const(0))
+        x = self._abs(x)
+        x = lt0.e(TernaryOps.WHERE, x.e(BinaryOps.ADD, x.const(math.pi)), x)
     
         # x = x.e(BinaryOps.SUB, reductor)
         # print("x: ")
         # print(__import__('tinygrad').Tensor(x).numpy())
         x = self._mod(x, x.const(2*math.pi))
-        print("x: ")
-        print(__import__('tinygrad').Tensor(x).numpy())
+        # print("x: ")
+        # print(__import__('tinygrad').Tensor(x).numpy())
         # return x
 
 
@@ -190,8 +202,8 @@ class Sin(Function):
         # is_inf = orig_x.e(BinaryOps.CMPEQ, orig_x.const(math.inf))
         res = orig_x.e(BinaryOps.CMPEQ, orig_x.const(float('inf'))).e(TernaryOps.WHERE, x.const(math.nan), res)
         res = orig_x.e(BinaryOps.CMPEQ, orig_x.const(float('-inf'))).e(TernaryOps.WHERE, x.const(math.nan), res)
-        print("reduced angle: ")
-        print(__import__('tinygrad').Tensor(res).numpy())
+        # print("reduced angle: ")
+        # print(__import__('tinygrad').Tensor(res).numpy())
         return res
 
 
