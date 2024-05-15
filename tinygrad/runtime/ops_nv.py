@@ -4,7 +4,6 @@ from typing import Tuple, List, Any, cast
 from tinygrad.device import Compiled, Compiler, LRUAllocator, BufferOptions
 from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up, to_char_p_p, DEBUG, prod
 from tinygrad.renderer.cstyle import CUDARenderer
-from tinygrad.renderer.assembly import PTXRenderer
 from tinygrad.runtime.ops_cuda import check as cuda_check, _get_bytes, CUDACompiler, PTXCompiler
 import tinygrad.runtime.autogen.cuda as cuda
 import tinygrad.runtime.autogen.nv_gpu as nv_gpu
@@ -119,7 +118,6 @@ class HWComputeQueue:
     assert len(self.q) < (1 << 21)
     dev.cmdq[dev.cmdq_wptr//4:dev.cmdq_wptr//4+len(self.q)] = array.array('I', self.q)
     fifo_entry = dev.compute_put_value % dev.compute_gpfifo_entries
-    # print("submit", hex(dev.cmdq_page.base+dev.cmdq_wptr), len(self.q))
     dev.compute_gpu_ring[fifo_entry] = ((dev.cmdq_page.base+dev.cmdq_wptr)//4 << 2) | (len(self.q) << 42) | (1 << 41)
     dev.compute_gpu_ring_controls.GPPut = (dev.compute_put_value + 1) % dev.compute_gpfifo_entries
     dev.compute_put_value += 1
@@ -151,7 +149,6 @@ class HWCopyQueue:
     dev.cmdq[dev.cmdq_wptr//4:dev.cmdq_wptr//4+len(self.q)] = array.array('I', self.q)
     fifo_entry = dev.dma_put_value % dev.dma_gpfifo_entries
     dev.dma_gpu_ring[fifo_entry] = ((dev.cmdq_page.base+dev.cmdq_wptr)//4 << 2) | (len(self.q) << 42)
-    # print("submit", hex(dev.cmdq_page.base+dev.cmdq_wptr), len(self.q))
     dev.dma_gpu_ring_controls.GPPut = (dev.dma_put_value + 1) % dev.dma_gpfifo_entries
     dev.dma_put_value += 1
     dev.gpu_mmio[0x90 // 4] = dev.dma_gpfifo_token
@@ -488,15 +485,11 @@ class NVDevice(Compiled):
 
     en_fifo_params = nv_gpu.NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS(bEnable=1)
     rm_control(self.fd_ctl, nv_gpu.NVA06C_CTRL_CMD_GPFIFO_SCHEDULE, self.root, channel_group, en_fifo_params)
-
-    # print("in signal write")
     
     self.timeline_value: int = 1
     self.timeline_signal = NVDevice._get_signal(self.device_id * 2)
     self._shadow_timeline_signal = NVDevice._get_signal(self.device_id * 2 + 1)
     self.time_event_st, self.time_event_en = NVDevice._get_signal(), NVDevice._get_signal()
-
-    # print("in signal write")
 
     self.cmdq_page: nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS = self._gpu_alloc(0x200000, map_to_cpu=True, huge_page=True)
     self.cmdq: memoryview = to_mv(self.cmdq_page.base, 0x200000).cast("I")
@@ -508,11 +501,8 @@ class NVDevice(Compiled):
     self.arch: str = "sm_89" if not MOCKGPU else "sm_35" # TODO: fix
 
     from tinygrad.runtime.graph.hcq import HCQGraph
-    super().__init__(device, NVAllocator(self), 
-                     PTXRenderer(self.arch) if MOCKGPU else CUDARenderer(self.arch),
-                     PTXCompiler(self.arch) if MOCKGPU else NVCompiler(self.arch),
-                     functools.partial(NVProgram, self),
-                     functools.partial(HCQGraph, NVDevice, HWComputeQueue, HWCopyQueue))
+    super().__init__(device, NVAllocator(self), CUDARenderer(self.arch), CUDACompiler(self.arch) if MOCKGPU else NVCompiler(self.arch),
+                     functools.partial(NVProgram, self), functools.partial(HCQGraph, NVDevice, HWComputeQueue, HWCopyQueue))
 
     self._cmdq_setup_compute_gpfifo()
     self._cmdq_setup_dma_gpfifo()
