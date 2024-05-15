@@ -1,8 +1,6 @@
 """This is where the forwards and backwards passes live."""
 import math
 from typing import Tuple, List, Optional
-
-from six import binary_type
 from tinygrad.helpers import argsort
 from tinygrad.dtype import dtypes, DType, sum_acc_dtype
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps
@@ -115,15 +113,19 @@ class Relu(Function):
     return self.ret.const(0).e(BinaryOps.CMPLT, self.ret).cast(grad_output.dtype).e(BinaryOps.MUL, grad_output)
 
 class Log2(Function):
-  coefficients = [-3.72162108e+00, 1.01438705e+01, -1.59554068e+01, 1.97155445e+01, -1.78832735e+01, 1.17975216e+01,
-                  -5.59830547e+00, 1.86329583e+00, -4.13182982e-01, 5.48583264e-02, -3.30087854e-03]
+  coefficients =  [-3.8601174939170164180e+00,  1.1216692432871667506e+01,
+                   -1.9710983827769030796e+01,  2.7558275589156679075e+01,
+                   -2.8739264884507441877e+01,  2.2256501167686717935e+01,
+                   -1.2755153664476619468e+01,  5.3417957537454547889e+00,
+                   -1.5901238589413362323e+00,  3.1888781723556752778e-01,
+                   -3.8648713727106605298e-02,  2.1396828028881287667e-03]
 
   def get_info(self, x:LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer, LazyBuffer]:
     if x.dtype is dtypes.double:
       b = x.cast(dtypes.ulong, bitcast=True)
       int_repr = dtypes.long
       pow_shift = 2**52
-      sig_shift = 2**9
+      sig_shift = 2**12
       fix = 4607182418800017408
       bias = 1023
     elif x.dtype is dtypes.float:
@@ -131,8 +133,10 @@ class Log2(Function):
       int_repr = dtypes.int
       pow_shift = 2**23
       sig_shift = 2**9
-      fix = 1065353216
+      fix = 0x3F800000
       bias = 127
+    else:
+      raise TypeError(f'{x.dtype} not supported for Log2.')
 
     bpow = b.e(BinaryOps.DIV, b.const(pow_shift)).cast(int_repr, bitcast=True)
     pow = bpow.e(BinaryOps.SUB, b.const(bias).cast(int_repr))
@@ -142,9 +146,9 @@ class Log2(Function):
     return (pow, sig, nan)
 
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    x_dtype = x.dtype
     self.x = x
-    if x_dtype in (dtypes.float16, dtypes.bfloat16): x = x.cast(dtypes.float32)
+    x_dtype = x.dtype
+    if x.dtype not in (dtypes.double, dtypes.float): x = x.cast(dtypes.double)
     pow, sig, nan = self.get_info(x)
     t = _taylor(self, sig, self.coefficients).e(BinaryOps.ADD, pow.cast(x.dtype))
     handle_nan = nan.e(TernaryOps.WHERE, t, x.const(math.nan))
