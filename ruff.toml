@@ -27,7 +27,6 @@ line-length = 150
 
 exclude = [
   "docs/",
-  "docs-legacy/",
   "examples/",
   "extra/",
   "tinygrad/runtime/autogen",
