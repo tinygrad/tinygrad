@@ -50,6 +50,7 @@ class Sin(Function):
   def horner_taylor_sin(self, x:LazyBuffer, xsq:LazyBuffer, n: int, s:LazyBuffer) -> LazyBuffer:
     for i in range(n, 1, -1):
       # s = s.const(1).e(BinaryOps.SUB, s.e(BinaryOps.MUL, xsq.e(BinaryOps.DIV, x.const((2*n-1)*(2*n-2)))))
+      # s = s.const(1).e(BinaryOps.SUB, xsq.e(BinaryOps.DIV, x.const((2*n-1)*(2*n-2))).e(BinaryOps.MUL, s))
       # print("xsq: ")
       # print(__import__('tinygrad').Tensor(xsq).numpy())
       # print("(2*i-1) * (2*i - 2): ", (2*i-1)*(2*i-2))
@@ -71,26 +72,19 @@ class Sin(Function):
   def _is_even(self, x:LazyBuffer) -> LazyBuffer:
     x = self._abs(x)
     ev = x.cast(dtypes.uint64)
-    print("ev: ")
-    print(__import__('tinygrad').Tensor(ev).numpy())
     ev = ev.e(BinaryOps.MOD, ev.const(2))
-    print("ev mod 2: ")
-    print(__import__('tinygrad').Tensor(ev).numpy())
     return ev.e(BinaryOps.CMPEQ, ev.const(1))
 
-  def _is_4k(self, x:LazyBuffer) -> LazyBuffer:
-    ev = x.cast(dtypes.uint64)
-    print("ev: ")
-    print(__import__('tinygrad').Tensor(ev).numpy())
-    ev = ev.e(BinaryOps.MOD, ev.const(4))
-    print("ev mod 4: ")
-    print(__import__('tinygrad').Tensor(ev).numpy())
-    return ev.e(BinaryOps.CMPEQ, ev.const(0))
-
-
+  def _mod(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
+    return x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, y).cast(dtypes.int64).cast(dtypes.float64).e(BinaryOps.MUL, y))
 
 
   def reduce_angle(self, x:LazyBuffer) -> LazyBuffer:
+
+    # Return mod 2pi if greater than 1e14
+    fallback = self._mod(x, x.const(2*math.pi))
+    orig_x = x
+
     # Reduce to [-pi/2, pi/2]
     beginning_dtype = x.dtype
     if Device.DEFAULT != "METAL": x = x.cast(dtypes.float64)
@@ -116,14 +110,15 @@ class Sin(Function):
     temp = divres.cast(dtypes.uint64).cast(old_dtype).e(BinaryOps.MUL, d)
     x = x.e(BinaryOps.SUB, temp)
 
-
     x = is_even.e(TernaryOps.WHERE, halfpi.e(BinaryOps.SUB, x), x)
     x = x.e(BinaryOps.MUL, sign)
 
-    return x
+    # return x.cast(beginning_dtype)
+    lt1e14 = orig_x.e(BinaryOps.CMPLT, orig_x.const(1e14))
+    return lt1e14.e(TernaryOps.WHERE, x.cast(beginning_dtype), fallback.cast(beginning_dtype))
+
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
-    # return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 30, x.const(1)).cast(beginning_dtype)
     return self._sin(x)
     # return x.e(UnaryOps.SIN)
 
