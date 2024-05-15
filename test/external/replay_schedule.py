@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import subprocess, pickle, shlex, sys
 from typing import Dict, List, Tuple
-from tinygrad.features.graph import print_tree
+from tinygrad.engine.graph import print_tree
 from tinygrad.helpers import colored
 from tinygrad.ops import LazyOp
 

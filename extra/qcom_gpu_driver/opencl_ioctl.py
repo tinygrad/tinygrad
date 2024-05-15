@@ -72,7 +72,7 @@ def parse_cmd_buf(dat):
         num_unit = vals[0]>>22
         print(f"{num_unit=} {state_block=} {state_src=} {state_type=} {dst_off=}")
 
-        from disassemblers.adreno import disasm_raw
+        from extra.disassemblers.adreno import disasm_raw
         if state_type == ST6_SHADER: disasm_raw(get_mem(((vals[2] << 32) | vals[1]), 0x180))
         if state_type == ST6_CONSTANTS: hexdump(get_mem(((vals[2] << 32) | vals[1]), min(0x180, num_unit*4)))
         pass

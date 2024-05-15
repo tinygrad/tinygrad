@@ -378,7 +378,6 @@ class TestIndexing(unittest.TestCase):
     numpy_testing_assert_equal_helper(strided[rows, columns],
                       np.array([[1, 3], [11, 13]]))
 
-
     # setting values
 
     # strided is [[10, 11],

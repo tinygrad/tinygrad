@@ -3,7 +3,7 @@ from tinygrad import Device, dtypes, Tensor
 from tinygrad.helpers import to_mv
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.runtime.ops_nv import NVDevice, HWComputeQueue
-from tinygrad.features.search import Opt, OptOps
+from tinygrad.engine.search import Opt, OptOps
 from test.test_linearizer_failures import helper_test_lin
 
 from tinygrad.codegen.linearizer import Linearizer
