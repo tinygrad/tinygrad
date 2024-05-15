@@ -1,7 +1,4 @@
 #include "common.h"
-#include <stdint.h>
-
-// https://github.com/JuliaMath/openlibm/blob/master/src/
 
 #define D_TBLBITS 8
 #define D_TBLSIZE (1 << D_TBLBITS)

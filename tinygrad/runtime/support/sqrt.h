@@ -1,6 +1,3 @@
-#ifndef TINYMATH_SQRT_H
-#define TINYMATH_SQRT_H
-
 double sqrt(double x) {
 #if defined(__aarch64__) || defined(_M_ARM64)
   __asm__("fsqrt %d0, %d1" : "=w"(x) : "w"(x));
@@ -22,5 +19,3 @@ float sqrtf(float x) {
 #endif
   return x;
 }
-
-#endif

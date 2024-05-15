@@ -1,7 +1,4 @@
 #include "common.h"
-#include <stdint.h>
-
-// https://github.com/JuliaMath/openlibm/blob/master/src/
 
 static const double D_Lg1 = 6.666666666666735130e-01, /* 3FE55555 55555593 */
     D_Lg2 = 3.999999999940941908e-01,                 /* 3FD99999 9997FA04 */

@@ -1,12 +1,12 @@
-// tinymath - a tiny single-header math library for tinygrad
-// a bunch of stuff here is taken from musl and
-// https://github.com/JuliaMath/openlibm
+// tinymath - a tiny single-header math library for tinygrad's clang backend (to
+// avoid linking with libc/libm)
+// a bunch of stuff here is taken from musl and julia openlibm - their licenses
+// apply
 #include "common.h"
 
-double sin(double);
-float sinf(float);
 #include "exp2.h"
 #include "log2.h"
+#include "sin.h"
 #include "sqrt.h"
 
 #define __IS_FP(x) (sizeof((x) + 1ULL) == sizeof((x) + 1.0f))

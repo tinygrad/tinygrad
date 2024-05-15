@@ -4,6 +4,7 @@
 
 // a bunch of stuff here is taken from musl and
 // https://github.com/JuliaMath/openlibm
+
 #define NAN __builtin_nanf("")
 #define INFINITY __builtin_inff()
 
@@ -83,4 +84,13 @@ typedef union {
     sf_u.word = (i);                                                           \
     (d) = sf_u.value;                                                          \
   } while (0)
+
+double copysign(double x, double y) {
+  uint32_t hx, hy;
+  GET_HIGH_WORD(hx, x);
+  GET_HIGH_WORD(hy, y);
+  SET_HIGH_WORD(x, (hx & 0x7fffffff) | (hy & 0x80000000));
+  return x;
+}
+
 #endif
