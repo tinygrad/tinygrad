@@ -3,8 +3,6 @@ from typing import List, Tuple, Any, Optional, cast, DefaultDict, Dict, Union, F
 import itertools, math, functools
 from collections import defaultdict
 
-import random
-
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, ConstType
 from tinygrad.helpers import colored, DEBUG, prod, getenv, to_function_name
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ConstBuffer, MemBuffer, BufferOps, get_lazyop_info
