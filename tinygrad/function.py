@@ -55,23 +55,10 @@ class Sin(Function):
     def horner_taylor_sin(
         self, x: LazyBuffer, xsq: LazyBuffer, n: int, s: LazyBuffer
     ) -> LazyBuffer:
-        # print("x: ")
-        # print(__import__('tinygrad').Tensor(x).numpy())
         for i in range(n, 1, -1):
-            # s = s.const(1).e(BinaryOps.SUB, s.e(BinaryOps.MUL, xsq.e(BinaryOps.DIV, x.const((2*n-1)*(2*n-2)))))
-            # s = s.const(1).e(BinaryOps.SUB, xsq.e(BinaryOps.DIV, x.const((2*n-1)*(2*n-2))).e(BinaryOps.MUL, s))
-            # print("xsq: ")
-            # print(__import__('tinygrad').Tensor(xsq).numpy())
-            # print("(2*i-1) * (2*i - 2): ", (2*i-1)*(2*i-2))
             xsqdivided = xsq.e(BinaryOps.DIV, x.const((2 * i - 1) * (2 * i - 2)))
-            # print("xsqdivided: ")
-            # print(__import__('tinygrad').Tensor(xsqdivided).numpy())
             stxsqdivided = xsqdivided.e(BinaryOps.MUL, s)
-            # print("stxsqdivided: ")
-            # print(__import__('tinygrad').Tensor(stxsqdivided).numpy())
             s = s.const(1).e(BinaryOps.SUB, stxsqdivided)
-            # print("s: ")
-            # print(__import__('tinygrad').Tensor(s).numpy())
         return s.e(BinaryOps.MUL, x)
 
     def _abs(self, x: LazyBuffer) -> LazyBuffer:
@@ -79,53 +66,27 @@ class Sin(Function):
         return lt0.e(TernaryOps.WHERE, x.e(UnaryOps.NEG), x)
 
     def _is_even(self, x: LazyBuffer) -> LazyBuffer:
-        # x = self._abs(x)
-        # ev = x.cast(dtypes.uint64)
-        # ev = ev.e(BinaryOps.MOD, ev.const(2))
-        # return ev.e(BinaryOps.CMPEQ, ev.const(1))
         x = x.cast(dtypes.uint64).cast(self.float_precision)
         q = x.e(BinaryOps.DIV, x.const(2))
-        # print("q: ")
-        # print(__import__('tinygrad').Tensor(q).numpy())
         q_floor = q.cast(dtypes.uint64).cast(self.float_precision)
-        # print("q_floor: ")
-        # print(__import__('tinygrad').Tensor(q_floor).numpy())
         diff = q.e(BinaryOps.SUB, q_floor)
-        # print("diff: ")
-        # print(__import__('tinygrad').Tensor(diff).numpy())
-        is_even = diff.e(BinaryOps.CMPLT, diff.const(1e-14))
-        # print("is_even: ")
-        # print(__import__('tinygrad').Tensor(is_even).numpy())
+        # is_even = diff.e(BinaryOps.CMPLT, diff.const(1e-14))
+        is_even = diff.e(BinaryOps.CMPEQ, diff.const(0))
         return is_even
 
     def _mod(self, x: LazyBuffer, y: LazyBuffer) -> LazyBuffer:
-        # lt0 = x.e(BinaryOps.CMPLT, x.const(0))
-        # x = self._abs(x)
-        # x = x.cast(dtypes.float64)
-        # return x.e(
-        #     BinaryOps.SUB,
-        #     x.e(BinaryOps.DIV, y)
-        #     .cast(dtypes.int64)
-        #     .cast(self.float_precision)
-        #     .e(BinaryOps.MUL, y),
-        # )
-        # print("x: ")
-        # print(__import__('tinygrad').Tensor(x).numpy())
-        # print("y: ")
-        # print(__import__('tinygrad').Tensor(y).numpy())
-        q = x.e(BinaryOps.DIV, y)
-        # print("q: ")
-        # print(__import__('tinygrad').Tensor(q).numpy())
-        q_floor = q.cast(dtypes.uint64).cast(self.float_precision)
-        # print("q_floor: ")
-        # print(__import__('tinygrad').Tensor(q_floor).numpy())
-        diff = q.e(BinaryOps.SUB, q_floor)
-        # print("diff: ")
-        # print(__import__('tinygrad').Tensor(diff).numpy())
-        x = diff.e(BinaryOps.MUL, y)
-        # print("x: ")
-        # print(__import__('tinygrad').Tensor(x).numpy())
-        return x
+        def v1(x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
+            return x.e( BinaryOps.SUB, x.e(BinaryOps.DIV, y) .cast(dtypes.int64) .cast(self.float_precision) .e(BinaryOps.MUL, y),)
+
+        def v2(x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
+            q = x.e(BinaryOps.DIV, y)
+            q_floor = q.cast(dtypes.uint64).cast(self.float_precision)
+            diff = q.e(BinaryOps.SUB, q_floor)
+            x = diff.e(BinaryOps.MUL, y)
+            return x
+        
+        # Return v1 if x < 1e14, else return v2
+        return x.e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, v1(x, y), v2(x, y))
 
 
 
@@ -144,7 +105,8 @@ class Sin(Function):
         # x = x.e(BinaryOps.SUB, reductor)
         # print("x: ")
         # print(__import__('tinygrad').Tensor(x).numpy())
-        x = self._mod(x, x.const(2*math.pi))
+        # x = self._mod(x, x.const(2*math.pi))
+        # return x
         # print("x: ")
         # print(__import__('tinygrad').Tensor(x).numpy())
         # return x
@@ -185,13 +147,17 @@ class Sin(Function):
 
         # x = is_even.e(TernaryOps.WHERE, halfpi.e(BinaryOps.SUB, x), x)
         x = is_even.e(TernaryOps.WHERE, x, halfpi.e(BinaryOps.SUB, x))
-        x = x.e(BinaryOps.MUL, sign)
+        # x = x.e(BinaryOps.MUL, sign)
+        # If sign is -1, negate
+
+        x = sign.e(BinaryOps.CMPEQ, x.const(1)).e(TernaryOps.WHERE, x, x.e(UnaryOps.NEG))
 
         # return x.cast(beginning_dtype)
         # 1486116864
         # 0000000000
         # 69800000000000
         # 100000000000000.0
+        # return x
         ltthresh = orig_x.e(BinaryOps.CMPLT, orig_x.const(69309000000000.0))
         # ltthresh = orig_x.e(BinaryOps.CMPLT, orig_x.const(1e14))
         res = ltthresh.e(
