@@ -51,7 +51,6 @@ class UOp:
 def uop_alu_resolve(u:UOp) -> sint:
   if u.uop is UOps.CONST: return u.arg
   elif u.uop is UOps.DEFINE_VAR: return u.arg
-  elif u.uop is UOps.SPECIAL: return u.arg[2]
   elif u.uop is UOps.ALU and u.arg is BinaryOps.MUL: return uop_alu_resolve(u.vin[0]) * uop_alu_resolve(u.vin[1])
   elif u.uop is UOps.ALU and u.arg is BinaryOps.ADD: return uop_alu_resolve(u.vin[0]) + uop_alu_resolve(u.vin[1])
   else: raise RuntimeError(f"ALU resolve fail @ {u.uop}")
@@ -112,8 +111,12 @@ constant_folder = PatternMatcher([
         {"uop": UOps.ALU, "arg": BinaryOps.SUB, "vin": ({"__name__": "val"}, {"uop": UOps.LOOP, "__name__": "loop"})},
         {"__name__": "cmploop", "uop": UOps.CONST})},
           {"__name__": "multconst", "uop": UOps.CONST}, {"uop": UOps.CONST, "arg": 0})}]})},
-      lambda loop, acc, cmploop, val, multconst: None if loop in val.parents else
-        ((UOp.alu(BinaryOps.MAX, val-loop.vin[1], cmploop)-(val-loop.vin[0])).cast(multconst.dtype) * multconst)),
+    lambda loop, acc, cmploop, val, multconst: None if loop in val.parents else
+      -UOp.alu(BinaryOps.MAX, -loop.vin[1],
+        -UOp.alu(BinaryOps.MAX, -val+cmploop-UOp.const(loop.dtype, 1)+(loop.vin[1]+loop.vin[0]), -loop.vin[0])).cast(multconst.dtype) * multconst),
+  # max on special can go away (TODO: special should be variable, same thing applies)
+  ({"uop": UOps.ALU, "arg": BinaryOps.MAX, "vin": [{"__name__": "c", "uop": UOps.CONST}, {"__name__": "s", "uop": UOps.SPECIAL}]},
+    lambda c,s: c if (s.arg[2]-1) <= c.arg else None),
   # const rules
   ({"__name__": "root", "uop": UOps.GEP, "vin": ({"__name__": "c", "uop": UOps.CONST},)}, lambda root, c: UOp.const(root.dtype, c.arg)),
   ({"__name__": "root", "uop": UOps.CAST, "vin": {"__name__": "c", "uop": UOps.CONST}}, lambda root, c: UOp.const(root.dtype, c.arg)),

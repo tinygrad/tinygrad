@@ -399,7 +399,7 @@ class TestLinearizer(unittest.TestCase):
     helper(Tensor.arange(-1, -100, -5))
     helper(Tensor.arange(-3.2, 6.7, 0.64))
     helper(Tensor.arange(256), max_ops=2)
-    helper(Tensor.arange(255), max_ops=0)
+    helper(Tensor.arange(255), max_ops=2)
 
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need backends that support float4")
 class TestFloat4(unittest.TestCase):
