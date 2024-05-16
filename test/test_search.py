@@ -81,7 +81,7 @@ class TestBEAM(unittest.TestCase):
     kernel_count = GlobalCounters.kernel_count
     _time_program(p, dev.compiler.compile(p.src), var_vals, rawbufs,
         max_global_size=65536, clear_l2=True, cnt=3, name=to_function_name(lin.name))
-    assert GlobalCounters.kernel_count == kernel_count
+    assert GlobalCounters.kernel_count == kernel_count, "kernel count was incremented by _time_program"
 
 if __name__ == '__main__':
   unittest.main()
