@@ -799,22 +799,19 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(out, 1))
     np.testing.assert_equal(out.numpy(), [2, 0])
 
-  # TODO: should not shuffle unsafe pad ops through any pads, even if buffer is shrunk overall (#3437)
   def test_shrink_pad_unsafe(self):
     a = Tensor.ones((3, )).contiguous().realize()
     out = a.exp2().shrink(((0, 1),)).pad(((0, 1),)).contiguous()
-    run_schedule(check_schedule(out, 1))
-    with self.assertRaises(AssertionError):
-      np.testing.assert_equal(out.numpy(), [2, 0])
+    run_schedule(check_schedule(out, 2))
+    np.testing.assert_equal(out.numpy(), [2, 0])
 
   def test_base_change_shrink_pad(self):
     a = Tensor.ones(3, 3).contiguous().realize()
     b = a.exp2()
     c = b[:-1, :-1]
     d = c.pad(((0, 1), (0, 1))) * 2
-    run_schedule(check_schedule(d, 1))
-    with self.assertRaises(AssertionError): # TODO unsafe pads
-      np.testing.assert_equal(d.numpy(), np.pad(np.exp2(a.numpy())[:-1, :-1], ((0, 1), (0, 1)))*2)
+    run_schedule(check_schedule(d, 2))
+    np.testing.assert_equal(d.numpy(), np.pad(np.exp2(a.numpy())[:-1, :-1], ((0, 1), (0, 1)))*2)
 
   def test_base_change_expand_pad(self):
     a = Tensor.ones(3, 3).contiguous().realize()
