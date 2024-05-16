@@ -79,7 +79,8 @@ class Sin(Function):
         # correction = cosabs.e(BinaryOps.MUL, x.const(-0.007)).e(BinaryOps.MUL, sinsign)
 
         # Apply correction only if x greater than 1e14
-        res = x.e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, res, res.e(BinaryOps.ADD, correction))
+        # res = x.e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, res, res.e(BinaryOps.ADD, correction))
+        res = x.e(BinaryOps.CMPLT, x.const(3e13)).e(TernaryOps.WHERE, res, res.e(BinaryOps.ADD, correction))
         # res = res.e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, res.e(BinaryOps.ADD, correction), res)
         # print("res: ")
         # print(__import__('tinygrad').Tensor(res).numpy())
