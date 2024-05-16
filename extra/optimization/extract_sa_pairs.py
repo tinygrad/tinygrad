@@ -14,7 +14,7 @@ from tinygrad.codegen.kernel import Opt, OptOps
 
 # more stuff
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.features.search import actions
+from tinygrad.engine.search import actions
 from extra.optimization.helpers import lin_to_feats
 from extra.optimization.pretrain_valuenet import ValueNet
 from tinygrad.nn.optim import Adam
