@@ -165,6 +165,10 @@ class HWPM4Queue:
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_DISPATCH_DIRECT, 3), *global_size, CS_W32_EN | FORCE_START_AT_000 | COMPUTE_SHADER_EN]
     return self
 
+  def update_exec_launch_dims(self, cmd_start_idx, global_dims, local_dims):
+    self.q[cmd_start_idx + 59 : cmd_start_idx + 62] = local_dims
+    self.q[cmd_start_idx + 68 : cmd_start_idx + 71] = global_dims
+
   def wait(self, signal:hsa.amd_signal_t, value=0):
     addr = ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_WAIT_REG_MEM, 5),
