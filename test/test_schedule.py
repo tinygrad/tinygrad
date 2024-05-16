@@ -247,6 +247,13 @@ class TestSchedule(unittest.TestCase):
     out = c1(img).relu()
     check_schedule(out, 1, [c1.weight, c1.bias])
 
+  def test_fold_conv_relu_alt(self):
+    img = Tensor.ones(1,4,8,8)
+    c1 = nn.Conv2d(4, 4, kernel_size=3)
+    c2 = nn.Conv2d(4, 4, kernel_size=3)
+    img_conv = img.sequential([c1, Tensor.relu, c2, Tensor.relu])
+    check_schedule(img_conv, 2, [*nn.state.get_parameters(c1), *nn.state.get_parameters(c2), img])
+
   def test_fold_conv_relu_nobias(self):
     img = Tensor.ones(1,4,8,8)
     c1 = nn.Conv2d(4, 4, kernel_size=3, bias=False)
@@ -261,6 +268,13 @@ class TestSchedule(unittest.TestCase):
     img = Tensor.rand(2,3,64,64)
     out = c1(img).elu()
     check_schedule(out, 1, [c1.weight, c1.bias, img])
+
+  def test_fold_conv_elu_alt(self):
+    img = Tensor.ones(1,4,8,8).contiguous()
+    c1 = nn.Conv2d(4, 4, kernel_size=3)
+    c2 = nn.Conv2d(4, 4, kernel_size=3)
+    img_conv = img.sequential([c1, Tensor.elu, c2, Tensor.elu])
+    check_schedule(img_conv, 2, [*nn.state.get_parameters(c1), *nn.state.get_parameters(c2), img])
 
   def test_two_sum(self):
     img = Tensor.empty(64,64)
@@ -426,6 +440,12 @@ class TestSchedule(unittest.TestCase):
     x = Tensor.empty(1, 64, 32, 32)
     out = x.permute(0,2,3,1).contiguous()
     check_schedule(out, 2, filter_loadops=False)
+
+  def test_fold_with_contiguous(self):
+    a = Tensor.randn(16, 16, 16).realize()
+    b = Tensor.randn(16, 16).realize()
+    c = (a.sum(2).contiguous() + b).contiguous()
+    check_schedule(c, 2)
 
   def test_double_from(self):
     x = Tensor([1,2,3,4])
@@ -799,13 +819,45 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(out, 1))
     np.testing.assert_equal(out.numpy(), [2, 0])
 
-  # TODO: should not shuffle unsafe pad ops through any pads, even if buffer is shrunk overall (#3437)
   def test_shrink_pad_unsafe(self):
     a = Tensor.ones((3, )).contiguous().realize()
     out = a.exp2().shrink(((0, 1),)).pad(((0, 1),)).contiguous()
-    run_schedule(check_schedule(out, 1))
-    with self.assertRaises(AssertionError):
-      np.testing.assert_equal(out.numpy(), [2, 0])
+    run_schedule(check_schedule(out, 2))
+    np.testing.assert_equal(out.numpy(), [2, 0])
+
+  def test_base_change_shrink_pad(self):
+    a = Tensor.ones(3, 3).contiguous().realize()
+    b = a.exp2()
+    c = b[:-1, :-1]
+    d = c.pad(((0, 1), (0, 1))) * 2
+    run_schedule(check_schedule(d, 2))
+    np.testing.assert_equal(d.numpy(), np.pad(np.exp2(a.numpy())[:-1, :-1], ((0, 1), (0, 1)))*2)
+
+  def test_base_change_expand_pad(self):
+    a = Tensor.ones(3, 3).contiguous().realize()
+    b = a.exp2()
+    c = b[:, None, :]
+    d = c.pad(((0, 0), (1, 1), (0, 0))) * 2
+    run_schedule(check_schedule(d, 2))
+    np.testing.assert_equal(d.numpy(), np.pad(np.exp2(a.numpy())[:, None, :], ((0, 0), (1, 1), (0, 0)))*2)
+
+  # TODO like openpilot with imagef
+  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  def test_base_change_expand_expand(self):
+    a = Tensor.ones(4, 4).contiguous().realize()
+    b = a.cast(dtypes.half).expand(2, 4, 4)
+    c = b.cast(dtypes.int).expand(2, 2, 4, 4)
+    run_schedule(check_schedule(c, 2))
+    np.testing.assert_equal(c.numpy(), np.ones(((2, 2, 4, 4)), dtype=np.int32))
+
+  def test_base_change_pad_expand(self):
+    a = Tensor.full((4, 4), 1.).contiguous().realize()
+    b = Tensor.full((4, 4), 2.).contiguous().realize()
+    c = (a + b).pad(((1, 1), (1, 1)))
+    d = c.cast(dtypes.int).expand((2, 6, 6)) * 4
+    run_schedule(check_schedule(d, 2))
+    c_np = np.pad((np.full((4, 4), 2., dtype=np.float32) + np.full((4, 4), 1., dtype=np.float32)), ((1, 1), (1, 1)), constant_values=0.0)
+    np.testing.assert_equal(d.numpy(), np.broadcast_to(c_np.astype(np.half), (2, *c_np.shape)) * 4)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
