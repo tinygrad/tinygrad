@@ -247,6 +247,13 @@ class TestSchedule(unittest.TestCase):
     out = c1(img).relu()
     check_schedule(out, 1, [c1.weight, c1.bias])
 
+  def test_fold_conv_relu_alt(self):
+    img = Tensor.ones(1,4,8,8)
+    c1 = nn.Conv2d(4, 4, kernel_size=3)
+    c2 = nn.Conv2d(4, 4, kernel_size=3)
+    img_conv = img.sequential([c1, Tensor.relu, c2, Tensor.relu])
+    check_schedule(img_conv, 2, [*nn.state.get_parameters(c1), *nn.state.get_parameters(c2), img])
+
   def test_fold_conv_relu_nobias(self):
     img = Tensor.ones(1,4,8,8)
     c1 = nn.Conv2d(4, 4, kernel_size=3, bias=False)
@@ -261,6 +268,13 @@ class TestSchedule(unittest.TestCase):
     img = Tensor.rand(2,3,64,64)
     out = c1(img).elu()
     check_schedule(out, 1, [c1.weight, c1.bias, img])
+
+  def test_fold_conv_elu_alt(self):
+    img = Tensor.ones(1,4,8,8).contiguous()
+    c1 = nn.Conv2d(4, 4, kernel_size=3)
+    c2 = nn.Conv2d(4, 4, kernel_size=3)
+    img_conv = img.sequential([c1, Tensor.elu, c2, Tensor.elu])
+    check_schedule(img_conv, 2, [*nn.state.get_parameters(c1), *nn.state.get_parameters(c2), img])
 
   def test_two_sum(self):
     img = Tensor.empty(64,64)
@@ -426,6 +440,12 @@ class TestSchedule(unittest.TestCase):
     x = Tensor.empty(1, 64, 32, 32)
     out = x.permute(0,2,3,1).contiguous()
     check_schedule(out, 2, filter_loadops=False)
+
+  def test_fold_with_contiguous(self):
+    a = Tensor.randn(16, 16, 16).realize()
+    b = Tensor.randn(16, 16).realize()
+    c = (a.sum(2).contiguous() + b).contiguous()
+    check_schedule(c, 2)
 
   def test_double_from(self):
     x = Tensor([1,2,3,4])
