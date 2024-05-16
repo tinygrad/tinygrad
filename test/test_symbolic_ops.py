@@ -5,7 +5,6 @@ from tinygrad.tensor import Tensor
 from examples.gpt2 import Attention
 import numpy as np
 
-@unittest.skipIf(getenv("ARM64") or getenv("PTX"), "ARM64 and PTX are not supported")
 class TestSymbolicOps(unittest.TestCase):
   def test_plus1(self):
     def f(a): return (a+1).realize()
@@ -108,7 +107,6 @@ class TestSymbolicOps(unittest.TestCase):
         expected = f(a, b).numpy()
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
-  @unittest.skip("two vars not supported")
   def test_two_vars_plus1_ij(self):
     def f(a, b): return (a@b+1).realize()
     for i in range(1, 5):
@@ -121,7 +119,6 @@ class TestSymbolicOps(unittest.TestCase):
         expected = f(a, b).numpy()
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
-  @unittest.skip("two vars not supported")
   def test_two_vars_plus1_ji(self):
     # reverse the order of variables
     def f(a, b): return (a@b+1).realize()
@@ -143,6 +140,46 @@ class TestSymbolicOps(unittest.TestCase):
       symbolic = symbolic.numpy()
       expected = a.shrink(((3,5),(i,i+2))).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
+
+  def test_mean(self):
+    for i in range(1, 5):
+      vi = Variable("i", 1, 10).bind(i)
+      # aixs = None
+      a = Tensor.rand(i, 3)
+      symbolic = a.reshape(vi, 3).mean().numpy()
+      expected = a.mean().numpy()
+      np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
+      # aixs = 0
+      a = Tensor.rand(i, 3)
+      symbolic = a.reshape(vi, 3).mean(0).numpy()
+      expected = a.mean(0).numpy()
+      np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
+      # aixs = 1
+      a = Tensor.rand(i, 3)
+      symbolic = a.reshape(vi, 3).mean(1).reshape(i).numpy()
+      expected = a.mean(1).numpy()
+      np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
+
+  def test_mean_2d(self):
+    for i in range(1, 5):
+      for j in range(1, 5):
+        vi = Variable("i", 1, 10).bind(i)
+        vj = Variable("j", 1, 10).bind(j)
+        # aixs = None
+        a = Tensor.rand(i, j)
+        symbolic = a.reshape(vi, vj).mean().numpy()
+        expected = a.mean().numpy()
+        np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
+        # aixs = 0
+        a = Tensor.rand(i, j)
+        symbolic = a.reshape(vi, vj).mean(0).reshape(j).numpy()
+        expected = a.mean(0).numpy()
+        np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
+        # aixs = 1
+        a = Tensor.rand(i, j)
+        symbolic = a.reshape(vi, vj).mean(1).reshape(i).numpy()
+        expected = a.mean(1).numpy()
+        np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
 if __name__ == '__main__':
   unittest.main()

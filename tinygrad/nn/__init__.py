@@ -20,7 +20,7 @@ class BatchNorm2d:
       # https://github.com/pytorch/pytorch/blob/c618dc13d2aa23625cb0d7ada694137532a4fa33/aten/src/ATen/native/cuda/Normalization.cuh
       # There's "online" algorithms that fix this, like https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_Online_algorithm
       batch_mean = x.mean(axis=(0,2,3))
-      y = (x - batch_mean.reshape(shape=[1, -1, 1, 1]))
+      y = (x - batch_mean.detach().reshape(shape=[1, -1, 1, 1]))  # d(var)/d(mean) = 0
       batch_var = (y*y).mean(axis=(0,2,3))
       batch_invstd = batch_var.add(self.eps).pow(-0.5)
 
@@ -122,12 +122,11 @@ class LayerNorm2d(LayerNorm):
 
 class Embedding:
   def __init__(self, vocab_size:int, embed_size:int):
-    self.vocab_size, self.embed_size = vocab_size, embed_size
-    self.weight = Tensor.glorot_uniform(vocab_size, embed_size)
+    self.vocab_sz, self.embed_sz, self.weight = vocab_size, embed_size, Tensor.glorot_uniform(vocab_size, embed_size)
 
   def __call__(self, idx:Tensor) -> Tensor:
-    if not hasattr(self, 'vocab_counter'):
-      self.vocab_counter = Tensor.arange(self.vocab_size, requires_grad=False, device=self.weight.device).reshape(1, 1, self.vocab_size)
-    batch_size, seqlen = idx.shape
-    if seqlen == 0: return Tensor.empty(batch_size, 0, self.embed_size, device=self.weight.device)
-    return (self.vocab_counter == idx.unsqueeze(2)).expand(*idx.shape, self.vocab_size) @ self.weight
+    if idx.numel() == 0: return Tensor.empty(idx.shape+(self.embed_sz,), device=self.weight.device)
+    arange_shp, weight_shp, big_shp = (1, 1, self.vocab_sz, 1), (1, 1, self.vocab_sz, self.embed_sz), idx.shape+(self.vocab_sz, self.embed_sz,)
+    if not hasattr(self, 'arange'): self.arange = Tensor.arange(self.vocab_sz, requires_grad=False, device=self.weight.device).reshape(arange_shp)
+    arange, idx, vals = self.arange.expand(big_shp), idx.reshape(idx.shape+(1, 1,)).expand(big_shp), self.weight.reshape(weight_shp).expand(big_shp)
+    return (arange == idx).mul(vals).sum(2)

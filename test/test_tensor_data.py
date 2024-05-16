@@ -31,6 +31,14 @@ class TestTensorData(unittest.TestCase):
     assert dat[0, 0] == 1
     assert dat[1, 1] == 4
 
+  def test_data_const(self):
+    a = Tensor(3, dtype=dtypes.int32)
+    dat = a.data()
+    assert dat.format == "i"
+    assert dat.itemsize == 4
+    assert dat.tolist() == 3
+    assert dat.shape == ()
+
   def test_data_float32(self):
     a = Tensor([[1,2.5],[3,4]], dtype=dtypes.float32)
     dat = a.data()

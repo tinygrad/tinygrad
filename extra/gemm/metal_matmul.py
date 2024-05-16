@@ -116,7 +116,7 @@ tm = min([torch_prog(b, c) for _ in range(20)])
 print(f"{N*N:10d} {tm*1e6:9.2f} us, would be {FLOPS*1e-9/tm:9.2f} GFLOPS matmul in torch")
 
 from tinygrad.tensor import Tensor
-from tinygrad.features.jit import TinyJit
+from tinygrad.engine.jit import TinyJit
 b = Tensor(nb)
 c = Tensor(nc)
 # TODO: slowness without the JIT I suspect comes from a lack of a caching allocator

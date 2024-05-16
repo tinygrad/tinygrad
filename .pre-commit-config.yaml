@@ -3,25 +3,19 @@ repos:
     hooks:
       - id: whitespace
         name: strip whitespace
-        entry: ./strip_whitespace.sh
+        entry: find tinygrad -type f -name "*.py" -exec sed -i '' 's/ *$//' '{}' ';'
         language: system
         always_run: true
         pass_filenames: false
       - id: ruff
         name: ruff
-        entry: ruff . --preview
+        entry: ruff check .
         language: system
         always_run: true
         pass_filenames: false
       - id: mypy
         name: mypy
         entry: mypy tinygrad/ --strict-equality
-        language: system
-        always_run: true
-        pass_filenames: false
-      - id: docs
-        name: docs
-        entry: python3 docs/abstractions.py
         language: system
         always_run: true
         pass_filenames: false

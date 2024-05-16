@@ -1,8 +1,10 @@
-import pathlib, unittest
+import pathlib, tempfile, unittest
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
+from tinygrad.dtype import DType
 from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load
-from tinygrad.helpers import Timing, CI, fetch, temp
+from tinygrad.helpers import Timing, fetch, temp
+from test.helpers import is_dtype_supported
 
 def compare_weights_both(url):
   import torch
@@ -19,16 +21,14 @@ def compare_weights_both(url):
 
 class TestTorchLoad(unittest.TestCase):
   # pytorch pkl format
+  @unittest.skip("this test is slow and takes 17s. TODO: fix")
   def test_load_enet(self): compare_weights_both("https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b0-355c32eb.pth")
   # pytorch zip format
   def test_load_enet_alt(self): compare_weights_both("https://download.pytorch.org/models/efficientnet_b0_rwightman-3dd342df.pth")
   # pytorch zip format
   def test_load_convnext(self): compare_weights_both('https://dl.fbaipublicfiles.com/convnext/convnext_tiny_1k_224_ema.pth')
 
-  # for GPU, cl_khr_fp16 isn't supported
-  # for LLVM, it segfaults because it can't link to the casting function
-  # CUDACPU architecture is sm_35 but we need at least sm_70 to run fp16 ALUs
-  @unittest.skipIf(Device.DEFAULT in ["GPU", "LLVM", "CUDA"] and CI, "fp16 broken in some backends")
+  @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need float16 support")
   def test_load_llama2bfloat(self): compare_weights_both("https://huggingface.co/qazalin/bf16-lightweight/resolve/main/consolidated.00.pth?download=true")
 
   # pytorch tar format
@@ -38,14 +38,50 @@ test_fn = pathlib.Path(__file__).parents[2] / "weights/LLaMA/7B/consolidated.00.
 #test_size = test_fn.stat().st_size
 test_size = 1024*1024*1024*2
 
+def _test_bitcasted(t: Tensor, dt: DType, expected):
+  np.testing.assert_allclose(t.bitcast(dt).numpy(), expected)
+
 # sudo su -c 'sync; echo 1 > /proc/sys/vm/drop_caches' && python3 test/unit/test_disk_tensor.py TestRawDiskBuffer.test_readinto_read_speed
-@unittest.skipIf(not test_fn.exists(), "download LLaMA weights for read in speed tests")
 class TestRawDiskBuffer(unittest.TestCase):
+  @unittest.skipIf(not test_fn.exists(), "download LLaMA weights for read in speed tests")
   def test_readinto_read_speed(self):
     tst = np.empty(test_size, np.uint8)
     with open(test_fn, "rb") as f:
       with Timing("copy in ", lambda et_ns: f" {test_size/et_ns:.2f} GB/s"):
         f.readinto(tst)
+  def test_bitcasts_on_disk(self):
+    tmp = tempfile.mktemp()
+    # ground truth = https://evanw.github.io/float-toy/
+    t = Tensor.empty((128, 128), dtype=dtypes.uint8, device=f"disk:{tmp}") # uint8
+    # all zeroes
+    _test_bitcasted(t, dtypes.float16, 0.0)
+    _test_bitcasted(t, dtypes.uint16, 0)
+    _test_bitcasted(t, dtypes.float32, 0.0)
+    _test_bitcasted(t, dtypes.uint32, 0)
+    # pi in float16 stored via int16
+    t.bitcast(dtypes.uint16).assign(Tensor.full((128, 64), 0x4248, dtype=dtypes.uint16)).realize()
+    _test_bitcasted(t, dtypes.float16, 3.141)
+    _test_bitcasted(t, dtypes.float32, 50.064727)
+    _test_bitcasted(t, dtypes.uint16, 0x4248)
+    _test_bitcasted(t, dtypes.uint32, 0x42484248)
+    # pi in float32 stored via float32
+    t.bitcast(dtypes.float32).assign(Tensor.full((128, 32), 3.1415927, dtype=dtypes.float32)).realize()
+    _test_bitcasted(t, dtypes.float32, 3.1415927)
+    _test_bitcasted(t, dtypes.uint32, 0x40490FDB)
+    # doesn't suport normal cast
+    with self.assertRaises(RuntimeError):
+      Tensor.empty((4,), dtype=dtypes.int16, device=f"disk:{tmp}").cast(dtypes.float16)
+
+    # Those two should be moved to test_dtype.py:test_shape_change_bitcast after bitcast works on non-disk
+    with self.assertRaises(RuntimeError):
+      # should fail because 3 int8 is 3 bytes but float16 is two and 3 isn't a multiple of 2
+      Tensor.empty((3,), dtype=dtypes.int8, device=f"DISK:{tmp}").bitcast(dtypes.float16)
+
+    with self.assertRaises(RuntimeError):
+      # should fail because backprop through bitcast is undefined
+      Tensor.empty((4,), dtype=dtypes.int8, requires_grad=True, device=f"DISK:{tmp}").bitcast(dtypes.float16)
+
+    pathlib.Path(tmp).unlink()
 
 @unittest.skipIf(Device.DEFAULT == "WEBGPU", "webgpu doesn't support uint8 datatype")
 class TestSafetensors(unittest.TestCase):
@@ -122,9 +158,9 @@ class TestSafetensors(unittest.TestCase):
     for dtype in dtypes.fields().values():
       if dtype in [dtypes.bfloat16]: continue # not supported in numpy
       path = temp(f"ones.{dtype}.safetensors")
-      ones = Tensor.rand((10,10), dtype=dtype)
+      ones = Tensor(np.random.rand(10,10), dtype=dtype)
       safe_save(get_state_dict(ones), path)
-      assert ones == list(safe_load(path).values())[0]
+      np.testing.assert_equal(ones.numpy(), list(safe_load(path).values())[0].numpy())
 
   def test_load_supported_types(self):
     import torch
@@ -178,6 +214,32 @@ class TestDiskTensor(unittest.TestCase):
     pathlib.Path(temp("dt1")).unlink(missing_ok=True)
     Tensor.empty(100, 100, device=f"disk:{temp('dt1')}")
 
+  def test_simple_read(self):
+    fn = pathlib.Path(temp("dt1"))
+    fn.unlink(missing_ok=True)
+    fn.write_bytes(bytes(range(256)))
+    t = Tensor.empty(16, 16, device=f"disk:{temp('dt1')}", dtype=dtypes.uint8)
+    out = t[1].to(Device.DEFAULT).tolist()
+    assert out == list(range(16, 32))
+
+  def test_simple_read_bitcast(self):
+    fn = pathlib.Path(temp("dt1"))
+    fn.unlink(missing_ok=True)
+    fn.write_bytes(bytes(range(256))*2)
+    t = Tensor.empty(16, 16*2, device=f"disk:{temp('dt1')}", dtype=dtypes.uint8)
+    out = t[1].bitcast(dtypes.uint16).to(Device.DEFAULT).tolist()
+    tout = [(x//256, x%256) for x in out]
+    assert tout == list([(x+1,x) for x in range(32,64,2)])
+
+  def test_simple_read_bitcast_alt(self):
+    fn = pathlib.Path(temp("dt1"))
+    fn.unlink(missing_ok=True)
+    fn.write_bytes(bytes(range(256))*2)
+    t = Tensor.empty(16, 16*2, device=f"disk:{temp('dt1')}", dtype=dtypes.uint8)
+    out = t.bitcast(dtypes.uint16)[1].to(Device.DEFAULT).tolist()
+    tout = [(x//256, x%256) for x in out]
+    assert tout == list([(x+1,x) for x in range(32,64,2)])
+
   def test_write_ones(self):
     pathlib.Path(temp("dt2")).unlink(missing_ok=True)
 
@@ -204,6 +266,36 @@ class TestDiskTensor(unittest.TestCase):
   def test_reshape(self):
     helper_test_disk_tensor("dt5", [1,2,3,4,5], lambda x: x.reshape((1,5)))
     helper_test_disk_tensor("dt6", [1,2,3,4], lambda x: x.reshape((2,2)))
+
+  def test_assign_to_different_dtype(self):
+    # NOTE: this is similar to Y_train in fetch_cifar
+    t = Tensor.empty(10, device=f'disk:{temp("dt7")}', dtype=dtypes.int64)
+
+    for i in range(5):
+      data = np.array([3, 3])
+      idx = 2 * i
+      t[idx:idx+2].assign(data)
+
+    np.testing.assert_array_equal(t.numpy(), np.array([3] * 10))
+
+  def test_bitcast(self):
+    with open(temp('range_1020'), "wb") as f: f.write(bytes(range(10,20)))
+    t = Tensor.empty(5, dtype=dtypes.int16, device=f"disk:{temp('range_1020')}")
+    ret = t.to("CLANG").bitcast(dtypes.uint16) + 1
+    assert ret.tolist() == [2827, 3341, 3855, 4369, 4883]
+
+  def test_bf16_disk_write_read(self):
+    t = Tensor([10000, -1, -1000, -10000, 20], dtype=dtypes.float32)
+    t.to(f"disk:{temp('f32')}").realize()
+
+    # hack to "cast" f32 -> bf16
+    with open(temp('f32'), "rb") as f: dat = f.read()
+    adat = b''.join([dat[i+2:i+4] for i in range(0, len(dat), 4)])
+    with open(temp('bf16'), "wb") as f: f.write(adat)
+
+    t = Tensor.empty(5, dtype=dtypes.bfloat16, device=f"disk:{temp('bf16')}")
+    ct = t.llvm_bf16_cast(dtypes.float)
+    assert ct.numpy().tolist() == [9984., -1, -1000, -9984, 20]
 
 if __name__ == "__main__":
   unittest.main()

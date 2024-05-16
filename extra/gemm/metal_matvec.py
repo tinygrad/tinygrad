@@ -1,18 +1,8 @@
-import os
-#os.environ["METAL"] = "1"
 import numpy as np
 import time, torch, torch.mps
 
-from tinygrad.tensor import Tensor
-from tinygrad.features.jit import TinyJit
-from tinygrad import Device, GlobalCounters, dtypes
-from tinygrad.helpers import colored, getenv, CI, flat_mv
-
-import os
-os.environ["METAL"] = "1"
-import time
-import numpy as np
-from tinygrad.helpers import getenv
+from tinygrad import Tensor, TinyJit, Device
+from tinygrad.helpers import flat_mv
 from tinygrad.runtime.ops_metal import MetalAllocator, MetalDevice, MetalProgram, MetalCompiler
 
 N = 16384
@@ -22,7 +12,6 @@ FLOPS = N*M*2
 nb = np.random.default_rng().standard_normal(size=(N), dtype=np.float32) #.astype(np.int32).astype(np.float32)
 nc = np.random.default_rng().standard_normal(size=(N,M), dtype=np.float32) #.astype(np.int32).astype(np.float32)
 
-import torch, torch.mps
 b = torch.from_numpy(nb).to('mps')
 c = torch.from_numpy(nc).to('mps')
 
@@ -107,8 +96,6 @@ metal_a = np.zeros(M, dtype=np.float32)
 metalalloc.copyout(flat_mv(metal_a.data), a)
 np.testing.assert_allclose(metal_a, torch_a, atol=5e-3)
 
-from tinygrad.tensor import Tensor
-from tinygrad.features.jit import TinyJit
 b = Tensor(nb)
 c = Tensor(nc)
 # TODO: slowness without the JIT I suspect comes from a lack of a caching allocator

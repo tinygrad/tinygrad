@@ -1,6 +1,6 @@
 import unittest
 import pickle
-from tinygrad.helpers import diskcache_get, diskcache_put, diskcache
+from tinygrad.helpers import diskcache_get, diskcache_put, diskcache, diskcache_clear
 
 def remote_get(table,q,k): q.put(diskcache_get(table, k))
 def remote_put(table,k,v): diskcache_put(table, k, v)
@@ -75,6 +75,34 @@ class DiskCache(unittest.TestCase):
     self.assertEqual(diskcache_get(table, fancy_key2), 8)
     self.assertEqual(diskcache_get(table, fancy_key), 5)
     self.assertEqual(diskcache_get(table, fancy_key3), None)
+
+  def test_table_name(self):
+    table = "test_gfx1010:xnack-"
+    diskcache_put(table, "key", "test")
+    self.assertEqual(diskcache_get(table, "key"), "test")
+
+  @unittest.skip("disabled by default because this drops cache table")
+  def test_clear_cache(self):
+    # clear cache to start
+    diskcache_clear()
+    tables = [f"test_clear_cache:{i}" for i in range(3)]
+    for table in tables:
+      # check no entries
+      self.assertIsNone(diskcache_get(table, "k"))
+    for table in tables:
+      diskcache_put(table, "k", "test")
+      # check insertion
+      self.assertEqual(diskcache_get(table, "k"), "test")
+
+    diskcache_clear()
+    for table in tables:
+      # check no entries again
+      self.assertIsNone(diskcache_get(table, "k"))
+
+    # calling multiple times is fine
+    diskcache_clear()
+    diskcache_clear()
+    diskcache_clear()
 
 if __name__ == "__main__":
   unittest.main()

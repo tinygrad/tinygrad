@@ -569,6 +569,22 @@ class TestMaskedShapeTracker(unittest.TestCase):
     self.st.pad(((1,1), (1,1)))
     self.st.assert_same()
 
+  def test_pad_reshape(self):
+    st1 = CheckingShapeTracker((1, 2))
+    st1.pad(((1, 0), (0, 1)))
+    st1.reshape((3, 2))
+    st1.assert_same()
+
+    st2 = CheckingShapeTracker((1, 2))
+    st2.pad(((1, 1), (0, 2)))
+    st2.reshape((4, 3))
+    st2.assert_same()
+
+    st3 = CheckingShapeTracker((1, 1, 1, 2))
+    st3.pad(((0, 2), (1, 2), (2, 2), (0, 4)))
+    st3.reshape((4, 3, 6, 5))
+    st3.assert_same()
+
 class TestShapeTracker(unittest.TestCase):
   def setUp(self):
     self.st = CheckingShapeTracker((7,4))
@@ -749,6 +765,14 @@ class TestShapeTrackerSize(unittest.TestCase):
     st = ShapeTracker.from_shape((100, 100))
     st = st.shrink(((0, 100), (0, 50)))
     self.assertEqual(st.real_size(), 9950)    # careful here
+
+class TestIdxs(unittest.TestCase):
+  def test_check_idx_range(self):
+    # generated from: (Tensor.rand(4096,599*64) @ Tensor.rand(599*64,1024)).realize()
+    # TODO: use int64
+    st = ShapeTracker(views=(View(shape=(4096, 1024, 599, 1), strides=(613376, 599, 1, 0), offset=0, mask=None, contiguous=True),))
+    with self.assertRaises(AssertionError):
+      st.expr_idxs()
 
 if __name__ == '__main__':
   unittest.main()

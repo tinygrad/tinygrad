@@ -1,13 +1,11 @@
 import unittest
 
 from test.helpers import assert_jit_cache_len
-from tinygrad.features.jit import TinyJit
-from tinygrad.helpers import getenv
+from tinygrad.engine.jit import TinyJit
 from tinygrad.shape.symbolic import Variable
 from tinygrad.tensor import Tensor
 import numpy as np
 
-@unittest.skipIf(getenv("ARM64") or getenv("PTX"), "ARM64 and PTX are not supported")
 class TestSymbolicJit(unittest.TestCase):
   def test_plus1(self):
     def f(a): return (a+1).realize()
@@ -124,7 +122,6 @@ class TestSymbolicJit(unittest.TestCase):
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
     assert_jit_cache_len(jf, 1)
 
-  @unittest.skip("two vars not supported")
   def test_two_vars_plus1_ij(self):
     def f(a, b): return (a@b+1).realize()
     jf = TinyJit(f)
@@ -139,7 +136,6 @@ class TestSymbolicJit(unittest.TestCase):
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
     assert_jit_cache_len(jf, 1)
 
-  @unittest.skip("two vars not supported")
   def test_two_vars_plus1_ji(self):
     def f(a, b): return (a@b+1).realize()
     jf = TinyJit(f)
@@ -180,6 +176,59 @@ class TestSymbolicJit(unittest.TestCase):
       expected = f(a.shrink(((3,5),(i,i+2)))).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
     assert_jit_cache_len(jf, 1)
+
+  def test_mean(self):
+    def f(a): return a.mean().realize()
+    def f0(a): return a.mean(0).realize()
+    def f1(a): return a.mean(1).realize()
+    jf = TinyJit(f)
+    jf0 = TinyJit(f0)
+    jf1 = TinyJit(f1)
+    for i in range(1, 5):
+      vi = Variable("i", 1, 10).bind(i)
+      # aixs = None
+      a = Tensor.rand(i, 3)
+      symbolic = jf(a.reshape(vi, 3)).numpy()
+      expected = a.mean().numpy()
+      np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
+      # aixs = 0
+      a = Tensor.rand(i, 3)
+      symbolic = jf0(a.reshape(vi, 3)).numpy()
+      expected = a.mean(0).numpy()
+      np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
+      # aixs = 1
+      a = Tensor.rand(i, 3)
+      symbolic = jf1(a.reshape(vi, 3)).reshape(i).numpy()
+      expected = a.mean(1).numpy()
+      np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
+
+  @unittest.skip("failed for some")
+  def test_mean_2d(self):
+    def f(a): return a.mean().realize()
+    def f0(a): return a.mean(0).realize()
+    def f1(a): return a.mean(1).realize()
+    jf = TinyJit(f)
+    jf0 = TinyJit(f0)
+    jf1 = TinyJit(f1)
+    for i in range(1, 5):
+      for j in range(1, 5):
+        vi = Variable("i", 1, 10).bind(i)
+        vj = Variable("j", 1, 10).bind(j)
+        # aixs = None
+        a = Tensor.rand(i, j)
+        symbolic = jf(a.reshape(vi, vj)).numpy()
+        expected = a.mean().numpy()
+        np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
+        # aixs = 0
+        a = Tensor.rand(i, j)
+        symbolic = jf0(a.reshape(vi, vj)).reshape(j).numpy()
+        expected = a.mean(0).numpy()
+        np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
+        # aixs = 1
+        a = Tensor.rand(i, j)
+        symbolic = jf1(a.reshape(vi, vj)).reshape(i).numpy()
+        expected = a.mean(1).numpy()
+        np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
 if __name__ == '__main__':
   unittest.main()

@@ -4,22 +4,27 @@ import numpy as np
 import torch
 from tinygrad import Tensor, Device, TinyJit
 from tinygrad.helpers import CI, Context
+from tinygrad.ops import BufferOps
 from tinygrad.nn import BatchNorm2d, Conv1d,ConvTranspose1d, Conv2d,ConvTranspose2d, Linear, GroupNorm, LayerNorm,LayerNorm2d, Embedding, InstanceNorm
+from tinygrad.nn.state import load_state_dict
+from tinygrad.engine.schedule import create_schedule
+from tinygrad.engine.realize import run_schedule
 
-@unittest.skipIf(CI and Device.DEFAULT == "CUDA", "slow")
+@unittest.skipIf(CI and Device.DEFAULT in {"CUDA", "NV"}, "slow")
 class TestNN(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "no int64 on WebGPU")
   def test_sparse_cat_cross_entropy(self):
     # create in tinygrad
-    input = Tensor.randn(3, 5)
-    target = Tensor.randint((3,), low=0, high=4)
-    loss = input.sparse_categorical_crossentropy(target)
-
+    input = Tensor.randn(5, 5)
+    target = Tensor([0, 0, 0, 1, 2])  # torch doesn't support target=-1
     torch_input = torch.tensor(input.numpy())
     torch_target = torch.tensor(target.numpy(), dtype=torch.long)
-    torch_loss = torch.nn.CrossEntropyLoss(reduction='mean')(torch_input, torch_target)
 
-    np.testing.assert_allclose(loss.numpy(), torch_loss.detach().numpy(), atol=1e-5, rtol=1e-6)
+    for smoothing in [0.0, 0.1, 0.5, 1.0]:
+      for ignore_index in [-1, 0, 2]:
+        loss = input.sparse_categorical_crossentropy(target, label_smoothing=smoothing, ignore_index=ignore_index)
+        torch_loss = torch.nn.CrossEntropyLoss(reduction='mean', label_smoothing=smoothing, ignore_index=ignore_index)(torch_input, torch_target)
+        np.testing.assert_allclose(loss.numpy(), torch_loss.detach().numpy(), atol=1e-5, rtol=1e-6)
 
   def test_batchnorm2d(self, training=False):
     with Tensor.train(training):
@@ -61,6 +66,24 @@ class TestNN(unittest.TestCase):
 
   def test_batchnorm2d_training(self):
     self.test_batchnorm2d(True)
+
+  def test_batchnorm_axis(self):
+    sz = (2, 4, 3, 2, 2)
+    x = Tensor.randn(sz)
+    weight = Tensor.randn(2, 3)
+    bias = Tensor.randn(2, 3)
+    mean = Tensor.randn(2, 3)
+    invstd = Tensor.randn(2, 3)
+    a = (x.batchnorm(weight, bias, mean, invstd, axis=(0, 2))
+         .permute(1, 0, 2, 3, 4).reshape(4, 6, 2, 2))
+    b = (x.permute(1, 0, 2, 3, 4).reshape(4, 6, 2, 2)
+         .batchnorm(weight.flatten(), bias.flatten(), mean.flatten(), invstd.flatten()))
+    t_x = torch.tensor(x.permute(1, 0, 2, 3, 4).reshape(4, 6, 2, 2).numpy())
+    t_weight, t_bias = torch.tensor(weight.flatten().numpy()), torch.tensor(bias.flatten().numpy())
+    t_mean, t_invstd = torch.tensor(mean.flatten().numpy()), torch.tensor(invstd.flatten().numpy())
+    torch.nn.functional.batch_norm(t_x, t_mean, 1.0 / t_invstd**2, t_weight, t_bias)
+
+    np.testing.assert_allclose(a.numpy(), b.numpy())
 
   def test_linear(self):
     def _test_linear(x, in_dim, out_dim):
@@ -158,7 +181,6 @@ class TestNN(unittest.TestCase):
     np.testing.assert_allclose(gw.numpy(), torch_layer.weight.grad.numpy(), atol=5e-4, rtol=1e-5)
     np.testing.assert_allclose(gb.numpy(), torch_layer.bias.grad.numpy(), atol=5e-4, rtol=1e-5)
     np.testing.assert_allclose(gx.numpy(), torch_x.grad.numpy(), atol=5e-4, rtol=1e-5)
-
 
   @unittest.skipIf(CI and Device.DEFAULT == "WEBGPU", "runs out of memory in CI")
   def test_conv_transpose1d(self):
@@ -333,6 +355,52 @@ class TestNN(unittest.TestCase):
       torch_z = torch_layer(torch_x)
       np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=1e-8, rtol=1e-8)
 
+  def test_embedding_one_kernel(self):
+    layer = Embedding(20, 30)
+    a = Tensor([[1, 5, 9, 11],
+                [12, 19, 8, 1]])
+    result = layer(a)
+    schedule = create_schedule([result.lazydata])
+    self.assertEqual(3, len([item for item in schedule if item.ast[0].op is BufferOps.STORE]), "first run realizes arange, weight, and embedding")
+    run_schedule(schedule)
+
+    b = Tensor([[1, 2, 3],
+                [4, 5, 6],
+                [7, 8, 9]])
+    result = layer(b)
+    schedule = create_schedule([result.lazydata])
+    self.assertEqual(1, len([item for item in schedule if item.ast[0].op is BufferOps.STORE]), "second run realizes embedding only")
+    run_schedule(schedule)
+
+  def test_load_state_dict(self):
+    layer = Conv2d(3, 5, kernel_size=3)
+
+    state_dict = {
+      'weight': Tensor.randn(5, 3, 3, 3),
+      'bias': Tensor.randn(5),
+    }
+    load_state_dict(layer, state_dict)
+
+    np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
+    np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
+
+  @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
+  def test_load_state_dict_sharded(self):
+    devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2")
+
+    layer = Conv2d(3, 5, kernel_size=3)
+    layer.weight.shard_(devices, -1)
+    layer.bias.shard_(devices, None)
+    state_dict = {
+      'weight': Tensor.randn(5, 3, 3, 3).shard(devices, -1),
+      'bias': Tensor.randn(5).shard(devices, None),
+    }
+    load_state_dict(layer, state_dict)
+
+    self.assertEqual(layer.weight.device, devices)
+    self.assertEqual(layer.bias.device, devices)
+    np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
+    np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
 
 if __name__ == '__main__':
   unittest.main()

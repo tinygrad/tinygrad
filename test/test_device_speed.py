@@ -1,14 +1,13 @@
 import unittest
 from tinygrad import Device
+from tinygrad.codegen.uops import UOpGraph
 from tinygrad.helpers import Timing, Profiling
-from tinygrad.device import Compiled
 
-@unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "only for compiled backend")
 class TestDeviceSpeed(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
     cls.dev = Device[Device.DEFAULT]
-    cls.empty = Device[Device.DEFAULT].compiler.render("test", [])
+    cls.empty = Device[Device.DEFAULT].renderer.render("test", UOpGraph())
 
   def test_empty_compile(self):
     with Timing("compiler "):

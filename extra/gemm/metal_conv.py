@@ -32,7 +32,7 @@ except RuntimeError:
   print("no torch metal conv")
 
 from tinygrad.tensor import Tensor
-from tinygrad.features.jit import TinyJit
+from tinygrad.engine.jit import TinyJit
 from tinygrad import Device
 b = Tensor(nb)
 c = Tensor(nc)

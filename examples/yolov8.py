@@ -295,7 +295,7 @@ class DFL:
   def __init__(self, c1=16):
     self.conv = Conv2d(c1, 1, 1, bias=False)
     x = Tensor.arange(c1)
-    self.conv.weight.assign(x.reshape(1, c1, 1, 1))
+    self.conv.weight.replace(x.reshape(1, c1, 1, 1))
     self.c1 = c1
 
   def __call__(self, x):
@@ -401,7 +401,7 @@ if __name__ == '__main__':
   #absolute image path or URL
   image_location = [np.frombuffer(fetch(img_path).read_bytes(), np.uint8)]
   image = [cv2.imdecode(image_location[0], 1)]
-  out_paths = [(output_folder_path / f"{Path(img_path).stem}_output{Path(img_path).suffix}").as_posix()]
+  out_paths = [(output_folder_path / f"{Path(img_path).stem}_output{Path(img_path).suffix or '.png'}").as_posix()]
   if not isinstance(image[0], np.ndarray):
     print('Error in image loading. Check your image file.')
     sys.exit(1)

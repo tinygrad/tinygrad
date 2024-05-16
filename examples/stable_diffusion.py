@@ -9,11 +9,10 @@ from collections import namedtuple
 from PIL import Image
 import numpy as np
 from tqdm import tqdm
-from tinygrad import Device, GlobalCounters, dtypes, Tensor
+from tinygrad import Device, GlobalCounters, dtypes, Tensor, TinyJit
 from tinygrad.helpers import Timing, Context, getenv, fetch, colored
 from tinygrad.nn import Conv2d, Linear, GroupNorm, LayerNorm, Embedding
 from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict
-from tinygrad.features.jit import TinyJit
 
 class AttnBlock:
   def __init__(self, in_channels):
@@ -251,8 +250,7 @@ class Upsample:
 
 def timestep_embedding(timesteps, dim, max_period=10000):
   half = dim // 2
-  # TODO: remove explicit dtypes after broadcast fix
-  freqs = (-math.log(max_period) * Tensor.arange(half, dtype=dtypes.float32) / half).exp()
+  freqs = (-math.log(max_period) * Tensor.arange(half) / half).exp()
   args = timesteps * freqs
   return Tensor.cat(args.cos(), args.sin()).reshape(1, -1)
 
@@ -512,9 +510,16 @@ class ClipTokenizer:
       bpe_tokens = bpe_tokens[:75]
     return [49406] + bpe_tokens + [49407] * (77 - len(bpe_tokens) - 1)
 
+
+def get_alphas_cumprod(beta_start=0.00085, beta_end=0.0120, n_training_steps=1000):
+  betas = np.linspace(beta_start ** 0.5, beta_end ** 0.5, n_training_steps, dtype=np.float32) ** 2
+  alphas = 1.0 - betas
+  alphas_cumprod = np.cumprod(alphas, axis=0)
+  return Tensor(alphas_cumprod)
+
 class StableDiffusion:
   def __init__(self):
-    self.alphas_cumprod = Tensor.empty(1000)
+    self.alphas_cumprod = get_alphas_cumprod()
     self.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel())
     self.first_stage_model = AutoencoderKL()
     self.cond_stage_model = namedtuple("CondStageModel", ["transformer"])(transformer = namedtuple("Transformer", ["text_model"])(text_model = CLIPTextTransformer()))
@@ -595,7 +600,7 @@ if __name__ == "__main__":
 
   if args.fp16:
     for l in get_state_dict(model).values():
-      l.assign(l.cast(dtypes.float16).realize())
+      l.replace(l.cast(dtypes.float16).realize())
 
   # run through CLIP to get context
   tokenizer = ClipTokenizer()

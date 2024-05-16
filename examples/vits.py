@@ -9,7 +9,7 @@ from tinygrad import nn, dtypes
 from tinygrad.helpers import fetch
 from tinygrad.nn.state import torch_load
 from tinygrad.tensor import Tensor
-from tinygrad.features.jit import TinyJit
+from tinygrad.engine.jit import TinyJit
 from unidecode import unidecode
 
 LRELU_SLOPE = 0.1
@@ -31,7 +31,7 @@ class Synthesizer:
     y_lengths = Tensor.maximum(w_ceil.sum([1, 2]), 1).cast(dtypes.int64)
     return self.generate(g, logs_p, m_p, max_len, max_y_length_estimate_scale, noise_scale, w_ceil, x, x_mask, y_lengths, pad_length)
   def generate(self, g, logs_p, m_p, max_len, max_y_length_estimate_scale, noise_scale, w_ceil, x, x_mask, y_lengths, pad_length):
-    max_y_length = y_lengths.max().numpy() if max_y_length_estimate_scale is None else max(15, x.shape[-1]) * max_y_length_estimate_scale
+    max_y_length = y_lengths.max().item() if max_y_length_estimate_scale is None else max(15, x.shape[-1]) * max_y_length_estimate_scale
     y_mask = sequence_mask(y_lengths, max_y_length).unsqueeze(1).cast(x_mask.dtype)
     attn_mask = x_mask.unsqueeze(2) * y_mask.unsqueeze(-1)
     attn = generate_path(w_ceil, attn_mask)
@@ -557,7 +557,7 @@ def load_checkpoint(checkpoint_path, model: Synthesizer, optimizer=None, skip_li
             if k == "weight_g": weight_g = v
             else: weight_v = v
           if not skip: obj = getattr(obj, k)
-      if weight_g and weight_v:
+      if weight_g is not None and weight_v is not None:
         setattr(obj, "weight_g", weight_g.numpy())
         setattr(obj, "weight_v", weight_v.numpy())
         obj, v = getattr(parent, "weight"), weight_norm(weight_v, weight_g, 0)

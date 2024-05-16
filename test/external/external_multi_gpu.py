@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# cd disassemblers/ && git clone --recursive github.com:geohot/cuda_ioctl_sniffer.git
-# LD_PRELOAD=$PWD/disassemblers/cuda_ioctl_sniffer/out/sniff.so GPU=1 python3 test/external/external_multi_gpu.py
+# cd extra/disassemblers/ && git clone --recursive github.com:geohot/cuda_ioctl_sniffer.git
+# LD_PRELOAD=$PWD/extra/disassemblers/cuda_ioctl_sniffer/out/sniff.so GPU=1 python3 test/external/external_multi_gpu.py
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import colored, Timing, getenv

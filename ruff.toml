@@ -1,7 +1,9 @@
 indent-width = 2
+preview = true
+target-version = "py38"
 
 lint.select = [
-  "F",
+  "F",  # Pyflakes
   "W6",
   "E71",
   "E72",
@@ -10,8 +12,8 @@ lint.select = [
   # "E124",
   "E203",   # whitespace-before-punctuation
   "E272",   # multiple-spaces-before-keyword
-  # "E303",
-  # "E304",
+  "E303",
+  "E304",
   "E501",   # line-too-long
   # "E502",
   "E702",   # multiple-statements-on-one-line-semicolon
@@ -26,10 +28,10 @@ lint.select = [
 line-length = 150
 
 exclude = [
-  "disassemblers/",
   "docs/",
   "examples/",
   "extra/",
-  "openpilot/",
   "tinygrad/runtime/autogen",
+  "test/external/mlperf_resnet",
+  "test/external/mlperf_unet3d",
 ]

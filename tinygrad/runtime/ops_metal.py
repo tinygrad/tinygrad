@@ -1,18 +1,20 @@
 from __future__ import annotations
 import os, subprocess, pathlib, ctypes, tempfile, functools
 import Metal, libdispatch
-from typing import List, Any, Tuple, Optional
-from tinygrad.codegen.kernel import LinearizerOptions
+from typing import List, Set, Any, Tuple, Optional
 from tinygrad.helpers import prod, getenv, DEBUG, unwrap2
-from tinygrad.device import Compiled, LRUAllocator, Compiler
+from tinygrad.device import Compiled, Compiler, LRUAllocator
 from tinygrad.renderer.cstyle import MetalRenderer
 
+def wait_check(cbuf: Any):
+  cbuf.waitUntilCompleted()
+  if (error := cbuf.error()) is not None:
+    raise RuntimeError(error)
+
 class MetalCompiler(Compiler):
-  linearizer_opts = LinearizerOptions("METAL", has_tensor_cores=os.uname().machine == "arm64")
   def __init__(self, device:Optional[MetalDevice]):
     self.device = device
     super().__init__("compile_metal")
-  def render(self, name:str, uops) -> str: return MetalRenderer(name, uops)
   def compile(self, src:str) -> bytes:
     if self.device is None:
       # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
@@ -31,14 +33,15 @@ class MetalProgram:
       with tempfile.NamedTemporaryFile(delete=True) as shader:
         shader.write(lib)
         shader.flush()
-        os.system(f"cd {pathlib.Path(__file__).parents[2]}/disassemblers/applegpu && python3 compiler_explorer.py {shader.name}")
+        os.system(f"cd {pathlib.Path(__file__).parents[2]}/extra/disassemblers/applegpu && python3 compiler_explorer.py {shader.name}")
+    assert lib[:4] == b"MTLB", "Invalid Metal library. Could be due to using conda. Try system python or METAL_XCODE=1 DISABLE_COMPILER_CACHE=1."
     data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
     self.library = unwrap2(self.device.device.newLibraryWithData_error_(data, None))
     self.fxn = self.library.newFunctionWithName_(name)
     self.pipeline_state = unwrap2(self.device.device.newComputePipelineStateWithFunction_error_(self.fxn, None))
 
   def __call__(self, *bufs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
-    assert prod(local_size) <= self.pipeline_state.maxTotalThreadsPerThreadgroup(),f"local size {local_size} bigger than {self.pipeline_state.maxTotalThreadsPerThreadgroup()} with exec width {self.pipeline_state.threadExecutionWidth()} memory length {self.pipeline_state.staticThreadgroupMemoryLength()}"  # noqa: E501
+    if prod(local_size) > self.pipeline_state.maxTotalThreadsPerThreadgroup(): raise RuntimeError(f"local size {local_size} bigger than {self.pipeline_state.maxTotalThreadsPerThreadgroup()} with exec width {self.pipeline_state.threadExecutionWidth()} memory length {self.pipeline_state.staticThreadgroupMemoryLength()}")  # noqa: E501
     command_buffer = self.device.mtl_queue.commandBuffer()
     encoder = command_buffer.computeCommandEncoder()
     encoder.setComputePipelineState_(self.pipeline_state)
@@ -48,19 +51,26 @@ class MetalProgram:
     encoder.endEncoding()
     command_buffer.commit()
     if wait:
-      command_buffer.waitUntilCompleted()
+      wait_check(command_buffer)
       return command_buffer.GPUEndTime() - command_buffer.GPUStartTime()
     self.device.mtl_buffers_in_flight.append(command_buffer)
 
 class MetalAllocator(LRUAllocator):
   def __init__(self, device:MetalDevice):
     self.device:MetalDevice = device
+    self.track_cross_device: Set[MetalDevice] = set()
     super().__init__()
-  def _alloc(self, size:int) -> Any:
+  def free_cache(self):
+    self.device.synchronize()
+    for x in self.track_cross_device: x.synchronize()
+    self.track_cross_device.clear()
+    return super().free_cache()
+  def _alloc(self, size:int, options) -> Any:
     ret = self.device.device.newBufferWithLength_options_(size, Metal.MTLResourceStorageModeShared)
     if ret is None: raise MemoryError(f"Metal OOM while allocating {size=}")
     return ret
-  def transfer(self, dest:Any, src:Any, sz:int, **kwargs):
+  def transfer(self, dest:Any, src:Any, sz:int, src_dev: MetalDevice, **kwargs):
+    src_dev.synchronize()
     command_buffer = self.device.mtl_queue.commandBuffer()
     encoder = command_buffer.blitCommandEncoder()
     encoder.copyFromBuffer_sourceOffset_toBuffer_destinationOffset_size_(src, 0, dest, 0, sz)
@@ -71,7 +81,7 @@ class MetalAllocator(LRUAllocator):
     ret = self.device.device.newBufferWithBytesNoCopy_length_options_deallocator_(src, len(src), Metal.MTLResourceStorageModeShared, None)
     if ret: self.device.mv_in_metal.append(src)
     return ret
-  def _free(self, opaque:Any): opaque.release()
+  def _free(self, opaque:Any, options): opaque.release()
   def as_buffer(self, src:Any) -> memoryview:
     self.device.synchronize()
     return src.contents().as_buffer(src.length())
@@ -84,10 +94,12 @@ class MetalDevice(Compiled):
     self.mtl_queue = self.device.newCommandQueueWithMaxCommandBufferCount_(1024)
     self.mtl_buffers_in_flight: List[Any] = []
     self.mv_in_metal: List[memoryview] = []
+    self.track_cross_buffer: List[Any] = []
     from tinygrad.runtime.graph.metal import MetalGraph
-    super().__init__(device, MetalAllocator(self), MetalCompiler(None if getenv("METAL_XCODE") else self),
-                     functools.partial(MetalProgram, self), functools.partial(MetalGraph, self))
+    super().__init__(device, MetalAllocator(self), MetalRenderer(), MetalCompiler(None if getenv("METAL_XCODE") else self),
+                     functools.partial(MetalProgram, self), MetalGraph)
   def synchronize(self):
-    for cbuf in self.mtl_buffers_in_flight: cbuf.waitUntilCompleted()
+    for cbuf in self.mtl_buffers_in_flight: wait_check(cbuf)
     self.mv_in_metal.clear()
     self.mtl_buffers_in_flight.clear()
+    self.track_cross_buffer.clear()
