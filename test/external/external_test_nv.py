@@ -30,9 +30,11 @@ class TestNV(unittest.TestCase):
     helper_test_lin(Linearizer(ast), opts=opts, failed_platforms=["NV"])
 
   def test_buf4_usage(self):
-    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=UnaryOps.SIN, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.ulong, st=ShapeTracker(views=(View(shape=(3,), strides=(1,), offset=0, mask=None, contiguous=True),)))),), arg=dtypes.float),), arg=None),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3,), strides=(1,), offset=0, mask=None, contiguous=True),))))
-    opts = [Opt(op=OptOps.LOCAL, axis=0, amt=3)]
-    helper_test_lin(Linearizer(ast), opts=opts, failed_platforms=[])
+    TestNV.along = Tensor([105615], device="NV").realize()
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=UnaryOps.SIN, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.ulong, st=ShapeTracker(views=(View(shape=(3,), strides=(1,), offset=0, mask=None, contiguous=True),)))),), arg=dtypes.float),), arg=None),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3,), strides=(1,), offset=0, mask=None, contiguous=True),)))) # noqa: E501
+    temp_runner = get_runner(TestNV.d0.dname, (ast,))
+    temp_runner([TestNV.b.lazydata.buffer, TestNV.along.lazydata.buffer], var_vals={})
+    assert abs((val:=TestNV.b.lazydata.buffer.as_buffer().cast("f")[0]) - 0.80647) < 0.001, f"got val {val}"
 
   def test_kernargs_no_oob_access(self):
     kernargs_start = TestNV.d0._gpu_alloc((2 << 20), map_to_cpu=True).va_addr
