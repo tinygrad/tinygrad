@@ -198,13 +198,12 @@ constant_folder = PatternMatcher([
   ({"uop": UOps.ALU, "arg": TernaryOps.WHERE, "vin": ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT,
                                                        "vin": ({"__name__": "loopend", "uop": UOps.CONST}, {"uop": UOps.LOOP, "__name__": "loop"})},
                                                       {"__name__": "val", "uop": UOps.CONST}, {"uop": UOps.CONST, "arg": 0})},
-   lambda val, loopend, loop: uop_assign(loop, UOp(UOps.LOOP, loop.dtype,
-                                                   (UOp.alu(BinaryOps.ADD, loopend, UOp.const(loopend.dtype, 1)), loop.vin[1])), val)),
+    lambda val, loopend, loop: uop_assign(loop, UOp(UOps.LOOP, loop.dtype,
+                                                    (UOp.alu(BinaryOps.ADD, loopend, UOp.const(loopend.dtype, 1)), loop.vin[1])), val)),
   ({"uop": UOps.ALU, "arg": TernaryOps.WHERE, "vin": ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT,
                                                        "vin": ({"uop": UOps.LOOP, "__name__": "loop"}, {"__name__": "loopend", "uop": UOps.CONST})},
                                                       {"__name__": "val", "uop": UOps.CONST}, {"uop": UOps.CONST, "arg": 0})},
-   lambda val, loopend, loop: uop_assign(loop, UOp(UOps.LOOP, loop.dtype, (loop.vin[0], loopend)), val)),
-                                                   #(UOp.alu(BinaryOps.ADD, loopend, UOp.const(loopend.dtype, 1)), loop.vin[1])), val))
+    lambda val, loopend, loop: uop_assign(loop, UOp(UOps.LOOP, loop.dtype, (loop.vin[0], loopend)), val)),
 ])
 
 # *** uop graph ***
