@@ -71,10 +71,16 @@ class Sin(Function):
         # print("sinabs: ")
         # print(__import__('tinygrad').Tensor(sinabs).numpy())
         oneminussinabs = sinabs.const(1).e(BinaryOps.SUB, sinabs)
+        cf1 = x.const(-0.0015)
+        cf2 = x.const(-0.003)
+        # Choose correction factor based on x magnitude
+        cf = x.e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, cf1, cf2)
         # correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.008).e(BinaryOps.MUL, cossign))
         # correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.016).e(BinaryOps.MUL, cossign))
         # correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.0015).e(BinaryOps.MUL, cossign))
-        correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.002).e(BinaryOps.MUL, cossign))
+        correction = oneminussinabs.e(BinaryOps.MUL, cf.e(BinaryOps.MUL, cossign))
+        # correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.002).e(BinaryOps.MUL, cossign))
+        # correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.003).e(BinaryOps.MUL, cossign))
         # correction = cosabs.e(BinaryOps.MUL, x.const(0.003)).e(BinaryOps.MUL, cossign)
         # correction = cosabs.e(BinaryOps.MUL, x.const(-0.007)).e(BinaryOps.MUL, sinsign)
 
