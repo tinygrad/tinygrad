@@ -38,13 +38,8 @@ class Reciprocal(Function):
 
 class Sin(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    # normalize x with analogue of math.fmod 2*pi, the double cast is to get the floor
-    x =  x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(math.pi*2)).cast(dtypes.int).cast(x.dtype).e(BinaryOps.MUL, x.const(math.pi*2)))
-    self.ret = acc = x
-    for i in range(1, 13):
-      acc = acc.e(UnaryOps.NEG).e(BinaryOps.MUL, x).e(BinaryOps.MUL, x)
-      self.ret = self.ret.e(BinaryOps.ADD, acc.e(BinaryOps.DIV, x.const(math.factorial(2*i + 1))))
-    return self.ret
+    self.x = x
+    return x.e(UnaryOps.SIN)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return grad_output.e(BinaryOps.MUL, self.ret.const(1).e(BinaryOps.SUB, self.ret.e(BinaryOps.MUL, self.ret)).e(UnaryOps.SQRT))
@@ -60,31 +55,13 @@ class Relu(Function):
 
 class Log(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.x = x
-    # Map (0, Inf) -> (0, 1] leveraging log(x) = -log(1/x)
-    y = x.e(BinaryOps.CMPLT, x.const(1)).e(TernaryOps.WHERE, x, x.const(1).e(BinaryOps.DIV, x))
-    sign = x.e(BinaryOps.CMPLT, x.const(1)).e(TernaryOps.WHERE, x.const(1), x.const(-1))
-    # improve convergence leveraging ln(x) = ln(2*x) - ln(2)
-    n = y.const(0)  # Buffer to store the count of twicings
-    for i in range(14):
-      n = y.e(BinaryOps.CMPLT, x.const(0.5)).e(TernaryOps.WHERE, n.e(BinaryOps.ADD, y.const(1)), n)
-      y = y.e(BinaryOps.CMPLT, x.const(0.5)).e(TernaryOps.WHERE, y.e(BinaryOps.MUL, y.const(2)), y)
-    # Taylor expansion valid for y < 2
-    ret = x.const(0)
-    acc = x.const(-1)
-    for i in range(1, 17):
-      acc = acc.e(UnaryOps.NEG).e(BinaryOps.MUL, y.e(BinaryOps.SUB, y.const(1)))
-      ret = ret.e(BinaryOps.ADD, acc.e(BinaryOps.DIV, y.const(i)))
-    return ret.e(BinaryOps.SUB, n.e(BinaryOps.MUL, x.const(math.log(2)))).e(BinaryOps.MUL, sign)
+    return x.e(UnaryOps.LOG2).e(BinaryOps.MUL, x.const(math.log(2)))
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.e(BinaryOps.DIV, self.x)
 
 class Exp(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = acc = x.const(1)
-    for i in range(1, 20):
-      acc = acc.e(BinaryOps.MUL, x)
-      self.ret = self.ret.e(BinaryOps.ADD, acc.e(BinaryOps.DIV, x.const(math.factorial(i))))
+    self.ret = x.e(BinaryOps.MUL, x.const(1/math.log(2))).e(UnaryOps.EXP2)
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return self.ret.e(BinaryOps.MUL, grad_output)
