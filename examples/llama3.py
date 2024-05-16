@@ -173,8 +173,8 @@ def build_transformer(model_path: Path, model_size="8B", quantize=None, device=N
 TEMPERATURE = 0.6
 TOP_K = 55
 TOP_P = 0.92
-ALPHA_F = 0.1
-ALPHA_P = 0.1
+ALPHA_F = 1.1
+ALPHA_P = 1.1
 if __name__ == "__main__":
   Tensor.no_grad = True
 
