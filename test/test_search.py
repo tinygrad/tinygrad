@@ -68,7 +68,7 @@ class TestBEAM(unittest.TestCase):
 
   def test_kernel_count(self):
     """
-    Ensure that the kernel count is not incremented by _time_program
+    Ensure that the kernel count is not incremented by _time_program when clearing l2
     """
     dev = Device[Device.DEFAULT]
     assert dev.compiler is not None
@@ -79,9 +79,8 @@ class TestBEAM(unittest.TestCase):
     p = lin.to_program()
 
     kernel_count = GlobalCounters.kernel_count
-    max_global_size, cnt, disable_cache, clear_l2 = 65536, 3, False, False
     _time_program(p, dev.compiler.compile(p.src), var_vals, rawbufs,
-        max_global_size=max_global_size, clear_l2=clear_l2, cnt=cnt, name=to_function_name(lin.name))
+        max_global_size=65536, clear_l2=True, cnt=3, name=to_function_name(lin.name))
     assert GlobalCounters.kernel_count == kernel_count
 
 if __name__ == '__main__':
