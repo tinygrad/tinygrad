@@ -176,10 +176,10 @@ class Sin(Function):
         x = self._abs(x)
         x = lt0.e(TernaryOps.WHERE, x.e(BinaryOps.ADD, x.const(math.pi)), x)
 
-        # x = self._mod(x, x.const(2 * math.pi))
-        # res = x.e(BinaryOps.CMPEQ, x.const(float('inf'))).e(TernaryOps.WHERE, x.const(math.nan), x)
-        # res = x.e(BinaryOps.CMPEQ, x.const(float('-inf'))).e(TernaryOps.WHERE, x.const(math.nan), res)
-        # return res
+        x = self._mod(x, x.const(2 * math.pi))
+        res = x.e(BinaryOps.CMPEQ, x.const(float('inf'))).e(TernaryOps.WHERE, x.const(math.nan), x)
+        res = x.e(BinaryOps.CMPEQ, x.const(float('-inf'))).e(TernaryOps.WHERE, x.const(math.nan), res)
+        return res
     
         # # Return mod 2pi if greater than a certain big value
         fallback = self._mod(x, x.const(2*math.pi))
