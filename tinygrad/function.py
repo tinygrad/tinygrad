@@ -54,12 +54,32 @@ class Sin(Function):
 
         # Compute normal sin if below 4e13, else use averaging
         res = self._abs(x).e(BinaryOps.CMPLT, x.const(3e13)).e(TernaryOps.WHERE, self._sin(x), self._averaging_sin(x))
+        # res = self._abs(x).e(BinaryOps.CMPLT, x.const(3e14)).e(TernaryOps.WHERE, self._sin(x), self._averaging_sin(x))
         # print("x: ")
         # print(__import__('tinygrad').Tensor(x).numpy())
         # cond = self._abs(x).e(BinaryOps.CMPLT, x.const(4e13))
         # print("cond: ")
         # print(__import__('tinygrad').Tensor(cond).numpy())
         # res = cond.e(TernaryOps.WHERE, self._sin(x), self._averaging_sin(x))
+        # sinsign = x.e(BinaryOps.CMPLT, x.const(0)).e(TernaryOps.WHERE, x.const(-1), x.const(1))
+        shiftval = x.e(BinaryOps.ADD, x.const(math.pi/2))
+        cos = self._abs(shiftval).e(BinaryOps.CMPLT, shiftval.const(3e13)).e(TernaryOps.WHERE, self._sin(shiftval), self._averaging_sin(shiftval))
+
+        # Cossign is sin slope
+        cossign = cos.e(BinaryOps.CMPLT, x.const(0)).e(TernaryOps.WHERE, cos.const(-1), cos.const(1))
+        sinabs = self._abs(res)
+        # print("sinabs: ")
+        # print(__import__('tinygrad').Tensor(sinabs).numpy())
+        oneminussinabs = sinabs.const(1).e(BinaryOps.SUB, sinabs)
+        # correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.008).e(BinaryOps.MUL, cossign))
+        # correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.016).e(BinaryOps.MUL, cossign))
+        correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.0015).e(BinaryOps.MUL, cossign))
+        # correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.002).e(BinaryOps.MUL, cossign))
+        # correction = cosabs.e(BinaryOps.MUL, x.const(0.003)).e(BinaryOps.MUL, cossign)
+        # correction = cosabs.e(BinaryOps.MUL, x.const(-0.007)).e(BinaryOps.MUL, sinsign)
+        res = res.e(BinaryOps.ADD, correction)
+        print("res: ")
+        print(__import__('tinygrad').Tensor(res).numpy())
         return res.cast(self.beginning_dtype)
 
 
@@ -69,6 +89,7 @@ class Sin(Function):
         # offsets = [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5]
         # offsets = [-2, -1, 0, 1, 2]
         sines = [self._sin(x.e(BinaryOps.ADD, x.const(offset*2*math.pi))) for offset in offsets]
+        # sines = [self._sin(x.e(BinaryOps.ADD, x.const(offset*2*math.pi + 1e-4*offset))) for offset in offsets]
         sum = x.const(0)
         for s in sines:
             # print("s: ")
@@ -127,6 +148,7 @@ class Sin(Function):
         
         # Return v1 if x < 1e14, else return v2
         return x.e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, v1(x, y), v2(x, y))
+        # return x.e(BinaryOps.CMPLT, x.const(1e13)).e(TernaryOps.WHERE, v1(x, y), v2(x, y))
         # return x.e(BinaryOps.CMPLT, x.const(1e5)).e(TernaryOps.WHERE, v1(x, y), v2(x, y))
 
 
@@ -137,14 +159,15 @@ class Sin(Function):
         x = self._abs(x)
         x = lt0.e(TernaryOps.WHERE, x.e(BinaryOps.ADD, x.const(math.pi)), x)
 
-        x = self._mod(x, x.const(2 * math.pi))
-        res = x.e(BinaryOps.CMPEQ, x.const(float('inf'))).e(TernaryOps.WHERE, x.const(math.nan), x)
-        res = x.e(BinaryOps.CMPEQ, x.const(float('-inf'))).e(TernaryOps.WHERE, x.const(math.nan), res)
-        return res
+        # x = self._mod(x, x.const(2 * math.pi))
+        # res = x.e(BinaryOps.CMPEQ, x.const(float('inf'))).e(TernaryOps.WHERE, x.const(math.nan), x)
+        # res = x.e(BinaryOps.CMPEQ, x.const(float('-inf'))).e(TernaryOps.WHERE, x.const(math.nan), res)
+        # return res
     
         # # Return mod 2pi if greater than a certain big value
-        # fallback = self._mod(x, x.const(2*math.pi))
-        # # fallback = self._mod(x, x.const(4 * math.pi))
+        fallback = self._mod(x, x.const(2*math.pi))
+        # fallback = self._mod(x, x.const(4 * math.pi))
+        return fallback
         orig_x = x
 
         # Reduce to [-pi/2, pi/2]
@@ -155,6 +178,7 @@ class Sin(Function):
         x = self._abs(x)
 
         halfpi = x.const(1.5707963267948966)
+        # halfpi = x.const(math.pi / 2)
         d = halfpi
         divres = x.e(BinaryOps.DIV, d)
 
