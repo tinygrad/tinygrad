@@ -32,6 +32,7 @@ class UOp:
   dtype: Optional[DType] = None
   vin: Tuple[UOp, ...] = tuple()
   arg: Any = None
+  def tuple(self): return (self.uop, self.dtype, self.vin, self.arg)
   def cmp_tuple(self): return (self.uop.value, self.arg if self.uop is not UOps.ALU else (type(self.uop), self.uop.value), self.dtype, self.vin)
   def __lt__(self, x:UOp): return self.cmp_tuple() < x.cmp_tuple()
   def __repr__(self):
@@ -251,6 +252,9 @@ class UOpGraph:
         up = pm.recursive_rewrite(u)
         if up != u: changed += 1
         up.vin = tuple(rewrite(x) for x in up.vin)
+        # replace with cached nodes
+        if found:=self.nodes.get(key:=up.tuple()): return found
+        else: self.nodes[key] = up
         return up
       sink = rewrite(sink)
       if changed == 0: break
