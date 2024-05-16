@@ -189,13 +189,22 @@ constant_folder = PatternMatcher([
   ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"uop": UOps.LOOP, "__name__": "loop"}, {"__name__": "val"}]},
     lambda loop, val: uop_assign(loop, UOp(UOps.LOOP, loop.dtype, (UOp(UOps.ALU, loop.dtype, (loop.vin[0], val), BinaryOps.ADD),
                                            UOp(UOps.ALU, loop.dtype, (loop.vin[1], val), BinaryOps.ADD)), loop.arg))),
+  ({"uop": UOps.ALU, "arg": UnaryOps.NEG, "vin": ({"uop": UOps.LOOP, "__name__": "loop"},)},
+    lambda loop: uop_assign(loop, UOp(UOps.LOOP, loop.dtype, (UOp(UOps.ALU, loop.dtype, (loop.vin[1], UOp.const(loop.dtype, 1)), BinaryOps.ADD),
+                                      UOp(UOps.ALU, loop.dtype, (loop.vin[0], UOp.const(loop.dtype, 1)), BinaryOps.ADD)), loop.arg))),
   # fold WHERE in loop
   # TODO: have to confirm LOOP doesn't have other children besides the CMPLT and some DEFINE_ACC
+  # TODO: have to confirm it lies in the range
   ({"uop": UOps.ALU, "arg": TernaryOps.WHERE, "vin": ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT,
                                                        "vin": ({"__name__": "loopend", "uop": UOps.CONST}, {"uop": UOps.LOOP, "__name__": "loop"})},
                                                       {"__name__": "val", "uop": UOps.CONST}, {"uop": UOps.CONST, "arg": 0})},
    lambda val, loopend, loop: uop_assign(loop, UOp(UOps.LOOP, loop.dtype,
-                                                   (UOp.alu(BinaryOps.ADD, loopend, UOp.const(loopend.dtype, 1)), loop.vin[1])), val))
+                                                   (UOp.alu(BinaryOps.ADD, loopend, UOp.const(loopend.dtype, 1)), loop.vin[1])), val)),
+  ({"uop": UOps.ALU, "arg": TernaryOps.WHERE, "vin": ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT,
+                                                       "vin": ({"uop": UOps.LOOP, "__name__": "loop"}, {"__name__": "loopend", "uop": UOps.CONST})},
+                                                      {"__name__": "val", "uop": UOps.CONST}, {"uop": UOps.CONST, "arg": 0})},
+   lambda val, loopend, loop: uop_assign(loop, UOp(UOps.LOOP, loop.dtype, (loop.vin[0], loopend)), val)),
+                                                   #(UOp.alu(BinaryOps.ADD, loopend, UOp.const(loopend.dtype, 1)), loop.vin[1])), val))
 ])
 
 # *** uop graph ***
