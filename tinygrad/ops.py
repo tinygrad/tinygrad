@@ -57,6 +57,9 @@ class LazyOp:
     return ret
   def __eq__(self, x): return self.cached_compare(x, context={})
   def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
+  def display(self, rec_limit=32):
+    if rec_limit <= 0: return '...'
+    return f"LazyOp(op={self.op}, src=({', '.join([x.display(rec_limit=rec_limit-len(self.src)) for x in self.src])}), arg={self.arg})"
   @functools.cached_property
   def dtype(self) -> DType:
     if self.op in BufferOps: return self.arg.dtype
