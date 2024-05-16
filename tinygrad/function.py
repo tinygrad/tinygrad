@@ -73,8 +73,8 @@ class Sin(Function):
         oneminussinabs = sinabs.const(1).e(BinaryOps.SUB, sinabs)
         # correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.008).e(BinaryOps.MUL, cossign))
         # correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.016).e(BinaryOps.MUL, cossign))
-        correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.0015).e(BinaryOps.MUL, cossign))
-        # correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.002).e(BinaryOps.MUL, cossign))
+        # correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.0015).e(BinaryOps.MUL, cossign))
+        correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.002).e(BinaryOps.MUL, cossign))
         # correction = cosabs.e(BinaryOps.MUL, x.const(0.003)).e(BinaryOps.MUL, cossign)
         # correction = cosabs.e(BinaryOps.MUL, x.const(-0.007)).e(BinaryOps.MUL, sinsign)
 
