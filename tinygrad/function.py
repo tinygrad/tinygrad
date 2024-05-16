@@ -38,11 +38,11 @@ class Reciprocal(Function):
 
 class Sin(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    # normalize x with analogue of math.fmod 1*pi, the double cast is to get the floor
-    x =  x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(math.pi*2)).cast(dtypes.int).cast(dtypes.float).e(BinaryOps.MUL, x.const(math.pi*2)))
+    # normalize x with analogue of math.fmod 2*pi, the double cast is to get the floor
+    x =  x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(math.pi*2)).cast(dtypes.int).cast(x.dtype).e(BinaryOps.MUL, x.const(math.pi*2)))
     self.ret = acc = x
     for i in range(1, 13):
-      acc = acc.e(UnaryOps.NEG).e(BinaryOps.MUL, self.x).e(BinaryOps.MUL, x)
+      acc = acc.e(UnaryOps.NEG).e(BinaryOps.MUL, x).e(BinaryOps.MUL, x)
       self.ret = self.ret.e(BinaryOps.ADD, acc.e(BinaryOps.DIV, x.const(math.factorial(2*i + 1))))
     return self.ret
 
@@ -66,7 +66,7 @@ class Log(Function):
     sign = x.e(BinaryOps.CMPLT, x.const(1)).e(TernaryOps.WHERE, x.const(1), x.const(-1))
     # improve convergence leveraging ln(x) = ln(2*x) - ln(2)
     n = y.const(0)  # Buffer to store the count of twicings
-    for i in range(14): # 14 for float16, 126 for float32
+    for i in range(14):
       n = y.e(BinaryOps.CMPLT, x.const(0.5)).e(TernaryOps.WHERE, n.e(BinaryOps.ADD, y.const(1)), n)
       y = y.e(BinaryOps.CMPLT, x.const(0.5)).e(TernaryOps.WHERE, y.e(BinaryOps.MUL, y.const(2)), y)
     # Taylor expansion valid for y < 2
