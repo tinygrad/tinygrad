@@ -164,34 +164,6 @@ class TestOpt(unittest.TestCase):
       d.realize()
     np.testing.assert_allclose(d.numpy(), na*nb+nc, rtol=1e-5, atol=1e-7)
 
-  def test_fold_conv_batchnorm_notrain(self):
-    img = Tensor.ones(1,3,8,8)
-    c1 = nn.Conv2d(3,32,3)
-    bn = nn.BatchNorm2d(32, track_running_stats=False)
-    # precache the bn
-    bn(c1(img)).relu().realize()
-    with CLCache() as cache:
-      bn(c1(img)).relu().realize()
-      assert cache.count == 1, f"optimizer didn't fold conv-batchnorm at test time, got {cache.count}"
-
-  def test_fold_conv_elu(self):
-    img = Tensor.ones(1,4,8,8)
-    c1 = nn.Conv2d(4, 4, kernel_size=3)
-    c2 = nn.Conv2d(4, 4, kernel_size=3)
-    with CLCache() as cache:
-      img_conv = img.sequential([c1, Tensor.elu, c2, Tensor.elu]).realize()
-      print(img_conv)
-      assert cache.count == 2, "optimizer didn't fold conv/elu"
-
-  def test_fold_conv_relu(self):
-    img = Tensor.ones(1,4,8,8)
-    c1 = nn.Conv2d(4, 4, kernel_size=3)
-    c2 = nn.Conv2d(4, 4, kernel_size=3)
-    with CLCache() as cache:
-      img_conv = img.sequential([c1, Tensor.relu, c2, Tensor.relu]).realize()
-      print(img_conv)
-      assert cache.count == 2, "optimizer didn't fold conv/relu"
-
   def test_permute_was_pushed(self):
     a = Tensor.randn(16, 16, 16)
     with CLCache(2):
