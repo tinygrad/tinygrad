@@ -825,6 +825,7 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_equal(d.numpy(), np.pad(np.exp2(a.numpy())[:, None, :], ((0, 0), (1, 1), (0, 0)))*2)
 
   # TODO like openpilot with imagef
+  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_base_change_expand_expand(self):
     a = Tensor.ones(4, 4).contiguous().realize()
     b = a.cast(dtypes.half).expand(2, 4, 4)
