@@ -138,6 +138,8 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
         pass # don't realize image to image casts. this is part of a larger problem
       else:
         realizes[buf.base] = None
+    # TODO: this needs tests
+    #elif any(v.mask is not None for v in buf.st.views): realizes[buf.base] = None
     return _recurse_lb(buf.base, realizes, allbufs, simple_pads, children)
   # base
   allbufs[buf] = None
