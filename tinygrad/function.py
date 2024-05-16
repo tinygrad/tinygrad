@@ -77,9 +77,15 @@ class Sin(Function):
         # correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.002).e(BinaryOps.MUL, cossign))
         # correction = cosabs.e(BinaryOps.MUL, x.const(0.003)).e(BinaryOps.MUL, cossign)
         # correction = cosabs.e(BinaryOps.MUL, x.const(-0.007)).e(BinaryOps.MUL, sinsign)
-        res = res.e(BinaryOps.ADD, correction)
-        print("res: ")
-        print(__import__('tinygrad').Tensor(res).numpy())
+
+        # Apply correction only if x greater than 1e14
+        res = x.e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, res, res.e(BinaryOps.ADD, correction))
+        # res = res.e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, res.e(BinaryOps.ADD, correction), res)
+        # print("res: ")
+        # print(__import__('tinygrad').Tensor(res).numpy())
+        # res = res.e(BinaryOps.ADD, correction)
+        # print("res: ")
+        # print(__import__('tinygrad').Tensor(res).numpy())
         return res.cast(self.beginning_dtype)
 
 
@@ -137,9 +143,13 @@ class Sin(Function):
 
     def _mod(self, x: LazyBuffer, y: LazyBuffer) -> LazyBuffer:
         def v1(x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
-            return x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, y).cast(dtypes.uint64).cast(self.float_precision).e(BinaryOps.MUL, y),)
+            y = y.cast(self.float_precision)
+            x = x.cast(self.float_precision)
+            return x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, y).cast(dtypes.uint64).cast(self.float_precision).e(BinaryOps.MUL, y))
 
         def v2(x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
+            x = x.cast(self.float_precision)
+            y = y.cast(self.float_precision)
             q = x.e(BinaryOps.DIV, y)
             q_floor = q.cast(dtypes.uint64).cast(self.float_precision)
             diff = q.e(BinaryOps.SUB, q_floor)
