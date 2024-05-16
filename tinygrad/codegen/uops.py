@@ -15,7 +15,7 @@ class UOps(Enum):
   SINK = auto()
   DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # noqa: E702
   CONST = auto(); SPECIAL = auto() # noqa: E702
-  NOOP = auto(); GEP = auto() # noqa: E702
+  NOOP = auto(); UNMUL = auto(); GEP = auto() # noqa: E702
   # math ops
   CAST = auto(); BITCAST = auto() # noqa: E702
   ALU = auto(); WMMA = auto() # noqa: E702
@@ -52,6 +52,7 @@ class UOp:
 def uop_alu_resolve(u:UOp) -> sint:
   if u.uop is UOps.CONST: return u.arg
   elif u.uop is UOps.DEFINE_VAR: return u.arg
+  elif u.uop is UOps.SPECIAL: return u.arg[2]-1
   elif u.uop is UOps.ALU and u.arg is BinaryOps.MUL: return uop_alu_resolve(u.vin[0]) * uop_alu_resolve(u.vin[1])
   elif u.uop is UOps.ALU and u.arg is BinaryOps.ADD: return uop_alu_resolve(u.vin[0]) + uop_alu_resolve(u.vin[1])
   else: raise RuntimeError(f"ALU resolve fail @ {u.uop}")
@@ -97,7 +98,7 @@ class PatternMatcher:
     while rewritten := self.rewrite(uop): uop = rewritten
     return uop
 
-constant_folder = PatternMatcher([
+"""
   # arange loop folding (must be at the top?)
   ({"uop": UOps.PHI, "vin": ({"uop": UOps.DEFINE_ACC, "__name__": "acc", "vin": ({"uop": UOps.LOOP, "__name__": "loop"},)},
     {"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"__name__": "acc"}, {"uop": UOps.ALU, "arg": TernaryOps.WHERE, "vin":
@@ -115,6 +116,48 @@ constant_folder = PatternMatcher([
     lambda loop, acc, cmploop, val, multconst: None if loop in val.parents else
       -UOp.alu(BinaryOps.MAX, -loop.vin[1],
         -UOp.alu(BinaryOps.MAX, -val+cmploop-UOp.const(loop.dtype, 1)+(loop.vin[1]+loop.vin[0]), -loop.vin[0])).cast(multconst.dtype) * multconst),
+  # max on special can go away (TODO: special should be variable, same thing applies)
+  ({"uop": UOps.ALU, "arg": BinaryOps.MAX, "vin": [{"__name__": "c", "uop": UOps.CONST}, {"__name__": "s", "uop": UOps.SPECIAL}]},
+    lambda c,s: c if (s.arg[2]-1) <= c.arg else None),
+"""
+
+def sum_collapse(acc, val1, val2):
+  loop = acc.vin[0]
+  if loop not in val1.parents:
+    loop_range = loop.vin[1]-loop.vin[0]
+    ret = val1*loop_range.cast(val1.dtype)
+    return UOp(UOps.PHI, acc.dtype, (acc, val2))+ret
+  elif loop not in val2.parents:
+    loop_range = loop.vin[1]-loop.vin[0]
+    ret = val2*loop_range.cast(val2.dtype)
+    return UOp(UOps.PHI, acc.dtype, (acc, val1))+ret
+  else:
+    return None
+
+constant_folder = PatternMatcher([
+  # noop PHI
+  ({"uop": UOps.PHI, "vin": ({"uop": UOps.DEFINE_ACC, "__name__": "acc"}, {"__name__": "acc"})}, lambda acc: UOp.const(acc.dtype, acc.arg[0])),
+  # sum collapse to mul
+  ({"uop": UOps.PHI, "vin": ({"__name__": "acc", "uop": UOps.DEFINE_ACC},
+    {"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"__name__": "val1"}, {"__name__": "val2"}]})}, sum_collapse),
+  # arange loop folding
+  ({"uop": UOps.ALU, "arg": TernaryOps.WHERE, "vin": ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": ({"__name__": "cmploop", "uop": UOps.CONST},
+        {"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"__name__": "val"}, {"uop": UOps.LOOP, "__name__": "loop"}]})},
+          {"__name__": "multconst", "uop": UOps.CONST}, {"uop": UOps.CONST, "arg": 0})},
+    lambda loop, cmploop, val, multconst: None if loop in val.parents else
+      UOp(UOps.UNMUL, multconst.dtype, (((val+loop.vin[1])-UOp.alu(BinaryOps.MAX, val+loop.vin[0], cmploop+UOp.const(loop.dtype, 1))) \
+                                          .cast(multconst.dtype) * multconst, loop.vin[1]-loop.vin[0]))),
+  #({"uop": UOps.ALU, "arg": TernaryOps.WHERE, "vin": ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": (
+  #      {"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin":
+  #       [{"__name__": "val"}, {"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{"__name__": "mval"}, {"uop": UOps.LOOP, "__name__": "loop"}]}]},
+  #       {"__name__": "cmploop", "uop": UOps.CONST})}, {"__name__": "multconst", "uop": UOps.CONST}, {"uop": UOps.CONST, "arg": 0})},
+  #  lambda loop, cmploop, val, mval, multconst:
+  #    UOp(UOps.UNMUL, multconst.dtype, (((val+mval*loop.vin[1])-UOp.alu(BinaryOps.MAX, val+mval*loop.vin[0], cmploop+UOp.const(loop.dtype, 1))) \
+  #                                      .cast(multconst.dtype) * multconst, loop.vin[1]-loop.vin[0]))),
+  # UNMUL can't survive
+  ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{"uop": UOps.CONST, "__name__": "c1"},
+                                                   {"uop": UOps.UNMUL, "vin": [{"uop": UOps.CONST, "__name__": "c2"}, {"__name__": "v"}]}]},
+                                                   lambda c1,c2,v: v if c1.arg == c2.arg else None),
   # max on special can go away (TODO: special should be variable, same thing applies)
   ({"uop": UOps.ALU, "arg": BinaryOps.MAX, "vin": [{"__name__": "c", "uop": UOps.CONST}, {"__name__": "s", "uop": UOps.SPECIAL}]},
     lambda c,s: c if (s.arg[2]-1) <= c.arg else None),
@@ -182,11 +225,6 @@ constant_folder = PatternMatcher([
   ({"__name__": "root", "uop": UOps.CAST, "vin":
     tuple({"uop": UOps.PHI, "vin": ({"uop": UOps.GEP, "vin": ({"__name__": "val"},), "arg": i}, {"__name__": f"v{i}"})} for i in range(2))},
     lambda root, val, v0, v1: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1))))),
-  # sum collapse to mul
-  ({"uop": UOps.PHI, "vin": ({"__name__": "acc", "uop": UOps.DEFINE_ACC, "vin": (
-    {"uop": UOps.LOOP, "__name__": "loop", "vin": ({"__name__": "start"}, {"__name__": "end"})})},
-    {"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"__name__": "acc"}, {"__name__": "val"}]})},
-    lambda acc, start, end, val, loop: None if loop in val.parents else val*((end-start).cast(val.dtype))),
   # x*y + x*z -> x*(y+z)
   # NOTE: you need two rules here because the matcher can't backtrack
   ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": ({"__name__": "x"}, {"__name__": "y"})},
@@ -253,9 +291,7 @@ class UOpGraph:
         if up != u: changed += 1
         up.vin = tuple(rewrite(x) for x in up.vin)
         # replace with cached nodes
-        if found:=self.nodes.get(key:=up.tuple()):
-          if found != up: changed += 1
-          return found
+        if found:=self.nodes.get(key:=up.tuple()): return found
         else: self.nodes[key] = up
         return up
       sink = rewrite(sink)
