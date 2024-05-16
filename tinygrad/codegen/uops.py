@@ -37,6 +37,7 @@ class UOp:
   def __repr__(self):
     return f"{str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.uop for x in self.vin]):32s} {self.arg}"
   def cast(self, dtype): return UOp(UOps.CAST, dtype, (self,))
+  def __neg__(self): return UOp.alu(UnaryOps.NEG, self)
   def __add__(self, x): return UOp.alu(BinaryOps.ADD, self, x)
   def __sub__(self, x): return UOp.alu(BinaryOps.SUB, self, x)
   def __mul__(self, x): return UOp.alu(BinaryOps.MUL, self, x)
@@ -100,11 +101,19 @@ constant_folder = PatternMatcher([
   # arange loop folding (must be at the top?)
   ({"uop": UOps.PHI, "vin": ({"uop": UOps.DEFINE_ACC, "__name__": "acc", "vin": ({"uop": UOps.LOOP, "__name__": "loop"},)},
     {"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"__name__": "acc"}, {"uop": UOps.ALU, "arg": TernaryOps.WHERE, "vin":
-      ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": ({"__name__": "loopend", "uop": UOps.CONST},
-        {"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"uop": UOps.LOOP, "__name__": "loop"}, {"__name__": "val"}]})},
+      ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": ({"__name__": "cmploop", "uop": UOps.CONST},
+        {"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"__name__": "val"}, {"uop": UOps.LOOP, "__name__": "loop"}]})},
           {"__name__": "multconst", "uop": UOps.CONST}, {"uop": UOps.CONST, "arg": 0})}]})},
-      lambda loop, acc, loopend, val, multconst: None if loop in val.parents else
-        (((val+loop.vin[1])-(loopend+UOp.const(loop.dtype, 1))).cast(multconst.dtype) * multconst)),
+      lambda loop, acc, cmploop, val, multconst: None if loop in val.parents else
+        (((val+loop.vin[1])-UOp.alu(BinaryOps.MAX, val+loop.vin[0], cmploop+UOp.const(loop.dtype, 1))).cast(multconst.dtype) * multconst)),
+  ({"uop": UOps.PHI, "vin": ({"uop": UOps.DEFINE_ACC, "__name__": "acc", "vin": ({"uop": UOps.LOOP, "__name__": "loop"},)},
+    {"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"__name__": "acc"}, {"uop": UOps.ALU, "arg": TernaryOps.WHERE, "vin":
+      ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": (
+        {"uop": UOps.ALU, "arg": BinaryOps.SUB, "vin": ({"__name__": "val"}, {"uop": UOps.LOOP, "__name__": "loop"})},
+        {"__name__": "cmploop", "uop": UOps.CONST})},
+          {"__name__": "multconst", "uop": UOps.CONST}, {"uop": UOps.CONST, "arg": 0})}]})},
+      lambda loop, acc, cmploop, val, multconst: None if loop in val.parents else
+        ((UOp.alu(BinaryOps.MAX, val-loop.vin[1], cmploop)-(val-loop.vin[0])).cast(multconst.dtype) * multconst)),
   # const rules
   ({"__name__": "root", "uop": UOps.GEP, "vin": ({"__name__": "c", "uop": UOps.CONST},)}, lambda root, c: UOp.const(root.dtype, c.arg)),
   ({"__name__": "root", "uop": UOps.CAST, "vin": {"__name__": "c", "uop": UOps.CONST}}, lambda root, c: UOp.const(root.dtype, c.arg)),
@@ -118,7 +127,7 @@ constant_folder = PatternMatcher([
   ({"uop": UOps.ALU, "arg": BinaryOps.MAX, "dtype": dtypes.int, "vin": [{"__name__": "x"}, {"uop": UOps.CONST, "arg": -2147483648}]}, lambda x: x),
   # x+-y -> x-y
   ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": ({"__name__": "x"}, {"__name__": "my", "uop": UOps.ALU, "arg": UnaryOps.NEG})},
-    lambda x, my: UOp(UOps.ALU, x.dtype, (x, my.vin[0]), BinaryOps.SUB)),
+    lambda x, my: x-my.vin[0]),
   # -1*x -> -x
   ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{"__name__": "x"}, {"uop": UOps.CONST, "arg": -1}]},
     lambda x: UOp(UOps.ALU, x.dtype, (x,), UnaryOps.NEG)),
@@ -148,6 +157,9 @@ constant_folder = PatternMatcher([
   ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"uop": UOps.ALU, "arg": BinaryOps.ADD,
                      "vin": [{"__name__": "x"}, {"__name__": "c1", "uop": UOps.CONST}]}, {"__name__": "c2", "uop": UOps.CONST}]},
      lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, [c1.arg, c2.arg]))),
+  ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"uop": UOps.ALU, "arg": BinaryOps.SUB,
+                     "vin": ({"__name__": "x"}, {"__name__": "c1", "uop": UOps.CONST})}, {"__name__": "c2", "uop": UOps.CONST}]},
+     lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.SUB, x.dtype, [c2.arg, c1.arg]))),
   # TODO: can do the invert of this (flip alt/load) when we fix double ops
   ({"uop": UOps.STORE, "vin": ({"__name__": "buf"}, {"__name__": "idx"}, {"uop": UOps.ALU, "arg": TernaryOps.WHERE,
                        "vin": ({"__name__": "gate"}, {"__name__": "alt"}, {"uop": UOps.LOAD, "vin": ({"__name__": "buf"}, {"__name__": "idx"})})})},
@@ -170,16 +182,15 @@ constant_folder = PatternMatcher([
   ({"uop": UOps.PHI, "vin": ({"__name__": "acc", "uop": UOps.DEFINE_ACC, "vin": (
     {"uop": UOps.LOOP, "__name__": "loop", "vin": ({"__name__": "start"}, {"__name__": "end"})})},
     {"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"__name__": "acc"}, {"__name__": "val"}]})},
-    lambda acc, start, end, val, loop: None if loop in val.parents else UOp(UOps.ALU, val.dtype,
-                                     (UOp(UOps.CAST, val.dtype, (UOp(UOps.ALU, start.dtype, (end, start), BinaryOps.SUB),)), val), BinaryOps.MUL)),
+    lambda acc, start, end, val, loop: None if loop in val.parents else val*((end-start).cast(val.dtype))),
   # x*y + x*z -> x*(y+z)
   # NOTE: you need two rules here because the matcher can't backtrack
   ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": ({"__name__": "x"}, {"__name__": "y"})},
                                                    {"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{"__name__": "z"}, {"__name__": "x"}]})},
-                                            lambda x,y,z: UOp(UOps.ALU, x.dtype, (x, UOp(UOps.ALU, x.dtype, (y,z), BinaryOps.ADD)), BinaryOps.MUL)),
+                                            lambda x,y,z: x*(y+z)),
   ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": ({"__name__": "y"}, {"__name__": "x"})},
                                                    {"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{"__name__": "z"}, {"__name__": "x"}]})},
-                                            lambda x,y,z: UOp(UOps.ALU, x.dtype, (x, UOp(UOps.ALU, x.dtype, (y,z), BinaryOps.ADD)), BinaryOps.MUL)),
+                                            lambda x,y,z: x*(y+z)),
   # NEG/CMPLT -> CMPLT
   ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": ({"uop": UOps.ALU, "arg": UnaryOps.NEG, "vin": ({"__name__": "x"},)},
                                                      {"__name__": "c", "uop": UOps.CONST, "dtype": dtypes.int})},

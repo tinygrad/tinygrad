@@ -164,11 +164,9 @@ class TestLinearizer(unittest.TestCase):
     lin = Linearizer(ast)
     lin.linearize()
 
-    a_bufs = [u.uop for u in lin.uops.uops[-2].vin[0].vin]
-    b_bufs = [u.uop for u in lin.uops.uops[-2].vin[1].vin]
-
+    assert len(lin.uops.uops) <= 7, "too many uops"
+    a_bufs = [u.uop for u in lin.uops.uops[-1].vin[2].vin]
     assert a_bufs == [UOps.LOAD, UOps.CONST]
-    assert b_bufs == [] # [UOps.CONST, UOps.CONST] will be folded
 
   def test_upcast_cse(self):
     # when upcasting, within a subtree, there may be common expressions.
