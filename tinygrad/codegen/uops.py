@@ -253,7 +253,9 @@ class UOpGraph:
         if up != u: changed += 1
         up.vin = tuple(rewrite(x) for x in up.vin)
         # replace with cached nodes
-        if found:=self.nodes.get(key:=up.tuple()): return found
+        if found:=self.nodes.get(key:=up.tuple()):
+          if found != up: changed += 1
+          return found
         else: self.nodes[key] = up
         return up
       sink = rewrite(sink)
