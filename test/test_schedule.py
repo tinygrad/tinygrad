@@ -836,7 +836,7 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.full((4, 4), 1.).contiguous().realize()
     b = Tensor.full((4, 4), 2.).contiguous().realize()
     c = (a + b).pad(((1, 1), (1, 1)))
-    d = c.half().expand((2, 6, 6)) * 4
+    d = c.cast(dtypes.int).expand((2, 6, 6)) * 4
     run_schedule(check_schedule(d, 2))
     c_np = np.pad((np.full((4, 4), 2., dtype=np.float32) + np.full((4, 4), 1., dtype=np.float32)), ((1, 1), (1, 1)), constant_values=0.0)
     np.testing.assert_equal(d.numpy(), np.broadcast_to(c_np.astype(np.half), (2, *c_np.shape)) * 4)
