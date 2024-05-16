@@ -210,10 +210,14 @@ class TestLinearizer(unittest.TestCase):
     output_shape = tuple([1 if i == axis else x for i,x in enumerate(list(shape))])
     load = MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker.from_shape(shape))
     store = MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape(output_shape))
+    const = ConstBuffer(val=1/64, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1,1)))
     ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.SUB, src=(
-      LazyOp(op=BufferOps.LOAD, src=(), arg=load), LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=load),)
-      , arg=((axis,), dtypes.float))), arg=None),), arg=((axis,), dtypes.float)),), arg=store)
+      LazyOp(op=BufferOps.LOAD, src=(), arg=load), LazyOp(op=BinaryOps.MUL, src=(
+        LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=load),), arg=((axis,), dtypes.float)),
+        LazyOp(op=BufferOps.CONST, src=(), arg=const),
+        )), ), arg=None),), arg=((axis,), dtypes.float)),), arg=store)
     k = Linearizer(ast)
+    k.hand_coded_optimizations()
     k.linearize()
     k.to_program()
     def get_recursive_children(x:UOp): return set.union(set(x.vin), *[get_recursive_children(v) for v in x.vin])
