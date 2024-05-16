@@ -1,4 +1,5 @@
 import ctypes, ctypes.util, struct, platform, pathlib, re, time, os, builtins, atexit
+from extra.mockgpu.nv.nvdriver import NVDriver
 from extra.mockgpu.amd.amddriver import AMDDriver
 from tinygrad.helpers import from_mv, to_mv
 start = time.perf_counter()
@@ -51,7 +52,7 @@ def install_hook(c_function, python_function):
   def __restore(): libc.memcpy(ioctl_address.contents, original_bc, len(tramp))
   atexit.register(__restore)
 
-drivers = [AMDDriver()]
+drivers = [AMDDriver(), NVDriver()]
 tracked_fds = {}
 
 @ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_ulong)
