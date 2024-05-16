@@ -419,7 +419,7 @@ def train_unet3d():
 
   def lr_warm_up(optim, init_lr, lr, current_epoch, warmup_epochs):
     scale = current_epoch / warmup_epochs
-    optim.lr.assign(Tensor([init_lr + (lr - init_lr) * scale], device=GPUS))
+    optim.lr.assign(Tensor([init_lr + (lr - init_lr) * scale], requires_grad=False, device=GPUS))
 
   def save_checkpoint(state_dict, fn):
     if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
@@ -427,25 +427,25 @@ def train_unet3d():
     safe_save(state_dict, fn)
 
   @TinyJit
+  @Tensor.train()
   def train_step(model, x, y):
-    with Tensor.train():
-      optim.zero_grad()
+    optim.zero_grad()
 
-      y_hat = model(x)
-      loss = dice_ce_loss(y_hat, y)
+    y_hat = model(x)
+    loss = dice_ce_loss(y_hat, y)
 
-      loss.backward()
-      optim.step()
-      return loss.realize()
+    loss.backward()
+    optim.step()
+    return loss.realize()
   
+  @Tensor.train(mode=False)
   @Tensor.inference_mode()
   def eval_step(model, x, y):
-    with Tensor.train(mode=False):
-      y_hat, y = sliding_window_inference(model, x, y, gpus=GPUS)
-      y_hat, y = Tensor(y_hat), Tensor(y, requires_grad=False)
-      loss = dice_ce_loss(y_hat, y)
-      score = dice_score(y_hat, y)
-      return loss.realize(), score.realize()
+    y_hat, y = sliding_window_inference(model, x, y, gpus=GPUS)
+    y_hat, y = Tensor(y_hat), Tensor(y, requires_grad=False)
+    loss = dice_ce_loss(y_hat, y)
+    score = dice_score(y_hat, y)
+    return loss.realize(), score.realize()
   
   if WANDB: wandb.init(config=config, project=PROJ_NAME)
 
@@ -484,9 +484,8 @@ def train_unet3d():
         step_times.append(cl - st)
 
       tqdm.write(
-        f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(pt - st) * 1000.0:7.2f} ms python, {(dt - st) * 1000.0:6.2f} ms fetch data,"
-        f"{loss:5.3f} loss, {optim.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used,"
-        f"{GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS"
+        f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(pt - st) * 1000.0:7.2f} ms python, {(dt - st) * 1000.0:6.2f} ms fetch data, "
+        f"{loss:5.3f} loss, {optim.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS"
       )
 
       if WANDB:
