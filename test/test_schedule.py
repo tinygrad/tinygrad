@@ -441,6 +441,12 @@ class TestSchedule(unittest.TestCase):
     out = x.permute(0,2,3,1).contiguous()
     check_schedule(out, 2, filter_loadops=False)
 
+  def test_fold_with_contiguous(self):
+    a = Tensor.randn(16, 16, 16).realize()
+    b = Tensor.randn(16, 16).realize()
+    c = (a.sum(2).contiguous() + b).contiguous()
+    check_schedule(c, 2)
+
   def test_double_from(self):
     x = Tensor([1,2,3,4])
     out = x.to('npy')

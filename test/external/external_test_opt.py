@@ -3,7 +3,7 @@ import gc, unittest
 import numpy as np
 import torch
 
-from tinygrad import nn, GlobalCounters, Tensor, Device
+from tinygrad import GlobalCounters, Tensor, Device
 from tinygrad.helpers import getenv
 from tinygrad.nn.state import get_parameters
 from tinygrad.engine.realize import capturing
@@ -220,13 +220,6 @@ class TestOpt(unittest.TestCase):
       cache_len = cache.count
     np.testing.assert_allclose(c.numpy(), d.numpy().transpose(1,0), rtol=1e-3, atol=1e-5)
     assert cache_len == 1, "reduceop was rerun!"
-
-  def test_fold_with_contiguous(self):
-    a = Tensor.randn(16, 16, 16)
-    b = Tensor.randn(16, 16)
-    with CLCache(2):
-      c = (a.sum(2).contiguous() + b).contiguous()
-      c.realize()
 
   def test_expand_reduce_is_folded_on_same_axis(self):
     for axis in [0, 1]:
