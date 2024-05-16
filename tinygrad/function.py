@@ -73,8 +73,10 @@ class Sin(Function):
         oneminussinabs = sinabs.const(1).e(BinaryOps.SUB, sinabs)
         cf1 = x.const(-0.0015)
         cf2 = x.const(-0.004)
+        cf3 = x.const(-0.015)
         # Choose correction factor based on x magnitude
         cf = x.e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, cf1, cf2)
+        cf = x.e(BinaryOps.CMPLT, x.const(13e13)).e(TernaryOps.WHERE, cf, cf3)
         # correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.008).e(BinaryOps.MUL, cossign))
         # correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.016).e(BinaryOps.MUL, cossign))
         # correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.0015).e(BinaryOps.MUL, cossign))
