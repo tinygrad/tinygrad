@@ -133,7 +133,7 @@ class TestSchedule(unittest.TestCase):
     d = a+b
     check_schedule(d, 0, [c])
 
-  # failing in old lazy
+  # failing in new lazy
   @unittest.expectedFailure
   def test_cache_binaryop_reshaped(self):
     a = Tensor.empty(10)
