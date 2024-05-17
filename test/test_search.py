@@ -77,6 +77,8 @@ class TestBEAM(unittest.TestCase):
     bufs = bufs_from_lin(lin)
     best_lin = beam_search(lin, bufs, 3)
     assert best_lin
+    tm = time_linearizer(best_lin, bufs, allow_test_size=False, cnt=2, disable_cache=False)
+    assert tm
 
 if __name__ == '__main__':
   unittest.main()
