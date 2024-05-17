@@ -5,7 +5,7 @@ from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op
 from tinygrad.dtype import dtypes, DType, PtrDType, ConstType
 from tinygrad.codegen.uops import UOpGraph, PatternMatcher
-from tinygrad.renderer import Renderer
+from tinygrad.renderer import Renderer, TensorCore
 
 def render_val(x, dtype):
   if dtypes.is_float(dtype):
@@ -48,11 +48,11 @@ def optimize_gated_loads(uops: UOpGraph):
 class PTXRenderer(Renderer):
   device = "CUDA"
   suffix = "PTX"
-  global_max=[65535, 65535, 2147483647]
-  local_max=[64, 1024, 1024]
-  shared_max=49152
-  has_tensor_cores = False
-  def __init__(self, arch:str): self.has_tensor_cores=int(arch[3:]) >= 80
+  global_max = [65535, 65535, 2147483647]
+  local_max = [64, 1024, 1024]
+  shared_max = 49152
+  tensor_cores = [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(0,2)], thread_local_sizes=[[2,2,2],[2,2],[2,2]], thread_local_aliases=[ [[0],[0],[5],[-2],[0],[-1,1,2,-3],[3,4]], [[3],[4],[0],[0],[5],[-1,1,2,-2],[0]], [[-1],[1],[5],[-2],[2],[0],[3,4]] ], dtype_in=di, dtype_out=do) for (di, do) in ([(dtypes.half, dtypes.float)])] # noqa: E501
+  def __init__(self, arch:str): self.tensor_cores = PTXRenderer.tensor_cores if int(arch[3:]) >= 80 else []
 
   # language options
   kernel_prefix = """.version VERSION

@@ -3,7 +3,7 @@ import numpy as np
 import unittest
 from dataclasses import replace
 
-from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError, tensor_cores
+from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError
 from tinygrad.codegen.linearizer import Linearizer, UOp, UOps, expand_node, expand_idxs
 from tinygrad.device import Device, Buffer
 from tinygrad.ops import BinaryOps, BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, TernaryOps, ReduceOps, UnaryOps
@@ -261,16 +261,16 @@ class TestLinearizer(unittest.TestCase):
       helper_arg_acc_dtype(d.conv2d(w, acc_dtype=acc_dtype), expected_dtype)
 
   def test_tensor_cores(self):
-    if not Device[Device.DEFAULT].renderer.has_tensor_cores:
+    if not Device[Device.DEFAULT].renderer.tensor_cores:
       self.skipTest("device doesn't have tensor cores")
-    for tc in tensor_cores[Device[Device.DEFAULT].renderer.device]:
+    for tc in Device[Device.DEFAULT].renderer.tensor_cores:
       if getenv("EMULATE_CUDA") and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
       helper_tc_allclose(tc.dims[0], tc.dims[1], tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
 
   def test_tensor_cores_padded(self):
-    if not Device[Device.DEFAULT].renderer.has_tensor_cores:
+    if not Device[Device.DEFAULT].renderer.tensor_cores:
       self.skipTest("device doesn't have tensor cores")
-    for tc in tensor_cores[Device[Device.DEFAULT].renderer.device]:
+    for tc in Device[Device.DEFAULT].renderer.tensor_cores:
       if getenv("EMULATE_CUDA") and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
       pad = 1
 
@@ -294,9 +294,9 @@ class TestLinearizer(unittest.TestCase):
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI is really slow here")
   def test_tensor_cores_multi_reduce(self):
-    if not Device[Device.DEFAULT].renderer.has_tensor_cores:
+    if not Device[Device.DEFAULT].renderer.tensor_cores:
       self.skipTest("device doesn't have tensor cores")
-    for tc in tensor_cores[Device[Device.DEFAULT].renderer.device]:
+    for tc in Device[Device.DEFAULT].renderer.tensor_cores:
       if getenv("EMULATE_CUDA") and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
       # this will be a M=G16, N=G32, M=G16, M=G16, K=R16, K=R16, K=R16 with 9 choices of TC MNK axes
       golden_result = None
@@ -786,10 +786,8 @@ class TestKernelOpts(unittest.TestCase):
     ])
 
   def test_invalid_tensor_core_extra_opts(self):
-    if not Device[Device.DEFAULT].renderer.has_tensor_cores:
+    if not Device[Device.DEFAULT].renderer.tensor_cores:
       self.skipTest("device doesn't have tensor cores")
-    if Device.DEFAULT not in tensor_cores:
-      self.skipTest("No tensor cores for device")
 
     N = 128
     Tensor.manual_seed(1552)
@@ -807,10 +805,8 @@ class TestKernelOpts(unittest.TestCase):
         assert k.apply_tensor_cores(use_tensor_cores=1, extra_opts=x), "no valid tensor core" # for METAL in runners
 
   def test_buf_index_not_found_tensor_core(self):
-    if not Device[Device.DEFAULT].renderer.has_tensor_cores:
+    if not Device[Device.DEFAULT].renderer.tensor_cores:
       self.skipTest("device doesn't have tensor cores")
-    if Device.DEFAULT not in tensor_cores:
-      self.skipTest("No tensor cores for device")
 
     ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BinaryOps.CMPEQ, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1243, 256), strides=(0, 1), offset=0, mask=None, contiguous=False),)))), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1243, 256), strides=(1, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=dtypes.float), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=3, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1243, 256), strides=(1, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=(0,)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 256), strides=(0, 1), offset=0, mask=None, contiguous=True),))))  # noqa: E501
     k = Linearizer(ast, opts=Device[Device.DEFAULT].renderer)
@@ -818,14 +814,12 @@ class TestKernelOpts(unittest.TestCase):
       k.apply_opt(Opt(OptOps.TC, 0, 1))
 
   def test_tensor_core_opts(self):
-    if not Device[Device.DEFAULT].renderer.has_tensor_cores:
+    if not Device[Device.DEFAULT].renderer.tensor_cores:
       self.skipTest("device doesn't have tensor cores")
-    if Device.DEFAULT not in tensor_cores:
-      self.skipTest("No tensor cores for device")
 
     N = 128
     Tensor.manual_seed(1552)
-    for tc in tensor_cores[Device[Device.DEFAULT].renderer.device]:
+    for tc in Device[Device.DEFAULT].renderer.tensor_cores:
       # bf16 buffer returns float32 numpy outputs so test would fail. testing opt with half suffices.
       if tc.dtype_in == dtypes.bfloat16: continue
       a, b = Tensor.rand(N, N, dtype=tc.dtype_in), Tensor.rand(N, N, dtype=tc.dtype_in)
