@@ -99,7 +99,11 @@ class PatternMatcher:
     return None
 
   def recursive_rewrite(self, uop:UOp) -> UOp:
-    while rewritten := self.rewrite(uop): uop = rewritten
+    run_cnt = 0
+    while (rewritten := self.rewrite(uop)):
+      assert run_cnt < 100, f"recursive_rewrite looped {uop} <--> {rewritten}"
+      uop = rewritten
+      run_cnt += 1
     return uop
 
 def sum_collapse(phi_input, loop, val1, val2):
