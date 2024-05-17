@@ -117,7 +117,7 @@ def sample(logits: Tensor, temp: float, k: int, p: float, af: float, ap: float):
   # softmax
   t = (logits / temp).softmax()
 
-  # set nan to -inf
+  # set nan to 0
   t = (t != t).where(0, t)
 
   # top k
@@ -132,8 +132,8 @@ def sample(logits: Tensor, temp: float, k: int, p: float, af: float, ap: float):
   # approximate top p
   # because we are already limited to top k elements we can do top p "without sorting"
   output_cumsum = output[::-1]._cumsum()[::-1] + t.sum()
-  output = (output_cumsum >= (1 - p)) * output
-  output_indices = (output_cumsum >= (1 - p)) * output_indices
+  output = (output_cumsum >= p) * output
+  output_indices = (output_cumsum >= p) * output_indices
 
   # sample
   output_idx = output.multinomial()

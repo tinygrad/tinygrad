@@ -4,6 +4,7 @@ import json, argparse
 import tiktoken
 from tiktoken.load import load_tiktoken_bpe
 from extra.models.llama import Transformer, convert_from_huggingface, fix_bf16
+from tinygrad.helpers import GlobalCounters
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict
 from tinygrad import Tensor, dtypes, nn, Context, Device
 
@@ -196,19 +197,27 @@ if __name__ == "__main__":
   model = build_transformer(args.model, model_size=args.size, quantize=args.quantize, device=device)
 
   prompt = [tokenizer.bos_id] + encode_message("system", "You are a helpful assistant.")
-  model(Tensor([prompt], device=device), 0, TEMPERATURE, top_k=TOP_K, top_p=TOP_P, alpha_f=ALPHA_F, alpha_p=ALPHA_P).realize()
+  GlobalCounters.reset()
+  model.forward(Tensor([[prompt[0]]], device=device), 0, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P).realize()
+  start_pos = 1
+  for tok in prompt[1:]:
+    GlobalCounters.reset()
+    model(Tensor([[tok]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P).realize()
+    start_pos += 1
 
-  start_pos, toks, outputted = len(prompt), prompt, len(tokenizer.decode(prompt))
+  toks, outputted = prompt, len(tokenizer.decode(prompt))
   while True:
     toks += encode_message("user", input("Q: ")) + encode_role("assistant")
 
     for tok in toks[start_pos:-1]:
+      GlobalCounters.reset()
       model(Tensor([[tok]], device=device), start_pos, TEMPERATURE).realize()
       start_pos += 1
 
     outputted = len(tokenizer.decode(toks))
     while True:
-      tok = model(Tensor([toks[start_pos:]], device=device), start_pos, TEMPERATURE, top_k=TOP_K, top_p=TOP_P, alpha_f=ALPHA_F, alpha_p=ALPHA_P).item()
+      GlobalCounters.reset()
+      tok = model(Tensor([toks[start_pos:]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P).item()
       start_pos = len(toks)
       toks.append(tok)
       if tok in tokenizer.stop_tokens:
