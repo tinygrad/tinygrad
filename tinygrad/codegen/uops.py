@@ -126,12 +126,16 @@ constant_folder = PatternMatcher([
       [{"__name__": "idx"}, {"uop": UOps.ALU, "arg": BinaryOps.MUL,
         "vin": [{"__name__": "mval", "uop": UOps.CONST}, {"uop": UOps.LOOP, "vin": ({"__name__": "loop_start"}, {"__name__": "loop_end"})}]}]},
       {"__name__": "compval", "uop": UOps.CONST})}, {"__name__": "multconst", "uop": UOps.CONST}, {"uop": UOps.CONST, "arg": 0})}, loop_collapse),
-  # sum collapse to mul + deal with UNMUL
+  # sum collapse to mul
   ({"uop": UOps.PHI, "vin": ({"__name__": "acc", "uop": UOps.DEFINE_ACC, "vin": ({"uop": UOps.LOOP, "__name__": "loop"},)},
       {"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"__name__": "val1"}, {"__name__": "val2"}]})}, sum_collapse),
+  # deal with UNMUL
   ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{"uop": UOps.CONST, "__name__": "c1"},
                                                    {"uop": UOps.UNMUL, "vin": [{"uop": UOps.CONST, "__name__": "c2"}, {"__name__": "v"}]}]},
                                                    lambda c1,c2,v: v if c1.arg == c2.arg else None),
+  ({"uop": UOps.UNMUL, "vin": ({"uop": UOps.CONST, "__name__": "zero", "arg": 0}, {})}, lambda zero: zero),
+  ({"__name__": "root", "uop": UOps.CAST, "vin": ({"uop": UOps.UNMUL, "__name__": "unmul"},)},
+    lambda root,unmul: UOp(UOps.UNMUL, root.dtype, (unmul.vin[0].cast(root.dtype), unmul.vin[1]))),
   # max on special can go away (TODO: special should be variable, same thing applies)
   ({"uop": UOps.ALU, "arg": BinaryOps.MAX, "vin": [{"__name__": "c", "uop": UOps.CONST}, {"__name__": "s", "uop": UOps.SPECIAL}]},
     lambda c,s: c if (s.arg[2]-1) <= c.arg else None),
@@ -261,6 +265,7 @@ class UOpGraph:
         up = pm.recursive_rewrite(u)
         if up != u: changed += 1
         up.vin = tuple(rewrite(x) for x in up.vin)
+        if hasattr(up, "parents"): del up.parents
         # replace with cached nodes
         if found:=self.nodes.get(key:=up.tuple()): return found
         else: self.nodes[key] = up
