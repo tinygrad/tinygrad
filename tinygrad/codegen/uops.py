@@ -102,12 +102,12 @@ class PatternMatcher:
     while rewritten := self.rewrite(uop): uop = rewritten
     return uop
 
-def sum_collapse(acc, loop, val1, val2):
+def sum_collapse(phi_input, loop, val1, val2):
   for v1,v2 in [(val1, val2), (val2, val1)]:
     if loop not in v1.parents:
       loop_range = loop.vin[1]-loop.vin[0]
       ret = v1*loop_range.cast(v1.dtype)
-      return UOp(UOps.PHI, acc.dtype, (acc, v2))+ret
+      return UOp(UOps.PHI, phi_input.dtype, (phi_input, v2))+ret
   return None
 
 def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst):
@@ -126,8 +126,11 @@ constant_folder = PatternMatcher([
       [{"__name__": "idx"}, {"uop": UOps.ALU, "arg": BinaryOps.MUL,
         "vin": [{"__name__": "mval", "uop": UOps.CONST}, {"uop": UOps.LOOP, "vin": ({"__name__": "loop_start"}, {"__name__": "loop_end"})}]}]},
       {"__name__": "compval", "uop": UOps.CONST})}, {"__name__": "multconst", "uop": UOps.CONST}, {"uop": UOps.CONST, "arg": 0})}, loop_collapse),
-  # sum collapse to mul
-  ({"uop": UOps.PHI, "vin": ({"__name__": "acc", "uop": UOps.DEFINE_ACC, "vin": ({"uop": UOps.LOOP, "__name__": "loop"},)},
+  # sum collapse to mul (with possible GEP)
+  ({"uop": UOps.PHI, "vin": ({"__name__": "phi_input", "uop": UOps.DEFINE_ACC, "vin": ({"uop": UOps.LOOP, "__name__": "loop"},)},
+      {"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"__name__": "val1"}, {"__name__": "val2"}]})}, sum_collapse),
+  ({"uop": UOps.PHI, "vin": ({"__name__": "phi_input", "uop": UOps.GEP,
+                              "vin": ({"uop": UOps.DEFINE_ACC, "vin":({"uop": UOps.LOOP, "__name__": "loop"},)},)},
       {"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"__name__": "val1"}, {"__name__": "val2"}]})}, sum_collapse),
   # deal with UNMUL
   ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{"uop": UOps.CONST, "__name__": "c1"},
