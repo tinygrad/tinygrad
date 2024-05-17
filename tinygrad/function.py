@@ -82,7 +82,7 @@ class Sin(Function):
         # res = self._sin(x)
 
         cf1 = x.const(-0.002)
-        cf2 = x.const(-0.007)
+        cf2 = x.const(-0.0075)
         cf3 = x.const(-0.05)
         cf4 = x.const(-0.05)
         # Choose correction factor based on x magnitude
