@@ -15,8 +15,6 @@ def render_val(x, dtype):
   return str(int(x)) + ("U" if dtypes.is_unsigned(dtype) else "")
 
 def ptr_ar(root, uops):
-  assert root.arg in {'.shared', '.global', None}
-  if root.arg is None: root.arg = '.shared' if root.vin[0].uop is UOps.DEFINE_LOCAL else '.global'  # move this to the argL
   val = uops.add(UOps.CONST, dtypes.int, tuple(), arg=root.vin[0].dtype.itemsize, insert_before=uops.uops.index(root))
   if root.vin[1].uop is UOps.ALU and root.vin[1].arg in [BinaryOps.ADD, BinaryOps.SUB] and root.vin[1].vin[1].uop is UOps.CONST:
     offset = uops.add(UOps.ALU, dtypes.int, (root.vin[1].vin[0], val), arg=BinaryOps.MUL, insert_before=uops.uops.index(root))
@@ -199,11 +197,12 @@ class PTXRenderer(Renderer):
         kk(f"{r_label[vin[0]]}:")
       elif uop is UOps.STORE:
         assert vin[0].dtype is not None and vin[1].dtype is not None and vin[2].dtype is not None
+        mem_type = '.shared' if any(x.uop is UOps.DEFINE_LOCAL for x in vin[0].parents) else '.global'
         if vin[2].dtype.count > 1:
           kk((f"@{r[vin[3]]} " if len(vin)>3 else "") + \
-              f"st{u.arg}.v{vin[2].dtype.count}.{self.mem_type(vin[2].dtype.scalar())} [{r[vin[0]]}+{vin[1].arg}], {{{', '.join(r[vin[2]])}}};")
+              f"st{mem_type}.v{vin[2].dtype.count}.{self.mem_type(vin[2].dtype.scalar())} [{r[vin[0]]}+{vin[1].arg}], {{{', '.join(r[vin[2]])}}};")
         else:
-          kk(*self.render_store(r[vin[0]], r[vin[2]], vin[2].dtype, gate=r[vin[3]] if len(vin)>3 else None, ss=u.arg, offset=vin[1].arg))
+          kk(*self.render_store(r[vin[0]], r[vin[2]], vin[2].dtype, gate=r[vin[3]] if len(vin)>3 else None, ss=mem_type, offset=vin[1].arg))
       else:
         assert dtype is not None, f"None dtype for uop {uop}"
         if uop is UOps.LOOP: kk(*self.render_loop(ssa('ridx', u), r[vin[0]], ssa_label('loop', u)))
@@ -230,15 +229,16 @@ class PTXRenderer(Renderer):
         elif uop is UOps.GEP: r[u] = r[vin[0]][u.arg]
         elif uop is UOps.LOAD:
           assert vin[1].dtype is not None
+          mem_type = '.shared' if any(x.uop is UOps.DEFINE_LOCAL for x in vin[0].parents) else '.global'
           if dtype.count > 1:
             r[u] = [ssa('val', dtype=self.types[dtype.scalar()]) for _ in range(dtype.count)]
             if(len(vin)>3):
               for v in r[u]: kk(f"mov.{self.mem_type(dtype.scalar())} {v}, {render_val(0, dtype.scalar())};")
             kk((f"@{r[vin[2]]}"if len(vin) > 3 else "")
-              + f" ld{u.arg}.v{dtype.count}.{self.mem_type(dtype.scalar())} {{{', '.join(r[u])}}}, [{r[vin[0]]}+{vin[1].arg}];")
+              + f" ld{mem_type}.v{dtype.count}.{self.mem_type(dtype.scalar())} {{{', '.join(r[u])}}}, [{r[vin[0]]}+{vin[1].arg}];")
           else:
             kk(*self.render_load(r[vin[0]], ssa('val', u), dtype, gate=r[vin[2]] if len(vin) > 3 else None,
-                                alt=r[vin[3]] if len(vin) > 3 else None, ss=u.arg, offset=vin[1].arg))
+                                alt=r[vin[3]] if len(vin) > 3 else None, ss=mem_type, offset=vin[1].arg))
         elif uop is UOps.PHI:
           if dtype.count > 1:
             for x0, x1 in zip(r[vin[0]], r[vin[1]]): kk(f"mov.b{self.types[dtype.scalar()][1:]} {x0}, {x1};")

@@ -35,7 +35,10 @@ class UOp:
   def tuple(self): return (self.uop, self.dtype, self.vin, self.arg)
   def cmp_tuple(self):
     return (self.uop.value, self.arg if self.uop is not UOps.ALU else (type(self.uop), self.uop.value), self.dtype, self.vin)
-  def __lt__(self, x:UOp): return self.cmp_tuple() < x.cmp_tuple()
+  def __lt__(self, x:UOp):
+    a, b = self.cmp_tuple(), x.cmp_tuple()
+    try: return a < b
+    except Exception: raise RuntimeError(f"compare failed between {self.uop} and {x.uop} -- {a} and {b}")
   def __repr__(self):
     return f"{str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.uop for x in self.vin]):32s} {self.arg}"
   def cast(self, dtype): return UOp(UOps.CAST, dtype, (self,))
