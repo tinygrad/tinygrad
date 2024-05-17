@@ -8,7 +8,8 @@ from tinygrad.helpers import all_same, getenv, flatten
 from tinygrad.device import Compiled, Compiler, Allocator
 from tinygrad.codegen.uops import UOpGraph, UOps
 from tinygrad.ops import BinaryOps, TernaryOps, exec_alu
-from tinygrad.renderer import Renderer, CUDARenderer, MetalRenderer, HIPRenderer
+from tinygrad.renderer import Renderer
+from tinygrad.renderer.cstyle import CUDARenderer, MetalRenderer, HIPRenderer
 
 def _load(m, i):
   if i < 0 or i >= len(m): raise IndexError(f"load out of bounds, size is {len(m)} and access is {i}")

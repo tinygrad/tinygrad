@@ -3,7 +3,7 @@ import math, itertools
 from typing import NamedTuple, Optional, List, Tuple, cast, Dict, Union
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, UNSAFE_PAD_OPS
 from tinygrad.device import Device
-from tinygrad.renderer import Renderer
+from tinygrad.renderer import Renderer, TensorCore
 from tinygrad.dtype import dtypes, ImageDType, DType
 from tinygrad.helpers import colored, ansilen, dedup, flatten, getenv, prod, DEBUG, round_up, all_int, get_contraction
 from tinygrad.shape.shapetracker import ShapeTracker

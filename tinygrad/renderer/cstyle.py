@@ -208,7 +208,7 @@ class MetalRenderer(CStyleLanguage):
   device = "METAL"
   shared_max = 32768
   tensor_cores = [TensorCore(dims=(8,8,8), threads=[(0,2),(1,4),(0,2),(1,2)], thread_local_sizes=[[2],[2],[2]], thread_local_aliases=[ [[0],[2],[0],[4],[-1, 1, 3],[0]], [[1],[0],[3],[0],[2, 4],[-1]], [[1],[2],[3],[4],[0],[-1]] ], dtype_in=di, dtype_out=do) for (di, do) in [(dtypes.float, dtypes.float), (dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]] # noqa: E501
-  def __init__(self, arch:str): self.tensor_cores = MetalRenderer.tensor_cores if os.uname().machine == "arm64" else []
+  def __init__(self): self.tensor_cores = MetalRenderer.tensor_cores if os.uname().machine == "arm64" else []
 
   # language options
   kernel_prefix = "kernel "
