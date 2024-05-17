@@ -322,7 +322,6 @@ class TestSchedule(unittest.TestCase):
     out = c.sum() + d.sum()
     check_schedule(out, 1)
 
-  # NOTE: for this to pass, LazyViews must be children of LazyBuffers so the (a+b) runs first
   def test_children_dont_push(self):
     a = Tensor.empty(10, 10, 1)
     b = Tensor.empty(10, 10, 1)
