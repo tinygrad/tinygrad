@@ -488,6 +488,8 @@ class TestOps(unittest.TestCase):
   def test_abs(self):
     helper_test_op([(45,65)], torch.abs, Tensor.abs)
     helper_test_op([()], torch.abs, Tensor.abs)
+  def test_abs_exact(self):
+    helper_test_op(None, torch.abs, Tensor.abs, vals=[[-1.,0,1]])
 
   def test_log(self):
     helper_test_op([(45,65)], torch.log, Tensor.log)
@@ -506,9 +508,14 @@ class TestOps(unittest.TestCase):
   def test_sign(self):
     helper_test_op([(45,65)], torch.sign, Tensor.sign)
     helper_test_op([()], torch.sign, Tensor.sign)
+  def test_sign_exact(self):
+    helper_test_op(None, torch.sign, Tensor.sign, vals=[[-1.,0,1]])
+
   def test_softsign(self):
     helper_test_op([(45,65)], torch.nn.functional.softsign, Tensor.softsign)
     helper_test_op([()], torch.nn.functional.softsign, Tensor.softsign)
+  def test_softsign_exact(self):
+    helper_test_op(None, torch.nn.functional.softsign, Tensor.softsign, vals=[[-1.,0,1]])
 
   def test_sigmoid(self):
     helper_test_op([(45,65)], torch.sigmoid, Tensor.sigmoid)
