@@ -57,7 +57,7 @@ class HCQGraph(MultiGraphRunner):
     for j,ji in enumerate(self.jit_cache):
       if isinstance(ji.prg, CompiledRunner):
         deps = self.access_resources(ji.bufs[(outs:=ji.prg.p.outcount):], ji.bufs[:outs], (self.comp_signal[ji.prg.device], sig_val:=j+1))
-        deps.append((self.comp_signal[ji.prg.device], self.comp_signal_val[ji.prg.device]))
+        deps = [x for x in deps if x != self.comp_signal[ji.prg.device]] # remove wait for the same queue as all operations are ordered.
         self.comp_signal_val[ji.prg.device] = sig_val
 
         # Rebuilt runners with dynamic launch dims online.
