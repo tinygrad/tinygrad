@@ -115,7 +115,7 @@ def sum_collapse(acc, loop, val1, val2):
     return None
 
 def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst):
-  assert mval.arg < 0 and loop_start.arg == 0
+  assert mval.arg < 0 and loop_start.arg == 0, f"mval:{mval.arg} loop_start:{loop_start.arg}"
   comprange = UOp.min(loop_end, UOp.max(UOp.alu(BinaryOps.DIV, idx-compval-mval, mval) + (loop_end-loop_start), loop_start))
   return UOp(UOps.UNMUL, multconst.dtype, (comprange.cast(multconst.dtype) * multconst, loop_end-loop_start))
 

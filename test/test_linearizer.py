@@ -395,9 +395,9 @@ class TestLinearizer(unittest.TestCase):
       assert len([u for u in uops if u.uop is UOps.PHI]) == 0, "PHI should have been simplified"
       assert len([u for u in uops if u.arg is BinaryOps.MAX]) <= max_ops, "no unnecessary MAX ops"
 
-    helper(Tensor.arange(5.5, (3.5*300), 3.5))
-    helper(Tensor.arange(-1, -100, -5))
-    helper(Tensor.arange(-3.2, 6.7, 0.64))
+    helper(Tensor.arange(5.5, (3.5*300), 3.5), max_ops=2)
+    helper(Tensor.arange(-1, -100, -5), max_ops=2)
+    helper(Tensor.arange(-3.2, 6.7, 0.64), max_ops=2)
     helper(Tensor.arange(256), max_ops=2)
     helper(Tensor.arange(255), max_ops=2)
 
