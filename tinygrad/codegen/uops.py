@@ -301,8 +301,8 @@ class UOpGraph:
     def push(u):
       priority = 0
       # prefer uops that are loop children
-      for ss in loops_children.values():
-        if u in ss: priority -= 10
+      for l, ss in loops_children.items():
+        if u in ss: priority -= l.arg[0]*1000 + l.arg[1]
       heapq.heappush(queue, (priority, u))
 
     for u in nodes:
