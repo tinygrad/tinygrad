@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from tinygrad.helpers import to_function_name
 from tinygrad.codegen.uops import UOpGraph
 from tinygrad.shape.symbolic import sym_infer, sint, Variable
+from tinygrad.dtype import DType
 
 @dataclass(frozen=True)
 class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x N)
