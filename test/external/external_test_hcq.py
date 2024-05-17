@@ -97,7 +97,6 @@ class TestHCQ(unittest.TestCase):
     assert (val:=TestHCQ.b.lazydata.buffer.as_buffer().cast("f")[0]) == 3.0, f"got val {val}"
 
   def test_update_exec(self):
-    temp_signal = TestHCQ.d0._get_signal(value=0)
     q = TestHCQ.compute_queue()
     exec_ptr = q.ptr()
     q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size)
