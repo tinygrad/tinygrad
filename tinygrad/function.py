@@ -107,8 +107,8 @@ class Sin(Function):
         oneminussinabs = sinabs.const(1).e(BinaryOps.SUB, sinabs)
         # cf1 = x.const(-0.0015)
         cf1 = x.const(-0.002)
-        # cf2 = x.const(-0.0045)
-        cf2 = x.const(-0.005)
+        cf2 = x.const(-0.0045)
+        # cf2 = x.const(-0.01)
         cf3 = x.const(-0.015)
         # Choose correction factor based on x magnitude
         cf = (
