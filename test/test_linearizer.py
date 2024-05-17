@@ -3,7 +3,7 @@ import numpy as np
 import unittest
 from dataclasses import replace
 
-from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError, tensor_cores
+from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError
 from tinygrad.codegen.linearizer import Linearizer, UOp, UOps, expand_node, expand_idxs
 from tinygrad.device import Device, Buffer
 from tinygrad.ops import BinaryOps, BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, TernaryOps, ReduceOps, UnaryOps
@@ -788,8 +788,6 @@ class TestKernelOpts(unittest.TestCase):
   def test_invalid_tensor_core_extra_opts(self):
     if not Device[Device.DEFAULT].renderer.tensor_cores:
       self.skipTest("device doesn't have tensor cores")
-    if Device.DEFAULT not in tensor_cores:
-      self.skipTest("No tensor cores for device")
 
     N = 128
     Tensor.manual_seed(1552)
@@ -809,8 +807,6 @@ class TestKernelOpts(unittest.TestCase):
   def test_buf_index_not_found_tensor_core(self):
     if not Device[Device.DEFAULT].renderer.tensor_cores:
       self.skipTest("device doesn't have tensor cores")
-    if Device.DEFAULT not in tensor_cores:
-      self.skipTest("No tensor cores for device")
 
     ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BinaryOps.CMPEQ, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1243, 256), strides=(0, 1), offset=0, mask=None, contiguous=False),)))), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1243, 256), strides=(1, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=dtypes.float), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=3, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1243, 256), strides=(1, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=(0,)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 256), strides=(0, 1), offset=0, mask=None, contiguous=True),))))  # noqa: E501
     k = Linearizer(ast, opts=Device[Device.DEFAULT].renderer)
@@ -820,8 +816,6 @@ class TestKernelOpts(unittest.TestCase):
   def test_tensor_core_opts(self):
     if not Device[Device.DEFAULT].renderer.tensor_cores:
       self.skipTest("device doesn't have tensor cores")
-    if Device.DEFAULT not in tensor_cores:
-      self.skipTest("No tensor cores for device")
 
     N = 128
     Tensor.manual_seed(1552)
