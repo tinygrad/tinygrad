@@ -1,4 +1,5 @@
 """This is where the forwards and backwards passes live."""
+
 import math
 from typing import Tuple, Optional
 from tinygrad.helpers import argsort
@@ -103,11 +104,17 @@ class Sin(Function):
         # print(__import__('tinygrad').Tensor(sinabs).numpy())
         oneminussinabs = sinabs.const(1).e(BinaryOps.SUB, sinabs)
         cf1 = x.const(-0.0015)
-        cf2 = x.const(-0.004)
+        cf2 = x.const(-0.0045)
         cf3 = x.const(-0.015)
         # Choose correction factor based on x magnitude
-        cf = self._abs(x).e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, cf1, cf2)
-        cf = self._abs(x).e(BinaryOps.CMPLT, x.const(153e12)).e(TernaryOps.WHERE, cf, cf3)
+        cf = (
+            self._abs(x).e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, cf1, cf2)
+        )
+        cf = (
+            self._abs(x)
+            .e(BinaryOps.CMPLT, x.const(153e12))
+            .e(TernaryOps.WHERE, cf, cf3)
+        )
         # correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.008).e(BinaryOps.MUL, cossign))
         # correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.016).e(BinaryOps.MUL, cossign))
         # correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.0015).e(BinaryOps.MUL, cossign))
@@ -156,6 +163,8 @@ class Sin(Function):
         #     x = x.cast(dtypes.float32)
         # self.float_precision = x.dtype
         x = self.reduce_angle(x)
+        # print("reduced angle: ")
+        # print(__import__("tinygrad").Tensor(x).numpy())
         # return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 30, x.const(1)).cast(
         # return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 50, x.const(1)).cast(
         #     self.beginning_dtype
@@ -191,7 +200,8 @@ class Sin(Function):
             return x.e(
                 BinaryOps.SUB,
                 x.e(BinaryOps.DIV, y)
-                .cast(dtypes.uint64)
+                # .e(BinaryOps.DIV, x.const(1e30))
+                .cast(dtypes.int64)
                 .cast(self.float_precision)
                 .e(BinaryOps.MUL, y),
             )
@@ -199,24 +209,67 @@ class Sin(Function):
         def v2(x: LazyBuffer, y: LazyBuffer) -> LazyBuffer:
             x = x.cast(self.float_precision)
             y = y.cast(self.float_precision)
+            # print(self.float_precision)
+            # print("x at beginning of v2: ")
+            # print(__import__("tinygrad").Tensor(x).numpy())
             q = x.e(BinaryOps.DIV, y)
-            q_floor = q.cast(dtypes.uint64).cast(self.float_precision)
+            # q = q.e(BinaryOps.SUB, q.const(1e38))
+            # q = q.e(BinaryOps.SUB, q.const(5.41576175e+37))
+            # q = q.e(BinaryOps.SUB, q.const(1.44316653e+28))
+            # q = q.e(BinaryOps.SUB, q.const(8.44522567e+18))
+
+            # print("q: ")
+            # print(__import__("tinygrad").Tensor(q).numpy())
+            q_floor = q.cast(dtypes.int64).cast(self.float_precision)
+            # print("q_floor: ")
+            # print(__import__("tinygrad").Tensor(q_floor).numpy())
             diff = q.e(BinaryOps.SUB, q_floor)
+            # print("diff: ")
+            # print(__import__("tinygrad").Tensor(diff).numpy())
             x = diff.e(BinaryOps.MUL, y)
+            # print("x: ")
+            # print(__import__("tinygrad").Tensor(x).numpy())
             return x
 
         # Return v1 if x < 1e14, else return v2
         return x.e(BinaryOps.CMPLT, x.const(1e14)).e(
             TernaryOps.WHERE, v1(x, y), v2(x, y)
         )
+        # return v2(x, y)
         # return x.e(BinaryOps.CMPLT, x.const(1e13)).e(TernaryOps.WHERE, v1(x, y), v2(x, y))
         # return x.e(BinaryOps.CMPLT, x.const(1e5)).e(TernaryOps.WHERE, v1(x, y), v2(x, y))
 
     def reduce_angle(self, x: LazyBuffer) -> LazyBuffer:
+        # x = x.cast(self.float_precision)
+        # print(self.float_precision)
+
+        # If x greater than this value, subtract it
+        # int64lim = 5.411268065124442e37
+        # x = x.e(BinaryOps.SUB, x.const(int64lim))
+        # x = x.e(BinaryOps.DIV, x.const(2e37 * math.pi))
+        # print("x after reduction: ")
+        # print(__import__("tinygrad").Tensor(x).numpy())
+        # x = x.e(BinaryOps.CMPLT, x.const(int64lim)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(int64lim)))
+
         lt0 = x.e(BinaryOps.CMPLT, x.const(0))
         x = self._abs(x)
         x = lt0.e(TernaryOps.WHERE, x.e(BinaryOps.ADD, x.const(math.pi)), x)
 
+        # x = self._mod(x, x.const(2 * math.pi*1e33))
+        # print("x after mod 1e33: ")
+        # print(__import__("tinygrad").Tensor(x).numpy()[0])
+        # print(__import__("tinygrad").Tensor(x).numpy())
+        # x = x.e(BinaryOps.MUL, x.const(2 * math.pi))
+        # print("x after mul 2pi: ")
+        # print(__import__("tinygrad").Tensor(x).numpy())
+        # x = self._mod(x, x.const(2 * math.pi*1e16))
+        # print("x after mod 1e16: ")
+        # print(__import__("tinygrad").Tensor(x).numpy())
+        # # x = x.e(BinaryOps.MUL, x.const(2 * math.pi))
+        # print("x after mul 2pi: ")
+        # print(__import__("tinygrad").Tensor(x).numpy())
+
+        # x = self._mod(x, x.const(2 * math.pi*1e17))
         x = self._mod(x, x.const(2 * math.pi))
         res = x.e(BinaryOps.CMPEQ, x.const(float("inf"))).e(
             TernaryOps.WHERE, x.const(math.nan), x
@@ -410,9 +463,9 @@ class Add(Function):
     def backward(
         self, grad_output: LazyBuffer
     ) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
-        return grad_output if self.needs_input_grad[
-            0
-        ] else None, grad_output if self.needs_input_grad[1] else None
+        return grad_output if self.needs_input_grad[0] else None, (
+            grad_output if self.needs_input_grad[1] else None
+        )
 
 
 class Sub(Function):
@@ -422,9 +475,9 @@ class Sub(Function):
     def backward(
         self, grad_output: LazyBuffer
     ) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
-        return grad_output if self.needs_input_grad[0] else None, grad_output.e(
-            UnaryOps.NEG
-        ) if self.needs_input_grad[1] else None
+        return grad_output if self.needs_input_grad[0] else None, (
+            grad_output.e(UnaryOps.NEG) if self.needs_input_grad[1] else None
+        )
 
 
 class Mul(Function):
@@ -435,11 +488,9 @@ class Mul(Function):
     def backward(
         self, grad_output: LazyBuffer
     ) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
-        return self.y.e(BinaryOps.MUL, grad_output) if self.needs_input_grad[
-            0
-        ] else None, self.x.e(BinaryOps.MUL, grad_output) if self.needs_input_grad[
-            1
-        ] else None
+        return (
+            self.y.e(BinaryOps.MUL, grad_output) if self.needs_input_grad[0] else None
+        ), (self.x.e(BinaryOps.MUL, grad_output) if self.needs_input_grad[1] else None)
 
 
 class Div(Function):
@@ -450,11 +501,15 @@ class Div(Function):
     def backward(
         self, grad_output: LazyBuffer
     ) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
-        return grad_output.e(BinaryOps.DIV, self.y) if self.needs_input_grad[
-            0
-        ] else None, grad_output.e(UnaryOps.NEG).e(BinaryOps.MUL, self.x).e(
-            BinaryOps.DIV, self.y.e(BinaryOps.MUL, self.y)
-        ) if self.needs_input_grad[1] else None  # noqa: E501
+        return (
+            grad_output.e(BinaryOps.DIV, self.y) if self.needs_input_grad[0] else None
+        ), (
+            grad_output.e(UnaryOps.NEG)
+            .e(BinaryOps.MUL, self.x)
+            .e(BinaryOps.DIV, self.y.e(BinaryOps.MUL, self.y))
+            if self.needs_input_grad[1]
+            else None
+        )  # noqa: E501
 
 
 # ************* ternary ops *************
@@ -470,12 +525,16 @@ class Where(Function):
     ) -> Tuple[None, Optional[LazyBuffer], Optional[LazyBuffer]]:
         return (
             None,
-            self.x.e(TernaryOps.WHERE, grad_output, grad_output.const(0))
-            if self.needs_input_grad[1]
-            else None,
-            self.x.e(TernaryOps.WHERE, grad_output.const(0), grad_output)
-            if self.needs_input_grad[2]
-            else None,
+            (
+                self.x.e(TernaryOps.WHERE, grad_output, grad_output.const(0))
+                if self.needs_input_grad[1]
+                else None
+            ),
+            (
+                self.x.e(TernaryOps.WHERE, grad_output.const(0), grad_output)
+                if self.needs_input_grad[2]
+                else None
+            ),
         )
 
 
@@ -571,4 +630,3 @@ class Flip(Function):
 
     def backward(self, grad_output: LazyBuffer) -> LazyBuffer:
         return grad_output.stride(self.arg)
-
