@@ -84,7 +84,7 @@ class PatternMatcher:
       queue = [n]
       while queue:
         if all([qq in uops.uops for qq in queue[-1].vin]):
-          new = uops.add_op(q:=queue.pop(), insert_before=max([0]+[uops.uops.index(vv) for vv in q.vin])+1)
+          new = uops.add_op(q:=queue.pop(), insert_before=max([uops.uops.index(o) if n == q else 0]+[uops.uops.index(vv) for vv in q.vin])+1)
           if new != q:
             for vv in uops.uops + queue: vv.vin = tuple(new if x is q else x for x in vv.vin)
         else: queue.extend([qq for qq in queue[-1].vin if qq not in uops.uops])
