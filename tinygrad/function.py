@@ -107,7 +107,7 @@ class Sin(Function):
         oneminussinabs = sinabs.const(1).e(BinaryOps.SUB, sinabs)
         # cf1 = x.const(-0.0015)
         cf1 = x.const(-0.002)
-        cf2 = x.const(-0.0045)
+        cf2 = x.const(-0.006)
         # cf2 = x.const(-0.01)
         cf3 = x.const(-0.015)
         # Choose correction factor based on x magnitude
@@ -122,8 +122,12 @@ class Sin(Function):
         # correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.008).e(BinaryOps.MUL, cossign))
         # correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.016).e(BinaryOps.MUL, cossign))
         # correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.0015).e(BinaryOps.MUL, cossign))
-        correction = oneminussinabs.e(BinaryOps.MUL, cf.e(BinaryOps.MUL, cossign))
-        correction = correction.e(BinaryOps.MUL, xsign)
+
+        # correction = oneminussinabs.e(BinaryOps.MUL, cf.e(BinaryOps.MUL, cossign))
+        # correction = correction.e(BinaryOps.MUL, xsign)
+
+        # correction = self._sin(x.e(BinaryOps.ADD, x.const(math.pi / 2).e(BinaryOps.MUL, xsign))).e(BinaryOps.MUL, x.const(-0.006))
+        correction = self._sin(x.e(BinaryOps.ADD, x.const(math.pi / 2).e(BinaryOps.MUL, xsign))).e(BinaryOps.MUL, cf)
         # correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.002).e(BinaryOps.MUL, cossign))
         # correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.003).e(BinaryOps.MUL, cossign))
         # correction = cosabs.e(BinaryOps.MUL, x.const(0.003)).e(BinaryOps.MUL, cossign)
@@ -237,9 +241,10 @@ class Sin(Function):
             return x
 
         # Return v1 if x < 1e14, else return v2
-        return x.e(BinaryOps.CMPLT, x.const(1e14)).e(
-            TernaryOps.WHERE, v1(x, y), v2(x, y)
-        )
+        # return self._abs(x).e(BinaryOps.CMPLT, x.const(1e14)).e(
+        #     TernaryOps.WHERE, v1(x, y), v2(x, y)
+        # )
+        return v1(x, y)
         # return v2(x, y)
         # return x.e(BinaryOps.CMPLT, x.const(1e13)).e(TernaryOps.WHERE, v1(x, y), v2(x, y))
         # return x.e(BinaryOps.CMPLT, x.const(1e5)).e(TernaryOps.WHERE, v1(x, y), v2(x, y))
