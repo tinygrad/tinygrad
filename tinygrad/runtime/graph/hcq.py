@@ -52,6 +52,7 @@ class HCQGraph(MultiGraphRunner):
     self.kickoff_value = 0
     self.graph_timeline = {dev: 0 for dev in self.devices}
 
+    self.exec_ptrs: Dict[int, Tuple[Any, int]] = {}
     self.copy_to_devs: Dict[Compiled, Set[Compiled]] = {dev: set() for dev in self.devices}
 
     for j,ji in enumerate(self.jit_cache):
@@ -60,14 +61,11 @@ class HCQGraph(MultiGraphRunner):
         deps = [x for x in deps if x != self.comp_signal[ji.prg.device]] # remove wait for the same queue as all operations are ordered.
         self.comp_signal_val[ji.prg.device] = sig_val
 
-        # Rebuilt runners with dynamic launch dims online.
-        if j in self.jc_idx_with_updatable_launch_dims:
-          if ji.prg.device in self.comp_queues: self.queue_list.append((self.comp_queues.pop(ji.prg.device), ji.prg.device))
-          self.queue_list.append((j, deps))
-        else:
-          for sig, val in deps: self.comp_queues[ji.prg.device].wait(sig, val)
-          self.comp_queues[ji.prg.device].exec(ji.prg.clprg, self.kargs_addrs[j], *ji.prg.p.launch_dims(var_vals)) \
-                                         .signal(self.comp_signal[ji.prg.device], sig_val)
+        for sig, val in deps: self.comp_queues[ji.prg.device].wait(sig, val)
+
+        self.exec_ptrs[j] = (self.comp_queues[ji.prg.device], self.comp_queues[ji.prg.device].ptr())
+        self.comp_queues[ji.prg.device].exec(ji.prg.clprg, self.kargs_addrs[j], *ji.prg.p.launch_dims(var_vals)) \
+                                       .signal(self.comp_signal[ji.prg.device], sig_val)
       elif isinstance(ji.prg, BufferXfer):
         dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
         Device[src.device]._gpu_map(dest._buf) #type: ignore
@@ -106,22 +104,17 @@ class HCQGraph(MultiGraphRunner):
       for i,v in enumerate(cast(CompiledRunner, self.jit_cache[j].prg).p.vars):
         self.ji_kargs_structs[j].__setattr__(f'v{i}', var_vals[v])
 
+    for j in self.jc_idx_with_updatable_launch_dims:
+      queue, cmd_ptr = self.exec_ptrs[j]
+      queue.update_exec(cmd_ptr, *cast(CompiledRunner, self.jit_cache[j].prg).p.launch_dims(var_vals))
+
     for dev in self.devices:
       self.comp_hcq_t().wait(dev.timeline_signal, dev.timeline_value - 1) \
                        .wait(self.kickoff_signal, self.kickoff_value).submit(dev)
       self.copy_hcq_t().wait(dev.timeline_signal, dev.timeline_value - 1) \
                        .wait(self.kickoff_signal, self.kickoff_value).submit(dev)
 
-    for entry in self.queue_list:
-      if isinstance(entry[0], self.comp_hcq_t) or isinstance(entry[0], self.copy_hcq_t): queue, dev = entry
-      else:
-        # Kernel with dynamic launch bounds, rebuild it.
-        j, ji, deps, dev = entry[0], self.jit_cache[entry[0]], entry[1], self.jit_cache[entry[0]].prg.device
-        queue = self.comp_hcq_t()
-        for sig, val in deps: queue.wait(sig, val)
-        queue.exec(ji.prg.clprg, self.kargs_addrs[j], *ji.prg.p.launch_dims(var_vals)) \
-             .signal(self.comp_signal[dev], value=j+1)
-      queue.submit(dev)
+    for queue, dev in self.queue_list: queue.submit(dev)
 
     for dev in self.devices:
       self.comp_hcq_t().signal(dev.timeline_signal, dev.timeline_value).submit(dev)

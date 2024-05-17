@@ -166,6 +166,10 @@ class HWPM4Queue:
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_EVENT_WRITE, 0), amd_gpu.EVENT_TYPE(7) | amd_gpu.EVENT_INDEX(4)]
     return self
 
+  def update_exec(self, cmd_ptr, global_size, local_size):
+    self.q[cmd_ptr + 59 : cmd_ptr + 62] = local_size
+    self.q[cmd_ptr + 68 : cmd_ptr + 71] = global_size
+
   def wait(self, signal:hsa.amd_signal_t, value=0):
     addr = ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_WAIT_REG_MEM, 5),
