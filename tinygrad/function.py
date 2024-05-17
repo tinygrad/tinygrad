@@ -131,15 +131,15 @@ class Sin(Function):
 
         # Apply correction only if x greater than 1e14
         # res = x.e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, res, res.e(BinaryOps.ADD, correction))
-        # res = x.e(BinaryOps.CMPLT, x.const(3e13)).e(
-        #     TernaryOps.WHERE, res, res.e(BinaryOps.ADD, correction)
-        # )
+        res = self._abs(x).e(BinaryOps.CMPLT, x.const(3e12)).e(
+            TernaryOps.WHERE, res, res.e(BinaryOps.ADD, correction)
+        )
         # res = res.e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, res.e(BinaryOps.ADD, correction), res)
-        print("res: ")
-        print(__import__('tinygrad').Tensor(res).numpy())
-        res = res.e(BinaryOps.ADD, correction)
-        print("res: ")
-        print(__import__('tinygrad').Tensor(res).numpy())
+        # print("res: ")
+        # print(__import__('tinygrad').Tensor(res).numpy())
+        # res = res.e(BinaryOps.ADD, correction)
+        # print("res: ")
+        # print(__import__('tinygrad').Tensor(res).numpy())
         return res.cast(self.beginning_dtype)
 
     def _averaging_sin(self, x: LazyBuffer) -> LazyBuffer:
