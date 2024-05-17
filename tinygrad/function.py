@@ -69,6 +69,8 @@ class Sin(Function):
         else:
             x = x.cast(dtypes.float32)
         self.float_precision = x.dtype
+        # x = self.reduce_angle(x)
+        xsign = x.e(BinaryOps.CMPLT, x.const(0)).e( TernaryOps.WHERE, x.const(-1), x.const(1))
 
         # return self._sin(x).cast(self.beginning_dtype)
         # res = self._averaging_sin(x)
@@ -105,7 +107,8 @@ class Sin(Function):
         oneminussinabs = sinabs.const(1).e(BinaryOps.SUB, sinabs)
         # cf1 = x.const(-0.0015)
         cf1 = x.const(-0.002)
-        cf2 = x.const(-0.0045)
+        # cf2 = x.const(-0.0045)
+        cf2 = x.const(-0.005)
         cf3 = x.const(-0.015)
         # Choose correction factor based on x magnitude
         cf = (
@@ -120,6 +123,7 @@ class Sin(Function):
         # correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.016).e(BinaryOps.MUL, cossign))
         # correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.0015).e(BinaryOps.MUL, cossign))
         correction = oneminussinabs.e(BinaryOps.MUL, cf.e(BinaryOps.MUL, cossign))
+        correction = correction.e(BinaryOps.MUL, xsign)
         # correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.002).e(BinaryOps.MUL, cossign))
         # correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.003).e(BinaryOps.MUL, cossign))
         # correction = cosabs.e(BinaryOps.MUL, x.const(0.003)).e(BinaryOps.MUL, cossign)
@@ -127,15 +131,15 @@ class Sin(Function):
 
         # Apply correction only if x greater than 1e14
         # res = x.e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, res, res.e(BinaryOps.ADD, correction))
-        res = x.e(BinaryOps.CMPLT, x.const(3e13)).e(
-            TernaryOps.WHERE, res, res.e(BinaryOps.ADD, correction)
-        )
+        # res = x.e(BinaryOps.CMPLT, x.const(3e13)).e(
+        #     TernaryOps.WHERE, res, res.e(BinaryOps.ADD, correction)
+        # )
         # res = res.e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, res.e(BinaryOps.ADD, correction), res)
-        # print("res: ")
-        # print(__import__('tinygrad').Tensor(res).numpy())
-        # res = res.e(BinaryOps.ADD, correction)
-        # print("res: ")
-        # print(__import__('tinygrad').Tensor(res).numpy())
+        print("res: ")
+        print(__import__('tinygrad').Tensor(res).numpy())
+        res = res.e(BinaryOps.ADD, correction)
+        print("res: ")
+        print(__import__('tinygrad').Tensor(res).numpy())
         return res.cast(self.beginning_dtype)
 
     def _averaging_sin(self, x: LazyBuffer) -> LazyBuffer:
