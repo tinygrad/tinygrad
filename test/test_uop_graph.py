@@ -50,5 +50,20 @@ class TestUOpGraph(unittest.TestCase):
     self.assertEqual(out.uop, UOps.CONST)
     self.assertEqual(out.arg, 0)
 
+  def test_depth_2_const_fold(self):
+    g = UOpGraph()
+    v = g.add(UOps.DEFINE_VAR, dtypes.int, arg=Variable('tmp', 0, 1))
+    c2 = g.add(UOps.CONST, dtypes.int, arg=2)
+    c4 = g.add(UOps.CONST, dtypes.int, arg=4)
+    vc = g.add(UOps.ALU, dtypes.int, (v, c2), BinaryOps.ADD)
+    out = g.add(UOps.ALU, dtypes.int, (vc, c4), BinaryOps.ADD)
+    g.add(UOps.SINK, None, (out,))
+    self.assertEqual(len(g.uops), 3)
+    out = g.uops[-1]
+    self.assertEqual(out.uop, UOps.ALU)
+    self.assertEqual(out.arg, BinaryOps.ADD)
+    self.assertEqual(out.vin[1].uop, UOps.CONST)
+    self.assertEqual(out.vin[1].arg, 6)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
