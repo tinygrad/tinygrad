@@ -6,7 +6,7 @@ from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import strip_parens, getenv, prod
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, ConstType
 from tinygrad.codegen.uops import UOpGraph
-from tinygrad.renderer import Renderer
+from tinygrad.renderer import Renderer, TensorCore
 
 class CStyleLanguage(Renderer):
   kernel_prefix: str = ""

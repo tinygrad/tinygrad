@@ -323,7 +323,7 @@ class Kernel:
   # ******************** high level optimizers ********************
 
   def _apply_tc_opt(self, use_tensor_cores:int, axis:int, opt_level:int) -> bool:
-    if use_tensor_cores and self.opts.has_local and self.reduceop and self.reduceop.op is ReduceOps.SUM and self.opts.device in tensor_cores:
+    if use_tensor_cores and self.opts.has_local and self.reduceop and self.reduceop.op is ReduceOps.SUM:
       for tc in self.opts.tensor_cores:
         has_cast = tc.dtype_in != tc.dtype_out
         if has_cast and not(self.reduceop.src[0].op is UnaryOps.CAST and self.reduceop.src[0].arg == tc.dtype_out): continue
@@ -418,7 +418,7 @@ class Kernel:
     if opt.op is OptOps.TC:
       check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: things like PADTO might be fine
       check(opt.axis is not None and opt.amt is not None, "tensor core opts must have an axis and amt")
-      check((use_tensor_cores:=getenv("TC", 1)) == 2 or self.opts.has_tensor_cores, "must have tensor cores or TC=2")
+      check((use_tensor_cores:=getenv("TC", 1)) == 2 or len(self.opts.tensor_cores) > 0, "must have tensor cores or TC=2")
       check(self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), cast(int, opt.amt)), "no tensor core available")
       self.applied_opts.append(opt)
       return

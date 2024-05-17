@@ -5,7 +5,7 @@ from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op
 from tinygrad.dtype import dtypes, DType, PtrDType, ConstType
 from tinygrad.codegen.uops import UOpGraph, PatternMatcher
-from tinygrad.renderer import Renderer
+from tinygrad.renderer import Renderer, TensorCore
 
 def render_val(x, dtype):
   if dtypes.is_float(dtype):
