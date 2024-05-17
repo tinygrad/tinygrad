@@ -103,7 +103,8 @@ class Sin(Function):
         # print("sinabs: ")
         # print(__import__('tinygrad').Tensor(sinabs).numpy())
         oneminussinabs = sinabs.const(1).e(BinaryOps.SUB, sinabs)
-        cf1 = x.const(-0.0015)
+        # cf1 = x.const(-0.0015)
+        cf1 = x.const(-0.002)
         cf2 = x.const(-0.0045)
         cf3 = x.const(-0.015)
         # Choose correction factor based on x magnitude
