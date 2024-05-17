@@ -131,7 +131,7 @@ class Sin(Function):
 
         # Apply correction only if x greater than 1e14
         # res = x.e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, res, res.e(BinaryOps.ADD, correction))
-        res = self._abs(x).e(BinaryOps.CMPLT, x.const(3e12)).e(
+        res = self._abs(x).e(BinaryOps.CMPLT, x.const(3e13)).e(
             TernaryOps.WHERE, res, res.e(BinaryOps.ADD, correction)
         )
         # res = res.e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, res.e(BinaryOps.ADD, correction), res)
