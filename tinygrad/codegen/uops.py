@@ -33,7 +33,8 @@ class UOp:
   vin: Tuple[UOp, ...] = tuple()
   arg: Any = None
   def tuple(self): return (self.uop, self.dtype, self.vin, self.arg)
-  def cmp_tuple(self): return (self.uop.value, self.arg if self.uop is not UOps.ALU else (type(self.uop), self.uop.value), self.dtype, self.vin)
+  def cmp_tuple(self):
+    return (self.uop.value, self.arg if self.uop is not UOps.ALU else (type(self.uop), self.uop.value), self.dtype, self.vin)
   def __lt__(self, x:UOp): return self.cmp_tuple() < x.cmp_tuple()
   def __repr__(self):
     return f"{str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.uop for x in self.vin]):32s} {self.arg}"
@@ -225,10 +226,9 @@ constant_folder = PatternMatcher([
 # *** uop graph ***
 
 class UOpGraph:
-  # TODO: remove start_uops
-  def __init__(self, start_uops:Optional[List[UOp]]=None):
+  def __init__(self):
     self.nodes: Dict[Tuple, UOp] = {}
-    self._uops: Optional[List[UOp]] = start_uops
+    self._uops: Optional[List[UOp]] = None
 
   def __iter__(self): return iter(self.uops)
 

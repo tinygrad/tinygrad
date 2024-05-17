@@ -13,7 +13,9 @@ from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.codegen.uops import UOpGraph
 from test.helpers import is_dtype_supported
 
-def _uops_to_prg(uops):
+def _uops_to_prg(uops_list):
+  uops = UOpGraph()
+  for l in uops_list: uops.add(l.uop, l.dtype, l.vin, l.arg)
   src = Device[Device.DEFAULT].renderer.render("test", uops)
   has_local = Device[Device.DEFAULT].renderer.has_local
   return CompiledRunner(Program("test", src, Device.DEFAULT, [1,1,1] if has_local else None, [1,1,1] if has_local else None, uops=uops))
@@ -32,7 +34,7 @@ def _test_single_value(vals, op, dts):
   uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
   buf2 = [Buffer(Device.DEFAULT, 1, dtype).allocate().copyin(np.array([a], dtype=dtype.np).data) for a,dtype in zip(vals, dts)]
-  prg = _uops_to_prg(UOpGraph(uops))
+  prg = _uops_to_prg(uops)
   prg.exec([buf]+buf2)
   ret = np.empty(1, output_dtype.np)
   buf.copyout(ret.data)
@@ -46,7 +48,7 @@ def _test_single_value_const(vals, op, dts):
   alu = uop(uops, UOps.ALU, output_dtype, loads, op)
   uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
-  prg = _uops_to_prg(UOpGraph(uops))
+  prg = _uops_to_prg(uops)
   prg.exec([buf])
   ret = np.empty(1, output_dtype.np)
   buf.copyout(ret.data)
@@ -58,7 +60,7 @@ def _test_uops_result(output_dtype, uops, res):
   # res = output_fn(uops)
   uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), res))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
-  prg = _uops_to_prg(UOpGraph(uops))
+  prg = _uops_to_prg(uops)
   prg.exec([buf])
   ret = np.empty(1, output_dtype.np)
   buf.copyout(ret.data)
@@ -72,13 +74,13 @@ class TestUOps(unittest.TestCase):
     else:
       np.testing.assert_equal(v1, v2)
 
-  def _test_uop_fxn(self, op, fxn, dts=(PtrDType(dtypes.float32), )):
+  def _test_uop_fxn(self, op, fxn, dts=(dtypes.float32, )):
     for f in [_test_single_value, _test_single_value_const]:
       for a in [-2.0, 0.0, 1.0]:
         a = dtypes.as_const(a, dts[0])
         self._equal(f([a], op, dts), fxn(a))
 
-  def _test_bop_fxn(self, op, fxn, dts=(PtrDType(dtypes.float32), )*2, no_b_zero=False):
+  def _test_bop_fxn(self, op, fxn, dts=(dtypes.float32, )*2, no_b_zero=False):
     for f in [_test_single_value, _test_single_value_const]:
       for a in [-2.0, 0.0, 1.0]:
         for b in [-3.0, 1.0] + ([] if no_b_zero else [0.0]):
@@ -86,7 +88,7 @@ class TestUOps(unittest.TestCase):
           b = dtypes.as_const(b, dts[1])
           self._equal(f([a,b], op, dts), fxn(a,b))
 
-  def _test_top_fxn(self, op, fxn, dts=(PtrDType(dtypes.float32), )*3):
+  def _test_top_fxn(self, op, fxn, dts=(dtypes.float32, )*3):
     for f in [_test_single_value, _test_single_value_const]:
       for a in [-2.0, 0, 1]:
         for b in [-3.0, 3.0]:

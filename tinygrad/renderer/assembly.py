@@ -240,7 +240,10 @@ class PTXRenderer(Renderer):
             kk(*self.render_load(r[vin[0]], ssa('val', u), dtype, gate=r[vin[2]] if len(vin) > 3 else None,
                                 alt=r[vin[3]] if len(vin) > 3 else None, ss=u.arg, offset=vin[1].arg))
         elif uop is UOps.PHI:
-          kk(f"mov.b{self.types[dtype][1:]} {r[vin[0]]}, {r[vin[1]]};")
+          if dtype.count > 1:
+            for x0, x1 in zip(r[vin[0]], r[vin[1]]): kk(f"mov.b{self.types[dtype.scalar()][1:]} {x0}, {x1};")
+          else:
+            kk(f"mov.b{self.types[dtype][1:]} {r[vin[0]]}, {r[vin[1]]};")
           r[u] = r[vin[0]]
         elif uop in {UOps.CAST, UOps.BITCAST}:
           assert vin[0].dtype is not None
