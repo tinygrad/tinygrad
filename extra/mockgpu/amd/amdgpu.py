@@ -77,7 +77,7 @@ class PM4Executor(AMDQueue):
       elif op == amd_gpu.PACKET3_RELEASE_MEM: self._exec_release_mem(n)
       elif op == amd_gpu.PACKET3_WAIT_REG_MEM: cont = self._exec_wait_reg_mem(n)
       elif op == amd_gpu.PACKET3_DISPATCH_DIRECT: self._exec_dispatch_direct(n)
-      elif op == amd_gpu.PACKET3_EVENT_WRITE: self._exec_dispatch_direct(n)
+      elif op == amd_gpu.PACKET3_EVENT_WRITE: self._exec_event_write(n)
       else: raise RuntimeError(f"PM4: Unknown opcode: {op}")
       if not cont: return
 
@@ -155,7 +155,7 @@ class PM4Executor(AMDQueue):
     remu.run_asm(prg_addr, prg_sz, *gl, *lc, args_addr)
 
   def _exec_event_write(self, n):
-    assert n == 1
+    assert n == 0
     _ = self._next_dword() # do not emulate events for now
 
 class SDMAExecutor(AMDQueue):
