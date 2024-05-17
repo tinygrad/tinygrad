@@ -117,7 +117,7 @@ class GPFIFO:
     timestamp = (flags & (1 << 25)) == (1 << 25)
     if typ == 1:
       to_mv(signal, 8).cast('Q')[0] = val
-      if timestamp: to_mv(signal + 8, 8).cast('Q')[0] = time.perf_counter()
+      if timestamp: to_mv(signal + 8, 8).cast('Q')[0] = int(time.perf_counter())
     elif typ == 3:
       mval = to_mv(signal, 8).cast('Q')[0]
       return SchedResult.CONT if mval >= val else SchedResult.YIELD
