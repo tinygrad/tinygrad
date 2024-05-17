@@ -34,17 +34,6 @@ class Opt:
     if self.op in {OptOps.GROUP, OptOps.GROUPTOP}: return k.first_reduce+k.group_for_reduces+self.axis
     return self.axis
 
-@dataclass(frozen=True)
-class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x N)
-  dims: Tuple[int,int,int] # N, M, K
-  dtype_in: DType # dtype for A and B
-  dtype_out: DType # dtype for C and D
-  threads: List[Tuple[int,int]] # list of (TC dim,amt) that construct the warp thread structure
-  thread_local_aliases: List[List[List[int]]] # a list of [threads_1, ..., threads_n, upcast_1(unrolled), upcast_2(upcast)] defining the alias (-1 is upcast, 1-n is warp threads) for each TC dim # noqa: E501
-  thread_local_sizes: List[List[int]] # in each thread, the number of elements stored in registers for each TC dim
-  def __str__(self): return "_".join(["WMMA"] + list(map(str, self.dims)) + [self.dtype_in.name, self.dtype_out.name])
-  def num_upcasts(self): return len(self.thread_local_aliases[0]) - len(self.threads)
-
 class TensorCoreOptions(NamedTuple):
   bufs: Tuple[int, int] # the local aliased buffers for A and B
   axes: List[int] # the location of the original N and M axes if still in the shape
@@ -53,12 +42,6 @@ class TensorCoreOptions(NamedTuple):
     for tc_dim in [i for i in range(2) if self.axes_exist[i]]:
       if removed_axis < self.axes[tc_dim]: self.axes[tc_dim] -= 1
       elif removed_axis == self.axes[tc_dim]: self.axes_exist[tc_dim] = False
-
-tensor_cores: Dict[str, List[TensorCore]] = {
-  "METAL": [TensorCore(dims=(8,8,8), threads=[(0,2),(1,4),(0,2),(1,2)], thread_local_sizes=[[2],[2],[2]], thread_local_aliases=[ [[0],[2],[0],[4],[-1, 1, 3],[0]], [[1],[0],[3],[0],[2, 4],[-1]], [[1],[2],[3],[4],[0],[-1]] ], dtype_in=di, dtype_out=do) for (di, do) in [(dtypes.float, dtypes.float), (dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]],  # noqa: E501
-  "HSA": [TensorCore(dims=(16,16,16), threads=[(0,8),(0,2),(1,2)], thread_local_sizes=[[16],[16],[4,2]], thread_local_aliases=[ [[0],[0],[2],[-1],[1]], [[1],[2],[0],[-1],[0]], [[1],[2],[-2],[0],[3,-1]] ], dtype_in=di, dtype_out=do) for (di, do) in [(dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]],  # noqa: E501
-  "CUDA": [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(0,2)], thread_local_sizes=[[2,2,2],[2,2],[2,2]], thread_local_aliases=[ [[0],[0],[5],[-2],[0],[-1,1,2,-3],[3,4]], [[3],[4],[0],[0],[5],[-1,1,2,-2],[0]], [[-1],[1],[5],[-2],[2],[0],[3,4]] ], dtype_in=di, dtype_out=do) for (di, do) in ([(dtypes.half, dtypes.float)] if getenv("PTX") else [(dtypes.half, dtypes.float), (dtypes.bfloat16, dtypes.float)])],  # noqa: E501
-}
 
 class LocalBuffer(NamedTuple):
   name: str
@@ -341,7 +324,7 @@ class Kernel:
 
   def _apply_tc_opt(self, use_tensor_cores:int, axis:int, opt_level:int) -> bool:
     if use_tensor_cores and self.opts.has_local and self.reduceop and self.reduceop.op is ReduceOps.SUM and self.opts.device in tensor_cores:
-      for tc in tensor_cores[self.opts.device]:
+      for tc in self.opts.tensor_cores:
         has_cast = tc.dtype_in != tc.dtype_out
         if has_cast and not(self.reduceop.src[0].op is UnaryOps.CAST and self.reduceop.src[0].arg == tc.dtype_out): continue
 
@@ -403,7 +386,7 @@ class Kernel:
       1: allows kernels with multiple reduce axes and also multiplication of UnaryOps.CAST'd buffers
       2: allows kernels with M, N, K axes that are not multiples of the tensor core dimensions by applying padding those axes as needed
     """
-    if not self.opts.has_tensor_cores and use_tensor_cores != 2: return False
+    if not self.opts.tensor_cores and use_tensor_cores != 2: return False
     try: # check TC first and apply hand-coded opts if successful
       self.apply_opt(Opt(OptOps.TC, axis, tc_opt))
 

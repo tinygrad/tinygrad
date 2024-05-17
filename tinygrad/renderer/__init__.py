@@ -6,6 +6,17 @@ from tinygrad.codegen.uops import UOpGraph
 from tinygrad.shape.symbolic import sym_infer, sint, Variable
 
 @dataclass(frozen=True)
+class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x N)
+  dims: Tuple[int,int,int] # N, M, K
+  dtype_in: DType # dtype for A and B
+  dtype_out: DType # dtype for C and D
+  threads: List[Tuple[int,int]] # list of (TC dim,amt) that construct the warp thread structure
+  thread_local_aliases: List[List[List[int]]] # a list of [threads_1, ..., threads_n, upcast_1(unrolled), upcast_2(upcast)] defining the alias (-1 is upcast, 1-n is warp threads) for each TC dim # noqa: E501
+  thread_local_sizes: List[List[int]] # in each thread, the number of elements stored in registers for each TC dim
+  def __str__(self): return "_".join(["WMMA"] + list(map(str, self.dims)) + [self.dtype_in.name, self.dtype_out.name])
+  def num_upcasts(self): return len(self.thread_local_aliases[0]) - len(self.threads)
+
+@dataclass(frozen=True)
 class Program:
   name:str
   src:str
@@ -40,10 +51,10 @@ class Renderer:
   supports_float4: bool = True
   has_local: bool = True
   has_shared: bool = True
-  has_tensor_cores: bool = False
   # NOTE: these two should be in z,y,x(reversed) order for cstyle backends, they are flipped when kernel is rendered
   global_max: Optional[List[int]] = None
   local_max: Optional[List[int]] = None
   shared_max: int = 32768
+  tensor_cores: List[TensorCore] = []
 
   def render(self, name:str, uops:UOpGraph) -> str: raise NotImplementedError("needs a renderer")
