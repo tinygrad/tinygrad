@@ -34,7 +34,7 @@ class LazyBuffer:
       self.op, self.arg, self.srcs = op, arg, srcs  # this is a LazyOp, except the src is LazyBuffers and not LazyOps
       assert self.op is not LoadOps.ASSIGN or srcs[1].base.realized is not None, "assign target must be realized"
 
-      if (self.op is LoadOps.CONTIGUOUS or (self.op is UnaryOps.CAST and self.arg[1] is True)) and srcs[0].st.consecutive and \
+      if (self.op is LoadOps.CONTIGUOUS or self.op is UnaryOps.BITCAST) and srcs[0].st.consecutive and \
           not srcs[0].is_unrealized_const() and device.split(":")[0] in view_supported_devices:
         # some LazyBuffers can be processed with only a view, no AST required
         self.buffer: Buffer = srcs[0].base.buffer.view(st.size, dtype, srcs[0].st.views[0].offset * srcs[0].dtype.itemsize)
@@ -106,7 +106,8 @@ class LazyBuffer:
       # https://pytorch.org/docs/stable/generated/torch.Tensor.view.html
       if not (new_shape[-1]*self.dtype.itemsize) % dtype.itemsize == 0: raise RuntimeError("unsupported size in bitcast")
       new_shape = new_shape[:-1] + ((new_shape[-1]*self.dtype.itemsize) // dtype.itemsize,)
-    return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), dtype, UnaryOps.CAST, (dtype, bitcast), (self,))
+    cast_op = UnaryOps.BITCAST if bitcast else UnaryOps.CAST
+    return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), dtype, cast_op, dtype, (self,))
 
   def is_unrealized_const(self): return self.base.realized is None and self.base.op is LoadOps.CONST and not isinstance(self.base.arg, Variable)
   def is_unrealized_unmasked_const(self): return self.is_unrealized_const() and all(v.mask is None for v in self.st.views)
@@ -152,8 +153,8 @@ class LazyBuffer:
     if op is UnaryOps.NEG and self.base.op is UnaryOps.NEG: return self.base.srcs[0]
     if op in BinaryOps: x, y = self, in_srcs[0]
     if op is BinaryOps.ADD:
-      if y.is_unrealized_unmasked_const() and y.base.arg == 0: return x
-      if x.is_unrealized_unmasked_const() and x.base.arg == 0: return y
+      if y.is_unrealized_unmasked_const() and y.base.arg == 0: return x # pylint: disable=possibly-used-before-assignment
+      if x.is_unrealized_unmasked_const() and x.base.arg == 0: return y # pylint: disable=possibly-used-before-assignment
     if op is BinaryOps.SUB and y.is_unrealized_unmasked_const() and y.base.arg == 0: return x
     if op is BinaryOps.MUL:
       if x.is_unrealized_unmasked_const() and (val := x.base.arg) in (1, 0, -1):

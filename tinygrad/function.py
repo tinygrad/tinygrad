@@ -86,6 +86,13 @@ class Sigmoid(Function):
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return self.ret.e(BinaryOps.MUL, self.ret.const(1).e(BinaryOps.SUB, self.ret)).e(BinaryOps.MUL, grad_output)
 
+class Sign(Function):
+  def forward(self, x:LazyBuffer) -> LazyBuffer:
+    return x.e(BinaryOps.CMPEQ, x.const(0)).e(TernaryOps.WHERE, x.const(0),
+                                              x.e(BinaryOps.CMPLT, x.const(0)).e(TernaryOps.WHERE, x.const(-1), x.const(1)))
+  # backward always return 0 to match torch
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.const(0)
+
 # ************* binary ops *************
 
 class Less(Function):
