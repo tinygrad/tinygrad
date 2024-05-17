@@ -105,7 +105,8 @@ class HWComputeQueue:
     return self
 
   def update_exec(self, cmd_ptr, global_size, local_size):
-    assert self.q[cmd_ptr + 2] == nvmethod(1, nv_gpu.NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI, 1)
+    # Patch the exec cmd with new launch dims
+    assert self.q[cmd_ptr + 2] == nvmethod(1, nv_gpu.NVC6C0_SET_INLINE_QMD_ADDRESS_A, 0x42),"The pointer does not point to a packet of this type"
     self.q[cmd_ptr + 5 + 12 : cmd_ptr + 5 + 15] = global_size
     self.q[cmd_ptr + 5 + 18] = (self.q[cmd_ptr + 5 + 18] & 0xffff) | ((local_size[0] & 0xffff) << 16)
     self.q[cmd_ptr + 5 + 19] = (local_size[1] & 0xffff) | ((local_size[2] & 0xffff) << 16)

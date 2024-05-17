@@ -113,6 +113,7 @@ CS_W32_EN = 1 << 15
 
 class HWPM4Queue:
   def __init__(self): self.q = []
+  def ptr(self) -> int: return len(self.q)
 
   def hdp_flush(self):
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_WAIT_REG_MEM, 5),
@@ -167,6 +168,8 @@ class HWPM4Queue:
     return self
 
   def update_exec(self, cmd_ptr, global_size, local_size):
+    # Patch the exec cmd with new launch dims
+    assert self.q[cmd_ptr + 67] == amd_gpu.PACKET3(amd_gpu.PACKET3_DISPATCH_DIRECT, 3),"The pointer does not point to a packet of this type"
     self.q[cmd_ptr + 59 : cmd_ptr + 62] = local_size
     self.q[cmd_ptr + 68 : cmd_ptr + 71] = global_size
 
