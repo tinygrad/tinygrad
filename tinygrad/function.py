@@ -69,115 +69,49 @@ class Sin(Function):
         else:
             x = x.cast(dtypes.float32)
         self.float_precision = x.dtype
-        # x = self.reduce_angle(x)
-        xsign = x.e(BinaryOps.CMPLT, x.const(0)).e( TernaryOps.WHERE, x.const(-1), x.const(1))
-
-        # return self._sin(x).cast(self.beginning_dtype)
-        # res = self._averaging_sin(x)
-        # return res.cast(self.beginning_dtype)
+        xsign = x.e(BinaryOps.CMPLT, x.const(0)).e(
+            TernaryOps.WHERE, x.const(-1), x.const(1)
+        )
 
         # Compute normal sin if below 4e13, else use averaging
         res = (
             self._abs(x)
-            .e(BinaryOps.CMPLT, x.const(3e13))
+            .e(BinaryOps.CMPLT, x.const(1e13))
             .e(TernaryOps.WHERE, self._sin(x), self._averaging_sin(x))
         )
-        # res = self._abs(x).e(BinaryOps.CMPLT, x.const(3e14)).e(TernaryOps.WHERE, self._sin(x), self._averaging_sin(x))
-        # print("x: ")
-        # print(__import__('tinygrad').Tensor(x).numpy())
-        # cond = self._abs(x).e(BinaryOps.CMPLT, x.const(4e13))
-        # print("cond: ")
-        # print(__import__('tinygrad').Tensor(cond).numpy())
-        # res = cond.e(TernaryOps.WHERE, self._sin(x), self._averaging_sin(x))
-        # sinsign = x.e(BinaryOps.CMPLT, x.const(0)).e(TernaryOps.WHERE, x.const(-1), x.const(1))
-        shiftval = x.e(BinaryOps.ADD, x.const(math.pi / 2))
-        cos = (
-            self._abs(shiftval)
-            .e(BinaryOps.CMPLT, shiftval.const(3e13))
-            .e(TernaryOps.WHERE, self._sin(shiftval), self._averaging_sin(shiftval))
-        )
+        # res = self._sin(x)
 
-        # Cossign is sin slope
-        cossign = cos.e(BinaryOps.CMPLT, x.const(0)).e(
-            TernaryOps.WHERE, cos.const(-1), cos.const(1)
-        )
-        sinabs = self._abs(res)
-        # print("sinabs: ")
-        # print(__import__('tinygrad').Tensor(sinabs).numpy())
-        oneminussinabs = sinabs.const(1).e(BinaryOps.SUB, sinabs)
-        # cf1 = x.const(-0.0015)
         cf1 = x.const(-0.002)
         cf2 = x.const(-0.006)
-        # cf2 = x.const(-0.01)
-        cf3 = x.const(-0.015)
+        cf3 = x.const(-0.05)
+        cf4 = x.const(-0.05)
         # Choose correction factor based on x magnitude
-        cf = (
-            self._abs(x).e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, cf1, cf2)
-        )
-        cf = (
-            self._abs(x)
-            .e(BinaryOps.CMPLT, x.const(153e12))
-            .e(TernaryOps.WHERE, cf, cf3)
-        )
-        # correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.008).e(BinaryOps.MUL, cossign))
-        # correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.016).e(BinaryOps.MUL, cossign))
-        # correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.0015).e(BinaryOps.MUL, cossign))
+        cf = self._abs(x).e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, cf1, cf2)
+        cf = self._abs(x) .e(BinaryOps.CMPLT, x.const(153e12)) .e(TernaryOps.WHERE, cf, cf3)
+        cf = self._abs(x).e(BinaryOps.CMPLT, x.const(1e15)).e(TernaryOps.WHERE, cf, cf4)
+        correction = self._sin(
+            x.e(BinaryOps.ADD, x.const(math.pi / 2).e(BinaryOps.MUL, xsign))
+        ).e(BinaryOps.MUL, cf)
 
-        # correction = oneminussinabs.e(BinaryOps.MUL, cf.e(BinaryOps.MUL, cossign))
-        # correction = correction.e(BinaryOps.MUL, xsign)
-
-        # correction = self._sin(x.e(BinaryOps.ADD, x.const(math.pi / 2).e(BinaryOps.MUL, xsign))).e(BinaryOps.MUL, x.const(-0.006))
-        correction = self._sin(x.e(BinaryOps.ADD, x.const(math.pi / 2).e(BinaryOps.MUL, xsign))).e(BinaryOps.MUL, cf)
-        # correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.002).e(BinaryOps.MUL, cossign))
-        # correction = oneminussinabs.e(BinaryOps.MUL, x.const(-0.003).e(BinaryOps.MUL, cossign))
-        # correction = cosabs.e(BinaryOps.MUL, x.const(0.003)).e(BinaryOps.MUL, cossign)
-        # correction = cosabs.e(BinaryOps.MUL, x.const(-0.007)).e(BinaryOps.MUL, sinsign)
-
-        # Apply correction only if x greater than 1e14
-        # res = x.e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, res, res.e(BinaryOps.ADD, correction))
-        res = self._abs(x).e(BinaryOps.CMPLT, x.const(3e13)).e(
-            TernaryOps.WHERE, res, res.e(BinaryOps.ADD, correction)
-        )
-        # res = res.e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, res.e(BinaryOps.ADD, correction), res)
-        # print("res: ")
-        # print(__import__('tinygrad').Tensor(res).numpy())
-        # res = res.e(BinaryOps.ADD, correction)
-        # print("res: ")
-        # print(__import__('tinygrad').Tensor(res).numpy())
+        res = x.e(BinaryOps.CMPLT, x.const(1e13)).e(TernaryOps.WHERE, res, res.e(BinaryOps.ADD, correction))
         return res.cast(self.beginning_dtype)
 
     def _averaging_sin(self, x: LazyBuffer) -> LazyBuffer:
         # Compute 5 sines and average
+        # offsets = [0]
         offsets = [-3, -2, -1, 0, 1, 2, 3]
         # offsets = [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5]
+        # offsets = [i for i in range(-10, 11)]
         # offsets = [-2, -1, 0, 1, 2]
-        sines = [
-            self._sin(x.e(BinaryOps.ADD, x.const(offset * 2 * math.pi)))
-            for offset in offsets
-        ]
-        # sines = [self._sin(x.e(BinaryOps.ADD, x.const(offset*2*math.pi + 1e-4*offset))) for offset in offsets]
+        sines = [ self._sin(x.e(BinaryOps.ADD, x.const(offset * 2 * math.pi))) for offset in offsets ]
         sum = x.const(0)
         for s in sines:
-            # print("s: ")
-            # print(__import__('tinygrad').Tensor(s).numpy())
             sum = sum.e(BinaryOps.ADD, s)
         res = sum.e(BinaryOps.DIV, x.const(len(sines)))
         return res
 
     def _sin(self, x: LazyBuffer) -> LazyBuffer:
-        # self.beginning_dtype = x.dtype
-        # if Device.DEFAULT != "METAL":
-        #     x = x.cast(dtypes.float64)
-        # else:
-        #     x = x.cast(dtypes.float32)
-        # self.float_precision = x.dtype
         x = self.reduce_angle(x)
-        # print("reduced angle: ")
-        # print(__import__("tinygrad").Tensor(x).numpy())
-        # return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 30, x.const(1)).cast(
-        # return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 50, x.const(1)).cast(
-        #     self.beginning_dtype
-        # )
         return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 30, x.const(1))
 
     def horner_taylor_sin(
@@ -193,15 +127,6 @@ class Sin(Function):
         lt0 = x.e(BinaryOps.CMPLT, x.const(0))
         return lt0.e(TernaryOps.WHERE, x.e(UnaryOps.NEG), x)
 
-    def _is_even(self, x: LazyBuffer) -> LazyBuffer:
-        x = x.cast(dtypes.uint64).cast(self.float_precision)
-        q = x.e(BinaryOps.DIV, x.const(2))
-        q_floor = q.cast(dtypes.uint64).cast(self.float_precision)
-        diff = q.e(BinaryOps.SUB, q_floor)
-        # is_even = diff.e(BinaryOps.CMPLT, diff.const(1e-14))
-        is_even = diff.e(BinaryOps.CMPEQ, diff.const(0))
-        return is_even
-
     def _mod(self, x: LazyBuffer, y: LazyBuffer) -> LazyBuffer:
         def v1(x: LazyBuffer, y: LazyBuffer) -> LazyBuffer:
             y = y.cast(self.float_precision)
@@ -209,7 +134,6 @@ class Sin(Function):
             return x.e(
                 BinaryOps.SUB,
                 x.e(BinaryOps.DIV, y)
-                # .e(BinaryOps.DIV, x.const(1e30))
                 .cast(dtypes.int64)
                 .cast(self.float_precision)
                 .e(BinaryOps.MUL, y),
@@ -218,26 +142,10 @@ class Sin(Function):
         def v2(x: LazyBuffer, y: LazyBuffer) -> LazyBuffer:
             x = x.cast(self.float_precision)
             y = y.cast(self.float_precision)
-            # print(self.float_precision)
-            # print("x at beginning of v2: ")
-            # print(__import__("tinygrad").Tensor(x).numpy())
             q = x.e(BinaryOps.DIV, y)
-            # q = q.e(BinaryOps.SUB, q.const(1e38))
-            # q = q.e(BinaryOps.SUB, q.const(5.41576175e+37))
-            # q = q.e(BinaryOps.SUB, q.const(1.44316653e+28))
-            # q = q.e(BinaryOps.SUB, q.const(8.44522567e+18))
-
-            # print("q: ")
-            # print(__import__("tinygrad").Tensor(q).numpy())
             q_floor = q.cast(dtypes.int64).cast(self.float_precision)
-            # print("q_floor: ")
-            # print(__import__("tinygrad").Tensor(q_floor).numpy())
             diff = q.e(BinaryOps.SUB, q_floor)
-            # print("diff: ")
-            # print(__import__("tinygrad").Tensor(diff).numpy())
             x = diff.e(BinaryOps.MUL, y)
-            # print("x: ")
-            # print(__import__("tinygrad").Tensor(x).numpy())
             return x
 
         # Return v1 if x < 1e14, else return v2
@@ -246,40 +154,11 @@ class Sin(Function):
         # )
         return v1(x, y)
         # return v2(x, y)
-        # return x.e(BinaryOps.CMPLT, x.const(1e13)).e(TernaryOps.WHERE, v1(x, y), v2(x, y))
-        # return x.e(BinaryOps.CMPLT, x.const(1e5)).e(TernaryOps.WHERE, v1(x, y), v2(x, y))
 
     def reduce_angle(self, x: LazyBuffer) -> LazyBuffer:
-        # x = x.cast(self.float_precision)
-        # print(self.float_precision)
-
-        # If x greater than this value, subtract it
-        # int64lim = 5.411268065124442e37
-        # x = x.e(BinaryOps.SUB, x.const(int64lim))
-        # x = x.e(BinaryOps.DIV, x.const(2e37 * math.pi))
-        # print("x after reduction: ")
-        # print(__import__("tinygrad").Tensor(x).numpy())
-        # x = x.e(BinaryOps.CMPLT, x.const(int64lim)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(int64lim)))
-
         lt0 = x.e(BinaryOps.CMPLT, x.const(0))
         x = self._abs(x)
         x = lt0.e(TernaryOps.WHERE, x.e(BinaryOps.ADD, x.const(math.pi)), x)
-
-        # x = self._mod(x, x.const(2 * math.pi*1e33))
-        # print("x after mod 1e33: ")
-        # print(__import__("tinygrad").Tensor(x).numpy()[0])
-        # print(__import__("tinygrad").Tensor(x).numpy())
-        # x = x.e(BinaryOps.MUL, x.const(2 * math.pi))
-        # print("x after mul 2pi: ")
-        # print(__import__("tinygrad").Tensor(x).numpy())
-        # x = self._mod(x, x.const(2 * math.pi*1e16))
-        # print("x after mod 1e16: ")
-        # print(__import__("tinygrad").Tensor(x).numpy())
-        # # x = x.e(BinaryOps.MUL, x.const(2 * math.pi))
-        # print("x after mul 2pi: ")
-        # print(__import__("tinygrad").Tensor(x).numpy())
-
-        # x = self._mod(x, x.const(2 * math.pi*1e17))
         x = self._mod(x, x.const(2 * math.pi))
         res = x.e(BinaryOps.CMPEQ, x.const(float("inf"))).e(
             TernaryOps.WHERE, x.const(math.nan), x
@@ -289,71 +168,11 @@ class Sin(Function):
         )
         return res
 
-        # # Return mod 2pi if greater than a certain big value
-        fallback = self._mod(x, x.const(2 * math.pi))
-        # fallback = self._mod(x, x.const(4 * math.pi))
-        return fallback
-        orig_x = x
-
-        # Reduce to [-pi/2, pi/2]
-        beginning_dtype = x.dtype
-        old_dtype = x.dtype
-
-        lt0 = x.e(BinaryOps.CMPLT, x.const(0))
-        x = self._abs(x)
-
-        halfpi = x.const(1.5707963267948966)
-        # halfpi = x.const(math.pi / 2)
-        d = halfpi
-        divres = x.e(BinaryOps.DIV, d)
-
-        # Check if divres is even. If yes, subtract final value from halfpi
-        is_even = self._is_even(divres)
-
-        divres_pi = x.e(BinaryOps.DIV, x.const(math.pi))
-        is_even_pi = self._is_even(divres_pi)
-        # sign = is_even_pi.e(TernaryOps.WHERE, x.const(-1), x.const(1))
-        sign = is_even_pi.e(TernaryOps.WHERE, x.const(1), x.const(-1))
-
-        # If negative, add pi
-        x = lt0.e(TernaryOps.WHERE, x.e(BinaryOps.ADD, x.const(math.pi)), x)
-        # temp = divres.cast(dtypes.uint64).cast(old_dtype).e(BinaryOps.MUL, d)
-        # x = x.e(BinaryOps.SUB, temp)
-        x = divres.e(BinaryOps.SUB, divres.cast(dtypes.uint64).cast(old_dtype)).e(
-            BinaryOps.MUL, d
-        )
-
-        x = is_even.e(TernaryOps.WHERE, x, halfpi.e(BinaryOps.SUB, x))
-
-        # If sign is -1, negate
-        x = sign.e(BinaryOps.CMPEQ, x.const(1)).e(
-            TernaryOps.WHERE, x, x.e(UnaryOps.NEG)
-        )
-
-        # ltthresh = orig_x.e(BinaryOps.CMPLT, orig_x.const(1e14))
-        # res = ltthresh.e(
-        #     TernaryOps.WHERE, x.cast(beginning_dtype), fallback.cast(beginning_dtype)
-        # )
-        res = x.cast(beginning_dtype)
-
-        # Return nan if value is inf or -inf
-        res = orig_x.e(BinaryOps.CMPEQ, orig_x.const(float("inf"))).e(
-            TernaryOps.WHERE, x.const(math.nan), res
-        )
-        res = orig_x.e(BinaryOps.CMPEQ, orig_x.const(float("-inf"))).e(
-            TernaryOps.WHERE, x.const(math.nan), res
-        )
-        # print("reduced angle: ")
-        # print(__import__('tinygrad').Tensor(res).numpy())
-        return res
-
     def forward(self, x: LazyBuffer) -> LazyBuffer:
         self.x = x
         return self._sin_grand(x)
-        # return x.e(UnaryOps.SIN)
 
     def backward(self, grad_output: LazyBuffer) -> LazyBuffer:
-        # return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
         return self._sin_grand(self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)).e(
             BinaryOps.MUL, grad_output
         )
