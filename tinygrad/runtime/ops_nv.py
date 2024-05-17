@@ -165,7 +165,7 @@ class NVProgram:
         print(subprocess.check_output(["nvdisasm", fn+".cubin"]).decode('utf-8'))
       except Exception as e: print("failed to disasm cubin", str(e))
 
-    self.shmem_usage = 0
+    self.global_init, self.shmem_usage = None, 0
     constant_buffers_data = {}
 
     if MOCKGPU:
@@ -183,7 +183,8 @@ class NVProgram:
           self.registers_usage = sh_info >> 24
         if match := re.match(r'\.nv\.constant(\d+)', section_name):
           constant_buffers_data[int(match.group(1))] = memoryview(bytearray(self.lib[sh_offset:sh_offset+sh_size])).cast("I")
-        if section_name == ".nv.info":
+        if section_name == ".nv.global.init": self.global_init = memoryview(bytearray(self.lib[sh_offset:sh_offset+sh_size])).cast("I")
+        elif section_name == ".nv.info":
           section_data = memoryview(bytearray(self.lib[sh_offset:sh_offset+sh_size])).cast("I")
           for i in range(sh_size // 12):
             if section_data[i * 3 + 0] & 0xffff == 0x1204 and section_data[i * 3 + 2] + 0x240 > self.device.slm_per_thread:
@@ -193,7 +194,8 @@ class NVProgram:
     self.max_threads = ((65536 // round_up(self.registers_usage * 32, 256)) // 4) * 4 * 32
 
     # Load program and constant buffers (if any)
-    self.lib_sz = round_up(round_up(self.program.nbytes, 128) + sum([round_up(x.nbytes, 128) for i,x in constant_buffers_data.items()]), 0x1000)
+    self.lib_sz = round_up(round_up(self.program.nbytes, 128) + round_up(0 if self.global_init is None else self.global_init.nbytes, 128) +
+                           sum([round_up(x.nbytes, 128) for i,x in constant_buffers_data.items()]), 0x1000)
     self.lib_gpu = self.device.allocator.alloc(self.lib_sz)
     for st in range(0, len(self.program), 4095):
       HWComputeQueue().copy_from_cpu(self.lib_gpu.base+st*4, self.program[st:st+4095]).submit(self.device)
@@ -221,6 +223,13 @@ class NVProgram:
     if 0 in constant_buffers_data: constant_buffers_data.pop(0)
 
     off = round_up(self.program.nbytes, 128)
+    if self.global_init is not None:
+      # Constbuffer 4 contains a pointer to nv.global.init, load section and set up the pointer.
+      assert 4 in constant_buffers_data and constant_buffers_data[4].nbytes == 8
+      HWComputeQueue().copy_from_cpu(load_addr:=(self.lib_gpu.base + off), self.global_init).submit(self.device)
+      constant_buffers_data[4][0:2] = memoryview(struct.pack('Q', load_addr)).cast('I')
+      off += round_up(self.global_init.nbytes, 128)
+
     for i,data in constant_buffers_data.items():
       self.qmd.__setattr__(f'constant_buffer_addr_upper_{i}', (self.lib_gpu.base + off) >> 32)
       self.qmd.__setattr__(f'constant_buffer_addr_lower_{i}', (self.lib_gpu.base + off) & 0xffffffff)
