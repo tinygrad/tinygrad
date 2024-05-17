@@ -13,10 +13,11 @@ from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.codegen.uops import UOpGraph
 from test.helpers import is_dtype_supported
 
-def _uops_to_prg(uops_list):
+def _uops_to_prg(uops_list, print=False):
   uops = UOpGraph()
   for l in uops_list: uops.add(l.uop, l.dtype, l.vin, l.arg)
   src = Device[Device.DEFAULT].renderer.render("test", uops)
+  if print: uops.print()
   has_local = Device[Device.DEFAULT].renderer.has_local
   return CompiledRunner(Program("test", src, Device.DEFAULT, [1,1,1] if has_local else None, [1,1,1] if has_local else None, uops=uops))
 
@@ -60,7 +61,7 @@ def _test_uops_result(output_dtype, uops, res):
   # res = output_fn(uops)
   uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), res))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
-  prg = _uops_to_prg(uops)
+  prg = _uops_to_prg(uops, print=True)
   prg.exec([buf])
   ret = np.empty(1, output_dtype.np)
   buf.copyout(ret.data)
