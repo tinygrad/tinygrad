@@ -102,7 +102,8 @@ class TestSchedule(unittest.TestCase):
     c = a.sum(axis=0) + b
     check_schedule(c, 1)
 
-  @unittest.skip("not pushing permutes through reduces")
+  # not pushing permutes through reduces
+  @unittest.expectedFailure
   def test_reduce_permute_binop_fusion(self):
     a = Tensor.empty(10,10,10)
     b = Tensor.empty(10,10,1)
@@ -132,7 +133,8 @@ class TestSchedule(unittest.TestCase):
     d = a+b
     check_schedule(d, 0, [c])
 
-  @unittest.skip("failing in old lazy")
+  # failing in old lazy
+  @unittest.expectedFailure
   def test_cache_binaryop_reshaped(self):
     a = Tensor.empty(10)
     b = Tensor.empty(10)
@@ -140,7 +142,8 @@ class TestSchedule(unittest.TestCase):
     d = a.reshape(10,1)+b.reshape(10,1)
     check_schedule(d, 0, [c])
 
-  @unittest.skip("failing in new lazy")
+  # failing in new lazy
+  @unittest.expectedFailure
   def test_cache_binaryop_transpose(self):
     a = Tensor.empty(10,10)
     b = Tensor.empty(10,10)
@@ -310,7 +313,7 @@ class TestSchedule(unittest.TestCase):
     c = a.sum((0,1)).cast(dtypes.float16).permute(1,0).reshape(4,4,1).permute(1,0,2).reshape(16) + b
     check_schedule(c, 1)
 
-  @unittest.skip("failing in old lazy")
+  @unittest.expectedFailure
   def test_fancy_reshape_fusion(self):
     a = Tensor.empty(10)
     b = Tensor.empty(10)
@@ -320,7 +323,6 @@ class TestSchedule(unittest.TestCase):
     check_schedule(out, 1)
 
   # NOTE: for this to pass, LazyViews must be children of LazyBuffers so the (a+b) runs first
-  @unittest.skip("not real world")
   def test_children_dont_push(self):
     a = Tensor.empty(10, 10, 1)
     b = Tensor.empty(10, 10, 1)
@@ -329,7 +331,8 @@ class TestSchedule(unittest.TestCase):
     f = d+e
     check_schedule(f, 2)
 
-  @unittest.skip("failing in new lazy")
+  # failing in new lazy
+  @unittest.expectedFailure
   def test_dont_fuse_binops_with_children(self):
     a = Tensor.empty(10)
     b = Tensor.empty(10)
@@ -374,7 +377,7 @@ class TestSchedule(unittest.TestCase):
     check_schedule(e, 2)
 
   # this is the failing case in openpilot...it's very simple like this
-  @unittest.skip("failing in old lazy")
+  @unittest.expectedFailure
   def test_image_conv_fusion(self):
     from tinygrad.features.image import image_conv2d
     w1 = Tensor.empty(16, 16, 1, 1)
@@ -522,7 +525,8 @@ class TestSchedule(unittest.TestCase):
     out = x + y
     check_schedule(out, 2)  # TODO: this should be 1
 
-  @unittest.skip("broken due to const folding and two contiguous are different kernels")
+  # broken due to const folding and two contiguous are different kernels
+  @unittest.expectedFailure
   def test_const_no_recompute(self):
     x = Tensor(2) + Tensor(2)
     y = Tensor(2) + Tensor(2)
