@@ -1136,7 +1136,7 @@ class Tensor:
   def sigmoid(self): return F.Sigmoid.apply(self.cast(least_upper_float(self.dtype)))
   def sin(self): return F.Sin.apply(self.cast(least_upper_float(self.dtype)))
   def sqrt(self): return F.Sqrt.apply(self.cast(least_upper_float(self.dtype)))
-  def rsqrt(self): return self.reciprocal().sqrt()
+  def rsqrt(self): return self.sqrt().reciprocal()
   def cos(self): return ((math.pi/2)-self).sin()
   def tan(self): return self.sin() / self.cos()
 

@@ -378,6 +378,11 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: x/2)
     helper_test_op([()], lambda x: 2/x)
 
+  def test_reciprocal(self):
+    helper_test_op([(45,65)], lambda x: x.reciprocal())
+  def test_reciprocal_exact(self):
+    helper_test_op(None, lambda x: x.reciprocal(), vals=[[-1.,0,1]])
+
   def test_mul_naninf(self):
     helper_test_op([(45,65)], lambda x: x*math.inf)
     helper_test_op([(45,65)], lambda x: x*-math.inf)
@@ -427,9 +432,14 @@ class TestOps(unittest.TestCase):
   def test_sqrt(self):
     helper_test_op([(45,65)], lambda x: x.sqrt())
     helper_test_op([()], lambda x: x.sqrt())
+  def test_sqrt_exact(self):
+    helper_test_op(None, lambda x: x.sqrt(), vals=[[-1.,0,1]])
+
   def test_rsqrt(self):
     helper_test_op([(45,65)], lambda x: x.rsqrt())
     helper_test_op([()], lambda x: x.rsqrt())
+  def test_rsqrt_exact(self):
+    helper_test_op(None, lambda x: x.rsqrt(), vals=[[-1.,0,1]])
 
   def test_xor(self):
     tor = torch.tensor([[1,-8,1],[32,1,6]], dtype=torch.int)
