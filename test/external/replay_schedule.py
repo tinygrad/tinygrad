@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-import subprocess, pickle, shlex, sys
+import subprocess, pickle, shlex, sys, os
 from typing import Dict, List, Tuple
-from tinygrad.features.graph import print_tree
+from tinygrad.engine.graph import print_tree
 from tinygrad.helpers import colored
 from tinygrad.ops import LazyOp
 
@@ -12,7 +12,7 @@ def _run(name:str, cmd:List[str], env:Dict[str, str]) -> List[Tuple[LazyOp, ...]
   return pickle.load(open(f"./{commit}.pkl", "rb"))
 
 def _get_cmd():
-  parts, env = shlex.split(sys.argv[1]), {"SAVE_SCHEDULE": "1", "CAPTURE_AST": "1"}
+  parts, env = shlex.split(sys.argv[1]), {**os.environ, "SAVE_SCHEDULE": "1", "CAPTURE_AST": "1"}
   env.update({k: v for p in parts if "=" in p for k, v in [p.split("=")]})
   return [p for p in parts if "=" not in p], env
 

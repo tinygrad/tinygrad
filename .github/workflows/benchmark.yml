@@ -22,7 +22,7 @@ jobs:
     - name: Symlink models and datasets
       run: |
         mkdir -p weights
-        ln -s ~/tinygrad/disassemblers/applegpu disassemblers/applegpu
+        ln -s ~/tinygrad/extra/disassemblers/applegpu extra/disassemblers/applegpu
         ln -s ~/tinygrad/weights/sd-v1-4.ckpt weights/sd-v1-4.ckpt
         ln -s ~/tinygrad/weights/bpe_simple_vocab_16e6.txt.gz weights/bpe_simple_vocab_16e6.txt.gz
         ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
@@ -120,6 +120,8 @@ jobs:
       run: |
         CUDA=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
         CUDA=1 BFLOAT16=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_bfloat16.txt
+    - name: Run Tensor Core GEMM (CUDA) with BEAM
+      run: BEAM=2 CUDA=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py
     - name: Run Tensor Core GEMM (PTX)
       run: CUDA=1 PTX=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_ptx.txt
     - name: Run Tensor Core GEMM (NV)
@@ -290,7 +292,7 @@ jobs:
       run: time HSA=1 DEFAULT_FLOAT=HALF LATEWINO=1 STEPS=1000 TARGET_EVAL_ACC_PCT=93.3 python3 examples/hlb_cifar10.py | tee train_cifar_one_gpu.txt
     - name: Run full CIFAR training steps w 6 GPUS
       run: time HSA=1 DEFAULT_FLOAT=HALF STEPS=350 BS=1536 GPUS=6 TARGET_EVAL_ACC_PCT=93.3 python3 examples/hlb_cifar10.py | tee train_cifar_six_gpu.txt
-    - name: Run MLPerf resnet eval on training data
+    - name: Run MLPerf resnet eval
       run: time HSA=1 MODEL=resnet python3 examples/mlperf/model_eval.py
     - name: Run 10 MLPerf ResNet50 training steps (1 gpu)
       run: HSA=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=256 GPUS=1 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet_one_gpu.txt

@@ -4,11 +4,12 @@ import functools, itertools, collections
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, BEAM, getenv, all_int, GraphException, colored, JIT
-from tinygrad.device import Buffer, CompiledRunner, BufferXfer, Compiled, Device, Runner
+from tinygrad.device import Buffer, Compiled, Device
 from tinygrad.dtype import DType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, sint
-from tinygrad.engine.realize import ExecItem, capturing, _internal_memory_planner, EmptyOp, ViewOp
+from tinygrad.engine.realize import ExecItem, capturing, EmptyOp, ViewOp, BufferXfer, CompiledRunner, Runner
+from tinygrad.engine.schedule import _internal_memory_planner
 from tinygrad.nn.state import get_parameters
 from weakref import WeakKeyDictionary
 
@@ -40,12 +41,14 @@ def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]
     if ji.prg.__class__ in {EmptyOp, ViewOp}: continue
     ji_graph_dev: Optional[Compiled] = None # device on which the ji will be graphed. Not graphed if None.
     if isinstance(ji.prg, CompiledRunner): ji_graph_dev = ji.prg.device
-    elif isinstance(ji.prg, BufferXfer) and ji.bufs[0] and ji.bufs[0].device.split(":", 1)[0] in {"HSA", "CUDA"}:
+    elif isinstance(ji.prg, BufferXfer) and ji.bufs[0] and ji.bufs[0].device.split(":", 1)[0] in {"HSA", "CUDA", "NV", "AMD"}:
       ji_graph_dev = Device[ji.bufs[0].device]
 
+    graph_class = (ji_graph_dev.graph.func if isinstance(ji_graph_dev.graph, functools.partial) else ji_graph_dev.graph) if ji_graph_dev else None #type: ignore
     can_be_graphed = ji_graph_dev and ji_graph_dev.graph
-    can_extend_graph_batch = can_be_graphed and len(current_batch) < max_batch_size and (ji_graph_dev == current_device or
-      (isinstance(ji_graph_dev.graph, type) and issubclass(ji_graph_dev.graph, MultiGraphRunner) and type(ji_graph_dev) == type(current_device))) #type:ignore
+    can_share_graph = (ji_graph_dev == current_device or (isinstance(graph_class, type) and issubclass(graph_class, MultiGraphRunner)) and
+                       type(ji_graph_dev) == type(current_device))
+    can_extend_graph_batch = can_be_graphed and len(current_batch) < max_batch_size and can_share_graph
     if not can_extend_graph_batch and len(current_batch) > 0: flush_batch()
 
     if can_be_graphed: current_batch.append(ji)
@@ -177,7 +180,8 @@ class TinyJit(Generic[ReturnType]):
       if DEBUG >= 1 and len(set(self.input_replace.values())) != len(input_rawbuffers): print("WARNING: some input tensors not found")
     elif self.cnt >= 2:
       # jit exec
-      assert self.expected_names == expected_names and self.expected_lbs == expected_lbs, "args mismatch in JIT"
+      assert self.expected_names == expected_names, f"args mismatch in JIT: {self.expected_names=} != {expected_names}"
+      assert self.expected_lbs == expected_lbs, f"args mismatch in JIT: {self.expected_lbs=} != {expected_lbs=}"
       for idx, offset, device, size, dtype in self.extra_view_inputs:
         input_rawbuffers.append(Buffer(device, size, dtype, base=input_rawbuffers[idx], offset=offset).ensure_allocated())
       for (j,i),input_idx in self.input_replace.items(): self.jit_cache[j].bufs[i] = input_rawbuffers[input_idx]

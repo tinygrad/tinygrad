@@ -4,12 +4,12 @@ from tinygrad import Tensor, nn
 from tinygrad.ops import LoadOps, get_lazyop_info
 from tinygrad.device import Device, Compiled
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.features.search import time_linearizer, beam_search, bufs_from_lin
+from tinygrad.engine.search import time_linearizer, beam_search, bufs_from_lin
 from tinygrad.helpers import ansilen, DEBUG, getenv
 from tinygrad.shape.symbolic import sym_infer
 from tinygrad.dtype import dtypes
 from tinygrad.engine.schedule import create_schedule
-from tinygrad.features.graph import print_tree
+from tinygrad.engine.graph import print_tree
 
 if __name__ == "__main__":
   if getenv("HALF"):
@@ -55,18 +55,18 @@ if __name__ == "__main__":
     lins:List[Linearizer] = []
 
     # always try hand coded opt
-    lin = Linearizer(*si.ast, opts=device.compiler.compiler_opts)
+    lin = Linearizer(*si.ast, opts=device.renderer)
     lin.hand_coded_optimizations()
     lins.append(lin)
 
     # maybe try tensor cores
-    lin = Linearizer(*si.ast, opts=device.compiler.compiler_opts)
+    lin = Linearizer(*si.ast, opts=device.renderer)
     if lin.apply_tensor_cores():
       lins.append(lin)
 
     # try a beam search
     if beam:=getenv("BEAM"):
-      lin = Linearizer(*si.ast, opts=device.compiler.compiler_opts)
+      lin = Linearizer(*si.ast, opts=device.renderer)
       lin = beam_search(lin, rawbufs, beam, bool(getenv("BEAM_ESTIMATE", 1)))
       lins.append(lin)
 

@@ -2,10 +2,10 @@ import ctypes
 from typing import Any, Optional, Tuple, Dict, List, cast
 import tinygrad.runtime.autogen.cuda as cuda
 from tinygrad.helpers import init_c_var, GraphException
-from tinygrad.device import CompiledRunner, Buffer, BufferXfer, Device
+from tinygrad.device import Buffer, Device
 from tinygrad.runtime.ops_cuda import CUDADevice, check, encode_args, cu_time_execution
 from tinygrad.shape.symbolic import Variable
-from tinygrad.engine.realize import ExecItem
+from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner
 from tinygrad.engine.jit import MultiGraphRunner
 
 class CUDAGraph(MultiGraphRunner):
