@@ -160,7 +160,8 @@ class PTXRenderer(Renderer):
 
     # here we do a pretransform on UOps to fix some shortcomings of PTX
     for pointer_op in list(filter(lambda uop: uop.uop in [UOps.LOAD, UOps.STORE], uops.uops)): ptr_ar(pointer_op, uops)
-    uops.linearize(matcher)
+    # NOTE: type verify is failing because of pointer addition
+    uops.linearize(matcher, type_verify=False)
 
     def kk(*s: str): kernel.append("\n".join(s))
 

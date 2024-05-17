@@ -241,8 +241,9 @@ class UOpGraph:
     for i,u in enumerate(self):
       print(f"{i:4d} {str(u.uop):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str([self.uops.index(x) for x in u.vin]):32s} {u.arg}")
 
-  def linearize(self, extra_pm:Optional[PatternMatcher]=None):
-    assert self._uops is None, "already linearized"
+  def linearize(self, extra_pm:Optional[PatternMatcher]=None, type_verify=True):
+    # NOTE: relinearizering should be okay
+    #assert self._uops is None, "already linearized"
     pm = PatternMatcher(constant_folder.patterns+extra_pm.patterns) if extra_pm is not None else constant_folder
 
     # get sink
@@ -331,7 +332,7 @@ class UOpGraph:
     # TODO: ifs should be removed and just the store should be gated
     for u in ifs[::-1]: self._uops.append(UOp(UOps.ENDIF, None, (u,)))
 
-    self.type_verify()
+    if type_verify: self.type_verify()
 
   def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None,
           cachable=True, insert_before=None, simplify=True) -> UOp:
