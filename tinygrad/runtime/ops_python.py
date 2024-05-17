@@ -181,9 +181,9 @@ class PythonProgram:
 class PythonRenderer(Renderer):
   device = "PYTHON"
   def __init__(self):
-    if getenv("EMULATE_METAL"): self.device, self.tensor_cores = "METAL", MetalRenderer.tesnor_cores
-    if getenv("EMULATE_HSA"): self.device, self.tensor_cores = "HSA", HIPRenderer.tesnor_cores
-    if getenv("EMULATE_CUDA"): self.device, self.tensor_cores = "CUDA", CUDARenderer.tesnor_cores
+    if getenv("EMULATE_METAL"): self.device, self.tensor_cores = "METAL", MetalRenderer.tensor_cores
+    if getenv("EMULATE_HSA"): self.device, self.tensor_cores = "HSA", HIPRenderer.tensor_cores
+    if getenv("EMULATE_CUDA"): self.device, self.tensor_cores = "CUDA", CUDARenderer.tensor_cores
 
   def render(self, name:str, uops:UOpGraph) -> str:
     lops = [(u.uop, u.dtype, [uops.uops.index(v) for v in u.vin], u.arg) for u in uops]
