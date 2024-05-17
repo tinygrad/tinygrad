@@ -31,6 +31,19 @@ def repeat_kv(x:Tensor, n_rep:int) -> Tensor:
   # NOTE: this is different from x.repeat((1, 1, n_rep, 1))
   return x.repeat((1, 1, 1, n_rep)).reshape(bs, seqlen, n_kv_heads * n_rep, head_dim)
 
+# **** drugs ****
+def norm(x: Tensor, dim: int, keepdim: bool = False) -> Tensor:
+  return x.square().sum(dim, keepdim=keepdim).sqrt()
+
+def apply_drugs(x: Tensor, dose: float):
+  random_angles = Tensor.randn(x.shape[:3], device=x.device, dtype=x.dtype) * dose
+  random_vectors = Tensor.randn(x.shape, device=x.device, dtype=x.dtype)
+  projections = x * (random_vectors * x).sum().div(x.square().sum())
+  ortho = random_vectors - projections
+  target = norm(x, dim=-1, keepdim=True) * (ortho / norm(ortho, dim=-1, keepdim=True))
+  return x * random_angles.cos().unsqueeze(-1) + target * random_angles.sin().unsqueeze(-1)
+
+# **** llama ****
 class RMSNorm:
   def __init__(self, dim, eps=1e-6):
     self.eps = eps
@@ -80,6 +93,7 @@ class Attention:
     keys, values = repeat_kv(keys, self.n_rep), repeat_kv(values, self.n_rep)
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
     attn = xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2)
+    attn = apply_drugs(attn, 0.1)
     attn = attn.reshape(bsz, seqlen, -1)
     return self.wo(attn)
 
@@ -170,8 +184,7 @@ class Transformer:
   def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0, top_k:int=55, top_p:float=0.8, alpha_f:float=0.1, alpha_p:float=0.1):
     # TODO: better way to handle the first call v.s. the rest?
     if tokens.shape[0:2] == (1,1) and self.forward_jit is not None:
-      assert start_pos > 0
-      return self.forward_jit(tokens, Variable("start_pos", 1, self.max_context).bind(start_pos), temperature, top_k, top_p, alpha_f, alpha_p)
+      return self.forward_jit(tokens, Variable("start_pos", 0, self.max_context).bind(start_pos), temperature, top_k, top_p, alpha_f, alpha_p)
     return self.forward(tokens, start_pos, temperature, top_k, top_p, alpha_f, alpha_p)
 
 # *** helpers ***
