@@ -259,6 +259,7 @@ class UOpGraph:
 
     # recursive rewrite
     changed = getenv("UOPS_REWRITE", 1)
+    run_cnt = 0
     while changed:
       changed = 0
       @functools.lru_cache
@@ -273,6 +274,8 @@ class UOpGraph:
         else: self.nodes[key] = up
         return up
       sink = rewrite(sink)
+      run_cnt += 1
+      assert run_cnt < 100, "exceeded 100 rewrite loops!"
 
     # filter nodes that don't link to a sink
     nodes: Dict[UOp, None] = {}
