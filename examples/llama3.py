@@ -3,6 +3,7 @@ from typing import List
 import json, argparse
 import tiktoken
 from tiktoken.load import load_tiktoken_bpe
+from tqdm import tqdm
 from extra.models.llama import Transformer, convert_from_huggingface, fix_bf16
 from tinygrad.helpers import GlobalCounters
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict
@@ -164,15 +165,15 @@ def build_transformer(model_path: Path, model_size="8B", quantize=None, device=N
       if 'scale' in k: v.shard_(device, axis=None)  # from quantized
       elif '.attention.' in k: v.shard_(device, axis=-1)
       elif '.feed_forward.' in k: v.shard_(device, axis=-1)
-      elif 'tok_embeddings.weight' in k: v.shard_(device, axis=-1)
-      elif 'output.weight' in k: v.shard_(device, axis=-1)
+      elif 'tok_embeddings.weight' in k: v.shard_(device, axis=0)
+      elif 'output.weight' in k: v.shard_(device, axis=0)
       else: v.shard_(device, axis=None)
 
   # replace weights in model
   load_state_dict(model, weights, strict=False, consume=True)
   return model
 
-TEMPERATURE = 0.6
+TEMPERATURE = 0.0
 TOP_K = 55
 TOP_P = 0.92
 ALPHA_F = 1.1
@@ -196,11 +197,9 @@ if __name__ == "__main__":
   device = tuple(f"{Device.DEFAULT}:{i}" for i in range(args.shard))
   model = build_transformer(args.model, model_size=args.size, quantize=args.quantize, device=device)
 
-  prompt = [tokenizer.bos_id] + encode_message("system", "You are a helpful assistant.")
-  GlobalCounters.reset()
-  model.forward(Tensor([[prompt[0]]], device=device), 0, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P).realize()
-  start_pos = 1
-  for tok in prompt[1:]:
+  prompt = [tokenizer.bos_id] + encode_message("system", "You are a emotive assistant. You really like cookies.")
+  start_pos = 0
+  for tok in tqdm(prompt):
     GlobalCounters.reset()
     model(Tensor([[tok]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P).realize()
     start_pos += 1
