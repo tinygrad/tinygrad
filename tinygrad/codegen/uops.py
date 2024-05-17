@@ -116,17 +116,16 @@ def sum_collapse(acc, loop, val1, val2):
 
 def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst):
   assert mval.arg < 0 and loop_start.arg == 0
-  print(mval.arg)
-  comprange = UOp.min(loop_end, UOp.max(-idx+compval-UOp.const(idx.dtype, 1)+(loop_end-loop_start), loop_start))
+  comprange = UOp.min(loop_end, UOp.max(UOp.alu(BinaryOps.DIV, idx-compval-mval, mval) + (loop_end-loop_start), loop_start))
   return UOp(UOps.UNMUL, multconst.dtype, (comprange.cast(multconst.dtype) * multconst, loop_end-loop_start))
 
 constant_folder = PatternMatcher([
   # arange loop folding (early)
   ({"uop": UOps.ALU, "arg": TernaryOps.WHERE, "vin": ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": (
-        {"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin":
-         [{"__name__": "idx"}, {"uop": UOps.ALU, "arg": BinaryOps.MUL,
-            "vin": [{"__name__": "mval", "uop": UOps.CONST}, {"uop": UOps.LOOP, "vin": ({"__name__": "loop_start"}, {"__name__": "loop_end"})}]}]},
-         {"__name__": "compval", "uop": UOps.CONST})}, {"__name__": "multconst", "uop": UOps.CONST}, {"uop": UOps.CONST, "arg": 0})}, loop_collapse),
+    {"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin":
+      [{"__name__": "idx"}, {"uop": UOps.ALU, "arg": BinaryOps.MUL,
+        "vin": [{"__name__": "mval", "uop": UOps.CONST}, {"uop": UOps.LOOP, "vin": ({"__name__": "loop_start"}, {"__name__": "loop_end"})}]}]},
+      {"__name__": "compval", "uop": UOps.CONST})}, {"__name__": "multconst", "uop": UOps.CONST}, {"uop": UOps.CONST, "arg": 0})}, loop_collapse),
   # sum collapse to mul + deal with UNMUL
   ({"uop": UOps.PHI, "vin": ({"__name__": "acc", "uop": UOps.DEFINE_ACC, "vin": ({"uop": UOps.LOOP, "__name__": "loop"},)},
       {"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"__name__": "val1"}, {"__name__": "val2"}]})}, sum_collapse),
@@ -172,6 +171,7 @@ constant_folder = PatternMatcher([
   ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{"__name__": "x"}, {"uop": UOps.CONST, "arg": 1}]}, lambda x: x),   # x*1 -> x or 1*x -> x
   ({"uop": UOps.ALU, "arg": BinaryOps.SUB, "vin": ({"__name__": "x"}, {"uop": UOps.CONST, "arg": 0})}, lambda x: x),   # x-0 -> x
   ({"uop": UOps.ALU, "arg": BinaryOps.DIV, "vin": ({"__name__": "x"}, {"uop": UOps.CONST, "arg": 1})}, lambda x: x),   # x/1 -> x
+  ({"uop": UOps.ALU, "arg": BinaryOps.DIV, "vin": ({"__name__": "x"}, {"uop": UOps.CONST, "arg": -1})}, lambda x: -x), # x/-1 -> -x
   # ** zero folding **
   ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{}, {"__name__": "c", "uop": UOps.CONST, "arg": 0}]}, lambda c: c), # x*0 -> 0 or 0*x -> 0
   ({"uop": UOps.ALU, "arg": BinaryOps.SUB, "vin": ({"__name__": "x"}, {"__name__": "x"})}, lambda x: UOp.const(x.dtype, 0)),   # x-x -> 0
@@ -203,14 +203,6 @@ constant_folder = PatternMatcher([
   ({"__name__": "root", "uop": UOps.CAST, "vin":
     tuple({"uop": UOps.PHI, "vin": ({"uop": UOps.GEP, "vin": ({"__name__": "val"},), "arg": i}, {"__name__": f"v{i}"})} for i in range(2))},
     lambda root, val, v0, v1: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1))))),
-  # x*y + x*z -> x*(y+z)
-  # NOTE: you need two rules here because the matcher can't backtrack
-  ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": ({"__name__": "x"}, {"__name__": "y"})},
-                                                   {"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{"__name__": "z"}, {"__name__": "x"}]})},
-                                            lambda x,y,z: x*(y+z)),
-  ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": ({"__name__": "y"}, {"__name__": "x"})},
-                                                   {"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{"__name__": "z"}, {"__name__": "x"}]})},
-                                            lambda x,y,z: x*(y+z)),
   # NEG/CMPLT -> CMPLT
   ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": ({"uop": UOps.ALU, "arg": UnaryOps.NEG, "vin": ({"__name__": "x"},)},
                                                      {"__name__": "c", "uop": UOps.CONST, "dtype": dtypes.int})},
