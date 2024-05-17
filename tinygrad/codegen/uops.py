@@ -72,18 +72,19 @@ def _match(uop:UOp, pattern:Dict[str, Any], store:Dict[str, UOp]) -> bool:
     if k == "__name__":
       if v in store and store[v] != uop: return False
       store[v] = uop
+    elif k[:2] == "__": continue
     elif k == "vin":
       # only one if it's a tuple
       # try all permutations if it's a list
       # repeat if it's a dict
       for vp in itertools.permutations(v) if isinstance(v, list) else ([v] if isinstance(v, tuple) else [(v,)*len(uop.vin)]):
-        if len(uop.vin) != len(vp): return False
+        if len(uop.vin) != len(vp) and (len(uop.vin) not in pattern.get('__allow_len__', [])): return False
         new_store = store.copy()
         if all(_match(uu, vv, new_store) for uu, vv in zip(uop.vin, vp)):
           for k,v in new_store.items(): store[k] = v
           return True
       return False
-    elif k == "dtype":
+    elif k in {"dtype", "uop"}:
       if uop.__getattribute__(k) not in (v if isinstance(v, set) else set([v])): return False
     else:
       if uop.__getattribute__(k) != v: return False
@@ -94,7 +95,11 @@ class PatternMatcher:
     self.patterns = patterns
     self.pdict = defaultdict(list)
     # uop is required, arg is optional
-    for p,fxn in self.patterns: self.pdict[(p.get("uop"), p.get("arg", None))].append((p, fxn))
+    for p,fxn in self.patterns:
+      if isinstance(p.get("uop"), set):
+        for uop in p.get("uop"): self.pdict[(uop, p.get("arg", None))].append((p, fxn))
+      else:
+        self.pdict[(p.get("uop"), p.get("arg", None))].append((p, fxn))
 
   def rewrite(self, uop:UOp) -> Optional[UOp]:
     for p,fxn in itertools.chain(self.pdict[(uop.uop, uop.arg)], self.pdict[(uop.uop, None)]):

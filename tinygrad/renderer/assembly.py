@@ -1,6 +1,7 @@
 from typing import DefaultDict, Dict, List, Union, Optional, cast, Callable
 import struct, copy
 from collections import defaultdict
+from tinygrad.helpers import DEBUG
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op
 from tinygrad.dtype import dtypes, DType, PtrDType, ConstType
@@ -13,24 +14,6 @@ def render_val(x, dtype):
     if dtype == dtypes.half: return "0x%02X%02X" % tuple(struct.pack("e",x)[::-1])
     return "0f%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
   return str(int(x)) + ("U" if dtypes.is_unsigned(dtype) else "")
-
-def ptr_ar(root, uops):
-  val = uops.add(UOps.CONST, dtypes.int, tuple(), arg=root.vin[0].dtype.itemsize, insert_before=uops.uops.index(root))
-  if root.vin[1].uop is UOps.ALU and root.vin[1].arg in [BinaryOps.ADD, BinaryOps.SUB] and root.vin[1].vin[1].uop is UOps.CONST:
-    offset = uops.add(UOps.ALU, dtypes.int, (root.vin[1].vin[0], val), arg=BinaryOps.MUL, insert_before=uops.uops.index(root))
-    offset = uops.add(UOps.CAST, dtypes.uint64, (offset,), insert_before=uops.uops.index(root))
-    cache = uops.add(UOps.ALU, dtypes.uint64, (root.vin[0], offset), arg=BinaryOps.ADD, insert_before=uops.uops.index(root))
-    ptr = uops.add(UOps.ALU, dtypes.int, (root.vin[1].vin[1], val), arg=BinaryOps.MUL, insert_before=uops.uops.index(root))
-    if root.vin[1].arg == BinaryOps.SUB: ptr = uops.add(UOps.ALU, dtypes.int, (ptr,), arg=UnaryOps.NEG, insert_before=uops.uops.index(root))
-    root.vin = (cache, ptr) + root.vin[2:]
-  else:
-    ptr = uops.add(UOps.ALU, dtypes.int, (root.vin[1], val), arg=BinaryOps.MUL, insert_before=uops.uops.index(root))
-    if ptr.uop is UOps.CONST: root.vin = (root.vin[0], ptr) + root.vin[2:]
-    else:
-      zero = uops.add(UOps.CONST, dtypes.int, tuple(), arg=0, insert_before=uops.uops.index(root))
-      bptr = uops.add(UOps.CAST, dtypes.uint64, (ptr,), insert_before=uops.uops.index(root))
-      fptr = uops.add(UOps.ALU, dtypes.uint64, (root.vin[0], bptr), arg=BinaryOps.ADD, insert_before=uops.uops.index(root))
-      root.vin = (fptr, zero) + root.vin[2:]
 
 class PTXRenderer(Renderer):
   device = "CUDA"
@@ -144,12 +127,21 @@ class PTXRenderer(Renderer):
       lambda root,z: UOp(root.uop, root.dtype, root.vin[:2] + (UOp(UOps.CAST, dtypes.uint8, (z,)),), root.arg)),
       ({"__name__": "root", "uop": UOps.STORE, "vin": ({},{},{},{"__name__": "g", "dtype": dtypes.int})},
       lambda root,g: UOp(root.uop, root.dtype, root.vin[:3] + (UOp(UOps.CAST, dtypes.bool, (g,)),), root.arg)),
+      # ptr_ar (load/store)
+      ({"__name__": "root", "uop": {UOps.LOAD, UOps.STORE}, "__allow_len__":[2,3,4,5], "vin": ({"uop":{UOps.DEFINE_LOCAL, UOps.DEFINE_GLOBAL}},
+                                                                                  {"__name__": "const", "uop":UOps.CONST})},
+        lambda root, const: UOp(root.uop, root.dtype, (root.vin[0].cast(dtypes.int64),
+                                   UOp.const(dtypes.int64, const.arg * root.vin[0].dtype.itemsize),
+                                                      )+root.vin[2:])),
+      ({"__name__": "root", "uop": {UOps.LOAD, UOps.STORE}, "__allow_len__":[2,3,4,5], "vin": ({"uop":{UOps.DEFINE_LOCAL, UOps.DEFINE_GLOBAL}},
+                                                                                  {"__name__": "alu", "uop":{UOps.ALU,UOps.LOOP,UOps.SPECIAL}})},
+        lambda root, alu: UOp(root.uop, root.dtype,
+          (alu.cast(dtypes.int64)*UOp.const(dtypes.int64, root.vin[0].dtype.itemsize)+root.vin[0].cast(dtypes.int64),
+           UOp.const(dtypes.int64, 0))+root.vin[2:])),
     ])
 
-    # here we do a pretransform on UOps to fix some shortcomings of PTX
-    for pointer_op in list(filter(lambda uop: uop.uop in [UOps.LOAD, UOps.STORE], uops.uops)): ptr_ar(pointer_op, uops)
-    # NOTE: type verify is failing because of pointer addition
-    uops.linearize(matcher, type_verify=False)
+    uops.linearize(matcher)
+    if DEBUG >= 4: uops.print()
 
     def kk(*s: str): kernel.append("\n".join(s))
 
@@ -177,7 +169,7 @@ class PTXRenderer(Renderer):
       return self.render_const(x, dtype)
 
     def _cast(a, dtype:DType, atype:DType, bitcast=False, u=None, pred=False):
-      if atype == dtype:
+      if atype == dtype or isinstance(atype, PtrDType):
         if u: r[u] = a
         return a
       kk(*self.render_cast((ret:=ssa('cast', u, self.types[dtype])), a, dtype, atype, bitcast))
@@ -196,8 +188,10 @@ class PTXRenderer(Renderer):
       elif uop is UOps.ENDIF:
         kk(f"{r_label[vin[0]]}:")
       elif uop is UOps.STORE:
-        assert vin[0].dtype is not None and vin[1].dtype is not None and vin[2].dtype is not None
-        mem_type = '.shared' if any(x.uop is UOps.DEFINE_LOCAL for x in vin[0].parents) else '.global'
+        assert vin[0].dtype is not None and vin[2].dtype is not None
+        assert vin[0].dtype is dtypes.int64, "store isn't int64"
+        assert vin[1].dtype is dtypes.int64 and vin[1].uop is UOps.CONST, f"store isn't const {u}"
+        mem_type = '.shared' if vin[0].uop is UOps.DEFINE_LOCAL or any(x.uop is UOps.DEFINE_LOCAL for x in vin[0].parents) else '.global'
         if vin[2].dtype.count > 1:
           kk((f"@{r[vin[3]]} " if len(vin)>3 else "") + \
               f"st{mem_type}.v{vin[2].dtype.count}.{self.mem_type(vin[2].dtype.scalar())} [{r[vin[0]]}+{vin[1].arg}], {{{', '.join(r[vin[2]])}}};")
@@ -228,8 +222,9 @@ class PTXRenderer(Renderer):
           else: r[u] = const(args, dtype, mov=True)
         elif uop is UOps.GEP: r[u] = r[vin[0]][u.arg]
         elif uop is UOps.LOAD:
-          assert vin[1].dtype is not None
-          mem_type = '.shared' if any(x.uop is UOps.DEFINE_LOCAL for x in vin[0].parents) else '.global'
+          assert vin[0].dtype is dtypes.int64, "load isn't int64"
+          assert vin[1].dtype is dtypes.int64 and vin[1].uop is UOps.CONST, f"load isn't const {u}"
+          mem_type = '.shared' if vin[0].uop is UOps.DEFINE_LOCAL or any(x.uop is UOps.DEFINE_LOCAL for x in vin[0].parents) else '.global'
           if dtype.count > 1:
             r[u] = [ssa('val', dtype=self.types[dtype.scalar()]) for _ in range(dtype.count)]
             if(len(vin)>3):
