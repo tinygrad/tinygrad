@@ -410,9 +410,6 @@ class Linearizer(Kernel):
       val = self.ast_parse(op.src[0], acc, None, loaded_buffers)
       self.global_store(op.arg.idx, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val)
 
-    # optimize the uops
-    self.uops.uoptimize()
-
     # maybe graph the uops
     if DEBUG >= 5: self.uops.print()
     if getenv("GRAPHUOPS"): self.uops.graph()

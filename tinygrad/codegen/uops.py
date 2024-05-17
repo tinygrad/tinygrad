@@ -103,16 +103,12 @@ class PatternMatcher:
     return uop
 
 def sum_collapse(acc, loop, val1, val2):
-  if loop not in val1.parents:
-    loop_range = loop.vin[1]-loop.vin[0]
-    ret = val1*loop_range.cast(val1.dtype)
-    return UOp(UOps.PHI, acc.dtype, (acc, val2))+ret
-  elif loop not in val2.parents:
-    loop_range = loop.vin[1]-loop.vin[0]
-    ret = val2*loop_range.cast(val2.dtype)
-    return UOp(UOps.PHI, acc.dtype, (acc, val1))+ret
-  else:
-    return None
+  for v1,v2 in [(val1, val2), (val2, val1)]:
+    if loop not in v1.parents:
+      loop_range = loop.vin[1]-loop.vin[0]
+      ret = v1*loop_range.cast(v1.dtype)
+      return UOp(UOps.PHI, acc.dtype, (acc, v2))+ret
+  return None
 
 def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst):
   assert mval.arg < 0 and loop_start.arg == 0, f"mval:{mval.arg} loop_start:{loop_start.arg}"
@@ -223,8 +219,6 @@ class UOpGraph:
   def __init__(self, start_uops:Optional[List[UOp]]=None):
     self.nodes: Dict[Tuple, UOp] = {}
     self._uops: Optional[List[UOp]] = start_uops
-
-  def uoptimize(self): pass
 
   def __iter__(self): return iter(self.uops)
 
