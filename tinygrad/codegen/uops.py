@@ -96,10 +96,11 @@ class PatternMatcher:
     self.pdict = defaultdict(list)
     # uop is required, arg is optional
     for p,fxn in self.patterns:
-      if isinstance(p.get("uop"), set):
-        for uop in p.get("uop"): self.pdict[(uop, p.get("arg", None))].append((p, fxn))
+      uops = p.get("uop")
+      if isinstance(uops, set):
+        for uop in uops: self.pdict[(uop, p.get("arg", None))].append((p, fxn))
       else:
-        self.pdict[(p.get("uop"), p.get("arg", None))].append((p, fxn))
+        self.pdict[(uops, p.get("arg", None))].append((p, fxn))
 
   def rewrite(self, uop:UOp) -> Optional[UOp]:
     for p,fxn in itertools.chain(self.pdict[(uop.uop, uop.arg)], self.pdict[(uop.uop, None)]):
@@ -227,8 +228,8 @@ constant_folder = PatternMatcher([
   ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": ({"uop": UOps.ALU, "arg": UnaryOps.NEG, "vin": ({"__name__": "x"},)},
                                                      {"__name__": "c", "uop": UOps.CONST, "dtype": dtypes.int})},
     lambda c,x: UOp(UOps.ALU, dtypes.bool, (UOp.const(c.dtype, -c.arg), x), BinaryOps.CMPLT)),
-  # cast NOOP
-  ({"__name__": "root", "uop": UOps.CAST}, lambda root: root.vin[0] if root.dtype == root.vin[0].dtype else None),
+  # cast NOOP (NOTE: it's str to deal with PtrDType)
+  ({"__name__": "root", "uop": UOps.CAST}, lambda root: root.vin[0] if str(root.dtype) == str(root.vin[0].dtype) else None),
 ])
 
 # *** uop graph ***
