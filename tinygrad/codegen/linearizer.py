@@ -50,9 +50,9 @@ class Linearizer(Kernel):
     return self.uops.add(UOps.ALU, dtype, (a, render_b), op)
 
   # NOTE: the consts have to be cached for deduping of downstream uops to work
-  def const(self, b:ConstType, dtype:DType=dtypes.int32, insert_before=None) -> UOp:
-    if isinstance(b, Variable): return self.uops.add(UOps.DEFINE_VAR, dtype, tuple(), b.unbind()[0], insert_before=insert_before)
-    else: return self.uops.add(UOps.CONST, dtype, tuple(), b, insert_before=insert_before)
+  def const(self, b:ConstType, dtype:DType=dtypes.int32) -> UOp:
+    if isinstance(b, Variable): return self.uops.add(UOps.DEFINE_VAR, dtype, tuple(), b.unbind()[0])
+    else: return self.uops.add(UOps.CONST, dtype, tuple(), b)
 
   def cast(self, val: UOp, dtype) -> UOp: return self.uops.add(UOps.CAST, dtype, (val,)) if val.dtype != dtype else val
 

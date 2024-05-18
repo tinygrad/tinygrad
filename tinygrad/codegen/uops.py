@@ -355,8 +355,7 @@ class UOpGraph:
 
     if type_verify: self.type_verify()
 
-  def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None,
-          cachable=True, insert_before=None, simplify=True) -> UOp:
+  def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None) -> UOp:
     if uop is UOps.CONST:
       assert dtype is not None
       arg = dtypes.as_const(arg, dtype) # TODO: this doesn't belong here
