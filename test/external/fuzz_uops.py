@@ -10,9 +10,9 @@ from tinygrad.shape.symbolic import Variable
 
 def fuzz_uops(graph:DefaultDict[UOp, List[UOp]], in_degree:DefaultDict[UOp, int]):
   paths: List[List[UOp]] = []
-  for path in find_all_toposorts(graph, in_degree):
-    assert path[-1].uop is UOps.SINK, f"didn't end with SINK, ended with {path[-1]}"
-    paths.append(path:=list(path[:-1]))
+  for p in find_all_toposorts(graph, in_degree):
+    assert p[-1].uop is UOps.SINK, f"didn't end with SINK, ended with {p[-1]}"
+    paths.append(path:=list(p[:-1]))
     for u in path:
       if u.uop is UOps.IF: path.append(UOp(UOps.ENDIF, None, (u,)))
   return paths
