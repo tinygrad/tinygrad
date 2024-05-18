@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Tuple, Any, Dict, List, DefaultDict, Set
+from typing import Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable
 import functools, itertools, heapq
 from collections import defaultdict
 from enum import Enum, auto
@@ -74,7 +74,6 @@ def _match(uop:UOp, pattern:Dict[str, Any], store:Dict[str, UOp]) -> bool:
     if k == "__name__":
       if v in store and store[v] != uop: return False
       store[v] = uop
-    elif k[:2] == "__": continue
     elif k == "vin":
       # only one if it's a tuple
       # try all permutations if it's a list
@@ -88,17 +87,18 @@ def _match(uop:UOp, pattern:Dict[str, Any], store:Dict[str, UOp]) -> bool:
       return False
     elif k in {"dtype", "uop"}:
       if uop.__getattribute__(k) not in (v if isinstance(v, set) else set([v])): return False
+    elif k[:2] == "__": continue
     else:
       if uop.__getattribute__(k) != v: return False
   return True
 
 class PatternMatcher:
-  def __init__(self, patterns:List[Tuple[Dict[str, Any], Any]]):
+  def __init__(self, patterns:List[Tuple[Dict[str, Any], Callable]]):
     self.patterns = patterns
-    self.pdict = defaultdict(list)
+    self.pdict: DefaultDict[Tuple[UOps, Any], List[Tuple[Dict[str, Any], Callable]]] = defaultdict(list)
     # uop is required, arg is optional
     for p,fxn in self.patterns:
-      uops = p.get("uop")
+      uops = p["uop"]
       if isinstance(uops, set):
         for uop in uops: self.pdict[(uop, p.get("arg", None))].append((p, fxn))
       else:
@@ -109,14 +109,6 @@ class PatternMatcher:
       store: Dict[str, UOp] = {}
       if _match(uop, p, store): return fxn(**store)
     return None
-
-  def recursive_rewrite(self, uop:UOp) -> UOp:
-    run_cnt = 0
-    while (rewritten := self.rewrite(uop)):
-      assert run_cnt < 100, f"recursive_rewrite looped {uop} <--> {rewritten}"
-      uop = rewritten
-      run_cnt += 1
-    return uop
 
 def sum_collapse(phi_input, loop, val1, val2):
   for v1,v2 in [(val1, val2), (val2, val1)]:
@@ -259,19 +251,7 @@ class UOpGraph:
     for i,u in enumerate(self):
       print(f"{i:4d} {str(u.uop):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str([self.uops.index(x) for x in u.vin]):32s} {u.arg}")
 
-  def linearize(self, extra_pm:Optional[PatternMatcher]=None, type_verify=True):
-    # NOTE: relinearizering should be okay
-    #assert self._uops is None, "already linearized"
-    pm = PatternMatcher(constant_folder.patterns+extra_pm.patterns) if extra_pm is not None else constant_folder
-
-    # get sink
-    _sinks: List[UOp] = []
-    for u in self.nodes.values():
-      if u.uop is UOps.STORE: _sinks.append(u)
-      if u.uop is UOps.SINK: _sinks.extend(u.vin)
-    sink = UOp(UOps.SINK, None, tuple(_sinks))
-    del _sinks
-
+  def graph_rewrite(self, sink, pm):
     # recursive rewrite
     changed = getenv("UOPS_REWRITE", 1)
     run_cnt = 0
@@ -280,8 +260,14 @@ class UOpGraph:
       @functools.lru_cache
       def rewrite(u:UOp) -> UOp:
         nonlocal changed
-        up = pm.recursive_rewrite(u)
-        if up != u: changed += 1
+        recurse_cnt = 0
+        up = u
+        # locally recursively rewrite
+        while (rewritten := pm.rewrite(up)):
+          assert recurse_cnt < 100, f"recursive_rewrite looped {up} <--> {rewritten}"
+          up = rewritten
+          recurse_cnt += 1
+        changed += recurse_cnt
         up.vin = tuple(rewrite(x) for x in up.vin)
         if hasattr(up, "parents"): del up.parents
         # replace with cached nodes
@@ -291,27 +277,41 @@ class UOpGraph:
       sink = rewrite(sink)
       run_cnt += 1
       assert run_cnt < 100, "exceeded 100 rewrite loops!"
+    return sink
+
+  def linearize(self, extra_pm:Optional[PatternMatcher]=None, type_verify=True):
+    # NOTE: relinearizering should be okay
+    #assert self._uops is None, "already linearized"
+
+    # get sink
+    _sinks: List[UOp] = []
+    for u in self.nodes.values():
+      if u.uop is UOps.STORE: _sinks.append(u)
+      if u.uop is UOps.SINK: _sinks.extend(u.vin)
+    sink = UOp(UOps.SINK, None, tuple(_sinks))
+    del _sinks
+
+    sink = self.graph_rewrite(sink, constant_folder)
+    if extra_pm: sink = self.graph_rewrite(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
 
     # filter nodes that don't link to a sink
-    nodes: Dict[UOp, None] = {}
-    def add_parents(u:UOp):
-      if u in nodes: return
-      nodes[u] = None
-      for x in u.vin: add_parents(x)
-    sink = UOp(UOps.SINK, None, tuple(x for x in sink.vin if x.uop is not UOps.NOOP))
-    add_parents(sink)
-
     # BFS toposort
     graph: DefaultDict[UOp, List[UOp]] = defaultdict(list)
     in_degree: DefaultDict[UOp, int] = defaultdict(int)
     loops = []
     ifs = []
-    for u in nodes:
+    nodes: Dict[UOp, None] = {}
+    def add_parents(u:UOp):
+      if u in nodes: return
+      nodes[u] = None
       for x in u.vin:
+        add_parents(x)
         in_degree[u] += 1
         graph[x].append(u)
       if u.uop is UOps.LOOP: loops.append(u)
       if u.uop is UOps.IF: ifs.append(u)
+    sink = UOp(UOps.SINK, None, tuple(x for x in sink.vin if x.uop is not UOps.NOOP))
+    add_parents(sink)
 
     @functools.lru_cache(None)
     def get_recursive_children(x:UOp, include_self=False) -> Set[UOp]:
@@ -355,8 +355,7 @@ class UOpGraph:
 
     if type_verify: self.type_verify()
 
-  def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None,
-          cachable=True, insert_before=None, simplify=True) -> UOp:
+  def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None) -> UOp:
     if uop is UOps.CONST:
       assert dtype is not None
       arg = dtypes.as_const(arg, dtype) # TODO: this doesn't belong here
