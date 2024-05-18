@@ -69,9 +69,9 @@ class Sin(Function):
         else:
             x = x.cast(dtypes.float32)
         self.float_precision = x.dtype
-        # xsign = x.e(BinaryOps.CMPLT, x.const(0)).e(
-        #     TernaryOps.WHERE, x.const(-1), x.const(1)
-        # )
+        xsign = x.e(BinaryOps.CMPLT, x.const(0)).e(
+            TernaryOps.WHERE, x.const(-1), x.const(1)
+        )
 
         # Compute normal sin if below 4e13, else use averaging
         res = (
@@ -233,14 +233,14 @@ class Sin(Function):
 
         # print("REM: ")
         # print(__import__('tinygrad').Tensor(rem).numpy())
-        return rem
+        # return rem
 
         fallback = self._mod(x, x.const(2 * math.pi))
         return fallback
         # return x.e(BinaryOps.CMPLT, x.const(1e15)).e(TernaryOps.WHERE, fallback, rem)
         # return self._abs(x).e(BinaryOps.CMPLT, x.const(0.25e15)).e(TernaryOps.WHERE, fallback, rem)
         # return self._abs(x).e(BinaryOps.CMPLT, x.const(0.25e15)).e(TernaryOps.WHERE, rem, fallback)
-        return self._abs(x).e(BinaryOps.CMPLT, x.const(1e13)).e(TernaryOps.WHERE, fallback, rem)
+        return self._abs(x).e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, fallback, rem)
 
 
     def reduce_angle(self, x: LazyBuffer) -> LazyBuffer:
