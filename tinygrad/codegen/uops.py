@@ -110,14 +110,6 @@ class PatternMatcher:
       if _match(uop, p, store): return fxn(**store)
     return None
 
-  def recursive_rewrite(self, uop:UOp) -> UOp:
-    run_cnt = 0
-    while (rewritten := self.rewrite(uop)):
-      assert run_cnt < 100, f"recursive_rewrite looped {uop} <--> {rewritten}"
-      uop = rewritten
-      run_cnt += 1
-    return uop
-
 def sum_collapse(phi_input, loop, val1, val2):
   for v1,v2 in [(val1, val2), (val2, val1)]:
     if loop not in v1.parents:
@@ -280,8 +272,14 @@ class UOpGraph:
       @functools.lru_cache
       def rewrite(u:UOp) -> UOp:
         nonlocal changed
-        up = pm.recursive_rewrite(u)
-        if up != u: changed += 1
+        recurse_cnt = 0
+        up = u
+        # locally recursively rewrite
+        while (rewritten := pm.rewrite(up)):
+          assert recurse_cnt < 100, f"recursive_rewrite looped {up} <--> {rewritten}"
+          up = rewritten
+          recurse_cnt += 1
+        changed += recurse_cnt
         up.vin = tuple(rewrite(x) for x in up.vin)
         if hasattr(up, "parents"): del up.parents
         # replace with cached nodes
