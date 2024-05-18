@@ -251,19 +251,7 @@ class UOpGraph:
     for i,u in enumerate(self):
       print(f"{i:4d} {str(u.uop):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str([self.uops.index(x) for x in u.vin]):32s} {u.arg}")
 
-  def linearize(self, extra_pm:Optional[PatternMatcher]=None, type_verify=True):
-    # NOTE: relinearizering should be okay
-    #assert self._uops is None, "already linearized"
-    pm = PatternMatcher(constant_folder.patterns+extra_pm.patterns) if extra_pm is not None else constant_folder
-
-    # get sink
-    _sinks: List[UOp] = []
-    for u in self.nodes.values():
-      if u.uop is UOps.STORE: _sinks.append(u)
-      if u.uop is UOps.SINK: _sinks.extend(u.vin)
-    sink = UOp(UOps.SINK, None, tuple(_sinks))
-    del _sinks
-
+  def graph_rewrite(self, sink, pm):
     # recursive rewrite
     changed = getenv("UOPS_REWRITE", 1)
     run_cnt = 0
@@ -289,6 +277,22 @@ class UOpGraph:
       sink = rewrite(sink)
       run_cnt += 1
       assert run_cnt < 100, "exceeded 100 rewrite loops!"
+    return sink
+
+  def linearize(self, extra_pm:Optional[PatternMatcher]=None, type_verify=True):
+    # NOTE: relinearizering should be okay
+    #assert self._uops is None, "already linearized"
+
+    # get sink
+    _sinks: List[UOp] = []
+    for u in self.nodes.values():
+      if u.uop is UOps.STORE: _sinks.append(u)
+      if u.uop is UOps.SINK: _sinks.extend(u.vin)
+    sink = UOp(UOps.SINK, None, tuple(_sinks))
+    del _sinks
+
+    sink = self.graph_rewrite(sink, constant_folder)
+    if extra_pm: sink = self.graph_rewrite(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
 
     # filter nodes that don't link to a sink
     # BFS toposort
