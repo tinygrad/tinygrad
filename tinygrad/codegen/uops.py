@@ -334,6 +334,10 @@ class UOpGraph:
     for u in nodes:
       if in_degree[u] == 0: push(u)
 
+    if getenv("FUZZ_UOPS", 0):
+      from test.external.fuzz_uops import fuzz_uops
+      self.fuzz_paths = fuzz_uops(graph, in_degree.copy())
+
     self._uops = []
     while queue:
       p,x = heapq.heappop(queue)
