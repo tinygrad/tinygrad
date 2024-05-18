@@ -76,7 +76,7 @@ class TestBEAM(unittest.TestCase):
     bufs = bufs_from_lin(lin)
 
     kernel_count = GlobalCounters.kernel_count
-    tm = time_linearizer(lin, bufs, allow_test_size=False, cnt=2, disable_cache=True, clear_l2=True)
+    time_linearizer(lin, bufs, allow_test_size=False, cnt=2, disable_cache=True, clear_l2=True)
     assert GlobalCounters.kernel_count == kernel_count, "kernel count was incremented by time_linearizer"
 
   def test_filter_global_buffer(self):
