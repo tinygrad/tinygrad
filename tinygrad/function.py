@@ -86,14 +86,20 @@ class Sin(Function):
         cf3 = x.const(-0.05)
         cf4 = x.const(-0.05)
         # Choose correction factor based on x magnitude
-        cf = self._abs(x).e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, cf1, cf2)
-        cf = self._abs(x) .e(BinaryOps.CMPLT, x.const(153e12)) .e(TernaryOps.WHERE, cf, cf3)
-        cf = self._abs(x).e(BinaryOps.CMPLT, x.const(1e15)).e(TernaryOps.WHERE, cf, cf4)
+        # cf = self._abs(x).e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, cf1, cf2)
+        # cf = self._abs(x) .e(BinaryOps.CMPLT, x.const(153e12)) .e(TernaryOps.WHERE, cf, cf3)
+        # cf = self._abs(x).e(BinaryOps.CMPLT, x.const(1e15)).e(TernaryOps.WHERE, cf, cf4)
+
+        cf = x.const(-0.03)
+        # cf = x.const(-0.00)
         correction = self._sin(
             x.e(BinaryOps.ADD, x.const(math.pi / 2).e(BinaryOps.MUL, xsign))
         ).e(BinaryOps.MUL, cf)
 
-        res = x.e(BinaryOps.CMPLT, x.const(1e13)).e(TernaryOps.WHERE, res, res.e(BinaryOps.ADD, correction))
+        # res = x.e(BinaryOps.CMPLT, x.const(1e15)).e(TernaryOps.WHERE, res, res.e(BinaryOps.ADD, correction))
+        # res = x.e(BinaryOps.CMPLT, x.const(1e1)).e(TernaryOps.WHERE, res, res.e(BinaryOps.ADD, correction))
+        print("SIN: ")
+        print(__import__('tinygrad').Tensor(res).numpy())
         return res.cast(self.beginning_dtype)
 
     def _averaging_sin(self, x: LazyBuffer) -> LazyBuffer:
@@ -155,17 +161,57 @@ class Sin(Function):
         return v1(x, y)
         # return v2(x, y)
 
+    def _karatsuba_mul(self, a: LazyBuffer, b: LazyBuffer, c: LazyBuffer, d: LazyBuffer) -> LazyBuffer:
+        ac = a.e(BinaryOps.MUL, c)
+        bd = b.e(BinaryOps.MUL, d)
+        adbc = a.e(BinaryOps.ADD, b).e(BinaryOps.MUL, c.e(BinaryOps.ADD, d)).e(BinaryOps.SUB, ac).e(BinaryOps.SUB, bd)
+        # ac, adbc, bd must be concatenated in this order to get the full number
+        # i.e. ac * 10^2n + adbc * 10^n + bd, where n is the number of digits the initial number
+        # was split by
+        return ac, adbc, bd
+
+    def _mod_2pi(self, x: LazyBuffer) -> LazyBuffer:
+        a = x.e(BinaryOps.DIV, x.const(1e9)).cast(dtypes.int64).cast(self.float_precision)
+        # print("A: ")
+        # print(__import__('tinygrad').Tensor(a).numpy())
+        b = x.e(BinaryOps.SUB, a.e(BinaryOps.MUL, x.const(1e9)))
+        # print("B: ")
+        # print(__import__('tinygrad').Tensor(b).numpy())
+        c = x.const(1591549430.0)
+        d = x.const(918953419.7301692504)
+        ac, adbc, bd = self._karatsuba_mul(a, b, c, d)
+
+        # rem = result[0] * 1e-1 + result[1] * 1e-10 + result[2] * 1e-19
+        ac = ac.e(BinaryOps.MUL, x.const(1e-1))
+        adbc = adbc.e(BinaryOps.MUL, x.const(1e-10))
+        bd = bd.e(BinaryOps.MUL, x.const(1e-19))
+        rem = ac.e(BinaryOps.ADD, adbc).e(BinaryOps.ADD, bd)
+        rem = rem.e(BinaryOps.SUB, rem.cast(dtypes.int64).cast(self.float_precision))
+        rem = rem.e(BinaryOps.MUL, x.const(2*math.pi))
+        # return rem
+
+        fallback = self._mod(x, x.const(2 * math.pi))
+        # return fallback
+        # return x.e(BinaryOps.CMPLT, x.const(1e15)).e(TernaryOps.WHERE, fallback, rem)
+        # return self._abs(x).e(BinaryOps.CMPLT, x.const(0.25e15)).e(TernaryOps.WHERE, fallback, rem)
+        # return self._abs(x).e(BinaryOps.CMPLT, x.const(0.25e15)).e(TernaryOps.WHERE, rem, fallback)
+        return self._abs(x).e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, fallback, rem)
+
+
     def reduce_angle(self, x: LazyBuffer) -> LazyBuffer:
         lt0 = x.e(BinaryOps.CMPLT, x.const(0))
         x = self._abs(x)
         x = lt0.e(TernaryOps.WHERE, x.e(BinaryOps.ADD, x.const(math.pi)), x)
-        x = self._mod(x, x.const(2 * math.pi))
+        # x = self._mod(x, x.const(2 * math.pi))
+        x = self._mod_2pi(x)
         res = x.e(BinaryOps.CMPEQ, x.const(float("inf"))).e(
             TernaryOps.WHERE, x.const(math.nan), x
         )
         res = x.e(BinaryOps.CMPEQ, x.const(float("-inf"))).e(
             TernaryOps.WHERE, x.const(math.nan), res
         )
+        print("REDUCED ANGLE: ")
+        print(__import__('tinygrad').Tensor(res).numpy())
         return res
 
     def forward(self, x: LazyBuffer) -> LazyBuffer:
