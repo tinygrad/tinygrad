@@ -98,8 +98,8 @@ class Sin(Function):
 
         # res = x.e(BinaryOps.CMPLT, x.const(1e15)).e(TernaryOps.WHERE, res, res.e(BinaryOps.ADD, correction))
         # res = x.e(BinaryOps.CMPLT, x.const(1e1)).e(TernaryOps.WHERE, res, res.e(BinaryOps.ADD, correction))
-        print("SIN: ")
-        print(__import__('tinygrad').Tensor(res).numpy())
+        # print("SIN: ")
+        # print(__import__('tinygrad').Tensor(res).numpy())
         return res.cast(self.beginning_dtype)
 
     def _averaging_sin(self, x: LazyBuffer) -> LazyBuffer:
@@ -210,8 +210,8 @@ class Sin(Function):
         res = x.e(BinaryOps.CMPEQ, x.const(float("-inf"))).e(
             TernaryOps.WHERE, x.const(math.nan), res
         )
-        print("REDUCED ANGLE: ")
-        print(__import__('tinygrad').Tensor(res).numpy())
+        # print("REDUCED ANGLE: ")
+        # print(__import__('tinygrad').Tensor(res).numpy())
         return res
 
     def forward(self, x: LazyBuffer) -> LazyBuffer:
