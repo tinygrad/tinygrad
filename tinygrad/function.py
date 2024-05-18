@@ -180,7 +180,7 @@ class Sin(Function):
 
     def _mod_2pi(self, x: LazyBuffer) -> LazyBuffer:
         a = x.e(BinaryOps.DIV, x.const(1e9)).cast(dtypes.int64).cast(self.float_precision)
-        print(self.float_precision)
+        # print(self.float_precision)
         # a = x.e(BinaryOps.DIV, x.const(1e7)).cast(dtypes.uint64).cast(self.float_precision)
         # print("A: ")
         # print(__import__('tinygrad').Tensor(a).numpy())
@@ -255,8 +255,8 @@ class Sin(Function):
         res = x.e(BinaryOps.CMPEQ, x.const(float("-inf"))).e(
             TernaryOps.WHERE, x.const(math.nan), res
         )
-        print("REDUCED ANGLE: ")
-        print(__import__('tinygrad').Tensor(res).numpy())
+        # print("REDUCED ANGLE: ")
+        # print(__import__('tinygrad').Tensor(res).numpy())
         return res
 
     def forward(self, x: LazyBuffer) -> LazyBuffer:
