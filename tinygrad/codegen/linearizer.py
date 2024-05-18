@@ -50,18 +50,15 @@ class Linearizer(Kernel):
     return self.uops.add(UOps.ALU, dtype, (a, render_b), op)
 
   # NOTE: the consts have to be cached for deduping of downstream uops to work
-  def const(self, b:ConstType, dtype:DType=dtypes.int32, insert_before=None) -> UOp:
-    if isinstance(b, Variable): return self.uops.add(UOps.DEFINE_VAR, dtype, tuple(), b.unbind()[0], insert_before=insert_before)
-    else: return self.uops.add(UOps.CONST, dtype, tuple(), b, insert_before=insert_before)
-
-  def cast(self, val: UOp, dtype) -> UOp: return self.uops.add(UOps.CAST, dtype, (val,)) if val.dtype != dtype else val
+  def const(self, b:ConstType, dtype:DType=dtypes.int32) -> UOp:
+    if isinstance(b, Variable): return self.uops.add(UOps.DEFINE_VAR, dtype, tuple(), b.unbind()[0])
+    return self.uops.add(UOps.CONST, dtype, tuple(), dtypes.as_const(b, dtype))
 
   def get_reduce_acc(self, reduceop:LazyOp):
-    dtype = reduceop.dtype
-    if reduceop.op is ReduceOps.SUM: return 0.0 if dtypes.is_float(dtype) else 0
+    if reduceop.op is ReduceOps.SUM: return 0.0 if dtypes.is_float(reduceop.dtype) else 0
     elif reduceop.op is ReduceOps.MAX:
-      if dtypes.is_int(dtype): return 0 if dtypes.is_unsigned(dtype) else -2**(dtype.itemsize*8-1)
-      return -math.inf if dtypes.is_float(dtype) else False
+      if dtypes.is_int(reduceop.dtype): return 0 if dtypes.is_unsigned(reduceop.dtype) else -2**(reduceop.dtype.itemsize*8-1)
+      return -math.inf if dtypes.is_float(reduceop.dtype) else False
 
   # NOTE: once images are loaded, we uop them as their base float
   def get_base_dtype(self, dt:DType): return dt.base if isinstance(dt, ImageDType) else dt
@@ -76,7 +73,7 @@ class Linearizer(Kernel):
     AndNode: lambda self,ops,ctx:
       functools.reduce(lambda a,b: ctx.uop_alu_idx(a, b, ops, ctx, BinaryOps.MUL, dtype=dtypes.bool), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
-  def global_load(self, i:int, idxs:List[Node], acc:Optional[LazyOp]=None, barrier:Optional[UOp]=None) -> List[UOp]:
+  def global_load(self, i:int, idxs:List[Node], acc:Optional[LazyOp]=None, barrier:Optional[UOp]=None, loop_ctx:Tuple[UOp, ...]=()) -> List[UOp]:
     buf = self.bufs[i]
     localtype = self.get_base_dtype(buf.dtype if acc is None else acc.dtype)
     const = buf.val if isinstance(buf, ConstBuffer) else None
@@ -107,7 +104,7 @@ class Linearizer(Kernel):
       if key not in self.load_cache:
         if acc is not None:
           id = f"{self.reduceops.index(acc)}_{i}"
-          self.load_cache[key] = self.uops.add(UOps.DEFINE_ACC, localtype, (), (self.get_reduce_acc(acc), id, acc_count))
+          self.load_cache[key] = self.uops.add(UOps.DEFINE_ACC, localtype, loop_ctx, (self.get_reduce_acc(acc), id, acc_count))
           acc_count += 1
         elif this_const is not None:
           self.load_cache[key] = self.const(this_const, localtype)
@@ -177,10 +174,10 @@ class Linearizer(Kernel):
     return stores
 
   # render loop
-  def render_loop(self, xx:List[Variable], nm:str) -> Tuple[UOp, ...]:
+  def render_loop(self, xx:List[Variable], depth:int) -> Tuple[UOp, ...]:
     new_loops = {x.expr:self.uops.add(UOps.LOOP, dtypes.int32, (
       self.const(x.min) if isinstance(x.min, int) else cast(Node, x.min).render(self.render_ops, self),
-      self.const(x.max+1) if isinstance(x.max, int) else cast(Node, x.max+1).render(self.render_ops, self)), arg=(nm,i)) for i,x in enumerate(xx) if not isinstance(x, NumNode) and x.expr is not None}  # noqa: E501
+      self.const(x.max+1) if isinstance(x.max, int) else cast(Node, x.max+1).render(self.render_ops, self)), arg=(depth,i)) for i,x in enumerate(xx) if not isinstance(x, NumNode) and x.expr is not None}  # noqa: E501
     self.loop_uops.update(new_loops)
     return tuple(new_loops.values())
 
@@ -221,6 +218,9 @@ class Linearizer(Kernel):
       if DEBUG >= 3: print(f"{localbuf_idx} alias {i}: sts={self.sts[i]} idxs={buf_idxs}")
       alias_buf_idxs.append((i, localbuf_idx, buf_idxs,))
 
+    # reduce loop
+    loop_ctx = self.render_loop(reduce_idxs, 2)
+
     # define accumulator - modify idxs if necessary for TC
     out_buf = -1 if self.group_for_reduces else 0
     if (tc:=self.tensor_core):
@@ -230,10 +230,10 @@ class Linearizer(Kernel):
       for n in range(len(replace_acc_idxs)-len(tc.threads)):
         upcast_idxs[n] = replace_acc_idxs[len(tc.threads)+n] # replace upcasts
       if DEBUG >= 3: print(f"store alias: sts={self.sts[0]} idxs={global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs}")
-    accs[reduceop] = self.global_load(out_buf, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop)
+    accs[reduceop] = self.global_load(out_buf, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop, loop_ctx=loop_ctx)
 
     # reduce loop
-    loop_ctx = self.render_loop(reduce_idxs, f"{nm}_reduce")
+    loop_ctx = self.render_loop(reduce_idxs, "2_reduce")
 
     # store local aliases
     locals_to_store = [(localbuf_idx, buf_idxs, self.global_load(i, buf_idxs)) for i, localbuf_idx, buf_idxs in alias_buf_idxs]
@@ -255,7 +255,7 @@ class Linearizer(Kernel):
                 self.uops.add(UOps.CAST, (dt3:=tc.dtype_out.vec(wmma_sz[2])), tuple(op3:=accs[reduceop][offs[2]:offs[2]+wmma_sz[2]])))
         ret = self.uops.add(UOps.WMMA, dt3, ops, (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, tuple(map(prod, tc.thread_local_sizes)), dev))
         for z in range(wmma_sz[2]): # TODO: don't need to DEFINE_ACC, pass to WMMA in op3, or PHI accs that are not valid
-          accs[reduceop][offs[2]+z] = self.uops.add(UOps.PHI, tc.dtype_out, (op3[z], self.uops.add(UOps.GEP, tc.dtype_out, (ret,), z)) + loop_ctx)
+          accs[reduceop][offs[2]+z] = self.uops.add(UOps.PHI, tc.dtype_out, (op3[z], self.uops.add(UOps.GEP, tc.dtype_out, (ret,), z)))
     else:
       assert not locals_to_store, "storing locals isn't supported here"
 
@@ -263,7 +263,7 @@ class Linearizer(Kernel):
         global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs})
 
       # run early AST (with reduce)
-      self.ast_parse(reduceop, accs, self.acc_offsets(self.full_buf_index), loaded_buffers, do_reduce=accs[reduceop], loop_ctx=loop_ctx)
+      self.ast_parse(reduceop, accs, self.acc_offsets(self.full_buf_index), loaded_buffers, do_reduce=accs[reduceop])
 
     # end the reduce loop
     self.load_cache.clear()
@@ -295,17 +295,17 @@ class Linearizer(Kernel):
 
       # NOTE: this structure is the same as the reduce op above
 
-      # define late accumulator
-      accs[reduceop] = self.global_load(0, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop)
-
       # late reduce loop
-      loop_ctx = self.render_loop(end_local_idxs, f"{nm}_late_reduce")
+      loop_ctx = self.render_loop(end_local_idxs, 3)
+
+      # define late accumulator
+      accs[reduceop] = self.global_load(0, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop, loop_ctx=loop_ctx)
 
       # load localbufs
       loaded_buffers[self.bufs[-1]] = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, barrier=barrier)
 
       # there's no AST here (and there's no shape for the reduce LazyOp)
-      self.ast_parse(LazyOp(reduceop.op, (LazyOp(BufferOps.LOAD, (), self.bufs[-1]),)), accs, self.acc_offsets(-1), loaded_buffers, do_reduce=accs[reduceop], loop_ctx=loop_ctx)  # noqa: E501
+      self.ast_parse(LazyOp(reduceop.op, (LazyOp(BufferOps.LOAD, (), self.bufs[-1]),)), accs, self.acc_offsets(-1), loaded_buffers, do_reduce=True)  # noqa: E501
 
       # end the late reduce loop
       self.load_cache.clear()
@@ -397,7 +397,7 @@ class Linearizer(Kernel):
       self.loop_uops.update({x.expr:self.uops.add(UOps.SPECIAL, dtypes.int32, (), (len(loop_global_idxs)-1-i, x.expr, x.max+1)) for i,x in enumerate(loop_global_idxs)})  # noqa: E501
       self.loop_uops.update({x.expr:self.uops.add(UOps.SPECIAL, dtypes.int32, (), (i, x.expr, x.max+1)) for i,x in enumerate(loop_local_idxs)})
     else:
-      self.render_loop(loop_global_idxs+loop_local_idxs, "1_global_local")
+      self.render_loop(loop_global_idxs+loop_local_idxs, 1)
     if self.global_size is not None: self.global_size += [1]*(3-len(self.global_size))
     if self.local_size is not None: self.local_size += [1]*(3-len(self.local_size))
 
@@ -419,9 +419,6 @@ class Linearizer(Kernel):
       val = self.ast_parse(op.src[0], accs, None, loaded_buffers)
       self.global_store(op.arg.idx, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val)
 
-    # optimize the uops
-    self.uops.uoptimize()
-
     # maybe graph the uops
     if DEBUG >= 5: self.uops.print()
     if getenv("GRAPHUOPS"): self.uops.graph()
@@ -433,7 +430,7 @@ class Linearizer(Kernel):
     self.applied_opts_cache = self.applied_opts[:]
     return self
 
-  def ast_parse(self, x:LazyOp, accs: Dict[LazyOp, List[UOp]], offs:Optional[List[int]], loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]], do_reduce:Optional[List[UOp]]=None, loop_ctx=tuple(), cache=None) -> List[UOp]: # noqa: E501
+  def ast_parse(self, x:LazyOp, accs: Dict[LazyOp, List[UOp]], offs:Optional[List[int]], loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]], do_reduce=Optional[List[UOp]]=None, cache=None) -> List[UOp]: # noqa: E501
     if cache is None: cache = {}
     if x in cache: return cache[x]
     if x.op in BufferOps: return loaded_buffers[x.arg]
@@ -442,7 +439,7 @@ class Linearizer(Kernel):
     if x.op in ReduceOps and do_reduce is None:
       return [accs[x][i] for i in offs] if offs else accs[x]
 
-    values = [self.ast_parse(v, accs, offs, loaded_buffers, loop_ctx=loop_ctx, cache=cache) for v in x.src]
+    values = [self.ast_parse(v, acc, offs, loaded_buffers, cache=cache) for v in x.src]
     ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}
     if do_reduce is not None:
       ret: List[UOp] = []
@@ -452,7 +449,7 @@ class Linearizer(Kernel):
         ret.append(acc[off])
       for off in range(len(acc)):
         if input_acc[off] != acc[off]:
-          acc[off] = self.uops.add(UOps.PHI, input_acc[off].dtype, (input_acc[off], acc[off]) + tuple(loop_ctx))
+          acc[off] = self.uops.add(UOps.PHI, input_acc[off].dtype, (input_acc[off], acc[off]))
     else:
       ret = [self.uops.add(UOps.ALU, dtypes.bool if x.op in {BinaryOps.CMPLT, BinaryOps.CMPEQ} else val[-1].dtype, val, x.op) for val in zip(*values)]
     cache[x] = ret
@@ -461,8 +458,9 @@ class Linearizer(Kernel):
   def to_program(self) -> Program:
     self.linearize()
     info = get_lazyop_info(self.ast[0])
+    src = self.opts.render(to_function_name(self.name), self.uops)
     ops, mem = self.uops.flops_mem()
     run_count = prod((self.global_size if self.global_size else []) + (self.local_size if self.local_size else []))
     # NOTE: we use min here to ignore the indexing FLOPS
-    return Program(self.name, self.opts.render(to_function_name(self.name), self.uops), self.opts.device,
-                   self.global_size, self.local_size, self.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))
+    return Program(self.name, src, self.opts.device, self.global_size, self.local_size,
+                   self.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))
