@@ -38,7 +38,7 @@ class Tokenizer:
   def stop_tokens(self): return {self.special_tokens["<|end_of_text|>"], self.special_tokens["<|eot_id|>"]}
 
   def decode(self, toks): return self.model.decode(toks)
-  def encode(self, text): return self.model.encode(text, disallowed_special=())
+  def encode(self, text, allow_special=False): return self.model.encode(text, allowed_special="all" if allow_special else set())
 
 # **** helper functions ****
 def concat_weights(models, device=None):
@@ -139,10 +139,10 @@ MODEL_PARAMS = {
 def build_transformer(model_path: Path, model_size="8B", quantize=None, device=None):
   # build model
   if quantize == "int8": linear = Int8Linear
-  elif quantize == "nf4": linear = NF4Linear(256)
+  elif quantize == "nf4": linear = NF4Linear(64)
   else: linear = nn.Linear
   with Context(THREEFRY=0):
-    model = Transformer(**MODEL_PARAMS[model_size]["args"], linear=linear, max_context=8192, jit=True)
+    model = Transformer(**MODEL_PARAMS[model_size]["args"], linear=linear, max_context=8192 * 2, jit=True)
 
   # load weights
   if model_path.is_dir():
@@ -175,9 +175,18 @@ def build_transformer(model_path: Path, model_size="8B", quantize=None, device=N
 
 TEMPERATURE = 0.0
 TOP_K = 55
-TOP_P = 0.92
+TOP_P = 0.9
 ALPHA_F = 1.1
 ALPHA_P = 1.1
+
+def prefill(model, toks, start_pos=0):
+  # do the rest of the tokens
+  for tok in tqdm(toks):
+    GlobalCounters.reset()
+    model(Tensor([[tok]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P).realize()
+    start_pos += 1
+  return start_pos
+
 if __name__ == "__main__":
   Tensor.no_grad = True
 
@@ -195,39 +204,25 @@ if __name__ == "__main__":
   def encode_message(role: str, content: str):
     return encode_role(role) + tokenizer.encode(content.strip()) + [tokenizer.special_tokens["<|eot_id|>"]]
 
-  device = tuple(f"{Device.DEFAULT}:{i}" for i in range(args.shard))
+  device = tuple(f"{Device.DEFAULT}:{i}" for i in range(args.shard)) if args.shard > 1 else Device.DEFAULT
   model = build_transformer(args.model, model_size=args.size, quantize=args.quantize, device=device)
 
   if not args.api:
     prompt = [tokenizer.bos_id] + encode_message("system", "You are a emotive assistant. You really like cookies.")
-    start_pos = 0
-    for tok in tqdm(prompt):
-      GlobalCounters.reset()
-      model(Tensor([[tok]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P).realize()
-      start_pos += 1
 
-    toks, outputted = prompt, len(tokenizer.decode(prompt))
+    start_pos = prefill(model, prompt)
     while True:
-      toks += encode_message("user", input("Q: ")) + encode_role("assistant")
+      toks = encode_message("user", input("Q: ")) + encode_role("assistant")
 
-      for tok in toks[start_pos:-1]:
-        GlobalCounters.reset()
-        model(Tensor([[tok]], device=device), start_pos, TEMPERATURE).realize()
-        start_pos += 1
-
-      outputted = len(tokenizer.decode(toks))
+      start_pos = prefill(model, toks[start_pos:-1], start_pos=start_pos)
+      last_tok = toks[-1]
       while True:
         GlobalCounters.reset()
-        tok = model(Tensor([toks[start_pos:]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P).item()
-        start_pos = len(toks)
-        toks.append(tok)
-        if tok in tokenizer.stop_tokens:
-          print(flush=True)
-          break
-
-        toks_str = tokenizer.decode(toks)[outputted:]
-        print(toks_str, end="", flush=True)
-        outputted += len(toks_str)
+        tok = model(Tensor([[last_tok]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P).item()
+        start_pos += 1
+        if tok in tokenizer.stop_tokens: break
+        print(tokenizer.decode([tok]), end="", flush=True)
+      print(flush=True)
   else:
     from bottle import Bottle, request, response, HTTPResponse, abort
     app = Bottle()
@@ -245,6 +240,10 @@ if __name__ == "__main__":
     def enable_cors():
       for key, value in cors_headers.items(): response.set_header(key, value)
 
+    @app.get("/v1/models")
+    def models():
+      return json.dumps([str(args.model)])
+
     @app.post("/v1/internal/token-count")
     def token_count():
       rjson = json.loads(request.body.read())
@@ -257,12 +256,6 @@ if __name__ == "__main__":
     @app.post("/v1/completions")
     def completions():
       rjson = json.loads(request.body.read())
-      toks = [tokenizer.bos_id] + encode_message("system", "You are a emotive assistant. You really like cookies.") + encode_message("user", rjson.get("prompt", "")) + encode_role("assistant")
-      start_pos = 0
-      for tok in toks[:-1]:
-        GlobalCounters.reset()
-        model(Tensor([[tok]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P).realize()
-        start_pos += 1
 
       # check if we are streaming
       if rjson.get("stream", False):
@@ -270,6 +263,9 @@ if __name__ == "__main__":
         response.set_header("Cache-Control", "no-cache")
       else: abort(400, "streaming required")
 
+      toks = [tokenizer.bos_id] + tokenizer.encode(rjson.get("prompt", ""), allow_special=True)
+
+      start_pos = prefill(model, toks)
       last_tok = toks[-1]
       while True:
         GlobalCounters.reset()
@@ -278,16 +274,48 @@ if __name__ == "__main__":
         last_tok = tok
         if tok in tokenizer.stop_tokens: break
 
-        if rjson.get("stream", False):
-          res = {
-            "choices": [{
-              "text": tokenizer.decode([tok]),
-            }]
-          }
-          yield f"data: {json.dumps(res)}\n\n"
+        res = {
+          "choices": [{
+            "text": tokenizer.decode([tok]),
+          }]
+        }
+        yield f"data: {json.dumps(res)}\n\n"
 
     @app.post("/v1/chat/completions")
     def chat_completions():
-      print(request.json)
+      rjson = json.loads(request.body.read())
+      if "messages" not in rjson: abort(400, "messages required")
+
+      # check if we are streaming
+      if rjson.get("stream", False):
+        response.content_type = "text/event-stream"
+        response.set_header("Cache-Control", "no-cache")
+      else: abort(400, "streaming required")
+
+      toks = [tokenizer.bos_id]
+      for message in rjson["messages"]:
+        toks += encode_message(message["role"], message["content"])
+      # ensure that the last message was a user message
+      if message["role"] != "user": abort(400, "last message must be a user message")
+      toks += encode_role("assistant")
+
+      start_pos = prefill(model, toks[:-1])
+      last_tok = toks[-1]
+      while True:
+        GlobalCounters.reset()
+        tok = model(Tensor([[last_tok]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P).item()
+        start_pos += 1
+        last_tok = tok
+        if tok in tokenizer.stop_tokens: break
+
+        res = {
+          "choices": [{
+            "delta": {
+              "role": "assistant",
+              "content": tokenizer.decode([tok]),
+            }
+          }]
+        }
+        yield f"data: {json.dumps(res)}\n\n"
 
     app.run(host="0.0.0.0", port=7776, debug=True)
