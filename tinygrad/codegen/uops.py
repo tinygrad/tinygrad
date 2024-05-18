@@ -34,7 +34,9 @@ class UOp:
   arg: Any = None
   def tuple(self): return (self.uop, self.dtype, self.vin, self.arg)
   def cmp_tuple(self):
-    return (self.uop.value, self.arg if self.uop is not UOps.ALU else (type(self.uop), self.uop.value), self.dtype, self.vin)
+    # NOTE: this sort of DEFINE_VAR shouldn't have to be here. only for PTX
+    return (self.uop.value, (self.arg if self.uop is not UOps.DEFINE_VAR else self.arg.expr) if self.uop is not UOps.ALU else \
+            (type(self.uop), self.uop.value), self.dtype, self.vin)
   def __lt__(self, x:UOp):
     a, b = self.cmp_tuple(), x.cmp_tuple()
     try: return a < b
