@@ -78,7 +78,7 @@ def _match(uop:UOp, pattern:Dict[str, Any], store:Dict[str, UOp]) -> bool:
       if isinstance(v, set):
         if uop.__getattribute__(k) not in v: return False
       else:
-        if uop.__getattribute__(k) is not v: return False
+        if uop.__getattribute__(k) != v: return False
     elif k == "vin":
       # only one if it's a tuple
       # try all permutations if it's a list
