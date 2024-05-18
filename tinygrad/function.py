@@ -84,14 +84,15 @@ class Sin(Function):
         # return res
 
         cf1 = x.const(-0.002)
-        cf2 = x.const(-0.0075)
+        cf2 = x.const(0.002)
         cf3 = x.const(-0.002)
-        # cf4 = x.const(-0.05)
+        cf4 = x.const(-0.03)
         # Choose correction factor based on x magnitude
         cf = self._abs(x).e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, cf1, cf2)
         cf = self._abs(x) .e(BinaryOps.CMPLT, x.const(153e12)) .e(TernaryOps.WHERE, cf, cf3)
+        cf = self._abs(x) .e(BinaryOps.CMPLT, x.const(1e15)) .e(TernaryOps.WHERE, cf, cf4)
 
-        cf = x.const(-0.003)
+        # cf = x.const(0.002)
         # print("CF: ")
         # print(__import__('tinygrad').Tensor(cf).numpy())
         # cf = self._abs(x).e(BinaryOps.CMPLT, x.const(1e15)).e(TernaryOps.WHERE, cf, cf4)
@@ -244,7 +245,7 @@ class Sin(Function):
         # return x.e(BinaryOps.CMPLT, x.const(1e15)).e(TernaryOps.WHERE, fallback, rem)
         # return self._abs(x).e(BinaryOps.CMPLT, x.const(0.25e15)).e(TernaryOps.WHERE, fallback, rem)
         # return self._abs(x).e(BinaryOps.CMPLT, x.const(0.25e15)).e(TernaryOps.WHERE, rem, fallback)
-        return self._abs(x).e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, fallback, rem)
+        return self._abs(x).e(BinaryOps.CMPLT, x.const(1e13)).e(TernaryOps.WHERE, fallback, rem)
 
 
     def reduce_angle(self, x: LazyBuffer) -> LazyBuffer:
