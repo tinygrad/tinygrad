@@ -523,7 +523,7 @@ class TestSchedule(unittest.TestCase):
     x = Tensor(2) + Tensor(2)
     y = Tensor(2) + Tensor(2)
     out = x.contiguous() + y.contiguous()
-    with self.assertRaises(KernelCountException): check_schedule(out, 2)
+    with self.assertRaises(KernelCountException): check_schedule(out, 2, filter_loadops=False)
 
   def test_reduce_same_size(self):
     a = Tensor.empty(4, 4)
