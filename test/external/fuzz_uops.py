@@ -23,7 +23,7 @@ def find_all_topsorts(graph:DefaultDict[UOp, List[UOp]], in_degree:DefaultDict[U
     visited.add(x)
     for u in graph[x]:
       in_degree[u] -= 1
-      if in_degree[u] == 0: push(u)
+      push(u)
 
   # modify the path
   for x in path:
@@ -31,10 +31,9 @@ def find_all_topsorts(graph:DefaultDict[UOp, List[UOp]], in_degree:DefaultDict[U
       path.remove(x)
       path.insert(min(path.index(l) for l in x.vin), x)
     elif x.uop is UOps.IF: path.insert(len(path)-1, UOp(UOps.ENDIF, None, (x,)))
-    for u, ss in loops_children.items():
-      if x in ss:
-        ss.remove(x)
-        if len(ss) == 0: path.insert(len(path)-1, UOp(UOps.ENDLOOP, None, (u,)))
+  for u, ss in loops_children.items():
+    last_op = max(path.index(s) for s in ss)
+    path.insert(last_op+1, UOp(UOps.ENDLOOP, None, (u,)))
 
   # add to paths
   assert path[-1].uop is UOps.SINK, f"didn't end with SINK, ended with {path[-1]}"
