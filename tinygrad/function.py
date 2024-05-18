@@ -91,7 +91,7 @@ class Sin(Function):
         cf = self._abs(x).e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, cf1, cf2)
         cf = self._abs(x) .e(BinaryOps.CMPLT, x.const(153e12)) .e(TernaryOps.WHERE, cf, cf3)
 
-        cf = x.const(0.004)
+        cf = x.const(-0.003)
         # print("CF: ")
         # print(__import__('tinygrad').Tensor(cf).numpy())
         # cf = self._abs(x).e(BinaryOps.CMPLT, x.const(1e15)).e(TernaryOps.WHERE, cf, cf4)
