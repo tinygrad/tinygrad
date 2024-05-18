@@ -10,6 +10,7 @@ from tinygrad.shape.symbolic import Variable
 
 def fuzz_uops(graph:DefaultDict[UOp, List[UOp]], in_degree:DefaultDict[UOp, int]):
   paths: List[List[UOp]] = []
+  # TODO: express DEFINE_ACC and loop children conditions in the graph, builtin.
   for p in find_all_toposorts(graph, in_degree):
     assert p[-1].uop is UOps.SINK, f"didn't end with SINK, ended with {p[-1]}"
     paths.append(path:=list(p[:-1]))
