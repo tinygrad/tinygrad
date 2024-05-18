@@ -236,7 +236,7 @@ class Sin(Function):
         # return rem
 
         fallback = self._mod(x, x.const(2 * math.pi))
-        return fallback
+        # return fallback
         # return x.e(BinaryOps.CMPLT, x.const(1e15)).e(TernaryOps.WHERE, fallback, rem)
         # return self._abs(x).e(BinaryOps.CMPLT, x.const(0.25e15)).e(TernaryOps.WHERE, fallback, rem)
         # return self._abs(x).e(BinaryOps.CMPLT, x.const(0.25e15)).e(TernaryOps.WHERE, rem, fallback)
@@ -255,8 +255,8 @@ class Sin(Function):
         res = x.e(BinaryOps.CMPEQ, x.const(float("-inf"))).e(
             TernaryOps.WHERE, x.const(math.nan), res
         )
-        # print("REDUCED ANGLE: ")
-        # print(__import__('tinygrad').Tensor(res).numpy())
+        print("REDUCED ANGLE: ")
+        print(__import__('tinygrad').Tensor(res).numpy())
         return res
 
     def forward(self, x: LazyBuffer) -> LazyBuffer:
