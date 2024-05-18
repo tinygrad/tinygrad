@@ -354,7 +354,7 @@ def train_rnnt():
   pass
 
 @TinyJit
-def train_step_bert(model, optimizer, scheduler, input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor, masked_positions:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
+def train_step_bert(model, optimizer, scheduler, input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor, masked_positions:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor, loss_scaler:float):
   lm_logits, clsf_logits = model(input_ids, segment_ids, attention_mask, masked_positions)
   lm_loss = lm_logits.sparse_categorical_crossentropy(masked_lm_ids, ignore_index=masked_lm_weights)
   clsf_loss = clsf_logits.binary_crossentropy_logits(next_sentence_labels)
@@ -362,7 +362,14 @@ def train_step_bert(model, optimizer, scheduler, input_ids:Tensor, segment_ids:T
 
   if not getenv('DISABLE_BACKWARD', 0):
     optimizer.zero_grad()
-    loss.backward()
+    (loss * loss_scaler).backward()
+
+    global_norm = Tensor.empty((len(optimizer.params),), device=optimizer[0].device).realize()
+    for i, p in enumerate(optimizer.params): 
+      p.grad = p.grad / loss_scaler
+      global_norm[i] = p.grad.square().sum()
+    global_norm = global_norm.sum().sqrt()
+    for i, p in enumerate(optimizer.params): p.grad = p.grad / Tensor.where(global_norm > 1.0, global_norm, 1.0)
 
     optimizer.step()
     scheduler.step()
@@ -415,6 +422,7 @@ def train_bert():
   keep_ckpt_amount   = config["KEEP_CKPT_AMOUNT"]       = getenv("KEEP_CKPT_AMOUNT", 5)
   init_ckpt          = config["INIT_CKPT_DIR"]          = getenv("INIT_CKPT_DIR", BASEDIR)
 
+  loss_scaler        = config["LOSS_SCALER"]            = getenv("LOSS_SCALER", 2 ** 9 if dtypes.default_float == dtypes.float16 else 1.0)
   decay              = config["decay"]                  = getenv("DECAY", 0.01)
   poly_power         = config["poly_power"]             = getenv("POLY_POWER", 1.0)
 
@@ -442,8 +450,8 @@ def train_bert():
   # ** Optimizer **
   skip_list = [v for k, v in get_state_dict(model).items() if "bias" in k or "LayerNorm" in k]
   parameters = [x for x in parameters if x not in set(skip_list)]
-  optimizer = LAMB(parameters, 1 / warmup_steps, eps=1e-6, wd=decay, adam=False)
-  optimizer_skip = LAMB(skip_list, 1 / warmup_steps, eps=1e-6, wd=0.0, adam=False)
+  optimizer = LAMB(parameters, lr=max_lr, eps=1e-6, wd=decay, adam=False)
+  optimizer_skip = LAMB(skip_list, lr=max_lr, eps=1e-6, wd=0.0, adam=False)
   optimizer_group = OptimizerGroup(optimizer, optimizer_skip)
 
   # ** LR scheduler **
@@ -480,7 +488,7 @@ def train_bert():
     GlobalCounters.reset()
     loss = train_step_bert(model, optimizer_group, scheduler,
       train_data["input_ids"], train_data["segment_ids"], train_data["input_mask"], train_data["masked_lm_positions"], \
-      train_data["masked_lm_ids"], train_data["masked_lm_weights"], train_data["next_sentence_labels"])
+      train_data["masked_lm_ids"], train_data["masked_lm_weights"], train_data["next_sentence_labels"], loss_scaler)
 
     pt = time.perf_counter()
 
