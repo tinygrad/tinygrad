@@ -451,8 +451,9 @@ class Linearizer(Kernel):
   def to_program(self) -> Program:
     self.linearize()
     info = get_lazyop_info(self.ast[0])
+    src = self.opts.render(to_function_name(self.name), self.uops)
     ops, mem = self.uops.flops_mem()
     run_count = prod((self.global_size if self.global_size else []) + (self.local_size if self.local_size else []))
     # NOTE: we use min here to ignore the indexing FLOPS
-    return Program(self.name, self.opts.render(to_function_name(self.name), self.uops), self.opts.device,
-                   self.global_size, self.local_size, self.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))
+    return Program(self.name, src, self.opts.device, self.global_size, self.local_size,
+                   self.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))
