@@ -68,20 +68,16 @@ class TestBEAM(unittest.TestCase):
 
   def test_kernel_count(self):
     """
-    Ensure that the kernel count is not incremented by _time_program when clearing l2
+    Ensure that the kernel count is not incremented by time_linearizer when clearing l2
     """
-    dev = Device[Device.DEFAULT]
-    assert dev.compiler is not None
-
-    # si = [i for i in create_schedule([Tensor([1,2,3,4]).add(1).lazydata]) if i.ast[0].op not in LoadOps][0]
-    # rawbufs = _ensure_buffer_alloc(bufs_from_lin(lin:=Linearizer(*si.ast)))
-    # var_vals = {k:(k.max+k.min)//2 for k in lin.ast[0].vars()}
-    # p = lin.to_program()
+    # ast of Tensor.zeros(16).contiguous().realize()
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(16,), strides=(0,), offset=0, mask=None, contiguous=False),)))),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(16,), strides=(1,), offset=0, mask=None, contiguous=True),))))  # noqa: E501
+    lin = Linearizer(ast)
+    bufs = bufs_from_lin(lin)
 
     kernel_count = GlobalCounters.kernel_count
-    # _time_program(p, dev.compiler.compile(p.src), var_vals, rawbufs,
-    #     max_global_size=65536, clear_l2=True, cnt=3, name=to_function_name(lin.name))
-    assert GlobalCounters.kernel_count == kernel_count, "kernel count was incremented by _time_program"
+    tm = time_linearizer(lin, bufs, allow_test_size=False, cnt=2, disable_cache=True, clear_l2=True)
+    assert GlobalCounters.kernel_count == kernel_count, "kernel count was incremented by time_linearizer"
 
   def test_filter_global_buffer(self):
     # taken from https://github.com/tinygrad/tinygrad/issues/4612
