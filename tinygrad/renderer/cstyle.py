@@ -44,9 +44,9 @@ class CStyleLanguage(Renderer):
     if math.isnan(x): val = "NAN"
     elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
     elif dtype is dtypes.bool: val = "1" if x else "0"
-    elif dtypes.is_float(dtype.scalar()): val = f"{x}" + ("f" if dtype.scalar() is dtypes.float else "h" if dtype.scalar() is dtypes.half else "")
+    elif dtype is dtypes.float: val = f"{x}f"
     else: val = str(x)
-    return self.render_cast([str(val)]*dtype.count if dtype.count > 1 else [str(val)], dtype)
+    return (self.render_cast([val] * dtype.count, dtype) if dtype.count > 1 or dtype not in [dtypes.float, dtypes.int, dtypes.bool] else val)
 
   # returns a str expression of the loaded value with the output type
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
