@@ -96,7 +96,7 @@ class Sin(Function):
             x.e(BinaryOps.ADD, x.const(math.pi / 2).e(BinaryOps.MUL, xsign))
         ).e(BinaryOps.MUL, cf)
 
-        # res = x.e(BinaryOps.CMPLT, x.const(1e15)).e(TernaryOps.WHERE, res, res.e(BinaryOps.ADD, correction))
+        # res = x.e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, res, res.e(BinaryOps.ADD, correction))
         # res = x.e(BinaryOps.CMPLT, x.const(1e1)).e(TernaryOps.WHERE, res, res.e(BinaryOps.ADD, correction))
         # print("SIN: ")
         # print(__import__('tinygrad').Tensor(res).numpy())
@@ -172,19 +172,30 @@ class Sin(Function):
 
     def _mod_2pi(self, x: LazyBuffer) -> LazyBuffer:
         a = x.e(BinaryOps.DIV, x.const(1e9)).cast(dtypes.int64).cast(self.float_precision)
+        # a = x.e(BinaryOps.DIV, x.const(1e7)).cast(dtypes.int64).cast(self.float_precision)
         # print("A: ")
         # print(__import__('tinygrad').Tensor(a).numpy())
         b = x.e(BinaryOps.SUB, a.e(BinaryOps.MUL, x.const(1e9)))
+        # b = x.e(BinaryOps.SUB, a.e(BinaryOps.MUL, x.const(1e7)))
         # print("B: ")
         # print(__import__('tinygrad').Tensor(b).numpy())
-        c = x.const(1591549430.0)
-        d = x.const(918953419.7301692504)
+        # c = x.const(1591549430.0)
+        # d = x.const(918953419.7301692504)
+
+
+        # c = 15915494.0
+        # d = 309189534.197301692504
+        c = x.const(15915494.0)
+        d = x.const(309189534.197301692504)
         ac, adbc, bd = self._karatsuba_mul(a, b, c, d)
 
         # rem = result[0] * 1e-1 + result[1] * 1e-10 + result[2] * 1e-19
-        ac = ac.e(BinaryOps.MUL, x.const(1e-1))
-        adbc = adbc.e(BinaryOps.MUL, x.const(1e-10))
-        bd = bd.e(BinaryOps.MUL, x.const(1e-19))
+        # ac = ac.e(BinaryOps.MUL, x.const(1e-1))
+        ac = ac.e(BinaryOps.MUL, x.const(1e1))
+        # adbc = adbc.e(BinaryOps.MUL, x.const(1e-10))
+        adbc = adbc.e(BinaryOps.MUL, x.const(1e-8))
+        # bd = bd.e(BinaryOps.MUL, x.const(1e-19))
+        bd = bd.e(BinaryOps.MUL, x.const(1e-17))
         rem = ac.e(BinaryOps.ADD, adbc).e(BinaryOps.ADD, bd)
         rem = rem.e(BinaryOps.SUB, rem.cast(dtypes.int64).cast(self.float_precision))
         rem = rem.e(BinaryOps.MUL, x.const(2*math.pi))
