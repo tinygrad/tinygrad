@@ -38,7 +38,7 @@ class TestUOpsStats(unittest.TestCase):
     self.assertEqual(mem, expected_mem)
     # NOTE; ops also include indexing ops
     assert expected_ops <= ops and ops <= expected_ops * 2
-    
+
   def test_simple_add_sq(self):
     a = Tensor.empty(100,100)
     b = Tensor.empty(100,100)
