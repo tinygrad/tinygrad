@@ -169,6 +169,7 @@ class Compiler:
   def compile(self, src:str) -> bytes: raise NotImplementedError("need a compile function")
   def compile_cached(self, src:str) -> bytes:
     if self.cachekey is None or (lib := diskcache_get(self.cachekey, src)) is None:
+      assert not getenv("ASSERT_COMPILE"), "tried to compile with ASSERT_COMPILE set"
       lib = self.compile(src)
       if self.cachekey is not None: diskcache_put(self.cachekey, src, lib)
     return lib
