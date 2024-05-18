@@ -19,7 +19,7 @@ python3 examples/efficientnet.py webcam
 
 Take a look at [yolov8.py](https://github.com/tinygrad/tinygrad/tree/master/examples/yolov8.py).
 
-![yolov8 by tinygrad](https://github.com/tinygrad/tinygrad/tree/master/docs/showcase/yolov8_showcase_image.png)
+![yolov8 by tinygrad](https://github.com/tinygrad/tinygrad/blob/master/docs/showcase/yolov8_showcase_image.png?raw=true)
 
 ## Audio
 
@@ -37,7 +37,7 @@ SMALL=1 python3 examples/whisper.py
 
 Take a look at [mnist_gan.py](https://github.com/tinygrad/tinygrad/tree/master/examples/mnist_gan.py).
 
-![mnist gan by tinygrad](https://github.com/tinygrad/tinygrad/tree/master/docs/showcase/mnist_by_tinygrad.jpg)
+![mnist gan by tinygrad](https://github.com/tinygrad/tinygrad/blob/master/docs/showcase/mnist_by_tinygrad.jpg?raw=true)
 
 ### Stable Diffusion
 
@@ -45,7 +45,7 @@ Take a look at [mnist_gan.py](https://github.com/tinygrad/tinygrad/tree/master/e
 python3 examples/stable_diffusion.py
 ```
 
-![a horse sized cat eating a bagel](https://github.com/tinygrad/tinygrad/tree/master/docs/showcase/stable_diffusion_by_tinygrad.jpg)
+![a horse sized cat eating a bagel](https://github.com/tinygrad/tinygrad/blob/master/docs/showcase/stable_diffusion_by_tinygrad.jpg?raw=true)
 
 *"a horse sized cat eating a bagel"*
 
