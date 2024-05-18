@@ -186,6 +186,7 @@ if __name__ == "__main__":
   parser.add_argument("--size", choices=["8B", "70B"], default="8B")
   parser.add_argument("--shard", type=int, default=1)
   parser.add_argument("--quantize", choices=["int8", "nf4"])
+  parser.add_argument("--api", action="store_true")
   args = parser.parse_args()
 
   tokenizer = Tokenizer(str((args.model if args.model.is_dir() else args.model.parent) / "tokenizer.model"))
@@ -197,32 +198,96 @@ if __name__ == "__main__":
   device = tuple(f"{Device.DEFAULT}:{i}" for i in range(args.shard))
   model = build_transformer(args.model, model_size=args.size, quantize=args.quantize, device=device)
 
-  prompt = [tokenizer.bos_id] + encode_message("system", "You are a emotive assistant. You really like cookies.")
-  start_pos = 0
-  for tok in tqdm(prompt):
-    GlobalCounters.reset()
-    model(Tensor([[tok]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P).realize()
-    start_pos += 1
-
-  toks, outputted = prompt, len(tokenizer.decode(prompt))
-  while True:
-    toks += encode_message("user", input("Q: ")) + encode_role("assistant")
-
-    for tok in toks[start_pos:-1]:
+  if not args.api:
+    prompt = [tokenizer.bos_id] + encode_message("system", "You are a emotive assistant. You really like cookies.")
+    start_pos = 0
+    for tok in tqdm(prompt):
       GlobalCounters.reset()
-      model(Tensor([[tok]], device=device), start_pos, TEMPERATURE).realize()
+      model(Tensor([[tok]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P).realize()
       start_pos += 1
 
-    outputted = len(tokenizer.decode(toks))
+    toks, outputted = prompt, len(tokenizer.decode(prompt))
     while True:
-      GlobalCounters.reset()
-      tok = model(Tensor([toks[start_pos:]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P).item()
-      start_pos = len(toks)
-      toks.append(tok)
-      if tok in tokenizer.stop_tokens:
-        print(flush=True)
-        break
+      toks += encode_message("user", input("Q: ")) + encode_role("assistant")
 
-      toks_str = tokenizer.decode(toks)[outputted:]
-      print(toks_str, end="", flush=True)
-      outputted += len(toks_str)
+      for tok in toks[start_pos:-1]:
+        GlobalCounters.reset()
+        model(Tensor([[tok]], device=device), start_pos, TEMPERATURE).realize()
+        start_pos += 1
+
+      outputted = len(tokenizer.decode(toks))
+      while True:
+        GlobalCounters.reset()
+        tok = model(Tensor([toks[start_pos:]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P).item()
+        start_pos = len(toks)
+        toks.append(tok)
+        if tok in tokenizer.stop_tokens:
+          print(flush=True)
+          break
+
+        toks_str = tokenizer.decode(toks)[outputted:]
+        print(toks_str, end="", flush=True)
+        outputted += len(toks_str)
+  else:
+    from bottle import Bottle, request, response, HTTPResponse, abort
+    app = Bottle()
+
+    cors_headers = {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+      "Access-Control-Allow-Headers": "Origin, Accept, Content-Type, X-Requested-With, X-CSRF-Token, Authorization",
+      "Access-Control-Allow-Credentials": "true",
+    }
+    @app.hook("before_request")
+    def handle_options():
+      if request.method == "OPTIONS": raise HTTPResponse(headers=cors_headers)
+    @app.hook("after_request")
+    def enable_cors():
+      for key, value in cors_headers.items(): response.set_header(key, value)
+
+    @app.post("/v1/internal/token-count")
+    def token_count():
+      rjson = json.loads(request.body.read())
+      return json.dumps(len(tokenizer.encode(rjson.get("text", ""))))
+    @app.post("/v1/token/encode")
+    def token_encode():
+      rjson = json.loads(request.body.read())
+      return json.dumps(tokenizer.encode(rjson.get("text", "")))
+
+    @app.post("/v1/completions")
+    def completions():
+      rjson = json.loads(request.body.read())
+      toks = [tokenizer.bos_id] + encode_message("system", "You are a emotive assistant. You really like cookies.") + encode_message("user", rjson.get("prompt", "")) + encode_role("assistant")
+      start_pos = 0
+      for tok in toks[:-1]:
+        GlobalCounters.reset()
+        model(Tensor([[tok]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P).realize()
+        start_pos += 1
+
+      # check if we are streaming
+      if rjson.get("stream", False):
+        response.content_type = "text/event-stream"
+        response.set_header("Cache-Control", "no-cache")
+      else: abort(400, "streaming required")
+
+      last_tok = toks[-1]
+      while True:
+        GlobalCounters.reset()
+        tok = model(Tensor([[last_tok]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P).item()
+        start_pos += 1
+        last_tok = tok
+        if tok in tokenizer.stop_tokens: break
+
+        if rjson.get("stream", False):
+          res = {
+            "choices": [{
+              "text": tokenizer.decode([tok]),
+            }]
+          }
+          yield f"data: {json.dumps(res)}\n\n"
+
+    @app.post("/v1/chat/completions")
+    def chat_completions():
+      print(request.json)
+
+    app.run(host="0.0.0.0", port=7776, debug=True)
