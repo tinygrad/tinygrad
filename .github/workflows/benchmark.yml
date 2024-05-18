@@ -216,7 +216,7 @@ jobs:
     - name: Run Tensor Core GEMM (HSA)
       run: HSA=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
     - name: Run Tensor Core GEMM (AMD)
-      run: AMD=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_kfd.txt
+      run: AMD=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_amd.txt
     # TODO: AMD compiler bug causes this to fail
     #- name: Fuzz Padded Tensor Core GEMM
     #  run: HSA=1 M_START=12 M_STOP=20 M_STEP=1 N_START=12 N_STOP=20 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 DEBUG=2 python3 ./extra/gemm/fuzz_matmul.py
@@ -255,7 +255,7 @@ jobs:
           gpt2_unjitted.txt
           gpt2_jitted.txt
           matmul.txt
-          matmul_kfd.txt
+          matmul_amd.txt
           sd.txt
           mixtral.txt
 
