@@ -114,7 +114,10 @@ class GPFIFO:
     val = self._state64_le(nv_gpu.NVC56F_SEM_PAYLOAD_LO)
     flags = self._next_dword()
     typ = (flags >> 0) & 0b111
-    if typ == 1: to_mv(signal, 8).cast('Q')[0] = val
+    timestamp = (flags & (1 << 25)) == (1 << 25)
+    if typ == 1:
+      to_mv(signal, 8).cast('Q')[0] = val
+      if timestamp: to_mv(signal + 8, 8).cast('Q')[0] = int(time.perf_counter() * 1e9)
     elif typ == 3:
       mval = to_mv(signal, 8).cast('Q')[0]
       return SchedResult.CONT if mval >= val else SchedResult.YIELD

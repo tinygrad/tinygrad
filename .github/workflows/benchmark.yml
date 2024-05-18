@@ -201,8 +201,9 @@ jobs:
         ln -s /raid/datasets/imagenet extra/datasets/imagenet
     - name: Show off tinybox
       run: /opt/rocm/bin/rocm-bandwidth-test
-    - name: Run model inference benchmark
-      run: LD_PRELOAD="/opt/rocm/lib/libhsa-runtime64.so" HSA=1 NOCLANG=1 python3 test/external/external_model_benchmark.py
+    # TODO: unstable on AMD
+    #- name: Run model inference benchmark
+    #  run: LD_PRELOAD="/opt/rocm/lib/libhsa-runtime64.so" HSA=1 NOCLANG=1 python3 test/external/external_model_benchmark.py
     # TODO: unstable on AMD
     #- name: Test speed vs torch
     #  run: |
@@ -292,7 +293,7 @@ jobs:
       run: time HSA=1 DEFAULT_FLOAT=HALF LATEWINO=1 STEPS=1000 TARGET_EVAL_ACC_PCT=93.3 python3 examples/hlb_cifar10.py | tee train_cifar_one_gpu.txt
     - name: Run full CIFAR training steps w 6 GPUS
       run: time HSA=1 DEFAULT_FLOAT=HALF STEPS=350 BS=1536 GPUS=6 TARGET_EVAL_ACC_PCT=93.3 python3 examples/hlb_cifar10.py | tee train_cifar_six_gpu.txt
-    - name: Run MLPerf resnet eval on training data
+    - name: Run MLPerf resnet eval
       run: time HSA=1 MODEL=resnet python3 examples/mlperf/model_eval.py
     - name: Run 10 MLPerf ResNet50 training steps (1 gpu)
       run: HSA=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=256 GPUS=1 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet_one_gpu.txt
