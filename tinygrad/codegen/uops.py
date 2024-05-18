@@ -291,25 +291,23 @@ class UOpGraph:
       assert run_cnt < 100, "exceeded 100 rewrite loops!"
 
     # filter nodes that don't link to a sink
-    nodes: Dict[UOp, None] = {}
-    def add_parents(u:UOp):
-      if u in nodes: return
-      nodes[u] = None
-      for x in u.vin: add_parents(x)
-    sink = UOp(UOps.SINK, None, tuple(x for x in sink.vin if x.uop is not UOps.NOOP))
-    add_parents(sink)
-
     # BFS toposort
     graph: DefaultDict[UOp, List[UOp]] = defaultdict(list)
     in_degree: DefaultDict[UOp, int] = defaultdict(int)
     loops = []
     ifs = []
-    for u in nodes:
+    nodes: Dict[UOp, None] = {}
+    def add_parents(u:UOp):
+      if u in nodes: return
+      nodes[u] = None
       for x in u.vin:
+        add_parents(x)
         in_degree[u] += 1
         graph[x].append(u)
       if u.uop is UOps.LOOP: loops.append(u)
       if u.uop is UOps.IF: ifs.append(u)
+    sink = UOp(UOps.SINK, None, tuple(x for x in sink.vin if x.uop is not UOps.NOOP))
+    add_parents(sink)
 
     @functools.lru_cache(None)
     def get_recursive_children(x:UOp, include_self=False) -> Set[UOp]:
