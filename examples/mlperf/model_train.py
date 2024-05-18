@@ -402,7 +402,8 @@ def train_retinanet():
 
   if not SYNCBN: resnet.BatchNorm = functools.partial(UnsyncedBatchNorm, num_devices=len(GPUS))
   model = retinanet.RetinaNet(resnet.ResNeXt50_32X4D(), num_anchors=anchor_generator.num_anchors_per_location()[0])
-  model.backbone.body.fc = None
+  # model.backbone.body.fc = None
+  # model.load_from_pretrained()
 
   for k, v in get_state_dict(model).items():
     if 'head' in k and ('clas' in k or 'reg' in k ):
@@ -567,15 +568,17 @@ def train_retinanet():
     eval_acc = coco_eval.stats[0]
     print(colored(f'{epoch} EVAL_ACC {eval_acc} || {time.time()-bt}', 'green'))
     if getenv("RESET_STEP", 1): val_step.reset()
+
+    if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
+    fn = f"./ckpts/retinanet_{len(GPUS)}x{HOSTNAME}_B{BS}_E{epoch}.safe"
+    state_dict = get_state_dict(model)
+    for k,v in state_dict.items():
+      state_dict[k] = v.cast(dtypes.float32)
+    safe_save(state_dict, fn)
+    print(f" *** Model saved to {fn} ***")
     if eval_acc>MAP_TARGET:
-      print('SUCCESSFULLY TRAINED TO TARGET: EPOCH', epoch)
-      if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
-      fn = f"./ckpts/retinanet_{len(GPUS)}x{HOSTNAME}_B{BS}_E{epoch}.safe"
-      state_dict = get_state_dict(model)
-      for k,v in state_dict.items():
-        state_dict[k] = v.cast(dtypes.float32)
-      safe_save(state_dict, fn)
-      print(f" *** Model saved to {fn} ***")
+      print('SUCCESSFULLY TRAINED TO TARGET: EPOCH', epoch, eval_acc)
+
       
 def train_unet3d():
   # TODO: Unet3d
