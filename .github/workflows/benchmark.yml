@@ -201,8 +201,9 @@ jobs:
         ln -s /raid/datasets/imagenet extra/datasets/imagenet
     - name: Show off tinybox
       run: /opt/rocm/bin/rocm-bandwidth-test
-    - name: Run model inference benchmark
-      run: LD_PRELOAD="/opt/rocm/lib/libhsa-runtime64.so" HSA=1 NOCLANG=1 python3 test/external/external_model_benchmark.py
+    # TODO: unstable on AMD
+    #- name: Run model inference benchmark
+    #  run: LD_PRELOAD="/opt/rocm/lib/libhsa-runtime64.so" HSA=1 NOCLANG=1 python3 test/external/external_model_benchmark.py
     # TODO: unstable on AMD
     #- name: Test speed vs torch
     #  run: |

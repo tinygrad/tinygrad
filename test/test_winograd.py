@@ -63,10 +63,9 @@ class TestWinograd(unittest.TestCase):
     ops_normal, mem_normal = GlobalCounters.global_ops, GlobalCounters.global_mem
 
     ops_ratio, mem_ratio = ops_wino/ops_normal, mem_wino/mem_normal
-    assert ops_ratio < 2 and mem_ratio < 10
-
     print(f"ops: normal {ops_normal:9d} wino {ops_wino:9d} ratio {ops_ratio:.2f}")
     print(f"mem: normal {mem_normal:9d} wino {mem_wino:9d} ratio {mem_ratio:.2f}")
+    assert ops_ratio < 2 and mem_ratio < 10
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
