@@ -289,8 +289,8 @@ def batch_load_retinanet(coco, bs=8, shuffle=False, seed=None, anchor_np=[1,2,3,
     YM = Tensor.empty(*msz, dtype=dtypes.int64, device=f"disk:/dev/shm/retinanet_YM")
 
 
-    for _ in range(cpu_count()):
-    # for _ in range(4):
+    # for _ in range(cpu_count()):
+    for _ in range(10):
       p = Process(target=loader_process, args=(q_in, q_out, X, seed, coco, YB, YL, YM, anchor_np))
       p.daemon = True
       p.start()
@@ -372,8 +372,8 @@ def batch_load_retinanet_val(coco, bs=8, shuffle=False, seed=None):
     X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:/dev/shm/retinanet_X_val")
     Y_IDX = [None] * (bs*BATCH_COUNT)
 
-    for _ in range(cpu_count()):
-    # for _ in range(4):
+    # for _ in range(cpu_count()):
+    for _ in range(10):
       p = Process(target=loader_process_val, args=(q_in, q_out, X, seed, coco))
       p.daemon = True
       p.start()
