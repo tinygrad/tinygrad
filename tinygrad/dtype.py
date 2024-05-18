@@ -80,7 +80,8 @@ class dtypes:
   @staticmethod
   def imagef(shp): return ImageDType(100, 4, "imagef", 'f', 1, shape=shp, base=dtypes.float32)
 
-  default_float: ClassVar[DType] = float32
+  # default_float: ClassVar[DType] = float32
+  default_float: ClassVar[DType] = float64
   default_int: ClassVar[DType] = int32
 
 if (env_default_float := getenv("DEFAULT_FLOAT", "")):
