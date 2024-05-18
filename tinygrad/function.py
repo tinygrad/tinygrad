@@ -83,7 +83,7 @@ class Sin(Function):
         # res = self._sin(x)
         # return res
 
-        cf1 = x.const(-0.002)
+        cf1 = x.const(-0.0025)
         cf2 = x.const(0.002)
         cf3 = x.const(-0.002)
         cf4 = x.const(-0.03)
