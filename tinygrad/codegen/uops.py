@@ -378,7 +378,7 @@ class UOpGraph:
       elif u.uop is UOps.ENDLOOP:
         mults = mult_stack.pop(-1)
       elif u.uop is UOps.ALU:
-        flops += mults
+        flops += mults * (2 if u.arg == TernaryOps.MULACC else 1)
       elif u.uop is UOps.LOAD:
         assert u.dtype is not None
         mem += u.dtype.itemsize * mults
