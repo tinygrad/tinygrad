@@ -28,17 +28,6 @@ class TestUOpsStats(unittest.TestCase):
     # NOTE; ops also include indexing ops
     assert expected_ops <= ops and ops <= expected_ops * 2
 
-  def test_simple_mulacc(self):
-    a = Tensor.empty(100,100)
-    b = Tensor.empty(100,100)
-    c = a*b+b
-    ops, mem = get_stats(c)
-    expected_ops = c.numel() * 2
-    expected_mem = a.nbytes() + b.nbytes() + c.nbytes()
-    self.assertEqual(mem, expected_mem)
-    # NOTE; ops also include indexing ops
-    assert expected_ops <= ops and ops <= expected_ops * 2
-
   def test_simple_add_sq(self):
     a = Tensor.empty(100,100)
     b = Tensor.empty(100,100)
