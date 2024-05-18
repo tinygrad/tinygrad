@@ -69,9 +69,9 @@ class Sin(Function):
         else:
             x = x.cast(dtypes.float32)
         self.float_precision = x.dtype
-        xsign = x.e(BinaryOps.CMPLT, x.const(0)).e(
-            TernaryOps.WHERE, x.const(-1), x.const(1)
-        )
+        # xsign = x.e(BinaryOps.CMPLT, x.const(0)).e(
+        #     TernaryOps.WHERE, x.const(-1), x.const(1)
+        # )
 
         # Compute normal sin if below 4e13, else use averaging
         res = (
@@ -79,24 +79,24 @@ class Sin(Function):
             .e(BinaryOps.CMPLT, x.const(1e13))
             .e(TernaryOps.WHERE, self._sin(x), self._averaging_sin(x))
         )
-        return res
+        # return res
         # res = self._sin(x)
         # return res
 
-        cf1 = x.const(-0.002)
-        cf2 = x.const(-0.0075)
-        cf3 = x.const(-0.05)
-        cf4 = x.const(-0.05)
+        # cf1 = x.const(-0.002)
+        # cf2 = x.const(-0.0075)
+        # cf3 = x.const(-0.05)
+        # cf4 = x.const(-0.05)
         # Choose correction factor based on x magnitude
         # cf = self._abs(x).e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, cf1, cf2)
         # cf = self._abs(x) .e(BinaryOps.CMPLT, x.const(153e12)) .e(TernaryOps.WHERE, cf, cf3)
         # cf = self._abs(x).e(BinaryOps.CMPLT, x.const(1e15)).e(TernaryOps.WHERE, cf, cf4)
 
-        cf = x.const(-0.03)
+        # cf = x.const(-0.03)
         # cf = x.const(-0.00)
-        correction = self._sin(
-            x.e(BinaryOps.ADD, x.const(math.pi / 2).e(BinaryOps.MUL, xsign))
-        ).e(BinaryOps.MUL, cf)
+        # correction = self._sin(
+        #     x.e(BinaryOps.ADD, x.const(math.pi / 2).e(BinaryOps.MUL, xsign))
+        # ).e(BinaryOps.MUL, cf)
 
         # res = x.e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, res, res.e(BinaryOps.ADD, correction))
         # res = x.e(BinaryOps.CMPLT, x.const(1e1)).e(TernaryOps.WHERE, res, res.e(BinaryOps.ADD, correction))
