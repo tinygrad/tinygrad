@@ -79,7 +79,9 @@ class Sin(Function):
             .e(BinaryOps.CMPLT, x.const(1e13))
             .e(TernaryOps.WHERE, self._sin(x), self._averaging_sin(x))
         )
+        return res
         # res = self._sin(x)
+        # return res
 
         cf1 = x.const(-0.002)
         cf2 = x.const(-0.0075)
@@ -163,8 +165,14 @@ class Sin(Function):
 
     def _karatsuba_mul(self, a: LazyBuffer, b: LazyBuffer, c: LazyBuffer, d: LazyBuffer) -> LazyBuffer:
         ac = a.e(BinaryOps.MUL, c)
+        print("AC: ")
+        print(__import__('tinygrad').Tensor(ac).numpy())
         bd = b.e(BinaryOps.MUL, d)
+        print("BD: ")
+        print(__import__('tinygrad').Tensor(bd).numpy())
         adbc = a.e(BinaryOps.ADD, b).e(BinaryOps.MUL, c.e(BinaryOps.ADD, d)).e(BinaryOps.SUB, ac).e(BinaryOps.SUB, bd)
+        print("ADBC: ")
+        print(__import__('tinygrad').Tensor(adbc).numpy())
         # ac, adbc, bd must be concatenated in this order to get the full number
         # i.e. ac * 10^2n + adbc * 10^n + bd, where n is the number of digits the initial number
         # was split by
@@ -172,41 +180,67 @@ class Sin(Function):
 
     def _mod_2pi(self, x: LazyBuffer) -> LazyBuffer:
         a = x.e(BinaryOps.DIV, x.const(1e9)).cast(dtypes.int64).cast(self.float_precision)
-        # a = x.e(BinaryOps.DIV, x.const(1e7)).cast(dtypes.int64).cast(self.float_precision)
+        print(self.float_precision)
+        # a = x.e(BinaryOps.DIV, x.const(1e7)).cast(dtypes.uint64).cast(self.float_precision)
+        print("A: ")
+        print(__import__('tinygrad').Tensor(a).numpy())
+        # a = a.e(BinaryOps.MUL, x.const(1e9))
         # print("A: ")
         # print(__import__('tinygrad').Tensor(a).numpy())
+        # b = x.e(BinaryOps.SUB, a)
         b = x.e(BinaryOps.SUB, a.e(BinaryOps.MUL, x.const(1e9)))
         # b = x.e(BinaryOps.SUB, a.e(BinaryOps.MUL, x.const(1e7)))
-        # print("B: ")
-        # print(__import__('tinygrad').Tensor(b).numpy())
-        # c = x.const(1591549430.0)
-        # d = x.const(918953419.7301692504)
+        print("B: ")
+        print(__import__('tinygrad').Tensor(b).numpy())
+        c = x.const(1591549430.0)
+        d = x.const(918953419.7301692504)
 
 
         # c = 15915494.0
         # d = 309189534.197301692504
-        c = x.const(15915494.0)
-        d = x.const(309189534.197301692504)
+
+        # c = 15915494.0
+        # d = 309189534.197301692504
+        # c = x.const(15915494.0)
+        # d = x.const(309189534.197301692504)
+
+        # c = x.const(159154.0)
+        # d = x.const(9430918.9534197301692504)
         ac, adbc, bd = self._karatsuba_mul(a, b, c, d)
 
         # rem = result[0] * 1e-1 + result[1] * 1e-10 + result[2] * 1e-19
-        # ac = ac.e(BinaryOps.MUL, x.const(1e-1))
-        ac = ac.e(BinaryOps.MUL, x.const(1e1))
-        # adbc = adbc.e(BinaryOps.MUL, x.const(1e-10))
-        adbc = adbc.e(BinaryOps.MUL, x.const(1e-8))
-        # bd = bd.e(BinaryOps.MUL, x.const(1e-19))
-        bd = bd.e(BinaryOps.MUL, x.const(1e-17))
+        ac = ac.e(BinaryOps.MUL, x.const(1e-1))
+        # ac = ac.e(BinaryOps.MUL, x.const(1e1))
+        # ac = ac.e(BinaryOps.MUL, x.const(1e5))
+        adbc = adbc.e(BinaryOps.MUL, x.const(1e-10))
+        # adbc = adbc.e(BinaryOps.MUL, x.const(1e-8))
+        # adbc = adbc.e(BinaryOps.MUL, x.const(1e-4))
+        bd = bd.e(BinaryOps.MUL, x.const(1e-19))
+        # bd = bd.e(BinaryOps.MUL, x.const(1e-17))
+        # bd = bd.e(BinaryOps.MUL, x.const(1e-13))
         rem = ac.e(BinaryOps.ADD, adbc).e(BinaryOps.ADD, bd)
-        rem = rem.e(BinaryOps.SUB, rem.cast(dtypes.int64).cast(self.float_precision))
+        print("REM: ")
+        print(__import__('tinygrad').Tensor(rem).numpy()[0])
+        floor = rem.cast(dtypes.uint64).cast(self.float_precision)
+        print("FLOOR: ")
+        print(__import__('tinygrad').Tensor(floor).numpy()[0])
+        # rem = rem.e(BinaryOps.SUB, rem.cast(dtypes.uint64).cast(self.float_precision))
+        rem = rem.e(BinaryOps.SUB, floor)
+
+        print("REM: ")
+        print(__import__('tinygrad').Tensor(rem).numpy())
         rem = rem.e(BinaryOps.MUL, x.const(2*math.pi))
-        # return rem
+
+        print("REM: ")
+        print(__import__('tinygrad').Tensor(rem).numpy())
+        return rem
 
         fallback = self._mod(x, x.const(2 * math.pi))
-        # return fallback
+        return fallback
         # return x.e(BinaryOps.CMPLT, x.const(1e15)).e(TernaryOps.WHERE, fallback, rem)
         # return self._abs(x).e(BinaryOps.CMPLT, x.const(0.25e15)).e(TernaryOps.WHERE, fallback, rem)
         # return self._abs(x).e(BinaryOps.CMPLT, x.const(0.25e15)).e(TernaryOps.WHERE, rem, fallback)
-        return self._abs(x).e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, fallback, rem)
+        return self._abs(x).e(BinaryOps.CMPLT, x.const(1e13)).e(TernaryOps.WHERE, fallback, rem)
 
 
     def reduce_angle(self, x: LazyBuffer) -> LazyBuffer:
@@ -221,8 +255,8 @@ class Sin(Function):
         res = x.e(BinaryOps.CMPEQ, x.const(float("-inf"))).e(
             TernaryOps.WHERE, x.const(math.nan), res
         )
-        # print("REDUCED ANGLE: ")
-        # print(__import__('tinygrad').Tensor(res).numpy())
+        print("REDUCED ANGLE: ")
+        print(__import__('tinygrad').Tensor(res).numpy())
         return res
 
     def forward(self, x: LazyBuffer) -> LazyBuffer:
