@@ -33,7 +33,7 @@ class TestUOpsStats(unittest.TestCase):
     b = Tensor.empty(100,100)
     c = a*b+b
     ops, mem = get_stats(c)
-    expected_ops = c.numel()
+    expected_ops = c.numel() * 2
     expected_mem = a.nbytes() + b.nbytes() + c.nbytes()
     self.assertEqual(mem, expected_mem)
     # NOTE; ops also include indexing ops
