@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Tuple, Any, Dict, List, DefaultDict, Set
+from typing import Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable
 import functools, itertools, heapq
 from collections import defaultdict
 from enum import Enum, auto
@@ -74,7 +74,6 @@ def _match(uop:UOp, pattern:Dict[str, Any], store:Dict[str, UOp]) -> bool:
     if k == "__name__":
       if v in store and store[v] != uop: return False
       store[v] = uop
-    elif k[:2] == "__": continue
     elif k == "vin":
       # only one if it's a tuple
       # try all permutations if it's a list
@@ -88,17 +87,18 @@ def _match(uop:UOp, pattern:Dict[str, Any], store:Dict[str, UOp]) -> bool:
       return False
     elif k in {"dtype", "uop"}:
       if uop.__getattribute__(k) not in (v if isinstance(v, set) else set([v])): return False
+    elif k[:2] == "__": continue
     else:
       if uop.__getattribute__(k) != v: return False
   return True
 
 class PatternMatcher:
-  def __init__(self, patterns:List[Tuple[Dict[str, Any], Any]]):
+  def __init__(self, patterns:List[Tuple[Dict[str, Any], Callable]]):
     self.patterns = patterns
-    self.pdict = defaultdict(list)
+    self.pdict: DefaultDict[Tuple[UOps, Any], List[Tuple[Dict[str, Any], Callable]]] = defaultdict(list)
     # uop is required, arg is optional
     for p,fxn in self.patterns:
-      uops = p.get("uop")
+      uops = p["uop"]
       if isinstance(uops, set):
         for uop in uops: self.pdict[(uop, p.get("arg", None))].append((p, fxn))
       else:
