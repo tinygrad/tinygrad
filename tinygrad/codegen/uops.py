@@ -74,11 +74,14 @@ def _match(uop:UOp, pattern:Dict[str, Any], store:Dict[str, UOp]) -> bool:
       store[v] = uop
     elif k == "arg":
       if uop.arg != v: return False
-    elif k == "dtype" or k == "uop":
+    elif k == "dtype":
       if isinstance(v, set):
-        if uop.__getattribute__(k) not in v: return False
-      else:
-        if uop.__getattribute__(k) != v: return False
+        if uop.dtype not in v: return False
+      elif uop.dtype != v: return False
+    elif k == "uop":
+      if isinstance(v, set):
+        if uop.uop not in v: return False
+      elif uop.uop != v: return False
     elif k == "vin":
       # only one if it's a tuple
       # try all permutations if it's a list
