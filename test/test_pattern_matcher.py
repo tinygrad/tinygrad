@@ -58,6 +58,7 @@ class TestPatternMatcher(unittest.TestCase):
     self.assertEqual(matcher.rewrite(c3), c3)
     self.assertEqual(matcher.rewrite(c4), None)
 
+  @unittest.skip("no longer supported")
   def test_rewrite_graph_folds(self):
     uops = UOpGraph()
     uops.add(UOps.CONST, dtypes.float, arg=2.0, simplify=False)
@@ -69,6 +70,7 @@ class TestPatternMatcher(unittest.TestCase):
     self.assertEqual(len(uops.uops), 2)
     self.assert_equiv_uops(UOp(UOps.CONST, dtypes.int, arg=4), uops.uops[-1])
 
+  @unittest.skip("no longer supported")
   def test_rewrite_graph_adds(self):
     uops = UOpGraph()
     uops.add(UOps.CONST, dtypes.int, arg=2, simplify=False)

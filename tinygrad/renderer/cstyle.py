@@ -6,7 +6,7 @@ from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import strip_parens, getenv, prod
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, ConstType
 from tinygrad.codegen.uops import UOpGraph
-from tinygrad.renderer import Renderer
+from tinygrad.renderer import Renderer, TensorCore
 
 class CStyleLanguage(Renderer):
   kernel_prefix: str = ""
@@ -43,9 +43,9 @@ class CStyleLanguage(Renderer):
   def render_const(self, x:ConstType, dtype:DType) -> str:
     if math.isnan(x): val = "NAN"
     elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
-    elif dtype == dtypes.float64: val = f"{x}"
-    elif dtype == dtypes.bool: val = "1" if x else "0"
-    else: val = f"{x}f" if dtypes.is_float(dtype) else f"{x}"
+    elif dtype is dtypes.bool: val = "1" if x else "0"
+    elif dtype is dtypes.float: val = f"{x}f"
+    else: val = str(x)
     return (self.render_cast([val] * dtype.count, dtype) if dtype.count > 1 or dtype not in [dtypes.float, dtypes.int, dtypes.bool] else val)
 
   # returns a str expression of the loaded value with the output type
@@ -206,8 +206,9 @@ class OpenCLRenderer(CStyleLanguage):
 
 class MetalRenderer(CStyleLanguage):
   device = "METAL"
-  has_tensor_cores=os.uname().machine == "arm64"
-  shared_max=32768
+  shared_max = 32768
+  tensor_cores = [TensorCore(dims=(8,8,8), threads=[(0,2),(1,4),(0,2),(1,2)], thread_local_sizes=[[2],[2],[2]], thread_local_aliases=[ [[0],[2],[0],[4],[-1, 1, 3],[0]], [[1],[0],[3],[0],[2, 4],[-1]], [[1],[2],[3],[4],[0],[-1]] ], dtype_in=di, dtype_out=do) for (di, do) in [(dtypes.float, dtypes.float), (dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]] # noqa: E501
+  def __init__(self): self.tensor_cores = MetalRenderer.tensor_cores if os.uname().machine == "arm64" else []
 
   # language options
   kernel_prefix = "kernel "
@@ -251,11 +252,11 @@ def _make_cuda_dtype(base_type, name, cnt):
 
 class CUDARenderer(CStyleLanguage):
   device = "CUDA"
-  global_max=[65535, 65535, 2147483647]
-  local_max=[64, 1024, 1024]
-  shared_max=49152
-  has_tensor_cores = False
-  def __init__(self, arch:str): self.has_tensor_cores=int(arch[3:]) >= 80
+  global_max = [65535, 65535, 2147483647]
+  local_max = [64, 1024, 1024]
+  shared_max = 49152
+  tensor_cores = [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(0,2)], thread_local_sizes=[[2,2,2],[2,2],[2,2]], thread_local_aliases=[ [[0],[0],[5],[-2],[0],[-1,1,2,-3],[3,4]], [[3],[4],[0],[0],[5],[-1,1,2,-2],[0]], [[-1],[1],[5],[-2],[2],[0],[3,4]] ], dtype_in=di, dtype_out=do) for (di, do) in ([(dtypes.half, dtypes.float), (dtypes.bfloat16, dtypes.float)])]  # noqa: E501
+  def __init__(self, arch:str): self.tensor_cores = CUDARenderer.tensor_cores if int(arch[3:]) >= 80 else []
 
   # language options
   kernel_prefix = "extern \"C\" __global__ "
@@ -313,8 +314,8 @@ def _make_hip_dtype(base_type, name, cnt):
 
 class HIPRenderer(CStyleLanguage):
   device = "HSA"
-  has_tensor_cores = True
   shared_max = 65536
+  tensor_cores = [TensorCore(dims=(16,16,16), threads=[(0,8),(0,2),(1,2)], thread_local_sizes=[[16],[16],[4,2]], thread_local_aliases=[ [[0],[0],[2],[-1],[1]], [[1],[2],[0],[-1],[0]], [[1],[2],[-2],[0],[3,-1]] ], dtype_in=di, dtype_out=do) for (di, do) in [(dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]] # noqa: E501
 
   # language options
   kernel_prefix = """extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_local_id(unsigned int);
@@ -378,3 +379,6 @@ static __attribute__((device)) bool operator==(hip_bfloat16 a, hip_bfloat16 b) {
     # https://clang.llvm.org/docs/AttributeReference.html#amdgpu-flat-work-group-size
     # NOTE: this makes hlb_cifar10 twice as fast, there may be more gains in tweaking these parameters
     return f"__attribute__((amdgpu_flat_work_group_size(1, {requiredMaxThreadsPerBlock})))"
+
+class NVRenderer(CUDARenderer): device = "NV"
+class AMDRenderer(HIPRenderer): device = "AMD"
