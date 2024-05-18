@@ -11,7 +11,7 @@ from tinygrad.tensor import Tensor
 
 ctx_vars = { MULTIOUTPUT: (0, 1) }
 
-def fuzz_schedule(outs: List[LazyBuffer]):
+def fuzz_schedule(outs:List[LazyBuffer]):
   # find toposorts across all tunable params
   unique_ts: Dict[Tuple[LazyBuffer, ...], Tuple[Dict, Dict[LazyBuffer, _LBScheduleItem]]] = {}
   for combination in itertools.product(*ctx_vars.values()):
@@ -66,7 +66,7 @@ def fuzz_schedule(outs: List[LazyBuffer]):
           print(f"FAILED FOR {out}")
           raise e
 
-def _exec_si(si: ScheduleItem, seed:int):
+def _exec_si(si:ScheduleItem, seed:int):
   ei = lower_schedule_item(si)
   if len(capturing): capturing[0].add(ei)
   if isinstance(ei.prg, CustomOp): Tensor._seed = seed
