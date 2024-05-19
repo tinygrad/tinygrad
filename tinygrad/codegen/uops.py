@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Tuple, Any, Dict, List, DefaultDict, Set
+from typing import Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable
 import functools, itertools, heapq
 from collections import defaultdict
 from enum import Enum, auto
@@ -33,14 +33,12 @@ class UOp:
   vin: Tuple[UOp, ...] = tuple()
   arg: Any = None
   def tuple(self): return (self.uop, self.dtype, self.vin, self.arg)
+  @functools.cached_property
   def cmp_tuple(self):
     # NOTE: this sort of DEFINE_VAR shouldn't have to be here. only for PTX
     return (self.uop.value, (self.arg if self.uop is not UOps.DEFINE_VAR else self.arg.expr) if self.uop is not UOps.ALU else \
             (type(self.uop), self.uop.value), self.dtype, self.vin)
-  def __lt__(self, x:UOp):
-    a, b = self.cmp_tuple(), x.cmp_tuple()
-    try: return a < b
-    except Exception: raise RuntimeError(f"compare failed between {self.uop} and {x.uop} -- {a} and {b}")
+  def __lt__(self, x:UOp): return self.cmp_tuple < x.cmp_tuple
   def __repr__(self):
     return f"{str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.uop for x in self.vin]):32s} {self.arg}"
   def cast(self, dtype): return UOp(UOps.CAST, dtype, (self,))
@@ -74,7 +72,16 @@ def _match(uop:UOp, pattern:Dict[str, Any], store:Dict[str, UOp]) -> bool:
     if k == "__name__":
       if v in store and store[v] != uop: return False
       store[v] = uop
-    elif k[:2] == "__": continue
+    elif k == "arg":
+      if uop.arg != v: return False
+    elif k == "dtype":
+      if isinstance(v, set):
+        if uop.dtype not in v: return False
+      elif uop.dtype != v: return False
+    elif k == "uop":
+      if isinstance(v, set):
+        if uop.uop not in v: return False
+      elif uop.uop != v: return False
     elif k == "vin":
       # only one if it's a tuple
       # try all permutations if it's a list
@@ -86,19 +93,15 @@ def _match(uop:UOp, pattern:Dict[str, Any], store:Dict[str, UOp]) -> bool:
           for k,v in new_store.items(): store[k] = v
           return True
       return False
-    elif k in {"dtype", "uop"}:
-      if uop.__getattribute__(k) not in (v if isinstance(v, set) else set([v])): return False
-    else:
-      if uop.__getattribute__(k) != v: return False
   return True
 
 class PatternMatcher:
-  def __init__(self, patterns:List[Tuple[Dict[str, Any], Any]]):
+  def __init__(self, patterns:List[Tuple[Dict[str, Any], Callable]]):
     self.patterns = patterns
-    self.pdict = defaultdict(list)
+    self.pdict: DefaultDict[Tuple[UOps, Any], List[Tuple[Dict[str, Any], Callable]]] = defaultdict(list)
     # uop is required, arg is optional
     for p,fxn in self.patterns:
-      uops = p.get("uop")
+      uops = p["uop"]
       if isinstance(uops, set):
         for uop in uops: self.pdict[(uop, p.get("arg", None))].append((p, fxn))
       else:
@@ -109,14 +112,6 @@ class PatternMatcher:
       store: Dict[str, UOp] = {}
       if _match(uop, p, store): return fxn(**store)
     return None
-
-  def recursive_rewrite(self, uop:UOp) -> UOp:
-    run_cnt = 0
-    while (rewritten := self.rewrite(uop)):
-      assert run_cnt < 100, f"recursive_rewrite looped {uop} <--> {rewritten}"
-      uop = rewritten
-      run_cnt += 1
-    return uop
 
 def sum_collapse(phi_input, loop, val1, val2):
   for v1,v2 in [(val1, val2), (val2, val1)]:
@@ -144,10 +139,10 @@ constant_folder = PatternMatcher([
       {"__name__": "compval", "uop": UOps.CONST})}, {"__name__": "multconst", "uop": UOps.CONST}, {"uop": UOps.CONST, "arg": 0})}, loop_collapse),
   # sum collapse to mul (with possible GEP)
   ({"uop": UOps.PHI, "vin": ({"__name__": "phi_input", "uop": UOps.DEFINE_ACC, "vin": ({"uop": UOps.LOOP, "__name__": "loop"},)},
-      {"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"__name__": "val1"}, {"__name__": "val2"}]})}, sum_collapse),
+      {"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": ({"__name__": "val1"}, {"__name__": "val2"})})}, sum_collapse),
   ({"uop": UOps.PHI, "vin": ({"__name__": "phi_input", "uop": UOps.GEP,
                               "vin": ({"uop": UOps.DEFINE_ACC, "vin":({"uop": UOps.LOOP, "__name__": "loop"},)},)},
-      {"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"__name__": "val1"}, {"__name__": "val2"}]})}, sum_collapse),
+      {"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": ({"__name__": "val1"}, {"__name__": "val2"})})}, sum_collapse),
   # deal with UNMUL
   ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{"uop": UOps.CONST, "__name__": "c1"},
                                                    {"uop": UOps.UNMUL, "vin": [{"uop": UOps.CONST, "__name__": "c2"}, {"__name__": "v"}]}]},
@@ -176,8 +171,7 @@ constant_folder = PatternMatcher([
   ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": ({"__name__": "x"}, {"__name__": "my", "uop": UOps.ALU, "arg": UnaryOps.NEG})},
     lambda x, my: x-my.vin[0]),
   # -1*x -> -x
-  ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{"__name__": "x"}, {"uop": UOps.CONST, "arg": -1}]},
-    lambda x: UOp(UOps.ALU, x.dtype, (x,), UnaryOps.NEG)),
+  ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{"__name__": "x"}, {"uop": UOps.CONST, "arg": -1}]}, lambda x: -x),
   # bool < False is always false, True < bool is always false
   ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": ({}, {"__name__": "x", "uop": UOps.CONST, "dtype": dtypes.bool, "arg": False})}, lambda x: x),
   ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": ({"__name__": "x", "uop": UOps.CONST, "dtype": dtypes.bool, "arg": True}, {})},
@@ -231,7 +225,7 @@ constant_folder = PatternMatcher([
                                                      {"__name__": "c", "uop": UOps.CONST, "dtype": dtypes.int})},
     lambda c,x: UOp(UOps.ALU, dtypes.bool, (UOp.const(c.dtype, -c.arg), x), BinaryOps.CMPLT)),
   # cast NOOP (NOTE: it's str to deal with PtrDType)
-  ({"__name__": "root", "uop": UOps.CAST}, lambda root: root.vin[0] if str(root.dtype) == str(root.vin[0].dtype) else None),
+  ({"__name__": "root", "uop": UOps.CAST}, lambda root: root.vin[0] if root.dtype is root.vin[0].dtype else None),
 ])
 
 # *** uop graph ***
@@ -259,10 +253,39 @@ class UOpGraph:
     for i,u in enumerate(self):
       print(f"{i:4d} {str(u.uop):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str([self.uops.index(x) for x in u.vin]):32s} {u.arg}")
 
+  def graph_rewrite(self, sink, pm):
+    # recursive rewrite
+    changed = getenv("UOPS_REWRITE", 1)
+    run_cnt = 0
+    while changed:
+      changed = 0
+      @functools.lru_cache
+      def rewrite(u:UOp) -> UOp:
+        nonlocal changed
+        recurse_cnt = 0
+        up = u
+        # locally recursively rewrite
+        while (rewritten := pm.rewrite(up)):
+          assert recurse_cnt < 100, f"recursive_rewrite looped {up} <--> {rewritten}"
+          up = rewritten
+          recurse_cnt += 1
+        changed += recurse_cnt
+        # NOTE: this changes UOp, so we have to delete caches
+        up.vin = tuple(rewrite(x) for x in up.vin)
+        if hasattr(up, "parents"): del up.parents
+        if hasattr(up, "cmp_tuple"): del up.cmp_tuple
+        # replace with cached nodes
+        if found:=self.nodes.get(key:=up.tuple()): return found
+        else: self.nodes[key] = up
+        return up
+      sink = rewrite(sink)
+      run_cnt += 1
+      assert run_cnt < 100, "exceeded 100 rewrite loops!"
+    return sink
+
   def linearize(self, extra_pm:Optional[PatternMatcher]=None, type_verify=True):
     # NOTE: relinearizering should be okay
     #assert self._uops is None, "already linearized"
-    pm = PatternMatcher(constant_folder.patterns+extra_pm.patterns) if extra_pm is not None else constant_folder
 
     # get sink
     _sinks: List[UOp] = []
@@ -272,46 +295,27 @@ class UOpGraph:
     sink = UOp(UOps.SINK, None, tuple(_sinks))
     del _sinks
 
-    # recursive rewrite
-    changed = getenv("UOPS_REWRITE", 1)
-    run_cnt = 0
-    while changed:
-      changed = 0
-      @functools.lru_cache
-      def rewrite(u:UOp) -> UOp:
-        nonlocal changed
-        up = pm.recursive_rewrite(u)
-        if up != u: changed += 1
-        up.vin = tuple(rewrite(x) for x in up.vin)
-        if hasattr(up, "parents"): del up.parents
-        # replace with cached nodes
-        if found:=self.nodes.get(key:=up.tuple()): return found
-        else: self.nodes[key] = up
-        return up
-      sink = rewrite(sink)
-      run_cnt += 1
-      assert run_cnt < 100, "exceeded 100 rewrite loops!"
+    sink = self.graph_rewrite(sink, constant_folder)
+    if extra_pm: sink = self.graph_rewrite(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
 
     # filter nodes that don't link to a sink
-    nodes: Dict[UOp, None] = {}
-    def add_parents(u:UOp):
-      if u in nodes: return
-      nodes[u] = None
-      for x in u.vin: add_parents(x)
-    sink = UOp(UOps.SINK, None, tuple(x for x in sink.vin if x.uop is not UOps.NOOP))
-    add_parents(sink)
-
     # BFS toposort
     graph: DefaultDict[UOp, List[UOp]] = defaultdict(list)
     in_degree: DefaultDict[UOp, int] = defaultdict(int)
     loops = []
     ifs = []
-    for u in nodes:
+    nodes: Dict[UOp, None] = {}
+    def add_parents(u:UOp):
+      if u in nodes: return
+      nodes[u] = None
       for x in u.vin:
+        add_parents(x)
         in_degree[u] += 1
         graph[x].append(u)
       if u.uop is UOps.LOOP: loops.append(u)
       if u.uop is UOps.IF: ifs.append(u)
+    sink = UOp(UOps.SINK, None, tuple(x for x in sink.vin if x.uop is not UOps.NOOP))
+    add_parents(sink)
 
     @functools.lru_cache(None)
     def get_recursive_children(x:UOp, include_self=False) -> Set[UOp]:
@@ -329,6 +333,10 @@ class UOpGraph:
 
     for u in nodes:
       if in_degree[u] == 0: push(u)
+
+    if getenv("FUZZ_UOPS", 0):
+      from test.external.fuzz_uops import fuzz_uops
+      self.fuzz_paths = fuzz_uops(graph, in_degree.copy())
 
     self._uops = []
     while queue:
@@ -355,11 +363,7 @@ class UOpGraph:
 
     if type_verify: self.type_verify()
 
-  def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None,
-          cachable=True, insert_before=None, simplify=True) -> UOp:
-    if uop is UOps.CONST:
-      assert dtype is not None
-      arg = dtypes.as_const(arg, dtype) # TODO: this doesn't belong here
+  def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None) -> UOp:
     if found:=self.nodes.get(key:=(uop, dtype, vin, arg)): return found
     self.nodes[key] = ret = UOp(*key)
     return ret

@@ -50,18 +50,15 @@ class Linearizer(Kernel):
     return self.uops.add(UOps.ALU, dtype, (a, render_b), op)
 
   # NOTE: the consts have to be cached for deduping of downstream uops to work
-  def const(self, b:ConstType, dtype:DType=dtypes.int32, insert_before=None) -> UOp:
-    if isinstance(b, Variable): return self.uops.add(UOps.DEFINE_VAR, dtype, tuple(), b.unbind()[0], insert_before=insert_before)
-    else: return self.uops.add(UOps.CONST, dtype, tuple(), b, insert_before=insert_before)
-
-  def cast(self, val: UOp, dtype) -> UOp: return self.uops.add(UOps.CAST, dtype, (val,)) if val.dtype != dtype else val
+  def const(self, b:ConstType, dtype:DType=dtypes.int32) -> UOp:
+    if isinstance(b, Variable): return self.uops.add(UOps.DEFINE_VAR, dtype, tuple(), b.unbind()[0])
+    return self.uops.add(UOps.CONST, dtype, tuple(), dtypes.as_const(b, dtype))
 
   def get_reduce_acc(self, reduceop:LazyOp):
-    dtype = reduceop.dtype
-    if reduceop.op is ReduceOps.SUM: return 0.0 if dtypes.is_float(dtype) else 0
+    if reduceop.op is ReduceOps.SUM: return 0.0 if dtypes.is_float(reduceop.dtype) else 0
     elif reduceop.op is ReduceOps.MAX:
-      if dtypes.is_int(dtype): return 0 if dtypes.is_unsigned(dtype) else -2**(dtype.itemsize*8-1)
-      return -math.inf if dtypes.is_float(dtype) else False
+      if dtypes.is_int(reduceop.dtype): return 0 if dtypes.is_unsigned(reduceop.dtype) else -2**(reduceop.dtype.itemsize*8-1)
+      return -math.inf if dtypes.is_float(reduceop.dtype) else False
 
   # NOTE: once images are loaded, we uop them as their base float
   def get_base_dtype(self, dt:DType): return dt.base if isinstance(dt, ImageDType) else dt
@@ -451,8 +448,9 @@ class Linearizer(Kernel):
   def to_program(self) -> Program:
     self.linearize()
     info = get_lazyop_info(self.ast[0])
+    src = self.opts.render(to_function_name(self.name), self.uops)
     ops, mem = self.uops.flops_mem()
     run_count = prod((self.global_size if self.global_size else []) + (self.local_size if self.local_size else []))
     # NOTE: we use min here to ignore the indexing FLOPS
-    return Program(self.name, self.opts.render(to_function_name(self.name), self.uops), self.opts.device,
-                   self.global_size, self.local_size, self.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))
+    return Program(self.name, src, self.opts.device, self.global_size, self.local_size,
+                   self.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))

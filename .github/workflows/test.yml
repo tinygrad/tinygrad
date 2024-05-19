@@ -14,7 +14,7 @@ jobs:
   uops:
     name: uops tests
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -62,7 +62,7 @@ jobs:
   linter:
     name: Linters
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
 
     # TODO: run the pre-commit hook to replace a lot of this
     steps:
@@ -122,7 +122,7 @@ jobs:
         task: [optimage, openpilot, onnx]
     name: ${{ matrix.task=='optimage'&&'GPU OPT and IMAGE Tests' || matrix.task=='openpilot'&&'openpilot (OpenCL) Tests' || matrix.task=='onnx'&&'ONNX+Optimization Tests' }}
     runs-on: ubuntu-20.04
-    timeout-minutes: 20
+    timeout-minutes: 10
 
     steps:
       - name: Checkout Code
@@ -209,7 +209,7 @@ jobs:
   #testwebgpu:
   #  name: WebGPU Tests
   #  runs-on: macos-13
-  #  timeout-minutes: 20
+  #  timeout-minutes: 10
   #  steps:
   #  - name: Checkout Code
   #    uses: actions/checkout@v4
@@ -250,7 +250,7 @@ jobs:
   testmetal:
     name: Metal Tests
     runs-on: macos-14
-    timeout-minutes: 20
+    timeout-minutes: 10
 
     steps:
     - name: Checkout Code
@@ -298,7 +298,7 @@ jobs:
 #  testwebgl:
 #    name: WebGL Tests
 #    runs-on: ubuntu-latest
-#    timeout-minutes: 20
+#    timeout-minutes: 10
 #
 #    steps:
 #    - name: Checkout Code
@@ -336,7 +336,7 @@ jobs:
 
     name: Tests on (${{ matrix.backend }})
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
 
     steps:
       - name: Checkout Code
@@ -382,7 +382,7 @@ jobs:
           cache-name: cache-gpuocelot-build
         with:
           path: ${{ github.workspace }}/gpuocelot/ocelot
-          key: ubuntu22.04-gpuocelot-18401f4245b27ca4b3af433196583cc81ef84480-rebuild-5
+          key: ubuntu22.04-gpuocelot-18401f4245b27ca4b3af433196583cc81ef84480-rebuild-6
       - name: Clone/compile gpuocelot
         if: (matrix.backend == 'cuda' || matrix.backend == 'ptx' || matrix.backend == 'triton' || matrix.backend == 'nv') && steps.cache-build.outputs.cache-hit != 'true'
         run: |
@@ -464,7 +464,7 @@ jobs:
   #testunicorn:
   #  name: ARM64 unicorn Test
   #  runs-on: ubuntu-latest
-  #  timeout-minutes: 20
+  #  timeout-minutes: 10
   #  steps:
   #    - name: Checkout Code
   #      uses: actions/checkout@v4
