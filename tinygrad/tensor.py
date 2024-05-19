@@ -111,8 +111,8 @@ class Tensor:
     elif isinstance(data, list):
       if dtype is None:
         if (d := fully_flatten(data)) and all(isinstance(s, bool) for s in d): dtype = dtypes.bool
-        # else: dtype = dtypes.default_int if d and all_int(d) else dtypes.default_float
-        else: dtype = dtypes.default_int if d and all_int(d) else dtypes.default_float if Device.DEFAULT != "METAL" else dtypes.float32
+        else: dtype = dtypes.default_int if d and all_int(d) else dtypes.default_float
+        # else: dtype = dtypes.default_int if d and all_int(d) else dtypes.default_float if Device.DEFAULT != "METAL" else dtypes.float32
       if dtype == dtypes.bfloat16: data = Tensor(_fromcpu(np.array(data, np.float32)), device=device).cast(dtypes.bfloat16).lazydata
       else: data = _fromcpu(np.array(data, dtype.np))
     elif isinstance(data, np.ndarray):
