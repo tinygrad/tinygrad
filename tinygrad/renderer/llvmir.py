@@ -108,7 +108,7 @@ class LLVMRenderer(Renderer):
             bb[-1].store(element, bb[-1].gep(lvars[vin[0]], [lvars[vin[1]]], inbounds=True))
         else:
           bb[-1].store(element, bb[-1].gep(lvars[vin[0]], [lvars[vin[1]]], inbounds=True))
-      elif uop is UOps.ENDLOOP:
+      elif uop is UOps.ENDRANGE:
         loop_entry_bb, phis = loop_blocks.pop()
         idx_p1 = bb[-1].add(lvars[vin[0]], ir.Constant(ir.IntType(32), 1))
         lvars[vin[0]].add_incoming(idx_p1, bb[-1].block)
@@ -117,7 +117,7 @@ class LLVMRenderer(Renderer):
         bb[-2].cbranch(bb[-2].icmp_unsigned("<", idx_p1, lvars[vin[0].vin[1]]), loop_entry_bb, bb[-1].block)
       else:
         assert dtype is not None, f"None dtype for uop {uop}"
-        if uop is UOps.LOOP:
+        if uop is UOps.RANGE:
           bb.append(ir.IRBuilder(func.append_basic_block(f"loop_body_{len(loop_blocks)}")))
           bb[-2].branch(bb[-1].block)
 
