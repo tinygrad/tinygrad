@@ -106,7 +106,7 @@ class HWQueue:
     self.hw_page = device._gpu_alloc(len(self.q) * 4, map_to_cpu=True)
     hw_view = to_mv(self.hw_page.base, self.hw_page.length).cast("I")
     for i, value in enumerate(self.q): hw_view[i] = value
-    self.q = hw_view # all updates now in the hw queue rn.
+    self.q = hw_view # all updates now in the hw queue rn. # type: ignore
 
   def _submit(self, dev, gpu_ring, put_value, gpfifo_entries, gpfifo_token, gpu_ring_controls):
     if dev == self.binded_device: cmdq_addr = self.hw_page.base
