@@ -59,7 +59,7 @@ def _try_compile_linearized_w_idx(x:Tuple[int,Linearizer], compiler:Compiler) ->
     prog = compiler.compile(p.src)
     et = time.perf_counter() - st
     return x[0], (p, prog, et)
-  except Exception:
+  except RuntimeError:
     if DEBUG >= 4: traceback.print_exc()
     return x[0], None
 
