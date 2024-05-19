@@ -80,16 +80,16 @@ class Sin(Function):
         #     .e(BinaryOps.CMPLT, x.const(1e13))
         #     .e(TernaryOps.WHERE, self._sin(x), self._averaging_sin(x))
         # )
-        # return self._sin(x)
-        res = self._averaging_sin(x)#.cast(self.beginning_dtype)
-        print(res.dtype)
-        return res
+        return self._sin(x)
+        # res = self._averaging_sin(x)#.cast(self.beginning_dtype)
+        # print(res.dtype)
+        # return res
 
     def _averaging_sin(self, x: LazyBuffer) -> LazyBuffer:
         # Compute 5 sines and average
         # offsets = [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5]
         # offsets = [o*10 for o in offsets]
-        offsets = [0, 1, 2]
+        # offsets = [0, 1, 2, 3]
         sines = [ self._sin(x.e(BinaryOps.ADD, x.const(offset * 2 * math.pi))) for offset in offsets ]
         # x = x.cast(self.beginning_dtype)
         sum = x.const(0)
