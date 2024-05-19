@@ -43,7 +43,7 @@ class Sin(Function):
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
- 
+
 # Approximates sin(x) using polynomial of degree n = 6
 # With coefficients found using Sollya's implementation of Remez Algorithm
 class SinApprox(Function):
@@ -72,7 +72,7 @@ class SinApprox(Function):
     # Normalize range to [0.0, 1.0]
     k = x.e(BinaryOps.DIV, x.const(2 * math.pi))
     k = x.e(BinaryOps.CMPLT, x.const(0)).e(TernaryOps.WHERE, k.e(UnaryOps.NEG), k)
-    
+
     k_floor = k.cast(dtypes.int32).cast(x.dtype)
     k_floor = k_floor.e(BinaryOps.CMPLT, k).e(TernaryOps.WHERE, k_floor, k_floor.e(BinaryOps.SUB, x.const(1)))
 
@@ -80,20 +80,20 @@ class SinApprox(Function):
 
     r = k_norm.e(BinaryOps.MUL, x.const(2 * math.pi))
 
-    y = k_norm.e(BinaryOps.CMPLT, x.const(0.25)).e(TernaryOps.WHERE, 
-          self._approx(r),     
-        k_norm.e(BinaryOps.CMPLT, x.const(0.50)).e(TernaryOps.WHERE, 
+    y = k_norm.e(BinaryOps.CMPLT, x.const(0.25)).e(TernaryOps.WHERE,
+          self._approx(r),
+        k_norm.e(BinaryOps.CMPLT, x.const(0.50)).e(TernaryOps.WHERE,
           self._approx(x.const(math.pi).e(BinaryOps.SUB, r)),
-        k_norm.e(BinaryOps.CMPLT, x.const(0.75)).e(TernaryOps.WHERE, 
+        k_norm.e(BinaryOps.CMPLT, x.const(0.75)).e(TernaryOps.WHERE,
           self._approx(r.e(BinaryOps.SUB, x.const(math.pi))).e(UnaryOps.NEG),
           self._approx(x.const(2 * math.pi).e(BinaryOps.SUB, r)).e(UnaryOps.NEG))))
-    
+
     return x.e(BinaryOps.CMPLT, x.const(0)).e(TernaryOps.WHERE, y.e(UnaryOps.NEG), y)
 
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
     return self.approx(x)
-  
+
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return self.approx(self.x.e(BinaryOps.ADD, self.x.const(0.5 * math.pi))).e(BinaryOps.MUL, grad_output)
 
