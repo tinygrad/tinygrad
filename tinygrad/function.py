@@ -80,19 +80,23 @@ class Sin(Function):
         #     .e(BinaryOps.CMPLT, x.const(1e13))
         #     .e(TernaryOps.WHERE, self._sin(x), self._averaging_sin(x))
         # )
-        res = self._averaging_sin(x).cast(self.beginning_dtype)
+        # return self._sin(x)
+        res = self._averaging_sin(x)#.cast(self.beginning_dtype)
         print(res.dtype)
         return res
 
     def _averaging_sin(self, x: LazyBuffer) -> LazyBuffer:
         # Compute 5 sines and average
-        offsets = [-3, -2, -1, 0, 1, 2, 3]
+        # offsets = [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5]
+        # offsets = [o*10 for o in offsets]
+        offsets = [0, 1, 2]
         sines = [ self._sin(x.e(BinaryOps.ADD, x.const(offset * 2 * math.pi))) for offset in offsets ]
+        # x = x.cast(self.beginning_dtype)
         sum = x.const(0)
         for s in sines:
             sum = sum.e(BinaryOps.ADD, s)
         res = sum.e(BinaryOps.DIV, x.const(len(sines)))
-        return res
+        return res.cast(self.beginning_dtype)
 
     def _sin(self, x: LazyBuffer) -> LazyBuffer:
         x = self.reduce_angle(x)
@@ -155,86 +159,47 @@ class Sin(Function):
         return ac, adbc, bd
 
     def _mod_2pi(self, x: LazyBuffer) -> LazyBuffer:
-        return self._mod(x, x.const(2 * math.pi))
-        x = x.cast(self.float_precision)
-        print("X: ")
-        print(__import__('tinygrad').Tensor(x).numpy())
-        a = x.e(BinaryOps.DIV, x.const(1e9))
-        # a = x.e(BinaryOps.DIV, x.const(1000000000))
-        # a = x.e(BinaryOps.MUL, x.const(1e-9))
-        print("A: ")
-        print(__import__('tinygrad').Tensor(a).numpy())
-        a = a.cast(dtypes.int64).cast(self.float_precision)
-        # print(self.float_precision)
-        # a = x.e(BinaryOps.DIV, x.const(1e7)).cast(dtypes.uint64).cast(self.float_precision)
-        print("A: ")
-        print(__import__('tinygrad').Tensor(a).numpy())
-        # a = a.e(BinaryOps.MUL, x.const(1e9))
-        # print("A: ")
-        # print(__import__('tinygrad').Tensor(a).numpy())
-        # b = x.e(BinaryOps.SUB, a)
-        b = self._mod(x, x.const(1e9))
+        # return self._mod(x, x.const(math.pi))
         # x = x.cast(self.float_precision)
-        # b = x.e(BinaryOps.SUB, a.e(BinaryOps.MUL, x.const(1e9).cast(self.float_precision)))
-        # b = x.e(BinaryOps.SUB, a.e(BinaryOps.MUL, x.const(1e7)))
-        print("B: ")
-        print(__import__('tinygrad').Tensor(b).numpy())
-        # c = x.const(1591549430.0)
-        # d = x.const(918953419.7301692504)
+        a = x.e(BinaryOps.DIV, x.const(1e9)).cast(dtypes.int64).cast(self.float_precision)
+        b = x.e(BinaryOps.SUB, a.e(BinaryOps.MUL, x.const(1e9).cast(self.float_precision)))
+        c = x.const(31830988.0)
+        d = x.const(618379068.3946033850086)
 
-
-        # c = 15915494.0
-        # d = 309189534.197301692504
-
-        # c = 15915494.0
-        # d = 309189534.197301692504
-        c = x.const(15915494.0)
-        d = x.const(309189534.197301692504)
-
-        # c = x.const(159154.0)
-        # d = x.const(9430918.9534197301692504)
         ac, adbc, bd = self._karatsuba_mul(a, b, c, d)
-
-        # rem = result[0] * 1e-1 + result[1] * 1e-10 + result[2] * 1e-19
-        # ac = ac.e(BinaryOps.MUL, x.const(1e-1))
         ac = ac.e(BinaryOps.MUL, x.const(1e1))
-        # ac = ac.e(BinaryOps.MUL, x.const(1e5))
-        # adbc = adbc.e(BinaryOps.MUL, x.const(1e-10))
         adbc = adbc.e(BinaryOps.MUL, x.const(1e-8))
-        # adbc = adbc.e(BinaryOps.MUL, x.const(1e-4))
-        # bd = bd.e(BinaryOps.MUL, x.const(1e-19))
         bd = bd.e(BinaryOps.MUL, x.const(1e-17))
-        # bd = bd.e(BinaryOps.MUL, x.const(1e-13))
         rem = ac.e(BinaryOps.ADD, adbc).e(BinaryOps.ADD, bd)
-        print("REM: ")
-        print(__import__('tinygrad').Tensor(rem).numpy()[0])
-        floor = rem.cast(dtypes.uint64).cast(self.float_precision)
-        print("FLOOR: ")
-        print(__import__('tinygrad').Tensor(floor).numpy()[0])
-        # rem = rem.e(BinaryOps.SUB, rem.cast(dtypes.uint64).cast(self.float_precision))
-        rem = rem.e(BinaryOps.SUB, floor)
 
         print("REM: ")
         print(__import__('tinygrad').Tensor(rem).numpy())
-        rem = rem.e(BinaryOps.MUL, rem.const(2*math.pi))
+        # nearestremint = rem.e(BinaryOps.ADD, rem.const(0.5)).cast(dtypes.int64)
+        nearestremint = rem.cast(dtypes.int64)
 
-        # print("REM: ")
-        # print(__import__('tinygrad').Tensor(rem).numpy())
+        floor = rem.cast(dtypes.int64).cast(self.float_precision)
+        rem = rem.e(BinaryOps.SUB, floor)
+        rem = rem.e(BinaryOps.MUL, rem.const(math.pi))
         # return rem
+    
+        nearestremint = nearestremint.e(BinaryOps.MOD, nearestremint.const(2))
+        rem = nearestremint.e(BinaryOps.CMPEQ, nearestremint.const(1)) \
+        .e(TernaryOps.WHERE, rem.e(UnaryOps.NEG), rem)
 
-        fallback = self._mod(x, x.const(2 * math.pi))
-        # return fallback
-        # return x.e(BinaryOps.CMPLT, x.const(1e15)).e(TernaryOps.WHERE, fallback, rem)
-        # return self._abs(x).e(BinaryOps.CMPLT, x.const(0.25e15)).e(TernaryOps.WHERE, fallback, rem)
-        # return self._abs(x).e(BinaryOps.CMPLT, x.const(0.25e15)).e(TernaryOps.WHERE, rem, fallback)
-        return self._abs(x).e(BinaryOps.CMPLT, x.const(1e13)).e(TernaryOps.WHERE, fallback, rem)
+        # rem = nearestremint.e(BinaryOps.CMPEQ, nearestremint.const(2)) \
+        # .e(TernaryOps.WHERE, rem.const(math.pi), rem)
+
+
+        # return rem.e(BinaryOps.ADD, correction)
+        return rem
 
 
     def reduce_angle(self, x: LazyBuffer) -> LazyBuffer:
+        # x = x.e(BinaryOps.SUB, x.const(36323880599548.86))
         lt0 = x.e(BinaryOps.CMPLT, x.const(0))
         x = self._abs(x)
         x = lt0.e(TernaryOps.WHERE, x.e(BinaryOps.ADD, x.const(math.pi)), x)
-        # x = self._mod(x, x.const(2 * math.pi))
+        # x = self._mod(x, x.const(math.pi))
         x = self._mod_2pi(x)
         res = x.e(BinaryOps.CMPEQ, x.const(float("inf"))).e(
             TernaryOps.WHERE, x.const(math.nan), x
