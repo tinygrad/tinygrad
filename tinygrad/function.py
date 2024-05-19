@@ -79,7 +79,7 @@ class Sin(Function):
         #     .e(BinaryOps.CMPLT, x.const(1e13))
         #     .e(TernaryOps.WHERE, self._sin(x), self._averaging_sin(x))
         # )
-        return self._averaging_sin(x)
+        return self._averaging_sin(x).cast(self.beginning_dtype)
         # return res
         # res = self._sin(x)
         # return res
