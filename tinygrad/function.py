@@ -81,8 +81,8 @@ class Sin(Function):
         # 7e15 - 9e15 - -0.15 correction
         # 9e15 - 1.36e16 - -0.07 correction
 
-        print("X: ")
-        print(__import__('tinygrad').Tensor(x).numpy())
+        # print("X: ")
+        # print(__import__('tinygrad').Tensor(x).numpy())
         r = x.e(BinaryOps.CMPLT, x.const(5e13)).e(TernaryOps.WHERE, x.const(0), x.const(-0.015))
         r = x.e(BinaryOps.CMPLT, x.const(6.9e13)).e(TernaryOps.WHERE, r, x.const(-0.005))
         r = x.e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, r, x.const(-0.009))
@@ -129,13 +129,13 @@ class Sin(Function):
         # correction = cos.e(BinaryOps.MUL, cos.const(-0.005))
         # print(cos.dtype)
         correction = cos.e(BinaryOps.MUL, self._corr_coeff(x))
-        print("CORR COEFF: ")
-        print(__import__('tinygrad').Tensor(self._corr_coeff(x)).numpy())
-        print("CORRECTION: ")
-        print(__import__('tinygrad').Tensor(correction).numpy())
+        # print("CORR COEFF: ")
+        # print(__import__('tinygrad').Tensor(self._corr_coeff(x)).numpy())
+        # print("CORRECTION: ")
+        # print(__import__('tinygrad').Tensor(correction).numpy())
         res = res.e(BinaryOps.ADD, correction)
         # print(res.dtype)
-        return res
+        return res.cast(self.beginning_dtype)
 
     def _averaging_sin(self, x: LazyBuffer) -> LazyBuffer:
         # Compute 5 sines and average
@@ -265,8 +265,8 @@ class Sin(Function):
         res = x.e(BinaryOps.CMPEQ, x.const(float("-inf"))).e(
             TernaryOps.WHERE, x.const(math.nan), res
         )
-        print("REDUCED ANGLE: ")
-        print(__import__('tinygrad').Tensor(res).numpy())
+        # print("REDUCED ANGLE: ")
+        # print(__import__('tinygrad').Tensor(res).numpy())
         return res
 
     def forward(self, x: LazyBuffer) -> LazyBuffer:
