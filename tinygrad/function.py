@@ -64,7 +64,7 @@ class Reciprocal(Function):
 class Sin(Function):
     def _sin_grand(self, x: LazyBuffer) -> LazyBuffer:
         self.beginning_dtype = x.dtype
-        print(self.beginning_dtype)
+        # print(self.beginning_dtype)
         if Device.DEFAULT != "METAL":
             x = x.cast(dtypes.float64)
         else:
@@ -173,8 +173,8 @@ class Sin(Function):
         bd = bd.e(BinaryOps.MUL, x.const(1e-17))
         rem = ac.e(BinaryOps.ADD, adbc).e(BinaryOps.ADD, bd)
 
-        print("REM: ")
-        print(__import__('tinygrad').Tensor(rem).numpy())
+        # print("REM: ")
+        # print(__import__('tinygrad').Tensor(rem).numpy())
         # nearestremint = rem.e(BinaryOps.ADD, rem.const(0.5)).cast(dtypes.int64)
         nearestremint = rem.cast(dtypes.int64)
 
@@ -208,8 +208,8 @@ class Sin(Function):
         res = x.e(BinaryOps.CMPEQ, x.const(float("-inf"))).e(
             TernaryOps.WHERE, x.const(math.nan), res
         )
-        print("REDUCED ANGLE: ")
-        print(__import__('tinygrad').Tensor(res).numpy())
+        # print("REDUCED ANGLE: ")
+        # print(__import__('tinygrad').Tensor(res).numpy())
         return res
 
     def forward(self, x: LazyBuffer) -> LazyBuffer:
