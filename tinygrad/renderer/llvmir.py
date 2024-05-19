@@ -12,7 +12,7 @@ def is_bool_or_unsigned(dtype: DType): return dtype == dtypes.bool or dtypes.is_
 
 code_for_op: Final[Dict[Op, Callable]] = {
   UnaryOps.NEG: lambda builder, x, dtype: builder.neg(x) if dtypes.is_int(dtype) else \
-    (builder.not_(x) if dtype is dtypes.bool else builder.fneg(x, flags=MFLAGS)),
+    (builder.not_(x) if dtype == dtypes.bool else builder.fneg(x, flags=MFLAGS)),
   UnaryOps.EXP2: lambda builder, x, dtype: builder.call(builder.module.declare_intrinsic('llvm.exp2', [x.type]), [x], fastmath=MFLAGS),
   UnaryOps.LOG2: lambda builder, x, dtype: builder.call(builder.module.declare_intrinsic('llvm.log2', [x.type]), [x], fastmath=MFLAGS),
   UnaryOps.SIN: lambda builder, x, dtype: builder.call(builder.module.declare_intrinsic('llvm.sin', [x.type]), [x], fastmath=MFLAGS),
