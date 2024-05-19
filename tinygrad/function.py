@@ -101,7 +101,7 @@ class Sin(Function):
     def _sin(self, x: LazyBuffer) -> LazyBuffer:
         x = self.reduce_angle(x)
         # return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 30, x.const(1))
-        return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 10, x.const(1))
+        return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 9, x.const(1))
 
     def horner_taylor_sin(
         self, x: LazyBuffer, xsq: LazyBuffer, n: int, s: LazyBuffer
