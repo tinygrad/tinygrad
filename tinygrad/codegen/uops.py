@@ -336,7 +336,7 @@ class UOpGraph:
 
     if getenv("FUZZ_UOPS", 0):
       from test.external.fuzz_uops import fuzz_uops
-      self.fuzz_paths = fuzz_uops(graph, in_degree.copy())
+      self.fuzz_paths = fuzz_uops(graph, in_degree.copy(), loops_children)
 
     self._uops = []
     while queue:
