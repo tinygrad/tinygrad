@@ -14,14 +14,16 @@ def fuzz_uops(graph:DefaultDict[UOp, List[UOp]], in_degree:DefaultDict[UOp, int]
   for p in find_all_toposorts(graph, in_degree):
     globals: List[UOp] = []
     assert p[-1].uop is UOps.SINK, f"didn't end with SINK, ended with {p[-1]}"
-    paths.append(path:=list(p[:-1]))
-    for u in path:
+    for u in (path:=list(p[:-1])).copy():
+      # TODO: add UOps.END*
       if u.uop is UOps.IF: path.append(UOp(UOps.ENDIF, None, (u,)))
-      # TODO: DEFINE_GLOBALs should be connected in the graph such that they are always toposorted as (data0, data1, data2, ...)
+      # TODO: fix DEFINE_ACC
+      # globals aren't fuzzed
       if u.uop is UOps.DEFINE_GLOBAL:
-        #path.remove(u)
+        path.remove(u)
         globals.append(u)
-    #path = list(sorted(globals, key=lambda x: x.arg[0])) + path
+    path = list(sorted(globals, key=lambda x:x.arg[0])) + path
+    paths.append(path)
   return paths
 
 class UOpsFuzzerRunner(CompiledRunner):
