@@ -112,7 +112,7 @@ class CStyleLanguage(Renderer):
         kk(f"if ({r[vin[0]]}) {{")
         depth += 1
       elif uop is UOps.BARRIER: kk(self.barrier)
-      elif uop in {UOps.ENDLOOP, UOps.ENDIF}:
+      elif uop in {UOps.ENDRANGE, UOps.ENDIF}:
         depth -= 1
         kk("}")
       elif uop is UOps.STORE:
@@ -121,7 +121,7 @@ class CStyleLanguage(Renderer):
         kk(f"if ({r[vin[3]]}) {{ {rendered_store} }}" if len(vin) > 3 else rendered_store)
       else:
         assert dtype is not None, f"None dtype for uop {uop}"
-        if uop is UOps.LOOP:
+        if uop is UOps.RANGE:
           kk(f"for (int {(expr := ssa('ridx',u))} = {r[vin[0]]}; {expr} < {r[vin[1]]}; {expr}++) {{")
           depth += 1
         elif uop is UOps.ALU:
