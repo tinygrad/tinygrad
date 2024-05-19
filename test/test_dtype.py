@@ -113,7 +113,7 @@ class TestDType(unittest.TestCase):
       arr = np.asarray(data, dtype=dt)
       tin = Tensor(arr).numpy()
       tor = torch.as_tensor(arr).detach().numpy()
-      assert dt is tin.dtype is tor.dtype, f"dtype mismatch: expected={dt} | tinygrad={tin.dtype} | torch={tor.dtype}"
+      assert dt == tin.dtype == tor.dtype, f"dtype mismatch: expected={dt} | tinygrad={tin.dtype} | torch={tor.dtype}"
       np.testing.assert_allclose(tin, tor, atol=1e-6, rtol=1e-3)
 
 def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype=None):

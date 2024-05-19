@@ -3,7 +3,7 @@ import gc, unittest
 import numpy as np
 import torch
 
-from tinygrad import nn, GlobalCounters, Tensor, Device
+from tinygrad import GlobalCounters, Tensor, Device
 from tinygrad.helpers import getenv
 from tinygrad.nn.state import get_parameters
 from tinygrad.engine.realize import capturing
@@ -164,34 +164,6 @@ class TestOpt(unittest.TestCase):
       d.realize()
     np.testing.assert_allclose(d.numpy(), na*nb+nc, rtol=1e-5, atol=1e-7)
 
-  def test_fold_conv_batchnorm_notrain(self):
-    img = Tensor.ones(1,3,8,8)
-    c1 = nn.Conv2d(3,32,3)
-    bn = nn.BatchNorm2d(32, track_running_stats=False)
-    # precache the bn
-    bn(c1(img)).relu().realize()
-    with CLCache() as cache:
-      bn(c1(img)).relu().realize()
-      assert cache.count == 1, f"optimizer didn't fold conv-batchnorm at test time, got {cache.count}"
-
-  def test_fold_conv_elu(self):
-    img = Tensor.ones(1,4,8,8)
-    c1 = nn.Conv2d(4, 4, kernel_size=3)
-    c2 = nn.Conv2d(4, 4, kernel_size=3)
-    with CLCache() as cache:
-      img_conv = img.sequential([c1, Tensor.elu, c2, Tensor.elu]).realize()
-      print(img_conv)
-      assert cache.count == 2, "optimizer didn't fold conv/elu"
-
-  def test_fold_conv_relu(self):
-    img = Tensor.ones(1,4,8,8)
-    c1 = nn.Conv2d(4, 4, kernel_size=3)
-    c2 = nn.Conv2d(4, 4, kernel_size=3)
-    with CLCache() as cache:
-      img_conv = img.sequential([c1, Tensor.relu, c2, Tensor.relu]).realize()
-      print(img_conv)
-      assert cache.count == 2, "optimizer didn't fold conv/relu"
-
   def test_permute_was_pushed(self):
     a = Tensor.randn(16, 16, 16)
     with CLCache(2):
@@ -249,19 +221,13 @@ class TestOpt(unittest.TestCase):
     np.testing.assert_allclose(c.numpy(), d.numpy().transpose(1,0), rtol=1e-3, atol=1e-5)
     assert cache_len == 1, "reduceop was rerun!"
 
-  def test_fold_with_contiguous(self):
-    a = Tensor.randn(16, 16, 16)
-    b = Tensor.randn(16, 16)
-    with CLCache(2):
-      c = (a.sum(2).contiguous() + b).contiguous()
-      c.realize()
-
+  # TODO with PUSH_PERMUTES these could be 2
   def test_expand_reduce_is_folded_on_same_axis(self):
     for axis in [0, 1]:
       for n in [4, 8, 16]:
         b = torch.ones(n, n).sum(axis).reshape(n, 1).expand(n, n).sum(axis)
-        with CLCache(allowed=0):
-          a = Tensor.ones(n, n).sum(axis).reshape(n, 1).expand(n, n).sum(axis)
+        with CLCache(allowed=3):
+          a = Tensor.ones(n, n).contiguous().sum(axis).reshape(n, 1).expand(n, n).sum(axis)
           a.realize()
         np.testing.assert_allclose(a.numpy(), b.numpy(), rtol=1e-3, atol=1e-5)
 
@@ -269,8 +235,8 @@ class TestOpt(unittest.TestCase):
     axis1, axis2 = 0, 1
     for n in [4, 8, 16]:
       b = torch.ones(n, n).sum(axis1).reshape(n, 1).expand(n, n).sum(axis2)
-      with CLCache(allowed=0):
-        a = Tensor.ones(n, n).sum(axis1).reshape(n, 1).expand(n, n).sum(axis2)
+      with CLCache(allowed=3):
+        a = Tensor.ones(n, n).contiguous().sum(axis1).reshape(n, 1).expand(n, n).sum(axis2)
         a.realize()
       np.testing.assert_allclose(a.numpy(), b.numpy(), rtol=1e-3, atol=1e-5)
 

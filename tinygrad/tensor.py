@@ -7,13 +7,12 @@ from collections import defaultdict
 import numpy as np
 
 from tinygrad.dtype import DType, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype
-from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, fully_flatten, argsort, IMAGE, DEBUG, WINO, THREEFRY
-from tinygrad.helpers import getenv
+from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, fully_flatten, argsort, getenv
+from tinygrad.helpers import IMAGE, DEBUG, WINO, THREEFRY
 from tinygrad.lazy import LazyBuffer
 from tinygrad.multi import MultiLazyBuffer
 from tinygrad.ops import LoadOps
-from tinygrad.device import Buffer, BufferOptions
-from tinygrad.device import Device
+from tinygrad.device import Device, Buffer, BufferOptions
 from tinygrad.shape.symbolic import sint, Variable, MulNode, Node
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars, memory_planner
@@ -161,9 +160,9 @@ class Tensor:
     assert len(var_vals) == 0
     return schedule
 
-  def realize(self, *lst:Tensor) -> Tensor:
+  def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
     """Trigger the computation needed to create these Tensor(s)."""
-    run_schedule(*self.schedule_with_vars(*lst))
+    run_schedule(*self.schedule_with_vars(*lst), do_update_stats=do_update_stats)
     return self
 
   def replace(self, x:Tensor) -> Tensor:
