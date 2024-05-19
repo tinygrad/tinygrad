@@ -8,7 +8,7 @@ from tinygrad.device import Device, Buffer
 from tinygrad.ops import LazyOp, LoadOps, BufferOps, ReduceOps, BinaryOps, MemBuffer, ConstBuffer
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import Context
+from tinygrad.helpers import Context, GlobalCounters
 from tinygrad.engine.realize import capturing
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
@@ -65,6 +65,19 @@ class TestBEAM(unittest.TestCase):
       assert len([x for x in lins if x.applied_opts[0] == Opt(OptOps.GROUP, axis=0, amt=3)]) == 0, "did not de-dup GROUP"
     if Opt(OptOps.GROUPTOP, 0, 0) in actions:
       assert len([x for x in lins if x.applied_opts[0] == Opt(OptOps.GROUPTOP, axis=0, amt=3)]) == 0, "did not de-dup GROUPTOP"
+
+  def test_kernel_count(self):
+    """
+    Ensure that the kernel count is not incremented by time_linearizer when clearing l2
+    """
+    # ast of Tensor.zeros(16).contiguous().realize()
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(16,), strides=(0,), offset=0, mask=None, contiguous=False),)))),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(16,), strides=(1,), offset=0, mask=None, contiguous=True),))))  # noqa: E501
+    lin = Linearizer(ast)
+    bufs = bufs_from_lin(lin)
+
+    kernel_count = GlobalCounters.kernel_count
+    time_linearizer(lin, bufs, allow_test_size=False, cnt=2, disable_cache=True, clear_l2=True)
+    assert GlobalCounters.kernel_count == kernel_count, "kernel count was incremented by time_linearizer"
 
   def test_filter_global_buffer(self):
     # taken from https://github.com/tinygrad/tinygrad/issues/4612

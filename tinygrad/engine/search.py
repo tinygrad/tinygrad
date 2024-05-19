@@ -45,7 +45,7 @@ def _time_program(p:Program, lib:bytes, var_vals, rawbufs, early_stop=None, max_
   input_bufs = [rawbufs[i] for i,_ in car.p.globals]
   for _ in range(cnt):
     if clear_l2:
-      with Context(DEBUG=0, BEAM=0, CACHECOLLECTING=0): Tensor.ones(1024,1024).contiguous().realize()
+      with Context(DEBUG=0, BEAM=0, CACHECOLLECTING=0): Tensor.ones(1024,1024).contiguous().realize(do_update_stats=False)
     tms.append(cast(float, car(input_bufs, var_vals, wait=True))*factor)
     if early_stop is not None and early_stop < tms[-1]: break
   return tms
