@@ -12,10 +12,16 @@ def fuzz_uops(graph:DefaultDict[UOp, List[UOp]], in_degree:DefaultDict[UOp, int]
   paths: List[List[UOp]] = []
   # TODO: express DEFINE_ACC and loop children conditions in the graph, builtin.
   for p in find_all_toposorts(graph, in_degree):
+    globals: List[UOp] = []
     assert p[-1].uop is UOps.SINK, f"didn't end with SINK, ended with {p[-1]}"
     paths.append(path:=list(p[:-1]))
     for u in path:
       if u.uop is UOps.IF: path.append(UOp(UOps.ENDIF, None, (u,)))
+      # TODO: DEFINE_GLOBALs should be connected in the graph such that they are always toposorted as (data0, data1, data2, ...)
+      if u.uop is UOps.DEFINE_GLOBAL:
+        #path.remove(u)
+        globals.append(u)
+    #path = list(sorted(globals, key=lambda x: x.arg[0])) + path
   return paths
 
 class UOpsFuzzerRunner(CompiledRunner):
@@ -31,12 +37,12 @@ class UOpsFuzzerRunner(CompiledRunner):
       # setup prg
       uops = UOpGraph()
       uops._uops = list(path)
+      if DEBUG >= 7: uops.print()
       self.p = replace(self.p, name=(name:=f"{init_name}fuzz{i}"), src=Device[self.p.dname].renderer.render(name, uops))
       self.lib = Device[self.p.dname].compiler.compile_cached(self.p.src)
       self.clprg = Device[self.p.dname].runtime(name, self.lib)
       for x in rawbufs: x.copyin(init_rawbufs[x])
       if DEBUG >= 4: print(self.p.src)
-      if DEBUG >= 7: uops.print()
       # verify
       super().__call__(rawbufs, var_vals, wait)
       for i, x in enumerate(rawbufs):
