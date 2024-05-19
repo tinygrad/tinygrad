@@ -43,6 +43,59 @@ class Sin(Function):
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
+ 
+# Approximates sin(x) using polynomial of degree n = 6
+# With coefficients found using Sollya's implementation of Remez Algorithm
+class SinApprox(Function):
+
+  # Only works for interval [0, 0.5 * pi]
+  def _approx(self, x: LazyBuffer) -> LazyBuffer:
+    c0 = x.const(-3.9734696902210357672938961517467719762882170010672e-7)
+    c1 = x.const( 1.0000253949194188244642184673601708008165190827699)
+    c2 = x.const(-2.6525857318639647713456451643447463972738392062113e-4)
+    c3 = x.const(-0.165624118725196353945133076112852096292230842035787)
+    c4 = x.const(-1.9644062125700811888281574623831356707392219408325e-3)
+    c5 = x.const( 1.02574389475930544066937846962477407301230092973513e-2)
+    c6 = x.const(-9.5802350704084589068723792470658516536082540035397e-4)
+
+    x0 = c0
+    x1 = x.e(BinaryOps.MUL, c1)
+    x2 = x.e(BinaryOps.MUL, x).e(BinaryOps.MUL, c2)
+    x3 = x.e(BinaryOps.MUL, x).e(BinaryOps.MUL, x).e(BinaryOps.MUL, c3)
+    x4 = x.e(BinaryOps.MUL, x).e(BinaryOps.MUL, x).e(BinaryOps.MUL, x).e(BinaryOps.MUL, c4)
+    x5 = x.e(BinaryOps.MUL, x).e(BinaryOps.MUL, x).e(BinaryOps.MUL, x).e(BinaryOps.MUL, x).e(BinaryOps.MUL, c5)
+    x6 = x.e(BinaryOps.MUL, x).e(BinaryOps.MUL, x).e(BinaryOps.MUL, x).e(BinaryOps.MUL, x).e(BinaryOps.MUL, x).e(BinaryOps.MUL, c6)
+
+    return x0.e(BinaryOps.ADD, x1).e(BinaryOps.ADD, x2).e(BinaryOps.ADD, x3).e(BinaryOps.ADD, x4).e(BinaryOps.ADD, x5).e(BinaryOps.ADD, x6)
+
+  def approx(self, x: LazyBuffer) -> LazyBuffer:
+    # Normalize range to [0.0, 1.0]
+    k = x.e(BinaryOps.DIV, x.const(2 * math.pi))
+    k = x.e(BinaryOps.CMPLT, x.const(0)).e(TernaryOps.WHERE, k.e(UnaryOps.NEG), k)
+    
+    k_floor = k.cast(dtypes.int32).cast(x.dtype)
+    k_floor = k_floor.e(BinaryOps.CMPLT, k).e(TernaryOps.WHERE, k_floor, k_floor.e(BinaryOps.SUB, x.const(1)))
+
+    k_norm = k.e(BinaryOps.SUB, k_floor)
+
+    r = k_norm.e(BinaryOps.MUL, x.const(2 * math.pi))
+
+    y = k_norm.e(BinaryOps.CMPLT, x.const(0.25)).e(TernaryOps.WHERE, 
+          self._approx(r),     
+        k_norm.e(BinaryOps.CMPLT, x.const(0.50)).e(TernaryOps.WHERE, 
+          self._approx(x.const(math.pi).e(BinaryOps.SUB, r)),
+        k_norm.e(BinaryOps.CMPLT, x.const(0.75)).e(TernaryOps.WHERE, 
+          self._approx(r.e(BinaryOps.SUB, x.const(math.pi))).e(UnaryOps.NEG),
+          self._approx(x.const(2 * math.pi).e(BinaryOps.SUB, r)).e(UnaryOps.NEG))))
+    
+    return x.e(BinaryOps.CMPLT, x.const(0)).e(TernaryOps.WHERE, y.e(UnaryOps.NEG), y)
+
+  def forward(self, x:LazyBuffer) -> LazyBuffer:
+    self.x = x
+    return self.approx(x)
+  
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
+    return self.approx(self.x.e(BinaryOps.ADD, self.x.const(0.5 * math.pi))).e(BinaryOps.MUL, grad_output)
 
 # NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
