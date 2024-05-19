@@ -114,7 +114,7 @@ class Sin(Function):
   pi_63 = 3.4061215800865545e-19
 
   def small_red_ang(self, x):
-    n = _floor(x.e(BinaryOps.MUL, x.const(1 / (2 * math.pi))))
+    n = _floor(x.e(BinaryOps.DIV, x.const(2 * math.pi)))
     ang = x.e(BinaryOps.SUB, n.e(BinaryOps.MUL, x.const(2 * math.pi)))
     adj_bottom = ang.e(BinaryOps.CMPLT, ang.const(math.pi))
     ang = adj_bottom.e(TernaryOps.WHERE, ang, ang.e(BinaryOps.SUB, ang.const(math.pi)))
@@ -124,6 +124,7 @@ class Sin(Function):
 
   def big_red_ang(self, x):
     x_dtype = x.dtype
+    x = x.cast(dtypes.float)
     xi = x.cast(dtypes.uint32, bitcast=True)
     index = xi.e(BinaryOps.MUL, xi.const(2**2)).e(BinaryOps.DIV, xi.const(2**28))
     shift = xi.e(BinaryOps.MUL, xi.const(2**6)).e(BinaryOps.DIV, xi.const(2**29))
@@ -168,8 +169,9 @@ class Sin(Function):
 
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
+    if x.size == 0: return x
     x_dtype = x.dtype
-    x = x.cast(dtypes.float)
+    if x.dtype not in (dtypes.double, dtypes.float): x = x.cast(dtypes.float32)
     reduced_angles = self.red_ang(x)
     signs = reduced_angles.e(BinaryOps.CMPLT, reduced_angles.const(0))
     reduced_angles = signs.e(TernaryOps.WHERE, reduced_angles.e(UnaryOps.NEG), reduced_angles)
@@ -185,8 +187,8 @@ class Sin(Function):
     return signs.e(TernaryOps.WHERE, t.e(UnaryOps.NEG), t).cast(x_dtype)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    x = self.x.e(BinaryOps.ADD, self.x.const(math.pi / 2))
-    return self.forward(x)
+    x = self.x.const(math.pi/2).e(BinaryOps.SUB, self.x)
+    return self.forward(x).e(BinaryOps.MUL, grad_output)
 
 # NOTE: maximum(x, 0) behaves differently where x=0
 
