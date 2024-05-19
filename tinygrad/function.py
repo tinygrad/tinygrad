@@ -163,7 +163,10 @@ class Sin(Function):
     signs = x.e(BinaryOps.CMPLT, x.const(0))
     x = signs.e(TernaryOps.WHERE, x.e(UnaryOps.NEG), x)
     size = x.e(BinaryOps.CMPLT, x.const(2**10))
-    red_ang = size.e(TernaryOps.WHERE, self.small_red_ang(x), self.big_red_ang(x))
+    if self.device == "METAL":
+      red_ang = self.small_red_ang(x)
+    else:
+      red_ang = size.e(TernaryOps.WHERE, self.small_red_ang(x), self.big_red_ang(x))
     red_ang = signs.e(TernaryOps.WHERE, red_ang.e(UnaryOps.NEG), red_ang)
     return red_ang
 
