@@ -24,7 +24,7 @@ class CStyleLanguage(Renderer):
   uses_ptr_arithmetic: bool = False
   type_map: Dict[DType, str] = {}
   code_for_op: Dict = {
-    UnaryOps.NEG: lambda x,dtype: f"(!{x})" if dtype is dtypes.bool else f"(-{x})", UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
+    UnaryOps.NEG: lambda x,dtype: f"(!{x})" if dtype == dtypes.bool else f"(-{x})", UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
     UnaryOps.EXP2: lambda x,dtype: f"exp2({x})", UnaryOps.LOG2: lambda x,dtype: f"log2({x})", UnaryOps.SIN: lambda x,dtype: f"sin({x})",
     BinaryOps.ADD: lambda a,b,dtype: f"({a}+{b})", BinaryOps.SUB: lambda a,b,dtype: f"({a}-{b})", BinaryOps.MUL: lambda a,b,dtype: f"({a}*{b})",
     BinaryOps.DIV: lambda a,b,dtype: f"({a}/{b})", BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})", BinaryOps.MOD: lambda a,b,dtype: f"({a}%{b})",
@@ -43,9 +43,9 @@ class CStyleLanguage(Renderer):
   def render_const(self, x:ConstType, dtype:DType) -> str:
     if math.isnan(x): val = "NAN"
     elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
-    elif dtype == dtypes.float64: val = f"{x}"
     elif dtype == dtypes.bool: val = "1" if x else "0"
-    else: val = f"{x}f" if dtypes.is_float(dtype) else f"{x}"
+    elif dtype == dtypes.float: val = f"{x}f"
+    else: val = str(x)
     return (self.render_cast([val] * dtype.count, dtype) if dtype.count > 1 or dtype not in [dtypes.float, dtypes.int, dtypes.bool] else val)
 
   # returns a str expression of the loaded value with the output type
