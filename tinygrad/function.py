@@ -80,8 +80,8 @@ class Sin(Function):
         #     .e(BinaryOps.CMPLT, x.const(1e13))
         #     .e(TernaryOps.WHERE, self._sin(x), self._averaging_sin(x))
         # )
-        return self._sin(x).cast(self.beginning_dtype)
-        # res = self._averaging_sin(x)#.cast(self.beginning_dtype)
+        # return self._sin(x).cast(self.beginning_dtype)
+        return self._averaging_sin(x)#.cast(self.beginning_dtype)
         # print(res.dtype)
         # return res
 
@@ -89,7 +89,7 @@ class Sin(Function):
         # Compute 5 sines and average
         # offsets = [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5]
         # offsets = [o*10 for o in offsets]
-        # offsets = [0, 1, 2, 3]
+        offsets = [0, 1, 2, 3]
         sines = [ self._sin(x.e(BinaryOps.ADD, x.const(offset * 2 * math.pi))) for offset in offsets ]
         # x = x.cast(self.beginning_dtype)
         sum = x.const(0)
@@ -184,6 +184,8 @@ class Sin(Function):
         floor = rem.cast(dtypes.int64).cast(self.float_precision)
         rem = rem.e(BinaryOps.SUB, floor)
         rem = rem.e(BinaryOps.MUL, rem.const(math.pi))
+
+        # rem = self._mod(x, x.const(math.pi))
         # return rem
     
         nearestremint = nearestremint.e(BinaryOps.MOD, nearestremint.const(2))
@@ -211,8 +213,8 @@ class Sin(Function):
         res = x.e(BinaryOps.CMPEQ, x.const(float("-inf"))).e(
             TernaryOps.WHERE, x.const(math.nan), res
         )
-        # print("REDUCED ANGLE: ")
-        # print(__import__('tinygrad').Tensor(res).numpy())
+        print("REDUCED ANGLE: ")
+        print(__import__('tinygrad').Tensor(res).numpy())
         return res
 
     def forward(self, x: LazyBuffer) -> LazyBuffer:
