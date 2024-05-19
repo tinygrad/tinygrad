@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, ctypes, pathlib, re, fcntl, functools, mmap, struct, tempfile, hashlib, subprocess, time, array
 from typing import Tuple, List, Any, cast
-from tinygrad.device import Compiled, Compiler, LRUAllocator, BufferOptions
+from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, BufferOptions
 from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up, to_char_p_p, DEBUG, prod
 from tinygrad.renderer.cstyle import NVRenderer
 from tinygrad.runtime.ops_cuda import check as cuda_check, _get_bytes, CUDACompiler
@@ -80,7 +80,7 @@ class NVCompiler(Compiler):
     status = cuda.nvrtcCompileProgram(prog, len(self.compile_options), to_char_p_p([o.encode() for o in self.compile_options]))
 
     if status != 0:
-      raise RuntimeError(f"compile failed: {_get_bytes(prog, cuda.nvrtcGetProgramLog, cuda.nvrtcGetProgramLogSize, cuda_check).decode()}")
+      raise CompileError(f"compile failed: {_get_bytes(prog, cuda.nvrtcGetProgramLog, cuda.nvrtcGetProgramLogSize, cuda_check).decode()}")
     return _get_bytes(prog, cuda.nvrtcGetCUBIN, cuda.nvrtcGetCUBINSize, cuda_check)
 
 class HWComputeQueue:
