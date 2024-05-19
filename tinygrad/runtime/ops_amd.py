@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Tuple, List, Any, cast
 import os, fcntl, ctypes, ctypes.util, functools, re, pathlib, mmap, struct, errno, subprocess, time
-from tinygrad.device import Compiled, Compiler, BufferOptions, LRUAllocator
+from tinygrad.device import Compiled, Compiler, CompileError, BufferOptions, LRUAllocator
 from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up, DEBUG
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.runtime.driver.hip_comgr import compile_hip
@@ -77,7 +77,9 @@ class AMDCompiler(Compiler):
   def __init__(self, arch:str):
     self.arch = arch
     super().__init__(f"compile_hip_{self.arch}")
-  def compile(self, src:str) -> bytes: return compile_hip(src, self.arch)
+  def compile(self, src:str) -> bytes:
+    try: return compile_hip(src, self.arch)
+    except RuntimeError as e: raise CompileError(e)
 
 PAGE_SIZE = 0x1000
 SIGNAL_SIZE, SIGNAL_COUNT = ctypes.sizeof(hsa.amd_signal_t), 16384

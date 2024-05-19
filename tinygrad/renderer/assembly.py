@@ -76,7 +76,7 @@ class PTXRenderer(Renderer):
   def mem_type(self, dtype): return 's8' if dtype.itemsize == 1 else 'b16' if dtype == dtypes.float16 else self.types[dtype]
 
   def render_load(self, loc, dest, dtype, gate=None, alt=None, ss="", offset=0) -> List[str]:
-    assert dtype is not dtypes.bool
+    assert dtype != dtypes.bool
     if gate: return [f"@{gate} ld{ss}.{self.mem_type(dtype)} {dest}, [{loc}+{offset}];", f"@!{gate} mov.b{self.types[dtype][1:]} {dest}, {alt};"]
     return [f"ld{ss}.{self.mem_type(dtype)} {dest}, [{loc}+{offset}];"]
 
@@ -154,7 +154,7 @@ class PTXRenderer(Renderer):
         kk(f"{r_label[vin[0]]}:")
       elif uop is UOps.STORE:
         assert vin[0].dtype is not None and vin[2].dtype is not None
-        assert vin[0].dtype is dtypes.int64, "store isn't int64"
+        assert vin[0].dtype == dtypes.int64, "store isn't int64"
         assert vin[1].uop is UOps.CONST, f"store isn't const {u}"
         mem_type = '.shared' if vin[0].uop is UOps.DEFINE_LOCAL or any(x.uop is UOps.DEFINE_LOCAL for x in vin[0].parents) else '.global'
         if vin[2].dtype.count > 1:
@@ -187,7 +187,7 @@ class PTXRenderer(Renderer):
           else: r[u] = const(args, dtype, mov=True)
         elif uop is UOps.GEP: r[u] = r[vin[0]][u.arg]
         elif uop is UOps.LOAD:
-          assert vin[0].dtype is dtypes.int64, "load isn't int64"
+          assert vin[0].dtype == dtypes.int64, "load isn't int64"
           assert vin[1].uop is UOps.CONST, f"load isn't const {u}"
           mem_type = '.shared' if vin[0].uop is UOps.DEFINE_LOCAL or any(x.uop is UOps.DEFINE_LOCAL for x in vin[0].parents) else '.global'
           if dtype.count > 1:
