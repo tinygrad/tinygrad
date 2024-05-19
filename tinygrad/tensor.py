@@ -111,8 +111,8 @@ class Tensor:
     elif isinstance(data, list):
       if dtype is None:
         if (d := fully_flatten(data)) and all(isinstance(s, bool) for s in d): dtype = dtypes.bool
-        # else: dtype = dtypes.default_int if d and all_int(d) else dtypes.default_float
-        else: dtype = dtypes.default_int if d and all_int(d) else dtypes.default_float if Device.DEFAULT != "METAL" else dtypes.float32
+        else: dtype = dtypes.default_int if d and all_int(d) else dtypes.default_float
+        # else: dtype = dtypes.default_int if d and all_int(d) else dtypes.default_float if Device.DEFAULT != "METAL" else dtypes.default_float
       if dtype == dtypes.bfloat16: data = Tensor(_fromcpu(np.array(data, np.float32)), device=device).cast(dtypes.bfloat16).lazydata
       else: data = _fromcpu(np.array(data, dtype.np))
     elif isinstance(data, np.ndarray):
@@ -1135,7 +1135,8 @@ class Tensor:
   def exp2(self): return F.Exp.apply(self*math.log(2))
   def relu(self): return F.Relu.apply(self)
   def sigmoid(self): return F.Sigmoid.apply(self.cast(least_upper_float(self.dtype)))
-  def sin(self): return F.Sin.apply(self.cast(least_upper_float(self.dtype)))
+  # def sin(self): return F.Sin.apply(self.cast(least_upper_float(self.dtype)))
+  def sin(self): return F.Sin.apply(self)
   def sqrt(self): return F.Sqrt.apply(self.cast(least_upper_float(self.dtype)))
   def rsqrt(self): return self.reciprocal().sqrt()
   def cos(self): return ((math.pi/2)-self).sin()
