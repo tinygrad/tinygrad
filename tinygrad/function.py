@@ -62,6 +62,45 @@ class Reciprocal(Function):
 
 
 class Sin(Function):
+
+    def _corr_coeff(self, x: LazyBuffer) -> LazyBuffer:
+        # 1e13 - 2e13 - no correction
+        #2e13 - 5e13 - no correction
+        # 5e13 - 7e13 - -0.015 correction
+        # 7e13 - 1e14 - no correction
+        # 1e14 - 2.2e14 - -0.009 correction
+        # 2.2e14 - 2.7e14 - -0.005 correction
+        # 2.7e14 - 5.6e14 - -0.03 correction
+        # 5.6e14 - 8.8e14 - -0.04 correction
+        # 8.8e14 - 1.1e15 - -0.06 correction
+        # 1.1e15 - 1.7e15 - -0.01 correction
+        # 1.7e15 - 2.2e15 - 0.01 correction
+        # 2.2e15 - 3.5e15 - -0.1 correction
+        # 3.5e15 - 4.5e15 - -0.2 correction
+        # 4.5e15 - 7e15 - -0.4 correction
+        # 7e15 - 9e15 - -0.15 correction
+        # 9e15 - 1.36e16 - -0.07 correction
+
+        print("X: ")
+        print(__import__('tinygrad').Tensor(x).numpy())
+        r = x.e(BinaryOps.CMPLT, x.const(5e13)).e(TernaryOps.WHERE, x.const(0), x.const(-0.015))
+        r = x.e(BinaryOps.CMPLT, x.const(6.9e13)).e(TernaryOps.WHERE, r, x.const(-0.005))
+        r = x.e(BinaryOps.CMPLT, x.const(1e14)).e(TernaryOps.WHERE, r, x.const(-0.009))
+        r = x.e(BinaryOps.CMPLT, x.const(2.2e14)).e(TernaryOps.WHERE, r, x.const(-0.005))
+        r = x.e(BinaryOps.CMPLT, x.const(2.7e14)).e(TernaryOps.WHERE, r, x.const(-0.03))
+        r = x.e(BinaryOps.CMPLT, x.const(5.6e14)).e(TernaryOps.WHERE, r, x.const(-0.04))
+        r = x.e(BinaryOps.CMPLT, x.const(8.8e14)).e(TernaryOps.WHERE, r, x.const(-0.06))
+        r = x.e(BinaryOps.CMPLT, x.const(1.1e15)).e(TernaryOps.WHERE, r, x.const(-0.01))
+        r = x.e(BinaryOps.CMPLT, x.const(1.7e15)).e(TernaryOps.WHERE, r, x.const(0.01))
+        r = x.e(BinaryOps.CMPLT, x.const(2.2e15)).e(TernaryOps.WHERE, r, x.const(-0.1))
+        r = x.e(BinaryOps.CMPLT, x.const(3.5e15)).e(TernaryOps.WHERE, r, x.const(-0.2))
+        r = x.e(BinaryOps.CMPLT, x.const(4.5e15)).e(TernaryOps.WHERE, r, x.const(-0.4))
+        r = x.e(BinaryOps.CMPLT, x.const(7e15)).e(TernaryOps.WHERE, r, x.const(-0.15))
+        r = x.e(BinaryOps.CMPLT, x.const(9e15)).e(TernaryOps.WHERE, r, x.const(-0.07))
+        
+        return r
+
+
     def _sin_grand(self, x: LazyBuffer) -> LazyBuffer:
         self.beginning_dtype = x.dtype
         # print(self.beginning_dtype)
@@ -70,9 +109,10 @@ class Sin(Function):
         else:
             x = x.cast(dtypes.float32)
         self.float_precision = x.dtype
-        xsign = x.e(BinaryOps.CMPLT, x.const(0)).e(
-            TernaryOps.WHERE, x.const(-1), x.const(1)
-        )
+        # print(x.dtype)
+        # xsign = x.e(BinaryOps.CMPLT, x.const(0)).e(
+        #     TernaryOps.WHERE, x.const(-1), x.const(1)
+        # )
 
         # Compute normal sin if below 4e13, else use averaging
         # res = (
@@ -81,9 +121,21 @@ class Sin(Function):
         #     .e(TernaryOps.WHERE, self._sin(x), self._averaging_sin(x))
         # )
         # return self._sin(x).cast(self.beginning_dtype)
-        return self._averaging_sin(x)#.cast(self.beginning_dtype)
+        # return self._averaging_sin(x)#.cast(self.beginning_dtype)
+        # print(x.dtype)
+        res = self._averaging_sin(x)
         # print(res.dtype)
-        # return res
+        cos = self._averaging_sin(x.e(BinaryOps.ADD, x.const(math.pi / 2)))
+        # correction = cos.e(BinaryOps.MUL, cos.const(-0.005))
+        # print(cos.dtype)
+        correction = cos.e(BinaryOps.MUL, self._corr_coeff(x))
+        print("CORR COEFF: ")
+        print(__import__('tinygrad').Tensor(self._corr_coeff(x)).numpy())
+        print("CORRECTION: ")
+        print(__import__('tinygrad').Tensor(correction).numpy())
+        res = res.e(BinaryOps.ADD, correction)
+        # print(res.dtype)
+        return res
 
     def _averaging_sin(self, x: LazyBuffer) -> LazyBuffer:
         # Compute 5 sines and average
@@ -96,15 +148,15 @@ class Sin(Function):
         for s in sines:
             sum = sum.e(BinaryOps.ADD, s)
         res = sum.e(BinaryOps.DIV, x.const(len(sines)))
-        return res.cast(self.beginning_dtype)
+        return res
 
     def _sin(self, x: LazyBuffer) -> LazyBuffer:
         x = self.reduce_angle(x)
-        # return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 30, x.const(1))
-        if self.beginning_dtype == dtypes.float32:
-            return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 9, x.const(1))
-        else:
-            return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 14, x.const(1))
+        return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 30, x.const(1))
+        # if self.beginning_dtype == dtypes.float32:
+        #     return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 9, x.const(1))
+        # else:
+        #     return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 14, x.const(1))
 
     def horner_taylor_sin(
         self, x: LazyBuffer, xsq: LazyBuffer, n: int, s: LazyBuffer
