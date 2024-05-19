@@ -30,18 +30,37 @@ class TestTimeLinearizer(unittest.TestCase):
     assert all(isinstance(r, Buffer) for r in rawbufs)
     assert all(r.size > 0 for r in rawbufs)
 
+  def test_kernel_count(self):
+    """
+    Ensure that the kernel count is not incremented by time_linearizer when clearing l2
+    """
+    # ast of Tensor.zeros(16).contiguous().realize()
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(16,), strides=(0,), offset=0, mask=None, contiguous=False),)))),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(16,), strides=(1,), offset=0, mask=None, contiguous=True),))))  # noqa: E501
+    lin = Linearizer(ast)
+    bufs = bufs_from_lin(lin)
+
+    kernel_count = GlobalCounters.kernel_count
+    time_linearizer(lin, bufs, allow_test_size=False, cnt=2, disable_cache=True, clear_l2=True)
+    assert GlobalCounters.kernel_count == kernel_count, "kernel count was incremented by time_linearizer"
+
 class TestBEAM(unittest.TestCase):
   def test_dynamic_beam(self):
     # TODO: make this infra globally usable
     class Capture:
       def __init__(self): self.captured = []
       def add(self, x): self.captured.append(x)
+
     capturing.append(Capture())
+    kernel_count = GlobalCounters.kernel_count
     with Context(BEAM=1): Tensor.zeros(16).contiguous().realize()
+    assert GlobalCounters.kernel_count == kernel_count + 1
     k_beam_1 = capturing[0].captured
     capturing.clear()
+
     capturing.append(Capture())
+    kernel_count = GlobalCounters.kernel_count
     with Context(BEAM=0): Tensor.zeros(16).contiguous().realize()
+    assert GlobalCounters.kernel_count == kernel_count + 1
     k_beam_0 = capturing[0].captured
     capturing.clear()
     assert k_beam_0[-1].prg.p.src != k_beam_1[-1].prg.p.src
@@ -65,19 +84,6 @@ class TestBEAM(unittest.TestCase):
       assert len([x for x in lins if x.applied_opts[0] == Opt(OptOps.GROUP, axis=0, amt=3)]) == 0, "did not de-dup GROUP"
     if Opt(OptOps.GROUPTOP, 0, 0) in actions:
       assert len([x for x in lins if x.applied_opts[0] == Opt(OptOps.GROUPTOP, axis=0, amt=3)]) == 0, "did not de-dup GROUPTOP"
-
-  def test_kernel_count(self):
-    """
-    Ensure that the kernel count is not incremented by time_linearizer when clearing l2
-    """
-    # ast of Tensor.zeros(16).contiguous().realize()
-    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(16,), strides=(0,), offset=0, mask=None, contiguous=False),)))),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(16,), strides=(1,), offset=0, mask=None, contiguous=True),))))  # noqa: E501
-    lin = Linearizer(ast)
-    bufs = bufs_from_lin(lin)
-
-    kernel_count = GlobalCounters.kernel_count
-    time_linearizer(lin, bufs, allow_test_size=False, cnt=2, disable_cache=True, clear_l2=True)
-    assert GlobalCounters.kernel_count == kernel_count, "kernel count was incremented by time_linearizer"
 
   def test_filter_global_buffer(self):
     # taken from https://github.com/tinygrad/tinygrad/issues/4612
