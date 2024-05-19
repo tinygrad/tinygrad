@@ -44,7 +44,7 @@ class OldSin(Function):
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
 
-def _taylor(self, x:LazyBuffer, coefficients:List[float]) -> LazyBuffer:
+def _taylor(x:LazyBuffer, coefficients:List[float]) -> LazyBuffer:
   current_term = x.const(1)
   result = x.const(0)
   for i, coef in enumerate(coefficients):
@@ -52,58 +52,141 @@ def _taylor(self, x:LazyBuffer, coefficients:List[float]) -> LazyBuffer:
     result = result.e(BinaryOps.ADD, current_term.e(BinaryOps.MUL, x.const(coef)))
   return result
 
+def _get_info(x:LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer, LazyBuffer]:
+  if x.dtype is dtypes.double:
+    b = x.cast(dtypes.ulong, bitcast=True)
+    int_repr = dtypes.long
+    pow_shift = 2**52
+    sig_shift = 2**12
+    fix = 4607182418800017408
+    bias = 1023
+  elif x.dtype is dtypes.float:
+    b = x.cast(dtypes.uint, bitcast=True)
+    int_repr = dtypes.int
+    pow_shift = 2**23
+    sig_shift = 2**9
+    fix = 0x3F800000
+    bias = 127
+  else:
+    raise TypeError(f'{x.dtype} not supported.')
+
+  b = b.e(BinaryOps.MUL, b.const(2)).e(BinaryOps.DIV, b.const(2))
+  bpow = b.e(BinaryOps.DIV, b.const(pow_shift)).cast(int_repr, bitcast=True)
+  pow = bpow.e(BinaryOps.SUB, b.const(bias).cast(int_repr))
+  bsig = b.e(BinaryOps.MUL, b.const(sig_shift)).e(BinaryOps.DIV, b.const(sig_shift))
+  sig = bsig.e(BinaryOps.ADD, bsig.const(fix)).cast(x.dtype, bitcast=True)
+  nan = bpow.e(BinaryOps.CMPEQ, bpow.const(sig_shift/2-1))
+  return (pow, sig, nan)
+
+def _floor(x:LazyBuffer) -> LazyBuffer:
+  x_dtype = x.dtype
+  return x.cast(dtypes.ulong).cast(x_dtype)
+
 class Sin(Function):
-  coefficients =  [0, 9.9999999999993782751e-01, 0, -1.6666666666432553012e-01, 0, 8.3333333187754141114e-03, 0, -1.9841266413256992626e-04,
-                   0, 2.7556932047318987798e-06, 0, -2.5029522966723734896e-08, 0, 1.5401222741012872935e-10]
+  coefficients =  [
+    -6.7438343474797085373779630031e-26,   0.999999999999624721374446633997,
+    -2.121921508148512319479060011252e-24, -0.1666666666609814631110143462865,
+     2.371851526646344079205758303618e-23, 8.3333333084146850832133575574e-3,
+    -6.46315333091709762469921156374e-23,  -1.984126502403636304322074311833e-4,
+     6.972197019543846009729322724116e-23, 2.755684087413563572364382264464e-6,
+    -3.240737222146389815085566457998e-23, -2.502663634786733989277463371664e-8,
+     5.432903568468138449760930559297e-24, 1.536593755736416904368799406149e-10
+  ]
 
-  def floor(self, x:LazyBuffer) -> LazyBuffer:
+  four_div_pi = [
+    (0xa2,       0xf9836e4e, 0x441529fc),
+    (0xa2f9,     0x836e4e44, 0x1529fc27),
+    (0xa2f983,   0x6e4e4415, 0x29fc2757),
+    (0xa2f9836e, 0x4e441529, 0xfc2757d1),
+    (0xf9836e4e, 0x441529fc, 0x2757d1f5),
+    (0x836e4e44, 0x1529fc27, 0x57d1f534),
+    (0x6e4e4415, 0x29fc2757, 0xd1f534dd),
+    (0x4e441529, 0xfc2757d1, 0xf534ddc0),
+    (0x441529fc, 0x2757d1f5, 0x34ddc0db),
+    (0x1529fc27, 0x57d1f534, 0xddc0db62),
+    (0x29fc2757, 0xd1f534dd, 0xc0db6295),
+    (0xfc2757d1, 0xf534ddc0, 0xdb629599),
+    (0x2757d1f5, 0x34ddc0db, 0x6295993c),
+    (0x57d1f534, 0xddc0db62, 0x95993c43),
+    (0xd1f534dd, 0xc0db6295, 0x993c4390),
+    (0xf534ddc0, 0xdb629599, 0x3c439041)
+  ]
+
+  pi_63 = 3.4061215800865545e-19
+
+  def small_red_ang(self, x):
+    n = _floor(x.e(BinaryOps.MUL, x.const(1 / (2 * math.pi))))
+    ang = x.e(BinaryOps.SUB, n.e(BinaryOps.MUL, x.const(2 * math.pi)))
+    adj_bottom = ang.e(BinaryOps.CMPLT, ang.const(math.pi))
+    ang = adj_bottom.e(TernaryOps.WHERE, ang, ang.e(BinaryOps.SUB, ang.const(math.pi)))
+    adj_top = ang.e(BinaryOps.CMPLT, ang.const(math.pi/2))
+    ang = adj_top.e(TernaryOps.WHERE, ang, ang.const(math.pi).e(BinaryOps.SUB, ang))
+    return adj_bottom.e(TernaryOps.WHERE, ang, ang.e(UnaryOps.NEG))
+
+  def big_red_ang(self, x):
     x_dtype = x.dtype
-    return x.cast(dtypes.ulong).cast(x_dtype)
+    xi = x.cast(dtypes.uint32, bitcast=True)
+    index = xi.e(BinaryOps.MUL, xi.const(2**2)).e(BinaryOps.DIV, xi.const(2**28))
+    shift = xi.e(BinaryOps.MUL, xi.const(2**6)).e(BinaryOps.DIV, xi.const(2**29))
+    xi = xi.e(BinaryOps.MUL, xi.const(2**9)).e(BinaryOps.DIV, xi.const(2**9)).e(BinaryOps.ADD, xi.const(0x800000))
+    xi = xi.e(BinaryOps.MUL, shift.cast(dtypes.float).e(UnaryOps.EXP2).cast(dtypes.uint32))
 
-  def two_pi_mod(self, x:LazyBuffer) -> LazyBuffer:
-    x_dtype = x.dtype
-    if self.device != "METAL": x = x.cast(dtypes.double)
-    two_pi = x.const(math.pi * 2)
-    div = x.e(BinaryOps.DIV, two_pi)
-    floor_div = self.floor(div)
-    subtraction = x.e(BinaryOps.SUB, two_pi.e(BinaryOps.MUL, floor_div))
-    return subtraction.cast(x_dtype)
+    pi0 = xi.const(0)
+    pi1 = xi.const(0)
+    pi2 = xi.const(0)
+    for i in range(16):
+      arr = index.e(BinaryOps.CMPEQ, index.const(i))
+      pi0 = arr.e(TernaryOps.WHERE, index.const(self.four_div_pi[i][0]), pi0)
+      pi1 = arr.e(TernaryOps.WHERE, index.const(self.four_div_pi[i][1]), pi1)
+      pi2 = arr.e(TernaryOps.WHERE, index.const(self.four_div_pi[i][2]), pi2)
 
-  def normalized_sin(self, x:LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
-    pi = x.const(math.pi)
+    res0 = xi.e(BinaryOps.MUL, pi0)
+    res1 = xi.cast(dtypes.uint64).e(BinaryOps.MUL, pi1.cast(dtypes.uint64))
+    res2 = xi.cast(dtypes.uint64).e(BinaryOps.MUL, pi2.cast(dtypes.uint64))
+    upper_res0 = res0.cast(dtypes.uint64).e(BinaryOps.MUL, res0.cast(dtypes.uint64).const(2**32))
+    lower_res2 = res2.e(BinaryOps.DIV, res2.const(2**32))
+    res0 = upper_res0.e(BinaryOps.ADD, lower_res2)
+    res0 = res0.e(BinaryOps.ADD, res1)
+
+    n = res0.e(BinaryOps.ADD, res0.const(1).e(BinaryOps.MUL, res0.const(2**61))).e(BinaryOps.DIV, res0.const(2**62))
+    res0 = res0.e(BinaryOps.SUB, n.e(BinaryOps.MUL, res0.const(2**62)))
+    x = res0.cast(dtypes.int64, bitcast=True).cast(dtypes.double)
+    x = x.e(BinaryOps.MUL, x.const(self.pi_63))
+
+    n_mod_4 = n.e(BinaryOps.MOD, n.const(4))
+    x = n_mod_4.e(BinaryOps.CMPEQ, n.const(1)).e(TernaryOps.WHERE, x.const(math.pi/2).e(BinaryOps.SUB, x), x)
+    x = n_mod_4.e(BinaryOps.CMPEQ, n.const(2)).e(TernaryOps.WHERE, x.e(UnaryOps.NEG), x)
+    x = n_mod_4.e(BinaryOps.CMPEQ, n.const(3)).e(TernaryOps.WHERE, x.e(BinaryOps.SUB, x.const(math.pi/2)), x)
+    return x.cast(x_dtype)
+
+  def red_ang(self, x:LazyBuffer) -> LazyBuffer:
     signs = x.e(BinaryOps.CMPLT, x.const(0))
-    abs_x = signs.e(TernaryOps.WHERE, x.e(UnaryOps.NEG), x)
-    two_pi_x = self.two_pi_mod(abs_x)
-    less_than_pi = two_pi_x.e(BinaryOps.CMPLT, pi)
-    pi_x = less_than_pi.e(TernaryOps.WHERE, two_pi_x, two_pi_x.e(BinaryOps.SUB, pi))
-    less_than_pi_half = pi_x.e(BinaryOps.CMPLT, pi.e(BinaryOps.DIV, pi_x.const(2)))
-    pi_half_x = less_than_pi_half.e(TernaryOps.WHERE, pi_x, pi.e(BinaryOps.SUB, pi_x))
-    signs = less_than_pi.e(BinaryOps.XOR, less_than_pi.const(True)).e(BinaryOps.XOR, signs)
-    return (pi_half_x, signs)
-
-  def taylor(self, x:LazyBuffer, coefficients:List[float]) -> LazyBuffer:
-    current_term = x.const(1)
-    result = x.const(0)
-    for i, coef in enumerate(coefficients):
-      if i > 0: current_term = current_term.e(BinaryOps.MUL, x)
-      result = result.e(BinaryOps.ADD, current_term.e(BinaryOps.MUL, x.const(coef)))
-    return result
+    x = signs.e(TernaryOps.WHERE, x.e(UnaryOps.NEG), x)
+    size = x.e(BinaryOps.CMPLT, x.const(2**10))
+    red_ang = size.e(TernaryOps.WHERE, self.small_red_ang(x), self.big_red_ang(x))
+    return signs.e(TernaryOps.WHERE, red_ang.e(UnaryOps.NEG), red_ang)
 
   def forward(self, x:LazyBuffer) -> LazyBuffer:
+    x_dtype = x.dtype
+    x = x.cast(dtypes.float)
     self.x = x
-    normalized_x, signs = self.normalized_sin(x)
-    result = self.taylor(normalized_x, self.coefficients)
-    signed_result = signs.e(TernaryOps.WHERE, result.e(UnaryOps.NEG), result)
-    return signed_result
+    t = _taylor(self.red_ang(x), self.coefficients)
+    _, _, nan = _get_info(x)
+    t = nan.e(TernaryOps.WHERE, x.const(math.nan), t)
+    zero = x.e(BinaryOps.CMPEQ, x.const(0))
+    t = zero.e(TernaryOps.WHERE, x.const(0), t)
+    inf = x.e(BinaryOps.CMPEQ, x.const(math.inf))
+    t = inf.e(TernaryOps.WHERE, t.const(math.nan), t)
+    n_inf = x.e(BinaryOps.CMPEQ, x.const(-math.inf))
+    t = n_inf.e(TernaryOps.WHERE, t.const(math.nan), t)
+    return t.cast(x_dtype)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     x = self.x.e(BinaryOps.ADD, self.x.const(math.pi / 2))
-    normalized_x, signs = self.normalized_sin(x)
-    result = self.taylor(normalized_x, self.coefficients)
-    signed_result = signs.e(TernaryOps.WHERE, result.e(UnaryOps.NEG), result)
-    return signed_result.e(BinaryOps.MUL, grad_output)
+    return _taylor(self.red_ang(x), self.coefficients)
 
 # NOTE: maximum(x, 0) behaves differently where x=0
+
 class Relu(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.ret = x.e(BinaryOps.MAX, x.const(0))
@@ -112,54 +195,12 @@ class Relu(Function):
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return self.ret.const(0).e(BinaryOps.CMPLT, self.ret).cast(grad_output.dtype).e(BinaryOps.MUL, grad_output)
 
-class Log2(Function):
-  coefficients =  [-3.8601174939170164180e+00,  1.1216692432871667506e+01,
-                   -1.9710983827769030796e+01,  2.7558275589156679075e+01,
-                   -2.8739264884507441877e+01,  2.2256501167686717935e+01,
-                   -1.2755153664476619468e+01,  5.3417957537454547889e+00,
-                   -1.5901238589413362323e+00,  3.1888781723556752778e-01,
-                   -3.8648713727106605298e-02,  2.1396828028881287667e-03]
-
-  def get_info(self, x:LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer, LazyBuffer]:
-    if x.dtype is dtypes.double:
-      b = x.cast(dtypes.ulong, bitcast=True)
-      int_repr = dtypes.long
-      pow_shift = 2**52
-      sig_shift = 2**12
-      fix = 4607182418800017408
-      bias = 1023
-    elif x.dtype is dtypes.float:
-      b = x.cast(dtypes.uint, bitcast=True)
-      int_repr = dtypes.int
-      pow_shift = 2**23
-      sig_shift = 2**9
-      fix = 0x3F800000
-      bias = 127
-    else:
-      raise TypeError(f'{x.dtype} not supported for Log2.')
-
-    bpow = b.e(BinaryOps.DIV, b.const(pow_shift)).cast(int_repr, bitcast=True)
-    pow = bpow.e(BinaryOps.SUB, b.const(bias).cast(int_repr))
-    bsig = b.e(BinaryOps.MUL, b.const(sig_shift)).e(BinaryOps.DIV, b.const(sig_shift))
-    sig = bsig.e(BinaryOps.ADD, bsig.const(fix)).cast(x.dtype, bitcast=True)
-    nan = bpow.e(BinaryOps.CMPLT, bpow.const(sig_shift/2 - 1))
-    return (pow, sig, nan)
-
+class Log(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
-    x_dtype = x.dtype
-    if x.dtype not in (dtypes.double, dtypes.float): x = x.cast(dtypes.double)
-    pow, sig, nan = self.get_info(x)
-    t = _taylor(self, sig, self.coefficients).e(BinaryOps.ADD, pow.cast(x.dtype))
-    handle_nan = nan.e(TernaryOps.WHERE, t, x.const(math.nan))
-    handle_neg = x.e(BinaryOps.CMPLT, x.const(0.0)).e(TernaryOps.WHERE, handle_nan.const(math.nan), handle_nan)
-    handle_0 = x.e(BinaryOps.CMPEQ, x.const(0.0)).e(TernaryOps.WHERE, handle_neg.const(-math.inf), handle_neg)
-    handle_1 = x.e(BinaryOps.CMPEQ, x.const(1.0)).e(TernaryOps.WHERE, handle_0.const(0.0), handle_0)
-    handle_inf = x.e(BinaryOps.CMPEQ, x.const(math.inf)).e(TernaryOps.WHERE, handle_1.const(math.inf), handle_1)
-    return handle_inf.cast(x_dtype)
+    return x.e(UnaryOps.LOG2).e(BinaryOps.MUL, x.const(math.log(2)))
 
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return grad_output.e(BinaryOps.DIV, self.x.e(BinaryOps.MUL, self.x.const(math.log(2))))
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.e(BinaryOps.DIV, self.x)
 
 class Exp(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
@@ -167,25 +208,6 @@ class Exp(Function):
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return self.ret.e(BinaryOps.MUL, grad_output)
-
-class Exp2(Function):
-  def forward(self, x:LazyBuffer) -> LazyBuffer:
-    COEFFICIENTS = [1.00000000081861939449e+00, 6.93147182520959859175e-01, 2.40226495713301319013e-01, 5.55040941978386520583e-02,
-                    9.61815259200062347422e-03, 1.33338111576375667293e-03, 1.54018907490696861651e-04, 1.52360250041314857400e-05,
-                    1.32587007737466412782e-06, 1.06391894003459590264e-07, 6.77776413810625168015e-09]
-
-    var = x.const(1)
-    acc = x.const(0)
-    for i, coef in enumerate(COEFFICIENTS):
-      if i > 0: var = var.e(BinaryOps.MUL, x)
-      term = var.e(BinaryOps.MUL, x.const(coef))
-      acc = acc.e(BinaryOps.ADD, term)
-
-    self.ret = acc
-    return self.ret
-
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return self.ret.e(BinaryOps.MUL, self.ret.const(math.log(2))).e(BinaryOps.MUL, grad_output)
 
 class Sqrt(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
