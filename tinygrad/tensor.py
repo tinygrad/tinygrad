@@ -338,8 +338,9 @@ class Tensor:
     counts2 = counts1 + math.ceil(num / 2)
     Tensor._rng_counter.assign(Tensor._rng_counter + num).realize()
 
+    seed = Tensor([Tensor._seed], dtype=dtypes.uint32, requires_grad=False)
     rotations = [[13, 15, 26, 6], [17, 29, 16, 24]]
-    ks = [0x0, Tensor._seed ^ 0x0 ^ 0x1BD11BDA, Tensor._seed]
+    ks = [0x0, seed ^ 0x0 ^ 0x1BD11BDA, seed]
 
     x = [counts1 + ks[-1], counts2 + ks[0]]
     for i in range(5):
