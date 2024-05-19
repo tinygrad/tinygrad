@@ -44,29 +44,35 @@ class Sin(Function):
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
 
-# Approximates sin(x) using polynomial of degree n = 6
-# With coefficients found using Sollya's implementation of Remez Algorithm
+# Approximates sin(x) using Chebyshev polynomial of degree n = 11
 class SinApprox(Function):
 
-  # Only works for interval [0, 0.5 * pi]
+  # Only works for interval [-pi, pi]
+  # Coefficients are from https://web.archive.org/web/20200628195036/http://mooooo.ooo/chebyshev-sine-approximation/
   def _approx(self, x: LazyBuffer) -> LazyBuffer:
-    c0 = x.const(-3.9734696902210357672938961517467719762882170010672e-7)
-    c1 = x.const( 1.0000253949194188244642184673601708008165190827699)
-    c2 = x.const(-2.6525857318639647713456451643447463972738392062113e-4)
-    c3 = x.const(-0.165624118725196353945133076112852096292230842035787)
-    c4 = x.const(-1.9644062125700811888281574623831356707392219408325e-3)
-    c5 = x.const( 1.02574389475930544066937846962477407301230092973513e-2)
-    c6 = x.const(-9.5802350704084589068723792470658516536082540035397e-4)
+    c0 = x.const(-0.10132118)
+    c1 = x.const( 0.0066208798)
+    c2 = x.const(-0.00017350505)
+    c3 = x.const( 0.0000025222919)
+    c4 = x.const(-0.00000002331778)
+    c5 = x.const( 0.00000000013291342)
 
-    x0 = c0
-    x1 = x.e(BinaryOps.MUL, c1)
-    x2 = x.e(BinaryOps.MUL, x).e(BinaryOps.MUL, c2)
-    x3 = x.e(BinaryOps.MUL, x).e(BinaryOps.MUL, x).e(BinaryOps.MUL, c3)
-    x4 = x.e(BinaryOps.MUL, x).e(BinaryOps.MUL, x).e(BinaryOps.MUL, x).e(BinaryOps.MUL, c4)
-    x5 = x.e(BinaryOps.MUL, x).e(BinaryOps.MUL, x).e(BinaryOps.MUL, x).e(BinaryOps.MUL, x).e(BinaryOps.MUL, c5)
-    x6 = x.e(BinaryOps.MUL, x).e(BinaryOps.MUL, x).e(BinaryOps.MUL, x).e(BinaryOps.MUL, x).e(BinaryOps.MUL, x).e(BinaryOps.MUL, c6)
+    pi_major = x.const( 3.1415927)
+    pi_minor = x.const(-0.00000008742278)
 
-    return x0.e(BinaryOps.ADD, x1).e(BinaryOps.ADD, x2).e(BinaryOps.ADD, x3).e(BinaryOps.ADD, x4).e(BinaryOps.ADD, x5).e(BinaryOps.ADD, x6)
+    x2 = x.e(BinaryOps.MUL, x)
+
+    p5 = c5
+    p4 = p5.e(BinaryOps.MUL, x2).e(BinaryOps.ADD, c4)
+    p3 = p4.e(BinaryOps.MUL, x2).e(BinaryOps.ADD, c3)
+    p2 = p3.e(BinaryOps.MUL, x2).e(BinaryOps.ADD, c2)
+    p1 = p2.e(BinaryOps.MUL, x2).e(BinaryOps.ADD, c1)
+    p0 = p1.e(BinaryOps.MUL, x2).e(BinaryOps.ADD, c0)
+
+    y0 = x.e(BinaryOps.SUB, pi_major).e(BinaryOps.SUB, pi_minor)
+    y1 = x.e(BinaryOps.ADD, pi_major).e(BinaryOps.ADD, pi_minor)
+
+    return p0.e(BinaryOps.MUL, x).e(BinaryOps.MUL, y0).e(BinaryOps.MUL, y1)
 
   def approx(self, x: LazyBuffer) -> LazyBuffer:
     # Normalize range to [0.0, 1.0]
