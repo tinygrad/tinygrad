@@ -71,27 +71,26 @@ def _get_info(x:LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer, LazyBuffer]:
     raise TypeError(f'{x.dtype} not supported.')
 
   b = b.e(BinaryOps.MUL, b.const(2)).e(BinaryOps.DIV, b.const(2))
-  bpow = b.e(BinaryOps.DIV, b.const(pow_shift)).cast(int_repr, bitcast=True)
-  pow = bpow.e(BinaryOps.SUB, b.const(bias).cast(int_repr))
+  bpower = b.e(BinaryOps.DIV, b.const(pow_shift)).cast(int_repr, bitcast=True)
+  power = bpower.e(BinaryOps.SUB, b.const(bias).cast(int_repr))
   bsig = b.e(BinaryOps.MUL, b.const(sig_shift)).e(BinaryOps.DIV, b.const(sig_shift))
   sig = bsig.e(BinaryOps.ADD, bsig.const(fix)).cast(x.dtype, bitcast=True)
-  nan = bpow.e(BinaryOps.CMPEQ, bpow.const(sig_shift/2-1))
-  return (pow, sig, nan)
+  nan = bpower.e(BinaryOps.CMPEQ, bpower.const(sig_shift/2-1))
+  return (power, sig, nan)
 
 def _floor(x:LazyBuffer) -> LazyBuffer:
   x_dtype = x.dtype
   return x.cast(dtypes.ulong).cast(x_dtype)
 
 class Sin(Function):
-  coefficients =  [
-    -6.7438343474797085373779630031e-26,   0.999999999999624721374446633997,
-    -2.121921508148512319479060011252e-24, -0.1666666666609814631110143462865,
-     2.371851526646344079205758303618e-23, 8.3333333084146850832133575574e-3,
-    -6.46315333091709762469921156374e-23,  -1.984126502403636304322074311833e-4,
-     6.972197019543846009729322724116e-23, 2.755684087413563572364382264464e-6,
-    -3.240737222146389815085566457998e-23, -2.502663634786733989277463371664e-8,
-     5.432903568468138449760930559297e-24, 1.536593755736416904368799406149e-10
-  ]
+  coefficients = [
+    -3.927706665244766e-14,   1.0000000000071227,
+    -2.1372653510812573e-10, -0.16666666415735265,
+    -1.5195658172408884e-08,  0.008333387485289051,
+    -1.218355377507116e-07,  -0.00019823344523361102,
+    -1.7392842459887678e-07,  2.864770129172753e-06,
+    -4.1207696421241214e-08, -1.7470936444039315e-08
+    ]
 
   four_div_pi = [
     (0xa2,       0xf9836e4e, 0x441529fc),
@@ -164,13 +163,17 @@ class Sin(Function):
     x = signs.e(TernaryOps.WHERE, x.e(UnaryOps.NEG), x)
     size = x.e(BinaryOps.CMPLT, x.const(2**10))
     red_ang = size.e(TernaryOps.WHERE, self.small_red_ang(x), self.big_red_ang(x))
-    return signs.e(TernaryOps.WHERE, red_ang.e(UnaryOps.NEG), red_ang)
+    red_ang = signs.e(TernaryOps.WHERE, red_ang.e(UnaryOps.NEG), red_ang)
+    return red_ang
 
   def forward(self, x:LazyBuffer) -> LazyBuffer:
+    self.x = x
     x_dtype = x.dtype
     x = x.cast(dtypes.float)
-    self.x = x
-    t = _taylor(self.red_ang(x), self.coefficients)
+    reduced_angles = self.red_ang(x)
+    signs = reduced_angles.e(BinaryOps.CMPLT, reduced_angles.const(0))
+    reduced_angles = signs.e(TernaryOps.WHERE, reduced_angles.e(UnaryOps.NEG), reduced_angles)
+    t = _taylor(reduced_angles, self.coefficients)
     _, _, nan = _get_info(x)
     t = nan.e(TernaryOps.WHERE, x.const(math.nan), t)
     zero = x.e(BinaryOps.CMPEQ, x.const(0))
@@ -179,11 +182,11 @@ class Sin(Function):
     t = inf.e(TernaryOps.WHERE, t.const(math.nan), t)
     n_inf = x.e(BinaryOps.CMPEQ, x.const(-math.inf))
     t = n_inf.e(TernaryOps.WHERE, t.const(math.nan), t)
-    return t.cast(x_dtype)
+    return signs.e(TernaryOps.WHERE, t.e(UnaryOps.NEG), t).cast(x_dtype)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     x = self.x.e(BinaryOps.ADD, self.x.const(math.pi / 2))
-    return _taylor(self.red_ang(x), self.coefficients)
+    return self.forward(x)
 
 # NOTE: maximum(x, 0) behaves differently where x=0
 
