@@ -42,10 +42,11 @@ def _time_program(p:Program, lib:bytes, var_vals, rawbufs, early_stop=None, max_
   try: car = CompiledRunner(p, precompiled=lib)
   except AssertionError: return [math.inf] * cnt
   tms = []
+  input_bufs = [rawbufs[i] for i,_ in car.p.globals]
   for _ in range(cnt):
     if clear_l2:
-      with Context(DEBUG=0, BEAM=0, CACHECOLLECTING=0): Tensor.ones(1024,1024).contiguous().realize()
-    tms.append(cast(float, car(rawbufs, var_vals, wait=True))*factor)
+      with Context(DEBUG=0, BEAM=0, CACHECOLLECTING=0): Tensor.ones(1024,1024).contiguous().realize(do_update_stats=False)
+    tms.append(cast(float, car(input_bufs, var_vals, wait=True))*factor)
     if early_stop is not None and early_stop < tms[-1]: break
   return tms
 
@@ -58,7 +59,7 @@ def _try_compile_linearized_w_idx(x:Tuple[int,Linearizer], compiler:Compiler) ->
     prog = compiler.compile(p.src)
     et = time.perf_counter() - st
     return x[0], (p, prog, et)
-  except Exception:
+  except RuntimeError:
     if DEBUG >= 4: traceback.print_exc()
     return x[0], None
 
