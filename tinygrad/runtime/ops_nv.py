@@ -106,6 +106,8 @@ class HWQueue:
     self.hw_page = device._gpu_alloc(len(self.q) * 4, map_to_cpu=True)
     hw_view = to_mv(self.hw_page.base, self.hw_page.length).cast("I")
     for i, value in enumerate(self.q): hw_view[i] = value
+
+    # From now on, the queue is on the device for faster submission.
     self.q = hw_view # type: ignore
 
   def _submit(self, dev, gpu_ring, put_value, gpfifo_entries, gpfifo_token, gpu_ring_controls):
