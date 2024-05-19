@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Tuple, Optional, List
 import tinygrad.runtime.autogen.cuda as cuda
 from tinygrad.helpers import DEBUG, getenv, from_mv, to_char_p_p, init_c_var, init_c_struct_t, colored, cpu_time_execution
-from tinygrad.device import Compiled, Compiler, BufferOptions, LRUAllocator, MallocAllocator
+from tinygrad.device import Compiled, Compiler, CompileError, BufferOptions, LRUAllocator, MallocAllocator
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.renderer.assembly import PTXRenderer
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl  # noqa: F401
@@ -71,7 +71,7 @@ class CUDACompiler(Compiler):
     check(cuda.nvrtcCreateProgram(ctypes.byref(prog := cuda.nvrtcProgram()), src.encode(), "<null>".encode(), 0, None, None))
     status = cuda.nvrtcCompileProgram(prog, len(self.compile_options), to_char_p_p([o.encode() for o in self.compile_options]))
 
-    if status != 0: raise RuntimeError(f"compile failed: {_get_bytes(prog, cuda.nvrtcGetProgramLog, cuda.nvrtcGetProgramLogSize, check).decode()}")
+    if status != 0: raise CompileError(f"compile failed: {_get_bytes(prog, cuda.nvrtcGetProgramLog, cuda.nvrtcGetProgramLogSize, check).decode()}")
     return _get_bytes(prog, cuda.nvrtcGetPTX, cuda.nvrtcGetPTXSize, check)
 
 def cuda_disassemble(lib, arch):

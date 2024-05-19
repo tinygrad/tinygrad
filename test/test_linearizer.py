@@ -417,7 +417,7 @@ class TestLinearizer(unittest.TestCase):
     sched = [si for si in create_schedule([t.lazydata]) if si.ast[0].op not in LoadOps]
     assert len(sched) == 1
     lin = Linearizer(*sched[0].ast)
-    assert not any(u.uop is UOps.LOOP for u in lin.linearize().uops), "found loop in sum collapse"
+    assert not any(u.uop is UOps.RANGE for u in lin.linearize().uops), "found loop in sum collapse"
 
   def test_assign_fold(self):
     a = Tensor.ones(4, 4).contiguous().realize()
@@ -471,7 +471,7 @@ class TestLinearizer(unittest.TestCase):
       # ignore kernel optimized IF/LOOP statements for now
       if if_op:=next((u for u in uops if u.uop is UOps.IF), None):
         uops = uops[:uops.index(if_op)]
-      assert len(set([u.uop for u in uops if u.uop in {UOps.LOOP, UOps.SPECIAL}])) == 1, "has either specials or loops, not both"
+      assert len(set([u.uop for u in uops if u.uop in {UOps.RANGE, UOps.SPECIAL}])) == 1, "has either specials or loops, not both"
       assert len([u for u in uops if u.uop is UOps.PHI]) == 0, "PHI should have been simplified"
       # TODO: once uops track min/max this will be fixed
       #assert len([u for u in uops if u.arg is BinaryOps.MAX]) <= max_ops, "no unnecessary MAX ops"

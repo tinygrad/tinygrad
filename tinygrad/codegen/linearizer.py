@@ -175,7 +175,7 @@ class Linearizer(Kernel):
 
   # render loop
   def render_loop(self, xx:List[Variable], depth:int) -> Tuple[UOp, ...]:
-    new_loops = {x.expr:self.uops.add(UOps.LOOP, dtypes.int32, (
+    new_loops = {x.expr:self.uops.add(UOps.RANGE, dtypes.int32, (
       self.const(x.min) if isinstance(x.min, int) else cast(Node, x.min).render(self.render_ops, self),
       self.const(x.max+1) if isinstance(x.max, int) else cast(Node, x.max+1).render(self.render_ops, self)), arg=(depth,i)) for i,x in enumerate(xx) if not isinstance(x, NumNode) and x.expr is not None}  # noqa: E501
     self.loop_uops.update(new_loops)

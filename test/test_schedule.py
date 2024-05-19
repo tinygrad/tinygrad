@@ -706,12 +706,12 @@ class TestSchedule(unittest.TestCase):
     a = shared * 2
     b = shared * 3
     sched = check_schedule([a, b], 1)
-    for si in sched[:-2]: assert all(out.dtype is dtypes.half for out in si.outputs)
+    for si in sched[:-2]: assert all(out.dtype == dtypes.half for out in si.outputs)
 
     # reduce
     a = z.sum(axis=0).half().float().sum(axis=0)
     sched = check_schedule(a, 2)
-    for si in sched[:-1]: assert all(out.dtype is dtypes.half for out in si.outputs)
+    for si in sched[:-1]: assert all(out.dtype == dtypes.half for out in si.outputs)
 
     # expand
     # expand will realize just after the .float(), so requires change to realize-before-expand

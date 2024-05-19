@@ -164,6 +164,8 @@ MallocAllocator = _MallocAllocator()
 
 # **************** for Compiled Devices ****************
 
+class CompileError(Exception): pass
+
 class Compiler:
   def __init__(self, cachekey:Optional[str]=None): self.cachekey = None if getenv("DISABLE_COMPILER_CACHE") else cachekey
   def compile(self, src:str) -> bytes: raise NotImplementedError("need a compile function")
