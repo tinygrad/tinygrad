@@ -108,6 +108,69 @@ class TestLinearizer(unittest.TestCase):
     self.assertEqual(k.uops.uops[-1].uop, UOps.ENDIF)
     self.assertLess(k.uops.uops.index([x for x in k.uops.uops if x.uop is UOps.STORE][-1]), k.uops.uops.index(k.uops.uops[-1]))
 
+  def test_two_nested_range(self):
+    a = Tensor.randn(2, ).realize()
+    out = a.reshape(2, 1).expand(2, 3).sum()
+    lin = helper_linearizer_opt(out, wanna_output=[np.broadcast_to(a.numpy().reshape(2, 1), (2, 3)).sum()])[0]
+    ranges = [i for i,u in enumerate(lin.uops) if u.uop is UOps.RANGE]
+    # RANGE -> LOAD -> RANGE -> PHI
+    assert ranges[1] == ranges[0]+2
+    assert lin.uops[ranges[0]+1].uop is UOps.LOAD
+
+  def test_three_nested_range(self):
+    a = Tensor.randn(2, ).realize()
+    out = a.reshape(2, 1).expand(2, 3).expand(2, 2, 3).sum()
+    lin = helper_linearizer_opt(out, wanna_output=[np.broadcast_to(np.broadcast_to(a.numpy().reshape(2, 1), (2, 3)), (2, 2, 3)).sum()])[0]
+    ranges = [i for i,u in enumerate(lin.uops) if u.uop is UOps.RANGE]
+    # RANGE -> RANGE -> LOAD -> RANGE -> PHI
+    assert ranges[2] == ranges[1]+2 == ranges[0]+3
+    assert lin.uops[ranges[1]+1].uop is UOps.LOAD
+
+  def test_two_nested_range_alt_indexing(self):
+    a = Tensor([2, 2]).realize()
+    out = a.reshape(2, 1).pad(((1, 1), (1, 1)), 2).sum()
+    lin = helper_linearizer_opt(out, wanna_output=[24])[0]
+    ranges = [i for i,u in enumerate(lin.uops) if u.uop is UOps.RANGE]
+    # RANGE -> 4x ALU -> RANGE -> 9x ALU + 1x LOAD -> PHI
+    assert ranges[1] == ranges[0]+5
+    assert lin.uops[ranges[1]+11].uop is UOps.ENDRANGE
+
+  def test_range_outer_op_before_phi(self):
+    a = Tensor.randn(4, 1).realize()
+    b = Tensor.randn(1, 1).realize()
+    out = (a + b[0]).sum() + b[0]
+    lin = helper_linearizer_opt(out, wanna_output=[(a.numpy()+b.numpy()[0]).sum()+b.numpy()[0]])[0]
+    ranges = [i for i,u in enumerate(lin.uops) if u.uop is UOps.RANGE]
+    # LOAD -> RANGE -> LOAD -> PHI
+    assert lin.uops[ranges[0]-2].uop is UOps.LOAD
+
+  def test_range_outer_op_before_phi_nested_range(self):
+    a = Tensor.randn(2, ).realize()
+    b = Tensor.randn(1, 1).realize()
+    out = (a.reshape(2, 1).expand(2, 3) + b[0]).sum() + b[0]
+    lin = helper_linearizer_opt(out, wanna_output=[(np.broadcast_to(a.numpy().reshape(2, 1), (2, 3)) + b.numpy()[0]).sum() + b.numpy()[0]])[0]
+    ranges = [i for i,u in enumerate(lin.uops) if u.uop is UOps.RANGE]
+    # LOAD -> RANGE -> LOAD -> ALU -> RANGE -> PHI
+    assert lin.uops[ranges[0]-2].uop is UOps.LOAD
+    assert ranges[1] == ranges[0]+3
+    assert [x.uop for x in lin.uops[ranges[0]+1:ranges[0]+3]] == [UOps.LOAD, UOps.ALU]
+
+  def test_range_outer_op_after_phi(self):
+    a = Tensor.randn(4, 1).realize()
+    out = a.sum() * a.sum()
+    lin = helper_linearizer_opt(out, wanna_output=[a.numpy().sum()*a.numpy().sum()])[0]
+    # RANGE -> LOAD -> PHI -> ALU
+    end = max(i for i,u in enumerate(lin.uops) if u.uop is UOps.ENDRANGE)
+    assert lin.uops[end+1].uop is UOps.ALU
+
+  def test_range_outer_op_after_phi_nested_range(self):
+    a = Tensor.randn(2, ).realize()
+    out = a.reshape(2, 1).expand(2, 3).sum() + a.reshape(2, 1).expand(2, 3).sum()
+    lin = helper_linearizer_opt(out, wanna_output=[(np.broadcast_to(a.numpy().reshape(2, 1), (2, 3))).sum()*2])[0]
+    # RANGE -> LOAD -> PHI -> ALU
+    end = max(i for i,u in enumerate(lin.uops) if u.uop is UOps.ENDRANGE)
+    assert lin.uops[end+1].uop is UOps.ALU
+
   @unittest.expectedFailure
   def test_early_end_local(self):
     shape, output_shape = (32,), (1,)
@@ -402,6 +465,106 @@ class TestLinearizer(unittest.TestCase):
     helper(Tensor.arange(256), max_ops=2)
     helper(Tensor.arange(255), max_ops=2)
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "device doesn't support float4")
+  def test_grouped_store_phis(self):
+    x, y = Tensor.randn(64,64), Tensor.randn(64,64)
+    out = x.matmul(y)
+
+    k = Linearizer(*create_schedule([out.lazydata])[-1].ast)
+    k.hand_coded_optimizations()
+    k.linearize()
+
+    # check that the float4 cast collapses
+    store_vals = [u.vin[-1] for u in k.uops if u.uop is UOps.STORE]
+    for val in store_vals:
+      assert val.dtype == dtypes.float.vec(4) and val.uop is not UOps.CAST
+
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "device doesn't support float4")
+  def test_grouped_store_values(self):
+    x = Tensor.randn((4,3,6,6)).realize()
+    out = x.flip((0,1)).contiguous()
+
+    k = Linearizer(*create_schedule([out.lazydata])[-1].ast)
+    k.hand_coded_optimizations()
+    k.linearize()
+
+    store_val = [u.vin[-1] for u in k.uops if u.uop is UOps.STORE][0]
+    assert store_val.dtype == dtypes.float.vec(4) and store_val.uop is not UOps.CAST
+
+  def test_grouped_store_locals_and_globals(self):
+    if not Device[Device.DEFAULT].renderer.has_local or not Device[Device.DEFAULT].renderer.has_shared or \
+       not Device[Device.DEFAULT].renderer.supports_float4: self.skipTest("needs locals, shared, and float4")
+
+    x, y = Tensor.rand(128, 128), Tensor.rand(128, 128)
+    out = x@y
+
+    opts = [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUPTOP, 0, 8),
+            Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 2)] # upcast accs in both reduces
+    k = Linearizer(*create_schedule([out.lazydata])[-1].ast)
+    for opt in opts: k.apply_opt(opt)
+    k.linearize()
+
+    local_stores = [u for u in k.uops if u.uop is UOps.STORE and u.vin[0].uop is UOps.DEFINE_LOCAL]
+    barrier = [u for u in k.uops if u.uop is UOps.BARRIER][0]
+    global_stores = [u for u in k.uops if u.uop is UOps.STORE and u.vin[0].uop is UOps.DEFINE_GLOBAL]
+
+    # check that the float4 cast collapses for all stores
+    for store in local_stores+global_stores:
+      assert store.vin[-1].dtype == dtypes.float.vec(2) and store.vin[-1].uop is not UOps.CAST
+    # check the children's vins
+    assert barrier.vin == tuple(local_stores)
+    assert len([u for u in k.uops if u.uop is UOps.IF and u.vin[-1] == barrier]) == 1
+
+  def test_grouped_store_local_only(self):
+    if not Device[Device.DEFAULT].renderer.has_local or not Device[Device.DEFAULT].renderer.has_shared or \
+       not Device[Device.DEFAULT].renderer.supports_float4: self.skipTest("needs locals, shared, and float4")
+
+    x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
+    r = (x@y).relu()
+    k = Linearizer(*create_schedule([r.lazydata])[-1].ast)
+    k.hand_coded_optimizations()
+    k.linearize()
+
+    stores = [u for u in k.uops if u.uop is UOps.STORE]
+
+    # the float4 value stores directly in lds and we skip upcast
+    assert stores[0].vin[-1].dtype == dtypes.float.vec(4)
+    assert stores[0].vin[-1].uop is not UOps.CAST
+
+    # the global store doesn't change
+    assert stores[1].vin[-1].dtype == dtypes.float
+
+  def test_skip_unmatching_upcasts(self):
+    if not Device[Device.DEFAULT].renderer.has_local or not Device[Device.DEFAULT].renderer.supports_float4:
+      self.skipTest("needs locals and float4")
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(240, 40, 1, 1), strides=(1, 240, 0, 0), offset=0, mask=None, contiguous=False),)))),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(240, 40, 1, 1), strides=(40, 1, 0, 0), offset=0, mask=None, contiguous=True),)))) # noqa: E501
+    opts = [
+        Opt(op=OptOps.UPCAST, axis=1, amt=4), Opt(op=OptOps.LOCAL, axis=0, amt=16),
+        Opt(op=OptOps.LOCAL, axis=1, amt=2), Opt(op=OptOps.UPCAST, axis=3, amt=2)
+    ]
+
+    k = Linearizer(ast)
+    for opt in opts: k.apply_opt(opt)
+    k.linearize()
+
+    out = [u for u in k.uops if u.uop is UOps.STORE][0]
+    assert out.vin[-1].uop is UOps.CAST and out.vin[-1].dtype == dtypes.float.vec(4)
+
+  def test_skip_unmatching_upcasts_with_gep(self):
+    if not Device[Device.DEFAULT].renderer.has_local or not Device[Device.DEFAULT].renderer.supports_float4:
+      self.skipTest("Needs locals and float4")
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(8, 32, 1, 1), strides=(1, 8, 0, 0), offset=0, mask=None, contiguous=False),)))),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(8, 32, 1, 1), strides=(32, 1, 0, 0), offset=0, mask=None, contiguous=True),)))) # noqa: E501
+    opts = [Opt(op=OptOps.LOCAL, axis=1, amt=4), Opt(op=OptOps.UPCAST, axis=2, amt=2), Opt(op=OptOps.LOCAL, axis=1, amt=8),
+            Opt(op=OptOps.UPCAST, axis=1, amt=0), Opt(op=OptOps.UPCAST, axis=1, amt=4), Opt(op=OptOps.LOCAL, axis=0, amt=8),
+            Opt(op=OptOps.UPCAST, axis=1, amt=0), Opt(op=OptOps.UPCAST, axis=0, amt=2)]
+
+    k = Linearizer(ast)
+    for opt in opts: k.apply_opt(opt)
+    k.linearize()
+
+    out = [u for u in k.uops if u.uop is UOps.STORE][0]
+    assert out.vin[-1].uop is UOps.CAST and out.vin[-1].dtype == dtypes.float.vec(2)
+
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need backends that support float4")
 class TestFloat4(unittest.TestCase):
   @staticmethod
@@ -685,7 +848,7 @@ def _helper_linearizer_opt_ast(realized_ast:Tuple[LazyOp, ...], real_bufs:List[B
 class TestKernelOpts(unittest.TestCase):
   def test_local_and_grouped_reduce(self):
     if not Device[Device.DEFAULT].renderer.has_local or not Device[Device.DEFAULT].renderer.has_shared:
-      self.skipTest("Only Compiled uses linearizer with locals and shared")
+      self.skipTest("needs with locals and shared")
 
     N = 128
     Tensor.manual_seed(1882)
@@ -731,7 +894,7 @@ class TestKernelOpts(unittest.TestCase):
 
   def test_matmul(self):
     if not Device[Device.DEFAULT].renderer.has_local or not Device[Device.DEFAULT].renderer.has_shared:
-      self.skipTest("Only Compiled uses linearizer with locals and shared")
+      self.skipTest("needs locals and shared")
 
     N = 128
     Tensor.manual_seed(1552)
@@ -761,7 +924,7 @@ class TestKernelOpts(unittest.TestCase):
 
   def test_double_reduce(self):
     if not Device[Device.DEFAULT].renderer.has_local or not Device[Device.DEFAULT].renderer.has_shared:
-      self.skipTest("Only Compiled uses linearizer with locals and shared")
+      self.skipTest("needs locals and shared")
 
     N = 128
     Tensor.manual_seed(1552)
@@ -950,7 +1113,7 @@ class TestKernelOpts(unittest.TestCase):
 
   def test_color_shapes_with_local(self):
     if not Device[Device.DEFAULT].renderer.has_local or not Device[Device.DEFAULT].renderer.has_shared:
-      self.skipTest("Only Compiled uses linearizer with locals and shared")
+      self.skipTest("needs locals and shared")
 
     N = 32
     Tensor.manual_seed(1552)
@@ -1017,110 +1180,6 @@ class TestLinearizerHelper(unittest.TestCase):
     uidx1 = Variable("_uidx1", 0, 1)
     idxs = (uidx0 // 5, uidx0 * 5, uidx1)
     assert expand_idxs(idxs) == (uidx0, NumNode(0), uidx1)
-
-class TestLinearizerUOptimize(unittest.TestCase):
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "device doesn't support float4")
-  def test_grouped_store_phis(self):
-    x, y = Tensor.randn(64,64), Tensor.randn(64,64)
-    out = x.matmul(y)
-
-    k = Linearizer(*create_schedule([out.lazydata])[-1].ast)
-    k.hand_coded_optimizations()
-    k.linearize()
-
-    # check that the float4 cast collapses
-    store_vals = [u.vin[-1] for u in k.uops if u.uop is UOps.STORE]
-    for val in store_vals:
-      assert val.dtype == dtypes.float.vec(4) and val.uop is not UOps.CAST
-
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "device doesn't support float4")
-  def test_grouped_store_values(self):
-    x = Tensor.randn((4,3,6,6)).realize()
-    out = x.flip((0,1)).contiguous()
-
-    k = Linearizer(*create_schedule([out.lazydata])[-1].ast)
-    k.hand_coded_optimizations()
-    k.linearize()
-
-    store_val = [u.vin[-1] for u in k.uops if u.uop is UOps.STORE][0]
-    assert store_val.dtype == dtypes.float.vec(4) and store_val.uop is not UOps.CAST
-
-  def test_grouped_store_locals_and_globals(self):
-    if not Device[Device.DEFAULT].renderer.has_local or not Device[Device.DEFAULT].renderer.has_shared or \
-       not Device[Device.DEFAULT].renderer.supports_float4:
-      self.skipTest("Only Compiled uses linearizer with locals, shared, and float4")
-
-    x, y = Tensor.rand(128, 128), Tensor.rand(128, 128)
-    out = x@y
-
-    opts = [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUPTOP, 0, 8),
-            Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 2)] # upcast accs in both reduces
-    k = Linearizer(*create_schedule([out.lazydata])[-1].ast)
-    for opt in opts: k.apply_opt(opt)
-    k.linearize()
-
-    local_stores = [u for u in k.uops if u.uop is UOps.STORE and u.vin[0].uop is UOps.DEFINE_LOCAL]
-    barrier = [u for u in k.uops if u.uop is UOps.BARRIER][0]
-    global_stores = [u for u in k.uops if u.uop is UOps.STORE and u.vin[0].uop is UOps.DEFINE_GLOBAL]
-
-    # check that the float4 cast collapses for all stores
-    for store in local_stores+global_stores:
-      assert store.vin[-1].dtype == dtypes.float.vec(2) and store.vin[-1].uop is not UOps.CAST
-    # check the children's vins
-    assert barrier.vin == tuple(local_stores)
-    assert len([u for u in k.uops if u.uop is UOps.IF and u.vin[-1] == barrier]) == 1
-
-  def test_grouped_store_local_only(self):
-    if not Device[Device.DEFAULT].renderer.has_local or not Device[Device.DEFAULT].renderer.has_shared or \
-       not Device[Device.DEFAULT].renderer.supports_float4:
-      self.skipTest("Only Compiled uses linearizer with locals, shared, and float4")
-
-    x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
-    r = (x@y).relu()
-    k = Linearizer(*create_schedule([r.lazydata])[-1].ast)
-    k.hand_coded_optimizations()
-    k.linearize()
-
-    stores = [u for u in k.uops if u.uop is UOps.STORE]
-
-    # the float4 value stores directly in lds and we skip upcast
-    assert stores[0].vin[-1].dtype == dtypes.float.vec(4)
-    assert stores[0].vin[-1].uop is not UOps.CAST
-
-    # the global store doesn't change
-    assert stores[1].vin[-1].dtype == dtypes.float
-
-  def test_skip_unmatching_upcasts(self):
-    if not Device[Device.DEFAULT].renderer.has_local or not Device[Device.DEFAULT].renderer.supports_float4:
-      self.skipTest("Needs locals and float4")
-    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(240, 40, 1, 1), strides=(1, 240, 0, 0), offset=0, mask=None, contiguous=False),)))),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(240, 40, 1, 1), strides=(40, 1, 0, 0), offset=0, mask=None, contiguous=True),)))) # noqa: E501
-    opts = [
-        Opt(op=OptOps.UPCAST, axis=1, amt=4), Opt(op=OptOps.LOCAL, axis=0, amt=16),
-        Opt(op=OptOps.LOCAL, axis=1, amt=2), Opt(op=OptOps.UPCAST, axis=3, amt=2)
-    ]
-
-    k = Linearizer(ast)
-    for opt in opts: k.apply_opt(opt)
-    k.linearize()
-
-    out = [u for u in k.uops if u.uop is UOps.STORE][0]
-    assert out.vin[-1].uop is UOps.CAST and out.vin[-1].dtype == dtypes.float.vec(4)
-
-  def test_skip_unmatching_upcasts_with_gep(self):
-    if not Device[Device.DEFAULT].renderer.has_local or not Device[Device.DEFAULT].renderer.supports_float4:
-      self.skipTest("Needs locals and float4")
-    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(8, 32, 1, 1), strides=(1, 8, 0, 0), offset=0, mask=None, contiguous=False),)))),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(8, 32, 1, 1), strides=(32, 1, 0, 0), offset=0, mask=None, contiguous=True),)))) # noqa: E501
-    opts = [Opt(op=OptOps.LOCAL, axis=1, amt=4), Opt(op=OptOps.UPCAST, axis=2, amt=2), Opt(op=OptOps.LOCAL, axis=1, amt=8),
-            Opt(op=OptOps.UPCAST, axis=1, amt=0), Opt(op=OptOps.UPCAST, axis=1, amt=4), Opt(op=OptOps.LOCAL, axis=0, amt=8),
-            Opt(op=OptOps.UPCAST, axis=1, amt=0), Opt(op=OptOps.UPCAST, axis=0, amt=2)]
-
-    k = Linearizer(ast)
-    for opt in opts: k.apply_opt(opt)
-    k.linearize()
-
-    out = [u for u in k.uops if u.uop is UOps.STORE][0]
-    assert out.vin[-1].uop is UOps.CAST and out.vin[-1].dtype == dtypes.float.vec(2)
-
 
 if __name__ == '__main__':
   unittest.main()
