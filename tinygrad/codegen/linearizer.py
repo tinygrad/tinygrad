@@ -256,6 +256,7 @@ class Linearizer(Kernel):
     else:
       assert not locals_to_store, "storing locals isn't supported here"
 
+      # load earlybufs
       loaded_buffers.update({b:self.global_load(self.bufs.index(self.local_alias[i]) if i in self.local_alias else i,
         global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs})
 

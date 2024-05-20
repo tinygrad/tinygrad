@@ -304,7 +304,6 @@ class UOpGraph:
     in_degree: DefaultDict[UOp, int] = defaultdict(int)
     loops = []
     ifs = []
-    stores = []
     nodes: Dict[UOp, None] = {}
     def add_parents(u:UOp):
       if u in nodes: return
@@ -315,7 +314,6 @@ class UOpGraph:
         graph[x].append(u)
       if u.uop is UOps.RANGE: loops.append(u)
       if u.uop is UOps.IF: ifs.append(u)
-      if u.uop is UOps.STORE: stores.append(u)
     sink = UOp(UOps.SINK, None, tuple(x for x in sink.vin if x.uop is not UOps.NOOP))
     add_parents(sink)
 
