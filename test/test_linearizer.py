@@ -1018,7 +1018,6 @@ class TestLinearizerHelper(unittest.TestCase):
     idxs = (uidx0 // 5, uidx0 * 5, uidx1)
     assert expand_idxs(idxs) == (uidx0, NumNode(0), uidx1)
 
-class TestLinearizerUOptimize(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "device doesn't support float4")
   def test_grouped_store_phis(self):
     x, y = Tensor.randn(64,64), Tensor.randn(64,64)
@@ -1120,7 +1119,6 @@ class TestLinearizerUOptimize(unittest.TestCase):
 
     out = [u for u in k.uops if u.uop is UOps.STORE][0]
     assert out.vin[-1].uop is UOps.CAST and out.vin[-1].dtype == dtypes.float.vec(2)
-
 
 if __name__ == '__main__':
   unittest.main()
