@@ -663,7 +663,7 @@ class Exp(Function):
         res = c120.e(TernaryOps.WHERE, res, ro.e(BinaryOps.MUL, e120))
 
         return res
-#
+
     def _abs(self, x: LazyBuffer) -> LazyBuffer:
         return x.e(BinaryOps.CMPLT, x.const(0)).e(
             TernaryOps.WHERE, x.e(UnaryOps.NEG), x
@@ -692,8 +692,8 @@ class Exp(Function):
         initial_x = x
         # self.ret = x.e(BinaryOps.MUL, x.const(1 / math.log(2))).e(UnaryOps.EXP2)
         x = x.e(BinaryOps.MUL, x.const(1 / math.log(2)))
-        print("converted x: ")
-        print(__import__('tinygrad').Tensor(x).numpy())
+        # print("converted x: ")
+        # print(__import__('tinygrad').Tensor(x).numpy())
         pinf_t = x.const(88.72687268726872)
         ninf_t = x.const(-103.97539753975397)
         computed = self._exp2_grand(x)
