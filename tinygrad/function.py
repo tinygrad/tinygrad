@@ -633,9 +633,20 @@ class Exp(Function):
             x = x.cast(dtypes.float32)
         else:
             x = x.cast(dtypes.float64)
+        initial_x = x
         # self.ret = x.e(BinaryOps.MUL, x.const(1 / math.log(2))).e(UnaryOps.EXP2)
         x = x.e(BinaryOps.MUL, x.const(1 / math.log(2)))
-        self.ret = self._exp2_grand(x).cast(self.beginning_dtype)
+        computed = self._exp2_grand(x)
+        pinf_t = x.const(88.72687268726872)
+        ninf_t = x.const(-103.97539753975397)
+        computed = initial_x.e(BinaryOps.CMPLT, pinf_t).e(
+            TernaryOps.WHERE, computed, computed.const(float("inf"))
+        )
+        computed = initial_x.e(BinaryOps.CMPLT, ninf_t).e(
+            TernaryOps.WHERE, computed.const(0), computed
+        )
+
+        self.ret = computed.cast(self.beginning_dtype)
         return self.ret
 
     def backward(self, grad_output: LazyBuffer) -> LazyBuffer:
