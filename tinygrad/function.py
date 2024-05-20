@@ -600,66 +600,77 @@ class Exp(Function):
         sign = x.e(BinaryOps.CMPLT, x.const(0)).e(TernaryOps.WHERE, x.cast(dtypes.int32).const(-1), x.cast(dtypes.int32).const(1))
         x = self._abs(x)
 
-        e10 = x.const(2**10)
-        e20 = x.const(2**20)
+        # e10 = x.const(2**10)
+        # e20 = x.const(2**20)
         e30 = x.const(2**30)
-        e40 = x.const(2**40)
-        e50 = x.const(2**50)
+        # e40 = x.const(2**40)
+        # e50 = x.const(2**50)
         e60 = x.const(2**60)
-        e70 = x.const(2**70)
-        e80 = x.const(2**80)
+        # e70 = x.const(2**70)
+        # e80 = x.const(2**80)
         e90 = x.const(2**90)
-        e100 = x.const(2**100)
-        e110 = x.const(2**110)
+        # e100 = x.const(2**100)
+        # e110 = x.const(2**110)
         e120 = x.const(2**120)
 
-        c10 = x.e(BinaryOps.CMPLT, x.const(10.0))
-        c20 = x.e(BinaryOps.CMPLT, x.const(20.0))
+        # c10 = x.e(BinaryOps.CMPLT, x.const(10.0))
+        # c20 = x.e(BinaryOps.CMPLT, x.const(20.0))
         c30 = x.e(BinaryOps.CMPLT, x.const(30.0))
-        c40 = x.e(BinaryOps.CMPLT, x.const(40.0))
-        c50 = x.e(BinaryOps.CMPLT, x.const(50.0))
+        # c40 = x.e(BinaryOps.CMPLT, x.const(40.0))
+        # c50 = x.e(BinaryOps.CMPLT, x.const(50.0))
         c60 = x.e(BinaryOps.CMPLT, x.const(60.0))
-        c70 = x.e(BinaryOps.CMPLT, x.const(70.0))
-        c80 = x.e(BinaryOps.CMPLT, x.const(80.0))
+        # c70 = x.e(BinaryOps.CMPLT, x.const(70.0))
+        # c80 = x.e(BinaryOps.CMPLT, x.const(80.0))
         c90 = x.e(BinaryOps.CMPLT, x.const(90.0))
-        c100 = x.e(BinaryOps.CMPLT, x.const(100.0))
-        c110 = x.e(BinaryOps.CMPLT, x.const(110.0))
+        # c100 = x.e(BinaryOps.CMPLT, x.const(100.0))
+        # c110 = x.e(BinaryOps.CMPLT, x.const(110.0))
         c120 = x.e(BinaryOps.CMPLT, x.const(120.0))
 
         x = x.e(BinaryOps.CMPLT, x.const(120.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(120.0)))
-        x = x.e(BinaryOps.CMPLT, x.const(110.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(110.0)))
-        x = x.e(BinaryOps.CMPLT, x.const(100.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(100.0)))
+        # x = x.e(BinaryOps.CMPLT, x.const(110.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(110.0)))
+        # x = x.e(BinaryOps.CMPLT, x.const(100.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(100.0)))
         x = x.e(BinaryOps.CMPLT, x.const(90.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(90.0)))
-        x = x.e(BinaryOps.CMPLT, x.const(80.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(80.0)))
-        x = x.e(BinaryOps.CMPLT, x.const(70.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(70.0)))
+        # x = x.e(BinaryOps.CMPLT, x.const(80.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(80.0)))
+        # x = x.e(BinaryOps.CMPLT, x.const(70.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(70.0)))
         x = x.e(BinaryOps.CMPLT, x.const(60.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(60.0)))
-        x = x.e(BinaryOps.CMPLT, x.const(50.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(50.0)))
-        x = x.e(BinaryOps.CMPLT, x.const(40.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(40.0)))
+        # x = x.e(BinaryOps.CMPLT, x.const(50.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(50.0)))
+        # x = x.e(BinaryOps.CMPLT, x.const(40.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(40.0)))
         x = x.e(BinaryOps.CMPLT, x.const(30.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(30.0)))
-        x = x.e(BinaryOps.CMPLT, x.const(20.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(20.0)))
-        x = x.e(BinaryOps.CMPLT, x.const(10.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(10.0)))
+        # x = x.e(BinaryOps.CMPLT, x.const(20.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(20.0)))
+        # x = x.e(BinaryOps.CMPLT, x.const(10.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(10.0)))
+
+        # print("reduced x: ")
+        # print(__import__('tinygrad').Tensor(x).numpy())
 
         floor = x.cast(dtypes.int64).cast(x.dtype)
         frac = x.e(BinaryOps.SUB, floor.cast(x.dtype))
+        # print("frac: ")
+        # print(__import__('tinygrad').Tensor(frac).numpy())
         floor_raised = self._exp2(floor, 30)
-        floor_raised = floor_raised.e(BinaryOps.ADD, floor_raised.const(1e-8)).cast(dtypes.int64).cast(floor_raised.dtype)
+        # print("floor raised: ")
+        # print(__import__('tinygrad').Tensor(floor_raised).numpy())
+        floor_raised = floor_raised.e(BinaryOps.ADD, floor_raised.const(5e-2)).cast(dtypes.int64).cast(floor_raised.dtype)
+        # print("floor raised: ")
+        # print(__import__('tinygrad').Tensor(floor_raised).numpy())
         frac_raised = self._exp2(frac, 30)
+        # print("frac raised: ")
+        # print(__import__('tinygrad').Tensor(frac_raised).numpy())
         res = floor_raised.e(BinaryOps.MUL, frac_raised)
         res = sign.e(BinaryOps.CMPEQ, sign.const(-1)) \
             .e(TernaryOps.WHERE, res.const(1).e(BinaryOps.DIV, res), res)
 
         ro = res
-        res = c10.e(TernaryOps.WHERE, res, ro.e(BinaryOps.MUL, e10))
-        res = c20.e(TernaryOps.WHERE, res, ro.e(BinaryOps.MUL, e20))
+        # res = c10.e(TernaryOps.WHERE, res, ro.e(BinaryOps.MUL, e10))
+        # res = c20.e(TernaryOps.WHERE, res, ro.e(BinaryOps.MUL, e20))
         res = c30.e(TernaryOps.WHERE, res, ro.e(BinaryOps.MUL, e30))
-        res = c40.e(TernaryOps.WHERE, res, ro.e(BinaryOps.MUL, e40))
-        res = c50.e(TernaryOps.WHERE, res, ro.e(BinaryOps.MUL, e50))
+        # res = c40.e(TernaryOps.WHERE, res, ro.e(BinaryOps.MUL, e40))
+        # res = c50.e(TernaryOps.WHERE, res, ro.e(BinaryOps.MUL, e50))
         res = c60.e(TernaryOps.WHERE, res, ro.e(BinaryOps.MUL, e60))
-        res = c70.e(TernaryOps.WHERE, res, ro.e(BinaryOps.MUL, e70))
-        res = c80.e(TernaryOps.WHERE, res, ro.e(BinaryOps.MUL, e80))
+        # res = c70.e(TernaryOps.WHERE, res, ro.e(BinaryOps.MUL, e70))
+        # res = c80.e(TernaryOps.WHERE, res, ro.e(BinaryOps.MUL, e80))
         res = c90.e(TernaryOps.WHERE, res, ro.e(BinaryOps.MUL, e90))
-        res = c100.e(TernaryOps.WHERE, res, ro.e(BinaryOps.MUL, e100))
-        res = c110.e(TernaryOps.WHERE, res, ro.e(BinaryOps.MUL, e110))
+        # res = c100.e(TernaryOps.WHERE, res, ro.e(BinaryOps.MUL, e100))
+        # res = c110.e(TernaryOps.WHERE, res, ro.e(BinaryOps.MUL, e110))
         res = c120.e(TernaryOps.WHERE, res, ro.e(BinaryOps.MUL, e120))
 
         return res
@@ -682,35 +693,35 @@ class Exp(Function):
         return res
 
     def forward(self, x: LazyBuffer) -> LazyBuffer:
-        # self.beginning_dtype = x.dtype
-        # if self.device == "METAL":
-        #     x = x.cast(dtypes.float32)
-        # else:
-        #     x = x.cast(dtypes.float64)
-        #
-        # _, _, nan = _get_info(x)
-        # initial_x = x
+        self.beginning_dtype = x.dtype
+        if self.device == "METAL":
+            x = x.cast(dtypes.float32)
+        else:
+            x = x.cast(dtypes.float64)
 
-        self.ret = x.e(BinaryOps.MUL, x.const(1 / math.log(2))).e(UnaryOps.EXP2)
-        return self.ret
+        _, _, nan = _get_info(x)
+        initial_x = x
 
-        # x = x.e(BinaryOps.MUL, x.const(1 / math.log(2)))
-        # # print("converted x: ")
-        # # print(__import__('tinygrad').Tensor(x).numpy())
-        # pinf_t = x.const(88.72687268726872)
-        # ninf_t = x.const(-103.97539753975397)
-        # computed = self._exp2_grand(x)
-        # computed = initial_x.e(BinaryOps.CMPLT, pinf_t).e(
-        #     TernaryOps.WHERE, computed, computed.const(float("inf"))
-        # )
-        # computed = initial_x.e(BinaryOps.CMPLT, ninf_t).e(
-        #     TernaryOps.WHERE, computed.const(0), computed
-        # )
-        # 
-        # computed = nan.e(TernaryOps.WHERE, x.const(math.nan).cast(computed.dtype), computed)
-        #
-        # self.ret = computed.cast(self.beginning_dtype)
+        # self.ret = x.e(BinaryOps.MUL, x.const(1 / math.log(2))).e(UnaryOps.EXP2)
         # return self.ret
+
+        x = x.e(BinaryOps.MUL, x.const(1 / math.log(2)))
+        # print("converted x: ")
+        # print(__import__('tinygrad').Tensor(x).numpy())
+        pinf_t = x.const(88.72687268726872)
+        ninf_t = x.const(-103.97539753975397)
+        computed = self._exp2_grand(x)
+        computed = initial_x.e(BinaryOps.CMPLT, pinf_t).e(
+            TernaryOps.WHERE, computed, computed.const(float("inf"))
+        )
+        computed = initial_x.e(BinaryOps.CMPLT, ninf_t).e(
+            TernaryOps.WHERE, computed.const(0), computed
+        )
+
+        computed = nan.e(TernaryOps.WHERE, x.const(math.nan).cast(computed.dtype), computed)
+
+        self.ret = computed.cast(self.beginning_dtype)
+        return self.ret
 
     def backward(self, grad_output: LazyBuffer) -> LazyBuffer:
         return self.ret.e(BinaryOps.MUL, grad_output)
