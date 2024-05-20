@@ -231,8 +231,9 @@ class Sin(Function):
 
     def _sin_grand(self, x: LazyBuffer) -> LazyBuffer:
 
-        _, _, nan = _get_info(x)
         self.beginning_dtype = x.dtype
+        if x.dtype not in (dtypes.double, dtypes.float): x = x.cast(dtypes.float32)
+        _, _, nan = _get_info(x)
         # print(self.beginning_dtype)
         if Device.DEFAULT != "METAL":
             x = x.cast(dtypes.float64)
