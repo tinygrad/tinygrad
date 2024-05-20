@@ -252,8 +252,22 @@ class Sin(Function):
         # return self._averaging_sin(x)#.cast(self.beginning_dtype)
         # print(x.dtype)
         # res = self._averaging_sin(x)
-        res = self._sin(x).cast(self.beginning_dtype)
-        return res
+        res = self._sin(x)#.cast(self.beginning_dtype)
+
+        # print(self.float_precision)
+        pinf = x.const(float("inf")).cast(self.float_precision)
+        # print(pinf.dtype)
+        ninf = x.const(float("-inf")).cast(self.float_precision)
+        # print(ninf.dtype)
+        # print(x.dtype)
+
+        res = x.e(BinaryOps.CMPEQ, pinf).e(
+            TernaryOps.WHERE, x.const(math.nan), res
+        )
+        res = x.e(BinaryOps.CMPEQ, ninf).e(
+            TernaryOps.WHERE, x.const(math.nan), res
+        )
+        return res.cast(self.beginning_dtype)
         # print(res.dtype)
         cos = self._averaging_sin(x.e(BinaryOps.ADD, x.const(math.pi / 2)))
         # correction = cos.e(BinaryOps.MUL, cos.const(-0.005))
