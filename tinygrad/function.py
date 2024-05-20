@@ -230,6 +230,8 @@ class Sin(Function):
         return r
 
     def _sin_grand(self, x: LazyBuffer) -> LazyBuffer:
+
+        _, _, nan = _get_info(x)
         self.beginning_dtype = x.dtype
         # print(self.beginning_dtype)
         if Device.DEFAULT != "METAL":
@@ -253,14 +255,21 @@ class Sin(Function):
         # print(x.dtype)
         # res = self._averaging_sin(x)
         res = self._sin(x)#.cast(self.beginning_dtype)
+        # _, _, nan = _get_info(x)
+        res = nan.e(TernaryOps.WHERE, x.const(math.nan).cast(self.float_precision), res)
 
         # print(self.float_precision)
         pinf = x.const(float("inf")).cast(self.float_precision)
         # print(pinf.dtype)
         ninf = x.const(float("-inf")).cast(self.float_precision)
+        # nan = x.const(float("nan")).cast(self.float_precision)
+        # print(__import__('tinygrad').Tensor(nan).numpy())
         # print(ninf.dtype)
         # print(x.dtype)
 
+        # res = x.e(BinaryOps.CMPEQ, nan).e(
+        #     TernaryOps.WHERE, x.const(math.nan), res
+        # )
         res = x.e(BinaryOps.CMPEQ, pinf).e(
             TernaryOps.WHERE, x.const(math.nan), res
         )
