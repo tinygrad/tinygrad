@@ -16,6 +16,8 @@ def fuzz_uops(graph:DefaultDict[UOp, List[UOp]], in_degree:DefaultDict[UOp, int]
     paths.append(path:=list(p[:-1]))
     for u in path:
       if u.uop is UOps.IF: path.append(UOp(UOps.ENDIF, None, (u,)))
+      # TODO: this hides potential bugs in get_recursive_children.
+      # Can a DEFINE_ACC -> RANGE edge be builtin to the graph?
       if u.uop is UOps.DEFINE_ACC:
         path.remove(u)
         path.insert(min(path.index(x) for x in u.vin), u)
