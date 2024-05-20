@@ -192,26 +192,28 @@ class Sin(Function):
 
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
-    if x.size == 0: return x
-    x_dtype = x.dtype
-    if x.dtype not in (dtypes.double, dtypes.float): x = x.cast(dtypes.float32)
-    reduced_angles = self.red_ang(x)
-    signs = reduced_angles.e(BinaryOps.CMPLT, reduced_angles.const(0))
-    reduced_angles = signs.e(TernaryOps.WHERE, reduced_angles.e(UnaryOps.NEG), reduced_angles)
-    t = _taylor(reduced_angles, self.coefficients)
-    _, _, nan = _get_info(x)
-    t = nan.e(TernaryOps.WHERE, x.const(math.nan), t)
-    zero = x.e(BinaryOps.CMPEQ, x.const(0))
-    t = zero.e(TernaryOps.WHERE, x.const(0), t)
-    inf = x.e(BinaryOps.CMPEQ, x.const(math.inf))
-    t = inf.e(TernaryOps.WHERE, t.const(math.nan), t)
-    n_inf = x.e(BinaryOps.CMPEQ, x.const(-math.inf))
-    t = n_inf.e(TernaryOps.WHERE, t.const(math.nan), t)
-    return signs.e(TernaryOps.WHERE, t.e(UnaryOps.NEG), t).cast(x_dtype)
+    return x.e(UnaryOps.SIN)
+    # if x.size == 0: return x
+    # x_dtype = x.dtype
+    # if x.dtype not in (dtypes.double, dtypes.float): x = x.cast(dtypes.float32)
+    # reduced_angles = self.red_ang(x)
+    # signs = reduced_angles.e(BinaryOps.CMPLT, reduced_angles.const(0))
+    # reduced_angles = signs.e(TernaryOps.WHERE, reduced_angles.e(UnaryOps.NEG), reduced_angles)
+    # t = _taylor(reduced_angles, self.coefficients)
+    # _, _, nan = _get_info(x)
+    # t = nan.e(TernaryOps.WHERE, x.const(math.nan), t)
+    # zero = x.e(BinaryOps.CMPEQ, x.const(0))
+    # t = zero.e(TernaryOps.WHERE, x.const(0), t)
+    # inf = x.e(BinaryOps.CMPEQ, x.const(math.inf))
+    # t = inf.e(TernaryOps.WHERE, t.const(math.nan), t)
+    # n_inf = x.e(BinaryOps.CMPEQ, x.const(-math.inf))
+    # t = n_inf.e(TernaryOps.WHERE, t.const(math.nan), t)
+    # return signs.e(TernaryOps.WHERE, t.e(UnaryOps.NEG), t).cast(x_dtype)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    x = self.x.const(math.pi/2).e(BinaryOps.SUB, self.x)
-    return self.forward(x).e(BinaryOps.MUL, grad_output)
+    # x = self.x.const(math.pi/2).e(BinaryOps.SUB, self.x)
+    # return self.forward(x).e(BinaryOps.MUL, grad_output)
+    return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
 
 class MySin(Function):
     coefficients = [
