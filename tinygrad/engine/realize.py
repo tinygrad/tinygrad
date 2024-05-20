@@ -1,13 +1,84 @@
-from typing import List, Dict, Optional, cast, Generator
+from typing import List, Dict, Optional, cast, Generator, Tuple
 import time
-from dataclasses import dataclass
-from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen
-from tinygrad.ops import ScheduleItem, BufferOps, LoadOps
-from tinygrad.device import Runner, Device
-from tinygrad.device import Buffer
-from tinygrad.shape.symbolic import Variable, sym_infer
+from dataclasses import dataclass, replace
+from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int
+from tinygrad.ops import BufferOps, LoadOps, LazyOp
+from tinygrad.device import Device, Buffer
+from tinygrad.shape.symbolic import Variable, sym_infer, sint
+from tinygrad.renderer import Renderer, Program
+from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.engine.schedule import ScheduleItem
+
+# **************** Program Creation ****************
+
+logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS", "") else None, getenv("LOGKERNS_LEVEL", 1)
+def get_linearizer(renderer:Renderer, ast:Tuple[LazyOp, ...]) -> Linearizer:
+  if DEBUG >= 3:
+    from tinygrad.engine.graph import print_tree
+    for op in ast: print_tree(op)
+  k = Linearizer(*ast, opts=renderer)
+  k.required_optimizations()
+  if not NOOPT:
+    if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
+    if BEAM >= 1:
+      from tinygrad.engine.search import beam_search, time_linearizer, bufs_from_lin
+      kb, k_opt = Linearizer(*ast, opts=renderer), k
+      kb.required_optimizations()
+      rawbufs = bufs_from_lin(kb, allocate=False)
+      k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
+      if getenv("BEAM_COMPARE", 1):
+        # TODO: move the HC/TC/BEAM compare to beam_search so it can be optionally cached which choice is better
+        lins: List[Tuple[str, Linearizer]] = [(f"beam{BEAM.value}", k), (("tc" if used_tensor_cores else "hc"), k_opt)]
+        if used_tensor_cores:
+          lins.append(("hc", Linearizer(*ast, opts=renderer)))
+          lins[-1][1].hand_coded_optimizations()
+        timed = sorted([(nm, tk, time_linearizer(tk, rawbufs, allow_test_size=False, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
+        if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
+        k = timed[0][1]
+        if logkerns is not None and logkerns_level > 1: logkerns.writelines([f"{(lin.ast, lin.applied_opts)}\n" for (_,lin,_) in timed[1:]])
+  # TODO: check the correctness inline once compare_linearizer is in core
+  if logkerns is not None: logkerns.writelines([f"{(k.ast, k.applied_opts)}\n"])
+  if DEBUG >= 4: print((k.ast, k.applied_opts)) # print here to show final applied_opts for all kernels instead of just in beam_search
+  return k
 
 # **************** Runners ****************
+
+class Runner:
+  def __init__(self, display_name:str, dname:str, op_estimate:sint=0, mem_estimate:sint=0):
+    self.first_run, self.display_name, self.dname, self.op_estimate, self.mem_estimate = True, display_name, dname, op_estimate, mem_estimate
+  @property
+  def device(self): return Device[self.dname]
+  def exec(self, rawbufs:List[Buffer], var_vals:Optional[Dict[Variable, int]]=None) -> Optional[float]:
+    return self(rawbufs, {} if var_vals is None else var_vals)
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False) -> Optional[float]:
+    raise NotImplementedError("override this")
+
+class CompiledRunner(Runner):
+  def __init__(self, p:Program, precompiled:Optional[bytes]=None):
+    if DEBUG >= 4: print(p.src)
+    self.p:Program = p
+    self.lib:bytes = precompiled if precompiled is not None else Device[p.dname].compiler.compile_cached(p.src)
+    self.clprg = Device[p.dname].runtime(p.function_name, self.lib)
+    super().__init__(p.name, p.dname, p.op_estimate, p.mem_estimate)
+
+  def __reduce__(self): return self.__class__, (self.p, self.lib)
+
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False) -> Optional[float]:
+    global_size, local_size = self.p.launch_dims(var_vals)
+    if global_size is not None and local_size is None and all_int(self.p.global_size): # type: ignore[arg-type]
+      # TODO: this is copied from get_program
+      from tinygrad.engine.search import optimize_local_size
+      local_size = optimize_local_size(self.clprg, global_size, rawbufs)
+      global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
+      self.p = replace(self.p, global_size=global_size, local_size=local_size)
+    lra = {}
+    if global_size:
+      lra['global_size'] = global_size
+      assert len(global_size) == 3, "global size must have len 3"
+    if local_size:
+      lra['local_size'] = local_size
+      assert len(local_size) == 3, "local size must have len 3"
+    return self.clprg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k] for k in self.p.vars), wait=wait)
 
 class CustomOp(Runner):
   def __init__(self, fxn):
@@ -53,6 +124,23 @@ class BufferXfer(BufferCopy):
       src.allocator.track_cross_device.add(dest.allocator.device)
     dest.allocator.transfer(dest._buf, src._buf, dest.nbytes, src_dev=src.allocator.device, dest_dev=dest.allocator.device)
 
+# **************** method cache ****************
+
+method_cache: Dict[Tuple[str, Tuple[LazyOp, ...], int, bool], CompiledRunner] = {}
+def get_runner(dname:str, ast:Tuple[LazyOp, ...]) -> CompiledRunner:
+  ckey = (dname, ast, BEAM.value, False)
+  if cret:=method_cache.get(ckey): return cret
+  bkey = (dname.split(":")[0], ast, BEAM.value, True)
+  if bret:=method_cache.get(bkey):
+    method_cache[ckey] = ret = CompiledRunner(replace(bret.p, dname=dname), bret.lib)
+  else:
+    prg: Program = get_linearizer(Device[dname].renderer, ast).to_program()
+    if hasattr(prg.uops, "fuzz_paths"):
+      from test.external.fuzz_uops import UOpsFuzzerRunner
+      return UOpsFuzzerRunner(replace(prg, dname=dname))
+    method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, dname=dname))
+  return ret
+
 # **************** lowering functions ****************
 
 @dataclass(frozen=True)
@@ -77,9 +165,8 @@ class ExecItem:
 def lower_schedule_item(si:ScheduleItem) -> ExecItem:
   assert len(set(x.device for x in si.bufs)) == 1 or si.ast[0].op is LoadOps.COPY or getenv("USE_COPY_KERNEL")
   if si.ast[0].op is BufferOps.STORE:
-    runner = Device[si.outputs[0].device].get_runner(*si.ast)
+    runner = get_runner(si.outputs[0].device, si.ast)
     return ExecItem(runner, [si.bufs[x[0]] for x in runner.p.globals])
-  assert len(si.ast) == 1 and len(si.outputs) == 1, "only ASTRunner supports multioutput"
   out, ast = si.outputs[0], si.ast[0]
   if ast.op is LoadOps.COPY:
     kernel_type = BufferCopy
@@ -98,7 +185,7 @@ def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, Non
 
 capturing: List = []  # put classes with an add method in here
 
-def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[Variable, int]]=None):
+def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[Variable, int]]=None, do_update_stats=True):
   for ei in lower_schedule(schedule):
     if len(capturing): capturing[0].add(ei)
-    ei.run(var_vals)
+    ei.run(var_vals, do_update_stats=do_update_stats)
