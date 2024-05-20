@@ -135,7 +135,7 @@ class TestLinearizer(unittest.TestCase):
     assert ranges[1] == ranges[0]+5
     assert lin.uops[ranges[1]+11].uop is UOps.ENDRANGE
 
-  def test_range_outer_op(self):
+  def test_range_outer_op_before_phi(self):
     a = Tensor.randn(4, 1).realize()
     b = Tensor.randn(1, 1).realize()
     out = (a + b[0]).sum() + b[0]
@@ -144,7 +144,7 @@ class TestLinearizer(unittest.TestCase):
     # LOAD -> RANGE -> LOAD -> PHI
     assert lin.uops[ranges[0]-2].uop is UOps.LOAD
 
-  def test_range_outer_op_nested_range(self):
+  def test_range_outer_op_before_phi_nested_range(self):
     a = Tensor.randn(2, ).realize()
     b = Tensor.randn(1, 1).realize()
     out = (a.reshape(2, 1).expand(2, 3) + b[0]).sum() + b[0]
@@ -154,6 +154,22 @@ class TestLinearizer(unittest.TestCase):
     assert lin.uops[ranges[0]-2].uop is UOps.LOAD
     assert ranges[1] == ranges[0]+3
     assert [x.uop for x in lin.uops[ranges[0]+1:ranges[0]+3]] == [UOps.LOAD, UOps.ALU]
+
+  def test_range_outer_op_after_phi(self):
+    a = Tensor.randn(4, 1).realize()
+    out = a.sum() * a.sum()
+    lin = helper_linearizer_opt(out, wanna_output=[a.numpy().sum()*a.numpy().sum()])[0]
+    # RANGE -> LOAD -> PHI -> ALU
+    end = max(i for i,u in enumerate(lin.uops) if u.uop is UOps.ENDRANGE)
+    assert lin.uops[end+1].uop is UOps.ALU
+
+  def test_range_outer_op_after_phi_nested_range(self):
+    a = Tensor.randn(2, ).realize()
+    out = a.reshape(2, 1).expand(2, 3).sum() + a.reshape(2, 1).expand(2, 3).sum()
+    lin = helper_linearizer_opt(out, wanna_output=[(np.broadcast_to(a.numpy().reshape(2, 1), (2, 3))).sum()*2])[0]
+    # RANGE -> LOAD -> PHI -> ALU
+    end = max(i for i,u in enumerate(lin.uops) if u.uop is UOps.ENDRANGE)
+    assert lin.uops[end+1].uop is UOps.ALU
 
   @unittest.expectedFailure
   def test_early_end_local(self):
