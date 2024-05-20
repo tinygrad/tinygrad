@@ -149,7 +149,7 @@ class Transformer:
     self.layers = [TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, max_context, linear, feed_forward=feed_forward) for _ in range(n_layers)]
     self.norm = RMSNorm(dim, norm_eps)
     self.tok_embeddings = nn.Embedding(vocab_size, dim)
-    self.output = linear(dim, vocab_size, bias=False)
+    self.output = nn.Linear(dim, vocab_size, bias=False)
     self.max_context = max_context
     self.freqs_cis = precompute_freqs_cis(dim // n_heads, self.max_context * 2, rope_theta)
     self.forward_jit = TinyJit(self.forward) if jit else None

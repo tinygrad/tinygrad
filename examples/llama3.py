@@ -75,7 +75,7 @@ class Int8Linear:
   def quantize(tensors, device):
     new_tensors = {}
     for name,v in tensors.items():
-      if "feed_forward" in name or "attention.w" in name or name == "output.weight":
+      if "feed_forward" in name or "attention.w" in name:
         assert "weight" in name, name
         scale = v.abs().max(axis=1) / 127.0
         int8_weight = (v.T/scale).T.cast(dtype=dtypes.int8)
@@ -112,7 +112,7 @@ def NF4Linear(block_size):
     def quantize(state_dict: dict[str, Tensor], device) -> dict[str, Tensor]:
       new_state_dict = {}
       for k, v in state_dict.items():
-        if "feed_forward" in k or "attention.w" in k or k == "output.weight":
+        if "feed_forward" in k or "attention.w" in k:
           grouped = v.reshape(-1, block_size)
           scale = (grouped.abs().max(axis=1, keepdim=True))
           coded = ((grouped / scale).unsqueeze(-1) - CODE.to(v.device)).abs().argmin(axis=-1).cast(dtypes.uint8).flatten()
