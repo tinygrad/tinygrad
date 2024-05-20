@@ -166,7 +166,7 @@ def build_transformer(model_path: Path, model_size="8B", quantize=None, device=N
         elif '.attention.' in k: v.shard_(device, axis=-1)
         elif '.feed_forward.' in k: v.shard_(device, axis=-1)
         elif 'tok_embeddings.weight' in k: v.shard_(device, axis=0)
-        elif 'output.weight' in k: v.shard_(device, axis=-1)
+        elif 'output.weight' in k: v.shard_(device, axis=0)
         else: v.shard_(device, axis=None)
 
     # replace weights in model
@@ -178,7 +178,7 @@ TEMPERATURE = 0.85
 TOP_K = 35
 TOP_P = 0.9
 ALPHA_F = 1.1
-ALPHA_P = 1.1
+ALPHA_P = 0.0
 
 def prefill(model, toks, start_pos=0):
   for tok in tqdm(toks):
