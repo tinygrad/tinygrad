@@ -633,6 +633,8 @@ class Exp(Function):
             x = x.cast(dtypes.float32)
         else:
             x = x.cast(dtypes.float64)
+
+        _, _, nan = _get_info(x)
         initial_x = x
         # self.ret = x.e(BinaryOps.MUL, x.const(1 / math.log(2))).e(UnaryOps.EXP2)
         x = x.e(BinaryOps.MUL, x.const(1 / math.log(2)))
@@ -645,6 +647,8 @@ class Exp(Function):
         computed = initial_x.e(BinaryOps.CMPLT, ninf_t).e(
             TernaryOps.WHERE, computed.const(0), computed
         )
+        
+        computed = nan.e(TernaryOps.WHERE, x.const(math.nan).cast(computed.dtype), computed)
 
         self.ret = computed.cast(self.beginning_dtype)
         return self.ret
