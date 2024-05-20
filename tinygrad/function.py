@@ -617,15 +617,19 @@ class Exp(Function):
         # factorials = [math.factorial(i) for i in range(1, N_TERMS + 1)]
         res = x.e(BinaryOps.ADD, x.const(1))
         orig_x = x
+        term = orig_x
         for i in range(2, N_TERMS):
-            x = x.e(BinaryOps.MUL, orig_x)
-            res = res.e(BinaryOps.ADD, x.e(BinaryOps.MUL, x.const(1 / math.factorial(i))))
+            term = term.e(BinaryOps.MUL, orig_x).e(BinaryOps.DIV, x.const(i))
+            # x = x.e(BinaryOps.MUL, orig_x)
+            # res = res.e(BinaryOps.ADD, x.e(BinaryOps.MUL, x.const(1 / math.factorial(i))))
+            # res = res.e(BinaryOps.ADD, x.e(BinaryOps.DIV, x.const(math.factorial(i))))
+            res = res.e(BinaryOps.ADD, term)
 
         return res
 
     def forward(self, x: LazyBuffer) -> LazyBuffer:
         # self.ret = x.e(BinaryOps.MUL, x.const(1 / math.log(2))).e(UnaryOps.EXP2)
-        self.ret = self._exp(x, 30)
+        self.ret = self._exp(x, 60)
         return self.ret
 
     def backward(self, grad_output: LazyBuffer) -> LazyBuffer:
