@@ -38,12 +38,7 @@ class UOp:
     # NOTE: this sort of DEFINE_VAR shouldn't have to be here. only for PTX
     return (self.uop.value, (self.arg if self.uop is not UOps.DEFINE_VAR else self.arg.expr) if self.uop is not UOps.ALU else \
             (type(self.uop), self.uop.value), self.dtype, self.vin)
-  def __lt__(self, x:UOp):
-    try:
-      self.cmp_tuple < x.cmp_tuple
-    except TypeError:
-      print("cmp: \n", self.cmp_tuple, "\n---\n", x.cmp_tuple, "\n---\n")
-    return self.cmp_tuple < x.cmp_tuple
+  def __lt__(self, x:UOp): return self.cmp_tuple < x.cmp_tuple
   def __repr__(self):
     return f"{str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.uop for x in self.vin]):32s} {self.arg}"
   def cast(self, dtype): return UOp(UOps.CAST, dtype, (self,))
