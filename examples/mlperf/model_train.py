@@ -364,10 +364,10 @@ def train_step_bert(model, optimizer, scheduler, input_ids:Tensor, segment_ids:T
     optimizer.zero_grad()
     (loss * loss_scaler).backward()
 
-    global_norm = Tensor.empty((len(optimizer.params),), device=optimizer[0].device).realize()
+    global_norm = Tensor.empty((len(optimizer.params),), dtype=optimizer.params[0].dtype, device=optimizer[0].device).realize()
     for i, p in enumerate(optimizer.params): 
       p.grad = p.grad / loss_scaler
-      global_norm[i] = p.grad.square().sum()
+      global_norm[i] = p.grad.float().square().sum()
     global_norm = global_norm.sum().sqrt()
     for i, p in enumerate(optimizer.params): p.grad = p.grad / Tensor.where(global_norm > 1.0, global_norm, 1.0)
 
@@ -380,11 +380,11 @@ def eval_step_bert(model, input_ids:Tensor, segment_ids:Tensor, attention_mask:T
   lm_logits, clsf_logits = model(input_ids, segment_ids, attention_mask, masked_positions)
 
   clsf_predictions = clsf_logits.log_softmax().argmax(-1)
-  clsf_accuracy = (clsf_predictions == next_sentence_labels).float().mean()
+  clsf_accuracy = (clsf_predictions == next_sentence_labels).mean()
 
   mlm_predictions = lm_logits.log_softmax().argmax(-1)
   mask = (masked_lm_weights == 1.0)
-  mlm_accuracy = (mlm_predictions == masked_lm_ids).where(mask, 0).sum() / mask.float().sum()
+  mlm_accuracy = (mlm_predictions == masked_lm_ids).where(mask, 0).sum() / mask.sum()
 
   lm_loss = lm_logits.sparse_categorical_crossentropy(masked_lm_ids, ignore_index=masked_lm_weights)
   clsf_loss = clsf_logits.binary_crossentropy_logits(next_sentence_labels)
@@ -393,7 +393,7 @@ def eval_step_bert(model, input_ids:Tensor, segment_ids:Tensor, attention_mask:T
     "masked_lm_loss": lm_loss.realize(), 
     "next_sentence_accuracy": clsf_accuracy.realize(), 
     "next_sentence_loss": clsf_loss.realize()
-    }
+  }
 
 def train_bert():
   # NOTE: pip install tensorflow, wandb required

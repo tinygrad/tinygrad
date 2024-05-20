@@ -56,7 +56,7 @@ class BertForMLPerf:
     self.lm_output_bias = Tensor.zeros(vocab_size, dtype=dtypes.float32)
 
   def __call__(self, input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor, masked_positions:Tensor):
-    output = self.model(input_ids, attention_mask, segment_ids)
+    output = self.model(input_ids, attention_mask, segment_ids).float()
     clsf_logits = self.clsf_output(self.clsf_pooling_activation(self.clsf_pooler(output[:, 0]))).cast(dtypes.float32)
 
     # gather only the masked_positions we care about
@@ -64,7 +64,7 @@ class BertForMLPerf:
     onehot = counter == masked_positions.unsqueeze(2).expand(*masked_positions.shape, output.shape[1])
     h_masked = onehot @ output
 
-    h_masked = self.lm_norm(self.lm_transform_activation(self.lm_transform(h_masked)))
+    h_masked = self.lm_norm(self.lm_transform_activation(self.lm_transform(h_masked).float()))
     lm_logits = self.lm_output(h_masked) + self.lm_output_bias
 
     return lm_logits, clsf_logits
