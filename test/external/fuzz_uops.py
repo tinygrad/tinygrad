@@ -16,6 +16,9 @@ def fuzz_uops(graph:DefaultDict[UOp, List[UOp]], in_degree:DefaultDict[UOp, int]
     paths.append(path:=list(p[:-1]))
     for u in path:
       if u.uop is UOps.IF: path.append(UOp(UOps.ENDIF, None, (u,)))
+      if u.uop is UOps.DEFINE_ACC:
+        path.remove(u)
+        path.insert(min(path.index(x) for x in u.vin), u)
       if u.uop is UOps.RANGE:
         path.insert(max(path.index(x) for x in loops_children[u])+1, UOp(UOps.ENDRANGE, None, (u,)))
   return paths
