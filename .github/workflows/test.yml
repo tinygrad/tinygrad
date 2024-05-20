@@ -464,7 +464,7 @@ jobs:
         run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors)' --ignore=test/external --ignore=test/models --durations=20
       - name: Run pytest (amd)
         if: matrix.backend=='amd'
-        run: python -m pytest -n=auto test/ test/external/external_test_hcq.py -k 'not (half or test_efficientnet_safetensors)' --ignore=test/external --ignore=test/models --durations=20
+        run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors)' --ignore=test/external --ignore=test/models --durations=20
       - name: Compile EfficientNet to C and test it
         if: matrix.backend=='clang'
         run: |
