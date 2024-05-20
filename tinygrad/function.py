@@ -98,8 +98,122 @@ def _floor(x:LazyBuffer) -> LazyBuffer:
   x_dtype = x.dtype
   return x.cast(dtypes.ulong).cast(x_dtype)
 
+def _floor(x:LazyBuffer) -> LazyBuffer:
+  x_dtype = x.dtype
+  return x.cast(dtypes.ulong).cast(x_dtype)
 
 class Sin(Function):
+  coefficients = [
+    -3.927706665244766e-14,   1.0000000000071227,
+    -2.1372653510812573e-10, -0.16666666415735265,
+    -1.5195658172408884e-08,  0.008333387485289051,
+    -1.218355377507116e-07,  -0.00019823344523361102,
+    -1.7392842459887678e-07,  2.864770129172753e-06,
+    -4.1207696421241214e-08, -1.7470936444039315e-08
+    ]
+
+  four_div_pi = [
+    (0xa2,       0xf9836e4e, 0x441529fc),
+    (0xa2f9,     0x836e4e44, 0x1529fc27),
+    (0xa2f983,   0x6e4e4415, 0x29fc2757),
+    (0xa2f9836e, 0x4e441529, 0xfc2757d1),
+    (0xf9836e4e, 0x441529fc, 0x2757d1f5),
+    (0x836e4e44, 0x1529fc27, 0x57d1f534),
+    (0x6e4e4415, 0x29fc2757, 0xd1f534dd),
+    (0x4e441529, 0xfc2757d1, 0xf534ddc0),
+    (0x441529fc, 0x2757d1f5, 0x34ddc0db),
+    (0x1529fc27, 0x57d1f534, 0xddc0db62),
+    (0x29fc2757, 0xd1f534dd, 0xc0db6295),
+    (0xfc2757d1, 0xf534ddc0, 0xdb629599),
+    (0x2757d1f5, 0x34ddc0db, 0x6295993c),
+    (0x57d1f534, 0xddc0db62, 0x95993c43),
+    (0xd1f534dd, 0xc0db6295, 0x993c4390),
+    (0xf534ddc0, 0xdb629599, 0x3c439041)
+  ]
+
+  pi_63 = 3.4061215800865545e-19
+
+  def small_red_ang(self, x):
+    n = _floor(x.e(BinaryOps.DIV, x.const(2 * math.pi)))
+    ang = x.e(BinaryOps.SUB, n.e(BinaryOps.MUL, x.const(2 * math.pi)))
+    adj_bottom = ang.e(BinaryOps.CMPLT, ang.const(math.pi))
+    ang = adj_bottom.e(TernaryOps.WHERE, ang, ang.e(BinaryOps.SUB, ang.const(math.pi)))
+    adj_top = ang.e(BinaryOps.CMPLT, ang.const(math.pi/2))
+    ang = adj_top.e(TernaryOps.WHERE, ang, ang.const(math.pi).e(BinaryOps.SUB, ang))
+    return adj_bottom.e(TernaryOps.WHERE, ang, ang.e(UnaryOps.NEG))
+
+  def big_red_ang(self, x):
+    x_dtype = x.dtype
+    x = x.cast(dtypes.float)
+    xi = x.cast(dtypes.uint32, bitcast=True)
+    index = xi.e(BinaryOps.MUL, xi.const(2**2)).e(BinaryOps.DIV, xi.const(2**28))
+    shift = xi.e(BinaryOps.MUL, xi.const(2**6)).e(BinaryOps.DIV, xi.const(2**29))
+    xi = xi.e(BinaryOps.MUL, xi.const(2**9)).e(BinaryOps.DIV, xi.const(2**9)).e(BinaryOps.ADD, xi.const(0x800000))
+    xi = xi.e(BinaryOps.MUL, shift.cast(dtypes.float).e(UnaryOps.EXP2).cast(dtypes.uint32))
+
+    pi0 = xi.const(0)
+    pi1 = xi.const(0)
+    pi2 = xi.const(0)
+    for i in range(16):
+      arr = index.e(BinaryOps.CMPEQ, index.const(i))
+      pi0 = arr.e(TernaryOps.WHERE, index.const(self.four_div_pi[i][0]), pi0)
+      pi1 = arr.e(TernaryOps.WHERE, index.const(self.four_div_pi[i][1]), pi1)
+      pi2 = arr.e(TernaryOps.WHERE, index.const(self.four_div_pi[i][2]), pi2)
+
+    res0 = xi.e(BinaryOps.MUL, pi0)
+    res1 = xi.cast(dtypes.uint64).e(BinaryOps.MUL, pi1.cast(dtypes.uint64))
+    res2 = xi.cast(dtypes.uint64).e(BinaryOps.MUL, pi2.cast(dtypes.uint64))
+    upper_res0 = res0.cast(dtypes.uint64).e(BinaryOps.MUL, res0.cast(dtypes.uint64).const(2**32))
+    lower_res2 = res2.e(BinaryOps.DIV, res2.const(2**32))
+    res0 = upper_res0.e(BinaryOps.ADD, lower_res2)
+    res0 = res0.e(BinaryOps.ADD, res1)
+
+    n = res0.e(BinaryOps.ADD, res0.const(1).e(BinaryOps.MUL, res0.const(2**61))).e(BinaryOps.DIV, res0.const(2**62))
+    res0 = res0.e(BinaryOps.SUB, n.e(BinaryOps.MUL, res0.const(2**62)))
+    x = res0.cast(dtypes.int64, bitcast=True).cast(dtypes.double)
+    x = x.e(BinaryOps.MUL, x.const(self.pi_63))
+
+    n_mod_4 = n.e(BinaryOps.MOD, n.const(4))
+    x = n_mod_4.e(BinaryOps.CMPEQ, n.const(1)).e(TernaryOps.WHERE, x.const(math.pi/2).e(BinaryOps.SUB, x), x)
+    x = n_mod_4.e(BinaryOps.CMPEQ, n.const(2)).e(TernaryOps.WHERE, x.e(UnaryOps.NEG), x)
+    x = n_mod_4.e(BinaryOps.CMPEQ, n.const(3)).e(TernaryOps.WHERE, x.e(BinaryOps.SUB, x.const(math.pi/2)), x)
+    return x.cast(x_dtype)
+
+  def red_ang(self, x:LazyBuffer) -> LazyBuffer:
+    signs = x.e(BinaryOps.CMPLT, x.const(0))
+    x = signs.e(TernaryOps.WHERE, x.e(UnaryOps.NEG), x)
+    size = x.e(BinaryOps.CMPLT, x.const(2**10))
+    if self.device == "METAL":
+      red_ang = self.small_red_ang(x)
+    else:
+      red_ang = size.e(TernaryOps.WHERE, self.small_red_ang(x), self.big_red_ang(x))
+    red_ang = signs.e(TernaryOps.WHERE, red_ang.e(UnaryOps.NEG), red_ang)
+    return red_ang
+
+  def forward(self, x:LazyBuffer) -> LazyBuffer:
+    self.x = x
+    if x.size == 0: return x
+    x_dtype = x.dtype
+    if x.dtype not in (dtypes.double, dtypes.float): x = x.cast(dtypes.float32)
+    reduced_angles = self.red_ang(x)
+    signs = reduced_angles.e(BinaryOps.CMPLT, reduced_angles.const(0))
+    reduced_angles = signs.e(TernaryOps.WHERE, reduced_angles.e(UnaryOps.NEG), reduced_angles)
+    t = _taylor(reduced_angles, self.coefficients)
+    _, _, nan = _get_info(x)
+    t = nan.e(TernaryOps.WHERE, x.const(math.nan), t)
+    zero = x.e(BinaryOps.CMPEQ, x.const(0))
+    t = zero.e(TernaryOps.WHERE, x.const(0), t)
+    inf = x.e(BinaryOps.CMPEQ, x.const(math.inf))
+    t = inf.e(TernaryOps.WHERE, t.const(math.nan), t)
+    n_inf = x.e(BinaryOps.CMPEQ, x.const(-math.inf))
+    t = n_inf.e(TernaryOps.WHERE, t.const(math.nan), t)
+    return signs.e(TernaryOps.WHERE, t.e(UnaryOps.NEG), t).cast(x_dtype)
+
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
+    x = self.x.const(math.pi/2).e(BinaryOps.SUB, self.x)
+    return self.forward(x).e(BinaryOps.MUL, grad_output)
+
+class MySin(Function):
     coefficients = [
     -3.927706665244766e-14,   1.0000000000071227,
     -2.1372653510812573e-10, -0.16666666415735265,
