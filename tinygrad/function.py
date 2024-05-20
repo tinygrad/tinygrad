@@ -251,8 +251,9 @@ class Sin(Function):
         # return self._sin(x).cast(self.beginning_dtype)
         # return self._averaging_sin(x)#.cast(self.beginning_dtype)
         # print(x.dtype)
-        res = self._averaging_sin(x)
-        # res = self._sin(x)
+        # res = self._averaging_sin(x)
+        res = self._sin(x)
+        return res
         # print(res.dtype)
         cos = self._averaging_sin(x.e(BinaryOps.ADD, x.const(math.pi / 2)))
         # correction = cos.e(BinaryOps.MUL, cos.const(-0.005))
