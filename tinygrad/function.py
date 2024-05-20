@@ -601,10 +601,15 @@ class Exp(Function):
         for i in range(N_TERMS, 1, -1):
             res = x.e(BinaryOps.ADD, x.const(i)).e(BinaryOps.SUB, x.e(BinaryOps.MUL, x.const(i)).e(BinaryOps.DIV, res))
 
+        res = res.const(1).e(BinaryOps.SUB, x.e(BinaryOps.DIV, res))
+        res = res.const(1).e(BinaryOps.ADD, x.e(BinaryOps.DIV, res))
+
+
         return res.cast(beginning_dtype)
 
     def forward(self, x: LazyBuffer) -> LazyBuffer:
-        self.ret = x.e(BinaryOps.MUL, x.const(1 / math.log(2))).e(UnaryOps.EXP2)
+        # self.ret = x.e(BinaryOps.MUL, x.const(1 / math.log(2))).e(UnaryOps.EXP2)
+        self.ret = self.exp(x)
         return self.ret
 
     def backward(self, grad_output: LazyBuffer) -> LazyBuffer:
