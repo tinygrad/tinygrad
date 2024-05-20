@@ -580,9 +580,14 @@ class Relu(Function):
 
 
 class Log(Function):
+    def _log(self, x: LazyBuffer) -> LazyBuffer:
+        pass
+
+
     def forward(self, x: LazyBuffer) -> LazyBuffer:
         self.x = x
         return x.e(UnaryOps.LOG2).e(BinaryOps.MUL, x.const(math.log(2)))
+        # return self._log(x)
 
     def backward(self, grad_output: LazyBuffer) -> LazyBuffer:
         return grad_output.e(BinaryOps.DIV, self.x)
@@ -590,26 +595,35 @@ class Log(Function):
 
 class Exp(Function):
     def exp(self, x: LazyBuffer) -> LazyBuffer:
-        beginning_dtype = x.dtype
+        self.beginning_dtype = x.dtype
         if self.device == "METAL":
             x = x.cast(dtypes.float32)
         else:
             x = x.cast(dtypes.float64)
         
-        N_TERMS = 100
-        res = x.e(BinaryOps.ADD, x.const(N_TERMS))
-        for i in range(N_TERMS, 1, -1):
-            res = x.e(BinaryOps.ADD, x.const(i)).e(BinaryOps.SUB, x.e(BinaryOps.MUL, x.const(i)).e(BinaryOps.DIV, res))
+        # N_TERMS = 38
 
-        res = res.const(1).e(BinaryOps.SUB, x.e(BinaryOps.DIV, res))
-        res = res.const(1).e(BinaryOps.ADD, x.e(BinaryOps.DIV, res))
+    def _exp(self, x: LazyBuffer, N_TERMS) -> LazyBuffer:
+    #     res = x.e(BinaryOps.ADD, x.const(N_TERMS))
+    #     for i in range(N_TERMS, 1, -1):
+    #         res = x.e(BinaryOps.ADD, x.const(i)).e(BinaryOps.SUB, x.e(BinaryOps.MUL, x.const(i)).e(BinaryOps.DIV, res))
+    #
+    #     res = res.const(1).e(BinaryOps.SUB, x.e(BinaryOps.DIV, res))
+    #     res = res.const(1).e(BinaryOps.ADD, x.e(BinaryOps.DIV, res))
+    #
+    #     return res.cast(self.beginning_dtype)
+        # factorials = [math.factorial(i) for i in range(1, N_TERMS + 1)]
+        res = x.e(BinaryOps.ADD, x.const(1))
+        orig_x = x
+        for i in range(2, N_TERMS):
+            x = x.e(BinaryOps.MUL, orig_x)
+            res = res.e(BinaryOps.ADD, x.e(BinaryOps.MUL, x.const(1 / math.factorial(i))))
 
-
-        return res.cast(beginning_dtype)
+        return res
 
     def forward(self, x: LazyBuffer) -> LazyBuffer:
         # self.ret = x.e(BinaryOps.MUL, x.const(1 / math.log(2))).e(UnaryOps.EXP2)
-        self.ret = self.exp(x)
+        self.ret = self._exp(x, 30)
         return self.ret
 
     def backward(self, grad_output: LazyBuffer) -> LazyBuffer:
@@ -632,8 +646,7 @@ class Sqrt(Function):
 # TODO: have the backend automatically find this
 class Sigmoid(Function):
     def forward(self, x: LazyBuffer) -> LazyBuffer:
-        self.ret = x.const(1).e(
-            BinaryOps.DIV,
+        self.ret = x.const(1).e( BinaryOps.DIV,
             x.const(1).e(
                 BinaryOps.ADD,
                 x.e(BinaryOps.MUL, x.const(-1 / math.log(2))).e(UnaryOps.EXP2),
