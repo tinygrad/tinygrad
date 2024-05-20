@@ -310,7 +310,8 @@ class Sin(Function):
     def _sin(self, x: LazyBuffer) -> LazyBuffer:
         # x = self.reduce_angle(x)
         x = self.red_ang(x)
-        return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 30, x.const(1))
+        return _taylor(x, self.coefficients)
+        # return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 30, x.const(1))
         # if self.beginning_dtype == dtypes.float32:
         #     return self.horner_taylor_sin(x, x.e(BinaryOps.MUL, x), 9, x.const(1))
         # else:
@@ -319,7 +320,7 @@ class Sin(Function):
     def horner_taylor_sin(
         self, x: LazyBuffer, xsq: LazyBuffer, n: int, s: LazyBuffer
     ) -> LazyBuffer:
-        for i in range(n, 2, -1):
+        for i in range(n, 1, -1):
             xsqdivided = xsq.e(BinaryOps.DIV, x.const((2 * i - 1) * (2 * i - 2)))
             stxsqdivided = xsqdivided.e(BinaryOps.MUL, s)
             s = s.const(1).e(BinaryOps.SUB, stxsqdivided)
