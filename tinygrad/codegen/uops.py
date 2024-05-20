@@ -359,15 +359,12 @@ class UOpGraph:
 
     assert self._uops[-1].uop is UOps.SINK, f"didn't end with SINK, ended with {self._uops[-1]}"
     self._uops = self._uops[:-1]
-    for i in ifs:
-      s = [self._uops.index(x) for x in stores if i in \
-           (parent_ifs:=sorted([z for z in x.parents if z.uop is UOps.IF or z.uop is UOps.BARRIER], key=self._uops.index)) and i is parent_ifs[-1]]
-      self._uops.insert(max(s)+1, (UOp(UOps.ENDIF, None, (u,))))
-      
-
 
     # TODO: ifs should be removed and just the store should be gated
-    # for u in ifs[::-1]: self._uops.append(UOp(UOps.ENDIF, None, (u,)))
+    for u in ifs:
+      barriers = ([i for i in range(self._uops.index(u), len(self._uops)-1) if self._uops[i].uop is UOps.BARRIER \
+                and self._uops[i+1].uop is UOps.LOAD and all([x.vin[0] in self._uops[i+1].vin for x in self._uops[i].vin])])
+      self._uops.insert(barriers[0] if len(barriers) > 0 else len(self._uops), UOp(UOps.ENDIF, None, (u,)))
 
     if type_verify: self.type_verify()
 
