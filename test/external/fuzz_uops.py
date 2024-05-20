@@ -1,7 +1,6 @@
 import numpy as np
 from dataclasses import replace
 from typing import DefaultDict, Dict, List, Set, Tuple
-from test.external.fuzz_schedule import find_all_toposorts
 from tinygrad.codegen.uops import UOp, UOpGraph, UOps
 from tinygrad.device import Buffer, Device
 from tinygrad.engine.realize import CompiledRunner
