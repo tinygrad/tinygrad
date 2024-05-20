@@ -430,8 +430,7 @@ class TestLinearizer(unittest.TestCase):
 
   def test_grouped_store_locals_and_globals(self):
     if not Device[Device.DEFAULT].renderer.has_local or not Device[Device.DEFAULT].renderer.has_shared or \
-       not Device[Device.DEFAULT].renderer.supports_float4:
-      self.skipTest("Only Compiled uses linearizer with locals, shared, and float4")
+       not Device[Device.DEFAULT].renderer.supports_float4: self.skipTest("needs locals, shared, and float4")
 
     x, y = Tensor.rand(128, 128), Tensor.rand(128, 128)
     out = x@y
@@ -455,8 +454,7 @@ class TestLinearizer(unittest.TestCase):
 
   def test_grouped_store_local_only(self):
     if not Device[Device.DEFAULT].renderer.has_local or not Device[Device.DEFAULT].renderer.has_shared or \
-       not Device[Device.DEFAULT].renderer.supports_float4:
-      self.skipTest("Only Compiled uses linearizer with locals, shared, and float4")
+       not Device[Device.DEFAULT].renderer.supports_float4: self.skipTest("needs locals, shared, and float4")
 
     x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
     r = (x@y).relu()
@@ -475,7 +473,7 @@ class TestLinearizer(unittest.TestCase):
 
   def test_skip_unmatching_upcasts(self):
     if not Device[Device.DEFAULT].renderer.has_local or not Device[Device.DEFAULT].renderer.supports_float4:
-      self.skipTest("Needs locals and float4")
+      self.skipTest("needs locals and float4")
     ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(240, 40, 1, 1), strides=(1, 240, 0, 0), offset=0, mask=None, contiguous=False),)))),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(240, 40, 1, 1), strides=(40, 1, 0, 0), offset=0, mask=None, contiguous=True),)))) # noqa: E501
     opts = [
         Opt(op=OptOps.UPCAST, axis=1, amt=4), Opt(op=OptOps.LOCAL, axis=0, amt=16),
@@ -787,7 +785,7 @@ def _helper_linearizer_opt_ast(realized_ast:Tuple[LazyOp, ...], real_bufs:List[B
 class TestKernelOpts(unittest.TestCase):
   def test_local_and_grouped_reduce(self):
     if not Device[Device.DEFAULT].renderer.has_local or not Device[Device.DEFAULT].renderer.has_shared:
-      self.skipTest("Only Compiled uses linearizer with locals and shared")
+      self.skipTest("needs with locals and shared")
 
     N = 128
     Tensor.manual_seed(1882)
@@ -833,7 +831,7 @@ class TestKernelOpts(unittest.TestCase):
 
   def test_matmul(self):
     if not Device[Device.DEFAULT].renderer.has_local or not Device[Device.DEFAULT].renderer.has_shared:
-      self.skipTest("Only Compiled uses linearizer with locals and shared")
+      self.skipTest("needs locals and shared")
 
     N = 128
     Tensor.manual_seed(1552)
@@ -863,7 +861,7 @@ class TestKernelOpts(unittest.TestCase):
 
   def test_double_reduce(self):
     if not Device[Device.DEFAULT].renderer.has_local or not Device[Device.DEFAULT].renderer.has_shared:
-      self.skipTest("Only Compiled uses linearizer with locals and shared")
+      self.skipTest("needs locals and shared")
 
     N = 128
     Tensor.manual_seed(1552)
@@ -1052,7 +1050,7 @@ class TestKernelOpts(unittest.TestCase):
 
   def test_color_shapes_with_local(self):
     if not Device[Device.DEFAULT].renderer.has_local or not Device[Device.DEFAULT].renderer.has_shared:
-      self.skipTest("Only Compiled uses linearizer with locals and shared")
+      self.skipTest("needs locals and shared")
 
     N = 32
     Tensor.manual_seed(1552)
