@@ -108,6 +108,18 @@ class TestLinearizer(unittest.TestCase):
     self.assertEqual(k.uops.uops[-1].uop, UOps.ENDIF)
     self.assertLess(k.uops.uops.index([x for x in k.uops.uops if x.uop is UOps.STORE][-1]), k.uops.uops.index(k.uops.uops[-1]))
 
+  def test_nested_range_simple(self):
+    a = Tensor.randn(2, 1).realize()
+    out = a.reshape(2, 1).expand(2, 3).sum()
+    lin = helper_linearizer_opt(out, wanna_output=[np.broadcast_to(a.numpy().reshape(2, 1), (2, 3)).sum()])[0]
+    ranges = [x for x in lin.uops if x.uop is UOps.RANGE]
+    print(ranges)
+
+  def test_range_simple(self):
+    t = Tensor([2, 2]).realize()
+    t = t.reshape(2, 1).pad(((1, 1), (1, 1)), 2).sum()
+    helper_linearizer_opt(t, wanna_output=[24])[-1]
+
   @unittest.expectedFailure
   def test_early_end_local(self):
     shape, output_shape = (32,), (1,)
