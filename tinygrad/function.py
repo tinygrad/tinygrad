@@ -690,7 +690,10 @@ class Exp(Function):
 
         _, _, nan = _get_info(x)
         initial_x = x
-        # self.ret = x.e(BinaryOps.MUL, x.const(1 / math.log(2))).e(UnaryOps.EXP2)
+
+        self.ret = x.e(BinaryOps.MUL, x.const(1 / math.log(2))).e(UnaryOps.EXP2)
+        return self.ret
+
         x = x.e(BinaryOps.MUL, x.const(1 / math.log(2)))
         # print("converted x: ")
         # print(__import__('tinygrad').Tensor(x).numpy())
