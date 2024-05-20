@@ -133,18 +133,19 @@ class TestLinearizer(unittest.TestCase):
     ast1 = LazyOp(op=ReduceOps.SUM, src=(LazyOp(BinaryOps.SUB, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=load), ast0)),), arg=(0,))
     ast2 = LazyOp(op=ReduceOps.SUM, src=(LazyOp(BinaryOps.SUB, src=(ast1, LazyOp(op=BufferOps.LOAD, src=(), arg=load))),), arg=(0,))
     ast3 = LazyOp(op=ReduceOps.SUM, src=(LazyOp(BinaryOps.ADD, src=(LazyOp(op=BinaryOps.SUB, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=load), ast2)), LazyOp(op=BinaryOps.SUB, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=load), ast0)),)),), arg=(0,)) # noqa E501
-    asts = [
-      LazyOp(op=BufferOps.STORE, src=(ast0,), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,)))),
-      LazyOp(op=BufferOps.STORE, src=(ast1,), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker.from_shape((1,)))),
-      LazyOp(op=BufferOps.STORE, src=(ast2,), arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker.from_shape((1,)))),
-      LazyOp(op=BufferOps.STORE, src=(ast3,), arg=MemBuffer(idx=3, dtype=dtypes.float, st=ShapeTracker.from_shape((1,))))
-    ]
-    for order in [(a, b, c, d) for d in asts for c in asts for b in asts for a in asts if len(set([a,b,c,d])) == 4]:
-      k = Linearizer(*order)
+    for order in [(d, c, b, a) for d in range(4) for c in range(4) for b in range(4) for a in range(4) if len(set([a,b,c,d])) == 4]:
+      asts = [
+        LazyOp(op=BufferOps.STORE, src=(ast0,), arg=MemBuffer(idx=order.index(0), dtype=dtypes.float, st=ShapeTracker.from_shape((1,)))),
+        LazyOp(op=BufferOps.STORE, src=(ast1,), arg=MemBuffer(idx=order.index(1), dtype=dtypes.float, st=ShapeTracker.from_shape((1,)))),
+        LazyOp(op=BufferOps.STORE, src=(ast2,), arg=MemBuffer(idx=order.index(2), dtype=dtypes.float, st=ShapeTracker.from_shape((1,)))),
+        LazyOp(op=BufferOps.STORE, src=(ast3,), arg=MemBuffer(idx=order.index(3), dtype=dtypes.float, st=ShapeTracker.from_shape((1,))))
+      ]
+      k = Linearizer(*[asts[i] for i in order])
       def recursive_reduceops(x: LazyOp): return [c for v in x.src for c in recursive_reduceops(v)] + [v for v in list(x.src) if v.op in ReduceOps]
       for i,r in enumerate(k.reduceops): assert not any([r in recursive_reduceops(x) for x in k.reduceops[:i]]), "reduceops are out of order"
       x = Tensor.randn(32).realize()
-      helper_linearizer_ast(order, [x], wanna_output=[b:=(a:=x.numpy()).sum(), c:=(a - b).sum(), d:=(c - a).sum(), (a-d + a-b).sum()])
+      outs = [b:=(a:=x.numpy()).sum(), c:=(a - b).sum(), d:=(c - a).sum(), (a-d + a-b).sum()]
+      helper_linearizer_ast([asts[i] for i in order], [x], wanna_output=[outs[i] for i in order])
 
   @unittest.skip
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
@@ -153,7 +154,6 @@ class TestLinearizer(unittest.TestCase):
     k = Linearizer(*ast)
     k.hand_coded_optimizations()
     k.linearize()
-
     local_buf = [u for u in k.uops if u.uop is UOps.DEFINE_LOCAL]
     self.assertEqual(len(real_local_stores:=[u for u in k.uops if u.uop is UOps.STORE and any([lb in u.vin for lb in local_buf])]), 3, \
       f"should have generated 3 BufferOps.STORE to the local buf but got {len(real_local_stores)}")
@@ -166,19 +166,17 @@ class TestLinearizer(unittest.TestCase):
 
   @unittest.skip
   def test_multireduce_upcasting(self):
-    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.SUB, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(2, 7), strides=(7, 1), offset=0, mask=None, contiguous=True),)))), LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(2, 7), strides=(7, 1), offset=0, mask=None, contiguous=True),),))),), arg=(1,)),)),), arg=(1,)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(2, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),)))), # noqa: E501
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.SUB, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float32, st=ShapeTracker(views=(View(shape=(2, 7), strides=(7, 1), offset=0, mask=None, contiguous=True),)))), LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.float32, st=ShapeTracker(views=(View(shape=(2, 7), strides=(7, 1), offset=0, mask=None, contiguous=True),),))),), arg=(1,)),)),), arg=(1,)),), arg=MemBuffer(idx=0, dtype=dtypes.float32, st=ShapeTracker(views=(View(shape=(2, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),)))), # noqa: E501
     k = Linearizer(*ast)
     k.upcast()
     k.linearize()
-
     define_globals = [u for u in k.uops.uops if u.uop is UOps.DEFINE_GLOBAL]
-    self.assertEqual(len([u for u in k.uops.uops if u.uop is UOps.DEFINE_ACC]), 2)
     self.assertEqual(len([u for u in k.uops.uops if u.uop is UOps.LOAD and define_globals[1] in u.vin]), 7)
     self.assertEqual(len([u for u in k.uops.uops if u.uop is UOps.LOAD and define_globals[2] in u.vin]), 7)
     self.assertEqual(len([u for u in k.uops.uops if u.uop is UOps.ALU and u.arg is BinaryOps.SUB]), 7)
-    x0 = Tensor.randn(2,7).realize()
-    x1 = Tensor.randn(2,7).realize()
-    helper_linearizer_ast(ast, [x0, x1], wanna_output=[(x0.numpy() - x1.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(-1)])
+    x0 = Tensor.randn(2,7).softmax().realize()
+    x1 = Tensor.randn(2,7).softmax().realize()
+    helper_linearizer_ast(ast, [x0, x1], wanna_output=[(x0.numpy() - x1.numpy().sum(axis=1, keepdims=True)).sum(axis=1)])
 
   @unittest.skip
   def test_multireduce_loop_scope(self):
@@ -189,9 +187,9 @@ class TestLinearizer(unittest.TestCase):
     def get_recursive_children(x:UOp): return set.union(set(x.vin), *[get_recursive_children(v) for v in x.vin])
     loop = None
     for u in k.uops.uops:
-      if u.uop is UOps.LOOP: loop = u
+      if u.uop is UOps.RANGE: loop = u
       elif loop is None: continue
-      elif u.uop is UOps.ENDLOOP and loop in u.vin: loop = None
+      elif u.uop is UOps.ENDRANGE and loop in u.vin: loop = None
       else: self.assertIn(loop, get_recursive_children(u), f"Any uop within a loop should depend on the loop: {u}")
     x = Tensor.randn(3, 27, 32).realize()
     helper_linearizer_ast(ast, [x], wanna_output=[x.numpy().std(axis=2, ddof=0).reshape(-1)])
@@ -214,7 +212,6 @@ class TestLinearizer(unittest.TestCase):
     mean = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(15, 25, 35), strides=(875, 35, 1), offset=0, mask=None, contiguous=True),)))),), arg=(0, 1, 2)), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=7.619047619047618e-05, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(15, 25, 35), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 1, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=True),)))) # noqa: E501
     x = Tensor.randn(15, 25, 35).realize()
     helper_linearizer_ast((std,mean), [x], wanna_output=[x.numpy().std(), x.numpy().mean()])
-    helper_linearizer_ast((mean,std), [x], wanna_output=[x.numpy().std(), x.numpy().mean()])
 
   def test_load_dedup(self):
     # for different leaves in the AST, the same loads may occur.

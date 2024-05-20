@@ -182,7 +182,7 @@ class Linearizer(Kernel):
     return tuple(new_loops.values())
 
   # helper function, the actual render_reduceop function will get initialize once the indexes get initilized
-  def render_reduceop(self, reduceop: LazyOp, nm: str, accs: Dict[LazyOp, List[UOp]],
+  def render_reduceop(self, reduceop: LazyOp, seq: int, accs: Dict[LazyOp, List[UOp]],
                        loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]], \
                       global_idxs, local_idxs, reduce_idxs, upcast_idxs, full_upcast_idxs):
     # define indicies
@@ -219,7 +219,7 @@ class Linearizer(Kernel):
       alias_buf_idxs.append((i, localbuf_idx, buf_idxs,))
 
     # reduce loop
-    loop_ctx = self.render_loop(reduce_idxs, 2)
+    loop_ctx = self.render_loop(reduce_idxs, seq*4+2)
 
     # define accumulator - modify idxs if necessary for TC
     out_buf = -1 if self.group_for_reduces else 0
@@ -231,9 +231,6 @@ class Linearizer(Kernel):
         upcast_idxs[n] = replace_acc_idxs[len(tc.threads)+n] # replace upcasts
       if DEBUG >= 3: print(f"store alias: sts={self.sts[0]} idxs={global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs}")
     accs[reduceop] = self.global_load(out_buf, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop, loop_ctx=loop_ctx)
-
-    # reduce loop
-    loop_ctx = self.render_loop(reduce_idxs, 2)
 
     # store local aliases
     locals_to_store = [(localbuf_idx, buf_idxs, self.global_load(i, buf_idxs)) for i, localbuf_idx, buf_idxs in alias_buf_idxs]
@@ -296,7 +293,7 @@ class Linearizer(Kernel):
       # NOTE: this structure is the same as the reduce op above
 
       # late reduce loop
-      loop_ctx = self.render_loop(end_local_idxs, 3)
+      loop_ctx = self.render_loop(end_local_idxs, seq*4+3)
 
       # define late accumulator
       accs[reduceop] = self.global_load(0, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop, loop_ctx=loop_ctx)
@@ -407,7 +404,7 @@ class Linearizer(Kernel):
     self.load_cache: Dict[str, UOp] = {}
 
     for i, reduceop in enumerate(self.reduceops):
-      accs = self.render_reduceop(reduceop, f"{i}", accs, loaded_buffers, global_idxs, local_idxs, reduce_idxs, upcast_idxs, full_upcast_idxs)
+      accs = self.render_reduceop(reduceop, i, accs, loaded_buffers, global_idxs, local_idxs, reduce_idxs, upcast_idxs, full_upcast_idxs)
     fake_reduce_idxs = [x*0 for x in reduce_idxs]
 
     # load latebufs
@@ -437,9 +434,6 @@ class Linearizer(Kernel):
     if x.op in [UnaryOps.CAST, UnaryOps.BITCAST]:
       return [self.uops.add(UOps.BITCAST if x.op is UnaryOps.BITCAST else UOps.CAST,
         self.get_base_dtype(x.arg), (u,)) for u in self.ast_parse(x.src[0], accs, offs, loaded_buffers)]
-
-    # if x.op in [UnaryOps.CAST, UnaryOps.BITCAST]: return [self.uops.add(UOps.BITCAST if x.op is UnaryOps.BITCAST else UOps.CAST, \
-    #                                   self.get_base_dtype(x.arg), (u,), x.arg) for u in self.ast_parse(x.src[0], accs, offs, loaded_buffers)]
     if x.op in ReduceOps and do_reduce is None:
       return [accs[x][i] for i in offs] if offs else accs[x]
 

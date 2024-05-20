@@ -304,6 +304,7 @@ class UOpGraph:
     in_degree: DefaultDict[UOp, int] = defaultdict(int)
     loops = []
     ifs = []
+    stores = []
     nodes: Dict[UOp, None] = {}
     def add_parents(u:UOp):
       if u in nodes: return
@@ -314,6 +315,7 @@ class UOpGraph:
         graph[x].append(u)
       if u.uop is UOps.RANGE: loops.append(u)
       if u.uop is UOps.IF: ifs.append(u)
+      if u.uop is UOps.STORE: stores.append(u)
     sink = UOp(UOps.SINK, None, tuple(x for x in sink.vin if x.uop is not UOps.NOOP))
     add_parents(sink)
 
@@ -357,9 +359,15 @@ class UOpGraph:
 
     assert self._uops[-1].uop is UOps.SINK, f"didn't end with SINK, ended with {self._uops[-1]}"
     self._uops = self._uops[:-1]
+    for i in ifs:
+      s = [self._uops.index(x) for x in stores if i in \
+           (parent_ifs:=sorted([z for z in x.parents if z.uop is UOps.IF or z.uop is UOps.BARRIER], key=self._uops.index)) and i is parent_ifs[-1]]
+      self._uops.insert(max(s)+1, (UOp(UOps.ENDIF, None, (u,))))
+      
+
 
     # TODO: ifs should be removed and just the store should be gated
-    for u in ifs[::-1]: self._uops.append(UOp(UOps.ENDIF, None, (u,)))
+    # for u in ifs[::-1]: self._uops.append(UOp(UOps.ENDIF, None, (u,)))
 
     if type_verify: self.type_verify()
 
