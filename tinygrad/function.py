@@ -596,41 +596,27 @@ class Log(Function):
 
 
 class Exp(Function):
-    # def exp(self, x: LazyBuffer) -> LazyBuffer:
-        
-    #     # N_TERMS = 38
-    #
-    # def twopown(self, acc: LazyBuffer, n: LazyBuffer) -> LazyBuffer:
-    #     # If x == 0, return 1
-    #     retval = n.e(BinaryOps.CMPEQ, n.const(0)).e(TernaryOps.WHERE, acc,
-    #         self.twopown(acc.e(BinaryOps.MUL, n.const(2)), n.e(BinaryOps.SUB, n.const(1)))
-    #     )
-    #     return retval
-
-
     def _exp2_grand(self, x: LazyBuffer) -> LazyBuffer:
-        
+        sign = x.e(BinaryOps.CMPLT, x.const(0)).e(TernaryOps.WHERE, x.cast(dtypes.int32).const(-1), x.cast(dtypes.int32).const(1))
+        x = self._abs(x)
+
         floor = x.cast(dtypes.int64).cast(x.dtype)
-
         frac = x.e(BinaryOps.SUB, floor.cast(x.dtype))
-        # print("frac: ")
-        # print(__import__('tinygrad').Tensor(frac).numpy()[0])
-
-
         floor_raised = self._exp2(floor, 60)
-        # print("floor raised: ")
-        # print(__import__('tinygrad').Tensor(floor_raised).numpy()[0])
         floor_raised = floor_raised.e(BinaryOps.ADD, floor_raised.const(1e-8)).cast(dtypes.int64).cast(floor_raised.dtype)
-        # print("floor raised: ")
-        # print(__import__('tinygrad').Tensor(floor_raised).numpy()[0])
         frac_raised = self._exp2(frac, 60)
-        # print("frac raised: ")
-        # print(__import__('tinygrad').Tensor(frac_raised).numpy())
-        return floor_raised.e(BinaryOps.MUL, frac_raised)#.cast(self.beginning_dtype)
+        res = floor_raised.e(BinaryOps.MUL, frac_raised)
+        res = sign.e(BinaryOps.CMPEQ, sign.const(-1)) \
+            .e(TernaryOps.WHERE, res.const(1).e(BinaryOps.DIV, res), res)
+        return res
 
+    def _abs(self, x: LazyBuffer) -> LazyBuffer:
+        return x.e(BinaryOps.CMPLT, x.const(0)).e(
+            TernaryOps.WHERE, x.e(UnaryOps.NEG), x
+        )
 
     def _exp2(self, x: LazyBuffer, N_TERMS) -> LazyBuffer:
-        # x = x.e(BinaryOps.SUB, floor.cast(x.dtype))
+
         ln2 = x.const(math.log(2))
         orig_x = x
         term = orig_x.e(BinaryOps.MUL, ln2)
@@ -642,15 +628,11 @@ class Exp(Function):
         return res
 
     def forward(self, x: LazyBuffer) -> LazyBuffer:
-
         self.beginning_dtype = x.dtype
         if self.device == "METAL":
             x = x.cast(dtypes.float32)
         else:
             x = x.cast(dtypes.float64)
-
-        # print("x: ")
-        # print(__import__('tinygrad').Tensor(x).numpy()[0])
         # self.ret = x.e(BinaryOps.MUL, x.const(1 / math.log(2))).e(UnaryOps.EXP2)
         x = x.e(BinaryOps.MUL, x.const(1 / math.log(2)))
         self.ret = self._exp2_grand(x).cast(self.beginning_dtype)
