@@ -5,7 +5,7 @@ from tinygrad.helpers import getenv
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
   freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2)[:(dim // 2)] / dim))
-  freqs = Tensor.arange(end).unsqueeze(dim=1).div(2) * freqs.unsqueeze(dim=0)
+  freqs = Tensor.arange(end).unsqueeze(dim=1) * freqs.unsqueeze(dim=0)
   return Tensor.stack([freqs.cos().half(), freqs.sin().half()], dim=-1).reshape(1, end, 1, dim//2, 2)
 
 # (a+i*b) * (c+i*d) = (ac-bd) + i*(ad+bc)
@@ -31,19 +31,6 @@ def repeat_kv(x:Tensor, n_rep:int) -> Tensor:
   # NOTE: this is different from x.repeat((1, 1, n_rep, 1))
   return x.repeat((1, 1, 1, n_rep)).reshape(bs, seqlen, n_kv_heads * n_rep, head_dim)
 
-# **** drugs ****
-def norm(x: Tensor, dim: int, keepdim: bool = False) -> Tensor:
-  return x.square().sum(dim, keepdim=keepdim).sqrt()
-
-def apply_drugs(x: Tensor, dose: float):
-  random_angles = Tensor.randn(x.shape[:3], device=x.device, dtype=x.dtype) * dose
-  random_vectors = Tensor.randn(x.shape, device=x.device, dtype=x.dtype)
-  projections = x * (random_vectors * x).sum().div(x.square().sum())
-  ortho = random_vectors - projections
-  target = norm(x, dim=-1, keepdim=True) * (ortho / norm(ortho, dim=-1, keepdim=True))
-  return x * random_angles.cos().unsqueeze(-1) + target * random_angles.sin().unsqueeze(-1)
-
-# **** llama ****
 class RMSNorm:
   def __init__(self, dim, eps=1e-6):
     self.eps = eps
@@ -93,7 +80,6 @@ class Attention:
     keys, values = repeat_kv(keys, self.n_rep), repeat_kv(values, self.n_rep)
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
     attn = xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2)
-    attn = apply_drugs(attn, 0.1)
     attn = attn.reshape(bsz, seqlen, -1)
     return self.wo(attn)
 
@@ -115,8 +101,9 @@ class TransformerBlock:
 
   def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]):
     h = x + self.attention(self.attention_norm(x), start_pos, freqs_cis, mask)
-    return (h + self.feed_forward(self.ffn_norm(h).half())).realize()
+    return (h + self.feed_forward(self.ffn_norm(h).half())).contiguous()
 
+# standard openai sampling
 def sample(logits: Tensor, temp: float, k: int, p: float, af: float, ap: float):
   assert logits.ndim == 1, "only works on 1d tensors"
   assert 0 <= p <= 1, "p must be between 0 and 1"
@@ -125,14 +112,14 @@ def sample(logits: Tensor, temp: float, k: int, p: float, af: float, ap: float):
   if not hasattr(sample, "alpha_counter"):
     setattr(sample, "alpha_counter", Tensor.zeros_like(logits, dtype=dtypes.int32).contiguous())
 
+  # if temperature is very low just use argmax
+  if temp < 1e-6: return logits.argmax()
+
   # alpha sampling
   logits = logits - (sample.alpha_counter * af + (sample.alpha_counter > 0) * ap)
 
   # softmax
   t = (logits / temp).softmax()
-
-  # set nan to 0
-  t = (t != t).where(0, t)
 
   # top k
   output, output_indices = Tensor.zeros(k, device=logits.device).contiguous(), Tensor.zeros(k, device=logits.device, dtype=dtypes.int32).contiguous()
@@ -167,7 +154,7 @@ class Transformer:
     self.freqs_cis = precompute_freqs_cis(dim // n_heads, self.max_context * 2, rope_theta)
     self.forward_jit = TinyJit(self.forward) if jit else None
 
-  def forward(self, tokens:Tensor, start_pos:Union[Variable,int], temperature:float=0.0, top_k:int=55, top_p:float=0.8, alpha_f:float=0.1, alpha_p:float=0.1):
+  def forward(self, tokens:Tensor, start_pos:Union[Variable,int], temperature:float=0.0, top_k:int=35, top_p:float=0.8, alpha_f:float=1.1, alpha_p:float=1.1):
     _bsz, seqlen = tokens.shape
     freqs_cis = self.freqs_cis.shrink((None, (start_pos, start_pos+seqlen),None,None,None))
 
@@ -175,13 +162,10 @@ class Transformer:
     mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype, device=h.device).triu(start_pos+1).realize() if seqlen > 1 else None
     for layer in self.layers: h = layer(h, start_pos, freqs_cis, mask)
     logits = self.output(self.norm(h))[:, -1, :]
-    if temperature < 1e-6:
-      ret = logits.argmax(-1)
-    else:
-      ret = sample(logits.flatten(), temperature, top_k, top_p, alpha_f, alpha_p)
-    return ret.realize()
 
-  def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0, top_k:int=55, top_p:float=0.8, alpha_f:float=0.1, alpha_p:float=0.1):
+    return sample(logits.flatten(), temperature, top_k, top_p, alpha_f, alpha_p).realize()
+
+  def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0, top_k:int=35, top_p:float=0.8, alpha_f:float=1.1, alpha_p:float=1.1):
     # TODO: better way to handle the first call v.s. the rest?
     if tokens.shape[0:2] == (1,1) and self.forward_jit is not None:
       return self.forward_jit(tokens, Variable("start_pos", 0, self.max_context).bind(start_pos), temperature, top_k, top_p, alpha_f, alpha_p)

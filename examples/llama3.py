@@ -132,7 +132,7 @@ MODEL_PARAMS = {
     "files": 1
   },
   "70B": {
-    "args": {"dim": 8192, "n_heads": 64, "n_kv_heads": 8, "n_layers": 80, "norm_eps": 1e-05, "rope_theta": 500000, "vocab_size": 128256,  "hidden_dim": 28672},
+    "args": {"dim": 8192, "n_heads": 64, "n_kv_heads": 8, "n_layers": 80, "norm_eps": 1e-5, "rope_theta": 500000, "vocab_size": 128256,  "hidden_dim": 28672},
     "files": 8
   }
 }
@@ -142,7 +142,7 @@ def build_transformer(model_path: Path, model_size="8B", quantize=None, device=N
   elif quantize == "nf4": linear = NF4Linear(64)
   else: linear = nn.Linear
   with Context(THREEFRY=0):
-    model = Transformer(**MODEL_PARAMS[model_size]["args"], linear=linear, max_context=8192 * 2, jit=True)
+    model = Transformer(**MODEL_PARAMS[model_size]["args"], linear=linear, max_context=8192, jit=True)
 
   # load weights
   if model_path.is_dir():
@@ -153,26 +153,27 @@ def build_transformer(model_path: Path, model_size="8B", quantize=None, device=N
     weights = convert_from_huggingface(weights, model, MODEL_PARAMS[model_size]["args"]["n_heads"], MODEL_PARAMS[model_size]["args"]["n_kv_heads"])
   weights = fix_bf16(weights)
 
-  # quantize
-  if quantize is not None:
-    with Context(BEAM=0):
+  with Context(BEAM=0):
+    # quantize
+    if quantize is not None:
       weights = linear.quantize(weights, device)
       for _,v in weights.items(): v.realize()
 
-  # shard
-  if isinstance(device, tuple):
-    for k,v in nn.state.get_state_dict(model).items():
-      if 'scale' in k: v.shard_(device, axis=None)  # from quantized
-      elif '.attention.' in k: v.shard_(device, axis=-1)
-      elif '.feed_forward.' in k: v.shard_(device, axis=-1)
-      elif 'tok_embeddings.weight' in k: v.shard_(device, axis=0)
-      elif 'output.weight' in k: v.shard_(device, axis=0)
-      else: v.shard_(device, axis=None)
+    # shard
+    if isinstance(device, tuple):
+      for k,v in nn.state.get_state_dict(model).items():
+        if 'scale' in k: v.shard_(device, axis=None)  # from quantized
+        elif '.attention.' in k: v.shard_(device, axis=-1)
+        elif '.feed_forward.' in k: v.shard_(device, axis=-1)
+        elif 'tok_embeddings.weight' in k: v.shard_(device, axis=0)
+        elif 'output.weight' in k: v.shard_(device, axis=-1)
+        else: v.shard_(device, axis=None)
 
-  # replace weights in model
-  load_state_dict(model, weights, strict=False, consume=True)
+    # replace weights in model
+    load_state_dict(model, weights, strict=False, consume=True)
   return model
 
+# default settings
 TEMPERATURE = 0.0
 TOP_K = 55
 TOP_P = 0.9
@@ -180,7 +181,6 @@ ALPHA_F = 1.1
 ALPHA_P = 1.1
 
 def prefill(model, toks, start_pos=0):
-  # do the rest of the tokens
   for tok in tqdm(toks):
     GlobalCounters.reset()
     model(Tensor([[tok]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P).realize()
@@ -207,23 +207,7 @@ if __name__ == "__main__":
   device = tuple(f"{Device.DEFAULT}:{i}" for i in range(args.shard)) if args.shard > 1 else Device.DEFAULT
   model = build_transformer(args.model, model_size=args.size, quantize=args.quantize, device=device)
 
-  if not args.api:
-    prompt = [tokenizer.bos_id] + encode_message("system", "You are a emotive assistant. You really like cookies.")
-
-    start_pos = prefill(model, prompt)
-    while True:
-      toks = encode_message("user", input("Q: ")) + encode_role("assistant")
-
-      start_pos = prefill(model, toks[start_pos:-1], start_pos=start_pos)
-      last_tok = toks[-1]
-      while True:
-        GlobalCounters.reset()
-        tok = model(Tensor([[last_tok]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P).item()
-        start_pos += 1
-        if tok in tokenizer.stop_tokens: break
-        print(tokenizer.decode([tok]), end="", flush=True)
-      print(flush=True)
-  else:
+  if args.api:
     from bottle import Bottle, request, response, HTTPResponse, abort
     app = Bottle()
 
@@ -319,3 +303,20 @@ if __name__ == "__main__":
         yield f"data: {json.dumps(res)}\n\n"
 
     app.run(host="0.0.0.0", port=7776, debug=True)
+  else:
+    prompt = [tokenizer.bos_id] + encode_message("system", "You are an *emotive* assistant.")
+
+    start_pos = prefill(model, prompt)
+    while True:
+      toks = encode_message("user", input("Q: ")) + encode_role("assistant")
+
+      start_pos = prefill(model, toks, start_pos=start_pos)
+      last_tok = toks[-1]
+      while True:
+        GlobalCounters.reset()
+        tok = model(Tensor([[last_tok]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P).item()
+        start_pos += 1
+        last_tok = tok
+        if tok in tokenizer.stop_tokens: break
+        print(tokenizer.decode([tok]), end="", flush=True)
+      print(flush=True)
