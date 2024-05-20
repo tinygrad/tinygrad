@@ -178,11 +178,11 @@ class TestLinearizer(unittest.TestCase):
     k = Linearizer(*ast)
     k.hand_coded_optimizations()
     k.linearize()
-    self.assertEqual(len(endifs:=[x for x in k.uops.uops if x.uop is UOps.ENDIF]), len(ifs:=[x for x in k.uops.uops if x.uop is UOps.IF]))
-    self.assertEqual(len(barriers:=[x for x in k.uops.uops if x.uop is UOps.BARRIER]), 3)
-    self.assertEqual(k.uops.uops[k.uops.uops.index(endifs[0])-1].uop, UOps.STORE)
-    self.assertEqual(k.uops.uops[k.uops.uops.index(endifs[0])+1], barriers[1])
-    self.assertEqual(k.uops.uops[k.uops.uops.index(endifs[0])+2].uop, UOps.LOAD)
+    self.assertEqual(len(endifs:=[x for x in k.uops if x.uop is UOps.ENDIF]), len(ifs:=[x for x in k.uops if x.uop is UOps.IF]))
+    self.assertEqual(len(barriers:=[x for x in k.uops if x.uop is UOps.BARRIER]), 3)
+    self.assertEqual(k.uops[k.uops.uops.index(endifs[0])-1].uop, UOps.STORE)
+    self.assertEqual(k.uops[k.uops.uops.index(endifs[0])+1], barriers[1])
+    self.assertEqual(k.uops[k.uops.uops.index(endifs[0])+2].uop, UOps.LOAD)
     self.assertLess(k.uops.uops.index(barriers[0]), k.uops.uops.index(ifs[0]))
     self.assertLess(k.uops.uops.index(ifs[0]), k.uops.uops.index(endifs[0]))
     self.assertLess(k.uops.uops.index(barriers[1]), k.uops.uops.index(ifs[1]))
@@ -208,7 +208,7 @@ class TestLinearizer(unittest.TestCase):
       for i,r in enumerate(k.reduceops): assert not any([r in recursive_reduceops(x) for x in k.reduceops[:i]]), "reduceops are out of order"
       x = Tensor.randn(32).realize()
       outs = [b:=(a:=x.numpy()).sum(), c:=(a - b).sum(), d:=(c - a).sum(), (a-d + a-b).sum()]
-      helper_linearizer_ast([asts[i] for i in order], [x], wanna_output=[outs[i] for i in order])
+      helper_linearizer_ast(tuple(asts[i] for i in order), [x], wanna_output=[outs[i] for i in order])
 
   @unittest.skip
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
@@ -233,9 +233,9 @@ class TestLinearizer(unittest.TestCase):
     k = Linearizer(*ast)
     k.upcast()
     k.linearize()
-    define_globals = [u for u in k.uops.uops if u.uop is UOps.DEFINE_GLOBAL]
-    self.assertEqual(len([u for u in k.uops.uops if u.uop is UOps.LOAD and define_globals[1] in u.vin]), 7)
-    self.assertEqual(len([u for u in k.uops.uops if u.uop is UOps.ALU and u.arg is BinaryOps.SUB]), 7)
+    define_globals = [u for u in k.uops if u.uop is UOps.DEFINE_GLOBAL]
+    self.assertEqual(len([u for u in k.uops if u.uop is UOps.LOAD and define_globals[1] in u.vin]), 7)
+    self.assertEqual(len([u for u in k.uops if u.uop is UOps.ALU and u.arg is BinaryOps.SUB]), 7)
     x = Tensor.randn(2,7).softmax().realize()
     helper_linearizer_ast(ast, [x], wanna_output=[(x.numpy() - x.numpy().sum(axis=1, keepdims=True)).sum(axis=1)])
 
@@ -247,7 +247,7 @@ class TestLinearizer(unittest.TestCase):
     k.linearize()
     def get_recursive_children(x:UOp): return set.union(set(x.vin), *[get_recursive_children(v) for v in x.vin])
     loop = None
-    for u in k.uops.uops:
+    for u in k.uops:
       if u.uop is UOps.RANGE: loop = u
       elif loop is None: continue
       elif u.uop is UOps.ENDRANGE and loop in u.vin: loop = None
