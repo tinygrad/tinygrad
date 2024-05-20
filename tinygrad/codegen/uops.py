@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable
+from typing import Iterator, Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable
 import functools, itertools, heapq
 from collections import defaultdict
 from enum import Enum, auto
@@ -235,7 +235,8 @@ class UOpGraph:
     self.nodes: Dict[Tuple, UOp] = {}
     self._uops: Optional[List[UOp]] = None
 
-  def __iter__(self): return iter(self.uops)
+  def __iter__(self) -> Iterator[UOp]: return iter(self.uops)
+  def __getitem__(self, index) -> UOp: return self.uops[index]
 
   def vars(self) -> List[Variable]: return [x.arg for x in self.uops if x.uop is UOps.DEFINE_VAR]
   def globals(self) -> List[Tuple[int, bool]]: return [x.arg for x in self.uops if x.uop is UOps.DEFINE_GLOBAL]
