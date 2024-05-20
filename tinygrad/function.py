@@ -641,9 +641,9 @@ class Exp(Function):
 
         floor = x.cast(dtypes.int64).cast(x.dtype)
         frac = x.e(BinaryOps.SUB, floor.cast(x.dtype))
-        floor_raised = self._exp2(floor, 60)
+        floor_raised = self._exp2(floor, 7)
         floor_raised = floor_raised.e(BinaryOps.ADD, floor_raised.const(1e-8)).cast(dtypes.int64).cast(floor_raised.dtype)
-        frac_raised = self._exp2(frac, 60)
+        frac_raised = self._exp2(frac, 7)
         res = floor_raised.e(BinaryOps.MUL, frac_raised)
         res = sign.e(BinaryOps.CMPEQ, sign.const(-1)) \
             .e(TernaryOps.WHERE, res.const(1).e(BinaryOps.DIV, res), res)
