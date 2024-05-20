@@ -364,7 +364,7 @@ def train_step_bert(model, optimizer, scheduler, input_ids:Tensor, segment_ids:T
     optimizer.zero_grad()
     (loss * loss_scaler).backward()
 
-    global_norm = Tensor.empty((len(optimizer.params),), dtype=optimizer.params[0].dtype, device=optimizer[0].device).realize()
+    global_norm = Tensor.empty((len(optimizer.params),), dtype=dtypes.float32, device=optimizer[0].device).realize()
     for i, p in enumerate(optimizer.params): 
       p.grad = p.grad / loss_scaler
       global_norm[i] = p.grad.float().square().sum()
