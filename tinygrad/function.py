@@ -682,35 +682,35 @@ class Exp(Function):
         return res
 
     def forward(self, x: LazyBuffer) -> LazyBuffer:
-        self.beginning_dtype = x.dtype
-        if self.device == "METAL":
-            x = x.cast(dtypes.float32)
-        else:
-            x = x.cast(dtypes.float64)
-
-        _, _, nan = _get_info(x)
-        initial_x = x
+        # self.beginning_dtype = x.dtype
+        # if self.device == "METAL":
+        #     x = x.cast(dtypes.float32)
+        # else:
+        #     x = x.cast(dtypes.float64)
+        #
+        # _, _, nan = _get_info(x)
+        # initial_x = x
 
         self.ret = x.e(BinaryOps.MUL, x.const(1 / math.log(2))).e(UnaryOps.EXP2)
         return self.ret
 
-        x = x.e(BinaryOps.MUL, x.const(1 / math.log(2)))
-        # print("converted x: ")
-        # print(__import__('tinygrad').Tensor(x).numpy())
-        pinf_t = x.const(88.72687268726872)
-        ninf_t = x.const(-103.97539753975397)
-        computed = self._exp2_grand(x)
-        computed = initial_x.e(BinaryOps.CMPLT, pinf_t).e(
-            TernaryOps.WHERE, computed, computed.const(float("inf"))
-        )
-        computed = initial_x.e(BinaryOps.CMPLT, ninf_t).e(
-            TernaryOps.WHERE, computed.const(0), computed
-        )
-        
-        computed = nan.e(TernaryOps.WHERE, x.const(math.nan).cast(computed.dtype), computed)
-
-        self.ret = computed.cast(self.beginning_dtype)
-        return self.ret
+        # x = x.e(BinaryOps.MUL, x.const(1 / math.log(2)))
+        # # print("converted x: ")
+        # # print(__import__('tinygrad').Tensor(x).numpy())
+        # pinf_t = x.const(88.72687268726872)
+        # ninf_t = x.const(-103.97539753975397)
+        # computed = self._exp2_grand(x)
+        # computed = initial_x.e(BinaryOps.CMPLT, pinf_t).e(
+        #     TernaryOps.WHERE, computed, computed.const(float("inf"))
+        # )
+        # computed = initial_x.e(BinaryOps.CMPLT, ninf_t).e(
+        #     TernaryOps.WHERE, computed.const(0), computed
+        # )
+        # 
+        # computed = nan.e(TernaryOps.WHERE, x.const(math.nan).cast(computed.dtype), computed)
+        #
+        # self.ret = computed.cast(self.beginning_dtype)
+        # return self.ret
 
     def backward(self, grad_output: LazyBuffer) -> LazyBuffer:
         return self.ret.e(BinaryOps.MUL, grad_output)
