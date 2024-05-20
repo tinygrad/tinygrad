@@ -229,17 +229,15 @@ class TestLinearizer(unittest.TestCase):
 
   @unittest.skip
   def test_multireduce_upcasting(self):
-    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.SUB, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float32, st=ShapeTracker(views=(View(shape=(2, 7), strides=(7, 1), offset=0, mask=None, contiguous=True),)))), LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.float32, st=ShapeTracker(views=(View(shape=(2, 7), strides=(7, 1), offset=0, mask=None, contiguous=True),),))),), arg=(1,)),)),), arg=(1,)),), arg=MemBuffer(idx=0, dtype=dtypes.float32, st=ShapeTracker(views=(View(shape=(2, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),)))), # noqa: E501
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.SUB, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float32, st=ShapeTracker(views=(View(shape=(2, 7), strides=(7, 1), offset=0, mask=None, contiguous=True),)))), LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float32, st=ShapeTracker(views=(View(shape=(2, 7), strides=(7, 1), offset=0, mask=None, contiguous=True),),))),), arg=(1,)),)),), arg=(1,)),), arg=MemBuffer(idx=0, dtype=dtypes.float32, st=ShapeTracker(views=(View(shape=(2, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),)))), # noqa: E501
     k = Linearizer(*ast)
     k.upcast()
     k.linearize()
     define_globals = [u for u in k.uops.uops if u.uop is UOps.DEFINE_GLOBAL]
     self.assertEqual(len([u for u in k.uops.uops if u.uop is UOps.LOAD and define_globals[1] in u.vin]), 7)
-    self.assertEqual(len([u for u in k.uops.uops if u.uop is UOps.LOAD and define_globals[2] in u.vin]), 7)
     self.assertEqual(len([u for u in k.uops.uops if u.uop is UOps.ALU and u.arg is BinaryOps.SUB]), 7)
-    x0 = Tensor.randn(2,7).softmax().realize()
-    x1 = Tensor.randn(2,7).softmax().realize()
-    helper_linearizer_ast(ast, [x0, x1], wanna_output=[(x0.numpy() - x1.numpy().sum(axis=1, keepdims=True)).sum(axis=1)])
+    x = Tensor.randn(2,7).softmax().realize()
+    helper_linearizer_ast(ast, [x], wanna_output=[(x.numpy() - x.numpy().sum(axis=1, keepdims=True)).sum(axis=1)])
 
   @unittest.skip
   def test_multireduce_loop_scope(self):
