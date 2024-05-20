@@ -146,7 +146,7 @@ class PTXRenderer(Renderer):
         assert vin[0].dtype is not None
         kk(*self.render_bra(lb:=ssa_label('if', u), _cast(r[vin[0]], dtypes.bool, vin[0].dtype, u=u, pred=True), f"{lb}_true"), f"{lb}_true:")
       elif uop is UOps.BARRIER and self.barrier: kk(self.barrier)
-      elif uop is UOps.ENDLOOP:
+      elif uop is UOps.ENDRANGE:
         kk(self.asm_for_op[BinaryOps.ADD](r[vin[0]], r[vin[0]], "1", dtypes.int, self.types[dtypes.int]),
             self.asm_for_op[BinaryOps.CMPLT](pred:=ssa("pred", dtype="pred"), r[vin[0]], r[vin[0].vin[1]], dtypes.int, self.types[dtypes.int]))
         kk(*self.render_bra(r_label[vin[0]], pred, f"{r_label[vin[0]]}_exit"), f"{r_label[vin[0]]}_exit:")
@@ -164,7 +164,7 @@ class PTXRenderer(Renderer):
           kk(*self.render_store(r[vin[0]], r[vin[2]], vin[2].dtype, gate=r[vin[3]] if len(vin)>3 else None, ss=mem_type, offset=vin[1].arg))
       else:
         assert dtype is not None, f"None dtype for uop {uop}"
-        if uop is UOps.LOOP: kk(*self.render_loop(ssa('ridx', u), r[vin[0]], ssa_label('loop', u)))
+        if uop is UOps.RANGE: kk(*self.render_loop(ssa('ridx', u), r[vin[0]], ssa_label('loop', u)))
         elif uop is UOps.ALU:
           assert vin[0].dtype is not None
           if args is BinaryOps.CMPLT or args is BinaryOps.CMPEQ:

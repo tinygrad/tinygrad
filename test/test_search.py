@@ -8,7 +8,7 @@ from tinygrad.device import Device, Buffer
 from tinygrad.ops import LazyOp, LoadOps, BufferOps, ReduceOps, BinaryOps, MemBuffer, ConstBuffer
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import Context
+from tinygrad.helpers import Context, GlobalCounters
 from tinygrad.engine.realize import capturing
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
@@ -30,18 +30,37 @@ class TestTimeLinearizer(unittest.TestCase):
     assert all(isinstance(r, Buffer) for r in rawbufs)
     assert all(r.size > 0 for r in rawbufs)
 
+  def test_kernel_count(self):
+    """
+    Ensure that the kernel count is not incremented by time_linearizer when clearing l2
+    """
+    # ast of Tensor.zeros(16).contiguous().realize()
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(16,), strides=(0,), offset=0, mask=None, contiguous=False),)))),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(16,), strides=(1,), offset=0, mask=None, contiguous=True),))))  # noqa: E501
+    lin = Linearizer(ast)
+    bufs = bufs_from_lin(lin)
+
+    kernel_count = GlobalCounters.kernel_count
+    time_linearizer(lin, bufs, allow_test_size=False, cnt=2, disable_cache=True, clear_l2=True)
+    assert GlobalCounters.kernel_count == kernel_count, "kernel count was incremented by time_linearizer"
+
 class TestBEAM(unittest.TestCase):
   def test_dynamic_beam(self):
     # TODO: make this infra globally usable
     class Capture:
       def __init__(self): self.captured = []
       def add(self, x): self.captured.append(x)
+
     capturing.append(Capture())
+    kernel_count = GlobalCounters.kernel_count
     with Context(BEAM=1): Tensor.zeros(16).contiguous().realize()
+    assert GlobalCounters.kernel_count == kernel_count + 1
     k_beam_1 = capturing[0].captured
     capturing.clear()
+
     capturing.append(Capture())
+    kernel_count = GlobalCounters.kernel_count
     with Context(BEAM=0): Tensor.zeros(16).contiguous().realize()
+    assert GlobalCounters.kernel_count == kernel_count + 1
     k_beam_0 = capturing[0].captured
     capturing.clear()
     assert k_beam_0[-1].prg.p.src != k_beam_1[-1].prg.p.src
