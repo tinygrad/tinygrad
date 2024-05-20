@@ -589,6 +589,20 @@ class Log(Function):
 
 
 class Exp(Function):
+    def exp(self, x: LazyBuffer) -> LazyBuffer:
+        beginning_dtype = x.dtype
+        if self.device == "METAL":
+            x = x.cast(dtypes.float32)
+        else:
+            x = x.cast(dtypes.float64)
+        
+        N_TERMS = 100
+        res = x.e(BinaryOps.ADD, x.const(N_TERMS))
+        for i in range(N_TERMS, 1, -1):
+            res = x.e(BinaryOps.ADD, x.const(i)).e(BinaryOps.SUB, x.e(BinaryOps.MUL, x.const(i)).e(BinaryOps.DIV, res))
+
+        return res.cast(beginning_dtype)
+
     def forward(self, x: LazyBuffer) -> LazyBuffer:
         self.ret = x.e(BinaryOps.MUL, x.const(1 / math.log(2))).e(UnaryOps.EXP2)
         return self.ret
