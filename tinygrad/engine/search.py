@@ -84,7 +84,7 @@ def bufs_from_lin(lin:Linearizer, allocate:bool=True) -> List[Buffer]:
 
 # get dictionary of all possible actions
 def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Linearizer]:
-  acted_lins, max_up, max_lcl = {0:lin} if include_0 else {}, getenv("BEAM_UPCAST_MAX", 256), getenv("BEAM_LOCAL_MAX", 256)
+  acted_lins, max_up, max_lcl = {0:lin} if include_0 else {}, getenv("BEAM_UPCAST_MAX", 256), getenv("BEAM_LOCAL_MAX", 1024)
   for i,a in enumerate(actions):
     if a.axis is not None and a.op is not OptOps.TC:
       if ((ax:=a.real_axis(lin)) >= lin.shape_len) or (lin.full_shape[ax] == a.amt and Opt(a.op, ax, 0) in actions): continue

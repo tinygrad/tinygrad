@@ -108,8 +108,70 @@ class TestLinearizer(unittest.TestCase):
     self.assertEqual(k.uops.uops[-1].uop, UOps.ENDIF)
     self.assertLess(k.uops.uops.index([x for x in k.uops.uops if x.uop is UOps.STORE][-1]), k.uops.uops.index(k.uops.uops[-1]))
 
+  def test_two_nested_range(self):
+    a = Tensor.randn(2, ).realize()
+    out = a.reshape(2, 1).expand(2, 3).sum()
+    lin = helper_linearizer_opt(out, wanna_output=[np.broadcast_to(a.numpy().reshape(2, 1), (2, 3)).sum()])[0]
+    ranges = [i for i,u in enumerate(lin.uops) if u.uop is UOps.RANGE]
+    # RANGE -> LOAD -> RANGE -> PHI
+    assert ranges[1] == ranges[0]+2
+    assert lin.uops[ranges[0]+1].uop is UOps.LOAD
+
+  def test_three_nested_range(self):
+    a = Tensor.randn(2, ).realize()
+    out = a.reshape(2, 1).expand(2, 3).expand(2, 2, 3).sum()
+    lin = helper_linearizer_opt(out, wanna_output=[np.broadcast_to(np.broadcast_to(a.numpy().reshape(2, 1), (2, 3)), (2, 2, 3)).sum()])[0]
+    ranges = [i for i,u in enumerate(lin.uops) if u.uop is UOps.RANGE]
+    # RANGE -> RANGE -> LOAD -> RANGE -> PHI
+    assert ranges[2] == ranges[1]+2 == ranges[0]+3
+    assert lin.uops[ranges[1]+1].uop is UOps.LOAD
+
+  def test_two_nested_range_alt_indexing(self):
+    a = Tensor([2, 2]).realize()
+    out = a.reshape(2, 1).pad(((1, 1), (1, 1)), 2).sum()
+    lin = helper_linearizer_opt(out, wanna_output=[24])[0]
+    ranges = [i for i,u in enumerate(lin.uops) if u.uop is UOps.RANGE]
+    # RANGE -> 4x ALU -> RANGE -> 9x ALU + 1x LOAD -> PHI
+    assert ranges[1] == ranges[0]+5
+    assert lin.uops[ranges[1]+11].uop is UOps.ENDRANGE
+
+  def test_range_outer_op_before_phi(self):
+    a = Tensor.randn(4, 1).realize()
+    b = Tensor.randn(1, 1).realize()
+    out = (a + b[0]).sum() + b[0]
+    lin = helper_linearizer_opt(out, wanna_output=[(a.numpy()+b.numpy()[0]).sum()+b.numpy()[0]])[0]
+    ranges = [i for i,u in enumerate(lin.uops) if u.uop is UOps.RANGE]
+    # LOAD -> RANGE -> LOAD -> PHI
+    assert lin.uops[ranges[0]-2].uop is UOps.LOAD
+
+  def test_range_outer_op_before_phi_nested_range(self):
+    a = Tensor.randn(2, ).realize()
+    b = Tensor.randn(1, 1).realize()
+    out = (a.reshape(2, 1).expand(2, 3) + b[0]).sum() + b[0]
+    lin = helper_linearizer_opt(out, wanna_output=[(np.broadcast_to(a.numpy().reshape(2, 1), (2, 3)) + b.numpy()[0]).sum() + b.numpy()[0]])[0]
+    ranges = [i for i,u in enumerate(lin.uops) if u.uop is UOps.RANGE]
+    # LOAD -> RANGE -> LOAD -> ALU -> RANGE -> PHI
+    assert lin.uops[ranges[0]-2].uop is UOps.LOAD
+    assert ranges[1] == ranges[0]+3
+    assert [x.uop for x in lin.uops[ranges[0]+1:ranges[0]+3]] == [UOps.LOAD, UOps.ALU]
+
+  def test_range_outer_op_after_phi(self):
+    a = Tensor.randn(4, 1).realize()
+    out = a.sum() * a.sum()
+    lin = helper_linearizer_opt(out, wanna_output=[a.numpy().sum()*a.numpy().sum()])[0]
+    # RANGE -> LOAD -> PHI -> ALU
+    end = max(i for i,u in enumerate(lin.uops) if u.uop is UOps.ENDRANGE)
+    assert lin.uops[end+1].uop is UOps.ALU
+
+  def test_range_outer_op_after_phi_nested_range(self):
+    a = Tensor.randn(2, ).realize()
+    out = a.reshape(2, 1).expand(2, 3).sum() + a.reshape(2, 1).expand(2, 3).sum()
+    lin = helper_linearizer_opt(out, wanna_output=[(np.broadcast_to(a.numpy().reshape(2, 1), (2, 3))).sum()*2])[0]
+    # RANGE -> LOAD -> PHI -> ALU
+    end = max(i for i,u in enumerate(lin.uops) if u.uop is UOps.ENDRANGE)
+    assert lin.uops[end+1].uop is UOps.ALU
+
   @unittest.skip
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_early_end_local(self):
     ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=UnaryOps.SQRT, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BinaryOps.SUB, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 27, 32), strides=(864, 32, 1), offset=0, mask=None, contiguous=True),)))), LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 27, 32), strides=(864, 32, 1), offset=0, mask=None, contiguous=True),)))),), arg=(2,)), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.03125, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 27, 32), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),))))), arg=None)), arg=None), LazyOp(op=BinaryOps.SUB, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 27, 32), strides=(864, 32, 1), offset=0, mask=None, contiguous=True),)))), LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 27, 32), strides=(864, 32, 1), offset=0, mask=None, contiguous=True),)))),), arg=(2,)), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.03125, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 27, 32), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),))))), arg=None)), arg=None)), arg=None),), arg=(2,)), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.03125, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 27, 1), strides=(27, 1, 0), offset=0, mask=None, contiguous=True),))))), arg=None),), arg=None),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3, 27, 1), strides=(27, 1, 0), offset=0, mask=None, contiguous=True),)))), # noqa: E501
     k = Linearizer(*ast)

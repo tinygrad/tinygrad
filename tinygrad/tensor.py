@@ -1321,7 +1321,7 @@ class Tensor:
 
   def dropout(self, p=0.5) -> Tensor:
     if not Tensor.training or p == 0: return self
-    return self * (Tensor.rand(*self.shape, requires_grad=False, device=self.device) >= p) * (1/(1.0 - p))
+    return self * (Tensor.rand(*self.shape, requires_grad=False, dtype=dtypes.default_float, device=self.device) >= p) * (1/(1.0 - p))
 
   def one_hot(self, num_classes:int) -> Tensor:
     return (self[..., None] == Tensor.arange(num_classes, requires_grad=False, device=self.device)).where(1, 0)
