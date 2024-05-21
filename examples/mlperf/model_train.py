@@ -362,7 +362,7 @@ def train_unet3d():
   for x in GPUS: Device[x]
 
   TARGET_METRIC = 0.908
-  NUM_EPOCHS = getenv("NUM_EPOCHS", 2500)
+  NUM_EPOCHS = getenv("NUM_EPOCHS", 4000)
   BS = getenv("BS", 1 * len(GPUS))
   LR = getenv("LR", 2.0 * (BS / 28))
   LR_WARMUP_EPOCHS = getenv("LR_WARMUP_EPOCHS", 1000)
@@ -416,7 +416,7 @@ def train_unet3d():
 
   def lr_warm_up(optim, init_lr, lr, current_epoch, warmup_epochs):
     scale = current_epoch / warmup_epochs
-    optim.lr.assign(Tensor([init_lr + (lr - init_lr) * scale], requires_grad=False, device=GPUS))
+    optim.lr.assign(Tensor([init_lr + (lr - init_lr) * scale], device=GPUS)).realize()
 
   def save_checkpoint(state_dict, fn):
     if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
