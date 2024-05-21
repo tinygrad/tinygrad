@@ -31,7 +31,8 @@ class TestPatternMatcher(unittest.TestCase):
     self.assertEqual(matcher.rewrite(c5), c5)
 
   def test_vin_one(self):
-    matcher = PatternMatcher([(UPat(**{"name": "x", "uop": UOps.ALU, "vin":(UPat(**{"uop": UOps.CONST}), UPat(**{"uop": UOps.CONST}))}), lambda x: x)])
+    matcher = PatternMatcher([(UPat(**{"name": "x", "uop": UOps.ALU, "vin":(UPat(**{"uop": UOps.CONST}), UPat(**{"uop": UOps.CONST}))}),
+                               lambda x: x)])
     c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
     c2 = UOp(UOps.CONST, dtypes.float, arg=2.0)
     c3 = UOp(UOps.ALU, dtypes.float, (c1,c2), BinaryOps.ADD)
@@ -68,7 +69,8 @@ class TestPatternMatcher(unittest.TestCase):
     self.assertEqual(matcher.rewrite(c2), None)
 
   def test_zero_add(self):
-    matcher = PatternMatcher([(UPat(**{"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [UPat(**{"name": "x"}), UPat(**{"uop": UOps.CONST, "arg": 0})]}), lambda x: x)])
+    matcher = PatternMatcher([(UPat(**{"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [UPat(**{"name": "x"}),
+                                                                                      UPat(**{"uop": UOps.CONST, "arg": 0})]}), lambda x: x)])
     c0 = UOp(UOps.CONST, dtypes.float, arg=0.0)
     x = UOp(UOps.LOAD, dtypes.float, arg='x')
     a1 = UOp(UOps.ALU, dtypes.float, (c0,x), BinaryOps.ADD)
@@ -77,7 +79,8 @@ class TestPatternMatcher(unittest.TestCase):
     self.assertEqual(matcher.rewrite(a2), x)
 
   def test_sub_zero(self):
-    matcher = PatternMatcher([(UPat(**{"uop": UOps.ALU, "arg": BinaryOps.SUB, "vin": (UPat(**{"name": "x"}), UPat(**{"uop": UOps.CONST, "arg": 0}))}), lambda x: x)])
+    matcher = PatternMatcher([(UPat(**{"uop": UOps.ALU, "arg": BinaryOps.SUB, "vin": (UPat(**{"name": "x"}),
+                                                                                      UPat(**{"uop": UOps.CONST, "arg": 0}))}), lambda x: x)])
     c0 = UOp(UOps.CONST, dtypes.float, arg=0.0)
     x = UOp(UOps.LOAD, dtypes.float, arg='x')
     a1 = UOp(UOps.ALU, dtypes.float, (c0,x), BinaryOps.SUB)
@@ -86,7 +89,8 @@ class TestPatternMatcher(unittest.TestCase):
     self.assertEqual(matcher.rewrite(a2), x)
 
   def test_zero_mul(self):
-    matcher = PatternMatcher([(UPat(**{"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [UPat(**{}), UPat(**{"name": "c", "uop": UOps.CONST, "arg": 0})]}), lambda c: c)])
+    matcher = PatternMatcher([(UPat(**{"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [UPat(**{}),
+                                                    UPat(**{"name": "c", "uop": UOps.CONST, "arg": 0})]}), lambda c: c)])
     c0 = UOp(UOps.CONST, dtypes.float, arg=0.0)
     x = UOp(UOps.LOAD, dtypes.float, arg='x')
     a1 = UOp(UOps.ALU, dtypes.float, (c0,x), BinaryOps.MUL)
@@ -95,7 +99,8 @@ class TestPatternMatcher(unittest.TestCase):
     self.assertEqual(matcher.rewrite(a2), c0)
 
   def test_self_sub(self):
-    matcher = PatternMatcher([(UPat(**{"uop": UOps.ALU, "arg": BinaryOps.SUB, "vin": (UPat(**{"name": "x"}), UPat(**{"name": "x"}))}), lambda x: UOp.const(x.dtype, 0))])   # x-x -> 0
+    matcher = PatternMatcher([(UPat(**{"uop": UOps.ALU, "arg": BinaryOps.SUB, "vin": (UPat(**{"name": "x"}), UPat(**{"name": "x"}))}),
+                               lambda x: UOp.const(x.dtype, 0))])   # x-x -> 0
     c0_int = UOp(UOps.CONST, dtypes.int, arg=0)
     c0_float = UOp(UOps.CONST, dtypes.float, arg=0.0)
     c1 = UOp(UOps.CONST, dtypes.int, arg=10)
@@ -106,7 +111,8 @@ class TestPatternMatcher(unittest.TestCase):
     self.assert_equiv_uops(matcher.rewrite(a2), c0_float)
 
   def test_fold_neg_mul(self):
-    matcher = PatternMatcher([(UPat(**{"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [UPat(**{"name": "x"}), UPat(**{"uop": UOps.CONST, "arg": -1})]}), lambda x: -x)])
+    matcher = PatternMatcher([(UPat(**{"uop": UOps.ALU, "arg": BinaryOps.MUL,
+                                       "vin": [UPat(**{"name": "x"}), UPat(**{"uop": UOps.CONST, "arg": -1})]}), lambda x: -x)])
     c1 = UOp(UOps.LOAD, dtypes.float, arg='xx')
     c2 = UOp(UOps.CONST, dtypes.float, arg=-1)
     a1 = UOp(UOps.ALU, dtypes.float, (c1,c2), BinaryOps.MUL)
