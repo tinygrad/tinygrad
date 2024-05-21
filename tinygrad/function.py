@@ -648,7 +648,7 @@ class Exp(Function):
 
         # fro = floor_raised
         # print("int(150 / RED_T): ")
-        print(int(150 / RED_T))
+        # print(int(150 / RED_T))
         for i in range(int(150 / RED_T), 0, -1):
             # print("i: ", i)
             floor_raised = divres.e(BinaryOps.CMPLT, divres.const(i)) \
