@@ -611,10 +611,14 @@ class Exp(Function):
         sign = x.e(BinaryOps.CMPLT, x.const(0)).e(TernaryOps.WHERE, x.cast(dtypes.int32).const(-1), x.cast(dtypes.int32).const(1))
         x = self._abs(x)
         floor = x.cast(dtypes.int64).cast(x.dtype)
+        print("FLOOR: ")
+        print(__import__('tinygrad').Tensor(floor).numpy())
         frac = x.e(BinaryOps.SUB, floor.cast(x.dtype))
-        floor_raised = self._exp2(floor, 20)
+        floor_raised = self._exp2(floor, 30)
         floor_raised = floor_raised.e(BinaryOps.CMPLT, floor_raised.const(2**32)).e(TernaryOps.WHERE, self.correct_to_int(floor_raised), floor_raised)
-        frac_raised = self._exp2(frac, 20)
+        print("FLOOR RAISED: ")
+        print(__import__('tinygrad').Tensor(floor_raised).numpy())
+        frac_raised = self._exp2(frac, 12)
         res = floor_raised.e(BinaryOps.MUL, frac_raised)
 
         res = sign.e(BinaryOps.CMPEQ, sign.const(-1)) \
