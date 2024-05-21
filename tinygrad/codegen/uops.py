@@ -73,7 +73,7 @@ class UPat:
   name: Optional[str] = None
   __allow_len__: Set[int] = field(default_factory=set)
   vin: Optional[Union[Tuple[UPat, ...], List[UPat], UPat]] = None
-  dtype: Optional[Union[DType, Set[DType]]] = None
+  dtype: Optional[Union[DType, Set[DType], str]] = None
 
 def _match(uop:UOp, pattern:UPat, store:Dict[str, UOp]) -> bool:
   uop_v, arg_v, name_v, allow_v, vin_v, dtype_v = pattern.uop, pattern.arg, pattern.name, pattern.__allow_len__, pattern.vin, pattern.dtype
