@@ -223,10 +223,10 @@ constant_folder = PatternMatcher([
    lambda buf,idx,val: UOp(UOps.STORE, None, (buf, idx, val))),
   # CAST-PHI-GEP -> PHI-CAST
   (UPat(**{"name": "root", "uop": UOps.CAST, "vin":
-    tuple(UPat(**{"uop": UOps.PHI, "vin": (UPat(**{"uop": UOps.GEP, "vin": (UPat(**{"name": "val"}),), "arg": i}), UPat(**{"name": f"vUPat(**{i})"}))}) for i in range(4))}),
+    tuple(UPat(**{"uop": UOps.PHI, "vin": (UPat(**{"uop": UOps.GEP, "vin": (UPat(**{"name": "val"}),), "arg": i}), UPat(**{"name": f"v{i}"}))}) for i in range(4))}),
     lambda root, val, v0, v1, v2, v3: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1, v2, v3))))),
   (UPat(**{"name": "root", "uop": UOps.CAST, "vin":
-    tuple(UPat(**{"uop": UOps.PHI, "vin": (UPat(**{"uop": UOps.GEP, "vin": (UPat(**{"name": "val"}),), "arg": i}), UPat(**{"name": f"vUPat(**{i})"}))}) for i in range(2))}),
+    tuple(UPat(**{"uop": UOps.PHI, "vin": (UPat(**{"uop": UOps.GEP, "vin": (UPat(**{"name": "val"}),), "arg": i}), UPat(**{"name": f"v{i}"}))}) for i in range(2))}),
     lambda root, val, v0, v1: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1))))),
   # NEG/CMPLT -> CMPLT
   (UPat(**{"uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": (UPat(**{"uop": UOps.ALU, "arg": UnaryOps.NEG, "vin": (UPat(**{"name": "x"}),)}),
