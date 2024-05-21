@@ -609,68 +609,22 @@ class Exp(Function):
             .e(BinaryOps.MUL, y)
         )
 
-    def _exp2_grand(self, x: LazyBuffer) -> LazyBuffer:
-        # print("X: ")
-        # print(__import__('tinygrad').Tensor(x).numpy())
-        sign = x.e(BinaryOps.CMPLT, x.const(0)).e(TernaryOps.WHERE, x.cast(dtypes.int32).const(-1), x.cast(dtypes.int32).const(1))
-        # print("SIGN: ")
-        # print(__import__('tinygrad').Tensor(sign).numpy())
-        x = self._abs(x)
-        # print("X: ")
-        # print(__import__('tinygrad').Tensor(x).numpy())
-        
-        # RED_T = 10
-        # ET = 2**RED_T
-        #
-        # floorint = x.cast(dtypes.uint64)
-        # try:
-        #     divres = floorint.e(BinaryOps.DIV, floorint.const(RED_T))
-        #     # print("DIVRES: ")
-        #     # print(__import__('tinygrad').Tensor(divres).numpy())
-        #     modres = floorint.e(BinaryOps.MOD, floorint.const(RED_T))
-        #     # print("DIVMOD: ")
-        #     # print(__import__('tinygrad').Tensor(modres).numpy())
-        # except Exception as _:
-        #     divres = floorint.const(0)
-        #     modres = floorint
-        # floor = modres.cast(x.dtype)
-        floor = x.cast(dtypes.int64).cast(x.dtype)
-        # print("FLOOR: ")
-        # print(__import__('tinygrad').Tensor(floor).numpy())
-        # frac = x.e(BinaryOps.SUB, floorint.cast(x.dtype))
-        frac = x.e(BinaryOps.SUB, floor.cast(x.dtype))
-        # print("FRAC: ")
-        # print(__import__('tinygrad').Tensor(frac).numpy())
-        floor_raised = self._exp2(floor, 20)
-        # print("FLOOR RAISED: ")
-        # print(__import__('tinygrad').Tensor(floor_raised).numpy())
-        floor_raised = floor_raised.e(BinaryOps.ADD, floor_raised.const(0.5)).cast(dtypes.int64).cast(floor_raised.dtype)
-        # print("FLOOR RAISED: ")
-        # print(__import__('tinygrad').Tensor(floor_raised).numpy())
+    def correct_to_int(self, x: LazyBuffer) -> LazyBuffer:
+        return x.e(BinaryOps.ADD, x.const(0.5)).cast(dtypes.int64).cast(x.dtype)
+      
 
-        # fro = floor_raised
-        # print("int(150 / RED_T): ")
-        # print(int(150 / RED_T))
-        # for i in range(int(150 / RED_T) // 2 - 6, 0, -1):
-        #     # print("i: ", i)
-        #     floor_raised = divres.e(BinaryOps.CMPLT, divres.const(i)) \
-        #     .e(TernaryOps.WHERE, floor_raised, floor_raised.e(BinaryOps.MUL, floor_raised.const(ET)))
-        #     # print("FLOOR RAISED: ")
-        #     # print(__import__('tinygrad').Tensor(floor_raised).numpy())
-        # # print("FLOOR RAISED: ")
-        # # print(__import__('tinygrad').Tensor(floor_raised).numpy())
+    def _exp2_grand(self, x: LazyBuffer) -> LazyBuffer:
+        sign = x.e(BinaryOps.CMPLT, x.const(0)).e(TernaryOps.WHERE, x.cast(dtypes.int32).const(-1), x.cast(dtypes.int32).const(1))
+        x = self._abs(x)
+        floor = x.cast(dtypes.int64).cast(x.dtype)
+        frac = x.e(BinaryOps.SUB, floor.cast(x.dtype))
+        floor_raised = self._exp2(floor, 20)
+        floor_raised = floor_raised.e(BinaryOps.CMPLT, floor_raised.const(2**32)).e(TernaryOps.WHERE, self.correct_to_int(floor_raised), floor_raised)
         frac_raised = self._exp2(frac, 12)
         res = floor_raised.e(BinaryOps.MUL, frac_raised)
 
-        # for i in range(int(150 / RED_T) // 2 - 6, 0, -1):
-        #     # print("i: ", i)
-        #     floor_raised = divres.e(BinaryOps.CMPLT, divres.const(i)) \
-        #     .e(TernaryOps.WHERE, floor_raised, floor_raised.e(BinaryOps.MUL, floor_raised.const(ET)))
-
         res = sign.e(BinaryOps.CMPEQ, sign.const(-1)) \
             .e(TernaryOps.WHERE, res.const(1).e(BinaryOps.DIV, res), res)
-        # print("RES: ")
-        # print(__import__('tinygrad').Tensor(res).numpy())
 
         return res
 
