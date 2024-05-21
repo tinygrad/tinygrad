@@ -433,7 +433,7 @@ class Linearizer(Kernel):
 
     values = [self.ast_parse(v, accs, offs, loaded_buffers, cache=cache) for v in x.src]
     ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}
-    if x.op in ops:
+    if do_reduce is not None:
       ret: List[UOp] = []
       acc, input_acc = do_reduce, do_reduce[:]
       for val, off in zip(zip(*values), cast(List[int], offs)):
