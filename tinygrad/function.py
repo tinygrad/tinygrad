@@ -601,13 +601,7 @@ class Log(Function):
 class Exp(Function):
 
     def _mod(self, x: LazyBuffer, y: LazyBuffer) -> LazyBuffer:
-        return x.e(
-            BinaryOps.SUB,
-            x.e(BinaryOps.DIV, y)
-            .cast(dtypes.int64)
-            .cast(x.dtype)
-            .e(BinaryOps.MUL, y)
-        )
+        return x.e(BinaryOps.SUB, x.e(BinaryOps.DIV, y).cast(dtypes.int64).cast(x.dtype).e(BinaryOps.MUL, y))
 
     def correct_to_int(self, x: LazyBuffer) -> LazyBuffer:
         return x.e(BinaryOps.ADD, x.const(0.5)).cast(dtypes.int64).cast(x.dtype)
@@ -620,7 +614,7 @@ class Exp(Function):
         frac = x.e(BinaryOps.SUB, floor.cast(x.dtype))
         floor_raised = self._exp2(floor, 20)
         floor_raised = floor_raised.e(BinaryOps.CMPLT, floor_raised.const(2**32)).e(TernaryOps.WHERE, self.correct_to_int(floor_raised), floor_raised)
-        frac_raised = self._exp2(frac, 12)
+        frac_raised = self._exp2(frac, 20)
         res = floor_raised.e(BinaryOps.MUL, frac_raised)
 
         res = sign.e(BinaryOps.CMPEQ, sign.const(-1)) \
