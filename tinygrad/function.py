@@ -619,7 +619,7 @@ class Exp(Function):
         # print("X: ")
         # print(__import__('tinygrad').Tensor(x).numpy())
         
-        RED_T = 10
+        RED_T = 30
         ET = 2**RED_T
 
         floorint = x.cast(dtypes.uint64)
@@ -649,12 +649,12 @@ class Exp(Function):
         # fro = floor_raised
         # print("int(150 / RED_T): ")
         # print(int(150 / RED_T))
-        for i in range(int(150 / RED_T), 0, -1):
-            # print("i: ", i)
-            floor_raised = divres.e(BinaryOps.CMPLT, divres.const(i)) \
-            .e(TernaryOps.WHERE, floor_raised, floor_raised.e(BinaryOps.MUL, floor_raised.const(ET)))
-            # print("FLOOR RAISED: ")
-            # print(__import__('tinygrad').Tensor(floor_raised).numpy())
+        # for i in range(int(150 / RED_T), 0, -1):
+        #     # print("i: ", i)
+        #     floor_raised = divres.e(BinaryOps.CMPLT, divres.const(i)) \
+        #     .e(TernaryOps.WHERE, floor_raised, floor_raised.e(BinaryOps.MUL, floor_raised.const(ET)))
+        #     # print("FLOOR RAISED: ")
+        #     # print(__import__('tinygrad').Tensor(floor_raised).numpy())
         # print("FLOOR RAISED: ")
         # print(__import__('tinygrad').Tensor(floor_raised).numpy())
         frac_raised = self._exp2(frac, 30)
