@@ -58,19 +58,17 @@ class Kernel:
     self.ast = ast
     self.lazyops = flatten([op.lazyops for op in self.ast])
 
-    # there's only allowed to be one reduceop
     cached_ordered_lazyops: Dict[LazyOp, List[LazyOp]] = {}
     def ordered_lazyops(op):
       if op not in cached_ordered_lazyops: cached_ordered_lazyops[op] = dedup([item for x in op.src for item in ordered_lazyops(x)] + [op])
       return cached_ordered_lazyops[op]
     self.reduceops = dedup([x for out in self.ast for x in ordered_lazyops(out) if x.op in ReduceOps])
-    assert len(self.reduceops) < 2, "Only one reduceop allowed"
 
     self.outbufs, self.vars = [x.arg for x in self.ast], flatten([x.vars() for x in self.ast])
     loadops = [BufferOps.LOAD, BufferOps.CONST]
     self.bufs: List[Union[MemBuffer, ConstBuffer, LocalBuffer]] = self.outbufs + dedup([x.arg for x in self.lazyops if x.op in loadops])
 
-    # get earlybufs, before the one reduce op
+    # get earlybufs, before any reduceops
     self.earlybufs = [x.arg for reduceop in self.reduceops for x in reduceop.lazyops if x.op in BufferOps]
     self.full_buf_index: int = self.bufs.index(self.earlybufs[0]) if self.earlybufs else 0
 
