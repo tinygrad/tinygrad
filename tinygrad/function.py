@@ -618,10 +618,12 @@ class Exp(Function):
         x = self._abs(x)
         # print("X: ")
         # print(__import__('tinygrad').Tensor(x).numpy())
+        
+        RED_T = 10
 
         floorint = x.cast(dtypes.uint64)
-        divres = floorint.e(BinaryOps.DIV, floorint.const(30))
-        divmod = floorint.e(BinaryOps.MOD, floorint.const(30))
+        divres = floorint.e(BinaryOps.DIV, floorint.const(RED_T))
+        divmod = floorint.e(BinaryOps.MOD, floorint.const(RED_T))
         floor = divmod.cast(x.dtype)
         # print("FLOOR: ")
         # print(__import__('tinygrad').Tensor(floor).numpy())
@@ -636,7 +638,7 @@ class Exp(Function):
         # print(__import__('tinygrad').Tensor(floor_raised).numpy())
 
         fro = floor_raised
-        for i in range(4, 0):
+        for i in range(int(150 / RED_T), 0):
             floor_raised = divres.e(BinaryOps.CMPLT, divres.const(i)) \
             .e(TernaryOps.WHERE, floor_raised, floor_raised.e(BinaryOps.MUL, fro))
         frac_raised = self._exp2(frac, 30)
