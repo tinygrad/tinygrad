@@ -108,6 +108,7 @@ class TestLinearizer(unittest.TestCase):
     self.assertEqual(k.uops.uops[-1].uop, UOps.ENDIF)
     self.assertLess(k.uops.uops.index([x for x in k.uops.uops if x.uop is UOps.STORE][-1]), k.uops.uops.index(k.uops.uops[-1]))
 
+  @unittest.skipIf(getenv("PTX"), "Ptx adds additional uops for load indexing")
   def test_two_nested_range(self):
     a = Tensor.randn(2, ).realize()
     out = a.reshape(2, 1).expand(2, 3).sum()
@@ -117,6 +118,7 @@ class TestLinearizer(unittest.TestCase):
     assert ranges[1] == ranges[0]+2
     assert lin.uops[ranges[0]+1].uop is UOps.LOAD
 
+  @unittest.skipIf(getenv("PTX"), "Ptx adds additional uops for load indexing")
   def test_three_nested_range(self):
     a = Tensor.randn(2, ).realize()
     out = a.reshape(2, 1).expand(2, 3).expand(2, 2, 3).sum()
@@ -126,6 +128,7 @@ class TestLinearizer(unittest.TestCase):
     assert ranges[2] == ranges[1]+2 == ranges[0]+3
     assert lin.uops[ranges[1]+1].uop is UOps.LOAD
 
+  @unittest.skipIf(getenv("PTX"), "Ptx adds additional uops for load indexing")
   def test_two_nested_range_alt_indexing(self):
     a = Tensor([2, 2]).realize()
     out = a.reshape(2, 1).pad(((1, 1), (1, 1)), 2).sum()
@@ -144,6 +147,7 @@ class TestLinearizer(unittest.TestCase):
     # LOAD -> RANGE -> LOAD -> PHI
     assert lin.uops[ranges[0]-2].uop is UOps.LOAD
 
+  @unittest.skipIf(getenv("PTX"), "Ptx adds additional uops for load indexing")
   def test_range_outer_op_before_phi_nested_range(self):
     a = Tensor.randn(2, ).realize()
     b = Tensor.randn(1, 1).realize()
