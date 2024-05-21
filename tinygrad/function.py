@@ -619,24 +619,26 @@ class Exp(Function):
         # print("X: ")
         # print(__import__('tinygrad').Tensor(x).numpy())
         
-        RED_T = 10
-        ET = 2**RED_T
-
-        floorint = x.cast(dtypes.uint64)
-        try:
-            divres = floorint.e(BinaryOps.DIV, floorint.const(RED_T))
-            # print("DIVRES: ")
-            # print(__import__('tinygrad').Tensor(divres).numpy())
-            modres = floorint.e(BinaryOps.MOD, floorint.const(RED_T))
-            # print("DIVMOD: ")
-            # print(__import__('tinygrad').Tensor(modres).numpy())
-        except Exception as _:
-            divres = floorint.const(0)
-            modres = floorint
-        floor = modres.cast(x.dtype)
+        # RED_T = 10
+        # ET = 2**RED_T
+        #
+        # floorint = x.cast(dtypes.uint64)
+        # try:
+        #     divres = floorint.e(BinaryOps.DIV, floorint.const(RED_T))
+        #     # print("DIVRES: ")
+        #     # print(__import__('tinygrad').Tensor(divres).numpy())
+        #     modres = floorint.e(BinaryOps.MOD, floorint.const(RED_T))
+        #     # print("DIVMOD: ")
+        #     # print(__import__('tinygrad').Tensor(modres).numpy())
+        # except Exception as _:
+        #     divres = floorint.const(0)
+        #     modres = floorint
+        # floor = modres.cast(x.dtype)
+        floor = x.cast(dtypes.int64).cast(x.dtype)
         # print("FLOOR: ")
         # print(__import__('tinygrad').Tensor(floor).numpy())
-        frac = x.e(BinaryOps.SUB, floorint.cast(x.dtype))
+        # frac = x.e(BinaryOps.SUB, floorint.cast(x.dtype))
+        frac = x.e(BinaryOps.SUB, floor.cast(x.dtype))
         # print("FRAC: ")
         # print(__import__('tinygrad').Tensor(frac).numpy())
         floor_raised = self._exp2(floor, 20)
@@ -649,21 +651,21 @@ class Exp(Function):
         # fro = floor_raised
         # print("int(150 / RED_T): ")
         # print(int(150 / RED_T))
-        for i in range(int(150 / RED_T) // 2 - 6, 0, -1):
-            # print("i: ", i)
-            floor_raised = divres.e(BinaryOps.CMPLT, divres.const(i)) \
-            .e(TernaryOps.WHERE, floor_raised, floor_raised.e(BinaryOps.MUL, floor_raised.const(ET)))
-            # print("FLOOR RAISED: ")
-            # print(__import__('tinygrad').Tensor(floor_raised).numpy())
-        # print("FLOOR RAISED: ")
-        # print(__import__('tinygrad').Tensor(floor_raised).numpy())
+        # for i in range(int(150 / RED_T) // 2 - 6, 0, -1):
+        #     # print("i: ", i)
+        #     floor_raised = divres.e(BinaryOps.CMPLT, divres.const(i)) \
+        #     .e(TernaryOps.WHERE, floor_raised, floor_raised.e(BinaryOps.MUL, floor_raised.const(ET)))
+        #     # print("FLOOR RAISED: ")
+        #     # print(__import__('tinygrad').Tensor(floor_raised).numpy())
+        # # print("FLOOR RAISED: ")
+        # # print(__import__('tinygrad').Tensor(floor_raised).numpy())
         frac_raised = self._exp2(frac, 30)
         res = floor_raised.e(BinaryOps.MUL, frac_raised)
 
-        for i in range(int(150 / RED_T) // 2 - 6, 0, -1):
-            # print("i: ", i)
-            floor_raised = divres.e(BinaryOps.CMPLT, divres.const(i)) \
-            .e(TernaryOps.WHERE, floor_raised, floor_raised.e(BinaryOps.MUL, floor_raised.const(ET)))
+        # for i in range(int(150 / RED_T) // 2 - 6, 0, -1):
+        #     # print("i: ", i)
+        #     floor_raised = divres.e(BinaryOps.CMPLT, divres.const(i)) \
+        #     .e(TernaryOps.WHERE, floor_raised, floor_raised.e(BinaryOps.MUL, floor_raised.const(ET)))
 
         res = sign.e(BinaryOps.CMPEQ, sign.const(-1)) \
             .e(TernaryOps.WHERE, res.const(1).e(BinaryOps.DIV, res), res)
