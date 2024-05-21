@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable
+from typing import Iterator, Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable
 import functools, itertools, heapq
 from collections import defaultdict
 from enum import Enum, auto
@@ -22,9 +22,9 @@ class UOps(Enum):
   # memory/assignment ops
   LOAD = auto(); STORE = auto(); PHI = auto() # noqa: E702
   # control flow ops
-  BARRIER = auto(); IF = auto(); LOOP = auto() # noqa: E702
+  BARRIER = auto(); IF = auto(); RANGE = auto() # noqa: E702
   # these two are not graph nodes
-  ENDLOOP = auto(); ENDIF = auto() # noqa: E702
+  ENDRANGE = auto(); ENDIF = auto() # noqa: E702
 
 @dataclass(eq=False)
 class UOp:
@@ -135,13 +135,13 @@ constant_folder = PatternMatcher([
   ({"uop": UOps.ALU, "arg": TernaryOps.WHERE, "vin": ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": (
     {"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin":
       [{"__name__": "idx"}, {"uop": UOps.ALU, "arg": BinaryOps.MUL,
-        "vin": [{"__name__": "mval", "uop": UOps.CONST}, {"uop": UOps.LOOP, "vin": ({"__name__": "loop_start"}, {"__name__": "loop_end"})}]}]},
+        "vin": [{"__name__": "mval", "uop": UOps.CONST}, {"uop": UOps.RANGE, "vin": ({"__name__": "loop_start"}, {"__name__": "loop_end"})}]}]},
       {"__name__": "compval", "uop": UOps.CONST})}, {"__name__": "multconst", "uop": UOps.CONST}, {"uop": UOps.CONST, "arg": 0})}, loop_collapse),
   # sum collapse to mul (with possible GEP)
-  ({"uop": UOps.PHI, "vin": ({"__name__": "phi_input", "uop": UOps.DEFINE_ACC, "vin": ({"uop": UOps.LOOP, "__name__": "loop"},)},
+  ({"uop": UOps.PHI, "vin": ({"__name__": "phi_input", "uop": UOps.DEFINE_ACC, "vin": ({"uop": UOps.RANGE, "__name__": "loop"},)},
       {"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": ({"__name__": "val1"}, {"__name__": "val2"})})}, sum_collapse),
   ({"uop": UOps.PHI, "vin": ({"__name__": "phi_input", "uop": UOps.GEP,
-                              "vin": ({"uop": UOps.DEFINE_ACC, "vin":({"uop": UOps.LOOP, "__name__": "loop"},)},)},
+                              "vin": ({"uop": UOps.DEFINE_ACC, "vin":({"uop": UOps.RANGE, "__name__": "loop"},)},)},
       {"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": ({"__name__": "val1"}, {"__name__": "val2"})})}, sum_collapse),
   # deal with UNMUL
   ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{"uop": UOps.CONST, "__name__": "c1"},
@@ -224,7 +224,7 @@ constant_folder = PatternMatcher([
   ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": ({"uop": UOps.ALU, "arg": UnaryOps.NEG, "vin": ({"__name__": "x"},)},
                                                      {"__name__": "c", "uop": UOps.CONST, "dtype": dtypes.int})},
     lambda c,x: UOp(UOps.ALU, dtypes.bool, (UOp.const(c.dtype, -c.arg), x), BinaryOps.CMPLT)),
-  # cast NOOP (NOTE: it's str to deal with PtrDType)
+  # cast NOOP (NOTE: it's `is` to deal with PtrDType)
   ({"__name__": "root", "uop": UOps.CAST}, lambda root: root.vin[0] if root.dtype is root.vin[0].dtype else None),
 ])
 
@@ -235,7 +235,8 @@ class UOpGraph:
     self.nodes: Dict[Tuple, UOp] = {}
     self._uops: Optional[List[UOp]] = None
 
-  def __iter__(self): return iter(self.uops)
+  def __iter__(self) -> Iterator[UOp]: return iter(self.uops)
+  def __getitem__(self, index) -> UOp: return self.uops[index]
 
   def vars(self) -> List[Variable]: return [x.arg for x in self.uops if x.uop is UOps.DEFINE_VAR]
   def globals(self) -> List[Tuple[int, bool]]: return [x.arg for x in self.uops if x.uop is UOps.DEFINE_GLOBAL]
@@ -312,7 +313,7 @@ class UOpGraph:
         add_parents(x)
         in_degree[u] += 1
         graph[x].append(u)
-      if u.uop is UOps.LOOP: loops.append(u)
+      if u.uop is UOps.RANGE: loops.append(u)
       if u.uop is UOps.IF: ifs.append(u)
     sink = UOp(UOps.SINK, None, tuple(x for x in sink.vin if x.uop is not UOps.NOOP))
     add_parents(sink)
@@ -334,6 +335,10 @@ class UOpGraph:
     for u in nodes:
       if in_degree[u] == 0: push(u)
 
+    if getenv("FUZZ_UOPS", 0):
+      from test.external.fuzz_uops import fuzz_uops
+      self.fuzz_paths = fuzz_uops(graph, in_degree.copy(), loops_children)
+
     self._uops = []
     while queue:
       p,x = heapq.heappop(queue)
@@ -346,7 +351,7 @@ class UOpGraph:
       for u, ss in loops_children.items():
         if x in ss:
           ss.remove(x)
-          if len(ss) == 0: self._uops.append(UOp(UOps.ENDLOOP, None, (u,)))
+          if len(ss) == 0: self._uops.append(UOp(UOps.ENDRANGE, None, (u,)))
       for u in graph[x]:
         in_degree[u] -= 1
         if in_degree[u] == 0: push(u)
@@ -372,13 +377,13 @@ class UOpGraph:
     mults: sint = 1
     mult_stack = []
     for u in self.uops:
-      if u.uop is UOps.LOOP:
+      if u.uop is UOps.RANGE:
         mult_stack.append(mults)
         mults *= uop_alu_resolve(u.vin[1])
-      elif u.uop is UOps.ENDLOOP:
+      elif u.uop is UOps.ENDRANGE:
         mults = mult_stack.pop(-1)
       elif u.uop is UOps.ALU:
-        flops += mults
+        flops += mults * (2 if u.arg == TernaryOps.MULACC else 1)
       elif u.uop is UOps.LOAD:
         assert u.dtype is not None
         mem += u.dtype.itemsize * mults

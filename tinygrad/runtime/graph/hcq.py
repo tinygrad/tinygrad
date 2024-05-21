@@ -38,8 +38,6 @@ class HCQGraph(MultiGraphRunner):
       if ji.prg.device.dname.startswith("NV"): to_mv(self.kargs_addrs[j], 0x160).cast('I')[:] = array.array('I', ji.prg.clprg.constbuffer_0)
 
     # Build queues.
-    self.queue_list: List[Tuple[Any, ...]] = []
-
     self.comp_queues: Dict[Compiled, Any] = collections.defaultdict(self.comp_hcq_t)
     self.comp_signal = {dev: dev._get_signal(value=0) for dev in self.devices}
     self.comp_signal_val = {dev: 0 for dev in self.devices}
@@ -58,7 +56,7 @@ class HCQGraph(MultiGraphRunner):
     for j,ji in enumerate(self.jit_cache):
       if isinstance(ji.prg, CompiledRunner):
         deps = self.access_resources(ji.bufs[(outs:=ji.prg.p.outcount):], ji.bufs[:outs], (self.comp_signal[ji.prg.device], sig_val:=j+1))
-        deps = [x for x in deps if x != self.comp_signal[ji.prg.device]] # remove wait for the same queue as all operations are ordered.
+        deps = [x for x in deps if id(x[0]) != id(self.comp_signal[ji.prg.device])] # remove wait for the same queue as all operations are ordered.
         self.comp_signal_val[ji.prg.device] = sig_val
 
         for sig, val in deps: self.comp_queues[ji.prg.device].wait(sig, val)
@@ -81,10 +79,10 @@ class HCQGraph(MultiGraphRunner):
 
     for dev in self.devices:
       if self.copy_signal_val[dev] > 0: self.comp_queues[dev].wait(self.copy_signal[dev], self.copy_signal_val[dev])
-      for dep_dev in self.copy_to_devs: self.comp_queues[dev].wait(self.copy_signal[dep_dev], self.copy_signal_val[dep_dev])
+      for dep_dev in self.copy_to_devs[dev]: self.comp_queues[dev].wait(self.copy_signal[dep_dev], self.copy_signal_val[dep_dev])
 
-      self.queue_list.append((self.comp_queues.pop(dev), dev))
-      if self.copy_signal_val[dev] > 0: self.queue_list.append((self.copy_queues.pop(dev), dev))
+      if hasattr(self.comp_queues[dev], 'bind'): self.comp_queues[dev].bind(dev)
+      if hasattr(self.copy_queues[dev], 'bind') and self.copy_signal_val[dev] > 0: self.copy_queues[dev].bind(dev)
 
   def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False) -> Optional[float]:
     # Wait and restore signals
@@ -109,14 +107,17 @@ class HCQGraph(MultiGraphRunner):
       queue.update_exec(cmd_ptr, *cast(CompiledRunner, self.jit_cache[j].prg).p.launch_dims(var_vals))
 
     for dev in self.devices:
+      # Submit sync with world and queues.
       self.comp_hcq_t().wait(dev.timeline_signal, dev.timeline_value - 1) \
                        .wait(self.kickoff_signal, self.kickoff_value).submit(dev)
-      self.copy_hcq_t().wait(dev.timeline_signal, dev.timeline_value - 1) \
-                       .wait(self.kickoff_signal, self.kickoff_value).submit(dev)
+      self.comp_queues[dev].submit(dev)
 
-    for queue, dev in self.queue_list: queue.submit(dev)
+      if self.copy_signal_val[dev] > 0:
+        self.copy_hcq_t().wait(dev.timeline_signal, dev.timeline_value - 1) \
+                         .wait(self.kickoff_signal, self.kickoff_value).submit(dev)
+        self.copy_queues[dev].submit(dev)
 
-    for dev in self.devices:
+      # Signal the final value
       self.comp_hcq_t().signal(dev.timeline_signal, dev.timeline_value).submit(dev)
       self.graph_timeline[dev] = dev.timeline_value
       dev.timeline_value += 1

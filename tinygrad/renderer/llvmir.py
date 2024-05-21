@@ -12,7 +12,7 @@ def is_bool_or_unsigned(dtype: DType): return dtype == dtypes.bool or dtypes.is_
 
 code_for_op: Final[Dict[Op, Callable]] = {
   UnaryOps.NEG: lambda builder, x, dtype: builder.neg(x) if dtypes.is_int(dtype) else \
-    (builder.not_(x) if dtype is dtypes.bool else builder.fneg(x, flags=MFLAGS)),
+    (builder.not_(x) if dtype == dtypes.bool else builder.fneg(x, flags=MFLAGS)),
   UnaryOps.EXP2: lambda builder, x, dtype: builder.call(builder.module.declare_intrinsic('llvm.exp2', [x.type]), [x], fastmath=MFLAGS),
   UnaryOps.LOG2: lambda builder, x, dtype: builder.call(builder.module.declare_intrinsic('llvm.log2', [x.type]), [x], fastmath=MFLAGS),
   UnaryOps.SIN: lambda builder, x, dtype: builder.call(builder.module.declare_intrinsic('llvm.sin', [x.type]), [x], fastmath=MFLAGS),
@@ -108,7 +108,7 @@ class LLVMRenderer(Renderer):
             bb[-1].store(element, bb[-1].gep(lvars[vin[0]], [lvars[vin[1]]], inbounds=True))
         else:
           bb[-1].store(element, bb[-1].gep(lvars[vin[0]], [lvars[vin[1]]], inbounds=True))
-      elif uop is UOps.ENDLOOP:
+      elif uop is UOps.ENDRANGE:
         loop_entry_bb, phis = loop_blocks.pop()
         idx_p1 = bb[-1].add(lvars[vin[0]], ir.Constant(ir.IntType(32), 1))
         lvars[vin[0]].add_incoming(idx_p1, bb[-1].block)
@@ -117,7 +117,7 @@ class LLVMRenderer(Renderer):
         bb[-2].cbranch(bb[-2].icmp_unsigned("<", idx_p1, lvars[vin[0].vin[1]]), loop_entry_bb, bb[-1].block)
       else:
         assert dtype is not None, f"None dtype for uop {uop}"
-        if uop is UOps.LOOP:
+        if uop is UOps.RANGE:
           bb.append(ir.IRBuilder(func.append_basic_block(f"loop_body_{len(loop_blocks)}")))
           bb[-2].branch(bb[-1].block)
 
