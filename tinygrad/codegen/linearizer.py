@@ -260,7 +260,7 @@ class Linearizer(Kernel):
         global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs})
 
       # run early AST (with reduce)
-      self.ast_parse(reduceop, accs, self.acc_offsets(self.full_buf_index), loaded_buffers, do_reduce=accs[reduceop])
+      self.ast_parse(reduceop, accs, self.acc_offsets(self.full_buf_index), loaded_buffers, reduce_acc=accs[reduceop])
 
     # end the reduce loop
     self.load_cache.clear()
@@ -303,7 +303,7 @@ class Linearizer(Kernel):
 
       # there's no AST here (and there's no shape for the reduce LazyOp)
       self.ast_parse(LazyOp(reduceop.op, (LazyOp(BufferOps.LOAD, (), self.bufs[-1]),)),\
-                     accs, self.acc_offsets(-1), loaded_buffers, do_reduce=accs[reduceop])
+                     accs, self.acc_offsets(-1), loaded_buffers, reduce_acc=accs[reduceop])
 
       # end the late reduce loop
       self.load_cache.clear()
@@ -420,22 +420,22 @@ class Linearizer(Kernel):
     self.applied_opts_cache = self.applied_opts[:]
     return self
 
-  def ast_parse(self, x:LazyOp, accs: Dict[LazyOp, List[UOp]], offs:Optional[List[int]], loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]], do_reduce:Optional[List[UOp]]=None, cache=None) -> List[UOp]: # noqa: E501
+  def ast_parse(self, x:LazyOp, accs: Dict[LazyOp, List[UOp]], offs:Optional[List[int]], loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]], reduce_acc:Optional[List[UOp]]=None, cache=None) -> List[UOp]: # noqa: E501
     if cache is None: cache = {}
     if x in cache: return cache[x]
     if x.op in BufferOps: return loaded_buffers[x.arg]
     if x.op in [UnaryOps.CAST, UnaryOps.BITCAST]:
       return [self.uops.add(UOps.BITCAST if x.op is UnaryOps.BITCAST else UOps.CAST,
                             self.get_base_dtype(x.arg), (u,)) for u in self.ast_parse(x.src[0], accs, offs, loaded_buffers)]
-    if x.op in ReduceOps and not do_reduce:
+    if x.op in ReduceOps and not reduce_acc:
       assert offs is None, "not available if we aren't doing reduce"
       return accs[x]
 
     values = [self.ast_parse(v, accs, offs, loaded_buffers, cache=cache) for v in x.src]
     ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}
-    if do_reduce is not None:
+    if reduce_acc is not None:
       ret: List[UOp] = []
-      acc, input_acc = do_reduce, do_reduce[:]
+      acc, input_acc = reduce_acc, reduce_acc[:]
       for val, off in zip(zip(*values), cast(List[int], offs)):
         acc[off] = self.uops.add(UOps.ALU, acc[off].dtype, vin=val+(acc[off],), arg=ops[cast(ReduceOps, x.op)])
         ret.append(acc[off])
