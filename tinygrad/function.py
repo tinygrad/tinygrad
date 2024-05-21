@@ -619,53 +619,29 @@ class Exp(Function):
         # print("X: ")
         # print(__import__('tinygrad').Tensor(x).numpy())
 
-        e30 = x.const(2**30)
-        e60 = x.const(2**60)
-        e90 = x.const(2**90)
-        e120 = x.const(2**120)
-        e150 = x.const(2**150)
-
-        c30 = x.e(BinaryOps.CMPLT, x.const(30.0))
-        c60 = x.e(BinaryOps.CMPLT, x.const(60.0))
-        c90 = x.e(BinaryOps.CMPLT, x.const(90.0))
-        c120 = x.e(BinaryOps.CMPLT, x.const(120.0))
-        c150 = x.e(BinaryOps.CMPLT, x.const(150.0))
-
-        x = self._mod(x, x.const(30.0))
-
-
-        floor = x.cast(dtypes.int64).cast(x.dtype)
+        floorint = x.cast(dtypes.uint64)
+        divres = floorint.e(BinaryOps.DIV, floorint.const(30))
+        divmod = floorint.e(BinaryOps.MOD, floorint.const(30))
+        floor = divmod.cast(x.dtype)
         # print("FLOOR: ")
         # print(__import__('tinygrad').Tensor(floor).numpy())
         frac = x.e(BinaryOps.SUB, floor.cast(x.dtype))
         # print("FRAC: ")
         # print(__import__('tinygrad').Tensor(frac).numpy())
-        floor_raised = self._exp2(floor, 20)
+        floor_raised = self._exp2(floor, 30)
         # print("FLOOR RAISED: ")
         # print(__import__('tinygrad').Tensor(floor_raised).numpy())
         floor_raised = floor_raised.e(BinaryOps.ADD, floor_raised.const(0.5)).cast(dtypes.int64).cast(floor_raised.dtype)
         # print("FLOOR RAISED: ")
         # print(__import__('tinygrad').Tensor(floor_raised).numpy())
-        frac_raised = self._exp2(frac, 20)
-        res = floor_raised.e(BinaryOps.MUL, frac_raised)
-        # print("RES: ")
-        # print(__import__('tinygrad').Tensor(res).numpy())
-        # res = self._exp2(x, 30)
 
-        ro = res
-        # res = c10.e(TernaryOps.WHERE, res, ro.e(BinaryOps.MUL, e10))
-        # res = c20.e(TernaryOps.WHERE, res, ro.e(BinaryOps.MUL, e20))
-        res = c30.e(TernaryOps.WHERE, res, ro.e(BinaryOps.MUL, e30))
-        # res = c40.e(TernaryOps.WHERE, res, ro.e(BinaryOps.MUL, e40))
-        # res = c50.e(TernaryOps.WHERE, res, ro.e(BinaryOps.MUL, e50))
-        res = c60.e(TernaryOps.WHERE, res, ro.e(BinaryOps.MUL, e60))
-        # res = c70.e(TernaryOps.WHERE, res, ro.e(BinaryOps.MUL, e70))
-        # res = c80.e(TernaryOps.WHERE, res, ro.e(BinaryOps.MUL, e80))
-        res = c90.e(TernaryOps.WHERE, res, ro.e(BinaryOps.MUL, e90))
-        # res = c100.e(TernaryOps.WHERE, res, ro.e(BinaryOps.MUL, e100))
-        # res = c110.e(TernaryOps.WHERE, res, ro.e(BinaryOps.MUL, e110))
-        res = c120.e(TernaryOps.WHERE, res, ro.e(BinaryOps.MUL, e120))
-        res = c150.e(TernaryOps.WHERE, res, ro.e(BinaryOps.MUL, e150))
+        fro = floor_raised
+        for i in range(4, 0):
+            floor_raised = divres.e(BinaryOps.CMPLT, divres.const(i)) \
+            .e(TernaryOps.WHERE, floor_raised, floor_raised.e(BinaryOps.MUL, fro))
+        frac_raised = self._exp2(frac, 30)
+        res = floor_raised.e(BinaryOps.MUL, frac_raised)
+
         res = sign.e(BinaryOps.CMPEQ, sign.const(-1)) \
             .e(TernaryOps.WHERE, res.const(1).e(BinaryOps.DIV, res), res)
         # print("RES: ")
