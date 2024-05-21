@@ -16,6 +16,7 @@ from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner
 from tinygrad.helpers import prod, Context, getenv, CI
 from tinygrad.dtype import DType, dtypes
 from tinygrad.codegen.uops import UOpGraph
+from test.helpers import is_dtype_supported
 
 def helper_realized_ast(r:Tensor):
   s = create_schedule([r.lazydata])
@@ -619,14 +620,16 @@ class TestLinearizer(unittest.TestCase):
 
   # TODO this broke llama BEAM=2
   @unittest.expectedFailure
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4 and is_dtype_supported(dtypes.half), "need backends that support float4")
   def test_acc_nofold_unmatching_dtypes(self):
     # acc is half4, store is float4.
+    t = Tensor.empty(1, 3, 11008, 4096).realize()
     ld0 = LazyOp(BufferOps.LOAD, (), MemBuffer(idx=1, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 4096), strides=(0, 4096, 0, 1), offset=0, mask=None, contiguous=False),)))) # noqa: E501
     ld1 = LazyOp(BufferOps.LOAD, (), MemBuffer(idx=2, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 4096), strides=(0, 0, 4096, 1), offset=0, mask=None, contiguous=False),)))) # noqa: E501
     cast = LazyOp(BinaryOps.MUL, (ld0, ld1))
     sum = LazyOp(ReduceOps.SUM, (cast, ), (3, ))
     st = LazyOp(BufferOps.STORE, (sum,), MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 1), strides=(0, 11008, 1, 0), offset=0, mask=None, contiguous=True),)))) # noqa: E501
-    helper_linearizer_ast((st, ), [])
+    helper_linearizer_ast((st, ), [t])
 
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need backends that support float4")
 class TestFloat4(unittest.TestCase):
