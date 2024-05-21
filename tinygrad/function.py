@@ -599,6 +599,16 @@ class Log(Function):
 
 
 class Exp(Function):
+
+    def _mod(self, x: LazyBuffer, y: LazyBuffer) -> LazyBuffer:
+        return x.e(
+            BinaryOps.SUB,
+            x.e(BinaryOps.DIV, y)
+            .cast(dtypes.int64)
+            .cast(x.dtype)
+            .e(BinaryOps.MUL, y)
+        )
+
     def _exp2_grand(self, x: LazyBuffer) -> LazyBuffer:
         # print("X: ")
         # print(__import__('tinygrad').Tensor(x).numpy())
@@ -633,19 +643,20 @@ class Exp(Function):
         c120 = x.e(BinaryOps.CMPLT, x.const(120.0))
         c150 = x.e(BinaryOps.CMPLT, x.const(150.0))
 
-        x = x.e(BinaryOps.CMPLT, x.const(150.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(150.0)))
-        x = x.e(BinaryOps.CMPLT, x.const(120.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(120.0)))
-        # x = x.e(BinaryOps.CMPLT, x.const(110.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(110.0)))
-        # x = x.e(BinaryOps.CMPLT, x.const(100.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(100.0)))
-        x = x.e(BinaryOps.CMPLT, x.const(90.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(90.0)))
-        x = x.e(BinaryOps.CMPLT, x.const(80.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(80.0)))
-        x = x.e(BinaryOps.CMPLT, x.const(70.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(70.0)))
-        x = x.e(BinaryOps.CMPLT, x.const(60.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(60.0)))
-        # x = x.e(BinaryOps.CMPLT, x.const(50.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(50.0)))
-        # x = x.e(BinaryOps.CMPLT, x.const(40.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(40.0)))
-        x = x.e(BinaryOps.CMPLT, x.const(30.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(30.0)))
-        # x = x.e(BinaryOps.CMPLT, x.const(20.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(20.0)))
-        # x = x.e(BinaryOps.CMPLT, x.const(10.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(10.0)))
+        # x = x.e(BinaryOps.CMPLT, x.const(150.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(150.0)))
+        # x = x.e(BinaryOps.CMPLT, x.const(120.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(120.0)))
+        # # x = x.e(BinaryOps.CMPLT, x.const(110.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(110.0)))
+        # # x = x.e(BinaryOps.CMPLT, x.const(100.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(100.0)))
+        # x = x.e(BinaryOps.CMPLT, x.const(90.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(90.0)))
+        # x = x.e(BinaryOps.CMPLT, x.const(80.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(80.0)))
+        # x = x.e(BinaryOps.CMPLT, x.const(70.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(70.0)))
+        # x = x.e(BinaryOps.CMPLT, x.const(60.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(60.0)))
+        # # x = x.e(BinaryOps.CMPLT, x.const(50.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(50.0)))
+        # # x = x.e(BinaryOps.CMPLT, x.const(40.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(40.0)))
+        # x = x.e(BinaryOps.CMPLT, x.const(30.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(30.0)))
+        # # x = x.e(BinaryOps.CMPLT, x.const(20.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(20.0)))
+        # # x = x.e(BinaryOps.CMPLT, x.const(10.0)).e(TernaryOps.WHERE, x, x.e(BinaryOps.SUB, x.const(10.0)))
+        x = self._mod(x, x.const(30.0))
 
 
         floor = x.cast(dtypes.int64).cast(x.dtype)
