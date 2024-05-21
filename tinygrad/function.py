@@ -714,6 +714,7 @@ class Exp(Function):
         computed = initial_x.e(BinaryOps.CMPLT, ninf_t).e(
             TernaryOps.WHERE, computed.const(0), computed
         )
+        computed = nan.e(TernaryOps.WHERE, x.const(float("nan")), computed)
 
         self.ret = computed.cast(self.beginning_dtype)
 
