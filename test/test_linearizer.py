@@ -621,11 +621,11 @@ class TestLinearizer(unittest.TestCase):
   @unittest.expectedFailure
   def test_acc_nofold_unmatching_dtypes(self):
     # acc is half4, store is float4.
-    ld0 = LazyOp(BufferOps.LOAD, (), MemBuffer(idx=1, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 4096), strides=(0, 4096, 0, 1), offset=0, mask=None, contiguous=False),))))
-    ld1 = LazyOp(BufferOps.LOAD, (), MemBuffer(idx=2, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 4096), strides=(0, 0, 4096, 1), offset=0, mask=None, contiguous=False),))))
+    ld0 = LazyOp(BufferOps.LOAD, (), MemBuffer(idx=1, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 4096), strides=(0, 4096, 0, 1), offset=0, mask=None, contiguous=False),)))) # noqa: E501
+    ld1 = LazyOp(BufferOps.LOAD, (), MemBuffer(idx=2, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 4096), strides=(0, 0, 4096, 1), offset=0, mask=None, contiguous=False),)))) # noqa: E501
     cast = LazyOp(BinaryOps.MUL, (ld0, ld1))
     sum = LazyOp(ReduceOps.SUM, (cast, ), (3, ))
-    st = LazyOp(BufferOps.STORE, (sum,), MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 1), strides=(0, 11008, 1, 0), offset=0, mask=None, contiguous=True),))))
+    st = LazyOp(BufferOps.STORE, (sum,), MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 1), strides=(0, 11008, 1, 0), offset=0, mask=None, contiguous=True),)))) # noqa: E501
     helper_linearizer_ast((st, ), [])
 
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need backends that support float4")
