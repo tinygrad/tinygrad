@@ -639,7 +639,7 @@ class Exp(Function):
         frac = x.e(BinaryOps.SUB, floorint.cast(x.dtype))
         # print("FRAC: ")
         # print(__import__('tinygrad').Tensor(frac).numpy())
-        floor_raised = self._exp2(floor, 30)
+        floor_raised = self._exp2(floor, 20)
         # print("FLOOR RAISED: ")
         # print(__import__('tinygrad').Tensor(floor_raised).numpy())
         floor_raised = floor_raised.e(BinaryOps.ADD, floor_raised.const(0.5)).cast(dtypes.int64).cast(floor_raised.dtype)
@@ -659,6 +659,11 @@ class Exp(Function):
         # print(__import__('tinygrad').Tensor(floor_raised).numpy())
         frac_raised = self._exp2(frac, 30)
         res = floor_raised.e(BinaryOps.MUL, frac_raised)
+
+        for i in range(int(150 / RED_T) // 2 - 6, 0, -1):
+            # print("i: ", i)
+            floor_raised = divres.e(BinaryOps.CMPLT, divres.const(i)) \
+            .e(TernaryOps.WHERE, floor_raised, floor_raised.e(BinaryOps.MUL, floor_raised.const(ET)))
 
         res = sign.e(BinaryOps.CMPEQ, sign.const(-1)) \
             .e(TernaryOps.WHERE, res.const(1).e(BinaryOps.DIV, res), res)
