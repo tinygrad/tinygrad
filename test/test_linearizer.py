@@ -628,13 +628,14 @@ class TestLinearizer(unittest.TestCase):
     assert out.vin[-1].uop is UOps.CAST and out.vin[-1].dtype == dtypes.float.vec(2)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4 and is_dtype_supported(dtypes.half), "need backends that support float4")
-  def test_acc_include_cast_unmatching_dtypes(self):
+  def test_acc_nofold_unmatching_dtypes(self):
     """
     half4 acc0 = half4(0.0,0.0,0.0,0.0);
     {
       acc0 = // ...
     }
     *((device float4*)(data0+alu0)) = float4(acc0.x,acc0.y,acc0.z,acc0.w);
+    doesn't simplify
     """
     ld0 = LazyOp(BufferOps.LOAD, (), MemBuffer(idx=1, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 4096), strides=(0, 4096, 0, 1), offset=0, mask=None, contiguous=False),)))) # noqa: E501
     ld1 = LazyOp(BufferOps.LOAD, (), MemBuffer(idx=2, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 4096), strides=(0, 0, 4096, 1), offset=0, mask=None, contiguous=False),)))) # noqa: E501
@@ -642,7 +643,6 @@ class TestLinearizer(unittest.TestCase):
     sum = LazyOp(ReduceOps.SUM, (cast, ), (3, ))
     st = LazyOp(BufferOps.STORE, (sum,), MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 1), strides=(0, 11008, 1, 0), offset=0, mask=None, contiguous=True),)))) # noqa: E501
     k = helper_linearizer_ast((st, ), [Tensor.empty(1, 3, 11008, 4096).realize(), Tensor.empty(1, 3, 11008, 4096).realize()])[-1]
-    # check that gep->vectorize collapses but CAST remains
     store_vals = [u.vin[-1] for u in k.uops if u.uop is UOps.STORE]
     for val in store_vals:
       assert val.dtype == dtypes.float.vec(4) and val.uop is UOps.CAST
