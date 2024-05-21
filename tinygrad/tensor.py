@@ -1227,7 +1227,13 @@ class Tensor:
     return self.div(2 ** x, upcast=False)
 
   def pow(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
+    print("Value being raised to a power is: ")
+    print(self.numpy())
+    print("Power is: ")
+    print(x)
     x = self._to_const_val(x)
+    print("x to const: ")
+    print(x)
     if not isinstance(x, Tensor) and not reverse:
       # simple pow identities
       if x < 0: return self.reciprocal().pow(-x)
