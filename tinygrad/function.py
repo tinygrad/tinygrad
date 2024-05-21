@@ -619,7 +619,7 @@ class Exp(Function):
         # print("X: ")
         # print(__import__('tinygrad').Tensor(x).numpy())
         
-        RED_T = 30
+        RED_T = 10
         ET = 2**RED_T
 
         floorint = x.cast(dtypes.uint64)
