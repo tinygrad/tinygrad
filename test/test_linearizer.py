@@ -643,7 +643,7 @@ class TestLinearizer(unittest.TestCase):
     cast = LazyOp(BinaryOps.MUL, (ld0, ld1))
     sum = LazyOp(ReduceOps.SUM, (cast, ), (3, ))
     st = LazyOp(BufferOps.STORE, (sum,), MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 1), strides=(0, 11008, 1, 0), offset=0, mask=None, contiguous=True),)))) # noqa: E501
-    k = helper_linearizer_ast((st, ), [Tensor.empty(1, 3, 11008, 4096).realize()])[-1]
+    k = helper_linearizer_ast((st, ), [Tensor.empty(1, 3, 11008, 4096).realize(), Tensor.empty(1, 3, 11008, 4096).realize()])[-1]
     # check that gep->vectorize collapses but CAST remains
     store_vals = [u.vin[-1] for u in k.uops if u.uop is UOps.STORE]
     for val in store_vals:
