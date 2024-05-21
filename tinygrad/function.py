@@ -618,7 +618,7 @@ class Exp(Function):
         floor_raised = floor_raised.e(BinaryOps.CMPLT, floor_raised.const(2**32)).e(TernaryOps.WHERE, self.correct_to_int(floor_raised), floor_raised)
         print("FLOOR RAISED: ")
         print(__import__('tinygrad').Tensor(floor_raised).numpy())
-        frac_raised = self._exp2(frac, 12)
+        frac_raised = self._exp2(frac, 25)
         res = floor_raised.e(BinaryOps.MUL, frac_raised)
 
         res = sign.e(BinaryOps.CMPEQ, sign.const(-1)) \
