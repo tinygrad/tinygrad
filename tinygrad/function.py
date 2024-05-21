@@ -659,7 +659,7 @@ class Exp(Function):
         #     # print(__import__('tinygrad').Tensor(floor_raised).numpy())
         # # print("FLOOR RAISED: ")
         # # print(__import__('tinygrad').Tensor(floor_raised).numpy())
-        frac_raised = self._exp2(frac, 30)
+        frac_raised = self._exp2(frac, 12)
         res = floor_raised.e(BinaryOps.MUL, frac_raised)
 
         # for i in range(int(150 / RED_T) // 2 - 6, 0, -1):
