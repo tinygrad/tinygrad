@@ -620,18 +620,23 @@ class Exp(Function):
         # print(__import__('tinygrad').Tensor(x).numpy())
         
         RED_T = 10
+        ET = 2**RED_T
 
         floorint = x.cast(dtypes.uint64)
         try:
             divres = floorint.e(BinaryOps.DIV, floorint.const(RED_T))
-            divmod = floorint.e(BinaryOps.MOD, floorint.const(RED_T))
+            # print("DIVRES: ")
+            # print(__import__('tinygrad').Tensor(divres).numpy())
+            modres = floorint.e(BinaryOps.MOD, floorint.const(RED_T))
+            # print("DIVMOD: ")
+            # print(__import__('tinygrad').Tensor(modres).numpy())
         except Exception as _:
             divres = floorint.const(0)
-            divmod = floorint
-        floor = divmod.cast(x.dtype)
+            modres = floorint
+        floor = modres.cast(x.dtype)
         # print("FLOOR: ")
         # print(__import__('tinygrad').Tensor(floor).numpy())
-        frac = x.e(BinaryOps.SUB, floor.cast(x.dtype))
+        frac = x.e(BinaryOps.SUB, floorint.cast(x.dtype))
         # print("FRAC: ")
         # print(__import__('tinygrad').Tensor(frac).numpy())
         floor_raised = self._exp2(floor, 30)
@@ -641,10 +646,17 @@ class Exp(Function):
         # print("FLOOR RAISED: ")
         # print(__import__('tinygrad').Tensor(floor_raised).numpy())
 
-        fro = floor_raised
-        for i in range(int(150 / RED_T), 0):
+        # fro = floor_raised
+        # print("int(150 / RED_T): ")
+        print(int(150 / RED_T))
+        for i in range(int(150 / RED_T), 0, -1):
+            # print("i: ", i)
             floor_raised = divres.e(BinaryOps.CMPLT, divres.const(i)) \
-            .e(TernaryOps.WHERE, floor_raised, floor_raised.e(BinaryOps.MUL, fro))
+            .e(TernaryOps.WHERE, floor_raised, floor_raised.e(BinaryOps.MUL, floor_raised.const(ET)))
+            # print("FLOOR RAISED: ")
+            # print(__import__('tinygrad').Tensor(floor_raised).numpy())
+        # print("FLOOR RAISED: ")
+        # print(__import__('tinygrad').Tensor(floor_raised).numpy())
         frac_raised = self._exp2(frac, 30)
         res = floor_raised.e(BinaryOps.MUL, frac_raised)
 
@@ -688,15 +700,17 @@ class Exp(Function):
         _, _, nan = _get_info(x)
         initial_x = x
 
+        # print("X INITIAL: ")
+        # print(__import__('tinygrad').Tensor(x).numpy())
         pinf_t = x.const(88.72687268726872)
         ninf_t = x.const(-103.97539753975397)
         x = x.e(BinaryOps.CMPLT, ninf_t).e(TernaryOps.WHERE, x.const(0), x)
         x = x.e(BinaryOps.MUL, x.const(1 / math.log(2)))
 
         computed = self._exp2_grand(x)
-        # computed = initial_x.e(BinaryOps.CMPLT, pinf_t).e(
-        #     TernaryOps.WHERE, computed, computed.const(float("inf"))
-        # )
+        computed = initial_x.e(BinaryOps.CMPLT, pinf_t).e(
+            TernaryOps.WHERE, computed, computed.const(float("inf"))
+        )
         computed = initial_x.e(BinaryOps.CMPLT, ninf_t).e(
             TernaryOps.WHERE, computed.const(0), computed
         )
