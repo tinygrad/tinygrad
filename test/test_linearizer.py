@@ -635,8 +635,6 @@ class TestLinearizer(unittest.TestCase):
       acc0 = // ...
     }
     *((device float4*)(data0+alu0)) = float4(acc0.x,acc0.y,acc0.z,acc0.w);
-    simplifies to:
-    *((device float4*)(data0+alu0)) = (float4)(acc0);
     """
     ld0 = LazyOp(BufferOps.LOAD, (), MemBuffer(idx=1, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 4096), strides=(0, 4096, 0, 1), offset=0, mask=None, contiguous=False),)))) # noqa: E501
     ld1 = LazyOp(BufferOps.LOAD, (), MemBuffer(idx=2, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 4096), strides=(0, 0, 4096, 1), offset=0, mask=None, contiguous=False),)))) # noqa: E501
@@ -648,7 +646,7 @@ class TestLinearizer(unittest.TestCase):
     store_vals = [u.vin[-1] for u in k.uops if u.uop is UOps.STORE]
     for val in store_vals:
       assert val.dtype == dtypes.float.vec(4) and val.uop is UOps.CAST
-      assert len(val.vin) == 1 and val.vin[0].uop is UOps.PHI
+      assert len(val.vin) == 4 and all(v.uop is UOps.PHI for v in val.vin)
 
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need backends that support float4")
 class TestFloat4(unittest.TestCase):
