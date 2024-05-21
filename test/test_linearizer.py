@@ -617,6 +617,17 @@ class TestLinearizer(unittest.TestCase):
     out = [u for u in k.uops if u.uop is UOps.STORE][0]
     assert out.vin[-1].uop is UOps.CAST and out.vin[-1].dtype == dtypes.float.vec(2)
 
+  # TODO this broke llama BEAM=2
+  @unittest.expectedFailure
+  def test_acc_nofold_unmatching_dtypes(self):
+    # acc is half4, store is float4.
+    ld0 = LazyOp(BufferOps.LOAD, (), MemBuffer(idx=1, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 4096), strides=(0, 4096, 0, 1), offset=0, mask=None, contiguous=False),))))
+    ld1 = LazyOp(BufferOps.LOAD, (), MemBuffer(idx=2, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 4096), strides=(0, 0, 4096, 1), offset=0, mask=None, contiguous=False),))))
+    cast = LazyOp(BinaryOps.MUL, (ld0, ld1))
+    sum = LazyOp(ReduceOps.SUM, (cast, ), (3, ))
+    st = LazyOp(BufferOps.STORE, (sum,), MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 1), strides=(0, 11008, 1, 0), offset=0, mask=None, contiguous=True),))))
+    helper_linearizer_ast((st, ), [])
+
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need backends that support float4")
 class TestFloat4(unittest.TestCase):
   @staticmethod
