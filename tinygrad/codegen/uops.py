@@ -85,6 +85,8 @@ def _match(uop:UOp, pattern:UPat, store:Dict[str, UOp]) -> bool:
   if dtype_v is not None:
     if isinstance(dtype_v, set):
       if uop.dtype not in dtype_v: return False
+    elif isinstance(dtype_v, str):
+      if uop.dtype != store[dtype_v].dtype: return False
     elif uop.dtype != dtype_v: return False
   if uop_v is not None:
     if isinstance(uop_v, set):
@@ -221,13 +223,13 @@ constant_folder = PatternMatcher([
                                 tuple(UPat(uop = UOps.GEP, vin = (UPat(name = "val"),), arg = i) for i in range(2))))),
    lambda buf,idx,val: UOp(UOps.STORE, None, (buf, idx, val))),
   # CAST-PHI-GEP -> PHI-CAST only if dtypes match
-  ({"__name__": "root", "uop": UOps.CAST, "vin":
-    tuple({"uop": UOps.PHI, "vin": ({"uop": UOps.GEP, "vin": ({"__name__": "val", "dtype": "root"},),
-                                     "arg": i}, {"__name__": f"v{i}"})} for i in range(4))},
+  (UPat(name = "root", uop = UOps.CAST, vin =
+    tuple(UPat(uop = UOps.PHI, vin = (UPat(uop = UOps.GEP, vin = (UPat(name = "val", dtype = "root"),),
+                                     arg = i), UPat(name = f"v{i}"))) for i in range(4))),
     lambda root, val, v0, v1, v2, v3: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1, v2, v3))))),
-  ({"__name__": "root", "uop": UOps.CAST, "vin":
-    tuple({"uop": UOps.PHI, "vin": ({"uop": UOps.GEP, "vin": ({"__name__": "val", "dtype": "root"},),
-                                     "arg": i}, {"__name__": f"v{i}"})} for i in range(2))},
+  (UPat(name = "root", uop = UOps.CAST, vin =
+    tuple(UPat(uop = UOps.PHI, vin = (UPat(uop = UOps.GEP, vin = (UPat(name = "val", dtype = "root"),),
+                                     arg = i), UPat(name = f"v{i}"))) for i in range(2))),
     lambda root, val, v0, v1: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1))))),
   # NEG/CMPLT -> CMPLT
   (UPat(uop = UOps.ALU, arg = BinaryOps.CMPLT, vin = (UPat(uop = UOps.ALU, arg = UnaryOps.NEG, vin = (UPat(name = "x"),)),
