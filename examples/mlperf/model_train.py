@@ -414,6 +414,7 @@ def train_bert():
   eval_step_freq     = config["EVAL_STEP_FREQ"]         = getenv("EVAL_STEP_FREQ", int((math.floor(0.05 * (230.23 * BS + 3000000) / 25000) * 25000) / BS)) # Round down
   save_ckpt_freq     = config["SAVE_CKPT_FREQ"]         = getenv("SAVE_CKPT_FREQ", 1000)
   keep_ckpt_amount   = config["KEEP_CKPT_AMOUNT"]       = getenv("KEEP_CKPT_AMOUNT", 5)
+  save_ckpt_dir      = config["SAVE_CKPT_DIR"]          = getenv("SAVE_CKPT_DIR", "./ckpts")
   init_ckpt          = config["INIT_CKPT_DIR"]          = getenv("INIT_CKPT_DIR", BASEDIR)
 
   loss_scaler        = config["loss_scaler"]            = getenv("LOSS_SCALER", 2**9 if dtypes.default_float == dtypes.float16 else 1.0)
@@ -437,7 +438,7 @@ def train_bert():
 
   assert 10000 <= (EVAL_BS * max_eval_steps), "Evaluation batchsize * max_eval_steps must greater or equal 10000 to iterate over full eval dataset"
 
-  # ** Log hparams **
+  # ** Log run config **
   for key, value in config.items(): print(f'HParam: "{key}": {value}')
 
   # ** Optimizer **
@@ -569,7 +570,7 @@ def train_bert():
       # save model if achieved target
       if not achieved and avg_lm_acc >= target:
         wc_end = time.perf_counter()
-        if not os.path.exists(ckpt_dir := getenv('CKPT_DIR', "./ckpts")): os.mkdir(ckpt_dir)
+        if not os.path.exists(ckpt_dir := save_ckpt_dir): os.mkdir(ckpt_dir)
         fn = f"{ckpt_dir}/bert-large.safe"
         safe_save(get_state_dict(model), fn)
         print(f" *** Model saved to {fn} ***")
@@ -584,7 +585,7 @@ def train_bert():
         break
 
     if getenv("CKPT") and i % save_ckpt_freq == 0:
-      if not os.path.exists(ckpt_dir := getenv('CKPT_DIR', "./ckpts")): os.mkdir(ckpt_dir)
+      if not os.path.exists(ckpt_dir := save_ckpt_dir): os.mkdir(ckpt_dir)
       if WANDB and wandb.run is not None:
         fn = f"{ckpt_dir}/{time.strftime('%Y%m%d_%H%M%S')}_{wandb.run.id}.safe"
       else:
