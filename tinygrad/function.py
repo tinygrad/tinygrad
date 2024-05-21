@@ -654,13 +654,13 @@ class Exp(Function):
         frac = x.e(BinaryOps.SUB, floor.cast(x.dtype))
         # print("FRAC: ")
         # print(__import__('tinygrad').Tensor(frac).numpy())
-        floor_raised = self._exp2(floor, 15)
+        floor_raised = self._exp2(floor, 30)
         # print("FLOOR RAISED: ")
         # print(__import__('tinygrad').Tensor(floor_raised).numpy())
         floor_raised = floor_raised.e(BinaryOps.ADD, floor_raised.const(0.5)).cast(dtypes.int64).cast(floor_raised.dtype)
         # print("FLOOR RAISED: ")
         # print(__import__('tinygrad').Tensor(floor_raised).numpy())
-        frac_raised = self._exp2(frac, 20)
+        frac_raised = self._exp2(frac, 30)
         res = floor_raised.e(BinaryOps.MUL, frac_raised)
         # print("RES: ")
         # print(__import__('tinygrad').Tensor(res).numpy())
@@ -694,17 +694,23 @@ class Exp(Function):
 
     def _exp2(self, x: LazyBuffer, N_TERMS) -> LazyBuffer:
 
-        ln2 = x.const(math.log(2))
+        coeffs = [0.34657359027997264, 0.23104906018664842, 0.17328679513998632, 0.13862943611198905, 0.11552453009332421, 0.09902102579427789, 0.08664339756999316, 0.07701635339554948, 0.06931471805599453, 0.06301338005090412, 0.057762265046662105, 
+        0.05331901388922656, 0.049510512897138946, 0.046209812037329684, 0.04332169878499658, 0.04077336356234972, 0.03850817669777474, 0.03648143055578659, 0.03465735902799726, 0.033007008598092635, 0.03150669002545206, 0.030136833937388925,
+        0.028881132523331052, 0.027725887222397813, 0.02665950694461328, 0.025672117798516494, 0.024755256448569473, 0.02390162691586018]
+
+        ln2 = x.const(0.6931471805599453)
         orig_x = x
         term = orig_x.e(BinaryOps.MUL, ln2)
         res = x.const(1).e(BinaryOps.ADD, term)
         for i in range(2, N_TERMS):
-            term = term.e(BinaryOps.MUL, orig_x).e(BinaryOps.DIV, x.const(i)).e(BinaryOps.MUL, ln2)
+            term = term.e(BinaryOps.MUL, orig_x).e(BinaryOps.MUL, term.const(coeffs[i-2]))
             res = res.e(BinaryOps.ADD, term)
 
         return res
 
     def forward(self, x: LazyBuffer) -> LazyBuffer:
+        # self.ret = x.e(BinaryOps.MUL, x.const(1 / math.log(2))).e(UnaryOps.EXP2)
+        # return self.ret
         self.beginning_dtype = x.dtype
         if self.device == "METAL":
             x = x.cast(dtypes.float32)
@@ -716,48 +722,16 @@ class Exp(Function):
 
         pinf_t = x.const(88.72687268726872)
         ninf_t = x.const(-103.97539753975397)
-        # self.ret = x.e(BinaryOps.MUL, x.const(1 / math.log(2))).e(UnaryOps.EXP2)
-        # return self.ret
-        # is_inf = x.e(BinaryOps.CMPEQ, x.const(float("inf")))
-        # is_minusinf = x.e(BinaryOps.CMPEQ, x.const(float("-inf")))
         x = x.e(BinaryOps.CMPLT, ninf_t).e(TernaryOps.WHERE, x.const(0), x)
-        # print("X: ")
-        # print(__import__('tinygrad').Tensor(x).numpy())
-
-        # print("value to multiply with: ")
-        # mul_val = x.const(1 / math.log(2))
-        # print(__import__('tinygrad').Tensor(mul_val).numpy())
         x = x.e(BinaryOps.MUL, x.const(1 / math.log(2)))
 
-        # print("converted x: ")
-        # print(__import__('tinygrad').Tensor(x).numpy())
-
-        # old = x.e(UnaryOps.EXP2)
-        # print("OLD: ")
-        # print(__import__('tinygrad').Tensor(old).numpy())
-        # return old
         computed = self._exp2_grand(x)
-        # computed = self._exp_grand(x)
-        computed = initial_x.e(BinaryOps.CMPLT, pinf_t).e(
-            TernaryOps.WHERE, computed, computed.const(float("inf"))
-        )
+        # computed = initial_x.e(BinaryOps.CMPLT, pinf_t).e(
+        #     TernaryOps.WHERE, computed, computed.const(float("inf"))
+        # )
         computed = initial_x.e(BinaryOps.CMPLT, ninf_t).e(
             TernaryOps.WHERE, computed.const(0), computed
         )
-        # computed = is_minusinf.e(TernaryOps.WHERE, x.const(1), computed)
-        # computed = is_inf.e(TernaryOps.WHERE, x.const(1), computed)
-
-        # computed = nan.e(TernaryOps.WHERE, x.const(math.nan).cast(computed.dtype), computed)
-        # if dtypes.is_int(self.beginning_dtype): # or self.beginning_dtype == dtypes.long:
-        #     # Replace with max int if infinity
-        #     max_int = x.const(2**64)
-        #     computed = computed.e(BinaryOps.CMPEQ, computed.const(float("inf"))).e(
-        #         TernaryOps.WHERE, max_int, computed
-        #     )
-        #     computed = computed.e(BinaryOps.CMPEQ, computed.const(float("-inf"))).e(
-        #         TernaryOps.WHERE, x.const(0), computed
-        #     )
-
 
         self.ret = computed.cast(self.beginning_dtype)
 
