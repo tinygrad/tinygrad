@@ -220,13 +220,15 @@ constant_folder = PatternMatcher([
   (UPat(uop = UOps.STORE, vin = (UPat(name = "buf"), UPat(name = "idx"), UPat(uop = UOps.CAST, vin =
                                 tuple(UPat(uop = UOps.GEP, vin = (UPat(name = "val"),), arg = i) for i in range(2))))),
    lambda buf,idx,val: UOp(UOps.STORE, None, (buf, idx, val))),
-  # CAST-PHI-GEP -> PHI-CAST
-  (UPat(name = "root", uop = UOps.CAST, vin =
-    tuple(UPat(uop = UOps.PHI, vin = (UPat(uop = UOps.GEP, vin = (UPat(name = "val"),), arg = i), UPat(name = f"v{i}"))) \
-    for i in range(4))), lambda root, val, v0, v1, v2, v3: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1, v2, v3))))),
-  (UPat(name = "root", uop = UOps.CAST, vin =
-    tuple(UPat(uop = UOps.PHI, vin = (UPat(uop = UOps.GEP, vin = (UPat(name = "val"),), arg = i), UPat(name =
-      f"v{i}"))) for i in range(2))), lambda root, val, v0, v1: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1))))),
+  # CAST-PHI-GEP -> PHI-CAST only if dtypes match
+  ({"__name__": "root", "uop": UOps.CAST, "vin":
+    tuple({"uop": UOps.PHI, "vin": ({"uop": UOps.GEP, "vin": ({"__name__": "val", "dtype": "root"},),
+                                     "arg": i}, {"__name__": f"v{i}"})} for i in range(4))},
+    lambda root, val, v0, v1, v2, v3: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1, v2, v3))))),
+  ({"__name__": "root", "uop": UOps.CAST, "vin":
+    tuple({"uop": UOps.PHI, "vin": ({"uop": UOps.GEP, "vin": ({"__name__": "val", "dtype": "root"},),
+                                     "arg": i}, {"__name__": f"v{i}"})} for i in range(2))},
+    lambda root, val, v0, v1: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1))))),
   # NEG/CMPLT -> CMPLT
   (UPat(uop = UOps.ALU, arg = BinaryOps.CMPLT, vin = (UPat(uop = UOps.ALU, arg = UnaryOps.NEG, vin = (UPat(name = "x"),)),
                                                      UPat(name = "c", uop = UOps.CONST, dtype = dtypes.int))),
