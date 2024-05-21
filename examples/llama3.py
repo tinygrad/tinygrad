@@ -5,9 +5,8 @@ import tiktoken
 from tiktoken.load import load_tiktoken_bpe
 from tqdm import tqdm
 from extra.models.llama import Transformer, convert_from_huggingface, fix_bf16
-from tinygrad.helpers import GlobalCounters
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict
-from tinygrad import Tensor, dtypes, nn, Context, Device
+from tinygrad import Tensor, dtypes, nn, Context, Device, GlobalCounters
 
 class Tokenizer:
   pat_str = r"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"
@@ -175,7 +174,7 @@ def build_transformer(model_path: Path, model_size="8B", quantize=None, device=N
 
 # default settings
 TEMPERATURE = 0.85
-TOP_K = 35
+TOP_K = 25
 TOP_P = 0.9
 ALPHA_F = 1.1
 ALPHA_P = 0.0
@@ -196,7 +195,11 @@ if __name__ == "__main__":
   parser.add_argument("--shard", type=int, default=1)
   parser.add_argument("--quantize", choices=["int8", "nf4"])
   parser.add_argument("--api", action="store_true")
+  parser.add_argument('--seed', type=int)
   args = parser.parse_args()
+
+  if args.seed is not None: Tensor.manual_seed(args.seed)
+  print(f"seed = {Tensor._seed}")
 
   tokenizer = Tokenizer(str((args.model if args.model.is_dir() else args.model.parent) / "tokenizer.model"))
   def encode_role(role: str):

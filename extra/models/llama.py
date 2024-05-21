@@ -109,40 +109,45 @@ def sample(logits: Tensor, temp: float, k: int, p: float, af: float, ap: float):
   assert 0 <= p <= 1, "p must be between 0 and 1"
   assert 0 <= k <= logits.numel(), "k must be between 0 and numel"
 
-  if not hasattr(sample, "alpha_counter"):
-    setattr(sample, "alpha_counter", Tensor.zeros_like(logits, dtype=dtypes.int32).contiguous())
-
   # if temperature is very low just use argmax
   if temp < 1e-6: return logits.argmax()
 
   # alpha sampling
-  logits = logits - (sample.alpha_counter * af + (sample.alpha_counter > 0) * ap)
+  if af or ap:
+    if not hasattr(sample, "alpha_counter"):
+      setattr(sample, "alpha_counter", Tensor.zeros_like(logits, dtype=dtypes.int32).contiguous())
+    logits = logits - (sample.alpha_counter * af + (sample.alpha_counter > 0) * ap)
 
   # softmax
   t = (logits / temp).softmax()
 
-  # top k
-  output, output_indices = Tensor.zeros(k, device=logits.device).contiguous(), Tensor.zeros(k, device=logits.device, dtype=dtypes.int32).contiguous()
   counter, counter2 = Tensor.arange(t.numel(), device=logits.device).contiguous(), Tensor.arange(t.numel() - 1, -1, -1, device=logits.device).contiguous()
-  for i in range(k):
-    t_argmax = (t.numel() - ((t == (t_max := t.max())) * counter2).max() - 1).cast(dtypes.default_int)
-    output = output + t_max.unsqueeze(0).pad(((i, k - i - 1),))
-    output_indices = output_indices + t_argmax.unsqueeze(0).pad(((i, k - i - 1),))
-    t = (counter == t_argmax).where(0, t)
+  # top k
+  if k:
+    output, output_indices = Tensor.zeros(k, device=logits.device).contiguous(), Tensor.zeros(k, device=logits.device, dtype=dtypes.int32).contiguous()
+    for i in range(k):
+      t_argmax = (t.numel() - ((t == (t_max := t.max())) * counter2).max() - 1).cast(dtypes.default_int)
+      output = output + t_max.unsqueeze(0).pad(((i, k - i - 1),))
+      output_indices = output_indices + t_argmax.unsqueeze(0).pad(((i, k - i - 1),))
+      t = (counter == t_argmax).where(0, t)
 
-  # approximate top p
-  # because we are already limited to top k elements we can do top p "without sorting"
-  output_cumsum = output[::-1]._cumsum()[::-1] + t.sum()
-  output = (output_cumsum >= (1 - p)) * output
-  output_indices = (output_cumsum >= (1 - p)) * output_indices
+    # approximate top p
+    # because we are already limited to top k elements we can do top p "without sorting"
+    output_cumsum = output[::-1]._cumsum()[::-1] + t.sum()
+    output = (output_cumsum >= (1 - p)) * output
+    output_indices = (output_cumsum >= (1 - p)) * output_indices
 
-  # sample
-  output_idx = output.multinomial()
+    # sample
+    output_idx = output.multinomial()
+    output_token = output_indices[output_idx]
+  else:
+    output_token = t.multinomial()
 
   # increase alpha counter
-  sample.alpha_counter = (counter == output_idx).where(sample.alpha_counter + 1, sample.alpha_counter)
+  if af or ap:
+    sample.alpha_counter = (counter == output_token).where(sample.alpha_counter + 1, sample.alpha_counter)
 
-  return output_indices[output_idx]
+  return output_token
 
 class Transformer:
   def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_layers:int, norm_eps:float, vocab_size, linear=nn.Linear, n_kv_heads=None, rope_theta=10000, max_context=1024, jit=True, feed_forward=FeedForward):
@@ -154,7 +159,7 @@ class Transformer:
     self.freqs_cis = precompute_freqs_cis(dim // n_heads, self.max_context * 2, rope_theta)
     self.forward_jit = TinyJit(self.forward) if jit else None
 
-  def forward(self, tokens:Tensor, start_pos:Union[Variable,int], temperature:float=0.0, top_k:int=35, top_p:float=0.8, alpha_f:float=1.1, alpha_p:float=1.1):
+  def forward(self, tokens:Tensor, start_pos:Union[Variable,int], temperature:float, top_k:int, top_p:float, alpha_f:float, alpha_p:float):
     _bsz, seqlen = tokens.shape
     freqs_cis = self.freqs_cis.shrink((None, (start_pos, start_pos+seqlen),None,None,None))
 
@@ -165,7 +170,7 @@ class Transformer:
 
     return sample(logits.flatten(), temperature, top_k, top_p, alpha_f, alpha_p).realize()
 
-  def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0, top_k:int=35, top_p:float=0.8, alpha_f:float=1.1, alpha_p:float=1.1):
+  def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0, top_k:int=0, top_p:float=0.8, alpha_f:float=0.0, alpha_p:float=0.0):
     # TODO: better way to handle the first call v.s. the rest?
     if tokens.shape[0:2] == (1,1) and self.forward_jit is not None:
       return self.forward_jit(tokens, Variable("start_pos", 0, self.max_context).bind(start_pos), temperature, top_k, top_p, alpha_f, alpha_p)
