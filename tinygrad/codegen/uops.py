@@ -214,16 +214,18 @@ constant_folder = PatternMatcher([
                                 tuple({"uop": UOps.GEP, "vin": ({"__name__": "val"},), "arg": i} for i in range(2))})},
    lambda buf,idx,val: UOp(UOps.STORE, None, (buf, idx, val))),
   # CAST-PHI-GEP -> PHI-CAST
-  ({"__name__": "root", "uop": UOps.CAST, "vin":
-    tuple({"uop": UOps.PHI, "vin": ({"uop": UOps.GEP, "vin": ({"__name__": "val"},), "arg": i}, {"__name__": f"v{i}"})} for i in range(4))},
-    lambda root, val, v0, v1, v2, v3: UOp(UOps.PHI, val.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1, v2, v3)))) if root.dtype == val.dtype
-    else UOp(UOps.CAST, root.dtype, (UOp(UOps.PHI, val.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1, v2, v3)))), ))
-   ),
-  ({"__name__": "root", "uop": UOps.CAST, "vin":
-    tuple({"uop": UOps.PHI, "vin": ({"uop": UOps.GEP, "vin": ({"__name__": "val"},), "arg": i}, {"__name__": f"v{i}"})} for i in range(2))},
-    lambda root, val, v0, v1: UOp(UOps.PHI, val.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1)))) if root.dtype == val.dtype
-    else UOp(UOps.CAST, root.dtype, (UOp(UOps.PHI, val.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1)))), ))
-   ),
+  *(({"__name__": "root", "uop": UOps.CAST, "dtype": dtype, "vin":
+    tuple({"uop": UOps.PHI, "vin": ({"uop": UOps.GEP, "vin": ({"__name__": "val", "dtype": dtype},), "arg": i}, {"__name__": f"v{i}"})}
+          for i in range(4))},
+    lambda root, val, v0, v1, v2, v3: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1, v2, v3)))))
+    for dtype in [dtypes.float.vec(4), dtypes.half.vec(4), dtypes.int.vec(4)]
+  ),
+  *(({"__name__": "root", "uop": UOps.CAST, "dtype": dtype, "vin":
+    tuple({"uop": UOps.PHI, "vin": ({"uop": UOps.GEP, "vin": ({"__name__": "val", "dtype": dtype},), "arg": i}, {"__name__": f"v{i}"})}
+          for i in range(2))},
+    lambda root, val, v0, v1: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1)))))
+    for dtype in [dtypes.float.vec(2), dtypes.half.vec(2), dtypes.int.vec(2)]
+  ),
   # NEG/CMPLT -> CMPLT
   ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": ({"uop": UOps.ALU, "arg": UnaryOps.NEG, "vin": ({"__name__": "x"},)},
                                                      {"__name__": "c", "uop": UOps.CONST, "dtype": dtypes.int})},
