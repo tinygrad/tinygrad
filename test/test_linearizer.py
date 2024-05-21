@@ -603,7 +603,7 @@ class TestLinearizer(unittest.TestCase):
         Opt(op=OptOps.UPCAST, axis=1, amt=4), Opt(op=OptOps.LOCAL, axis=0, amt=16),
         Opt(op=OptOps.LOCAL, axis=1, amt=2), Opt(op=OptOps.UPCAST, axis=3, amt=2)
     ]
-    k = helper_linearizer_ast(ast, [], opts=[opt])[-1]
+    k = helper_linearizer_ast(ast, [Tensor.empty(240*40).realize()], opts=[opt])[-1]
     out = [u for u in k.uops if u.uop is UOps.STORE][0]
     assert out.vin[-1].uop is UOps.CAST and out.vin[-1].dtype == dtypes.float.vec(4)
 
@@ -614,7 +614,7 @@ class TestLinearizer(unittest.TestCase):
     opt = [Opt(op=OptOps.LOCAL, axis=1, amt=4), Opt(op=OptOps.UPCAST, axis=2, amt=2), Opt(op=OptOps.LOCAL, axis=1, amt=8),
             Opt(op=OptOps.UPCAST, axis=1, amt=0), Opt(op=OptOps.UPCAST, axis=1, amt=4), Opt(op=OptOps.LOCAL, axis=0, amt=8),
             Opt(op=OptOps.UPCAST, axis=1, amt=0), Opt(op=OptOps.UPCAST, axis=0, amt=2)]
-    k = helper_linearizer_ast(ast, [], opts=[opt])[-1]
+    k = helper_linearizer_ast(ast, [Tensor.empty(8*32).realize()], opts=[opt])[-1]
     out = [u for u in k.uops if u.uop is UOps.STORE][0]
     assert out.vin[-1].uop is UOps.CAST and out.vin[-1].dtype == dtypes.float.vec(2)
 
@@ -623,13 +623,12 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4 and is_dtype_supported(dtypes.half), "need backends that support float4")
   def test_acc_nofold_unmatching_dtypes(self):
     # acc is half4, store is float4.
-    t = Tensor.empty(1, 3, 11008, 4096).realize()
     ld0 = LazyOp(BufferOps.LOAD, (), MemBuffer(idx=1, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 4096), strides=(0, 4096, 0, 1), offset=0, mask=None, contiguous=False),)))) # noqa: E501
     ld1 = LazyOp(BufferOps.LOAD, (), MemBuffer(idx=2, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 4096), strides=(0, 0, 4096, 1), offset=0, mask=None, contiguous=False),)))) # noqa: E501
     cast = LazyOp(BinaryOps.MUL, (ld0, ld1))
     sum = LazyOp(ReduceOps.SUM, (cast, ), (3, ))
     st = LazyOp(BufferOps.STORE, (sum,), MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 1), strides=(0, 11008, 1, 0), offset=0, mask=None, contiguous=True),)))) # noqa: E501
-    helper_linearizer_ast((st, ), [t])
+    helper_linearizer_ast((st, ), [Tensor.empty(1, 3, 11008, 4096).realize()])
 
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need backends that support float4")
 class TestFloat4(unittest.TestCase):
@@ -857,7 +856,7 @@ class TestHandCodedOpts(unittest.TestCase):
 
 def helper_linearizer_ast(ast:Tuple[LazyOp, ...], inputs:List[Tensor], *args, **kwargs):
   inbufs = [x.lazydata.buffer for x in inputs]
-  outbufs = [Buffer(inbufs[-1].device if len(inbufs) else Device.DEFAULT, out.arg.st.size, out.arg.dtype).allocate() for out in ast]
+  outbufs = [Buffer(inbufs[-1].device, out.arg.st.size, out.arg.dtype).allocate() for out in ast]
   return _helper_linearizer_opt_ast(ast, outbufs+inbufs, *args, **kwargs)
 
 def helper_linearizer_opt(r:Tensor, *args, **kwargs):
