@@ -649,12 +649,12 @@ class Exp(Function):
         # fro = floor_raised
         # print("int(150 / RED_T): ")
         # print(int(150 / RED_T))
-        # for i in range(int(150 / RED_T) // 2, 0, -1):
-        #     # print("i: ", i)
-        #     floor_raised = divres.e(BinaryOps.CMPLT, divres.const(i)) \
-        #     .e(TernaryOps.WHERE, floor_raised, floor_raised.e(BinaryOps.MUL, floor_raised.const(ET)))
-        #     # print("FLOOR RAISED: ")
-        #     # print(__import__('tinygrad').Tensor(floor_raised).numpy())
+        for i in range(int(150 / RED_T) // 2, 0, -1):
+            # print("i: ", i)
+            floor_raised = divres.e(BinaryOps.CMPLT, divres.const(i)) \
+            .e(TernaryOps.WHERE, floor_raised, floor_raised.e(BinaryOps.MUL, floor_raised.const(ET)))
+            # print("FLOOR RAISED: ")
+            # print(__import__('tinygrad').Tensor(floor_raised).numpy())
         # print("FLOOR RAISED: ")
         # print(__import__('tinygrad').Tensor(floor_raised).numpy())
         frac_raised = self._exp2(frac, 30)
@@ -697,7 +697,7 @@ class Exp(Function):
         else:
             x = x.cast(dtypes.float64)
 
-        _, _, nan = _get_info(x)
+        # _, _, nan = _get_info(x)
         initial_x = x
 
         # print("X INITIAL: ")
@@ -707,11 +707,14 @@ class Exp(Function):
         x = x.e(BinaryOps.CMPLT, ninf_t).e(TernaryOps.WHERE, x.const(0), x)
         x = x.e(BinaryOps.MUL, x.const(1 / math.log(2)))
 
+        isnotnan = x.e(BinaryOps.CMPEQ, x)
+        # print("ISNOTNAN: ")
+        # print(__import__('tinygrad').Tensor(isnotnan).numpy())
         computed = self._exp2_grand(x)
-        # computed = nan.e(TernaryOps.WHERE, x.const(float("nan")), computed)
         computed = initial_x.e(BinaryOps.CMPLT, pinf_t).e(
             TernaryOps.WHERE, computed, computed.const(float("inf"))
         )
+        computed = isnotnan.e(TernaryOps.WHERE,computed, x.const(float("nan")))
         computed = initial_x.e(BinaryOps.CMPLT, ninf_t).e(
             TernaryOps.WHERE, computed.const(0), computed
         )

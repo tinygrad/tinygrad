@@ -5,6 +5,7 @@ from contextlib import ContextDecorator
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Dict, DefaultDict, cast, get_args, Set
 from collections import defaultdict
 import numpy as np
+import sys
 
 from tinygrad.dtype import DType, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype
 from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, fully_flatten, argsort, getenv
@@ -1228,6 +1229,14 @@ class Tensor:
 
   def pow(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     x = self._to_const_val(x)
+    try:
+        print("value being raised: ")
+        np.set_printoptions(threshold=sys.maxsize)
+        print(self.numpy())
+        print("exponent: ", x.numpy())
+        np.set_printoptions(threshold=1000)
+    except:
+        pass
     if not isinstance(x, Tensor) and not reverse:
       # simple pow identities
       if x < 0: return self.reciprocal().pow(-x)
