@@ -622,8 +622,12 @@ class Exp(Function):
         RED_T = 10
 
         floorint = x.cast(dtypes.uint64)
-        divres = floorint.e(BinaryOps.DIV, floorint.const(RED_T))
-        divmod = floorint.e(BinaryOps.MOD, floorint.const(RED_T))
+        try:
+            divres = floorint.e(BinaryOps.DIV, floorint.const(RED_T))
+            divmod = floorint.e(BinaryOps.MOD, floorint.const(RED_T))
+        except Exception as _:
+            divres = floorint.const(0)
+            divmod = floorint
         floor = divmod.cast(x.dtype)
         # print("FLOOR: ")
         # print(__import__('tinygrad').Tensor(floor).numpy())
