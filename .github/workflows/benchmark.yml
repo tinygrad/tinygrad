@@ -148,8 +148,8 @@ jobs:
       run: CUDA=1 python3 examples/llama.py --gen 1 --size 7B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_six_gpu.txt
     # - name: Run LLaMA-2 70B
     #   run: CUDA=1 python3 examples/llama.py --gen 2 --size 70B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_2_70B.txt
-    - name: Run Mixtral 8x7B
-      run: time CUDA=1 python3 examples/mixtral.py --temperature 0 --count 10 --timing | tee mixtral.txt
+    # - name: Run Mixtral 8x7B
+    #   run: time CUDA=1 python3 examples/mixtral.py --temperature 0 --count 10 --timing | tee mixtral.txt
     - name: Run GPT2
       run: |
         CUDA=1 JIT=0 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_unjitted.txt
@@ -175,7 +175,7 @@ jobs:
           llama_four_gpu.txt
           llama_six_gpu.txt
           # llama_2_70B.txt
-          mixtral.txt
+          # mixtral.txt
           gpt2_unjitted.txt
           gpt2_jitted.txt
           gpt2_half.txt
