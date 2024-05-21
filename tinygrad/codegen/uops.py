@@ -69,54 +69,43 @@ def uop_alu_resolve(u:UOp) -> sint:
 @dataclass(frozen=True)
 class UPat:
   uop: Optional[Union[UOps, Set[UOps]]] = None
-  arg: Any = None
+  arg: Optional[Any] = None
   name: Optional[str] = None
-  __allow_len__: Optional[List[int]] = None #field(default_factory=list)
-  vin: Union[Tuple[UPat, ...], List[UPat], UPat] = ()
+  __allow_len__: Set[int] = field(default_factory=set)
+  vin: Optional[Union[Tuple[UPat, ...], List[UPat], UPat]] = None
   dtype: Optional[Union[DType, Set[DType]]] = None
 
 def _match(uop:UOp, pattern:UPat, store:Dict[str, UOp]) -> bool:
-  uop_v, arg_v, name_v, allow_v, vin_v, dtype_v = pattern.uop, pattern.arg, pattern.name, pattern.__allow_len__,\
-    pattern.vin, pattern.dtype
-  print('***NAME')
-  if name_v in store and store[name_v] != uop: return False
-  store[name_v] = uop
+  uop_v, arg_v, name_v, allow_v, vin_v, dtype_v = pattern.uop, pattern.arg, pattern.name, pattern.__allow_len__, pattern.vin, pattern.dtype
 
-  print('***ARG', uop.arg, '||',arg_v)
-  if uop.arg != arg_v: return False
-
-  print('***DTYPE')
-  if isinstance(dtype_v, set):
-    if uop.dtype not in dtype_v: return False
-  elif uop.dtype != dtype_v: return False
-  
-  print('***UOP')
-  if isinstance(uop_v, set):
-    if uop.uop not in uop_v: return False
-  elif uop.uop != uop_v: return False
-
-  # only one if it's a tuple
-  # try all permutations if it's a list
-  # repeat if it's a dict
-  print('PRE PERMUTATIONSSSS')
-  for vp in itertools.permutations(vin_v) if isinstance(vin_v, list) else ([vin_v] if isinstance(vin_v, tuple) else [(vin_v,)*len(uop.vin)]):
-    if len(uop.vin) != len(vp) and (len(uop.vin) not in allow_v): return False
-    new_store = store.copy()
-    if all(_match(uu, vv, new_store) for uu, vv in zip(uop.vin, vp)):
-      for k,v in new_store.items(): store[k] = v
-      return True
-  return False
+  if name_v is not None:
+    if name_v in store and store[name_v] != uop: return False
+    store[name_v] = uop
+  if arg_v is not None and uop.arg != arg_v: return False
+  if dtype_v is not None:
+    if isinstance(dtype_v, set):
+      if uop.dtype not in dtype_v: return False
+    elif uop.dtype != dtype_v: return False
+  if uop_v is not None:
+    if isinstance(uop_v, set):
+      if uop.uop not in uop_v: return False
+    elif uop.uop != uop_v: return False
+  if vin_v is not None:
+    # only one if it's a tuple
+    # try all permutations if it's a list
+    # repeat if it's a dict
+    for vp in itertools.permutations(vin_v) if isinstance(vin_v, list) else ([vin_v] if isinstance(vin_v, tuple) else [(vin_v,)*len(uop.vin)]):
+      if len(uop.vin) != len(vp) and (len(uop.vin) not in allow_v): return False
+      new_store = store.copy()
+      if all(_match(uu, vv, new_store) for uu, vv in zip(uop.vin, vp)):
+        for k,v in new_store.items(): store[k] = v
+        return True
+    return False
+  return True
 
 class PatternMatcher:
   def __init__(self, patterns:List[Tuple[UPat, Callable]]):
-    # (UPat(**p[0]), p[1]) for p in patterns
-    self.patterns = []
     self.patterns = patterns
-    # for p in patterns:
-    #   print(p[0]['vin'])
-    #   p[0]['vin'] = [UPat(**p_sub) for p_sub in p[0]['vin']]
-    #   self.patterns.append((UPat(**p[0]), p[1]))
-    # print(self.patterns)
     self.pdict: DefaultDict[Tuple[UOps, Any], List[Tuple[UPat, Callable]]] = defaultdict(list)
     # uop is required, arg is optional
     for p,fxn in self.patterns:
@@ -129,7 +118,6 @@ class PatternMatcher:
   def rewrite(self, uop:UOp) -> Optional[UOp]:
     for p,fxn in itertools.chain(self.pdict[(uop.uop, uop.arg)], self.pdict[(uop.uop, None)]):
       store: Dict[str, UOp] = {}
-      print('rewrite', p)
       if _match(uop, p, store): return fxn(**store)
     return None
 

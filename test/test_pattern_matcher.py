@@ -14,9 +14,6 @@ class TestPatternMatcher(unittest.TestCase):
     matcher = PatternMatcher([(UPat(**{"name": "x", "uop": UOps.CONST, "dtype": dtypes.float}), lambda x: x)])
     c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
     c2 = UOp(UOps.CONST, dtypes.int, arg=1)
-    print()
-    print(c1)
-    print(matcher.rewrite(c1))
     self.assertEqual(matcher.rewrite(c1), c1)
     self.assertEqual(matcher.rewrite(c2), None)
 
