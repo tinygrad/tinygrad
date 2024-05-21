@@ -618,8 +618,6 @@ class TestLinearizer(unittest.TestCase):
     out = [u for u in k.uops if u.uop is UOps.STORE][0]
     assert out.vin[-1].uop is UOps.CAST and out.vin[-1].dtype == dtypes.float.vec(2)
 
-  # TODO this broke llama BEAM=2
-  @unittest.expectedFailure
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4 and is_dtype_supported(dtypes.half), "need backends that support float4")
   def test_acc_nofold_unmatching_dtypes(self):
     # acc is half4, store is float4.
