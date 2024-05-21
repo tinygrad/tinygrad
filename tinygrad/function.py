@@ -664,7 +664,7 @@ class Exp(Function):
         # res = floor_raised.e(BinaryOps.MUL, frac_raised)
         # print("RES: ")
         # print(__import__('tinygrad').Tensor(res).numpy())
-        res = self._exp2(x, 30)
+        res = self._exp2(x, 15)
 
         ro = res
         # res = c10.e(TernaryOps.WHERE, res, ro.e(BinaryOps.MUL, e10))
