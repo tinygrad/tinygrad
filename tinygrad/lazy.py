@@ -1,6 +1,6 @@
 from __future__ import annotations
 import math
-from typing import Union, Optional, Any, Tuple, List
+from typing import Any, Tuple, List
 from tinygrad.dtype import dtypes, DType, ConstType
 from tinygrad.helpers import prod, getenv, all_int, all_same, DEBUG
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op, exec_alu, python_alu
@@ -10,8 +10,8 @@ from tinygrad.device import Buffer
 from weakref import ref, ReferenceType, WeakValueDictionary
 
 lazycache: WeakValueDictionary[Any, LazyBuffer] = WeakValueDictionary()
-def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
-                      base:Optional[LazyBuffer]=None, enable_cache=bool(getenv("LAZYCACHE", 1))):
+def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Op | None=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
+                      base:LazyBuffer | None=None, enable_cache=bool(getenv("LAZYCACHE", 1))):
   if st.size == 0: op, arg, srcs, base = LoadOps.CONST, 0, (), None
   if op is LoadOps.CONST: arg, enable_cache = dtypes.as_const(arg, dtype) if not isinstance(arg, Variable) else arg, True
 
@@ -25,10 +25,10 @@ def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Op]=
 view_supported_devices = {"LLVM", "CLANG", "CUDA", "DISK"}
 class LazyBuffer:
   def __init__(self, device:str, st:ShapeTracker, dtype:DType,
-               op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
-               base:Optional[LazyBuffer]=None):
+               op:Op | None=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
+               base:LazyBuffer | None=None):
     self.device, self.st, self.dtype, self.shape, self.size = device, st, dtype, st.shape, st.size
-    self._base: Optional[LazyBuffer] = None
+    self._base: LazyBuffer | None = None
     if base is None:
       # properties on base
       self.op, self.arg, self.srcs = op, arg, srcs  # this is a LazyOp, except the src is LazyBuffers and not LazyOps
@@ -42,7 +42,7 @@ class LazyBuffer:
       else:
         self.buffer = srcs[1].base.buffer if self.op is LoadOps.ASSIGN else Buffer(device, self.size, dtype)
       self.buffer.ref(1)
-      self.contiguous_child: Optional[Tuple[ReferenceType[LazyBuffer], ShapeTracker]] = None
+      self.contiguous_child: Tuple[ReferenceType[LazyBuffer], ShapeTracker] | None = None
       self.forced_realize = False
     else:
       # properties on view
@@ -56,7 +56,7 @@ class LazyBuffer:
     return f"<LB {self.device} {self.shape} {str(self.dtype)[7:]} {self.st if self.base != self else (self.op, self.realized)}>"
 
   @property
-  def realized(self) -> Optional[Buffer]:
+  def realized(self) -> Buffer | None:
     # NOTE: we check for a lack of srcs instead of an allocated buffer to make unrealized assigns return None here
     return self.buffer if self._base is None and not hasattr(self, 'srcs') else None
 
@@ -73,7 +73,7 @@ class LazyBuffer:
     assert isinstance(src, tuple)
     return create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype, op, arg, src, enable_cache=enable_cache)
 
-  def const(self, val:ConstType, shape:Optional[Tuple[sint,...]]=None) -> LazyBuffer:
+  def const(self, val:ConstType, shape:Tuple[sint, ...] | None=None) -> LazyBuffer:
     shape = self.shape if shape is None else shape
     return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, self.device, arg=val).reshape((1,)*len(shape)).expand(shape)
 
@@ -133,7 +133,7 @@ class LazyBuffer:
     # copy the base and apply the shapetracker on the new device
     return self.base._copy(device)._view(self.st)
 
-  def e(self, op:Union[LoadOps, UnaryOps, BinaryOps, TernaryOps], *in_srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
+  def e(self, op:LoadOps | UnaryOps | BinaryOps | TernaryOps, *in_srcs:LazyBuffer, arg:Any | None=None) -> LazyBuffer:
     srcs: List[LazyBuffer] = []
     for s in (self,)+in_srcs:
       if s == s.base and s.base.contiguous_child and (root:=s.base.contiguous_child[0]()) is not None:

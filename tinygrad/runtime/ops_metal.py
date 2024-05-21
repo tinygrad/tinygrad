@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, subprocess, pathlib, ctypes, tempfile, functools
 import Metal, libdispatch
-from typing import List, Set, Any, Tuple, Optional
+from typing import List, Set, Any, Tuple
 from tinygrad.helpers import prod, getenv, DEBUG, unwrap2
 from tinygrad.device import Compiled, Compiler, LRUAllocator
 from tinygrad.renderer.cstyle import MetalRenderer
@@ -12,7 +12,7 @@ def wait_check(cbuf: Any):
     raise RuntimeError(error)
 
 class MetalCompiler(Compiler):
-  def __init__(self, device:Optional[MetalDevice]):
+  def __init__(self, device:MetalDevice | None):
     self.device = device
     super().__init__("compile_metal")
   def compile(self, src:str) -> bytes:
@@ -77,7 +77,7 @@ class MetalAllocator(LRUAllocator):
     encoder.endEncoding()
     command_buffer.commit()
     self.device.mtl_buffers_in_flight.append(command_buffer)
-  def from_buffer(self, src:memoryview) -> Optional[Any]:
+  def from_buffer(self, src:memoryview) -> Any | None:
     ret = self.device.device.newBufferWithBytesNoCopy_length_options_deallocator_(src, len(src), Metal.MTLResourceStorageModeShared, None)
     if ret: self.device.mv_in_metal.append(src)
     return ret

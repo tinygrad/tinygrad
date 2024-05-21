@@ -1,7 +1,7 @@
 from __future__ import annotations
 import subprocess, hashlib, tempfile, ctypes, ctypes.util, functools, re
 from pathlib import Path
-from typing import Tuple, Optional, List
+from typing import Tuple, List
 import tinygrad.runtime.autogen.cuda as cuda
 from tinygrad.helpers import DEBUG, getenv, from_mv, to_char_p_p, init_c_var, init_c_struct_t, colored, cpu_time_execution
 from tinygrad.device import Compiled, Compiler, CompileError, BufferOptions, LRUAllocator, MallocAllocator
@@ -35,7 +35,7 @@ def encode_args(args, vals) -> Tuple[ctypes.Structure, ctypes.Array]:
                                 ctypes.cast(ctypes.pointer(ctypes.c_size_t(ctypes.sizeof(c_args))), ctypes.c_void_p), ctypes.c_void_p(0))
   return c_args, vargs
 
-def cu_time_execution(cb, enable=False) -> Optional[float]:
+def cu_time_execution(cb, enable=False) -> float | None:
   if CUDACPU: return cpu_time_execution(cb, enable=enable)
   if not enable: return cb()
   evs = [init_c_var(cuda.CUevent(), lambda x: cuda.cuEventCreate(ctypes.byref(x), 0)) for _ in range(2)]
@@ -166,7 +166,7 @@ class CUDADevice(Compiled):
         CUDADevice.peer_access = True
 
     self.arch = f"sm_{major.value}{minor.value}" if not CUDACPU else "sm_35"
-    self.pending_copyin: List[Tuple[int, int, Optional[BufferOptions]]] = []
+    self.pending_copyin: List[Tuple[int, int, BufferOptions | None]] = []
     CUDADevice.devices.append(self)
 
     from tinygrad.runtime.graph.cuda import CUDAGraph

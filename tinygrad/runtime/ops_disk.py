@@ -1,6 +1,5 @@
 from __future__ import annotations
 import os, mmap, _posixshmem, io
-from typing import Optional
 from tinygrad.helpers import OSX
 from tinygrad.device import Compiled, Allocator
 
@@ -33,7 +32,7 @@ class DiskAllocator(Allocator):
 
 class DiskDevice(Compiled):
   def __init__(self, device:str):
-    self.size: Optional[int] = None
+    self.size: int | None = None
     self.count = 0
     super().__init__(device, DiskAllocator(self), None, None, None)
   def _might_open(self, size):

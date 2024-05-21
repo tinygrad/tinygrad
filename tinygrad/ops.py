@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Union, Tuple, Any, List, Dict, Callable
+from typing import Tuple, Any, List, Dict, Callable
 import functools, hashlib, math, operator, ctypes
 from enum import Enum, auto
 from dataclasses import dataclass
@@ -27,7 +27,7 @@ class ReduceOps(Enum):
 class BufferOps(Enum): LOAD = auto(); CONST = auto(); STORE = auto() # noqa: E702
 class LoadOps(Enum): EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); CUSTOM = auto(); ASSIGN = auto(); VIEW = auto() # noqa: E702
 
-Op = Union[UnaryOps, BinaryOps, ReduceOps, LoadOps, TernaryOps, BufferOps]
+Op = UnaryOps | BinaryOps | ReduceOps | LoadOps | TernaryOps | BufferOps
 
 # do not preserve f(0) = 0
 UNSAFE_PAD_OPS = {BinaryOps.DIV, BinaryOps.CMPLT, BinaryOps.CMPEQ, UnaryOps.LOG2, UnaryOps.EXP2}

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import TypeVar, Generic, Callable, List, Tuple, Union, Dict, cast, Optional, Any
+from typing import TypeVar, Generic, Callable, List, Tuple, Dict, cast, Optional, Any
 import functools, itertools, collections
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
@@ -19,7 +19,7 @@ def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]
   max_batch_size = getenv("JIT_BATCH_SIZE", 32)
   graphed_jit_cache: List[ExecItem] = []
   current_batch: List[ExecItem] = []
-  current_device: Optional[Compiled] = None
+  current_device: Compiled | None = None
 
   def flush_batch():
     nonlocal current_batch, current_device, max_batch_size
@@ -39,7 +39,7 @@ def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]
 
   for ji in jit_cache:
     if ji.prg.__class__ in {EmptyOp, ViewOp}: continue
-    ji_graph_dev: Optional[Compiled] = None # device on which the ji will be graphed. Not graphed if None.
+    ji_graph_dev: Compiled | None = None # device on which the ji will be graphed. Not graphed if None.
     if isinstance(ji.prg, CompiledRunner): ji_graph_dev = ji.prg.device
     elif isinstance(ji.prg, BufferXfer) and ji.bufs[0] and ji.bufs[0].device.split(":", 1)[0] in {"HSA", "CUDA", "NV", "AMD"}:
       ji_graph_dev = Device[ji.bufs[0].device]
@@ -133,8 +133,8 @@ class TinyJit(Generic[ReturnType]):
   def __get__(self, obj, objtype): return functools.partial(self.__call__, obj) # add support for instance methods
 
   def __call__(self, *args, **kwargs) -> ReturnType:
-    input_tensors: List[Tuple[Union[int, str], Tensor]] = \
-      [(cast(Union[int, str], k),v) for k,v in itertools.chain(enumerate(args), sorted(kwargs.items())) if v.__class__ is Tensor]
+    input_tensors: List[Tuple[int | str, Tensor]] = \
+      [(cast(int | str, k),v) for k,v in itertools.chain(enumerate(args), sorted(kwargs.items())) if v.__class__ is Tensor]
     if len(input_tensors): Tensor.realize(*[x[1] for x in input_tensors])
     lbs: List[LazyBuffer] = flatten([v.lazydata.lbs for _,v in input_tensors])
     expected_sts_var_dtype_device = [(*x.st.unbind(), x.dtype, x.device) for x in lbs]
@@ -151,7 +151,7 @@ class TinyJit(Generic[ReturnType]):
         if len(params:=get_parameters(self.ret)): Tensor.realize(params[0], *params[1:])
     elif self.cnt == 1:
       # jit capture
-      self.expected_names: List[Union[int, str]] = expected_names
+      self.expected_names: List[int | str] = expected_names
       self.expected_lbs: List[Tuple[ShapeTracker, Tuple[Variable, ...], DType, str]] = expected_lbs
       with Context(GRAPH=getenv("JITGRAPH", GRAPH.value), BEAM=getenv("JITBEAM", BEAM.value)):
         capturing.append(self)

@@ -1,4 +1,4 @@
-from typing import DefaultDict, Dict, List, Union, Optional, cast, Callable
+from typing import DefaultDict, Dict, List, Optional, cast, Callable
 import struct, copy
 from collections import defaultdict
 from tinygrad.helpers import DEBUG
@@ -61,7 +61,7 @@ class PTXRenderer(Renderer):
 
   const_requires_mov: List[DType] = [dtypes.half, dtypes.bool]
 
-  def render_const(self, x:ConstType, dtype:DType, mov=None) -> Union[List[str], str]:
+  def render_const(self, x:ConstType, dtype:DType, mov=None) -> List[str] | str:
     val = render_val(x, dtype)
     if dtype == dtypes.bool: return [f"setp.ne.s16 {mov}, {val}, 0;"]
     return [f"mov.b{self.types[dtype][1:]} {mov}, {val};"] if mov else val
@@ -111,7 +111,7 @@ class PTXRenderer(Renderer):
     def kk(*s: str): kernel.append("\n".join(s))
 
     c: DefaultDict[str, int] = defaultdict(int)
-    r: Dict[UOp, Union[List[str], str]] = {}
+    r: Dict[UOp, List[str] | str] = {}
     def ssa(prefix:str, u:Optional[UOp]=None, dtype:Optional[str]=None) -> str:
       nonlocal c, r
       prefix += f"_{dtype if dtype is not None else self.types[cast(DType, cast(UOp, u).dtype)]}_"

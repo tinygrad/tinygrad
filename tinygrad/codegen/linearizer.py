@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Tuple, Any, Optional, cast, DefaultDict, Dict, Union, Final, Iterator, Sequence
+from typing import List, Tuple, Any, cast, DefaultDict, Dict, Final, Iterator, Sequence
 import itertools, math, functools
 from collections import defaultdict
 
@@ -24,11 +24,11 @@ def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0):
     local_idxs = nli + local_idxs[-(maxdim-1):]
   return local_idxs, [x for x in loop_local_idxs if not isinstance(x, NumNode)]
 
-def expand_idx(node:Node) -> Union[Variable, NumNode]: return next((v for v in node.vars() if v.expr.startswith("_uidx")), NumNode(0))
-def expand_idxs(nodes:Sequence[Node]) -> Tuple[Union[Variable, NumNode], ...]:
+def expand_idx(node:Node) -> Variable | NumNode: return next((v for v in node.vars() if v.expr.startswith("_uidx")), NumNode(0))
+def expand_idxs(nodes:Sequence[Node]) -> Tuple[Variable | NumNode, ...]:
   eidxs = [expand_idx(node) for node in nodes]
   return tuple([v if v not in eidxs[:j] else NumNode(0) for j, v in enumerate(eidxs)])  # take only first occurrence of expand variable
-def iter_idxs(idxs:Tuple[Union[Variable, NumNode], ...]) -> Iterator[Tuple[int,...]]:
+def iter_idxs(idxs:Tuple[Variable | NumNode, ...]) -> Iterator[Tuple[int,...]]:
   yield from (x[::-1] for x in itertools.product(*[[x for x in range(v.min, v.max + 1)] for v in idxs[::-1]]))
 
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tuple[Node, Node], Node]:
@@ -40,7 +40,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
 # expand a Node into List[Node] that enumerates the underlying Variables from min to max
 # expand increments earlier variables faster than later variables (as specified in the argument)
 @functools.lru_cache(maxsize=None)
-def expand_node(node:Node, idxs:Optional[Tuple[Union[Variable, NumNode], ...]]=None) -> List[Node]:
+def expand_node(node:Node, idxs:Tuple[Variable | NumNode, ...] | None=None) -> List[Node]:
   if idxs is None: idxs = (expand_idx(node),)
   return [node.substitute({k:v for k,v in zip(idxs, (NumNode(x) for x in rep)) if isinstance(k, Variable)}) for rep in iter_idxs(idxs)]
 
@@ -73,7 +73,7 @@ class Linearizer(Kernel):
     AndNode: lambda self,ops,ctx:
       functools.reduce(lambda a,b: ctx.uop_alu_idx(a, b, ops, ctx, BinaryOps.MUL, dtype=dtypes.bool), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
-  def global_load(self, i:int, idxs:List[Node], acc:Optional[LazyOp]=None, barrier:Optional[UOp]=None, loop_ctx:Tuple[UOp, ...]=()) -> List[UOp]:
+  def global_load(self, i:int, idxs:List[Node], acc:LazyOp | None=None, barrier:UOp | None=None, loop_ctx:Tuple[UOp, ...]=()) -> List[UOp]:
     buf = self.bufs[i]
     localtype = self.get_base_dtype(buf.dtype if acc is None else acc.dtype)
     const = buf.val if isinstance(buf, ConstBuffer) else None
@@ -180,7 +180,7 @@ class Linearizer(Kernel):
     self.loop_uops.update(new_loops)
     return tuple(new_loops.values())
 
-  def render_reduceop(self, reduceop: LazyOp, loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]], \
+  def render_reduceop(self, reduceop: LazyOp, loaded_buffers:Dict[MemBuffer | ConstBuffer | LocalBuffer, List[UOp]], \
                       global_idxs, local_idxs, upcast_idxs):
     # define indicies
     full_upcast_idxs = [Variable(f"_uidx{i}", 0, s-1) for i, s in enumerate(self.full_shape[self.shape_len-self.upcasted:])]
@@ -333,7 +333,7 @@ class Linearizer(Kernel):
 
     # uops
     self.uops:UOpGraph = UOpGraph()
-    self.buf_uops: List[Optional[UOp]] = [None]*len(self.bufs)
+    self.buf_uops: List[UOp | None] = [None]*len(self.bufs)
     self.loop_uops: Dict[str, UOp] = {}
 
     # add global buffers
@@ -374,8 +374,8 @@ class Linearizer(Kernel):
     upcast_idxs = [Variable(f"_uidx{i}", 0, s-1) for i, s in enumerate(self.output_shape[self.shape_len-self.upcasted:])]
 
     # set global/local size
-    self.global_size: Optional[List[int]] = None
-    self.local_size: Optional[List[int]] = None
+    self.global_size: List[int] | None = None
+    self.local_size: List[int] | None = None
     if self.dont_use_locals:
       self.global_size = [x.max+1 for x in loop_global_idxs][::-1]
       self.loop_uops.update({x.expr:self.uops.add(UOps.SPECIAL, dtypes.int32, (), (len(loop_global_idxs)-1-i, x.expr.replace("gidx", "idx"), x.max+1)) for i,x in enumerate(loop_global_idxs)})  # noqa: E501
@@ -389,7 +389,7 @@ class Linearizer(Kernel):
     if self.local_size is not None: self.local_size += [1]*(3-len(self.local_size))
 
     # parse AST
-    loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]] = {}
+    loaded_buffers:Dict[MemBuffer | ConstBuffer | LocalBuffer, List[UOp]] = {}
     acc: List[UOp] = []
     self.load_cache: Dict[str, UOp] = {}
 
@@ -418,7 +418,7 @@ class Linearizer(Kernel):
     self.applied_opts_cache = self.applied_opts[:]
     return self
 
-  def ast_parse(self, x:LazyOp, acc: List[UOp], offs:Optional[List[int]], loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]], do_reduce=False, cache=None) -> List[UOp]: # noqa: E501
+  def ast_parse(self, x:LazyOp, acc: List[UOp], offs:List[int] | None, loaded_buffers:Dict[MemBuffer | ConstBuffer | LocalBuffer, List[UOp]], do_reduce=False, cache=None) -> List[UOp]: # noqa: E501
     if cache is None: cache = {}
     if x in cache: return cache[x]
     if x.op in BufferOps: return loaded_buffers[x.arg]

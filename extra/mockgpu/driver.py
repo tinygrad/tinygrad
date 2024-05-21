@@ -1,5 +1,4 @@
 import ctypes, struct, os, functools
-from typing import Union
 from dataclasses import dataclass
 from tinygrad.helpers import round_up, to_mv
 
@@ -71,7 +70,7 @@ class DirFileDesc(VirtFileDesc):
 @dataclass(frozen=True)
 class VirtFile():
   path: str
-  fdcls: Union[VirtFileDesc, functools.partial[VirtFileDesc]]
+  fdcls: VirtFileDesc | functools.partial[VirtFileDesc]
 
   @staticmethod
   def build_fstat(st_dev=0x20, st_ino=0x100000, st_mode=0o100777, st_nlink=1, st_uid=0, st_gid=0, st_rdev=0, st_size=0,

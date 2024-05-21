@@ -2,7 +2,7 @@ from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string, ctypes
 import itertools, urllib.request, subprocess
 from tqdm import tqdm
-from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Sequence
+from typing import Dict, Tuple, List, ClassVar, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Sequence
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
   from tinygrad.shape.shapetracker import sint
@@ -10,7 +10,7 @@ if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once min
 T = TypeVar("T")
 U = TypeVar("U")
 # NOTE: it returns int 1 if x is empty regardless of the type of x
-def prod(x:Iterable[T]) -> Union[T,int]: return functools.reduce(operator.mul, x, 1)
+def prod(x:Iterable[T]) -> T |int: return functools.reduce(operator.mul, x, 1)
 
 # NOTE: helpers is not allowed to import from anything else in tinygrad
 OSX = platform.system() == "Darwin"
@@ -25,10 +25,10 @@ def argfix(*x):
 def argsort(x): return type(x)(sorted(range(len(x)), key=x.__getitem__)) # https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
 def all_same(items:List[T]): return all(x == items[0] for x in items)
 def all_int(t: Sequence[Any]) -> TypeGuard[Tuple[int, ...]]: return all(isinstance(s, int) for s in t)
-def colored(st, color:Optional[str], background=False): return f"\u001b[{10*background+60*(color.upper() == color)+30+['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].index(color.lower())}m{st}\u001b[0m" if color is not None else st  # replace the termcolor library with one line  # noqa: E501
+def colored(st, color:str | None, background=False): return f"\u001b[{10*background+60*(color.upper() == color)+30+['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].index(color.lower())}m{st}\u001b[0m" if color is not None else st  # replace the termcolor library with one line  # noqa: E501
 def ansistrip(s:str): return re.sub('\x1b\\[(K|.*?m)', '', s)
 def ansilen(s:str): return len(ansistrip(s))
-def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else x
+def make_pair(x:int | Tuple[int, ...], cnt=2) -> Tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else x
 def flatten(l:Iterable[Iterable[T]]): return [item for sublist in l for item in sublist]
 def fully_flatten(l): return [item for sublist in l for item in (fully_flatten(sublist) if isinstance(sublist, (tuple, list)) else [sublist])]
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
@@ -42,7 +42,7 @@ def partition(lst:List[T], fxn:Callable[[T],bool]) -> Tuple[List[T], List[T]]:
   b:List[T] = []
   for s in lst: (a if fxn(s) else b).append(s)
   return a,b
-def unwrap(x:Optional[T]) -> T:
+def unwrap(x:T | None) -> T:
   assert x is not None
   return x
 def unwrap2(x:Tuple[T,Any]) -> T:
@@ -57,7 +57,7 @@ def get_child(obj, key):
   return obj
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
-def get_contraction(old_shape:Tuple[sint, ...], new_shape:Tuple[sint, ...]) -> Optional[List[List[int]]]:
+def get_contraction(old_shape:Tuple[sint, ...], new_shape:Tuple[sint, ...]) -> List[List[int]] | None:
   acc_old, acc_new = list(itertools.accumulate(old_shape, operator.mul)), list(itertools.accumulate(new_shape, operator.mul))
   try: split = [acc_old.index(acc)+1 if acc != 1 else 0 for acc in acc_new]
   except ValueError: return None
@@ -160,7 +160,7 @@ def diskcache_clear():
   drop_tables = cur.execute("SELECT 'DROP TABLE IF EXISTS ' || quote(name) || ';' FROM sqlite_master WHERE type = 'table';").fetchall()
   cur.executescript("\n".join([s[0] for s in drop_tables]))
 
-def diskcache_get(table:str, key:Union[Dict, str, int]) -> Any:
+def diskcache_get(table:str, key:Dict | str | int) -> Any:
   if CACHELEVEL == 0: return None
   if isinstance(key, (str,int)): key = {"key": key}
   conn = db_connection()
@@ -173,7 +173,7 @@ def diskcache_get(table:str, key:Union[Dict, str, int]) -> Any:
   return None
 
 _db_tables = set()
-def diskcache_put(table:str, key:Union[Dict, str, int], val:Any):
+def diskcache_put(table:str, key:Dict | str | int, val:Any):
   if CACHELEVEL == 0: return val
   if isinstance(key, (str,int)): key = {"key": key}
   conn = db_connection()
@@ -197,7 +197,7 @@ def diskcache(func):
 
 # *** http support ***
 
-def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, allow_caching=not getenv("DISABLE_HTTP_CACHE")) -> pathlib.Path:
+def fetch(url:str, name:pathlib.Path | str | None=None, allow_caching=not getenv("DISABLE_HTTP_CACHE")) -> pathlib.Path:
   if url.startswith(("/", ".")): return pathlib.Path(url)
   fp = pathlib.Path(name) if name is not None and (isinstance(name, pathlib.Path) or '/' in name) else pathlib.Path(_cache_dir) / "tinygrad" / "downloads" / (name if name else hashlib.md5(url.encode('utf-8')).hexdigest())  # noqa: E501
   if not fp.is_file() or not allow_caching:

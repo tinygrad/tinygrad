@@ -1,4 +1,4 @@
-from typing import Tuple, List, NamedTuple, Any, Dict, Optional, Union, DefaultDict, cast
+from typing import Tuple, List, NamedTuple, Any, Dict, Optional, DefaultDict, cast
 from tinygrad.codegen.linearizer import UOps, MemOp, UOp
 from tinygrad.ops import BinaryOps, UnaryOps
 from tinygrad.dtype import DType, dtypes
@@ -25,7 +25,7 @@ class Register(NamedTuple):
 class AssemblyInstruction(NamedTuple):
   op: UOps
   out: Optional[Register]
-  vin: List[Union[Register, int, float]]
+  vin: List[Register | int | float]
   arg: Any = None
 
 # warp size of 32, s registers are shared across the warp, v are 32-wide vectors
@@ -52,7 +52,7 @@ class AssemblyLanguage:
     if key not in self.tor: self.ins.append(AssemblyInstruction(UOps.LOAD, self.newreg(key, scalar=True, dtype=dtypes.int32), [], b))
     return self.tor[key]
 
-  def render_alu(self, op, a:Register, b:Union[Register, int, float], dtype=dtypes.int32) -> Register:
+  def render_alu(self, op, a:Register, b:Register | int | float, dtype=dtypes.int32) -> Register:
     key = (op, a, b)
     if key not in self.tor:
       #if not isinstance(b, Register): b = render_numnode(b)

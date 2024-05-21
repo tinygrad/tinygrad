@@ -1,6 +1,6 @@
 import os, json, pathlib, zipfile, pickle, tarfile, struct
 from tqdm import tqdm
-from typing import Dict, Union, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap, GlobalCounters
@@ -11,12 +11,12 @@ safe_dtypes = {"BOOL":dtypes.bool, "I8":dtypes.int8, "U8":dtypes.uint8, "I16":dt
                "I64":dtypes.int64, "U64":dtypes.uint64, "F16":dtypes.float16, "BF16":dtypes.bfloat16, "F32":dtypes.float32, "F64":dtypes.float64}
 inverse_safe_dtypes = {v:k for k,v in safe_dtypes.items()}
 
-def safe_load_metadata(fn:Union[Tensor,str]) -> Tuple[Tensor, int, Any]:
+def safe_load_metadata(fn:Tensor | str) -> Tuple[Tensor, int, Any]:
   t = fn if isinstance(fn, Tensor) else Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}")
   json_len = t[0:8].bitcast(dtypes.int64).item()
   return t, json_len, json.loads(t[8:8+json_len].numpy().tobytes())
 
-def safe_load(fn:Union[Tensor,str]) -> Dict[str, Tensor]:
+def safe_load(fn:Tensor | str) -> Dict[str, Tensor]:
   t, json_len, metadata = safe_load_metadata(fn)
   ret = {}
   for k,v in metadata.items():
@@ -78,8 +78,8 @@ def load_state_dict(model, state_dict:Dict[str, Tensor], strict=True, verbose=Tr
 def torch_load(fn:str) -> Dict[str, Tensor]:
   t = Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}")
 
-  offsets: Dict[Union[str, int], int] = {}
-  lens: Dict[Union[str, int], int] = {}
+  offsets: Dict[str | int, int] = {}
+  lens: Dict[str | int, int] = {}
   def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad=None, backward_hooks=None, metadata=None):
     #print(storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata)
     lens[storage[2]] = storage[4] * storage[1].itemsize

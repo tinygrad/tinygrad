@@ -1,10 +1,10 @@
-from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Union
+from typing import Final, Optional, ClassVar, Set, Tuple, Dict
 from dataclasses import dataclass
 import numpy as np  # TODO: remove numpy
 import functools
 from tinygrad.helpers import getenv
 
-ConstType = Union[float, int, bool]
+ConstType = float | int | bool
 
 @dataclass(frozen=True, order=True)
 class DType:

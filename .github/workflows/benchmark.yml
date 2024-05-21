@@ -19,6 +19,9 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
+      with:
+        python-version: 3.10
     - name: Symlink models and datasets
       run: |
         mkdir -p weights
@@ -102,6 +105,9 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
+      with:
+        python-version: 3.10
     - name: Print nvidia-smi
       run: nvidia-smi
     - name: Symlink models and datasets
@@ -193,6 +199,9 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
+      with:
+        python-version: 3.10
     - name: Symlink models and datasets
       run: |
         mkdir -p weights
@@ -247,6 +256,9 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
+      with:
+        python-version: 3.10
     - name: Symlink models and datasets
       run: |
         mkdir -p weights

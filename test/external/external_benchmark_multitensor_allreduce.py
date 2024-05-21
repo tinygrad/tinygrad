@@ -6,9 +6,9 @@ from tinygrad.multi import MultiLazyBuffer, all_reduce
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
 from tinygrad.helpers import getenv, Context, RING
-from typing import List, Union
+from typing import List
 
-def realize(x: Union[LazyBuffer, List[LazyBuffer]]):
+def realize(x: LazyBuffer | List[LazyBuffer]):
   x = x if isinstance(x, list) else [x]
   run_schedule(create_schedule(x))
   for lb in x: Device[lb.device].synchronize()

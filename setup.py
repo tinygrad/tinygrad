@@ -23,7 +23,7 @@ setup(name='tinygrad',
       install_requires=["numpy", "tqdm",
                         "pyobjc-framework-Metal; platform_system=='Darwin'",
                         "pyobjc-framework-libdispatch; platform_system=='Darwin'"],
-      python_requires='>=3.8',
+      python_requires='>=3.10',
       extras_require={
         'llvm': ["llvmlite"],
         'arm': ["unicorn"],

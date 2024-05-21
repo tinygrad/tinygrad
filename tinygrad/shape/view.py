@@ -1,7 +1,7 @@
 from __future__ import annotations
 import functools, operator, itertools, math
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, Dict, Set, cast
+from typing import Tuple, List, Dict, Set, cast
 from tinygrad.helpers import prod, all_int, argsort
 from tinygrad.shape.symbolic import Node, NumNode, Variable, sint
 
@@ -16,7 +16,7 @@ def strides_for_shape(shape:Tuple[sint, ...]) -> Tuple[sint, ...]:
   return canonicalize_strides(shape, strides[::-1])
 
 @functools.lru_cache(maxsize=None)
-def _merge_dims(shape:Tuple[int, ...], strides:Tuple[int, ...], mask:Optional[Tuple[Tuple[int, int], ...]]=None) -> Tuple[Tuple[int, int, int], ...]:
+def _merge_dims(shape:Tuple[int, ...], strides:Tuple[int, ...], mask:Tuple[Tuple[int, int], ...] | None=None) -> Tuple[Tuple[int, int, int], ...]:
   # merge contiguous subparts or zero strided dims. ret = List[(merged_dims, stride, merged dims w/o zero stride), ...]
   if not shape: return tuple()
   assert len(shape) == len(strides)
@@ -33,7 +33,7 @@ def _merge_dims(shape:Tuple[int, ...], strides:Tuple[int, ...], mask:Optional[Tu
   return tuple(ret)
 
 @functools.lru_cache(maxsize=None)
-def _reshape_mask(view: View, new_shape:Tuple[sint, ...]) -> Tuple[Optional[Tuple[Tuple[sint, sint], ...]], bool]:
+def _reshape_mask(view: View, new_shape:Tuple[sint, ...]) -> Tuple[Tuple[Tuple[sint, sint], ...] | None, bool]:
   if view.mask is None: return view.mask, False
   if any(not isinstance(m[0], int) or not isinstance(m[1], int) for m in view.mask): return view.mask, True
   new_mask: List[Tuple[int, int]] = []
@@ -82,7 +82,7 @@ class View:
   shape:Tuple[sint, ...]
   strides:Tuple[sint, ...]
   offset:sint
-  mask:Optional[Tuple[Tuple[sint, sint], ...]]
+  mask:Tuple[Tuple[sint, sint], ...] | None
   contiguous:bool
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
@@ -94,7 +94,7 @@ class View:
 
   @staticmethod
   @functools.lru_cache(maxsize=None)
-  def create(shape:Tuple[sint, ...], strides:Optional[Tuple[sint, ...]]=None, offset:sint=0, mask:Optional[Tuple[Tuple[sint, sint], ...]]=None):
+  def create(shape:Tuple[sint, ...], strides:Tuple[sint, ...] | None=None, offset:sint=0, mask:Tuple[Tuple[sint, sint], ...] | None=None):
     strides = canonicalize_strides(shape, strides) if strides else strides_for_shape(shape)
     # canonicalize empty mask
     if mask is not None and all(m == (0,s) for m,s in zip(mask, shape)): mask = None
@@ -126,7 +126,7 @@ class View:
     return View.create(new_shape, new_strides, new_offset, new_mask), dict(x[1] for x in var_unboundvar_val)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
-  def __add__(self, vm1:View) -> Optional[View]:
+  def __add__(self, vm1:View) -> View | None:
     vm2 = self
     if vm2.contiguous: return vm1
     if vm1.contiguous and vm1.shape == vm2.shape: return vm2
@@ -192,7 +192,7 @@ class View:
     return View.create(vm1.shape, tuple(strides), sum(o * s for o, s in zip(origin, vm2.strides)) + vm2.offset)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
-  def invert(self, out_shape:Tuple[sint, ...]) -> Optional[View]:
+  def invert(self, out_shape:Tuple[sint, ...]) -> View | None:
     ret = View.create(self.shape)
     if self.mask: ret = ret.shrink(self.mask)
     ret = ret.stride(tuple(-1 if x < 0 else 1 for x in self.strides)).permute(argsort(tuple(-x if x > 0 else x for x in self.strides)))
@@ -258,7 +258,7 @@ class View:
     return View.create(new_shape, strides, self.offset + offset, mask)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
-  def reshape(self, new_shape: Tuple[sint, ...]) -> Optional[View]:
+  def reshape(self, new_shape: Tuple[sint, ...]) -> View | None:
     if self.shape == new_shape: return self
 
     assert all(x >= 0 for x in new_shape), f"shape can't contain negative numbers {new_shape}"

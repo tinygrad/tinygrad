@@ -6,7 +6,7 @@ import numpy as np
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.helpers import getenv, DEBUG, CI, OSX
 from tinygrad.dtype import ConstType
-from typing import List, Dict, Union
+from typing import List, Dict
 from onnx import AttributeProto, ModelProto, TensorProto, TypeProto
 try:
   from onnx.helper import tensor_dtype_to_np_dtype
@@ -20,7 +20,7 @@ cache_misses = 0
 def _cached_to_python_const(t:Tensor, tobytes): return t.data().tobytes() if tobytes else t.tolist()
 
 # Tensor -> python value cache for parameters
-def to_python_const(t, tobytes=False) -> Union[List[ConstType], List[bytes], Union[ConstType, bytes]]:
+def to_python_const(t, tobytes=False) -> List[ConstType] | List[bytes] | [ConstType | bytes]:
   if not isinstance(t, Tensor): return t
   global cache_misses
   ret = _cached_to_python_const(t, tobytes)

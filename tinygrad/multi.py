@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Union, Any, Tuple, List
+from typing import Any, Tuple, List
 import functools, itertools, operator
 from tinygrad.helpers import all_same, all_int, dedup, round_up, prod, DEBUG, RING
 from tinygrad.dtype import DType, ConstType
@@ -48,7 +48,7 @@ def to_sharded(lbs:List[LazyBuffer], axis:int) -> List[LazyBuffer]:
   return [lb.shrink(tuple((0,s) if a != axis else (sz*i,min(s,sz*(i+1))) for a,s in enumerate(lb.shape))) for i,lb in enumerate(lbs)]
 
 class MultiLazyBuffer:
-  def __init__(self, lbs:List[LazyBuffer], axis:Optional[int], real:Optional[List[bool]]=None):
+  def __init__(self, lbs:List[LazyBuffer], axis:int | None, real:List[bool] | None=None):
     assert all(isinstance(x, LazyBuffer) for x in lbs) and len(lbs), "all lbs must be LazyBuffers, and we need at least one of them"
     assert all_same([x.dtype for x in lbs]), f"all multilazybuffer needs same dtype, getting {[x.dtype for x in lbs]}"
     self.lbs, self.axis, self.dtype, self.device, self.real = lbs, axis, lbs[0].dtype, tuple(x.device for x in lbs), real or [True]*len(lbs)
@@ -70,7 +70,7 @@ class MultiLazyBuffer:
     return f"<MLB {self.axis=} {self.real=} {chr(10)}{chr(10).join([f'{x.device} {x.st}' for x in self.lbs])}>"
 
   @staticmethod
-  def from_sharded(lb:LazyBuffer, devices:Tuple[str, ...], axis:Optional[int]=None):
+  def from_sharded(lb:LazyBuffer, devices:Tuple[str, ...], axis:int | None=None):
     lbs = [lb.contiguous() if lb.base != lb and not lb.is_unrealized_unmasked_const() else lb] * len(devices)
     sharded_lbs = [lb.copy_to_device(d) for lb,d in zip(to_sharded(lbs, axis) if axis is not None else lbs, devices)]
     return MultiLazyBuffer([lb if lb.is_unrealized_unmasked_const() else lb.contiguous() for lb in sharded_lbs], axis)
@@ -92,7 +92,7 @@ class MultiLazyBuffer:
   def contiguous(self): return MultiLazyBuffer([x.contiguous() for x in self.lbs], self.axis, self.real)
 
   # elementwise is simple
-  def e(self, op:Union[LoadOps, UnaryOps, BinaryOps, TernaryOps], *in_srcs:MultiLazyBuffer, arg:Optional[Any]=None) -> MultiLazyBuffer:
+  def e(self, op:LoadOps | UnaryOps | BinaryOps | TernaryOps, *in_srcs:MultiLazyBuffer, arg:Any | None=None) -> MultiLazyBuffer:
     msrcs = (self,)+in_srcs
     assert all(isinstance(x, MultiLazyBuffer) for x in msrcs), f"all buffers must be MultiLazyBuffer {msrcs}"
     assert all_same([x.device for x in msrcs]), f"all buffers must have the same device {[x.device for x in msrcs]}"

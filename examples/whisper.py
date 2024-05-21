@@ -1,7 +1,7 @@
 # thanks to https://github.com/openai/whisper for a good chunk of MIT licensed code
 
 import sys, base64, multiprocessing, itertools
-from typing import Optional, Union, Literal, List
+from typing import Optional, Literal, List
 
 from tinygrad import Tensor, TinyJit, Variable, nn
 from tinygrad.nn.state import torch_load, load_state_dict
@@ -21,7 +21,7 @@ class MultiHeadAttention:
     self.kv_caching = kv_caching
     self.max_self_attn_cache_len = max_self_attn_cache_len
 
-  def __call__(self, x:Tensor, xa:Optional[Tensor]=None, mask:Optional[Tensor]=None, len: Union[Variable,int]=None):
+  def __call__(self, x:Tensor, xa:Optional[Tensor]=None, mask:Optional[Tensor]=None, len: Variable | int=None):
     if self.kv_caching == 'cross':
       if xa is not None:
         k, v = self.key(xa), self.value(xa)
@@ -67,7 +67,7 @@ class ResidualAttentionBlock:
     self.mlp = [nn.Linear(n_state, n_state*4), Tensor.gelu, nn.Linear(n_state*4, n_state)]
     self.mlp_ln = nn.LayerNorm(n_state)
 
-  def __call__(self, x, xa=None, mask=None, len: Union[Variable, int]=None):
+  def __call__(self, x, xa=None, mask=None, len: Variable | int=None):
     x = x + self.attn(self.attn_ln(x), mask=mask, len=len)
     if self.cross_attn: x = x + self.cross_attn(self.cross_attn_ln(x), xa)
     x = x + self.mlp_ln(x).sequential(self.mlp)

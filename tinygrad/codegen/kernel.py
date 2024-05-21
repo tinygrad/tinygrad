@@ -1,6 +1,6 @@
 from __future__ import annotations
 import math, itertools
-from typing import NamedTuple, Optional, List, Tuple, cast, Dict, Union
+from typing import NamedTuple, List, Tuple, cast, Dict
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, UNSAFE_PAD_OPS
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore
@@ -25,8 +25,8 @@ def check(cond:bool, msg:str=""):
 @dataclass(frozen=True, order=True)
 class Opt:
   op: OptOps
-  axis: Optional[int] = None
-  amt: Optional[int] = None
+  axis: int | None = None
+  amt: int | None = None
   def __repr__(self): return f"Opt(op={self.op}, axis={self.axis}, amt={self.amt})"
   def real_axis(self, k:Kernel):
     if self.axis is None: return -1
@@ -51,7 +51,7 @@ class LocalBuffer(NamedTuple):
   def __str__(self): return f"localbuffer<{self.name}[{self.size}]>"
 
 class Kernel:
-  def __init__(self, *ast:LazyOp, opts:Optional[Renderer]=None):
+  def __init__(self, *ast:LazyOp, opts:Renderer | None=None):
     self.opts = opts if opts is not None else Device[Device.DEFAULT].renderer
     assert all(op.op is BufferOps.STORE for op in ast), f"kernels must have stores as the output, got {ast}"
     assert len(set(op.arg.st.size for op in ast)) == 1, f"all outbufs should have the same size, got {[op.arg.st for op in ast]}"
@@ -68,14 +68,14 @@ class Kernel:
 
     self.outbufs, self.vars = [x.arg for x in self.ast], flatten([x.vars() for x in self.ast])
     loadops = [BufferOps.LOAD, BufferOps.CONST]
-    self.bufs: List[Union[MemBuffer, ConstBuffer, LocalBuffer]] = self.outbufs + dedup([x.arg for x in self.lazyops if x.op in loadops])
+    self.bufs: List[MemBuffer | ConstBuffer | LocalBuffer] = self.outbufs + dedup([x.arg for x in self.lazyops if x.op in loadops])
 
     # get earlybufs, before the one reduce op
     self.earlybufs = [x.arg for reduceop in self.reduceops for x in reduceop.lazyops if x.op in BufferOps]
     self.full_buf_index: int = self.bufs.index(self.earlybufs[0]) if self.earlybufs else 0
 
     # create new shapetrackers inside this kernel, we will permute them
-    self.sts: List[ShapeTracker] = [x.st for x in cast(List[Union[MemBuffer, ConstBuffer]], self.bufs)]
+    self.sts: List[ShapeTracker] = [x.st for x in cast(List[MemBuffer | ConstBuffer], self.bufs)]
 
     # move all reduce axes to the end
     reduce = list(enumerate(zip(self.full_shape, self.output_shape)))
@@ -88,8 +88,8 @@ class Kernel:
     self.upcasted: int = 0
     self.local_dims: int = 0
     self.local_alias: Dict[int, LocalBuffer] = {}
-    self.tensor_core: Optional[TensorCore] = None
-    self.tensor_core_opts: Optional[TensorCoreOptions] = None
+    self.tensor_core: TensorCore | None = None
+    self.tensor_core_opts: TensorCoreOptions | None = None
     self.dont_use_locals: bool = False
 
     # group simplifies
@@ -97,7 +97,7 @@ class Kernel:
     self.simplify_merge_adjacent()
 
     # cache
-    self.applied_opts_cache: Optional[List[Opt]] = None
+    self.applied_opts_cache: List[Opt] | None = None
 
   def copy(self):
     ret = type(self).__new__(type(self))
@@ -127,7 +127,7 @@ class Kernel:
   def shape_offsets(self, i:int): return itertools.product(*[list(range(cast(int, s))) for s in self.sts[i].shape[self.shape_len-self.upcasted:][::-1]]) if self.upcasted > 0 else [tuple()]  # noqa: E501
   def float4_axis(self, i:int): return [x-(self.shape_len-self.upcasted) for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x]%4 == 0]  # noqa: E501
 
-  def upcasted_axis(self, i:int) -> List[Tuple[int, Optional[sint], bool]]:
+  def upcasted_axis(self, i:int) -> List[Tuple[int, sint | None, bool]]:
     upcasted_shape, upcasted_stride = self.sts[i].shape[self.shape_len-self.upcasted:], self.sts[i].real_strides()[self.shape_len-self.upcasted:]
     assert all_int(upcasted_shape), f"cannot upcast a symbolic amount {upcasted_shape=}"
     return list(zip(upcasted_shape, upcasted_stride,
@@ -194,7 +194,7 @@ class Kernel:
     assert len(colors) == self.shape_len, "colors size mismatch"
     return colors
 
-  def colored_shape(self, pad:Optional[int]=None, dense=False) -> str:
+  def colored_shape(self, pad:int | None=None, dense=False) -> str:
     ret = ' '.join(colored(s, color) for s,color in zip([f"{s:4d}" if isinstance(s, int) and not dense else s for s in self.full_shape], self.colors()))  # noqa: E501
     if pad: ret += ' '*(pad-ansilen(ret))
     return ret
@@ -276,7 +276,7 @@ class Kernel:
 
   # ******************** helpers ********************
 
-  def _limit_size(self, x: Tuple[int], max_size: List[Union[int,float]]) -> Tuple[int, ...]:
+  def _limit_size(self, x: Tuple[int], max_size: List[int | float]) -> Tuple[int, ...]:
     new_shape = list(x)
     for i in range(len(new_shape)):
       next_idx = (i + 1) % len(new_shape)
@@ -331,7 +331,7 @@ class Kernel:
         mul_op = self.reduceop.src[0].src[0] if has_cast else self.reduceop.src[0]
         if mul_op.op is not BinaryOps.MUL: continue
 
-        def buf_index(src: LazyOp) -> Optional[int]:
+        def buf_index(src: LazyOp) -> int | None:
           # TODO: apply tc even if the sources are not from LOAD
           if src.op is BufferOps.LOAD and src.arg.dtype == tc.dtype_in: return self.bufs.index(cast(MemBuffer, src.arg))
           try:
@@ -371,7 +371,7 @@ class Kernel:
         return True
     return False
 
-  def apply_tensor_cores(self, use_tensor_cores=1, extra_opts:Optional[List[Opt]]=None, axis:int=0, tc_opt:int=getenv("TC_OPT")) -> bool:
+  def apply_tensor_cores(self, use_tensor_cores=1, extra_opts:List[Opt] | None=None, axis:int=0, tc_opt:int=getenv("TC_OPT")) -> bool:
     """ Attempts to apply a tensor core optimization to the kernel.  If one exists and applies properly, return true, otherwise return false.
     Tensor cores are optimized instructions that matrix multiply-accumulate across a wave of threads: D(M, N) = A(M, K) * B(K, N) + C(M, N).
 
@@ -621,7 +621,7 @@ class Kernel:
         to_local: List[Tuple[int, int]] = []
         for _, axis in sorted(local_axis_ranking, key=lambda x: (-x[0], -x[1])):
           local_size = prod(sz for _, sz in to_local)
-          local_sz: Optional[int] = next((x for x in ([32] * (axis == 0) + [16, 8, 4, 3, 2]) if self.full_shape[axis] % x == 0 and local_size * x <= 128), None)  # noqa: E501
+          local_sz: int | None = next((x for x in ([32] * (axis == 0) + [16, 8, 4, 3, 2]) if self.full_shape[axis] % x == 0 and local_size * x <= 128), None)  # noqa: E501
           if local_sz is not None: to_local.append((axis, local_sz))
         deleted_shape = 0
         for axis, local_sz in sorted(to_local[:3]):

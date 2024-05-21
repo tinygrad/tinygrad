@@ -1,12 +1,12 @@
 # ShapeTracker allows movement operations to a buffer that don't require a copy to be made.
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, Dict, Set, Iterable, cast
+from typing import Tuple, List, Dict, Set, Iterable, cast
 from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, NumNode, create_lt_node, create_ge_node, sint
 from tinygrad.shape.view import View, strides_for_shape
 
-def _expr_view(view:View, idxs:List[Node], valid:Optional[Node]=None) -> Tuple[Node, Node]:
+def _expr_view(view:View, idxs:List[Node], valid:Node | None=None) -> Tuple[Node, Node]:
   assert len(idxs) == len(view.shape), f"need an idx for all dimensions {idxs} vs {view.shape}"
   iexpr: List[Node] = [NumNode(view.offset) if isinstance(view.offset, int) else view.offset]
   vexpr: List[Node] = [valid] if valid is not None else []
@@ -24,7 +24,7 @@ class ShapeTracker:
     for v in st.views: ret = ShapeTracker(ret.views + (v,)).simplify() # one view at a time = better simplification
     return ret
 
-  def invert(self, out_shape:Tuple[sint, ...]) -> Optional[ShapeTracker]:
+  def invert(self, out_shape:Tuple[sint, ...]) -> ShapeTracker | None:
     ret = tuple(v.invert(s) for v,s in zip(self.views[::-1], [x.shape for x in self.views[::-1][1:]]+[out_shape]))
     return ShapeTracker(cast(Tuple[View, ...], ret)).reshape(out_shape) if all(x is not None for x in ret) else None
 
@@ -63,11 +63,11 @@ class ShapeTracker:
     return ShapeTracker(tuple(unbound_views)), merge_dicts(var_vals)
 
   # NOTE: if a stride is not always valid, it will be None
-  def real_strides(self, ignore_valid=False) -> Tuple[Optional[sint], ...]:
+  def real_strides(self, ignore_valid=False) -> Tuple[sint | None, ...]:
     if len(self.views) == 1 and self.views[-1].mask is None: return self.views[-1].strides
     idxs: List[Node] = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
     idx, valid = self.expr_idxs(idxs)
-    ret: List[Optional[sint]] = [None] * len(self.views[-1].shape)
+    ret: List[sint | None] = [None] * len(self.views[-1].shape)
     bad_idx_vars: Set[Variable] = set()
     for this_dim in (idx.nodes if isinstance(idx, SumNode) else [idx]):
       idx_maybe, stride_maybe = (this_dim.a, this_dim.b) if isinstance(this_dim, MulNode) else (this_dim, 1)
@@ -81,7 +81,7 @@ class ShapeTracker:
 
   def unit_stride_axes(self, ignore_valid=False) -> List[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]
 
-  def expr_idxs(self, idxs:Optional[Iterable[Node]]=None) -> Tuple[Node, Node]:
+  def expr_idxs(self, idxs:Iterable[Node] | None=None) -> Tuple[Node, Node]:
     idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)] if idxs is None else list(idxs)
     idx, valid = _expr_view(self.views[-1], idxs)
     for view in reversed(self.views[0:-1]):

@@ -2,7 +2,7 @@ from __future__ import annotations
 import multiprocessing
 from dataclasses import dataclass
 from collections import defaultdict
-from typing import List, Optional, Dict, Tuple, Any
+from typing import List, Dict, Tuple, Any
 import importlib, inspect, functools, pathlib, os, ctypes
 from tinygrad.helpers import getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv
 from tinygrad.dtype import DType, ImageDType
@@ -15,7 +15,7 @@ class _Device:
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def _canonicalize(self, device:str) -> str: return (device.split(":", 1)[0].upper() + ((":"+device.split(":", 1)[1]) if ':' in device else '')).replace(":0", "")   # noqa: E501
   # NOTE: you can't cache canonicalize in case Device.DEFAULT changes
-  def canonicalize(self, device:Optional[str]) -> str: return self._canonicalize(device) if device is not None else Device.DEFAULT
+  def canonicalize(self, device:str | None) -> str: return self._canonicalize(device) if device is not None else Device.DEFAULT
   def __getitem__(self, ix:str) -> Compiled: return self.__get_canonicalized_item(self.canonicalize(ix))
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def __get_canonicalized_item(self, ix:str) -> Compiled:
@@ -25,7 +25,7 @@ class _Device:
     return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._devices][0](ix)  # noqa: E501
   @functools.cached_property
   def DEFAULT(self) -> str:
-    device_from_env: Optional[str] = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._devices, None)   # type: ignore
+    device_from_env: str | None = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._devices, None)   # type: ignore
     if device_from_env: return device_from_env
     for device in ["METAL", "HSA", "CUDA", "GPU", "CLANG", "LLVM"]:
       try:
@@ -40,15 +40,15 @@ Device = _Device()
 
 @dataclass(frozen=True, eq=True)
 class BufferOptions:
-  image: Optional[ImageDType] = None
+  image: ImageDType | None = None
   uncached: bool = False
   cpu_access: bool = False
   host: bool = False
   nolru: bool = False
 
 class Buffer:
-  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferOptions]=None,
-               initial_value:Optional[bytes]=None, lb_refcount=0, base:Optional[Buffer]=None, offset:int=0, preallocate=False):
+  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:BufferOptions | None=None,
+               initial_value:bytes | None=None, lb_refcount=0, base:Buffer | None=None, offset:int=0, preallocate=False):
     assert isinstance(dtype, DType)
     if isinstance(dtype, ImageDType): options = BufferOptions(image=dtype) # TODO: image hack shouldn't be here. where should it be?
     self.device, self.size, self.dtype, self.options, self.offset = device, size, dtype, options, offset
@@ -127,19 +127,19 @@ class Buffer:
 
 # TODO: size, dest, src are the same type. can we enforce this?
 class Allocator:
-  def alloc(self, size:int, options:Optional[BufferOptions]=None):
+  def alloc(self, size:int, options:BufferOptions | None=None):
     assert not isinstance(size, int) or size > 0, f"alloc size must be positve, getting {size}"
     return self._alloc(size, options if options is not None else BufferOptions())
   def _alloc(self, size:int, options:BufferOptions): raise NotImplementedError("need alloc")
-  def free(self, opaque, size:int, options:Optional[BufferOptions]=None):
+  def free(self, opaque, size:int, options:BufferOptions | None=None):
     self._free(opaque, options if options is not None else BufferOptions())
   def _free(self, opaque, options:BufferOptions): pass  # if opaque is a Python object, you don't need a free
   def copyin(self, dest, src:memoryview): raise NotImplementedError("need copyin")
   def copyout(self, dest:memoryview, src): raise NotImplementedError("need copyout")
 
 class LRUAllocator(Allocator):  # pylint: disable=abstract-method
-  def __init__(self): self.cache: Dict[Tuple[int, Optional[BufferOptions]], Any] = defaultdict(list)
-  def alloc(self, size:int, options:Optional[BufferOptions]=None):
+  def __init__(self): self.cache: Dict[Tuple[int, BufferOptions | None], Any] = defaultdict(list)
+  def alloc(self, size:int, options:BufferOptions | None=None):
     if len(c := self.cache[(size, options)]): return c.pop()
     try: return super().alloc(size, options)
     except (RuntimeError, MemoryError):
@@ -149,7 +149,7 @@ class LRUAllocator(Allocator):  # pylint: disable=abstract-method
     for (sz,options),opaques in self.cache.items():
       for opaque in opaques: super().free(opaque, sz, options)
       opaques.clear()
-  def free(self, opaque:Any, size:int, options:Optional[BufferOptions]=None):
+  def free(self, opaque:Any, size:int, options:BufferOptions | None=None):
     if getenv("LRU", 1) and (options is None or not options.nolru): self.cache[(size, options)].append(opaque)
     else: super().free(opaque, size, options)
 
@@ -167,7 +167,7 @@ MallocAllocator = _MallocAllocator()
 class CompileError(Exception): pass
 
 class Compiler:
-  def __init__(self, cachekey:Optional[str]=None): self.cachekey = None if getenv("DISABLE_COMPILER_CACHE") else cachekey
+  def __init__(self, cachekey:str | None=None): self.cachekey = None if getenv("DISABLE_COMPILER_CACHE") else cachekey
   def compile(self, src:str) -> bytes: raise NotImplementedError("need a compile function")
   def compile_cached(self, src:str) -> bytes:
     if self.cachekey is None or (lib := diskcache_get(self.cachekey, src)) is None:
@@ -177,7 +177,7 @@ class Compiler:
     return lib
 
 class Compiled:
-  def __init__(self, device:str, allocator:Allocator, renderer:Optional[Renderer], compiler:Optional[Compiler], runtime, graph=None):
+  def __init__(self, device:str, allocator:Allocator, renderer:Renderer | None, compiler:Compiler | None, runtime, graph=None):
     self.dname, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler if compiler else Compiler(), runtime, graph
     self.renderer = renderer if renderer else Renderer()
   def synchronize(self): pass  # override this in your device

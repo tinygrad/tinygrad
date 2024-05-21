@@ -1,4 +1,4 @@
-from typing import Tuple, Union, Optional, Dict, Any
+from typing import Tuple, Optional, Dict, Any
 from tinygrad import Tensor, Variable, TinyJit, dtypes, nn, Device
 from tinygrad.helpers import getenv
 
@@ -53,7 +53,7 @@ class Attention:
     self.wv = linear(dim, self.n_kv_heads * self.head_dim, bias=False)
     self.wo = linear(self.n_heads * self.head_dim, dim, bias=False)
 
-  def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]) -> Tensor:
+  def __call__(self, x:Tensor, start_pos:Variable | int, freqs_cis:Tensor, mask:Optional[Tensor]) -> Tensor:
     x = x.half()
     xq, xk, xv = self.wq(x).half(), self.wk(x).half(), self.wv(x).half()
     xq = xq.reshape(xq.shape[0], xq.shape[1], self.n_heads, self.head_dim)
@@ -99,7 +99,7 @@ class TransformerBlock:
     self.attention_norm = RMSNorm(dim, norm_eps)
     self.ffn_norm = RMSNorm(dim, norm_eps)
 
-  def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]):
+  def __call__(self, x:Tensor, start_pos:Variable | int, freqs_cis:Tensor, mask:Optional[Tensor]):
     h = x + self.attention(self.attention_norm(x), start_pos, freqs_cis, mask)
     return (h + self.feed_forward(self.ffn_norm(h).half())).contiguous()
 
@@ -159,7 +159,7 @@ class Transformer:
     self.freqs_cis = precompute_freqs_cis(dim // n_heads, self.max_context * 2, rope_theta)
     self.forward_jit = TinyJit(self.forward) if jit else None
 
-  def forward(self, tokens:Tensor, start_pos:Union[Variable,int], temperature:float, top_k:int, top_p:float, alpha_f:float, alpha_p:float):
+  def forward(self, tokens:Tensor, start_pos:Variable | int, temperature:float, top_k:int, top_p:float, alpha_f:float, alpha_p:float):
     _bsz, seqlen = tokens.shape
     freqs_cis = self.freqs_cis.shrink((None, (start_pos, start_pos+seqlen),None,None,None))
 

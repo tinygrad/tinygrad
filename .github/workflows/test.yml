@@ -68,15 +68,15 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
-    - name: Set up Python 3.8
+    - name: Set up Python 3.10
       uses: actions/setup-python@v5
       with:
-        python-version: 3.8
+        python-version: '3.10'
     - name: Cache python packages
       uses: actions/cache@v4
       with:
-        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.8/site-packages
-        key: linting-packages-${{ hashFiles('**/setup.py') }}-3.8
+        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.10/site-packages
+        key: linting-packages-${{ hashFiles('**/setup.py') }}-3.10
     - name: Install dependencies
       run: pip install -e '.[linting,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Lint with pylint

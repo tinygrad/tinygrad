@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from typing import Optional, Union
+from typing import Optional
 import argparse
 from tqdm import trange
 import numpy as np
@@ -76,7 +76,7 @@ class Transformer:
     self.lm_head = Linear(dim, vocab_size, bias=False)
     self.forward_jit = TinyJit(self.forward)
 
-  def forward(self, tokens:Union[Tensor,Variable], start_pos:Variable, temperature:float=0.0):
+  def forward(self, tokens:Tensor | Variable, start_pos:Variable, temperature:float=0.0):
     if not hasattr(self, 'allpos'): self.allpos = Tensor.arange(0, MAX_CONTEXT).reshape(1, -1).realize()
     if isinstance(tokens, Variable):
       seqlen = 1

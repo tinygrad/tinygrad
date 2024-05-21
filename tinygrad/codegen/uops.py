@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Iterator, Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable
+from typing import Iterator, Tuple, Any, Dict, List, DefaultDict, Set, Callable
 import functools, itertools, heapq
 from collections import defaultdict
 from enum import Enum, auto
@@ -29,7 +29,7 @@ class UOps(Enum):
 @dataclass(eq=False)
 class UOp:
   uop: UOps
-  dtype: Optional[DType] = None
+  dtype: DType | None = None
   vin: Tuple[UOp, ...] = tuple()
   arg: Any = None
   def tuple(self): return (self.uop, self.dtype, self.vin, self.arg)
@@ -107,7 +107,7 @@ class PatternMatcher:
       else:
         self.pdict[(uops, p.get("arg", None))].append((p, fxn))
 
-  def rewrite(self, uop:UOp) -> Optional[UOp]:
+  def rewrite(self, uop:UOp) -> UOp | None:
     for p,fxn in itertools.chain(self.pdict[(uop.uop, uop.arg)], self.pdict[(uop.uop, None)]):
       store: Dict[str, UOp] = {}
       if _match(uop, p, store): return fxn(**store)
@@ -233,7 +233,7 @@ constant_folder = PatternMatcher([
 class UOpGraph:
   def __init__(self):
     self.nodes: Dict[Tuple, UOp] = {}
-    self._uops: Optional[List[UOp]] = None
+    self._uops: List[UOp] | None = None
 
   def __iter__(self) -> Iterator[UOp]: return iter(self.uops)
   def __getitem__(self, index) -> UOp: return self.uops[index]
@@ -284,7 +284,7 @@ class UOpGraph:
       assert run_cnt < 100, "exceeded 100 rewrite loops!"
     return sink
 
-  def linearize(self, extra_pm:Optional[PatternMatcher]=None, type_verify=True):
+  def linearize(self, extra_pm:PatternMatcher | None=None, type_verify=True):
     # NOTE: relinearizering should be okay
     #assert self._uops is None, "already linearized"
 
@@ -364,7 +364,7 @@ class UOpGraph:
 
     if type_verify: self.type_verify()
 
-  def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None) -> UOp:
+  def add(self, uop:UOps, dtype:DType | None=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None) -> UOp:
     if found:=self.nodes.get(key:=(uop, dtype, vin, arg)): return found
     self.nodes[key] = ret = UOp(*key)
     return ret

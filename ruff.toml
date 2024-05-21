@@ -23,6 +23,7 @@ lint.select = [
   "W291",   # trailing-whitespace
   "W293",   # blank-line-with-whitespace
   "UP039",  # unnecessary-class-parentheses
+  "UP007"   # non-pep604-annotation
 ]
 
 line-length = 150

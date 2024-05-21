@@ -4,7 +4,7 @@
 
 import unittest
 import numpy as np
-from typing import List, Optional, Union
+from typing import List, Optional
 from tinygrad import nn, dtypes
 from tinygrad.tensor import Tensor
 from tinygrad.ops import BinaryOps, LoadOps, ReduceOps
@@ -16,7 +16,7 @@ from tinygrad.engine.realize import run_schedule
 from test.helpers import is_dtype_supported
 
 class KernelCountException(Exception): pass
-def check_schedule(t:Union[Tensor, List[Tensor]], allowed:int, to_prerealize:Optional[List[Tensor]]=None, filter_loadops=True):
+def check_schedule(t:Tensor | List[Tensor], allowed:int, to_prerealize:Optional[List[Tensor]]=None, filter_loadops=True):
   if isinstance(t, Tensor): t = [t]
   seen = set()
   if to_prerealize:

@@ -1,5 +1,5 @@
 import functools, io, math
-from typing import Union, Tuple, Optional, List, Any
+from typing import Tuple, Optional, List, Any
 from tinygrad.tensor import Tensor, broadcast_shape
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.helpers import prod, flatten
@@ -15,7 +15,7 @@ tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log
 def Identity(x: Tensor): return x
 # TODO: fix buffer_parse
 def Add(x: Tensor, other: Tensor, broadcast=None, axis=None): return x + other if x.dtype == dtypes.float or isinstance(x.dtype, ImageDType) else (x + other).cast(x.dtype)
-def Sub(x: Union[Tensor, Any], other: Tensor): return x - other # some test has input as int
+def Sub(x: Tensor | Any, other: Tensor): return x - other # some test has input as int
 def Less(x:Tensor,y:Tensor): return x < y
 def LessOrEqual(x:Tensor,y:Tensor): return x <= y
 def Greater(x:Tensor,y:Tensor): return x > y
@@ -104,7 +104,7 @@ def Atan(y: Tensor):
   t3 = (y.abs() > 1).where(1.570796327 - t3, t3)
   return (y < 0).where(-t3, t3)
 
-def Trilu(x: Tensor, k: Union[Tensor, int]=0, upper=1):
+def Trilu(x: Tensor, k: Tensor | int=0, upper=1):
   k = to_python_const(k) if isinstance(k, Tensor) else 0 # onnx passes k as a tensor int64 with one element, default is 0
   return x.triu(k) if upper else x.tril(k)
 
@@ -230,7 +230,7 @@ def _auto_pad(X: Tensor, auto_pad, strides, kernel_shape, dilations):
     return pad_shape[::2] + pad_shape[1::2] if auto_pad == "SAME_UPPER" else pad_shape[1::2] + pad_shape[::2]
   raise NotImplementedError(f"auto_pad={auto_pad} not implemented")
 
-def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=None, axes: Tensor=None, mode="constant", value: float=0.):
+def Pad(x: Tensor, pads: Tensor | Tuple[int, ...], constant_value: Tensor=None, axes: Tensor=None, mode="constant", value: float=0.):
   constant_value = value if constant_value is None else float(to_python_const(constant_value))
   seq_pads = list(pads) if isinstance(pads, tuple) else to_python_const(pads)
   seq_pads = [math.ceil(i) for i in seq_pads]
@@ -546,7 +546,7 @@ def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)
 def IsInf(x: Tensor, detect_negative=1, detect_positive=1):
   return (x == float("inf")) * bool(detect_positive) + (x == float("-inf")) * bool(detect_negative)
 
-def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point: Union[Tensor, int] = 0, axis=1, block_size=0):
+def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point: Tensor | int = 0, axis=1, block_size=0):
   def numpy_repeat(t: Tensor, axis, repeats, out_shape):
     t = t.reshape(tuple(-1 if i == axis-1 else 1 if i == axis else sh for i,sh in enumerate(t.shape)))
     return t.repeat([repeats if i == axis else 1 for i in range(t.ndim)]).reshape(out_shape)

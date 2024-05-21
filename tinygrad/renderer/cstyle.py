@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Tuple, Union, DefaultDict, cast, Literal, Callable
+from typing import Dict, List, Optional, Tuple, DefaultDict, cast, Literal, Callable
 import os, math
 from collections import defaultdict, Counter
 from tinygrad.codegen.linearizer import UOps, UOp
@@ -17,7 +17,7 @@ class CStyleLanguage(Renderer):
   smem_prefix_for_cast: bool = True
   arg_int_prefix: str = "const int"
   barrier: str = ""
-  code_for_workitem: Dict[Union[Literal["g"], Literal["l"], Literal["i"]], Callable] = {}
+  code_for_workitem: Dict[Literal["g"] | Literal["l"] | Literal["i"], Callable] = {}
   extra_args: List[str] = []
   float4: Optional[str] = None
   uses_vload: bool = False
