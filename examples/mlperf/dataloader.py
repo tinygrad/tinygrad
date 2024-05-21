@@ -207,13 +207,15 @@ def load_datasample(file_and_offset:Tuple[str, int]) -> List[dict]:
   return data[file_and_offset[1]]
 
 # Reference: https://github.com/mlcommons/training/blob/1c8a098ae3e70962a4f7422c0b0bd35ae639e357/language_model/tensorflow/bert/run_pretraining.py, Line 394
-def batch_load_train_bert(BS:int):
+def batch_load_train_bert(BS:int, start_step:int = 0):
   from extra.datasets.wikipedia import get_wiki_train_files
   files = shuffle_parts(get_wiki_train_files())
   dataset = []
-  for f in files: 
+  for f in tqdm(files, desc="Building dataset"):
     lists = [(f, o) for o in range(int(Path(f).stem.split("_")[3].split(".")[0]))]
     dataset.extend(lists)
+  
+  dataset = dataset[start_step:]
   
   active_set = deque(dataset[:1000])
   remaining_set = deque(dataset[1000:])
