@@ -891,16 +891,13 @@ class Exp(Function):
 
         # _, _, nan = _get_info(x)
 
-        isnotnan = x.e(BinaryOps.CMPEQ, x)
-        # print("ISNOTNAN: ")
-        # print(__import__('tinygrad').Tensor(isnotnan).numpy())
-        # computed = self._exp2_grand(x)
-        # computed = self._pade_15_15(x)
+        # isnotnan = x.e(BinaryOps.CMPEQ, x)
+
         computed = self._exp(x)
         computed = initial_x.e(BinaryOps.CMPLT, pinf_t).e(
             TernaryOps.WHERE, computed, computed.const(float("inf"))
         )
-        computed = isnotnan.e(TernaryOps.WHERE, computed, x.const(float("nan")))
+        # computed = isnotnan.e(TernaryOps.WHERE, computed, x.const(float("nan")))
         computed = initial_x.e(BinaryOps.CMPLT, ninf_t).e(
             TernaryOps.WHERE, computed.const(0), computed
         )
