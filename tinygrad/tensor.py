@@ -653,7 +653,7 @@ class Tensor:
     Must be used on a scalar tensor.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.arange(6, requires_grad=True)
+    t = Tensor.arange(6.0, requires_grad=True)
     t2 = t.sum()
     t2.backward()
     print(t.grad.numpy())
