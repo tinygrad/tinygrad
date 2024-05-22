@@ -751,9 +751,7 @@ class Exp(Function):
             x.cast(dtypes.int32).const(1),
         )
         x = self._abs(x)
-
         res = self._pade(x)
-
         res = sign.e(BinaryOps.CMPEQ, sign.const(-1)).e(
             TernaryOps.WHERE, res.const(1).e(BinaryOps.DIV, res), res
         )
@@ -843,15 +841,9 @@ class Exp(Function):
         # print("COMPUTED: ")
         # print(__import__('tinygrad').Tensor(computed).numpy()[0])
 
-        ret = computed.cast(dtypes.float32)
         # print("RET: ")
         # print(__import__('tinygrad').Tensor(ret).numpy()[0])
-        ret = computed.cast(self.beginning_dtype)
-        # print("RET: ")
-        # print(__import__('tinygrad').Tensor(ret).numpy()[0])
-
-        self.ret = ret
-
+        self.ret = computed.cast(self.beginning_dtype)
         # print("RET: ")
         # print(__import__('tinygrad').Tensor(self.ret).numpy())
         return self.ret
