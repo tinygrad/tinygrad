@@ -729,20 +729,16 @@ class Exp(Function):
         return Psum.e(BinaryOps.DIV, Qsum)
 
     def _eq(self, x: LazyBuffer, y: LazyBuffer) -> LazyBuffer:
-        res = self._abs(x.e(BinaryOps.SUB, y)).e(BinaryOps.CMPLT, x.const(0.5)).cast(x.dtype)
-        # print("\tX: ", __import__('tinygrad').Tensor(x).numpy())
-        # print("\tY: ", __import__('tinygrad').Tensor(y).numpy())
-        # print("\tEQ: ", __import__('tinygrad').Tensor(res).numpy())
-        return res
-
+        return self._abs(x.e(BinaryOps.SUB, y)).e(BinaryOps.CMPLT, x.const(0.5)).cast(x.dtype)
+    
     def _revnorm(self, x: LazyBuffer) -> LazyBuffer:
         """
         Revert and normalize x, using arithmetic ops:
             if x is 0, return 1
             if x != 0, return x
         """
-        x = x.e(BinaryOps.ADD, self._eq(x, x.const(0)))
-        return x
+        return x.e(BinaryOps.ADD, self._eq(x, x.const(0)))
+        
 
     def _exp_lowprec(self, x: LazyBuffer) -> LazyBuffer:
         sign = x.e(BinaryOps.CMPLT, x.const(0)).e(
@@ -799,6 +795,14 @@ class Exp(Function):
         return res
 
 
+    def zero_if_below_thresh(self, x: LazyBuffer, thresh: LazyBuffer) -> LazyBuffer:
+        """
+        Return 0 if x < thresh, else return x
+        """
+        lt = x.e(BinaryOps.CMPLT, thresh).cast(dtypes.int32)
+        lt = self._abs(lt.const(1).e(BinaryOps.SUB, lt).cast(x.dtype))
+        return x.e(BinaryOps.MUL, lt)
+
     def forward(self, x: LazyBuffer) -> LazyBuffer:
         # self.ret = x.e(BinaryOps.MUL, x.const(1 / math.log(2))).e(UnaryOps.EXP2)
         # return self.ret
@@ -806,7 +810,10 @@ class Exp(Function):
         initial_x = x
         pinf_t = x.const(88.72687268726872)
         ninf_t = x.const(-103.97539753975397)
-        x = x.e(BinaryOps.CMPLT, ninf_t).e(TernaryOps.WHERE, x.const(0), x)
+        # x = x.e(BinaryOps.CMPLT, ninf_t).e(TernaryOps.WHERE, x.const(0), x)
+        x = self.zero_if_below_thresh(x, ninf_t)
+
+
         # x = x.e(BinaryOps.MUL, x.const(1 / math.log(2)))
 
         self.beginning_dtype = x.dtype
