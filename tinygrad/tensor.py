@@ -1214,8 +1214,6 @@ class Tensor:
     """
     Returns the indices of the maximum value of the tensor along the specified axis.
 
-    If there are multiple maximum values, the function returns the index of the first occurrence.
-
     You can pass in `axis` and `keepdim` keyword arguments to control the axis along which the maximum is computed and whether the reduced dimensions are retained.
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -1237,8 +1235,6 @@ class Tensor:
   def argmin(self, axis=None, keepdim=False):
     """
     Returns the indices of the minimum value of the tensor along the specified axis.
-
-    If there are multiple minimum values, the function returns the index of the first occurrence.
 
     You can pass in `axis` and `keepdim` keyword arguments to control the axis along which the minimum is computed and whether the reduced dimensions are retained.
 
