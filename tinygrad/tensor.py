@@ -1156,7 +1156,7 @@ class Tensor:
     """
     Applies the softmax function to the tensor along the specified axis.
 
-    The softmax function transforms the input tensor into a probability distribution, where each element represents the probability of that class.
+    Rescales the elements of the tensor such that they lie in the range [0, 1] and sum to 1.
 
     You can pass in the `axis` keyword argument to control the axis along which the softmax is computed.
 
