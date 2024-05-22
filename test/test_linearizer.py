@@ -358,13 +358,16 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skip("multireduce isn't supported yet")
   def test_upcast_multireduce_nested_local_upcast(self):
     x, y, z, w = [Tensor.rand(1,128).realize() for _ in range(4)]
-    ld0 = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, ShapeTracker(views=(View(shape=(1, 128, 128), strides=(0, 0, 1), offset=0, mask=None, contiguous=False),))))
-    ld1 = LazyOp(BufferOps.LOAD, (), MemBuffer(2, dtypes.float, ShapeTracker(views=(View(shape=(1, 128, 128), strides=(0, 1, 128), offset=0, mask=None, contiguous=False),))))
-    ld2 = LazyOp(BufferOps.LOAD, (), MemBuffer(3, dtypes.float, ShapeTracker(views=(View(shape=(1, 128, 128), strides=(0, 0, 1), offset=0, mask=None, contiguous=False),))))
-    ld3 = LazyOp(BufferOps.LOAD, (), MemBuffer(4, dtypes.float, ShapeTracker(views=(View(shape=(1, 128, 128), strides=(0, 1, 128), offset=0, mask=None, contiguous=False),))))
+    st0 = ShapeTracker(views=(View(shape=(1, 128, 128), strides=(0, 0, 1), offset=0, mask=None, contiguous=False),))
+    st1 = ShapeTracker(views=(View(shape=(1, 128, 128), strides=(0, 1, 128), offset=0, mask=None, contiguous=False),))
+    ld0 = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, st0))
+    ld1 = LazyOp(BufferOps.LOAD, (), MemBuffer(2, dtypes.float, st1))
+    ld2 = LazyOp(BufferOps.LOAD, (), MemBuffer(3, dtypes.float, st0))
+    ld3 = LazyOp(BufferOps.LOAD, (), MemBuffer(4, dtypes.float, st1))
     r0 = LazyOp(ReduceOps.SUM, (LazyOp(BinaryOps.MUL, (ld0, ld1)), ), (2,))
     r1 = LazyOp(ReduceOps.SUM, (LazyOp(BinaryOps.MUL, (ld2, ld3)), ), (2,))
-    ast = (LazyOp(BufferOps.STORE, (LazyOp(BinaryOps.ADD, (r0, r1)), ), MemBuffer(0, dtypes.float, ShapeTracker(views=(View(shape=(1, 128, 1), strides=(0, 1, 0), offset=0, mask=None, contiguous=True),)))),)
+    out_st = ShapeTracker(views=(View(shape=(1, 128, 1), strides=(0, 1, 0), offset=0, mask=None, contiguous=True),))
+    ast = (LazyOp(BufferOps.STORE, (LazyOp(BinaryOps.ADD, (r0, r1)), ), MemBuffer(0, dtypes.float, out_st)),)
     helper_linearizer_ast(ast, [x, y, z, w])
 
   def test_zero_fold(self):
