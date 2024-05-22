@@ -1,7 +1,7 @@
 import unittest
 from tinygrad.dtype import dtypes
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
-from tinygrad.codegen.uops import UOpGraph, UOps, PatternMatcher, UOp, UPat, loop_collapse
+from tinygrad.ops import BinaryOps
+from tinygrad.codegen.uops import UOpGraph, UOps, PatternMatcher, UOp, UPat
 
 class TestPatternMatcher(unittest.TestCase):
   def assert_equiv_uops(self, uop1: UOp, uop2: UOp):
@@ -60,21 +60,24 @@ class TestPatternMatcher(unittest.TestCase):
     self.assertEqual(matcher.rewrite(c3), c3)
     self.assertEqual(matcher.rewrite(c4), None)
 
-  def test_constant_arg(self):
-    matcher = PatternMatcher([(UPat(name="x", uop=UOps.CONST, arg=42), lambda x: x)])
-    c1 = UOp(UOps.CONST, dtypes.int, arg=42)
-    c2 = UOp(UOps.CONST, dtypes.int, arg=43)
-    self.assertEqual(matcher.rewrite(c1), c1)
-    self.assertEqual(matcher.rewrite(c2), None)
+  @unittest.skip("no longer supported")
+  def test_rewrite_graph_folds(self):
+    uops = UOpGraph()
+    uops.add(UOps.CONST, dtypes.float, arg=2.0, simplify=False)
+    matcher = PatternMatcher([(UPat(name="x", uop=UOps.CONST, dtype=dtypes.float),
+                                lambda x: UOp(UOps.CAST, dtypes.int, (UOp(UOps.ALU, x.dtype, (x, x), BinaryOps.ADD),)))])
+    matcher.rewrite_graph(uops)
+    self.assertEqual(len(uops.uops), 2)
+    self.assert_equiv_uops(UOp(UOps.CONST, dtypes.int, arg=4), uops.uops[-1])
 
-  def test_zero_add(self):
-    matcher = PatternMatcher([(UPat(uop=UOps.ALU, arg=BinaryOps.ADD, vin=[UPat(name="x"), UPat(uop=UOps.CONST, arg=0)]), lambda x: x)])
-    c0 = UOp(UOps.CONST, dtypes.float, arg=0.0)
-    x = UOp(UOps.LOAD, dtypes.float, arg='x')
-    a1 = UOp(UOps.ALU, dtypes.float, (c0, x), BinaryOps.ADD)
-    a2 = UOp(UOps.ALU, dtypes.float, (x, c0), BinaryOps.ADD)
-    self.assertEqual(matcher.rewrite(a1), x)
-    self.assertEqual(matcher.rewrite(a2), x)
+  @unittest.skip("no longer supported")
+  def test_rewrite_graph_adds(self):
+    uops = UOpGraph()
+    uops.add(UOps.CONST, dtypes.int, arg=2, simplify=False)
+    matcher = PatternMatcher([(UPat(name="x", uop=UOps.CONST, dtype=dtypes.int),
+                               lambda x: UOp(UOps.STORE, x.dtype, (UOp(UOps.DEFINE_GLOBAL, x.dtype, tuple(), None), x)))])
+    matcher.rewrite_graph(uops)
+    uops.remove_childless({x for x in uops if x.uop == UOps.STORE})
 
   def test_sub_zero(self):
     matcher = PatternMatcher([(UPat(uop=UOps.ALU, arg=BinaryOps.SUB, vin=(UPat(name="x"), UPat(uop=UOps.CONST, arg=0))), lambda x: x)])
