@@ -744,6 +744,21 @@ class Exp(Function):
         x = x.e(BinaryOps.ADD, self._eq(x, x.const(0)))
         return x
 
+    def _exp_lowprec(self, x: LazyBuffer) -> LazyBuffer:
+        sign = x.e(BinaryOps.CMPLT, x.const(0)).e(
+            TernaryOps.WHERE,
+            x.cast(dtypes.int32).const(-1),
+            x.cast(dtypes.int32).const(1),
+        )
+        x = self._abs(x)
+
+        res = self._pade(x)
+
+        res = sign.e(BinaryOps.CMPEQ, sign.const(-1)).e(
+            TernaryOps.WHERE, res.const(1).e(BinaryOps.DIV, res), res
+        )
+        return res
+
     def _exp(self, x: LazyBuffer) -> LazyBuffer:
         sign = x.e(BinaryOps.CMPLT, x.const(0)).e(
             TernaryOps.WHERE,
@@ -799,9 +814,14 @@ class Exp(Function):
         self.beginning_dtype = x.dtype
         if self.beginning_dtype == dtypes.float32 and self.device != "METAL":
             x = x.cast(dtypes.float64)
+        # if self.device != "METAL":
+        #     x = x.cast(dtypes.float64)
         # print(self.beginning_dtype)
         # if self.device == "METAL":
-        # x = x.cast(dtypes.float32)
+        # x = x.cast(dtypes.float64)
+        # print("X: ")
+        # print(__import__('tinygrad').Tensor(x).numpy())
+        # x = x.cast(dtypes.float64)
         # else:
         #     x = x.cast(dtypes.float64)
 
@@ -809,7 +829,10 @@ class Exp(Function):
 
         isnotnan = x.e(BinaryOps.CMPEQ, x)
         #
-        computed = self._exp(x)
+        if self.beginning_dtype == dtypes.half:
+            computed = self._exp_lowprec(x)
+        else:
+            computed = self._exp(x)
         computed = initial_x.e(BinaryOps.CMPLT, pinf_t).e(
             TernaryOps.WHERE, computed, computed.const(float("inf"))
         )
@@ -817,8 +840,17 @@ class Exp(Function):
         computed = initial_x.e(BinaryOps.CMPLT, ninf_t).e(
             TernaryOps.WHERE, computed.const(0), computed
         )
+        # print("COMPUTED: ")
+        # print(__import__('tinygrad').Tensor(computed).numpy()[0])
 
-        self.ret = computed.cast(self.beginning_dtype)
+        ret = computed.cast(dtypes.float32)
+        # print("RET: ")
+        # print(__import__('tinygrad').Tensor(ret).numpy()[0])
+        ret = computed.cast(self.beginning_dtype)
+        # print("RET: ")
+        # print(__import__('tinygrad').Tensor(ret).numpy()[0])
+
+        self.ret = ret
 
         # print("RET: ")
         # print(__import__('tinygrad').Tensor(self.ret).numpy())
