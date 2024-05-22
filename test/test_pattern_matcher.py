@@ -227,4 +227,8 @@ class TestPatternMatcher(unittest.TestCase):
 
 
 if __name__ == "__main__":
+<<<<<<< HEAD
   unittest.main(verbosity=2)
+=======
+  unittest.main(verbosity=2)
+>>>>>>> 9c8cf2aa (ruff format)
