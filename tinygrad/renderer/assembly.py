@@ -1,5 +1,5 @@
 from typing import DefaultDict, Dict, List, Union, Optional, cast, Callable
-import struct
+import struct, copy, math
 from collections import defaultdict
 from tinygrad.helpers import DEBUG
 from tinygrad.codegen.linearizer import UOps, UOp
@@ -40,12 +40,15 @@ class PTXRenderer(Renderer):
     UnaryOps.NEG: lambda d,a,dt,name: f"not.pred {d}, {a};" if name == "pred" else f"neg.{name} {d}, {a};",
     UnaryOps.EXP2: lambda d,a,dt,name: f"ex2.approx.{name} {d}, {a};", UnaryOps.LOG2: lambda d,a,dt,name: f"lg2.approx.{name} {d}, {a};",
     UnaryOps.SIN: lambda d,a,dt,name: f"sin.approx.{name} {d}, {a};", UnaryOps.SQRT: lambda d,a,dt,name: f"sqrt.approx.{name} {d}, {a};",
+    BinaryOps.SHR: lambda d,a,b,dt,name: f"shr.b{name[1:]} {d}, {a}, {b};",
+    BinaryOps.SHL: lambda d,a,b,dt,name: f"shl.b{name[1:]} {d}, {a}, {b};",
     BinaryOps.ADD: lambda d,a,b,dt,name: f"{'or' if name == 'pred' else 'add'}.{name} {d}, {a}, {b};",
     BinaryOps.SUB: lambda d,a,b,dt,name: f"sub.{name} {d}, {a}, {b};",
     BinaryOps.MUL: lambda d,a,b,dt,name: ('and' if dt == dtypes.bool else 'mul') + f"{'.lo' if dtypes.is_int(dt) else ''}.{name} {d}, {a}, {b};",
     BinaryOps.XOR: lambda d,a,b,dt,name: f"xor.pred {d}, {a}, {b};" if name == "pred" else f"xor.b{name[1:]} {d}, {a}, {b};",
     BinaryOps.DIV: lambda d,a,b,dt,name: f"div{'.approx' if dtypes.is_float(dt) else ''}.{name} {d}, {a}, {b};",
-    BinaryOps.MAX: lambda d,a,b,dt,name: f"max.{name} {d}, {a}, {b};", BinaryOps.MOD: lambda d,a,b,dt,name: f"rem.{name} {d}, {a}, {b};",
+    BinaryOps.MAX: lambda d,a,b,dt,name: f"max.{name} {d}, {a}, {b};", 
+    BinaryOps.MOD: lambda d,a,b,dt,name: f"rem.{name} {d}, {a}, {b};", # if not dtypes.is_int(dtype) and b.isdigit() and int(b) > 0 and math.log2(int(b)).is_integer() else f"shr.u32 ",
     BinaryOps.CMPLT: lambda d,a,b,dt,name: f"setp.lt.{name} {d}, {a}, {b};",
     BinaryOps.CMPEQ: lambda d,a,b,dt,name: f"setp.eq.{name} {d}, {a}, {b};",
     TernaryOps.MULACC: lambda d,a,b,c,dt,name: f"{'fma.rn' if dtypes.is_float(dt) else 'mad.lo'}.{name} {d}, {a}, {b}, {c};",
@@ -104,6 +107,9 @@ class PTXRenderer(Renderer):
     kernel:List[str] = []
     bufs = []
 
+    if DEBUG >= 4: uops.print()
+    # for patt in ptx_matcher.patterns:
+    #   print("Pattern:", patt)
     uops.linearize(ptx_matcher)
     if DEBUG >= 4: uops.print()
 
@@ -169,6 +175,13 @@ class PTXRenderer(Renderer):
           if args is BinaryOps.CMPLT or args is BinaryOps.CMPEQ:
             # pass in the other dtype here
             kk(self.asm_for_op[args](ssa("alu", u), *[r[x] for x in vin], vin[0].dtype, self.types[vin[0].dtype]))
+          # elif args is BinaryOps.MUL and vin[1].uop is UOps.CONST and vin[1].arg > 0 and math.log2(vin[1].arg).is_integer():
+          #   def sr(d,a,b,dt,name): return f"shl.b{self.types[dt][1:]} {d}, {a}, {b};"
+          #   kk(sr(ssa("alu",u), r[vin[0]], int(math.log2(vin[1].arg)), dtype, self.types[dtype]))
+          # elif args is BinaryOps.DIV and vin[1].uop is UOps.CONST and vin[1].arg > 0 and math.log2(vin[1].arg).is_integer():
+          #   def sr(d,a,b,dt,name): return f"shr.{name} {d}, {a}, {b};"
+          #   assert False
+          #   kk(sr(ssa("alu",u), r[vin[0]], int(math.log2(vin[1].arg)), dtype, self.types[dtype]))
           else:
             kk(self.asm_for_op[args](ssa("alu", u), *[r[x] for x in vin], dtype, self.types[dtype]))
         elif uop is UOps.DEFINE_ACC:
@@ -183,7 +196,7 @@ class PTXRenderer(Renderer):
           kernel = [f".reg .u32 %{args[1]};"] + kernel
         elif uop is UOps.CONST:
           if dtype.count > 1: r[u] = [const(args, dtype.scalar(), mov=True) for _ in range(dtype.count)]
-          else: r[u] = const(args, dtype, mov=True)
+          else: r[u] = const(args, dtype, mov=False)
         elif uop is UOps.GEP: r[u] = r[vin[0]][u.arg]
         elif uop is UOps.LOAD:
           assert vin[0].dtype == dtypes.int64, "load isn't int64"
@@ -236,6 +249,12 @@ class PTXRenderer(Renderer):
     return self.render_kernel(kernel, name, bufs, c.items())
 
 ptx_matcher = PatternMatcher([
+  *[({"__name__": "root", "uop": UOps.ALU, "arg": BinaryOps.MUL, "dtype": set([dt for dt in dtypes.fields().values() if dtypes.is_int(dt)]),
+      "vin": [{"__name__": "const", "uop": UOps.CONST, "arg": 2**i}, {"__name__": "mul"}]},
+    lambda root, mul, const: UOp(UOps.ALU, root.dtype, (mul, UOp.const(root.dtype, int(math.log2(const.arg)))), BinaryOps.SHL)) for i in range(64)],
+  *[({"__name__": "root", "uop": UOps.ALU, "arg": BinaryOps.DIV, "dtype": set([dt for dt in dtypes.fields().values() if dtypes.is_int(dt)]),
+      "vin": [{"__name__": "const", "uop": UOps.CONST, "arg": 2**i}, {"__name__": "div"}]},
+    lambda root, div, const: UOp(UOps.ALU, root.dtype, (div, UOp.const(root.dtype, int(math.log2(const.arg)))), BinaryOps.SHR)) for i in range(64)],
   ({"__name__": "root", "uop": UOps.ALU, "arg": BinaryOps.CMPEQ, "vin": ({"dtype": dtypes.bool},{})},
   lambda root: UOp(UOps.ALU, dtypes.bool, (UOp(root.uop, root.dtype, root.vin, BinaryOps.XOR),), UnaryOps.NEG)),
   ({"__name__": "root", "uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": ({"__name__": "x", "dtype": dtypes.bool},{"__name__": "y"})},
