@@ -5,10 +5,9 @@ from tinygrad import Device, nn, Tensor, dtypes, Variable
 Device.DEFAULT = "CLANG"
 from train_gpt2 import GPT, GPTConfig
 from tinygrad.helpers import dedup, to_function_name, flatten, getenv, GRAPH, GlobalCounters, ansilen, to_function_name
-from tinygrad.engine.schedule import create_schedule
-from tinygrad.engine.realize import memory_planner, run_schedule
+from tinygrad.engine.schedule import create_schedule, memory_planner
+from tinygrad.engine.realize import get_linearizer, run_schedule
 from tinygrad.ops import BufferOps, LoadOps
-from tinygrad.runtime.ops_clang import CLANG_PROGRAM_HEADER
 
 TIMING = getenv("TIMING")
 
@@ -24,6 +23,7 @@ if __name__ == "__main__":
   #B, T = Variable("B", 1, 128).bind(4), 64 #Variable("T", 1, 1024).bind(64)
   B, T = 4, 64
 
+  Tensor.training = True
   optimizer = nn.optim.Adam(nn.state.get_parameters(model), lr=1e-4)
   warmup_count = getenv("WARMUP", 3)
   for i in range(warmup_count):  # TODO: why does it take three and not two to stablize
@@ -46,9 +46,9 @@ if __name__ == "__main__":
   ast_dedup = dedup([si.ast for si in sched if si.ast[0].op is BufferOps.STORE])
   srcs = {}
   for ast in ast_dedup:
-    k = Device["CLANG"].get_linearizer(*ast)
+    k = get_linearizer(Device["CLANG"].renderer, ast)
     k.linearize()
-    src = Device["CLANG"].compiler.render(to_function_name(k.name), k.uops).strip(CLANG_PROGRAM_HEADER)
+    src = Device["CLANG"].renderer.render(to_function_name(k.name), k.uops)
     srcs[ast] = (k.name, src)
   print("functions:", len(srcs))
   used_buffers = dedup(flatten([si.bufs for si in sched]))
@@ -62,7 +62,7 @@ if __name__ == "__main__":
     if v.lazydata.base.buffer not in used_buffers: print(f"UNUSED: {k}")
     if v.grad is not None: grad_state_dict['grad_'+k] = v.grad
   state_dict.update(grad_state_dict)
-  state_dict.update({'adam_b1': optimizer.b1, 'adam_b2': optimizer.b2, 'adam_t': optimizer.t, 'adam_lr': optimizer.lr})
+  state_dict.update({'adam_b1_t': optimizer.b1_t, 'adam_b2_t': optimizer.b2_t, 'adam_lr': optimizer.lr})
   inverse_state_dict = {v:k for k,v in state_dict.items()}
   for p,m,v in zip(optimizer.params, optimizer.m, optimizer.v):
     nm = inverse_state_dict[p]
@@ -70,10 +70,8 @@ if __name__ == "__main__":
     state_dict["adam_v_"+nm] = v
   named_buffers = {v.lazydata.base.buffer:k.replace(".", "_") for k,v in state_dict.items()}
 
-  if TIMING:
-    c_code = [CLANG_PROGRAM_HEADER, "#include <stdio.h>", "#include <time.h>", "#include <stdlib.h>"]
-  else:
-    c_code = ["#include <stdlib.h>", CLANG_PROGRAM_HEADER]
+  c_code = ["#include <stdlib.h>", "#include <tgmath.h>", "#include <stdbool.h>"]
+  if TIMING: c_code += ["#include <stdio.h>", "#include <time.h>"]
   c_code += [x[1].replace(" restrict ", " ")+"\n" for x in srcs.values()]
 
   premain = ["int main() {"]

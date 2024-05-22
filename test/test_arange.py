@@ -12,3 +12,6 @@ class TestArange(unittest.TestCase):
     f2 = self._get_flops(2560)
     print(f"{f1=}, {f2=}")
     assert f2 / f1 < 15, f"bad complexity, flops {f2/f1:.1f}X while inputs 10X"
+
+if __name__ == "__main__":
+  unittest.main()

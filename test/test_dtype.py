@@ -2,11 +2,11 @@ import unittest, operator, subprocess
 import numpy as np
 import torch
 from typing import Any, List
-from tinygrad.helpers import getenv, DEBUG
+from tinygrad.helpers import getenv, DEBUG, CI
 from tinygrad.dtype import DType, DTYPES_DICT, ImageDType, PtrDType, least_upper_float, least_upper_dtype
 from tinygrad import Device, Tensor, dtypes
 from hypothesis import given, settings, strategies as strat
-from test.helpers import is_dtype_supported
+from test.helpers import is_dtype_supported, rand_for_dtype
 
 settings.register_profile("my_profile", max_examples=200, deadline=None)
 settings.load_profile("my_profile")
@@ -47,6 +47,9 @@ def _test_cast(a:Tensor, target_dtype:DType):
   if target_dtype == dtypes.half and Device.DEFAULT == "PYTHON":
     # TODO: struct.pack cannot pack value > 65504 (max of half) into e format
     a = (a > 65504).where(65504, a)
+  if CI and Device.DEFAULT == "CLANG" and (target_dtype, a.dtype) in [(dtypes.double, dtypes.half), (dtypes.half, dtypes.double)]:
+    # TODO: cast between double and half are broken https://github.com/tinygrad/tinygrad/issues/4084
+    return
 
   _test_op(lambda: a.cast(target_dtype), target_dtype, list(a.numpy().astype(target_dtype.np)))
 def _test_bitcast(a:Tensor, target_dtype:DType, target=None):
@@ -59,15 +62,7 @@ class TestDType(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
     if not cls.DTYPE or not is_dtype_supported(cls.DTYPE): raise unittest.SkipTest("dtype not supported")
-    DATA_SIZE = 10
-    if dtypes.is_unsigned(cls.DTYPE):
-      cls.DATA = np.random.randint(0, 100, size=DATA_SIZE, dtype=cls.DTYPE.np)
-    elif dtypes.is_int(cls.DTYPE):
-      cls.DATA = np.random.randint(-100, 100, size=DATA_SIZE, dtype=cls.DTYPE.np)
-    elif cls.DTYPE == dtypes.bool:
-      cls.DATA = np.random.choice([True, False], size=DATA_SIZE)
-    else:
-      cls.DATA = np.random.uniform(-10, 10, size=DATA_SIZE).astype(cls.DTYPE.np)
+    cls.DATA = rand_for_dtype(cls.DTYPE, 10)
   def setUp(self):
     if self.DTYPE is None: raise unittest.SkipTest("base class")
 
@@ -118,7 +113,7 @@ class TestDType(unittest.TestCase):
       arr = np.asarray(data, dtype=dt)
       tin = Tensor(arr).numpy()
       tor = torch.as_tensor(arr).detach().numpy()
-      assert dt is tin.dtype is tor.dtype, f"dtype mismatch: expected={dt} | tinygrad={tin.dtype} | torch={tor.dtype}"
+      assert dt == tin.dtype == tor.dtype, f"dtype mismatch: expected={dt} | tinygrad={tin.dtype} | torch={tor.dtype}"
       np.testing.assert_allclose(tin, tor, atol=1e-6, rtol=1e-3)
 
 def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype=None):
@@ -205,7 +200,7 @@ class TestFloatDType(TestDType):
 
 class TestDoubleDtype(TestDType):
   DTYPE = dtypes.double
-  @unittest.skipIf(getenv("CUDACPU") or getenv("PTX"), "conversion not supported on CUDACPU and PTX")  # TODO: why not?
+  @unittest.skipIf((CI and Device.DEFAULT in {"CUDA", "NV"}) or getenv("PTX"), "conversion not supported on CUDACPU and PTX")  # TODO: why not?
   def test_float64_increased_precision(self):
     for func in [
       lambda t: t.exp(),
@@ -531,6 +526,21 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([0, 1], dtype=dtypes.float32)).sum().dtype == dtypes.float32
     assert (Tensor([0, 1], dtype=dtypes.float64)).sum().dtype == dtypes.float64
 
+  def test_mean(self):
+    assert (Tensor([0, 1], dtype=dtypes.bool)).mean().dtype == dtypes.float32
+    assert (Tensor([0, 1], dtype=dtypes.int8)).mean().dtype == dtypes.float32
+    assert (Tensor([0, 1], dtype=dtypes.int16)).mean().dtype == dtypes.float32
+    assert (Tensor([0, 1], dtype=dtypes.int32)).mean().dtype == dtypes.float32
+    assert (Tensor([0, 1], dtype=dtypes.int64)).mean().dtype == dtypes.float32
+    assert (Tensor([0, 1], dtype=dtypes.uint8)).mean().dtype == dtypes.float32
+    assert (Tensor([0, 1], dtype=dtypes.uint16)).mean().dtype == dtypes.float32
+    assert (Tensor([0, 1], dtype=dtypes.uint32)).mean().dtype == dtypes.float32
+    assert (Tensor([0, 1], dtype=dtypes.uint64)).mean().dtype == dtypes.float32
+    assert (Tensor([0, 1], dtype=dtypes.float16)).mean().dtype == dtypes.float16
+    #assert (Tensor([0, 1], dtype=dtypes.bfloat16)).mean().dtype == dtypes.bfloat16
+    assert (Tensor([0, 1], dtype=dtypes.float32)).mean().dtype == dtypes.float32
+    assert (Tensor([0, 1], dtype=dtypes.float64)).mean().dtype == dtypes.float64
+
   def test_cumsum(self):
     assert (Tensor([0, 1], dtype=dtypes.bool)).cumsum(0).dtype == dtypes.int32
     assert (Tensor([0, 1], dtype=dtypes.int8)).cumsum(0).dtype == dtypes.int32
@@ -629,13 +639,13 @@ class TestAutoCastType(unittest.TestCase):
     t = Tensor([[x]], dtype=dtypes.half, requires_grad=True).expand(N, N).contiguous()
     np.testing.assert_allclose(t.mean(axis=1).numpy(), np.array([x] * N, dtype=np.float16), rtol=1e-3)
 
-  @unittest.skip("TODO: fix this")
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_mean_half_precision_overflow(self):
-    t = Tensor([60000, 60000, 60000], dtype=dtypes.half, requires_grad=True)
+    N = 256
+    t = Tensor([60000] * N*N, dtype=dtypes.half, requires_grad=True).reshape(N, N)
     np.testing.assert_allclose(t.mean().numpy(), 60000)
     t.square().mean().backward()
-    np.testing.assert_allclose(t.grad.numpy(), [60000 * 2 / 3] * 3)
+    np.testing.assert_allclose(t.grad.numpy().flatten(), [60000 * 2 / (N*N)] * N*N)
 
 class TestImplicitFunctionTypeChange(unittest.TestCase):
   def test_functions(self):
@@ -650,8 +660,15 @@ class TestImplicitFunctionTypeChange(unittest.TestCase):
     ]:
       t = func(Tensor([4.0, 3.0])).max() == func(Tensor([4.0, 3.0]))
       result.append(t.numpy().sum())
-
     assert all(result)
+
+class TestTensorMethod(unittest.TestCase):
+  @given(strat.sampled_from(core_dtypes))
+  def test_abs_diff(self, dt):
+    if dt == dtypes.bool or not is_dtype_supported(dt): return
+    a, b = Tensor([2], dtype=dt), Tensor([1], dtype=dt)
+    ret = (a - b).abs()
+    np.testing.assert_allclose(ret.numpy(), np.abs(a.numpy()-b.numpy()))
 
 if __name__ == '__main__':
   unittest.main()

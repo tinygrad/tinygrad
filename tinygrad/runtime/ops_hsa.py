@@ -3,8 +3,7 @@ import ctypes, functools, subprocess, io, atexit, collections, json
 from typing import Tuple, TypeVar, List, Dict, Any
 import tinygrad.runtime.autogen.hsa as hsa
 from tinygrad.helpers import DEBUG, init_c_var, from_mv, round_up, to_mv, init_c_struct_t, getenv
-from tinygrad.device import Compiled, LRUAllocator, Compiler, CompilerOptions
-from tinygrad.buffer import BufferOptions
+from tinygrad.device import Compiled, Compiler, CompileError, BufferOptions, LRUAllocator
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.runtime.driver.hsa import check, scan_agents, find_memory_pool, AQLQueue
 from tinygrad.runtime.driver.hip_comgr import compile_hip
@@ -43,12 +42,12 @@ class HSAProfiler:
 Profiler = HSAProfiler()
 
 class HSACompiler(Compiler):
-  compiler_opts = CompilerOptions("HSA", has_tensor_cores=True, shared_max=65536)
   def __init__(self, arch:str):
     self.arch = arch
     super().__init__(f"compile_hip_{self.arch}")
-  def render(self, name:str, uops) -> str: return HIPRenderer(name, uops)
-  def compile(self, src:str) -> bytes: return compile_hip(src, self.arch)
+  def compile(self, src:str) -> bytes:
+    try: return compile_hip(src, self.arch)
+    except RuntimeError as e: raise CompileError(e)
 
 class HSAProgram:
   def __init__(self, device:HSADevice, name:str, lib:bytes):
@@ -221,7 +220,7 @@ class HSADevice(Compiled):
     self.reusable_signals: List[hsa.hsa_signal_t] = []
 
     from tinygrad.runtime.graph.hsa import HSAGraph
-    super().__init__(device, HSAAllocator(self), HSACompiler(self.arch), functools.partial(HSAProgram, self), HSAGraph)
+    super().__init__(device, HSAAllocator(self), HIPRenderer(), HSACompiler(self.arch), functools.partial(HSAProgram, self), HSAGraph)
 
     # Finish init: preallocate some signals + space for kernargs
     self.signal_pool = [init_c_var(hsa.hsa_signal_t(), lambda x: check(hsa.hsa_signal_create(1, 0, None, ctypes.byref(x)))) for _ in range(4096)]
