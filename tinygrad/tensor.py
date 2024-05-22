@@ -702,7 +702,7 @@ class Tensor:
     Returns a new tensor that is expanded to the shape that is specified.
     Expand can also increase the number of dimensions that a tensor has.
 
-    Passing a -1 to a dimension means that it's size will not be changed.
+    Passing a `-1` or `None` to a dimension means that it's size will not be changed.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([1, 2, 3])
