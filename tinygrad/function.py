@@ -794,23 +794,21 @@ class Exp(Function):
         )
         x = self._abs(x)
 
-        divres = x.e(BinaryOps.DIV, x.const(20)).cast(dtypes.int64)
-        # print("DIVRES: ")
-        # print(__import__('tinygrad').Tensor(divres).numpy())
-        modres = self._mod(x, x.const(20))
-        #
-        # res = self._pade_15_15(modres)
-        # res = self._pade(x)
-        res = self._pade(modres)
+        # divres = x.e(BinaryOps.DIV, x.const(20)).cast(dtypes.int64)
+        # modres = self._mod(x, x.const(20))
+        # res = self._pade(modres)
+
+        res = self._pade(x)
+
         # print("RES: ")
         # print(__import__('tinygrad').Tensor(res).numpy())
 
-        for i in range(5, 0, -1):
-            res = divres.e(BinaryOps.CMPEQ, divres.const(i)).e(
-                TernaryOps.WHERE, res.e(BinaryOps.MUL, res.const(math.exp(i * 20))), res
-            )
-            # print(f"i: {i}, RES: ")
-            # print(__import__('tinygrad').Tensor(res).numpy())
+        # for i in range(5, 0, -1):
+        #     res = divres.e(BinaryOps.CMPEQ, divres.const(i)).e(
+        #         TernaryOps.WHERE, res.e(BinaryOps.MUL, res.const(math.exp(i * 20))), res
+        #     )
+        #     # print(f"i: {i}, RES: ")
+        #     # print(__import__('tinygrad').Tensor(res).numpy())
         res = sign.e(BinaryOps.CMPEQ, sign.const(-1)).e(
             TernaryOps.WHERE, res.const(1).e(BinaryOps.DIV, res), res
         )
