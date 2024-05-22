@@ -1042,20 +1042,116 @@ class Tensor:
     return ret if keepdim else ret.reshape(tuple(s for i,s in enumerate(self.shape) if i not in axis_))
 
   def sum(self, axis=None, keepdim=False, acc_dtype:Optional[DType]=None):
+    """
+    Sums the elements of the tensor along the specified axis or axes.
+
+    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    which the maximum is computed and whether the reduced dimensions are retained.
+
+    You can pass in `acc_dtype` keyword argument to control the data type of the accumulation.
+    If not specified, the accumulation data type is chosen based on the input tensor's data type.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randint(2, 3, low=5, high=10)
+    print(t.numpy(), "->")
+    print(t.sum().numpy())
+    print(t.sum(axis=0).numpy())
+    print(t.sum(axis=1).numpy())
+    ```
+    """
     ret = self.cast(acc_dtype or sum_acc_dtype(self.dtype))._reduce(F.Sum, axis, keepdim)
     return ret.cast(self.dtype) if self.dtype in {dtypes.float16, dtypes.bfloat16} else ret
-  def max(self, axis=None, keepdim=False): return self._reduce(F.Max, axis, keepdim)
-  def min(self, axis=None, keepdim=False): return -((-self).max(axis=axis, keepdim=keepdim))
+  def max(self, axis=None, keepdim=False):
+    """
+    Returns the maximum value of the tensor along the specified axis or axes.
+
+    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    which the maximum is computed and whether the reduced dimensions are retained.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randint(2, 3, low=5, high=10)
+    print(t.numpy(), "->")
+    print(t.max().numpy())
+    print(t.max(axis=0).numpy())
+    print(t.max(axis=1).numpy())
+    ```
+    """
+    return self._reduce(F.Max, axis, keepdim)
+  def min(self, axis=None, keepdim=False):
+    """
+    Returns the minimum value of the tensor along the specified axis or axes.
+
+    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    which the minimum is computed and whether the reduced dimensions are retained.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randint(2, 3, low=5, high=10)
+    print(t.numpy(), "->")
+    print(t.min().numpy())
+    print(t.min(axis=0).numpy())
+    print(t.min(axis=1).numpy())
+    ```
+    """
+    return -((-self).max(axis=axis, keepdim=keepdim))
 
   def mean(self, axis=None, keepdim=False):
+    """
+    Returns the mean value of the tensor along the specified axis or axes.
+
+    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    which the mean is computed and whether the reduced dimensions are retained.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randint(2, 3, low=5, high=10)
+    print(t.numpy(), "->")
+    print(t.mean().numpy())
+    print(t.mean(axis=0).numpy())
+    print(t.mean(axis=1).numpy())
+    ```
+    """
     output_dtype = self.dtype if dtypes.is_float(self.dtype) else dtypes.float32
     numerator = self.cast(sum_acc_dtype(self.dtype)).sum(axis=axis, keepdim=keepdim)
     return numerator.div(prod([si for si, so in zip(self.shape, self.sum(axis=axis, keepdim=True).shape) if si != so])).cast(output_dtype)
   def var(self, axis=None, keepdim=False, correction=1):
+    """
+    Returns the variance of the tensor along the specified axis or axes.
+
+    You can pass in `axis`, `keepdim`, and `correction` keyword arguments to control the axis along
+    which the variance is computed, whether the reduced dimensions are retained, and the Bessel's correction applied.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randint(2, 3, low=5, high=10)
+    print(t.numpy(), "->")
+    print(t.var().numpy())
+    print(t.var(axis=0).numpy())
+    print(t.var(axis=1).numpy())
+    ```
+    """
     assert all_int(self.shape), "does not support symbolic shape"
     square_sum = ((self - self.mean(axis=axis, keepdim=True)).square()).sum(axis=axis, keepdim=keepdim)
     return square_sum.div(max(0, prod(self.shape)/prod(square_sum.shape)-correction))
-  def std(self, axis=None, keepdim=False, correction=1): return self.var(axis, keepdim, correction).sqrt()
+  def std(self, axis=None, keepdim=False, correction=1):
+    """
+    Returns the standard deviation of the tensor along the specified axis or axes.
+
+    You can pass in `axis`, `keepdim`, and `correction` keyword arguments to control the axis along
+    which the standard deviation is computed, whether the reduced dimensions are retained, and the Bessel's correction applied.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randint(2, 3, low=5, high=10)
+    print(t.numpy(), "->")
+    print(t.std().numpy())
+    print(t.std(axis=0).numpy())
+    print(t.std(axis=1).numpy())
+    ```
+    """
+    return self.var(axis, keepdim, correction).sqrt()
 
   def _softmax(self, axis):
     m = self - self.max(axis=axis, keepdim=True)
@@ -1063,19 +1159,80 @@ class Tensor:
     return m, e, e.sum(axis=axis, keepdim=True)
 
   def softmax(self, axis=-1):
+    """
+    Applies the softmax function to the tensor along the specified axis.
+
+    Rescales the elements of the tensor such that they lie in the range [0, 1] and sum to 1.
+
+    You can pass in the `axis` keyword argument to control the axis along which the softmax is computed.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(2, 3)
+    print(t.numpy(), "->")
+    print(t.softmax().numpy())
+    print(t.softmax(axis=0).numpy())
+    ```
+    """
     _, e, ss = self._softmax(axis)
     return e.div(ss)
 
   def log_softmax(self, axis=-1):
+    """
+    Applies the log-softmax function to the tensor along the specified axis.
+
+    The log-softmax function is a numerically stable alternative to the softmax function in log space.
+
+    You can pass in the `axis` keyword argument to control the axis along which the log-softmax is computed.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(2, 3)
+    print(t.numpy(), "->")
+    print(t.log_softmax().numpy())
+    print(t.log_softmax(axis=0).numpy())
+    ```
+    """
     m, _, ss = self._softmax(axis)
     return m - ss.log()
 
   def logsumexp(self, axis=None, keepdim=False):
+    """
+    Computes the log-sum-exp of the tensor along the specified axis or axes.
+
+    The log-sum-exp function is a numerically stable way to compute the logarithm of the sum of exponentials.
+
+    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    which the log-sum-exp is computed and whether the reduced dimensions are retained.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(2, 3)
+    print(t.numpy(), "->")
+    print(t.logsumexp().numpy())
+    print(t.logsumexp(axis=0).numpy())
+    print(t.logsumexp(axis=1).numpy())
+    ```
+    """
     m = self.max(axis=axis, keepdim=True)
     return (self - m).exp().sum(axis=axis, keepdim=keepdim).log() + m.squeeze(axis)
 
   def argmax(self, axis=None, keepdim=False):
-    # NOTE: return the first index if there are multiple occurrences of the maximum values
+    """
+    Returns the indices of the maximum value of the tensor along the specified axis.
+
+    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    which the maximum is computed and whether the reduced dimensions are retained.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(2, 3)
+    print(t.numpy(), "->")
+    print(t.argmax().numpy()) # Returns the index of the maximum value in the flattened tensor.
+    print(t.argmax(axis=0).numpy()) # Returns the indices of the maximum values along axis 0.
+    print(t.argmax(axis=1).numpy()) # Returns the indices of the maximum values along axis 1.
+    ```
+    """
     if axis is None:
       idx = (self == self.max(axis)) * Tensor.arange(prod(self.shape)-1,-1,-1, requires_grad=False, device=self.device).reshape(self.shape)
       return (prod(self.shape) - idx.max() - 1).cast(dtypes.int32)
@@ -1083,7 +1240,23 @@ class Tensor:
     m = self == self.max(axis=axis, keepdim=True)
     idx = m * Tensor.arange(self.shape[axis]-1,-1,-1, requires_grad=False, device=self.device).reshape(self.shape[axis], *[1]*(self.ndim-axis-1))
     return (self.shape[axis]-idx.max(axis=axis, keepdim=keepdim)-1).cast(dtypes.int32)
-  def argmin(self, axis=None, keepdim=False): return (-self).argmax(axis=axis, keepdim=keepdim)
+  def argmin(self, axis=None, keepdim=False):
+    """
+    Returns the indices of the minimum value of the tensor along the specified axis.
+
+    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    which the minimum is computed and whether the reduced dimensions are retained.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(2, 3)
+    print(t.numpy(), "->")
+    print(t.argmin().numpy()) # Returns the index of the minimum value in the flattened tensor.
+    print(t.argmin(axis=0).numpy()) # Returns the indices of the minimum values along axis 0.
+    print(t.argmin(axis=1).numpy()) # Returns the indices of the minimum values along axis 1.
+    ```
+    """
+    return (-self).argmax(axis=axis, keepdim=keepdim)
 
   @staticmethod
   def einsum(formula:str, *raw_xs, acc_dtype:Optional[DType]=None) -> Tensor:
