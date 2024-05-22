@@ -120,7 +120,6 @@ def uop_alu_resolve(u: UOp) -> sint:
 
 # *** simplification logic ***
 
-
 @dataclass(frozen=True)
 class UPat:
   uop: Optional[Union[UOps, Set[UOps]]] = None
@@ -150,12 +149,8 @@ def _match(uop: UOp, pattern: UPat, store: Dict[str, UOp]) -> bool:
     elif uop.uop != pattern.uop:
       return False
   if pattern.vin:
-    for vp in (
-      itertools.permutations(pattern.vin)
-      if isinstance(pattern.vin, list)
-      else ([pattern.vin] if isinstance(pattern.vin, tuple) else [(pattern.vin,) * len(uop.vin)])
-    ):
-      if len(uop.vin) != len(vp) and (len(uop.vin) not in getattr(pattern, "__allow_len__", [])):
+    for vp in itertools.permutations(pattern.vin) if isinstance(pattern.vin, list) else ([pattern.vin] if isinstance(pattern.vin, tuple) else [(pattern.vin,) * len(uop.vin)]):
+      if len(uop.vin) != len(vp) and (len(uop.vin) not in getattr(pattern, '__allow_len__', [])):
         return False
       new_store = store.copy()
       if all(_match(uu, vv, new_store) for uu, vv in zip(uop.vin, vp)):
@@ -164,7 +159,6 @@ def _match(uop: UOp, pattern: UPat, store: Dict[str, UOp]) -> bool:
         return True
     return False
   return True
-
 
 class PatternMatcher:
   def __init__(self, patterns: List[Tuple[UPat, Callable]]):
@@ -208,76 +202,27 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst):
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
   # arange loop folding (early)
-  (
-    UPat(
-      uop=UOps.ALU,
-      arg=TernaryOps.WHERE,
-      vin=(
-        UPat(
-          uop=UOps.ALU,
-          arg=BinaryOps.CMPLT,
-          vin=(
-            UPat(
-              uop=UOps.ALU,
-              arg=BinaryOps.ADD,
-              vin=[
-                UPat(name="idx"),
-                UPat(
-                  uop=UOps.ALU,
-                  arg=BinaryOps.MUL,
-                  vin=[UPat(name="mval", uop=UOps.CONST), UPat(uop=UOps.RANGE, vin=(UPat(name="loop_start"), UPat(name="loop_end")))],
-                ),
-              ],
-            ),
-            UPat(name="compval", uop=UOps.CONST),
-          ),
-        ),
-        UPat(name="multconst", uop=UOps.CONST),
-        UPat(uop=UOps.CONST, arg=0),
-      ),
-    ),
-    loop_collapse,
-  ),
+  (UPat(uop=UOps.ALU, arg=TernaryOps.WHERE, vin=(
+    UPat(uop=UOps.ALU, arg=BinaryOps.CMPLT, vin=(
+      UPat(uop=UOps.ALU, arg=BinaryOps.ADD, vin=[
+        UPat(name="idx"), UPat(uop=UOps.ALU, arg=BinaryOps.MUL,
+          vin=[UPat(name="mval", uop=UOps.CONST), UPat(uop=UOps.RANGE, vin=(UPat(name="loop_start"), UPat(name="loop_end")))])]),
+      UPat(name="compval", uop=UOps.CONST))), UPat(name="multconst", uop=UOps.CONST), UPat(uop=UOps.CONST, arg=0))), loop_collapse),
   # sum collapse to mul (with possible GEP)
-  (
-    UPat(
-      uop=UOps.PHI,
-      vin=(
-        UPat(name="phi_input", uop=UOps.DEFINE_ACC, vin=(UPat(uop=UOps.RANGE, name="loop"),)),
-        UPat(uop=UOps.ALU, arg=BinaryOps.ADD, vin=(UPat(name="val1"), UPat(name="val2"))),
-      ),
-    ),
-    sum_collapse,
-  ),
-  (
-    UPat(
-      uop=UOps.PHI,
-      vin=(
-        UPat(name="phi_input", uop=UOps.GEP, vin=(UPat(uop=UOps.DEFINE_ACC, vin=(UPat(uop=UOps.RANGE, name="loop"),)),)),
-        UPat(uop=UOps.ALU, arg=BinaryOps.ADD, vin=(UPat(name="val1"), UPat(name="val2"))),
-      ),
-    ),
-    sum_collapse,
-  ),
+  (UPat(uop=UOps.PHI, vin=(UPat(name="phi_input", uop=UOps.DEFINE_ACC, vin=(UPat(uop=UOps.RANGE, name="loop"),)),
+      UPat(uop=UOps.ALU, arg=BinaryOps.ADD, vin=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
+  (UPat(uop=UOps.PHI, vin=(UPat(name="phi_input", uop=UOps.GEP, vin=(UPat(uop=UOps.DEFINE_ACC, vin=(UPat(uop=UOps.RANGE, name="loop"),)),)),
+      UPat(uop=UOps.ALU, arg=BinaryOps.ADD, vin=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
   # deal with UNMUL
-  (
-    UPat(
-      uop=UOps.ALU,
-      arg=BinaryOps.MUL,
-      vin=[UPat(uop=UOps.CONST, name="c1"), UPat(uop=UOps.UNMUL, vin=[UPat(uop=UOps.CONST, name="c2"), UPat(name="v")])],
-    ),
-    lambda c1, c2, v: v if c1.arg == c2.arg else None,
-  ),
+  (UPat(uop=UOps.ALU, arg=BinaryOps.MUL, vin=[UPat(uop=UOps.CONST, name="c1"),
+                                                   UPat(uop=UOps.UNMUL, vin=[UPat(uop=UOps.CONST, name="c2"), UPat(name="v")])]),
+                                                   lambda c1,c2,v: v if c1.arg == c2.arg else None),
   (UPat(uop=UOps.UNMUL, vin=(UPat(uop=UOps.CONST, name="zero", arg=0), UPat())), lambda zero: zero),
-  (
-    UPat(name="root", uop=UOps.CAST, vin=(UPat(uop=UOps.UNMUL, name="unmul"),)),
-    lambda root, unmul: UOp(UOps.UNMUL, root.dtype, (unmul.vin[0].cast(root.dtype), unmul.vin[1])),
-  ),
+  (UPat(name="root", uop=UOps.CAST, vin=(UPat(uop=UOps.UNMUL, name="unmul"),)),
+    lambda root,unmul: UOp(UOps.UNMUL, root.dtype, (unmul.vin[0].cast(root.dtype), unmul.vin[1]))),
   # max on special can go away (TODO: special should be variable, same thing applies)
-  (
-    UPat(uop=UOps.ALU, arg=BinaryOps.MAX, vin=[UPat(name="c", uop=UOps.CONST), UPat(name="s", uop=UOps.SPECIAL)]),
-    lambda c, s: c if (s.arg[2] - 1) <= c.arg else None,
-  ),
+  (UPat(uop=UOps.ALU, arg=BinaryOps.MAX, vin=[UPat(name="c", uop=UOps.CONST), UPat(name="s", uop=UOps.SPECIAL)]),
+    lambda c,s: c if (s.arg[2]-1) <= c.arg else None),
   # const rules
   (UPat(name="root", uop=UOps.GEP, vin=(UPat(name="c", uop=UOps.CONST),)), lambda root, c: UOp.const(root.dtype, c.arg)),
   (UPat(name="root", uop=UOps.CAST, vin=UPat(name="c", uop=UOps.CONST)), lambda root, c: UOp.const(root.dtype, c.arg)),
@@ -298,107 +243,56 @@ constant_folder = PatternMatcher([
   (UPat(uop=UOps.ALU, arg=BinaryOps.MUL, vin=[UPat(name="x"), UPat(uop=UOps.CONST, arg=-1)]), lambda x: -x),
   # bool < False is always false, True < bool is always false
   (UPat(uop=UOps.ALU, arg=BinaryOps.CMPLT, vin=(UPat(), UPat(name="x", uop=UOps.CONST, dtype=dtypes.bool, arg=False))), lambda x: x),
-  (
-    UPat(uop=UOps.ALU, arg=BinaryOps.CMPLT, vin=(UPat(name="x", uop=UOps.CONST, dtype=dtypes.bool, arg=True), UPat())),
-    lambda x: UOp.const(dtypes.bool, False),
-  ),
+  (UPat(uop=UOps.ALU, arg=BinaryOps.CMPLT, vin=(UPat(name="x", uop=UOps.CONST, dtype=dtypes.bool, arg=True), UPat())),
+    lambda x: UOp.const(dtypes.bool, False)),
   # a conditional with the same results either way is a noop, also fold const conditionals
   (UPat(uop=UOps.ALU, arg=TernaryOps.WHERE, vin=(UPat(), UPat(name="val"), UPat(name="val"))), lambda val: val),
-  (
-    UPat(uop=UOps.ALU, arg=TernaryOps.WHERE, vin=(UPat(name="gate", uop=UOps.CONST), UPat(name="c0"), UPat(name="c1"))),
-    lambda gate, c0, c1: c0 if gate.arg else c1,
-  ),
+  (UPat(uop=UOps.ALU, arg=TernaryOps.WHERE, vin=(UPat(name="gate", uop=UOps.CONST), UPat(name="c0"), UPat(name="c1"))),
+    lambda gate, c0, c1: c0 if gate.arg else c1),
   # ** constant folding **
-  (
-    UPat(name="root", uop=UOps.ALU, vin=UPat(uop=UOps.CONST)),
-    lambda root: UOp.const(root.dtype, exec_alu(root.arg, root.dtype, [x.arg for x in root.vin])),
-  ),
+  (UPat(name="root", uop=UOps.ALU, vin=UPat(uop=UOps.CONST)),
+    lambda root: UOp.const(root.dtype, exec_alu(root.arg, root.dtype, [x.arg for x in root.vin]))),
   # ** self folding **
-  (UPat(uop=UOps.ALU, arg=BinaryOps.ADD, vin=[UPat(name="x"), UPat(uop=UOps.CONST, arg=0)]), lambda x: x),  # x+0 -> x or 0+x -> x
-  (UPat(uop=UOps.ALU, arg=BinaryOps.MUL, vin=[UPat(name="x"), UPat(uop=UOps.CONST, arg=1)]), lambda x: x),  # x*1 -> x or 1*x -> x
-  (UPat(uop=UOps.ALU, arg=BinaryOps.SUB, vin=(UPat(name="x"), UPat(uop=UOps.CONST, arg=0))), lambda x: x),  # x-0 -> x
-  (UPat(uop=UOps.ALU, arg=BinaryOps.DIV, vin=(UPat(name="x"), UPat(uop=UOps.CONST, arg=1))), lambda x: x),  # x/1 -> x
-  (UPat(uop=UOps.ALU, arg=BinaryOps.DIV, vin=(UPat(name="x"), UPat(uop=UOps.CONST, arg=-1))), lambda x: -x),  # x/-1 -> -x
+  (UPat(uop=UOps.ALU, arg=BinaryOps.ADD, vin=[UPat(name="x"), UPat(uop=UOps.CONST, arg=0)]), lambda x: x),   # x+0 -> x or 0+x -> x
+  (UPat(uop=UOps.ALU, arg=BinaryOps.MUL, vin=[UPat(name="x"), UPat(uop=UOps.CONST, arg=1)]), lambda x: x),   # x*1 -> x or 1*x -> x
+  (UPat(uop=UOps.ALU, arg=BinaryOps.SUB, vin=(UPat(name="x"), UPat(uop=UOps.CONST, arg=0))), lambda x: x),   # x-0 -> x
+  (UPat(uop=UOps.ALU, arg=BinaryOps.DIV, vin=(UPat(name="x"), UPat(uop=UOps.CONST, arg=1))), lambda x: x),   # x/1 -> x
+  (UPat(uop=UOps.ALU, arg=BinaryOps.DIV, vin=(UPat(name="x"), UPat(uop=UOps.CONST, arg=-1))), lambda x: -x), # x/-1 -> -x
   # ** zero folding **
-  (UPat(uop=UOps.ALU, arg=BinaryOps.MUL, vin=[UPat(), UPat(name="c", uop=UOps.CONST, arg=0)]), lambda c: c),  # x*0 -> 0 or 0*x -> 0
-  (UPat(uop=UOps.ALU, arg=BinaryOps.SUB, vin=(UPat(name="x"), UPat(name="x"))), lambda x: UOp.const(x.dtype, 0)),  # x-x -> 0
+  (UPat(uop=UOps.ALU, arg=BinaryOps.MUL, vin=[UPat(), UPat(name="c", uop=UOps.CONST, arg=0)]), lambda c: c), # x*0 -> 0 or 0*x -> 0
+  (UPat(uop=UOps.ALU, arg=BinaryOps.SUB, vin=(UPat(name="x"), UPat(name="x"))), lambda x: UOp.const(x.dtype, 0)),   # x-x -> 0
   # ** load/store folding **
-  (
-    UPat(uop=UOps.STORE, vin=(UPat(name="buf"), UPat(name="idx"), UPat(uop=UOps.LOAD, vin=(UPat(name="buf"), UPat(name="idx"))))),
-    lambda buf, idx: UOp(UOps.NOOP),
-  ),
+  (UPat(uop=UOps.STORE, vin=(UPat(name="buf"), UPat(name="idx"),
+                               UPat(uop=UOps.LOAD, vin=(UPat(name="buf"), UPat(name="idx"))))), lambda buf, idx: UOp(UOps.NOOP)),
   # ** two stage add/sub folding **
-  (
-    UPat(
-      uop=UOps.ALU,
-      arg=BinaryOps.ADD,
-      vin=[UPat(uop=UOps.ALU, arg=BinaryOps.ADD, vin=[UPat(name="x"), UPat(name="c1", uop=UOps.CONST)]), UPat(name="c2", uop=UOps.CONST)],
-    ),
-    lambda x, c1, c2: x + UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, [c1.arg, c2.arg])),
-  ),
-  (
-    UPat(
-      uop=UOps.ALU,
-      arg=BinaryOps.ADD,
-      vin=[UPat(uop=UOps.ALU, arg=BinaryOps.SUB, vin=(UPat(name="x"), UPat(name="c1", uop=UOps.CONST))), UPat(name="c2", uop=UOps.CONST)],
-    ),
-    lambda x, c1, c2: x + UOp.const(x.dtype, exec_alu(BinaryOps.SUB, x.dtype, [c2.arg, c1.arg])),
-  ),
+  (UPat(uop=UOps.ALU, arg=BinaryOps.ADD, vin=[UPat(uop=UOps.ALU, arg=BinaryOps.ADD,
+                     vin=[UPat(name="x"), UPat(name="c1", uop=UOps.CONST)]), UPat(name="c2", uop=UOps.CONST)]),
+     lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, [c1.arg, c2.arg]))),
+  (UPat(uop=UOps.ALU, arg=BinaryOps.ADD, vin=[UPat(uop=UOps.ALU, arg=BinaryOps.SUB,
+                     vin=(UPat(name="x"), UPat(name="c1", uop=UOps.CONST))), UPat(name="c2", uop=UOps.CONST)]),
+     lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.SUB, x.dtype, [c2.arg, c1.arg]))),
   # TODO: can do the invert of this (flip alt/load) when we fix double ops
-  (
-    UPat(
-      uop=UOps.STORE,
-      vin=(
-        UPat(name="buf"),
-        UPat(name="idx"),
-        UPat(
-          uop=UOps.ALU, arg=TernaryOps.WHERE, vin=(UPat(name="gate"), UPat(name="alt"), UPat(uop=UOps.LOAD, vin=(UPat(name="buf"), UPat(name="idx"))))
-        ),
-      ),
-    ),
-    lambda buf, idx, gate, alt: UOp(UOps.STORE, None, (buf, idx, alt, gate)),
-  ),
+  (UPat(uop=UOps.STORE, vin=(UPat(name="buf"), UPat(name="idx"), UPat(uop=UOps.ALU, arg=TernaryOps.WHERE,
+                       vin=(UPat(name="gate"), UPat(name="alt"), UPat(uop=UOps.LOAD, vin=(UPat(name="buf"), UPat(name="idx"))))))),
+    lambda buf, idx, gate, alt: UOp(UOps.STORE, None, (buf, idx, alt, gate))),
   # store float4/float2 directly (remove CAST/GEP)
-  (
-    UPat(
-      uop=UOps.STORE,
-      vin=(UPat(name="buf"), UPat(name="idx"), UPat(uop=UOps.CAST, vin=[UPat(uop=UOps.GEP, vin=(UPat(name="val"),), arg=i) for i in range(4)])),
-    ),
-    lambda buf, idx, val: UOp(UOps.STORE, None, (buf, idx, val)),
-  ),
-  (
-    UPat(
-      uop=UOps.STORE,
-      vin=(UPat(name="buf"), UPat(name="idx"), UPat(uop=UOps.CAST, vin=[UPat(uop=UOps.GEP, vin=(UPat(name="val"),), arg=i) for i in range(2)])),
-    ),
-    lambda buf, idx, val: UOp(UOps.STORE, None, (buf, idx, val)),
-  ),
+  (UPat(uop=UOps.STORE, vin=(UPat(name="buf"), UPat(name="idx"), UPat(uop=UOps.CAST, vin=[
+                                UPat(uop=UOps.GEP, vin=(UPat(name="val"),), arg=i) for i in range(4)]))),
+   lambda buf,idx,val: UOp(UOps.STORE, None, (buf, idx, val))),
+  (UPat(uop=UOps.STORE, vin=(UPat(name="buf"), UPat(name="idx"), UPat(uop=UOps.CAST, vin=[
+                                UPat(uop=UOps.GEP, vin=(UPat(name="val"),), arg=i) for i in range(2)]))),
+   lambda buf,idx,val: UOp(UOps.STORE, None, (buf, idx, val))),
   # CAST-PHI-GEP -> PHI-CAST
-  (
-    UPat(
-      name="root",
-      uop=UOps.CAST,
-      vin=[UPat(uop=UOps.PHI, vin=(UPat(uop=UOps.GEP, vin=(UPat(name="val"),), arg=i), UPat(name=f"v{i}"))) for i in range(4)],
-    ),
-    lambda root, val, v0, v1, v2, v3: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1, v2, v3)))),
-  ),
-  (
-    UPat(
-      name="root",
-      uop=UOps.CAST,
-      vin=[UPat(uop=UOps.PHI, vin=(UPat(uop=UOps.GEP, vin=(UPat(name="val"),), arg=i), UPat(name=f"v{i}"))) for i in range(2)],
-    ),
-    lambda root, val, v0, v1: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1)))),
-  ),
+  (UPat(name="root", uop=UOps.CAST, vin=[
+    UPat(uop=UOps.PHI, vin=(UPat(uop=UOps.GEP, vin=(UPat(name="val"),), arg=i), UPat(name=f"v{i}"))) for i in range(4)]),
+    lambda root, val, v0, v1, v2, v3: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1, v2, v3))))),
+  (UPat(name="root", uop=UOps.CAST, vin=[
+    UPat(uop=UOps.PHI, vin=(UPat(uop=UOps.GEP, vin=(UPat(name="val"),), arg=i), UPat(name=f"v{i}"))) for i in range(2)]),
+    lambda root, val, v0, v1: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1))))),
   # NEG/CMPLT -> CMPLT
-  (
-    UPat(
-      uop=UOps.ALU,
-      arg=BinaryOps.CMPLT,
-      vin=(UPat(uop=UOps.ALU, arg=UnaryOps.NEG, vin=(UPat(name="x"),)), UPat(name="c", uop=UOps.CONST, dtype=dtypes.int)),
-    ),
-    lambda c, x: UOp(UOps.ALU, dtypes.bool, (UOp.const(c.dtype, -c.arg), x), BinaryOps.CMPLT),
-  ),
+  (UPat(uop=UOps.ALU, arg=BinaryOps.CMPLT, vin=(UPat(uop=UOps.ALU, arg=UnaryOps.NEG, vin=(UPat(name="x"),)),
+                                                     UPat(name="c", uop=UOps.CONST, dtype=dtypes.int))),
+    lambda c,x: UOp(UOps.ALU, dtypes.bool, (UOp.const(c.dtype, -c.arg), x), BinaryOps.CMPLT)),
   # cast NOOP (NOTE: it's `is` to deal with PtrDType)
   (UPat(name="root", uop=UOps.CAST), lambda root: root.vin[0] if root.dtype is root.vin[0].dtype else None),
 ])
