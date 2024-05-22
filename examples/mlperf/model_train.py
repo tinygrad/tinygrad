@@ -435,6 +435,7 @@ def train_unet3d():
     optim.step()
     return loss.realize()
   
+  @TinyJit
   @Tensor.train(mode=False)
   @Tensor.inference_mode()
   def eval_step(model, x, y):
@@ -514,6 +515,8 @@ def train_unet3d():
           eval_loss_value, score = eval_step(model, x, y)
           eval_loss.append(eval_loss_value)
           scores.append(score)
+
+        eval_step.reset()
 
         scores = Tensor.mean(Tensor.stack(scores, dim=0), axis=0).numpy()
         eval_loss = Tensor.mean(Tensor.stack(eval_loss, dim=0), axis=0).numpy()
