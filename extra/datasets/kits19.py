@@ -227,6 +227,18 @@ def rand_balanced_crop(image, label, patch_size=(128, 128, 128), oversampling=0.
     image, label = _rand_crop(image, label, patch_size)
   return image, label
 
+def kits19_dataloader(batch_size:int = 6, val:bool = False, shuffle:bool = True):
+  batch_count = min(6, len(files) // batch_size)
+  files = get_val_files() if val else get_train_files()
+  ds_iter = iter(files)
+
+  for bc in range(batch_count):
+    for _ in range(bc * batch_size, (bc+1) * batch_size):
+      fn = next(ds_iter)
+      print(fn)
+  
+
 if __name__ == "__main__":
-  for X, Y in iterate(get_val_files()):
-    print(X.shape, Y.shape)
+  kits19_dataloader()
+  # for X, Y in iterate(get_val_files()):
+  #   print(X.shape, Y.shape)
