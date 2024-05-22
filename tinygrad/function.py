@@ -681,8 +681,8 @@ class Exp(Function):
 
         # divres = x.e(BinaryOps.DIV, x.const(10)).cast(dtypes.int64)
         # modres = self._mod(x, x.const(10))
-        divres = x.e(BinaryOps.DIV, x.const(70)).cast(dtypes.int64)
-        modres = self._mod(x, x.const(70))
+        # divres = x.e(BinaryOps.DIV, x.const(70)).cast(dtypes.int64)
+        # modres = self._mod(x, x.const(70))
         # print("MODRES: ")
         # print(__import__('tinygrad').Tensor(modres).numpy())
         res = self._exp2_v1(x, 130)
