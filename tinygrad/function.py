@@ -695,16 +695,36 @@ class Log(Function):
 
 
 class Exp(Function):
+
     def _mod(self, x: LazyBuffer, y: LazyBuffer) -> LazyBuffer:
         return x.e(
             BinaryOps.SUB,
             x.e(BinaryOps.DIV, y).cast(dtypes.int64).cast(x.dtype).e(BinaryOps.MUL, y),
         )
 
+    def _sign(self, x: LazyBuffer) -> LazyBuffer:
+        # return x.e(BinaryOps.CMPLT, x.const(0)).e(
+        #     TernaryOps.WHERE, x.e(UnaryOps.NEG), x
+        # )
+        # res = x.e(BinaryOps.CMPLT, x.const(0)).cast(x.dtype).e(BinaryOps.MUL, x.const(2)).e(BinaryOps.SUB, x.const(1))
+        res = x.const(0).e(BinaryOps.CMPLT, x).cast(x.dtype).e(BinaryOps.MUL, x.const(2)).e(BinaryOps.SUB, x.const(1))
+        # print("\tSign of ")
+        # print(__import__('tinygrad').Tensor(x).numpy())
+        # print("\tis ")
+        # print(__import__('tinygrad').Tensor(res).numpy())
+        return res
+
+        
+
     def _abs(self, x: LazyBuffer) -> LazyBuffer:
-        return x.e(BinaryOps.CMPLT, x.const(0)).e(
-            TernaryOps.WHERE, x.e(UnaryOps.NEG), x
-        )
+        res = x.e(BinaryOps.MUL, self._sign(x))
+        # print("\tAbs of ")
+        # print(__import__('tinygrad').Tensor(x).numpy())
+        # print("\tis ")
+        # print(__import__('tinygrad').Tensor(res).numpy())
+        return res
+
+
         
     def _pade(self, x: LazyBuffer) -> LazyBuffer:
         PQ = [5.555436579284281e-21, 1.3125769210893678e-18, 1.5403901227001058e-16, 1.1868561690995733e-14, 6.692190361862563e-13, 2.916409677106555e-11, 1.0120390540692245e-09, 2.8407411743582775e-08, 6.48870399793012e-07, 1.2036730599655186e-05, 0.00017952743589247597, 0.002110706881493183, 0.018906257230122514, 0.12163057975674008, 0.5018697635563099, 1.0]
@@ -729,7 +749,7 @@ class Exp(Function):
         return Psum.e(BinaryOps.DIV, Qsum)
 
     def _eq(self, x: LazyBuffer, y: LazyBuffer) -> LazyBuffer:
-        return self._abs(x.e(BinaryOps.SUB, y)).e(BinaryOps.CMPLT, x.const(0.5)).cast(x.dtype)
+        return self._abs(x.e(BinaryOps.SUB, y)).e(BinaryOps.CMPLT, x.const(0.001)).cast(x.dtype)
     
     def _revnorm(self, x: LazyBuffer) -> LazyBuffer:
         """
@@ -741,11 +761,12 @@ class Exp(Function):
         
 
     def _exp_lowprec(self, x: LazyBuffer) -> LazyBuffer:
-        sign = x.e(BinaryOps.CMPLT, x.const(0)).e(
-            TernaryOps.WHERE,
-            x.cast(dtypes.int32).const(-1),
-            x.cast(dtypes.int32).const(1),
-        )
+        # sign = x.e(BinaryOps.CMPLT, x.const(0)).e(
+        #     TernaryOps.WHERE,
+        #     x.cast(dtypes.int32).const(-1),
+        #     x.cast(dtypes.int32).const(1),
+        # )
+        sign = self._sign(x).cast(dtypes.int32)
         x = self._abs(x)
         res = self._pade(x)
         res = sign.e(BinaryOps.CMPEQ, sign.const(-1)).e(
@@ -760,31 +781,35 @@ class Exp(Function):
             x.cast(dtypes.int32).const(1),
         )
         x = self._abs(x)
+        print("X: ")
 
-        divres = x.e(BinaryOps.DIV, x.const(10)).cast(x.dtype).e(BinaryOps.SUB, x.const(0.499999))
-        # print("DIVRES: ")
-        # print(__import__('tinygrad').Tensor(divres).numpy())
+        # divres = x.e(BinaryOps.DIV, x.const(10)).cast(x.dtype).e(BinaryOps.SUB, x.const(0.499999))
+        divres = x.e(BinaryOps.DIV, x.const(10)).cast(dtypes.uint64).cast(x.dtype)
+        print("DIVRES: ")
+        print(__import__('tinygrad').Tensor(divres).numpy())
         modres = self._mod(x, x.const(10))
+        print("MODRES: ")
+        print(__import__('tinygrad').Tensor(modres).numpy())
         res = self._pade(modres)
 
         # res = self._pade(x)
-        # print("RES: ")
-        # print(__import__('tinygrad').Tensor(res).numpy())
+        print("RES: ")
+        print(__import__('tinygrad').Tensor(res).numpy())
 
         for i in range(10, 0, -1):
-            # print("i: ", i)
+            print("i: ", i)
             epow = res.const(math.exp(i*10))
-            # print("epow: ")
-            # print(__import__('tinygrad').Tensor(epow).numpy())
+            print("epow: ")
+            print(__import__('tinygrad').Tensor(epow).numpy())
             epow = epow.e(BinaryOps.MUL, self._eq(divres, divres.const(i)).cast(epow.dtype))
-            # print("epow: ")
-            # print(__import__('tinygrad').Tensor(epow).numpy())
+            print("epow: ")
+            print(__import__('tinygrad').Tensor(epow).numpy())
             epow = self._revnorm(epow)
-            # print("epow: ")
-            # print(__import__('tinygrad').Tensor(epow).numpy())
+            print("epow: ")
+            print(__import__('tinygrad').Tensor(epow).numpy())
             res = res.e(BinaryOps.MUL, epow)
-            # print("res: ")
-            # print(__import__('tinygrad').Tensor(res).numpy())
+            print("res: ")
+            print(__import__('tinygrad').Tensor(res).numpy())
         
         res = sign.e(BinaryOps.CMPEQ, sign.const(-1)).e(
             TernaryOps.WHERE, res.const(1).e(BinaryOps.DIV, res), res
