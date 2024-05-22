@@ -684,10 +684,11 @@ class Tensor:
     `.view` is an alias for `.reshape`.
     """
     return self.reshape(shape)
+
   def reshape(self, shape, *args) -> Tensor:
     """
-    Returns a new tensor with the same data as the original tensor but with a different shape.
-    shape can be passed as a tuple or as separate arguments.
+    Returns a tensor with the same data as the original tensor but with a different shape.
+    `shape` can be passed as a tuple or as separate arguments.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor.arange(6)
@@ -697,12 +698,13 @@ class Tensor:
     new_shape = argfix(shape, *args)
     new_shape = tuple([-prod(self.shape) // prod(new_shape) if s == -1 else (s if s is not None else self.shape[i]) for i,s in enumerate(new_shape)])
     return F.Reshape.apply(self, shape=new_shape) if new_shape != self.shape else self
+
   def expand(self, shape, *args) -> Tensor:
     """
-    Returns a new tensor that is expanded to the shape that is specified.
+    Returns a tensor that is expanded to the shape that is specified.
     Expand can also increase the number of dimensions that a tensor has.
 
-    Passing a `-1` or `None` to a dimension means that it's size will not be changed.
+    Passing a `-1` or `None` to a dimension means that its size will not be changed.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([1, 2, 3])
@@ -710,11 +712,12 @@ class Tensor:
     ```
     """
     return self._broadcast_to(tuple(sh if s==-1 or s is None else s for s, sh in zip(*(_pad_left(argfix(shape, *args), self.shape)))))
+
   def permute(self, order, *args) -> Tensor:
     """
-    Returns a new tensor that is a permutation of the original tensor.
+    Returns a tensor that is a permutation of the original tensor.
     The new tensor has the same data as the original tensor but with the dimensions permuted according to the order specified.
-    order can be passed as a tuple or as separate arguments.
+    `order` can be passed as a tuple or as separate arguments.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor.arange(6).reshape(2, 3)
@@ -723,11 +726,66 @@ class Tensor:
     ```
     """
     return F.Permute.apply(self, order=argfix(order, *args))
-  def flip(self, axis, *args) -> Tensor: return F.Flip.apply(self, axis=[x if x >= 0 else x+len(self.shape) for x in argfix(axis, *args)])
+
+  def flip(self, axis, *args) -> Tensor:
+    """
+    Returns a tensor that reverses the order of the original tensor along given axis.
+    `axis` can be passed as a tuple or as separate arguments.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(6).reshape(2, 3)
+    print(t.numpy(), "->")
+    print(t.flip(0).numpy())
+    ```
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(6).reshape(2, 3)
+    print(t.numpy(), "->")
+    print(t.flip((0, 1)).numpy())
+    ```
+    """
+    return F.Flip.apply(self, axis=[x if x >= 0 else x+len(self.shape) for x in argfix(axis, *args)])
+
   def shrink(self, arg:Tuple[Optional[Tuple[sint, sint]], ...]) -> Tensor:
+    """
+    Returns a tensor that shrinks the each axis based on input arg.
+    `arg` has the same length as `self.ndim`.
+    For each axis, it can be `None`, which means no shrink, or a tuple `(start, end)` that works the same as python slice.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(9).reshape(3, 3)
+    print(t.numpy(), "->")
+    print(t.shrink(((None, (1, 3)))).numpy())
+    ```
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(9).reshape(3, 3)
+    print(t.numpy(), "->")
+    print(t.shrink((((0, 2), (0, 2)))).numpy())
+    ```
+    """
     if all(x is None or x == (0,s) for x,s in zip(arg, self.shape)): return self
     return F.Shrink.apply(self, arg=tuple(x if x is not None else (0,s) for x,s in zip(arg, self.shape)))
+
   def pad(self, arg:Tuple[Optional[Tuple[sint, sint]], ...], value:float=0.0) -> Tensor:
+    """
+    Returns a tensor that pads the each axis based on input arg.
+    arg has the same length as `self.ndim`.
+    For each axis, it can be `None`, which means no pad, or a tuple `(pad_before, pad_after)`.
+    If `value` is specified, the tensor is padded with `value`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(6).reshape(2, 3)
+    print(t.numpy(), "->")
+    print(t.pad(((None, (1, 2)))).numpy())
+    ```
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(6).reshape(2, 3)
+    print(t.numpy(), "->")
+    print(t.pad(((None, (1, 2))), -2).numpy())
+    ```
+    """
     if all(x is None or x == (0,0) for x in arg): return self
     ret = F.Pad.apply(self, arg=(narg:=tuple(x if x is not None else (0,0) for x in arg)))
     return ret if 0 == value else ret + F.Pad.apply(Tensor.ones_like(self), arg=narg).where(0, value)
