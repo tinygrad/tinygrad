@@ -680,9 +680,7 @@ class Tensor:
   # ***** movement mlops *****
 
   def view(self, *shape) -> Tensor:
-    """
-    `.view` is an alias for `.reshape`.
-    """
+    """`.view` is an alias for `.reshape`."""
     return self.reshape(shape)
 
   def reshape(self, shape, *args) -> Tensor:
@@ -1008,10 +1006,22 @@ class Tensor:
     return self.slice([(0,s) for s in self.shape[:-(len(padding)//2)]] + slc, value=value)
 
   @property
-  def T(self) -> Tensor: return self.transpose()
-  def transpose(self, ax1=1, ax2=0) -> Tensor:
+  def T(self) -> Tensor:
+    """`.T` is an alias for `.transpose(1, 0)`."""
+    return self.transpose()
+  def transpose(self, dim0=1, dim1=0) -> Tensor:
+    """
+    Returns a tensor that is a transposed version of the original tensor.
+    The given dimensions `dim0` and `dim1` are swapped.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(6).reshape(2, 3)
+    print(t.numpy(), "->")
+    print(t.transpose(0, 1).numpy())
+    ```
+    """
     order = list(range(self.ndim))
-    order[ax1], order[ax2] = order[ax2], order[ax1]
+    order[dim0], order[dim1] = order[dim1], order[dim0]
     return self.permute(order)
   def flatten(self, start_dim=0, end_dim=-1):
     start_dim, end_dim = self._resolve_dim(start_dim), self._resolve_dim(end_dim)
