@@ -679,7 +679,11 @@ class Tensor:
 
   # ***** movement mlops *****
 
-  def view(self, *shape) -> Tensor: return self.reshape(shape)  # in tinygrad, view and reshape are the same thing
+  def view(self, *shape) -> Tensor:
+    """
+    `.view` is an alias for `.reshape`.
+    """
+    return self.reshape(shape)
   def reshape(self, shape, *args) -> Tensor:
     """
     Returns a new tensor with the same data as the original tensor but with a different shape.
