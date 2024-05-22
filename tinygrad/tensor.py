@@ -1007,9 +1007,9 @@ class Tensor:
 
   @property
   def T(self) -> Tensor:
-    """`.T` is an alias for `.transpose(0, 1)`."""
+    """`.T` is an alias for `.transpose(1, 0)`."""
     return self.transpose()
-  def transpose(self, dim0=0, dim1=1) -> Tensor:
+  def transpose(self, dim0=1, dim1=0) -> Tensor:
     """
     Returns a tensor that is a transposed version of the original tensor.
     The given dimensions `dim0` and `dim1` are swapped.
