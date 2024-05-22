@@ -548,13 +548,18 @@ class TestLinearizer(unittest.TestCase):
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "device doesn't support float4")
   def test_grouped_store_phis(self):
+    """
+    float4 acc0 = float4(0.0,0.0,0.0,0.0);
+    {
+      acc0 = // ...
+    }
+    *((device float4*)(data0+alu2)) = float4(acc0.x,acc0.y,acc0.z,acc0.w);
+    simplifies to:
+    *((device float4*)(data0+alu2)) = acc0;
+    """
     x, y = Tensor.randn(64,64), Tensor.randn(64,64)
     out = x.matmul(y)
-
-    k = Linearizer(*create_schedule([out.lazydata])[-1].ast)
-    k.hand_coded_optimizations()
-    k.linearize()
-
+    k = helper_linearizer_opt(out)[-1]
     # check that the float4 cast collapses
     store_vals = [u.vin[-1] for u in k.uops if u.uop is UOps.STORE]
     for val in store_vals:
@@ -564,11 +569,7 @@ class TestLinearizer(unittest.TestCase):
   def test_grouped_store_values(self):
     x = Tensor.randn((4,3,6,6)).realize()
     out = x.flip((0,1)).contiguous()
-
-    k = Linearizer(*create_schedule([out.lazydata])[-1].ast)
-    k.hand_coded_optimizations()
-    k.linearize()
-
+    k = helper_linearizer_opt(out)[-1]
     store_val = [u.vin[-1] for u in k.uops if u.uop is UOps.STORE][0]
     assert store_val.dtype == dtypes.float.vec(4) and store_val.uop is not UOps.CAST
 
@@ -578,17 +579,12 @@ class TestLinearizer(unittest.TestCase):
 
     x, y = Tensor.rand(128, 128), Tensor.rand(128, 128)
     out = x@y
-
-    opts = [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUPTOP, 0, 8),
+    opt = [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUPTOP, 0, 8),
             Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 2)] # upcast accs in both reduces
-    k = Linearizer(*create_schedule([out.lazydata])[-1].ast)
-    for opt in opts: k.apply_opt(opt)
-    k.linearize()
-
+    k = helper_linearizer_opt(out, opts=[opt])[-1]
     local_stores = [u for u in k.uops if u.uop is UOps.STORE and u.vin[0].uop is UOps.DEFINE_LOCAL]
     barrier = [u for u in k.uops if u.uop is UOps.BARRIER][0]
     global_stores = [u for u in k.uops if u.uop is UOps.STORE and u.vin[0].uop is UOps.DEFINE_GLOBAL]
-
     # check that the float4 cast collapses for all stores
     for store in local_stores+global_stores:
       assert store.vin[-1].dtype == dtypes.float.vec(2) and store.vin[-1].uop is not UOps.CAST
@@ -602,10 +598,7 @@ class TestLinearizer(unittest.TestCase):
 
     x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
     r = (x@y).relu()
-    k = Linearizer(*create_schedule([r.lazydata])[-1].ast)
-    k.hand_coded_optimizations()
-    k.linearize()
-
+    k = helper_linearizer_opt(r)[-1]
     stores = [u for u in k.uops if u.uop is UOps.STORE]
 
     # the float4 value stores directly in lds and we skip upcast
@@ -618,31 +611,23 @@ class TestLinearizer(unittest.TestCase):
   def test_skip_unmatching_upcasts(self):
     if not Device[Device.DEFAULT].renderer.has_local or not Device[Device.DEFAULT].renderer.supports_float4:
       self.skipTest("needs locals and float4")
-    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(240, 40, 1, 1), strides=(1, 240, 0, 0), offset=0, mask=None, contiguous=False),)))),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(240, 40, 1, 1), strides=(40, 1, 0, 0), offset=0, mask=None, contiguous=True),)))) # noqa: E501
-    opts = [
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(240, 40, 1, 1), strides=(1, 240, 0, 0), offset=0, mask=None, contiguous=False),)))),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(240, 40, 1, 1), strides=(40, 1, 0, 0), offset=0, mask=None, contiguous=True),)))), # noqa: E501
+    opt = [
         Opt(op=OptOps.UPCAST, axis=1, amt=4), Opt(op=OptOps.LOCAL, axis=0, amt=16),
         Opt(op=OptOps.LOCAL, axis=1, amt=2), Opt(op=OptOps.UPCAST, axis=3, amt=2)
     ]
-
-    k = Linearizer(ast)
-    for opt in opts: k.apply_opt(opt)
-    k.linearize()
-
+    k = helper_linearizer_ast(ast, [Tensor.empty(240*40).realize()], opts=[opt])[-1]
     out = [u for u in k.uops if u.uop is UOps.STORE][0]
     assert out.vin[-1].uop is UOps.CAST and out.vin[-1].dtype == dtypes.float.vec(4)
 
   def test_skip_unmatching_upcasts_with_gep(self):
     if not Device[Device.DEFAULT].renderer.has_local or not Device[Device.DEFAULT].renderer.supports_float4:
       self.skipTest("Needs locals and float4")
-    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(8, 32, 1, 1), strides=(1, 8, 0, 0), offset=0, mask=None, contiguous=False),)))),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(8, 32, 1, 1), strides=(32, 1, 0, 0), offset=0, mask=None, contiguous=True),)))) # noqa: E501
-    opts = [Opt(op=OptOps.LOCAL, axis=1, amt=4), Opt(op=OptOps.UPCAST, axis=2, amt=2), Opt(op=OptOps.LOCAL, axis=1, amt=8),
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(8, 32, 1, 1), strides=(1, 8, 0, 0), offset=0, mask=None, contiguous=False),)))),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(8, 32, 1, 1), strides=(32, 1, 0, 0), offset=0, mask=None, contiguous=True),)))), # noqa: E501
+    opt = [Opt(op=OptOps.LOCAL, axis=1, amt=4), Opt(op=OptOps.UPCAST, axis=2, amt=2), Opt(op=OptOps.LOCAL, axis=1, amt=8),
             Opt(op=OptOps.UPCAST, axis=1, amt=0), Opt(op=OptOps.UPCAST, axis=1, amt=4), Opt(op=OptOps.LOCAL, axis=0, amt=8),
             Opt(op=OptOps.UPCAST, axis=1, amt=0), Opt(op=OptOps.UPCAST, axis=0, amt=2)]
-
-    k = Linearizer(ast)
-    for opt in opts: k.apply_opt(opt)
-    k.linearize()
-
+    k = helper_linearizer_ast(ast, [Tensor.empty(8*32).realize()], opts=[opt])[-1]
     out = [u for u in k.uops if u.uop is UOps.STORE][0]
     assert out.vin[-1].uop is UOps.CAST and out.vin[-1].dtype == dtypes.float.vec(2)
 
