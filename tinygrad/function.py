@@ -685,7 +685,8 @@ class Exp(Function):
         # modres = self._mod(x, x.const(70))
         # print("MODRES: ")
         # print(__import__('tinygrad').Tensor(modres).numpy())
-        res = self._exp2_v1(x, 70)
+        # res = self._exp2_v1(x, 90)
+        # res = self._pade(x)
         # res = self._exp2_v2(x)
         # res = self._exp2_v1(modres, 40)
         # res = self._exp2_v1(modres, 80)
@@ -748,6 +749,68 @@ class Exp(Function):
             res = res.e(BinaryOps.ADD, term)
 
         return res
+        
+    # def _pade22(self, x: LazyBuffer) -> LazyBuffer:
+    #     xsq = x.e(BinaryOps.MUL, x)
+    #     p = x.e(BinaryOps.MUL, x.const(0.5)).e(BinaryOps.ADD, x.const(1)) \
+    #         .e(BinaryOps.ADD, xsq.e(BinaryOps.MUL, x.const(1/12)))
+    #     q = x.e(BinaryOps.MUL, x.const(-0.5)).e(BinaryOps.ADD, x.const(1)) \
+    #         .e(BinaryOps.ADD, xsq.e(BinaryOps.MUL, x.const(1/12)))
+    #     return p.e(BinaryOps.DIV, q)
+
+    def _pade(self, x: LazyBuffer) -> LazyBuffer:
+        x = x.e(BinaryOps.MUL, x.const(math.log(2)))
+        return self._pade_15_15(x)
+
+    def _pade_15_15(self, x: LazyBuffer) -> LazyBuffer:
+        PQ = [5.555436579284281e-21, 1.3125769210893678e-18, 1.5403901227001058e-16, 1.1868561690995733e-14, 6.692190361862563e-13, 2.916409677106555e-11, 1.0120390540692245e-09, 2.8407411743582775e-08, 6.48870399793012e-07, 1.2036730599655186e-05, 0.00017952743589247597, 0.002110706881493183, 0.018906257230122514, 0.12163057975674008, 0.5018697635563099, 1.0]
+        QC = [-4.478605805860244e-21, 1.0863415635646055e-18, -1.3053235772233647e-16, 1.0272111889614586e-14, -5.902904998127621e-13, 2.6167958543246226e-11, -9.222321652739181e-10, 2.6253510113724633e-08, -6.074293602608563e-07, 1.1401546217153162e-05, -0.00017190730848319345, 0.0020414456036890105, -0.018456107415129226, 0.11976081620043016, -0.49813023644369014, 1.0]
+        ox = x
+        Psum = x.const(0)
+        Qsum = x.const(0)
+        x = x.const(1)
+        for p, q in zip(PQ[::-1], QC[::-1]):
+            Psum = Psum.e(BinaryOps.ADD, x.e(BinaryOps.MUL, x.const(p)))
+            Qsum = Qsum.e(BinaryOps.ADD, x.e(BinaryOps.MUL, x.const(q)))
+            x = x.e(BinaryOps.MUL, ox)
+        return Psum.e(BinaryOps.DIV, Qsum)
+
+    def _exp(self, x: LazyBuffer) -> LazyBuffer:
+        sign = x.e(BinaryOps.CMPLT, x.const(0)).e(
+            TernaryOps.WHERE,
+            x.cast(dtypes.int32).const(-1),
+            x.cast(dtypes.int32).const(1),
+        )
+        x = self._abs(x)
+
+        divres = x.e(BinaryOps.DIV, x.const(10)).cast(dtypes.int64)
+        modres = self._mod(x, x.const(10))
+
+        res = self._pade_15_15(modres)
+
+        for i in range(10, 0, -1):
+            res = divres.e(BinaryOps.CMPEQ, divres.const(i)).e(
+                TernaryOps.WHERE, res.e(BinaryOps.MUL, res.const(math.exp(i * 10))), res
+            )
+        res = sign.e(BinaryOps.CMPEQ, sign.const(-1)).e(
+            TernaryOps.WHERE, res.const(1).e(BinaryOps.DIV, res), res
+        )
+        return res
+
+    # def _pade77(self, x: LazyBuffer) -> LazyBuffer:
+    #     uP = [84341, 47011, 24219, 11283, 4535, 1351, 279]
+    #     uQ = [24329, 21641, -10283, 3173, -647, 85, -7]
+    #     den = 363209
+    #     ox = x
+    #     q = x.const(1)
+    #     p = x.const(1)
+    #     xpow = x
+    #     for i in range(1, 8):
+    #         p = p.e(BinaryOps.ADD, xpow.e(BinaryOps.MUL, ox.const(uP[i - 1]/den)))
+    #         q = q.e(BinaryOps.ADD, xpow.e(BinaryOps.MUL, ox.const(uQ[i - 1]/den)))
+    #         xpow = xpow.e(BinaryOps.MUL, x)
+    #
+    #     return p.e(BinaryOps.DIV, q)
 
     # def _exp2_v3(self, x: LazyBuffer, N_TERMS) -> LazyBuffer:
     #     factorials = [1, 1, 2, 6, 24, 120, 720, 5040, 40320, 362880]
@@ -768,26 +831,26 @@ class Exp(Function):
         res = res.e(BinaryOps.MUL, ox).e(BinaryOps.MUL, ox).e(BinaryOps.ADD, x.const(1))
         return res
 
-    def _gx(self, x: LazyBuffer) -> LazyBuffer:
-        xsq = x.e(BinaryOps.MUL, x)
-        xcube = xsq.e(BinaryOps.MUL, x)
-        xquad = xsq.e(BinaryOps.MUL, xsq)
-        res = x.const(1 / 6)
-        res = res.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(360)))
-        res = res.e(BinaryOps.ADD, xsq.e(BinaryOps.DIV, x.const(15120)))
-        res = res.e(BinaryOps.SUB, xcube.e(BinaryOps.DIV, x.const(604800)))
-        res = res.e(BinaryOps.ADD, xquad.e(BinaryOps.DIV, x.const(23950080)))
-        return res
+    # def _gx(self, x: LazyBuffer) -> LazyBuffer:
+    #     xsq = x.e(BinaryOps.MUL, x)
+    #     xcube = xsq.e(BinaryOps.MUL, x)
+    #     xquad = xsq.e(BinaryOps.MUL, xsq)
+    #     res = x.const(1 / 6)
+    #     res = res.e(BinaryOps.SUB, x.e(BinaryOps.DIV, x.const(360)))
+    #     res = res.e(BinaryOps.ADD, xsq.e(BinaryOps.DIV, x.const(15120)))
+    #     res = res.e(BinaryOps.SUB, xcube.e(BinaryOps.DIV, x.const(604800)))
+    #     res = res.e(BinaryOps.ADD, xquad.e(BinaryOps.DIV, x.const(23950080)))
+    #     return res
 
-    def _c(self, x: LazyBuffer) -> LazyBuffer:
-        xsq = x.e(BinaryOps.MUL, x)
-        return x.e(BinaryOps.SUB, self._gx(xsq).e(BinaryOps.MUL, xsq))
+    # def _c(self, x: LazyBuffer) -> LazyBuffer:
+    #     xsq = x.e(BinaryOps.MUL, x)
+    #     return x.e(BinaryOps.SUB, self._gx(xsq).e(BinaryOps.MUL, xsq))
 
-    def _exp(self, x: LazyBuffer) -> LazyBuffer:
-        c = self._c(x)
-        res = x.e(BinaryOps.MUL, c).e(BinaryOps.DIV, x.const(2).e(BinaryOps.SUB, c))
-        res = res.e(BinaryOps.ADD, x).e(BinaryOps.ADD, x.const(1))
-        return res
+    # def _exp(self, x: LazyBuffer) -> LazyBuffer:
+    #     c = self._c(x)
+    #     res = x.e(BinaryOps.MUL, c).e(BinaryOps.DIV, x.const(2).e(BinaryOps.SUB, c))
+    #     res = res.e(BinaryOps.ADD, x).e(BinaryOps.ADD, x.const(1))
+    #     return res
 
     def forward(self, x: LazyBuffer) -> LazyBuffer:
         # self.ret = x.e(BinaryOps.MUL, x.const(1 / math.log(2))).e(UnaryOps.EXP2)
@@ -799,7 +862,7 @@ class Exp(Function):
         pinf_t = x.const(88.72687268726872)
         ninf_t = x.const(-103.97539753975397)
         x = x.e(BinaryOps.CMPLT, ninf_t).e(TernaryOps.WHERE, x.const(0), x)
-        x = x.e(BinaryOps.MUL, x.const(1 / math.log(2)))
+        # x = x.e(BinaryOps.MUL, x.const(1 / math.log(2)))
 
         self.beginning_dtype = x.dtype
         if self.device == "METAL":
@@ -812,8 +875,9 @@ class Exp(Function):
         isnotnan = x.e(BinaryOps.CMPEQ, x)
         # print("ISNOTNAN: ")
         # print(__import__('tinygrad').Tensor(isnotnan).numpy())
-        computed = self._exp2_grand(x)
-        # computed = self._exp(x)
+        # computed = self._exp2_grand(x)
+        # computed = self._pade_15_15(x)
+        computed = self._exp(x)
         computed = initial_x.e(BinaryOps.CMPLT, pinf_t).e(
             TernaryOps.WHERE, computed, computed.const(float("inf"))
         )
