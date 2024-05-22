@@ -685,7 +685,7 @@ class Exp(Function):
         # modres = self._mod(x, x.const(70))
         # print("MODRES: ")
         # print(__import__('tinygrad').Tensor(modres).numpy())
-        res = self._exp2_v1(x, 130)
+        res = self._exp2_v1(x, 70)
         # res = self._exp2_v2(x)
         # res = self._exp2_v1(modres, 40)
         # res = self._exp2_v1(modres, 80)
