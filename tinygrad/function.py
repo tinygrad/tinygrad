@@ -794,21 +794,21 @@ class Exp(Function):
         )
         x = self._abs(x)
 
-        # divres = x.e(BinaryOps.DIV, x.const(20)).cast(dtypes.int64)
-        # modres = self._mod(x, x.const(20))
-        # res = self._pade(modres)
+        divres = x.e(BinaryOps.DIV, x.const(20)).cast(dtypes.int64)
+        modres = self._mod(x, x.const(20))
+        res = self._pade(modres)
 
-        res = self._pade(x)
+        # res = self._pade(x)
 
         # print("RES: ")
         # print(__import__('tinygrad').Tensor(res).numpy())
 
-        # for i in range(5, 0, -1):
-        #     res = divres.e(BinaryOps.CMPEQ, divres.const(i)).e(
-        #         TernaryOps.WHERE, res.e(BinaryOps.MUL, res.const(math.exp(i * 20))), res
-        #     )
-        #     # print(f"i: {i}, RES: ")
-        #     # print(__import__('tinygrad').Tensor(res).numpy())
+        for i in range(5, 0, -1):
+            res = divres.e(BinaryOps.CMPEQ, divres.const(i)).e(
+                TernaryOps.WHERE, res.e(BinaryOps.MUL, res.const(math.exp(i * 20))), res
+            )
+            # print(f"i: {i}, RES: ")
+            # print(__import__('tinygrad').Tensor(res).numpy())
         res = sign.e(BinaryOps.CMPEQ, sign.const(-1)).e(
             TernaryOps.WHERE, res.const(1).e(BinaryOps.DIV, res), res
         )
@@ -891,13 +891,13 @@ class Exp(Function):
 
         # _, _, nan = _get_info(x)
 
-        # isnotnan = x.e(BinaryOps.CMPEQ, x)
-
+        isnotnan = x.e(BinaryOps.CMPEQ, x)
+        #
         computed = self._exp(x)
         computed = initial_x.e(BinaryOps.CMPLT, pinf_t).e(
             TernaryOps.WHERE, computed, computed.const(float("inf"))
         )
-        # computed = isnotnan.e(TernaryOps.WHERE, computed, x.const(float("nan")))
+        computed = isnotnan.e(TernaryOps.WHERE, computed, x.const(float("nan")))
         computed = initial_x.e(BinaryOps.CMPLT, ninf_t).e(
             TernaryOps.WHERE, computed.const(0), computed
         )
