@@ -144,7 +144,6 @@ class TestLinearizer(unittest.TestCase):
     ranges = [i for i,u in enumerate(lin.uops) if u.uop is UOps.RANGE]
     if getenv("PTX"):
       # RANGE -> CAST ridx -> 2xLOAD_INDEXING -> 4x ALU -> RANGE -> LOAD -> RANGE -> PHI
-      lin.uops.print()
       assert ranges[1] == ranges[0]+7
       assert lin.uops[ranges[1]+11].uop is UOps.ENDRANGE
     else:
