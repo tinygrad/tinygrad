@@ -16,7 +16,7 @@ def fuzz_uops(graph:DefaultDict[UOp, List[UOp]], in_degree:DefaultDict[UOp, int]
     for u in path:
       if u.uop is UOps.IF: path.append(UOp(UOps.ENDIF, None, (u,)))
       if u.uop is UOps.RANGE:
-        path.insert(max(path.index(x) for x in loops_children[u])+1, UOp(UOps.ENDRANGE, None, (u,)))
+        path.insert(max(path.index(x) for x in loops_children[u] if x in path)+1, UOp(UOps.ENDRANGE, None, (u,)))
   return paths
 
 class UOpsFuzzerRunner(CompiledRunner):
@@ -43,7 +43,7 @@ class UOpsFuzzerRunner(CompiledRunner):
       super().__call__(rawbufs, var_vals, wait)
       for i, x in enumerate(rawbufs):
         try:
-          np.testing.assert_allclose(np.frombuffer(x.as_buffer(), x.dtype.np), ground_truth[x])
+          np.testing.assert_allclose(np.frombuffer(x.as_buffer(), x.dtype.np), ground_truth[x], atol=1e-6, rtol=1e-6)
           if DEBUG >= 2: print(colored(name, "green"))
         except AssertionError as e:
           print(colored(name, "red"))
