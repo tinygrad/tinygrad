@@ -67,7 +67,7 @@ def _apply_winograd_matrix(mat, t:Tensor, dims:int) -> Tensor:
   return ret
 
 def _pad_left(*shps:Tuple[sint, ...], v=1): return tuple((v,) * (max(len(i_) for i_ in shps) - len(i)) + i for i in shps)
-def broadcast_shape(*shps:Tuple[sint, ...]): return tuple(0 if any(sh_ == 0 for sh_ in sh) else max(sh) for sh in zip(*_pad_left(*shps)))
+def _broadcast_shape(*shps:Tuple[sint, ...]): return tuple(0 if any(sh_ == 0 for sh_ in sh) else max(sh) for sh in zip(*_pad_left(*shps)))
 
 class Tensor:
   """
@@ -638,14 +638,14 @@ class Tensor:
 
   # ***** toposort and backward pass *****
 
-  def deepwalk(self):
-    def _deepwalk(node, visited):
+  def _deepwalk(self):
+    def _walk(node, visited):
       visited.add(node)
       if getattr(node, "_ctx", None):
         for i in node._ctx.parents:
-          if i not in visited: yield from _deepwalk(i, visited)
+          if i not in visited: yield from _walk(i, visited)
         yield node
-    return list(_deepwalk(self, set()))
+    return list(_walk(self, set()))
 
   def backward(self) -> Tensor:
     assert self.shape == tuple(), f"backward can only be called for scalar tensors, but it has shape {self.shape})"
@@ -654,7 +654,7 @@ class Tensor:
     # this is "implicit gradient creation"
     self.grad = Tensor(1.0, dtype=self.dtype, device=self.device, requires_grad=False)
 
-    for t0 in reversed(self.deepwalk()):
+    for t0 in reversed(self._deepwalk()):
       if t0.grad is None: raise RuntimeError(f"tensor {t0} has no grad")
       grads = t0._ctx.backward(t0.grad.lazydata)
       grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
@@ -792,7 +792,7 @@ class Tensor:
       idx: Dict[int,Tensor] = {(dim := calc_dim(td)):(tensor<0).where(ret.shape[dim],0) + tensor for td,tensor in zip(type_dim[Tensor], tensor_index)}
 
       masks, first_dim, last_dim = [], min(idx.keys()), max(idx.keys())
-      pre_reduce_shape = ret.shape[:first_dim] + (big_shape := broadcast_shape(*(t.shape for t in idx.values()))) + ret.shape[first_dim:]
+      pre_reduce_shape = ret.shape[:first_dim] + (big_shape := _broadcast_shape(*(t.shape for t in idx.values()))) + ret.shape[first_dim:]
 
       # create masks
       for dim, i in idx.items():
@@ -828,7 +828,7 @@ class Tensor:
 
     assign_to = self.realize().__getitem__(indices)
     # NOTE: contiguous to prevent const folding.
-    v = v.cast(assign_to.dtype)._broadcast_to(broadcast_shape(assign_to.shape, v.shape)).contiguous()
+    v = v.cast(assign_to.dtype)._broadcast_to(_broadcast_shape(assign_to.shape, v.shape)).contiguous()
     assign_to.assign(v).realize()
 
   # NOTE: using slice is discouraged and things should migrate to pad and shrink
@@ -1200,7 +1200,7 @@ class Tensor:
     if reverse: x, y = y, x
 
     # broadcast
-    out_shape = broadcast_shape(x.shape, y.shape)
+    out_shape = _broadcast_shape(x.shape, y.shape)
     return x._broadcast_to(out_shape), y._broadcast_to(out_shape)
 
   def _to_const_val(self, x:Union[Tensor, ConstType]) -> Union[Tensor, ConstType]:
