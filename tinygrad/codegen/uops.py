@@ -128,7 +128,7 @@ class UPat:
   name: Optional[str] = None
   vin: Union[Tuple[UPat, ...], List[UPat], UPat] = ()
   dtype: Optional[Union[DType, Set[DType]]] = None
-
+ 
 
 def _match(uop: UOp, pattern: UPat, store: Dict[str, UOp]) -> bool:
   if pattern.name:
