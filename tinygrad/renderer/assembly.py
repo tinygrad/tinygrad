@@ -1,7 +1,7 @@
 from typing import DefaultDict, Dict, List, Union, Optional, cast, Callable
 import struct, copy
 from collections import defaultdict
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG, getenv
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op
 from tinygrad.dtype import dtypes, DType, PtrDType, ConstType
@@ -184,7 +184,7 @@ class PTXRenderer(Renderer):
           kernel = [f".reg .u32 %{args[1]};"] + kernel
         elif uop is UOps.CONST:
           if dtype.count > 1: r[u] = [const(args, dtype.scalar(), mov=True) for _ in range(dtype.count)]
-          else: r[u] = const(args, dtype)
+          else: r[u] = const(args, dtype, mov=True)
         elif uop is UOps.GEP: r[u] = r[vin[0]][u.arg]
         elif uop is UOps.LOAD:
           assert vin[0].dtype == dtypes.int64, "load isn't int64"
@@ -242,6 +242,8 @@ ptx_matcher = PatternMatcher([
   ({"__name__": "root", "uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": ({"__name__": "x", "dtype": dtypes.bool},{"__name__": "y"})},
   lambda root,x,y: UOp(root.uop, root.dtype, (UOp(UOps.ALU, dtypes.bool, (x,), UnaryOps.NEG), y), BinaryOps.MUL)),
   ({"__name__": "root", "uop": UOps.ALU, "arg": BinaryOps.ADD,
+    #NOTE: To be removed when https://github.com/gpuocelot/gpuocelot/issues/18 gets resolved
+    "dtype": set([dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64]) if getenv("CUDACPU") else set(dtypes.fields().keys()),
     "vin": [{"__name__": "non_muls"}, {"__name__": "muls", "uop": UOps.ALU, "arg": BinaryOps.MUL}]},
     lambda root, muls, non_muls: UOp(UOps.ALU, root.dtype, muls.vin + (non_muls,), TernaryOps.MULACC)),
   *[({"__name__": "x", "uop": UOps.ALU, "dtype": dtypes.half, "arg": op},
