@@ -685,7 +685,7 @@ class Exp(Function):
         # modres = self._mod(x, x.const(70))
         # print("MODRES: ")
         # print(__import__('tinygrad').Tensor(modres).numpy())
-        # res = self._exp2_v1(x, 90)
+        res = self._exp2_v1(x, 90)
         # res = self._pade(x)
         # res = self._exp2_v2(x)
         # res = self._exp2_v1(modres, 40)
@@ -787,14 +787,20 @@ class Exp(Function):
         modres = self._mod(x, x.const(10))
 
         res = self._pade_15_15(modres)
+        # print("RES: ")
+        # print(__import__('tinygrad').Tensor(res).numpy())
 
         for i in range(10, 0, -1):
             res = divres.e(BinaryOps.CMPEQ, divres.const(i)).e(
                 TernaryOps.WHERE, res.e(BinaryOps.MUL, res.const(math.exp(i * 10))), res
             )
+            # print(f"i: {i}, RES: ")
+            # print(__import__('tinygrad').Tensor(res).numpy())
         res = sign.e(BinaryOps.CMPEQ, sign.const(-1)).e(
             TernaryOps.WHERE, res.const(1).e(BinaryOps.DIV, res), res
         )
+        # print("RES: ")
+        # print(__import__('tinygrad').Tensor(res).numpy())
         return res
 
     # def _pade77(self, x: LazyBuffer) -> LazyBuffer:
