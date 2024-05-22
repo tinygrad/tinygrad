@@ -648,13 +648,47 @@ class Relu(Function):
 
 
 class Log(Function):
-    def _log(self, x: LazyBuffer) -> LazyBuffer:
-        pass
+    # def _pade(self, x: LazyBuffer) -> LazyBuffer:
+    #     PQ = [-1.0171323192031956e-07, -8.974972614803067e-06, -0.00021569320345808662, -0.0022287096343596574, -0.011523228925209891, -0.02997122525322186, -0.03352213026479973, -0.038427405218536395, -0.30428083695014563, -1.0129765778842845, -1.200969213826871, -0.09639100181475165, -0.8843265383274049, -5.370061941354115, -5.066130614712678, 2.0073414590633094, 0.9698928140269265, -3.8600022677142456, 2.58620555984148, 1.6514031476066195, -8.252254129240626, 0.06224699227314931, 6.681924589077946, -4.629513219080865, -6.2307758823412405, -2.437614257288357, -6.571665880451656, -4.774951226934315, 0.7864858197983817, 1.0, 0.0]
+    #     QC = [-1.683401215861629e-08, -2.2233784204689774e-06, -7.145980947116403e-05, -0.0009623854318982274, -0.006577947471552396, -0.024187052836199364, -0.0457752693637781, -0.04583686976823449, -0.14555829220584707, -0.7259367483528768, -1.5889614963900662, -1.2720682742743799, -0.2973848945342432, -3.1435886735004583, -7.9486882979352815, -4.281567449506767, 2.7946913135358447, -0.9799274703772372, -2.9267202153766196, 3.9246439573148297, -2.1919784020750295, -8.812108780672386, 3.538211985613214, 4.8688655541076935, -7.689102963891802, -7.102904975648057, -5.319153241666949, -8.983015312235345, -4.465041650368457, 1.2864858197983817, 1.0]
+    #     ox = x
+    #     Psum = x.const(0)
+    #     Qsum = x.const(0)
+    #     x = x.const(1)
+    #     Pterms = []
+    #     Qterms = []
+    #     for p, q in zip(PQ[::-1], QC[::-1]):
+    #         Pterms.append(x.e(BinaryOps.MUL, x.const(p)))
+    #         Qterms.append(x.e(BinaryOps.MUL, x.const(q)))
+    #         x = x.e(BinaryOps.MUL, ox)
+    #
+    #     for p, q in zip(Pterms, Qterms):
+    #         Psum = Psum.e(BinaryOps.ADD, p)
+    #         Qsum = Qsum.e(BinaryOps.ADD, q)
+    #     return Psum.e(BinaryOps.DIV, Qsum)
+
+
 
     def forward(self, x: LazyBuffer) -> LazyBuffer:
+        # x = x.e(BinaryOps.ADD, x.const(1))
         self.x = x
         return x.e(UnaryOps.LOG2).e(BinaryOps.MUL, x.const(math.log(2)))
-        # return self._log(x)
+        # self.beginning_dtype = x.dtype
+        # if self.beginning_dtype == dtypes.float32 and self.device != "METAL":
+        #     x = x.cast(dtypes.float64)
+        #
+        # # computed = x.e(BinaryOps.CMPLT, x.const(2)).e(
+        # #     TernaryOps.WHERE, self._simple_approx(x), self._pade(x))
+        # computed = self._pade(x)
+        # computed = Exp().forward(x)
+
+        # computed = computed.cast(self.beginning_dtype)
+        # If x < -1, return NaN
+        # computed = x.e(BinaryOps.CMPLT, x.const(1)).e(
+            # TernaryOps.WHERE, computed.const(math.nan), computed
+        # )
+
+        # return computed
 
     def backward(self, grad_output: LazyBuffer) -> LazyBuffer:
         return grad_output.e(BinaryOps.DIV, self.x)
@@ -753,8 +787,8 @@ class Exp(Function):
 
 
     def forward(self, x: LazyBuffer) -> LazyBuffer:
-        self.ret = x.e(BinaryOps.MUL, x.const(1 / math.log(2))).e(UnaryOps.EXP2)
-        return self.ret
+        # self.ret = x.e(BinaryOps.MUL, x.const(1 / math.log(2))).e(UnaryOps.EXP2)
+        # return self.ret
 
         initial_x = x
         pinf_t = x.const(88.72687268726872)
