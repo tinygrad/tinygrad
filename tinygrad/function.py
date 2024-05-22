@@ -884,10 +884,13 @@ class Exp(Function):
         # x = x.e(BinaryOps.MUL, x.const(1 / math.log(2)))
 
         self.beginning_dtype = x.dtype
-        if self.device == "METAL":
-            x = x.cast(dtypes.float32)
-        else:
+        if self.beginning_dtype == dtypes.float32:
             x = x.cast(dtypes.float64)
+        # print(self.beginning_dtype)
+        # if self.device == "METAL":
+        # x = x.cast(dtypes.float32)
+        # else:
+        #     x = x.cast(dtypes.float64)
 
         # _, _, nan = _get_info(x)
 
