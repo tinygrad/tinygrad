@@ -1045,7 +1045,8 @@ class Tensor:
     """
     Sums the elements of the tensor along the specified axis or axes.
 
-    You can pass in `axis` and `keepdim` keyword arguments to control the axis along which the maximum is computed and whether the reduced dimensions are retained.
+    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    which the maximum is computed and whether the reduced dimensions are retained.
 
     You can pass in `acc_dtype` keyword argument to control the data type of the accumulation.
     If not specified, the accumulation data type is chosen based on the input tensor's data type.
@@ -1065,7 +1066,8 @@ class Tensor:
     """
     Returns the maximum value of the tensor along the specified axis or axes.
 
-    You can pass in `axis` and `keepdim` keyword arguments to control the axis along which the maximum is computed and whether the reduced dimensions are retained.
+    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    which the maximum is computed and whether the reduced dimensions are retained.
 
     ```python exec="true" source="above" session="tensor" result="python"
     Tensor.manual_seed(42)
@@ -1081,7 +1083,8 @@ class Tensor:
     """
     Returns the minimum value of the tensor along the specified axis or axes.
 
-    You can pass in `axis` and `keepdim` keyword arguments to control the axis along which the minimum is computed and whether the reduced dimensions are retained.
+    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    which the minimum is computed and whether the reduced dimensions are retained.
 
     ```python exec="true" source="above" session="tensor" result="python"
     Tensor.manual_seed(42)
@@ -1098,7 +1101,8 @@ class Tensor:
     """
     Returns the mean value of the tensor along the specified axis or axes.
 
-    You can pass in `axis` and `keepdim` keyword arguments to control the axis along which the mean is computed and whether the reduced dimensions are retained.
+    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    which the mean is computed and whether the reduced dimensions are retained.
 
     ```python exec="true" source="above" session="tensor" result="python"
     Tensor.manual_seed(42)
@@ -1116,7 +1120,8 @@ class Tensor:
     """
     Returns the variance of the tensor along the specified axis or axes.
 
-    You can pass in `axis`, `keepdim`, and `correction` keyword arguments to control the axis along which the variance is computed, whether the reduced dimensions are retained, and the Bessel's correction applied.
+    You can pass in `axis`, `keepdim`, and `correction` keyword arguments to control the axis along
+    which the variance is computed, whether the reduced dimensions are retained, and the Bessel's correction applied.
 
     ```python exec="true" source="above" session="tensor" result="python"
     Tensor.manual_seed(42)
@@ -1134,7 +1139,8 @@ class Tensor:
     """
     Returns the standard deviation of the tensor along the specified axis or axes.
 
-    You can pass in `axis`, `keepdim`, and `correction` keyword arguments to control the axis along which the standard deviation is computed, whether the reduced dimensions are retained, and the Bessel's correction applied.
+    You can pass in `axis`, `keepdim`, and `correction` keyword arguments to control the axis along
+    which the standard deviation is computed, whether the reduced dimensions are retained, and the Bessel's correction applied.
 
     ```python exec="true" source="above" session="tensor" result="python"
     Tensor.manual_seed(42)
@@ -1196,7 +1202,8 @@ class Tensor:
 
     The log-sum-exp function is a numerically stable way to compute the logarithm of the sum of exponentials.
 
-    You can pass in `axis` and `keepdim` keyword arguments to control the axis along which the log-sum-exp is computed and whether the reduced dimensions are retained.
+    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    which the log-sum-exp is computed and whether the reduced dimensions are retained.
 
     ```python exec="true" source="above" session="tensor" result="python"
     Tensor.manual_seed(42)
@@ -1214,7 +1221,8 @@ class Tensor:
     """
     Returns the indices of the maximum value of the tensor along the specified axis.
 
-    You can pass in `axis` and `keepdim` keyword arguments to control the axis along which the maximum is computed and whether the reduced dimensions are retained.
+    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    which the maximum is computed and whether the reduced dimensions are retained.
 
     ```python exec="true" source="above" session="tensor" result="python"
     Tensor.manual_seed(42)
@@ -1236,7 +1244,8 @@ class Tensor:
     """
     Returns the indices of the minimum value of the tensor along the specified axis.
 
-    You can pass in `axis` and `keepdim` keyword arguments to control the axis along which the minimum is computed and whether the reduced dimensions are retained.
+    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    which the minimum is computed and whether the reduced dimensions are retained.
 
     ```python exec="true" source="above" session="tensor" result="python"
     Tensor.manual_seed(42)
