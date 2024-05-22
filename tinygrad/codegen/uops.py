@@ -75,7 +75,6 @@ class UPat:
   vin: Union[Tuple[UPat, ...], List[UPat], UPat] = ()
   dtype: Optional[Union[DType, Set[DType]]] = None
  
-
 def _match(uop: UOp, pattern: UPat, store: Dict[str, UOp]) -> bool:
   if pattern.name:
     if pattern.name in store and store[pattern.name] != uop:
