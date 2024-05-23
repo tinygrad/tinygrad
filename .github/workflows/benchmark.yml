@@ -80,6 +80,8 @@ jobs:
           llama_unjitted.txt
           llama_jitted.txt
           llama_beam.txt
+          llama_int8.txt
+          llama_nf4.txt
           llama_four_gpu.txt
           gpt2_unjitted.txt
           gpt2_jitted.txt
