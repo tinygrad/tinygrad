@@ -702,27 +702,7 @@ class Exp(Function):
             x.e(BinaryOps.DIV, y).cast(dtypes.int64).cast(x.dtype).e(BinaryOps.MUL, y),
         )
 
-    # def _sign(self, x: LazyBuffer) -> LazyBuffer:
-    #     # return x.e(BinaryOps.CMPLT, x.const(0)).e(
-    #     #     TernaryOps.WHERE, x.e(UnaryOps.NEG), x
-    #     # )
-    #     # res = x.e(BinaryOps.CMPLT, x.const(0)).cast(x.dtype).e(BinaryOps.MUL, x.const(2)).e(BinaryOps.SUB, x.const(1))
-    #     res = x.const(0).e(BinaryOps.CMPLT, x).cast(x.dtype).e(BinaryOps.MUL, x.const(2)).e(BinaryOps.SUB, x.const(1))
-    #     # print("\tSign of ")
-    #     # print(__import__('tinygrad').Tensor(x).numpy())
-    #     # print("\tis ")
-    #     # print(__import__('tinygrad').Tensor(res).numpy())
-    #     return res
-
-        
-
     def _abs(self, x: LazyBuffer) -> LazyBuffer:
-        # res = x.e(BinaryOps.MUL, self._sign(x))
-        # print("\tAbs of ")
-        # print(__import__('tinygrad').Tensor(x).numpy())
-        # print("\tis ")
-        # print(__import__('tinygrad').Tensor(res).numpy())
-        # return res
         return x.e(BinaryOps.CMPLT, x.const(0)).e(
             TernaryOps.WHERE, x.e(UnaryOps.NEG), x)
 
@@ -733,8 +713,8 @@ class Exp(Function):
         # QC = [-4.478605805860244e-21, 1.0863415635646055e-18, -1.3053235772233647e-16, 1.0272111889614586e-14, -5.902904998127621e-13, 2.6167958543246226e-11, -9.222321652739181e-10, 2.6253510113724633e-08, -6.074293602608563e-07, 1.1401546217153162e-05, -0.00017190730848319345, 0.0020414456036890105, -0.018456107415129226, 0.11976081620043016, -0.49813023644369014, 1.0]
         PQ = [3.174762095014651e-43, 1.263811817120668e-40, 2.658055794651458e-38, 3.883024949574583e-36, 4.387406677622896e-34, 4.0568154379146483e-32, 3.1760823864584966e-30, 2.152815765767272e-28, 1.2828932159926686e-26, 6.794576362219056e-25, 3.2233733507145425e-23, 1.3773897092444197e-21, 5.322115916738285e-20, 1.864160966757357e-18, 5.927115816904798e-17, 1.7112268658344284e-15, 4.4833216357863006e-14, 1.0642119389244422e-12, 2.2827822584346438e-11, 4.408610736922463e-10, 7.627455623784314e-09, 1.174550495142883e-07, 1.5962976038929916e-06, 1.893847991776601e-05, 0.0001933307149243482, 0.0016655142800334362, 0.011784956877608896, 0.06581777187936474, 0.27224432096364365, 0.7419615234818666, 1.0]
         QC = [-1.6450967139818605e-47, 7.083837883319338e-45, -1.4485633669730453e-42, 1.8497904314244254e-40, -1.627375956018421e-38, 1.0203926744598311e-36, -4.4884695672444623e-35, 1.2351339816691232e-33, -8.726182247724124e-33, -9.170082074829936e-31, 4.385918018403493e-29, -7.351396750962011e-28, -1.4056699049671058e-26, 1.3028331440402866e-24, -4.949101283272678e-23, 1.327044338712687e-21, -1.6968548038857145e-20, -7.208661425683472e-19, 5.711026248292443e-17, -2.0601609093590077e-15, 4.8444247051418994e-14, -7.80168384841284e-13, 1.1140384591689052e-11, -6.701138406495334e-10, 5.579382638755613e-08, -2.8800067559171957e-06, 9.575823308819763e-05, -0.0021124540100122403, 0.03028279748177699, -0.25803847651813333, 1.0]
-        PQ = PQ[-30:]
-        QC = QC[-30:]
+        PQ = PQ[-21:]
+        QC = QC[-21:]
 
         ox = x
         Psum = x.const(0)
@@ -808,9 +788,13 @@ class Exp(Function):
         # print(__import__('tinygrad').Tensor(divres).numpy())
         # modres = self._mod(x, x.const(20))
         modres = x.e(BinaryOps.SUB, divres.e(BinaryOps.MUL, x.const(20)))
+        lthalf = modres.e(BinaryOps.CMPLT, x.const(10))
+        modres = lthalf.e(TernaryOps.WHERE, modres, modres.const(20).e(BinaryOps.SUB, modres))
+        divres = lthalf.e(TernaryOps.WHERE, divres, divres.e(BinaryOps.ADD, divres.const(1)))
         # print("MODRES: ")
         # print(__import__('tinygrad').Tensor(modres).numpy())
         res = self._pade(modres)
+        res = lthalf.e(TernaryOps.WHERE, res, res.const(1).e(BinaryOps.DIV, res))
 
         # res = self._pade(x)
         # print("RES: ")
