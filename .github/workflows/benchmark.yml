@@ -125,7 +125,7 @@ jobs:
         CUDA=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
         CUDA=1 BFLOAT16=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_bfloat16.txt
     - name: Run Tensor Core GEMM (CUDA) with BEAM
-      run: BEAM=2 CUDA=1 HALF=1 CACHELEVEL=0 DEBUG=2 python3 extra/gemm/simple_matmul.py
+      run: BEAM=4 CUDA=1 HALF=1 CACHELEVEL=0 DEBUG=2 python3 extra/gemm/simple_matmul.py
     - name: Run Tensor Core GEMM (PTX)
       run: CUDA=1 PTX=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_ptx.txt
     - name: Run Tensor Core GEMM (NV)
