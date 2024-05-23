@@ -1,11 +1,14 @@
 import ctypes, collections, array, time
 from typing import List, Any, Dict, cast, Optional, Tuple, Set
-from tinygrad.helpers import GraphException, round_up, to_mv
+from tinygrad.helpers import GraphException, round_up, to_mv, getenv
 from tinygrad.device import Buffer, BufferOptions
 from tinygrad.device import Compiled, Device
 from tinygrad.shape.symbolic import Variable
 from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner
 from tinygrad.engine.jit import MultiGraphRunner
+if getenv("IOCTL"):
+  import extra.nv_gpu_driver.nv_ioctl  # noqa: F401
+  from extra.nv_gpu_driver.nv_ioctl import _dump_gpfifo
 
 class HCQGraph(MultiGraphRunner):
   def __init__(self, device_t, comp_hcq_t, copy_hcq_t, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
@@ -53,6 +56,7 @@ class HCQGraph(MultiGraphRunner):
     self.prevv = {dev: 0 for dev in self.devices}
     self.exec_ptrs: Dict[int, Tuple[Any, int]] = {}
     self.copy_to_devs: Dict[Compiled, Set[Compiled]] = {dev: set() for dev in self.devices}
+    self.waits = 0
 
     for j,ji in enumerate(self.jit_cache):
       if isinstance(ji.prg, CompiledRunner):
@@ -68,10 +72,12 @@ class HCQGraph(MultiGraphRunner):
           if self.prevv[ji.prg.device]: 
             self.comp_queues[ji.prg.device].signal(self.comp_signal[ji.prg.device], self.comp_signal_val[ji.prg.device])
             self.prevv[ji.prg.device] = False
-          for sig, val in deps: self.comp_queues[ji.prg.device].wait(sig, val)
+          for sig, val in deps:
+            self.waits += 1
+            self.comp_queues[ji.prg.device].wait(sig, val)
           self.exec_ptrs[j] = (self.comp_queues[ji.prg.device], self.comp_queues[ji.prg.device].ptr())
           self.comp_queues[ji.prg.device].exec(ji.prg.clprg, self.kargs_addrs[j], *ji.prg.p.launch_dims(var_vals)) \
-                                        .signal(self.comp_signal[ji.prg.device], sig_val)
+                                         .signal(self.comp_signal[ji.prg.device], sig_val)
         self.comp_signal_val[ji.prg.device] = sig_val
       elif isinstance(ji.prg, BufferXfer):
         dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
@@ -82,9 +88,10 @@ class HCQGraph(MultiGraphRunner):
         deps.append((self.copy_signal[Device[src.device]], self.copy_signal_val[Device[src.device]]))
         self.copy_signal_val[Device[src.device]] = sig_val
 
-        for sig,val in deps: self.copy_queues[Device[src.device]].wait(sig, val)
-        self.copy_queues[Device[src.device]].copy(dest._buf.va_addr, src._buf.va_addr, dest.nbytes) \
-                                            .signal(self.copy_signal[Device[src.device]], sig_val)
+        for sig,val in deps:
+          self.waits += 1
+          self.copy_queues[Device[src.device]].wait(sig, val)
+        self.copy_queues[Device[src.device]].signal(self.copy_signal[Device[src.device]], sig_val)
         self.copy_to_devs[Device[dest.device]].add(Device[src.device])
 
     for dev in self.devices:
@@ -117,6 +124,10 @@ class HCQGraph(MultiGraphRunner):
       queue, cmd_ptr = self.exec_ptrs[j]
       queue.update_exec(cmd_ptr, *cast(CompiledRunner, self.jit_cache[j].prg).p.launch_dims(var_vals))
 
+    # try:
+    #   _dump_gpfifo("BEF GRAPH")
+    # except: pass
+
     for dev in self.devices:
       # Submit sync with world and queues.
       self.comp_hcq_t().wait(dev.timeline_signal, dev.timeline_value - 1) \
@@ -132,6 +143,12 @@ class HCQGraph(MultiGraphRunner):
       self.comp_hcq_t().signal(dev.timeline_signal, dev.timeline_value).submit(dev)
       self.graph_timeline[dev] = dev.timeline_value
       dev.timeline_value += 1
+
+    # try:
+    #   _dump_gpfifo("AFT GRAPH")
+    # except: pass
+
+    print("waits", self.waits)
 
     if wait:
       st = time.perf_counter()

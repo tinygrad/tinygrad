@@ -1,12 +1,15 @@
 import ctypes
 from typing import Any, Optional, Tuple, Dict, List, cast
 import tinygrad.runtime.autogen.cuda as cuda
-from tinygrad.helpers import init_c_var, GraphException
+from tinygrad.helpers import init_c_var, GraphException, getenv
 from tinygrad.device import Buffer, Device
 from tinygrad.runtime.ops_cuda import CUDADevice, check, encode_args, cu_time_execution
 from tinygrad.shape.symbolic import Variable
 from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner
 from tinygrad.engine.jit import MultiGraphRunner
+if getenv("IOCTL"):
+  import extra.nv_gpu_driver.nv_ioctl  # noqa: F401
+  from extra.nv_gpu_driver.nv_ioctl import _dump_gpfifo
 
 class CUDAGraph(MultiGraphRunner):
   def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
@@ -22,7 +25,8 @@ class CUDAGraph(MultiGraphRunner):
 
     for j,ji in enumerate(self.jit_cache):
       if isinstance(ji.prg, CompiledRunner):
-        global_size, local_size = ji.prg.p.launch_dims(var_vals)
+        # global_size, local_size = ji.prg.p.launch_dims(var_vals)
+        global_size, local_size = (1,1,1), (1,1,1)
 
         new_node = cuda.CUgraphNode()
         deps = self._access_resources([x.base for x in ji.bufs[ji.prg.p.outcount:] if x is not None],
@@ -35,17 +39,17 @@ class CUDAGraph(MultiGraphRunner):
 
         if j in self.jc_idx_with_updatable_launch_dims or j in self.jc_idx_with_updatable_var_vals or j in self.jc_idx_with_updatable_rawbufs:
           self.updatable_nodes[j] = (new_node, kern_params, c_args, False)
-      elif isinstance(ji.prg, BufferXfer):
-        dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
-        src_dev = cast(CUDADevice, Device[src.device])
-        node_from = cuda.CUgraphNode()
-        deps = self._access_resources(read=[src.base], write=[dest.base], new_dependency=node_from)
-        c_deps = (cuda.CUgraphNode*len(deps))(*deps) if deps else None
-        cp_params = cuda.CUDA_MEMCPY3D_v2(srcMemoryType=cuda.CU_MEMORYTYPE_DEVICE, srcDevice=src._buf, srcPitch=src.nbytes, srcHeight=1,
-                                          dstMemoryType=cuda.CU_MEMORYTYPE_DEVICE, dstDevice=dest._buf, dstPitch=dest.nbytes, dstHeight=1,
-                                          WidthInBytes=dest.nbytes, Height=1, Depth=1)
-        check(cuda.cuGraphAddMemcpyNode(ctypes.byref(node_from), self.graph, c_deps, len(deps), ctypes.byref(cp_params), src_dev.context))
-        if j in self.jc_idx_with_updatable_rawbufs: self.updatable_nodes[j] = (node_from, cp_params, src_dev.context, True)
+      elif isinstance(ji.prg, BufferXfer): pass
+        # dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
+        # src_dev = cast(CUDADevice, Device[src.device])
+        # node_from = cuda.CUgraphNode()
+        # deps = self._access_resources(read=[src.base], write=[dest.base], new_dependency=node_from)
+        # c_deps = (cuda.CUgraphNode*len(deps))(*deps) if deps else None
+        # cp_params = cuda.CUDA_MEMCPY3D_v2(srcMemoryType=cuda.CU_MEMORYTYPE_DEVICE, srcDevice=src._buf, srcPitch=src.nbytes, srcHeight=1,
+        #                                   dstMemoryType=cuda.CU_MEMORYTYPE_DEVICE, dstDevice=dest._buf, dstPitch=dest.nbytes, dstHeight=1,
+        #                                   WidthInBytes=dest.nbytes, Height=1, Depth=1)
+        # check(cuda.cuGraphAddMemcpyNode(ctypes.byref(node_from), self.graph, c_deps, len(deps), ctypes.byref(cp_params), src_dev.context))
+        # if j in self.jc_idx_with_updatable_rawbufs: self.updatable_nodes[j] = (node_from, cp_params, src_dev.context, True)
 
     self.instance = init_c_var(cuda.CUgraphExec(), lambda x: check(cuda.cuGraphInstantiate_v2(ctypes.byref(x), self.graph, None, None, 0)))
 
@@ -71,7 +75,11 @@ class CUDAGraph(MultiGraphRunner):
       if not is_copy: check(cuda.cuGraphExecKernelNodeSetParams(self.instance, node, ctypes.byref(c_node_params)))
       else: check(cuda.cuGraphExecMemcpyNodeSetParams(self.instance, node, ctypes.byref(c_node_params), c_args))
 
-    return cu_time_execution(lambda: check(cuda.cuGraphLaunch(self.instance, None)), enable=wait)
+    # _dump_gpfifo("BEF GRAPH")
+    x = cu_time_execution(lambda: check(cuda.cuGraphLaunch(self.instance, None)), enable=wait)
+    # _dump_gpfifo("AFT GRAPH")
+
+    return x
 
   def __del__(self):
     if hasattr(self, 'graph'): check(cuda.cuGraphDestroy(self.graph))

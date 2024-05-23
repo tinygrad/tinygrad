@@ -141,6 +141,7 @@ class HWComputeQueue(HWQueue):
     prg.qmd.constant_buffer_addr_upper_0 = kernargs >> 32
     prg.qmd.release0_enable = 0
     prg.qmd.require_scheduling_pcas = 0
+    prg.qmd.self_copy_on_completion = 0
     if signal is not None:
       prg.qmd.release0_address_lower = ctypes.addressof(from_mv(signal)) & 0xffffffff
       prg.qmd.release0_address_upper = ctypes.addressof(from_mv(signal)) >> 32
@@ -152,10 +153,10 @@ class HWComputeQueue(HWQueue):
 
     # print(hex(qmd_addr))
     self.ptr_to_qmd[self.ptr()] = qmd_struct_t.from_address(qmd_addr)
+    self.q += [nvmethod(1, nv_gpu.NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI, 1), (1 << 12) | (1 << 4) | (1 << 0)]
     self.q += [nvmethod(1, nv_gpu.NVC6C0_SEND_PCAS_A, 0x1), qmd_addr >> 8]
     self.q += [nvmethod(1, nv_gpu.NVC6C0_SEND_SIGNALING_PCAS2_B, 0x1), 2]
-
-    # self.q += [nvmethod(1, nv_gpu.NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI, 1), (1 << 12) | (1 << 4) | (1 << 0)]
+    
     # self.q += [nvmethod(1, nv_gpu.NVC6C0_SET_INLINE_QMD_ADDRESS_A, 0x42), *nvdata64((kernargs + round_up(prg.constbuf_0_size, 1 << 8)) >> 8)]
     # self.q += [x for x in to_mv(ctypes.addressof(prg.qmd), ctypes.sizeof(prg.qmd)).cast("I")]
     return self
@@ -167,6 +168,7 @@ class HWComputeQueue(HWQueue):
     prg.qmd.constant_buffer_addr_lower_0 = kernargs & 0xffffffff
     prg.qmd.constant_buffer_addr_upper_0 = kernargs >> 32
     prg.qmd.require_scheduling_pcas = 1
+    prg.qmd.self_copy_on_completion = 1
     if signal is not None:
       prg.qmd.release0_address_lower = ctypes.addressof(from_mv(signal)) & 0xffffffff
       prg.qmd.release0_address_upper = ctypes.addressof(from_mv(signal)) >> 32
@@ -206,6 +208,11 @@ class HWCopyQueue(HWQueue):
     self.q += [nvmethod(4, nv_gpu.NVC6B5_LINE_LENGTH_IN, 1), copy_size]
     self.q += [nvmethod(4, nv_gpu.NVC6B5_LAUNCH_DMA, 1), 0x182] # TRANSFER_TYPE_NON_PIPELINED | DST_MEMORY_LAYOUT_PITCH | SRC_MEMORY_LAYOUT_PITCH
     return self
+
+  # def signal(self, signal, value=0):
+  #   self.q += [nvmethod(4, nv_gpu.NVC6B5_SET_SEMAPHORE_A, 3), *nvdata64(ctypes.addressof(from_mv(signal))), value]
+  #   self.q += [nvmethod(4, nv_gpu.NVC6B5_LAUNCH_DMA, 1), 0x14]
+  #   return self
 
   def submit(self, dev:NVDevice):
     if len(self.q) == 0: return
@@ -527,7 +534,7 @@ class NVDevice(Compiled):
     for dev in self.devices:
       uvm.enable_peer_access(self.fd_uvm, gpuUuidA=nv_gpu.struct_nv_uuid(uuid=self.gpu_uuid), gpuUuidB=nv_gpu.struct_nv_uuid(uuid=dev.gpu_uuid))
 
-    if NVDevice.signals_page is None: NVDevice.signals_page = self._gpu_system_alloc(0x10000, map_to_cpu=True)
+    if NVDevice.signals_page is None: NVDevice.signals_page = self._gpu_system_alloc((2 << 20) * 64, map_to_cpu=True)
     else: self._gpu_map(NVDevice.signals_page)
 
     channel_params = nv_gpu.NV_CHANNEL_GROUP_ALLOCATION_PARAMETERS(engineType=nv_gpu.NV2080_ENGINE_TYPE_GRAPHICS)
@@ -596,9 +603,9 @@ class NVDevice(Compiled):
   def _get_signal(self, num=None, value=0) -> memoryview:
     if num is None:
       self.signal_number += 1
-      if self.signals_page and self.signal_number * 16 >= self.signals_page.length: self.signal_number = 32
+      if self.signals_page and self.signal_number * (2 << 20) >= self.signals_page.length: assert False
       num = self.signal_number
-    sig = to_mv(self.signals_page.base + num * 16, 16).cast("Q")
+    sig = to_mv(self.signals_page.base + num * (2 << 20), 16).cast("Q")
     sig[0] = value
     return sig
 
