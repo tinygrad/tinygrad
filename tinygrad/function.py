@@ -743,6 +743,7 @@ class Exp(Function):
             Qterms.append(x.e(BinaryOps.MUL, x.const(q)))
             x = x.e(BinaryOps.MUL, ox)
 
+        # for p, q in zip(Pterms[::-1], Qterms[::-1]):
         for p, q in zip(Pterms, Qterms):
             Psum = Psum.e(BinaryOps.ADD, p)
             Qsum = Qsum.e(BinaryOps.ADD, q)
@@ -761,13 +762,15 @@ class Exp(Function):
         
 
     def _exp_lowprec(self, x: LazyBuffer) -> LazyBuffer:
-        # sign = x.e(BinaryOps.CMPLT, x.const(0)).e(
-        #     TernaryOps.WHERE,
-        #     x.cast(dtypes.int32).const(-1),
-        #     x.cast(dtypes.int32).const(1),
-        # )
-        sign = self._sign(x).cast(dtypes.int32)
+        sign = x.e(BinaryOps.CMPLT, x.const(0)).e(
+            TernaryOps.WHERE,
+            x.cast(dtypes.int64).const(-1),
+            x.cast(dtypes.int64).const(1),
+        )
+        # sign = self._sign(x)#.cast(dtypes.int32)
+        # signint = sign.cast(dtypes.int32)
         x = self._abs(x)
+        # x = x.e(BinaryOps.MUL, sign)
         res = self._pade(x)
         res = sign.e(BinaryOps.CMPEQ, sign.const(-1)).e(
             TernaryOps.WHERE, res.const(1).e(BinaryOps.DIV, res), res
@@ -777,10 +780,13 @@ class Exp(Function):
     def _exp(self, x: LazyBuffer) -> LazyBuffer:
         sign = x.e(BinaryOps.CMPLT, x.const(0)).e(
             TernaryOps.WHERE,
-            x.cast(dtypes.int32).const(-1),
-            x.cast(dtypes.int32).const(1),
+            x.cast(dtypes.int64).const(-1),
+            x.cast(dtypes.int64).const(1),
         )
+        # sign = self._sign(x)#.cast(dtypes.int32)
+        # signint = sign.cast(dtypes.int32)
         x = self._abs(x)
+        # x = x.e(BinaryOps.MUL, sign)
         # print("X: ")
 
         # divres = x.e(BinaryOps.DIV, x.const(10)).cast(x.dtype).e(BinaryOps.SUB, x.const(0.499999))
@@ -797,19 +803,22 @@ class Exp(Function):
         # print(__import__('tinygrad').Tensor(res).numpy())
 
         for i in range(10, 0, -1):
-            # print("i: ", i)
-            epow = res.const(math.exp(i*10))
-            # print("epow: ")
-            # print(__import__('tinygrad').Tensor(epow).numpy())
-            epow = epow.e(BinaryOps.MUL, self._eq(divres, divres.const(i)).cast(epow.dtype))
-            # print("epow: ")
-            # print(__import__('tinygrad').Tensor(epow).numpy())
-            epow = self._revnorm(epow)
-            # print("epow: ")
-            # print(__import__('tinygrad').Tensor(epow).numpy())
-            res = res.e(BinaryOps.MUL, epow)
-            # print("res: ")
-            # print(__import__('tinygrad').Tensor(res).numpy())
+            # # print("i: ", i)
+            # epow = res.const(math.exp(i*10))
+            # # print("epow: ")
+            # # print(__import__('tinygrad').Tensor(epow).numpy())
+            # epow = epow.e(BinaryOps.MUL, self._eq(divres, divres.const(i)).cast(epow.dtype))
+            # # print("epow: ")
+            # # print(__import__('tinygrad').Tensor(epow).numpy())
+            # epow = self._revnorm(epow)
+            # # print("epow: ")
+            # # print(__import__('tinygrad').Tensor(epow).numpy())
+            # res = res.e(BinaryOps.MUL, epow)
+            # # print("res: ")
+            # # print(__import__('tinygrad').Tensor(res).numpy())
+            res = divres.e(BinaryOps.CMPEQ, divres.const(i)).e(
+                TernaryOps.WHERE, res.e(BinaryOps.MUL, res.const(math.exp(i*10))), res
+            )
         
         res = sign.e(BinaryOps.CMPEQ, sign.const(-1)).e(
             TernaryOps.WHERE, res.const(1).e(BinaryOps.DIV, res), res
@@ -824,19 +833,19 @@ class Exp(Function):
         """
         Return 0 if x < thresh, else return x
         """
-        lt = x.e(BinaryOps.CMPLT, thresh).cast(dtypes.int32)
-        lt = self._abs(lt.const(1).e(BinaryOps.SUB, lt).cast(x.dtype))
-        return x.e(BinaryOps.MUL, lt)
+        # lt = x.e(BinaryOps.CMPLT, thresh).cast(dtypes.int32)
+        # lt = self._abs(lt.const(1).e(BinaryOps.SUB, lt).cast(x.dtype))
+        # return x.e(BinaryOps.MUL, lt)
 
     def forward(self, x: LazyBuffer) -> LazyBuffer:
         # self.ret = x.e(BinaryOps.MUL, x.const(1 / math.log(2))).e(UnaryOps.EXP2)
         # return self.ret
 
         initial_x = x
-        pinf_t = x.const(88.72687268726872)
+        pinf_t = x.const(88.722)
         ninf_t = x.const(-103.97539753975397)
-        # x = x.e(BinaryOps.CMPLT, ninf_t).e(TernaryOps.WHERE, x.const(0), x)
-        x = self.zero_if_below_thresh(x, ninf_t)
+        x = x.e(BinaryOps.CMPLT, ninf_t).e(TernaryOps.WHERE, x.const(0), x)
+        # x = self.zero_if_below_thresh(x, ninf_t)
 
 
         # x = x.e(BinaryOps.MUL, x.const(1 / math.log(2)))

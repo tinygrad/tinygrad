@@ -1228,15 +1228,15 @@ class Tensor:
     return self.div(2 ** x, upcast=False)
 
   def pow(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
-    x = self._to_const_val(x)
     # try:
-    #     print("value being raised: ")
-    #     np.set_printoptions(threshold=sys.maxsize)
-    #     print(self.numpy())
-    #     print("exponent: ", x.numpy())
-    #     np.set_printoptions(threshold=1000)
+    print("value being raised: ")
+    np.set_printoptions(threshold=sys.maxsize)
+    print(self.numpy() if isinstance(self, Tensor) else self)
+    print("exponent: ", x.numpy() if isinstance(x, Tensor) else x)
+    np.set_printoptions(threshold=1000)
     # except:
     #     pass
+    x = self._to_const_val(x)
     if not isinstance(x, Tensor) and not reverse:
       # simple pow identities
       if x < 0: return self.reciprocal().pow(-x)
