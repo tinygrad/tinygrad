@@ -361,7 +361,7 @@ class TestLinearizer(unittest.TestCase):
     assert stores[1].vin[0].uop is UOps.DEFINE_GLOBAL
 
   def test_upcast_multireduce_nested_local_upcast(self):
-    x, y, z, w = [Tensor.rand(1,128).realize() for _ in range(4)]
+    x, y, z, w = [Tensor.rand(1,128,128).realize() for _ in range(4)]
     st0 = ShapeTracker(views=(View(shape=(1, 128, 128), strides=(0, 0, 1), offset=0, mask=None, contiguous=False),))
     st1 = ShapeTracker(views=(View(shape=(1, 128, 128), strides=(0, 1, 128), offset=0, mask=None, contiguous=False),))
     ld0 = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, st0))
