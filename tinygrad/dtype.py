@@ -31,12 +31,12 @@ class ImageDType(DType):
   def vec(self, sz:int): return self.base.vec(sz)
   def __repr__(self): return f"dtypes.{self.name}({self.shape})"
 
-# @dataclass(frozen=True, init=False, repr=False, eq=False)
 class PtrDType(DType):
   def __init__(self, dt:DType): super().__init__(dt.priority, dt.itemsize, dt.name, dt.fmt, dt.count)
   def __repr__(self): return f"ptr.{super().__repr__()}"
   def __hash__(self): return super().__hash__()
-  def __eq__(self, dt): return self.priority==dt.priority and self.itemsize==dt.itemsize and self.name==dt.name and self.count==dt.count
+  def __eq__(self, dt):
+    return isinstance(dt, PtrDType) and (self.priority, self.itemsize, self.name, self.count) == (dt.priority, dt.itemsize, dt.name, dt.count)
   def __ne__(self, dt): return not (self == dt)
 
 class dtypes:

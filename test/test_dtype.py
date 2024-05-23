@@ -287,12 +287,10 @@ class TestEqStrDType(unittest.TestCase):
     assert isinstance(dtypes.imageh((1,2,4)), ImageDType)
   def test_ptr_ne(self):
     if PtrDType is None: raise unittest.SkipTest("no PtrDType support")
-    # TODO: is this the wrong behavior?
-    assert PtrDType(dtypes.float32) == dtypes.float32
-    assert not (PtrDType(dtypes.float32) != dtypes.float32)
+    assert PtrDType(dtypes.float32) != dtypes.float32
+    assert not (PtrDType(dtypes.float32) == dtypes.float32)
     assert PtrDType(dtypes.float32) == PtrDType(dtypes.float32)
     assert not (PtrDType(dtypes.float32) != PtrDType(dtypes.float32))
-    #assert PtrDType(dtypes.float32) != dtypes.float32
   def test_strs(self):
     if PtrDType is None: raise unittest.SkipTest("no PtrDType support")
     self.assertEqual(str(dtypes.imagef((1,2,4))), "dtypes.imagef((1, 2, 4))")
