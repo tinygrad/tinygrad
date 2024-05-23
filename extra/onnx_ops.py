@@ -1,9 +1,9 @@
 import functools, io, math
 from typing import Union, Tuple, Optional, List, Any
-from tinygrad.tensor import Tensor, broadcast_shape
+from tinygrad.tensor import Tensor, _broadcast_shape
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.helpers import prod, flatten
-from extra.onnx import safe_numpy, DTYPE_MAP
+from extra.onnx import DTYPE_MAP, to_python_const
 import numpy as np
 
 tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu", "Sigmoid", "MatMul",
@@ -58,7 +58,7 @@ def Clip(x: Tensor, min=None, max=None): return x.clip(float('-inf') if min is N
 
 # NOTE ReduceProd would require a new llop
 def _axes(axes, noop_with_empty_axes):
-  if axes is not None and not (isinstance(axes, Tensor) and axes.shape == (0,)): return [int(x) for x in safe_numpy(axes)]
+  if axes is not None and not (isinstance(axes, Tensor) and axes.shape == (0,)): return to_python_const(axes)
   return [] if noop_with_empty_axes else None
 def ReduceMax(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.max(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
 def ReduceMin(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.min(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
@@ -75,14 +75,14 @@ def GlobalMaxPool(X: Tensor): return X.max(axis=tuple(range(2, len(X.shape))), k
 def OptionalHasElement(x: Optional[Tensor]=None): return Tensor(x is not None and x.numel() > 0)
 def OptionalGetElement(x: Optional[Tensor]=None): return x if x is not None else Tensor([])
 
-def Tile(x: Tensor, repeats): return x.repeat([int(x) for x in safe_numpy(repeats)])
-def Range(start: Tensor, limit, delta): return Tensor.arange(start=safe_numpy(start).item(), stop=safe_numpy(limit).item(), step=safe_numpy(delta).item())
+def Tile(x: Tensor, repeats): return x.repeat(to_python_const(repeats))
+def Range(start: Tensor, limit, delta): return Tensor.arange(start=to_python_const(start), stop=to_python_const(limit), step=to_python_const(delta))
 def Shape(data: Tensor, end=None, start=0): return Tensor(list(data.shape)[start:end], dtype=dtypes.int64)
 def Size(data: Tensor): return prod(data if isinstance(data, list) else data.shape)
 def Flatten(x: Tensor, axis=1): return x.reshape(prod(x.shape[0:axis]), -1)
 def Reshape(data: Tensor, shape: Tensor, allowzero=0):
-  return data.reshape([int(x) if x != 0 else (0 if allowzero else data.shape[i]) for i,x in enumerate(safe_numpy(shape))])
-def Expand(x: Tensor, shape:Tensor): return x.expand(broadcast_shape(x.shape, tuple(int(x) for x in safe_numpy(shape))))
+  return data.reshape([int(x) if x != 0 else (0 if allowzero else data.shape[i]) for i,x in enumerate(to_python_const(shape))])
+def Expand(x: Tensor, shape:Tensor): return x.expand(_broadcast_shape(x.shape, tuple(to_python_const(shape))))
 def Shrink(x: Tensor, bias=0.0, lambd=0.5): return (x < -lambd)*(x+bias) + (x > lambd)*(x-bias)
 def And(x:Tensor, y:Tensor): return (x==y).where(x, False)
 def Or(x:Tensor, y:Tensor): return (x==y).where(x, True)
@@ -105,15 +105,15 @@ def Atan(y: Tensor):
   return (y < 0).where(-t3, t3)
 
 def Trilu(x: Tensor, k: Union[Tensor, int]=0, upper=1):
-  k = safe_numpy(k).item() if isinstance(k, Tensor) else 0 # onnx passes k as a tensor int64 with one element, default is 0
+  k = to_python_const(k) if isinstance(k, Tensor) else 0 # onnx passes k as a tensor int64 with one element, default is 0
   return x.triu(k) if upper else x.tril(k)
 
 def Squeeze(data: Tensor, axes):
-  if isinstance(axes, Tensor): axes = safe_numpy(axes)
-  axes = [int(x) + data.ndim if x < 0 else int(x) for x in axes]
+  if isinstance(axes, Tensor): axes = to_python_const(axes)
+  axes = [x + data.ndim if x < 0 else x for x in axes]
   return data.reshape([s for i,s in enumerate(data.shape) if i not in axes])
 def Unsqueeze(data: Tensor, axes):
-  axes = [int(x) + data.ndim if x < 0 else int(x) for x in safe_numpy(axes)]
+  axes = [x + data.ndim if x < 0 else x for x in to_python_const(axes)]
   new_shape = [1] * (data.ndim + len(axes))
   ptr = iter(data.shape)
   for i in range(len(new_shape)):
@@ -133,7 +133,7 @@ def Transpose(x: Tensor, perm=None): return x.permute(order=list(range(len(x.sha
 
 def ConstantOfShape(x, value:Tensor=None):
   if value is None: value=Tensor([0.0])
-  shape = [int(x) for x in safe_numpy(x)]
+  shape = to_python_const(x)
   return Tensor.ones(*shape, dtype=value.dtype) * (value if shape[0]!=0 else 1)
 
 # **************** Complex Ops ****************
@@ -146,7 +146,7 @@ def Gemm(A: Tensor, B: Tensor, C: Tensor=None, alpha=1.0, beta=1.0, transA=0, tr
 def Einsum(*Inputs: List[Tensor], equation): return Tensor.einsum(equation, Inputs)
 
 def CumSum(X:Tensor, axis:Tensor, exclusive=0, reverse=0):
-  axis = safe_numpy(axis).item()
+  axis = to_python_const(axis)
   if axis < 0: axis += X.ndim
   if reverse: X = X.flip(axis)
   if exclusive:
@@ -231,10 +231,10 @@ def _auto_pad(X: Tensor, auto_pad, strides, kernel_shape, dilations):
   raise NotImplementedError(f"auto_pad={auto_pad} not implemented")
 
 def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=None, axes: Tensor=None, mode="constant", value: float=0.):
-  constant_value = value if constant_value is None else float(safe_numpy(constant_value))
-  seq_pads = list(pads) if isinstance(pads, tuple) else safe_numpy(pads)
+  constant_value = value if constant_value is None else float(to_python_const(constant_value))
+  seq_pads = list(pads) if isinstance(pads, tuple) else to_python_const(pads)
   seq_pads = [math.ceil(i) for i in seq_pads]
-  seq_axes = safe_numpy(axes).tolist() if axes is not None else None
+  seq_axes = to_python_const(axes) if axes is not None else None
   base_shape = x.shape
   pads = _format_padding(seq_pads, ndims=len(x.shape), axes=seq_axes)
   if mode == "wrap":
@@ -284,12 +284,10 @@ def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Optional[Tensor]=None, kernel_sh
   arange = Tensor.arange(outlength, requires_grad=False).reshape(1, outlength).expand(xI.shape)
   xT = xT.flatten().unsqueeze(1).expand(None, outlength)
   ret = ((xI == arange) * xT).sum(0).reshape([1, 1] + out_sh)
-  if outshape is not None:
-    outshape = tuple(safe_numpy(outshape).tolist())
-    if outshape != ret.shape:
-      diff = [outshape[2] - ret.shape[2], outshape[3] - ret.shape[3]]
-      pad_args = [diff[0]//2, diff[1]//2, diff[0]-diff[0]//2, diff[1]-diff[1]//2]
-      ret = ret.pad2d((pad_args[1], pad_args[3], pad_args[0], pad_args[2]))
+  if outshape is not None and (outshape := to_python_const(outshape)) != ret.shape:
+    diff = [outshape[2] - ret.shape[2], outshape[3] - ret.shape[3]]
+    pad_args = [diff[0]//2, diff[1]//2, diff[0]-diff[0]//2, diff[1]-diff[1]//2]
+    ret = ret.pad2d((pad_args[1], pad_args[3], pad_args[0], pad_args[2]))
   return ret
 
 def Conv(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
@@ -331,8 +329,8 @@ def SpaceToDepth(X:Tensor, blocksize:int):
 
 # Reimplemented here because you need legacy RNG for passing ONNX tests.
 def Dropout(data: Tensor, ratio=0.5, training_mode=False, seed=None):
-  if isinstance(ratio, Tensor) and not ratio.shape: ratio = safe_numpy(ratio) # ratio and tensor is passed in as Tensor with shape: ()
-  if isinstance(training_mode, Tensor) and not training_mode.shape: training_mode = safe_numpy(training_mode)
+  if isinstance(ratio, Tensor) and not ratio.shape: ratio = to_python_const(ratio) # ratio and tensor is passed in as Tensor with shape: ()
+  if isinstance(training_mode, Tensor) and not training_mode.shape: training_mode = to_python_const(training_mode)
   if not training_mode: return data, Tensor.ones(data.shape, dtype=dtypes.bool)  # if mask is requested as output it will contain all True's.
   rng = np.random.RandomState(seed)
   if isinstance(ratio, Tensor): ratio = ratio.item()
@@ -386,7 +384,7 @@ def Gather(x: Tensor, indices: Tensor, axis=0):
     x_sh = list(x.shape)
     ret_shape = x_sh[:axis] + list(indices.shape) + x_sh[axis+1:]
     if indices.ndim > 1: indices = indices.flatten()
-    indices = [int(safe_numpy(indices))] if indices.shape == () else [x_sh[axis]+int(x) if x<0 else int(x) for x in safe_numpy(indices)]
+    indices = [to_python_const(indices)] if indices.shape == () else [x_sh[axis]+x if x<0 else x for x in to_python_const(indices)]
     args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(x_sh)] for i in indices]
     return x.shrink(arg=tuple(args[0])).cat(*[x.shrink(arg=tuple(arg)) for arg in args[1:]], dim=axis).reshape(ret_shape)
   # NOTE faster gather, fixed number of kernels, but exceeds limited kernels for openpilot
@@ -394,7 +392,7 @@ def Gather(x: Tensor, indices: Tensor, axis=0):
 
 def GatherElements(x: Tensor, indices: Tensor, axis):
   indices = (indices < 0).where(x.shape[axis], 0) + indices
-  return x.gather(indices, axis)
+  return x.gather(axis, indices)
 
 # TODO clean this up, it's taking the longest in CI
 def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, coordinate_transformation_mode='half_pixel',
@@ -428,7 +426,7 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
       y_out = roi[-2][0] * (X.shape[-2] - 1) + y_out * ((roi[-2][1] - roi[-2][0]) * (X.shape[-2] - 1) / (output_shape[-2] - 1)) if output_shape[-2] > 1 else Tensor([0.5 * (roi[-2][0] + roi[-2][1]) * (X.shape[-2] - 1)])
     return x_out.clip(0, X.shape[-1]-1), y_out.clip(0, X.shape[-2]-1)
   if roi is not None:
-    roi = safe_numpy(roi).tolist()
+    roi = to_python_const(roi)
     roi = [(st,ed) for st, ed in zip(roi[:len(roi)//2], roi[len(roi)//2:])]
     roi_ = [(1,1)] * 4
     if axes is not None:
@@ -436,14 +434,14 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
         roi_[a] = r
       roi = roi_
   if scales is not None:
-    scales = safe_numpy(scales).tolist()
+    scales = to_python_const(scales)
     if axes is not None:
       scales_ = [1]*X.ndim
       for a,s in zip(axes, scales):
         scales_[a] = s
       scales = scales_
   elif sizes is not None:
-    sizes = [int(i) for i in safe_numpy(sizes)]
+    sizes = to_python_const(sizes)
     scales = []
     if axes is not None:
       sizes_ = [1]*X.ndim
@@ -471,23 +469,23 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
   if mode == "linear":
     x_out, y_out = _coordinate_transformation(x_out, y_out, output_shape_, scales, roi)
     ret = []
-    for y in safe_numpy(y_out):
-      for x in safe_numpy(x_out):
+    for y in to_python_const(y_out):
+      for x in to_python_const(x_out):
         x_floor, y_floor = int(x), int(y)
         y_shrink = (y_floor, math.ceil(y)+1)
         x_shrink = (x_floor, math.ceil(x)+1)
-        corners = safe_numpy(X.shrink((None, None, y_shrink, x_shrink)))
+        corners = to_python_const(X.shrink((None, None, y_shrink, x_shrink)))[0][0]
 
         wx, wy = math.ceil(x) - x, math.ceil(y) - y
         if x == x_floor and y == y_floor:
-          weighted = corners[0,0,0,0]
+          weighted = corners[0][0]
         elif x == x_floor:
-          weighted = corners[0,0,0,0] * wy + corners[0,0,1,0] * (1-wy)
+          weighted = corners[0][0] * wy + corners[1][0] * (1-wy)
         elif y == y_floor:
-          weighted = corners[0,0,0,0] * wx + corners[0,0,0,1] * (1-wx)
+          weighted = corners[0][0] * wx + corners[0][1] * (1-wx)
         else:
-          weighted = (corners[0,0,0,0] * wx + corners[0,0,0,1] * (1-wx)) * wy + \
-                     (corners[0,0,1,0] * (wx) + corners[0,0,1,1] * (1-wx)) * (1-wy)
+          weighted = (corners[0][0] * wx + corners[0][1] * (1-wx)) * wy + \
+                     (corners[1][0] * (wx) + corners[1][1] * (1-wx)) * (1-wy)
         ret.append(weighted)
     return Tensor(ret).reshape(output_shape)
   if mode == "cubic":
@@ -497,7 +495,7 @@ def CenterCropPad(t: Tensor, shape: Tensor, axes=None):
   if not axes: axes = list(range(t.ndim))
   shrink_arg = [None] * t.ndim
   pad_arg = [None] * t.ndim
-  shape = safe_numpy(shape).tolist()
+  shape = to_python_const(shape)
   for s, x in zip(shape, axes):
     tx = t.shape[x]
     if s < tx: shrink_arg[x] = (tx//2 - (s+1)//2, tx//2 + s//2)
@@ -505,7 +503,7 @@ def CenterCropPad(t: Tensor, shape: Tensor, axes=None):
   return t.shrink(tuple(shrink_arg)).pad(tuple(pad_arg))
 
 def OneHot(indices: Tensor, depth: Tensor, values: Tensor, axis=-1):
-  depth = int(safe_numpy(depth).item())
+  depth = int(to_python_const(depth))
   indices, rank = (indices < 0).where(indices+depth, indices), indices.ndim
   if axis < 0: axis += rank + 1
   ls, rs = indices.shape[0:axis], indices.shape[axis: rank]
@@ -530,7 +528,7 @@ def Compress(inp: Tensor, condition: Tensor, axis=None):
 
   if axis < 0: axis += inp.ndim
 
-  con_np = safe_numpy(condition)
+  con_np = to_python_const(condition)
   con = Tensor(np.arange(condition.shape[0])[con_np]) # no boolean indexing in Tensor
   return inp[tuple(con if i == axis else slice(None) for i in range(inp.ndim))]
 
@@ -569,7 +567,7 @@ def ImageDecoder(encoded_stream: Tensor, pixel_format="RGB"):
     import PIL.Image
   except ImportError as e:
     raise ImportError("Pillow must be installed to use the reference implementation of the ImageDecoder operator") from e
-  img = PIL.Image.open(io.BytesIO(safe_numpy(encoded_stream).tobytes()))
+  img = PIL.Image.open(io.BytesIO(to_python_const(encoded_stream, tobytes=True)))
   if pixel_format == "BGR":
     return Tensor(np.array(img))[:, :, ::-1]
   if pixel_format == "RGB":
@@ -581,7 +579,7 @@ def ImageDecoder(encoded_stream: Tensor, pixel_format="RGB"):
   raise ValueError(f"pixel_format={pixel_format!r} is not supported.")
 
 def AffineGrid(theta: Tensor, size: Tensor, align_corners=0):
-  _, _, *data_sz = safe_numpy(size).tolist()
+  _, _, *data_sz = to_python_const(size)
   size_zeros, original_grid = Tensor.zeros(data_sz), Tensor.ones(data_sz)
   stackable = [original_grid]
   for dim, dim_sz in enumerate(data_sz):
@@ -683,15 +681,14 @@ def Attention(x:Tensor, weights, bias:Optional[Tensor]=None, mask_index:Optional
 def Adagrad(R, T, *inputs, decay_factor=0.0, epsilon=0.0, norm_coefficient=0.0):
   groups = len(inputs) // 3
   grouped_inputs = [inputs[i::groups] for i in range(groups)]
-  T, R = safe_numpy(T), safe_numpy(R)
-  r = R / (1 + T * decay_factor)
+  r = to_python_const(R / (1 + T * decay_factor))
   ret = []
   for X, G, H in grouped_inputs:
     X.grad = norm_coefficient * X + G
     X.grad.requires_grad, H.requires_grad = False, False # TODO manually turning off requires_grad, see TODO under (domain == "ai.onnx.preview.training") in onnx.py
     H.assign(H.detach() + X.grad * X.grad).realize()
     H_adaptive = H.sqrt() + epsilon
-    X.assign(X.detach() - r.tolist() * X.grad / H_adaptive)
+    X.assign(X.detach() - r * X.grad / H_adaptive)
     ret.extend([X, H])
   ret = ret[::2] + ret[1::2]
   return tuple(ret)
@@ -699,7 +696,7 @@ def Adagrad(R, T, *inputs, decay_factor=0.0, epsilon=0.0, norm_coefficient=0.0):
 def Momentum(R, T, *inputs, alpha, beta, mode, norm_coefficient):
   groups = len(inputs) // 3
   grouped_inputs = [inputs[i::groups] for i in range(groups)]
-  T, R.requires_grad = T.item(), False
+  T, R.requires_grad = to_python_const(T), False
   beta_adjusted = beta if T > 0 else 1
   ret = []
   for X, G, V in grouped_inputs:
@@ -716,7 +713,7 @@ def Momentum(R, T, *inputs, alpha, beta, mode, norm_coefficient):
 def Adam(R, T, *inputs, alpha=0.9, beta=0.999, epsilon=0.0, norm_coefficient=0.0, norm_coefficient_post=0.0):
   groups = len(inputs) // 4
   grouped_inputs = [inputs[i::groups] for i in range(groups)]
-  T, R.requires_grad = T.item(), False
+  T, R.requires_grad = to_python_const(T), False
   ret = []
   for X, G, V, H in grouped_inputs:
     X.grad = (norm_coefficient * X + G).realize()

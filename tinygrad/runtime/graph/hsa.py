@@ -1,12 +1,12 @@
 import ctypes, collections, time, itertools
-from typing import List, Any, Dict, cast, Optional, Union, Tuple
-from tinygrad.helpers import GraphException, init_c_var, round_up, colored
-from tinygrad.buffer import Buffer, BufferOptions
-from tinygrad.device import Compiled, CompiledRunner, BufferXfer, MultiDeviceJITGraph, Device
+from typing import List, Any, Dict, cast, Optional, Tuple
+from tinygrad.helpers import GraphException, init_c_var, round_up
+from tinygrad.device import Buffer, BufferOptions
+from tinygrad.device import Compiled, Device
 from tinygrad.shape.symbolic import Variable
 from tinygrad.runtime.ops_hsa import HSADevice, PROFILE, Profiler
-from tinygrad.engine.realize import ExecItem
-from tinygrad.engine.jit import get_input_replace, get_jit_stats, get_jc_idxs_with_updatable_launch_dims, get_jc_idxs_with_updatable_var_vals
+from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner
+from tinygrad.engine.jit import MultiGraphRunner
 import tinygrad.runtime.autogen.hsa as hsa
 from tinygrad.runtime.driver.hsa import check, AQLQueue, AQL_PACKET_SIZE, EMPTY_SIGNAL
 
@@ -25,19 +25,16 @@ class VirtAQLQueue(AQLQueue):
     self.packets_count += 1
     self.available_packet_slots -= 1
 
-class HSAGraph(MultiDeviceJITGraph):
+class HSAGraph(MultiGraphRunner):
   def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
-    self.jit_cache = jit_cache
-    self.input_replace = get_input_replace(jit_cache, input_rawbuffers)
-    self.jc_idxs_with_updatable_launch_dims = get_jc_idxs_with_updatable_launch_dims(jit_cache)
-    self.jc_idxs_with_updatable_var_vals = get_jc_idxs_with_updatable_var_vals(jit_cache)
+    super().__init__(jit_cache, input_rawbuffers, var_vals)
 
     # Check all jit items are compatible.
     compiled_devices = set()
     for ji in self.jit_cache:
       if isinstance(ji.prg, CompiledRunner): compiled_devices.add(ji.prg.device)
       elif isinstance(ji.prg, BufferXfer):
-        for x in ji.rawbufs[0:2]: compiled_devices.add(Device[cast(Buffer, x).device])
+        for x in ji.bufs[0:2]: compiled_devices.add(Device[cast(Buffer, x).device])
       else: raise GraphException
     if any(not isinstance(d, HSADevice) for d in compiled_devices): raise GraphException
 
@@ -55,8 +52,8 @@ class HSAGraph(MultiDeviceJITGraph):
       if not isinstance(ji.prg, CompiledRunner): continue
       self.ji_kargs_structs[j] = ji.prg.clprg.args_struct_t.from_address(kernargs_ptrs[ji.prg.device])
       kernargs_ptrs[ji.prg.device] += round_up(ctypes.sizeof(ji.prg.clprg.args_struct_t), 16)
-      for i in range(len(ji.rawbufs)): self.ji_kargs_structs[j].__setattr__(f'f{i}', cast(Buffer, ji.rawbufs[i])._buf)
-      for i in range(len(ji.prg.vars)): self.ji_kargs_structs[j].__setattr__(f'v{i}', var_vals[ji.prg.vars[i]])
+      for i in range(len(ji.bufs)): self.ji_kargs_structs[j].__setattr__(f'f{i}', cast(Buffer, ji.bufs[i])._buf)
+      for i in range(len(ji.prg.p.vars)): self.ji_kargs_structs[j].__setattr__(f'v{i}', var_vals[ji.prg.p.vars[i]])
 
     # Build queues.
     self.virt_aql_queues: Dict[Compiled, VirtAQLQueue] = {dev:VirtAQLQueue(dev, 2*len(self.jit_cache)+16) for dev in self.devices}
@@ -64,8 +61,6 @@ class HSAGraph(MultiDeviceJITGraph):
     self.transfers = []
     self.ji_to_transfer: Dict[int, int] = {} # faster to store transfers as list and update using this mapping table.
     self.signals_to_reset: List[hsa.hsa_signal_t] = []
-    self.w_dependency_map: Dict[Any, Union[hsa.hsa_signal_t, int]] = {}
-    self.r_dependency_map: Dict[Any, List[Union[hsa.hsa_signal_t, int]]] = collections.defaultdict(list)
     self.signals_to_devices: Dict[ctypes.c_uint64, List[HSADevice]] = {}
     self.profile_info: Dict[Compiled, List[Tuple[Any, ...]]] = collections.defaultdict(list)
 
@@ -75,17 +70,17 @@ class HSAGraph(MultiDeviceJITGraph):
 
     for j,ji in enumerate(self.jit_cache):
       if isinstance(ji.prg, CompiledRunner):
-        wait_signals = self.access_resources(ji.rawbufs[(outs:=ji.prg.outcount):], ji.rawbufs[:outs], new_dependency=j, sync_with_aql_packets=False)
+        wait_signals = self.access_resources(ji.bufs[(outs:=ji.prg.p.outcount):], ji.bufs[:outs], new_dependency=j, sync_with_aql_packets=False)
         for i in range(0, len(wait_signals), 5):
           self.virt_aql_queues[ji.prg.device].submit_barrier(wait_signals[i:i+5])
         self.packets[j] = hsa.hsa_kernel_dispatch_packet_t.from_address(self.virt_aql_queues[ji.prg.device].write_addr)
 
         sync_signal = self.alloc_signal(reset_on_start=True) if PROFILE else None
-        self.virt_aql_queues[ji.prg.device].submit_kernel(ji.prg.clprg, *ji.prg.launch_dims(var_vals), #type:ignore
+        self.virt_aql_queues[ji.prg.device].submit_kernel(ji.prg.clprg, *ji.prg.p.launch_dims(var_vals), #type:ignore
                                                           ctypes.addressof(self.ji_kargs_structs[j]), completion_signal=sync_signal)
         if PROFILE: self.profile_info[ji.prg.device].append((sync_signal, ji.prg.clprg.name, False))
       elif isinstance(ji.prg, BufferXfer):
-        dest, src = [cast(Buffer, x) for x in ji.rawbufs[0:2]]
+        dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
         dest_dev, src_dev = cast(HSADevice, Device[dest.device]), cast(HSADevice, Device[src.device])
         sync_signal = self.alloc_signal(reset_on_start=True, wait_on=[dest_dev, src_dev])
 
@@ -111,10 +106,6 @@ class HSAGraph(MultiDeviceJITGraph):
     for sig in self.signals_to_reset: hsa.hsa_signal_silent_store_relaxed(sig, 0)
     hsa.hsa_signal_silent_store_relaxed(self.finish_signal, 0)
 
-    # clear jit inputs to allow their memory to be freed/reused
-    for (j,i) in self.input_replace.keys(): self.jit_cache[j].rawbufs[i] = None
-    super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), "HSA", *get_jit_stats(jit_cache))
-
   def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False) -> Optional[float]:
     # Wait and restore signals
     hsa.hsa_signal_wait_scacquire(self.finish_signal, hsa.HSA_SIGNAL_CONDITION_LT, 1, (1 << 64) - 1, hsa.HSA_WAIT_STATE_ACTIVE)
@@ -130,13 +121,13 @@ class HSAGraph(MultiDeviceJITGraph):
         elif i == 1: self.transfers[self.ji_to_transfer[j]][2] = input_rawbuffers[input_idx]._buf # src
 
     # Update var_vals
-    for j in self.jc_idxs_with_updatable_var_vals:
-      for i,v in enumerate(cast(CompiledRunner, self.jit_cache[j].prg).vars):
+    for j in self.jc_idx_with_updatable_var_vals:
+      for i,v in enumerate(cast(CompiledRunner, self.jit_cache[j].prg).p.vars):
         self.ji_kargs_structs[j].__setattr__(f'v{i}', var_vals[v])
 
     # Update launch dims
-    for j in self.jc_idxs_with_updatable_launch_dims:
-      gl, lc = cast(CompiledRunner, self.jit_cache[j].prg).launch_dims(var_vals)
+    for j in self.jc_idx_with_updatable_launch_dims:
+      gl, lc = cast(CompiledRunner, self.jit_cache[j].prg).p.launch_dims(var_vals)
       self.packets[j].workgroup_size_x = lc[0]
       self.packets[j].workgroup_size_y = lc[1]
       self.packets[j].workgroup_size_z = lc[2]
@@ -173,27 +164,8 @@ class HSAGraph(MultiDeviceJITGraph):
       return packet.completion_signal
     return None
 
-  def access_resources(self, read, write, new_dependency=None, sync_with_aql_packets=False):
-    # To synchronize access to resources, we monitor the necessary prerequisites for accessing each resource,
-    # whether for write or read operations. A resource can be accessed by either a single writer or multiple readers.
-    # The tracked dependencies are either hsa signals or ints that reference a specific aql packet.
-    wait_signals: List[Optional[hsa.hsa_signal_t]] = []
-
+  def access_resources(self, read, write, new_dependency, sync_with_aql_packets=False):
+    rdeps = self._access_resources(read, write, new_dependency)
+    wait_signals = [self.dependency_as_signal(dep, sync_with_aql_packets=sync_with_aql_packets) for dep in rdeps]
     if sync_with_aql_packets: wait_signals += [self.kickoff_signals[cast(HSADevice, Device[rawbuf.device])] for rawbuf in read+write]
-    for rawbuf in read:
-      wait_signals.append(self.dependency_as_signal(self.w_dependency_map.get(rawbuf._buf), sync_with_aql_packets=sync_with_aql_packets))
-    for rawbuf in write:
-      wait_signals.append(self.dependency_as_signal(self.w_dependency_map.get(rawbuf._buf), sync_with_aql_packets=sync_with_aql_packets))
-      if rawbuf._buf in self.r_dependency_map:
-        rdeps = self.r_dependency_map.pop(rawbuf._buf)
-
-        # When synchronizing to aql packets, we only need to sync to the latest one, as they are executed in order.
-        signal_deps, aql_deps = [x for x in rdeps if isinstance(x, hsa.hsa_signal_t)], [x for x in rdeps if isinstance(x, int)]
-        deps = signal_deps + ([max(aql_deps)] if len(aql_deps) > 0 else [])
-        for dep in deps: wait_signals.append(self.dependency_as_signal(dep, sync_with_aql_packets=sync_with_aql_packets))
-
-    if new_dependency is not None:
-      for rawbuf in read: self.r_dependency_map[rawbuf._buf].append(new_dependency)
-      for rawbuf in write: self.w_dependency_map[rawbuf._buf] = new_dependency
-
     return dedup_signals(wait_signals)

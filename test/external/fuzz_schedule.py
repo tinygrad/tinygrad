@@ -1,17 +1,17 @@
 import itertools
 import numpy as np
 from typing import DefaultDict, Dict, List, Set, Tuple, TypeVar
-from tinygrad.buffer import Buffer
-from tinygrad.engine.realize import CustomOp, ExecItem, capturing, lower_schedule_item
+from tinygrad.device import Buffer
+from tinygrad.engine.realize import CustomOp, capturing, lower_schedule_item
 from tinygrad.helpers import DEBUG, MULTIOUTPUT, colored, getenv
 from tinygrad.lazy import LazyBuffer
-from tinygrad.engine.schedule import _graph_schedule, _LBScheduleItem
-from tinygrad.ops import LoadOps, ScheduleItem
+from tinygrad.engine.schedule import _graph_schedule, _LBScheduleItem, ScheduleItem
+from tinygrad.ops import LoadOps
 from tinygrad.tensor import Tensor
 
 ctx_vars = { MULTIOUTPUT: (0, 1) }
 
-def fuzz_schedule(outs: List[LazyBuffer]):
+def fuzz_schedule(outs:List[LazyBuffer]):
   # find toposorts across all tunable params
   unique_ts: Dict[Tuple[LazyBuffer, ...], Tuple[Dict, Dict[LazyBuffer, _LBScheduleItem]]] = {}
   for combination in itertools.product(*ctx_vars.values()):
@@ -23,6 +23,7 @@ def fuzz_schedule(outs: List[LazyBuffer]):
 
   # setup ground truth
   ground_truth: Dict[LazyBuffer, memoryview] = {}
+  assign_targets: Dict[LazyBuffer, LazyBuffer] = {}
   # IMPORTANT: freeze prerealized bufs before ScheduleItem exec
   prerealized: Dict[LazyBuffer, memoryview] = {}
   seed = Tensor._seed
@@ -30,10 +31,12 @@ def fuzz_schedule(outs: List[LazyBuffer]):
   for key in ts:
     for out in (ps:=prescheduled[key]).outputs:
       # freeze assign state before exec
-      if out.op is LoadOps.ASSIGN: prerealized[out] = out.buffer.as_buffer()
+      if out.op is LoadOps.ASSIGN:
+        prerealized[out] = out.buffer.as_buffer()
+        assign_targets[out.srcs[1]] = out
     for x in ps.inputs:
       if x not in ground_truth and x.device != "NPY": prerealized[x] = x.buffer.as_buffer()
-    si = ScheduleItem(ps.ast, tuple(x.buffer for x in ps.outputs if x.size != 0), tuple(x.buffer for x in ps.inputs if x.size != 0))
+    si = ScheduleItem(ps.ast, tuple(x.buffer for x in (ps.outputs+ps.inputs) if x.size != 0))
     _exec_si(si, seed)
     for out in ps.outputs:
       ground_truth[out] = out.buffer.as_buffer()
@@ -49,10 +52,12 @@ def fuzz_schedule(outs: List[LazyBuffer]):
         if out.op is LoadOps.ASSIGN: rawbufs[out].ensure_allocated().copyin(prerealized[out])
       for x in ps.inputs:
         if x not in rawbufs:
-          if x.device == "NPY": rawbufs[x] = x.buffer
+          # override the assign_target after ASSIGN
+          if x in assign_targets and assign_targets[x] in rawbufs: rawbufs[x] = rawbufs[assign_targets[x]]
+          elif x.device == "NPY": rawbufs[x] = x.buffer
           # copy the pre realized input
           else: rawbufs[x] = Buffer(x.buffer.device, x.buffer.size, x.buffer.dtype, initial_value=prerealized[x])
-      si = ScheduleItem(ps.ast, tuple(rawbufs[x] for x in ps.outputs if x.size != 0), tuple(rawbufs[x] for x in ps.inputs if x.size != 0))
+      si = ScheduleItem(ps.ast, tuple(rawbufs[x] for x in (ps.outputs+ps.inputs) if x.size != 0))
       _exec_si(si, seed)
       for out in ps.outputs:
         outbuf = np.frombuffer(rawbufs[out].as_buffer(), out.dtype.np)
@@ -61,8 +66,8 @@ def fuzz_schedule(outs: List[LazyBuffer]):
           print(f"FAILED FOR {out}")
           raise e
 
-def _exec_si(si: ScheduleItem, seed:int):
-  ei = ExecItem(lower_schedule_item(si), list(si.outputs+si.inputs))
+def _exec_si(si:ScheduleItem, seed:int):
+  ei = lower_schedule_item(si)
   if len(capturing): capturing[0].add(ei)
   if isinstance(ei.prg, CustomOp): Tensor._seed = seed
   ei.run()

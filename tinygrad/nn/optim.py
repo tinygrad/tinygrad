@@ -2,6 +2,7 @@
 from typing import List
 from tinygrad.helpers import dedup, flatten, getenv
 from tinygrad.tensor import Tensor
+from tinygrad.dtype import dtypes, least_upper_dtype
 
 class Optimizer:
   def __init__(self, params: List[Tensor], lr: float):
@@ -13,13 +14,19 @@ class Optimizer:
     assert len(self.params) != 0, "optimizer must have at least one param"
     self.device = self.params[0].device
     self.buffers: List[Tensor] = dedup([x for x in params if not x.requires_grad])   # buffers are still realized
-    self.lr = lr if getenv("CONST_LR") else Tensor([lr], requires_grad=False, device=self.device).contiguous()
+    # store lr in at least float32 precision
+    self.lr = Tensor(lr if getenv("CONST_LR") else [lr], requires_grad=False, device=self.device,
+                     dtype=least_upper_dtype(dtypes.default_float, dtypes.float32))
 
   def zero_grad(self):
     for param in self.params: param.grad = None
 
-  def step(self): Tensor.corealize(self.schedule_step())
-  def schedule_step(self) -> List[Tensor]: return self._step()+self.params+self.buffers
+  def step(self): Tensor.realize(*self.schedule_step())
+  def schedule_step(self) -> List[Tensor]:
+    assert Tensor.training, (
+            f"""Tensor.training={Tensor.training}, Tensor.training must be enabled to use the optimizer.
+                - help: Consider setting Tensor.training=True before calling Optimizer.step().""")
+    return self._step()+self.params+self.buffers
   def _step(self) -> List[Tensor]: raise NotImplementedError
 
 class OptimizerGroup(Optimizer):
@@ -59,7 +66,7 @@ class LARS(Optimizer):
         g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
       # popular momentum does pre learning rate update
       if not self.classic: g = g * r * self.lr
-      t.assign(t.detach() - g)
+      t.assign((t.detach() - g).cast(t.dtype))
     return self.b
 
 # LAMB is essentially just the trust ratio part of LARS applied to Adam/W so if we just set the trust ratio to 1.0 its just Adam/W.
@@ -69,19 +76,20 @@ def Adam(params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8): return LAM
 class LAMB(Optimizer):
   def __init__(self, params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, wd=0.0, adam=False):
     super().__init__(params, lr)
-    self.eps, self.wd, self.adam = eps, wd, adam
-    self.b1, self.b2, self.t = (Tensor([x], device=self.device, requires_grad=False).realize() for x in [b1, b2, 0])
-    self.m = [Tensor.zeros(*t.shape, dtype=t.dtype, device=t.device, requires_grad=False).contiguous() for t in self.params]
-    self.v = [Tensor.zeros(*t.shape, dtype=t.dtype, device=t.device, requires_grad=False).contiguous() for t in self.params]
+    self.b1, self.b2, self.eps, self.wd, self.adam = b1, b2, eps, wd, adam
+    self.b1_t, self.b2_t = (Tensor([1], dtype=dtypes.float32, device=self.device, requires_grad=False).realize() for _ in [b1, b2])
+    self.m = [Tensor.zeros(*t.shape, dtype=dtypes.float32, device=t.device, requires_grad=False).contiguous() for t in self.params]
+    self.v = [Tensor.zeros(*t.shape, dtype=dtypes.float32, device=t.device, requires_grad=False).contiguous() for t in self.params]
 
   def _step(self) -> List[Tensor]:
-    self.t.assign(self.t + 1)
+    self.b1_t *= self.b1
+    self.b2_t *= self.b2
     for i, t in enumerate(self.params):
       assert t.grad is not None
       self.m[i].assign(self.b1 * self.m[i] + (1.0 - self.b1) * t.grad)
       self.v[i].assign(self.b2 * self.v[i] + (1.0 - self.b2) * (t.grad * t.grad))
-      m_hat = self.m[i] / (1.0 - self.b1 ** self.t)
-      v_hat = self.v[i] / (1.0 - self.b2 ** self.t)
+      m_hat = self.m[i] / (1.0 - self.b1_t)
+      v_hat = self.v[i] / (1.0 - self.b2_t)
       up = (m_hat / (v_hat.sqrt() + self.eps)) + self.wd * t.detach()
       if not self.adam:
         r1 = t.detach().square().sum().sqrt()
@@ -89,5 +97,5 @@ class LAMB(Optimizer):
         r = Tensor.where(r1 > 0, Tensor.where(r2 > 0, r1 / r2, 1.0), 1.0)
       else:
         r = 1.0
-      t.assign(t.detach() - self.lr * r * up)
-    return [self.t] + self.m + self.v
+      t.assign((t.detach() - self.lr * r * up).cast(t.dtype))
+    return [self.b1_t, self.b2_t] + self.m + self.v

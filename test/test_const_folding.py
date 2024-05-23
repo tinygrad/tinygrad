@@ -4,6 +4,7 @@ from tinygrad.engine.schedule import create_schedule
 from tinygrad.helpers import CI
 from tinygrad.ops import BufferOps
 import numpy as np
+from test.helpers import is_dtype_supported
 
 def _check_ast_count(desired_count:int, t:Tensor):
   # NOTE: this has side effect because everything can be scheduled only once
@@ -21,6 +22,11 @@ class TestUnaryOpsConstFolding(unittest.TestCase):
   def test_cast(self):
     _check_ast_count(0, Tensor.ones(4).cast(dtypes.int16))
     _check_ast_count(0, Tensor.full(4, fill_value=-1).cast(dtypes.uint16))
+
+  def test_neg_folding(self):
+    _check_ast_count(0, Tensor([1, 2, 3]).mul(-1).neg())
+    _check_ast_count(0, Tensor([1, 2, 3]).neg().mul(-1))
+    _check_ast_count(0, Tensor([1, 2, 3]).neg().neg())
 
 class TestBinaryOpsConstFolding(unittest.TestCase):
   def test_add_literal_zero(self):
@@ -54,6 +60,13 @@ class TestBinaryOpsConstFolding(unittest.TestCase):
     _check_ast_count(0, 1 * Tensor([1.0, 2, 3, 4]))
   def test_tensor_one_mul(self):
     _check_ast_count(0, Tensor.ones(4) * Tensor([1.0, 2, 3, 4]))
+
+  def test_bool_tensor_mul_bool(self):
+    _check_ast_count(0, Tensor([True, False]) * True)
+    _check_ast_count(0, Tensor([True, False]) * False)
+  def test_bool_mul_bool_tensor(self):
+    _check_ast_count(0, True * Tensor([True, False]))
+    _check_ast_count(0, False * Tensor([True, False]))
 
   def test_div_literal_one(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) / 1)
@@ -105,12 +118,14 @@ class TestMovedConstFolding(unittest.TestCase):
     _check_ast_count(1, Tensor([1.0, 2, 3, 4]) * Tensor.ones(2).pad(((1, 1),)))
 
   def test_cast_padded(self):
-    _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16))
+    # NOTE: this is folded due to CAST_BEFORE_VIEW
+    _check_ast_count(0, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16))
     np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16).numpy(), [0, 1, 1, 1, 1, 0])
+    _check_ast_count(0, Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16))
+    np.testing.assert_equal(Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16).numpy(), [0, 65535, 65535, 65535, 65535, 0])
+    # not folded
     _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int64))
     np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int64).numpy(), [0, 1, 1, 1, 1, 0])
-    _check_ast_count(1, Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16))
-    np.testing.assert_equal(Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16).numpy(), [0, 65535, 65535, 65535, 65535, 0])
 
 class TestReduceOpsConstFolding(unittest.TestCase):
   def test_const_sum(self):
@@ -134,6 +149,13 @@ class TestReduceOpsConstFolding(unittest.TestCase):
     np.testing.assert_equal(Tensor.ones(4, 5, 6).max().numpy(), 1)
     _check_ast_count(0, Tensor(4).max())
     np.testing.assert_equal(Tensor(4).max().numpy(), 4)
+
+  def test_sum_output_dtype(self):
+    # sum output dtype can be different from input
+    for dt in dtypes.fields().values():
+      if is_dtype_supported(dt):
+        t = Tensor.ones(16, dtype=dt).reshape(4, 4)
+        assert t.sum().dtype == t.contiguous().sum().dtype
 
 @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
 class TestMultiConstFolding(unittest.TestCase):

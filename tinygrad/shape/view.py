@@ -52,7 +52,8 @@ def _reshape_mask(view: View, new_shape:Tuple[sint, ...]) -> Tuple[Optional[Tupl
         if mask[1] - mask[0] < 1: return ((0, 0),) * len(new_shape), False # invalid mask
 
       else: # mask can only be splitted if reshape doesn't cut across the mask.
-        if ((l % next_stride != 0 or r % next_stride != 0) and l // next_stride != (r - 1) // next_stride): return view.mask, True
+        if (((l % next_stride != 0 or r % next_stride != 0) and l // next_stride != (r - 1) // next_stride)
+            or old_dim % next_stride != 0): return view.mask, True
         new_mask.append((l % next_stride // curr_stride, (r - 1) % next_stride // curr_stride + 1))
         curr_stride, new_dim = next_stride,  next(r_new_shape, 1) # need to get mask for next dimension
 

@@ -72,12 +72,63 @@ generate_cuda() {
   python3 -c "import tinygrad.runtime.autogen.cuda"
 }
 
+generate_nv() {
+  NVKERN_COMMIT_HASH=d6b75a34094b0f56c2ccadf14e5d0bd515ed1ab6
+  NVKERN_SRC=/tmp/open-gpu-kernel-modules-$NVKERN_COMMIT_HASH
+  if [ ! -d "$NVKERN_SRC" ]; then
+    git clone https://github.com/tinygrad/open-gpu-kernel-modules $NVKERN_SRC
+    pushd .
+    cd $NVKERN_SRC
+    git reset --hard $NVKERN_COMMIT_HASH
+    popd
+  fi
+
+  clang2py \
+    extra/nv_gpu_driver/clc6c0qmd.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/class/cl0080.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/class/cl2080_notification.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc56f.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc56f.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc56f.h \
+    $NVKERN_SRC/src/nvidia/generated/g_allclasses.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc6c0.h \
+    $NVKERN_SRC/kernel-open/nvidia-uvm/clc6b5.h \
+    $NVKERN_SRC/kernel-open/nvidia-uvm/uvm_ioctl.h \
+    $NVKERN_SRC/kernel-open/nvidia-uvm/uvm_linux_ioctl.h \
+    $NVKERN_SRC/src/nvidia/arch/nvalloc/unix/include/nv_escape.h \
+    $NVKERN_SRC/src/nvidia/arch/nvalloc/unix/include/nv-ioctl.h \
+    $NVKERN_SRC/src/nvidia/arch/nvalloc/unix/include/nv-ioctl-numbers.h \
+    $NVKERN_SRC/src/nvidia/arch/nvalloc/unix/include/nv-ioctl-numa.h \
+    $NVKERN_SRC/src/nvidia/arch/nvalloc/unix/include/nv-unix-nvos-params-wrappers.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/alloc/alloc_channel.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/nvos.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl/ctrl0000/*.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl/ctrl0080/*.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl/ctrl2080/*.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl/ctrl83de/*.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl/ctrlc36f.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl/ctrlcb33.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl/ctrla06c.h \
+    --clang-args="-include $NVKERN_SRC/src/common/sdk/nvidia/inc/nvtypes.h -I$NVKERN_SRC/src/common/inc -I$NVKERN_SRC/kernel-open/nvidia-uvm -I$NVKERN_SRC/kernel-open/common/inc -I$NVKERN_SRC/src/common/sdk/nvidia/inc -I$NVKERN_SRC/src/nvidia/arch/nvalloc/unix/include -I$NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl" \
+    -o $BASE/nv_gpu.py -k cdefstum
+  fixup $BASE/nv_gpu.py
+  sed -i "s\(0000000001)\1\g" $BASE/nv_gpu.py
+  sed -i "s\import ctypes\import ctypes, os\g" $BASE/nv_gpu.py
+  sed -i 's/#\?\s\([A-Za-z0-9_]\+\) = MW ( \([0-9]\+\) : \([0-9]\+\) )/\1 = (\2 , \3)/' $BASE/nv_gpu.py # NVC6C0_QMDV03_00 processing
+  sed -i 's/#\sdef NVC6C0_QMD\([A-Za-z0-9_()]\+\):/def NVC6C0_QMD\1:/' $BASE/nv_gpu.py
+  sed -i 's/#\s*return MW(\([0-9i()*+]\+\):\([0-9i()*+]\+\))/    return (\1 , \2)/' $BASE/nv_gpu.py
+  sed -i 's/#\?\s*\(.*\)\s*=\s*\(NV\)\?BIT\(32\)\?\s*(\s*\([0-9]\+\)\s*)/\1 = (1 << \4)/' $BASE/nv_gpu.py # name = BIT(x) -> name = (1 << x)
+  sed -i "s/UVM_\([A-Za-z0-9_]\+\) = \['i', '(', '\([0-9]\+\)', ')'\]/UVM_\1 = \2/" $BASE/nv_gpu.py # UVM_name = ['i', '(', '<num>', ')'] -> UVM_name = <num>
+  python3 -c "import tinygrad.runtime.autogen.nv_gpu"
+}
+
 generate_hsa() {
   clang2py \
     /opt/rocm/include/hsa/hsa.h \
     /opt/rocm/include/hsa/hsa_ext_amd.h \
     /opt/rocm/include/hsa/amd_hsa_signal.h \
     /opt/rocm/include/hsa/amd_hsa_queue.h \
+    /opt/rocm/include/hsa/amd_hsa_kernel_code.h \
     /opt/rocm/include/hsa/hsa_ext_finalize.h /opt/rocm/include/hsa/hsa_ext_image.h \
     /opt/rocm/include/hsa/hsa_ven_amd_aqlprofile.h \
     --clang-args="-I/opt/rocm/include" \
@@ -105,6 +156,7 @@ elif [ "$1" == "comgr" ]; then generate_comgr
 elif [ "$1" == "cuda" ]; then generate_cuda
 elif [ "$1" == "hsa" ]; then generate_hsa
 elif [ "$1" == "kfd" ]; then generate_kfd
-elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_hsa; generate_kfd
+elif [ "$1" == "nv" ]; then generate_nv
+elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_hsa; generate_kfd; generate_nv
 else echo "usage: $0 <type>"
 fi

@@ -6,10 +6,12 @@ nav:
 - Tensor: tensor.md
 - dtypes: dtypes.md
 - Neural Networks: nn.md
+- MNIST Tutorial: mnist.md
 - Quickstart: quickstart.md
 - Showcase: showcase.md
 - Developer: developer.md
 - Function: function.md
+- Environment: env_vars.md
 #- tinygrad: reference/
 
 #extra_css:
@@ -91,6 +93,7 @@ plugins:
           show_source: true
           signature_crossrefs: true
           summary: true
+- markdown-exec
 #- gen-files:
 #    scripts:
 #      - docs/gen_ref_pages.py

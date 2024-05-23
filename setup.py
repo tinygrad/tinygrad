@@ -15,7 +15,7 @@ setup(name='tinygrad',
       long_description=long_description,
       long_description_content_type='text/markdown',
       packages = ['tinygrad', 'tinygrad.runtime.autogen', 'tinygrad.codegen', 'tinygrad.nn', 'tinygrad.renderer', 'tinygrad.engine',
-                  'tinygrad.runtime', 'tinygrad.runtime.driver', 'tinygrad.runtime.graph', 'tinygrad.shape', 'tinygrad.features'],
+                  'tinygrad.runtime', 'tinygrad.runtime.driver', 'tinygrad.runtime.graph', 'tinygrad.shape'],
       classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License"
@@ -36,6 +36,7 @@ setup(name='tinygrad',
             "ruff",
             "types-tqdm",
         ],
+        'mlperf': ["mlperf-logging @ git+https://github.com/mlperf/logging.git@4.0.0-rc2"],
         'testing': [
             "torch",
             "pillow",
@@ -52,11 +53,14 @@ setup(name='tinygrad',
             "librosa",
             "networkx",
             "hypothesis",
+            "nibabel",
         ],
         'docs': [
             "mkdocs-material",
             "mkdocstrings[python]",
             "markdown-callouts",
+            "markdown-exec[ansi]",
+            "black"
         ],
         'testing_tf': [
             "tensorflow==2.15.1",

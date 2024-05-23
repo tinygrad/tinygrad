@@ -12,7 +12,8 @@
 
 ## tinygrad ops
 
-::: tinygrad.Tensor.corealize
+::: tinygrad.Tensor.schedule_with_vars
+::: tinygrad.Tensor.schedule
 ::: tinygrad.Tensor.realize
 ::: tinygrad.Tensor.replace
 ::: tinygrad.Tensor.assign
@@ -23,6 +24,7 @@
 ::: tinygrad.Tensor.shard_
 ::: tinygrad.Tensor.contiguous
 ::: tinygrad.Tensor.contiguous_backward
+::: tinygrad.Tensor.backward
 
 ## Creation (basic)
 
@@ -87,7 +89,9 @@
 ::: tinygrad.Tensor.std
 ::: tinygrad.Tensor.softmax
 ::: tinygrad.Tensor.log_softmax
+::: tinygrad.Tensor.logsumexp
 ::: tinygrad.Tensor.argmax
+::: tinygrad.Tensor.argmin
 
 ## Processing
 

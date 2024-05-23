@@ -3,7 +3,7 @@ import os, subprocess, pathlib, ctypes, tempfile, functools
 import Metal, libdispatch
 from typing import List, Set, Any, Tuple, Optional
 from tinygrad.helpers import prod, getenv, DEBUG, unwrap2
-from tinygrad.device import Compiled, LRUAllocator, Compiler, CompilerOptions
+from tinygrad.device import Compiled, Compiler, LRUAllocator
 from tinygrad.renderer.cstyle import MetalRenderer
 
 def wait_check(cbuf: Any):
@@ -12,11 +12,9 @@ def wait_check(cbuf: Any):
     raise RuntimeError(error)
 
 class MetalCompiler(Compiler):
-  compiler_opts = CompilerOptions("METAL", has_tensor_cores=os.uname().machine == "arm64", shared_max=32768)
   def __init__(self, device:Optional[MetalDevice]):
     self.device = device
     super().__init__("compile_metal")
-  def render(self, name:str, uops) -> str: return MetalRenderer(name, uops)
   def compile(self, src:str) -> bytes:
     if self.device is None:
       # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
@@ -35,7 +33,7 @@ class MetalProgram:
       with tempfile.NamedTemporaryFile(delete=True) as shader:
         shader.write(lib)
         shader.flush()
-        os.system(f"cd {pathlib.Path(__file__).parents[2]}/disassemblers/applegpu && python3 compiler_explorer.py {shader.name}")
+        os.system(f"cd {pathlib.Path(__file__).parents[2]}/extra/disassemblers/applegpu && python3 compiler_explorer.py {shader.name}")
     assert lib[:4] == b"MTLB", "Invalid Metal library. Could be due to using conda. Try system python or METAL_XCODE=1 DISABLE_COMPILER_CACHE=1."
     data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
     self.library = unwrap2(self.device.device.newLibraryWithData_error_(data, None))
@@ -98,8 +96,8 @@ class MetalDevice(Compiled):
     self.mv_in_metal: List[memoryview] = []
     self.track_cross_buffer: List[Any] = []
     from tinygrad.runtime.graph.metal import MetalGraph
-    super().__init__(device, MetalAllocator(self), MetalCompiler(None if getenv("METAL_XCODE") else self),
-                     functools.partial(MetalProgram, self), functools.partial(MetalGraph, self))
+    super().__init__(device, MetalAllocator(self), MetalRenderer(), MetalCompiler(None if getenv("METAL_XCODE") else self),
+                     functools.partial(MetalProgram, self), MetalGraph)
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight: wait_check(cbuf)
     self.mv_in_metal.clear()

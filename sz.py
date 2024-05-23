@@ -21,7 +21,7 @@ def gen_stats(base_path="."):
       with tokenize.open(filepath) as file_:
         tokens = [t for t in tokenize.generate_tokens(file_.readline) if t.type in TOKEN_WHITELIST and not is_docstring(t)]
         token_count, line_count = len(tokens), len(set([x for t in tokens for x in range(t.start[0], t.end[0]+1)]))
-        table.append([relfilepath, line_count, token_count/line_count])
+        if line_count > 0: table.append([relfilepath, line_count, token_count/line_count])
   return table
 
 def gen_diff(table_old, table_new):

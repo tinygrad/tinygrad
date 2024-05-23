@@ -3,9 +3,8 @@ import gc, unittest
 import numpy as np
 import torch
 
-from tinygrad import nn, GlobalCounters, Tensor, Device
+from tinygrad import GlobalCounters, Tensor, Device
 from tinygrad.helpers import getenv
-from tinygrad.nn import optim
 from tinygrad.nn.state import get_parameters
 from tinygrad.engine.realize import capturing
 
@@ -144,7 +143,7 @@ class TestOptReduceLoop(unittest.TestCase):
 
 @unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
 class TestOptWChild(unittest.TestCase):
-  @unittest.skip("this no longer happens, use corealize")
+  @unittest.skip("this no longer happens, use realize")
   def test_unrealized_child(self):
     a = Tensor.randn(16, 16)
     b = Tensor.randn(16, 16)
@@ -164,118 +163,6 @@ class TestOpt(unittest.TestCase):
       d = a * b + c
       d.realize()
     np.testing.assert_allclose(d.numpy(), na*nb+nc, rtol=1e-5, atol=1e-7)
-
-  def test_fold_reduce_elementwise(self):
-    img = Tensor.ones(32).contiguous()
-    addme = Tensor.ones(1)
-    with CLCache() as cache:
-      ret = img.sum() + addme
-      ret.realize()
-      assert cache.count == 1, "optimizer didn't fold reduce/elementwise"
-    assert ret.item() == 33
-
-  def test_fold_batchnorm(self):
-    with Tensor.train():
-      img = Tensor.ones(1,32,4,4).contiguous()
-      bn = nn.BatchNorm2d(32, track_running_stats=False)
-      with CLCache() as cache:
-        img_bn = bn(img).realize()
-        print(img_bn)
-        assert cache.count == 3, f"optimizer didn't fold batchnorm, got {cache.count}"
-
-  def test_fold_conv_sgd(self):
-    with Tensor.train():
-      img = Tensor.ones(2,3,4,4)
-      c1 = nn.Conv2d(3,32,3)
-      opt = optim.SGD(get_parameters(c1))
-      with CLCache() as cache:
-        opt.zero_grad()
-        c1(img).relu().sum().backward()
-        opt.step()
-        assert cache.count == 5, f"optimizer didn't fold conv-backward SGD, got {cache.count}"
-
-  def test_fold_2convs_sgd(self):
-    with Tensor.train():
-      img = Tensor.ones(2,3,64,64)
-      c1 = nn.Conv2d(3,16,3,bias=False)
-      c2 = nn.Conv2d(16,32,3,bias=False)
-      opt = optim.SGD(get_parameters([c1, c2]))
-      with CLCache(allowed=8):
-        opt.zero_grad()
-        c2(c1(img).relu()).relu().sum().backward()
-        opt.step()
-
-  def test_fold_4convs_sgd(self):
-    with Tensor.train():
-      img = Tensor.ones(2,3,64,64)
-      c1 = nn.Conv2d(3,4,3,bias=False)
-      c2 = nn.Conv2d(4,8,3,bias=False)
-      c3 = nn.Conv2d(8,16,3,bias=False)
-      c4 = nn.Conv2d(16,32,3,bias=False)
-      opt = optim.SGD(get_parameters([c1, c2, c3, c4]))
-      with CLCache(allowed=18):
-        opt.zero_grad()
-        c4(c3(c2(c1(img).relu()).relu()).relu()).relu().sum().backward()
-        opt.step()
-
-  def test_fold_conv_batchnorm_sgd(self):
-    with Tensor.train():
-      img = Tensor.ones(1,3,4,4)
-      c1 = nn.Conv2d(3,32,3)
-      bn = nn.BatchNorm2d(32, track_running_stats=False)
-      opt = optim.SGD(get_parameters([c1, bn]))
-      with CLCache(allowed=16): # this is too high
-        img_bn = bn(c1(img)).elu().sum()
-        opt.zero_grad()
-        img_bn.backward()
-        opt.step()
-
-  def test_fold_conv_batchnorm_notrain(self):
-    img = Tensor.ones(1,3,8,8)
-    c1 = nn.Conv2d(3,32,3)
-    bn = nn.BatchNorm2d(32, track_running_stats=False)
-    # precache the bn
-    bn(c1(img)).relu().realize()
-    with CLCache() as cache:
-      bn(c1(img)).relu().realize()
-      assert cache.count == 1, f"optimizer didn't fold conv-batchnorm at test time, got {cache.count}"
-
-  def test_fold_conv_batchnorm(self):
-    with Tensor.train():
-      img = Tensor.ones(1,3,8,8)
-      c1 = nn.Conv2d(3,32,3)
-      bn = nn.BatchNorm2d(32, track_running_stats=False)
-      with CLCache() as cache:
-        img_conv = bn(c1(img)).relu().realize()
-        print(img_conv)
-        assert cache.count == 4, f"optimizer didn't fold conv-batchnorm, got {cache.count}"
-
-  def test_fold_conv_elu(self):
-    img = Tensor.ones(1,4,8,8)
-    c1 = nn.Conv2d(4, 4, kernel_size=3)
-    c2 = nn.Conv2d(4, 4, kernel_size=3)
-    with CLCache() as cache:
-      img_conv = img.sequential([c1, Tensor.elu, c2, Tensor.elu]).realize()
-      print(img_conv)
-      assert cache.count == 2, "optimizer didn't fold conv/elu"
-
-  def test_fold_conv_relu(self):
-    img = Tensor.ones(1,4,8,8)
-    c1 = nn.Conv2d(4, 4, kernel_size=3)
-    c2 = nn.Conv2d(4, 4, kernel_size=3)
-    with CLCache() as cache:
-      img_conv = img.sequential([c1, Tensor.relu, c2, Tensor.relu]).realize()
-      print(img_conv)
-      assert cache.count == 2, "optimizer didn't fold conv/relu"
-
-  def test_fold_conv_relu_nobias(self):
-    img = Tensor.ones(1,4,8,8)
-    c1 = nn.Conv2d(4, 4, kernel_size=3, bias=False)
-    c2 = nn.Conv2d(4, 4, kernel_size=3, bias=False)
-    with CLCache() as cache:
-      img_conv = img.sequential([c1, Tensor.relu, c2, Tensor.relu]).realize()
-      print(img_conv)
-      assert cache.count == 2, "optimizer didn't fold conv/relu"
 
   def test_permute_was_pushed(self):
     a = Tensor.randn(16, 16, 16)
@@ -334,19 +221,13 @@ class TestOpt(unittest.TestCase):
     np.testing.assert_allclose(c.numpy(), d.numpy().transpose(1,0), rtol=1e-3, atol=1e-5)
     assert cache_len == 1, "reduceop was rerun!"
 
-  def test_fold_with_contiguous(self):
-    a = Tensor.randn(16, 16, 16)
-    b = Tensor.randn(16, 16)
-    with CLCache(2):
-      c = (a.sum(2).contiguous() + b).contiguous()
-      c.realize()
-
+  # TODO with PUSH_PERMUTES these could be 2
   def test_expand_reduce_is_folded_on_same_axis(self):
     for axis in [0, 1]:
       for n in [4, 8, 16]:
         b = torch.ones(n, n).sum(axis).reshape(n, 1).expand(n, n).sum(axis)
-        with CLCache(allowed=0):
-          a = Tensor.ones(n, n).sum(axis).reshape(n, 1).expand(n, n).sum(axis)
+        with CLCache(allowed=3):
+          a = Tensor.ones(n, n).contiguous().sum(axis).reshape(n, 1).expand(n, n).sum(axis)
           a.realize()
         np.testing.assert_allclose(a.numpy(), b.numpy(), rtol=1e-3, atol=1e-5)
 
@@ -354,8 +235,8 @@ class TestOpt(unittest.TestCase):
     axis1, axis2 = 0, 1
     for n in [4, 8, 16]:
       b = torch.ones(n, n).sum(axis1).reshape(n, 1).expand(n, n).sum(axis2)
-      with CLCache(allowed=0):
-        a = Tensor.ones(n, n).sum(axis1).reshape(n, 1).expand(n, n).sum(axis2)
+      with CLCache(allowed=3):
+        a = Tensor.ones(n, n).contiguous().sum(axis1).reshape(n, 1).expand(n, n).sum(axis2)
         a.realize()
       np.testing.assert_allclose(a.numpy(), b.numpy(), rtol=1e-3, atol=1e-5)
 

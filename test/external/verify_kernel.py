@@ -4,13 +4,13 @@ from extra.optimization.helpers import kern_str_to_lin
 from test.external.fuzz_linearizer import compare_linearizer
 from tinygrad.helpers import colored
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.features.graph import print_tree
-from tinygrad.features.search import time_linearizer
+from tinygrad.engine.graph import print_tree
+from tinygrad.engine.search import time_linearizer
 
-# Use this with the LOGKERN options to verify that all executed kernels are valid and evaluate to the same ground truth results
+# Use this with the LOGKERNS options to verify that all executed kernels are valid and evaluate to the same ground truth results
 
 # Example for GPT2:
-# 1) Run the model to log all kernels: `PYTHONPATH=. LOGKERN=/tmp/gpt2_kerns.txt JIT=1 HALF=1 BEAM=2 CACHELEVEL=0 python3 examples/gpt2.py --count 10 --temperature 0 --timing`   # noqa: E501
+# 1) Run the model to log all kernels: `PYTHONPATH=. LOGKERNS=/tmp/gpt2_kerns.txt JIT=1 HALF=1 BEAM=2 CACHELEVEL=0 python3 examples/gpt2.py --count 10 --temperature 0 --timing`   # noqa: E501
 # 2) Validate the kernel correctness: `PYTHONPATH=. python3 ./test/external/verify_kernel.py --file /tmp/gpt2_kerns.txt`
 
 if __name__ == "__main__":
