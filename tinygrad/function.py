@@ -883,8 +883,8 @@ class Exp(Function):
         if self.beginning_dtype == dtypes.half:
             computed = self._exp_lowprec(x)
         else:
-            # computed = self._exp(x)
-            computed = self._exp_lowprec(x)
+            computed = self._exp(x)
+            # computed = self._exp_lowprec(x)
         computed = initial_x.e(BinaryOps.CMPLT, pinf_t).e(
             TernaryOps.WHERE, computed, computed.const(float("inf"))
         )
