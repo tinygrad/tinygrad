@@ -3,7 +3,7 @@ import ctypes, functools, subprocess, io, atexit, collections, json
 from typing import Tuple, TypeVar, List, Dict, Any
 import tinygrad.runtime.autogen.hsa as hsa
 from tinygrad.helpers import DEBUG, init_c_var, from_mv, round_up, to_mv, init_c_struct_t, getenv
-from tinygrad.device import Compiled, Compiler, BufferOptions, LRUAllocator
+from tinygrad.device import Compiled, Compiler, CompileError, BufferOptions, LRUAllocator
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.runtime.driver.hsa import check, scan_agents, find_memory_pool, AQLQueue
 from tinygrad.runtime.driver.hip_comgr import compile_hip
@@ -45,7 +45,9 @@ class HSACompiler(Compiler):
   def __init__(self, arch:str):
     self.arch = arch
     super().__init__(f"compile_hip_{self.arch}")
-  def compile(self, src:str) -> bytes: return compile_hip(src, self.arch)
+  def compile(self, src:str) -> bytes:
+    try: return compile_hip(src, self.arch)
+    except RuntimeError as e: raise CompileError(e)
 
 class HSAProgram:
   def __init__(self, device:HSADevice, name:str, lib:bytes):

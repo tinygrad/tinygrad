@@ -1,6 +1,6 @@
 import functools, io, math
 from typing import Union, Tuple, Optional, List, Any
-from tinygrad.tensor import Tensor, broadcast_shape
+from tinygrad.tensor import Tensor, _broadcast_shape
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.helpers import prod, flatten
 from extra.onnx import DTYPE_MAP, to_python_const
@@ -82,7 +82,7 @@ def Size(data: Tensor): return prod(data if isinstance(data, list) else data.sha
 def Flatten(x: Tensor, axis=1): return x.reshape(prod(x.shape[0:axis]), -1)
 def Reshape(data: Tensor, shape: Tensor, allowzero=0):
   return data.reshape([int(x) if x != 0 else (0 if allowzero else data.shape[i]) for i,x in enumerate(to_python_const(shape))])
-def Expand(x: Tensor, shape:Tensor): return x.expand(broadcast_shape(x.shape, tuple(to_python_const(shape))))
+def Expand(x: Tensor, shape:Tensor): return x.expand(_broadcast_shape(x.shape, tuple(to_python_const(shape))))
 def Shrink(x: Tensor, bias=0.0, lambd=0.5): return (x < -lambd)*(x+bias) + (x > lambd)*(x-bias)
 def And(x:Tensor, y:Tensor): return (x==y).where(x, False)
 def Or(x:Tensor, y:Tensor): return (x==y).where(x, True)
@@ -392,7 +392,7 @@ def Gather(x: Tensor, indices: Tensor, axis=0):
 
 def GatherElements(x: Tensor, indices: Tensor, axis):
   indices = (indices < 0).where(x.shape[axis], 0) + indices
-  return x.gather(indices, axis)
+  return x.gather(axis, indices)
 
 # TODO clean this up, it's taking the longest in CI
 def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, coordinate_transformation_mode='half_pixel',

@@ -113,7 +113,7 @@ class TestDType(unittest.TestCase):
       arr = np.asarray(data, dtype=dt)
       tin = Tensor(arr).numpy()
       tor = torch.as_tensor(arr).detach().numpy()
-      assert dt is tin.dtype is tor.dtype, f"dtype mismatch: expected={dt} | tinygrad={tin.dtype} | torch={tor.dtype}"
+      assert dt == tin.dtype == tor.dtype, f"dtype mismatch: expected={dt} | tinygrad={tin.dtype} | torch={tor.dtype}"
       np.testing.assert_allclose(tin, tor, atol=1e-6, rtol=1e-3)
 
 def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype=None):
@@ -443,8 +443,8 @@ class TestTypeSpec(unittest.TestCase):
   def test_gather_returns_same_dtype(self, data_dtype, indices_dtype):
     X_data = Tensor([[1, 0], [0, 1]], dtype=data_dtype)
     indices = Tensor([[0, 0], [1, 0]], dtype=indices_dtype)
-    assert X_data.gather(indices, 0).dtype == X_data.dtype
-    assert X_data.gather(indices, 1).dtype == X_data.dtype
+    assert X_data.gather(0, indices).dtype == X_data.dtype
+    assert X_data.gather(1, indices).dtype == X_data.dtype
 
 class TestTypePromotion(unittest.TestCase):
   @given(strat.sampled_from(core_dtypes))

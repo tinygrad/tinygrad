@@ -79,7 +79,7 @@ def make_tensor(shape, dtype:dtypes, noncontiguous) -> Tensor:
   +---------------------------+------------+----------+
   """
   contiguous = not noncontiguous
-  if dtype is dtypes.bool: return Tensor.randint(shape=shape, low=0, high=2, contiguous=contiguous).cast(dtypes.bool)
+  if dtype == dtypes.bool: return Tensor.randint(shape=shape, low=0, high=2, contiguous=contiguous).cast(dtypes.bool)
   elif dtype.is_unsigned(): return Tensor.randint(shape=shape, low=0, high=10, contiguous=contiguous).cast(dtype)
   elif dtype.is_int(): return Tensor.randint(shape=shape, low=-9, high=10, contiguous=contiguous).cast(dtype) # signed int
   elif dtype.is_float(): return Tensor.rand(shape=shape, low=-9, high=9, dtype=dtype, contiguous=contiguous)
@@ -452,7 +452,7 @@ class TestIndexing(unittest.TestCase):
 
     def tensor_indices_to_np(tensor: Tensor, indices):
       npt = tensor.numpy()
-      idxs = tuple(i.numpy().tolist() if isinstance(i, Tensor) and i.dtype is dtypes.int64 else
+      idxs = tuple(i.numpy().tolist() if isinstance(i, Tensor) and i.dtype == dtypes.int64 else
                   i for i in indices)
       return npt, idxs
 
@@ -1251,7 +1251,7 @@ class TestIndexing(unittest.TestCase):
 
   def test_take_along_dim(self):
     def _test_against_numpy(t: Tensor, indices: Tensor, dim):
-      actual = t.gather(indices, dim=dim)
+      actual = t.gather(dim, indices)
       t_np = t.numpy()
       indices_np = indices.numpy()
       expected = np.take_along_axis(t_np, indices_np, axis=dim)
@@ -1295,24 +1295,24 @@ class TestIndexing(unittest.TestCase):
 
       # dim of `t` and `indices` does not match
       with self.assertRaises(RuntimeError, "input and indices should have the same number of dimensions"):
-        t.gather(indices[0], dim=0)
+        t.gather(0, indices[0])
 
       # invalid `indices` dtype
       with self.assertRaises(RuntimeError):
-        t.gather(indices.cast(dtypes.bool), dim=0)
+        t.gather(0, indices.cast(dtypes.bool))
 
       with self.assertRaises(RuntimeError):
-        t.gather(indices.cast(dtypes.float32), dim=0)
+        t.gather(0, indices.cast(dtypes.float32))
 
       with self.assertRaises(RuntimeError):
-        t.gather(indices.cast(dtypes.int32), dim=0)
+        t.gather(0, indices.cast(dtypes.int32))
 
       # invalid axis
       with self.assertRaises(IndexError):
-        t.gather(indices, dim=-7)
+        t.gather(-7, indices)
 
       with self.assertRaises(IndexError):
-        t.gather(t, indices, dim=7)
+        t.gather(7, indices)
   '''
 
 class TestNumpy(unittest.TestCase):
