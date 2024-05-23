@@ -67,7 +67,7 @@ def _apply_winograd_matrix(mat, t:Tensor, dims:int) -> Tensor:
   return ret
 
 def _pad_left(*shps:Tuple[sint, ...], v=1): return tuple((v,) * (max(len(i_) for i_ in shps) - len(i)) + i for i in shps)
-def broadcast_shape(*shps:Tuple[sint, ...]): return tuple(0 if any(sh_ == 0 for sh_ in sh) else max(sh) for sh in zip(*_pad_left(*shps)))
+def _broadcast_shape(*shps:Tuple[sint, ...]): return tuple(0 if any(sh_ == 0 for sh_ in sh) else max(sh) for sh in zip(*_pad_left(*shps)))
 
 class Tensor:
   """
@@ -638,23 +638,34 @@ class Tensor:
 
   # ***** toposort and backward pass *****
 
-  def deepwalk(self):
-    def _deepwalk(node, visited):
+  def _deepwalk(self):
+    def _walk(node, visited):
       visited.add(node)
       if getattr(node, "_ctx", None):
         for i in node._ctx.parents:
-          if i not in visited: yield from _deepwalk(i, visited)
+          if i not in visited: yield from _walk(i, visited)
         yield node
-    return list(_deepwalk(self, set()))
+    return list(_walk(self, set()))
 
   def backward(self) -> Tensor:
+    """
+    Propagates the gradient of a tensor backwards through the computation graph.
+    Must be used on a scalar tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(6.0, requires_grad=True)
+    t2 = t.sum()
+    t2.backward()
+    print(t.grad.numpy())
+    ```
+    """
     assert self.shape == tuple(), f"backward can only be called for scalar tensors, but it has shape {self.shape})"
 
     # fill in the first grad with one. don't use Tensor.ones because we don't need contiguous
     # this is "implicit gradient creation"
     self.grad = Tensor(1.0, dtype=self.dtype, device=self.device, requires_grad=False)
 
-    for t0 in reversed(self.deepwalk()):
+    for t0 in reversed(self._deepwalk()):
       if t0.grad is None: raise RuntimeError(f"tensor {t0} has no grad")
       grads = t0._ctx.backward(t0.grad.lazydata)
       grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
@@ -668,19 +679,111 @@ class Tensor:
 
   # ***** movement mlops *****
 
-  def view(self, *shape) -> Tensor: return self.reshape(shape)  # in tinygrad, view and reshape are the same thing
+  def view(self, *shape) -> Tensor:
+    """`.view` is an alias for `.reshape`."""
+    return self.reshape(shape)
+
   def reshape(self, shape, *args) -> Tensor:
+    """
+    Returns a tensor with the same data as the original tensor but with a different shape.
+    `shape` can be passed as a tuple or as separate arguments.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(6)
+    print(t.reshape(2, 3).numpy())
+    ```
+    """
     new_shape = argfix(shape, *args)
     new_shape = tuple([-prod(self.shape) // prod(new_shape) if s == -1 else (s if s is not None else self.shape[i]) for i,s in enumerate(new_shape)])
     return F.Reshape.apply(self, shape=new_shape) if new_shape != self.shape else self
+
   def expand(self, shape, *args) -> Tensor:
+    """
+    Returns a tensor that is expanded to the shape that is specified.
+    Expand can also increase the number of dimensions that a tensor has.
+
+    Passing a `-1` or `None` to a dimension means that its size will not be changed.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3])
+    print(t.expand(4, -1).numpy())
+    ```
+    """
     return self._broadcast_to(tuple(sh if s==-1 or s is None else s for s, sh in zip(*(_pad_left(argfix(shape, *args), self.shape)))))
-  def permute(self, order, *args) -> Tensor: return F.Permute.apply(self, order=argfix(order, *args))
-  def flip(self, axis, *args) -> Tensor: return F.Flip.apply(self, axis=[x if x >= 0 else x+len(self.shape) for x in argfix(axis, *args)])
+
+  def permute(self, order, *args) -> Tensor:
+    """
+    Returns a tensor that is a permutation of the original tensor.
+    The new tensor has the same data as the original tensor but with the dimensions permuted according to the order specified.
+    `order` can be passed as a tuple or as separate arguments.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(6).reshape(2, 3)
+    print(t.numpy(), "->")
+    print(t.permute(1, 0).numpy())
+    ```
+    """
+    return F.Permute.apply(self, order=argfix(order, *args))
+
+  def flip(self, axis, *args) -> Tensor:
+    """
+    Returns a tensor that reverses the order of the original tensor along given axis.
+    `axis` can be passed as a tuple or as separate arguments.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(6).reshape(2, 3)
+    print(t.numpy(), "->")
+    print(t.flip(0).numpy())
+    ```
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(6).reshape(2, 3)
+    print(t.numpy(), "->")
+    print(t.flip((0, 1)).numpy())
+    ```
+    """
+    return F.Flip.apply(self, axis=[x if x >= 0 else x+len(self.shape) for x in argfix(axis, *args)])
+
   def shrink(self, arg:Tuple[Optional[Tuple[sint, sint]], ...]) -> Tensor:
+    """
+    Returns a tensor that shrinks the each axis based on input arg.
+    `arg` has the same length as `self.ndim`.
+    For each axis, it can be `None`, which means no shrink, or a tuple `(start, end)` that works the same as python slice.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(9).reshape(3, 3)
+    print(t.numpy(), "->")
+    print(t.shrink(((None, (1, 3)))).numpy())
+    ```
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(9).reshape(3, 3)
+    print(t.numpy(), "->")
+    print(t.shrink((((0, 2), (0, 2)))).numpy())
+    ```
+    """
     if all(x is None or x == (0,s) for x,s in zip(arg, self.shape)): return self
     return F.Shrink.apply(self, arg=tuple(x if x is not None else (0,s) for x,s in zip(arg, self.shape)))
+
   def pad(self, arg:Tuple[Optional[Tuple[sint, sint]], ...], value:float=0.0) -> Tensor:
+    """
+    Returns a tensor that pads the each axis based on input arg.
+    arg has the same length as `self.ndim`.
+    For each axis, it can be `None`, which means no pad, or a tuple `(pad_before, pad_after)`.
+    If `value` is specified, the tensor is padded with `value`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(6).reshape(2, 3)
+    print(t.numpy(), "->")
+    print(t.pad(((None, (1, 2)))).numpy())
+    ```
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(6).reshape(2, 3)
+    print(t.numpy(), "->")
+    print(t.pad(((None, (1, 2))), -2).numpy())
+    ```
+    """
     if all(x is None or x == (0,0) for x in arg): return self
     ret = F.Pad.apply(self, arg=(narg:=tuple(x if x is not None else (0,0) for x in arg)))
     return ret if 0 == value else ret + F.Pad.apply(Tensor.ones_like(self), arg=narg).where(0, value)
@@ -792,7 +895,7 @@ class Tensor:
       idx: Dict[int,Tensor] = {(dim := calc_dim(td)):(tensor<0).where(ret.shape[dim],0) + tensor for td,tensor in zip(type_dim[Tensor], tensor_index)}
 
       masks, first_dim, last_dim = [], min(idx.keys()), max(idx.keys())
-      pre_reduce_shape = ret.shape[:first_dim] + (big_shape := broadcast_shape(*(t.shape for t in idx.values()))) + ret.shape[first_dim:]
+      pre_reduce_shape = ret.shape[:first_dim] + (big_shape := _broadcast_shape(*(t.shape for t in idx.values()))) + ret.shape[first_dim:]
 
       # create masks
       for dim, i in idx.items():
@@ -828,7 +931,7 @@ class Tensor:
 
     assign_to = self.realize().__getitem__(indices)
     # NOTE: contiguous to prevent const folding.
-    v = v.cast(assign_to.dtype)._broadcast_to(broadcast_shape(assign_to.shape, v.shape)).contiguous()
+    v = v.cast(assign_to.dtype)._broadcast_to(_broadcast_shape(assign_to.shape, v.shape)).contiguous()
     assign_to.assign(v).realize()
 
   # NOTE: using slice is discouraged and things should migrate to pad and shrink
@@ -837,15 +940,15 @@ class Tensor:
     padding = tuple((max(0, -l), max(0, r-s)) for s,(l,r) in zip(self.shape, arg_))
     return self.pad(padding, value=value).shrink(tuple((l + pl, r + pl) for (l,r),(pl,_) in zip(arg_, padding)))
 
-  def gather(self:Tensor, idx:Tensor, dim:int) -> Tensor:
-    assert idx.ndim == self.ndim, "self.ndim must equal idx.ndim"
-    assert all(s >= i for s,i in zip(self.shape, idx.shape)), "all dim of idx.shape must be smaller than self.shape"
+  def gather(self:Tensor, dim:int, index:Tensor) -> Tensor:
+    assert index.ndim == self.ndim, f"self.ndim must equal index.ndim, {self.ndim=}, {index.ndim=}"
+    assert all(s >= i for s,i in zip(self.shape, index.shape)), "all dim of index.shape must be smaller than self.shape"
     dim = self._resolve_dim(dim)
-    idx = idx.to(self.device).transpose(0, dim).unsqueeze(-1)
+    index = index.to(self.device).transpose(0, dim).unsqueeze(-1)
     permarg = list(range(self.ndim))
     permarg = permarg[1:dim] + [permarg[0]] + permarg[dim+1:] + [permarg[dim]] if dim != 0 else permarg[1:] + [permarg[0]]
-    return ((idx == Tensor.arange(self.shape[dim], requires_grad=False, device=self.device)) * self.permute(*permarg).shrink(
-      tuple([*[(0,sh) for sh in idx.shape[1:-1]], None])).unsqueeze(0)).sum(-1, acc_dtype=self.dtype).transpose(0, dim)
+    return ((index == Tensor.arange(self.shape[dim], requires_grad=False, device=self.device)) * self.permute(*permarg).shrink(
+      tuple([*[(0,sh) for sh in index.shape[1:-1]], None])).unsqueeze(0)).sum(-1, acc_dtype=self.dtype).transpose(0, dim)
 
   def cat(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
     dim = self._resolve_dim(dim)
@@ -903,14 +1006,28 @@ class Tensor:
     return self.slice([(0,s) for s in self.shape[:-(len(padding)//2)]] + slc, value=value)
 
   @property
-  def T(self) -> Tensor: return self.transpose()
-  def transpose(self, ax1=1, ax2=0) -> Tensor:
+  def T(self) -> Tensor:
+    """`.T` is an alias for `.transpose(1, 0)`."""
+    return self.transpose()
+  def transpose(self, dim0=1, dim1=0) -> Tensor:
+    """
+    Returns a tensor that is a transposed version of the original tensor.
+    The given dimensions `dim0` and `dim1` are swapped.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(6).reshape(2, 3)
+    print(t.numpy(), "->")
+    print(t.transpose(0, 1).numpy())
+    ```
+    """
     order = list(range(self.ndim))
-    order[ax1], order[ax2] = order[ax2], order[ax1]
+    order[dim0], order[dim1] = order[dim1], order[dim0]
     return self.permute(order)
+
   def flatten(self, start_dim=0, end_dim=-1):
     start_dim, end_dim = self._resolve_dim(start_dim), self._resolve_dim(end_dim)
     return self.reshape(self.shape[:start_dim] + (prod(self.shape[start_dim:end_dim+1]), ) + self.shape[end_dim+1:])
+
   def unflatten(self, dim:int, sizes:Tuple[int,...]):
     dim = self._resolve_dim(dim)
     return self.reshape(self.shape[:dim] + sizes + self.shape[dim+1:])
@@ -927,20 +1044,116 @@ class Tensor:
     return ret if keepdim else ret.reshape(tuple(s for i,s in enumerate(self.shape) if i not in axis_))
 
   def sum(self, axis=None, keepdim=False, acc_dtype:Optional[DType]=None):
+    """
+    Sums the elements of the tensor along the specified axis or axes.
+
+    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    which the maximum is computed and whether the reduced dimensions are retained.
+
+    You can pass in `acc_dtype` keyword argument to control the data type of the accumulation.
+    If not specified, the accumulation data type is chosen based on the input tensor's data type.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randint(2, 3, low=5, high=10)
+    print(t.numpy(), "->")
+    print(t.sum().numpy())
+    print(t.sum(axis=0).numpy())
+    print(t.sum(axis=1).numpy())
+    ```
+    """
     ret = self.cast(acc_dtype or sum_acc_dtype(self.dtype))._reduce(F.Sum, axis, keepdim)
     return ret.cast(self.dtype) if self.dtype in {dtypes.float16, dtypes.bfloat16} else ret
-  def max(self, axis=None, keepdim=False): return self._reduce(F.Max, axis, keepdim)
-  def min(self, axis=None, keepdim=False): return -((-self).max(axis=axis, keepdim=keepdim))
+  def max(self, axis=None, keepdim=False):
+    """
+    Returns the maximum value of the tensor along the specified axis or axes.
+
+    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    which the maximum is computed and whether the reduced dimensions are retained.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randint(2, 3, low=5, high=10)
+    print(t.numpy(), "->")
+    print(t.max().numpy())
+    print(t.max(axis=0).numpy())
+    print(t.max(axis=1).numpy())
+    ```
+    """
+    return self._reduce(F.Max, axis, keepdim)
+  def min(self, axis=None, keepdim=False):
+    """
+    Returns the minimum value of the tensor along the specified axis or axes.
+
+    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    which the minimum is computed and whether the reduced dimensions are retained.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randint(2, 3, low=5, high=10)
+    print(t.numpy(), "->")
+    print(t.min().numpy())
+    print(t.min(axis=0).numpy())
+    print(t.min(axis=1).numpy())
+    ```
+    """
+    return -((-self).max(axis=axis, keepdim=keepdim))
 
   def mean(self, axis=None, keepdim=False):
+    """
+    Returns the mean value of the tensor along the specified axis or axes.
+
+    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    which the mean is computed and whether the reduced dimensions are retained.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randint(2, 3, low=5, high=10)
+    print(t.numpy(), "->")
+    print(t.mean().numpy())
+    print(t.mean(axis=0).numpy())
+    print(t.mean(axis=1).numpy())
+    ```
+    """
     output_dtype = self.dtype if dtypes.is_float(self.dtype) else dtypes.float32
     numerator = self.cast(sum_acc_dtype(self.dtype)).sum(axis=axis, keepdim=keepdim)
     return numerator.div(prod([si for si, so in zip(self.shape, self.sum(axis=axis, keepdim=True).shape) if si != so])).cast(output_dtype)
   def var(self, axis=None, keepdim=False, correction=1):
+    """
+    Returns the variance of the tensor along the specified axis or axes.
+
+    You can pass in `axis`, `keepdim`, and `correction` keyword arguments to control the axis along
+    which the variance is computed, whether the reduced dimensions are retained, and the Bessel's correction applied.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randint(2, 3, low=5, high=10)
+    print(t.numpy(), "->")
+    print(t.var().numpy())
+    print(t.var(axis=0).numpy())
+    print(t.var(axis=1).numpy())
+    ```
+    """
     assert all_int(self.shape), "does not support symbolic shape"
     square_sum = ((self - self.mean(axis=axis, keepdim=True)).square()).sum(axis=axis, keepdim=keepdim)
     return square_sum.div(max(0, prod(self.shape)/prod(square_sum.shape)-correction))
-  def std(self, axis=None, keepdim=False, correction=1): return self.var(axis, keepdim, correction).sqrt()
+  def std(self, axis=None, keepdim=False, correction=1):
+    """
+    Returns the standard deviation of the tensor along the specified axis or axes.
+
+    You can pass in `axis`, `keepdim`, and `correction` keyword arguments to control the axis along
+    which the standard deviation is computed, whether the reduced dimensions are retained, and the Bessel's correction applied.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randint(2, 3, low=5, high=10)
+    print(t.numpy(), "->")
+    print(t.std().numpy())
+    print(t.std(axis=0).numpy())
+    print(t.std(axis=1).numpy())
+    ```
+    """
+    return self.var(axis, keepdim, correction).sqrt()
 
   def _softmax(self, axis):
     m = self - self.max(axis=axis, keepdim=True)
@@ -948,19 +1161,80 @@ class Tensor:
     return m, e, e.sum(axis=axis, keepdim=True)
 
   def softmax(self, axis=-1):
+    """
+    Applies the softmax function to the tensor along the specified axis.
+
+    Rescales the elements of the tensor such that they lie in the range [0, 1] and sum to 1.
+
+    You can pass in the `axis` keyword argument to control the axis along which the softmax is computed.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(2, 3)
+    print(t.numpy(), "->")
+    print(t.softmax().numpy())
+    print(t.softmax(axis=0).numpy())
+    ```
+    """
     _, e, ss = self._softmax(axis)
     return e.div(ss)
 
   def log_softmax(self, axis=-1):
+    """
+    Applies the log-softmax function to the tensor along the specified axis.
+
+    The log-softmax function is a numerically stable alternative to the softmax function in log space.
+
+    You can pass in the `axis` keyword argument to control the axis along which the log-softmax is computed.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(2, 3)
+    print(t.numpy(), "->")
+    print(t.log_softmax().numpy())
+    print(t.log_softmax(axis=0).numpy())
+    ```
+    """
     m, _, ss = self._softmax(axis)
     return m - ss.log()
 
   def logsumexp(self, axis=None, keepdim=False):
+    """
+    Computes the log-sum-exp of the tensor along the specified axis or axes.
+
+    The log-sum-exp function is a numerically stable way to compute the logarithm of the sum of exponentials.
+
+    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    which the log-sum-exp is computed and whether the reduced dimensions are retained.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(2, 3)
+    print(t.numpy(), "->")
+    print(t.logsumexp().numpy())
+    print(t.logsumexp(axis=0).numpy())
+    print(t.logsumexp(axis=1).numpy())
+    ```
+    """
     m = self.max(axis=axis, keepdim=True)
     return (self - m).exp().sum(axis=axis, keepdim=keepdim).log() + m.squeeze(axis)
 
   def argmax(self, axis=None, keepdim=False):
-    # NOTE: return the first index if there are multiple occurrences of the maximum values
+    """
+    Returns the indices of the maximum value of the tensor along the specified axis.
+
+    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    which the maximum is computed and whether the reduced dimensions are retained.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(2, 3)
+    print(t.numpy(), "->")
+    print(t.argmax().numpy()) # Returns the index of the maximum value in the flattened tensor.
+    print(t.argmax(axis=0).numpy()) # Returns the indices of the maximum values along axis 0.
+    print(t.argmax(axis=1).numpy()) # Returns the indices of the maximum values along axis 1.
+    ```
+    """
     if axis is None:
       idx = (self == self.max(axis)) * Tensor.arange(prod(self.shape)-1,-1,-1, requires_grad=False, device=self.device).reshape(self.shape)
       return (prod(self.shape) - idx.max() - 1).cast(dtypes.int32)
@@ -968,7 +1242,23 @@ class Tensor:
     m = self == self.max(axis=axis, keepdim=True)
     idx = m * Tensor.arange(self.shape[axis]-1,-1,-1, requires_grad=False, device=self.device).reshape(self.shape[axis], *[1]*(self.ndim-axis-1))
     return (self.shape[axis]-idx.max(axis=axis, keepdim=keepdim)-1).cast(dtypes.int32)
-  def argmin(self, axis=None, keepdim=False): return (-self).argmax(axis=axis, keepdim=keepdim)
+  def argmin(self, axis=None, keepdim=False):
+    """
+    Returns the indices of the minimum value of the tensor along the specified axis.
+
+    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    which the minimum is computed and whether the reduced dimensions are retained.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(2, 3)
+    print(t.numpy(), "->")
+    print(t.argmin().numpy()) # Returns the index of the minimum value in the flattened tensor.
+    print(t.argmin(axis=0).numpy()) # Returns the indices of the minimum values along axis 0.
+    print(t.argmin(axis=1).numpy()) # Returns the indices of the minimum values along axis 1.
+    ```
+    """
+    return (-self).argmax(axis=axis, keepdim=keepdim)
 
   @staticmethod
   def einsum(formula:str, *raw_xs, acc_dtype:Optional[DType]=None) -> Tensor:
@@ -1200,7 +1490,7 @@ class Tensor:
     if reverse: x, y = y, x
 
     # broadcast
-    out_shape = broadcast_shape(x.shape, y.shape)
+    out_shape = _broadcast_shape(x.shape, y.shape)
     return x._broadcast_to(out_shape), y._broadcast_to(out_shape)
 
   def _to_const_val(self, x:Union[Tensor, ConstType]) -> Union[Tensor, ConstType]:

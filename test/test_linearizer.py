@@ -16,7 +16,6 @@ from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner
 from tinygrad.helpers import prod, Context, getenv, CI
 from tinygrad.dtype import DType, dtypes
 from tinygrad.codegen.uops import UOpGraph
-from test.helpers import is_dtype_supported
 
 def helper_realized_ast(r:Tensor):
   s = create_schedule([r.lazydata])
@@ -377,6 +376,21 @@ class TestLinearizer(unittest.TestCase):
     assert accs[1].dtype == stores[1].vin[-1].dtype == dtypes.float
     assert stores[1].vin[0].uop is UOps.DEFINE_GLOBAL
 
+  @unittest.skip("multireduce isn't supported yet")
+  def test_upcast_multireduce_nested_local_upcast(self):
+    x, y, z, w = [Tensor.rand(1,128).realize() for _ in range(4)]
+    st0 = ShapeTracker(views=(View(shape=(1, 128, 128), strides=(0, 0, 1), offset=0, mask=None, contiguous=False),))
+    st1 = ShapeTracker(views=(View(shape=(1, 128, 128), strides=(0, 1, 128), offset=0, mask=None, contiguous=False),))
+    ld0 = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, st0))
+    ld1 = LazyOp(BufferOps.LOAD, (), MemBuffer(2, dtypes.float, st1))
+    ld2 = LazyOp(BufferOps.LOAD, (), MemBuffer(3, dtypes.float, st0))
+    ld3 = LazyOp(BufferOps.LOAD, (), MemBuffer(4, dtypes.float, st1))
+    r0 = LazyOp(ReduceOps.SUM, (LazyOp(BinaryOps.MUL, (ld0, ld1)), ), (2,))
+    r1 = LazyOp(ReduceOps.SUM, (LazyOp(BinaryOps.MUL, (ld2, ld3)), ), (2,))
+    out_st = ShapeTracker(views=(View(shape=(1, 128, 1), strides=(0, 1, 0), offset=0, mask=None, contiguous=True),))
+    ast = (LazyOp(BufferOps.STORE, (LazyOp(BinaryOps.ADD, (r0, r1)), ), MemBuffer(0, dtypes.float, out_st)),)
+    helper_linearizer_ast(ast, [x, y, z, w])
+
   def test_zero_fold(self):
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
     r = Tensor.stack([a, b])
@@ -484,6 +498,17 @@ class TestLinearizer(unittest.TestCase):
       from tinygrad.engine.search import get_linearizer_actions
       tc_actions = [k for i, k in get_linearizer_actions(Linearizer(realized_ast), False).items() if k.applied_opts[0].op == OptOps.TC]
       assert len(tc_actions) == 9, f"get_linearizer_actions should contain 9 possible TC actions, only got {len(tc_actions)}"
+
+  @unittest.skipIf(Device.DEFAULT != "METAL", "these opts are only valid on METAL")
+  @unittest.skip("UOps toposort is wrong, CAST child should render outside RANGE")
+  def test_tensor_cores_upcast_unroll(self):
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 4096), strides=(0, 4096, 0, 1), offset=0, mask=None, contiguous=False),)))), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 4096), strides=(0, 0, 4096, 1), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=dtypes.float),), arg=(3,)),), arg=dtypes.half), LazyOp(op=BinaryOps.DIV, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=1.0, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 1), strides=(0, 0, 0, 0), offset=0, mask=None, contiguous=False),)))), LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=1.0, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 1), strides=(0, 0, 0, 0), offset=0, mask=None, contiguous=False),)))), LazyOp(op=UnaryOps.EXP2, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 4096), strides=(0, 4096, 0, 1), offset=0, mask=None, contiguous=False),)))), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 4096), strides=(0, 0, 4096, 1), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=dtypes.float),), arg=(3,)),), arg=dtypes.half), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=-1.4426950408889634, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 1), strides=(0, 0, 0, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=None)), arg=None)), arg=None)), arg=None), LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=3, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 1), strides=(0, 11008, 1, 0), offset=0, mask=None, contiguous=True),)))),), arg=dtypes.half)), arg=None),), arg=MemBuffer(idx=0, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 1), strides=(0, 11008, 1, 0), offset=0, mask=None, contiguous=True),)))), # noqa: E501
+    a = Tensor.empty(1, 3, 11008, 4096).realize()
+    b = Tensor.empty(1, 3, 11008, 4096).realize()
+    c = Tensor.empty(1, 3, 11008, 1).realize()
+    opt = [Opt(op=OptOps.TC, axis=0, amt=2), Opt(op=OptOps.LOCAL, axis=0, amt=4), Opt(op=OptOps.UNROLL, axis=0, amt=4),
+           Opt(op=OptOps.UPCAST, axis=5, amt=0)]
+    helper_linearizer_ast(ast, [a, b, c], opts=[opt])
 
   def test_limit_dims_to_max_5d_global(self):
     t = Tensor.empty(3, 4, 5, 6, 7).pad(((1, 1), (1, 1), (1, 1), (1, 1), (1, 1))) + 1
@@ -648,27 +673,6 @@ class TestLinearizer(unittest.TestCase):
     k = helper_linearizer_ast(ast, [Tensor.empty(8*32).realize()], opts=[opt])[-1]
     out = [u for u in k.uops if u.uop is UOps.STORE][0]
     assert out.vin[-1].uop is UOps.CAST and out.vin[-1].dtype == dtypes.float.vec(2)
-
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4 and is_dtype_supported(dtypes.half), "need backends that support float4")
-  def test_acc_nofold_unmatching_dtypes(self):
-    """
-    half4 acc0 = half4(0.0,0.0,0.0,0.0);
-    {
-      acc0 = // ...
-    }
-    *((device float4*)(data0+alu0)) = float4(acc0.x,acc0.y,acc0.z,acc0.w);
-    doesn't simplify
-    """
-    ld0 = LazyOp(BufferOps.LOAD, (), MemBuffer(idx=1, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 4096), strides=(0, 4096, 0, 1), offset=0, mask=None, contiguous=False),)))) # noqa: E501
-    ld1 = LazyOp(BufferOps.LOAD, (), MemBuffer(idx=2, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 4096), strides=(0, 0, 4096, 1), offset=0, mask=None, contiguous=False),)))) # noqa: E501
-    cast = LazyOp(BinaryOps.MUL, (ld0, ld1))
-    sum = LazyOp(ReduceOps.SUM, (cast, ), (3, ))
-    st = LazyOp(BufferOps.STORE, (sum,), MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 1), strides=(0, 11008, 1, 0), offset=0, mask=None, contiguous=True),)))) # noqa: E501
-    k = helper_linearizer_ast((st, ), [Tensor.empty(1, 3, 11008, 4096).realize(), Tensor.empty(1, 3, 11008, 4096).realize()])[-1]
-    store_vals = [u.vin[-1] for u in k.uops if u.uop is UOps.STORE]
-    for val in store_vals:
-      assert val.dtype == dtypes.float.vec(4) and val.uop is UOps.CAST
-      assert len(val.vin) == 4 and all(v.uop is UOps.PHI for v in val.vin)
 
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need backends that support float4")
 class TestFloat4(unittest.TestCase):
