@@ -221,7 +221,7 @@ class LLaMa:
 
     with Context(BEAM=0):
       # quantize
-      if quantize is not None:      
+      if quantize is not None:
         weights = linear.quantize(weights, device)
         for _,v in weights.items(): v.realize()
 
