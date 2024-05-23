@@ -817,12 +817,14 @@ class Exp(Function):
         # print("M6: ")
         # print(__import__('tinygrad').Tensor(m6).numpy())
         res = res.e(BinaryOps.MUL, self._revnorm(x.const(math.exp(6)).e(BinaryOps.MUL, d6)))
+        d3, m3 = self._divmod(m6, x.const(3))
+        res = res.e(BinaryOps.MUL, self._revnorm(x.const(math.exp(3)).e(BinaryOps.MUL, d3)))
         # print("RES: ") 
         # print(__import__('tinygrad').Tensor(res).numpy())
-        m6pade = self._pade(m6)
+        rempade = self._pade(m3)
         # print("M6PADE: ")
         # print(__import__('tinygrad').Tensor(m6pade).numpy())
-        res = res.e(BinaryOps.MUL, m6pade)
+        res = res.e(BinaryOps.MUL, rempade)
         # print("RES: ")
         # print(__import__('tinygrad').Tensor(res).numpy())
 
@@ -867,9 +869,9 @@ class Exp(Function):
 
         # x = x.e(BinaryOps.MUL, x.const(1 / math.log(2)))
 
-        self.beginning_dtype = x.dtype
-        if self.beginning_dtype == dtypes.float32 and self.device != "METAL":
-            x = x.cast(dtypes.float64)
+        # self.beginning_dtype = x.dtype
+        # if self.beginning_dtype == dtypes.float32 and self.device != "METAL":
+        #     x = x.cast(dtypes.float64)
         # if self.device != "METAL":
         #     x = x.cast(dtypes.float64)
         # print(self.beginning_dtype)
@@ -902,7 +904,7 @@ class Exp(Function):
 
         # print("RET: ")
         # print(__import__('tinygrad').Tensor(ret).numpy()[0])
-        self.ret = computed.cast(self.beginning_dtype)
+        self.ret = computed#.cast(self.beginning_dtype)
         # print("RET: ")
         # print(__import__('tinygrad').Tensor(self.ret).numpy())
         return self.ret
