@@ -1229,11 +1229,11 @@ class Tensor:
 
   def pow(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     # try:
-    print("value being raised: ")
-    np.set_printoptions(threshold=sys.maxsize)
-    print(self.numpy() if isinstance(self, Tensor) else self)
-    print("exponent: ", x.numpy() if isinstance(x, Tensor) else x)
-    np.set_printoptions(threshold=1000)
+    # print("value being raised: ")
+    # np.set_printoptions(threshold=sys.maxsize)
+    # print(self.numpy() if isinstance(self, Tensor) else self)
+    # print("exponent: ", x.numpy() if isinstance(x, Tensor) else x)
+    # np.set_printoptions(threshold=1000)
     # except:
     #     pass
     x = self._to_const_val(x)
