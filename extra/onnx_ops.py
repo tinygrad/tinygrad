@@ -392,7 +392,7 @@ def Gather(x: Tensor, indices: Tensor, axis=0):
 
 def GatherElements(x: Tensor, indices: Tensor, axis):
   indices = (indices < 0).where(x.shape[axis], 0) + indices
-  return x.gather(indices, axis)
+  return x.gather(axis, indices)
 
 # TODO clean this up, it's taking the longest in CI
 def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, coordinate_transformation_mode='half_pixel',
