@@ -492,7 +492,6 @@ class AMDDevice(Compiled):
       AMDDevice.event_page = self._gpu_alloc(0x8000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
       for off in range(0, AMDDevice.signals_page.size, SIGNAL_SIZE):
         AMDDevice.signals_pool.append(hsa.amd_signal_t.from_address(AMDDevice.signals_page.va_addr + off))
-        AMDDevice.signals_pool[-1].kind = hsa.AMD_SIGNAL_KIND_USER
       sync_event = kio.create_event(AMDDevice.kfd, event_page_offset=AMDDevice.event_page.handle, auto_reset=1)
     else:
       self._gpu_map(AMDDevice.signals_page)
