@@ -735,10 +735,7 @@ class Tensor:
     print(t.numpy(), "->")
     print(t.flip(0).numpy())
     ```
-
     ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.arange(6).reshape(2, 3)
-    print(t.numpy(), "->")
     print(t.flip((0, 1)).numpy())
     ```
     """
@@ -755,10 +752,7 @@ class Tensor:
     print(t.numpy(), "->")
     print(t.shrink(((None, (1, 3)))).numpy())
     ```
-
     ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.arange(9).reshape(3, 3)
-    print(t.numpy(), "->")
     print(t.shrink((((0, 2), (0, 2)))).numpy())
     ```
     """
@@ -777,10 +771,7 @@ class Tensor:
     print(t.numpy(), "->")
     print(t.pad(((None, (1, 2)))).numpy())
     ```
-
     ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.arange(6).reshape(2, 3)
-    print(t.numpy(), "->")
     print(t.pad(((None, (1, 2))), -2).numpy())
     ```
     """
@@ -1008,7 +999,6 @@ class Tensor:
     print(t.numpy(), "->")
     print(t.repeat(4, 2).numpy())
     ```
-
     ```python exec="true" source="above" session="tensor" result="python"
     print(t.repeat(4, 2, 1).shape)
     ```
