@@ -257,20 +257,43 @@ ptx_matcher = PatternMatcher([
   (UPat(name="root", uop=UOps.STORE, vin=(UPat(), UPat(), UPat(), UPat(name="g", dtype=dtypes.int))),
   lambda root,g: UOp(root.uop, root.dtype, root.vin[:3] + (UOp(UOps.CAST, dtypes.bool, (g,)),), root.arg)),
   # ptr_ar (load/store)
-  (UPat(name="root", uop={UOps.LOAD, UOps.STORE}, vin=(UPat(uop={UOps.DEFINE_LOCAL, UOps.DEFINE_GLOBAL}),
-    UPat(uop=UOps.ALU, arg=BinaryOps.ADD, vin=[UPat(name="alu"), UPat(name="const", uop=UOps.CONST)])), 
-    __allow_len__=[2,3,4,5]),
-    lambda root, alu, const: UOp(root.uop, root.dtype, (alu.cast(dtypes.int64)*UOp.const(dtypes.int64, 
-      root.vin[0].dtype.itemsize)+root.vin[0].cast(dtypes.int64),
-      UOp.const(const.dtype, root.vin[0].dtype.itemsize)*const)+root.vin[2:])),
-  (UPat(name="root", uop={UOps.LOAD, UOps.STORE}, vin=(UPat(uop={UOps.DEFINE_LOCAL, UOps.DEFINE_GLOBAL}),
-      UPat(name="const", uop=UOps.CONST)), __allow_len__=[2,3,4,5]),
-    lambda root, const: UOp(root.uop, root.dtype, (root.vin[0].cast(dtypes.int64),
-                                UOp.const(dtypes.int64, const.arg * root.vin[0].dtype.itemsize),
-                                                  )+root.vin[2:])),
-  (UPat(name="root", uop={UOps.LOAD, UOps.STORE}, vin=(UPat(uop={UOps.DEFINE_LOCAL, UOps.DEFINE_GLOBAL}),
-      UPat(name="alu")), __allow_len__=[2,3,4,5]),  # no const here
-    lambda root, alu: UOp(root.uop, root.dtype,
-      (alu.cast(dtypes.int64)*UOp.const(dtypes.int64, root.vin[0].dtype.itemsize)+root.vin[0].cast(dtypes.int64),
-        UOp.const(dtypes.int64, 0))+root.vin[2:])),
+  (UPat(name="root", uop={UOps.LOAD, UOps.STORE}, vin=(
+      UPat(uop={UOps.DEFINE_LOCAL, UOps.DEFINE_GLOBAL}),
+      UPat(uop=UOps.ALU, arg=BinaryOps.ADD, vin=[
+          UPat(name="alu"), 
+          UPat(name="const", uop=UOps.CONST)
+      ])
+  ), __allow_len__=[2, 3, 4, 5]),
+  lambda root, alu, const: UOp(
+      root.uop, root.dtype, 
+      (
+          alu.cast(dtypes.int64) * UOp.const(dtypes.int64, root.vin[0].dtype.itemsize) + root.vin[0].cast(dtypes.int64),
+          UOp.const(const.dtype, root.vin[0].dtype.itemsize) * const
+      ) + root.vin[2:]
+  )),
+
+  (UPat(name="root", uop={UOps.LOAD, UOps.STORE}, vin=(
+      UPat(uop={UOps.DEFINE_LOCAL, UOps.DEFINE_GLOBAL}),
+      UPat(name="const", uop=UOps.CONST)
+  ), __allow_len__=[2, 3, 4, 5]),
+  lambda root, const: UOp(
+      root.uop, root.dtype, 
+      (
+          root.vin[0].cast(dtypes.int64),
+          UOp.const(dtypes.int64, const.arg * root.vin[0].dtype.itemsize)
+      ) + root.vin[2:]
+  )),
+
+  (UPat(name="root", uop={UOps.LOAD, UOps.STORE}, vin=(
+      UPat(uop={UOps.DEFINE_LOCAL, UOps.DEFINE_GLOBAL}),
+      UPat(name="alu")
+  ), __allow_len__=[2, 3, 4, 5]),
+  lambda root, alu: UOp(
+      root.uop, root.dtype, 
+      (
+          alu.cast(dtypes.int64) * UOp.const(dtypes.int64, root.vin[0].dtype.itemsize) + root.vin[0].cast(dtypes.int64),
+          UOp.const(dtypes.int64, 0)
+      ) + root.vin[2:]
+  ))
+
 ])
