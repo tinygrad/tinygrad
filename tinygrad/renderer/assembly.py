@@ -1,5 +1,5 @@
 from typing import DefaultDict, Dict, List, Union, Optional, cast, Callable
-import struct, copy
+import struct
 from collections import defaultdict
 from tinygrad.helpers import DEBUG
 from tinygrad.codegen.linearizer import UOps, UOp
@@ -99,9 +99,7 @@ class PTXRenderer(Renderer):
             '\n'.join([fmt(line) for op in kernel for line in op.splitlines()]) +
             "\n}")
 
-  def render(self, name:str, _uops:UOpGraph) -> str:
-    # editing the uops breaks beam search
-    uops = copy.deepcopy(_uops)
+  def render(self, name:str, uops:UOpGraph) -> str:
     kernel:List[str] = []
     bufs = []
 
