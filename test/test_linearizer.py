@@ -500,7 +500,6 @@ class TestLinearizer(unittest.TestCase):
       assert len(tc_actions) == 9, f"get_linearizer_actions should contain 9 possible TC actions, only got {len(tc_actions)}"
 
   @unittest.skipIf(Device.DEFAULT != "METAL", "these opts are only valid on METAL")
-  @unittest.skip("UOps toposort is wrong, CAST child should render outside RANGE")
   def test_tensor_cores_upcast_unroll(self):
     ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 4096), strides=(0, 4096, 0, 1), offset=0, mask=None, contiguous=False),)))), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 4096), strides=(0, 0, 4096, 1), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=dtypes.float),), arg=(3,)),), arg=dtypes.half), LazyOp(op=BinaryOps.DIV, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=1.0, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 1), strides=(0, 0, 0, 0), offset=0, mask=None, contiguous=False),)))), LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=1.0, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 1), strides=(0, 0, 0, 0), offset=0, mask=None, contiguous=False),)))), LazyOp(op=UnaryOps.EXP2, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 4096), strides=(0, 4096, 0, 1), offset=0, mask=None, contiguous=False),)))), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 4096), strides=(0, 0, 4096, 1), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=dtypes.float),), arg=(3,)),), arg=dtypes.half), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=-1.4426950408889634, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 1), strides=(0, 0, 0, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=None)), arg=None)), arg=None)), arg=None), LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=3, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 1), strides=(0, 11008, 1, 0), offset=0, mask=None, contiguous=True),)))),), arg=dtypes.half)), arg=None),), arg=MemBuffer(idx=0, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 1), strides=(0, 11008, 1, 0), offset=0, mask=None, contiguous=True),)))), # noqa: E501
     a = Tensor.empty(1, 3, 11008, 4096).realize()
@@ -508,7 +507,46 @@ class TestLinearizer(unittest.TestCase):
     c = Tensor.empty(1, 3, 11008, 1).realize()
     opt = [Opt(op=OptOps.TC, axis=0, amt=2), Opt(op=OptOps.LOCAL, axis=0, amt=4), Opt(op=OptOps.UNROLL, axis=0, amt=4),
            Opt(op=OptOps.UPCAST, axis=5, amt=0)]
-    helper_linearizer_ast(ast, [a, b, c], opts=[opt])
+
+    with self.assertRaises(Exception): # float2 CAST of PHI isn't prioritized in toposort
+      helper_linearizer_ast(ast, [a, b, c], opts=[opt])
+
+  def test_tensor_cores_unroll_phi(self):
+    if not Device[Device.DEFAULT].renderer.tensor_cores: self.skipTest("device doesn't have tensor cores")
+    tc = Device[Device.DEFAULT].renderer.tensor_cores[0]
+    x, y = Tensor.rand(128, 128, dtype=tc.dtype_in), Tensor.rand(128, 128, dtype=tc.dtype_in)
+    r = x.matmul(y, acc_dtype=tc.dtype_out)
+    k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4)]], apply_tc=True, atol=3e-2, rtol=1e-3)[-1]
+    with self.assertRaises(AssertionError): # TODO: can we remove PHI parents from WMMA?
+      for u in k.uops:
+        if u.uop is UOps.WMMA:
+          assert u.vin[-1].vin[0].uop != UOps.PHI
+
+  def test_tensor_cores_unroll_casted_phi(self):
+    if not Device[Device.DEFAULT].renderer.tensor_cores: self.skipTest("device doesn't have tensor cores")
+    tc = [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in != tc.dtype_out][0]
+    x, y = Tensor.rand(128, 128, dtype=tc.dtype_in), Tensor.rand(128, 128, dtype=tc.dtype_in)
+    r = x.matmul(y, acc_dtype=tc.dtype_out)
+    k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4)]], apply_tc=True, atol=3e-2, rtol=1e-3)[-1]
+    # NOTE: currently the cast folds for the first WMMA but remains in the other ones because it's not a nested PHI
+    with self.assertRaises(AssertionError):
+      for u in k.uops:
+        if u.uop is UOps.WMMA:
+          assert u.vin[-1].dtype == dtypes.float.vec(2)
+          assert u.vin[-1].vin[0].uop != UOps.PHI
+
+  def test_simple_unroll_no_between_phi_dependencies(self):
+    x, y = Tensor.rand(128, 128), Tensor.rand(128, 128)
+    r = (x@y).relu()
+    k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 4)]])[-1]
+    # the uops graph is RANGE -> DEFINE_ACC -> 4x ALU -> 4x PHI -> ENDRANGE
+    for u in k.uops:
+      if u.uop is UOps.PHI:
+        assert u.vin[1].uop is UOps.ALU
+      # children of PHI are placed after ENDRANGE
+      if any(x.uop is UOps.PHI for x in u.vin):
+        end_range = [i for i, x in enumerate(k.uops) if x.uop is UOps.ENDRANGE][0]
+        assert end_range < k.uops.uops.index(u)
 
   def test_limit_dims_to_max_5d_global(self):
     t = Tensor.empty(3, 4, 5, 6, 7).pad(((1, 1), (1, 1), (1, 1), (1, 1), (1, 1))) + 1
