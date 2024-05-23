@@ -51,8 +51,8 @@ generate_comgr() {
   clang2py /opt/rocm/include/amd_comgr/amd_comgr.h \
   --clang-args="-D__HIP_PLATFORM_AMD__ -I/opt/rocm/include -x c++" -o $BASE/comgr.py -l /opt/rocm/lib/libamd_comgr.so
   fixup $BASE/comgr.py
-  sed -i "s\import ctypes\import ctypes, os\g" $BASE/comgr.py
-  sed -i "s\'/opt/rocm/\os.getenv('ROCM_PATH', '/opt/rocm/')+'/\g" $BASE/comgr.py
+  sed -i "s\import ctypes\import ctypes, ctypes.util, os\g" $BASE/comgr.py
+  sed -i "s\ctypes.CDLL('/opt/rocm/lib/libamd_comgr.so')\ctypes.CDLL(os.getenv('ROCM_PATH')+'/lib/libamd_comgr.so' if os.getenv('ROCM_PATH') else ctypes.util.find_library('amd_comgr'))\g" $BASE/comgr.py
   python3 -c "import tinygrad.runtime.autogen.comgr"
 }
 
@@ -145,8 +145,8 @@ generate_hsa() {
 
   fixup $BASE/hsa.py
   fixup $BASE/amd_gpu.py
-  sed -i "s\import ctypes\import ctypes, os\g" $BASE/hsa.py
-  sed -i "s\'/opt/rocm/\os.getenv('ROCM_PATH', '/opt/rocm/')+'/\g" $BASE/hsa.py
+  sed -i "s\import ctypes\import ctypes, ctypes.util, os\g" $BASE/hsa.py
+  sed -i "s\ctypes.CDLL('/opt/rocm/lib/libhsa-runtime64.so')\ctypes.CDLL(os.getenv('ROCM_PATH')+'/lib/libhsa-runtime64.so' if os.getenv('ROCM_PATH') else ctypes.util.find_library('hsa-runtime64'))\g" $BASE/hsa.py
   python3 -c "import tinygrad.runtime.autogen.hsa"
 }
 
