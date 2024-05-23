@@ -161,10 +161,8 @@ class PTXRenderer(Renderer):
       + "\n}"
     )
 
-  def render(self, name: str, _uops: UOpGraph) -> str:
-    # editing the uops breaks beam search
-    uops = copy.deepcopy(_uops)
-    kernel: List[str] = []
+  def render(self, name:str, uops:UOpGraph) -> str:
+    kernel:List[str] = []
     bufs = []
 
     uops.linearize(ptx_matcher)
