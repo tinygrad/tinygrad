@@ -545,7 +545,7 @@ class TestLinearizer(unittest.TestCase):
     k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4)]], apply_tc=True, atol=3e-2, rtol=1e-3)[-1]
     for u in k.uops:
       if u.uop is UOps.WMMA:
-        assert u.vin[-1].dtype == dtypes.float.vec(2)
+        assert u.vin[-1].dtype == dtypes.float.vec(prod(tc.thread_local_sizes[2]))
         assert u.vin[-1].vin[0].uop != UOps.PHI
 
   def test_tensor_cores_unroll_casted_phi_with_children(self):
@@ -557,7 +557,7 @@ class TestLinearizer(unittest.TestCase):
     k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4)]], apply_tc=True, atol=3e-2, rtol=1e-3)[-1]
     for u in k.uops:
       if u.uop is UOps.WMMA:
-        assert u.vin[-1].dtype == dtypes.float.vec(2)
+        assert u.vin[-1].dtype == dtypes.float.vec(prod(tc.thread_local_sizes[2]))
         assert u.vin[-1].vin[0].uop != UOps.PHI
 
   def test_simple_unroll_no_between_phi_dependencies(self):
