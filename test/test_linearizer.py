@@ -535,6 +535,19 @@ class TestLinearizer(unittest.TestCase):
           assert u.vin[-1].dtype == dtypes.float.vec(2)
           assert u.vin[-1].vin[0].uop != UOps.PHI
 
+  def test_tensor_cores_unroll_casted_phi_with_children(self):
+    if not Device[Device.DEFAULT].renderer.tensor_cores: self.skipTest("device doesn't have tensor cores")
+    tc = [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in != tc.dtype_out][0]
+    x, y = Tensor.rand(128, 128, dtype=tc.dtype_in), Tensor.rand(128, 128, dtype=tc.dtype_in)
+    r = x.matmul(y, acc_dtype=tc.dtype_out).relu()
+    k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4)]], apply_tc=True, atol=3e-2, rtol=1e-3)[-1]
+    # NOTE: same as above, the CAST IN the first one folds.
+    with self.assertRaises(AssertionError):
+      for u in k.uops:
+        if u.uop is UOps.WMMA:
+          assert u.vin[-1].dtype == dtypes.float.vec(2)
+          assert u.vin[-1].vin[0].uop != UOps.PHI
+
   def test_simple_unroll_no_between_phi_dependencies(self):
     x, y = Tensor.rand(128, 128), Tensor.rand(128, 128)
     r = (x@y).relu()
