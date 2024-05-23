@@ -525,9 +525,7 @@ class TestLinearizer(unittest.TestCase):
     b = Tensor.empty(1, 3, 11008, 4096).realize()
     opt = [Opt(op=OptOps.TC, axis=0, amt=2), Opt(op=OptOps.LOCAL, axis=0, amt=4), Opt(op=OptOps.UNROLL, axis=0, amt=4),
            Opt(op=OptOps.UPCAST, axis=5, amt=0)]
-
-    with self.assertRaises(Exception): # compile error
-      helper_linearizer_ast(ast, [a, b], opts=[opt])
+    helper_linearizer_ast(ast, [a, b], opts=[opt])
 
   def test_tensor_cores_unroll_phi(self):
     if not Device[Device.DEFAULT].renderer.tensor_cores: self.skipTest("device doesn't have tensor cores")
@@ -535,10 +533,9 @@ class TestLinearizer(unittest.TestCase):
     x, y = Tensor.rand(128, 128, dtype=tc.dtype_in), Tensor.rand(128, 128, dtype=tc.dtype_in)
     r = x.matmul(y, acc_dtype=tc.dtype_out)
     k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4)]], apply_tc=True, atol=3e-2, rtol=1e-3)[-1]
-    with self.assertRaises(AssertionError): # TODO: can we remove PHI parents from WMMA?
-      for u in k.uops:
-        if u.uop is UOps.WMMA:
-          assert u.vin[-1].vin[0].uop != UOps.PHI
+    for u in k.uops:
+      if u.uop is UOps.WMMA:
+        assert u.vin[-1].vin[0].uop != UOps.PHI
 
   def test_tensor_cores_unroll_casted_phi(self):
     if not Device[Device.DEFAULT].renderer.tensor_cores: self.skipTest("device doesn't have tensor cores")
@@ -546,11 +543,10 @@ class TestLinearizer(unittest.TestCase):
     x, y = Tensor.rand(128, 128, dtype=tc.dtype_in), Tensor.rand(128, 128, dtype=tc.dtype_in)
     r = x.matmul(y, acc_dtype=tc.dtype_out)
     k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4)]], apply_tc=True, atol=3e-2, rtol=1e-3)[-1]
-    with self.assertRaises(AssertionError):
-      for u in k.uops:
-        if u.uop is UOps.WMMA:
-          assert u.vin[-1].dtype == dtypes.float.vec(2)
-          assert u.vin[-1].vin[0].uop != UOps.PHI
+    for u in k.uops:
+      if u.uop is UOps.WMMA:
+        assert u.vin[-1].dtype == dtypes.float.vec(2)
+        assert u.vin[-1].vin[0].uop != UOps.PHI
 
   def test_tensor_cores_unroll_casted_phi_with_children(self):
     # all PHI children are outside the loop
@@ -559,11 +555,10 @@ class TestLinearizer(unittest.TestCase):
     x, y = Tensor.rand(128, 128, dtype=tc.dtype_in), Tensor.rand(128, 128, dtype=tc.dtype_in)
     r = x.matmul(y, acc_dtype=tc.dtype_out).relu()
     k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4)]], apply_tc=True, atol=3e-2, rtol=1e-3)[-1]
-    with self.assertRaises(AssertionError):
-      for u in k.uops:
-        if u.uop is UOps.WMMA:
-          assert u.vin[-1].dtype == dtypes.float.vec(2)
-          assert u.vin[-1].vin[0].uop != UOps.PHI
+    for u in k.uops:
+      if u.uop is UOps.WMMA:
+        assert u.vin[-1].dtype == dtypes.float.vec(2)
+        assert u.vin[-1].vin[0].uop != UOps.PHI
 
   def test_simple_unroll_no_between_phi_dependencies(self):
     if not Device[Device.DEFAULT].renderer.supports_float4: self.skipTest("needs float4")
