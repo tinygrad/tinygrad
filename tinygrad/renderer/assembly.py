@@ -148,23 +148,15 @@ class PTXRenderer(Renderer):
     return [f"cvt{rnd}.{self.types[dtype]}.{self.types[atype]} {d}, {a};"]
 
   def render_kernel(self, kernel, function_name, bufs, regs) -> str:
-    kernel = [f".reg .{reg.split('_')[-2]} %{reg}<{cnt}>;" for reg, cnt in regs] + kernel + ["ret;"]
+    kernel = [f".reg .{reg.split('_')[-2]} %{reg}<{cnt}>;" for reg,cnt in regs] + kernel + ["ret;"]
+    def fmt(line): return line if line[0]=="$" else "\t" + line.replace(" ", "\t" if len(line.split(" ")[0]) > 7 else "\t\t", 1)
+    return (f"{self.kernel_prefix} {function_name}(\n\t" +
+            ',\n\t'.join([f".param .{'u64' if dtype.__class__ == PtrDType else self.types[dtype]} {name}" for name,dtype in bufs]) + "\n)\n{\n" +
+            '\n'.join([fmt(line) for op in kernel for line in op.splitlines()]) +
+            "\n}")
 
-    def fmt(line):
-      return line if line[0] == "$" else "\t" + line.replace(" ", "\t" if len(line.split(" ")[0]) > 7 else "\t\t", 1)
-
-    return (
-      f"{self.kernel_prefix} {function_name}(\n\t"
-      + ",\n\t".join([f".param .{'u64' if dtype.__class__ == PtrDType else self.types[dtype]} {name}" for name, dtype in bufs])
-      + "\n)\n{\n"
-      + "\n".join([fmt(line) for op in kernel for line in op.splitlines()])
-      + "\n}"
-    )
-
-  def render(self, name: str, _uops: UOpGraph) -> str:
-    # editing the uops breaks beam search
-    uops = copy.deepcopy(_uops)
-    kernel: List[str] = []
+  def render(self, name:str, uops:UOpGraph) -> str:
+    kernel:List[str] = []
     bufs = []
 
     uops.linearize(ptx_matcher)
