@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import dtypes, Variable
 from tinygrad.dtype import PtrDType
-from tinygrad.ops import BinaryOps, MemBuffer, TernaryOps, UnaryOps
+from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps
 from tinygrad.codegen.uops import UOpGraph, UOps
 
 class TestUOpGraph(unittest.TestCase):
