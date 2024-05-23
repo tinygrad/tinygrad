@@ -941,6 +941,15 @@ class Tensor:
     return self.pad(padding, value=value).shrink(tuple((l + pl, r + pl) for (l,r),(pl,_) in zip(arg_, padding)))
 
   def gather(self:Tensor, dim:int, index:Tensor) -> Tensor:
+    """
+    Gathers values along an axis specified by `dim`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[1, 2], [3, 4]])
+    print(t.numpy(), "->")
+    print(t.gather(1, Tensor([[0, 0], [1, 0]])).numpy())
+    ```
+    """
     assert index.ndim == self.ndim, f"self.ndim must equal index.ndim, {self.ndim=}, {index.ndim=}"
     assert all(s >= i for s,i in zip(self.shape, index.shape)), "all dim of index.shape must be smaller than self.shape"
     dim = self._resolve_dim(dim)
@@ -951,6 +960,18 @@ class Tensor:
       tuple([*[(0,sh) for sh in index.shape[1:-1]], None])).unsqueeze(0)).sum(-1, acc_dtype=self.dtype).transpose(0, dim)
 
   def cat(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
+    """
+    Concatenates self with other `Tensor` in `args` along an axis specified by `dim`.
+    All tensors must have the same shape except in the concatenating dimension.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t0, t1, t2 = Tensor([[1, 2]]), Tensor([[3, 4]]), Tensor([[5, 6]])
+    print(t0.cat(t1, t2, dim=0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t0.cat(t1, t2, dim=1).numpy())
+    ```
+    """
     dim = self._resolve_dim(dim)
     assert all(len(y.shape) == len(self.shape) and all(y.shape[i] == s for i,s in enumerate(self.shape) if i != dim) for y in args)
     catargs = [self, *args]
@@ -962,11 +983,37 @@ class Tensor:
 
   @staticmethod
   def stack(tensors:Sequence[Tensor], dim:int=0) -> Tensor:
+    """
+    Concatenates a sequence of tensors along a new dimension.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t0, t1, t2 = Tensor([1, 2]), Tensor([3, 4]), Tensor([5, 6])
+    print(Tensor.stack([t0, t1, t2], dim=0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.stack([t0, t1, t2], dim=1).numpy())
+    ```
+    """
     unsqueezed_tensors = [tensor.unsqueeze(dim) for tensor in tensors]
     # checks for shapes and number of dimensions delegated to cat
     return unsqueezed_tensors[0].cat(*unsqueezed_tensors[1:], dim=dim)
 
-  def repeat(self, repeats:Sequence[int]) -> Tensor:
+  def repeat(self, repeats, *args) -> Tensor:
+    """
+    Repeat tensor number of times along each dimension specified by `repeats`.
+    `repeats` can be passed as a tuple or as separate arguments.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3])
+    print(t.numpy(), "->")
+    print(t.repeat(4, 2).numpy())
+    ```
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.repeat(4, 2, 1).shape)
+    ```
+    """
+    repeats = argfix(repeats, *args)
     base_shape = (1,) * (len(repeats) - self.ndim) + self.shape
     new_shape = [x for b in base_shape for x in [1, b]]
     expand_shape = [x for rs in zip(repeats, base_shape) for x in rs]
@@ -992,11 +1039,37 @@ class Tensor:
     return list(self.split(math.ceil(self.shape[dim]/num) if self.shape[dim] else [0]*num, dim=dim))
 
   def squeeze(self, dim:Optional[int]=None) -> Tensor:
+    """
+    Returns a tensor with specified dimensions of input of size 1 removed.
+    If `dim` is not specified, all dimensions with size 1 are removed.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.zeros(2, 1, 2, 1, 2)
+    print(t.squeeze().shape)
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.squeeze(0).shape)
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.squeeze(1).shape)
+    ```
+    """
     if dim is None: return self.reshape(tuple(dim for dim in self.shape if dim != 1))
     dim = self._resolve_dim(dim)
     return self if not self.ndim or self.shape[dim] != 1 else self.reshape(self.shape[:dim] + self.shape[dim+1:])
 
   def unsqueeze(self, dim:int) -> Tensor:
+    """
+    Returns a tensor with a new dimension of size 1 inserted at the specified `dim`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3, 4])
+    print(t.unsqueeze(0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.unsqueeze(1).numpy())
+    ```
+    """
     dim = self._resolve_dim(dim, outer=True)
     return self.reshape(self.shape[:dim] + (1,) + self.shape[dim:])
 
