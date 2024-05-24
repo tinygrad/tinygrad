@@ -5,7 +5,6 @@ from dataclasses import replace
 
 from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError
 from tinygrad.codegen.linearizer import Linearizer, UOp, UOps, expand_node, expand_idxs
-from tinygrad.codegen.uops import UOpGraph
 from tinygrad.device import Device, Buffer
 from tinygrad.ops import BinaryOps, BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, TernaryOps, ReduceOps, UnaryOps
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -106,8 +105,8 @@ class TestLinearizer(unittest.TestCase):
 
     load_t = Tensor.full(load.st.shape, 1).contiguous().realize()
     k = helper_linearizer_ast(ast, [load_t], wanna_output=[load_t.numpy().sum()])[1]
-    self.assertEqual(k.uops.uops[-1].uop, UOps.ENDIF)
-    self.assertLess(k.uops.uops.index([x for x in k.uops.uops if x.uop is UOps.STORE][-1]), k.uops.uops.index(k.uops.uops[-1]))
+    self.assertEqual(k.uops[-1].uop, UOps.ENDIF)
+    self.assertLess(k.uops.uops.index([x for x in k.uops.uops if x.uop is UOps.STORE][-1]), k.uops.uops.index(k.uops[-1]))
 
   def test_two_nested_range(self):
     a = Tensor.randn(2, ).realize()
@@ -497,16 +496,6 @@ class TestLinearizer(unittest.TestCase):
       assert len(tc_actions) == 9, f"get_linearizer_actions should contain 9 possible TC actions, only got {len(tc_actions)}"
 
   @unittest.skipIf(Device.DEFAULT != "METAL", "these opts are only valid on METAL")
-  def test_tensor_cores_upcast_unroll(self):
-    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 4096), strides=(0, 4096, 0, 1), offset=0, mask=None, contiguous=False),)))), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 4096), strides=(0, 0, 4096, 1), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=dtypes.float),), arg=(3,)),), arg=dtypes.half), LazyOp(op=BinaryOps.DIV, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=1.0, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 1), strides=(0, 0, 0, 0), offset=0, mask=None, contiguous=False),)))), LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=1.0, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 1), strides=(0, 0, 0, 0), offset=0, mask=None, contiguous=False),)))), LazyOp(op=UnaryOps.EXP2, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 4096), strides=(0, 4096, 0, 1), offset=0, mask=None, contiguous=False),)))), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 4096), strides=(0, 0, 4096, 1), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=dtypes.float),), arg=(3,)),), arg=dtypes.half), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=-1.4426950408889634, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 1), strides=(0, 0, 0, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=None)), arg=None)), arg=None)), arg=None), LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=3, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 1), strides=(0, 11008, 1, 0), offset=0, mask=None, contiguous=True),)))),), arg=dtypes.half)), arg=None),), arg=MemBuffer(idx=0, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 1), strides=(0, 11008, 1, 0), offset=0, mask=None, contiguous=True),)))), # noqa: E501
-    a = Tensor.empty(1, 3, 11008, 4096).realize()
-    b = Tensor.empty(1, 3, 11008, 4096).realize()
-    c = Tensor.empty(1, 3, 11008, 1).realize()
-    opt = [Opt(op=OptOps.TC, axis=0, amt=2), Opt(op=OptOps.LOCAL, axis=0, amt=4), Opt(op=OptOps.UNROLL, axis=0, amt=4),
-           Opt(op=OptOps.UPCAST, axis=5, amt=0)]
-    helper_linearizer_ast(ast, [a, b, c], opts=[opt])
-
-  @unittest.skipIf(Device.DEFAULT != "METAL", "these opts are only valid on METAL")
   def test_tensor_cores_upcast_unroll_minimal(self):
     # the llama BEAM=2 failure is like this - float2 upcast of PHI should render inside the loop, cast_half should render outside the loop
     ld1 = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.half, ShapeTracker(views=(View(shape=(1, 3, 11008, 4096), strides=(0, 4096, 0, 1), offset=0, mask=None, contiguous=False),)))) # noqa: E501
@@ -606,27 +595,6 @@ class TestLinearizer(unittest.TestCase):
     lin.linearize()
     assert not any(u.arg == TernaryOps.WHERE for u in lin.uops), "found where where where should be folded"
 
-  def test_simplify_uop(self):
-    def helper_test_simplify(uop, dtype, vin, arg=None):
-      ast = LazyOp(BufferOps.CONST, (),
-                   ConstBuffer(42, dtypes.float, ShapeTracker(views=(View(shape=(), strides=(), offset=0, mask=None, contiguous=True),))))
-      ast = LazyOp(BufferOps.STORE, (ast,),
-                   MemBuffer(0, dtypes.float, ShapeTracker(views=(View(shape=(), strides=(), offset=0, mask=None, contiguous=True),))))
-      lin = Linearizer(ast) # this is a dummy ast
-
-      lin.uops = UOpGraph()
-      ret = lin.uops.add(uop, dtype, vin, arg)
-      lin.uops.add(UOps.SINK, None, (ret,))
-      return list(lin.uops.uops)[-1]
-
-    c0 = UOp(UOps.CONST, dtypes.float, vin=(), arg=0.0)
-    assert helper_test_simplify(UOps.ALU, dtypes.float, vin=(UOp(UOps.CONST, dtypes.bool, vin=(), arg=True), c0, c0), arg=TernaryOps.WHERE) == c0
-
-    c0 = UOp(UOps.CONST, dtypes.float, vin=(), arg=0.0)
-    c1 = UOp(UOps.CONST, dtypes.float, vin=(), arg=1.0)
-    assert helper_test_simplify(UOps.ALU, dtypes.float, vin=(UOp(UOps.CONST, dtypes.bool, vin=(), arg=True), c0, c1),
-                                arg=TernaryOps.WHERE).arg == c0.arg
-
   def test_phi_simplification(self):
     def helper(t, max_ops=0):
       sched = create_schedule([t.lazydata])
@@ -639,8 +607,7 @@ class TestLinearizer(unittest.TestCase):
         uops = uops[:uops.index(if_op)]
       assert len(set([u.uop for u in uops if u.uop in {UOps.RANGE, UOps.SPECIAL}])) == 1, "has either specials or ranges, not both"
       assert len([u for u in uops if u.uop is UOps.PHI]) == 0, "PHI should have been simplified"
-      # TODO: once uops track min/max this will be fixed
-      #assert len([u for u in uops if u.arg is BinaryOps.MAX]) <= max_ops, "no unnecessary MAX ops"
+      assert len([u for u in uops if u.arg is BinaryOps.MAX]) <= max_ops, "no unnecessary MAX ops"
 
     helper(Tensor.arange(5.5, (3.5*300), 3.5), max_ops=2)
     helper(Tensor.arange(-1, -100, -5), max_ops=2)
@@ -947,9 +914,7 @@ class TestHandCodedOpts(unittest.TestCase):
     b = Tensor.rand(N, N).realize()
     c = a @ b
 
-    s = create_schedule([c.lazydata])[0]
-    k = Linearizer(*s.ast)
-    k.hand_coded_optimizations()
+    k = helper_linearizer_opt(c)[-1]
 
     assert k.group_for_reduces == 1
     assert k.local_dims == 1
