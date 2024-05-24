@@ -781,9 +781,9 @@ class Exp(Function):
         return res
 
     def _divmod(self, x: LazyBuffer, y: LazyBuffer) -> LazyBuffer:
-        divres = x.e(BinaryOps.DIV, y).cast(dtypes.uint64).cast(x.dtype)
-        modres = x.e(BinaryOps.SUB, divres.e(BinaryOps.MUL, y))
-        return divres, modres
+            divres = x.e(BinaryOps.DIV, y).cast(dtypes.uint64).cast(x.dtype)
+            modres = x.e(BinaryOps.SUB, divres.e(BinaryOps.MUL, y))
+            return divres, modres
 
     def _exp(self, x: LazyBuffer) -> LazyBuffer:
         sign = x.e(BinaryOps.CMPLT, x.const(0)).e(
@@ -796,79 +796,110 @@ class Exp(Function):
 
         d50, m50 = self._divmod(x, x.const(50))
         res = self._revnorm(x.const(math.exp(50)).e(BinaryOps.MUL, d50))
+        # print("RES after d50: ")
+        # print(__import__('tinygrad').Tensor(res).numpy())
         d25, m25 = self._divmod(m50, x.const(25))
         res = res.e(BinaryOps.MUL, self._revnorm(x.const(math.exp(25)).e(BinaryOps.MUL, d25)))
+        # print("RES after d25: ")
+        # print(__import__('tinygrad').Tensor(res).numpy())
         d12, m12 = self._divmod(m25, x.const(12))
         res = res.e(BinaryOps.MUL, self._revnorm(x.const(math.exp(12)).e(BinaryOps.MUL, d12)))
+        # print("RES after d12: ")
+        # print(__import__('tinygrad').Tensor(res).numpy())
         d6, m6 = self._divmod(m12, x.const(6))
         res = res.e(BinaryOps.MUL, self._revnorm(x.const(math.exp(6)).e(BinaryOps.MUL, d6)))
+        # print("RES after d6: ")
+        # print(__import__('tinygrad').Tensor(res).numpy())
         d3, m3 = self._divmod(m6, x.const(3))
         res = res.e(BinaryOps.MUL, self._revnorm(x.const(math.exp(3)).e(BinaryOps.MUL, d3)))
+        # print("RES after d3: ")
+        # print(__import__('tinygrad').Tensor(res).numpy())
         rempade = self._pade(m3)
+        # print("Pade: ")
+        # print(__import__('tinygrad').Tensor(rempade).numpy())
         res = res.e(BinaryOps.MUL, rempade)
+        # print("RES after pade: ")
+        # print(__import__('tinygrad').Tensor(res).numpy())
 
         res = sign.e(BinaryOps.CMPEQ, sign.const(-1)).e(
             TernaryOps.WHERE, res.const(1).e(BinaryOps.DIV, res), res
         )
         return res
 
+    # def zero_if_minus_inf(self, x: LazyBuffer) -> LazyBuffer:
+    #     eq = x.e(BinaryOps.CMPEQ, x.const(float("-inf"))).cast(x.dtype)
+    #     eq = x.const(1).e(BinaryOps.SUB, eq)
+    #     return x.e(BinaryOps.MUL, eq)
+
+
+
     def forward(self, x: LazyBuffer) -> LazyBuffer:
-        # self.ret = x.e(BinaryOps.MUL, x.const(1 / math.log(2))).e(UnaryOps.EXP2)
-        # return self.ret
+        try:
+            # self.ret = x.e(BinaryOps.MUL, x.const(1 / math.log(2))).e(UnaryOps.EXP2)
+            # return self.ret
 
-        initial_x = x
-        pinf_t = x.const(88.722)
-        ninf_t = x.const(-103.97539753975397)
-        # x = x.e(BinaryOps.CMPLT, ninf_t).e(TernaryOps.WHERE, x.const(0), x)
-        # x = self.zero_if_below_thresh(x, ninf_t)
+            initial_x = x
+            pinf_t = x.const(88.722)
+            ninf_t = x.const(-103.97539753975397)
+            # x = x.e(BinaryOps.CMPLT, ninf_t).e(TernaryOps.WHERE, x.const(0), x)
+            # x = self.zero_if_minus_inf(x)
 
 
-        # x = x.e(BinaryOps.MUL, x.const(1 / math.log(2)))
+            # x = x.e(BinaryOps.MUL, x.const(1 / math.log(2)))
 
-        self.beginning_dtype = x.dtype
-        if self.beginning_dtype != dtypes.half:
-            if self.device != "METAL":
+            self.beginning_dtype = x.dtype
+            if self.beginning_dtype != dtypes.half and self.device != "METAL":
                 x = x.cast(dtypes.float64)
+            # x = x.cast(dtypes.float64)
+
+            # if self.device != "METAL":
+            #     x = x.cast(dtypes.float64)
+            # print(self.beginning_dtype)
+            # if self.device == "METAL":
+            # x = x.cast(dtypes.float64)
+            # print("X: ")
+            # print(__import__('tinygrad').Tensor(x).numpy())
+            # x = x.cast(dtypes.float64)
+            # else:
+            #     x = x.cast(dtypes.float64)
+
+            # _, _, nan = _get_info(x)
+
+            isnotnan = x.e(BinaryOps.CMPEQ, x)
+            print("X: ")
+            print(__import__('tinygrad').Tensor(x).numpy())
+            print("X dtype:")
+            print(x.dtype)
+            #
+            if self.beginning_dtype == dtypes.half:
+                computed = self._exp_lowprec(x)
             else:
-                x = x.cast(dtypes.float32)
+                computed = self._exp(x)
+                # computed = self._exp_lowprec(x)
 
-        # if self.device != "METAL":
-        #     x = x.cast(dtypes.float64)
-        # print(self.beginning_dtype)
-        # if self.device == "METAL":
-        # x = x.cast(dtypes.float64)
-        # print("X: ")
-        # print(__import__('tinygrad').Tensor(x).numpy())
-        # x = x.cast(dtypes.float64)
-        # else:
-        #     x = x.cast(dtypes.float64)
+            computed = initial_x.e(BinaryOps.CMPLT, pinf_t).e(
+                TernaryOps.WHERE, computed, computed.const(float("inf"))
+            )
+            computed = isnotnan.e(TernaryOps.WHERE, computed, x.const(float("nan")))
+            computed = initial_x.e(BinaryOps.CMPLT, ninf_t).e(
+                TernaryOps.WHERE, computed.const(0), computed
+            )
 
-        # _, _, nan = _get_info(x)
+            # print("COMPUTED: ")
+            # print(__import__('tinygrad').Tensor(computed).numpy()[0])
 
-        isnotnan = x.e(BinaryOps.CMPEQ, x)
-        #
-        if self.beginning_dtype == dtypes.half:
-            computed = self._exp_lowprec(x)
-        else:
-            computed = self._exp(x)
-            # computed = self._exp_lowprec(x)
+            if not dtypes.is_int(self.beginning_dtype):
+                computed = computed.cast(self.beginning_dtype)
 
-        computed = initial_x.e(BinaryOps.CMPLT, pinf_t).e(
-            TernaryOps.WHERE, computed, computed.const(float("inf"))
-        )
-        computed = isnotnan.e(TernaryOps.WHERE, computed, x.const(float("nan")))
-        computed = initial_x.e(BinaryOps.CMPLT, ninf_t).e(
-            TernaryOps.WHERE, computed.const(0), computed
-        )
-        # print("COMPUTED: ")
-        # print(__import__('tinygrad').Tensor(computed).numpy()[0])
-
-        # print("RET: ")
-        # print(__import__('tinygrad').Tensor(ret).numpy()[0])
-        self.ret = computed.cast(self.beginning_dtype)
-        # print("RET: ")
-        # print(__import__('tinygrad').Tensor(self.ret).numpy())
-        return self.ret
+            # print("RET: ")
+            # print(__import__('tinygrad').Tensor(ret).numpy()[0])
+            self.ret = computed#.cast(self.beginning_dtype)
+            print("RET: ")
+            print(__import__('tinygrad').Tensor(self.ret).numpy())
+            return self.ret
+        except:
+            self.ret = initial_x.const(0)
+            return self.ret
 
     def backward(self, grad_output: LazyBuffer) -> LazyBuffer:
         return self.ret.e(BinaryOps.MUL, grad_output)

@@ -1132,7 +1132,7 @@ class Tensor:
   def contiguous_backward(self): return F.ContiguousBackward.apply(self)
   def log(self): return F.Log.apply(self.cast(least_upper_float(self.dtype)))
   def log2(self): return self.log()/math.log(2)
-    #def exp(self): return F.Exp.apply(self.cast(least_upper_float(self.dtype)))
+  # def exp(self): return F.Exp.apply(self.cast(least_upper_float(self.dtype)))
   def exp(self): return F.Exp.apply(self)
   def exp2(self): return F.Exp.apply(self*math.log(2))
   def relu(self): return F.Relu.apply(self)
@@ -1230,10 +1230,10 @@ class Tensor:
 
   def pow(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     # try:
-    # print("value being raised: ")
+    print("value being raised: ")
     # np.set_printoptions(threshold=sys.maxsize)
-    # print(self.numpy() if isinstance(self, Tensor) else self)
-    # print("exponent: ", x.numpy() if isinstance(x, Tensor) else x)
+    print(self.numpy() if isinstance(self, Tensor) else self)
+    print("exponent: ", x.numpy() if isinstance(x, Tensor) else x)
     # np.set_printoptions(threshold=1000)
     # except:
     #     pass
