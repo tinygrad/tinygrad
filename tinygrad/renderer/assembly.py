@@ -181,7 +181,7 @@ class PTXRenderer(Renderer):
           assert args[1][0] != "i", "idx not supported"
           kk(f"mov.u32 %{args[1]}, {(self.gid if args[1][0] == 'g' else self.lid)[args[0]]};")
           r[u] = "%" + args[1]
-          kernel = [f".reg .b32 %{args[1]};"] + kernel
+          kernel = [f".reg .u32 %{args[1]};"] + kernel
         elif uop is UOps.CONST:
           if dtype.count > 1: r[u] = [const(args, dtype.scalar(), mov=True) for _ in range(dtype.count)]
           else: r[u] = const(args, dtype, mov=True)
