@@ -1014,7 +1014,7 @@ class Tensor:
     print(t0.stack(t1, t2, dim=0).numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t0.stack([t1, t2], dim=1).numpy())
+    print(t0.stack(t1, t2, dim=1).numpy())
     ```
     """
     # checks for shapes and number of dimensions delegated to cat
