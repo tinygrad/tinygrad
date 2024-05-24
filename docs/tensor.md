@@ -34,6 +34,9 @@
 ::: tinygrad.Tensor.full
 ::: tinygrad.Tensor.arange
 ::: tinygrad.Tensor.eye
+::: tinygrad.Tensor.full_like
+::: tinygrad.Tensor.zeros_like
+::: tinygrad.Tensor.ones_like
 
 ## Creation (random)
 
