@@ -2759,6 +2759,7 @@ class Tensor:
     print(t.dtype, t.numpy())
     ```
     """
+    return self.cast(dtypes.float16)
 
   # ***** convenience stuff *****
 
