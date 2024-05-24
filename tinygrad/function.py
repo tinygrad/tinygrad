@@ -742,22 +742,22 @@ class Exp(Function):
         Psum = x.const(0)
         Qsum = x.const(0)
         x = x.const(1)
-        # Pterms = []
-        # Qterms = []
+        Pterms = []
+        Qterms = []
         for p, q in zip(PC[::-1], QC[::-1]):
-            # Pterms.append(x.e(BinaryOps.MUL, x.const(p)))
-            p = x.e(BinaryOps.MUL, x.const(p))
-            Psum = Psum.e(BinaryOps.ADD, p)
+            Pterms.append(x.e(BinaryOps.MUL, x.const(p)))
+            # p = x.e(BinaryOps.MUL, x.const(p))
+            # Psum = Psum.e(BinaryOps.ADD, p)
             
-            # Qterms.append(x.e(BinaryOps.MUL, x.const(q)))
-            q = x.e(BinaryOps.MUL, x.const(q))
-            Qsum = Qsum.e(BinaryOps.ADD, q)
+            Qterms.append(x.e(BinaryOps.MUL, x.const(q)))
+            # q = x.e(BinaryOps.MUL, x.const(q))
+            # Qsum = Qsum.e(BinaryOps.ADD, q)
             x = x.e(BinaryOps.MUL, ox)
 
-        # for p, q in zip(Pterms[::-1], Qterms[::-1]):
+        for p, q in zip(Pterms[::-1], Qterms[::-1]):
         # for p, q in zip(Pterms, Qterms):
-        #     Psum = Psum.e(BinaryOps.ADD, p)
-        #     Qsum = Qsum.e(BinaryOps.ADD, q)
+            Psum = Psum.e(BinaryOps.ADD, p)
+            Qsum = Qsum.e(BinaryOps.ADD, q)
         return Psum.e(BinaryOps.DIV, Qsum)
 
     def _eq(self, x: LazyBuffer, y: LazyBuffer) -> LazyBuffer:
