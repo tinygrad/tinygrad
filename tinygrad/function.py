@@ -866,10 +866,10 @@ class Exp(Function):
             # _, _, nan = _get_info(x)
 
             isnotnan = x.e(BinaryOps.CMPEQ, x)
-            print("X: ")
-            print(__import__('tinygrad').Tensor(x).numpy())
-            print("X dtype:")
-            print(x.dtype)
+            # print("X: ")
+            # print(__import__('tinygrad').Tensor(x).numpy())
+            # print("X dtype:")
+            # print(x.dtype)
             #
             if self.beginning_dtype == dtypes.half:
                 computed = self._exp_lowprec(x)
@@ -894,8 +894,8 @@ class Exp(Function):
             # print("RET: ")
             # print(__import__('tinygrad').Tensor(ret).numpy()[0])
             self.ret = computed#.cast(self.beginning_dtype)
-            print("RET: ")
-            print(__import__('tinygrad').Tensor(self.ret).numpy())
+            # print("RET: ")
+            # print(__import__('tinygrad').Tensor(self.ret).numpy())
             return self.ret
         except:
             self.ret = initial_x.const(0)
