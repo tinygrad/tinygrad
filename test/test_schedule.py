@@ -15,7 +15,6 @@ from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
 from test.helpers import is_dtype_supported
 
-np.set_printoptions(precision=20, threshold = 100)
 
 class KernelCountException(Exception): pass
 def check_schedule(t:Union[Tensor, List[Tensor]], allowed:int, to_prerealize:Optional[List[Tensor]]=None, filter_loadops=True):
@@ -818,12 +817,14 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_equal(out.numpy(), [2, 0])
 
   def test_shrink_pad_unsafe(self):
+    np.set_printoptions(precision=20, threshold = 100)
     a = Tensor.ones((3, )).contiguous().realize()
     out = a.exp2().shrink(((0, 1),)).pad(((0, 1),)).contiguous()
     run_schedule(check_schedule(out, 2))
     np.testing.assert_equal(out.numpy(), [2, 0])
 
   def test_base_change_shrink_pad(self):
+    np.set_printoptions(precision=20, threshold = 100)
     a = Tensor.ones(3, 3).contiguous().realize()
     b = a.exp2()
     c = b[:-1, :-1]
@@ -832,6 +833,7 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_equal(d.numpy(), np.pad(np.exp2(a.numpy())[:-1, :-1], ((0, 1), (0, 1)))*2)
 
   def test_base_change_expand_pad(self):
+    np.set_printoptions(precision=20, threshold = 100)
     a = Tensor.ones(3, 3).contiguous().realize()
     b = a.exp2()
     c = b[:, None, :]
