@@ -64,8 +64,6 @@
 
 ## Movement (high level)
 
-::: tinygrad.Tensor.__getitem__
-::: tinygrad.Tensor.slice
 ::: tinygrad.Tensor.gather
 ::: tinygrad.Tensor.cat
 ::: tinygrad.Tensor.stack
