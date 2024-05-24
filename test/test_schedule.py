@@ -15,6 +15,8 @@ from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
 from test.helpers import is_dtype_supported
 
+np.set_printoptions(precision=20, threshold = 100)
+
 class KernelCountException(Exception): pass
 def check_schedule(t:Union[Tensor, List[Tensor]], allowed:int, to_prerealize:Optional[List[Tensor]]=None, filter_loadops=True):
   if isinstance(t, Tensor): t = [t]
