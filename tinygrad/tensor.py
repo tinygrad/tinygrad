@@ -76,7 +76,7 @@ class Tensor:
   ```python exec="true" session="tensor"
   from tinygrad import Tensor, dtypes
   import numpy as np
-  np.set_printoptions(precision=5)
+  np.set_printoptions(precision=4)
   ```
   """
   __slots__ = "lazydata", "requires_grad", "grad", "_ctx"
@@ -1196,8 +1196,7 @@ class Tensor:
     If not specified, the accumulation data type is chosen based on the input tensor's data type.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.randint(2, 3, low=5, high=10)
+    t = Tensor.arange(6).reshape(2, 3)
     print(t.numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
@@ -1220,8 +1219,7 @@ class Tensor:
     which the maximum is computed and whether the reduced dimensions are retained.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.randint(2, 3, low=5, high=10)
+    t = Tensor([[1, 0, 2], [5, 4, 3]])
     print(t.numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
@@ -1231,7 +1229,7 @@ class Tensor:
     print(t.max(axis=0).numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t.max(axis=1).numpy())
+    print(t.max(axis=1, keepdim=True).numpy())
     ```
     """
     return self._reduce(F.Max, axis, keepdim)
@@ -1243,8 +1241,7 @@ class Tensor:
     which the minimum is computed and whether the reduced dimensions are retained.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.randint(2, 3, low=5, high=10)
+    t = Tensor([[1, 0, 2], [5, 4, 3]])
     print(t.numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
@@ -1254,7 +1251,7 @@ class Tensor:
     print(t.min(axis=0).numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t.min(axis=1).numpy())
+    print(t.min(axis=1, keepdim=True).numpy())
     ```
     """
     return -((-self).max(axis=axis, keepdim=keepdim))
@@ -1268,7 +1265,7 @@ class Tensor:
 
     ```python exec="true" source="above" session="tensor" result="python"
     Tensor.manual_seed(42)
-    t = Tensor.randint(2, 3, low=5, high=10)
+    t = Tensor.normal(2, 3, mean=2.5, std=0.5)
     print(t.numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
@@ -1294,7 +1291,7 @@ class Tensor:
 
     ```python exec="true" source="above" session="tensor" result="python"
     Tensor.manual_seed(42)
-    t = Tensor.randint(2, 3, low=5, high=10)
+    t = Tensor.normal(2, 3, mean=2.5, std=0.5)
     print(t.numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
@@ -1320,7 +1317,7 @@ class Tensor:
 
     ```python exec="true" source="above" session="tensor" result="python"
     Tensor.manual_seed(42)
-    t = Tensor.randint(2, 3, low=5, high=10)
+    t = Tensor.normal(2, 3, mean=2.5, std=0.5)
     print(t.numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
@@ -1421,8 +1418,7 @@ class Tensor:
     which the maximum is computed and whether the reduced dimensions are retained.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.randn(2, 3)
+    t = Tensor([[1, 0, 2], [5, 4, 3]])
     print(t.numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
@@ -1451,8 +1447,7 @@ class Tensor:
     which the minimum is computed and whether the reduced dimensions are retained.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.randn(2, 3)
+    t = Tensor([[1, 0, 2], [5, 4, 3]])
     print(t.numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
@@ -1925,24 +1920,146 @@ class Tensor:
     return x.lazydata.base.arg if isinstance(x, Tensor) and isinstance(x.lazydata, LazyBuffer) and x.lazydata.is_unrealized_unmasked_const() \
       and not x.requires_grad and self._broadcasted(x)[0].shape == self.shape else x
 
-  def add(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor: return F.Add.apply(*self._broadcasted(x, reverse))
-  def sub(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor: return F.Sub.apply(*self._broadcasted(x, reverse))
-  def mul(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor: return F.Mul.apply(*self._broadcasted(x, reverse))
+  def add(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
+    """
+    Adds `self` and `x`.
+    Equivalent to `self + x`.
+    Supports broadcasting to a common shape, type promotion, and integer, float, boolean inputs.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(4)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.add(20).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.add(Tensor([[2.0], [3.5]])).numpy())
+    ```
+    """
+    return F.Add.apply(*self._broadcasted(x, reverse))
+
+  def sub(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
+    """
+    Subtracts `x` from `self`.
+    Equivalent to `self - x`.
+    Supports broadcasting to a common shape, type promotion, and integer, float, boolean inputs.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(4)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.sub(20).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.sub(Tensor([[2.0], [3.5]])).numpy())
+    ```
+    """
+    return F.Sub.apply(*self._broadcasted(x, reverse))
+
+  def mul(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
+    """
+    Multiplies `self` and `x`.
+    Equivalent to `self * x`.
+    Supports broadcasting to a common shape, type promotion, and integer, float, boolean inputs.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(4)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.mul(3).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.mul(Tensor([[-1.0], [2.0]])).numpy())
+    ```
+    """
+    return F.Mul.apply(*self._broadcasted(x, reverse))
+
   def div(self, x:Union[Tensor, ConstType], reverse=False, upcast=True) -> Tensor:
+    """
+    Divides `self` by `x`.
+    Equivalent to `self / x`.
+    Supports broadcasting to a common shape, type promotion, and integer, float, boolean inputs.
+    By default, `div` performs true division. Set `upcast` to `False` for integer division.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(4)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.div(3).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1, 4, 10]).div(Tensor([2, 3, 4])).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1, 4, 10]).div(Tensor([2, 3, 4]), upcast=False).numpy())
+    ```
+    """
     numerator, denominator = self._broadcasted(x, reverse)
     if upcast: numerator, denominator = numerator.cast(least_upper_float(numerator.dtype)), denominator.cast(least_upper_float(denominator.dtype))
     return F.Div.apply(numerator, denominator)
-  def xor(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor: return F.Xor.apply(*self._broadcasted(x, reverse))
+
+  def xor(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
+    """
+    Computes bitwise xor of `self` and `x`.
+    Equivalent to `self ^ x`.
+    Supports broadcasting to a common shape, type promotion, and integer, boolean inputs.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1, -2, 3]).xor(Tensor([1, 0, 3])).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([True, True, False, False]).xor(Tensor([True, False, True, False])).numpy())
+    ```
+    """
+    return F.Xor.apply(*self._broadcasted(x, reverse))
 
   def lshift(self, x:int):
+    """
+    Computes left arithmetic shift of `self` by `x` bits. `self` must have unsigned dtype.
+    Equivalent to `self << x`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1, 3, 31], dtype=dtypes.uint8).lshift(2).numpy())
+    ```
+    """
     assert dtypes.is_unsigned(self.dtype) and isinstance(x, int) and x >= 0, f"not supported {self.dtype=} {x=}"
     return self.mul(2 ** x)
 
   def rshift(self, x:int):
+    """
+    Computes right arithmetic shift of `self` by `x` bits. `self` must have unsigned dtype.
+    Equivalent to `self >> x`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([4, 13, 125], dtype=dtypes.uint8).rshift(2).numpy())
+    ```
+    """
     assert dtypes.is_unsigned(self.dtype) and isinstance(x, int) and x >= 0, f"not supported {self.dtype=} {x=}"
     return self.div(2 ** x, upcast=False)
 
   def pow(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
+    """
+    Computes power of `self` with `x`.
+    Equivalent to `self ** x`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1, 2, 3]).pow(2).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1, 2, 3]).pow(Tensor([-1.5, 0.5, 1.5])).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print((2 ** Tensor([-1, 2, 3])).numpy())
+    ```
+    """
     x = self._to_const_val(x)
     if not isinstance(x, Tensor) and not reverse:
       # simple pow identities
@@ -1965,10 +2082,49 @@ class Tensor:
     return ar.mul(sign * base_sign + (1 - base_sign)).mul(inject_nan)
 
   def maximum(self, x:Union[Tensor, ConstType]) -> Tensor:
-    return (self<x).detach().where(x, (self==x).detach().where(((self * 0.5 + x * 0.5).cast(self.dtype)), self))
-  def minimum(self, x:Union[Tensor, ConstType]) -> Tensor: return -((-self).maximum(-x))
+    """
+    Computes element-wise maximum of `self` and `x`.
 
-  def where(self:Tensor, input_:Union[Tensor, ConstType], other:Union[Tensor, ConstType]):
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1, 2, 3]).maximum(1).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1, 2, 3]).maximum(Tensor([-4, -2, 9])).numpy())
+    ```
+    """
+    return (self<x).detach().where(x, (self==x).detach().where(((self * 0.5 + x * 0.5).cast(self.dtype)), self))
+
+  def minimum(self, x:Union[Tensor, ConstType]) -> Tensor:
+    """
+    Computes element-wise minimum of `self` and `x`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1, 2, 3]).minimum(1).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1, 2, 3]).minimum(Tensor([-4, -2, 9])).numpy())
+    ```
+    """
+    return -((-self).maximum(-x))
+
+  def where(self:Tensor, x:Union[Tensor, ConstType], y:Union[Tensor, ConstType]):
+    """
+    Return a tensor of elements selected from either `x` or `y`, depending on `self`.
+    `output_i = x_i if self_i else y_i`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    cond = Tensor([[True, True, False], [True, False, False]])
+    print(cond.where(1, 3).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    cond = Tensor.randn(2, 3)
+    print(cond.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print((cond > 0).where(cond, -float("inf")).numpy())
+    ```
+    """
     if isinstance(input_, Tensor): input_, other = input_._broadcasted(other)
     elif isinstance(other, Tensor): other, input_ = other._broadcasted(input_)
     x_,y = self._broadcasted(input_, match_dtype=False)
@@ -1977,7 +2133,7 @@ class Tensor:
 
   def masked_fill(self:Tensor, mask:Tensor, value:Union[Tensor, ConstType]): return mask.where(value, self)
 
-  # ***** op wrappers (wasted lines to make the typechecker happy) *****
+  # ***** op wrappers *****
 
   def __neg__(self) -> Tensor: return self.neg()
 

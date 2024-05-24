@@ -160,6 +160,8 @@
 ::: tinygrad.Tensor.mul
 ::: tinygrad.Tensor.div
 ::: tinygrad.Tensor.xor
+::: tinygrad.Tensor.lshift
+::: tinygrad.Tensor.rshift
 ::: tinygrad.Tensor.pow
 ::: tinygrad.Tensor.maximum
 ::: tinygrad.Tensor.minimum
