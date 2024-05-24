@@ -834,72 +834,68 @@ class Exp(Function):
 
 
     def forward(self, x: LazyBuffer) -> LazyBuffer:
-        try:
-            # self.ret = x.e(BinaryOps.MUL, x.const(1 / math.log(2))).e(UnaryOps.EXP2)
-            # return self.ret
+        # self.ret = x.e(BinaryOps.MUL, x.const(1 / math.log(2))).e(UnaryOps.EXP2)
+        # return self.ret
 
-            initial_x = x
-            pinf_t = x.const(88.722)
-            ninf_t = x.const(-103.97539753975397)
-            # x = x.e(BinaryOps.CMPLT, ninf_t).e(TernaryOps.WHERE, x.const(0), x)
-            # x = self.zero_if_minus_inf(x)
+        initial_x = x
+        pinf_t = x.const(88.722)
+        ninf_t = x.const(-103.97539753975397)
+        x = x.e(BinaryOps.CMPLT, ninf_t).e(TernaryOps.WHERE, x.const(0), x)
+        # x = self.zero_if_minus_inf(x)
 
 
-            # x = x.e(BinaryOps.MUL, x.const(1 / math.log(2)))
+        # x = x.e(BinaryOps.MUL, x.const(1 / math.log(2)))
 
-            self.beginning_dtype = x.dtype
-            if self.beginning_dtype != dtypes.half and self.device != "METAL":
-                x = x.cast(dtypes.float64)
-            # x = x.cast(dtypes.float64)
+        self.beginning_dtype = x.dtype
+        if self.beginning_dtype != dtypes.half and self.device != "METAL":
+            x = x.cast(dtypes.float64)
+        # x = x.cast(dtypes.float64)
 
-            # if self.device != "METAL":
-            #     x = x.cast(dtypes.float64)
-            # print(self.beginning_dtype)
-            # if self.device == "METAL":
-            # x = x.cast(dtypes.float64)
-            # print("X: ")
-            # print(__import__('tinygrad').Tensor(x).numpy())
-            # x = x.cast(dtypes.float64)
-            # else:
-            #     x = x.cast(dtypes.float64)
+        # if self.device != "METAL":
+        #     x = x.cast(dtypes.float64)
+        # print(self.beginning_dtype)
+        # if self.device == "METAL":
+        # x = x.cast(dtypes.float64)
+        # print("X: ")
+        # print(__import__('tinygrad').Tensor(x).numpy())
+        # x = x.cast(dtypes.float64)
+        # else:
+        #     x = x.cast(dtypes.float64)
 
-            # _, _, nan = _get_info(x)
+        # _, _, nan = _get_info(x)
 
-            isnotnan = x.e(BinaryOps.CMPEQ, x)
-            # print("X: ")
-            # print(__import__('tinygrad').Tensor(x).numpy())
-            # print("X dtype:")
-            # print(x.dtype)
-            #
-            if self.beginning_dtype == dtypes.half:
-                computed = self._exp_lowprec(x)
-            else:
-                computed = self._exp(x)
-                # computed = self._exp_lowprec(x)
+        isnotnan = x.e(BinaryOps.CMPEQ, x)
+        # print("X: ")
+        # print(__import__('tinygrad').Tensor(x).numpy())
+        # print("X dtype:")
+        # print(x.dtype)
+        #
+        if self.beginning_dtype == dtypes.half:
+            computed = self._exp_lowprec(x)
+        else:
+            computed = self._exp(x)
+            # computed = self._exp_lowprec(x)
 
-            computed = initial_x.e(BinaryOps.CMPLT, pinf_t).e(
-                TernaryOps.WHERE, computed, computed.const(float("inf"))
-            )
-            computed = isnotnan.e(TernaryOps.WHERE, computed, x.const(float("nan")))
-            computed = initial_x.e(BinaryOps.CMPLT, ninf_t).e(
-                TernaryOps.WHERE, computed.const(0), computed
-            )
+        computed = initial_x.e(BinaryOps.CMPLT, pinf_t).e(
+            TernaryOps.WHERE, computed, computed.const(float("inf"))
+        )
+        computed = isnotnan.e(TernaryOps.WHERE, computed, x.const(float("nan")))
+        computed = initial_x.e(BinaryOps.CMPLT, ninf_t).e(
+            TernaryOps.WHERE, computed.const(0), computed
+        )
 
-            # print("COMPUTED: ")
-            # print(__import__('tinygrad').Tensor(computed).numpy()[0])
+        # print("COMPUTED: ")
+        # print(__import__('tinygrad').Tensor(computed).numpy()[0])
 
-            if not dtypes.is_int(self.beginning_dtype):
-                computed = computed.cast(self.beginning_dtype)
+        if not dtypes.is_int(self.beginning_dtype):
+            computed = computed.cast(self.beginning_dtype)
 
-            # print("RET: ")
-            # print(__import__('tinygrad').Tensor(ret).numpy()[0])
-            self.ret = computed#.cast(self.beginning_dtype)
-            # print("RET: ")
-            # print(__import__('tinygrad').Tensor(self.ret).numpy())
-            return self.ret
-        except:
-            self.ret = initial_x.const(0)
-            return self.ret
+        # print("RET: ")
+        # print(__import__('tinygrad').Tensor(ret).numpy()[0])
+        self.ret = computed#.cast(self.beginning_dtype)
+        # print("RET: ")
+        # print(__import__('tinygrad').Tensor(self.ret).numpy())
+        return self.ret
 
     def backward(self, grad_output: LazyBuffer) -> LazyBuffer:
         return self.ret.e(BinaryOps.MUL, grad_output)
