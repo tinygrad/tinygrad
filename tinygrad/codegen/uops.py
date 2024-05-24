@@ -77,8 +77,6 @@ def _match(uop:UOp, pattern:Dict[str, Any], store:Dict[str, UOp]) -> bool:
     elif k == "dtype":
       if isinstance(v, set):
         if uop.dtype not in v: return False
-      elif isinstance(v, str):
-        if uop.dtype != store[v].dtype: return False
       elif uop.dtype != v: return False
     elif k == "uop":
       if isinstance(v, set):
@@ -215,21 +213,19 @@ constant_folder = PatternMatcher([
   ({"uop": UOps.STORE, "vin": ({"__name__": "buf"}, {"__name__": "idx"}, {"uop": UOps.CAST, "vin":
                                 tuple({"uop": UOps.GEP, "vin": ({"__name__": "val"},), "arg": i} for i in range(2))})},
    lambda buf,idx,val: UOp(UOps.STORE, None, (buf, idx, val))),
-  # CAST-PHI-GEP -> PHI-CAST only if dtypes match
+  # CAST-PHI-GEP -> PHI-CAST
   ({"__name__": "root", "uop": UOps.CAST, "vin":
-    tuple({"uop": UOps.PHI, "vin": ({"uop": UOps.GEP, "vin": ({"__name__": "val", "dtype": "root"},),
-                                     "arg": i}, {"__name__": f"v{i}"})} for i in range(4))},
+    tuple({"uop": UOps.PHI, "vin": ({"uop": UOps.GEP, "vin": ({"__name__": "val"},), "arg": i}, {"__name__": f"v{i}"})} for i in range(4))},
     lambda root, val, v0, v1, v2, v3: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1, v2, v3))))),
   ({"__name__": "root", "uop": UOps.CAST, "vin":
-    tuple({"uop": UOps.PHI, "vin": ({"uop": UOps.GEP, "vin": ({"__name__": "val", "dtype": "root"},),
-                                     "arg": i}, {"__name__": f"v{i}"})} for i in range(2))},
+    tuple({"uop": UOps.PHI, "vin": ({"uop": UOps.GEP, "vin": ({"__name__": "val"},), "arg": i}, {"__name__": f"v{i}"})} for i in range(2))},
     lambda root, val, v0, v1: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1))))),
   # NEG/CMPLT -> CMPLT
   ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": ({"uop": UOps.ALU, "arg": UnaryOps.NEG, "vin": ({"__name__": "x"},)},
                                                      {"__name__": "c", "uop": UOps.CONST, "dtype": dtypes.int})},
     lambda c,x: UOp(UOps.ALU, dtypes.bool, (UOp.const(c.dtype, -c.arg), x), BinaryOps.CMPLT)),
-  # cast NOOP (NOTE: it's `is` to deal with PtrDType)
-  ({"__name__": "root", "uop": UOps.CAST}, lambda root: root.vin[0] if root.dtype is root.vin[0].dtype else None),
+  # cast NOOP (NOTE: it's str to deal with PtrDType)
+  ({"__name__": "root", "uop": UOps.CAST}, lambda root: root.vin[0] if str(root.dtype) == str(root.vin[0].dtype) else None),
 ])
 
 # *** uop graph ***

@@ -47,6 +47,10 @@ jobs:
         JIT=1 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
     - name: Run LLaMA with BEAM
       run: JIT=1 BEAM=2 CACHELEVEL=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_beam.txt
+    - name: Run quantized LLaMA
+      run: |
+        JIT=1 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing --quantize int8 | tee llama_int8.txt
+        JIT=1 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing --quantize nf4 | tee llama_nf4.txt
     - name: Run LLaMA 7B on 4 (virtual) GPUs
       run: JIT=1 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_four_gpu.txt
     - name: Run GPT2
@@ -76,6 +80,8 @@ jobs:
           llama_unjitted.txt
           llama_jitted.txt
           llama_beam.txt
+          llama_int8.txt
+          llama_nf4.txt
           llama_four_gpu.txt
           gpt2_unjitted.txt
           gpt2_jitted.txt
@@ -125,7 +131,7 @@ jobs:
         CUDA=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
         CUDA=1 BFLOAT16=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_bfloat16.txt
     - name: Run Tensor Core GEMM (CUDA) with BEAM
-      run: BEAM=2 CUDA=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py
+      run: BEAM=4 CUDA=1 HALF=1 CACHELEVEL=0 DEBUG=2 python3 extra/gemm/simple_matmul.py
     - name: Run Tensor Core GEMM (PTX)
       run: CUDA=1 PTX=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_ptx.txt
     - name: Run Tensor Core GEMM (NV)
