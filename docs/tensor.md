@@ -10,22 +10,6 @@
 ::: tinygrad.Tensor.dtype
 ::: tinygrad.Tensor.device
 
-## tinygrad ops
-
-::: tinygrad.Tensor.schedule_with_vars
-::: tinygrad.Tensor.schedule
-::: tinygrad.Tensor.realize
-::: tinygrad.Tensor.replace
-::: tinygrad.Tensor.assign
-::: tinygrad.Tensor.detach
-::: tinygrad.Tensor.to
-::: tinygrad.Tensor.to_
-::: tinygrad.Tensor.shard
-::: tinygrad.Tensor.shard_
-::: tinygrad.Tensor.contiguous
-::: tinygrad.Tensor.contiguous_backward
-::: tinygrad.Tensor.backward
-
 ## Creation (basic)
 
 ::: tinygrad.Tensor.empty
@@ -42,6 +26,7 @@
 
 ::: tinygrad.Tensor.rand
 ::: tinygrad.Tensor.randn
+::: tinygrad.Tensor.randint
 ::: tinygrad.Tensor.normal
 ::: tinygrad.Tensor.uniform
 ::: tinygrad.Tensor.scaled_uniform
@@ -56,8 +41,25 @@
 ::: tinygrad.Tensor.tolist
 ::: tinygrad.Tensor.numpy
 
+## tinygrad ops
+
+::: tinygrad.Tensor.schedule_with_vars
+::: tinygrad.Tensor.schedule
+::: tinygrad.Tensor.realize
+::: tinygrad.Tensor.replace
+::: tinygrad.Tensor.assign
+::: tinygrad.Tensor.detach
+::: tinygrad.Tensor.to
+::: tinygrad.Tensor.to_
+::: tinygrad.Tensor.shard
+::: tinygrad.Tensor.shard_
+::: tinygrad.Tensor.contiguous
+::: tinygrad.Tensor.contiguous_backward
+::: tinygrad.Tensor.backward
+
 ## Movement (low level)
 
+::: tinygrad.Tensor.view
 ::: tinygrad.Tensor.reshape
 ::: tinygrad.Tensor.expand
 ::: tinygrad.Tensor.permute
@@ -76,6 +78,7 @@
 ::: tinygrad.Tensor.squeeze
 ::: tinygrad.Tensor.unsqueeze
 ::: tinygrad.Tensor.pad2d
+::: tinygrad.Tensor.T
 ::: tinygrad.Tensor.transpose
 ::: tinygrad.Tensor.flatten
 ::: tinygrad.Tensor.unflatten
@@ -181,4 +184,3 @@
 ::: tinygrad.Tensor.bitcast
 ::: tinygrad.Tensor.float
 ::: tinygrad.Tensor.half
-
