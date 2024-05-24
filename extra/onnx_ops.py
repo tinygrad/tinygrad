@@ -587,7 +587,7 @@ def AffineGrid(theta: Tensor, size: Tensor, align_corners=0):
     if dim == 0: stackable = [a.reshape(dim_sz, *[1]*(len(data_sz)-1)) + size_zeros, *stackable]
     elif dim == 1: stackable = [a.reshape(1, dim_sz, *[1]*(len(data_sz)-2)) + size_zeros, *stackable]
     else: stackable = [a.reshape(1, dim_sz) + size_zeros, *stackable]
-  original_grid = Tensor.stack(stackable, dim=len(data_sz))
+  original_grid = Tensor.stack(*stackable, dim=len(data_sz))
   if original_grid.ndim == 3:
     N, dim_2d, dim_homo = theta.shape
     assert dim_2d == 2 and dim_homo == 3
