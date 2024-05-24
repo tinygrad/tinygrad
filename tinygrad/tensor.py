@@ -672,7 +672,7 @@ class Tensor:
       del t0._ctx
     return self
 
-  # ***** movement mlops *****
+  # ***** movement low level ops *****
 
   def view(self, *shape) -> Tensor:
     """`.view` is an alias for `.reshape`."""
@@ -782,7 +782,7 @@ class Tensor:
     ret = F.Pad.apply(self, arg=(narg:=tuple(x if x is not None else (0,0) for x in arg)))
     return ret if 0 == value else ret + F.Pad.apply(Tensor.ones_like(self), arg=narg).where(0, value)
 
-  # ***** movement hlops *****
+  # ***** movement high level ops *****
 
   # Supported Indexing Implementations:
   #   1. Int indexing (no copy)
@@ -1612,7 +1612,7 @@ class Tensor:
   def triu(self, k:int=0) -> Tensor: return Tensor._tri(self.shape[-2], self.shape[-1], k=k, device=self.device).where(self, 0)
   def tril(self, k:int=0) -> Tensor: return Tensor._tri(self.shape[-2], self.shape[-1], k=k+1, device=self.device).where(0, self)
 
-  # ***** mlops (unary) *****
+  # ***** unary ops *****
 
   def logical_not(self): return F.Eq.apply(*self._broadcasted(False))
   def neg(self): return F.Neg.apply(self) if self.dtype != dtypes.bool else self.logical_not()
@@ -1650,7 +1650,7 @@ class Tensor:
   def cos(self): return ((math.pi/2)-self).sin()
   def tan(self): return self.sin() / self.cos()
 
-  # ***** math functions (unary) *****
+  # ***** math functions *****
 
   def trunc(self: Tensor) -> Tensor:
     """
@@ -1744,7 +1744,7 @@ class Tensor:
     """
     return F.Reciprocal.apply(self.cast(least_upper_float(self.dtype)))
 
-  # ***** activation functions (unary) *****
+  # ***** activation functions *****
 
   def elu(self, alpha=1.0):
     """
@@ -1758,6 +1758,7 @@ class Tensor:
     ```
     """
     return self.relu() - alpha*(1-self.exp()).relu()
+
   def celu(self, alpha=1.0):
     """
     Applies the Continuously differentiable Exponential Linear Unit (CELU) function element-wise.
@@ -1770,6 +1771,7 @@ class Tensor:
     ```
     """
     return self.maximum(0) + (alpha * ((self / alpha).exp() - 1)).minimum(0)
+
   def swish(self):
     """
     See `.silu()`
@@ -1781,6 +1783,7 @@ class Tensor:
     ```
     """
     return self * self.sigmoid()
+
   def silu(self):
     """
     Applies the Sigmoid Linear Unit (SiLU) function element-wise.
@@ -1793,6 +1796,7 @@ class Tensor:
     ```
     """
     return self.swish()   # The SiLU function is also known as the swish function.
+
   def relu6(self):
     """
     Applies the ReLU6 function element-wise.
@@ -1805,6 +1809,7 @@ class Tensor:
     ```
     """
     return self.relu() - (self-6).relu()
+
   def hardswish(self):
     """
     Applies the Hardswish function element-wise.
@@ -1817,6 +1822,7 @@ class Tensor:
     ```
     """
     return self * (self+3).relu6() * (1/6)
+
   def tanh(self):
     """
     Applies the Hyperbolic Tangent (tanh) function element-wise.
@@ -1828,6 +1834,7 @@ class Tensor:
     ```
     """
     return 2.0 * ((2.0 * self).sigmoid()) - 1.0
+
   def sinh(self):
     """
     Applies the Hyperbolic Sine (sinh) function element-wise.
@@ -1839,6 +1846,7 @@ class Tensor:
     ```
     """
     return (self.exp() - self.neg().exp()) / 2
+
   def cosh(self):
     """
     Applies the Hyperbolic Cosine (cosh) function element-wise.
@@ -1850,6 +1858,7 @@ class Tensor:
     ```
     """
     return (self.exp() + self.neg().exp()) / 2
+
   def atanh(self):
     """
     Applies the Inverse Hyperbolic Tangent (atanh) function element-wise.
@@ -1861,6 +1870,7 @@ class Tensor:
     ```
     """
     return ((1 + self)/(1 - self)).log() / 2
+
   def asinh(self):
     """
     Applies the Inverse Hyperbolic Sine (asinh) function element-wise.
@@ -1872,6 +1882,7 @@ class Tensor:
     ```
     """
     return (self + (self.square() + 1).sqrt()).log()
+
   def acosh(self):
     """
     Applies the Inverse Hyperbolic Cosine (acosh) function element-wise.
@@ -1883,6 +1894,7 @@ class Tensor:
     ```
     """
     return (self + (self.square() - 1).sqrt()).log()
+
   def hardtanh(self, min_val=-1, max_val=1):
     """
     Applies the Hardtanh function element-wise.
@@ -1894,6 +1906,7 @@ class Tensor:
     ```
     """
     return self.clip(min_val, max_val)
+
   def gelu(self):
     """
     Applies the Gaussian Error Linear Unit (GELU) function element-wise.
@@ -1906,6 +1919,7 @@ class Tensor:
     ```
     """
     return 0.5 * self * (1 + (self * 0.7978845608 * (1 + 0.044715 * self * self)).tanh())
+
   def quick_gelu(self):
     """
     Applies the Sigmoid GELU approximation element-wise.
@@ -1917,6 +1931,7 @@ class Tensor:
     ```
     """
     return self * (self * 1.702).sigmoid()
+
   def leakyrelu(self, neg_slope=0.01):
     """
     Applies the Leaky ReLU function element-wise.
@@ -1931,6 +1946,7 @@ class Tensor:
     ```
     """
     return self.relu() - (-neg_slope*self).relu()
+
   def mish(self):
     """
     Applies the Mish function element-wise.
@@ -1943,6 +1959,7 @@ class Tensor:
     ```
     """
     return self * self.softplus().tanh()
+
   def softplus(self, beta=1):
     """
     Applies the Softplus function element-wise.
@@ -1954,6 +1971,7 @@ class Tensor:
     ```
     """
     return (1/beta) * (1 + (self*beta).exp()).log()
+
   def softsign(self):
     """
     Applies the Softsign function element-wise.
@@ -1966,7 +1984,7 @@ class Tensor:
     """
     return self / (1 + self.abs())
 
-  # ***** broadcasted elementwise mlops *****
+  # ***** broadcasted elementwise ops *****
   def _broadcast_to(self, shape:Tuple[sint, ...]):
     reshape_arg, _ = _pad_left(self.shape, shape)
     if self.ndim > len(shape) or not all(sh in {s,1} or (s==0 and sh==1) for sh,s in zip(reshape_arg, shape)):
