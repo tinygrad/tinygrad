@@ -468,7 +468,7 @@ def repeat_expand_2d_left(content, target_len): # content : [h, t]
     if i >= temp[current_pos+1]:
       current_pos += 1
     cols.append(content[:, current_pos])
-  return Tensor.stack(cols).transpose(0, 1)
+  return Tensor.stack(*cols).transpose(0, 1)
 
 def load_fairseq_cfg(checkpoint_path):
   assert Path(checkpoint_path).is_file()

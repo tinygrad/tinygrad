@@ -393,7 +393,7 @@ class TestLinearizer(unittest.TestCase):
 
   def test_zero_fold(self):
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
-    r = Tensor.stack([a, b])
+    r = Tensor.stack(a, b)
 
     k = Linearizer(*create_schedule([r.lazydata])[-1].ast)
     k.upcast()
@@ -890,7 +890,7 @@ class TestHandCodedOpts(unittest.TestCase):
     assert k.upcasted == 1 and k.full_shape[-1] == 7
 
   def test_masked_upcast_wino(self):
-    monster = Tensor.stack([Tensor.stack([Tensor.rand(16) for _ in range(6)]) for _ in range(6)])
+    monster = Tensor.stack(*[Tensor.stack(*[Tensor.rand(16) for _ in range(6)]) for _ in range(6)])
 
     s = create_schedule([monster.lazydata])[-1]
     k = Linearizer(*s.ast)

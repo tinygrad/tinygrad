@@ -92,7 +92,7 @@ def NF4Linear(block_size):
     -1.0, -0.6961928009986877, -0.5250730514526367, -0.39491748809814453, -0.28444138169288635, -0.18477343022823334, -0.09105003625154495, 0.0,
     0.07958029955625534, 0.16093020141124725, 0.24611230194568634, 0.33791524171829224, 0.44070982933044434, 0.5626170039176941, 0.7229568362236023, 1.0,
   ]
-  CODE = Tensor.stack([Tensor(c) for c in _CODE])
+  CODE = Tensor.stack(*[Tensor(c) for c in _CODE])
   class _NF4Linear:
     def __init__(self, in_features, out_features, bias=False):
       assert not bias, "bias not supported"
@@ -103,7 +103,7 @@ def NF4Linear(block_size):
     def __call__(self, x: Tensor) -> Tensor:
       high_bits = self.weight
       low_bits = (self.weight * 2 ** 4).contiguous()
-      unpacked = Tensor.stack([high_bits, low_bits], dim=-1).div(2 ** 4, upcast=False)
+      unpacked = Tensor.stack(high_bits, low_bits, dim=-1).div(2 ** 4, upcast=False)
       unscaled = CODE[unpacked].to(x.device).reshape(-1, block_size) * self.scale
       return x.linear(unscaled.reshape(self.out_features, self.in_features).T)
 
