@@ -34,7 +34,7 @@ def preprocess(im, imgsz=640, model_stride=32, model_pt=True):
   same_shapes = all(x.shape == im[0].shape for x in im)
   auto = same_shapes and model_pt
   im = Tensor([compute_transform(x, new_shape=imgsz, auto=auto, stride=model_stride) for x in im])
-  im = Tensor.stack(im) if im.shape[0] > 1 else im
+  im = Tensor.stack(*im) if im.shape[0] > 1 else im
   im = im[..., ::-1].permute(0, 3, 1, 2)  # BGR to RGB, BHWC to BCHW, (n, 3, h, w)
   im /= 255  # 0 - 255 to 0.0 - 1.0
   return im
@@ -180,7 +180,7 @@ def make_anchors(feats, strides, grid_cell_offset=0.5):
     sx = sx.reshape(1, -1).repeat([h, 1]).reshape(-1)
     sy = sy.reshape(-1, 1).repeat([1, w]).reshape(-1)
 
-    anchor_points.append(Tensor.stack((sx, sy), -1).reshape(-1, 2))
+    anchor_points.append(Tensor.stack(sx, sy, dim=-1).reshape(-1, 2))
     stride_tensor.append(Tensor.full((h * w), stride))
   anchor_points = anchor_points[0].cat(anchor_points[1], anchor_points[2])
   stride_tensor = stride_tensor[0].cat(stride_tensor[1], stride_tensor[2]).unsqueeze(1)

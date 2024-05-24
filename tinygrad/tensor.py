@@ -977,22 +977,20 @@ class Tensor:
     for d,k,s in zip(cat_dims, cat_dim_cumsum[:-1], slc): s[dim] = (k, cat_dim_cumsum[-1] - k - d)
     return functools.reduce(Tensor.__add__, [arg.pad(tuple(s)) for arg,s in zip(catargs, slc)])
 
-  @staticmethod
-  def stack(tensors:Sequence[Tensor], dim:int=0) -> Tensor:
+  def stack(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
     """
-    Concatenates a sequence of tensors along a new dimension.
+    Concatenates self with other `Tensor` in `args` along a new dimension specified by `dim`.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t0, t1, t2 = Tensor([1, 2]), Tensor([3, 4]), Tensor([5, 6])
-    print(Tensor.stack([t0, t1, t2], dim=0).numpy())
+    print(t0.stack(t1, t2, dim=0).numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor.stack([t0, t1, t2], dim=1).numpy())
+    print(t0.stack([t1, t2], dim=1).numpy())
     ```
     """
-    unsqueezed_tensors = [tensor.unsqueeze(dim) for tensor in tensors]
     # checks for shapes and number of dimensions delegated to cat
-    return unsqueezed_tensors[0].cat(*unsqueezed_tensors[1:], dim=dim)
+    return self.unsqueeze(dim).cat(*[t.unsqueeze(dim) for t in args], dim=dim)
 
   def repeat(self, repeats, *args) -> Tensor:
     """
