@@ -2127,8 +2127,8 @@ class Tensor:
     """
     if isinstance(x, Tensor): x, y = x._broadcasted(y)
     elif isinstance(y, Tensor): y, x = y._broadcasted(x)
-    cond,x = self._broadcasted(x, match_dtype=False)
-    cond,y = cond._broadcasted(y, match_dtype=False)
+    cond, x = self._broadcasted(x, match_dtype=False)
+    cond, y = cond._broadcasted(y, match_dtype=False)
     return F.Where.apply(cond.cast(dtypes.bool), *x._broadcasted(y))
 
   def masked_fill(self:Tensor, mask:Tensor, value:Union[Tensor, ConstType]): return mask.where(value, self)
