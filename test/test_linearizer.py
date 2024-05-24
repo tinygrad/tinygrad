@@ -117,7 +117,7 @@ class TestLinearizer(unittest.TestCase):
     if getenv("PTX"):
       # RANGE -> 2xLOAD_INDEXING -> LOAD -> RANGE -> PHI
       assert ranges[1] == ranges[0]+4
-      assert lin.uops[ranges[0]+4].uop is UOps.LOAD
+      assert lin.uops[ranges[0]+3].uop is UOps.LOAD
     else:
     # RANGE -> LOAD -> RANGE -> PHI
       assert ranges[1] == ranges[0]+2
@@ -131,7 +131,7 @@ class TestLinearizer(unittest.TestCase):
     if getenv("PTX"):
       # RANGE -> RANGE -> 2xLOAD_INDEXING -> LOAD -> RANGE -> PHI
       assert ranges[2] == ranges[1]+4 == ranges[0]+5
-      assert lin.uops[ranges[1]+4].uop is UOps.LOAD
+      assert lin.uops[ranges[1]+3].uop is UOps.LOAD
     else:
     # RANGE -> RANGE -> LOAD -> RANGE -> PHI
       assert ranges[2] == ranges[1]+2 == ranges[0]+3
@@ -169,8 +169,8 @@ class TestLinearizer(unittest.TestCase):
     if getenv("PTX"):
     # LOAD -> RANGE -> 3xLOAD_INDEXING -> LOAD -> ALU -> RANGE -> PHI
       assert lin.uops[ranges[0]-2].uop is UOps.LOAD
-      assert ranges[1] == ranges[0]+6
-      assert [x.uop for x in lin.uops[ranges[0]+4:ranges[0]+6]] == [UOps.LOAD, UOps.ALU]
+      assert ranges[1] == ranges[0]+5
+      assert [x.uop for x in lin.uops[ranges[0]+3:ranges[0]+5]] == [UOps.LOAD, UOps.ALU]
     # LOAD -> RANGE -> LOAD -> ALU -> RANGE -> PHI
     else:
       assert lin.uops[ranges[0]-2].uop is UOps.LOAD
