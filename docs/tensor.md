@@ -99,16 +99,16 @@
 
 ## Processing
 
+::: tinygrad.Tensor.avg_pool2d
+::: tinygrad.Tensor.max_pool2d
 ::: tinygrad.Tensor.conv2d
+::: tinygrad.Tensor.conv_transpose2d
 ::: tinygrad.Tensor.dot
 ::: tinygrad.Tensor.matmul
 ::: tinygrad.Tensor.einsum
 ::: tinygrad.Tensor.cumsum
 ::: tinygrad.Tensor.triu
 ::: tinygrad.Tensor.tril
-::: tinygrad.Tensor.avg_pool2d
-::: tinygrad.Tensor.max_pool2d
-::: tinygrad.Tensor.conv_transpose2d
 
 ## Unary Ops (math)
 
@@ -118,6 +118,11 @@
 ::: tinygrad.Tensor.log2
 ::: tinygrad.Tensor.exp
 ::: tinygrad.Tensor.exp2
+::: tinygrad.Tensor.sqrt
+::: tinygrad.Tensor.rsqrt
+::: tinygrad.Tensor.sin
+::: tinygrad.Tensor.cos
+::: tinygrad.Tensor.tan
 ::: tinygrad.Tensor.trunc
 ::: tinygrad.Tensor.ceil
 ::: tinygrad.Tensor.floor
