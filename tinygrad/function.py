@@ -826,8 +826,11 @@ class Exp(Function):
         # x = x.e(BinaryOps.MUL, x.const(1 / math.log(2)))
 
         self.beginning_dtype = x.dtype
-        # if self.beginning_dtype != dtypes.half and self.device != "METAL":
-        #     x = x.cast(dtypes.float64)
+        if self.beginning_dtype != dtypes.half:
+            if self.device != "METAL":
+                x = x.cast(dtypes.float64)
+            else:
+                x = x.cast(dtypes.float32)
 
         # if self.device != "METAL":
         #     x = x.cast(dtypes.float64)
@@ -849,6 +852,7 @@ class Exp(Function):
         else:
             computed = self._exp(x)
             # computed = self._exp_lowprec(x)
+
         computed = initial_x.e(BinaryOps.CMPLT, pinf_t).e(
             TernaryOps.WHERE, computed, computed.const(float("inf"))
         )
@@ -861,7 +865,7 @@ class Exp(Function):
 
         # print("RET: ")
         # print(__import__('tinygrad').Tensor(ret).numpy()[0])
-        self.ret = computed#.cast(self.beginning_dtype)
+        self.ret = computed.cast(self.beginning_dtype)
         # print("RET: ")
         # print(__import__('tinygrad').Tensor(self.ret).numpy())
         return self.ret
