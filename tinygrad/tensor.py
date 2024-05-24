@@ -1654,17 +1654,97 @@ class Tensor:
 
   # ***** math functions (unary) *****
 
-  def trunc(self: Tensor) -> Tensor: return self.cast(dtypes.int32).cast(self.dtype)
-  def ceil(self: Tensor) -> Tensor: return (self > (b := self.trunc())).where(b+1, b)
-  def floor(self: Tensor) -> Tensor: return (self < (b := self.trunc())).where(b-1, b)
+  def trunc(self: Tensor) -> Tensor:
+    """
+    Truncates the tensor element-wise.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3.9, -2.1, -1.5, 0.5, 1.5, 2.1, 3.9]).trunc().numpy())
+    ```
+    """
+    return self.cast(dtypes.int32).cast(self.dtype)
+  def ceil(self: Tensor) -> Tensor:
+    """
+    Rounds the tensor element-wise towards positive infinity.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3.9, -2.1, -1.5, 0.5, 1.5, 2.1, 3.9]).ceil().numpy())
+    ```
+    """
+    return (self > (b := self.trunc())).where(b+1, b)
+  def floor(self: Tensor) -> Tensor:
+    """
+    Rounds the tensor element-wise towards negative infinity.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3.9, -2.1, -1.5, 0.5, 1.5, 2.1, 3.9]).floor().numpy())
+    ```
+    """
+    return (self < (b := self.trunc())).where(b-1, b)
   def round(self: Tensor) -> Tensor:
+    """
+    Rounds the tensor element-wise.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3.9, -2.1, -1.5, 0.5, 1.5, 2.1, 3.9]).round().numpy())
+    ```
+    """
     return ((self > 0) == ((b := self.cast(dtypes.int32) / 2.0).cast(dtypes.int32) == b)).where((self - 0.5).ceil(), (self + 0.5).floor())
-  def lerp(self, end: Tensor, weight: Union[Tensor, float]) -> Tensor: return self + (end - self) * weight
-  def square(self): return self*self
-  def clip(self, min_, max_): return self.maximum(min_).minimum(max_)
-  def sign(self): return F.Sign.apply(self)
-  def abs(self): return self * self.sign()
-  def reciprocal(self): return F.Reciprocal.apply(self.cast(least_upper_float(self.dtype)))
+  def lerp(self, end: Tensor, weight: Union[Tensor, float]) -> Tensor:
+    """
+    Linearly interpolates between `self` and `end` by `weight`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1., 2., 3.]).lerp(Tensor([4., 5., 6.]), 0.5).numpy())
+    ```
+    """
+    return self + (end - self) * weight
+  def square(self):
+    """
+    Convenience method for squaring the tensor element-wise.
+    Equivalent to `self*self`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).square().numpy())
+    ```
+    """
+    return self*self
+  def clip(self, min_, max_):
+    """
+    Clips (limits) the values in the tensor between `min_` and `max_` element-wise.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).clip(-1, 1).numpy())
+    ```
+    """
+    return self.maximum(min_).minimum(max_)
+  def sign(self):
+    """
+    Returns the sign of the tensor element-wise.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).sign().numpy())
+    ```
+    """
+    return F.Sign.apply(self)
+  def abs(self):
+    """
+    Computes the absolute value of the tensor element-wise.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).abs().numpy())
+    ```
+    """
+    return self * self.sign()
+  def reciprocal(self):
+    """
+    Compute `1/x` element-wise.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1., 2., 3.]).reciprocal().numpy())
+    ```
+    """
+    return F.Reciprocal.apply(self.cast(least_upper_float(self.dtype)))
 
   # ***** activation functions (unary) *****
 
@@ -2175,16 +2255,67 @@ class Tensor:
   # ***** functional nn ops *****
 
   def linear(self, weight:Tensor, bias:Optional[Tensor]=None):
+    """
+    Applies a linear transformation to `self` using `weight` and `bias`.
+
+    See: https://pytorch.org/docs/stable/generated/torch.nn.Linear.html
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[1, 2], [3, 4]])
+    weight = Tensor([[1, 2], [3, 4]])
+    bias = Tensor([1, 2])
+    print(t.linear(weight, bias).numpy())
+    ```
+    """
     x = self.mul(weight) if len(weight.shape) == 1 else self.dot(weight)
     return x.add(bias) if bias is not None else x
 
-  def sequential(self, ll:List[Callable[[Tensor], Tensor]]): return functools.reduce(lambda x,f: f(x), ll, self)
+  def sequential(self, ll:List[Callable[[Tensor], Tensor]]):
+    """
+    Applies a sequence of functions to `self` chaining the output of each function to the input of the next.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3])
+    print(t.sequential([lambda x: x * 2, lambda x: x + 1]).numpy())
+    ```
+    """
+    return functools.reduce(lambda x,f: f(x), ll, self)
 
   def layernorm(self, axis=-1, eps:float=1e-5) -> Tensor:
+    """
+    Applies Layer Normalization over a mini-batch of inputs.
+
+    Described: https://paperswithcode.com/method/layer-normalization
+    Paper: https://arxiv.org/abs/1607.06450v1
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.randn(8, 10, 16) * 2 + 8
+    print(t.mean().item(), t.std().item())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = t.layernorm()
+    print(t.mean().item(), t.std().item())
+    ```
+    """
     y = (self - self.mean(axis, keepdim=True))
     return y.mul((y*y).mean(axis, keepdim=True).add(eps).rsqrt())
 
   def batchnorm(self, weight:Optional[Tensor], bias:Optional[Tensor], mean:Tensor, invstd:Tensor, axis:Union[int,Tuple[int,...]]=1) -> Tensor:
+    """
+    Applies Batch Normalization over a mini-batch of inputs.
+
+    Described: https://paperswithcode.com/method/batch-normalization
+    Paper: https://arxiv.org/abs/1502.03167
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.randn(8, 4, 16, 16) * 2 + 8
+    print(t.mean().item(), t.std().item())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = t.batchnorm(None, None, t.mean(axis=(0,2,3)), t.var(axis=(0,2,3)).add(1e-5).rsqrt())
+    print(t.mean().item(), t.std().item())
+    ```
+    """
     axis_ = argfix(axis)
     shape = tuple(s if ax in axis_ else 1 for ax, s in enumerate(self.shape))
     x = self - mean.reshape(shape)
@@ -2193,15 +2324,53 @@ class Tensor:
     return (ret + bias.reshape(shape)) if bias is not None else ret
 
   def dropout(self, p=0.5) -> Tensor:
+    """
+    Applies dropout to `self`.
+
+    NOTE: dropout is only applied when `Tensor.training` is `True`.
+
+    Described: https://paperswithcode.com/method/dropout
+    Paper: https://jmlr.org/papers/v15/srivastava14a.html
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(2, 2)
+    with Tensor.train():
+      print(t.dropout().numpy())
+    ```
+    """
     if not Tensor.training or p == 0: return self
     return self * (Tensor.rand(*self.shape, requires_grad=False, dtype=dtypes.default_float, device=self.device) >= p) * (1/(1.0 - p))
 
   def one_hot(self, num_classes:int) -> Tensor:
+    """
+    Converts `self` to a one-hot tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([0, 1, 3, 3, 4])
+    print(t.one_hot(5).numpy())
+    ```
+    """
     return (self[..., None] == Tensor.arange(num_classes, requires_grad=False, device=self.device)).where(1, 0)
 
   def scaled_dot_product_attention(self, key:Tensor, value:Tensor, attn_mask:Optional[Tensor]=None,
                                    dropout_p:float=0.0, is_causal:bool=False) -> Tensor:
-    # NOTE: it works if key, value have symbolic shape
+    """
+    Computes scaled dot-product attention.
+    `self` is the query tensor, `key` is the key tensor, and `value` is the value tensor.
+
+    NOTE: it also works when `key` and `value` have symbolic shape.
+
+    Described: https://paperswithcode.com/method/scaled
+    Paper: https://arxiv.org/abs/1706.03762v7
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    q = Tensor.randn(2, 4, 8)
+    k = Tensor.randn(2, 4, 8)
+    v = Tensor.randn(2, 4, 8)
+    print(q.scaled_dot_product_attention(k, v).numpy())
+    ```
+    """
     assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
     if is_causal: attn_mask = Tensor.ones(self.shape[-2], key.shape[-2], requires_grad=False, device=self.device).tril(0).cast(dtypes.bool)
     if attn_mask is not None and attn_mask.dtype == dtypes.bool: attn_mask = (attn_mask == 0).where(-float("inf"), 0)
@@ -2209,14 +2378,48 @@ class Tensor:
     return ((qk+attn_mask) if attn_mask is not None else qk).softmax(-1).dropout(dropout_p) @ value
 
   def binary_crossentropy(self, y:Tensor) -> Tensor:
+    """
+    Computes the binary cross-entropy loss between `self` and `y`.
+
+    See: https://pytorch.org/docs/stable/generated/torch.nn.BCELoss.html
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([0.1, 0.9, 0.2])
+    y = Tensor([0, 1, 0])
+    print(t.binary_crossentropy(y).item())
+    ```
+    """
     return (-y*self.log() - (1-y)*(1-self).log()).mean()
 
   def binary_crossentropy_logits(self, y:Tensor) -> Tensor:
+    """
+    Computes the binary cross-entropy loss between `self` and `y` where `self` is logits.
+
+    See: https://pytorch.org/docs/stable/generated/torch.nn.BCEWithLogitsLoss.html
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([-1, 2, -3])
+    y = Tensor([0, 1, 0])
+    print(t.binary_crossentropy_logits(y).item())
+    ```
+    """
     return (self.maximum(0) - y * self + (1 + self.abs().neg().exp()).log()).mean()
 
   def sparse_categorical_crossentropy(self, Y:Tensor, ignore_index=-1, label_smoothing=0.0) -> Tensor:
+    """
+    Computes the sparse categorical cross-entropy loss between `self` and `Y`.
+
+    NOTE: `self` is logits and `Y` is the target labels.
+
+    See: https://pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[-1, 2, -3], [1, -2, 3]])
+    Y = Tensor([1, 2])
+    print(t.sparse_categorical_crossentropy(Y).item())
+    ```
+    """
     assert 0.0 <= label_smoothing <= 1.0, "label_smoothing must be in [0.0, 1.0]"
-    # NOTE: self is a logits input
     log_probs, loss_mask = self.log_softmax(), (Y != ignore_index)
     y_counter = Tensor.arange(self.shape[-1], requires_grad=False, device=self.device).unsqueeze(0).expand(Y.numel(), self.shape[-1])
     y = ((y_counter == Y.flatten().reshape(-1, 1)) * loss_mask.reshape(-1, 1)).reshape(*Y.shape, self.shape[-1])
@@ -2229,12 +2432,64 @@ class Tensor:
     # hack for devices that don't support bfloat16
     assert self.dtype == dtypes.bfloat16
     return self.to("LLVM").bitcast(dtypes.uint16).cast(dtypes.uint32).mul(1<<16).bitcast(dtypes.float32).cast(dtype)
-  def cast(self, dtype:DType) -> Tensor: return self if self.dtype == dtype else F.Cast.apply(self, dtype=dtype)
+  def cast(self, dtype:DType) -> Tensor:
+    """
+    Casts `self` to a new dtype.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([-1, 2.5, 3], dtype=dtypes.float)
+    print(t.dtype, t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = t.cast(dtypes.int32)
+    print(t.dtype, t.numpy())
+    ```
+    """
+    return self if self.dtype == dtype else F.Cast.apply(self, dtype=dtype)
   def bitcast(self, dtype:DType) -> Tensor:
+    """
+    Bitcasts `self` to a new dtype of the same itemsize.
+
+    `self` must not require a gradient.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([-1, 2, 3], dtype=dtypes.int32)
+    print(t.dtype, t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = t.bitcast(dtypes.uint32)
+    print(t.dtype, t.numpy())
+    ```
+    """
     if self.requires_grad: raise RuntimeError("can't backprop through bitcast")
     return F.Cast.apply(self, dtype=dtype, bitcast=True) if self.dtype != dtype else self
-  def float(self) -> Tensor: return self.cast(dtypes.float32)
-  def half(self) -> Tensor: return self.cast(dtypes.float16)
+  def float(self) -> Tensor:
+    """
+    Convenience method to cast `self` to a `float32` Tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([-1, 2, 3], dtype=dtypes.int32)
+    print(t.dtype, t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = t.float()
+    print(t.dtype, t.numpy())
+    ```
+    """
+    return self.cast(dtypes.float32)
+  def half(self) -> Tensor:
+    """
+    Convenience method to cast `self` to a `float16` Tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([-1, 2, 3], dtype=dtypes.int32)
+    print(t.dtype, t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = t.half()
+    print(t.dtype, t.numpy())
+    ```
+    """
 
   # ***** convenience stuff *****
 
