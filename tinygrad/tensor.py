@@ -2125,11 +2125,11 @@ class Tensor:
     print((cond > 0).where(cond, -float("inf")).numpy())
     ```
     """
-    if isinstance(input_, Tensor): input_, other = input_._broadcasted(other)
-    elif isinstance(other, Tensor): other, input_ = other._broadcasted(input_)
-    x_,y = self._broadcasted(input_, match_dtype=False)
-    x,z = x_._broadcasted(other, match_dtype=False)
-    return F.Where.apply(x.cast(dtypes.bool), *y._broadcasted(z))
+    if isinstance(x, Tensor): x, y = x._broadcasted(y)
+    elif isinstance(y, Tensor): y, x = y._broadcasted(x)
+    cond,x = self._broadcasted(x, match_dtype=False)
+    cond,y = cond._broadcasted(y, match_dtype=False)
+    return F.Where.apply(cond.cast(dtypes.bool), *x._broadcasted(y))
 
   def masked_fill(self:Tensor, mask:Tensor, value:Union[Tensor, ConstType]): return mask.where(value, self)
 
