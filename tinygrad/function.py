@@ -746,16 +746,11 @@ class Exp(Function):
         Qterms = []
         for p, q in zip(PC[::-1], QC[::-1]):
             Pterms.append(x.e(BinaryOps.MUL, x.const(p)))
-            # p = x.e(BinaryOps.MUL, x.const(p))
-            # Psum = Psum.e(BinaryOps.ADD, p)
             
             Qterms.append(x.e(BinaryOps.MUL, x.const(q)))
-            # q = x.e(BinaryOps.MUL, x.const(q))
-            # Qsum = Qsum.e(BinaryOps.ADD, q)
             x = x.e(BinaryOps.MUL, ox)
 
         for p, q in zip(Pterms[::-1], Qterms[::-1]):
-        # for p, q in zip(Pterms, Qterms):
             Psum = Psum.e(BinaryOps.ADD, p)
             Qsum = Qsum.e(BinaryOps.ADD, q)
         return Psum.e(BinaryOps.DIV, Qsum)
@@ -824,7 +819,7 @@ class Exp(Function):
         initial_x = x
         pinf_t = x.const(88.722)
         ninf_t = x.const(-103.97539753975397)
-        x = x.e(BinaryOps.CMPLT, ninf_t).e(TernaryOps.WHERE, x.const(0), x)
+        # x = x.e(BinaryOps.CMPLT, ninf_t).e(TernaryOps.WHERE, x.const(0), x)
         # x = self.zero_if_below_thresh(x, ninf_t)
 
 
