@@ -37,7 +37,7 @@ class BertForQuestionAnswering:
     start_logits = start_logits.reshape(-1, 1)
     end_logits = end_logits.reshape(-1, 1)
 
-    return Tensor.stack([start_logits, end_logits])
+    return Tensor.stack(start_logits, end_logits)
 
 class BertForMLPerf:
   def __init__(self, hidden_size:int, intermediate_size:int, max_position_embeddings:int, num_attention_heads:int, num_hidden_layers:int, type_vocab_size:int, vocab_size:int, attention_probs_dropout_prob:float, hidden_dropout_prob:float) -> None:

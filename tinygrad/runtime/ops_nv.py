@@ -338,7 +338,7 @@ class NVDevice(Compiled):
   fd_uvm: int = -1
   gpus_info = None
   signals_page:Any = None
-  signal_number: int = 32
+  signals_pool: List[Any] = []
   uvm_vaddr: int = 0x1000000000
   host_object_enumerator: int = 0x1000
   devices: List[NVDevice] = []
@@ -479,7 +479,9 @@ class NVDevice(Compiled):
     for dev in self.devices:
       uvm.enable_peer_access(self.fd_uvm, gpuUuidA=nv_gpu.struct_nv_uuid(uuid=self.gpu_uuid), gpuUuidB=nv_gpu.struct_nv_uuid(uuid=dev.gpu_uuid))
 
-    if NVDevice.signals_page is None: NVDevice.signals_page = self._gpu_system_alloc(0x10000, map_to_cpu=True)
+    if NVDevice.signals_page is None:
+      NVDevice.signals_page = self._gpu_system_alloc(0x10000, map_to_cpu=True)
+      NVDevice.signals_pool = [to_mv(self.signals_page.base + off, 16).cast("Q") for off in range(0, NVDevice.signals_page.length, 16)]
     else: self._gpu_map(NVDevice.signals_page)
 
     channel_params = nv_gpu.NV_CHANNEL_GROUP_ALLOCATION_PARAMETERS(engineType=nv_gpu.NV2080_ENGINE_TYPE_GRAPHICS)
@@ -506,8 +508,7 @@ class NVDevice(Compiled):
     rm_control(self.fd_ctl, nv_gpu.NVA06C_CTRL_CMD_GPFIFO_SCHEDULE, self.root, channel_group, en_fifo_params)
 
     self.timeline_value: int = 1
-    self.timeline_signal = NVDevice._get_signal(self.device_id * 2)
-    self._shadow_timeline_signal = NVDevice._get_signal(self.device_id * 2 + 1)
+    self.timeline_signal, self._shadow_timeline_signal = NVDevice._get_signal(), NVDevice._get_signal()
     self.time_event_st, self.time_event_en = NVDevice._get_signal(), NVDevice._get_signal()
 
     self.cmdq_page: nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS = self._gpu_alloc(0x200000, map_to_cpu=True, huge_page=True)
@@ -545,13 +546,8 @@ class NVDevice(Compiled):
   def _set_signal(self, sig, value): sig[0] = value
 
   @classmethod
-  def _get_signal(self, num=None, value=0) -> memoryview:
-    if num is None:
-      self.signal_number += 1
-      if self.signals_page and self.signal_number * 16 >= self.signals_page.length: self.signal_number = 32
-      num = self.signal_number
-    sig = to_mv(self.signals_page.base + num * 16, 16).cast("Q")
-    sig[0] = value
+  def _get_signal(self, value=0) -> memoryview:
+    self._set_signal(sig := self.signals_pool.pop(), value)
     return sig
 
   @classmethod

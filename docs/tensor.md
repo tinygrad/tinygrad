@@ -10,6 +10,37 @@
 ::: tinygrad.Tensor.dtype
 ::: tinygrad.Tensor.device
 
+## Creation (basic)
+
+::: tinygrad.Tensor.empty
+::: tinygrad.Tensor.zeros
+::: tinygrad.Tensor.ones
+::: tinygrad.Tensor.full
+::: tinygrad.Tensor.arange
+::: tinygrad.Tensor.eye
+::: tinygrad.Tensor.full_like
+::: tinygrad.Tensor.zeros_like
+::: tinygrad.Tensor.ones_like
+
+## Creation (random)
+
+::: tinygrad.Tensor.rand
+::: tinygrad.Tensor.randn
+::: tinygrad.Tensor.randint
+::: tinygrad.Tensor.normal
+::: tinygrad.Tensor.uniform
+::: tinygrad.Tensor.scaled_uniform
+::: tinygrad.Tensor.glorot_uniform
+::: tinygrad.Tensor.kaiming_uniform
+::: tinygrad.Tensor.kaiming_normal
+
+## Data Access
+
+::: tinygrad.Tensor.data
+::: tinygrad.Tensor.item
+::: tinygrad.Tensor.tolist
+::: tinygrad.Tensor.numpy
+
 ## tinygrad ops
 
 ::: tinygrad.Tensor.schedule_with_vars
@@ -26,35 +57,9 @@
 ::: tinygrad.Tensor.contiguous_backward
 ::: tinygrad.Tensor.backward
 
-## Creation (basic)
-
-::: tinygrad.Tensor.empty
-::: tinygrad.Tensor.zeros
-::: tinygrad.Tensor.ones
-::: tinygrad.Tensor.full
-::: tinygrad.Tensor.arange
-::: tinygrad.Tensor.eye
-
-## Creation (random)
-
-::: tinygrad.Tensor.rand
-::: tinygrad.Tensor.randn
-::: tinygrad.Tensor.normal
-::: tinygrad.Tensor.uniform
-::: tinygrad.Tensor.scaled_uniform
-::: tinygrad.Tensor.glorot_uniform
-::: tinygrad.Tensor.kaiming_uniform
-::: tinygrad.Tensor.kaiming_normal
-
-## Data Access
-
-::: tinygrad.Tensor.data
-::: tinygrad.Tensor.item
-::: tinygrad.Tensor.tolist
-::: tinygrad.Tensor.numpy
-
 ## Movement (low level)
 
+::: tinygrad.Tensor.view
 ::: tinygrad.Tensor.reshape
 ::: tinygrad.Tensor.expand
 ::: tinygrad.Tensor.permute
@@ -64,8 +69,6 @@
 
 ## Movement (high level)
 
-::: tinygrad.Tensor.__getitem__
-::: tinygrad.Tensor.slice
 ::: tinygrad.Tensor.gather
 ::: tinygrad.Tensor.cat
 ::: tinygrad.Tensor.stack
@@ -75,6 +78,7 @@
 ::: tinygrad.Tensor.squeeze
 ::: tinygrad.Tensor.unsqueeze
 ::: tinygrad.Tensor.pad2d
+::: tinygrad.Tensor.T
 ::: tinygrad.Tensor.transpose
 ::: tinygrad.Tensor.flatten
 ::: tinygrad.Tensor.unflatten
@@ -95,16 +99,16 @@
 
 ## Processing
 
+::: tinygrad.Tensor.avg_pool2d
+::: tinygrad.Tensor.max_pool2d
 ::: tinygrad.Tensor.conv2d
+::: tinygrad.Tensor.conv_transpose2d
 ::: tinygrad.Tensor.dot
 ::: tinygrad.Tensor.matmul
 ::: tinygrad.Tensor.einsum
 ::: tinygrad.Tensor.cumsum
 ::: tinygrad.Tensor.triu
 ::: tinygrad.Tensor.tril
-::: tinygrad.Tensor.avg_pool2d
-::: tinygrad.Tensor.max_pool2d
-::: tinygrad.Tensor.conv_transpose2d
 
 ## Unary Ops (math)
 
@@ -114,6 +118,11 @@
 ::: tinygrad.Tensor.log2
 ::: tinygrad.Tensor.exp
 ::: tinygrad.Tensor.exp2
+::: tinygrad.Tensor.sqrt
+::: tinygrad.Tensor.rsqrt
+::: tinygrad.Tensor.sin
+::: tinygrad.Tensor.cos
+::: tinygrad.Tensor.tan
 ::: tinygrad.Tensor.trunc
 ::: tinygrad.Tensor.ceil
 ::: tinygrad.Tensor.floor
@@ -156,6 +165,8 @@
 ::: tinygrad.Tensor.mul
 ::: tinygrad.Tensor.div
 ::: tinygrad.Tensor.xor
+::: tinygrad.Tensor.lshift
+::: tinygrad.Tensor.rshift
 ::: tinygrad.Tensor.pow
 ::: tinygrad.Tensor.maximum
 ::: tinygrad.Tensor.minimum
@@ -180,4 +191,3 @@
 ::: tinygrad.Tensor.bitcast
 ::: tinygrad.Tensor.float
 ::: tinygrad.Tensor.half
-

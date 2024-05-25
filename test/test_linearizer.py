@@ -5,6 +5,7 @@ from dataclasses import replace
 
 from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError
 from tinygrad.codegen.linearizer import Linearizer, UOp, UOps, expand_node, expand_idxs
+from tinygrad.codegen.uops import UOpGraph
 from tinygrad.device import Device, Buffer
 from tinygrad.ops import BinaryOps, BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, TernaryOps, ReduceOps, UnaryOps
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -15,7 +16,6 @@ from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner
 from tinygrad.helpers import prod, Context, getenv, CI
 from tinygrad.dtype import DType, dtypes
-from tinygrad.codegen.uops import UOpGraph
 
 def helper_realized_ast(r:Tensor):
   s = create_schedule([r.lazydata])
@@ -97,8 +97,9 @@ class TestLinearizer(unittest.TestCase):
     assert len(mutable_bufs) == len(stores) == 2
     assert [u.arg[0] for u in mutable_bufs] == [0, 1]
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   def test_end_local(self):
-    if not (opts:=Device[Device.DEFAULT].renderer).has_local or not opts.has_shared: self.skipTest("device does not support locals")
     load = MemBuffer(idx=1, dtype=dtypes.int, st=ShapeTracker.from_shape((32,)))
     store = MemBuffer(idx=0, dtype=dtypes.int, st=ShapeTracker.from_shape((1,)))
     ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, arg=load),), arg=(0,)),), arg=store),
@@ -114,9 +115,9 @@ class TestLinearizer(unittest.TestCase):
     lin = helper_linearizer_opt(out, wanna_output=[np.broadcast_to(a.numpy().reshape(2, 1), (2, 3)).sum()])[0]
     ranges = [i for i,u in enumerate(lin.uops) if u.uop is UOps.RANGE]
     if getenv("PTX"):
-      # RANGE -> 3xLOAD_INDEXING -> LOAD -> RANGE -> PHI
-      assert ranges[1] == ranges[0]+5
-      assert lin.uops[ranges[0]+4].uop is UOps.LOAD
+      # RANGE -> 2xLOAD_INDEXING -> LOAD -> RANGE -> PHI
+      assert ranges[1] == ranges[0]+4
+      assert lin.uops[ranges[0]+3].uop is UOps.LOAD
     else:
     # RANGE -> LOAD -> RANGE -> PHI
       assert ranges[1] == ranges[0]+2
@@ -128,9 +129,9 @@ class TestLinearizer(unittest.TestCase):
     lin = helper_linearizer_opt(out, wanna_output=[np.broadcast_to(np.broadcast_to(a.numpy().reshape(2, 1), (2, 3)), (2, 2, 3)).sum()])[0]
     ranges = [i for i,u in enumerate(lin.uops) if u.uop is UOps.RANGE]
     if getenv("PTX"):
-      # RANGE -> RANGE -> 3xLOAD_INDEXING -> LOAD -> RANGE -> PHI
-      assert ranges[2] == ranges[1]+5 == ranges[0]+6
-      assert lin.uops[ranges[1]+4].uop is UOps.LOAD
+      # RANGE -> RANGE -> 2xLOAD_INDEXING -> LOAD -> RANGE -> PHI
+      assert ranges[2] == ranges[1]+4 == ranges[0]+5
+      assert lin.uops[ranges[1]+3].uop is UOps.LOAD
     else:
     # RANGE -> RANGE -> LOAD -> RANGE -> PHI
       assert ranges[2] == ranges[1]+2 == ranges[0]+3
@@ -142,8 +143,8 @@ class TestLinearizer(unittest.TestCase):
     lin = helper_linearizer_opt(out, wanna_output=[24])[0]
     ranges = [i for i,u in enumerate(lin.uops) if u.uop is UOps.RANGE]
     if getenv("PTX"):
-      # RANGE -> CAST ridx -> 2xLOAD_INDEXING -> 4x ALU -> RANGE -> LOAD -> RANGE -> PHI
-      assert ranges[1] == ranges[0]+7
+      # RANGE -> CAST ridx -> LOAD_INDEXING -> 4x ALU -> RANGE -> LOAD -> RANGE -> PHI
+      assert ranges[1] == ranges[0]+6
       assert lin.uops[ranges[1]+11].uop is UOps.ENDRANGE
     else:
       # RANGE -> 4x ALU -> RANGE -> 9x ALU + 1x LOAD -> PHI
@@ -168,8 +169,8 @@ class TestLinearizer(unittest.TestCase):
     if getenv("PTX"):
     # LOAD -> RANGE -> 3xLOAD_INDEXING -> LOAD -> ALU -> RANGE -> PHI
       assert lin.uops[ranges[0]-2].uop is UOps.LOAD
-      assert ranges[1] == ranges[0]+6
-      assert [x.uop for x in lin.uops[ranges[0]+4:ranges[0]+6]] == [UOps.LOAD, UOps.ALU]
+      assert ranges[1] == ranges[0]+5
+      assert [x.uop for x in lin.uops[ranges[0]+3:ranges[0]+5]] == [UOps.LOAD, UOps.ALU]
     # LOAD -> RANGE -> LOAD -> ALU -> RANGE -> PHI
     else:
       assert lin.uops[ranges[0]-2].uop is UOps.LOAD
@@ -345,9 +346,8 @@ class TestLinearizer(unittest.TestCase):
     num_ops = len([uop for uop in k.uops if uop.uop is UOps.ALU])
     assert num_ops <= 1, "more alu uops than needed"
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_reduce_upcast(self):
-    if not Device[Device.DEFAULT].renderer.supports_float4:
-      self.skipTest("device does not support upcast")
     x, w = Tensor.randn((1,1,3)).realize(), Tensor.randn((1,1,2)).realize()
     r = Tensor.conv2d(x,w,padding=1).relu()
 
@@ -361,10 +361,10 @@ class TestLinearizer(unittest.TestCase):
     assert len(stores) == 1
     assert stores[0].vin[-1].dtype == dtypes.float.vec(4)
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_upcast_with_locals(self):
-    if not (opts:=Device[Device.DEFAULT].renderer).has_local or not opts.has_shared or not opts.supports_float4:
-      self.skipTest("device does not support upcasted reduce with locals")
-
     x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
     r = (x@y).relu()
     k = Linearizer(*create_schedule([r.lazydata])[-1].ast)
@@ -398,7 +398,7 @@ class TestLinearizer(unittest.TestCase):
 
   def test_zero_fold(self):
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
-    r = Tensor.stack([a, b])
+    r = Tensor.stack(a, b)
 
     k = Linearizer(*create_schedule([r.lazydata])[-1].ast)
     k.upcast()
@@ -438,16 +438,14 @@ class TestLinearizer(unittest.TestCase):
       d, w = Tensor.rand(4, 8, 8, 8, dtype=tensor_dtype), Tensor.rand(8, 8, 2, 2, dtype=tensor_dtype)
       helper_arg_acc_dtype(d.conv2d(w, acc_dtype=acc_dtype), expected_dtype)
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores(self):
-    if not Device[Device.DEFAULT].renderer.tensor_cores:
-      self.skipTest("device doesn't have tensor cores")
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
       if getenv("EMULATE_CUDA") and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
       helper_tc_allclose(tc.dims[0], tc.dims[1], tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_padded(self):
-    if not Device[Device.DEFAULT].renderer.tensor_cores:
-      self.skipTest("device doesn't have tensor cores")
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
       if getenv("EMULATE_CUDA") and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
       pad = 1
@@ -471,11 +469,10 @@ class TestLinearizer(unittest.TestCase):
       helper_tc_allclose(tc.dims[0]+pad, tc.dims[1]+pad, tc.dims[2]+pad, tc.dtype_in, tc.dtype_out, tc_opt=2)
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI is really slow here")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_multi_reduce(self):
-    if not Device[Device.DEFAULT].renderer.tensor_cores:
-      self.skipTest("device doesn't have tensor cores")
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if getenv("EMULATE_CUDA") and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
+      if tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16: continue
       # this will be a M=G16, N=G32, M=G16, M=G16, K=R16, K=R16, K=R16 with 9 choices of TC MNK axes
       golden_result = None
       for axis in range(9):
@@ -505,7 +502,6 @@ class TestLinearizer(unittest.TestCase):
       assert len(tc_actions) == 9, f"get_linearizer_actions should contain 9 possible TC actions, only got {len(tc_actions)}"
 
   @unittest.skipIf(Device.DEFAULT != "METAL", "these opts are only valid on METAL")
-  @unittest.skip("UOps toposort is wrong, CAST child should render outside RANGE")
   def test_tensor_cores_upcast_unroll(self):
     ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 4096), strides=(0, 4096, 0, 1), offset=0, mask=None, contiguous=False),)))), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 4096), strides=(0, 0, 4096, 1), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=dtypes.float),), arg=(3,)),), arg=dtypes.half), LazyOp(op=BinaryOps.DIV, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=1.0, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 1), strides=(0, 0, 0, 0), offset=0, mask=None, contiguous=False),)))), LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=1.0, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 1), strides=(0, 0, 0, 0), offset=0, mask=None, contiguous=False),)))), LazyOp(op=UnaryOps.EXP2, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 4096), strides=(0, 4096, 0, 1), offset=0, mask=None, contiguous=False),)))), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 4096), strides=(0, 0, 4096, 1), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=dtypes.float),), arg=(3,)),), arg=dtypes.half), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=-1.4426950408889634, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 1), strides=(0, 0, 0, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=None)), arg=None)), arg=None)), arg=None), LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=3, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 1), strides=(0, 11008, 1, 0), offset=0, mask=None, contiguous=True),)))),), arg=dtypes.half)), arg=None),), arg=MemBuffer(idx=0, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 3, 11008, 1), strides=(0, 11008, 1, 0), offset=0, mask=None, contiguous=True),)))), # noqa: E501
     a = Tensor.empty(1, 3, 11008, 4096).realize()
@@ -532,8 +528,8 @@ class TestLinearizer(unittest.TestCase):
            Opt(op=OptOps.UPCAST, axis=5, amt=0)]
     helper_linearizer_ast(ast, [a, b], opts=[opt])
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_unroll_phi(self):
-    if not Device[Device.DEFAULT].renderer.tensor_cores: self.skipTest("device doesn't have tensor cores")
     tc = Device[Device.DEFAULT].renderer.tensor_cores[0]
     x, y = Tensor.rand(128, 128, dtype=tc.dtype_in), Tensor.rand(128, 128, dtype=tc.dtype_in)
     r = x.matmul(y, acc_dtype=tc.dtype_out)
@@ -542,8 +538,8 @@ class TestLinearizer(unittest.TestCase):
       if u.uop is UOps.WMMA:
         assert u.vin[-1].vin[0].uop != UOps.PHI
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_unroll_casted_phi(self):
-    if not Device[Device.DEFAULT].renderer.tensor_cores: self.skipTest("device doesn't have tensor cores")
     tc = [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in != tc.dtype_out][0]
     x, y = Tensor.rand(128, 128, dtype=tc.dtype_in), Tensor.rand(128, 128, dtype=tc.dtype_in)
     r = x.matmul(y, acc_dtype=tc.dtype_out)
@@ -553,9 +549,9 @@ class TestLinearizer(unittest.TestCase):
         assert u.vin[-1].dtype == dtypes.float.vec(prod(tc.thread_local_sizes[2]))
         assert u.vin[-1].vin[0].uop != UOps.PHI
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_unroll_casted_phi_with_children(self):
     # all PHI children are outside the loop
-    if not Device[Device.DEFAULT].renderer.tensor_cores: self.skipTest("device doesn't have tensor cores")
     tc = [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in != tc.dtype_out][0]
     x, y = Tensor.rand(128, 128, dtype=tc.dtype_in), Tensor.rand(128, 128, dtype=tc.dtype_in)
     r = x.matmul(y, acc_dtype=tc.dtype_out).relu()
@@ -565,8 +561,8 @@ class TestLinearizer(unittest.TestCase):
         assert u.vin[-1].dtype == dtypes.float.vec(prod(tc.thread_local_sizes[2]))
         assert u.vin[-1].vin[0].uop != UOps.PHI
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_simple_unroll_no_between_phi_dependencies(self):
-    if not Device[Device.DEFAULT].renderer.supports_float4: self.skipTest("needs float4")
     x, y = Tensor.rand(128, 128), Tensor.rand(128, 128)
     r = (x@y).relu()
     k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 4)]])[-1]
@@ -643,10 +639,10 @@ class TestLinearizer(unittest.TestCase):
       k = Linearizer(*sched[0].ast)
       k.hand_coded_optimizations()
       uops = list(k.linearize().uops)
-      # ignore kernel optimized IF/LOOP statements for now
+      # ignore kernel optimized IF statements for now
       if if_op:=next((u for u in uops if u.uop is UOps.IF), None):
         uops = uops[:uops.index(if_op)]
-      assert len(set([u.uop for u in uops if u.uop in {UOps.RANGE, UOps.SPECIAL}])) == 1, "has either specials or loops, not both"
+      assert len(set([u.uop for u in uops if u.uop in {UOps.RANGE, UOps.SPECIAL}])) == 1, "has either specials or ranges, not both"
       assert len([u for u in uops if u.uop is UOps.PHI]) == 0, "PHI should have been simplified"
       # TODO: once uops track min/max this will be fixed
       #assert len([u for u in uops if u.arg is BinaryOps.MAX]) <= max_ops, "no unnecessary MAX ops"
@@ -657,7 +653,7 @@ class TestLinearizer(unittest.TestCase):
     helper(Tensor.arange(256), max_ops=2)
     helper(Tensor.arange(255), max_ops=2)
 
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "device doesn't support float4")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_grouped_store_phis(self):
     """
     float4 acc0 = float4(0.0,0.0,0.0,0.0);
@@ -676,7 +672,7 @@ class TestLinearizer(unittest.TestCase):
     for val in store_vals:
       assert val.dtype == dtypes.float.vec(4) and val.uop is not UOps.CAST
 
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "device doesn't support float4")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_grouped_store_values(self):
     x = Tensor.randn((4,3,6,6)).realize()
     out = x.flip((0,1)).contiguous()
@@ -684,10 +680,10 @@ class TestLinearizer(unittest.TestCase):
     store_val = [u.vin[-1] for u in k.uops if u.uop is UOps.STORE][0]
     assert store_val.dtype == dtypes.float.vec(4) and store_val.uop is not UOps.CAST
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_grouped_store_locals_and_globals(self):
-    if not Device[Device.DEFAULT].renderer.has_local or not Device[Device.DEFAULT].renderer.has_shared or \
-       not Device[Device.DEFAULT].renderer.supports_float4: self.skipTest("needs locals, shared, and float4")
-
     x, y = Tensor.rand(128, 128), Tensor.rand(128, 128)
     out = x@y
     opt = [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUPTOP, 0, 8),
@@ -704,10 +700,10 @@ class TestLinearizer(unittest.TestCase):
     assert barrier.vin == tuple(local_stores)
     assert len([u for u in k.uops if u.uop is UOps.IF and u.vin[-1] == barrier]) == 1
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_grouped_store_local_only(self):
-    if not Device[Device.DEFAULT].renderer.has_local or not Device[Device.DEFAULT].renderer.has_shared or \
-       not Device[Device.DEFAULT].renderer.supports_float4: self.skipTest("needs locals, shared, and float4")
-
     x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
     r = (x@y).relu()
     k = helper_linearizer_opt(r)[-1]
@@ -720,9 +716,8 @@ class TestLinearizer(unittest.TestCase):
     # the global store doesn't change
     assert stores[1].vin[-1].dtype == dtypes.float
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_skip_unmatching_upcasts(self):
-    if not Device[Device.DEFAULT].renderer.has_local or not Device[Device.DEFAULT].renderer.supports_float4:
-      self.skipTest("needs locals and float4")
     ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(240, 40, 1, 1), strides=(1, 240, 0, 0), offset=0, mask=None, contiguous=False),)))),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(240, 40, 1, 1), strides=(40, 1, 0, 0), offset=0, mask=None, contiguous=True),)))), # noqa: E501
     opt = [
         Opt(op=OptOps.UPCAST, axis=1, amt=4), Opt(op=OptOps.LOCAL, axis=0, amt=16),
@@ -732,9 +727,9 @@ class TestLinearizer(unittest.TestCase):
     out = [u for u in k.uops if u.uop is UOps.STORE][0]
     assert out.vin[-1].uop is UOps.CAST and out.vin[-1].dtype == dtypes.float.vec(4)
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_skip_unmatching_upcasts_with_gep(self):
-    if not Device[Device.DEFAULT].renderer.has_local or not Device[Device.DEFAULT].renderer.supports_float4:
-      self.skipTest("Needs locals and float4")
     ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(8, 32, 1, 1), strides=(1, 8, 0, 0), offset=0, mask=None, contiguous=False),)))),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(8, 32, 1, 1), strides=(32, 1, 0, 0), offset=0, mask=None, contiguous=True),)))), # noqa: E501
     opt = [Opt(op=OptOps.LOCAL, axis=1, amt=4), Opt(op=OptOps.UPCAST, axis=2, amt=2), Opt(op=OptOps.LOCAL, axis=1, amt=8),
             Opt(op=OptOps.UPCAST, axis=1, amt=0), Opt(op=OptOps.UPCAST, axis=1, amt=4), Opt(op=OptOps.LOCAL, axis=0, amt=8),
@@ -899,9 +894,8 @@ class TestHandCodedOpts(unittest.TestCase):
     # float4/other hcopt shouldn't upcast last axis, since we already have 7 upcast, and the last axis is not very contiguous
     assert k.upcasted == 1 and k.full_shape[-1] == 7
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Failing because of custom kernel splitting to circumvent the 8 buffer limit")
   def test_masked_upcast_wino(self):
-    monster = Tensor.stack([Tensor.stack([Tensor.rand(16) for _ in range(6)]) for _ in range(6)])
+    monster = Tensor.stack(*[Tensor.stack(*[Tensor.rand(16) for _ in range(6)]) for _ in range(6)])
 
     s = create_schedule([monster.lazydata])[-1]
     k = Linearizer(*s.ast)
@@ -951,9 +945,8 @@ class TestHandCodedOpts(unittest.TestCase):
     # check that we don't do too many upcasts
     assert prod(k.full_shape[k.shape_len-k.upcasted:k.shape_len]) <= 49
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_matvec(self):
-    if not Device[Device.DEFAULT].renderer.has_local:
-      self.skipTest("Only devices with locals")
     N = 128
     a = Tensor.rand(1, N).realize()
     b = Tensor.rand(N, N).realize()
@@ -1024,10 +1017,9 @@ def _helper_linearizer_opt_ast(realized_ast:Tuple[LazyOp, ...], real_bufs:List[B
   return lins
 
 class TestKernelOpts(unittest.TestCase):
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   def test_local_and_grouped_reduce(self):
-    if not Device[Device.DEFAULT].renderer.has_local or not Device[Device.DEFAULT].renderer.has_shared:
-      self.skipTest("needs with locals and shared")
-
     N = 128
     Tensor.manual_seed(1882)
     a = Tensor.rand(4, 4, N, N)
@@ -1070,10 +1062,9 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.UPCAST, 0, 4)], # Checking how it works with upcasts
     ])
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   def test_matmul(self):
-    if not Device[Device.DEFAULT].renderer.has_local or not Device[Device.DEFAULT].renderer.has_shared:
-      self.skipTest("needs locals and shared")
-
     N = 128
     Tensor.manual_seed(1552)
     a = Tensor.rand(N, N)
@@ -1100,10 +1091,9 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 8)],
     ])
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   def test_double_reduce(self):
-    if not Device[Device.DEFAULT].renderer.has_local or not Device[Device.DEFAULT].renderer.has_shared:
-      self.skipTest("needs locals and shared")
-
     N = 128
     Tensor.manual_seed(1552)
     a = Tensor.rand(8, N, 8, N)
@@ -1127,10 +1117,8 @@ class TestKernelOpts(unittest.TestCase):
        Opt(OptOps.UPCAST, 0, 2)], # No globals
     ])
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_invalid_tensor_core_extra_opts(self):
-    if not Device[Device.DEFAULT].renderer.tensor_cores:
-      self.skipTest("device doesn't have tensor cores")
-
     N = 128
     Tensor.manual_seed(1552)
     a = Tensor.rand(N, N)
@@ -1146,19 +1134,15 @@ class TestKernelOpts(unittest.TestCase):
       with self.assertRaises(AssertionError):
         assert k.apply_tensor_cores(use_tensor_cores=1, extra_opts=x), "no valid tensor core" # for METAL in runners
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_buf_index_not_found_tensor_core(self):
-    if not Device[Device.DEFAULT].renderer.tensor_cores:
-      self.skipTest("device doesn't have tensor cores")
-
     ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BinaryOps.CMPEQ, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1243, 256), strides=(0, 1), offset=0, mask=None, contiguous=False),)))), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1243, 256), strides=(1, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=dtypes.float), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=3, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1243, 256), strides=(1, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=(0,)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 256), strides=(0, 1), offset=0, mask=None, contiguous=True),))))  # noqa: E501
     k = Linearizer(ast, opts=Device[Device.DEFAULT].renderer)
     with self.assertRaises(KernelOptError):
       k.apply_opt(Opt(OptOps.TC, 0, 1))
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_core_opts(self):
-    if not Device[Device.DEFAULT].renderer.tensor_cores:
-      self.skipTest("device doesn't have tensor cores")
-
     N = 128
     Tensor.manual_seed(1552)
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
@@ -1289,10 +1273,9 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],
     ])
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   def test_color_shapes_with_local(self):
-    if not Device[Device.DEFAULT].renderer.has_local or not Device[Device.DEFAULT].renderer.has_shared:
-      self.skipTest("needs locals and shared")
-
     N = 32
     Tensor.manual_seed(1552)
     a = Tensor.rand(N, N)
