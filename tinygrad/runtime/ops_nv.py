@@ -148,6 +148,7 @@ class HWComputeQueue(HWQueue):
       prg.qmd.release0_enable = 1
       prg.qmd.release0_payload_lower = signal_value & 0xffffffff
       prg.qmd.release0_payload_upper = signal_value >> 32
+    else: prg.qmd.release0_enable = 0
 
     ctypes.memmove(qmd_addr:=(kernargs + round_up(prg.constbuf_0_size, 1 << 8)), ctypes.addressof(prg.qmd), 0x40 * 4)
 
@@ -175,6 +176,7 @@ class HWComputeQueue(HWQueue):
       prg.qmd.release0_enable = 1
       prg.qmd.release0_payload_lower = signal_value & 0xffffffff
       prg.qmd.release0_payload_upper = signal_value >> 32
+    else: prg.qmd.release0_enable = 0
 
     ctypes.memmove(qmd_addr:=(kernargs + round_up(prg.constbuf_0_size, 1 << 8)), ctypes.addressof(prg.qmd), 0x40 * 4)
     self.ptr_to_qmd[exec_ptr].dependent_qmd0_pointer = qmd_addr >> 8
