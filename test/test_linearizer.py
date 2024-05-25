@@ -264,6 +264,18 @@ class TestLinearizer(unittest.TestCase):
     x = Tensor.randn(2,7).softmax().realize()
     helper_linearizer_ast(ast, [x], wanna_output=[(x.numpy() - x.numpy().sum(axis=1, keepdims=True)).sum(axis=1)])
 
+  def test_multireduce_unroll(self):
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.SUB, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float32, st=ShapeTracker(views=(View(shape=(2, 12), strides=(12, 1), offset=0, mask=None, contiguous=True),)))), LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float32, st=ShapeTracker(views=(View(shape=(2, 12), strides=(12, 1), offset=0, mask=None, contiguous=True),),))),), arg=(1,)),)),), arg=(1,)),), arg=MemBuffer(idx=0, dtype=dtypes.float32, st=ShapeTracker(views=(View(shape=(2, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),)))), # noqa: E501
+    opts = [
+      [Opt(op=OptOps.UNROLL, axis=0, amt=12)],
+      [Opt(op=OptOps.UNROLL, axis=0, amt=6)],
+      [Opt(op=OptOps.UNROLL, axis=0, amt=4)],
+      [Opt(op=OptOps.UNROLL, axis=0, amt=3)],
+      [Opt(op=OptOps.UNROLL, axis=0, amt=2)]
+    ]
+    x = Tensor.randn(2,12).softmax().realize()
+    helper_linearizer_ast(ast, [x], opts=opts, wanna_output=[(x.numpy() - x.numpy().sum(axis=1, keepdims=True)).sum(axis=1)])
+
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI is really slow here")
   def test_multireduce_loop_scope(self):
     # when rendering multiple reducops, any arithmetic on the result of one reduceop will be rendered within the loop of the next
