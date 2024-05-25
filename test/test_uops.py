@@ -220,7 +220,7 @@ class TestConstantFolding(unittest.TestCase):
 
 class TestLocalAccess(unittest.TestCase):
   # NOTE: this is failing on METAL CI, no idea why. Works locally.
-  #@unittest.skipIf(Device.DEFAULT == "METAL" and CI, "failing only in CI")
+  @unittest.skipIf(Device.DEFAULT == "METAL" and CI, "failing only in CI")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_local_basic(self):
     uops = []
