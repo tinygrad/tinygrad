@@ -1753,6 +1753,7 @@ class Tensor:
     """
     Returns the lower triangular part of the tensor, the other elements are set to 0.
     """
+    return Tensor._tri(self.shape[-2], self.shape[-1], k=k+1, device=self.device).where(0, self)
 
   # ***** unary ops *****
 
