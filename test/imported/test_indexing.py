@@ -131,13 +131,13 @@ class TestIndexing(unittest.TestCase):
 
     # indexing with step
     reference = consec((10, 10, 10))
-    numpy_testing_assert_equal_helper(reference[1:5:2], Tensor.stack([reference[1], reference[3]], 0))
-    numpy_testing_assert_equal_helper(reference[1:6:2], Tensor.stack([reference[1], reference[3], reference[5]], 0))
-    numpy_testing_assert_equal_helper(reference[1:9:4], Tensor.stack([reference[1], reference[5]], 0))
-    numpy_testing_assert_equal_helper(reference[2:4, 1:5:2], Tensor.stack([reference[2:4, 1], reference[2:4, 3]], 1))
-    numpy_testing_assert_equal_helper(reference[3, 1:6:2], Tensor.stack([reference[3, 1], reference[3, 3], reference[3, 5]], 0))
-    numpy_testing_assert_equal_helper(reference[None, 2, 1:9:4], Tensor.stack([reference[2, 1], reference[2, 5]], 0).unsqueeze(0))
-    numpy_testing_assert_equal_helper(reference[:, 2, 1:6:2], Tensor.stack([reference[:, 2, 1], reference[:, 2, 3], reference[:, 2, 5]], 1))
+    numpy_testing_assert_equal_helper(reference[1:5:2], Tensor.stack(reference[1], reference[3], dim=0))
+    numpy_testing_assert_equal_helper(reference[1:6:2], Tensor.stack(reference[1], reference[3], reference[5], dim=0))
+    numpy_testing_assert_equal_helper(reference[1:9:4], Tensor.stack(reference[1], reference[5], dim=0))
+    numpy_testing_assert_equal_helper(reference[2:4, 1:5:2], Tensor.stack(reference[2:4, 1], reference[2:4, 3], dim=1))
+    numpy_testing_assert_equal_helper(reference[3, 1:6:2], Tensor.stack(reference[3, 1], reference[3, 3], reference[3, 5], dim=0))
+    numpy_testing_assert_equal_helper(reference[None, 2, 1:9:4], Tensor.stack(reference[2, 1], reference[2, 5], dim=0).unsqueeze(0))
+    numpy_testing_assert_equal_helper(reference[:, 2, 1:6:2], Tensor.stack(reference[:, 2, 1], reference[:, 2, 3], reference[:, 2, 5], dim=1))
 
     lst = [list(range(i, i+10)) for i in range(0, 100, 10)]
     tensor = Tensor(lst)
@@ -1251,7 +1251,7 @@ class TestIndexing(unittest.TestCase):
 
   def test_take_along_dim(self):
     def _test_against_numpy(t: Tensor, indices: Tensor, dim):
-      actual = t.gather(indices, dim=dim)
+      actual = t.gather(dim, indices)
       t_np = t.numpy()
       indices_np = indices.numpy()
       expected = np.take_along_axis(t_np, indices_np, axis=dim)
@@ -1295,24 +1295,24 @@ class TestIndexing(unittest.TestCase):
 
       # dim of `t` and `indices` does not match
       with self.assertRaises(RuntimeError, "input and indices should have the same number of dimensions"):
-        t.gather(indices[0], dim=0)
+        t.gather(0, indices[0])
 
       # invalid `indices` dtype
       with self.assertRaises(RuntimeError):
-        t.gather(indices.cast(dtypes.bool), dim=0)
+        t.gather(0, indices.cast(dtypes.bool))
 
       with self.assertRaises(RuntimeError):
-        t.gather(indices.cast(dtypes.float32), dim=0)
+        t.gather(0, indices.cast(dtypes.float32))
 
       with self.assertRaises(RuntimeError):
-        t.gather(indices.cast(dtypes.int32), dim=0)
+        t.gather(0, indices.cast(dtypes.int32))
 
       # invalid axis
       with self.assertRaises(IndexError):
-        t.gather(indices, dim=-7)
+        t.gather(-7, indices)
 
       with self.assertRaises(IndexError):
-        t.gather(t, indices, dim=7)
+        t.gather(7, indices)
   '''
 
 class TestNumpy(unittest.TestCase):

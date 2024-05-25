@@ -85,7 +85,7 @@ def selective_scan_ref(
     if i == u.shape[2] - 1:
       last_state = x
     ys.append(y)
-  y = Tensor.stack(ys, dim=2)  # (batch dim L)
+  y = Tensor.stack(*ys, dim=2)  # (batch dim L)
   out = y if D is None else y + u * D.reshape((-1, 1))
   if z is not None:
     out = out * z.silu()

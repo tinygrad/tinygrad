@@ -443,8 +443,8 @@ class TestTypeSpec(unittest.TestCase):
   def test_gather_returns_same_dtype(self, data_dtype, indices_dtype):
     X_data = Tensor([[1, 0], [0, 1]], dtype=data_dtype)
     indices = Tensor([[0, 0], [1, 0]], dtype=indices_dtype)
-    assert X_data.gather(indices, 0).dtype == X_data.dtype
-    assert X_data.gather(indices, 1).dtype == X_data.dtype
+    assert X_data.gather(0, indices).dtype == X_data.dtype
+    assert X_data.gather(1, indices).dtype == X_data.dtype
 
 class TestTypePromotion(unittest.TestCase):
   @given(strat.sampled_from(core_dtypes))
