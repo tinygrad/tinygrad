@@ -744,7 +744,8 @@ class Exp(Function):
             if x is 0, return 1
             if x != 0, return x
         """
-        return x.e(BinaryOps.ADD, self._eq(x, x.const(0)))
+        # return x.e(BinaryOps.ADD, self._eq(x, x.const(0)))
+        return x.e(BinaryOps.CMPEQ, x.const(0)).e(TernaryOps.WHERE, x.const(1), x)
         
 
     def _exp_lowprec(self, x: LazyBuffer) -> LazyBuffer:
@@ -772,33 +773,17 @@ class Exp(Function):
 
         d50, m50 = self._divmod(x, x.const(50))
         res = self._revnorm(x.const(math.exp(50)).e(BinaryOps.MUL, d50))
-        # print("RES after d50: ")
-        # print(__import__('tinygrad').Tensor(res).numpy())
         d25, m25 = self._divmod(m50, x.const(25))
         res = res.e(BinaryOps.MUL, self._revnorm(x.const(math.exp(25)).e(BinaryOps.MUL, d25)))
-        # print("RES after d25: ")
-        # print(__import__('tinygrad').Tensor(res).numpy())
         d12, m12 = self._divmod(m25, x.const(12))
         res = res.e(BinaryOps.MUL, self._revnorm(x.const(math.exp(12)).e(BinaryOps.MUL, d12)))
-        # print("RES after d12: ")
-        # print(__import__('tinygrad').Tensor(res).numpy())
         d6, m6 = self._divmod(m12, x.const(6))
         res = res.e(BinaryOps.MUL, self._revnorm(x.const(math.exp(6)).e(BinaryOps.MUL, d6)))
-        # print("RES after d6: ")
-        # print(__import__('tinygrad').Tensor(res).numpy())
         d3, m3 = self._divmod(m6, x.const(3))
         res = res.e(BinaryOps.MUL, self._revnorm(x.const(math.exp(3)).e(BinaryOps.MUL, d3)))
 
-        # d1_5, m1_5 = self._divmod(m3, x.const(1.5))
-        # res = res.e(BinaryOps.MUL, self._revnorm(x.const(math.exp(1.5)).e(BinaryOps.MUL, d1_5)))
-        # print("RES after d3: ")
-        # print(__import__('tinygrad').Tensor(res).numpy())
         rempade = self._pade(m3)
-        # print("Pade: ")
-        # print(__import__('tinygrad').Tensor(rempade).numpy())
         res = res.e(BinaryOps.MUL, rempade)
-        # print("RES after pade: ")
-        # print(__import__('tinygrad').Tensor(res).numpy())
 
         res = lt0.e(TernaryOps.WHERE, res.const(1).e(BinaryOps.DIV, res), res)
         return res
