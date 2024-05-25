@@ -744,8 +744,8 @@ class Exp(Function):
             if x is 0, return 1
             if x != 0, return x
         """
-        # return x.e(BinaryOps.ADD, self._eq(x, x.const(0)))
-        return x.e(BinaryOps.CMPEQ, x.const(0)).e(TernaryOps.WHERE, x.const(1), x)
+        return x.e(BinaryOps.ADD, self._eq(x, x.const(0)))
+        # return x.e(BinaryOps.CMPEQ, x.const(0)).e(TernaryOps.WHERE, x.const(1), x)
         
 
     def _exp_lowprec(self, x: LazyBuffer) -> LazyBuffer:
