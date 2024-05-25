@@ -220,7 +220,8 @@ class TestConstantFolding(unittest.TestCase):
 
 class TestLocalAccess(unittest.TestCase):
   # NOTE: this is failing on METAL CI, no idea why. Works locally.
-  @unittest.skipIf(Device.DEFAULT in {"LLVM"} or (Device.DEFAULT == "METAL" and CI), "device doesn't support local memory")
+  @unittest.skipIf(Device.DEFAULT == "METAL" and CI, "device doesn't support local memory")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_local_basic(self):
     uops = []
     smem = uop(uops, UOps.DEFINE_LOCAL, PtrDType(dtypes.float32), (), ('smem', 16))
@@ -229,7 +230,7 @@ class TestLocalAccess(unittest.TestCase):
     sres = uop(uops, UOps.LOAD, dtypes.float32, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 0), barr))
     self.assertEqual(_test_uops_result(dtypes.float32, uops, sres), 42)
 
-  @unittest.skipIf(Device.DEFAULT in {"LLVM"}, "device doesn't support local memory")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_local_indirect(self):
     uops = []
     smem = uop(uops, UOps.DEFINE_LOCAL, PtrDType(dtypes.int32), (), ('smem', 16))
