@@ -840,7 +840,7 @@ class Exp(Function):
         initial_x = x
         pinf_t = x.const(88.722)
         ninf_t = x.const(-103.97539753975397)
-        # x = x.e(BinaryOps.CMPLT, ninf_t).e(TernaryOps.WHERE, x.const(0), x)
+        x = x.e(BinaryOps.CMPLT, ninf_t).e(TernaryOps.WHERE, x.const(0), x)
         # x = self.zero_if_minus_inf(x)
 
 
