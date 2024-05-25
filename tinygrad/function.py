@@ -696,11 +696,11 @@ class Log(Function):
 
 class Exp(Function):
 
-    def _mod(self, x: LazyBuffer, y: LazyBuffer) -> LazyBuffer:
-        return x.e(
-            BinaryOps.SUB,
-            x.e(BinaryOps.DIV, y).cast(dtypes.int64).cast(x.dtype).e(BinaryOps.MUL, y),
-        )
+    # def _mod(self, x: LazyBuffer, y: LazyBuffer) -> LazyBuffer:
+    #     return x.e(
+    #         BinaryOps.SUB,
+    #         x.e(BinaryOps.DIV, y).cast(dtypes.int64).cast(x.dtype).e(BinaryOps.MUL, y),
+    #     )
 
     def _abs(self, x: LazyBuffer) -> LazyBuffer:
         return x.e(BinaryOps.CMPLT, x.const(0)).e(
@@ -724,10 +724,8 @@ class Exp(Function):
         Qterms = []
         for p, q in zip(PC, QC):
             Pterms.append(x.e(BinaryOps.MUL, x.const(p)))
-            # Pterms.insert(0, x.e(BinaryOps.MUL, x.const(p)))
             
             Qterms.append(x.e(BinaryOps.MUL, x.const(q)))
-            # Qterms.insert(0, x.e(BinaryOps.MUL, x.const(q)))
             x = x.e(BinaryOps.MUL, ox)
 
         for p, q in zip(Pterms[::-1], Qterms[::-1]):
@@ -761,8 +759,8 @@ class Exp(Function):
         )
         return res
 
-    def _divmod(self, x: LazyBuffer, y: LazyBuffer) -> LazyBuffer:
-            divres = x.e(BinaryOps.DIV, y).cast(dtypes.uint64).cast(x.dtype)
+    def _divmod(self, x: LazyBuffer, o_y: LazyBuffer, y: LazyBuffer) -> LazyBuffer:
+            divres = x.e(BinaryOps.MUL, o_y).cast(dtypes.uint64).cast(x.dtype)
             modres = x.e(BinaryOps.SUB, divres.e(BinaryOps.MUL, y))
             return divres, modres
 
@@ -771,23 +769,23 @@ class Exp(Function):
         x = self._abs_w_lt(x, lt0)
 
 
-        d50, m50 = self._divmod(x, x.const(50))
+        d50, m50 = self._divmod(x, x.const(1/50), x.const(50))
         # res = self._revnorm(x.const(math.exp(50)).e(BinaryOps.MUL, d50))
         res = d50.e(BinaryOps.CMPEQ, d50.const(0)) \
         .e(TernaryOps.WHERE, x.const(1), x.const(math.exp(50)).e(BinaryOps.MUL, d50))
-        d25, m25 = self._divmod(m50, x.const(25))
+        d25, m25 = self._divmod(m50, x.const(1/25), x.const(25))
         # res = res.e(BinaryOps.MUL, self._revnorm(x.const(math.exp(25)).e(BinaryOps.MUL, d25)))
         res = res.e(BinaryOps.MUL, d25.e(BinaryOps.CMPEQ, d25.const(0)) \
         .e(TernaryOps.WHERE, x.const(1), x.const(math.exp(25)).e(BinaryOps.MUL, d25)))
-        d12, m12 = self._divmod(m25, x.const(12))
+        d12, m12 = self._divmod(m25, x.const(1/12), x.const(12))
         # res = res.e(BinaryOps.MUL, self._revnorm(x.const(math.exp(12)).e(BinaryOps.MUL, d12)))
         res = res.e(BinaryOps.MUL, d12.e(BinaryOps.CMPEQ, d12.const(0)) \
         .e(TernaryOps.WHERE, x.const(1), x.const(math.exp(12)).e(BinaryOps.MUL, d12)))
-        d6, m6 = self._divmod(m12, x.const(6))
+        d6, m6 = self._divmod(m12, x.const(1/6), x.const(6))
         # res = res.e(BinaryOps.MUL, self._revnorm(x.const(math.exp(6)).e(BinaryOps.MUL, d6)))
         res = res.e(BinaryOps.MUL, d6.e(BinaryOps.CMPEQ, d6.const(0)) \
         .e(TernaryOps.WHERE, x.const(1), x.const(math.exp(6)).e(BinaryOps.MUL, d6)))
-        d3, m3 = self._divmod(m6, x.const(3))
+        d3, m3 = self._divmod(m6, x.const(1/3), x.const(3))
         # res = res.e(BinaryOps.MUL, self._revnorm(x.const(math.exp(3)).e(BinaryOps.MUL, d3)))
         res = res.e(BinaryOps.MUL, d3.e(BinaryOps.CMPEQ, d3.const(0)) \
         .e(TernaryOps.WHERE, x.const(1), x.const(math.exp(3)).e(BinaryOps.MUL, d3)))
