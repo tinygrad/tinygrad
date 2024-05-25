@@ -828,9 +828,9 @@ class Exp(Function):
             TernaryOps.WHERE, computed, computed.const(float("inf"))
         )
         computed = isnotnan.e(TernaryOps.WHERE, computed, x.const(float("nan")))
-        # computed = initial_x.e(BinaryOps.CMPLT, ninf_t).e(
-        #     TernaryOps.WHERE, computed.const(0), computed
-        # )
+        computed = initial_x.e(BinaryOps.CMPLT, ninf_t).e(
+            TernaryOps.WHERE, computed.const(0), computed
+        )
 
         # print("COMPUTED: ")
         # print(__import__('tinygrad').Tensor(computed).numpy()[0])
