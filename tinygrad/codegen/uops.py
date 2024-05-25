@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Iterator, Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable
+from typing import Iterator, Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable, cast
 import functools, itertools, heapq
 from collections import defaultdict
 from enum import Enum, auto
@@ -62,6 +62,7 @@ def uop_alu_resolve(u:UOp) -> sint:
   elif u.uop is UOps.DEFINE_VAR: return u.arg
   elif u.uop is UOps.SPECIAL: return u.arg[2]-1
   elif u.uop is UOps.ALU and u.arg is BinaryOps.MUL: return uop_alu_resolve(u.vin[0]) * uop_alu_resolve(u.vin[1])
+  elif u.uop is UOps.ALU and u.arg is BinaryOps.SHL: return uop_alu_resolve(u.vin[0]) * (2**cast(int, uop_alu_resolve(u.vin[1])))
   elif u.uop is UOps.ALU and u.arg is BinaryOps.ADD: return uop_alu_resolve(u.vin[0]) + uop_alu_resolve(u.vin[1])
   else: raise RuntimeError(f"ALU resolve fail @ {u.uop}")
 
@@ -73,7 +74,9 @@ def _match(uop:UOp, pattern:Dict[str, Any], store:Dict[str, UOp]) -> bool:
       if v in store and store[v] != uop: return False
       store[v] = uop
     elif k == "arg":
-      if uop.arg != v: return False
+      if isinstance(v, set):
+        if uop.arg not in v: return False
+      elif uop.arg != v: return False
     elif k == "dtype":
       if isinstance(v, set):
         if uop.dtype not in v: return False
