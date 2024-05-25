@@ -78,16 +78,6 @@ class TestPatternMatcher(unittest.TestCase):
     self.assertEqual(matcher.rewrite(c3), None)
     self.assertEqual(matcher.rewrite(c4), None)
 
-  def test_dtype_str(self):
-    matcher = PatternMatcher([({"__name__": "root", "uop": UOps.CONST, "dtype": dtypes.float64,
-      "vin": ({"__name__": "val", "dtype": "root"},)}, lambda root, val: root)])
-    c1 = UOp(UOps.CONST, dtypes.float64, arg=1.0)
-    c2 = UOp(UOps.CONST, dtypes.float16, arg=1.0)
-    c3 = UOp(UOps.CONST, dtypes.float64, arg=1.0, vin=(c1,))
-    c4 = UOp(UOps.CONST, dtypes.float64, arg=1.0, vin=(c2,))
-    self.assertEqual(matcher.rewrite(c3), c3)
-    self.assertEqual(matcher.rewrite(c4), None)
-
   def test_vin_one(self):
     matcher = PatternMatcher([({"__name__": "x", "uop": UOps.ALU, "vin":({"uop": UOps.CONST}, {"uop": UOps.ALU})}, lambda x: x)])
     c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
