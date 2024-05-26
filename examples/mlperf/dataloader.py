@@ -285,13 +285,11 @@ def batch_load_unet3d(preprocessed_dir, batch_size=6, val=False, shuffle=True):
       
       procs.append(proc)
 
-    # enqueues the data
     for bc in range(batch_count):
       for idx in range(bc * batch_size, (bc+1) * batch_size):
         fn = next(ds_iter)
         queue_in.put((idx, fn, val))
 
-    # dequeues the data
     for _ in range(len(files) // batch_size):
       while True:
         idx = queue_out.get() // batch_size
