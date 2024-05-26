@@ -92,7 +92,7 @@ class HWQueue:
 
   def wait(self, signal, value=0):
     self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(ctypes.addressof(from_mv(signal))), *nvdata64_le(value),
-               (3 << 0) | (1 << 12) | (1 << 24)] # ACQUIRE | ACQUIRE_SWITCH_TSG | PAYLOAD_SIZE_64BIT
+               (3 << 0) | (1 << 24)] # ACQUIRE | PAYLOAD_SIZE_64BIT
     return self
 
   def signal(self, signal, value=0, timestamp=False):
@@ -130,11 +130,18 @@ class HWComputeQueue(HWQueue):
     self.q += [nvmethod(1, nv_gpu.NVC6C0_LOAD_INLINE_DATA, len(data), typ=6)] + [x for x in data]
     return self
 
-  def exec(self, prg, kernargs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1)):
+  def exec(self, prg, kernargs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), signal=None, signal_value=0):
     prg.qmd.cta_raster_width, prg.qmd.cta_raster_height, prg.qmd.cta_raster_depth = global_size
     prg.qmd.cta_thread_dimension0, prg.qmd.cta_thread_dimension1, prg.qmd.cta_thread_dimension2 = local_size
     prg.qmd.constant_buffer_addr_lower_0 = kernargs & 0xffffffff
     prg.qmd.constant_buffer_addr_upper_0 = kernargs >> 32
+    if signal is not None:
+      prg.qmd.release0_address_lower = ctypes.addressof(from_mv(signal)) & 0xffffffff
+      prg.qmd.release0_address_upper = ctypes.addressof(from_mv(signal)) >> 32
+      prg.qmd.release0_payload_lower = signal_value & 0xffffffff
+      prg.qmd.release0_payload_upper = signal_value >> 32
+      prg.qmd.release0_enable = 1
+    else: prg.qmd.release0_enable = 0
     self.q += [nvmethod(1, nv_gpu.NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI, 1), (1 << 12) | (1 << 4) | (1 << 0)]
     self.q += [nvmethod(1, nv_gpu.NVC6C0_SET_INLINE_QMD_ADDRESS_A, 0x42), *nvdata64((kernargs + round_up(prg.constbuf_0_size, 1 << 8)) >> 8)]
     self.q += [x for x in to_mv(ctypes.addressof(prg.qmd), ctypes.sizeof(prg.qmd)).cast("I")]
