@@ -56,14 +56,17 @@ class HCQGraph(MultiGraphRunner):
     for j,ji in enumerate(self.jit_cache):
       if isinstance(ji.prg, CompiledRunner):
         deps = self.access_resources(ji.bufs[(outs:=ji.prg.p.outcount):], ji.bufs[:outs], (self.comp_signal[ji.prg.device], sig_val:=j+1))
-        deps = [x for x in deps if id(x[0]) != id(self.comp_signal[ji.prg.device])] # remove wait for the same queue as all operations are ordered.
+
+        # NV should wait for the previous kernel to finish
+        deps = [x for x in deps if id(x[0]) != id(self.comp_signal[ji.prg.device])]
+        if ji.prg.device.dname.startswith("NV"): deps.append((self.comp_signal[ji.prg.device], self.comp_signal_val[ji.prg.device]))
         self.comp_signal_val[ji.prg.device] = sig_val
 
         for sig, val in deps: self.comp_queues[ji.prg.device].wait(sig, val)
 
         self.exec_ptrs[j] = (self.comp_queues[ji.prg.device], self.comp_queues[ji.prg.device].ptr())
-        self.comp_queues[ji.prg.device].exec(ji.prg.clprg, self.kargs_addrs[j], *ji.prg.p.launch_dims(var_vals)) \
-                                       .signal(self.comp_signal[ji.prg.device], sig_val)
+        self.comp_queues[ji.prg.device].exec(ji.prg.clprg, self.kargs_addrs[j], *ji.prg.p.launch_dims(var_vals),
+                                             signal=self.comp_signal[ji.prg.device], signal_value=sig_val)
       elif isinstance(ji.prg, BufferXfer):
         dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
         Device[src.device]._gpu_map(dest._buf) #type: ignore
