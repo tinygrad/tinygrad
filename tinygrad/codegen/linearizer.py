@@ -47,12 +47,13 @@ def expand_node(node:Node, idxs:Optional[Tuple[Union[Variable, NumNode], ...]]=N
 class Linearizer(Kernel):
   def uop_alu_idx(self, a:UOp, b, ops, ctx:Linearizer, op, dtype:DType=dtypes.int32):
     render_b:UOp = cast(UOp, (NumNode(b) if not isinstance(b, Node) else b).render(ops, ctx))
+    # return UOp.alu(op, a, render_b)
     return self.uops.add(UOps.ALU, dtype, (a, render_b), op)
 
   # NOTE: the consts have to be cached for deduping of downstream uops to work
   def const(self, b:ConstType, dtype:DType=dtypes.int32) -> UOp:
     if isinstance(b, Variable): return self.uops.add(UOps.DEFINE_VAR, dtype, tuple(), b.unbind()[0])
-    return self.uops.add(UOps.CONST, dtype, tuple(), dtypes.as_const(b, dtype))
+    return UOp.const(dtype, b)
 
   def get_reduce_acc(self, reduceop:LazyOp):
     if reduceop.op is ReduceOps.SUM: return 0.0 if dtypes.is_float(reduceop.dtype) else 0
@@ -360,9 +361,8 @@ class Linearizer(Kernel):
     if self.group_for_reduces:
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker.from_shape(tuple([1] * self.global_dims + list(self.full_shape[self.global_dims:self.global_dims+self.local_dims+self.group_for_reduces]) + [1] * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))  # noqa: E501
-      temp_dtype = self.get_base_dtype(self.reduceop.dtype)
-      self.bufs.append(LocalBuffer("temp", self.sts[-1].size, temp_dtype))
-      self.buf_uops.append(self.uops.add(UOps.DEFINE_LOCAL, PtrDType(temp_dtype), (), ("temp", self.sts[-1].size)))
+      self.bufs.append(LocalBuffer("temp", self.sts[-1].size, self.reduceop.dtype))
+      self.buf_uops.append(self.uops.add(UOps.DEFINE_LOCAL, PtrDType(self.reduceop.dtype), (), ("temp", self.sts[-1].size)))
 
     # kernel name (before late upcast)
     self.name = ("r" if self.reduceop else ("C" if all(x.op in BufferOps for x in self.lazyops) else "E")) + \
