@@ -477,8 +477,8 @@ class Tensor:
 
   def full_like(self, fill_value:ConstType, **kwargs):
     """
-    Creates a tensor with the same shape as `tensor`, filled with the given value.
-    If `dtype` is not specified, the dtype of `tensor` is used.
+    Creates a tensor with the same shape as `self`, filled with the given value.
+    If `dtype` is not specified, the dtype of `self` is used.
 
     You can pass in the `device` keyword argument to control device of the tensor.
     Additionally, all other keyword arguments are passed to the constructor of the tensor.
@@ -492,7 +492,7 @@ class Tensor:
 
   def zeros_like(self, **kwargs):
     """
-    Creates a tensor with the same shape as `tensor`, filled with zeros.
+    Creates a tensor with the same shape as `self`, filled with zeros.
 
     You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
     Additionally, all other keyword arguments are passed to the constructor of the tensor.
@@ -506,7 +506,7 @@ class Tensor:
 
   def ones_like(self, **kwargs):
     """
-    Creates a tensor with the same shape as `tensor`, filled with ones.
+    Creates a tensor with the same shape as `self`, filled with ones.
 
     You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
     Additionally, all other keyword arguments are passed to the constructor of the tensor.

@@ -13,6 +13,12 @@ class BatchNorm2d:
 
   See: `Tensor.batchnorm`
 
+  ```python exec="true" session="tensor"
+  from tinygrad import Tensor, dtypes, nn
+  import numpy as np
+  np.set_printoptions(precision=4)
+  ```
+
   ```python exec="true" source="above" session="tensor" result="python"
   norm = nn.BatchNorm2d(3)
   t = Tensor.rand(2, 3, 4, 4)
@@ -68,6 +74,7 @@ def Conv1d(in_channels, out_channels, kernel_size, stride=1, padding=0, dilation
   ```
   ```python exec="true" source="above" session="tensor" result="python"
   t = conv(t)
+  print(t.numpy())
   ```
   """
   return Conv2d(in_channels, out_channels, (kernel_size,), stride, padding, dilation, groups, bias)
