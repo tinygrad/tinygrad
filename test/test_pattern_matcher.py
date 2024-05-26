@@ -19,16 +19,16 @@ class TestPatternMatcher(unittest.TestCase):
 
   def test_uop(self):
     matcher = PatternMatcher([({"__name__": "x", "uop": UOps.CONST}, lambda x: x)])
-    c1 = UOp(UOps.CONST)
-    c2 = UOp(UOps.ALU)
+    c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
+    c2 = UOp(UOps.ALU, dtypes.float, (c1, c1), BinaryOps.ADD)
     self.assertEqual(matcher.rewrite(c1), c1)
     self.assertEqual(matcher.rewrite(c2), None)
 
   def test_uop_set(self):
-    matcher = PatternMatcher([({"__name__": "x", "uop": {UOps.CONST, UOps.RANGE}}, lambda x: x)])
-    c1 = UOp(UOps.CONST)
-    c2 = UOp(UOps.ALU)
-    c3 = UOp(UOps.RANGE)
+    matcher = PatternMatcher([({"__name__": "x", "uop": {UOps.CONST, UOps.DEFINE_ACC}}, lambda x: x)])
+    c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
+    c2 = UOp(UOps.ALU, dtypes.float, (c1, c1), BinaryOps.ADD)
+    c3 = UOp(UOps.DEFINE_ACC, dtypes.int, arg=(1,))
     self.assertEqual(matcher.rewrite(c1), c1)
     self.assertEqual(matcher.rewrite(c2), None)
     self.assertEqual(matcher.rewrite(c3), c3)
@@ -36,14 +36,14 @@ class TestPatternMatcher(unittest.TestCase):
   def test_arg(self):
     matcher = PatternMatcher([
       ({"__name__": "x", "uop": UOps.CONST, "arg": 0}, lambda x: x),
+      ({"__name__": "x", "uop": UOps.CONST, "arg": False}, lambda x: x),
       ({"__name__": "x", "uop": UOps.ALU, "arg": BinaryOps.MAX}, lambda x: x),
-      ({"__name__": "x", "uop": UOps.ALU, "arg": False}, lambda x: x),
     ])
-    c1 = UOp(UOps.CONST, arg=0)
-    c2 = UOp(UOps.ALU, arg=BinaryOps.MAX)
-    c3 = UOp(UOps.ALU, arg=False)
-    c4 = UOp(UOps.ALU, arg=BinaryOps.MUL)
-    c5 = UOp(UOps.ALU, arg=-1)
+    c1 = UOp(UOps.CONST, dtypes.float, arg=0.)
+    c2 = UOp(UOps.CONST, dtypes.bool, arg=False)
+    c3 = UOp(UOps.ALU, dtypes.float, (c1, c1), arg=BinaryOps.MAX)
+    c4 = UOp(UOps.ALU, dtypes.float, (c1, c1), arg=BinaryOps.MUL)
+    c5 = UOp(UOps.CONST, dtypes.int, arg=-1)
     self.assertEqual(matcher.rewrite(c1), c1)
     self.assertEqual(matcher.rewrite(c2), c2)
     self.assertEqual(matcher.rewrite(c3), c3)
@@ -54,11 +54,11 @@ class TestPatternMatcher(unittest.TestCase):
     matcher = PatternMatcher([({"uop": UOps.PHI, "vin": ({"uop": UOps.DEFINE_ACC, "__name__": "acc"}, {"__name__": "acc"})},
       lambda acc: UOp.const(acc.dtype, acc.arg[0]))])
     acc = UOp(UOps.DEFINE_ACC, dtype=dtypes.int, arg=(1,))
-    c2 = UOp(UOps.PHI, vin=(acc, acc))
-    c4 = UOp(UOps.PHI, vin=(acc, UOp(UOps.CONST, arg=(1,))))
-    expected_rewrite = UOp(UOps.CONST, dtype=acc.dtype, arg=1)
-    self.assert_equiv_uops(matcher.rewrite(c2), expected_rewrite)
-    self.assertEqual(matcher.rewrite(c4), None)
+    c1 = UOp(UOps.PHI, vin=(acc, acc))
+    c2 = UOp(UOps.PHI, vin=(acc, UOp(UOps.CONST, arg=(1,))))
+    expected_rewrite = UOp.const(acc.dtype, acc.arg[0])
+    self.assert_equiv_uops(matcher.rewrite(c1), expected_rewrite)
+    self.assertEqual(matcher.rewrite(c2), None)
 
   def test_dtype(self):
     matcher = PatternMatcher([({"__name__": "x", "uop": UOps.CONST, "dtype": dtypes.float32}, lambda x: x)])
@@ -81,7 +81,7 @@ class TestPatternMatcher(unittest.TestCase):
   def test_vin_one(self):
     matcher = PatternMatcher([({"__name__": "x", "uop": UOps.ALU, "vin":({"uop": UOps.CONST}, {"uop": UOps.ALU})}, lambda x: x)])
     c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
-    c2 = UOp(UOps.ALU, dtypes.float, arg=2.0)
+    c2 = UOp(UOps.ALU, dtypes.float, (c1,c1), arg=BinaryOps.ADD)
     c3 = UOp(UOps.ALU, dtypes.float, (c1,c2), BinaryOps.ADD)
     c4 = UOp(UOps.ALU, dtypes.float, (c2,c1), BinaryOps.ADD)
     self.assertEqual(matcher.rewrite(c2), None)
@@ -111,14 +111,14 @@ class TestPatternMatcher(unittest.TestCase):
     self.assertEqual(matcher.rewrite(c4), None)
 
   def test_allow_len(self):
-    matcher = PatternMatcher([({"__name__": "x", "uop": UOps.ALU, "vin": ({"uop": UOps.CONST},), "__allow_len__": {2,4}}, lambda x: x)])
+    matcher = PatternMatcher([({"__name__": "x", "uop": UOps.LOAD, "vin": ({"uop": UOps.CONST},), "__allow_len__": {2,4}}, lambda x: x)])
     c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
     c2 = UOp(UOps.CONST, dtypes.float, arg=2.0)
     c3 = UOp(UOps.CONST, dtypes.float, arg=3.0)
-    c4 = UOp(UOps.ALU, dtypes.float, (c1,))
-    c5 = UOp(UOps.ALU, dtypes.float, (c1,c2))
-    c6 = UOp(UOps.ALU, dtypes.float, (c1,c2,c3))
-    c7 = UOp(UOps.ALU, dtypes.float, (c1,c2,c3,c3))
+    c4 = UOp(UOps.LOAD, dtypes.float, (c1,))
+    c5 = UOp(UOps.LOAD, dtypes.float, (c1,c2))
+    c6 = UOp(UOps.LOAD, dtypes.float, (c1,c2,c3))
+    c7 = UOp(UOps.LOAD, dtypes.float, (c1,c2,c3,c3))
     self.assertEqual(matcher.rewrite(c4), c4)
     self.assertEqual(matcher.rewrite(c5), c5)
     self.assertEqual(matcher.rewrite(c6), None)
