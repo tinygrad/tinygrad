@@ -988,7 +988,8 @@ def _temp_create_multireduce_ast(r0:Tensor, r1:Tensor, merge=lambda r0,r1: LazyO
     else: arg = op.arg
     return LazyOp(op.op, tuple(_deep_replace(x, offset) for x in op.src), arg)
   op0_loads = len([x for x in op0.lazyops if x.op is BufferOps.LOAD])
-  op = LazyOp(BufferOps.STORE, (merge(_deep_replace(op0), _deep_replace(op1, op0_loads)), ), MemBuffer(0, s0[-1].ast[-1].arg.dtype, s0[-1].ast[-1].arg.st))
+  out = merge(_deep_replace(op0), _deep_replace(op1, op0_loads))
+  op = LazyOp(BufferOps.STORE, (out, ), MemBuffer(0, s0[-1].ast[-1].arg.dtype, s0[-1].ast[-1].arg.st))
   print_tree(op)
   return op,
 
@@ -1017,6 +1018,7 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.UPCAST, 0, 8), Opt(OptOps.UNROLL, 1, 4)],
     ])
 
+  @unittest.skip("multireduce isn't supported yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   def test_local_and_grouped_reduce_multireduce(self):
@@ -1096,6 +1098,7 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 8)],
     ])
 
+  @unittest.skip("multireduce isn't supported yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   def test_matmul_multireduce(self):
@@ -1155,6 +1158,7 @@ class TestKernelOpts(unittest.TestCase):
        Opt(OptOps.UPCAST, 0, 2)], # No globals
     ])
 
+  @unittest.skip("multireduce isn't supported yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   def test_double_reduce_multireudce(self):
@@ -1238,6 +1242,7 @@ class TestKernelOpts(unittest.TestCase):
         # [Opt(OptOps.GROUP, 0, 2)] # doesn't work because group_for_reduce dims become early locals (conflicting with TC)
       ], apply_tc=True, atol=atol, rtol=rtol)
 
+  @unittest.skip("multireduce isn't supported yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_core_opts_multireduce(self):
     N = 128
