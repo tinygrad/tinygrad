@@ -74,6 +74,7 @@ def Conv1d(in_channels, out_channels, kernel_size, stride=1, padding=0, dilation
   ```
   ```python exec="true" source="above" session="tensor" result="python"
   t = conv(t)
+  print(t.numpy())
   ```
   """
   return Conv2d(in_channels, out_channels, (kernel_size,), stride, padding, dilation, groups, bias)
