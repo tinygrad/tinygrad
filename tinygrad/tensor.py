@@ -74,7 +74,7 @@ class Tensor:
   A `Tensor` is a multi-dimensional matrix containing elements of a single data type.
 
   ```python exec="true" session="tensor"
-  from tinygrad import Tensor, dtypes
+  from tinygrad import Tensor, dtypes, nn
   import numpy as np
   import math
   np.set_printoptions(precision=4)
