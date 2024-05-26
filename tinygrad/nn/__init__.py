@@ -13,6 +13,12 @@ class BatchNorm2d:
 
   See: `Tensor.batchnorm`
 
+  ```python exec="true" session="tensor"
+  from tinygrad import Tensor, dtypes, nn
+  import numpy as np
+  np.set_printoptions(precision=4)
+  ```
+
   ```python exec="true" source="above" session="tensor" result="python"
   norm = nn.BatchNorm2d(3)
   t = Tensor.rand(2, 3, 4, 4)
