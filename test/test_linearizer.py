@@ -13,6 +13,7 @@ from tinygrad.shape.symbolic import MulNode, Variable, NumNode, Node
 from tinygrad.tensor import Tensor
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner
+from tinygrad.engine.graph import print_tree
 from tinygrad.helpers import prod, Context, getenv, CI
 from tinygrad.dtype import DType, dtypes
 
@@ -977,6 +978,16 @@ def _helper_linearizer_opt_ast(realized_ast:Tuple[LazyOp, ...], real_bufs:List[B
     check_opt(x, lambda: Linearizer(*realized_ast), color_sizes[i] if i < len(color_sizes) else None)
   return lins
 
+# creates a back-to-back multi reduce AST by merging r0 and r1.
+# TODO: delete once we can schedule multi reduce
+def _temp_create_multireduce_ast(r0:Tensor, r1:Tensor, merge=lambda r0,r1: LazyOp(BinaryOps.ADD, (r0, r1))) -> Tuple[LazyOp, ...]:
+  assert len(s0:=r0.schedule()) == 1 and len(s1:=r1.schedule()), "inputs should be realized"
+  op0, op1 = s0[-1].ast[-1].src[0], s1[-1].ast[-1].src[0]
+  loadops = [op for op in op0.lazyops+op1.lazyops if op.op is BufferOps.LOAD]
+  for op in op0.lazyops+op1.lazyops:
+    for src in op.src:
+      if src in loadops: print(op)
+
 class TestKernelOpts(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
@@ -1001,6 +1012,37 @@ class TestKernelOpts(unittest.TestCase):
       # Checking how it works with locals + grouped reduce + upcasts
       [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.UPCAST, 0, 8), Opt(OptOps.UNROLL, 1, 4)],
     ])
+
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  def test_local_and_grouped_reduce_multireduce(self):
+    N = 128
+    Tensor.manual_seed(1882)
+    a = Tensor.rand(4, 4, N, N).realize()
+    b = Tensor.rand(4, 4, N).realize()
+    r0 = (b.sqrt() + ((a+1).sum(axis=3).exp()))
+    c = Tensor.rand(4, 4, N, N).realize()
+    d = Tensor.rand(4, 4, N).realize()
+    r1 = (d.sqrt() + ((c+1).sum(axis=3).exp()))
+    _temp_create_multireduce_ast(r0, r1)
+
+    """
+    helper_linearizer_opt(r, [
+      [Opt(OptOps.LOCAL, 0, 2)],
+      [Opt(OptOps.LOCAL, 0, 8)],
+      [Opt(OptOps.LOCAL, 0, 16)], # Checking how it works with locals
+      [Opt(OptOps.GROUPTOP, 0, 2)],
+      [Opt(OptOps.GROUPTOP, 0, 32)],
+      [Opt(OptOps.GROUPTOP, 0, 64)], # Checking how it works with grouped reduce
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 2)],
+      [Opt(OptOps.LOCAL, 0, 16), Opt(OptOps.GROUPTOP, 0, 16)],
+      [Opt(OptOps.LOCAL, 0, 32), Opt(OptOps.GROUPTOP, 0, 2)],
+      # Checking how it works with locals + grouped reduce
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 64)],
+      # Checking how it works with locals + grouped reduce + upcasts
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.UPCAST, 0, 8), Opt(OptOps.UNROLL, 1, 4)],
+    ])
+    """
 
   def test_upcasts(self):
     N = 16
