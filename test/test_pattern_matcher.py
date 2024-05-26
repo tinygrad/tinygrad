@@ -79,14 +79,18 @@ class TestPatternMatcher(unittest.TestCase):
     self.assertEqual(matcher.rewrite(c4), None)
 
   def test_vin_one(self):
-    matcher = PatternMatcher([({"__name__": "x", "uop": UOps.ALU, "vin":({"uop": UOps.CONST}, {"uop": UOps.ALU})}, lambda x: x)])
+    matcher = PatternMatcher([({"__name__": "x", "uop": UOps.ALU, "vin":({"uop": UOps.CONST}, {"uop": UOps.CONST})}, lambda x: x)])
     c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
-    c2 = UOp(UOps.ALU, dtypes.float, (c1,c1), arg=BinaryOps.ADD)
+    c2 = UOp(UOps.CONST, dtypes.float, arg=2.0)
     c3 = UOp(UOps.ALU, dtypes.float, (c1,c2), BinaryOps.ADD)
-    c4 = UOp(UOps.ALU, dtypes.float, (c2,c1), BinaryOps.ADD)
-    self.assertEqual(matcher.rewrite(c2), None)
     self.assertEqual(matcher.rewrite(c3), c3)
-    self.assertEqual(matcher.rewrite(c4), None)
+    self.assertEqual(matcher.rewrite(c2), None)
+    matcher = PatternMatcher([({"__name__": "x", "uop": UOps.ALU, "vin":({"uop": UOps.CONST}, {"uop": UOps.ALU})}, lambda x: x)])
+    c4 = UOp(UOps.ALU, dtypes.float, (c1,c3), BinaryOps.ADD)
+    c5 = UOp(UOps.ALU, dtypes.float, (c3,c1), BinaryOps.ADD)
+    self.assertEqual(matcher.rewrite(c3), None)
+    self.assertEqual(matcher.rewrite(c4), c4)
+    self.assertEqual(matcher.rewrite(c5), None)
 
   def test_vin_permutations(self):
     matcher = PatternMatcher([({"__name__": "x", "uop": UOps.ALU, "vin":[{"uop": UOps.CONST}, {"uop": UOps.ALU}]}, lambda x: x)])
