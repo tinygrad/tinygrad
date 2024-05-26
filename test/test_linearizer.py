@@ -14,7 +14,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner
 from tinygrad.engine.graph import print_tree
-from tinygrad.helpers import prod, Context, getenv, CI
+from tinygrad.helpers import DEBUG, prod, Context, getenv, CI
 from tinygrad.dtype import DType, dtypes
 
 def helper_realized_ast(r:Tensor):
@@ -981,16 +981,18 @@ def _helper_linearizer_opt_ast(realized_ast:Tuple[LazyOp, ...], real_bufs:List[B
 # creates a back-to-back multi reduce AST by merging r0 and r1.
 # TODO: delete once we can schedule multi reduce
 def _temp_create_multireduce_ast(r0:Tensor, r1:Tensor, merge=lambda r0,r1: LazyOp(BinaryOps.ADD, (r0, r1))) -> Tuple[LazyOp, ...]:
-  assert len(s0:=r0.schedule()) == 1 and len(s1:=r1.schedule()), "inputs should be realized"
-  op0, op1 = s0[-1].ast[-1].src[0], s1[-1].ast[-1].src[0]
+  assert len(s0:=r0.schedule()) == 1 and len(s1:=r1.schedule()) == 1, "inputs should be realized"
+  op0, op1 = s0[0].ast[0].src[0], s1[0].ast[0].src[0]
   def _deep_replace(op:LazyOp, offset=0):
     if op.op is BufferOps.LOAD: arg = MemBuffer(op.arg.idx+offset, op.arg.dtype, op.arg.st)
     else: arg = op.arg
     return LazyOp(op.op, tuple(_deep_replace(x, offset) for x in op.src), arg)
+  # limitation: r0 and r1 cannot share inputs.
   op0_loads = len([x for x in op0.lazyops if x.op is BufferOps.LOAD])
   out = merge(_deep_replace(op0), _deep_replace(op1, op0_loads))
+  # limitation: only tests single output
   op = LazyOp(BufferOps.STORE, (out, ), MemBuffer(0, s0[-1].ast[-1].arg.dtype, s0[-1].ast[-1].arg.st))
-  print_tree(op)
+  if DEBUG >= 3: print_tree(op)
   return op,
 
 class TestKernelOpts(unittest.TestCase):
