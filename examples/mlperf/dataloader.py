@@ -245,6 +245,79 @@ def batch_load_val_bert(BS:int):
         yield process_batch_bert(dataset[start_idx:] + dataset[:end_idx])
     idx += 1
 
+def load_unet3d_data(preprocessed_dir, queue_in, queue_out, X:Tensor, Y:Tensor):
+  from extra.datasets.kits19 import rand_balanced_crop, rand_flip, random_brightness_augmentation, gaussian_noise
+
+  while (data := queue_in.get()) is not None:
+    idx, fn, val = data
+    preprocessed_dataset_dir = (preprocessed_dir / ("val" if val else "train")) if preprocessed_dir is not None else None
+    x_path, y_path = preprocessed_dataset_dir / f"{os.path.basename(fn)}_x.npy", preprocessed_dataset_dir / f"{os.path.basename(fn)}_y.npy"
+    x, y = np.load(x_path), np.load(y_path)
+    x, y = rand_balanced_crop(x, y)
+
+    X[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = x.tobytes()
+    Y[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = y.tobytes()
+
+    queue_out.put(idx)
+  queue_out.put(None)
+
+def batch_load_unet3d(preprocessed_dir, batch_size=6, val=False, shuffle=True):
+  from extra.datasets.kits19 import get_train_files, get_val_files
+
+  files = get_val_files() if val else get_train_files()
+  batch_count = min(32, len(files) // batch_size)
+  ds_iter = iter(files)
+
+  queue_in, queue_out = Queue(), Queue()
+  procs, data_out_count = [], [0] * batch_count
+  sz = (batch_size * batch_count, 1, 128, 128, 128)
+  if os.path.exists("/Users/flata/unet3d"): os.unlink("/Users/flata/unet3d")
+  shm = shared_memory.SharedMemory(name="Users/flata/unet3d", create=True, size=prod(sz))
+
+  try:
+    X = Tensor.empty(*sz, dtype=dtypes.float32, device=f"disk:/Users/flata/unet3d")
+    Y = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:/Users/flata/unet3d")
+
+    for _ in range(cpu_count()):
+      proc = Process(target=load_unet3d_data, args=(preprocessed_dir, queue_in, queue_out, X, Y))
+      proc.daemon = True
+      proc.start()
+      
+      procs.append(proc)
+
+    # enqueues the data
+    for bc in range(batch_count):
+      for idx in range(bc * batch_size, (bc+1) * batch_size):
+        fn = next(ds_iter)
+        queue_in.put((idx, fn, val))
+
+    # dequeues the data
+    for _ in range(len(files) // batch_size):
+      while True:
+        idx = queue_out.get() // batch_size
+        data_out_count[idx] += 1
+        if data_out_count[idx] == batch_size: break
+
+      data_out_count[idx] = 0
+      yield X[idx * batch_size:(idx + 1) * batch_size], Y[idx * batch_size:(idx + 1) * batch_size]
+  finally:
+    for _ in procs: queue_in.put(None)
+    queue_in.close()
+
+    for _ in procs:
+      while queue_out.get() is not None: pass
+    queue_out.close()
+
+    # shutdown processes
+    for proc in procs: proc.join()
+
+    shm.close()
+    try:
+      shm.unlink()
+    except FileNotFoundError:
+      # happens with BENCHMARK set
+      pass
+
 if __name__ == "__main__":
   from extra.datasets.imagenet import get_train_files, get_val_files
   VAL = getenv("VAL", 1)
