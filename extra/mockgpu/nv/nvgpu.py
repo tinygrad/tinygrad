@@ -103,11 +103,15 @@ class GPFIFO:
     if qmd.release0_enable:
       rel0 = to_mv(qmd.release0_address_lower + (qmd.release0_address_upper << 32), 0x8).cast('Q')
       rel0[0] = qmd.release0_payload_lower + (qmd.release0_payload_upper << 32)
+    if qmd.dependent_qmd0_enable:
+      if qmd.dependent_qmd0_action == 1: self.execute_qmd(qmd.dependent_qmd0_pointer << 8)
+      else: raise RuntimeError("unsupported dependent qmd action")
 
   def execute_cmd(self, cmd) -> SchedResult:
     if cmd == nv_gpu.NVC56F_SEM_EXECUTE: return self._exec_signal()
     elif cmd == nv_gpu.NVC6C0_LAUNCH_DMA: return self._exec_nvc6c0_dma()
     elif cmd == nv_gpu.NVC6B5_LAUNCH_DMA: return self._exec_nvc6b5_dma()
+    elif cmd == nv_gpu.NVC6C0_SEND_SIGNALING_PCAS2_B: return self._exec_pcas2()
     elif cmd == 0x0320: return self._exec_load_inline_qmd() # NVC6C0_LOAD_INLINE_QMD_DATA
     else: self.state[cmd] = self._next_dword() # just state update
     return SchedResult.CONT
@@ -162,6 +166,12 @@ class GPFIFO:
       val = self._state(nv_gpu.NVC6B5_SET_SEMAPHORE_PAYLOAD)
       src[0] = val
     else: raise RuntimeError("unknown nvc6b5_dma flags")
+
+  def _exec_pcas2(self):
+    qmd_addr = self._state(nv_gpu.NVC6C0_SEND_PCAS_A) << 8
+    typ = self._next_dword()
+    if typ == 2 or typ == 9: # schedule
+      self.execute_qmd(qmd_addr)
 
 class NVGPU(VirtGPU):
   def __init__(self, gpuid):
