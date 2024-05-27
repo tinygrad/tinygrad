@@ -9,6 +9,7 @@ from tinygrad.device import Compiled, Compiler, Allocator
 from tinygrad.codegen.uops import UOpGraph, UOps
 from tinygrad.ops import BinaryOps, TernaryOps, exec_alu
 from tinygrad.renderer import Renderer
+from tinygrad.renderer.cstyle import CUDARenderer, MetalRenderer, HIPRenderer
 
 def _load(m, i):
   if i < 0 or i >= len(m): raise IndexError(f"load out of bounds, size is {len(m)} and access is {i}")
@@ -38,7 +39,8 @@ class PythonProgram:
       loop_ends: Dict[int, int] = {}
       while i < len(self.uops):
         uop, dtype, idp, arg = self.uops[i]
-        void_ops = {UOps.STORE, UOps.ENDLOOP, UOps.BARRIER, UOps.IF, UOps.ENDIF}
+        void_ops = {UOps.STORE, UOps.ENDRANGE, UOps.BARRIER, UOps.IF, UOps.ENDIF}
+        if uop is UOps.DEFINE_ACC: idp.clear()
         inp = [ul[v] for v in idp if self.uops[v][0] not in void_ops]
         dtp = [dl[v] for v in idp if self.uops[v][0] not in void_ops]
         if getenv("TRACE"): print(i, uop, dtype, arg, inp, dtp)
@@ -60,7 +62,7 @@ class PythonProgram:
               if g: _store(m, o, v)
           i += 1
           continue
-        elif uop is UOps.ENDLOOP:
+        elif uop is UOps.ENDRANGE:
           loop_ends[idp[0]] = i
           i = idp[0]
           continue
@@ -88,7 +90,7 @@ class PythonProgram:
           ul[i] = [[arg] * warp_size for _ in range(dtype.count)] if dtype.count > 1 else [arg] * warp_size
         elif uop is UOps.DEFINE_ACC:
           ul[i] = [[arg[0]] * warp_size for _ in range(dtype.count)] if dtype.count > 1 else [arg[0]] * warp_size
-        elif uop is UOps.LOOP:
+        elif uop is UOps.RANGE:
           if i not in ul: ul[i] = [inp[0][0]] * warp_size
           else:
             for j in range(len(ul[i])):
@@ -181,9 +183,9 @@ class PythonProgram:
 class PythonRenderer(Renderer):
   device = "PYTHON"
   def __init__(self):
-    if getenv("EMULATE_METAL"): self.device, self.has_tensor_cores = "METAL", True
-    if getenv("EMULATE_HSA"): self.device, self.has_tensor_cores = "HSA", True
-    if getenv("EMULATE_CUDA"): self.device, self.has_tensor_cores = "CUDA", True
+    if getenv("EMULATE_METAL"): self.device, self.tensor_cores = "METAL", MetalRenderer.tensor_cores
+    if getenv("EMULATE_HSA"): self.device, self.tensor_cores = "HSA", HIPRenderer.tensor_cores
+    if getenv("EMULATE_CUDA"): self.device, self.tensor_cores = "CUDA", CUDARenderer.tensor_cores
 
   def render(self, name:str, uops:UOpGraph) -> str:
     lops = [(u.uop, u.dtype, [uops.uops.index(v) for v in u.vin], u.arg) for u in uops]

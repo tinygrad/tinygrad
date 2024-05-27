@@ -1,12 +1,12 @@
 import sys, pickle, atexit
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Tuple, List, Dict, Optional, Set, DefaultDict
+from typing import Tuple, List, Dict, Optional, Set, DefaultDict, Union
 from tinygrad.ops import LoadOps, BufferOps, LazyOp, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps
-from tinygrad.features.graph import log_lazybuffer, realized_lazybuffer
+from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
 from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, GlobalCounters, prod, dedup, all_int, merge_dicts, getenv
 from tinygrad.shape.symbolic import Variable
-from tinygrad.dtype import ImageDType, dtypes
+from tinygrad.dtype import ImageDType, dtypes, DType
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
@@ -124,21 +124,24 @@ def _schedule_group(outs:Tuple[LazyBuffer, ...], realizes:Dict[LazyBuffer, None]
 def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[LazyBuffer, None],
                 simple_pads:Set[LazyBuffer], children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], scheduled=False):
   """recursively search the entire graph for all LazyBuffers, insert realizes after expands"""
-  if buf in allbufs or buf.base.realized: return
+  if buf in allbufs or buf.base.realized is not None: return
   if GRAPH: log_lazybuffer(buf, scheduled)
+  # view
   if buf.base != buf:
-    # realize all places where the buffer is expanded
-    if prod(buf.base.st.shape) < prod(buf.st.shape):
-      if len(buf.st.views) == 1 and buf.st.views[-1].mask and all_int(buf.base.st.shape) and \
-          prod(buf.base.st.shape) >= prod([y-x for x,y in buf.st.views[-1].mask]):
-        simple_pads.add(buf.base)
-      elif buf.base.op is UnaryOps.CAST and isinstance(buf.base.srcs[0].dtype, ImageDType) and isinstance(buf.base.arg[0], ImageDType):
+    # fuse some pads
+    if len(buf.st.views) == 1 and buf.st.views[-1].mask is not None and all_int(buf.base.st.shape) and \
+        prod(buf.base.st.shape) >= prod([y-x for x,y in buf.st.views[-1].mask]):
+      simple_pads.add(buf.base)
+    # realize all expands
+    elif prod(buf.base.st.shape) < prod(buf.st.shape):
+      if buf.base.op is UnaryOps.CAST and isinstance(buf.base.srcs[0].dtype, ImageDType) and isinstance(buf.base.arg, ImageDType):
         pass # don't realize image to image casts. this is part of a larger problem
       else:
         realizes[buf.base] = None
     return _recurse_lb(buf.base, realizes, allbufs, simple_pads, children)
-  if buf.forced_realize: realizes[buf] = None
+  # base
   allbufs[buf] = None
+  if buf.forced_realize: realizes[buf] = None
   if buf.op in LoadOps: realizes[buf.base] = None
   if buf.op is LoadOps.COPY:
     assert buf.srcs[0].st.contiguous and buf.srcs[0].size == buf.srcs[0].base.size, "can only copy contig"
@@ -189,7 +192,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: Dict[LazyBuffer, LazyBuffer] = {}
   for r in allbufs:
-    if r != r.base or r.op not in ReduceOps or r in realizes: continue
+    if r.op not in ReduceOps or r in realizes: continue
 
     group: Set[LazyBuffer] = set()
     _recursive_group(r, r.st, r, children, realizes, reduce_for_op, group)
@@ -235,7 +238,7 @@ def _graph_schedule(outs:List[LazyBuffer], seen:Set[LazyBuffer]) -> Tuple[Defaul
           if not st.contiguous or tr_next.op in ReduceOps: break
           tr = tr_next
         # don't cast to higher size before store (tr cannot be realized if forced_realize)
-        if tr.op is UnaryOps.CAST and tr.arg[0].itemsize > tr.srcs[0].dtype.itemsize:
+        if tr.op is UnaryOps.CAST and tr.arg.itemsize > tr.srcs[0].dtype.itemsize:
           tr = tr.srcs[0].base
         reduce_for_op[tr] = r
       realizes[tr] = None
@@ -318,3 +321,42 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
   schedule, var_vals = create_schedule_with_vars(outs, seen)
   assert len(var_vals) == 0
   return schedule
+
+# *** memory planning ***
+
+def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]]], debug_prefix="") -> Dict[Buffer, Buffer]:
+  if getenv("NO_MEMORY_PLANNER"): return {}
+  last_appearance = {}
+  for i,u in enumerate(buffers):
+    for buf in u: last_appearance[buf] = i
+
+  # LRU algorithm
+  assigned: Dict[Buffer, Buffer] = {}
+  local_cache: DefaultDict[Tuple[str, int, DType], List[Buffer]] = defaultdict(list)
+
+  def handle_buffer(buf):
+    key = (buf.device, buf.size, buf.dtype)
+    if buf not in assigned:
+      if len(ll:=local_cache[key]): assigned[buf] = ll.pop()
+      else: assigned[buf] = Buffer(*key)
+    if i == last_appearance[buf]:
+      if assigned[buf] not in local_cache[key]: local_cache[key].append(assigned[buf])
+
+  for i,u in enumerate(buffers):
+    for buf in u:
+      # all unallocated unparented buffers are fair game to replace
+      if buf.is_allocated() or buf.lb_refcount > 0: continue
+      # handle view buffers
+      if buf._base is not None:
+        assigned[buf] = Buffer(buf.device, buf.size, buf.dtype, base=assigned.get(buf._base, buf._base), offset=buf.offset)
+      else:
+        handle_buffer(buf)
+
+  if DEBUG >= 1 and len(ak:=dedup(assigned.keys())) != len(av:=dedup(assigned.values())):
+    print(debug_prefix+f"memory reduced from {sum([x.nbytes for x in ak])/1e6:.2f} MB -> {sum([x.nbytes for x in av])/1e6:.2f} MB,",
+          f"{len(ak)} -> {len(av)} bufs")
+  return assigned
+
+def memory_planner(schedule:List[ScheduleItem]) -> List[ScheduleItem]:
+  assigned = _internal_memory_planner([si.bufs for si in schedule])
+  return [ScheduleItem(si.ast, tuple(assigned.get(x, x) for x in si.bufs)) for si in schedule]

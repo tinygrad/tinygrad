@@ -14,14 +14,14 @@ from tinygrad.engine.schedule import ScheduleItem
 logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS", "") else None, getenv("LOGKERNS_LEVEL", 1)
 def get_linearizer(renderer:Renderer, ast:Tuple[LazyOp, ...]) -> Linearizer:
   if DEBUG >= 3:
-    from tinygrad.features.graph import print_tree
+    from tinygrad.engine.graph import print_tree
     for op in ast: print_tree(op)
   k = Linearizer(*ast, opts=renderer)
   k.required_optimizations()
   if not NOOPT:
     if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
     if BEAM >= 1:
-      from tinygrad.features.search import beam_search, time_linearizer, bufs_from_lin
+      from tinygrad.engine.search import beam_search, time_linearizer, bufs_from_lin
       kb, k_opt = Linearizer(*ast, opts=renderer), k
       kb.required_optimizations()
       rawbufs = bufs_from_lin(kb, allocate=False)
@@ -67,7 +67,7 @@ class CompiledRunner(Runner):
     global_size, local_size = self.p.launch_dims(var_vals)
     if global_size is not None and local_size is None and all_int(self.p.global_size): # type: ignore[arg-type]
       # TODO: this is copied from get_program
-      from tinygrad.features.search import optimize_local_size
+      from tinygrad.engine.search import optimize_local_size
       local_size = optimize_local_size(self.clprg, global_size, rawbufs)
       global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
       self.p = replace(self.p, global_size=global_size, local_size=local_size)
@@ -135,6 +135,9 @@ def get_runner(dname:str, ast:Tuple[LazyOp, ...]) -> CompiledRunner:
     method_cache[ckey] = ret = CompiledRunner(replace(bret.p, dname=dname), bret.lib)
   else:
     prg: Program = get_linearizer(Device[dname].renderer, ast).to_program()
+    if hasattr(prg.uops, "fuzz_paths"):
+      from test.external.fuzz_uops import UOpsFuzzerRunner
+      return UOpsFuzzerRunner(replace(prg, dname=dname))
     method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, dname=dname))
   return ret
 
@@ -182,7 +185,7 @@ def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, Non
 
 capturing: List = []  # put classes with an add method in here
 
-def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[Variable, int]]=None):
+def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[Variable, int]]=None, do_update_stats=True):
   for ei in lower_schedule(schedule):
     if len(capturing): capturing[0].add(ei)
-    ei.run(var_vals)
+    ei.run(var_vals, do_update_stats=do_update_stats)

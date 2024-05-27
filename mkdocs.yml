@@ -11,6 +11,7 @@ nav:
 - Showcase: showcase.md
 - Developer: developer.md
 - Function: function.md
+- Environment: env_vars.md
 #- tinygrad: reference/
 
 #extra_css:
@@ -47,6 +48,8 @@ markdown_extensions:
 
 theme:
   name: material
+  logo: logo_tiny_dark.svg
+  favicon: logo_tiny_dark.svg
   features:
   - announce.dismiss
   - content.action.edit

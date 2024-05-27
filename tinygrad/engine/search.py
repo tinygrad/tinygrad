@@ -15,7 +15,7 @@ from tinygrad.engine.realize import CompiledRunner
 from tinygrad.renderer import Program
 
 actions = [Opt(op=OptOps.UPCAST, axis=axis, amt=amt) for amt in [0,2,3,4,5,7] for axis in range(6)]
-actions += [Opt(op=OptOps.UNROLL, axis=axis, amt=amt) for amt in [0,4,7] for axis in range(4)]
+actions += [Opt(op=OptOps.UNROLL, axis=axis, amt=amt) for amt in [0,4,7] for axis in range(5)]
 actions += [Opt(op=OptOps.LOCAL, axis=axis, amt=amt) for amt in [2,3,4,8,13,16,29] for axis in range(5)]
 actions += [Opt(op=OptOps.GROUPTOP, axis=axis, amt=amt) for amt in [13,16,28,29,32,49,64,256] for axis in range(3)]
 actions += [Opt(op=OptOps.GROUP, axis=axis, amt=amt) for amt in [0,4,8,16] for axis in range(3)]
@@ -42,14 +42,21 @@ def _time_program(p:Program, lib:bytes, var_vals, rawbufs, early_stop=None, max_
   try: car = CompiledRunner(p, precompiled=lib)
   except AssertionError: return [math.inf] * cnt
   tms = []
+  input_bufs = [rawbufs[i] for i,_ in car.p.globals]
   for _ in range(cnt):
     if clear_l2:
-      with Context(DEBUG=0, BEAM=0, CACHECOLLECTING=0): Tensor.ones(1024,1024).contiguous().realize()
-    tms.append(cast(float, car(rawbufs, var_vals, wait=True))*factor)
+      with Context(DEBUG=0, BEAM=0, CACHECOLLECTING=0): Tensor.ones(1024,1024).contiguous().realize(do_update_stats=False)
+    tms.append(cast(float, car(input_bufs, var_vals, wait=True))*factor)
     if early_stop is not None and early_stop < tms[-1]: break
   return tms
 
+class TimeoutException(Exception): pass
+def timeout_handler(signum, frame): raise TimeoutException()
+
 def _try_compile_linearized_w_idx(x:Tuple[int,Linearizer], compiler:Compiler) -> Tuple[int, Optional[Tuple[Program, bytes, float]]]:
+  signal.signal(signal.SIGALRM, timeout_handler)
+  # set timeout
+  signal.alarm(getenv("BEAM_TIMEOUT_SEC", 10))
   try:
     x[1].linearize()
     if len(x[1].uops.uops) >= getenv("BEAM_UOPS_MAX", 3000) > 0: raise RuntimeError("too many uops")
@@ -57,10 +64,15 @@ def _try_compile_linearized_w_idx(x:Tuple[int,Linearizer], compiler:Compiler) ->
     st = time.perf_counter()
     prog = compiler.compile(p.src)
     et = time.perf_counter() - st
-    return x[0], (p, prog, et)
-  except Exception:
+    ret = (p, prog, et)
+  except RuntimeError:
     if DEBUG >= 4: traceback.print_exc()
-    return x[0], None
+    ret = None
+  except TimeoutException:
+    ret = None
+  finally:
+    signal.alarm(0)
+  return x[0], ret
 
 # workers should ignore ctrl c
 def _init_worker(): signal.signal(signal.SIGINT, signal.SIG_IGN)
@@ -83,7 +95,7 @@ def bufs_from_lin(lin:Linearizer, allocate:bool=True) -> List[Buffer]:
 
 # get dictionary of all possible actions
 def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Linearizer]:
-  acted_lins, max_up, max_lcl = {0:lin} if include_0 else {}, getenv("BEAM_UPCAST_MAX", 256), getenv("BEAM_LOCAL_MAX", 256)
+  acted_lins, max_up, max_lcl = {0:lin} if include_0 else {}, getenv("BEAM_UPCAST_MAX", 256), getenv("BEAM_LOCAL_MAX", 1024)
   for i,a in enumerate(actions):
     if a.axis is not None and a.op is not OptOps.TC:
       if ((ax:=a.real_axis(lin)) >= lin.shape_len) or (lin.full_shape[ax] == a.amt and Opt(a.op, ax, 0) in actions): continue
