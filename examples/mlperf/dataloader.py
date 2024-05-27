@@ -277,13 +277,27 @@ def batch_load_unet3d(preprocessed_dir, batch_size=6, val=False, shuffle=True):
 
   queue_in, queue_out = Queue(), Queue()
   procs, data_out_count = [], [0] * batch_count
-  sz = (batch_size * batch_count, 1, 128, 128, 128)
-  if os.path.exists("/Users/flata/unet3d"): os.unlink("/Users/flata/unet3d")
-  shm = shared_memory.SharedMemory(name="Users/flata/unet3d", create=True, size=prod(sz))
+  sz, shm_path = (batch_size * batch_count, 1, 128, 128, 128), "/dev/shm/unet3d"
+  if os.path.exists(shm_path): os.unlink(shm_path)
+  shm = shared_memory.SharedMemory(name="/dev/shm/unet3d", create=True, size=prod(sz))
+
+  shutdown = False
+  class Cookie:
+    def __init__(self, bc):
+      self.bc = bc
+    def __del__(self):
+      if not shutdown:
+        try: enqueue_batch(self.bc)
+        except StopIteration: pass
+
+  def enqueue_batch(bc):
+    for idx in range(bc * batch_size, (bc+1) * batch_size):
+      fn = next(ds_iter)
+      queue_in.put((idx, fn, val))
 
   try:
-    X = Tensor.empty(*sz, dtype=dtypes.float32, device=f"disk:/Users/flata/unet3d")
-    Y = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:/Users/flata/unet3d")
+    X = Tensor.empty(*sz, dtype=dtypes.float32, device=f"disk:{shm_path}")
+    Y = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:{shm_path}")
 
     for _ in range(cpu_count()):
       proc = Process(target=load_unet3d_data, args=(preprocessed_dir, queue_in, queue_out, X, Y))
@@ -293,19 +307,19 @@ def batch_load_unet3d(preprocessed_dir, batch_size=6, val=False, shuffle=True):
       procs.append(proc)
 
     for bc in range(batch_count):
-      for idx in range(bc * batch_size, (bc+1) * batch_size):
-        fn = next(ds_iter)
-        queue_in.put((idx, fn, val))
+      enqueue_batch(bc)
 
     for _ in range(len(files) // batch_size):
       while True:
-        idx = queue_out.get() // batch_size
-        data_out_count[idx] += 1
-        if data_out_count[idx] == batch_size: break
+        bc = queue_out.get() // batch_size
+        data_out_count[bc] += 1
+        if data_out_count[bc] == batch_size: break
 
-      data_out_count[idx] = 0
-      yield X[idx * batch_size:(idx + 1) * batch_size], Y[idx * batch_size:(idx + 1) * batch_size]
+      data_out_count[bc] = 0
+      yield X[bc * batch_size:(bc + 1) * batch_size], Y[bc * batch_size:(bc + 1) * batch_size], Cookie(bc)
   finally:
+    shutdown = True
+
     for _ in procs: queue_in.put(None)
     queue_in.close()
 
