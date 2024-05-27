@@ -247,13 +247,13 @@ def batch_load_val_bert(BS:int):
         yield process_batch_bert(dataset[start_idx:] + dataset[:end_idx])
     idx += 1
 
-def load_unet3d_data(preprocessed_dir, queue_in, queue_out, X:Tensor, Y:Tensor):
+def load_unet3d_data(preprocessed_dataset_dir, queue_in, queue_out, X:Tensor, Y:Tensor):
   from extra.datasets.kits19 import rand_balanced_crop, rand_flip, random_brightness_augmentation, gaussian_noise
 
   while (data := queue_in.get()) is not None:
     idx, fn, val = data
-    preprocessed_dataset_dir = (preprocessed_dir / ("val" if val else "train"))
-    x, y = np.load(preprocessed_dataset_dir / f"{os.path.basename(fn)}_x.npy"), np.load(preprocessed_dataset_dir / f"{os.path.basename(fn)}_y.npy")
+    case_name = os.path.basename(fn).split("_x.npy")[0]
+    x, y = np.load(preprocessed_dataset_dir / f"{case_name}_x.npy"), np.load(preprocessed_dataset_dir / f"{case_name}_y.npy")
 
     if not val:
       x, y = rand_balanced_crop(x, y)
@@ -268,12 +268,10 @@ def load_unet3d_data(preprocessed_dir, queue_in, queue_out, X:Tensor, Y:Tensor):
     queue_out.put(idx)
   queue_out.put(None)
 
-def batch_load_unet3d(preprocessed_dir, batch_size=6, val=False, shuffle=True):
-  from extra.datasets.kits19 import get_train_files, get_val_files
+def batch_load_unet3d(preprocessed_dataset_dir:Path, batch_size:int=6, val:bool=False, shuffle:bool=True):
+  assert preprocessed_dataset_dir is not None, "run preprocess_data on kits19"
 
-  assert preprocessed_dir is not None, "run preprocess_data on kits19"
-
-  files = get_val_files() if val else get_train_files()
+  files = list(preprocessed_dataset_dir.glob("*_x.npy"))
   batch_count = min(32, len(files) // batch_size)
   ds_iter = iter(files)
 
@@ -344,13 +342,12 @@ if __name__ == "__main__":
     assert not val, "validation set is not supported due to different sizes on inputs"
 
     from extra.datasets.kits19 import get_train_files, get_val_files, preprocess_dataset, BASEDIR
-    preprocessed_dir = BASEDIR / ".." / "preprocessed"
-    preprocessed_dataset_dir = (preprocessed_dir / ("val" if val else "train"))
+    preprocessed_dataset_dir = (BASEDIR / ".." / "preprocessed" / ("val" if val else "train"))
     files = get_val_files() if val else get_train_files()
 
-    if not preprocessed_dataset_dir.exists(): preprocess_dataset(files, preprocessed_dir, val)
+    if not preprocessed_dataset_dir.exists(): preprocess_dataset(files, preprocessed_dataset_dir, val)
     with tqdm(total=len(files)) as pbar:
-      for x, _, _ in batch_load_unet3d(preprocessed_dir, val=val):
+      for x, _, _ in batch_load_unet3d(preprocessed_dataset_dir, val=val):
         pbar.update(x.shape[0])
 
   def load_resnet(val):
