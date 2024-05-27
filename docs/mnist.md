@@ -26,6 +26,8 @@ We'll use the model from [the Keras tutorial](https://keras.io/examples/vision/m
 ```python
 from tinygrad import Tensor, nn
 
+Tensor.manual_seed(42)
+
 class Model:
   def __init__(self):
     self.l1 = nn.Conv2d(1, 32, kernel_size=(3,3))
@@ -52,7 +54,7 @@ print(X_train.shape, X_train.dtype, Y_train.shape, Y_train.dtype)
 # (60000, 1, 28, 28) dtypes.uchar (60000,) dtypes.uchar
 ```
 
-tinygrad includes MNIST, it only adds four lines. Free feel to [read the function](https://github.com/tinygrad/tinygrad/blob/master/tinygrad/nn/datasets.py).
+tinygrad includes MNIST, it only adds four lines. Feel free to read the [function](https://github.com/tinygrad/tinygrad/blob/master/tinygrad/nn/datasets.py).
 
 ## Using the model
 
@@ -123,7 +125,7 @@ timeit.repeat(jit_step, repeat=5, number=1)
 
 1.0 ms is 75x faster! Note that we aren't syncing the GPU, so GPU time may be slower.
 
-The slowness the first two times is the JIT capturing the kernels. And this JIT will not run any Python in the function, it will just replay the tinygrad kernels that were run, so be aware that non tinygrad Python operations won't work. Randomness functions as expected.
+The slowness the first two times is the JIT capturing the kernels. And this JIT will not run any Python in the function, it will just replay the tinygrad kernels that were run, so be aware that non tinygrad Python operations won't work. Randomness functions work as expected.
 
 Unlike other JITs, we JIT everything, including the optimizer. Think of it as a dumb replay on different data.
 
@@ -143,24 +145,24 @@ for step in range(7000):
 It doesn't take long to reach 98%, and it usually reaches 99%.
 
 ```
-step    0, loss 3.98, acc 62.53%
-step  100, loss 0.38, acc 94.25%
-step  200, loss 0.35, acc 96.46%
-step  300, loss 0.11, acc 96.70%
-step  400, loss 0.12, acc 96.81%
-step  500, loss 0.17, acc 97.43%
-step  600, loss 0.16, acc 97.34%
-step  700, loss 0.17, acc 97.52%
-step  800, loss 0.27, acc 97.59%
-step  900, loss 0.09, acc 97.62%
-step 1000, loss 0.16, acc 97.82%
-step 1100, loss 0.13, acc 97.74%
-step 1200, loss 0.05, acc 97.79%
-step 1300, loss 0.17, acc 97.47%
-step 1400, loss 0.07, acc 97.60%
-step 1500, loss 0.13, acc 97.99%
-step 1600, loss 0.12, acc 97.92%
-step 1700, loss 0.09, acc 98.15%
+step    0, loss 4.03, acc 71.43%
+step  100, loss 0.34, acc 93.86%
+step  200, loss 0.23, acc 95.97%
+step  300, loss 0.18, acc 96.32%
+step  400, loss 0.18, acc 96.76%
+step  500, loss 0.13, acc 97.46%
+step  600, loss 0.14, acc 97.45%
+step  700, loss 0.10, acc 97.27%
+step  800, loss 0.23, acc 97.49%
+step  900, loss 0.13, acc 97.51%
+step 1000, loss 0.13, acc 97.88%
+step 1100, loss 0.11, acc 97.72%
+step 1200, loss 0.14, acc 97.65%
+step 1300, loss 0.12, acc 98.04%
+step 1400, loss 0.25, acc 98.17%
+step 1500, loss 0.11, acc 97.86%
+step 1600, loss 0.21, acc 98.21%
+step 1700, loss 0.14, acc 98.34%
 ...
 ```
 

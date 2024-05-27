@@ -10,21 +10,6 @@
 ::: tinygrad.Tensor.dtype
 ::: tinygrad.Tensor.device
 
-## tinygrad ops
-
-::: tinygrad.Tensor.schedule_with_vars
-::: tinygrad.Tensor.schedule
-::: tinygrad.Tensor.realize
-::: tinygrad.Tensor.replace
-::: tinygrad.Tensor.assign
-::: tinygrad.Tensor.detach
-::: tinygrad.Tensor.to
-::: tinygrad.Tensor.to_
-::: tinygrad.Tensor.shard
-::: tinygrad.Tensor.shard_
-::: tinygrad.Tensor.contiguous
-::: tinygrad.Tensor.contiguous_backward
-
 ## Creation (basic)
 
 ::: tinygrad.Tensor.empty
@@ -33,11 +18,15 @@
 ::: tinygrad.Tensor.full
 ::: tinygrad.Tensor.arange
 ::: tinygrad.Tensor.eye
+::: tinygrad.Tensor.full_like
+::: tinygrad.Tensor.zeros_like
+::: tinygrad.Tensor.ones_like
 
 ## Creation (random)
 
 ::: tinygrad.Tensor.rand
 ::: tinygrad.Tensor.randn
+::: tinygrad.Tensor.randint
 ::: tinygrad.Tensor.normal
 ::: tinygrad.Tensor.uniform
 ::: tinygrad.Tensor.scaled_uniform
@@ -52,8 +41,25 @@
 ::: tinygrad.Tensor.tolist
 ::: tinygrad.Tensor.numpy
 
+## tinygrad ops
+
+::: tinygrad.Tensor.schedule_with_vars
+::: tinygrad.Tensor.schedule
+::: tinygrad.Tensor.realize
+::: tinygrad.Tensor.replace
+::: tinygrad.Tensor.assign
+::: tinygrad.Tensor.detach
+::: tinygrad.Tensor.to
+::: tinygrad.Tensor.to_
+::: tinygrad.Tensor.shard
+::: tinygrad.Tensor.shard_
+::: tinygrad.Tensor.contiguous
+::: tinygrad.Tensor.contiguous_backward
+::: tinygrad.Tensor.backward
+
 ## Movement (low level)
 
+::: tinygrad.Tensor.view
 ::: tinygrad.Tensor.reshape
 ::: tinygrad.Tensor.expand
 ::: tinygrad.Tensor.permute
@@ -63,8 +69,6 @@
 
 ## Movement (high level)
 
-::: tinygrad.Tensor.__getitem__
-::: tinygrad.Tensor.slice
 ::: tinygrad.Tensor.gather
 ::: tinygrad.Tensor.cat
 ::: tinygrad.Tensor.stack
@@ -74,6 +78,7 @@
 ::: tinygrad.Tensor.squeeze
 ::: tinygrad.Tensor.unsqueeze
 ::: tinygrad.Tensor.pad2d
+::: tinygrad.Tensor.T
 ::: tinygrad.Tensor.transpose
 ::: tinygrad.Tensor.flatten
 ::: tinygrad.Tensor.unflatten
@@ -88,20 +93,22 @@
 ::: tinygrad.Tensor.std
 ::: tinygrad.Tensor.softmax
 ::: tinygrad.Tensor.log_softmax
+::: tinygrad.Tensor.logsumexp
 ::: tinygrad.Tensor.argmax
+::: tinygrad.Tensor.argmin
 
 ## Processing
 
+::: tinygrad.Tensor.avg_pool2d
+::: tinygrad.Tensor.max_pool2d
 ::: tinygrad.Tensor.conv2d
+::: tinygrad.Tensor.conv_transpose2d
 ::: tinygrad.Tensor.dot
 ::: tinygrad.Tensor.matmul
 ::: tinygrad.Tensor.einsum
 ::: tinygrad.Tensor.cumsum
 ::: tinygrad.Tensor.triu
 ::: tinygrad.Tensor.tril
-::: tinygrad.Tensor.avg_pool2d
-::: tinygrad.Tensor.max_pool2d
-::: tinygrad.Tensor.conv_transpose2d
 
 ## Unary Ops (math)
 
@@ -111,6 +118,11 @@
 ::: tinygrad.Tensor.log2
 ::: tinygrad.Tensor.exp
 ::: tinygrad.Tensor.exp2
+::: tinygrad.Tensor.sqrt
+::: tinygrad.Tensor.rsqrt
+::: tinygrad.Tensor.sin
+::: tinygrad.Tensor.cos
+::: tinygrad.Tensor.tan
 ::: tinygrad.Tensor.trunc
 ::: tinygrad.Tensor.ceil
 ::: tinygrad.Tensor.floor
@@ -153,6 +165,8 @@
 ::: tinygrad.Tensor.mul
 ::: tinygrad.Tensor.div
 ::: tinygrad.Tensor.xor
+::: tinygrad.Tensor.lshift
+::: tinygrad.Tensor.rshift
 ::: tinygrad.Tensor.pow
 ::: tinygrad.Tensor.maximum
 ::: tinygrad.Tensor.minimum
@@ -177,4 +191,3 @@
 ::: tinygrad.Tensor.bitcast
 ::: tinygrad.Tensor.float
 ::: tinygrad.Tensor.half
-

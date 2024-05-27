@@ -138,7 +138,7 @@ class HWPM4Queue:
                amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL2_INV(gl2)]
     return self
 
-  def exec(self, prg:AMDProgram, kernargs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1)):
+  def exec(self, prg, kernargs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), signal=None, signal_value=0):
     self.hdp_flush()
     self.invalidate_cache()
 
@@ -167,6 +167,8 @@ class HWPM4Queue:
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), regCOMPUTE_RESOURCE_LIMITS, 0]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_DISPATCH_DIRECT, 3), *global_size, CS_W32_EN | FORCE_START_AT_000 | COMPUTE_SHADER_EN]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_EVENT_WRITE, 0), amd_gpu.EVENT_TYPE(7) | amd_gpu.EVENT_INDEX(4)]
+
+    if signal is not None: self.signal(signal, signal_value)
     return self
 
   def update_exec(self, cmd_ptr, global_size, local_size):
@@ -418,7 +420,7 @@ class AMDDevice(Compiled):
   kfd:int = -1
   event_page:Any = None  # TODO: fix types in kfd, Optional[kfd.struct_kfd_ioctl_alloc_memory_of_gpu_args]
   signals_page:Any = None
-  signal_number:int = 16
+  signals_pool:List[hsa.amd_signal_t] = []
   gpus:List[pathlib.Path] = []
 
   def _gpu_map(self, mem):
@@ -456,18 +458,12 @@ class AMDDevice(Compiled):
   def _set_signal(self, sig, value): sig.value = value
 
   @classmethod
-  def _get_signal(self, num=None, sync_event=None, value=0) -> hsa.amd_signal_t:
-    if num is None:
-      num = AMDDevice.signal_number
-      AMDDevice.signal_number += 1
-      if AMDDevice.signal_number == SIGNAL_COUNT: AMDDevice.signal_number = 16
-    #print("signal", num)
-    ret = hsa.amd_signal_t.from_address(AMDDevice.signals_page.va_addr + SIGNAL_SIZE*num)
-    ret.value = value
-    ret.kind = hsa.AMD_SIGNAL_KIND_USER
+  def _get_signal(self, value=0, sync_event=None) -> hsa.amd_signal_t:
+    self._set_signal(ret := self.signals_pool.pop(), value)
     if sync_event is not None:
       ret.event_mailbox_ptr = AMDDevice.event_page.va_addr + sync_event.event_slot_index*8
       ret.event_id = sync_event.event_id
+    else: ret.event_mailbox_ptr = ret.event_id = 0
     return ret
 
   @classmethod
@@ -496,6 +492,8 @@ class AMDDevice(Compiled):
     if AMDDevice.event_page is None:
       AMDDevice.signals_page = self._gpu_alloc(SIGNAL_SIZE*SIGNAL_COUNT, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
       AMDDevice.event_page = self._gpu_alloc(0x8000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
+      for off in range(0, AMDDevice.signals_page.size, SIGNAL_SIZE):
+        AMDDevice.signals_pool.append(hsa.amd_signal_t.from_address(AMDDevice.signals_page.va_addr + off))
       sync_event = kio.create_event(AMDDevice.kfd, event_page_offset=AMDDevice.event_page.handle, auto_reset=1)
     else:
       self._gpu_map(AMDDevice.signals_page)
@@ -503,8 +501,8 @@ class AMDDevice(Compiled):
       sync_event = kio.create_event(AMDDevice.kfd, auto_reset=1)
 
     self.timeline_value: int = 1
-    self.timeline_signal = AMDDevice._get_signal(self.device_id*2, sync_event=sync_event)
-    self._shadow_timeline_signal = AMDDevice._get_signal(self.device_id*2+1, sync_event=kio.create_event(AMDDevice.kfd, auto_reset=1))
+    self.timeline_signal = AMDDevice._get_signal(sync_event=sync_event)
+    self._shadow_timeline_signal = AMDDevice._get_signal(sync_event=kio.create_event(AMDDevice.kfd, auto_reset=1))
 
     self.kernargs = self._gpu_alloc(0x1000000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
     self.kernargs_ptr = self.kernargs.va_addr

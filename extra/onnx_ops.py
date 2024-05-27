@@ -392,7 +392,7 @@ def Gather(x: Tensor, indices: Tensor, axis=0):
 
 def GatherElements(x: Tensor, indices: Tensor, axis):
   indices = (indices < 0).where(x.shape[axis], 0) + indices
-  return x.gather(indices, axis)
+  return x.gather(axis, indices)
 
 # TODO clean this up, it's taking the longest in CI
 def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, coordinate_transformation_mode='half_pixel',
@@ -587,7 +587,7 @@ def AffineGrid(theta: Tensor, size: Tensor, align_corners=0):
     if dim == 0: stackable = [a.reshape(dim_sz, *[1]*(len(data_sz)-1)) + size_zeros, *stackable]
     elif dim == 1: stackable = [a.reshape(1, dim_sz, *[1]*(len(data_sz)-2)) + size_zeros, *stackable]
     else: stackable = [a.reshape(1, dim_sz) + size_zeros, *stackable]
-  original_grid = Tensor.stack(stackable, dim=len(data_sz))
+  original_grid = Tensor.stack(*stackable, dim=len(data_sz))
   if original_grid.ndim == 3:
     N, dim_2d, dim_homo = theta.shape
     assert dim_2d == 2 and dim_homo == 3
@@ -650,7 +650,7 @@ def Attention(x:Tensor, weights, bias:Optional[Tensor]=None, mask_index:Optional
   if unidirectional:  # gpt-style
     assert hidden_size == v_hidden_size
     xqkv = x.linear(weights, bias)
-    xq, xk, xv = [xqkv.slice([None, None, (i*hidden_size, (i+1)*hidden_size)]) for i in range(3)]
+    xq, xk, xv = [xqkv._slice([None, None, (i*hidden_size, (i+1)*hidden_size)]) for i in range(3)]
   else:  # bert-style
     wq, wk, wv = weights[:,:hidden_size], weights[:,hidden_size:hidden_size+v_hidden_size], weights[:,hidden_size+v_hidden_size:]
     bq, bk, bv = (bias[:hidden_size], bias[hidden_size:hidden_size+v_hidden_size], bias[hidden_size+v_hidden_size]) if bias is not None else None
