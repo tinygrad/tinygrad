@@ -1,6 +1,6 @@
 import functools, io, math
 from typing import Union, Tuple, Optional, List, Any
-from tinygrad.tensor import Tensor, broadcast_shape
+from tinygrad.tensor import Tensor, _broadcast_shape
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.helpers import prod, flatten
 from extra.onnx import DTYPE_MAP, to_python_const
@@ -82,7 +82,7 @@ def Size(data: Tensor): return prod(data if isinstance(data, list) else data.sha
 def Flatten(x: Tensor, axis=1): return x.reshape(prod(x.shape[0:axis]), -1)
 def Reshape(data: Tensor, shape: Tensor, allowzero=0):
   return data.reshape([int(x) if x != 0 else (0 if allowzero else data.shape[i]) for i,x in enumerate(to_python_const(shape))])
-def Expand(x: Tensor, shape:Tensor): return x.expand(broadcast_shape(x.shape, tuple(to_python_const(shape))))
+def Expand(x: Tensor, shape:Tensor): return x.expand(_broadcast_shape(x.shape, tuple(to_python_const(shape))))
 def Shrink(x: Tensor, bias=0.0, lambd=0.5): return (x < -lambd)*(x+bias) + (x > lambd)*(x-bias)
 def And(x:Tensor, y:Tensor): return (x==y).where(x, False)
 def Or(x:Tensor, y:Tensor): return (x==y).where(x, True)
@@ -392,7 +392,7 @@ def Gather(x: Tensor, indices: Tensor, axis=0):
 
 def GatherElements(x: Tensor, indices: Tensor, axis):
   indices = (indices < 0).where(x.shape[axis], 0) + indices
-  return x.gather(indices, axis)
+  return x.gather(axis, indices)
 
 # TODO clean this up, it's taking the longest in CI
 def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, coordinate_transformation_mode='half_pixel',
@@ -587,7 +587,7 @@ def AffineGrid(theta: Tensor, size: Tensor, align_corners=0):
     if dim == 0: stackable = [a.reshape(dim_sz, *[1]*(len(data_sz)-1)) + size_zeros, *stackable]
     elif dim == 1: stackable = [a.reshape(1, dim_sz, *[1]*(len(data_sz)-2)) + size_zeros, *stackable]
     else: stackable = [a.reshape(1, dim_sz) + size_zeros, *stackable]
-  original_grid = Tensor.stack(stackable, dim=len(data_sz))
+  original_grid = Tensor.stack(*stackable, dim=len(data_sz))
   if original_grid.ndim == 3:
     N, dim_2d, dim_homo = theta.shape
     assert dim_2d == 2 and dim_homo == 3
@@ -650,7 +650,7 @@ def Attention(x:Tensor, weights, bias:Optional[Tensor]=None, mask_index:Optional
   if unidirectional:  # gpt-style
     assert hidden_size == v_hidden_size
     xqkv = x.linear(weights, bias)
-    xq, xk, xv = [xqkv.slice([None, None, (i*hidden_size, (i+1)*hidden_size)]) for i in range(3)]
+    xq, xk, xv = [xqkv._slice([None, None, (i*hidden_size, (i+1)*hidden_size)]) for i in range(3)]
   else:  # bert-style
     wq, wk, wv = weights[:,:hidden_size], weights[:,hidden_size:hidden_size+v_hidden_size], weights[:,hidden_size+v_hidden_size:]
     bq, bk, bv = (bias[:hidden_size], bias[hidden_size:hidden_size+v_hidden_size], bias[hidden_size+v_hidden_size]) if bias is not None else None

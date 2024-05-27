@@ -2,7 +2,7 @@ import unittest
 import numpy as np
 from tinygrad import Device, dtypes, Tensor, Variable
 from tinygrad.dtype import ImageDType
-from tinygrad.features.image import to_image_idx
+from tinygrad.codegen.linearizer import to_image_idx
 
 @unittest.skipIf(Device.DEFAULT != "GPU", "only images on GPU")
 class TestImageDType(unittest.TestCase):

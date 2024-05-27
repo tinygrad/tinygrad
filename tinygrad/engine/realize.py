@@ -135,6 +135,9 @@ def get_runner(dname:str, ast:Tuple[LazyOp, ...]) -> CompiledRunner:
     method_cache[ckey] = ret = CompiledRunner(replace(bret.p, dname=dname), bret.lib)
   else:
     prg: Program = get_linearizer(Device[dname].renderer, ast).to_program()
+    if hasattr(prg.uops, "fuzz_paths"):
+      from test.external.fuzz_uops import UOpsFuzzerRunner
+      return UOpsFuzzerRunner(replace(prg, dname=dname))
     method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, dname=dname))
   return ret
 
@@ -182,7 +185,7 @@ def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, Non
 
 capturing: List = []  # put classes with an add method in here
 
-def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[Variable, int]]=None):
+def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[Variable, int]]=None, do_update_stats=True):
   for ei in lower_schedule(schedule):
     if len(capturing): capturing[0].add(ei)
-    ei.run(var_vals)
+    ei.run(var_vals, do_update_stats=do_update_stats)

@@ -1,9 +1,9 @@
 from __future__ import annotations
 from typing import Tuple, List, Any, cast
 import os, fcntl, ctypes, ctypes.util, functools, re, pathlib, mmap, struct, errno, subprocess, time
-from tinygrad.device import Compiled, Compiler, BufferOptions, LRUAllocator
+from tinygrad.device import Compiled, Compiler, CompileError, BufferOptions, LRUAllocator
 from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up, DEBUG
-from tinygrad.renderer.cstyle import HIPRenderer
+from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.runtime.driver.hip_comgr import compile_hip
 from tinygrad.runtime.ops_hsa import HSACompiler
 import tinygrad.runtime.autogen.kfd as kfd
@@ -77,7 +77,9 @@ class AMDCompiler(Compiler):
   def __init__(self, arch:str):
     self.arch = arch
     super().__init__(f"compile_hip_{self.arch}")
-  def compile(self, src:str) -> bytes: return compile_hip(src, self.arch)
+  def compile(self, src:str) -> bytes:
+    try: return compile_hip(src, self.arch)
+    except RuntimeError as e: raise CompileError(e)
 
 PAGE_SIZE = 0x1000
 SIGNAL_SIZE, SIGNAL_COUNT = ctypes.sizeof(hsa.amd_signal_t), 16384
@@ -113,6 +115,7 @@ CS_W32_EN = 1 << 15
 
 class HWPM4Queue:
   def __init__(self): self.q = []
+  def ptr(self) -> int: return len(self.q)
 
   def hdp_flush(self):
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_WAIT_REG_MEM, 5),
@@ -135,7 +138,7 @@ class HWPM4Queue:
                amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL2_INV(gl2)]
     return self
 
-  def exec(self, prg:AMDProgram, kernargs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1)):
+  def exec(self, prg, kernargs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), signal=None, signal_value=0):
     self.hdp_flush()
     self.invalidate_cache()
 
@@ -163,7 +166,16 @@ class HWPM4Queue:
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 8), regCOMPUTE_START_X, 0, 0, 0, *local_size, 0, 0]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), regCOMPUTE_RESOURCE_LIMITS, 0]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_DISPATCH_DIRECT, 3), *global_size, CS_W32_EN | FORCE_START_AT_000 | COMPUTE_SHADER_EN]
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_EVENT_WRITE, 0), amd_gpu.EVENT_TYPE(7) | amd_gpu.EVENT_INDEX(4)]
+
+    if signal is not None: self.signal(signal, signal_value)
     return self
+
+  def update_exec(self, cmd_ptr, global_size, local_size):
+    # Patch the exec cmd with new launch dims
+    assert self.q[cmd_ptr + 67] == amd_gpu.PACKET3(amd_gpu.PACKET3_DISPATCH_DIRECT, 3),"The pointer does not point to a packet of this type"
+    self.q[cmd_ptr + 59 : cmd_ptr + 62] = local_size
+    self.q[cmd_ptr + 68 : cmd_ptr + 71] = global_size
 
   def wait(self, signal:hsa.amd_signal_t, value=0):
     addr = ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET
@@ -408,7 +420,7 @@ class AMDDevice(Compiled):
   kfd:int = -1
   event_page:Any = None  # TODO: fix types in kfd, Optional[kfd.struct_kfd_ioctl_alloc_memory_of_gpu_args]
   signals_page:Any = None
-  signal_number:int = 16
+  signals_pool:List[hsa.amd_signal_t] = []
   gpus:List[pathlib.Path] = []
 
   def _gpu_map(self, mem):
@@ -446,18 +458,12 @@ class AMDDevice(Compiled):
   def _set_signal(self, sig, value): sig.value = value
 
   @classmethod
-  def _get_signal(self, num=None, sync_event=None, value=0) -> hsa.amd_signal_t:
-    if num is None:
-      num = AMDDevice.signal_number
-      AMDDevice.signal_number += 1
-      if AMDDevice.signal_number == SIGNAL_COUNT: AMDDevice.signal_number = 16
-    #print("signal", num)
-    ret = hsa.amd_signal_t.from_address(AMDDevice.signals_page.va_addr + SIGNAL_SIZE*num)
-    ret.value = value
-    ret.kind = hsa.AMD_SIGNAL_KIND_USER
+  def _get_signal(self, value=0, sync_event=None) -> hsa.amd_signal_t:
+    self._set_signal(ret := self.signals_pool.pop(), value)
     if sync_event is not None:
       ret.event_mailbox_ptr = AMDDevice.event_page.va_addr + sync_event.event_slot_index*8
       ret.event_id = sync_event.event_id
+    else: ret.event_mailbox_ptr = ret.event_id = 0
     return ret
 
   @classmethod
@@ -486,6 +492,8 @@ class AMDDevice(Compiled):
     if AMDDevice.event_page is None:
       AMDDevice.signals_page = self._gpu_alloc(SIGNAL_SIZE*SIGNAL_COUNT, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
       AMDDevice.event_page = self._gpu_alloc(0x8000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
+      for off in range(0, AMDDevice.signals_page.size, SIGNAL_SIZE):
+        AMDDevice.signals_pool.append(hsa.amd_signal_t.from_address(AMDDevice.signals_page.va_addr + off))
       sync_event = kio.create_event(AMDDevice.kfd, event_page_offset=AMDDevice.event_page.handle, auto_reset=1)
     else:
       self._gpu_map(AMDDevice.signals_page)
@@ -493,8 +501,8 @@ class AMDDevice(Compiled):
       sync_event = kio.create_event(AMDDevice.kfd, auto_reset=1)
 
     self.timeline_value: int = 1
-    self.timeline_signal = AMDDevice._get_signal(self.device_id*2, sync_event=sync_event)
-    self._shadow_timeline_signal = AMDDevice._get_signal(self.device_id*2+1, sync_event=kio.create_event(AMDDevice.kfd, auto_reset=1))
+    self.timeline_signal = AMDDevice._get_signal(sync_event=sync_event)
+    self._shadow_timeline_signal = AMDDevice._get_signal(sync_event=kio.create_event(AMDDevice.kfd, auto_reset=1))
 
     self.kernargs = self._gpu_alloc(0x1000000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
     self.kernargs_ptr = self.kernargs.va_addr
@@ -541,7 +549,7 @@ class AMDDevice(Compiled):
     self.pm4_doorbell = to_mv(self.doorbells + self.pm4_queue.doorbell_offset - self.doorbells_base, 8).cast("Q")
 
     from tinygrad.runtime.graph.hcq import HCQGraph
-    super().__init__(device, AMDAllocator(self), HIPRenderer(), HSACompiler(self.arch),
+    super().__init__(device, AMDAllocator(self), AMDRenderer(), HSACompiler(self.arch),
                      functools.partial(AMDProgram, self),
                      functools.partial(HCQGraph, AMDDevice, HWPM4Queue, HWCopyQueue))
 

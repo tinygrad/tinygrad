@@ -19,9 +19,11 @@ WAIT_REG_MEM_FUNCTION_ALWAYS = 0
 WAIT_REG_MEM_FUNCTION_EQ = 3 # ==
 WAIT_REG_MEM_FUNCTION_GEQ = 5 # >=
 
-remu = ctypes.CDLL("/usr/local/lib/libremu.so")
-remu.run_asm.restype = ctypes.c_uint32
-remu.run_asm.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p]
+try:
+  remu = ctypes.CDLL("/usr/local/lib/libremu.so")
+  remu.run_asm.restype = ctypes.c_uint32
+  remu.run_asm.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p]
+except Exception: pass
 
 def create_sdma_packets():
   # TODO: clean up this, if we want to keep it
@@ -75,6 +77,7 @@ class PM4Executor(AMDQueue):
       elif op == amd_gpu.PACKET3_RELEASE_MEM: self._exec_release_mem(n)
       elif op == amd_gpu.PACKET3_WAIT_REG_MEM: cont = self._exec_wait_reg_mem(n)
       elif op == amd_gpu.PACKET3_DISPATCH_DIRECT: self._exec_dispatch_direct(n)
+      elif op == amd_gpu.PACKET3_EVENT_WRITE: self._exec_event_write(n)
       else: raise RuntimeError(f"PM4: Unknown opcode: {op}")
       if not cont: return
 
@@ -150,6 +153,10 @@ class PM4Executor(AMDQueue):
 
     assert prg_sz > 0, "Invalid prg ptr (not found in mapped ranges)"
     remu.run_asm(prg_addr, prg_sz, *gl, *lc, args_addr)
+
+  def _exec_event_write(self, n):
+    assert n == 0
+    _ = self._next_dword() # do not emulate events for now
 
 class SDMAExecutor(AMDQueue):
   def __init__(self, gpu, base, size, rptr, wptr): 
