@@ -13,9 +13,8 @@ nav:
     - Function: function.md
     - dtypes: dtypes.md
     - nn (Neural Networks): nn.md
-  - Notes:
-    - Developer: developer.md
-    - Environment: env_vars.md
+    - Environment Variables: env_vars.md
+  - Developer: developer.md
 #- tinygrad: reference/
 
 #extra_css:
