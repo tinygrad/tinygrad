@@ -279,7 +279,7 @@ def batch_load_unet3d(preprocessed_dir, batch_size=6, val=False, shuffle=True):
   procs, data_out_count = [], [0] * batch_count
   sz, shm_path = (batch_size * batch_count, 1, 128, 128, 128), "/dev/shm/unet3d"
   if os.path.exists(shm_path): os.unlink(shm_path)
-  shm = shared_memory.SharedMemory(name="/dev/shm/unet3d", create=True, size=prod(sz))
+  shm = shared_memory.SharedMemory(name=shm_path, create=True, size=prod(sz))
 
   shutdown = False
   class Cookie:
