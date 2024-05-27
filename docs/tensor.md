@@ -46,7 +46,7 @@
 ::: tinygrad.Tensor.schedule_with_vars
 ::: tinygrad.Tensor.schedule
 ::: tinygrad.Tensor.realize
-::: tinygrad.Tensor.replace
+::: tinygrad.Tensor._replace
 ::: tinygrad.Tensor.assign
 ::: tinygrad.Tensor.detach
 ::: tinygrad.Tensor.to
