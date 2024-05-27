@@ -53,7 +53,7 @@ class UOp:
   @staticmethod
   def const(dtype, val): return UOp(UOps.CONST, dtype, arg=dtypes.as_const(val, dtype))
   @staticmethod
-  def alu(arg, *vin:UOp): return UOp(UOps.ALU, vin[0].dtype, vin, arg)
+  def alu(arg, *vin:UOp): return UOp(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPEQ} else vin[-1].dtype, vin, arg)
   @functools.cached_property
   def parents(self) -> Set[UOp]: return set.union(set(self.vin), *[x.parents for x in self.vin])
 

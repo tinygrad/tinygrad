@@ -5,6 +5,9 @@ from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes, least_upper_dtype
 
 class Optimizer:
+  """
+  Base class for all optimizers.
+  """
   def __init__(self, params: List[Tensor], lr: float):
     # if it's None, but being put into an optimizer, set it to True
     for x in params:
@@ -19,10 +22,20 @@ class Optimizer:
                      dtype=least_upper_dtype(dtypes.default_float, dtypes.float32))
 
   def zero_grad(self):
+    """
+    Zeroes the gradients of all the parameters.
+    """
     for param in self.params: param.grad = None
 
-  def step(self): Tensor.realize(*self.schedule_step())
+  def step(self):
+    """
+    Performs a single optimization step.
+    """
+    Tensor.realize(*self.schedule_step())
   def schedule_step(self) -> List[Tensor]:
+    """
+    Returns the tensors that need to be realized to perform a single optimization step.
+    """
     assert Tensor.training, (
             f"""Tensor.training={Tensor.training}, Tensor.training must be enabled to use the optimizer.
                 - help: Consider setting Tensor.training=True before calling Optimizer.step().""")
@@ -30,6 +43,9 @@ class Optimizer:
   def _step(self) -> List[Tensor]: raise NotImplementedError
 
 class OptimizerGroup(Optimizer):
+  """
+  Combines multiple optimizers into one.
+  """
   def __init__(self, *optimizers: Optimizer): # pylint: disable=super-init-not-called
     self.optimizers = optimizers
     self.params, self.buffers = flatten([o.params for o in self.optimizers]), flatten([o.buffers for o in self.optimizers])
@@ -39,9 +55,22 @@ class OptimizerGroup(Optimizer):
 
 # LARS is essentially just trust ratio to SGD so if we just set the trust coeff 0.0 its just standard SGD.
 def SGD(params: List[Tensor], lr=0.001, momentum=0.0, weight_decay=0.0, nesterov=False, classic=False):
+  """
+  Stochastic Gradient Descent (SGD) optimizer with optional momentum and weight decay.
+
+  `classic` is a boolean flag that determines whether to use the popular momentum update rule or the classic momentum update rule.
+
+  - Described: https://paperswithcode.com/method/sgd
+  """
   return LARS(params, lr, momentum, weight_decay, nesterov, classic, tcoef=0.0)
 
 class LARS(Optimizer):
+  """
+  Layer-wise Adaptive Rate Scaling (LARS) optimizer with optional momentum and weight decay.
+
+  - Described: https://paperswithcode.com/method/lars
+  - Paper: https://arxiv.org/abs/1708.03888v3
+  """
   def __init__(self, params:List[Tensor], lr=0.001, momentum=0.9, weight_decay=1e-4, nesterov=False, classic=True, tcoef=0.001):
     super().__init__(params, lr)
     self.momentum, self.wd, self.nesterov, self.classic, self.tcoef = momentum, weight_decay, nesterov, classic, tcoef
@@ -70,13 +99,33 @@ class LARS(Optimizer):
     return self.b
 
 # LAMB is essentially just the trust ratio part of LARS applied to Adam/W so if we just set the trust ratio to 1.0 its just Adam/W.
-def AdamW(params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8, wd=0.01): return LAMB(params, lr, b1, b2, eps, wd, adam=True)
-def Adam(params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8): return LAMB(params, lr, b1, b2, eps, 0.0, adam=True)
+def AdamW(params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8, weight_decay=0.01):
+  """
+  AdamW optimizer with optional weight decay.
+
+  - Described: https://paperswithcode.com/method/adamw
+  - Paper: https://arxiv.org/abs/1711.05101v3
+  """
+  return LAMB(params, lr, b1, b2, eps, weight_decay, adam=True)
+def Adam(params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8):
+  """
+  Adam optimizer.
+
+  - Described: https://paperswithcode.com/method/adam
+  - Paper: https://arxiv.org/abs/1412.6980
+  """
+  return LAMB(params, lr, b1, b2, eps, 0.0, adam=True)
 
 class LAMB(Optimizer):
-  def __init__(self, params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, wd=0.0, adam=False):
+  """
+  LAMB optimizer with optional weight decay.
+
+  - Described: https://paperswithcode.com/method/lamb
+  - Paper: https://arxiv.org/abs/1904.00962
+  """
+  def __init__(self, params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, weight_decay=0.0, adam=False):
     super().__init__(params, lr)
-    self.b1, self.b2, self.eps, self.wd, self.adam = b1, b2, eps, wd, adam
+    self.b1, self.b2, self.eps, self.wd, self.adam = b1, b2, eps, weight_decay, adam
     self.b1_t, self.b2_t = (Tensor([1], dtype=dtypes.float32, device=self.device, requires_grad=False).realize() for _ in [b1, b2])
     self.m = [Tensor.zeros(*t.shape, dtype=dtypes.float32, device=t.device, requires_grad=False).contiguous() for t in self.params]
     self.v = [Tensor.zeros(*t.shape, dtype=dtypes.float32, device=t.device, requires_grad=False).contiguous() for t in self.params]

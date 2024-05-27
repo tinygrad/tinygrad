@@ -84,21 +84,23 @@ class NVCompiler(Compiler):
     return _get_bytes(prog, cuda.nvrtcGetCUBIN, cuda.nvrtcGetCUBINSize, cuda_check)
 
 class HWQueue:
-  def __init__(self): self.q, self.binded_device = [], None
+  def __init__(self): self.q, self.binded_device, self.next_cmd_index = [], None, 0
   def __del__(self):
     if self.binded_device is not None: self.binded_device._gpu_free(self.hw_page)
 
-  def ptr(self) -> int: return len(self.q)
+  def ptr(self) -> int: return self.next_cmd_index
 
   def wait(self, signal, value=0):
     self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(ctypes.addressof(from_mv(signal))), *nvdata64_le(value),
-               (3 << 0) | (1 << 12) | (1 << 24)] # ACQUIRE | ACQUIRE_SWITCH_TSG | PAYLOAD_SIZE_64BIT
+               (3 << 0) | (1 << 24)] # ACQUIRE | PAYLOAD_SIZE_64BIT
+    self.next_cmd_index += 1
     return self
 
   def signal(self, signal, value=0, timestamp=False):
     self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(ctypes.addressof(from_mv(signal))), *nvdata64_le(value),
                (1 << 0) | (1 << 20) | (1 << 24) | ((1 << 25) if timestamp else 0)] # RELEASE | RELEASE_WFI | PAYLOAD_SIZE_64BIT | RELEASE_TIMESTAMP
     self.q += [nvmethod(0, nv_gpu.NVC56F_NON_STALL_INTERRUPT, 1), 0x0]
+    self.next_cmd_index += 1
     return self
 
   def bind(self, device: NVDevice):
@@ -123,29 +125,51 @@ class HWQueue:
     return put_value + 1
 
 class HWComputeQueue(HWQueue):
+  def __init__(self):
+    super().__init__()
+    self.ptr_to_qmd = {}
+
   def copy_from_cpu(self, gpuaddr, data):
     self.q += [nvmethod(1, nv_gpu.NVC6C0_OFFSET_OUT_UPPER, 2), *nvdata64(gpuaddr)]
     self.q += [nvmethod(1, nv_gpu.NVC6C0_LINE_LENGTH_IN, 2), len(data)*4, 0x1]
     self.q += [nvmethod(1, nv_gpu.NVC6C0_LAUNCH_DMA, 1), 0x41]
     self.q += [nvmethod(1, nv_gpu.NVC6C0_LOAD_INLINE_DATA, len(data), typ=6)] + [x for x in data]
+    self.next_cmd_index += 1
     return self
 
-  def exec(self, prg, kernargs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1)):
+  def exec(self, prg, kernargs, global_size=(1,1,1), local_size=(1,1,1), signal=None, signal_value=0, chain_exec_ptr=None):
     prg.qmd.cta_raster_width, prg.qmd.cta_raster_height, prg.qmd.cta_raster_depth = global_size
     prg.qmd.cta_thread_dimension0, prg.qmd.cta_thread_dimension1, prg.qmd.cta_thread_dimension2 = local_size
     prg.qmd.constant_buffer_addr_lower_0 = kernargs & 0xffffffff
     prg.qmd.constant_buffer_addr_upper_0 = kernargs >> 32
-    self.q += [nvmethod(1, nv_gpu.NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI, 1), (1 << 12) | (1 << 4) | (1 << 0)]
-    self.q += [nvmethod(1, nv_gpu.NVC6C0_SET_INLINE_QMD_ADDRESS_A, 0x42), *nvdata64((kernargs + round_up(prg.constbuf_0_size, 1 << 8)) >> 8)]
-    self.q += [x for x in to_mv(ctypes.addressof(prg.qmd), ctypes.sizeof(prg.qmd)).cast("I")]
+    if signal is not None:
+      prg.qmd.release0_address_lower = ctypes.addressof(from_mv(signal)) & 0xffffffff
+      prg.qmd.release0_address_upper = ctypes.addressof(from_mv(signal)) >> 32
+      prg.qmd.release0_payload_lower = signal_value & 0xffffffff
+      prg.qmd.release0_payload_upper = signal_value >> 32
+      prg.qmd.release0_enable = 1
+    else: prg.qmd.release0_enable = 0
+
+    ctypes.memmove(qmd_addr:=(kernargs + round_up(prg.constbuf_0_size, 1 << 8)), ctypes.addressof(prg.qmd), 0x40 * 4)
+    self.ptr_to_qmd[self.ptr()] = qmd_struct_t.from_address(qmd_addr) # Save qmd for later update
+
+    if chain_exec_ptr is None:
+      self.q += [nvmethod(1, nv_gpu.NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI, 1), (1 << 12) | (1 << 4) | (1 << 0)]
+      self.q += [nvmethod(1, nv_gpu.NVC6C0_SEND_PCAS_A, 0x1), qmd_addr >> 8]
+      self.q += [nvmethod(1, nv_gpu.NVC6C0_SEND_SIGNALING_PCAS2_B, 0x1), 9]
+    else:
+      self.ptr_to_qmd[chain_exec_ptr].dependent_qmd0_pointer = qmd_addr >> 8
+      self.ptr_to_qmd[chain_exec_ptr].dependent_qmd0_action = 1
+      self.ptr_to_qmd[chain_exec_ptr].dependent_qmd0_prefetch = 1
+      self.ptr_to_qmd[chain_exec_ptr].dependent_qmd0_enable = 1
+    self.next_cmd_index += 1
     return self
 
   def update_exec(self, cmd_ptr, global_size, local_size):
     # Patch the exec cmd with new launch dims
-    assert self.q[cmd_ptr + 2] == nvmethod(1, nv_gpu.NVC6C0_SET_INLINE_QMD_ADDRESS_A, 0x42),"The pointer does not point to a packet of this type"
-    self.q[cmd_ptr + 5 + 12 : cmd_ptr + 5 + 15] = array.array('I', global_size)
-    self.q[cmd_ptr + 5 + 18] = (self.q[cmd_ptr + 5 + 18] & 0xffff) | ((local_size[0] & 0xffff) << 16)
-    self.q[cmd_ptr + 5 + 19] = (local_size[1] & 0xffff) | ((local_size[2] & 0xffff) << 16)
+    qmd = self.ptr_to_qmd[cmd_ptr]
+    qmd.cta_raster_width, qmd.cta_raster_height, qmd.cta_raster_depth = global_size
+    qmd.cta_thread_dimension0, qmd.cta_thread_dimension1, qmd.cta_thread_dimension2 = local_size
 
   def submit(self, dev:NVDevice):
     if len(self.q) == 0: return
@@ -157,6 +181,7 @@ class HWCopyQueue(HWQueue):
     self.q += [nvmethod(4, nv_gpu.NVC6B5_OFFSET_IN_UPPER, 4), *nvdata64(src), *nvdata64(dest)]
     self.q += [nvmethod(4, nv_gpu.NVC6B5_LINE_LENGTH_IN, 1), copy_size]
     self.q += [nvmethod(4, nv_gpu.NVC6B5_LAUNCH_DMA, 1), 0x182] # TRANSFER_TYPE_NON_PIPELINED | DST_MEMORY_LAYOUT_PITCH | SRC_MEMORY_LAYOUT_PITCH
+    self.next_cmd_index += 1
     return self
 
   def submit(self, dev:NVDevice):
