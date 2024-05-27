@@ -75,7 +75,7 @@ class TestPatternMatcher(unittest.TestCase):
     c1 = UOp(UOps.CONST, dtypes.int, arg=42)
     a1 = UOp(UOps.GEP, dtypes.int, (c1,))
     self.assert_equiv_uops(matcher.rewrite(a1), c0)
-    
+
   def test_cast_const(self):
     matcher = PatternMatcher([({"__name__": "root", "uop": UOps.CAST, "vin": {"__name__": "c", "uop": UOps.CONST}},
                                lambda root, c: UOp.const(root.dtype, c.arg))])
@@ -83,7 +83,7 @@ class TestPatternMatcher(unittest.TestCase):
     c1 = UOp(UOps.CONST, dtypes.int, arg=42)
     a1 = UOp(UOps.CAST, dtypes.float, (c1,))
     self.assert_equiv_uops(matcher.rewrite(a1), c0)
-  
+
   def test_zero_add(self):
     matcher = PatternMatcher([({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"__name__": "x"},
                                                                                       {"uop": UOps.CONST, "arg": 0}]}, lambda x: x)])
