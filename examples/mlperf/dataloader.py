@@ -250,10 +250,15 @@ def load_unet3d_data(preprocessed_dir, queue_in, queue_out, X:Tensor, Y:Tensor):
 
   while (data := queue_in.get()) is not None:
     idx, fn, val = data
-    preprocessed_dataset_dir = (preprocessed_dir / ("val" if val else "train")) if preprocessed_dir is not None else None
-    x_path, y_path = preprocessed_dataset_dir / f"{os.path.basename(fn)}_x.npy", preprocessed_dataset_dir / f"{os.path.basename(fn)}_y.npy"
-    x, y = np.load(x_path), np.load(y_path)
-    x, y = rand_balanced_crop(x, y)
+    preprocessed_dataset_dir = (preprocessed_dir / ("val" if val else "train"))
+    x, y = np.load(preprocessed_dataset_dir / f"{os.path.basename(fn)}_x.npy"), np.load(preprocessed_dataset_dir / f"{os.path.basename(fn)}_y.npy")
+
+    if not val:
+      x, y = rand_balanced_crop(x, y)
+      x, y = rand_flip(x, y)
+      x, y = x.astype(np.float32), y.astype(np.uint8)
+      x = random_brightness_augmentation(x)
+      x = gaussian_noise(x)
 
     X[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = x.tobytes()
     Y[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = y.tobytes()
@@ -263,6 +268,8 @@ def load_unet3d_data(preprocessed_dir, queue_in, queue_out, X:Tensor, Y:Tensor):
 
 def batch_load_unet3d(preprocessed_dir, batch_size=6, val=False, shuffle=True):
   from extra.datasets.kits19 import get_train_files, get_val_files
+
+  assert preprocessed_dir is not None, "run preprocess_data on kits19"
 
   files = get_val_files() if val else get_train_files()
   batch_count = min(32, len(files) // batch_size)
