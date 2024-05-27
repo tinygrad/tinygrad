@@ -277,9 +277,10 @@ def batch_load_unet3d(preprocessed_dataset_dir:Path, batch_size:int=6, val:bool=
 
   queue_in, queue_out = Queue(), Queue()
   procs, data_out_count = [], [0] * batch_count
-  sz, shm_path = (batch_size * batch_count, 1, 128, 128, 128), "/Users/flata/unet3d"
+  shm_name = "unet3d"
+  sz, shm_path = (batch_size * batch_count, 1, 128, 128, 128), f"/dev/shm/{shm_name}"
   if os.path.exists(shm_path): os.unlink(shm_path)
-  shm = shared_memory.SharedMemory(name=shm_path, create=True, size=prod(sz))
+  shm = shared_memory.SharedMemory(name=shm_name, create=True, size=prod(sz))
 
   shutdown = False
   class Cookie:
