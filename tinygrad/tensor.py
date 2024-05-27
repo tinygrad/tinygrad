@@ -589,7 +589,7 @@ class Tensor:
     ```
     """
     dtype = kwargs.pop("dtype", dtypes.default_float)
-    return ((high-low) * Tensor.rand(*shape, **kwargs) + low).cast(dtype)
+    return ((high-low) * Tensor.rand(*shape, **kwargs)).cast(dtype) + low
 
   @staticmethod
   def scaled_uniform(*shape, **kwargs) -> Tensor:
