@@ -52,7 +52,7 @@ markdown_extensions:
 theme:
   name: material
   logo: logo_tiny_dark.svg
-  favicon: logo_tiny_dark.svg
+  favicon: favicon.svg
   features:
   - announce.dismiss
   - content.action.edit
