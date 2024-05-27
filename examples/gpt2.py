@@ -139,7 +139,7 @@ class GPT2:
 
     if HALF:
       for l in get_state_dict(model).values():
-        l.replace(l.half().realize())
+        l._replace(l.half().realize())
 
     return GPT2(model, tokenizer)
 

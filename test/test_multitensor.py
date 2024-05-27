@@ -264,7 +264,7 @@ class TestMultiTensor(unittest.TestCase):
     z = layer(x)
 
     layer_sharded = nn.Embedding(vocab_size, embed_size)
-    layer_sharded.weight.replace(layer.weight.shard((d0, d1), axis=1)).realize()
+    layer_sharded.weight._replace(layer.weight.shard((d0, d1), axis=1)).realize()
     x_sharded = x.shard((d0, d1), axis=None)
     z_shard = layer_sharded(x_sharded)
 

@@ -600,7 +600,7 @@ if __name__ == "__main__":
 
   if args.fp16:
     for l in get_state_dict(model).values():
-      l.replace(l.cast(dtypes.float16).realize())
+      l._replace(l.cast(dtypes.float16).realize())
 
   # run through CLIP to get context
   tokenizer = ClipTokenizer()

@@ -14,7 +14,7 @@ TIMING = getenv("TIMING")
 if __name__ == "__main__":
   model = GPT(GPTConfig(n_layer=getenv("NLAYER", 12), n_head=12, n_embd=768))
   #model.load_pretrained()
-  for p in nn.state.get_parameters(model): p.replace(Tensor.empty(p.shape, dtype=p.dtype)) # fake load pretrained
+  for p in nn.state.get_parameters(model): p._replace(Tensor.empty(p.shape, dtype=p.dtype)) # fake load pretrained
 
   seen = set()
   #early_sched = create_schedule([x.lazydata for x in nn.state.get_parameters(model)], seen)

@@ -168,7 +168,7 @@ class Tensor:
     run_schedule(*self.schedule_with_vars(*lst), do_update_stats=do_update_stats)
     return self
 
-  def replace(self, x:Tensor) -> Tensor:
+  def _replace(self, x:Tensor) -> Tensor:
     """
     Replace the data of this tensor with the data of another tensor. Only the shape of the tensors must match.
     """
@@ -193,7 +193,7 @@ class Tensor:
     assert self.dtype == x.dtype, f"assign dtype mismatch {self.dtype} != {x.dtype}"
     assert not isinstance(self.lazydata, MultiLazyBuffer) or self.lazydata.axis == x.lazydata.axis, "axis must match on MultiLazyBuffer"
     assert not x.requires_grad  # self requires_grad is okay?
-    if not self.lazydata.is_realized(): return self.replace(x)
+    if not self.lazydata.is_realized(): return self._replace(x)
     self.lazydata = self.lazydata.assign(x.lazydata)
     return self
   def detach(self) -> Tensor:
