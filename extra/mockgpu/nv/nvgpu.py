@@ -104,8 +104,8 @@ class GPFIFO:
       rel0 = to_mv(qmd.release0_address_lower + (qmd.release0_address_upper << 32), 0x8).cast('Q')
       rel0[0] = qmd.release0_payload_lower + (qmd.release0_payload_upper << 32)
     if qmd.dependent_qmd0_enable:
-      qmd_addr = qmd.dependent_qmd0_pointer << 8
-      if qmd.dependent_qmd0_action == 1: self.execute_qmd(self, qmd_addr)
+      if qmd.dependent_qmd0_action == 1: self.execute_qmd(qmd.dependent_qmd0_pointer << 8)
+      else: raise RuntimeError("unsupported dependent qmd action")
 
   def execute_cmd(self, cmd) -> SchedResult:
     if cmd == nv_gpu.NVC56F_SEM_EXECUTE: return self._exec_signal()

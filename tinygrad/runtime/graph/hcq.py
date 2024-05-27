@@ -59,7 +59,7 @@ class HCQGraph(MultiGraphRunner):
         deps = self.access_resources(ji.bufs[(outs:=ji.prg.p.outcount):], ji.bufs[:outs], (self.comp_signal[ji.prg.device], sig_val:=j+1))
         deps = [x for x in deps if id(x[0]) != id(self.comp_signal[ji.prg.device])]
 
-        # On NV, to synchronize kernel execution, we must either issue a wait or chain executions to schedule them in order. 
+        # On NV, to synchronize kernel execution, we must either issue a wait or chain executions to schedule them in order.
         # Chaining executions is preferred when possible, as it is faster.
         if ji.prg.device.dname.startswith("NV"):
           if len(deps) == 0 and self.comp_signal_val[ji.prg.device] > 0:
