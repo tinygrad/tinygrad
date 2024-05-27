@@ -59,7 +59,7 @@ class TestUOpGraph(unittest.TestCase):
     cast = g.add(UOps.CAST, dtypes.float.vec(2), (ld,))
     x = g.add(UOps.GEP, dtypes.float, (cast, ), arg=0)
     alu = g.add(UOps.ALU, dtypes.float, (x, ), UnaryOps.SQRT)
-    out = g.add(UOps.STORE, dtypes.float, (d0, idx, alu), UnaryOps.SQRT)
+    out = g.add(UOps.STORE, dtypes.float, (d0, idx, alu))
     g.add(UOps.SINK, None, (out,))
     self.assertEqual(len([x for x in g.uops if x.uop is UOps.CAST]), 0)
 
