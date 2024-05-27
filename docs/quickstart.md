@@ -1,4 +1,4 @@
-# tinygrad Quick Start Guide
+# Quick Start Guide
 
 This guide assumes no prior knowledge of pytorch or any other deep learning framework, but does assume some basic knowledge of neural networks.
 It is intended to be a very quick overview of the high level API that tinygrad provides.
