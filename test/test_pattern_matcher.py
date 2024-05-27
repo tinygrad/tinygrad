@@ -156,7 +156,7 @@ class TestPatternMatcher(unittest.TestCase):
     matcher = PatternMatcher([({"__name__": "x", "uop": UOps.CONST, "dtype": dtypes.float},
                                 lambda x: UOp(UOps.CAST, dtypes.int, (UOp(UOps.ALU, x.dtype, (x, x), BinaryOps.ADD),)))])
     matcher.rewrite_graph(uops)
-    # TODO: fix this. it"s 2 now
+    # TODO: fix this. it's 2 now
     # self.assertEqual(len(uops.uops), 1)
     self.assertEqual(len(uops.uops), 2)
     self.assert_equiv_uops(UOp(UOps.CONST, dtypes.int, arg=4), uops.uops[-1])
