@@ -204,6 +204,26 @@ class LazyBuffer:
     if DEBUG >= 3: print(f"split {divisor}: {self.shape} -> {splitted.shape} -> {new_shape}")
     return splitted._reduce_op(op, axis)._reduce_op(op, (len(new_shape),)).reshape(new_shape)  # reduce original axes, then split
 
+  # Taylor approximation
+  def square(self):
+    return self.e(BinaryOps.MUL, self)
+  
+  def pow(self, x: int):
+    assert isinstance(x, int), "pow must be an int"
+    if x == 0: return self.const(1)
+    ret = self.pow(x // 2).square()
+    if x % 2 == 0:
+      return ret
+    else:
+      return ret.e(BinaryOps.MUL, self)
+    
+  def exp(self, n: int):
+    term = self.pow(n).e(BinaryOps.DIV, self.const(math.factorial(n)))
+    if n == 0:
+      return term
+    else:
+      return term.e(BinaryOps.ADD, self.exp(n - 1))
+
   # *** movement ops ***
 
   def _view(self, new_st:ShapeTracker) -> LazyBuffer:
