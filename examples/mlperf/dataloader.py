@@ -268,16 +268,16 @@ def load_unet3d_data(preprocessed_dataset_dir, queue_in, queue_out, X:Tensor, Y:
     queue_out.put(idx)
   queue_out.put(None)
 
-def batch_load_unet3d(preprocessed_dataset_dir:Path, batch_size:int=6, val:bool=False, shuffle:bool=True):
+def batch_load_unet3d(preprocessed_dataset_dir:Path, batch_size:int=6, val:bool=False, shuffle:bool=True, seed=None):
   assert preprocessed_dataset_dir is not None, "run preprocess_data on kits19"
 
   files = list(preprocessed_dataset_dir.glob("*_x.npy"))
+  file_indices = list(range(len(files)))
   batch_count = min(32, len(files) // batch_size)
-  ds_iter = iter(files)
 
   queue_in, queue_out = Queue(), Queue()
   procs, data_out_count = [], [0] * batch_count
-  sz, shm_path = (batch_size * batch_count, 1, 128, 128, 128), "/dev/shm/unet3d"
+  sz, shm_path = (batch_size * batch_count, 1, 128, 128, 128), "/Users/flata/unet3d"
   if os.path.exists(shm_path): os.unlink(shm_path)
   shm = shared_memory.SharedMemory(name=shm_path, create=True, size=prod(sz))
 
@@ -292,8 +292,15 @@ def batch_load_unet3d(preprocessed_dataset_dir:Path, batch_size:int=6, val:bool=
 
   def enqueue_batch(bc):
     for idx in range(bc * batch_size, (bc+1) * batch_size):
-      fn = next(ds_iter)
+      fn = files[next(ds_iter)]
       queue_in.put((idx, fn, val))
+
+  def shuffle_indices(file_indices, seed=None):
+    rng = random.Random(seed)
+    rng.shuffle(file_indices)
+
+  if shuffle: shuffle_indices(file_indices, seed=seed)
+  ds_iter = iter(file_indices)
 
   try:
     X = Tensor.empty(*sz, dtype=dtypes.float32, device=f"disk:{shm_path}")
