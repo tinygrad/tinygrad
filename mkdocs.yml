@@ -3,17 +3,19 @@ site_name: tinygrad docs
 site_url: https://docs.tinygrad.org/
 repo_url: https://github.com/tinygrad/tinygrad/
 nav:
-- Home: index.md
-- Quickstart: quickstart.md
-- MNIST Tutorial: mnist.md
-- API:
-  - Tensor: tensor.md
-  - Function: function.md
-  - dtypes: dtypes.md
-  - nn (Neural Networks): nn.md
-- Showcase: showcase.md
-- Developer: developer.md
-- Environment: env_vars.md
+- Home:
+  - index.md
+  - Quickstart: quickstart.md
+  - Showcase: showcase.md
+  - MNIST Tutorial: mnist.md
+  - API Reference:
+    - Tensor: tensor.md
+    - Function: function.md
+    - dtypes: dtypes.md
+    - nn (Neural Networks): nn.md
+  - Notes:
+    - Developer: developer.md
+    - Environment: env_vars.md
 #- tinygrad: reference/
 
 #extra_css:
@@ -62,16 +64,36 @@ theme:
   - navigation.footer
   - navigation.indexes
   - navigation.sections
-  - navigation.tabs
-  - navigation.tabs.sticky
   - navigation.top
   - search.highlight
   - search.suggest
   - toc.follow
+  - toc.integrate
   palette:
     scheme: slate
     primary: black
     accent: lime
+  palette:
+    - media: "(prefers-color-scheme)"
+      accent: lime
+      primary: black
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      accent: lime
+      primary: black
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      accent: lime
+      primary: black
+      toggle:
+        icon: material/brightness-4
+        name: Switch to system preference
 plugins:
 - search
 - mkdocstrings:
