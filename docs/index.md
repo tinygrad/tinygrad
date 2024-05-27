@@ -40,6 +40,6 @@ In tinygrad, you can do [`x.conv2d(w, b)`](tensor.md/#tinygrad.Tensor.conv2d) or
 
 When you do `a+b` in tinygrad, nothing happens. It's not until you [`realize`](tensor.md/#tinygrad.Tensor.realize) the Tensor that the computation actually runs.
 
-### tinygrad requires @TinyJIT to be fast
+### tinygrad requires @TinyJit to be fast
 
 PyTorch spends a lot of development effort to make dispatch very fast. tinygrad doesn't. We have a simple decorator that will replay the kernels used in the decorated function.

@@ -1,16 +1,18 @@
 # pip install mkdocs mkdocs-material mkdocstrings[python]
 site_name: tinygrad docs
 site_url: https://docs.tinygrad.org/
+repo_url: https://github.com/tinygrad/tinygrad/
 nav:
 - Home: index.md
-- Tensor: tensor.md
-- dtypes: dtypes.md
-- Neural Networks: nn.md
-- MNIST Tutorial: mnist.md
 - Quickstart: quickstart.md
+- MNIST Tutorial: mnist.md
+- API:
+  - Tensor: tensor.md
+  - Function: function.md
+  - dtypes: dtypes.md
+  - nn (Neural Networks): nn.md
 - Showcase: showcase.md
 - Developer: developer.md
-- Function: function.md
 - Environment: env_vars.md
 #- tinygrad: reference/
 
