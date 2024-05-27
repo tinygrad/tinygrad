@@ -300,7 +300,7 @@ def batch_load_unet3d(preprocessed_dataset_dir:Path, batch_size:int=6, val:bool=
     Y = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:{shm_path}")
 
     for _ in range(cpu_count()):
-      proc = Process(target=load_unet3d_data, args=(preprocessed_dir, queue_in, queue_out, X, Y))
+      proc = Process(target=load_unet3d_data, args=(preprocessed_dataset_dir, queue_in, queue_out, X, Y))
       proc.daemon = True
       proc.start()
       
