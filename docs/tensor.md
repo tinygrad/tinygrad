@@ -130,8 +130,8 @@
 ::: tinygrad.Tensor.lerp
 ::: tinygrad.Tensor.square
 ::: tinygrad.Tensor.clip
-::: tinygrad.Tensor.abs
 ::: tinygrad.Tensor.sign
+::: tinygrad.Tensor.abs
 ::: tinygrad.Tensor.reciprocal
 
 ## Unary Ops (activation)
