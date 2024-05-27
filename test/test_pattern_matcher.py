@@ -27,11 +27,12 @@ class TestPatternMatcher(unittest.TestCase):
   def test_uop_set(self):
     matcher = PatternMatcher([({"__name__": "x", "uop": {UOps.CONST, UOps.CAST}}, lambda x: x)])
     c1 = UOp(UOps.CONST, dtypes.bool, arg=False)
-    c2 = UOp(UOps.ALU, dtypes.float, (c1, c1), BinaryOps.ADD)
-    c3 = UOp(UOps.CAST, dtypes.int, (c1,))
+    c2 = UOp(UOps.CAST, dtypes.int, (c1,))
+    c3 = UOp(UOps.CONST, dtypes.float, arg=1.0)
+    c4 = UOp(UOps.ALU, dtypes.float, (c3, c3), BinaryOps.ADD)
     self.assertEqual(matcher.rewrite(c1), c1)
-    self.assertEqual(matcher.rewrite(c2), None)
-    self.assertEqual(matcher.rewrite(c3), c3)
+    self.assertEqual(matcher.rewrite(c2), c2)
+    self.assertEqual(matcher.rewrite(c4), None)
 
   def test_arg(self):
     matcher = PatternMatcher([
@@ -57,7 +58,7 @@ class TestPatternMatcher(unittest.TestCase):
     y2 = UOp(UOps.CONST, dtypes.float, arg=1.0)
     c1 = UOp(UOps.ALU, dtypes.float, (y1, y1), BinaryOps.ADD)
     c2 = UOp(UOps.ALU, dtypes.float, (y1, y2), BinaryOps.ADD)
-    self.assert_equiv_uops(matcher.rewrite(c1), c1)
+    self.assertEqual(matcher.rewrite(c1), c1)
     self.assertEqual(matcher.rewrite(c2), None)
 
   def test_dtype(self):
