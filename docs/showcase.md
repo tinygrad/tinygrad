@@ -1,4 +1,4 @@
-# tinygrad Showcase
+# Showcase
 
 Despite being a tiny library, tinygrad is capable of doing a lot of things. From state-of-the-art [vision](https://arxiv.org/abs/1905.11946) to state-of-the-art [language](https://arxiv.org/abs/1706.03762) models.
 
