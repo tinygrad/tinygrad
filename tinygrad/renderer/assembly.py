@@ -240,8 +240,7 @@ ptx_matcher = PatternMatcher([
   lambda root: UOp(UOps.ALU, dtypes.bool, (UOp(root.uop, root.dtype, root.vin, BinaryOps.XOR),), UnaryOps.NEG)),
   (UPat(UOps.ALU, BinaryOps.CMPLT, (UPat(name = "x", dtype = dtypes.bool),UPat(name = "y")), "root"),
   lambda root,x,y: UOp(root.uop, root.dtype, (UOp(UOps.ALU, dtypes.bool, (x,), UnaryOps.NEG), y), BinaryOps.MUL)),
-  (UPat(UOps.ALU, BinaryOps.ADD, [UPat(name = "non_muls"), UPat(UOps.ALU, BinaryOps.MUL, name = "muls")], "root",
-    set([dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64])),
+  (UPat(UOps.ALU, BinaryOps.ADD, [UPat(name = "non_muls"), UPat(UOps.ALU, BinaryOps.MUL, name = "muls")], "root"),
     lambda root, muls, non_muls: UOp(UOps.ALU, root.dtype, muls.vin + (non_muls,), TernaryOps.MULACC)),
   *[(UPat(UOps.ALU, op, name = "x", dtype = dtypes.half),
     lambda x: UOp(UOps.CAST, dtypes.half, (UOp(x.uop, dtypes.float32, tuple([UOp(UOps.CAST, dtypes.float32, (vv,)) for vv in x.vin]), x.arg),)))

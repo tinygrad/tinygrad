@@ -236,7 +236,7 @@ constant_folder = PatternMatcher([
                                                      UPat(UOps.CONST, name = "c", dtype = dtypes.int))),
     lambda c,x: UOp(UOps.ALU, dtypes.bool, (UOp.const(c.dtype, -c.arg), x), BinaryOps.CMPLT)),
   # cast NOOP (NOTE: it's `is` to deal with PtrDType)
-  (UPat(UOps.CAST, name = "root"), lambda root: root.vin[0] if root.dtype is root.vin[0].dtype else None),
+  (UPat(UOps.CAST, name = "root"), lambda root: root.vin[0] if str(root.dtype) == str(root.vin[0].dtype) else None),
 ])
 
 # *** uop graph ***
