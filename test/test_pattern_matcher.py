@@ -124,7 +124,7 @@ class TestPatternMatcher(unittest.TestCase):
     c1 = UOp(UOps.CONST, dtypes.float, arg=42.0)
     c2 = UOp(UOps.CONST, dtypes.float, arg=-1.0)
     a1 = UOp(UOps.ALU, dtypes.float, (c1,c2), BinaryOps.MUL)
-    a2 = UOp(UOps.ALU, dtypes.float, (c1), UnaryOps.NEG)
+    a2 = UOp(UOps.ALU, dtypes.float, (c1,), UnaryOps.NEG)
     self.assert_equiv_uops(matcher.rewrite(a1), a2)
 
   def test_nested_pattern(self):
