@@ -327,36 +327,37 @@ class Kernel:
   def _apply_tc_opt(self, use_tensor_cores:int, axis:int, opt_level:int) -> bool:
     if use_tensor_cores and self.opts.has_local and self.reduceop is not None and self.reduceop.op is ReduceOps.SUM:
       for tc in self.opts.tensor_cores:
-        has_cast = tc.dtype_in != tc.dtype_out
-        if has_cast and not(self.reduceop.src[0].op is UnaryOps.CAST and self.reduceop.src[0].arg == tc.dtype_out): continue
+        for reduceop in self.reduceops:
+          has_cast = tc.dtype_in != tc.dtype_out
+          if has_cast and not(reduceop.src[0].op is UnaryOps.CAST and reduceop.src[0].arg == tc.dtype_out): continue
 
-        mul_op = self.reduceop.src[0].src[0] if has_cast else self.reduceop.src[0]
-        if mul_op.op is not BinaryOps.MUL: continue
+          mul_op = reduceop.src[0].src[0] if has_cast else reduceop.src[0]
+          if mul_op.op is not BinaryOps.MUL: continue
 
-        def buf_index(src: LazyOp) -> Optional[int]:
-          # TODO: apply tc even if the sources are not from LOAD
-          if src.op is BufferOps.LOAD and src.arg.dtype == tc.dtype_in: return self.bufs.index(cast(MemBuffer, src.arg))
-          try:
-            if opt_level >= 1 and src.op is UnaryOps.CAST and src.arg == tc.dtype_in: return self.bufs.index(cast(MemBuffer, src.src[0].arg))
-          except ValueError: return None
-          return None
-        if (buf0:=buf_index(mul_op.src[0])) is None or (buf1:=buf_index(mul_op.src[1])) is None: continue
+          def buf_index(src: LazyOp) -> Optional[int]:
+            # TODO: apply tc even if the sources are not from LOAD
+            if src.op is BufferOps.LOAD and src.arg.dtype == tc.dtype_in: return self.bufs.index(cast(MemBuffer, src.arg))
+            try:
+              if opt_level >= 1 and src.op is UnaryOps.CAST and src.arg == tc.dtype_in: return self.bufs.index(cast(MemBuffer, src.src[0].arg))
+            except ValueError: return None
+            return None
+          if (buf0:=buf_index(mul_op.src[0])) is None or (buf1:=buf_index(mul_op.src[1])) is None: continue
 
-        buf0_strides, buf1_strides = self.sts[buf0].real_strides(), self.sts[buf1].real_strides()
-        axis_buf0 = [(i,self.full_shape[i],buf1_strides[i]) for i,s in enumerate(buf0_strides[:self.first_reduce]) if s == 0]
-        axis_buf1 = [(i,self.full_shape[i],buf0_strides[i]) for i,s in enumerate(buf1_strides[:self.first_reduce]) if s == 0]
-        if not(axis_buf0 and axis_buf1 and ((self.shape_len-self.first_reduce) == 1 or (opt_level >= 1))): continue
+          buf0_strides, buf1_strides = self.sts[buf0].real_strides(), self.sts[buf1].real_strides()
+          axis_buf0 = [(i,self.full_shape[i],buf1_strides[i]) for i,s in enumerate(buf0_strides[:self.first_reduce]) if s == 0]
+          axis_buf1 = [(i,self.full_shape[i],buf0_strides[i]) for i,s in enumerate(buf1_strides[:self.first_reduce]) if s == 0]
+          if not(axis_buf0 and axis_buf1 and ((self.shape_len-self.first_reduce) == 1 or (opt_level >= 1))): continue
 
-        axis_choices = list(itertools.product(axis_buf0, axis_buf1, range(self.first_reduce, self.shape_len)))
-        if not(axis < len(axis_choices)): continue
+          axis_choices = list(itertools.product(axis_buf0, axis_buf1, range(self.first_reduce, self.shape_len)))
+          if not(axis < len(axis_choices)): continue
 
-        s0, s1, s2 = axis_choices[-(axis+1)][0][0], axis_choices[-(axis+1)][1][0], axis_choices[-(axis+1)][2]  # s0 is n, s1 is m, s2 is k
-        axis_pads = [(x, tc.dims[i]) for i, x in enumerate([s0, s1, s2]) if self.full_shape[x]%tc.dims[i] != 0]
-        if axis_pads and (opt_level < 2): continue
+          s0, s1, s2 = axis_choices[-(axis+1)][0][0], axis_choices[-(axis+1)][1][0], axis_choices[-(axis+1)][2]  # s0 is n, s1 is m, s2 is k
+          axis_pads = [(x, tc.dims[i]) for i, x in enumerate([s0, s1, s2]) if self.full_shape[x]%tc.dims[i] != 0]
+          if axis_pads and (opt_level < 2): continue
 
-        # tensor core -- unroll the reduce dim, upcast input, then create the correct thread pattern
-        self.tensor_core_opts = (tc_opts:=TensorCoreOptions(axes=[s0, s1], axes_exist=[True, True]))
-        self.bufs_for_tensor_core[self.reduceop] = (buf0, buf1)
+          # tensor core -- unroll the reduce dim, upcast input, then create the correct thread pattern
+          self.tensor_core_opts = (tc_opts:=TensorCoreOptions(axes=[s0, s1], axes_exist=[True, True]))
+          self.bufs_for_tensor_core[reduceop] = (buf0, buf1)
 
         # attempt to pad the tensor axes that require it
         try:
