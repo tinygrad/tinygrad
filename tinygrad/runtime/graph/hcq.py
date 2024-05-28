@@ -1,8 +1,7 @@
 import ctypes, collections, array, time
 from typing import List, Any, Dict, cast, Optional, Tuple, Set
-from tinygrad.helpers import GraphException, round_up, to_mv
-from tinygrad.device import Buffer, BufferOptions
-from tinygrad.device import Compiled, Device
+from tinygrad.helpers import GraphException, round_up, to_mv, init_c_struct_t
+from tinygrad.device import Buffer, BufferOptions, Compiled, Device
 from tinygrad.shape.symbolic import Variable
 from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner
 from tinygrad.engine.jit import MultiGraphRunner
@@ -19,7 +18,8 @@ class HCQGraph(MultiGraphRunner):
     # Allocate kernel args.
     kernargs_size: Dict[Compiled, int] = collections.defaultdict(int)
     for ji in self.jit_cache:
-      kernargs_size[ji.prg.device] += round_up(ji.prg.clprg.kernargs_segment_size, 16) if isinstance(ji.prg, CompiledRunner) else 0
+      if not isinstance(ji.prg, CompiledRunner): continue
+      kernargs_size[ji.prg.device] += round_up(ji.prg.clprg.kernargs_segment_size, 16)
     kernargs_ptrs: Dict[Compiled, int] = {dev:dev.allocator._alloc(sz, BufferOptions(cpu_access=True)).va_addr for dev,sz in kernargs_size.items()}
 
     # Fill initial arguments.
@@ -30,7 +30,9 @@ class HCQGraph(MultiGraphRunner):
       self.kargs_addrs[j] = kernargs_ptrs[ji.prg.device]
       kernargs_ptrs[ji.prg.device] += round_up(ji.prg.clprg.kernargs_segment_size, 16)
 
-      self.ji_kargs_structs[j] = ji.prg.clprg.args_struct_t.from_address(self.kargs_addrs[j] + ji.prg.clprg.kernargs_offset)
+      args_t = init_c_struct_t(tuple([(f'f{i}', ctypes.c_void_p) for i in range(len(ji.bufs))] +
+                                     [(f'v{i}', ctypes.c_int) for i in range(len(ji.prg.p.vars))]))
+      self.ji_kargs_structs[j] = args_t.from_address(self.kargs_addrs[j] + ji.prg.clprg.kernargs_offset)
       for i in range(len(ji.bufs)): self.ji_kargs_structs[j].__setattr__(f'f{i}', cast(Buffer, ji.bufs[i])._buf.va_addr)
       for i in range(len(ji.prg.p.vars)): self.ji_kargs_structs[j].__setattr__(f'v{i}', var_vals[ji.prg.p.vars[i]])
 
@@ -55,15 +57,23 @@ class HCQGraph(MultiGraphRunner):
 
     for j,ji in enumerate(self.jit_cache):
       if isinstance(ji.prg, CompiledRunner):
+        exec_params = {}
         deps = self.access_resources(ji.bufs[(outs:=ji.prg.p.outcount):], ji.bufs[:outs], (self.comp_signal[ji.prg.device], sig_val:=j+1))
-        deps = [x for x in deps if id(x[0]) != id(self.comp_signal[ji.prg.device])] # remove wait for the same queue as all operations are ordered.
-        self.comp_signal_val[ji.prg.device] = sig_val
+        deps = [x for x in deps if id(x[0]) != id(self.comp_signal[ji.prg.device])]
+
+        # On NV, to synchronize kernel execution, we must either issue a wait or chain executions to schedule them in order.
+        # Chaining executions is preferred when possible, as it is faster.
+        if ji.prg.device.dname.startswith("NV"):
+          if len(deps) == 0 and self.comp_signal_val[ji.prg.device] > 0:
+            exec_params['chain_exec_ptr'] = self.exec_ptrs[self.comp_signal_val[ji.prg.device] - 1][1]
+          else: deps.append((self.comp_signal[ji.prg.device], self.comp_signal_val[ji.prg.device]))
 
         for sig, val in deps: self.comp_queues[ji.prg.device].wait(sig, val)
 
         self.exec_ptrs[j] = (self.comp_queues[ji.prg.device], self.comp_queues[ji.prg.device].ptr())
-        self.comp_queues[ji.prg.device].exec(ji.prg.clprg, self.kargs_addrs[j], *ji.prg.p.launch_dims(var_vals)) \
-                                       .signal(self.comp_signal[ji.prg.device], sig_val)
+        self.comp_queues[ji.prg.device].exec(ji.prg.clprg, self.kargs_addrs[j], *ji.prg.p.launch_dims(var_vals),
+                                             signal=self.comp_signal[ji.prg.device], signal_value=sig_val, **exec_params)
+        self.comp_signal_val[ji.prg.device] = sig_val
       elif isinstance(ji.prg, BufferXfer):
         dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
         Device[src.device]._gpu_map(dest._buf) #type: ignore

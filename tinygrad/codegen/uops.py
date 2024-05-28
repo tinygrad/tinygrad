@@ -53,17 +53,17 @@ class UOp:
   @staticmethod
   def const(dtype, val): return UOp(UOps.CONST, dtype, arg=dtypes.as_const(val, dtype))
   @staticmethod
-  def alu(arg, *vin:UOp): return UOp(UOps.ALU, vin[0].dtype, vin, arg)
+  def alu(arg, *vin:UOp): return UOp(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPEQ} else vin[-1].dtype, vin, arg)
   @functools.cached_property
   def parents(self) -> Set[UOp]: return set.union(set(self.vin), *[x.parents for x in self.vin])
 
 def uop_alu_resolve(u:UOp) -> sint:
   if u.uop is UOps.CONST: return u.arg
-  elif u.uop is UOps.DEFINE_VAR: return u.arg
-  elif u.uop is UOps.SPECIAL: return u.arg[2]-1
-  elif u.uop is UOps.ALU and u.arg is BinaryOps.MUL: return uop_alu_resolve(u.vin[0]) * uop_alu_resolve(u.vin[1])
-  elif u.uop is UOps.ALU and u.arg is BinaryOps.ADD: return uop_alu_resolve(u.vin[0]) + uop_alu_resolve(u.vin[1])
-  else: raise RuntimeError(f"ALU resolve fail @ {u.uop}")
+  if u.uop is UOps.DEFINE_VAR: return u.arg
+  if u.uop is UOps.SPECIAL: return u.arg[2]-1
+  if u.uop is UOps.ALU and u.arg is BinaryOps.MUL: return uop_alu_resolve(u.vin[0]) * uop_alu_resolve(u.vin[1])
+  if u.uop is UOps.ALU and u.arg is BinaryOps.ADD: return uop_alu_resolve(u.vin[0]) + uop_alu_resolve(u.vin[1])
+  raise RuntimeError(f"ALU resolve fail @ {u.uop}")
 
 # *** simplification logic ***
 @dataclass(frozen=True)
