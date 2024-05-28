@@ -322,8 +322,8 @@ class Linearizer(Kernel):
     # late alias the tensor core buffers
     if (tc:=self.tensor_core) and self.tensor_core_opts is not None:
       alias_pattern = [0]*(self.global_dims) + [2]*(len(tc.threads)) + [0]*(self.local_dims-len(tc.threads)) + [0]*(self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3]*(self.upcasted-2)  # noqa: E501
-      for tc_buf in self.bufs_for_tensor_core.values():
-        self.alias_buffer(tc_buf, alias_pattern) # TODO aliased buffers should be mapped to a reduceop
+      for _,tc_bufs in self.bufs_for_tensor_core.items():
+        for tc_buf in tc_bufs: self.alias_buffer(tc_buf, alias_pattern) # TODO aliased buffers should map to the reduceop
 
     # save backups
     sts_backup, gfr_backup, upc_backup = self.sts[:], self.group_for_reduces, self.upcasted
