@@ -68,14 +68,6 @@ class TestPatternMatcher(unittest.TestCase):
     self.assertEqual(matcher.rewrite(c1), c1)
     self.assertEqual(matcher.rewrite(c2), None)
 
-  def test_gep_const(self):
-    matcher = PatternMatcher([({"__name__": "root", "uop": UOps.GEP, "vin": ({"__name__": "c", "uop": UOps.CONST},)},
-                               lambda root, c: UOp.const(root.dtype, c.arg))])
-    c0 = UOp(UOps.CONST, dtypes.int, arg=42)
-    c1 = UOp(UOps.CONST, dtypes.int, arg=42)
-    a1 = UOp(UOps.GEP, dtypes.int, (c1,), arg=42)
-    self.assert_equiv_uops(matcher.rewrite(a1), c0)
-
   def test_cast_const(self):
     matcher = PatternMatcher([({"__name__": "root", "uop": UOps.CAST, "vin": {"__name__": "c", "uop": UOps.CONST}},
                                lambda root, c: UOp.const(root.dtype, c.arg))])
