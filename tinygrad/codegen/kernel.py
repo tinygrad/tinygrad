@@ -1,6 +1,7 @@
 from __future__ import annotations
+from collections import defaultdict
 import math, itertools
-from typing import NamedTuple, Optional, List, Tuple, cast, Dict, Union
+from typing import DefaultDict, NamedTuple, Optional, List, Tuple, cast, Dict, Union
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, UNSAFE_PAD_OPS
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore
@@ -86,7 +87,7 @@ class Kernel:
     self.group_for_reduces: int = 0
     self.upcasted: int = 0
     self.local_dims: int = 0
-    self.local_alias: Dict[int, LocalBuffer] = {}
+    self.local_alias: DefaultDict[LazyOp, Dict[int, LocalBuffer]] = defaultdict(dict)
     self.tensor_core: Optional[TensorCore] = None
     self.tensor_core_opts: Optional[TensorCoreOptions] = None
     # the local aliased buffers for A and B
@@ -114,7 +115,7 @@ class Kernel:
     # parameters for optimizations
     ret.applied_opts, ret.group_for_reduces, ret.upcasted, ret.local_dims, ret.dont_use_locals = \
       self.applied_opts[:], self.group_for_reduces, self.upcasted, self.local_dims, self.dont_use_locals
-    ret.tensor_core, ret.tensor_core_opts, ret.local_alias, ret.bufs_for_tensor_core = self.tensor_core, self.tensor_core_opts, {}, \
+    ret.tensor_core, ret.tensor_core_opts, ret.local_alias, ret.bufs_for_tensor_core = self.tensor_core, self.tensor_core_opts, defaultdict(dict), \
         self.bufs_for_tensor_core
 
     # uncached since linearize didn't run
@@ -305,7 +306,7 @@ class Kernel:
           self.reshape_and_permute(None, order)
           if DEBUG >= 3: print("permuted global dim", order, "due to allocation exceeds global limit")
 
-  def alias_buffer(self, i, pattern):
+  def alias_buffer(self, op:LazyOp, i:int, pattern:List[int]) -> None:
     assert len(pattern) == len(self.sts[i].shape), f"must include a pattern for each shape {pattern} {self.sts[i].shape}"
 
     bst = 1
@@ -320,7 +321,7 @@ class Kernel:
     self.sts.append(ShapeTracker((View.create(tuple(shp), tuple(stride)),)))
     self.bufs.append(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size))
     if DEBUG >= 4: print("aliasing buffer", self.sts[i])
-    self.local_alias[i] = cast(LocalBuffer, self.bufs[-1])
+    self.local_alias[op][i] = cast(LocalBuffer, self.bufs[-1])
 
   # ******************** high level optimizers ********************
 
