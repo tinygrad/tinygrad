@@ -1,3 +1,5 @@
+# Tensor
+
 ::: tinygrad.Tensor
     options:
         heading_level: 2

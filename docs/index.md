@@ -16,7 +16,7 @@ We also have [developer docs](developer.md), and Di Zhu has created a [bunch of 
 
 ## tinygrad Usage
 
-The main class you will interact with is [Tensor](tensor.md). It functions very similarly to PyTorch, but has a bit more of a functional style. tinygrad supports [many datatypes](dtypes.md).  All operations in tinygrad are lazy, meaning they won't do anything until you realize.
+The main class you will interact with is [Tensor](tensor/index.md). It functions very similarly to PyTorch, but has a bit more of a functional style. tinygrad supports [many datatypes](dtypes.md).  All operations in tinygrad are lazy, meaning they won't do anything until you realize.
 
 * tinygrad has a built in [neural network library](nn.md) with some classes, optimizers, and load/save state management.
 * tinygrad has a JIT to make things fast. Decorate your pure function with `TinyJit`
@@ -36,11 +36,11 @@ There's nothing special about a "Module" class in tinygrad, it's just a normal c
 
 ### tinygrad is functional
 
-In tinygrad, you can do [`x.conv2d(w, b)`](tensor.md/#tinygrad.Tensor.conv2d) or [`x.sparse_categorical_cross_entropy(y)`](tensor.md/#tinygrad.Tensor.sparse_categorical_crossentropy). We do also have a [`Conv2D`](nn.md/#tinygrad.nn.Conv2d) class like PyTorch if you want a place to keep the state, but all stateless operations don't have classes.
+In tinygrad, you can do [`x.conv2d(w, b)`](tensor/ops.md/#tinygrad.Tensor.conv2d) or [`x.sparse_categorical_cross_entropy(y)`](tensor/ops.md/#tinygrad.Tensor.sparse_categorical_crossentropy). We do also have a [`Conv2D`](nn.md/#tinygrad.nn.Conv2d) class like PyTorch if you want a place to keep the state, but all stateless operations don't have classes.
 
 ### tinygrad is lazy
 
-When you do `a+b` in tinygrad, nothing happens. It's not until you [`realize`](tensor.md/#tinygrad.Tensor.realize) the Tensor that the computation actually runs.
+When you do `a+b` in tinygrad, nothing happens. It's not until you [`realize`](tensor/index.md/#tinygrad.Tensor.realize) the Tensor that the computation actually runs.
 
 ### tinygrad requires @TinyJit to be fast
 

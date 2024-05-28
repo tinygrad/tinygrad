@@ -50,7 +50,7 @@ randn = Tensor.randn(2, 3) # create a tensor of shape (2, 3) filled with random 
 uniform = Tensor.uniform(2, 3, low=0, high=10) # create a tensor of shape (2, 3) filled with random values from a uniform distribution between 0 and 10
 ```
 
-There are even more of these factory methods, you can find them in the [Tensor](tensor.md) file.
+There are even more of these factory methods, you can find them in the [Tensor Creation](tensor/creation.md) file.
 
 All the tensors creation methods can take a `dtype` argument to specify the data type of the tensor, find the supported `dtype` in [dtypes](dtypes.md).
 
@@ -75,7 +75,7 @@ print(t6.numpy())
 # [-56. -48. -36. -20.   0.]
 ```
 
-There are a lot more operations that can be performed on tensors, you can find them in the [Tensor](tensor.md) file.
+There are a lot more operations that can be performed on tensors, you can find them in the [Tensor Ops](tensor/ops.md) file.
 Additionally reading through [abstractions2.py](https://github.com/tinygrad/tinygrad/blob/master/docs/abstractions2.py) will help you understand how operations on these tensors make their way down to your hardware.
 
 ## Models
