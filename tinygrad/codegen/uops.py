@@ -59,11 +59,11 @@ class UOp:
 
 def uop_alu_resolve(u:UOp) -> sint:
   if u.uop is UOps.CONST: return u.arg
-  elif u.uop is UOps.DEFINE_VAR: return u.arg
-  elif u.uop is UOps.SPECIAL: return u.arg[2]-1
-  elif u.uop is UOps.ALU and u.arg is BinaryOps.MUL: return uop_alu_resolve(u.vin[0]) * uop_alu_resolve(u.vin[1])
-  elif u.uop is UOps.ALU and u.arg is BinaryOps.ADD: return uop_alu_resolve(u.vin[0]) + uop_alu_resolve(u.vin[1])
-  else: raise RuntimeError(f"ALU resolve fail @ {u.uop}")
+  if u.uop is UOps.DEFINE_VAR: return u.arg
+  if u.uop is UOps.SPECIAL: return u.arg[2]-1
+  if u.uop is UOps.ALU and u.arg is BinaryOps.MUL: return uop_alu_resolve(u.vin[0]) * uop_alu_resolve(u.vin[1])
+  if u.uop is UOps.ALU and u.arg is BinaryOps.ADD: return uop_alu_resolve(u.vin[0]) + uop_alu_resolve(u.vin[1])
+  raise RuntimeError(f"ALU resolve fail @ {u.uop}")
 
 # *** simplification logic ***
 

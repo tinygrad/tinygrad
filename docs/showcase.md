@@ -51,3 +51,12 @@ Then you can have a chat with Stacy:
 ```sh
 python3 examples/llama.py
 ```
+
+### Conversation
+
+Make sure you have espeak installed and `PHONEMIZER_ESPEAK_LIBRARY` set.
+
+Then you can talk to Stacy:
+```sh
+python3 examples/conversation.py
+```

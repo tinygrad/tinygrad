@@ -487,7 +487,7 @@ def split(tensor, split_sizes, dim=0):  # if split_sizes is an integer, convert 
     slice_range = [(start, start + size) if j == dim else None for j in range(len(tensor.shape))]
     slices.append(slice_range)
     start += size
-  return [tensor.slice(s) for s in slices]
+  return [tensor._slice(s) for s in slices]
 def gather(x, indices, axis):
   indices = (indices < 0).where(indices + x.shape[axis], indices).transpose(0, axis)
   permute_args = list(range(x.ndim))
