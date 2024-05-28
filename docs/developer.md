@@ -5,6 +5,8 @@ The tinygrad framework has four pieces
 * a <b>lowering</b> engine which converts ASTs into code that can run on the accelerator.
 * an <b>execution</b> engine which can run that code.
 
+There is a good [bunch of tutorials](https://mesozoic-egg.github.io/tinygrad-notes/) by Di Zhu that go over tinygrad internals.
+
 ## Frontend
 
 Everything in [Tensor](tensor.md) is syntactic sugar around [function.py](function.md), where the forwards and backwards passes are implemented for the different functions. There's about 25 of them, implemented using about 20 basic ops. Those basic ops go on to construct a graph of:
