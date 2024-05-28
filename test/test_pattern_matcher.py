@@ -141,6 +141,37 @@ class TestPatternMatcher(unittest.TestCase):
     self.assertEqual(matcher.rewrite(outer_op), outer_op)
     self.assertEqual(matcher.rewrite(inner_op), None)
 
+  def test_max_special(self):
+    matcher = PatternMatcher([({"uop": UOps.ALU, "arg": BinaryOps.MAX, "vin": [{"__name__": "c", "uop": UOps.CONST},
+                                      {"__name__": "s", "uop": UOps.SPECIAL}]}, lambda c,s: c if (s.arg[2]-1) <= c.arg else None)])
+    c1 = UOp(UOps.CONST, dtypes.int, arg=42)
+    c2 = UOp(UOps.SPECIAL, dtypes.int, arg=(1,2,3))
+    c3 = UOp(UOps.SPECIAL, dtypes.int, arg=(1,2,50))
+    a1 = UOp(UOps.ALU, dtypes.int, (c1, c2), BinaryOps.MAX)
+    a2 = UOp(UOps.ALU, dtypes.int, (c1, c3), BinaryOps.MAX)
+    self.assertEqual(matcher.rewrite(a1), c1)
+    self.assertEqual(matcher.rewrite(a2), None)
+
+  def test_max_214(self):
+    matcher = PatternMatcher([({"uop": UOps.ALU, "arg": BinaryOps.MAX, "dtype": dtypes.int, "vin": [{"__name__": "x"},
+                                                                                {"uop": UOps.CONST, "arg": -2147483648}]}, lambda x: x)])
+    c1 = UOp(UOps.CONST, dtypes.int32, arg=42)
+    c2 = UOp(UOps.CONST, dtypes.int32, arg=-2147483648)
+    a1 = UOp(UOps.ALU, dtypes.int32, (c1, c2), BinaryOps.MAX)
+    self.assertEqual(matcher.rewrite(a1), c1)
+
+  def test_neg_cmplt(self):
+    matcher = PatternMatcher([({"uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": ({"uop": UOps.ALU, "arg": UnaryOps.NEG, "vin": ({"__name__": "x"},)},
+                        {"__name__": "c", "uop": UOps.CONST, "dtype": dtypes.int})},
+                        lambda c,x: UOp(UOps.ALU, dtypes.bool, (UOp.const(c.dtype, -c.arg), x), BinaryOps.CMPLT))])
+    c1 = UOp(UOps.CONST, dtypes.int, arg=42)
+    c1_neg = UOp(UOps.CONST, dtypes.int, arg=-42)
+    c2 = UOp(UOps.CONST, dtypes.int, arg=50)
+    a1 = UOp(UOps.ALU, dtypes.int, (c2,), UnaryOps.NEG)
+    a2 = UOp(UOps.ALU, dtypes.int, (a1,c1), BinaryOps.CMPLT)
+    a3 = UOp(UOps.ALU, dtypes.bool, (c1_neg, c2), BinaryOps.CMPLT)
+    self.assert_equiv_uops(matcher.rewrite(a2), a3)
+  
   @unittest.skip("no longer supported")
   def test_rewrite_graph_folds(self):
     uops = UOpGraph()
