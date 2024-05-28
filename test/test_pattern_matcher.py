@@ -73,13 +73,13 @@ class TestPatternMatcher(unittest.TestCase):
                                lambda root, c: UOp.const(root.dtype, c.arg))])
     c0 = UOp(UOps.CONST, dtypes.int, arg=42)
     c1 = UOp(UOps.CONST, dtypes.int, arg=42)
-    a1 = UOp(UOps.GEP, dtypes.int, (c1,))
+    a1 = UOp(UOps.GEP, dtypes.int, (c1,), arg=42)
     self.assert_equiv_uops(matcher.rewrite(a1), c0)
 
   def test_cast_const(self):
     matcher = PatternMatcher([({"__name__": "root", "uop": UOps.CAST, "vin": {"__name__": "c", "uop": UOps.CONST}},
                                lambda root, c: UOp.const(root.dtype, c.arg))])
-    c0 = UOp(UOps.CONST, dtypes.float, arg=42)
+    c0 = UOp(UOps.CONST, dtypes.float, arg=42.0)
     c1 = UOp(UOps.CONST, dtypes.int, arg=42)
     a1 = UOp(UOps.CAST, dtypes.float, (c1,))
     self.assert_equiv_uops(matcher.rewrite(a1), c0)
@@ -88,7 +88,7 @@ class TestPatternMatcher(unittest.TestCase):
     matcher = PatternMatcher([({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"__name__": "x"},
                                                                                       {"uop": UOps.CONST, "arg": 0}]}, lambda x: x)])
     c0 = UOp(UOps.CONST, dtypes.float, arg=0.0)
-    x = UOp(UOps.LOAD, dtypes.float, arg="x")
+    x = UOp(UOps.CONST, dtypes.float, arg=55.0)
     a1 = UOp(UOps.ALU, dtypes.float, (c0,x), BinaryOps.ADD)
     a2 = UOp(UOps.ALU, dtypes.float, (x,c0), BinaryOps.ADD)
     self.assertEqual(matcher.rewrite(a1), x)
@@ -98,7 +98,7 @@ class TestPatternMatcher(unittest.TestCase):
     matcher = PatternMatcher([({"uop": UOps.ALU, "arg": BinaryOps.SUB, "vin": ({"__name__": "x"},
                                                                                       {"uop": UOps.CONST, "arg": 0})}, lambda x: x)])
     c0 = UOp(UOps.CONST, dtypes.float, arg=0.0)
-    x = UOp(UOps.LOAD, dtypes.float, arg="x")
+    x = UOp(UOps.CONST, dtypes.float, arg=42.0)
     a1 = UOp(UOps.ALU, dtypes.float, (c0,x), BinaryOps.SUB)
     a2 = UOp(UOps.ALU, dtypes.float, (x,c0), BinaryOps.SUB)
     self.assertEqual(matcher.rewrite(a1), None)
@@ -108,7 +108,7 @@ class TestPatternMatcher(unittest.TestCase):
     matcher = PatternMatcher([({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{},
                                                     {"__name__": "c", "uop": UOps.CONST, "arg": 0}]}, lambda c: c)])
     c0 = UOp(UOps.CONST, dtypes.float, arg=0.0)
-    x = UOp(UOps.LOAD, dtypes.float, arg="x")
+    x = UOp(UOps.CONST, dtypes.float, arg=42.0)
     a1 = UOp(UOps.ALU, dtypes.float, (c0,x), BinaryOps.MUL)
     a2 = UOp(UOps.ALU, dtypes.float, (x,c0), BinaryOps.MUL)
     self.assertEqual(matcher.rewrite(a1), c0)
@@ -129,8 +129,8 @@ class TestPatternMatcher(unittest.TestCase):
   def test_fold_neg_mul(self):
     matcher = PatternMatcher([({"uop": UOps.ALU, "arg": BinaryOps.MUL,
                                        "vin": [{"__name__": "x"}, {"uop": UOps.CONST, "arg": -1}]}, lambda x: -x)])
-    c1 = UOp(UOps.LOAD, dtypes.float, arg="xx")
-    c2 = UOp(UOps.CONST, dtypes.float, arg=-1)
+    c1 = UOp(UOps.CONST, dtypes.float, arg=42.0)
+    c2 = UOp(UOps.CONST, dtypes.float, arg=-1.0)
     a1 = UOp(UOps.ALU, dtypes.float, (c1,c2), BinaryOps.MUL)
     a2 = UOp(UOps.ALU, dtypes.float, (c1), UnaryOps.NEG)
     self.assert_equiv_uops(matcher.rewrite(a1), a2)
