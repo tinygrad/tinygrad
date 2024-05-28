@@ -483,7 +483,7 @@ class Kernel:
       check(axis < self.shape_len - self.upcasted, "cannot pad upcasted")
       # ok to pad SUM if all parent ops have f(0) = 0
       if self.first_reduce <= axis:
-        check((r:=cast(LazyOp,self.reduceop)).op is ReduceOps.SUM and \
+        check((r:=cast(LazyOp, self.reduceop)).op is ReduceOps.SUM and \
             all(op.op not in UNSAFE_PAD_OPS for ops in r.src for op in ops.lazyops), "cannot pad")
       padded = False
       for i,st in enumerate(self.sts):
