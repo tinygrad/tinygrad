@@ -5,8 +5,9 @@ import tiktoken
 from tiktoken.load import load_tiktoken_bpe
 from tqdm import tqdm
 from extra.models.llama import Transformer, convert_from_huggingface, fix_bf16
-from tinygrad.nn.state import safe_load, torch_load, load_state_dict
+from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
 from tinygrad import Tensor, dtypes, nn, Context, Device, GlobalCounters
+from tinygrad.helpers import Profiling, Timing, DEBUG
 
 class Tokenizer:
   pat_str = r"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"
@@ -195,7 +196,9 @@ if __name__ == "__main__":
   parser.add_argument("--shard", type=int, default=1)
   parser.add_argument("--quantize", choices=["int8", "nf4"])
   parser.add_argument("--api", action="store_true")
-  parser.add_argument('--seed', type=int)
+  parser.add_argument("--seed", type=int)
+  parser.add_argument("--timing", action="store_true", help="Print timing per token")
+  parser.add_argument("--profile", action="store_true", help="Output profile data")
   args = parser.parse_args()
 
   if args.seed is not None: Tensor.manual_seed(args.seed)
@@ -209,6 +212,7 @@ if __name__ == "__main__":
 
   device = tuple(f"{Device.DEFAULT}:{i}" for i in range(args.shard)) if args.shard > 1 else Device.DEFAULT
   model = build_transformer(args.model, model_size=args.size, quantize=args.quantize, device=device)
+  param_bytes = sum(x.lazydata.size * x.dtype.itemsize for x in get_parameters(model))
 
   if args.api:
     from bottle import Bottle, request, response, HTTPResponse, abort
@@ -317,7 +321,16 @@ if __name__ == "__main__":
       last_tok = toks[-1]
       while True:
         GlobalCounters.reset()
-        tok = model(Tensor([[last_tok]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P).item()
+        if args.timing or args.profile: print("")
+        st = GlobalCounters.time_sum_s
+        with Profiling(enabled=args.profile):
+          with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/s, {GlobalCounters.global_mem/x:.2f} GB/s, param {param_bytes/x:.2f} GB/s"):
+            with Timing("enqueue in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
+                        f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
+                        (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_bytes*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=args.timing):
+
+              tok = model(Tensor([[last_tok]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P)
+            tok = tok.item()
         start_pos += 1
         last_tok = tok
         if tok in tokenizer.stop_tokens: break
