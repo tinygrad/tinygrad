@@ -45,33 +45,30 @@ def expand_node(node:Node, idxs:Optional[Tuple[Union[Variable, NumNode], ...]]=N
   return [node.substitute({k:v for k,v in zip(idxs, (NumNode(x) for x in rep)) if isinstance(k, Variable)}) for rep in iter_idxs(idxs)]
 
 class Linearizer(Kernel):
-  def uop_alu_idx(self, a:UOp, b, ops, ctx:Linearizer, op, dtype:DType=dtypes.int32):
-    render_b:UOp = cast(UOp, (NumNode(b) if not isinstance(b, Node) else b).render(ops, ctx))
-    return self.uops.add(UOps.ALU, dtype, (a, render_b), op)
+  def uop_alu_idx(self, a:UOp, b, ops, ctx:Linearizer, op): return UOp.alu(op, a, (NumNode(b) if not isinstance(b, Node) else b).render(ops, ctx))
 
   # NOTE: the consts have to be cached for deduping of downstream uops to work
   def const(self, b:ConstType, dtype:DType=dtypes.int32) -> UOp:
-    if isinstance(b, Variable): return self.uops.add(UOps.DEFINE_VAR, dtype, tuple(), b.unbind()[0])
-    return self.uops.add(UOps.CONST, dtype, tuple(), dtypes.as_const(b, dtype))
+    return self.uops.add(UOps.DEFINE_VAR, dtype, (), b.unbind()[0]) if isinstance(b, Variable) else UOp.const(dtype, b)
 
   def get_reduce_acc(self, reduceop:LazyOp):
     if reduceop.op is ReduceOps.SUM: return 0.0 if dtypes.is_float(reduceop.dtype) else 0
-    elif reduceop.op is ReduceOps.MAX:
+    if reduceop.op is ReduceOps.MAX:
       if dtypes.is_int(reduceop.dtype): return 0 if dtypes.is_unsigned(reduceop.dtype) else -2**(reduceop.dtype.itemsize*8-1)
       return -math.inf if dtypes.is_float(reduceop.dtype) else False
 
   # NOTE: once images are loaded, we uop them as their base float
-  def get_base_dtype(self, dt:DType): return dt.base if isinstance(dt, ImageDType) else dt
+  def get_base_dtype(self, dt:DType) -> DType: return dt.base if isinstance(dt, ImageDType) else dt
 
   render_ops: Any = { Variable: lambda self, ops, ctx: ctx.loop_uops[self.expr], NumNode: lambda self, ops, ctx: ctx.const(self.b),
                 MulNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.MUL),
                 DivNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.DIV),
                 ModNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.MOD),
-                LtNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.CMPLT, dtype=dtypes.bool),
+                LtNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.CMPLT),
     SumNode: lambda self,ops,ctx:
       functools.reduce(lambda a,b: ctx.uop_alu_idx(a, b, ops, ctx, BinaryOps.ADD), self.nodes[1:], self.nodes[0].render(ops,ctx)),
     AndNode: lambda self,ops,ctx:
-      functools.reduce(lambda a,b: ctx.uop_alu_idx(a, b, ops, ctx, BinaryOps.MUL, dtype=dtypes.bool), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
+      functools.reduce(lambda a,b: ctx.uop_alu_idx(a, b, ops, ctx, BinaryOps.MUL), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
   def global_load(self, i:int, idxs:List[Node], acc:Optional[LazyOp]=None, barrier:Optional[UOp]=None, loop_ctx:Tuple[UOp, ...]=()) -> List[UOp]:
     buf = self.bufs[i]
@@ -109,7 +106,7 @@ class Linearizer(Kernel):
           self.load_cache[key] = self.const(this_const, localtype)
           if valid.min == 0 and valid.max == 1:
             valid_rendered = valid.render(self.render_ops, self)
-            self.load_cache[key] = self.uops.add(UOps.ALU, localtype, (valid_rendered, self.load_cache[key], self.const(invalid_value, localtype)), TernaryOps.WHERE)  # noqa: E501
+            self.load_cache[key] = UOp.alu(TernaryOps.WHERE, valid_rendered, self.load_cache[key], self.const(invalid_value, localtype))
         elif isinstance(buf.dtype, ImageDType):
           buf_uop = self.buf_uops[i]
           assert buf_uop is not None, f"buffer {i} wasn't UOped"
@@ -124,8 +121,8 @@ class Linearizer(Kernel):
             out = self.uops.add(UOps.GEP, localtype, (self.load_cache[key],), idx_small.max)
             for ix in range(idx_small.max, idx_small.min, -1):
               rvv = self.uops.add(UOps.GEP, localtype, (self.load_cache[key],), ix-1)
-              sel = self.uops.add(UOps.ALU, dtypes.bool, (res, self.const(ix)), BinaryOps.CMPLT)
-              out = self.uops.add(UOps.ALU, localtype, (sel, rvv, out), TernaryOps.WHERE)
+              sel = UOp.alu(BinaryOps.CMPLT, res, self.const(ix))
+              out = UOp.alu(TernaryOps.WHERE, sel, rvv, out)
             self.load_cache[key] = out
         else:
           buf_uop = self.buf_uops[i]
@@ -191,7 +188,7 @@ class Linearizer(Kernel):
     if self.group_for_reduces:
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker.from_shape(tuple([1] * self.global_dims + list(self.full_shape[self.global_dims:self.global_dims+self.local_dims+self.group_for_reduces]) + [1] * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))  # noqa: E501
-      temp_dtype = self.get_base_dtype(self.reduceop.dtype)
+      temp_dtype = self.get_base_dtype(cast(LazyOp, self.reduceop).dtype)
       self.bufs.append(LocalBuffer(f"temp{self.reduceops.index(reduceop)}", self.sts[-1].size, temp_dtype))
       self.buf_uops.append(self.uops.add(UOps.DEFINE_LOCAL, PtrDType(temp_dtype), (), (f"temp{self.reduceops.index(reduceop)}", self.sts[-1].size)))
 
@@ -340,10 +337,10 @@ class Linearizer(Kernel):
     if self.applied_opts == self.applied_opts_cache: return self
 
     # late alias the tensor core buffers
-    if (tc:=self.tensor_core) and (tc_opts:=self.tensor_core_opts):
+    if (tc:=self.tensor_core) and self.tensor_core_opts is not None:
       alias_pattern = [0]*(self.global_dims) + [2]*(len(tc.threads)) + [0]*(self.local_dims-len(tc.threads)) + [0]*(self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3]*(self.upcasted-2)  # noqa: E501
-      for tc_buf in tc_opts.bufs:
-        self.alias_buffer(tc_buf, alias_pattern)
+      for _,tc_bufs in self.bufs_for_tensor_core.items():
+        for tc_buf in tc_bufs: self.alias_buffer(tc_buf, alias_pattern) # TODO aliased buffers should map to the reduceop
 
     # save backups
     sts_backup, gfr_backup, upc_backup = self.sts[:], self.group_for_reduces, self.upcasted
@@ -435,7 +432,7 @@ class Linearizer(Kernel):
     self.applied_opts_cache = self.applied_opts[:]
     return self
 
-  def ast_parse(self, x:LazyOp, accs: Dict[LazyOp, List[UOp]], offs:Optional[List[int]], loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]], reduce_acc:Optional[List[UOp]]=None, cache=None) -> List[UOp]: # noqa: E501
+  def ast_parse(self, x:LazyOp, accs:Dict[LazyOp, List[UOp]], offs:Optional[List[int]], loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]], reduce_acc:Optional[List[UOp]]=None, cache=None) -> List[UOp]: # noqa: E501
     if cache is None: cache = {}
     if x in cache: return cache[x]
     if x.op in BufferOps: return loaded_buffers[x.arg]
@@ -452,13 +449,12 @@ class Linearizer(Kernel):
       ret: List[UOp] = []
       acc, input_acc = reduce_acc, reduce_acc[:]
       for val, off in zip(zip(*values), cast(List[int], offs)):
-        acc[off] = self.uops.add(UOps.ALU, acc[off].dtype, vin=val+(acc[off],), arg=ops[cast(ReduceOps, x.op)])
+        acc[off] = UOp.alu(ops[cast(ReduceOps, x.op)], *(val+(acc[off], )))
         ret.append(acc[off])
       for off in range(len(acc)):
         if input_acc[off] != acc[off]:
           acc[off] = self.uops.add(UOps.PHI, input_acc[off].dtype, (input_acc[off], acc[off]))
-    else:
-      ret = [self.uops.add(UOps.ALU, dtypes.bool if x.op in {BinaryOps.CMPLT, BinaryOps.CMPEQ} else val[-1].dtype, val, x.op) for val in zip(*values)]
+    else: ret = [UOp.alu(x.op, *vin) for vin in zip(*values)]
     cache[x] = ret
     return ret
 
