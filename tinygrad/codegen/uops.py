@@ -190,7 +190,7 @@ constant_folder = PatternMatcher([
   (UPat(UOps.ALU, TernaryOps.WHERE, (UPat(UOps.CONST, name = "gate"), UPat(name = "c0"),
                                                       UPat(name = "c1"))), lambda gate, c0, c1: c0 if gate.arg else c1),
   # ** constant folding **
-  (UPat(UOps.ALU, vin = UPat(UOps.CONST, name = "root")),
+  (UPat(UOps.ALU, vin = UPat(UOps.CONST), name = "root"),
     lambda root: UOp.const(root.dtype, exec_alu(root.arg, root.dtype, [x.arg for x in root.vin]))),
   # ** self folding **
   (UPat(UOps.ALU, BinaryOps.ADD, [UPat(name = "x"), UPat(UOps.CONST, 0)]), lambda x: x),   # x+0 -> x or 0+x -> x
