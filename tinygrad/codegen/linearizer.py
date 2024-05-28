@@ -258,7 +258,8 @@ class Linearizer(Kernel):
       assert not locals_to_store, "storing locals isn't supported here"
 
       # load earlybufs
-      loaded_buffers.update({b:self.global_load(self.bufs.index(self.local_alias[i]) if i in self.local_alias else i,
+      loaded_buffers.update({b:self.global_load(self.bufs.index([lb for aliases in self.local_alias.values() for lb in aliases.values()
+        if lb is b][0]) if any(i in aliases for aliases in self.local_alias.values()) else i,
         global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs})
 
       # run early AST (with reduce)
