@@ -35,7 +35,6 @@ class Opt:
     return self.axis
 
 class TensorCoreOptions(NamedTuple):
-  bufs: Tuple[int, int] # the local aliased buffers for A and B
   axes: List[int] # the location of the original N and M axes if still in the shape
   axes_exist: List[bool] # true if the original N and M axes are still in the shape
   def fix_axes(self, removed_axis:int): # adjust the TC axes if necesssary when an dimension is removed
@@ -90,6 +89,8 @@ class Kernel:
     self.local_alias: Dict[int, LocalBuffer] = {}
     self.tensor_core: Optional[TensorCore] = None
     self.tensor_core_opts: Optional[TensorCoreOptions] = None
+    # the local aliased buffers for A and B
+    self.bufs_for_tensor_core: Dict[LazyOp, Tuple[int, int]] = {}
     self.dont_use_locals: bool = False
 
     # group simplifies
@@ -113,7 +114,7 @@ class Kernel:
     # parameters for optimizations
     ret.applied_opts, ret.group_for_reduces, ret.upcasted, ret.local_dims, ret.dont_use_locals = \
       self.applied_opts[:], self.group_for_reduces, self.upcasted, self.local_dims, self.dont_use_locals
-    ret.tensor_core, ret.tensor_core_opts, ret.local_alias = self.tensor_core, self.tensor_core_opts, {}
+    ret.tensor_core, ret.tensor_core_opts, ret.local_alias, ret.bufs_for_tensor_core = self.tensor_core, self.tensor_core_opts, {}, self.bufs_for_tensor_core
 
     # uncached since linearize didn't run
     ret.applied_opts_cache = None
@@ -353,7 +354,8 @@ class Kernel:
         if axis_pads and (opt_level < 2): continue
 
         # tensor core -- unroll the reduce dim, upcast input, then create the correct thread pattern
-        self.tensor_core_opts = (tc_opts:=TensorCoreOptions(bufs=(buf0, buf1), axes=[s0, s1], axes_exist=[True, True]))
+        self.tensor_core_opts = (tc_opts:=TensorCoreOptions(axes=[s0, s1], axes_exist=[True, True]))
+        self.bufs_for_tensor_core[self.reduceop] = (buf0, buf1)
 
         # attempt to pad the tensor axes that require it
         try:
