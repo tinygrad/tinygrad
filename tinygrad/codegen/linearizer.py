@@ -352,9 +352,8 @@ class Linearizer(Kernel):
       self.loop_uops[var.expr] = self.uops.add(UOps.DEFINE_VAR, dtypes.int32, (), var)
     # define local buffers
     for aliases in self.local_alias.values():
-      for lb in aliases.values():
-        self.buf_uops[self.bufs.index(lb)] = self.uops.add(UOps.DEFINE_LOCAL,
-                                                           PtrDType(dtypes.float32), (), (lb.name, self.sts[self.bufs.index(lb)].size))
+      for lb in aliases.values(): self.buf_uops[self.bufs.index(lb)] = self.uops.add(UOps.DEFINE_LOCAL, PtrDType(lb.dtype),
+                                                                                     (), (lb.name, self.sts[self.bufs.index(lb)].size))
     # add a local buffer for multistage reduce. # TODO: use local alias
     if self.group_for_reduces:
       # TODO: the strides of this can be controlled
