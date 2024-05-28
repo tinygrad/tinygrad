@@ -171,7 +171,7 @@ class TestPatternMatcher(unittest.TestCase):
     a2 = UOp(UOps.ALU, dtypes.int, (a1,c1), BinaryOps.CMPLT)
     a3 = UOp(UOps.ALU, dtypes.bool, (c1_neg, c2), BinaryOps.CMPLT)
     self.assert_equiv_uops(matcher.rewrite(a2), a3)
-  
+
   @unittest.skip("no longer supported")
   def test_rewrite_graph_folds(self):
     uops = UOpGraph()
