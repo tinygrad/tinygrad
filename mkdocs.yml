@@ -9,7 +9,11 @@ nav:
   - Showcase: showcase.md
   - MNIST Tutorial: mnist.md
   - API Reference:
-    - Tensor: tensor.md
+    - Tensor:
+      - tensor/index.md
+      - Creation: tensor/creation.md
+      - Movement: tensor/movement.md
+      - Ops: tensor/ops.md
     - Function: function.md
     - dtypes: dtypes.md
     - nn (Neural Networks): nn.md
@@ -65,6 +69,7 @@ theme:
   - navigation.sections
   - navigation.expand
   - navigation.top
+  - navigation.path
   - search.highlight
   - search.suggest
   - toc.follow

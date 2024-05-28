@@ -33,12 +33,6 @@ SMALL=1 python3 examples/whisper.py
 
 ## Generative
 
-### Generative Adversarial Networks
-
-Take a look at [mnist_gan.py](https://github.com/tinygrad/tinygrad/tree/master/examples/mnist_gan.py).
-
-![mnist gan by tinygrad](https://github.com/tinygrad/tinygrad/blob/master/docs/showcase/mnist_by_tinygrad.jpg?raw=true)
-
 ### Stable Diffusion
 
 ```sh
