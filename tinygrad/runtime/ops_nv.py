@@ -87,8 +87,7 @@ class HWQueue:
   def __init__(self): self.q, self.binded_device, self.next_cmd_index = [], None, 0
   def __del__(self):
     if self.binded_device is not None:
-      # Synchronize to ensure the buffer is no longer in use by any previous operations.
-      self.binded_device.synchronize()
+      self.binded_device.synchronize() # Synchronize to ensure the buffer is no longer in use.
       self.binded_device._gpu_free(self.hw_page)
 
   def ptr(self) -> int: return self.next_cmd_index
