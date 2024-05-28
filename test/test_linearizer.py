@@ -1163,7 +1163,7 @@ class TestKernelOpts(unittest.TestCase):
   @unittest.skip("multireduce isn't supported yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
-  def test_double_reduce_multireudce(self):
+  def test_double_reduce_multireduce(self):
     N = 128
     Tensor.manual_seed(1552)
     a = Tensor.rand(8, N, 8, N).realize()
