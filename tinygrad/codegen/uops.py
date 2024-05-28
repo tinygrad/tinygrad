@@ -142,16 +142,13 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst):
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
   # arange loop folding (early)
-  (UPat(UOps.ALU, TernaryOps.WHERE, (UPat(UOps.ALU, BinaryOps.CMPLT, (
-    UPat(UOps.ALU, BinaryOps.ADD, [UPat(name = "idx"), UPat(UOps.ALU, BinaryOps.MUL,
-        [UPat(UOps.CONST, name = "mval"), UPat(UOps.RANGE, vin = (UPat(name = "loop_start"),
-            UPat(name = "loop_end")))])]), UPat(UOps.CONST, name = "compval"))),
-                UPat(UOps.CONST, name = "multconst"), UPat(UOps.CONST, 0))), loop_collapse),
+  (UPat(UOps.ALU, TernaryOps.WHERE, (UPat(UOps.ALU, BinaryOps.CMPLT, (UPat(UOps.ALU,BinaryOps.ADD, [UPat(name = "idx"), UPat(UOps.ALU, BinaryOps.MUL,
+    [UPat(UOps.CONST, name = "mval"), UPat(UOps.RANGE, vin = (UPat(name = "loop_start"),
+    UPat(name = "loop_end")))])]), UPat(UOps.CONST, name = "compval"))), UPat(UOps.CONST, name = "multconst"), UPat(UOps.CONST, 0))), loop_collapse),
   # sum collapse to mul (with possible GEP)
   (UPat(UOps.PHI, vin = (UPat(UOps.DEFINE_ACC, name = "phi_input", vin = (UPat(UOps.RANGE, name = "loop"),)),
       UPat(UOps.ALU, BinaryOps.ADD, (UPat(name = "val1"), UPat(name = "val2"))))), sum_collapse),
-  (UPat(UOps.PHI, vin = (UPat(UOps.GEP, name = "phi_input",
-                              vin = (UPat(UOps.DEFINE_ACC, vin =(UPat(UOps.RANGE, name = "loop"),)),)),
+  (UPat(UOps.PHI, vin = (UPat(UOps.GEP, name = "phi_input", vin = (UPat(UOps.DEFINE_ACC, vin =(UPat(UOps.RANGE, name = "loop"),)),)),
       UPat(UOps.ALU, BinaryOps.ADD, (UPat(name = "val1"), UPat(name = "val2"))))), sum_collapse),
   # deal with UNMUL
   (UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name = "c1"), UPat(UOps.UNMUL, vin = [UPat(UOps.CONST,
@@ -183,8 +180,7 @@ constant_folder = PatternMatcher([
   (UPat(UOps.ALU, BinaryOps.MUL, [UPat(name = "x"), UPat(UOps.CONST, -1)]), lambda x: -x),
   # bool < False is always false, True < bool is always false
   (UPat(UOps.ALU, BinaryOps.CMPLT, (UPat(), UPat(UOps.CONST, False, name = "x", dtype = dtypes.bool))), lambda x: x),
-  (UPat(UOps.ALU, BinaryOps.CMPLT, (UPat(UOps.CONST, True, name = "x", dtype = dtypes.bool),
-                                                            UPat())), lambda x: UOp.const(dtypes.bool, False)),
+  (UPat(UOps.ALU, BinaryOps.CMPLT, (UPat(UOps.CONST, True, name = "x", dtype = dtypes.bool), UPat())), lambda x: UOp.const(dtypes.bool, False)),
   # a conditional with the same results either way is a noop, also fold const conditionals
   (UPat(UOps.ALU, TernaryOps.WHERE, (UPat(), UPat(name = "val"), UPat(name = "val"))), lambda val: val),
   (UPat(UOps.ALU, TernaryOps.WHERE, (UPat(UOps.CONST, name = "gate"), UPat(name = "c0"),
@@ -205,11 +201,9 @@ constant_folder = PatternMatcher([
   (UPat(UOps.STORE, vin = (UPat(name = "buf"), UPat(name = "idx"),
                         UPat(UOps.LOAD, vin = (UPat(name = "buf"), UPat(name = "idx"))))), lambda buf, idx: UOp(UOps.NOOP)),
   # ** two stage add/sub folding **
-  (UPat(UOps.ALU, BinaryOps.ADD, [UPat(UOps.ALU, BinaryOps.ADD,
-                     [UPat(name = "x"), UPat(UOps.CONST, name = "c1")]), UPat(UOps.CONST, name = "c2")]),
+  (UPat(UOps.ALU, BinaryOps.ADD, [UPat(UOps.ALU, BinaryOps.ADD, [UPat(name = "x"), UPat(UOps.CONST, name = "c1")]), UPat(UOps.CONST, name = "c2")]),
      lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, [c1.arg, c2.arg]))),
-  (UPat(UOps.ALU, BinaryOps.ADD, [UPat(UOps.ALU, BinaryOps.SUB,
-                     (UPat(name = "x"), UPat(UOps.CONST, name = "c1"))), UPat(UOps.CONST, name = "c2")]),
+  (UPat(UOps.ALU, BinaryOps.ADD, [UPat(UOps.ALU, BinaryOps.SUB, (UPat(name = "x"), UPat(UOps.CONST, name = "c1"))), UPat(UOps.CONST, name = "c2")]),
      lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.SUB, x.dtype, [c2.arg, c1.arg]))),
   # TODO: can do the invert of this (flip alt/load) when we fix double ops
   (UPat(UOps.STORE, vin = (UPat(name = "buf"), UPat(name = "idx"), UPat(UOps.ALU, TernaryOps.WHERE,
@@ -217,23 +211,17 @@ constant_folder = PatternMatcher([
     )))))), lambda buf, idx, gate, alt: UOp(UOps.STORE, None, (buf, idx, alt, gate))),
   # store float4/float2 directly (remove CAST/GEP)
   (UPat(UOps.STORE, vin = (UPat(name = "buf"), UPat(name = "idx"), UPat(UOps.CAST, vin =
-                                tuple(UPat(UOps.GEP, i, (UPat(name = "val"),)) for i in range(4))))),
-   lambda buf,idx,val: UOp(UOps.STORE, None, (buf, idx, val))),
+      tuple(UPat(UOps.GEP, i, (UPat(name = "val"),)) for i in range(4))))), lambda buf,idx,val: UOp(UOps.STORE, None, (buf, idx, val))),
   (UPat(UOps.STORE, vin = (UPat(name = "buf"), UPat(name = "idx"), UPat(UOps.CAST, vin =
-                                tuple(UPat(UOps.GEP, i, (UPat(name = "val"),)) for i in range(2))))),
-   lambda buf,idx,val: UOp(UOps.STORE, None, (buf, idx, val))),
+      tuple(UPat(UOps.GEP, i, (UPat(name = "val"),)) for i in range(2))))), lambda buf,idx,val: UOp(UOps.STORE, None, (buf, idx, val))),
   # CAST-PHI-GEP -> PHI-CAST only if dtypes match
   (UPat(UOps.CAST, name = "root", vin =
-    tuple(UPat(UOps.PHI, vin = (UPat(UOps.GEP, i, (UPat(name = "val", dtype = "root"),)
-                                     ), UPat(name = f"v{i}"))) for i in range(4))),
+    tuple(UPat(UOps.PHI, vin = (UPat(UOps.GEP, i, (UPat(name = "val", dtype = "root"),)), UPat(name = f"v{i}"))) for i in range(4))),
     lambda root, val, v0, v1, v2, v3: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1, v2, v3))))),
-  (UPat(UOps.CAST, name = "root", vin =
-    tuple(UPat(UOps.PHI, vin = (UPat(UOps.GEP, i, (UPat(name = "val", dtype = "root"),)
-                                     ), UPat(name = f"v{i}"))) for i in range(2))),
-    lambda root, val, v0, v1: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1))))),
+  (UPat(UOps.CAST, name = "root", vin = tuple(UPat(UOps.PHI, vin = (UPat(UOps.GEP, i, (UPat(name = "val", dtype = "root"),)),
+    UPat(name = f"v{i}"))) for i in range(2))), lambda root, val, v0, v1: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1))))),
   # NEG/CMPLT -> CMPLT
-  (UPat(UOps.ALU, BinaryOps.CMPLT, (UPat(UOps.ALU, UnaryOps.NEG, (UPat(name = "x"),)),
-                                                     UPat(UOps.CONST, name = "c", dtype = dtypes.int))),
+  (UPat(UOps.ALU, BinaryOps.CMPLT, (UPat(UOps.ALU, UnaryOps.NEG, (UPat(name = "x"),)), UPat(UOps.CONST, name = "c", dtype = dtypes.int))),
     lambda c,x: UOp(UOps.ALU, dtypes.bool, (UOp.const(c.dtype, -c.arg), x), BinaryOps.CMPLT)),
   # cast NOOP (NOTE: it's `is` to deal with PtrDType)
   (UPat(UOps.CAST, name = "root"), lambda root: root.vin[0] if str(root.dtype) == str(root.vin[0].dtype) else None),

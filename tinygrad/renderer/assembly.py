@@ -265,7 +265,7 @@ ptx_matcher = PatternMatcher([
         __allow_len__ = {2,3,4,5}), lambda root, const: UOp(root.uop, root.dtype, (root.vin[0].cast(dtypes.int64),
                                                           UOp.const(dtypes.int64, const.arg * root.vin[0].dtype.itemsize),)+root.vin[2:])),
   (UPat({UOps.LOAD, UOps.STORE}, vin = (UPat({UOps.DEFINE_LOCAL,UOps.DEFINE_GLOBAL}), UPat(name = "alu")), name = "root", 
-      __allow_len__ = {2,3,4,5}),  # no const here
-    lambda root, alu: UOp(root.uop, root.dtype, (alu.cast(dtypes.int64)*UOp.const(dtypes.int64,
+        # no const here 
+      __allow_len__ = {2,3,4,5}), lambda root, alu: UOp(root.uop, root.dtype, (alu.cast(dtypes.int64)*UOp.const(dtypes.int64,
                                               root.vin[0].dtype.itemsize)+root.vin[0].cast(dtypes.int64), UOp.const(dtypes.int64, 0))+root.vin[2:])),
 ])
