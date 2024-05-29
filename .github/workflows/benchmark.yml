@@ -164,6 +164,8 @@ jobs:
       run: CUDA=1 JIT=1 HALF=1 python3 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half.txt
     - name: Run GPT2 w HALF/BEAM
       run: CUDA=1 JIT=1 HALF=1 BEAM=2 CACHELEVEL=0 CAST_BEFORE_VIEW=0 JIT_BATCH_SIZE=4 python3 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half_beam.txt
+    - name: Run GPT2 w HALF/BEAM (NV)
+      run: NV=1 JIT=1 HALF=1 BEAM=2 CACHELEVEL=0 CAST_BEFORE_VIEW=0 JIT_BATCH_SIZE=4 python3 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half_beam_nv.txt
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (NVIDIA)
@@ -186,6 +188,7 @@ jobs:
           gpt2_jitted.txt
           gpt2_half.txt
           gpt2_half_beam.txt
+          gpt2_half_beam_nv.txt
 
   testmorenvidiabenchmark:
     name: tinybox green Training Benchmark
