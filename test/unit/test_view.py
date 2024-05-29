@@ -35,6 +35,8 @@ class TestView(unittest.TestCase):
     v1 = View.create(shape=(1,1,1,4), strides=(0,0,0,1), offset=0, mask=None)
     v2 = View.create(shape=(1,1,1,4), strides=(0,0,0,1), offset=0, mask=((0,1),(0,1),(0,1),(0,4)))
     assert v1.contiguous == v2.contiguous
+    v = View.create(shape=(2,3,4), mask=((0,2),(0,3),(0,4)))
+    assert v.contiguous
 
 if __name__ == '__main__':
   unittest.main()
