@@ -1,4 +1,4 @@
-# tinygrad Showcase
+# Showcase
 
 Despite being a tiny library, tinygrad is capable of doing a lot of things. From state-of-the-art [vision](https://arxiv.org/abs/1905.11946) to state-of-the-art [language](https://arxiv.org/abs/1706.03762) models.
 
@@ -33,12 +33,6 @@ SMALL=1 python3 examples/whisper.py
 
 ## Generative
 
-### Generative Adversarial Networks
-
-Take a look at [mnist_gan.py](https://github.com/tinygrad/tinygrad/tree/master/examples/mnist_gan.py).
-
-![mnist gan by tinygrad](https://github.com/tinygrad/tinygrad/blob/master/docs/showcase/mnist_by_tinygrad.jpg?raw=true)
-
 ### Stable Diffusion
 
 ```sh
@@ -56,4 +50,13 @@ You will need to download and put the weights into the `weights/LLaMA` directory
 Then you can have a chat with Stacy:
 ```sh
 python3 examples/llama.py
+```
+
+### Conversation
+
+Make sure you have espeak installed and `PHONEMIZER_ESPEAK_LIBRARY` set.
+
+Then you can talk to Stacy:
+```sh
+python3 examples/conversation.py
 ```

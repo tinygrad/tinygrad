@@ -86,7 +86,9 @@ class NVCompiler(Compiler):
 class HWQueue:
   def __init__(self): self.q, self.binded_device, self.next_cmd_index = [], None, 0
   def __del__(self):
-    if self.binded_device is not None: self.binded_device._gpu_free(self.hw_page)
+    if self.binded_device is not None:
+      self.binded_device.synchronize() # Synchronize to ensure the buffer is no longer in use.
+      self.binded_device._gpu_free(self.hw_page)
 
   def ptr(self) -> int: return self.next_cmd_index
 
@@ -283,9 +285,8 @@ class NVProgram:
 
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
     if prod(local_size) > 1024 or self.max_threads < prod(local_size): raise RuntimeError("Too many resources requsted for launch")
-    if not hasattr(self, "args_struct_t"):
-      self.args_struct_t = init_c_struct_t(tuple([(f'f{i}', ctypes.c_void_p) for i in range(len(args))] +
-                                                 [(f'v{i}', ctypes.c_int) for i in range(len(vals))]))
+    if any(cur > mx for cur,mx in zip(global_size, [2147483647, 65535, 65535])) or any(cur > mx for cur,mx in zip(local_size, [1024, 1024, 64])):
+      raise RuntimeError("Invalid global/local dims")
 
     if self.device.kernargs_ptr >= (self.device.kernargs_page.base + self.device.kernargs_page.length - self.kernargs_segment_size):
       self.device.kernargs_ptr = self.device.kernargs_page.base
