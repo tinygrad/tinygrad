@@ -152,6 +152,12 @@ jobs:
       run: CUDA=1 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_four_gpu.txt
     - name: Run LLaMA 7B on 6 GPUs
       run: CUDA=1 python3 examples/llama.py --gen 1 --size 7B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_six_gpu.txt
+    - name: Run LLaMA with BEAM (NV)
+      run: NV=1 JIT=1 BEAM=2 CACHELEVEL=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_beam_nv.txt
+    - name: Run LLaMA 7B on 4 GPUs (NV)
+      run: NV=1 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_four_gpu_nv.txt
+    - name: Run LLaMA 7B on 6 GPUs (NV)
+      run: NV=1 python3 examples/llama.py --gen 1 --size 7B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_six_gpu_nv.txt
     # - name: Run LLaMA-2 70B
     #   run: CUDA=1 python3 examples/llama.py --gen 2 --size 70B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_2_70B.txt
     # - name: Run Mixtral 8x7B
@@ -182,6 +188,9 @@ jobs:
           llama_beam.txt
           llama_four_gpu.txt
           llama_six_gpu.txt
+          llama_beam_nv.txt
+          llama_four_gpu_nv.txt
+          llama_six_gpu_nv.txt
           # llama_2_70B.txt
           # mixtral.txt
           gpt2_unjitted.txt
