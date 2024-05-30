@@ -1,6 +1,6 @@
 import unittest
 from tinygrad.dtype import dtypes
-from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps
+from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps
 from tinygrad.codegen.uops import UOpGraph, UOps, PatternMatcher, UOp
 
 class TestPatternMatcher(unittest.TestCase):
@@ -82,8 +82,7 @@ class TestPatternMatcher(unittest.TestCase):
     self.assertEqual(matcher.rewrite(c5), c5)
 
   def test_vin_one(self):
-    matcher = PatternMatcher([({"__name__": "x", "uop": UOps.ALU, "vin":({"uop": UOps.CONST}, {"uop": UOps.CONST})},
-                               lambda x: x)])
+    matcher = PatternMatcher([({"__name__": "x", "uop": UOps.ALU, "vin":({"uop": UOps.CONST}, {"uop": UOps.CONST})}, lambda x: x)])
     c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
     c2 = UOp(UOps.CONST, dtypes.float, arg=2.0)
     c3 = UOp(UOps.ALU, dtypes.float, (c1,c2), BinaryOps.ADD)
@@ -110,7 +109,7 @@ class TestPatternMatcher(unittest.TestCase):
     self.assertEqual(matcher.rewrite(c6), None)
 
   def test_vin_repeat(self):
-    matcher = PatternMatcher([({"__name__": "x", "uop": UOps.ALU, "vin": {"uop": UOps.CONST}}, lambda x: x)])
+    matcher = PatternMatcher([({"__name__": "x", "uop": UOps.ALU, "vin":{"uop": UOps.CONST}}, lambda x: x)])
     c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
     c2 = UOp(UOps.CONST, dtypes.float, arg=2.0)
     c3 = UOp(UOps.ALU, dtypes.float, (c1,c2), BinaryOps.ADD)
