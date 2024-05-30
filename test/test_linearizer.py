@@ -1420,6 +1420,20 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],
     ])
 
+  @unittest.skip("multireduce isn't supported yet")
+  def test_padto_multireduce(self):
+    N = 18 * 18
+    x = (Tensor.rand(N, N).shrink(((0, 17), (0, 17)))*100).realize()
+    x_ast = LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(17, 17), strides=(324, 1), offset=0, mask=None, contiguous=False),)))),LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=100.0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),)))))) # noqa: E501
+    def ast(axis): LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.SUB, src=(x_ast,LazyOp(op=ReduceOps.SUM, src=(x_ast,), arg=(axis,)))),), arg=(axis,)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 17), strides=(0, 1), offset=0, mask=None, contiguous=True),)))) # noqa: E501
+
+    helper_linearizer_ast((ast(0),), [x], opts=[[Opt(OptOps.PADTO, 0, 32)],[Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],])
+    helper_linearizer_ast((ast(1),), [x], opts=[[Opt(OptOps.PADTO, 0, 32)],[Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],])
+
+    # can pad sum reduce axis if there's no unsafe ops prior to sum
+    helper_linearizer_ast((ast((0,1)),), [x], opts=[[Opt(OptOps.PADTO, 0, 32)],])
+    helper_linearizer_ast((ast(0),), [x], opts=[[Opt(OptOps.PADTO, 1, 32)],])
+
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   def test_color_shapes_with_local(self):
