@@ -171,13 +171,14 @@ if __name__ == "__main__":
     optimizer.step()
     return loss
 
-  for i in range(args.num_iterations):
-    GlobalCounters.reset()
-    t0 = time.time()
-    loss = step(x.contiguous(), y.contiguous())
-    Device[Device.DEFAULT].synchronize()
-    t1 = time.time()
-    print(f"iteration {i}, loss: {loss.item()}, time: {(t1-t0)*1000:.3f}ms")
+  with Tensor.train():
+    for i in range(args.num_iterations):
+      GlobalCounters.reset()
+      t0 = time.time()
+      loss = step(x.contiguous(), y.contiguous())
+      Device[Device.DEFAULT].synchronize()
+      t1 = time.time()
+      print(f"iteration {i}, loss: {loss.item()}, time: {(t1-t0)*1000:.3f}ms")
 
   start = "<|endoftext|>"
   start_ids = encode(start)

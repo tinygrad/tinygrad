@@ -45,4 +45,4 @@ if __name__ == "__main__":
         print(f"GOT: {st2}")
         print(colored("****", "green" if eq else "red"))
       if not eq: exit(0)
-    if getenv("CHECK_NEQ"): print(f"same but unequal {(same_but_neq/total)*100:.2f}%")
+    if getenv("CHECK_NEQ"): print(f"same but unequal {same_but_neq}/{total} = {(same_but_neq/total)*100:.2f}%")

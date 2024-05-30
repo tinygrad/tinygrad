@@ -5,8 +5,9 @@ import tiktoken
 from tiktoken.load import load_tiktoken_bpe
 from tqdm import tqdm
 from extra.models.llama import Transformer, convert_from_huggingface, fix_bf16
-from tinygrad.nn.state import safe_load, torch_load, load_state_dict
+from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
 from tinygrad import Tensor, dtypes, nn, Context, Device, GlobalCounters
+from tinygrad.helpers import Profiling, Timing, DEBUG
 
 class Tokenizer:
   pat_str = r"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"
@@ -92,7 +93,7 @@ def NF4Linear(block_size):
     -1.0, -0.6961928009986877, -0.5250730514526367, -0.39491748809814453, -0.28444138169288635, -0.18477343022823334, -0.09105003625154495, 0.0,
     0.07958029955625534, 0.16093020141124725, 0.24611230194568634, 0.33791524171829224, 0.44070982933044434, 0.5626170039176941, 0.7229568362236023, 1.0,
   ]
-  CODE = Tensor.stack([Tensor(c) for c in _CODE])
+  CODE = Tensor.stack(*[Tensor(c) for c in _CODE])
   class _NF4Linear:
     def __init__(self, in_features, out_features, bias=False):
       assert not bias, "bias not supported"
@@ -103,7 +104,7 @@ def NF4Linear(block_size):
     def __call__(self, x: Tensor) -> Tensor:
       high_bits = self.weight
       low_bits = (self.weight * 2 ** 4).contiguous()
-      unpacked = Tensor.stack([high_bits, low_bits], dim=-1).div(2 ** 4, upcast=False)
+      unpacked = Tensor.stack(high_bits, low_bits, dim=-1).div(2 ** 4, upcast=False)
       unscaled = CODE[unpacked].to(x.device).reshape(-1, block_size) * self.scale
       return x.linear(unscaled.reshape(self.out_features, self.in_features).T)
 
@@ -195,7 +196,9 @@ if __name__ == "__main__":
   parser.add_argument("--shard", type=int, default=1)
   parser.add_argument("--quantize", choices=["int8", "nf4"])
   parser.add_argument("--api", action="store_true")
-  parser.add_argument('--seed', type=int)
+  parser.add_argument("--seed", type=int)
+  parser.add_argument("--timing", action="store_true", help="Print timing per token")
+  parser.add_argument("--profile", action="store_true", help="Output profile data")
   args = parser.parse_args()
 
   if args.seed is not None: Tensor.manual_seed(args.seed)
@@ -209,6 +212,7 @@ if __name__ == "__main__":
 
   device = tuple(f"{Device.DEFAULT}:{i}" for i in range(args.shard)) if args.shard > 1 else Device.DEFAULT
   model = build_transformer(args.model, model_size=args.size, quantize=args.quantize, device=device)
+  param_bytes = sum(x.lazydata.size * x.dtype.itemsize for x in get_parameters(model))
 
   if args.api:
     from bottle import Bottle, request, response, HTTPResponse, abort
@@ -317,7 +321,16 @@ if __name__ == "__main__":
       last_tok = toks[-1]
       while True:
         GlobalCounters.reset()
-        tok = model(Tensor([[last_tok]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P).item()
+        if args.timing or args.profile: print("")
+        st = GlobalCounters.time_sum_s
+        with Profiling(enabled=args.profile):
+          with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/s, {GlobalCounters.global_mem/x:.2f} GB/s, param {param_bytes/x:.2f} GB/s"):
+            with Timing("enqueue in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
+                        f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
+                        (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_bytes*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=args.timing):
+
+              tok = model(Tensor([[last_tok]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P)
+            tok = tok.item()
         start_pos += 1
         last_tok = tok
         if tok in tokenizer.stop_tokens: break
