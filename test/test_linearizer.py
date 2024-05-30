@@ -202,7 +202,7 @@ class TestLinearizer(unittest.TestCase):
     k.hand_coded_optimizations()
     k.linearize()
     self.assertEqual(len(endifs:=[x for x in k.uops if x.uop is UOps.ENDIF]), len(ifs:=[x for x in k.uops if x.uop is UOps.IF]))
-    self.assertEqual(len(barriers:=[x for x in k.uops if x.uop is UOps.BARRIER]), 3)
+    self.assertEqual(len(barriers:=[x for x in k.uops if x.uop is UOps.BARRIER]), 4)
     self.assertEqual(k.uops[k.uops.uops.index(endifs[0])-1].uop, UOps.STORE)
     self.assertEqual(k.uops[k.uops.uops.index(endifs[0])+1], barriers[1])
     self.assertEqual(k.uops[k.uops.uops.index(endifs[0])+2].uop, UOps.LOAD)
