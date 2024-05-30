@@ -1292,7 +1292,7 @@ class TestKernelOpts(unittest.TestCase):
   @unittest.skip("multireduce isn't supported yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_fused_tensor_core_simple(self):
-    N = 128
+    N = 64
     Tensor.manual_seed(1552)
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
       if tc.dtype_in == dtypes.bfloat16: continue
@@ -1304,7 +1304,7 @@ class TestKernelOpts(unittest.TestCase):
   @unittest.skip("multireduce isn't supported yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_fused_tensor_core_permuted(self):
-    N = 128
+    N = 64
     Tensor.manual_seed(1552)
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
       if tc.dtype_in == dtypes.bfloat16: continue
