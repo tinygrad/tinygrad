@@ -635,6 +635,10 @@ class TestOps(unittest.TestCase):
                                                 lambda a,b: Tensor.einsum('zqrs,tuqvr->zstuv', a,b), atol=1e-5)
     # bilinear transformation
     helper_test_op([(2,3),(5,3,7),(2,7)], lambda a,b,c: torch.einsum('ik,jkl,il->ij', [a,b,c]), lambda a,b,c: Tensor.einsum('ik,jkl,il->ij', [a,b,c]))
+    # test ellipsis # TODO: FIXME
+    with self.assertRaises(Exception):
+      helper_test_op([(16,29,256),(16,29,256)], lambda a,b: torch.einsum('...id, ...jd -> ...ij', [a,b]),
+                                                lambda a,b: Tensor.einsum('...id, ...jd -> ...ij', [a,b]))
 
   def test_einsum_shape_check(self):
     a = Tensor.zeros(3,8,10,5)
