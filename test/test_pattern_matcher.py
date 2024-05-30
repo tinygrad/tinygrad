@@ -271,5 +271,5 @@ class TestPatternMatcher(unittest.TestCase):
     self.assert_equiv_uops(e2, uops.uops[1])
     self.assert_equiv_uops(e3, uops.uops[2])
 
-if __name__ == "__main__":
+if __name__ == '__main__':
   unittest.main(verbosity=2)
