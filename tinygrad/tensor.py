@@ -2367,7 +2367,8 @@ class Tensor:
     """
     Multiplies the gradient of `self` with `scale`.
     """
-    return F.GradScale.apply(*self._broadcasted(scale))
+    inverse_scale = 1 - scale if -1 <= scale <= 1 else -1 / scale
+    return (self * scale) + (self.detach() * inverse_scale)
 
   def xor(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
