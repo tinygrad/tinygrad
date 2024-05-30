@@ -95,7 +95,7 @@ class TestPatternMatcher(unittest.TestCase):
     self.assertEqual(matcher.rewrite(a2), c0)
 
   def test_self_sub(self):
-    matcher = PatternMatcher([(UPat(uop=UOps.ALU, arg=BinaryOps.SUB, vin=(UPat(name="x"), UPat(name="x"))), lambda x: UOp.const(x.dtype, 0))])   # x-x -> 0
+    matcher = PatternMatcher([(UPat(uop=UOps.ALU, arg=BinaryOps.SUB, vin=(UPat(name="x"), UPat(name="x"))), lambda x: UOp.const(x.dtype, 0))])  
     c0_int = UOp(UOps.CONST, dtypes.int, arg=0)
     c0_float = UOp(UOps.CONST, dtypes.float, arg=0.0)
     c1 = UOp(UOps.CONST, dtypes.int, arg=10)

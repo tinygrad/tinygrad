@@ -3,7 +3,7 @@ from typing import Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable,
 import functools, itertools, heapq
 from collections import defaultdict
 from enum import Enum, auto
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, DType
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, exec_alu
@@ -74,6 +74,7 @@ class UPat:
   name: Optional[str] = None
   vin: Union[Tuple[UPat, ...], List[UPat], UPat] = ()
   dtype: Optional[Union[DType, Set[DType]]] = None
+  __allow_len__: List[int] = field(default_factory=list)
  
 
 def _match(uop: UOp, pattern: UPat, store: Dict[str, UOp]) -> bool:
