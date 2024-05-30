@@ -186,6 +186,12 @@ class HWCopyQueue(HWQueue):
     self.next_cmd_index += 1
     return self
 
+  def signal(self, signal, value=0):
+    self.q += [nvmethod(4, nv_gpu.NVC6B5_SET_SEMAPHORE_A, 4), *nvdata64(ctypes.addressof(from_mv(signal))), value, 4]
+    self.q += [nvmethod(4, nv_gpu.NVC6B5_LAUNCH_DMA, 1), 0x14]
+    self.next_cmd_index += 1
+    return self
+
   def submit(self, dev:NVDevice):
     if len(self.q) == 0: return
     dev.dma_put_value = self._submit(dev, dev.dma_gpu_ring, dev.dma_put_value, dev.dma_gpfifo_entries,
