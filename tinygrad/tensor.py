@@ -1726,9 +1726,8 @@ class Tensor:
     print(t.cumsum(1).numpy())
     ```
     """
-    if self.ndim == 0:
-      axis = self._resolve_dim(axis) # still checks axis range
-      return self
+    axis = self._resolve_dim(axis)
+    if self.ndim == 0: return self
     # TODO: someday the optimizer will find this on it's own
     # for now this is a two stage cumsum
     SPLIT = 256
