@@ -138,6 +138,14 @@ class Div(Function):
     return grad_output.e(BinaryOps.DIV, self.y) if self.needs_input_grad[0] else None, \
            grad_output.e(UnaryOps.NEG).e(BinaryOps.MUL, self.x).e(BinaryOps.DIV, self.y.e(BinaryOps.MUL, self.y)) if self.needs_input_grad[1] else None  # noqa: E501
 
+class GradScale(Function):
+  def forward(self, x:LazyBuffer, scale:LazyBuffer):
+    self.scale = scale
+    return x
+
+  def backward(self, grad_output: LazyBuffer):
+    return grad_output.e(BinaryOps.MUL, self.scale), None
+
 # ************* ternary ops *************
 
 class Where(Function):

@@ -2363,6 +2363,12 @@ class Tensor:
     if upcast: numerator, denominator = numerator.cast(least_upper_float(numerator.dtype)), denominator.cast(least_upper_float(denominator.dtype))
     return F.Div.apply(numerator, denominator)
 
+  def gradscale(self, scale:Union[int, "float"]):
+    """
+    Multiplies the gradient of `self` with `scale`.
+    """
+    return F.GradScale.apply(*self._broadcasted(scale))
+
   def xor(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
     Computes bitwise xor of `self` and `x`.
