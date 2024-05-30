@@ -1075,6 +1075,19 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.UPCAST, 0, 8), Opt(OptOps.UNROLL, 1, 4)],
     ])
 
+  @unittest.skip("multireduce isn't supported yet")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  def test_atomic_local_multireduce(self):
+    # reducops will need to use the local buffer to load the result of a local reduce into every thread, barriers are needed on both sides
+    # of the load to ensure 1) the correct value is in the local buffer and 2) the value isn't overwritten by the next reduceop
+    N = 512
+    Tensor.manual_seed(1882)
+    a,b = Tensor.rand(4,4,N).realize(), Tensor.rand(4,4,N).realize()
+    r0,r1 = a.sum(-1), b.sum(-1)
+    ast = _temp_create_multireduce_ast(r0, r1)
+    helper_linearizer_ast(ast, [a,b], [[Opt(OptOps.GROUP, 0, 2)]])
+
   def test_upcasts(self):
     N = 16
     Tensor.manual_seed(1772)
