@@ -99,7 +99,7 @@ COMPUTE_SHADER_EN = 1
 FORCE_START_AT_000 = 1 << 2
 CS_W32_EN = 1 << 15
 
-def gfxreg(reg, off=amd_gpu.PACKET3_SET_SH_REG_START): return reg + 0x00001260 - off
+def gfxreg(reg): return reg + 0x00001260 - amd_gpu.PACKET3_SET_SH_REG_START
 
 class HWPM4Queue:
   def __init__(self): self.q = []
