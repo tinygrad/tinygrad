@@ -134,7 +134,7 @@ generate_amd() {
 
   sed -e '/^reg/s/^\(reg[^ ]*\) [^ ]* \([^ ]*\) .*/\1 = \2/' \
     -e '/^ix/s/^\(ix[^ ]*\) [^ ]* \([^ ]*\) .*/\1 = \2/' \
-    -e '/^[ \t]/s/^/# /' \
+    -e '/^[ \t]/d' \
     extra/hip_gpu_driver/gc_11_0_0.reg >> $BASE/amd_gpu.py
 
   fixup $BASE/amd_gpu.py
