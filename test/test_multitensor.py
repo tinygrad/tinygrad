@@ -2,7 +2,7 @@ import unittest, functools, random
 from typing import List
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes
 from tinygrad.ops import LoadOps, ReduceOps
-from tinygrad.helpers import CI, prod, Context
+from tinygrad.helpers import CI, getenv, prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import lower_schedule, BufferCopy, CompiledRunner
@@ -12,7 +12,7 @@ import numpy as np
 from hypothesis import given, strategies as strat, settings
 from test.helpers import is_dtype_supported
 
-settings.register_profile("my_profile", max_examples=200, deadline=None)
+settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
 
 d_zero = f"{Device.DEFAULT}:0"
