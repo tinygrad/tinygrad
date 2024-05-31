@@ -3,11 +3,11 @@ import torch
 import unittest, copy
 import mmap
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.helpers import temp, CI
+from tinygrad.helpers import getenv, temp, CI
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
 
-settings.register_profile("my_profile", max_examples=200, deadline=None)
+settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
 
 x_init = np.random.randn(1,3).astype(np.float32)
