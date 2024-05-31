@@ -124,8 +124,8 @@ class HWPM4Queue:
     self.hdp_flush()
     self.invalidate_cache()
 
-    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 6), gfxreg(amd_gpu.regCOMPUTE_PGM_LO), (prg.prog_addr>>8) & 0xFFFFFFFF, prg.prog_addr >> 40, 0, 0,
-               (prg.device.scratch.va_addr>>8) & 0xFFFFFFFF, prg.device.scratch.va_addr >> 40]
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 6), gfxreg(amd_gpu.regCOMPUTE_PGM_LO), (prg.prog_addr>>8) & 0xFFFFFFFF,
+               prg.prog_addr >> 40, 0, 0, (prg.device.scratch.va_addr>>8) & 0xFFFFFFFF, prg.device.scratch.va_addr >> 40]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), gfxreg(amd_gpu.regCOMPUTE_PGM_RSRC1), prg.rsrc1, prg.rsrc2]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), gfxreg(amd_gpu.regCOMPUTE_TMPRING_SIZE), 0x00200200] # (waveSize << 12) | (numWaves)
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 4), gfxreg(amd_gpu.regCOMPUTE_RESTART_X), 0, 0, 0, 0]
