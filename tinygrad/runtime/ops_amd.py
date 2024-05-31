@@ -270,7 +270,7 @@ class HWCopyQueue:
       ctypes.memset(device.sdma_ring.va_addr + (device.sdma_doorbell_value % device.sdma_ring.size), 0, zero_fill)
       device.sdma_doorbell_value += zero_fill
 
-      sdma_doorbell_value[0:rem_packet_cnt] = array.array('I', self.q[tail_blit_dword:])
+      sdma_buffer_view[0:rem_packet_cnt] = array.array('I', self.q[tail_blit_dword:])
       device.sdma_doorbell_value += rem_packet_cnt * 4
 
     device.sdma_write_pointer[0] = device.sdma_doorbell_value
