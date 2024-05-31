@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 import numpy as np
 import unittest
 from dataclasses import replace
@@ -982,13 +982,15 @@ def _helper_linearizer_opt_ast(realized_ast:Tuple[LazyOp, ...], real_bufs:List[B
 
 # creates a back-to-back multi reduce AST by merging r0 and r1.
 # TODO: delete once we can schedule multi reduce
-def _temp_create_multireduce_ast(r0:Tensor, r1:Tensor, replace_idxs={}, merge=lambda r0,r1: LazyOp(BinaryOps.ADD, (r0, r1))) -> Tuple[LazyOp, ...]:
+def _temp_create_multireduce_ast(r0:Tensor, r1:Tensor, replace_idxs:Dict[int,Tensor]={}, merge=lambda r0,r1: LazyOp(BinaryOps.ADD, (r0, r1))) -> Tuple[LazyOp, ...]:
   assert len(s0:=r0.schedule()) == 1 and len(s1:=r1.schedule()) == 1, "inputs should be realized"
+  assert all(replace_idxs[idx] is r0 or replace_idxs[idx] is r1 for idx in replace_idxs), "replace idxs should be in {{r0, r1}}"
   op0, op1 = s0[0].ast[0].src[0], s1[0].ast[0].src[0]
+  _replace_idxs = {idx:(op0 if replace_idxs[idx] is r0 else op1) for idx in replace_idxs}
   def _deep_replace(op:LazyOp, offset=0):
-    if op.op is BufferOps.LOAD:
-      if op.arg.idx+offset in replace_idxs: return replace_idxs[op.arg.idx+offset]
-      else: arg = op.arg+offset
+    if op.op is BufferOps.LOAD: 
+      if op.arg.idx+offset in _replace_idxs: return _replace_idxs[op.arg.idx+offset]
+      else: arg = MemBuffer(op.arg.idx+offset, op.arg.dtype, op.arg.st)
     else: arg = op.arg
     return LazyOp(op.op, tuple(_deep_replace(x, offset) for x in op.src), arg)
   # limitation: r0 and r1 cannot share inputs.
@@ -1078,6 +1080,12 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.UPCAST, 0, 8), Opt(OptOps.UNROLL, 1, 4)],
     ])
 
+  # The key problem is that all interactions with the temp buffer MUST BE ORDERED
+  # we can ensure a barrier before a load & after a store, but with multiple reduceops we also need the converse
+  # so I propose the addition of an optional barrier to the UOps.STORE vin, it will do nothing but it will ensure: 
+  # barriers can be inserted BEFORE a store,,, preventing them from overwriting data before it's loaded into every thread
+  # uops optimizations won't reorder stores for independent reduceops
+
   @unittest.skip("multireduce isn't supported yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
@@ -1097,6 +1105,61 @@ class TestKernelOpts(unittest.TestCase):
     r0,r1 = (a-dummy).sum(-1), b.sum(-1)
     ast = _temp_create_multireduce_ast(r0, r1, replace_idxs={2:r1}, merge=lambda r0,_: r0)
     helper_linearizer_ast(ast, [a,b], [[Opt(OptOps.GROUP, 0, 2)]])
+
+  @unittest.skip("multireduce isn't supported yet")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  def test_just_enough_barriers(self):
+    def check_barriers(k:Linearizer):
+      k.linearize()
+      assert k.uops._uops, "Uops need to have been generated"
+      mem_fenced = True
+      local_bufs = [u for u in k.uops._uops if u.uop is UOps.DEFINE_LOCAL]
+      for u in k.uops._uops:
+        if u.uop is UOps.BARRIER:
+          assert not mem_fenced, "found redundant barrier"
+          mem_fenced = True
+        if u.uop is UOps.LOAD or u.uop is UOps.STORE and any(v in local_bufs for v in u.vin):
+          assert mem_fenced, "sequential local buffer read/write operations are not fenced"
+          mem_fenced = False
+
+    # parallel reduces
+    a,b = Tensor.rand(64,).realize(), Tensor.rand(64,).realize()
+    r0,r1 = a.sum(), b.sum()
+    ast = _temp_create_multireduce_ast(r0, r1)
+    k = Linearizer(*ast)
+    k.hand_coded_optimizations()
+    check_barriers(k)
+    k = Linearizer(*ast)
+    k.apply_opt(Opt(OptOps.GROUP, 0, 16))
+    check_barriers(k)
+    k = Linearizer(*ast)
+    k.apply_opt(Opt(OptOps.GROUP, 0, 16))
+    k.apply_opt(Opt(OptOps.UNROLL, 0, 2))
+    check_barriers(k)
+    k = Linearizer(*ast)
+    k.apply_opt(Opt(OptOps.GROUP, 0, 16))
+    k.apply_opt(Opt(OptOps.GROUP, 1, 2))
+    check_barriers(k)
+
+    # sequential reduces
+    a,b = Tensor.rand(64,).realize(), Tensor.rand(64,).realize()
+    dummy = Tensor.rand(1,).realize()
+    r0,r1 = (a+dummy).sum(), b.sum()
+    ast = _temp_create_multireduce_ast(r0, r1)
+    k = Linearizer(*ast)
+    k.hand_coded_optimizations()
+    check_barriers(k)
+    k = Linearizer(*ast)
+    k.apply_opt(Opt(OptOps.GROUP, 0, 16))
+    check_barriers(k)
+    k = Linearizer(*ast)
+    k.apply_opt(Opt(OptOps.GROUP, 0, 16))
+    k.apply_opt(Opt(OptOps.UNROLL, 0, 2))
+    check_barriers(k)
+    k = Linearizer(*ast)
+    k.apply_opt(Opt(OptOps.GROUP, 0, 16))
+    k.apply_opt(Opt(OptOps.GROUP, 1, 2))
+    check_barriers(k)
 
   @unittest.skip("multireduce isn't supported yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
