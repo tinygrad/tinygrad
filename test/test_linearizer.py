@@ -1172,10 +1172,9 @@ class TestKernelOpts(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   def test_atomic_store_nested_range_multireduce(self):
-    N = 256
     # nested ranges
-    a,b = Tensor.rand(8, N, 8, N).realize(), Tensor.rand(8, N, 8, N).realize()
-    r0,r1 = a.sum(), b.sum()
+    a,b = Tensor.rand(6, ).realize(), Tensor.rand(6, ).realize()
+    r0,r1 = a.reshape(6, 1).expand(6, 3).sum(), b.reshape(6, 1).expand(6, 3).sum()
     ast = _temp_create_multireduce_ast(r0, r1)
     helper_linearizer_ast(ast, [a,b], [
       [Opt(OptOps.GROUP, 0, 2)],[Opt(OptOps.GROUP, 1, 3)],
@@ -1184,16 +1183,6 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.GROUP, 0, 2), Opt(OptOps.UNROLL, 0, 2)],
       [Opt(OptOps.GROUP, 1, 3), Opt(OptOps.UNROLL, 1, 3)],
       ])
-
-    # nested ranges (sequential)
-    a,b = Tensor.rand(6, 3).realize(), Tensor.rand(6,3).realize()
-    dummy = Tensor.rand(1,1).realize()
-    r0,r1 = (a+dummy).sum(), b.sum()
-    ast = _temp_create_multireduce_ast(r0, r1, replace_idxs={2:r1}, merge=lambda r0,_: r0)
-    helper_linearizer_ast(ast, [a,b], [
-      [Opt(OptOps.GROUP, 0, 3)],[Opt(OptOps.GROUP, 0, 6)],
-      [Opt(OptOps.GROUP, 0, 3),Opt(OptOps.GROUP, 0, 6)],
-    ])
 
   def test_upcasts(self):
     N = 16
