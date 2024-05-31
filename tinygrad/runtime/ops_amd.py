@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Tuple, List, Any, cast
-import os, fcntl, ctypes, ctypes.util, functools, re, pathlib, mmap, struct, errno, subprocess, time
+import os, fcntl, ctypes, ctypes.util, functools, re, pathlib, mmap, struct, errno, subprocess, time, array
 from tinygrad.device import Compiled, Compiler, CompileError, BufferOptions, LRUAllocator
 from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up, DEBUG
 from tinygrad.renderer.cstyle import AMDRenderer
@@ -213,34 +213,30 @@ class HWCopyQueue:
     self._q([0x8, 0x0, 0x80000000, 0x0, 0x0, 0x0])
 
     # Invalidate cache inv
-    self._q([amd_gpu.SDMA_PKT_GCR_REQ_HEADER_OP(amd_gpu.SDMA_OP_GCR_REQ), 0, amd_gpu.SDMA_GCR_GLM_INV | amd_gpu.SDMA_GCR_GLK_INV | \
-      amd_gpu.SDMA_GCR_GLK_WB | amd_gpu.SDMA_GCR_GLV_INV | amd_gpu.SDMA_GCR_GL1_INV | amd_gpu.SDMA_GCR_GL2_WB | amd_gpu.SDMA_GCR_GL2_INV, 0, 0])
+    self._q([amd_gpu.SDMA_OP_GCR_REQ, 0, amd_gpu.SDMA_GCR_GLM_INV | amd_gpu.SDMA_GCR_GLK_INV | amd_gpu.SDMA_GCR_GLK_WB | amd_gpu.SDMA_GCR_GLV_INV | \
+      amd_gpu.SDMA_GCR_GL1_INV | amd_gpu.SDMA_GCR_GL2_WB | amd_gpu.SDMA_GCR_GL2_INV, 0, 0])
 
     copied = 0
     copy_commands = (copy_size + SDMA_MAX_COPY_SIZE - 1) // SDMA_MAX_COPY_SIZE
     for _ in range(copy_commands):
       step_copy_size = min(copy_size - copied, SDMA_MAX_COPY_SIZE)
 
-      self._q([amd_gpu.SDMA_PKT_COPY_LINEAR_HEADER_OP(amd_gpu.SDMA_OP_COPY) | \
-        amd_gpu.SDMA_PKT_COPY_LINEAR_HEADER_SUB_OP(amd_gpu.SDMA_SUBOP_COPY_LINEAR), amd_gpu.SDMA_PKT_COPY_LINEAR_COUNT_COUNT(step_copy_size - 1), 0,
-        *data64_le(src + copied), *data64_le(dest + copied)])
+      self._q([amd_gpu.SDMA_OP_COPY | amd_gpu.SDMA_PKT_COPY_LINEAR_HEADER_SUB_OP(amd_gpu.SDMA_SUBOP_COPY_LINEAR),
+        amd_gpu.SDMA_PKT_COPY_LINEAR_COUNT_COUNT(step_copy_size - 1), 0, *data64_le(src + copied), *data64_le(dest + copied)])
 
       copied += step_copy_size
 
     # Invalidate cache wb
-    self._q([amd_gpu.SDMA_PKT_GCR_REQ_HEADER_OP(amd_gpu.SDMA_OP_GCR_REQ), 0, amd_gpu.SDMA_GCR_GLM_INV | amd_gpu.SDMA_GCR_GLK_INV | \
-      amd_gpu.SDMA_GCR_GLK_WB | amd_gpu.SDMA_GCR_GLV_INV | amd_gpu.SDMA_GCR_GL1_INV | amd_gpu.SDMA_GCR_GL2_WB | amd_gpu.SDMA_GCR_GL2_INV, 0, 0])
+    self._q([amd_gpu.SDMA_OP_GCR_REQ, 0, amd_gpu.SDMA_GCR_GLK_WB | amd_gpu.SDMA_GCR_GL2_WB, 0, 0])
 
     return self
 
   def signal(self, signal: hsa.amd_signal_t, value=0):
-    self._q([amd_gpu.SDMA_PKT_FENCE_HEADER_OP(amd_gpu.SDMA_OP_FENCE) | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3),
-      *data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET), value])
+    self._q([amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET), value])
 
-    # if signal.event_mailbox_ptr != 0:
-    #   self._q([amd_gpu.SDMA_PKT_FENCE_HEADER_OP(amd_gpu.SDMA_OP_FENCE) | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3),
-    #     *data64_le(signal.event_mailbox_ptr), signal.event_id])
-    #   self._q([amd_gpu.SDMA_PKT_TRAP_HEADER_OP(amd_gpu.SDMA_OP_TRAP), amd_gpu.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(signal.event_id)])
+    if signal.event_mailbox_ptr != 0:
+      self._q([amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(signal.event_mailbox_ptr), signal.event_id])
+      self._q([amd_gpu.SDMA_OP_TRAP, amd_gpu.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(signal.event_id)])
 
     return self
 
@@ -259,112 +255,27 @@ class HWCopyQueue:
     if (device.sdma_doorbell_value-read_ptr) > device.sdma_ring.size: raise RuntimeError("SDMA queue overrun")
 
     sdma_buffer_view = to_mv(device.sdma_ring.va_addr, device.sdma_ring.size).cast("I")
-    # for i, value in enumerate(self.q): pm4_buffer_view[(wptr+i)%(device.pm4_ring.size//4)] = value
 
-    # Cannot split command on the wrap around
-    goff = 0
+    tail_blit_dword = 0
     for cmdsz in self.cmd_sizes:
-      if cmdsz * 4 > (fill:=device.sdma_ring.size - device.sdma_doorbell_value % device.sdma_ring.size):
-        ctypes.memset(device.sdma_ring.va_addr + (device.sdma_doorbell_value % device.sdma_ring.size), 0, fill)
-        device.sdma_doorbell_value += fill
+      if (tail_blit_dword + cmdsz) * 4 > device.sdma_ring.size - device.sdma_doorbell_value % device.sdma_ring.size: break
+      tail_blit_dword += cmdsz
 
-      for _ in range(cmdsz):
-        sdma_buffer_view[(device.sdma_doorbell_value // 4) % (device.sdma_ring.size // 4)] = self.q[goff]
-        goff += 1
-        device.sdma_doorbell_value += 4
+    start_idx = (device.sdma_doorbell_value % device.sdma_ring.size) // 4
+    sdma_buffer_view[start_idx : start_idx + tail_blit_dword] = array.array('I', self.q[:tail_blit_dword])
+    device.sdma_doorbell_value += tail_blit_dword * 4
 
-    assert goff == len(self.q)
-      # device.sdma_ring.va_addr + (device.sdma_doorbell_value % device.sdma_ring.size)
-      # device.sdma_doorbell_value += cmdsz
-    # if (device.sdma_doorbell_value-read_ptr) > device.sdma_ring.size: raise RuntimeError("SDMA queue overrun")
-    # for cmd in self.q:
-    #   if (cmdsz:=ctypes.sizeof(cmd)) > (fill:=device.sdma_ring.size - device.sdma_doorbell_value % device.sdma_ring.size):
-    #     ctypes.memset(device.sdma_ring.va_addr + (device.sdma_doorbell_value % device.sdma_ring.size), 0, fill)
-    #     device.sdma_doorbell_value += fill
-    #   ctypes.memmove(device.sdma_ring.va_addr + (device.sdma_doorbell_value % device.sdma_ring.size), ctypes.addressof(cmd), cmdsz)
-    #   device.sdma_doorbell_value += cmdsz
+    if (rem_packet_cnt := len(self.q) - tail_blit_dword) > 0:
+      zero_fill = device.sdma_ring.size - device.sdma_doorbell_value % device.sdma_ring.size
+      ctypes.memset(device.sdma_ring.va_addr + (device.sdma_doorbell_value % device.sdma_ring.size), 0, zero_fill)
+      device.sdma_doorbell_value += zero_fill
+
+      sdma_doorbell_value[0:rem_packet_cnt] = array.array('I', self.q[tail_blit_dword:])
+      device.sdma_doorbell_value += rem_packet_cnt * 4
 
     device.sdma_write_pointer[0] = device.sdma_doorbell_value
     device.sdma_doorbell[0] = device.sdma_doorbell_value
     return self
-
-  # def timestamp(self, addr):
-  #   self.q.append(sdma_pkts.timestamp(op=amd_gpu.SDMA_OP_TIMESTAMP, sub_op=amd_gpu.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL, addr=addr))
-  #   return self
-
-  # def copy(self, dest, src, copy_size):
-  #   self.q.append(sdma_flush_hdp_pkt)  # TODO: do I need this?
-  #   self.q.append(sdma_cache_inv)
-  #   copied = 0
-  #   copies_commands = (copy_size + SDMA_MAX_COPY_SIZE - 1) // SDMA_MAX_COPY_SIZE
-  #   for _ in range(copies_commands):
-  #     step_copy_size = min(copy_size - copied, SDMA_MAX_COPY_SIZE)
-  #     self.q.append(sdma_pkts.copy_linear(op=amd_gpu.SDMA_OP_COPY, sub_op=amd_gpu.SDMA_SUBOP_COPY_LINEAR,
-  #                                         count=step_copy_size-1, src_addr=src+copied, dst_addr=dest+copied))
-  #     copied += step_copy_size
-  #   self.q.append(sdma_cache_wb)
-  #   return self
-
-  # def signal(self, signal:hsa.amd_signal_t, value=0):
-  #   self.q.append(sdma_pkts.fence(op=amd_gpu.SDMA_OP_FENCE, mtype=3, addr=ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET, data=value))
-  #   if signal.event_mailbox_ptr != 0:
-  #     self.q.append(sdma_pkts.fence(op=amd_gpu.SDMA_OP_FENCE, mtype=3, addr=signal.event_mailbox_ptr, data=signal.event_id))
-  #     self.q.append(sdma_pkts.trap(op=amd_gpu.SDMA_OP_TRAP, int_ctx=signal.event_id))
-  #   return self
-
-  # def wait(self, signal:hsa.amd_signal_t, value=0):
-  #   self.q.append(sdma_pkts.poll_regmem(op=amd_gpu.SDMA_OP_POLL_REGMEM, mem_poll=1, func=WAIT_REG_MEM_FUNCTION_GEQ,
-  #                                       addr=ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET,
-  #                                       value=value, mask=0xffffffff, interval=0x04, retry_count=0xfff))
-  #   return self
-
-# class HWCopyQueue2:
-#   def __init__(self): self.q = []
-
-#   def submit(self, device:AMDDevice):
-#     read_ptr = device.sdma_read_pointer[0]
-#     if (device.sdma_doorbell_value-read_ptr) > device.sdma_ring.size: raise RuntimeError("SDMA queue overrun")
-#     for cmd in self.q:
-#       if (cmdsz:=ctypes.sizeof(cmd)) > (fill:=device.sdma_ring.size - device.sdma_doorbell_value % device.sdma_ring.size):
-#         ctypes.memset(device.sdma_ring.va_addr + (device.sdma_doorbell_value % device.sdma_ring.size), 0, fill)
-#         device.sdma_doorbell_value += fill
-#       ctypes.memmove(device.sdma_ring.va_addr + (device.sdma_doorbell_value % device.sdma_ring.size), ctypes.addressof(cmd), cmdsz)
-#       device.sdma_doorbell_value += cmdsz
-#     device.sdma_write_pointer[0] = device.sdma_doorbell_value
-#     device.sdma_doorbell[0] = device.sdma_doorbell_value
-#     return self
-
-#   # def timestamp(self, addr):
-#   #   self.q.append(sdma_pkts.timestamp(op=amd_gpu.SDMA_OP_TIMESTAMP, sub_op=amd_gpu.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL, addr=addr))
-#   #   return self
-
-#   def copy(self, dest, src, copy_size):
-#     # self.q += [amd_gpu.]
-    
-#     self.q.append(sdma_flush_hdp_pkt)  # TODO: do I need this?
-#     self.q.append(sdma_cache_inv)
-#     copied = 0
-#     copies_commands = (copy_size + SDMA_MAX_COPY_SIZE - 1) // SDMA_MAX_COPY_SIZE
-#     for _ in range(copies_commands):
-#       step_copy_size = min(copy_size - copied, SDMA_MAX_COPY_SIZE)
-#       self.q.append(sdma_pkts.copy_linear(op=amd_gpu.SDMA_OP_COPY, sub_op=amd_gpu.SDMA_SUBOP_COPY_LINEAR,
-#                                           count=step_copy_size-1, src_addr=src+copied, dst_addr=dest+copied))
-#       copied += step_copy_size
-#     self.q.append(sdma_cache_wb)
-#     return self
-
-#   def signal(self, signal:hsa.amd_signal_t, value=0):
-#     self.q.append(sdma_pkts.fence(op=amd_gpu.SDMA_OP_FENCE, mtype=3, addr=ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET, data=value))
-#     if signal.event_mailbox_ptr != 0:
-#       self.q.append(sdma_pkts.fence(op=amd_gpu.SDMA_OP_FENCE, mtype=3, addr=signal.event_mailbox_ptr, data=signal.event_id))
-#       self.q.append(sdma_pkts.trap(op=amd_gpu.SDMA_OP_TRAP, int_ctx=signal.event_id))
-#     return self
-
-#   def wait(self, signal:hsa.amd_signal_t, value=0):
-#     self.q.append(sdma_pkts.poll_regmem(op=amd_gpu.SDMA_OP_POLL_REGMEM, mem_poll=1, func=WAIT_REG_MEM_FUNCTION_GEQ,
-#                                         addr=ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET,
-#                                         value=value, mask=0xffffffff, interval=0x04, retry_count=0xfff))
-#     return self
 
 SHT_PROGBITS, SHF_ALLOC = 0x1, 0x2
 class AMDProgram:
