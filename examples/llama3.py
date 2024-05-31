@@ -1,6 +1,6 @@
 from pathlib import Path
 from typing import List
-import json, argparse
+import json, argparse, random, time
 import tiktoken
 from tiktoken.load import load_tiktoken_bpe
 from tqdm import tqdm
@@ -290,6 +290,8 @@ if __name__ == "__main__":
       if message["role"] != "user": abort(400, "last message must be a user message")
       toks += encode_role("assistant")
 
+      random_id = random.randbytes(16).hex()
+
       start_pos = prefill(model, toks[:-1])
       last_tok = toks[-1]
       while True:
@@ -300,14 +302,33 @@ if __name__ == "__main__":
         if tok in tokenizer.stop_tokens: break
 
         res = {
+          "id": random_id,
+          "object": "chat.completion.chunk",
+          "created": int(time.time()),
+          "model": str(args.model),
           "choices": [{
+            "index": 0,
             "delta": {
               "role": "assistant",
               "content": tokenizer.decode([tok]),
-            }
+            },
+            "finish_reason": None,
           }]
         }
         yield f"data: {json.dumps(res)}\n\n"
+
+      res = {
+        "id": random_id,
+        "object": "chat.completion.chunk",
+        "created": int(time.time()),
+        "model": str(args.model),
+        "choices": [{
+          "index": 0,
+          "delta": {},
+          "finish_reason": "stop",
+        }]
+      }
+      yield f"data: {json.dumps(res)}\n\n"
 
     app.run(host="0.0.0.0", port=7776, debug=True)
   else:
