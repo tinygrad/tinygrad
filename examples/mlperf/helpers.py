@@ -195,6 +195,7 @@ def get_bert_qa_prediction(features, example, start_end_logits):
   return "empty"
 
 def get_mlperf_bert_config():
+  """Config is BERT-large"""
   return {
     "attention_probs_dropout_prob": 0.1,
     "hidden_act": "gelu",
@@ -217,20 +218,8 @@ def get_mlperf_bert_model():
   bert.Embedding = EmbeddingBert 
   bert.LayerNorm = LayerNormBert
 
-  from extra.models.bert import BertForMLPerf
-
-  config = get_mlperf_bert_config()
-  return BertForMLPerf(
-    config["hidden_size"],
-    config["intermediate_size"], 
-    config["max_position_embeddings"], 
-    config["num_attention_heads"], 
-    config["num_hidden_layers"], 
-    config["type_vocab_size"], 
-    config["vocab_size"],
-    config["attention_probs_dropout_prob"], 
-    config["hidden_dropout_prob"]
-  )
+  from extra.models.bert import BertForPretraining
+  return BertForPretraining(**get_mlperf_bert_config()).load_from_pretrained()
 
 def init_bert_from_checkpoint(model, ckpt_dir:str):
   for tinygrad_key, x in get_state_dict(model).items():

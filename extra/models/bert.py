@@ -31,7 +31,7 @@ class BertForQuestionAnswering:
       get_child(self, k).assign(v.numpy()).realize()
 
   def __call__(self, input_ids:Tensor, attention_mask:Tensor, token_type_ids:Tensor):
-    sequence_output = self.bert(input_ids, attention_mask, token_type_ids)
+    sequence_output, _ = self.bert(input_ids, attention_mask, token_type_ids)
     logits = self.qa_outputs(sequence_output)
     start_logits, end_logits = logits.chunk(2, dim=-1)
     start_logits = start_logits.reshape(-1, 1)
@@ -39,40 +39,81 @@ class BertForQuestionAnswering:
 
     return Tensor.stack(start_logits, end_logits)
 
-class BertForMLPerf:
-  def __init__(self, hidden_size:int, intermediate_size:int, max_position_embeddings:int, num_attention_heads:int, num_hidden_layers:int, type_vocab_size:int, vocab_size:int, attention_probs_dropout_prob:float, hidden_dropout_prob:float) -> None:
-    self.model = Bert(hidden_size, intermediate_size, max_position_embeddings, num_attention_heads, num_hidden_layers, type_vocab_size, vocab_size, attention_probs_dropout_prob, hidden_dropout_prob)
-    # for clsf:
-    self.clsf_pooler = LinearBert(hidden_size, hidden_size) # [bs, seq, hidden] -> [bs, hidden]
-    self.clsf_pooling_activation = Tensor.tanh
-    self.clsf_output = LinearBert(hidden_size, 2) # [bs, hidden] -> [bs, 2]
+class BertForPretraining:
+  def __init__(self, hidden_size:int=1024, intermediate_size:int=4096, max_positon_embeddings:int=512, num_attention_heads:int=16, num_hidden_layers:int=24, type_vocab_size:int=2, vocab_size:int=30522, attention_probs_dropout_prob:float=0.1, hidden_dropout_prob:float=0.1):
+    """Default is BERT-large"""
+    self.bert = Bert(hidden_size, intermediate_size, max_positon_embeddings, num_attention_heads, num_hidden_layers, type_vocab_size, vocab_size, attention_probs_dropout_prob, hidden_dropout_prob)
+    self.heads = BertPreTrainingHeads(hidden_size, vocab_size, self.bert.embeddings.word_embeddings.weight)
+  
+  def __call__(self, input_ids:Tensor, attention_mask:Tensor, token_type_ids:Tensor):
+    output, pooled_output = self.bert(input_ids, attention_mask, token_type_ids)
+    return self.heads(output, pooled_output)
+  
+  def gather(self, prediction_logits:Tensor, masked_lm_positions:Tensor):
+    counter = Tensor.arange(prediction_logits.shape[1], requires_grad=False).reshape(1, 1, prediction_logits.shape[1]).expand(*masked_lm_positions.shape, prediction_logits.shape[1])
+    onehot = counter == masked_lm_positions.unsqueeze(2).expand(*masked_lm_positions.shape, prediction_logits.shape[1])
+    return onehot @ prediction_logits
+  
+  def loss(self, prediction_logits:Tensor, seq_relationship_logits:Tensor, masked_lm_positions:Tensor, masked_lm_ids:Tensor, next_sentence_labels:Tensor):
+    gathered_prediction_logits = self.gather(prediction_logits, masked_lm_positions)
+    masked_lm_loss = gathered_prediction_logits.sparse_categorical_crossentropy(masked_lm_ids)
+    next_sentence_loss = seq_relationship_logits.binary_crossentropy_logits(next_sentence_labels)
+    return masked_lm_loss + next_sentence_loss
+  
+  def accuracy(self, prediction_logits:Tensor, seq_relationship_logits:Tensor, masked_lm_positions:Tensor, masked_lm_ids:Tensor, next_sentence_labels:Tensor):
+    gathered_lm_prediction_logits = self.gather(prediction_logits, masked_lm_positions)
 
-    # for lm:
-    self.lm_transform = LinearBert(hidden_size, hidden_size)
-    self.lm_transform_activation = gelu
-    self.lm_norm = LayerNormBert(hidden_size, eps=1e-12)
-    self.lm_output = LinearBert(hidden_size, vocab_size, bias=False) # [bs, seq, hidden] -> [bs, seq, vocab]
-    self.lm_output.weight = self.model.embeddings.word_embeddings.weight
-    self.lm_output_bias = Tensor.zeros(vocab_size, dtype=dtypes.float32)
+    valid = masked_lm_ids != 0
+    masked_lm_predictions = gathered_lm_prediction_logits.log_softmax().argmax(-1)
+    masked_lm_accuracy = (masked_lm_predictions == masked_lm_ids) * valid
 
-  def __call__(self, input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor, masked_positions:Tensor):
-    output = self.model(input_ids, attention_mask, segment_ids)
-    clsf_logits = self.clsf_output(self.clsf_pooling_activation(self.clsf_pooler(output[:, 0]))).cast(dtypes.float32)
+    seq_relationship_predictions = seq_relationship_logits.log_softmax().argmax(-1)
+    seq_relationship_accuracy = (seq_relationship_predictions == next_sentence_labels)
 
-    # gather only the masked_positions we care about
-    counter = Tensor.arange(output.shape[1], requires_grad=False, device=output.device).reshape(1, 1, output.shape[1]).expand(*masked_positions.shape, output.shape[1])
-    onehot = counter == masked_positions.unsqueeze(2).expand(*masked_positions.shape, output.shape[1])
-    h_masked = onehot @ output
+    return masked_lm_accuracy.sum() / valid.sum(), seq_relationship_accuracy.mean()
+  
+  def load_from_pretrained(self):
+    ...
 
-    h_masked = self.lm_norm(self.lm_transform_activation(self.lm_transform(h_masked)))
-    lm_logits = self.lm_output(h_masked) + self.lm_output_bias
+class BertPreTrainingHeads:
+  def __init__(self, hidden_size:int, vocab_size:int, embeddings_weight:Tensor):
+    self.predictions = BertLMPredictionHead(hidden_size, vocab_size, embeddings_weight)
+    self.seq_relationship = Linear(hidden_size, 2)
 
-    return lm_logits, clsf_logits
+  def __call__(self, sequence_output:Tensor, pooled_output:Tensor):
+    prediction_logits = self.predictions(sequence_output)
+    seq_relationship_logits = self.seq_relationship(pooled_output)
+    return prediction_logits, seq_relationship_logits
+
+class BertLMPredictionHead:
+  def __init__(self, hidden_size:int, vocab_size:int, embeddings_weight:Tensor):
+    self.transform = BertPredictionHeadTransform(hidden_size)
+    self.embedding_weight = embeddings_weight
+    self.bias = Tensor.zeros(vocab_size)
+
+  def __call__(self, hidden_states:Tensor):
+    return self.transform(hidden_states) @ self.embedding_weight.T + self.bias
+
+class BertPredictionHeadTransform:
+  def __init__(self, hidden_size:int):
+    self.dense = Linear(hidden_size, hidden_size)
+    self.LayerNorm = LayerNorm(hidden_size, eps=1e-12)
+
+  def __call__(self, hidden_states:Tensor):
+   return self.LayerNorm(gelu(self.dense(hidden_states)))
+
+class BertPooler:
+  def __init__(self, hidden_size:int):
+    self.dense = Linear(hidden_size, hidden_size)
+
+  def __call__(self, hidden_states:Tensor):
+    return self.dense(hidden_states[:, 0]).tanh()
 
 class Bert:
   def __init__(self, hidden_size, intermediate_size, max_position_embeddings, num_attention_heads, num_hidden_layers, type_vocab_size, vocab_size, attention_probs_dropout_prob, hidden_dropout_prob):
     self.embeddings = BertEmbeddings(hidden_size, max_position_embeddings, type_vocab_size, vocab_size, hidden_dropout_prob)
     self.encoder = BertEncoder(hidden_size, intermediate_size, num_attention_heads, num_hidden_layers, attention_probs_dropout_prob, hidden_dropout_prob)
+    self.pooler = BertPooler(hidden_size)
 
   def __call__(self, input_ids, attention_mask, token_type_ids):
     extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
@@ -81,7 +122,7 @@ class Bert:
     embedding_output = self.embeddings(input_ids, token_type_ids)
     encoder_outputs = self.encoder(embedding_output, extended_attention_mask)
 
-    return encoder_outputs
+    return encoder_outputs, self.pooler(encoder_outputs)
 
 class BertEmbeddings:
   def __init__(self, hidden_size, max_position_embeddings, type_vocab_size, vocab_size,  hidden_dropout_prob):
