@@ -1793,7 +1793,7 @@ class Tensor:
     print(Tensor([False, True]).logical_not().numpy())
     ```
     """
-    return F.Eq.apply(*self._broadcasted(False))
+    return F.Neq.apply(*self.cast(dtypes.bool)._broadcasted(True))
   def neg(self):
     """
     Negates the tensor element-wise.
@@ -2542,8 +2542,8 @@ class Tensor:
   def __gt__(self, x) -> Tensor: return F.Less.apply(*self._broadcasted(x, True))
   def __ge__(self, x) -> Tensor: return (self<x).logical_not()
   def __le__(self, x) -> Tensor: return (self>x).logical_not()
-  def __eq__(self, x) -> Tensor: return F.Eq.apply(*self._broadcasted(x, True))       # type: ignore[override]
-  def __ne__(self, x) -> Tensor: return (self==x).logical_not()                       # type: ignore[override]
+  def __ne__(self, x) -> Tensor: return F.Neq.apply(*self._broadcasted(x))  # type: ignore[override]
+  def __eq__(self, x) -> Tensor: return (self!=x).logical_not()             # type: ignore[override]
 
   # ***** functional nn ops *****
 
