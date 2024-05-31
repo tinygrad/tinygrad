@@ -177,6 +177,17 @@ class TestSymbolicJit(unittest.TestCase):
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
     assert_jit_cache_len(jf, 1)
 
+  def test_ones_sum(self):
+    def f(a): return a.sum().realize()
+    jf = TinyJit(f)
+    for i in range(1, 5):
+      vi = Variable("i", 1, 10).bind(i)
+      # TODO: without contiguous, the CONST shape are different in jit
+      t = Tensor.ones(i).contiguous()
+      symbolic = jf(t.reshape(vi)).item()
+      expected = f(t).item()
+      np.testing.assert_equal(symbolic, expected)
+
   def test_mean(self):
     def f(a): return a.mean().realize()
     def f0(a): return a.mean(0).realize()

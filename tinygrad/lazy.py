@@ -74,6 +74,7 @@ class LazyBuffer:
     return create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype, op, arg, src, enable_cache=enable_cache)
 
   def const(self, val:ConstType, shape:Optional[Tuple[sint,...]]=None) -> LazyBuffer:
+    assert isinstance(val, (int,float,bool)), f"{val=} has {type(val)=}, not a ConstType"
     shape = self.shape if shape is None else shape
     return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, self.device, arg=val).reshape((1,)*len(shape)).expand(shape)
 
@@ -181,7 +182,8 @@ class LazyBuffer:
     if self.size == 0 and 0 not in new_shape: return self.const({ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[op], new_shape)
 
     # const folding
-    if self.is_unrealized_unmasked_const():
+    # TODO: fold this for symbolic?
+    if self.is_unrealized_unmasked_const() and all_int(self.shape):
       return self.const(self.base.arg * {ReduceOps.SUM: prod(self.shape[i] for i in axis), ReduceOps.MAX: 1}[op], new_shape)
 
     # TODO: can we split symbolic shape if the reduce axis is not symbolic?
