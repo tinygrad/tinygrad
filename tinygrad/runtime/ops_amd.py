@@ -224,7 +224,7 @@ class HWCopyQueue:
 
     tail_blit_dword = 0
     for cmdsz in self.cmd_sizes:
-      if (tail_blit_dword + cmdsz) * 4 > device.sdma_ring.size - device.sdma_doorbell_value % device.sdma_ring.size: break
+      if (tail_blit_dword + cmdsz) * 4 >= device.sdma_ring.size - device.sdma_doorbell_value % device.sdma_ring.size: break
       tail_blit_dword += cmdsz
 
     start_idx = (device.sdma_doorbell_value % device.sdma_ring.size) // 4
