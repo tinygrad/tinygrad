@@ -178,12 +178,7 @@ class Linearizer(Kernel):
     return tuple(new_loops.values())
 
   def render_reduceop(self, reduceop:LazyOp, accs:Dict[LazyOp, List[UOp]], loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]],
-                      global_idxs, local_idxs, upcast_idxs):
-    # define indicies
-    full_upcast_idxs = [Variable(f"_uidx{i}", 0, s-1) for i, s in enumerate(self.full_shape[self.shape_len-self.upcasted:])]
-    reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+self.group_for_reduces, self.shape_len-self.upcasted)]  # noqa: E501
-    fake_reduce_idxs = [x*0 for x in reduce_idxs]
-
+                      global_idxs, local_idxs, upcast_idxs, full_upcast_idxs, reduce_idxs, fake_reduce_idxs):
     def calc_tc_idxs(local_sizes: List[int], aliases: List[List[int]]):
       replace_idxs, thread_idxs, thread_idx = [], [], Variable("_uidx_tc", 0, prod(local_sizes)-1)
       for s in local_sizes:
@@ -396,11 +391,14 @@ class Linearizer(Kernel):
     accs: Dict[LazyOp, List[UOp]] = {}
     self.load_cache: Dict[str, UOp] = {}
 
-    # reduce op
-    fake_reduce_idxs: List[Variable] = []
+    # define indexs
+    full_upcast_idxs = [Variable(f"_uidx{i}", 0, s-1) for i, s in enumerate(self.full_shape[self.shape_len-self.upcasted:])]
+    reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+self.group_for_reduces, self.shape_len-self.upcasted)]  # noqa: E501
+    fake_reduce_idxs = [x*0 for x in reduce_idxs]
+    # render reduce op
     for reduceop in [self.reduceop] if self.reduceop is not None else []:
       accs,loaded_buffers,fake_reduce_idxs,local_idxs,upcast_idxs = \
-        self.render_reduceop(reduceop,accs,loaded_buffers,global_idxs,local_idxs,upcast_idxs)
+        self.render_reduceop(reduceop,accs,loaded_buffers,global_idxs,local_idxs,upcast_idxs,full_upcast_idxs,reduce_idxs,fake_reduce_idxs)
 
     # load latebufs
     loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs) \
