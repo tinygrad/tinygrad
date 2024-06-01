@@ -1,9 +1,9 @@
-from tinygrad.tensor import Tensor
-from tinygrad import nn, dtypes
-from tinygrad.helpers import fetch, get_child
+import re, os
 from pathlib import Path
-
-from examples.mlperf.initializers import LinearBert, LayerNormBert
+from tinygrad.tensor import Tensor, cast
+from tinygrad import nn
+from tinygrad.helpers import fetch, get_child
+from tinygrad.nn.state import get_parameters
 
 # allow for monkeypatching
 Embedding = nn.Embedding
@@ -40,40 +40,86 @@ class BertForQuestionAnswering:
     return Tensor.stack(start_logits, end_logits)
 
 class BertForPretraining:
-  def __init__(self, hidden_size:int=1024, intermediate_size:int=4096, max_positon_embeddings:int=512, num_attention_heads:int=16, num_hidden_layers:int=24, type_vocab_size:int=2, vocab_size:int=30522, attention_probs_dropout_prob:float=0.1, hidden_dropout_prob:float=0.1):
+  def __init__(self, hidden_size:int=1024, intermediate_size:int=4096, max_position_embeddings:int=512, num_attention_heads:int=16, num_hidden_layers:int=24, type_vocab_size:int=2, vocab_size:int=30522, attention_probs_dropout_prob:float=0.1, hidden_dropout_prob:float=0.1):
     """Default is BERT-large"""
-    self.bert = Bert(hidden_size, intermediate_size, max_positon_embeddings, num_attention_heads, num_hidden_layers, type_vocab_size, vocab_size, attention_probs_dropout_prob, hidden_dropout_prob)
-    self.heads = BertPreTrainingHeads(hidden_size, vocab_size, self.bert.embeddings.word_embeddings.weight)
+    self.bert = Bert(hidden_size, intermediate_size, max_position_embeddings, num_attention_heads, num_hidden_layers, type_vocab_size, vocab_size, attention_probs_dropout_prob, hidden_dropout_prob)
+    self.cls = BertPreTrainingHeads(hidden_size, vocab_size, self.bert.embeddings.word_embeddings.weight)
   
   def __call__(self, input_ids:Tensor, attention_mask:Tensor, token_type_ids:Tensor):
     output, pooled_output = self.bert(input_ids, attention_mask, token_type_ids)
-    return self.heads(output, pooled_output)
+    return self.cls(output, pooled_output)
   
   def gather(self, prediction_logits:Tensor, masked_lm_positions:Tensor):
-    counter = Tensor.arange(prediction_logits.shape[1], requires_grad=False).reshape(1, 1, prediction_logits.shape[1]).expand(*masked_lm_positions.shape, prediction_logits.shape[1])
+    print(prediction_logits.shape, masked_lm_positions.shape)
+    counter = Tensor.arange(prediction_logits.shape[1], device=prediction_logits.device, requires_grad=False).reshape(1, 1, prediction_logits.shape[1]).expand(*masked_lm_positions.shape, prediction_logits.shape[1])
     onehot = counter == masked_lm_positions.unsqueeze(2).expand(*masked_lm_positions.shape, prediction_logits.shape[1])
     return onehot @ prediction_logits
   
-  def loss(self, prediction_logits:Tensor, seq_relationship_logits:Tensor, masked_lm_positions:Tensor, masked_lm_ids:Tensor, next_sentence_labels:Tensor):
+  def loss(self, prediction_logits:Tensor, seq_relationship_logits:Tensor, masked_lm_positions:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
     gathered_prediction_logits = self.gather(prediction_logits, masked_lm_positions)
-    masked_lm_loss = gathered_prediction_logits.sparse_categorical_crossentropy(masked_lm_ids)
+    masked_lm_loss = gathered_prediction_logits.sparse_categorical_crossentropy(masked_lm_ids, ignore_index=masked_lm_weights)
     next_sentence_loss = seq_relationship_logits.binary_crossentropy_logits(next_sentence_labels)
     return masked_lm_loss + next_sentence_loss
   
-  def accuracy(self, prediction_logits:Tensor, seq_relationship_logits:Tensor, masked_lm_positions:Tensor, masked_lm_ids:Tensor, next_sentence_labels:Tensor):
+  def accuracy(self, prediction_logits:Tensor, seq_relationship_logits:Tensor, masked_lm_positions:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
     gathered_lm_prediction_logits = self.gather(prediction_logits, masked_lm_positions)
 
     valid = masked_lm_ids != 0
     masked_lm_predictions = gathered_lm_prediction_logits.log_softmax().argmax(-1)
     masked_lm_accuracy = (masked_lm_predictions == masked_lm_ids) * valid
+    masked_lm_loss = gathered_lm_prediction_logits.sparse_categorical_crossentropy(masked_lm_ids, ignore_index=masked_lm_weights)
 
     seq_relationship_predictions = seq_relationship_logits.log_softmax().argmax(-1)
     seq_relationship_accuracy = (seq_relationship_predictions == next_sentence_labels)
+    next_sentence_loss = seq_relationship_logits.binary_crossentropy_logits(next_sentence_labels)
 
-    return masked_lm_accuracy.sum() / valid.sum(), seq_relationship_accuracy.mean()
+    return masked_lm_accuracy.sum() / valid.sum(), seq_relationship_accuracy.mean(), masked_lm_loss, next_sentence_loss
   
-  def load_from_pretrained(self):
-    ...
+  def load_from_pretrained(self, tf_weight_path:str=Path(__file__).parent.parent / "datasets" / "wiki"):
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' # Mute tf flag info
+    # load from tensorflow
+    import tensorflow as tf
+    import numpy as np
+
+    state_dict = {}
+    for name, _ in tf.train.list_variables(str(tf_weight_path)):
+      state_dict[name] = tf.train.load_variable(str(tf_weight_path), name)
+
+    for k, v in state_dict.items():
+      m = k.split("/")
+      if any(n in ["adam_v", "adam_m", "global_step", "LAMB", "LAMB_1", "beta1_power", "beta2_power", "_CHECKPOINTABLE_OBJECT_GRAPH"] for n in m):
+        continue
+
+      pointer = self
+      n = m[-1] # this is just to stop python from complaining about possibly unbound local variable
+      for n in m:
+        if re.fullmatch(r'[A-Za-z]+_\d+', n):
+          l = re.split(r'_(\d+)', n)[:-1]
+        else:
+          l = [n]
+        if l[0] in ["kernel", "gamma", "output_weights"]:
+          pointer = getattr(pointer, "weight")
+        elif l[0] in ["output_bias", "beta"]:
+          pointer = getattr(pointer, "bias")
+        else:
+          pointer = getattr(pointer, l[0])
+        if len(l) == 2: # layers
+          pointer = pointer[int(l[1])]
+      if n[-11:] == "_embeddings":
+        pointer = getattr(pointer, "weight")
+      elif n == "kernel":
+        v = np.transpose(v)
+      cast(Tensor, pointer).assign(v).realize()
+
+    params = get_parameters(self)
+    count = 0
+    for p in params:
+      param_count = 1
+      for s in p.shape:
+        param_count *= s
+      count += param_count
+    print(f"Total parameters: {count / 1000 / 1000}M")
+    return self
 
 class BertPreTrainingHeads:
   def __init__(self, hidden_size:int, vocab_size:int, embeddings_weight:Tensor):
