@@ -173,6 +173,17 @@ class TestSymbolicShrink(unittest.TestCase):
     t = Tensor.rand(3, 5).shrink(((0, 2), (vi, vi+1)))
     assert t.shape == (2, 1)
 
+class TestSymbolicPad(unittest.TestCase):
+  def test_pad(self):
+    v = Variable("v", 1, 100).bind(5)
+    t = Tensor.ones(5).reshape(v).pad(((4, 0),)).reshape(9)
+    assert t.shape == (9,)
+    st = t.lazydata.st
+    print(st)
+    # TODO: fix this, required for symbolic arange
+    with self.assertRaises(RuntimeError):
+      st.expr_idxs()
+
 class TestSymbolicShapeExpr(unittest.TestCase):
   def test_symbolic_expr_idxs(self):
     # taken from symbolic shape llama

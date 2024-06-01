@@ -1370,6 +1370,7 @@ class TestKernelOpts(unittest.TestCase):
     # can pad sum reduce axis if there's no unsafe ops prior to sum
     helper_linearizer_opt(a.sum(), [[Opt(OptOps.PADTO, 0, 32)],])
     helper_linearizer_opt(a.sum(0), [[Opt(OptOps.PADTO, 1, 32)],])
+    helper_linearizer_opt((a < 0.5).sum(), [[Opt(OptOps.PADTO, 0, 32)],])
 
     # having unsafe ops after sum is fine
     helper_linearizer_opt(a.sum().exp(), [[Opt(OptOps.PADTO, 0, 32)],])
