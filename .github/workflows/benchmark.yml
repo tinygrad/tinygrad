@@ -35,7 +35,7 @@ jobs:
         ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
         ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
     - name: Setup process replay
-      if: ${{ inputs.run_process_replay }} || contains(github.event.head_commit.message, '[run_process_replay]')
+      if: github.event.inputs.run_process_replay == 'true' || contains(github.event.head_commit.message, '[run_process_replay]')
       run: echo "ASSERT_COMPILE=1" >> $GITHUB_ENV
     - name: Run Stable Diffusion
       run: JIT=2 python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
