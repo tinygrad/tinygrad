@@ -164,9 +164,17 @@ class HWPM4Queue:
   def submit(self, device:AMDDevice):
     wptr = device.pm4_write_pointer[0]
     pm4_buffer_view = to_mv(device.pm4_ring.va_addr, device.pm4_ring.size).cast("I")
-    for i, value in enumerate(self.q): pm4_buffer_view[(wptr+i)%(device.pm4_ring.size//4)] = value
-    device.pm4_write_pointer[0] = wptr + len(self.q)
-    device.pm4_doorbell[0] = wptr + len(self.q)
+
+    tail_blit_dword = min(((device.pm4_ring.size//4) - wptr % (device.pm4_ring.size//4)), len(self.q))
+    pm4_buffer_view[wptr%(device.pm4_ring.size//4):wptr%(device.pm4_ring.size//4)+tail_blit_dword] = array.array('I', self.q[:tail_blit_dword])
+    wptr += tail_blit_dword
+
+    if (rem_packet_cnt := len(self.q) - tail_blit_dword) > 0:
+      pm4_buffer_view[wptr%(device.pm4_ring.size//4):wptr%(device.pm4_ring.size//4)+rem_packet_cnt] = array.array('I', self.q[tail_blit_dword:])
+      wptr += rem_packet_cnt
+
+    device.pm4_write_pointer[0] = wptr
+    device.pm4_doorbell[0] = wptr
     return self
 
 SDMA_MAX_COPY_SIZE = 0x400000
