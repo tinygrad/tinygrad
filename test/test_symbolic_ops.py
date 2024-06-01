@@ -141,6 +141,14 @@ class TestSymbolicOps(unittest.TestCase):
       expected = a.shrink(((3,5),(i,i+2))).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
+  def test_ones_sum(self):
+    for i in range(1, 5):
+      vi = Variable("i", 1, 10).bind(i)
+      t = Tensor.ones(i)
+      symbolic = t.reshape(vi).sum().item()
+      expected = t.sum().item()
+      np.testing.assert_equal(symbolic, expected)
+
   def test_mean(self):
     for i in range(1, 5):
       vi = Variable("i", 1, 10).bind(i)

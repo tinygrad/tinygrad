@@ -11,7 +11,7 @@ from tinygrad.engine.realize import run_schedule
 from tinygrad.ops import UnaryOps
 from test.helpers import is_dtype_supported
 
-settings.register_profile("my_profile", max_examples=200, deadline=None)
+settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
 print(settings.default)
 

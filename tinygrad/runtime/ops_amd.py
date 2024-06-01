@@ -85,20 +85,6 @@ PAGE_SIZE = 0x1000
 SIGNAL_SIZE, SIGNAL_COUNT = ctypes.sizeof(hsa.amd_signal_t), 16384
 SIGNAL_VALUE_OFFSET = getattr(hsa.amd_signal_t, 'value').offset
 
-BASE_ADDR = 0x00001260
-SUB = amd_gpu.PACKET3_SET_SH_REG_START - BASE_ADDR
-
-regCOMPUTE_PGM_LO = 0x1bac - SUB
-regCOMPUTE_PGM_RSRC1 = 0x1bb2 - SUB
-regCOMPUTE_USER_DATA_0 = 0x1be0 - SUB
-regCOMPUTE_START_X = 0x1ba4 - SUB
-regCOMPUTE_TMPRING_SIZE = 0x1bb8 - SUB
-regCOMPUTE_RESOURCE_LIMITS = 0x1bb5 - SUB
-regCOMPUTE_RESTART_X = 0x1bbb - SUB
-regCOMPUTE_STATIC_THREAD_MGMT_SE0 = 0x1bb6 - SUB
-regCOMPUTE_STATIC_THREAD_MGMT_SE2 = 0x1bb9 - SUB
-regCOMPUTE_STATIC_THREAD_MGMT_SE4 = 0x1bcb - SUB
-
 regBIF_BX_PF1_GPU_HDP_FLUSH_REQ = 0x0106
 regBIF_BX_PF1_GPU_HDP_FLUSH_DONE = 0x0107
 
@@ -112,6 +98,8 @@ WAIT_REG_MEM_FUNCTION_GEQ = 5 # >=
 COMPUTE_SHADER_EN = 1
 FORCE_START_AT_000 = 1 << 2
 CS_W32_EN = 1 << 15
+
+def gfxreg(reg): return reg + 0x00001260 - amd_gpu.PACKET3_SET_SH_REG_START
 
 class HWPM4Queue:
   def __init__(self): self.q = []
@@ -136,29 +124,17 @@ class HWPM4Queue:
     self.hdp_flush()
     self.invalidate_cache()
 
-    code = hsa.amd_kernel_code_t.from_address(prg.handle) # NOTE: this is wrong, it's not this object
-    assert code.kernel_code_properties & 0x400 == 0x400 # ENABLE_WAVEFRONT_SIZE32
-    assert code.workitem_private_segment_byte_size == 0
-    assert code.max_scratch_backing_memory_byte_size == 0
-    assert code.kernel_code_prefetch_byte_size == 0
-    rsrc1, rsrc2 = code.compute_pgm_rsrc1, code.compute_pgm_rsrc2
-
-    # this is required
-    lds_size = ((prg.group_segment_size + 511) // 512) & 0x1FF
-    assert lds_size <= 0x80 # larger numbers stall the GPU
-
-    prog_addr = (prg.handle + code.kernel_code_entry_byte_offset) >> 8
-    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 6), regCOMPUTE_PGM_LO, prog_addr&0xFFFFFFFF, prog_addr>>32, 0, 0,
-               (prg.device.scratch.va_addr>>8)&0xFFFFFFFF, prg.device.scratch.va_addr>>40]
-    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), regCOMPUTE_PGM_RSRC1, rsrc1, rsrc2 | (lds_size << 15)]
-    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), regCOMPUTE_TMPRING_SIZE, 0x00200200] # (waveSize << 12) | (numWaves)
-    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 4), regCOMPUTE_RESTART_X, 0,0,0,0]
-    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), regCOMPUTE_STATIC_THREAD_MGMT_SE0, 0xFFFFFFFF,0xFFFFFFFF]
-    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), regCOMPUTE_STATIC_THREAD_MGMT_SE2, 0xFFFFFFFF,0xFFFFFFFF]
-    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 4), regCOMPUTE_STATIC_THREAD_MGMT_SE4, 0xFFFFFFFF,0xFFFFFFFF,0xFFFFFFFF,0xFFFFFFFF]
-    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), regCOMPUTE_USER_DATA_0, kernargs&0xFFFFFFFF, kernargs>>32]
-    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 8), regCOMPUTE_START_X, 0, 0, 0, *local_size, 0, 0]
-    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), regCOMPUTE_RESOURCE_LIMITS, 0]
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 6), gfxreg(amd_gpu.regCOMPUTE_PGM_LO), (prg.prog_addr>>8) & 0xFFFFFFFF,
+               prg.prog_addr >> 40, 0, 0, (prg.device.scratch.va_addr>>8) & 0xFFFFFFFF, prg.device.scratch.va_addr >> 40]
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), gfxreg(amd_gpu.regCOMPUTE_PGM_RSRC1), prg.rsrc1, prg.rsrc2]
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), gfxreg(amd_gpu.regCOMPUTE_TMPRING_SIZE), 0x00200200] # (waveSize << 12) | (numWaves)
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 4), gfxreg(amd_gpu.regCOMPUTE_RESTART_X), 0, 0, 0, 0]
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), gfxreg(amd_gpu.regCOMPUTE_STATIC_THREAD_MGMT_SE0)] + [0xFFFFFFFF] * 2
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), gfxreg(amd_gpu.regCOMPUTE_STATIC_THREAD_MGMT_SE2)] + [0xFFFFFFFF] * 2
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 4), gfxreg(amd_gpu.regCOMPUTE_STATIC_THREAD_MGMT_SE4)] + [0xFFFFFFFF] * 4
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), gfxreg(amd_gpu.regCOMPUTE_USER_DATA_0), kernargs & 0xFFFFFFFF, kernargs >> 32]
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 8), gfxreg(amd_gpu.regCOMPUTE_START_X), 0, 0, 0, *local_size, 0, 0]
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), gfxreg(amd_gpu.regCOMPUTE_RESOURCE_LIMITS), 0]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_DISPATCH_DIRECT, 3), *global_size, CS_W32_EN | FORCE_START_AT_000 | COMPUTE_SHADER_EN]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_EVENT_WRITE, 0), amd_gpu.EVENT_TYPE(7) | amd_gpu.EVENT_INDEX(4)]
 
@@ -291,13 +267,25 @@ class AMDProgram:
       if sh_type == SHT_PROGBITS and sh_flags & SHF_ALLOC: lib_gpu_view[sh_addr:sh_addr+sh_size] = self.lib[sh_offset:sh_offset+sh_size]
 
     entry_point = min(sh[3] for sh in sections if sh[1] == SHT_PROGBITS and sh[2] & SHF_ALLOC)
-    self.handle = self.lib_gpu.va_addr + entry_point
     self.group_segment_size = lib_gpu_view.cast("I")[entry_point//4]
     self.private_segment_size = lib_gpu_view.cast("I")[entry_point//4 + 1]
     self.kernargs_segment_size = lib_gpu_view.cast("I")[entry_point//4 + 2]
     self.kernargs_offset = 0
-    assert self.private_segment_size <= self.device.max_private_segment_size, \
-      f"{self.private_segment_size=} > {self.device.max_private_segment_size=}"
+
+    lds_size = ((self.group_segment_size + 511) // 512) & 0x1FF
+    if lds_size > (self.device.properties['lds_size_in_kb'] * 1024) // 512: raise RuntimeError("Too many resources requsted: group_segment_size")
+    if self.private_segment_size > self.device.max_private_segment_size: raise RuntimeError("Too many resources requsted: private_segment_size")
+
+    code = hsa.amd_kernel_code_t.from_address(self.lib_gpu.va_addr + entry_point) # NOTE: this is wrong, it's not this object
+    self.rsrc1 = code.compute_pgm_rsrc1
+    self.rsrc2 = code.compute_pgm_rsrc2 | (lds_size << 15)
+
+    assert code.kernel_code_properties & 0x400 == 0x400 # ENABLE_WAVEFRONT_SIZE32
+    assert code.workitem_private_segment_byte_size == 0
+    assert code.max_scratch_backing_memory_byte_size == 0
+    assert code.kernel_code_prefetch_byte_size == 0
+
+    self.prog_addr = self.lib_gpu.va_addr + entry_point + code.kernel_code_entry_byte_offset
 
     HWPM4Queue().invalidate_cache().submit(self.device)
 
