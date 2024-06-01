@@ -985,7 +985,7 @@ def _helper_linearizer_opt_ast(realized_ast:Tuple[LazyOp, ...], real_bufs:List[B
 def _temp_create_multireduce_ast(r0:Tensor, r1:Tensor, replace_idxs:Dict[int,Tensor]={}, \
                                  merge=lambda r0,r1: LazyOp(BinaryOps.ADD, (r0, r1))) -> Tuple[LazyOp, ...]:
   assert len(s0:=r0.schedule()) == 1 and len(s1:=r1.schedule()) == 1, "inputs should be realized"
-  assert all(replace_idxs[idx] is r0 or replace_idxs[idx] is r1 for idx in replace_idxs), "replace idxs should be in {{r0, r1}}"
+  assert all({idx:replace_idxs[idx] is r0 or replace_idxs[idx] is r1 for idx in replace_idxs}.values()), "replace idxs should be in {{r0, r1}}"
   op0, op1 = s0[0].ast[0].src[0], s1[0].ast[0].src[0]
   _replace_idxs = {idx:(op0 if replace_idxs[idx] is r0 else op1) for idx in replace_idxs}
   def _deep_replace(op:LazyOp, offset=0):
