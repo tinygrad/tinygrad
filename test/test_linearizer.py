@@ -1083,61 +1083,6 @@ class TestKernelOpts(unittest.TestCase):
 
   @unittest.skip("multireduce isn't supported yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
-  def test_just_enough_barriers(self):
-    def check_barriers(k:Linearizer):
-      k.linearize()
-      assert k.uops._uops, "Uops need to have been generated"
-      mem_fenced = True
-      local_bufs = [u for u in k.uops._uops if u.uop is UOps.DEFINE_LOCAL]
-      for u in k.uops._uops:
-        if u.uop is UOps.BARRIER:
-          assert not mem_fenced, "found redundant barrier"
-          mem_fenced = True
-        if u.uop is UOps.LOAD or u.uop is UOps.STORE and any(v in local_bufs for v in u.vin):
-          assert mem_fenced, "sequential local buffer read/write operations are not fenced"
-          mem_fenced = False
-
-    # parallel reduces
-    a,b = Tensor.rand(64,).realize(), Tensor.rand(64,).realize()
-    r0,r1 = a.sum(), b.sum()
-    ast = _temp_create_multireduce_ast(r0, r1)
-    k = Linearizer(*ast)
-    k.hand_coded_optimizations()
-    check_barriers(k)
-    k = Linearizer(*ast)
-    k.apply_opt(Opt(OptOps.GROUP, 0, 16))
-    check_barriers(k)
-    k = Linearizer(*ast)
-    k.apply_opt(Opt(OptOps.GROUP, 0, 16))
-    k.apply_opt(Opt(OptOps.UNROLL, 0, 2))
-    check_barriers(k)
-    k = Linearizer(*ast)
-    k.apply_opt(Opt(OptOps.GROUP, 0, 16))
-    k.apply_opt(Opt(OptOps.GROUP, 1, 2))
-    check_barriers(k)
-
-    # sequential reduces
-    a,b = Tensor.rand(64,).realize(), Tensor.rand(64,).realize()
-    dummy = Tensor.rand(1,).realize()
-    r0,r1 = (a+dummy).sum(), b.sum()
-    ast = _temp_create_multireduce_ast(r0, r1)
-    k = Linearizer(*ast)
-    k.hand_coded_optimizations()
-    check_barriers(k)
-    k = Linearizer(*ast)
-    k.apply_opt(Opt(OptOps.GROUP, 0, 16))
-    check_barriers(k)
-    k = Linearizer(*ast)
-    k.apply_opt(Opt(OptOps.GROUP, 0, 16))
-    k.apply_opt(Opt(OptOps.UNROLL, 0, 2))
-    check_barriers(k)
-    k = Linearizer(*ast)
-    k.apply_opt(Opt(OptOps.GROUP, 0, 16))
-    k.apply_opt(Opt(OptOps.GROUP, 1, 2))
-    check_barriers(k)
-
-  @unittest.skip("multireduce isn't supported yet")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   def test_atomic_store_multireduce(self):
     # reducops will need to use the local buffer to load the result of a local reduce into every thread, barriers are needed on both sides
@@ -1147,14 +1092,23 @@ class TestKernelOpts(unittest.TestCase):
     a,b = Tensor.rand(4,4,N).realize(), Tensor.rand(4,4,N).realize()
     r0,r1 = a.sum(-1), b.sum(-1)
     ast = _temp_create_multireduce_ast(r0, r1)
-    helper_linearizer_ast(ast, [a,b], [[Opt(OptOps.GROUP, 0, 2)]])
+    lins = helper_linearizer_ast(ast, [a,b], [[Opt(OptOps.GROUP, 0, 2)]])
 
     # sequential
     a,b = Tensor.rand(4,4,N).realize(), Tensor.rand(4,4,N).realize()
     dummy = Tensor.rand(4,4,1).realize()
     r0,r1 = (a-dummy).sum(-1), b.sum(-1)
     ast = _temp_create_multireduce_ast(r0, r1, replace_idxs={2:r1}, merge=lambda r0,_: r0)
-    helper_linearizer_ast(ast, [a,b], [[Opt(OptOps.GROUP, 0, 2)]])
+    lins += helper_linearizer_ast(ast, [a,b], [[Opt(OptOps.GROUP, 0, 2)]])
+
+    for k in lins:
+      local_bufs = [u for u in k.uops._uops if u.uop is UOps.DEFINE_LOCAL]
+      seen_bar = False
+      for u in k.uops._uops:
+        if u.uop is UOps.BARRIER:
+          if seen_bar: assert "redudant barrier"
+          else: seen_bar = True
+        elif (u.uop is UOps.LOAD or u.uop is UOps.STORE) and any([v in local_bufs for v in u.vin]): seen_bar = False
 
   @unittest.skip("multireduce isn't supported yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
@@ -1164,9 +1118,18 @@ class TestKernelOpts(unittest.TestCase):
     a,b = Tensor.rand(4,).realize(), Tensor.rand(4,).realize()
     r0,r1 = a.sum(), b.sum()
     ast = _temp_create_multireduce_ast(r0, r1)
-    helper_linearizer_ast(ast, [a,b], [
+    lins = helper_linearizer_ast(ast, [a,b], [
       [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.GROUP, 0, 2)]
     ])
+
+    for k in lins:
+      local_bufs = [u for u in k.uops._uops if u.uop is UOps.DEFINE_LOCAL]
+      seen_bar = False
+      for u in k.uops._uops:
+        if u.uop is UOps.BARRIER:
+          if seen_bar: assert "redudant barrier"
+          else: seen_bar = True
+        elif (u.uop is UOps.LOAD or u.uop is UOps.STORE) and any([v in local_bufs for v in u.vin]): seen_bar = False
 
   @unittest.skip("multireduce isn't supported yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
@@ -1176,13 +1139,22 @@ class TestKernelOpts(unittest.TestCase):
     a,b = Tensor.rand(6, ).realize(), Tensor.rand(6, ).realize()
     r0,r1 = a.reshape(6, 1).expand(6, 3).sum(), b.reshape(6, 1).expand(6, 3).sum()
     ast = _temp_create_multireduce_ast(r0, r1)
-    helper_linearizer_ast(ast, [a,b], [
+    lins = helper_linearizer_ast(ast, [a,b], [
       [Opt(OptOps.GROUP, 0, 2)],[Opt(OptOps.GROUP, 1, 3)],
       [Opt(OptOps.GROUP, 1, 3), Opt(OptOps.GROUP, 0, 2)],
       [Opt(OptOps.UNROLL, 0, 2)],[Opt(OptOps.UNROLL, 1, 3)],
       [Opt(OptOps.GROUP, 0, 2), Opt(OptOps.UNROLL, 0, 2)],
       [Opt(OptOps.GROUP, 1, 3), Opt(OptOps.UNROLL, 1, 3)],
       ])
+
+    for k in lins:
+      local_bufs = [u for u in k.uops._uops if u.uop is UOps.DEFINE_LOCAL]
+      seen_bar = False
+      for u in k.uops._uops:
+        if u.uop is UOps.BARRIER:
+          if seen_bar: assert "redudant barrier"
+          else: seen_bar = True
+        elif (u.uop is UOps.LOAD or u.uop is UOps.STORE) and any([v in local_bufs for v in u.vin]): seen_bar = False
 
   def test_upcasts(self):
     N = 16
