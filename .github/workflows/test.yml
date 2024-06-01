@@ -9,6 +9,12 @@ on:
       - master
   pull_request:
   workflow_dispatch:
+    inputs:
+      run_process_replay:
+        description: "Run process replay tests"
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   uops:
@@ -450,9 +456,21 @@ jobs:
           diff /tmp/hsa.py.bak tinygrad/runtime/autogen/hsa.py
           diff /tmp/comgr.py.bak tinygrad/runtime/autogen/comgr.py
           diff /tmp/amd_gpu.py.bak tinygrad/runtime/autogen/amd_gpu.py
+      - name: Setup process replay
+        if: matrix.backend!='ptx' && matrix.backend != 'amd' && matrix.backend != 'nv' && (github.event.inputs.run_process_replay == 'true' || contains(github.event.head_commit.message, '[run_process_replay]'))
+        run: |
+          echo "DERANDOMIZE_CI=1" >> $GITHUB_ENV
+          git fetch origin master && git checkout origin/master && python -m pytest -n=auto test/ --durations=20
+          git checkout $GITHUB_SHA
       - name: Run pytest (not cuda or amd)
         if: matrix.backend!='ptx' && matrix.backend!='triton' && matrix.backend != 'amd' && matrix.backend != 'nv'
-        run: python -m pytest -n=auto test/ --durations=20
+        run: |
+          if [[ "${{ github.event.inputs.run_process_replay }}" == 'true' || $(echo "${{ github.event.head_commit.message }}") == *'[run_process_replay]'* ]]; then
+            export ASSERT_COMPILE=1
+          else
+            export ASSERT_COMPILE=0
+          fi
+          python -m pytest -n=auto test/ --durations=20
       # - name: Run test_ops with FUZZ_UOPS=1
       #   if: matrix.backend!='cuda' && matrix.backend!='ptx' && matrix.backend!='triton' && matrix.backend != 'amd' && matrix.backend != 'nv'
       #   run: FUZZ_UOPS=1 python -m pytest -n=auto test/test_ops.py --durations=20
