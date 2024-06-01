@@ -15,7 +15,7 @@ class ExternalTestDatasets(unittest.TestCase):
     np.random.seed(42)
     random.seed(42)
 
-  def _create_sample(self, val):
+  def _create_sample(self):
     self._set_seed()
 
     img, lbl = np.random.rand(190, 392, 392).astype(np.float32), np.random.randint(0, 100, size=(190, 392, 392)).astype(np.uint8)
@@ -25,7 +25,11 @@ class ExternalTestDatasets(unittest.TestCase):
     nib.save(img, temp("case_0000/imaging.nii.gz"))
     nib.save(lbl, temp("case_0000/segmentation.nii.gz"))
 
-    sample_pth = Path(tempfile.gettempdir()) / "case_0000"
+    return Path(tempfile.gettempdir()) / "case_0000"
+
+  def _create_kits19_ref_sample(self, sample_pth, val):
+    self._set_seed()
+
     img, lbl = preprocess(sample_pth)
     dataset = "val" if val else "train"
     preproc_img_pth, preproc_lbl_pth = temp(f"{dataset}/case_0000_x.npy"), temp(f"{dataset}/case_0000_y.npy")
@@ -33,13 +37,6 @@ class ExternalTestDatasets(unittest.TestCase):
     os.makedirs(tempfile.gettempdir() + f"/{dataset}", exist_ok=True)
     np.save(preproc_img_pth, img, allow_pickle=False)
     np.save(preproc_lbl_pth, lbl, allow_pickle=False)
-
-    return Path(tempfile.gettempdir()) / dataset, sample_pth #TODO: remove sample_pth afterwards once it is moved to dataloader
-
-  def _create_kits19_ref_sample(self, preprocessed_dataset_dir, val):
-    self._set_seed()
-
-    preproc_img_pth, preproc_lbl_pth = preprocessed_dataset_dir / "case_0000_x.npy", preprocessed_dataset_dir / "case_0000_y.npy"
 
     if val:
       dataset = PytVal([preproc_img_pth], [preproc_lbl_pth])
@@ -53,19 +50,19 @@ class ExternalTestDatasets(unittest.TestCase):
     return next(iterate([sample_pth], val=val))
 
   def test_kits19_training_set(self):
-    preprocessed_dataset_dir, sample_pth = self._create_sample(False)
+    sample_pth = self._create_sample()
 
     tinygrad_img, tinygrad_lbl = self._create_kits19_tinygrad_sample(sample_pth, False)
-    ref_img, ref_lbl = self._create_kits19_ref_sample(preprocessed_dataset_dir, False)
+    ref_img, ref_lbl = self._create_kits19_ref_sample(sample_pth, False)
 
     np.testing.assert_equal(tinygrad_img[:, 0], ref_img)
     np.testing.assert_equal(tinygrad_lbl[:, 0], ref_lbl)
 
   def test_kits19_validation_set(self):
-    preprocessed_dataset_dir, sample_pth = self._create_sample(True)
+    sample_pth = self._create_sample()
 
     tinygrad_img, tinygrad_lbl = self._create_kits19_tinygrad_sample(sample_pth, True)
-    ref_img, ref_lbl = self._create_kits19_ref_sample(preprocessed_dataset_dir, True)
+    ref_img, ref_lbl = self._create_kits19_ref_sample(sample_pth, True)
 
     np.testing.assert_equal(tinygrad_img[:, 0], ref_img)
     np.testing.assert_equal(tinygrad_lbl, ref_lbl)
