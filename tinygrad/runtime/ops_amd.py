@@ -179,7 +179,7 @@ class HWCopyQueue:
 
   def copy(self, dest, src, copy_size):
     # HDP flush
-    self._q([0x8, 0x0, 0x80000000, 0x0, 0x0, 0x0])
+    self._q([amd_gpu.SDMA_OP_POLL_REGMEM, 0, 0x80000000, 0, 0, 0])
 
     # Invalidate cache inv
     self._q([amd_gpu.SDMA_OP_GCR_REQ, 0, amd_gpu.SDMA_GCR_GLM_INV | amd_gpu.SDMA_GCR_GLK_INV | amd_gpu.SDMA_GCR_GLK_WB | amd_gpu.SDMA_GCR_GLV_INV | \
