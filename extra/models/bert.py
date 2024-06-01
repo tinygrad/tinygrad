@@ -31,7 +31,7 @@ class BertForQuestionAnswering:
       get_child(self, k).assign(v.numpy()).realize()
 
   def __call__(self, input_ids:Tensor, attention_mask:Tensor, token_type_ids:Tensor):
-    sequence_output, _ = self.bert(input_ids, attention_mask, token_type_ids)
+    sequence_output = self.bert(input_ids, attention_mask, token_type_ids)
     logits = self.qa_outputs(sequence_output)
     start_logits, end_logits = logits.chunk(2, dim=-1)
     start_logits = start_logits.reshape(-1, 1)
@@ -46,8 +46,8 @@ class BertForPretraining:
     self.cls = BertPreTrainingHeads(hidden_size, vocab_size, self.bert.embeddings.word_embeddings.weight)
   
   def __call__(self, input_ids:Tensor, attention_mask:Tensor, token_type_ids:Tensor):
-    output, pooled_output = self.bert(input_ids, attention_mask, token_type_ids)
-    return self.cls(output, pooled_output)
+    output = self.bert(input_ids, attention_mask, token_type_ids)
+    return self.cls(output)
   
   def gather(self, prediction_logits:Tensor, masked_lm_positions:Tensor):
     counter = Tensor.arange(prediction_logits.shape[1], device=prediction_logits.device, requires_grad=False).reshape(1, 1, prediction_logits.shape[1]).expand(*masked_lm_positions.shape, prediction_logits.shape[1])
@@ -91,7 +91,7 @@ class BertForPretraining:
 
       pointer = self
       n = m[-1] # this is just to stop python from complaining about possibly unbound local variable
-      for n in m:
+      for i, n in enumerate(m):
         if re.fullmatch(r'[A-Za-z]+_\d+', n):
           l = re.split(r'_(\d+)', n)[:-1]
         else:
@@ -100,6 +100,8 @@ class BertForPretraining:
           pointer = getattr(pointer, "weight")
         elif l[0] in ["output_bias", "beta"]:
           pointer = getattr(pointer, "bias")
+        elif l[0] == "pooler":
+          pointer = getattr(getattr(self, "cls"), "pooler")
         else:
           pointer = getattr(pointer, l[0])
         if len(l) == 2: # layers
@@ -123,11 +125,12 @@ class BertForPretraining:
 class BertPreTrainingHeads:
   def __init__(self, hidden_size:int, vocab_size:int, embeddings_weight:Tensor):
     self.predictions = BertLMPredictionHead(hidden_size, vocab_size, embeddings_weight)
+    self.pooler = BertPooler(hidden_size)
     self.seq_relationship = Linear(hidden_size, 2)
 
-  def __call__(self, sequence_output:Tensor, pooled_output:Tensor):
+  def __call__(self, sequence_output:Tensor):
     prediction_logits = self.predictions(sequence_output)
-    seq_relationship_logits = self.seq_relationship(pooled_output)
+    seq_relationship_logits = self.seq_relationship(self.pooler(sequence_output))
     return prediction_logits, seq_relationship_logits
 
 class BertLMPredictionHead:
@@ -158,7 +161,6 @@ class Bert:
   def __init__(self, hidden_size, intermediate_size, max_position_embeddings, num_attention_heads, num_hidden_layers, type_vocab_size, vocab_size, attention_probs_dropout_prob, hidden_dropout_prob):
     self.embeddings = BertEmbeddings(hidden_size, max_position_embeddings, type_vocab_size, vocab_size, hidden_dropout_prob)
     self.encoder = BertEncoder(hidden_size, intermediate_size, num_attention_heads, num_hidden_layers, attention_probs_dropout_prob, hidden_dropout_prob)
-    self.pooler = BertPooler(hidden_size)
 
   def __call__(self, input_ids, attention_mask, token_type_ids):
     extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
@@ -167,7 +169,7 @@ class Bert:
     embedding_output = self.embeddings(input_ids, token_type_ids)
     encoder_outputs = self.encoder(embedding_output, extended_attention_mask)
 
-    return encoder_outputs, self.pooler(encoder_outputs)
+    return encoder_outputs
 
 class BertEmbeddings:
   def __init__(self, hidden_size, max_position_embeddings, type_vocab_size, vocab_size,  hidden_dropout_prob):
