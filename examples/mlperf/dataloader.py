@@ -247,7 +247,7 @@ def batch_load_val_bert(BS:int):
         yield process_batch_bert(dataset[start_idx:] + dataset[:end_idx])
     idx += 1
 
-def load_unet3d_data(preprocessed_dataset_dir, queue_in, queue_out, X:Tensor, Y:Tensor):
+def load_unet3d_data(preprocessed_dataset_dir, seed, queue_in, queue_out, X:Tensor, Y:Tensor):
   from extra.datasets.kits19 import rand_balanced_crop, rand_flip, random_brightness_augmentation, gaussian_noise
 
   while (data := queue_in.get()) is not None:
@@ -256,6 +256,10 @@ def load_unet3d_data(preprocessed_dataset_dir, queue_in, queue_out, X:Tensor, Y:
     x, y = np.load(preprocessed_dataset_dir / f"{case_name}_x.npy"), np.load(preprocessed_dataset_dir / f"{case_name}_y.npy")
 
     if not val:
+      if seed is not None:
+        np.random.seed(seed)
+        random.seed(seed)
+
       x, y = rand_balanced_crop(x, y)
       x, y = rand_flip(x, y)
       x, y = x.astype(np.float32), y.astype(np.uint8)
@@ -271,7 +275,7 @@ def load_unet3d_data(preprocessed_dataset_dir, queue_in, queue_out, X:Tensor, Y:
 def batch_load_unet3d(preprocessed_dataset_dir:Path, batch_size:int=6, val:bool=False, shuffle:bool=True, seed=None):
   assert preprocessed_dataset_dir is not None, "run preprocess_data on kits19"
 
-  files = list(preprocessed_dataset_dir.glob("*_x.npy"))
+  files = sorted(list(preprocessed_dataset_dir.glob("*_x.npy")))
   file_indices = list(range(len(files)))
   batch_count = min(32, len(files) // batch_size)
 
@@ -308,7 +312,7 @@ def batch_load_unet3d(preprocessed_dataset_dir:Path, batch_size:int=6, val:bool=
     Y = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:{shm_path}")
 
     for _ in range(cpu_count()):
-      proc = Process(target=load_unet3d_data, args=(preprocessed_dataset_dir, queue_in, queue_out, X, Y))
+      proc = Process(target=load_unet3d_data, args=(preprocessed_dataset_dir, seed, queue_in, queue_out, X, Y))
       proc.daemon = True
       proc.start()
       
