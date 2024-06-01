@@ -54,19 +54,19 @@ class BertForPretraining:
     onehot = counter == masked_lm_positions.unsqueeze(2).expand(*masked_lm_positions.shape, prediction_logits.shape[1])
     return onehot @ prediction_logits
   
-  def loss(self, prediction_logits:Tensor, seq_relationship_logits:Tensor, masked_lm_positions:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
+  def loss(self, prediction_logits:Tensor, seq_relationship_logits:Tensor, masked_lm_positions:Tensor, masked_lm_ids:Tensor, next_sentence_labels:Tensor):
     gathered_prediction_logits = self.gather(prediction_logits, masked_lm_positions)
-    masked_lm_loss = gathered_prediction_logits.sparse_categorical_crossentropy(masked_lm_ids, ignore_index=masked_lm_weights)
+    masked_lm_loss = gathered_prediction_logits.sparse_categorical_crossentropy(masked_lm_ids)
     next_sentence_loss = seq_relationship_logits.binary_crossentropy_logits(next_sentence_labels)
     return masked_lm_loss + next_sentence_loss
   
-  def accuracy(self, prediction_logits:Tensor, seq_relationship_logits:Tensor, masked_lm_positions:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
+  def accuracy(self, prediction_logits:Tensor, seq_relationship_logits:Tensor, masked_lm_positions:Tensor, masked_lm_ids:Tensor, next_sentence_labels:Tensor):
     gathered_lm_prediction_logits = self.gather(prediction_logits, masked_lm_positions)
 
     valid = masked_lm_ids != 0
     masked_lm_predictions = gathered_lm_prediction_logits.log_softmax().argmax(-1)
     masked_lm_accuracy = (masked_lm_predictions == masked_lm_ids) * valid
-    masked_lm_loss = gathered_lm_prediction_logits.sparse_categorical_crossentropy(masked_lm_ids, ignore_index=masked_lm_weights)
+    masked_lm_loss = gathered_lm_prediction_logits.sparse_categorical_crossentropy(masked_lm_ids)
 
     seq_relationship_predictions = seq_relationship_logits.log_softmax().argmax(-1)
     seq_relationship_accuracy = (seq_relationship_predictions == next_sentence_labels)
