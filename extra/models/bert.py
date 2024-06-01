@@ -86,7 +86,7 @@ class BertForPretraining:
 
     for k, v in state_dict.items():
       m = k.split("/")
-      if any(n in ["adam_v", "adam_m", "global_step", "LAMB", "LAMB_1", "beta1_power", "beta2_power", "_CHECKPOINTABLE_OBJECT_GRAPH"] for n in m):
+      if any(n in ["adam_v", "adam_m", "global_step", "LAMB", "LAMB_1", "beta1_power", "beta2_power"] for n in m):
         continue
 
       pointer = self
