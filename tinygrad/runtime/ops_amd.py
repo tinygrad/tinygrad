@@ -50,29 +50,6 @@ def ioctls_from_header():
   return type("KIO", (object, ), fxns)
 kio = ioctls_from_header()
 
-# def create_sdma_packets():
-#   # TODO: clean up this, if we want to keep it
-#   structs = {}
-#   for name,pkt in [(name,s) for name,s in amd_gpu.__dict__.items() if name.startswith("struct_SDMA_PKT_") and name.endswith("_TAG")]:
-#     names = set()
-#     fields = []
-#     for pkt_fields in pkt._fields_:
-#       if not pkt_fields[0].endswith("_UNION"): fields.append(pkt_fields)
-#       else:
-#         assert pkt_fields[1]._fields_[0][0] == '_0'
-#         for union_fields in pkt_fields[1]._fields_[0][1]._fields_:
-#           fname = union_fields[0]
-#           if fname in names: fname = pkt_fields[0]+fname
-#           names.add(fname)
-#           # merge together 64-bit fields, otherwise just append them
-#           if fname.endswith("_63_32") and fields[-1][0].endswith("_31_0"): fields[-1] = tuple([fname[:-6], ctypes.c_ulong, 64])
-#           else: fields.append(tuple([fname, *union_fields[1:]]))
-#     new_name = name[16:-4].lower()
-#     structs[new_name] = init_c_struct_t(tuple(fields))
-#     assert ctypes.sizeof(structs[new_name]) == ctypes.sizeof(pkt), f"{ctypes.sizeof(structs[new_name])} != {ctypes.sizeof(pkt)}"
-#   return type("SDMA_PKTS", (object, ), structs)
-# sdma_pkts = create_sdma_packets()
-
 class AMDCompiler(Compiler):
   def __init__(self, arch:str):
     self.arch = arch
@@ -192,14 +169,6 @@ class HWPM4Queue:
     device.pm4_doorbell[0] = wptr + len(self.q)
     return self
 
-# prebuilt sdma packets
-# sdma_flush_hdp_pkt = sdma_pkts.hdp_flush(0x8, 0x0, 0x80000000, 0x0, 0x0, 0x0)
-# sdma_cache_inv = sdma_pkts.gcr(op=amd_gpu.SDMA_OP_GCR, sub_op=amd_gpu.SDMA_SUBOP_USER_GCR, GCR_CONTROL_GL2_WB=1, GCR_CONTROL_GLK_WB=1,
-#                               GCR_CONTROL_GL2_INV=1, GCR_CONTROL_GL1_INV=1, GCR_CONTROL_GLV_INV=1, GCR_CONTROL_GLK_INV=1,
-#                               GCR_CONTROL_GL2_RANGE=0)
-# sdma_cache_wb = sdma_pkts.gcr(op=amd_gpu.SDMA_OP_GCR, sub_op=amd_gpu.SDMA_SUBOP_USER_GCR, GCR_CONTROL_GL2_WB=1, GCR_CONTROL_GLK_WB=1,
-#                               GCR_CONTROL_GL2_RANGE=0)
-
 SDMA_MAX_COPY_SIZE = 0x400000
 class HWCopyQueue:
   def __init__(self): self.q, self.cmd_sizes = [], []
@@ -245,9 +214,6 @@ class HWCopyQueue:
       amd_gpu.SDMA_PKT_POLL_REGMEM_HEADER_MEM_POLL(1), *data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET), value, 0xffffffff,
       amd_gpu.SDMA_PKT_POLL_REGMEM_DW5_INTERVAL(0x04) | amd_gpu.SDMA_PKT_POLL_REGMEM_DW5_RETRY_COUNT(0xfff)])
 
-    # self.q.append(sdma_pkts.poll_regmem(op=amd_gpu.SDMA_OP_POLL_REGMEM, mem_poll=1, func=WAIT_REG_MEM_FUNCTION_GEQ,
-    #                                     addr=ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET,
-    #                                     value=value, mask=0xffffffff, interval=0x04, retry_count=0xfff))
     return self
 
   def submit(self, device:AMDDevice):
