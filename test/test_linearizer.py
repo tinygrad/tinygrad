@@ -1319,7 +1319,7 @@ class TestKernelOpts(unittest.TestCase):
       check_fused_tc_opt(tc, r0, r1, [a, b, c, d])
 
   def test_padto_matmul(self):
-    if CI and Device.DEFAULT in ["CUDA", "AMD", "NV"]: self.skipTest("super slow on CUDA and AMD because of the big grid dims")
+    if CI and Device.DEFAULT in ["AMD", "NV"]: self.skipTest("super slow on CUDA and AMD because of the big grid dims")
     N = 17 * 17
     Tensor.manual_seed(289)
     a = Tensor.rand(N, N)
@@ -1465,7 +1465,7 @@ class TestKernelOpts(unittest.TestCase):
 
   @unittest.skip("multireduce isn't supported yet")
   def test_padto_matmul_multireduce(self):
-    if CI and Device.DEFAULT in ["CUDA", "AMD", "NV"]: self.skipTest("super slow on CUDA and AMD because of the big grid dims")
+    if CI and Device.DEFAULT in ["AMD", "NV"]: self.skipTest("super slow on CUDA and AMD because of the big grid dims")
     N = 17 * 17
     Tensor.manual_seed(289)
     a = Tensor.rand(N, N).realize()
