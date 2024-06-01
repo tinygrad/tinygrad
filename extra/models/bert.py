@@ -50,7 +50,6 @@ class BertForPretraining:
     return self.cls(output, pooled_output)
   
   def gather(self, prediction_logits:Tensor, masked_lm_positions:Tensor):
-    print(prediction_logits.shape, masked_lm_positions.shape)
     counter = Tensor.arange(prediction_logits.shape[1], device=prediction_logits.device, requires_grad=False).reshape(1, 1, prediction_logits.shape[1]).expand(*masked_lm_positions.shape, prediction_logits.shape[1])
     onehot = counter == masked_lm_positions.unsqueeze(2).expand(*masked_lm_positions.shape, prediction_logits.shape[1])
     return onehot @ prediction_logits
