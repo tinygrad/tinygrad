@@ -1430,7 +1430,7 @@ class TestKernelOpts(unittest.TestCase):
     x_ld = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, ShapeTracker.from_shape((N, N))))
 
     def ast(axis, output_shape):
-      r0 = LazyOp(ReduceOps.SUM, (x_ld,), (0,))
+      r0 = LazyOp(ReduceOps.SUM, (x_ld,), axis)
       r1 = LazyOp(ReduceOps.SUM, (LazyOp(BinaryOps.SUB, (x_ld,r0,),),), axis)
       return LazyOp(BufferOps.STORE, (r1, ), MemBuffer(0, dtypes.float, ShapeTracker.from_shape(output_shape))),
     helper_linearizer_ast(ast((0, ), (1, 17)), [x], opts=opts, wanna_output=[(x.numpy()-x.numpy().sum(axis=0,keepdims=True)).sum(0)])
@@ -1454,7 +1454,7 @@ class TestKernelOpts(unittest.TestCase):
     x_ld = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, ShapeTracker.from_shape((N, N))))
 
     def ast(axis, output_shape):
-      r0 = LazyOp(ReduceOps.MAX, (x_ld,), (0,))
+      r0 = LazyOp(ReduceOps.MAX, (x_ld,), axis)
       r1 = LazyOp(ReduceOps.MAX, (LazyOp(BinaryOps.ADD, (x_ld,r0,),),), axis)
       return LazyOp(BufferOps.STORE, (r1, ), MemBuffer(0, dtypes.float, ShapeTracker.from_shape(output_shape))),
     helper_linearizer_ast(ast((0, ), (1, 17)), [x], opts=opts, wanna_output=[(x.numpy()+x.numpy().max(axis=0,keepdims=True)).max(0)])
