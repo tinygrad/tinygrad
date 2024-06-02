@@ -99,8 +99,7 @@ class Linearizer(Kernel):
       key = f"{self.reduceops.index(acc) if acc is not None else None}{localtype}{'CONST'+str(this_const) if this_const is not None and acc is None else (buf.idx if isinstance(buf, MemBuffer) else cast(LocalBuffer, buf).name)}{idx.render()}{valid.render()}"  # noqa: E501
       if key not in self.load_cache:
         if acc is not None:
-          id = f"{self.reduceops.index(acc)}_{i}"
-          self.load_cache[key] = self.uops.add(UOps.DEFINE_ACC, localtype, loop_ctx, (self.get_reduce_acc(acc), id, acc_count))
+          self.load_cache[key] = self.uops.add(UOps.DEFINE_ACC, localtype, loop_ctx, (self.get_reduce_acc(acc), i, acc_count))
           acc_count += 1
         elif this_const is not None:
           self.load_cache[key] = self.const(this_const, localtype)
@@ -214,7 +213,7 @@ class Linearizer(Kernel):
       alias_buf_idxs.append((i, localbuf_idx, buf_idxs,))
 
     # reduce loop
-    loop_ctx = self.render_loop(reduce_idxs, seq*4+2)
+    loop_ctx = self.render_loop(reduce_idxs, seq*2+2)
 
     # define accumulator - modify idxs if necessary for TC
     out_buf = -1 if self.group_for_reduces else 0
@@ -260,6 +259,7 @@ class Linearizer(Kernel):
       loaded_buffers.update({b:self.global_load(self.bufs.index(local_alias[i]) if i in self.local_alias else i,
         global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs})
 
+
       # run early AST (with reduce)
       self.ast_parse(reduceop, accs, self.acc_offsets(self.full_buf_index), loaded_buffers, reduce_acc=accs[reduceop])
 
@@ -295,7 +295,7 @@ class Linearizer(Kernel):
       # NOTE: this structure is the same as the reduce op above
 
       # late reduce loop
-      loop_ctx = self.render_loop(end_local_idxs, seq*4+3)
+      loop_ctx = self.render_loop(end_local_idxs, seq*2+3)
 
       # define late accumulator
       accs[reduceop] = self.global_load(0, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop, loop_ctx=loop_ctx)
