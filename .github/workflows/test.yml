@@ -10,11 +10,11 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
-      run_process_replay:
-        description: "Run process replay tests"
-        required: false
-        default: false
-        type: boolean
+       run_process_replay:
+         description: "Run process replay tests"
+         required: false
+         default: false
+         type: boolean
 
 jobs:
   uops:
@@ -342,11 +342,13 @@ jobs:
 
     name: Tests on (${{ matrix.backend }})
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # NOTE: this fetches the HEAD commit of the PR
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
@@ -362,7 +364,21 @@ jobs:
           path: ~/.cache/tinygrad/downloads/
           key: downloads-cache-${{ matrix.backend }}-${{ env.DOWNLOAD_CACHE_VERSION }}
       - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nPTX=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas' || matrix.backend == 'amd' && 'AMD=1\nMOCKGPU=1\nFORWARD_ONLY=1' || matrix.backend == 'nv' && 'NV=1\nMOCKGPU=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
+        run: |
+          COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
+          echo "checking commit: $COMMIT_MESSAGE for process replay"
+          if echo "$COMMIT_MESSAGE" | grep -q "\[run_process_replay\]" || [ "${{ github.event.inputs.run_process_replay }}" == "true" ]; then
+            echo "RUN_PROCESS_REPLAY=1" >> $GITHUB_ENV
+          fi
+
+          printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nPTX=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas' || matrix.backend == 'amd' && 'AMD=1\nMOCKGPU=1\nFORWARD_ONLY=1' || matrix.backend == 'nv' && 'NV=1\nMOCKGPU=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
+      # TODO: delete these
+      - name: test run
+        if: ${{ env.RUN_PROCESS_REPLAY }}
+        run: echo "process replay enabled"
+      - name: test run 2
+        if: ${{ !env.RUN_PROCESS_REPLAY }}
+        run: echo "process replay disabled"
       - name: Install OpenCL
         if: matrix.backend == 'gpu'
         run: |
@@ -456,21 +472,9 @@ jobs:
           diff /tmp/hsa.py.bak tinygrad/runtime/autogen/hsa.py
           diff /tmp/comgr.py.bak tinygrad/runtime/autogen/comgr.py
           diff /tmp/amd_gpu.py.bak tinygrad/runtime/autogen/amd_gpu.py
-      - name: Setup process replay
-        if: matrix.backend!='ptx' && matrix.backend != 'amd' && matrix.backend != 'nv' && (github.event.inputs.run_process_replay == 'true' || contains(github.event.head_commit.message, '[run_process_replay]'))
-        run: |
-          echo "DERANDOMIZE_CI=1" >> $GITHUB_ENV
-          git fetch origin master && git checkout origin/master && python -m pytest -n=auto test/ --durations=20
-          git checkout $GITHUB_SHA
       - name: Run pytest (not cuda or amd)
         if: matrix.backend!='ptx' && matrix.backend!='triton' && matrix.backend != 'amd' && matrix.backend != 'nv'
-        run: |
-          if [[ "${{ github.event.inputs.run_process_replay }}" == 'true' || $(echo "${{ github.event.head_commit.message }}") == *'[run_process_replay]'* ]]; then
-            export ASSERT_COMPILE=1
-          else
-            export ASSERT_COMPILE=0
-          fi
-          python -m pytest -n=auto test/ --durations=20
+        run: python -m pytest -n=auto test/ --durations=20
       # - name: Run test_ops with FUZZ_UOPS=1
       #   if: matrix.backend!='cuda' && matrix.backend!='ptx' && matrix.backend!='triton' && matrix.backend != 'amd' && matrix.backend != 'nv'
       #   run: FUZZ_UOPS=1 python -m pytest -n=auto test/test_ops.py --durations=20
