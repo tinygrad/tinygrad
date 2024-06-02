@@ -1423,45 +1423,43 @@ class TestKernelOpts(unittest.TestCase):
 
   @unittest.skip("multireduce isn't supported yet")
   def test_padto_sum_multireduce(self):
-    N = 18 * 18
-    x = (Tensor.rand(N, N).shrink(((0, 17), (0, 17)))*100).realize()
-    x_ast = LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(17, 17), strides=(324, 1), offset=0, mask=None, contiguous=False),)))),LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=100.0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),)))))) # noqa: E501
-    def ast(axis:int): return LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.SUB, src=(x_ast,LazyOp(op=ReduceOps.SUM, src=(x_ast,), arg=(axis,)))),), arg=(axis,)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 17), strides=(0, 1), offset=0, mask=None, contiguous=True),)))) # noqa: E501
+    N = 17
+    x = Tensor.rand(N, N).realize()
+    x_ast = LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(N, N), strides=(N, 1), offset=0, mask=None, contiguous=True),)))) # noqa: E501
     opts = [[Opt(OptOps.PADTO, 0, 32)],[Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],]
-    helper_linearizer_ast((ast(0),), [x], opts=opts)
-    helper_linearizer_ast((ast(1),), [x], opts=opts)
+    def ast(axis:int): return LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.SUB, src=(x_ast,LazyOp(op=ReduceOps.SUM, src=(x_ast,), arg=(axis,)))),), arg=(axis,)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape((17,1)))) # noqa: E501
+    helper_linearizer_ast((ast(1),), [x], opts=opts, wanna_output=[(x.numpy()-x.numpy().sum(axis=1,keepdims=True)).sum(1)])
+    def ast(axis:int): return LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.SUB, src=(x_ast,LazyOp(op=ReduceOps.SUM, src=(x_ast,), arg=(axis,)))),), arg=(axis,)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,17)))) # noqa: E501
+    helper_linearizer_ast((ast(0),), [x], opts=opts, wanna_output=[(x.numpy()-x.numpy().sum(axis=0,keepdims=True)).sum(0)])
 
-    # pad reduce sum
-    helper_linearizer_ast((ast(0),), [x], opts=[[Opt(OptOps.PADTO, 1, 32)],])
+    # pad reduce axis
+    helper_linearizer_ast((ast(0),), [x], opts=[[Opt(OptOps.PADTO, 1, 32)],], wanna_output=[(x.numpy()-x.numpy().sum(axis=0,keepdims=True)).sum(0)])
     ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.SUB, src=(x_ast,LazyOp(op=ReduceOps.SUM, src=(x_ast,), arg=(0,1)))),), arg=(0,1)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 1), offset=0, mask=None, contiguous=True),)))) # noqa: E501
-    helper_linearizer_ast((ast,), [x], opts=[[Opt(OptOps.PADTO, 0, 32)],])
+    helper_linearizer_ast((ast,), [x], opts=[[Opt(OptOps.PADTO, 0, 32)],], wanna_output=[(x.numpy()-x.numpy().sum(keepdims=True)).sum()])
 
   @unittest.skip("multireduce isn't supported yet")
   def test_padto_max_multireduce(self):
-    N = 18 * 18
-    x = (Tensor.rand(N,N)).realize()
-    def ast(axis:int): return LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.MAX, src=(LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(17, 17), strides=(324, 1), offset=0, mask=None, contiguous=False),)))),LazyOp(op=ReduceOps.MAX, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(17, 17), strides=(324, 1), offset=0, mask=None, contiguous=False),)))),), arg=(axis,)))),), arg=(0,)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 17), strides=(0, 1), offset=0, mask=None, contiguous=True),)))) # noqa: E501
-
+    N = 17
+    x = Tensor.rand(N,N).realize()
+    x_ast = LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker.from_shape((N,N)))) # noqa: E501
     opts = [[Opt(OptOps.PADTO, 0, 32)],[Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],]
-    helper_linearizer_ast((ast(0),), [x], opts=opts)
-    helper_linearizer_ast((ast(1),), [x], opts=opts)
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.MAX, src=(LazyOp(op=BinaryOps.ADD, src=(x_ast,LazyOp(op=ReduceOps.MAX, src=(x_ast,), arg=(0,)))),), arg=(0,)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,17)))) # noqa: E501
+    helper_linearizer_ast((ast,), [x], opts=opts)
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.MAX, src=(LazyOp(op=BinaryOps.ADD, src=(x_ast,LazyOp(op=ReduceOps.MAX, src=(x_ast,), arg=(1,)))),), arg=(1,)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape((17,1)))) # noqa: E501
+    helper_linearizer_ast((ast,), [x], opts=opts)
 
   @unittest.skip("multireduce isn't supported yet")
   def test_padto_where_multireduce(self):
     # we need to make sure the ternary operators nest properly
-    N = 17 * 17
+    N = 17
     x = Tensor.rand(N, N).realize()
     a = Tensor.rand(1, 1).realize()
     b = Tensor.rand(1, 1).realize()
-    def ast(axis): return LazyOp(op=BufferOps.STORE, src=(LazyOp(op=TernaryOps.WHERE, src=(LazyOp(op=BinaryOps.CMPLT, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.5*17, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=TernaryOps.WHERE, src=(LazyOp(op=BinaryOps.CMPLT, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.75*17, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(17, 17), strides=(324, 1), offset=0, mask=None, contiguous=False),)))),), arg=axis))),LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1,1), strides=(1, 0), offset=0, mask=None, contiguous=False),)))),LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=3, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1,1), strides=(1, 0), offset=0, mask=None, contiguous=False),)))),)),), arg=axis),)),LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=1.0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(17, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),)))) # noqa: E501
     opts = [[Opt(OptOps.PADTO, 0, 32)],[Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],]
-    helper_linearizer_ast((ast((0,)),), [x,a,b], opts=opts)
-    helper_linearizer_ast((ast((1,)),), [x,a,b], opts=opts)
-
-    # pad reduce axis
-    helper_linearizer_ast((ast((0,)),), [x,a,b], opts=[[Opt(OptOps.PADTO, 1, 32)],])
-    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=TernaryOps.WHERE, src=(LazyOp(op=BinaryOps.CMPLT, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.5*17, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=TernaryOps.WHERE, src=(LazyOp(op=BinaryOps.CMPLT, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.75*17, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(17, 17), strides=(324, 1), offset=0, mask=None, contiguous=False),)))),), arg=(0,1)))),LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1,1), strides=(1, 0), offset=0, mask=None, contiguous=False),)))),LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=3, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1,1), strides=(1, 0), offset=0, mask=None, contiguous=False),)))),)),), arg=(0,1)),)),LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=1.0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 1), offset=0, mask=None, contiguous=True),)))) # noqa: E501
-    helper_linearizer_ast((ast,), [x,a,b], opts=[[Opt(OptOps.PADTO, 0, 32)],])
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=TernaryOps.WHERE, src=(LazyOp(op=BinaryOps.CMPLT, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.5*17, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=TernaryOps.WHERE, src=(LazyOp(op=BinaryOps.CMPLT, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.75*17, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker.from_shape((N,N)))),), arg=(1,)))),LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=3, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),)),), arg=(1,)),)),LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=1.0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape((N,1)))) # noqa: E501
+    helper_linearizer_ast((ast,), [x,a,b], opts=opts)
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=TernaryOps.WHERE, src=(LazyOp(op=BinaryOps.CMPLT, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.5*17, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=TernaryOps.WHERE, src=(LazyOp(op=BinaryOps.CMPLT, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.75*17, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker.from_shape((N,N)))),), arg=(0,)))),LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=3, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),)),), arg=(0,)),)),LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=0.0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=1.0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,1)))),)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,N)))) # noqa: E501
+    helper_linearizer_ast((ast,), [x,a,b], opts=opts)
 
   @unittest.skip("multireduce isn't supported yet")
   def test_padto_matmul_multireduce(self):
