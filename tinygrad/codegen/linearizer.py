@@ -96,8 +96,7 @@ class Linearizer(Kernel):
     acc_count = 0
     for idx, valid, rep_idx in zip(e_idxs, e_valids, iter_idxs(expand_vars)):
       this_const, idx, valid = (invalid_value, NumNode(0), NumNode(1)) if valid.max == 0 else (const, idx, valid)
-      # todo: when multiple reduceops are supported, clearly disambiguate and test acc load keys are unique for each reduceop
-      key = f"{acc is not None}{localtype}{'CONST'+str(this_const) if this_const is not None and acc is None else (buf.idx if isinstance(buf, MemBuffer) else cast(LocalBuffer, buf).name)}{idx.render()}{valid.render()}"  # noqa: E501
+      key = f"{self.reduceops.index(acc) if acc is not None else ''}{localtype}{'CONST'+str(this_const) if this_const is not None and acc is None else (buf.idx if isinstance(buf, MemBuffer) else cast(LocalBuffer, buf).name)}{idx.render()}{valid.render()}"  # noqa: E501
       if key not in self.load_cache:
         if acc is not None:
           self.load_cache[key] = self.uops.add(UOps.DEFINE_ACC, localtype, loop_ctx, (self.get_reduce_acc(acc), i, acc_count))
