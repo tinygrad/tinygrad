@@ -217,7 +217,8 @@ class Linearizer(Kernel):
       if DEBUG >= 3: print(f"store alias: sts={self.sts[0]} idxs={global_idxs+local_idxs+upcast_idxs}")
     return alias_buf_idxs
 
-  def render_reduceop(self, reduceop:LazyOp, seq:int, accs:Dict[LazyOp, List[UOp]], loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]],
+  def render_reduceop(self, reduceop:LazyOp, seq:int, accs:Dict[LazyOp, List[UOp]], \
+                      loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]],
                       global_idxs, local_idxs, upcast_idxs, full_upcast_idxs, reduce_idxs, alias_buf_idxs):
     fake_reduce_idxs = [x*0 for x in reduce_idxs]
     # reduce loop
@@ -259,7 +260,6 @@ class Linearizer(Kernel):
       # load earlybufs
       loaded_buffers.update({b:self.global_load(self.bufs.index(self.local_alias[reduceop][i]) if i in self.local_alias else i,
         global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs})
-
 
       # run early AST (with reduce)
       self.ast_parse(reduceop, accs, self.acc_offsets(self.full_buf_index), loaded_buffers, reduce_acc=accs[reduceop])
@@ -413,7 +413,8 @@ class Linearizer(Kernel):
     alias_buf_idxs = self.index_local_aliases(global_idxs,local_idxs,reduce_idxs,upcast_idxs,full_upcast_idxs)
     # render reduce op
     for i, reduceop in enumerate(self.reduceops):
-      accs = self.render_reduceop(reduceop, i, accs, loaded_buffers, global_idxs, local_idxs, upcast_idxs, full_upcast_idxs, reduce_idxs, alias_buf_idxs[reduceop])
+      accs = self.render_reduceop(reduceop, i, accs, loaded_buffers, \
+                                  global_idxs, local_idxs, upcast_idxs, full_upcast_idxs, reduce_idxs, alias_buf_idxs[reduceop])
     fake_reduce_idxs = [x*0 for x in reduce_idxs]
 
     # load latebufs
