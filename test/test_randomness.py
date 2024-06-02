@@ -4,11 +4,11 @@ from functools import partial
 import numpy as np
 import torch
 from tinygrad import nn, dtypes, Tensor, Device
-from tinygrad.helpers import THREEFRY
+from tinygrad.helpers import THREEFRY, getenv
 from test.helpers import is_dtype_supported
 from hypothesis import given, settings, strategies as strat
 
-settings.register_profile("my_profile", max_examples=200, deadline=None)
+settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
 
 # https://gist.github.com/devries/11405101
