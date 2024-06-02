@@ -366,19 +366,10 @@ jobs:
       - name: Set env
         run: |
           COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
-          echo "checking commit: $COMMIT_MESSAGE for process replay"
           if echo "$COMMIT_MESSAGE" | grep -q "\[run_process_replay\]" || [ "${{ github.event.inputs.run_process_replay }}" == "true" ]; then
             echo "RUN_PROCESS_REPLAY=1" >> $GITHUB_ENV
           fi
-
           printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nPTX=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas' || matrix.backend == 'amd' && 'AMD=1\nMOCKGPU=1\nFORWARD_ONLY=1' || matrix.backend == 'nv' && 'NV=1\nMOCKGPU=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
-      # TODO: delete these
-      - name: test run
-        if: ${{ env.RUN_PROCESS_REPLAY }}
-        run: echo "process replay enabled"
-      - name: test run 2
-        if: ${{ !env.RUN_PROCESS_REPLAY }}
-        run: echo "process replay disabled"
       - name: Install OpenCL
         if: matrix.backend == 'gpu'
         run: |
@@ -474,7 +465,13 @@ jobs:
           diff /tmp/amd_gpu.py.bak tinygrad/runtime/autogen/amd_gpu.py
       - name: Run pytest (not cuda or amd)
         if: matrix.backend!='ptx' && matrix.backend!='triton' && matrix.backend != 'amd' && matrix.backend != 'nv'
-        run: python -m pytest -n=auto test/ --durations=20
+        run: |
+          if [ "$RUN_PROCESS_REPLAY" ]; then
+            git fetch origin master && git checkout origin/master && DERANDOMIZE_CI=1 python -m pytest test/ --durations=20 --ignore test/test_gc.py
+            git checkout $GITHUB_SHA && ASSERT_COMPILE=1 DERANDOMIZE_CI=1 python -m pytest test/ --durations=20 --ignore test/test_gc.py
+          else
+            python -m pytest -n=auto test/ --durations=20
+          fi
       # - name: Run test_ops with FUZZ_UOPS=1
       #   if: matrix.backend!='cuda' && matrix.backend!='ptx' && matrix.backend!='triton' && matrix.backend != 'amd' && matrix.backend != 'nv'
       #   run: FUZZ_UOPS=1 python -m pytest -n=auto test/test_ops.py --durations=20
