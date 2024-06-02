@@ -1423,19 +1423,27 @@ class TestKernelOpts(unittest.TestCase):
 
   @unittest.skip("multireduce isn't supported yet")
   def test_padto_sum_multireduce(self):
+    Tensor.manual_seed(0)
     N = 17
     x = Tensor.rand(N, N).realize()
-    x_ast = LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(N, N), strides=(N, 1), offset=0, mask=None, contiguous=True),)))) # noqa: E501
     opts = [[Opt(OptOps.PADTO, 0, 32)],[Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],]
-    def ast(axis:int): return LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.SUB, src=(x_ast,LazyOp(op=ReduceOps.SUM, src=(x_ast,), arg=(axis,)))),), arg=(axis,)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape((17,1)))) # noqa: E501
-    helper_linearizer_ast((ast(1),), [x], opts=opts, wanna_output=[(x.numpy()-x.numpy().sum(axis=1,keepdims=True)).sum(1)])
-    def ast(axis:int): return LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.SUB, src=(x_ast,LazyOp(op=ReduceOps.SUM, src=(x_ast,), arg=(axis,)))),), arg=(axis,)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,17)))) # noqa: E501
-    helper_linearizer_ast((ast(0),), [x], opts=opts, wanna_output=[(x.numpy()-x.numpy().sum(axis=0,keepdims=True)).sum(0)])
+    x_ld = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float, ShapeTracker.from_shape((N, N))))
 
-    # pad reduce axis
-    helper_linearizer_ast((ast(0),), [x], opts=[[Opt(OptOps.PADTO, 1, 32)],], wanna_output=[(x.numpy()-x.numpy().sum(axis=0,keepdims=True)).sum(0)])
-    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.SUB, src=(x_ast,LazyOp(op=ReduceOps.SUM, src=(x_ast,), arg=(0,1)))),), arg=(0,1)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 1), offset=0, mask=None, contiguous=True),)))) # noqa: E501
-    helper_linearizer_ast((ast,), [x], opts=[[Opt(OptOps.PADTO, 0, 32)],], wanna_output=[(x.numpy()-x.numpy().sum(keepdims=True)).sum()])
+    def ast(axis, output_shape):
+      r0 = LazyOp(ReduceOps.SUM, (x_ld,), (0,))
+      r1 = LazyOp(ReduceOps.SUM, (LazyOp(BinaryOps.SUB, (x_ld,r0,),),), axis)
+      return LazyOp(BufferOps.STORE, (r1, ), MemBuffer(0, dtypes.float, ShapeTracker.from_shape(output_shape))),
+    helper_linearizer_ast(ast((0, ), (1, 17)), [x], opts=opts, wanna_output=[(x.numpy()-x.numpy().sum(axis=0,keepdims=True)).sum(0)])
+    helper_linearizer_ast(ast((1, ), (17, 1)), [x], opts=opts, wanna_output=[(x.numpy()-x.numpy().sum(axis=1,keepdims=True)).sum(1)])
+
+    # pad reduce axis TODO: broken
+    with self.assertRaises(AssertionError):
+      expected = (x.numpy()-x.numpy().sum(axis=0,keepdims=True)).sum(0)
+      helper_linearizer_ast(ast((0, ), (1, 17)), [x], opts=[[Opt(OptOps.PADTO, 1, 32)]], wanna_output=[expected])
+
+    with self.assertRaises(AssertionError):
+      op = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.SUB, src=(x_ld,LazyOp(op=ReduceOps.SUM, src=(x_ld,), arg=(0,1)))),), arg=(0,1)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 1), offset=0, mask=None, contiguous=True),)))) # noqa: E501
+      helper_linearizer_ast((op,), [x], opts=[[Opt(OptOps.PADTO, 0, 32)],], wanna_output=[(x.numpy()-x.numpy().sum(keepdims=True)).sum()])
 
   @unittest.skip("multireduce isn't supported yet")
   def test_padto_max_multireduce(self):
