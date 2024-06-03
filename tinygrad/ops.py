@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Union, Type, Tuple, Any, List, Dict, Callable
+from typing import Union, Tuple, Any, List, Dict, Callable
 import functools, hashlib, math, operator, ctypes
 from enum import Enum, auto
 from dataclasses import dataclass
@@ -7,25 +7,30 @@ from tinygrad.helpers import prod, dedup
 from tinygrad.dtype import dtypes, DType, ConstType
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.buffer import Buffer
 
 # these are the llops your accelerator must implement, along with toCpu
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
 # NOTE: MOD, CMPLT don't have to be implemented on vectors, just scalars
 # NOTE: many GPUs don't have DIV, but UnaryOps.RECIP doesn't work for integer division
-class UnaryOps(Enum): EXP2 = auto(); LOG2 = auto(); CAST = auto(); SIN = auto(); SQRT = auto(); NEG = auto() # noqa: E702
+class UnaryOps(Enum):
+  """A -> A (elementwise)"""
+  EXP2 = auto(); LOG2 = auto(); CAST = auto(); BITCAST = auto(); SIN = auto(); SQRT = auto(); NEG = auto() # noqa: E702
 class BinaryOps(Enum):
+  """A + A -> A (elementwise)"""
   ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); CMPEQ = auto(); XOR = auto() # noqa: E702
-class TernaryOps(Enum): WHERE = auto(); MULACC = auto() # noqa: E702
-class ReduceOps(Enum): SUM = auto(); MAX = auto() # noqa: E702
+class TernaryOps(Enum):
+  """A + A + A -> A (elementwise)"""
+  WHERE = auto(); MULACC = auto() # noqa: E702
+class ReduceOps(Enum):
+  """A -> B (reduce)"""
+  SUM = auto(); MAX = auto() # noqa: E702
 class BufferOps(Enum): LOAD = auto(); CONST = auto(); STORE = auto() # noqa: E702
-class LoadOps(Enum): EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); CUSTOM = auto(); ASSIGN = auto() # noqa: E702
+class LoadOps(Enum): EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); CUSTOM = auto(); ASSIGN = auto(); VIEW = auto() # noqa: E702
 
 Op = Union[UnaryOps, BinaryOps, ReduceOps, LoadOps, TernaryOps, BufferOps]
-OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[LoadOps], Type[TernaryOps], Type[BufferOps]]
 
 # do not preserve f(0) = 0
-UNSAFE_PAD_OPS = {BinaryOps.DIV, BinaryOps.CMPLT, BinaryOps.CMPEQ, UnaryOps.LOG2, UnaryOps.EXP2}
+UNSAFE_PAD_OPS = {BinaryOps.DIV, BinaryOps.CMPEQ, UnaryOps.LOG2, UnaryOps.EXP2}
 
 @dataclass(frozen=True)
 class MemBuffer:
@@ -38,12 +43,6 @@ class ConstBuffer:
   val: ConstType
   dtype: DType
   st: ShapeTracker
-
-@dataclass(frozen=True)
-class ScheduleItem:
-  ast: Tuple[LazyOp, ...]
-  outputs: Tuple[Buffer, ...]
-  inputs: Tuple[Buffer, ...]
 
 @dataclass(frozen=True, eq=False)
 class LazyOp:
@@ -61,7 +60,7 @@ class LazyOp:
   @functools.cached_property
   def dtype(self) -> DType:
     if self.op in BufferOps: return self.arg.dtype
-    if self.op is UnaryOps.CAST: return self.arg[0]
+    if self.op in [UnaryOps.CAST, UnaryOps.BITCAST]: return self.arg
     return dtypes.bool if self.op in {BinaryOps.CMPLT, BinaryOps.CMPEQ} else self.src[-1].dtype
 
   @functools.cached_property
@@ -73,11 +72,9 @@ class LazyOp:
   @functools.cached_property
   def lazyops(self) -> List[LazyOp]: return dedup([self] + [item for x in self.src for item in x.lazyops])
   def vars(self) -> List[Variable]:
-    return sorted(set.union(*[x.arg.st.vars() for x in self.lazyops if x.op in BufferOps], set()), key=lambda x: str(x.expr))
-
-def copy_ast(sz) -> LazyOp:
-  rd = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.uint8, st:=ShapeTracker.from_shape((sz,))))
-  return LazyOp(BufferOps.STORE, (rd,), MemBuffer(0, dtypes.uint8, st))
+    extract_vars = [x.arg.st.vars() for x in self.lazyops if x.op in BufferOps]
+    const_vars = [x.arg.val.unbind()[0] for x in self.lazyops if x.op is BufferOps.CONST and isinstance(x.arg.val, Variable)]
+    return sorted(set.union(*extract_vars, set(const_vars)), key=lambda x: str(x.expr))
 
 # **************** independent FlopCounter ****************
 
@@ -97,7 +94,8 @@ InterpretedFlopCounter: Dict[Op, Callable] = {
   BufferOps.CONST: lambda arg: FlopCounter(arg.st.shape, 0, {}),
   BufferOps.STORE: lambda self,arg: FlopCounter(arg.st.shape, self.consume_flops(), {**self.mem, arg.idx: arg.dtype.itemsize * arg.st.real_size()}),
   UnaryOps.CAST: lambda self,arg: FlopCounter(self.shape, self.consume_flops(), self.mem),   # cast uses no flops
-  **{op:lambda self: FlopCounter(self.shape, self.consume_flops() + prod(self.shape), self.mem) for op in UnaryOps if op is not UnaryOps.CAST},
+  UnaryOps.BITCAST: lambda self,arg: FlopCounter(self.shape, self.consume_flops(), self.mem),   # bitcast uses no flops
+  **{op:lambda self: FlopCounter(self.shape, self.consume_flops() + prod(self.shape), self.mem) for op in UnaryOps if op not in {UnaryOps.CAST, UnaryOps.BITCAST}},  # noqa: E501
   **{op:lambda self,y: FlopCounter(self.shape, self.consume_flops() + y.consume_flops() + prod(self.shape), {**self.mem, **y.mem}) for op in BinaryOps},  # noqa: E501
   **{op:lambda self,axis: FlopCounter(tuple(1 if i in axis else s for i,s in enumerate(self.shape)), self.consume_flops() + prod(self.shape), self.mem) for op in ReduceOps},  # noqa: E501
   TernaryOps.WHERE: lambda self,y,z: FlopCounter(self.shape, self.consume_flops() + y.consume_flops() + z.consume_flops() + prod(self.shape), {**self.mem, **y.mem, **z.mem})}  # noqa: E501

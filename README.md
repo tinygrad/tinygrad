@@ -1,16 +1,15 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="/docs-legacy/logo_tiny_dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="/docs-legacy/logo_tiny_light.svg">
-  <img alt="tiny corp logo" src="/docs-legacy/logo_tiny_light.svg" width="50%" height="50%">
+  <source media="(prefers-color-scheme: light)" srcset="/docs/logo_tiny_light.svg">
+  <img alt="tiny corp logo" src="/docs/logo_tiny_dark.svg" width="50%" height="50%">
 </picture>
 
 tinygrad: For something between [PyTorch](https://github.com/pytorch/pytorch) and [karpathy/micrograd](https://github.com/karpathy/micrograd). Maintained by [tiny corp](https://tinygrad.org).
 
 <h3>
 
-[Homepage](https://github.com/tinygrad/tinygrad) | [Documentation](/docs) | [Examples](/examples) | [Showcase](/docs/showcase.md) | [Discord](https://discord.gg/ZjZadyC7PK)
+[Homepage](https://github.com/tinygrad/tinygrad) | [Documentation](https://docs.tinygrad.org/) | [Examples](/examples) | [Showcase](/docs/showcase.md) | [Discord](https://discord.gg/ZjZadyC7PK)
 
 </h3>
 
@@ -81,14 +80,13 @@ See [examples/beautiful_mnist.py](examples/beautiful_mnist.py) for the full vers
 tinygrad already supports numerous accelerators, including:
 
 - [x] [GPU (OpenCL)](tinygrad/runtime/ops_gpu.py)
-- [x] [C Code (Clang)](tinygrad/runtime/ops_clang.py)
+- [x] [CLANG (C Code)](tinygrad/runtime/ops_clang.py)
 - [x] [LLVM](tinygrad/runtime/ops_llvm.py)
 - [x] [METAL](tinygrad/runtime/ops_metal.py)
 - [x] [CUDA](tinygrad/runtime/ops_cuda.py)
 - [x] [HSA](tinygrad/runtime/ops_hsa.py)
 
 And it is easy to add more! Your accelerator of choice only needs to support a total of ~25 low level ops.
-More information can be found in the [documentation for adding new accelerators](/docs-legacy/adding_new_accelerators.md).
 
 ## Installation
 

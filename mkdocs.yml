@@ -1,15 +1,24 @@
 # pip install mkdocs mkdocs-material mkdocstrings[python]
 site_name: tinygrad docs
 site_url: https://docs.tinygrad.org/
+repo_url: https://github.com/tinygrad/tinygrad/
 nav:
-- Home: index.md
-- Tensor: tensor.md
-- dtypes: dtypes.md
-- Neural Networks: nn.md
-- Quickstart: quickstart.md
-- Showcase: showcase.md
-- Developer: developer.md
-- Function: function.md
+- Home:
+  - index.md
+  - Quickstart: quickstart.md
+  - Showcase: showcase.md
+  - MNIST Tutorial: mnist.md
+  - API Reference:
+    - Tensor:
+      - tensor/index.md
+      - Creation: tensor/creation.md
+      - Movement: tensor/movement.md
+      - Ops: tensor/ops.md
+    - Function: function.md
+    - dtypes: dtypes.md
+    - nn (Neural Networks): nn.md
+    - Environment Variables: env_vars.md
+  - Developer: developer.md
 #- tinygrad: reference/
 
 #extra_css:
@@ -46,6 +55,8 @@ markdown_extensions:
 
 theme:
   name: material
+  logo: logo_tiny_dark.svg
+  favicon: favicon.svg
   features:
   - announce.dismiss
   - content.action.edit
@@ -56,16 +67,38 @@ theme:
   - navigation.footer
   - navigation.indexes
   - navigation.sections
-  - navigation.tabs
-  - navigation.tabs.sticky
+  - navigation.expand
   - navigation.top
+  - navigation.path
   - search.highlight
   - search.suggest
   - toc.follow
+  - toc.integrate
   palette:
     scheme: slate
     primary: black
     accent: lime
+  palette:
+    - media: "(prefers-color-scheme)"
+      accent: lime
+      primary: black
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      accent: lime
+      primary: black
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      accent: lime
+      primary: black
+      toggle:
+        icon: material/brightness-4
+        name: Switch to system preference
 plugins:
 - search
 - mkdocstrings:
@@ -91,6 +124,7 @@ plugins:
           show_source: true
           signature_crossrefs: true
           summary: true
+- markdown-exec
 #- gen-files:
 #    scripts:
 #      - docs/gen_ref_pages.py

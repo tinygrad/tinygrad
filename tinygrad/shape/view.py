@@ -52,7 +52,8 @@ def _reshape_mask(view: View, new_shape:Tuple[sint, ...]) -> Tuple[Optional[Tupl
         if mask[1] - mask[0] < 1: return ((0, 0),) * len(new_shape), False # invalid mask
 
       else: # mask can only be splitted if reshape doesn't cut across the mask.
-        if ((l % next_stride != 0 or r % next_stride != 0) and l // next_stride != (r - 1) // next_stride): return view.mask, True
+        if (((l % next_stride != 0 or r % next_stride != 0) and l // next_stride != (r - 1) // next_stride)
+            or old_dim % next_stride != 0): return view.mask, True
         new_mask.append((l % next_stride // curr_stride, (r - 1) % next_stride // curr_stride + 1))
         curr_stride, new_dim = next_stride,  next(r_new_shape, 1) # need to get mask for next dimension
 
@@ -97,7 +98,6 @@ class View:
     strides = canonicalize_strides(shape, strides) if strides else strides_for_shape(shape)
     # canonicalize empty mask
     if mask is not None and all(m == (0,s) for m,s in zip(mask, shape)): mask = None
-    contiguous = offset == 0 and mask is None and strides == strides_for_shape(shape)
     # if any dimension has size >1, but is masked such that only one index in the dimension is unmasked
     # then its stride can also be set to 0, albeit with a corresponding adjustment required to the offset
     # TODO: assert comparison with LtNode to avoid mis-using symbolic
@@ -106,6 +106,7 @@ class View:
         strides, offset, mask = (0,) * len(shape), 0, ((0,0),) * len(shape)
       offset += sum((strides[i] * mask[i][0]) if e else 0 for i, e in enumerate(elim))
       strides = tuple(0 if e else st for st,e in zip(strides, elim))
+    contiguous = offset == 0 and mask is None and strides == strides_for_shape(shape)
     return View(shape, strides, offset, mask, contiguous)
 
   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none

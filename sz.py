@@ -7,6 +7,9 @@ from tabulate import tabulate
 
 TOKEN_WHITELIST = [token.OP, token.NAME, token.NUMBER, token.STRING]
 
+def is_docstring(t):
+  return t.type == token.STRING and t.string.startswith('"""') and t.line.strip().startswith('"""')
+
 def gen_stats(base_path="."):
   table = []
   for path, _, files in os.walk(os.path.join(base_path, "tinygrad")):
@@ -16,9 +19,9 @@ def gen_stats(base_path="."):
       filepath = os.path.join(path, name)
       relfilepath = os.path.relpath(filepath, base_path)
       with tokenize.open(filepath) as file_:
-        tokens = [t for t in tokenize.generate_tokens(file_.readline) if t.type in TOKEN_WHITELIST]
+        tokens = [t for t in tokenize.generate_tokens(file_.readline) if t.type in TOKEN_WHITELIST and not is_docstring(t)]
         token_count, line_count = len(tokens), len(set([x for t in tokens for x in range(t.start[0], t.end[0]+1)]))
-        table.append([relfilepath, line_count, token_count/line_count])
+        if line_count > 0: table.append([relfilepath, line_count, token_count/line_count])
   return table
 
 def gen_diff(table_old, table_new):

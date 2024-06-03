@@ -1,8 +1,14 @@
 from tinygrad.tensor import Tensor
-from tinygrad.nn import Linear, LayerNorm, Embedding
+from tinygrad import nn, dtypes
 from tinygrad.helpers import fetch, get_child
 from pathlib import Path
 
+from examples.mlperf.initializers import LinearBert, LayerNormBert
+
+# allow for monkeypatching
+Embedding = nn.Embedding
+Linear = nn.Linear
+LayerNorm = nn.LayerNorm
 
 class BertForQuestionAnswering:
   def __init__(self, hidden_size=1024, intermediate_size=4096, max_position_embeddings=512, num_attention_heads=16, num_hidden_layers=24, type_vocab_size=2, vocab_size=30522, attention_probs_dropout_prob=0.1, hidden_dropout_prob=0.1):
@@ -31,7 +37,37 @@ class BertForQuestionAnswering:
     start_logits = start_logits.reshape(-1, 1)
     end_logits = end_logits.reshape(-1, 1)
 
-    return Tensor.stack([start_logits, end_logits])
+    return Tensor.stack(start_logits, end_logits)
+
+class BertForMLPerf:
+  def __init__(self, hidden_size:int, intermediate_size:int, max_position_embeddings:int, num_attention_heads:int, num_hidden_layers:int, type_vocab_size:int, vocab_size:int, attention_probs_dropout_prob:float, hidden_dropout_prob:float) -> None:
+    self.model = Bert(hidden_size, intermediate_size, max_position_embeddings, num_attention_heads, num_hidden_layers, type_vocab_size, vocab_size, attention_probs_dropout_prob, hidden_dropout_prob)
+    # for clsf:
+    self.clsf_pooler = LinearBert(hidden_size, hidden_size) # [bs, seq, hidden] -> [bs, hidden]
+    self.clsf_pooling_activation = Tensor.tanh
+    self.clsf_output = LinearBert(hidden_size, 2) # [bs, hidden] -> [bs, 2]
+
+    # for lm:
+    self.lm_transform = LinearBert(hidden_size, hidden_size)
+    self.lm_transform_activation = gelu
+    self.lm_norm = LayerNormBert(hidden_size, eps=1e-12)
+    self.lm_output = LinearBert(hidden_size, vocab_size, bias=False) # [bs, seq, hidden] -> [bs, seq, vocab]
+    self.lm_output.weight = self.model.embeddings.word_embeddings.weight
+    self.lm_output_bias = Tensor.zeros(vocab_size, dtype=dtypes.float32)
+
+  def __call__(self, input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor, masked_positions:Tensor):
+    output = self.model(input_ids, attention_mask, segment_ids)
+    clsf_logits = self.clsf_output(self.clsf_pooling_activation(self.clsf_pooler(output[:, 0]))).cast(dtypes.float32)
+
+    # gather only the masked_positions we care about
+    counter = Tensor.arange(output.shape[1], requires_grad=False, device=output.device).reshape(1, 1, output.shape[1]).expand(*masked_positions.shape, output.shape[1])
+    onehot = counter == masked_positions.unsqueeze(2).expand(*masked_positions.shape, output.shape[1])
+    h_masked = onehot @ output
+
+    h_masked = self.lm_norm(self.lm_transform_activation(self.lm_transform(h_masked)))
+    lm_logits = self.lm_output(h_masked) + self.lm_output_bias
+
+    return lm_logits, clsf_logits
 
 class Bert:
   def __init__(self, hidden_size, intermediate_size, max_position_embeddings, num_attention_heads, num_hidden_layers, type_vocab_size, vocab_size, attention_probs_dropout_prob, hidden_dropout_prob):
@@ -102,6 +138,9 @@ class BertOutput:
     hidden_states = self.LayerNorm(hidden_states + input_tensor)
     return hidden_states
 
+def gelu(x):
+  return x * 0.5 * (1.0 + erf(x / 1.41421))
+
 # approximation of the error function
 def erf(x):
   t = (1 + 0.3275911 * x.abs()).reciprocal()
@@ -114,7 +153,7 @@ class BertIntermediate:
   def __call__(self, hidden_states):
     x = self.dense(hidden_states)
     # tinygrad gelu is openai gelu but we need the original bert gelu
-    return x * 0.5 * (1.0 + erf(x / 1.41421))
+    return gelu(x)
 
 class BertAttention:
   def __init__(self, hidden_size, num_attention_heads, attention_probs_dropout_prob, hidden_dropout_prob):
