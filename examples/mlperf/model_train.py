@@ -471,7 +471,7 @@ def train_bert():
   wc_start = time.perf_counter()
   i, train_data = start_step, get_data_bert(GPUS, train_it)
   while train_data is not None and i < train_steps and not achieved:
-    #Tensor.training = True
+    Tensor.training = True
     BEAM.value = TRAIN_BEAM
     st = time.perf_counter()
     GlobalCounters.reset()
