@@ -385,11 +385,15 @@ class AMDRenderer(HIPRenderer): device = "AMD"
 
 
 # TODO: go through all dtypes and make sure they're correct
-class HVXLanguage(CStyleLanguage):
+class HVXRenderer(CStyleLanguage):
+  device = "HEXAGON"
+  supports_float4 = False
+  has_local = False
+
   kernel_prefix = """ #include <math.h>\n#include <stdio.h>\n#include <string.h>\n#include <stdlib.h>
 #define max(x,y) ((x>y)?x:y)\n#define int64 long long\n#define half __fp16\n#define uchar unsigned char
 #define bool uchar\n#define true 1\n #define false 0\n"""
-  buffer_suffix=" restrict"
+  buffer_suffix = " restrict"
   type_map = {dtypes.long: "long long", dtypes.ulong: "unsigned long long"}
 
   def render_cast(self, x: List[str], var_dtype: DType, bitcast=False) -> str:

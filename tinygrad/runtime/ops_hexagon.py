@@ -1,9 +1,8 @@
 import time, ctypes, subprocess, pathlib, tempfile
 from typing import List
 from tinygrad.device import Compiled, Compiler, MallocAllocator
-from tinygrad.device import CompilerOptions
 from tinygrad.helpers import DEBUG
-from tinygrad.renderer.cstyle import HVXLanguage, uops_to_cstyle
+from tinygrad.renderer.cstyle import HVXRenderer
 
 
 # argv: 0 - .elf, 1 - output, 2+ - input and symbolic
@@ -44,9 +43,6 @@ def gen_func_call(signature: str):
   return "\n".join(lines) + "\n" + call
 
 class HexagonCompiler(Compiler):
-  compiler_opts = CompilerOptions("HEXAGON", supports_float4=False, has_local=False)
-  def render(self, name:str, uops) -> str:
-    return uops_to_cstyle(HVXLanguage(), name, uops)
   def compile(self, src:str) -> bytes:
     # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here
     with tempfile.NamedTemporaryFile(delete=False, suffix='.hexagon.elf') as outelf, tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.hexagon.c') as outc:  # noqa: E501
@@ -95,4 +91,4 @@ class HexagonProgram:
     if wait: return time.monotonic()-st
 
 class HexagonDevice(Compiled):
-  def __init__(self, device:str): super().__init__(device, MallocAllocator, HexagonCompiler("compile_hexagon"), HexagonProgram)
+  def __init__(self, device:str): super().__init__(device, MallocAllocator, HVXRenderer(), HexagonCompiler("compile_hexagon"), HexagonProgram)
