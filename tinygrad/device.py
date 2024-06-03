@@ -3,8 +3,8 @@ import multiprocessing
 from dataclasses import dataclass
 from collections import defaultdict
 from typing import List, Optional, Dict, Tuple, Any, cast
-import importlib, inspect, functools, pathlib, os, ctypes
-from tinygrad.helpers import getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv
+import importlib, inspect, functools, pathlib, os, ctypes, json, atexit, time
+from tinygrad.helpers import getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, PROFILE
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.renderer import Renderer
 
@@ -184,6 +184,34 @@ class Compiled:
     self.renderer = renderer if renderer else Renderer()
   def synchronize(self): pass  # override this in your device
 
+class _Profiler:
+  def __init__(self): self.collected_events = []
+
+  def add_event(self, ev_name, ev_start, ev_stop, actor_name, subactor_name=None):
+    self.collected_events.append((ev_name, ev_start, ev_stop, actor_name, subactor_name))
+    if len(self.collected_events) == 1: atexit.register(self.save)
+
+  def save(self):
+    path = getenv("PROFILE_OUTPUT_FILE", "/tmp/tinygrad_profile.json")
+    mjson: List[Dict] = []
+    actors: Dict[str, int] = {}
+    subactors: Dict[Tuple[str, str], int] = {}
+    for name,st,et,actor_name,subactor_name in self.collected_events:
+      if actor_name not in actors:
+        actors[actor_name] = (pid:=len(actors))
+        mjson.append({"name": "process_name", "ph": "M", "pid": pid, "args": {"name": actor_name}})
+
+      if (subactor_key:=(actor_name,subactor_name)) not in subactors:
+        subactors[subactor_key] = (tid:=len(subactors))
+        mjson.append({"name": "thread_name", "ph": "M", "pid": actors[actor_name], "tid":tid, "args": {"name": subactor_name}})
+
+      mjson.append({"name": name, "ph": "B", "pid": actors[actor_name], "tid": subactors.get(subactor_key, -1), "ts": st})
+      mjson.append({"name": name, "ph": "E", "pid": actors[actor_name], "tid": subactors.get(subactor_key, -1), "ts": et})
+
+    with open(path, "w") as f: f.write(json.dumps({"traceEvents": mjson}))
+    print(f"Saved profile to {path}")
+Profiler = _Profiler()
+
 # **************** for HCQ Compatible Devices ****************
 
 class HCQCompatCompiled(Compiled):
@@ -191,12 +219,17 @@ class HCQCompatCompiled(Compiled):
     self.hw_compute_queue_t, self.hw_copy_queue_t = comp_queue_t, copy_queue_t
     self.timeline_value: int = 1
     self.timeline_signal, self._shadow_timeline_signal = timeline_signals
+    self.profile_records: List[Tuple[Any, Any str, bool]] = []
+    if PROFILE: self._sync_gpu_to_cpu_time()
 
     from tinygrad.runtime.graph.hcq import HCQGraph
     super().__init__(device, allocator, renderer, compiler, runtime, HCQGraph)
 
   @classmethod
   def _read_signal(self, sig): raise NotImplementedError("need _read_signal") # reads a value for a signal
+
+  @classmethod
+  def _read_timestamp(self, signal): raise NotImplementedError("need _read_timestamp") # reads a timestamp for a signal
 
   @classmethod
   def _set_signal(self, sig, value): raise NotImplementedError("need _set_signal") # sets a value for a signal
@@ -206,6 +239,23 @@ class HCQCompatCompiled(Compiled):
 
   @classmethod
   def _wait_signal(self, signal, value=0, timeout=10000): raise NotImplementedError("need _wait_signal") # waits for a signal value
+
+  def _sync_gpu_to_cpu_time(self):
+    def _sync_queue(qtype):
+      qtype().timestamp(self.time_event_st).signal(self.timeline_signal, self.timeline_value).submit(self)
+      self.timeline_value += 1
+      cpu_start_time = time.perf_counter_ns() / 1e3
+      self._wait_signal(self.timeline_signal, self.timeline_value - 1)
+      return cpu_start_time, self.time_event_st.start_ts
+    self.cpu_start_time, self.gpu_start_time = _sync_queue(self.hw_compute_queue_t)
+    self.copy_cpu_start_time, self.copy_gpu_start_time = _sync_queue(self.hw_copy_queue_t)
+
+  def _prof_process_events(self):
+    for st, en, name, is_copy in self.profile_records:
+      Profiler.add_event(name, self._gpu_time_to_cpu(st if st.__class__ is int else self._read_timestamp(st), is_copy),
+        self._gpu_time_to_cpu(en if en.__class__ is int else self._read_timestamp(en), is_copy), self.dname, "DMA" if is_copy else "COMPUTE")
+      self.signals_pool += [st, en] # type: ignore
+    self.profile_records = []
 
   def _wrap_timeline_signal(self):
     self.timeline_signal, self._shadow_timeline_signal, self.timeline_value = self._shadow_timeline_signal, self.timeline_signal, 1
