@@ -77,21 +77,6 @@ class UPat:
   dtype: Optional[Union[DType, Set[DType]]] = None
   allow_len: Set[int] = field(default_factory=set)
 
-  @classmethod
-  def from_dict(cls, pat:Dict[str, Any]) -> UPat:
-    name, uop, dtype = pat.get("__name__"), pat.get("uop"), pat.get("dtype")
-    assert isinstance(name, str) or name is None
-    assert isinstance(uop, (UOps, set)) or uop is None
-    assert isinstance(dtype, (DType, set)) or dtype is None
-    vin = pat.get("vin")
-    if isinstance(vin, list): vin = [UPat.from_dict(x) for x in vin]
-    elif isinstance(vin, tuple): vin = tuple(UPat.from_dict(x) for x in vin)
-    elif isinstance(vin, dict): vin = UPat.from_dict(vin)
-    else: assert vin is None
-    arg = pat.get("arg")
-    allow_len = pat.get("__allow_len__", set())
-    return cls(uop, arg, vin, name, dtype, allow_len)
-
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
   if pat.name in store and store[pat.name] != uop: return False
   if pat.name is not None: store[pat.name] = uop
@@ -120,12 +105,11 @@ def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
   return False
 
 class PatternMatcher:
-  def __init__(self, patterns:List[Tuple[Union[Dict[str, Any], UPat], Callable]]):
+  def __init__(self, patterns:List[Tuple[UPat, Callable]]):
     self.patterns = patterns
     self.pdict: DefaultDict[Tuple[UOps, Any], List[Tuple[UPat, Callable]]] = defaultdict(list)
     # uop is required, arg is optional
-    for pd,fxn in self.patterns:
-      p = UPat.from_dict(pd) if isinstance(pd, dict) else pd
+    for p,fxn in self.patterns:
       assert p.uop is not None
       if isinstance(p.uop, set):
         for uop in p.uop: self.pdict[(uop, p.arg)].append((p, fxn))
