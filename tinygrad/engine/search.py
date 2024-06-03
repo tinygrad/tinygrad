@@ -70,6 +70,9 @@ def _try_compile_linearized_w_idx(x:Tuple[int,Linearizer], compiler:Compiler) ->
     ret = None
   except TimeoutException:
     ret = None
+  except Exception as e:
+    if getenv("BEAM_STRICT_MODE"): raise e
+    ret = None
   finally:
     signal.alarm(0)
   return x[0], ret
