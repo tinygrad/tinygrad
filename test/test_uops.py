@@ -107,7 +107,6 @@ class TestFloatUOps(TestUOps):
   def test_sqrt(self): self._test_uop_fxn(UnaryOps.SQRT, lambda a: math.sqrt(a) if a >= 0 else float('nan'))
 
   def test_add(self): self._test_bop_fxn(BinaryOps.ADD, lambda a,b: a+b)
-  def test_sub(self): self._test_bop_fxn(BinaryOps.SUB, lambda a,b: a-b)
   def test_mul(self): self._test_bop_fxn(BinaryOps.MUL, lambda a,b: a*b)
   def test_div(self): self._test_bop_fxn(BinaryOps.DIV, lambda a,b: a/b if b != 0 else a*float('inf'))
   def test_max(self): self._test_bop_fxn(BinaryOps.MAX, lambda a,b: max(a,b))
@@ -120,7 +119,6 @@ class TestFloatUOps(TestUOps):
 class TestNonFloatUOps(TestUOps):
   def test_neg_int32(self): self._test_uop_fxn(UnaryOps.NEG, lambda a: -a, (dtypes.int32, ))
   def test_add_int32(self): self._test_bop_fxn(BinaryOps.ADD, lambda a,b: int(a)+int(b), (dtypes.int32, dtypes.int32))
-  def test_sub_int32(self): self._test_bop_fxn(BinaryOps.SUB, lambda a,b: int(a)-int(b), (dtypes.int32, dtypes.int32))
   def test_mul_int32(self): self._test_bop_fxn(BinaryOps.MUL, lambda a,b: int(a)*int(b), (dtypes.int32, dtypes.int32))
   def test_div_int32(self):
     self._test_bop_fxn(BinaryOps.DIV, lambda a,b: int(a/b), (dtypes.int32, dtypes.int32), no_b_zero=True)
@@ -193,14 +191,9 @@ class TestExecALU(TestUOps):
   def test_overflow(self):
     self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.uint8, (250, 250)), 244)
     self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.uint8, (256, 0)), 0)
-    self.assertEqual(exec_alu(BinaryOps.SUB, dtypes.uint8, (0, 1)), 255)
-    self.assertEqual(exec_alu(BinaryOps.SUB, dtypes.uint8, (0, 1000)), 24)
 
     self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.int8, (127, 0)), 127)
     self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.int8, (-128, 0)), -128)
-    self.assertEqual(exec_alu(BinaryOps.SUB, dtypes.int8, (-100, 100)), 56)
-    self.assertEqual(exec_alu(BinaryOps.SUB, dtypes.int8, (-1000, 0)), 24)
-    self.assertEqual(exec_alu(BinaryOps.SUB, dtypes.int8, (-130, 0)), 126)
 
     self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.int8, (1, 1)), 2)
     self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.int8, (-128, 0)), -128)

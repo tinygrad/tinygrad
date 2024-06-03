@@ -42,7 +42,7 @@ class Sin(Function):
     return x.e(UnaryOps.SIN)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
+    return self.x.const(math.pi / 2).e(BinaryOps.ADD, self.x.e(UnaryOps.NEG)).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
 
 # NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
@@ -84,7 +84,7 @@ class Sigmoid(Function):
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return self.ret.e(BinaryOps.MUL, self.ret.const(1).e(BinaryOps.SUB, self.ret)).e(BinaryOps.MUL, grad_output)
+    return self.ret.e(BinaryOps.MUL, self.ret.const(1).e(BinaryOps.ADD, self.ret.e(UnaryOps.NEG))).e(BinaryOps.MUL, grad_output)
 
 class Sign(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
@@ -114,7 +114,7 @@ class Add(Function):
            grad_output if self.needs_input_grad[1] else None
 
 class Sub(Function):
-  def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer: return x.e(BinaryOps.SUB, y)
+  def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer: return  x.e(BinaryOps.ADD, y.e(UnaryOps.NEG))
 
   def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
     return grad_output if self.needs_input_grad[0] else None, \
