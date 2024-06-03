@@ -374,8 +374,8 @@ def train_step_bert(model, optimizer, scheduler, loss_scaler:float, input_ids:Te
 
 @TinyJit
 def eval_step_bert(model, input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor, masked_positions:Tensor, masked_lm_ids:Tensor, next_sentence_labels:Tensor):
-  lm_logits, seq_relationship_logits = model(input_ids, attention_mask, segment_ids)
-  masked_lm_accuracy, seq_relationship_accuracy, masked_lm_loss, next_sentence_loss = model.accuracy(lm_logits, seq_relationship_logits, masked_positions, masked_lm_ids, next_sentence_labels)
+  lm_logits, seq_relationship_logits = model(input_ids, attention_mask, masked_positions, segment_ids)
+  masked_lm_accuracy, seq_relationship_accuracy, masked_lm_loss, next_sentence_loss = model.accuracy(lm_logits, seq_relationship_logits, masked_lm_ids, next_sentence_labels)
   return {
     "masked_lm_accuracy": masked_lm_accuracy.realize(),
     "next_sentence_accuracy": seq_relationship_accuracy.realize(),
@@ -471,7 +471,7 @@ def train_bert():
   wc_start = time.perf_counter()
   i, train_data = start_step, get_data_bert(GPUS, train_it)
   while train_data is not None and i < train_steps and not achieved:
-    Tensor.training = True
+    #Tensor.training = True
     BEAM.value = TRAIN_BEAM
     st = time.perf_counter()
     GlobalCounters.reset()

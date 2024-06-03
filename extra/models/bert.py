@@ -1,7 +1,7 @@
 import re, os
 from pathlib import Path
 from tinygrad.tensor import Tensor, cast
-from tinygrad import nn
+from tinygrad import nn, dtypes
 from tinygrad.helpers import fetch, get_child
 from tinygrad.nn.state import get_parameters
 
@@ -54,13 +54,12 @@ class BertForPretraining:
     next_sentence_loss = seq_relationship_logits.binary_crossentropy_logits(next_sentence_labels)
     return masked_lm_loss + next_sentence_loss
   
-  def accuracy(self, prediction_logits:Tensor, seq_relationship_logits:Tensor, masked_lm_positions:Tensor, masked_lm_ids:Tensor, next_sentence_labels:Tensor):
-    gathered_lm_prediction_logits = self.gather(prediction_logits, masked_lm_positions)
+  def accuracy(self, prediction_logits:Tensor, seq_relationship_logits:Tensor, masked_lm_ids:Tensor, next_sentence_labels:Tensor):
 
     valid = masked_lm_ids != 0
-    masked_lm_predictions = gathered_lm_prediction_logits.log_softmax().argmax(-1)
+    masked_lm_predictions = prediction_logits.log_softmax().argmax(-1)
     masked_lm_accuracy = (masked_lm_predictions == masked_lm_ids) * valid
-    masked_lm_loss = gathered_lm_prediction_logits.sparse_categorical_crossentropy(masked_lm_ids)
+    masked_lm_loss = prediction_logits.sparse_categorical_crossentropy(masked_lm_ids)
 
     seq_relationship_predictions = seq_relationship_logits.log_softmax().argmax(-1)
     seq_relationship_accuracy = (seq_relationship_predictions == next_sentence_labels)
@@ -131,7 +130,7 @@ class BertLMPredictionHead:
   def __init__(self, hidden_size:int, vocab_size:int, embeddings_weight:Tensor):
     self.transform = BertPredictionHeadTransform(hidden_size)
     self.embedding_weight = embeddings_weight
-    self.bias = Tensor.zeros(vocab_size)
+    self.bias = Tensor.zeros(vocab_size, dtype=dtypes.float32)
 
   def __call__(self, hidden_states:Tensor):
     return self.transform(hidden_states) @ self.embedding_weight.T + self.bias
