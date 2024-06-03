@@ -96,6 +96,8 @@ class View:
   @functools.lru_cache(maxsize=None)
   def create(shape:Tuple[sint, ...], strides:Optional[Tuple[sint, ...]]=None, offset:sint=0, mask:Optional[Tuple[Tuple[sint, sint], ...]]=None):
     strides = canonicalize_strides(shape, strides) if strides else strides_for_shape(shape)
+    # canonicalize 0 in shape
+    if 0 in shape: return View(shape, (0,) * len(shape), offset=0, mask=None, contiguous=True)
     # canonicalize empty mask
     if mask is not None and all(m == (0,s) for m,s in zip(mask, shape)): mask = None
     # if any dimension has size >1, but is masked such that only one index in the dimension is unmasked
