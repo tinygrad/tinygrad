@@ -120,12 +120,12 @@ def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
   return False
 
 class PatternMatcher:
-  def __init__(self, patterns:List[Tuple[Dict[str, Any], Callable]]):
+  def __init__(self, patterns:List[Tuple[Union[Dict[str, Any], UPat], Callable]]):
     self.patterns = patterns
     self.pdict: DefaultDict[Tuple[UOps, Any], List[Tuple[UPat, Callable]]] = defaultdict(list)
     # uop is required, arg is optional
     for pd,fxn in self.patterns:
-      p = UPat.from_dict(pd)
+      p = UPat.from_dict(pd) if isinstance(pd, dict) else pd
       assert p.uop is not None
       if isinstance(p.uop, set):
         for uop in p.uop: self.pdict[(uop, p.arg)].append((p, fxn))
