@@ -56,16 +56,150 @@ class Relu(Function):
 class Log(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
+    return Log._forward(x)
+
+  @staticmethod
+  def _forward(x:LazyBuffer) -> LazyBuffer:
     return x.e(UnaryOps.LOG2).e(BinaryOps.MUL, x.const(math.log(2)))
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.e(BinaryOps.DIV, self.x)
 
-class Exp(Function):
+def pow2if(q:LazyBuffer) -> LazyBuffer:
+  assert q.dtype == dtypes.int32
+  return q.e(BinaryOps.ADD, q.const(127)).e(BinaryOps.SHL, q.const(23)).cast(dtypes.float32, True)
+
+def ldexp2kf(d:LazyBuffer, e:LazyBuffer) -> LazyBuffer:
+  assert d.dtype == dtypes.float32
+  assert e.dtype == dtypes.int32
+  return d.e(BinaryOps.MUL, pow2if(e.e(BinaryOps.SHR, e.const(1)))).e(BinaryOps.MUL, pow2if(e.e(BinaryOps.SUB, e.e(BinaryOps.SHR, e.const(1)))))
+
+def rintfk(d:LazyBuffer) -> LazyBuffer:
+  assert d.dtype == dtypes.float32
+  return d.e(BinaryOps.ADD, d.e(BinaryOps.CMPLT, d.const(0.0)).e(TernaryOps.WHERE, d.const(-0.5), d.const(0.5))).cast(dtypes.int32)
+
+class Exp2(Function): # 3.5 ULP maximum error
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = x.e(BinaryOps.MUL, x.const(1/math.log(2))).e(UnaryOps.EXP2)
+    q = rintfk(x)
+    s = x.e(BinaryOps.SUB, q.cast(x.dtype))
+
+    u = x.const(+0.1535920892e-3)
+    # TODO: collapse in a loop
+    u = u.e(BinaryOps.MUL, s).e(BinaryOps.ADD, x.const(+0.1339262701e-2))
+    u = u.e(BinaryOps.MUL, s).e(BinaryOps.ADD, x.const(+0.9618384764e-2))
+    u = u.e(BinaryOps.MUL, s).e(BinaryOps.ADD, x.const(+0.5550392344e-1))
+    u = u.e(BinaryOps.MUL, s).e(BinaryOps.ADD, x.const(+0.2402265069e+0))
+    u = u.e(BinaryOps.MUL, s).e(BinaryOps.ADD, x.const(+0.6931471825e+0))
+    u = u.e(BinaryOps.MUL, s).e(BinaryOps.ADD, x.const(+0.1000000000e+1))
+
+    u = ldexp2kf(u, q)
+
+    u = x.e(BinaryOps.CMPLT, x.const(128.0)).e(TernaryOps.WHERE, u, x.const(math.inf))
+    u = x.e(BinaryOps.CMPLT, x.const(-150.0)).e(TernaryOps.WHERE, x.const(0.0), u)
+
+    self.ret = u
     return self.ret
 
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return self.ret.e(BinaryOps.MUL, grad_output)
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
+    return self.ret.e(BinaryOps.MUL, self.ret.const(math.log(2))).e(BinaryOps.MUL, grad_output)
+
+def ilogb2kf(d:LazyBuffer) -> LazyBuffer: # returns int32
+  assert d.dtype == dtypes.float32
+  dint = d.cast(dtypes.int32, True)
+  return dint.e(BinaryOps.SHR, dint.const(23)).e(BinaryOps.AND, dint.const(255)).e(BinaryOps.SUB, dint.const(127))
+
+def logk3f(d:LazyBuffer) -> LazyBuffer:
+  assert d.dtype == dtypes.float32
+  o = d.e(BinaryOps.CMPLT, d.const(1.17549435e-38))
+  d = o.e(TernaryOps.WHERE, d.e(BinaryOps.MUL, d.const(1.8446744073709552e+19)), d)
+  e = ilogb2kf(d.e(BinaryOps.MUL, d.const(1.0/0.75)))
+  m = ldexp2kf(d, e.e(UnaryOps.NEG))
+  e = o.e(TernaryOps.WHERE, e.e(BinaryOps.SUB, e.const(64)), e)
+  x = m.e(BinaryOps.SUB, m.const(1.0)).e(BinaryOps.DIV, m.e(BinaryOps.ADD, m.const(1.0)))
+  x2 = x.e(BinaryOps.MUL, x)
+
+  t = d.const(0.2392828464508056640625)
+  t = t.e(BinaryOps.MUL, x2).e(BinaryOps.ADD, d.const(0.28518211841583251953125))
+  t = t.e(BinaryOps.MUL, x2).e(BinaryOps.ADD, d.const(0.400005877017974853515625))
+  t = t.e(BinaryOps.MUL, x2).e(BinaryOps.ADD, d.const(0.666666686534881591796875))
+  t = t.e(BinaryOps.MUL, x2).e(BinaryOps.ADD, d.const(2.0))
+
+  x = x.e(BinaryOps.MUL, t).e(BinaryOps.ADD, x.const(0.693147180559945286226764).e(BinaryOps.MUL, e.cast(dtypes.float32)))
+  return x
+
+def expk3f(d:LazyBuffer) -> LazyBuffer:
+  assert d.dtype == dtypes.float32
+  q = rintfk(d.e(BinaryOps.MUL, d.const(1.4426950408889634)))
+  qf = q.cast(d.dtype)
+  s = qf.e(BinaryOps.MUL, d.const(-0.693145751953125)).e(BinaryOps.ADD, d)
+  s = qf.e(BinaryOps.MUL, d.const(-1.428606765330187045e-06)).e(BinaryOps.ADD, s)
+
+  u = d.const(0.000198527617612853646278381)
+  u = u.e(BinaryOps.MUL, s).e(BinaryOps.ADD, d.const(0.00139304355252534151077271))
+  u = u.e(BinaryOps.MUL, s).e(BinaryOps.ADD, d.const(0.00833336077630519866943359))
+  u = u.e(BinaryOps.MUL, s).e(BinaryOps.ADD, d.const(0.0416664853692054748535156))
+  u = u.e(BinaryOps.MUL, s).e(BinaryOps.ADD, d.const(0.166666671633720397949219))
+  u = u.e(BinaryOps.MUL, s).e(BinaryOps.ADD, d.const(0.5))
+  u = u.e(BinaryOps.MUL, s.e(BinaryOps.MUL, s)).e(BinaryOps.ADD, s.e(BinaryOps.ADD, d.const(1.0)))
+  u = ldexp2kf(u, q)
+  u = d.e(BinaryOps.CMPLT, d.const(-104.0)).e(TernaryOps.WHERE, u.const(0.0), u)
+  return u
+
+def fabsfk(d:LazyBuffer) -> LazyBuffer:
+  assert d.dtype == dtypes.float32
+  dint = d.cast(dtypes.int32, True)
+  return dint.e(BinaryOps.AND, dint.const(0x7FFFFFFF)).cast(dtypes.float32, True)
+
+def xisnotnanf(d:LazyBuffer) -> LazyBuffer:
+  assert d.dtype == dtypes.float32
+  return d.e(BinaryOps.CMPEQ, d)
+
+def xisinff(x:LazyBuffer) -> LazyBuffer:
+  assert x.dtype == dtypes.float32
+  return x.e(BinaryOps.CMPEQ, x.const(math.inf)).e(BinaryOps.OR, x.e(BinaryOps.CMPEQ, x.const(-math.inf)))
+
+def xsignbitf(d: LazyBuffer) -> LazyBuffer:
+  assert d.dtype == dtypes.float32
+  return d.e(BinaryOps.CMPLT, d.const(0.0))
+
+def mulsignf(x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
+  assert x.dtype == dtypes.float32
+  assert y.dtype == dtypes.float32
+  xint = x.cast(dtypes.int32, True)
+  return xint.e(BinaryOps.XOR, y.cast(dtypes.int32, True).e(BinaryOps.AND, xint.const(1 << 31))).cast(dtypes.float32, True)
+
+class Pow(Function):
+  def forward(self, x: LazyBuffer, y: LazyBuffer) -> LazyBuffer:
+    self.x, self.y = x, y
+    self.ret = Pow._forward(x, y)
+    return self.ret
+
+  @staticmethod
+  def _forward(x: LazyBuffer, y: LazyBuffer) -> LazyBuffer:
+    result = expk3f(logk3f(fabsfk(x)).e(BinaryOps.MUL, y))
+    yint = y.cast(dtypes.int32)
+    yiswhole = y.e(BinaryOps.CMPEQ, yint.cast(y.dtype))
+    yisodd = yint.e(BinaryOps.AND, yint.const(1)).e(BinaryOps.CMPEQ, yint.const(0)).e(TernaryOps.WHERE, yiswhole.const(False), yiswhole.const(True))
+    yisodd = yiswhole.e(TernaryOps.WHERE, yisodd, yiswhole.const(False))
+
+    result = xisnotnanf(result).e(TernaryOps.WHERE, result, result.const(math.inf))
+    result = result.e(BinaryOps.MUL, x.e(BinaryOps.CMPLT, x.const(0.0)).e(TernaryOps.WHERE, yiswhole.e(TernaryOps.WHERE, yisodd.e(TernaryOps.WHERE, x.const(-1.0), x.const(1.0)), x.const(math.nan)), x.const(1.0)))
+    efx = mulsignf(fabsfk(x).e(BinaryOps.SUB, x.const(1.0)), y)
+    result = xisinff(y).e(TernaryOps.WHERE, efx.e(BinaryOps.CMPLT, efx.const(0.0)).e(TernaryOps.WHERE, x.const(0.0), efx.e(BinaryOps.CMPEQ, efx.const(0.0)).e(TernaryOps.WHERE, x.const(1.0), x.const(math.inf))), result)
+    result = xisinff(x).e(BinaryOps.OR, x.e(BinaryOps.CMPEQ, x.const(0.0))).e(TernaryOps.WHERE, mulsignf(xsignbitf(y).e(BinaryOps.XOR, x.e(BinaryOps.CMPEQ, x.const(0.0))).e(TernaryOps.WHERE, x.const(0.0), x.const(math.inf)), yisodd.e(TernaryOps.WHERE, x, x.const(1.0))), result)
+    result = xisnotnanf(x).e(BinaryOps.AND, xisnotnanf(y)).e(TernaryOps.WHERE, result, x.const(math.nan))
+    result = y.e(BinaryOps.CMPEQ, y.const(0.0)).e(BinaryOps.OR, x.e(BinaryOps.CMPEQ, x.const(1.0))).e(TernaryOps.WHERE, x.const(1.0), result)
+    return result
+
+  def backward(self, grad_output: LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
+    # Gradient with respect to the base x
+    grad_x = (grad_output.e(BinaryOps.MUL, self.y).e(BinaryOps.MUL, Pow._forward(self.x, self.y.e(BinaryOps.SUB, self.y.const(1))))) \
+              if self.needs_input_grad[0] else None
+
+    # Gradient with respect to the exponent y
+    grad_y = (grad_output.e(BinaryOps.MUL, Pow._forward(self.x, self.y)).e(BinaryOps.MUL, Log._forward(self.x))) \
+              if self.needs_input_grad[1] else None
+
+    return grad_x, grad_y
 
 class Sqrt(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
