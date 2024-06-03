@@ -189,11 +189,7 @@ class HWPM4Queue:
 
 SDMA_MAX_COPY_SIZE = 0x400000
 class HWCopyQueue:
-  def __init__(self): self.q, self.cmd_sizes, self.binded_device = [], [], None
-  def __del__(self):
-    if self.binded_device is not None:
-      # self.binded_device.synchronize()
-      self.binded_device._gpu_free(self.hw_page)
+  def __init__(self): self.q, self.cmd_sizes = [], []
 
   def _q(self, arr):
     self.q += arr
