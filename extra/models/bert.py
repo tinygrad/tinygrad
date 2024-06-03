@@ -49,17 +49,17 @@ class BertForPretraining:
     output = self.bert(input_ids, attention_mask, token_type_ids)
     return self.cls(output, masked_lm_positions)
   
-  def loss(self, prediction_logits:Tensor, seq_relationship_logits:Tensor, masked_lm_ids:Tensor, next_sentence_labels:Tensor):
-    masked_lm_loss = prediction_logits.sparse_categorical_crossentropy(masked_lm_ids)
+  def loss(self, prediction_logits:Tensor, seq_relationship_logits:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
+    masked_lm_loss = prediction_logits.sparse_categorical_crossentropy(masked_lm_ids, ignore_index=masked_lm_weights)
     next_sentence_loss = seq_relationship_logits.binary_crossentropy_logits(next_sentence_labels)
     return masked_lm_loss + next_sentence_loss
   
-  def accuracy(self, prediction_logits:Tensor, seq_relationship_logits:Tensor, masked_lm_ids:Tensor, next_sentence_labels:Tensor):
+  def accuracy(self, prediction_logits:Tensor, seq_relationship_logits:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
 
     valid = masked_lm_ids != 0
     masked_lm_predictions = prediction_logits.log_softmax().argmax(-1)
     masked_lm_accuracy = (masked_lm_predictions == masked_lm_ids) * valid
-    masked_lm_loss = prediction_logits.sparse_categorical_crossentropy(masked_lm_ids)
+    masked_lm_loss = prediction_logits.sparse_categorical_crossentropy(masked_lm_ids, ignore_index=masked_lm_weights)
 
     seq_relationship_predictions = seq_relationship_logits.log_softmax().argmax(-1)
     seq_relationship_accuracy = (seq_relationship_predictions == next_sentence_labels)
