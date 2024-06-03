@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Iterator, Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable, Union
+from typing import Iterator, Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable, Union, cast
 import functools, itertools, heapq
 from collections import defaultdict
 from enum import Enum, auto
@@ -62,6 +62,7 @@ def uop_alu_resolve(u:UOp) -> sint:
   if u.uop is UOps.DEFINE_VAR: return u.arg
   if u.uop is UOps.SPECIAL: return u.arg[2]-1
   if u.uop is UOps.ALU and u.arg is BinaryOps.MUL: return uop_alu_resolve(u.vin[0]) * uop_alu_resolve(u.vin[1])
+  if u.uop is UOps.ALU and u.arg is BinaryOps.SHL: return uop_alu_resolve(u.vin[0]) * (2**cast(int, uop_alu_resolve(u.vin[1])))
   if u.uop is UOps.ALU and u.arg is BinaryOps.ADD: return uop_alu_resolve(u.vin[0]) + uop_alu_resolve(u.vin[1])
   raise RuntimeError(f"ALU resolve fail @ {u.uop}")
 
@@ -94,7 +95,8 @@ class UPat:
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
   if pat.name in store and store[pat.name] != uop: return False
   if pat.name is not None: store[pat.name] = uop
-  if pat.arg is not None and uop.arg != pat.arg: return False
+  if isinstance(pat.arg, set) and uop.arg not in pat.arg: return False
+  elif pat.arg is not None and uop.arg != pat.arg: return False
   if isinstance(pat.dtype, set) and uop.dtype not in pat.dtype: return False
   if isinstance(pat.dtype, DType) and uop.dtype != pat.dtype: return False
   if isinstance(pat.uop, set) and uop.uop not in pat.uop: return False
