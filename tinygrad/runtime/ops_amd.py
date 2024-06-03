@@ -238,47 +238,27 @@ class HWCopyQueue:
 
     return self
 
-  def bind(self, device: AMDDevice):
-    self.binded_device = device
-    self.hw_page = device._gpu_alloc((elems_cnt:=round_up(len(self.q), 8)) * 4, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
-    ctypes.memset(self.hw_page.va_addr, 0x0, self.hw_page.size)
-
-    hw_view = to_mv(self.hw_page.va_addr, self.hw_page.size).cast("I")
-    for i, value in enumerate(self.q): hw_view[i] = value
-
-    self.indirect_cmd = [amd_gpu.SDMA_OP_INDIRECT, *data64_le(self.hw_page.va_addr), elems_cnt, 0, 0]
-    self.q, self.cmd_sizes = hw_view, [6]
-
-  def submit(self, device: AMDDevice):
+  def submit(self, device:AMDDevice):
     read_ptr = device.sdma_read_pointer[0]
     if (device.sdma_doorbell_value-read_ptr) > device.sdma_ring.size: raise RuntimeError("SDMA queue overrun")
-
-    if self.binded_device == device:
-      # An IB packet must end on a 8 DW boundary.
-      if len(self.indirect_cmd) * 4 >= (device.sdma_ring.size - device.sdma_doorbell_value % device.sdma_ring.size):
-        cmds, cmd_sizes = [0, 0] + self.indirect_cmd, [8]
-      else:
-        add = (40 - (device.sdma_doorbell_value % 32)) % 32
-        cmds, cmd_sizes = [0] * add + self.indirect_cmd, [6 + add]
-    else: cmds, cmd_sizes = self.q, self.cmd_sizes
 
     sdma_buffer_view = to_mv(device.sdma_ring.va_addr, device.sdma_ring.size).cast("I")
 
     tail_blit_dword = 0
-    for cmdsz in cmd_sizes:
+    for cmdsz in self.cmd_sizes:
       if (tail_blit_dword + cmdsz) * 4 >= device.sdma_ring.size - device.sdma_doorbell_value % device.sdma_ring.size: break
       tail_blit_dword += cmdsz
 
     start_idx = (device.sdma_doorbell_value % device.sdma_ring.size) // 4
-    sdma_buffer_view[start_idx : start_idx + tail_blit_dword] = array.array('I', cmds[:tail_blit_dword])
+    sdma_buffer_view[start_idx : start_idx + tail_blit_dword] = array.array('I', self.q[:tail_blit_dword])
     device.sdma_doorbell_value += tail_blit_dword * 4
 
-    if (rem_packet_cnt := len(cmds) - tail_blit_dword) > 0:
+    if (rem_packet_cnt := len(self.q) - tail_blit_dword) > 0:
       zero_fill = device.sdma_ring.size - device.sdma_doorbell_value % device.sdma_ring.size
       ctypes.memset(device.sdma_ring.va_addr + (device.sdma_doorbell_value % device.sdma_ring.size), 0, zero_fill)
       device.sdma_doorbell_value += zero_fill
 
-      sdma_buffer_view[0:rem_packet_cnt] = array.array('I', cmds[tail_blit_dword:])
+      sdma_buffer_view[0:rem_packet_cnt] = array.array('I', self.q[tail_blit_dword:])
       device.sdma_doorbell_value += rem_packet_cnt * 4
 
     device.sdma_write_pointer[0] = device.sdma_doorbell_value
@@ -404,18 +384,11 @@ class AMDAllocator(LRUAllocator):
       self.b_next = (self.b_next + 1) % len(self.b)
       AMDDevice._wait_signal(self.device.timeline_signal, self.b_timeline[self.b_next])
       ctypes.memmove(self.b[self.b_next].va_addr, from_mv(src[i:]), lsize:=min(self.b[self.b_next].size, src.nbytes-i))
-      x = HWCopyQueue()
-      x.wait(self.device.timeline_signal, self.device.timeline_value - 1) \
+      HWCopyQueue().wait(self.device.timeline_signal, self.device.timeline_value - 1) \
                    .copy(dest.va_addr+i, self.b[self.b_next].va_addr, lsize) \
-                   .signal(self.device.timeline_signal, self.device.timeline_value)
-      x.bind(self.device)
-      x.submit(self.device)
-
-      # HWCopyQueue().signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
+                   .signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
       self.b_timeline[self.b_next] = self.device.timeline_value
       self.device.timeline_value += 1
-      self.device.synchronize()
-      print("run")
 
   def copyout(self, dest:memoryview, src):
     self.device.synchronize()
