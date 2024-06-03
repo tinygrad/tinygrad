@@ -366,7 +366,7 @@ jobs:
       - name: Set env
         run: |
           COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
-          if echo "$COMMIT_MESSAGE" | grep -q "\[run_process_replay\]" || [ "${{ github.event.inputs.run_process_replay }}" == "true" ]; then
+          if { echo "$COMMIT_MESSAGE" | grep -q "\[run_process_replay\]" || [ "${{ github.event.inputs.run_process_replay }}" == "true" ]; } && [ "$GITHUB_REF_NAME" != "master" ]; then
             echo "RUN_PROCESS_REPLAY=1" >> $GITHUB_ENV
           fi
           printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nPTX=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas' || matrix.backend == 'amd' && 'AMD=1\nMOCKGPU=1\nFORWARD_ONLY=1' || matrix.backend == 'nv' && 'NV=1\nMOCKGPU=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
