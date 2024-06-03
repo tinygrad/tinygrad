@@ -246,10 +246,128 @@ def batch_load_val_bert(BS:int):
         yield process_batch_bert(dataset[start_idx:] + dataset[:end_idx])
     idx += 1
 
+def load_unet3d_data(preprocessed_dataset_dir, seed, queue_in, queue_out, X:Tensor, Y:Tensor):
+  from extra.datasets.kits19 import rand_balanced_crop, rand_flip, random_brightness_augmentation, gaussian_noise
+
+  while (data := queue_in.get()) is not None:
+    idx, fn, val = data
+    case_name = os.path.basename(fn).split("_x.npy")[0]
+    x, y = np.load(preprocessed_dataset_dir / f"{case_name}_x.npy"), np.load(preprocessed_dataset_dir / f"{case_name}_y.npy")
+
+    if not val:
+      if seed is not None:
+        np.random.seed(seed)
+        random.seed(seed)
+
+      x, y = rand_balanced_crop(x, y)
+      x, y = rand_flip(x, y)
+      x, y = x.astype(np.float32), y.astype(np.uint8)
+      x = random_brightness_augmentation(x)
+      x = gaussian_noise(x)
+
+    X[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = x.tobytes()
+    Y[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = y.tobytes()
+
+    queue_out.put(idx)
+  queue_out.put(None)
+
+def batch_load_unet3d(preprocessed_dataset_dir:Path, batch_size:int=6, val:bool=False, shuffle:bool=True, seed=None):
+  assert preprocessed_dataset_dir is not None, "run preprocess_data on kits19"
+
+  files = sorted(list(preprocessed_dataset_dir.glob("*_x.npy")))
+  file_indices = list(range(len(files)))
+  batch_count = min(32, len(files) // batch_size)
+
+  queue_in, queue_out = Queue(), Queue()
+  procs, data_out_count = [], [0] * batch_count
+  shm_name = "unet3d"
+  sz, shm_path = (batch_size * batch_count, 1, 128, 128, 128), f"/dev/shm/{shm_name}"
+  if os.path.exists(shm_path): os.unlink(shm_path)
+  shm = shared_memory.SharedMemory(name=shm_name, create=True, size=prod(sz))
+
+  shutdown = False
+  class Cookie:
+    def __init__(self, bc):
+      self.bc = bc
+    def __del__(self):
+      if not shutdown:
+        try: enqueue_batch(self.bc)
+        except StopIteration: pass
+
+  def enqueue_batch(bc):
+    for idx in range(bc * batch_size, (bc+1) * batch_size):
+      fn = files[next(ds_iter)]
+      queue_in.put((idx, fn, val))
+
+  def shuffle_indices(file_indices, seed=None):
+    rng = random.Random(seed)
+    rng.shuffle(file_indices)
+
+  if shuffle: shuffle_indices(file_indices, seed=seed)
+  ds_iter = iter(file_indices)
+
+  try:
+    X = Tensor.empty(*sz, dtype=dtypes.float32, device=f"disk:{shm_path}")
+    Y = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:{shm_path}")
+
+    for _ in range(cpu_count()):
+      proc = Process(target=load_unet3d_data, args=(preprocessed_dataset_dir, seed, queue_in, queue_out, X, Y))
+      proc.daemon = True
+      proc.start()
+      
+      procs.append(proc)
+
+    for bc in range(batch_count):
+      enqueue_batch(bc)
+
+    for _ in range(len(files) // batch_size):
+      while True:
+        bc = queue_out.get() // batch_size
+        data_out_count[bc] += 1
+        if data_out_count[bc] == batch_size: break
+
+      data_out_count[bc] = 0
+      yield X[bc * batch_size:(bc + 1) * batch_size], Y[bc * batch_size:(bc + 1) * batch_size], Cookie(bc)
+  finally:
+    shutdown = True
+
+    for _ in procs: queue_in.put(None)
+    queue_in.close()
+
+    for _ in procs:
+      while queue_out.get() is not None: pass
+    queue_out.close()
+
+    # shutdown processes
+    for proc in procs: proc.join()
+
+    shm.close()
+    try:
+      shm.unlink()
+    except FileNotFoundError:
+      # happens with BENCHMARK set
+      pass
+
 if __name__ == "__main__":
-  from extra.datasets.imagenet import get_train_files, get_val_files
-  VAL = getenv("VAL", 1)
-  files = get_val_files() if VAL else get_train_files()
-  with tqdm(total=len(files)) as pbar:
-    for x,y,c in batch_load_resnet(val=VAL):
-      pbar.update(x.shape[0])
+  def load_unet3d(val):
+    assert not val, "validation set is not supported due to different sizes on inputs"
+
+    from extra.datasets.kits19 import get_train_files, get_val_files, preprocess_dataset, BASEDIR
+    preprocessed_dataset_dir = (BASEDIR / ".." / "preprocessed" / ("val" if val else "train"))
+    files = get_val_files() if val else get_train_files()
+
+    if not preprocessed_dataset_dir.exists(): preprocess_dataset(files, preprocessed_dataset_dir, val)
+    with tqdm(total=len(files)) as pbar:
+      for x, _, _ in batch_load_unet3d(preprocessed_dataset_dir, val=val):
+        pbar.update(x.shape[0])
+
+  def load_resnet(val):
+    from extra.datasets.imagenet import get_train_files, get_val_files
+    files = get_val_files() if val else get_train_files()
+    with tqdm(total=len(files)) as pbar:
+      for x,y,c in batch_load_resnet(val=val):
+        pbar.update(x.shape[0])
+
+  load_fn_name = f"load_{getenv('MODEL', 'resnet')}"
+  if load_fn_name in globals():
+    globals()[load_fn_name](getenv("VAL", 1))
