@@ -388,6 +388,8 @@ class AMDAllocator(LRUAllocator):
     HWPM4Queue().wait(src_dev.timeline_signal, src_dev.timeline_value).submit(dest_dev)
     src_dev.timeline_value += 1
 
+  def offset(self, buf, size:int, offset:int): return type(buf)(base=buf.base + offset, size=buf.size - offset)
+
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
 class AMDDevice(Compiled):
   kfd:int = -1
