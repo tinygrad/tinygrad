@@ -133,7 +133,7 @@ class Linearizer(Kernel):
       ret.append(self.uops.add(UOps.GEP, localtype.scalar(), (self.load_cache[key],), rep_idx[dim]) if dim is not None else self.load_cache[key])
     return ret
 
-  def global_store(self, i:int, idxs:List[Node], store:List[UOp]) -> List[UOp]:
+  def global_store(self, i:int, idxs:List[Node], store:List[UOp], barrier:Optional[UOp]=None) -> List[UOp]:
     buf = self.bufs[i]
     buf_uop = self.buf_uops[i]
     assert buf_uop is not None, f"buffer {i} wasn't UOped"
@@ -165,8 +165,10 @@ class Linearizer(Kernel):
                       tuple(x.render(self.render_ops, self) for x in image_idx))
       else:
         rendered_idx = idx.render(self.render_ops, self)
-      if valid.min == 1: stores.append(self.uops.add(UOps.STORE, None, (buf_uop, rendered_idx, var)))
-      else: stores.append(self.uops.add(UOps.STORE, None, (buf_uop, rendered_idx, var, valid.render(self.render_ops, self))))
+      if valid.min == 1: stores.append(self.uops.add(UOps.STORE, None, (buf_uop, rendered_idx, var)+((barrier,) if barrier else ())))
+      else: 
+        gate = self.uops.add(UOps.IF, dtype=None, vin=(valid.render(self.render_ops, self),)+((barrier,) if barrier else ()))
+        stores.append(self.uops.add(UOps.STORE, None, (buf_uop, rendered_idx, var, gate)))
     return stores
 
   # render loop
