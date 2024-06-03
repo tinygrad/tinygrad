@@ -218,7 +218,7 @@ class Linearizer(Kernel):
     return alias_buf_idxs
 
   def render_reduceop(self, reduceop:LazyOp, accs:Dict[LazyOp, List[UOp]], loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]],
-                      global_idxs, local_idxs, upcast_idxs, full_upcast_idxs, reduce_idxs, fake_reduce_idxs, alias_buf_idxs) -> List[Variable]:
+                      global_idxs, local_idxs, upcast_idxs, full_upcast_idxs, reduce_idxs, fake_reduce_idxs, alias_buf_idxs):
     # reduce loop
     loop_ctx = self.render_loop(reduce_idxs, 2)
 
@@ -310,7 +310,7 @@ class Linearizer(Kernel):
 
     # all local indices which were used for group_for_reduce are not valid any more and should be replaced with fake NumNode(0), since they have
     # been rewritten with fake end_local_idxs.
-    return local_idxs[:self.local_dims] + [NumNode(0) for _ in range(self.group_for_reduces)]
+    return local_idxs[:self.local_dims] + [NumNode(0) for _ in range(self.group_for_reduces)], upcast_idxs
 
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
   def linearize(self):
@@ -401,8 +401,8 @@ class Linearizer(Kernel):
     alias_buf_idxs = self.index_local_aliases(global_idxs,local_idxs,reduce_idxs,upcast_idxs,full_upcast_idxs)
     # render reduce op
     for reduceop in self.reduceops:
-      local_idxs = self.render_reduceop(reduceop,accs,loaded_buffers,global_idxs,local_idxs,upcast_idxs,full_upcast_idxs,reduce_idxs,fake_reduce_idxs,
-                                        alias_buf_idxs[reduceop])
+      local_idxs, upcast_idxs = self.render_reduceop(reduceop,accs,loaded_buffers,global_idxs,local_idxs,upcast_idxs,
+                                                     full_upcast_idxs,reduce_idxs,fake_reduce_idxs,alias_buf_idxs[reduceop])
 
     # load latebufs
     loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs) \
