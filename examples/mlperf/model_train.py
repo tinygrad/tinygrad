@@ -357,8 +357,8 @@ def train_rnnt():
 def train_step_bert(model, optimizer, scheduler, loss_scaler:float, input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor, masked_positions:Tensor, masked_lm_ids:Tensor, next_sentence_labels:Tensor):
   optimizer.zero_grad()
 
-  lm_logits, seq_relationship_logits = model(input_ids, attention_mask, segment_ids)
-  loss = model.loss(lm_logits, seq_relationship_logits, masked_positions, masked_lm_ids, next_sentence_labels)
+  lm_logits, seq_relationship_logits = model(input_ids, attention_mask, masked_positions, segment_ids)
+  loss = model.loss(lm_logits, seq_relationship_logits, masked_lm_ids, next_sentence_labels)
   (loss * loss_scaler).backward()
 
   global_norm = Tensor([0.0], dtype=dtypes.float32, device=optimizer[0].device).realize()

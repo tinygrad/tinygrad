@@ -45,18 +45,12 @@ class BertForPretraining:
     self.bert = Bert(hidden_size, intermediate_size, max_position_embeddings, num_attention_heads, num_hidden_layers, type_vocab_size, vocab_size, attention_probs_dropout_prob, hidden_dropout_prob)
     self.cls = BertPreTrainingHeads(hidden_size, vocab_size, self.bert.embeddings.word_embeddings.weight)
   
-  def __call__(self, input_ids:Tensor, attention_mask:Tensor, token_type_ids:Tensor):
+  def __call__(self, input_ids:Tensor, attention_mask:Tensor, masked_lm_positions:Tensor, token_type_ids:Tensor):
     output = self.bert(input_ids, attention_mask, token_type_ids)
-    return self.cls(output)
+    return self.cls(output, masked_lm_positions)
   
-  def gather(self, prediction_logits:Tensor, masked_lm_positions:Tensor):
-    counter = Tensor.arange(prediction_logits.shape[1], device=prediction_logits.device, requires_grad=False).reshape(1, 1, prediction_logits.shape[1]).expand(*masked_lm_positions.shape, prediction_logits.shape[1])
-    onehot = counter == masked_lm_positions.unsqueeze(2).expand(*masked_lm_positions.shape, prediction_logits.shape[1])
-    return onehot @ prediction_logits
-  
-  def loss(self, prediction_logits:Tensor, seq_relationship_logits:Tensor, masked_lm_positions:Tensor, masked_lm_ids:Tensor, next_sentence_labels:Tensor):
-    gathered_prediction_logits = self.gather(prediction_logits, masked_lm_positions)
-    masked_lm_loss = gathered_prediction_logits.sparse_categorical_crossentropy(masked_lm_ids)
+  def loss(self, prediction_logits:Tensor, seq_relationship_logits:Tensor, masked_lm_ids:Tensor, next_sentence_labels:Tensor):
+    masked_lm_loss = prediction_logits.sparse_categorical_crossentropy(masked_lm_ids)
     next_sentence_loss = seq_relationship_logits.binary_crossentropy_logits(next_sentence_labels)
     return masked_lm_loss + next_sentence_loss
   
@@ -128,8 +122,8 @@ class BertPreTrainingHeads:
     self.pooler = BertPooler(hidden_size)
     self.seq_relationship = Linear(hidden_size, 2)
 
-  def __call__(self, sequence_output:Tensor):
-    prediction_logits = self.predictions(sequence_output)
+  def __call__(self, sequence_output:Tensor, masked_lm_positions:Tensor):
+    prediction_logits = self.predictions(gather(sequence_output, masked_lm_positions))
     seq_relationship_logits = self.seq_relationship(self.pooler(sequence_output))
     return prediction_logits, seq_relationship_logits
 
@@ -156,6 +150,11 @@ class BertPooler:
 
   def __call__(self, hidden_states:Tensor):
     return self.dense(hidden_states[:, 0]).tanh()
+
+def gather(prediction_logits:Tensor, masked_lm_positions:Tensor):
+  counter = Tensor.arange(prediction_logits.shape[1], device=prediction_logits.device, requires_grad=False).reshape(1, 1, prediction_logits.shape[1]).expand(*masked_lm_positions.shape, prediction_logits.shape[1])
+  onehot = counter == masked_lm_positions.unsqueeze(2).expand(*masked_lm_positions.shape, prediction_logits.shape[1])
+  return onehot @ prediction_logits
 
 class Bert:
   def __init__(self, hidden_size, intermediate_size, max_position_embeddings, num_attention_heads, num_hidden_layers, type_vocab_size, vocab_size, attention_probs_dropout_prob, hidden_dropout_prob):
