@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Device, dtypes, Tensor
-from tinygrad.helpers import CI
+from tinygrad.helpers import getenv
 from tinygrad.device import Buffer
 from tinygrad.lazy import view_supported_devices
 
@@ -41,11 +41,11 @@ class TestSubBuffer(unittest.TestCase):
     out = (vt + 100).tolist()
     assert out == [102, 103]
 
-  @unittest.skipIf(Device.DEFAULT != "CUDA" or CI, "only CUDA")
+  @unittest.skipIf(Device.DEFAULT not in {"CUDA", "NV", "AMD"} or getenv("CUDACPU"), "only NV, AMD, CUDA but not CUDACPU")
   def test_subbuffer_transfer(self):
     t = Tensor.arange(0, 10, dtype=dtypes.uint8).realize()
     vt = t[2:5].contiguous().realize()
-    out = vt.to("CUDA:1").realize().tolist()
+    out = vt.to(f"{Device.DEFAULT}:1").realize().tolist()
     assert out == [2, 3, 4]
 
 if __name__ == '__main__':

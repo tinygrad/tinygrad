@@ -363,6 +363,8 @@ class NVAllocator(LRUAllocator):
     HWComputeQueue().wait(src_dev.timeline_signal, src_dev.timeline_value).submit(dest_dev)
     src_dev.timeline_value += 1
 
+  def offset(self, buf, size:int, offset:int): return type(buf)(base=buf.base + offset, va_addr=buf.va_addr + offset, length=size)
+
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
 class NVDevice(Compiled):
   root = None
