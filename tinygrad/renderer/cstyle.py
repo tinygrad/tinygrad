@@ -403,3 +403,4 @@ class HVXRenderer(CStyleLanguage):
     if len(x) == 1: return f"({self.render_dtype(var_dtype)})({x[0]})"
     assert len(x) == var_dtype.count, f"cast is wrong size {len(x)} != {var_dtype.count}"
     return f"({self.render_dtype(var_dtype)})({x[0]})"
+  
