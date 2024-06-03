@@ -74,7 +74,7 @@ class Tensor:
   A `Tensor` is a multi-dimensional matrix containing elements of a single data type.
 
   ```python exec="true" session="tensor"
-  from tinygrad import Tensor, dtypes
+  from tinygrad import Tensor, dtypes, nn
   import numpy as np
   import math
   np.set_printoptions(precision=4)
@@ -104,13 +104,14 @@ class Tensor:
     # None (the default) will be updated to True if it's put in an optimizer
     self.requires_grad: Optional[bool] = requires_grad
 
-    # internal variables used for autograd graph construction
+    # internal variable used for autograd graph construction
     self._ctx: Optional[Function] = None
+
+    # create a LazyBuffer from the different types of inputs
     if isinstance(data, LazyBuffer): assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
     elif isinstance(data, get_args(ConstType)): data = _loadop(LoadOps.CONST, tuple(), dtype or dtypes.from_py(data), device, data)
     elif isinstance(data, Variable): data = _loadop(LoadOps.CONST, tuple(), dtype or dtypes.from_py(data.unbind()[1]), device, data)
     elif isinstance(data, bytes): data = _fromcpu(np.frombuffer(data, np.uint8))
-    elif data is None: data = _loadop(LoadOps.EMPTY, (0,), dtype or dtypes.default_float, device)
     elif isinstance(data, list):
       if dtype is None:
         if (d := fully_flatten(data)) and all(isinstance(s, bool) for s in d): dtype = dtypes.bool
@@ -120,16 +121,25 @@ class Tensor:
     elif isinstance(data, np.ndarray):
       if data.shape == (): data = _loadop(LoadOps.CONST, tuple(), dtype or dtypes.from_np(data.dtype), device, data.item())
       else: data = _fromcpu(data.astype(dtype.np) if dtype is not None and dtype.np is not None else data)
+    elif data is None: data = _loadop(LoadOps.EMPTY, (0,), dtype or dtypes.default_float, device)
+
+    # by this point, it has to be a LazyBuffer
+    if not isinstance(data, (LazyBuffer, MultiLazyBuffer)):
+      raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
 
     # data is a LazyBuffer, but it might be on the wrong device
-    if not isinstance(data, (LazyBuffer, MultiLazyBuffer)): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
     if isinstance(device, tuple):
-      # TODO: what if it's a MultiLazyBuffer on other devices?
-      self.lazydata: Union[LazyBuffer, MultiLazyBuffer] = MultiLazyBuffer.from_sharded(data, device, None) if isinstance(data, LazyBuffer) else data
+      # if device is a tuple, we should have/construct a MultiLazyBuffer
+      if isinstance(data, MultiLazyBuffer):
+        assert data.device == device, f"MultiLazyBuffer device mismatch, {data.device} != {device}"
+        self.lazydata: Union[LazyBuffer, MultiLazyBuffer] = data
+      else:
+        self.lazydata = MultiLazyBuffer.from_sharded(data, device, None)
     else:
       self.lazydata = data if data.device == device else data.copy_to_device(device)
 
-  def __repr__(self): return f"<Tensor {self.lazydata!r} on {self.device} with grad {(self.grad.lazydata if self.grad is not None else None)!r}>"
+  def __repr__(self):
+    return f"<Tensor {self.lazydata!r} on {self.device} with grad {(self.grad.lazydata if self.grad is not None else None)!r}>"
 
   # Python has a non moving GC, so this should be okay
   def __hash__(self): return id(self)
@@ -150,7 +160,7 @@ class Tensor:
   # ***** data handlers ****
 
   def schedule_with_vars(self, *lst:Tensor, seen:Optional[Set[LazyBuffer]]=None) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
-    """Create the schedule needed to realize these Tensor(s), with Variables."""
+    """Creates the schedule needed to realize these Tensor(s), with Variables."""
     if getenv("FUZZ_SCHEDULE"):
       from test.external.fuzz_schedule import fuzz_schedule
       fuzz_schedule(flatten([x.lazydata.lbs for x in (self,)+lst]))
@@ -158,19 +168,19 @@ class Tensor:
     return memory_planner(schedule), var_vals
 
   def schedule(self, *lst:Tensor, seen:Optional[Set[LazyBuffer]]=None) -> List[ScheduleItem]:
-    """Create the schedule needed to realize these Tensor(s)."""
+    """Creates the schedule needed to realize these Tensor(s)."""
     schedule, var_vals = self.schedule_with_vars(*lst, seen=seen)
     assert len(var_vals) == 0
     return schedule
 
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
-    """Trigger the computation needed to create these Tensor(s)."""
+    """Triggers the computation needed to create these Tensor(s)."""
     run_schedule(*self.schedule_with_vars(*lst), do_update_stats=do_update_stats)
     return self
 
   def replace(self, x:Tensor) -> Tensor:
     """
-    Replace the data of this tensor with the data of another tensor. Only the shape of the tensors must match.
+    Replaces the data of this tensor with the data of another tensor. Only the shape of the tensors must match.
     """
     # used for replacing a Tensor with a new version of it (potentially with a different device and dtype)
     assert not x.requires_grad and getattr(self, '_ctx', None) is None
@@ -196,6 +206,7 @@ class Tensor:
     if not self.lazydata.is_realized(): return self.replace(x)
     self.lazydata = self.lazydata.assign(x.lazydata)
     return self
+
   def detach(self) -> Tensor:
     """
     Returns a new tensor with the same data as this tensor, but detached from the autograd graph.
@@ -222,6 +233,7 @@ class Tensor:
     assert self.dtype.fmt is not None, f"no fmt dtype for {self.dtype}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
     return self._data().cast(self.dtype.fmt, self.shape)
+
   def item(self) -> ConstType:
     """
     Returns the value of this tensor as a standard Python number.
@@ -234,6 +246,7 @@ class Tensor:
     assert self.dtype.fmt is not None, f"no fmt dtype for {self.dtype}"
     assert self.numel() == 1, "must have one element for item"
     return self._data().cast(self.dtype.fmt)[0]
+
   # TODO: should be Tensor.tolist() -> Union[List[ConstType], ConstType]. The List is Sequence because mypy expects memoryview.tolist() -> list[int]
   # src: https://github.com/python/mypy/blob/release-1.6/mypy/typeshed/stdlib/builtins.pyi#L803
   def tolist(self) -> Union[Sequence[ConstType], ConstType]:
@@ -246,13 +259,14 @@ class Tensor:
     ```
     """
     return self.data().tolist()
+
   def numpy(self) -> np.ndarray:
     """
-    Returns the value of this tensor as a numpy array.
+    Returns the value of this tensor as a `numpy.ndarray`.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([1, 2, 3, 4])
-    print(t.numpy())
+    print(repr(t.numpy()))
     ```
     """
     if self.dtype == dtypes.bfloat16: return self.float().numpy()
@@ -344,7 +358,7 @@ class Tensor:
   @staticmethod
   def rand(*shape, device:Optional[Union[Tuple[str, ...], str]]=None, dtype:Optional[DType]=None, **kwargs):
     """
-    Creates a tensor with the given shape, filled with random values between the interval `[0, 1)`.
+    Creates a tensor with the given shape, filled with random values from a uniform distribution over the interval `[0, 1)`.
 
     You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
     Additionally, all other keyword arguments are passed to the constructor of the tensor.
@@ -436,9 +450,11 @@ class Tensor:
   @staticmethod
   def arange(start, stop=None, step=1, **kwargs):
     """
-    If `stop` is not specified, creates a tensor with the given shape, filled with values from `0` to `start` with the given step size.
+    Returns a 1-D tensor of size `ceil((stop - start) / step)` with values from `[start, stop)`, with spacing between values given by `step`.
 
-    If `stop` is specified, creates a tensor with the given shape, filled with values from `start` to `stop` with the given step size.
+    If `stop` is not specified, values are generated from `[0, start)` with the given `step`.
+
+    If `stop` is specified, values are generated from `[start, stop)` with the given `step`.
 
     You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
     Additionally, all other keyword arguments are passed to the constructor of the tensor.
@@ -477,8 +493,8 @@ class Tensor:
 
   def full_like(self, fill_value:ConstType, **kwargs):
     """
-    Creates a tensor with the same shape as `tensor`, filled with the given value.
-    If `dtype` is not specified, the dtype of `tensor` is used.
+    Creates a tensor with the same shape as `self`, filled with the given value.
+    If `dtype` is not specified, the dtype of `self` is used.
 
     You can pass in the `device` keyword argument to control device of the tensor.
     Additionally, all other keyword arguments are passed to the constructor of the tensor.
@@ -492,7 +508,7 @@ class Tensor:
 
   def zeros_like(self, **kwargs):
     """
-    Creates a tensor with the same shape as `tensor`, filled with zeros.
+    Creates a tensor with the same shape as `self`, filled with zeros.
 
     You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
     Additionally, all other keyword arguments are passed to the constructor of the tensor.
@@ -506,7 +522,7 @@ class Tensor:
 
   def ones_like(self, **kwargs):
     """
-    Creates a tensor with the same shape as `tensor`, filled with ones.
+    Creates a tensor with the same shape as `self`, filled with ones.
 
     You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
     Additionally, all other keyword arguments are passed to the constructor of the tensor.
@@ -541,7 +557,7 @@ class Tensor:
   @staticmethod
   def randint(*shape, low=0, high=10, **kwargs) -> Tensor:
     """
-    Creates a tensor with the given shape, filled with random integer values from the interval `[low, high)`.
+    Creates a tensor with the given shape, filled with random integer values generated uniformly from the interval `[low, high)`.
     If `dtype` is not specified, the default type is used.
 
     You can pass in the `device` keyword argument to control device of the tensor.
@@ -550,14 +566,17 @@ class Tensor:
     ```python exec="true" source="above" session="tensor" result="python"
     Tensor.manual_seed(42)
     print(Tensor.randint(2, 3, low=5, high=10).numpy())
+    ```
     """
-    assert dtypes.is_int(dtype := kwargs.pop("dtype", dtypes.int32)), f"Unsupported dtype {dtype} for randint"
+    if not isinstance(low, int) or not isinstance(high, int): raise TypeError(f"{low=} and {high=} must be integers")
+    dtype = kwargs.pop("dtype", dtypes.int32)
+    if not dtypes.is_int(dtype): raise TypeError(f"{dtype=} must be int")
     return Tensor.uniform(*shape, low=low, high=high, dtype=dtype, **kwargs)
 
   @staticmethod
   def normal(*shape, mean=0.0, std=1.0, **kwargs) -> Tensor:
     """
-    Creates a tensor with the given shape, filled with random values from a normal distribution with the given mean and standard deviation.
+    Creates a tensor with the given shape, filled with random values from a normal distribution with the given `mean` and standard deviation `std`.
 
     You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
     Additionally, all other keyword arguments are passed to the constructor of the tensor.
@@ -572,7 +591,7 @@ class Tensor:
   @staticmethod
   def uniform(*shape, low=0.0, high=1.0, **kwargs) -> Tensor:
     """
-    Creates a tensor with the given shape, filled with random values from a uniform distribution with the given lower and upper bounds.
+    Creates a tensor with the given shape, filled with random values from a uniform distribution over the interval `[low, high)`.
 
     You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
     Additionally, all other keyword arguments are passed to the constructor of the tensor.
@@ -588,8 +607,8 @@ class Tensor:
   @staticmethod
   def scaled_uniform(*shape, **kwargs) -> Tensor:
     """
-    Creates a tensor with the given shape, filled with random values
-    from a uniform distribution with a mean of zero and a standard deviation of `(prod(shape)**-0.5`.
+    Creates a tensor with the given shape, filled with random values from a uniform distribution
+    over the interval `[-prod(shape)**-0.5, prod(shape)**-0.5)`.
 
     You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
     Additionally, all other keyword arguments are passed to the constructor of the tensor.
@@ -752,7 +771,7 @@ class Tensor:
 
   def flip(self, axis, *args) -> Tensor:
     """
-    Returns a tensor that reverses the order of the original tensor along given axis.
+    Returns a tensor that reverses the order of the original tensor along given `axis`.
     `axis` can be passed as a tuple or as separate arguments.
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -771,8 +790,8 @@ class Tensor:
   def shrink(self, arg:Tuple[Optional[Tuple[sint, sint]], ...]) -> Tensor:
     """
     Returns a tensor that shrinks the each axis based on input arg.
-    `arg` has the same length as `self.ndim`.
-    For each axis, it can be `None`, which means no shrink, or a tuple `(start, end)` that works the same as python slice.
+    `arg` must have the same length as `self.ndim`.
+    For each axis, it can be `None`, which means no shrink, or a tuple `(start, end)` that works the same as Python slice.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor.arange(9).reshape(3, 3)
@@ -791,7 +810,7 @@ class Tensor:
   def pad(self, arg:Tuple[Optional[Tuple[sint, sint]], ...], value:float=0.0) -> Tensor:
     """
     Returns a tensor that pads the each axis based on input arg.
-    arg has the same length as `self.ndim`.
+    `arg` must have the same length as `self.ndim`.
     For each axis, it can be `None`, which means no pad, or a tuple `(pad_before, pad_after)`.
     If `value` is specified, the tensor is padded with `value` instead of `0.0`.
 
@@ -1022,7 +1041,7 @@ class Tensor:
 
   def repeat(self, repeats, *args) -> Tensor:
     """
-    Repeat tensor number of times along each dimension specified by `repeats`.
+    Repeats tensor number of times along each dimension specified by `repeats`.
     `repeats` can be passed as a tuple or as separate arguments.
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -1147,7 +1166,7 @@ class Tensor:
 
   @property
   def T(self) -> Tensor:
-    """`.T` is an alias for `.transpose(1, 0)`."""
+    """`.T` is an alias for `.transpose()`."""
     return self.transpose()
 
   def transpose(self, dim0=1, dim1=0) -> Tensor:
@@ -1560,7 +1579,7 @@ class Tensor:
     See: https://paperswithcode.com/method/average-pooling
 
     ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.arange(9).reshape(1, 1, 3, 3)
+    t = Tensor.arange(25).reshape(1, 1, 5, 5)
     print(t.avg_pool2d().numpy())
     ```
     """
@@ -1575,7 +1594,7 @@ class Tensor:
     See: https://paperswithcode.com/method/max-pooling
 
     ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.arange(9).reshape(1, 1, 3, 3)
+    t = Tensor.arange(25).reshape(1, 1, 5, 5)
     print(t.max_pool2d().numpy())
     ```
     """
@@ -1584,7 +1603,7 @@ class Tensor:
 
   def conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0, acc_dtype:Optional[DType]=None) -> Tensor:
     """
-    Applies a convolution over a tensor with a given weight and optional bias.
+    Applies a convolution over a tensor with a given `weight` and optional `bias`.
 
     NOTE: unlike PyTorch, this implementation is not limited to only 2d convolutions and instead works for any number of dimensions.
 
@@ -1645,7 +1664,7 @@ class Tensor:
 
   def conv_transpose2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0, output_padding=0) -> Tensor:
     """
-    Applies a transposed convolution over a tensor with a given weight and optional bias.
+    Applies a transposed convolution over a tensor with a given `weight` and optional `bias`.
 
     NOTE: unlike PyTorch, this implementation is not limited to only 2d transposed convolutions and instead works for any number of dimensions.
 
@@ -1702,8 +1721,9 @@ class Tensor:
     return x.dot(self, acc_dtype=acc_dtype) if reverse else self.dot(x, acc_dtype=acc_dtype)
 
   def _cumsum(self, axis:int=0, _first_zero=False) -> Tensor:
-    pl_sz = self.shape[axis] - int(not _first_zero and self.shape[axis] != 0)
-    return self.transpose(axis,-1).pad2d((pl_sz,0))._pool((self.shape[axis] or 1,)).sum(-1).transpose(axis,-1)
+    assert self.shape[axis] != 0
+    pl_sz = self.shape[axis] - int(not _first_zero)
+    return self.transpose(axis,-1).pad2d((pl_sz,-int(_first_zero)))._pool((self.shape[axis],)).sum(-1).transpose(axis,-1)
   def cumsum(self, axis:int=0) -> Tensor:
     """
     Computes the cumulative sum of the tensor along the specified axis.
@@ -1718,13 +1738,15 @@ class Tensor:
     print(t.cumsum(1).numpy())
     ```
     """
+    axis = self._resolve_dim(axis)
+    if self.ndim == 0 or 0 in self.shape: return self
     # TODO: someday the optimizer will find this on it's own
     # for now this is a two stage cumsum
     SPLIT = 256
     if self.shape[axis] <= SPLIT*2: return self._cumsum(axis)
     ret = self.transpose(axis,-1).pad2d((round_up(self.shape[axis], SPLIT)-self.shape[axis], 0))
     ret = ret.unflatten(-1, (-1, SPLIT))._cumsum(-1)
-    base_add = ret[..., -1]._cumsum(-1, _first_zero=True)[..., :-1]
+    base_add = ret[..., -1]._cumsum(-1, _first_zero=True)
     base_add = base_add.unsqueeze(-1).expand(*base_add.shape, ret.shape[-1])
     def fix(x:Tensor): return x.flatten(start_dim=-2)[..., -self.shape[axis]:].transpose(axis,-1)
     return fix(ret) + fix(base_add)
@@ -1862,7 +1884,7 @@ class Tensor:
     Computes the square root of the tensor element-wise.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1., 2., 3.]).sqrt().numpy())
+    print(Tensor([1., 2., 3., 4.]).sqrt().numpy())
     ```
     """
     return F.Sqrt.apply(self.cast(least_upper_float(self.dtype)))
@@ -1871,7 +1893,7 @@ class Tensor:
     Computes the reciprocal of the square root of the tensor element-wise.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1., 2., 3.]).rsqrt().numpy())
+    print(Tensor([1., 2., 3., 4.]).rsqrt().numpy())
     ```
     """
     return self.reciprocal().sqrt()
@@ -1952,7 +1974,7 @@ class Tensor:
     return self + (end - self) * weight
   def square(self):
     """
-    Convenience method for squaring the tensor element-wise.
+    Squares the tensor element-wise.
     Equivalent to `self*self`.
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -1962,7 +1984,7 @@ class Tensor:
     return self*self
   def clip(self, min_, max_):
     """
-    Clips (limits) the values in the tensor between `min_` and `max_` element-wise.
+    Clips (clamps) the values in the tensor between `min_` and `max_` element-wise.
 
     ```python exec="true" source="above" session="tensor" result="python"
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).clip(-1, 1).numpy())
@@ -1992,7 +2014,7 @@ class Tensor:
     Compute `1/x` element-wise.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1., 2., 3.]).reciprocal().numpy())
+    print(Tensor([1., 2., 3., 4.]).reciprocal().numpy())
     ```
     """
     return F.Reciprocal.apply(self.cast(least_upper_float(self.dtype)))
@@ -2414,21 +2436,23 @@ class Tensor:
       # simple pow identities
       if x < 0: return self.reciprocal().pow(-x)
       if x == 0: return 1 + self * 0
-      if x in [3,2,1]: return functools.reduce(lambda acc,_: acc * self, range(int(x)-1), self)
-      if x == 0.5: return self.sqrt()
+      if int(x - 0.5) + 0.5 == x: return self.pow(int(x - 0.5)) * self.sqrt()
+      if int(x) == x: return self.pow(x // 2).square() * (1 if x % 2 == 0 else self)
+
+    # positive const ** self
     if not isinstance(x, Tensor) and reverse and x > 0: return self.mul(math.log(x)).exp()
-    ar = self.abs().log().mul(x).exp() if not reverse or isinstance(x, Tensor) else self.mul(math.log(abs(x))).exp()
-    # correct sign of negative numbers raised to a power (cos has a period of 2pi so we use it here to get the oddness of the power)
-    sign = (x * math.pi).cos() if isinstance(x, Tensor) else math.cos(x * math.pi) if not reverse else (self * math.pi).cos()
-    # we only need to correct the sign if the base is negative
-    base_sign = ((self.sign() if not reverse else x.sign() if isinstance(x, Tensor) else math.copysign(1, x)) - 1) / -2
-    # we need 0 to be positive so we need to correct base_sign when the base is 0
-    base_sign = base_sign - (1.5 * (1 - (self.sign().abs() if not reverse else x.sign().abs() if isinstance(x, Tensor) else abs(int(bool(x))))))
-    # inject nan if the base is negative and the power is not an integer
-    to_nan = (((x - x.trunc()) * 1e10).abs().clip(0, 1) if isinstance(x, Tensor) else \
-              int(bool(x - int(x))) if not reverse else ((self - self.trunc()) * 1e10).abs().clip(0, 1)) * base_sign
-    inject_nan = ((((-to_nan) * 2) + 1)).log().add(1) if isinstance(to_nan, Tensor) else 1 if not to_nan else float("nan")
-    return ar.mul(sign * base_sign + (1 - base_sign)).mul(inject_nan)
+
+    base, exponent = self._broadcasted(x, reverse=reverse)
+    # start with b ** e = exp(e * log(b))
+    ret = base.abs().log().mul(exponent).exp()
+    # correct sign of negative base with odd exponent (cos has a period of 2pi so we use it here to get the oddness of the exponent)
+    negative_base = (base < 0).detach().where(1, 0)
+    # 1 for non-negative base or negative even exponent, -1 for negative odd exponent, don't care about non-integer exponent
+    correct_sign = 1 + negative_base * ((exponent * math.pi).cos() - 1)
+    # inject nan for negative base and non-integer exponent
+    inject_nan = (negative_base * (exponent != exponent.trunc())).detach().where(math.nan, 1)
+    # apply correct_sign inject_nan, and fix 0 ** 0 = 1
+    return ((base == 0) * (exponent == 0)).detach().where(1, ret * correct_sign * inject_nan)
 
   def maximum(self, x:Union[Tensor, ConstType]) -> Tensor:
     """
@@ -2566,7 +2590,7 @@ class Tensor:
     print(t.mean().item(), t.std().item())
     ```
     """
-    y = (self - self.mean(axis, keepdim=True))
+    y = (self - self.detach().mean(axis, keepdim=True))
     return y.mul((y*y).mean(axis, keepdim=True).add(eps).rsqrt())
 
   def batchnorm(self, weight:Optional[Tensor], bias:Optional[Tensor], mean:Tensor, invstd:Tensor, axis:Union[int,Tuple[int,...]]=1) -> Tensor:
@@ -2628,8 +2652,6 @@ class Tensor:
     Computes scaled dot-product attention.
     `self` is the query tensor, `key` is the key tensor, and `value` is the value tensor.
 
-    NOTE: it also works when `key` and `value` have symbolic shape.
-
     - Described: https://paperswithcode.com/method/scaled
     - Paper: https://arxiv.org/abs/1706.03762v7
 
@@ -2640,6 +2662,7 @@ class Tensor:
     print(q.scaled_dot_product_attention(k, v).numpy())
     ```
     """
+    # NOTE: it also works when `key` and `value` have symbolic shape.
     assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
     if is_causal: attn_mask = Tensor.ones(self.shape[-2], key.shape[-2], requires_grad=False, device=self.device).tril(0).cast(dtypes.bool)
     if attn_mask is not None and attn_mask.dtype == dtypes.bool: attn_mask = (attn_mask == 0).where(-float("inf"), 0)
@@ -2703,7 +2726,7 @@ class Tensor:
     return self.to("LLVM").bitcast(dtypes.uint16).cast(dtypes.uint32).mul(1<<16).bitcast(dtypes.float32).cast(dtype)
   def cast(self, dtype:DType) -> Tensor:
     """
-    Casts `self` to a new dtype.
+    Casts `self` to the given `dtype`.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([-1, 2.5, 3], dtype=dtypes.float)
@@ -2717,7 +2740,7 @@ class Tensor:
     return self if self.dtype == dtype else F.Cast.apply(self, dtype=dtype)
   def bitcast(self, dtype:DType) -> Tensor:
     """
-    Bitcasts `self` to a new dtype of the same itemsize.
+    Bitcasts `self` to the given `dtype` of the same itemsize.
 
     `self` must not require a gradient.
 

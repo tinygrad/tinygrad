@@ -1,4 +1,4 @@
-# tinygrad Quick Start Guide
+# Quick Start Guide
 
 This guide assumes no prior knowledge of pytorch or any other deep learning framework, but does assume some basic knowledge of neural networks.
 It is intended to be a very quick overview of the high level API that tinygrad provides.
@@ -20,7 +20,7 @@ All high level operations in tinygrad operate on these tensors.
 The tensor class can be imported like so:
 
 ```python
-from tinygrad.tensor import Tensor
+from tinygrad import Tensor
 ```
 
 Tensors can be created from an existing data structure like a python list or numpy ndarray:
@@ -46,16 +46,16 @@ eye = Tensor.eye(3) # create a 3x3 identity matrix
 arange = Tensor.arange(start=0, stop=10, step=1) # create a tensor of shape (10,) filled with values from 0 to 9
 
 rand = Tensor.rand(2, 3) # create a tensor of shape (2, 3) filled with random values from a uniform distribution
-randn = Tensor.randn(2, 3) # create a tensor of shape (2, 3) filled with random values from a normal distribution
+randn = Tensor.randn(2, 3) # create a tensor of shape (2, 3) filled with random values from a standard normal distribution
 uniform = Tensor.uniform(2, 3, low=0, high=10) # create a tensor of shape (2, 3) filled with random values from a uniform distribution between 0 and 10
 ```
 
-There are even more of these factory methods, you can find them in the [Tensor](tensor.md) file.
+There are even more of these factory methods, you can find them in the [Tensor Creation](tensor/creation.md) file.
 
-All the tensors creation methods can take a `dtype` argument to specify the data type of the tensor.
+All the tensors creation methods can take a `dtype` argument to specify the data type of the tensor, find the supported `dtype` in [dtypes](dtypes.md).
 
 ```python
-from tinygrad.dtype import dtypes
+from tinygrad import dtypes
 
 t3 = Tensor([1, 2, 3, 4, 5], dtype=dtypes.int32)
 ```
@@ -75,7 +75,7 @@ print(t6.numpy())
 # [-56. -48. -36. -20.   0.]
 ```
 
-There are a lot more operations that can be performed on tensors, you can find them in the [Tensor](tensor.md) file.
+There are a lot more operations that can be performed on tensors, you can find them in the [Tensor Ops](tensor/ops.md) file.
 Additionally reading through [abstractions2.py](https://github.com/tinygrad/tinygrad/blob/master/docs/abstractions2.py) will help you understand how operations on these tensors make their way down to your hardware.
 
 ## Models
@@ -139,7 +139,6 @@ def sparse_categorical_crossentropy(self, Y, ignore_index=-1) -> Tensor:
 ```
 
 As we can see in this implementation of cross entropy loss, there are certain operations that tinygrad does not support natively.
-Namely, operations that are load/store or assigning a value to a tensor at a certain index.
 Load/store ops are not supported in tinygrad natively because they add complexity when trying to port to different backends, 90% of the models out there don't use/need them, and they can be implemented like it's done above with an `arange` mask.
 
 For our optimizer we will be using the traditional stochastic gradient descent optimizer with a learning rate of 3e-4.
@@ -299,7 +298,7 @@ Many of the models in the [models/](https://github.com/tinygrad/tinygrad/tree/ma
 There exist a bunch of environment variables that control the runtime behavior of tinygrad.
 Some of the commons ones are `DEBUG` and the different backend enablement variables.
 
-You can find a full list and their descriptions in [env_vars.md](https://github.com/tinygrad/tinygrad/blob/master/docs/env_vars.md).
+You can find a full list and their descriptions in [env_vars.md](env_vars.md).
 
 ### Visualizing the Computation Graph
 
