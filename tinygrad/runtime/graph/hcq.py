@@ -39,16 +39,23 @@ class HCQGraph(MultiGraphRunner):
       # NV needs constbuffer to be set
       if ji.prg.device.dname.startswith("NV"): to_mv(self.kargs_addrs[j], 0x160).cast('I')[:] = array.array('I', ji.prg.clprg.constbuffer_0)
 
+    __signals = {dev:dev._gpu_system_alloc(0x1000, map_to_cpu=True) for dev in self.devices}
+    
+    for dev1,sp in __signals.items():
+      for dev in self.devices:
+        if dev1 != dev: dev._gpu_map(sp)
+    self.signal_pool = {dev:[to_mv(__signals[dev].base + off, 16).cast("Q") for off in range(0, __signals[dev].length, 16)] for dev in self.devices}
+
     # Build queues.
     self.comp_queues: Dict[Compiled, Any] = collections.defaultdict(self.comp_hcq_t)
-    self.comp_signal = {dev: dev._get_signal(value=0) for dev in self.devices}
+    self.comp_signal = {dev: self.signal_pool[dev][0] for dev in self.devices}
     self.comp_signal_val = {dev: 0 for dev in self.devices}
 
     self.copy_queues: Dict[Compiled, Any] = collections.defaultdict(self.copy_hcq_t)
-    self.copy_signal = {dev: dev._get_signal(value=0) for dev in self.devices}
+    self.copy_signal = {dev: self.signal_pool[dev][1] for dev in self.devices}
     self.copy_signal_val = {dev: 0 for dev in self.devices}
 
-    self.kickoff_signal = self.devices[0]._get_signal(value=0)
+    self.kickoff_signal = self.signal_pool[self.devices[0]][2]
     self.kickoff_value = 0
     self.graph_timeline = {dev: 0 for dev in self.devices}
 
