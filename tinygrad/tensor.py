@@ -2590,7 +2590,7 @@ class Tensor:
     print(t.mean().item(), t.std().item())
     ```
     """
-    y = (self - self.mean(axis, keepdim=True))
+    y = (self - self.detach().mean(axis, keepdim=True))
     return y.mul((y*y).mean(axis, keepdim=True).add(eps).rsqrt())
 
   def batchnorm(self, weight:Optional[Tensor], bias:Optional[Tensor], mean:Tensor, invstd:Tensor, axis:Union[int,Tuple[int,...]]=1) -> Tensor:
