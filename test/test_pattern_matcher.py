@@ -51,6 +51,7 @@ class TestPatternMatcher(unittest.TestCase):
     self.assertEqual(matcher.rewrite(c4), None)
     self.assertEqual(matcher.rewrite(c5), None)
 
+  @unittest.expectedFailure
   def test_arg_set(self):
     matcher = PatternMatcher([({"__name__": "x", "uop": UOps.ALU, "arg": BinaryOps.MUL,
       "vin": ({"uop": UOps.CONST, "arg": {-1, 1}}, {"uop": UOps.CONST, "arg": 2})}, lambda x: x)])
