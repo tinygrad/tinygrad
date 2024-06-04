@@ -95,8 +95,10 @@ class UPat:
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
   if pat.name in store and store[pat.name] != uop: return False
   if pat.name is not None: store[pat.name] = uop
-  if isinstance(pat.arg, set) and uop.arg not in pat.arg: return False
-  elif pat.arg is not None and uop.arg != pat.arg: return False
+  if pat.arg is not None:
+    if isinstance(pat.arg, set):
+      if uop.arg not in pat.arg: return False
+    elif uop.arg != pat.arg: return False
   if isinstance(pat.dtype, set) and uop.dtype not in pat.dtype: return False
   if isinstance(pat.dtype, DType) and uop.dtype != pat.dtype: return False
   if isinstance(pat.uop, set) and uop.uop not in pat.uop: return False
