@@ -42,8 +42,7 @@ class LinearBert(nn.Linear):
   
   def __call__(self, x:Tensor):
     x = x.contiguous().cast(dtypes.half if getenv("HALF_LINEAR", 0) else dtypes.default_float)
-    self.weight = self.weight.contiguous().cast(dtypes.half if getenv("HALF_LINEAR", 0) else dtypes.default_float)
-    return x.linear(self.weight.transpose(), self.bias.cast(dtypes.default_float) if self.bias is not None else None)
+    return x.contiguous().cast(dtypes.half).linear(self.weight.contiguous().cast(dtypes.half if getenv("HALF_LINEAR", 0) else dtypes.default_float).transpose(), self.bias.cast(dtypes.default_float) if self.bias is not None else None)
 
 class EmbeddingBert(nn.Embedding):
   def __init__(self, vocab_size:int, embed_size:int, std=0.02):
