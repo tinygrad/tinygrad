@@ -51,6 +51,20 @@ class TestPatternMatcher(unittest.TestCase):
     self.assertEqual(matcher.rewrite(c4), None)
     self.assertEqual(matcher.rewrite(c5), None)
 
+  @unittest.expectedFailure
+  def test_arg_set(self):
+    matcher = PatternMatcher([({"__name__": "x", "uop": UOps.ALU, "arg": BinaryOps.MUL,
+      "vin": ({"uop": UOps.CONST, "arg": {-1, 1}}, {"uop": UOps.CONST, "arg": 2})}, lambda x: x)])
+    y1 = UOp(UOps.CONST, dtypes.int, arg=1)
+    y2 = UOp(UOps.CONST, dtypes.int, arg=2)
+    y3 = UOp(UOps.CONST, dtypes.int, arg=-1)
+    c1 = UOp(UOps.ALU, dtypes.int, (y1, y2), BinaryOps.MUL)
+    c2 = UOp(UOps.ALU, dtypes.int, (y2, y2), BinaryOps.MUL)
+    c3 = UOp(UOps.ALU, dtypes.int, (y3, y2), BinaryOps.MUL)
+    self.assertEqual(matcher.rewrite(c1), c1)
+    self.assertEqual(matcher.rewrite(c2), None)
+    self.assertEqual(matcher.rewrite(c3), c3)
+
   def test_dup_name(self):
     matcher = PatternMatcher([({"__name__": "x", "uop": UOps.ALU, "vin": ({"uop": UOps.CONST, "__name__": "y"}, {"__name__": "y"})},
       lambda x, y: x)])
