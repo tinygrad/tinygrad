@@ -1,10 +1,9 @@
 from collections import OrderedDict
-import os, unicodedata, json, functools
+import unicodedata
 import numpy as np
 from tinygrad.nn import state
 from tinygrad.tensor import Tensor
-from tinygrad.dtype import dtypes
-from tinygrad.nn.state import get_state_dict
+from tinygrad.helpers import getenv
 
 #
 # checkpointing utils
@@ -217,7 +216,10 @@ def get_mlperf_bert_model(checkpoint_path:str):
   bert.LayerNorm = LayerNormBert
 
   from extra.models.bert import BertForPretraining
-  return BertForPretraining(**get_mlperf_bert_config()).load_from_pretrained(checkpoint_path)
+  config = get_mlperf_bert_config()
+  if getenv("DISABLE_DROPOUT", 0):
+    config["hidden_dropout_prob"] = config["attention_probs_dropout_prob"] = 0.0
+  return BertForPretraining(**config).load_from_pretrained(checkpoint_path)
 
 def get_data_bert(GPUS:list[str], it):
   data: dict[str, Tensor] = next(it)
