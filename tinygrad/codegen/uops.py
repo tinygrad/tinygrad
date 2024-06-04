@@ -99,10 +99,14 @@ def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
     if isinstance(pat.arg, set):
       if uop.arg not in pat.arg: return False
     elif uop.arg != pat.arg: return False
-  if isinstance(pat.dtype, set) and uop.dtype not in pat.dtype: return False
-  if isinstance(pat.dtype, DType) and uop.dtype != pat.dtype: return False
-  if isinstance(pat.uop, set) and uop.uop not in pat.uop: return False
-  if isinstance(pat.uop, UOps) and uop.uop != pat.uop: return False
+  if pat.dtype is not None:
+    if isinstance(pat.dtype, set):
+      if uop.dtype not in pat.dtype: return False
+    elif uop.dtype != pat.dtype: return False
+  if pat.uop is not None:
+    if isinstance(pat.uop, set):
+      if uop.uop not in pat.uop: return False
+    elif uop.uop != pat.uop: return False
   if pat.vin is None: return True
   # only one if it's a tuple
   # try all permutations if it's a list
