@@ -286,9 +286,9 @@ class TestDiskTensor(unittest.TestCase):
 
   def test_bitcast_view(self):
     with open(temp('range_1020'), "wb") as f: f.write(bytes(range(10, 24)))
-    t = Tensor.empty(12, dtype=dtypes.uchar, device=f"disk:{temp('range_1020')}").shrink([(0, 10)])
+    t = Tensor.empty(3, dtype=dtypes.uint, device=f"disk:{temp('range_1020')}").shrink([(0, 2)])
     ret = t.bitcast(dtypes.uint16).to("CLANG") + 1
-    assert ret.tolist() == [2827, 3341, 3855, 4369, 4883]
+    assert ret.tolist() == [2827, 3341, 3855, 4369]
 
   def test_bf16_disk_write_read(self):
     t = Tensor([10000, -1, -1000, -10000, 20], dtype=dtypes.float32)
