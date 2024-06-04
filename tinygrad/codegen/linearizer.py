@@ -317,10 +317,10 @@ class Linearizer(Kernel):
     # no new opts and we already ran? skip relinearizing
     if self.applied_opts == self.applied_opts_cache: return self
 
-    # *** Kernel
     # save backups
     sts_backup, gfr_backup, upc_backup = self.sts[:], self.group_for_reduces, self.upcasted
 
+    # *** Kernel
     # global uop cache
     self.saved_exprs: Dict[Tuple, UOp] = dict()
 
@@ -335,9 +335,9 @@ class Linearizer(Kernel):
     # add global buffers
     for i,buf in enumerate(self.bufs):
       if isinstance(buf, MemBuffer):
-        self.buf_uops[i] = self.uops.add(UOps.DEFINE_GLOBAL,
-                                         buf.dtype if isinstance(buf.dtype, ImageDType) else PtrDType(buf.dtype), (),
-                                         (buf.idx, any(buf.idx == x.idx for x in self.outbufs)))
+        self.buf_uops[i] = self.uops.add(UOps.DEFINE_GLOBAL, buf.dtype if isinstance(buf.dtype, ImageDType) else PtrDType(buf.dtype),
+                                         (), (buf.idx, any(buf.idx == x.idx for x in self.outbufs)))
+
     # add var vals
     for i,var in enumerate(self.vars):
       assert var.expr is not None
@@ -379,7 +379,7 @@ class Linearizer(Kernel):
     reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+self.group_for_reduces, self.shape_len-self.upcasted)]  # noqa: E501
     fake_reduce_idxs = [x*0 for x in reduce_idxs]
 
-    # late alias the tensor core buffers
+    # add LocalBuffers for multistage reduce and tensor core
     if (tc:=self.tensor_core) and self.tensor_core_opts is not None:
       alias_pattern = [0]*(self.global_dims) + [2]*(len(tc.threads)) + [0]*(self.local_dims-len(tc.threads)) + [0]*(self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3]*(self.upcasted-2)  # noqa: E501
       for op, tc_bufs in self.bufs_for_tensor_core.items():
@@ -387,8 +387,7 @@ class Linearizer(Kernel):
           self.bufs.append(buf:=self.alias_buffer(op, tc_buf, alias_pattern))
           self.buf_uops.append(self.uops.add(UOps.DEFINE_LOCAL, PtrDType(buf.dtype), (), (buf.name, self.sts[self.bufs.index(buf)].size)))
     alias_buf_idxs = self.index_local_aliases(global_idxs,local_idxs,reduce_idxs,upcast_idxs,full_upcast_idxs)
-
-    # add a local buffer for multistage reduce. # TODO: use local alias
+    # # TODO: use local alias
     if self.group_for_reduces:
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker.from_shape(tuple([1] * self.global_dims + list(self.full_shape[self.global_dims:self.global_dims+self.local_dims+self.group_for_reduces]) + [1] * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))  # noqa: E501
