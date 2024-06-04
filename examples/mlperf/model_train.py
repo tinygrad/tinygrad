@@ -554,7 +554,7 @@ def train_unet3d():
           print("Model diverging. Aborting.")
           diverged = True
 
-    if CKPT:
+    if not is_successful and CKPT:
       if WANDB and wandb.run is not None:
         fn = f"./ckpts/{time.strftime('%Y%m%d_%H%M%S')}_{wandb.run.id}_e{epoch}.safe"
       else:
