@@ -245,5 +245,29 @@ class TestLocalAccess(unittest.TestCase):
     sres = uop(uops, UOps.LOAD, dtypes.int32, (smem, ofs))
     self.assertEqual(_test_uops_result(dtypes.int32, uops, sres), 42)
 
+@unittest.skipUnless(Device.DEFAULT in {"CUDA"} and getenv("PTX"), "This only tests assembly backends")
+class TestAssembly(unittest.TestCase):
+  @unittest.skip("Broken")
+  def test_bitshift_left(self):
+    uops = UOpGraph()
+    g1 = uops.add(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int32), (), (0, True))
+    c1 = uops.add(UOps.CONST, dtypes.int32, (), 2)
+    l1 = uops.add(UOps.LOAD, dtypes.int32, (g1, c1), 2)
+    a1 = uops.add(UOps.ALU, dtypes.int32, (l1, c1), BinaryOps.MUL)
+    uops.add(UOps.SINK, None, (a1,))
+    Device[Device.DEFAULT].renderer.render("test", uops)
+    self.assertEqual(uops.uops[-1].arg, BinaryOps.SHL)
+
+  @unittest.skip("Broken")
+  def test_bitshift_right(self):
+    uops = UOpGraph()
+    g1 = uops.add(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int32), (), (0, True))
+    c1 = uops.add(UOps.CONST, dtypes.int, (), 2)
+    l1 = uops.add(UOps.LOAD, dtypes.int, (g1, c1), 2)
+    a1 = uops.add(UOps.ALU, dtypes.int, (l1, c1), BinaryOps.DIV)
+    uops.add(UOps.SINK, None, (a1,))
+    Device[Device.DEFAULT].renderer.render("test", uops)
+    self.assertEqual(uops.uops[-1].arg, BinaryOps.SHR)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
