@@ -20,7 +20,7 @@ class TestUOpGraph(unittest.TestCase):
     g = UOpGraph()
     v = g.add(UOps.DEFINE_VAR, dtypes.int, arg=Variable('tmp', 0, 1))
     c0 = g.add(UOps.CONST, dtypes.int, arg=0)
-    vc = g.add(UOps.ALU, dtypes.bool, (v, c0), BinaryOps.CMPEQ)
+    vc = g.add(UOps.ALU, dtypes.bool, (v, c0), BinaryOps.CMPNE)
     c1 = g.add(UOps.CONST, dtypes.float, arg=1.0)
     out = g.add(UOps.ALU, dtypes.float, (vc, c1, c1), TernaryOps.WHERE)
     g.add(UOps.SINK, None, (out,))

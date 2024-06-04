@@ -31,7 +31,7 @@ class LoadOps(Enum): EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS =
 Op = Union[UnaryOps, BinaryOps, ReduceOps, LoadOps, TernaryOps, BufferOps]
 
 # do not preserve f(0) = 0
-UNSAFE_PAD_OPS = {BinaryOps.DIV, BinaryOps.CMPEQ, UnaryOps.LOG2, UnaryOps.EXP2}
+UNSAFE_PAD_OPS = {BinaryOps.DIV, UnaryOps.LOG2, UnaryOps.EXP2}
 
 @dataclass(frozen=True)
 class MemBuffer:
@@ -62,7 +62,7 @@ class LazyOp:
   def dtype(self) -> DType:
     if self.op in BufferOps: return self.arg.dtype
     if self.op in [UnaryOps.CAST, UnaryOps.BITCAST]: return self.arg
-    return dtypes.bool if self.op in {BinaryOps.CMPLT, BinaryOps.CMPEQ} else self.src[-1].dtype
+    return dtypes.bool if self.op in {BinaryOps.CMPLT, BinaryOps.CMPNE} else self.src[-1].dtype
 
   @functools.cached_property
   def key(self) -> bytes:
@@ -120,6 +120,7 @@ python_alu = {
   UnaryOps.EXP2: hook_overflow(math.inf, lambda x: math.exp(x*math.log(2))),
   UnaryOps.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan, UnaryOps.SIN: math.sin,
   UnaryOps.NEG: lambda x: (not x) if isinstance(x, bool) else -x,
+  BinaryOps.SHR: operator.rshift, BinaryOps.SHL: operator.lshift,
   BinaryOps.MUL: operator.mul, BinaryOps.ADD: operator.add, BinaryOps.SUB: operator.sub, BinaryOps.XOR: operator.xor,
   BinaryOps.SHL: operator.lshift, BinaryOps.SHR: operator.rshift, BinaryOps.OR: operator.or_, BinaryOps.AND: operator.and_,
   BinaryOps.MAX: max, BinaryOps.CMPEQ: operator.eq, BinaryOps.CMPLT: operator.lt,
