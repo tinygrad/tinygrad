@@ -22,7 +22,7 @@ def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Op]=
   if enable_cache: lazycache[cache_key] = ret
   return ret
 
-view_supported_devices = {"LLVM", "CLANG", "CUDA", "DISK"}
+view_supported_devices = {"LLVM", "CLANG", "CUDA", "NV", "AMD", "DISK"}
 class LazyBuffer:
   def __init__(self, device:str, st:ShapeTracker, dtype:DType,
                op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
@@ -146,7 +146,7 @@ class LazyBuffer:
     if op is TernaryOps.WHERE: assert srcs[0].dtype == dtypes.bool, "TernaryOps.WHERE must have the first arg be bool"
     if op is UnaryOps.NEG: assert srcs[0].dtype != dtypes.bool, "UnaryOps.NEG does not accept dtype bool"
 
-    out_dtype = dtypes.bool if op in (BinaryOps.CMPLT, BinaryOps.CMPEQ) else srcs[-1].dtype
+    out_dtype = dtypes.bool if op in (BinaryOps.CMPLT, BinaryOps.CMPNE) else srcs[-1].dtype
 
     # const folding
     if op in python_alu and all(s.is_unrealized_unmasked_const() for s in srcs):
