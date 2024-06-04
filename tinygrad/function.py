@@ -64,16 +64,16 @@ class Log(Function):
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.e(BinaryOps.DIV, self.x)
 
-def pow2if(q:LazyBuffer) -> LazyBuffer:
+def pow2if(q:LazyBuffer) -> LazyBuffer: # returns float32
   assert q.dtype == dtypes.int32
   return q.e(BinaryOps.ADD, q.const(127)).e(BinaryOps.SHL, q.const(23)).cast(dtypes.float32, True)
 
-def ldexp2kf(d:LazyBuffer, e:LazyBuffer) -> LazyBuffer:
+def ldexp2kf(d:LazyBuffer, e:LazyBuffer) -> LazyBuffer: # returns float32
   assert d.dtype == dtypes.float32
   assert e.dtype == dtypes.int32
   return d.e(BinaryOps.MUL, pow2if(e.e(BinaryOps.SHR, e.const(1)))).e(BinaryOps.MUL, pow2if(e.e(BinaryOps.SUB, e.e(BinaryOps.SHR, e.const(1)))))
 
-def rintfk(d:LazyBuffer) -> LazyBuffer:
+def rintfk(d:LazyBuffer) -> LazyBuffer: # returns int32
   assert d.dtype == dtypes.float32
   return d.e(BinaryOps.ADD, d.e(BinaryOps.CMPLT, d.const(0.0)).e(TernaryOps.WHERE, d.const(-0.5), d.const(0.5))).cast(dtypes.int32)
 
@@ -110,7 +110,7 @@ def ilogb2kf(d:LazyBuffer) -> LazyBuffer: # returns int32
 def logk3f(d:LazyBuffer) -> LazyBuffer:
   assert d.dtype == dtypes.float32
   o = d.e(BinaryOps.CMPLT, d.const(1.17549435e-38))
-  d = o.e(TernaryOps.WHERE, d.e(BinaryOps.MUL, d.const(1.8446744073709552e+19)), d)
+  d = d.e(BinaryOps.MUL, o.e(TernaryOps.WHERE, d.const(1.8446744073709552e+19), d.const(1.0)))
   e = ilogb2kf(d.e(BinaryOps.MUL, d.const(1.0/0.75)))
   m = ldexp2kf(d, e.e(UnaryOps.NEG))
   e = o.e(TernaryOps.WHERE, e.e(BinaryOps.SUB, e.const(64)), e)
@@ -148,6 +148,7 @@ def fabsfk(d:LazyBuffer) -> LazyBuffer:
   assert d.dtype == dtypes.float32
   dint = d.cast(dtypes.int32, True)
   return dint.e(BinaryOps.AND, dint.const(0x7FFFFFFF)).cast(dtypes.float32, True)
+  # return d.e(BinaryOps.CMPLT, d.const(0.0)).e(TernaryOps.WHERE, d.e(UnaryOps.NEG), d)
 
 def xisnotnanf(d:LazyBuffer) -> LazyBuffer:
   assert d.dtype == dtypes.float32
