@@ -120,7 +120,8 @@ class HWQueue:
     if dev == self.binded_device: cmdq_addr = self.hw_page.base
     else:
       if dev.cmdq_wptr + len(self.q) * 4 > dev.cmdq_page.length:
-        assert (gpu_ring[gpu_ring_controls.GPGet] & 0xFFFFFFFFFC) >= dev.cmdq_page.base + len(self.q) * 4, "cmdq overrun"
+        assert (gpu_ring[gpu_ring_controls.GPGet] & 0xFFFFFFFFFC) >= dev.cmdq_page.base + len(self.q) * 4 or \
+               gpu_ring_controls.GPGet == gpu_ring_controls.GPPut, "cmdq overrun"
         dev.cmdq_wptr = 0
 
       dev.cmdq[dev.cmdq_wptr//4:dev.cmdq_wptr//4+len(self.q)] = array.array('I', self.q)
