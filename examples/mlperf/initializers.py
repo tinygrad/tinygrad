@@ -42,6 +42,7 @@ class LinearBert(nn.Linear):
   
   def __call__(self, x:Tensor):
     matmul_dtype = dtypes.half if getenv("HALF_LINEAR", 0) else dtypes.default_float
+    # TODO: Remove contiguous once slow kernel compile without this contiguous is fixed
     return x.contiguous().cast(matmul_dtype).linear(self.weight.contiguous().cast(matmul_dtype).transpose(), self.bias.cast(dtypes.default_float) if self.bias is not None else None)
 
 class EmbeddingBert(nn.Embedding):
