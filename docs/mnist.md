@@ -26,8 +26,6 @@ We'll use the model from [the Keras tutorial](https://keras.io/examples/vision/m
 ```python
 from tinygrad import Tensor, nn
 
-Tensor.manual_seed(42)
-
 class Model:
   def __init__(self):
     self.l1 = nn.Conv2d(1, 32, kernel_size=(3,3))

@@ -19,11 +19,12 @@ class _Device:
   def __getitem__(self, ix:str) -> Compiled: return self.__get_canonicalized_item(self.canonicalize(ix))
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def __get_canonicalized_item(self, ix:str) -> Compiled:
-    if DEBUG >= 1: print(f"opening device {ix} from pid:{os.getpid()}")
     assert ((cpn:=multiprocessing.current_process().name) == "MainProcess") or ix.split(":")[0] in ["DISK", "NPY"], \
       f"can only open device {ix} from parent, not {cpn}"
     x = ix.split(":")[0].upper()
-    return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._devices][0](ix)  # noqa: E501
+    ret = [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._devices][0](ix)  # noqa: E501
+    if DEBUG >= 1: print(f"opened device {ix} from pid:{os.getpid()}")
+    return ret
   @functools.cached_property
   def DEFAULT(self) -> str:
     device_from_env: Optional[str] = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._devices, None)   # type: ignore
