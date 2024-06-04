@@ -133,7 +133,8 @@ class Linearizer(Kernel):
       ret.append(self.uops.add(UOps.GEP, localtype.scalar(), (self.load_cache[key],), rep_idx[dim]) if dim is not None else self.load_cache[key])
     return ret
 
-  def global_store(self, i:int, idxs:List[Node], store:List[UOp], barrier:Optional[UOp]=None) -> List[UOp]:
+  def global_store(self, i:int, idxs:List[Node], store:List[UOp], barrier:Optional[UOp]=None, gate:Optional[UOp]=None) -> List[UOp]:
+    print("global_store with gate:",gate)
     buf = self.bufs[i]
     buf_uop = self.buf_uops[i]
     assert buf_uop is not None, f"buffer {i} wasn't UOped"
@@ -165,10 +166,10 @@ class Linearizer(Kernel):
                       tuple(x.render(self.render_ops, self) for x in image_idx))
       else:
         rendered_idx = idx.render(self.render_ops, self)
-      if valid.min == 1: stores.append(self.uops.add(UOps.STORE, None, (buf_uop, rendered_idx, var)+((barrier,) if barrier else ())))
-      else: 
-        gate = self.uops.add(UOps.IF, dtype=None, vin=(valid.render(self.render_ops, self),)+((barrier,) if barrier else ()))
-        stores.append(self.uops.add(UOps.STORE, None, (buf_uop, rendered_idx, var, gate)))
+      strgate = self.const(True, dtypes.bool) if gate is None else gate
+      if valid.min != 1: strgate = self.uops.add(uop=UOps.ALU, dtype=dtypes.bool, vin=(valid.render(self.render_ops, self), strgate), arg=BinaryOps.MUL)
+      # print(f"with valid: {valid}; and indecies: {idxs}; \nand full_shape: {self.full_shape}; and store_shape: {self.sts[i].shape};\ngate for store: ", gate)
+      stores.append(self.uops.add(UOps.STORE, None, (buf_uop, rendered_idx, var, strgate)+((barrier,) if barrier else ())))
     return stores
 
   # render loop
@@ -269,6 +270,7 @@ class Linearizer(Kernel):
     self.load_cache.clear()
 
     # end the local loop, do the local reduce
+    if_cond = None
     if self.group_for_reduces:
       fake_global_idxs = [x*0 for x in global_idxs]
       stores = self.global_store(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, accs[reduceop])  # store accumulators
@@ -277,7 +279,7 @@ class Linearizer(Kernel):
         fake_idxs = [NumNode(0)]*len(self.sts[-1].shape)
         fake_idxs[self.global_dims+self.local_dims:self.global_dims+len(local_idxs)] = local_idxs[self.local_dims:]
         if_cond: UOp = create_lt_node(self.sts[-1].expr_idxs(fake_idxs)[0], 1).render(self.render_ops, self)
-        barrier = self.uops.add(UOps.IF, None, (if_cond, barrier))
+        # barrier = self.uops.add(UOps.IF, None, (if_cond, barrier))
 
       # create new late reduce local loops and replace local_idxs that have been used
       end_local_idxs = [Variable(f"tidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce and i not in self.upcast_in_mid_reduce_axes else 0) for i in range(0, self.first_reduce+self.group_for_reduces)]  # noqa: E501
@@ -313,7 +315,7 @@ class Linearizer(Kernel):
 
       # all local indices which were used for group_for_reduce are not valid any more and should be replaced with fake NumNode(0), since they have
       # been rewritten with fake end_local_idxs.
-    return (accs, loaded_buffers, fake_reduce_idxs, local_idxs[:self.local_dims] + [NumNode(0) for i in range(self.group_for_reduces)], upcast_idxs)
+    return (accs, loaded_buffers, fake_reduce_idxs, local_idxs[:self.local_dims] + [NumNode(0) for i in range(self.group_for_reduces)], upcast_idxs, if_cond)
 
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
   def linearize(self):
@@ -403,8 +405,9 @@ class Linearizer(Kernel):
     fake_reduce_idxs = [x*0 for x in reduce_idxs]
     alias_buf_idxs = self.index_local_aliases(global_idxs,local_idxs,reduce_idxs,upcast_idxs,full_upcast_idxs)
     # render reduce op
+    if_cond = None
     for reduceop in [self.reduceop] if self.reduceop is not None else []:
-      accs,loaded_buffers,fake_reduce_idxs,local_idxs,upcast_idxs = \
+      accs,loaded_buffers,fake_reduce_idxs,local_idxs,upcast_idxs,if_cond = \
         self.render_reduceop(reduceop,accs,loaded_buffers,global_idxs,local_idxs,upcast_idxs,full_upcast_idxs,reduce_idxs,fake_reduce_idxs,alias_buf_idxs[reduceop])
 
     # load latebufs
@@ -414,7 +417,9 @@ class Linearizer(Kernel):
     # run late AST (without the store)
     for op in self.ast:
       val = self.ast_parse(op.src[0], accs, None, loaded_buffers)
-      self.global_store(op.arg.idx, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val)
+      # why don't these idxs make the final store gated?
+      print("late ast with if_cond=",if_cond)
+      self.global_store(op.arg.idx, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val, gate=if_cond)
 
     # maybe graph the uops
     if DEBUG >= 5: self.uops.print()

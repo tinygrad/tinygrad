@@ -211,7 +211,7 @@ constant_folder = PatternMatcher([
   ({"uop": UOps.ALU, "arg": BinaryOps.SUB, "vin": ({"__name__": "x"}, {"__name__": "x"})}, lambda x: UOp.const(x.dtype, 0)),   # x-x -> 0
   # ** load/store folding **
   ({"uop": UOps.STORE, "vin": ({"__name__": "buf"}, {"__name__": "idx"},
-                               {"uop": UOps.LOAD, "vin": ({"__name__": "buf"}, {"__name__": "idx"})})}, lambda buf, idx: UOp(UOps.NOOP)),
+                               {"uop": UOps.LOAD, "vin": ({"__name__": "buf"}, {"__name__": "idx"})}, {"__name__": "gate"})}, lambda buf, idx, gate: UOp(UOps.NOOP)),
   # ** two stage add/sub folding **
   ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"uop": UOps.ALU, "arg": BinaryOps.ADD,
                      "vin": [{"__name__": "x"}, {"__name__": "c1", "uop": UOps.CONST}]}, {"__name__": "c2", "uop": UOps.CONST}]},
@@ -221,15 +221,15 @@ constant_folder = PatternMatcher([
      lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.SUB, x.dtype, [c2.arg, c1.arg]))),
   # TODO: can do the invert of this (flip alt/load) when we fix double ops
   ({"uop": UOps.STORE, "vin": ({"__name__": "buf"}, {"__name__": "idx"}, {"uop": UOps.ALU, "arg": TernaryOps.WHERE,
-                       "vin": ({"__name__": "gate"}, {"__name__": "alt"}, {"uop": UOps.LOAD, "vin": ({"__name__": "buf"}, {"__name__": "idx"})})})},
-    lambda buf, idx, gate, alt: UOp(UOps.STORE, None, (buf, idx, alt, gate))),
+                       "vin": ({"__name__": "gate"}, {"__name__": "alt"}, {"uop": UOps.LOAD, "vin": ({"__name__": "buf"}, {"__name__": "idx"})})}, {"__name__": "str_gate"})},
+    lambda buf, idx, gate, alt, str_gate: UOp(UOps.STORE, None, (buf, idx, alt, UOp(uop=UOps.ALU, dtype=dtypes.bool, vin=(gate,str_gate), arg=BinaryOps.MUL)))),
   # store float4/float2 directly (remove CAST/GEP)
   ({"uop": UOps.STORE, "vin": ({"__name__": "buf"}, {"__name__": "idx"}, {"uop": UOps.CAST, "vin":
-                                tuple({"uop": UOps.GEP, "vin": ({"__name__": "val"},), "arg": i} for i in range(4))})},
-   lambda buf,idx,val: UOp(UOps.STORE, None, (buf, idx, val))),
+                                tuple({"uop": UOps.GEP, "vin": ({"__name__": "val"},), "arg": i} for i in range(4))}, {"__name__": "gate"})},
+   lambda buf,idx,val,gate: UOp(UOps.STORE, None, (buf, idx, val, gate))),
   ({"uop": UOps.STORE, "vin": ({"__name__": "buf"}, {"__name__": "idx"}, {"uop": UOps.CAST, "vin":
-                                tuple({"uop": UOps.GEP, "vin": ({"__name__": "val"},), "arg": i} for i in range(2))})},
-   lambda buf,idx,val: UOp(UOps.STORE, None, (buf, idx, val))),
+                                tuple({"uop": UOps.GEP, "vin": ({"__name__": "val"},), "arg": i} for i in range(2))}, {"__name__": "gate"})},
+   lambda buf,idx,val,gate: UOp(UOps.STORE, None, (buf, idx, val, gate))),
   # CAST-PHI-GEP -> PHI-CAST
   ({"__name__": "root", "uop": UOps.CAST, "vin":
     tuple({"uop": UOps.PHI, "vin": ({"uop": UOps.GEP, "vin": ({"__name__": "val"},), "arg": i}, {"__name__": f"v{i}"})} for i in range(4))},
@@ -321,7 +321,7 @@ class UOpGraph:
     graph: DefaultDict[UOp, List[UOp]] = defaultdict(list)
     in_degree: DefaultDict[UOp, int] = defaultdict(int)
     loops = []
-    ifs = []
+    # ifs = []
     nodes: Dict[UOp, None] = {}
     def add_parents(u:UOp):
       if u in nodes: return
@@ -331,7 +331,7 @@ class UOpGraph:
         in_degree[u] += 1
         graph[x].append(u)
       if u.uop is UOps.RANGE: loops.append(u)
-      if u.uop is UOps.IF: ifs.append(u)
+      # if u.uop is UOps.IF: ifs.append(u)
     sink = UOp(UOps.SINK, None, tuple(x for x in sink.vin if x.uop is not UOps.NOOP))
     add_parents(sink)
 
@@ -377,7 +377,27 @@ class UOpGraph:
     self._uops = self._uops[:-1]
 
     # TODO: ifs should be removed and just the store should be gated
-    for u in ifs[::-1]: self._uops.append(UOp(UOps.ENDIF, None, (u,)))
+    # sets of stores that have the same store condition and are not seperated by a barrier
+    # could replace barrier_domain with barrier; some stores do not have a barrier tho
+    gates: Dict[Tuple[int,UOp], Set[UOp]] = {}
+    barrier_domain = 0
+    for u in self._uops:
+      if u.uop is UOps.BARRIER: barrier_domain += 1
+      if u.uop is UOps.STORE:
+        if not (key:=(barrier_domain, u.vin[3])) in gates: gates[key] = set()
+        gates[key].add(u)
+
+    # dfs_until_bar_cache = {}
+    # def dfs_until_bar(u: UOp): 
+    #     if u not in dfs_until_bar_cache: dfs_until_bar_cache[u] = list(graph[u]) + [x for v in graph[u] for x in dfs_until_bar(v) if v.uop is not UOps.BARRIER]
+    #     return dfs_until_bar_cache[u]
+    
+    # for u in ifs[::-1]:
+    #   if all([x.uop is UOps.STORE for x in graph[u]]):
+    #     self._uops.remove(u)
+    #     self._uops.insert(min([self._uops.index(x) for x in graph[u]]), u)
+    #   # self._uops.insert(max([self._uops.index(x) for x in dfs_until_bar(u) if x.uop is UOps.STORE])+1, UOp(UOps.ENDIF, None, (u,)))
+    #   self._uops.append(UOp(UOps.ENDIF, None, (u,)))
 
     if type_verify: self.type_verify()
 

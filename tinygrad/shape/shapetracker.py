@@ -84,6 +84,7 @@ class ShapeTracker:
   def expr_idxs(self, idxs:Optional[Iterable[Node]]=None) -> Tuple[Node, Node]:
     idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)] if idxs is None else list(idxs)
     idx, valid = _expr_view(self.views[-1], idxs)
+    # print("inditial idx, valid, len(views):", idx, valid, len(self.views))
     for view in reversed(self.views[0:-1]):
       if valid.max == 0: return NumNode(-1), valid
       view = view.minify()
@@ -92,6 +93,7 @@ class ShapeTracker:
         idxs.append((idx//acc)%d)
         acc *= d
       idx, valid = _expr_view(view, idxs[::-1], valid)
+    # print("final idx, valid:", idx, valid, len(self.views))
     assert not isinstance(idx.min, int) or idx.min >= -2**31, f"idx.min too small. {idx=}, {idx.min=}"
     assert not isinstance(idx.max, int) or idx.max < 2**31, f"idx.max too big. {idx=}, {idx.max=}"
     return idx, valid

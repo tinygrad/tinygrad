@@ -108,8 +108,9 @@ class TestLinearizer(unittest.TestCase):
 
     load_t = Tensor.full(load.st.shape, 1).contiguous().realize()
     k = helper_linearizer_ast(ast, [load_t], wanna_output=[load_t.numpy().sum()])[1]
-    self.assertEqual(k.uops[-1].uop, UOps.ENDIF)
-    self.assertLess(k.uops.uops.index([x for x in k.uops.uops if x.uop is UOps.STORE][-1]), k.uops.uops.index(k.uops[-1]))
+    # Replacing IF/ENDIFs with gated stores
+    # self.assertEqual(k.uops[-1].uop, UOps.ENDIF)
+    # self.assertLess(k.uops.uops.index([x for x in k.uops.uops if x.uop is UOps.STORE][-1]), k.uops.uops.index(k.uops[-1]))
 
   def test_two_nested_range(self):
     a = Tensor.randn(2, ).realize()
@@ -327,7 +328,9 @@ class TestLinearizer(unittest.TestCase):
     lin = Linearizer(ast)
     lin.linearize()
 
-    assert len(lin.uops.uops) <= 7, "too many uops"
+    # an additional UOP for the TRUE in the gated store (Pattern match away? get rid of gate if true?)
+    # assert len(lin.uops.uops) <= 7, "too many uops"
+    assert len(lin.uops.uops) <= 8, "too many uops"
     a_bufs = [u.uop for u in lin.uops.uops[-1].vin[2].vin]
     assert a_bufs == [UOps.LOAD, UOps.CONST]
 
@@ -356,7 +359,7 @@ class TestLinearizer(unittest.TestCase):
     stores = [u for u in k.uops if u.uop is UOps.STORE]
     assert len(accs) == 0  # it's removed now
     assert len(stores) == 1
-    assert stores[0].vin[-1].dtype == dtypes.float.vec(4)
+    assert stores[0].vin[2].dtype == dtypes.float.vec(4)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
@@ -372,10 +375,10 @@ class TestLinearizer(unittest.TestCase):
     stores = [u for u in k.uops if u.uop is UOps.STORE]
 
     # the first store is to lds and can be upcasted
-    assert accs[0].dtype == stores[0].vin[-1].dtype == dtypes.float.vec(4)
+    assert accs[0].dtype == stores[0].vin[2].dtype == dtypes.float.vec(4)
     assert stores[0].vin[0].uop is UOps.DEFINE_LOCAL
     # the second store is to gds with no upcasts
-    assert accs[1].dtype == stores[1].vin[-1].dtype == dtypes.float
+    assert accs[1].dtype == stores[1].vin[2].dtype == dtypes.float
     assert stores[1].vin[0].uop is UOps.DEFINE_GLOBAL
 
   @unittest.skip("multireduce isn't supported yet")
@@ -606,8 +609,15 @@ class TestLinearizer(unittest.TestCase):
       k.hand_coded_optimizations()
       uops = list(k.linearize().uops)
       # ignore kernel optimized IF statements for now
-      if if_op:=next((u for u in uops if u.uop is UOps.IF), None):
-        uops = uops[:uops.index(if_op)]
+      if gated_store:=next((u for u in uops if u.uop is UOps.STORE and u.vin[3].arg != True), None):
+        children = [gated_store]
+        while len(children) > 0:
+          x = children.pop(0)
+          if x not in uops: continue
+          children += [c for c in list(x.vin) if c.uop is not UOps.BARRIER]
+          if x.uop is UOps.RANGE or x.uop is UOps.PHI: uops.remove(x) # ignore phis and ranges for grouped reduces
+      print("uops=")
+      for u in uops: print("  ",u)
       assert len(set([u.uop for u in uops if u.uop in {UOps.RANGE, UOps.SPECIAL}])) == 1, "has either specials or ranges, not both"
       assert len([u for u in uops if u.uop is UOps.PHI]) == 0, "PHI should have been simplified"
       # TODO: once uops track min/max this will be fixed
@@ -634,7 +644,7 @@ class TestLinearizer(unittest.TestCase):
     out = x.matmul(y)
     k = helper_linearizer_opt(out)[-1]
     # check that the float4 cast collapses
-    store_vals = [u.vin[-1] for u in k.uops if u.uop is UOps.STORE]
+    store_vals = [u.vin[2] for u in k.uops if u.uop is UOps.STORE]
     for val in store_vals:
       assert val.dtype == dtypes.float.vec(4) and val.uop is not UOps.CAST
 
@@ -643,7 +653,7 @@ class TestLinearizer(unittest.TestCase):
     x = Tensor.randn((4,3,6,6)).realize()
     out = x.flip((0,1)).contiguous()
     k = helper_linearizer_opt(out)[-1]
-    store_val = [u.vin[-1] for u in k.uops if u.uop is UOps.STORE][0]
+    store_val = [u.vin[2] for u in k.uops if u.uop is UOps.STORE][0]
     assert store_val.dtype == dtypes.float.vec(4) and store_val.uop is not UOps.CAST
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
@@ -661,10 +671,11 @@ class TestLinearizer(unittest.TestCase):
     barrier = [u for u in k.uops if u.uop is UOps.BARRIER][0]
     # check that the float4 cast collapses for all stores
     for store in local_stores+global_stores:
-      assert store.vin[-1].dtype == dtypes.float.vec(2) and store.vin[-1].uop is not UOps.CAST
+      assert store.vin[2].dtype == dtypes.float.vec(2) and store.vin[2].uop is not UOps.CAST
     # check the children's vins
     assert barrier.vin == tuple(local_stores)
-    assert len([u for u in k.uops if u.uop is UOps.IF and u.vin[-1] == barrier]) == 1
+    # Replacing IF/ENDIFs with gated stores
+    # assert len([u for u in k.uops if u.uop is UOps.IF and u.vin[-1] == barrier]) == 1
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
@@ -676,11 +687,11 @@ class TestLinearizer(unittest.TestCase):
     stores = [u for u in k.uops if u.uop is UOps.STORE]
 
     # the float4 value stores directly in lds and we skip upcast
-    assert stores[0].vin[-1].dtype == dtypes.float.vec(4)
-    assert stores[0].vin[-1].uop is not UOps.CAST
+    assert stores[0].vin[2].dtype == dtypes.float.vec(4)
+    assert stores[0].vin[2].uop is not UOps.CAST
 
     # the global store doesn't change
-    assert stores[1].vin[-1].dtype == dtypes.float
+    assert stores[1].vin[2].dtype == dtypes.float
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_skip_unmatching_upcasts(self):
@@ -691,7 +702,7 @@ class TestLinearizer(unittest.TestCase):
     ]
     k = helper_linearizer_ast(ast, [Tensor.empty(240*40).realize()], opts=[opt])[-1]
     out = [u for u in k.uops if u.uop is UOps.STORE][0]
-    assert out.vin[-1].uop is UOps.CAST and out.vin[-1].dtype == dtypes.float.vec(4)
+    assert out.vin[2].uop is UOps.CAST and out.vin[2].dtype == dtypes.float.vec(4)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
@@ -702,14 +713,14 @@ class TestLinearizer(unittest.TestCase):
             Opt(op=OptOps.UPCAST, axis=1, amt=0), Opt(op=OptOps.UPCAST, axis=0, amt=2)]
     k = helper_linearizer_ast(ast, [Tensor.empty(8*32).realize()], opts=[opt])[-1]
     out = [u for u in k.uops if u.uop is UOps.STORE][0]
-    assert out.vin[-1].uop is UOps.CAST and out.vin[-1].dtype == dtypes.float.vec(2)
+    assert out.vin[2].uop is UOps.CAST and out.vin[2].dtype == dtypes.float.vec(2)
 
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need backends that support float4")
 class TestFloat4(unittest.TestCase):
   @staticmethod
   def count_float4(k):
     return (len([uop for uop in k.uops if uop.uop is UOps.LOAD and uop.dtype == dtypes.float.vec(4)]),
-            len([uop for uop in k.uops if uop.uop is UOps.STORE and len(uop.vin) == 3 and uop.vin[2].dtype == dtypes.float.vec(4)]))
+            len([uop for uop in k.uops if uop.uop is UOps.STORE and uop.vin[2].dtype == dtypes.float.vec(4)]))
 
   # TODO: express opts below as auto opts
 

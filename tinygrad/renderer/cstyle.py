@@ -117,7 +117,8 @@ class CStyleLanguage(Renderer):
         kk("}")
       elif uop is UOps.STORE:
         assert vin[0].dtype is not None and vin[2].dtype is not None
-        kk(self.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, strip_parens(r[vin[1]]), vin[0].uop is UOps.DEFINE_LOCAL))
+        rendered_store = self.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, strip_parens(r[vin[1]]), vin[0].uop is UOps.DEFINE_LOCAL)
+        kk(f"if ({r[vin[3]]}) {{ {rendered_store} }}" if len(vin) > 3 else rendered_store)
       else:
         assert dtype is not None, f"None dtype for uop {uop}"
         if uop is UOps.RANGE:
