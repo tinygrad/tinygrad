@@ -379,13 +379,13 @@ class UOpGraph:
     # TODO: ifs should be removed and just the store should be gated
     # sets of stores that have the same store condition and are not seperated by a barrier
     # could replace barrier_domain with barrier; some stores do not have a barrier tho
-    gates: Dict[Tuple[int,UOp], Set[UOp]] = {}
-    barrier_domain = 0
-    for u in self._uops:
-      if u.uop is UOps.BARRIER: barrier_domain += 1
-      if u.uop is UOps.STORE:
-        if not (key:=(barrier_domain, u.vin[3])) in gates: gates[key] = set()
-        gates[key].add(u)
+    # gates: Dict[Tuple[int,UOp], Set[UOp]] = {}
+    # barrier_domain = 0
+    # for u in self._uops:
+    #   if u.uop is UOps.BARRIER: barrier_domain += 1
+    #   if u.uop is UOps.STORE:
+    #     if not (key:=(barrier_domain, u.vin[3])) in gates: gates[key] = set()
+    #     gates[key].add(u)
 
     # dfs_until_bar_cache = {}
     # def dfs_until_bar(u: UOp): 
