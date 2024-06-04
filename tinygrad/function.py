@@ -176,6 +176,7 @@ class Pow(Function):
 
   @staticmethod
   def _forward(x: LazyBuffer, y: LazyBuffer) -> LazyBuffer:
+    x_eq_zero = x.e(BinaryOps.CMPEQ, x.const(0.0))
     result = expk3f(logk3f(fabsfk(x)).e(BinaryOps.MUL, y))
     yint = y.cast(dtypes.int32)
     yiswhole = y.e(BinaryOps.CMPEQ, yint.cast(y.dtype))
@@ -183,10 +184,14 @@ class Pow(Function):
     yisodd = yiswhole.e(TernaryOps.WHERE, yisodd, yiswhole.const(False))
 
     result = xisnotnanf(result).e(TernaryOps.WHERE, result, result.const(math.inf))
-    result = result.e(BinaryOps.MUL, x.e(BinaryOps.CMPLT, x.const(0.0)).e(TernaryOps.WHERE, yiswhole.e(TernaryOps.WHERE, yisodd.e(TernaryOps.WHERE, x.const(-1.0), x.const(1.0)), x.const(math.nan)), x.const(1.0)))
+    yisoddexpr = yiswhole.e(TernaryOps.WHERE, yisodd.e(TernaryOps.WHERE, x.const(-1.0), x.const(1.0)), x.const(math.nan))
+    result = result.e(BinaryOps.MUL, x.e(BinaryOps.CMPLT, x.const(0.0)).e(TernaryOps.WHERE, yisoddexpr, x.const(1.0)))
     efx = mulsignf(fabsfk(x).e(BinaryOps.SUB, x.const(1.0)), y)
-    result = xisinff(y).e(TernaryOps.WHERE, efx.e(BinaryOps.CMPLT, efx.const(0.0)).e(TernaryOps.WHERE, x.const(0.0), efx.e(BinaryOps.CMPEQ, efx.const(0.0)).e(TernaryOps.WHERE, x.const(1.0), x.const(math.inf))), result)
-    result = xisinff(x).e(BinaryOps.OR, x.e(BinaryOps.CMPEQ, x.const(0.0))).e(TernaryOps.WHERE, mulsignf(xsignbitf(y).e(BinaryOps.XOR, x.e(BinaryOps.CMPEQ, x.const(0.0))).e(TernaryOps.WHERE, x.const(0.0), x.const(math.inf)), yisodd.e(TernaryOps.WHERE, x, x.const(1.0))), result)
+    efxexpr = efx.e(BinaryOps.CMPEQ, efx.const(0.0)).e(TernaryOps.WHERE, x.const(1.0), x.const(math.inf))
+    result = xisinff(y).e(TernaryOps.WHERE, efx.e(BinaryOps.CMPLT, efx.const(0.0)).e(TernaryOps.WHERE, x.const(0.0), efxexpr), result)
+    mulsign0 = xsignbitf(y).e(BinaryOps.XOR, x_eq_zero).e(TernaryOps.WHERE, x.const(0.0), x.const(math.inf))
+    mulsign1 = yisodd.e(TernaryOps.WHERE, x, x.const(1.0))
+    result = xisinff(x).e(BinaryOps.OR, x_eq_zero).e(TernaryOps.WHERE, mulsignf(mulsign0, mulsign1), result)
     result = xisnotnanf(x).e(BinaryOps.AND, xisnotnanf(y)).e(TernaryOps.WHERE, result, x.const(math.nan))
     result = y.e(BinaryOps.CMPEQ, y.const(0.0)).e(BinaryOps.OR, x.e(BinaryOps.CMPEQ, x.const(1.0))).e(TernaryOps.WHERE, x.const(1.0), result)
     return result

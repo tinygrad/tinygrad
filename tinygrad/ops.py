@@ -17,8 +17,8 @@ class UnaryOps(Enum):
   EXP2 = auto(); LOG2 = auto(); CAST = auto(); BITCAST = auto(); SIN = auto(); SQRT = auto(); NEG = auto() # noqa: E702
 class BinaryOps(Enum):
   """A + A -> A (elementwise)"""
-  ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); CMPEQ = auto(); XOR = auto();
-  SHL = auto(); SHR = auto(); OR = auto(); AND = auto()# noqa: E702
+  ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); CMPEQ = auto(); XOR = auto() # noqa: E702
+  SHL = auto(); SHR = auto(); OR = auto(); AND = auto() # noqa: E702
 class TernaryOps(Enum):
   """A + A + A -> A (elementwise)"""
   WHERE = auto(); MULACC = auto() # noqa: E702
