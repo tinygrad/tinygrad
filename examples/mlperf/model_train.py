@@ -554,13 +554,13 @@ def train_unet3d():
           print("Model diverging. Aborting.")
           diverged = True
 
-        if CKPT:
-          if WANDB and wandb.run is not None:
-            fn = f"./ckpts/{time.strftime('%Y%m%d_%H%M%S')}_{wandb.run.id}_e{epoch}.safe"
-          else:
-            fn = f"./ckpts/{time.strftime('%Y%m%d_%H%M%S')}_e{epoch}.safe"
+    if CKPT:
+      if WANDB and wandb.run is not None:
+        fn = f"./ckpts/{time.strftime('%Y%m%d_%H%M%S')}_{wandb.run.id}_e{epoch}.safe"
+      else:
+        fn = f"./ckpts/{time.strftime('%Y%m%d_%H%M%S')}_e{epoch}.safe"
 
-          save_checkpoint(get_state_dict(model), fn)
+      save_checkpoint(get_state_dict(model), fn)
 
     if is_successful or diverged:
       break
