@@ -307,7 +307,7 @@ class Kernel:
           self.reshape_and_permute(None, order)
           if DEBUG >= 3: print("permuted global dim", order, "due to allocation exceeds global limit")
 
-  def alias_buffer(self, op:LazyOp, i:int, pattern:List[int]) -> None:
+  def alias_buffer(self, op:LazyOp, i:int, pattern:List[int]) -> LocalBuffer:
     assert len(pattern) == len(self.sts[i].shape), f"must include a pattern for each shape {pattern} {self.sts[i].shape}"
 
     bst = 1
@@ -320,9 +320,9 @@ class Kernel:
           bst *= shp[j]
 
     self.sts.append(ShapeTracker((View.create(tuple(shp), tuple(stride)),)))
-    self.bufs.append(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size))
     if DEBUG >= 4: print("aliasing buffer", self.sts[i])
-    self.local_alias[op][i] = cast(LocalBuffer, self.bufs[-1])
+    self.local_alias[op][i] = cast(LocalBuffer, buf:=LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size))
+    return buf
 
   # ******************** high level optimizers ********************
 
