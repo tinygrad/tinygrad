@@ -1,6 +1,6 @@
 from tinygrad.helpers import tinytqdm
 from tqdm import tqdm
-import time, sys, shutil, os
+import time
 
 import unittest
 from unittest.mock import patch
