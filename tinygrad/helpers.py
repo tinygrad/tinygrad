@@ -251,6 +251,3 @@ def tinytqdm(iterable, desc='', disable=False, total=None, update_rate=100, char
     post_fix = f'| {i+1}/{total} [{fmt_time(dur)}<{fmt_time((dur/(i+1)*total)-dur)}, {(i+1)/dur:5.2f}it/s]'
     size = max(term-len(pre_fix)-len(post_fix)-len(desc), 1)
     print(f'\r{desc}{pre_fix}{char*int(size*prog)}{" "*(size-int(size*prog))}{post_fix}'[:term+1],flush=True,end=('' if i!=total-1 else '\n'))
-
-
-
