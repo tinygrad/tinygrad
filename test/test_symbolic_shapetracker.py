@@ -165,7 +165,7 @@ class TestSymbolicReshapeFromNonContiguous(unittest.TestCase):
       # different shape length  # TODO: cases where contractions matched might be fine
       Tensor.ones(3, 4, 1).reshape(3, vi)
     with self.assertRaises(ValueError):
-      # size matched, but dimentions do not match
+      # size matched, but dimensions do not match
       Tensor.ones(4, 3).reshape(3, vi)
 
   def test_reshape_from_padded(self):
