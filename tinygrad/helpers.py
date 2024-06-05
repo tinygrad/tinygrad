@@ -203,7 +203,6 @@ def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, allow_caching=n
     with urllib.request.urlopen(url, timeout=10) as r:
       assert r.status == 200
       total_length = int(r.headers.get('content-length', 0))
-      # progress_bar = tqdm(total=total_length, unit='B', unit_scale=True, desc=url)
       progress_bar = tinytqdm(range(total_length//16384+(total_length%16384!=0)), desc=url)
       (path := fp.parent).mkdir(parents=True, exist_ok=True)
       with tempfile.NamedTemporaryFile(dir=path, delete=False) as f:
@@ -252,3 +251,6 @@ def tinytqdm(iterable, desc='', disable=False, total=None, update_rate=100, char
     post_fix = f'| {i+1}/{total} [{fmt_time(dur)}<{fmt_time((dur/(i+1)*total)-dur)}, {(i+1)/dur:5.2f}it/s]'
     size = max(term-len(pre_fix)-len(post_fix)-len(desc), 1)
     print(f'\r{desc}{pre_fix}{char*int(size*prog)}{" "*(size-int(size*prog))}{post_fix}'[:term+1],flush=True,end=('' if i!=total-1 else '\n'))
+
+
+
