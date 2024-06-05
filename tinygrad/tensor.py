@@ -13,7 +13,7 @@ from tinygrad.lazy import LazyBuffer
 from tinygrad.multi import MultiLazyBuffer
 from tinygrad.ops import LoadOps
 from tinygrad.device import Device, Buffer, BufferOptions
-from tinygrad.shape.symbolic import sint, Variable, MulNode, Node
+from tinygrad.shape.symbolic import sint, Variable, MulNode, SumNode, NumNode, Node
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars, memory_planner
 
@@ -83,21 +83,14 @@ class Tensor:
   __slots__ = "lazydata", "requires_grad", "grad", "_ctx"
   __deletable__ = ('_ctx',)
   training: ClassVar[bool] = False
-  class train(ContextDecorator):
-    def __init__(self, mode:bool = True): self.mode = mode
-    def __enter__(self): self.prev, Tensor.training = Tensor.training, self.mode
-    def __exit__(self, exc_type, exc_value, traceback): Tensor.training = self.prev
-
   no_grad: ClassVar[bool] = False
-  class inference_mode(ContextDecorator):
-    def __init__(self, mode:bool = True): self.mode = mode
-    def __enter__(self): self.prev, Tensor.no_grad = Tensor.no_grad, self.mode
-    def __exit__(self, exc_type, exc_value, traceback): Tensor.no_grad = self.prev
+
   def __init__(self, data:Union[None, ConstType, List, Tuple, LazyBuffer, np.ndarray, bytes, MultiLazyBuffer, Variable],
                device:Optional[Union[str, tuple, list]]=None, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
     assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
     device = tuple(Device.canonicalize(x) for x in device) if isinstance(device, (tuple, list)) else Device.canonicalize(device)
-    # tensors have gradients, buffers do not
+
+    # tensors can have gradients if you have called .backward
     self.grad: Optional[Tensor] = None
 
     # NOTE: this can be in three states. False and None: no gradient, True: gradient
@@ -137,6 +130,16 @@ class Tensor:
         self.lazydata = MultiLazyBuffer.from_sharded(data, device, None)
     else:
       self.lazydata = data if data.device == device else data.copy_to_device(device)
+
+  class train(ContextDecorator):
+    def __init__(self, mode:bool = True): self.mode = mode
+    def __enter__(self): self.prev, Tensor.training = Tensor.training, self.mode
+    def __exit__(self, exc_type, exc_value, traceback): Tensor.training = self.prev
+
+  class inference_mode(ContextDecorator):
+    def __init__(self, mode:bool = True): self.mode = mode
+    def __enter__(self): self.prev, Tensor.no_grad = Tensor.no_grad, self.mode
+    def __exit__(self, exc_type, exc_value, traceback): Tensor.no_grad = self.prev
 
   def __repr__(self):
     return f"<Tensor {self.lazydata!r} on {self.device} with grad {(self.grad.lazydata if self.grad is not None else None)!r}>"
@@ -313,8 +316,10 @@ class Tensor:
 
   @staticmethod
   def from_node(y:Node, **kwargs) -> Tensor:
-    if isinstance(y, MulNode): return Tensor.from_node(y.a, **kwargs) * y.b
+    if isinstance(y, NumNode): return Tensor(y.b, **kwargs, requires_grad=False)
     if isinstance(y, Variable): return Tensor(y, **kwargs, requires_grad=False)
+    if isinstance(y, MulNode): return Tensor.from_node(y.a, **kwargs) * y.b
+    if isinstance(y, SumNode): return Tensor.from_node(y.nodes[0], **kwargs) + sum(y.nodes[1:])
     raise RuntimeError(f"unhandled Node {y}")
 
   # ***** creation llop entrypoint *****
@@ -1349,9 +1354,9 @@ class Tensor:
     print(t.var(axis=1).numpy())
     ```
     """
-    assert all_int(self.shape), "does not support symbolic shape"
-    square_sum = ((self - self.mean(axis=axis, keepdim=True)).square()).sum(axis=axis, keepdim=keepdim)
-    return square_sum.div(max(0, prod(self.shape)/prod(square_sum.shape)-correction))
+    squares = (self - self.mean(axis=axis, keepdim=True)).square()
+    n = prod([si for si, so in zip(self.shape, squares.sum(axis=axis, keepdim=True).shape) if si != so])
+    return squares.sum(axis=axis, keepdim=keepdim).div(max(0, n-correction))
 
   def std(self, axis=None, keepdim=False, correction=1):
     """
