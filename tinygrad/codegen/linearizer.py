@@ -390,13 +390,20 @@ class Linearizer(Kernel):
     if self.global_size is not None: self.global_size += [1]*(3-len(self.global_size))
     if self.local_size is not None: self.local_size += [1]*(3-len(self.local_size))
 
-    self.load_cache: Dict[str, UOp] = {}
-
     # define indexs
     reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+self.group_for_reduces, self.shape_len-self.upcasted)]  # noqa: E501
     alias_buf_idxs = self.index_local_aliases(global_idxs,local_idxs,reduce_idxs,upcast_idxs,full_upcast_idxs)
 
-    self.render_block(self.ast, global_idxs, local_idxs, upcast_idxs, full_upcast_idxs, alias_buf_idxs)
+    # parse AST
+    self.load_cache: Dict[str, UOp] = {}
+    loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]] = {}
+    accs: Dict[LazyOp, List[UOp]] = {}
+
+    # render reduceops by depth
+    for reduceop in self.reduceops:
+      self.render_block((reduceop, ), global_idxs, local_idxs, upcast_idxs, full_upcast_idxs, alias_buf_idxs, loaded_buffers, accs)
+
+    self.render_block(self.ast, global_idxs, local_idxs, upcast_idxs, full_upcast_idxs, alias_buf_idxs, loaded_buffers, accs)
 
     # maybe graph the uops
     if DEBUG >= 5: self.uops.print()
@@ -409,27 +416,25 @@ class Linearizer(Kernel):
     self.applied_opts_cache = self.applied_opts[:]
     return self
 
-  def render_block(self, outputs:Tuple[LazyOp, ...], global_idxs, local_idxs, upcast_idxs, full_upcast_idxs, alias_buf_idxs) -> List[List[UOp]]:
-    assert len(reduceops:=dedup([x for out in outputs for x in out.lazyops if x.op in ReduceOps])) <= 1, "max one reduceop per block"
+  def render_block(self, outputs:Tuple[LazyOp, ...], global_idxs, local_idxs, upcast_idxs, full_upcast_idxs,
+                   alias_buf_idxs, loaded_buffers, accs) -> List[List[UOp]]:
+    assert len(reduceops:=dedup([x for x in outputs if x.op in ReduceOps])) <= 1, "max one reduceop per block"
     reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+self.group_for_reduces, self.shape_len-self.upcasted)]  # noqa: E501
     fake_reduce_idxs = [x*0 for x in reduce_idxs]
 
-    # parse AST
-    loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]] = {}
-    accs: Dict[LazyOp, List[UOp]] = {}
-
     if len(reduceops) != 0:
       # render reduce op
-      local_idxs, upcast_idxs = self.render_reduceop(reduceops[0],accs,loaded_buffers,global_idxs,local_idxs,upcast_idxs,
-                                                     full_upcast_idxs,reduce_idxs,fake_reduce_idxs,alias_buf_idxs[reduceops[0]])
+      local_idxs, upcast_idxs = self.render_reduceop((r:=reduceops[0]),accs,loaded_buffers,global_idxs,local_idxs,upcast_idxs, full_upcast_idxs,
+                                                     reduce_idxs,fake_reduce_idxs,alias_buf_idxs[r])
+      return accs[r]
 
-    # load latebufs
-    loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs) \
-                           for i,b in enumerate(self.bufs) if b not in self.earlybufs and b.__class__ is not LocalBuffer})
-
-    # run late AST (without the store)
-    store_vals = {op.arg.idx:self.ast_parse(op.src[0], accs, None, loaded_buffers) for op in self.ast}
-    return [self.global_store(i, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val) for i, val in store_vals.items()]
+    else:
+      # load latebufs
+      loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs) \
+                             for i,b in enumerate(self.bufs) if b not in self.earlybufs and b.__class__ is not LocalBuffer})
+      # run late AST (without the store)
+      store_vals = {op.arg.idx:self.ast_parse(op.src[0], accs, None, loaded_buffers) for op in self.ast}
+      return [self.global_store(i, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val) for i, val in store_vals.items()]
 
   def ast_parse(self, x:LazyOp, accs:Dict[LazyOp, List[UOp]], offs:Optional[List[int]], loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]], reduce_acc:Optional[List[UOp]]=None, cache=None) -> List[UOp]: # noqa: E501
     if cache is None: cache = {}
