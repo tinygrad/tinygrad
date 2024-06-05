@@ -107,7 +107,7 @@ class TestLinearizer(unittest.TestCase):
     ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, arg=load),), arg=(0,)),), arg=store),
 
     load_t = Tensor.full(load.st.shape, 1).contiguous().realize()
-    k = helper_linearizer_ast(ast, [load_t], wanna_output=[load_t.numpy().sum()])[1]
+    helper_linearizer_ast(ast, [load_t], wanna_output=[load_t.numpy().sum()])[1]
     # Replacing IF/ENDIFs with gated stores
     # self.assertEqual(k.uops[-1].uop, UOps.ENDIF)
     # self.assertLess(k.uops.uops.index([x for x in k.uops.uops if x.uop is UOps.STORE][-1]), k.uops.uops.index(k.uops[-1]))
@@ -609,17 +609,9 @@ class TestLinearizer(unittest.TestCase):
       k.hand_coded_optimizations()
       uops = list(k.linearize().uops)
       # ignore kernel optimized IF statements for now
-      if gated_store:=next((u for u in uops if u.uop is UOps.STORE and u.vin[3].arg != True), None):
-        children = [gated_store]
-        while len(children) > 0:
-          x = children.pop(0)
-          if x not in uops: continue
-          children += [c for c in list(x.vin) if c.uop is not UOps.BARRIER]
-          if x.uop is UOps.RANGE or x.uop is UOps.PHI: uops.remove(x) # ignore phis and ranges for grouped reduces
-      print("uops=")
-      for u in uops: print("  ",u)
-      assert len(set([u.uop for u in uops if u.uop in {UOps.RANGE, UOps.SPECIAL}])) == 1, "has either specials or ranges, not both"
-      assert len([u for u in uops if u.uop is UOps.PHI]) == 0, "PHI should have been simplified"
+      gated_stores = [x for x in uops if x.uop is UOps.STORE and not (x.vin[3].uop is UOps.CONST and x.vin[3].arg)]
+      assert len(set([u.uop for u in uops if u.uop in {UOps.RANGE, UOps.SPECIAL}])) == 1+len(gated_stores), "has either specials or ranges, not both"
+      assert len([u for u in uops if u.uop is UOps.PHI]) == 0+len(gated_stores), "PHI should have been simplified"
       # TODO: once uops track min/max this will be fixed
       #assert len([u for u in uops if u.arg is BinaryOps.MAX]) <= max_ops, "no unnecessary MAX ops"
 

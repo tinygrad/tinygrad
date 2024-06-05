@@ -211,7 +211,8 @@ constant_folder = PatternMatcher([
   ({"uop": UOps.ALU, "arg": BinaryOps.SUB, "vin": ({"__name__": "x"}, {"__name__": "x"})}, lambda x: UOp.const(x.dtype, 0)),   # x-x -> 0
   # ** load/store folding **
   ({"uop": UOps.STORE, "vin": ({"__name__": "buf"}, {"__name__": "idx"},
-                               {"uop": UOps.LOAD, "vin": ({"__name__": "buf"}, {"__name__": "idx"})}, {"__name__": "gate"})}, lambda buf, idx, gate: UOp(UOps.NOOP)),
+                               {"uop": UOps.LOAD, "vin": ({"__name__": "buf"}, {"__name__": "idx"})}, {"__name__": "gate"})},
+    lambda buf, idx, gate: UOp(UOps.NOOP)),
   # ** two stage add/sub folding **
   ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"uop": UOps.ALU, "arg": BinaryOps.ADD,
                      "vin": [{"__name__": "x"}, {"__name__": "c1", "uop": UOps.CONST}]}, {"__name__": "c2", "uop": UOps.CONST}]},
@@ -221,8 +222,10 @@ constant_folder = PatternMatcher([
      lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.SUB, x.dtype, [c2.arg, c1.arg]))),
   # TODO: can do the invert of this (flip alt/load) when we fix double ops
   ({"uop": UOps.STORE, "vin": ({"__name__": "buf"}, {"__name__": "idx"}, {"uop": UOps.ALU, "arg": TernaryOps.WHERE,
-                       "vin": ({"__name__": "gate"}, {"__name__": "alt"}, {"uop": UOps.LOAD, "vin": ({"__name__": "buf"}, {"__name__": "idx"})})}, {"__name__": "str_gate"})},
-    lambda buf, idx, gate, alt, str_gate: UOp(UOps.STORE, None, (buf, idx, alt, UOp(uop=UOps.ALU, dtype=dtypes.bool, vin=(gate,str_gate), arg=BinaryOps.MUL)))),
+                       "vin": ({"__name__": "gate"}, {"__name__": "alt"}, {"uop": UOps.LOAD, "vin": ({"__name__": "buf"}, {"__name__": "idx"})})},
+                       {"__name__": "str_gate"})},
+    lambda buf, idx, gate, alt, str_gate:
+      UOp(UOps.STORE, None, (buf, idx, alt, UOp(uop=UOps.ALU, dtype=dtypes.bool, vin=(gate,str_gate), arg=BinaryOps.MUL)))),
   # store float4/float2 directly (remove CAST/GEP)
   ({"uop": UOps.STORE, "vin": ({"__name__": "buf"}, {"__name__": "idx"}, {"uop": UOps.CAST, "vin":
                                 tuple({"uop": UOps.GEP, "vin": ({"__name__": "val"},), "arg": i} for i in range(4))}, {"__name__": "gate"})},

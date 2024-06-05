@@ -166,7 +166,8 @@ class Linearizer(Kernel):
       else:
         rendered_idx = idx.render(self.render_ops, self)
       strgate = self.const(True, dtypes.bool) if gate is None else gate
-      if valid.min != 1: strgate = self.uops.add(uop=UOps.ALU, dtype=dtypes.bool, vin=(valid.render(self.render_ops, self), strgate), arg=BinaryOps.MUL)
+      if valid.min != 1:
+        strgate = self.uops.add(uop=UOps.ALU, dtype=dtypes.bool, vin=(valid.render(self.render_ops, self), strgate), arg=BinaryOps.MUL)
       stores.append(self.uops.add(UOps.STORE, None, (buf_uop, rendered_idx, var, strgate)+((barrier,) if barrier else ())))
     return stores
 
@@ -268,7 +269,7 @@ class Linearizer(Kernel):
     self.load_cache.clear()
 
     # end the local loop, do the local reduce
-    if_cond = None
+    if_cond:Optional[UOp] = None
     if self.group_for_reduces:
       fake_global_idxs = [x*0 for x in global_idxs]
       stores = self.global_store(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, accs[reduceop])  # store accumulators
@@ -276,7 +277,7 @@ class Linearizer(Kernel):
       if self.opts.has_local:
         fake_idxs = [NumNode(0)]*len(self.sts[-1].shape)
         fake_idxs[self.global_dims+self.local_dims:self.global_dims+len(local_idxs)] = local_idxs[self.local_dims:]
-        if_cond: UOp = create_lt_node(self.sts[-1].expr_idxs(fake_idxs)[0], 1).render(self.render_ops, self)
+        if_cond = create_lt_node(self.sts[-1].expr_idxs(fake_idxs)[0], 1).render(self.render_ops, self)
         # barrier = self.uops.add(UOps.IF, None, (if_cond, barrier))
 
       # create new late reduce local loops and replace local_idxs that have been used
@@ -313,7 +314,8 @@ class Linearizer(Kernel):
 
       # all local indices which were used for group_for_reduce are not valid any more and should be replaced with fake NumNode(0), since they have
       # been rewritten with fake end_local_idxs.
-    return (accs, loaded_buffers, fake_reduce_idxs, local_idxs[:self.local_dims] + [NumNode(0) for i in range(self.group_for_reduces)], upcast_idxs, if_cond)
+    return (accs, loaded_buffers, fake_reduce_idxs, \
+            local_idxs[:self.local_dims] + [NumNode(0) for i in range(self.group_for_reduces)], upcast_idxs, if_cond)
 
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
   def linearize(self):
