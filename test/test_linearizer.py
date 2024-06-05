@@ -1102,12 +1102,12 @@ class TestKernelOpts(unittest.TestCase):
     lins += helper_linearizer_ast(ast, [a,b], [[Opt(OptOps.GROUP, 0, 2)]])
 
     for k in lins:
-      local_bufs = [u for u in k.uops._uops if u.uop is UOps.DEFINE_LOCAL]
+      local_bufs = [u for u in k.uops if u.uop is UOps.DEFINE_LOCAL]
       seen_bar = False
-      for u in k.uops._uops:
+      for u in k.uops:
         if u.uop is UOps.BARRIER:
-          if seen_bar: assert "redudant barrier"
-          else: seen_bar = True
+          assert not seen_bar, "redudant barrier"
+          seen_bar = True
         elif (u.uop is UOps.LOAD or u.uop is UOps.STORE) and any([v in local_bufs for v in u.vin]): seen_bar = False
 
   @unittest.skip("multireduce isn't supported yet")
@@ -1123,12 +1123,12 @@ class TestKernelOpts(unittest.TestCase):
     ])
 
     for k in lins:
-      local_bufs = [u for u in k.uops._uops if u.uop is UOps.DEFINE_LOCAL]
+      local_bufs = [u for u in k.uops if u.uop is UOps.DEFINE_LOCAL]
       seen_bar = False
-      for u in k.uops._uops:
+      for u in k.uops:
         if u.uop is UOps.BARRIER:
-          if seen_bar: assert "redudant barrier"
-          else: seen_bar = True
+          assert not seen_bar, "redudant barrier"
+          seen_bar = True
         elif (u.uop is UOps.LOAD or u.uop is UOps.STORE) and any([v in local_bufs for v in u.vin]): seen_bar = False
 
   @unittest.skip("multireduce isn't supported yet")
@@ -1145,15 +1145,15 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.UNROLL, 0, 2)],[Opt(OptOps.UNROLL, 1, 3)],
       [Opt(OptOps.GROUP, 0, 2), Opt(OptOps.UNROLL, 0, 2)],
       [Opt(OptOps.GROUP, 1, 3), Opt(OptOps.UNROLL, 1, 3)],
-      ])
+    ])
 
     for k in lins:
-      local_bufs = [u for u in k.uops._uops if u.uop is UOps.DEFINE_LOCAL]
+      local_bufs = [u for u in k.uops if u.uop is UOps.DEFINE_LOCAL]
       seen_bar = False
-      for u in k.uops._uops:
+      for u in k.uops:
         if u.uop is UOps.BARRIER:
-          if seen_bar: assert "redudant barrier"
-          else: seen_bar = True
+          assert not seen_bar, "redudant barrier"
+          seen_bar = True
         elif (u.uop is UOps.LOAD or u.uop is UOps.STORE) and any([v in local_bufs for v in u.vin]): seen_bar = False
 
   def test_upcasts(self):
