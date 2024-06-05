@@ -15,10 +15,10 @@ def prod(x:Iterable[T]) -> Union[T,int]: return functools.reduce(operator.mul, x
 OSX = platform.system() == "Darwin"
 CI = os.getenv("CI", "") != ""
 def progress_bar(iterable, length=50, fill='█'):
-    start = time(); print(f'{0}% | {'-'*length} 0/{len(iterable)} 00:00<?,?it/s', end='\r')
+    start = time(); print(f'{0}%|{' '*length} 0/{len(iterable)} 00:00<?,?it/s', end='\r')
     for i, item in enumerate(iterable):
-        yield item; elapsed, percent, bar = time()-start, round(100*((i+1)/float(len(iterable))),1),fill*int(length * (i+1) // len(iterable)) + '-' * (length - int(length * (i+1) // len(iterable)))
-        print(f'{percent}% |{bar}|{i+1}/{len(iterable)}[{strftime("%H:%M:%S", gmtime(elapsed))}<{strftime("%H:%M:%S",gmtime(elapsed-elapsed/(percent/100)))},{str(round((i+1)/elapsed,2))+'it/s' if (i+1)/elapsed>=0.1 else str(round(elapsed/(i+1),2))+'s/it'}]', end='\n' if i+1==len(iterable) else '\r') 
+        yield item; elapsed, percent, bar = time.time()-start, round(100*((i+1)/float(len(iterable))),1),fill * int(length*(i+1)//len(iterable)) + ' ' * (length-int(length*(i+1)//len(iterable)))
+        print(f'{percent}%|{bar}|{i+1}/{len(iterable)}[{time.strftime("%H:%M:%S", time.gmtime(elapsed))}<{time.strftime("%H:%M:%S",time.gmtime(elapsed*(1-1/(percent/100)))},{str(round((i+1)/elapsed,2))+'it/s' if (i+1)/elapsed>=0.1 else str(round(elapsed/(i+1),2))+'s/it'}]', end='\n' if i+1==len(iterable) else '\r') 
 def dedup(x:Iterable[T]): return list(dict.fromkeys(x))   # retains list order
 def argfix(*x):
   if x and x[0].__class__ in (tuple, list):
