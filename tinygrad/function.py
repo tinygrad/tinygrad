@@ -150,13 +150,13 @@ def fabsfk(d:LazyBuffer) -> LazyBuffer:
   return dint.e(BinaryOps.AND, dint.const(0x7FFFFFFF)).cast(dtypes.float32, True)
   # return d.e(BinaryOps.CMPLT, d.const(0.0)).e(TernaryOps.WHERE, d.e(UnaryOps.NEG), d)
 
-def xisnotnanf(d:LazyBuffer) -> LazyBuffer:
+def xisnanf(d:LazyBuffer) -> LazyBuffer:
   assert d.dtype == dtypes.float32
-  return d.e(BinaryOps.CMPEQ, d)
+  return d.e(BinaryOps.CMPNE, d)
 
 def xisinff(x:LazyBuffer) -> LazyBuffer:
   assert x.dtype == dtypes.float32
-  return x.e(BinaryOps.CMPEQ, x.const(math.inf)).e(BinaryOps.OR, x.e(BinaryOps.CMPEQ, x.const(-math.inf)))
+  return x.e(BinaryOps.CMPNE, x.const(math.inf)).e(UnaryOps.NEG).e(BinaryOps.OR, x.e(BinaryOps.CMPNE, x.const(-math.inf)).e(UnaryOps.NEG))
 
 def xsignbitf(d: LazyBuffer) -> LazyBuffer:
   assert d.dtype == dtypes.float32
@@ -176,24 +176,25 @@ class Pow(Function):
 
   @staticmethod
   def _forward(x: LazyBuffer, y: LazyBuffer) -> LazyBuffer:
-    x_eq_zero = x.e(BinaryOps.CMPEQ, x.const(0.0))
+    x_eq_zero = x.e(BinaryOps.CMPNE, x.const(0.0)).e(UnaryOps.NEG)
+    x_eq_one = x.e(BinaryOps.CMPNE, x.const(1.0)).e(UnaryOps.NEG)
+    y_eq_zero = y.e(BinaryOps.CMPNE, y.const(0.0)).e(UnaryOps.NEG)
     result = expk3f(logk3f(fabsfk(x)).e(BinaryOps.MUL, y))
     yint = y.cast(dtypes.int32)
-    yiswhole = y.e(BinaryOps.CMPEQ, yint.cast(y.dtype))
-    yisodd = yint.e(BinaryOps.AND, yint.const(1)).e(BinaryOps.CMPEQ, yint.const(0)).e(TernaryOps.WHERE, yiswhole.const(False), yiswhole.const(True))
-    yisodd = yiswhole.e(TernaryOps.WHERE, yisodd, yiswhole.const(False))
+    yiswhole = y.e(BinaryOps.CMPNE, yint.cast(y.dtype)).e(UnaryOps.NEG)
+    yisodd = yint.e(BinaryOps.AND, yint.const(1)).e(BinaryOps.CMPNE, yint.const(0)).e(BinaryOps.AND, yiswhole)
 
-    result = xisnotnanf(result).e(TernaryOps.WHERE, result, result.const(math.inf))
+    result = xisnanf(result).e(TernaryOps.WHERE, result.const(math.inf), result)
     yisoddexpr = yiswhole.e(TernaryOps.WHERE, yisodd.e(TernaryOps.WHERE, x.const(-1.0), x.const(1.0)), x.const(math.nan))
     result = result.e(BinaryOps.MUL, x.e(BinaryOps.CMPLT, x.const(0.0)).e(TernaryOps.WHERE, yisoddexpr, x.const(1.0)))
     efx = mulsignf(fabsfk(x).e(BinaryOps.SUB, x.const(1.0)), y)
-    efxexpr = efx.e(BinaryOps.CMPEQ, efx.const(0.0)).e(TernaryOps.WHERE, x.const(1.0), x.const(math.inf))
+    efxexpr = efx.e(BinaryOps.CMPNE, efx.const(0.0)).e(TernaryOps.WHERE, x.const(math.inf), x.const(1.0))
     result = xisinff(y).e(TernaryOps.WHERE, efx.e(BinaryOps.CMPLT, efx.const(0.0)).e(TernaryOps.WHERE, x.const(0.0), efxexpr), result)
     mulsign0 = xsignbitf(y).e(BinaryOps.XOR, x_eq_zero).e(TernaryOps.WHERE, x.const(0.0), x.const(math.inf))
     mulsign1 = yisodd.e(TernaryOps.WHERE, x, x.const(1.0))
     result = xisinff(x).e(BinaryOps.OR, x_eq_zero).e(TernaryOps.WHERE, mulsignf(mulsign0, mulsign1), result)
-    result = xisnotnanf(x).e(BinaryOps.AND, xisnotnanf(y)).e(TernaryOps.WHERE, result, x.const(math.nan))
-    result = y.e(BinaryOps.CMPEQ, y.const(0.0)).e(BinaryOps.OR, x.e(BinaryOps.CMPEQ, x.const(1.0))).e(TernaryOps.WHERE, x.const(1.0), result)
+    result = xisnanf(x).e(BinaryOps.OR, xisnanf(y)).e(TernaryOps.WHERE, x.const(math.nan), result)
+    result = y_eq_zero.e(BinaryOps.OR, x_eq_one).e(TernaryOps.WHERE, x.const(1.0), result)
     return result
 
   def backward(self, grad_output: LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
