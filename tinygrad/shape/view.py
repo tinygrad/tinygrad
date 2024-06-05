@@ -2,7 +2,7 @@ from __future__ import annotations
 import functools, operator, itertools, math
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Set, cast
-from tinygrad.helpers import prod, all_int, argsort, merge_dicts
+from tinygrad.helpers import prod, all_int, argsort
 from tinygrad.shape.symbolic import Node, NumNode, Variable, sint, sym_infer
 
 @functools.lru_cache(maxsize=None)
@@ -281,14 +281,15 @@ class View:
 
     # if it's not contiguous and new shape is symbolic, check if it's directly replaceable
     if self_all_int and not new_all_int:
-      assert len(self.shape) == len(new_shape), f"cannot symbolic reshape non-contiguous {self} -> {new_shape}"
+      if len(self.shape) != len(new_shape): raise ValueError(f"cannot symbolic reshape non-contiguous {self} -> {new_shape}")
       for si, so in zip(self.shape, new_shape):
-        if isinstance(so, int): assert si == so, f"cannot symbolic reshape non-contiguous {self} -> {new_shape}"
+        if isinstance(so, int):
+          if si != so: raise ValueError(f"cannot symbolic reshape non-contiguous {self} -> {new_shape}")
         else:
           var_vals = {v: v.unbind()[1] for v in so.vars()}
-          assert si == sym_infer(so, var_vals), f"cannot symbolic reshape non-contiguous {self} -> {new_shape}"
+          if si != sym_infer(so, var_vals): raise ValueError(f"cannot symbolic reshape non-contiguous {self} -> {new_shape}")
       # all dimensions matched, return the new view directly
-      return View.create(new_shape)
+      return View(new_shape, self.strides, self.offset, self.mask, self.contiguous)
 
     strides, r_new_shape = [], reversed(new_shape)
     for merged_dim, new_stride, real_dim in reversed(_merge_dims(self.shape, self.strides, self.mask)):
