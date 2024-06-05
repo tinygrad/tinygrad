@@ -321,7 +321,7 @@ class UOpGraph:
     graph: DefaultDict[UOp, List[UOp]] = defaultdict(list)
     in_degree: DefaultDict[UOp, int] = defaultdict(int)
     loops = []
-    # ifs = []
+    ifs = []
     nodes: Dict[UOp, None] = {}
     def add_parents(u:UOp):
       if u in nodes: return
@@ -331,7 +331,7 @@ class UOpGraph:
         in_degree[u] += 1
         graph[x].append(u)
       if u.uop is UOps.RANGE: loops.append(u)
-      # if u.uop is UOps.IF: ifs.append(u)
+      if u.uop is UOps.IF: ifs.append(u)
     sink = UOp(UOps.SINK, None, tuple(x for x in sink.vin if x.uop is not UOps.NOOP))
     add_parents(sink)
 
@@ -377,27 +377,7 @@ class UOpGraph:
     self._uops = self._uops[:-1]
 
     # TODO: ifs should be removed and just the store should be gated
-    # sets of stores that have the same store condition and are not seperated by a barrier
-    # could replace barrier_domain with barrier; some stores do not have a barrier tho
-    # gates: Dict[Tuple[int,UOp], Set[UOp]] = {}
-    # barrier_domain = 0
-    # for u in self._uops:
-    #   if u.uop is UOps.BARRIER: barrier_domain += 1
-    #   if u.uop is UOps.STORE:
-    #     if not (key:=(barrier_domain, u.vin[3])) in gates: gates[key] = set()
-    #     gates[key].add(u)
-
-    # dfs_until_bar_cache = {}
-    # def dfs_until_bar(u: UOp): 
-    #     if u not in dfs_until_bar_cache: dfs_until_bar_cache[u] = list(graph[u]) + [x for v in graph[u] for x in dfs_until_bar(v) if v.uop is not UOps.BARRIER]
-    #     return dfs_until_bar_cache[u]
-    
-    # for u in ifs[::-1]:
-    #   if all([x.uop is UOps.STORE for x in graph[u]]):
-    #     self._uops.remove(u)
-    #     self._uops.insert(min([self._uops.index(x) for x in graph[u]]), u)
-    #   # self._uops.insert(max([self._uops.index(x) for x in dfs_until_bar(u) if x.uop is UOps.STORE])+1, UOp(UOps.ENDIF, None, (u,)))
-    #   self._uops.append(UOp(UOps.ENDIF, None, (u,)))
+    assert len(ifs) == 0, "Ifs should be removed"
 
     if type_verify: self.type_verify()
 

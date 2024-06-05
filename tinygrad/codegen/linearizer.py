@@ -134,7 +134,6 @@ class Linearizer(Kernel):
     return ret
 
   def global_store(self, i:int, idxs:List[Node], store:List[UOp], barrier:Optional[UOp]=None, gate:Optional[UOp]=None) -> List[UOp]:
-    print("global_store with gate:",gate)
     buf = self.bufs[i]
     buf_uop = self.buf_uops[i]
     assert buf_uop is not None, f"buffer {i} wasn't UOped"
@@ -168,7 +167,6 @@ class Linearizer(Kernel):
         rendered_idx = idx.render(self.render_ops, self)
       strgate = self.const(True, dtypes.bool) if gate is None else gate
       if valid.min != 1: strgate = self.uops.add(uop=UOps.ALU, dtype=dtypes.bool, vin=(valid.render(self.render_ops, self), strgate), arg=BinaryOps.MUL)
-      # print(f"with valid: {valid}; and indecies: {idxs}; \nand full_shape: {self.full_shape}; and store_shape: {self.sts[i].shape};\ngate for store: ", gate)
       stores.append(self.uops.add(UOps.STORE, None, (buf_uop, rendered_idx, var, strgate)+((barrier,) if barrier else ())))
     return stores
 
@@ -418,7 +416,6 @@ class Linearizer(Kernel):
     for op in self.ast:
       val = self.ast_parse(op.src[0], accs, None, loaded_buffers)
       # why don't these idxs make the final store gated?
-      print("late ast with if_cond=",if_cond)
       self.global_store(op.arg.idx, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val, gate=if_cond)
 
     # maybe graph the uops
