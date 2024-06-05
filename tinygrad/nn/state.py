@@ -1,9 +1,8 @@
 import os, json, pathlib, zipfile, pickle, tarfile, struct
-from tqdm import tqdm
 from typing import Dict, Union, List, Optional, Any, Tuple
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap, GlobalCounters
+from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap, GlobalCounters, tinytqdm as tqdm
 from tinygrad.shape.view import strides_for_shape
 from tinygrad.multi import MultiLazyBuffer
 

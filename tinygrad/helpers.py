@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string, ctypes
+import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string, ctypes, shutil
 import itertools, urllib.request, subprocess
 from tqdm import tqdm
 from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Sequence
@@ -204,10 +204,11 @@ def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, allow_caching=n
     with urllib.request.urlopen(url, timeout=10) as r:
       assert r.status == 200
       total_length = int(r.headers.get('content-length', 0))
-      progress_bar = tqdm(total=total_length, unit='B', unit_scale=True, desc=url)
+      # progress_bar = tqdm(total=total_length, unit='B', unit_scale=True, desc=url)
+      progress_bar = tinytqdm(range(total_length//16384), desc=url)
       (path := fp.parent).mkdir(parents=True, exist_ok=True)
       with tempfile.NamedTemporaryFile(dir=path, delete=False) as f:
-        while chunk := r.read(16384): progress_bar.update(f.write(chunk))
+        while chunk := r.read(16384): f.write(chunk), next(progress_bar)
         f.close()
         if (file_size:=os.stat(f.name).st_size) < total_length: raise RuntimeError(f"fetch size incomplete, {file_size} < {total_length}")
         pathlib.Path(f.name).rename(fp)
@@ -239,3 +240,16 @@ def init_c_struct_t(fields: Tuple[Tuple[str, ctypes._SimpleCData], ...]):
   return CStruct
 def init_c_var(ctypes_var, creat_cb): return (creat_cb(ctypes_var), ctypes_var)[1]
 def flat_mv(mv:memoryview): return mv if len(mv) == 0 else mv.cast("B", shape=(mv.nbytes,))
+
+def tinytqdm(iterable, desc='', disable=False, total=None, update_rate=100, char='█'):
+  skip, st, total, desc = 1, time.perf_counter(), len(iterable) if total is None else total, f'{desc}: ' if len(desc)>0 else ''
+  for i, item in enumerate(iterable):
+      yield item
+      if (i % skip != 0 and (i+1) != total) or disable: continue
+      prog, dur, term = (i+1)/total, time.perf_counter()-st, shutil.get_terminal_size().columns
+      pre_fix = f'{int(100*prog):3}%|'
+      if (i+1)/dur > update_rate: skip = int((i+1)/(dur/update_rate))
+      def fmt_time(t): return ':'.join([f'{x:02d}' for x in divmod(int(t), 60)])
+      post_fix = f'| {i+1}/{total} [{fmt_time(dur)}<{fmt_time((dur/(i+1)*total)-dur)}, {(i+1)/dur:5.2f}it/s]'
+      size = max(term-len(pre_fix)-len(post_fix)-len(desc), 1)
+      print(f'\r{desc}{pre_fix}{char*int(size*prog)}{" "*(size-int(size*prog))}{post_fix}'[:term+1],flush=True,end=('' if i!=total-1 else '\n'))
