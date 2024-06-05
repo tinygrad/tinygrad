@@ -267,9 +267,8 @@ class View:
     if 0 in self.shape:
       assert 0 in new_shape, f"cannot reshape 0 size to {new_shape}"
       return View.create(new_shape)
-    self_all_int, new_all_int = all_int(self.shape), all_int(new_shape)
     # check for the same size
-    if self_all_int:
+    if (self_all_int := all_int(self.shape)):
       assert all(isinstance(s, (int, Variable)) for s in new_shape), f"{self.shape=} -> {new_shape=} contains non (int, Variable) dim"
       if prod(self.shape) != prod([s if isinstance(s, int) else cast(Variable,s).val for s in new_shape]):
         raise ValueError(f"size mismatched, can't reshape {self.shape=} -> {new_shape=}")
@@ -280,7 +279,7 @@ class View:
     if self.contiguous: return View.create(new_shape)
 
     # if it's not contiguous and new shape is symbolic, check if it's directly replaceable
-    if self_all_int and not new_all_int:
+    if self_all_int and not all_int(new_shape):
       if len(self.shape) != len(new_shape): raise ValueError(f"cannot symbolic reshape non-contiguous {self} -> {new_shape}")
       for si, so in zip(self.shape, new_shape):
         if isinstance(so, int):
