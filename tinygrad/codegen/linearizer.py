@@ -390,7 +390,7 @@ class Linearizer(Kernel):
     if self.global_size is not None: self.global_size += [1]*(3-len(self.global_size))
     if self.local_size is not None: self.local_size += [1]*(3-len(self.local_size))
 
-    # define indexs
+    # define idxs for aliased buffers TODO: this doesn't belong in Kernel, but it can't exist in Block either (because of multireduce tensor cores)
     reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+self.group_for_reduces, self.shape_len-self.upcasted)]  # noqa: E501
     alias_buf_idxs = self.index_local_aliases(global_idxs,local_idxs,reduce_idxs,upcast_idxs,full_upcast_idxs)
 
@@ -424,7 +424,7 @@ class Linearizer(Kernel):
 
     if len(reduceops) != 0:
       # TODO: delete render_reduceop and move the logic for group_for_reduces to Block
-      local_idxs, upcast_idxs = self.render_reduceop((r:=reduceops[0]),accs,loaded_buffers,global_idxs,local_idxs,upcast_idxs, full_upcast_idxs,
+      local_idxs[:], upcast_idxs[:] = self.render_reduceop((r:=reduceops[0]),accs,loaded_buffers,global_idxs,local_idxs,upcast_idxs, full_upcast_idxs,
                                                      reduce_idxs,fake_reduce_idxs,alias_buf_idxs[r])
       return accs[r]
 
