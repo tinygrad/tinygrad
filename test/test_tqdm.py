@@ -26,9 +26,9 @@ class TestProgressBar(unittest.TestCase):
         time.sleep(0.001)
 
       tinytqdm_output = mock_stdout.getvalue().split("\r")[-1].rstrip()
-      tinytqdm_iters_per_sec = float(tinytqdm_output.split("it/s")[-2].split(" ")[-1])
+      iters_per_sec = float(tinytqdm_output.split("it/s")[-2].split(" ")[-1])
 
-      tqdm_output = tqdm.format_meter(n=tc['total'], total=tc['total'], elapsed=tc['total']/tinytqdm_iters_per_sec, ncols=tc['ncols'], prefix=tc['desc'])
+      tqdm_output = tqdm.format_meter(n=tc['total'], total=tc['total'], elapsed=tc['total']/iters_per_sec, ncols=tc['ncols'], prefix=tc['desc'])
       self.assertEqual(tinytqdm_output, tqdm_output)
 
 def test_tqdm_perf():
