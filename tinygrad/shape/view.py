@@ -1,7 +1,7 @@
 from __future__ import annotations
 import functools, operator, itertools, math
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, Dict, Set, cast
+from typing import Tuple, List, Optional, Dict, Set
 from tinygrad.helpers import prod, all_int, argsort
 from tinygrad.shape.symbolic import Node, NumNode, Variable, sint, sym_infer
 
@@ -79,6 +79,8 @@ def un1d(shape:Tuple[sint, ...], offs:sint) -> List[sint]:
     offs -= here * stride
   return result
 
+def int_size(shape:Tuple[sint, ...]) -> int: return prod([s if isinstance(s, int) else s.val for s in shape])
+
 @dataclass(frozen=True)
 class View:
   shape:Tuple[sint, ...]
@@ -89,10 +91,13 @@ class View:
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def size(self) -> int:
-    # NOTE: Variable and the Node derived from it in symbolic shapes can only have int as max.
+    # NOTE: sint in symbolic shapes can only have int as max.
     ret = prod([x.max if isinstance(x, Node) else x for x in self.shape])
     assert isinstance(ret, int), f"{ret=} is not int"
     return ret
+
+  @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
+  def int_size(self) -> int: return int_size(self.shape)
 
   @staticmethod
   @functools.lru_cache(maxsize=None)
@@ -269,19 +274,21 @@ class View:
     if 0 in self.shape:
       assert 0 in new_shape, f"cannot reshape 0 size to {new_shape}"
       return View.create(new_shape)
+
     # check for the same size
-    if (self_all_int := all_int(self.shape)):
-      assert all(isinstance(s, (int, Variable)) for s in new_shape), f"{self.shape=} -> {new_shape=} contains non (int, Variable) dim"
-      if prod(self.shape) != prod([s if isinstance(s, int) else cast(Variable,s).val for s in new_shape]):
-        raise ValueError(f"size mismatched, can't reshape {self.shape=} -> {new_shape=}")
+    try:
+      if self.int_size() != int_size(new_shape): raise ValueError(f"size mismatched, can't reshape {self.shape=} -> {new_shape=}")
+    except AttributeError:
+      # this happens in reshape_and_permute in linearizer since Variables are no longer bound
+      pass
 
     if new_shape == () and self.mask and any(mx==my for (mx,my) in self.mask): return None
 
-    # after the asserts, it's okay to check contiguous
+    # after checking the sizes, it's okay to check contiguous
     if self.contiguous: return View.create(new_shape)
 
     # if it's not contiguous and new shape is symbolic, check if it's directly replaceable
-    if self_all_int and not all_int(new_shape):
+    if all_int(self.shape) and not all_int(new_shape):
       if len(self.shape) != len(new_shape): raise ValueError(f"cannot symbolic reshape non-contiguous {self} -> {new_shape}")
       for si, so in zip(self.shape, new_shape):
         if isinstance(so, int):
