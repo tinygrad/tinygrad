@@ -1115,6 +1115,7 @@ class TestKernelOpts(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   def test_atomic_store_unrolled_multireduce(self):
     # unrolled local dim - causes stores for local reductions to pool at the top of the kernel, overwriting eachother
+    Tensor.manual_seed(1882)
     a,b = Tensor.rand(4,).realize(), Tensor.rand(4,).realize()
     r0,r1 = a.sum(), b.sum()
     ast = _temp_create_multireduce_ast(r0, r1)
@@ -1136,6 +1137,7 @@ class TestKernelOpts(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   def test_atomic_store_nested_range_multireduce(self):
     # nested ranges
+    Tensor.manual_seed(1882)
     a,b = Tensor.rand(6, ).realize(), Tensor.rand(6, ).realize()
     r0,r1 = a.reshape(6, 1).expand(6, 3).sum(), b.reshape(6, 1).expand(6, 3).sum()
     ast = _temp_create_multireduce_ast(r0, r1)
