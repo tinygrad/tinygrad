@@ -16,8 +16,7 @@ def prod(x:Iterable[T]) -> Union[T,int]: return functools.reduce(operator.mul, x
 OSX = platform.system() == "Darwin"
 CI = os.getenv("CI", "") != ""
 def progress_bar(iterable, length=50, fill='█'):
-    start = time.time()
-    print('{0}%|{1} 0/{2} 00:00<?,?it/s'.format(0, ' ' * length, len(iterable)), end='\r')
+    start = time.time(); print('{0}%|{1} 0/{2} 00:00<?,?it/s'.format(0, ' ' * length, len(iterable)), end='\r')
     for i, item in enumerate(iterable):
         yield item; elapsed, percent, bar = time.time() - start, round(100 * ((i + 1) / float(len(iterable))), 1), fill * int(length * (i + 1) // len(iterable)) + ' ' * (length - int(length * (i + 1) // len(iterable)))
         print("{0}%|{1}|{2}/{3}[{4}<{5},{6}]".format(percent,bar,i+1,len(iterable), time.strftime("%H:%M:%S", time.gmtime(elapsed)),time.strftime("%H:%M:%S", time.gmtime(elapsed*(1-1/(percent/100)))),str(round((i+1)/elapsed,2)) + 'it/s' if (i+1)/elapsed >= 0.1 else str(round(elapsed/(i+1),2))+'s/it'), end='\n' if i+1==len(iterable) else '\r')
