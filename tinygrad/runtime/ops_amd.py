@@ -80,7 +80,12 @@ def gfxreg(reg): return reg + 0x00001260 - amd_gpu.PACKET3_SET_SH_REG_START
 def data64_le(data): return (data & 0xFFFFFFFF, data >> 32)
 
 class HWPM4Queue:
-  def __init__(self): self.q = []
+  def __init__(self): self.q, self.binded_device = [], None
+  def __del__(self):
+    if self.binded_device is not None:
+      self.binded_device.synchronize()
+      self.binded_device._gpu_free(self.hw_page)
+
   def ptr(self) -> int: return len(self.q)
 
   def hdp_flush(self):
@@ -122,8 +127,8 @@ class HWPM4Queue:
   def update_exec(self, cmd_ptr, global_size, local_size):
     # Patch the exec cmd with new launch dims
     assert self.q[cmd_ptr + 67] == amd_gpu.PACKET3(amd_gpu.PACKET3_DISPATCH_DIRECT, 3),"The pointer does not point to a packet of this type"
-    self.q[cmd_ptr + 59 : cmd_ptr + 62] = local_size
-    self.q[cmd_ptr + 68 : cmd_ptr + 71] = global_size
+    self.q[cmd_ptr + 59 : cmd_ptr + 62] = array.array('I', local_size)
+    self.q[cmd_ptr + 68 : cmd_ptr + 71] = array.array('I', global_size)
 
   def wait(self, signal:hsa.amd_signal_t, value=0):
     addr = ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET
@@ -161,12 +166,25 @@ class HWPM4Queue:
                         value=signal.event_id, cst=signal.event_id, cache_flush=True)
     return self
 
-  def submit(self, device:AMDDevice):
+  def bind(self, device: AMDDevice):
+    self.binded_device = device
+    self.hw_page = device._gpu_alloc(len(self.q) * 4, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
+    hw_view = to_mv(self.hw_page.va_addr, self.hw_page.size).cast("I")
+    for i, value in enumerate(self.q): hw_view[i] = value
+
+    self.indirect_cmd = [amd_gpu.PACKET3(amd_gpu.PACKET3_INDIRECT_BUFFER, 2), self.hw_page.va_addr & 0xffffffff, self.hw_page.va_addr >> 32,
+                         len(self.q) | amd_gpu.INDIRECT_BUFFER_VALID]
+    self.q = hw_view # type: ignore
+
+  def submit(self, device: AMDDevice):
+    if device == self.binded_device: cmds = self.indirect_cmd
+    else: cmds = self.q
+
     wptr = device.pm4_write_pointer[0]
     pm4_buffer_view = to_mv(device.pm4_ring.va_addr, device.pm4_ring.size).cast("I")
-    for i, value in enumerate(self.q): pm4_buffer_view[(wptr+i)%(device.pm4_ring.size//4)] = value
-    device.pm4_write_pointer[0] = wptr + len(self.q)
-    device.pm4_doorbell[0] = wptr + len(self.q)
+    for i, value in enumerate(cmds): pm4_buffer_view[(wptr+i)%(device.pm4_ring.size//4)] = value
+    device.pm4_write_pointer[0] = wptr + len(cmds)
+    device.pm4_doorbell[0] = wptr + len(cmds)
     return self
 
 SDMA_MAX_COPY_SIZE = 0x400000
@@ -387,6 +405,8 @@ class AMDAllocator(LRUAllocator):
                  .signal(src_dev.timeline_signal, src_dev.timeline_value).submit(src_dev)
     HWPM4Queue().wait(src_dev.timeline_signal, src_dev.timeline_value).submit(dest_dev)
     src_dev.timeline_value += 1
+
+  def offset(self, buf, size:int, offset:int): return type(buf)(va_addr=buf.va_addr + offset, size=size)
 
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
 class AMDDevice(Compiled):

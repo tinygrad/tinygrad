@@ -379,17 +379,17 @@ class TestZeroShapeTensor(unittest.TestCase):
     t = Tensor.empty(3, 2, 0)
     assert t.shape == (3, 2, 0)
     # numpy has stride 0, 0, 0; torch has stride 2, 1, 1
-    assert t.lazydata.st.real_strides() == (0, 0, 1)
+    assert t.lazydata.st.real_strides() == (0, 0, 0)
 
     t = Tensor.empty(3, 0, 2)
     assert t.shape == (3, 0, 2)
     # numpy has stride 0, 0, 0; torch has stride 2, 2, 1
-    assert t.lazydata.st.real_strides() == (0, 2, 1)
+    assert t.lazydata.st.real_strides() == (0, 0, 0)
 
     t = Tensor.empty(0, 0, 0)
     assert t.shape == (0, 0, 0)
     # numpy has stride 0, 0, 0; torch has stride 1, 1, 1
-    assert t.lazydata.st.real_strides() == (0, 0, 1)
+    assert t.lazydata.st.real_strides() == (0, 0, 0)
 
   def test_rand(self):
     t = Tensor.rand(3, 2, 0)
