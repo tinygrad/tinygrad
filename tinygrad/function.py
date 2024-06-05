@@ -1,5 +1,6 @@
 """This is where the forwards and backwards passes live."""
 import math
+from dataclasses import dataclass
 from typing import Tuple, Optional
 from tinygrad.helpers import argsort
 from tinygrad.dtype import dtypes, DType, sum_acc_dtype
@@ -64,38 +65,60 @@ class Log(Function):
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.e(BinaryOps.DIV, self.x)
 
+@dataclass(frozen=True, order=True)
+class CoeffExp2:
+  u0: float # Constant term of polynomial
+  ci: Tuple[float, ...] # Polynomial coefficients
+  of: float # Overflow threshold
+  uf: float # Underflow threshold
+
+CoeffExp2f = CoeffExp2(
+  u0=0.1535920892e-3,
+  ci=(0.1339262701e-2, 0.9618384764e-2, 0.5550392344e-1,
+      0.2402265069e+0, 0.6931471825e+0, 0.1000000000e+1),
+  of=128.0,
+  uf=-150.0
+)
+
+CoeffExp2d = CoeffExp2(
+  u0=0.4434359082926529454e-9,
+  ci=(0.7073164598085707425e-8, 0.1017819260921760451e-6, 0.1321543872511327615e-5,
+      0.1525273353517584730e-4, 0.1540353045101147808e-3, 0.1333355814670499073e-2,
+      0.9618129107597600536e-2, 0.5550410866482046596e-1, 0.2402265069591012214e+0,
+      0.6931471805599452862e+0, 0.1000000000000000000e+1),
+  of=1024.0,
+  uf=-2000.0
+)
+
 def pow2if(q:LazyBuffer) -> LazyBuffer: # returns float32
-  assert q.dtype == dtypes.int32
-  return q.e(BinaryOps.ADD, q.const(127)).e(BinaryOps.SHL, q.const(23)).cast(dtypes.float32, True)
+  assert q.dtype in (dtypes.int32, dtypes.int64)
+  if q.dtype == dtypes.int32: return q.e(BinaryOps.ADD, q.const(127)).e(BinaryOps.SHL, q.const(23)).cast(dtypes.float32, True)
+  if q.dtype == dtypes.int64: return q.e(BinaryOps.ADD, q.const(1023)).e(BinaryOps.SHL, q.const(52)).cast(dtypes.float64, True)
 
 def ldexp2kf(d:LazyBuffer, e:LazyBuffer) -> LazyBuffer: # returns float32
-  assert d.dtype == dtypes.float32
-  assert e.dtype == dtypes.int32
+  assert d.dtype in (dtypes.float32, dtypes.float64)
+  assert e.dtype in (dtypes.int32, dtypes.int64)
   return d.e(BinaryOps.MUL, pow2if(e.e(BinaryOps.SHR, e.const(1)))).e(BinaryOps.MUL, pow2if(e.e(BinaryOps.SUB, e.e(BinaryOps.SHR, e.const(1)))))
 
 def rintfk(d:LazyBuffer) -> LazyBuffer: # returns int32
-  assert d.dtype == dtypes.float32
-  return d.e(BinaryOps.ADD, d.e(BinaryOps.CMPLT, d.const(0.0)).e(TernaryOps.WHERE, d.const(-0.5), d.const(0.5))).cast(dtypes.int32)
+  assert d.dtype in (dtypes.float32, dtypes.float64)
+  return_t = dtypes.int32 if d.dtype == dtypes.float32 else dtypes.int64
+  return d.e(BinaryOps.ADD, d.e(BinaryOps.CMPLT, d.const(0.0)).e(TernaryOps.WHERE, d.const(-0.5), d.const(0.5))).cast(return_t)
+
+def poly(u:LazyBuffer, s:LazyBuffer, c:Tuple[float, ...]) -> LazyBuffer:
+  for ci in c: u = u.e(BinaryOps.MUL, s).e(BinaryOps.ADD, u.const(ci))
+  return u
 
 class Exp2(Function): # 3.5 ULP maximum error
   def forward(self, x:LazyBuffer) -> LazyBuffer:
+    assert x.dtype in (dtypes.float32, dtypes.float64)
+    c = CoeffExp2f if x.dtype == dtypes.float32 else CoeffExp2d
     q = rintfk(x)
     s = x.e(BinaryOps.SUB, q.cast(x.dtype))
-
-    u = x.const(+0.1535920892e-3)
-    # TODO: collapse in a loop
-    u = u.e(BinaryOps.MUL, s).e(BinaryOps.ADD, x.const(+0.1339262701e-2))
-    u = u.e(BinaryOps.MUL, s).e(BinaryOps.ADD, x.const(+0.9618384764e-2))
-    u = u.e(BinaryOps.MUL, s).e(BinaryOps.ADD, x.const(+0.5550392344e-1))
-    u = u.e(BinaryOps.MUL, s).e(BinaryOps.ADD, x.const(+0.2402265069e+0))
-    u = u.e(BinaryOps.MUL, s).e(BinaryOps.ADD, x.const(+0.6931471825e+0))
-    u = u.e(BinaryOps.MUL, s).e(BinaryOps.ADD, x.const(+0.1000000000e+1))
-
+    u = poly(x.const(c.u0), s, c.ci)
     u = ldexp2kf(u, q)
-
-    u = x.e(BinaryOps.CMPLT, x.const(128.0)).e(TernaryOps.WHERE, u, x.const(math.inf))
-    u = x.e(BinaryOps.CMPLT, x.const(-150.0)).e(TernaryOps.WHERE, x.const(0.0), u)
-
+    u = x.e(BinaryOps.CMPLT, x.const(c.of)).e(TernaryOps.WHERE, u, x.const(math.inf))
+    u = x.e(BinaryOps.CMPLT, x.const(c.uf)).e(TernaryOps.WHERE, x.const(0.0), u)
     self.ret = u
     return self.ret
 
@@ -176,6 +199,8 @@ class Pow(Function):
 
   @staticmethod
   def _forward(x: LazyBuffer, y: LazyBuffer) -> LazyBuffer:
+    assert x.dtype == dtypes.float32
+    assert y.dtype == dtypes.float32
     x_eq_zero = x.e(BinaryOps.CMPNE, x.const(0.0)).e(UnaryOps.NEG)
     x_eq_one = x.e(BinaryOps.CMPNE, x.const(1.0)).e(UnaryOps.NEG)
     y_eq_zero = y.e(BinaryOps.CMPNE, y.const(0.0)).e(UnaryOps.NEG)

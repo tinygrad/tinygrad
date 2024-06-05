@@ -1845,7 +1845,7 @@ class Tensor:
     print(Tensor([0., 1., 2., 3.]).exp().numpy())
     ```
     """
-    return F.Exp2.apply(self*math.log2(math.e)) # self.cast(least_upper_float(self.dtype)) ?
+    return F.Exp2.apply(self.cast(least_upper_float(self.dtype))*math.log2(math.e)) # self.cast(least_upper_float(self.dtype)) ?
   def exp2(self):
     """
     Computes the base-2 exponential function element-wise.
@@ -1856,7 +1856,7 @@ class Tensor:
     print(Tensor([0., 1., 2., 3.]).exp2().numpy())
     ```
     """
-    return F.Exp2.apply(self)
+    return F.Exp2.apply(self.cast(least_upper_float(self.dtype)))
   def relu(self):
     """
     Applies the Rectified Linear Unit (ReLU) function element-wise.
