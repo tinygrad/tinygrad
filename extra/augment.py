@@ -6,11 +6,11 @@ cwd = Path.cwd()
 sys.path.append(cwd.as_posix())
 sys.path.append((cwd / 'test').as_posix())
 from extra.datasets import fetch_mnist
-from tqdm import trange
+from helpers import progress_bar
 
 def augment_img(X, rotate=10, px=3):
   Xaug = np.zeros_like(X)
-  for i in trange(len(X)):
+  for i in progress_bar(range(len(X))):
     im = Image.fromarray(X[i])
     im = im.rotate(np.random.randint(-rotate,rotate), resample=Image.BICUBIC)
     w, h = X.shape[1:]

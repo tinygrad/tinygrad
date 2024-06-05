@@ -3,7 +3,7 @@ import numpy as np
 import pickle
 from tinygrad.runtime.ops_gpu import CLProgram, CLBuffer
 from tinygrad import dtypes
-from tqdm import trange, tqdm
+from helpers import progress_bar
 from matplotlib import pyplot as plt
 
 tests = {}
@@ -31,7 +31,7 @@ def warp_size2(nthread):
 
 @register_test
 def test_warp_size():
-  return [(nthread, warp_size2(nthread)) for nthread in trange(1,256)]
+  return [(nthread, warp_size2(nthread)) for nthread in progress_bar(range(1,256))]
 
 def reg_count(nthread, ngrp, nreg):
   reg_declr = ''.join([f"float reg_data{i} = (float)niter + {i};\n" for i in range(nreg)])
@@ -56,7 +56,7 @@ def reg_count(nthread, ngrp, nreg):
 @register_test
 def test_reg_count(nthread=1, ngrp=1):
   base = reg_count(nthread, ngrp, 1)
-  return [(nreg, (reg_count(nthread, ngrp, nreg)-base)/nreg) for nreg in trange(4, 513, 4)]
+  return [(nreg, (reg_count(nthread, ngrp, nreg)-base)/nreg) for nreg in progress_bar(range(4, 513, 4))]
 
 def buf_cache_hierarchy_pchase(ndata, stride=1, NCOMP=1, steps=65536):
   ndata //= NCOMP*4  # ptr size
@@ -82,12 +82,12 @@ def buf_cache_hierarchy_pchase(ndata, stride=1, NCOMP=1, steps=65536):
 def test_memory_latency():
   # requires cacheline < 16
   szs = [int(1.3**x) for x in range(20, 70)]
-  return [(ndata, buf_cache_hierarchy_pchase(ndata, NCOMP=16, steps=128*1024)) for ndata in tqdm(szs)]
+  return [(ndata, buf_cache_hierarchy_pchase(ndata, NCOMP=16, steps=128*1024)) for ndata in progress_bar(szs)]
 
 @register_test
 def test_cacheline_size():
   # TODO: this buffer must be at least 2x the L1 cache for this test to work
-  return [(stride, buf_cache_hierarchy_pchase(4*65536, stride, steps=65536)) for stride in trange(1,64)]
+  return [(stride, buf_cache_hierarchy_pchase(4*65536, stride, steps=65536)) for stride in progress_bar(range(1,64))]
 
 def cl_read(sz, niter=1):
   prg = f"""__kernel void copy(
@@ -108,7 +108,7 @@ def test_read_bandwidth():
   szs = list(range(128*1024, 20*1024*1024, 128*1024))
   NITER = 8
   base = cl_read(16, niter=NITER)
-  return [(sz, (sz*NITER)/(cl_read(sz, niter=NITER)-base)) for sz in tqdm(szs)]
+  return [(sz, (sz*NITER)/(cl_read(sz, niter=NITER)-base)) for sz in progress_bar(szs)]
 
 
 def gflops(niter=4, nroll=4, ngroups=4096):
@@ -133,7 +133,7 @@ def gflops(niter=4, nroll=4, ngroups=4096):
 
 @register_test
 def test_gflops():
-  return [(niter, gflops(niter=niter, nroll=32)) for niter in trange(1, 32, 1)]
+  return [(niter, gflops(niter=niter, nroll=32)) for niter in progress_bar(range(1, 32, 1))]
 
 if __name__ == "__main__":
   cache = {}
