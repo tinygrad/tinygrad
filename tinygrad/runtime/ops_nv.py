@@ -326,7 +326,7 @@ class NVAllocator(LRUAllocator):
 
   def _alloc(self, size:int, options:BufferOptions):
     if options.host: return self.device._gpu_host_alloc(size)
-    else: return self.device._gpu_alloc(size, map_to_cpu=options.cpu_access)
+    else: return self.device._gpu_alloc(size, map_to_cpu=options.cpu_access, huge_page=(size > (16 << 20)))
 
   def _free(self, gpumem, options:BufferOptions):
     NVDevice.synchronize_system()
@@ -402,7 +402,7 @@ class NVDevice(Compiled):
              nv_gpu.NVOS32_ALLOC_FLAGS_IGNORE_BANK_PLACEMENT | nv_gpu.NVOS32_ALLOC_FLAGS_MEMORY_HANDLE_PROVIDED))
     mem_handle = rm_alloc(self.fd_ctl, nv_gpu.NV1_MEMORY_USER, self.root, self.device, alloc_params).hObjectNew
 
-    if va_addr is None: va_addr = self._alloc_gpu_vaddr(size)
+    if va_addr is None: va_addr = self._alloc_gpu_vaddr(size, alignment=align)
     if map_to_cpu: va_addr = self._gpu_map_to_cpu(mem_handle, size, target=va_addr, flags=map_flags)
     return self._gpu_uvm_map(va_addr, size, mem_handle)
 
@@ -458,7 +458,7 @@ class NVDevice(Compiled):
     mem.__setattr__("mapped_gpu_ids", getattr(mem, "mapped_gpu_ids", []) + [self.gpu_uuid])
     return self._gpu_uvm_map(mem.base, mem.length, mem.hMemory, create_range=False)
 
-  def _alloc_gpu_vaddr(self, size, alignment=(2 << 20)):
+  def _alloc_gpu_vaddr(self, size, alignment=(4 << 10)):
     NVDevice.uvm_vaddr = (res_va:=round_up(NVDevice.uvm_vaddr, alignment)) + size
     return res_va
 
