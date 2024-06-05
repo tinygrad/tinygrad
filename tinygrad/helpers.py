@@ -204,7 +204,7 @@ def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, allow_caching=n
       assert r.status == 200
       total_length = int(r.headers.get('content-length', 0))
       # progress_bar = tqdm(total=total_length, unit='B', unit_scale=True, desc=url)
-      progress_bar = tinytqdm(range(total_length//16384), desc=url)
+      progress_bar = tinytqdm(range(total_length//16384+(total_length%16384!=0)), desc=url)
       (path := fp.parent).mkdir(parents=True, exist_ok=True)
       with tempfile.NamedTemporaryFile(dir=path, delete=False) as f:
         while chunk := r.read(16384): f.write(chunk), next(progress_bar)
