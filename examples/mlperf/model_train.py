@@ -571,50 +571,38 @@ def train_rnnt():
 
 @TinyJit
 def train_step_bert(model, optimizer, scheduler, loss_scaler:float, input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor, masked_positions:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
-  lm_logits, clsf_logits = model(input_ids, segment_ids, attention_mask, masked_positions)
-  lm_loss = lm_logits.sparse_categorical_crossentropy(masked_lm_ids, ignore_index=masked_lm_weights)
-  clsf_loss = clsf_logits.binary_crossentropy_logits(next_sentence_labels)
-  loss = lm_loss + clsf_loss
+  optimizer.zero_grad()
 
-  if not getenv('DISABLE_BACKWARD', 0):
-    optimizer.zero_grad()
-    (loss * loss_scaler).backward()
+  lm_logits, seq_relationship_logits = model(input_ids, attention_mask, masked_positions, segment_ids)
+  loss = model.loss(lm_logits, seq_relationship_logits, masked_lm_ids, masked_lm_weights, next_sentence_labels)
+  (loss * loss_scaler).backward()
 
-    global_norm = Tensor([0.0], dtype=dtypes.float32, device=optimizer[0].device).realize()
-    for p in optimizer.params: 
-      p.grad = p.grad / loss_scaler
-      global_norm += p.grad.float().square().sum()
-    global_norm = global_norm.sqrt()
-    for p in optimizer.params: p.grad = (p.grad / Tensor.where(global_norm > 1.0, global_norm, 1.0)).cast(p.grad.dtype)
+  global_norm = Tensor([0.0], dtype=dtypes.float32, device=optimizer[0].device).realize()
+  for p in optimizer.params: 
+    p.grad = p.grad / loss_scaler
+    global_norm += p.grad.float().square().sum()
+  global_norm = global_norm.sqrt()
+  for p in optimizer.params: p.grad = (p.grad / Tensor.where(global_norm > 1.0, global_norm, 1.0)).cast(p.grad.dtype)
 
-    optimizer.step()
-    scheduler.step()
+  optimizer.step()
+  scheduler.step()
   return loss.realize()
 
 @TinyJit
 def eval_step_bert(model, input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor, masked_positions:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
-  lm_logits, clsf_logits = model(input_ids, segment_ids, attention_mask, masked_positions)
-
-  clsf_predictions = clsf_logits.log_softmax().argmax(-1)
-  clsf_accuracy = (clsf_predictions == next_sentence_labels).mean()
-
-  mlm_predictions = lm_logits.log_softmax().argmax(-1)
-  mask = (masked_lm_weights == 1.0)
-  mlm_accuracy = (mlm_predictions == masked_lm_ids).where(mask, 0).sum() / mask.sum()
-
-  lm_loss = lm_logits.sparse_categorical_crossentropy(masked_lm_ids, ignore_index=masked_lm_weights)
-  clsf_loss = clsf_logits.binary_crossentropy_logits(next_sentence_labels)
+  lm_logits, seq_relationship_logits = model(input_ids, attention_mask, masked_positions, segment_ids)
+  masked_lm_accuracy, seq_relationship_accuracy, masked_lm_loss, next_sentence_loss = model.accuracy(lm_logits, seq_relationship_logits, masked_lm_ids, masked_lm_weights, next_sentence_labels)
   return {
-    "masked_lm_accuracy": mlm_accuracy.realize(), 
-    "masked_lm_loss": lm_loss.realize(), 
-    "next_sentence_accuracy": clsf_accuracy.realize(), 
-    "next_sentence_loss": clsf_loss.realize()
+    "masked_lm_accuracy": masked_lm_accuracy.realize(),
+    "next_sentence_accuracy": seq_relationship_accuracy.realize(),
+    "masked_lm_loss": masked_lm_loss.realize(),
+    "next_sentence_loss": next_sentence_loss.realize()
   }
 
 def train_bert():
   # NOTE: pip install tensorflow, wandb required
   from examples.mlperf.dataloader import batch_load_train_bert, batch_load_val_bert
-  from examples.mlperf.helpers import get_mlperf_bert_model, init_bert_from_checkpoint, get_data_bert
+  from examples.mlperf.helpers import get_mlperf_bert_model, get_data_bert
   from examples.mlperf.lr_schedulers import PolynomialDecayWithWarmup
 
   config = {}
@@ -646,13 +634,14 @@ def train_bert():
   target, achieved                                      = getenv("TARGET", 0.72), False
 
   config["DEFAULT_FLOAT"] = dtypes.default_float.name
+  config["HALF_LINEAR"]   = getenv("HALF_LINEAR", 0)
+  config["DISABLE_DROPOUT"] = getenv("DISABLE_DROPOUT", 0)
   config["TRAIN_BEAM"]    = TRAIN_BEAM = getenv("TRAIN_BEAM", BEAM.value)
   config["EVAL_BEAM"]     = EVAL_BEAM  = getenv("EVAL_BEAM", BEAM.value)
 
   Tensor.manual_seed(seed)  # seed for weight initialization
 
-  model = get_mlperf_bert_model()
-  if init_ckpt: init_bert_from_checkpoint(model, init_ckpt)
+  model = get_mlperf_bert_model(init_ckpt)
   
   for _, x in get_state_dict(model).items():
     x.realize().to_(GPUS)
