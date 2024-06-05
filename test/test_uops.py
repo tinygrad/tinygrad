@@ -247,7 +247,6 @@ class TestLocalAccess(unittest.TestCase):
 
 @unittest.skipUnless(Device.DEFAULT in {"CUDA"} and getenv("PTX"), "This only tests assembly backends")
 class TestAssembly(unittest.TestCase):
-  @unittest.skip("Broken")
   def test_bitshift_left(self):
     uops = UOpGraph()
     g1 = uops.add(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int32), (), (0, True))
@@ -261,7 +260,6 @@ class TestAssembly(unittest.TestCase):
     self.assertEqual(uops.uops[-1].arg, BinaryOps.MUL)
     self.assertEqual(uops.uops[-2].arg, BinaryOps.SHL)
 
-  @unittest.skip("Broken")
   def test_bitshift_right(self):
     uops = UOpGraph()
     g1 = uops.add(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int32), (), (0, True))
