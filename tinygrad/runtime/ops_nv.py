@@ -115,8 +115,15 @@ class HWQueue:
     self.q = hw_view # type: ignore
 
   def _submit(self, dev, gpu_ring, put_value, gpfifo_entries, gpfifo_token, gpu_ring_controls):
+    if len(self.q) == 0: return put_value
+
     if dev == self.binded_device: cmdq_addr = self.hw_page.base
     else:
+      if dev.cmdq_wptr + len(self.q) * 4 > dev.cmdq_page.length:
+        assert (gpu_ring[gpu_ring_controls.GPGet] & 0xFFFFFFFFFC) >= dev.cmdq_page.base + len(self.q) * 4 or \
+               gpu_ring_controls.GPGet == gpu_ring_controls.GPPut, "cmdq overrun"
+        dev.cmdq_wptr = 0
+
       dev.cmdq[dev.cmdq_wptr//4:dev.cmdq_wptr//4+len(self.q)] = array.array('I', self.q)
       cmdq_addr = dev.cmdq_page.base+dev.cmdq_wptr
       dev.cmdq_wptr += len(self.q) * 4
@@ -173,10 +180,8 @@ class HWComputeQueue(HWQueue):
     qmd.cta_raster_width, qmd.cta_raster_height, qmd.cta_raster_depth = global_size
     qmd.cta_thread_dimension0, qmd.cta_thread_dimension1, qmd.cta_thread_dimension2 = local_size
 
-  def submit(self, dev:NVDevice):
-    if len(self.q) == 0: return
-    dev.compute_put_value = self._submit(dev, dev.compute_gpu_ring, dev.compute_put_value, dev.compute_gpfifo_entries,
-                                         dev.compute_gpfifo_token, dev.compute_gpu_ring_controls)
+  def submit(self, dev:NVDevice): dev.compute_put_value = self._submit(dev, dev.compute_gpu_ring, dev.compute_put_value, dev.compute_gpfifo_entries,
+                                                                       dev.compute_gpfifo_token, dev.compute_gpu_ring_controls)
 
 class HWCopyQueue(HWQueue):
   def copy(self, dest, src, copy_size):
@@ -192,10 +197,8 @@ class HWCopyQueue(HWQueue):
     self.next_cmd_index += 1
     return self
 
-  def submit(self, dev:NVDevice):
-    if len(self.q) == 0: return
-    dev.dma_put_value = self._submit(dev, dev.dma_gpu_ring, dev.dma_put_value, dev.dma_gpfifo_entries,
-                                     dev.dma_gpfifo_token, dev.dma_gpu_ring_controls)
+  def submit(self, dev:NVDevice): dev.dma_put_value = self._submit(dev, dev.dma_gpu_ring, dev.dma_put_value, dev.dma_gpfifo_entries,
+                                                                   dev.dma_gpfifo_token, dev.dma_gpu_ring_controls)
 
 SHT_PROGBITS, SHT_NOBITS, SHF_ALLOC, SHF_EXECINSTR = 0x1, 0x8, 0x2, 0x4
 class NVProgram:
@@ -241,6 +244,8 @@ class NVProgram:
     self.lib_sz = round_up(round_up(self.program.nbytes, 128) + max(0x1000, sum([round_up(x.nbytes, 128) for i,x in constant_buffers_data.items()]) +
                            round_up(0 if self.global_init is None else self.global_init.nbytes, 128)), 0x1000)
     self.lib_gpu = self.device.allocator.alloc(self.lib_sz)
+
+    HWComputeQueue().wait(self.device.timeline_signal, self.device.timeline_value - 1).submit(self.device)
     for st in range(0, len(self.program), 4095):
       HWComputeQueue().copy_from_cpu(self.lib_gpu.base+st*4, self.program[st:st+4095]).submit(self.device)
 
