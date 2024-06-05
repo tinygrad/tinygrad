@@ -1,7 +1,7 @@
 from __future__ import annotations
-from typing import Iterator, Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable, Union, cast
-import functools, itertools, heapq
-from collections import defaultdict
+from typing import Iterator, Optional, Tuple, Any, Dict, List, Deque, DefaultDict, Set, Callable, Union, cast
+import functools, itertools, random
+from collections import deque, defaultdict
 from enum import Enum, auto
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, DType
@@ -293,7 +293,7 @@ class UOpGraph:
       assert run_cnt < 100, "exceeded 100 rewrite loops!"
     return sink
 
-  def linearize(self, extra_pm:Optional[PatternMatcher]=None, type_verify=True):
+  def linearize(self, extra_pm:Optional[PatternMatcher]=None, type_verify=True, fuzz=False):
     # NOTE: relinearizering should be okay
     #assert self._uops is None, "already linearized"
 
@@ -310,14 +310,13 @@ class UOpGraph:
 
     # filter nodes that don't link to a sink
     # BFS toposort
+    nodes: Set[UOp] = set()
     graph: DefaultDict[UOp, List[UOp]] = defaultdict(list)
     in_degree: DefaultDict[UOp, int] = defaultdict(int)
-    loops = []
-    ifs = []
-    nodes: Dict[UOp, None] = {}
+    loops, ifs = [], []
     def add_parents(u:UOp):
       if u in nodes: return
-      nodes[u] = None
+      nodes.add(u)
       for x in u.vin:
         add_parents(x)
         in_degree[u] += 1
@@ -328,45 +327,50 @@ class UOpGraph:
     add_parents(sink)
 
     @functools.lru_cache(None)
-    def get_recursive_children(x:UOp, include_self=False) -> Set[UOp]:
+    def get_recursive_children(x:UOp, i:int, include_self=False) -> Set[UOp]:
       if x.uop is UOps.SINK: return set()
-      return set.union(set((x,)) if include_self else set(), *([get_recursive_children(u, True) for u in graph[x]] if x.uop is not UOps.PHI else []))
-    loops_children = {l:get_recursive_children(l) for l in loops[::-1]}
+      if (y:=x).uop is UOps.PHI:
+        # mypy bug: it thinks that y.uop will always be UOps.PHI and warns about unreachable code and non-overlapping identity check
+        while y.uop is not UOps.RANGE: y = y.vin[0] # type: ignore
+        if y in loops[:-i if i > 0 else None]: return set((x,)) if include_self else set() # type: ignore
+      return set.union(set((x,)) if include_self else set(), *([get_recursive_children(u, i, True) for u in graph[x]]))
 
-    queue: List = []
-    def push(u):
-      priority = 0
-      # prefer uops that are loop children
-      for l, ss in loops_children.items():
-        if u in ss: priority -= l.arg[0]*1000 + l.arg[1]
-      heapq.heappush(queue, (priority, u))
+    # make sure that external dependencies of a range are placed before entering range
+    uop2ctx: Dict[UOp, Optional[UOp]] = defaultdict(lambda: None)
+    for i,l in enumerate(loops[::-1]):
+      chlds = get_recursive_children(l, i)
+      for chld in chlds:
+        if chld not in uop2ctx: uop2ctx[chld] = l
+        for vin in chld.vin:
+          if vin in chlds or vin is l: continue
+          in_degree[l] += 1
+          graph[vin].append(l)
 
-    for u in nodes:
-      if in_degree[u] == 0: push(u)
+    queue: Dict[Optional[UOp], Deque[UOp]] = defaultdict(deque)
+    for u in filter(lambda u: in_degree[u] == 0, nodes): queue[uop2ctx[u]].append(u)
 
-    if getenv("FUZZ_UOPS", 0):
-      from test.external.fuzz_uops import fuzz_uops
-      self.fuzz_paths = fuzz_uops(graph, in_degree.copy(), loops_children)
-
-    self._uops = []
-    while queue:
-      p,x = heapq.heappop(queue)
-      if DEBUG >= 7: print(p,x)
-      if x.uop is UOps.DEFINE_ACC and len(x.vin):
+    self._uops, globals = [], []
+    ctxstack: List[Optional[UOp]] = [None]
+    while ctxstack:
+      if len(queue[ctxstack[-1]]) == 0:
+        if (ctx:=ctxstack.pop()) is not None: self._uops.append(UOp(UOps.ENDRANGE, None, (ctx,)))
+        continue
+      if fuzz: random.shuffle(queue[ctxstack[-1]])
+      x = queue[ctxstack[-1]].popleft()
+      if DEBUG >= 7: print(x)
+      if x.uop is UOps.RANGE: ctxstack.append(x)
+      if x.uop is UOps.DEFINE_GLOBAL: globals.append(x)
+      elif x.uop is UOps.DEFINE_ACC and len(x.vin):
         idx = min([self._uops.index(l) for l in x.vin])
         self._uops.insert(idx, x)
-      else:
-        self._uops.append(x)
-      for u, ss in loops_children.items():
-        if x in ss:
-          ss.remove(x)
-          if len(ss) == 0: self._uops.append(UOp(UOps.ENDRANGE, None, (u,)))
+      else: self._uops.append(x)
       for u in graph[x]:
         in_degree[u] -= 1
-        if in_degree[u] == 0: push(u)
+        if in_degree[u] == 0: queue[uop2ctx[u]].append(u)
+    globals.sort()
 
     assert self._uops[-1].uop is UOps.SINK, f"didn't end with SINK, ended with {self._uops[-1]}"
-    self._uops = self._uops[:-1]
+    self._uops = globals + self._uops[:-1]
 
     # TODO: ifs should be removed and just the store should be gated
     for u in ifs[::-1]: self._uops.append(UOp(UOps.ENDIF, None, (u,)))
