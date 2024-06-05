@@ -246,8 +246,18 @@ class HWCopyQueue:
     hw_view = to_mv(self.hw_page.va_addr, self.hw_page.size).cast("I")
     for i, value in enumerate(self.q): hw_view[i] = value
 
-    self.indirect_cmd = [amd_gpu.SDMA_OP_INDIRECT | amd_gpu.SDMA_PKT_INDIRECT_HEADER_VMID(8), *data64_le(self.hw_page.va_addr), elems_cnt, *data64_le(0)]
-    self.q, self.cmd_sizes = hw_view, [6]
+    # self._q([amd_gpu.SDMA_OP_GCR_REQ, 0, amd_gpu.SDMA_GCR_GLM_INV | amd_gpu.SDMA_GCR_GLK_INV | amd_gpu.SDMA_GCR_GLK_WB | amd_gpu.SDMA_GCR_GLV_INV | \
+    #   amd_gpu.SDMA_GCR_GL1_INV | amd_gpu.SDMA_GCR_GL2_WB | amd_gpu.SDMA_GCR_GL2_INV, 0, 0])
+
+    vmid = 8
+    fake_addr = 0xa111ddeadbeef
+    self.indirect_cmd = [amd_gpu.SDMA_OP_POLL_REGMEM, 0, 0x80000000, 0, 0, 0] + \
+      [amd_gpu.SDMA_OP_GCR_REQ, 0, amd_gpu.SDMA_GCR_GLM_INV | amd_gpu.SDMA_GCR_GLK_INV | amd_gpu.SDMA_GCR_GLK_WB | amd_gpu.SDMA_GCR_GLV_INV | \
+        amd_gpu.SDMA_GCR_GL1_INV | amd_gpu.SDMA_GCR_GL2_WB | amd_gpu.SDMA_GCR_GL2_INV | amd_gpu.SDMA_GCR_GLI_INV(1), 0, amd_gpu.SDMA_PKT_GCR_REQ_PAYLOAD4_VMID(vmid)] + \
+      [amd_gpu.SDMA_OP_INDIRECT | amd_gpu.SDMA_PKT_INDIRECT_HEADER_VMID(vmid), *data64_le(self.hw_page.va_addr), elems_cnt, *data64_le(fake_addr)]
+
+    # self.indirect_cmd = [amd_gpu.SDMA_OP_INDIRECT | amd_gpu.SDMA_PKT_INDIRECT_HEADER_VMID(8), *data64_le(self.hw_page.va_addr), elems_cnt, *data64_le(0)]
+    self.q, self.cmd_sizes = hw_view, [len(self.indirect_cmd)]
 
   def submit(self, device: AMDDevice):
     read_ptr = device.sdma_read_pointer[0]
@@ -258,8 +268,11 @@ class HWCopyQueue:
       if len(self.indirect_cmd) * 4 >= (device.sdma_ring.size - device.sdma_doorbell_value % device.sdma_ring.size):
         cmds, cmd_sizes = [0, 0] + self.indirect_cmd, [8]
       else:
-        add = ((40 - (device.sdma_doorbell_value % 32)) % 32) // 4
-        cmds, cmd_sizes = ([0] * add) + self.indirect_cmd, [6 + add]
+        # rem_ = len(self.indirect_cmd) % 8
+        # print(rem_)
+
+        add = 8 - (((device.sdma_doorbell_value % 32) // 4) + len(self.indirect_cmd) % 8)
+        cmds, cmd_sizes = ([0] * add) + self.indirect_cmd, [len(self.indirect_cmd) + add]
     else: cmds, cmd_sizes = self.q, self.cmd_sizes
 
     sdma_buffer_view = to_mv(device.sdma_ring.va_addr, device.sdma_ring.size).cast("I")
