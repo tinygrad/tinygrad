@@ -368,7 +368,7 @@ def train_unet3d():
   LR_WARMUP_INIT_LR = getenv("LR_WARMUP_INIT_LR", 0.0001)
   WANDB = getenv("WANDB")
   PROJ_NAME = getenv("PROJ_NAME", "tinygrad_unet3d_mlperf")
-  SEED = getenv("SEED", None)
+  SEED = getenv("SEED", -1) if getenv("SEED", -1) >= 0 else None
   TRAIN_DATASET_SIZE, VAL_DATASET_SIZE = len(get_train_files()), len(get_val_files())
   SAMPLES_PER_EPOCH = TRAIN_DATASET_SIZE // BS
   START_EVAL_AT = getenv("START_EVAL_AT", ceil(1000 * TRAIN_DATASET_SIZE / (SAMPLES_PER_EPOCH * BS)))
