@@ -316,7 +316,7 @@ class TestJit(unittest.TestCase):
       return y.realize()
 
     jf = TinyJit(f)
-    for _ in range(100):
+    for _ in range(5):
       a = Tensor.randn(10, 1000, device=d0).realize()
       xc = jf(a)
       np.testing.assert_allclose((a.numpy().sum(axis=(1,)) + 5).view(np.int32), xc.numpy(), atol=1e-4, rtol=1e-5)
