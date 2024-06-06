@@ -245,9 +245,8 @@ def tinytqdm(iterable, desc='', disable=False, total=None, update_rate=100, char
     yield item
     if (i % skip != 0 and (i+1) != total) or disable: continue
     prog, dur, term = (i+1)/total, time.perf_counter()-st, shutil.get_terminal_size().columns
-    pre_fix = f'{int(100*prog):3}%|'
     if (i+1)/dur > update_rate: skip = int((i+1)/(dur/update_rate))
     def fmt_time(t): return ':'.join([f'{x:02d}' for x in divmod(int(t), 60)])
     post_fix = f'| {i+1}/{total} [{fmt_time(dur)}<{fmt_time((dur/(i+1)*total)-dur)}, {(i+1)/dur:5.2f}it/s]'
-    size = max(term-len(pre_fix)-len(post_fix)-len(desc), 1)
-    print(f'\r{desc}{pre_fix}{char*int(size*prog)}{" "*(size-int(size*prog))}{post_fix}'[:term+1],flush=True,end=('' if i!=total-1 else '\n'))
+    sz = max(term-5-len(post_fix)-len(desc), 1)
+    print(f'\r{desc}{int(100*prog):3}%|{char*int(sz*prog)}{" "*(sz-int(sz*prog))}{post_fix}'[:term+1],flush=True,end=('' if i!=total-1 else '\n'))
