@@ -12,24 +12,26 @@ def canonicalize_strides(shape:Tuple[sint, ...], strides:Tuple[sint, ...]) -> Tu
 @functools.lru_cache(maxsize=None)
 def strides_for_shape(shape:Tuple[sint, ...]) -> Tuple[sint, ...]:
   if not shape: return ()
-  strides = tuple(itertools.accumulate(reversed(shape[1:]), operator.mul, initial=1))
-  return canonicalize_strides(shape, strides[::-1])
+  strides = tuple(itertools.accumulate(reversed(shape[1:]), operator.mul, initial=1))[::-1]
+  return canonicalize_strides(shape, strides)
 
 @functools.lru_cache(maxsize=None)
 def _merge_dims(shape:Tuple[int, ...], strides:Tuple[int, ...], mask:Optional[Tuple[Tuple[int, int], ...]]=None) -> Tuple[Tuple[int, int, int], ...]:
-  # merge contiguous subparts or zero strided dims. ret = List[(merged_dims, stride, merged dims w/o zero stride), ...]
-  if not shape: return tuple()
-  assert len(shape) == len(strides)
+  # merge contiguous sub-parts or zero strided dims. ret = Tuple[(merged_size, stride, merged size w/o zero stride), ...]
+  if not shape: return ()
+  assert len(shape) == len(strides) and (mask is None or len(shape) == len(mask))
   ret = [(shape[0], strides[0], shape[0] if strides[0] else 0)]
-  # wrt merging zero strided dimensions
-  merging = strides[0] == 0 and (mask[0][1] - mask[0][0] == 1 if mask else shape[0] == 1)
-  for i, (sh, st) in enumerate(zip(shape[1:], strides[1:]), start=1):
-    if sh == 1: continue
-    if merging or ret[-1][1] == sh * st: # mergeable
-      ret[-1] = (ret[-1][0] * sh, st, (sh if merging else ret[-1][2] * sh) if st else 0)
-    else: ret.append((sh, st, sh if st else 0)) # begin new
-    # merging ends with either non-zero strided dim or zero strided dim with mask range > 1
-    merging = st == 0 and (mask[i][1] - mask[i][0] == 1 if mask else sh == 1)
+  # merge this dim to next dim if size is 1
+  merging = (mask[0][1] - mask[0][0] == 1) if mask is not None else shape[0] == 1
+  for i, (s, st) in enumerate(zip(shape[1:], strides[1:]), start=1):
+    last_s, last_st, last_pre_expand_s = ret[-1]
+    # always merge 1
+    if s == 1: continue
+    # merge last dim with this dim if merging or strides matched
+    if merging or last_st == s * st: ret[-1] = (last_s * s, st, (s if merging else last_pre_expand_s * s) if st else 0)
+    else: ret.append((s, st, s if st else 0))
+    # merge this dim to next dim if size is 1
+    merging = (mask[i][1] - mask[i][0] == 1) if mask is not None else s == 1
   return tuple(ret)
 
 @functools.lru_cache(maxsize=None)
