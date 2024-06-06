@@ -355,8 +355,6 @@ def train_unet3d():
   from tinygrad.nn.optim import SGD
   from math import ceil
 
-  import numpy as np
-  import random
   import time
 
   GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
@@ -370,7 +368,7 @@ def train_unet3d():
   LR_WARMUP_INIT_LR = getenv("LR_WARMUP_INIT_LR", 0.0001)
   WANDB = getenv("WANDB")
   PROJ_NAME = getenv("PROJ_NAME", "tinygrad_unet3d_mlperf")
-  SEED = getenv("SEED")
+  SEED = getenv("SEED", None)
   TRAIN_DATASET_SIZE, VAL_DATASET_SIZE = len(get_train_files()), len(get_val_files())
   SAMPLES_PER_EPOCH = TRAIN_DATASET_SIZE // BS
   START_EVAL_AT = getenv("START_EVAL_AT", ceil(1000 * TRAIN_DATASET_SIZE / (SAMPLES_PER_EPOCH * BS)))
@@ -401,12 +399,9 @@ def train_unet3d():
     except ImportError:
       raise "Need to install wandb to use it"
 
-  if SEED:
+  if SEED is not None:
     config["seed"] = SEED
-
     Tensor.manual_seed(SEED)
-    np.random.seed(SEED)
-    random.seed(SEED)
 
   model = UNet3D()
   params = get_parameters(model)
