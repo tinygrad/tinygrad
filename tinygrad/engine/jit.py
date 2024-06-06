@@ -92,17 +92,19 @@ class MultiGraphRunner(GraphRunner):  # pylint: disable=abstract-method
     super().__init__(jit_cache, input_rawbuffers, var_vals)
 
   def _access_resources(self, read, write, new_dependency:Any):
+    def get_buf_id(rawbuf): return get_buf_id(rawbuf._base) if rawbuf._base is not None else id(rawbuf._buf)
+
     # To synchronize access to resources, we monitor the necessary prerequisites for accessing each resource,
     # whether for write or read operations. A resource can be accessed by either a single writer or multiple readers.
     wait_nodes = []
 
     for rawbuf in read + write:
-      if id(rawbuf._buf) in self.w_dependency_map: wait_nodes.append(self.w_dependency_map[id(rawbuf._buf)])
+      if get_buf_id(rawbuf) in self.w_dependency_map: wait_nodes.append(self.w_dependency_map[get_buf_id(rawbuf)])
     for rawbuf in write:
-      if id(rawbuf._buf) in self.r_dependency_map: wait_nodes.extend(self.r_dependency_map.pop(id(rawbuf._buf)))
+      if get_buf_id(rawbuf) in self.r_dependency_map: wait_nodes.extend(self.r_dependency_map.pop(get_buf_id(rawbuf)))
 
-    for rawbuf in read: self.r_dependency_map[id(rawbuf._buf)].append(new_dependency)
-    for rawbuf in write: self.w_dependency_map[id(rawbuf._buf)] = new_dependency
+    for rawbuf in read: self.r_dependency_map[get_buf_id(rawbuf)].append(new_dependency)
+    for rawbuf in write: self.w_dependency_map[get_buf_id(rawbuf)] = new_dependency
     return list({id(x):x for x in wait_nodes}.values())
 
 ReturnType = TypeVar('ReturnType')
