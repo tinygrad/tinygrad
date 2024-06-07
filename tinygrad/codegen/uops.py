@@ -382,6 +382,35 @@ class UOpGraph:
     # TODO: ifs should be removed and just the store should be gated
     assert len(ifs) == 0, "Ifs should be removed"
 
+    str_cache: Dict[UOp, Set[UOp]] = {}
+    def gate_group_dfs(x):
+      # len(x.vin) > 3 is for the test_uops, I think ideally vin[3] should be solified as the gate
+      # barriers are optional, so it makes sense for them to be last
+      if x.uop is UOps.STORE: str_cache[x] = set([x.vin[3] if len(x.vin) > 3 else UOp(uop=UOps.CONST, dtype=dtypes.bool, arg=True)])
+      elif x.uop is UOps.WMMA: str_cache[x] = set([UOp(uop=UOps.CONST, dtype=dtypes.bool, arg=True)])
+      elif x not in str_cache: str_cache[x] = set.union(set(), *[gate_group_dfs(v) for v in graph[x] if x.uop not in {UOps.BARRIER}])
+      return str_cache[x]
+    for u in self._uops: gate_group_dfs(u)
+
+    gated_groups: Dict[UOp, Tuple[UOp, int]] = {}
+    gate_counter = 0
+    for i in reversed([i for i,u in enumerate(self._uops) if u.uop is UOps.STORE]):
+      gate = list(str_cache[self._uops[i]])[0]
+      if self._uops[i] in gated_groups and gated_groups[self._uops[i]][0] is gate: gate_counter = gated_groups[self._uops[i]][1]
+      else: gated_groups[self._uops[i]] = (gate, gate_counter)
+      j = i
+      while j >= 0:
+        u = self._uops[j]
+        # this MUST be `!=` NOT `not is`
+        if u is gate or u.uop is UOps.BARRIER or any([gated_groups[x] != (gate,gate_counter) for x in graph[u] if x in gated_groups]): break
+        if (len(str_cache[u]) == 1 and list(str_cache[u])[0] is gate) or \
+          (u.uop is UOps.ENDRANGE and len(str_cache[u.vin[0]]) == 1 and list(str_cache[u.vin[0]])[0] is gate):
+          gated_groups[u] = (gate, gate_counter)
+          j -= 1
+        else: break
+      gate_counter += 1
+    self.uop_gates: Dict[UOp, UOp] = {u:gated_groups[u][0] for u in gated_groups}
+
     if type_verify: self.type_verify()
 
   def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None) -> UOp:

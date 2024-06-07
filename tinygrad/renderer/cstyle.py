@@ -104,10 +104,23 @@ class CStyleLanguage(Renderer):
       return ret
 
     child_count = Counter(v for ru in uops for v in ru.vin)
+    gate: Union[None, UOp] = None
 
     for u in uops:
       uop,dtype,vin,args = u.uop,u.dtype,u.vin,u.arg
       # these four uops don't have output dtypes
+      if ((u in uops.uop_gates and uops.uop_gates[u] is not gate) or u not in uops.uop_gates) and (gate is not None):
+        depth -= 1
+        kk("}")
+        gate = None
+
+      if gate is None and u in uops.uop_gates:
+        if not (uops.uop_gates[u].uop is UOps.CONST and uops.uop_gates[u].arg):
+          gate = uops.uop_gates[u]
+          assert gate in r, "gate cannot be gated"
+          kk(f"if ({r[gate]}) {{")
+          depth += 1
+          
       if uop is UOps.IF:
         kk(f"if ({r[vin[0]]}) {{")
         depth += 1
@@ -117,8 +130,7 @@ class CStyleLanguage(Renderer):
         kk("}")
       elif uop is UOps.STORE:
         assert vin[0].dtype is not None and vin[2].dtype is not None
-        rendered_store = self.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, strip_parens(r[vin[1]]), vin[0].uop is UOps.DEFINE_LOCAL)
-        kk(f"if ({r[vin[3]]}) {{ {rendered_store} }}" if len(vin) > 3 else rendered_store)
+        kk(self.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, strip_parens(r[vin[1]]), vin[0].uop is UOps.DEFINE_LOCAL))
       else:
         assert dtype is not None, f"None dtype for uop {uop}"
         if uop is UOps.RANGE:
@@ -171,7 +183,9 @@ class CStyleLanguage(Renderer):
           from_ssa = vin[0].uop in {UOps.LOAD, UOps.WMMA, UOps.DEFINE_ACC}
           r[u] = (r[vin[0]] if from_ssa else f"{(r[vin[0]])}") + (f"[{args}]" if vin[0].dtype.count > 4 else f".{'xyzw'[args]}")
         else: raise RuntimeError(f"failed to render {uop}")
-
+    if gate is not None:
+      depth -= 1
+      kk("}")
     return self.render_kernel(name, kernel, bufs, uops)
 
 class ClangRenderer(CStyleLanguage):
