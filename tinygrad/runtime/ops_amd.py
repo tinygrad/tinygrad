@@ -467,7 +467,7 @@ class AMDDevice(Compiled):
     start_time = time.time() * 1000
     while (time.time() * 1000 - start_time) < timeout:
       if signal.value >= value: return
-      kio.wait_events(AMDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=100)
+      # kio.wait_events(AMDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=100)
     raise RuntimeError(f"wait_signal: not set to {value}, but {signal.value}, {timeout} ms TIMEOUT!")
 
   def __init__(self, device:str=""):
