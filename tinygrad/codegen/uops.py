@@ -80,22 +80,13 @@ class UPat:
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
   if pat.name in store and store[pat.name] != uop: return False
   if pat.name is not None: store[pat.name] = uop
-  if pat.arg is not None:
-    if isinstance(pat.arg, set):
-      if uop.arg not in pat.arg: return False
-    elif uop.arg != pat.arg: return False
-  if pat.dtype is not None:
-    if isinstance(pat.dtype, set):
-      if uop.dtype not in pat.dtype: return False
-    elif uop.dtype != pat.dtype: return False
-  if pat.uop is not None:
-    if isinstance(pat.uop, set):
-      if uop.uop not in pat.uop: return False
-    elif uop.uop != pat.uop: return False
+  for p, u in [(pat.arg,uop.arg), (pat.dtype, uop.dtype), (pat.uop, uop.uop)]:
+      if p is not None:
+        if isinstance(p, set):
+          if u not in p: return False
+        elif u != p: return False
   if pat.vin is None: return True
-  # only one if it's a tuple
-  # try all permutations if it's a list
-  # repeat if it's a dict
+  # try all permutations if it's a list, only one if it's a tuple, repeat if it's a dict
   for vp in itertools.permutations(pat.vin) if isinstance(pat.vin,list) else ([pat.vin] if isinstance(pat.vin,tuple) else [(pat.vin,)*len(uop.vin)]):
     if len(uop.vin) != len(vp) and (len(uop.vin) not in pat.allow_len): return False
     new_store = store.copy()
