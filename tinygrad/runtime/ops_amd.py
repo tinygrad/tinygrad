@@ -466,7 +466,7 @@ class AMDDevice(Compiled):
 
     # Wait active for 5s, then going to sleep.
     start_time = time.time() * 1000
-    while time_spent:=(time.time() * 1000 - start_time) < timeout:
+    while (time_spent:=time.time() * 1000 - start_time) < timeout:
       if signal.value >= value: return
       if time_spent > 5000: kio.wait_events(AMDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=1000)
     raise RuntimeError(f"wait_signal: not set to {value}, but {signal.value}, {timeout} ms TIMEOUT!")
