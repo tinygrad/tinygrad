@@ -28,7 +28,7 @@ setup(name='tinygrad',
         'llvm': ["llvmlite"],
         'arm': ["unicorn"],
         'triton': ["triton-nightly>=2.1.0.dev20231014192330"],
-        'eval' : ["faster-coco-eval"],
+        'eval': ["faster-coco-eval"],
         'linting': [
             "pylint",
             "mypy",
