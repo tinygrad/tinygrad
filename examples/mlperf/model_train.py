@@ -424,7 +424,6 @@ def train_unet3d():
     return x.shard(GPUS, axis=0).realize(), y.shard(GPUS, axis=0), cookie
 
   @TinyJit
-  @Tensor.train()
   def train_step(model, x, y):
     optim.zero_grad()
 
@@ -435,8 +434,6 @@ def train_unet3d():
     optim.step()
     return loss.realize()
   
-  @Tensor.train(mode=False)
-  @Tensor.inference_mode()
   def eval_step(model, x, y):
     y_hat, y = sliding_window_inference(model, x, y, gpus=GPUS)
     y_hat, y = Tensor(y_hat), Tensor(y, requires_grad=False)
@@ -463,91 +460,97 @@ def train_unet3d():
     preprocess_dataset(get_val_files(), PREPROCESSED_DIR, True)
 
   for epoch in range(1, NUM_EPOCHS + 1):
-    with Context(BEAM=TRAIN_BEAM):
-      if epoch <= LR_WARMUP_EPOCHS and LR_WARMUP_EPOCHS > 0:
-        lr_warm_up(optim, LR_WARMUP_INIT_LR, LR, epoch, LR_WARMUP_EPOCHS)
+    Tensor.training = True
+    Tensor.no_grad = False
+    BEAM.value = TRAIN_BEAM
 
-      train_dataloader = batch_load_unet3d(PREPROCESSED_DIR / "train", batch_size=BS, val=False, shuffle=True, seed=SEED)
-      it = iter(tqdm(train_dataloader, total=SAMPLES_PER_EPOCH, desc=f"epoch {epoch}", disable=BENCHMARK))
-      i, proc = 0, data_get(it)
+    if epoch <= LR_WARMUP_EPOCHS and LR_WARMUP_EPOCHS > 0:
+      lr_warm_up(optim, LR_WARMUP_INIT_LR, LR, epoch, LR_WARMUP_EPOCHS)
 
-      prev_cookies = []
-      st = time.perf_counter()
+    train_dataloader = batch_load_unet3d(PREPROCESSED_DIR / "train", batch_size=BS, val=False, shuffle=True, seed=SEED)
+    it = iter(tqdm(train_dataloader, total=SAMPLES_PER_EPOCH, desc=f"epoch {epoch}", disable=BENCHMARK))
+    i, proc = 0, data_get(it)
 
-      while proc is not None:
-        GlobalCounters.reset()
+    prev_cookies = []
+    st = time.perf_counter()
 
-        loss, proc = train_step(model, proc[0], proc[1]), proc[2]
+    while proc is not None:
+      GlobalCounters.reset()
 
-        pt = time.perf_counter()
+      loss, proc = train_step(model, proc[0], proc[1]), proc[2]
 
-        if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
-        try:
-          next_proc = data_get(it)
-        except StopIteration:
-          next_proc = None
+      pt = time.perf_counter()
 
-        dt = time.perf_counter()
+      if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
+      try:
+        next_proc = data_get(it)
+      except StopIteration:
+        next_proc = None
 
-        device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
-        loss = loss.numpy().item()
+      dt = time.perf_counter()
 
-        cl = time.perf_counter()
+      device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
+      loss = loss.numpy().item()
 
-        if BENCHMARK: step_times.append(cl - st)
+      cl = time.perf_counter()
 
-        tqdm.write(
-          f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(pt - st) * 1000.0:7.2f} ms python, {(dt - pt) * 1000.0:6.2f} ms fetch data, "
-          f"{(cl - dt) * 1000.0:7.2f} ms {device_str}, {loss:5.2f} loss, {optim.lr.numpy()[0]:.6f} LR, "
-          f"{GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS"
-        )
+      if BENCHMARK: step_times.append(cl - st)
 
-        if WANDB:
-          wandb.log({"lr": optim.lr.numpy(), "train/loss": loss, "train/step_time": cl - st, "train/python_time": pt - st, "train/data_time": dt - pt,
-                     "train/cl_time": cl - dt, "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": epoch + (i + 1) / SAMPLES_PER_EPOCH})
+      tqdm.write(
+        f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(pt - st) * 1000.0:7.2f} ms python, {(dt - pt) * 1000.0:6.2f} ms fetch data, "
+        f"{(cl - dt) * 1000.0:7.2f} ms {device_str}, {loss:5.2f} loss, {optim.lr.numpy()[0]:.6f} LR, "
+        f"{GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS"
+      )
 
-        st = cl
-        prev_cookies.append(proc)
-        proc, next_proc = next_proc, None  # return old cookie
-        i += 1
+      if WANDB:
+        wandb.log({"lr": optim.lr.numpy(), "train/loss": loss, "train/step_time": cl - st, "train/python_time": pt - st, "train/data_time": dt - pt,
+                   "train/cl_time": cl - dt, "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": epoch + (i + 1) / SAMPLES_PER_EPOCH})
 
-        if i == BENCHMARK:
-          median_step_time = sorted(step_times)[(BENCHMARK + 1) // 2]  # in seconds
-          estimated_total_minutes = int(median_step_time * SAMPLES_PER_EPOCH * NUM_EPOCHS / 60)
-          print(f"Estimated training time: {estimated_total_minutes // 60}h{estimated_total_minutes % 60}m")
-          if (TRAIN_BEAM or EVAL_BEAM) and epoch == start_epoch: break
-          return
+      st = cl
+      prev_cookies.append(proc)
+      proc, next_proc = next_proc, None  # return old cookie
+      i += 1
 
-    with Context(BEAM=EVAL_BEAM):
-      if epoch == next_eval_at:
-        train_step.reset()
+      if i == BENCHMARK:
+        median_step_time = sorted(step_times)[(BENCHMARK + 1) // 2]  # in seconds
+        estimated_total_minutes = int(median_step_time * SAMPLES_PER_EPOCH * NUM_EPOCHS / 60)
+        print(f"Estimated training time: {estimated_total_minutes // 60}h{estimated_total_minutes % 60}m")
+        if (TRAIN_BEAM or EVAL_BEAM) and epoch == start_epoch: break
+        return
 
-        next_eval_at += evaluate_every
-        eval_loss = []
-        scores = []
+    if epoch == next_eval_at:
+      Tensor.training = False
+      Tensor.no_grad = True
+      BEAM.value = EVAL_BEAM
 
-        for x, y in tqdm(iterate(get_val_files(), preprocessed_dir=PREPROCESSED_DIR), total=VAL_DATASET_SIZE):
-          eval_loss_value, score = eval_step(model, x, y)
-          eval_loss.append(eval_loss_value)
-          scores.append(score)
+      train_step.reset()
 
-        scores = Tensor.mean(Tensor.stack(scores, dim=0), axis=0).numpy()
-        eval_loss = Tensor.mean(Tensor.stack(eval_loss, dim=0), axis=0).numpy()
+      next_eval_at += evaluate_every
+      eval_loss = []
+      scores = []
 
-        l1_dice, l2_dice = scores[0][-2], scores[0][-1]
-        mean_dice = (l2_dice + l1_dice) / 2
+      for x, y in tqdm(iterate(get_val_files(), preprocessed_dir=PREPROCESSED_DIR), total=VAL_DATASET_SIZE):
+        eval_loss_value, score = eval_step(model, x, y)
+        eval_loss.append(eval_loss_value)
+        scores.append(score)
 
-        tqdm.write(f"{l1_dice} L1 dice, {l2_dice} L2 dice, {mean_dice:.3f} mean_dice, {eval_loss:5.2f} eval_loss")
+      scores = Tensor.mean(Tensor.stack(scores, dim=0), axis=0).numpy()
+      eval_loss = Tensor.mean(Tensor.stack(eval_loss, dim=0), axis=0).numpy()
 
-        if WANDB:
-          wandb.log({"eval/loss": eval_loss, "eval/mean_dice": mean_dice, "epoch": epoch})
+      l1_dice, l2_dice = scores[0][-2], scores[0][-1]
+      mean_dice = (l2_dice + l1_dice) / 2
 
-        if mean_dice >= TARGET_METRIC:
-          is_successful = True
-          save_checkpoint(get_state_dict(model), f"./ckpts/unet3d.safe")
-        elif mean_dice < 1e-6:
-          print("Model diverging. Aborting.")
-          diverged = True
+      tqdm.write(f"{l1_dice} L1 dice, {l2_dice} L2 dice, {mean_dice:.3f} mean_dice, {eval_loss:5.2f} eval_loss")
+
+      if WANDB:
+        wandb.log({"eval/loss": eval_loss, "eval/mean_dice": mean_dice, "epoch": epoch})
+
+      if mean_dice >= TARGET_METRIC:
+        is_successful = True
+        save_checkpoint(get_state_dict(model), f"./ckpts/unet3d.safe")
+      elif mean_dice < 1e-6:
+        print("Model diverging. Aborting.")
+        diverged = True
 
     if not is_successful and CKPT:
       if WANDB and wandb.run is not None:
