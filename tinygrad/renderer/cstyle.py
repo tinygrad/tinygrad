@@ -120,7 +120,7 @@ class CStyleLanguage(Renderer):
           assert gate in r, "gate cannot be gated"
           kk(f"if ({r[gate]}) {{")
           depth += 1
-          
+
       if uop is UOps.IF:
         kk(f"if ({r[vin[0]]}) {{")
         depth += 1
