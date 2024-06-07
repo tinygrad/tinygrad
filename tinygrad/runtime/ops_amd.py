@@ -80,7 +80,7 @@ def gfxreg(reg): return reg + 0x00001260 - amd_gpu.PACKET3_SET_SH_REG_START
 def data64_le(data): return (data & 0xFFFFFFFF, data >> 32)
 
 class HWPM4Queue:
-  def __init__(self): self.q, self.binded_device = [], None
+  def __init__(self): self.q, self.binded_device, self.ptr_to_dispatch_packet = [], None, {}
   def __del__(self):
     if self.binded_device is not None:
       self.binded_device.synchronize()
@@ -107,6 +107,15 @@ class HWPM4Queue:
     self.hdp_flush()
     self.invalidate_cache()
 
+    user_data = [*data64_le(kernargs)]
+    if hasattr(prg, 'dispatch_packet_offset'):
+      dp = hsa.hsa_kernel_dispatch_packet_t.from_address(kernargs + prg.dispatch_packet_offset)
+      dp.workgroup_size_x, dp.workgroup_size_y, dp.workgroup_size_z = local_size[0], local_size[1], local_size[2]
+      dp.grid_size_y, dp.grid_size_y, dp.grid_size_y = global_size[0]*local_size[0], global_size[1]*local_size[1], global_size[2]*local_size[2]
+      dp.group_segment_size, dp.private_segment_size = prg.group_segment_size, prg.private_segment_size
+      user_data = [*data64_le(kernargs + prg.dispatch_packet_offset)] + user_data
+      self.ptr_to_dispatch_packet[self.ptr()] = dp
+
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 6), gfxreg(amd_gpu.regCOMPUTE_PGM_LO), (prg.prog_addr>>8) & 0xFFFFFFFF,
                prg.prog_addr >> 40, 0, 0, (prg.device.scratch.va_addr>>8) & 0xFFFFFFFF, prg.device.scratch.va_addr >> 40]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), gfxreg(amd_gpu.regCOMPUTE_PGM_RSRC1), prg.rsrc1, prg.rsrc2]
@@ -115,7 +124,7 @@ class HWPM4Queue:
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), gfxreg(amd_gpu.regCOMPUTE_STATIC_THREAD_MGMT_SE0)] + [0xFFFFFFFF] * 2
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), gfxreg(amd_gpu.regCOMPUTE_STATIC_THREAD_MGMT_SE2)] + [0xFFFFFFFF] * 2
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 4), gfxreg(amd_gpu.regCOMPUTE_STATIC_THREAD_MGMT_SE4)] + [0xFFFFFFFF] * 4
-    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), gfxreg(amd_gpu.regCOMPUTE_USER_DATA_0), kernargs & 0xFFFFFFFF, kernargs >> 32]
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, len(user_data)), gfxreg(amd_gpu.regCOMPUTE_USER_DATA_0)] + user_data
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 8), gfxreg(amd_gpu.regCOMPUTE_START_X), 0, 0, 0, *local_size, 0, 0]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), gfxreg(amd_gpu.regCOMPUTE_RESOURCE_LIMITS), 0]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_DISPATCH_DIRECT, 3), *global_size, CS_W32_EN | FORCE_START_AT_000 | COMPUTE_SHADER_EN]
@@ -129,6 +138,10 @@ class HWPM4Queue:
     assert self.q[cmd_ptr + 67] == amd_gpu.PACKET3(amd_gpu.PACKET3_DISPATCH_DIRECT, 3),"The pointer does not point to a packet of this type"
     self.q[cmd_ptr + 59 : cmd_ptr + 62] = array.array('I', local_size)
     self.q[cmd_ptr + 68 : cmd_ptr + 71] = array.array('I', global_size)
+
+    if (dp:=self.ptr_to_dispatch_packet.get(cmd_ptr)) is not None:
+      dp.workgroup_size_x, dp.workgroup_size_y, dp.workgroup_size_z = local_size[0], local_size[1], local_size[2]
+      dp.grid_size_y, dp.grid_size_y, dp.grid_size_y = global_size[0]*local_size[0], global_size[1]*local_size[1], global_size[2]*local_size[2]
 
   def wait(self, signal:hsa.amd_signal_t, value=0):
     addr = ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET
@@ -285,6 +298,7 @@ class AMDProgram:
     self.group_segment_size = lib_gpu_view.cast("I")[entry_point//4]
     self.private_segment_size = lib_gpu_view.cast("I")[entry_point//4 + 1]
     self.kernargs_segment_size = lib_gpu_view.cast("I")[entry_point//4 + 2]
+    self.kernargs_alloc_size = self.kernargs_segment_size
     self.kernargs_offset = 0
 
     lds_size = ((self.group_segment_size + 511) // 512) & 0x1FF
@@ -294,6 +308,11 @@ class AMDProgram:
     code = hsa.amd_kernel_code_t.from_address(self.lib_gpu.va_addr + entry_point) # NOTE: this is wrong, it's not this object
     self.rsrc1 = code.compute_pgm_rsrc1
     self.rsrc2 = code.compute_pgm_rsrc2 | (lds_size << 15)
+
+    if code.kernel_code_properties & 0x2 == 0x2: # ENABLE_SGPR_DISPATCH_PTR
+      # Appned dispatch packet to the kernargs to pass it to gpu.
+      self.dispatch_packet_offset = self.kernargs_alloc_size
+      self.kernargs_alloc_size += ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t)
 
     assert code.kernel_code_properties & 0x400 == 0x400 # ENABLE_WAVEFRONT_SIZE32
     assert code.workitem_private_segment_byte_size == 0
@@ -309,7 +328,7 @@ class AMDProgram:
     if hasattr(self, 'lib_gpu'): self.device._gpu_free(self.lib_gpu)
 
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
-    if self.device.kernargs_ptr + self.kernargs_segment_size > (self.device.kernargs.va_addr + self.device.kernargs.size):
+    if self.device.kernargs_ptr + self.kernargs_alloc_size > (self.device.kernargs.va_addr + self.device.kernargs.size):
       self.device.kernargs_ptr = self.device.kernargs.va_addr
 
     if not hasattr(self, "args_struct_t"):
@@ -329,7 +348,7 @@ class AMDProgram:
     if wait: q.timestamp(ctypes.addressof(self.device.timeline_signal) + getattr(hsa.amd_signal_t, 'end_ts').offset)
     q.signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
     self.device.timeline_value += 1
-    self.device.kernargs_ptr += self.kernargs_segment_size
+    self.device.kernargs_ptr += self.kernargs_alloc_size
 
     if wait:
       self.device._wait_signal(self.device.timeline_signal, self.device.timeline_value - 1)
