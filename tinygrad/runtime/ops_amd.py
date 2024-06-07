@@ -462,16 +462,14 @@ class AMDDevice(Compiled):
   @classmethod
   def _wait_signal(self, signal:hsa.amd_signal_t, value=0, timeout=10000):
     assert signal.event_id != 0, "can't wait on this signal"
+    evt_arr = (kfd.struct_kfd_event_data)(event_id=signal.event_id)
 
     # Wait active for 5s, then going to sleep.
     start_time = time.time() * 1000
-    while (time.time() * 1000 - start_time) < (active_wait := max(5000, timeout)):
+    while time_spent:=(time.time() * 1000 - start_time) < timeout:
       if signal.value >= value: return
-
-    evt_arr = kfd.struct_kfd_event_data(event_id=signal.event_id)
-    if (wait_sleeping := timeout - int(active_wait)) > 0:
-      kio.wait_events(AMDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=wait_sleeping)
-    if signal.value < value: raise RuntimeError(f"wait_signal: not set to {value}, but {signal.value}, {timeout} ms TIMEOUT!")
+      if time_spent > 5000: kio.wait_events(AMDDevice.kfd, events_ptr=ctypes.byref(evt_arr), num_events=1, wait_for_all=1, timeout=1000)
+    raise RuntimeError(f"wait_signal: not set to {value}, but {signal.value}, {timeout} ms TIMEOUT!")
 
   def __init__(self, device:str=""):
     if AMDDevice.kfd == -1:
