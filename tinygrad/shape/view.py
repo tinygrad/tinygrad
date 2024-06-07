@@ -34,6 +34,10 @@ def _merge_dims(shape:Tuple[int, ...], strides:Tuple[int, ...], mask:Optional[Tu
     merging = (mask[i][1] - mask[i][0] == 1) if mask is not None else s == 1
   return tuple(ret)
 
+# TODO: can_merge should match the check in merge_dims (why doesn't it?)
+def can_merge(dim_size: sint, dim_stride: Optional[sint], last_st: Optional[sint]) -> bool:
+  return (dim_stride is not None) and ((dim_stride != 0 and last_st == dim_size*dim_stride) or (dim_stride == 0 and last_st == 0))
+
 @functools.lru_cache(maxsize=None)
 def _reshape_mask(view: View, new_shape:Tuple[sint, ...]) -> Tuple[Optional[Tuple[Tuple[sint, sint], ...]], bool]:
   if view.mask is None: return view.mask, False

@@ -7,7 +7,7 @@ from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore
 from tinygrad.dtype import dtypes, ImageDType, DType
 from tinygrad.helpers import all_same, colored, ansilen, dedup, flatten, getenv, prod, DEBUG, round_up, all_int, get_contraction
-from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.shape.shapetracker import ShapeTracker, multi_merge_dims
 from tinygrad.shape.symbolic import sint
 from tinygrad.shape.view import View, strides_for_shape
 from dataclasses import dataclass
@@ -246,7 +246,6 @@ class Kernel:
   def simplify_merge_adjacent(self):
     if self.shape_len == 0: return
     shapes, strides = [x.shape for x in self.sts], [x.real_strides() for x in self.sts]
-
     # if it's an image, insert fake strides such that this fusion doesn't happen across image axes
     if isinstance(self.bufs[0].dtype, ImageDType):
       base_shape = self.bufs[0].dtype.shape
@@ -262,20 +261,8 @@ class Kernel:
 
     # merge dimensions if we can, multi _merge_dims
     # NOTE: this does not always preserve the reduce dimension
-    # TODO: move this into shapetracker, with tests!
     # TODO: how does this work with multi-reduce?
-    rets = [[(s[0], st[0])] for s,st in zip(shapes, strides)]
-    for i in range(1, len(shapes[0])):
-      can_merge = []
-      for s,st,ret in zip(shapes, strides, rets):
-        # TODO: added the always mergeability of 1s, is this right? if so, add to shapetracker in the 1 case
-        si, sti, last_st = s[i], st[i], ret[-1][1]
-        can_merge.append((sti is not None) and ((sti != 0 and last_st == si*sti) or (sti == 0 and last_st == 0)))
-      # more can merge than this
-      mergeable = all(can_merge) and i != self.first_reduce
-      for j,(s,st) in enumerate(zip(shapes, strides)):
-        if mergeable: rets[j][-1] = (rets[j][-1][0] * s[i], st[i])
-        else: rets[j].append((s[i], st[i]))
+    rets = multi_merge_dims(shapes, strides, self.first_reduce)
 
     # do the reshapes
     for i,x in enumerate(rets[:len(self.sts)]): self.sts[i] = self.sts[i].reshape(tuple([y[0] for y in x]))

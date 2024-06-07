@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Set, Iterable, cast
 from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, NumNode, create_lt_node, create_ge_node, sint
-from tinygrad.shape.view import View, strides_for_shape
+from tinygrad.shape.view import View, can_merge, strides_for_shape
 
 def _expr_view(view:View, idxs:List[Node], valid:Optional[Node]=None) -> Tuple[Node, Node]:
   assert len(idxs) == len(view.shape), f"need an idx for all dimensions {idxs} vs {view.shape}"
@@ -14,6 +14,16 @@ def _expr_view(view:View, idxs:List[Node], valid:Optional[Node]=None) -> Tuple[N
     if sh != 1 and st != 0: iexpr.append(idx*st)
     if m is not None: vexpr += [create_ge_node(idx, m[0]), create_lt_node(idx, m[1])]  # idx >= m[0], idx < m[1]
   return Node.sum(iexpr), Node.ands(vexpr)
+
+def multi_merge_dims(shapes: List[Tuple[sint,...]], strides: List[Tuple[Optional[sint], ...]], first_reduce: int):
+  rets = [[(s[0], st[0])] for s,st in zip(shapes, strides)]
+  for i in range(1, len(shapes[0])):
+    mergeable = i != first_reduce and all((can_merge(s[i], st[i], ret[-1][1]) for s,st,ret in zip(shapes, strides, rets)))
+    # more can merge than this
+    for j,(s,st) in enumerate(zip(shapes, strides)):
+      if mergeable: rets[j][-1] = (rets[j][-1][0] * s[i], st[i])
+      else: rets[j].append((s[i], st[i]))
+  return rets
 
 @dataclass(frozen=True)
 class ShapeTracker:
