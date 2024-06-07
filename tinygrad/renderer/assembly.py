@@ -30,9 +30,6 @@ class PTXRenderer(Renderer):
 .address_size 64
 .visible .entry"""
   barrier = "bar.sync\t0;"
-  has_pred = True
-  load_global = True
-  label_prefix = "$"
   gid = [f'%ctaid.{chr(120+i)}' for i in range(3)]
   gdim = [f'%nctaid.{chr(120+i)}' for i in range(3)]
   lid = [f'%tid.{chr(120+i)}' for i in range(3)]
@@ -208,13 +205,12 @@ class PTXRenderer(Renderer):
         elif uop is UOps.DEFINE_VAR:
           bufs.append((args.expr, dtype))
           r[u] = f"%{args.expr}"
-          if self.load_global: kk(*self.render_load(args.expr, ssa('dat', u, self.types[dtype]), dtype, ss=".param"))
+          kk(*self.render_load(args.expr, ssa('dat', u, self.types[dtype]), dtype, ss=".param"))
         elif uop is UOps.DEFINE_GLOBAL:
           bufs.append((nm:=f"data{args[0]}", dtype))
           r[u] = f"%{nm}"
-          if self.load_global:
-            dt = dtypes.ulong if dtype.__class__ == PtrDType else dtype
-            kk(*self.render_load(nm, ssa('dat', u, self.types[dt]), dt, ss=".param"))
+          dt = dtypes.ulong if dtype.__class__ == PtrDType else dtype
+          kk(*self.render_load(nm, ssa('dat', u, self.types[dt]), dt, ss=".param"))
         elif uop is UOps.WMMA:
           wmma = []
           for vv in vin[:2]:
