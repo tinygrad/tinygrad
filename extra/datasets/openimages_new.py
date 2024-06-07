@@ -37,7 +37,7 @@ class ConvertCocoPolysToMask(object):
     classes = classes[keep]
 
     target = {}
-    target["boxes"] = resize_boxes_np(boxes, image.size[::-1], (800, 800))
+    target["boxes"] = resize_boxes_np(boxes, image.size[::-1], (800, 800)).astype(np.float32)
     # print('BOXES:TENSCONV', target["boxes"].numpy())
     target["labels"] = classes
     target["image_id"] = image_id
@@ -225,7 +225,7 @@ def loader_process(q_in, q_out, X:Tensor, seed, coco, YB:Tensor, YL:Tensor, YM:T
       img = np.array(resize_img(img))
       b = target['boxes']
       if r:
-        img = np.flip(img, axis=2)
+        img = np.flip(img, axis=1)
         b[:, [0, 2]] = 800 - b[:, [2, 0]]
       midx = matcher_iou_func(b, Anchor)
       m_temp = np.clip(midx, 0, None)

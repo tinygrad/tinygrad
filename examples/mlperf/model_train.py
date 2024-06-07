@@ -395,14 +395,24 @@ def train_retinanet():
   from extra.datasets.openimages_new import get_openimages, batch_load_retinanet, batch_load_retinanet_val
   from pycocotools.cocoeval import COCOeval
   from pycocotools.coco import COCO
+  from tinygrad.nn import BatchNorm2d
   ROOT = 'extra/datasets/open-images-v6TEST'
   NAME = 'openimages-mlperf'
   coco_train = get_openimages(NAME,ROOT, 'train')
   coco_val = get_openimages(NAME,ROOT, 'val')
+  def cust_call(self, x:Tensor):
+    batch_mean = self.running_mean
+      # NOTE: this can be precomputed for static inference. we expand it here so it fuses
+    batch_invstd = self.running_var.reshape(1, -1, 1, 1).expand(x.shape).add(self.eps).rsqrt()
 
+    return x.batchnorm(self.weight, self.bias, batch_mean, batch_invstd)
+  resnet.BatchNorm = functools.partial(BatchNorm2d, eps=0.0)
+  resnet.BatchNorm.__call__ = cust_call
   if not SYNCBN: resnet.BatchNorm = functools.partial(UnsyncedBatchNorm, num_devices=len(GPUS))
-  model = retinanet.RetinaNet(resnet.ResNeXt50_32X4D(), num_anchors=anchor_generator.num_anchors_per_location()[0])
-  # model.backbone.body.fc = None
+  resnet_model = resnet.ResNeXt50_32X4D()
+  resnet_model.load_from_pretrained()
+  model = retinanet.RetinaNet(resnet_model, num_anchors=anchor_generator.num_anchors_per_location()[0])
+  model.backbone.body.fc = None
   # model.load_from_pretrained()
 
   for k, v in get_state_dict(model).items():
@@ -426,7 +436,7 @@ def train_retinanet():
       v.realize().to_(GPUS)
   
   # model.load_checkpoint("./ckpts/retinanet_4xgpu020_B100_E0_11703.safe")
-  # model.load_checkpoint("./ckpts/retinanet_4xgpu020_B52_E0x75.safe")
+  # model.load_checkpoint("./ckpts/retinanet_4xgpu018_B16_E0.safe")
   # model.load_from_pretrained()
 
   parameters = get_parameters(model)
@@ -509,6 +519,15 @@ def train_retinanet():
       proc, next_proc = next_proc, None  # return old cookie
       cnt+=1
 
+
+    if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
+    fn = f"./ckpts/retinanet_{len(GPUS)}x{HOSTNAME}_B{BS}_E{epoch}.safe"
+    state_dict = get_state_dict(model)
+    for k,v in state_dict.items():
+      state_dict[k] = v.cast(dtypes.float32)
+    safe_save(state_dict, fn)
+    print(f" *** Model saved to {fn} ***")
+    
     # ***********EVAL******************
     bt = time.time()
     if getenv("RESET_STEP", 1): train_step.reset()
@@ -569,13 +588,7 @@ def train_retinanet():
     print(colored(f'{epoch} EVAL_ACC {eval_acc} || {time.time()-bt}', 'green'))
     if getenv("RESET_STEP", 1): val_step.reset()
 
-    if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
-    fn = f"./ckpts/retinanet_{len(GPUS)}x{HOSTNAME}_B{BS}_E{epoch}.safe"
-    state_dict = get_state_dict(model)
-    for k,v in state_dict.items():
-      state_dict[k] = v.cast(dtypes.float32)
-    safe_save(state_dict, fn)
-    print(f" *** Model saved to {fn} ***")
+    
     if eval_acc>MAP_TARGET:
       print('SUCCESSFULLY TRAINED TO TARGET: EPOCH', epoch, eval_acc)
 

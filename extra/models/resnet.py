@@ -148,6 +148,10 @@ class ResNet:
 
       # TODO: remove or when #777 is merged
       assert obj.shape == dat.shape or (obj.shape == (1,) and dat.shape == ()), (k, obj.shape, dat.shape)
+      if dat.shape==():
+        # print('REASHAPE TO 1')
+        dat = dat.reshape(1)
+      # print(k, dat.shape, obj.shape)
       obj.assign(dat)
 
 ResNet18 = lambda num_classes=1000: ResNet(18, num_classes=num_classes)
