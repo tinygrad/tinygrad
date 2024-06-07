@@ -6,7 +6,7 @@ from tinygrad.ops import LoadOps, BufferOps, LazyOp, ReduceOps, ConstBuffer, Mem
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
 from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, GlobalCounters, colored, prod, dedup, all_int, merge_dicts, getenv
 from tinygrad.shape.symbolic import Variable
-from tinygrad.dtype import ImageDType, dtypes, DType
+from tinygrad.dtype import ConstType, ImageDType, dtypes, DType
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
@@ -56,8 +56,13 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], outputs:Tuple[Laz
   if buf.op is LoadOps.CONST:
     unbound_st, st_var_vals = st.simplify().unbind()
     var_vals.update(st_var_vals)
-    if isinstance(buf.arg, Variable): var_vals.__setitem__(*buf.arg.unbind())
-    return LazyOp(BufferOps.CONST, (), ConstBuffer(buf.arg, buf.dtype, unbound_st))
+    if isinstance(buf.arg, Variable):
+      var_vals.__setitem__(*buf.arg.unbind())
+      #value = buf.arg.val?
+      val = buf.arg
+    else: val = buf.arg
+    assert isinstance(val, ConstType), f"cannot create ConstBuffer of type {type(val)}"
+    return LazyOp(BufferOps.CONST, (), ConstBuffer(val, buf.dtype, unbound_st))
 
   # if we aren't fusing it, it's a load and we add it to the inputs
   if buf.realized is not None or (buf in realizes and buf not in outputs):
