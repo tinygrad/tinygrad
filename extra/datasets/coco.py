@@ -3,14 +3,13 @@ import pathlib
 import zipfile
 import numpy as np
 from tinygrad.helpers import fetch
-import pycocotools._mask as _mask
 from examples.mask_rcnn import Masker
-from pycocotools.coco import COCO
-from pycocotools.cocoeval import COCOeval
+from faster_coco_eval import COCO, COCOeval_faster
+import faster_coco_eval.core.mask as mask_util
 
-iou         = _mask.iou
-merge       = _mask.merge
-frPyObjects = _mask.frPyObjects
+iou         = mask_util.iou
+merge       = mask_util.merge
+frPyObjects = mask_util.frPyObjects
 
 BASEDIR = pathlib.Path(__file__).parent / "COCO"
 BASEDIR.mkdir(exist_ok=True)
@@ -45,28 +44,28 @@ contiguous_category_id_to_json_id = {v:k for k,v in json_category_id_to_contiguo
 
 def encode(bimask):
   if len(bimask.shape) == 3:
-    return _mask.encode(bimask)
+    return mask_util.encode(bimask)
   elif len(bimask.shape) == 2:
     h, w = bimask.shape
-    return _mask.encode(bimask.reshape((h, w, 1), order='F'))[0]
+    return mask_util.encode(bimask.reshape((h, w, 1), order='F'))[0]
 
 def decode(rleObjs):
   if type(rleObjs) == list:
-    return _mask.decode(rleObjs)
+    return mask_util.decode(rleObjs)
   else:
-    return _mask.decode([rleObjs])[:,:,0]
+    return mask_util.decode([rleObjs])[:,:,0]
 
 def area(rleObjs):
   if type(rleObjs) == list:
-    return _mask.area(rleObjs)
+    return mask_util.area(rleObjs)
   else:
-    return _mask.area([rleObjs])[0]
+    return mask_util.area([rleObjs])[0]
 
 def toBbox(rleObjs):
   if type(rleObjs) == list:
-    return _mask.toBbox(rleObjs)
+    return mask_util.toBbox(rleObjs)
   else:
-    return _mask.toBbox([rleObjs])[0]
+    return mask_util.toBbox([rleObjs])[0]
 
 
 def convert_prediction_to_coco_bbox(file_name, prediction):
@@ -185,7 +184,7 @@ def evaluate_predictions_on_coco(json_result_file, iou_type="bbox"):
     json.dump(unique_list, f)
 
   coco_dt = coco_gt.loadRes(str(f'{json_result_file}.flattend'))
-  coco_eval = COCOeval(coco_gt, coco_dt, iou_type)
+  coco_eval = COCOeval_faster(coco_gt, coco_dt, iou_type)
   coco_eval.evaluate()
   coco_eval.accumulate()
   coco_eval.summarize()
