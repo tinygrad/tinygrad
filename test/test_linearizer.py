@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 import numpy as np
 import unittest
 from dataclasses import replace
@@ -608,8 +608,10 @@ class TestLinearizer(unittest.TestCase):
       k = Linearizer(*sched[0].ast)
       k.hand_coded_optimizations()
       uops = list(k.linearize().uops)
+      print(k.to_program().src)
       # ignore kernel optimized IF statements for now
       gated_stores = [x for x in uops if x.uop is UOps.STORE and not (x.vin[3].uop is UOps.CONST and x.vin[3].arg)]
+      print("gated_stores:",gated_stores)
       assert len(set([u.uop for u in uops if u.uop in {UOps.RANGE, UOps.SPECIAL}])) == 1+len(gated_stores), "has either specials or ranges, not both"
       assert len([u for u in uops if u.uop is UOps.PHI]) == 0+len(gated_stores), "PHI should have been simplified"
       # TODO: once uops track min/max this will be fixed
@@ -985,16 +987,22 @@ def _helper_linearizer_opt_ast(realized_ast:Tuple[LazyOp, ...], real_bufs:List[B
 
 # creates a back-to-back multi reduce AST by merging r0 and r1.
 # TODO: delete once we can schedule multi reduce
-def _temp_create_multireduce_ast(r0:Tensor, r1:Tensor, merge=lambda r0,r1: LazyOp(BinaryOps.ADD, (r0, r1))) -> Tuple[LazyOp, ...]:
+def _temp_create_multireduce_ast(r0:Tensor, r1:Tensor, replace_idxs:Dict[int,Tensor]={}, \
+                                 merge=lambda r0,r1: LazyOp(BinaryOps.ADD, (r0, r1))) -> Tuple[LazyOp, ...]:
   assert len(s0:=r0.schedule()) == 1 and len(s1:=r1.schedule()) == 1, "inputs should be realized"
+  assert all({idx:replace_idxs[idx] is r0 or replace_idxs[idx] is r1 for idx in replace_idxs}.values()), "replace idxs should be in {{r0, r1}}"
   op0, op1 = s0[0].ast[0].src[0], s1[0].ast[0].src[0]
+  _replace_idxs = {idx:(op0 if replace_idxs[idx] is r0 else op1) for idx in replace_idxs}
   def _deep_replace(op:LazyOp, offset=0):
-    if op.op is BufferOps.LOAD: arg = MemBuffer(op.arg.idx+offset, op.arg.dtype, op.arg.st)
+    if op.op is BufferOps.LOAD:
+      if op.arg.idx+offset in _replace_idxs: return _replace_idxs[op.arg.idx+offset]
+      else: arg = MemBuffer(op.arg.idx+offset, op.arg.dtype, op.arg.st)
     else: arg = op.arg
     return LazyOp(op.op, tuple(_deep_replace(x, offset) for x in op.src), arg)
   # limitation: r0 and r1 cannot share inputs.
+  op0 = _deep_replace(op0, 0)
   op0_loads = len([x for x in op0.lazyops if x.op is BufferOps.LOAD])
-  out = merge(_deep_replace(op0), _deep_replace(op1, op0_loads))
+  out = merge(op0, _deep_replace(op1, op0_loads))
   # limitation: only tests single output
   op = LazyOp(BufferOps.STORE, (out, ), MemBuffer(0, s0[-1].ast[-1].arg.dtype, s0[-1].ast[-1].arg.st))
   if DEBUG >= 3: print_tree(op)
@@ -1077,6 +1085,83 @@ class TestKernelOpts(unittest.TestCase):
       # Checking how it works with locals + grouped reduce + upcasts
       [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.UPCAST, 0, 8), Opt(OptOps.UNROLL, 1, 4)],
     ])
+
+  @unittest.skip("multireduce isn't supported yet")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  def test_atomic_store_multireduce(self):
+    # reducops will need to use the local buffer to load the result of a local reduce into every thread, barriers are needed on both sides
+    # of the load to ensure 1) the correct value is in the local buffer and 2) the value isn't overwritten by the next reduceop
+    N = 512
+    Tensor.manual_seed(1882)
+    a,b = Tensor.rand(4,4,N).realize(), Tensor.rand(4,4,N).realize()
+    r0,r1 = a.sum(-1), b.sum(-1)
+    ast = _temp_create_multireduce_ast(r0, r1)
+    lins = helper_linearizer_ast(ast, [a,b], [[Opt(OptOps.GROUP, 0, 2)]])
+
+    # sequential
+    a,b = Tensor.rand(4,4,N).realize(), Tensor.rand(4,4,N).realize()
+    dummy = Tensor.rand(4,4,1).realize()
+    r0,r1 = (a-dummy).sum(-1), b.sum(-1)
+    ast = _temp_create_multireduce_ast(r0, r1, replace_idxs={2:r1}, merge=lambda r0,_: r0)
+    lins += helper_linearizer_ast(ast, [a,b], [[Opt(OptOps.GROUP, 0, 2)]])
+
+    for k in lins:
+      local_bufs = [u for u in k.uops if u.uop is UOps.DEFINE_LOCAL]
+      seen_bar = False
+      for u in k.uops:
+        if u.uop is UOps.BARRIER:
+          assert not seen_bar, "redudant barrier"
+          seen_bar = True
+        elif (u.uop is UOps.LOAD or u.uop is UOps.STORE) and any([v in local_bufs for v in u.vin]): seen_bar = False
+
+  @unittest.skip("multireduce isn't supported yet")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  def test_atomic_store_unrolled_multireduce(self):
+    # unrolled local dim - causes stores for local reductions to pool at the top of the kernel, overwriting eachother
+    Tensor.manual_seed(1882)
+    a,b = Tensor.rand(4,).realize(), Tensor.rand(4,).realize()
+    r0,r1 = a.sum(), b.sum()
+    ast = _temp_create_multireduce_ast(r0, r1)
+    lins = helper_linearizer_ast(ast, [a,b], [
+      [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.GROUP, 0, 2)]
+    ])
+
+    for k in lins:
+      local_bufs = [u for u in k.uops if u.uop is UOps.DEFINE_LOCAL]
+      seen_bar = False
+      for u in k.uops:
+        if u.uop is UOps.BARRIER:
+          assert not seen_bar, "redudant barrier"
+          seen_bar = True
+        elif (u.uop is UOps.LOAD or u.uop is UOps.STORE) and any([v in local_bufs for v in u.vin]): seen_bar = False
+
+  @unittest.skip("multireduce isn't supported yet")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  def test_atomic_store_nested_range_multireduce(self):
+    # nested ranges
+    Tensor.manual_seed(1882)
+    a,b = Tensor.rand(6, ).realize(), Tensor.rand(6, ).realize()
+    r0,r1 = a.reshape(6, 1).expand(6, 3).sum(), b.reshape(6, 1).expand(6, 3).sum()
+    ast = _temp_create_multireduce_ast(r0, r1)
+    lins = helper_linearizer_ast(ast, [a,b], [
+      [Opt(OptOps.GROUP, 0, 2)],[Opt(OptOps.GROUP, 1, 3)],
+      [Opt(OptOps.GROUP, 1, 3), Opt(OptOps.GROUP, 0, 2)],
+      [Opt(OptOps.UNROLL, 0, 2)],[Opt(OptOps.UNROLL, 1, 3)],
+      [Opt(OptOps.GROUP, 0, 2), Opt(OptOps.UNROLL, 0, 2)],
+      [Opt(OptOps.GROUP, 1, 3), Opt(OptOps.UNROLL, 1, 3)],
+    ])
+
+    for k in lins:
+      local_bufs = [u for u in k.uops if u.uop is UOps.DEFINE_LOCAL]
+      seen_bar = False
+      for u in k.uops:
+        if u.uop is UOps.BARRIER:
+          assert not seen_bar, "redudant barrier"
+          seen_bar = True
+        elif (u.uop is UOps.LOAD or u.uop is UOps.STORE) and any([v in local_bufs for v in u.vin]): seen_bar = False
 
   def test_upcasts(self):
     N = 16
@@ -1237,7 +1322,7 @@ class TestKernelOpts(unittest.TestCase):
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_buf_index_not_found_tensor_core(self):
-    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BinaryOps.CMPEQ, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1243, 256), strides=(0, 1), offset=0, mask=None, contiguous=False),)))), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1243, 256), strides=(1, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=dtypes.float), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=3, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1243, 256), strides=(1, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=(0,)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 256), strides=(0, 1), offset=0, mask=None, contiguous=True),))))  # noqa: E501
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BinaryOps.CMPNE, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1243, 256), strides=(0, 1), offset=0, mask=None, contiguous=False),)))), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1243, 256), strides=(1, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=dtypes.float), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=3, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1243, 256), strides=(1, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=(0,)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 256), strides=(0, 1), offset=0, mask=None, contiguous=True),))))  # noqa: E501
     k = Linearizer(ast, opts=Device[Device.DEFAULT].renderer)
     with self.assertRaises(KernelOptError):
       k.apply_opt(Opt(OptOps.TC, 0, 1))
@@ -1322,7 +1407,7 @@ class TestKernelOpts(unittest.TestCase):
       check_fused_tc_opt(tc, r0, r1, [a, b, c, d])
 
   def test_padto_matmul(self):
-    if CI and Device.DEFAULT in ["AMD", "NV"]: self.skipTest("super slow on CUDA and AMD because of the big grid dims")
+    if CI and Device.DEFAULT in ["AMD", "NV", "CUDA"]: self.skipTest("super slow on CUDA and AMD because of the big grid dims")
     N = 17 * 17
     Tensor.manual_seed(289)
     a = Tensor.rand(N, N)
