@@ -10,7 +10,23 @@ class TestProgressBarOutput(unittest.TestCase):
     prefix1, prog1, suffix1 = bar1.split("|")
     prefix2, prog2, suffix2 = bar2.split("|")
     self.assertEqual(prefix1, prefix2)
-    self.assertEqual(suffix1, suffix2)
+
+    def parse_timer(timer):
+      return sum([int(timer.split(":")[0])*60, int(timer.split(":")[1])])
+
+    if "?" not in suffix1 and "?" not in suffix2:
+      # allow for 1 sec diff in timers (removes flakiness)
+      timer1, rm1 = [parse_timer(timer) for timer in suffix1.split("[")[-1].split(",")[0].split("<")]
+      timer2, rm2 = [parse_timer(timer) for timer in suffix2.split("[")[-1].split(",")[0].split("<")]
+      self.assertTrue(abs(timer1 - timer2) <= 1)
+      self.assertTrue(abs(rm1 - rm2) <= 1)
+
+      # get suffix without timers
+      suffix1 = suffix1.split("[")[0] + suffix1.split(",")[1]
+      suffix2 = suffix2.split("[")[0] + suffix2.split(",")[1]
+      self.assertEqual(suffix1, suffix2)
+    else:
+      self.assertEqual(suffix1, suffix2)
 
     diff = sum([1 for c1, c2 in zip(prog1, prog2) if c1 == c2]) # allow 1 char diff (due to tqdm special chars)
     self.assertTrue(not cmp_prog or diff <= 1)
