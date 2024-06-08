@@ -120,15 +120,14 @@ python_alu = {
   UnaryOps.EXP2: hook_overflow(math.inf, lambda x: math.exp(x*math.log(2))),
   UnaryOps.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan, UnaryOps.SIN: math.sin,
   UnaryOps.NEG: lambda x: (not x) if isinstance(x, bool) else -x,
+  UnaryOps.RECIP: lambda x: 1 / x if x != 0 else math.copysign(math.inf, x),
   BinaryOps.SHR: operator.rshift, BinaryOps.SHL: operator.lshift,
   BinaryOps.MUL: operator.mul, BinaryOps.ADD: operator.add, BinaryOps.SUB: operator.sub, BinaryOps.XOR: operator.xor,
   BinaryOps.MAX: max, BinaryOps.CMPNE: operator.ne, BinaryOps.CMPLT: operator.lt,
   BinaryOps.MOD: lambda x,y: abs(int(x))%abs(int(y))*(1,-1)[x<0],
-  #BinaryOps.DIV: lambda x,y: int(x/y) if isinstance(x, int) else (x/y if y != 0 else x*math.inf),
-  UnaryOps.RECIP: lambda x: 1.0 / x if x != 0 else math.inf if x > 0 else -math.inf,
-  BinaryOps.DIV: lambda x, y: python_alu[BinaryOps.MUL](x, python_alu[UnaryOps.RECIP](y)) if isinstance(x, float) or isinstance(y, float)
-                 else python_alu[BinaryOps.IDIV](x, y),
-  BinaryOps.IDIV: lambda x, y: int(x // y) if y != 0 else (math.inf if x > 0 else -math.inf),
+  BinaryOps.IDIV: lambda x, y: int(x / y) if y != 0 else math.copysign(math.inf, x),
+  BinaryOps.DIV: lambda x, y: python_alu[BinaryOps.IDIV](x, y) if isinstance(x, int) and isinstance(y, int) 
+                                else python_alu[BinaryOps.MUL](x, python_alu[UnaryOps.RECIP](y)),
   TernaryOps.WHERE: lambda x,y,z: y if x else z}
 
 truncate: Dict[DType, Callable] = {dtypes.bool: bool,
