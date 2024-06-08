@@ -97,12 +97,12 @@ class MultiGraphRunner(GraphRunner):  # pylint: disable=abstract-method
     wait_nodes = []
 
     for rawbuf in read + write:
-      if id(rawbuf._buf) in self.w_dependency_map: wait_nodes.append(self.w_dependency_map[id(rawbuf._buf)])
+      if id(rawbuf.base._buf) in self.w_dependency_map: wait_nodes.append(self.w_dependency_map[id(rawbuf.base._buf)])
     for rawbuf in write:
-      if id(rawbuf._buf) in self.r_dependency_map: wait_nodes.extend(self.r_dependency_map.pop(id(rawbuf._buf)))
+      if id(rawbuf.base._buf) in self.r_dependency_map: wait_nodes.extend(self.r_dependency_map.pop(id(rawbuf.base._buf)))
 
-    for rawbuf in read: self.r_dependency_map[id(rawbuf._buf)].append(new_dependency)
-    for rawbuf in write: self.w_dependency_map[id(rawbuf._buf)] = new_dependency
+    for rawbuf in read: self.r_dependency_map[id(rawbuf.base._buf)].append(new_dependency)
+    for rawbuf in write: self.w_dependency_map[id(rawbuf.base._buf)] = new_dependency
     return list({id(x):x for x in wait_nodes}.values())
 
 ReturnType = TypeVar('ReturnType')
