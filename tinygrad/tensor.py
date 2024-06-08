@@ -2282,10 +2282,10 @@ class Tensor:
       else: y_dtype = dtypes.from_py(y)
       if isinstance(y, Node): y = Tensor.from_node(y, device=self.device)
       else: y = Tensor(dtypes.as_const(y, y_dtype), self.device, y_dtype, requires_grad=False)
-    if match_dtype and not x.dtype == y.dtype:
+    if match_dtype and x.dtype != y.dtype:
       output_dtype = least_upper_dtype(x.dtype, y.dtype)
       x,y = x.cast(output_dtype), y.cast(output_dtype)
-    if not x.shape == y.shape:
+    if x.shape != y.shape:
       out_shape = _broadcast_shape(x.shape, y.shape)
       x,y = x._broadcast_to(out_shape), y._broadcast_to(out_shape)
     return (y,x) if reverse else (x,y)
