@@ -82,7 +82,7 @@
         </template>
       </div>
     </div>
-    <div class="messages" x-init="
+    <div x-ref="messages" class="messages" x-init="
       $watch('cstate', value => {
         $el.innerHTML = '';
         value.messages.forEach(({ role, content }) => {
@@ -121,7 +121,10 @@
             if (cstate.messages.length === 0 && $el.value === '') home = -1;
           " x-effect="
             console.log(generating);
-            if (!generating) $nextTick(() => $el.focus());
+            if (!generating) $nextTick(() => {
+              $el.focus();
+              setTimeout(() => $refs.messages.scrollTo({ top: $refs.messages.scrollHeight, behavior: 'smooth' }), 100);
+            });
           " @keydown.enter="await handleEnter($event)" @keydown.escape.window="$focus.focus($el)"></textarea>
         <button class="input-button" :disabled="generating" @click="await handleSend()">
           <i class="fas" :class="generating ? 'fa-spinner fa-spin' : 'fa-paper-plane'"></i>
