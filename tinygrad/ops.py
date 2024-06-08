@@ -1,4 +1,5 @@
 from __future__ import annotations
+from ast import UnaryOp
 from typing import Union, Tuple, Any, List, Dict, Callable
 import functools, hashlib, math, operator, ctypes
 from enum import Enum, auto
@@ -14,10 +15,10 @@ from tinygrad.shape.shapetracker import ShapeTracker
 # NOTE: many GPUs don't have DIV, but UnaryOps.RECIP doesn't work for integer division
 class UnaryOps(Enum):
   """A -> A (elementwise)"""
-  EXP2 = auto(); LOG2 = auto(); CAST = auto(); BITCAST = auto(); SIN = auto(); SQRT = auto(); NEG = auto() # noqa: E702
+  EXP2 = auto(); LOG2 = auto(); CAST = auto(); BITCAST = auto(); SIN = auto(); SQRT = auto(); NEG = auto(); RECIP = auto() # noqa: E702
 class BinaryOps(Enum):
   """A + A -> A (elementwise)"""
-  ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); CMPNE = auto(); XOR = auto() # noqa: E702
+  ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); IDIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); CMPNE = auto(); XOR = auto() # noqa: E702
   SHR = auto(); SHL = auto() # noqa: E702
 class TernaryOps(Enum):
   """A + A + A -> A (elementwise)"""
@@ -119,11 +120,13 @@ python_alu = {
   UnaryOps.LOG2: lambda x: math.log2(x) if x > 0 else -math.inf if x == 0 else math.nan,
   UnaryOps.EXP2: hook_overflow(math.inf, lambda x: math.exp(x*math.log(2))),
   UnaryOps.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan, UnaryOps.SIN: math.sin,
+  UnaryOps.RECIP: lambda x: 1/x if x != 0 else (-math.inf if x == -0 else math.inf),
   UnaryOps.NEG: lambda x: (not x) if isinstance(x, bool) else -x,
   BinaryOps.SHR: operator.rshift, BinaryOps.SHL: operator.lshift,
   BinaryOps.MUL: operator.mul, BinaryOps.ADD: operator.add, BinaryOps.SUB: operator.sub, BinaryOps.XOR: operator.xor,
   BinaryOps.MAX: max, BinaryOps.CMPNE: operator.ne, BinaryOps.CMPLT: operator.lt,
   BinaryOps.MOD: lambda x,y: abs(int(x))%abs(int(y))*(1,-1)[x<0],
+  BinaryOps.IDIV: lambda x, y: int(x/y) if y != 0 else x*math.inf,
   BinaryOps.DIV: lambda x,y: int(x/y) if isinstance(x, int) else (x/y if y != 0 else x*math.inf),
   TernaryOps.WHERE: lambda x,y,z: y if x else z}
 
