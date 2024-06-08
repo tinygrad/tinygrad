@@ -268,9 +268,11 @@ class UOpGraph:
           recurse_cnt += 1
         changed += recurse_cnt
         # NOTE: this changes UOp, so we have to delete caches
-        up.vin = tuple(rewrite(x) for x in up.vin)
-        if hasattr(up, "parents"): del up.parents
-        if hasattr(up, "cmp_tuple"): del up.cmp_tuple
+        up.vin = tuple([rewrite(x) for x in up.vin])
+        try: del up.parents
+        except AttributeError: pass
+        try: del up.cmp_tuple
+        except AttributeError: pass
         # replace with cached nodes
         if found:=self.nodes.get(key:=up.tuple()): return found
         self.nodes[key] = up
