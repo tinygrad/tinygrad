@@ -2266,7 +2266,7 @@ class Tensor:
     return self / (1 + self.abs())
 
   # ***** broadcasted elementwise ops *****
-  def _broadcast_to(self, shape:Tuple[sint, ...]):
+  def _broadcast_to(self, shape:Tuple[sint, ...]) -> Tensor:
     if self.shape == shape: return self
     reshape_arg, _ = _pad_left(self.shape, shape)
     if self.ndim > len(shape) or not all(sh in {s,1} or (s==0 and sh==1) for sh,s in zip(reshape_arg, shape)):
