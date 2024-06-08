@@ -59,9 +59,9 @@ document.addEventListener("alpine:init", () => {
       const index = this.histories.findIndex((cstate) => {
         return cstate.time === this.cstate.time;
       });
+      this.cstate.time = Date.now();
       if (index !== -1) {
         // update the time
-        this.cstate.time = Date.now();
         this.histories[index] = this.cstate;
       } else {
         this.histories.push(this.cstate);
