@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string, ctypes, shutil
 import itertools, urllib.request, subprocess
-from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Sequence
+from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Sequence, Sized
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
   from tinygrad.shape.shapetracker import sint
@@ -240,7 +240,7 @@ def init_c_var(ctypes_var, creat_cb): return (creat_cb(ctypes_var), ctypes_var)[
 def flat_mv(mv:memoryview): return mv if len(mv) == 0 else mv.cast("B", shape=(mv.nbytes,))
 
 class tinytqdm:
-  def __init__(self, iterable:Optional[Iterable]=None, desc:str='', disable:bool=False, unit:str='it', total:int=-1, rate:int=100):
+  def __init__(self, iterable=None, desc:str='', disable:bool=False, unit:str='it', total:int=-1, rate:int=100):
     self.iter, self.desc, self.dis, self.unit, self.total, self.rate = iterable, desc, disable, unit, len(iterable) if total==-1 else total, rate
     self.st, self.cnt, self.val, self.skip = time.perf_counter(), 0, 0, 1
     self.update(0)
