@@ -81,10 +81,10 @@ def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
   if pat.name in store and store[pat.name] != uop: return False
   if pat.name is not None: store[pat.name] = uop
   for p, u in [(pat.arg,uop.arg), (pat.dtype, uop.dtype), (pat.uop, uop.uop)]:
-      if p is not None:
-        if isinstance(p, set):
-          if u not in p: return False
-        elif u != p: return False
+    if p is not None:
+      if isinstance(p, set):
+        if u not in p: return False
+      elif u != p: return False
   if pat.vin is None: return True
   # try all permutations if it's a list, only one if it's a tuple, repeat if it's a dict
   for vp in itertools.permutations(pat.vin) if isinstance(pat.vin,list) else ([pat.vin] if isinstance(pat.vin,tuple) else [(pat.vin,)*len(uop.vin)]):
