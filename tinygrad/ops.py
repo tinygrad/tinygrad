@@ -14,7 +14,7 @@ from tinygrad.shape.shapetracker import ShapeTracker
 # NOTE: many GPUs don't have DIV, but UnaryOps.RECIP doesn't work for integer division
 class UnaryOps(Enum):
   """A -> A (elementwise)"""
-  EXP2 = auto(); LOG2 = auto(); CAST = auto(); BITCAST = auto(); SIN = auto(); SQRT = auto(); NEG = auto() ; RECIP = auto()# noqa: E702
+  EXP2 = auto(); LOG2 = auto(); CAST = auto(); BITCAST = auto(); SIN = auto(); SQRT = auto(); NEG = auto(); RECIP = auto()# noqa: E702
 class BinaryOps(Enum):
   """A + A -> A (elementwise)"""
   ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); CMPNE = auto(); XOR = auto() # noqa: E702
@@ -126,7 +126,7 @@ python_alu = {
   BinaryOps.MAX: max, BinaryOps.CMPNE: operator.ne, BinaryOps.CMPLT: operator.lt,
   BinaryOps.MOD: lambda x,y: abs(int(x))%abs(int(y))*(1,-1)[x<0],
   BinaryOps.IDIV: lambda x, y: int(x / y) if y != 0 else math.copysign(math.inf, x),
-  BinaryOps.DIV: lambda x, y: python_alu[BinaryOps.IDIV](x, y) if isinstance(x, int) and isinstance(y, int) 
+  BinaryOps.DIV: lambda x, y: python_alu[BinaryOps.IDIV](x, y) if isinstance(x, int) and isinstance(y, int)
                                 else python_alu[BinaryOps.MUL](x, python_alu[UnaryOps.RECIP](y)),
   TernaryOps.WHERE: lambda x,y,z: y if x else z}
 
