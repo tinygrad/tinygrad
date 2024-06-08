@@ -36,13 +36,41 @@ class Reciprocal(Function):
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return grad_output.e(UnaryOps.NEG).e(BinaryOps.MUL, self.ret).e(BinaryOps.MUL, self.ret)
 
+def _pade(x:LazyBuffer, a, b) -> LazyBuffer:
+  m = len(a)
+  current_term = x.const(1)
+  top = x.const(0)
+  bottom = x.const(1)
+  for i in range(m):
+    if i > 0: current_term = current_term.e(BinaryOps.MUL, x)
+    top = top.e(BinaryOps.ADD, current_term.e(BinaryOps.MUL, x.const(a[i])))
+    bottom = bottom.e(BinaryOps.ADD, current_term.e(BinaryOps.MUL, x.const(b[i])))
+  return top.e(BinaryOps.DIV, bottom)
+
+def _reduce_range(x:LazyBuffer) -> LazyBuffer:
+  pi = x.const(math.pi)
+  pi_neg = x.const(-math.pi)
+  two_pi = x.const(math.pi * 2)
+  k = x.e(BinaryOps.DIV, two_pi).cast(dtypes.int64).cast(x.dtype)
+  x = x.e(BinaryOps.SUB, k.e(BinaryOps.MUL, two_pi))
+  x = x.e(UnaryOps.NEG).e(BinaryOps.MAX, x.e(BinaryOps.SUB, pi)).e(UnaryOps.NEG)
+  x = x.e(BinaryOps.MAX, pi_neg.e(BinaryOps.SUB, x))
+  x = x.e(UnaryOps.NEG).e(BinaryOps.MAX, x.e(BinaryOps.SUB, pi)).e(UnaryOps.NEG)
+  return x
+
 class Sin(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
-    return x.e(UnaryOps.SIN)
+    self.a = [ 3.63306240e-15,  9.99997647e-01,  2.63039393e-10, -1.29929092e-01,
+         3.59965385e-09,  2.90132249e-03,  1.06017224e-08,  1.37373884e-06,
+        -1.13369994e-09, -1.66454527e-07]
+    self.b = [-2.35338808e-06,  2.63198715e-10,  3.67371821e-02,  3.64239383e-09,
+         6.90872501e-04,  1.12095597e-08,  8.78808583e-06,  7.00548826e-10,
+         7.44781488e-08,  2.64644304e-11]
+    return _pade(_reduce_range(x), self.a, self.b)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
+    return _pade(_reduce_range(self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)), self.a, self.b).e(BinaryOps.MUL, grad_output)
 
 # NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
