@@ -65,8 +65,9 @@ def _apply_winograd_matrix(mat, t:Tensor, dims:int) -> Tensor:
   ret = sum(prod(col[idx] for col, idx in zip(matcols, mat_is)) * t_[mat_is] for mat_is in itertools.product(range(len(mat[0])), repeat=dims))
   assert isinstance(ret, Tensor), "sum didn't return a Tensor"
   return ret
-
+@functools.lru_cache(maxsize=None)
 def _pad_left(*shps:Tuple[sint, ...], v=1): return tuple((v,) * (max(len(i_) for i_ in shps) - len(i)) + i for i in shps)
+@functools.lru_cache(maxsize=None)
 def _broadcast_shape(*shps:Tuple[sint, ...]): return tuple(0 if any(sh_ == 0 for sh_ in sh) else max(sh) for sh in zip(*_pad_left(*shps)))
 
 class Tensor:
@@ -2265,11 +2266,12 @@ class Tensor:
     return self / (1 + self.abs())
 
   # ***** broadcasted elementwise ops *****
-  def _broadcast_to(self, shape:Tuple[sint, ...]):
+  def _broadcast_to(self, shape:Tuple[sint, ...]) -> Tensor:
+    if self.shape == shape: return self
     reshape_arg, _ = _pad_left(self.shape, shape)
     if self.ndim > len(shape) or not all(sh in {s,1} or (s==0 and sh==1) for sh,s in zip(reshape_arg, shape)):
       raise ValueError(f"cannot broadcast tensor with shape={self.shape} to {shape=}")
-    return F.Expand.apply(self.reshape(reshape_arg), shape=shape) if shape != self.shape else self
+    return F.Expand.apply(self.reshape(reshape_arg) if self.shape != reshape_arg else self, shape=shape)
 
   def _broadcasted(self, y:Union[Tensor, ConstType], reverse:bool=False, match_dtype:bool=True) -> Tuple[Tensor, Tensor]:
     x: Tensor = self
@@ -2280,16 +2282,13 @@ class Tensor:
       else: y_dtype = dtypes.from_py(y)
       if isinstance(y, Node): y = Tensor.from_node(y, device=self.device)
       else: y = Tensor(dtypes.as_const(y, y_dtype), self.device, y_dtype, requires_grad=False)
-
-    if match_dtype:
+    if match_dtype and not x.dtype == y.dtype:
       output_dtype = least_upper_dtype(x.dtype, y.dtype)
-      x, y = x.cast(output_dtype), y.cast(output_dtype)
-
-    if reverse: x, y = y, x
-
-    # broadcast
-    out_shape = _broadcast_shape(x.shape, y.shape)
-    return x._broadcast_to(out_shape), y._broadcast_to(out_shape)
+      x,y = x.cast(output_dtype), y.cast(output_dtype)
+    if not x.shape == y.shape:
+      out_shape = _broadcast_shape(x.shape, y.shape)
+      x,y = x._broadcast_to(out_shape), y._broadcast_to(out_shape)
+    return (y,x) if reverse else (x,y)
 
   def _to_const_val(self, x:Union[Tensor, ConstType]) -> Union[Tensor, ConstType]:
     # TODO: update with multi
