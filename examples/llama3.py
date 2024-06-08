@@ -196,6 +196,9 @@ if __name__ == "__main__":
   parser.add_argument("--shard", type=int, default=1)
   parser.add_argument("--quantize", choices=["int8", "nf4"])
   parser.add_argument("--api", action="store_true")
+  parser.add_argument("--host", type=str, default="0.0.0.0")
+  parser.add_argument("--port", type=int, default=7776)
+  parser.add_argument("--debug", action="store_true")
   parser.add_argument("--seed", type=int)
   parser.add_argument("--timing", action="store_true", help="Print timing per token")
   parser.add_argument("--profile", action="store_true", help="Output profile data")
@@ -337,7 +340,7 @@ if __name__ == "__main__":
       }
       yield f"data: {json.dumps(res)}\n\n"
 
-    app.run(host="0.0.0.0", port=7776, debug=True)
+    app.run(host=args.host, port=args.port, debug=args.debug)
   else:
     prompt = [tokenizer.bos_id] + encode_message("system", "You are an *emotive* assistant.")
 
