@@ -4,7 +4,7 @@ import functools, itertools, heapq
 from collections import defaultdict
 from enum import Enum, auto
 from dataclasses import dataclass, field
-from tinygrad.dtype import dtypes, DType
+from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, exec_alu
 from tinygrad.helpers import prod, DEBUG, getenv
@@ -26,6 +26,11 @@ class UOps(Enum):
   # these two are not graph nodes
   ENDRANGE = auto(); ENDIF = auto() # noqa: E702
 
+def ufix(dtype, x):
+  if not isinstance(x, UOp): return UOp.const(dtype, x)
+  assert x.dtype == dtype, "dtype mismatch"
+  return x
+
 @dataclass(eq=False)
 class UOp:
   uop: UOps
@@ -43,9 +48,9 @@ class UOp:
     return f"{str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.uop for x in self.vin]):32s} {self.arg}"
   def cast(self, dtype): return UOp(UOps.CAST, dtype, (self,))
   def __neg__(self): return UOp.alu(UnaryOps.NEG, self)
-  def __add__(self, x): return UOp.alu(BinaryOps.ADD, self, x)
-  def __sub__(self, x): return UOp.alu(BinaryOps.SUB, self, x)
-  def __mul__(self, x): return UOp.alu(BinaryOps.MUL, self, x)
+  def __add__(self, x): return UOp.alu(BinaryOps.ADD, self, ufix(self.dtype, x))
+  def __sub__(self, x): return UOp.alu(BinaryOps.SUB, self, ufix(self.dtype, x))
+  def __mul__(self, x): return UOp.alu(BinaryOps.MUL, self, ufix(self.dtype, x))
   @staticmethod
   def max(x, y): return UOp.alu(BinaryOps.MAX, x, y)
   @staticmethod
@@ -56,6 +61,15 @@ class UOp:
   def alu(arg, *vin:UOp): return UOp(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else vin[-1].dtype, vin, arg)
   @functools.cached_property
   def parents(self) -> Set[UOp]: return set.union(set(self.vin), *[x.parents for x in self.vin])
+  def render(self) -> str:
+    graph = UOpGraph()
+    # NOTE: we need STORE so the ALU op has children
+    glbl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=(0,True))
+    graph.recursive_add(UOp(UOps.STORE, None, (glbl,UOp.const(dtypes.int, 0),self)))
+    graph.linearize()
+    from tinygrad.renderer.cstyle import CStyleLanguage
+    fxn = CStyleLanguage().render("", graph)
+    return fxn.split("data0[0] = ")[1].split(";")[0]
 
 def uop_alu_resolve(u:UOp) -> sint:
   if u.uop is UOps.CONST: return u.arg
@@ -233,6 +247,10 @@ class UOpGraph:
     self.nodes: Dict[Tuple, UOp] = {}
     self._uops: Optional[List[UOp]] = None
 
+  def recursive_add(self, u:UOp):
+    self.add(u.uop, u.dtype, u.vin, u.arg)
+    for c in u.vin: self.recursive_add(c)
+  
   def __iter__(self) -> Iterator[UOp]: return iter(self.uops)
   def __getitem__(self, index) -> UOp: return self.uops[index]
 
