@@ -5,7 +5,6 @@ from io import StringIO
 from collections import namedtuple
 from tinygrad.helpers import tinytqdm
 
-random.seed(1337)
 class TestProgressBarOutput(unittest.TestCase):
   def _compare_bars(self, bar1, bar2, cmp_prog=False):
     prefix1, prog1, suffix1 = bar1.split("|")
