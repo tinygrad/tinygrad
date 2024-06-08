@@ -51,6 +51,8 @@ class UOp:
   def __add__(self, x): return UOp.alu(BinaryOps.ADD, self, ufix(self.dtype, x))
   def __sub__(self, x): return UOp.alu(BinaryOps.SUB, self, ufix(self.dtype, x))
   def __mul__(self, x): return UOp.alu(BinaryOps.MUL, self, ufix(self.dtype, x))
+  def __floordiv__(self, x): return UOp.alu(BinaryOps.DIV, self, ufix(self.dtype, x))
+  def __mod__(self, x): return UOp.alu(BinaryOps.MOD, self, ufix(self.dtype, x))
   @staticmethod
   def max(x, y): return UOp.alu(BinaryOps.MAX, x, y)
   @staticmethod
@@ -217,6 +219,9 @@ constant_folder = PatternMatcher([
      lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, [c1.arg, c2.arg]))),
   (UPat(UOps.ALU, BinaryOps.ADD, [UPat(UOps.ALU, BinaryOps.SUB, (UPat(name="x"), UPat(UOps.CONST, name="c1"))), UPat(UOps.CONST, name="c2")]),
      lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.SUB, x.dtype, [c2.arg, c1.arg]))),
+  # *** rules from symbolic ***
+  (UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.ALU, BinaryOps.MUL, [UPat(name="x"), UPat(UOps.CONST, name="c1")]), UPat(UOps.CONST, name="c2")]),
+     lambda x,c1,c2: x*UOp.const(x.dtype, exec_alu(BinaryOps.MUL, x.dtype, [c1.arg, c2.arg]))),
   # TODO: can do the invert of this (flip alt/load) when we fix double ops
   (UPat(UOps.STORE, vin=(UPat(name="buf"), UPat(name="idx"), UPat(UOps.ALU, TernaryOps.WHERE,
                         (UPat(name="gate"), UPat(name="alt"), UPat(UOps.LOAD, vin=(UPat(name="buf"), UPat(name="idx"))))))),
