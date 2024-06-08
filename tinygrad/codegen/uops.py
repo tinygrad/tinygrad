@@ -272,7 +272,7 @@ class UOpGraph:
   def recursive_add(self, u:UOp):
     self.add(u.uop, u.dtype, u.vin, u.arg)
     for c in u.vin: self.recursive_add(c)
-  
+
   def __iter__(self) -> Iterator[UOp]: return iter(self.uops)
   def __getitem__(self, index) -> UOp: return self.uops[index]
 
