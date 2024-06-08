@@ -15,7 +15,7 @@ def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Op]=
   if st.size == 0: op, arg, srcs, base = LoadOps.CONST, 0, (), None
   if op is LoadOps.CONST: arg, enable_cache = dtypes.as_const(arg, dtype) if not isinstance(arg, Variable) else arg, True
 
-  cache_key = (device, st, dtype, op, arg, tuple(ref(x) for x in srcs)) if base is None else (st, ref(base))
+  cache_key = (device, st, dtype, op, arg, tuple([ref(x) for x in srcs])) if base is None else (st, ref(base))
   if enable_cache and (rret := lazycache.get(cache_key, None)): return rret
 
   ret = LazyBuffer(device, st, dtype, op, arg, srcs, base=base)
@@ -171,13 +171,13 @@ class LazyBuffer:
 
   def _reduce_op(self, op:ReduceOps, axis:Tuple[int, ...]) -> LazyBuffer:
     assert all(0 <= x < len(self.shape) for x in axis), f"axis args {axis} out of range for shape {self.shape}"
-    axis = tuple(x for x in axis if self.shape[x] != 1)
+    axis = tuple([x for x in axis if self.shape[x] != 1])
     if len(axis) == 0: return self
-    new_shape = tuple(1 if i in axis else s for i,s in enumerate(self.shape))
+    new_shape = tuple([1 if i in axis else s for i,s in enumerate(self.shape)])
     return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), self.dtype, op, axis, (self,))
 
   def r(self, op:ReduceOps, axis:Tuple[int, ...]) -> LazyBuffer:
-    new_shape = tuple(1 if i in axis else s for i,s in enumerate(self.shape))
+    new_shape = tuple([1 if i in axis else s for i,s in enumerate(self.shape)])
     # TODO: this logic should move to the scheduler
     if self.size == 0 and 0 not in new_shape: return self.const({ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[op], new_shape)
 

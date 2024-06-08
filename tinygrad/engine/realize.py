@@ -78,7 +78,7 @@ class CompiledRunner(Runner):
     if local_size:
       lra['local_size'] = local_size
       assert len(local_size) == 3, "local size must have len 3"
-    return self.clprg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k] for k in self.p.vars), wait=wait)
+    return self.clprg(*[x._buf for x in rawbufs], **lra, vals=tuple([var_vals[k] for k in self.p.vars]), wait=wait)
 
 class CustomOp(Runner):
   def __init__(self, fxn):

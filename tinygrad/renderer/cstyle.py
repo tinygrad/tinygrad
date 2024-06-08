@@ -301,7 +301,7 @@ def _make_hip_code_for_op():
   def wrapper(key, func):
     def cast_bf16(*args):
       if args[-1] == dtypes.bfloat16:
-        operands = tuple(f"(float)({arg})" for arg in (args[1:-1] if key is TernaryOps.WHERE else args[:-1]))
+        operands = tuple([f"(float)({arg})" for arg in (args[1:-1] if key is TernaryOps.WHERE else args[:-1])])
         return f"(hip_bfloat16)({func(*(((args[0],) if key is TernaryOps.WHERE else ()) + operands), dtypes.float)})"
       return func(*args)
     return cast_bf16

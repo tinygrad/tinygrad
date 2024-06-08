@@ -110,7 +110,7 @@ class Linearizer(Kernel):
           buf_uop = self.buf_uops[i]
           assert buf_uop is not None, f"buffer {i} wasn't UOped"
           image_idx, valid = to_image_idx(buf.dtype.shape, idx, valid)
-          rendered_idx = self.uops.add(UOps.CAST, dtypes.int.vec(2), tuple(x.render(self.render_ops, self) for x in image_idx))
+          rendered_idx = self.uops.add(UOps.CAST, dtypes.int.vec(2), tuple([x.render(self.render_ops, self) for x in image_idx]))
           valid_tuple = (valid.render(self.render_ops, self), self.const(invalid_value, buf.dtype.base.vec(4))) if valid.min == 0 else tuple()
           self.load_cache[key] = self.uops.add(UOps.LOAD, buf.dtype.base.vec(4),
                                                (buf_uop, rendered_idx) + valid_tuple + ((barrier,) if barrier else ()))
@@ -161,7 +161,7 @@ class Linearizer(Kernel):
       if isinstance(buf.dtype, ImageDType):
         image_idx, valid = to_image_idx(buf.dtype.shape, idx, valid)
         rendered_idx = self.uops.add(UOps.CAST, dtypes.int.vec(2), \
-                      tuple(x.render(self.render_ops, self) for x in image_idx))
+                      tuple([x.render(self.render_ops, self) for x in image_idx]))
       else:
         rendered_idx = idx.render(self.render_ops, self)
       if valid.min == 1: stores.append(self.uops.add(UOps.STORE, None, (buf_uop, rendered_idx, var)))

@@ -268,7 +268,7 @@ class UOpGraph:
           recurse_cnt += 1
         changed += recurse_cnt
         # NOTE: this changes UOp, so we have to delete caches
-        up.vin = tuple(rewrite(x) for x in up.vin)
+        up.vin = tuple([rewrite(x) for x in up.vin])
         try: del up.parents
         except AttributeError: pass
         try: del up.cmp_tuple
@@ -313,7 +313,7 @@ class UOpGraph:
         graph[x].append(u)
       if u.uop is UOps.RANGE: loops.append(u)
       if u.uop is UOps.IF: ifs.append(u)
-    sink = UOp(UOps.SINK, None, tuple(x for x in sink.vin if x.uop is not UOps.NOOP))
+    sink = UOp(UOps.SINK, None, tuple([x for x in sink.vin if x.uop is not UOps.NOOP]))
     add_parents(sink)
 
     @functools.lru_cache(None)

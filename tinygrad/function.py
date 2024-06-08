@@ -175,7 +175,7 @@ class Max(Function):
 # NOTE: this is sum in reverse
 class Expand(Function):
   def forward(self, x:LazyBuffer, shape:Tuple[int, ...]) -> LazyBuffer:
-    self.expanded_axis = tuple(i for i, (si, so) in enumerate(zip(x.shape, shape)) if si != so)
+    self.expanded_axis = tuple([i for i, (si, so) in enumerate(zip(x.shape, shape)) if si != so])
     return x.expand(shape)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:

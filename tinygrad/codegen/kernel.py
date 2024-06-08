@@ -141,7 +141,7 @@ class Kernel:
   def acc_offsets(self, i:int) -> List[int]:
     if self.upcasted == 0: return [0]
     upcasted_i = self.upcasted_axis(i)
-    acc_strides = [x*(1-upcasted_i[::-1][i][2]) for i,x in enumerate(strides_for_shape(tuple(1 if r else s for s,_,r in upcasted_i[::-1])))]
+    acc_strides = [x*(1-upcasted_i[::-1][i][2]) for i,x in enumerate(strides_for_shape(tuple([1 if r else s for s,_,r in upcasted_i[::-1]])))]
     return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(upcasted_i[::-1])])]
 
   def get_float4_upcast_dim(self, i:int) -> List[int]:
@@ -253,7 +253,7 @@ class Kernel:
       if shape_idx_groups := get_contraction(self.output_shape, base_shape):
         special_strides: Tuple[sint, ...] = tuple()
         for i,g in enumerate(shape_idx_groups):
-          shape_piece = tuple(self.output_shape[x] for x in g)
+          shape_piece = tuple([self.output_shape[x] for x in g])
           assert prod(shape_piece) == base_shape[i], f"get_contraction was wrong? {shape_piece} != {base_shape[i]}"
           special_strides += strides_for_shape(shape_piece)
         # adding the fake image shape

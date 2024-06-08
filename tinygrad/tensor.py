@@ -66,8 +66,8 @@ def _apply_winograd_matrix(mat, t:Tensor, dims:int) -> Tensor:
   assert isinstance(ret, Tensor), "sum didn't return a Tensor"
   return ret
 
-def _pad_left(*shps:Tuple[sint, ...], v=1): return tuple((v,) * (max(len(i_) for i_ in shps) - len(i)) + i for i in shps)
-def _broadcast_shape(*shps:Tuple[sint, ...]): return tuple(0 if any(sh_ == 0 for sh_ in sh) else max(sh) for sh in zip(*_pad_left(*shps)))
+def _pad_left(*shps:Tuple[sint, ...], v=1): return tuple([(v,) * (max(len(i_) for i_ in shps) - len(i)) + i for i in shps])
+def _broadcast_shape(*shps:Tuple[sint, ...]): return tuple([0 if any(sh_ == 0 for sh_ in sh) else max(sh) for sh in zip(*_pad_left(*shps))])
 
 class Tensor:
   """
@@ -281,7 +281,7 @@ class Tensor:
     """
     Moves the tensor to the given device.
     """
-    device = tuple(Device.canonicalize(x) for x in device) if isinstance(device, (tuple, list)) else Device.canonicalize(device)
+    device = tuple([Device.canonicalize(x) for x in device]) if isinstance(device, (tuple, list)) else Device.canonicalize(device)
     if device == self.device: return self
     if not isinstance(device, str): return self.shard(device)
     ret = Tensor(self.lazydata, device, requires_grad=self.requires_grad)
@@ -303,7 +303,7 @@ class Tensor:
     Shards the tensor across the given devices.
     """
     assert isinstance(self.lazydata, LazyBuffer), "can't shard a MultiLazyBuffer"
-    canonical_devices = tuple(Device.canonicalize(x) for x in devices)
+    canonical_devices = tuple([Device.canonicalize(x) for x in devices])
     if axis is not None and axis < 0: axis += len(self.shape)
     return Tensor(MultiLazyBuffer.from_sharded(self.lazydata, canonical_devices, axis), device=canonical_devices, requires_grad=self.requires_grad)
 
@@ -756,7 +756,7 @@ class Tensor:
     print(t.expand(4, -1).numpy())
     ```
     """
-    return self._broadcast_to(tuple(sh if s==-1 or s is None else s for s, sh in zip(*(_pad_left(argfix(shape, *args), self.shape)))))
+    return self._broadcast_to(tuple([sh if s==-1 or s is None else s for s, sh in zip(*(_pad_left(argfix(shape, *args), self.shape)))]))
 
   def permute(self, order, *args) -> Tensor:
     """
@@ -810,7 +810,7 @@ class Tensor:
     ```
     """
     if all(x is None or x == (0,s) for x,s in zip(arg, self.shape)): return self
-    return F.Shrink.apply(self, arg=tuple(x if x is not None else (0,s) for x,s in zip(arg, self.shape)))
+    return F.Shrink.apply(self, arg=tuple([x if x is not None else (0,s) for x,s in zip(arg, self.shape)]))
 
   def pad(self, arg:Tuple[Optional[Tuple[sint, sint]], ...], value:float=0.0) -> Tensor:
     """
@@ -831,7 +831,7 @@ class Tensor:
     ```
     """
     if all(x is None or x == (0,0) for x in arg): return self
-    ret = F.Pad.apply(self, arg=(narg:=tuple(x if x is not None else (0,0) for x in arg)))
+    ret = F.Pad.apply(self, arg=(narg:=tuple([x if x is not None else (0,0) for x in arg])))
     return ret if 0 == value else ret + F.Pad.apply(Tensor.ones_like(self), arg=narg).where(0, value)
 
   # ***** movement high level ops *****
@@ -915,17 +915,17 @@ class Tensor:
       indices_filtered[dim] = ((0, self.shape[dim]), 1)
 
     new_slice, strides = ((),()) if not indices_filtered else zip(*indices_filtered)
-    ret = self.shrink(new_slice).flip(tuple(i for i, s in enumerate(strides) if s < 0))
+    ret = self.shrink(new_slice).flip(tuple([i for i, s in enumerate(strides) if s < 0]))
     if any(abs(s) != 1 for s in strides):
-      strides = tuple(abs(s) for s in strides)
-      ret = ret.pad(tuple((0, round_up(sh, s) - sh) for s, sh in zip(strides, ret.shape)))
-      ret = ret.reshape(tuple(flatten((sh // s, s) for s, sh in zip(strides, ret.shape))))
-      ret = ret.shrink(tuple(flatten(((0, sh), (0, 1)) for sh in ret.shape[::2]))).reshape(ret.shape[::2])
+      strides = tuple([abs(s) for s in strides])
+      ret = ret.pad(tuple([(0, round_up(sh, s) - sh) for s, sh in zip(strides, ret.shape)]))
+      ret = ret.reshape(tuple(flatten([(sh // s, s) for s, sh in zip(strides, ret.shape)])))
+      ret = ret.shrink(tuple(flatten([((0, sh), (0, 1)) for sh in ret.shape[::2]]))).reshape(ret.shape[::2])
 
     # inject 1 for dim where it's None and collapse dim for int
     new_shape = list(ret.shape)
     for dim in type_dim[None]: new_shape.insert(dim, 1)
-    for dim in (dims_collapsed := tuple(dim + sum(1 for d in type_dim[None] if dim >= d) for dim in reversed(type_dim[int]))): new_shape.pop(dim)
+    for dim in (dims_collapsed := tuple([dim + sum([1 for d in type_dim[None] if dim >= d]) for dim in reversed(type_dim[int])])): new_shape.pop(dim)
 
     ret = ret.reshape(new_shape)
     assert all_int(ret.shape), f"does not support symbolic shape {ret.shape}"
@@ -934,7 +934,7 @@ class Tensor:
     if type_dim[Tensor]:
       # calculate dim of current ret by subtracting dims collapsed and adding dims injected up until tensor_dim
       def calc_dim(tensor_dim:int) -> int:
-        return tensor_dim - sum(1 for d in dims_collapsed if tensor_dim >= d) + sum(1 for d in type_dim[None] if tensor_dim >= d)
+        return tensor_dim - sum(1 for d in dims_collapsed if tensor_dim >= d) + sum([1 for d in type_dim[None] if tensor_dim >= d])
 
       # track tensor_dim and tensor_index using a dict
       # calc_dim to get dim and use that to normalize the negative tensor indices
@@ -956,7 +956,7 @@ class Tensor:
       # inject 1's for the extra dims added in create masks
       sh = ret.shape[:first_dim] + (1,) * len(big_shape) + ret.shape[first_dim:]
       # sum reduce the extra dims introduced in create masks
-      ret = (ret.reshape(sh) * mask).sum(tuple(i + len(big_shape) for i in idx.keys()), acc_dtype=ret.dtype)
+      ret = (ret.reshape(sh) * mask).sum(tuple([i + len(big_shape) for i in idx.keys()]), acc_dtype=ret.dtype)
 
       # special permute case
       if first_dim != 0 and len(idx) != 1 and tuple(idx.keys()) != tuple(range(first_dim, last_dim+1)):
@@ -982,9 +982,9 @@ class Tensor:
 
   # NOTE: using _slice is discouraged and things should migrate to pad and shrink
   def _slice(self, arg:Sequence[Optional[Tuple[int, sint]]], value:float=0) -> Tensor:
-    arg_ = tuple(a if a is not None else (0, s) for s,a in zip(self.shape, arg))
-    padding = tuple((max(0, -l), max(0, r-s)) for s,(l,r) in zip(self.shape, arg_))
-    return self.pad(padding, value=value).shrink(tuple((l + pl, r + pl) for (l,r),(pl,_) in zip(arg_, padding)))
+    arg_ = tuple([a if a is not None else (0, s) for s,a in zip(self.shape, arg)])
+    padding = tuple([(max(0, -l), max(0, r-s)) for s,(l,r) in zip(self.shape, arg_)])
+    return self.pad(padding, value=value).shrink(tuple([(l + pl, r + pl) for (l,r),(pl,_) in zip(arg_, padding)]))
 
   def gather(self:Tensor, dim:int, index:Tensor) -> Tensor:
     """
@@ -1092,7 +1092,7 @@ class Tensor:
     dim = self._resolve_dim(dim)
     if isinstance(sizes, int): sizes = [min(sizes, self.shape[dim]-i) for i in range(0, max(1, self.shape[dim]), max(1, sizes))]
     assert sum(sizes) == self.shape[dim], f"expect sizes to sum exactly to {self.shape[dim]}, but got {sum(sizes)}"
-    return tuple(self[sl] for sl in [tuple([slice(None)]*dim + [slice(sum(sizes[:i]), sum(sizes[:i + 1]))]) for i in range(len(sizes))])
+    return tuple([self[sl] for sl in [tuple([slice(None)]*dim + [slice(sum(sizes[:i]), sum(sizes[:i + 1]))]) for i in range(len(sizes))]])
 
   def chunk(self, chunks:int, dim:int=0) -> List[Tensor]:
     """
@@ -1134,7 +1134,7 @@ class Tensor:
     print(t.squeeze(1).shape)
     ```
     """
-    if dim is None: return self.reshape(tuple(dim for dim in self.shape if dim != 1))
+    if dim is None: return self.reshape(tuple([dim for dim in self.shape if dim != 1]))
     dim = self._resolve_dim(dim)
     return self if not self.ndim or self.shape[dim] != 1 else self.reshape(self.shape[:dim] + self.shape[dim+1:])
 
@@ -1231,9 +1231,9 @@ class Tensor:
       if axis is not None and axis not in [-1, 0]: raise IndexError(f"{axis=} out of range of [-1, 0]")
       axis = None
     axis_: Tuple[int, ...] = tuple(range(len(self.shape))) if axis is None else ((axis,) if isinstance(axis, int) else tuple(axis))
-    axis_ = tuple(self._resolve_dim(x) for x in axis_)
+    axis_ = tuple([self._resolve_dim(x) for x in axis_])
     ret = fxn.apply(self, axis=axis_)
-    return ret if keepdim else ret.reshape(tuple(s for i,s in enumerate(self.shape) if i not in axis_))
+    return ret if keepdim else ret.reshape(tuple([s for i,s in enumerate(self.shape) if i not in axis_]))
 
   def sum(self, axis=None, keepdim=False, acc_dtype:Optional[DType]=None):
     """
@@ -1663,7 +1663,7 @@ class Tensor:
     # interleave tyx and HWO: (bs, groups, rcout, oy, HO, ox, WO)
     ret = ret.permute([*range(len(HW), len(ret.shape)-len(HW)), *[i+o for i in range(len(HW)) for o in [len(ret.shape)-len(HW),0]]])
     # merge groups and rcout, tyx and HWO: (bs, groups, cout, *yx), shrink to final
-    ret = ret.reshape(bs, cout, *[c * HWO[i] for i, c in enumerate(tyx)]).shrink(tuple((0, s) for s in [bs, cout, *oyx]))
+    ret = ret.reshape(bs, cout, *[c * HWO[i] for i, c in enumerate(tyx)]).shrink(tuple([(0, s) for s in [bs, cout, *oyx]]))
 
     return (ret if bias is None else ret.add(bias.reshape(1, -1, *[1 for _ in range(len(HW))]))).contiguous().contiguous_backward()
 
@@ -2615,7 +2615,7 @@ class Tensor:
     ```
     """
     axis_ = argfix(axis)
-    shape = tuple(s if ax in axis_ else 1 for ax, s in enumerate(self.shape))
+    shape = tuple([s if ax in axis_ else 1 for ax, s in enumerate(self.shape)])
     x = self - mean.reshape(shape)
     if weight is not None: x = x * weight.reshape(shape)
     ret = x.mul(invstd.reshape(shape) if len(invstd.shape) == len(axis_) else invstd)
@@ -2826,8 +2826,8 @@ class Tensor:
     if cin % 4 != 0 and not (cin == 1 and groups%4 == 0):
       x = x.reshape(bs, groups, cin, iy, ix)   # do this always?
       added_input_channels = 4 - (cin % 4)
-      w = w.pad(tuple((0, added_input_channels) if i == 2 else None for i in range(w.ndim)))
-      x = x.pad(tuple((0, added_input_channels) if i == 2 else None for i in range(x.ndim)))
+      w = w.pad(tuple([(0, added_input_channels) if i == 2 else None for i in range(w.ndim)]))
+      x = x.pad(tuple([(0, added_input_channels) if i == 2 else None for i in range(x.ndim)]))
       cin = cin + added_input_channels
       x = x.reshape(bs, groups*cin, iy, ix)
 
@@ -2837,7 +2837,7 @@ class Tensor:
       added_output_channels = 4 - (rcout % 4)
       rcout += added_output_channels
       cout = groups * rcout
-      w = w.pad(tuple((0, added_output_channels) if i == 1 else None for i in range(w.ndim)))
+      w = w.pad(tuple([(0, added_output_channels) if i == 1 else None for i in range(w.ndim)]))
 
     # packed (note: flipping bs and iy would make the auto-padding work)
     x = x.permute(0,2,3,1)
