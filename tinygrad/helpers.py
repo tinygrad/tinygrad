@@ -241,7 +241,7 @@ def flat_mv(mv:memoryview): return mv if len(mv) == 0 else mv.cast("B", shape=(m
 
 class tinytqdm:
   def __init__(self, iterable:Iterable = None, desc:str = '', disable:bool = False, unit:str = 'it', total:int = None, rate:int = 100):
-    self.iter, self.desc, self.dis, self.unit, self.total, self.rate = iter, desc, disable, unit, len(iter) if total is None else total, rate
+    self.iter, self.desc, self.dis, self.unit, self.total, self.rate = iterable, desc, disable, unit, len(iter) if total is None else total, rate
     self.st, self.cnt, self.val, self.skip = time.perf_counter(), 0, 0, 1
     self.update(0)
   def __iter__(self):
