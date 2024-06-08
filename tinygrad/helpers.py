@@ -240,7 +240,7 @@ def init_c_var(ctypes_var, creat_cb): return (creat_cb(ctypes_var), ctypes_var)[
 def flat_mv(mv:memoryview): return mv if len(mv) == 0 else mv.cast("B", shape=(mv.nbytes,))
 
 class tinytqdm:
-  def __init__(self, iter = None, desc: str = '', disable: bool = False, unit: str = 'it', total: int = None, rate: int = 100):
+  def __init__(self, iter:Iterable = None, desc:str = '', disable:bool = False, unit:str = 'it', total:int = None, rate:int = 100):
     self.iter, self.desc, self.dis, self.unit, self.total, self.rate = iter, desc, disable, unit, len(iter) if total is None else total, rate
     self.st, self.cnt, self.val, self.skip = time.perf_counter(), 0, 0, 1
     self.update(0)
@@ -250,7 +250,7 @@ class tinytqdm:
         yield item
         self.update()
     finally: self.update(0, close=True)
-  def update(self, n=1, close=False):
+  def update(self, n:int=1, close:bool=False):
     i = self.val = self.val + n
     if (i % self.skip != 0 and not close) or self.dis: return
     prog, dur, term, self.cnt = i/self.total, time.perf_counter()-self.st, shutil.get_terminal_size().columns, self.cnt+1
