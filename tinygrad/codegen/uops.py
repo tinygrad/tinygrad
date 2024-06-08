@@ -70,7 +70,9 @@ class UOp:
     graph.recursive_add(UOp(UOps.STORE, None, (glbl,UOp.const(dtypes.int, 0),self)))
     graph.linearize()
     from tinygrad.renderer.cstyle import CStyleLanguage
-    fxn = CStyleLanguage().render("", graph)
+    class TestRenderer(CStyleLanguage):
+      code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.DIV: lambda a,b,dtype: f"({a}//{b})"}
+    fxn = TestRenderer().render("", graph)
     return fxn.split("data0[0] = ")[1].split(";")[0]
 
 def uop_alu_resolve(u:UOp) -> sint:
@@ -221,7 +223,15 @@ constant_folder = PatternMatcher([
      lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.SUB, x.dtype, [c2.arg, c1.arg]))),
   # *** rules from symbolic ***
   (UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.ALU, BinaryOps.MUL, [UPat(name="x"), UPat(UOps.CONST, name="c1")]), UPat(UOps.CONST, name="c2")]),
-     lambda x,c1,c2: x*UOp.const(x.dtype, exec_alu(BinaryOps.MUL, x.dtype, [c1.arg, c2.arg]))),
+     lambda x,c1,c2: x*UOp.const(x.dtype, exec_alu(BinaryOps.MUL, x.dtype, [c1.arg, c2.arg]))),  # two stage mul
+  (UPat(UOps.ALU, BinaryOps.MOD, (UPat(name="x"), UPat(UOps.CONST, 1))), lambda x: UOp.const(x.dtype, 0)), # x%1 -> 0
+  (UPat(UOps.ALU, BinaryOps.ADD, (UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c0"), UPat(name="x")]),  # (x*c0)+(x*c1) -> x*(c0+c1)
+                                  UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c1"), UPat(name="x")]),)),
+                                  lambda x,c0,c1: x*exec_alu(BinaryOps.ADD, x.dtype, [c0.arg, c1.arg])),
+  (UPat(UOps.ALU, BinaryOps.DIV, (UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c0"), UPat(name="x")]),
+                                  UPat(UOps.CONST, name="c0"))), lambda x,c0: x),    # (x*c0)/c0 -> x (why is this not matching?)
+  (UPat(UOps.ALU, BinaryOps.CMPLT, (UPat(UOps.ALU, BinaryOps.ADD, [UPat(UOps.CONST, name="c0"), UPat(name="x")]), UPat(UOps.CONST, name="c1"))),
+    lambda x,c0,c1: UOp.alu(BinaryOps.CMPLT, x, UOp.const(x.dtype, exec_alu(BinaryOps.SUB, x.dtype, [c1.arg, c0.arg])))),
   # TODO: can do the invert of this (flip alt/load) when we fix double ops
   (UPat(UOps.STORE, vin=(UPat(name="buf"), UPat(name="idx"), UPat(UOps.ALU, TernaryOps.WHERE,
                         (UPat(name="gate"), UPat(name="alt"), UPat(UOps.LOAD, vin=(UPat(name="buf"), UPat(name="idx"))))))),

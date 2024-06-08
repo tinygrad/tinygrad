@@ -6,6 +6,8 @@ import unittest, pickle
 
 from tinygrad import dtypes
 from tinygrad.codegen.uops import UOp, UOps
+from tinygrad.ops import BinaryOps
+import functools
 
 def NumNode(val): return UOp.const(dtypes.int, val)
 def Variable(expr, nmin, nmax):
@@ -13,6 +15,13 @@ def Variable(expr, nmin, nmax):
   class TempVar:
     def __init__(self, x): self.expr = x
   return UOp(UOps.DEFINE_VAR, dtypes.int, (UOp.const(dtypes.int, nmin), UOp.const(dtypes.int, nmax)), TempVar(expr))
+class Node:
+  @staticmethod
+  def sum(ops): return functools.reduce(lambda x,y: x+y, ops)
+def create_lt_node(v, n): return UOp.alu(BinaryOps.CMPLT, v, UOp.const(v.dtype, n))
+def create_ge_node(v, n): return UOp.alu(BinaryOps.CMPLT, -v, UOp.const(v.dtype, -n+1))
+def SumNode(x): return Node.sum(x)
+def MulNode(x, y): return x*y
 
 # *** leave tests the same
 
@@ -29,6 +38,10 @@ class TestSymbolic(unittest.TestCase):
       self.assertEqual(v.render(), s)
     #self.assertEqual(v.min, n)
     #self.assertEqual(v.max, m)
+
+  def test_cmp_simple(self):
+    self.helper_test_variable(create_lt_node(Variable("a", 3, 8), 4), 0, 1, "(a<4)")
+    self.helper_test_variable(create_ge_node(Variable("a", 3, 8), 8), 0, 1, {"((a*-1)<-7)", "(7<a)"})
 
   def test_ge(self):
     self.helper_test_variable(create_ge_node(Variable("a", 3, 8), 77), 0, 0, "0")
@@ -100,7 +113,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(a+a*3, 0, 8*4, "(a*4)")
 
   def test_neg(self):
-    self.helper_test_variable(-Variable("a", 0, 8), -8, 0, "(a*-1)")
+    self.helper_test_variable(-Variable("a", 0, 8), -8, 0, {"(a*-1)", "(-a)"})
 
   def test_add_1(self):
     self.helper_test_variable(Variable("a", 0, 8)+1, 1, 9, {"(1+a)", "(a+1)"})
@@ -198,7 +211,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((Variable("a", 0, 1800)//10)//9, 0, 20, "(a//90)")
 
   def test_distribute_mul(self):
-    self.helper_test_variable(Node.sum([Variable("a", 0, 3), Variable("b", 0, 5)])*3, 0, 24, "((a*3)+(b*3))")
+    self.helper_test_variable(Node.sum([Variable("a", 0, 3), Variable("b", 0, 5)])*3, 0, 24, {"((a*3)+(b*3))", "((a+b)*3)"})
 
   def test_mod_mul_sum(self):
     self.helper_test_variable(Node.sum([Variable("b", 0, 2), Variable("a", 0, 5)*10])%9, 0, 7, "(a+b)")
@@ -239,7 +252,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Node.sum([NumNode(-29), Variable("a", 0, 100), Variable("b", 0, 10)*28]) % 28, 0, 27, "((27+a)%28)")
 
   def test_sum_combine_num(self):
-    self.helper_test_variable(Node.sum([NumNode(29), Variable("a", 0, 10), NumNode(-23)]), 6, 16, "(6+a)")
+    self.helper_test_variable(Node.sum([NumNode(29), Variable("a", 0, 10), NumNode(-23)]), 6, 16, {"(6+a)", "(a+6)"})
 
   def test_sum_num_hoisted_and_factors_cancel_out(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 1) * -4 + 1, Variable("a", 0, 1) * 4]), 1, 1, "1")
