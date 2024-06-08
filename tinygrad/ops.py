@@ -14,11 +14,11 @@ from tinygrad.shape.shapetracker import ShapeTracker
 # NOTE: many GPUs don't have DIV, but UnaryOps.RECIP doesn't work for integer division
 class UnaryOps(Enum):
   """A -> A (elementwise)"""
-  EXP2 = auto(); LOG2 = auto(); CAST = auto(); BITCAST = auto(); SIN = auto(); SQRT = auto(); NEG = auto() # noqa: E702
+  EXP2 = auto(); LOG2 = auto(); CAST = auto(); BITCAST = auto(); SIN = auto(); SQRT = auto(); NEG = auto() ; RECIP = auto()# noqa: E702
 class BinaryOps(Enum):
   """A + A -> A (elementwise)"""
   ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); CMPNE = auto(); XOR = auto() # noqa: E702
-  SHR = auto(); SHL = auto() # noqa: E702
+  SHR = auto(); SHL = auto(); IDIV = auto() # noqa: E702
 class TernaryOps(Enum):
   """A + A + A -> A (elementwise)"""
   WHERE = auto(); MULACC = auto() # noqa: E702
@@ -124,7 +124,11 @@ python_alu = {
   BinaryOps.MUL: operator.mul, BinaryOps.ADD: operator.add, BinaryOps.SUB: operator.sub, BinaryOps.XOR: operator.xor,
   BinaryOps.MAX: max, BinaryOps.CMPNE: operator.ne, BinaryOps.CMPLT: operator.lt,
   BinaryOps.MOD: lambda x,y: abs(int(x))%abs(int(y))*(1,-1)[x<0],
-  BinaryOps.DIV: lambda x,y: int(x/y) if isinstance(x, int) else (x/y if y != 0 else x*math.inf),
+  #BinaryOps.DIV: lambda x,y: int(x/y) if isinstance(x, int) else (x/y if y != 0 else x*math.inf),
+  UnaryOps.RECIP: lambda x: 1.0 / x if x != 0 else math.inf if x > 0 else -math.inf,
+  BinaryOps.DIV: lambda x, y: python_alu[BinaryOps.MUL](x, python_alu[UnaryOps.RECIP](y)) if isinstance(x, float) or isinstance(y, float)
+                 else python_alu[BinaryOps.IDIV](x, y),
+  BinaryOps.IDIV: lambda x, y: int(x // y) if y != 0 else (math.inf if x > 0 else -math.inf),
   TernaryOps.WHERE: lambda x,y,z: y if x else z}
 
 truncate: Dict[DType, Callable] = {dtypes.bool: bool,
