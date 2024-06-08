@@ -19,7 +19,7 @@ class HCQGraph(MultiGraphRunner):
     kernargs_size: Dict[Compiled, int] = collections.defaultdict(int)
     for ji in self.jit_cache:
       if not isinstance(ji.prg, CompiledRunner): continue
-      kernargs_size[ji.prg.device] += round_up(ji.prg.clprg.kernargs_segment_size, 16)
+      kernargs_size[ji.prg.device] += round_up(ji.prg.clprg.kernargs_alloc_size, 16)
     kernargs_ptrs: Dict[Compiled, int] = {dev:dev.allocator._alloc(sz, BufferOptions(cpu_access=True)).va_addr for dev,sz in kernargs_size.items()}
 
     # Fill initial arguments.
@@ -28,7 +28,7 @@ class HCQGraph(MultiGraphRunner):
     for j,ji in enumerate(self.jit_cache):
       if not isinstance(ji.prg, CompiledRunner): continue
       self.kargs_addrs[j] = kernargs_ptrs[ji.prg.device]
-      kernargs_ptrs[ji.prg.device] += round_up(ji.prg.clprg.kernargs_segment_size, 16)
+      kernargs_ptrs[ji.prg.device] += round_up(ji.prg.clprg.kernargs_alloc_size, 16)
 
       args_t = init_c_struct_t(tuple([(f'f{i}', ctypes.c_void_p) for i in range(len(ji.bufs))] +
                                      [(f'v{i}', ctypes.c_int) for i in range(len(ji.prg.p.vars))]))
