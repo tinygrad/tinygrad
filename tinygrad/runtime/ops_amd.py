@@ -50,14 +50,6 @@ def ioctls_from_header():
   return type("KIO", (object, ), fxns)
 kio = ioctls_from_header()
 
-class AMDCompiler(Compiler):
-  def __init__(self, arch:str):
-    self.arch = arch
-    super().__init__(f"compile_hip_{self.arch}")
-  def compile(self, src:str) -> bytes:
-    try: return compile_hip(src, self.arch)
-    except RuntimeError as e: raise CompileError(e)
-
 SIGNAL_SIZE, SIGNAL_COUNT = ctypes.sizeof(hsa.amd_signal_t), 16384
 SIGNAL_VALUE_OFFSET = getattr(hsa.amd_signal_t, 'value').offset
 
