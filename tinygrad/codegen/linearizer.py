@@ -234,7 +234,7 @@ class Linearizer(Kernel):
       wmma_sz = [prod(l) for l in tc.thread_local_sizes]
       def upcast_strides(buf:int):
         strides, next_ = [], 1
-        for (sz, stride, reduce) in self.upcasted_axis(buf)[tc.num_upcasts():]:
+        for (sz, stride, _) in self.upcasted_axis(buf)[tc.num_upcasts():]:
           strides.append((0 if stride == 0 else next_, sz))
           next_ *= 1 if stride == 0 else sz
         return strides
