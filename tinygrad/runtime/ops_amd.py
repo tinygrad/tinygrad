@@ -99,7 +99,7 @@ class HWPM4Queue:
       dp = hsa.hsa_kernel_dispatch_packet_t.from_address(dp_addr:=kernargs + prg.dispatch_packet_offset)
       dp.workgroup_size_x, dp.workgroup_size_y, dp.workgroup_size_z = local_size[0], local_size[1], local_size[2]
       dp.grid_size_x, dp.grid_size_y, dp.grid_size_z = global_size[0]*local_size[0], global_size[1]*local_size[1], global_size[2]*local_size[2]
-      dp.group_segment_size, dp.kernarg_address = prg.group_segment_size, kernargs
+      dp.group_segment_size, dp.private_segment_size, dp.kernarg_address = prg.group_segment_size, prg.private_segment_size, kernargs
       user_data = [*data64_le(dp_addr)] + user_data
       self.ptr_to_dispatch_packet[self.ptr()] = dp
 
