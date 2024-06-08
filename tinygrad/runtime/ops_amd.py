@@ -1,10 +1,9 @@
 from __future__ import annotations
 from typing import Tuple, List, Any, cast
 import os, fcntl, ctypes, ctypes.util, functools, re, pathlib, mmap, struct, errno, subprocess, time, array
-from tinygrad.device import Compiled, Compiler, CompileError, BufferOptions, LRUAllocator
+from tinygrad.device import Compiled, BufferOptions, LRUAllocator
 from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up, DEBUG
 from tinygrad.renderer.cstyle import AMDRenderer
-from tinygrad.runtime.driver.hip_comgr import compile_hip
 from tinygrad.runtime.ops_hsa import HSACompiler
 import tinygrad.runtime.autogen.kfd as kfd
 import tinygrad.runtime.autogen.hsa as hsa
