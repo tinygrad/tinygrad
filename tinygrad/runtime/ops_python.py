@@ -17,7 +17,7 @@ def _load(m, i):
 
 def load(inp, j=0):
   if len(inp) == 4: return [_load(m, x+j) if gate else default for m,x,gate,default in zip(*inp)]
-  else: return [_load(m, x+j) for m,x in zip(inp[0], inp[1])]
+  return [_load(m, x+j) for m,x in zip(inp[0], inp[1])]
 
 def _store(m, i, v):
   if i < 0 or i >= len(m): raise IndexError(f"store out of bounds, size is {len(m)}, access is {i}, value is {v}")

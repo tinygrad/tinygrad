@@ -347,7 +347,7 @@ class AMDAllocator(LRUAllocator):
   def _alloc(self, size:int, options:BufferOptions):
     try:
       if options.host: return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, public=True)
-      else: return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=options.cpu_access)
+      return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=options.cpu_access)
     except OSError as e:
       if e.errno == errno.ENOMEM: raise MemoryError("Cannot allocate memory") from e
       else: raise
