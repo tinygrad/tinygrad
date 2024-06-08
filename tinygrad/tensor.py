@@ -2285,7 +2285,7 @@ class Tensor:
 
     if match_dtype and x.dtype != y.dtype:
       output_dtype = least_upper_dtype(x.dtype, y.dtype)
-      x,y = x.cast(output_dtype), y.cast(output_dtype)
+      x, y = x.cast(output_dtype), y.cast(output_dtype)
 
     if reverse: x, y = y, x
 
