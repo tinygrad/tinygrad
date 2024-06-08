@@ -4,7 +4,7 @@ import functools, itertools, heapq
 from collections import defaultdict
 from enum import Enum, auto
 from dataclasses import dataclass, field
-from tinygrad.dtype import dtypes, DType, PtrDType
+from tinygrad.dtype import dtypes, DType
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, exec_alu
 from tinygrad.helpers import prod, DEBUG, getenv
@@ -66,17 +66,6 @@ class UOp:
   @functools.cached_property
   def parents(self) -> Set[UOp]: return set.union(set(self.vin), *[x.parents for x in self.vin])
   def vars(self) -> Set[UOp]: return set([x for x in set.union(set([self]), self.parents) if x.uop is UOps.DEFINE_VAR])
-  def render(self) -> str:
-    graph = UOpGraph()
-    # NOTE: we need STORE so the ALU op has children
-    glbl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=(0,True))
-    graph.recursive_add(UOp(UOps.STORE, None, (glbl,UOp.const(dtypes.int, 0),self)))
-    graph.linearize()
-    from tinygrad.renderer.cstyle import CStyleLanguage
-    class TestRenderer(CStyleLanguage):
-      code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.DIV: lambda a,b,dtype: f"({a}//{b})"}
-    fxn = TestRenderer().render("", graph)
-    return fxn.split("data0[0] = ")[1].split(";")[0]
 
 def uop_alu_resolve(u:UOp) -> sint:
   if u.uop is UOps.CONST: return u.arg

@@ -6,10 +6,22 @@ import unittest, pickle
 
 # *** fake symobilc uops ***
 
-from tinygrad import dtypes
-from tinygrad.codegen.uops import UOp, UOps
+from tinygrad.dtype import dtypes, PtrDType
+from tinygrad.codegen.uops import UOp, UOps, UOpGraph
 from tinygrad.ops import BinaryOps
 import functools
+
+def render(self) -> str:
+  graph = UOpGraph()
+  # NOTE: we need STORE so the ALU op has children
+  glbl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=(0,True))
+  graph.recursive_add(UOp(UOps.STORE, None, (glbl,UOp.const(dtypes.int, 0),self)))
+  graph.linearize()
+  from tinygrad.renderer.cstyle import CStyleLanguage
+  class TestRenderer(CStyleLanguage):
+    code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.DIV: lambda a,b,dtype: f"({a}//{b})"}
+  fxn = TestRenderer().render("", graph)
+  return fxn.split("data0[0] = ")[1].split(";")[0]
 
 def NumNode(val): return UOp.const(dtypes.int, val)
 def Variable(expr, nmin, nmax):
@@ -40,9 +52,9 @@ class TestSymbolicPickle(unittest.TestCase):
 class TestSymbolic(unittest.TestCase):
   def helper_test_variable(self, v, n, m, s):
     if isinstance(s, set):
-      self.assertIn(v.render(), s)
+      self.assertIn(render(v), s)
     else:
-      self.assertEqual(v.render(), s)
+      self.assertEqual(render(v), s)
     #self.assertEqual(v.min, n)
     #self.assertEqual(v.max, m)
 
