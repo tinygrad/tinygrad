@@ -89,7 +89,7 @@ class Linearizer(Kernel):
     # todo: multioutput test with different output valids to add if acc is None: g_valid = NumNode(1)
 
     if amt > 1: localtype = localtype.vec(amt)
-    e_idxs, e_valids = expand_node(g_idx, expand_vars), expand_node(g_valid, expand_vars)
+    e_idxs, e_valids = expand_node(g_idx, expand_vars), expand_node(g_valid, expand_vars)  # pylint: disable=possibly-used-before-assignment
 
     ret = []
     invalid_value = 0
