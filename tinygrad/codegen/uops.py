@@ -268,7 +268,7 @@ class UOpGraph:
           recurse_cnt += 1
         changed += recurse_cnt
         # NOTE: this changes UOp, so we have to delete caches
-        up.vin = tuple([rewrite(x) for x in up.vin])
+        up.vin = tuple(rewrite(x) for x in up.vin)
         try: del up.parents
         except AttributeError: pass
         try: del up.cmp_tuple
