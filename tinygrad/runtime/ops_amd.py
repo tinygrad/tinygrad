@@ -58,7 +58,6 @@ class AMDCompiler(Compiler):
     try: return compile_hip(src, self.arch)
     except RuntimeError as e: raise CompileError(e)
 
-PAGE_SIZE = 0x1000
 SIGNAL_SIZE, SIGNAL_COUNT = ctypes.sizeof(hsa.amd_signal_t), 16384
 SIGNAL_VALUE_OFFSET = getattr(hsa.amd_signal_t, 'value').offset
 
@@ -67,14 +66,11 @@ regBIF_BX_PF1_GPU_HDP_FLUSH_DONE = 0x0107
 
 # VGT_EVENT_TYPE in navi10_enum.h
 CACHE_FLUSH_AND_INV_TS_EVENT = 0x14
-CS_PARTIAL_FLUSH = 0x7
 
 WAIT_REG_MEM_FUNCTION_EQ = 3 # ==
 WAIT_REG_MEM_FUNCTION_GEQ = 5 # >=
 
-COMPUTE_SHADER_EN = 1
-FORCE_START_AT_000 = 1 << 2
-CS_W32_EN = 1 << 15
+COMPUTE_SHADER_EN, FORCE_START_AT_000, CS_W32_EN = (1 << 0), (1 << 2), (1 << 15)
 
 def gfxreg(reg): return reg + 0x00001260 - amd_gpu.PACKET3_SET_SH_REG_START
 def data64_le(data): return (data & 0xFFFFFFFF, data >> 32)
@@ -151,9 +147,6 @@ class HWPM4Queue:
     return self
 
   def _release_mem(self, mem_event_type, mem_data_sel, mem_int_sel, address, value=0, cst=0, cache_flush=False):
-    # event_index__mec_release_mem__end_of_pipe = 5
-    # event_index__mec_release_mem__shader_done = 6
-    mem_event_index = 5
     cache_flush_flags = 0
 
     if cache_flush:
@@ -161,8 +154,10 @@ class HWPM4Queue:
         amd_gpu.PACKET3_RELEASE_MEM_GCR_GL2_INV | amd_gpu.PACKET3_RELEASE_MEM_GCR_GLM_WB | amd_gpu.PACKET3_RELEASE_MEM_GCR_GLM_INV | \
         amd_gpu.PACKET3_RELEASE_MEM_GCR_GL2_WB | amd_gpu.PACKET3_RELEASE_MEM_GCR_SEQ
 
+    # event_index__mec_release_mem__end_of_pipe = 5
+    # event_index__mec_release_mem__shader_done = 6
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_RELEASE_MEM, 6),
-      amd_gpu.PACKET3_RELEASE_MEM_EVENT_TYPE(mem_event_type) | amd_gpu.PACKET3_RELEASE_MEM_EVENT_INDEX(mem_event_index) | cache_flush_flags,
+      amd_gpu.PACKET3_RELEASE_MEM_EVENT_TYPE(mem_event_type) | amd_gpu.PACKET3_RELEASE_MEM_EVENT_INDEX(5) | cache_flush_flags,
       amd_gpu.PACKET3_RELEASE_MEM_DATA_SEL(mem_data_sel) | amd_gpu.PACKET3_RELEASE_MEM_INT_SEL(mem_int_sel) | amd_gpu.PACKET3_RELEASE_MEM_DST_SEL(0),
       address & 0xffffffff, address >> 32, value & 0xffffffff, value >> 32, cst]
 
