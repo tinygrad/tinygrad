@@ -241,8 +241,8 @@ def flat_mv(mv:memoryview): return mv if len(mv) == 0 else mv.cast("B", shape=(m
 
 class tinytqdm:
   def __init__(self, iterable=None, desc:str='', disable:bool=False, unit:str='it', total:int=-1, rate:int=100):
-    self.iter, self.desc, self.dis, self.unit, self.total, self.rate = iterable, desc, disable, unit, len(iterable) if total==-1 else total, rate
-    self.st, self.cnt, self.val, self.skip = time.perf_counter(), 0, 0, 1
+    self.iter, self.desc, self.dis, self.unit, self.rate = iterable, desc, disable, unit, rate
+    self.st, self.cnt, self.val, self.skip, self.total = time.perf_counter(), 0, 0, 1, len(iterable) if total==-1 else total
     self.update(0)
   def __iter__(self):
     try:
@@ -252,10 +252,10 @@ class tinytqdm:
     finally: self.update(0, close=True)
   def update(self, n:int=1, close:bool=False):
     i = self.val = self.val + n
-    if (i % self.skip != 0 and not close) or self.dis: return
+    if (self.cnt % self.skip != 0 and not close) or self.dis: return
     prog, dur, term, self.cnt = i/self.total, time.perf_counter()-self.st, shutil.get_terminal_size().columns, self.cnt+1
     if self.cnt/dur > self.rate and i>0: self.skip = max(int(self.cnt/dur)//self.rate,1)
     def fmt_t(t): return ':'.join([f'{x:02d}' for x in divmod(int(t), 60)]) if t != -1 else '?'
-    post_fix = f'| {i}/{self.total} [{fmt_t(dur)}<{fmt_t(((dur/i*self.total)-dur) if i>0 else -1)}, {f"{i/dur:5.2f}" if i!=0 else "?"}{self.unit}/s]'
-    sz = max(term-5-len(post_fix)-len(self.desc), 1)
-    print(f'\r{self.desc}{int(100*prog):3}%|{"█"*int(sz*prog)}{" "*(sz-int(sz*prog))}{post_fix}'[:term+1],flush=True,end=('\n' if close else ''))
+    suffix = f'| {i}/{self.total} [{fmt_t(dur)}<{fmt_t(((dur/i*self.total)-dur) if i>0 else -1)}, {f"{i/dur:5.2f}" if i!=0 else "?"}{self.unit}/s]'
+    sz = max(term-5-len(suffix)-len(self.desc), 1)
+    print(f'\r{self.desc}{round(100*prog):3}%|{"█"*round(sz*prog)}{" "*(sz-round(sz*prog))}{suffix}'[:term+1],flush=True,end=('\n' if close else ''))
