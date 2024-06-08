@@ -254,29 +254,29 @@ class UOpGraph:
     # recursive rewrite
     changed = getenv("UOPS_REWRITE", 1)
     run_cnt = 0
+    @functools.lru_cache
+    def rewrite(u:UOp) -> UOp:
+      nonlocal changed
+      recurse_cnt = 0
+      up = u
+      # locally recursively rewrite
+      while (rewritten := pm.rewrite(up)):
+        assert recurse_cnt < 100, f"recursive_rewrite looped {up} <--> {rewritten}"
+        up = rewritten
+        recurse_cnt += 1
+      changed += recurse_cnt
+      # NOTE: this changes UOp, so we have to delete caches
+      up.vin = tuple(rewrite(x) for x in up.vin)
+      try: del up.parents
+      except AttributeError: pass
+      try: del up.cmp_tuple
+      except AttributeError: pass
+      # replace with cached nodes
+      if found:=self.nodes.get(key:=up.tuple()): return found
+      self.nodes[key] = up
+      return up
     while changed:
       changed = 0
-      @functools.lru_cache
-      def rewrite(u:UOp) -> UOp:
-        nonlocal changed
-        recurse_cnt = 0
-        up = u
-        # locally recursively rewrite
-        while (rewritten := pm.rewrite(up)):
-          assert recurse_cnt < 100, f"recursive_rewrite looped {up} <--> {rewritten}"
-          up = rewritten
-          recurse_cnt += 1
-        changed += recurse_cnt
-        # NOTE: this changes UOp, so we have to delete caches
-        up.vin = tuple(rewrite(x) for x in up.vin)
-        try: del up.parents
-        except AttributeError: pass
-        try: del up.cmp_tuple
-        except AttributeError: pass
-        # replace with cached nodes
-        if found:=self.nodes.get(key:=up.tuple()): return found
-        self.nodes[key] = up
-        return up
       sink = rewrite(sink)
       run_cnt += 1
       assert run_cnt < 100, "exceeded 100 rewrite loops!"
