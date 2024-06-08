@@ -215,7 +215,7 @@ if __name__ == "__main__":
   param_bytes = sum(x.lazydata.size * x.dtype.itemsize for x in get_parameters(model))
 
   if args.api:
-    from bottle import Bottle, request, response, HTTPResponse, abort
+    from bottle import Bottle, request, response, HTTPResponse, abort, static_file
     app = Bottle()
 
     cors_headers = {
@@ -230,6 +230,13 @@ if __name__ == "__main__":
     @app.hook("after_request")
     def enable_cors():
       for key, value in cors_headers.items(): response.set_header(key, value)
+
+    @app.route("/<filename>")
+    def server_static(filename):
+      return static_file(filename, root=(Path(__file__).parent / "tinychat").as_posix())
+    @app.route("/")
+    def index():
+      return static_file("index.html", root=(Path(__file__).parent / "tinychat").as_posix())
 
     @app.get("/v1/models")
     def models():
