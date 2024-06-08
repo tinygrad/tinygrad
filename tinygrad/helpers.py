@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string, ctypes, shutil
+import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string, ctypes, shutil, sys
 import itertools, urllib.request, subprocess
 from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Sequence
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
@@ -203,10 +203,10 @@ def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, allow_caching=n
     with urllib.request.urlopen(url, timeout=10) as r:
       assert r.status == 200
       total_length = int(r.headers.get('content-length', 0))
-      progress_bar = tinytqdm(range(total_length//16384+(total_length%16384!=0)), desc=url)
+      progress_bar = tinytqdm(total=total_length, unit='B', desc=url)
       (path := fp.parent).mkdir(parents=True, exist_ok=True)
       with tempfile.NamedTemporaryFile(dir=path, delete=False) as f:
-        while chunk := r.read(16384): f.write(chunk), next(progress_bar)
+        while chunk := r.read(16384): progress_bar.update(f.write(chunk))
         f.close()
         if (file_size:=os.stat(f.name).st_size) < total_length: raise RuntimeError(f"fetch size incomplete, {file_size} < {total_length}")
         pathlib.Path(f.name).rename(fp)
@@ -239,14 +239,23 @@ def init_c_struct_t(fields: Tuple[Tuple[str, ctypes._SimpleCData], ...]):
 def init_c_var(ctypes_var, creat_cb): return (creat_cb(ctypes_var), ctypes_var)[1]
 def flat_mv(mv:memoryview): return mv if len(mv) == 0 else mv.cast("B", shape=(mv.nbytes,))
 
-def tinytqdm(iterable, desc='', disable=False, total=None, update_rate=100, char='█'):
-  skip, st, total, desc = 1, time.perf_counter(), len(iterable) if total is None else total, f'{desc}: ' if len(desc)>0 else ''
-  for i, item in enumerate(iterable):
-    yield item
-    if (i % skip != 0 and (i+1) != total) or disable: continue
-    prog, dur, term = (i+1)/total, time.perf_counter()-st, shutil.get_terminal_size().columns
-    if (i+1)/dur > update_rate: skip = int((i+1)/(dur/update_rate))
-    def fmt_time(t): return ':'.join([f'{x:02d}' for x in divmod(int(t), 60)])
-    post_fix = f'| {i+1}/{total} [{fmt_time(dur)}<{fmt_time((dur/(i+1)*total)-dur)}, {(i+1)/dur:5.2f}it/s]'
-    sz = max(term-5-len(post_fix)-len(desc), 1)
-    print(f'\r{desc}{int(100*prog):3}%|{char*int(sz*prog)}{" "*(sz-int(sz*prog))}{post_fix}'[:term+1],flush=True,end=('' if i!=total-1 else '\n'))
+class tinytqdm:
+  def __init__(self, iter = None, desc: str = '', disable: bool = False, unit: str = 'it', total: int = None, rate: int = 100):
+    self.iter, self.desc, self.dis, self.unit, self.total, self.rate = iter, desc, disable, unit, len(iter) if total is None else total, rate
+    self.st, self.cnt, self.val, self.skip = time.perf_counter(), 0, 0, 1
+    self.update(0)
+  def __iter__(self):
+    try:
+      for item in self.iter:
+        yield item
+        self.update()
+    finally: self.update(0, close=True)
+  def update(self, n=1, close=False):
+    i = self.val = self.val + n
+    if (i % self.skip != 0 and not close) or self.dis: return
+    prog, dur, term, self.cnt = i/self.total, time.perf_counter()-self.st, shutil.get_terminal_size().columns, self.cnt+1
+    if self.cnt/dur > self.rate and i>0: self.skip = max(int(self.cnt/dur)//self.rate,1)
+    def fmt_t(t): return ':'.join([f'{x:02d}' for x in divmod(int(t), 60)]) if t != -1 else '?'
+    post_fix = f'| {i}/{self.total} [{fmt_t(dur)}<{fmt_t(((dur/i*self.total)-dur) if i>0 else -1)}, {f"{i/dur:5.2f}" if i!=0 else "?"}{self.unit}/s]'
+    sz = max(term-5-len(post_fix)-len(self.desc), 1)
+    print(f'\r{self.desc}{int(100*prog):3}%|{"█"*int(sz*prog)}{" "*(sz-int(sz*prog))}{post_fix}'[:term+1],flush=True,end=('\n' if close else ''))
