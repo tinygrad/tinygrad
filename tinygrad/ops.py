@@ -41,7 +41,7 @@ class MemBuffer:
 
 @dataclass(frozen=True)
 class ConstBuffer:
-  val: ConstType
+  val: ConstType | Variable
   dtype: DType
   st: ShapeTracker
 
