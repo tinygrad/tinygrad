@@ -26,11 +26,7 @@ class UOps(Enum):
   # these two are not graph nodes
   ENDRANGE = auto(); ENDIF = auto() # noqa: E702
 
-def ufix(dtype, x):
-  if not isinstance(x, UOp): return UOp.const(dtype, x)
-  assert x.dtype == dtype, "dtype mismatch"
-  return x
-
+def ufix(dtype, x): return UOp.const(dtype, x) if not isinstance(x, UOp) else x
 @dataclass(eq=False)
 class UOp:
   uop: UOps
@@ -258,10 +254,6 @@ class UOpGraph:
   def __init__(self):
     self.nodes: Dict[Tuple, UOp] = {}
     self._uops: Optional[List[UOp]] = None
-
-  def recursive_add(self, u:UOp):
-    self.add(u.uop, u.dtype, u.vin, u.arg)
-    for c in u.vin: self.recursive_add(c)
 
   def __iter__(self) -> Iterator[UOp]: return iter(self.uops)
   def __getitem__(self, index) -> UOp: return self.uops[index]

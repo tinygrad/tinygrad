@@ -15,7 +15,10 @@ def render(self) -> str:
   graph = UOpGraph()
   # NOTE: we need STORE so the ALU op has children
   glbl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=(0,True))
-  graph.recursive_add(UOp(UOps.STORE, None, (glbl,UOp.const(dtypes.int, 0),self)))
+  def recursive_add(x):
+    graph.add(x.uop, x.dtype, x.vin, x.arg)
+    for c in x.vin: recursive_add(c)
+  recursive_add(UOp(UOps.STORE, None, (glbl,UOp.const(dtypes.int, 0),self)))
   graph.linearize()
   from tinygrad.renderer.cstyle import CStyleLanguage
   class TestRenderer(CStyleLanguage):
