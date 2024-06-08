@@ -275,7 +275,7 @@ class UOpGraph:
         if hasattr(up, "cmp_tuple"): del up.cmp_tuple
         # replace with cached nodes
         if found:=self.nodes.get(key:=up.tuple()): return found
-        else: self.nodes[key] = up
+        self.nodes[key] = up
         return up
       sink = rewrite(sink)
       run_cnt += 1

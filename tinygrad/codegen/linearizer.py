@@ -89,7 +89,7 @@ class Linearizer(Kernel):
     # todo: multioutput test with different output valids to add if acc is None: g_valid = NumNode(1)
 
     if amt > 1: localtype = localtype.vec(amt)
-    e_idxs, e_valids = expand_node(g_idx, expand_vars), expand_node(g_valid, expand_vars)
+    e_idxs, e_valids = expand_node(g_idx, expand_vars), expand_node(g_valid, expand_vars)  # pylint: disable=possibly-used-before-assignment
 
     ret = []
     invalid_value = 0
@@ -233,17 +233,17 @@ class Linearizer(Kernel):
       # run tensor cores AST
       wmma_sz = [prod(l) for l in tc.thread_local_sizes]
       def upcast_strides(buf:int):
-        strides, next = [], 1
-        for (sz, stride, reduce) in self.upcasted_axis(buf)[tc.num_upcasts():]:
-          strides.append((0 if stride == 0 else next, sz))
-          next *= 1 if stride == 0 else sz
+        strides, next_ = [], 1
+        for (sz, stride, _) in self.upcasted_axis(buf)[tc.num_upcasts():]:
+          strides.append((0 if stride == 0 else next_, sz))
+          next_ *= 1 if stride == 0 else sz
         return strides
       upcasts, dev = [upcast_strides(x) for x in [locals_to_store[0][0], locals_to_store[1][0], 0]], self.opts.device
       # cast initial accs
       wmmas = [self.uops.add(UOps.CAST, (dt3:=tc.dtype_out.vec(wmma_sz[2])), tuple(accs[reduceop][x:x+wmma_sz[2]]))
                for x in range(0, len(accs[reduceop]), wmma_sz[2])]
-      for iter in [x[::-1] for x in itertools.product(*[x for x in [range(sz) for _,sz in upcasts[0]][::-1]])]:
-        offs = [x*y for (x,y) in zip([sum([prod(x) for x in zip(iter, [stride for stride,_ in y])]) for y in upcasts], wmma_sz)]
+      for it in [x[::-1] for x in itertools.product(*[x for x in [range(sz) for _,sz in upcasts[0]][::-1]])]:
+        offs = [x*y for (x,y) in zip([sum([prod(x) for x in zip(it, [stride for stride,_ in y])]) for y in upcasts], wmma_sz)]
         ops = (self.uops.add(UOps.CAST, tc.dtype_in.vec(wmma_sz[0]), tuple(locals_to_store[0][2][offs[0]:offs[0]+wmma_sz[0]])),
                 self.uops.add(UOps.CAST, tc.dtype_in.vec(wmma_sz[1]), tuple(locals_to_store[1][2][offs[1]:offs[1]+wmma_sz[1]])),
                 wmmas[(wmma_idx:=offs[2]//wmma_sz[2])])
