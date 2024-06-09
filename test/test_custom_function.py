@@ -31,7 +31,7 @@ def atan2_cpu(ret:Buffer, a:Buffer, b:Buffer): ret.copyin(np.require(np.arctan2(
 # NOTE: The derivative of atan2 doesn't need a custom op! https://www.liquisearch.com/atan2/derivative
 # In general, it is also optional to write a backward function, just your backward pass won't work without it
 
-from tinygrad.ops import LoadOps, BinaryOps
+from tinygrad.ops import LoadOps, BinaryOps, UnaryOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.tensor import Function
 
@@ -43,8 +43,11 @@ class ATan2(Function):
                              arg={"GPU": atan2_gpu, "CPU": atan2_cpu}[a.device], srcs=(a.contiguous(), b.contiguous()))
   def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
     denom = (self.a.e(BinaryOps.MUL, self.a)).e(BinaryOps.ADD, self.b.e(BinaryOps.MUL, self.b))
-    return grad_output.e(BinaryOps.MUL, self.b.e(BinaryOps.DIV, denom)) if self.needs_input_grad[0] else None, \
-           grad_output.e(BinaryOps.MUL, self.a.const(0).e(BinaryOps.SUB, self.a).e(BinaryOps.DIV, denom)) if self.needs_input_grad[1] else None
+    grad_a = self.b.e(BinaryOps.MUL, denom.e(UnaryOps.RECIP)) if dtypes.is_float(self.b.dtype) else self.b.e(BinaryOps.IDIV, denom)
+    grad_b = self.a.const(0).e(BinaryOps.SUB, self.a)
+    grad_b = grad_b.e(BinaryOps.MUL, denom.e(UnaryOps.RECIP)) if dtypes.is_float(self.a.dtype) else grad_b.e(BinaryOps.IDIV, denom)
+    return grad_output.e(BinaryOps.MUL, grad_a) if self.needs_input_grad[0] else None, \
+           grad_output.e(BinaryOps.MUL, grad_b) if self.needs_input_grad[1] else None
 
 # *** third, we use our lovely new mlop in some tests ***
 

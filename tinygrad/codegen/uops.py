@@ -8,6 +8,7 @@ from tinygrad.dtype import dtypes, DType
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, exec_alu
 from tinygrad.helpers import prod, DEBUG, getenv
+import math
 
 # the order of these UOps controls the order of the toposort
 class UOps(Enum):
@@ -49,7 +50,7 @@ class UOp:
   def __sub__(self, x): return UOp.alu(BinaryOps.SUB, self, ufix(self.dtype, x))
   def __mul__(self, x): return UOp.alu(BinaryOps.MUL, self, ufix(self.dtype, x))
   def __rmul__(self, x): return UOp.alu(BinaryOps.MUL, ufix(self.dtype, x), self)
-  def __floordiv__(self, x): return UOp.alu(BinaryOps.DIV, self, ufix(self.dtype, x))
+  def __floordiv__(self, x): return UOp.alu(BinaryOps.IDIV, self, ufix(self.dtype, x))
   def __mod__(self, x): return UOp.alu(BinaryOps.MOD, self, ufix(self.dtype, x))
   @staticmethod
   def max(x, y): return UOp.alu(BinaryOps.MAX, x, y)
@@ -139,7 +140,7 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst):
     # TODO: support and test this with other mvals and loop_starts
     if DEBUG >= 1: print(f"WARNING, NOT FOLDING: mval:{mval.arg} loop_start:{loop_start.arg}")
     return None
-  comprange = UOp.min(loop_end, UOp.max(UOp.alu(BinaryOps.DIV, idx-compval-mval, mval) + (loop_end-loop_start), loop_start))
+  comprange = UOp.min(loop_end, UOp.max(UOp.alu(BinaryOps.IDIV, idx-compval-mval, mval) + (loop_end-loop_start), loop_start))
   return UOp(UOps.UNMUL, multconst.dtype, (comprange.cast(multconst.dtype) * multconst, loop_end-loop_start))
 
 # this is symbolic 2.0
@@ -194,10 +195,10 @@ constant_folder = PatternMatcher([
   (UPat(UOps.ALU, BinaryOps.ADD, [UPat(name="x"), UPat(UOps.CONST, 0)]), lambda x: x),   # x+0 -> x or 0+x -> x
   (UPat(UOps.ALU, BinaryOps.MUL, [UPat(name="x"), UPat(UOps.CONST, 1)]), lambda x: x),   # x*1 -> x or 1*x -> x
   (UPat(UOps.ALU, BinaryOps.SUB, (UPat(name="x"), UPat(UOps.CONST, 0))), lambda x: x),   # x-0 -> x
-  (UPat(UOps.ALU, BinaryOps.DIV, (UPat(name="x"), UPat(UOps.CONST, 1))), lambda x: x),   # x/1 -> x
-  (UPat(UOps.ALU, BinaryOps.DIV, (UPat(name="x"), UPat(UOps.CONST, -1))), lambda x: -x), # x/-1 -> -x
+  (UPat(UOps.ALU, BinaryOps.IDIV, (UPat(name="x"), UPat(UOps.CONST, 1))), lambda x: x),   # x/1 -> x
+  (UPat(UOps.ALU, BinaryOps.IDIV, (UPat(name="x"), UPat(UOps.CONST, -1))), lambda x: -x), # x/-1 -> -x
   # ** zero folding **
-  (UPat(UOps.ALU, BinaryOps.MUL, [UPat(), UPat(UOps.CONST, 0, name="c")]), lambda c: c), # x*0 -> 0 or 0*x -> 0
+  (UPat(UOps.ALU, BinaryOps.MUL, [UPat(name="x"), UPat(UOps.CONST, 0, name="c")]), lambda x,c: x if isinstance(x.arg, float) and math.isnan(x.arg) else c), # x*0 -> 0 or 0*x -> 0 # noqa: E501
   (UPat(UOps.ALU, BinaryOps.SUB, (UPat(name="x"), UPat(name="x"))), lambda x: UOp.const(x.dtype, 0)),   # x-x -> 0
   # ** load/store folding **
   (UPat(UOps.STORE, vin=(UPat(name="buf"), UPat(name="idx"),
@@ -214,9 +215,9 @@ constant_folder = PatternMatcher([
   (UPat(UOps.ALU, BinaryOps.ADD, (UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c0"), UPat(name="x")]),  # (x*c0)+(x*c1) -> x*(c0+c1)
                                   UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c1"), UPat(name="x")]),)),
                                   lambda x,c0,c1: x*exec_alu(BinaryOps.ADD, x.dtype, [c0.arg, c1.arg])),
-  (UPat(UOps.ALU, BinaryOps.DIV, (UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c0"), UPat(name="x")]),
+  (UPat(UOps.ALU, BinaryOps.IDIV, (UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c0"), UPat(name="x")]),
                                   UPat(UOps.CONST, name="c0"))), lambda x,c0: x if c0.arg != 0 else None),    # (x*c0)/c0 -> x
-  (UPat(UOps.ALU, BinaryOps.DIV, (UPat(UOps.ALU, BinaryOps.DIV, (UPat(name="x"), UPat(UOps.CONST, name="c0"))), UPat(UOps.CONST, name="c1"))),
+  (UPat(UOps.ALU, BinaryOps.IDIV, (UPat(UOps.ALU, BinaryOps.IDIV, (UPat(name="x"), UPat(UOps.CONST, name="c0"))), UPat(UOps.CONST, name="c1"))),
     lambda x,c0,c1: x//UOp.const(x.dtype, exec_alu(BinaryOps.MUL, x.dtype, [c0.arg, c1.arg]))),    # (x/c0)/c1 -> x/(c0*c1)
   (UPat(UOps.ALU, BinaryOps.CMPLT, (UPat(UOps.ALU, BinaryOps.ADD, [UPat(UOps.CONST, name="c0"), UPat(name="x")]), UPat(UOps.CONST, name="c1"))),
     lambda x,c0,c1: UOp.alu(BinaryOps.CMPLT, x, UOp.const(x.dtype, exec_alu(BinaryOps.SUB, x.dtype, [c1.arg, c0.arg])))),
@@ -454,6 +455,9 @@ class UOpGraph:
           assert vin[0].dtype == vin[1].dtype, f"{arg} dtype mismatch {dtype=} != {vin[0].dtype=} != {vin[1].dtype=}"
         elif arg in BinaryOps:
           assert dtype == vin[0].dtype == vin[1].dtype, f"{arg} dtype mismatch {dtype=} != {vin[0].dtype=} != {vin[1].dtype=}"
+        elif arg is BinaryOps.IDIV:
+          assert dtypes.is_int(dtype), f"{arg} output dtype mismatch {dtype=} is not an integer"
+          assert dtypes.is_int(vin[0].dtype), f"{arg} dtype mismatch {vin[0].dtype=} is not an integer"
         elif arg == TernaryOps.WHERE:
           assert vin[0].dtype == dtypes.bool, f"{arg} selector dtype mismatch {vin[0].dtype=} != {dtypes.bool}"
           assert dtype == vin[1].dtype == vin[2].dtype, f"{arg} choice dtype mismatch {dtype=} != {vin[1].dtype=} != {vin[2].dtype=}"

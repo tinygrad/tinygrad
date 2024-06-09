@@ -7,10 +7,10 @@ import torch
 import unittest
 
 class ExternalTestMetrics(unittest.TestCase):
-  def _test_metrics(self, tinygrad_metrics, orig_metrics, pred, label):
+  def _test_metrics(self, tinygrad_metrics, orig_metrics, pred, label, rtol=1e-8, atol=1e-8):
     tinygrad_metrics_res = tinygrad_metrics(Tensor(pred), Tensor(label)).squeeze().numpy()
     orig_metrics_res = orig_metrics(torch.from_numpy(pred), torch.from_numpy(label)).numpy()
-    np.testing.assert_equal(tinygrad_metrics_res, orig_metrics_res)
+    np.testing.assert_allclose(tinygrad_metrics_res, orig_metrics_res, rtol, atol)
 
   def test_dice(self):
     pred, label = np.random.rand(1, 3, 128, 128, 128).astype(np.float32), np.ones((1, 1, 128, 128, 128)).astype(np.uint8)
