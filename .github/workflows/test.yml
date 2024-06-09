@@ -286,6 +286,9 @@ jobs:
   testmetal:
     name: Metal Tests
     runs-on: macos-14
+    needs: check_process_replay
+    env:
+      RUN_PROCESS_REPLAY: ${{ needs.check_process_replay.outputs.run_process_replay }}
     timeout-minutes: 10
 
     steps:
@@ -329,6 +332,12 @@ jobs:
       run: PYTHONPATH="." METAL=1 CACHELEVEL=0 FUZZ_ALL_ACTIONS=1 DEPTH=2 FUZZ_N=48 FUZZ_MAX_SIZE=10000000 python test/external/fuzz_linearizer.py
     - name: Fuzz Test models schedule
       run: FUZZ_SCHEDULE=1 FUZZ_SCHEDULE_MAX_PATHS=5 python -m pytest test/models/test_train.py test/models/test_end2end.py
+    - name: Run process replay tests
+      if: env.RUN_PROCESS_REPLAY == '1'
+      run: |
+        cp test/external/replay_codegen.py ./replay_codegen.py
+        git fetch origin master && git checkout origin/master
+        PYTHONPATH=. python3 replay_codegen.py
 
 
 #  testwebgl:
