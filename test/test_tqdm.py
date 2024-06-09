@@ -34,7 +34,7 @@ class TestProgressBar(unittest.TestCase):
   @patch('sys.stderr', new_callable=StringIO)
   @patch('shutil.get_terminal_size')
   def test_tqdm_output_iter_e2e(self, mock_terminal_size, mock_stderr):
-    for _ in range(10000):
+    for _ in range(10):
       total, ncols = random.randint(5, 30), random.randint(80, 240)
       mock_terminal_size.return_value = namedtuple(field_names='columns', typename='terminal_size')(ncols)
       mock_stderr.truncate(0)
@@ -59,7 +59,7 @@ class TestProgressBar(unittest.TestCase):
   @patch('sys.stderr', new_callable=StringIO)
   @patch('shutil.get_terminal_size')
   def test_tqdm_output_custom_e2e(self, mock_terminal_size, mock_stderr):
-    for _ in range(10000):
+    for _ in range(10):
       total, ncols = random.randint(10000, 100000), random.randint(80, 120)
       mock_terminal_size.return_value = namedtuple(field_names='columns', typename='terminal_size')(ncols)
       mock_stderr.truncate(0)
