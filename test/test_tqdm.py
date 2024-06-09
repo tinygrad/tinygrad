@@ -3,7 +3,7 @@ from tqdm import tqdm
 from unittest.mock import patch
 from io import StringIO
 from tinygrad.helpers import tinytqdm
-import os
+from collections import namedtuple
 
 class TestProgressBar(unittest.TestCase):
   def _compare_bars(self, bar1, bar2, cmp_prog=False):
@@ -32,12 +32,11 @@ class TestProgressBar(unittest.TestCase):
     diff = sum([1 for c1, c2 in zip(prog1, prog2) if c1 == c2]) # allow 1 char diff (due to tqdm special chars)
     self.assertTrue(not cmp_prog or diff <= 1)
   @patch('sys.stderr', new_callable=StringIO)
-  @patch('os.get_terminal_size')
+  @patch('shutil.get_terminal_size')
   def test_tqdm_output_iter_e2e(self, mock_terminal_size, mock_stderr):
     for _ in range(10):
       total, ncols = random.randint(5, 30), random.randint(80, 240)
-      # mock_terminal_size.return_value = namedtuple(field_names='columns')(ncols)
-      mock_terminal_size.return_value = os.terminal_size((ncols, 24))
+      mock_terminal_size.return_value = namedtuple(field_names='columns', typename='terminal_size')(ncols)
       mock_stderr.truncate(0)
 
       # compare bars at each iteration (only when tinytqdm bar has been updated)
@@ -58,12 +57,11 @@ class TestProgressBar(unittest.TestCase):
       self._compare_bars(tinytqdm_output, tqdm_output)
 
   @patch('sys.stderr', new_callable=StringIO)
-  @patch('os.get_terminal_size')
+  @patch('shutil.get_terminal_size')
   def test_tqdm_output_custom_e2e(self, mock_terminal_size, mock_stderr):
     for _ in range(10):
       total, ncols = random.randint(10000, 100000), random.randint(80, 120)
-      # mock_terminal_size.return_value = namedtuple(field_names='columns', typename='terminal_size')(ncols)
-      mock_terminal_size.return_value = os.terminal_size((ncols, 0))
+      mock_terminal_size.return_value = namedtuple(field_names='columns', typename='terminal_size')(ncols)
       mock_stderr.truncate(0)
 
       # compare bars at each iteration (only when tinytqdm bar has been updated)
@@ -89,9 +87,7 @@ class TestProgressBar(unittest.TestCase):
       tqdm_output = tqdm.format_meter(n=total, total=total, elapsed=elapsed, ncols=ncols, prefix="Test")
       self._compare_bars(tinytqdm_output, tqdm_output)
 
-  @patch('os.get_terminal_size')
-  def test_tqdm_perf(self, mock_terminal_size):
-    mock_terminal_size.return_value = os.terminal_size((80, 24))
+  def test_tqdm_perf(self):
     st = time.perf_counter()
     for _ in tqdm(range(100)): time.sleep(0.01)
 
@@ -103,9 +99,7 @@ class TestProgressBar(unittest.TestCase):
 
     assert tinytqdm_time < 2.0 * tqdm_time
 
-  @patch('os.get_terminal_size')
-  def test_tqdm_perf_high_iter(self, mock_terminal_size):
-    mock_terminal_size.return_value = os.terminal_size((80, 24))
+  def test_tqdm_perf_high_iter(self):
     st = time.perf_counter()
     for _ in tqdm(range(10^7)): pass
     tqdm_time = time.perf_counter() - st

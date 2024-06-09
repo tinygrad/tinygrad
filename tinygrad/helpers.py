@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string, ctypes, sys
-import itertools, urllib.request, subprocess
+import itertools, urllib.request, subprocess, shutil
 from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Sequence
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
@@ -252,7 +252,7 @@ class tinytqdm:
   def update(self, n:int=0, close:bool=False):
     self.n, self.i, close = self.n+n, self.i+1, close or (self.n+n == self.t)
     if (self.i % self.skip != 0 and not close) or self.dis: return
-    prog, dur, term = self.n/self.t, time.perf_counter()-self.st, os.get_terminal_size().columns
+    prog, dur, term = self.n/self.t, time.perf_counter()-self.st, shutil.get_terminal_size().columns
     if self.i/dur > self.rate and self.i: self.skip = max(int(self.i/dur)//self.rate,1) if self.i else 1
     def fmt(t): return ':'.join([f'{x:02d}' for x in divmod(int(t), 60)]) if t!=-1 else '?'
     suf = f'| {self.n}/{self.t} [{fmt(dur)}<{fmt(dur/self.n*self.t-dur if self.n else -1)}, {f"{self.n/dur:5.2f}" if self.n else "?"}{self.unit}/s]'
