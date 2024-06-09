@@ -44,7 +44,7 @@ class ATan2(Function):
   def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
     denom = (self.a.e(BinaryOps.MUL, self.a)).e(BinaryOps.ADD, self.b.e(BinaryOps.MUL, self.b))
     return grad_output.e(BinaryOps.MUL, self.b.e(BinaryOps.MUL, denom.e(UnaryOps.RECIP))) if self.needs_input_grad[0] else None, \
-           grad_output.e(BinaryOps.MUL, self.a.const(0).e(BinaryOps.SUB, self.a).e(BinaryOps.MUL, denom.e(UnaryOps.RECIP))) if self.needs_input_grad[1] else None
+           grad_output.e(BinaryOps.MUL, self.a.const(0).e(BinaryOps.SUB, self.a).e(BinaryOps.MUL, denom.e(UnaryOps.RECIP))) if self.needs_input_grad[1] else None # noqa: E501
 
 # *** third, we use our lovely new mlop in some tests ***
 
