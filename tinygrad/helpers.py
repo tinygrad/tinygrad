@@ -208,7 +208,6 @@ def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, allow_caching=n
       with tempfile.NamedTemporaryFile(dir=path, delete=False) as f:
         while chunk := r.read(16384): progress_bar.update(f.write(chunk))
         f.close()
-        # progress_bar.update(close=True)
         if (file_size:=os.stat(f.name).st_size) < total_length: raise RuntimeError(f"fetch size incomplete, {file_size} < {total_length}")
         pathlib.Path(f.name).rename(fp)
   return fp
