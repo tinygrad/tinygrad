@@ -125,7 +125,7 @@ python_alu = {
   BinaryOps.MUL: operator.mul, BinaryOps.ADD: operator.add, BinaryOps.SUB: operator.sub, BinaryOps.XOR: operator.xor,
   BinaryOps.MAX: max, BinaryOps.CMPNE: operator.ne, BinaryOps.CMPLT: operator.lt,
   BinaryOps.MOD: lambda x,y: abs(int(x))%abs(int(y))*(1,-1)[x<0],
-  BinaryOps.IDIV: lambda x, y: x//y if y != 0 else x*math.inf,
+  BinaryOps.IDIV: lambda x, y: int(x/y) if y != 0 else x*math.inf,
   BinaryOps.DIV: lambda x,y: int(x/y) if isinstance(x, int) else (x/y if y != 0 else x*math.inf),
   TernaryOps.WHERE: lambda x,y,z: y if x else z}
 

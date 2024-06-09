@@ -127,7 +127,7 @@ class TestNonFloatUOps(TestUOps):
   @unittest.skipUnless(getenv("PTX"), "only ptx uses bitshifts")
   def test_shl_int32(self): self._test_bop_fxn(BinaryOps.SHL, lambda a,b: int(a)<<int(b), (dtypes.int32, dtypes.int32), no_b_neg=True)
   def test_div_int32(self):
-    self._test_bop_fxn(BinaryOps.IDIV, lambda a,b: a//b, (dtypes.int32, dtypes.int32), no_b_zero=True)
+    self._test_bop_fxn(BinaryOps.IDIV, lambda a,b: int(a/b), (dtypes.int32, dtypes.int32), no_b_zero=True)
   def test_mod_int32(self):
     self._test_bop_fxn(BinaryOps.MOD,
                        lambda a,b: abs(int(a))%abs(int(b))*(1,-1)[a<0], (dtypes.int32, dtypes.int32), no_b_zero=True)
@@ -172,8 +172,8 @@ class TestExecALU(TestUOps):
   def test_div(self):
     self.assertEqual(exec_alu(BinaryOps.IDIV, dtypes.int8, (8, 2)), 4)
     self.assertEqual(exec_alu(BinaryOps.IDIV, dtypes.int8, (7, 3)), 2)
-    self.assertEqual(exec_alu(BinaryOps.IDIV, dtypes.int8, (7, -3)), -3)
-    self.assertEqual(exec_alu(BinaryOps.IDIV, dtypes.int8, (-50, 6)), -9)
+    self.assertEqual(exec_alu(BinaryOps.IDIV, dtypes.int8, (7, -3)), -2)
+    self.assertEqual(exec_alu(BinaryOps.IDIV, dtypes.int8, (-50, 6)), -8)
 
     np.testing.assert_allclose(exec_alu(BinaryOps.IDIV, dtypes.float32, (8.0, 2.0)), 4.0)
     np.testing.assert_allclose(exec_alu(BinaryOps.MUL, dtypes.float32, (7.0, exec_alu(UnaryOps.RECIP, dtypes.float32, (3.0,)))), 2+(1.0/3.0))
