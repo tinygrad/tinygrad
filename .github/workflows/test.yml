@@ -146,6 +146,10 @@ jobs:
       fail-fast: false
       matrix:
         task: [optimage, openpilot, onnx]
+    needs: check_process_replay
+    env:
+      RUN_PROCESS_REPLAY: ${{ needs.check_process_replay.outputs.run_process_replay }}
+
     name: ${{ matrix.task=='optimage'&&'GPU OPT and IMAGE Tests' || matrix.task=='openpilot'&&'openpilot (OpenCL) Tests' || matrix.task=='onnx'&&'ONNX+Optimization Tests' }}
     runs-on: ubuntu-20.04
     timeout-minutes: 10
@@ -231,6 +235,12 @@ jobs:
       - if: ${{ matrix.task == 'onnx' }}
         name: Test THREEFRY
         run: PYTHONPATH=. THREEFRY=1 GPU=1 python3 -m pytest test/test_randomness.py test/test_jit.py
+      - name: Run process replay tests
+        if: env.RUN_PROCESS_REPLAY == '1'
+        run: |
+          cp test/external/replay_codegen.py ./replay_codegen.py
+          git fetch origin master && git checkout origin/master
+          PYTHONPATH=. python3 replay_codegen.py
 
   #testwebgpu:
   #  name: WebGPU Tests
