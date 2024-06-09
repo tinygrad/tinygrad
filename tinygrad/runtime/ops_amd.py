@@ -5,7 +5,6 @@ from tinygrad.device import Compiled, Compiler, CompileError, BufferOptions, LRU
 from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up, DEBUG
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.runtime.driver.hip_comgr import compile_hip
-from tinygrad.runtime.ops_hsa import HSACompiler
 import tinygrad.runtime.autogen.kfd as kfd
 import tinygrad.runtime.autogen.hsa as hsa
 import tinygrad.runtime.autogen.amd_gpu as amd_gpu
@@ -50,15 +49,6 @@ def ioctls_from_header():
   return type("KIO", (object, ), fxns)
 kio = ioctls_from_header()
 
-class AMDCompiler(Compiler):
-  def __init__(self, arch:str):
-    self.arch = arch
-    super().__init__(f"compile_hip_{self.arch}")
-  def compile(self, src:str) -> bytes:
-    try: return compile_hip(src, self.arch)
-    except RuntimeError as e: raise CompileError(e)
-
-PAGE_SIZE = 0x1000
 SIGNAL_SIZE, SIGNAL_COUNT = ctypes.sizeof(hsa.amd_signal_t), 16384
 SIGNAL_VALUE_OFFSET = getattr(hsa.amd_signal_t, 'value').offset
 
@@ -67,20 +57,25 @@ regBIF_BX_PF1_GPU_HDP_FLUSH_DONE = 0x0107
 
 # VGT_EVENT_TYPE in navi10_enum.h
 CACHE_FLUSH_AND_INV_TS_EVENT = 0x14
-CS_PARTIAL_FLUSH = 0x7
 
 WAIT_REG_MEM_FUNCTION_EQ = 3 # ==
 WAIT_REG_MEM_FUNCTION_GEQ = 5 # >=
 
-COMPUTE_SHADER_EN = 1
-FORCE_START_AT_000 = 1 << 2
-CS_W32_EN = 1 << 15
+COMPUTE_SHADER_EN, FORCE_START_AT_000, CS_W32_EN = (1 << 0), (1 << 2), (1 << 15)
 
 def gfxreg(reg): return reg + 0x00001260 - amd_gpu.PACKET3_SET_SH_REG_START
 def data64_le(data): return (data & 0xFFFFFFFF, data >> 32)
 
+class AMDCompiler(Compiler):
+  def __init__(self, arch:str):
+    self.arch = arch
+    super().__init__(f"compile_hip_{self.arch}")
+  def compile(self, src:str) -> bytes:
+    try: return compile_hip(src, self.arch)
+    except RuntimeError as e: raise CompileError(e)
+
 class HWPM4Queue:
-  def __init__(self): self.q, self.binded_device = [], None
+  def __init__(self): self.q, self.binded_device, self.ptr_to_dispatch_packet = [], None, {}
   def __del__(self):
     if self.binded_device is not None:
       self.binded_device.synchronize()
@@ -107,15 +102,24 @@ class HWPM4Queue:
     self.hdp_flush()
     self.invalidate_cache()
 
-    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 6), gfxreg(amd_gpu.regCOMPUTE_PGM_LO), (prg.prog_addr>>8) & 0xFFFFFFFF,
-               prg.prog_addr >> 40, 0, 0, (prg.device.scratch.va_addr>>8) & 0xFFFFFFFF, prg.device.scratch.va_addr >> 40]
+    user_data = [*data64_le(kernargs)]
+    if hasattr(prg, 'dispatch_packet_offset'):
+      dp = hsa.hsa_kernel_dispatch_packet_t.from_address(dp_addr:=kernargs + prg.dispatch_packet_offset)
+      dp.workgroup_size_x, dp.workgroup_size_y, dp.workgroup_size_z = local_size[0], local_size[1], local_size[2]
+      dp.grid_size_x, dp.grid_size_y, dp.grid_size_z = global_size[0]*local_size[0], global_size[1]*local_size[1], global_size[2]*local_size[2]
+      dp.group_segment_size, dp.private_segment_size, dp.kernarg_address = prg.group_segment_size, prg.private_segment_size, kernargs
+      user_data = [*data64_le(dp_addr)] + user_data
+      self.ptr_to_dispatch_packet[self.ptr()] = dp
+
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 6), gfxreg(amd_gpu.regCOMPUTE_PGM_LO), *data64_le(prg.prog_addr >> 8),
+               *data64_le(0), *data64_le(prg.device.scratch.va_addr >> 8)]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), gfxreg(amd_gpu.regCOMPUTE_PGM_RSRC1), prg.rsrc1, prg.rsrc2]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), gfxreg(amd_gpu.regCOMPUTE_TMPRING_SIZE), prg.device.tmpring_size]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 4), gfxreg(amd_gpu.regCOMPUTE_RESTART_X), 0, 0, 0, 0]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), gfxreg(amd_gpu.regCOMPUTE_STATIC_THREAD_MGMT_SE0)] + [0xFFFFFFFF] * 2
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), gfxreg(amd_gpu.regCOMPUTE_STATIC_THREAD_MGMT_SE2)] + [0xFFFFFFFF] * 2
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 4), gfxreg(amd_gpu.regCOMPUTE_STATIC_THREAD_MGMT_SE4)] + [0xFFFFFFFF] * 4
-    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), gfxreg(amd_gpu.regCOMPUTE_USER_DATA_0), kernargs & 0xFFFFFFFF, kernargs >> 32]
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, len(user_data)), gfxreg(amd_gpu.regCOMPUTE_USER_DATA_0)] + user_data
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 8), gfxreg(amd_gpu.regCOMPUTE_START_X), 0, 0, 0, *local_size, 0, 0]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), gfxreg(amd_gpu.regCOMPUTE_RESOURCE_LIMITS), 0]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_DISPATCH_DIRECT, 3), *global_size, CS_W32_EN | FORCE_START_AT_000 | COMPUTE_SHADER_EN]
@@ -130,6 +134,10 @@ class HWPM4Queue:
     self.q[cmd_ptr + 59 : cmd_ptr + 62] = array.array('I', local_size)
     self.q[cmd_ptr + 68 : cmd_ptr + 71] = array.array('I', global_size)
 
+    if (dp:=self.ptr_to_dispatch_packet.get(cmd_ptr)) is not None:
+      dp.workgroup_size_x, dp.workgroup_size_y, dp.workgroup_size_z = local_size[0], local_size[1], local_size[2]
+      dp.grid_size_x, dp.grid_size_y, dp.grid_size_z = global_size[0]*local_size[0], global_size[1]*local_size[1], global_size[2]*local_size[2]
+
   def wait(self, signal:hsa.amd_signal_t, value=0):
     addr = ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_WAIT_REG_MEM, 5),
@@ -138,9 +146,6 @@ class HWPM4Queue:
     return self
 
   def _release_mem(self, mem_event_type, mem_data_sel, mem_int_sel, address, value=0, cst=0, cache_flush=False):
-    # event_index__mec_release_mem__end_of_pipe = 5
-    # event_index__mec_release_mem__shader_done = 6
-    mem_event_index = 5
     cache_flush_flags = 0
 
     if cache_flush:
@@ -148,8 +153,10 @@ class HWPM4Queue:
         amd_gpu.PACKET3_RELEASE_MEM_GCR_GL2_INV | amd_gpu.PACKET3_RELEASE_MEM_GCR_GLM_WB | amd_gpu.PACKET3_RELEASE_MEM_GCR_GLM_INV | \
         amd_gpu.PACKET3_RELEASE_MEM_GCR_GL2_WB | amd_gpu.PACKET3_RELEASE_MEM_GCR_SEQ
 
+    # event_index__mec_release_mem__end_of_pipe = 5
+    # event_index__mec_release_mem__shader_done = 6
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_RELEASE_MEM, 6),
-      amd_gpu.PACKET3_RELEASE_MEM_EVENT_TYPE(mem_event_type) | amd_gpu.PACKET3_RELEASE_MEM_EVENT_INDEX(mem_event_index) | cache_flush_flags,
+      amd_gpu.PACKET3_RELEASE_MEM_EVENT_TYPE(mem_event_type) | amd_gpu.PACKET3_RELEASE_MEM_EVENT_INDEX(5) | cache_flush_flags,
       amd_gpu.PACKET3_RELEASE_MEM_DATA_SEL(mem_data_sel) | amd_gpu.PACKET3_RELEASE_MEM_INT_SEL(mem_int_sel) | amd_gpu.PACKET3_RELEASE_MEM_DST_SEL(0),
       address & 0xffffffff, address >> 32, value & 0xffffffff, value >> 32, cst]
 
@@ -285,6 +292,7 @@ class AMDProgram:
     self.group_segment_size = lib_gpu_view.cast("I")[entry_point//4]
     self.private_segment_size = lib_gpu_view.cast("I")[entry_point//4 + 1]
     self.kernargs_segment_size = lib_gpu_view.cast("I")[entry_point//4 + 2]
+    self.kernargs_alloc_size = self.kernargs_segment_size
     self.kernargs_offset = 0
 
     lds_size = ((self.group_segment_size + 511) // 512) & 0x1FF
@@ -294,6 +302,11 @@ class AMDProgram:
     code = hsa.amd_kernel_code_t.from_address(self.lib_gpu.va_addr + entry_point) # NOTE: this is wrong, it's not this object
     self.rsrc1 = code.compute_pgm_rsrc1
     self.rsrc2 = code.compute_pgm_rsrc2 | (lds_size << 15)
+
+    if code.kernel_code_properties & 0x2 == 0x2: # ENABLE_SGPR_DISPATCH_PTR
+      # Allocate space for the dispatch packet in the kernargs to pass it to the GPU.
+      self.dispatch_packet_offset = self.kernargs_alloc_size
+      self.kernargs_alloc_size += ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t)
 
     assert code.kernel_code_properties & 0x400 == 0x400 # ENABLE_WAVEFRONT_SIZE32
     assert code.workitem_private_segment_byte_size == 0
@@ -309,7 +322,7 @@ class AMDProgram:
     if hasattr(self, 'lib_gpu'): self.device._gpu_free(self.lib_gpu)
 
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
-    if self.device.kernargs_ptr + self.kernargs_segment_size > (self.device.kernargs.va_addr + self.device.kernargs.size):
+    if self.device.kernargs_ptr + self.kernargs_alloc_size > (self.device.kernargs.va_addr + self.device.kernargs.size):
       self.device.kernargs_ptr = self.device.kernargs.va_addr
 
     if not hasattr(self, "args_struct_t"):
@@ -329,7 +342,7 @@ class AMDProgram:
     if wait: q.timestamp(ctypes.addressof(self.device.timeline_signal) + getattr(hsa.amd_signal_t, 'end_ts').offset)
     q.signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
     self.device.timeline_value += 1
-    self.device.kernargs_ptr += self.kernargs_segment_size
+    self.device.kernargs_ptr += self.kernargs_alloc_size
 
     if wait:
       self.device._wait_signal(self.device.timeline_signal, self.device.timeline_value - 1)
@@ -543,9 +556,8 @@ class AMDDevice(Compiled):
     self.pm4_doorbell = to_mv(self.doorbells + self.pm4_queue.doorbell_offset - self.doorbells_base, 8).cast("Q")
 
     from tinygrad.runtime.graph.hcq import HCQGraph
-    super().__init__(device, AMDAllocator(self), AMDRenderer(), HSACompiler(self.arch),
-                     functools.partial(AMDProgram, self),
-                     functools.partial(HCQGraph, AMDDevice, HWPM4Queue, HWCopyQueue))
+    super().__init__(device, AMDAllocator(self), AMDRenderer(), AMDCompiler(self.arch),
+                     functools.partial(AMDProgram, self), functools.partial(HCQGraph, AMDDevice, HWPM4Queue, HWCopyQueue))
 
   def synchronize(self):
     AMDDevice._wait_signal(self.timeline_signal, self.timeline_value - 1)
