@@ -73,7 +73,7 @@ class Sqrt(Function):
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return grad_output.e(BinaryOps.MUL, self.ret.e(UnaryOps.RECIP).e(BinaryOps.MUL, self.ret.const(2)))
+    return grad_output.e(BinaryOps.MUL, self.ret.e(BinaryOps.MUL, self.ret.const(2)).e(UnaryOps.RECIP))
 
 # NOTE: the implicit derivative of sigmoid is not stable
 # https://towardsdatascience.com/derivative-of-the-sigmoid-function-536880cf918e
@@ -136,7 +136,7 @@ class Div(Function):
 
   def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
     return grad_output.e(BinaryOps.MUL, self.y.e(UnaryOps.RECIP)) if self.needs_input_grad[0] else None, \
-           grad_output.e(UnaryOps.NEG).e(BinaryOps.MUL, self.x).e(BinaryOps.IDIV, self.y.e(BinaryOps.MUL, self.y)) if self.needs_input_grad[1] else None  # noqa: E501
+           grad_output.e(UnaryOps.NEG).e(BinaryOps.MUL, self.x).e(BinaryOps.MUL, self.y.e(BinaryOps.MUL, self.y).e(UnaryOps.RECIP)) if self.needs_input_grad[1] else None  # noqa: E501
 
 # ************* ternary ops *************
 
