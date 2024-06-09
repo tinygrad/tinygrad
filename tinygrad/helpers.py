@@ -203,7 +203,7 @@ def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, allow_caching=n
     with urllib.request.urlopen(url, timeout=10) as r:
       assert r.status == 200
       total_length = int(r.headers.get('content-length', 0))
-      progress_bar = tinytqdm(total=total_length, unit='B', unit_scale=True, desc=f"{url}: ", disable=False)
+      progress_bar = tinytqdm(total=total_length, unit='B', unit_scale=True, desc=f"{url}: ")
       (path := fp.parent).mkdir(parents=True, exist_ok=True)
       with tempfile.NamedTemporaryFile(dir=path, delete=False) as f:
         while chunk := r.read(16384): progress_bar.update(f.write(chunk))
