@@ -23,7 +23,7 @@ def render(self) -> str:
   from tinygrad.renderer.cstyle import CStyleLanguage
   class TestRenderer(CStyleLanguage):
     code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.IDIV: lambda a,b,dtype: f"({a}//{b})"}
-  fxn = CStyleLanguage().render("", graph)
+  fxn = TestRenderer().render("", graph)
   return fxn.split("data0[0] = ")[1].split(";")[0]
 
 def NumNode(val): return UOp.const(dtypes.int, val)
