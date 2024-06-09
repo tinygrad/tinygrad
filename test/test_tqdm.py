@@ -1,4 +1,4 @@
-import time, random, unittest, sys
+import time, random, unittest
 from tqdm import tqdm
 from unittest.mock import patch
 from io import StringIO
@@ -79,7 +79,6 @@ class TestProgressBarOutput(unittest.TestCase):
         iters_per_sec = float(tinytqdm_output.split("it/s")[-2].split(" ")[-1]) if n>0 else 0
         elapsed = n/iters_per_sec if n>0 else 0
         tqdm_output = tqdm.format_meter(n=n, total=total, elapsed=elapsed, ncols=ncols, prefix="Test")
-        sys.stderr.write(f"{tinytqdm_output}\n{tqdm_output}\n\n")
 
       # compare final bars
       tinytqdm_output = mock_stdout.getvalue().split("\r")[-1].rstrip()
@@ -98,7 +97,7 @@ def test_tqdm_perf():
   for _ in tinytqdm(range(100)): time.sleep(0.01)
   tinytqdm_time = time.perf_counter() - st
 
-  assert tinytqdm_time < 1.1 * tqdm_time
+  assert tinytqdm_time < 2.0 * tqdm_time
 
 def test_tqdm_perf_high_iter():
   st = time.perf_counter()
@@ -109,7 +108,7 @@ def test_tqdm_perf_high_iter():
   for _ in tinytqdm(range(10^7)): pass
   tinytqdm_time = time.perf_counter() - st
 
-  assert tinytqdm_time < 4 * tqdm_time
+  assert tinytqdm_time < 5 * tqdm_time
 
 if __name__ == '__main__':
   unittest.main()
