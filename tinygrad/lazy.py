@@ -163,7 +163,7 @@ class LazyBuffer:
       if y.is_unrealized_unmasked_const() and (val := float(y.base.arg)) in (1, 0, -1):
         return x if val == 1 else x.const(0) if val == 0 else x.e(UnaryOps.NEG)
     if op is BinaryOps.DIV and dtypes.is_float(x.dtype) and y.is_unrealized_unmasked_const() and y.base.arg != 0:
-      return x.e(BinaryOps.MUL, x.const(1 / y.base.arg))
+      return x.e(BinaryOps.MUL, y.e(UnaryOps.RECIP))
 
     return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), out_dtype, op, arg, tuple(srcs))
 
