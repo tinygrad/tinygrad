@@ -35,6 +35,8 @@ jobs:
         COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
         if { echo "$COMMIT_MESSAGE" | grep -q "\[run_process_replay\]" || [ "${{ github.event.inputs.run_process_replay }}" == "true" ]; } && [ "$GITHUB_REF_NAME" != "master" ]; then
           echo "RUN_PROCESS_REPLAY=1" >> $GITHUB_OUTPUT
+        else
+          echo "RUN_PROCESS_REPLAY=0" >> $GITHUB_OUTPUT
         fi
 
   uops:
