@@ -237,10 +237,7 @@ jobs:
         run: PYTHONPATH=. THREEFRY=1 GPU=1 python3 -m pytest test/test_randomness.py test/test_jit.py
       - name: Run process replay tests
         if: env.RUN_PROCESS_REPLAY == '1'
-        run: |
-          cp test/external/replay_codegen.py ./replay_codegen.py
-          git fetch origin master && git checkout origin/master
-          PYTHONPATH=. python3 replay_codegen.py
+        run: cp test/external/replay_codegen.py ./replay_codegen.py && git fetch origin master && git checkout origin/master && PYTHONPATH=. python3 replay_codegen.py
 
   #testwebgpu:
   #  name: WebGPU Tests
@@ -334,11 +331,7 @@ jobs:
       run: FUZZ_SCHEDULE=1 FUZZ_SCHEDULE_MAX_PATHS=5 python -m pytest test/models/test_train.py test/models/test_end2end.py
     - name: Run process replay tests
       if: env.RUN_PROCESS_REPLAY == '1'
-      run: |
-        cp test/external/replay_codegen.py ./replay_codegen.py
-        git fetch origin master && git checkout origin/master
-        PYTHONPATH=. python3 replay_codegen.py
-
+      run: cp test/external/replay_codegen.py ./replay_codegen.py && git fetch origin master && git checkout origin/master && PYTHONPATH=. python3 replay_codegen.py
 
 #  testwebgl:
 #    name: WebGL Tests
@@ -521,10 +514,7 @@ jobs:
           cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock
       - name: Run process replay tests
         if: env.RUN_PROCESS_REPLAY == '1'
-        run: |
-          cp test/external/replay_codegen.py ./replay_codegen.py
-          git fetch origin master && git checkout origin/master
-          PYTHONPATH=. python3 replay_codegen.py
+        run: cp test/external/replay_codegen.py ./replay_codegen.py && git fetch origin master && git checkout origin/master && PYTHONPATH=. python3 replay_codegen.py
 
   #testunicorn:
   #  name: ARM64 unicorn Test
