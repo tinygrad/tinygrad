@@ -18,12 +18,11 @@ for offset in tqdm(range(0, row_count, page_size)):
     good_uops = k.linearize().uops
     good_src = k.opts.render("test", good_uops)
     try: assert compare_src == good_src
-    except AssertionError:
+    except AssertionError as e:
       print("PROCESS REPLAY FAILED")
       print(compare_k.ast)
       print(compare_k.applied_opts)
       diff = list(difflib.unified_diff(good_src.splitlines(), compare_src.splitlines()))
       for line in diff:
         print(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
-      # TODO: fix nondeterminism in ASTs with Variable 4860
-      #raise e
+      raise e
