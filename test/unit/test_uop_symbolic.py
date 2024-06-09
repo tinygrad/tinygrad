@@ -21,6 +21,8 @@ def render(self) -> str:
   recursive_add(UOp(UOps.STORE, None, (glbl,UOp.const(dtypes.int, 0),self)))
   graph.linearize()
   from tinygrad.renderer.cstyle import CStyleLanguage
+  class TestRenderer(CStyleLanguage):
+    code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.DIV: lambda a,b,dtype: f"({a}//{b})"}
   fxn = CStyleLanguage().render("", graph)
   return fxn.split("data0[0] = ")[1].split(";")[0]
 
