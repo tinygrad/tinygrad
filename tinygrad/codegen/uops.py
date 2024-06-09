@@ -34,12 +34,12 @@ class UOp:
   vin: Tuple[UOp, ...] = tuple()
   arg: Any = None
   def tuple(self): return (self.uop, self.dtype, self.vin, self.arg)
-  @functools.cached_property
+  @functools.lru_cache  # not a cached property to enable calling cache_clear()
   def cmp_tuple(self):
     # NOTE: this sort of DEFINE_VAR shouldn't have to be here. only for PTX
     return (self.uop.value, (self.arg if self.uop is not UOps.DEFINE_VAR else self.arg.expr) if self.uop is not UOps.ALU else \
             (type(self.uop), self.uop.value), self.dtype, self.vin)
-  def __lt__(self, x:UOp): return self.cmp_tuple < x.cmp_tuple
+  def __lt__(self, x:UOp): return self.cmp_tuple() < x.cmp_tuple()
   def __repr__(self):
     return f"{str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.uop for x in self.vin]):32s} {self.arg}"
   def cast(self, dtype): return UOp(UOps.CAST, dtype, (self,))
@@ -59,9 +59,9 @@ class UOp:
   def const(dtype, val): return UOp(UOps.CONST, dtype, arg=dtypes.as_const(val, dtype))
   @staticmethod
   def alu(arg, *vin:UOp): return UOp(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else vin[-1].dtype, vin, arg)
-  @functools.cached_property
-  def parents(self) -> Set[UOp]: return set.union(set(self.vin), *[x.parents for x in self.vin])
-  def vars(self) -> Set[UOp]: return set([x for x in set.union(set([self]), self.parents) if x.uop is UOps.DEFINE_VAR])
+  @functools.lru_cache  # not a cached property to enable calling cache_clear()
+  def parents(self) -> Set[UOp]: return set.union(set(self.vin), *[x.parents() for x in self.vin])
+  def vars(self) -> Set[UOp]: return set([x for x in set.union(set([self]), self.parents()) if x.uop is UOps.DEFINE_VAR])
 
 def uop_alu_resolve(u:UOp) -> sint:
   if u.uop is UOps.CONST: return u.arg
@@ -128,7 +128,7 @@ class PatternMatcher:
 
 def sum_collapse(phi_input, loop, val1, val2):
   for v1,v2 in [(val1, val2), (val2, val1)]:
-    if loop not in v1.parents:
+    if loop not in v1.parents():
       loop_range = loop.vin[1]-loop.vin[0]
       ret = v1*loop_range.cast(v1.dtype)
       return UOp(UOps.PHI, phi_input.dtype, (phi_input, v2))+ret
@@ -291,10 +291,8 @@ class UOpGraph:
         changed += recurse_cnt
         # NOTE: this changes UOp, so we have to delete caches
         up.vin = tuple(rewrite(x) for x in up.vin)
-        try: del up.parents
-        except AttributeError: pass
-        try: del up.cmp_tuple
-        except AttributeError: pass
+        up.parents.cache_clear()
+        up.cmp_tuple.cache_clear()
         # replace with cached nodes
         if found:=self.nodes.get(key:=up.tuple()): return found
         self.nodes[key] = up

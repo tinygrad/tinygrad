@@ -145,7 +145,7 @@ class PTXRenderer(Renderer):
         assert vin[0].dtype is not None and vin[2].dtype is not None
         assert vin[0].dtype == dtypes.int64, "store isn't int64"
         assert vin[1].uop is UOps.CONST, f"store isn't const {u}"
-        mem_type = '.shared' if vin[0].uop is UOps.DEFINE_LOCAL or any(x.uop is UOps.DEFINE_LOCAL for x in vin[0].parents) else '.global'
+        mem_type = '.shared' if vin[0].uop is UOps.DEFINE_LOCAL or any(x.uop is UOps.DEFINE_LOCAL for x in vin[0].parents()) else '.global'
         if vin[2].dtype.count > 1:
           kk((f"@{r[vin[3]]} " if len(vin)>3 else "") + \
               f"st{mem_type}.v{vin[2].dtype.count}.{self.mem_types[vin[2].dtype.scalar()]} [{r[vin[0]]}+{vin[1].arg}], {{{', '.join(r[vin[2]])}}};")
@@ -178,7 +178,7 @@ class PTXRenderer(Renderer):
         elif uop is UOps.LOAD:
           assert vin[0].dtype == dtypes.int64, "load isn't int64"
           assert vin[1].uop is UOps.CONST, f"load isn't const {u}"
-          mem_type = '.shared' if vin[0].uop is UOps.DEFINE_LOCAL or any(x.uop is UOps.DEFINE_LOCAL for x in vin[0].parents) else '.global'
+          mem_type = '.shared' if vin[0].uop is UOps.DEFINE_LOCAL or any(x.uop is UOps.DEFINE_LOCAL for x in vin[0].parents()) else '.global'
           if dtype.count > 1:
             r[u] = [ssa('val', dtype=self.types[dtype.scalar()]) for _ in range(dtype.count)]
             if(len(vin)>3):
