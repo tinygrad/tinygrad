@@ -28,7 +28,7 @@ class CStyleLanguage(Renderer):
     UnaryOps.RECIP: lambda x,dtype: f"(1/{x})",
     UnaryOps.EXP2: lambda x,dtype: f"exp2({x})", UnaryOps.LOG2: lambda x,dtype: f"log2({x})", UnaryOps.SIN: lambda x,dtype: f"sin({x})",
     BinaryOps.ADD: lambda a,b,dtype: f"({a}+{b})", BinaryOps.SUB: lambda a,b,dtype: f"({a}-{b})", BinaryOps.MUL: lambda a,b,dtype: f"({a}*{b})",
-    BinaryOps.IDIV: lambda a,b,dtype: f"(int)({a}/{'(double)' if dtypes.is_int(dtype) else ''}{b})",
+    BinaryOps.IDIV: lambda a,b,dtype: f"floor({a}/{'(double)' if dtypes.is_int(dtype) else ''}{b})",
     BinaryOps.DIV: lambda a,b,dtype: f"({a}/{b})", BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})", BinaryOps.MOD: lambda a,b,dtype: f"({a}%{b})",
     BinaryOps.CMPLT: lambda a,b,dtype: f"({a}<{b})", BinaryOps.CMPNE: lambda a,b,dtype: f"({a}!={b})", BinaryOps.XOR: lambda a,b,dtype: f"({a}^{b})",
     TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})"}
@@ -242,7 +242,6 @@ class MetalRenderer(CStyleLanguage):
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
 code_for_op_half = {UnaryOps.RECIP: lambda x,dtype: f"({'(half)'if dtype == dtypes.half else ''}1/{x})",
-                    BinaryOps.IDIV: lambda a,b,dtype: "f(unsigned)(__fdividef(dividend, divisor)",
                     BinaryOps.MAX: lambda a,b,dtype: f"__hmax({a},{b})" if dtype in (dtypes.half, dtypes.bfloat16) else f"max({a},{b})",
                     UnaryOps.SQRT: lambda x,dtype: f"hsqrt({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"sqrt({x})",
                     UnaryOps.SIN: lambda x,dtype: f"hsin({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"sin({x})",
