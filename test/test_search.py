@@ -8,7 +8,7 @@ from tinygrad.device import Device, Buffer
 from tinygrad.ops import LazyOp, LoadOps, BufferOps, ReduceOps, BinaryOps, MemBuffer, ConstBuffer
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import Context, GlobalCounters, getenv
+from tinygrad.helpers import Context, GlobalCounters
 from tinygrad.engine.realize import capturing
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
@@ -43,7 +43,6 @@ class TestTimeLinearizer(unittest.TestCase):
     time_linearizer(lin, bufs, allow_test_size=False, cnt=2, disable_cache=True, clear_l2=True)
     assert GlobalCounters.kernel_count == kernel_count, "kernel count was incremented by time_linearizer"
 
-@unittest.skipIf(getenv("RUN_PROCESS_REPLAY"), "TODO: run process replay for BEAM=2")
 class TestBEAM(unittest.TestCase):
   def test_dynamic_beam(self):
     # TODO: make this infra globally usable
