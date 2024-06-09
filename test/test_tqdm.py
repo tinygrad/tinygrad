@@ -100,9 +100,9 @@ class TestProgressBar(unittest.TestCase):
       n = 0
       i = 1
 
-      bar = tinytqdm(total=total, desc="Test: ", unit_scale=True)
+      bar = tinytqdm(total=total, desc="Test: ", unit="B", unit_scale=True)
       tinytqdm_output = mock_stderr.getvalue().split("\r")[-1].rstrip()
-      tqdm_output = tqdm.format_meter(n=n, total=total, unit_scale=True, elapsed=i*dt, ncols=ncols, prefix="Test")
+      tqdm_output = tqdm.format_meter(n=n, total=total, unit="B", unit_scale=True, elapsed=i*dt, ncols=ncols, prefix="Test")
       self._compare_bars(tinytqdm_output, tqdm_output)
 
       while n < total:
@@ -114,7 +114,8 @@ class TestProgressBar(unittest.TestCase):
         if bar.i % bar.skip != 0: continue
 
         tinytqdm_output = mock_stderr.getvalue().split("\r")[-1].rstrip()
-        tqdm_output = tqdm.format_meter(n=n, total=total, unit_scale=True, elapsed=i*dt, ncols=ncols, prefix="Test")
+        tqdm_output = tqdm.format_meter(n=n, total=total, unit="B", unit_scale=True, elapsed=i*dt, ncols=ncols, prefix="Test")
+        print(f"{tinytqdm_output}\n{tqdm_output}\n")
         self._compare_bars(tinytqdm_output, tqdm_output)
 
   def test_tqdm_perf(self):
