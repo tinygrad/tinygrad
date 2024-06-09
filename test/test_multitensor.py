@@ -1,7 +1,7 @@
 import unittest, functools, random
 from typing import List
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes
-from tinygrad.ops import LoadOps, ReduceOps
+from tinygrad.ops import LoadOps, ReduceOps, BufferOps, BinaryOps
 from tinygrad.helpers import CI, getenv, prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.schedule import create_schedule
@@ -505,6 +505,32 @@ class TestMultiTensor(unittest.TestCase):
     output.numpy()
     Tensor.training = False
 
+  def test_broadcast_const(self):
+    devices = (d0, d1, d2, d3)
+    for axis in (None, 0, 1):
+      t = Tensor.zeros(16, 16).contiguous().shard(devices, axis).realize()
+      t = t + 1
+      for si in t.schedule():
+        ast = si.ast[0]
+        assert ast.op is BufferOps.STORE
+        assert ast.src[0].op is BinaryOps.ADD
+        assert ast.src[0].src[0].op is BufferOps.LOAD and ast.src[0].src[0]
+        assert ast.src[0].src[1].op is BufferOps.CONST and ast.src[0].src[1].arg.val == 1
+      t = 2 * t
+      for si in t.schedule():
+        ast = si.ast[0]
+        assert ast.op is BufferOps.STORE
+        assert ast.src[0].op is BinaryOps.MUL
+        assert ast.src[0].src[0].op is BufferOps.CONST and ast.src[0].src[0].arg.val == 2
+        assert ast.src[0].src[1].op is BufferOps.LOAD
+      t = t + t.full_like(3)
+      for si in t.schedule():
+        ast = si.ast[0]
+        assert ast.op is BufferOps.STORE
+        assert ast.src[0].op is BinaryOps.ADD
+        assert ast.src[0].src[0].op is BufferOps.LOAD
+        assert ast.src[0].src[1].op is BufferOps.CONST and ast.src[0].src[1].arg.val == 3
+
 @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
 class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
   # shrink a multitensor on sharded axis
@@ -633,6 +659,8 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
     expected = np.arange(64).reshape((8,8)) + np.array([[0,0,1,1,2,2,3,3] for _ in range(8)]).T
     np.testing.assert_allclose(output.numpy(), expected)
 
+@unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
+class TestBatchNorm(unittest.TestCase):
   def test_unsynced_backprop_conv_bn(self):
     with Tensor.train():
       from extra.lr_scheduler import OneCycleLR
