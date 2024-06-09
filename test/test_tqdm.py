@@ -42,7 +42,7 @@ class TestProgressBarOutput(unittest.TestCase):
       # compare bars at each iteration (only when tinytqdm bar has been updated)
       for n in (bar := tinytqdm(range(total), desc="Test: ")):
         time.sleep(0.01)
-        if bar.cnt % bar.skip != 0: continue
+        if bar.i % bar.skip != 0: continue
         tinytqdm_output = mock_stdout.getvalue().split("\r")[-1].rstrip()
         iters_per_sec = float(tinytqdm_output.split("it/s")[-2].split(" ")[-1]) if n>0 else 0
         elapsed = n/iters_per_sec if n>0 else 0
@@ -73,7 +73,7 @@ class TestProgressBarOutput(unittest.TestCase):
         if n + incr > total: incr = total - n
         bar.update(incr, close=n+incr==total)
         n += incr
-        if bar.cnt % bar.skip != 0: continue
+        if bar.i % bar.skip != 0: continue
 
         tinytqdm_output = mock_stdout.getvalue().split("\r")[-1].rstrip()
         iters_per_sec = float(tinytqdm_output.split("it/s")[-2].split(" ")[-1]) if n>0 else 0

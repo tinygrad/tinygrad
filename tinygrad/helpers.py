@@ -203,11 +203,12 @@ def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, allow_caching=n
     with urllib.request.urlopen(url, timeout=10) as r:
       assert r.status == 200
       total_length = int(r.headers.get('content-length', 0))
-      progress_bar = tinytqdm(total=total_length, unit='B', desc=url)
+      progress_bar = tinytqdm(total=total_length, unit='B', desc=f"{url}: ")
       (path := fp.parent).mkdir(parents=True, exist_ok=True)
       with tempfile.NamedTemporaryFile(dir=path, delete=False) as f:
         while chunk := r.read(16384): progress_bar.update(f.write(chunk))
         f.close()
+        # progress_bar.update(close=True)
         if (file_size:=os.stat(f.name).st_size) < total_length: raise RuntimeError(f"fetch size incomplete, {file_size} < {total_length}")
         pathlib.Path(f.name).rename(fp)
   return fp
@@ -242,20 +243,20 @@ def flat_mv(mv:memoryview): return mv if len(mv) == 0 else mv.cast("B", shape=(m
 class tinytqdm:
   def __init__(self, iterable=None, desc:str='', disable:bool=False, unit:str='it', total:int=-1, rate:int=100):
     self.iter, self.desc, self.dis, self.unit, self.rate = iterable, desc, disable, unit, rate
-    self.st, self.cnt, self.val, self.skip, self.total = time.perf_counter(), 0, 0, 1, len(iterable) if total==-1 else total
+    self.st, self.i, self.n, self.skip, self.t= time.perf_counter(), -1, 0, 1, len(iterable) if total==-1 else total
     self.update(0)
   def __iter__(self):
     try:
       for item in self.iter:
         yield item
-        self.update()
-    finally: self.update(0, close=True)
-  def update(self, n:int=1, close:bool=False):
-    i = self.val = self.val + n
-    if (self.cnt % self.skip != 0 and not close) or self.dis: return
-    prog, dur, term, self.cnt = i/self.total, time.perf_counter()-self.st, shutil.get_terminal_size().columns, self.cnt+1
-    if self.cnt/dur > self.rate and i>0: self.skip = max(int(self.cnt/dur)//self.rate,1)
-    def fmt_t(t): return ':'.join([f'{x:02d}' for x in divmod(int(t), 60)]) if t != -1 else '?'
-    suffix = f'| {i}/{self.total} [{fmt_t(dur)}<{fmt_t(((dur/i*self.total)-dur) if i>0 else -1)}, {f"{i/dur:5.2f}" if i!=0 else "?"}{self.unit}/s]'
-    sz = max(term-5-len(suffix)-len(self.desc), 1)
-    print(f'\r{self.desc}{round(100*prog):3}%|{"█"*round(sz*prog)}{" "*(sz-round(sz*prog))}{suffix}'[:term+1],flush=True,end=('\n' if close else ''))
+        self.update(1)
+    finally: self.update(close=True)
+  def update(self, n:int=0, close:bool=False):
+    self.n, self.i, close = self.n+n, self.i+1, close or (self.n+n == self.t)
+    if (self.i % self.skip != 0 and not close) or self.dis: return
+    prog, dur, term = self.n/self.t, time.perf_counter()-self.st, shutil.get_terminal_size().columns
+    if self.i/dur > self.rate and self.i: self.skip = max(int(self.i/dur)//self.rate,1) if self.i else 1
+    def fmt(t): return ':'.join([f'{x:02d}' for x in divmod(int(t), 60)]) if t!=-1 else '?'
+    suf = f'| {self.n}/{self.t} [{fmt(dur)}<{fmt(dur/self.n*self.t-dur if self.n else -1)}, {f"{self.n/dur:5.2f}" if self.n else "?"}{self.unit}/s]'
+    sz = max(term-5-len(suf)-len(self.desc), 1)
+    print(f'\r{self.desc}{round(100*prog):3}%|{"█"*round(sz*prog)}{" "*(sz-round(sz*prog))}{suf}'[:term+1],flush=True,end=('\n' if close else ''))
