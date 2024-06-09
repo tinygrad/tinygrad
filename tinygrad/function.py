@@ -73,7 +73,7 @@ class Sqrt(Function):
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return grad_output.e(BinaryOps.MUL, self.ret.e(BinaryOps.MUL, self.ret.const(2)).e(UnaryOps.RECIP))
+    return grad_output.e(BinaryOps.MUL, self.ret.e(UnaryOps.RECIP).e(BinaryOps.MUL, self.ret.const(2)))
 
 # NOTE: the implicit derivative of sigmoid is not stable
 # https://towardsdatascience.com/derivative-of-the-sigmoid-function-536880cf918e
@@ -132,7 +132,7 @@ class Mul(Function):
 class Div(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
     self.x, self.y = x, y
-    return x.e(BinaryOps.IDIV, y)
+    return x.e(BinaryOps.MUL, y.e(UnaryOps.RECIP))
 
   def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
     return grad_output.e(BinaryOps.MUL, self.y.e(UnaryOps.RECIP)) if self.needs_input_grad[0] else None, \
