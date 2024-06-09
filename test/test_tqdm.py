@@ -88,9 +88,9 @@ class TestProgressBar(unittest.TestCase):
     for _ in range(10):
       total, ncols, dt = random.randint(10000, 100000), random.randint(80, 120), 0.1
 
-      def time_gen(): 
+      def time_gen():
         cnt = 0
-        while True: 
+        while True:
           yield dt * cnt
           cnt += 1
 

@@ -255,15 +255,6 @@ def init_c_struct_t(fields: Tuple[Tuple[str, ctypes._SimpleCData], ...]):
 def init_c_var(ctypes_var, creat_cb): return (creat_cb(ctypes_var), ctypes_var)[1]
 def flat_mv(mv:memoryview): return mv if len(mv) == 0 else mv.cast("B", shape=(mv.nbytes,))
 
-from math import log, floor
-def format_metric(number):
-    units = ["", "k", "M", "G", "T", "P", "E", "Z", "Y"]
-    k = 1000.0
-    magnitude = max(0, min(len(units) - 1, int(floor(log(abs(number), k))))) if number != 0 else 0
-    scaled_number = number / k**magnitude
-    formatted_number = f"{scaled_number:.2f}".rstrip('0').rstrip('.')
-    return f"{formatted_number}{units[magnitude]}"
-
 class tinytqdm:
   def __init__(self, iterable=None, desc:str='', disable:bool=False, unit:str='it', unit_scale=False, total:int=-1, rate:int=100):
     self.iter, self.desc, self.dis, self.unit, self.unit_scale, self.rate = iterable, desc, disable, unit, unit_scale, rate
