@@ -1,11 +1,10 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string, ctypes, shutil
+import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string, ctypes, sys
 import itertools, urllib.request, subprocess
 from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Sequence
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
   from tinygrad.shape.shapetracker import sint
-from tqdm import tqdm
 
 T = TypeVar("T")
 U = TypeVar("U")
@@ -203,7 +202,7 @@ def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, allow_caching=n
     with urllib.request.urlopen(url, timeout=10) as r:
       assert r.status == 200
       total_length = int(r.headers.get('content-length', 0))
-      progress_bar = tqdm(total=total_length, unit='B', desc=f"{url}: ")
+      progress_bar = tinytqdm(total=total_length, unit='B', desc=f"{url}: ", disable=False)
       (path := fp.parent).mkdir(parents=True, exist_ok=True)
       with tempfile.NamedTemporaryFile(dir=path, delete=False) as f:
         while chunk := r.read(16384): progress_bar.update(f.write(chunk))
@@ -253,9 +252,9 @@ class tinytqdm:
   def update(self, n:int=0, close:bool=False):
     self.n, self.i, close = self.n+n, self.i+1, close or (self.n+n == self.t)
     if (self.i % self.skip != 0 and not close) or self.dis: return
-    prog, dur, term = self.n/self.t, time.perf_counter()-self.st, shutil.get_terminal_size().columns
+    prog, dur, term = self.n/self.t, time.perf_counter()-self.st, os.get_terminal_size().columns
     if self.i/dur > self.rate and self.i: self.skip = max(int(self.i/dur)//self.rate,1) if self.i else 1
     def fmt(t): return ':'.join([f'{x:02d}' for x in divmod(int(t), 60)]) if t!=-1 else '?'
     suf = f'| {self.n}/{self.t} [{fmt(dur)}<{fmt(dur/self.n*self.t-dur if self.n else -1)}, {f"{self.n/dur:5.2f}" if self.n else "?"}{self.unit}/s]'
     sz = max(term-5-len(suf)-len(self.desc), 1)
-    print(f'\r{self.desc}{round(100*prog):3}%|{"█"*round(sz*prog)}{" "*(sz-round(sz*prog))}{suf}'[:term+1],flush=True,end=('\n' if close else ''))
+    print(f'\r{self.desc}{round(100*prog):3}%|{"█"*round(sz*prog)}{" "*(sz-round(sz*prog))}{suf}'[:term+1],flush=True,end='\n'*close,file=sys.stderr)

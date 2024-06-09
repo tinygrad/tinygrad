@@ -2,17 +2,18 @@ import time, random, unittest
 from tqdm import tqdm
 from unittest.mock import patch
 from io import StringIO
-from collections import namedtuple
 from tinygrad.helpers import tinytqdm
+import os
 
-class TestProgressBarOutput(unittest.TestCase):
+class TestProgressBar(unittest.TestCase):
   def _compare_bars(self, bar1, bar2, cmp_prog=False):
     prefix1, prog1, suffix1 = bar1.split("|")
     prefix2, prog2, suffix2 = bar2.split("|")
+
+    self.assertEqual(len(bar1), len(bar2))
     self.assertEqual(prefix1, prefix2)
 
-    def parse_timer(timer):
-      return sum([int(timer.split(":")[0])*60, int(timer.split(":")[1])])
+    def parse_timer(timer): return sum([int(timer.split(":")[0])*60, int(timer.split(":")[1])])
 
     if "?" not in suffix1 and "?" not in suffix2:
       # allow for 1 sec diff in timers (removes flakiness)
@@ -30,39 +31,40 @@ class TestProgressBarOutput(unittest.TestCase):
 
     diff = sum([1 for c1, c2 in zip(prog1, prog2) if c1 == c2]) # allow 1 char diff (due to tqdm special chars)
     self.assertTrue(not cmp_prog or diff <= 1)
-
-  @patch('sys.stdout', new_callable=StringIO)
-  @patch('shutil.get_terminal_size')
-  def test_tqdm_output_iter_e2e(self, mock_terminal_size, mock_stdout):
+  @patch('sys.stderr', new_callable=StringIO)
+  @patch('os.get_terminal_size')
+  def test_tqdm_output_iter_e2e(self, mock_terminal_size, mock_stderr):
     for _ in range(10):
       total, ncols = random.randint(5, 30), random.randint(80, 240)
-      mock_terminal_size.return_value = namedtuple(field_names='columns', typename='terminal_size')(ncols)
-      mock_stdout.truncate(0)
+      # mock_terminal_size.return_value = namedtuple(field_names='columns')(ncols)
+      mock_terminal_size.return_value = os.terminal_size((ncols, 24))
+      mock_stderr.truncate(0)
 
       # compare bars at each iteration (only when tinytqdm bar has been updated)
       for n in (bar := tinytqdm(range(total), desc="Test: ")):
         time.sleep(0.01)
         if bar.i % bar.skip != 0: continue
-        tinytqdm_output = mock_stdout.getvalue().split("\r")[-1].rstrip()
+        tinytqdm_output = mock_stderr.getvalue().split("\r")[-1].rstrip()
         iters_per_sec = float(tinytqdm_output.split("it/s")[-2].split(" ")[-1]) if n>0 else 0
         elapsed = n/iters_per_sec if n>0 else 0
         tqdm_output = tqdm.format_meter(n=n, total=total, elapsed=elapsed, ncols=ncols, prefix="Test")
         self._compare_bars(tinytqdm_output, tqdm_output)
 
       # compare final bars
-      tinytqdm_output = mock_stdout.getvalue().split("\r")[-1].rstrip()
+      tinytqdm_output = mock_stderr.getvalue().split("\r")[-1].rstrip()
       iters_per_sec = float(tinytqdm_output.split("it/s")[-2].split(" ")[-1]) if n>0 else 0
       elapsed = total/iters_per_sec if n>0 else 0
       tqdm_output = tqdm.format_meter(n=total, total=total, elapsed=elapsed, ncols=ncols, prefix="Test")
       self._compare_bars(tinytqdm_output, tqdm_output)
 
-  @patch('sys.stdout', new_callable=StringIO)
-  @patch('shutil.get_terminal_size')
-  def test_tqdm_output_custom_e2e(self, mock_terminal_size, mock_stdout):
+  @patch('sys.stderr', new_callable=StringIO)
+  @patch('os.get_terminal_size')
+  def test_tqdm_output_custom_e2e(self, mock_terminal_size, mock_stderr):
     for _ in range(10):
       total, ncols = random.randint(10000, 100000), random.randint(80, 120)
-      mock_terminal_size.return_value = namedtuple(field_names='columns', typename='terminal_size')(ncols)
-      mock_stdout.truncate(0)
+      # mock_terminal_size.return_value = namedtuple(field_names='columns', typename='terminal_size')(ncols)
+      mock_terminal_size.return_value = os.terminal_size((ncols, 0))
+      mock_stderr.truncate(0)
 
       # compare bars at each iteration (only when tinytqdm bar has been updated)
       bar = tinytqdm(total=total, desc="Test: ")
@@ -75,40 +77,44 @@ class TestProgressBarOutput(unittest.TestCase):
         n += incr
         if bar.i % bar.skip != 0: continue
 
-        tinytqdm_output = mock_stdout.getvalue().split("\r")[-1].rstrip()
+        tinytqdm_output = mock_stderr.getvalue().split("\r")[-1].rstrip()
         iters_per_sec = float(tinytqdm_output.split("it/s")[-2].split(" ")[-1]) if n>0 else 0
         elapsed = n/iters_per_sec if n>0 else 0
         tqdm_output = tqdm.format_meter(n=n, total=total, elapsed=elapsed, ncols=ncols, prefix="Test")
 
       # compare final bars
-      tinytqdm_output = mock_stdout.getvalue().split("\r")[-1].rstrip()
+      tinytqdm_output = mock_stderr.getvalue().split("\r")[-1].rstrip()
       iters_per_sec = float(tinytqdm_output.split("it/s")[-2].split(" ")[-1]) if n>0 else 0
       elapsed = total/iters_per_sec if n>0 else 0
       tqdm_output = tqdm.format_meter(n=total, total=total, elapsed=elapsed, ncols=ncols, prefix="Test")
       self._compare_bars(tinytqdm_output, tqdm_output)
 
-def test_tqdm_perf():
-  st = time.perf_counter()
-  for _ in tqdm(range(100)): time.sleep(0.01)
+  @patch('os.get_terminal_size')
+  def test_tqdm_perf(self, mock_terminal_size):
+    mock_terminal_size.return_value = os.terminal_size((80, 24))
+    st = time.perf_counter()
+    for _ in tqdm(range(100)): time.sleep(0.01)
 
-  tqdm_time = time.perf_counter() - st
+    tqdm_time = time.perf_counter() - st
 
-  st = time.perf_counter()
-  for _ in tinytqdm(range(100)): time.sleep(0.01)
-  tinytqdm_time = time.perf_counter() - st
+    st = time.perf_counter()
+    for _ in tinytqdm(range(100)): time.sleep(0.01)
+    tinytqdm_time = time.perf_counter() - st
 
-  assert tinytqdm_time < 2.0 * tqdm_time
+    assert tinytqdm_time < 2.0 * tqdm_time
 
-def test_tqdm_perf_high_iter():
-  st = time.perf_counter()
-  for _ in tqdm(range(10^7)): pass
-  tqdm_time = time.perf_counter() - st
+  @patch('os.get_terminal_size')
+  def test_tqdm_perf_high_iter(self, mock_terminal_size):
+    mock_terminal_size.return_value = os.terminal_size((80, 24))
+    st = time.perf_counter()
+    for _ in tqdm(range(10^7)): pass
+    tqdm_time = time.perf_counter() - st
 
-  st = time.perf_counter()
-  for _ in tinytqdm(range(10^7)): pass
-  tinytqdm_time = time.perf_counter() - st
+    st = time.perf_counter()
+    for _ in tinytqdm(range(10^7)): pass
+    tinytqdm_time = time.perf_counter() - st
 
-  assert tinytqdm_time < 5 * tqdm_time
+    assert tinytqdm_time < 5 * tqdm_time
 
 if __name__ == '__main__':
   unittest.main()
