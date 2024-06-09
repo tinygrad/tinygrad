@@ -97,7 +97,15 @@
             button.className = 'clipboard-button';
             button.innerHTML = '<i class=\'fas fa-clipboard\'></i>';
             button.onclick = () => {
-              navigator.clipboard.writeText(codeBlock.textContent);
+              // navigator.clipboard.writeText(codeBlock.textContent);
+              const range = document.createRange();
+              range.setStartBefore(codeBlock);
+              range.setEndAfter(codeBlock);
+              window.getSelection()?.removeAllRanges();
+              window.getSelection()?.addRange(range);
+              document.execCommand('copy');
+              window.getSelection()?.removeAllRanges();
+
               button.innerHTML = '<i class=\'fas fa-check\'></i>';
               setTimeout(() => button.innerHTML = '<i class=\'fas fa-clipboard\'></i>', 1000);
             };
