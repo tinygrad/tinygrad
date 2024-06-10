@@ -219,12 +219,12 @@ class Linearizer(Kernel):
       if DEBUG >= 3: print(f"store alias: sts={self.sts[0]} idxs={global_idxs+local_idxs+upcast_idxs}")
     return alias_buf_idxs
 
-  def render_reduceop(self, reduceop:LazyOp, seq:int, accs:Dict[LazyOp, List[UOp]], \
+  def render_reduceop(self, reduceop:LazyOp, accs:Dict[LazyOp, List[UOp]], \
                       loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]],
                       global_idxs, local_idxs, upcast_idxs, full_upcast_idxs, reduce_idxs, alias_buf_idxs):
     fake_reduce_idxs = [x*0 for x in reduce_idxs]
     # reduce loop
-    loop_ctx = self.render_loop(reduce_idxs, seq*2+2)
+    loop_ctx = self.render_loop(reduce_idxs, self.reduceops.index(reduceop)*2+2)
 
     # define accumulator - modify idxs if necessary for TC
     out_buf = -1 if self.group_for_reduces else 0
@@ -303,7 +303,7 @@ class Linearizer(Kernel):
       # NOTE: this structure is the same as the reduce op above
 
       # late reduce loop
-      loop_ctx = self.render_loop(end_local_idxs, seq*2+3)
+      loop_ctx = self.render_loop(end_local_idxs, self.reduceops.index(reduceop)*2+3)
 
       # define late accumulator
       accs[reduceop] = self.global_load(0, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop, loop_ctx=loop_ctx)
@@ -447,8 +447,8 @@ class Linearizer(Kernel):
 
     if len(reduceops) != 0:
       # TODO: delete render_reduceop and move the logic for group_for_reduces to Block
-      nlidx, nuidx = self.render_reduceop((r:=reduceops[0]),self.reduceops.index(r),\
-                                          accs,loaded_buffers,global_idxs,local_idxs,upcast_idxs,full_upcast_idxs,reduce_idxs,alias_buf_idxs[r])
+      nlidx, nuidx = \
+        self.render_reduceop((r:=reduceops[0]),accs,loaded_buffers,global_idxs,local_idxs,upcast_idxs,full_upcast_idxs,reduce_idxs,alias_buf_idxs[r])
       if r is self.reduceops[-1]: local_idxs[:], upcast_idxs[:] = nlidx, nuidx
       return accs[r]
 
