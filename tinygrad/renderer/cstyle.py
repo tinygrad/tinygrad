@@ -108,8 +108,6 @@ class CStyleLanguage(Renderer):
     for i,u in enumerate(uops):
       uop,dtype,vin,args = u.uop,u.dtype,u.vin,u.arg
       # these four uops don't have output dtypes
-      print(f"kernel at step {i}")
-      for x in kernel: print("  ",x)
       if uop is UOps.IF:
         kk(f"if ({r[vin[0]]}) {{")
         depth += 1

@@ -360,11 +360,11 @@ class UOpGraph:
     # TODO: ifs should be removed and just the store should be gated
     dfs_until_bar_cache = {}
     def dfs_until_bar(u: UOp):
-        if u not in dfs_until_bar_cache:
-          dfs_until_bar_cache[u] = list(graph[u]) + [x for v in graph[u] for x in dfs_until_bar(v) if v.uop is not UOps.BARRIER]
-        return dfs_until_bar_cache[u]
+      if u not in dfs_until_bar_cache:
+        dfs_until_bar_cache[u] = list(graph[u]) + [x for v in graph[u] for x in dfs_until_bar(v) if v.uop is not UOps.BARRIER]
+      return dfs_until_bar_cache[u]
     for u in ifs[::-1]:
-      if all([x.uop is UOps.STORE for x in graph[u]]):
+      if all(x.uop is UOps.STORE for x in graph[u]):
         self._uops.remove(u)
         self._uops.insert(min([self._uops.index(x) for x in graph[u]]), u)
       self._uops.insert(max([self._uops.index(x) for x in dfs_until_bar(u) if x.uop is UOps.STORE])+1, UOp(UOps.ENDIF, None, (u,)))
