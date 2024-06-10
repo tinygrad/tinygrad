@@ -4,7 +4,6 @@ import numpy as np
 from tinygrad import Tensor, dtypes
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import lower_schedule_item, run_schedule
-from tinygrad.helpers import getenv
 
 class TestFusionOp(unittest.TestCase):
   def test_contiguous_add(self):
@@ -23,7 +22,6 @@ class TestFusionOp(unittest.TestCase):
     outd = out.tolist()
     assert all(x == 20.0 for x in outd)
 
-  @unittest.skipIf(getenv("RUN_PROCESS_REPLAY"), "very slow")
   def test_recursive_add(self):
     st = time.perf_counter()
     a = Tensor([1,2,3,4])

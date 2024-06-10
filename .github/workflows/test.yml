@@ -17,6 +17,28 @@ on:
          type: boolean
 
 jobs:
+  check_process_replay:
+    name: Check process replay
+    runs-on: ubuntu-latest
+    outputs:
+      run_process_replay: ${{ steps.set-env.outputs.run_process_replay }}
+    timeout-minutes: 5
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 2 # NOTE: this fetches the HEAD commit of the PR
+    - name: Set process replay
+      id: set-env
+      run: |
+        COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
+        if { echo "$COMMIT_MESSAGE" | grep -q "\[run_process_replay\]" || [ "${{ github.event.inputs.run_process_replay }}" == "true" ]; } && [ "$GITHUB_REF_NAME" != "master" ]; then
+          echo "RUN_PROCESS_REPLAY=1" >> $GITHUB_OUTPUT
+        else
+          echo "RUN_PROCESS_REPLAY=0" >> $GITHUB_OUTPUT
+        fi
+
   uops:
     name: uops tests
     runs-on: ubuntu-latest
@@ -126,6 +148,10 @@ jobs:
       fail-fast: false
       matrix:
         task: [optimage, openpilot, onnx]
+    needs: check_process_replay
+    #env:
+      #RUN_PROCESS_REPLAY: ${{ needs.check_process_replay.outputs.run_process_replay }}
+
     name: ${{ matrix.task=='optimage'&&'GPU OPT and IMAGE Tests' || matrix.task=='openpilot'&&'openpilot (OpenCL) Tests' || matrix.task=='onnx'&&'ONNX+Optimization Tests' }}
     runs-on: ubuntu-20.04
     timeout-minutes: 10
@@ -211,6 +237,9 @@ jobs:
       - if: ${{ matrix.task == 'onnx' }}
         name: Test THREEFRY
         run: PYTHONPATH=. THREEFRY=1 GPU=1 python3 -m pytest test/test_randomness.py test/test_jit.py
+      - name: Run process replay tests
+        if: env.RUN_PROCESS_REPLAY == '1'
+        run: cp test/external/replay_codegen.py ./replay_codegen.py && git fetch origin master && git checkout origin/master && PYTHONPATH=. python3 replay_codegen.py
 
   #testwebgpu:
   #  name: WebGPU Tests
@@ -256,6 +285,9 @@ jobs:
   testmetal:
     name: Metal Tests
     runs-on: macos-14
+    needs: check_process_replay
+    env:
+      RUN_PROCESS_REPLAY: ${{ needs.check_process_replay.outputs.run_process_replay }}
     timeout-minutes: 10
 
     steps:
@@ -299,7 +331,9 @@ jobs:
       run: PYTHONPATH="." METAL=1 CACHELEVEL=0 FUZZ_ALL_ACTIONS=1 DEPTH=2 FUZZ_N=48 FUZZ_MAX_SIZE=10000000 python test/external/fuzz_linearizer.py
     - name: Fuzz Test models schedule
       run: FUZZ_SCHEDULE=1 FUZZ_SCHEDULE_MAX_PATHS=5 python -m pytest test/models/test_train.py test/models/test_end2end.py
-
+    - name: Run process replay tests
+      if: env.RUN_PROCESS_REPLAY == '1'
+      run: cp test/external/replay_codegen.py ./replay_codegen.py && git fetch origin master && git checkout origin/master && PYTHONPATH=. python3 replay_codegen.py
 
 #  testwebgl:
 #    name: WebGL Tests
@@ -339,6 +373,9 @@ jobs:
       fail-fast: false
       matrix:
         backend: [llvm, clang, gpu, ptx, amd, nv] #, triton]
+    needs: check_process_replay
+    env:
+      RUN_PROCESS_REPLAY: ${{ needs.check_process_replay.outputs.run_process_replay }}
 
     name: Tests on (${{ matrix.backend }})
     runs-on: ubuntu-latest
@@ -347,8 +384,6 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 2 # NOTE: this fetches the HEAD commit of the PR
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
@@ -364,12 +399,7 @@ jobs:
           path: ~/.cache/tinygrad/downloads/
           key: downloads-cache-${{ matrix.backend }}-${{ env.DOWNLOAD_CACHE_VERSION }}
       - name: Set env
-        run: |
-          COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
-          if { echo "$COMMIT_MESSAGE" | grep -q "\[run_process_replay\]" || [ "${{ github.event.inputs.run_process_replay }}" == "true" ]; } && [ "$GITHUB_REF_NAME" != "master" ]; then
-            echo "RUN_PROCESS_REPLAY=1" >> $GITHUB_ENV
-          fi
-          printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nPTX=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas' || matrix.backend == 'amd' && 'AMD=1\nMOCKGPU=1\nFORWARD_ONLY=1' || matrix.backend == 'nv' && 'NV=1\nMOCKGPU=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
+        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nPTX=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas' || matrix.backend == 'amd' && 'AMD=1\nMOCKGPU=1\nFORWARD_ONLY=1' || matrix.backend == 'nv' && 'NV=1\nMOCKGPU=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
       - name: Install OpenCL
         if: matrix.backend == 'gpu'
         run: |
@@ -486,10 +516,7 @@ jobs:
           cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock
       - name: Run process replay tests
         if: env.RUN_PROCESS_REPLAY == '1'
-        run: |
-          cp test/external/replay_codegen.py ./replay_codegen.py
-          git fetch origin master && git checkout origin/master
-          PYTHONPATH=. python3 replay_codegen.py
+        run: cp test/external/replay_codegen.py ./replay_codegen.py && git fetch origin master && git checkout origin/master && PYTHONPATH=. python3 replay_codegen.py
 
   #testunicorn:
   #  name: ARM64 unicorn Test
