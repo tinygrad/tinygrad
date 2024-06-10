@@ -21,7 +21,7 @@ jobs:
     name: Check process replay
     runs-on: ubuntu-latest
     outputs:
-      run_process_replay: ${{ steps.set.outputs.run_process_replay }}
+      run_process_replay: ${{ steps.set-env.outputs.run_process_replay }}
     timeout-minutes: 5
 
     steps:
@@ -30,7 +30,7 @@ jobs:
       with:
         fetch-depth: 2 # NOTE: this fetches the HEAD commit of the PR
     - name: Set process replay
-      id: set
+      id: set-env
       run: |
         COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
         if { echo "$COMMIT_MESSAGE" | grep -q "\[run_process_replay\]" || [ "${{ github.event.inputs.run_process_replay }}" == "true" ]; } && [ "$GITHUB_REF_NAME" != "master" ]; then
