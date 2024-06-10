@@ -105,7 +105,7 @@ class CStyleLanguage(Renderer):
 
     child_count = Counter(v for ru in uops for v in ru.vin)
 
-    for i,u in enumerate(uops):
+    for u in uops:
       uop,dtype,vin,args = u.uop,u.dtype,u.vin,u.arg
       # these four uops don't have output dtypes
       if uop is UOps.IF:
