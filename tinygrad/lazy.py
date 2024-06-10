@@ -152,18 +152,19 @@ class LazyBuffer:
     if op in python_alu and all(s.is_unrealized_unmasked_const() for s in srcs):
       return self.cast(out_dtype).const(exec_alu(op, out_dtype, [s.base.arg for s in srcs]))
     if op is UnaryOps.NEG and self.base.op is UnaryOps.NEG: return self.base.srcs[0]
-    if op in BinaryOps: x, y = self, in_srcs[0]
-    if op is BinaryOps.ADD:
-      if y.is_unrealized_unmasked_const() and y.base.arg == 0: return x # pylint: disable=possibly-used-before-assignment
-      if x.is_unrealized_unmasked_const() and x.base.arg == 0: return y # pylint: disable=possibly-used-before-assignment
-    if op is BinaryOps.SUB and y.is_unrealized_unmasked_const() and y.base.arg == 0: return x
-    if op is BinaryOps.MUL:
-      if x.is_unrealized_unmasked_const() and (val := x.base.arg) in (1, 0, -1):
-        return y if val == 1 else y.const(0) if val == 0 else y.e(UnaryOps.NEG)
-      if y.is_unrealized_unmasked_const() and (val := float(y.base.arg)) in (1, 0, -1):
-        return x if val == 1 else x.const(0) if val == 0 else x.e(UnaryOps.NEG)
-    if op is BinaryOps.IDIV and dtypes.is_float(x.dtype) and y.is_unrealized_unmasked_const() and y.base.arg != 0:
-      return x.e(BinaryOps.MUL, y.e(UnaryOps.RECIP))
+    if op in BinaryOps:
+      x, y = self, in_srcs[0]
+      if op is BinaryOps.ADD:
+        if y.is_unrealized_unmasked_const() and y.base.arg == 0: return x
+        if x.is_unrealized_unmasked_const() and x.base.arg == 0: return y
+      if op is BinaryOps.SUB and y.is_unrealized_unmasked_const() and y.base.arg == 0: return x
+      if op is BinaryOps.MUL:
+        if x.is_unrealized_unmasked_const() and (val := x.base.arg) in (1, 0, -1):
+          return y if val == 1 else y.const(0) if val == 0 else y.e(UnaryOps.NEG)
+        if y.is_unrealized_unmasked_const() and (val := y.base.arg) in (1, 0, -1):
+          return x if val == 1 else x.const(0) if val == 0 else x.e(UnaryOps.NEG)
+      if op is BinaryOps.IDIV and dtypes.is_float(x.dtype) and y.is_unrealized_unmasked_const() and y.base.arg != 0:
+        return x.e(BinaryOps.MUL, y.e(UnaryOps.RECIP))
 
     return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), out_dtype, op, arg, tuple(srcs))
 
