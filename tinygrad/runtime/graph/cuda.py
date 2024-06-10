@@ -1,7 +1,7 @@
 import ctypes
 from typing import Any, Optional, Tuple, Dict, List, cast
 import tinygrad.runtime.autogen.cuda as cuda
-from tinygrad.helpers import init_c_var, GraphException
+from tinygrad.helpers import init_c_var, GraphException, dedup
 from tinygrad.device import Buffer, Device
 from tinygrad.runtime.ops_cuda import CUDADevice, check, encode_args, cu_time_execution
 from tinygrad.shape.symbolic import Variable
@@ -15,7 +15,7 @@ class CUDAGraph(MultiGraphRunner):
     # Check all jit items are compatible.
     if not all(isinstance(ji.prg, (CompiledRunner, BufferXfer)) for ji in jit_cache): raise GraphException
 
-    self.jc_idx_with_updatable_rawbufs = list(set([x[0] for x in self.input_replace.keys()]))
+    self.jc_idx_with_updatable_rawbufs = dedup([x[0] for x in self.input_replace.keys()])
     self.updatable_nodes: Dict[int, Tuple[Any, Any, Any, bool]] = {} # Dict[jc index] = tuple(graph node, node params, input kernel params, is memcpy)
 
     self.graph = init_c_var(cuda.CUgraph(), lambda x: check(cuda.cuGraphCreate(ctypes.byref(x), 0)))
