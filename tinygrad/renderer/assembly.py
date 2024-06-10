@@ -30,9 +30,6 @@ class PTXRenderer(Renderer):
 .address_size 64
 .visible .entry"""
   barrier = "bar.sync\t0;"
-  has_pred = True
-  load_global = True
-  label_prefix = "$"
   gid = [f'%ctaid.{chr(120+i)}' for i in range(3)]
   gdim = [f'%nctaid.{chr(120+i)}' for i in range(3)]
   lid = [f'%tid.{chr(120+i)}' for i in range(3)]
@@ -208,13 +205,12 @@ class PTXRenderer(Renderer):
         elif uop is UOps.DEFINE_VAR:
           bufs.append((args.expr, dtype))
           r[u] = f"%{args.expr}"
-          if self.load_global: kk(*self.render_load(args.expr, ssa('dat', u, self.types[dtype]), dtype, ss=".param"))
+          kk(*self.render_load(args.expr, ssa('dat', u, self.types[dtype]), dtype, ss=".param"))
         elif uop is UOps.DEFINE_GLOBAL:
           bufs.append((nm:=f"data{args[0]}", dtype))
           r[u] = f"%{nm}"
-          if self.load_global:
-            dt = dtypes.ulong if dtype.__class__ == PtrDType else dtype
-            kk(*self.render_load(nm, ssa('dat', u, self.types[dt]), dt, ss=".param"))
+          dt = dtypes.ulong if dtype.__class__ == PtrDType else dtype
+          kk(*self.render_load(nm, ssa('dat', u, self.types[dt]), dt, ss=".param"))
         elif uop is UOps.WMMA:
           wmma = []
           for vv in vin[:2]:
@@ -235,27 +231,25 @@ ptx_matcher = PatternMatcher([
   (UPat(UOps.ALU, BinaryOps.DIV, name="root", dtype=set([dt for dt in dtypes.fields().values() if dtypes.is_int(dt)]),
       vin=[UPat(UOps.CONST, set([2**i for i in range(64)]), name="const"), UPat(name="div")]),
     lambda root, div, const: UOp(UOps.ALU, root.dtype, (div, UOp.const(root.dtype, int(math.log2(const.arg)))), BinaryOps.SHR)),
-  (UPat(UOps.ALU, BinaryOps.CMPNE, (UPat(dtype=dtypes.bool),UPat()), "root"),
-  lambda root: UOp(root.uop, root.dtype, root.vin, BinaryOps.XOR)),
+  (UPat(UOps.ALU, BinaryOps.CMPNE, (UPat(dtype=dtypes.bool),UPat()), "root"), lambda root: UOp(root.uop, root.dtype, root.vin, BinaryOps.XOR)),
   (UPat(UOps.ALU, BinaryOps.CMPLT, (UPat(name="x", dtype=dtypes.bool),UPat(name="y")), "root"),
-  lambda root,x,y: UOp(root.uop, root.dtype, (UOp(UOps.ALU, dtypes.bool, (x,), UnaryOps.NEG), y), BinaryOps.MUL)),
+    lambda root,x,y: UOp(root.uop, root.dtype, (UOp(UOps.ALU, dtypes.bool, (x,), UnaryOps.NEG), y), BinaryOps.MUL)),
   (UPat(UOps.ALU, BinaryOps.ADD,
     [UPat(name="non_muls"), UPat(UOps.ALU, BinaryOps.MUL, name="muls")], "root"),
     lambda root, muls, non_muls: UOp(UOps.ALU, root.dtype, muls.vin + (non_muls,), TernaryOps.MULACC)),
   *[(UPat(UOps.ALU, op, dtype=dtypes.half, name="x"),
     lambda x: UOp(UOps.CAST, dtypes.half, (UOp(x.uop, dtypes.float32, tuple([UOp(UOps.CAST, dtypes.float32, (vv,)) for vv in x.vin]), x.arg),)))
     for op in PTXRenderer.asm_for_op.keys() if op not in PTXRenderer.supports_half],
-  (UPat(UOps.LOAD, name="root", dtype=dtypes.bool,
-    vin=(UPat(name="x"),UPat(name="y"),UPat(name="z"),UPat(name="k"))),
-  lambda root,x,y,z,k: UOp(UOps.CAST, dtypes.bool, (UOp(root.uop, dtypes.int8, (x,y,z,UOp(UOps.CAST, dtypes.uint8, (k,)))),), root.arg)),
+  (UPat(UOps.LOAD, name="root", dtype=dtypes.bool, vin=(UPat(name="x"),UPat(name="y"),UPat(name="z"),UPat(name="k"))),
+    lambda root,x,y,z,k: UOp(UOps.CAST, dtypes.bool, (UOp(root.uop, dtypes.int8, (x,y,z,UOp(UOps.CAST, dtypes.uint8, (k,)))),), root.arg)),
   (UPat(UOps.LOAD, name="root", dtype=dtypes.bool, vin=(UPat(),UPat())),
-  lambda root: UOp(UOps.CAST, dtypes.bool, (UOp(root.uop, dtypes.uint8, root.vin, root.arg),))),
+    lambda root: UOp(UOps.CAST, dtypes.bool, (UOp(root.uop, dtypes.uint8, root.vin, root.arg),))),
   (UPat(UOps.STORE, name="root", vin=(UPat(),UPat(),UPat(name="z",dtype=dtypes.bool), UPat())),
-  lambda root,z: UOp(root.uop, root.dtype, root.vin[:2] + (UOp(UOps.CAST, dtypes.uint8, (z,)),), root.arg)),
+    lambda root,z: UOp(root.uop, root.dtype, root.vin[:2] + (UOp(UOps.CAST, dtypes.uint8, (z,)),), root.arg)),
   (UPat(UOps.STORE, name="root", vin=(UPat(),UPat(),UPat(name="z",dtype=dtypes.bool))),
-  lambda root,z: UOp(root.uop, root.dtype, root.vin[:2] + (UOp(UOps.CAST, dtypes.uint8, (z,)),), root.arg)),
+    lambda root,z: UOp(root.uop, root.dtype, root.vin[:2] + (UOp(UOps.CAST, dtypes.uint8, (z,)),), root.arg)),
   (UPat(UOps.STORE, name="root", vin=(UPat(),UPat(),UPat(),UPat(name="g", dtype=dtypes.int))),
-  lambda root,g: UOp(root.uop, root.dtype, root.vin[:3] + (UOp(UOps.CAST, dtypes.bool, (g,)),), root.arg)),
+    lambda root,g: UOp(root.uop, root.dtype, root.vin[:3] + (UOp(UOps.CAST, dtypes.bool, (g,)),), root.arg)),
   # ptr_ar (load/store)
   (UPat({UOps.LOAD, UOps.STORE}, name="root", allow_len={2,3,4,5}, vin=(UPat({UOps.DEFINE_LOCAL,UOps.DEFINE_GLOBAL}),
                                UPat(UOps.ALU, BinaryOps.ADD, vin=[UPat(name="alu"), UPat(UOps.CONST, name="const")]))),

@@ -196,6 +196,9 @@ if __name__ == "__main__":
   parser.add_argument("--shard", type=int, default=1)
   parser.add_argument("--quantize", choices=["int8", "nf4"])
   parser.add_argument("--api", action="store_true")
+  parser.add_argument("--host", type=str, default="0.0.0.0")
+  parser.add_argument("--port", type=int, default=7776)
+  parser.add_argument("--debug", action="store_true")
   parser.add_argument("--seed", type=int)
   parser.add_argument("--timing", action="store_true", help="Print timing per token")
   parser.add_argument("--profile", action="store_true", help="Output profile data")
@@ -215,7 +218,7 @@ if __name__ == "__main__":
   param_bytes = sum(x.lazydata.size * x.dtype.itemsize for x in get_parameters(model))
 
   if args.api:
-    from bottle import Bottle, request, response, HTTPResponse, abort
+    from bottle import Bottle, request, response, HTTPResponse, abort, static_file
     app = Bottle()
 
     cors_headers = {
@@ -230,6 +233,13 @@ if __name__ == "__main__":
     @app.hook("after_request")
     def enable_cors():
       for key, value in cors_headers.items(): response.set_header(key, value)
+
+    @app.route("/<filename>")
+    def server_static(filename):
+      return static_file(filename, root=(Path(__file__).parent / "tinychat").as_posix())
+    @app.route("/")
+    def index():
+      return static_file("index.html", root=(Path(__file__).parent / "tinychat").as_posix())
 
     @app.get("/v1/models")
     def models():
@@ -330,7 +340,7 @@ if __name__ == "__main__":
       }
       yield f"data: {json.dumps(res)}\n\n"
 
-    app.run(host="0.0.0.0", port=7776, debug=True)
+    app.run(host=args.host, port=args.port, debug=args.debug)
   else:
     prompt = [tokenizer.bos_id] + encode_message("system", "You are an *emotive* assistant.")
 

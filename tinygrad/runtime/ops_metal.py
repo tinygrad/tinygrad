@@ -20,12 +20,11 @@ class MetalCompiler(Compiler):
       # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
       air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=src.encode('utf-8'))
       return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
-    else:
-      options = Metal.MTLCompileOptions.new()
-      options.setFastMathEnabled_(getenv("METAL_FAST_MATH"))
-      try: library = unwrap2(self.device.device.newLibraryWithSource_options_error_(src, options, None))
-      except AssertionError as e: raise CompileError(e)
-      return library.libraryDataContents().bytes().tobytes()
+    options = Metal.MTLCompileOptions.new()
+    options.setFastMathEnabled_(getenv("METAL_FAST_MATH"))
+    try: library = unwrap2(self.device.device.newLibraryWithSource_options_error_(src, options, None))
+    except AssertionError as e: raise CompileError(e)
+    return library.libraryDataContents().bytes().tobytes()
 
 class MetalProgram:
   def __init__(self, device:MetalDevice, name:str, lib:bytes):

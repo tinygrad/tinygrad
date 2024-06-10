@@ -182,8 +182,7 @@ class TestSymbolicJit(unittest.TestCase):
     jf = TinyJit(f)
     for i in range(1, 5):
       vi = Variable("i", 1, 10).bind(i)
-      # TODO: without contiguous, the CONST shape are different in jit
-      t = Tensor.ones(i).contiguous()
+      t = Tensor.ones(i)
       symbolic = jf(t.reshape(vi)).item()
       expected = f(t).item()
       np.testing.assert_equal(symbolic, expected)
