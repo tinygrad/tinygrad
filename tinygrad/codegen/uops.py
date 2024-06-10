@@ -360,7 +360,7 @@ class UOpGraph:
     queue: Dict[Optional[UOp], Deque[UOp]] = defaultdict(deque)
     for u in filter(lambda u: in_degree[u] == 0, nodes): queue[uop2ctx[u]].append(u)
 
-    self._uops, globals = [], []
+    self._uops, define_globals = [], []
     ctxstack: List[Optional[UOp]] = [None]
     while ctxstack:
       if len(queue[ctxstack[-1]]) == 0:
@@ -370,7 +370,7 @@ class UOpGraph:
       x = queue[ctxstack[-1]].popleft()
       if DEBUG >= 7: print(x)
       if x.uop is UOps.RANGE: ctxstack.append(x)
-      if x.uop is UOps.DEFINE_GLOBAL: globals.append(x)
+      if x.uop is UOps.DEFINE_GLOBAL: define_globals.append(x)
       elif x.uop is UOps.DEFINE_ACC and len(x.vin):
         idx = min([self._uops.index(l) for l in x.vin])
         self._uops.insert(idx, x)
@@ -378,10 +378,10 @@ class UOpGraph:
       for u in graph[x]:
         in_degree[u] -= 1
         if in_degree[u] == 0: queue[uop2ctx[u]].append(u)
-    globals.sort()
+    define_globals.sort()
 
     assert self._uops[-1].uop is UOps.SINK, f"didn't end with SINK, ended with {self._uops[-1]}"
-    self._uops = globals + self._uops[:-1]
+    self._uops = define_globals + self._uops[:-1]
 
     # TODO: ifs should be removed and just the store should be gated
     for u in ifs[::-1]: self._uops.append(UOp(UOps.ENDIF, None, (u,)))
