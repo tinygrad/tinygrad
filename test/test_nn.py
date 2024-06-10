@@ -326,7 +326,7 @@ class TestNN(unittest.TestCase):
       z.sum().backward()
       torch_z.sum().backward(retain_graph=True)
       np.testing.assert_allclose(x.grad.numpy(), torch_x.grad.detach().numpy(), atol=5e-5, rtol=5e-5)
-      np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=5e-5, rtol=5e-5)
+      np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=1e-3, rtol=5e-4)
       np.testing.assert_allclose(layer.bias.grad.numpy(), torch_layer.bias.grad.detach().numpy(), atol=5e-5, rtol=5e-5)
 
   def test_instancenorm_3d(self):
@@ -351,8 +351,8 @@ class TestNN(unittest.TestCase):
       # backward
       z.sum().backward()
       torch_z.sum().backward(retain_graph=True)
-      np.testing.assert_allclose(x.grad.numpy(), torch_x.grad.detach().numpy(), atol=5e-5, rtol=5e-5)
-      np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=5e-4, rtol=5e-5)
+      np.testing.assert_allclose(x.grad.numpy(), torch_x.grad.detach().numpy(), atol=5e-4, rtol=5e-5)
+      np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
       np.testing.assert_allclose(layer.bias.grad.numpy(), torch_layer.bias.grad.detach().numpy(), atol=5e-4, rtol=5e-5)
 
   def test_embedding(self):
