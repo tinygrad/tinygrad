@@ -1,7 +1,6 @@
 from __future__ import annotations
 from typing import Iterator, Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable, Union, cast, TypeVar
-import math
-import functools, itertools, heapq
+import functools, itertools, heapq, math
 from collections import defaultdict
 from enum import Enum, auto
 from dataclasses import dataclass, field

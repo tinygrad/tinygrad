@@ -146,7 +146,7 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
         pred_reg = lang.newreg((u, 'pred'), dtype=dtypes.bool)
         lang.ins.append(AssemblyInstruction(UOps.ALU, pred_reg, [lang.tor[x] for x in vin], args))
         lang.ins.append(AssemblyInstruction(UOps.CAST, out, [pred_reg], args))
-      elif args == BinaryOps.IDIV and lang.no_div:
+      elif args == BinaryOps.DIV and lang.no_div:
         tmp = lang.newreg((u, "rcp"))
         lang.ins.append(AssemblyInstruction(UOps.ALU, tmp, [lang.tor[vin[1]]], UnaryOps.RECIP))
         lang.ins.append(AssemblyInstruction(UOps.ALU, out, [lang.tor[vin[0]], tmp], BinaryOps.MUL))
