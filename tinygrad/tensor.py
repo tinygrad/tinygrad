@@ -2424,7 +2424,7 @@ class Tensor:
     ```
     """
     assert dtypes.is_unsigned(self.dtype) and isinstance(x, int) and x >= 0, f"not supported {self.dtype=} {x=}"
-    return self.div(2 ** x)
+    return self.div(2 ** x, upcast=False)
 
   def pow(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
