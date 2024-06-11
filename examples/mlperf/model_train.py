@@ -534,8 +534,8 @@ def train_unet3d():
         eval_loss.append(eval_loss_value)
         scores.append(score)
 
-      scores = Tensor.mean(Tensor.stack(scores, dim=0), axis=0).numpy()
-      eval_loss = Tensor.mean(Tensor.stack(eval_loss, dim=0), axis=0).numpy()
+      scores = Tensor.mean(Tensor.stack(*scores, dim=0), axis=0).numpy()
+      eval_loss = Tensor.mean(Tensor.stack(*eval_loss, dim=0), axis=0).numpy()
 
       l1_dice, l2_dice = scores[0][-2], scores[0][-1]
       mean_dice = (l2_dice + l1_dice) / 2
