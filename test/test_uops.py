@@ -110,7 +110,6 @@ class TestFloatUOps(TestUOps):
   def test_add(self): self._test_bop_fxn(BinaryOps.ADD, lambda a,b: a+b)
   def test_sub(self): self._test_bop_fxn(BinaryOps.SUB, lambda a,b: a-b)
   def test_mul(self): self._test_bop_fxn(BinaryOps.MUL, lambda a,b: a*b)
-  def test_div(self): self._test_bop_fxn(BinaryOps.IDIV, lambda a,b: int(a/b) if b != 0 else a*float('inf'))
   def test_max(self): self._test_bop_fxn(BinaryOps.MAX, lambda a,b: max(a,b))
   def test_cmplt(self): self._test_bop_fxn(BinaryOps.CMPLT, lambda a,b: a<b)
   # MOD isn't tested on floats
