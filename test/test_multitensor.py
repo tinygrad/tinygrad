@@ -504,11 +504,12 @@ class TestMultiTensor(unittest.TestCase):
       t_none.assign(t_zero)
 
   def test_dropout_on_shard(self):
-    Tensor.training = True
-    X = Tensor.ones(256).to(devices_2)
-    output = X.dropout(0.5)
-    output.numpy()
-    Tensor.training = False
+    with Tensor.train():
+      X = Tensor.ones(256).to(devices_2)
+      output = X.dropout(0.5).numpy()
+      unique, counts = np.unique(output, return_counts=True)
+      assert set(unique) == {0, 2}, unique
+      assert 100 < counts[0] < 156, counts[0]
 
   def test_broadcast_const(self):
     devices = (d0, d1, d2, d3)

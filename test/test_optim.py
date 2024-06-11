@@ -46,7 +46,8 @@ class TestOptim(unittest.TestCase):
   def setUp(self):
     self.old_training = Tensor.training
     Tensor.training = True
-  def tearDown(self): Tensor.training = self.old_training
+  def tearDown(self):
+    Tensor.training = self.old_training
 
   def _test_optim(self, tinygrad_optim, torch_optim, steps, opts, atol, rtol):
     for x,y in zip(step(Tensor, tinygrad_optim, steps, **opts),
