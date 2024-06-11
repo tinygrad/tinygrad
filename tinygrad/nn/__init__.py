@@ -2,7 +2,7 @@ import math
 from typing import Optional, Union, Tuple, cast
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod
-from tinygrad.nn import optim, state  # noqa: F401
+from tinygrad.nn import optim, state, datasets  # noqa: F401
 
 class BatchNorm2d:
   """

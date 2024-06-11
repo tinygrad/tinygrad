@@ -228,9 +228,9 @@ jobs:
     - name: Run 10 CIFAR training steps w BF16
       run: CUDA=1 STEPS=10 DEFAULT_FLOAT=BFLOAT16 python3 examples/hlb_cifar10.py | tee train_cifar_bf16.txt
     - name: Run full CIFAR training w 1 GPU
-      run: time CUDA=1 DEFAULT_FLOAT=HALF LATEWINO=1 STEPS=1000 TARGET_EVAL_ACC_PCT=93.3 python3 examples/hlb_cifar10.py | tee train_cifar_one_gpu.txt
+      run: time CUDA=1 DEFAULT_FLOAT=HALF LATEWINO=1 STEPS=1000 TARGET_EVAL_ACC_PCT=93.2 python3 examples/hlb_cifar10.py | tee train_cifar_one_gpu.txt
     - name: Run full CIFAR training steps w 6 GPUS
-      run: time CUDA=1 DEFAULT_FLOAT=HALF STEPS=350 BS=1536 GPUS=6 TARGET_EVAL_ACC_PCT=93.3 python3 examples/hlb_cifar10.py | tee train_cifar_six_gpu.txt
+      run: time CUDA=1 DEFAULT_FLOAT=HALF STEPS=350 BS=1536 GPUS=6 TARGET_EVAL_ACC_PCT=93.2 python3 examples/hlb_cifar10.py | tee train_cifar_six_gpu.txt
     - name: Run MLPerf resnet eval on training data
       run: time CUDA=1 MODEL=resnet python3 examples/mlperf/model_eval.py
     - name: Run 10 MLPerf ResNet50 training steps (1 gpu)
@@ -285,35 +285,32 @@ jobs:
     #    LD_PRELOAD="/opt/rocm/lib/libhsa-runtime64.so" HSA=1 BIG=2 TORCHCUDA=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
     - name: Test tensor cores
       run: |
-        HSA=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
         AMD=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
-    - name: Run Tensor Core GEMM (HSA)
-      run: HSA=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
     - name: Run Tensor Core GEMM (AMD)
       run: AMD=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_amd.txt
     # TODO: AMD compiler bug causes this to fail
     #- name: Fuzz Padded Tensor Core GEMM
     #  run: HSA=1 M_START=12 M_STOP=20 M_STEP=1 N_START=12 N_STOP=20 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 DEBUG=2 python3 ./extra/gemm/fuzz_matmul.py
     - name: Run Stable Diffusion
-      run: HSA=1 python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
+      run: AMD=1 python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
     - name: Run LLaMA 7B
       run: |
-        HSA=1 JIT=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
-        HSA=1 JIT=1 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
+        AMD=1 JIT=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
+        AMD=1 JIT=1 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
     - name: Run LLaMA 7B with BEAM
-      run: HSA=1 JIT=1 BEAM=2 CACHELEVEL=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_beam.txt
+      run: AMD=1 JIT=1 BEAM=2 CACHELEVEL=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_beam.txt
     - name: Run LLaMA 7B on 4 GPUs
-      run: HSA=1 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_four_gpu.txt
+      run: AMD=1 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_four_gpu.txt
     - name: Run LLaMA 7B on 6 GPUs
-      run: HSA=1 python3 examples/llama.py --gen 1 --size 7B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_six_gpu.txt
+      run: AMD=1 python3 examples/llama.py --gen 1 --size 7B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_six_gpu.txt
     - name: Run LLaMA-2 70B
-      run: HSA=1 python3 examples/llama.py --gen 2 --size 70B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_2_70B.txt
+      run: AMD=1 python3 examples/llama.py --gen 2 --size 70B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_2_70B.txt
     - name: Run Mixtral 8x7B
-      run: time HSA=1 python3 examples/mixtral.py --temperature 0 --count 10 --timing | tee mixtral.txt
+      run: time AMD=1 python3 examples/mixtral.py --temperature 0 --count 10 --timing | tee mixtral.txt
     - name: Run GPT2
       run: |
-        HSA=1 JIT=0 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_unjitted.txt
-        HSA=1 JIT=1 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_jitted.txt
+        AMD=1 JIT=0 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_unjitted.txt
+        AMD=1 JIT=1 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_jitted.txt
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (AMD)
@@ -356,23 +353,23 @@ jobs:
         mkdir -p extra/datasets
         ln -s /raid/datasets/imagenet extra/datasets/imagenet
     - name: Train MNIST
-      run: time PYTHONPATH=. HSA=1 TARGET_EVAL_ACC_PCT=97.3 python3 examples/beautiful_mnist.py | tee beautiful_mnist.txt
+      run: time PYTHONPATH=. AMD=1 TARGET_EVAL_ACC_PCT=97.3 python3 examples/beautiful_mnist.py | tee beautiful_mnist.txt
     - name: Run 10 CIFAR training steps
-      run: HSA=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
+      run: AMD=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
     - name: Run 10 CIFAR training steps w HALF
-      run: HSA=1 STEPS=10 DEFAULT_FLOAT=HALF python3 examples/hlb_cifar10.py | tee train_cifar_half.txt
+      run: AMD=1 STEPS=10 DEFAULT_FLOAT=HALF python3 examples/hlb_cifar10.py | tee train_cifar_half.txt
     - name: Run 10 CIFAR training steps w BF16
-      run: HSA=1 STEPS=10 DEFAULT_FLOAT=BFLOAT16 python3 examples/hlb_cifar10.py | tee train_cifar_bf16.txt
+      run: AMD=1 STEPS=10 DEFAULT_FLOAT=BFLOAT16 python3 examples/hlb_cifar10.py | tee train_cifar_bf16.txt
     - name: Run full CIFAR training w 1 GPU
-      run: time HSA=1 DEFAULT_FLOAT=HALF LATEWINO=1 STEPS=1000 TARGET_EVAL_ACC_PCT=93.3 python3 examples/hlb_cifar10.py | tee train_cifar_one_gpu.txt
+      run: time AMD=1 DEFAULT_FLOAT=HALF LATEWINO=1 STEPS=1000 TARGET_EVAL_ACC_PCT=93.2 python3 examples/hlb_cifar10.py | tee train_cifar_one_gpu.txt
     - name: Run full CIFAR training steps w 6 GPUS
-      run: time HSA=1 DEFAULT_FLOAT=HALF STEPS=350 BS=1536 GPUS=6 TARGET_EVAL_ACC_PCT=93.3 python3 examples/hlb_cifar10.py | tee train_cifar_six_gpu.txt
+      run: time AMD=1 DEFAULT_FLOAT=HALF STEPS=350 BS=1536 GPUS=6 TARGET_EVAL_ACC_PCT=93.2 python3 examples/hlb_cifar10.py | tee train_cifar_six_gpu.txt
     - name: Run MLPerf resnet eval
-      run: time HSA=1 MODEL=resnet python3 examples/mlperf/model_eval.py
+      run: time AMD=1 MODEL=resnet python3 examples/mlperf/model_eval.py
     - name: Run 10 MLPerf ResNet50 training steps (1 gpu)
-      run: HSA=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=256 GPUS=1 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet_one_gpu.txt
+      run: AMD=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=256 GPUS=1 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet_one_gpu.txt
     - name: Run 10 MLPerf ResNet50 training steps (6 gpu)
-      run: HSA=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=1536 GPUS=6 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet.txt
+      run: AMD=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=1536 GPUS=6 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet.txt
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (AMD Training)

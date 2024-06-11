@@ -260,20 +260,22 @@ class Kernel:
         shapes.append(self.output_shape)
         strides.append(special_strides)
 
-    # merge dimensions if we can, multi get_shape_strides
+    # merge dimensions if we can, multi _merge_dims
     # NOTE: this does not always preserve the reduce dimension
     # TODO: move this into shapetracker, with tests!
-    rets = [[(shapes[j][0], strides[j][0])] for j in range(len(shapes))]
+    # TODO: how does this work with multi-reduce?
+    rets = [[(s[0], st[0])] for s,st in zip(shapes, strides)]
     for i in range(1, len(shapes[0])):
       can_merge = []
-      for j in range(len(shapes)):
+      for s,st,ret in zip(shapes, strides, rets):
         # TODO: added the always mergeability of 1s, is this right? if so, add to shapetracker in the 1 case
-        can_merge.append(strides[j][i] is not None and ((strides[j][i] != 0 and rets[j][-1][1] == shapes[j][i]*cast(int, strides[j][i])) or (strides[j][i] == 0 and rets[j][-1][1] == 0))) # noqa: E501
+        si, sti, last_st = s[i], st[i], ret[-1][1]
+        can_merge.append((sti is not None) and ((sti != 0 and last_st == si*sti) or (sti == 0 and last_st == 0)))
       # more can merge than this
       mergeable = all(can_merge) and i != self.first_reduce
-      for j in range(len(shapes)):
-        if mergeable: rets[j][-1] = (rets[j][-1][0] * shapes[j][i], strides[j][i])
-        else: rets[j].append((shapes[j][i], strides[j][i]))
+      for j,(s,st) in enumerate(zip(shapes, strides)):
+        if mergeable: rets[j][-1] = (rets[j][-1][0] * s[i], st[i])
+        else: rets[j].append((s[i], st[i]))
 
     # do the reshapes
     for i,x in enumerate(rets[:len(self.sts)]): self.sts[i] = self.sts[i].reshape(tuple([y[0] for y in x]))
@@ -382,7 +384,7 @@ class Kernel:
         return True
     return False
 
-  def apply_tensor_cores(self, use_tensor_cores=1, extra_opts:Optional[List[Opt]]=None, axis:int=0, tc_opt:int=getenv("TC_OPT")) -> bool:
+  def apply_tensor_cores(self, use_tensor_cores=1, extra_opts:Optional[List[Opt]]=None, axis:int=0, tc_opt:Optional[int]=None) -> bool:
     """ Attempts to apply a tensor core optimization to the kernel.  If one exists and applies properly, return true, otherwise return false.
     Tensor cores are optimized instructions that matrix multiply-accumulate across a wave of threads: D(M, N) = A(M, K) * B(K, N) + C(M, N).
 
@@ -397,6 +399,7 @@ class Kernel:
       1: allows kernels with multiple reduce axes and also multiplication of UnaryOps.CAST'd buffers
       2: allows kernels with M, N, K axes that are not multiples of the tensor core dimensions by applying padding those axes as needed
     """
+    if tc_opt is None: tc_opt = self.opts.tc_opt
     if not self.opts.tensor_cores and use_tensor_cores != 2: return False
     try: # check TC first and apply hand-coded opts if successful
       self.apply_opt(Opt(OptOps.TC, axis, tc_opt))
@@ -429,7 +432,7 @@ class Kernel:
     if opt.op is OptOps.TC:
       check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: things like PADTO might be fine
       check(opt.axis is not None and opt.amt is not None, "tensor core opts must have an axis and amt")
-      check((use_tensor_cores:=getenv("TC", 1)) == 2 or len(self.opts.tensor_cores) > 0, "must have tensor cores or TC=2")
+      check((use_tensor_cores:=self.opts.tc) == 2 or len(self.opts.tensor_cores) > 0, "must have tensor cores or TC=2")
       check(self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), cast(int, opt.amt)), "no tensor core available")
       self.applied_opts.append(opt)
       return

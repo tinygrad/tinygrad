@@ -9,7 +9,7 @@ from tinygrad.device import Compiled, Compiler, Allocator
 from tinygrad.codegen.uops import UOpGraph, UOps
 from tinygrad.ops import BinaryOps, TernaryOps, exec_alu
 from tinygrad.renderer import Renderer
-from tinygrad.renderer.cstyle import CUDARenderer, MetalRenderer, HIPRenderer
+from tinygrad.renderer.cstyle import CUDARenderer, MetalRenderer, AMDRenderer
 
 def _load(m, i):
   if i < 0 or i >= len(m): raise IndexError(f"load out of bounds, size is {len(m)} and access is {i}")
@@ -17,7 +17,7 @@ def _load(m, i):
 
 def load(inp, j=0):
   if len(inp) == 4: return [_load(m, x+j) if gate else default for m,x,gate,default in zip(*inp)]
-  else: return [_load(m, x+j) for m,x in zip(inp[0], inp[1])]
+  return [_load(m, x+j) for m,x in zip(inp[0], inp[1])]
 
 def _store(m, i, v):
   if i < 0 or i >= len(m): raise IndexError(f"store out of bounds, size is {len(m)}, access is {i}, value is {v}")
@@ -154,7 +154,7 @@ class PythonProgram:
             # (i, j), C, D (2 elements on 32 threads): row major same as A/B
             def c_map(lane, elem): return (elem + ((lane%2)*2) + ((lane//8)%2)*4, ((lane//2)%4) + (lane//16)*4)
             ul[i] = wmma_helper(32, 8, 2, 2, 2, a_b_elem, a_b_elem, c_map)
-          elif arg[5] == "HSA":
+          elif arg[5] == "AMD":
             # A (16 elements on 32 threads): col major, lane 16-32 == lane 0-15
             def a_elem(x, i, j, goff):
               assert x[i][goff+j] == x[i][goff+j+16], "warp elements not duplicated properly across lanes"
@@ -184,7 +184,7 @@ class PythonRenderer(Renderer):
   device = "PYTHON"
   def __init__(self):
     if getenv("EMULATE_METAL"): self.device, self.tensor_cores = "METAL", MetalRenderer.tensor_cores
-    if getenv("EMULATE_HSA"): self.device, self.tensor_cores = "HSA", HIPRenderer.tensor_cores
+    if getenv("EMULATE_AMD"): self.device, self.tensor_cores = "AMD", AMDRenderer.tensor_cores
     if getenv("EMULATE_CUDA"): self.device, self.tensor_cores = "CUDA", CUDARenderer.tensor_cores
 
   def render(self, name:str, uops:UOpGraph) -> str:

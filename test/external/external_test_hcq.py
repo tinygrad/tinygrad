@@ -28,7 +28,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.addr = struct.pack("QQ", TestHCQ.b.lazydata.buffer._buf.va_addr, TestHCQ.a.lazydata.buffer._buf.va_addr)
     TestHCQ.addr2 = struct.pack("QQ", TestHCQ.a.lazydata.buffer._buf.va_addr, TestHCQ.b.lazydata.buffer._buf.va_addr)
     TestHCQ.kernargs_off = TestHCQ.runner.clprg.kernargs_offset
-    TestHCQ.kernargs_size = TestHCQ.runner.clprg.kernargs_segment_size
+    TestHCQ.kernargs_size = TestHCQ.runner.clprg.kernargs_alloc_size
     ctypes.memmove(TestHCQ.d0.kernargs_ptr+TestHCQ.kernargs_off, TestHCQ.addr, len(TestHCQ.addr))
     ctypes.memmove(TestHCQ.d0.kernargs_ptr+TestHCQ.kernargs_size+TestHCQ.kernargs_off, TestHCQ.addr2, len(TestHCQ.addr2))
 
