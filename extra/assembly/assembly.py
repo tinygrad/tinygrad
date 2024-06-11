@@ -68,7 +68,7 @@ class AssemblyLanguage:
 
   render_ops: Any = { Variable: lambda self, ops, ctx: ctx.tor[self], NumNode: lambda self, ops, ctx: ctx.render_numnode(self.b),
                  MulNode: lambda self, ops, ctx: ctx.render_alu(BinaryOps.MUL, self.a.render(ops, ctx), self.b),
-                 DivNode: lambda self, ops, ctx: ctx.render_alu(BinaryOps.DIV, self.a.render(ops, ctx), self.b),
+                 DivNode: lambda self, ops, ctx: ctx.render_alu(BinaryOps.IDIV, self.a.render(ops, ctx), self.b),
                  ModNode: lambda self, ops, ctx: ctx.render_alu(BinaryOps.MOD, self.a.render(ops, ctx), self.b),
                  LtNode: lambda self, ops, ctx: ctx.render_alu(BinaryOps.CMPLT, self.a.render(ops, ctx), self.b, dtype=dtypes.bool),
     SumNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.render_alu(BinaryOps.ADD, a, b.render(ops,ctx)), self.nodes[1:], self.nodes[0].render(ops,ctx)),
@@ -146,7 +146,7 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
         pred_reg = lang.newreg((u, 'pred'), dtype=dtypes.bool)
         lang.ins.append(AssemblyInstruction(UOps.ALU, pred_reg, [lang.tor[x] for x in vin], args))
         lang.ins.append(AssemblyInstruction(UOps.CAST, out, [pred_reg], args))
-      elif args == BinaryOps.DIV and lang.no_div:
+      elif args == BinaryOps.IDIV and lang.no_div:
         tmp = lang.newreg((u, "rcp"))
         lang.ins.append(AssemblyInstruction(UOps.ALU, tmp, [lang.tor[vin[1]]], UnaryOps.RECIP))
         lang.ins.append(AssemblyInstruction(UOps.ALU, out, [lang.tor[vin[0]], tmp], BinaryOps.MUL))

@@ -65,7 +65,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
     UnaryOps.SQRT: lambda x,dtype: f"tl.sqrt({x})",
     UnaryOps.NEG: lambda x,dtype: f"-{x}",
     BinaryOps.ADD: lambda x,y,dtype: f"({x}+{y})", BinaryOps.SUB: lambda x,y,: f"({x}-{y})",
-    BinaryOps.MUL: lambda x,y,dtype: f"({x}*{y})", BinaryOps.DIV: lambda x,y,: f"({x}/{y})" if y != '0.0' else f"{x}*tl.where({x}==0.0, float('nan'), float('inf'))",
+    BinaryOps.MUL: lambda x,y,dtype: f"({x}*{y})", BinaryOps.IDIV: lambda x,y,: f"({x}//{y})",
     BinaryOps.MAX: lambda x,y,dtype: f"tl.maximum({x},{y})",
     BinaryOps.CMPLT: lambda x,y,dtype: f"({x}<{y})",
     BinaryOps.MOD: lambda x,y,dtype: f"tl.abs({x})%tl.abs({y})*tl.where({x}<0,-1,1)",
@@ -82,7 +82,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
     elif uop == UOps.ALU:
       assert dtype is not None
       val = code_for_op[args](*[r[x] for x in vin])
-      if child_count[u] <=1 or dtypes.is_int(dtype): r[u] = int_div(*[r[x] for x in vin]) if args == BinaryOps.DIV and dtypes.is_int(dtype) else val
+      if child_count[u] <=1 or dtypes.is_int(dtype): r[u] = int_div(*[r[x] for x in vin]) if args == BinaryOps.IDIV and dtypes.is_int(dtype) else val
       else: kk(f"{ssa(u, 'alu')} = ({val})")
     elif uop == UOps.LOAD:
       assert dtype is not None
