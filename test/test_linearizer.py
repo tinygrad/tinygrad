@@ -318,6 +318,36 @@ class TestLinearizer(unittest.TestCase):
     mean = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(15, 25, 35), strides=(875, 35, 1), offset=0, mask=None, contiguous=True),)))),), arg=(0, 1, 2)), LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=7.619047619047618e-05, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(15, 25, 35), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),))))), arg=None),), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 1, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=True),)))) # noqa: E501
     x = Tensor.randn(15, 25, 35).realize()
     helper_linearizer_ast((std,mean), [x], wanna_output=[x.numpy().std(), x.numpy().mean()])
+  
+  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI is really slow here")
+  def test_softmax_multireduce(self):
+    x = Tensor.rand(4, 32).realize()
+    x_ast = LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker.from_shape((4,32))))
+    max_x = LazyOp(op=ReduceOps.MAX, src=(x_ast,), arg=(1,))
+    centered_x = LazyOp(op=BinaryOps.SUB, src=(x_ast, max_x))
+    exp_x = LazyOp(op=UnaryOps.EXP2, src=(centered_x,))
+    sum_exp_x = LazyOp(op=ReduceOps.SUM, src=(exp_x,), arg=(1,))
+    y = LazyOp(op=BinaryOps.DIV, src=(exp_x, sum_exp_x))
+    y_reduced = LazyOp(op=ReduceOps.SUM, src=(y,), arg=(1,))
+    ast = LazyOp(op=BufferOps.STORE, src=(y_reduced,), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape((4,1))))
+    expected = ((np_exp2:=np.exp2(x.numpy() - x.numpy().max(axis=-1, keepdims=True)))/np_exp2.sum(axis=-1, keepdims=True)).sum(axis=-1)
+    helper_linearizer_ast((ast,), [x], wanna_output=[expected])
+
+  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI is really slow here")
+  def test_softmax_multireduce_multiout(self):
+    x = Tensor.rand(4, 32).realize()
+    x_ast = LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=3, dtype=dtypes.float, st=ShapeTracker.from_shape((4,32))))
+    max_x = LazyOp(op=ReduceOps.MAX, src=(x_ast,), arg=(1,))
+    exp_x = LazyOp(op=UnaryOps.EXP2, src=(LazyOp(op=BinaryOps.SUB, src=(x_ast, max_x)),))
+    sum_exp_x = LazyOp(op=ReduceOps.SUM, src=(exp_x,), arg=(1,))
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.DIV, src=(exp_x, sum_exp_x)),), arg=(1,)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape((4,1)))) # noqa: E501
+    max_x_ast = LazyOp(op=BufferOps.STORE, src=(max_x,), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker.from_shape((4,1))))
+    sum_exp_x_ast = LazyOp(op=BufferOps.STORE, src=(sum_exp_x,), arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker.from_shape((4,1))))
+    expected = [
+      ((np_exp2:=np.exp2(x.numpy()-(np_max_x:=x.numpy().max(axis=-1,keepdims=True))))/(sum_exp_x:=np_exp2.sum(axis=-1,keepdims=True))).sum(axis=-1,),
+      np_max_x.reshape(-1), sum_exp_x.reshape(-1)
+    ]
+    helper_linearizer_ast((ast,max_x_ast,sum_exp_x_ast), [x], wanna_output=expected)
 
   def test_load_dedup(self):
     # for different leaves in the AST, the same loads may occur.
