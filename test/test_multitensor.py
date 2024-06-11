@@ -48,6 +48,11 @@ class TestMultiTensor(unittest.TestCase):
       assert lb.shape == (128,)
     (X + X).realize()
 
+  def test_sharded_arange(self):
+    sharded_arange = Tensor.arange(1000).shard(devices_2, 0)
+    sharded_arange.realize()
+    np.testing.assert_equal(sharded_arange.numpy(), np.arange(1000))
+
   def test_shard_no_recompile(self):
     X = Tensor.ones(256).contiguous().realize()
     X.shard_((d0, d1), 0)
