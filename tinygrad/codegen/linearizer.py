@@ -378,7 +378,7 @@ class Linearizer(Kernel):
       self.buf_uops.append(self.uops.add(UOps.DEFINE_LOCAL, PtrDType(temp_dtype), (), ("temp", self.sts[-1].size)))
 
     # kernel name (before late upcast)
-    self.name = ("r" if len(self.reduceops)>0 else ("C" if all(x.op in BufferOps for x in self.lazyops) else "E")) + \
+    self.name = ("r" if self.reduceop else ("C" if all(x.op in BufferOps for x in self.lazyops) else "E")) + \
                  (f"{len(self.outbufs)}_" if len(self.outbufs) > 1 else "_") + \
                  colored('_', 'BLACK').join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
 
@@ -422,9 +422,6 @@ class Linearizer(Kernel):
     for reduceop in self.reduceops:
       self.render_block((reduceop, ), global_idxs, local_idxs, upcast_idxs, full_upcast_idxs, alias_buf_idxs, loaded_buffers, accs)
 
-    # all local indices which were used for group_for_reduce are not valid any more and should be replaced with fake NumNode(0), since they have
-    # been rewritten with fake end_local_idxs.
-    local_idxs[:], upcast_idxs[:] =  local_idxs[:self.local_dims] + [NumNode(0) for _ in range(self.group_for_reduces)], upcast_idxs
     self.render_block(self.ast, global_idxs, local_idxs, upcast_idxs, full_upcast_idxs, alias_buf_idxs, loaded_buffers, accs)
 
     # maybe graph the uops
@@ -449,6 +446,8 @@ class Linearizer(Kernel):
       # TODO: delete render_reduceop and move the logic for group_for_reduces to Block
       nlidx, nuidx = \
         self.render_reduceop((r:=reduceops[0]),accs,loaded_buffers,global_idxs,local_idxs,upcast_idxs,full_upcast_idxs,reduce_idxs,alias_buf_idxs[r])
+      # all local indices which were used for group_for_reduce are not valid any more and should be replaced with fake NumNode(0), since they have
+      # been rewritten with fake end_local_idxs.
       if r is self.reduceops[-1]: local_idxs[:], upcast_idxs[:] = nlidx, nuidx
       return accs[r]
 
