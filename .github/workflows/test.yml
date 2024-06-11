@@ -484,13 +484,10 @@ jobs:
       - name: Verify AMD autogen
         if: matrix.backend == 'amd'
         run: |
-          cp tinygrad/runtime/autogen/hsa.py /tmp/hsa.py.bak
           cp tinygrad/runtime/autogen/comgr.py /tmp/comgr.py.bak
           cp tinygrad/runtime/autogen/amd_gpu.py /tmp/amd_gpu.py.bak
-          ./autogen_stubs.sh hsa
           ./autogen_stubs.sh comgr
           ./autogen_stubs.sh amd
-          diff /tmp/hsa.py.bak tinygrad/runtime/autogen/hsa.py
           diff /tmp/comgr.py.bak tinygrad/runtime/autogen/comgr.py
           diff /tmp/amd_gpu.py.bak tinygrad/runtime/autogen/amd_gpu.py
       - name: Run pytest (not cuda or amd)
