@@ -52,45 +52,52 @@ class HCQGraph(MultiGraphRunner):
     self.kickoff_value = 0
     self.graph_timeline = {dev: 0 for dev in self.devices}
 
+    signal_scheduling = {}
     self.exec_ptrs: Dict[int, Tuple[Any, int]] = {}
     self.copy_to_devs: Dict[Compiled, Set[Compiled]] = {dev: set() for dev in self.devices}
 
+    for j,ji in enumerate(self.jit_cache):
+      if isinstance(ji.prg, CompiledRunner):
+        deps = self.access_resources(ji.bufs[(outs:=ji.prg.p.outcount):], ji.bufs[:outs], (self.comp_signal[ji.prg.device], sig_val:=j+1))
+        deps = [x for x in deps if id(x[0]) != id(self.comp_signal[ji.prg.device])]
+
+        # NV should self wait if we have any other dependecies which brake the chained execution.
+        if ji.prg.device.dname.startswith("NV") and (len(deps) >= 1 or id(deps[0][1]) != id(self.comp_signal[ji.prg.device])):
+          deps.append((self.comp_signal[ji.prg.device], self.comp_signal_val[ji.prg.device]))
+
+        signal_scheduling[j] = (deps, None) # output signal
+        self.comp_signal_val[ji.prg.device] = sig_val
+      elif isinstance(ji.prg, BufferXfer):
+        dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
+        deps = self.access_resources([src], [dest], (self.copy_signal[Device[src.device]], sig_val:=j+1))
+        deps = [x for x in deps if id(x[0]) != id(self.copy_signal[Device[src.device]])]
+        signal_scheduling[j] = (deps, j+1) # output signal
+        self.copy_signal_val[Device[src.device]] = sig_val
+        self.copy_to_devs[Device[dest.device]].add(Device[src.device])
+      for sig,val in deps: signal_scheduling[val - 1] = (signal_scheduling[val - 1][0], val) # set need output for signal, as it has deps
+
+    # Building hardware queues
     for dev in self.devices:
       self.comp_queues[dev].memory_barrier().wait(dev.timeline_signal, dev.timeline_value - 1).wait(self.kickoff_signal, self.kickoff_value)
       self.copy_queues[dev].wait(dev.timeline_signal, dev.timeline_value - 1).wait(self.kickoff_signal, self.kickoff_value)
 
     for j,ji in enumerate(self.jit_cache):
+      deps, signal_value = signal_scheduling[j]
+
       if isinstance(ji.prg, CompiledRunner):
-        exec_params = {}
-        deps = self.access_resources(ji.bufs[(outs:=ji.prg.p.outcount):], ji.bufs[:outs], (self.comp_signal[ji.prg.device], sig_val:=j+1))
-        deps = [x for x in deps if id(x[0]) != id(self.comp_signal[ji.prg.device])]
-
-        # On NV, to synchronize kernel execution, we must either issue a wait or chain executions to schedule them in order.
-        # Chaining executions is preferred when possible, as it is faster.
-        if ji.prg.device.dname.startswith("NV"):
-          if len(deps) == 0 and self.comp_signal_val[ji.prg.device] > 0:
-            exec_params['chain_exec_ptr'] = self.exec_ptrs[self.comp_signal_val[ji.prg.device] - 1][1]
-          else: deps.append((self.comp_signal[ji.prg.device], self.comp_signal_val[ji.prg.device]))
-
         for sig, val in deps: self.comp_queues[ji.prg.device].wait(sig, val)
-
-        self.exec_ptrs[j] = (self.comp_queues[ji.prg.device], len(self.comp_queues[ji.prg.device]))
         self.comp_queues[ji.prg.device].exec(ji.prg.clprg, self.kargs_addrs[j], *ji.prg.p.launch_dims(var_vals),
-                                             signal=self.comp_signal[ji.prg.device], signal_value=sig_val, **exec_params)
-        self.comp_signal_val[ji.prg.device] = sig_val
+                                             signal=self.comp_signal[ji.prg.device] if signal_value is not None else None, signal_value=signal_value)
+        self.exec_ptrs[j] = (self.comp_queues[ji.prg.device], len(self.comp_queues[ji.prg.device]) - 1)
       elif isinstance(ji.prg, BufferXfer):
         dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
         Device[src.device]._gpu_map(dest._buf) #type: ignore
 
-        deps = self.access_resources([src], [dest], (self.copy_signal[Device[src.device]], sig_val:=j+1))
-        deps.append((self.copy_signal[Device[src.device]], self.copy_signal_val[Device[src.device]]))
-        self.copy_signal_val[Device[src.device]] = sig_val
-
         for sig,val in deps: self.copy_queues[Device[src.device]].wait(sig, val)
         self.copy_queues[Device[src.device]].copy(dest._buf.va_addr, src._buf.va_addr, dest.nbytes) \
-                                            .signal(self.copy_signal[Device[src.device]], sig_val)
-        self.copy_to_devs[Device[dest.device]].add(Device[src.device])
+                                            .signal(self.copy_signal[Device[src.device]], signal_value)
 
+    # Finilize queues
     for dev in self.devices:
       if self.copy_signal_val[dev] > 0: self.comp_queues[dev].wait(self.copy_signal[dev], self.copy_signal_val[dev])
       for dep_dev in self.copy_to_devs[dev]: self.comp_queues[dev].wait(self.copy_signal[dep_dev], self.copy_signal_val[dep_dev])
