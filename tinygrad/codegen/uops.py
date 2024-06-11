@@ -259,6 +259,10 @@ class UOpGraph:
   def vars(self) -> List[Variable]: return [x.arg for x in self.uops if x.uop is UOps.DEFINE_VAR]
   def globals(self) -> List[Tuple[int, bool]]: return [x.arg for x in self.uops if x.uop is UOps.DEFINE_GLOBAL]
 
+  def recursive_add(self, x):
+    self.add(x.uop, x.dtype, x.vin, x.arg)
+    for c in x.vin: self.recursive_add(c)
+
   @property
   def uops(self):
     if self._uops is None: self.linearize()
