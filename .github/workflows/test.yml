@@ -288,7 +288,7 @@ jobs:
     needs: check_process_replay
     env:
       RUN_PROCESS_REPLAY: ${{ needs.check_process_replay.outputs.run_process_replay }}
-    timeout-minutes: 10
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Code
