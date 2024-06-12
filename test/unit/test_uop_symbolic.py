@@ -6,6 +6,7 @@ import unittest, pickle
 
 # *** fake symobilc uops ***
 
+from tinygrad.helpers import DEBUG
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.codegen.uops import UOp, UOps, UOpGraph
 from tinygrad.ops import BinaryOps
@@ -16,6 +17,7 @@ def render(self) -> str:
   glbl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=(0,True))
   graph = UOpGraph([UOp(UOps.STORE, None, (glbl, UOp.const(dtypes.int, 0), self))])
   graph.linearize()
+  if DEBUG>=5: graph.print()
   from tinygrad.renderer.cstyle import CStyleLanguage
   class TestRenderer(CStyleLanguage):
     code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.DIV: lambda a,b,dtype: f"({a}//{b})"}
@@ -304,7 +306,6 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Node.sum([NumNode(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) // 40, -1, 9, "(-1+b)")
 
   # TODO: this one should already work!
-  @unittest.expectedFailure
   def test_mul_div(self):
     self.helper_test_variable((Variable("a", 0, 10)*4)//4, 0, 10, "a")
 
