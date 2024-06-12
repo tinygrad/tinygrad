@@ -1,7 +1,6 @@
 import os, time, math, functools
 from pathlib import Path
 from tqdm import tqdm
-import numpy as np
 import multiprocessing
 
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
