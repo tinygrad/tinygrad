@@ -325,7 +325,7 @@ class TestLinearizer(unittest.TestCase):
     centered_x = LazyOp(op=BinaryOps.SUB, src=(x_ast, max_x))
     exp_x = LazyOp(op=UnaryOps.EXP2, src=(centered_x,))
     sum_exp_x = LazyOp(op=ReduceOps.SUM, src=(exp_x,), arg=(1,))
-    y = LazyOp(op=BinaryOps.DIV, src=(exp_x, sum_exp_x))
+    y = LazyOp(op=BinaryOps.MUL, src=(exp_x, LazyOp(op=UnaryOps.RECIP, src=(sum_exp_x,))))
     y_reduced = LazyOp(op=ReduceOps.SUM, src=(y,), arg=(1,))
     ast = LazyOp(op=BufferOps.STORE, src=(y_reduced,), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape((4,1))))
     expected = ((np_exp2:=np.exp2(x.numpy() - x.numpy().max(axis=-1, keepdims=True)))/np_exp2.sum(axis=-1, keepdims=True)).sum(axis=-1)
@@ -338,7 +338,7 @@ class TestLinearizer(unittest.TestCase):
     max_x = LazyOp(op=ReduceOps.MAX, src=(x_ast,), arg=(1,))
     exp_x = LazyOp(op=UnaryOps.EXP2, src=(LazyOp(op=BinaryOps.SUB, src=(x_ast, max_x)),))
     sum_exp_x = LazyOp(op=ReduceOps.SUM, src=(exp_x,), arg=(1,))
-    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.DIV, src=(exp_x, sum_exp_x)),), arg=(1,)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape((4,1)))) # noqa: E501
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.MUL, src=(exp_x, LazyOp(op=UnaryOps.RECIP, src=(sum_exp_x,)))),), arg=(1,)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape((4,1)))) # noqa: E501
     max_x_ast = LazyOp(op=BufferOps.STORE, src=(max_x,), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker.from_shape((4,1))))
     sum_exp_x_ast = LazyOp(op=BufferOps.STORE, src=(sum_exp_x,), arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker.from_shape((4,1))))
     expected = [
