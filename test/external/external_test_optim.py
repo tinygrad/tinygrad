@@ -104,7 +104,8 @@ class ExternalTestOptim(unittest.TestCase):
   def setUp(self):
     self.old_training = Tensor.training
     Tensor.training = True
-  def tearDown(self): Tensor.training = self.old_training
+  def tearDown(self):
+    Tensor.training = self.old_training
 
   def _test_optim(self, tinygrad_optim, tensorflow_optim, steps, opts, atol, rtol, tiny_sched=None, tf_sched=None, schedopts=None, do_optim=True):
     for x,y in zip(step(tinygrad_optim, steps=steps, kwargs=opts, scheduler=tiny_sched, schedopts=schedopts, do_optim=do_optim),
