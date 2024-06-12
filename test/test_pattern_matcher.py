@@ -131,12 +131,12 @@ class TestPatternMatcher(unittest.TestCase):
     c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
     c2 = UOp(UOps.CONST, dtypes.float, arg=2.0)
     c3 = UOp(UOps.CONST, dtypes.float, arg=3.0)
-    c5 = UOp(UOps.ALU, dtypes.float, (c1,), UnaryOps.NEG)
-    c6 = UOp(UOps.ALU, dtypes.float, (c1,c2), BinaryOps.ADD)
-    c7 = UOp(UOps.ALU, dtypes.float, (c1,c2,c3), TernaryOps.MULACC)
-    self.assertEqual(matcher.rewrite(c5), c5)
-    self.assertEqual(matcher.rewrite(c6), None)
-    self.assertEqual(matcher.rewrite(c7), c7)
+    c4 = UOp(UOps.ALU, dtypes.float, (c1,), UnaryOps.NEG)
+    c5 = UOp(UOps.ALU, dtypes.float, (c1,c2), BinaryOps.ADD)
+    c6 = UOp(UOps.ALU, dtypes.float, (c1,c2,c3), TernaryOps.MULACC)
+    self.assertEqual(matcher.rewrite(c4), c4)
+    self.assertEqual(matcher.rewrite(c5), None)
+    self.assertEqual(matcher.rewrite(c6), c6)
 
   @unittest.skip("no longer supported")
   def test_rewrite_graph_folds(self):
