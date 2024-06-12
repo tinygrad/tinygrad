@@ -318,12 +318,12 @@ class Linearizer(Kernel):
         for j in self.upcast_in_mid_reduce_axes:
           self.upcasted -= 1
           self.group_for_reduces += 1
-        reduce_buf_uop = self.buf_uops[-1]
+        reduce_buf_uop = self.buf_uops[out_buf]
         assert reduce_buf_uop is not None, "Local reduce buf must have been uoped at this point"
         fake_local_idxs = local_idxs[:self.local_dims] + [x*0 for x in local_idxs[self.local_dims:]]
-        stores = self.global_store(-1, fake_global_idxs+fake_local_idxs+fake_reduce_idxs+upcast_idxs, accs[reduceop])
+        stores = self.global_store(out_buf, fake_global_idxs+fake_local_idxs+fake_reduce_idxs+upcast_idxs, accs[reduceop])
         barrier = self.uops.add(UOps.BARRIER, None, tuple(stores))
-        accs[reduceop] = self.global_load(-1, fake_global_idxs+fake_local_idxs+fake_reduce_idxs+upcast_idxs, barrier=barrier)
+        accs[reduceop] = self.global_load(out_buf, fake_global_idxs+fake_local_idxs+fake_reduce_idxs+upcast_idxs, barrier=barrier)
     return local_idxs[:self.local_dims] + [NumNode(0) for _ in range(self.group_for_reduces)], upcast_idxs
 
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
