@@ -252,7 +252,7 @@ class tinytqdm:
         self.update(1)
     finally: self.update(close=True)
   def update(self, n:int=0, close:bool=False):
-    self.n, self.i, close = self.n+n, self.i+1, close
+    self.n, self.i = self.n+n, self.i+1
     if (self.i % self.skip != 0 and not close) or self.dis: return
     prog, dur, term = self.n/self.t if self.t else -1, time.perf_counter()-self.st, shutil.get_terminal_size().columns
     if self.i/dur > self.rate and self.i: self.skip = max(int(self.i/dur)//self.rate,1) if self.i else 1
