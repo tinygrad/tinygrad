@@ -195,38 +195,20 @@ def diskcache(func):
   return wrapper
 
 # *** http support ***
-from tqdm import tqdm
+
 def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, allow_caching=not getenv("DISABLE_HTTP_CACHE")) -> pathlib.Path:
   if url.startswith(("/", ".")): return pathlib.Path(url)
   fp = pathlib.Path(name) if name is not None and (isinstance(name, pathlib.Path) or '/' in name) else pathlib.Path(_cache_dir) / "tinygrad" / "downloads" / (name if name else hashlib.md5(url.encode('utf-8')).hexdigest())  # noqa: E501
   if not fp.is_file() or not allow_caching:
     with urllib.request.urlopen(url, timeout=10) as r:
       assert r.status == 200
-      # total_length = int(r.headers.get('content-length', 0))
-      total_length = 0
+      total_length = int(r.headers.get('content-length', 0))
       progress_bar = tinytqdm(total=total_length, unit='B', unit_scale=True, desc=f"{url}: ")
       (path := fp.parent).mkdir(parents=True, exist_ok=True)
       with tempfile.NamedTemporaryFile(dir=path, delete=False) as f:
         while chunk := r.read(16384): progress_bar.update(f.write(chunk))
         f.close()
         progress_bar.update(close=True)
-        if (file_size:=os.stat(f.name).st_size) < total_length: raise RuntimeError(f"fetch size incomplete, {file_size} < {total_length}")
-        pathlib.Path(f.name).rename(fp)
-  return fp
-
-def fetch2(url:str, name:Optional[Union[pathlib.Path, str]]=None, allow_caching=not getenv("DISABLE_HTTP_CACHE")) -> pathlib.Path:
-  if url.startswith(("/", ".")): return pathlib.Path(url)
-  fp = pathlib.Path(name) if name is not None and (isinstance(name, pathlib.Path) or '/' in name) else pathlib.Path(_cache_dir) / "tinygrad" / "downloads" / (name if name else hashlib.md5(url.encode('utf-8')).hexdigest())  # noqa: E501
-  if not fp.is_file() or not allow_caching:
-    with urllib.request.urlopen(url, timeout=10) as r:
-      assert r.status == 200
-      total_length = int(r.headers.get('content-length', 0))
-      total_length = 0
-      progress_bar = tqdm(total=total_length, unit='B', unit_scale=True, desc=url)
-      (path := fp.parent).mkdir(parents=True, exist_ok=True)
-      with tempfile.NamedTemporaryFile(dir=path, delete=False) as f:
-        while chunk := r.read(16384): progress_bar.update(f.write(chunk))
-        f.close()
         if (file_size:=os.stat(f.name).st_size) < total_length: raise RuntimeError(f"fetch size incomplete, {file_size} < {total_length}")
         pathlib.Path(f.name).rename(fp)
   return fp
@@ -270,7 +252,7 @@ class tinytqdm:
         self.update(1)
     finally: self.update(close=True)
   def update(self, n:int=0, close:bool=False):
-    self.n, self.i, close = self.n+n, self.i+1, close or (self.n+n == self.t and self.t)
+    self.n, self.i, close = self.n+n, self.i+1, close
     if (self.i % self.skip != 0 and not close) or self.dis: return
     prog, dur, term = self.n/self.t if self.t else -1, time.perf_counter()-self.st, shutil.get_terminal_size().columns
     if self.i/dur > self.rate and self.i: self.skip = max(int(self.i/dur)//self.rate,1) if self.i else 1
