@@ -1006,9 +1006,9 @@ class Tensor:
     dim = self._resolve_dim(dim)
     index = index.to(self.device).transpose(0, dim).unsqueeze(-1)
     permarg = list(range(self.ndim))
-    permarg = permarg[1:dim] + [permarg[0]] + permarg[dim+1:] + [permarg[dim]] if dim != 0 else permarg[1:] + [permarg[0]]
-    return ((index == Tensor.arange(self.shape[dim], requires_grad=False, device=self.device)) * self.permute(*permarg).shrink(
-      tuple([*[(0,sh) for sh in index.shape[1:-1]], None])).unsqueeze(0)).sum(-1, acc_dtype=self.dtype).transpose(0, dim)
+    permarg = (permarg[1:dim] + [0] + permarg[dim+1:] + [dim]) if dim != 0 else (permarg[1:] + [0])
+    x = self.permute(*permarg).shrink(tuple((0,i) for i in index.shape[1:-1])+(None,)).unsqueeze(0)
+    return ((index == Tensor.arange(self.shape[dim], requires_grad=False, device=self.device)) * x).sum(-1, acc_dtype=self.dtype).transpose(0, dim)
 
   def cat(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
     """
