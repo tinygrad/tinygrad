@@ -401,10 +401,11 @@ class Linearizer(Kernel):
     accs: Dict[LazyOp, List[UOp]] = {}
 
     # render reduceops by depth
-    stores = []
     for reduceop in self.reduceops:
-      stores += self.render_block((reduceop, ), global_idxs, local_idxs, upcast_idxs, full_upcast_idxs, alias_buf_idxs, loaded_buffers, accs)
-    stores += self.render_block(self.ast, global_idxs, local_idxs, upcast_idxs, full_upcast_idxs, alias_buf_idxs, loaded_buffers, accs)
+      self.render_block((reduceop, ), global_idxs, local_idxs, upcast_idxs, full_upcast_idxs, alias_buf_idxs, loaded_buffers, accs)
+    stores = self.render_block(self.ast, global_idxs, local_idxs, upcast_idxs, full_upcast_idxs, alias_buf_idxs, loaded_buffers, accs)
+
+    # only the final stores should be needed here
     self.uops.multiadd(flatten(stores))
 
     # maybe graph the uops
