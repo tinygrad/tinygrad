@@ -132,7 +132,7 @@ class Linearizer(Kernel):
       ret.append(self.uops.add(UOps.GEP, localtype.scalar(), (self.load_cache[key],), rep_idx[dim]) if dim is not None else self.load_cache[key])
     return ret
 
-  def global_store(self, i:int, idxs:List[Node], store:List[UOp], barrier:Optional[UOp]=None) -> List[UOp]:
+  def global_store(self, i:int, idxs:List[Node], store:List[UOp]) -> List[UOp]:
     buf = self.bufs[i]
     buf_uop = self.buf_uops[i]
     assert buf_uop is not None, f"buffer {i} wasn't UOped"
@@ -164,10 +164,8 @@ class Linearizer(Kernel):
                       tuple(x.render(self.render_ops, self) for x in image_idx))
       else:
         rendered_idx = idx.render(self.render_ops, self)
-      if valid.min == 1: stores.append(self.uops.add(UOps.STORE, None, (buf_uop, rendered_idx, var) + \
-                                                     ((self.const(True, dtypes.bool), barrier,) if barrier else ())))
-      else: stores.append(self.uops.add(UOps.STORE, None, (buf_uop, rendered_idx, var, valid.render(self.render_ops, self)) \
-                                        + ((barrier,) if barrier else ())))
+      if valid.min == 1: stores.append(self.uops.add(UOps.STORE, None, (buf_uop, rendered_idx, var)))
+      else: stores.append(self.uops.add(UOps.STORE, None, (buf_uop, rendered_idx, var, valid.render(self.render_ops, self))))
     return stores
 
   # render loop
@@ -224,10 +222,10 @@ class Linearizer(Kernel):
                       global_idxs, local_idxs, upcast_idxs, full_upcast_idxs, reduce_idxs, alias_buf_idxs):
     fake_reduce_idxs = [x*0 for x in reduce_idxs]
     # reduce loop
-    loop_ctx = self.render_loop(reduce_idxs, self.reduceops.index(reduceop)*2+2)
+    loop_ctx = self.render_loop(reduce_idxs, (i:=self.reduceops.index(reduceop))*2+2)
 
     # define accumulator - modify idxs if necessary for TC
-    out_buf = -1 if self.group_for_reduces else 0
+    out_buf = -len(self.reduceops)+i if self.group_for_reduces else 0
     accs[reduceop] = self.global_load(out_buf, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop, loop_ctx=loop_ctx)
 
     # store local aliases
@@ -277,8 +275,7 @@ class Linearizer(Kernel):
     # end the local loop, do the local reduce
     if self.group_for_reduces:
       fake_global_idxs = [x*0 for x in global_idxs]
-      barrier = self.uops.add(UOps.BARRIER, None, tuple(accs[self.reduceops[i-1]])) if (i:=self.reduceops.index(reduceop)) else None
-      stores = self.global_store(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, accs[reduceop], barrier=barrier)  # store accumulators
+      stores = self.global_store(out_buf, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, accs[reduceop])  # store accumulators
       barrier = self.uops.add(UOps.BARRIER, None, tuple(stores))
       if self.opts.has_local:
         fake_idxs = [NumNode(0)]*len(self.sts[-1].shape)
@@ -303,16 +300,16 @@ class Linearizer(Kernel):
       # NOTE: this structure is the same as the reduce op above
 
       # late reduce loop
-      loop_ctx = self.render_loop(end_local_idxs, self.reduceops.index(reduceop)*2+3)
+      loop_ctx = self.render_loop(end_local_idxs, i*2+3)
 
       # define late accumulator
       accs[reduceop] = self.global_load(0, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop, loop_ctx=loop_ctx)
 
       # load localbufs
-      loaded_buffers[self.bufs[-1]] = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, barrier=barrier)
+      loaded_buffers[self.bufs[out_buf]] = self.global_load(out_buf, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, barrier=barrier)
 
       # there's no AST here (and there's no shape for the reduce LazyOp)
-      self.ast_parse(LazyOp(reduceop.op, (LazyOp(BufferOps.LOAD, (), self.bufs[-1]),)),\
+      self.ast_parse(LazyOp(reduceop.op, (LazyOp(BufferOps.LOAD, (), self.bufs[out_buf]),)),\
                      accs, self.acc_offsets(-1), loaded_buffers, reduce_acc=accs[reduceop])
 
       # end the late reduce loop
@@ -371,11 +368,12 @@ class Linearizer(Kernel):
                                                                                      (), (lb.name, self.sts[self.bufs.index(lb)].size))
     # add a local buffer for multistage reduce. # TODO: use local alias
     if self.group_for_reduces:
-      # TODO: the strides of this can be controlled
-      self.sts.append(ShapeTracker.from_shape(tuple([1] * self.global_dims + list(self.full_shape[self.global_dims:self.global_dims+self.local_dims+self.group_for_reduces]) + [1] * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))  # noqa: E501
-      temp_dtype = self.get_base_dtype(cast(LazyOp, self.reduceop).dtype)
-      self.bufs.append(LocalBuffer("temp", self.sts[-1].size, temp_dtype))
-      self.buf_uops.append(self.uops.add(UOps.DEFINE_LOCAL, PtrDType(temp_dtype), (), ("temp", self.sts[-1].size)))
+      for i in range(len(self.reduceops)):
+        # TODO: the strides of this can be controlled
+        self.sts.append(ShapeTracker.from_shape(tuple([1] * self.global_dims + list(self.full_shape[self.global_dims:self.global_dims+self.local_dims+self.group_for_reduces]) + [1] * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))  # noqa: E501
+        temp_dtype = self.get_base_dtype(cast(LazyOp, self.reduceop).dtype)
+        self.bufs.append(LocalBuffer(name:=f"temp{i if len(self.reduceops) > 1 else ''}", buf_size:=self.sts[-1].size, temp_dtype))
+        self.buf_uops.append(self.uops.add(UOps.DEFINE_LOCAL, PtrDType(temp_dtype), (), (name, buf_size)))
 
     # kernel name (before late upcast)
     self.name = ("r" if self.reduceop else ("C" if all(x.op in BufferOps for x in self.lazyops) else "E")) + \
@@ -488,7 +486,7 @@ class Linearizer(Kernel):
     self.linearize()
     info = get_lazyop_info(self.ast[0])
     src = self.opts.render(to_function_name(self.name), self.uops)
-    if getenv("RUN_PROCESS_REPLAY"): diskcache_put("process_replay", "".join(map(str,[self.ast,self.applied_opts])), self)
+    if getenv("RUN_PROCESS_REPLAY"): diskcache_put("process_replay", id(self), self)
     ops, mem = self.uops.flops_mem()
     run_count = prod((self.global_size if self.global_size else []) + (self.local_size if self.local_size else []))
     # NOTE: we use min here to ignore the indexing FLOPS

@@ -28,20 +28,20 @@ def rm_alloc(fd, clss, root, parant, params):
   made = nv_gpu.NVOS21_PARAMETERS(hRoot=root, hObjectParent=parant, hClass=clss,
                                   pAllocParms=ctypes.cast(ctypes.byref(params), ctypes.POINTER(None)) if params is not None else None) # type: ignore
   nv_iowr(fd, nv_gpu.NV_ESC_RM_ALLOC, made)
-  if made.status != 0: raise RuntimeError(f"rm_alloc returned {made.status}")
+  if made.status != 0: raise RuntimeError(f"rm_alloc returned {made.status}: {nv_gpu.nv_status_codes.get(made.status, 'Unknown error')}")
   return made
 
 def rm_control(fd, cmd, client, obj, params):
   made = nv_gpu.NVOS54_PARAMETERS(hClient=client, hObject=obj, cmd=cmd, paramsSize=ctypes.sizeof(params),
                                   params=ctypes.cast(ctypes.byref(params), ctypes.POINTER(None)) if params is not None else None) # type: ignore
   nv_iowr(fd, nv_gpu.NV_ESC_RM_CONTROL, made)
-  if made.status != 0: raise RuntimeError(f"rm_control returned {made.status}")
+  if made.status != 0: raise RuntimeError(f"rm_control returned {made.status}: {nv_gpu.nv_status_codes.get(made.status, 'Unknown error')}")
   return made
 
 def uvm_ioctl(cmd, sttyp, fd, **kwargs):
   ret = fcntl.ioctl(fd, cmd, made:=sttyp(**kwargs))
-  if ret != 0: raise RuntimeError(f"uvm_ioctl returned {ret}")
-  if made.rmStatus != 0: raise RuntimeError(f"uvm_ioctl struct returned {made.rmStatus}")
+  if ret != 0: raise RuntimeError(f"ioctl(uvm) returned {ret}")
+  if made.rmStatus != 0: raise RuntimeError(f"uvm_ioctl returned {made.rmStatus}: {nv_gpu.nv_status_codes.get(made.rmStatus, 'Unknown error')}")
   return made
 
 def make_uvm_type():
@@ -265,7 +265,7 @@ class NVProgram:
 
     # NV's kernargs is constbuffer (size 0x160), then arguments to the kernel follows. Kernargs also appends QMD at the end of the kernel.
     self.constbuf_0_size = constant_buffers_data[0].nbytes if 0 in constant_buffers_data else 0
-    self.kernargs_segment_size = round_up(self.constbuf_0_size, 1 << 8) + (8 << 8)
+    self.kernargs_alloc_size = round_up(self.constbuf_0_size, 1 << 8) + (8 << 8)
     self.kernargs_offset = 0x160
 
     # constant buffer 0 is filled for each program, no need to copy it from elf (it's just zeroes)
@@ -300,7 +300,7 @@ class NVProgram:
     if any(cur > mx for cur,mx in zip(global_size, [2147483647, 65535, 65535])) or any(cur > mx for cur,mx in zip(local_size, [1024, 1024, 64])):
       raise RuntimeError("Invalid global/local dims")
 
-    if self.device.kernargs_ptr >= (self.device.kernargs_page.base + self.device.kernargs_page.length - self.kernargs_segment_size):
+    if self.device.kernargs_ptr >= (self.device.kernargs_page.base + self.device.kernargs_page.length - self.kernargs_alloc_size):
       self.device.kernargs_ptr = self.device.kernargs_page.base
 
     # HACK: Save counts of args and vars to "unused" constbuffer for later extraction in mockgpu to pass into gpuocelot.
@@ -315,7 +315,7 @@ class NVProgram:
     if wait: queue.signal(self.device.time_event_en, timestamp=True)
     queue.signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
     self.device.timeline_value += 1
-    self.device.kernargs_ptr += self.kernargs_segment_size
+    self.device.kernargs_ptr += self.kernargs_alloc_size
 
     if wait:
       self.device._wait_signal(self.device.timeline_signal, self.device.timeline_value - 1)
