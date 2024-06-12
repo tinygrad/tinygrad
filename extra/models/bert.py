@@ -50,6 +50,7 @@ class BertForPretraining:
     return self.cls(output, masked_lm_positions)
   
   def loss(self, prediction_logits:Tensor, seq_relationship_logits:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
+    # Reference has residual on denominator: https://github.com/mlcommons/training/blob/master/language_model/tensorflow/bert/run_pretraining.py#L315
     def sparse_categorical_crossentropy(predictions:Tensor, labels:Tensor, ignore_index=-1):
       log_probs, loss_mask = predictions.log_softmax(), (labels != ignore_index)
       y_counter = Tensor.arange(predictions.shape[-1], requires_grad=False, device=predictions.device).unsqueeze(0).expand(labels.numel(), predictions.shape[-1])
