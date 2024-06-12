@@ -70,7 +70,7 @@ class Linearizer(Kernel):
     AndNode: lambda self,ops,ctx:
       functools.reduce(lambda a,b: ctx.uop_alu_idx(a, b, ops, ctx, BinaryOps.MUL), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
-  def global_load(self, i:int, idxs:List[Node|Variable|NumNode], acc:Optional[LazyOp]=None, barrier:Optional[UOp]=None, loop_ctx:Tuple[UOp, ...]=()) -> List[UOp]: # noqa: E501
+  def global_load(self, i:int, idxs:List[Node], acc:Optional[LazyOp]=None, barrier:Optional[UOp]=None, loop_ctx:Tuple[UOp, ...]=()) -> List[UOp]:
     buf = self.bufs[i]
     localtype = self.get_base_dtype(buf.dtype if acc is None else acc.dtype)
     const = buf.val if isinstance(buf, ConstBuffer) else None
@@ -169,7 +169,7 @@ class Linearizer(Kernel):
     return stores
 
   # render loop
-  def render_loop(self, xx:List[NumNode|Variable], depth:int) -> Tuple[UOp, ...]:
+  def render_loop(self, xx:List[Variable], depth:int) -> Tuple[UOp, ...]:
     new_loops = {x.expr:UOp(UOps.RANGE, dtypes.int32, (
       self.const(x.min) if isinstance(x.min, int) else cast(Node, x.min).render(self.render_ops, self),
       self.const(x.max+1) if isinstance(x.max, int) else cast(Node, x.max+1).render(self.render_ops, self)), arg=(depth,i)) for i,x in enumerate(xx) if not isinstance(x, NumNode) and x.expr is not None}  # noqa: E501
@@ -217,7 +217,9 @@ class Linearizer(Kernel):
       if DEBUG >= 3: print(f"store alias: sts={self.sts[0]} idxs={global_idxs+local_idxs+upcast_idxs}")
     return alias_buf_idxs
 
-  def render_reduceop(self, reduceop:LazyOp, accs:Dict[LazyOp, List[UOp]], loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]], global_idxs:List[NumNode|Variable], local_idxs:List[NumNode|Variable], upcast_idxs:List[NumNode|Variable], full_upcast_idxs:List[NumNode|Variable], reduce_idxs:List[NumNode|Variable], fake_reduce_idxs:List[NumNode|Node|Variable], alias_buf_idxs:List[Tuple[int, int, List]]) -> Tuple[List[NumNode|Variable], List[NumNode|Variable]]: # noqa: E501
+  def render_reduceop(self, reduceop:LazyOp, accs:Dict[LazyOp, List[UOp]], loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]],
+                      global_idxs, local_idxs, upcast_idxs, full_upcast_idxs, reduce_idxs, fake_reduce_idxs,
+                      alias_buf_idxs:List[Tuple[int, int, List]]) -> Tuple[List[NumNode|Variable], List[NumNode|Variable]]:
     # reduce loop
     loop_ctx = self.render_loop(reduce_idxs, 2)
 
@@ -417,7 +419,9 @@ class Linearizer(Kernel):
     self.applied_opts_cache = self.applied_opts[:]
     return self
 
-  def render_block(self, outputs:Tuple[LazyOp, ...], global_idxs:List[NumNode|Variable], local_idxs:List[NumNode|Variable], upcast_idxs:List[NumNode|Variable], full_upcast_idxs:List[NumNode|Variable], alias_buf_idxs:DefaultDict[LazyOp,List[Tuple[int,int,List[NumNode|Variable]]]], loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]], accs:Dict[LazyOp,List[UOp]]) -> List[List[UOp]]: # noqa: E501
+  def render_block(self, outputs:Tuple[LazyOp, ...], global_idxs, local_idxs, upcast_idxs, full_upcast_idxs,
+                   alias_buf_idxs:DefaultDict[LazyOp,List[Tuple[int,int,List[NumNode|Variable]]]],
+                   loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]], accs:Dict[LazyOp,List[UOp]]) -> List[List[UOp]]:
     reduceops = dedup(x for x in outputs if x.op in ReduceOps)
     assert len(reduceops) <= 1, "max one reduceop per block"
     reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+self.group_for_reduces, self.shape_len-self.upcasted)]  # noqa: E501
