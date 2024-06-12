@@ -50,7 +50,13 @@ class BertForPretraining:
     return self.cls(output, masked_lm_positions)
   
   def loss(self, prediction_logits:Tensor, seq_relationship_logits:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
-    masked_lm_loss = prediction_logits.sparse_categorical_crossentropy(masked_lm_ids, ignore_index=masked_lm_weights)
+    def sparse_categorical_crossentropy(predictions:Tensor, labels:Tensor, ignore_index=-1):
+      log_probs, loss_mask = predictions.log_softmax(), (labels != ignore_index)
+      y_counter = Tensor.arange(predictions.shape[-1], requires_grad=False, device=predictions.device).unsqueeze(0).expand(labels.numel(), predictions.shape[-1])
+      y = ((y_counter == labels.flatten().reshape(-1, 1)) * loss_mask.reshape(-1, 1)).reshape(*labels.shape, predictions.shape[-1])
+      return -((log_probs * y).sum()) / (loss_mask.sum() + 1e-5) # Small constant to avoid division by zero
+
+    masked_lm_loss = sparse_categorical_crossentropy(prediction_logits, masked_lm_ids, ignore_index=masked_lm_weights)
     next_sentence_loss = seq_relationship_logits.binary_crossentropy_logits(next_sentence_labels)
     return masked_lm_loss + next_sentence_loss
   
