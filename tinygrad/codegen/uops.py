@@ -259,13 +259,14 @@ class UOpGraph:
 
   def multiadd(self, unprocessed_nodes:List[UOp]):
     # add nodes to graph in reverse BFS order
+    # TODO: i feel like this is written in a few places, possible to library it?
     in_degree: DefaultDict[UOp, int] = defaultdict(int)
     children: DefaultDict[UOp, List[UOp]] = defaultdict(list)
-    all_nodes: Set[UOp] = set()
+    all_nodes: Dict[UOp, None] = dict()
     while len(unprocessed_nodes):
       n = unprocessed_nodes.pop(0)
       if n in all_nodes: continue
-      all_nodes.add(n)
+      all_nodes[n] = None
       for x in n.vin:
         in_degree[x] += 1
         children[x].append(n)
