@@ -404,9 +404,8 @@ class Linearizer(Kernel):
       self.render_block((reduceop, ), global_idxs, local_idxs, upcast_idxs, full_upcast_idxs, alias_buf_idxs, loaded_buffers, accs)
     stores = self.render_block(self.ast, global_idxs, local_idxs, upcast_idxs, full_upcast_idxs, alias_buf_idxs, loaded_buffers, accs)
 
-    # only the final stores should be needed here
-    self.uops:UOpGraph = UOpGraph()
-    self.uops.multiadd(flatten(stores))
+    # only the final stores are needed to define the full UOps graph
+    self.uops:UOpGraph = UOpGraph(flatten(stores))
 
     # maybe graph the uops
     if DEBUG >= 5: self.uops.print()

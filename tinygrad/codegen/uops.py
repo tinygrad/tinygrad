@@ -249,14 +249,14 @@ constant_folder = PatternMatcher([
 # *** uop graph ***
 
 class UOpGraph:
-  def __init__(self):
+  def __init__(self, add_nodes:Optional[List[UOp]]=None):
     self.nodes: Dict[Tuple, UOp] = {}
     self._uops: Optional[List[UOp]] = None
+    if add_nodes is not None: self.multiadd(add_nodes)
 
   def __iter__(self) -> Iterator[UOp]: return iter(self.uops)
   def __getitem__(self, index) -> UOp: return self.uops[index]
 
-  # TOOD: this should be the constructor
   def multiadd(self, unprocessed_nodes:List[UOp]):
     # add nodes to graph in reverse BFS order
     in_degree: DefaultDict[UOp, int] = defaultdict(int)
