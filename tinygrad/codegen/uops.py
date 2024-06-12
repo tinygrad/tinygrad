@@ -91,7 +91,7 @@ def __unmatch(m1:Union[T, Set[T]], m2:T) -> bool:
   return False
 
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
-  if pat.name in store and store[pat.name] != uop: return False
+  if pat.name in store and store[pat.name] is not uop: return False
   if pat.name is not None: store[pat.name] = uop
   if pat.arg is not None and __unmatch(pat.arg, uop.arg): return False
   if pat.dtype is not None and uop.dtype is not None and __unmatch(pat.dtype, uop.dtype): return False
@@ -214,9 +214,8 @@ constant_folder = PatternMatcher([
   (UPat(UOps.ALU, BinaryOps.ADD, (UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c0"), UPat(name="x")]),  # (x*c0)+(x*c1) -> x*(c0+c1)
                                   UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c1"), UPat(name="x")]),)),
                                   lambda x,c0,c1: x*exec_alu(BinaryOps.ADD, x.dtype, [c0.arg, c1.arg])),
-  # this rule not only doesn't work, it breaks TestSymbolicOps.test_var
-  #(UPat(UOps.ALU, BinaryOps.DIV, (UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c0"), UPat(name="x")]),
-  #                                UPat(UOps.CONST, name="c0"))), lambda x,c0: x),    # (x*c0)/c0 -> x (why is this not matching?)
+  (UPat(UOps.ALU, BinaryOps.DIV, (UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c0"), UPat(name="x")]),
+                                  UPat(UOps.CONST, name="c0"))), lambda x,c0: x if c0.arg != 0 else None),    # (x*c0)/c0 -> x
   (UPat(UOps.ALU, BinaryOps.DIV, (UPat(UOps.ALU, BinaryOps.DIV, (UPat(name="x"), UPat(UOps.CONST, name="c0"))), UPat(UOps.CONST, name="c1"))),
     lambda x,c0,c1: x//UOp.const(x.dtype, exec_alu(BinaryOps.MUL, x.dtype, [c0.arg, c1.arg]))),    # (x/c0)/c1 -> x/(c0*c1)
   (UPat(UOps.ALU, BinaryOps.CMPLT, (UPat(UOps.ALU, BinaryOps.ADD, [UPat(UOps.CONST, name="c0"), UPat(name="x")]), UPat(UOps.CONST, name="c1"))),
@@ -249,12 +248,38 @@ constant_folder = PatternMatcher([
 # *** uop graph ***
 
 class UOpGraph:
-  def __init__(self):
+  def __init__(self, add_nodes:Optional[List[UOp]]=None):
     self.nodes: Dict[Tuple, UOp] = {}
     self._uops: Optional[List[UOp]] = None
+    if add_nodes is not None: self.multiadd(add_nodes)
 
   def __iter__(self) -> Iterator[UOp]: return iter(self.uops)
   def __getitem__(self, index) -> UOp: return self.uops[index]
+
+  def multiadd(self, unprocessed_nodes:List[UOp]):
+    # add nodes to graph in reverse BFS order
+    # TODO: i feel like this is written in a few places, possible to library it?
+    in_degree: DefaultDict[UOp, int] = defaultdict(int)
+    children: DefaultDict[UOp, List[UOp]] = defaultdict(list)
+    all_nodes: Dict[UOp, None] = dict()
+    while len(unprocessed_nodes):
+      n = unprocessed_nodes.pop(0)
+      if n in all_nodes: continue
+      all_nodes[n] = None
+      for x in n.vin:
+        in_degree[n] += 1
+        children[x].append(n)
+      unprocessed_nodes += list(n.vin)
+    queue = [x for x in all_nodes if in_degree[x] == 0]
+    replace_nodes: Dict[UOp, UOp] = {}
+    while len(queue):
+      n = queue.pop(0)
+      if n in replace_nodes: continue
+      replace_nodes[n] = self.add(n.uop, n.dtype, tuple(replace_nodes.get(x, x) for x in n.vin), n.arg)
+      for x in children[n]:
+        in_degree[x] -= 1
+        if in_degree[x] == 0:
+          queue.append(x)
 
   def vars(self) -> List[Variable]: return [x.arg for x in self.uops if x.uop is UOps.DEFINE_VAR]
   def globals(self) -> List[Tuple[int, bool]]: return [x.arg for x in self.uops if x.uop is UOps.DEFINE_GLOBAL]
