@@ -249,12 +249,38 @@ constant_folder = PatternMatcher([
 # *** uop graph ***
 
 class UOpGraph:
-  def __init__(self):
+  def __init__(self, add_nodes:Optional[List[UOp]]=None):
     self.nodes: Dict[Tuple, UOp] = {}
     self._uops: Optional[List[UOp]] = None
+    if add_nodes is not None: self.multiadd(add_nodes)
 
   def __iter__(self) -> Iterator[UOp]: return iter(self.uops)
   def __getitem__(self, index) -> UOp: return self.uops[index]
+
+  def multiadd(self, unprocessed_nodes:List[UOp]):
+    # add nodes to graph in reverse BFS order
+    # TODO: i feel like this is written in a few places, possible to library it?
+    in_degree: DefaultDict[UOp, int] = defaultdict(int)
+    children: DefaultDict[UOp, List[UOp]] = defaultdict(list)
+    all_nodes: Dict[UOp, None] = dict()
+    while len(unprocessed_nodes):
+      n = unprocessed_nodes.pop(0)
+      if n in all_nodes: continue
+      all_nodes[n] = None
+      for x in n.vin:
+        in_degree[x] += 1
+        children[x].append(n)
+      unprocessed_nodes += list(n.vin)
+    queue = [x for x in all_nodes if in_degree[x] == 0]
+    replace_nodes: Dict[UOp, UOp] = {}
+    while len(queue):
+      n = queue.pop(0)
+      if n in replace_nodes: continue
+      replace_nodes[n] = self.add(n.uop, n.dtype, tuple(replace_nodes.get(x, x) for x in n.vin), n.arg)
+      for x in children[n]:
+        in_degree[x] -= 1
+        if in_degree[x] == 0:
+          queue.append(x)
 
   def vars(self) -> List[Variable]: return [x.arg for x in self.uops if x.uop is UOps.DEFINE_VAR]
   def globals(self) -> List[Tuple[int, bool]]: return [x.arg for x in self.uops if x.uop is UOps.DEFINE_GLOBAL]
