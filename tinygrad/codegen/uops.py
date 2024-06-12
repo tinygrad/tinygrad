@@ -1,7 +1,6 @@
 from __future__ import annotations
 from typing import Iterator, Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable, Union, cast, TypeVar
-import functools, itertools, heapq
-from math import isnan
+import functools, itertools, heapq, math
 from collections import defaultdict
 from enum import Enum, auto
 from dataclasses import dataclass, field
@@ -200,7 +199,7 @@ constant_folder = PatternMatcher([
   # ** zero folding **
   #x*0 -> 0 or 0*x -> 0
   #if x is nan it should render the nan value.
-  (UPat(UOps.ALU, BinaryOps.MUL, [UPat(name="x"), UPat(UOps.CONST, 0, name="c")]), lambda x,c: x if isinstance(x.arg, float) and isnan(x.arg) else c),
+  (UPat(UOps.ALU, BinaryOps.MUL, [UPat(name="x"), UPat(UOps.CONST, 0, name="c")]), lambda x,c: x if isinstance(x.arg, float) and math.isnan(x.arg) else c), # noqa: E501
   (UPat(UOps.ALU, BinaryOps.SUB, (UPat(name="x"), UPat(name="x"))), lambda x: UOp.const(x.dtype, 0)),   # x-x -> 0
   # ** load/store folding **
   (UPat(UOps.STORE, vin=(UPat(name="buf"), UPat(name="idx"),
