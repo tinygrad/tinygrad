@@ -333,7 +333,6 @@ class Linearizer(Kernel):
     if self.opts.global_max and self.opts.local_max: self.limit_dims_to_max(self.opts.global_max, self.opts.local_max)
 
     # uops
-    self.uops:UOpGraph = UOpGraph()
     self.buf_uops: List[Optional[UOp]] = [None]*len(self.bufs)
     self.loop_uops: Dict[str, UOp] = {}
 
@@ -406,6 +405,7 @@ class Linearizer(Kernel):
     stores = self.render_block(self.ast, global_idxs, local_idxs, upcast_idxs, full_upcast_idxs, alias_buf_idxs, loaded_buffers, accs)
 
     # only the final stores should be needed here
+    self.uops:UOpGraph = UOpGraph()
     self.uops.multiadd(flatten(stores))
 
     # maybe graph the uops
