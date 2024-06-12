@@ -221,10 +221,10 @@ class Linearizer(Kernel):
                       global_idxs, local_idxs, upcast_idxs, full_upcast_idxs, reduce_idxs, fake_reduce_idxs,
                       alias_buf_idxs:List[Tuple[int, int, List]]) -> Tuple[List[NumNode|Variable], List[NumNode|Variable]]:
     # reduce loop
-    loop_ctx = self.render_loop(reduce_idxs, 2)
+    loop_ctx = self.render_loop(reduce_idxs, (i:=self.reduceops.index(reduceop))*2+2)
 
     # define accumulator - modify idxs if necessary for TC
-    out_buf = -len(self.reduceops)+self.reduceops.index(reduceop) if self.group_for_reduces else 0
+    out_buf = -len(self.reduceops)+i if self.group_for_reduces else 0
     accs[reduceop] = self.global_load(out_buf, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop, loop_ctx=loop_ctx)
 
     # store local aliases
@@ -260,8 +260,13 @@ class Linearizer(Kernel):
       loaded_buffers.update({b:self.global_load(self.bufs.index(self.local_alias[reduceop][i]) if i in self.local_alias else i,
         global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs})
 
+      def gate_acc(r, idxs): return [
+        UOp.alu(TernaryOps.WHERE, valid.render(self.render_ops, self), acc, self.const(0, r.dtype)) if valid.min == 0 and valid.max == 1 else acc
+        for valid, acc in zip(expand_node(self.sts[self.full_buf_index].expr_idxs(idxs)[1], expand_idxs(idxs)), accs[r])]
+      local_accs = {r: gate_acc(r,global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for r in accs}
+
       # run early AST (with reduce)
-      self.ast_parse(reduceop, accs, self.acc_offsets(self.full_buf_index), loaded_buffers, reduce_acc=accs[reduceop])
+      self.ast_parse(reduceop, local_accs, self.acc_offsets(self.full_buf_index), loaded_buffers, reduce_acc=accs[reduceop])
 
     # end the reduce loop
     self.load_cache.clear()
@@ -294,13 +299,13 @@ class Linearizer(Kernel):
       # NOTE: this structure is the same as the reduce op above
 
       # late reduce loop
-      loop_ctx = self.render_loop(end_local_idxs, 3)
+      loop_ctx = self.render_loop(end_local_idxs, i*2+3)
 
       # define late accumulator
       accs[reduceop] = self.global_load(0, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop, loop_ctx=loop_ctx)
 
       # load localbufs
-      loaded_buffers[self.bufs[out_buf]] = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, barrier=barrier)
+      loaded_buffers[self.bufs[out_buf]] = self.global_load(out_buf, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, barrier=barrier)
 
       # there's no AST here (and there's no shape for the reduce LazyOp)
       self.ast_parse(LazyOp(reduceop.op, (LazyOp(BufferOps.LOAD, (), self.bufs[out_buf]),)),\
@@ -309,8 +314,15 @@ class Linearizer(Kernel):
       # end the late reduce loop
       self.load_cache.clear()
 
-    # all local indices which were used for group_for_reduce are not valid any more and should be replaced with fake NumNode(0), since they have
-    # been rewritten with fake end_local_idxs.
+      if reduceop is not self.reduceops[-1]:
+        for j in self.upcast_in_mid_reduce_axes:
+          self.upcasted -= 1
+          self.group_for_reduces += 1
+        assert self.buf_uops[out_buf] is not None, "Local reduce buf must have been uoped at this point"
+        fake_local_idxs = local_idxs[:self.local_dims] + [x*0 for x in local_idxs[self.local_dims:]]
+        stores = self.global_store(out_buf, fake_global_idxs+fake_local_idxs+fake_reduce_idxs+upcast_idxs, accs[reduceop])
+        barrier = UOp(UOps.BARRIER, None, tuple(stores))
+        accs[reduceop] = self.global_load(out_buf, fake_global_idxs+fake_local_idxs+fake_reduce_idxs+upcast_idxs, barrier=barrier)
     return local_idxs[:self.local_dims] + [NumNode(0) for _ in range(self.group_for_reduces)], upcast_idxs
 
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
@@ -429,8 +441,12 @@ class Linearizer(Kernel):
 
     if len(reduceops) != 0:
       # TODO: delete render_reduceop and move the logic for group_for_reduces to Block
-      local_idxs[:], upcast_idxs[:] = self.render_reduceop((r:=reduceops[0]),accs,loaded_buffers,global_idxs,local_idxs,upcast_idxs, full_upcast_idxs,
-                                                     reduce_idxs,fake_reduce_idxs,alias_buf_idxs[r])
+      nlidx, nuidx = self.render_reduceop((r:=reduceops[0]),accs,loaded_buffers,\
+                                          global_idxs,local_idxs,upcast_idxs,full_upcast_idxs,reduce_idxs,fake_reduce_idxs,alias_buf_idxs[r])
+
+      # all local indices which were used for group_for_reduce are not valid any more and should be replaced with fake NumNode(0), since they have
+      # been rewritten with fake end_local_idxs.
+      if r is self.reduceops[-1]: local_idxs[:], upcast_idxs[:] = nlidx, nuidx
       return [accs[r]]
 
     # load latebufs
@@ -448,8 +464,7 @@ class Linearizer(Kernel):
       return [UOp(UOps.BITCAST if x.op is UnaryOps.BITCAST else UOps.CAST,
                             self.get_base_dtype(x.arg), (u,)) for u in self.ast_parse(x.src[0], accs, offs, loaded_buffers)]
     if x.op in ReduceOps and reduce_acc is None:
-      assert offs is None, "not available if we aren't doing reduce"
-      return accs[x]
+      return [accs[x][i] for i in offs] if offs else accs[x]
 
     values = [self.ast_parse(v, accs, offs, loaded_buffers, cache=cache) for v in x.src]
     ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}
