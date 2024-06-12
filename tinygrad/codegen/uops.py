@@ -367,10 +367,10 @@ class UOpGraph:
     add_parents(sink)
 
     @functools.lru_cache(None)
-    def get_recursive_children(x:UOp, include_self=False) -> Set[UOp]:
+    def get_recursive_children(x:UOp, include_self=False, stop=lambda x,u: True) -> Set[UOp]:
       if x.uop is UOps.SINK: return set()
-      return set.union(set((x,)) if include_self else set(), *([get_recursive_children(u, True) for u in graph[x]] if x.uop is not UOps.PHI else []))
-    loops_children = {l:get_recursive_children(l) for l in loops[::-1]}
+      return set.union(set((x,)) if include_self else set(), *([get_recursive_children(u, True, stop) for u in graph[x] if stop(x,u)]))
+    loops_children = {l:get_recursive_children(l, stop=lambda x,u: x.uop is not UOps.PHI) for l in loops[::-1]}
 
     queue: List = []
     def push(u):
@@ -387,6 +387,8 @@ class UOpGraph:
       from test.external.fuzz_uops import fuzz_uops
       self.fuzz_paths = fuzz_uops(graph, in_degree.copy(), loops_children)
 
+    # find all ifs children, add them to the loops children so we can add ends
+    scope_children = {**loops_children, **{u:get_recursive_children(u, stop=lambda x,u: u.uop is not UOps.BARRIER) for u in ifs[::-1]}}
     self._uops = []
     while queue:
       p,x = heapq.heappop(queue)
@@ -396,19 +398,16 @@ class UOpGraph:
         self._uops.insert(idx, x)
       else:
         self._uops.append(x)
-      for u, ss in loops_children.items():
+      for u, ss in scope_children.items():
         if x in ss:
           ss.remove(x)
-          if len(ss) == 0: self._uops.append(UOp(UOps.ENDRANGE, None, (u,)))
+          if len(ss) == 0: self._uops.append(UOp({UOps.RANGE:UOps.ENDRANGE, UOps.IF:UOps.ENDIF}[u.uop], None, (u,)))
       for u in graph[x]:
         in_degree[u] -= 1
         if in_degree[u] == 0: push(u)
 
     assert self._uops[-1].uop is UOps.SINK, f"didn't end with SINK, ended with {self._uops[-1]}"
     self._uops = self._uops[:-1]
-
-    # TODO: ifs should be removed and just the store should be gated
-    for u in ifs[::-1]: self._uops.append(UOp(UOps.ENDIF, None, (u,)))
 
     if type_verify: self.type_verify()
 
@@ -457,7 +456,9 @@ class UOpGraph:
           assert dtype == dtypes.bool, f"{arg} output dtype mismatch {dtype=} != {dtypes.bool}"
           assert vin[0].dtype == vin[1].dtype, f"{arg} dtype mismatch {dtype=} != {vin[0].dtype=} != {vin[1].dtype=}"
         elif arg is BinaryOps.IDIV:
-          assert dtypes.is_int(vin[0].dtype), f"{arg} output dtype mismatch {dtype=} != {dtypes.int}"
+          assert dtypes.is_int(vin[0].dtype) and dtypes.is_int(vin[1].dtype), \
+              f"input dtype mismatch {dtypes.int} != {vin[0].dtype=} != {vin[1].dtype=}"
+          assert dtypes.is_int(dtype), f"{arg} output dtype mismatch {dtype=} != {dtypes.int}"
         elif arg in BinaryOps:
           assert dtype == vin[0].dtype == vin[1].dtype, f"{arg} dtype mismatch {dtype=} != {vin[0].dtype=} != {vin[1].dtype=}"
         elif arg == TernaryOps.WHERE:
