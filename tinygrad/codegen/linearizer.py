@@ -223,7 +223,7 @@ class Linearizer(Kernel):
     loop_ctx = self.render_loop(reduce_idxs, 2)
 
     # define accumulator - modify idxs if necessary for TC
-    out_buf = -(self.reduceops.index(reduceop)+1) if self.group_for_reduces else 0
+    out_buf = -len(self.reduceops)+self.reduceops.index(reduceop) if self.group_for_reduces else 0
     accs[reduceop] = self.global_load(out_buf, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop, loop_ctx=loop_ctx)
 
     # store local aliases
@@ -299,10 +299,10 @@ class Linearizer(Kernel):
       accs[reduceop] = self.global_load(0, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc=reduceop, loop_ctx=loop_ctx)
 
       # load localbufs
-      loaded_buffers[self.bufs[-1]] = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, barrier=barrier)
+      loaded_buffers[self.bufs[out_buf]] = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, barrier=barrier)
 
       # there's no AST here (and there's no shape for the reduce LazyOp)
-      self.ast_parse(LazyOp(reduceop.op, (LazyOp(BufferOps.LOAD, (), self.bufs[-1]),)),\
+      self.ast_parse(LazyOp(reduceop.op, (LazyOp(BufferOps.LOAD, (), self.bufs[out_buf]),)),\
                      accs, self.acc_offsets(-1), loaded_buffers, reduce_acc=accs[reduceop])
 
       # end the late reduce loop
