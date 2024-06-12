@@ -91,7 +91,7 @@ def __unmatch(m1:Union[T, Set[T]], m2:T) -> bool:
   return False
 
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
-  if pat.name in store and store[pat.name] != uop: return False
+  if pat.name in store and store[pat.name] is not uop: return False
   if pat.name is not None: store[pat.name] = uop
   if pat.arg is not None and __unmatch(pat.arg, uop.arg): return False
   if pat.dtype is not None and uop.dtype is not None and __unmatch(pat.dtype, uop.dtype): return False
@@ -214,9 +214,8 @@ constant_folder = PatternMatcher([
   (UPat(UOps.ALU, BinaryOps.ADD, (UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c0"), UPat(name="x")]),  # (x*c0)+(x*c1) -> x*(c0+c1)
                                   UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c1"), UPat(name="x")]),)),
                                   lambda x,c0,c1: x*exec_alu(BinaryOps.ADD, x.dtype, [c0.arg, c1.arg])),
-  # this rule not only doesn't work, it breaks TestSymbolicOps.test_var
-  #(UPat(UOps.ALU, BinaryOps.DIV, (UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c0"), UPat(name="x")]),
-  #                                UPat(UOps.CONST, name="c0"))), lambda x,c0: x),    # (x*c0)/c0 -> x (why is this not matching?)
+  (UPat(UOps.ALU, BinaryOps.DIV, (UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c0"), UPat(name="x")]),
+                                  UPat(UOps.CONST, name="c0"))), lambda x,c0: x if c0.arg != 0 else None),    # (x*c0)/c0 -> x
   (UPat(UOps.ALU, BinaryOps.DIV, (UPat(UOps.ALU, BinaryOps.DIV, (UPat(name="x"), UPat(UOps.CONST, name="c0"))), UPat(UOps.CONST, name="c1"))),
     lambda x,c0,c1: x//UOp.const(x.dtype, exec_alu(BinaryOps.MUL, x.dtype, [c0.arg, c1.arg]))),    # (x/c0)/c1 -> x/(c0*c1)
   (UPat(UOps.ALU, BinaryOps.CMPLT, (UPat(UOps.ALU, BinaryOps.ADD, [UPat(UOps.CONST, name="c0"), UPat(name="x")]), UPat(UOps.CONST, name="c1"))),
@@ -268,7 +267,7 @@ class UOpGraph:
       if n in all_nodes: continue
       all_nodes[n] = None
       for x in n.vin:
-        in_degree[x] += 1
+        in_degree[n] += 1
         children[x].append(n)
       unprocessed_nodes += list(n.vin)
     queue = [x for x in all_nodes if in_degree[x] == 0]
