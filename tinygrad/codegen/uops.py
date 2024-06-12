@@ -431,6 +431,8 @@ class UOpGraph:
         elif arg in (BinaryOps.CMPLT, BinaryOps.CMPNE):
           assert dtype == dtypes.bool, f"{arg} output dtype mismatch {dtype=} != {dtypes.bool}"
           assert vin[0].dtype == vin[1].dtype, f"{arg} dtype mismatch {dtype=} != {vin[0].dtype=} != {vin[1].dtype=}"
+        elif arg is BinaryOps.IDIV:
+          assert dtypes.is_int(vin[0].dtype), f"{arg} output dtype mismatch {dtype=} != {dtypes.int}"
         elif arg in BinaryOps:
           assert dtype == vin[0].dtype == vin[1].dtype, f"{arg} dtype mismatch {dtype=} != {vin[0].dtype=} != {vin[1].dtype=}"
         elif arg == TernaryOps.WHERE:
