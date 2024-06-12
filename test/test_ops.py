@@ -1681,6 +1681,13 @@ class TestOps(unittest.TestCase):
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,b,None,d,e], lambda x: x[i,j,None,o,p])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[None,b,c,d,None], lambda x: x[None,j,k,o,None])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,:,None,d,e], lambda x: x[i,:,None,o,p])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[None,None,None,None,None], lambda x: x[None,None,None,None,None])
+
+  # TODO: fix
+  @unittest.expectedFailure
+  def test_slice_fancy_indexing_dim_leading_nones(self):
+    a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()  # noqa
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[None,None,b,c,d,e], lambda x: x[None,None,j,k,o,p])
 
   def test_slice_fancy_indexing_dim_inject_and_collapse(self):
     a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()  # noqa
