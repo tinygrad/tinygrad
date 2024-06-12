@@ -140,7 +140,7 @@ class PTXRenderer(Renderer):
             self.asm_for_op[BinaryOps.CMPLT](pred:=ssa("pred", dtype="pred"), r[vin[0]], r[vin[0].vin[1]], dtypes.int, self.types[dtypes.int]))
         kk(*self.render_bra(f"LOOP_{r[vin[0]][1:]}", pred))
       elif uop is UOps.ENDIF:
-        kk(f"IF_{r[vin[0].vin[0]][1:]}_{cast(List, uops._uops).index(u)}:")
+        kk(f"IF_{r[vin[0].vin[0]][1:]}_{cast(List, uops._uops).index(vin[0])}:")
       elif uop is UOps.STORE:
         assert vin[0].dtype is not None and vin[2].dtype is not None
         assert vin[0].dtype == dtypes.int64, "store isn't int64"
