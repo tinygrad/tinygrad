@@ -850,7 +850,7 @@ class Tensor:
   #     - first shrink the Tensor to X.shrink(((start, end),))
   #     - then we apply stride through Optional[flip] -> pad -> reshape -> shrink
   #       - flip where dim value is negative
-  #       - pad 0's on dims such that reshaping [dim_size_padded] -> [dim_size_padded // stride, stride] is possible
+  #       - pad on dims to be multiple of strides, such that reshaping [dim_size_padded] -> [dim_size_padded // stride, stride] is possible
   #       - shrink [dim_size_padded // stride, stride] -> [dim_size_padded // stride, 1]
   #       - reshape [dim_size_padded // stride, 1] -> [dim_size_padded // stride] and now you have your stride
   #   3. None indexing (no copy)
@@ -866,7 +866,7 @@ class Tensor:
   #     - for any tuple, Tuple[Union[List, Tuple, int]], must have homogeneous shape
   #   2. Bool indexing is not supported
   #   3. Out of bounds Tensor indexing results in 0
-  #     - e.g: Tensor([1, 2, 3])[Tensor([4, 3, 2])] -> [0, 0, 3] index 4 and 3 are OOB
+  #     - e.g: Tensor([1, 2, 3])[Tensor([4, 3, 2])] -> [0, 0, 3] index 4 and 3 are out of bounds
   def __getitem__(self, indices) -> Tensor:
     # 1. indices normalization and validation
     # treat internal tuples and lists as Tensors and standardize indices to list type
@@ -891,7 +891,7 @@ class Tensor:
 
     # record None for dimension injection later and filter None and record rest of indices
     type_dim[None] = [dim for dim, i in enumerate(indices) if i is None]
-    indices_filtered = [v for v in indices if v is not None]
+    indices_filtered = [i for i in indices if i is not None]
     for dim,i in enumerate(indices_filtered): type_dim[type(i)].append(dim)
 
     for index_type in type_dim:
@@ -900,8 +900,8 @@ class Tensor:
     if num_indices > self.ndim: raise IndexError(f"too many {num_indices=} for {self.ndim=}")
 
     # 2. basic indexing, uses only movement ops (no copy)
-    # currently indices_filtered: Tuple[Union[slice, int, Tensor], ...]
-    # turn indices in indices_filtered to Tuple[shrink_arg, strides]
+    # currently indices_filtered: Tuple[Union[int, slice, Tensor], ...]
+    # turn indices in indices_filtered to Tuple[new_slice, strides]
     for dim in type_dim[int]:
       if (index := indices_filtered[dim]) >= (size := self.shape[dim]) or index < -size:
         raise IndexError(f"{index=} is out of bounds on {dim=} with {size=}")
@@ -917,13 +917,16 @@ class Tensor:
       if not dtypes.is_int(index.dtype): raise IndexError(f"{index.dtype=} on {dim=} is not supported, only int tensor indexing is supported")
       indices_filtered[dim] = ((0, self.shape[dim]), 1)
 
-    new_slice, strides = ((),()) if not indices_filtered else zip(*indices_filtered)
-    ret = self.shrink(new_slice).flip(tuple(i for i, s in enumerate(strides) if s < 0))
-    if any(abs(s) != 1 for s in strides):
+    new_slice, strides = ((), ()) if not indices_filtered else zip(*indices_filtered)
+    # flip negative strides
+    ret = self.shrink(new_slice).flip(tuple(i for i, st in enumerate(strides) if st < 0))
+    # handle stride != 1 or -1
+    if any(abs(st) != 1 for st in strides):
       strides = tuple(abs(s) for s in strides)
-      ret = ret.pad(tuple((0, round_up(sh, s) - sh) for s, sh in zip(strides, ret.shape)))
-      ret = ret.reshape(tuple(flatten((sh // s, s) for s, sh in zip(strides, ret.shape))))
-      ret = ret.shrink(tuple(flatten(((0, sh), (0, 1)) for sh in ret.shape[::2]))).reshape(ret.shape[::2])
+      # pad shape to multiple of stride
+      ret = ret.pad(tuple((0, round_up(s, st) - s) for s, st in zip(ret.shape, strides)))
+      ret = ret.reshape(tuple(flatten((s // st, st) for s, st in zip(ret.shape, strides))))
+      ret = ret.shrink(tuple(flatten(((0, s), (0, 1)) for s in ret.shape[::2]))).reshape(ret.shape[::2])
 
     # inject 1 for dim where it's None and collapse dim for int
     new_shape = list(ret.shape)
@@ -931,7 +934,6 @@ class Tensor:
     for dim in (dims_collapsed := tuple(dim + sum(1 for d in type_dim[None] if dim >= d) for dim in reversed(type_dim[int]))): new_shape.pop(dim)
 
     ret = ret.reshape(new_shape)
-    assert all_int(ret.shape), f"does not support symbolic shape {ret.shape}"
 
     # 3. advanced indexing (copy)
     if type_dim[Tensor]:
@@ -939,6 +941,7 @@ class Tensor:
       def calc_dim(tensor_dim:int) -> int:
         return tensor_dim - sum(1 for d in dims_collapsed if tensor_dim >= d) + sum(1 for d in type_dim[None] if tensor_dim >= d)
 
+      assert all_int(ret.shape), f"does not support symbolic shape {ret.shape}"
       # track tensor_dim and tensor_index using a dict
       # calc_dim to get dim and use that to normalize the negative tensor indices
       idx: Dict[int,Tensor] = {(dim := calc_dim(td)):(tensor<0).where(ret.shape[dim],0) + tensor for td,tensor in zip(type_dim[Tensor], tensor_index)}
@@ -957,9 +960,9 @@ class Tensor:
       mask: Tensor = functools.reduce(lambda x,y: x.mul(y), masks)
 
       # inject 1's for the extra dims added in create masks
-      sh = ret.shape[:first_dim] + (1,) * len(big_shape) + ret.shape[first_dim:]
+      reshape_arg = ret.shape[:first_dim] + (1,) * len(big_shape) + ret.shape[first_dim:]
       # sum reduce the extra dims introduced in create masks
-      ret = (ret.reshape(sh) * mask).sum(tuple(i + len(big_shape) for i in idx.keys()), acc_dtype=ret.dtype)
+      ret = (ret.reshape(reshape_arg) * mask).sum(tuple(i + len(big_shape) for i in idx.keys()), acc_dtype=ret.dtype)
 
       # special permute case
       if first_dim != 0 and len(idx) != 1 and tuple(idx.keys()) != tuple(range(first_dim, last_dim+1)):
