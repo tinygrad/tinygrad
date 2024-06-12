@@ -265,6 +265,5 @@ class tinytqdm:
     if self.t: suf = f'| {unit_text} [{fmt(dur)}<{fmt(dur/self.n*self.t-dur if self.n else -1)}, {it_text}{self.unit}/s]'
     else: suf = f'{unit_text} [{fmt(dur)}, {it_text}{self.unit}/s]'
     sz = max(term-5-len(suf)-len(self.desc), 1)
-    if self.t: bar = f'\r{self.desc}{round(100*prog):3}%|{"█"*round(sz*prog)}{" "*(sz-round(sz*prog))}{suf}'[:term+1]
-    else: bar = f'\r{self.desc}{suf}{" "*term}'[:term+1]
-    print(bar,flush=True,end='\n'*close,file=sys.stderr)
+    bar = f'\r{self.desc}{round(100*prog):3}%|{"█"*round(sz*prog)}{" "*(sz-round(sz*prog))}{suf}' if self.t else f'\r{self.desc}{suf}{" "*term}'
+    print(bar[:term+1],flush=True,end='\n'*close,file=sys.stderr)
