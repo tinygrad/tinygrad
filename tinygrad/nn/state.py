@@ -40,7 +40,7 @@ def safe_save(tensors:Dict[str, Tensor], fn:str, metadata:Optional[Dict[str, Any
   Saves a state_dict to disk in a .safetensor file with optional metadata.
 
   ```python
-  t = nn.Tensor([1, 2, 3])
+  t = Tensor([1, 2, 3])
   nn.state.safe_save({'t':t}, "test.safetensor")
   ```
   """
