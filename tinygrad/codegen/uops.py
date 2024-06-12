@@ -256,12 +256,21 @@ class UOpGraph:
   def __iter__(self) -> Iterator[UOp]: return iter(self.uops)
   def __getitem__(self, index) -> UOp: return self.uops[index]
 
+  # TOOD: this should be the constructor
+  def multiadd(self, unprocessed_nodes:List[UOp]):
+    # add nodes to graph in reverse DFS order
+    all_nodes: Dict[UOp, None] = {}
+    while len(unprocessed_nodes):
+      n = unprocessed_nodes.pop(0)
+      if n in all_nodes: continue
+      all_nodes[n] = None
+      unprocessed_nodes += list(n.vin)
+    replace_nodes: Dict[UOp, UOp] = {}
+    for n in list(all_nodes.keys())[::-1]:
+      replace_nodes[n] = self.add(n.uop, n.dtype, tuple(replace_nodes.get(x, x) for x in n.vin), n.arg)
+
   def vars(self) -> List[Variable]: return [x.arg for x in self.uops if x.uop is UOps.DEFINE_VAR]
   def globals(self) -> List[Tuple[int, bool]]: return [x.arg for x in self.uops if x.uop is UOps.DEFINE_GLOBAL]
-
-  def recursive_add(self, x):
-    self.add(x.uop, x.dtype, x.vin, x.arg)
-    for c in x.vin: self.recursive_add(c)
 
   @property
   def uops(self):

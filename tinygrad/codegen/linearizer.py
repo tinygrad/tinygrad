@@ -4,7 +4,7 @@ import itertools, math, functools
 from collections import defaultdict
 
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, ConstType
-from tinygrad.helpers import colored, DEBUG, dedup, diskcache_put, prod, getenv, to_function_name
+from tinygrad.helpers import colored, DEBUG, dedup, diskcache_put, prod, getenv, to_function_name, flatten
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ConstBuffer, MemBuffer, BufferOps, get_lazyop_info
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, create_lt_node
@@ -405,11 +405,7 @@ class Linearizer(Kernel):
     for reduceop in self.reduceops:
       stores += self.render_block((reduceop, ), global_idxs, local_idxs, upcast_idxs, full_upcast_idxs, alias_buf_idxs, loaded_buffers, accs)
     stores += self.render_block(self.ast, global_idxs, local_idxs, upcast_idxs, full_upcast_idxs, alias_buf_idxs, loaded_buffers, accs)
-
-    # add nodes to graph
-    for s in stores:
-      for ss in s:
-        self.uops.recursive_add(ss)
+    self.uops.multiadd(flatten(stores))
 
     # maybe graph the uops
     if DEBUG >= 5: self.uops.print()
@@ -433,7 +429,7 @@ class Linearizer(Kernel):
       # TODO: delete render_reduceop and move the logic for group_for_reduces to Block
       local_idxs[:], upcast_idxs[:] = self.render_reduceop((r:=reduceops[0]),accs,loaded_buffers,global_idxs,local_idxs,upcast_idxs, full_upcast_idxs,
                                                      reduce_idxs,fake_reduce_idxs,alias_buf_idxs[r])
-      return accs[r]
+      return [accs[r]]
 
     # load latebufs
     loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs) \
