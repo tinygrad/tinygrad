@@ -141,5 +141,53 @@ class TestSymbolicOps(unittest.TestCase):
       expected = a.shrink(((3,5),(i,i+2))).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
+  def test_ones_sum(self):
+    for i in range(1, 5):
+      vi = Variable("i", 1, 10).bind(i)
+      t = Tensor.ones(i)
+      symbolic = t.reshape(vi).sum().item()
+      expected = t.sum().item()
+      np.testing.assert_equal(symbolic, expected)
+
+  def test_mean(self):
+    for i in range(1, 5):
+      vi = Variable("i", 1, 10).bind(i)
+      for axis in [None, 0, 1]:
+        a = Tensor.rand(i, 3)
+        expected = a.mean(axis).numpy()
+        symbolic = a.reshape(vi, 3).mean(axis).reshape(expected.shape).numpy()
+        np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
+
+  def test_mean_2d(self):
+    for i in range(1, 5):
+      for j in range(1, 5):
+        vi = Variable("i", 1, 10).bind(i)
+        vj = Variable("j", 1, 10).bind(j)
+        for axis in [None, 0, 1]:
+          a = Tensor.rand(i, j)
+          expected = a.mean(axis).numpy()
+          symbolic = a.reshape(vi, vj).mean(axis).reshape(expected.shape).numpy()
+          np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
+
+  def test_var(self):
+    for i in range(1, 5):
+      vi = Variable("i", 1, 10).bind(i)
+      for axis in [None, 0, 1]:
+        a = Tensor.rand(i, 3)
+        expected = a.var(axis).numpy()
+        symbolic = a.reshape(vi, 3).var(axis).reshape(expected.shape).numpy()
+        np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
+
+  def test_var_2d(self):
+    for i in range(1, 5):
+      for j in range(1, 5):
+        vi = Variable("i", 1, 10).bind(i)
+        vj = Variable("j", 1, 10).bind(j)
+        for axis in [None, 0, 1]:
+          a = Tensor.rand(i, j)
+          expected = a.var(axis).numpy()
+          symbolic = a.reshape(vi, vj).var(axis).reshape(expected.shape).numpy()
+          np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
+
 if __name__ == '__main__':
   unittest.main()

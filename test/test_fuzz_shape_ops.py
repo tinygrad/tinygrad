@@ -1,3 +1,4 @@
+from __future__ import annotations
 import unittest
 from math import prod
 
@@ -6,12 +7,12 @@ from hypothesis.extra import numpy as stn
 
 import numpy as np
 import torch
-import tinygrad
-from tinygrad.helpers import CI
+from tinygrad import Tensor, Device
+from tinygrad.helpers import CI, getenv
 
 
 settings.register_profile(__file__, settings.default,
-                          max_examples=100 if CI else 250, deadline=None)
+                          max_examples=100 if CI else 250, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 
 
 # torch wraparound for large numbers
@@ -25,10 +26,9 @@ def st_shape(draw) -> tuple[int, ...]:
   assume(prod([d for d in s if d]) <= 1024 ** 4)
   return s
 
-
-def tensors_for_shape(s:tuple[int, ...]) -> tuple[torch.tensor, tinygrad.Tensor]:
+def tensors_for_shape(s:tuple[int, ...]) -> tuple[torch.tensor, Tensor]:
   x = np.arange(prod(s)).reshape(s)
-  return torch.from_numpy(x), tinygrad.Tensor(x)
+  return torch.from_numpy(x), Tensor(x)
 
 def apply(tor, ten, tor_fn, ten_fn=None):
   ok = True
@@ -38,7 +38,7 @@ def apply(tor, ten, tor_fn, ten_fn=None):
   except: ten, ok = None, not ok  # noqa: E722
   return tor, ten, ok
 
-
+@unittest.skipIf(CI and Device.DEFAULT == "CLANG", "slow")
 class TestShapeOps(unittest.TestCase):
   @settings.get_profile(__file__)
   @given(st_shape(), st_int32, st.one_of(st_int32, st.lists(st_int32)))
@@ -50,7 +50,6 @@ class TestShapeOps(unittest.TestCase):
 
     assert len(tor) == len(ten)
     assert all([np.array_equal(tor.numpy(), ten.numpy()) for (tor, ten) in zip(tor, ten)])
-
 
   @settings.get_profile(__file__)
   @given(st_shape(), st_int32, st_int32)

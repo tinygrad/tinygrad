@@ -2,6 +2,7 @@
 
 import os, sys
 os.environ["CLANG"] = '1'
+os.environ["JIT"] = '2'
 
 import numpy as np
 import subprocess

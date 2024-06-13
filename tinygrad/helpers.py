@@ -1,7 +1,6 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string, ctypes
-import itertools, urllib.request
-from tqdm import tqdm
+import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string, ctypes, sys
+import itertools, urllib.request, subprocess, shutil, math
 from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Sequence
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
@@ -84,18 +83,34 @@ class Context(contextlib.ContextDecorator):
 class ContextVar:
   _cache: ClassVar[Dict[str, ContextVar]] = {}
   value: int
+  key: str
   def __new__(cls, key, default_value):
     if key in ContextVar._cache: return ContextVar._cache[key]
     instance = ContextVar._cache[key] = super().__new__(cls)
-    instance.value = getenv(key, default_value)
+    instance.value, instance.key = getenv(key, default_value), key
     return instance
   def __bool__(self): return bool(self.value)
   def __ge__(self, x): return self.value >= x
   def __gt__(self, x): return self.value > x
   def __lt__(self, x): return self.value < x
 
-DEBUG, IMAGE, WINO, BEAM, NOOPT = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0), ContextVar("WINO", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0)
-GRAPH, GRAPHPATH = ContextVar("GRAPH", 0), getenv("GRAPHPATH", "/tmp/net")
+DEBUG, IMAGE, BEAM, NOOPT, JIT = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0), ContextVar("JIT", 1)
+WINO, THREEFRY, CACHECOLLECTING = ContextVar("WINO", 0), ContextVar("THREEFRY", 0), ContextVar("CACHECOLLECTING", 1)
+GRAPH, GRAPHPATH, SAVE_SCHEDULE, RING = ContextVar("GRAPH", 0), getenv("GRAPHPATH", "/tmp/net"), ContextVar("SAVE_SCHEDULE", 0), ContextVar("RING", 1)
+MULTIOUTPUT = ContextVar("MULTIOUTPUT", 1)
+
+# **************** global state Counters ****************
+
+class GlobalCounters:
+  global_ops: ClassVar[int] = 0
+  global_mem: ClassVar[int] = 0
+  time_sum_s: ClassVar[float] = 0.0
+  kernel_count: ClassVar[int] = 0
+  mem_used: ClassVar[int] = 0   # NOTE: this is not reset
+  @staticmethod
+  def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count = 0,0,0.0,0
+
+# **************** timer and profiler ****************
 
 class Timing(contextlib.ContextDecorator):
   def __init__(self, prefix="", on_exit=None, enabled=True): self.prefix, self.on_exit, self.enabled = prefix, on_exit, enabled
@@ -129,7 +144,7 @@ _cache_dir: str = getenv("XDG_CACHE_HOME", os.path.expanduser("~/Library/Caches"
 CACHEDB: str = getenv("CACHEDB", os.path.abspath(os.path.join(_cache_dir, "tinygrad", "cache.db")))
 CACHELEVEL = getenv("CACHELEVEL", 2)
 
-VERSION = 12
+VERSION = 16
 _db_connection = None
 def db_connection():
   global _db_connection
@@ -138,6 +153,11 @@ def db_connection():
     _db_connection = sqlite3.connect(CACHEDB)
     if DEBUG >= 7: _db_connection.set_trace_callback(print)
   return _db_connection
+
+def diskcache_clear():
+  cur = db_connection().cursor()
+  drop_tables = cur.execute("SELECT 'DROP TABLE IF EXISTS ' || quote(name) || ';' FROM sqlite_master WHERE type = 'table';").fetchall()
+  cur.executescript("\n".join([s[0] for s in drop_tables]))
 
 def diskcache_get(table:str, key:Union[Dict, str, int]) -> Any:
   if CACHELEVEL == 0: return None
@@ -183,7 +203,7 @@ def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, allow_caching=n
     with urllib.request.urlopen(url, timeout=10) as r:
       assert r.status == 200
       total_length = int(r.headers.get('content-length', 0))
-      progress_bar = tqdm(total=total_length, unit='B', unit_scale=True, desc=url)
+      progress_bar = tinytqdm(total=total_length, unit='B', unit_scale=True, desc=f"{url}: ")
       (path := fp.parent).mkdir(parents=True, exist_ok=True)
       with tempfile.NamedTemporaryFile(dir=path, delete=False) as f:
         while chunk := r.read(16384): progress_bar.update(f.write(chunk))
@@ -199,10 +219,16 @@ def cpu_time_execution(cb, enable):
   cb()
   if enable: return time.perf_counter()-st
 
+def cpu_objdump(lib):
+  with tempfile.NamedTemporaryFile(delete=True) as f:
+    pathlib.Path(f.name).write_bytes(lib)
+    print(subprocess.check_output(['objdump', '-d', f.name]).decode('utf-8'))
+
 # *** ctypes helpers
 
 # TODO: make this work with read only memoryviews (if possible)
-def from_mv(mv:memoryview, to_type=ctypes.c_char): return ctypes.cast(ctypes.addressof(to_type.from_buffer(mv)), ctypes.POINTER(to_type))
+def from_mv(mv:memoryview, to_type=ctypes.c_char):
+  return ctypes.cast(ctypes.addressof(to_type.from_buffer(mv)), ctypes.POINTER(to_type * len(mv))).contents
 def to_mv(ptr, sz) -> memoryview: return memoryview(ctypes.cast(ptr, ctypes.POINTER(ctypes.c_uint8 * sz)).contents).cast("B")
 def to_char_p_p(options: List[bytes], to_type=ctypes.c_char): return (ctypes.POINTER(to_type) * len(options))(*[ctypes.cast(ctypes.create_string_buffer(o), ctypes.POINTER(to_type)) for o in options])  # noqa: E501
 @functools.lru_cache(maxsize=None)
@@ -213,19 +239,27 @@ def init_c_struct_t(fields: Tuple[Tuple[str, ctypes._SimpleCData], ...]):
 def init_c_var(ctypes_var, creat_cb): return (creat_cb(ctypes_var), ctypes_var)[1]
 def flat_mv(mv:memoryview): return mv if len(mv) == 0 else mv.cast("B", shape=(mv.nbytes,))
 
-# *** Helpers for CUDA-like APIs.
-
-def encode_args_cuda_style(bufs, vals, device_ptr_t, marks) -> Tuple[ctypes.Array, ctypes.Structure]:
-  c_args = init_c_struct_t(tuple([(f'f{i}', device_ptr_t) for i in range(len(bufs))] + [(f'f{i}', ctypes.c_int) for i in range(len(bufs), len(bufs)+len(vals))]))(*bufs, *vals)  # noqa: E501
-  return (ctypes.c_void_p * 5)(ctypes.c_void_p(marks[0]), ctypes.cast(ctypes.pointer(c_args), ctypes.c_void_p), ctypes.c_void_p(marks[1]), ctypes.cast(ctypes.pointer(ctypes.c_size_t(ctypes.sizeof(c_args))), ctypes.c_void_p), ctypes.c_void_p(marks[2])), c_args  # noqa: E501
-
-def time_execution_cuda_style(cb, ev_t, evcreate, evrecord, evsync, evdestroy, evtime, enable=False) -> Optional[float]:
-  if not enable: return cb()
-  evs = [init_c_var(ev_t(), lambda x: evcreate(ctypes.byref(x), 0)) for _ in range(2)]
-  evrecord(evs[0], None)
-  cb()
-  evrecord(evs[1], None)
-  evsync(evs[1])
-  evtime(ctypes.byref(ret := ctypes.c_float()), evs[0], evs[1])
-  for ev in evs: evdestroy(ev)
-  return ret.value * 1e-3
+class tinytqdm:
+  def __init__(self, iterable=None, desc:str='', disable:bool=False, unit:str='it', unit_scale=False, total:int=-1, rate:int=100):
+    self.iter, self.desc, self.dis, self.unit, self.unit_scale, self.rate = iterable, desc, disable, unit, unit_scale, rate
+    self.st, self.i, self.n, self.skip, self.t= time.perf_counter(), -1, 0, 1, len(iterable) if total==-1 else total
+    self.update(0)
+  def __iter__(self):
+    try:
+      for item in self.iter:
+        yield item
+        self.update(1)
+    finally: self.update(close=True)
+  def update(self, n:int=0, close:bool=False):
+    self.n, self.i, close = self.n+n, self.i+1, close or (self.n+n == self.t)
+    if (self.i % self.skip != 0 and not close) or self.dis: return
+    prog, dur, term = self.n/self.t, time.perf_counter()-self.st, shutil.get_terminal_size().columns
+    if self.i/dur > self.rate and self.i: self.skip = max(int(self.i/dur)//self.rate,1) if self.i else 1
+    def fmt(t): return ':'.join([f'{x:02d}' for x in divmod(int(t), 60)]) if t!=-1 else '?'
+    def scl(x): return x/1000**int(math.log(x,1000))
+    def fn(x): return (f"{scl(x):.{3-math.ceil(math.log10(scl(x)))}f}"[:4]+(f"{[' ','k','M','G','T','P'][int(math.log(x,1000))]}") if x else '0.00')
+    unit_text = f"{fn(self.n)}/{fn(self.t)}" if self.unit_scale else f"{self.n}/{self.t}"
+    it_text = f"{fn(self.n/dur)}" if self.n and self.unit_scale else f"{self.n/dur:5.2f}" if self.n else "?"
+    suf = f'| {unit_text} [{fmt(dur)}<{fmt(dur/self.n*self.t-dur if self.n else -1)}, {it_text}{self.unit}/s]'
+    sz = max(term-5-len(suf)-len(self.desc), 1)
+    print(f'\r{self.desc}{round(100*prog):3}%|{"█"*round(sz*prog)}{" "*(sz-round(sz*prog))}{suf}'[:term+1],flush=True,end='\n'*close,file=sys.stderr)

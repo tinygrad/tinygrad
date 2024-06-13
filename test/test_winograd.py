@@ -3,7 +3,7 @@ from tinygrad import Tensor, GlobalCounters
 from tinygrad.helpers import Timing, CI, Profiling, WINO, DEBUG
 from tinygrad.ops import LoadOps
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.realize import create_schedule
+from tinygrad.engine.schedule import create_schedule
 
 class TestWinograd(unittest.TestCase):
   def setUp(self):
@@ -23,10 +23,10 @@ class TestWinograd(unittest.TestCase):
       sched = create_schedule([out.lazydata])
 
     for i,s in enumerate(sched):
-      if s.ast.op in LoadOps: continue
-      ops = s.ast.lazyops
+      if s.ast[0].op in LoadOps: continue
+      ops = [out.lazyops for out in s.ast]
       with Timing(f"linearize {i} with {len(ops):4d} ops: "):
-        l = Linearizer(s.ast)
+        l = Linearizer(*s.ast)
         l.hand_coded_optimizations()
         l.linearize()
       assert len(l.sts) <= 256  # just the current value to prevent regression
@@ -63,10 +63,9 @@ class TestWinograd(unittest.TestCase):
     ops_normal, mem_normal = GlobalCounters.global_ops, GlobalCounters.global_mem
 
     ops_ratio, mem_ratio = ops_wino/ops_normal, mem_wino/mem_normal
-    assert ops_ratio < 2 and mem_ratio < 10
-
     print(f"ops: normal {ops_normal:9d} wino {ops_wino:9d} ratio {ops_ratio:.2f}")
     print(f"mem: normal {mem_normal:9d} wino {mem_wino:9d} ratio {mem_ratio:.2f}")
+    assert ops_ratio < 2 and mem_ratio < 10
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

@@ -43,9 +43,9 @@ from tinygrad.ops import LazyOp, BufferOps, MemBuffer, BinaryOps
 from tinygrad.shape.shapetracker import ShapeTracker
 
 # allocate some buffers + load in values
-out = Buffer(DEVICE, 1, dtypes.int32)
-a = Buffer(DEVICE, 1, dtypes.int32).copyin(memoryview(bytearray(struct.pack("I", 2))))
-b = Buffer(DEVICE, 1, dtypes.int32).copyin(memoryview(bytearray(struct.pack("I", 3))))
+out = Buffer(DEVICE, 1, dtypes.int32).allocate()
+a = Buffer(DEVICE, 1, dtypes.int32).allocate().copyin(memoryview(bytearray(struct.pack("I", 2))))
+b = Buffer(DEVICE, 1, dtypes.int32).allocate().copyin(memoryview(bytearray(struct.pack("I", 3))))
 # NOTE: a._buf is the same as the return from MallocAllocator.alloc
 
 # describe the computation
@@ -55,12 +55,13 @@ alu = LazyOp(BinaryOps.ADD, (ld_1, ld_2))
 st_0 = LazyOp(BufferOps.STORE, (alu,), MemBuffer(0, dtypes.int32, ShapeTracker.from_shape((1,))))
 
 # convert the computation to a "linearized" format (print the format)
-lin = Device[DEVICE].get_linearizer(st_0).linearize()
+from tinygrad.engine.realize import get_linearizer, CompiledRunner
+lin = get_linearizer(Device[DEVICE].renderer, (st_0,)).linearize()
 for u in lin.uops: print(u)
 
 # compile a program (and print the source)
-fxn = Device[DEVICE].to_program(lin)
-print(fxn.prg)
+fxn = CompiledRunner(lin.to_program())
+print(fxn.p.src)
 # NOTE: fxn.clprg is the ClangProgram
 
 # run the program
@@ -73,24 +74,27 @@ assert out.as_buffer().cast('I')[0] == 5
 print("******** third, the LazyBuffer ***********")
 
 from tinygrad.lazy import LazyBuffer, LoadOps
-from tinygrad.realize import run_schedule, create_schedule
+from tinygrad.engine.realize import run_schedule
+from tinygrad.engine.schedule import create_schedule
 
 # allocate some values + load in values
 a = LazyBuffer.loadop(LoadOps.EMPTY, (1,), dtypes.int32, DEVICE)
 b = LazyBuffer.loadop(LoadOps.EMPTY, (1,), dtypes.int32, DEVICE)
-a.realized = Buffer(DEVICE, 1, dtypes.int32).copyin(memoryview(bytearray(struct.pack("I", 2))))
-b.realized = Buffer(DEVICE, 1, dtypes.int32).copyin(memoryview(bytearray(struct.pack("I", 3))))
+a.buffer.allocate().copyin(memoryview(bytearray(struct.pack("I", 2))))
+b.buffer.allocate().copyin(memoryview(bytearray(struct.pack("I", 3))))
+del a.srcs
+del b.srcs
 
 # describe the computation
 out = a.e(BinaryOps.ADD, b)
 
 # schedule the computation as a list of kernels
 sched = create_schedule([out])
-for si in sched: print(si.ast.op)  # NOTE: the first two convert it to CLANG
+for si in sched: print(si.ast[0].op)  # NOTE: the first two convert it to CLANG
 
 # DEBUGGING: print the compute ast as a tree
-from tinygrad.features.graph import print_tree
-print_tree(sched[-1].ast)
+from tinygrad.engine.graph import print_tree
+print_tree(sched[-1].ast[0])
 # NOTE: sched[-1].ast is the same as st_0 above
 
 # run that schedule

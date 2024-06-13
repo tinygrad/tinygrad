@@ -1,18 +1,15 @@
 from __future__ import annotations
 import ctypes, functools
 from typing import Tuple
-from tinygrad.device import Compiled, MallocAllocator, Compiler
-from tinygrad.helpers import DEBUG, cpu_time_execution
-from tinygrad.codegen.kernel import LinearizerOptions
-from tinygrad.renderer.llvmir import uops_to_llvm_ir
+from tinygrad.device import Compiled, Compiler, MallocAllocator
+from tinygrad.helpers import DEBUG, cpu_time_execution, cpu_objdump
+from tinygrad.renderer.llvmir import LLVMRenderer
 import llvmlite.binding as llvm
 
 class LLVMCompiler(Compiler):
-  linearizer_opts = LinearizerOptions("LLVM", supports_float4=False, has_local=False, has_shared=False)
   def __init__(self, device:LLVMDevice):
     self.device = device
     super().__init__("compile_llvm")
-  def render(self, name:str, uops) -> str: return uops_to_llvm_ir(name, uops)
   def compile(self, src:str) -> bytes:
     mod = llvm.parse_assembly(src)
     mod.verify()
@@ -22,12 +19,14 @@ class LLVMCompiler(Compiler):
 
 class LLVMProgram:
   def __init__(self, device:LLVMDevice, name:str, lib:bytes):
+    if DEBUG >= 6: cpu_objdump(lib)
     self.name, self.lib = name, lib
     device.engine.add_object_file(llvm.object_file.ObjectFileRef.from_data(lib))
     self.fxn = device.engine.get_function_address(name)
 
   def __call__(self, *bufs, vals:Tuple[int, ...]=(), wait=False):
-    self.cfunc = ctypes.CFUNCTYPE(ctypes.c_int, *([ctypes.c_void_p]*len(bufs)), *([ctypes.c_int32]*len(vals)))(self.fxn)
+    if not hasattr(self, 'cfunc'):
+      self.cfunc = ctypes.CFUNCTYPE(ctypes.c_int, *([ctypes.c_void_p]*len(bufs)), *([ctypes.c_int32]*len(vals)))(self.fxn)
     return cpu_time_execution(lambda: self.cfunc(*bufs, *vals), enable=wait)
 
 class LLVMDevice(Compiled):
@@ -44,4 +43,4 @@ class LLVMDevice(Compiled):
     backing_mod = llvm.parse_assembly(str())
     backing_mod.triple = llvm.get_process_triple()
     self.engine: llvm.executionengine.ExecutionEngine = llvm.create_mcjit_compiler(backing_mod, self.target_machine)
-    super().__init__(device, MallocAllocator, LLVMCompiler(self), functools.partial(LLVMProgram, self))
+    super().__init__(device, MallocAllocator, LLVMRenderer(), LLVMCompiler(self), functools.partial(LLVMProgram, self))

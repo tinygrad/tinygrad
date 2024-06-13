@@ -4,7 +4,8 @@ from examples.llama import Transformer, MODEL_PARAMS
 from tinygrad.tensor import Tensor
 from tinygrad import Device
 from tinygrad.nn.state import get_state_dict
-from tinygrad.device import Compiled, Allocator
+from tinygrad.device import Allocator
+from tinygrad.engine.realize import method_cache
 from tinygrad.helpers import Profiling
 
 class FakeProgram:
@@ -12,11 +13,10 @@ class FakeProgram:
   def __call__(self, *bufs, global_size, local_size, vals=(), wait=False): pass
 
 class FakeAllocator(Allocator):
-  def _alloc(self, sz): return None
+  def _alloc(self, sz, options): return None
   def copyin(self, dest, src:memoryview): pass
 
 class TestLLaMASpeed(unittest.TestCase):
-  @unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "only test for compiled backends")
   def test_llama_compile(self):
     backup_program = Device[Device.DEFAULT].runtime
     backup_allocator = Device[Device.DEFAULT].allocator
@@ -32,7 +32,7 @@ class TestLLaMASpeed(unittest.TestCase):
     print("assigned empty tensors, doing warmup")
 
     def run_llama(st, empty_method_cache=True):
-      if empty_method_cache: Device[Device.DEFAULT].get_runner.cache_clear()
+      if empty_method_cache: method_cache.clear()
       tms = [time.perf_counter()]
       for i in range(5):
         model(Tensor([[1,2,3,4]]), i).realize()

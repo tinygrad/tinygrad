@@ -1,5 +1,5 @@
 from tinygrad.tensor import Tensor
-from tinygrad.features.jit import TinyJit
+from tinygrad.engine.jit import TinyJit
 from tinygrad.nn import Linear, Embedding
 from tinygrad.helpers import fetch
 import numpy as np
@@ -145,7 +145,7 @@ class LSTM:
     new_hc = [x]
     for i, cell in enumerate(self.cells):
       new_hc.append(cell(new_hc[i][:x.shape[0]], hc[i]))
-    return Tensor.stack(new_hc[1:]).realize()
+    return Tensor.stack(*new_hc[1:]).realize()
 
 
 class StackTime:

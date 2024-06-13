@@ -1,6 +1,6 @@
 from typing import List, Tuple
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.features.search import get_linearizer_actions, actions
+from tinygrad.engine.search import get_linearizer_actions, actions
 
 _net = None
 def beam_q_estimate(beam:List[Tuple[Linearizer, float]]) -> List[Tuple[Linearizer, float]]:

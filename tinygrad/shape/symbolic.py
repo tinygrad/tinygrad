@@ -51,12 +51,12 @@ class Node:
   def __rfloordiv__(self, b:int): return NumNode(b) // self
   def __floordiv__(self, b:Union[Node,int], factoring_allowed=True):
     if isinstance(b, Node):
-      if b.__class__ is NumNode: return self // b.b
+      if b.__class__ is NumNode: return self.__floordiv__(b.b, factoring_allowed)
       if self == b: return NumNode(1)
       if (b - self).min > 0 and self.min >= 0: return NumNode(0) # b - self simplifies the node
       raise RuntimeError(f"not supported: {self} // {b}")
     assert b != 0
-    if b < 0: return (self*-1)//-b
+    if b < 0: return (self*-1).__floordiv__(-b, factoring_allowed)
     if b == 1: return self
 
     # the numerator of div is not allowed to be negative
@@ -257,12 +257,15 @@ class SumNode(RedNode):
     divisor = 1
     for x in self.flat_components:
       if x.__class__ in (NumNode, MulNode):
-        if x.b%b == 0: fully_divided.append(x//b)
+        if x.b % b == 0: fully_divided.append(x // b)
         else:
+          if x.__class__ is NumNode and (div := x.b // b):
+            fully_divided.append(NumNode(div))
+            x = NumNode(x.b - b * div)
           rest.append(x)
           if isinstance(x.b, int):
             _gcd = gcd(_gcd, x.b)
-            if x.__class__ == MulNode and divisor == 1 and b%x.b == 0: divisor = x.b
+            if x.__class__ == MulNode and divisor == 1 and b % x.b == 0: divisor = x.b
           else:
             _gcd = 1
       else:
@@ -297,9 +300,9 @@ class AndNode(RedNode):
     return Node.ands(subed)
 
 def sym_render(a: Union[Node, int], ops=None, ctx=None) -> str: return str(a) if isinstance(a, int) else a.render(ops, ctx)
-def sym_infer(a: Union[Node, int], var_vals: Dict[Variable, int]) -> int:
+def sym_infer(a: Union[Node, int], var_vals: Optional[Dict[Variable, int]]) -> int:
   if isinstance(a, (int, float)): return a
-  ret = a.substitute({k:NumNode(v) for k, v in var_vals.items()})
+  ret = a.substitute({k:NumNode(v) for k, v in var_vals.items()}) if var_vals is not None else a
   assert isinstance(ret, NumNode), f"sym_infer didn't produce NumNode from {a} with {var_vals}"
   return ret.b
 

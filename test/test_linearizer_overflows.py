@@ -1,10 +1,10 @@
 # ruff: noqa: E501
 import unittest
-from tinygrad import dtypes
+from tinygrad import dtypes, Device
 from tinygrad.helpers import CI
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.features.search import Opt, OptOps
-from tinygrad.features.search import time_linearizer, bufs_from_lin
+from tinygrad.engine.search import Opt, OptOps
+from tinygrad.engine.search import time_linearizer, bufs_from_lin
 
 # stuff needed to unpack a kernel
 from tinygrad.ops import LazyOp, BinaryOps, UnaryOps, ReduceOps, BufferOps, MemBuffer, ConstBuffer
@@ -17,7 +17,6 @@ def _test_overflow(ast, opts):
   lin.linearize()
   bufs = bufs_from_lin(lin)
   print(bufs)
-  if bufs[0].device in {"HIP", "HSA"}: print([hex(x._buf.value) for x in bufs])
   time_linearizer(lin, bufs)
 
 # NOTE: if you want these to trigger, set launch bounds on HIP kernels
@@ -64,7 +63,7 @@ class TestLinearizerOverflow(unittest.TestCase):
     opts = [Opt(op=OptOps.UPCAST, axis=3, amt=4), Opt(op=OptOps.LOCAL, axis=3, amt=16), Opt(op=OptOps.UPCAST, axis=1, amt=4), Opt(op=OptOps.LOCAL, axis=2, amt=8), Opt(op=OptOps.UPCAST, axis=1, amt=2), Opt(op=OptOps.UPCAST, axis=2, amt=4)]
     _test_overflow(ast, opts)
 
-#@unittest.skipIf(Device.DEFAULT not in {"GPU", "HIP", "HSA", "CUDA", "METAL"}, "only backends with locals")
+@unittest.skipIf(Device.DEFAULT not in {"GPU", "HSA", "CUDA", "METAL"}, "only backends with locals")
 @unittest.skipIf(CI, "slow")
 class TestLinearizerOverflowAlt(unittest.TestCase):
   def test_overflow_1(self):

@@ -34,7 +34,7 @@ def preprocess(im, imgsz=640, model_stride=32, model_pt=True):
   same_shapes = all(x.shape == im[0].shape for x in im)
   auto = same_shapes and model_pt
   im = Tensor([compute_transform(x, new_shape=imgsz, auto=auto, stride=model_stride) for x in im])
-  im = Tensor.stack(im) if im.shape[0] > 1 else im
+  im = Tensor.stack(*im) if im.shape[0] > 1 else im
   im = im[..., ::-1].permute(0, 3, 1, 2)  # BGR to RGB, BHWC to BCHW, (n, 3, h, w)
   im /= 255  # 0 - 255 to 0.0 - 1.0
   return im
@@ -180,7 +180,7 @@ def make_anchors(feats, strides, grid_cell_offset=0.5):
     sx = sx.reshape(1, -1).repeat([h, 1]).reshape(-1)
     sy = sy.reshape(-1, 1).repeat([1, w]).reshape(-1)
 
-    anchor_points.append(Tensor.stack((sx, sy), -1).reshape(-1, 2))
+    anchor_points.append(Tensor.stack(sx, sy, dim=-1).reshape(-1, 2))
     stride_tensor.append(Tensor.full((h * w), stride))
   anchor_points = anchor_points[0].cat(anchor_points[1], anchor_points[2])
   stride_tensor = stride_tensor[0].cat(stride_tensor[1], stride_tensor[2]).unsqueeze(1)
@@ -295,7 +295,7 @@ class DFL:
   def __init__(self, c1=16):
     self.conv = Conv2d(c1, 1, 1, bias=False)
     x = Tensor.arange(c1)
-    self.conv.weight.assign(x.reshape(1, c1, 1, 1))
+    self.conv.weight.replace(x.reshape(1, c1, 1, 1))
     self.c1 = c1
 
   def __call__(self, x):
@@ -401,13 +401,13 @@ if __name__ == '__main__':
   #absolute image path or URL
   image_location = [np.frombuffer(fetch(img_path).read_bytes(), np.uint8)]
   image = [cv2.imdecode(image_location[0], 1)]
-  out_paths = [(output_folder_path / f"{Path(img_path).stem}_output{Path(img_path).suffix}").as_posix()]
+  out_paths = [(output_folder_path / f"{Path(img_path).stem}_output{Path(img_path).suffix or '.png'}").as_posix()]
   if not isinstance(image[0], np.ndarray):
     print('Error in image loading. Check your image file.')
     sys.exit(1)
   pre_processed_image = preprocess(image)
 
-  # Different YOLOv8 variants use different w , r, and d multiples. For a list , refer to this yaml file (the scales section) https://github.com/ultralytics/ultralytics/blob/main/ultralytics/models/v8/yolov8.yaml
+  # Different YOLOv8 variants use different w , r, and d multiples. For a list , refer to this yaml file (the scales section) https://github.com/ultralytics/ultralytics/blob/main/ultralytics/cfg/models/v8/yolov8.yaml
   depth, width, ratio = get_variant_multiples(yolo_variant)
   yolo_infer = YOLOv8(w=width, r=ratio, d=depth, num_classes=80)
 

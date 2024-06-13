@@ -6,7 +6,7 @@
 # POINTER_SIZE is: 8
 # LONGDOUBLE_SIZE is: 16
 #
-import ctypes
+import ctypes, os
 
 
 class AsDictMixin:
@@ -155,7 +155,7 @@ def char_pointer_cast(string, encoding='utf-8'):
 
 
 
-_libraries['libamdhip64.so'] = ctypes.CDLL('/opt/rocm/lib/libamdhip64.so')
+_libraries['libamdhip64.so'] = ctypes.CDLL(os.getenv('ROCM_PATH', '/opt/rocm/')+'/lib/libamdhip64.so')
 
 
 

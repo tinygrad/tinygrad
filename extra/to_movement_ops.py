@@ -1,12 +1,15 @@
 from tqdm import tqdm
 import itertools
+from enum import Enum, auto
 from collections import defaultdict
 from typing import List, Tuple, DefaultDict
 from extra.optimization.helpers import load_worlds, ast_str_to_ast
-from tinygrad.ops import MovementOps, BufferOps, LazyOp
+from tinygrad.ops import BufferOps, LazyOp
 from tinygrad.helpers import prod
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import sym_infer, Node
+
+class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto(); AS_STRIDED = auto() # noqa: E702
 
 def apply_mop(st: ShapeTracker, mop_arg: Tuple[MovementOps, Tuple]) -> ShapeTracker:
   mop, arg = mop_arg
@@ -132,16 +135,16 @@ def test_rebuild(st: ShapeTracker):
   last_v2 = rebuilt_st.views[-1]
   assert last_v1.shape == last_v2.shape, f"{last_v1.shape} != {last_v2.shape}"
 
-def test_interpret_ast(ast:LazyOp):
+def test_rebuild_bufferop_st(ast:LazyOp):
   if ast.op in BufferOps:
     test_rebuild(ast.arg.st)
-  else:
-    for src in ast.src: test_interpret_ast(src)
+    for src in ast.src: test_rebuild_bufferop_st(src)
 
 
 if __name__ == "__main__":
-  ast_strs = load_worlds(False, False, True)[:4000]
+  ast_strs = load_worlds(False, False, True)[:2000]
   for ast_str in tqdm(ast_strs):
-    test_interpret_ast(ast_str_to_ast(ast_str))
+    for ast in ast_str_to_ast(ast_str):
+      test_rebuild_bufferop_st(ast)
 
   print(f"avg length of mop = {sum(k*v for k,v in c.items()) / sum(c.values()):.2f}")

@@ -5,50 +5,43 @@
 # https://siboehm.com/articles/22/CUDA-MMM
 import random, time
 import numpy as np
-from typing import Optional, List
+from typing import Optional
 from extra.datasets import fetch_cifar, cifar_mean, cifar_std
 from extra.lr_scheduler import OneCycleLR
 from tinygrad import nn, dtypes, Tensor, Device, GlobalCounters, TinyJit
 from tinygrad.nn.state import get_state_dict, get_parameters
 from tinygrad.nn import optim
 from tinygrad.helpers import Context, BEAM, WINO, getenv, colored, prod
-from tinygrad.features.multi import MultiLazyBuffer
+from tinygrad.multi import MultiLazyBuffer
 
 BS, STEPS = getenv("BS", 512), getenv("STEPS", 1000)
 EVAL_BS = getenv("EVAL_BS", BS)
 GPUS = [f'{Device.DEFAULT}:{i}' for i in range(getenv("GPUS", 1))]
 assert BS % len(GPUS) == 0, f"{BS=} is not a multiple of {len(GPUS)=}, uneven multi GPU is slow"
 assert EVAL_BS % len(GPUS) == 0, f"{EVAL_BS=} is not a multiple of {len(GPUS)=}, uneven multi GPU is slow"
-for x in GPUS: Device[x]
-
-if getenv("HALF"):
-  dtypes.default_float = dtypes.float16
-  np_dtype = np.float16
-else:
-  dtypes.default_float = dtypes.float32
-  np_dtype = np.float32
 
 class UnsyncedBatchNorm:
   def __init__(self, sz:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1, num_devices=len(GPUS)):
     self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
     self.num_devices = num_devices
 
-    if affine: self.weight, self.bias = Tensor.ones(sz), Tensor.zeros(sz)
+    if affine: self.weight, self.bias = Tensor.ones(sz, dtype=dtypes.float32), Tensor.zeros(sz, dtype=dtypes.float32)
     else: self.weight, self.bias = None, None
 
-    self.running_mean, self.running_var = Tensor.zeros(num_devices, sz, requires_grad=False), Tensor.ones(num_devices, sz, requires_grad=False)
-    self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
+    self.running_mean = Tensor.zeros(num_devices, sz, dtype=dtypes.float32, requires_grad=False)
+    self.running_var = Tensor.ones(num_devices, sz, dtype=dtypes.float32, requires_grad=False)
+    self.num_batches_tracked = Tensor.zeros(1, dtype=dtypes.int, requires_grad=False)
 
   def __call__(self, x:Tensor):
     if isinstance(x.lazydata, MultiLazyBuffer): assert x.lazydata.axis is None or x.lazydata.axis == 0 and len(x.lazydata.lbs) == self.num_devices
 
-    rshape, x = x.shape, x.reshape(self.num_devices, -1, *x.shape[1:])
-    batch_mean, batch_invstd = self.calc_stats(x)
-    ret = x.batchnorm(
+    xr = x.reshape(self.num_devices, -1, *x.shape[1:]).cast(dtypes.float32)
+    batch_mean, batch_invstd = self.calc_stats(xr)
+    ret = xr.batchnorm(
       self.weight.reshape(1, -1).expand((self.num_devices, -1)),
       self.bias.reshape(1, -1).expand((self.num_devices, -1)),
       batch_mean, batch_invstd, axis=(0, 2))
-    return ret.reshape(rshape)
+    return ret.reshape(x.shape).cast(x.dtype)
 
   def calc_stats(self, x:Tensor):
     if Tensor.training:
@@ -56,14 +49,15 @@ class UnsyncedBatchNorm:
       # https://github.com/pytorch/pytorch/blob/c618dc13d2aa23625cb0d7ada694137532a4fa33/aten/src/ATen/native/cuda/Normalization.cuh
       # There's "online" algorithms that fix this, like https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_Online_algorithm
       batch_mean = x.mean(axis=(1,3,4))
-      y = (x - batch_mean.reshape(shape=[batch_mean.shape[0], 1, -1, 1, 1]))
+      y = (x - batch_mean.detach().reshape(shape=[batch_mean.shape[0], 1, -1, 1, 1]))  # d(var)/d(mean) = 0
       batch_var = (y*y).mean(axis=(1,3,4))
       batch_invstd = batch_var.add(self.eps).pow(-0.5)
 
       # NOTE: wow, this is done all throughout training in most PyTorch models
       if self.track_running_stats:
-        self.running_mean.assign((1-self.momentum) * self.running_mean + self.momentum * batch_mean.detach())
-        self.running_var.assign((1-self.momentum) * self.running_var + self.momentum * prod(y.shape[1:])/(prod(y.shape[1:])-y.shape[2]) * batch_var.detach())
+        self.running_mean.assign((1-self.momentum) * self.running_mean + self.momentum * batch_mean.detach().cast(self.running_mean.dtype))
+        batch_var_adjust = prod(y.shape[1:])/(prod(y.shape[1:])-y.shape[2])
+        self.running_var.assign((1-self.momentum) * self.running_var + self.momentum * batch_var_adjust * batch_var.detach().cast(self.running_var.dtype))
         self.num_batches_tracked += 1
     else:
       batch_mean = self.running_mean
@@ -158,7 +152,6 @@ def train_cifar():
     random.seed(seed)
 
   # ========== Model ==========
-  # NOTE: np.linalg.eigh only supports float32 so the whitening layer weights need to be converted to float16 manually
   def whitening(X, kernel_size=hyp['net']['kernel_size']):
     def _cov(X):
       return (X.T @ X) / (X.shape[0] - 1)
@@ -175,10 +168,11 @@ def train_cifar():
       Λ, V = np.linalg.eigh(Σ, UPLO='U')
       return np.flip(Λ, 0), np.flip(V.T.reshape(c*h*w, c, h, w), 0)
 
-    Λ, V = _eigens(_patches(X.numpy()))
+    # NOTE: np.linalg.eigh only supports float32 so the whitening layer weights need to be converted to float16 manually
+    Λ, V = _eigens(_patches(X.float().numpy()))
     W = V/np.sqrt(Λ+1e-2)[:,None,None,None]
 
-    return Tensor(W.astype(np_dtype), requires_grad=False)
+    return Tensor(W.astype(np.float32), requires_grad=False).cast(dtypes.default_float)
 
   # ========== Loss ==========
   def cross_entropy(x:Tensor, y:Tensor, reduction:str='mean', label_smoothing:float=0.0) -> Tensor:
@@ -203,8 +197,8 @@ def train_cifar():
     BS, _, H, W = shape
     low_x = Tensor.randint(BS, low=0, high=W-mask_size).reshape(BS,1,1,1)
     low_y = Tensor.randint(BS, low=0, high=H-mask_size).reshape(BS,1,1,1)
-    idx_x = Tensor.arange(W).reshape((1,1,1,W))
-    idx_y = Tensor.arange(H).reshape((1,1,H,1))
+    idx_x = Tensor.arange(W, dtype=dtypes.int32).reshape((1,1,1,W))
+    idx_y = Tensor.arange(H, dtype=dtypes.int32).reshape((1,1,H,1))
     return (idx_x >= low_x) * (idx_x < (low_x + mask_size)) * (idx_y >= low_y) * (idx_y < (low_y + mask_size))
 
   def random_crop(X:Tensor, crop_size=32):
@@ -218,8 +212,8 @@ def train_cifar():
     mask = make_square_mask(X.shape, mask_size)
     order = list(range(0, X.shape[0]))
     random.shuffle(order)
-    X_patch = Tensor(X.numpy()[order], device=X.device)
-    Y_patch = Tensor(Y.numpy()[order], device=Y.device)
+    X_patch = Tensor(X.numpy()[order], device=X.device, dtype=X.dtype)
+    Y_patch = Tensor(Y.numpy()[order], device=Y.device, dtype=Y.dtype)
     X_cutmix = mask.where(X_patch, X)
     mix_portion = float(mask_size**2)/(X.shape[-2]*X.shape[-1])
     Y_cutmix = mix_portion * Y_patch + (1. - mix_portion) * Y
@@ -250,8 +244,8 @@ def train_cifar():
       for i in range(0, X.shape[0], BS):
         # pad the last batch  # TODO: not correct for test
         batch_end = min(i+BS, Y.shape[0])
-        x = Tensor(X[batch_end-BS:batch_end], device=X_in.device)
-        y = Tensor(Y[batch_end-BS:batch_end], device=Y_in.device)
+        x = Tensor(X[batch_end-BS:batch_end], device=X_in.device, dtype=X_in.dtype)
+        y = Tensor(Y[batch_end-BS:batch_end], device=Y_in.device, dtype=Y_in.dtype)
         step += 1
         yield x, y
       epoch += 1
@@ -259,7 +253,8 @@ def train_cifar():
 
   transform = [
     lambda x: x / 255.0,
-    lambda x: (x.reshape((-1,3,32,32)) - Tensor(cifar_mean).reshape((1,3,1,1)))/Tensor(cifar_std).reshape((1,3,1,1))
+    lambda x: x.reshape((-1,3,32,32)) - Tensor(cifar_mean, device=x.device, dtype=x.dtype).reshape((1,3,1,1)),
+    lambda x: x / Tensor(cifar_std, device=x.device, dtype=x.dtype).reshape((1,3,1,1)),
   ]
 
   class modelEMA():

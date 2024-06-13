@@ -9,11 +9,9 @@ torch.set_num_threads(1)
 import time
 import numpy as np
 np.set_printoptions(linewidth=160)
-from tinygrad import Device, GlobalCounters
-from tinygrad.tensor import Tensor
+from tinygrad import Tensor, Device, GlobalCounters, TinyJit
 from tinygrad.nn import Conv2d
 from tinygrad.helpers import colored, getenv, CI
-from tinygrad.features.jit import TinyJit
 
 IN_CHANS = [int(x) for x in getenv("IN_CHANS", "4,16,64").split(",")]
 
@@ -119,7 +117,7 @@ def helper_test_conv(bs, in_chans, out_chans, kernel_size, img_size_y, img_size_
   helper_test_generic(f"conv bs:{bs:3d} chans:{in_chans:3d} -> {out_chans:3d} k:{kernel_size}", f1, (torch_dat,), TinyJit(f2), (tiny_dat,))
 
 @unittest.skipIf(getenv("BIG") == 0, "no big tests")
-@unittest.skipIf(getenv("CUDACPU"), "no CUDACPU")
+@unittest.skipIf(getenv("CUDACPU") or getenv("MOCKGPU"), "no CUDACPU or MOCKGPUs")
 class TestBigSpeed(unittest.TestCase):
   def test_add(self):
     def f(a, b): return a+b
@@ -140,7 +138,7 @@ class TestBigSpeed(unittest.TestCase):
   def test_matvec_16384_4096(self): helper_test_matvec('matvec_16384_4096', 16384, 4096)
 
 @unittest.skipIf(getenv("BIG") == 1, "only big tests")
-@unittest.skipIf(getenv("CUDACPU"), "no CUDACPU")
+@unittest.skipIf(getenv("CUDACPU") or getenv("MOCKGPU"), "no CUDACPU or MOCKGPUs")
 class TestSpeed(unittest.TestCase):
   def test_sub(self):
     def f(a, b): return a-b

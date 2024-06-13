@@ -2,7 +2,8 @@ import unittest
 import time
 import numpy as np
 from tinygrad import Tensor, dtypes
-from tinygrad.realize import run_schedule, create_schedule, lower_schedule_item
+from tinygrad.engine.schedule import create_schedule
+from tinygrad.engine.realize import lower_schedule_item, run_schedule
 
 class TestFusionOp(unittest.TestCase):
   def test_contiguous_add(self):
@@ -18,7 +19,7 @@ class TestFusionOp(unittest.TestCase):
     out = (bt*2).expand(10,10).sum(1)
     sched = create_schedule([out.lazydata], None)
     run_schedule(sched)
-    outd = out.data().tolist()
+    outd = out.tolist()
     assert all(x == 20.0 for x in outd)
 
   def test_recursive_add(self):
@@ -26,9 +27,9 @@ class TestFusionOp(unittest.TestCase):
     a = Tensor([1,2,3,4])
     for _ in range(24): a = a + a
     sched = create_schedule([a.lazydata], None)
-    ji = lower_schedule_item(sched[-1])
+    ei = lower_schedule_item(sched[-1])
     self.assertLess(time.perf_counter()-st, 1.0)
-    assert len(ji.prg.splitlines()) < 250
+    assert len(ei.prg.p.src.splitlines()) < 250
 
   def test_recursive_add_cmp(self):
     st = time.perf_counter()

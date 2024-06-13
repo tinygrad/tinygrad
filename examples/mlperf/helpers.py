@@ -1,10 +1,40 @@
 from collections import OrderedDict
 import unicodedata
 import numpy as np
-from scipy import signal
+from tinygrad.nn import state
+from tinygrad.tensor import Tensor
+from tinygrad.helpers import getenv
+
+#
+# checkpointing utils
+#
+
+def invert_dict(d): return {v: k for k, v in reversed(d.items())}
+def dedup_dict(d): return invert_dict(invert_dict(d))
+# store each tensor into the first key it appears in
+def get_training_state(model, optimizer, scheduler):
+  # hack: let get_state_dict walk the tree starting with model, so that the checkpoint keys are
+  # readable and can be loaded as a model for eval
+  train_state = {'model': model, 'optimizer': optimizer, 'scheduler': scheduler}
+  return dedup_dict(state.get_state_dict(train_state))
+def load_training_state(model, optimizer, scheduler, state_dict):
+  # use fresh model to restore duplicate keys
+  train_state = {'model': model, 'optimizer': optimizer, 'scheduler': scheduler}
+  big_dict = state.get_state_dict(train_state)
+  # hack: put back the dupes
+  dupe_names = {}
+  for k, v in big_dict.items():
+    if v not in dupe_names:
+      dupe_names[v] = k
+      assert k in state_dict
+    state_dict[k] = state_dict[dupe_names[v]]
+  # scheduler contains optimizer and all params, load each weight only once
+  scheduler_state = {'scheduler': scheduler}
+  state.load_state_dict(scheduler_state, state_dict)
 
 def gaussian_kernel(n, std):
-  gaussian_1d = signal.gaussian(n, std)
+  from scipy import signal
+  gaussian_1d = signal.windows.gaussian(n, std)
   gaussian_2d = np.outer(gaussian_1d, gaussian_1d)
   gaussian_3d = np.outer(gaussian_2d, gaussian_1d)
   gaussian_3d = gaussian_3d.reshape(n, n, n)
@@ -162,3 +192,36 @@ def get_bert_qa_prediction(features, example, start_end_logits):
     orig_text = " ".join(orig_tokens)
     return _get_final_text(tok_text, orig_text)
   return "empty"
+
+def get_mlperf_bert_config():
+  """Config is BERT-large"""
+  return {
+    "attention_probs_dropout_prob": 0.1,
+    "hidden_dropout_prob": 0.1,
+    "hidden_size": 1024,
+    "intermediate_size": 4096,
+    "max_position_embeddings": 512,
+    "num_attention_heads": 16,
+    "num_hidden_layers": 24,
+    "type_vocab_size": 2,
+    "vocab_size": 30522
+  }
+
+def get_mlperf_bert_model(checkpoint_path:str):
+  from extra.models import bert
+  from examples.mlperf.initializers import LinearBert, EmbeddingBert, LayerNormBert
+
+  bert.Linear = LinearBert
+  bert.Embedding = EmbeddingBert 
+  bert.LayerNorm = LayerNormBert
+
+  from extra.models.bert import BertForPretraining
+  config = get_mlperf_bert_config()
+  if getenv("DISABLE_DROPOUT", 0):
+    config["hidden_dropout_prob"] = config["attention_probs_dropout_prob"] = 0.0
+  return BertForPretraining(**config).load_from_pretrained(checkpoint_path)
+
+def get_data_bert(GPUS:list[str], it):
+  data: dict[str, Tensor] = next(it)
+  for key in data.keys(): data[key].shard_(GPUS, axis=0)
+  return data

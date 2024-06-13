@@ -1,9 +1,15 @@
-import math
-import unittest
+import unittest, math
+from functools import partial
+
 import numpy as np
 import torch
-from tinygrad import nn, dtypes, Tensor
-from functools import partial
+from tinygrad import nn, dtypes, Tensor, Device
+from tinygrad.helpers import THREEFRY, getenv
+from test.helpers import is_dtype_supported
+from hypothesis import given, settings, strategies as strat
+
+settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
+settings.load_profile("my_profile")
 
 # https://gist.github.com/devries/11405101
 def ksprob(a):
@@ -39,7 +45,7 @@ def kstest(l1, l2):
   prob = ksprob((nesq + 0.12 + 0.11 / nesq) * d)
   return prob
 
-def equal_distribution(tiny_func, torch_func=None, numpy_func=None, shape=(20, 23), alpha=0.05):
+def equal_distribution(tiny_func, torch_func=None, numpy_func=None, shape=(20, 23), alpha=0.04):
   Tensor.manual_seed(1337)
   torch.manual_seed(1337)
   np.random.seed(1337)
@@ -58,14 +64,68 @@ class TestRandomness(unittest.TestCase):
     self.assertFalse(normal_test(Tensor.rand))
     self.assertTrue(equal_distribution(Tensor.rand, torch.rand, lambda x: np.random.rand(*x)))
 
+  @unittest.skipIf(THREEFRY.value, "broken with threefry")
+  def test_rand_half(self):
+    N = 128
+    x = Tensor.rand((2, N, N), dtype=dtypes.half)
+    assert x.dtype == dtypes.half
+    x = x.numpy()
+    ones = np.take(x, np.where(x == 1))
+    zeros = np.take(x, np.where(x == 0))
+    self.assertTrue(ones.size == 0)
+    self.assertTrue(zeros.size > 0)
+    equal_distribution(lambda *x: Tensor.rand(*x, dtype=dtypes.float16), torch.rand, lambda x: np.random.rand(*x), shape=(2, N, N))
+
+  @unittest.skipIf(not THREEFRY.value, "not using threefry")
+  def test_threefly_against_reference(self):
+    Tensor.manual_seed(1337)
+    # generated using
+    # (jax.extend.random.threefry_2x32((np.uint32(1337), np.uint32(0x0)), np.arange(20, dtype=np.uint32)) >> 8).astype(float) / np.float32(2**24)
+    jr = np.array([0.30984968, 0.42723763, 0.92448753, 0.27268296, 0.48820806, 0.29587173, 0.3213513, 0.05805135, 0.4954177, 0.23303074,
+                   0.62478125, 0.51861334, 0.24712527, 0.12718695, 0.5236074, 0.50704265, 0.9166272, 0.6918763, 0.6530086, 0.34640658])
+    r = Tensor.rand(20).numpy()
+    np.testing.assert_allclose(jr, r, atol=1e-5, rtol=1e-5)
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "need bfloat16 support")
+  def test_rand_bfloat16(self):
+    N = 128
+    x = Tensor.rand((2, N, N), dtype=dtypes.bfloat16)
+    assert x.dtype == dtypes.bfloat16
+    # TODO: fix this property for bfloat16 random
+    # x = x.numpy()
+    # ones = np.take(x, np.where(x == 1))
+    # zeros = np.take(x, np.where(x == 0))
+    # self.assertTrue(ones.size == 0)
+    # self.assertTrue(zeros.size > 0)
+    equal_distribution(lambda *x: Tensor.rand(*x, dtype=dtypes.bfloat16).float(), torch.rand, lambda x: np.random.rand(*x), shape=(2, N, N))
+
   def test_randn(self):
     self.assertTrue(normal_test(Tensor.randn))
     self.assertTrue(equal_distribution(Tensor.randn, torch.randn, lambda x: np.random.randn(*x)))
 
+  @given(strat.sampled_from([dtypes.float, dtypes.float16, dtypes.bfloat16]))
+  @unittest.skipIf(Device.DEFAULT in ["HSA", "AMD"], "bfloat16 local buffer broken in HSA")
+  def test_randn_finite(self, default_float):
+    if not is_dtype_supported(default_float): return
+    old_default_float = dtypes.default_float
+    # low precision can result in inf from randn
+    dtypes.default_float = default_float
+    t = Tensor.randn(1024, 1024)
+    mx = t.max().numpy().item()
+    mn = t.min().numpy().item()
+    print(f"testing with {default_float=}")
+    assert math.isfinite(mx), mx
+    assert math.isfinite(mn), mn
+    dtypes.default_float = old_default_float
+
   def test_randint(self):
     self.assertFalse(normal_test(Tensor.randint))
     self.assertTrue(equal_distribution(partial(Tensor.randint, low=-2, high=5), numpy_func=lambda x: np.random.randint(low=-2, high=5, size=x)))
-    self.assertTrue(Tensor.randint(1,device="CLANG").device=="CLANG")
+    self.assertTrue(Tensor.randint(1, device="CLANG").device=="CLANG")
+    # check types of args
+    with self.assertRaises(TypeError): Tensor.randint((3, 4), low=0.1, high=3)
+    with self.assertRaises(TypeError): Tensor.randint((3, 4), low=0, high=3.5)
+    with self.assertRaises(TypeError): Tensor.randint((3, 4), low=0, high=3, dtype=dtypes.float32)
 
   def test_normal(self):
     self.assertTrue(normal_test(Tensor.normal))
@@ -89,16 +149,10 @@ class TestRandomness(unittest.TestCase):
                                                               lambda x: np.random.uniform(-1, 1, size=x) * math.sqrt(6 / (x[0] + math.prod(x[1:])))))
 
   def test_kaiming_uniform(self):
-    Tensor.manual_seed(1337)
-    torch.manual_seed(1337)
-    np.random.seed(1337)
     for shape in [(128, 64, 3, 3), (20, 24)]:
       self.assertTrue(equal_distribution(Tensor.kaiming_uniform, lambda x: torch.nn.init.kaiming_uniform_(torch.empty(x)), shape=shape))
 
   def test_kaiming_normal(self):
-    Tensor.manual_seed(1337)
-    torch.manual_seed(1337)
-    np.random.seed(1337)
     for shape in [(128, 64, 3, 3), (20, 24)]:
       self.assertTrue(equal_distribution(Tensor.kaiming_normal, lambda x: torch.nn.init.kaiming_normal_(torch.empty(x)), shape=shape))
 

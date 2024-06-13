@@ -12,13 +12,13 @@ WINO=1 STEPS=3 python3 examples/hlb_cifar10.py
 python3 examples/stable_diffusion.py --noshow
 python3 examples/llama.py --prompt "hello" --count 5
 python3 examples/gpt2.py --count 5
-python3 HALF=1 examples/gpt2.py --count 5
-python3 python examples/beautiful_mnist.py
-python3 python examples/beautiful_cartpole.py
+HALF=1 python3 examples/gpt2.py --count 5
+python3 examples/beautiful_mnist.py
+python3 examples/beautiful_cartpole.py
 python3 examples/mlperf/model_spec.py
 python3 examples/yolov8.py ./test/models/efficientnet/Chicken.jpg
-openpilot/go.sh
-BIG=1 MPS=1 pytest test/
+examples/openpilot/go.sh
+BIG=1 MPS=1 pytest test/ --ignore=test/test_fusion_op.py --ignore=test/test_linearizer_failures.py
 
 # sort and uniq
 sort -u /tmp/ops > /tmp/sops

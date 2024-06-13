@@ -1,6 +1,6 @@
 import unittest
 from tinygrad.tensor import Tensor
-from tinygrad.realize import create_schedule
+from tinygrad.engine.schedule import create_schedule
 
 # stuff needed to unpack a kernel
 # ruff: noqa: F401
