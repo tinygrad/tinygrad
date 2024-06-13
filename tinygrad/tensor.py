@@ -2286,7 +2286,7 @@ class Tensor:
       # make y a Tensor
       assert isinstance(y, (float, int, bool, Node)), f"{type(y)=}, {y=}"
       if isinstance(self.dtype, ImageDType) or dtypes.is_float(x.dtype) or (dtypes.is_int(x.dtype) and isinstance(y, int)): y_dtype = x.dtype
-      else: y_dtype = dtypes.from_py(y)
+      elif not isinstance(y, Node): y_dtype = dtypes.from_py(y)
       if isinstance(y, Node): y = Tensor.from_node(y, device=self.device)
       else: y = Tensor(dtypes.as_const(y, y_dtype), self.device, y_dtype, requires_grad=False)
 
