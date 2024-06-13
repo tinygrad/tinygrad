@@ -51,5 +51,6 @@ quickstart.py
 .hypothesis
 weights
 *.lprof
+comgr_*
 *.pkl
 site/
