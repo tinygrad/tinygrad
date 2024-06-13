@@ -1007,11 +1007,9 @@ class Tensor:
     assert index.ndim == self.ndim, f"self.ndim must equal index.ndim, {self.ndim=}, {index.ndim=}"
     assert all(s >= i for d,(s,i) in enumerate(zip(self.shape, index.shape)) if d != dim), "requires self.shape[d] >= index.shape[d] for all d != dim"
     dim = self._resolve_dim(dim)
-    index = index.to(self.device).transpose(0, dim).unsqueeze(-1)
-    permarg = list(range(self.ndim))
-    permarg = (permarg[1:dim] + [0] + permarg[dim+1:] + [dim]) if dim != 0 else (permarg[1:] + [0])
-    x = self.permute(*permarg).shrink(tuple((0,i) for i in index.shape[1:-1])+(None,)).unsqueeze(0)
-    return ((index == Tensor.arange(self.shape[dim], requires_grad=False, device=self.device)) * x).sum(-1, acc_dtype=self.dtype).transpose(0, dim)
+    index = index.to(self.device)
+    x = self.shrink(tuple((0, i) if d != dim else None for d,i in enumerate(index.shape))).unsqueeze(-1).transpose(-1, dim)
+    return ((index.unsqueeze(-1) == Tensor.arange(self.shape[dim], requires_grad=False, device=self.device)) * x).sum(-1, acc_dtype=self.dtype)
 
   def cat(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
     """
@@ -1779,7 +1777,7 @@ class Tensor:
     print(t.triu(k=1).numpy())
     ```
     """
-    return Tensor._tri(self.shape[-2], self.shape[-1], k=k, device=self.device).where(self, 0)
+    return Tensor._tri(self.shape[-2], self.shape[-1], k=k, device=self.device).where(self, 0).cast(self.dtype)
   def tril(self, k:int=0) -> Tensor:
     """
     Returns the lower triangular part of the tensor, the other elements are set to 0.
@@ -1792,7 +1790,7 @@ class Tensor:
     print(t.tril().numpy())
     ```
     """
-    return Tensor._tri(self.shape[-2], self.shape[-1], k=k+1, device=self.device).where(0, self)
+    return Tensor._tri(self.shape[-2], self.shape[-1], k=k+1, device=self.device).where(0, self).cast(self.dtype)
 
   # ***** unary ops *****
 
