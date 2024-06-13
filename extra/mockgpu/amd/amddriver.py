@@ -74,6 +74,7 @@ class AMDDriver(VirtDriver):
     self.doorbells[gpu_id] = memoryview(bytearray(0x2000))
     self.gpus[gpu_id] = AMDGPU(gpu_id)
     self.tracked_files += [
+      VirtFile(f'/sys/devices/virtual/kfd/kfd/topology/nodes/{gpu_id}', functools.partial(DirFileDesc, child_names=['gpu_id', 'properties'])),
       VirtFile(f'/sys/devices/virtual/kfd/kfd/topology/nodes/{gpu_id}/gpu_id', functools.partial(TextFileDesc, text=f"{gpu_id}")),
       VirtFile(f'/sys/devices/virtual/kfd/kfd/topology/nodes/{gpu_id}/properties',
         functools.partial(TextFileDesc, text=gpu_props.format(drm_render_minor=gpu_id))),

@@ -3,8 +3,10 @@ from tinygrad import Device, dtypes, Tensor
 from tinygrad.helpers import to_mv
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.runtime.ops_nv import NVDevice, HWComputeQueue
-from tinygrad.features.search import Opt, OptOps
+from tinygrad.engine.search import Opt, OptOps
 from test.test_linearizer_failures import helper_test_lin
+from tinygrad.engine.realize import get_runner, CompiledRunner
+from test.external.fuzz_linearizer import get_fuzz_rawbufs
 
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.ops import LazyOp, BinaryOps, UnaryOps, ReduceOps, BufferOps, MemBuffer
@@ -19,7 +21,7 @@ class TestNV(unittest.TestCase):
     TestNV.a = Tensor([0.,1.], device="NV").realize()
     TestNV.b = self.a + 1
     si = create_schedule([self.b.lazydata])[-1]
-    TestNV.d0_runner = TestNV.d0.get_runner(*si.ast)
+    TestNV.d0_runner = get_runner(TestNV.d0.dname, si.ast)
     TestNV.b.lazydata.buffer.allocate()
     TestNV.addr = struct.pack("QQ", TestNV.b.lazydata.buffer._buf.va_addr, TestNV.a.lazydata.buffer._buf.va_addr)
 
@@ -28,9 +30,27 @@ class TestNV(unittest.TestCase):
     opts = [Opt(op=OptOps.TC, axis=6, amt=2), Opt(op=OptOps.UPCAST, axis=0, amt=4), Opt(op=OptOps.UPCAST, axis=3, amt=0), Opt(op=OptOps.LOCAL, axis=1, amt=4), Opt(op=OptOps.LOCAL, axis=2, amt=3), Opt(op=OptOps.UPCAST, axis=1, amt=2)] # noqa: E501
     helper_test_lin(Linearizer(ast), opts=opts, failed_platforms=["NV"])
 
+  def test_error_on_huge_dims(self):
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 1, 1024, 683), strides=(0, 0, 0, 1), offset=0, mask=None, contiguous=False),)))), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(1, 1, 1024, 683), strides=(0, 0, 683, 1), offset=0, mask=None, contiguous=True),))))), arg=None),), arg=dtypes.float),), arg=(3,)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1, 1, 1024, 1), strides=(0, 0, 1, 0), offset=0, mask=None, contiguous=True),)))) # noqa: E501
+    opts = [Opt(op=OptOps.GROUP, axis=0, amt=0), Opt(op=OptOps.PADTO, axis=1, amt=32), Opt(op=OptOps.UNROLL, axis=0, amt=4), Opt(op=OptOps.LOCAL, axis=0, amt=2), Opt(op=OptOps.LOCAL, axis=0, amt=2)] # noqa: E501
+    with self.assertRaises(RuntimeError) as cm:
+      lin = Linearizer(ast)
+      for opt in opts: lin.apply_opt(opt)
+      rawbufs = get_fuzz_rawbufs(lin)
+      prg = CompiledRunner(lin.to_program())
+      prg(rawbufs, {}, wait=True)
+    self.assertEqual(str(cm.exception), "This is a runtime error message")
+
+  def test_buf4_usage(self):
+    TestNV.along = Tensor([105615], device="NV").realize()
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=UnaryOps.SIN, src=(LazyOp(op=UnaryOps.CAST, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.ulong, st=ShapeTracker(views=(View(shape=(3,), strides=(1,), offset=0, mask=None, contiguous=True),)))),), arg=dtypes.float),), arg=None),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3,), strides=(1,), offset=0, mask=None, contiguous=True),)))) # noqa: E501
+    temp_runner = get_runner(TestNV.d0.dname, (ast,))
+    temp_runner([TestNV.b.lazydata.buffer, TestNV.along.lazydata.buffer], var_vals={})
+    assert abs((val:=TestNV.b.lazydata.buffer.as_buffer().cast("f")[0]) - 0.80647) < 0.001, f"got val {val}"
+
   def test_kernargs_no_oob_access(self):
     kernargs_start = TestNV.d0._gpu_alloc((2 << 20), map_to_cpu=True).va_addr
-    kernargs = kernargs_start + ((2 << 20) - TestNV.d0_runner.clprg.kernargs_segment_size)
+    kernargs = kernargs_start + ((2 << 20) - TestNV.d0_runner.clprg.kernargs_alloc_size)
     to_mv(kernargs, 0x160).cast('I')[:] = array.array('I', TestNV.d0_runner.clprg.constbuffer_0)
     ctypes.memmove(kernargs + TestNV.d0_runner.clprg.kernargs_offset, TestNV.addr, len(TestNV.addr))
 

@@ -9,7 +9,7 @@ from tinygrad.dtype import DType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.engine.realize import ExecItem, capturing, EmptyOp, ViewOp, BufferXfer, CompiledRunner, Runner
-from tinygrad.engine.memory import _internal_memory_planner
+from tinygrad.engine.schedule import _internal_memory_planner
 from tinygrad.nn.state import get_parameters
 from weakref import WeakKeyDictionary
 
@@ -41,7 +41,7 @@ def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]
     if ji.prg.__class__ in {EmptyOp, ViewOp}: continue
     ji_graph_dev: Optional[Compiled] = None # device on which the ji will be graphed. Not graphed if None.
     if isinstance(ji.prg, CompiledRunner): ji_graph_dev = ji.prg.device
-    elif isinstance(ji.prg, BufferXfer) and ji.bufs[0] and ji.bufs[0].device.split(":", 1)[0] in {"HSA", "CUDA", "NV", "AMD"}:
+    elif isinstance(ji.prg, BufferXfer) and ji.bufs[0] and ji.bufs[0].device.split(":", 1)[0] in {"CUDA", "NV", "AMD"}:
       ji_graph_dev = Device[ji.bufs[0].device]
 
     graph_class = (ji_graph_dev.graph.func if isinstance(ji_graph_dev.graph, functools.partial) else ji_graph_dev.graph) if ji_graph_dev else None #type: ignore
@@ -97,12 +97,12 @@ class MultiGraphRunner(GraphRunner):  # pylint: disable=abstract-method
     wait_nodes = []
 
     for rawbuf in read + write:
-      if id(rawbuf._buf) in self.w_dependency_map: wait_nodes.append(self.w_dependency_map[id(rawbuf._buf)])
+      if id(rawbuf.base._buf) in self.w_dependency_map: wait_nodes.append(self.w_dependency_map[id(rawbuf.base._buf)])
     for rawbuf in write:
-      if id(rawbuf._buf) in self.r_dependency_map: wait_nodes.extend(self.r_dependency_map.pop(id(rawbuf._buf)))
+      if id(rawbuf.base._buf) in self.r_dependency_map: wait_nodes.extend(self.r_dependency_map.pop(id(rawbuf.base._buf)))
 
-    for rawbuf in read: self.r_dependency_map[id(rawbuf._buf)].append(new_dependency)
-    for rawbuf in write: self.w_dependency_map[id(rawbuf._buf)] = new_dependency
+    for rawbuf in read: self.r_dependency_map[id(rawbuf.base._buf)].append(new_dependency)
+    for rawbuf in write: self.w_dependency_map[id(rawbuf.base._buf)] = new_dependency
     return list({id(x):x for x in wait_nodes}.values())
 
 ReturnType = TypeVar('ReturnType')

@@ -1,8 +1,7 @@
 import ctypes, collections, array, time
 from typing import List, Any, Dict, cast, Optional, Tuple, Set
-from tinygrad.helpers import GraphException, round_up, to_mv
-from tinygrad.device import Buffer, BufferOptions
-from tinygrad.device import Compiled, Device
+from tinygrad.helpers import GraphException, round_up, to_mv, init_c_struct_t
+from tinygrad.device import Buffer, BufferOptions, Compiled, Device
 from tinygrad.shape.symbolic import Variable
 from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner
 from tinygrad.engine.jit import MultiGraphRunner
@@ -19,7 +18,8 @@ class HCQGraph(MultiGraphRunner):
     # Allocate kernel args.
     kernargs_size: Dict[Compiled, int] = collections.defaultdict(int)
     for ji in self.jit_cache:
-      kernargs_size[ji.prg.device] += round_up(ji.prg.clprg.kernargs_segment_size, 16) if isinstance(ji.prg, CompiledRunner) else 0
+      if not isinstance(ji.prg, CompiledRunner): continue
+      kernargs_size[ji.prg.device] += round_up(ji.prg.clprg.kernargs_alloc_size, 16)
     kernargs_ptrs: Dict[Compiled, int] = {dev:dev.allocator._alloc(sz, BufferOptions(cpu_access=True)).va_addr for dev,sz in kernargs_size.items()}
 
     # Fill initial arguments.
@@ -28,9 +28,11 @@ class HCQGraph(MultiGraphRunner):
     for j,ji in enumerate(self.jit_cache):
       if not isinstance(ji.prg, CompiledRunner): continue
       self.kargs_addrs[j] = kernargs_ptrs[ji.prg.device]
-      kernargs_ptrs[ji.prg.device] += round_up(ji.prg.clprg.kernargs_segment_size, 16)
+      kernargs_ptrs[ji.prg.device] += round_up(ji.prg.clprg.kernargs_alloc_size, 16)
 
-      self.ji_kargs_structs[j] = ji.prg.clprg.args_struct_t.from_address(self.kargs_addrs[j] + ji.prg.clprg.kernargs_offset)
+      args_t = init_c_struct_t(tuple([(f'f{i}', ctypes.c_void_p) for i in range(len(ji.bufs))] +
+                                     [(f'v{i}', ctypes.c_int) for i in range(len(ji.prg.p.vars))]))
+      self.ji_kargs_structs[j] = args_t.from_address(self.kargs_addrs[j] + ji.prg.clprg.kernargs_offset)
       for i in range(len(ji.bufs)): self.ji_kargs_structs[j].__setattr__(f'f{i}', cast(Buffer, ji.bufs[i])._buf.va_addr)
       for i in range(len(ji.prg.p.vars)): self.ji_kargs_structs[j].__setattr__(f'v{i}', var_vals[ji.prg.p.vars[i]])
 
@@ -38,8 +40,6 @@ class HCQGraph(MultiGraphRunner):
       if ji.prg.device.dname.startswith("NV"): to_mv(self.kargs_addrs[j], 0x160).cast('I')[:] = array.array('I', ji.prg.clprg.constbuffer_0)
 
     # Build queues.
-    self.queue_list: List[Tuple[Any, ...]] = []
-
     self.comp_queues: Dict[Compiled, Any] = collections.defaultdict(self.comp_hcq_t)
     self.comp_signal = {dev: dev._get_signal(value=0) for dev in self.devices}
     self.comp_signal_val = {dev: 0 for dev in self.devices}
@@ -52,22 +52,28 @@ class HCQGraph(MultiGraphRunner):
     self.kickoff_value = 0
     self.graph_timeline = {dev: 0 for dev in self.devices}
 
+    self.exec_ptrs: Dict[int, Tuple[Any, int]] = {}
     self.copy_to_devs: Dict[Compiled, Set[Compiled]] = {dev: set() for dev in self.devices}
 
     for j,ji in enumerate(self.jit_cache):
       if isinstance(ji.prg, CompiledRunner):
+        exec_params = {}
         deps = self.access_resources(ji.bufs[(outs:=ji.prg.p.outcount):], ji.bufs[:outs], (self.comp_signal[ji.prg.device], sig_val:=j+1))
-        deps.append((self.comp_signal[ji.prg.device], self.comp_signal_val[ji.prg.device]))
-        self.comp_signal_val[ji.prg.device] = sig_val
+        deps = [x for x in deps if id(x[0]) != id(self.comp_signal[ji.prg.device])]
 
-        # Rebuilt runners with dynamic launch dims online.
-        if j in self.jc_idx_with_updatable_launch_dims:
-          if ji.prg.device in self.comp_queues: self.queue_list.append((self.comp_queues.pop(ji.prg.device), ji.prg.device))
-          self.queue_list.append((j, deps))
-        else:
-          for sig, val in deps: self.comp_queues[ji.prg.device].wait(sig, val)
-          self.comp_queues[ji.prg.device].exec(ji.prg.clprg, self.kargs_addrs[j], *ji.prg.p.launch_dims(var_vals)) \
-                                         .signal(self.comp_signal[ji.prg.device], sig_val)
+        # On NV, to synchronize kernel execution, we must either issue a wait or chain executions to schedule them in order.
+        # Chaining executions is preferred when possible, as it is faster.
+        if ji.prg.device.dname.startswith("NV"):
+          if len(deps) == 0 and self.comp_signal_val[ji.prg.device] > 0:
+            exec_params['chain_exec_ptr'] = self.exec_ptrs[self.comp_signal_val[ji.prg.device] - 1][1]
+          else: deps.append((self.comp_signal[ji.prg.device], self.comp_signal_val[ji.prg.device]))
+
+        for sig, val in deps: self.comp_queues[ji.prg.device].wait(sig, val)
+
+        self.exec_ptrs[j] = (self.comp_queues[ji.prg.device], self.comp_queues[ji.prg.device].ptr())
+        self.comp_queues[ji.prg.device].exec(ji.prg.clprg, self.kargs_addrs[j], *ji.prg.p.launch_dims(var_vals),
+                                             signal=self.comp_signal[ji.prg.device], signal_value=sig_val, **exec_params)
+        self.comp_signal_val[ji.prg.device] = sig_val
       elif isinstance(ji.prg, BufferXfer):
         dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
         Device[src.device]._gpu_map(dest._buf) #type: ignore
@@ -83,10 +89,10 @@ class HCQGraph(MultiGraphRunner):
 
     for dev in self.devices:
       if self.copy_signal_val[dev] > 0: self.comp_queues[dev].wait(self.copy_signal[dev], self.copy_signal_val[dev])
-      for dep_dev in self.copy_to_devs: self.comp_queues[dev].wait(self.copy_signal[dep_dev], self.copy_signal_val[dep_dev])
+      for dep_dev in self.copy_to_devs[dev]: self.comp_queues[dev].wait(self.copy_signal[dep_dev], self.copy_signal_val[dep_dev])
 
-      self.queue_list.append((self.comp_queues.pop(dev), dev))
-      if self.copy_signal_val[dev] > 0: self.queue_list.append((self.copy_queues.pop(dev), dev))
+      if hasattr(self.comp_queues[dev], 'bind'): self.comp_queues[dev].bind(dev)
+      if hasattr(self.copy_queues[dev], 'bind') and self.copy_signal_val[dev] > 0: self.copy_queues[dev].bind(dev)
 
   def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False) -> Optional[float]:
     # Wait and restore signals
@@ -106,24 +112,22 @@ class HCQGraph(MultiGraphRunner):
       for i,v in enumerate(cast(CompiledRunner, self.jit_cache[j].prg).p.vars):
         self.ji_kargs_structs[j].__setattr__(f'v{i}', var_vals[v])
 
+    for j in self.jc_idx_with_updatable_launch_dims:
+      queue, cmd_ptr = self.exec_ptrs[j]
+      queue.update_exec(cmd_ptr, *cast(CompiledRunner, self.jit_cache[j].prg).p.launch_dims(var_vals))
+
     for dev in self.devices:
+      # Submit sync with world and queues.
       self.comp_hcq_t().wait(dev.timeline_signal, dev.timeline_value - 1) \
                        .wait(self.kickoff_signal, self.kickoff_value).submit(dev)
-      self.copy_hcq_t().wait(dev.timeline_signal, dev.timeline_value - 1) \
-                       .wait(self.kickoff_signal, self.kickoff_value).submit(dev)
+      self.comp_queues[dev].submit(dev)
 
-    for entry in self.queue_list:
-      if isinstance(entry[0], self.comp_hcq_t) or isinstance(entry[0], self.copy_hcq_t): queue, dev = entry
-      else:
-        # Kernel with dynamic launch bounds, rebuild it.
-        j, ji, deps, dev = entry[0], self.jit_cache[entry[0]], entry[1], self.jit_cache[entry[0]].prg.device
-        queue = self.comp_hcq_t()
-        for sig, val in deps: queue.wait(sig, val)
-        queue.exec(ji.prg.clprg, self.kargs_addrs[j], *ji.prg.p.launch_dims(var_vals)) \
-             .signal(self.comp_signal[dev], value=j+1)
-      queue.submit(dev)
+      if self.copy_signal_val[dev] > 0:
+        self.copy_hcq_t().wait(dev.timeline_signal, dev.timeline_value - 1) \
+                         .wait(self.kickoff_signal, self.kickoff_value).submit(dev)
+        self.copy_queues[dev].submit(dev)
 
-    for dev in self.devices:
+      # Signal the final value
       self.comp_hcq_t().signal(dev.timeline_signal, dev.timeline_value).submit(dev)
       self.graph_timeline[dev] = dev.timeline_value
       dev.timeline_value += 1

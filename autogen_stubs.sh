@@ -51,8 +51,8 @@ generate_comgr() {
   clang2py /opt/rocm/include/amd_comgr/amd_comgr.h \
   --clang-args="-D__HIP_PLATFORM_AMD__ -I/opt/rocm/include -x c++" -o $BASE/comgr.py -l /opt/rocm/lib/libamd_comgr.so
   fixup $BASE/comgr.py
-  sed -i "s\import ctypes\import ctypes, os\g" $BASE/comgr.py
-  sed -i "s\'/opt/rocm/\os.getenv('ROCM_PATH', '/opt/rocm/')+'/\g" $BASE/comgr.py
+  sed -i "s\import ctypes\import ctypes, ctypes.util, os\g" $BASE/comgr.py
+  sed -i "s\ctypes.CDLL('/opt/rocm/lib/libamd_comgr.so')\ctypes.CDLL(os.getenv('ROCM_PATH')+'/lib/libamd_comgr.so' if os.getenv('ROCM_PATH') else ctypes.util.find_library('amd_comgr'))\g" $BASE/comgr.py
   python3 -c "import tinygrad.runtime.autogen.comgr"
 }
 
@@ -119,7 +119,34 @@ generate_nv() {
   sed -i 's/#\s*return MW(\([0-9i()*+]\+\):\([0-9i()*+]\+\))/    return (\1 , \2)/' $BASE/nv_gpu.py
   sed -i 's/#\?\s*\(.*\)\s*=\s*\(NV\)\?BIT\(32\)\?\s*(\s*\([0-9]\+\)\s*)/\1 = (1 << \4)/' $BASE/nv_gpu.py # name = BIT(x) -> name = (1 << x)
   sed -i "s/UVM_\([A-Za-z0-9_]\+\) = \['i', '(', '\([0-9]\+\)', ')'\]/UVM_\1 = \2/" $BASE/nv_gpu.py # UVM_name = ['i', '(', '<num>', ')'] -> UVM_name = <num>
+
+  # Parse status codes
+  sed -n '1i\
+nv_status_codes = {}
+/^NV_STATUS_CODE/ { s/^NV_STATUS_CODE(\([^,]*\), *\([^,]*\), *"\([^"]*\)") *.*$/\1 = \2\nnv_status_codes[\1] = "\3"/; p }' $NVKERN_SRC/src/common/sdk/nvidia/inc/nvstatuscodes.h >> $BASE/nv_gpu.py
+
   python3 -c "import tinygrad.runtime.autogen.nv_gpu"
+}
+
+generate_amd() {
+  # clang2py broken when pass -x c++ to prev headers
+  clang2py extra/hip_gpu_driver/sdma_registers.h \
+    --clang-args="-I/opt/rocm/include -x c++" \
+    -o $BASE/amd_gpu.py
+
+  sed 's/^\(.*\)\(\s*\/\*\)\(.*\)$/\1 #\2\3/; s/^\(\s*\*\)\(.*\)$/#\1\2/' extra/hip_gpu_driver/nvd.h >> $BASE/amd_gpu.py # comments
+  sed 's/^\(.*\)\(\s*\/\*\)\(.*\)$/\1 #\2\3/; s/^\(\s*\*\)\(.*\)$/#\1\2/' extra/hip_gpu_driver/sdma_v6_0_0_pkt_open.h >> $BASE/amd_gpu.py # comments
+  sed -i 's/#\s*define\s*\([^ \t]*\)(\([^)]*\))\s*\(.*\)/def \1(\2): return \3/' $BASE/amd_gpu.py # #define name(x) (smth) -> def name(x): return (smth)
+  sed -i '/#\s*define\s\+\([^ \t]\+\)\s\+\([^ ]\+\)/s//\1 = \2/' $BASE/amd_gpu.py # #define name val -> name = val
+
+  sed -e '/^reg/s/^\(reg[^ ]*\) [^ ]* \([^ ]*\) .*/\1 = \2/' \
+    -e '/^ix/s/^\(ix[^ ]*\) [^ ]* \([^ ]*\) .*/\1 = \2/' \
+    -e '/^[ \t]/d' \
+    extra/hip_gpu_driver/gc_11_0_0.reg >> $BASE/amd_gpu.py
+
+  fixup $BASE/amd_gpu.py
+  sed -i "s\import ctypes\import ctypes, os\g" $BASE/amd_gpu.py
+  python3 -c "import tinygrad.runtime.autogen.amd_gpu"
 }
 
 generate_hsa() {
@@ -134,19 +161,9 @@ generate_hsa() {
     --clang-args="-I/opt/rocm/include" \
     -o $BASE/hsa.py -l /opt/rocm/lib/libhsa-runtime64.so
 
-  # clang2py broken when pass -x c++ to prev headers
-  clang2py extra/hip_gpu_driver/sdma_registers.h \
-    --clang-args="-I/opt/rocm/include -x c++" \
-    -o $BASE/amd_gpu.py -l /opt/rocm/lib/libhsa-runtime64.so
-
-  sed 's/^\(.*\)\(\s*\/\*\)\(.*\)$/\1 #\2\3/; s/^\(\s*\*\)\(.*\)$/#\1\2/' extra/hip_gpu_driver/nvd.h >> $BASE/amd_gpu.py # comments
-  sed -i 's/#\s*define\s*\([^ \t]*\)(\([^)]*\))\s*\(.*\)/def \1(\2): return \3/' $BASE/amd_gpu.py # #define name(x) (smth) -> def name(x): return (smth)
-  sed -i '/#\s*define\s\+\([^ \t]\+\)\s\+\([^ ]\+\)/s//\1 = \2/' $BASE/amd_gpu.py # #define name val -> name = val
-
   fixup $BASE/hsa.py
-  fixup $BASE/amd_gpu.py
-  sed -i "s\import ctypes\import ctypes, os\g" $BASE/hsa.py
-  sed -i "s\'/opt/rocm/\os.getenv('ROCM_PATH', '/opt/rocm/')+'/\g" $BASE/hsa.py
+  sed -i "s\import ctypes\import ctypes, ctypes.util, os\g" $BASE/hsa.py
+  sed -i "s\ctypes.CDLL('/opt/rocm/lib/libhsa-runtime64.so')\ctypes.CDLL(os.getenv('ROCM_PATH')+'/lib/libhsa-runtime64.so' if os.getenv('ROCM_PATH') else ctypes.util.find_library('hsa-runtime64'))\g" $BASE/hsa.py
   python3 -c "import tinygrad.runtime.autogen.hsa"
 }
 
@@ -157,6 +174,7 @@ elif [ "$1" == "cuda" ]; then generate_cuda
 elif [ "$1" == "hsa" ]; then generate_hsa
 elif [ "$1" == "kfd" ]; then generate_kfd
 elif [ "$1" == "nv" ]; then generate_nv
-elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_hsa; generate_kfd; generate_nv
+elif [ "$1" == "amd" ]; then generate_amd
+elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_hsa; generate_kfd; generate_nv; generate_amd
 else echo "usage: $0 <type>"
 fi

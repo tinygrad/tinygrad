@@ -4,7 +4,7 @@ from tinygrad import Tensor, Device, dtypes
 from test.helpers import is_dtype_supported
 # similar to test/external/external_test_gpu_ast.py, but universal
 
-@unittest.skipIf(Device.DEFAULT == "CUDA" and CI, "slow on CUDA CI")
+@unittest.skipIf(Device.DEFAULT in {"CUDA", "NV"} and CI, "slow on CUDA CI")
 class TestSpecific(unittest.TestCase):
   # from openpilot
 

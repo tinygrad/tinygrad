@@ -1,13 +1,12 @@
 import numpy as np
 import torch
-import unittest, copy
-import mmap
+import unittest, copy, mmap, random
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.helpers import temp, CI
+from tinygrad.helpers import getenv, temp, CI
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
 
-settings.register_profile("my_profile", max_examples=200, deadline=None)
+settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
 
 x_init = np.random.randn(1,3).astype(np.float32)
@@ -18,11 +17,8 @@ m_init = np.random.randn(1,3).astype(np.float32)
 
 class TestTinygrad(unittest.TestCase):
   def test_zerodim_initialization(self):
-    a = Tensor(55)
-    b = Tensor(3.14)
-
-    self.assertEqual(a.shape, ())
-    self.assertEqual(b.shape, ())
+    self.assertEqual(Tensor(55).shape, ())
+    self.assertEqual(Tensor(3.14).shape, ())
 
   def test_plus_equals(self):
     a = Tensor.randn(10,10)
@@ -187,39 +183,20 @@ class TestTinygrad(unittest.TestCase):
     assert Tensor.randn(1,1,1,1,1,1).ndim == 6
 
   def test_argfix(self):
-    self.assertEqual(Tensor.zeros().shape, ())
-    self.assertEqual(Tensor.ones().shape, ())
+    for f in [Tensor.zeros, Tensor.ones, Tensor.rand, Tensor.randn, Tensor.empty]:
+      self.assertEqual(f().shape, ())
+      self.assertEqual(f(1).shape, (1,))
+      self.assertEqual(f(10,20,40).shape, (10,20,40))
+      self.assertEqual(f([]).shape, ())
+      self.assertEqual(f([1]).shape, (1,))
+      self.assertEqual(f([10,20,40]).shape, (10,20,40))
+      self.assertEqual(f(()).shape, ())
+      self.assertEqual(f((1,)).shape, (1,))
+      self.assertEqual(f((10,20,40)).shape, (10,20,40))
 
-    self.assertEqual(Tensor.zeros([]).shape, ())
-    self.assertEqual(Tensor.ones([]).shape, ())
-
-    self.assertEqual(Tensor.zeros(tuple()).shape, ())
-    self.assertEqual(Tensor.ones(tuple()).shape, ())
-
-    self.assertEqual(Tensor.zeros(1).shape, (1,))
-    self.assertEqual(Tensor.ones(1).shape, (1,))
-
-    self.assertEqual(Tensor.zeros(1,10,20).shape, (1,10,20))
-    self.assertEqual(Tensor.ones(1,10,20).shape, (1,10,20))
-
-    self.assertEqual(Tensor.zeros([1]).shape, (1,))
-    self.assertEqual(Tensor.ones([1]).shape, (1,))
-
-    self.assertEqual(Tensor.zeros([10,20,40]).shape, (10,20,40))
-    self.assertEqual(Tensor.ones([10,20,40]).shape, (10,20,40))
-
-    self.assertEqual(Tensor.rand(1,10,20).shape, (1,10,20))
-    self.assertEqual(Tensor.rand((10,20,40)).shape, (10,20,40))
-
-    self.assertEqual(Tensor.empty(1,10,20).shape, (1,10,20))
-    self.assertEqual(Tensor.empty((10,20,40)).shape, (10,20,40))
-
-    with self.assertRaises(ValueError):
-      Tensor.zeros((2, 2), 2, 2)
-    with self.assertRaises(ValueError):
-      Tensor.zeros((2, 2), (2, 2))
-    with self.assertRaises(ValueError):
-      Tensor.randn((128, 128), 0.0, 0.01)
+      with self.assertRaises(ValueError): f((2, 2), 2, 2)
+      with self.assertRaises(ValueError): f((2, 2), (2, 2))
+      with self.assertRaises(ValueError): f((128, 128), 0.0, 0.01)
 
   def test_numel(self):
     assert Tensor.randn(10, 10).numel() == 100
@@ -311,6 +288,18 @@ class TestTinygrad(unittest.TestCase):
     with self.assertRaises(ValueError): Tensor([[[1,1,1],[1,1]]])
     with self.assertRaises(ValueError): Tensor([[1,1,1],[[1,1,1]]])
 
+  def test_tensor_mixed_list_tuple(self):
+    def _list_or_tuple(): return list if random.random() < 0.5 else tuple
+    def _generate_data(depth):
+      if depth == 0: return _list_or_tuple()()
+      if depth == 1: return _list_or_tuple()([random.random(), random.random()])
+      return _list_or_tuple()([_generate_data(depth-1), _generate_data(depth-1)])
+
+    for depth in range(7):
+      for _ in range(20):
+        data = _generate_data(depth)
+        np.testing.assert_allclose(Tensor(data).numpy(), np.array(data))
+
   def test_tensor_copy(self):
     x = copy.deepcopy(Tensor.ones((3,3,3)))
     np.testing.assert_allclose(x.numpy(), np.ones((3,3,3)))
@@ -348,19 +337,20 @@ class TestTinygrad(unittest.TestCase):
 
   def test_no_bool(self):
     with self.assertRaises(TypeError):
-      if Tensor(["3"]):
+      if Tensor(3):
         print("hi")
 
     with self.assertRaises(TypeError):
       _a = Tensor([3]) in [Tensor([3]), Tensor([4]), Tensor([5])]
 
   def test_repr_with_grad(self):
-    a = Tensor([1])
+    a = Tensor([1], requires_grad=True)
     b = Tensor([1])
     c = (a + b).mean().backward()
+    print(a)
     print(c)
 
-@unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
+@unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL", "NV", "AMD"}, "no GPU CI")
 class TestMoveTensor(unittest.TestCase):
   d0, d1 = f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"
   @given(strat.sampled_from([d0, d1]), strat.sampled_from([d0, d1]),
@@ -401,17 +391,17 @@ class TestZeroShapeTensor(unittest.TestCase):
     t = Tensor.empty(3, 2, 0)
     assert t.shape == (3, 2, 0)
     # numpy has stride 0, 0, 0; torch has stride 2, 1, 1
-    assert t.lazydata.st.real_strides() == (0, 0, 1)
+    assert t.lazydata.st.real_strides() == (0, 0, 0)
 
     t = Tensor.empty(3, 0, 2)
     assert t.shape == (3, 0, 2)
     # numpy has stride 0, 0, 0; torch has stride 2, 2, 1
-    assert t.lazydata.st.real_strides() == (0, 2, 1)
+    assert t.lazydata.st.real_strides() == (0, 0, 0)
 
     t = Tensor.empty(0, 0, 0)
     assert t.shape == (0, 0, 0)
     # numpy has stride 0, 0, 0; torch has stride 1, 1, 1
-    assert t.lazydata.st.real_strides() == (0, 0, 1)
+    assert t.lazydata.st.real_strides() == (0, 0, 0)
 
   def test_rand(self):
     t = Tensor.rand(3, 2, 0)
@@ -437,6 +427,9 @@ class TestZeroShapeTensor(unittest.TestCase):
     a = t.reshape(7, 0)
     assert a.shape == (7, 0)
     np.testing.assert_equal(a.numpy(), np.zeros((7, 0)))
+    a = t.reshape(0)
+    assert a.shape == (0,)
+    np.testing.assert_equal(a.numpy(), np.zeros((0,)))
     with self.assertRaises(AssertionError):
       # cannot reshape from size 0 to size 1
       a = t.reshape(())
@@ -447,15 +440,15 @@ class TestZeroShapeTensor(unittest.TestCase):
     np.testing.assert_equal(t.numpy(), np.full((6, 2, 0), 12))
 
   def test_pad(self):
-    t = Tensor.rand(3, 2, 0).pad((None, None, (1, 1)), 1)
+    t = Tensor.rand(3, 2, 0).pad((None, None, (1, 1)), value=1)
     assert t.shape == (3, 2, 2)
     np.testing.assert_equal(t.numpy(), np.ones((3, 2, 2)))
 
-    t = Tensor.rand(3, 2, 0).pad((None, (1, 1), None), 1)
+    t = Tensor.rand(3, 2, 0).pad((None, (1, 1), None), value=1)
     assert t.shape == (3, 4, 0)
     np.testing.assert_equal(t.numpy(), np.ones((3, 4, 0)))
 
-    t = Tensor.rand(3, 2, 0).pad(((1, 1), None, None), 1)
+    t = Tensor.rand(3, 2, 0).pad(((1, 1), None, None), value=1)
     assert t.shape == (5, 2, 0)
     np.testing.assert_equal(t.numpy(), np.ones((5, 2, 0)))
 
@@ -466,15 +459,26 @@ class TestZeroShapeTensor(unittest.TestCase):
     assert t.shrink(((2, 2), (2, 2))).realize().shape == (0, 0)
 
   def test_cat(self):
-    s = Tensor.rand(3, 2, 2)
-    t = Tensor.rand(3, 2, 0).cat(s, dim=2)
-    assert t.shape == (3, 2, 2)
-    np.testing.assert_equal(t.numpy(), s.numpy())
+    a = Tensor.rand(3, 2, 2)
+    b = Tensor.rand(3, 2, 0)
 
-    s = Tensor.rand(3, 4, 0)
-    t = Tensor.rand(3, 2, 0).cat(s, dim=1)
-    assert t.shape == (3, 6, 0)
-    np.testing.assert_equal(t.numpy(), np.zeros((3, 6, 0)))
+    t = a.cat(b, dim=2)
+    assert t.shape == (3, 2, 2)
+    np.testing.assert_equal(t.numpy(), a.numpy())
+
+    t = b.cat(a, dim=2)
+    assert t.shape == (3, 2, 2)
+    np.testing.assert_equal(t.numpy(), a.numpy())
+
+    t = b.cat(b, dim=0)
+    assert t.shape == (6, 2, 0)
+    np.testing.assert_equal(t.numpy(), np.zeros((6, 2, 0)))
+    t = b.cat(b, dim=1)
+    assert t.shape == (3, 4, 0)
+    np.testing.assert_equal(t.numpy(), np.zeros((3, 4, 0)))
+    t = b.cat(b, dim=2)
+    assert t.shape == (3, 2, 0)
+    np.testing.assert_equal(t.numpy(), np.zeros((3, 2, 0)))
 
   def test_elementwise(self):
     a = Tensor.rand(3, 2, 0)

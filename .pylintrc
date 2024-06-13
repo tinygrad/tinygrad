@@ -55,7 +55,7 @@ confidence=
 # no Warning level messages displayed, use"--disable=all --enable=classes
 # --disable=W"
 disable=C,R,W0613,W0511,W0212,W0201,W0106,W0603,W0621,W0703,W1201,W1203,E1136,W1514,E1101,W0221,W0105,E0401
-# E1101 for mlops binding
+# E1101 for function binding
 # W0221 for Function class
 # W0105 for comment strings
 # E0401 for missing imports

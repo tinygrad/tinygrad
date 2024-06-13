@@ -5,16 +5,17 @@
 import unittest
 import numpy as np
 from typing import List, Optional, Union
-from tinygrad.engine.realize import run_schedule
+from tinygrad import nn, dtypes
 from tinygrad.tensor import Tensor
 from tinygrad.ops import BinaryOps, LoadOps, ReduceOps
 from tinygrad.helpers import DEBUG, flatten
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.features.graph import print_tree
+from tinygrad.engine.graph import print_tree
 from tinygrad.engine.schedule import create_schedule
-from tinygrad import nn, dtypes
+from tinygrad.engine.realize import run_schedule
 from test.helpers import is_dtype_supported
 
+class KernelCountException(Exception): pass
 def check_schedule(t:Union[Tensor, List[Tensor]], allowed:int, to_prerealize:Optional[List[Tensor]]=None, filter_loadops=True):
   if isinstance(t, Tensor): t = [t]
   seen = set()
@@ -30,7 +31,7 @@ def check_schedule(t:Union[Tensor, List[Tensor]], allowed:int, to_prerealize:Opt
     for i, s in enumerate(sched):
       print("kernel", i+1)
       for op in s.ast: print_tree(op)
-  assert len(sched) == allowed, f"{len(sched)} != {allowed}"
+  if len(sched) != allowed: raise KernelCountException()
   # test the (non loadops) ops linearize
   for s in sched:
     if s.ast[0].op in LoadOps: continue
@@ -102,12 +103,12 @@ class TestSchedule(unittest.TestCase):
     c = a.sum(axis=0) + b
     check_schedule(c, 1)
 
-  @unittest.skip("not pushing permutes through reduces")
+  # not pushing permutes through reduces
   def test_reduce_permute_binop_fusion(self):
     a = Tensor.empty(10,10,10)
     b = Tensor.empty(10,10,1)
     c = a.sum(axis=0, keepdim=True).permute(2,1,0) + b
-    check_schedule(c, 1)
+    with self.assertRaises(KernelCountException): check_schedule(c, 1)
 
   def test_binop_early_reshape_reduce_fusion(self):
     a = Tensor.empty(100)
@@ -132,21 +133,21 @@ class TestSchedule(unittest.TestCase):
     d = a+b
     check_schedule(d, 0, [c])
 
-  @unittest.skip("failing in old lazy")
+  # failing in new lazy
   def test_cache_binaryop_reshaped(self):
     a = Tensor.empty(10)
     b = Tensor.empty(10)
     c = a+b
     d = a.reshape(10,1)+b.reshape(10,1)
-    check_schedule(d, 0, [c])
+    with self.assertRaises(KernelCountException): check_schedule(d, 0, [c])
 
-  @unittest.skip("failing in new lazy")
+  # failing in new lazy
   def test_cache_binaryop_transpose(self):
     a = Tensor.empty(10,10)
     b = Tensor.empty(10,10)
     c = (a.T*b.T).T #.contiguous()
     d = a*b
-    check_schedule(d, 0, [c])
+    with self.assertRaises(KernelCountException): check_schedule(d, 0, [c])
 
   def test_cache_two_reduceops(self):
     a = Tensor.empty(10)
@@ -247,6 +248,13 @@ class TestSchedule(unittest.TestCase):
     out = c1(img).relu()
     check_schedule(out, 1, [c1.weight, c1.bias])
 
+  def test_fold_conv_relu_alt(self):
+    img = Tensor.ones(1,4,8,8)
+    c1 = nn.Conv2d(4, 4, kernel_size=3)
+    c2 = nn.Conv2d(4, 4, kernel_size=3)
+    img_conv = img.sequential([c1, Tensor.relu, c2, Tensor.relu])
+    check_schedule(img_conv, 2, [*nn.state.get_parameters(c1), *nn.state.get_parameters(c2), img])
+
   def test_fold_conv_relu_nobias(self):
     img = Tensor.ones(1,4,8,8)
     c1 = nn.Conv2d(4, 4, kernel_size=3, bias=False)
@@ -261,6 +269,13 @@ class TestSchedule(unittest.TestCase):
     img = Tensor.rand(2,3,64,64)
     out = c1(img).elu()
     check_schedule(out, 1, [c1.weight, c1.bias, img])
+
+  def test_fold_conv_elu_alt(self):
+    img = Tensor.ones(1,4,8,8).contiguous()
+    c1 = nn.Conv2d(4, 4, kernel_size=3)
+    c2 = nn.Conv2d(4, 4, kernel_size=3)
+    img_conv = img.sequential([c1, Tensor.elu, c2, Tensor.elu])
+    check_schedule(img_conv, 2, [*nn.state.get_parameters(c1), *nn.state.get_parameters(c2), img])
 
   def test_two_sum(self):
     img = Tensor.empty(64,64)
@@ -296,17 +311,14 @@ class TestSchedule(unittest.TestCase):
     c = a.sum((0,1)).cast(dtypes.float16).permute(1,0).reshape(4,4,1).permute(1,0,2).reshape(16) + b
     check_schedule(c, 1)
 
-  @unittest.skip("failing in old lazy")
   def test_fancy_reshape_fusion(self):
     a = Tensor.empty(10)
     b = Tensor.empty(10)
     c = a+b
     d = a.reshape(10,1)+b.reshape(10,1)
     out = c.sum() + d.sum()
-    check_schedule(out, 1)
+    with self.assertRaises(KernelCountException): check_schedule(out, 1)
 
-  # NOTE: for this to pass, LazyViews must be children of LazyBuffers so the (a+b) runs first
-  @unittest.skip("not real world")
   def test_children_dont_push(self):
     a = Tensor.empty(10, 10, 1)
     b = Tensor.empty(10, 10, 1)
@@ -315,7 +327,7 @@ class TestSchedule(unittest.TestCase):
     f = d+e
     check_schedule(f, 2)
 
-  @unittest.skip("failing in new lazy")
+  # failing in new lazy
   def test_dont_fuse_binops_with_children(self):
     a = Tensor.empty(10)
     b = Tensor.empty(10)
@@ -323,8 +335,8 @@ class TestSchedule(unittest.TestCase):
     keep_me = a+b
     e = keep_me.sum() # noqa: F841 give keep_me a child (NOTE: BinaryOps won't be a child since it will instant fuse)
     d = keep_me+c
-    check_schedule(d, 2)
-    check_schedule(keep_me, 0, [d])
+    with self.assertRaises(KernelCountException): check_schedule(d, 2)
+    with self.assertRaises(KernelCountException): check_schedule(keep_me, 0, [d])
 
   #@unittest.skip("failing in old lazy")
   def test_permute_breaks_fusion(self):
@@ -360,9 +372,7 @@ class TestSchedule(unittest.TestCase):
     check_schedule(e, 2)
 
   # this is the failing case in openpilot...it's very simple like this
-  @unittest.skip("failing in old lazy")
   def test_image_conv_fusion(self):
-    from tinygrad.features.image import image_conv2d
     w1 = Tensor.empty(16, 16, 1, 1)
     b1 = Tensor.empty(16)
     w2 = Tensor.empty(16, 16, 1, 1)
@@ -371,12 +381,12 @@ class TestSchedule(unittest.TestCase):
     b3 = Tensor.empty(16)
 
     x = Tensor.empty(1, 16, 32, 32)
-    x = base = image_conv2d(x, w1, b1)
-    x = image_conv2d(x, w2, b2) + base
-    x = image_conv2d(x, w3, b3)
+    x = base = x.image_conv2d(w1, b1)
+    x = x.image_conv2d(w2, b2) + base
+    x = x.image_conv2d(w3, b3)
 
     # NOOP, 3 convs, contiguous
-    check_schedule(x, 5)
+    with self.assertRaises(KernelCountException): check_schedule(x, 5)
 
   def test_image_conv_fusion_minimal(self):
     b1 = Tensor.empty(16)
@@ -426,6 +436,12 @@ class TestSchedule(unittest.TestCase):
     x = Tensor.empty(1, 64, 32, 32)
     out = x.permute(0,2,3,1).contiguous()
     check_schedule(out, 2, filter_loadops=False)
+
+  def test_fold_with_contiguous(self):
+    a = Tensor.randn(16, 16, 16).realize()
+    b = Tensor.randn(16, 16).realize()
+    c = (a.sum(2).contiguous() + b).contiguous()
+    check_schedule(c, 2)
 
   def test_double_from(self):
     x = Tensor([1,2,3,4])
@@ -502,12 +518,12 @@ class TestSchedule(unittest.TestCase):
     out = x + y
     check_schedule(out, 2)  # TODO: this should be 1
 
-  @unittest.skip("broken due to const folding and two contiguous are different kernels")
+  # broken due to const folding and two contiguous are different kernels
   def test_const_no_recompute(self):
     x = Tensor(2) + Tensor(2)
     y = Tensor(2) + Tensor(2)
     out = x.contiguous() + y.contiguous()
-    check_schedule(out, 2)
+    with self.assertRaises(KernelCountException): check_schedule(out, 2, filter_loadops=False)
 
   def test_reduce_same_size(self):
     a = Tensor.empty(4, 4)
@@ -690,12 +706,12 @@ class TestSchedule(unittest.TestCase):
     a = shared * 2
     b = shared * 3
     sched = check_schedule([a, b], 1)
-    for si in sched[:-2]: assert all(out.dtype is dtypes.half for out in si.outputs)
+    for si in sched[:-2]: assert all(out.dtype == dtypes.half for out in si.outputs)
 
     # reduce
     a = z.sum(axis=0).half().float().sum(axis=0)
     sched = check_schedule(a, 2)
-    for si in sched[:-1]: assert all(out.dtype is dtypes.half for out in si.outputs)
+    for si in sched[:-1]: assert all(out.dtype == dtypes.half for out in si.outputs)
 
     # expand
     # expand will realize just after the .float(), so requires change to realize-before-expand
@@ -785,12 +801,12 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(out, 1))
     np.testing.assert_allclose(out.numpy(), np.pad(a.numpy()+b.numpy(), ((0, 1), (0, 1), (0, 1)), constant_values=1.0).sum())
 
-  def test_pad_reduce_usafe(self):
+  def test_pad_reduce_unsafe(self):
     Tensor.manual_seed(0)
     a = Tensor.rand(3, 4, 5).realize()
     out = a.log2().pad(((0, 1), (0, 1), (0, 1)), 1.0).sum().contiguous()
     run_schedule(check_schedule(out, 2))
-    np.testing.assert_allclose(out.numpy(), np.pad(np.log2(a.numpy()), ((0, 1), (0, 1), (0, 1)), constant_values=1.0).sum())
+    np.testing.assert_allclose(out.numpy(), np.pad(np.log2(a.numpy()), ((0, 1), (0, 1), (0, 1)), constant_values=1.0).sum(), rtol=1e-6)
 
   def test_shrink_pad_safe(self):
     a = Tensor.ones((3, )).contiguous().realize()
@@ -799,13 +815,45 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(out, 1))
     np.testing.assert_equal(out.numpy(), [2, 0])
 
-  # TODO: should not shuffle unsafe pad ops through any pads, even if buffer is shrunk overall (#3437)
   def test_shrink_pad_unsafe(self):
     a = Tensor.ones((3, )).contiguous().realize()
     out = a.exp2().shrink(((0, 1),)).pad(((0, 1),)).contiguous()
-    run_schedule(check_schedule(out, 1))
-    with self.assertRaises(AssertionError):
-      np.testing.assert_equal(out.numpy(), [2, 0])
+    run_schedule(check_schedule(out, 2))
+    np.testing.assert_equal(out.numpy(), [2, 0])
+
+  def test_base_change_shrink_pad(self):
+    a = Tensor.ones(3, 3).contiguous().realize()
+    b = a.exp2()
+    c = b[:-1, :-1]
+    d = c.pad(((0, 1), (0, 1))) * 2
+    run_schedule(check_schedule(d, 2))
+    np.testing.assert_equal(d.numpy(), np.pad(np.exp2(a.numpy())[:-1, :-1], ((0, 1), (0, 1)))*2)
+
+  def test_base_change_expand_pad(self):
+    a = Tensor.ones(3, 3).contiguous().realize()
+    b = a.exp2()
+    c = b[:, None, :]
+    d = c.pad(((0, 0), (1, 1), (0, 0))) * 2
+    run_schedule(check_schedule(d, 2))
+    np.testing.assert_equal(d.numpy(), np.pad(np.exp2(a.numpy())[:, None, :], ((0, 0), (1, 1), (0, 0)))*2)
+
+  # TODO like openpilot with imagef
+  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  def test_base_change_expand_expand(self):
+    a = Tensor.ones(4, 4).contiguous().realize()
+    b = a.cast(dtypes.half).expand(2, 4, 4)
+    c = b.cast(dtypes.int).expand(2, 2, 4, 4)
+    run_schedule(check_schedule(c, 2))
+    np.testing.assert_equal(c.numpy(), np.ones(((2, 2, 4, 4)), dtype=np.int32))
+
+  def test_base_change_pad_expand(self):
+    a = Tensor.full((4, 4), 1.).contiguous().realize()
+    b = Tensor.full((4, 4), 2.).contiguous().realize()
+    c = (a + b).pad(((1, 1), (1, 1)))
+    d = c.cast(dtypes.int).expand((2, 6, 6)) * 4
+    run_schedule(check_schedule(d, 2))
+    c_np = np.pad((np.full((4, 4), 2., dtype=np.float32) + np.full((4, 4), 1., dtype=np.float32)), ((1, 1), (1, 1)), constant_values=0.0)
+    np.testing.assert_equal(d.numpy(), np.broadcast_to(c_np.astype(np.half), (2, *c_np.shape)) * 4)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

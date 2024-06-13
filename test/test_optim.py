@@ -41,12 +41,13 @@ def step(tensor, optim, steps=1, teeny=False, **kwargs):
     optim.step()
   return net.x.detach().numpy(), net.W.detach().numpy()
 
-@unittest.skipIf(CI and Device.DEFAULT == "CUDA", "slow")
+@unittest.skipIf(CI and Device.DEFAULT in {"CUDA", "NV"}, "slow")
 class TestOptim(unittest.TestCase):
   def setUp(self):
     self.old_training = Tensor.training
     Tensor.training = True
-  def tearDown(self): Tensor.training = self.old_training
+  def tearDown(self):
+    Tensor.training = self.old_training
 
   def _test_optim(self, tinygrad_optim, torch_optim, steps, opts, atol, rtol):
     for x,y in zip(step(Tensor, tinygrad_optim, steps, **opts),

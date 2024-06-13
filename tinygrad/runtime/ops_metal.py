@@ -3,7 +3,7 @@ import os, subprocess, pathlib, ctypes, tempfile, functools
 import Metal, libdispatch
 from typing import List, Set, Any, Tuple, Optional
 from tinygrad.helpers import prod, getenv, DEBUG, unwrap2
-from tinygrad.device import Compiled, Compiler, LRUAllocator
+from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator
 from tinygrad.renderer.cstyle import MetalRenderer
 
 def wait_check(cbuf: Any):
@@ -20,11 +20,11 @@ class MetalCompiler(Compiler):
       # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
       air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=src.encode('utf-8'))
       return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
-    else:
-      options = Metal.MTLCompileOptions.new()
-      options.setFastMathEnabled_(getenv("METAL_FAST_MATH"))
-      library = unwrap2(self.device.device.newLibraryWithSource_options_error_(src, options, None))
-      return library.libraryDataContents().bytes().tobytes()
+    options = Metal.MTLCompileOptions.new()
+    options.setFastMathEnabled_(getenv("METAL_FAST_MATH"))
+    try: library = unwrap2(self.device.device.newLibraryWithSource_options_error_(src, options, None))
+    except AssertionError as e: raise CompileError(e)
+    return library.libraryDataContents().bytes().tobytes()
 
 class MetalProgram:
   def __init__(self, device:MetalDevice, name:str, lib:bytes):
@@ -33,7 +33,7 @@ class MetalProgram:
       with tempfile.NamedTemporaryFile(delete=True) as shader:
         shader.write(lib)
         shader.flush()
-        os.system(f"cd {pathlib.Path(__file__).parents[2]}/disassemblers/applegpu && python3 compiler_explorer.py {shader.name}")
+        os.system(f"cd {pathlib.Path(__file__).parents[2]}/extra/disassemblers/applegpu && python3 compiler_explorer.py {shader.name}")
     assert lib[:4] == b"MTLB", "Invalid Metal library. Could be due to using conda. Try system python or METAL_XCODE=1 DISABLE_COMPILER_CACHE=1."
     data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
     self.library = unwrap2(self.device.device.newLibraryWithData_error_(data, None))

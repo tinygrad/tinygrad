@@ -223,7 +223,7 @@ class ConvFeatureExtractionModel:
         return conv
       assert (is_layer_norm and is_group_norm) == False, "layer norm and group norm are exclusive"
       if is_layer_norm:
-        return [make_conv(), partial(Tensor.dropout, p=dropout),[partial(Tensor.transpose, ax1=-2, ax2=-1), nn.LayerNorm(dim, elementwise_affine=True), partial(Tensor.transpose, ax1=-2, ax2=-1)], Tensor.gelu]
+        return [make_conv(), partial(Tensor.dropout, p=dropout),[partial(Tensor.transpose, dim0=-2, dim1=-1), nn.LayerNorm(dim, elementwise_affine=True), partial(Tensor.transpose, dim0=-2, dim1=-1)], Tensor.gelu]
       elif is_group_norm and mode == "default":
         return [make_conv(), partial(Tensor.dropout, p=dropout), nn.GroupNorm(dim, dim, affine=True), Tensor.gelu]
       elif is_group_norm and mode == "group_norm_masked":
@@ -468,7 +468,7 @@ def repeat_expand_2d_left(content, target_len): # content : [h, t]
     if i >= temp[current_pos+1]:
       current_pos += 1
     cols.append(content[:, current_pos])
-  return Tensor.stack(cols).transpose(0, 1)
+  return Tensor.stack(*cols).transpose(0, 1)
 
 def load_fairseq_cfg(checkpoint_path):
   assert Path(checkpoint_path).is_file()

@@ -11,7 +11,7 @@ from tinygrad.engine.realize import run_schedule
 from tinygrad.ops import UnaryOps
 from test.helpers import is_dtype_supported
 
-settings.register_profile("my_profile", max_examples=200, deadline=None)
+settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
 print(settings.default)
 
@@ -40,7 +40,7 @@ unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), operator.neg, (T
 
 # TODO: CUDACPU segfaults on sin
 # TODO: METAL sin is flaky for float16
-if getenv("CUDACPU") or Device.DEFAULT == "METAL": unary_operations.remove((Tensor.sin, np.sin))
+if getenv("CUDACPU") or (getenv("MOCKGPU") and Device.DEFAULT == "NV") or Device.DEFAULT == "METAL": unary_operations.remove((Tensor.sin, np.sin))
 
 class ht:
   float64 = strat.floats(width=64, allow_subnormal=False)
@@ -145,7 +145,7 @@ class TestDTypeALU(unittest.TestCase):
   def test_int32_midcast_float(self, a, b, c, op1, op2): universal_test_midcast(a, b, c, op1, op2, dtypes.int32, dtypes.float32)
 
   # Metal and CUDACPU and HIP behave differently than numpy in CI for overflows
-  skip_overflow = CI and (Device.DEFAULT in {"HSA", "AMD"} or getenv("CUDACPU"))
+  skip_overflow = CI and (Device.DEFAULT in {"AMD", "NV"} or getenv("CUDACPU"))
   @given(strat.floats(width=32, min_value=0, max_value=10.0) if skip_overflow else ht.float32,
          strat.floats(width=32, min_value=0, max_value=10.0) if skip_overflow else ht.float32,
          ht.int32, strat.sampled_from(binary_operations), strat.sampled_from(integer_binary_operations))

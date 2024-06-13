@@ -1,10 +1,12 @@
 import unittest
 from tinygrad import Tensor, GlobalCounters
+from tinygrad.helpers import Context
 
 class TestArange(unittest.TestCase):
   def _get_flops(self, N):
     GlobalCounters.reset()
-    Tensor.arange(N).realize()
+    with Context(NOOPT=1):
+      Tensor.arange(N).realize()
     return GlobalCounters.global_ops
 
   def test_complexity(self):
