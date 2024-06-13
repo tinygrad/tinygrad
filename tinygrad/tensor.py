@@ -1777,7 +1777,7 @@ class Tensor:
     print(t.triu(k=1).numpy())
     ```
     """
-    return Tensor._tri(self.shape[-2], self.shape[-1], k=k, device=self.device).where(self, 0)
+    return Tensor._tri(self.shape[-2], self.shape[-1], k=k, device=self.device).where(self, 0).cast(self.dtype)
   def tril(self, k:int=0) -> Tensor:
     """
     Returns the lower triangular part of the tensor, the other elements are set to 0.
@@ -1790,7 +1790,7 @@ class Tensor:
     print(t.tril().numpy())
     ```
     """
-    return Tensor._tri(self.shape[-2], self.shape[-1], k=k+1, device=self.device).where(0, self)
+    return Tensor._tri(self.shape[-2], self.shape[-1], k=k+1, device=self.device).where(0, self).cast(self.dtype)
 
   # ***** unary ops *****
 
