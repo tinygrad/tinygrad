@@ -329,6 +329,22 @@ class TestHelpers(unittest.TestCase):
   def test_scalar(self, dtype, amt):
     assert dtype.vec(amt).scalar() == dtype
 
+  def test_from_py(self):
+    assert dtypes.from_py(True) == dtypes.bool
+    assert dtypes.from_py(2) == dtypes.default_int
+    assert dtypes.from_py(3.0) == dtypes.default_float
+    assert dtypes.from_py([]) == dtypes.default_float
+    assert dtypes.from_py(()) == dtypes.default_float
+    assert dtypes.from_py([True]) == dtypes.bool
+    assert dtypes.from_py([True, 2]) == dtypes.default_int
+    assert dtypes.from_py([True, 3.0]) == dtypes.default_float
+    assert dtypes.from_py([2, 3.0]) == dtypes.default_float
+    assert dtypes.from_py([True, 2, 3.0]) == dtypes.default_float
+    with self.assertRaises(RuntimeError): dtypes.from_py(None)
+    with self.assertRaises(RuntimeError): dtypes.from_py([None])
+    with self.assertRaises(RuntimeError): dtypes.from_py({})
+    with self.assertRaises(RuntimeError): dtypes.from_py(set())
+
 class TestTypeSpec(unittest.TestCase):
   def setUp(self):
     self.old_default_int, self.old_default_float = dtypes.default_int, dtypes.default_float

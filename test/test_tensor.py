@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-import unittest, copy, mmap
+import unittest, copy, mmap, random
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.helpers import getenv, temp, CI
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
@@ -288,6 +288,18 @@ class TestTinygrad(unittest.TestCase):
     with self.assertRaises(ValueError): Tensor([[[1,1,1],[1,1]]])
     with self.assertRaises(ValueError): Tensor([[1,1,1],[[1,1,1]]])
 
+  def test_tensor_mixed_list_tuple(self):
+    def _list_or_tuple(): return list if random.random() < 0.5 else tuple
+    def _generate_data(depth):
+      if depth == 0: return _list_or_tuple()()
+      if depth == 1: return _list_or_tuple()([random.random(), random.random()])
+      return _list_or_tuple()([_generate_data(depth-1), _generate_data(depth-1)])
+
+    for depth in range(7):
+      for _ in range(20):
+        data = _generate_data(depth)
+        np.testing.assert_allclose(Tensor(data).numpy(), np.array(data))
+
   def test_tensor_copy(self):
     x = copy.deepcopy(Tensor.ones((3,3,3)))
     np.testing.assert_allclose(x.numpy(), np.ones((3,3,3)))
@@ -325,7 +337,7 @@ class TestTinygrad(unittest.TestCase):
 
   def test_no_bool(self):
     with self.assertRaises(TypeError):
-      if Tensor(["3"]):
+      if Tensor(3):
         print("hi")
 
     with self.assertRaises(TypeError):

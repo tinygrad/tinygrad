@@ -288,7 +288,7 @@ jobs:
     needs: check_process_replay
     env:
       RUN_PROCESS_REPLAY: ${{ needs.check_process_replay.outputs.run_process_replay }}
-    timeout-minutes: 10
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Code
@@ -451,7 +451,7 @@ jobs:
           EOF
           echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | sudo tee /etc/apt/preferences.d/rocm-pin-600
           sudo apt update || true
-          sudo apt install --no-install-recommends --allow-unauthenticated -y hsa-rocr comgr rocm-llvm hsa-rocr-dev
+          sudo apt install --no-install-recommends --allow-unauthenticated -y hsa-rocr comgr hsa-rocr-dev
           curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
           jq -r '.assets[] | select(.name == "libremu.so").browser_download_url' | \
           sudo xargs curl -L -o /usr/local/lib/libremu.so
