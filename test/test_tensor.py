@@ -337,7 +337,7 @@ class TestTinygrad(unittest.TestCase):
 
   def test_no_bool(self):
     with self.assertRaises(TypeError):
-      if Tensor(["3"]):
+      if Tensor(3):
         print("hi")
 
     with self.assertRaises(TypeError):

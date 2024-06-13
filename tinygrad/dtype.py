@@ -48,8 +48,14 @@ class dtypes:
   def is_unsigned(x: DType) -> bool: return x.scalar() in (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
   @staticmethod
   def from_np(x: type) -> DType: return DTYPES_DICT[np.dtype(x).name]
-  @staticmethod  # NOTE: isinstance(True, int) is True in python
-  def from_py(x) -> DType: return dtypes.default_float if isinstance(x, float) else dtypes.bool if isinstance(x, bool) else dtypes.default_int
+  @staticmethod
+  def from_py(x) -> DType:
+    if isinstance(x, (list, tuple)): return max(dtypes.from_py(xi) for xi in x) if x else dtypes.default_float
+    if isinstance(x, float): return dtypes.default_float
+    # NOTE: isinstance(True, int) is True in python, so check bool before int
+    if isinstance(x, bool): return dtypes.bool
+    if isinstance(x, int): return dtypes.default_int
+    raise RuntimeError(f"Could not infer dtype of {x} with type {type(x)}")
   @staticmethod
   def as_const(val: ConstType, dtype:DType): return int(val) if dtypes.is_int(dtype) else float(val) if dtypes.is_float(dtype) else bool(val)
   @staticmethod
