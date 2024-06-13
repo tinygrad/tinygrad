@@ -875,6 +875,10 @@ class Tensor:
       indices = [Tensor(list(i), self.device, requires_grad=False) if isinstance(i, (tuple, list)) else i for i in indices]
     else: indices = [indices]
 
+    # handling leading Nones
+    # TODO: unify how None is handled
+    if indices and indices[0] is None: return (self[indices[1:]] if indices[1:] else self).unsqueeze(0)
+
     # turn scalar Tensors into const val for int indexing if possible
     indices = [self._to_const_val(i) if isinstance(i, Tensor) and i.shape == () else i for i in indices]
     # move Tensor indices to the same device as self
