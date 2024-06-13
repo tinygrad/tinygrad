@@ -1,13 +1,13 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
-import time, math, itertools, functools
+import time, math, itertools, functools, struct
 from contextlib import ContextDecorator
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Dict, DefaultDict, cast, get_args, Set
 from collections import defaultdict
 import numpy as np
 
 from tinygrad.dtype import DType, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype
-from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv
+from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, flat_mv, get_shape, fully_flatten
 from tinygrad.helpers import IMAGE, DEBUG, WINO, THREEFRY
 from tinygrad.lazy import LazyBuffer
 from tinygrad.multi import MultiLazyBuffer
@@ -47,6 +47,14 @@ def _fromcpu(x: np.ndarray) -> LazyBuffer:
   ret = LazyBuffer.loadop(LoadOps.EMPTY, x.shape, dtypes.from_np(x.dtype), "NPY")
   # fake realize
   ret.buffer.allocate(x)
+  del ret.srcs
+  return ret
+
+def _frompy(x:Union[List, Tuple], dtype:DType) -> LazyBuffer:
+  ret = LazyBuffer.loadop(LoadOps.EMPTY, get_shape(x), dtype, "PYTHON")
+  # fake realize
+  assert dtype.fmt is not None, f"{dtype=} has None fmt"
+  ret.buffer.allocate(flat_mv(memoryview(bytes(b''.join(struct.pack(f"@{dtype.fmt}", xi) for xi in fully_flatten(x))))))
   del ret.srcs
   return ret
 
@@ -110,8 +118,8 @@ class Tensor:
     elif isinstance(data, bytes): data = _fromcpu(np.frombuffer(data, np.uint8))
     elif isinstance(data, (list, tuple)):
       if dtype is None: dtype = dtypes.from_py(data)
-      if dtype == dtypes.bfloat16: data = Tensor(_fromcpu(np.array(data, np.float32)), device=device).cast(dtypes.bfloat16).lazydata
-      else: data = _fromcpu(np.array(data, dtype.np))
+      if dtype == dtypes.bfloat16: data = Tensor(_frompy(data, dtypes.float32), device=device).cast(dtypes.bfloat16).lazydata
+      else: data = _frompy(data, dtype)
     elif isinstance(data, np.ndarray):
       if data.shape == (): data = _loadop(LoadOps.CONST, tuple(), dtype or dtypes.from_np(data.dtype), device, data.item())
       else: data = _fromcpu(data.astype(dtype.np) if dtype is not None and dtype.np is not None else data)
