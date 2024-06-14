@@ -7,7 +7,7 @@ from tqdm import tqdm
 from extra.models.llama import Transformer, convert_from_huggingface, fix_bf16
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
 from tinygrad import Tensor, dtypes, nn, Context, Device, GlobalCounters
-from tinygrad.helpers import Profiling, Timing, DEBUG, fetch
+from tinygrad.helpers import Profiling, Timing, DEBUG, colored, fetch
 
 class Tokenizer:
   pat_str = r"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"
@@ -193,16 +193,17 @@ if __name__ == "__main__":
   Tensor.no_grad = True
 
   parser = argparse.ArgumentParser()
-  parser.add_argument("--download_model", action="store_true")
-  parser.add_argument("--model", type=Path, required=True)
-  parser.add_argument("--size", choices=["8B", "70B"], default="8B")
-  parser.add_argument("--shard", type=int, default=1)
-  parser.add_argument("--quantize", choices=["int8", "nf4"])
-  parser.add_argument("--api", action="store_true")
-  parser.add_argument("--host", type=str, default="0.0.0.0")
-  parser.add_argument("--port", type=int, default=7776)
-  parser.add_argument("--debug", action="store_true")
-  parser.add_argument("--seed", type=int)
+  parser.add_argument("--download_model", action="store_true", help="Download a 8B model")
+  parser.add_argument("--model", type=Path, required=True, help="Model path")
+  parser.add_argument("--size", choices=["8B", "70B"], default="8B", help="Model size")
+  parser.add_argument("--shard", type=int, default=1, help="Shard the model across multiple devices")
+  parser.add_argument("--quantize", choices=["int8", "nf4"], help="Quantization method")
+  parser.add_argument("--api", action="store_true", help="Run a openai API compatible server and a web interface")
+  parser.add_argument("--host", type=str, default="0.0.0.0", help="Web server bind address")
+  parser.add_argument("--port", type=int, default=7776, help="Web server port")
+  parser.add_argument("--debug", action="store_true", help="Enable debug mode")
+  parser.add_argument("--seed", type=int, help="Random seed")
+  parser.add_argument("--benchmark", action="store_true", help="Run a benchmark")
   parser.add_argument("--timing", action="store_true", help="Print timing per token")
   parser.add_argument("--profile", action="store_true", help="Output profile data")
   args = parser.parse_args()
@@ -218,6 +219,7 @@ if __name__ == "__main__":
     fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/raw/main/model.safetensors.index.json", args.model / "model.safetensors.index.json")
 
   if args.seed is not None: Tensor.manual_seed(args.seed)
+  if args.benchmark: Tensor.manual_seed(42)
   print(f"seed = {Tensor._seed}")
 
   tokenizer = Tokenizer(str((args.model if args.model.is_dir() else args.model.parent) / "tokenizer.model"))
@@ -354,6 +356,28 @@ if __name__ == "__main__":
       yield f"data: {json.dumps(res)}\n\n"
 
     app.run(host=args.host, port=args.port, debug=args.debug)
+  elif args.benchmark:
+    toks = [tokenizer.bos_id] + encode_message("user", "Hello.") + encode_role("assistant")
+
+    start_pos = prefill(model, toks)
+    last_tok = toks[-1]
+    generated = ""
+    for _ in range(20):
+      GlobalCounters.reset()
+      st = GlobalCounters.time_sum_s
+      with Profiling(enabled=args.profile):
+        with Timing("total ", on_exit=lambda x: f", {1e9/x:.2f} tok/s, {GlobalCounters.global_mem/x:.2f} GB/s, param {param_bytes/x:.2f} GB/s"):
+          with Timing("enqueue in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
+                      f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
+                      (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_bytes*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None):
+            tok = model(Tensor([[last_tok]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P)
+          tok = tok.item()
+      start_pos += 1
+      last_tok = tok
+      generated += tokenizer.decode([tok])
+      print(generated)
+    assert generated == "Hello! How can I assist you today? If you have any questions, need information, or require", f"{generated=}"
+    print("\n" + colored("output validated", "green"))  # NOTE: "\n" iside colored does not render the color in github action
   else:
     prompt = [tokenizer.bos_id] + encode_message("system", "You are an *emotive* assistant.")
 
