@@ -30,6 +30,7 @@ def load_worlds(filter_reduce=True, filter_noimage=True, filter_novariable=True)
   if filter_reduce: ast_strs = [x for x in ast_strs if "ReduceOps" in x]
   if filter_noimage: ast_strs = [x for x in ast_strs if "dtypes.image" not in x]
   if filter_novariable: ast_strs = [x for x in ast_strs if "Variable" not in x]
+  ast_strs = [x for x in ast_strs if "BinaryOps.SUB" not in x]
   random.seed(1337)
   random.shuffle(ast_strs)
   return ast_strs
