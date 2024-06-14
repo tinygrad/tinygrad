@@ -47,7 +47,6 @@ class UOp:
   def __add__(self, x): return UOp.alu(BinaryOps.ADD, self, ufix(self.dtype, x))
   def __radd__(self, x): return UOp.alu(BinaryOps.ADD, ufix(self.dtype, x), self)
   def __sub__(self, x): return UOp.alu(BinaryOps.ADD, self, -ufix(self.dtype, x))
-  #def __sub__(self, x): return UOp.alu(BinaryOps.SUB, self, ufix(self.dtype, x))
   def __mul__(self, x): return UOp.alu(BinaryOps.MUL, self, ufix(self.dtype, x))
   def __rmul__(self, x): return UOp.alu(BinaryOps.MUL, ufix(self.dtype, x), self)
   def __floordiv__(self, x): return UOp.alu(BinaryOps.IDIV, self, ufix(self.dtype, x))
@@ -201,8 +200,7 @@ constant_folder = PatternMatcher([
   #if x is nan it should render the nan value.
   (UPat(UOps.ALU, BinaryOps.MUL, [UPat(name="x"), UPat(UOps.CONST, 0, name="c")]),
      lambda x,c: x if isinstance(x.arg, float) and math.isnan(x.arg) else c),
-  #(UPat(UOps.ALU, BinaryOps.SUB, (UPat(name="x"), UPat(name="x"))), lambda x: UOp.const(x.dtype, 0)),   # x-x -> 0
-  (UPat(UOps.ALU, BinaryOps.ADD, (UPat(name="x"), UPat(UOps.ALU, UnaryOps.NEG, UPat(name="x")))), lambda x: UOp.const(x.dtype, 0)), 
+  (UPat(UOps.ALU, BinaryOps.ADD, (UPat(name="x"), UPat(UOps.ALU, UnaryOps.NEG, UPat(name="x")))), lambda x: UOp.const(x.dtype, 0)), # x-x -> 0
   # ** load/store folding **
   (UPat(UOps.STORE, vin=(UPat(name="buf"), UPat(name="idx"),
                                UPat(UOps.LOAD, vin=(UPat(name="buf"), UPat(name="idx"))))), lambda buf, idx: UOp(UOps.NOOP)),
@@ -220,6 +218,8 @@ constant_folder = PatternMatcher([
                                   UPat(UOps.CONST, name="c0"))), lambda x,c0: x if c0.arg != 0 else None),    # (x*c0)/c0 -> x
   (UPat(UOps.ALU, BinaryOps.IDIV, (UPat(UOps.ALU, BinaryOps.IDIV, (UPat(name="x"), UPat(UOps.CONST, name="c0"))), UPat(UOps.CONST, name="c1"))),
     lambda x,c0,c1: x//UOp.const(x.dtype, exec_alu(BinaryOps.MUL, x.dtype, [c0.arg, c1.arg]))),    # (x/c0)/c1 -> x/(c0*c1)
+  (UPat(UOps.ALU, BinaryOps.CMPLT, (UPat(UOps.ALU, BinaryOps.ADD, [UPat(UOps.CONST, name="c0"), UPat(name="x")]), UPat(UOps.CONST, name="c1"))),
+    lambda x,c0,c1: UOp.alu(BinaryOps.CMPLT, x, UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, [c1.arg, (-c0).arg])))),
   (UPat(UOps.ALU, BinaryOps.ADD, [UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c0"), UPat(name="x")]), UPat(name="x")]),
     lambda x,c0: x*UOp.const(x.dtype, c0.arg+1)),    # (x+x*c0)-> x*(c0+1)
   # TODO: can do the invert of this (flip alt/load) when we fix double ops
