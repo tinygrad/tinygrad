@@ -148,7 +148,7 @@ acc_number = 0
 def replace_reduce(root):
   global acc_number
   # TODO: DEFINE_ACC should have a const input
-  acc = UOp(UOps.DEFINE_ACC, root.dtype, root.vin[2:], (root.vin[1].arg, acc_number, 0))
+  acc = UOp(UOps.DEFINE_ACC, root.dtype, root.vin[2:], (root.vin[1].arg, acc_number))
   acc_number += 1
   ret = UOp.alu(root.arg, acc, root.vin[0])
   return UOp(UOps.PHI, ret.dtype, (acc, ret))
@@ -156,7 +156,7 @@ def replace_reduce(root):
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
   # replace REDUCE
-  #(UPat(UOps.REDUCE, name="root"), replace_reduce),
+  (UPat(UOps.REDUCE, name="root"), replace_reduce),
   # arange loop folding (early)
   (UPat(UOps.ALU, TernaryOps.WHERE, vin=(UPat(UOps.ALU, BinaryOps.CMPLT, vin=(
     UPat(UOps.ALU, BinaryOps.ADD, vin=[UPat(name="idx"), UPat(UOps.ALU, BinaryOps.MUL,
@@ -351,6 +351,9 @@ class UOpGraph:
     return replace_nodes.get(sink, sink)
 
   def linearize(self, extra_pm:Optional[PatternMatcher]=None, type_verify=True):
+    global acc_number
+    acc_number = 0
+
     # NOTE: relinearizering should be okay
     #assert self._uops is None, "already linearized"
     self.nodes: Dict[Tuple, UOp] = {}
