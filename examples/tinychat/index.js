@@ -33,7 +33,7 @@ document.addEventListener("alpine:init", () => {
       if (this.home === 0) this.home = 1;
 
       // ensure that going back in history will go back to home
-      window.history.pushState({}, '', '/');
+      window.history.pushState({}, "", "/");
 
       // add message to list
       this.cstate.messages.push({ role: "user", content: value });
@@ -45,7 +45,9 @@ document.addEventListener("alpine:init", () => {
 
       // start receiving server sent events
       let gottenFirstChunk = false;
-      for await (const chunk of this.openaiChatCompletion(this.cstate.messages)) {
+      for await (
+        const chunk of this.openaiChatCompletion(this.cstate.messages)
+      ) {
         if (!gottenFirstChunk) {
           this.cstate.messages.push({ role: "ai", content: "" });
           gottenFirstChunk = true;
@@ -96,20 +98,20 @@ document.addEventListener("alpine:init", () => {
         throw new Error("Failed to fetch");
       }
 
-      for await (
-        const event of response.body.pipeThrough(new TextDecoderStream())
-          .pipeThrough(new EventSourceParserStream())
-      ) {
-        if (event.type === "event") {
-          const json = JSON.parse(event.data);
-
+      const reader = response.body.pipeThrough(new TextDecoderStream())
+        .pipeThrough(new EventSourceParserStream()).getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        if (value.type === "event") {
+          const json = JSON.parse(value.data);
           if (json.choices) {
             const choice = json.choices[0];
-
-            // see if the completion is done
-            if (choice.finish_reason === "stop") break;
-
-            // yield the completion
+            if (choice.finish_reason === "stop") {
+              break;
+            }
             yield choice.delta.content;
           }
         }
