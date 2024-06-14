@@ -19,8 +19,10 @@ from matplotlib import pyplot as plt
 import numpy as np
 import time
 
+# ngpus = 2
 
 GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS"))]
+GPUS=False
 
 def logsumexp(a:Tensor, b:Tensor):
     mx = Tensor.maximum(a,b).maximum(-1e10)
@@ -153,8 +155,7 @@ def mask(d,X_lens, Y_lens, maxX, maxY, vocab=28):
 rnnt = RNNT()
 opt = Adam(get_parameters(rnnt))
 if (GPUS):
-  for x in get_parameters(rnnt):
-    x.to_(GPUS)
+  for x in get_parameters(rnnt): x.to_(GPUS)
 
 
 def fb_pass(X:Tensor,labels, X_lens, Y_lens, maxX, maxY):
@@ -162,7 +163,6 @@ def fb_pass(X:Tensor,labels, X_lens, Y_lens, maxX, maxY):
   opt.zero_grad()
   L = forward(X, labels, X_lens, Y_lens, maxX, maxY)
   L.backward()
-
 
   for p in opt.params: p.grad.realize()
   opt.step()
@@ -175,8 +175,7 @@ def forward(X:Tensor, labels, X_lens, Y_lens, maxx, maxy):
   Y = Y.pad(((0,0),(1,0),(0,0)))
   d = rnnt.joint(X,Y).softmax(-1).realize()
   md = mask(d,X_lens, Y_lens, maxx/2, maxy)
-  L = Loss(md, labels)
-  return L
+  return Loss(md, labels)
 
 forward_jit = TinyJit(lambda *args: forward(*args).value.realize())
 
@@ -196,19 +195,19 @@ maxsecs = 5
 if __name__ == "__main__":
 
   ci, maxx, maxy = load_data(maxsecs)
-  train_set = ci[:-(2*BS)]
-  test_set = ci[-(2*BS):]
+  train_set, test_set = ci[:-(2*BS)], ci[-(2*BS):]
   print(f"eval: {test()}")
   step = TinyJit(fb_pass)
   for e in range(40):
     st = time.time()
     for i,sample in enumerate(iterate(train_set, BS, maxx,maxy)):
       try:
+        if GPUS:
+          sample = [s.shard_(GPUS, axis=0) for s in sample]
         L = fb_pass(*sample, maxx, maxy).numpy().item()
-        print( end = f"\r {i}/{int(len(train_set)/BS)} L:{L:.4}", flush = True)
+        print( end = f"\r{timestring(time.time() - st)} {i}/{int(len(train_set)/BS)} L:{L:.4}", flush = True)
       except KeyboardInterrupt:
         rnnt.save(f"rnnt_e_{e+1}_i_{i+1}.weight")
-        interrupt = True
         raise KeyboardInterrupt
     print (f"\nepoch {e+1} finished in {timestring(time.time() - st )} val:{test()}")
     rnnt.save(f"rnnt_e_{e+1}")
