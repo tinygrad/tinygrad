@@ -1,5 +1,4 @@
-# %%
-from tinygrad.features.graph import print_tree
+from tinygrad.engine.graph import print_tree
 
 from tinygrad import TinyJit
 from tinygrad.nn.optim import Adam
@@ -45,6 +44,8 @@ def unshear(x:Tensor):
 
 class Loss:
   def __init__(self,d:Tensor, labels:Tensor):
+
+    # print(f'Loss init {d=} {labels=}')
     Tensor.no_grad = True
 
     self.d = d
@@ -74,6 +75,7 @@ class Loss:
         ).realize()
       ))
     self.value = -self.a[-1].max(1).sum()
+    # print(f"{self.value=}")
 
   def backward(self):
     Tensor.no_grad = True
@@ -170,7 +172,7 @@ def forward(X:Tensor, labels, X_lens, Y_lens, maxx, maxy):
     d = rnnt.joint(X,Y).softmax(-1).realize()
     md = mask(d,X_lens, Y_lens, maxx/2, maxy)
     L = Loss(md, labels)
-    return L
+    return L.value.realize()
 
 forward_jit = TinyJit(forward)
 
@@ -180,8 +182,9 @@ def test():
     L = 0
     for sample in iter:
         X_lens = sample[2]
-        l = forward_jit(*sample,maxx,maxy).value.numpy()/(X_lens.sum())
-        L += l.numpy().item()
+        l = forward_jit(*sample,maxx,maxy).numpy()
+        l /= (X_lens.sum()).numpy()
+        L += l
 
     Tensor.no_grad = False
     return L / int(len(test_set) / BS)
@@ -213,6 +216,3 @@ if __name__ == "__main__":
         if interrupt: break
         print (f"\nepoch {e+1} finished in {timestring(time.time() - st )} val:{test()}")
         rnnt.save(f"rnnt_e_{e+1}")
-
-
-# %%
