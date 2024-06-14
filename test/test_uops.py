@@ -14,8 +14,7 @@ from tinygrad.codegen.uops import UOpGraph
 from test.helpers import is_dtype_supported
 
 def _uops_to_prg(uops_list, print=False):
-  uops = UOpGraph()
-  for l in uops_list: uops.add(l.uop, l.dtype, l.vin, l.arg)
+  uops = UOpGraph(uops_list)
   src = Device[Device.DEFAULT].renderer.render("test", uops)
   if print: uops.print()
   has_local = Device[Device.DEFAULT].renderer.has_local
@@ -32,10 +31,10 @@ def _test_single_value(vals, op, dts):
   buf_loads = [uop(uops, UOps.DEFINE_GLOBAL, PtrDType(dtype), (), (i+1, False)) for i,dtype in enumerate(dts)]
   loads = (uop(uops, UOps.LOAD, dtype, [buf_loads[i], uop(uops, UOps.CONST, dtypes.int32, (), 0)]) for i,dtype in enumerate(dts))
   alu = uop(uops, UOps.ALU, output_dtype, loads, op)
-  uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
+  out = uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
   buf2 = [Buffer(Device.DEFAULT, 1, dtype).allocate().copyin(np.array([a], dtype=dtype.np).data) for a,dtype in zip(vals, dts)]
-  prg = _uops_to_prg(uops)
+  prg = _uops_to_prg([out])
   prg.exec([buf]+buf2)
   ret = np.empty(1, output_dtype.np)
   buf.copyout(ret.data)
@@ -47,9 +46,9 @@ def _test_single_value_const(vals, op, dts):
   buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(output_dtype), (), (0, True))
   loads = (uop(uops, UOps.CONST, dtype, [], a) for a,dtype in zip(vals, dts))
   alu = uop(uops, UOps.ALU, output_dtype, loads, op)
-  uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
+  out = uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
-  prg = _uops_to_prg(uops)
+  prg = _uops_to_prg([out])
   prg.exec([buf])
   ret = np.empty(1, output_dtype.np)
   buf.copyout(ret.data)
@@ -59,9 +58,9 @@ def _test_uops_result(output_dtype, uops, res):
   # uops = []
   buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(output_dtype), (), (0, True))
   # res = output_fn(uops)
-  uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), res))
+  out = uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), res))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
-  prg = _uops_to_prg(uops, print=True)
+  prg = _uops_to_prg([out], print=True)
   prg.exec([buf])
   ret = np.empty(1, output_dtype.np)
   buf.copyout(ret.data)
