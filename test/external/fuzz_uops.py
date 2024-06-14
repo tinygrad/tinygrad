@@ -31,7 +31,7 @@ class UOpsFuzzerRunner(CompiledRunner):
 
     for i, path in enumerate(self.p.uops.fuzz_paths):
       # setup prg
-      uops = UOpGraph()
+      uops = UOpGraph([])
       uops._uops = list(path)
       if DEBUG >= 6: uops.print()
       self.p = replace(self.p, name=(name:=f"{init_name}fuzz{i}"), src=Device[self.p.dname].renderer.render(name, uops), uops=uops)
