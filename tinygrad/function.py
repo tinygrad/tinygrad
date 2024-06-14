@@ -40,9 +40,14 @@ class Sin(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
     return x.e(UnaryOps.SIN)
-
+  '''
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
+  '''
+  def backward(self, grad_output: LazyBuffer) -> LazyBuffer:
+    neg_x = self.x.e(UnaryOps.NEG)  # Negate x
+    return self.x.const(math.pi / 2).e(BinaryOps.ADD, neg_x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output) 
+
 
 # NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
@@ -84,7 +89,8 @@ class Sigmoid(Function):
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return self.ret.e(BinaryOps.MUL, self.ret.const(1).e(BinaryOps.SUB, self.ret)).e(BinaryOps.MUL, grad_output)
+    neg_ret = self.ret.e(UnaryOps.NEG)
+    return self.ret.e(BinaryOps.MUL, self.ret.const(1).e(BinaryOps.ADD, neg_ret)).e(BinaryOps.MUL, grad_output)
 
 class Sign(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
@@ -114,7 +120,7 @@ class Add(Function):
            grad_output if self.needs_input_grad[1] else None
 
 class Sub(Function):
-  def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer: return x.e(BinaryOps.SUB, y)
+  def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer: return x.e(BinaryOps.ADD, y.e(UnaryOps.NEG))
 
   def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
     return grad_output if self.needs_input_grad[0] else None, \
@@ -158,7 +164,7 @@ class Sum(Function):
     return x.r(ReduceOps.SUM, axis)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.expand(self.input_shape)
-
+'''
 class Max(Function):
   def forward(self, x:LazyBuffer, axis:Tuple[int, ...]) -> LazyBuffer:
     self.x, self.ret, self.axis = x, x.r(ReduceOps.MAX, axis), axis
@@ -169,6 +175,21 @@ class Max(Function):
     max_is_1s = self.x.const(1.0).cast(dtypes.float).e(BinaryOps.SUB, self.x.e(BinaryOps.CMPNE, self.ret.expand(self.x.shape)).cast(dtypes.float))
     div = max_is_1s.r(ReduceOps.SUM, self.axis).expand(self.x.shape)
     return max_is_1s.e(BinaryOps.MUL, div.e(UnaryOps.RECIP)).cast(grad_output.dtype).e(BinaryOps.MUL, grad_output.expand(self.x.shape))
+'''
+class Max(Function):
+    def forward(self, x: LazyBuffer, axis: Tuple[int, ...]) -> LazyBuffer:
+        self.x, self.ret, self.axis = x, x.r(ReduceOps.MAX, axis), axis
+        return self.ret
+
+    def backward(self, grad_output: LazyBuffer) -> LazyBuffer:
+        # 1s in locations where the max was chosen (can be two locations)
+        cmpne_result = self.x.e(BinaryOps.CMPNE, self.ret.expand(self.x.shape)).cast(dtypes.float)
+        neg_cmpne_result = cmpne_result.e(UnaryOps.NEG)
+        max_is_1s = self.x.const(1.0).cast(dtypes.float).e(BinaryOps.ADD, neg_cmpne_result)
+        div = max_is_1s.r(ReduceOps.SUM, self.axis).expand(self.x.shape)
+        return max_is_1s.e(BinaryOps.MUL, div.e(UnaryOps.RECIP)).cast(grad_output.dtype).e(BinaryOps.MUL, grad_output.expand(self.x.shape))
+
+
 
 # ************* movement ops *************
 
