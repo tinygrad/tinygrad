@@ -198,7 +198,7 @@ if __name__ == "__main__":
   parser.add_argument("--size", choices=["8B", "70B"], default="8B", help="Model size")
   parser.add_argument("--shard", type=int, default=1, help="Shard the model across multiple devices")
   parser.add_argument("--quantize", choices=["int8", "nf4"], help="Quantization method")
-  parser.add_argument("--api", action="store_true", help="Run a openai API compatible server and a web interface")
+  parser.add_argument("--no_api", action="store_true", help="Disable the api and run a cli test interface")
   parser.add_argument("--host", type=str, default="0.0.0.0", help="Web server bind address")
   parser.add_argument("--port", type=int, default=7776, help="Web server port")
   parser.add_argument("--debug", action="store_true", help="Enable debug mode")
@@ -208,15 +208,14 @@ if __name__ == "__main__":
   parser.add_argument("--profile", action="store_true", help="Output profile data")
   args = parser.parse_args()
 
+  assert not (args.download_model and args.model), "either download or provide model"
   if args.download_model:
-    if not args.model.is_dir(): raise ValueError("for --download_model, --model must be a directory")
-    if not args.model.exists(): args.model.mkdir(parents=True)
-    fetch("https://huggingface.co/bofenghuang/Meta-Llama-3-8B/resolve/main/original/tokenizer.model", args.model / "tokenizer.model")
-    fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/resolve/main/model-00001-of-00004.safetensors", args.model / "model-00001-of-00004.safetensors")
-    fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/resolve/main/model-00002-of-00004.safetensors", args.model / "model-00002-of-00004.safetensors")
-    fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/resolve/main/model-00003-of-00004.safetensors", args.model / "model-00003-of-00004.safetensors")
-    fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/resolve/main/model-00004-of-00004.safetensors", args.model / "model-00004-of-00004.safetensors")
-    fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/raw/main/model.safetensors.index.json", args.model / "model.safetensors.index.json")
+    fetch("https://huggingface.co/bofenghuang/Meta-Llama-3-8B/resolve/main/original/tokenizer.model", "tokenizer.model", subdir="llama3-8b-sfr")
+    fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/resolve/main/model-00001-of-00004.safetensors", "model-00001-of-00004.safetensors", subdir="llama3-8b-sfr")
+    fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/resolve/main/model-00002-of-00004.safetensors", "model-00002-of-00004.safetensors", subdir="llama3-8b-sfr")
+    fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/resolve/main/model-00003-of-00004.safetensors", "model-00003-of-00004.safetensors", subdir="llama3-8b-sfr")
+    fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/resolve/main/model-00004-of-00004.safetensors", "model-00004-of-00004.safetensors", subdir="llama3-8b-sfr")
+    args.model = fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/raw/main/model.safetensors.index.json", "model.safetensors.index.json", subdir="llama3-8b-sfr")
 
   if args.seed is not None: Tensor.manual_seed(args.seed)
   if args.benchmark: Tensor.manual_seed(42)
@@ -232,7 +231,7 @@ if __name__ == "__main__":
   model = build_transformer(args.model, model_size=args.size, quantize=args.quantize, device=device)
   param_bytes = sum(x.lazydata.size * x.dtype.itemsize for x in get_parameters(model))
 
-  if args.api:
+  if not args.no_api:
     from bottle import Bottle, request, response, HTTPResponse, abort, static_file
     app = Bottle()
 
