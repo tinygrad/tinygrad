@@ -166,7 +166,8 @@ class Max(Function):
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     # 1s in locations where the max was chosen (can be two locations)
-    max_is_1s = self.x.const(1.0).cast(dtypes.float).e(BinaryOps.ADD, self.x.e(BinaryOps.CMPNE, self.ret.expand(self.x.shape)).cast(dtypes.float).e(UnaryOps.NEG))
+    max_is_1s = self.x.const(1.0).cast(dtypes.float)\
+      .e(BinaryOps.ADD, self.x.e(BinaryOps.CMPNE, self.ret.expand(self.x.shape)).cast(dtypes.float).e(UnaryOps.NEG))
     div = max_is_1s.r(ReduceOps.SUM, self.axis).expand(self.x.shape)
     return max_is_1s.e(BinaryOps.MUL, div.e(UnaryOps.RECIP)).cast(grad_output.dtype).e(BinaryOps.MUL, grad_output.expand(self.x.shape))
 
