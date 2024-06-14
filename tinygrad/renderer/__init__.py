@@ -52,9 +52,9 @@ class Renderer:
   supports_float4: bool = True
   has_local: bool = True
   has_shared: bool = True
-  # NOTE: these two should be in z,y,x(reversed) order for cstyle backends, they are flipped when kernel is rendered
-  global_max: Optional[List[int]] = None
-  local_max: Optional[List[int]] = None
+  # NOTE: these two should be in (x,y,z) order to match the max_sizes argument in get_grouped_dims
+  global_max: Tuple[int, ...] = (0x8FFFFFFF,) * (3) # TODO: UOps.SPECIAL int32 indexes right now
+  local_max: Tuple[int, ...] = (0x8FFFFFFF,) * (3) # TODO: UOps.SPECIAL int32 indexes right now
   shared_max: int = 32768
   tensor_cores: List[TensorCore] = []
   @functools.cached_property
