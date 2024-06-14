@@ -164,7 +164,9 @@ class Tensor:
 
   def __bool__(self): raise TypeError("__bool__ on Tensor is not defined")
 
-  def __len__(self): return self.shape[0] if len(self.shape) else 1
+  def __len__(self):
+    if not self.shape: raise TypeError("len() of a 0-d tensor")
+    return self.shape[0]
 
   @property
   def device(self) -> Union[str, Tuple[str, ...]]: return self.lazydata.device
