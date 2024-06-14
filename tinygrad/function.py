@@ -169,7 +169,7 @@ class Max(Function):
     max_is_1s = self.x.const(1.0).cast(dtypes.float).e(BinaryOps.ADD, self.x.e(BinaryOps.CMPNE, self.ret.expand(self.x.shape)).cast(dtypes.float).e(UnaryOps.NEG)) # noqa: E501
     div = max_is_1s.r(ReduceOps.SUM, self.axis).expand(self.x.shape)
     return max_is_1s.e(BinaryOps.MUL, div.e(UnaryOps.RECIP)).cast(grad_output.dtype).e(BinaryOps.MUL, grad_output.expand(self.x.shape))
-  
+
 # ************* movement ops *************
 
 # NOTE: this is sum in reverse
