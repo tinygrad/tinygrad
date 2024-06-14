@@ -157,7 +157,6 @@ class LazyBuffer:
       if op is BinaryOps.ADD:
         if y.is_unrealized_unmasked_const() and y.base.arg == 0: return x
         if x.is_unrealized_unmasked_const() and x.base.arg == 0: return y
-      if op is BinaryOps.SUB and y.is_unrealized_unmasked_const() and y.base.arg == 0: return x
       if op is BinaryOps.MUL:
         if x.is_unrealized_unmasked_const() and (val := x.base.arg) in (1, 0, -1):
           return y if val == 1 else y.const(0) if val == 0 else y.e(UnaryOps.NEG)
