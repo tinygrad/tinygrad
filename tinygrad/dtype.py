@@ -50,10 +50,11 @@ class dtypes:
   def from_np(x: type) -> DType: return DTYPES_DICT[np.dtype(x).name]
   @staticmethod
   def from_py(x) -> DType:
-    if x.__class__ is list or x.__class__ is tuple: return max(dtypes.from_py(xi) for xi in x) if x else dtypes.default_float
     if x.__class__ is float: return dtypes.default_float
     if x.__class__ is int: return dtypes.default_int
     if x.__class__ is bool: return dtypes.bool
+    # put this in the last is faster because there are more items than lists/tuples to check
+    if x.__class__ is list or x.__class__ is tuple: return max(dtypes.from_py(xi) for xi in x) if x else dtypes.default_float
     raise RuntimeError(f"Could not infer dtype of {x} with type {type(x)}")
   @staticmethod
   def as_const(val: ConstType, dtype:DType): return int(val) if dtypes.is_int(dtype) else float(val) if dtypes.is_float(dtype) else bool(val)
