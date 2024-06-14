@@ -371,7 +371,8 @@ class UOpGraph:
       if x.uop is UOps.SINK: return set()
       return set.union(set((x,)) if include_self else set(), *([get_recursive_children(u, True, stop) for u in graph[x] if stop(x,u)]))
     # scope children impact the toposort and END* insertion
-    scope_children = {p:get_recursive_children(p, stop=lambda x,u: (u.uop is not UOps.BARRIER) if p.uop is UOps.IF else (x.uop is not UOps.PHI)) for p in (loops+ifs)[::-1]}
+    stop_for_uop = {UOps.IF:lambda _,u: u.uop is not UOps.BARRIER, UOps.RANGE:lambda x,_: x.uop is not UOps.PHI}
+    scope_children = {p:get_recursive_children(p, stop=stop_for_uop[p.uop]) for p in (loops+ifs)[::-1]}
 
     queue: List = []
     def push(u):
