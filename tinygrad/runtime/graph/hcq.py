@@ -1,6 +1,6 @@
-import ctypes, collections, array, time
+import collections, array, time
 from typing import List, Any, Dict, cast, Optional, Tuple, Set
-from tinygrad.helpers import GraphException, round_up, to_mv, init_c_struct_t
+from tinygrad.helpers import GraphException, round_up, to_mv
 from tinygrad.device import Buffer, BufferOptions, Compiled, Device
 from tinygrad.shape.symbolic import Variable
 from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner
