@@ -320,7 +320,7 @@ class TestTinygrad(unittest.TestCase):
   # Regression test for https://github.com/tinygrad/tinygrad/issues/1751
   def test_copy_from_numpy_unaligned(self):
     # 2**15 is the minimum for repro
-    arr = np.random.randn(2**15).astype(dtypes.float.np)
+    arr = np.random.randn(2**15).astype(np.float32)
     fn = temp('test_copy_from_numpy_unaligned')
     with open(fn, 'wb') as f: f.write(b't' + arr.tobytes())
     with open(fn, "a+b") as f: memview = memoryview(mmap.mmap(f.fileno(), arr.nbytes + 1))

@@ -4,6 +4,7 @@ from extra.optimization.helpers import load_worlds, ast_str_to_lin
 from test.external.fuzz_linearizer import get_fuzz_rawbufs
 from tinygrad.engine.search import bufs_from_lin
 from tinygrad.engine.realize import CompiledRunner
+from tinygrad.tensor import _to_np_dtype
 import numpy as np
 
 # move to helpers?
@@ -63,8 +64,8 @@ if __name__ == "__main__":
       failed = True
 
     if not failed and not has_bf16:
-      curesult = np.frombuffer(test_cubufs[0].as_buffer(), test_cubufs[0].dtype.np)
-      nvresult = np.frombuffer(test_nvbufs[0].as_buffer(), test_nvbufs[0].dtype.np)
+      curesult = np.frombuffer(test_cubufs[0].as_buffer(), _to_np_dtype(test_cubufs[0].dtype))
+      nvresult = np.frombuffer(test_nvbufs[0].as_buffer(), _to_np_dtype(test_nvbufs[0].dtype))
       np.testing.assert_allclose(curesult, nvresult, rtol=1e-2, atol=1e-2)
 
     average_tm_cuda += min(tm_cuda)
