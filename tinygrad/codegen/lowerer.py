@@ -52,10 +52,8 @@ class Lowerer(Kernel):
     if x.op in ReduceOps:
       loops = [self.idxs[i] for i in range(len(self.full_shape)) if self.full_shape[i] != self.sts[0].shape[i]]
       # TODO: DEFINE_ACC should have a const input
-      acc = UOp(UOps.DEFINE_ACC, x.dtype, loops, (get_reduce_acc(x), 0, 0))
-      ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}
-      ret = UOp.alu(ops[x.op], acc, *in_uops)
-      return UOp(UOps.PHI, ret.dtype, (acc, ret))
+      op = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[x.op]
+      return UOp(UOps.REDUCE, x.dtype, (in_uops[0], UOp.const(x.dtype, get_reduce_acc(x))) + tuple(loops), op)
     return UOp.alu(x.op, *in_uops)
 
   def linearize(self) -> Lowerer:
@@ -63,10 +61,16 @@ class Lowerer(Kernel):
     self.name = ("r" if self.reduceop else ("C" if all(x.op in BufferOps for x in self.lazyops) else "E")) + \
                  (f"{len(self.outbufs)}_" if len(self.outbufs) > 1 else "_") + \
                  colored('_', 'BLACK').join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
-    print(self.name)
+    self.idxs = []
+
+    # for clang
+    """
+    for i,g in enumerate(self.full_shape):
+      self.idxs.append(UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), UOp.const(dtypes.int32, g)), (i,0)))
+    self.global_size, self.local_size = None, None
+    """
 
     # TODO: why is this middle name arg here?
-    self.idxs = []
     for i,g in enumerate(self.full_shape[:self.global_dims]):
       self.idxs.append(UOp(UOps.SPECIAL, dtypes.int32, (), (self.global_dims-1-i, f"gidx{i}", g)))
     for i,g in enumerate(self.full_shape[self.global_dims:self.global_dims+self.local_dims]):

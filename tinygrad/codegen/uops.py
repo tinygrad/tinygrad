@@ -18,7 +18,7 @@ class UOps(Enum):
   NOOP = auto(); UNMUL = auto(); GEP = auto() # noqa: E702
   # math ops
   CAST = auto(); BITCAST = auto() # noqa: E702
-  ALU = auto(); WMMA = auto() # noqa: E702
+  ALU = auto(); REDUCE = auto(); WMMA = auto() # noqa: E702
   # memory/assignment ops
   LOAD = auto(); STORE = auto(); PHI = auto() # noqa: E702
   # control flow ops
@@ -144,8 +144,19 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst):
   comprange = UOp.min(loop_end, UOp.max(UOp.alu(BinaryOps.IDIV, idx-compval-mval, mval) + (loop_end-loop_start), loop_start))
   return UOp(UOps.UNMUL, multconst.dtype, (comprange.cast(multconst.dtype) * multconst, loop_end-loop_start))
 
+acc_number = 0
+def replace_reduce(root):
+  global acc_number
+  # TODO: DEFINE_ACC should have a const input
+  acc = UOp(UOps.DEFINE_ACC, root.dtype, root.vin[2:], (root.vin[1].arg, acc_number, 0))
+  acc_number += 1
+  ret = UOp.alu(root.arg, acc, root.vin[0])
+  return UOp(UOps.PHI, ret.dtype, (acc, ret))
+
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
+  # replace REDUCE
+  (UPat(UOps.REDUCE, name="root"), replace_reduce),
   # arange loop folding (early)
   (UPat(UOps.ALU, TernaryOps.WHERE, vin=(UPat(UOps.ALU, BinaryOps.CMPLT, vin=(
     UPat(UOps.ALU, BinaryOps.ADD, vin=[UPat(name="idx"), UPat(UOps.ALU, BinaryOps.MUL,
