@@ -46,7 +46,8 @@ class UOp:
   def __neg__(self): return UOp.alu(UnaryOps.NEG, self)
   def __add__(self, x): return UOp.alu(BinaryOps.ADD, self, ufix(self.dtype, x))
   def __radd__(self, x): return UOp.alu(BinaryOps.ADD, ufix(self.dtype, x), self)
-  def __sub__(self, x): return -UOp.alu(BinaryOps.ADD, -self, ufix(self.dtype, x))
+  def __sub__(self, x): return UOp.alu(BinaryOps.ADD, self, -ufix(self.dtype, x))
+  #def __sub__(self, x): return UOp.alu(BinaryOps.SUB, self, ufix(self.dtype, x))
   def __mul__(self, x): return UOp.alu(BinaryOps.MUL, self, ufix(self.dtype, x))
   def __rmul__(self, x): return UOp.alu(BinaryOps.MUL, ufix(self.dtype, x), self)
   def __floordiv__(self, x): return UOp.alu(BinaryOps.IDIV, self, ufix(self.dtype, x))
@@ -179,7 +180,7 @@ constant_folder = PatternMatcher([
   # -(-x) -> x
   (UPat(UOps.ALU, UnaryOps.NEG, (UPat(UOps.ALU, UnaryOps.NEG, (UPat(name="x"),)))), lambda x: x),
   # x+-y -> x-y
-  (UPat(UOps.ALU, BinaryOps.ADD, (UPat(name="x"), UPat(UOps.ALU, UnaryOps.NEG, name="my"))), lambda x, my: x-my.vin[0]),
+  # (UPat(UOps.ALU, BinaryOps.ADD, (UPat(name="x"), UPat(UOps.ALU, UnaryOps.NEG, name="my"))), lambda x, my: x-my.vin[0]),
   # -1*x -> -x
   (UPat(UOps.ALU, BinaryOps.MUL, [UPat(name="x"), UPat(UOps.CONST, -1)]), lambda x: -x),
   # bool < False is always false, True < bool is always false
@@ -200,6 +201,8 @@ constant_folder = PatternMatcher([
   #if x is nan it should render the nan value.
   (UPat(UOps.ALU, BinaryOps.MUL, [UPat(name="x"), UPat(UOps.CONST, 0, name="c")]),
      lambda x,c: x if isinstance(x.arg, float) and math.isnan(x.arg) else c),
+  #(UPat(UOps.ALU, BinaryOps.SUB, (UPat(name="x"), UPat(name="x"))), lambda x: UOp.const(x.dtype, 0)),   # x-x -> 0
+  (UPat(UOps.ALU, BinaryOps.ADD, (UPat(name="x"), UPat(UOps.ALU, UnaryOps.NEG, UPat(name="x")))), lambda x: UOp.const(x.dtype, 0)), 
   # ** load/store folding **
   (UPat(UOps.STORE, vin=(UPat(name="buf"), UPat(name="idx"),
                                UPat(UOps.LOAD, vin=(UPat(name="buf"), UPat(name="idx"))))), lambda buf, idx: UOp(UOps.NOOP)),
