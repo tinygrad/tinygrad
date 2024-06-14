@@ -251,38 +251,13 @@ constant_folder = PatternMatcher([
 # *** uop graph ***
 
 class UOpGraph:
-  def __init__(self, add_nodes:Optional[List[UOp]]=None):
-    self.nodes: Dict[Tuple, UOp] = {}
+  def __init__(self, sinks:List[UOp]):
+    self.sinks: List[UOp] = sinks
+    # used by linearizer
     self._uops: Optional[List[UOp]] = None
-    if add_nodes is not None: self._multiadd(add_nodes)
 
   def __iter__(self) -> Iterator[UOp]: return iter(self.uops)
   def __getitem__(self, index) -> UOp: return self.uops[index]
-
-  def _multiadd(self, unprocessed_nodes:List[UOp]):
-    # add nodes to graph in reverse BFS order
-    # TODO: i feel like this is written in a few places, possible to library it?
-    in_degree: DefaultDict[UOp, int] = defaultdict(int)
-    children: DefaultDict[UOp, List[UOp]] = defaultdict(list)
-    all_nodes: Dict[UOp, None] = dict()
-    while len(unprocessed_nodes):
-      n = unprocessed_nodes.pop(0)
-      if n in all_nodes: continue
-      all_nodes[n] = None
-      for x in n.vin:
-        in_degree[n] += 1
-        children[x].append(n)
-      unprocessed_nodes += list(n.vin)
-    queue = [x for x in all_nodes if in_degree[x] == 0]
-    replace_nodes: Dict[UOp, UOp] = {}
-    while len(queue):
-      n = queue.pop(0)
-      if n in replace_nodes: continue
-      replace_nodes[n] = self._add(n.uop, n.dtype, tuple(replace_nodes.get(x, x) for x in n.vin), n.arg)
-      for x in children[n]:
-        in_degree[x] -= 1
-        if in_degree[x] == 0:
-          queue.append(x)
 
   def vars(self) -> List[Variable]: return [x.arg for x in self.uops if x.uop is UOps.DEFINE_VAR]
   def globals(self) -> List[Tuple[int, bool]]: return [x.arg for x in self.uops if x.uop is UOps.DEFINE_GLOBAL]
@@ -335,15 +310,38 @@ class UOpGraph:
   def linearize(self, extra_pm:Optional[PatternMatcher]=None, type_verify=True):
     # NOTE: relinearizering should be okay
     #assert self._uops is None, "already linearized"
+    self.nodes: Dict[Tuple, UOp] = {}
 
-    # get sink
-    _sinks: List[UOp] = []
-    for u in self.nodes.values():
-      if u.uop is UOps.STORE: _sinks.append(u)
-      if u.uop is UOps.SINK: _sinks.extend(u.vin)
-    sink = UOp(UOps.SINK, None, tuple(_sinks))
-    del _sinks
+    # add nodes to graph in reverse BFS order
+    # TODO: i feel like this is written in a few places, possible to library it?
+    sink = UOp(UOps.SINK, None, tuple(self.sinks))
+    unprocessed_nodes = [sink]
+    early_in_degree: DefaultDict[UOp, int] = defaultdict(int)
+    children: DefaultDict[UOp, List[UOp]] = defaultdict(list)
+    all_nodes: Dict[UOp, None] = dict()
+    while len(unprocessed_nodes):
+      n = unprocessed_nodes.pop(0)
+      if n in all_nodes: continue
+      all_nodes[n] = None
+      for x in n.vin:
+        early_in_degree[n] += 1
+        children[x].append(n)
+      unprocessed_nodes += list(n.vin)
+    early_queue = [x for x in all_nodes if early_in_degree[x] == 0]
+    replace_nodes: Dict[UOp, UOp] = {}
+    while len(early_queue):
+      n = early_queue.pop(0)
+      if n in replace_nodes: continue
+      key = (n.uop, n.dtype, tuple(replace_nodes.get(x, x) for x in n.vin), n.arg)
+      if found:=self.nodes.get(key): replace_nodes[n] = found
+      else: replace_nodes[n] = self.nodes[key] = UOp(*key)
+      for x in children[n]:
+        early_in_degree[x] -= 1
+        if early_in_degree[x] == 0:
+          early_queue.append(x)
+    sink = replace_nodes.get(sink, sink)
 
+    # do graph rewrite
     sink = self.graph_rewrite(sink, constant_folder)
     if extra_pm: sink = self.graph_rewrite(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
 
@@ -410,11 +408,6 @@ class UOpGraph:
     self._uops = self._uops[:-1]
 
     if type_verify: self.type_verify()
-
-  def _add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None) -> UOp:
-    if found:=self.nodes.get(key:=(uop, dtype, vin, arg)): return found
-    self.nodes[key] = ret = UOp(*key)
-    return ret
 
   # *** checker functions ***
 
