@@ -296,14 +296,10 @@ class UOpGraph:
         changed += recurse_cnt
         # NOTE: this changes UOp, so we have to delete caches
         up.vin = tuple(rewrite(x) for x in up.vin)
-        try: del up.parents
-        except AttributeError: pass
-        try: del up.cmp_tuple
-        except AttributeError: pass
+        if 'parents' in up.__dict__: delattr(up, 'parents')
+        if 'cmp_tuple' in up.__dict__: delattr(up, 'cmp_tuple')
         # replace with cached nodes
-        if found:=self.nodes.get(key:=up.tuple()): return found
-        self.nodes[key] = up
-        return up
+        return self.nodes.setdefault(up.tuple(), up)
       sink = rewrite(sink)
       run_cnt += 1
       assert run_cnt < 100, "exceeded 100 rewrite loops!"
