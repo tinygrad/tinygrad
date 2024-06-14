@@ -313,7 +313,8 @@ class UOpGraph:
     self.nodes: Dict[Tuple, UOp] = {}
 
     # add nodes to graph in reverse BFS order
-    # TODO: i feel like this is written in a few places, possible to library it?
+    # dedup all nodes
+    # TODO: i feel like this BFS is written in a few places, possible to library it?
     sink = UOp(UOps.SINK, None, tuple(self.sinks))
     unprocessed_nodes = [sink]
     early_in_degree: DefaultDict[UOp, int] = defaultdict(int)
