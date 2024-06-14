@@ -22,6 +22,23 @@ fixup() {
   grep FIXME_STUB $1 || true
 }
 
+patch_dlopen() {
+  path=$1; shift
+  name=$1; shift
+  cat <<EOF | sed -i "/import ctypes.*/r /dev/stdin" $path
+PATHS_TO_TRY = [
+$(for p in "$@"; do echo "  $p,"; done)
+]
+def _try_dlopen_$name():
+  library = ctypes.util.find_library("$name")
+  if library: return ctypes.CDLL(library)
+  for candidate in PATHS_TO_TRY:
+    try: return ctypes.CDLL(candidate)
+    except OSError: pass
+  raise RuntimeError("library $name not found")
+EOF
+}
+
 generate_opencl() {
   clang2py /usr/include/CL/cl.h -o $BASE/opencl.py -l /usr/lib/x86_64-linux-gnu/libOpenCL.so.1 -k cdefstum
   fixup $BASE/opencl.py
@@ -52,7 +69,8 @@ generate_comgr() {
   --clang-args="-D__HIP_PLATFORM_AMD__ -I/opt/rocm/include -x c++" -o $BASE/comgr.py -l /opt/rocm/lib/libamd_comgr.so
   fixup $BASE/comgr.py
   sed -i "s\import ctypes\import ctypes, ctypes.util, os\g" $BASE/comgr.py
-  sed -i "s\ctypes.CDLL('/opt/rocm/lib/libamd_comgr.so')\ctypes.CDLL(os.getenv('ROCM_PATH')+'/lib/libamd_comgr.so' if os.getenv('ROCM_PATH') else ctypes.util.find_library('amd_comgr'))\g" $BASE/comgr.py
+  patch_dlopen $BASE/comgr.py amd_comgr "'/opt/rocm/lib/libamd_comgr.so'" "os.getenv('ROCM_PATH', '')+'/lib/libamd_comgr.so'"
+  sed -i "s\ctypes.CDLL('/opt/rocm/lib/libamd_comgr.so')\_try_dlopen_amd_comgr()\g" $BASE/comgr.py
   python3 -c "import tinygrad.runtime.autogen.comgr"
 }
 
