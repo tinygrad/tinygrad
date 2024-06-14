@@ -44,14 +44,14 @@ class Lowerer(Kernel):
         return UOp.alu(TernaryOps.WHERE, valid, UOp.const(x.arg.dtype, x.arg.val), UOp.const(x.arg.dtype, 0))
       else:
         buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(x.arg.dtype), (), (x.arg.idx, any(x.arg.idx == y.idx for y in self.outbufs)))
+        opt_valid = (valid,) if valid.uop is not UOps.CONST or valid.arg is not True else ()
         if x.op is BufferOps.LOAD:
-          return UOp(UOps.LOAD, x.arg.dtype, (buf, idx, valid))
+          return UOp(UOps.LOAD, x.arg.dtype, (buf, idx) + opt_valid)
         else:
-          return UOp(UOps.STORE, None, (buf, idx, self.to_uop(x.src[0]), valid))
+          return UOp(UOps.STORE, None, (buf, idx, self.to_uop(x.src[0])) + opt_valid)
     in_uops = tuple(self.to_uop(y) for y in x.src)
     if x.op in ReduceOps:
       loops = [self.idxs[i] for i in range(len(self.full_shape)) if self.full_shape[i] != self.sts[0].shape[i]]
-      # TODO: DEFINE_ACC should have a const input
       op = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[x.op]
       return UOp(UOps.REDUCE, x.dtype, (in_uops[0], UOp.const(x.dtype, get_reduce_acc(x))) + tuple(loops), op)
     return UOp.alu(x.op, *in_uops)

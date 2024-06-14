@@ -156,7 +156,7 @@ def replace_reduce(root):
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
   # replace REDUCE
-  (UPat(UOps.REDUCE, name="root"), replace_reduce),
+  #(UPat(UOps.REDUCE, name="root"), replace_reduce),
   # arange loop folding (early)
   (UPat(UOps.ALU, TernaryOps.WHERE, vin=(UPat(UOps.ALU, BinaryOps.CMPLT, vin=(
     UPat(UOps.ALU, BinaryOps.ADD, vin=[UPat(name="idx"), UPat(UOps.ALU, BinaryOps.MUL,
