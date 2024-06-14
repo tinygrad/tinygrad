@@ -4,7 +4,7 @@ import functools, itertools, heapq, math
 from collections import defaultdict
 from enum import Enum, auto
 from dataclasses import dataclass, field
-from tinygrad.dtype import dtypes, DType
+from tinygrad.dtype import ConstType, dtypes, DType
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, exec_alu
 from tinygrad.helpers import prod, DEBUG, getenv
@@ -56,7 +56,9 @@ class UOp:
   @staticmethod
   def min(x, y): return -UOp.alu(BinaryOps.MAX, -x, -y)
   @staticmethod
-  def const(dtype, val): return UOp(UOps.CONST, dtype, arg=dtypes.as_const(val, dtype))
+  def const(dtype:DType, b:ConstType|Variable):
+    if isinstance(b, Variable): return UOp(UOps.DEFINE_VAR, dtype, (), b)
+    return UOp(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype))
   @staticmethod
   def alu(arg, *vin:UOp): return UOp(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else vin[-1].dtype, vin, arg)
   @functools.cached_property
