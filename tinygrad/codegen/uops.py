@@ -370,14 +370,15 @@ class UOpGraph:
     def get_recursive_children(x:UOp, include_self=False, stop=lambda x,u: True) -> Set[UOp]:
       if x.uop is UOps.SINK: return set()
       return set.union(set((x,)) if include_self else set(), *([get_recursive_children(u, True, stop) for u in graph[x] if stop(x,u)]))
-    loops_children = {l:get_recursive_children(l, stop=lambda x,u: x.uop is not UOps.PHI) for l in loops[::-1]}
+    # find all ifs children, add them to the loops children so we can add ends
+    loops_children = {p:get_recursive_children(p, stop=lambda x,u: (u.uop is not UOps.BARRIER) if p.uop is UOps.IF else (x.uop is not UOps.PHI)) for p in (loops+ifs)[::-1]}
 
     queue: List = []
     def push(u):
       priority = 0
       # prefer uops that are loop children
       for l, ss in loops_children.items():
-        if u in ss: priority -= l.arg[0]*1000 + l.arg[1]
+        if l.uop is UOps.RANGE and u in ss: priority -= l.arg[0]*1000 + l.arg[1]
       heapq.heappush(queue, (priority, u))
 
     for u in nodes:
@@ -387,8 +388,6 @@ class UOpGraph:
       from test.external.fuzz_uops import fuzz_uops
       self.fuzz_paths = fuzz_uops(graph, in_degree.copy(), loops_children)
 
-    # find all ifs children, add them to the loops children so we can add ends
-    scope_children = {**loops_children, **{u:get_recursive_children(u, stop=lambda x,u: u.uop is not UOps.BARRIER) for u in ifs[::-1]}}
     self._uops = []
     while queue:
       p,x = heapq.heappop(queue)
@@ -398,7 +397,7 @@ class UOpGraph:
         self._uops.insert(idx, x)
       else:
         self._uops.append(x)
-      for u, ss in scope_children.items():
+      for u, ss in loops_children.items():
         if x in ss:
           ss.remove(x)
           if len(ss) == 0: self._uops.append(UOp({UOps.RANGE:UOps.ENDRANGE, UOps.IF:UOps.ENDIF}[u.uop], None, (u,)))
