@@ -9,7 +9,7 @@ class TestUOpGraph(unittest.TestCase):
     c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
     c2 = UOp(UOps.CONST, dtypes.float, arg=2.0)
     out = UOp(UOps.ALU, dtypes.float, (c1, c2), BinaryOps.ADD)
-    g = UOpGraph([UOp(UOps.SINK, None, (out,))])
+    g = UOpGraph([out])
     self.assertEqual(len(g.uops), 1)
     out = g.uops[-1]
     self.assertEqual(out.uop, UOps.CONST)
@@ -21,7 +21,7 @@ class TestUOpGraph(unittest.TestCase):
     vc = UOp(UOps.ALU, dtypes.bool, (v, c0), BinaryOps.CMPNE)
     c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
     out = UOp(UOps.ALU, dtypes.float, (vc, c1, c1), TernaryOps.WHERE)
-    g = UOpGraph([UOp(UOps.SINK, None, (out,))])
+    g = UOpGraph([out])
     self.assertEqual(len(g.uops), 1)
     out = g.uops[-1]
     self.assertEqual(out.uop, UOps.CONST)
@@ -32,7 +32,7 @@ class TestUOpGraph(unittest.TestCase):
     c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
     c2 = UOp(UOps.CONST, dtypes.float, arg=2.0)
     out = UOp(UOps.ALU, dtypes.float, (bf, c1, c2), TernaryOps.WHERE)
-    g = UOpGraph([UOp(UOps.SINK, None, (out,))])
+    g = UOpGraph([out])
     self.assertEqual(len(g.uops), 1)
     out = g.uops[-1]
     self.assertEqual(out.uop, UOps.CONST)
@@ -41,7 +41,7 @@ class TestUOpGraph(unittest.TestCase):
   def test_const_cast(self):
     bf = UOp(UOps.CONST, dtypes.bool, arg=False)
     out = UOp(UOps.CAST, dtypes.int, (bf,))
-    g = UOpGraph([UOp(UOps.SINK, None, (out,))])
+    g = UOpGraph([out])
     self.assertEqual(len(g.uops), 1)
     out = g.uops[-1]
     self.assertEqual(out.uop, UOps.CONST)
@@ -55,7 +55,7 @@ class TestUOpGraph(unittest.TestCase):
     x = UOp(UOps.GEP, dtypes.float, (cast, ), arg=0)
     alu = UOp(UOps.ALU, dtypes.float, (x, ), UnaryOps.SQRT)
     out = UOp(UOps.STORE, dtypes.float, (d0, idx, alu))
-    g = UOpGraph([UOp(UOps.SINK, None, (out,))])
+    g = UOpGraph([out])
     self.assertEqual(len([x for x in g.uops if x.uop is UOps.CAST]), 0)
 
   def test_depth_2_const_fold(self):
@@ -64,7 +64,7 @@ class TestUOpGraph(unittest.TestCase):
     c4 = UOp(UOps.CONST, dtypes.int, arg=4)
     vc = UOp(UOps.ALU, dtypes.int, (v, c2), BinaryOps.ADD)
     out = UOp(UOps.ALU, dtypes.int, (vc, c4), BinaryOps.ADD)
-    g = UOpGraph([UOp(UOps.SINK, None, (out,))])
+    g = UOpGraph([out])
     self.assertEqual(len(g.uops), 3)
     out = g.uops[-1]
     self.assertEqual(out.uop, UOps.ALU)
