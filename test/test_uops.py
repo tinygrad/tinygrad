@@ -1,7 +1,7 @@
 from typing import Optional, Tuple, Any, List
 import unittest, math
 import numpy as np
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.helpers import CI, DEBUG, getenv
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.device import Buffer, Device
@@ -33,10 +33,10 @@ def _test_single_value(vals, op, dts):
   alu = uop(uops, UOps.ALU, output_dtype, loads, op)
   out = uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
-  buf2 = [Buffer(Device.DEFAULT, 1, dtype).allocate().copyin(np.array([a], dtype=dtype.np).data) for a,dtype in zip(vals, dts)]
+  buf2 = [Buffer(Device.DEFAULT, 1, dtype).allocate().copyin(np.array([a], dtype=_to_np_dtype(dtype)).data) for a,dtype in zip(vals, dts)]
   prg = _uops_to_prg([out])
   prg.exec([buf]+buf2)
-  ret = np.empty(1, output_dtype.np)
+  ret = np.empty(1, _to_np_dtype(output_dtype))
   buf.copyout(ret.data)
   return ret[0]
 
@@ -50,7 +50,7 @@ def _test_single_value_const(vals, op, dts):
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
   prg = _uops_to_prg([out])
   prg.exec([buf])
-  ret = np.empty(1, output_dtype.np)
+  ret = np.empty(1, _to_np_dtype(output_dtype))
   buf.copyout(ret.data)
   return ret[0]
 
@@ -62,7 +62,7 @@ def _test_uops_result(output_dtype, uops, res):
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
   prg = _uops_to_prg([out], print=True)
   prg.exec([buf])
-  ret = np.empty(1, output_dtype.np)
+  ret = np.empty(1, _to_np_dtype(output_dtype))
   buf.copyout(ret.data)
   return ret[0]
 

@@ -116,7 +116,7 @@ class HCQGraph(MultiGraphRunner):
 
     for dev in self.devices:
       # Submit sync with world and queues.
-      self.comp_hcq_t().wait(dev.timeline_signal, dev.timeline_value - 1) \
+      self.comp_hcq_t().memory_barrier().wait(dev.timeline_signal, dev.timeline_value - 1) \
                        .wait(self.kickoff_signal, self.kickoff_value).submit(dev)
       self.comp_queues[dev].submit(dev)
 
