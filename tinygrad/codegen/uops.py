@@ -367,17 +367,19 @@ class UOpGraph:
     add_parents(sink)
 
     @functools.lru_cache(None)
-    def get_recursive_children(x:UOp, include_self=False, stop=lambda x,u: True) -> Set[UOp]:
+    def get_recursive_children(x:UOp, stop:Callable[[UOp, UOp], bool], include_self=False) -> Set[UOp]:
       if x.uop is UOps.SINK: return set()
-      return set.union(set((x,)) if include_self else set(), *([get_recursive_children(u, True, stop) for u in graph[x] if stop(x,u)]))
-    loops_children = {l:get_recursive_children(l, stop=lambda x,u: x.uop is not UOps.PHI) for l in loops[::-1]}
+      return set.union(set((x,)) if include_self else set(), *([get_recursive_children(u, stop, include_self=True) for u in graph[x] if stop(x,u)]))
+    # scope children impact the toposort and END* insertion
+    end_for_uop = {UOps.IF:(lambda _,u: u.uop is not UOps.BARRIER, UOps.ENDIF), UOps.RANGE:(lambda x,_: x.uop is not UOps.PHI, UOps.ENDRANGE)}
+    scope_children = {p:get_recursive_children(p, stop=end_for_uop[p.uop][0]) for p in (loops+ifs)[::-1]}
 
     queue: List = []
     def push(u):
       priority = 0
       # prefer uops that are loop children
-      for l, ss in loops_children.items():
-        if u in ss: priority -= l.arg[0]*1000 + l.arg[1]
+      for l, ss in scope_children.items():
+        if l.uop is UOps.RANGE and u in ss: priority -= l.arg[0]*1000 + l.arg[1]
       heapq.heappush(queue, (priority, u))
 
     for u in nodes:
@@ -385,10 +387,8 @@ class UOpGraph:
 
     if getenv("FUZZ_UOPS", 0):
       from test.external.fuzz_uops import fuzz_uops
-      self.fuzz_paths = fuzz_uops(graph, in_degree.copy(), loops_children)
+      self.fuzz_paths = fuzz_uops(graph, in_degree.copy(), scope_children)
 
-    # find all ifs children, add them to the loops children so we can add ends
-    scope_children = {**loops_children, **{u:get_recursive_children(u, stop=lambda x,u: u.uop is not UOps.BARRIER) for u in ifs[::-1]}}
     self._uops = []
     while queue:
       p,x = heapq.heappop(queue)
@@ -401,7 +401,7 @@ class UOpGraph:
       for u, ss in scope_children.items():
         if x in ss:
           ss.remove(x)
-          if len(ss) == 0: self._uops.append(UOp({UOps.RANGE:UOps.ENDRANGE, UOps.IF:UOps.ENDIF}[u.uop], None, (u,)))
+          if len(ss) == 0: self._uops.append(UOp(end_for_uop[u.uop][1], None, (u,)))
       for u in graph[x]:
         in_degree[u] -= 1
         if in_degree[u] == 0: push(u)
