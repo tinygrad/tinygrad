@@ -14,7 +14,7 @@
   <script defer src="https://unpkg.com/alpinejs-swipe@1.0.2/dist/cjs.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <script src="https://unpkg.com/dompurify@3.1.5/dist/purify.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/marked/lib/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked-highlight/lib/index.umd.js"></script>
   <script src="https://unpkg.com/@highlightjs/cdn-assets@11.9.0/highlight.min.js"></script>
   <script src="index.js"></script>
@@ -88,7 +88,12 @@
         value.messages.forEach(({ role, content }) => {
           const div = document.createElement('div');
           div.className = `message message-role-${role}`;
-          div.innerHTML = DOMPurify.sanitize(marked.parse(content));
+          try {
+            div.innerHTML = DOMPurify.sanitize(marked.parse(content));
+          } catch (e) {
+            console.log(content);
+            console.error(e);
+          }
 
           // add a clipboard button to all code blocks
           const codeBlocks = div.querySelectorAll('.hljs');
