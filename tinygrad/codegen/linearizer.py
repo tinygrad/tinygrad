@@ -1,17 +1,37 @@
 from __future__ import annotations
-from typing import List, Tuple, Any, Optional, cast, DefaultDict, Dict, Union, Final, Iterator, Sequence
+from typing import List, Tuple, Any, Optional, cast, DefaultDict, Dict, Union, Final, Iterator, Sequence, Iterable
 import itertools, math, functools
 from collections import defaultdict
 
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, ConstType
 from tinygrad.helpers import colored, DEBUG, dedup, diskcache_put, prod, getenv, to_function_name, flatten
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ConstBuffer, MemBuffer, BufferOps, get_lazyop_info
-from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, create_lt_node
 from tinygrad.codegen.kernel import LocalBuffer, Kernel
 from tinygrad.renderer import Program
 
 from tinygrad.codegen.uops import UOps, UOp, UOpGraph
+
+def _uop_view(view:View, idxs:List[UOp], vexpr:UOp=UOp.const(dtypes.bool, True)) -> Tuple[UOp, UOp]:
+  # TODO: dtypes.realint
+  iexpr = UOp.const(dtypes.int32, view.offset)
+  for idx,sh,st,m in zip(idxs, view.shape, view.strides, view.mask if view.mask is not None else [None]*len(view.shape)):
+    if sh != 1 and st != 0: iexpr = iexpr + idx*st
+    if m is not None:
+      vexpr = vexpr * idx.ge(m[0]) * idx.lt(m[1])
+  return iexpr, vexpr
+
+def st_to_uops(st:ShapeTracker, idxs:Iterable[UOp]) -> Tuple[UOp, UOp]:
+  idx, valid = _uop_view(st.views[-1], idxs)
+  for view in reversed(st.views[0:-1]):
+    view = view.minify()
+    acc, idxs = 1, []
+    for d in reversed(view.shape):
+      idxs.append((idx//acc)%d)
+      acc *= d
+    idx, valid = _uop_view(view, idxs[::-1], valid)
+  return idx, valid
 
 def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0):
   local_idxs = loop_local_idxs = [Variable(f"{prefix}{start_dim+i}", 0, s-1) for i,s in enumerate((prod(local_dims[:-(maxdim-1)]),) + local_dims[-(maxdim-1):] if len(local_dims) > maxdim else local_dims)]  # noqa: E501
@@ -157,15 +177,17 @@ class Linearizer(Kernel):
 
     stores = []
     for _idx, var in store_offset.items():
-      idx, valid = self.sts[i].expr_idxs(_idx)
+      #idx, valid = self.sts[i].expr_idxs(_idx)
+      idx, valid = st_to_uops(self.sts[i], [x.render(self.render_ops, self) for x in _idx])
       if isinstance(buf.dtype, ImageDType):
         image_idx, valid = to_image_idx(buf.dtype.shape, idx, valid)
         rendered_idx = UOp(UOps.CAST, dtypes.int.vec(2), \
                       tuple(x.render(self.render_ops, self) for x in image_idx))
       else:
-        rendered_idx = idx.render(self.render_ops, self)
+        #rendered_idx = idx.render(self.render_ops, self)
+        rendered_idx = idx
       if valid.min == 1: stores.append(UOp(UOps.STORE, None, (buf_uop, rendered_idx, var)))
-      else: stores.append(UOp(UOps.STORE, None, (buf_uop, rendered_idx, var, valid.render(self.render_ops, self))))
+      else: stores.append(UOp(UOps.STORE, None, (buf_uop, rendered_idx, var, valid))) #valid.render(self.render_ops, self))))
     return stores
 
   # render loop
