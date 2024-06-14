@@ -55,6 +55,12 @@ def get_child(obj, key):
     else: obj = getattr(obj, k)
   return obj
 
+def get_shape(x) -> Tuple[int, ...]:
+  if not isinstance(x, (list, tuple)): return ()
+  subs = [get_shape(xi) for xi in x]
+  if not all_same([sub for sub in subs]): raise ValueError(f"inhomogeneous shape from {x}")
+  return (len(subs),) + (subs[0] if subs else ())
+
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
 def get_contraction(old_shape:Tuple[sint, ...], new_shape:Tuple[sint, ...]) -> Optional[List[List[int]]]:
   acc_old, acc_new = list(itertools.accumulate(old_shape, operator.mul)), list(itertools.accumulate(new_shape, operator.mul))

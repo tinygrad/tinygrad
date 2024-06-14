@@ -300,6 +300,13 @@ class TestTinygrad(unittest.TestCase):
         data = _generate_data(depth)
         np.testing.assert_allclose(Tensor(data).numpy(), np.array(data))
 
+  def test_tensor_bytes(self):
+    data = b"abc123"
+    t = Tensor(data)
+    assert t.dtype == dtypes.uint8
+    assert t.shape == (6,)
+    np.testing.assert_equal(t.numpy(), list(data))
+
   def test_tensor_copy(self):
     x = copy.deepcopy(Tensor.ones((3,3,3)))
     np.testing.assert_allclose(x.numpy(), np.ones((3,3,3)))
