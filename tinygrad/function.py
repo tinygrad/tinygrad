@@ -83,8 +83,7 @@ class Sigmoid(Function):
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    neg_ret = self.ret.e(UnaryOps.NEG)
-    return self.ret.e(BinaryOps.MUL, self.ret.const(1).e(BinaryOps.ADD, neg_ret)).e(BinaryOps.MUL, grad_output)
+    return self.ret.e(BinaryOps.MUL, self.ret.const(1).e(BinaryOps.ADD, self.ret.e(UnaryOps.NEG))).e(BinaryOps.MUL, grad_output)
 
 class Sign(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
