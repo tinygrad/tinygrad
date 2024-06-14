@@ -1,6 +1,5 @@
 from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Union
 from dataclasses import dataclass
-import numpy as np  # TODO: remove numpy
 import functools
 from tinygrad.helpers import getenv
 
@@ -18,9 +17,6 @@ class DType:
     assert sz > 1 and self.count == 1, f"can't vectorize {self} with size {sz}"
     return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self.name]}{sz}", None, sz)
   def scalar(self): return DTYPES_DICT[self.name[:-len(str(self.count))]] if self.count > 1 else self
-  # TODO: someday this will be removed with the "remove numpy" project
-  @property
-  def np(self) -> Optional[type]: return np.dtype(self.fmt).type if self.fmt is not None else None
 
 # dependent typing?
 @dataclass(frozen=True, repr=False)
@@ -46,8 +42,6 @@ class dtypes:
   def is_int(x: DType) -> bool: return x.scalar() in (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64) or dtypes.is_unsigned(x)
   @staticmethod
   def is_unsigned(x: DType) -> bool: return x.scalar() in (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
-  @staticmethod
-  def from_np(x: type) -> DType: return DTYPES_DICT[np.dtype(x).name]
   @staticmethod
   def from_py(x) -> DType:
     if x.__class__ is float: return dtypes.default_float

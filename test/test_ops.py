@@ -3,6 +3,7 @@ import numpy as np
 import torch
 from tinygrad.helpers import getenv, IMAGE, DEBUG, CI
 from tinygrad import Tensor, Device, dtypes
+from tinygrad.tensor import _to_np_dtype
 
 if CI:
   import warnings
@@ -66,7 +67,7 @@ def prepare_test_op(low, high, shps, vals, forward_only=False):
     ts = [torch.tensor(x, requires_grad=(not forward_only)) for x in vals]
   else:
     np.random.seed(0)
-    np_data = [np.random.uniform(low=low, high=high, size=size).astype(dtypes.default_float.np) for size in shps]
+    np_data = [np.random.uniform(low=low, high=high, size=size).astype(_to_np_dtype(dtypes.default_float)) for size in shps]
     ts = [torch.tensor(data, requires_grad=(not forward_only)) for data in np_data]
   tst = [Tensor(x.detach().numpy(), requires_grad=(not forward_only and not FORWARD_ONLY)) for x in ts]
   return ts, tst
