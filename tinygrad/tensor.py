@@ -7,7 +7,7 @@ from collections import defaultdict
 import numpy as np
 
 from tinygrad.dtype import DType, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype
-from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, flat_mv, get_shape, fully_flatten
+from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, get_shape, fully_flatten
 from tinygrad.helpers import IMAGE, DEBUG, WINO, THREEFRY
 from tinygrad.lazy import LazyBuffer
 from tinygrad.multi import MultiLazyBuffer
@@ -54,7 +54,7 @@ def _frompy(x:Union[List, Tuple], dtype:DType) -> LazyBuffer:
   ret = LazyBuffer.loadop(LoadOps.EMPTY, get_shape(x), dtype, "PYTHON")
   # fake realize
   assert dtype.fmt is not None, f"{dtype=} has None fmt"
-  ret.buffer.allocate(flat_mv(memoryview(bytes(b''.join(struct.pack(f"@{dtype.fmt}", xi) for xi in fully_flatten(x))))))
+  ret.buffer.allocate(memoryview(bytes(b''.join(struct.pack(f"@{dtype.fmt}", xi) for xi in fully_flatten(x)))))
   del ret.srcs
   return ret
 
