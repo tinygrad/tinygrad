@@ -2,7 +2,7 @@ import unittest
 from tinygrad import Tensor
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import lower_schedule_item
-from tinygrad.codegen.uops import UOpGraph, UOps
+from tinygrad.codegen.uops import UOpGraph, UOps, UOp
 from tinygrad.ops import BinaryOps, TernaryOps
 from tinygrad.dtype import dtypes
 
@@ -55,26 +55,24 @@ class TestUOpsStats(unittest.TestCase):
 
   #MULACC should have the same stats as MUL + ADD
   def test_mulacc(self):
-    uops = UOpGraph()
-    globl = uops.add(UOps.DEFINE_GLOBAL, dtypes.int, tuple())
-    o1 = uops.add(UOps.CONST, dtypes.int, tuple(), 1)
-    o2 = uops.add(UOps.CONST, dtypes.int, tuple(), 2)
-    u1 = uops.add(UOps.LOAD, dtypes.int, (globl, o1))
-    u2 = uops.add(UOps.LOAD, dtypes.int, (globl, o2))
-    u3 = uops.add(UOps.CONST, dtypes.int, tuple(), 3)
-    u4 = uops.add(UOps.ALU, dtypes.int, (u1,u2), BinaryOps.MUL)
-    u5 = uops.add(UOps.ALU, dtypes.int, (u4,u3), BinaryOps.ADD)
-    uops.add(UOps.SINK, None, (u5,))
+    globl = UOp(UOps.DEFINE_GLOBAL, dtypes.int, tuple())
+    o1 = UOp(UOps.CONST, dtypes.int, tuple(), 1)
+    o2 = UOp(UOps.CONST, dtypes.int, tuple(), 2)
+    u1 = UOp(UOps.LOAD, dtypes.int, (globl, o1))
+    u2 = UOp(UOps.LOAD, dtypes.int, (globl, o2))
+    u3 = UOp(UOps.CONST, dtypes.int, tuple(), 3)
+    u4 = UOp(UOps.ALU, dtypes.int, (u1,u2), BinaryOps.MUL)
+    u5 = UOp(UOps.ALU, dtypes.int, (u4,u3), BinaryOps.ADD)
+    uops = UOpGraph([UOp(UOps.SINK, None, (u5,))])
 
-    uops_fma = UOpGraph()
-    globl = uops_fma.add(UOps.DEFINE_GLOBAL, dtypes.int, tuple())
-    o1 = uops_fma.add(UOps.CONST, dtypes.int, tuple(), 1)
-    o2 = uops_fma.add(UOps.CONST, dtypes.int, tuple(), 2)
-    u1 = uops_fma.add(UOps.LOAD, dtypes.int, (globl, o1))
-    u2 = uops_fma.add(UOps.LOAD, dtypes.int, (globl, o2))
-    u3 = uops_fma.add(UOps.CONST, dtypes.int, tuple(), 3)
-    u4 = uops_fma.add(UOps.ALU, dtypes.int, (u1,u2,u3), TernaryOps.MULACC)
-    uops_fma.add(UOps.SINK, None, (u4,))
+    globl = UOp(UOps.DEFINE_GLOBAL, dtypes.int, tuple())
+    o1 = UOp(UOps.CONST, dtypes.int, tuple(), 1)
+    o2 = UOp(UOps.CONST, dtypes.int, tuple(), 2)
+    u1 = UOp(UOps.LOAD, dtypes.int, (globl, o1))
+    u2 = UOp(UOps.LOAD, dtypes.int, (globl, o2))
+    u3 = UOp(UOps.CONST, dtypes.int, tuple(), 3)
+    u4 = UOp(UOps.ALU, dtypes.int, (u1,u2,u3), TernaryOps.MULACC)
+    uops_fma = UOpGraph([UOp(UOps.SINK, None, (u4,))])
 
     self.assertEqual(uops.flops_mem(), uops_fma.flops_mem())
 

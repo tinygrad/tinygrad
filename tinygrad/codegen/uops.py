@@ -254,12 +254,12 @@ class UOpGraph:
   def __init__(self, add_nodes:Optional[List[UOp]]=None):
     self.nodes: Dict[Tuple, UOp] = {}
     self._uops: Optional[List[UOp]] = None
-    if add_nodes is not None: self.multiadd(add_nodes)
+    if add_nodes is not None: self._multiadd(add_nodes)
 
   def __iter__(self) -> Iterator[UOp]: return iter(self.uops)
   def __getitem__(self, index) -> UOp: return self.uops[index]
 
-  def multiadd(self, unprocessed_nodes:List[UOp]):
+  def _multiadd(self, unprocessed_nodes:List[UOp]):
     # add nodes to graph in reverse BFS order
     # TODO: i feel like this is written in a few places, possible to library it?
     in_degree: DefaultDict[UOp, int] = defaultdict(int)
@@ -278,7 +278,7 @@ class UOpGraph:
     while len(queue):
       n = queue.pop(0)
       if n in replace_nodes: continue
-      replace_nodes[n] = self.add(n.uop, n.dtype, tuple(replace_nodes.get(x, x) for x in n.vin), n.arg)
+      replace_nodes[n] = self._add(n.uop, n.dtype, tuple(replace_nodes.get(x, x) for x in n.vin), n.arg)
       for x in children[n]:
         in_degree[x] -= 1
         if in_degree[x] == 0:
@@ -411,7 +411,7 @@ class UOpGraph:
 
     if type_verify: self.type_verify()
 
-  def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None) -> UOp:
+  def _add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None) -> UOp:
     if found:=self.nodes.get(key:=(uop, dtype, vin, arg)): return found
     self.nodes[key] = ret = UOp(*key)
     return ret
