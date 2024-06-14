@@ -367,12 +367,12 @@ class UOpGraph:
     add_parents(sink)
 
     @functools.lru_cache(None)
-    def get_recursive_children(x:UOp, stop:Callable[[UOp, UOp], bool], include_self=False) -> Set[UOp]:
+    def get_recursive_children(x:UOp, end:UOps, include_self=False) -> Set[UOp]:
       if x.uop is UOps.SINK: return set()
-      return set.union(set((x,)) if include_self else set(), *([get_recursive_children(u, stop, include_self=True) for u in graph[x] if stop(x,u)]))
+      return set.union(set((x,)) if include_self else set(), *([get_recursive_children(u, end, True) for u in graph[x] if x.uop is not end]))
     # scope children impact the toposort and END* insertion
-    end_for_uop = {UOps.IF:(lambda _,u: u.uop is not UOps.BARRIER, UOps.ENDIF), UOps.RANGE:(lambda x,_: x.uop is not UOps.PHI, UOps.ENDRANGE)}
-    scope_children = {p:get_recursive_children(p, stop=end_for_uop[p.uop][0]) for p in (loops+ifs)[::-1]}
+    end_for_uop = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.PHI, UOps.ENDRANGE)}
+    scope_children = {p:get_recursive_children(p, end_for_uop[p.uop][0]) for p in (loops+ifs)[::-1]}
 
     queue: List = []
     def push(u):
