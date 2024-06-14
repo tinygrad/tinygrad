@@ -650,11 +650,11 @@ class TestSchedule(unittest.TestCase):
   # multireduce spec
   @unittest.skip
   def test_multireduce_fusion(self):
-    # two genres: 
+    # two genres:
     # - parallel, will f() + f() fuse
     # - sequential, will f( f() ) fuse
 
-    # simple consecutive reduceops 
+    # simple consecutive reduceops
     x = Tensor.rand(4, 32).realize()
     y = Tensor.rand(4, 32).realize()
     out = (y + x.sum(axis=-1, keepdim=True)).sum(axis=-1)
@@ -690,7 +690,6 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_allclose(out[0].numpy(), np.sqrt(np.square(x.numpy() - np_mu).sum(-1)/x.shape[-1]), atol=1e-4, rtol=1e-4)
     np.testing.assert_allclose(out[1].numpy(), np.sqrt(np.square(y.numpy() - np_mu).sum(-1)/y.shape[-1]), atol=1e-4, rtol=1e-4)
     check_schedule(out, 1)
-
 
   # multireduce spec
   @unittest.skip
