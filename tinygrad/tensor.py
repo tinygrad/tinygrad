@@ -54,8 +54,7 @@ def _frompy(x:Union[List, Tuple], dtype:DType) -> LazyBuffer:
   ret = LazyBuffer.loadop(LoadOps.EMPTY, get_shape(x), dtype, "PYTHON")
   # fake realize
   assert dtype.fmt is not None, f"{dtype=} has None fmt"
-  flattened = fully_flatten(x)
-  ret.buffer.allocate(memoryview(struct.pack(f"@{len(flattened)}{dtype.fmt}", *flattened)))
+  ret.buffer.allocate(memoryview(struct.pack(f"@{ret.size}{dtype.fmt}", *fully_flatten(x))))
   del ret.srcs
   return ret
 
