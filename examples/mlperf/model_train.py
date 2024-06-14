@@ -436,7 +436,7 @@ def train_retinanet():
       v.realize().to_(GPUS)
   
   # model.load_checkpoint("./ckpts/retinanet_4xgpu020_B100_E0_11703.safe")
-  # model.load_checkpoint("./ckpts/retinanet_4xgpu018_B16_E0.safe")
+  # model.load_checkpoint("./ckpts/retinanet_4xgpu018_B32_E0.safe")
   # model.load_from_pretrained()
 
   parameters = get_parameters(model)
@@ -468,7 +468,7 @@ def train_retinanet():
 
   feature_shapes = [(100, 100), (50, 50), (25, 25), (13, 13), (7, 7)]
   ANCHORS = anchor_generator((BS,3,800,800), feature_shapes)
-  ANCHORS_STACK = Tensor.stack(ANCHORS)
+  ANCHORS_STACK = Tensor.stack(*ANCHORS)
   ANCHORS_STACK = ANCHORS_STACK.shard(GPUS, axis=0)
   ANCHOR_NP = ANCHORS[0].numpy()
   mdl_reg_loss = lambda r, m, b_t: model.head.regression_head.loss(r,ANCHORS_STACK, m, b_t)

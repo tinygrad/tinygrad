@@ -79,12 +79,12 @@ def encode_boxes(reference_boxes, proposals, weights = (1.0,1.0,1.0,1.0)):
   ex_ctr = proposals[:, :, 0:2] + 0.5 * (proposals[:, :, 2:4] - proposals[:, :, 0:2])
   gt_ctr = reference_boxes[:, :, 0:2] + 0.5 * (reference_boxes[:, :, 2:4] - reference_boxes[:, :, 0:2])
 
-  return Tensor.stack([
+  return Tensor.stack(
     wx * (gt_ctr[:, :, 0] - ex_ctr[:, :, 0]) / (proposals[:, :, 2] - proposals[:, :, 0]),
     wy * (gt_ctr[:, :, 1] - ex_ctr[:, :, 1]) / (proposals[:, :, 3] - proposals[:, :, 1]),
     ww * ((reference_boxes[:, :, 2] - reference_boxes[:, :, 0]) / (proposals[:, :, 2] - proposals[:, :, 0])).log(),
     wh * ((reference_boxes[:, :, 3] - reference_boxes[:, :, 1]) / (proposals[:, :, 3] - proposals[:, :, 1])).log()
-  ], dim=2)
+  , dim=2)
 
 def generate_anchors(input_size, grid_sizes, scales, aspect_ratios):
   assert len(scales) == len(aspect_ratios) == len(grid_sizes)
@@ -107,7 +107,8 @@ def generate_anchors(input_size, grid_sizes, scales, aspect_ratios):
 def cust_meshgrid(x:Tensor, y:Tensor):
   xs = x.shape[0]
   ys = y.shape[0]
-  y = Tensor.stack([y]*xs)
+  temp = [y]*xs
+  y = Tensor.stack(*temp)
   x = x.reshape(xs, 1).expand((xs,ys))
   return x, y
 
@@ -136,7 +137,7 @@ class AnchorGenerator:
     w_ratios = 1 / h_ratios
     ws = (w_ratios.unsqueeze(1) * scales.unsqueeze(0)).reshape(-1)  #.view(-1)
     hs = (h_ratios.unsqueeze(1) * scales.unsqueeze(0)).reshape(-1)  #.view(-1)
-    base_anchors = Tensor.stack([-ws, -hs, ws, hs], dim=1) / 2
+    base_anchors = Tensor.stack(-ws, -hs, ws, hs, dim=1) / 2
     return base_anchors.round()
 
   def set_cell_anchors(self, dtype):
@@ -167,7 +168,7 @@ class AnchorGenerator:
       shift_y, shift_x = cust_meshgrid(shifts_y, shifts_x)
       shift_x = shift_x.reshape(-1)
       shift_y = shift_y.reshape(-1)
-      shifts = Tensor.stack((shift_x, shift_y, shift_x, shift_y), dim=1)
+      shifts = Tensor.stack(shift_x, shift_y, shift_x, shift_y, dim=1)
 
       # For every (base anchor, output anchor) pair,
       # offset each zero-centered base anchor by the center of the output anchor.
