@@ -92,6 +92,8 @@ class HWQueue:
 
   def ptr(self) -> int: return self.next_cmd_index
 
+  def memory_barrier(self): pass
+
   def wait(self, signal, value=0):
     self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(ctypes.addressof(from_mv(signal))), *nvdata64_le(value),
                (3 << 0) | (1 << 24)] # ACQUIRE | PAYLOAD_SIZE_64BIT
