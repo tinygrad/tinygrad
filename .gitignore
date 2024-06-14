@@ -54,3 +54,5 @@ weights
 comgr_*
 *.pkl
 site/
+
+examples/mlperf/rnnt/*.weight

@@ -1,3 +1,4 @@
+#%%
 from tinygrad.engine.graph import print_tree
 
 from tinygrad import TinyJit
@@ -115,7 +116,7 @@ def backward(self) -> Tensor:
   # this is "implicit gradient creation"
   self.grad = Tensor(1.0, device=self.device, requires_grad=False)
 
-  for t0 in reversed(self.deepwalk()):
+  for t0 in reversed(self._deepwalk()):
     if t0.grad is None: raise RuntimeError("tensor has no grad")
     grads = t0._ctx.backward(t0.grad.lazydata)
     grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
@@ -152,67 +153,62 @@ def mask(d,X_lens, Y_lens, maxX, maxY, vocab=28):
 rnnt = RNNT()
 opt = Adam(get_parameters(rnnt))
 if (GPUS):
-    for x in get_parameters(rnnt):
-        x.to_(GPUS)
+  for x in get_parameters(rnnt):
+    x.to_(GPUS)
 
 
 def fb_pass(X:Tensor,labels, X_lens, Y_lens, maxX, maxY):
-    opt.zero_grad()
-    L = forward(X, labels, X_lens, Y_lens, maxX, maxY)
-    L.backward()
-    for p in opt.params: p.grad.realize()
-    opt.step()
-    return (L.value/ X_lens.sum()).realize()
+  Tensor.training = True
+  opt.zero_grad()
+  L = forward(X, labels, X_lens, Y_lens, maxX, maxY)
+  L.backward()
+
+
+  for p in opt.params: p.grad.realize()
+  opt.step()
+  return (L.value/ X_lens.sum()).realize()
 
 def forward(X:Tensor, labels, X_lens, Y_lens, maxx, maxy):
-    X = rnnt.encoder.__call__(X) # LSTM expects (N,B,D)
-    X_lens = (X_lens+1)/2
-    Y = rnnt.prediction.__call__(labels,1)
-    Y = Y.pad(((0,0),(1,0),(0,0)))
-    d = rnnt.joint(X,Y).softmax(-1).realize()
-    md = mask(d,X_lens, Y_lens, maxx/2, maxy)
-    L = Loss(md, labels)
-    return L.value.realize()
+  X = rnnt.encoder.__call__(X) # LSTM expects (N,B,D)
+  X_lens = (X_lens+1)/2
+  Y = rnnt.prediction.__call__(labels,1)
+  Y = Y.pad(((0,0),(1,0),(0,0)))
+  d = rnnt.joint(X,Y).softmax(-1).realize()
+  md = mask(d,X_lens, Y_lens, maxx/2, maxy)
+  L = Loss(md, labels)
+  return L
 
-forward_jit = TinyJit(forward)
+forward_jit = TinyJit(lambda *args: forward(*args).value.realize())
 
 def test():
-    iter = iterate(test_set,BS, maxx,maxy)
-    Tensor.no_grad = True
-    L = 0
-    for sample in iter:
-        X_lens = sample[2]
-        l = forward_jit(*sample,maxx,maxy).numpy()
-        l /= (X_lens.sum()).numpy()
-        L += l
-
-    Tensor.no_grad = False
-    return L / int(len(test_set) / BS)
+  iter = iterate(test_set,BS, maxx,maxy)
+  Tensor.no_grad = True
+  L = 0
+  for sample in iter: L += forward_jit(*sample,maxx,maxy).numpy() / sample[2].sum().numpy()
+  Tensor.no_grad = False
+  return L / int(len(test_set) / BS)
 
 def timestring(s:int): return f"{int(s//3600)}:{int(s//60%60)}:{s%60:.4}"
 
-
-BS = 4
+BS = 2
 maxsecs = 5
 
 if __name__ == "__main__":
 
-    ci, maxx, maxy = load_data(maxsecs)
-    train_set = ci[:-(2*BS)]
-    test_set = ci[-(2*BS):]
-    print(f"eval: {test()}")
-    interrupt = False
-    step = TinyJit(fb_pass)
-    for e in range(20,40):
-        st = time.time()
-        for i,sample in enumerate(iterate(train_set, BS, maxx,maxy)):
-            try:
-                L = fb_pass(*sample, maxx, maxy).numpy().item()
-                print( end = f"\r {i}/{int(len(train_set)/BS)} L:{L:.4}", flush = True)
-            except KeyboardInterrupt:
-                rnnt.save(f"rnnt_e_{e+1}_i_{i+1}")
-                interrupt = True
-                break
-        if interrupt: break
-        print (f"\nepoch {e+1} finished in {timestring(time.time() - st )} val:{test()}")
-        rnnt.save(f"rnnt_e_{e+1}")
+  ci, maxx, maxy = load_data(maxsecs)
+  train_set = ci[:-(2*BS)]
+  test_set = ci[-(2*BS):]
+  print(f"eval: {test()}")
+  step = TinyJit(fb_pass)
+  for e in range(40):
+    st = time.time()
+    for i,sample in enumerate(iterate(train_set, BS, maxx,maxy)):
+      try:
+        L = fb_pass(*sample, maxx, maxy).numpy().item()
+        print( end = f"\r {i}/{int(len(train_set)/BS)} L:{L:.4}", flush = True)
+      except KeyboardInterrupt:
+        rnnt.save(f"rnnt_e_{e+1}_i_{i+1}.weight")
+        interrupt = True
+        raise KeyboardInterrupt
+    print (f"\nepoch {e+1} finished in {timestring(time.time() - st )} val:{test()}")
+    rnnt.save(f"rnnt_e_{e+1}")

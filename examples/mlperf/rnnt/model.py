@@ -22,7 +22,7 @@ class LSTMCell:
       h = (o * c.tanh()).realize()
       c = (f * c) + (i * g).realize()
 
-      res.append(Tensor.stack([h,c]))
+      res.append(Tensor.stack(h,c))
       h = res[-1][0]
       c = res[-1][1]
     
