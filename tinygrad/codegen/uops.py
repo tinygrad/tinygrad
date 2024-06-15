@@ -152,10 +152,10 @@ constant_folder = PatternMatcher([
       vin=[UPat(UOps.CONST, name="mval"), UPat(UOps.RANGE, vin=(UPat(name="loop_start"), UPat(name="loop_end")))])]),
       UPat(UOps.CONST, name="compval"))), UPat(UOps.CONST, name="multconst"), UPat(UOps.CONST, 0))), loop_collapse),
   # sum collapse to mul (with possible GEP)
-  (UPat(UOps.PHI, vin=(UPat(UOps.DEFINE_ACC, name="phi_input", vin=(UPat(UOps.RANGE, name="loop"),)),
+  (UPat(UOps.PHI, vin=(UPat(UOps.DEFINE_ACC, name="phi_input", vin=(UPat(UOps.RANGE, name="loop"), UPat(UOps.CONST))),
       UPat(UOps.ALU, BinaryOps.ADD, vin=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
   (UPat(UOps.PHI, vin=(UPat(UOps.GEP, name="phi_input",
-                            vin=(UPat(UOps.DEFINE_ACC, vin=(UPat(UOps.RANGE, name="loop"),)),)),
+                            vin=(UPat(UOps.DEFINE_ACC, vin=(UPat(UOps.RANGE, name="loop"), UPat(UOps.CONST))),)),
       UPat(UOps.ALU, BinaryOps.ADD, vin=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
   # deal with UNMUL
   (UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c1"),
@@ -170,11 +170,11 @@ constant_folder = PatternMatcher([
   (UPat(UOps.GEP, name="root", vin=(UPat(UOps.CONST, name="c"),)), lambda root, c: UOp.const(root.dtype, c.arg)),
   (UPat(UOps.CAST, name="root", vin=UPat(UOps.CONST, name="c")), lambda root, c: UOp.const(root.dtype, c.arg)),
   # a phi on a DEFINE_ACC without loops or a CONST is a noop. this is for correctness, not just speed
-  (UPat(UOps.PHI, vin=(UPat(UOps.DEFINE_ACC, name="acc"), UPat(name="acc"))), lambda acc: UOp.const(acc.dtype, acc.arg[0])),
-  (UPat(UOps.PHI, vin=(UPat(UOps.DEFINE_ACC, vin=tuple()), UPat(name="x"))), lambda x: x),
+  (UPat(UOps.PHI, vin=(UPat(UOps.DEFINE_ACC, name="acc"), UPat(name="acc"))), lambda acc: acc.vin[-1]),
+  (UPat(UOps.PHI, vin=(UPat(UOps.DEFINE_ACC, vin=(UPat(UOps.CONST),)), UPat(name="x"))), lambda x: x),
   (UPat(UOps.PHI, vin=(UPat(UOps.CONST), UPat(name="x"))), lambda x: x),
   # a DEFINE_ACC without inputs is a const + GEP on a const is the const
-  (UPat(UOps.DEFINE_ACC, name="root", vin=tuple()), lambda root: UOp.const(root.dtype, root.arg[0])),
+  (UPat(UOps.DEFINE_ACC, name="root", vin=(UPat(UOps.CONST),)), lambda root: root.vin[-1]),
   (UPat(UOps.GEP, name="root", vin=(UPat(UOps.CONST, name="x"),)), lambda root,x: UOp.const(root.dtype, x.arg)),
   # max -2147483648
   (UPat(UOps.ALU, BinaryOps.MAX, dtype=dtypes.int, vin=[UPat(name="x"), UPat(UOps.CONST, -2147483648)]), lambda x: x),
@@ -393,8 +393,8 @@ class UOpGraph:
     while queue:
       p,x = heapq.heappop(queue)
       if DEBUG >= 7: print(p,x)
-      if x.uop is UOps.DEFINE_ACC and len(x.vin):
-        idx = min([self._uops.index(l) for l in x.vin])
+      if x.uop is UOps.DEFINE_ACC and x.vin[0].uop is UOps.RANGE:
+        idx = min([self._uops.index(l) for l in x.vin if l.uop is UOps.RANGE])
         self._uops.insert(idx, x)
       else:
         self._uops.append(x)
@@ -441,7 +441,7 @@ class UOpGraph:
     for u in self.uops:
       uop, arg, vin, dtype = u.uop, u.arg, u.vin, u.dtype
       if uop in {UOps.CONST, UOps.DEFINE_ACC}:
-        if uop is UOps.DEFINE_ACC: arg = arg[0]
+        if uop is UOps.DEFINE_ACC: arg = vin[-1].arg
         assert dtype is not None and type(arg) is type(dtypes.as_const(arg, dtype)), f"type of {arg=} does not match {dtype}"
       if uop in {UOps.CAST, UOps.BITCAST}: assert arg is None   # type is the output type, not an arg
       if uop is UOps.ALU:

@@ -89,7 +89,7 @@ class PythonProgram:
         elif uop is UOps.CONST:
           ul[i] = [[arg] * warp_size for _ in range(dtype.count)] if dtype.count > 1 else [arg] * warp_size
         elif uop is UOps.DEFINE_ACC:
-          ul[i] = [[arg[0]] * warp_size for _ in range(dtype.count)] if dtype.count > 1 else [arg[0]] * warp_size
+          ul[i] = [[idp[-1]] * warp_size for _ in range(dtype.count)] if dtype.count > 1 else [idp[-1]] * warp_size
         elif uop is UOps.RANGE:
           if i not in ul: ul[i] = [inp[0][0]] * warp_size
           else:
