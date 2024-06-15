@@ -102,8 +102,10 @@ class UPat:
   def where(gate: UPat, a: UPat, b: UPat, name: Optional[str] = None): return UPat.alu(TernaryOps.WHERE, (gate, a, b), name)
   @staticmethod
   def range(start: Optional[UPat], end: Optional[UPat], name:Optional[str]=None):
-    if start is not None: assert end is not None, 'either both start and end should be specified, or both should be None'
-    return UPat(UOps.RANGE, None, (start, end) if start is not None else None, name)
+    # mypy workaround
+    if start is not None and end is not None: return UPat(UOps.RANGE, None, (start, end), name)
+    assert start is None and end is None, 'either both start and end should be specified, or both should be None'
+    return UPat(UOps.RANGE, name=name)
 
   def nm(self, name: Optional[str]) -> UPat: return UPat(self.uop, self.arg, self.vin, name, self.dtype, self.allow_len)
   def recip(self, name:Optional[str]=None): return UPat.alu(UnaryOps.RECIP, self, name=name)
