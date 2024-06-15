@@ -116,6 +116,8 @@ class UPat:
   def __rtruediv__(self, x): return self.recip() * upatfix(x, self.dtype)
   def __lt__(self, x): return UPat.alu(BinaryOps.CMPLT, (self, upatfix(x, self.dtype)))
   def __ne__(self, x): return UPat.alu(BinaryOps.CMPNE, [self, upatfix(x, self.dtype)])
+  def __mod__(self, x): return UPat.alu(BinaryOps.MOD, (self, upatfix(x, self.dtype)))
+  def __rmod__(self, x): return UPat.alu(BinaryOps.MOD, (upatfix(x, self.dtype), self))
 UPatVin = Optional[Union[Tuple[UPat, ...], List[UPat], UPat]]
 UPatDType = Optional[Union[DType, Set[DType]]]
 
@@ -243,20 +245,21 @@ constant_folder = PatternMatcher([
   ((UPat.var("x") + UPat.cvar("c1")) + UPat.cvar("c2"), lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, [c1.arg, c2.arg]))),
   ((UPat.var("x") - UPat.cvar("c1")) + UPat.cvar("c2"), lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.SUB, x.dtype, [c2.arg, c1.arg]))),
   # *** rules from symbolic ***
-  (UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.ALU, BinaryOps.MUL, [UPat(name="x"), UPat(UOps.CONST, name="c1")]), UPat(UOps.CONST, name="c2")]),
-     lambda x,c1,c2: x*UOp.const(x.dtype, exec_alu(BinaryOps.MUL, x.dtype, [c1.arg, c2.arg]))),  # two stage mul
-  (UPat(UOps.ALU, BinaryOps.MOD, (UPat(name="x"), UPat(UOps.CONST, 1))), lambda x: UOp.const(x.dtype, 0)), # x%1 -> 0
-  (UPat(UOps.ALU, BinaryOps.ADD, (UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c0"), UPat(name="x")]),  # (x*c0)+(x*c1) -> x*(c0+c1)
-                                  UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c1"), UPat(name="x")]),)),
-                                  lambda x,c0,c1: x*exec_alu(BinaryOps.ADD, x.dtype, [c0.arg, c1.arg])),
-  (UPat(UOps.ALU, BinaryOps.IDIV, (UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c0"), UPat(name="x")]),
-                                  UPat(UOps.CONST, name="c0"))), lambda x,c0: x if c0.arg != 0 else None),    # (x*c0)/c0 -> x
-  (UPat(UOps.ALU, BinaryOps.IDIV, (UPat(UOps.ALU, BinaryOps.IDIV, (UPat(name="x"), UPat(UOps.CONST, name="c0"))), UPat(UOps.CONST, name="c1"))),
-    lambda x,c0,c1: x//UOp.const(x.dtype, exec_alu(BinaryOps.MUL, x.dtype, [c0.arg, c1.arg]))),    # (x/c0)/c1 -> x/(c0*c1)
+  # two stage mul, (x*c1)*c2 = x*(c1*c2)
+  ((UPat.var("x") * UPat.cvar("c1")) * UPat.cvar("c2"), lambda x,c1,c2: x*UOp.const(x.dtype, exec_alu(BinaryOps.MUL, x.dtype, [c1.arg, c2.arg]))),
+  # x%1 -> 0
+  (UPat.var("x") % UPat.const(1), lambda x: UOp.const(x.dtype, 0)),
+  # (x*c0)+(x*c1) -> x*(c0+c1)
+  (UPat.var("x") * UPat.cvar("c0") + UPat.var("x") * UPat.cvar("c1") , lambda x,c0,c1: x*exec_alu(BinaryOps.ADD, x.dtype, [c0.arg, c1.arg])),
+  # (x*c0)/c0 -> x
+  ((UPat.var("x") * UPat.cvar("c0")) // UPat.cvar("c0"), lambda x,c0: x if c0.arg != 0 else None),
+  # (x/c0)/c1 -> x/(c0*c1)
+  ((UPat.var("x") // UPat.cvar("c0")) // UPat.cvar("c1"), lambda x,c0,c1: x//UOp.const(x.dtype, exec_alu(BinaryOps.MUL, x.dtype, [c0.arg, c1.arg]))),
+  # ???
   (UPat(UOps.ALU, BinaryOps.CMPLT, (UPat(UOps.ALU, BinaryOps.ADD, [UPat(UOps.CONST, name="c0"), UPat(name="x")]), UPat(UOps.CONST, name="c1"))),
     lambda x,c0,c1: UOp.alu(BinaryOps.CMPLT, x, UOp.const(x.dtype, exec_alu(BinaryOps.SUB, x.dtype, [c1.arg, c0.arg])))),
-  (UPat(UOps.ALU, BinaryOps.ADD, [UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c0"), UPat(name="x")]), UPat(name="x")]),
-    lambda x,c0: x*UOp.const(x.dtype, c0.arg+1)),    # (x+x*c0)-> x*(c0+1)
+  # (x+x*c0)-> x*(c0+1)
+  (UPat.var("x") + UPat.var("x") * UPat.cvar("c0"), lambda x,c0: x*UOp.const(x.dtype, c0.arg+1)),
   # TODO: can do the invert of this (flip alt/load) when we fix double ops
   (UPat.store(UPat.var("buf"), UPat.var("idx"), UPat.where(UPat.var("gate"), UPat.var("alt"), UPat.load(UPat.var("buf"), UPat.var("idx")))),
     lambda buf, idx, gate, alt: UOp(UOps.STORE, None, (buf, idx, alt, gate))),
