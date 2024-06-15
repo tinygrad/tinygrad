@@ -183,10 +183,11 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst):
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
   # arange loop folding (early)
-  (UPat(UOps.ALU, TernaryOps.WHERE, vin=(UPat(UOps.ALU, BinaryOps.CMPLT, vin=(
-    UPat(UOps.ALU, BinaryOps.ADD, vin=[UPat(name="idx"), UPat(UOps.ALU, BinaryOps.MUL,
-      vin=[UPat(UOps.CONST, name="mval"), UPat(UOps.RANGE, vin=(UPat(name="loop_start"), UPat(name="loop_end")))])]),
-      UPat(UOps.CONST, name="compval"))), UPat(UOps.CONST, name="multconst"), UPat(UOps.CONST, 0))), loop_collapse),
+  (UPat.where(
+    UPat.var("idx") + UPat.cvar("mval") * UPat(UOps.RANGE, vin=(UPat.var("loop_start"), UPat.var("loop_end"))) < UPat.cvar("compval"),
+    UPat.cvar("multconst"),
+    UPat.const(0)
+  ), loop_collapse),
   # sum collapse to mul (with possible GEP)
   (UPat(UOps.PHI, vin=(UPat(UOps.DEFINE_ACC, name="phi_input", vin=(UPat(UOps.RANGE, name="loop"),)), UPat.var("val1") + UPat.var("val2"))),
                                                                                                                                         sum_collapse),
