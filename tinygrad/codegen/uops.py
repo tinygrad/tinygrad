@@ -147,7 +147,10 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst):
 
 def expand_nodes(parents, ranges, base):
   children = defaultdict(list)
+  define_accs = []
   for p in parents:
+    if p.uop is UOps.PHI:
+      define_accs.append(p.vin[0])
     for x in p.vin:
       children[x].append(p)
 
@@ -157,8 +160,12 @@ def expand_nodes(parents, ranges, base):
 
   # get nodes on the path from root to the range node
   new_uops = []
+  acc_number = 0
   for rp in itertools.product(*replacements.values()):
     replace = dict(zip(replacements.keys(), rp))
+    for d in define_accs:
+      replace[d] = UOp(d.uop, d.dtype, d.vin, d.arg + (acc_number,))
+      acc_number += 1
     to_replace = list(replace.keys())
     while len(to_replace):
       t = to_replace.pop(0)
