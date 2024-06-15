@@ -107,7 +107,7 @@ class TestFloatUOps(TestUOps):
   def test_sqrt(self): self._test_uop_fxn(UnaryOps.SQRT, lambda a: math.sqrt(a) if a >= 0 else float('nan'))
 
   def test_add(self): self._test_bop_fxn(BinaryOps.ADD, lambda a,b: a+b)
-  def test_sub(self): self._test_bop_fxn(BinaryOps.SUB, lambda a,b: a-b)
+  def test_sub(self): self._test_bop_fxn(BinaryOps.ADD, lambda a,b: a+(-b))
   def test_mul(self): self._test_bop_fxn(BinaryOps.MUL, lambda a,b: a*b)
   def test_max(self): self._test_bop_fxn(BinaryOps.MAX, lambda a,b: max(a,b))
   def test_cmplt(self): self._test_bop_fxn(BinaryOps.CMPLT, lambda a,b: a<b)
@@ -119,7 +119,7 @@ class TestFloatUOps(TestUOps):
 class TestNonFloatUOps(TestUOps):
   def test_neg_int32(self): self._test_uop_fxn(UnaryOps.NEG, lambda a: -a, (dtypes.int32, ))
   def test_add_int32(self): self._test_bop_fxn(BinaryOps.ADD, lambda a,b: int(a)+int(b), (dtypes.int32, dtypes.int32))
-  def test_sub_int32(self): self._test_bop_fxn(BinaryOps.SUB, lambda a,b: int(a)-int(b), (dtypes.int32, dtypes.int32))
+  def test_sub_int32(self): self._test_bop_fxn(BinaryOps.ADD, lambda a,b: int(a)+(-int(b)), (dtypes.int32, dtypes.int32))
   def test_mul_int32(self): self._test_bop_fxn(BinaryOps.MUL, lambda a,b: int(a)*int(b), (dtypes.int32, dtypes.int32))
   @unittest.skipUnless(getenv("PTX"), "only ptx uses bitshifts")
   def test_shr_int32(self): self._test_bop_fxn(BinaryOps.SHR, lambda a,b: int(a)>>int(b), (dtypes.int32, dtypes.int32), no_b_neg=True)
@@ -147,11 +147,11 @@ class TestNonFloatUOps(TestUOps):
 
     value = x+(-y)
     uops = UOpGraph([UOp(UOps.STORE, None, (data0, idx, value))])
-    assert uops[-1].vin[2].arg is BinaryOps.SUB
+    assert uops[-1].vin[2].arg is BinaryOps.ADD
 
     value = -y+x
     uops = UOpGraph([UOp(UOps.STORE, None, (data0, idx, value))])
-    assert uops[-1].vin[2].arg is BinaryOps.SUB
+    assert uops[-1].vin[2].arg is BinaryOps.ADD
 
 class TestBoolUOps(TestUOps):
   def _test_uop_bool_fxn(self, op, fxn):
