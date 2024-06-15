@@ -16,6 +16,7 @@ document.addEventListener("alpine:init", () => {
     // performance tracking
     time_till_first: 0,
     tokens_per_second: 0,
+    total_tokens: 0,
 
     removeHistory(cstate) {
       const index = this.histories.findIndex((state) => {
@@ -68,6 +69,7 @@ document.addEventListener("alpine:init", () => {
 
         // calculate performance tracking
         tokens += 1;
+        this.total_tokens += 1;
         if (start_time === 0) {
           start_time = Date.now();
           this.time_till_first = start_time - prefill_start;
@@ -102,6 +104,16 @@ document.addEventListener("alpine:init", () => {
         event.preventDefault();
         await this.handleSend();
       }
+    },
+
+    updateTotalTokens(messages) {
+      fetch(`${this.endpoint}/chat/token/encode`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages })
+      }).then(response => response.json()).then(data => {
+        this.total_tokens = data.length;
+      }).catch(console.error);
     },
 
     async *openaiChatCompletion(messages) {

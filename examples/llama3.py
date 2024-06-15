@@ -181,7 +181,7 @@ TOP_K = 25
 TOP_P = 0.9
 ALPHA_F = 1.1
 ALPHA_P = 0.0
-import sys
+
 last_seen_toks = []
 def prefill(model, toks, start_pos=0):
   global last_seen_toks
@@ -309,6 +309,17 @@ if __name__ == "__main__":
         }
         yield f"data: {json.dumps(res)}\n\n"
 
+    @app.post("/v1/chat/token/encode")
+    def chat_token_encode():
+      rjson = json.loads(request.body.read())
+      if "messages" not in rjson: abort(400, "messages required")
+      toks = [tokenizer.bos_id]
+      for message in rjson["messages"]:
+        toks += encode_message(message["role"], message["content"])
+      if message["role"] == "user":
+        toks += encode_role("assistant")
+      return json.dumps(toks)
+
     @app.post("/v1/chat/completions")
     def chat_completions():
       global last_seen_toks
@@ -369,7 +380,6 @@ if __name__ == "__main__":
         }]
       }
       yield f"data: {json.dumps(res)}\n\n"
-      print(last_seen_toks, file=sys.stderr)
 
     app.run(host=args.host, port=args.port, debug=args.debug)
   elif args.benchmark:

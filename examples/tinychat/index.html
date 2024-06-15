@@ -43,6 +43,7 @@
         cstate = { time: null, messages: [] };
         time_till_first = 0;
         tokens_per_second = 0;
+        total_tokens = 0;
       }
     ">
       <h1 class="title megrim-regular">tinychat</h1>
@@ -56,6 +57,7 @@
           <template x-for="_state in histories.toSorted((a, b) => b.time - a.time)">
             <div x-data="{ otx: 0, trigger: 75 }" class="history" @click="
             cstate = _state;
+            updateTotalTokens(cstate.messages);
             home = 1;
             // ensure that going back in history will go back to home
             window.history.pushState({}, '', '/');
@@ -137,12 +139,25 @@
           <p style="font-family: monospace" x-text="tokens_per_second.toFixed(1)"></p>
           <p class="megrim-regular">TOKENS/SEC</p>
         </span>
+        <span class="input-performance-point">
+          <p style="font-family: monospace" x-text="total_tokens"></p>
+          <p class="megrim-regular">TOKENS</p>
+        </span>
       </div>
       <div class="input">
         <textarea x-ref="inputForm" id="input-form" class="input-form" autofocus rows=1 x-autosize
           :placeholder="generating ? 'Generating...' : 'Say something'" :disabled="generating" @input="
             home = (home === 0) ? 1 : home
             if (cstate.messages.length === 0 && $el.value === '') home = -1;
+
+            if ($el.value !== '') {
+              const messages = [...cstate.messages];
+              messages.push({ role: 'user', content: $el.value });
+              updateTotalTokens(messages);
+            } else {
+              if (cstate.messages.length === 0) total_tokens = 0;
+              else updateTotalTokens(cstate.messages);
+            }
           " x-effect="
             console.log(generating);
             if (!generating) $nextTick(() => {
