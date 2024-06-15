@@ -181,8 +181,21 @@ TOP_K = 25
 TOP_P = 0.9
 ALPHA_F = 1.1
 ALPHA_P = 0.0
-
+import sys
+last_seen_toks = []
 def prefill(model, toks, start_pos=0):
+  global last_seen_toks
+
+  # we can skip part of the prompt if it is the same as last and start_pos=0
+  if start_pos == 0:
+    for i, (a, b) in enumerate(zip(toks, last_seen_toks)):
+      if a != b: break
+    else: i = min(len(toks), len(last_seen_toks))
+    start_pos += i
+    last_seen_toks = toks
+    toks = toks[i:]
+
+  # prefill the model
   for tok in tqdm(toks):
     GlobalCounters.reset()
     model(Tensor([[tok]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P).realize()
@@ -223,7 +236,7 @@ if __name__ == "__main__":
 
   tokenizer = Tokenizer(str((args.model if args.model.is_dir() else args.model.parent) / "tokenizer.model"))
   def encode_role(role: str):
-    return [tokenizer.special_tokens["<|start_header_id|>"]] + tokenizer.encode(role) + [tokenizer.special_tokens["<|end_header_id|>"]] + tokenizer.encode("\n\n")
+    return [tokenizer.special_tokens["<|start_header_id|>"]] + tokenizer.encode(role) + [tokenizer.special_tokens["<|end_header_id|>"]] + tokenizer.encode(r"\n\n")
   def encode_message(role: str, content: str):
     return encode_role(role) + tokenizer.encode(content.strip()) + [tokenizer.special_tokens["<|eot_id|>"]]
 
@@ -231,7 +244,7 @@ if __name__ == "__main__":
   model = build_transformer(args.model, model_size=args.size, quantize=args.quantize, device=device)
   param_bytes = sum(x.lazydata.size * x.dtype.itemsize for x in get_parameters(model))
 
-  if not args.no_api:
+  if not args.no_api and not args.benchmark:
     from bottle import Bottle, request, response, HTTPResponse, abort, static_file
     app = Bottle()
 
@@ -280,7 +293,7 @@ if __name__ == "__main__":
 
       toks = [tokenizer.bos_id] + tokenizer.encode(rjson.get("prompt", ""), allow_special=True)
 
-      start_pos = prefill(model, toks)
+      start_pos = prefill(model, toks[:-1])
       last_tok = toks[-1]
       while True:
         GlobalCounters.reset()
@@ -298,6 +311,7 @@ if __name__ == "__main__":
 
     @app.post("/v1/chat/completions")
     def chat_completions():
+      global last_seen_toks
       rjson = json.loads(request.body.read())
       if "messages" not in rjson: abort(400, "messages required")
 
@@ -318,11 +332,13 @@ if __name__ == "__main__":
 
       start_pos = prefill(model, toks[:-1])
       last_tok = toks[-1]
+      last_seen_toks.append(last_tok)
       while True:
         GlobalCounters.reset()
         tok = model(Tensor([[last_tok]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P).item()
         start_pos += 1
         last_tok = tok
+        last_seen_toks.append(tok)
         if tok in tokenizer.stop_tokens: break
 
         res = {
@@ -353,12 +369,13 @@ if __name__ == "__main__":
         }]
       }
       yield f"data: {json.dumps(res)}\n\n"
+      print(last_seen_toks, file=sys.stderr)
 
     app.run(host=args.host, port=args.port, debug=args.debug)
   elif args.benchmark:
     toks = [tokenizer.bos_id] + encode_message("user", "Hello.") + encode_role("assistant")
 
-    start_pos = prefill(model, toks)
+    start_pos = prefill(model, toks[:-1])
     last_tok = toks[-1]
     generated = ""
     for _ in range(20):
@@ -375,16 +392,16 @@ if __name__ == "__main__":
       last_tok = tok
       generated += tokenizer.decode([tok])
       print(generated)
-    assert generated == "Hello! How can I assist you today? If you have any questions, need information, or require", f"{generated=}"
-    print("\n" + colored("output validated", "green"))  # NOTE: "\n" iside colored does not render the color in github action
+    assert generated == "Hello! How can I assist you today? If you have any questions or need help with something,", f"{generated=}"
+    print("\n" + colored("output validated", "green"))  # NOTE: "\n" inside colored does not render the color in github action
   else:
-    prompt = [tokenizer.bos_id] + encode_message("system", "You are an *emotive* assistant.")
+    prompt = [tokenizer.bos_id] + encode_message("system", "You are an helpful assistant.")
 
     start_pos = prefill(model, prompt)
     while True:
       toks = encode_message("user", input("Q: ")) + encode_role("assistant")
 
-      start_pos = prefill(model, toks, start_pos=start_pos)
+      start_pos = prefill(model, toks[:-1], start_pos=start_pos)
       last_tok = toks[-1]
       while True:
         GlobalCounters.reset()
