@@ -34,7 +34,7 @@ class PTXRenderer(Renderer):
   gdim = [f'%nctaid.{chr(120+i)}' for i in range(3)]
   lid = [f'%tid.{chr(120+i)}' for i in range(3)]
   asm_for_op: Dict[Op, Callable] = {
-    UnaryOps.NEG: lambda d,a,dt,name: f"not.pred {d}, {a};" if name == "pred" else f"neg.{name} {d}, {a};",
+    UnaryOps.NEG: lambda d,a,dt,name,uint: f"not.pred {d}, {a};" if name == "pred" else f"neg.{name} {d}, {a};" if not uint else f"sub.{name} {d}, 0, {a};",
     UnaryOps.RECIP: lambda d,a,dt,name: f"rcp{'.approx' if dtypes.is_float(dt) else ''}.{name} {d}, {a};",
     UnaryOps.EXP2: lambda d,a,dt,name: f"ex2.approx.{name} {d}, {a};", UnaryOps.LOG2: lambda d,a,dt,name: f"lg2.approx.{name} {d}, {a};",
     UnaryOps.SIN: lambda d,a,dt,name: f"sin.approx.{name} {d}, {a};", UnaryOps.SQRT: lambda d,a,dt,name: f"sqrt.approx.{name} {d}, {a};",
@@ -49,10 +49,6 @@ class PTXRenderer(Renderer):
     TernaryOps.MULACC: lambda d,a,b,c,dt,name: f"{'fma.rn' if dtypes.is_float(dt) else 'mad.lo'}.{name} {d}, {a}, {b}, {c};",
     TernaryOps.WHERE: lambda d,a,b,c,dt,name:
       f"@{a} mov.{name} {d}, {b};\n@!{a} mov.{name} {d}, {c};" if name == "pred" else f"selp.{'b16' if name == 'f16' else name} {d}, {b}, {c}, {a};"
-  }
-
-  asm_for_op_uint: Dict[Op, Callable] = {
-      UnaryOps.NEG: lambda d,a,dt,name: f"not.pred {d}, {a};" if name == "pred" else f"sub.{name} {d}, 0, {a};",
   }
 
   supports_half: List[Op] = [UnaryOps.NEG, UnaryOps.EXP2, BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPLT,
@@ -165,8 +161,9 @@ class PTXRenderer(Renderer):
             # pass in the other dtype here
             kk(self.asm_for_op[args](ssa("alu", u), *[r[x] for x in vin], vin[0].dtype, self.types[vin[0].dtype]))
           else:
-            if args is UnaryOps.NEG and vin[0].dtype in [dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64]:
-              kk(self.asm_for_op_uint[args](ssa("alu", u), *[r[x] for x in vin], dtype, self.types[dtype]))
+            if args is UnaryOps.NEG:
+              unsigned = vin[0].dtype in [dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64]
+              kk(self.asm_for_op[args](ssa("alu", u), *[r[x] for x in vin], dtype, self.types[dtype], unsigned))
             else:
               kk(self.asm_for_op[args](ssa("alu", u), *[r[x] for x in vin], dtype, self.types[dtype]))
         elif uop is UOps.DEFINE_ACC:

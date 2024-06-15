@@ -2537,7 +2537,7 @@ class Tensor:
   def __neg__(self) -> Tensor: return self.neg()
 
   def __add__(self, x) -> Tensor: return self.add(x)
-  def __sub__(self, x) -> Tensor: return self.add(-x)
+  def __sub__(self, x) -> Tensor: return self.sub(x)
   def __mul__(self, x) -> Tensor: return self.mul(x)
   def __pow__(self, x) -> Tensor: return self.pow(x)
   def __truediv__(self, x) -> Tensor: return self.div(x)
@@ -2547,7 +2547,7 @@ class Tensor:
   def __rshift__(self, x) -> Tensor: return self.rshift(x)
 
   def __radd__(self, x) -> Tensor: return self.add(x, True)
-  def __rsub__(self, x) -> Tensor: return -self.add(-x, True)
+  def __rsub__(self, x) -> Tensor: return self.sub(x, True)
   def __rmul__(self, x) -> Tensor: return self.mul(x, True)
   def __rpow__(self, x) -> Tensor: return self.pow(x, True)
   def __rtruediv__(self, x) -> Tensor: return self.div(x, True)
@@ -2555,7 +2555,7 @@ class Tensor:
   def __rxor__(self, x) -> Tensor: return self.xor(x, True)
 
   def __iadd__(self, x) -> Tensor: return self.assign(self.add(x))
-  def __isub__(self, x) -> Tensor: return self.assign(self.add(-x))
+  def __isub__(self, x) -> Tensor: return self.assign(self.sub(x))
   def __imul__(self, x) -> Tensor: return self.assign(self.mul(x))
   def __ipow__(self, x) -> Tensor: return self.assign(self.pow(x))
   def __itruediv__(self, x) -> Tensor: return self.assign(self.div(x))
