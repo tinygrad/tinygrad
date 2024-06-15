@@ -1784,7 +1784,7 @@ class TestOps(unittest.TestCase):
                                        lambda x,y: x.binary_crossentropy_logits(y.clip(0,1)))
 
   def test_one_hot(self):
-    data = [13, 24, 45]
+    data = [1, 2, 4]
     helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data), 6).type(torch.int32),
                        lambda: Tensor(data).one_hot(6), forward_only=True)
     data = [[[1, 2, 3], [0, 3, 5]], [[1, 2, 3], [0, 3, 5]]]
