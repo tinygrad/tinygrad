@@ -50,7 +50,6 @@ class PTXRenderer(Renderer):
     TernaryOps.WHERE: lambda d,a,b,c,dt,name:
       f"@{a} mov.{name} {d}, {b};\n@!{a} mov.{name} {d}, {c};" if name == "pred" else f"selp.{'b16' if name == 'f16' else name} {d}, {b}, {c}, {a};"
   }
-
   supports_half: List[Op] = [UnaryOps.NEG, UnaryOps.EXP2, BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPLT,
                              TernaryOps.WHERE]
   # HACK: Use s16 and u16 for int8 and uint8 buffers. This can be wrong in cast.
