@@ -83,7 +83,7 @@ class UPat:
   arg: Any = None
   vin: UPatVin = None
   name: Optional[str] = None
-  dtype: UPatDType = None
+  dtype: Optional[Union[DType, Set[DType]]] = None
   allow_len: Set[int] = field(default_factory=set)
 
   @staticmethod
@@ -101,7 +101,7 @@ class UPat:
   @staticmethod
   def where(gate: UPat, a: UPat, b: UPat, name: Optional[str] = None): return UPat.alu(TernaryOps.WHERE, (gate, a, b), name)
   @staticmethod
-  def range(start: Optional[UPat], end: Optional[UPat], name:Optional[str]=None):
+  def range(start: Optional[UPat] = None, end: Optional[UPat] = None, name:Optional[str]=None):
     # mypy workaround
     if start is not None and end is not None: return UPat(UOps.RANGE, None, (start, end), name)
     assert start is None and end is None, 'either both start and end should be specified, or both should be None'
@@ -112,7 +112,6 @@ class UPat:
   def __add__(self, x): return UPat.alu(BinaryOps.ADD, [self, upatfix(x, self.dtype)])
   def __sub__(self, x): return UPat.alu(BinaryOps.SUB, (self, upatfix(x, self.dtype)))
   def __mul__(self, x): return UPat.alu(BinaryOps.MUL, [self, upatfix(x, self.dtype)])
-  def __rmul__(self, x): return UPat.alu(BinaryOps.MUL, [upatfix(x, self.dtype), self])
   def __floordiv__(self, x): return UPat.alu(BinaryOps.IDIV, (self, upatfix(x, self.dtype)))
   def __truediv__(self, x): return self * upatfix(x, self.dtype).recip()
   def __lt__(self, x): return UPat.alu(BinaryOps.CMPLT, (self, upatfix(x, self.dtype)))
@@ -182,15 +181,11 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst):
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
   # arange loop folding (early)
-  (UPat.where(
-    UPat.var("idx") + UPat.cvar("mval") * UPat.range(UPat.var("loop_start"), UPat.var("loop_end")) < UPat.cvar("compval"),
-    UPat.cvar("multconst"),
-    UPat.const(0)
-  ), loop_collapse),
+  (UPat.where(UPat.var("idx") + UPat.cvar("mval") * UPat.range(UPat.var("loop_start"), UPat.var("loop_end")) < UPat.cvar("compval"),
+    UPat.cvar("multconst"), UPat.const(0)), loop_collapse),
   # sum collapse to mul (with possible GEP)
-  (UPat(UOps.PHI, vin=(UPat(UOps.DEFINE_ACC, name="phi_input", vin=(UPat(UOps.RANGE, name="loop"),)), UPat.var("val1") + UPat.var("val2"))),
-                                                                                                                                        sum_collapse),
-  (UPat(UOps.PHI, vin=(UPat(UOps.GEP, name="phi_input", vin=(UPat(UOps.DEFINE_ACC, vin=(UPat(UOps.RANGE, name="loop"),)),)),
+  (UPat(UOps.PHI, vin=(UPat(UOps.DEFINE_ACC, name="phi_input", vin=(UPat.range(name="loop"),)), UPat.var("val1") + UPat.var("val2"))), sum_collapse),
+  (UPat(UOps.PHI, vin=(UPat(UOps.GEP, name="phi_input", vin=(UPat(UOps.DEFINE_ACC, vin=(UPat.range(name="loop"),)),)),
                        UPat.var("val1") + UPat.var("val2"))), sum_collapse),
   # deal with UNMUL
   (UPat.cvar("c1") * UPat(UOps.UNMUL, vin=[UPat.cvar("c2"), UPat.var("v")]), lambda c1,c2,v: v if c1.arg == c2.arg else None),
@@ -215,8 +210,8 @@ constant_folder = PatternMatcher([
   (-(-UPat.var('x')), lambda x: x),
   # x+-y -> x-y
   (UPat.var('x')+(-UPat.var('y')), lambda x, y: x-y),
-  # -1*x -> -x
-  (-1*UPat.var('x'), lambda x: -x),
+  # x*-1 -> -x
+  (UPat.var('x')*-1, lambda x: -x),
   # bool < False is always false, True < bool is always false
   (UPat(dtype=dtypes.bool) < UPat.const(False), lambda: UOp.const(dtypes.bool, False)),
   (UPat.const(True) < UPat(dtype=dtypes.bool), lambda: UOp.const(dtypes.bool, False)),
