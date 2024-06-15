@@ -286,3 +286,7 @@ p {
   font-weight: 400;
   font-style: normal;
 }
+
+.monospace {
+  font-family: monospace;
+}
