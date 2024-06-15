@@ -93,9 +93,9 @@ class UPat:
   @staticmethod
   def alu(op = None, vin: UPatVin = None, name:Optional[str]=None): return UPat(UOps.ALU, op, vin, name)
   @staticmethod
-  def load(vin: UPatVin = None, name: Optional[str] = None, dtype: UPatDType = None): return UPat(UOps.LOAD, vin=vin, name=name, dtype=dtype)
+  def load(*vin: UPat, name: Optional[str] = None, dtype: UPatDType = None): return UPat(UOps.LOAD, vin=tuple(vin), name=name, dtype=dtype)
   @staticmethod
-  def store(vin: UPatVin = None, name: Optional[str] = None, dtype: UPatDType = None): return UPat(UOps.STORE, vin=vin, name=name, dtype=dtype)
+  def store(*vin: UPat, name: Optional[str] = None, dtype: UPatDType = None): return UPat(UOps.STORE, vin=tuple(vin), name=name, dtype=dtype)
   @staticmethod
   def where(gate: UPat, a: UPat, b: UPat, name: Optional[str] = None): return UPat.alu(TernaryOps.WHERE, (gate, a, b), name)
 
@@ -235,7 +235,7 @@ constant_folder = PatternMatcher([
   (UPat.var('x') * UPat.const(0, name='c'), lambda x,c: x if isinstance(x.arg, float) and math.isnan(x.arg) else c),
   (UPat.var('x') - UPat.var('x'), lambda x: UOp.const(x.dtype, 0)),
   # ** load/store folding **
-  (UPat.store((UPat.var('buf'), UPat.var('idx'), UPat.load((UPat.var('buf'), UPat.var('idx'))))), lambda buf, idx: UOp(UOps.NOOP)),
+  (UPat.store(UPat.var('buf'), UPat.var('idx'), UPat.load(UPat.var('buf'), UPat.var('idx'))), lambda buf, idx: UOp(UOps.NOOP)),
   # ** two stage add/sub folding **
   (UPat(UOps.ALU, BinaryOps.ADD, [UPat(UOps.ALU, BinaryOps.ADD, [UPat(name="x"), UPat(UOps.CONST, name="c1")]), UPat(UOps.CONST, name="c2")]),
      lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, [c1.arg, c2.arg]))),
@@ -257,14 +257,12 @@ constant_folder = PatternMatcher([
   (UPat(UOps.ALU, BinaryOps.ADD, [UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c0"), UPat(name="x")]), UPat(name="x")]),
     lambda x,c0: x*UOp.const(x.dtype, c0.arg+1)),    # (x+x*c0)-> x*(c0+1)
   # TODO: can do the invert of this (flip alt/load) when we fix double ops
-  (UPat.store((UPat.var("buf"), UPat.var("idx"), UPat.where(UPat.var("gate"), UPat.var("alt"), UPat.load((UPat.var("buf"), UPat.var("idx")))))),
+  (UPat.store(UPat.var("buf"), UPat.var("idx"), UPat.where(UPat.var("gate"), UPat.var("alt"), UPat.load(UPat.var("buf"), UPat.var("idx")))),
     lambda buf, idx, gate, alt: UOp(UOps.STORE, None, (buf, idx, alt, gate))),
-  # store float4/float2 directly (remove CAST/GEP)
-  (UPat(UOps.STORE, vin=(UPat(name="buf"), UPat(name="idx"), UPat(UOps.CAST, vin=
-                                tuple(UPat(UOps.GEP, i, vin=(UPat(name="val"),)) for i in range(4))))),
+  # store float4/float2 directly (remove CAST/GEP) (those two probably can be unified)
+  (UPat.store(UPat.var("buf"), UPat.var("idx"), UPat(UOps.CAST, vin=tuple(UPat(UOps.GEP, i, vin=(UPat.var("val"),)) for i in range(4)))),
    lambda buf,idx,val: UOp(UOps.STORE, None, (buf, idx, val))),
-  (UPat(UOps.STORE, vin=(UPat(name="buf"), UPat(name="idx"), UPat(UOps.CAST, vin=
-                                tuple(UPat(UOps.GEP, i, vin=(UPat(name="val"),)) for i in range(2))))),
+  (UPat.store(UPat.var("buf"), UPat.var("idx"), UPat(UOps.CAST, vin=tuple(UPat(UOps.GEP, i, vin=(UPat.var("val"),)) for i in range(2)))),
    lambda buf,idx,val: UOp(UOps.STORE, None, (buf, idx, val))),
   # CAST-PHI-GEP -> PHI-CAST
   (UPat(UOps.CAST, name="root", vin=tuple(UPat(UOps.PHI, vin=(UPat(UOps.GEP, i, vin=(UPat(name="val"),)), UPat(name=f"v{i}"))) for i in range(4))),
