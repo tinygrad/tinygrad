@@ -88,24 +88,27 @@ class UPat:
   allow_len: Set[int] = field(default_factory=set)
 
   @staticmethod
-  def const(val: Optional[Union[int, float]], dtype: Optional[Union[DType, Set[DType]]], name: Optional[str] = None):
+  def var(name: str) -> UPat: return UPat(name=name)
+  @staticmethod
+  def const(val: Optional[Union[int, float]] = None, dtype: Optional[Union[DType, Set[DType]]] = None, name: Optional[str] = None):
     return UPat(UOps.CONST, val, name=name, dtype=dtype)
   @staticmethod
-  def var(name: str) -> UPat: return UPat(name=name)
+  def alu(op = None, vin: Optional[Union[Tuple[UPat, ...], List[UPat], UPat]] = None, name:Optional[str]=None):
+    return UPat(UOps.ALU, op, vin, name)
 
   def nm(self, name: Optional[str]) -> UPat: return UPat(self.uop, self.arg, self.vin, name, self.dtype, self.allow_len)
-  def recip(self, name:Optional[str]=None): return UPat(UOps.ALU, UnaryOps.RECIP, self, name, self.dtype)
-  def __add__(self, x): return UPat(UOps.ALU, BinaryOps.ADD, [self, upatfix(x, self.dtype)], None, self.dtype)
-  def __radd__(self, x): return UPat(UOps.ALU, BinaryOps.ADD, [upatfix(x, self.dtype), self], None, self.dtype)
-  def __sub__(self, x): return UPat(UOps.ALU, BinaryOps.SUB, (self, upatfix(x, self.dtype)), None, self.dtype)
-  def __rsub__(self, x): return UPat(UOps.ALU, BinaryOps.SUB, (upatfix(x, self.dtype), self), None, self.dtype)
-  def __neg__(self): return UPat(UOps.ALU, UnaryOps.NEG, self, None, self.dtype)
-  def __mul__(self, x): return UPat(UOps.ALU, BinaryOps.MUL, [self, upatfix(x, self.dtype)], None, self.dtype)
-  def __rmul__(self, x): return UPat(UOps.ALU, BinaryOps.MUL, [upatfix(x, self.dtype), self], None, self.dtype)
-  def __truediv__(self, x): return UPat(UOps.ALU, BinaryOps.MUL, [self, upatfix(x, self.dtype).recip()], None, self.dtype)
-  def __rtruediv__(self, x): return UPat(UOps.ALU, BinaryOps.MUL, [upatfix(x, self.dtype), self.recip()], None, self.dtype)
-  def __floordiv__(self, x): return UPat(UOps.ALU, BinaryOps.IDIV, (self, upatfix(x, self.dtype)), None, self.dtype)
-  def __rfloordiv__(self, x): return UPat(UOps.ALU, BinaryOps.IDIV, (upatfix(x, self.dtype), self), None, self.dtype)
+  def recip(self, name:Optional[str]=None): return UPat.alu(UnaryOps.RECIP, self, name=name)
+  def __neg__(self): return UPat.alu(UnaryOps.NEG, self)
+  def __add__(self, x): return UPat.alu(BinaryOps.ADD, [self, upatfix(x, self.dtype)])
+  def __radd__(self, x): return UPat.alu(BinaryOps.ADD, [upatfix(x, self.dtype), self])
+  def __sub__(self, x): return UPat.alu(BinaryOps.SUB, (self, upatfix(x, self.dtype)))
+  def __rsub__(self, x): return UPat.alu(BinaryOps.SUB, (upatfix(x, self.dtype), self))
+  def __mul__(self, x): return UPat.alu(BinaryOps.MUL, [self, upatfix(x, self.dtype)])
+  def __rmul__(self, x): return UPat.alu(BinaryOps.MUL, [upatfix(x, self.dtype), self])
+  def __floordiv__(self, x): return UPat.alu(BinaryOps.IDIV, (self, upatfix(x, self.dtype)))
+  def __rfloordiv__(self, x): return UPat.alu(BinaryOps.IDIV, (upatfix(x, self.dtype), self))
+  def __truediv__(self, x): return self * upatfix(x, self.dtype).recip()
+  def __rtruediv__(self, x): return self.recip() * upatfix(x, self.dtype)
 
 T = TypeVar("T")
 def __unmatch(m1:Union[T, Set[T]], m2:T) -> bool:
@@ -214,7 +217,7 @@ constant_folder = PatternMatcher([
   (UPat(UOps.ALU, TernaryOps.WHERE, (UPat(), UPat(name="val"), UPat(name="val"))), lambda val: val),
   (UPat(UOps.ALU, TernaryOps.WHERE, (UPat(UOps.CONST, name="gate"), UPat(name="c0"), UPat(name="c1"))), lambda gate, c0, c1: c0 if gate.arg else c1),
   # ** constant folding **
-  (UPat(UOps.ALU, name="root", vin=UPat(UOps.CONST)), lambda root: UOp.const(root.dtype, exec_alu(root.arg, root.dtype, [x.arg for x in root.vin]))),
+  (UPat.alu(vin=UPat.const(), name='root'), lambda root: UOp.const(root.dtype, exec_alu(root.arg, root.dtype, [x.arg for x in root.vin]))),
   # ** self folding **
   (UPat.var('x')+0, lambda x: x),
   (UPat.var('x')-0, lambda x: x),
@@ -224,9 +227,8 @@ constant_folder = PatternMatcher([
   # ** zero folding **
   #x*0 -> 0 or 0*x -> 0
   #if x is nan it should render the nan value.
-  (UPat(UOps.ALU, BinaryOps.MUL, [UPat(name="x"), UPat(UOps.CONST, 0, name="c")]),
-     lambda x,c: x if isinstance(x.arg, float) and math.isnan(x.arg) else c),
-  (UPat(UOps.ALU, BinaryOps.SUB, (UPat(name="x"), UPat(name="x"))), lambda x: UOp.const(x.dtype, 0)),   # x-x -> 0
+  (UPat.var('x') * UPat.const(0, name='c'), lambda x,c: x if isinstance(x.arg, float) and math.isnan(x.arg) else c),
+  (UPat.var('x') - UPat.var('x'), lambda x: UOp.const(x.dtype, 0)),
   # ** load/store folding **
   (UPat(UOps.STORE, vin=(UPat(name="buf"), UPat(name="idx"),
                                UPat(UOps.LOAD, vin=(UPat(name="buf"), UPat(name="idx"))))), lambda buf, idx: UOp(UOps.NOOP)),
