@@ -3,7 +3,6 @@ from typing import Iterator, Optional, Tuple, Any, Dict, List, DefaultDict, Set,
 import functools, itertools, heapq, math
 from collections import defaultdict
 from enum import Enum, auto
-import itertools
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, DType
 from tinygrad.shape.symbolic import sint, Variable

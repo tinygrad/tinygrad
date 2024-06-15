@@ -7,7 +7,7 @@ from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, BinaryOps, UnaryOps
 from tinygrad.codegen.uops import UOp, UOpGraph, UOps
 from tinygrad.renderer import Program
-from tinygrad.helpers import to_function_name, colored, DEBUG, getenv
+from tinygrad.helpers import to_function_name, colored, DEBUG, getenv, prod
 
 def _uop_view(view:View, idxs:List[UOp], vexpr:UOp) -> Tuple[UOp, UOp]:
   # TODO: dtypes.realint
@@ -29,6 +29,17 @@ def st_to_uops(st:ShapeTracker, idxs:Iterable[UOp]) -> Tuple[UOp, UOp]:
       acc *= d
     idx, valid = _uop_view(view, idxs[::-1], valid)
   return idx, valid
+
+def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0):
+  local_idxs = loop_local_idxs = [UOp(UOps.SPECIAL, dtypes.int32, (), (i, f"{prefix}{start_dim+i}", s)) for i,s in enumerate((prod(local_dims[:-(maxdim-1)]),) + local_dims[-(maxdim-1):] if len(local_dims) > maxdim else local_dims)]  # noqa: E501
+  if maxdim != 0 and len(local_dims) > maxdim:
+    dd = local_idxs[0]
+    nli = []
+    for s in local_dims[:-(maxdim-1)]:
+      nli.append(dd % s)
+      dd //= s
+    local_idxs = nli + local_idxs[-(maxdim-1):]
+  return local_idxs, loop_local_idxs
 
 def get_reduce_acc(reduceop:LazyOp):
   if reduceop.op is ReduceOps.SUM: return 0.0 if dtypes.is_float(reduceop.dtype) else 0
@@ -71,24 +82,17 @@ class Lowerer(Kernel):
     self.idxs = []
 
     # for clang
-    """
-    for i,g in enumerate(self.full_shape):
-      self.idxs.append(UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), UOp.const(dtypes.int32, g)), (i,0)))
-    self.global_size, self.local_size = None, None
-    """
+    global_idxs, loop_global_idxs = get_grouped_dims("gidx", 0, self.full_shape[:self.global_dims], 3 if self.opts.has_local else 0)
+    local_idxs, loop_local_idxs = get_grouped_dims("lidx", self.global_dims, self.full_shape[self.global_dims:self.first_reduce+self.group_for_reduces], 3 if self.opts.has_local else 0)  # noqa: E501
+    self.idxs = global_idxs + local_idxs
 
-    # TODO: why is this middle name arg here?
-    for i,g in enumerate(self.full_shape[:self.global_dims]):
-      self.idxs.append(UOp(UOps.SPECIAL, dtypes.int32, (), (self.global_dims-1-i, f"gidx{i}", g)))
-    for i,g in enumerate(self.full_shape[self.global_dims:self.global_dims+self.local_dims]):
-      self.idxs.append(UOp(UOps.SPECIAL, dtypes.int32, (), (self.local_dims-1-i, f"lidx{i}", g)))
     for i,g in enumerate(self.full_shape[self.first_reduce:]):
       unrolled = (self.first_reduce+i) >= (self.shape_len-self.upcasted)
       #if i == 0: unrolled = False
       self.idxs.append(UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), UOp.const(dtypes.int32, g)), (i,unrolled)))
 
-    self.global_size = list(self.full_shape[:self.global_dims][::-1])
-    self.local_size = list(self.full_shape[self.global_dims:self.global_dims+self.local_dims][::-1])
+    self.global_size = [x.arg[2] for x in loop_global_idxs]
+    self.local_size = [x.arg[2] for x in loop_local_idxs]
     self.global_size += [1]*(3-len(self.global_size))
     self.local_size += [1]*(3-len(self.local_size))
 
