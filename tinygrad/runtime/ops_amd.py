@@ -76,19 +76,22 @@ class AMDCompiler(Compiler):
     except RuntimeError as e: raise CompileError(e)
 
 class HWPM4Queue:
-  def __init__(self): self.q, self.binded_device, self.ptr_to_dispatch_packet = [], None, {}
+  def __init__(self): self.q, self.binded_device, self.cmd_offsets, self.ptr_to_dispatch_packet = [], None, [], {}
   def __del__(self):
     if self.binded_device is not None:
       self.binded_device.synchronize()
       self.binded_device._gpu_free(self.hw_page)
 
-  def ptr(self) -> int: return len(self.q)
+  def __len__(self): return len(self.cmd_offsets)
+  def _mark_command_end(self): self.cmd_offsets.append(len(self.q))
+
+  # def ptr(self) -> int: return len(self.q)
 
   def memory_barrier(self):
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_WAIT_REG_MEM, 5), amd_gpu.WAIT_REG_MEM_MEM_SPACE(0) | amd_gpu.WAIT_REG_MEM_OPERATION(1) | \
       amd_gpu.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_EQ) | amd_gpu.WAIT_REG_MEM_ENGINE(0), nbioreg(regBIF_BX_PF1_GPU_HDP_FLUSH_REQ),
       nbioreg(regBIF_BX_PF1_GPU_HDP_FLUSH_DONE), 0xffffffff, 0xffffffff, 0x20]
-    return self.invalidate_cache()
+    return self.invalidate_cache()._mark_command_end()
 
   def invalidate_cache(self, addr=0x0, sz=(1 << 64)-1, gli=1, glm=1, glk=1, glv=1, gl1=1, gl2=1):
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_ACQUIRE_MEM, 6), 0, #0x80000000,
@@ -127,7 +130,7 @@ class HWPM4Queue:
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_EVENT_WRITE, 0), amd_gpu.EVENT_TYPE(7) | amd_gpu.EVENT_INDEX(4)]
 
     if signal is not None: self.signal(signal, signal_value)
-    return self
+    return self._mark_command_end()
 
   def update_exec(self, cmd_ptr, global_size, local_size):
     # Patch the exec cmd with new launch dims
@@ -144,6 +147,12 @@ class HWPM4Queue:
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_WAIT_REG_MEM, 5),
       amd_gpu.WAIT_REG_MEM_MEM_SPACE(1) | amd_gpu.WAIT_REG_MEM_OPERATION(0) | amd_gpu.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_GEQ) | \
       amd_gpu.WAIT_REG_MEM_ENGINE(0), addr&0xFFFFFFFF, addr>>32, value, 0xffffffff, 4]
+    return self._mark_command_end()
+
+  def update_wait(self, cmd_ptr, signal=None, value=None):
+    if signal is not None:
+      self.q[(sigoff:=self.cmd_offsets[cmd_ptr]+1):sigoff+2] = array.array('I', [*data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET)])
+    if value is not None: self.q[self.cmd_offsets[cmd_ptr]+3] = array.array('I', [*data64_le(value)])
     return self
 
   def _release_mem(self, mem_event_type, mem_data_sel, mem_int_sel, address, value=0, cst=0, cache_flush=False):
@@ -163,7 +172,7 @@ class HWPM4Queue:
 
   def timestamp(self, addr):
     self._release_mem(CACHE_FLUSH_AND_INV_TS_EVENT, mem_data_sel=3, mem_int_sel=0, address=addr)
-    return self
+    return self._mark_command_end()
 
   def signal(self, signal:hsa.amd_signal_t, value=0):
     # NOTE: this needs an EOP buffer on the queue or it will NULL pointer
@@ -172,6 +181,12 @@ class HWPM4Queue:
     if signal.event_mailbox_ptr != 0:
       self._release_mem(CACHE_FLUSH_AND_INV_TS_EVENT, mem_data_sel=1, mem_int_sel=2, address=signal.event_mailbox_ptr,
                         value=signal.event_id, cst=signal.event_id, cache_flush=True)
+    return self._mark_command_end()
+
+  def update_signal(self, cmd_ptr, signal=None, value=None):
+    if signal is not None:
+      self.q[(sigoff:=self.cmd_offsets[cmd_ptr]+3):sigoff+2] = array.array('I', [*data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET)])
+    if value is not None: self.q[(sigoff:=self.cmd_offsets[cmd_ptr]+5):sigoff+2] = array.array('I', [*data64_le(value)])
     return self
 
   def bind(self, device: AMDDevice):
@@ -197,11 +212,12 @@ class HWPM4Queue:
 
 SDMA_MAX_COPY_SIZE = 0x400000
 class HWCopyQueue:
-  def __init__(self): self.q, self.cmd_sizes = [], []
+  def __init__(self): self.q, self.cmd_sizes, self.cmd_offsets = [], [], []
 
   def _q(self, arr):
     self.q += arr
-    self.cmd_sizes.append(len(arr))
+    self.cmd_sizes.append(len(self.q)) # TODO: remove
+    self.cmd_offsets.append(len(self.q))
 
   def copy(self, dest, src, copy_size):
     # Invalidate cache inv
@@ -237,6 +253,12 @@ class HWCopyQueue:
       amd_gpu.SDMA_PKT_POLL_REGMEM_HEADER_MEM_POLL(1), *data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET), value, 0xffffffff,
       amd_gpu.SDMA_PKT_POLL_REGMEM_DW5_INTERVAL(0x04) | amd_gpu.SDMA_PKT_POLL_REGMEM_DW5_RETRY_COUNT(0xfff)])
 
+    return self
+
+  def update_wait(self, cmd_ptr, signal=None, value=None):
+    if signal is not None:
+      self.q[(sigoff:=self.cmd_offsets[cmd_ptr]+1):sigoff+2] = array.array('I', [*data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET)])
+    if value is not None: self.q[self.cmd_offsets[cmd_ptr]+3] = value
     return self
 
   def submit(self, device:AMDDevice):
