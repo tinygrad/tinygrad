@@ -188,11 +188,10 @@ constant_folder = PatternMatcher([
       vin=[UPat(UOps.CONST, name="mval"), UPat(UOps.RANGE, vin=(UPat(name="loop_start"), UPat(name="loop_end")))])]),
       UPat(UOps.CONST, name="compval"))), UPat(UOps.CONST, name="multconst"), UPat(UOps.CONST, 0))), loop_collapse),
   # sum collapse to mul (with possible GEP)
-  (UPat(UOps.PHI, vin=(UPat(UOps.DEFINE_ACC, name="phi_input", vin=(UPat(UOps.RANGE, name="loop"),)),
-      UPat(UOps.ALU, BinaryOps.ADD, vin=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
-  (UPat(UOps.PHI, vin=(UPat(UOps.GEP, name="phi_input",
-                            vin=(UPat(UOps.DEFINE_ACC, vin=(UPat(UOps.RANGE, name="loop"),)),)),
-      UPat(UOps.ALU, BinaryOps.ADD, vin=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
+  (UPat(UOps.PHI, vin=(UPat(UOps.DEFINE_ACC, name="phi_input", vin=(UPat(UOps.RANGE, name="loop"),)), UPat.var("val1") + UPat.var("val2"))),
+                                                                                                                                        sum_collapse),
+  (UPat(UOps.PHI, vin=(UPat(UOps.GEP, name="phi_input", vin=(UPat(UOps.DEFINE_ACC, vin=(UPat(UOps.RANGE, name="loop"),)),)),
+                       UPat.var("val1") + UPat.var("val2"))), sum_collapse),
   # deal with UNMUL
   (UPat.cvar("c1") * UPat(UOps.UNMUL, vin=[UPat.cvar("c2"), UPat.var("v")]), lambda c1,c2,v: v if c1.arg == c2.arg else None),
   (UPat(UOps.UNMUL, vin=(UPat.const(0, name="zero"), UPat())), lambda zero: zero),
