@@ -106,6 +106,7 @@ class UPat:
   def __radd__(self, x): return UPat(UOps.ALU, BinaryOps.ADD, [upatfix(x, self.dtype), self], None, self.dtype)
   def __sub__(self, x): return UPat(UOps.ALU, BinaryOps.SUB, (self, upatfix(x, self.dtype)), None, self.dtype)
   def __rsub__(self, x): return UPat(UOps.ALU, BinaryOps.SUB, (upatfix(x, self.dtype), self), None, self.dtype)
+  def __neg__(self): return UPat(UOps.ALU, UnaryOps.NEG, self, None, self.dtype)
   def __mul__(self, x): return UPat(UOps.ALU, BinaryOps.MUL, [self, upatfix(x, self.dtype)], None, self.dtype)
   def __rmul__(self, x): return UPat(UOps.ALU, BinaryOps.MUL, [upatfix(x, self.dtype), self], None, self.dtype)
   def __truediv__(self, x): return UPat(UOps.ALU, BinaryOps.MUL, [self, upatfix(x, self.dtype).recip()], None, self.dtype)
