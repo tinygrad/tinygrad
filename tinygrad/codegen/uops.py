@@ -194,24 +194,22 @@ constant_folder = PatternMatcher([
                             vin=(UPat(UOps.DEFINE_ACC, vin=(UPat(UOps.RANGE, name="loop"),)),)),
       UPat(UOps.ALU, BinaryOps.ADD, vin=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
   # deal with UNMUL
-  (UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c1"),
-                                                   UPat(UOps.UNMUL, vin=[UPat(UOps.CONST, name="c2"), UPat(name="v")])]),
-                                                   lambda c1,c2,v: v if c1.arg == c2.arg else None),
-  (UPat(UOps.UNMUL, vin=(UPat(UOps.CONST, name="zero", arg=0), UPat())), lambda zero: zero),
+  (UPat.cvar("c1") * UPat(UOps.UNMUL, vin=[UPat.cvar("c2"), UPat.var("v")]), lambda c1,c2,v: v if c1.arg == c2.arg else None),
+  (UPat(UOps.UNMUL, vin=(UPat.const(0, name="zero"), UPat())), lambda zero: zero),
   (UPat(UOps.CAST, name="root", vin=(UPat(UOps.UNMUL, name="unmul"),)),
     lambda root,unmul: UOp(UOps.UNMUL, root.dtype, (unmul.vin[0].cast(root.dtype), unmul.vin[1]))),
   # max on special can go away (TODO: special should be variable, same thing applies)
-  (UPat(UOps.ALU, BinaryOps.MAX, [UPat(UOps.CONST, name="c"), UPat(UOps.SPECIAL, name="s")]), lambda c,s: c if (s.arg[2]-1) <= c.arg else None),
+  (UPat.alu(BinaryOps.MAX, [UPat.cvar("c"), UPat(UOps.SPECIAL, name="s")]), lambda c,s: c if (s.arg[2]-1) <= c.arg else None),
   # const rules
-  (UPat(UOps.GEP, name="root", vin=(UPat(UOps.CONST, name="c"),)), lambda root, c: UOp.const(root.dtype, c.arg)),
-  (UPat(UOps.CAST, name="root", vin=UPat(UOps.CONST, name="c")), lambda root, c: UOp.const(root.dtype, c.arg)),
+  (UPat(UOps.GEP, name="root", vin=(UPat.cvar("c"),)), lambda root, c: UOp.const(root.dtype, c.arg)),
+  (UPat(UOps.CAST, name="root", vin=UPat.cvar("c")), lambda root, c: UOp.const(root.dtype, c.arg)),
   # a phi on a DEFINE_ACC without loops or a CONST is a noop. this is for correctness, not just speed
-  (UPat(UOps.PHI, vin=(UPat(UOps.DEFINE_ACC, name="acc"), UPat(name="acc"))), lambda acc: UOp.const(acc.dtype, acc.arg[0])),
-  (UPat(UOps.PHI, vin=(UPat(UOps.DEFINE_ACC, vin=tuple()), UPat(name="x"))), lambda x: x),
-  (UPat(UOps.PHI, vin=(UPat(UOps.CONST), UPat(name="x"))), lambda x: x),
+  (UPat(UOps.PHI, vin=(UPat(UOps.DEFINE_ACC, name="acc"), UPat.var("acc"))), lambda acc: UOp.const(acc.dtype, acc.arg[0])),
+  (UPat(UOps.PHI, vin=(UPat(UOps.DEFINE_ACC, vin=tuple()), UPat.var("x"))), lambda x: x),
+  (UPat(UOps.PHI, vin=(UPat(UOps.CONST), UPat.var("x"))), lambda x: x),
   # a DEFINE_ACC without inputs is a const + GEP on a const is the const
   (UPat(UOps.DEFINE_ACC, name="root", vin=tuple()), lambda root: UOp.const(root.dtype, root.arg[0])),
-  (UPat(UOps.GEP, name="root", vin=(UPat(UOps.CONST, name="x"),)), lambda root,x: UOp.const(root.dtype, x.arg)),
+  (UPat(UOps.GEP, name="root", vin=(UPat.cvar("x"),)), lambda root,x: UOp.const(root.dtype, x.arg)),
   # max -2147483648
   (UPat.alu(BinaryOps.MAX, [UPat.var("x"), UPat.const(-2147483648, dtypes.int)]), lambda x: x),
   # -(-x) -> x
@@ -255,9 +253,9 @@ constant_folder = PatternMatcher([
   ((UPat.var("x") * UPat.cvar("c0")) // UPat.cvar("c0"), lambda x,c0: x if c0.arg != 0 else None),
   # (x/c0)/c1 -> x/(c0*c1)
   ((UPat.var("x") // UPat.cvar("c0")) // UPat.cvar("c1"), lambda x,c0,c1: x//UOp.const(x.dtype, exec_alu(BinaryOps.MUL, x.dtype, [c0.arg, c1.arg]))),
-  # ???
-  (UPat(UOps.ALU, BinaryOps.CMPLT, (UPat(UOps.ALU, BinaryOps.ADD, [UPat(UOps.CONST, name="c0"), UPat(name="x")]), UPat(UOps.CONST, name="c1"))),
-    lambda x,c0,c1: UOp.alu(BinaryOps.CMPLT, x, UOp.const(x.dtype, exec_alu(BinaryOps.SUB, x.dtype, [c1.arg, c0.arg])))),
+  # c0 + x < c1 -> x < c1 - c0
+  (UPat.cvar("c0") + UPat.var("x") < UPat.cvar("c1"),
+   lambda x,c0,c1: UOp.alu(BinaryOps.CMPLT, x, UOp.const(x.dtype, exec_alu(BinaryOps.SUB, x.dtype, [c1.arg, c0.arg])))),
   # (x+x*c0)-> x*(c0+1)
   (UPat.var("x") + UPat.var("x") * UPat.cvar("c0"), lambda x,c0: x*UOp.const(x.dtype, c0.arg+1)),
   # TODO: can do the invert of this (flip alt/load) when we fix double ops
