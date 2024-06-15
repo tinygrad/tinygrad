@@ -2,7 +2,7 @@ import math
 from typing import Union, Tuple
 
 from tinygrad import Tensor, nn, dtypes
-from tinygrad.helpers import prod, argfix, getenv
+from tinygrad.helpers import prod, argfix, getenv, all_int
 
 # rejection sampling truncated randn
 def rand_truncn(*shape, dtype=None, truncstds=2, **kwargs) -> Tensor:
@@ -41,9 +41,7 @@ class LinearBert(nn.Linear):
     self.bias = Tensor.zeros(out_features, dtype=dtypes.float32) if bias else None
   
   def __call__(self, x:Tensor):
-    matmul_dtype = dtypes.half if getenv("HALF_LINEAR", 0) else dtypes.default_float
-    # TODO: Remove contiguous once slow kernel compile without this contiguous is fixed
-    return x.contiguous().cast(matmul_dtype).linear(self.weight.contiguous().cast(matmul_dtype).transpose(), self.bias.cast(dtypes.default_float) if self.bias is not None else None)
+    return x.cast(dtypes.default_float).linear(self.weight.cast(dtypes.default_float).transpose(), self.bias.cast(dtypes.default_float) if self.bias is not None else None)
 
 class EmbeddingBert(nn.Embedding):
   def __init__(self, vocab_size:int, embed_size:int, std=0.02):
@@ -68,3 +66,11 @@ class LayerNormBert:
     xn = x.cast(dtypes.float32).layernorm(eps=self.eps, axis=self.axis).cast(x.dtype)
     if not self.elementwise_affine: return xn
     return (xn * self.weight.cast(dtypes.default_float) + self.bias.cast(dtypes.default_float))
+
+def scaled_dot_product_attention_bert(query:Tensor, key:Tensor, value:Tensor, attn_mask:Tensor=None, dropout_p:float=0.0, is_causal:bool=False):
+  assert all_int(query.shape), f"does not support symbolic shape {query.shape}"
+  if is_causal: attn_mask = Tensor.ones(query.shape[-2], key.shape[-2], requires_grad=False, device=query.device).tril(0).cast(dtypes.bool)
+  if attn_mask is not None and attn_mask.dtype == dtypes.bool: attn_mask = (attn_mask == 0).where(-float("inf"), 0)
+  # NOTE: During training we get -inf from key @ query, so we cast to float
+  qk = query.cast(dtypes.float32) @ key.cast(dtypes.float32).transpose(-2,-1) / math.sqrt(query.shape[-1])
+  return ((qk+attn_mask.cast(dtypes.float32)) if attn_mask is not None else qk).softmax(-1).cast(dtypes.default_float).dropout(dropout_p) @ value

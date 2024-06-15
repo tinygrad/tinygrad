@@ -9,6 +9,7 @@ from tinygrad.nn.state import get_parameters
 Embedding = nn.Embedding
 Linear = nn.Linear
 LayerNorm = nn.LayerNorm
+scaled_dot_product_attention = Tensor.scaled_dot_product_attention
 
 class BertForQuestionAnswering:
   def __init__(self, hidden_size=1024, intermediate_size=4096, max_position_embeddings=512, num_attention_heads=16, num_hidden_layers=24, type_vocab_size=2, vocab_size=30522, attention_probs_dropout_prob=0.1, hidden_dropout_prob=0.1):
@@ -279,7 +280,7 @@ class BertSelfAttention:
     key_layer = self.transpose_for_scores(mixed_key_layer)
     value_layer = self.transpose_for_scores(mixed_value_layer)
 
-    context_layer = Tensor.scaled_dot_product_attention(query_layer, key_layer, value_layer, attention_mask, self.dropout)
+    context_layer = scaled_dot_product_attention(query_layer, key_layer, value_layer, attention_mask, self.dropout)
 
     context_layer = context_layer.transpose(1, 2)
     context_layer = context_layer.reshape(context_layer.shape[0], context_layer.shape[1], self.all_head_size)
