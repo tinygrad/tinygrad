@@ -95,6 +95,15 @@ class UPat:
   @staticmethod
   def alu(op = None, vin: Optional[Union[Tuple[UPat, ...], List[UPat], UPat]] = None, name:Optional[str]=None):
     return UPat(UOps.ALU, op, vin, name)
+  @staticmethod
+  def load(vin: Optional[Union[Tuple[UPat, ...], List[UPat], UPat]]=None, name:Optional[str]=None, dtype:Optional[Union[DType, Set[DType]]]=None):
+    return UPat(UOps.LOAD, vin=vin, name=name, dtype=dtype)
+  @staticmethod
+  def store(vin: Optional[Union[Tuple[UPat, ...], List[UPat], UPat]]=None, name:Optional[str]=None, dtype:Optional[Union[DType, Set[DType]]]=None):
+    return UPat(UOps.STORE, vin=vin, name=name, dtype=dtype)
+  @staticmethod
+  def where(gate: UPat, a: UPat, b: UPat, name:Optional[str]=None):
+    return UPat.alu(TernaryOps.WHERE, (gate, a, b), name)
 
   def nm(self, name: Optional[str]) -> UPat: return UPat(self.uop, self.arg, self.vin, name, self.dtype, self.allow_len)
   def recip(self, name:Optional[str]=None): return UPat.alu(UnaryOps.RECIP, self, name=name)
@@ -214,8 +223,8 @@ constant_folder = PatternMatcher([
   (UPat(UOps.ALU, BinaryOps.CMPLT, (UPat(), UPat(UOps.CONST, False, name="x", dtype=dtypes.bool))), lambda x: x),
   (UPat(UOps.ALU, BinaryOps.CMPLT, (UPat(UOps.CONST, True, name="x", dtype=dtypes.bool), UPat())), lambda x: UOp.const(dtypes.bool, False)),
   # a conditional with the same results either way is a noop, also fold const conditionals
-  (UPat(UOps.ALU, TernaryOps.WHERE, (UPat(), UPat(name="val"), UPat(name="val"))), lambda val: val),
-  (UPat(UOps.ALU, TernaryOps.WHERE, (UPat(UOps.CONST, name="gate"), UPat(name="c0"), UPat(name="c1"))), lambda gate, c0, c1: c0 if gate.arg else c1),
+  (UPat.where(UPat(), UPat.var("x"), UPat.var("x")), lambda x: x),
+  (UPat.where(UPat.const(name='gate'), UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
   # ** constant folding **
   (UPat.alu(vin=UPat.const(), name='root'), lambda root: UOp.const(root.dtype, exec_alu(root.arg, root.dtype, [x.arg for x in root.vin]))),
   # ** self folding **
@@ -230,8 +239,7 @@ constant_folder = PatternMatcher([
   (UPat.var('x') * UPat.const(0, name='c'), lambda x,c: x if isinstance(x.arg, float) and math.isnan(x.arg) else c),
   (UPat.var('x') - UPat.var('x'), lambda x: UOp.const(x.dtype, 0)),
   # ** load/store folding **
-  (UPat(UOps.STORE, vin=(UPat(name="buf"), UPat(name="idx"),
-                               UPat(UOps.LOAD, vin=(UPat(name="buf"), UPat(name="idx"))))), lambda buf, idx: UOp(UOps.NOOP)),
+  (UPat.store((UPat.var('buf'), UPat.var('idx'), UPat.load((UPat.var('buf'), UPat.var('idx'))))), lambda buf, idx: UOp(UOps.NOOP)),
   # ** two stage add/sub folding **
   (UPat(UOps.ALU, BinaryOps.ADD, [UPat(UOps.ALU, BinaryOps.ADD, [UPat(name="x"), UPat(UOps.CONST, name="c1")]), UPat(UOps.CONST, name="c2")]),
      lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, [c1.arg, c2.arg]))),
@@ -253,8 +261,7 @@ constant_folder = PatternMatcher([
   (UPat(UOps.ALU, BinaryOps.ADD, [UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c0"), UPat(name="x")]), UPat(name="x")]),
     lambda x,c0: x*UOp.const(x.dtype, c0.arg+1)),    # (x+x*c0)-> x*(c0+1)
   # TODO: can do the invert of this (flip alt/load) when we fix double ops
-  (UPat(UOps.STORE, vin=(UPat(name="buf"), UPat(name="idx"), UPat(UOps.ALU, TernaryOps.WHERE,
-                        (UPat(name="gate"), UPat(name="alt"), UPat(UOps.LOAD, vin=(UPat(name="buf"), UPat(name="idx"))))))),
+  (UPat.store((UPat.var("buf"), UPat.var("idx"), UPat.where(UPat.var("gate"), UPat.var("alt"), UPat.load((UPat.var("buf"), UPat.var("idx")))))),
     lambda buf, idx, gate, alt: UOp(UOps.STORE, None, (buf, idx, alt, gate))),
   # store float4/float2 directly (remove CAST/GEP)
   (UPat(UOps.STORE, vin=(UPat(name="buf"), UPat(name="idx"), UPat(UOps.CAST, vin=
