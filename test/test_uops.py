@@ -151,7 +151,7 @@ class TestNonFloatUOps(TestUOps):
 
     value = -y+x
     uops = UOpGraph([UOp(UOps.STORE, None, (data0, idx, value))])
-    with self.assertRaises(AssertionError): assert uops[-1].vin[2].arg is BinaryOps.SUB
+    assert uops[-1].vin[2].arg is BinaryOps.SUB
 
 class TestBoolUOps(TestUOps):
   def _test_uop_bool_fxn(self, op, fxn):
