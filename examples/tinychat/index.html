@@ -41,6 +41,8 @@
       if (home === 2) {
         home = -1;
         cstate = { time: null, messages: [] };
+        time_till_first = 0;
+        tokens_per_second = 0;
       }
     ">
       <h1 class="title megrim-regular">tinychat</h1>
@@ -126,6 +128,16 @@
     " x-show="home === 2" x-transition>
     </div>
     <div class="input-container">
+      <div class="input-performance">
+        <span class="input-performance-point">
+          <p style="font-family: monospace" x-text="(time_till_first / 1000).toFixed(2)"></p>
+          <p class="megrim-regular">SEC TO FIRST TOKEN</p>
+        </span>
+        <span class="input-performance-point">
+          <p style="font-family: monospace" x-text="tokens_per_second.toFixed(1)"></p>
+          <p class="megrim-regular">TOKENS/SEC</p>
+        </span>
+      </div>
       <div class="input">
         <textarea x-ref="inputForm" id="input-form" class="input-form" autofocus rows=1 x-autosize
           :placeholder="generating ? 'Generating...' : 'Say something'" :disabled="generating" @input="
