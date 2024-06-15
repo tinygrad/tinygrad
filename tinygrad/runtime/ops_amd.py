@@ -64,6 +64,7 @@ WAIT_REG_MEM_FUNCTION_GEQ = 5 # >=
 COMPUTE_SHADER_EN, FORCE_START_AT_000, CS_W32_EN = (1 << 0), (1 << 2), (1 << 15)
 
 def gfxreg(reg): return reg + 0x00001260 - amd_gpu.PACKET3_SET_SH_REG_START
+def nbioreg(reg): return reg + 0x00000d20 # NBIO_BASE__INST0_SEG2
 def data64_le(data): return (data & 0xFFFFFFFF, data >> 32)
 
 class AMDCompiler(Compiler):
@@ -83,10 +84,11 @@ class HWPM4Queue:
 
   def ptr(self) -> int: return len(self.q)
 
-  def hdp_flush(self):
-    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_WAIT_REG_MEM, 5),
-      amd_gpu.WAIT_REG_MEM_MEM_SPACE(0) | amd_gpu.WAIT_REG_MEM_OPERATION(1) | amd_gpu.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_EQ) | \
-      amd_gpu.WAIT_REG_MEM_ENGINE(0), regBIF_BX_PF1_GPU_HDP_FLUSH_REQ, regBIF_BX_PF1_GPU_HDP_FLUSH_DONE, 0x0, 0x0, 0x20]
+  def memory_barrier(self):
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_WAIT_REG_MEM, 5), amd_gpu.WAIT_REG_MEM_MEM_SPACE(0) | amd_gpu.WAIT_REG_MEM_OPERATION(1) | \
+      amd_gpu.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_EQ) | amd_gpu.WAIT_REG_MEM_ENGINE(0), nbioreg(regBIF_BX_PF1_GPU_HDP_FLUSH_REQ),
+      nbioreg(regBIF_BX_PF1_GPU_HDP_FLUSH_DONE), 0xffffffff, 0xffffffff, 0x20]
+    return self.invalidate_cache()
 
   def invalidate_cache(self, addr=0x0, sz=(1 << 64)-1, gli=1, glm=1, glk=1, glv=1, gl1=1, gl2=1):
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_ACQUIRE_MEM, 6), 0, #0x80000000,
@@ -99,7 +101,6 @@ class HWPM4Queue:
     return self
 
   def exec(self, prg, kernargs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), signal=None, signal_value=0):
-    self.hdp_flush()
     self.invalidate_cache()
 
     user_data = [*data64_le(kernargs)]
@@ -130,9 +131,9 @@ class HWPM4Queue:
 
   def update_exec(self, cmd_ptr, global_size, local_size):
     # Patch the exec cmd with new launch dims
-    assert self.q[cmd_ptr + 67] == amd_gpu.PACKET3(amd_gpu.PACKET3_DISPATCH_DIRECT, 3),"The pointer does not point to a packet of this type"
-    self.q[cmd_ptr + 59 : cmd_ptr + 62] = array.array('I', local_size)
-    self.q[cmd_ptr + 68 : cmd_ptr + 71] = array.array('I', global_size)
+    assert self.q[cmd_ptr + 60] == amd_gpu.PACKET3(amd_gpu.PACKET3_DISPATCH_DIRECT, 3),"The pointer does not point to a packet of this type"
+    self.q[cmd_ptr + 52 : cmd_ptr + 55] = array.array('I', local_size)
+    self.q[cmd_ptr + 61 : cmd_ptr + 64] = array.array('I', global_size)
 
     if (dp:=self.ptr_to_dispatch_packet.get(cmd_ptr)) is not None:
       dp.workgroup_size_x, dp.workgroup_size_y, dp.workgroup_size_z = local_size[0], local_size[1], local_size[2]
@@ -203,9 +204,6 @@ class HWCopyQueue:
     self.cmd_sizes.append(len(arr))
 
   def copy(self, dest, src, copy_size):
-    # HDP flush
-    self._q([amd_gpu.SDMA_OP_POLL_REGMEM, 0, 0x80000000, 0, 0, 0])
-
     # Invalidate cache inv
     self._q([amd_gpu.SDMA_OP_GCR_REQ, 0, amd_gpu.SDMA_GCR_GLM_INV | amd_gpu.SDMA_GCR_GLK_INV | amd_gpu.SDMA_GCR_GLK_WB | amd_gpu.SDMA_GCR_GLV_INV | \
       amd_gpu.SDMA_GCR_GL1_INV | amd_gpu.SDMA_GCR_GL2_WB | amd_gpu.SDMA_GCR_GL2_INV, 0, 0])
@@ -315,7 +313,7 @@ class AMDProgram:
 
     self.prog_addr = self.lib_gpu.va_addr + entry_point + code.kernel_code_entry_byte_offset
 
-    HWPM4Queue().invalidate_cache().submit(self.device)
+    HWPM4Queue().memory_barrier().submit(self.device)
 
   # NOTE: no programs are ever freed
   def __del__(self):
@@ -336,7 +334,7 @@ class AMDProgram:
     for i in range(len(vals)): args_st.__setattr__(f'v{i}', vals[i])
 
     q = HWPM4Queue()
-    q.wait(self.device.timeline_signal, self.device.timeline_value - 1)
+    q.wait(self.device.timeline_signal, self.device.timeline_value - 1).memory_barrier()
     if wait: q.timestamp(ctypes.addressof(self.device.timeline_signal) + getattr(hsa.amd_signal_t, 'start_ts').offset)
     q.exec(self, self.device.kernargs_ptr, global_size, local_size)
     if wait: q.timestamp(ctypes.addressof(self.device.timeline_signal) + getattr(hsa.amd_signal_t, 'end_ts').offset)

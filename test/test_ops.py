@@ -3,6 +3,7 @@ import numpy as np
 import torch
 from tinygrad.helpers import getenv, IMAGE, DEBUG, CI
 from tinygrad import Tensor, Device, dtypes
+from tinygrad.tensor import _to_np_dtype
 
 if CI:
   import warnings
@@ -66,7 +67,7 @@ def prepare_test_op(low, high, shps, vals, forward_only=False):
     ts = [torch.tensor(x, requires_grad=(not forward_only)) for x in vals]
   else:
     np.random.seed(0)
-    np_data = [np.random.uniform(low=low, high=high, size=size).astype(dtypes.default_float.np) for size in shps]
+    np_data = [np.random.uniform(low=low, high=high, size=size).astype(_to_np_dtype(dtypes.default_float)) for size in shps]
     ts = [torch.tensor(data, requires_grad=(not forward_only)) for data in np_data]
   tst = [Tensor(x.detach().numpy(), requires_grad=(not forward_only and not FORWARD_ONLY)) for x in ts]
   return ts, tst
@@ -1684,12 +1685,11 @@ class TestOps(unittest.TestCase):
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[None,b,c,d,None], lambda x: x[None,j,k,o,None])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,:,None,d,e], lambda x: x[i,:,None,o,p])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[None,None,None,None,None], lambda x: x[None,None,None,None,None])
-
-  # TODO: fix
-  @unittest.expectedFailure
-  def test_slice_fancy_indexing_dim_leading_nones(self):
-    a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()  # noqa
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[None,None,b,c,d,e], lambda x: x[None,None,j,k,o,p])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[None,None,b,c,None,None], lambda x: x[None,None,j,k,None,None])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,None,None,c,d,e], lambda x: x[i,None,None,k,o,p])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,None,None,c,None,None], lambda x: x[i,None,None,k,None,None])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[None,None,b,None,d,e], lambda x: x[None,None,j,None,o,p])
 
   def test_slice_fancy_indexing_dim_inject_and_collapse(self):
     a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()  # noqa

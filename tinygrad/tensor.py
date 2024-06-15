@@ -1,13 +1,13 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
-import time, math, itertools, functools
+import time, math, itertools, functools, struct
 from contextlib import ContextDecorator
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Dict, DefaultDict, cast, get_args, Set
 from collections import defaultdict
 import numpy as np
 
 from tinygrad.dtype import DType, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype
-from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, fully_flatten, argsort, getenv
+from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, get_shape, fully_flatten
 from tinygrad.helpers import IMAGE, DEBUG, WINO, THREEFRY
 from tinygrad.lazy import LazyBuffer
 from tinygrad.multi import MultiLazyBuffer
@@ -43,10 +43,17 @@ def _loadop(op, shape:Tuple[sint,...], dtype:DType, device:Union[str, Tuple[str,
   if isinstance(device, str): return LazyBuffer.loadop(op, shape, dtype, device, arg, src)
   return MultiLazyBuffer([LazyBuffer.loadop(op, shape, dtype, d, arg, src) for d in device], None)
 
-def _fromcpu(x: np.ndarray) -> LazyBuffer:
-  ret = LazyBuffer.loadop(LoadOps.EMPTY, x.shape, dtypes.from_np(x.dtype), "NPY")
+def _from_np_dtype(npdtype:type) -> DType: return dtypes.fields()[np.dtype(npdtype).name]
+def _to_np_dtype(dtype:DType) -> Optional[type]: return np.dtype(dtype.fmt).type if dtype.fmt is not None else None
+
+def _frompy(x:Union[List, Tuple, bytes], dtype:DType) -> LazyBuffer:
+  if isinstance(x, bytes): ret, data = LazyBuffer.loadop(LoadOps.EMPTY, (len(x),), dtype, "PYTHON"), x
+  else:
+    ret = LazyBuffer.loadop(LoadOps.EMPTY, get_shape(x), dtype, "PYTHON")
+    assert dtype.fmt is not None, f"{dtype=} has None fmt"
+    data = struct.pack(f"@{ret.size}{dtype.fmt}", *fully_flatten(x))
   # fake realize
-  ret.buffer.allocate(x)
+  ret.buffer.allocate(memoryview(data))
   del ret.srcs
   return ret
 
@@ -107,17 +114,22 @@ class Tensor:
     if isinstance(data, LazyBuffer): assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
     elif isinstance(data, get_args(ConstType)): data = _loadop(LoadOps.CONST, tuple(), dtype or dtypes.from_py(data), device, data)
     elif isinstance(data, Variable): data = _loadop(LoadOps.CONST, tuple(), dtype or dtypes.from_py(data.unbind()[1]), device, data)
-    elif isinstance(data, bytes): data = _fromcpu(np.frombuffer(data, np.uint8))
-    elif isinstance(data, list):
-      if dtype is None:
-        if (d := fully_flatten(data)) and all(isinstance(s, bool) for s in d): dtype = dtypes.bool
-        else: dtype = dtypes.default_int if d and all_int(d) else dtypes.default_float
-      if dtype == dtypes.bfloat16: data = Tensor(_fromcpu(np.array(data, np.float32)), device=device).cast(dtypes.bfloat16).lazydata
-      else: data = _fromcpu(np.array(data, dtype.np))
-    elif isinstance(data, np.ndarray):
-      if data.shape == (): data = _loadop(LoadOps.CONST, tuple(), dtype or dtypes.from_np(data.dtype), device, data.item())
-      else: data = _fromcpu(data.astype(dtype.np) if dtype is not None and dtype.np is not None else data)
+    elif isinstance(data, bytes): data = _frompy(data, dtypes.uint8)
+    elif isinstance(data, (list, tuple)):
+      if dtype is None: dtype = dtypes.from_py(data)
+      if dtype == dtypes.bfloat16: data = Tensor(_frompy(data, dtypes.float32), device=device).cast(dtypes.bfloat16).lazydata
+      else: data = _frompy(data, dtype)
     elif data is None: data = _loadop(LoadOps.EMPTY, (0,), dtype or dtypes.default_float, device)
+    elif isinstance(data, np.ndarray):
+      if data.shape == (): data = _loadop(LoadOps.CONST, tuple(), dtype or _from_np_dtype(data.dtype), device, data.item())
+      else:
+        def _fromnp(x: np.ndarray) -> LazyBuffer:
+          ret = LazyBuffer.loadop(LoadOps.EMPTY, x.shape, _from_np_dtype(x.dtype), "NPY")
+          # fake realize
+          ret.buffer.allocate(x)
+          del ret.srcs
+          return ret
+        data = _fromnp(data.astype(npdtype) if dtype is not None and (npdtype:=_to_np_dtype(dtype)) is not None else data)
 
     # by this point, it has to be a LazyBuffer
     if not isinstance(data, (LazyBuffer, MultiLazyBuffer)):
@@ -152,7 +164,9 @@ class Tensor:
 
   def __bool__(self): raise TypeError("__bool__ on Tensor is not defined")
 
-  def __len__(self): return self.shape[0] if len(self.shape) else 1
+  def __len__(self):
+    if not self.shape: raise TypeError("len() of a 0-d tensor")
+    return self.shape[0]
 
   @property
   def device(self) -> Union[str, Tuple[str, ...]]: return self.lazydata.device
@@ -276,9 +290,9 @@ class Tensor:
     ```
     """
     if self.dtype == dtypes.bfloat16: return self.float().numpy()
-    assert self.dtype.np is not None, f"no np dtype for {self.dtype}"
+    assert _to_np_dtype(self.dtype) is not None, f"no np dtype for {self.dtype}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
-    return np.frombuffer(self._data(), dtype=self.dtype.np).reshape(self.shape)
+    return np.frombuffer(self._data(), dtype=_to_np_dtype(self.dtype)).reshape(self.shape)
 
   def to(self, device:Optional[Union[str, Tuple[str, ...]]]) -> Tensor:
     """
@@ -891,6 +905,7 @@ class Tensor:
 
     # record None for dimension injection later and filter None and record rest of indices
     type_dim[None] = [dim for dim, i in enumerate(indices) if i is None]
+    tensor_dims = [dim for dim, i in enumerate(indices) if isinstance(i, Tensor)]
     indices_filtered = [i for i in indices if i is not None]
     for dim,i in enumerate(indices_filtered): type_dim[type(i)].append(dim)
 
@@ -939,12 +954,12 @@ class Tensor:
     if type_dim[Tensor]:
       # calculate dim of current ret by subtracting dims collapsed and adding dims injected up until tensor_dim
       def calc_dim(tensor_dim:int) -> int:
-        return tensor_dim - sum(1 for d in dims_collapsed if tensor_dim >= d) + sum(1 for d in type_dim[None] if tensor_dim >= d)
+        return tensor_dim - sum(1 for d in dims_collapsed if tensor_dim >= d)
 
       assert all_int(ret.shape), f"does not support symbolic shape {ret.shape}"
       # track tensor_dim and tensor_index using a dict
       # calc_dim to get dim and use that to normalize the negative tensor indices
-      idx: Dict[int,Tensor] = {(dim := calc_dim(td)):(tensor<0).where(ret.shape[dim],0) + tensor for td,tensor in zip(type_dim[Tensor], tensor_index)}
+      idx: Dict[int,Tensor] = {(dim := calc_dim(td)):(tensor<0).where(ret.shape[dim],0) + tensor for td,tensor in zip(tensor_dims, tensor_index)}
 
       masks, first_dim, last_dim = [], min(idx.keys()), max(idx.keys())
       pre_reduce_shape = ret.shape[:first_dim] + (big_shape := _broadcast_shape(*(t.shape for t in idx.values()))) + ret.shape[first_dim:]
@@ -1213,7 +1228,7 @@ class Tensor:
 
   def unflatten(self, dim:int, sizes:Tuple[int,...]):
     """
-    Expands dimension `dim` of the tensor over multiple dimensions specified by `sizes`.
+    Unflattens dimension `dim` of the tensor into multiple dimensions specified by `sizes`. `Tensor.flatten()` is the inverse of this function.
 
     ```python exec="true" source="above" session="tensor" result="python"
     print(Tensor.ones(3, 4, 1).unflatten(1, (2, 2)).shape)
@@ -2278,15 +2293,15 @@ class Tensor:
     if any(from_ != 1 and from_ != to for from_,to in zip(padded, shape)): raise ValueError(f"cannot broadcast from shape={self.shape} to {shape=}")
     return F.Expand.apply(self.reshape(padded), shape=shape)
 
-  def _broadcasted(self, y:Union[Tensor, ConstType], reverse:bool=False, match_dtype:bool=True) -> Tuple[Tensor, Tensor]:
+  def _broadcasted(self, y:Union[Tensor, Node, ConstType], reverse:bool=False, match_dtype:bool=True) -> Tuple[Tensor, Tensor]:
     x: Tensor = self
     if not isinstance(y, Tensor):
       # make y a Tensor
       assert isinstance(y, (float, int, bool, Node)), f"{type(y)=}, {y=}"
-      if isinstance(self.dtype, ImageDType) or dtypes.is_float(x.dtype) or (dtypes.is_int(x.dtype) and isinstance(y, int)): y_dtype = x.dtype
-      else: y_dtype = dtypes.from_py(y)
-      if isinstance(y, Node): y = Tensor.from_node(y, device=self.device)
-      else: y = Tensor(dtypes.as_const(y, y_dtype), self.device, y_dtype, requires_grad=False)
+      if isinstance(x.dtype, ImageDType) or dtypes.is_float(x.dtype) or (dtypes.is_int(x.dtype) and isinstance(y, int)): y_dtype = x.dtype
+      elif not isinstance(y, Node): y_dtype = dtypes.from_py(y)
+      if isinstance(y, Node): y = Tensor.from_node(y, device=x.device)
+      else: y = Tensor(dtypes.as_const(y, y_dtype), x.device, y_dtype, requires_grad=False)
 
     if match_dtype and x.dtype != y.dtype:
       output_dtype = least_upper_dtype(x.dtype, y.dtype)
@@ -2899,5 +2914,5 @@ def custom_random(out:Buffer):
   Tensor._seed += 1
   rng = np.random.default_rng(Tensor._seed)
   if out.dtype == dtypes.half: rng_np_buffer = (rng.integers(low=0, high=2047, size=out.size) / 2048).astype(np.half, copy=False)
-  else: rng_np_buffer = rng.random(size=out.size, dtype=np.float32).astype(dtype=out.dtype.np, copy=False)
+  else: rng_np_buffer = rng.random(size=out.size, dtype=np.float32).astype(dtype=_to_np_dtype(out.dtype), copy=False)
   out.copyin(rng_np_buffer.data)

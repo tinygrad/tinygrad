@@ -33,7 +33,7 @@ class TestProgressBar(unittest.TestCase):
     self.assertTrue(not cmp_prog or diff <= 1)
   @patch('sys.stderr', new_callable=StringIO)
   @patch('shutil.get_terminal_size')
-  def test_tqdm_output_iter_e2e(self, mock_terminal_size, mock_stderr):
+  def test_tqdm_output_iter(self, mock_terminal_size, mock_stderr):
     for _ in range(10):
       total, ncols = random.randint(5, 30), random.randint(80, 240)
       mock_terminal_size.return_value = namedtuple(field_names='columns', typename='terminal_size')(ncols)
@@ -58,7 +58,7 @@ class TestProgressBar(unittest.TestCase):
 
   @patch('sys.stderr', new_callable=StringIO)
   @patch('shutil.get_terminal_size')
-  def test_tqdm_output_custom_e2e(self, mock_terminal_size, mock_stderr):
+  def test_tqdm_output_custom(self, mock_terminal_size, mock_stderr):
     for _ in range(10):
       total, ncols = random.randint(10000, 100000), random.randint(80, 120)
       mock_terminal_size.return_value = namedtuple(field_names='columns', typename='terminal_size')(ncols)
@@ -80,6 +80,31 @@ class TestProgressBar(unittest.TestCase):
         elapsed = n/iters_per_sec if n>0 else 0
         tqdm_output = tqdm.format_meter(n=n, total=total, elapsed=elapsed, ncols=ncols, prefix="Test")
         self._compare_bars(tinytqdm_output, tqdm_output)
+
+  @patch('sys.stderr', new_callable=StringIO)
+  @patch('shutil.get_terminal_size')
+  def test_tqdm_output_custom_0_total(self, mock_terminal_size, mock_stderr):
+    for _ in range(10):
+      total, ncols = random.randint(10000, 100000), random.randint(80, 120)
+      mock_terminal_size.return_value = namedtuple(field_names='columns', typename='terminal_size')(ncols)
+      mock_stderr.truncate(0)
+
+      # compare bars at each iteration (only when tinytqdm bar has been updated)
+      bar = tinytqdm(total=0, desc="Test: ")
+      n = 0
+      while n < total:
+        time.sleep(0.01)
+        incr = (total // 10) + random.randint(0, 100)
+        if n + incr > total: incr = total - n
+        bar.update(incr, close=n+incr==total)
+        n += incr
+        if bar.i % bar.skip != 0: continue
+
+        tinytqdm_output = mock_stderr.getvalue().split("\r")[-1].rstrip()
+        iters_per_sec = float(tinytqdm_output.split("it/s")[-2].split(" ")[-1]) if n>0 else 0
+        elapsed = n/iters_per_sec if n>0 else 0
+        tqdm_output = tqdm.format_meter(n=n, total=0, elapsed=elapsed, ncols=ncols, prefix="Test")
+        self.assertEqual(tinytqdm_output, tqdm_output)
 
   def test_tqdm_perf(self):
     st = time.perf_counter()

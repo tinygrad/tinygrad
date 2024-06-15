@@ -141,7 +141,7 @@ class TestPatternMatcher(unittest.TestCase):
   @unittest.skip("no longer supported")
   def test_rewrite_graph_folds(self):
     uops = UOpGraph()
-    uops.add(UOps.CONST, dtypes.float, arg=2.0, simplify=False)
+    UOp(UOps.CONST, dtypes.float, arg=2.0, simplify=False)
     matcher = PatternMatcher([(UPat(UOps.CONST, name="x", dtype=dtypes.float),
                                lambda x: UOp(UOps.CAST, dtypes.int, (UOp(UOps.ALU, x.dtype, (x, x), BinaryOps.ADD),)))])
     matcher.rewrite_graph(uops)
@@ -153,7 +153,7 @@ class TestPatternMatcher(unittest.TestCase):
   @unittest.skip("no longer supported")
   def test_rewrite_graph_adds(self):
     uops = UOpGraph()
-    uops.add(UOps.CONST, dtypes.int, arg=2, simplify=False)
+    UOp(UOps.CONST, dtypes.int, arg=2, simplify=False)
     matcher = PatternMatcher([(UPat(UOps.CONST, name="x", dtype=dtypes.int),
                                lambda x: UOp(UOps.STORE, x.dtype, (UOp(UOps.DEFINE_GLOBAL, x.dtype, tuple(), None), x)))])
     matcher.rewrite_graph(uops)

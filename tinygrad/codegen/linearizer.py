@@ -3,7 +3,7 @@ from typing import List, Tuple, Any, Optional, cast, DefaultDict, Dict, Union, F
 import itertools, math, functools
 from collections import defaultdict
 
-from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, ConstType
+from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.helpers import colored, DEBUG, dedup, diskcache_put, prod, getenv, to_function_name, flatten
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ConstBuffer, MemBuffer, BufferOps, get_lazyop_info
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -47,10 +47,6 @@ def expand_node(node:Node, idxs:Optional[Tuple[Union[Variable, NumNode], ...]]=N
 class Linearizer(Kernel):
   def uop_alu_idx(self, a:UOp, b, ops, ctx:Linearizer, op): return UOp.alu(op, a, (NumNode(b) if not isinstance(b, Node) else b).render(ops, ctx))
 
-  # NOTE: the consts have to be cached for deduping of downstream uops to work
-  def const(self, b:ConstType|Variable, dtype:DType=dtypes.int32) -> UOp:
-    return UOp(UOps.DEFINE_VAR, dtype, (), b) if isinstance(b, Variable) else UOp.const(dtype, b)
-
   def get_reduce_acc(self, reduceop:LazyOp):
     if reduceop.op is ReduceOps.SUM: return 0.0 if dtypes.is_float(reduceop.dtype) else 0
     if reduceop.op is ReduceOps.MAX:
@@ -60,9 +56,9 @@ class Linearizer(Kernel):
   # NOTE: once images are loaded, we uop them as their base float
   def get_base_dtype(self, dt:DType) -> DType: return dt.base if isinstance(dt, ImageDType) else dt
 
-  render_ops: Any = { Variable: lambda self, ops, ctx: ctx.loop_uops[self.expr], NumNode: lambda self, ops, ctx: ctx.const(self.b),
+  render_ops: Any = { Variable: lambda self, ops, ctx: ctx.loop_uops[self.expr], NumNode: lambda self, ops, ctx: UOp.const(dtypes.int, self.b),
                 MulNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.MUL),
-                DivNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.DIV),
+                DivNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.IDIV),
                 ModNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.MOD),
                 LtNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.CMPLT),
     SumNode: lambda self,ops,ctx:
@@ -102,16 +98,16 @@ class Linearizer(Kernel):
           self.load_cache[key] = UOp(UOps.DEFINE_ACC, localtype, loop_ctx, (self.get_reduce_acc(acc), i, acc_count))
           acc_count += 1
         elif this_const is not None:
-          self.load_cache[key] = self.const(this_const, localtype)
+          self.load_cache[key] = UOp.const(localtype, this_const)
           if valid.min == 0 and valid.max == 1:
             valid_rendered = valid.render(self.render_ops, self)
-            self.load_cache[key] = UOp.alu(TernaryOps.WHERE, valid_rendered, self.load_cache[key], self.const(invalid_value, localtype))
+            self.load_cache[key] = UOp.alu(TernaryOps.WHERE, valid_rendered, self.load_cache[key], UOp.const(localtype, invalid_value))
         elif isinstance(buf.dtype, ImageDType):
           buf_uop = self.buf_uops[i]
           assert buf_uop is not None, f"buffer {i} wasn't UOped"
           image_idx, valid = to_image_idx(buf.dtype.shape, idx, valid)
           rendered_idx = UOp(UOps.CAST, dtypes.int.vec(2), tuple(x.render(self.render_ops, self) for x in image_idx))
-          valid_tuple = (valid.render(self.render_ops, self), self.const(invalid_value, buf.dtype.base.vec(4))) if valid.min == 0 else tuple()
+          valid_tuple = (valid.render(self.render_ops, self), UOp.const(buf.dtype.base.vec(4), invalid_value)) if valid.min == 0 else tuple()
           self.load_cache[key] = UOp(UOps.LOAD, buf.dtype.base.vec(4),
                                                (buf_uop, rendered_idx) + valid_tuple + ((barrier,) if barrier else ()))
           if localtype == localtype.scalar():
@@ -120,14 +116,14 @@ class Linearizer(Kernel):
             out = UOp(UOps.GEP, localtype, (self.load_cache[key],), idx_small.max)
             for ix in range(idx_small.max, idx_small.min, -1):
               rvv = UOp(UOps.GEP, localtype, (self.load_cache[key],), ix-1)
-              sel = UOp.alu(BinaryOps.CMPLT, res, self.const(ix))
+              sel = UOp.alu(BinaryOps.CMPLT, res, UOp.const(dtypes.int, ix))
               out = UOp.alu(TernaryOps.WHERE, sel, rvv, out)
             self.load_cache[key] = out
         else:
           buf_uop = self.buf_uops[i]
           assert buf_uop is not None, f"buffer {i} wasn't UOped"
           rendered_idx = idx.render(self.render_ops, self)
-          valid_tuple = (valid.render(self.render_ops, self), self.const(invalid_value, localtype)) if valid.min == 0 else tuple()
+          valid_tuple = (valid.render(self.render_ops, self), UOp.const(localtype, invalid_value)) if valid.min == 0 else tuple()
           self.load_cache[key] = UOp(UOps.LOAD, localtype, (buf_uop, rendered_idx) + valid_tuple + ((barrier,) if barrier else ()))
       ret.append(UOp(UOps.GEP, localtype.scalar(), (self.load_cache[key],), rep_idx[dim]) if dim is not None else self.load_cache[key])
     return ret
@@ -171,8 +167,8 @@ class Linearizer(Kernel):
   # render loop
   def render_loop(self, xx:List[Variable], depth:int) -> Tuple[UOp, ...]:
     new_loops = {x.expr:UOp(UOps.RANGE, dtypes.int32, (
-      self.const(x.min) if isinstance(x.min, int) else cast(Node, x.min).render(self.render_ops, self),
-      self.const(x.max+1) if isinstance(x.max, int) else cast(Node, x.max+1).render(self.render_ops, self)), arg=(depth,i)) for i,x in enumerate(xx) if not isinstance(x, NumNode) and x.expr is not None}  # noqa: E501
+      UOp.const(dtypes.int, x.min) if isinstance(x.min, int) else cast(Node, x.min).render(self.render_ops, self),
+      UOp.const(dtypes.int, x.max+1) if isinstance(x.max, int) else cast(Node, x.max+1).render(self.render_ops, self)), arg=(depth,i)) for i,x in enumerate(xx) if not isinstance(x, NumNode) and x.expr is not None}  # noqa: E501
     self.loop_uops.update(new_loops)
     return tuple(new_loops.values())
 
@@ -261,7 +257,7 @@ class Linearizer(Kernel):
         global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs})
 
       def gate_acc(r, idxs): return [
-        UOp.alu(TernaryOps.WHERE, valid.render(self.render_ops, self), acc, self.const(0, r.dtype)) if valid.min == 0 and valid.max == 1 else acc
+        UOp.alu(TernaryOps.WHERE, valid.render(self.render_ops, self), acc, UOp.const(r.dtype, 0)) if valid.min == 0 and valid.max == 1 else acc
         for valid, acc in zip(expand_node(self.sts[self.full_buf_index].expr_idxs(idxs)[1], expand_idxs(idxs)), accs[r])]
       local_accs = {r: gate_acc(r,global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for r in accs}
 
