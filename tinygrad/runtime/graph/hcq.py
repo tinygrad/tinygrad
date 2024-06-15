@@ -55,6 +55,10 @@ class HCQGraph(MultiGraphRunner):
     self.exec_ptrs: Dict[int, Tuple[Any, int]] = {}
     self.copy_to_devs: Dict[Compiled, Set[Compiled]] = {dev: set() for dev in self.devices}
 
+    for dev in self.devices:
+      self.comp_queues[dev].memory_barrier().wait(dev.timeline_signal, dev.timeline_value - 1).wait(self.kickoff_signal, self.kickoff_value)
+      self.copy_queues[dev].wait(dev.timeline_signal, dev.timeline_value - 1).wait(self.kickoff_signal, self.kickoff_value)
+
     for j,ji in enumerate(self.jit_cache):
       if isinstance(ji.prg, CompiledRunner):
         exec_params = {}
@@ -70,7 +74,7 @@ class HCQGraph(MultiGraphRunner):
 
         for sig, val in deps: self.comp_queues[ji.prg.device].wait(sig, val)
 
-        self.exec_ptrs[j] = (self.comp_queues[ji.prg.device], self.comp_queues[ji.prg.device].ptr())
+        self.exec_ptrs[j] = (self.comp_queues[ji.prg.device], len(self.comp_queues[ji.prg.device]))
         self.comp_queues[ji.prg.device].exec(ji.prg.clprg, self.kargs_addrs[j], *ji.prg.p.launch_dims(var_vals),
                                              signal=self.comp_signal[ji.prg.device], signal_value=sig_val, **exec_params)
         self.comp_signal_val[ji.prg.device] = sig_val
@@ -91,6 +95,7 @@ class HCQGraph(MultiGraphRunner):
       if self.copy_signal_val[dev] > 0: self.comp_queues[dev].wait(self.copy_signal[dev], self.copy_signal_val[dev])
       for dep_dev in self.copy_to_devs[dev]: self.comp_queues[dev].wait(self.copy_signal[dep_dev], self.copy_signal_val[dep_dev])
 
+      self.comp_queues[dev].signal(dev.timeline_signal, dev.timeline_value)
       if hasattr(self.comp_queues[dev], 'bind'): self.comp_queues[dev].bind(dev)
       if hasattr(self.copy_queues[dev], 'bind') and self.copy_signal_val[dev] > 0: self.copy_queues[dev].bind(dev)
 
@@ -115,18 +120,12 @@ class HCQGraph(MultiGraphRunner):
       queue.update_exec(cmd_ptr, *cast(CompiledRunner, self.jit_cache[j].prg).p.launch_dims(var_vals))
 
     for dev in self.devices:
-      # Submit sync with world and queues.
-      self.comp_hcq_t().memory_barrier().wait(dev.timeline_signal, dev.timeline_value - 1) \
-                       .wait(self.kickoff_signal, self.kickoff_value).submit(dev)
-      self.comp_queues[dev].submit(dev)
+      self.comp_queues[dev].update_wait(1, dev.timeline_signal, dev.timeline_value - 1).update_wait(2, value=self.kickoff_value) \
+                           .update_signal(len(self.comp_queues[dev]) - 1, dev.timeline_signal, dev.timeline_value).submit(dev)
 
       if self.copy_signal_val[dev] > 0:
-        self.copy_hcq_t().wait(dev.timeline_signal, dev.timeline_value - 1) \
-                         .wait(self.kickoff_signal, self.kickoff_value).submit(dev)
-        self.copy_queues[dev].submit(dev)
+        self.copy_queues[dev].update_wait(0, dev.timeline_signal, dev.timeline_value - 1).update_wait(1, value=self.kickoff_value).submit(dev)
 
-      # Signal the final value
-      self.comp_hcq_t().signal(dev.timeline_signal, dev.timeline_value).submit(dev)
       self.graph_timeline[dev] = dev.timeline_value
       dev.timeline_value += 1
 

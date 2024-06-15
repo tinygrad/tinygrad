@@ -2,7 +2,7 @@ from __future__ import annotations
 import os, ctypes, pathlib, re, fcntl, functools, mmap, struct, tempfile, hashlib, subprocess, time, array
 from typing import Tuple, List, Any, cast
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, BufferOptions
-from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up, to_char_p_p, DEBUG, prod
+from tinygrad.helpers import getenv, from_mv, mv_address, init_c_struct_t, to_mv, round_up, to_char_p_p, DEBUG, prod
 from tinygrad.renderer.cstyle import NVRenderer
 from tinygrad.runtime.ops_cuda import check as cuda_check, _get_bytes, CUDACompiler
 import tinygrad.runtime.autogen.cuda as cuda
@@ -84,27 +84,37 @@ class NVCompiler(Compiler):
     return _get_bytes(prog, cuda.nvrtcGetCUBIN, cuda.nvrtcGetCUBINSize, cuda_check)
 
 class HWQueue:
-  def __init__(self): self.q, self.binded_device, self.next_cmd_index = [], None, 0
+  def __init__(self): self.q, self.binded_device, self.cmd_offsets = [], None, []
   def __del__(self):
     if self.binded_device is not None:
       self.binded_device.synchronize() # Synchronize to ensure the buffer is no longer in use.
       self.binded_device._gpu_free(self.hw_page)
 
-  def ptr(self) -> int: return self.next_cmd_index
+  def _q(self, arr):
+    self.cmd_offsets.append(len(self.q))
+    self.q += arr
 
-  def memory_barrier(self): return self
+  def __len__(self): return len(self.cmd_offsets)
+
+  def memory_barrier(self):
+    self._q([])
+    return self
 
   def wait(self, signal, value=0):
-    self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(ctypes.addressof(from_mv(signal))), *nvdata64_le(value),
-               (3 << 0) | (1 << 24)] # ACQUIRE | PAYLOAD_SIZE_64BIT
-    self.next_cmd_index += 1
+    self._q([nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(ctypes.addressof(from_mv(signal))), *nvdata64_le(value),
+             (3 << 0) | (1 << 24)]) # ACQUIRE | PAYLOAD_SIZE_64BIT
     return self
 
   def signal(self, signal, value=0, timestamp=False):
-    self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(ctypes.addressof(from_mv(signal))), *nvdata64_le(value),
-               (1 << 0) | (1 << 20) | (1 << 24) | ((1 << 25) if timestamp else 0)] # RELEASE | RELEASE_WFI | PAYLOAD_SIZE_64BIT | RELEASE_TIMESTAMP
-    self.q += [nvmethod(0, nv_gpu.NVC56F_NON_STALL_INTERRUPT, 1), 0x0]
-    self.next_cmd_index += 1
+    self._q([nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(ctypes.addressof(from_mv(signal))), *nvdata64_le(value),
+            (1 << 0) | (1 << 20) | (1 << 24) | ((1 << 25) if timestamp else 0)] + # RELEASE | RELEASE_WFI | PAYLOAD_SIZE_64BIT | RELEASE_TIMESTAMP
+            [nvmethod(0, nv_gpu.NVC56F_NON_STALL_INTERRUPT, 1), 0x0])
+    return self
+
+  def update_signal(self, cmd_ptr, signal=None, value=None): return self.update_wait(cmd_ptr, signal, value) # the same offsets and commands
+  def update_wait(self, cmd_ptr, signal=None, value=None):
+    if signal is not None: self.q[(sigoff:=self.cmd_offsets[cmd_ptr]+1):sigoff+2] = array.array('I', [*nvdata64_le(mv_address(signal))])
+    if value is not None: self.q[(valoff:=self.cmd_offsets[cmd_ptr]+3):valoff+2] = array.array('I', [*nvdata64_le(value)])
     return self
 
   def bind(self, device: NVDevice):
@@ -141,18 +151,17 @@ class HWComputeQueue(HWQueue):
     self.ptr_to_qmd, self.ptr_to_global_dims, self.ptr_to_local_dims = {}, {}, {}
 
   def copy_from_cpu(self, gpuaddr, data):
-    self.q += [nvmethod(1, nv_gpu.NVC6C0_OFFSET_OUT_UPPER, 2), *nvdata64(gpuaddr)]
-    self.q += [nvmethod(1, nv_gpu.NVC6C0_LINE_LENGTH_IN, 2), len(data)*4, 0x1]
-    self.q += [nvmethod(1, nv_gpu.NVC6C0_LAUNCH_DMA, 1), 0x41]
-    self.q += [nvmethod(1, nv_gpu.NVC6C0_LOAD_INLINE_DATA, len(data), typ=6)] + [x for x in data]
-    self.next_cmd_index += 1
+    self._q([nvmethod(1, nv_gpu.NVC6C0_OFFSET_OUT_UPPER, 2), *nvdata64(gpuaddr)] +
+            [nvmethod(1, nv_gpu.NVC6C0_LINE_LENGTH_IN, 2), len(data)*4, 0x1] +
+            [nvmethod(1, nv_gpu.NVC6C0_LAUNCH_DMA, 1), 0x41] +
+            [nvmethod(1, nv_gpu.NVC6C0_LOAD_INLINE_DATA, len(data), typ=6)] + [x for x in data])
     return self
 
   def exec(self, prg, kernargs, global_size=(1,1,1), local_size=(1,1,1), signal=None, signal_value=0, chain_exec_ptr=None):
     ctypes.memmove(qmd_addr:=(kernargs + round_up(prg.constbuf_0_size, 1 << 8)), ctypes.addressof(prg.qmd), 0x40 * 4)
-    self.ptr_to_qmd[self.ptr()] = qmd = qmd_struct_t.from_address(qmd_addr) # Save qmd for later update
-    self.ptr_to_global_dims[self.ptr()] = to_mv(qmd_addr + nv_gpu.NVC6C0_QMDV03_00_CTA_RASTER_WIDTH[1] // 8, 12).cast('I')
-    self.ptr_to_local_dims[self.ptr()] = to_mv(qmd_addr + nv_gpu.NVC6C0_QMDV03_00_CTA_THREAD_DIMENSION0[1] // 8, 6).cast('H')
+    self.ptr_to_qmd[len(self.cmd_offsets)] = qmd = qmd_struct_t.from_address(qmd_addr) # Save qmd for later update
+    self.ptr_to_global_dims[len(self.cmd_offsets)] = to_mv(qmd_addr + nv_gpu.NVC6C0_QMDV03_00_CTA_RASTER_WIDTH[1] // 8, 12).cast('I')
+    self.ptr_to_local_dims[len(self.cmd_offsets)] = to_mv(qmd_addr + nv_gpu.NVC6C0_QMDV03_00_CTA_THREAD_DIMENSION0[1] // 8, 6).cast('H')
 
     qmd.cta_raster_width, qmd.cta_raster_height, qmd.cta_raster_depth = global_size
     qmd.cta_thread_dimension0, qmd.cta_thread_dimension1, qmd.cta_thread_dimension2 = local_size
@@ -166,15 +175,17 @@ class HWComputeQueue(HWQueue):
       qmd.release0_enable = 1
 
     if chain_exec_ptr is None:
-      self.q += [nvmethod(1, nv_gpu.NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI, 1), (1 << 12) | (1 << 4) | (1 << 0)]
-      self.q += [nvmethod(1, nv_gpu.NVC6C0_SEND_PCAS_A, 0x1), qmd_addr >> 8]
-      self.q += [nvmethod(1, nv_gpu.NVC6C0_SEND_SIGNALING_PCAS2_B, 0x1), 9]
+      self._q([nvmethod(1, nv_gpu.NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI, 1), (1 << 12) | (1 << 4) | (1 << 0)] +
+              [nvmethod(1, nv_gpu.NVC6C0_SEND_PCAS_A, 0x1), qmd_addr >> 8] +
+              [nvmethod(1, nv_gpu.NVC6C0_SEND_SIGNALING_PCAS2_B, 0x1), 9])
     else:
       self.ptr_to_qmd[chain_exec_ptr].dependent_qmd0_pointer = qmd_addr >> 8
       self.ptr_to_qmd[chain_exec_ptr].dependent_qmd0_action = 1
       self.ptr_to_qmd[chain_exec_ptr].dependent_qmd0_prefetch = 1
       self.ptr_to_qmd[chain_exec_ptr].dependent_qmd0_enable = 1
-    self.next_cmd_index += 1
+
+      # NOTE: This is not a real command in gpfifo, but a chained execution. Update command offset to allow access by ptr.
+      self._q([])
     return self
 
   def update_exec(self, cmd_ptr, global_size, local_size):
@@ -187,16 +198,19 @@ class HWComputeQueue(HWQueue):
 
 class HWCopyQueue(HWQueue):
   def copy(self, dest, src, copy_size):
-    self.q += [nvmethod(4, nv_gpu.NVC6B5_OFFSET_IN_UPPER, 4), *nvdata64(src), *nvdata64(dest)]
-    self.q += [nvmethod(4, nv_gpu.NVC6B5_LINE_LENGTH_IN, 1), copy_size]
-    self.q += [nvmethod(4, nv_gpu.NVC6B5_LAUNCH_DMA, 1), 0x182] # TRANSFER_TYPE_NON_PIPELINED | DST_MEMORY_LAYOUT_PITCH | SRC_MEMORY_LAYOUT_PITCH
-    self.next_cmd_index += 1
+    self._q([nvmethod(4, nv_gpu.NVC6B5_OFFSET_IN_UPPER, 4), *nvdata64(src), *nvdata64(dest)] +
+            [nvmethod(4, nv_gpu.NVC6B5_LINE_LENGTH_IN, 1), copy_size] +
+            [nvmethod(4, nv_gpu.NVC6B5_LAUNCH_DMA, 1), 0x182]) # TRANSFER_TYPE_NON_PIPELINED | DST_MEMORY_LAYOUT_PITCH | SRC_MEMORY_LAYOUT_PITCH
     return self
 
   def signal(self, signal, value=0):
-    self.q += [nvmethod(4, nv_gpu.NVC6B5_SET_SEMAPHORE_A, 4), *nvdata64(ctypes.addressof(from_mv(signal))), value, 4]
-    self.q += [nvmethod(4, nv_gpu.NVC6B5_LAUNCH_DMA, 1), 0x14]
-    self.next_cmd_index += 1
+    self._q([nvmethod(4, nv_gpu.NVC6B5_SET_SEMAPHORE_A, 4), *nvdata64(ctypes.addressof(from_mv(signal))), value, 4] +
+            [nvmethod(4, nv_gpu.NVC6B5_LAUNCH_DMA, 1), 0x14])
+    return self
+
+  def update_signal(self, cmd_ptr, signal=None, value=None):
+    if signal is not None: self.q[(sigoff:=self.cmd_offsets[cmd_ptr]+1):sigoff+2] = array.array('I', [*nvdata64(mv_address(signal))])
+    if value is not None: self.q[self.cmd_offsets[cmd_ptr]+3] = value
     return self
 
   def submit(self, dev:NVDevice): dev.dma_put_value = self._submit(dev, dev.dma_gpu_ring, dev.dma_put_value, dev.dma_gpfifo_entries,
