@@ -76,14 +76,16 @@ class AMDCompiler(Compiler):
     except RuntimeError as e: raise CompileError(e)
 
 class HWPM4Queue:
-  def __init__(self): self.q, self.binded_device, self.cmd_offsets, self.ptr_to_dispatch_packet = [], None, [], {}
+  def __init__(self): self.q, self.binded_device, self.cmd_offsets, self.ptr_to_dispatch_packet = [], None, [0], {}
   def __del__(self):
     if self.binded_device is not None:
       self.binded_device.synchronize()
       self.binded_device._gpu_free(self.hw_page)
 
-  def __len__(self): return len(self.cmd_offsets)
-  def _mark_command_end(self): self.cmd_offsets.append(len(self.q))
+  def __len__(self): return len(self.cmd_offsets) - 1
+  def _mark_command_end(self):
+    self.cmd_offsets.append(len(self.q))
+    return self
 
   # def ptr(self) -> int: return len(self.q)
 
@@ -134,9 +136,9 @@ class HWPM4Queue:
 
   def update_exec(self, cmd_ptr, global_size, local_size):
     # Patch the exec cmd with new launch dims
-    assert self.q[cmd_ptr + 60] == amd_gpu.PACKET3(amd_gpu.PACKET3_DISPATCH_DIRECT, 3),"The pointer does not point to a packet of this type"
-    self.q[cmd_ptr + 52 : cmd_ptr + 55] = array.array('I', local_size)
-    self.q[cmd_ptr + 61 : cmd_ptr + 64] = array.array('I', global_size)
+    assert self.q[self.cmd_offsets[cmd_ptr] + 60] == amd_gpu.PACKET3(amd_gpu.PACKET3_DISPATCH_DIRECT, 3),"The pointer does not point to a packet of this type"
+    self.q[self.cmd_offsets[cmd_ptr] + 52 : self.cmd_offsets[cmd_ptr] + 55] = array.array('I', local_size)
+    self.q[self.cmd_offsets[cmd_ptr] + 61 : self.cmd_offsets[cmd_ptr] + 64] = array.array('I', global_size)
 
     if (dp:=self.ptr_to_dispatch_packet.get(cmd_ptr)) is not None:
       dp.workgroup_size_x, dp.workgroup_size_y, dp.workgroup_size_z = local_size[0], local_size[1], local_size[2]
@@ -148,12 +150,6 @@ class HWPM4Queue:
       amd_gpu.WAIT_REG_MEM_MEM_SPACE(1) | amd_gpu.WAIT_REG_MEM_OPERATION(0) | amd_gpu.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_GEQ) | \
       amd_gpu.WAIT_REG_MEM_ENGINE(0), addr&0xFFFFFFFF, addr>>32, value, 0xffffffff, 4]
     return self._mark_command_end()
-
-  def update_wait(self, cmd_ptr, signal=None, value=None):
-    if signal is not None:
-      self.q[(sigoff:=self.cmd_offsets[cmd_ptr]+1):sigoff+2] = array.array('I', [*data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET)])
-    if value is not None: self.q[self.cmd_offsets[cmd_ptr]+3] = array.array('I', [*data64_le(value)])
-    return self
 
   def _release_mem(self, mem_event_type, mem_data_sel, mem_int_sel, address, value=0, cst=0, cache_flush=False):
     cache_flush_flags = 0
@@ -183,9 +179,18 @@ class HWPM4Queue:
                         value=signal.event_id, cst=signal.event_id, cache_flush=True)
     return self._mark_command_end()
 
-  def update_signal(self, cmd_ptr, signal=None, value=None):
+  def update_wait(self, cmd_ptr, signal=None, value=None):
+    assert self.q[self.cmd_offsets[cmd_ptr]] == amd_gpu.PACKET3(amd_gpu.PACKET3_WAIT_REG_MEM, 5), "The pointer does not point to a packet of this type"
     if signal is not None:
-      self.q[(sigoff:=self.cmd_offsets[cmd_ptr]+3):sigoff+2] = array.array('I', [*data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET)])
+      self.q[(sigoff:=self.cmd_offsets[cmd_ptr]+2):sigoff+2] = array.array('I', [*data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET)])
+    if value is not None: self.q[self.cmd_offsets[cmd_ptr]+4] = value
+    return self
+
+  def update_signal(self, cmd_ptr, signal=None, value=None):
+    assert self.q[self.cmd_offsets[cmd_ptr]] == amd_gpu.PACKET3(amd_gpu.PACKET3_RELEASE_MEM, 6), "The pointer does not point to a packet of this type"
+    # if signal is not None:
+    #   # TODO: add second signal
+    #   self.q[(sigoff:=self.cmd_offsets[cmd_ptr]+3):sigoff+2] = array.array('I', [*data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET)])
     if value is not None: self.q[(sigoff:=self.cmd_offsets[cmd_ptr]+5):sigoff+2] = array.array('I', [*data64_le(value)])
     return self
 
@@ -215,9 +220,9 @@ class HWCopyQueue:
   def __init__(self): self.q, self.cmd_sizes, self.cmd_offsets = [], [], []
 
   def _q(self, arr):
-    self.q += arr
-    self.cmd_sizes.append(len(self.q)) # TODO: remove
     self.cmd_offsets.append(len(self.q))
+    self.q += arr
+    self.cmd_sizes.append(len(arr)) # TODO: remove
 
   def copy(self, dest, src, copy_size):
     # Invalidate cache inv
@@ -256,6 +261,7 @@ class HWCopyQueue:
     return self
 
   def update_wait(self, cmd_ptr, signal=None, value=None):
+    assert self.q[self.cmd_offsets[cmd_ptr]] & 0xf == amd_gpu.SDMA_OP_POLL_REGMEM, "The pointer does not point to a packet of this type"
     if signal is not None:
       self.q[(sigoff:=self.cmd_offsets[cmd_ptr]+1):sigoff+2] = array.array('I', [*data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET)])
     if value is not None: self.q[self.cmd_offsets[cmd_ptr]+3] = value
