@@ -145,25 +145,17 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst):
   comprange = UOp.min(loop_end, UOp.max(UOp.alu(BinaryOps.IDIV, idx-compval-mval, mval) + (loop_end-loop_start), loop_start))
   return UOp(UOps.UNMUL, multconst.dtype, (comprange.cast(multconst.dtype) * multconst, loop_end-loop_start))
 
-acc_number = 0
-def replace_reduce(root):
-  global acc_number
-  parents = root.parents
+def expand_nodes(parents, ranges, base):
   children = defaultdict(list)
   for p in parents:
     for x in p.vin:
       children[x].append(p)
 
-  still_range_uops = []
+  # should be unrolled
   replacements = {}
-  for r in root.vin[2:]:
-    if r.arg[1]:
-      # should be unrolled
-      # get nodes on the path from root to the range node
-      replacements[r] = [UOp.const(r.dtype, j) for j in range(r.vin[0].arg, r.vin[1].arg)]
-    else:
-      still_range_uops.append(r)
+  for r in ranges: replacements[r] = [UOp.const(r.dtype, j) for j in range(r.vin[0].arg, r.vin[1].arg)]
 
+  # get nodes on the path from root to the range node
   new_uops = []
   for rp in itertools.product(*replacements.values()):
     replace = dict(zip(replacements.keys(), rp))
@@ -173,10 +165,21 @@ def replace_reduce(root):
       for cc in children[t]:
         to_replace.append(cc)
         replace[cc] = UOp(cc.uop, cc.dtype, tuple(replace.get(x, x) for x in cc.vin), cc.arg)
-    new_uops.append(replace[root.vin[0]])
+    new_uops.append(replace[base])
+  return new_uops
+
+acc_number = 0
+def replace_reduce(root):
+  global acc_number
+  expand_ranges = [x for x in root.vin[2:] if x.arg[1] is True]
+
+  if len(expand_ranges):
+    new_uops = expand_nodes(root.parents, expand_ranges, root.vin[0])
+  else:
+    new_uops = [root.vin[0]]
 
   # TODO: DEFINE_ACC should have a const input
-  acc = UOp(UOps.DEFINE_ACC, root.dtype, tuple(still_range_uops), (root.vin[1].arg, acc_number))
+  acc = UOp(UOps.DEFINE_ACC, root.dtype, tuple(x for x in root.vin[2:] if x not in expand_ranges), (root.vin[1].arg, acc_number))
   acc_number += 1
   ret = acc
   for xx in new_uops:
@@ -395,6 +398,13 @@ class UOpGraph:
     # do graph rewrite
     sink = self.graph_rewrite(sink, constant_folder)
     if extra_pm: sink = self.graph_rewrite(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
+
+    # do upcasts (after reduce unrolls and rewrites)
+    all_parents = sink.parents
+    expand_ranges = list(sorted(x for x in all_parents if x.uop is UOps.RANGE and x.arg[1] is True))
+    if len(expand_ranges):
+      new_nodes = expand_nodes(all_parents, expand_ranges, sink.vin[0])
+      sink = UOp(UOps.SINK, None, tuple(new_nodes))
 
     # filter nodes that don't link to a sink
     # BFS toposort

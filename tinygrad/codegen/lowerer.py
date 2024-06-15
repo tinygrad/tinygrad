@@ -4,7 +4,7 @@ import math
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.dtype import dtypes, PtrDType
-from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, BinaryOps
+from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, BinaryOps, UnaryOps
 from tinygrad.codegen.uops import UOp, UOpGraph, UOps
 from tinygrad.renderer import Program
 from tinygrad.helpers import to_function_name, colored, DEBUG, getenv
@@ -37,7 +37,7 @@ def get_reduce_acc(reduceop:LazyOp):
 
 class Lowerer(Kernel):
   def to_uop(self, x:LazyOp) -> UOp:
-    print(x.op)
+    #print(x.op)
     if x.op in BufferOps:
       idx, valid = st_to_uops(self.sts[self.bufs.index(x.arg)], self.idxs)
       if x.op is BufferOps.CONST:
@@ -50,6 +50,8 @@ class Lowerer(Kernel):
         else:
           return UOp(UOps.STORE, None, (buf, idx, self.to_uop(x.src[0])) + opt_valid)
     in_uops = tuple(self.to_uop(y) for y in x.src)
+    if x.op is UnaryOps.CAST:
+      return UOp(UOps.CAST, x.arg, in_uops)
     if x.op in ReduceOps:
       loops = [self.idxs[i] for i in range(len(self.full_shape)) if self.full_shape[i] != self.sts[0].shape[i]]
       op = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[x.op]
@@ -61,6 +63,7 @@ class Lowerer(Kernel):
     self.name = ("r" if self.reduceop else ("C" if all(x.op in BufferOps for x in self.lazyops) else "E")) + \
                  (f"{len(self.outbufs)}_" if len(self.outbufs) > 1 else "_") + \
                  colored('_', 'BLACK').join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
+    if DEBUG >= 4: print(self.name)
     self.idxs = []
 
     # for clang
