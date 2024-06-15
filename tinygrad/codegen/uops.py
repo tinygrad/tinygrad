@@ -207,11 +207,11 @@ constant_folder = PatternMatcher([
   # max -2147483648
   (UPat(UOps.ALU, BinaryOps.MAX, dtype=dtypes.int, vin=[UPat(name="x"), UPat(UOps.CONST, -2147483648)]), lambda x: x),
   # -(-x) -> x
-  (UPat(UOps.ALU, UnaryOps.NEG, (UPat(UOps.ALU, UnaryOps.NEG, (UPat(name="x"),)))), lambda x: x),
+  (-(-UPat.var('x')), lambda x: x),
   # x+-y -> x-y
-  (UPat(UOps.ALU, BinaryOps.ADD, (UPat(name="x"), UPat(UOps.ALU, UnaryOps.NEG, name="my"))), lambda x, my: x-my.vin[0]),
+  (UPat.var('x')+(-UPat.var('y')), lambda x, y: x-y),
   # -1*x -> -x
-  (UPat(UOps.ALU, BinaryOps.MUL, [UPat(name="x"), UPat(UOps.CONST, -1)]), lambda x: -x),
+  (-1*UPat.var('x'), lambda x: -x),
   # bool < False is always false, True < bool is always false
   (UPat(UOps.ALU, BinaryOps.CMPLT, (UPat(), UPat(UOps.CONST, False, name="x", dtype=dtypes.bool))), lambda x: x),
   (UPat(UOps.ALU, BinaryOps.CMPLT, (UPat(UOps.CONST, True, name="x", dtype=dtypes.bool), UPat())), lambda x: UOp.const(dtypes.bool, False)),
