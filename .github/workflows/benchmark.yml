@@ -129,6 +129,7 @@ jobs:
         ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
         ln -s /raid/weights/mixtral-8x7b-32kseqlen weights/mixtral-8x7b-32kseqlen
         ln -s /raid/weights/LLaMA-2 weights/LLaMA-2
+        ln -s /raid/weights/LLaMA-3 weights/LLaMA-3
         mkdir -p extra/datasets
         ln -s /raid/datasets/imagenet extra/datasets/imagenet
     - name: Run model inference benchmark
@@ -165,6 +166,12 @@ jobs:
       run: CUDA=1 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_four_gpu.txt
     - name: Run LLaMA 7B on 6 GPUs
       run: CUDA=1 python3 examples/llama.py --gen 1 --size 7B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_six_gpu.txt
+    - name: Run LLaMA-3 8B BEAM
+      run: NV=1 JITBEAM=2 CACHELEVEL=0 python3 examples/llama3.py --model weights/LLaMA-3/8B-SF-DPO/ --benchmark | tee llama3_beam.txt
+    - name: Run LLaMA-3 8B on 4 GPUs
+      run: NV=1 CACHELEVEL=0 python3 examples/llama3.py --shard 4 --model weights/LLaMA-3/8B-SF-DPO/ --benchmark | tee llama3_four_gpu.txt
+    - name: Run LLaMA-3 8B on 6 GPUs
+      run: NV=1 CACHELEVEL=0 python3 examples/llama3.py --shard 6 --model weights/LLaMA-3/8B-SF-DPO/ --benchmark | tee llama3_six_gpu.txt
     # - name: Run LLaMA-2 70B
     #   run: CUDA=1 python3 examples/llama.py --gen 2 --size 70B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_2_70B.txt
     # - name: Run Mixtral 8x7B
@@ -193,6 +200,9 @@ jobs:
           llama_beam.txt
           llama_four_gpu.txt
           llama_six_gpu.txt
+          llama3_beam.txt
+          llama3_four_gpu.txt
+          llama3_six_gpu.txt
           # llama_2_70B.txt
           # mixtral.txt
           gpt2_unjitted.txt
@@ -274,6 +284,7 @@ jobs:
         ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
         ln -s /raid/weights/mixtral-8x7b-32kseqlen weights/mixtral-8x7b-32kseqlen
         ln -s /raid/weights/LLaMA-2 weights/LLaMA-2
+        ln -s /raid/weights/LLaMA-3 weights/LLaMA-3
         mkdir -p extra/datasets
         ln -s /raid/datasets/imagenet extra/datasets/imagenet
     - name: Show off tinybox
@@ -306,6 +317,12 @@ jobs:
       run: AMD=1 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_four_gpu.txt
     - name: Run LLaMA 7B on 6 GPUs
       run: AMD=1 python3 examples/llama.py --gen 1 --size 7B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_six_gpu.txt
+    - name: Run LLaMA-3 8B BEAM
+      run: AMD=1 JITBEAM=2 CACHELEVEL=0 python3 examples/llama3.py --model weights/LLaMA-3/8B-SF-DPO/ --benchmark | tee llama3_beam.txt
+    - name: Run LLaMA-3 8B on 4 GPUs
+      run: AMD=1 CACHELEVEL=0 python3 examples/llama3.py --shard 4 --model weights/LLaMA-3/8B-SF-DPO/ --benchmark | tee llama3_four_gpu.txt
+    - name: Run LLaMA-3 8B on 6 GPUs
+      run: AMD=1 CACHELEVEL=0 python3 examples/llama3.py --shard 6 --model weights/LLaMA-3/8B-SF-DPO/ --benchmark | tee llama3_six_gpu.txt
     - name: Run LLaMA-2 70B
       run: AMD=1 python3 examples/llama.py --gen 2 --size 70B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_2_70B.txt
     - name: Run Mixtral 8x7B
@@ -325,6 +342,9 @@ jobs:
           llama_beam.txt
           llama_four_gpu.txt
           llama_six_gpu.txt
+          llama3_beam.txt
+          llama3_four_gpu.txt
+          llama3_six_gpu.txt
           llama_2_70B.txt
           gpt2_unjitted.txt
           gpt2_jitted.txt
