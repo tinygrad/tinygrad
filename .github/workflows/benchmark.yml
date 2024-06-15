@@ -1,6 +1,4 @@
 name: Benchmarks
-env:
-  RUN_PROCESS_REPLAY: 0
 
 on:
   push:
@@ -36,9 +34,9 @@ jobs:
         ln -s ~/tinygrad/weights/bpe_simple_vocab_16e6.txt.gz weights/bpe_simple_vocab_16e6.txt.gz
         ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
         ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
-    - name: Setup process replay
-      if: github.event.inputs.run_process_replay == 'true' || contains(github.event.head_commit.message, '[run_process_replay]') || contains(github.event.pull_request.title, '[run_process_replay]')
-      run: echo "RUN_PROCESS_REPLAY=1" >> $GITHUB_ENV
+    # - name: Setup process replay
+    # if: github.event.inputs.run_process_replay == 'true' || contains(github.event.head_commit.message, '[run_process_replay]') || contains(github.event.pull_request.title, '[run_process_replay]')
+    # run: echo "RUN_PROCESS_REPLAY=1" >> $GITHUB_ENV
     - name: Run Stable Diffusion
       run: JIT=2 python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
     - name: Run model inference benchmark
