@@ -100,6 +100,10 @@ class UPat:
   def store(*vin: UPat, name: Optional[str] = None, dtype: UPatDType = None): return UPat(UOps.STORE, vin=tuple(vin), name=name, dtype=dtype)
   @staticmethod
   def where(gate: UPat, a: UPat, b: UPat, name: Optional[str] = None): return UPat.alu(TernaryOps.WHERE, (gate, a, b), name)
+  @staticmethod
+  def range(start: Optional[UPat], end: Optional[UPat], name:Optional[str]=None):
+    if start is not None: assert end is not None, 'either both start and end should be specified, or both should be None'
+    return UPat(UOps.RANGE, None, (start, end) if start is not None else None, name)
 
   def nm(self, name: Optional[str]) -> UPat: return UPat(self.uop, self.arg, self.vin, name, self.dtype, self.allow_len)
   def recip(self, name:Optional[str]=None): return UPat.alu(UnaryOps.RECIP, self, name=name)
@@ -184,7 +188,7 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst):
 constant_folder = PatternMatcher([
   # arange loop folding (early)
   (UPat.where(
-    UPat.var("idx") + UPat.cvar("mval") * UPat(UOps.RANGE, vin=(UPat.var("loop_start"), UPat.var("loop_end"))) < UPat.cvar("compval"),
+    UPat.var("idx") + UPat.cvar("mval") * UPat.range(UPat.var("loop_start"), UPat.var("loop_end")) < UPat.cvar("compval"),
     UPat.cvar("multconst"),
     UPat.const(0)
   ), loop_collapse),
