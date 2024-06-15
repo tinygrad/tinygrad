@@ -107,23 +107,16 @@ class UPat:
     assert start is None and end is None, 'either both start and end should be specified, or both should be None'
     return UPat(UOps.RANGE, name=name)
 
-  def nm(self, name: Optional[str]) -> UPat: return UPat(self.uop, self.arg, self.vin, name, self.dtype, self.allow_len)
   def recip(self, name:Optional[str]=None): return UPat.alu(UnaryOps.RECIP, self, name=name)
   def __neg__(self): return UPat.alu(UnaryOps.NEG, self)
   def __add__(self, x): return UPat.alu(BinaryOps.ADD, [self, upatfix(x, self.dtype)])
-  def __radd__(self, x): return UPat.alu(BinaryOps.ADD, [upatfix(x, self.dtype), self])
   def __sub__(self, x): return UPat.alu(BinaryOps.SUB, (self, upatfix(x, self.dtype)))
-  def __rsub__(self, x): return UPat.alu(BinaryOps.SUB, (upatfix(x, self.dtype), self))
   def __mul__(self, x): return UPat.alu(BinaryOps.MUL, [self, upatfix(x, self.dtype)])
   def __rmul__(self, x): return UPat.alu(BinaryOps.MUL, [upatfix(x, self.dtype), self])
   def __floordiv__(self, x): return UPat.alu(BinaryOps.IDIV, (self, upatfix(x, self.dtype)))
-  def __rfloordiv__(self, x): return UPat.alu(BinaryOps.IDIV, (upatfix(x, self.dtype), self))
   def __truediv__(self, x): return self * upatfix(x, self.dtype).recip()
-  def __rtruediv__(self, x): return self.recip() * upatfix(x, self.dtype)
   def __lt__(self, x): return UPat.alu(BinaryOps.CMPLT, (self, upatfix(x, self.dtype)))
-  def __ne__(self, x): return UPat.alu(BinaryOps.CMPNE, [self, upatfix(x, self.dtype)])
   def __mod__(self, x): return UPat.alu(BinaryOps.MOD, (self, upatfix(x, self.dtype)))
-  def __rmod__(self, x): return UPat.alu(BinaryOps.MOD, (upatfix(x, self.dtype), self))
 UPatVin = Optional[Union[Tuple[UPat, ...], List[UPat], UPat]]
 UPatDType = Optional[Union[DType, Set[DType]]]
 
