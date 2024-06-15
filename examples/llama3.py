@@ -402,7 +402,15 @@ if __name__ == "__main__":
       last_tok = tok
       generated += tokenizer.decode([tok])
       print(generated)
-    assert generated == "Hello! How can I help you today? If you have any questions or need assistance with anything,", f"{generated=}"
+    EXPECTED_TEXT = {
+      1: "Hello! How can I help you today? If you have any questions or need assistance with anything,",
+      2: "Hello! How can I help you today? If you have any questions, need assistance or just want",
+      3: "Hello! How can I help you today? If you have any questions or need assistance, feel free",
+      4: "Hello! How can I assist you today? If you have any questions, need information, or require",
+      5: "Hello! How can I assist you today? If you have any questions or need help with something",
+      6: "Hello! How can I assist you today? If you have any questions, need information, or require",
+    }
+    assert generated == EXPECTED_TEXT[args.shard], f"{generated=} {EXPECTED_TEXT[args.shard]}"
     print("\n" + colored("output validated", "green"))  # NOTE: "\n" inside colored does not render the color in github action
   else:
     prompt = [tokenizer.bos_id] + encode_message("system", "You are an helpful assistant.")
