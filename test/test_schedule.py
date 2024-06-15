@@ -481,7 +481,7 @@ class TestSchedule(unittest.TestCase):
   @unittest.skipUnless(getenv("SPLIT_REDUCEOP", 1), "Testing split reducop requires SPLIT_REDUCEOP")
   def test_preserve_multistage_reduce(self):
     big_enough = getenv("REDUCEOP_SPLIT_THRESHOLD", 32768)
-    x = Tensor.randn(big_enough)
+    x = Tensor.randn(big_enough).realize()
     out = (x - x.max(keepdim=True)).max()
     run_schedule(check_schedule(out, 4))
     np.testing.assert_allclose(out.numpy(), (x.numpy() - x.numpy().max(keepdims=True)).max())
@@ -1063,11 +1063,11 @@ class TestSchedule(unittest.TestCase):
     Tensor.manual_seed(0)
     a = Tensor.randn(3, 4, 5).realize()
     b = Tensor.randn(3, 4, 5).realize()
-    out = (a.pad(((0, 1), (0, 1), (0, 1)), 1.0).sum(keepdim=True)+b).pad(((0, 1), (0, 1), (0, 1)), 1.0).sum().contiguous()
+    out = (a.pad(((0, 1), (0, 1), (0, 1)), 1.0).sum(keepdim=True)+b.pad(((0, 1), (0, 1), (0, 1)), 1.0).sum()).contiguous()
     # run_schedule(check_schedule(out, 1))
     run_schedule(check_schedule(out, 2))
-    np.testing.assert_allclose(out.numpy(), np.pad(np.pad(a.numpy(), ((0, 1), (0, 1), (0, 1)), constant_values=1.0).sum() + \
-                                                   b.numpy(), ((0, 1), (0, 1), (0, 1)), constant_values=1.0).sum(), atol=1e-4, rtol=1e-4)
+    np.testing.assert_allclose(out.numpy(), np.pad(a.numpy(), ((0, 1), (0, 1), (0, 1)), constant_values=1.0).sum(keepdims=True) + \
+                                                   np.pad(b.numpy(), ((0, 1), (0, 1), (0, 1)), constant_values=1.0).sum(), atol=1e-4, rtol=1e-4)
 
   def test_pad_reduce_unsafe(self):
     Tensor.manual_seed(0)
