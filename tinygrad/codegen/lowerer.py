@@ -42,15 +42,16 @@ class Lowerer(Kernel):
     #print(x.op)
     if x.op in BufferOps:
       idx, valid = st_to_uops(self.sts[self.bufs.index(x.arg)], self.idxs)
+      # TODO: check has_valid in UPat, not here
+      has_valid = valid.uop is not UOps.CONST or valid.arg is not True
       if x.op is BufferOps.CONST:
         return UOp.alu(TernaryOps.WHERE, valid, UOp.const(x.arg.dtype, x.arg.val), UOp.const(x.arg.dtype, 0))
       else:
         buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(x.arg.dtype), (), (x.arg.idx, any(x.arg.idx == y.idx for y in self.outbufs)))
-        opt_valid = (valid,) if valid.uop is not UOps.CONST or valid.arg is not True else ()
         if x.op is BufferOps.LOAD:
-          return UOp(UOps.LOAD, x.arg.dtype, (buf, idx) + opt_valid)
+          return UOp(UOps.LOAD, x.arg.dtype, (buf, idx) + ((valid, UOp.const(x.arg.dtype, 0)) if has_valid else ()))
         else:
-          return UOp(UOps.STORE, None, (buf, idx, self.to_uop(x.src[0])) + opt_valid)
+          return UOp(UOps.STORE, None, (buf, idx, self.to_uop(x.src[0])) + ((valid) if has_valid else ()))
     in_uops = tuple(self.to_uop(y) for y in x.src)
     if x.op is UnaryOps.CAST:
       return UOp(UOps.CAST, x.arg, in_uops)
