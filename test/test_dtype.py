@@ -685,8 +685,8 @@ class TestTensorMethod(unittest.TestCase):
   def test_abs_diff(self, dt):
     if dt == dtypes.bool or not is_dtype_supported(dt): return
     a, b = Tensor([2], dtype=dt), Tensor([1], dtype=dt)
-    ret = (a - b).abs()
-    np.testing.assert_allclose(ret.numpy(), np.abs(a.numpy()-b.numpy()))
+    ret = (a + b).abs()
+    np.testing.assert_allclose(ret.numpy(), np.abs(a.numpy()+b.numpy()))
 
 if __name__ == '__main__':
   unittest.main()
