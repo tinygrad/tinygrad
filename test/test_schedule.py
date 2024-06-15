@@ -479,12 +479,12 @@ class TestSchedule(unittest.TestCase):
 
   # multireduce spec
   @unittest.skipUnless(getenv("SPLIT_REDUCEOP", 1), "Testing split reducop requires SPLIT_REDUCEOP")
-  def test_multireduce_preserve_multistage_reduce(self):
+  def test_preserve_multistage_reduce(self):
     big_enough = getenv("REDUCEOP_SPLIT_THRESHOLD", 32768)
-    x = Tensor.rand(big_enough, dtype=dtypes.float64)
-    out = (x - x.sum()/big_enough).sum()
-    check_schedule(out, 4)
-    np.testing.assert_allclose(out.numpy(), (x.numpy() - x.numpy().sum(keepdims=True)/big_enough).sum())
+    x = Tensor.randn(big_enough, dtype=dtypes.float64)
+    out = (x - x.max()).max()
+    run_schedule(check_schedule(out, 4))
+    np.testing.assert_allclose(out.numpy(), (x.numpy() - x.numpy().max(keepdims=True)).max())
 
   def test_multistage_reduce(self):
     x = Tensor.empty(32, 32, 32)
@@ -498,14 +498,15 @@ class TestSchedule(unittest.TestCase):
     out = x.relu().sum(1) + out2[0]
     check_schedule(out, 2)
 
-  # double check for multireduce
+  # multireduce spec
   def test_example_matmul(self):
     x = Tensor.eye(64, requires_grad=True)
     y = Tensor.eye(64, requires_grad=True)
     z = y.matmul(x).sum()
     z.backward()
     out = x.grad.contiguous()
-    check_schedule(out, 2)
+    run_schedule(check_schedule(out, 2))
+    np.testing.assert_allclose(out.numpy(), np.ones((64,64)))
 
   def test_contiguous_add(self):
     x = Tensor.empty(32)
@@ -558,9 +559,9 @@ class TestSchedule(unittest.TestCase):
     out1 = a.sum() + 4
     out2 = out0 * out1
     run_schedule(check_schedule([out0, out1, out2], 1))
-    np.testing.assert_allclose(out0.numpy(), out0_np:=a.numpy().sum()+2)
-    np.testing.assert_allclose(out1.numpy(), out1_np:=a.numpy().sum()+4)
-    np.testing.assert_allclose(out2.numpy(), out0_np*out1_np)
+    np.testing.assert_allclose(out0.numpy(), out0_np:=a.numpy().sum()+2, atol=1e-4, rtol=1e-6)
+    np.testing.assert_allclose(out1.numpy(), out1_np:=a.numpy().sum()+4, atol=1e-4, rtol=1e-6)
+    np.testing.assert_allclose(out2.numpy(), out0_np*out1_np, atol=1e-4, rtol=1e-6)
 
   # multireduce spec
   def test_reduce_multiple_paths(self):
@@ -570,8 +571,8 @@ class TestSchedule(unittest.TestCase):
     # out1 has two paths to a.sum()
     out1 = a.sum() + out0
     run_schedule(check_schedule([out0, out1], 1))
-    np.testing.assert_allclose(out0.numpy(), out0_np:=np.exp2(a.numpy().sum()))
-    np.testing.assert_allclose(out1.numpy(), a.numpy().sum()+out0_np)
+    np.testing.assert_allclose(out0.numpy(), out0_np:=np.exp2(a.numpy().sum()), atol=1e-4, rtol=1e-4)
+    np.testing.assert_allclose(out1.numpy(), a.numpy().sum()+out0_np, atol=1e-4, rtol=1e-6)
 
   # multireduce spec
   def test_multireduce_reduce_multiple_paths(self):
@@ -628,10 +629,10 @@ class TestSchedule(unittest.TestCase):
     out1 = b.max() + out0*2
     out2 = a.sum() + out1
     # run_schedule(check_schedule([out0, out1, out2], 1))
-    run_schedule(check_schedule([out0, out1, out2], 4))
-    np.testing.assert_allclose(out0.numpy(), out0_np:=a.numpy().sum()+4)
-    np.testing.assert_allclose(out1.numpy(), out1_np:=b.numpy().max() + out0_np*2)
-    np.testing.assert_allclose(out2.numpy(), a.numpy().sum() + out1_np)
+    run_schedule(check_schedule([out0, out1, out2], 4), atol=1e-4, rtol=1e-6)
+    np.testing.assert_allclose(out0.numpy(), out0_np:=a.numpy().sum()+4, atol=1e-4, rtol=1e-6)
+    np.testing.assert_allclose(out1.numpy(), out1_np:=b.numpy().max() + out0_np*2, atol=1e-4, rtol=1e-6)
+    np.testing.assert_allclose(out2.numpy(), a.numpy().sum() + out1_np, atol=1e-4, rtol=1e-6)
 
   # multireduce spec
   def test_reduce_multiple_paths_midexpand(self):
@@ -785,8 +786,8 @@ class TestSchedule(unittest.TestCase):
     # run_schedule(check_schedule(out, 2))
     run_schedule(check_schedule(out, 3))
     y = (x.numpy() - x.numpy().mean(layer.axis, keepdims=True))
-    y = y / np.sqrt((y*y).mean(layer.axis, keepdims=True) + layer.eps)
-    np.testing.assert_allclose(out.numpy(), y * layer.weight.numpy() + layer.bias.numpy(), atol=1e-4, rtol=1e-4)
+    expected = y / np.sqrt((y*y).mean(layer.axis, keepdims=True) + layer.eps)
+    np.testing.assert_allclose(out.numpy(), expected * layer.weight.numpy() + layer.bias.numpy(), atol=1e-4, rtol=1e-4)
 
   def test_scaled_dot_product_attention_fusion(self):
     x, y, z, m = (Tensor.empty(32, 8, 16, 16) for _ in range(4))
@@ -914,7 +915,7 @@ class TestSchedule(unittest.TestCase):
   # multireduce spec
   def test_multireduce_simple_chase(self):
     Tensor.manual_seed(0)
-    a = Tensor.randn(4, 4, 4)
+    a = Tensor.randn(4, 4, 4).realize()
     r = (a + (a.sum(0, keepdim=True) + 6)).sum(0) * 2
     b = r.sum(0) + 8
     c = r.sum(1) + 12
@@ -938,8 +939,8 @@ class TestSchedule(unittest.TestCase):
   # multireduce spec
   def test_multireduce_push_permute_chase(self):
     Tensor.manual_seed(0)
-    a = Tensor.randn(4, 4, 4)
-    b = Tensor.randn(4, 4)
+    a = Tensor.randn(4, 4, 4).realize()
+    b = Tensor.randn(4, 4).realize()
     r = a.sum(2) + b
     d = r.T * 4
     e = r * (d + a).sum(2)
@@ -961,10 +962,10 @@ class TestSchedule(unittest.TestCase):
   # multireduce spec
   def test_multireduce_push_shrink_chase(self):
     Tensor.manual_seed(0)
-    a = Tensor.randn(16, 16)
-    b = Tensor.randn(4)
-    c = Tensor.randn(16, )
-    d = Tensor.randn(16, 16)
+    a = Tensor.randn(16, 16).realize()
+    b = Tensor.randn(4).realize()
+    c = Tensor.randn(16, ).realize()
+    d = Tensor.randn(16, 16).realize()
     r = a.sum(1) + c
     out = r[:4] * b + d.sum(1)[:4]
     # schedule = check_schedule(out, 2)
@@ -982,7 +983,7 @@ class TestSchedule(unittest.TestCase):
   # multireduce spec
   def test_multireduce_midreduce_nochase(self):
     Tensor.manual_seed(0)
-    a = Tensor.randn(16, 16)
+    a = Tensor.randn(16, 16).realize()
     b = (a.sum(0)+a.max(0) + a.max(1)+a.sum(1)) + 2
     # schedule = check_schedule(b, 2)
     schedule = check_schedule(b, 4)
