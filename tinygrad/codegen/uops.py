@@ -3,6 +3,7 @@ from typing import Iterator, Optional, Tuple, Any, Dict, List, DefaultDict, Set,
 import functools, itertools, heapq, math
 from collections import defaultdict
 from enum import Enum, auto
+import itertools
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, DType
 from tinygrad.shape.symbolic import sint, Variable
@@ -153,23 +154,26 @@ def replace_reduce(root):
     for x in p.vin:
       children[x].append(p)
 
-  new_uops = []
   still_range_uops = []
+  replacements = {}
   for r in root.vin[2:]:
-    if r.arg[1] and r.arg[0] == 1:
+    if r.arg[1]:
       # should be unrolled
       # get nodes on the path from root to the range node
-      for j in range(r.vin[0].arg, r.vin[1].arg):
-        replace = {r:UOp.const(r.dtype, j)}
-        to_replace = [r]
-        while len(to_replace):
-          t = to_replace.pop(0)
-          for cc in children[t]:
-            to_replace.append(cc)
-            replace[cc] = UOp(cc.uop, cc.dtype, tuple(replace.get(x, x) for x in cc.vin), cc.arg)
-        new_uops.append(replace[root.vin[0]])
+      replacements[r] = [UOp.const(r.dtype, j) for j in range(r.vin[0].arg, r.vin[1].arg)]
     else:
       still_range_uops.append(r)
+
+  new_uops = []
+  for rp in itertools.product(*replacements.values()):
+    replace = dict(zip(replacements.keys(), rp))
+    to_replace = list(replace.keys())
+    while len(to_replace):
+      t = to_replace.pop(0)
+      for cc in children[t]:
+        to_replace.append(cc)
+        replace[cc] = UOp(cc.uop, cc.dtype, tuple(replace.get(x, x) for x in cc.vin), cc.arg)
+    new_uops.append(replace[root.vin[0]])
 
   # TODO: DEFINE_ACC should have a const input
   acc = UOp(UOps.DEFINE_ACC, root.dtype, tuple(still_range_uops), (root.vin[1].arg, acc_number))
