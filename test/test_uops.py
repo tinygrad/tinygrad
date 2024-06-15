@@ -135,6 +135,7 @@ class TestNonFloatUOps(TestUOps):
   def test_where_float16(self):
     self._test_top_fxn(TernaryOps.WHERE, lambda a,b,c: b if a!=0 else c, (dtypes.bool, dtypes.float16, dtypes.float16))
 
+  @unittest.skip("no longer using BinaryOps.SUB")
   def test_neg_fold(self):
     data0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (0, True))
     data1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (1, False))
