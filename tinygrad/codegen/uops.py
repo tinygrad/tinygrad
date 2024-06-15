@@ -76,12 +76,7 @@ def uop_alu_resolve(u:UOp) -> sint:
 
 # *** simplification logic ***
 
-def upatfix(x: Any, dtype: Optional[Union[DType, Set[DType]]]) -> UPat:
-  if isinstance(x, UPat):
-    assert x.dtype in dtype if isinstance(dtype, set) else x.dtype == dtype, f'dtype missmatch: expected {dtype}, got:\n{x}'
-    return x
-  assert isinstance(x, int) or isinstance(x, float), f'float or int expected, got {x}'
-  return UPat.const(x, dtype)
+def upatfix(x: Any, dtype: Optional[Union[DType, Set[DType]]]) -> UPat: return x if isinstance(x, UPat) else UPat.const(x, dtype)
 
 @dataclass(frozen=True)
 class UPat:
@@ -93,14 +88,12 @@ class UPat:
   allow_len: Set[int] = field(default_factory=set)
 
   @staticmethod
-  def const(val: Union[int, float], dtype: Optional[Union[DType, Set[DType]]], name: Optional[str] = None):
-    return UPat(UOps.CONST, val, dtype=dtype, name=name)
+  def const(val: Optional[Union[int, float]], dtype: Optional[Union[DType, Set[DType]]], name: Optional[str] = None):
+    return UPat(UOps.CONST, val, dtype, name)
   @staticmethod
-  def var(name: str) -> UPat:
-    return UPat(name=name)
+  def var(name: str) -> UPat: return UPat(name=name)
 
   def nm(self, name: Optional[str]) -> UPat: return UPat(self.uop, self.arg, self.vin, name, self.dtype, self.allow_len)
-
   def recip(self, name:Optional[str]=None): return UPat(UOps.ALU, UnaryOps.RECIP, self, name, self.dtype)
   def __add__(self, x): return UPat(UOps.ALU, BinaryOps.ADD, [self, upatfix(x, self.dtype)], None, self.dtype)
   def __radd__(self, x): return UPat(UOps.ALU, BinaryOps.ADD, [upatfix(x, self.dtype), self], None, self.dtype)
@@ -210,7 +203,8 @@ constant_folder = PatternMatcher([
   # -(-x) -> x
   (-(-UPat.var('x')), lambda x: x),
   # x+-y -> x-y
-  (UPat.var('x')+(-UPat.var('y')), lambda x, y: x-y),
+  (UPat(UOps.ALU, BinaryOps.ADD, (UPat(name="x"), UPat(UOps.ALU, UnaryOps.NEG, name="my"))), lambda x, my: x-my.vin[0]),
+  #(UPat.var('x')+(-UPat.var('y')), lambda x, y: x-y),
   # -1*x -> -x
   (-1*UPat.var('x'), lambda x: -x),
   # bool < False is always false, True < bool is always false
