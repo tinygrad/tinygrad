@@ -481,8 +481,8 @@ class TestSchedule(unittest.TestCase):
   @unittest.skipUnless(getenv("SPLIT_REDUCEOP", 1), "Testing split reducop requires SPLIT_REDUCEOP")
   def test_preserve_multistage_reduce(self):
     big_enough = getenv("REDUCEOP_SPLIT_THRESHOLD", 32768)
-    x = Tensor.randn(big_enough, dtype=dtypes.float64)
-    out = (x - x.max()).max()
+    x = Tensor.randn(big_enough)
+    out = (x - x.max(keepdim=True)).max()
     run_schedule(check_schedule(out, 4))
     np.testing.assert_allclose(out.numpy(), (x.numpy() - x.numpy().max(keepdims=True)).max())
 
@@ -629,7 +629,7 @@ class TestSchedule(unittest.TestCase):
     out1 = b.max() + out0*2
     out2 = a.sum() + out1
     # run_schedule(check_schedule([out0, out1, out2], 1))
-    run_schedule(check_schedule([out0, out1, out2], 4), atol=1e-4, rtol=1e-6)
+    run_schedule(check_schedule([out0, out1, out2], 4))
     np.testing.assert_allclose(out0.numpy(), out0_np:=a.numpy().sum()+4, atol=1e-4, rtol=1e-6)
     np.testing.assert_allclose(out1.numpy(), out1_np:=b.numpy().max() + out0_np*2, atol=1e-4, rtol=1e-6)
     np.testing.assert_allclose(out2.numpy(), a.numpy().sum() + out1_np, atol=1e-4, rtol=1e-6)
