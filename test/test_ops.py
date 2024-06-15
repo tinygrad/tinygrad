@@ -1785,8 +1785,8 @@ class TestOps(unittest.TestCase):
 
   def test_one_hot(self):
     data = [13, 24, 45]
-    helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data), 6).type(torch.int32),
-                       lambda: Tensor(data).one_hot(6), forward_only=True)
+    helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data), 64).type(torch.int32),
+                       lambda: Tensor(data).one_hot(64), forward_only=True)
     data = [[[1, 2, 3], [0, 3, 5]], [[1, 2, 3], [0, 3, 5]]]
     helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data), 8).type(torch.int32),
                        lambda: Tensor(data).one_hot(8), forward_only=True)
