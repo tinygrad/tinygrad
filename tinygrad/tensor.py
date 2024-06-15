@@ -1228,7 +1228,7 @@ class Tensor:
 
   def unflatten(self, dim:int, sizes:Tuple[int,...]):
     """
-    Expands dimension `dim` of the tensor over multiple dimensions specified by `sizes`.
+    Unflattens dimension `dim` of the tensor into multiple dimensions specified by `sizes`. `Tensor.flatten()` is the inverse of this function.
 
     ```python exec="true" source="above" session="tensor" result="python"
     print(Tensor.ones(3, 4, 1).unflatten(1, (2, 2)).shape)
