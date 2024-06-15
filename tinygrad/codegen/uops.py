@@ -147,10 +147,37 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst):
 acc_number = 0
 def replace_reduce(root):
   global acc_number
+  parents = root.parents
+  children = defaultdict(list)
+  for p in parents:
+    for x in p.vin:
+      children[x].append(p)
+
+  new_uops = []
+  still_range_uops = []
+  for r in root.vin[2:]:
+    if r.arg[1] and r.arg[0] == 1:
+      # should be unrolled
+      # get nodes on the path from root to the range node
+      for j in range(r.vin[0].arg, r.vin[1].arg):
+        replace = {r:UOp.const(r.dtype, j)}
+        to_replace = [r]
+        while len(to_replace):
+          t = to_replace.pop(0)
+          for cc in children[t]:
+            to_replace.append(cc)
+            replace[cc] = UOp(cc.uop, cc.dtype, tuple(replace.get(x, x) for x in cc.vin), cc.arg)
+        new_uops.append(replace[root.vin[0]])
+    else:
+      still_range_uops.append(r)
+
   # TODO: DEFINE_ACC should have a const input
-  acc = UOp(UOps.DEFINE_ACC, root.dtype, root.vin[2:], (root.vin[1].arg, acc_number))
+  acc = UOp(UOps.DEFINE_ACC, root.dtype, tuple(still_range_uops), (root.vin[1].arg, acc_number))
   acc_number += 1
-  ret = UOp.alu(root.arg, acc, root.vin[0])
+  ret = acc
+  for xx in new_uops:
+    ret = UOp.alu(root.arg, ret, xx)
+  #ret = UOp.alu(root.arg, acc, root.vin[0])
   return UOp(UOps.PHI, ret.dtype, (acc, ret))
 
 # this is symbolic 2.0

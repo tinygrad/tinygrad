@@ -76,7 +76,8 @@ class Lowerer(Kernel):
     for i,g in enumerate(self.full_shape[self.global_dims:self.global_dims+self.local_dims]):
       self.idxs.append(UOp(UOps.SPECIAL, dtypes.int32, (), (self.local_dims-1-i, f"lidx{i}", g)))
     for i,g in enumerate(self.full_shape[self.first_reduce:]):
-      self.idxs.append(UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), UOp.const(dtypes.int32, g)), (i,0)))
+      unrolled = (self.first_reduce+i) >= (self.shape_len-self.upcasted)
+      self.idxs.append(UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), UOp.const(dtypes.int32, g)), (i,unrolled)))
 
     self.global_size = list(self.full_shape[:self.global_dims][::-1])
     self.local_size = list(self.full_shape[self.global_dims:self.global_dims+self.local_dims][::-1])
