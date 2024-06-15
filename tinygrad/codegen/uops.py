@@ -215,7 +215,7 @@ constant_folder = PatternMatcher([
   # -(-x) -> x
   (-(-UPat.var('x')), lambda x: x),
   # x+-y -> x-y
-  (UPat(UOps.ALU, BinaryOps.ADD, (UPat(name="x"), UPat(UOps.ALU, UnaryOps.NEG, name="my"))), lambda x, my: x-my.vin[0]), # TODO: #4978
+  (UPat.var('x')+(-UPat.var('y')), lambda x, y: x-y),
   # -1*x -> -x
   (-1*UPat.var('x'), lambda x: -x),
   # bool < False is always false, True < bool is always false
