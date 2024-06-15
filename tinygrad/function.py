@@ -113,13 +113,6 @@ class Add(Function):
     return grad_output if self.needs_input_grad[0] else None, \
            grad_output if self.needs_input_grad[1] else None
 
-class Sub(Function):
-  def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer: return x.e(BinaryOps.ADD, y.e(UnaryOps.NEG))
-
-  def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
-    return grad_output if self.needs_input_grad[0] else None, \
-           grad_output.e(UnaryOps.NEG) if self.needs_input_grad[1] else None
-
 class Mul(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
     self.x, self.y = x, y
