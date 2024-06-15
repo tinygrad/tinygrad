@@ -372,7 +372,13 @@ class Tensor:
 
     ```python exec="true" source="above" session="tensor" result="python"
     Tensor.manual_seed(42)
-    print(Tensor._seed)
+    print(Tensor.rand(5).numpy())
+    print(Tensor.rand(5).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)  # reset to the same seed
+    print(Tensor.rand(5).numpy())
+    print(Tensor.rand(5).numpy())
     ```
     """
     Tensor._seed, Tensor._rng_counter = seed, Tensor([0], dtype=dtypes.uint32, requires_grad=False)
