@@ -89,7 +89,7 @@ class UPat:
 
   @staticmethod
   def const(val: Optional[Union[int, float]], dtype: Optional[Union[DType, Set[DType]]], name: Optional[str] = None):
-    return UPat(UOps.CONST, val, dtype, name)
+    return UPat(UOps.CONST, val, name=name, dtype=dtype)
   @staticmethod
   def var(name: str) -> UPat: return UPat(name=name)
 
