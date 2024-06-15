@@ -126,7 +126,7 @@ jobs:
         ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
         ln -s /raid/weights/mixtral-8x7b-32kseqlen weights/mixtral-8x7b-32kseqlen
         ln -s /raid/weights/LLaMA-2 weights/LLaMA-2
-        ln - /raid/weights/LLaMA-3 weights/LLaMA-3
+        ln -s /raid/weights/LLaMA-3 weights/LLaMA-3
         mkdir -p extra/datasets
         ln -s /raid/datasets/imagenet extra/datasets/imagenet
     - name: Run model inference benchmark
@@ -281,6 +281,7 @@ jobs:
         ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
         ln -s /raid/weights/mixtral-8x7b-32kseqlen weights/mixtral-8x7b-32kseqlen
         ln -s /raid/weights/LLaMA-2 weights/LLaMA-2
+        ln -s /raid/weights/LLaMA-3 weights/LLaMA-3
         mkdir -p extra/datasets
         ln -s /raid/datasets/imagenet extra/datasets/imagenet
     - name: Show off tinybox
