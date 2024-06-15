@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, DType
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, exec_alu
-from tinygrad.helpers import prod, DEBUG, getenv
+from tinygrad.helpers import prod, DEBUG, getenv, flatten
 
 # the order of these UOps controls the order of the toposort
 class UOps(Enum):
@@ -53,7 +53,7 @@ class UOp:
   def __floordiv__(self, x): return UOp.alu(BinaryOps.IDIV, self, ufix(self.dtype, x))
   def __mod__(self, x): return UOp.alu(BinaryOps.MOD, self, ufix(self.dtype, x))
   def lt(self, x): return UOp.alu(BinaryOps.CMPLT, self, ufix(self.dtype, x))
-  def ge(self, x): return UOp.alu(BinaryOps.CMPLT, -self, -ufix(self.dtype, x)+1)
+  def ge(self, x): return -self.lt(x)
   @staticmethod
   def max(x, y): return UOp.alu(BinaryOps.MAX, x, y)
   @staticmethod
@@ -400,11 +400,14 @@ class UOpGraph:
     if extra_pm: sink = self.graph_rewrite(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
 
     # do upcasts (after reduce unrolls and rewrites)
-    all_parents = sink.parents
+    all_parents = set([sink]).union(sink.parents)
     expand_ranges = list(sorted(x for x in all_parents if x.uop is UOps.RANGE and x.arg[1] is True))
     if len(expand_ranges):
-      new_nodes = expand_nodes(all_parents, expand_ranges, sink.vin[0])
-      sink = UOp(UOps.SINK, None, tuple(new_nodes))
+      new_nodes = expand_nodes(all_parents, expand_ranges, sink)
+      sink = UOp(UOps.SINK, None, tuple(flatten([x.vin for x in new_nodes])))  # merge the sinks
+
+    # do graph rewrite (2)
+    sink = self.graph_rewrite(sink, constant_folder)
 
     # filter nodes that don't link to a sink
     # BFS toposort
