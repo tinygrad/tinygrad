@@ -46,7 +46,7 @@ class UOp:
   def cast(self, dtype): return UOp(UOps.CAST, dtype, (self,))
   def __neg__(self): return UOp.alu(UnaryOps.NEG, self)
   def __add__(self, x): return UOp.alu(BinaryOps.ADD, self, ufix(self.dtype, x))
-  def __sub__(self, x): return UOp.alu(BinaryOps.ADD, -self, ufix(self.dtype, x))
+  def __sub__(self, x): return UOp.alu(BinaryOps.ADD, self, -ufix(self.dtype, x))
   def __radd__(self, x): return UOp.alu(BinaryOps.ADD, ufix(self.dtype, x), self)  
   def __mul__(self, x): return UOp.alu(BinaryOps.MUL, self, ufix(self.dtype, x))
   def __rmul__(self, x): return UOp.alu(BinaryOps.MUL, ufix(self.dtype, x), self)
