@@ -76,34 +76,28 @@ def uop_alu_resolve(u:UOp) -> sint:
 
 # *** simplification logic ***
 
-def upatfix(x: Any, dtype: Optional[Union[DType, Set[DType]]]) -> UPat: return x if isinstance(x, UPat) else UPat.const(x, dtype)
-
+def upatfix(x: Any, dtype: UPatDType) -> UPat: return x if isinstance(x, UPat) else UPat.const(x, dtype)
 @dataclass(frozen=True)
 class UPat:
   uop: Optional[Union[UOps, Set[UOps]]] = None
   arg: Any = None
-  vin: Optional[Union[Tuple[UPat, ...], List[UPat], UPat]] = None
+  vin: UPatVin = None
   name: Optional[str] = None
-  dtype: Optional[Union[DType, Set[DType]]] = None
+  dtype: UPatDType = None
   allow_len: Set[int] = field(default_factory=set)
 
   @staticmethod
   def var(name: str) -> UPat: return UPat(name=name)
   @staticmethod
-  def const(val: Optional[Union[int, float]] = None, dtype: Optional[Union[DType, Set[DType]]] = None, name: Optional[str] = None):
-    return UPat(UOps.CONST, val, name=name, dtype=dtype)
+  def const(val: Optional[ConstType] = None, dtype: UPatDType = None, name: Optional[str] = None): return UPat(UOps.CONST, val, None, name, dtype)
   @staticmethod
-  def alu(op = None, vin: Optional[Union[Tuple[UPat, ...], List[UPat], UPat]] = None, name:Optional[str]=None):
-    return UPat(UOps.ALU, op, vin, name)
+  def alu(op = None, vin: UPatVin = None, name:Optional[str]=None): return UPat(UOps.ALU, op, vin, name)
   @staticmethod
-  def load(vin: Optional[Union[Tuple[UPat, ...], List[UPat], UPat]]=None, name:Optional[str]=None, dtype:Optional[Union[DType, Set[DType]]]=None):
-    return UPat(UOps.LOAD, vin=vin, name=name, dtype=dtype)
+  def load(vin: UPatVin = None, name: Optional[str] = None, dtype: UPatDType = None): return UPat(UOps.LOAD, vin=vin, name=name, dtype=dtype)
   @staticmethod
-  def store(vin: Optional[Union[Tuple[UPat, ...], List[UPat], UPat]]=None, name:Optional[str]=None, dtype:Optional[Union[DType, Set[DType]]]=None):
-    return UPat(UOps.STORE, vin=vin, name=name, dtype=dtype)
+  def store(vin: UPatVin = None, name: Optional[str] = None, dtype: UPatDType = None): return UPat(UOps.STORE, vin=vin, name=name, dtype=dtype)
   @staticmethod
-  def where(gate: UPat, a: UPat, b: UPat, name:Optional[str]=None):
-    return UPat.alu(TernaryOps.WHERE, (gate, a, b), name)
+  def where(gate: UPat, a: UPat, b: UPat, name: Optional[str] = None): return UPat.alu(TernaryOps.WHERE, (gate, a, b), name)
 
   def nm(self, name: Optional[str]) -> UPat: return UPat(self.uop, self.arg, self.vin, name, self.dtype, self.allow_len)
   def recip(self, name:Optional[str]=None): return UPat.alu(UnaryOps.RECIP, self, name=name)
@@ -118,6 +112,8 @@ class UPat:
   def __rfloordiv__(self, x): return UPat.alu(BinaryOps.IDIV, (upatfix(x, self.dtype), self))
   def __truediv__(self, x): return self * upatfix(x, self.dtype).recip()
   def __rtruediv__(self, x): return self.recip() * upatfix(x, self.dtype)
+UPatVin = Optional[Union[Tuple[UPat, ...], List[UPat], UPat]]
+UPatDType = Optional[Union[DType, Set[DType]]]
 
 T = TypeVar("T")
 def __unmatch(m1:Union[T, Set[T]], m2:T) -> bool:
