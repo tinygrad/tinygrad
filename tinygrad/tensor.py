@@ -2337,6 +2337,26 @@ class Tensor:
     """
     return F.Add.apply(*self._broadcasted(x, reverse))
 
+  def sub(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
+    """
+    Subtracts `x` from `self`.
+    Equivalent to `self - x`.
+    Supports broadcasting to a common shape, type promotion, and integer, float, boolean inputs.
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(4)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.sub(20).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.sub(Tensor([[2.0], [3.5]])).numpy())
+    ```
+    """
+    a, b = self._broadcasted(x, reverse)
+    return F.Add.apply(a, -b)
+
   def mul(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
     Multiplies `self` and `x`.
