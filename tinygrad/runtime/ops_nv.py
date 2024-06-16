@@ -596,7 +596,7 @@ class NVDevice(Compiled):
       if signal[0] >= value: return
     raise RuntimeError(f"wait_result: {timeout} ms TIMEOUT!")
 
-  def _new_gpu_fifo(self, gpfifo_area, ctxshare, channel_group, offset=0, entries=0x400):
+  def _new_gpu_fifo(self, gpfifo_area, ctxshare, channel_group, offset=0, entries=0x400) -> GPFifo:
     notifier = self._gpu_system_alloc(48 << 20)
     params = nv_gpu.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS(hObjectError=notifier.hMemory, hObjectBuffer=gpfifo_area.hMemory,
       gpFifoOffset=gpfifo_area.base+offset, gpFifoEntries=entries, hContextShare=ctxshare,
