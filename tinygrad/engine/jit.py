@@ -82,7 +82,7 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
         if ji.prg.p.vars: self.jc_idx_with_updatable_var_vals.append(j)
         if (ji.prg.p.global_size and not all_int(ji.prg.p.global_size)) or (ji.prg.p.local_size and not all_int(ji.prg.p.local_size)):
           self.jc_idx_with_updatable_launch_dims.append(j)
-    self.vars = list(var_vals.keys())
+    self.vars = sorted(var_vals.keys(), key=lambda v: v.expr)
     super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), jit_cache[0].prg.dname.split(":")[0], op_estimate, mem_estimate)
 
 class MultiGraphRunner(GraphRunner):  # pylint: disable=abstract-method
