@@ -11,12 +11,10 @@ row_count = cur.execute(f"select count(*) from 'process_replay_{VERSION}'").fetc
 for offset in tqdm(range(0, row_count, page_size)):
   cur.execute(f"SELECT val FROM 'process_replay_{VERSION}' LIMIT ? OFFSET ?", (page_size, offset))
   for row in cur.fetchall():
-    compare_k: Linearizer = pickle.loads(row[0])
-    compare_src = compare_k.opts.render("test", compare_k.uops)
+    compare_k, compare_src = pickle.loads(row[0])
     k = Linearizer(*compare_k.ast, opts=compare_k.opts)
     for opt in compare_k.applied_opts: k.apply_opt(opt)
-    good_uops = k.linearize().uops
-    good_src = k.opts.render("test", good_uops)
+    good_src = k.opts.render(compare_k.name, k.linearize().uops)
     try: assert compare_src == good_src
     except AssertionError as e:
       print("PROCESS REPLAY FAILED")
