@@ -1,6 +1,7 @@
 from __future__ import annotations
 import os, ctypes, pathlib, re, fcntl, functools, mmap, struct, tempfile, hashlib, subprocess, time, array
 from typing import Tuple, List, Any, cast
+from dataclasses import dataclass
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, BufferOptions
 from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up, to_char_p_p, DEBUG, prod
 from tinygrad.renderer.cstyle import NVRenderer
@@ -116,24 +117,24 @@ class HWQueue:
     # From now on, the queue is on the device for faster submission.
     self.q = hw_view # type: ignore
 
-  def _submit(self, dev, gpu_ring, put_value, gpfifo_entries, gpfifo_token, gpu_ring_controls):
-    if len(self.q) == 0: return put_value
+  def _submit(self, dev, gpfifo:GPFifo):
+    if len(self.q) == 0: return
 
     if dev == self.binded_device: cmdq_addr = self.hw_page.base
     else:
       if dev.cmdq_wptr + len(self.q) * 4 > dev.cmdq_page.length:
-        assert (gpu_ring[gpu_ring_controls.GPGet] & 0xFFFFFFFFFC) >= dev.cmdq_page.base + len(self.q) * 4 or \
-               gpu_ring_controls.GPGet == gpu_ring_controls.GPPut, "cmdq overrun"
+        assert (gpfifo.ring[gpfifo.controls.GPGet] & 0xFFFFFFFFFC) >= dev.cmdq_page.base + len(self.q) * 4 or \
+               gpfifo.controls.GPGet == gpfifo.controls.GPPut, "cmdq overrun"
         dev.cmdq_wptr = 0
 
       dev.cmdq[dev.cmdq_wptr//4:dev.cmdq_wptr//4+len(self.q)] = array.array('I', self.q)
       cmdq_addr = dev.cmdq_page.base+dev.cmdq_wptr
       dev.cmdq_wptr += len(self.q) * 4
 
-    gpu_ring[put_value % gpfifo_entries] = (cmdq_addr//4 << 2) | (len(self.q) << 42) | (1 << 41)
-    gpu_ring_controls.GPPut = (put_value + 1) % gpfifo_entries
-    dev.gpu_mmio[0x90 // 4] = gpfifo_token
-    return put_value + 1
+    gpfifo.ring[gpfifo.put_value % gpfifo.entries_count] = (cmdq_addr//4 << 2) | (len(self.q) << 42) | (1 << 41)
+    gpfifo.controls.GPPut = (gpfifo.put_value + 1) % gpfifo.entries_count
+    dev.gpu_mmio[0x90 // 4] = gpfifo.token
+    gpfifo.put_value += 1
 
 class HWComputeQueue(HWQueue):
   def __init__(self):
@@ -182,8 +183,7 @@ class HWComputeQueue(HWQueue):
     self.ptr_to_global_dims[cmd_ptr][:] = array.array('I', global_size)
     self.ptr_to_local_dims[cmd_ptr][:] = array.array('H', local_size)
 
-  def submit(self, dev:NVDevice): dev.compute_put_value = self._submit(dev, dev.compute_gpu_ring, dev.compute_put_value, dev.compute_gpfifo_entries,
-                                                                       dev.compute_gpfifo_token, dev.compute_gpu_ring_controls)
+  def submit(self, dev:NVDevice): self._submit(dev, dev.compute_gpfifo)
 
 class HWCopyQueue(HWQueue):
   def copy(self, dest, src, copy_size):
@@ -199,8 +199,7 @@ class HWCopyQueue(HWQueue):
     self.next_cmd_index += 1
     return self
 
-  def submit(self, dev:NVDevice): dev.dma_put_value = self._submit(dev, dev.dma_gpu_ring, dev.dma_put_value, dev.dma_gpfifo_entries,
-                                                                   dev.dma_gpfifo_token, dev.dma_gpu_ring_controls)
+  def submit(self, dev:NVDevice): self._submit(dev, dev.dma_gpfifo)
 
 SHT_PROGBITS, SHT_NOBITS, SHF_ALLOC, SHF_EXECINSTR = 0x1, 0x8, 0x2, 0x4
 class NVProgram:
@@ -373,6 +372,14 @@ class NVAllocator(LRUAllocator):
 
   def offset(self, buf, size:int, offset:int): return type(buf)(base=buf.base + offset, va_addr=buf.va_addr + offset, length=size)
 
+@dataclass
+class GPFifo:
+  ring: memoryview
+  controls: nv_gpu.AmpereAControlGPFifo
+  entries_count: int
+  token: int
+  put_value: int = 0
+
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
 class NVDevice(Compiled):
   root = None
@@ -528,22 +535,13 @@ class NVDevice(Compiled):
     channel_params = nv_gpu.NV_CHANNEL_GROUP_ALLOCATION_PARAMETERS(engineType=nv_gpu.NV2080_ENGINE_TYPE_GRAPHICS)
     channel_group = rm_alloc(self.fd_ctl, nv_gpu.KEPLER_CHANNEL_GROUP_A, self.root, self.device, channel_params).hObjectNew
 
-    gpfifo = self._gpu_alloc(0x200000, contig=True, huge_page=True, map_to_cpu=True, map_flags=0x10d0000)
+    gpfifo_area = self._gpu_alloc(0x200000, contig=True, huge_page=True, map_to_cpu=True, map_flags=0x10d0000)
 
     ctxshare_params = nv_gpu.NV_CTXSHARE_ALLOCATION_PARAMETERS(hVASpace=vaspace, flags=nv_gpu.NV_CTXSHARE_ALLOCATION_FLAGS_SUBCONTEXT_ASYNC)
     ctxshare = rm_alloc(self.fd_ctl, nv_gpu.FERMI_CONTEXT_SHARE_A, self.root, channel_group, ctxshare_params).hObjectNew
 
-    self.compute_gpfifo_entries: int = 0x10000
-    self.compute_gpfifo_token: int = self._gpu_fifo_setup(gpfifo, ctxshare, channel_group, offset=0, entries=self.compute_gpfifo_entries)
-    self.compute_gpu_ring: memoryview = to_mv(gpfifo.base, self.compute_gpfifo_entries * 8).cast("Q")
-    self.compute_gpu_ring_controls = nv_gpu.AmpereAControlGPFifo.from_address(gpfifo.base + self.compute_gpfifo_entries * 8)
-    self.compute_put_value: int = 0
-
-    self.dma_gpfifo_entries: int = 0x10000
-    self.dma_gpfifo_token: int = self._gpu_fifo_setup(gpfifo, ctxshare, channel_group, offset=0x100000, entries=self.dma_gpfifo_entries)
-    self.dma_gpu_ring: memoryview = to_mv(gpfifo.base + 0x100000, self.dma_gpfifo_entries * 8).cast("Q")
-    self.dma_gpu_ring_controls = nv_gpu.AmpereAControlGPFifo.from_address(gpfifo.base + 0x100000 + self.dma_gpfifo_entries * 8)
-    self.dma_put_value: int = 0
+    self.compute_gpfifo = self._new_gpu_fifo(gpfifo_area, ctxshare, channel_group, offset=0, entries=0x10000)
+    self.dma_gpfifo = self._new_gpu_fifo(gpfifo_area, ctxshare, channel_group, offset=0x100000, entries=0x10000)
 
     en_fifo_params = nv_gpu.NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS(bEnable=1)
     rm_control(self.fd_ctl, nv_gpu.NVA06C_CTRL_CMD_GPFIFO_SCHEDULE, self.root, channel_group, en_fifo_params)
@@ -598,11 +596,11 @@ class NVDevice(Compiled):
       if signal[0] >= value: return
     raise RuntimeError(f"wait_result: {timeout} ms TIMEOUT!")
 
-  def _gpu_fifo_setup(self, gpfifo, ctxshare, channel_group, offset, entries=0x400):
+  def _new_gpu_fifo(self, gpfifo_area, ctxshare, channel_group, offset=0, entries=0x400):
     notifier = self._gpu_system_alloc(48 << 20)
-    params = nv_gpu.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS(hObjectError=notifier.hMemory, hObjectBuffer=gpfifo.hMemory,
-      gpFifoOffset=gpfifo.base+offset, gpFifoEntries=entries, hContextShare=ctxshare,
-      hUserdMemory=(ctypes.c_uint32*8)(gpfifo.hMemory), userdOffset=(ctypes.c_uint64*8)(entries*8+offset))
+    params = nv_gpu.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS(hObjectError=notifier.hMemory, hObjectBuffer=gpfifo_area.hMemory,
+      gpFifoOffset=gpfifo_area.base+offset, gpFifoEntries=entries, hContextShare=ctxshare,
+      hUserdMemory=(ctypes.c_uint32*8)(gpfifo_area.hMemory), userdOffset=(ctypes.c_uint64*8)(entries*8+offset))
     gpfifo = rm_alloc(self.fd_ctl, nv_gpu.AMPERE_CHANNEL_GPFIFO_A, self.root, channel_group, params).hObjectNew
     rm_alloc(self.fd_ctl, self.compute_type, self.root, gpfifo, None)
     rm_alloc(self.fd_ctl, nv_gpu.AMPERE_DMA_COPY_B, self.root, gpfifo, None)
@@ -615,7 +613,8 @@ class NVDevice(Compiled):
     uvm.register_channel(self.fd_uvm, gpuUuid=nv_gpu.struct_nv_uuid(uuid=self.gpu_uuid), rmCtrlFd=self.fd_ctl, hClient=self.root,
                          hChannel=gpfifo, base=channel_base, length=0x4000000)
 
-    return ws_token_params.workSubmitToken
+    return GPFifo(ring=to_mv(gpfifo_area.base + offset, entries * 8).cast("Q"), entries_count=entries, token=ws_token_params.workSubmitToken,
+                  controls=nv_gpu.AmpereAControlGPFifo.from_address(gpfifo_area.base + offset + entries * 8))
 
   def _cmdq_setup_compute_gpfifo(self):
     self.slm_per_thread = 0x900
