@@ -12,7 +12,7 @@ from tinygrad.helpers import prod, DEBUG, getenv
 # the order of these UOps controls the order of the toposort
 class UOps(Enum):
   # ops that aren't rendered
-  SINK = auto()
+  SINK = auto(); VAR = auto() # noqa: E702
   DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # noqa: E702
   CONST = auto(); SPECIAL = auto() # noqa: E702
   NOOP = auto(); UNMUL = auto(); GEP = auto() # noqa: E702
@@ -25,8 +25,6 @@ class UOps(Enum):
   BARRIER = auto(); IF = auto(); RANGE = auto() # noqa: E702
   # these two are not graph nodes
   ENDRANGE = auto(); ENDIF = auto() # noqa: E702
-  # has to be at the end because otherwise it will mess up descriminants of other enum variants and process replay will freak out
-  VAR = auto()
 
 def ufix(dtype: Optional[DType], x): return UOp.const(dtype, x) if not isinstance(x, UOp) else x
 @dataclass(eq=False)
