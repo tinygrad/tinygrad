@@ -18,7 +18,7 @@ class UnaryOps(Enum):
 class BinaryOps(Enum):
   """A + A -> A (elementwise)"""
   ADD = auto(); SUB = auto(); MUL = auto(); IDIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); CMPNE = auto(); XOR = auto() # noqa: E702
-  SHR = auto(); SHL = auto() # noqa: E702
+  SHL = auto(); SHR = auto(); OR = auto(); AND = auto() # noqa: E702
 class TernaryOps(Enum):
   """A + A + A -> A (elementwise)"""
   WHERE = auto(); MULACC = auto() # noqa: E702
@@ -121,7 +121,7 @@ python_alu = {
   UnaryOps.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan, UnaryOps.SIN: math.sin,
   UnaryOps.RECIP: lambda x: 1/x if x != 0 else float('inf'),
   UnaryOps.NEG: lambda x: (not x) if isinstance(x, bool) else -x,
-  BinaryOps.SHR: operator.rshift, BinaryOps.SHL: operator.lshift,
+  BinaryOps.SHL: operator.lshift, BinaryOps.SHR: operator.rshift, BinaryOps.OR: operator.or_, BinaryOps.AND: operator.and_,
   BinaryOps.MUL: operator.mul, BinaryOps.ADD: operator.add, BinaryOps.SUB: operator.sub,
   BinaryOps.XOR: operator.xor, BinaryOps.MAX: max, BinaryOps.CMPNE: operator.ne, BinaryOps.CMPLT: operator.lt,
   BinaryOps.MOD: lambda x,y: abs(int(x))%abs(int(y))*(1,-1)[x<0], BinaryOps.IDIV: lambda x, y: int(x/y) if y != 0 else x*math.inf,
