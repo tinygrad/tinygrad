@@ -189,7 +189,7 @@ constant_folder = PatternMatcher([
   (UPat(UOps.DEFINE_ACC, name="root", vin=tuple()), lambda root: UOp.const(root.dtype, root.arg[0])),
   (UPat(UOps.GEP, name="root", vin=(UPat(UOps.CONST, name="x"),)), lambda root,x: UOp.const(root.dtype, x.arg)),
   # max -2147483648
-  (UOp.max(UOp.var('x'), UOp.const(None, -2147483648)), lambda x: x),
+  (UOp.max(UOp.var('x'), UOp.const(dtypes.int, -2147483648)), lambda x: x),
   # -(-x) -> x
   (-(-UOp.var('x')), lambda x: x),
   # x+-y -> x-y
