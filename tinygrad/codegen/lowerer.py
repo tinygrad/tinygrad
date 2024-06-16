@@ -120,8 +120,8 @@ class Lowerer(Kernel):
     local_idxs, loop_local_idxs = get_grouped_dims("lidx", self.global_dims, self.full_shape[self.global_dims:self.first_reduce+self.group_for_reduces], 3 if self.opts.has_local else 0)  # noqa: E501
     self.idxs = global_idxs + local_idxs
 
-    for i,g in enumerate(self.full_shape[self.first_reduce+self.group_for_reduces:]):
-      unrolled = (self.first_reduce+i) >= (self.shape_len-self.upcasted)
+    for i,g in enumerate(self.full_shape[self.first_reduce+self.group_for_reduces:], start=self.first_reduce+self.group_for_reduces):
+      unrolled = i >= (self.shape_len-self.upcasted)
       self.idxs.append(UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), UOp.const(dtypes.int32, g)), (i,unrolled)))
 
     # late indexes
