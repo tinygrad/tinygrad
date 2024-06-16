@@ -2,7 +2,7 @@ import math
 from typing import Union, Tuple
 
 from tinygrad import Tensor, nn, dtypes
-from tinygrad.helpers import prod, argfix, getenv, all_int
+from tinygrad.helpers import prod, argfix
 
 # rejection sampling truncated randn
 def rand_truncn(*shape, dtype=None, truncstds=2, **kwargs) -> Tensor:
