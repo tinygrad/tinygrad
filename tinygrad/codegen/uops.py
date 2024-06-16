@@ -12,7 +12,7 @@ from tinygrad.helpers import prod, DEBUG, getenv
 # the order of these UOps controls the order of the toposort
 class UOps(Enum):
   # ops that aren't rendered
-  SINK = auto()
+  SINK = auto(); VAR = auto()
   DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # noqa: E702
   CONST = auto(); SPECIAL = auto() # noqa: E702
   NOOP = auto(); UNMUL = auto(); GEP = auto() # noqa: E702
@@ -26,7 +26,7 @@ class UOps(Enum):
   # these two are not graph nodes
   ENDRANGE = auto(); ENDIF = auto() # noqa: E702
 
-def ufix(dtype, x): return UOp.const(dtype, x) if not isinstance(x, UOp) else x
+def ufix(dtype: Optional[DType], x): return UOp.const(dtype, x) if not isinstance(x, UOp) else x
 @dataclass(eq=False)
 class UOp:
   uop: UOps
@@ -34,6 +34,8 @@ class UOp:
   vin: Tuple[UOp, ...] = tuple()
   arg: Any = None
   def tuple(self): return (self.uop, self.dtype, self.vin, self.arg)
+  def commutative(self) -> bool:
+    return self.uop is UOps.ALU and self.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR}
   @functools.cached_property
   def cmp_tuple(self):
     # NOTE: this sort of DEFINE_VAR shouldn't have to be here. only for PTX
@@ -43,6 +45,7 @@ class UOp:
   def __repr__(self):
     return f"{str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.uop for x in self.vin]):32s} {self.arg}"
   def cast(self, dtype): return UOp(UOps.CAST, dtype, (self,))
+  def name(self, name:Optional[str]): return UOp(UOps.VAR, vin=(self,), arg=name)
   def __neg__(self): return UOp.alu(UnaryOps.NEG, self)
   def __add__(self, x): return UOp.alu(BinaryOps.ADD, self, ufix(self.dtype, x))
   def __radd__(self, x): return UOp.alu(BinaryOps.ADD, ufix(self.dtype, x), self)
@@ -56,11 +59,13 @@ class UOp:
   @staticmethod
   def min(x, y): return -UOp.alu(BinaryOps.MAX, -x, -y)
   @staticmethod
-  def const(dtype:DType, b:ConstType|Variable):
+  def const(dtype:Optional[DType], b:ConstType|Variable):
     if isinstance(b, Variable): return UOp(UOps.DEFINE_VAR, dtype, (), b)
-    return UOp(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype))
+    return UOp(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
   @staticmethod
   def alu(arg, *vin:UOp): return UOp(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else vin[-1].dtype, vin, arg)
+  @staticmethod
+  def var(name: Optional[str]=None, dtype: Optional[DType]=None): return UOp(UOps.VAR, dtype=dtype, arg=name)
   @functools.cached_property
   def parents(self) -> Set[UOp]: return set.union(set(self.vin), *[x.parents for x in self.vin])
   def vars(self) -> Set[UOp]: return set([x for x in set.union(set([self]), self.parents) if x.uop is UOps.DEFINE_VAR])
@@ -84,6 +89,11 @@ class UPat:
   name: Optional[str] = None
   dtype: Optional[Union[DType, Set[DType]]] = None
   allow_len: Set[int] = field(default_factory=set)
+
+  @staticmethod
+  def compile(u: UOp, name:Optional[str]=None) -> UPat:
+    if u.uop is UOps.VAR: return UPat(name=name or u.arg, dtype=u.dtype) if len(u.vin) == 0 else UPat.compile(u.vin[0], name or u.arg)
+    return UPat(u.uop, u.arg, (list if u.commutative() else tuple)([UPat.compile(vin) for vin in u.vin]), name, u.dtype)
 
 T = TypeVar("T")
 def __unmatch(m1:Union[T, Set[T]], m2:T) -> bool:
@@ -111,11 +121,12 @@ def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
   return False
 
 class PatternMatcher:
-  def __init__(self, patterns:List[Tuple[UPat, Callable]]):
+  def __init__(self, patterns:List[Tuple[Union[UPat, UOp], Callable]]):
     self.patterns = patterns
     self.pdict: DefaultDict[Tuple[UOps, Any], List[Tuple[UPat, Callable]]] = defaultdict(list)
     # uop is required, arg is optional
     for p,fxn in self.patterns:
+      if isinstance(p, UOp): p = UPat.compile(p)
       assert p.uop is not None
       if isinstance(p.uop, set):
         for uop in p.uop: self.pdict[(uop, p.arg)].append((p, fxn))
@@ -177,13 +188,13 @@ constant_folder = PatternMatcher([
   (UPat(UOps.DEFINE_ACC, name="root", vin=tuple()), lambda root: UOp.const(root.dtype, root.arg[0])),
   (UPat(UOps.GEP, name="root", vin=(UPat(UOps.CONST, name="x"),)), lambda root,x: UOp.const(root.dtype, x.arg)),
   # max -2147483648
-  (UPat(UOps.ALU, BinaryOps.MAX, dtype=dtypes.int, vin=[UPat(name="x"), UPat(UOps.CONST, -2147483648)]), lambda x: x),
+  (UOp.max(UOp.var('x'), UOp.const(None, -2147483648)), lambda x: x),
   # -(-x) -> x
-  (UPat(UOps.ALU, UnaryOps.NEG, (UPat(UOps.ALU, UnaryOps.NEG, (UPat(name="x"),)))), lambda x: x),
+  (-(-UOp.var('x')), lambda x: x),
   # x+-y -> x-y
-  (UPat(UOps.ALU, BinaryOps.ADD, [UPat(name="x"), UPat(UOps.ALU, UnaryOps.NEG, name="my")]), lambda x, my: x-my.vin[0]),
+  (UOp.var('x')+(-UOp.var('y')), lambda x, y: x-y),
   # -1*x -> -x
-  (UPat(UOps.ALU, BinaryOps.MUL, [UPat(name="x"), UPat(UOps.CONST, -1)]), lambda x: -x),
+  (-1*UOp.var('x'), lambda x: -x),
   # bool < False is always false, True < bool is always false
   (UPat(UOps.ALU, BinaryOps.CMPLT, (UPat(), UPat(UOps.CONST, False, name="x", dtype=dtypes.bool))), lambda x: x),
   (UPat(UOps.ALU, BinaryOps.CMPLT, (UPat(UOps.CONST, True, name="x", dtype=dtypes.bool), UPat())), lambda x: UOp.const(dtypes.bool, False)),
@@ -193,17 +204,16 @@ constant_folder = PatternMatcher([
   # ** constant folding **
   (UPat(UOps.ALU, name="root", vin=UPat(UOps.CONST)), lambda root: UOp.const(root.dtype, exec_alu(root.arg, root.dtype, [x.arg for x in root.vin]))),
   # ** self folding **
-  (UPat(UOps.ALU, BinaryOps.ADD, [UPat(name="x"), UPat(UOps.CONST, 0)]), lambda x: x),   # x+0 -> x or 0+x -> x
-  (UPat(UOps.ALU, BinaryOps.MUL, [UPat(name="x"), UPat(UOps.CONST, 1)]), lambda x: x),   # x*1 -> x or 1*x -> x
-  (UPat(UOps.ALU, BinaryOps.SUB, (UPat(name="x"), UPat(UOps.CONST, 0))), lambda x: x),   # x-0 -> x
-  (UPat(UOps.ALU, BinaryOps.IDIV, (UPat(name="x"), UPat(UOps.CONST, 1))), lambda x: x),   # x/1 -> x
-  (UPat(UOps.ALU, BinaryOps.IDIV, (UPat(name="x"), UPat(UOps.CONST, -1))), lambda x: -x), # x/-1 -> -x
+  (UOp.var('x') + 0, lambda x: x),    # x+0 -> x
+  (UOp.var('x') - 0, lambda x: x),    # x-0 -> x
+  (UOp.var('x') * 1, lambda x: x),    # x*1 -> x
+  (UOp.var('x') // 1, lambda x: x),    # x/1 -> x
+  (UOp.var('x') // -1, lambda x: -x), # x/-1 -> -x
   # ** zero folding **
   #x*0 -> 0 or 0*x -> 0
   #if x is nan it should render the nan value.
-  (UPat(UOps.ALU, BinaryOps.MUL, [UPat(name="x"), UPat(UOps.CONST, 0, name="c")]),
-     lambda x,c: x if isinstance(x.arg, float) and math.isnan(x.arg) else c),
-  (UPat(UOps.ALU, BinaryOps.SUB, (UPat(name="x"), UPat(name="x"))), lambda x: UOp.const(x.dtype, 0)),   # x-x -> 0
+  (UOp.var('x') * 0, lambda x: x if isinstance(x.arg, float) and math.isnan(x.arg) else UOp.const(x.dtype, 0)),
+  (UOp.var('x') - UOp.var('x'), lambda x: UOp.const(x.dtype, 0)),   # x-x -> 0
   # ** load/store folding **
   (UPat(UOps.STORE, vin=(UPat(name="buf"), UPat(name="idx"),
                                UPat(UOps.LOAD, vin=(UPat(name="buf"), UPat(name="idx"))))), lambda buf, idx: UOp(UOps.NOOP)),
