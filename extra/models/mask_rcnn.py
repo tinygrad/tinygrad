@@ -4,6 +4,7 @@ import os
 import numpy as np
 from pathlib import Path
 from tinygrad import nn, Tensor, dtypes
+from tinygrad.tensor import _to_np_dtype
 from tinygrad.helpers import get_child, fetch
 from tinygrad.nn.state import torch_load
 from extra.models.resnet import ResNet
@@ -1217,7 +1218,7 @@ def to_image_list(tensors, size_divisible=32):
       max_size = tuple(max_size)
 
     batch_shape = (len(tensors),) + max_size
-    batched_imgs = np.zeros(batch_shape, dtype=tensors[0].dtype.np)
+    batched_imgs = np.zeros(batch_shape, dtype=_to_np_dtype(tensors[0].dtype))
     for img, pad_img in zip(tensors, batched_imgs):
       pad_img[: img.shape[0], : img.shape[1], : img.shape[2]] += img.numpy()
 

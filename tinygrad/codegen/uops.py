@@ -4,7 +4,7 @@ import functools, itertools, heapq, math
 from collections import defaultdict
 from enum import Enum, auto
 from dataclasses import dataclass, field
-from tinygrad.dtype import dtypes, DType
+from tinygrad.dtype import ConstType, dtypes, DType
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, exec_alu
 from tinygrad.helpers import prod, DEBUG, getenv, flatten
@@ -58,7 +58,9 @@ class UOp:
   @staticmethod
   def min(x, y): return -UOp.alu(BinaryOps.MAX, -x, -y)
   @staticmethod
-  def const(dtype, val): return UOp(UOps.CONST, dtype, arg=dtypes.as_const(val, dtype))
+  def const(dtype:DType, b:ConstType|Variable):
+    if isinstance(b, Variable): return UOp(UOps.DEFINE_VAR, dtype, (), b)
+    return UOp(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype))
   @staticmethod
   def alu(arg, *vin:UOp): return UOp(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else vin[-1].dtype, vin, arg)
   @functools.cached_property
@@ -232,7 +234,7 @@ constant_folder = PatternMatcher([
   # -(-x) -> x
   (UPat(UOps.ALU, UnaryOps.NEG, (UPat(UOps.ALU, UnaryOps.NEG, (UPat(name="x"),)))), lambda x: x),
   # x+-y -> x-y
-  (UPat(UOps.ALU, BinaryOps.ADD, (UPat(name="x"), UPat(UOps.ALU, UnaryOps.NEG, name="my"))), lambda x, my: x-my.vin[0]),
+  (UPat(UOps.ALU, BinaryOps.ADD, [UPat(name="x"), UPat(UOps.ALU, UnaryOps.NEG, name="my")]), lambda x, my: x-my.vin[0]),
   # -1*x -> -x
   (UPat(UOps.ALU, BinaryOps.MUL, [UPat(name="x"), UPat(UOps.CONST, -1)]), lambda x: -x),
   # bool < False is always false, True < bool is always false
@@ -347,14 +349,10 @@ class UOpGraph:
         changed += recurse_cnt
         # NOTE: this changes UOp, so we have to delete caches
         up.vin = tuple(rewrite(x) for x in up.vin)
-        try: del up.parents
-        except AttributeError: pass
-        try: del up.cmp_tuple
-        except AttributeError: pass
+        if 'parents' in up.__dict__: delattr(up, 'parents')
+        if 'cmp_tuple' in up.__dict__: delattr(up, 'cmp_tuple')
         # replace with cached nodes
-        if found:=self.nodes.get(key:=up.tuple()): return found
-        self.nodes[key] = up
-        return up
+        return self.nodes.setdefault(up.tuple(), up)
       sink = rewrite(sink)
       run_cnt += 1
       assert run_cnt < 100, "exceeded 100 rewrite loops!"
