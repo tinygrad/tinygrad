@@ -49,17 +49,12 @@ def get_reduce_acc(reduceop:LazyOp):
     if dtypes.is_int(reduceop.dtype): return 0 if dtypes.is_unsigned(reduceop.dtype) else -2**(reduceop.dtype.itemsize*8-1)
     return -math.inf if dtypes.is_float(reduceop.dtype) else False
 
-def to_range(x):
-  if x.uop != UOps.RANGE:
-    return UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), UOp.const(dtypes.int32, x.arg[2])), (-1, False))
-  return x
-
 uop_graphed = False
 class Lowerer(Kernel):
   def to_uop(self, x:LazyOp) -> UOp:
     #print(x.op)
     if x.op in BufferOps:
-      idx, valid = st_to_uops(x.arg.st, self.idxs)
+      idx, valid = st_to_uops(x.arg.st, self.ridxs if x.op is BufferOps.LOAD and x.arg.idx == -1 else self.idxs)
       # TODO: check has_valid in UPat, not here
       has_valid = valid.uop is not UOps.CONST or valid.arg is not True
       if x.op is BufferOps.CONST:
@@ -79,7 +74,8 @@ class Lowerer(Kernel):
       return UOp(UOps.CAST, x.arg, in_uops)
     if x.op in ReduceOps:
       op = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[x.op]
-      return UOp(UOps.REDUCE, x.dtype, (in_uops[0], UOp.const(x.dtype, get_reduce_acc(x))) + tuple(to_range(self.idxs[i]) for i in x.arg), op)
+      # NOTE: always using ridxs is fine here
+      return UOp(UOps.REDUCE, x.dtype, (in_uops[0], UOp.const(x.dtype, get_reduce_acc(x))) + tuple(self.ridxs[i] for i in x.arg), op)
     return UOp.alu(x.op, *in_uops)
 
   def linearize(self) -> Lowerer:
@@ -124,9 +120,14 @@ class Lowerer(Kernel):
     local_idxs, loop_local_idxs = get_grouped_dims("lidx", self.global_dims, self.full_shape[self.global_dims:self.first_reduce+self.group_for_reduces], 3 if self.opts.has_local else 0)  # noqa: E501
     self.idxs = global_idxs + local_idxs
 
-    for i,g in enumerate(self.full_shape[self.first_reduce:]):
+    for i,g in enumerate(self.full_shape[self.first_reduce+self.group_for_reduces:]):
       unrolled = (self.first_reduce+i) >= (self.shape_len-self.upcasted)
       self.idxs.append(UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), UOp.const(dtypes.int32, g)), (i,unrolled)))
+
+    # late indexes
+    self.ridxs = self.idxs[:]
+    for a in range(self.first_reduce, self.first_reduce+self.group_for_reduces):
+      self.ridxs[a] = UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), UOp.const(dtypes.int32, self.full_shape[a])), (1000+a, False))
 
     self.global_size = [x.arg[2] for x in loop_global_idxs]
     self.local_size = [x.arg[2] for x in loop_local_idxs]
