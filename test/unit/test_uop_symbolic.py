@@ -37,8 +37,8 @@ class Node:
   @staticmethod
   def ands(ops): return functools.reduce(lambda x,y: x*y, ops)
   def __floordiv__(a,b,unk): return a//b
-def create_lt_node(v, n): return UOp.alu(BinaryOps.CMPLT, v, UOp.const(v.dtype, n))
-def create_ge_node(v, n): return UOp.alu(BinaryOps.CMPLT, -v, UOp.const(v.dtype, -n+1))
+def create_lt_node(v, n): return v.lt(n)
+def create_ge_node(v, n): return v.ge(n)
 def SumNode(x): return Node.sum(x)
 def MulNode(x, y): return x*y
 
