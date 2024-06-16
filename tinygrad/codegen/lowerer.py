@@ -1,13 +1,15 @@
 from __future__ import annotations
-from typing import List, Tuple, Iterable
+from typing import List, Tuple, Iterable, cast
 import math
-from tinygrad.codegen.kernel import Kernel
+from dataclasses import replace
+from tinygrad.codegen.kernel import LocalBuffer, Kernel
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, BinaryOps, UnaryOps
 from tinygrad.codegen.uops import UOp, UOpGraph, UOps
 from tinygrad.renderer import Program
 from tinygrad.helpers import to_function_name, colored, DEBUG, getenv, prod
+from tinygrad.engine.graph import print_tree
 
 def _uop_view(view:View, idxs:List[UOp], vexpr:UOp) -> Tuple[UOp, UOp]:
   # TODO: dtypes.realint
@@ -52,7 +54,7 @@ class Lowerer(Kernel):
   def to_uop(self, x:LazyOp) -> UOp:
     #print(x.op)
     if x.op in BufferOps:
-      idx, valid = st_to_uops(self.sts[self.bufs.index(x.arg)], self.idxs)
+      idx, valid = st_to_uops(x.arg.st, self.idxs)
       # TODO: check has_valid in UPat, not here
       has_valid = valid.uop is not UOps.CONST or valid.arg is not True
       if x.op is BufferOps.CONST:
@@ -67,9 +69,8 @@ class Lowerer(Kernel):
     if x.op is UnaryOps.CAST:
       return UOp(UOps.CAST, x.arg, in_uops)
     if x.op in ReduceOps:
-      loops = [self.idxs[i] for i in range(len(self.full_shape)) if self.full_shape[i] != self.sts[0].shape[i]]
       op = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[x.op]
-      return UOp(UOps.REDUCE, x.dtype, (in_uops[0], UOp.const(x.dtype, get_reduce_acc(x))) + tuple(loops), op)
+      return UOp(UOps.REDUCE, x.dtype, (in_uops[0], UOp.const(x.dtype, get_reduce_acc(x))) + tuple(self.idxs[i] for i in x.arg), op)
     return UOp.alu(x.op, *in_uops)
 
   def linearize(self) -> Lowerer:
@@ -80,6 +81,32 @@ class Lowerer(Kernel):
                  colored('_', 'BLACK').join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
     if DEBUG >= 4: print(self.name)
     self.idxs = []
+
+    # set the shapetrackers to the optimized ones, fixup reduceop
+    # transformed to the final LazyOp
+    def fixup_ast(op):
+      if op.op in BufferOps:
+        arg = replace(op.arg, st=self.sts[self.bufs.index(op.arg)])
+      elif op.op in ReduceOps:
+        arg = tuple(i for i in range(len(self.full_shape)) if self.full_shape[i] != self.sts[0].shape[i])
+        print(op.arg, arg)
+      else:
+        arg = op.arg
+      return LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
+    self.ast = [fixup_ast(x) for x in self.ast]
+    print_tree(self.ast[0])
+
+    # add a local buffer for multistage reduce. # TODO: use local alias
+    """
+    if self.group_for_reduces:
+      for i in range(len(self.reduceops)):
+        # TODO: the strides of this can be controlled
+        self.sts.append(ShapeTracker.from_shape(tuple([1] * self.global_dims + list(self.full_shape[self.global_dims:self.global_dims+self.local_dims+self.group_for_reduces]) + [1] * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))  # noqa: E501
+        temp_dtype = cast(LazyOp, self.reduceop).dtype
+        self.bufs.append(LocalBuffer(name:=f"temp{i if len(self.reduceops) > 1 else ''}", buf_size:=self.sts[-1].size, temp_dtype))
+        print_tree(self.ast[0])
+        print(self.bufs[-1], self.sts[-1])
+    """
 
     # define indexes
     global_idxs, loop_global_idxs = get_grouped_dims("gidx", 0, self.full_shape[:self.global_dims], 3 if self.opts.has_local else 0)
