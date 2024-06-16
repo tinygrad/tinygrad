@@ -2,7 +2,7 @@
 import difflib, pickle
 from tqdm import tqdm
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.helpers import colored, db_connection, VERSION
+from tinygrad.helpers import colored, db_connection, VERSION, to_function_name
 
 page_size = 100
 conn = db_connection()
@@ -14,7 +14,7 @@ for offset in tqdm(range(0, row_count, page_size)):
     compare_k, compare_src = pickle.loads(row[0])
     k = Linearizer(*compare_k.ast, opts=compare_k.opts)
     for opt in compare_k.applied_opts: k.apply_opt(opt)
-    good_src = k.opts.render(compare_k.name, k.linearize().uops)
+    good_src = k.opts.render(to_function_name(compare_k.name), k.linearize().uops)
     try: assert compare_src == good_src
     except AssertionError as e:
       print("PROCESS REPLAY FAILED")
