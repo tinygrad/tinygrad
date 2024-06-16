@@ -322,10 +322,7 @@ class Linearizer(Kernel):
     return local_idxs[:self.local_dims] + [NumNode(0) for _ in range(self.group_for_reduces)], upcast_idxs
 
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
-  def linearize(self) -> Linearizer:
-    # no new opts and we already ran? skip relinearizing
-    if self.applied_opts == self.applied_opts_cache: return self
-
+  def to_uops(self) -> List[UOp]:
     # late alias the tensor core buffers
     if (tc:=self.tensor_core) and self.tensor_core_opts is not None:
       alias_pattern = [0]*(self.global_dims) + [2]*(len(tc.threads)) + [0]*(self.local_dims-len(tc.threads)) + [0]*(self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3]*(self.upcasted-2)  # noqa: E501
@@ -411,21 +408,15 @@ class Linearizer(Kernel):
     # render reduceops by depth
     for reduceop in self.reduceops:
       self.render_block((reduceop, ), global_idxs, local_idxs, upcast_idxs, full_upcast_idxs, alias_buf_idxs, loaded_buffers, accs)
-    stores = self.render_block(self.ast, global_idxs, local_idxs, upcast_idxs, full_upcast_idxs, alias_buf_idxs, loaded_buffers, accs)
-
-    # only the final stores are needed to define the full UOps graph
-    self.uops:UOpGraph = UOpGraph(flatten(stores))
-
-    # maybe graph the uops
-    if DEBUG >= 5: self.uops.print()
-    if getenv("GRAPHUOPS"): self.uops.graph()
+    output = self.render_block(self.ast, global_idxs, local_idxs, upcast_idxs, full_upcast_idxs, alias_buf_idxs, loaded_buffers, accs)
 
     # restore backups
     self.sts, self.group_for_reduces, self.upcasted = sts_backup, gfr_backup, upc_backup
 
+    # return the stores
+    return flatten(output)
+
     # set cache and return
-    self.applied_opts_cache = self.applied_opts[:]
-    return self
 
   def render_block(self, outputs:Tuple[LazyOp, ...], global_idxs, local_idxs, upcast_idxs, full_upcast_idxs,
                    alias_buf_idxs:DefaultDict[LazyOp,List[Tuple[int,int,List[NumNode|Variable]]]],
@@ -479,7 +470,13 @@ class Linearizer(Kernel):
     return ret
 
   def to_program(self) -> Program:
-    self.linearize()
+    # only the final stores are needed to define the full UOps graph
+    self.uops:UOpGraph = UOpGraph(self.to_uops())
+
+    # maybe graph the uops
+    if DEBUG >= 5: self.uops.print()
+    if getenv("GRAPHUOPS"): self.uops.graph()
+
     info = get_lazyop_info(self.ast[0])
     src = self.opts.render(to_function_name(self.name), self.uops)
     if getenv("RUN_PROCESS_REPLAY"): diskcache_put("process_replay", id(self), self)

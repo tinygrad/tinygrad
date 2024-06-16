@@ -58,9 +58,8 @@ def _try_compile_linearized_w_idx(x:Tuple[int,Linearizer], compiler:Compiler) ->
   # set timeout
   signal.alarm(getenv("BEAM_TIMEOUT_SEC", 10))
   try:
-    x[1].linearize()
-    if len(x[1].uops.uops) >= getenv("BEAM_UOPS_MAX", 3000) > 0: raise RuntimeError("too many uops")
     p = x[1].to_program()
+    if len(x[1].uops.uops) >= getenv("BEAM_UOPS_MAX", 3000) > 0: raise RuntimeError("too many uops")
     st = time.perf_counter()
     prog = compiler.compile(p.src)
     et = time.perf_counter() - st

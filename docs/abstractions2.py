@@ -56,8 +56,7 @@ st_0 = LazyOp(BufferOps.STORE, (alu,), MemBuffer(0, dtypes.int32, ShapeTracker.f
 
 # convert the computation to a "linearized" format (print the format)
 from tinygrad.engine.realize import get_linearizer, CompiledRunner
-lin = get_linearizer(Device[DEVICE].renderer, (st_0,)).linearize()
-for u in lin.uops: print(u)
+lin = get_linearizer(Device[DEVICE].renderer, (st_0,))
 
 # compile a program (and print the source)
 fxn = CompiledRunner(lin.to_program())

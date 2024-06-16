@@ -37,7 +37,7 @@ def check_schedule(t:Union[Tensor, List[Tensor]], allowed:int, to_prerealize:Opt
     if s.ast[0].op in LoadOps: continue
     l = Linearizer(*s.ast)
     l.hand_coded_optimizations()
-    l.linearize()
+    l.to_uops()
   return sched
 
 class TestSchedule(unittest.TestCase):
