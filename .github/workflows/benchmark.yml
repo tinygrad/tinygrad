@@ -38,7 +38,7 @@ jobs:
     # if: github.event.inputs.run_process_replay == 'true' || contains(github.event.head_commit.message, '[run_process_replay]') || contains(github.event.pull_request.title, '[run_process_replay]')
     # run: echo "RUN_PROCESS_REPLAY=1" >> $GITHUB_ENV
     - name: Run Stable Diffusion
-      run: JIT=2 python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
+      run: JIT=2 THREEFRY=1 python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
     - name: Run model inference benchmark
       run: METAL=1 python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
@@ -129,6 +129,7 @@ jobs:
         ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
         ln -s /raid/weights/mixtral-8x7b-32kseqlen weights/mixtral-8x7b-32kseqlen
         ln -s /raid/weights/LLaMA-2 weights/LLaMA-2
+        ln -s /raid/weights/LLaMA-3 weights/LLaMA-3
         mkdir -p extra/datasets
         ln -s /raid/datasets/imagenet extra/datasets/imagenet
     - name: Run model inference benchmark
@@ -154,7 +155,7 @@ jobs:
     - name: Fuzz Padded Tensor Core GEMM(PTX)
       run: CUDA=1 PTX=1 M_START=12 M_STOP=20 M_STEP=1 N_START=6 N_STOP=10 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 python3 ./extra/gemm/fuzz_matmul.py
     - name: Run Stable Diffusion
-      run: CUDA=1 python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
+      run: CUDA=1 THREEFRY=1 python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
     - name: Run LLaMA
       run: |
         CUDA=1 JIT=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
@@ -165,6 +166,12 @@ jobs:
       run: CUDA=1 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_four_gpu.txt
     - name: Run LLaMA 7B on 6 GPUs
       run: CUDA=1 python3 examples/llama.py --gen 1 --size 7B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_six_gpu.txt
+    - name: Run LLaMA-3 8B BEAM
+      run: NV=1 JITBEAM=2 CACHELEVEL=0 python3 examples/llama3.py --model weights/LLaMA-3/8B-SF-DPO/ --benchmark | tee llama3_beam.txt
+    - name: Run LLaMA-3 8B on 4 GPUs
+      run: NV=1 CACHELEVEL=0 python3 examples/llama3.py --shard 4 --model weights/LLaMA-3/8B-SF-DPO/ --benchmark | tee llama3_four_gpu.txt
+    - name: Run LLaMA-3 8B on 6 GPUs
+      run: NV=1 CACHELEVEL=0 python3 examples/llama3.py --shard 6 --model weights/LLaMA-3/8B-SF-DPO/ --benchmark | tee llama3_six_gpu.txt
     # - name: Run LLaMA-2 70B
     #   run: CUDA=1 python3 examples/llama.py --gen 2 --size 70B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_2_70B.txt
     # - name: Run Mixtral 8x7B
@@ -193,6 +200,9 @@ jobs:
           llama_beam.txt
           llama_four_gpu.txt
           llama_six_gpu.txt
+          llama3_beam.txt
+          llama3_four_gpu.txt
+          llama3_six_gpu.txt
           # llama_2_70B.txt
           # mixtral.txt
           gpt2_unjitted.txt
@@ -274,6 +284,7 @@ jobs:
         ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
         ln -s /raid/weights/mixtral-8x7b-32kseqlen weights/mixtral-8x7b-32kseqlen
         ln -s /raid/weights/LLaMA-2 weights/LLaMA-2
+        ln -s /raid/weights/LLaMA-3 weights/LLaMA-3
         mkdir -p extra/datasets
         ln -s /raid/datasets/imagenet extra/datasets/imagenet
     - name: Show off tinybox
@@ -295,7 +306,7 @@ jobs:
     #- name: Fuzz Padded Tensor Core GEMM
     #  run: HSA=1 M_START=12 M_STOP=20 M_STEP=1 N_START=12 N_STOP=20 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 DEBUG=2 python3 ./extra/gemm/fuzz_matmul.py
     - name: Run Stable Diffusion
-      run: AMD=1 python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
+      run: AMD=1 THREEFRY=1 python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
     - name: Run LLaMA 7B
       run: |
         AMD=1 JIT=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
@@ -306,6 +317,12 @@ jobs:
       run: AMD=1 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_four_gpu.txt
     - name: Run LLaMA 7B on 6 GPUs
       run: AMD=1 python3 examples/llama.py --gen 1 --size 7B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_six_gpu.txt
+    - name: Run LLaMA-3 8B BEAM
+      run: AMD=1 JITBEAM=2 CACHELEVEL=0 python3 examples/llama3.py --model weights/LLaMA-3/8B-SF-DPO/ --benchmark | tee llama3_beam.txt
+    - name: Run LLaMA-3 8B on 4 GPUs
+      run: AMD=1 CACHELEVEL=0 python3 examples/llama3.py --shard 4 --model weights/LLaMA-3/8B-SF-DPO/ --benchmark | tee llama3_four_gpu.txt
+    - name: Run LLaMA-3 8B on 6 GPUs
+      run: AMD=1 CACHELEVEL=0 python3 examples/llama3.py --shard 6 --model weights/LLaMA-3/8B-SF-DPO/ --benchmark | tee llama3_six_gpu.txt
     - name: Run LLaMA-2 70B
       run: AMD=1 python3 examples/llama.py --gen 2 --size 70B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_2_70B.txt
     - name: Run Mixtral 8x7B
@@ -325,6 +342,9 @@ jobs:
           llama_beam.txt
           llama_four_gpu.txt
           llama_six_gpu.txt
+          llama3_beam.txt
+          llama3_four_gpu.txt
+          llama3_six_gpu.txt
           llama_2_70B.txt
           gpt2_unjitted.txt
           gpt2_jitted.txt
