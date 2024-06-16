@@ -56,6 +56,8 @@ class UOp:
   def __rmul__(self, x): return UOp.alu(BinaryOps.MUL, ufix(self.dtype, x), self)
   def __floordiv__(self, x): return UOp.alu(BinaryOps.IDIV, self, ufix(self.dtype, x))
   def __mod__(self, x): return UOp.alu(BinaryOps.MOD, self, ufix(self.dtype, x))
+  def lt(self, x): return UOp.alu(BinaryOps.CMPLT, self, ufix(self.dtype, x))
+  def ge(self, x): return -self.lt(x)
   @staticmethod
   def max(x, y): return UOp.alu(BinaryOps.MAX, x, y)
   @staticmethod
@@ -202,8 +204,8 @@ constant_folder = PatternMatcher([
   # -1*x -> -x
   (-1*UOp.var('x'), lambda x: -x),
   # bool < False is always false, True < bool is always false
-  (UOp.alu(BinaryOps.CMPLT, UOp.var(), UOp.const(dtypes.bool, False)), lambda: UOp.const(dtypes.bool, False)),
-  (UOp.alu(BinaryOps.CMPLT, UOp.const(dtypes.bool, True), UOp.var()), lambda: UOp.const(dtypes.bool, False)),
+  (UOp.var().lt(UOp.const(dtypes.bool, False)), lambda: UOp.const(dtypes.bool, False)),
+  (UOp.const(dtypes.bool, True).lt(UOp.var()), lambda: UOp.const(dtypes.bool, False)),
   # a conditional with the same results either way is a noop, also fold const conditionals
   (UOp.alu(TernaryOps.WHERE, UOp.var(), UOp.var("val"), UOp.var("val")), lambda val: val),
   (UOp.alu(TernaryOps.WHERE, UOp.cvar('gate'), UOp.var('true'), UOp.var('false')), lambda gate, true, false: true if gate.arg else false),
@@ -238,8 +240,8 @@ constant_folder = PatternMatcher([
   # (x/c0)/c1 -> x/(c0*c1)
   ((UOp.var("x") // UOp.cvar("c0")) // UOp.cvar("c1"), lambda x,c0,c1: x//UOp.const(x.dtype, exec_alu(BinaryOps.MUL, x.dtype, [c0.arg, c1.arg]))),
   # c0 + x < c1 -> x < c1 - c0
-  (UOp.alu(BinaryOps.CMPLT, UOp.cvar("c0") + UOp.var("x"), UOp.cvar("c1")),
-   lambda x,c0,c1: UOp.alu(BinaryOps.CMPLT, x, UOp.const(x.dtype, exec_alu(BinaryOps.SUB, x.dtype, [c1.arg, c0.arg])))),
+  ((UOp.cvar("c0") + UOp.var("x")).lt(UOp.cvar("c1")),
+    lambda x,c0,c1: UOp.alu(BinaryOps.CMPLT, x, UOp.const(x.dtype, exec_alu(BinaryOps.SUB, x.dtype, [c1.arg, c0.arg])))),
   # (x+x*c0)-> x*(c0+1)
   (UOp.var("x") + UOp.var("x") * UOp.cvar("c0"), lambda x,c0: x*UOp.const(x.dtype, c0.arg+1)),
   # TODO: can do the invert of this (flip alt/load) when we fix double ops
