@@ -38,7 +38,6 @@ class UOp:
     return self.uop is UOps.ALU and self.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR}
   @functools.cached_property
   def cmp_tuple(self):
-    if self is UOps.VAR: raise RuntimeError('wtf')
     # NOTE: this sort of DEFINE_VAR shouldn't have to be here. only for PTX
     return (self.uop.value, (self.arg if self.uop is not UOps.DEFINE_VAR else self.arg.expr) if self.uop is not UOps.ALU else \
             (type(self.uop), self.uop.value), self.dtype, self.vin)
@@ -208,7 +207,7 @@ constant_folder = PatternMatcher([
   (UOp.var('x') + 0, lambda x: x),    # x+0 -> x
   (UOp.var('x') - 0, lambda x: x),    # x-0 -> x
   (UOp.var('x') * 1, lambda x: x),    # x*1 -> x
-  (UOp.var('x') // 1, lambda x: x),   # x/1 -> x
+  (UOp.var('x') // 1, lambda x: x),    # x/1 -> x
   (UOp.var('x') // -1, lambda x: -x), # x/-1 -> -x
   # ** zero folding **
   #x*0 -> 0 or 0*x -> 0
