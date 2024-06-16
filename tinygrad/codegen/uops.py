@@ -63,6 +63,8 @@ class UOp:
   def alu(arg, *vin:UOp): return UOp(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else vin[-1].dtype, vin, arg)
   @functools.cached_property
   def parents(self) -> Set[UOp]: return set.union(set(self.vin), *[x.parents for x in self.vin])
+  @property  # parents with self
+  def sparents(self) -> Set[UOp]: return set([self]).union(self.parents)
   def vars(self) -> Set[UOp]: return set([x for x in set.union(set([self]), self.parents) if x.uop is UOps.DEFINE_VAR])
 
 def uop_alu_resolve(u:UOp) -> sint:
@@ -413,26 +415,35 @@ class UOpGraph:
 
   # *** checker functions ***
 
-  def flops_mem(self) -> Tuple[sint, sint]:
+  def flops_mem(self, ignore_indexing=False) -> Tuple[sint, sint]:
     flops: sint = 0
     mem: sint = 0
     mults: sint = 1
     mult_stack = []
+    dont_count: Set[UOp] = set()
+    if ignore_indexing:
+      for u in self.uops:
+        if u.uop is UOps.LOAD:
+          dont_count = dont_count.union(u.vin[1].sparents)
+          if len(u.vin) > 3: dont_count = dont_count.union(u.vin[2].sparents)
+        elif u.uop is UOps.STORE:
+          dont_count = dont_count.union(u.vin[1].sparents)
+          if len(u.vin) > 3: dont_count = dont_count.union(u.vin[3].sparents)
     for u in self.uops:
       if u.uop is UOps.RANGE:
         mult_stack.append(mults)
         mults *= uop_alu_resolve(u.vin[1])
       elif u.uop is UOps.ENDRANGE:
         mults = mult_stack.pop(-1)
-      elif u.uop is UOps.ALU:
-        flops += mults * (2 if u.arg == TernaryOps.MULACC else 1)
       elif u.uop is UOps.LOAD:
         assert u.dtype is not None
         mem += u.dtype.itemsize * mults
       elif u.uop is UOps.STORE:
         assert u.vin[2].dtype is not None
         mem += u.vin[2].dtype.itemsize * mults
-      elif u.uop is UOps.WMMA:
+      elif u.uop is UOps.ALU and u not in dont_count:
+        flops += mults * (2 if u.arg == TernaryOps.MULACC else 1)
+      elif u.uop is UOps.WMMA and u not in dont_count:
         assert u.arg[1] is not None
         flops += 2 * prod(u.arg[1]) // 32 * mults
     return flops, mem
