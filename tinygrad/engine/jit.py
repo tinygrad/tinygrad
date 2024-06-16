@@ -143,7 +143,7 @@ class TinyJit(Generic[ReturnType]):
     assert len(set(input_buffers)) == len(input_buffers), "duplicate inputs to JIT"
     var_vals: Dict[Variable, int] = merge_dicts([varvals for _,varvals,_,_ in st_varvals_dtype_device] + \
                                                 [dict(v.unbind() for v in itertools.chain(args, kwargs.values()) if isinstance(v, Variable))])
-    st_vars_dtype_device = [(x[0], tuple(sorted(x[1].keys(), key=lambda v:v.expr)), x[2], x[3]) for x in st_varvals_dtype_device]
+    st_vars_dtype_device = [(x[0], tuple(sorted(x[1].keys(), key=lambda v: v.expr)), x[2], x[3]) for x in st_varvals_dtype_device]
     if self.cnt == 0:
       # jit ignore
       with Context(BEAM=0 if getenv("IGNORE_JIT_FIRST_BEAM") else BEAM.value):
