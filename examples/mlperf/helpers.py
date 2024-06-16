@@ -209,12 +209,11 @@ def get_mlperf_bert_config():
 
 def get_mlperf_bert_model(checkpoint_path:str):
   from extra.models import bert
-  from examples.mlperf.initializers import LinearBert, EmbeddingBert, LayerNormBert, scaled_dot_product_attention_bert
+  from examples.mlperf.initializers import LinearBert, EmbeddingBert, LayerNormBert
 
   bert.Linear = LinearBert
   bert.Embedding = EmbeddingBert 
   bert.LayerNorm = LayerNormBert
-  bert.scaled_dot_product_attention = scaled_dot_product_attention_bert
 
   from extra.models.bert import BertForPretraining
   config = get_mlperf_bert_config()
