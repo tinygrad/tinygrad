@@ -199,8 +199,6 @@ constant_folder = PatternMatcher([
   (UOp.max(UOp.var('x'), UOp.const(dtypes.int, -2147483648)), lambda x: x),
   # -(-x) -> x
   (-(-UOp.var('x')), lambda x: x),
-  # x+-y -> x-y
-  (UOp.var('x')+(-UOp.var('y')), lambda x, y: x-y),
   # -1*x -> -x
   (-1*UOp.var('x'), lambda x: -x),
   # bool < False is always false, True < bool is always false
