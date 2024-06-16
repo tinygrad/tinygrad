@@ -64,7 +64,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
     UnaryOps.SIN: lambda x,dtype: f"tl.sin({x})",
     UnaryOps.SQRT: lambda x,dtype: f"tl.sqrt({x})",
     UnaryOps.NEG: lambda x,dtype: f"-{x}",
-    BinaryOps.ADD: lambda x,y,dtype: f"({x}+{y})", BinaryOps.SUB: lambda x,y,: f"({x}-{y})",
+    BinaryOps.ADD: lambda x,y,dtype: f"({x}+{y})",
     BinaryOps.MUL: lambda x,y,dtype: f"({x}*{y})", BinaryOps.DIV: lambda x,y,: f"({x}/{y})" if y != '0.0' else f"{x}*tl.where({x}==0.0, float('nan'), float('inf'))",
     BinaryOps.MAX: lambda x,y,dtype: f"tl.maximum({x},{y})",
     BinaryOps.CMPLT: lambda x,y,dtype: f"({x}<{y})",
