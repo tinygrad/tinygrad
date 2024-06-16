@@ -159,7 +159,6 @@ class CStyleLanguage(Renderer):
           kk(self.render_local(args[0], dtype, args[1]))
           r[u] = args[0]
         elif uop is UOps.DEFINE_VAR:
-          if isinstance(args, tuple): raise RuntimeError(f"WTF {args}")
           bufs.append((args.expr, (dtype,False)))
           r[u] = args.expr
         elif uop is UOps.DEFINE_GLOBAL:
