@@ -574,9 +574,13 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([0, 1], dtype=dtypes.float32)).cumsum(0).dtype == dtypes.float32
     assert (Tensor([0, 1], dtype=dtypes.float64)).cumsum(0).dtype == dtypes.float64
 
-  @given(strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes))
-  def test_matmul(self, dt1, dt2):
-    assert (Tensor([0, 1], dtype=dt1) @ Tensor([0, 1], dtype=dt2)).dtype == least_upper_dtype(dt1, dt2)
+  @given(strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes))
+  def test_matmul(self, dt1, dt2, acc_dt):
+    t1 = Tensor([0, 1], dtype=dt1)
+    t2 = Tensor([0, 1], dtype=dt2)
+    assert (t1 @ t2).dtype == least_upper_dtype(dt1, dt2)
+    # if acc_dtype is specified, return in acc_dtype
+    assert (t1.matmul(t2, acc_dtype=acc_dt).dtype == acc_dt)
 
   @staticmethod
   def check_where_alternate_input_other(input_, other, data_type):
