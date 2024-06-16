@@ -81,14 +81,13 @@ class Lowerer(Kernel):
     if DEBUG >= 4: print(self.name)
     self.idxs = []
 
-    # for clang
+    # define indexes
     global_idxs, loop_global_idxs = get_grouped_dims("gidx", 0, self.full_shape[:self.global_dims], 3 if self.opts.has_local else 0)
     local_idxs, loop_local_idxs = get_grouped_dims("lidx", self.global_dims, self.full_shape[self.global_dims:self.first_reduce+self.group_for_reduces], 3 if self.opts.has_local else 0)  # noqa: E501
     self.idxs = global_idxs + local_idxs
 
     for i,g in enumerate(self.full_shape[self.first_reduce:]):
       unrolled = (self.first_reduce+i) >= (self.shape_len-self.upcasted)
-      #if i == 0: unrolled = False
       self.idxs.append(UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), UOp.const(dtypes.int32, g)), (i,unrolled)))
 
     self.global_size = [x.arg[2] for x in loop_global_idxs]
@@ -103,6 +102,7 @@ class Lowerer(Kernel):
     if getenv("GRAPHUOPS") and not uop_graphed:
       self.uops.graph()
       uop_graphed = True
+    return self
 
   def to_program(self) -> Program:
     self.linearize()
