@@ -488,7 +488,7 @@ class NVDevice(Compiled):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
     self.fd_dev = self._new_gpu_fd()
 
-    assert NVDevice.gpus_info[self.device_id].valid
+    assert NVDevice.gpus_info[self.device_id].valid, f"No valid device found for NV:{self.device_id}. Requesting more devices than the system has?"
     gpu_info = nv_gpu.NV0000_CTRL_GPU_GET_ID_INFO_V2_PARAMS(gpuId=NVDevice.gpus_info[self.device_id].gpu_id)
     rm_control(self.fd_ctl, nv_gpu.NV0000_CTRL_CMD_GPU_GET_ID_INFO_V2, self.root, self.root, gpu_info)
     device_id = NVDevice.gpus_info[self.device_id].pci_info.device_id
@@ -499,8 +499,7 @@ class NVDevice(Compiled):
     self.device = rm_alloc(self.fd_ctl, nv_gpu.NV01_DEVICE_0, self.root, self.root, device_params).hObjectNew
     self.subdevice = rm_alloc(self.fd_ctl, nv_gpu.NV20_SUBDEVICE_0, self.root, self.device, None).hObjectNew
     self.usermode = rm_alloc(self.fd_ctl, nv_gpu.TURING_USERMODE_A, self.root, self.subdevice, None).hObjectNew
-    gpu_mmio_ptr = self._gpu_map_to_cpu(self.usermode, 0x10000, flags=2)
-    self.gpu_mmio = to_mv(gpu_mmio_ptr, 0x10000).cast("I")
+    self.gpu_mmio = to_mv(self._gpu_map_to_cpu(self.usermode, mmio_sz:=0x10000, flags=2), mmio_sz).cast("I")
 
     boost_params = nv_gpu.struct_NV2080_CTRL_PERF_BOOST_PARAMS(duration=0xffffffff, flags=((nv_gpu.NV2080_CTRL_PERF_BOOST_FLAGS_CUDA_YES << 4) | \
       (nv_gpu.NV2080_CTRL_PERF_BOOST_FLAGS_CUDA_PRIORITY_HIGH << 6) | (nv_gpu.NV2080_CTRL_PERF_BOOST_FLAGS_CMD_BOOST_TO_MAX << 0)))
@@ -595,10 +594,9 @@ class NVDevice(Compiled):
   @classmethod
   def _wait_signal(self, signal, value=0, timeout=10000):
     start_time = time.time() * 1000
-    sem_value = signal[0]
-    while sem_value < value:
-      sem_value = signal[0]
-      if time.time() * 1000 - start_time > timeout: raise RuntimeError(f"wait_result: {timeout} ms TIMEOUT!")
+    while time.time() * 1000 - start_time < timeout:
+      if signal[0] >= value: return
+    raise RuntimeError(f"wait_result: {timeout} ms TIMEOUT!")
 
   def _gpu_fifo_setup(self, gpfifo, ctxshare, channel_group, offset, entries=0x400):
     notifier = self._gpu_system_alloc(48 << 20)
