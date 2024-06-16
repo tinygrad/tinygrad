@@ -5,7 +5,7 @@ from dataclasses import replace
 from tinygrad.codegen.kernel import LocalBuffer, Kernel
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.dtype import dtypes, PtrDType
-from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, BinaryOps, UnaryOps
+from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, BinaryOps, UnaryOps, MemBuffer
 from tinygrad.codegen.uops import UOp, UOpGraph, UOps
 from tinygrad.renderer import Program
 from tinygrad.helpers import to_function_name, colored, DEBUG, getenv, prod
@@ -49,6 +49,11 @@ def get_reduce_acc(reduceop:LazyOp):
     if dtypes.is_int(reduceop.dtype): return 0 if dtypes.is_unsigned(reduceop.dtype) else -2**(reduceop.dtype.itemsize*8-1)
     return -math.inf if dtypes.is_float(reduceop.dtype) else False
 
+def to_range(x):
+  if x.uop != UOps.RANGE:
+    return UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), UOp.const(dtypes.int32, x.arg[2])), (-1, False))
+  return x
+
 uop_graphed = False
 class Lowerer(Kernel):
   def to_uop(self, x:LazyOp) -> UOp:
@@ -60,9 +65,13 @@ class Lowerer(Kernel):
       if x.op is BufferOps.CONST:
         return UOp.alu(TernaryOps.WHERE, valid, UOp.const(x.arg.dtype, x.arg.val), UOp.const(x.arg.dtype, 0))
       else:
-        buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(x.arg.dtype), (), (x.arg.idx, any(x.arg.idx == y.idx for y in self.outbufs)))
+        if x.arg.idx == -1:
+          buf = self.local_buffer_uop
+        else:
+          buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(x.arg.dtype), (), (x.arg.idx, any(x.arg.idx == y.idx for y in self.outbufs)))
         if x.op is BufferOps.LOAD:
-          return UOp(UOps.LOAD, x.arg.dtype, (buf, idx) + ((valid, UOp.const(x.arg.dtype, 0)) if has_valid else ()))
+          barrier = (UOp(UOps.BARRIER, None, (self.to_uop(x.src[0]),)),) if len(x.src) else ()
+          return UOp(UOps.LOAD, x.arg.dtype, (buf, idx) + ((valid, UOp.const(x.arg.dtype, 0)) if has_valid else ()) + barrier)
         else:
           return UOp(UOps.STORE, None, (buf, idx, self.to_uop(x.src[0])) + ((valid) if has_valid else ()))
     in_uops = tuple(self.to_uop(y) for y in x.src)
@@ -70,7 +79,7 @@ class Lowerer(Kernel):
       return UOp(UOps.CAST, x.arg, in_uops)
     if x.op in ReduceOps:
       op = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[x.op]
-      return UOp(UOps.REDUCE, x.dtype, (in_uops[0], UOp.const(x.dtype, get_reduce_acc(x))) + tuple(self.idxs[i] for i in x.arg), op)
+      return UOp(UOps.REDUCE, x.dtype, (in_uops[0], UOp.const(x.dtype, get_reduce_acc(x))) + tuple(to_range(self.idxs[i]) for i in x.arg), op)
     return UOp.alu(x.op, *in_uops)
 
   def linearize(self) -> Lowerer:
@@ -82,31 +91,33 @@ class Lowerer(Kernel):
     if DEBUG >= 4: print(self.name)
     self.idxs = []
 
-    # set the shapetrackers to the optimized ones, fixup reduceop
-    # transformed to the final LazyOp
-    def fixup_ast(op):
-      if op.op in BufferOps:
-        arg = replace(op.arg, st=self.sts[self.bufs.index(op.arg)])
-      elif op.op in ReduceOps:
-        arg = tuple(i for i in range(len(self.full_shape)) if self.full_shape[i] != self.sts[0].shape[i])
-        print(op.arg, arg)
-      else:
-        arg = op.arg
-      return LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
-    self.ast = [fixup_ast(x) for x in self.ast]
-    print_tree(self.ast[0])
-
-    # add a local buffer for multistage reduce. # TODO: use local alias
-    """
+    # add a local buffer for multistage reduce.
     if self.group_for_reduces:
       for i in range(len(self.reduceops)):
         # TODO: the strides of this can be controlled
         self.sts.append(ShapeTracker.from_shape(tuple([1] * self.global_dims + list(self.full_shape[self.global_dims:self.global_dims+self.local_dims+self.group_for_reduces]) + [1] * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))  # noqa: E501
         temp_dtype = cast(LazyOp, self.reduceop).dtype
         self.bufs.append(LocalBuffer(name:=f"temp{i if len(self.reduceops) > 1 else ''}", buf_size:=self.sts[-1].size, temp_dtype))
-        print_tree(self.ast[0])
-        print(self.bufs[-1], self.sts[-1])
-    """
+        self.local_buffer_uop = UOp(UOps.DEFINE_LOCAL, PtrDType(temp_dtype), (), (name, buf_size))
+
+    # set the shapetrackers to the optimized ones, fixup reduceop
+    # transformed to the final LazyOp
+    def fixup_ast(op):
+      if op.op in BufferOps:
+        arg = replace(op.arg, st=self.sts[self.bufs.index(op.arg)])
+      elif op.op in ReduceOps:
+        arg = tuple(i for i in range(self.first_reduce+self.group_for_reduces, self.shape_len) if self.full_shape[i] != self.sts[0].shape[i])
+        if self.group_for_reduces:
+          start = LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
+          local_buffer = MemBuffer(-1, start.dtype, self.sts[-1])
+          local_store = LazyOp(BufferOps.STORE, (start,), local_buffer)
+          local_load = LazyOp(BufferOps.LOAD, (local_store,), local_buffer)
+          return LazyOp(op.op, (local_load,), tuple(range(self.first_reduce, self.first_reduce+self.group_for_reduces)))
+      else:
+        arg = op.arg
+      return LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
+    self.ast = [fixup_ast(x) for x in self.ast]
+    #print_tree(self.ast[0])
 
     # define indexes
     global_idxs, loop_global_idxs = get_grouped_dims("gidx", 0, self.full_shape[:self.global_dims], 3 if self.opts.has_local else 0)
