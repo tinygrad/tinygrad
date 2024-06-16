@@ -200,18 +200,18 @@ constant_folder = PatternMatcher([
   # -1*x -> -x
   (-1*UOp.var('x'), lambda x: -x),
   # bool < False is always false, True < bool is always false
-  (UPat(UOps.ALU, BinaryOps.CMPLT, (UPat(), UPat(UOps.CONST, False, name="x", dtype=dtypes.bool))), lambda x: x),
-  (UPat(UOps.ALU, BinaryOps.CMPLT, (UPat(UOps.CONST, True, name="x", dtype=dtypes.bool), UPat())), lambda x: UOp.const(dtypes.bool, False)),
+  (UOp.alu(BinaryOps.CMPLT, UOp.var(), UOp.const(dtypes.bool, False)), lambda: UOp.const(dtypes.bool, False)),
+  (UOp.alu(BinaryOps.CMPLT, UOp.const(dtypes.bool, True), UOp.var()), lambda: UOp.const(dtypes.bool, False)),
   # a conditional with the same results either way is a noop, also fold const conditionals
-  (UPat(UOps.ALU, TernaryOps.WHERE, (UPat(), UPat(name="val"), UPat(name="val"))), lambda val: val),
-  (UPat(UOps.ALU, TernaryOps.WHERE, (UPat(UOps.CONST, name="gate"), UPat(name="c0"), UPat(name="c1"))), lambda gate, c0, c1: c0 if gate.arg else c1),
+  (UOp.alu(TernaryOps.WHERE, UOp.var(), UOp.var("val"), UOp.var("val")), lambda val: val),
+  (UOp.alu(TernaryOps.WHERE, UOp.cvar('gate'), UOp.var('true'), UOp.var('false')), lambda gate, true, false: true if gate.arg else false),
   # ** constant folding **
   (UPat(UOps.ALU, name="root", vin=UPat(UOps.CONST)), lambda root: UOp.const(root.dtype, exec_alu(root.arg, root.dtype, [x.arg for x in root.vin]))),
   # ** self folding **
   (UOp.var('x') + 0, lambda x: x),    # x+0 -> x
   (UOp.var('x') - 0, lambda x: x),    # x-0 -> x
   (UOp.var('x') * 1, lambda x: x),    # x*1 -> x
-  (UOp.var('x') // 1, lambda x: x),    # x/1 -> x
+  (UOp.var('x') // 1, lambda x: x),   # x/1 -> x
   (UOp.var('x') // -1, lambda x: -x), # x/-1 -> -x
   # ** zero folding **
   #x*0 -> 0 or 0*x -> 0
