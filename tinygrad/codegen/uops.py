@@ -188,7 +188,7 @@ def expand_nodes(parents, ranges, base):
       for cc in children[t]:
         to_replace.append(cc)
         replace[cc] = UOp(cc.uop, cc.dtype, tuple(replace.get(x, x) for x in cc.vin), cc.arg)
-    new_uops.append(replace[base])
+    new_uops.append(replace.get(base, base))
   return new_uops
 
 acc_number = 0
