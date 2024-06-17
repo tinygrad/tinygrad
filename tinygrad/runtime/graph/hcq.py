@@ -56,14 +56,15 @@ class HCQGraph(MultiGraphRunner):
     self.exec_ptrs: Dict[int, Tuple[Any, int]] = {}
     self.copy_to_devs: Dict[Compiled, Set[Compiled]] = {dev: set() for dev in self.devices}
 
+    # Schedule signals
     for j,ji in enumerate(self.jit_cache):
       if isinstance(ji.prg, CompiledRunner):
         deps = self.access_resources(ji.bufs[(outs:=ji.prg.p.outcount):], ji.bufs[:outs], (self.comp_signal[ji.prg.device], sig_val:=j+1))
         deps = [x for x in deps if id(x[0]) != id(self.comp_signal[ji.prg.device])]
 
         # NV should self wait if we have any other dependecies which brake the chained execution.
-        if ji.prg.device.dname.startswith("NV") and (len(deps) >= 1 or id(deps[0][1]) != id(self.comp_signal[ji.prg.device])):
-          deps.append((self.comp_signal[ji.prg.device], self.comp_signal_val[ji.prg.device]))
+        if ji.prg.device.dname.startswith("NV") and (len(deps) > 1 or (len(deps) == 1 and id(deps[0][1]) != id(self.comp_signal[ji.prg.device]))):
+          if self.comp_signal_val[ji.prg.device] > 0: deps.append((self.comp_signal[ji.prg.device], self.comp_signal_val[ji.prg.device]))
 
         signal_scheduling[j] = (deps, None) # output signal
         self.comp_signal_val[ji.prg.device] = sig_val
