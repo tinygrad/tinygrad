@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Tuple, cast
+from typing import List, Tuple, cast, Optional, Any
 import math, functools
 from dataclasses import replace
 from tinygrad.codegen.kernel import LocalBuffer, Kernel
@@ -10,14 +10,30 @@ from tinygrad.codegen.uops import UOp, UOpGraph, UOps
 from tinygrad.renderer import Program
 from tinygrad.helpers import to_function_name, colored, DEBUG, getenv, prod
 
+# TODO: this needs to be replaced, there shouldn't be variables in the shapetracker
+from tinygrad.shape.symbolic import Variable, NumNode, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode
+render_ops: Any = { Variable: lambda self, ops, ctx: UOp(UOps.DEFINE_VAR, dtypes.int32, (), self),
+                    NumNode: lambda self, ops, ctx: UOp.const(dtypes.int, self.b),
+                    MulNode: lambda self, ops, ctx: self.a.render(ops, ctx)*self.b,
+                    DivNode: lambda self, ops, ctx: self.a.render(ops, ctx)//self.b,
+                    ModNode: lambda self, ops, ctx: self.a.render(ops, ctx)%self.b,
+                    LtNode: lambda self, ops, ctx: self.a.render(ops, ctx).lt(self.b),
+  SumNode: lambda self,ops,ctx: functools.reduce(lambda a,b: a+b.render(ops, ctx), self.nodes[1:], self.nodes[0].render(ops,ctx)),
+  AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: a*b.render(ops, ctx), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
+
+def variable_to_uop(x) -> UOp:
+  if isinstance(x, int): return UOp.const(dtypes.int32, x)
+  #raise NotImplementedError(f"must be an int, not {x}")
+  return x.render(render_ops)
+
 def _uop_view(view:View, idxs:List[UOp], vexpr:UOp) -> Tuple[UOp, UOp]:
   # TODO: dtypes.realint
-  iexpr = UOp.const(dtypes.int32, view.offset)
+  iexpr = variable_to_uop(view.offset)
   for idx,sh,st,m in zip(idxs, view.shape, view.strides, view.mask if view.mask is not None else [None]*len(view.shape)):
-    if sh != 1 and st != 0: iexpr = iexpr + idx*st
+    if sh != 1 and st != 0: iexpr = iexpr + idx*variable_to_uop(st)
     if m is not None:
-      if m[0] != 0: vexpr = vexpr * idx.ge(m[0])
-      if m[1] != sh: vexpr = vexpr * idx.lt(m[1])
+      if m[0] != 0: vexpr = vexpr * idx.ge(variable_to_uop(m[0]))
+      if m[1] != sh: vexpr = vexpr * idx.lt(variable_to_uop(m[1]))
   return iexpr, vexpr
 
 def st_to_uops(st:ShapeTracker, idxs:List[UOp]) -> Tuple[UOp, UOp]:
@@ -26,8 +42,8 @@ def st_to_uops(st:ShapeTracker, idxs:List[UOp]) -> Tuple[UOp, UOp]:
     view = view.minify()
     acc, idxs = 1, []
     for d in reversed(view.shape):
-      idxs.append((idx//acc)%d)
-      acc *= d
+      idxs.append((idx//acc)%variable_to_uop(d))
+      acc *= variable_to_uop(d)
     idx, valid = _uop_view(view, idxs[::-1], valid)
   return idx, valid
 
@@ -125,26 +141,26 @@ class Lowerer(Kernel):
       self.idxs = global_idxs + local_idxs
 
       # define sizes
-      self.global_size = [x.arg[2] for x in loop_global_idxs]
-      self.local_size = [x.arg[2] for x in loop_local_idxs]
+      self.global_size: Optional[List[int]] = [x.arg[2] for x in loop_global_idxs]
+      self.local_size: Optional[List[int]] = [x.arg[2] for x in loop_local_idxs]
       self.global_size += [1]*(3-len(self.global_size))
       self.local_size += [1]*(3-len(self.local_size))
     else:
       # all loops
       self.idxs = []
       for i,g in enumerate(self.full_shape[:self.first_reduce]):
-        self.idxs.append(UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), UOp.const(dtypes.int32, g)), (i,False)))
+        self.idxs.append(UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), variable_to_uop(g)), (i,False)))
       self.global_size, self.local_size = None, None
 
     # reduce loops
     for i,g in enumerate(self.full_shape[self.first_reduce+self.group_for_reduces:], start=self.first_reduce+self.group_for_reduces):
       unrolled = i >= (self.shape_len-self.upcasted)
-      self.idxs.append(UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), UOp.const(dtypes.int32, g)), (i,unrolled)))
+      self.idxs.append(UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), variable_to_uop(g)), (i,unrolled)))
 
     # late indexes
     self.ridxs = self.idxs[:]
     for a in range(self.first_reduce, self.first_reduce+self.group_for_reduces):
-      self.ridxs[a] = UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), UOp.const(dtypes.int32, self.full_shape[a])), (1000+a, False))
+      self.ridxs[a] = UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), variable_to_uop(self.full_shape[a])), (1000+a, False))
 
     self.uops:UOpGraph = UOpGraph([self.to_uop(x) for x in modified_ast])
 
