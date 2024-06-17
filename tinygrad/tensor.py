@@ -2361,8 +2361,8 @@ class Tensor:
     print(t.sub(Tensor([[2.0], [3.5]])).numpy())
     ```
     """
-    minuend, subtrahend = self._broadcasted(x, reverse)
-    return F.Add.apply(minuend, -subtrahend)
+    a, b = self._broadcasted(x, reverse)
+    return a + (-b)
 
   def mul(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
