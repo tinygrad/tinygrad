@@ -250,9 +250,9 @@ constant_folder = PatternMatcher([
    lambda buf, idx, gate, alt: UOp.store(buf, idx, alt, gate)),
   # store float4/float2 directly (remove CAST/GEP)
   (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp(UOps.CAST, vin=tuple(UOp(UOps.GEP, arg=i, vin=(UOp.var("val"),)) for i in range(4)))),
-   lambda buf, idx, val: UOp.store(buf, idx, val)),
+   lambda buf, idx, val: UOp.store(buf, idx, val)), # pylint: disable=unnecessary-lambda
   (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp(UOps.CAST, vin=tuple(UOp(UOps.GEP, arg=i, vin=(UOp.var("val"),)) for i in range(2)))),
-   lambda buf, idx, val: UOp.store(buf, idx, val)),
+   lambda buf, idx, val: UOp.store(buf, idx, val)), # pylint: disable=unnecessary-lambda
   # CAST-PHI-GEP -> PHI-CAST
   (UPat(UOps.CAST, name="root", vin=tuple(UPat(UOps.PHI, vin=(UPat(UOps.GEP, i, vin=(UPat(name="val"),)), UPat(name=f"v{i}"))) for i in range(4))),
     lambda root, val, v0, v1, v2, v3: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1, v2, v3))))),
