@@ -262,7 +262,7 @@ class TestLinearizer(unittest.TestCase):
     k.linearize()
     define_globals = [u for u in k.uops if u.uop is UOps.DEFINE_GLOBAL]
     self.assertEqual(len([u for u in k.uops if u.uop is UOps.LOAD and define_globals[1] in u.vin]), 7)
-    self.assertEqual(len([u for u in k.uops if u.uop is UOps.ALU and u.arg is BinaryOps.ADD]), 25) 
+    self.assertEqual(len([u for u in k.uops if u.uop is UOps.ALU and u.arg is BinaryOps.ADD]), 25)
     opts = [[Opt(op=OptOps.UPCAST, axis=0, amt=2)], [Opt(op=OptOps.UPCAST, axis=0, amt=4)]]
     x = Tensor.randn(8,7).softmax().realize()
     helper_linearizer_ast(ast, [x], opts=opts, wanna_output=[(x.numpy() - x.numpy().sum(axis=1, keepdims=True)).sum(axis=1)])
