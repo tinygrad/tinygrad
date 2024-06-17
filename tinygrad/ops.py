@@ -118,7 +118,8 @@ def hook_overflow(dv, fxn):
 python_alu = {
   UnaryOps.LOG2: lambda x: math.log2(x) if x > 0 else -math.inf if x == 0 else math.nan,
   UnaryOps.EXP2: hook_overflow(math.inf, lambda x: math.exp(x*math.log(2))),
-  UnaryOps.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan, UnaryOps.SIN: math.sin,
+  UnaryOps.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan,
+  UnaryOps.SIN: lambda x: math.sin(x) if not math.isinf(x) else math.nan,
   UnaryOps.RECIP: lambda x: 1/x if x != 0 else float('inf'),
   UnaryOps.NEG: lambda x: (not x) if isinstance(x, bool) else -x,
   BinaryOps.SHR: operator.rshift, BinaryOps.SHL: operator.lshift,
