@@ -163,7 +163,8 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst):
   comprange = UOp.min(loop_end, UOp.max(UOp.alu(BinaryOps.IDIV, idx-compval-mval, mval) + (loop_end-loop_start), loop_start))
   return UOp(UOps.UNMUL, multconst.dtype, (comprange.cast(multconst.dtype) * multconst, loop_end-loop_start))
 
-def expand_nodes(parents, ranges, base):
+def expand_nodes(parents, ranges:List[UOp], base):
+  # get children and define_accs
   children = defaultdict(list)
   define_accs = []
   for p in parents:
@@ -172,9 +173,36 @@ def expand_nodes(parents, ranges, base):
     for x in p.vin:
       children[x].append(p)
 
+  # get nodes on the path from root to the range node
+  on_path: Dict[UOp, None] = {}
+  search = ranges[:]
+  while len(search):
+    t = search.pop(0)
+    for cc in children[t]:
+      if cc in on_path: continue
+      on_path[cc] = None
+      search.append(cc)
+
+  # toposort the nodes on the path
+  # TODO: library!
+  in_degree: DefaultDict[UOp, int] = defaultdict(int)
+  for n in on_path:
+    for x in children[n]:
+      in_degree[x] += 1
+  toposort = []
+  search2 = [p for p in on_path if in_degree[p] == 0]
+  seen: Set[UOp] = set()
+  while len(search2):
+    n = search2.pop(0)
+    if n in seen: continue
+    toposort.append(n)
+    for x in children[n]:
+      in_degree[x] -= 1
+      if in_degree[x] == 0:
+        search2.append(x)
+
   # should be unrolled
-  replacements = {}
-  for r in ranges: replacements[r] = [UOp.const(r.dtype, j) for j in range(r.vin[0].arg, r.vin[1].arg)]
+  replacements = {r:[UOp.const(r.dtype, j) for j in range(r.vin[0].arg, r.vin[1].arg)] for r in ranges}
 
   # get nodes on the path from root to the range node
   new_uops = []
@@ -184,12 +212,7 @@ def expand_nodes(parents, ranges, base):
     for d in define_accs:
       replace[d] = UOp(d.uop, d.dtype, d.vin, d.arg + (acc_number,))
       acc_number += 1
-    to_replace = list(replace.keys())
-    while len(to_replace):
-      t = to_replace.pop(0)
-      for cc in children[t]:
-        to_replace.append(cc)
-        replace[cc] = UOp(cc.uop, cc.dtype, tuple(replace.get(x, x) for x in cc.vin), cc.arg)
+    for cc in toposort: replace[cc] = UOp(cc.uop, cc.dtype, tuple(replace.get(x, x) for x in cc.vin), cc.arg)
     new_uops.append(replace.get(base, base))
   return new_uops
 

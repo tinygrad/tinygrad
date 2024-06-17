@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Tuple, cast, Optional, Any
+from typing import List, Tuple, cast, Optional, Any, Dict
 import math, functools
 from dataclasses import replace
 from tinygrad.codegen.kernel import LocalBuffer, Kernel
@@ -67,7 +67,12 @@ def get_reduce_acc(reduceop:LazyOp):
 uop_graphed = False
 class Lowerer(Kernel):
   def to_uop(self, x:LazyOp) -> UOp:
-    #print(x.op)
+    if uop:=self.uop_cache.get(x, None): return uop
+    ret = self._to_uop(x)
+    self.uop_cache[x] = ret
+    return ret
+
+  def _to_uop(self, x:LazyOp) -> UOp:
     if x.op in BufferOps:
       idx, valid = st_to_uops(x.arg.st, self.ridxs if x.op is BufferOps.LOAD and x.arg.idx == -1 else self.idxs)
       # TODO: check has_valid in UPat, not here
@@ -96,6 +101,8 @@ class Lowerer(Kernel):
 
   def linearize(self) -> Lowerer:
     global uop_graphed
+    self.uop_cache: Dict[LazyOp, UOp] = {}
+
     # kernel name (before late upcast)
     self.name = ("r" if self.reduceop else ("C" if all(x.op in BufferOps for x in self.lazyops) else "E")) + \
                  (f"{len(self.outbufs)}_" if len(self.outbufs) > 1 else "_") + \
