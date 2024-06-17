@@ -2342,8 +2342,8 @@ class Tensor:
     print(t.sub(Tensor([[2.0], [3.5]])).numpy())
     ```
     """
-
-    return F.Add.apply(*self._broadcasted(x, reverse))
+    m_d, s_d = self._broadcasted(x, reverse)
+    return F.Add.apply(m_d, -s_d)
 
   def mul(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
