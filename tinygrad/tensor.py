@@ -1285,7 +1285,8 @@ class Tensor:
     ```
     """
     ret = self.cast(acc_dtype or sum_acc_dtype(self.dtype))._reduce(F.Sum, axis, keepdim)
-    return ret.cast(self.dtype) if self.dtype in {dtypes.float16, dtypes.bfloat16} else ret
+    return ret.cast(self.dtype) if acc_dtype is None and self.dtype in (dtypes.float16, dtypes.bfloat16) else ret
+
   def max(self, axis=None, keepdim=False):
     """
     Returns the maximum value of the tensor along the specified axis or axes.
@@ -1308,6 +1309,7 @@ class Tensor:
     ```
     """
     return self._reduce(F.Max, axis, keepdim)
+
   def min(self, axis=None, keepdim=False):
     """
     Returns the minimum value of the tensor along the specified axis or axes.
