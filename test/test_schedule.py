@@ -1134,5 +1134,23 @@ class TestSchedule(unittest.TestCase):
     c_np = np.pad((np.full((4, 4), 2., dtype=np.float32) + np.full((4, 4), 1., dtype=np.float32)), ((1, 1), (1, 1)), constant_values=0.0)
     np.testing.assert_equal(d.numpy(), np.broadcast_to(c_np.astype(np.half), (2, *c_np.shape)) * 4)
 
+  def test_pad_reduce_unsafe_multiview_st(self):
+    P = Tensor.ones(3, 3).contiguous()
+    sums = P.sum(axis=1, keepdim=True)
+    P /= sums
+    p = P[0]
+    p = p.pad(((1, 0), ))
+    p = p.repeat([2])
+    run_schedule(check_schedule(p, 3))
+    tiny_ret = p.numpy()
+
+    P = np.ones((3, 3), dtype=np.float32)
+    sums = P.sum(axis=1, keepdims=True)
+    P /= sums
+    p = P[0]
+    p = np.pad(p, (1, 0), 'constant')
+    p = np.tile(p, 2)
+    np.testing.assert_allclose(tiny_ret, p)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
