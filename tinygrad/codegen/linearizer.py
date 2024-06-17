@@ -61,7 +61,7 @@ def get_grouped_dims(prefix:str, off:int, dims:Tuple[sint, ...], max_sizes:Optio
 
   # construct the final dim idx variables from the the portions of the size variables
   sizes, idxs = [prod([dim_max for (_, dim_max) in size_dim]) for size_dim in size_dims], [NumNode(0)] * len(dims)
-  size_vars = loop_idxs = [Variable(f"{prefix}{i+off}", 0, s-1) for i,s in enumerate(sizes)]
+  size_vars = loop_idxs = [Variable(f"{prefix}{len(sizes)-1-(i+off) if reverse_dims else i+off}", 0, s-1) for i,s in enumerate(sizes)]
   for size_idx, size_var in enumerate(size_vars):
     for dim_idx, dim_max in size_dims[size_idx]:
       idxs[dim_idx] += (size_var % dim_max) * (idxs[dim_idx].max+1)
