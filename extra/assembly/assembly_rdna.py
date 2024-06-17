@@ -43,7 +43,7 @@ class RDNACodegen(AssemblyCodegen):
     s_cnt = 5  # s[0:1] is the address, s[2:4] is global_xyz
 
     dtype_to_rdnatype = {dtypes.float32: "f32", dtypes.int64: "i64", dtypes.int32: "i32", dtypes.uint64: "u64", dtypes.bool: "i32"}
-    alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", TernaryOps.MULACC: "fma",
+    alu = {BinaryOps.ADD: "add", BinaryOps.MUL: "mul", TernaryOps.MULACC: "fma",
            BinaryOps.MAX: "max", UnaryOps.RECIP: "rcp",
            UnaryOps.NOOP: "mov", UnaryOps.SIN: "sin", UnaryOps.LOG2: "log", UnaryOps.EXP2: "exp",
            BinaryOps.CMPLT: "cmp_lt"}
