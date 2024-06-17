@@ -627,6 +627,9 @@ class TestLinearizer(unittest.TestCase):
     _assert_grouped_dims("gidx", (2,3), (16,16,16,), True, [3,2,1])
     _assert_grouped_dims("gidx", (2,3,4,), (16,16,16,), False, [2,3,4])
     _assert_grouped_dims("gidx", (2,3,4,5,), (16,16,16,), False, [6,4,5])
+    # _assert_grouped_dims("gidx", (2,3,4,5,), (16,16,16,), True, [5,12,2]) # this is the new linearizer way
+    # _assert_grouped_dims("gidx", (2,3,4,5,), (32,16,16,), True, [20,3,2]) # this is the new linearizer way
+    _assert_grouped_dims("gidx", (2,3,4,5,), (16,16,16,), True, [5,4,6]) # this is the old linearizer way - TODO: remove
     _assert_grouped_dims("gidx", (64,3,4,), (16,16,16,), False, [16,12,4])
     _assert_grouped_dims("gidx", (64,3,4,), (16,4,16,), False, [16,4,12])
     _assert_grouped_dims("gidx", (64,3,4,), (16,16,16,), True, [12,16,4])

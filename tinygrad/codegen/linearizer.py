@@ -52,12 +52,15 @@ def get_grouped_dims(prefix:str, off:int, dims:Tuple[sint, ...], max_sizes:Optio
     assert size_dims[size_idx][0][1] <= max_sz, f"dim at {size_idx} too large and non-factorable: {dim_max} > {max_sz}"
 
   # compress the extra dims, collapsing them onto the left-most valid size axis
+  # for run_process_replay, collapse onto the right-most dim to compare the outputs.  TODO: remove
+  if reverse_dims: size_dims, max_sizes = size_dims[::-1], max_sizes[::-1]
   cur_size_idx = 0
   while len(size_dims) > len(max_sizes):
     if prod([dim_max for (_, dim_max) in size_dims[cur_size_idx]])*size_dims[cur_size_idx+1][0][1] < max_sizes[cur_size_idx]:
       size_dims = size_dims[:cur_size_idx] + [size_dims[cur_size_idx] + size_dims[cur_size_idx+1]] + size_dims[cur_size_idx+2:]
     elif cur_size_idx < len(max_sizes)-1: cur_size_idx += 1
     else: raise AssertionError(f"cannot fit dims in size: {dims=} {max_sizes=}")
+  if reverse_dims: size_dims, max_sizes = size_dims[::-1], max_sizes[::-1]
 
   # construct the final dim idx variables from the the portions of the size variables
   sizes, idxs = [prod([dim_max for (_, dim_max) in size_dim]) for size_dim in size_dims], [NumNode(0)] * len(dims)
