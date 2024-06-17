@@ -6,7 +6,6 @@ from tinygrad.ops import BufferOps, LoadOps, LazyOp
 from tinygrad.device import Device, Buffer
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.renderer import Renderer, Program
-#from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.codegen.lowerer import Lowerer as Linearizer
 from tinygrad.engine.schedule import ScheduleItem
 

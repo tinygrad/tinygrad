@@ -4,7 +4,7 @@ import math, functools
 from dataclasses import replace
 from tinygrad.codegen.kernel import LocalBuffer, Kernel
 from tinygrad.shape.shapetracker import ShapeTracker, View
-from tinygrad.dtype import dtypes, PtrDType
+from tinygrad.dtype import dtypes, PtrDType, ImageDType
 from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, BinaryOps, UnaryOps, MemBuffer
 from tinygrad.codegen.uops import UOp, UOpGraph, UOps
 from tinygrad.renderer import Program
@@ -58,20 +58,20 @@ class Lowerer(Kernel):
       has_valid = valid.uop is not UOps.CONST or valid.arg is not True
       if x.op is BufferOps.CONST:
         return UOp.alu(TernaryOps.WHERE, valid, UOp.const(x.arg.dtype, x.arg.val), UOp.const(x.arg.dtype, 0))
-
       if x.arg.idx == -1:
+        # TODO: this should come from somewhere else
         buf = self.local_buffer_uop
       else:
-        buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(x.arg.dtype), (), (x.arg.idx, any(x.arg.idx == y.idx for y in self.outbufs)))
-
+        buf = UOp(UOps.DEFINE_GLOBAL, x.arg.dtype if isinstance(x.arg.dtype, ImageDType) else PtrDType(x.arg.dtype), (),
+                  (x.arg.idx, any(x.arg.idx == y.idx for y in self.outbufs)))
       if x.op is BufferOps.LOAD:
         barrier = (UOp(UOps.BARRIER, None, (self.to_uop(x.src[0]),)),) if len(x.src) else ()
-        return UOp(UOps.LOAD, x.arg.dtype, (buf, idx) + ((valid, UOp.const(x.arg.dtype, 0)) if has_valid else ()) + barrier)
+        return UOp(UOps.LOAD, x.arg.dtype.scalar(), (buf, idx) + ((valid, UOp.const(x.arg.dtype, 0)) if has_valid else ()) + barrier)
       return UOp(UOps.STORE, None, (buf, idx, self.to_uop(x.src[0])) + ((valid,) if has_valid else ()))
 
     in_uops = tuple(self.to_uop(y) for y in x.src)
-    if x.op is UnaryOps.CAST: return UOp(UOps.CAST, x.arg, in_uops)
-    if x.op is UnaryOps.BITCAST: return UOp(UOps.BITCAST, x.arg, in_uops)
+    if x.op is UnaryOps.CAST: return UOp(UOps.CAST, x.arg.scalar(), in_uops)
+    if x.op is UnaryOps.BITCAST: return UOp(UOps.BITCAST, x.arg.scalar(), in_uops)
     if x.op in ReduceOps:
       op = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[cast(ReduceOps, x.op)]
       # NOTE: always using ridxs is fine here
