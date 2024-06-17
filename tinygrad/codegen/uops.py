@@ -249,19 +249,17 @@ constant_folder = PatternMatcher([
   (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp.alu(TernaryOps.WHERE, UOp.var("gate"), UOp.var("alt"), UOp.load(UOp.var("buf"), UOp.var("idx")))),
    lambda buf, idx, gate, alt: UOp.store(buf, idx, alt, gate)),
   # store float4/float2 directly (remove CAST/GEP)
-  (UPat(UOps.STORE, vin=(UPat(name="buf"), UPat(name="idx"), UPat(UOps.CAST, vin=
-                                tuple(UPat(UOps.GEP, i, vin=(UPat(name="val"),)) for i in range(4))))),
-   lambda buf,idx,val: UOp(UOps.STORE, None, (buf, idx, val))),
-  (UPat(UOps.STORE, vin=(UPat(name="buf"), UPat(name="idx"), UPat(UOps.CAST, vin=
-                                tuple(UPat(UOps.GEP, i, vin=(UPat(name="val"),)) for i in range(2))))),
-   lambda buf,idx,val: UOp(UOps.STORE, None, (buf, idx, val))),
+  (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp(UOps.CAST, vin=tuple(UOp(UOps.GEP, arg=i, vin=(UOp.var("val"),)) for i in range(4)))),
+   lambda buf,idx,val: UOp.store(buf, idx, val)),
+  (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp(UOps.CAST, vin=tuple(UOp(UOps.GEP, arg=i, vin=(UOp.var("val"),)) for i in range(2)))),
+   lambda buf,idx,val: UOp.store(buf, idx, val)),
   # CAST-PHI-GEP -> PHI-CAST
   (UPat(UOps.CAST, name="root", vin=tuple(UPat(UOps.PHI, vin=(UPat(UOps.GEP, i, vin=(UPat(name="val"),)), UPat(name=f"v{i}"))) for i in range(4))),
     lambda root, val, v0, v1, v2, v3: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1, v2, v3))))),
   (UPat(UOps.CAST, name="root", vin=tuple(UPat(UOps.PHI, vin=(UPat(UOps.GEP, i, vin=(UPat(name="val"),)), UPat(name=f"v{i}"))) for i in range(2))),
     lambda root, val, v0, v1: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1))))),
   # NEG/CMPLT -> CMPLT
-  (UOp.lt(-UOp.var('x'), UOp.cvar('c')), lambda c,x: UOp.lt(UOp.const(c.dtype, -c.arg), x)),
+  (UOp.lt(-UOp.var('x'), UOp.cvar('c', dtypes.int)), lambda c,x: UOp.lt(UOp.const(c.dtype, -c.arg), x)),
   # cast NOOP (NOTE: it's str to deal with PtrDType)
   (UPat(UOps.CAST, name="root"), lambda root: root.vin[0] if str(root.dtype) == str(root.vin[0].dtype) else None),
 ])
