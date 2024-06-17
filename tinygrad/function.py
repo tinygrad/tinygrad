@@ -167,11 +167,10 @@ def _xlog2(d: LazyBuffer) -> LazyBuffer:
   return r
 
 class Sin(Function):
-  def forward(self, x:LazyBuffer, fast_approx:bool=True) -> LazyBuffer:
+  def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
-    self.fast_approx = fast_approx
-    self.fast_approx = fast_approx or x.dtype == dtypes.float32 or x.dtype == dtypes.float64
-    if self.fast_approx:
+    fast_approx = x.dtype == dtypes.float32 or x.dtype == dtypes.float64
+    if fast_approx:
       assert x.dtype == dtypes.float32 or x.dtype == dtypes.float64, ""
       return _xsin(x)
     else:
@@ -192,13 +191,17 @@ class Relu(Function):
 class Log(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
-    #return x.e(UnaryOps.LOG2).e(BinaryOps.MUL, x.const(math.log(2)))
-    return _xlog2(x).e(BinaryOps.MUL, x.const(math.log(2)))
+    return x.e(UnaryOps.LOG2).e(BinaryOps.MUL, x.const(math.log(2)))
+    #return _xlog2(x).e(BinaryOps.MUL, x.const(math.log(2)))
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.e(BinaryOps.MUL, self.x.e(UnaryOps.RECIP))
 
 class Exp(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = _xexp2(x.e(BinaryOps.MUL, x.const(1/math.log(2))))#_xexp2(x)#x.e(BinaryOps.MUL, x.const(1/math.log(2))).e(UnaryOps.EXP2)
+    fast_approx = x.dtype == dtypes.float32 or x.dtype == dtypes.float64
+    if fast_approx:
+      self.ret = _xexp2(x.e(BinaryOps.MUL, x.const(1/math.log(2))))
+    else:
+      self.ret = x.e(BinaryOps.MUL, x.const(1/math.log(2))).e(UnaryOps.EXP2)
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return self.ret.e(BinaryOps.MUL, grad_output)
