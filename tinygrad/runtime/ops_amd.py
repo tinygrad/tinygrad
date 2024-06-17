@@ -119,7 +119,7 @@ class HWPM4Queue(HWQueue):
       dp.grid_size_x, dp.grid_size_y, dp.grid_size_z = global_size[0]*local_size[0], global_size[1]*local_size[1], global_size[2]*local_size[2]
       dp.group_segment_size, dp.private_segment_size, dp.kernarg_address = prg.group_segment_size, prg.private_segment_size, kernargs
       user_data = [*data64_le(dp_addr)] + user_data
-      self.ptr_to_dispatch_packet[self.ptr()] = dp
+      self.ptr_to_dispatch_packet[len(self)] = dp
 
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 6), gfxreg(amd_gpu.regCOMPUTE_PGM_LO), *data64_le(prg.prog_addr >> 8),
                *data64_le(0), *data64_le(prg.device.scratch.va_addr >> 8)]
