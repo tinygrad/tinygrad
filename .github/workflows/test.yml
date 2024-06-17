@@ -149,8 +149,8 @@ jobs:
       matrix:
         task: [optimage, openpilot, onnx]
     needs: check_process_replay
-    #env:
-      #RUN_PROCESS_REPLAY: ${{ needs.check_process_replay.outputs.run_process_replay }}
+    env:
+      RUN_PROCESS_REPLAY: ${{ needs.check_process_replay.outputs.run_process_replay }}
 
     name: ${{ matrix.task=='optimage'&&'GPU OPT and IMAGE Tests' || matrix.task=='openpilot'&&'openpilot (OpenCL) Tests' || matrix.task=='onnx'&&'ONNX+Optimization Tests' }}
     runs-on: ubuntu-20.04

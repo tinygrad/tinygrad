@@ -21,6 +21,5 @@ for offset in tqdm(range(0, row_count, page_size)):
       print(compare_k.ast)
       print(compare_k.applied_opts)
       diff = list(difflib.unified_diff(good_src.splitlines(), compare_src.splitlines()))
-      for line in diff:
-        print(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
+      for line in diff: print(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
       raise e
