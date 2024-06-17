@@ -13,7 +13,7 @@ from tinygrad.renderer import Program
 
 from tinygrad.codegen.uops import UOps, UOp, UOpGraph
 
-def get_grouped_dims(prefix:str, dims:Tuple[sint, ...], max_sizes:Tuple[int, ...], reverse_dims:bool=False):
+def get_grouped_dims(prefix:str, off:int, dims:Tuple[sint, ...], max_sizes:Optional[Tuple[int, ...]], reverse_dims:bool=False):
   """ Maps all global/local dims onto global/local sizes and returns the idxs, loop_idxs and sizes.
 
   * If there are fewer dims than size, size will be padded with 1s to the length of max_sizes.
@@ -27,6 +27,8 @@ def get_grouped_dims(prefix:str, dims:Tuple[sint, ...], max_sizes:Tuple[int, ...
   reverse_dims -- reverse the order of the dims as they are mapped into size, i.e. if True, the right dim will go to the left size (.x).
   """
 
+  # check the edge cases on max_sizes
+  if max_sizes is None: max_sizes = tuple([0xFFFFFFFFFFFFFFFF] * len(dims))
   assert len(max_sizes) > 0 or len(dims) == 0, f"{prefix} dims should be empty because no size axes available"
   if len(max_sizes) == 0: return [], [], None
 
@@ -59,7 +61,7 @@ def get_grouped_dims(prefix:str, dims:Tuple[sint, ...], max_sizes:Tuple[int, ...
 
   # construct the final dim idx variables from the the portions of the size variables
   sizes, idxs = [prod([dim_max for (_, dim_max) in size_dim]) for size_dim in size_dims], [NumNode(0)] * len(dims)
-  size_vars = loop_idxs = [Variable(f"{prefix}{i}", 0, s-1) for i,s in enumerate(sizes)]
+  size_vars = loop_idxs = [Variable(f"{prefix}{i+off}", 0, s-1) for i,s in enumerate(sizes)]
   for size_idx, size_var in enumerate(size_vars):
     for dim_idx, dim_max in size_dims[size_idx]:
       idxs[dim_idx] += (size_var % dim_max) * (idxs[dim_idx].max+1)
@@ -421,9 +423,9 @@ class Linearizer(Kernel):
 
     # define indexes
     gl_dims = self.full_shape[:self.first_reduce+self.group_for_reduces]
-    global_idxs, loop_global_idxs, self.global_size = get_grouped_dims("idx" if self.dont_use_locals else "gidx", gl_dims[:self.global_dims],
+    global_idxs, loop_global_idxs, self.global_size = get_grouped_dims("idx" if self.dont_use_locals else "gidx", 0, gl_dims[:self.global_dims],
                                                                        self.opts.global_max, self.opts.has_local)
-    local_idxs, loop_local_idxs, self.local_size = get_grouped_dims("lidx", gl_dims[self.global_dims:],
+    local_idxs, loop_local_idxs, self.local_size = get_grouped_dims("lidx", self.global_dims, gl_dims[self.global_dims:],
                                                                     self.opts.local_max if self.opts.has_local else (), False)
     upcast_idxs = [Variable(f"_uidx{i}", 0, s-1) for i, s in enumerate(self.output_shape[self.shape_len-self.upcasted:])]
     full_upcast_idxs = [Variable(f"_uidx{i}", 0, s-1) for i, s in enumerate(self.full_shape[self.shape_len-self.upcasted:])]

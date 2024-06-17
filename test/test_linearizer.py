@@ -612,7 +612,7 @@ class TestLinearizer(unittest.TestCase):
 
   def test_grouped_dims(self):
     def _assert_grouped_dims(prefix, dims, max_sizes, reverse_dims, expected_sizes):
-      idxs, loop_idxs, sizes = get_grouped_dims(prefix, dims, max_sizes, reverse_dims)
+      idxs, loop_idxs, sizes = get_grouped_dims(prefix, 0, dims, max_sizes, reverse_dims)
       assert len(idxs) == len(dims), f"expected idxs to have same length as dims {len(dims)}, got {len(idxs)}"
       assert len(loop_idxs) == min(len(sizes), len(dims)), f"expected idxs to have length {min(len(sizes), len(dims))}, got {len(loop_idxs)}"
       assert sizes == expected_sizes, f"expected sizes={expected_sizes}, got {sizes=}"
@@ -632,13 +632,13 @@ class TestLinearizer(unittest.TestCase):
     _assert_grouped_dims("gidx", (64,3,4,), (16,16,16,), True, [12,16,4])
 
     with self.assertRaises(AssertionError): # dim too large and not factorable
-      get_grouped_dims("gidx", (23,), (16,16,16,), False,)
+      get_grouped_dims("gidx", 0, (23,), (16,16,16,), False,)
 
     with self.assertRaises(AssertionError): # too large for sizes
-      get_grouped_dims("gidx", (2,3,4,5,6), (16,16,16,), False,)
+      get_grouped_dims("gidx", 0, (2,3,4,5,6), (16,16,16,), False,)
 
     with self.assertRaises(AssertionError): # variable too large
-      get_grouped_dims("gidx", (Variable("start_pos", 0, 17),3,4), (16,16,16,), False,)
+      get_grouped_dims("gidx", 0, (Variable("start_pos", 0, 17),3,4), (16,16,16,), False,)
 
   def test_sum_collapse(self):
     t = Tensor([2]).reshape(1, 1).expand(256, 256).sum()

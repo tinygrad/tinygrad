@@ -69,9 +69,10 @@ def const(args, dtype): return ir.Constant(dtype_to_llvm_dtype[dtype], args)
 
 class LLVMRenderer(Renderer):
   device = "LLVM"
-  supports_float4=False
-  has_local=False
-  has_shared=False
+  supports_float4 = False
+  has_local = False
+  has_shared = False
+  global_max = None
 
   def render(self, name:str, uops:UOpGraph) -> str:
     # all llvm stuff goes into a module

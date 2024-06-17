@@ -179,6 +179,7 @@ class ClangRenderer(CStyleLanguage):
   device = "CLANG"
   supports_float4 = False
   has_local = False
+  global_max = None
 
   # language options
   buffer_suffix = " restrict"
