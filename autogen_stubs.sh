@@ -35,6 +35,7 @@ generate_opencl_error_codes(){
   fi
   
   file=$OPENCL_HEADERS_SRC/opencl_headers_coalesce.h
+  sed -i '220d' $OPENCL_HEADERS_SRC/CL/cl.h
   cat $OPENCL_HEADERS_SRC/CL/*.h > $file
 
   sed -i 's/Codes/codes/p' $file
@@ -49,6 +50,7 @@ generate_opencl_error_codes(){
   sed -i -e 's/"\(\s*\)\(.*\)\(\s*\)\(\r*\)"/"\2"/' $file 
   sed -i -e 's/\(\s*\)\(.*\)/\2/' $file 
   cat $file >> $BASE/opencl.py
+  #TODO 
 }
 
 generate_opencl() {
