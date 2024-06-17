@@ -1,4 +1,4 @@
-import unittest, operator, subprocess
+import unittest, operator, subprocess, math
 import numpy as np
 import torch
 from typing import Any, List
@@ -543,6 +543,15 @@ class TestAutoCastType(unittest.TestCase):
     #assert (Tensor([0, 1], dtype=dtypes.bfloat16)).sum().dtype == dtypes.bfloat16
     assert (Tensor([0, 1], dtype=dtypes.float32)).sum().dtype == dtypes.float32
     assert (Tensor([0, 1], dtype=dtypes.float64)).sum().dtype == dtypes.float64
+
+  def test_sum_acc_dtype(self):
+    t = Tensor([40000, 40000], dtype=dtypes.float16)
+    # default float16 sum returns in float16, overflowed in this case
+    assert t.sum().dtype == dtypes.float16
+    assert math.isinf(t.sum().numpy().item())
+    # specifiying acc_dtype and it's not downcasted
+    assert t.sum(acc_dtype=dtypes.float32).dtype == dtypes.float32
+    np.testing.assert_allclose(t.sum(acc_dtype=dtypes.float32).numpy(), 80000)
 
   def test_mean(self):
     assert (Tensor([0, 1], dtype=dtypes.bool)).mean().dtype == dtypes.float32
