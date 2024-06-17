@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, dtypes, DType
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, exec_alu
-from tinygrad.helpers import prod, DEBUG, getenv
+from tinygrad.helpers import bfs, prod, DEBUG, getenv
 
 # the order of these UOps controls the order of the toposort
 class UOps(Enum):
@@ -328,23 +328,15 @@ class UOpGraph:
     while len(unprocessed_nodes):
       n = unprocessed_nodes.pop(0)
       if n in all_nodes: continue
-      all_nodes[n] = None
+      all_nodes[n], early_in_degree[n] = None, 0
       for x in n.vin:
         early_in_degree[n] += 1
         children[x].append(n)
       unprocessed_nodes += list(n.vin)
-    early_queue = [x for x in all_nodes if early_in_degree[x] == 0]
-    replace_nodes: Dict[UOp, UOp] = {}
-    while len(early_queue):
-      n = early_queue.pop(0)
-      if n in replace_nodes: continue
-      key = (n.uop, n.dtype, tuple(replace_nodes.get(x, x) for x in n.vin), n.arg)
-      if found:=self.nodes.get(key): replace_nodes[n] = found
-      else: replace_nodes[n] = self.nodes[key] = UOp(*key)
-      for x in children[n]:
-        early_in_degree[x] -= 1
-        if early_in_degree[x] == 0:
-          early_queue.append(x)
+    def insert(v:UOp, toposort:Dict[UOp, UOp]):
+      key = (v.uop, v.dtype, tuple(toposort.get(x, x) for x in v.vin), v.arg)
+      toposort[v] = self.nodes.setdefault(key, UOp(*key))
+    replace_nodes = bfs(children, early_in_degree, insert)
     return replace_nodes.get(sink, sink)
 
   def linearize(self, extra_pm:Optional[PatternMatcher]=None, type_verify=True):

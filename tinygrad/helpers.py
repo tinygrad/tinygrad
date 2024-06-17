@@ -1,7 +1,8 @@
 from __future__ import annotations
+from collections import deque
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string, ctypes, sys
 import itertools, urllib.request, subprocess, shutil, math
-from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Sequence
+from typing import DefaultDict, Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Sequence
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
   from tinygrad.shape.shapetracker import sint
@@ -75,6 +76,19 @@ def getenv(key:str, default=0): return type(default)(os.getenv(key, default))
 def temp(x:str) -> str: return (pathlib.Path(tempfile.gettempdir()) / x).as_posix()
 
 class GraphException(Exception): pass
+
+V = TypeVar("V")
+def bfs(graph:DefaultDict[T, List[T]], in_degree:DefaultDict[T, int], insert:Callable[[T, Dict[T, T]], None]) -> Dict[T, T]:
+  queue = deque(n for n,d in in_degree.items() if d == 0)
+  toposort: Dict[T, T] = {}
+  while queue:
+    v = queue.popleft()
+    if v in toposort: continue
+    insert(v, toposort)
+    for u in graph[v]:
+      in_degree[u] -= 1
+      if in_degree[u] == 0: queue.append(u)
+  return toposort
 
 class Context(contextlib.ContextDecorator):
   stack: ClassVar[List[dict[str, int]]] = [{}]
