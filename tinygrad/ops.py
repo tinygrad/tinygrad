@@ -75,7 +75,7 @@ class LazyOp:
   def vars(self) -> List[Variable]:
     extract_vars = [x.arg.st.vars() for x in self.lazyops if x.op in BufferOps]
     const_vars = [x.arg.val for x in self.lazyops if x.op is BufferOps.CONST and isinstance(x.arg.val, Variable)]
-    return sorted(set.union(*extract_vars, set(const_vars)), key=lambda x: str(x.expr))
+    return sorted(set.union(*extract_vars, set(const_vars)), key=lambda v: v.expr)
 
 # **************** independent FlopCounter ****************
 

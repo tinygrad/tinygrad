@@ -82,7 +82,7 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
         if ji.prg.p.vars: self.jc_idx_with_updatable_var_vals.append(j)
         if (ji.prg.p.global_size and not all_int(ji.prg.p.global_size)) or (ji.prg.p.local_size and not all_int(ji.prg.p.local_size)):
           self.jc_idx_with_updatable_launch_dims.append(j)
-    self.vars = list(var_vals.keys())
+    self.vars = sorted(var_vals.keys(), key=lambda v: v.expr)
     super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), jit_cache[0].prg.dname.split(":")[0], op_estimate, mem_estimate)
 
 class MultiGraphRunner(GraphRunner):  # pylint: disable=abstract-method
@@ -143,8 +143,7 @@ class TinyJit(Generic[ReturnType]):
     assert len(set(input_buffers)) == len(input_buffers), "duplicate inputs to JIT"
     var_vals: Dict[Variable, int] = merge_dicts([varvals for _,varvals,_,_ in st_varvals_dtype_device] + \
                                                 [dict(v.unbind() for v in itertools.chain(args, kwargs.values()) if isinstance(v, Variable))])
-    # TODO: var here is not sorted
-    st_vars_dtype_device = [(x[0], tuple(x[1].keys()), x[2], x[3]) for x in st_varvals_dtype_device]
+    st_vars_dtype_device = [(x[0], tuple(sorted(x[1].keys(), key=lambda v: v.expr)), x[2], x[3]) for x in st_varvals_dtype_device]
     if self.cnt == 0:
       # jit ignore
       with Context(BEAM=0 if getenv("IGNORE_JIT_FIRST_BEAM") else BEAM.value):
