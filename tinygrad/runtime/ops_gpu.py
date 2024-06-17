@@ -5,12 +5,14 @@ import tinygrad.runtime.autogen.opencl as cl
 from tinygrad.helpers import init_c_var, to_char_p_p, from_mv, OSX, DEBUG
 from tinygrad.renderer.cstyle import OpenCLRenderer
 from tinygrad.device import BufferOptions, LRUAllocator, Compiled, Compiler, CompileError
+from tinygrad.runtime.autogen.opencl import opencl_status_codes
+
 
 # see test/external/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
 OSX_TIMING_RATIO = (125/3) if OSX else 1.0
 
 def check(status):
-  if status != 0: raise RuntimeError(f"OpenCL Error {status}")
+    if status != 0: raise RuntimeError(f"OpenCL Error {opencl_status_codes.get(status, 'Unkown Error')}") 
 def checked(ret, status): return (check(status.value), ret)[1]
 
 class CLCompiler(Compiler):
