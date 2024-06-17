@@ -99,7 +99,7 @@ class PythonProgram:
               del ul[i]
               i = loop_ends[i] + 1
               continue
-        elif uop in {UOps.CAST, UOps.BITCAST}:
+        elif uop in (UOps.CAST, UOps.BITCAST):
           if dtype.count > 1: ul[i] = inp
           else:
             assert dtp[0].fmt and dtype.fmt
@@ -107,9 +107,10 @@ class PythonProgram:
             if uop is UOps.BITCAST: ul[i] = list(struct.unpack(unpack_format, struct.pack(pack_format, *inp[0])))
             else:
               casted = [dtypes.as_const(x, dtype) for x in inp[0]]
-              overflow_adjust = 2**(dtype.itemsize*8 - 1) if (dtypes.is_int(dtype) and not dtypes.is_unsigned(dtype)) else 0
-              overflow_fixed = [((x + overflow_adjust) % 2**(dtype.itemsize*8) - overflow_adjust) if dtypes.is_int(dtype) else x for x in casted]
-              ul[i] = list(struct.unpack(unpack_format, struct.pack(unpack_format, *overflow_fixed)))
+              if dtypes.is_int(dtype):
+                overflow_adjust = 2**(dtype.itemsize*8 - 1) if not dtypes.is_unsigned(dtype) else 0
+                casted = [((x + overflow_adjust) % 2**(dtype.itemsize*8) - overflow_adjust) for x in casted]
+              ul[i] = list(struct.unpack(unpack_format, struct.pack(unpack_format, *casted)))
         elif uop is UOps.LOAD:
           if isinstance(dtp[0], ImageDType):
             assert dtype.count == 4
