@@ -60,7 +60,7 @@ def _pow2if(q:LazyBuffer) -> LazyBuffer: # returns float32
   assert q.dtype in (dtypes.int32, dtypes.int64)
   if q.dtype == dtypes.int32: return q.e(BinaryOps.ADD, q.const(127)).e(BinaryOps.SHL, q.const(23)).cast(dtypes.float32, True)
   if q.dtype == dtypes.int64: return q.e(BinaryOps.ADD, q.const(1023)).e(BinaryOps.SHL, q.const(52)).cast(dtypes.float64, True)
-  
+
 def _ldexp2kf(d:LazyBuffer, e:LazyBuffer) -> LazyBuffer: # returns float32
   assert d.dtype in (dtypes.float32, dtypes.float64)
   assert e.dtype in (dtypes.int32, dtypes.int64)
@@ -76,12 +76,12 @@ def _ldexp3kf(d:LazyBuffer, e:LazyBuffer) -> LazyBuffer:
 def _xsin(d: LazyBuffer) -> LazyBuffer:
   TRIGRANGEMAXf = d.const(39000)
   TRIGRANGEMAX2f = d.const(125.0)
-  
+
   PI_A2f = d.const(3.1414794921875)
   PI_B2f = d.const(0.00011315941810607910156)
   PI_C2f = d.const(1.9841872589410058936e-09)
   PI_D2f = d.const(1.2154201256553420762e-10)
-  
+
   minus_PI_A2f = d.const(-3.1414794921875)
   minus_PI_B2f = d.const(-0.00011315941810607910156)
   minus_PI_C2f = d.const(-1.9841872589410058936e-09)
@@ -90,29 +90,29 @@ def _xsin(d: LazyBuffer) -> LazyBuffer:
 
   u = d
   di = _rintk(d).cast(d.dtype)
-  
+
   def __lv1q(x:LazyBuffer) -> LazyBuffer: return _rintk(x.e(BinaryOps.MUL, M_1_PI)).cast(d.dtype)
   def __lv2q(x:LazyBuffer) -> LazyBuffer: return _rintk(x.e(BinaryOps.MUL, M_1_PI)).cast(d.dtype)
-        
+
   q = di.e(BinaryOps.CMPLT, TRIGRANGEMAX2f).e(
     TernaryOps.WHERE,
     __lv1q(d),
     __lv2q(d)
   )
-  
+
   def __lv1(x:LazyBuffer) -> LazyBuffer:
     d = _mla(q, minus_PI_A2f, x)
     d = _mla(q, minus_PI_B2f, d)
     d = _mla(q, minus_PI_C2f, d)
     return d
-      
+
   def __lv2(x:LazyBuffer) -> LazyBuffer:
     d = _mla(q, minus_PI_A2f, x)
     d = _mla(q, minus_PI_B2f, d)
     d = _mla(q, minus_PI_C2f, d)
     d = _mla(q, minus_PI_D2f, d)
     return d
-      
+
   d = di.e(BinaryOps.CMPLT, TRIGRANGEMAX2f).e(
     TernaryOps.WHERE,
     __lv1(d),
@@ -157,11 +157,11 @@ def _xlog2(d: LazyBuffer) -> LazyBuffer:
   e = o.e(TernaryOps.WHERE, e, e.e(BinaryOps.ADD, d.const(-64.0)))
   x = m.e(BinaryOps.ADD, d.const(-1.0)).e(BinaryOps.MUL, m.e(BinaryOps.ADD, d.const(1.0)).e(UnaryOps.RECIP))
   x2 = x.e(BinaryOps.MUL, x)
-  
+
   t = d.const(+0.4374088347e+0)
   t = _mla(t, x2, d.const(0.5764843822e+0))
   t = _mla(t, x2, d.const(0.9618024230e+0))
-  
+
   r = _mla(x2.e(BinaryOps.MUL, x), t, _mla(x, d.const(0.2885390043e+1), e))
   #r = _xisinf(r).e(TernaryOps.WHERE, d.const(math.inf), r)
   return r
