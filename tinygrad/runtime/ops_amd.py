@@ -184,13 +184,13 @@ class HWPM4Queue(HWQueue):
     return self._mark_command_end()
 
   def update_wait(self, cmd_idx, signal=None, value=None):
-    assert self.q[self.cmd_offsets[cmd_idx]] == amd_gpu.PACKET3(amd_gpu.PACKET3_WAIT_REG_MEM, 5), "The pointer does not point to a packet of this type"
+    assert self.q[self.cmd_offsets[cmd_idx]] == amd_gpu.PACKET3(amd_gpu.PACKET3_WAIT_REG_MEM, 5), f"Command at index {cmd_idx} is not wait"
     if signal is not None: self._patch(self.cmd_offsets[cmd_idx] + 2, [*data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET)])
-    if value is not None: self.q[self.cmd_offsets[cmd_idx]+4] = value
+    if value is not None: self.q[self.cmd_offsets[cmd_idx] + 4] = value
     return self
 
   def update_signal(self, cmd_idx, signal=None, value=None):
-    assert self.q[self.cmd_offsets[cmd_idx]] == amd_gpu.PACKET3(amd_gpu.PACKET3_RELEASE_MEM, 6), "The pointer does not point to a packet of this type"
+    assert self.q[self.cmd_offsets[cmd_idx]] == amd_gpu.PACKET3(amd_gpu.PACKET3_RELEASE_MEM, 6), f"Command at index {cmd_idx} is not signal"
     if signal is not None:
       self._patch(self.cmd_offsets[cmd_idx] + 3, [*data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET)])
       if signal.event_mailbox_ptr != 0:
@@ -209,8 +209,7 @@ class HWPM4Queue(HWQueue):
     self.q = hw_view # type: ignore
 
   def submit(self, device: AMDDevice):
-    if device == self.binded_device: cmds = self.indirect_cmd
-    else: cmds = self.q
+    cmds = self.indirect_cmd if device == self.binded_device else self.q
 
     wptr = device.pm4_write_pointer[0]
     pm4_buffer_view = to_mv(device.pm4_ring.va_addr, device.pm4_ring.size).cast("I")
@@ -266,7 +265,7 @@ class HWCopyQueue(HWQueue):
     return self._mark_command_end()
 
   def update_wait(self, cmd_idx, signal=None, value=None):
-    assert self.q[self.cmd_offsets[cmd_idx]] & 0xf == amd_gpu.SDMA_OP_POLL_REGMEM, "The pointer does not point to a packet of this type"
+    assert self.q[self.cmd_offsets[cmd_idx]] & 0xf == amd_gpu.SDMA_OP_POLL_REGMEM, f"Command at index {cmd_idx} is not wait"
     if signal is not None: self._patch(self.cmd_offsets[cmd_idx] + 1, [*data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET)])
     if value is not None: self.q[self.cmd_offsets[cmd_idx] + 3] = value
     return self
