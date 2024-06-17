@@ -12,7 +12,7 @@ from tinygrad.runtime.autogen.opencl import opencl_status_codes
 OSX_TIMING_RATIO = (125/3) if OSX else 1.0
 
 def check(status):
-  if status != 0: raise RuntimeError(f"OpenCL Error {opencl_status_codes.get(status, 'Unkown Error')}") 
+  if status != 0: raise RuntimeError(f"OpenCL Error {opencl_status_codes.get(status, 'Unknown Error')}") 
 def checked(ret, status): return (check(status.value), ret)[1]
 
 class CLCompiler(Compiler):
