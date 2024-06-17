@@ -98,9 +98,9 @@ class TestHCQ(unittest.TestCase):
 
   def test_update_exec(self):
     q = TestHCQ.compute_queue()
-    exec_ptr = q.ptr()
+    exec_cmd_idx = len(q)
     q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size)
-    q.update_exec(exec_ptr, (1,1,1), (1,1,1))
+    q.update_exec(exec_cmd_idx, (1,1,1), (1,1,1))
     q.signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
     TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
