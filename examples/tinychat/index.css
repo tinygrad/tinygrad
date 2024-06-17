@@ -140,7 +140,7 @@ main {
   gap: 1rem;
   align-items: center;
   padding-top: 1rem;
-  padding-bottom: 9rem;
+  padding-bottom: 11rem;
 }
 
 .message {
@@ -153,7 +153,7 @@ main {
   padding: 0.5rem 1rem;
   border-radius: 10px;
 }
-.message-role-ai {
+.message-role-assistant {
   border-bottom: 2px solid var(--primary-color);
   border-left: 2px solid var(--primary-color);
   box-shadow: -10px 10px 20px 2px var(--primary-color-transparent);
@@ -204,9 +204,29 @@ main {
 
   width: 100%;
   display: flex;
+  flex-direction: column;
   justify-content: center;
   align-items: center;
   z-index: 999;
+}
+
+.input-performance {
+  margin-top: 4rem;
+
+  display: flex;
+  flex-direction: row;
+  gap: 1rem;
+}
+
+.input-performance-point {
+  display: flex;
+  flex-direction: row;
+  place-items: center;
+  gap: 0.5rem;
+}
+.input-performance-point > p {
+  height: 1rem;
+  line-height: normal;
 }
 
 .input {
@@ -221,7 +241,6 @@ main {
 
   align-items: flex-end;
   margin-bottom: 2rem;
-  margin-top: 4rem;
 }
 
 .input-form {
@@ -266,4 +285,8 @@ p {
   font-family: "Megrim", system-ui;
   font-weight: 400;
   font-style: normal;
+}
+
+.monospace {
+  font-family: monospace;
 }

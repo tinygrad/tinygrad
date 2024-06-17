@@ -1,6 +1,7 @@
 import sys
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
+from tinygrad.tensor import _to_np_dtype
 from tinygrad.engine.realize import Runner
 from tinygrad.dtype import DType
 from tinygrad.nn.state import get_parameters
@@ -41,9 +42,9 @@ def is_dtype_supported(dtype: DType, device: str = Device.DEFAULT):
 
 def rand_for_dtype(dt:DType, size:int):
   if dtypes.is_unsigned(dt):
-    return np.random.randint(0, 100, size=size, dtype=dt.np)
+    return np.random.randint(0, 100, size=size, dtype=_to_np_dtype(dt))
   elif dtypes.is_int(dt):
-    return np.random.randint(-100, 100, size=size, dtype=dt.np)
+    return np.random.randint(-100, 100, size=size, dtype=_to_np_dtype(dt))
   elif dt == dtypes.bool:
     return np.random.choice([True, False], size=size)
-  return np.random.uniform(-10, 10, size=size).astype(dt.np)
+  return np.random.uniform(-10, 10, size=size).astype(_to_np_dtype(dt))

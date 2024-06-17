@@ -1,7 +1,7 @@
 from typing import Optional, Tuple, Any, List
 import unittest, math
 import numpy as np
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.helpers import CI, DEBUG, getenv
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.device import Buffer, Device
@@ -14,8 +14,7 @@ from tinygrad.codegen.uops import UOpGraph
 from test.helpers import is_dtype_supported
 
 def _uops_to_prg(uops_list, print=False):
-  uops = UOpGraph()
-  for l in uops_list: uops.add(l.uop, l.dtype, l.vin, l.arg)
+  uops = UOpGraph(uops_list)
   src = Device[Device.DEFAULT].renderer.render("test", uops)
   if print: uops.print()
   has_local = Device[Device.DEFAULT].renderer.has_local
@@ -32,12 +31,12 @@ def _test_single_value(vals, op, dts):
   buf_loads = [uop(uops, UOps.DEFINE_GLOBAL, PtrDType(dtype), (), (i+1, False)) for i,dtype in enumerate(dts)]
   loads = (uop(uops, UOps.LOAD, dtype, [buf_loads[i], uop(uops, UOps.CONST, dtypes.int32, (), 0)]) for i,dtype in enumerate(dts))
   alu = uop(uops, UOps.ALU, output_dtype, loads, op)
-  uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
+  out = uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
-  buf2 = [Buffer(Device.DEFAULT, 1, dtype).allocate().copyin(np.array([a], dtype=dtype.np).data) for a,dtype in zip(vals, dts)]
-  prg = _uops_to_prg(uops)
+  buf2 = [Buffer(Device.DEFAULT, 1, dtype).allocate().copyin(np.array([a], dtype=_to_np_dtype(dtype)).data) for a,dtype in zip(vals, dts)]
+  prg = _uops_to_prg([out])
   prg.exec([buf]+buf2)
-  ret = np.empty(1, output_dtype.np)
+  ret = np.empty(1, _to_np_dtype(output_dtype))
   buf.copyout(ret.data)
   return ret[0]
 
@@ -47,11 +46,11 @@ def _test_single_value_const(vals, op, dts):
   buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(output_dtype), (), (0, True))
   loads = (uop(uops, UOps.CONST, dtype, [], a) for a,dtype in zip(vals, dts))
   alu = uop(uops, UOps.ALU, output_dtype, loads, op)
-  uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
+  out = uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
-  prg = _uops_to_prg(uops)
+  prg = _uops_to_prg([out])
   prg.exec([buf])
-  ret = np.empty(1, output_dtype.np)
+  ret = np.empty(1, _to_np_dtype(output_dtype))
   buf.copyout(ret.data)
   return ret[0]
 
@@ -59,11 +58,11 @@ def _test_uops_result(output_dtype, uops, res):
   # uops = []
   buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(output_dtype), (), (0, True))
   # res = output_fn(uops)
-  uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), res))
+  out = uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), res))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
-  prg = _uops_to_prg(uops, print=True)
+  prg = _uops_to_prg([out], print=True)
   prg.exec([buf])
-  ret = np.empty(1, output_dtype.np)
+  ret = np.empty(1, _to_np_dtype(output_dtype))
   buf.copyout(ret.data)
   return ret[0]
 
@@ -135,6 +134,22 @@ class TestNonFloatUOps(TestUOps):
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "dtype not supported")
   def test_where_float16(self):
     self._test_top_fxn(TernaryOps.WHERE, lambda a,b,c: b if a!=0 else c, (dtypes.bool, dtypes.float16, dtypes.float16))
+
+  def test_neg_fold(self):
+    data0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (0, True))
+    data1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (1, False))
+    data2 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (2, False))
+    idx = UOp.const(dtypes.int, 0)
+    x = UOp(UOps.LOAD, dtypes.int, (data1, idx,))
+    y = UOp(UOps.LOAD, dtypes.int, (data2, idx,))
+
+    value = x+(-y)
+    uops = UOpGraph([UOp(UOps.STORE, None, (data0, idx, value))])
+    assert uops[-1].vin[2].arg is BinaryOps.SUB
+
+    value = -y+x
+    uops = UOpGraph([UOp(UOps.STORE, None, (data0, idx, value))])
+    assert uops[-1].vin[2].arg is BinaryOps.SUB
 
 class TestBoolUOps(TestUOps):
   def _test_uop_bool_fxn(self, op, fxn):
@@ -228,14 +243,13 @@ class TestGatedStoreRewrite(unittest.TestCase):
   @unittest.skip("not yet implemented")
   def test_wrap_store_parents(self):
     # wraps all store parents in the valid branch
-    uops = UOpGraph()
-    gmem = uops.add(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (0, True))
-    gidx0 = uops.add(UOps.SPECIAL, dtypes.int, (), (0, 'gidx0', 4))
+    gmem = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (0, True))
+    gidx0 = UOp(UOps.SPECIAL, dtypes.int, (), (0, 'gidx0', 4))
     idx = gidx0 * UOp.const(dtypes.int, 2)
-    value = uops.add(UOps.CONST, dtypes.float, (), 42.0)
+    value = UOp(UOps.CONST, dtypes.float, (), 42.0)
 
-    gate = uops.add(UOps.ALU, dtypes.bool, (gidx0, UOp.const(dtypes.int, 1)), arg=BinaryOps.CMPLT)
-    uops.add(UOps.STORE, None, (gmem, idx, value, gate))
+    gate = UOp(UOps.ALU, dtypes.bool, (gidx0, UOp.const(dtypes.int, 1)), arg=BinaryOps.CMPLT)
+    uops = UOpGraph([UOp(UOps.STORE, None, (gmem, idx, value, gate))])
     if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
     if_uop = next(u for u in uops if u.uop is UOps.IF)
     endif = next(u for u in uops if u.uop is UOps.ENDIF)
@@ -246,17 +260,17 @@ class TestGatedStoreRewrite(unittest.TestCase):
   @unittest.skip("not yet implemented")
   def test_wrap_some_parents(self):
     # some parents are used outside the branch
-    uops = UOpGraph()
-    gmem0 = uops.add(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (0, True))
-    gmem1 = uops.add(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (1, True))
-    gidx0 = uops.add(UOps.SPECIAL, dtypes.int, (), (0, 'gidx0', 4))
+    gmem0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (0, True))
+    gmem1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (1, True))
+    gidx0 = UOp(UOps.SPECIAL, dtypes.int, (), (0, 'gidx0', 4))
     idx = gidx0 * UOp.const(dtypes.int, 2)
-    value0 = uops.add(UOps.CONST, dtypes.float, (), 42.0)
-    value1 = uops.add(UOps.CONST, dtypes.float, (), 43.0)
+    value0 = UOp(UOps.CONST, dtypes.float, (), 42.0)
+    value1 = UOp(UOps.CONST, dtypes.float, (), 43.0)
 
-    gate = uops.add(UOps.ALU, dtypes.bool, (gidx0, UOp.const(dtypes.int, 1)), arg=BinaryOps.CMPLT)
-    uops.add(UOps.STORE, None, (gmem0, idx, value0, gate))
-    uops.add(UOps.STORE, None, (gmem1, idx, value1))
+    gate = UOp(UOps.ALU, dtypes.bool, (gidx0, UOp.const(dtypes.int, 1)), arg=BinaryOps.CMPLT)
+    outs = [UOp(UOps.STORE, None, (gmem0, idx, value0, gate))]
+    outs.append(UOp(UOps.STORE, None, (gmem1, idx, value1)))
+    uops = UOpGraph(outs)
     if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
     if_uop = next(u for u in uops if u.uop is UOps.IF)
     endif = next(u for u in uops if u.uop is UOps.ENDIF)
@@ -290,27 +304,25 @@ class TestLocalAccess(unittest.TestCase):
 @unittest.skipUnless(Device.DEFAULT in {"CUDA"} and getenv("PTX"), "This only tests assembly backends")
 class TestAssembly(unittest.TestCase):
   def test_bitshift_left(self):
-    uops = UOpGraph()
-    g1 = uops.add(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int32), (), (0, True))
-    c1 = uops.add(UOps.CONST, dtypes.int, (), 2)
-    c2 = uops.add(UOps.CONST, dtypes.int, (), 3)
-    l1 = uops.add(UOps.LOAD, dtypes.int, (g1, c1))
-    a1 = uops.add(UOps.ALU, dtypes.int, (l1, c1), BinaryOps.MUL)
-    a2 = uops.add(UOps.ALU, dtypes.int, (l1, c2), BinaryOps.MUL)
-    uops.add(UOps.SINK, None, (a1,a2))
+    g1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int32), (), (0, True))
+    c1 = UOp(UOps.CONST, dtypes.int, (), 2)
+    c2 = UOp(UOps.CONST, dtypes.int, (), 3)
+    l1 = UOp(UOps.LOAD, dtypes.int, (g1, c1))
+    a1 = UOp(UOps.ALU, dtypes.int, (l1, c1), BinaryOps.MUL)
+    a2 = UOp(UOps.ALU, dtypes.int, (l1, c2), BinaryOps.MUL)
+    uops = UOpGraph([a1,a2])
     Device[Device.DEFAULT].renderer.render("test", uops)
     self.assertEqual(uops.uops[-1].arg, BinaryOps.MUL)
     self.assertEqual(uops.uops[-2].arg, BinaryOps.SHL)
 
   def test_bitshift_right(self):
-    uops = UOpGraph()
-    g1 = uops.add(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int32), (), (0, True))
-    c1 = uops.add(UOps.CONST, dtypes.int, (), 2)
-    c2 = uops.add(UOps.CONST, dtypes.int, (), 3)
-    l1 = uops.add(UOps.LOAD, dtypes.int, (g1, c1))
-    a1 = uops.add(UOps.ALU, dtypes.int, (l1, c1), BinaryOps.IDIV)
-    a2 = uops.add(UOps.ALU, dtypes.int, (l1, c2), BinaryOps.IDIV)
-    uops.add(UOps.SINK, None, (a1,a2))
+    g1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int32), (), (0, True))
+    c1 = UOp(UOps.CONST, dtypes.int, (), 2)
+    c2 = UOp(UOps.CONST, dtypes.int, (), 3)
+    l1 = UOp(UOps.LOAD, dtypes.int, (g1, c1))
+    a1 = UOp(UOps.ALU, dtypes.int, (l1, c1), BinaryOps.IDIV)
+    a2 = UOp(UOps.ALU, dtypes.int, (l1, c2), BinaryOps.IDIV)
+    uops = UOpGraph([a1,a2])
     Device[Device.DEFAULT].renderer.render("test", uops)
     self.assertEqual(uops.uops[-1].arg, BinaryOps.IDIV)
     self.assertEqual(uops.uops[-2].arg, BinaryOps.SHR)

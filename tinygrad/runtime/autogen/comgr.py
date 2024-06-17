@@ -7,6 +7,17 @@
 # LONGDOUBLE_SIZE is: 16
 #
 import ctypes, ctypes.util, os
+PATHS_TO_TRY = [
+  '/opt/rocm/lib/libamd_comgr.so',
+  os.getenv('ROCM_PATH', '')+'/lib/libamd_comgr.so',
+]
+def _try_dlopen_amd_comgr():
+  library = ctypes.util.find_library("amd_comgr")
+  if library: return ctypes.CDLL(library)
+  for candidate in PATHS_TO_TRY:
+    try: return ctypes.CDLL(candidate)
+    except OSError: pass
+  raise RuntimeError("library amd_comgr not found")
 
 
 def string_cast(char_pointer, encoding='utf-8', errors='strict'):
@@ -29,7 +40,7 @@ def char_pointer_cast(string, encoding='utf-8'):
 
 
 _libraries = {}
-_libraries['libamd_comgr.so'] = ctypes.CDLL(os.getenv('ROCM_PATH')+'/lib/libamd_comgr.so' if os.getenv('ROCM_PATH') else ctypes.util.find_library('amd_comgr'))
+_libraries['libamd_comgr.so'] = _try_dlopen_amd_comgr()
 c_int128 = ctypes.c_ubyte*16
 c_uint128 = c_int128
 void = None
@@ -171,14 +182,16 @@ amd_comgr_language_s__enumvalues = {
     2: 'AMD_COMGR_LANGUAGE_OPENCL_2_0',
     3: 'AMD_COMGR_LANGUAGE_HC',
     4: 'AMD_COMGR_LANGUAGE_HIP',
-    4: 'AMD_COMGR_LANGUAGE_LAST',
+    5: 'AMD_COMGR_LANGUAGE_LLVM_IR',
+    5: 'AMD_COMGR_LANGUAGE_LAST',
 }
 AMD_COMGR_LANGUAGE_NONE = 0
 AMD_COMGR_LANGUAGE_OPENCL_1_2 = 1
 AMD_COMGR_LANGUAGE_OPENCL_2_0 = 2
 AMD_COMGR_LANGUAGE_HC = 3
 AMD_COMGR_LANGUAGE_HIP = 4
-AMD_COMGR_LANGUAGE_LAST = 4
+AMD_COMGR_LANGUAGE_LLVM_IR = 5
+AMD_COMGR_LANGUAGE_LAST = 5
 amd_comgr_language_s = ctypes.c_uint32 # enum
 amd_comgr_language_t = amd_comgr_language_s
 amd_comgr_language_t__enumvalues = amd_comgr_language_s__enumvalues
@@ -543,7 +556,9 @@ amd_comgr_action_kind_s__enumvalues = {
     13: 'AMD_COMGR_ACTION_DISASSEMBLE_BYTES_TO_SOURCE',
     14: 'AMD_COMGR_ACTION_COMPILE_SOURCE_TO_FATBIN',
     15: 'AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC',
-    15: 'AMD_COMGR_ACTION_LAST',
+    16: 'AMD_COMGR_ACTION_COMPILE_SOURCE_TO_RELOCATABLE',
+    17: 'AMD_COMGR_ACTION_COMPILE_SOURCE_TO_EXECUTABLE',
+    17: 'AMD_COMGR_ACTION_LAST',
 }
 AMD_COMGR_ACTION_SOURCE_TO_PREPROCESSOR = 0
 AMD_COMGR_ACTION_ADD_PRECOMPILED_HEADERS = 1
@@ -561,7 +576,9 @@ AMD_COMGR_ACTION_DISASSEMBLE_EXECUTABLE_TO_SOURCE = 12
 AMD_COMGR_ACTION_DISASSEMBLE_BYTES_TO_SOURCE = 13
 AMD_COMGR_ACTION_COMPILE_SOURCE_TO_FATBIN = 14
 AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC = 15
-AMD_COMGR_ACTION_LAST = 15
+AMD_COMGR_ACTION_COMPILE_SOURCE_TO_RELOCATABLE = 16
+AMD_COMGR_ACTION_COMPILE_SOURCE_TO_EXECUTABLE = 17
+AMD_COMGR_ACTION_LAST = 17
 amd_comgr_action_kind_s = ctypes.c_uint32 # enum
 amd_comgr_action_kind_t = amd_comgr_action_kind_s
 amd_comgr_action_kind_t__enumvalues = amd_comgr_action_kind_s__enumvalues
@@ -757,6 +774,12 @@ try:
     amd_comgr_lookup_code_object.argtypes = [amd_comgr_data_t, ctypes.POINTER(struct_code_object_info_s), size_t]
 except AttributeError:
     pass
+try:
+    amd_comgr_map_elf_virtual_address_to_code_object_offset = _libraries['libamd_comgr.so'].amd_comgr_map_elf_virtual_address_to_code_object_offset
+    amd_comgr_map_elf_virtual_address_to_code_object_offset.restype = amd_comgr_status_t
+    amd_comgr_map_elf_virtual_address_to_code_object_offset.argtypes = [amd_comgr_data_t, uint64_t, ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_bool)]
+except AttributeError:
+    pass
 __all__ = \
     ['AMD_COMGR_ACTION_ADD_DEVICE_LIBRARIES',
     'AMD_COMGR_ACTION_ADD_PRECOMPILED_HEADERS',
@@ -764,7 +787,9 @@ __all__ = \
     'AMD_COMGR_ACTION_CODEGEN_BC_TO_ASSEMBLY',
     'AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE',
     'AMD_COMGR_ACTION_COMPILE_SOURCE_TO_BC',
+    'AMD_COMGR_ACTION_COMPILE_SOURCE_TO_EXECUTABLE',
     'AMD_COMGR_ACTION_COMPILE_SOURCE_TO_FATBIN',
+    'AMD_COMGR_ACTION_COMPILE_SOURCE_TO_RELOCATABLE',
     'AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC',
     'AMD_COMGR_ACTION_DISASSEMBLE_BYTES_TO_SOURCE',
     'AMD_COMGR_ACTION_DISASSEMBLE_EXECUTABLE_TO_SOURCE',
@@ -784,11 +809,11 @@ __all__ = \
     'AMD_COMGR_DATA_KIND_RELOCATABLE', 'AMD_COMGR_DATA_KIND_SOURCE',
     'AMD_COMGR_DATA_KIND_UNDEF', 'AMD_COMGR_LANGUAGE_HC',
     'AMD_COMGR_LANGUAGE_HIP', 'AMD_COMGR_LANGUAGE_LAST',
-    'AMD_COMGR_LANGUAGE_NONE', 'AMD_COMGR_LANGUAGE_OPENCL_1_2',
-    'AMD_COMGR_LANGUAGE_OPENCL_2_0', 'AMD_COMGR_METADATA_KIND_LAST',
-    'AMD_COMGR_METADATA_KIND_LIST', 'AMD_COMGR_METADATA_KIND_MAP',
-    'AMD_COMGR_METADATA_KIND_NULL', 'AMD_COMGR_METADATA_KIND_STRING',
-    'AMD_COMGR_STATUS_ERROR',
+    'AMD_COMGR_LANGUAGE_LLVM_IR', 'AMD_COMGR_LANGUAGE_NONE',
+    'AMD_COMGR_LANGUAGE_OPENCL_1_2', 'AMD_COMGR_LANGUAGE_OPENCL_2_0',
+    'AMD_COMGR_METADATA_KIND_LAST', 'AMD_COMGR_METADATA_KIND_LIST',
+    'AMD_COMGR_METADATA_KIND_MAP', 'AMD_COMGR_METADATA_KIND_NULL',
+    'AMD_COMGR_METADATA_KIND_STRING', 'AMD_COMGR_STATUS_ERROR',
     'AMD_COMGR_STATUS_ERROR_INVALID_ARGUMENT',
     'AMD_COMGR_STATUS_ERROR_OUT_OF_RESOURCES',
     'AMD_COMGR_STATUS_SUCCESS', 'AMD_COMGR_SYMBOL_INFO_IS_UNDEFINED',
@@ -841,6 +866,7 @@ __all__ = \
     'amd_comgr_iterate_symbols', 'amd_comgr_language_s',
     'amd_comgr_language_t', 'amd_comgr_language_t__enumvalues',
     'amd_comgr_lookup_code_object',
+    'amd_comgr_map_elf_virtual_address_to_code_object_offset',
     'amd_comgr_map_name_expression_to_symbol_name',
     'amd_comgr_metadata_kind_s', 'amd_comgr_metadata_kind_t',
     'amd_comgr_metadata_kind_t__enumvalues',

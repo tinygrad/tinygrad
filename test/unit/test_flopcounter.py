@@ -1,14 +1,28 @@
 #!/usr/bin/env python
 import unittest
-from tinygrad import dtypes
+from tinygrad import dtypes, Tensor
+from tinygrad.helpers import prod
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, get_lazyop_info, BufferOps, MemBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.codegen.linearizer import Linearizer
 
 class TestFlopCounter(unittest.TestCase):
   def setUp(self):
     self.buf0 = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float32, ShapeTracker.from_shape((4,))))
     self.buf1 = LazyOp(BufferOps.LOAD, (), MemBuffer(2, dtypes.float32, ShapeTracker.from_shape((4,))))
     self.buf2 = LazyOp(BufferOps.LOAD, (), MemBuffer(2, dtypes.float32, ShapeTracker.from_shape((4,4))))
+
+  def compare_flop_counters(self, ast):
+    info = get_lazyop_info(ast)
+    lin = Linearizer(ast)
+    # NOTE: why does hand coded optimizations change flops for the GEMM?
+    #lin.hand_coded_optimizations()
+    lin.linearize()
+    ops, mem = lin.uops.flops_mem(ignore_indexing=True)
+    run_count = prod((lin.global_size if lin.global_size else []) + (lin.local_size if lin.local_size else []))
+    self.assertEqual(info.flops, ops*run_count)
+    print(info.flops, info.mem_estimate, "vs", ops*run_count, mem*run_count)
+    #lin.uops.print()
 
   def test_flops_sin(self):
     op0 = LazyOp(UnaryOps.SIN, (self.buf0,), None)
@@ -62,6 +76,14 @@ class TestFlopCounter(unittest.TestCase):
     info = get_lazyop_info(op1)
     self.assertEqual(info.flops, 16+4)
     self.assertEqual(info.shape, (1,1))
+
+  def test_flops_conv(self):
+    out = Tensor.empty(16,3,16,16).conv2d(Tensor.empty(64,3,3,3))
+    self.compare_flop_counters(out.schedule()[-1].ast[0])
+
+  def test_flops_gemm(self):
+    out = Tensor.empty(4,16,16) @ Tensor.empty(4,16,16)
+    self.compare_flop_counters(out.schedule()[-1].ast[0])
 
 if __name__ == '__main__':
   unittest.main()
