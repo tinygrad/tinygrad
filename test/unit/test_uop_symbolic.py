@@ -6,23 +6,21 @@ import unittest, pickle
 
 # *** fake symobilc uops ***
 
+from tinygrad.helpers import DEBUG
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.codegen.uops import UOp, UOps, UOpGraph
 from tinygrad.ops import BinaryOps
 import functools
 
 def render(self) -> str:
-  graph = UOpGraph()
   # NOTE: we need STORE so the ALU op has children
   glbl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=(0,True))
-  def recursive_add(x):
-    graph.add(x.uop, x.dtype, x.vin, x.arg)
-    for c in x.vin: recursive_add(c)
-  recursive_add(UOp(UOps.STORE, None, (glbl,UOp.const(dtypes.int, 0),self)))
+  graph = UOpGraph([UOp(UOps.STORE, None, (glbl, UOp.const(dtypes.int, 0), self))])
   graph.linearize()
+  if DEBUG>=5: graph.print()
   from tinygrad.renderer.cstyle import CStyleLanguage
   class TestRenderer(CStyleLanguage):
-    code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.DIV: lambda a,b,dtype: f"({a}//{b})"}
+    code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.IDIV: lambda a,b,dtype: f"({a}//{b})"}
   fxn = TestRenderer().render("", graph)
   return fxn.split("data0[0] = ")[1].split(";")[0]
 
@@ -39,8 +37,8 @@ class Node:
   @staticmethod
   def ands(ops): return functools.reduce(lambda x,y: x*y, ops)
   def __floordiv__(a,b,unk): return a//b
-def create_lt_node(v, n): return UOp.alu(BinaryOps.CMPLT, v, UOp.const(v.dtype, n))
-def create_ge_node(v, n): return UOp.alu(BinaryOps.CMPLT, -v, UOp.const(v.dtype, -n+1))
+def create_lt_node(v, n): return v.lt(n)
+def create_ge_node(v, n): return v.ge(n)
 def SumNode(x): return Node.sum(x)
 def MulNode(x, y): return x*y
 
@@ -63,7 +61,7 @@ class TestSymbolic(unittest.TestCase):
 
   def test_cmp_simple(self):
     self.helper_test_variable(create_lt_node(Variable("a", 3, 8), 4), 0, 1, "(a<4)")
-    self.helper_test_variable(create_ge_node(Variable("a", 3, 8), 8), 0, 1, {"((a*-1)<-7)", "(7<a)"})
+    self.helper_test_variable(create_ge_node(Variable("a", 3, 8), 8), 0, 1, {"((a*-1)<-7)", "(7<a)", "(!(a<8))"})
 
   @unittest.expectedFailure
   def test_ge(self):
@@ -308,7 +306,6 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Node.sum([NumNode(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) // 40, -1, 9, "(-1+b)")
 
   # TODO: this one should already work!
-  @unittest.expectedFailure
   def test_mul_div(self):
     self.helper_test_variable((Variable("a", 0, 10)*4)//4, 0, 10, "a")
 

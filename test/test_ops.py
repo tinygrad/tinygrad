@@ -3,6 +3,7 @@ import numpy as np
 import torch
 from tinygrad.helpers import getenv, IMAGE, DEBUG, CI
 from tinygrad import Tensor, Device, dtypes
+from tinygrad.tensor import _to_np_dtype
 
 if CI:
   import warnings
@@ -66,7 +67,7 @@ def prepare_test_op(low, high, shps, vals, forward_only=False):
     ts = [torch.tensor(x, requires_grad=(not forward_only)) for x in vals]
   else:
     np.random.seed(0)
-    np_data = [np.random.uniform(low=low, high=high, size=size).astype(dtypes.default_float.np) for size in shps]
+    np_data = [np.random.uniform(low=low, high=high, size=size).astype(_to_np_dtype(dtypes.default_float)) for size in shps]
     ts = [torch.tensor(data, requires_grad=(not forward_only)) for data in np_data]
   tst = [Tensor(x.detach().numpy(), requires_grad=(not forward_only and not FORWARD_ONLY)) for x in ts]
   return ts, tst
@@ -301,6 +302,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(5,3,3)], lambda x: x.tril())
     helper_test_op([(5,0,3)], lambda x: x.tril())
     helper_test_op([(5,3,3)], lambda x: x.tril(1))
+    helper_test_op(None, lambda x: x.tril(), vals=[[[True] * 3] * 3], forward_only=True)
   def test_triu(self):
     helper_test_op([(3,3)], lambda x: x.triu())
     helper_test_op([(3,3)], lambda x: x.triu(1))
@@ -308,6 +310,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(5,3,3)], lambda x: x.triu())
     helper_test_op([(5,0,3)], lambda x: x.triu())
     helper_test_op([(5,3,3)], lambda x: x.triu(1))
+    helper_test_op(None, lambda x: x.triu(), vals=[[[True] * 3] * 3], forward_only=True)
 
   def test_maximum(self):
     helper_test_op([(45,65), (45,65)], torch.maximum, Tensor.maximum)
@@ -1681,6 +1684,12 @@ class TestOps(unittest.TestCase):
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,b,None,d,e], lambda x: x[i,j,None,o,p])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[None,b,c,d,None], lambda x: x[None,j,k,o,None])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,:,None,d,e], lambda x: x[i,:,None,o,p])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[None,None,None,None,None], lambda x: x[None,None,None,None,None])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[None,None,b,c,d,e], lambda x: x[None,None,j,k,o,p])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[None,None,b,c,None,None], lambda x: x[None,None,j,k,None,None])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,None,None,c,d,e], lambda x: x[i,None,None,k,o,p])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,None,None,c,None,None], lambda x: x[i,None,None,k,None,None])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[None,None,b,None,d,e], lambda x: x[None,None,j,None,o,p])
 
   def test_slice_fancy_indexing_dim_inject_and_collapse(self):
     a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()  # noqa
@@ -1749,6 +1758,9 @@ class TestOps(unittest.TestCase):
                                           lambda x: x.gather(dim=0, index=Tensor([1], dtype=dtypes.int32)), expected=(RuntimeError, AssertionError))
     self.helper_test_exception([(2,1,1)], lambda x: x.gather(dim=0, index=b),
                                           lambda x: x.gather(dim=0, index=a), expected=(RuntimeError, AssertionError))
+    helper_test_op(None, lambda x: x.gather(dim=0, index=torch.tensor([2, 1, 0, 1, 2], requires_grad=False)),
+                         lambda x: x.gather(dim=0, index=Tensor([2, 1, 0, 1, 2])),
+                         vals=[[1., 2., 3.]])
 
   def test_scaled_product_attention(self):
     helper_test_op([(32,8,16,64), (32,8,16,64), (32,8,16,64)], torch.nn.functional.scaled_dot_product_attention, Tensor.scaled_dot_product_attention)

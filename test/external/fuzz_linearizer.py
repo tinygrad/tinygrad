@@ -5,6 +5,7 @@ from collections import defaultdict
 from extra.optimization.helpers import load_worlds, ast_str_to_lin
 
 from tinygrad import Tensor, Device, dtypes
+from tinygrad.tensor import _to_np_dtype
 from tinygrad.codegen.linearizer import Linearizer, UOp
 from tinygrad.codegen.kernel import Opt, OptOps
 from tinygrad.engine.search import get_linearizer_actions, bufs_from_lin
@@ -12,6 +13,7 @@ from tinygrad.engine.graph import print_tree
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import getenv, from_mv, prod, colored, Context, DEBUG
 from tinygrad.ops import LazyOp, UnaryOps, BufferOps
+from test.helpers import is_dtype_supported
 
 def tuplize_uops(uops:List[UOp]) -> Tuple:
   return tuple([(x.uop, x.dtype, tuple(uops.index(x) for x in x.vin), x.arg) for x in uops])
@@ -29,15 +31,15 @@ def get_fuzz_rawbufs(lin):
   with Context(DEBUG=0):
     for rawbuf in rawbufs[1:]:
       if dtypes.is_unsigned(rawbuf.dtype):
-        data = np.random.randint(0, 100, size=rawbuf.size, dtype=rawbuf.dtype.np)
+        data = np.random.randint(0, 100, size=rawbuf.size, dtype=_to_np_dtype(rawbuf.dtype))
       elif dtypes.is_int(rawbuf.dtype):
-        data = np.random.randint(-100, 100, size=rawbuf.size, dtype=rawbuf.dtype.np)
+        data = np.random.randint(-100, 100, size=rawbuf.size, dtype=_to_np_dtype(rawbuf.dtype))
       elif rawbuf.dtype == dtypes.bool:
         data = np.random.choice([True, False], size=rawbuf.size)
       elif rawbuf.dtype == dtypes.half:
-        data = np.random.uniform(-1, 1, size=rawbuf.size).astype(dtype=rawbuf.dtype.np)
+        data = np.random.uniform(-1, 1, size=rawbuf.size).astype(dtype=_to_np_dtype(rawbuf.dtype))
       else:
-        data = np.random.uniform(-10, 10, size=rawbuf.size).astype(dtype=rawbuf.dtype.np)
+        data = np.random.uniform(-10, 10, size=rawbuf.size).astype(dtype=_to_np_dtype(rawbuf.dtype))
       rawbuf.copyin(Tensor(data).realize().lazydata.realized.as_buffer())
   return rawbufs
 
@@ -91,7 +93,7 @@ def compare_linearizer(lin: Linearizer, rawbufs=None, var_vals=None, ground_trut
     unoptimized.required_optimizations()
     if run_linearizer(unoptimized, rawbufs, var_vals) != "PASS":
       return ("BASELINE_ERROR", rawbufs, var_vals, ground_truth,)
-    ground_truth = np.frombuffer(rawbufs[0].as_buffer(), rawbufs[0].dtype.np).copy()
+    ground_truth = np.frombuffer(rawbufs[0].as_buffer(), _to_np_dtype(rawbufs[0].dtype)).copy()
 
   rawbufs[0] = get_fuzz_rawbuf_like(rawbufs[0], zero=True) # get a new output buffer
   if (run_msg := run_linearizer(lin, rawbufs, var_vals)) != "PASS":
@@ -99,7 +101,7 @@ def compare_linearizer(lin: Linearizer, rawbufs=None, var_vals=None, ground_trut
 
   try:
     if not has_bf16:
-      result = np.frombuffer(rawbufs[0].as_buffer(), rawbufs[0].dtype.np)
+      result = np.frombuffer(rawbufs[0].as_buffer(), _to_np_dtype(rawbufs[0].dtype))
       np.testing.assert_allclose(result, ground_truth, rtol=rtol, atol=atol)
   except AssertionError as e:
     if DEBUG >= 2:
@@ -211,9 +213,13 @@ if __name__ == "__main__":
     if ast in seen_ast_strs: continue
     seen_ast_strs.add(ast)
 
+    lin = ast_str_to_lin(ast)
+    if not all(is_dtype_supported(buf.dtype) for buf in lin.bufs):
+      print("skipping kernel due to not supported dtype")
+      continue
+
     print(f"testing ast {i}")
     tested += 1
-    lin = ast_str_to_lin(ast)
 
     fuzz_failures = fuzz_linearizer(lin, rtol=args.rtol, atol=args.atol)
     if fuzz_failures: failed_ids.append(i)

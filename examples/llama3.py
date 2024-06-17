@@ -7,7 +7,7 @@ from tqdm import tqdm
 from extra.models.llama import Transformer, convert_from_huggingface, fix_bf16
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
 from tinygrad import Tensor, dtypes, nn, Context, Device, GlobalCounters
-from tinygrad.helpers import Profiling, Timing, DEBUG
+from tinygrad.helpers import Profiling, Timing, DEBUG, colored, fetch
 
 class Tokenizer:
   pat_str = r"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"
@@ -146,7 +146,9 @@ def build_transformer(model_path: Path, model_size="8B", quantize=None, device=N
 
   # load weights
   if model_path.is_dir():
-    weights = concat_weights([load(str(model_path / f"consolidated.{i:02d}.pth")) for i in range(MODEL_PARAMS[model_size]["files"])], device[0] if isinstance(device, tuple) else device)
+    if (model_path / "model.safetensors.index.json").exists(): weights = load(str(model_path / "model.safetensors.index.json"))
+    elif (model_path / "model.safetensors").exists(): weights = load(str(model_path / "model.safetensors"))
+    else: weights = concat_weights([load(str(model_path / f"consolidated.{i:02d}.pth")) for i in range(MODEL_PARAMS[model_size]["files"])], device[0] if isinstance(device, tuple) else device)
   else:
     weights = load(str(model_path))
   if "model.embed_tokens.weight" in weights:
@@ -180,7 +182,20 @@ TOP_P = 0.9
 ALPHA_F = 1.1
 ALPHA_P = 0.0
 
+last_seen_toks = []
 def prefill(model, toks, start_pos=0):
+  global last_seen_toks
+
+  # we can skip part of the prompt if it is the same as last and start_pos=0
+  if start_pos == 0:
+    for i, (a, b) in enumerate(zip(toks, last_seen_toks)):
+      if a != b: break
+    else: i = min(len(toks), len(last_seen_toks))
+    start_pos += i
+    last_seen_toks = toks
+    toks = toks[i:]
+
+  # prefill the model
   for tok in tqdm(toks):
     GlobalCounters.reset()
     model(Tensor([[tok]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P).realize()
@@ -191,20 +206,32 @@ if __name__ == "__main__":
   Tensor.no_grad = True
 
   parser = argparse.ArgumentParser()
-  parser.add_argument("--model", type=Path, required=True)
-  parser.add_argument("--size", choices=["8B", "70B"], default="8B")
-  parser.add_argument("--shard", type=int, default=1)
-  parser.add_argument("--quantize", choices=["int8", "nf4"])
-  parser.add_argument("--api", action="store_true")
-  parser.add_argument("--host", type=str, default="0.0.0.0")
-  parser.add_argument("--port", type=int, default=7776)
-  parser.add_argument("--debug", action="store_true")
-  parser.add_argument("--seed", type=int)
+  parser.add_argument("--download_model", action="store_true", help="Download a 8B model")
+  parser.add_argument("--model", type=Path, required=True, help="Model path")
+  parser.add_argument("--size", choices=["8B", "70B"], default="8B", help="Model size")
+  parser.add_argument("--shard", type=int, default=1, help="Shard the model across multiple devices")
+  parser.add_argument("--quantize", choices=["int8", "nf4"], help="Quantization method")
+  parser.add_argument("--no_api", action="store_true", help="Disable the api and run a cli test interface")
+  parser.add_argument("--host", type=str, default="0.0.0.0", help="Web server bind address")
+  parser.add_argument("--port", type=int, default=7776, help="Web server port")
+  parser.add_argument("--debug", action="store_true", help="Enable debug mode")
+  parser.add_argument("--seed", type=int, help="Random seed")
+  parser.add_argument("--benchmark", action="store_true", help="Run a benchmark")
   parser.add_argument("--timing", action="store_true", help="Print timing per token")
   parser.add_argument("--profile", action="store_true", help="Output profile data")
   args = parser.parse_args()
 
+  assert not (args.download_model and args.model), "either download or provide model"
+  if args.download_model:
+    fetch("https://huggingface.co/bofenghuang/Meta-Llama-3-8B/resolve/main/original/tokenizer.model", "tokenizer.model", subdir="llama3-8b-sfr")
+    fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/resolve/main/model-00001-of-00004.safetensors", "model-00001-of-00004.safetensors", subdir="llama3-8b-sfr")
+    fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/resolve/main/model-00002-of-00004.safetensors", "model-00002-of-00004.safetensors", subdir="llama3-8b-sfr")
+    fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/resolve/main/model-00003-of-00004.safetensors", "model-00003-of-00004.safetensors", subdir="llama3-8b-sfr")
+    fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/resolve/main/model-00004-of-00004.safetensors", "model-00004-of-00004.safetensors", subdir="llama3-8b-sfr")
+    args.model = fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/raw/main/model.safetensors.index.json", "model.safetensors.index.json", subdir="llama3-8b-sfr")
+
   if args.seed is not None: Tensor.manual_seed(args.seed)
+  if args.benchmark: Tensor.manual_seed(42)
   print(f"seed = {Tensor._seed}")
 
   tokenizer = Tokenizer(str((args.model if args.model.is_dir() else args.model.parent) / "tokenizer.model"))
@@ -217,7 +244,7 @@ if __name__ == "__main__":
   model = build_transformer(args.model, model_size=args.size, quantize=args.quantize, device=device)
   param_bytes = sum(x.lazydata.size * x.dtype.itemsize for x in get_parameters(model))
 
-  if args.api:
+  if not args.no_api and not args.benchmark:
     from bottle import Bottle, request, response, HTTPResponse, abort, static_file
     app = Bottle()
 
@@ -266,7 +293,7 @@ if __name__ == "__main__":
 
       toks = [tokenizer.bos_id] + tokenizer.encode(rjson.get("prompt", ""), allow_special=True)
 
-      start_pos = prefill(model, toks)
+      start_pos = prefill(model, toks[:-1])
       last_tok = toks[-1]
       while True:
         GlobalCounters.reset()
@@ -282,8 +309,20 @@ if __name__ == "__main__":
         }
         yield f"data: {json.dumps(res)}\n\n"
 
+    @app.post("/v1/chat/token/encode")
+    def chat_token_encode():
+      rjson = json.loads(request.body.read())
+      if "messages" not in rjson: abort(400, "messages required")
+      toks = [tokenizer.bos_id]
+      for message in rjson["messages"]:
+        toks += encode_message(message["role"], message["content"])
+      if message["role"] == "user":
+        toks += encode_role("assistant")
+      return json.dumps(toks)
+
     @app.post("/v1/chat/completions")
     def chat_completions():
+      global last_seen_toks
       rjson = json.loads(request.body.read())
       if "messages" not in rjson: abort(400, "messages required")
 
@@ -304,11 +343,13 @@ if __name__ == "__main__":
 
       start_pos = prefill(model, toks[:-1])
       last_tok = toks[-1]
+      last_seen_toks.append(last_tok)
       while True:
         GlobalCounters.reset()
         tok = model(Tensor([[last_tok]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P).item()
         start_pos += 1
         last_tok = tok
+        last_seen_toks.append(tok)
         if tok in tokenizer.stop_tokens: break
 
         res = {
@@ -341,14 +382,44 @@ if __name__ == "__main__":
       yield f"data: {json.dumps(res)}\n\n"
 
     app.run(host=args.host, port=args.port, debug=args.debug)
+  elif args.benchmark:
+    toks = [tokenizer.bos_id] + encode_message("user", "Hello.") + encode_role("assistant")
+
+    start_pos = prefill(model, toks[:-1])
+    last_tok = toks[-1]
+    generated = ""
+    for _ in range(20):
+      GlobalCounters.reset()
+      st = GlobalCounters.time_sum_s
+      with Profiling(enabled=args.profile):
+        with Timing("total ", on_exit=lambda x: f", {1e9/x:.2f} tok/s, {GlobalCounters.global_mem/x:.2f} GB/s, param {param_bytes/x:.2f} GB/s"):
+          with Timing("enqueue in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
+                      f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
+                      (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_bytes*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None):
+            tok = model(Tensor([[last_tok]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P)
+          tok = tok.item()
+      start_pos += 1
+      last_tok = tok
+      generated += tokenizer.decode([tok])
+      print(generated)
+    EXPECTED_TEXT = {
+      1: "Hello! How can I help you today? If you have any questions or need assistance with anything,",
+      2: "Hello! How can I help you today? If you have any questions, need assistance or just want",
+      3: "Hello! How can I help you today? If you have any questions or need assistance, feel free",
+      4: "Hello! How can I assist you today? If you have any questions, need information, or require",
+      5: "Hello! How can I assist you today? If you have any questions or need help with something",
+      6: "Hello! How can I assist you today? If you have any questions, need information, or require",
+    }
+    assert generated == EXPECTED_TEXT[args.shard], f"{generated=} {EXPECTED_TEXT[args.shard]}"
+    print("\n" + colored("output validated", "green"))  # NOTE: "\n" inside colored does not render the color in github action
   else:
-    prompt = [tokenizer.bos_id] + encode_message("system", "You are an *emotive* assistant.")
+    prompt = [tokenizer.bos_id] + encode_message("system", "You are an helpful assistant.")
 
     start_pos = prefill(model, prompt)
     while True:
       toks = encode_message("user", input("Q: ")) + encode_role("assistant")
 
-      start_pos = prefill(model, toks, start_pos=start_pos)
+      start_pos = prefill(model, toks[:-1], start_pos=start_pos)
       last_tok = toks[-1]
       while True:
         GlobalCounters.reset()
