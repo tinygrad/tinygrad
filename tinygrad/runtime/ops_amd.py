@@ -75,22 +75,25 @@ class AMDCompiler(Compiler):
     try: return compile_hip(src, self.arch)
     except RuntimeError as e: raise CompileError(e)
 
-class HWPM4Queue:
-  def __init__(self): self.q, self.binded_device, self.ptr_to_dispatch_packet = [], None, {}
+class HWQueue:
+  def __init__(self): self.q, self.cmd_offsets = [], [0]
+  def _mark_command_end(self):
+    self.cmd_offsets.append(len(self.q))
+    return self
+  def _patch(self, off, data): self.q[off:off+len(data)] = array.array('I', data)
+  def __len__(self): return len(self.cmd_offsets) - 1
+
+class HWPM4Queue(HWQueue):
+  def __init__(self):
+    self.binded_device, self.ptr_to_dispatch_packet = None, {}
+    super().__init__()
+
   def __del__(self):
     if self.binded_device is not None:
       self.binded_device.synchronize()
       self.binded_device._gpu_free(self.hw_page)
 
-  def ptr(self) -> int: return len(self.q)
-
-  def memory_barrier(self):
-    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_WAIT_REG_MEM, 5), amd_gpu.WAIT_REG_MEM_MEM_SPACE(0) | amd_gpu.WAIT_REG_MEM_OPERATION(1) | \
-      amd_gpu.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_EQ) | amd_gpu.WAIT_REG_MEM_ENGINE(0), nbioreg(regBIF_BX_PF1_GPU_HDP_FLUSH_REQ),
-      nbioreg(regBIF_BX_PF1_GPU_HDP_FLUSH_DONE), 0xffffffff, 0xffffffff, 0x20]
-    return self.invalidate_cache()
-
-  def invalidate_cache(self, addr=0x0, sz=(1 << 64)-1, gli=1, glm=1, glk=1, glv=1, gl1=1, gl2=1):
+  def _invalidate_cache(self, addr=0x0, sz=(1 << 64)-1, gli=1, glm=1, glk=1, glv=1, gl1=1, gl2=1):
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_ACQUIRE_MEM, 6), 0, #0x80000000,
                sz & 0xffffffff, (sz >> 32) & 0xff, addr & 0xffffffff, (addr >> 32) & 0xffffff, 0,
                amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLI_INV(gli) | \
@@ -98,10 +101,16 @@ class HWPM4Queue:
                amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLK_INV(glk) | amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLK_WB(glk) | \
                amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLV_INV(glv) | amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL1_INV(gl1) | \
                amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL2_INV(gl2) | amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL2_WB(gl2)]
-    return self
+
+  def memory_barrier(self):
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_WAIT_REG_MEM, 5), amd_gpu.WAIT_REG_MEM_MEM_SPACE(0) | amd_gpu.WAIT_REG_MEM_OPERATION(1) | \
+      amd_gpu.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_EQ) | amd_gpu.WAIT_REG_MEM_ENGINE(0), nbioreg(regBIF_BX_PF1_GPU_HDP_FLUSH_REQ),
+      nbioreg(regBIF_BX_PF1_GPU_HDP_FLUSH_DONE), 0xffffffff, 0xffffffff, 0x20]
+    self._invalidate_cache()
+    return self._mark_command_end()
 
   def exec(self, prg, kernargs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), signal=None, signal_value=0):
-    self.invalidate_cache()
+    self._invalidate_cache()
 
     user_data = [*data64_le(kernargs)]
     if hasattr(prg, 'dispatch_packet_offset'):
@@ -110,7 +119,7 @@ class HWPM4Queue:
       dp.grid_size_x, dp.grid_size_y, dp.grid_size_z = global_size[0]*local_size[0], global_size[1]*local_size[1], global_size[2]*local_size[2]
       dp.group_segment_size, dp.private_segment_size, dp.kernarg_address = prg.group_segment_size, prg.private_segment_size, kernargs
       user_data = [*data64_le(dp_addr)] + user_data
-      self.ptr_to_dispatch_packet[self.ptr()] = dp
+      self.ptr_to_dispatch_packet[len(self)] = dp
 
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 6), gfxreg(amd_gpu.regCOMPUTE_PGM_LO), *data64_le(prg.prog_addr >> 8),
                *data64_le(0), *data64_le(prg.device.scratch.va_addr >> 8)]
@@ -127,15 +136,15 @@ class HWPM4Queue:
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_EVENT_WRITE, 0), amd_gpu.EVENT_TYPE(7) | amd_gpu.EVENT_INDEX(4)]
 
     if signal is not None: self.signal(signal, signal_value)
-    return self
+    return self._mark_command_end()
 
-  def update_exec(self, cmd_ptr, global_size, local_size):
+  def update_exec(self, cmd_idx, global_size, local_size):
     # Patch the exec cmd with new launch dims
-    assert self.q[cmd_ptr + 60] == amd_gpu.PACKET3(amd_gpu.PACKET3_DISPATCH_DIRECT, 3),"The pointer does not point to a packet of this type"
-    self.q[cmd_ptr + 52 : cmd_ptr + 55] = array.array('I', local_size)
-    self.q[cmd_ptr + 61 : cmd_ptr + 64] = array.array('I', global_size)
+    assert self.q[self.cmd_offsets[cmd_idx] + 60] == amd_gpu.PACKET3(amd_gpu.PACKET3_DISPATCH_DIRECT, 3), f"Command at index {cmd_idx} is not exec"
+    self.q[self.cmd_offsets[cmd_idx] + 52 : self.cmd_offsets[cmd_idx] + 55] = array.array('I', local_size)
+    self.q[self.cmd_offsets[cmd_idx] + 61 : self.cmd_offsets[cmd_idx] + 64] = array.array('I', global_size)
 
-    if (dp:=self.ptr_to_dispatch_packet.get(cmd_ptr)) is not None:
+    if (dp:=self.ptr_to_dispatch_packet.get(cmd_idx)) is not None:
       dp.workgroup_size_x, dp.workgroup_size_y, dp.workgroup_size_z = local_size[0], local_size[1], local_size[2]
       dp.grid_size_x, dp.grid_size_y, dp.grid_size_z = global_size[0]*local_size[0], global_size[1]*local_size[1], global_size[2]*local_size[2]
 
@@ -144,7 +153,7 @@ class HWPM4Queue:
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_WAIT_REG_MEM, 5),
       amd_gpu.WAIT_REG_MEM_MEM_SPACE(1) | amd_gpu.WAIT_REG_MEM_OPERATION(0) | amd_gpu.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_GEQ) | \
       amd_gpu.WAIT_REG_MEM_ENGINE(0), addr&0xFFFFFFFF, addr>>32, value, 0xffffffff, 4]
-    return self
+    return self._mark_command_end()
 
   def _release_mem(self, mem_event_type, mem_data_sel, mem_int_sel, address, value=0, cst=0, cache_flush=False):
     cache_flush_flags = 0
@@ -163,7 +172,7 @@ class HWPM4Queue:
 
   def timestamp(self, addr):
     self._release_mem(CACHE_FLUSH_AND_INV_TS_EVENT, mem_data_sel=3, mem_int_sel=0, address=addr)
-    return self
+    return self._mark_command_end()
 
   def signal(self, signal:hsa.amd_signal_t, value=0):
     # NOTE: this needs an EOP buffer on the queue or it will NULL pointer
@@ -172,6 +181,21 @@ class HWPM4Queue:
     if signal.event_mailbox_ptr != 0:
       self._release_mem(CACHE_FLUSH_AND_INV_TS_EVENT, mem_data_sel=1, mem_int_sel=2, address=signal.event_mailbox_ptr,
                         value=signal.event_id, cst=signal.event_id, cache_flush=True)
+    return self._mark_command_end()
+
+  def update_wait(self, cmd_idx, signal=None, value=None):
+    assert self.q[self.cmd_offsets[cmd_idx]] == amd_gpu.PACKET3(amd_gpu.PACKET3_WAIT_REG_MEM, 5), f"Command at index {cmd_idx} is not wait"
+    if signal is not None: self._patch(self.cmd_offsets[cmd_idx] + 2, [*data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET)])
+    if value is not None: self.q[self.cmd_offsets[cmd_idx] + 4] = value
+    return self
+
+  def update_signal(self, cmd_idx, signal=None, value=None):
+    assert self.q[self.cmd_offsets[cmd_idx]] == amd_gpu.PACKET3(amd_gpu.PACKET3_RELEASE_MEM, 6), f"Command at index {cmd_idx} is not signal"
+    if signal is not None:
+      self._patch(self.cmd_offsets[cmd_idx] + 3, [*data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET)])
+      if signal.event_mailbox_ptr != 0:
+        self._patch(self.cmd_offsets[cmd_idx] + 8 + 3, [*data64_le(signal.event_mailbox_ptr), *data64_le(signal.event_id), signal.event_id])
+    if value is not None: self._patch(self.cmd_offsets[cmd_idx] + 5, [*data64_le(value)])
     return self
 
   def bind(self, device: AMDDevice):
@@ -185,8 +209,7 @@ class HWPM4Queue:
     self.q = hw_view # type: ignore
 
   def submit(self, device: AMDDevice):
-    if device == self.binded_device: cmds = self.indirect_cmd
-    else: cmds = self.q
+    cmds = self.indirect_cmd if device == self.binded_device else self.q
 
     wptr = device.pm4_write_pointer[0]
     pm4_buffer_view = to_mv(device.pm4_ring.va_addr, device.pm4_ring.size).cast("I")
@@ -196,12 +219,14 @@ class HWPM4Queue:
     return self
 
 SDMA_MAX_COPY_SIZE = 0x400000
-class HWCopyQueue:
-  def __init__(self): self.q, self.cmd_sizes = [], []
+class HWCopyQueue(HWQueue):
+  def __init__(self):
+    self.internal_cmd_sizes = []
+    super().__init__()
 
   def _q(self, arr):
     self.q += arr
-    self.cmd_sizes.append(len(arr))
+    self.internal_cmd_sizes.append(len(arr))
 
   def copy(self, dest, src, copy_size):
     # Invalidate cache inv
@@ -221,7 +246,7 @@ class HWCopyQueue:
     # Invalidate cache wb
     self._q([amd_gpu.SDMA_OP_GCR_REQ, 0, amd_gpu.SDMA_GCR_GLK_WB | amd_gpu.SDMA_GCR_GL2_WB, 0, 0])
 
-    return self
+    return self._mark_command_end()
 
   def signal(self, signal: hsa.amd_signal_t, value=0):
     self._q([amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET), value])
@@ -230,13 +255,19 @@ class HWCopyQueue:
       self._q([amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(signal.event_mailbox_ptr), signal.event_id])
       self._q([amd_gpu.SDMA_OP_TRAP, amd_gpu.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(signal.event_id)])
 
-    return self
+    return self._mark_command_end()
 
   def wait(self, signal: hsa.amd_signal_t, value=0):
     self._q([amd_gpu.SDMA_OP_POLL_REGMEM | amd_gpu.SDMA_PKT_POLL_REGMEM_HEADER_FUNC(WAIT_REG_MEM_FUNCTION_GEQ) | \
       amd_gpu.SDMA_PKT_POLL_REGMEM_HEADER_MEM_POLL(1), *data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET), value, 0xffffffff,
       amd_gpu.SDMA_PKT_POLL_REGMEM_DW5_INTERVAL(0x04) | amd_gpu.SDMA_PKT_POLL_REGMEM_DW5_RETRY_COUNT(0xfff)])
 
+    return self._mark_command_end()
+
+  def update_wait(self, cmd_idx, signal=None, value=None):
+    assert self.q[self.cmd_offsets[cmd_idx]] & 0xf == amd_gpu.SDMA_OP_POLL_REGMEM, f"Command at index {cmd_idx} is not wait"
+    if signal is not None: self._patch(self.cmd_offsets[cmd_idx] + 1, [*data64_le(ctypes.addressof(signal) + SIGNAL_VALUE_OFFSET)])
+    if value is not None: self.q[self.cmd_offsets[cmd_idx] + 3] = value
     return self
 
   def submit(self, device:AMDDevice):
@@ -246,7 +277,7 @@ class HWCopyQueue:
     sdma_buffer_view = to_mv(device.sdma_ring.va_addr, device.sdma_ring.size).cast("I")
 
     tail_blit_dword = 0
-    for cmdsz in self.cmd_sizes:
+    for cmdsz in self.internal_cmd_sizes:
       if (tail_blit_dword + cmdsz) * 4 >= device.sdma_ring.size - device.sdma_doorbell_value % device.sdma_ring.size: break
       tail_blit_dword += cmdsz
 
