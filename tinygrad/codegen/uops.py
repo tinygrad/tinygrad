@@ -188,7 +188,7 @@ constant_folder = PatternMatcher([
   (UOp.max(UOp.cvar('c'), UOp(UOps.SPECIAL).name('s')), lambda c,s: c if (s.arg[2]-1) <= c.arg else None),
   # const rules
   (UPat(UOps.GEP, name="root", vin=(UPat(UOps.CONST, name="c"),)), lambda root, c: UOp.const(root.dtype, c.arg)),
-  (UOp.cvar('c').cast().name('root'), lambda root, c: UOp.const(root.dtype, c.arg)),
+  (UPat(UOps.CAST, name="root", vin=UPat(UOps.CONST, name="c")), lambda root, c: UOp.const(root.dtype, c.arg)),
   # a phi on a DEFINE_ACC without loops or a CONST is a noop. this is for correctness, not just speed
   (UPat(UOps.PHI, vin=(UPat(UOps.DEFINE_ACC, name="acc"), UPat(name="acc"))), lambda acc: UOp.const(acc.dtype, acc.arg[0])),
   (UPat(UOps.PHI, vin=(UPat(UOps.DEFINE_ACC, vin=tuple()), UPat(name="x"))), lambda x: x),
@@ -209,7 +209,7 @@ constant_folder = PatternMatcher([
   (UOp.const(dtypes.bool, True).lt(UOp.var()), lambda: UOp.const(dtypes.bool, False)),
   # a conditional with the same results either way is a noop, also fold const conditionals
   (UOp.alu(TernaryOps.WHERE, UOp.var(), UOp.var("val"), UOp.var("val")), lambda val: val),
-  (UOp.alu(TernaryOps.WHERE, UOp.cvar('gate'), UOp.var('true'), UOp.var('false')), lambda gate, true, false: true if gate.arg else false),
+  (UOp.alu(TernaryOps.WHERE, UOp.cvar('gate'), UOp.var('c0'), UOp.var('c1')), lambda gate, c0, c1: c0 if gate.arg else c1),
   # ** constant folding **
   (UPat(UOps.ALU, name="root", vin=UPat(UOps.CONST)), lambda root: UOp.const(root.dtype, exec_alu(root.arg, root.dtype, [x.arg for x in root.vin]))),
   # ** self folding **
