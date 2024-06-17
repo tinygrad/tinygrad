@@ -52,7 +52,7 @@ class HCQGraph(MultiGraphRunner):
     self.kickoff_value = 0
     self.graph_timeline = {dev: 0 for dev in self.devices}
 
-    signal_scheduling = {}
+    signal_scheduling: Dict[int, Tuple[List, Optional[int]]] = {}
     self.exec_ptrs: Dict[int, Tuple[Any, int]] = {}
     self.copy_to_devs: Dict[Compiled, Set[Compiled]] = {dev: set() for dev in self.devices}
 
@@ -114,7 +114,7 @@ class HCQGraph(MultiGraphRunner):
     for dev in self.devices:
       dev._set_signal(self.comp_signal[dev], 0)
       dev._set_signal(self.copy_signal[dev], 0)
-    dev._set_signal(self.kickoff_signal, self.kickoff_value)
+    self.devices[0]._set_signal(self.kickoff_signal, self.kickoff_value)
 
     # Update rawbuffers
     for (j,i),input_idx in self.input_replace.items(): self.ji_args_bufs[j][i] = input_rawbuffers[input_idx]._buf.va_addr
