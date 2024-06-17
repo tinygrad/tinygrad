@@ -259,7 +259,7 @@ constant_folder = PatternMatcher([
   (UPat(UOps.CAST, name="root", vin=tuple(UPat(UOps.PHI, vin=(UPat(UOps.GEP, i, vin=(UPat(name="val"),)), UPat(name=f"v{i}"))) for i in range(2))),
     lambda root, val, v0, v1: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1))))),
   # NEG/CMPLT -> CMPLT
-  (UOp.alu(UnaryOps.NEG, UOp.var('x')).lt(UOp.cvar('c')), lambda c,x: UOp.const(c.dtype, -c.arg).lt(x)),
+  (UOp.alu(UnaryOps.NEG, UOp.var('x')).lt(UOp.cvar('c', dtypes.int)), lambda c,x: UOp.const(c.dtype, -c.arg).lt(x)),
 
   # cast NOOP (NOTE: it's str to deal with PtrDType)
   (UPat(UOps.CAST, name="root"), lambda root: root.vin[0] if str(root.dtype) == str(root.vin[0].dtype) else None),
