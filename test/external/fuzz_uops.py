@@ -6,6 +6,7 @@ from tinygrad.device import Buffer, Device
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import DEBUG, colored, getenv
 from tinygrad.shape.symbolic import Variable
+from tinygrad.tensor import _to_np_dtype
 
 def fuzz_uops(graph:DefaultDict[UOp, List[UOp]], in_degree:DefaultDict[UOp, int], loops_children:Dict[UOp, Set[UOp]]):
   paths: List[List[UOp]] = []
@@ -27,11 +28,11 @@ class UOpsFuzzerRunner(CompiledRunner):
     if DEBUG >= 1: print(colored(f"fuzzing {len(self.p.uops.fuzz_paths)} UOps permutations for {init_name}", "yellow"))
 
     super().__call__(rawbufs, var_vals, wait)
-    ground_truth = {x:np.frombuffer(x.as_buffer(), x.dtype.np) for x in rawbufs}
+    ground_truth = {x:np.frombuffer(x.as_buffer(), _to_np_dtype(x.dtype)) for x in rawbufs}
 
     for i, path in enumerate(self.p.uops.fuzz_paths):
       # setup prg
-      uops = UOpGraph()
+      uops = UOpGraph([])
       uops._uops = list(path)
       if DEBUG >= 6: uops.print()
       self.p = replace(self.p, name=(name:=f"{init_name}fuzz{i}"), src=Device[self.p.dname].renderer.render(name, uops), uops=uops)
@@ -43,7 +44,7 @@ class UOpsFuzzerRunner(CompiledRunner):
       super().__call__(rawbufs, var_vals, wait)
       for i, x in enumerate(rawbufs):
         try:
-          np.testing.assert_allclose(np.frombuffer(x.as_buffer(), x.dtype.np), ground_truth[x], atol=1e-6, rtol=1e-6)
+          np.testing.assert_allclose(np.frombuffer(x.as_buffer(), _to_np_dtype(x.dtype)), ground_truth[x], atol=1e-6, rtol=1e-6)
           if DEBUG >= 2: print(colored(name, "green"))
         except AssertionError as e:
           print(colored(name, "red"))
