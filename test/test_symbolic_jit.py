@@ -212,7 +212,6 @@ class TestSymbolicJit(unittest.TestCase):
       expected = a.mean(1).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
-  @unittest.skip("failed for some")
   def test_mean_2d(self):
     def f(a): return a.mean().realize()
     def f0(a): return a.mean(0).realize()
@@ -265,7 +264,6 @@ class TestSymbolicJit(unittest.TestCase):
       expected = a.var(1).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
-  @unittest.skip("failed for some")
   def test_var_2d(self):
     def f(a): return a.var().realize()
     def f0(a): return a.var(0).realize()
