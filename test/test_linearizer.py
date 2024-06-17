@@ -344,7 +344,7 @@ class TestLinearizer(unittest.TestCase):
     x = Tensor.rand(4, 32).realize()
     x_ast = LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=3, dtype=dtypes.float, st=ShapeTracker.from_shape((4,32))))
     max_x = LazyOp(op=ReduceOps.MAX, src=(x_ast,), arg=(1,))
-    exp_x = LazyOp(op=UnaryOps.EXP2, src=(LazyOp(op=BinaryOps.ADD, src=(x_ast,LazyOp(Op=UnaryOps.NEG, src=(max_x, ), arg=None))),))
+    exp_x = LazyOp(op=UnaryOps.EXP2, src=(LazyOp(op=BinaryOps.ADD, src=(x_ast,LazyOp(op=UnaryOps.NEG, src=(max_x, ), arg=None))),))
     sum_exp_x = LazyOp(op=ReduceOps.SUM, src=(exp_x,), arg=(1,))
     ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BinaryOps.MUL, src=(exp_x, LazyOp(op=UnaryOps.RECIP, src=(sum_exp_x,)))),), arg=(1,)),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape((4,1)))) # noqa: E501
     max_x_ast = LazyOp(op=BufferOps.STORE, src=(max_x,), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker.from_shape((4,1))))
