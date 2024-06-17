@@ -82,12 +82,12 @@ def bfs(graph:DefaultDict[T, List[T]], in_degree:DefaultDict[T, int], insert:Cal
   queue = deque(n for n,d in in_degree.items() if d == 0)
   toposort: Dict[T, V] = {}
   while queue:
-    v = queue.popleft()
-    if v in toposort: continue
-    insert(v, toposort)
-    for u in graph[v]:
-      in_degree[u] -= 1
-      if in_degree[u] == 0: queue.append(u)
+    n = queue.popleft()
+    if n in toposort: continue
+    insert(n, toposort)
+    for x in graph[n]:
+      in_degree[x] -= 1
+      if in_degree[x] == 0: queue.append(x)
   return toposort
 
 class Context(contextlib.ContextDecorator):
