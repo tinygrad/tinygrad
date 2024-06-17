@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import List, Tuple, Iterable, cast
-import math
+import math, functools
 from dataclasses import replace
 from tinygrad.codegen.kernel import LocalBuffer, Kernel
 from tinygrad.shape.shapetracker import ShapeTracker, View
@@ -9,7 +9,6 @@ from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, BinaryOps, Un
 from tinygrad.codegen.uops import UOp, UOpGraph, UOps
 from tinygrad.renderer import Program
 from tinygrad.helpers import to_function_name, colored, DEBUG, getenv, prod
-from tinygrad.engine.graph import print_tree
 
 def _uop_view(view:View, idxs:List[UOp], vexpr:UOp) -> Tuple[UOp, UOp]:
   # TODO: dtypes.realint
@@ -59,19 +58,20 @@ class Lowerer(Kernel):
       has_valid = valid.uop is not UOps.CONST or valid.arg is not True
       if x.op is BufferOps.CONST:
         return UOp.alu(TernaryOps.WHERE, valid, UOp.const(x.arg.dtype, x.arg.val), UOp.const(x.arg.dtype, 0))
+
+      if x.arg.idx == -1:
+        buf = self.local_buffer_uop
       else:
-        if x.arg.idx == -1:
-          buf = self.local_buffer_uop
-        else:
-          buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(x.arg.dtype), (), (x.arg.idx, any(x.arg.idx == y.idx for y in self.outbufs)))
-        if x.op is BufferOps.LOAD:
-          barrier = (UOp(UOps.BARRIER, None, (self.to_uop(x.src[0]),)),) if len(x.src) else ()
-          return UOp(UOps.LOAD, x.arg.dtype, (buf, idx) + ((valid, UOp.const(x.arg.dtype, 0)) if has_valid else ()) + barrier)
-        else:
-          return UOp(UOps.STORE, None, (buf, idx, self.to_uop(x.src[0])) + ((valid) if has_valid else ()))
+        buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(x.arg.dtype), (), (x.arg.idx, any(x.arg.idx == y.idx for y in self.outbufs)))
+
+      if x.op is BufferOps.LOAD:
+        barrier = (UOp(UOps.BARRIER, None, (self.to_uop(x.src[0]),)),) if len(x.src) else ()
+        return UOp(UOps.LOAD, x.arg.dtype, (buf, idx) + ((valid, UOp.const(x.arg.dtype, 0)) if has_valid else ()) + barrier)
+      return UOp(UOps.STORE, None, (buf, idx, self.to_uop(x.src[0])) + ((valid,) if has_valid else ()))
+
     in_uops = tuple(self.to_uop(y) for y in x.src)
-    if x.op is UnaryOps.CAST:
-      return UOp(UOps.CAST, x.arg, in_uops)
+    if x.op is UnaryOps.CAST: return UOp(UOps.CAST, x.arg, in_uops)
+    if x.op is UnaryOps.BITCAST: return UOp(UOps.BITCAST, x.arg, in_uops)
     if x.op in ReduceOps:
       op = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[x.op]
       # NOTE: always using ridxs is fine here
@@ -96,9 +96,13 @@ class Lowerer(Kernel):
         self.bufs.append(LocalBuffer(name:=f"temp{i if len(self.reduceops) > 1 else ''}", buf_size:=self.sts[-1].size, temp_dtype))
         self.local_buffer_uop = UOp(UOps.DEFINE_LOCAL, PtrDType(temp_dtype), (), (name, buf_size))
 
+    #from tinygrad.engine.graph import print_tree
+    #print_tree(self.ast[0])
+
     # set the shapetrackers to the optimized ones, fixup reduceop
     # transformed to the final LazyOp
-    def fixup_ast(op):
+    @functools.lru_cache(None)
+    def fixup_ast(op:LazyOp) -> LazyOp:
       if op.op in BufferOps:
         arg = replace(op.arg, st=self.sts[self.bufs.index(op.arg)])
       elif op.op in ReduceOps:
@@ -112,14 +116,27 @@ class Lowerer(Kernel):
       else:
         arg = op.arg
       return LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
-    self.ast = [fixup_ast(x) for x in self.ast]
-    #print_tree(self.ast[0])
+    modified_ast = tuple(fixup_ast(x) for x in self.ast)
 
-    # define indexes
-    global_idxs, loop_global_idxs = get_grouped_dims("gidx", 0, self.full_shape[:self.global_dims], 3 if self.opts.has_local else 0)
-    local_idxs, loop_local_idxs = get_grouped_dims("lidx", self.global_dims, self.full_shape[self.global_dims:self.first_reduce+self.group_for_reduces], 3 if self.opts.has_local else 0)  # noqa: E501
-    self.idxs = global_idxs + local_idxs
+    if self.opts.has_local:
+      # define indexes
+      global_idxs, loop_global_idxs = get_grouped_dims("gidx", 0, self.full_shape[:self.global_dims], 3 if self.opts.has_local else 0)
+      local_idxs, loop_local_idxs = get_grouped_dims("lidx", self.global_dims, self.full_shape[self.global_dims:self.first_reduce+self.group_for_reduces], 3 if self.opts.has_local else 0)  # noqa: E501
+      self.idxs = global_idxs + local_idxs
 
+      # define sizes
+      self.global_size = [x.arg[2] for x in loop_global_idxs]
+      self.local_size = [x.arg[2] for x in loop_local_idxs]
+      self.global_size += [1]*(3-len(self.global_size))
+      self.local_size += [1]*(3-len(self.local_size))
+    else:
+      # all loops
+      self.idxs = []
+      for i,g in enumerate(self.full_shape[:self.first_reduce]):
+        self.idxs.append(UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), UOp.const(dtypes.int32, g)), (i,False)))
+      self.global_size, self.local_size = None, None
+
+    # reduce loops
     for i,g in enumerate(self.full_shape[self.first_reduce+self.group_for_reduces:], start=self.first_reduce+self.group_for_reduces):
       unrolled = i >= (self.shape_len-self.upcasted)
       self.idxs.append(UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), UOp.const(dtypes.int32, g)), (i,unrolled)))
@@ -129,12 +146,7 @@ class Lowerer(Kernel):
     for a in range(self.first_reduce, self.first_reduce+self.group_for_reduces):
       self.ridxs[a] = UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), UOp.const(dtypes.int32, self.full_shape[a])), (1000+a, False))
 
-    self.global_size = [x.arg[2] for x in loop_global_idxs]
-    self.local_size = [x.arg[2] for x in loop_local_idxs]
-    self.global_size += [1]*(3-len(self.global_size))
-    self.local_size += [1]*(3-len(self.local_size))
-
-    self.uops:UOpGraph = UOpGraph([self.to_uop(x) for x in self.ast])
+    self.uops:UOpGraph = UOpGraph([self.to_uop(x) for x in modified_ast])
 
     # maybe graph the uops
     if DEBUG >= 5: self.uops.print()
