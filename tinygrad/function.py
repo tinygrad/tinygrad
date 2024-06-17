@@ -155,8 +155,10 @@ def _fabsk(d:LazyBuffer) -> LazyBuffer:
   dint = d.cast(dtypes.int64, True)
   return dint.e(BinaryOps.AND, dint.const(0x7fffffffffffffff)).cast(dtypes.float64, True)
 
-def _rintk(d:LazyBuffer) -> LazyBuffer:
-  return d.e(BinaryOps.ADD, d.e(BinaryOps.CMPLT, d.const(0)).e(TernaryOps.WHERE, d.const(-0.5), d.const(0.5)))
+def _rintk(d:LazyBuffer) -> LazyBuffer: # returns int32
+  assert d.dtype in (dtypes.float32, dtypes.float64)
+  return_t = dtypes.int32 if d.dtype == dtypes.float32 else dtypes.int64
+  return d.e(BinaryOps.ADD, d.e(BinaryOps.CMPLT, d.const(0.0)).e(TernaryOps.WHERE, d.const(-0.5), d.const(0.5))).cast(return_t)
 
 def _mla(x:LazyBuffer, y:LazyBuffer, z:LazyBuffer) -> LazyBuffer:
   return x.e(BinaryOps.MUL, y).e(BinaryOps.ADD, z)
@@ -342,15 +344,15 @@ def _xsinf(d: LazyBuffer, u10:bool = True) -> LazyBuffer:
   minus_PI_B2f = d.const(-0.00011315941810607910156)
   minus_PI_C2f = d.const(-1.9841872589410058936e-09)
   minus_PI_D2f = d.const(-1.2154201256553420762e-10)
-  
   M_1_PI = d.const(0.318309886183790671537767526745028724)
 
   u = d
-  di = _rintk(d)
+  di = _rintk(d).cast(d.dtype)
   
-  def __lv1q(x:LazyBuffer) -> LazyBuffer: return _rintk(x.e(BinaryOps.MUL, M_1_PI))
-  def __lv2q(x:LazyBuffer) -> LazyBuffer: return _rintk(x.e(BinaryOps.MUL, M_1_PI))
+  def __lv1q(x:LazyBuffer) -> LazyBuffer: return _rintk(x.e(BinaryOps.MUL, M_1_PI)).cast(d.dtype)
+  def __lv2q(x:LazyBuffer) -> LazyBuffer: return _rintk(x.e(BinaryOps.MUL, M_1_PI)).cast(d.dtype)
   def __lv3q(x:LazyBuffer) -> LazyBuffer:
+    return __lv2q(x)
     _, _, i= _rempif(x)
     return i.e(BinaryOps.AND, i.const(3)).e(BinaryOps.MUL, i.const(2)).e(BinaryOps.ADD, dfx.e(BinaryOps.CMPLT, i.const(0)).e(TernaryOps.WHERE, a.const(0), a.const(1))).e(BinaryOps.SHR, a.const(2))
       
@@ -380,6 +382,7 @@ def _xsinf(d: LazyBuffer, u10:bool = True) -> LazyBuffer:
       assert False
       
   def __lv3(x:LazyBuffer) -> LazyBuffer:
+    return __lv2(x)
     if u10:
       dfx, dfy, i = _rempif(x)
       return dfx.e(BinaryOps.ADD, dfy)
@@ -400,8 +403,25 @@ def _xsinf(d: LazyBuffer, u10:bool = True) -> LazyBuffer:
   u = _mla(u, s, u.const(0.00833307858556509017944336))
   u = _mla(u, s, u.const(-0.166666597127914428710938))
   u = _mla(s, u.e(BinaryOps.MUL, d), d)
+  u = u.e(BinaryOps.MUL, u.const(-1.0))
   return u
 
+def __xsinf(d: LazyBuffer) -> LazyBuffer:
+  M_1_PI = d.const(0.318309886183790671537767526745028724)
+  minus_M_PI = d.const(-3.141592653589793238462643383279502884)
+  
+  q = None
+  u, s, t = d, d, d
+  q = _rintk(d.e(BinaryOps.MUL, M_1_PI)).cast(d.dtype)
+  d = _mla(q, minus_M_PI, d)
+  s = d.e(BinaryOps.MUL, d)
+  u = d.const(-0.1881748176e-3)
+  u = _mla(u, s, d.const(+0.8323502727e-2))
+  u = _mla(u, s, d.const(-0.1666651368e+0))
+  u = _mla(s.e(BinaryOps.MUL, d), u, d)
+  return u
+# follows: https://ieeexplore.ieee.org/stamp/stamp.jsp?arnumber=8936472
+# https://realtimecollisiondetection.net/blog/?p=9
 class Sin(Function):
   def forward(self, x:LazyBuffer, fast_approx:bool=True) -> LazyBuffer:
     self.x = x
