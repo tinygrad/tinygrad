@@ -316,7 +316,7 @@ class TestNN(unittest.TestCase):
 
     for _ in range(10):
       # forward
-      x = Tensor.randn(N, C, H, W, requires_grad=True)
+      x = Tensor.randn(N, C, H, W, requires_grad=True).realize()
       z = layer(x)
       torch_x = torch.tensor(x.numpy(), requires_grad=True)
       torch_z = torch_layer(torch_x)
@@ -342,7 +342,7 @@ class TestNN(unittest.TestCase):
 
     for _ in range(10):
       # forward
-      x = Tensor.randn(N, C, D, H, W, requires_grad=True)
+      x = Tensor.randn(N, C, D, H, W, requires_grad=True).realize()
       z = layer(x)
       torch_x = torch.tensor(x.numpy(), requires_grad=True)
       torch_z = torch_layer(torch_x)
