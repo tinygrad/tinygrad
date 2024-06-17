@@ -22,12 +22,43 @@ fixup() {
   grep FIXME_STUB $1 || true
 }
 
+generate_opencl_error_codes(){
+
+  OPENCL_HEADERS_SRC=/tmp/opencl-headers
+  OPENCL_COMMIT_HASH=c860bb551eeef9a47d56286a70cea903db3d6ed2
+  if [ ! -d "$OPENCL_HEADERS_SRC" ]; then
+    git clone https://github.com/KhronosGroup/OpenCL-Headers.git $OPENCL_HEADERS_SRC
+    pushd .
+    cd $OPENCL_HEADERS_SRC
+    git reset --hard $OPENCL_COMMIT_HASH
+    popd
+  fi
+  
+  file=$OPENCL_HEADERS_SRC/opencl_headers_coalesce.h
+  cat $OPENCL_HEADERS_SRC/CL/*.h > $file
+
+  sed -i 's/Codes/codes/p' $file
+  sed -n -i -e '/\/\* Error \([a-z].*\) \*\//,/^\s*$/p' $file
+  sed -n -i '/#define [A-Z_]/p' $file 
+  sed -i 's/#define//' $file 
+
+  sed -n -i '1i\  opencl_status_codes = {}
+      { s/\([^,]*\) *\([-][0-9].*\)/opencl_status_codes[\2] = "\1"/; p }' $file 
+  sed -n -i 's/\([^,]*\) *\(0x[a-zA-Z0-9].*\)/opencl_status_codes[\2] = "\1"/; p ' $file
+  sed -n -i 's/\(CL_SUCCESS\) *\(0$\)/opencl_status_codes[\2] = "\1"/; p ' $file
+  sed -i -e 's/"\(\s*\)\(.*\)\(\s*\)\(\r*\)"/"\2"/' $file 
+  sed -i -e 's/\(\s*\)\(.*\)/\2/' $file 
+  cat $file >> $BASE/opencl.py
+}
+
 generate_opencl() {
   clang2py /usr/include/CL/cl.h -o $BASE/opencl.py -l /usr/lib/x86_64-linux-gnu/libOpenCL.so.1 -k cdefstum
   fixup $BASE/opencl.py
   # hot patches
   sed -i "s\import ctypes\import ctypes, ctypes.util\g" $BASE/opencl.py
   sed -i "s\ctypes.CDLL('/usr/lib/x86_64-linux-gnu/libOpenCL.so.1')\ctypes.CDLL(ctypes.util.find_library('OpenCL'))\g" $BASE/opencl.py
+
+
   python3 -c "import tinygrad.runtime.autogen.opencl"
 }
 
@@ -128,6 +159,7 @@ nv_status_codes = {}
   python3 -c "import tinygrad.runtime.autogen.nv_gpu"
 }
 
+
 generate_amd() {
   # clang2py broken when pass -x c++ to prev headers
   clang2py extra/hip_gpu_driver/sdma_registers.h \
@@ -168,6 +200,7 @@ generate_hsa() {
 }
 
 if [ "$1" == "opencl" ]; then generate_opencl
+elif [ "$1" == "opencl-error-code" ]; then generate_opencl_error_codes
 elif [ "$1" == "hip" ]; then generate_hip
 elif [ "$1" == "comgr" ]; then generate_comgr
 elif [ "$1" == "cuda" ]; then generate_cuda
