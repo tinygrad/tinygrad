@@ -59,20 +59,18 @@ class HCQGraph(MultiGraphRunner):
     # Schedule signals
     for j,ji in enumerate(self.jit_cache):
       if isinstance(ji.prg, CompiledRunner):
-        deps = self.access_resources(ji.bufs[(outs:=ji.prg.p.outcount):], ji.bufs[:outs], (self.comp_signal[ji.prg.device], sig_val:=j+1))
-        deps = [x for x in deps if id(x[0]) != id(self.comp_signal[ji.prg.device])]
+        deps = self.access_resources(ji.bufs[(outs:=ji.prg.p.outcount):], ji.bufs[:outs], (self.comp_signal[dev:=ji.prg.device], sig_val:=j+1))
 
-        # NV should self wait if we have any other dependecies which brake the chained execution.
-        if ji.prg.device.dname.startswith("NV") and (len(deps) > 1 or (len(deps) == 1 and id(deps[0][1]) != id(self.comp_signal[ji.prg.device]))):
-          if self.comp_signal_val[ji.prg.device] > 0: deps.append((self.comp_signal[ji.prg.device], self.comp_signal_val[ji.prg.device]))
+        # Remove self-dependency for AMD or NV with only 1 same-queue dep, since NV chains 2+ kernels in this case, eliminating dep need.
+        if (dname:=dev.dname.split(":", 1)[0]) == "AMD" or (dname == "NV" and len(deps) == 1 and id(deps[0][0]) == id(self.comp_signal[dev])):
+          deps = [x for x in deps if id(x[0]) != id(self.comp_signal[dev])]
 
-        signal_scheduling[j] = (deps, None) # output signal
-        self.comp_signal_val[ji.prg.device] = sig_val
+        signal_scheduling[j] = (deps, None) # on compute kernels, we can skip signals by default, since no dependencies might be there.
+        self.comp_signal_val[dev] = sig_val
       elif isinstance(ji.prg, BufferXfer):
-        dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
-        deps = self.access_resources([src], [dest], (self.copy_signal[Device[src.device]], sig_val:=j+1))
+        deps = self.access_resources([src:=ji.bufs[0]], [dest:=ji.bufs[1]], (self.copy_signal[Device[src.device]], sig_val:=j+1))
         deps = [x for x in deps if id(x[0]) != id(self.copy_signal[Device[src.device]])]
-        signal_scheduling[j] = (deps, j+1) # output signal
+        signal_scheduling[j] = (deps, j+1)
         self.copy_signal_val[Device[src.device]] = sig_val
         self.copy_to_devs[Device[dest.device]].add(Device[src.device])
       for sig,val in deps: signal_scheduling[val - 1] = (signal_scheduling[val - 1][0], val) # set need output for signal, as it has deps
@@ -98,7 +96,6 @@ class HCQGraph(MultiGraphRunner):
         self.copy_queues[Device[src.device]].copy(dest._buf.va_addr, src._buf.va_addr, dest.nbytes) \
                                             .signal(self.copy_signal[Device[src.device]], signal_value)
 
-    # Finilize queues
     for dev in self.devices:
       if self.copy_signal_val[dev] > 0: self.comp_queues[dev].wait(self.copy_signal[dev], self.copy_signal_val[dev])
       for dep_dev in self.copy_to_devs[dev]: self.comp_queues[dev].wait(self.copy_signal[dep_dev], self.copy_signal_val[dep_dev])
