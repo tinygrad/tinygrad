@@ -2363,8 +2363,7 @@ class Tensor:
     print(t.sub(Tensor([[2.0], [3.5]])).numpy())
     ```
     """
-    a, b = self._broadcasted(x, reverse)
-    return a + (-b)
+    return self.add(-x) if not reverse else self.neg().add(x)
 
   def mul(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
