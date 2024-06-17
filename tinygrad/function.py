@@ -70,6 +70,16 @@ def _ilogb2kf(d:LazyBuffer) -> LazyBuffer: # returns int32
   dint = d.cast(dtypes.int32, True)
   return dint.e(BinaryOps.SHR, dint.const(23)).e(BinaryOps.AND, dint.const(255)).e(BinaryOps.SUB, dint.const(127))
 
+def _pow2if(q:LazyBuffer) -> LazyBuffer: # returns float32
+  assert q.dtype in (dtypes.int32, dtypes.int64)
+  if q.dtype == dtypes.int32: return q.e(BinaryOps.ADD, q.const(127)).e(BinaryOps.SHL, q.const(23)).cast(dtypes.float32, True)
+  if q.dtype == dtypes.int64: return q.e(BinaryOps.ADD, q.const(1023)).e(BinaryOps.SHL, q.const(52)).cast(dtypes.float64, True)
+  
+def _ldexp2kf(d:LazyBuffer, e:LazyBuffer) -> LazyBuffer: # returns float32
+  assert d.dtype in (dtypes.float32, dtypes.float64)
+  assert e.dtype in (dtypes.int32, dtypes.int64)
+  return d.e(BinaryOps.MUL, _pow2if(e.e(BinaryOps.SHR, e.const(1)))).e(BinaryOps.MUL, _pow2if(e.e(BinaryOps.SUB, e.e(BinaryOps.SHR, e.const(1)))))
+
 def _ldexp3kf(d:LazyBuffer, e:LazyBuffer) -> LazyBuffer:
   assert d.dtype in (dtypes.float32, dtypes.float64)
   assert e.dtype in (dtypes.int32, dtypes.int64)
@@ -189,36 +199,6 @@ def _dfadd2_f2_f2_f2(x_x:LazyBuffer, x_y:LazyBuffer, y_x:LazyBuffer, y_y:LazyBuf
   r_y = r_y.e(BinaryOps.ADD, x_y.e(BinaryOps.ADD, y_y))
   return r_x, r_y
 
-def _rempif(x:LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer, LazyBuffer]:
-  ex = _ilogb2kf(x).e(BinaryOps.SUB, x.const(25).cast(dtypes.int32))
-  k = ex.const(90 - 25)
-  q = ex.e(BinaryOps.CMPNE, k).e(TernaryOps.WHERE, ex.e(BinaryOps.CMPLT, k).e(TernaryOps.WHERE, x.const(0), x.const(-64)), x.const(0)).cast(dtypes.int32)
-  a = _ldexp3kf(x, q)
-
-  ex = ex.e(BinaryOps.CMPLT, x.const(0).cast(dtypes.int32)).e(TernaryOps.WHERE, x.const(0).cast(dtypes.int32), ex)
-  ex = ex.e(BinaryOps.MUL, x.const(4).cast(dtypes.int32))
-  from tinygrad import Tensor
-  lut = Tensor(np.array(COEFF_SINF))
-  x_x, x_y = _dfmul_f2_f_f(a, lut[ex])
-  di_d, di_i = _remisubf(x_x)
-  q = di_i
-  x_x = di_d
-  x_x, x_y = _dfnormalize_f2_f2(x_x, x_y)
-  y_x, y_y = _dfmul_f2_f_f(a, lut[ex.e(BinaryOps.ADD, ex.const(1))])
-  x_x, x_y = _dfadd2_f2_f2_f2(x_x, x_y, y_x, y_y)
-  di_d, di_i = _remisubf(x_x)
-  q = q.e(BinaryOps.ADD, di_i)
-  x_x = di_d
-  x_x, x_y = _dfnormalize_f2_f2(x_x, x_y)
-  y_x, y_y = _dfmul_f2_f2_f(lut[ex.e(BinaryOps.ADD, ex.const(2))], lut[ex.e(BinaryOps.ADD, ex.const(3))], a)
-  x_x, x_y = _dfadd2_f2_f2_f2(x_x, x_y, y_x, y_y)
-  x_x, x_y = _dfnormalize_f2_f2(x_x, x_y)
-  x_x, x_y = _dfmul_f2_f2_f2(x_x, x_y, x_x.const(3.1415927410125732422*2), x_y.const(-8.7422776573475857731e-08*2))
-
-  ret_dfx = _fabsfk(a).e(BinaryOps.CMPLT, a.const(0.7)).e(TernaryOps.WHERE, a, x_x)
-  ret_dfy = _fabsfk(a).e(BinaryOps.CMPLT, a.const(0.7)).e(TernaryOps.WHERE, a.const(0), x_y)
-  return ret_dfx, ret_dfy, q
-
 def _xsin(d: LazyBuffer) -> LazyBuffer:
   TRIGRANGEMAXf = d.const(39000)
   TRIGRANGEMAX2f = d.const(125.0)
@@ -276,6 +256,22 @@ def _xsin(d: LazyBuffer) -> LazyBuffer:
   u = u.e(BinaryOps.MUL, u.const(-1.0))
   return u
 
+def _xexp2(d: LazyBuffer) -> LazyBuffer:
+  q = _rintk(d)
+  s = d.e(BinaryOps.SUB, q.cast(d.dtype))
+  u = d.const(0.1535920892e-3)
+  u = _mla(u, s, d.const(0.1339262701e-2))
+  u = _mla(u, s, d.const(0.9618384764e-2))
+  u = _mla(u, s, d.const(0.5550347269e-1))
+  u = _mla(u, s, d.const(0.2402264476e+0))
+  u = _mla(u, s, d.const(0.6931471825e+0))
+  u = _mla(u, s, d.const(0.1000000000e+1))
+  u = _ldexp2kf(u, q)
+  #u = d.e(BinaryOps.CMPNE, d.const(128.0)).e(TernaryOps.WHERE, d.const(math.inf), u)
+  u = d.e(BinaryOps.CMPLT, d.const(128.0)).e(TernaryOps.WHERE, u, d.const(math.inf))
+  u = d.e(BinaryOps.CMPLT, d.const(-150)).e(TernaryOps.WHERE, d.const(0.0), u)
+  return u
+  
 class Sin(Function):
   def forward(self, x:LazyBuffer, fast_approx:bool=True) -> LazyBuffer:
     self.x = x
@@ -308,7 +304,7 @@ class Log(Function):
 
 class Exp(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = x.e(BinaryOps.MUL, x.const(1/math.log(2))).e(UnaryOps.EXP2)
+    self.ret = _xexp2(x.e(BinaryOps.MUL, x.const(1/math.log(2))))#_xexp2(x)#x.e(BinaryOps.MUL, x.const(1/math.log(2))).e(UnaryOps.EXP2)
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return self.ret.e(BinaryOps.MUL, grad_output)
