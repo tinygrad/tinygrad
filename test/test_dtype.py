@@ -1,4 +1,4 @@
-import unittest, operator, subprocess
+import unittest, operator, subprocess, math
 import numpy as np
 import torch
 from typing import Any, List
@@ -544,6 +544,17 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([0, 1], dtype=dtypes.float32)).sum().dtype == dtypes.float32
     assert (Tensor([0, 1], dtype=dtypes.float64)).sum().dtype == dtypes.float64
 
+  @unittest.skipIf(Device.DEFAULT == "PYTHON", "TODO: support inf to half in PYTHON backend")
+  @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need float16")
+  def test_sum_acc_dtype(self):
+    t = Tensor([40000, 40000], dtype=dtypes.float16)
+    # default float16 sum returns in float16, overflowed in this case
+    assert t.sum().dtype == dtypes.float16
+    assert math.isinf(t.sum().numpy().item())
+    # specifiying acc_dtype and it's not downcasted
+    assert t.sum(acc_dtype=dtypes.float32).dtype == dtypes.float32
+    np.testing.assert_allclose(t.sum(acc_dtype=dtypes.float32).numpy(), 80000)
+
   def test_mean(self):
     assert (Tensor([0, 1], dtype=dtypes.bool)).mean().dtype == dtypes.float32
     assert (Tensor([0, 1], dtype=dtypes.int8)).mean().dtype == dtypes.float32
@@ -574,9 +585,13 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([0, 1], dtype=dtypes.float32)).cumsum(0).dtype == dtypes.float32
     assert (Tensor([0, 1], dtype=dtypes.float64)).cumsum(0).dtype == dtypes.float64
 
-  @given(strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes))
-  def test_matmul(self, dt1, dt2):
-    assert (Tensor([0, 1], dtype=dt1) @ Tensor([0, 1], dtype=dt2)).dtype == least_upper_dtype(dt1, dt2)
+  @given(strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes))
+  def test_matmul(self, dt1, dt2, acc_dt):
+    t1 = Tensor([0, 1], dtype=dt1)
+    t2 = Tensor([0, 1], dtype=dt2)
+    assert (t1 @ t2).dtype == least_upper_dtype(dt1, dt2)
+    # if acc_dtype is specified, return in acc_dtype
+    assert (t1.matmul(t2, acc_dtype=acc_dt).dtype == acc_dt)
 
   @staticmethod
   def check_where_alternate_input_other(input_, other, data_type):

@@ -12,6 +12,7 @@
 
 ## Creation (random)
 
+::: tinygrad.Tensor.manual_seed
 ::: tinygrad.Tensor.rand
 ::: tinygrad.Tensor.randn
 ::: tinygrad.Tensor.randint

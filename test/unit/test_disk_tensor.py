@@ -21,7 +21,6 @@ def compare_weights_both(url):
 
 class TestTorchLoad(unittest.TestCase):
   # pytorch pkl format
-  @unittest.skip("this test is slow and takes 17s. TODO: fix")
   def test_load_enet(self): compare_weights_both("https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b0-355c32eb.pth")
   # pytorch zip format
   def test_load_enet_alt(self): compare_weights_both("https://download.pytorch.org/models/efficientnet_b0_rwightman-3dd342df.pth")

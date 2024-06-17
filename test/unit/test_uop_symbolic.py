@@ -37,8 +37,8 @@ class Node:
   @staticmethod
   def ands(ops): return functools.reduce(lambda x,y: x*y, ops)
   def __floordiv__(a,b,unk): return a//b
-def create_lt_node(v, n): return UOp.alu(BinaryOps.CMPLT, v, UOp.const(v.dtype, n))
-def create_ge_node(v, n): return UOp.alu(BinaryOps.CMPLT, -v, UOp.const(v.dtype, -n+1))
+def create_lt_node(v, n): return v.lt(n)
+def create_ge_node(v, n): return v.ge(n)
 def SumNode(x): return Node.sum(x)
 def MulNode(x, y): return x*y
 
@@ -61,7 +61,7 @@ class TestSymbolic(unittest.TestCase):
 
   def test_cmp_simple(self):
     self.helper_test_variable(create_lt_node(Variable("a", 3, 8), 4), 0, 1, "(a<4)")
-    self.helper_test_variable(create_ge_node(Variable("a", 3, 8), 8), 0, 1, {"((a*-1)<-7)", "(7<a)"})
+    self.helper_test_variable(create_ge_node(Variable("a", 3, 8), 8), 0, 1, {"((a*-1)<-7)", "(7<a)", "(!(a<8))"})
 
   @unittest.expectedFailure
   def test_ge(self):

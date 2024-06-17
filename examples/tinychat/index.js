@@ -13,6 +13,11 @@ document.addEventListener("alpine:init", () => {
     generating: false,
     endpoint: `${window.location.origin}/v1`,
 
+    // performance tracking
+    time_till_first: 0,
+    tokens_per_second: 0,
+    total_tokens: 0,
+
     removeHistory(cstate) {
       const index = this.histories.findIndex((state) => {
         return state.time === cstate.time;
@@ -43,18 +48,37 @@ document.addEventListener("alpine:init", () => {
       el.style.height = "auto";
       el.style.height = el.scrollHeight + "px";
 
+      // reset performance tracking
+      const prefill_start = Date.now();
+      let start_time = 0;
+      let tokens = 0;
+      this.tokens_per_second = 0;
+
       // start receiving server sent events
       let gottenFirstChunk = false;
       for await (
         const chunk of this.openaiChatCompletion(this.cstate.messages)
       ) {
         if (!gottenFirstChunk) {
-          this.cstate.messages.push({ role: "ai", content: "" });
+          this.cstate.messages.push({ role: "assistant", content: "" });
           gottenFirstChunk = true;
         }
 
         // add chunk to the last message
         this.cstate.messages[this.cstate.messages.length - 1].content += chunk;
+
+        // calculate performance tracking
+        tokens += 1;
+        this.total_tokens += 1;
+        if (start_time === 0) {
+          start_time = Date.now();
+          this.time_till_first = start_time - prefill_start;
+        } else {
+          const diff = Date.now() - start_time
+          if (diff > 0) {
+            this.tokens_per_second = tokens / (diff / 1000);
+          }
+        }
       }
 
       // update the state in histories or add it if it doesn't exist
@@ -80,6 +104,16 @@ document.addEventListener("alpine:init", () => {
         event.preventDefault();
         await this.handleSend();
       }
+    },
+
+    updateTotalTokens(messages) {
+      fetch(`${this.endpoint}/chat/token/encode`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages })
+      }).then(response => response.json()).then(data => {
+        this.total_tokens = data.length;
+      }).catch(console.error);
     },
 
     async *openaiChatCompletion(messages) {
