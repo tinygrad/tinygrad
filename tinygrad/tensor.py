@@ -2368,7 +2368,7 @@ class Tensor:
     ```
     """
     a, b = self._broadcasted(x, reverse)
-    return F.Add.apply(a, -b)
+    return a + (-b)
 
   def mul(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
