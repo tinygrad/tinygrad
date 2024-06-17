@@ -474,6 +474,7 @@ class TestOps(unittest.TestCase):
   def test_sin(self):
     helper_test_op([(45,65)], lambda x: x.sin())
     helper_test_op([()], lambda x: x.sin())
+    helper_test_op(None, lambda x: x.sin(), vals=[[math.nan, math.inf, -math.inf]])
   def test_cos(self):
     helper_test_op([(45,65)], lambda x: x.cos())
     helper_test_op([()], lambda x: x.cos())
