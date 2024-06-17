@@ -4,16 +4,15 @@ import functools, itertools, heapq, math
 from collections import defaultdict
 from enum import Enum, auto
 from dataclasses import dataclass, field
-from tinygrad.dtype import dtypes, DType
+from tinygrad.dtype import ConstType, dtypes, DType
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, exec_alu
 from tinygrad.helpers import prod, DEBUG, getenv
 
-
 # the order of these UOps controls the order of the toposort
 class UOps(Enum):
   # ops that aren't rendered
-  SINK = auto()
+  SINK = auto(); VAR = auto() # noqa: E702
   DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # noqa: E702
   CONST = auto(); SPECIAL = auto() # noqa: E702
   NOOP = auto(); UNMUL = auto(); GEP = auto() # noqa: E702
@@ -27,7 +26,7 @@ class UOps(Enum):
   # these two are not graph nodes
   ENDRANGE = auto(); ENDIF = auto() # noqa: E702
 
-def ufix(dtype, x): return UOp.const(dtype, x) if not isinstance(x, UOp) else x
+def ufix(dtype: Optional[DType], x): return UOp.const(dtype, x) if not isinstance(x, UOp) else x
 @dataclass(eq=False)
 class UOp:
   uop: UOps
@@ -35,6 +34,8 @@ class UOp:
   vin: Tuple[UOp, ...] = tuple()
   arg: Any = None
   def tuple(self): return (self.uop, self.dtype, self.vin, self.arg)
+  def commutative(self) -> bool:
+    return self.uop is UOps.ALU and self.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR}
   @functools.cached_property
   def cmp_tuple(self):
     # NOTE: this sort of DEFINE_VAR shouldn't have to be here. only for PTX
@@ -44,24 +45,35 @@ class UOp:
   def __repr__(self):
     return f"{str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.uop for x in self.vin]):32s} {self.arg}"
   def cast(self, dtype): return UOp(UOps.CAST, dtype, (self,))
+  def name(self, name:Optional[str]): return UOp(UOps.VAR, vin=(self,), arg=name)
   def __neg__(self): return UOp.alu(UnaryOps.NEG, self)
   def __add__(self, x): return UOp.alu(BinaryOps.ADD, self, ufix(self.dtype, x))
+  def __radd__(self, x): return UOp.alu(BinaryOps.ADD, ufix(self.dtype, x), self)
   def __sub__(self, x): return UOp.alu(BinaryOps.ADD, self, -ufix(self.dtype, x))
-  def __radd__(self, x): return UOp.alu(BinaryOps.ADD, ufix(self.dtype, x), self)  
   def __mul__(self, x): return UOp.alu(BinaryOps.MUL, self, ufix(self.dtype, x))
   def __rmul__(self, x): return UOp.alu(BinaryOps.MUL, ufix(self.dtype, x), self)
   def __floordiv__(self, x): return UOp.alu(BinaryOps.IDIV, self, ufix(self.dtype, x))
   def __mod__(self, x): return UOp.alu(BinaryOps.MOD, self, ufix(self.dtype, x))
+  def lt(self, x): return UOp.alu(BinaryOps.CMPLT, self, ufix(self.dtype, x))
+  def ge(self, x): return -self.lt(x)
   @staticmethod
   def max(x, y): return UOp.alu(BinaryOps.MAX, x, y)
   @staticmethod
   def min(x, y): return -UOp.alu(BinaryOps.MAX, -x, -y)
   @staticmethod
-  def const(dtype, val): return UOp(UOps.CONST, dtype, arg=dtypes.as_const(val, dtype))
+  def const(dtype:Optional[DType], b:ConstType|Variable):
+    if isinstance(b, Variable): return UOp(UOps.DEFINE_VAR, dtype, (), b)
+    return UOp(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
   @staticmethod
   def alu(arg, *vin:UOp): return UOp(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else vin[-1].dtype, vin, arg)
+  @staticmethod
+  def var(name: Optional[str]=None, dtype: Optional[DType]=None): return UOp(UOps.VAR, dtype=dtype, arg=name)
+  @staticmethod
+  def cvar(name: Optional[str]=None, dtype: Optional[DType]=None): return UOp(UOps.CONST, dtype=dtype).name(name)
   @functools.cached_property
   def parents(self) -> Set[UOp]: return set.union(set(self.vin), *[x.parents for x in self.vin])
+  @property  # parents with self
+  def sparents(self) -> Set[UOp]: return set([self]).union(self.parents)
   def vars(self) -> Set[UOp]: return set([x for x in set.union(set([self]), self.parents) if x.uop is UOps.DEFINE_VAR])
 
 def uop_alu_resolve(u:UOp) -> sint:
@@ -83,6 +95,11 @@ class UPat:
   name: Optional[str] = None
   dtype: Optional[Union[DType, Set[DType]]] = None
   allow_len: Set[int] = field(default_factory=set)
+
+  @staticmethod
+  def compile(u: UOp, name:Optional[str]=None) -> UPat:
+    if u.uop is UOps.VAR: return UPat(name=name or u.arg, dtype=u.dtype) if len(u.vin) == 0 else UPat.compile(u.vin[0], name or u.arg)
+    return UPat(u.uop, u.arg, (list if u.commutative() else tuple)([UPat.compile(vin) for vin in u.vin]), name, u.dtype)
 
 T = TypeVar("T")
 def __unmatch(m1:Union[T, Set[T]], m2:T) -> bool:
@@ -110,11 +127,12 @@ def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
   return False
 
 class PatternMatcher:
-  def __init__(self, patterns:List[Tuple[UPat, Callable]]):
+  def __init__(self, patterns:List[Tuple[Union[UPat, UOp], Callable]]):
     self.patterns = patterns
     self.pdict: DefaultDict[Tuple[UOps, Any], List[Tuple[UPat, Callable]]] = defaultdict(list)
     # uop is required, arg is optional
     for p,fxn in self.patterns:
+      if isinstance(p, UOp): p = UPat.compile(p)
       assert p.uop is not None
       if isinstance(p.uop, set):
         for uop in p.uop: self.pdict[(uop, p.arg)].append((p, fxn))
@@ -176,57 +194,54 @@ constant_folder = PatternMatcher([
   (UPat(UOps.DEFINE_ACC, name="root", vin=tuple()), lambda root: UOp.const(root.dtype, root.arg[0])),
   (UPat(UOps.GEP, name="root", vin=(UPat(UOps.CONST, name="x"),)), lambda root,x: UOp.const(root.dtype, x.arg)),
   # max -2147483648
-  (UPat(UOps.ALU, BinaryOps.MAX, dtype=dtypes.int, vin=[UPat(name="x"), UPat(UOps.CONST, -2147483648)]), lambda x: x),
+  (UOp.max(UOp.var('x'), UOp.const(dtypes.int, -2147483648)), lambda x: x),
   # -(-x) -> x
-  (UPat(UOps.ALU, UnaryOps.NEG, (UPat(UOps.ALU, UnaryOps.NEG, (UPat(name="x"),)))), lambda x: x),
+  (-(-UOp.var('x')), lambda x: x),
   # x+-y -> x-y
-  (UPat(UOps.ALU, BinaryOps.ADD, (UPat(name="x"), UPat(UOps.ALU, UnaryOps.NEG, name="my"))), lambda x, my: x-my.vin[0]),
-  #(UPat(UOps.ALU, BinaryOps.ADD, (UPat(name="x"), UPat(UOps.ALU, UnaryOps.NEG, name="my"))), lambda x, my: x + (-my.vin[0])),  # sdas work on
+  (UOp.var('x')+(-UOp.var('y')), lambda x, y: x-y),
   # -1*x -> -x
-  (UPat(UOps.ALU, BinaryOps.MUL, [UPat(name="x"), UPat(UOps.CONST, -1)]), lambda x: -x),
+  (-1*UOp.var('x'), lambda x: -x),
   # bool < False is always false, True < bool is always false
-  (UPat(UOps.ALU, BinaryOps.CMPLT, (UPat(), UPat(UOps.CONST, False, name="x", dtype=dtypes.bool))), lambda x: x),
-  (UPat(UOps.ALU, BinaryOps.CMPLT, (UPat(UOps.CONST, True, name="x", dtype=dtypes.bool), UPat())), lambda x: UOp.const(dtypes.bool, False)),
+  (UOp.var().lt(UOp.const(dtypes.bool, False)), lambda: UOp.const(dtypes.bool, False)),
+  (UOp.const(dtypes.bool, True).lt(UOp.var()), lambda: UOp.const(dtypes.bool, False)),
   # a conditional with the same results either way is a noop, also fold const conditionals
-  (UPat(UOps.ALU, TernaryOps.WHERE, (UPat(), UPat(name="val"), UPat(name="val"))), lambda val: val),
-  (UPat(UOps.ALU, TernaryOps.WHERE, (UPat(UOps.CONST, name="gate"), UPat(name="c0"), UPat(name="c1"))), lambda gate, c0, c1: c0 if gate.arg else c1),
+  (UOp.alu(TernaryOps.WHERE, UOp.var(), UOp.var("val"), UOp.var("val")), lambda val: val),
+  (UOp.alu(TernaryOps.WHERE, UOp.cvar('gate'), UOp.var('true'), UOp.var('false')), lambda gate, true, false: true if gate.arg else false),
   # ** constant folding **
   (UPat(UOps.ALU, name="root", vin=UPat(UOps.CONST)), lambda root: UOp.const(root.dtype, exec_alu(root.arg, root.dtype, [x.arg for x in root.vin]))),
   # ** self folding **
-  (UPat(UOps.ALU, BinaryOps.ADD, [UPat(name="x"), UPat(UOps.CONST, 0)]), lambda x: x),   # x+0 -> x or 0+x -> x
-  (UPat(UOps.ALU, BinaryOps.MUL, [UPat(name="x"), UPat(UOps.CONST, 1)]), lambda x: x),   # x*1 -> x or 1*x -> x
-  (UPat(UOps.ALU, BinaryOps.ADD, (UPat(name="x"), UPat(UOps.CONST, -0))), lambda x: x),   # x-0 -> x 
-  (UPat(UOps.ALU, BinaryOps.IDIV, (UPat(name="x"), UPat(UOps.CONST, 1))), lambda x: x),   # x/1 -> x
-  (UPat(UOps.ALU, BinaryOps.IDIV, (UPat(name="x"), UPat(UOps.CONST, -1))), lambda x: -x), # x/-1 -> -x
+  (UOp.var('x') + 0, lambda x: x),    # x+0 -> x
+  (UOp.var('x') - 0, lambda x: x),    # x-0 -> x
+  (UOp.var('x') * 1, lambda x: x),    # x*1 -> x
+  (UOp.var('x') // 1, lambda x: x),   # x/1 -> x
+  (UOp.var('x') // -1, lambda x: -x), # x/-1 -> -x
   # ** zero folding **
   #x*0 -> 0 or 0*x -> 0
   #if x is nan it should render the nan value.
-  (UPat(UOps.ALU, BinaryOps.MUL, [UPat(name="x"), UPat(UOps.CONST, 0, name="c")]),
-     lambda x,c: x if isinstance(x.arg, float) and math.isnan(x.arg) else c),
-  (UPat(UOps.ALU, BinaryOps.ADD, (UPat(name="x"), UPat(UOps.ALU, UnaryOps.NEG, UPat(name="x")))), lambda x: UOp.const(x.dtype, 0)),   # x-x -> 0
+  (UOp.var('x') * 0, lambda x: x if isinstance(x.arg, float) and math.isnan(x.arg) else UOp.const(x.dtype, 0)),
+  (UOp.var('x') - UOp.var('x'), lambda x: UOp.const(x.dtype, 0)),   # x-x -> 0
   # ** load/store folding **
   (UPat(UOps.STORE, vin=(UPat(name="buf"), UPat(name="idx"),
                                UPat(UOps.LOAD, vin=(UPat(name="buf"), UPat(name="idx"))))), lambda buf, idx: UOp(UOps.NOOP)),
   # ** two stage add/sub folding **
-  (UPat(UOps.ALU, BinaryOps.ADD, [UPat(UOps.ALU, BinaryOps.ADD, [UPat(name="x"), UPat(UOps.CONST, name="c1")]), UPat(UOps.CONST, name="c2")]),
-     lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, [c1.arg, c2.arg]))),
-  (UPat(UOps.ALU, BinaryOps.ADD, [UPat(UOps.ALU, BinaryOps.ADD, (UPat(name="x"), UPat (UOps.ALU,UnaryOps.NEG,UPat(UOps.CONST, name="c1")))), UPat(UOps.CONST, name="c2")]),
-     lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.SUB, x.dtype, [c2.arg, c1.arg]))),
+  ((UOp.var('x') + UOp.cvar('c1')) + UOp.cvar('c2'), lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, [c1.arg, c2.arg]))),
+  ((UOp.var('x') - UOp.cvar('c1')) + UOp.cvar('c2'), lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.SUB, x.dtype, [c2.arg, c1.arg]))),
   # *** rules from symbolic ***
-  (UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.ALU, BinaryOps.MUL, [UPat(name="x"), UPat(UOps.CONST, name="c1")]), UPat(UOps.CONST, name="c2")]),
-     lambda x,c1,c2: x*UOp.const(x.dtype, exec_alu(BinaryOps.MUL, x.dtype, [c1.arg, c2.arg]))),  # two stage mul
-  (UPat(UOps.ALU, BinaryOps.MOD, (UPat(name="x"), UPat(UOps.CONST, 1))), lambda x: UOp.const(x.dtype, 0)), # x%1 -> 0
-  (UPat(UOps.ALU, BinaryOps.ADD, (UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c0"), UPat(name="x")]),  # (x*c0)+(x*c1) -> x*(c0+c1)
-                                  UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c1"), UPat(name="x")]),)),
-                                  lambda x,c0,c1: x*exec_alu(BinaryOps.ADD, x.dtype, [c0.arg, c1.arg])),
-  (UPat(UOps.ALU, BinaryOps.IDIV, (UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c0"), UPat(name="x")]),
-                                  UPat(UOps.CONST, name="c0"))), lambda x,c0: x if c0.arg != 0 else None),    # (x*c0)/c0 -> x
-  (UPat(UOps.ALU, BinaryOps.IDIV, (UPat(UOps.ALU, BinaryOps.IDIV, (UPat(name="x"), UPat(UOps.CONST, name="c0"))), UPat(UOps.CONST, name="c1"))),
-    lambda x,c0,c1: x//UOp.const(x.dtype, exec_alu(BinaryOps.MUL, x.dtype, [c0.arg, c1.arg]))),    # (x/c0)/c1 -> x/(c0*c1)
-  (UPat(UOps.ALU, BinaryOps.CMPLT, (UPat(UOps.ALU, BinaryOps.ADD, [UPat(UOps.CONST, name="c0"), UPat(name="x")]), UPat(UOps.CONST, name="c1"))),
-    lambda x,c0,c1: UOp.alu(BinaryOps.CMPLT, x, UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, [c1.arg, -c0.arg])))),
-  (UPat(UOps.ALU, BinaryOps.ADD, [UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c0"), UPat(name="x")]), UPat(name="x")]),
-    lambda x,c0: x*UOp.const(x.dtype, c0.arg+1)),    # (x+x*c0)-> x*(c0+1)
+  # two stage mul, (x*c1)*c2 = x*(c1*c2)
+  ((UOp.var("x") * UOp.cvar("c1")) * UOp.cvar("c2"), lambda x,c1,c2: x*UOp.const(x.dtype, exec_alu(BinaryOps.MUL, x.dtype, [c1.arg, c2.arg]))),
+  # x%1 -> 0
+  (UOp.var("x") % UOp.const(None, 1), lambda x: UOp.const(x.dtype, 0)),
+  # (x*c0)+(x*c1) -> x*(c0+c1)
+  (UOp.var("x") * UOp.cvar("c0") + UOp.var("x") * UOp.cvar("c1"), lambda x,c0,c1: x*exec_alu(BinaryOps.ADD, x.dtype, [c0.arg, c1.arg])),
+  # (x*c0)/c0 -> x
+  ((UOp.var("x") * UOp.cvar("c0")) // UOp.cvar("c0"), lambda x,c0: x if c0.arg != 0 else None),
+  # (x/c0)/c1 -> x/(c0*c1)
+  ((UOp.var("x") // UOp.cvar("c0")) // UOp.cvar("c1"), lambda x,c0,c1: x//UOp.const(x.dtype, exec_alu(BinaryOps.MUL, x.dtype, [c0.arg, c1.arg]))),
+  # c0 + x < c1 -> x < c1 - c0
+  ((UOp.cvar("c0") + UOp.var("x")).lt(UOp.cvar("c1")),
+    lambda x,c0,c1: UOp.alu(BinaryOps.CMPLT, x, UOp.const(x.dtype, exec_alu(BinaryOps.SUB, x.dtype, [c1.arg, c0.arg])))),
+  # (x+x*c0)-> x*(c0+1)
+  (UOp.var("x") + UOp.var("x") * UOp.cvar("c0"), lambda x,c0: x*UOp.const(x.dtype, c0.arg+1)),
   # TODO: can do the invert of this (flip alt/load) when we fix double ops
   (UPat(UOps.STORE, vin=(UPat(name="buf"), UPat(name="idx"), UPat(UOps.ALU, TernaryOps.WHERE,
                         (UPat(name="gate"), UPat(name="alt"), UPat(UOps.LOAD, vin=(UPat(name="buf"), UPat(name="idx"))))))),
@@ -253,40 +268,15 @@ constant_folder = PatternMatcher([
 # *** uop graph ***
 
 class UOpGraph:
-  def __init__(self, add_nodes:Optional[List[UOp]]=None):
-    self.nodes: Dict[Tuple, UOp] = {}
+  def __init__(self, sinks:List[UOp]):
+    self.sinks: List[UOp] = sinks
+    # used by linearizer
     self._uops: Optional[List[UOp]] = None
-    if add_nodes is not None: self.multiadd(add_nodes)
 
   def __iter__(self) -> Iterator[UOp]: return iter(self.uops)
   def __getitem__(self, index) -> UOp: return self.uops[index]
 
-  def multiadd(self, unprocessed_nodes:List[UOp]):
-    # add nodes to graph in reverse BFS order
-    # TODO: i feel like this is written in a few places, possible to library it?
-    in_degree: DefaultDict[UOp, int] = defaultdict(int)
-    children: DefaultDict[UOp, List[UOp]] = defaultdict(list)
-    all_nodes: Dict[UOp, None] = dict()
-    while len(unprocessed_nodes):
-      n = unprocessed_nodes.pop(0)
-      if n in all_nodes: continue
-      all_nodes[n] = None
-      for x in n.vin:
-        in_degree[n] += 1
-        children[x].append(n)
-      unprocessed_nodes += list(n.vin)
-    queue = [x for x in all_nodes if in_degree[x] == 0]
-    replace_nodes: Dict[UOp, UOp] = {}
-    while len(queue):
-      n = queue.pop(0)
-      if n in replace_nodes: continue
-      replace_nodes[n] = self.add(n.uop, n.dtype, tuple(replace_nodes.get(x, x) for x in n.vin), n.arg)
-      for x in children[n]:
-        in_degree[x] -= 1
-        if in_degree[x] == 0:
-          queue.append(x)
-
-  def vars(self) -> List[Variable]: return [x.arg for x in self.uops if x.uop is UOps.DEFINE_VAR]
+  def vars(self) -> List[Variable]: return sorted([x.arg for x in self.uops if x.uop is UOps.DEFINE_VAR], key=lambda v: v.expr)
   def globals(self) -> List[Tuple[int, bool]]: return [x.arg for x in self.uops if x.uop is UOps.DEFINE_GLOBAL]
 
   @property
@@ -321,31 +311,54 @@ class UOpGraph:
         changed += recurse_cnt
         # NOTE: this changes UOp, so we have to delete caches
         up.vin = tuple(rewrite(x) for x in up.vin)
-        try: del up.parents
-        except AttributeError: pass
-        try: del up.cmp_tuple
-        except AttributeError: pass
+        if 'parents' in up.__dict__: delattr(up, 'parents')
+        if 'cmp_tuple' in up.__dict__: delattr(up, 'cmp_tuple')
         # replace with cached nodes
-        if found:=self.nodes.get(key:=up.tuple()): return found
-        self.nodes[key] = up
-        return up
+        return self.nodes.setdefault(up.tuple(), up)
       sink = rewrite(sink)
       run_cnt += 1
       assert run_cnt < 100, "exceeded 100 rewrite loops!"
     return sink
 
+  def graph_dedup(self, sink):
+    # add nodes to graph in reverse BFS order
+    # dedup all nodes
+    # TODO: i feel like this BFS is written in a few places, possible to library it?
+    unprocessed_nodes = [sink]
+    early_in_degree: DefaultDict[UOp, int] = defaultdict(int)
+    children: DefaultDict[UOp, List[UOp]] = defaultdict(list)
+    all_nodes: Dict[UOp, None] = dict()
+    while len(unprocessed_nodes):
+      n = unprocessed_nodes.pop(0)
+      if n in all_nodes: continue
+      all_nodes[n] = None
+      for x in n.vin:
+        early_in_degree[n] += 1
+        children[x].append(n)
+      unprocessed_nodes += list(n.vin)
+    early_queue = [x for x in all_nodes if early_in_degree[x] == 0]
+    replace_nodes: Dict[UOp, UOp] = {}
+    while len(early_queue):
+      n = early_queue.pop(0)
+      if n in replace_nodes: continue
+      key = (n.uop, n.dtype, tuple(replace_nodes.get(x, x) for x in n.vin), n.arg)
+      if found:=self.nodes.get(key): replace_nodes[n] = found
+      else: replace_nodes[n] = self.nodes[key] = UOp(*key)
+      for x in children[n]:
+        early_in_degree[x] -= 1
+        if early_in_degree[x] == 0:
+          early_queue.append(x)
+    return replace_nodes.get(sink, sink)
+
   def linearize(self, extra_pm:Optional[PatternMatcher]=None, type_verify=True):
     # NOTE: relinearizering should be okay
     #assert self._uops is None, "already linearized"
+    self.nodes: Dict[Tuple, UOp] = {}
 
-    # get sink
-    _sinks: List[UOp] = []
-    for u in self.nodes.values():
-      if u.uop is UOps.STORE: _sinks.append(u)
-      if u.uop is UOps.SINK: _sinks.extend(u.vin)
-    sink = UOp(UOps.SINK, None, tuple(_sinks))
-    del _sinks
+    # dedup all nodes in graph
+    sink = self.graph_dedup(UOp(UOps.SINK, None, tuple(self.sinks)))
 
+    # do graph rewrite
     sink = self.graph_rewrite(sink, constant_folder)
     if extra_pm: sink = self.graph_rewrite(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
 
@@ -369,17 +382,19 @@ class UOpGraph:
     add_parents(sink)
 
     @functools.lru_cache(None)
-    def get_recursive_children(x:UOp, include_self=False, stop=lambda x,u: True) -> Set[UOp]:
+    def get_recursive_children(x:UOp, end:UOps, include_self=False) -> Set[UOp]:
       if x.uop is UOps.SINK: return set()
-      return set.union(set((x,)) if include_self else set(), *([get_recursive_children(u, True, stop) for u in graph[x] if stop(x,u)]))
-    loops_children = {l:get_recursive_children(l, stop=lambda x,u: x.uop is not UOps.PHI) for l in loops[::-1]}
+      return set.union(set((x,)) if include_self else set(), *([get_recursive_children(u, end, True) for u in graph[x] if x.uop is not end]))
+    # scope children impact the toposort and END* insertion
+    end_for_uop = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.PHI, UOps.ENDRANGE)}
+    scope_children = {p:get_recursive_children(p, end_for_uop[p.uop][0]) for p in (loops+ifs)[::-1]}
 
     queue: List = []
     def push(u):
       priority = 0
       # prefer uops that are loop children
-      for l, ss in loops_children.items():
-        if u in ss: priority -= l.arg[0]*1000 + l.arg[1]
+      for l, ss in scope_children.items():
+        if l.uop is UOps.RANGE and u in ss: priority -= l.arg[0]*1000 + l.arg[1]
       heapq.heappush(queue, (priority, u))
 
     for u in nodes:
@@ -387,10 +402,8 @@ class UOpGraph:
 
     if getenv("FUZZ_UOPS", 0):
       from test.external.fuzz_uops import fuzz_uops
-      self.fuzz_paths = fuzz_uops(graph, in_degree.copy(), loops_children)
+      self.fuzz_paths = fuzz_uops(graph, in_degree.copy(), scope_children)
 
-    # find all ifs children, add them to the loops children so we can add ends
-    scope_children = {**loops_children, **{u:get_recursive_children(u, stop=lambda x,u: u.uop is not UOps.BARRIER) for u in ifs[::-1]}}
     self._uops = []
     while queue:
       p,x = heapq.heappop(queue)
@@ -403,7 +416,7 @@ class UOpGraph:
       for u, ss in scope_children.items():
         if x in ss:
           ss.remove(x)
-          if len(ss) == 0: self._uops.append(UOp({UOps.RANGE:UOps.ENDRANGE, UOps.IF:UOps.ENDIF}[u.uop], None, (u,)))
+          if len(ss) == 0: self._uops.append(UOp(end_for_uop[u.uop][1], None, (u,)))
       for u in graph[x]:
         in_degree[u] -= 1
         if in_degree[u] == 0: push(u)
@@ -413,33 +426,37 @@ class UOpGraph:
 
     if type_verify: self.type_verify()
 
-  def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None) -> UOp:
-    if found:=self.nodes.get(key:=(uop, dtype, vin, arg)): return found
-    self.nodes[key] = ret = UOp(*key)
-    return ret
-
   # *** checker functions ***
 
-  def flops_mem(self) -> Tuple[sint, sint]:
+  def flops_mem(self, ignore_indexing=False) -> Tuple[sint, sint]:
     flops: sint = 0
     mem: sint = 0
     mults: sint = 1
     mult_stack = []
+    dont_count: Set[UOp] = set()
+    if ignore_indexing:
+      for u in self.uops:
+        if u.uop is UOps.LOAD:
+          dont_count = dont_count.union(u.vin[1].sparents)
+          if len(u.vin) > 3: dont_count = dont_count.union(u.vin[2].sparents)
+        elif u.uop is UOps.STORE:
+          dont_count = dont_count.union(u.vin[1].sparents)
+          if len(u.vin) > 3: dont_count = dont_count.union(u.vin[3].sparents)
     for u in self.uops:
       if u.uop is UOps.RANGE:
         mult_stack.append(mults)
         mults *= uop_alu_resolve(u.vin[1])
       elif u.uop is UOps.ENDRANGE:
         mults = mult_stack.pop(-1)
-      elif u.uop is UOps.ALU:
-        flops += mults * (2 if u.arg == TernaryOps.MULACC else 1)
       elif u.uop is UOps.LOAD:
         assert u.dtype is not None
         mem += u.dtype.itemsize * mults
       elif u.uop is UOps.STORE:
         assert u.vin[2].dtype is not None
         mem += u.vin[2].dtype.itemsize * mults
-      elif u.uop is UOps.WMMA:
+      elif u.uop is UOps.ALU and u not in dont_count:
+        flops += mults * (2 if u.arg == TernaryOps.MULACC else 1)
+      elif u.uop is UOps.WMMA and u not in dont_count:
         assert u.arg[1] is not None
         flops += 2 * prod(u.arg[1]) // 32 * mults
     return flops, mem
