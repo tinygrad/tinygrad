@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Tuple, Iterable, cast
+from typing import List, Tuple, cast
 import math, functools
 from dataclasses import replace
 from tinygrad.codegen.kernel import LocalBuffer, Kernel
@@ -20,7 +20,7 @@ def _uop_view(view:View, idxs:List[UOp], vexpr:UOp) -> Tuple[UOp, UOp]:
       if m[1] != sh: vexpr = vexpr * idx.lt(m[1])
   return iexpr, vexpr
 
-def st_to_uops(st:ShapeTracker, idxs:Iterable[UOp]) -> Tuple[UOp, UOp]:
+def st_to_uops(st:ShapeTracker, idxs:List[UOp]) -> Tuple[UOp, UOp]:
   idx, valid = _uop_view(st.views[-1], idxs, UOp.const(dtypes.bool, True))
   for view in reversed(st.views[0:-1]):
     view = view.minify()
@@ -73,7 +73,7 @@ class Lowerer(Kernel):
     if x.op is UnaryOps.CAST: return UOp(UOps.CAST, x.arg, in_uops)
     if x.op is UnaryOps.BITCAST: return UOp(UOps.BITCAST, x.arg, in_uops)
     if x.op in ReduceOps:
-      op = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[x.op]
+      op = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[cast(ReduceOps, x.op)]
       # NOTE: always using ridxs is fine here
       return UOp(UOps.REDUCE, x.dtype, (in_uops[0], UOp.const(x.dtype, get_reduce_acc(x))) + tuple(self.ridxs[i] for i in x.arg), op)
     return UOp.alu(x.op, *in_uops)
