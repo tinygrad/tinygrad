@@ -78,9 +78,9 @@ def temp(x:str) -> str: return (pathlib.Path(tempfile.gettempdir()) / x).as_posi
 class GraphException(Exception): pass
 
 V = TypeVar("V")
-def bfs(graph:DefaultDict[T, List[T]], in_degree:DefaultDict[T, int], insert:Callable[[T, Dict[T, T]], None]) -> Dict[T, T]:
+def bfs(graph:DefaultDict[T, List[T]], in_degree:DefaultDict[T, int], insert:Callable[[T, Dict[T, V]], None]) -> Dict[T, V]:
   queue = deque(n for n,d in in_degree.items() if d == 0)
-  toposort: Dict[T, T] = {}
+  toposort: Dict[T, V] = {}
   while queue:
     v = queue.popleft()
     if v in toposort: continue

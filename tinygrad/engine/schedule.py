@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Tuple, List, Dict, Optional, Set, DefaultDict, Union, get_args
 from tinygrad.ops import LoadOps, BufferOps, LazyOp, ReduceOps, ConstBuffer, MemBuffer, UNSAFE_PAD_OPS, UnaryOps
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
-from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, GlobalCounters, colored, prod, dedup, all_int, merge_dicts, getenv
+from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, GlobalCounters, bfs, colored, prod, dedup, all_int, merge_dicts, getenv
 from tinygrad.shape.symbolic import Variable
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType
 from tinygrad.lazy import LazyBuffer
@@ -295,23 +295,19 @@ SCHEDULES: List = []
 def create_schedule_with_vars(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
   if seen is None: seen = set()
   graph, in_degree, prescheduled = _graph_schedule(outs, seen)
-  queue = deque(si for key, si in prescheduled.items() if in_degree[key] == 0)
-  schedule: List[ScheduleItem] = []
   var_vals: Dict[Variable, int] = {}
   kernel_number = GlobalCounters.kernel_count
-  while queue:
-    ps = queue.popleft()
-    for buf in ps.outputs: seen.add(buf)
+  def insert(k:LazyBuffer, toposort:Dict[LazyBuffer, ScheduleItem]):
+    nonlocal kernel_number, var_vals
+    for buf in (ps:=prescheduled[k]).outputs: seen.add(buf)
     if GRAPH:
       kernel_number += 1
       for out in ps.outputs: realized_lazybuffer(out, kernel_number)
     var_vals = merge_dicts([var_vals, ps.var_vals])
     for out in ps.outputs: del out.srcs  # can only schedule once
-    schedule.append(si:=ScheduleItem(ps.ast, tuple(x.buffer for x in (ps.outputs+ps.inputs) if x.size != 0)))
+    toposort[k] = si =ScheduleItem(ps.ast, tuple(x.buffer for x in (ps.outputs+ps.inputs) if x.size != 0))
     if logops and si.ast[0].op not in LoadOps and not any(i.device.startswith("DISK:") for i in si.inputs): logops.write(str(si.ast)+"\n")
-    for x in graph[ps.outputs[0]]:
-      in_degree[x] -= 1
-      if in_degree[x] == 0: queue.append(prescheduled[x])
+  schedule = list(bfs(graph, in_degree, insert).values())
 
   if SAVE_SCHEDULE:
     def _save():
