@@ -67,9 +67,9 @@ class UOp:
   @staticmethod
   def alu(arg, *vin:UOp): return UOp(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else vin[-1].dtype, vin, arg)
   @staticmethod
-  def load(*vin: UOp, dtype:Optional[DType]=None): return UOp(UOps.LOAD, dtype, tuple(vin))
+  def load(*vin:UOp, dtype=None, **kwargs): return UOp(UOps.LOAD, dtype, tuple(vin)+tuple(kwargs.values()))
   @staticmethod
-  def store(*vin: UOp, **kwargs): return UOp(UOps.STORE, kwargs.pop("dtype", None), tuple(vin)+tuple(kwargs.values()))
+  def store(*vin:UOp, dtype=None, **kwargs): return UOp(UOps.STORE, dtype, tuple(vin)+tuple(kwargs.values()))
   @staticmethod
   def var(name: Optional[str]=None, dtype: Optional[DType]=None): return UOp(UOps.VAR, dtype=dtype, arg=name)
   @staticmethod
