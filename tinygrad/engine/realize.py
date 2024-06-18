@@ -102,7 +102,7 @@ class BufferCopy(Runner):
     super().__init__(colored(name, "yellow"), dest_device, 0, total_sz)
   def copy(self, dest, src):
     if src.device.startswith("DISK") and hasattr(dest.allocator, 'copy_from_fd') and src.nbytes >= 4096 and hasattr(src.allocator.device, 'fd'):
-      dest.allocator.copy_from_fd(dest._buf, src.allocator.device.fd, src._buf.offset, src.nbytes)
+      dest.allocator.copy_from_fd(dest._buf, src.allocator.device.fd, src._buf.offset, src.nbytes, device=src.allocator.device)
     elif src.device.startswith("DISK") and hasattr(dest.allocator, 'as_buffer'):
       # fast(ish) path, uses readinto in diskbuffers
       src.allocator.copyout(dest.allocator.as_buffer(dest._buf), src._buf)

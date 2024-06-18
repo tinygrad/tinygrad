@@ -1,8 +1,11 @@
 from __future__ import annotations
-import os, mmap, _posixshmem, io
+import os, mmap, _posixshmem, io, ctypes
 from typing import Optional
 from tinygrad.helpers import OSX
 from tinygrad.device import Compiled, Allocator
+import tinygrad.runtime.autogen.uring as io_uring
+
+def check(status): assert status == 0
 
 class DiskBuffer:
   def __init__(self, device:DiskDevice, size:int, offset=0):
@@ -32,7 +35,13 @@ class DiskAllocator(Allocator):
   def offset(self, buf:DiskBuffer, size:int, offset:int): return DiskBuffer(buf.device, size, offset)
 
 class DiskDevice(Compiled):
+  io_uring = None
+
   def __init__(self, device:str):
+    if DiskDevice.io_uring is None:
+      check(io_uring.io_uring_queue_init(0x1000, ctypes.byref(ring:=io_uring.struct_io_uring()), 0))
+      DiskDevice.io_uring = ring
+
     self.size: Optional[int] = None
     self.count = 0
     super().__init__(device, DiskAllocator(self), None, None, None)
