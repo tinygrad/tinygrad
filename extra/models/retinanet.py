@@ -74,17 +74,39 @@ def decode_bbox(offsets, anchors):
   return np.stack([pred_x1, pred_y1, pred_x2, pred_y2], axis=1, dtype=np.float32)
 
 def encode_boxes(reference_boxes, proposals, weights = (1.0,1.0,1.0,1.0)):
-  wx, wy, ww, wh = weights
+  wx = weights[0]
+  wy = weights[1]
+  ww = weights[2]
+  wh = weights[3]
 
-  ex_ctr = proposals[:, :, 0:2] + 0.5 * (proposals[:, :, 2:4] - proposals[:, :, 0:2])
-  gt_ctr = reference_boxes[:, :, 0:2] + 0.5 * (reference_boxes[:, :, 2:4] - reference_boxes[:, :, 0:2])
+  proposals_x1 = proposals[:, 0].unsqueeze(1)
+  proposals_y1 = proposals[:, 1].unsqueeze(1)
+  proposals_x2 = proposals[:, 2].unsqueeze(1)
+  proposals_y2 = proposals[:, 3].unsqueeze(1)
 
-  return Tensor.stack(
-    wx * (gt_ctr[:, :, 0] - ex_ctr[:, :, 0]) / (proposals[:, :, 2] - proposals[:, :, 0]),
-    wy * (gt_ctr[:, :, 1] - ex_ctr[:, :, 1]) / (proposals[:, :, 3] - proposals[:, :, 1]),
-    ww * ((reference_boxes[:, :, 2] - reference_boxes[:, :, 0]) / (proposals[:, :, 2] - proposals[:, :, 0])).log(),
-    wh * ((reference_boxes[:, :, 3] - reference_boxes[:, :, 1]) / (proposals[:, :, 3] - proposals[:, :, 1])).log()
-  , dim=2)
+  reference_boxes_x1 = reference_boxes[:, 0].unsqueeze(1)
+  reference_boxes_y1 = reference_boxes[:, 1].unsqueeze(1)
+  reference_boxes_x2 = reference_boxes[:, 2].unsqueeze(1)
+  reference_boxes_y2 = reference_boxes[:, 3].unsqueeze(1)
+
+  # implementation starts here
+  ex_widths = proposals_x2 - proposals_x1
+  ex_heights = proposals_y2 - proposals_y1
+  ex_ctr_x = proposals_x1 + 0.5 * ex_widths
+  ex_ctr_y = proposals_y1 + 0.5 * ex_heights
+
+  gt_widths = reference_boxes_x2 - reference_boxes_x1
+  gt_heights = reference_boxes_y2 - reference_boxes_y1
+  gt_ctr_x = reference_boxes_x1 + 0.5 * gt_widths
+  gt_ctr_y = reference_boxes_y1 + 0.5 * gt_heights
+
+  targets_dx = wx * (gt_ctr_x - ex_ctr_x) / ex_widths
+  targets_dy = wy * (gt_ctr_y - ex_ctr_y) / ex_heights
+  targets_dw = ww * (gt_widths / ex_widths).log()
+  targets_dh = wh * (gt_heights / ex_heights).log()
+
+  targets = Tensor.cat(targets_dx, targets_dy, targets_dw, targets_dh, dim=1)
+  return targets
 
 def generate_anchors(input_size, grid_sizes, scales, aspect_ratios):
   assert len(scales) == len(aspect_ratios) == len(grid_sizes)
