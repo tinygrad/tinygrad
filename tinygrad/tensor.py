@@ -11,7 +11,7 @@ from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up
 from tinygrad.helpers import IMAGE, DEBUG, WINO, THREEFRY
 from tinygrad.lazy import LazyBuffer
 from tinygrad.multi import MultiLazyBuffer
-from tinygrad.ops import LoadOps
+from tinygrad.ops import LoadOps, truncate
 from tinygrad.device import Device, Buffer, BufferOptions
 from tinygrad.shape.symbolic import sint, Variable, MulNode, SumNode, NumNode, Node
 from tinygrad.engine.realize import run_schedule
@@ -51,7 +51,8 @@ def _frompy(x:Union[List, Tuple, bytes], dtype:DType) -> LazyBuffer:
   else:
     ret = LazyBuffer.loadop(LoadOps.EMPTY, get_shape(x), dtype, "PYTHON")
     assert dtype.fmt is not None, f"{dtype=} has None fmt"
-    data = struct.pack(f"@{ret.size}{dtype.fmt}", *fully_flatten(x))
+    truncate_function = truncate[dtype]
+    data = struct.pack(f"@{ret.size}{dtype.fmt}", *[truncate_function(xi) for xi in fully_flatten(x)])
   # fake realize
   ret.buffer.allocate(memoryview(data))
   del ret.srcs
@@ -1285,7 +1286,8 @@ class Tensor:
     ```
     """
     ret = self.cast(acc_dtype or sum_acc_dtype(self.dtype))._reduce(F.Sum, axis, keepdim)
-    return ret.cast(self.dtype) if self.dtype in {dtypes.float16, dtypes.bfloat16} else ret
+    return ret.cast(self.dtype) if acc_dtype is None and self.dtype in (dtypes.float16, dtypes.bfloat16) else ret
+
   def max(self, axis=None, keepdim=False):
     """
     Returns the maximum value of the tensor along the specified axis or axes.
@@ -1308,6 +1310,7 @@ class Tensor:
     ```
     """
     return self._reduce(F.Max, axis, keepdim)
+
   def min(self, axis=None, keepdim=False):
     """
     Returns the minimum value of the tensor along the specified axis or axes.
