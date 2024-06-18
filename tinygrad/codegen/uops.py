@@ -168,9 +168,9 @@ def expand_nodes(parents, ranges:List[UOp], base):
   children = defaultdict(list)
   define_accs = []
   for p in parents:
-    if p.uop is UOps.PHI:
-      define_accs.append(p.vin[0])
-    for x in p.vin:
+    if p.op is UOps.PHI:
+      define_accs.append(p.src[0])
+    for x in p.src:
       children[x].append(p)
 
   # get nodes on the path from root to the range node
@@ -202,7 +202,7 @@ def expand_nodes(parents, ranges:List[UOp], base):
         search2.append(x)
 
   # should be unrolled
-  replacements = {r:[UOp.const(r.dtype, j) for j in range(r.vin[0].arg, r.vin[1].arg)] for r in ranges}
+  replacements = {r:[UOp.const(r.dtype, j) for j in range(r.src[0].arg, r.src[1].arg)] for r in ranges}
 
   # get nodes on the path from root to the range node
   new_uops = []
@@ -210,29 +210,27 @@ def expand_nodes(parents, ranges:List[UOp], base):
   for rp in itertools.product(*replacements.values()):
     replace = dict(zip(replacements.keys(), rp))
     for d in define_accs:
-      replace[d] = UOp(d.uop, d.dtype, d.vin, d.arg + (acc_number,))
+      replace[d] = UOp(d.op, d.dtype, d.src, d.arg + (acc_number,))
       acc_number += 1
-    for cc in toposort: replace[cc] = UOp(cc.uop, cc.dtype, tuple(replace.get(x, x) for x in cc.vin), cc.arg)
+    for cc in toposort: replace[cc] = UOp(cc.op, cc.dtype, tuple(replace.get(x, x) for x in cc.src), cc.arg)
     new_uops.append(replace.get(base, base))
   return new_uops
 
 acc_number = 0
 def replace_reduce(root):
   global acc_number
-  expand_ranges = [x for x in root.vin[2:] if x.arg[1] is True]
+  expand_ranges = [x for x in root.src[2:] if x.arg[1] is True]
 
   if len(expand_ranges):
-    new_uops = expand_nodes(root.parents, expand_ranges, root.vin[0])
+    new_uops = expand_nodes(root.parents, expand_ranges, root.src[0])
   else:
-    new_uops = [root.vin[0]]
+    new_uops = [root.src[0]]
 
   # TODO: DEFINE_ACC should have a const input
-  acc = UOp(UOps.DEFINE_ACC, root.dtype, tuple(x for x in root.vin[2:] if x not in expand_ranges), (root.vin[1].arg, acc_number))
+  acc = UOp(UOps.DEFINE_ACC, root.dtype, tuple(x for x in root.src[2:] if x not in expand_ranges), (root.src[1].arg, acc_number))
   acc_number += 1
   ret = acc
-  for xx in new_uops:
-    ret = UOp.alu(root.arg, ret, xx)
-  #ret = UOp.alu(root.arg, acc, root.vin[0])
+  for xx in new_uops: ret = UOp.alu(root.arg, ret, xx)
   return UOp(UOps.PHI, ret.dtype, (acc, ret))
 
 # this is symbolic 2.0
@@ -435,10 +433,10 @@ class UOpGraph:
 
     # do upcasts (after reduce unrolls and rewrites)
     all_parents = set([sink]).union(sink.parents)
-    expand_ranges = list(sorted(x for x in all_parents if x.uop is UOps.RANGE and x.arg[1] is True))
+    expand_ranges = list(sorted(x for x in all_parents if x.op is UOps.RANGE and x.arg[1] is True))
     if len(expand_ranges):
       new_nodes = expand_nodes(all_parents, expand_ranges, sink)
-      sink = UOp(UOps.SINK, None, tuple(flatten([x.vin for x in new_nodes])))  # merge the sinks
+      sink = UOp(UOps.SINK, None, tuple(flatten([x.src for x in new_nodes])))  # merge the sinks
 
     # do graph rewrite (2)
     sink = self.graph_rewrite(sink, constant_folder)

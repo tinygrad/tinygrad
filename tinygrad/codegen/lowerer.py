@@ -13,20 +13,20 @@ from tinygrad.helpers import to_function_name, colored, DEBUG, getenv, prod
 
 # TODO: this needs to be replaced, there shouldn't be variables in the shapetracker
 from tinygrad.shape.symbolic import Variable, NumNode, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode
-render_ops: Any = { Variable: lambda self, ops, ctx: UOp(UOps.DEFINE_VAR, dtypes.int32, (), self),
-                    NumNode: lambda self, ops, ctx: UOp.const(dtypes.int, self.b),
+render_ops: Any = { NumNode: lambda self, ops, ctx: UOp.const(dtypes.int, self.b),
                     MulNode: lambda self, ops, ctx: self.a.render(ops, ctx)*self.b,
                     DivNode: lambda self, ops, ctx: self.a.render(ops, ctx)//self.b,
                     ModNode: lambda self, ops, ctx: self.a.render(ops, ctx)%self.b,
                     LtNode: lambda self, ops, ctx: self.a.render(ops, ctx).lt(self.b),
+  Variable: lambda self, ops, ctx: ctx[self] if self in ctx else UOp(UOps.DEFINE_VAR, dtypes.int32, (), self),
   SumNode: lambda self,ops,ctx: functools.reduce(lambda a,b: a+b.render(ops, ctx), self.nodes[1:], self.nodes[0].render(ops,ctx)),
   AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: a*b.render(ops, ctx), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
 def variable_to_uop(x) -> UOp:
   if isinstance(x, int): return UOp.const(dtypes.int32, x)
-  #raise NotImplementedError(f"must be an int, not {x}")
   return x.render(render_ops)
 
+"""
 def _uop_view(view:View, idxs:List[UOp], vexpr:UOp) -> Tuple[UOp, UOp]:
   # TODO: dtypes.realint
   iexpr = variable_to_uop(view.offset)
@@ -47,6 +47,13 @@ def st_to_uops(st:ShapeTracker, idxs:List[UOp]) -> Tuple[UOp, UOp]:
       acc *= variable_to_uop(d)
     idx, valid = _uop_view(view, idxs[::-1], valid)
   return idx, valid
+"""
+
+def st_to_uops(st:ShapeTracker, idxs:List[UOp]) -> Tuple[UOp, UOp]:
+  fake_idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(st.shape)]
+  idx, valid = st.expr_idxs(fake_idxs)
+  ctx = dict(zip(fake_idxs, idxs))
+  return idx.render(render_ops, ctx), valid.render(render_ops, ctx)
 
 def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0):
   local_idxs = loop_local_idxs = [UOp(UOps.SPECIAL, dtypes.int32, (), (i, f"{prefix}{start_dim+i}", s)) for i,s in enumerate((prod(local_dims[:-(maxdim-1)]),) + local_dims[-(maxdim-1):] if len(local_dims) > maxdim else local_dims)]  # noqa: E501
@@ -65,7 +72,6 @@ def get_reduce_acc(reduceop:LazyOp):
     if dtypes.is_int(reduceop.dtype): return 0 if dtypes.is_unsigned(reduceop.dtype) else -2**(reduceop.dtype.itemsize*8-1)
     return -math.inf if dtypes.is_float(reduceop.dtype) else False
 
-uop_graphed = False
 class Lowerer(Kernel):
   def to_uop(self, x:LazyOp) -> UOp:
     if uop:=self.uop_cache.get(x, None): return uop
@@ -77,7 +83,7 @@ class Lowerer(Kernel):
     if x.op in BufferOps:
       idx, valid = st_to_uops(x.arg.st, self.ridxs if x.op is BufferOps.LOAD and x.arg.idx == -1 else self.idxs)
       # TODO: check has_valid in UPat, not here
-      has_valid = valid.uop is not UOps.CONST or valid.arg is not True
+      has_valid = valid.op is not UOps.CONST or valid.arg is not True
       if x.op is BufferOps.CONST:
         return UOp.alu(TernaryOps.WHERE, valid, UOp.const(x.arg.dtype, x.arg.val), UOp.const(x.arg.dtype, 0))
       if x.arg.idx == -1:
@@ -180,9 +186,7 @@ class Lowerer(Kernel):
 
     # maybe graph the uops
     if DEBUG >= 5: self.uops.print()
-    if getenv("GRAPHUOPS") and not uop_graphed:
-      self.uops.graph()
-      uop_graphed = True
+    if getenv("GRAPHUOPS"): self.uops.graph()
     return self
 
   def to_program(self) -> Program:
