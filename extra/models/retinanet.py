@@ -31,6 +31,7 @@ def sigmoid_focal_loss(inputs: Tensor, targets: Tensor, mask: Tensor,
   return loss
 
 def l1_loss(x1:Tensor, x2:Tensor) -> Tensor:
+  x2 = Tensor.where(x2>-1000, x2, 0) #nan replace with 0
   # https://pytorch.org/docs/stable/_modules/torch/nn/functional.html#l1_loss
   ans = (x1 - x2).abs().sum(-1)
   ans = ans.sum(-1)
