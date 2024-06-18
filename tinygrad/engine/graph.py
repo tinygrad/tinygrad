@@ -1,6 +1,6 @@
 import os, atexit, functools
 from collections import defaultdict
-from typing import List, Any, DefaultDict
+from typing import List, Any, DefaultDict, Union
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LoadOps, BufferOps, TernaryOps, LazyOp
 from tinygrad.device import Device
 from tinygrad.helpers import GRAPHPATH, DEBUG, GlobalCounters, getenv
@@ -75,18 +75,19 @@ def log_lazybuffer(lb:'LazyBuffer', scheduled=False):
       # realized but unseen?
       G.add_node(nm(lb), label=f'"{str(lb.base.realized)[5:-1].replace(" ", chr(10))}\nb:{nm(lb.realized)}"', style='filled', fillcolor="#f0c08080")
 
-def _tree(lazyop:LazyOp, cycles, cnt, prefix=""):
+def _tree(luop:Union[LazyOp,UOp], cycles, cnt, prefix=""):
   cnt[0] += 1
-  if len(lazyop.src) == 0: return [f"━━ {prefix}{lazyop.op.name} {lazyop.arg if lazyop.arg else ''}"]
-  if (lid := id(lazyop)) in cycles and cycles[lid][1] > (tcnt := getenv("TREE_CYCLE_CNT", 5)) and tcnt >= 0:
-    return [f"━⬆︎ goto {cycles[id(lazyop)][0]}: {lazyop.op.name}"]
+  if len(src:=luop.vin if hasattr(luop,'vin')else luop.src) == 0:
+    return [f"━━ {prefix}{(luop.op if hasattr(luop, 'op') else luop.uop).name} {luop.arg if luop.arg else ''}"]
+  if (lid := id(luop)) in cycles and cycles[lid][1] > (tcnt := getenv("TREE_CYCLE_CNT", 5)) and tcnt >= 0:
+    return [f"━⬆︎ goto {cycles[id(luop)][0]}: {(luop.op if hasattr(luop,'op')else luop.uop).name}"]
   cycles[lid] = (cnt[0], 1 if lid not in cycles else cycles[lid][1]+1)
-  lines = [f"━┳ {prefix}{lazyop.op.name} {lazyop.arg if lazyop.arg else ''}"]
-  childs = [_tree(c, cycles, cnt) for c in lazyop.src[:]]
+  lines = [f"━┳ {prefix}{(luop.op if hasattr(luop,'op')else luop.uop).name} {luop.arg if luop.arg else ''}"]
+  childs = [_tree(c, cycles, cnt) for c in src[:]]
   for c in childs[:-1]: lines += [f" ┣{c[0]}"] + [f" ┃{l}" for l in c[1:]]
   return lines + [" ┗"+childs[-1][0]] + ["  "+l for l in childs[-1][1:]]
 
-def print_tree(lazyop:LazyOp): print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(lazyop, {}, [-1]))]))
+def print_tree(luop:Union[LazyOp,UOp]): print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(luop, {}, [-1]))]))
 
 def graph_uops(uops:List[UOp]):
   colors = {UOps.ALU: "#ffffc0", UOps.LOAD: "#ffc0c0", UOps.STORE: "#c0ffc0", UOps.SPECIAL: "#c0c0ff", UOps.CONST: "#e0e0e0",
