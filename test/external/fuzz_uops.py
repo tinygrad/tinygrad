@@ -12,11 +12,11 @@ def fuzz_uops(graph:DefaultDict[UOp, List[UOp]], in_degree:DefaultDict[UOp, int]
   paths: List[List[UOp]] = []
   # TODO: express DEFINE_ACC and loop children conditions in the graph, builtin.
   for p in find_all_toposorts(graph, in_degree):
-    assert p[-1].uop is UOps.SINK, f"didn't end with SINK, ended with {p[-1]}"
+    assert p[-1].op is UOps.SINK, f"didn't end with SINK, ended with {p[-1]}"
     paths.append(path:=list(p[:-1]))
     for u in path:
-      if u.uop is UOps.IF: path.append(UOp(UOps.ENDIF, None, (u,)))
-      if u.uop is UOps.RANGE:
+      if u.op is UOps.IF: path.append(UOp(UOps.ENDIF, None, (u,)))
+      if u.op is UOps.RANGE:
         path.insert(max(path.index(x) for x in loops_children[u] if x in path)+1, UOp(UOps.ENDRANGE, None, (u,)))
   return paths
 
@@ -58,9 +58,9 @@ def find_all_toposorts(graph:DefaultDict[UOp, List[UOp]], in_degree:DefaultDict[
   def recurse_paths(path:List[UOp]):
     for v, d in in_degree.items():
       if d != 0 or v in visited: continue
-      if v.uop is UOps.DEFINE_ACC and any(l not in path for l in v.vin): continue
+      if v.op is UOps.DEFINE_ACC and any(l not in path for l in v.vin): continue
       for u in graph[v]: in_degree[u] -= 1
-      if v.uop is UOps.DEFINE_ACC: path.insert(min(path.index(l) for l in v.vin), v)
+      if v.op is UOps.DEFINE_ACC: path.insert(min(path.index(l) for l in v.vin), v)
       else: path.append(v)
       visited.add(v)
       recurse_paths(path)

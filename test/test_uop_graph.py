@@ -12,7 +12,7 @@ class TestUOpGraph(unittest.TestCase):
     g = UOpGraph([out])
     self.assertEqual(len(g.uops), 1)
     out = g.uops[-1]
-    self.assertEqual(out.uop, UOps.CONST)
+    self.assertEqual(out.op, UOps.CONST)
     self.assertEqual(out.arg, 3.0)
 
   def test_where_same_fold(self):
@@ -24,7 +24,7 @@ class TestUOpGraph(unittest.TestCase):
     g = UOpGraph([out])
     self.assertEqual(len(g.uops), 1)
     out = g.uops[-1]
-    self.assertEqual(out.uop, UOps.CONST)
+    self.assertEqual(out.op, UOps.CONST)
     self.assertEqual(out.arg, 1.0)
 
   def test_where_const_fold(self):
@@ -35,7 +35,7 @@ class TestUOpGraph(unittest.TestCase):
     g = UOpGraph([out])
     self.assertEqual(len(g.uops), 1)
     out = g.uops[-1]
-    self.assertEqual(out.uop, UOps.CONST)
+    self.assertEqual(out.op, UOps.CONST)
     self.assertEqual(out.arg, 2.0)
 
   def test_const_cast(self):
@@ -44,7 +44,7 @@ class TestUOpGraph(unittest.TestCase):
     g = UOpGraph([out])
     self.assertEqual(len(g.uops), 1)
     out = g.uops[-1]
-    self.assertEqual(out.uop, UOps.CONST)
+    self.assertEqual(out.op, UOps.CONST)
     self.assertEqual(out.arg, 0)
 
   def test_cast_vectorized_fold(self):
@@ -56,7 +56,7 @@ class TestUOpGraph(unittest.TestCase):
     alu = UOp(UOps.ALU, dtypes.float, (x, ), UnaryOps.SQRT)
     out = UOp(UOps.STORE, dtypes.float, (d0, idx, alu))
     g = UOpGraph([out])
-    self.assertEqual(len([x for x in g.uops if x.uop is UOps.CAST]), 0)
+    self.assertEqual(len([x for x in g.uops if x.op is UOps.CAST]), 0)
 
   def test_depth_2_const_fold(self):
     v = UOp(UOps.DEFINE_VAR, dtypes.int, arg=Variable('tmp', 0, 1))
@@ -67,9 +67,9 @@ class TestUOpGraph(unittest.TestCase):
     g = UOpGraph([out])
     self.assertEqual(len(g.uops), 3)
     out = g.uops[-1]
-    self.assertEqual(out.uop, UOps.ALU)
+    self.assertEqual(out.op, UOps.ALU)
     self.assertEqual(out.arg, BinaryOps.ADD)
-    self.assertEqual(out.vin[1].uop, UOps.CONST)
+    self.assertEqual(out.vin[1].op, UOps.CONST)
     self.assertEqual(out.vin[1].arg, 6)
 
 if __name__ == '__main__':

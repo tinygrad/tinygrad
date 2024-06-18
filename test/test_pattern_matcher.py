@@ -6,7 +6,7 @@ from tinygrad.codegen.uops import UOpGraph, UOps, PatternMatcher, UOp, UPat
 class TestPatternMatcher(unittest.TestCase):
   def assert_equiv_uops(self, uop1:UOp, uop2:UOp):
     # NOTE: direct UOps __eq__ is comparing object reference, use this function to compare two uops
-    self.assertEqual(uop1.uop, uop2.uop)
+    self.assertEqual(uop1.op, uop2.op)
     self.assertEqual(uop1.dtype, uop2.dtype)
     self.assertEqual(uop1.arg, uop2.arg)
 
@@ -157,7 +157,7 @@ class TestPatternMatcher(unittest.TestCase):
     matcher = PatternMatcher([(UPat(UOps.CONST, name="x", dtype=dtypes.int),
                                lambda x: UOp(UOps.STORE, x.dtype, (UOp(UOps.DEFINE_GLOBAL, x.dtype, tuple(), None), x)))])
     matcher.rewrite_graph(uops)
-    uops.remove_childless(set(x for x in uops if x.uop in {UOps.STORE}))
+    uops.remove_childless(set(x for x in uops if x.op in {UOps.STORE}))
 
     self.assertEqual(len(uops.uops), 3)
 

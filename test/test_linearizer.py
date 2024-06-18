@@ -38,7 +38,7 @@ def helper_tc_allclose(n:int, m:int, k:int, dtype_in:DType, dtype_out:DType, axi
   k = Linearizer(realized_ast)
   k.apply_tensor_cores(1, axis=axis, tc_opt=tc_opt)
   k.linearize()
-  assert len([uop for uop in k.uops if uop.uop is UOps.WMMA]) > 0, "tensor core not triggered"
+  assert len([uop for uop in k.uops if uop.op is UOps.WMMA]) > 0, "tensor core not triggered"
   assert len([x for x in k.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
   np_c = np_a @ np_b
   if dtype_out == dtypes.half: tc_atol, tc_rtol = 1e-2, 1e-3
@@ -54,7 +54,7 @@ def helper_tc_ensure_uops_and_opts_count(n: int, m:int, k:int, dtype_in:DType, d
   k = Linearizer(realized_ast)
   k.apply_tensor_cores(1, axis=axis, tc_opt=tc_opt)
   k.linearize()
-  wmmas = len([uop for uop in k.uops if uop.uop is UOps.WMMA])
+  wmmas = len([uop for uop in k.uops if uop.op is UOps.WMMA])
   tcs = len([x for x in k.applied_opts if x.op is OptOps.TC])
   if ensure_triggered:
     assert wmmas > 0, "tensor core not triggered"
@@ -94,8 +94,8 @@ class TestLinearizer(unittest.TestCase):
     b_t = Tensor.full(st.shape, 3).contiguous().realize()
     lin = helper_linearizer_ast((out0, out1), [a_t, b_t], wanna_output=[a_t.numpy()+b_t.numpy(), a_t.numpy()*b_t.numpy()])[0]
 
-    stores = [u for u in lin.uops if u.uop is UOps.STORE]
-    mutable_bufs = [u for u in lin.uops if u.uop is UOps.DEFINE_GLOBAL and u.arg[-1]]
+    stores = [u for u in lin.uops if u.op is UOps.STORE]
+    mutable_bufs = [u for u in lin.uops if u.op is UOps.DEFINE_GLOBAL and u.arg[-1]]
     assert len(mutable_bufs) == len(stores) == 2
     assert [u.arg[0] for u in mutable_bufs] == [0, 1]
 
@@ -108,22 +108,22 @@ class TestLinearizer(unittest.TestCase):
 
     load_t = Tensor.full(load.st.shape, 1).contiguous().realize()
     k = helper_linearizer_ast(ast, [load_t], wanna_output=[load_t.numpy().sum()])[1]
-    self.assertEqual(k.uops[-1].uop, UOps.ENDIF)
-    self.assertLess(k.uops.uops.index([x for x in k.uops.uops if x.uop is UOps.STORE][-1]), k.uops.uops.index(k.uops[-1]))
+    self.assertEqual(k.uops[-1].op, UOps.ENDIF)
+    self.assertLess(k.uops.uops.index([x for x in k.uops.uops if x.op is UOps.STORE][-1]), k.uops.uops.index(k.uops[-1]))
 
   def test_two_nested_range(self):
     a = Tensor.randn(2, ).realize()
     out = a.reshape(2, 1).expand(2, 3).sum()
     lin = helper_linearizer_opt(out, wanna_output=[np.broadcast_to(a.numpy().reshape(2, 1), (2, 3)).sum()])[0]
-    ranges = [i for i,u in enumerate(lin.uops) if u.uop is UOps.RANGE]
+    ranges = [i for i,u in enumerate(lin.uops) if u.op is UOps.RANGE]
     if getenv("PTX"):
       # RANGE -> 2xLOAD_INDEXING -> LOAD -> RANGE -> PHI
       assert ranges[1] == ranges[0]+4
-      assert lin.uops[ranges[0]+3].uop is UOps.LOAD
+      assert lin.uops[ranges[0]+3].op is UOps.LOAD
     else:
     # RANGE -> LOAD -> RANGE -> PHI
       assert ranges[1] == ranges[0]+2
-      assert lin.uops[ranges[0]+1].uop is UOps.LOAD
+      assert lin.uops[ranges[0]+1].op is UOps.LOAD
 
   def test_three_nested_range(self):
     a = Tensor.randn(2, ).realize()

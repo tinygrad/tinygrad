@@ -78,7 +78,7 @@ class LLVMRenderer(Renderer):
     module = ir.Module(name=__file__)
 
     # extract global buffers (NOTE: this isn't right if DEFINE_GLOBAL is out of order)
-    buf_to_dtype = {u.arg:u.dtype for u in uops if u.uop in {UOps.DEFINE_GLOBAL, UOps.DEFINE_VAR}}
+    buf_to_dtype = {u.arg:u.dtype for u in uops if u.op in {UOps.DEFINE_GLOBAL, UOps.DEFINE_VAR}}
     buf_index = {x:i for i,x in enumerate(buf_to_dtype.keys())}
 
     # create llvm function
@@ -101,7 +101,7 @@ class LLVMRenderer(Renderer):
       if not isinstance(dtype, PtrDType) and dtype == dtypes.int32: lvars[bufname] = bb[-1].sext(func.args[buf_index[bufname]], ir.IntType(32))
 
     for u in uops:
-      uop,dtype,vin,args = u.uop,u.dtype,u.vin,u.arg
+      uop,dtype,vin,args = u.op,u.dtype,u.vin,u.arg
       if uop is UOps.STORE:
         element = cast(bb, lvars[vin[2]], vin[2].dtype, vin[0].dtype)
         if len(vin) > 3:
@@ -147,7 +147,7 @@ class LLVMRenderer(Renderer):
           lvars[u] = lvars[vin[1]]
           # PHI UOps can link to other PHI Uops, backtrace this to DEFINE_ACC
           backward = vin[0]
-          while backward.uop is UOps.PHI: backward = backward.vin[0]
+          while backward.op is UOps.PHI: backward = backward.vin[0]
           lvars[backward] = lvars[u]
         elif uop is UOps.ALU:
           lvars[u] = code_for_op[args](bb[-1], *[lvars[x] for x in vin], dtype if args not in (BinaryOps.CMPLT, BinaryOps.CMPNE) else vin[0].dtype)
