@@ -140,18 +140,16 @@ class ResNet:
     self.url = model_urls[(self.num, self.groups, self.base_width)]
     for k, v in torch_load(fetch(self.url)).items():
       obj: Tensor = get_child(self, k)
-      dat = v.detach().numpy()
+      dat = v.numpy()
 
       if 'fc.' in k and obj.shape != dat.shape:
         print("skipping fully connected layer")
         continue # Skip FC if transfer learning
 
-      # TODO: remove or when #777 is merged
-      assert obj.shape == dat.shape or (obj.shape == (1,) and dat.shape == ()), (k, obj.shape, dat.shape)
-      if dat.shape==():
-        # print('REASHAPE TO 1')
+      if dat.shape == ():
+        assert obj.shape == (1,), obj.shape
         dat = dat.reshape(1)
-      # print(k, dat.shape, obj.shape)
+      assert obj.shape == dat.shape, (k, obj.shape, dat.shape)
       obj.assign(dat)
 
 ResNet18 = lambda num_classes=1000: ResNet(18, num_classes=num_classes)

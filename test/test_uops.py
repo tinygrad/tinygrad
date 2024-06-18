@@ -20,8 +20,8 @@ def _uops_to_prg(uops_list, print=False):
   has_local = Device[Device.DEFAULT].renderer.has_local
   return CompiledRunner(Program("test", src, Device.DEFAULT, [1,1,1] if has_local else None, [1,1,1] if has_local else None, uops=uops))
 
-def uop(uops:List[UOp], uop:UOps, dtype:Optional[DType], vin:Tuple[UOp, ...], arg:Any=None) -> UOp:
-  uops.append(UOp(uop, dtype, tuple(vin), arg))
+def uop(uops:List[UOp], uop:UOps, dtype:Optional[DType], src:Tuple[UOp, ...], arg:Any=None) -> UOp:
+  uops.append(UOp(uop, dtype, tuple(src), arg))
   return uops[-1]
 
 def _test_single_value(vals, op, dts):
@@ -226,7 +226,7 @@ class TestConstantFolding(unittest.TestCase):
     si = create_schedule([t.lazydata])
     assert len(si) == 1
     ji = lower_schedule_item(si[-1])
-    assert any(uop.uop is UOps.BITCAST for uop in ji.prg.p.uops), f"{[uop.uop for uop in ji.prg.p.uops]} does not contain bitcast"
+    assert any(uop.op is UOps.BITCAST for uop in ji.prg.p.uops), f"{[uop.op for uop in ji.prg.p.uops]} does not contain bitcast"
 
 class TestGatedStoreRewrite(unittest.TestCase):
   @unittest.skip("not yet implemented")
@@ -240,9 +240,9 @@ class TestGatedStoreRewrite(unittest.TestCase):
     gate = UOp(UOps.ALU, dtypes.bool, (gidx0, UOp.const(dtypes.int, 1)), arg=BinaryOps.CMPLT)
     uops = UOpGraph([UOp(UOps.STORE, None, (gmem, idx, value, gate))])
     if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
-    if_uop = next(u for u in uops if u.uop is UOps.IF)
-    endif = next(u for u in uops if u.uop is UOps.ENDIF)
-    assert endif.vin[0] is if_uop
+    if_uop = next(u for u in uops if u.op is UOps.IF)
+    endif = next(u for u in uops if u.op is UOps.ENDIF)
+    assert endif.src[0] is if_uop
     nested_uops = tuple(uops.uops[uops.uops.index(if_uop)+1:uops.uops.index(endif)])
     assert nested_uops == (gmem, gidx0, idx, value)
 
@@ -261,9 +261,9 @@ class TestGatedStoreRewrite(unittest.TestCase):
     outs.append(UOp(UOps.STORE, None, (gmem1, idx, value1)))
     uops = UOpGraph(outs)
     if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
-    if_uop = next(u for u in uops if u.uop is UOps.IF)
-    endif = next(u for u in uops if u.uop is UOps.ENDIF)
-    assert endif.vin[0] is if_uop
+    if_uop = next(u for u in uops if u.op is UOps.IF)
+    endif = next(u for u in uops if u.op is UOps.ENDIF)
+    assert endif.src[0] is if_uop
     nested_uops = tuple(uops.uops[uops.uops.index(if_uop)+1:uops.uops.index(endif)])
     assert nested_uops == (gmem0, value0)
 
