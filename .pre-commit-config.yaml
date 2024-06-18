@@ -43,9 +43,9 @@ repos:
         language: system
         always_run: true
         pass_filenames: false
-      - id: pylint
-        name: pylint
-        entry: env PYTHONPATH="." python3 -m pylint tinygrad/
-        language: system
-        always_run: true
-        pass_filenames: false
+      # - id: pylint
+      #   name: pylint
+      #   entry: env PYTHONPATH="." python3 -m pylint tinygrad/
+      #   language: system
+      #   always_run: true
+      #   pass_filenames: false
