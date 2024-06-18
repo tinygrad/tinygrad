@@ -1,14 +1,13 @@
 # compare kernels created by HEAD against master
 import difflib, pickle
-from tqdm import tqdm
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.helpers import colored, db_connection, VERSION, to_function_name
+from tinygrad.helpers import colored, db_connection, VERSION, to_function_name, tinytqdm
 
 page_size = 100
 conn = db_connection()
 cur = conn.cursor()
 row_count = cur.execute(f"select count(*) from 'process_replay_{VERSION}'").fetchone()[0]
-for offset in tqdm(range(0, row_count, page_size)):
+for offset in tinytqdm(range(0, row_count, page_size)):
   cur.execute(f"SELECT val FROM 'process_replay_{VERSION}' LIMIT ? OFFSET ?", (page_size, offset))
   for row in cur.fetchall():
     compare_k, compare_src = pickle.loads(row[0])
