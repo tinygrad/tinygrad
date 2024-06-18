@@ -104,10 +104,10 @@ class CStyleLanguage(Renderer):
       c[prefix] += 1
       return ret
 
-    child_count = Counter(v for ru in uops for v in ru.vin)
+    child_count = Counter(v for ru in uops for v in ru.src)
 
     for u in uops:
-      uop,dtype,vin,args = u.uop,u.dtype,u.vin,u.arg
+      uop,dtype,vin,args = u.op,u.dtype,u.src,u.arg
       # these four uops don't have output dtypes
       if uop is UOps.IF:
         kk(f"if ({r[vin[0]]}) {{")
@@ -118,7 +118,7 @@ class CStyleLanguage(Renderer):
         kk("}")
       elif uop is UOps.STORE:
         assert vin[0].dtype is not None and vin[2].dtype is not None
-        rendered_store = self.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, strip_parens(r[vin[1]]), vin[0].uop is UOps.DEFINE_LOCAL)
+        rendered_store = self.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, strip_parens(r[vin[1]]), vin[0].op is UOps.DEFINE_LOCAL)
         kk(f"if ({r[vin[3]]}) {{ {rendered_store} }}" if len(vin) > 3 else rendered_store)
       else:
         assert dtype is not None, f"None dtype for uop {uop}"
@@ -138,7 +138,7 @@ class CStyleLanguage(Renderer):
           kk(f"int {args[1]} = {self.code_for_workitem[args[1][0]](args[0])}; /* {args[2]} */")
           r[u] = args[1]
         elif uop is UOps.LOAD:
-          val = self.render_load(dtype, r[vin[0]], vin[0].dtype, strip_parens(r[vin[1]]), vin[0].uop is UOps.DEFINE_LOCAL)
+          val = self.render_load(dtype, r[vin[0]], vin[0].dtype, strip_parens(r[vin[1]]), vin[0].op is UOps.DEFINE_LOCAL)
           # NOTE: this relies on the load not happening if it's in the unselected branch
           if len(vin) > 3: val = self.code_for_op[TernaryOps.WHERE](r[vin[2]], val, r[vin[3]], dtype)
           kk(f"{self.render_dtype(dtype)} {ssa('val',u)} = {val};")
@@ -169,7 +169,7 @@ class CStyleLanguage(Renderer):
         elif uop is UOps.CONST: r[u] = self.render_const(args, dtype) if args >= 0 else f"({self.render_const(args, dtype)})"
         elif uop is UOps.GEP:
           assert vin[0].dtype is not None
-          from_ssa = vin[0].uop in {UOps.LOAD, UOps.WMMA, UOps.DEFINE_ACC}
+          from_ssa = vin[0].op in {UOps.LOAD, UOps.WMMA, UOps.DEFINE_ACC}
           r[u] = (r[vin[0]] if from_ssa else f"{(r[vin[0]])}") + (f"[{args}]" if vin[0].dtype.count > 4 else f".{'xyzw'[args]}")
         else: raise RuntimeError(f"failed to render {uop}")
 
@@ -235,7 +235,7 @@ class MetalRenderer(CStyleLanguage):
     return f"as_type<{self.render_dtype(var_dtype)}>({x[0]})" if bitcast else super().render_cast(x, var_dtype)
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
-    prefix, wmma_args = ["#include <metal_stdlib>","using namespace metal;"], set([uop.arg for uop in uops if uop.uop is UOps.WMMA])
+    prefix, wmma_args = ["#include <metal_stdlib>","using namespace metal;"], set([uop.arg for uop in uops if uop.op is UOps.WMMA])
     for arg in wmma_args: prefix.append(f"""{arg[3].name}2 __{arg[0]}({arg[2].name}2 m, {arg[2].name}2 n, {arg[3].name}2 o) {{
   simdgroup_{arg[3].name}8x8 a,b,c; a.thread_elements()[0] = m.x; a.thread_elements()[1] = m.y; b.thread_elements()[0] = n.x;
   b.thread_elements()[1] = n.y; c.thread_elements()[0] = o.x; c.thread_elements()[1] = o.y; simdgroup_multiply_accumulate(c, a, b, c);
@@ -285,7 +285,7 @@ class CUDARenderer(CStyleLanguage):
       prefix += ["#include <cuda_bf16.h>"] + [_make_cuda_dtype("nv_bfloat16", "bfloat16", x) for x in [4, 8]]
 
     # TODO: this has to be way better to generate for arbitrary M,N,K: use arg[1] for MNK, use arg[4] for vec sizes, encode register packing
-    for arg in dedup([uop.arg for uop in uops if uop.uop is UOps.WMMA]):
+    for arg in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
       fn, ti, to, ci, co = arg[0], dt_map[arg[2]][0], dt_map[arg[3]][0], dt_map[arg[2]][1], dt_map[arg[3]][1]
       prefix.append(f"""__device__ {to}4 __{fn}({ti}8 a, {ti}4 b, {to}4 c) {{ int *a_pk = (int *) (&a), *b_pk = (int *) (&b);
 asm( "mma.sync.aligned.m16n8k16.row.col.{co}.{ci}.{ci}.{co} {{ %0, %1, %2, %3 }}, {{ %4, %5, %6, %7 }}, {{ %8, %9 }}, {{ %0, %1, %2, %3 }};"
@@ -370,7 +370,7 @@ static __attribute__((device)) bool operator==(hip_bfloat16 a, hip_bfloat16 b) {
 
     prefix += [_make_hip_dtype(*x) for x in vec_dts]
 
-    for arg in dedup([uop.arg for uop in uops if uop.uop is UOps.WMMA]): # TODO: handle TCs f32_bf16 and bf16_bf16 w/ wrapper
+    for arg in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]): # TODO: handle TCs f32_bf16 and bf16_bf16 w/ wrapper
       if arg[3] == dtypes.float: prefix.append(f"#define __{arg[0]} __builtin_amdgcn_wmma_f32_16x16x16_f16_w32")
       else: prefix.append(f"static __attribute__((device)) half8 __{arg[0]}"+"""(half16 a, half16 b, half8 c) {
   half16 c_frag = {}; half8 d; for (int n = 0; n < 8; n++) { c_frag[n*2] = c[n]; }
@@ -379,7 +379,7 @@ static __attribute__((device)) bool operator==(hip_bfloat16 a, hip_bfloat16 b) {
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
   def get_kernel_modifier(self, uops:UOpGraph) -> str:
-    requiredMaxThreadsPerBlock = prod(u.arg[2] for u in uops if u.uop is UOps.SPECIAL and u.arg[1][0] == "l")
+    requiredMaxThreadsPerBlock = prod(u.arg[2] for u in uops if u.op is UOps.SPECIAL and u.arg[1][0] == "l")
     # https://clang.llvm.org/docs/AttributeReference.html#amdgpu-flat-work-group-size
     # NOTE: this makes hlb_cifar10 twice as fast, there may be more gains in tweaking these parameters
     return f"__attribute__((amdgpu_flat_work_group_size(1, {requiredMaxThreadsPerBlock})))"
