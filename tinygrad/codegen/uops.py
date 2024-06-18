@@ -12,7 +12,7 @@ from tinygrad.helpers import prod, DEBUG, getenv
 # the order of these UOps controls the order of the toposort
 class UOps(Enum):
   # ops that aren't rendered
-  SINK = auto()
+  SINK = auto(); VAR = auto() # noqa: E702
   DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # noqa: E702
   CONST = auto(); SPECIAL = auto() # noqa: E702
   NOOP = auto(); UNMUL = auto(); GEP = auto() # noqa: E702
@@ -26,7 +26,7 @@ class UOps(Enum):
   # these two are not graph nodes
   ENDRANGE = auto(); ENDIF = auto() # noqa: E702
 
-def ufix(dtype, x): return UOp.const(dtype, x) if not isinstance(x, UOp) else x
+def ufix(dtype: Optional[DType], x): return UOp.const(dtype, x) if not isinstance(x, UOp) else x
 @dataclass(eq=False)
 class UOp:
   uop: UOps
@@ -34,6 +34,8 @@ class UOp:
   vin: Tuple[UOp, ...] = tuple()
   arg: Any = None
   def tuple(self): return (self.uop, self.dtype, self.vin, self.arg)
+  def commutative(self) -> bool:
+    return self.uop is UOps.ALU and self.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR}
   @functools.cached_property
   def cmp_tuple(self):
     # NOTE: this sort of DEFINE_VAR shouldn't have to be here. only for PTX
@@ -42,7 +44,8 @@ class UOp:
   def __lt__(self, x:UOp): return self.cmp_tuple < x.cmp_tuple
   def __repr__(self):
     return f"{str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.uop for x in self.vin]):32s} {self.arg}"
-  def cast(self, dtype): return UOp(UOps.CAST, dtype, (self,))
+  def cast(self, dtype=None): return UOp(UOps.CAST, dtype, (self,))
+  def name(self, name:Optional[str]): return UOp(UOps.VAR, vin=(self,), arg=name)
   def __neg__(self): return UOp.alu(UnaryOps.NEG, self)
   def __add__(self, x): return UOp.alu(BinaryOps.ADD, self, ufix(self.dtype, x))
   def __radd__(self, x): return UOp.alu(BinaryOps.ADD, ufix(self.dtype, x), self)
@@ -51,18 +54,30 @@ class UOp:
   def __rmul__(self, x): return UOp.alu(BinaryOps.MUL, ufix(self.dtype, x), self)
   def __floordiv__(self, x): return UOp.alu(BinaryOps.IDIV, self, ufix(self.dtype, x))
   def __mod__(self, x): return UOp.alu(BinaryOps.MOD, self, ufix(self.dtype, x))
+  def lt(self, x): return UOp.alu(BinaryOps.CMPLT, self, ufix(self.dtype, x))
+  def ge(self, x): return -self.lt(x)
   @staticmethod
   def max(x, y): return UOp.alu(BinaryOps.MAX, x, y)
   @staticmethod
   def min(x, y): return -UOp.alu(BinaryOps.MAX, -x, -y)
   @staticmethod
-  def const(dtype:DType, b:ConstType|Variable):
+  def const(dtype:Optional[DType], b:ConstType|Variable):
     if isinstance(b, Variable): return UOp(UOps.DEFINE_VAR, dtype, (), b)
-    return UOp(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype))
+    return UOp(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
   @staticmethod
   def alu(arg, *vin:UOp): return UOp(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else vin[-1].dtype, vin, arg)
+  @staticmethod
+  def load(*vin:UOp, dtype:Optional[DType]=None, **kwargs): return UOp(UOps.LOAD, dtype, tuple(vin)+tuple(kwargs.values()))
+  @staticmethod
+  def store(*vin:UOp, dtype:Optional[DType]=None, **kwargs): return UOp(UOps.STORE, dtype, tuple(vin)+tuple(kwargs.values()))
+  @staticmethod
+  def var(name: Optional[str]=None, dtype: Optional[DType]=None): return UOp(UOps.VAR, dtype=dtype, arg=name)
+  @staticmethod
+  def cvar(name: Optional[str]=None, dtype: Optional[DType]=None): return UOp(UOps.CONST, dtype=dtype).name(name)
   @functools.cached_property
   def parents(self) -> Set[UOp]: return set.union(set(self.vin), *[x.parents for x in self.vin])
+  @property  # parents with self
+  def sparents(self) -> Set[UOp]: return set([self]).union(self.parents)
   def vars(self) -> Set[UOp]: return set([x for x in set.union(set([self]), self.parents) if x.uop is UOps.DEFINE_VAR])
 
 def uop_alu_resolve(u:UOp) -> sint:
@@ -84,6 +99,11 @@ class UPat:
   name: Optional[str] = None
   dtype: Optional[Union[DType, Set[DType]]] = None
   allow_len: Set[int] = field(default_factory=set)
+
+  @staticmethod
+  def compile(u: UOp, name:Optional[str]=None) -> UPat:
+    if u.uop is UOps.VAR: return UPat(name=name or u.arg, dtype=u.dtype) if len(u.vin) == 0 else UPat.compile(u.vin[0], name or u.arg)
+    return UPat(u.uop, u.arg, (list if u.commutative() else tuple)([UPat.compile(vin) for vin in u.vin]) if u.vin != () else None, name, u.dtype)
 
 T = TypeVar("T")
 def __unmatch(m1:Union[T, Set[T]], m2:T) -> bool:
@@ -111,11 +131,12 @@ def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
   return False
 
 class PatternMatcher:
-  def __init__(self, patterns:List[Tuple[UPat, Callable]]):
+  def __init__(self, patterns:List[Tuple[Union[UPat, UOp], Callable]]):
     self.patterns = patterns
     self.pdict: DefaultDict[Tuple[UOps, Any], List[Tuple[UPat, Callable]]] = defaultdict(list)
     # uop is required, arg is optional
     for p,fxn in self.patterns:
+      if isinstance(p, UOp): p = UPat.compile(p)
       assert p.uop is not None
       if isinstance(p.uop, set):
         for uop in p.uop: self.pdict[(uop, p.arg)].append((p, fxn))
@@ -161,11 +182,10 @@ constant_folder = PatternMatcher([
   (UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c1"),
                                                    UPat(UOps.UNMUL, vin=[UPat(UOps.CONST, name="c2"), UPat(name="v")])]),
                                                    lambda c1,c2,v: v if c1.arg == c2.arg else None),
-  (UPat(UOps.UNMUL, vin=(UPat(UOps.CONST, name="zero", arg=0), UPat())), lambda zero: zero),
-  (UPat(UOps.CAST, name="root", vin=(UPat(UOps.UNMUL, name="unmul"),)),
-    lambda root,unmul: UOp(UOps.UNMUL, root.dtype, (unmul.vin[0].cast(root.dtype), unmul.vin[1]))),
+  (UOp(UOps.UNMUL, vin=(UOp.const(None, 0).name('zero'), UOp.var())), lambda zero: zero),
+  (UOp(UOps.UNMUL).name('unmul').cast().name('root'), lambda root,unmul: UOp(UOps.UNMUL, root.dtype, (unmul.vin[0].cast(root.dtype), unmul.vin[1]))),
   # max on special can go away (TODO: special should be variable, same thing applies)
-  (UPat(UOps.ALU, BinaryOps.MAX, [UPat(UOps.CONST, name="c"), UPat(UOps.SPECIAL, name="s")]), lambda c,s: c if (s.arg[2]-1) <= c.arg else None),
+  (UOp.max(UOp.cvar('c'), UOp(UOps.SPECIAL).name('s')), lambda c,s: c if (s.arg[2]-1) <= c.arg else None),
   # const rules
   (UPat(UOps.GEP, name="root", vin=(UPat(UOps.CONST, name="c"),)), lambda root, c: UOp.const(root.dtype, c.arg)),
   (UPat(UOps.CAST, name="root", vin=UPat(UOps.CONST, name="c")), lambda root, c: UOp.const(root.dtype, c.arg)),
@@ -177,75 +197,67 @@ constant_folder = PatternMatcher([
   (UPat(UOps.DEFINE_ACC, name="root", vin=tuple()), lambda root: UOp.const(root.dtype, root.arg[0])),
   (UPat(UOps.GEP, name="root", vin=(UPat(UOps.CONST, name="x"),)), lambda root,x: UOp.const(root.dtype, x.arg)),
   # max -2147483648
-  (UPat(UOps.ALU, BinaryOps.MAX, dtype=dtypes.int, vin=[UPat(name="x"), UPat(UOps.CONST, -2147483648)]), lambda x: x),
+  (UOp.max(UOp.var('x'), UOp.const(dtypes.int, -2147483648)), lambda x: x),
   # -(-x) -> x
-  (UPat(UOps.ALU, UnaryOps.NEG, (UPat(UOps.ALU, UnaryOps.NEG, (UPat(name="x"),)))), lambda x: x),
+  (-(-UOp.var('x')), lambda x: x),
   # x+-y -> x-y
-  (UPat(UOps.ALU, BinaryOps.ADD, [UPat(name="x"), UPat(UOps.ALU, UnaryOps.NEG, name="my")]), lambda x, my: x-my.vin[0]),
+  (UOp.var('x')+(-UOp.var('y')), lambda x, y: x-y),
   # -1*x -> -x
-  (UPat(UOps.ALU, BinaryOps.MUL, [UPat(name="x"), UPat(UOps.CONST, -1)]), lambda x: -x),
+  (-1*UOp.var('x'), lambda x: -x),
   # bool < False is always false, True < bool is always false
-  (UPat(UOps.ALU, BinaryOps.CMPLT, (UPat(), UPat(UOps.CONST, False, name="x", dtype=dtypes.bool))), lambda x: x),
-  (UPat(UOps.ALU, BinaryOps.CMPLT, (UPat(UOps.CONST, True, name="x", dtype=dtypes.bool), UPat())), lambda x: UOp.const(dtypes.bool, False)),
+  (UOp.var().lt(UOp.const(dtypes.bool, False)), lambda: UOp.const(dtypes.bool, False)),
+  (UOp.const(dtypes.bool, True).lt(UOp.var()), lambda: UOp.const(dtypes.bool, False)),
   # a conditional with the same results either way is a noop, also fold const conditionals
-  (UPat(UOps.ALU, TernaryOps.WHERE, (UPat(), UPat(name="val"), UPat(name="val"))), lambda val: val),
-  (UPat(UOps.ALU, TernaryOps.WHERE, (UPat(UOps.CONST, name="gate"), UPat(name="c0"), UPat(name="c1"))), lambda gate, c0, c1: c0 if gate.arg else c1),
+  (UOp.alu(TernaryOps.WHERE, UOp.var(), UOp.var("val"), UOp.var("val")), lambda val: val),
+  (UOp.alu(TernaryOps.WHERE, UOp.cvar('gate'), UOp.var('c0'), UOp.var('c1')), lambda gate, c0, c1: c0 if gate.arg else c1),
   # ** constant folding **
   (UPat(UOps.ALU, name="root", vin=UPat(UOps.CONST)), lambda root: UOp.const(root.dtype, exec_alu(root.arg, root.dtype, [x.arg for x in root.vin]))),
   # ** self folding **
-  (UPat(UOps.ALU, BinaryOps.ADD, [UPat(name="x"), UPat(UOps.CONST, 0)]), lambda x: x),   # x+0 -> x or 0+x -> x
-  (UPat(UOps.ALU, BinaryOps.MUL, [UPat(name="x"), UPat(UOps.CONST, 1)]), lambda x: x),   # x*1 -> x or 1*x -> x
-  (UPat(UOps.ALU, BinaryOps.SUB, (UPat(name="x"), UPat(UOps.CONST, 0))), lambda x: x),   # x-0 -> x
-  (UPat(UOps.ALU, BinaryOps.IDIV, (UPat(name="x"), UPat(UOps.CONST, 1))), lambda x: x),   # x/1 -> x
-  (UPat(UOps.ALU, BinaryOps.IDIV, (UPat(name="x"), UPat(UOps.CONST, -1))), lambda x: -x), # x/-1 -> -x
+  (UOp.var('x') + 0, lambda x: x),    # x+0 -> x
+  (UOp.var('x') - 0, lambda x: x),    # x-0 -> x
+  (UOp.var('x') * 1, lambda x: x),    # x*1 -> x
+  (UOp.var('x') // 1, lambda x: x),   # x/1 -> x
+  (UOp.var('x') // -1, lambda x: -x), # x/-1 -> -x
   # ** zero folding **
   #x*0 -> 0 or 0*x -> 0
   #if x is nan it should render the nan value.
-  (UPat(UOps.ALU, BinaryOps.MUL, [UPat(name="x"), UPat(UOps.CONST, 0, name="c")]),
-     lambda x,c: x if isinstance(x.arg, float) and math.isnan(x.arg) else c),
-  (UPat(UOps.ALU, BinaryOps.SUB, (UPat(name="x"), UPat(name="x"))), lambda x: UOp.const(x.dtype, 0)),   # x-x -> 0
+  (UOp.var('x') * 0, lambda x: x if isinstance(x.arg, float) and math.isnan(x.arg) else UOp.const(x.dtype, 0)),
+  (UOp.var('x') - UOp.var('x'), lambda x: UOp.const(x.dtype, 0)),   # x-x -> 0
   # ** load/store folding **
   (UPat(UOps.STORE, vin=(UPat(name="buf"), UPat(name="idx"),
                                UPat(UOps.LOAD, vin=(UPat(name="buf"), UPat(name="idx"))))), lambda buf, idx: UOp(UOps.NOOP)),
   # ** two stage add/sub folding **
-  (UPat(UOps.ALU, BinaryOps.ADD, [UPat(UOps.ALU, BinaryOps.ADD, [UPat(name="x"), UPat(UOps.CONST, name="c1")]), UPat(UOps.CONST, name="c2")]),
-     lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, [c1.arg, c2.arg]))),
-  (UPat(UOps.ALU, BinaryOps.ADD, [UPat(UOps.ALU, BinaryOps.SUB, (UPat(name="x"), UPat(UOps.CONST, name="c1"))), UPat(UOps.CONST, name="c2")]),
-     lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.SUB, x.dtype, [c2.arg, c1.arg]))),
+  ((UOp.var('x') + UOp.cvar('c1')) + UOp.cvar('c2'), lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, [c1.arg, c2.arg]))),
+  ((UOp.var('x') - UOp.cvar('c1')) + UOp.cvar('c2'), lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.SUB, x.dtype, [c2.arg, c1.arg]))),
   # *** rules from symbolic ***
-  (UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.ALU, BinaryOps.MUL, [UPat(name="x"), UPat(UOps.CONST, name="c1")]), UPat(UOps.CONST, name="c2")]),
-     lambda x,c1,c2: x*UOp.const(x.dtype, exec_alu(BinaryOps.MUL, x.dtype, [c1.arg, c2.arg]))),  # two stage mul
-  (UPat(UOps.ALU, BinaryOps.MOD, (UPat(name="x"), UPat(UOps.CONST, 1))), lambda x: UOp.const(x.dtype, 0)), # x%1 -> 0
-  (UPat(UOps.ALU, BinaryOps.ADD, (UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c0"), UPat(name="x")]),  # (x*c0)+(x*c1) -> x*(c0+c1)
-                                  UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c1"), UPat(name="x")]),)),
-                                  lambda x,c0,c1: x*exec_alu(BinaryOps.ADD, x.dtype, [c0.arg, c1.arg])),
-  (UPat(UOps.ALU, BinaryOps.IDIV, (UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c0"), UPat(name="x")]),
-                                  UPat(UOps.CONST, name="c0"))), lambda x,c0: x if c0.arg != 0 else None),    # (x*c0)/c0 -> x
-  (UPat(UOps.ALU, BinaryOps.IDIV, (UPat(UOps.ALU, BinaryOps.IDIV, (UPat(name="x"), UPat(UOps.CONST, name="c0"))), UPat(UOps.CONST, name="c1"))),
-    lambda x,c0,c1: x//UOp.const(x.dtype, exec_alu(BinaryOps.MUL, x.dtype, [c0.arg, c1.arg]))),    # (x/c0)/c1 -> x/(c0*c1)
-  (UPat(UOps.ALU, BinaryOps.CMPLT, (UPat(UOps.ALU, BinaryOps.ADD, [UPat(UOps.CONST, name="c0"), UPat(name="x")]), UPat(UOps.CONST, name="c1"))),
-    lambda x,c0,c1: UOp.alu(BinaryOps.CMPLT, x, UOp.const(x.dtype, exec_alu(BinaryOps.SUB, x.dtype, [c1.arg, c0.arg])))),
-  (UPat(UOps.ALU, BinaryOps.ADD, [UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c0"), UPat(name="x")]), UPat(name="x")]),
-    lambda x,c0: x*UOp.const(x.dtype, c0.arg+1)),    # (x+x*c0)-> x*(c0+1)
+  # two stage mul, (x*c1)*c2 = x*(c1*c2)
+  ((UOp.var("x") * UOp.cvar("c1")) * UOp.cvar("c2"), lambda x,c1,c2: x*UOp.const(x.dtype, exec_alu(BinaryOps.MUL, x.dtype, [c1.arg, c2.arg]))),
+  # x%1 -> 0
+  (UOp.var("x") % UOp.const(None, 1), lambda x: UOp.const(x.dtype, 0)),
+  # (x*c0)+(x*c1) -> x*(c0+c1)
+  (UOp.var("x") * UOp.cvar("c0") + UOp.var("x") * UOp.cvar("c1"), lambda x,c0,c1: x*exec_alu(BinaryOps.ADD, x.dtype, [c0.arg, c1.arg])),
+  # (x*c0)/c0 -> x
+  ((UOp.var("x") * UOp.cvar("c0")) // UOp.cvar("c0"), lambda x,c0: x if c0.arg != 0 else None),
+  # (x/c0)/c1 -> x/(c0*c1)
+  ((UOp.var("x") // UOp.cvar("c0")) // UOp.cvar("c1"), lambda x,c0,c1: x//UOp.const(x.dtype, exec_alu(BinaryOps.MUL, x.dtype, [c0.arg, c1.arg]))),
+  # c0 + x < c1 -> x < c1 - c0
+  ((UOp.cvar("c0") + UOp.var("x")).lt(UOp.cvar("c1")),
+    lambda x,c0,c1: UOp.lt(x, UOp.const(x.dtype, exec_alu(BinaryOps.SUB, x.dtype, [c1.arg, c0.arg])))),
+  # (x+x*c0)-> x*(c0+1)
+  (UOp.var("x") + UOp.var("x") * UOp.cvar("c0"), lambda x,c0: x*UOp.const(x.dtype, c0.arg+1)),
   # TODO: can do the invert of this (flip alt/load) when we fix double ops
-  (UPat(UOps.STORE, vin=(UPat(name="buf"), UPat(name="idx"), UPat(UOps.ALU, TernaryOps.WHERE,
-                        (UPat(name="gate"), UPat(name="alt"), UPat(UOps.LOAD, vin=(UPat(name="buf"), UPat(name="idx"))))))),
-    lambda buf, idx, gate, alt: UOp(UOps.STORE, None, (buf, idx, alt, gate))),
+  (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp.alu(TernaryOps.WHERE, UOp.var("gate"), UOp.var("alt"), UOp.load(UOp.var("buf"), UOp.var("idx")))),
+   lambda buf, idx, gate, alt: UOp.store(buf, idx, alt, gate)),
   # store float4/float2 directly (remove CAST/GEP)
-  (UPat(UOps.STORE, vin=(UPat(name="buf"), UPat(name="idx"), UPat(UOps.CAST, vin=
-                                tuple(UPat(UOps.GEP, i, vin=(UPat(name="val"),)) for i in range(4))))),
-   lambda buf,idx,val: UOp(UOps.STORE, None, (buf, idx, val))),
-  (UPat(UOps.STORE, vin=(UPat(name="buf"), UPat(name="idx"), UPat(UOps.CAST, vin=
-                                tuple(UPat(UOps.GEP, i, vin=(UPat(name="val"),)) for i in range(2))))),
-   lambda buf,idx,val: UOp(UOps.STORE, None, (buf, idx, val))),
+  (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp(UOps.CAST, vin=tuple(UOp(UOps.GEP, arg=i, vin=(UOp.var("val"),)) for i in range(4)))), UOp.store),
+  (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp(UOps.CAST, vin=tuple(UOp(UOps.GEP, arg=i, vin=(UOp.var("val"),)) for i in range(2)))), UOp.store),
   # CAST-PHI-GEP -> PHI-CAST
   (UPat(UOps.CAST, name="root", vin=tuple(UPat(UOps.PHI, vin=(UPat(UOps.GEP, i, vin=(UPat(name="val"),)), UPat(name=f"v{i}"))) for i in range(4))),
     lambda root, val, v0, v1, v2, v3: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1, v2, v3))))),
   (UPat(UOps.CAST, name="root", vin=tuple(UPat(UOps.PHI, vin=(UPat(UOps.GEP, i, vin=(UPat(name="val"),)), UPat(name=f"v{i}"))) for i in range(2))),
     lambda root, val, v0, v1: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1))))),
   # NEG/CMPLT -> CMPLT
-  (UPat(UOps.ALU, BinaryOps.CMPLT, (UPat(UOps.ALU, UnaryOps.NEG, (UPat(name="x"),)), UPat(UOps.CONST, name="c", dtype=dtypes.int))),
-    lambda c,x: UOp(UOps.ALU, dtypes.bool, (UOp.const(c.dtype, -c.arg), x), BinaryOps.CMPLT)),
+  (UOp.lt(-UOp.var('x'), UOp.cvar('c', dtypes.int)), lambda c,x: UOp.lt(UOp.const(c.dtype, -c.arg), x)),
   # cast NOOP (NOTE: it's str to deal with PtrDType)
   (UPat(UOps.CAST, name="root"), lambda root: root.vin[0] if str(root.dtype) == str(root.vin[0].dtype) else None),
 ])
@@ -261,7 +273,7 @@ class UOpGraph:
   def __iter__(self) -> Iterator[UOp]: return iter(self.uops)
   def __getitem__(self, index) -> UOp: return self.uops[index]
 
-  def vars(self) -> List[Variable]: return [x.arg for x in self.uops if x.uop is UOps.DEFINE_VAR]
+  def vars(self) -> List[Variable]: return sorted([x.arg for x in self.uops if x.uop is UOps.DEFINE_VAR], key=lambda v: v.expr)
   def globals(self) -> List[Tuple[int, bool]]: return [x.arg for x in self.uops if x.uop is UOps.DEFINE_GLOBAL]
 
   @property
@@ -413,26 +425,35 @@ class UOpGraph:
 
   # *** checker functions ***
 
-  def flops_mem(self) -> Tuple[sint, sint]:
+  def flops_mem(self, ignore_indexing=False) -> Tuple[sint, sint]:
     flops: sint = 0
     mem: sint = 0
     mults: sint = 1
     mult_stack = []
+    dont_count: Set[UOp] = set()
+    if ignore_indexing:
+      for u in self.uops:
+        if u.uop is UOps.LOAD:
+          dont_count = dont_count.union(u.vin[1].sparents)
+          if len(u.vin) > 3: dont_count = dont_count.union(u.vin[2].sparents)
+        elif u.uop is UOps.STORE:
+          dont_count = dont_count.union(u.vin[1].sparents)
+          if len(u.vin) > 3: dont_count = dont_count.union(u.vin[3].sparents)
     for u in self.uops:
       if u.uop is UOps.RANGE:
         mult_stack.append(mults)
         mults *= uop_alu_resolve(u.vin[1])
       elif u.uop is UOps.ENDRANGE:
         mults = mult_stack.pop(-1)
-      elif u.uop is UOps.ALU:
-        flops += mults * (2 if u.arg == TernaryOps.MULACC else 1)
       elif u.uop is UOps.LOAD:
         assert u.dtype is not None
         mem += u.dtype.itemsize * mults
       elif u.uop is UOps.STORE:
         assert u.vin[2].dtype is not None
         mem += u.vin[2].dtype.itemsize * mults
-      elif u.uop is UOps.WMMA:
+      elif u.uop is UOps.ALU and u not in dont_count:
+        flops += mults * (2 if u.arg == TernaryOps.MULACC else 1)
+      elif u.uop is UOps.WMMA and u not in dont_count:
         assert u.arg[1] is not None
         flops += 2 * prod(u.arg[1]) // 32 * mults
     return flops, mem

@@ -11,7 +11,7 @@ from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up
 from tinygrad.helpers import IMAGE, DEBUG, WINO, THREEFRY
 from tinygrad.lazy import LazyBuffer
 from tinygrad.multi import MultiLazyBuffer
-from tinygrad.ops import LoadOps
+from tinygrad.ops import LoadOps, truncate
 from tinygrad.device import Device, Buffer, BufferOptions
 from tinygrad.shape.symbolic import sint, Variable, MulNode, SumNode, NumNode, Node
 from tinygrad.engine.realize import run_schedule
@@ -51,7 +51,8 @@ def _frompy(x:Union[List, Tuple, bytes], dtype:DType) -> LazyBuffer:
   else:
     ret = LazyBuffer.loadop(LoadOps.EMPTY, get_shape(x), dtype, "PYTHON")
     assert dtype.fmt is not None, f"{dtype=} has None fmt"
-    data = struct.pack(f"@{ret.size}{dtype.fmt}", *fully_flatten(x))
+    truncate_function = truncate[dtype]
+    data = struct.pack(f"@{ret.size}{dtype.fmt}", *[truncate_function(xi) for xi in fully_flatten(x)])
   # fake realize
   ret.buffer.allocate(memoryview(data))
   del ret.srcs
@@ -1285,7 +1286,8 @@ class Tensor:
     ```
     """
     ret = self.cast(acc_dtype or sum_acc_dtype(self.dtype))._reduce(F.Sum, axis, keepdim)
-    return ret.cast(self.dtype) if self.dtype in {dtypes.float16, dtypes.bfloat16} else ret
+    return ret.cast(self.dtype) if acc_dtype is None and self.dtype in (dtypes.float16, dtypes.bfloat16) else ret
+
   def max(self, axis=None, keepdim=False):
     """
     Returns the maximum value of the tensor along the specified axis or axes.
@@ -1308,6 +1310,7 @@ class Tensor:
     ```
     """
     return self._reduce(F.Max, axis, keepdim)
+
   def min(self, axis=None, keepdim=False):
     """
     Returns the minimum value of the tensor along the specified axis or axes.
@@ -1552,8 +1555,9 @@ class Tensor:
     """
     xs:Tuple[Tensor] = argfix(*raw_xs)
     formula = formula.replace(" ", "")
-    inputs_str, output = formula.split("->") if "->" in formula else (formula, sorted(formula))
-    inputs = [x for x in cast(str,inputs_str).split(',')]
+    inputs_str, output = formula.split("->") if "->" in formula else (formula, \
+                                                                       ''.join(c for c in sorted(formula) if formula.count(c) == 1 and c.isalpha()))
+    inputs = [x for x in inputs_str.split(',')]
     assert len(xs) == len(inputs), f"number of inputs doesn't match number of operands in formula, expected {len(inputs)}, got {len(xs)}"
 
     # map the value of each letter in the formula
@@ -1722,6 +1726,8 @@ class Tensor:
     """
     Performs dot product between two tensors.
 
+    You can pass in the optional `acc_dtype` keyword argument to control the data type of the accumulation.
+
     ```python exec="true" source="above" session="tensor" result="python"
     a = Tensor([[1, 2], [3, 4]])
     b = Tensor([[5, 6], [7, 8]])
@@ -1733,7 +1739,7 @@ class Tensor:
     assert (L:=self.shape[-1]) == (R:=w.shape[-min(n2, 2)]), f"Input Tensor shapes {self.shape} and {w.shape} cannot be multiplied ({L} != {R})"
     x = self.reshape(*self.shape[0:-1], *[1]*min(n1-1, n2-1, 1), self.shape[-1])
     w = w.reshape(*w.shape[0:-2], *[1]*min(n1-1, n2-1, 1), *w.shape[-min(n2, 2):]).transpose(-1, -min(n2, 2))
-    return (x*w).sum(-1, acc_dtype=acc_dtype).cast(least_upper_dtype(x.dtype, w.dtype))
+    return (x*w).sum(-1, acc_dtype=acc_dtype).cast(least_upper_dtype(x.dtype, w.dtype) if acc_dtype is None else acc_dtype)
 
   def matmul(self, x:Tensor, reverse=False, acc_dtype:Optional[DType]=None) -> Tensor:
     """
