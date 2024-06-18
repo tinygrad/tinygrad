@@ -4,7 +4,7 @@ import math, functools
 from dataclasses import replace
 from collections import defaultdict
 from tinygrad.codegen.kernel import LocalBuffer, Kernel
-from tinygrad.shape.shapetracker import ShapeTracker, View
+from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.dtype import dtypes, PtrDType, ImageDType
 from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, BinaryOps, UnaryOps, MemBuffer, get_lazyop_info
 from tinygrad.codegen.uops import UOp, UOpGraph, UOps
@@ -18,7 +18,7 @@ render_ops: Any = { NumNode: lambda self, ops, ctx: UOp.const(dtypes.int, self.b
                     DivNode: lambda self, ops, ctx: self.a.render(ops, ctx)//self.b,
                     ModNode: lambda self, ops, ctx: self.a.render(ops, ctx)%self.b,
                     LtNode: lambda self, ops, ctx: self.a.render(ops, ctx).lt(self.b),
-  Variable: lambda self, ops, ctx: ctx[self] if self in ctx else UOp(UOps.DEFINE_VAR, dtypes.int32, (), self),
+  Variable: lambda self,ops,ctx: ctx[self] if self in ctx else UOp(UOps.DEFINE_VAR, dtypes.int32, (), self),
   SumNode: lambda self,ops,ctx: functools.reduce(lambda a,b: a+b.render(ops, ctx), self.nodes[1:], self.nodes[0].render(ops,ctx)),
   AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: a*b.render(ops, ctx), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
@@ -50,7 +50,7 @@ def st_to_uops(st:ShapeTracker, idxs:List[UOp]) -> Tuple[UOp, UOp]:
 """
 
 def st_to_uops(st:ShapeTracker, idxs:List[UOp]) -> Tuple[UOp, UOp]:
-  fake_idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(st.shape)]
+  fake_idxs = [Variable(f"__idx{i}", 0, s-1) for i,s in enumerate(st.shape)]
   idx, valid = st.expr_idxs(fake_idxs)
   ctx = dict(zip(fake_idxs, idxs))
   return idx.render(render_ops, ctx), valid.render(render_ops, ctx)
@@ -108,7 +108,6 @@ class Lowerer(Kernel):
 
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
   def linearize(self) -> Lowerer:
-    global uop_graphed
     self.uop_cache: Dict[LazyOp, UOp] = {}
 
     # kernel name (before late upcast)
@@ -169,24 +168,26 @@ class Lowerer(Kernel):
       # all loops
       self.idxs = []
       for i,g in enumerate(self.full_shape[:self.first_reduce]):
-        self.idxs.append(UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), variable_to_uop(g)), (i,False)))
+        self.idxs.append(UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), variable_to_uop(g)), (i, False, False)))
       self.global_size, self.local_size = None, None
 
     # reduce loops
     for i,g in enumerate(self.full_shape[self.first_reduce+self.group_for_reduces:], start=self.first_reduce+self.group_for_reduces):
-      unrolled = i >= (self.shape_len-self.upcasted)
-      self.idxs.append(UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), variable_to_uop(g)), (i,unrolled)))
+      unrolled, is_reduce = i >= (self.shape_len-self.upcasted), self.full_shape[i] != self.output_shape[i]
+      self.idxs.append(UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), variable_to_uop(g)), (i, unrolled, is_reduce)))
 
     # late indexes
     self.ridxs = self.idxs[:]
     for a in range(self.first_reduce, self.first_reduce+self.group_for_reduces):
-      self.ridxs[a] = UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), variable_to_uop(self.full_shape[a])), (1000+a, False))
+      self.ridxs[a] = UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), variable_to_uop(self.full_shape[a])), (1000+a, False, True))
 
     self.uops:UOpGraph = UOpGraph([self.to_uop(x) for x in modified_ast])
 
     # maybe graph the uops
     if DEBUG >= 5: self.uops.print()
-    if getenv("GRAPHUOPS"): self.uops.graph()
+    if getenv("GRAPHUOPS"):
+      self.uops.graph()
+      if getenv("GRAPHUOPS") == 2: exit(0)
     return self
 
   def to_program(self) -> Program:
