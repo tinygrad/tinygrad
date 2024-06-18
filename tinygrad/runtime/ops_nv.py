@@ -155,7 +155,7 @@ class HWComputeQueue(HWQueue):
     self.q += [nvmethod(1, nv_gpu.NVC6C0_LOAD_INLINE_DATA, len(data), typ=6)] + [x for x in data]
     return self._mark_command_end()
 
-  def exec(self, prg, kernargs, global_size=(1,1,1), local_size=(1,1,1), signal=None, signal_value=0, chain_exec_ptr=None):
+  def exec(self, prg, kernargs, global_size=(1,1,1), local_size=(1,1,1), signal=None, signal_value=0):
     ctypes.memmove(qmd_addr:=(kernargs + round_up(prg.constbuf_0_size, 1 << 8)), ctypes.addressof(prg.qmd), 0x40 * 4)
     self.cmd_idx_to_qmd[len(self)] = qmd = qmd_struct_t.from_address(qmd_addr) # Save qmd for later update
     self.cmd_idx_to_global_dims[len(self)] = to_mv(qmd_addr + nv_gpu.NVC6C0_QMDV03_00_CTA_RASTER_WIDTH[1] // 8, 12).cast('I')
@@ -172,15 +172,15 @@ class HWComputeQueue(HWQueue):
       qmd.release0_payload_upper = signal_value >> 32
       qmd.release0_enable = 1
 
-    if chain_exec_ptr is None:
+    if (prev_qmd:=self.cmd_idx_to_qmd.get(len(self) - 1)) is None:
       self.q += [nvmethod(1, nv_gpu.NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI, 1), (1 << 12) | (1 << 4) | (1 << 0)]
       self.q += [nvmethod(1, nv_gpu.NVC6C0_SEND_PCAS_A, 0x1), qmd_addr >> 8]
       self.q += [nvmethod(1, nv_gpu.NVC6C0_SEND_SIGNALING_PCAS2_B, 0x1), 9]
     else:
-      self.cmd_idx_to_qmd[chain_exec_ptr].dependent_qmd0_pointer = qmd_addr >> 8
-      self.cmd_idx_to_qmd[chain_exec_ptr].dependent_qmd0_action = 1
-      self.cmd_idx_to_qmd[chain_exec_ptr].dependent_qmd0_prefetch = 1
-      self.cmd_idx_to_qmd[chain_exec_ptr].dependent_qmd0_enable = 1
+      prev_qmd.dependent_qmd0_pointer = qmd_addr >> 8
+      prev_qmd.dependent_qmd0_action = 1
+      prev_qmd.dependent_qmd0_prefetch = 1
+      prev_qmd.dependent_qmd0_enable = 1
     return self._mark_command_end()
 
   def update_exec(self, cmd_idx, global_size, local_size):

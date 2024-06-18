@@ -1123,6 +1123,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(1,)], lambda x: x.reshape([]))
     helper_test_op([()], lambda x: x.reshape([1]))
     helper_test_op([()], lambda x: x.reshape([1, 1, 1]))
+    self.helper_test_exception([(3, 4)], lambda x: x.reshape((-1, -1, 2)), lambda x: x.reshape((-1, -1, 2)), expected=RuntimeError)
+    self.helper_test_exception([(3, 4)], lambda x: x.reshape((-1, -1, -1, 2)), lambda x: x.reshape((-1, -1, -1, 2)), expected=RuntimeError)
 
     with self.assertRaises(ValueError):
       x = Tensor.ones((4,3,6,6))
