@@ -157,7 +157,3 @@ ResNet50 = lambda num_classes=1000: ResNet(50, num_classes=num_classes)
 ResNet101 = lambda num_classes=1000: ResNet(101, num_classes=num_classes)
 ResNet152 = lambda num_classes=1000: ResNet(152, num_classes=num_classes)
 ResNeXt50_32X4D = lambda num_classes=1000: ResNet(50, num_classes=num_classes, groups=32, width_per_group=4)
-
-if __name__ == '__main__':
-  model = ResNeXt50_32X4D()
-  model.load_from_pretrained()
