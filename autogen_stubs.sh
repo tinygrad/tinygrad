@@ -55,6 +55,8 @@ generate_opencl() {
 
 
   python3 -c "import tinygrad.runtime.autogen.opencl"
+
+  generate_opencl_error_codes
 }
 
 generate_hip() {
@@ -195,7 +197,6 @@ generate_hsa() {
 }
 
 if [ "$1" == "opencl" ]; then generate_opencl
-elif [ "$1" == "opencl-error-code" ]; then generate_opencl_error_codes
 elif [ "$1" == "hip" ]; then generate_hip
 elif [ "$1" == "comgr" ]; then generate_comgr
 elif [ "$1" == "cuda" ]; then generate_cuda
