@@ -236,7 +236,7 @@ jobs:
         run: GPU=1 python -m pytest -n=auto test/external/external_test_datasets.py --durations=20
       - if: ${{ matrix.task == 'onnx' }}
         name: Test THREEFRY
-        run: PYTHONPATH=. THREEFRY=1 GPU=1 python3 -m pytest test/test_randomness.py test/test_jit.py
+        run: PYTHONPATH=. THREEFRY=1 GPU=1 python3 -m pytest test/test_randomness.py test/test_jit.py --durations=20
       - name: Run process replay tests
         if: env.RUN_PROCESS_REPLAY == '1'
         run: cp test/external/replay_codegen.py ./replay_codegen.py && git fetch origin master && git checkout origin/master && PYTHONPATH=. python3 replay_codegen.py
