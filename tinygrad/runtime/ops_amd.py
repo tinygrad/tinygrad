@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Tuple, List, Any, cast
-import os, fcntl, ctypes, ctypes.util, functools, re, pathlib, mmap, struct, errno, subprocess, time, array
+import os, fcntl, ctypes, ctypes.util, functools, re, pathlib, mmap, struct, errno, subprocess, time, array, io
 from tinygrad.device import Compiled, Compiler, CompileError, BufferOptions, LRUAllocator
 from tinygrad.helpers import getenv, from_mv, init_c_struct_t, to_mv, round_up, DEBUG
 from tinygrad.renderer.cstyle import AMDRenderer
@@ -382,7 +382,7 @@ class AMDAllocator(LRUAllocator):
   def __init__(self, device:AMDDevice):
     self.device = device
     # NOTE: KFD_IOC_ALLOC_MEM_FLAGS_GTT doesn't work here for readinto
-    self.b = [self.device._gpu_alloc(16 << 20, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, public=True) for _ in range(16)]
+    self.b = [self.device._gpu_alloc(8 << 20, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, public=True) for _ in range(16)]
     self.b_timeline = [0] * len(self.b)
     self.b_next = 0
     super().__init__()
@@ -396,127 +396,100 @@ class AMDAllocator(LRUAllocator):
       else: raise
 
   def _free(self, opaque, options:BufferOptions): self.device._gpu_free(opaque)
-  #def as_buffer(self, src:Any) -> memoryview:
-  #  self.device.synchronize()
-  #  return to_mv(src.va_addr, src.size)
 
+  def copy_from_fd2(self, dest, fd, offset, size, device=None):
+    PAGE_SIZE, BATCH_SIZE = (4 << 10), (8 << 20)
+
+    fo = io.FileIO(fd, "a+b", closefd=False)
+    fo.seek(offset - (minor_offset:=offset % PAGE_SIZE))
+    copied_in, total_copy_size = 0, round_up(size+minor_offset, PAGE_SIZE)
+    for i in range(0, total_copy_size, BATCH_SIZE):
+      local_size = min(BATCH_SIZE, total_copy_size-i)
+      copy_size = min(local_size-minor_offset, size-copied_in)
+      if copy_size == 0: break
+
+      self.b_next = (self.b_next + 1) % len(self.b)
+
+      AMDDevice._wait_signal(self.device.timeline_signal, self.b_timeline[self.b_next])
+      fo.readinto(to_mv(self.b[self.b_next].va_addr, local_size))
+      HWCopyQueue().wait(self.device.timeline_signal, self.device.timeline_value - 1) \
+                   .copy(dest.va_addr + copied_in, self.b[self.b_next].va_addr + minor_offset, copy_size) \
+                   .signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
+      self.b_timeline[self.b_next] = self.device.timeline_value
+      self.device.timeline_value += 1
+
+      copied_in += copy_size
+      minor_offset = 0 # only on the first
+  
   def copy_from_fd(self, dest, fd, offset, size, device=None):
-    # print("copy_from_fd", device.io_uring)
-
-    PAGE_SIZE, BATCH_SIZE = 0x1000, (2 << 20)
+    PAGE_SIZE, BATCH_SIZE = (4 << 10), (8 << 20)
     fd_offset = offset - (minor_offset := offset % PAGE_SIZE)
     total_copy_size = round_up(size + minor_offset, PAGE_SIZE)
 
     next_read_offset = 0
-    next_write_offset = 0
+    copied_in = 0
     cqe = ctypes.POINTER(io_uring.struct_io_uring_cqe)()
 
+    pending_reads = 0
     gpu_copy_info = [None] * len(self.b)
     free_bs = [i for i in range(len(self.b)) if self.b_timeline[i] <= self.device.timeline_signal.value]
     free_bs_order = sorted([i for i in range(len(self.b)) if i not in free_bs], key=lambda x: self.b_timeline[x])
     iovecs = (io_uring.struct_iovec * len(self.b))()
     for i,b in enumerate(self.b): iovecs[i].iov_base = b.va_addr
 
-    pending_reads = 0
-
     while True:
       if next_read_offset < total_copy_size and len(free_bs) > 0: # if we have something to read from disk
         sqe = io_uring.io_uring_get_sqe(ctypes.byref(device.io_uring))
         if sqe != 0: # and we have slot
-          b_slot = free_bs.pop()
-          iovecs[b_slot].iov_size = (bytes_to_read := min(BATCH_SIZE, total_copy_size - next_read_offset))
+          b_slot = free_bs.pop(0)
+          iovecs[b_slot].iov_len = (bytes_to_read := min(BATCH_SIZE, total_copy_size - next_read_offset))
+
+          # print(fd, b_slot, fd_offset + next_read_offset, iovecs[b_slot].iov_len)
           io_uring.io_uring_prep_rw(sqe, io_uring.IORING_OP_READV, fd, ctypes.addressof(iovecs[b_slot]), 1, fd_offset + next_read_offset)
           sqe.contents.user_data = b_slot
           io_uring.io_uring_submit(ctypes.byref(device.io_uring))
+          # print("sub", res)
 
-          real_copy_size = min(bytes_to_read - minor_offset, size - next_write_offset)
-          gpu_copy_info[b_slot] = (next_write_offset, minor_offset, real_copy_size)
+          real_copy_size = min(bytes_to_read - minor_offset, size - copied_in)
+          gpu_copy_info[b_slot] = (copied_in, minor_offset, real_copy_size, time.perf_counter_ns())
           next_read_offset += bytes_to_read
-          next_write_offset += real_copy_size
+          copied_in += real_copy_size
           minor_offset = 0
           pending_reads += 1
           # print(f"sent req {b_slot=}, off={fd_offset + next_read_offset}, read_from_fd={bytes_to_read}, gpu_copy_info={gpu_copy_info[b_slot]}")
       
       # Check if any had read
-      while io_uring._io_uring_get_cqe(ctypes.byref(device.io_uring), ctypes.byref(cqe), 0, 0, None) == 0:
-        assert cqe.contents.res == 0, "cannot read from disk"
-        # print(f"done req b_slot={cqe.contents.user_data}")
+      if io_uring._io_uring_get_cqe(ctypes.byref(device.io_uring), ctypes.byref(cqe), 0, 0, None) == 0:
+        rd_copied_in, rd_minor_offset, rd_copy_size, tt = gpu_copy_info[b_slot := cqe.contents.user_data]
+        # print(f"sent_to_gpu req read={cqe.contents.res} b_slot={cqe.contents.user_data}, completed in {(time.perf_counter_ns() - tt)*1e-6:6.2f} ms")
+        assert cqe.contents.res >= rd_copy_size + rd_minor_offset, f"cannot read from disk, {cqe.contents.res} != {rd_copy_size + rd_minor_offset}"
+        
+        # print(to_mv(self.b[b_slot].va_addr, 0x1000)[0])
 
-        copied_in, minor_offset, copy_size = gpu_copy_info[b_slot := cqe.contents.user_data]
-        gpu_copy_info[b_slot] = None
-        HWCopyQueue().copy(dest.va_addr + copied_in, self.b[b_slot].va_addr + minor_offset, copy_size) \
+        gpu_copy_info[b_slot] = time.perf_counter_ns()
+        HWCopyQueue().wait(self.device.timeline_signal, self.device.timeline_value - 1) \
+                     .copy(dest.va_addr + rd_copied_in, self.b[b_slot].va_addr + rd_minor_offset, rd_copy_size) \
                      .signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
 
         self.b_timeline[b_slot] = self.device.timeline_value
         self.device.timeline_value += 1
+
         pending_reads -= 1
         device.io_uring.cq.khead[0] = device.io_uring.cq.khead[0] + 1 # advance
         free_bs_order.append(b_slot)
         # free_bs.append(b_slot)
 
-      if next_read_offset >= total_copy_size and pending_reads == 0: return # done reading
+      if next_read_offset >= total_copy_size and pending_reads == 0: break # done reading
 
-      if len(free_bs) == 0:
-        while len(free_bs_order) > 0 and self.b_timeline[free_bs_order[0]] <= self.device.timeline_signal.value:
-          free_bs.append(free_bs_order.pop())
+      if len(free_bs) == 0 and len(free_bs_order) > 0 and self.b_timeline[free_bs_order[0]] <= self.device.timeline_signal.value:
+        b_slot = free_bs_order.pop(0)
+        tt = gpu_copy_info[b_slot]
+        # if tt is not None: print(f"done req b_slot={b_slot}, completed in {(time.perf_counter_ns() - tt)*1e-6:6.2f} ms")
+        free_bs.append(b_slot)
 
-    # for i in range(0, size + minor_offset, BATCH_SIZE):
-      
-      
-    #   sqe = io_uring.io_uring_get_sqe(ctypes.byref(device.io_uring))
-    #   if sqe != 0:
-    #     pass
-
-    # # TODO: prebuilt
-    # iovecs = (io_uring.struct_iovec * len(self.b))()
-    # for i,b in enumerate(self.b):
-    #   iovecs[i].iov_base = b.va_addr
-    #   iovecs[i].iov_size = b.size
-
-    # submitted = 0
-    # fd_off = offset - (minor_offset:=offset % PAGE_SIZE)
-    # copied_in, total_copy_size = 0, round_up(size+minor_offset, PAGE_SIZE)
-    # for i in range(0, size+minor_offset, self.b[0].size):
-    #   local_size = min(self.b[0].size, total_copy_size-i)
-    #   copy_size = min(local_size-minor_offset, size-copied_in)
-
-    #   sqe = io_uring.io_uring_get_sqe(ctypes.byref(device.io_uring))
-    #   assert sqe != 0
-
-    #   self.b_next = (self.b_next + 1) % len(self.b)
-
-    #   iovecs[self.b_next].iov_size = copy_size
-    #   io_uring_prep_rw(sqe, io_uring.IORING_OP_READV, fd, iovecs, 1, fd_off + copied_in)
-    #   sqe.user_data = self.b_next
-    #   io_uring.io_uring_submit(ctypes.byref(device.io_uring))
-    #   submitted += 1
-
-    #   # AMDDevice._wait_signal(self.device.timeline_signal, self.b_timeline[self.b_next])
-
-    # cqe = ctypes.POINTER(io_uring.struct_io_uring_cqe)()
-    # for i in range(submitted):
-    #   ret = io_uring._io_uring_get_cqe(ctypes.byref(device.io_uring), ctypes.byref(cqe), 0, 0, None)
-    #   if ret == 0:
-    #     # print(ret, cqe, cqe.contents.res, cqe.contents.user_data)
-    #     device.io_uring.cq.khead[0] = device.io_uring.cq.khead[0] + 1 # advance
-    #   else: pass
-
-  #  fo = io.FileIO(fd, "a+b", closefd=False)
-  #  fo.seek(offset - (minor_offset:=offset % PAGE_SIZE))
-  #  copied_in, total_copy_size = 0, round_up(size+minor_offset, PAGE_SIZE)
-  #  for i in range(0, size+minor_offset, self.b[0].size):
-  #    local_size = min(self.b[0].size, total_copy_size-i)
-  #    copy_size = min(local_size-minor_offset, size-copied_in)
-  #    if copy_size == 0: break
-
-  #    fo.readinto(to_mv(self.b[1].va_addr, local_size))
-  #    if i != 0: self.device._wait_signal(self.device.signal_sdma)
-  #    self.b = self.b[::-1]
-  #    self.device._submit_sdma(dest.va_addr+copied_in, self.b[0].va_addr+minor_offset, copy_size, completion_signal=self.device.signal_sdma)
-
-  #    copied_in += copy_size
-  #    minor_offset = 0 # only on the first
-  #  self.device._wait_signal(self.device.signal_sdma)
+    for b_slot in free_bs_order:
+      tt = gpu_copy_info[b_slot]
+      # if tt is not None: print(f"done req b_slot={b_slot}, completed in {(time.perf_counter_ns() - tt)*1e-6:6.2f} ms")
 
   def copyin(self, dest, src: memoryview):
     for i in range(0, src.nbytes, self.b[0].size):
@@ -605,13 +578,13 @@ class AMDDevice(Compiled):
   @classmethod
   def _wait_signal(self, signal:hsa.amd_signal_t, value=0, timeout=10000):
     assert signal.event_id != 0, "can't wait on this signal"
-    evt_arr = (kfd.struct_kfd_event_data)(event_id=signal.event_id)
+    # evt_arr = (kfd.struct_kfd_event_data)(event_id=signal.event_id)
 
     # Wait active for 5s, then going to sleep.
     start_time = time.time() * 1000
     while (time_spent:=time.time() * 1000 - start_time) < timeout:
       if signal.value >= value: return
-      if time_spent > 5000: kio.wait_events(AMDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=1000)
+      # if time_spent > 5000: kio.wait_events(AMDDevice.kfd, events_ptr=ctypes.addressof(evt_arr), num_events=1, wait_for_all=1, timeout=1000)
     raise RuntimeError(f"wait_signal: not set to {value}, but {signal.value}, {timeout} ms TIMEOUT!")
 
   def __init__(self, device:str=""):

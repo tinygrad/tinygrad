@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os, ctypes, ctypes.util, io, mmap
+import os, ctypes, ctypes.util, io, mmap, pathlib
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.helpers import Timing, from_mv
 libc = ctypes.CDLL(ctypes.util.find_library("c"))
@@ -11,82 +11,84 @@ libc = ctypes.CDLL(ctypes.util.find_library("c"))
 # sudo su -c 'echo 8 > /proc/sys/kernel/printk'
 # sudo su -c "echo 'module amdgpu +p' > /sys/kernel/debug/dynamic_debug/control"
 
-libc.memcpy.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t]
+# libc.memcpy.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t]
 
-libc.read.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_size_t]
-libc.read.restype = ctypes.c_size_t
+# libc.read.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_size_t]
+# libc.read.restype = ctypes.c_size_t
 
-libc.malloc.argtypes = [ctypes.c_size_t]
-libc.malloc.restype = ctypes.c_void_p
+# libc.malloc.argtypes = [ctypes.c_size_t]
+# libc.malloc.restype = ctypes.c_void_p
 
-def read_direct(fd, sz):
-  with Timing("mmap: ", lambda x: f", {sz/x:.2f} GB/s"):
-    buf = mmap.mmap(-1, sz, flags=mmap.MAP_SHARED|mmap.MAP_POPULATE)
-  with Timing("read: ", lambda x: f", {sz/x:.2f} GB/s"):
-    ret = libc.read(fd, from_mv(buf), sz)
-  assert ret == sz
+# def read_direct(fd, sz):
+#   with Timing("mmap: ", lambda x: f", {sz/x:.2f} GB/s"):
+#     buf = mmap.mmap(-1, sz, flags=mmap.MAP_SHARED|mmap.MAP_POPULATE)
+#   with Timing("read: ", lambda x: f", {sz/x:.2f} GB/s"):
+#     ret = libc.read(fd, from_mv(buf), sz)
+#   assert ret == sz
 
-def read_mmap(fd, sz):
-  with Timing("mmfd:       ", lambda x: f", {sz/x:.2f} GB/s"):
-    buf = mmap.mmap(fd, sz, flags=mmap.MAP_SHARED|mmap.MAP_POPULATE) #|MAP_LOCKED)
-    t = 0
-    for i in range(0, sz, 0x1000): t += buf[i]
+# def read_mmap(fd, sz):
+#   with Timing("mmfd:       ", lambda x: f", {sz/x:.2f} GB/s"):
+#     buf = mmap.mmap(fd, sz, flags=mmap.MAP_SHARED|mmap.MAP_POPULATE) #|MAP_LOCKED)
+#     t = 0
+#     for i in range(0, sz, 0x1000): t += buf[i]
 
-# def _copyin_async(self, dest:T, src:T, size:int): check(hip.hipMemcpyAsync(dest, src, size, hip.hipMemcpyHostToDevice, None))
+# # def _copyin_async(self, dest:T, src:T, size:int): check(hip.hipMemcpyAsync(dest, src, size, hip.hipMemcpyHostToDevice, None))
 
-def read_to_gpu_mmap(fd, sz, gpubuf):
-  with Timing("gpu copyin: ", lambda x: f", {sz/x:.2f} GB/s"):
-    with Timing("mmfd:       ", lambda x: f", {sz/x:.2f} GB/s"):
-      buf = mmap.mmap(fd, sz, flags=mmap.MAP_SHARED|mmap.MAP_POPULATE) #|MAP_LOCKED)
-    dev.allocator._copyin_async(gpubuf, from_mv(buf), sz)
-    dev.synchronize()
+# def read_to_gpu_mmap(fd, sz, gpubuf):
+#   with Timing("gpu copyin: ", lambda x: f", {sz/x:.2f} GB/s"):
+#     with Timing("mmfd:       ", lambda x: f", {sz/x:.2f} GB/s"):
+#       buf = mmap.mmap(fd, sz, flags=mmap.MAP_SHARED|mmap.MAP_POPULATE) #|MAP_LOCKED)
+#     dev.allocator._copyin_async(gpubuf, from_mv(buf), sz)
+#     dev.synchronize()
 
-def read_to_gpu_single(fd, sz, gpubuf):
-  os.lseek(fd, 0, os.SEEK_SET)
-  with Timing("total: ", lambda x: f", {sz/x:.2f} GB/s"):
-    with Timing("gpu host alloc: ", lambda x: f", {sz/x:.2f} GB/s"):
-      hst = dev.allocator._hostalloc(sz)
-    with Timing("read to host:   ", lambda x: f", {sz/x:.2f} GB/s"):
-      ret = libc.read(fd, hst, sz)
-    with Timing("gpu host copy:  ", lambda x: f", {sz/x:.2f} GB/s"):
-      dev.allocator._copyin_async(gpubuf, hst, sz)
-      dev.synchronize()
+# def read_to_gpu_single(fd, sz, gpubuf):
+#   os.lseek(fd, 0, os.SEEK_SET)
+#   with Timing("total: ", lambda x: f", {sz/x:.2f} GB/s"):
+#     with Timing("gpu host alloc: ", lambda x: f", {sz/x:.2f} GB/s"):
+#       hst = dev.allocator._hostalloc(sz)
+#     with Timing("read to host:   ", lambda x: f", {sz/x:.2f} GB/s"):
+#       ret = libc.read(fd, hst, sz)
+#     with Timing("gpu host copy:  ", lambda x: f", {sz/x:.2f} GB/s"):
+#       dev.allocator._copyin_async(gpubuf, hst, sz)
+#       dev.synchronize()
 
-def read_to_gpu_pingpong(fd, sz, gpubuf):
-  psz = 256*1024*1024
-  print(f"piece size {psz/(1024*1024):.2f} MB")
-  with Timing("gpu host alloc: ", lambda x: f", {sz/x:.2f} GB/s"):
-    hst1 = dev.allocator._hostalloc(psz)
-    hst2 = dev.allocator._hostalloc(psz)
+# def read_to_gpu_pingpong(fd, sz, gpubuf):
+#   psz = 256*1024*1024
+#   print(f"piece size {psz/(1024*1024):.2f} MB")
+#   with Timing("gpu host alloc: ", lambda x: f", {sz/x:.2f} GB/s"):
+#     hst1 = dev.allocator._hostalloc(psz)
+#     hst2 = dev.allocator._hostalloc(psz)
 
-  os.lseek(fd, 0, os.SEEK_SET)
-  with Timing("total: ", lambda x: f", {sz/x:.2f} GB/s"):
-    for i in range(sz//(psz*2)):
-      with Timing("tfer(0):           ", lambda x: f", {psz/x:.2f} GB/s"):
-        ret = libc.read(fd, hst1, psz)
-        dev.synchronize()
-        dev.allocator._copyin_async(gpubuf, hst1, psz)
-      with Timing("tfer(1):           ", lambda x: f", {psz/x:.2f} GB/s"):
-        ret = libc.read(fd, hst2, psz)
-        dev.synchronize()
-        dev.allocator._copyin_async(gpubuf, hst2, psz)
-    dev.synchronize()
+#   os.lseek(fd, 0, os.SEEK_SET)
+#   with Timing("total: ", lambda x: f", {sz/x:.2f} GB/s"):
+#     for i in range(sz//(psz*2)):
+#       with Timing("tfer(0):           ", lambda x: f", {psz/x:.2f} GB/s"):
+#         ret = libc.read(fd, hst1, psz)
+#         dev.synchronize()
+#         dev.allocator._copyin_async(gpubuf, hst1, psz)
+#       with Timing("tfer(1):           ", lambda x: f", {psz/x:.2f} GB/s"):
+#         ret = libc.read(fd, hst2, psz)
+#         dev.synchronize()
+#         dev.allocator._copyin_async(gpubuf, hst2, psz)
+#     dev.synchronize()
 
-MAP_LOCKED = 0x2000
-MAP_HUGETLB = 0x40000
-
-from tinygrad.runtime.ops_hip import HIPDevice
+# MAP_LOCKED = 0x2000
+# MAP_HUGETLB = 0x40000
 
 if __name__ == "__main__":
-  dev = Device["HIP"]
+  import numpy as np
+  dev = Device[Device.DEFAULT]
 
-  warm = (Tensor.ones(1024, device="HIP").contiguous() + Tensor.ones(1024, device="HIP").contiguous()).realize()
+  warm = (Tensor.ones(1024, device=Device.DEFAULT).contiguous() + Tensor.ones(1024, device=Device.DEFAULT).contiguous()).realize()
   #fn = "/home/tiny/tinygrad/weights/rng"
-  fn = "/home/tiny/tinygrad/weights/LLaMA/7B/consolidated.00.pth"
+  fn = pathlib.Path(__file__).parents[1] / "weights/LLaMA-2/70B/consolidated.00.pth"
+  # fn = "/home/nimlgen/tinygrad/extra/disk_read_speed.py"
   sz = os.stat(fn).st_size
   t = Tensor.empty(sz, dtype=dtypes.uint8, device=f"disk:{fn}")
   with Timing("copy:  ", lambda x: f", {sz/x:.2f} GB/s"):
-    on_hip = t.to("HIP").realize()
+    on_dev = t.to(Device.DEFAULT).realize()
+
+  # np.testing.assert_allclose(on_dev.numpy(), t.numpy())
   exit(0)
 
   # 4GB of random numbers
