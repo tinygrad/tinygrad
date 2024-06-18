@@ -61,7 +61,7 @@ def log_lazybuffer(lb:'LazyBuffer', scheduled=False):
     for idx,x in enumerate(lb.srcs):
       if nm(x) not in G.nodes: log_lazybuffer(x)
       if x.base.realized is None and x.base.op is LoadOps.CONST:
-        label_append.append(f"\nCONST{idx} {x.base.arg}")
+        label_append.append(f"\nCONST{idx} {x.base.arg:g}")
       else:
         G.add_edge(nm(x), nm(lb), color='#a0a0a0')
     label = '"' + \

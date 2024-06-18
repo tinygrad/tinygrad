@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Union, Tuple, Any, List, Dict, Callable
-import functools, hashlib, math, operator, ctypes
+import functools, hashlib, math, operator, ctypes, struct
 from enum import Enum, auto
 from dataclasses import dataclass
 from tinygrad.helpers import prod, dedup
@@ -75,7 +75,7 @@ class LazyOp:
   def vars(self) -> List[Variable]:
     extract_vars = [x.arg.st.vars() for x in self.lazyops if x.op in BufferOps]
     const_vars = [x.arg.val for x in self.lazyops if x.op is BufferOps.CONST and isinstance(x.arg.val, Variable)]
-    return sorted(set.union(*extract_vars, set(const_vars)), key=lambda x: str(x.expr))
+    return sorted(set.union(*extract_vars, set(const_vars)), key=lambda v: v.expr)
 
 # **************** independent FlopCounter ****************
 
@@ -118,8 +118,9 @@ def hook_overflow(dv, fxn):
 python_alu = {
   UnaryOps.LOG2: lambda x: math.log2(x) if x > 0 else -math.inf if x == 0 else math.nan,
   UnaryOps.EXP2: hook_overflow(math.inf, lambda x: math.exp(x*math.log(2))),
-  UnaryOps.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan, UnaryOps.SIN: math.sin,
-  UnaryOps.RECIP: lambda x: 1/x if x != 0 else float('inf'),
+  UnaryOps.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan,
+  UnaryOps.SIN: lambda x: math.sin(x) if not math.isinf(x) else math.nan,
+  UnaryOps.RECIP: lambda x: 1/x if x != 0 else math.copysign(math.inf, x),
   UnaryOps.NEG: lambda x: (not x) if isinstance(x, bool) else -x,
   BinaryOps.SHR: operator.rshift, BinaryOps.SHL: operator.lshift,
   BinaryOps.MUL: operator.mul, BinaryOps.ADD: operator.add, BinaryOps.SUB: operator.sub,
@@ -127,9 +128,16 @@ python_alu = {
   BinaryOps.MOD: lambda x,y: abs(int(x))%abs(int(y))*(1,-1)[x<0], BinaryOps.IDIV: lambda x, y: int(x/y) if y != 0 else x*math.inf,
   TernaryOps.WHERE: lambda x,y,z: y if x else z}
 
+def truncate_fp16(x):
+  try:
+    x = float(x)
+    struct.pack("@e", x)
+    return x
+  except OverflowError: return math.copysign(math.inf, x)
+
 truncate: Dict[DType, Callable] = {dtypes.bool: bool,
-  # TODO: float16 and bfloat16?
-  dtypes.float32: lambda x: ctypes.c_float(x).value, dtypes.float64: lambda x: ctypes.c_double(x).value,
+  # TODO: bfloat16
+  dtypes.float16: truncate_fp16, dtypes.float32: lambda x: ctypes.c_float(x).value, dtypes.float64: lambda x: ctypes.c_double(x).value,
   dtypes.uint8: lambda x: ctypes.c_uint8(x).value, dtypes.uint16: lambda x: ctypes.c_uint16(x).value,
   dtypes.uint32: lambda x: ctypes.c_uint32(x).value, dtypes.uint64: lambda x: ctypes.c_uint64(x).value,
   dtypes.int8: lambda x: ctypes.c_int8(x).value, dtypes.int16: lambda x: ctypes.c_int16(x).value,
