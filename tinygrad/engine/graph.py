@@ -77,13 +77,12 @@ def log_lazybuffer(lb:'LazyBuffer', scheduled=False):
 
 def _tree(luop:Union[LazyOp,UOp], cycles, cnt, prefix=""):
   cnt[0] += 1
-  if len(src:=luop.src if hasattr(luop,'vin')else luop.src) == 0:
-    return [f"━━ {prefix}{luop.op.name} {luop.arg if luop.arg else ''}"]
+  if len(luop.src) == 0: return [f"━━ {prefix}{luop.op.name} {luop.arg if luop.arg else ''}"]
   if (lid := id(luop)) in cycles and cycles[lid][1] > (tcnt := getenv("TREE_CYCLE_CNT", 5)) and tcnt >= 0:
-    return [f"━⬆︎ goto {cycles[id(luop)][0]}: {(luop.op if hasattr(luop,'op')else luop.op).name}"]
+    return [f"━⬆︎ goto {cycles[id(luop)][0]}: {luop.op.name}"]
   cycles[lid] = (cnt[0], 1 if lid not in cycles else cycles[lid][1]+1)
   lines = [f"━┳ {prefix}{luop.op.name} {luop.arg if luop.arg else ''}"]
-  childs = [_tree(c, cycles, cnt) for c in src[:]]
+  childs = [_tree(c, cycles, cnt) for c in luop.src[:]]
   for c in childs[:-1]: lines += [f" ┣{c[0]}"] + [f" ┃{l}" for l in c[1:]]
   return lines + [" ┗"+childs[-1][0]] + ["  "+l for l in childs[-1][1:]]
 
