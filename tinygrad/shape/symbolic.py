@@ -19,6 +19,8 @@ class Node:
   # substitute Variables with the values in var_vals
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node: raise RuntimeError(self.__class__.__name__)
   def unbind(self) -> Tuple[Node, Optional[int]]: return self.substitute({v: v.unbind()[0] for v in self.vars() if v.val is not None}), None
+  @property
+  def val(self): raise NotImplementedError("val is only implemented for sint")
 
   @functools.cached_property
   def key(self) -> str: return self.render(ctx="DEBUG")
@@ -123,7 +125,7 @@ class Variable(Node):
     self._val: Optional[int] = None
   @property
   def val(self):
-    assert self._val is not None, f"Variable isn't bound, can't access val of {self}"
+    if self._val is None: raise AttributeError(f"Variable isn't bound, can't access val of {self}")
     return self._val
   def bind(self, val):
     assert self._val is None and self.min<=val<=self.max, f"cannot bind {val} to {self}"
@@ -147,6 +149,8 @@ class NumNode(Node):
   def __eq__(self, other): return self.b == other
   def __hash__(self): return hash(self.b)  # needed with __eq__ override
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node: return self
+  @property
+  def val(self): return self.b
 
 def create_node(ret:Node):
   assert ret.min <= ret.max, f"min greater than max! {ret.min} {ret.max} when creating {type(ret)} {ret}"
@@ -209,6 +213,8 @@ class MulNode(OpNode):
     return (self.a.min*self.b.min, self.a.max*self.b.max) if self.b.min >= 0 else (self.a.max*self.b.min, self.a.min*self.b.max)
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node:
     return self.a.substitute(var_vals) * (self.b if isinstance(self.b, int) else self.b.substitute(var_vals))
+  @property
+  def val(self): return self.a.val * (self.b if isinstance(self.b, int) else self.b.val)
 
 class DivNode(OpNode):
   def __floordiv__(self, b: Union[Node, int], _=False): return self.a//(self.b*b) # two divs is one div
@@ -284,6 +290,9 @@ class SumNode(RedNode):
 
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node:
     return Node.sum([node.substitute(var_vals) for node in self.nodes])
+
+  @property
+  def val(self): return sum(node.val for node in self.nodes)
 
   # recursively expand sumnode components
   # TODO: can remove this if there's no SumNode inside SumNode
