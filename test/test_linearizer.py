@@ -5,7 +5,7 @@ from dataclasses import replace
 from test.external.fuzz_linearizer import compare_linearizer
 
 from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError
-from tinygrad.codegen.linearizer import Linearizer, UOp, UOps, expand_node, expand_idxs
+from tinygrad.codegen.linearizer import Linearizer, UOp, UOps, expand_node, expand_idxs, get_grouped_dims
 from tinygrad.device import Device, Buffer
 from tinygrad.ops import BinaryOps, BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, TernaryOps, ReduceOps, UnaryOps
 from tinygrad.renderer import TensorCore
@@ -611,13 +611,38 @@ class TestLinearizer(unittest.TestCase):
         end_range = [i for i, x in enumerate(k.uops) if x.uop is UOps.ENDRANGE][0]
         assert end_range < k.uops.uops.index(u)
 
-  def test_limit_dims_to_max_5d_global(self):
-    t = Tensor.empty(3, 4, 5, 6, 7).pad(((1, 1), (1, 1), (1, 1), (1, 1), (1, 1))) + 1
-    sched = [si for si in create_schedule([t.lazydata]) if si.ast[0].op not in LoadOps]
-    assert len(sched) == 1
-    lin = Linearizer(*sched[0].ast)
-    assert lin.full_shape[:lin.global_dims] == (5, 6, 7, 8, 9)
-    lin.limit_dims_to_max(global_max=[16, 16, 16], local_max=[16, 16, 16])
+  def test_grouped_dims(self):
+    def _assert_grouped_dims(prefix, dims, max_sizes, reverse_dims, expected_sizes):
+      idxs, loop_idxs, sizes = get_grouped_dims(prefix, 0, dims, max_sizes, reverse_dims)
+      assert len(idxs) == len(dims), f"expected idxs to have same length as dims {len(dims)}, got {len(idxs)}"
+      assert len(loop_idxs) == min(len(sizes), len(dims)), f"expected idxs to have length {min(len(sizes), len(dims))}, got {len(loop_idxs)}"
+      assert sizes == expected_sizes, f"expected sizes={expected_sizes}, got {sizes=}"
+      for i in range(len(dims)):
+        assert idxs[i].max+1 == dims[i], f"idxs[{i}] should have max {dims[i]-1}"
+      for i in range(len(loop_idxs)):
+        assert loop_idxs[i].expr.startswith(prefix), f"loop_idxs[{i}] must start with {prefix}"
+        assert loop_idxs[i].max+1 == sizes[i], f"loop_idxs[{i}] should have max {sizes[i]-1}"
+
+    _assert_grouped_dims("gidx", (2,), (16,16,16,), False, [2,1,1])
+    _assert_grouped_dims("gidx", (2,3), (16,16,16,), False, [2,3,1])
+    _assert_grouped_dims("gidx", (2,3), (16,16,16,), True, [3,2,1])
+    _assert_grouped_dims("gidx", (2,3,4,), (16,16,16,), False, [2,3,4])
+    _assert_grouped_dims("gidx", (2,3,4,5,), (16,16,16,), False, [6,4,5])
+    # _assert_grouped_dims("gidx", (2,3,4,5,), (16,16,16,), True, [5,12,2]) # this is the new linearizer way
+    # _assert_grouped_dims("gidx", (2,3,4,5,), (32,16,16,), True, [20,3,2]) # this is the new linearizer way
+    _assert_grouped_dims("gidx", (2,3,4,5,), (16,16,16,), True, [5,4,6]) # this is the old linearizer way - TODO: remove
+    _assert_grouped_dims("gidx", (64,3,4,), (16,16,16,), False, [16,12,4])
+    _assert_grouped_dims("gidx", (64,3,4,), (16,4,16,), False, [16,4,12])
+    _assert_grouped_dims("gidx", (64,3,4,), (16,16,16,), True, [12,16,4])
+
+    with self.assertRaises(AssertionError): # dim too large and not factorable
+      get_grouped_dims("gidx", 0, (23,), (16,16,16,), False,)
+
+    with self.assertRaises(AssertionError): # too large for sizes
+      get_grouped_dims("gidx", 0, (2,3,4,5,6), (16,16,16,), False,)
+
+    with self.assertRaises(AssertionError): # variable too large
+      get_grouped_dims("gidx", 0, (Variable("start_pos", 0, 17),3,4), (16,16,16,), False,)
 
   def test_sum_collapse(self):
     t = Tensor([2]).reshape(1, 1).expand(256, 256).sum()
