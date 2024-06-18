@@ -307,18 +307,17 @@ class TestTinygrad(unittest.TestCase):
     if is_dtype_supported(dtypes.float16):
       data = [math.nan, -math.inf, 65504, 65519, 65519.999, 65520, 65520.1]
       data = data + [-x for x in data]
-      np.testing.assert_allclose(Tensor(data, dtype=dtypes.float16).numpy(), np.array(data, dtype=np.float16))
+      np.testing.assert_allclose(Tensor(data, dtype=dtypes.float16).numpy(), np.array(data).astype(np.float16))
 
-    # TODO: numpy changed this behavior in 2.0
-    # # uint32
-    # data = [1 << 33, 1 << 32, 1 << 32 - 1, 1]
-    # data = data + [-x for x in data]
-    # np.testing.assert_allclose(Tensor(data, dtype=dtypes.uint32).numpy(), np.array(data, dtype=np.uint32))
+    # uint32
+    data = [1 << 33, 1 << 32, 1 << 32 - 1, 1]
+    data = data + [-x for x in data]
+    np.testing.assert_allclose(Tensor(data, dtype=dtypes.uint32).numpy(), np.array(data).astype(np.uint32))
 
-    # # int32
-    # data = [1 << 33, 1 << 32, 1 << 32 - 1, 1]
-    # data = data + [-x for x in data]
-    # np.testing.assert_allclose(Tensor(data, dtype=dtypes.int32).numpy(), np.array(data, dtype=np.int32))
+    # int32
+    data = [1 << 33, 1 << 32, 1 << 32 - 1, 1]
+    data = data + [-x for x in data]
+    np.testing.assert_allclose(Tensor(data, dtype=dtypes.int32).numpy(), np.array(data).astype(np.int32))
 
   def test_tensor_list_ndarray(self):
     data = [np.array([1, 2, 3]), np.array([1, 2, 3]), np.array([1, 2, 3])]
