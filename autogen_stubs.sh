@@ -39,12 +39,11 @@ generate_opencl_error_codes(){
 
   # Get all Errors 
   sed -i -n -E '/#define CL_BUILD_[SNEI][A-Z0-9_]*|[A-Z0-9_]*EXP|[A-Z0-9_]*END_INTEL/b;/#define \w*\s*0x40D[4-5]/p;/#define \w*\s*-[0-9]*/p' $file
-  sed -i 's/#define //' $file
 
-  # Form dict of errors and clean whitespaces
+  #Form dict
   sed -n -i '1i\opencl_status_codes = {}
-      { s/\([^,]*\)\s*\([-][0-9].*\)/opencl_status_codes[\2] = "\1"/; p }' $file 
-  sed -n -i 's/\([^,]*\) *\(0x[a-zA-Z0-9].*\)/opencl_status_codes[\2] = "\1"/; p ' $file
+  { s/#define \([^,]*\)\s*\([-][0-9].*\)/opencl_status_codes[\2] = "\1"/};
+  { s/#define \([^,]*\)\s*\(0x40D[4|5].*\)/opencl_status_codes[\2] = "\1"/; p };' $file
   cat $file >> $BASE/opencl.py
 }
 
