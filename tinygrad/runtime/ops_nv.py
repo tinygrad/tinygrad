@@ -172,15 +172,15 @@ class HWComputeQueue(HWQueue):
       qmd.release0_payload_upper = signal_value >> 32
       qmd.release0_enable = 1
 
-    if self.cmd_idx_to_qmd.get(len(self) - 1) is None:
+    if (prev_qmd:=self.cmd_idx_to_qmd.get(len(self) - 1)) is None:
       self.q += [nvmethod(1, nv_gpu.NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI, 1), (1 << 12) | (1 << 4) | (1 << 0)]
       self.q += [nvmethod(1, nv_gpu.NVC6C0_SEND_PCAS_A, 0x1), qmd_addr >> 8]
       self.q += [nvmethod(1, nv_gpu.NVC6C0_SEND_SIGNALING_PCAS2_B, 0x1), 9]
     else:
-      self.cmd_idx_to_qmd[len(self) - 1].dependent_qmd0_pointer = qmd_addr >> 8
-      self.cmd_idx_to_qmd[len(self) - 1].dependent_qmd0_action = 1
-      self.cmd_idx_to_qmd[len(self) - 1].dependent_qmd0_prefetch = 1
-      self.cmd_idx_to_qmd[len(self) - 1].dependent_qmd0_enable = 1
+      prev_qmd.dependent_qmd0_pointer = qmd_addr >> 8
+      prev_qmd.dependent_qmd0_action = 1
+      prev_qmd.dependent_qmd0_prefetch = 1
+      prev_qmd.dependent_qmd0_enable = 1
     return self._mark_command_end()
 
   def update_exec(self, cmd_idx, global_size, local_size):
