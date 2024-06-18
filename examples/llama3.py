@@ -37,7 +37,8 @@ class Tokenizer:
   def stop_tokens(self): return {self.special_tokens["<|end_of_text|>"], self.special_tokens["<|eot_id|>"]}
 
   def decode(self, toks): return self.model.decode(toks)
-  def encode(self, text, allow_special=False): return self.model.encode(text, allowed_special="all" if allow_special else set())
+  def encode(self, text, allow_special=False):
+    return self.model.encode(text, allowed_special="all" if allow_special else set(), disallowed_special=set())
 
 # **** helper functions ****
 def concat_weights(models, device=None):
