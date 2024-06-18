@@ -517,7 +517,7 @@ class Linearizer(Kernel):
       for off in range(len(acc)):
         if input_acc[off] != acc[off]:
           acc[off] = UOp(UOps.PHI, input_acc[off].dtype, (input_acc[off], acc[off]))
-    else: ret = [UOp.alu(x.op, *vin) for vin in zip(*values)]
+    else: ret = [UOp.alu(x.op, *src) for src in zip(*values)]
     cache[x] = ret
     return ret
 
