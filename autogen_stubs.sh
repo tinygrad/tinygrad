@@ -34,28 +34,18 @@ generate_opencl_error_codes(){
     popd
   fi
   
-  line220=$(sed -n '220p' $OPENCL_HEADERS_SRC/CL/cl.h) # See if line220 is empty, if true deletes it
-  if [ -z "$line220" ]; then 
-    sed -i '220d' $OPENCL_HEADERS_SRC/CL/cl.h
-  fi
   file=$OPENCL_HEADERS_SRC/opencl_headers_coalesce.h
   cat $OPENCL_HEADERS_SRC/CL/*.h > $file # Form a single file from all headers, to extract all errors present
 
-  # Get all #defines under a Error codes comment
-  sed -i 's/Codes/codes/p' $file
-  sed -n -i -e '/\/\* Error \([a-z].*\) \*\//,/^\s*$/p' $file
-  sed -n -i '/#define [A-Z_]/p' $file 
-  sed -i 's/#define//' $file 
-
+  # Get all Errors 
+  sed -i -n -E '/#define CL_BUILD_[SNEI][A-Z0-9_]*|[A-Z0-9_]*EXP|[A-Z0-9_]*END_INTEL/b;/#define \w*\s*0x40D[4-5]/p;/#define \w*\s*-[0-9]*/p' $file
+  sed -i 's/#define //' $file
 
   # Form dict of errors and clean whitespaces
   sed -n -i '1i\  opencl_status_codes = {}
-      { s/\([^,]*\) *\([-][0-9].*\)/opencl_status_codes[\2] = "\1"/; p }' $file 
+      { s/\([^,]*\)\s*\([-][0-9].*\)/opencl_status_codes[\2] = "\1"/; p }' $file 
   sed -n -i 's/\([^,]*\) *\(0x[a-zA-Z0-9].*\)/opencl_status_codes[\2] = "\1"/; p ' $file
-  sed -n -i 's/\(CL_SUCCESS\) *\(0$\)/opencl_status_codes[\2] = "\1"/; p ' $file
-  sed -i -e 's/"\(\s*\)\(.*\)\(\s*\)\(\r*\)"/"\2"/' $file 
-  sed -i -e 's/\(\s*\)\(.*\)/\2/' $file 
-  cat $file >> $BASE/opencl.py
+  #cat $file >> $BASE/opencl.py
 }
 
 generate_opencl() {
