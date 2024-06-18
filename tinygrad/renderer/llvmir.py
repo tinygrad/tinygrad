@@ -19,7 +19,6 @@ code_for_op: Final[Dict[Op, Callable]] = {
   UnaryOps.SIN: lambda builder, x, dtype: builder.call(builder.module.declare_intrinsic('llvm.sin', [x.type]), [x], fastmath=MFLAGS),
   UnaryOps.SQRT: lambda builder, x, dtype: builder.call(builder.module.declare_intrinsic('llvm.sqrt', [x.type]), [x], fastmath=MFLAGS),
   BinaryOps.ADD: lambda builder, x, y, dtype: builder.or_(x, y) if dtype == dtypes.bool else builder.add(x, y) if dtypes.is_int(dtype) else builder.fadd(x, y, flags=MFLAGS),  # noqa: E501
-  BinaryOps.SUB: lambda builder, x, y, dtype: builder.sub(x, y) if dtypes.is_int(dtype) else builder.fsub(x, y, flags=MFLAGS),
   BinaryOps.MUL: lambda builder, x, y, dtype: builder.mul(x, y) if is_bool_or_unsigned(dtype) or dtypes.is_int(dtype) else builder.fmul(x, y, flags=MFLAGS),  # noqa: E501
   BinaryOps.IDIV: lambda builder, x, y, dtype: builder.udiv(x, y) if is_bool_or_unsigned(dtype) else builder.sdiv(x, y),
   BinaryOps.CMPLT: lambda builder, x, y, dtype: builder.icmp_unsigned("<", x, y) if is_bool_or_unsigned(dtype) else builder.icmp_signed("<", x, y) if dtypes.is_int(dtype) else builder.fcmp_unordered("<", x, y, flags=MFLAGS),  # noqa: E501
@@ -69,16 +68,17 @@ def const(args, dtype): return ir.Constant(dtype_to_llvm_dtype[dtype], args)
 
 class LLVMRenderer(Renderer):
   device = "LLVM"
-  supports_float4=False
-  has_local=False
-  has_shared=False
+  supports_float4 = False
+  has_local = False
+  has_shared = False
+  global_max = None
 
   def render(self, name:str, uops:UOpGraph) -> str:
     # all llvm stuff goes into a module
     module = ir.Module(name=__file__)
 
     # extract global buffers (NOTE: this isn't right if DEFINE_GLOBAL is out of order)
-    buf_to_dtype = {u.arg:u.dtype for u in uops if u.uop in {UOps.DEFINE_GLOBAL, UOps.DEFINE_VAR}}
+    buf_to_dtype = {u.arg:u.dtype for u in uops if u.op in {UOps.DEFINE_GLOBAL, UOps.DEFINE_VAR}}
     buf_index = {x:i for i,x in enumerate(buf_to_dtype.keys())}
 
     # create llvm function
@@ -101,7 +101,7 @@ class LLVMRenderer(Renderer):
       if not isinstance(dtype, PtrDType) and dtype == dtypes.int32: lvars[bufname] = bb[-1].sext(func.args[buf_index[bufname]], ir.IntType(32))
 
     for u in uops:
-      uop,dtype,vin,args = u.uop,u.dtype,u.vin,u.arg
+      uop,dtype,vin,args = u.op,u.dtype,u.src,u.arg
       if uop is UOps.STORE:
         element = cast(bb, lvars[vin[2]], vin[2].dtype, vin[0].dtype)
         if len(vin) > 3:
@@ -115,7 +115,7 @@ class LLVMRenderer(Renderer):
         lvars[vin[0]].add_incoming(idx_p1, bb[-1].block)
         for n,phi in phis: phi.add_incoming(lvars[n], bb[-1].block)
         bb.append(ir.IRBuilder(func.append_basic_block(f"loop_exit_{len(loop_blocks)}")))
-        bb[-2].cbranch(bb[-2].icmp_unsigned("<", idx_p1, lvars[vin[0].vin[1]]), loop_entry_bb, bb[-1].block)
+        bb[-2].cbranch(bb[-2].icmp_unsigned("<", idx_p1, lvars[vin[0].src[1]]), loop_entry_bb, bb[-1].block)
       else:
         assert dtype is not None, f"None dtype for uop {uop}"
         if uop is UOps.RANGE:
@@ -147,7 +147,7 @@ class LLVMRenderer(Renderer):
           lvars[u] = lvars[vin[1]]
           # PHI UOps can link to other PHI Uops, backtrace this to DEFINE_ACC
           backward = vin[0]
-          while backward.uop is UOps.PHI: backward = backward.vin[0]
+          while backward.op is UOps.PHI: backward = backward.src[0]
           lvars[backward] = lvars[u]
         elif uop is UOps.ALU:
           lvars[u] = code_for_op[args](bb[-1], *[lvars[x] for x in vin], dtype if args not in (BinaryOps.CMPLT, BinaryOps.CMPNE) else vin[0].dtype)

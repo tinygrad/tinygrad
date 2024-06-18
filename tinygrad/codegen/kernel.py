@@ -1,6 +1,6 @@
 from __future__ import annotations
 from collections import defaultdict
-import math, itertools
+import itertools
 from typing import DefaultDict, NamedTuple, Optional, List, Tuple, cast, Dict, Union
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, UNSAFE_PAD_OPS
 from tinygrad.device import Device
@@ -279,33 +279,6 @@ class Kernel:
     for i,x in enumerate(rets[:len(self.sts)]): self.sts[i] = self.sts[i].reshape(tuple([y[0] for y in x]))
 
   # ******************** helpers ********************
-
-  def _limit_size(self, x: Tuple[int], max_size: List[Union[int,float]]) -> Tuple[int, ...]:
-    new_shape = list(x)
-    for i in range(len(new_shape)):
-      next_idx = (i + 1) % len(new_shape)
-      while new_shape[i] > max_size[i]:
-        # TODO: what if new_shape[i] is not a multiple of 2??
-        new_shape[i] = new_shape[i] // 2
-        next_idx = next_idx if new_shape[next_idx] <= max_size[next_idx] else (next_idx + 1) % len(new_shape)
-        new_shape[next_idx] = new_shape[next_idx] * 2
-    return tuple(new_shape)
-
-  def limit_dims_to_max(self, global_max: List[int], local_max: List[int]):
-    # Check the global allocation limit, current the global_size will be flipped during codegen
-    # and then padded right with 1s if its length < 3 which makes this part a bit awkward to write
-    if self.global_dims > 0:
-      if global_max:
-        tmp = global_max[:self.global_dims] + (local_max[:self.local_dims] if local_max else [])
-        if max(global_max) < max(self.full_shape[:self.global_dims]):
-          self.reshape_and_permute(lambda x: self._limit_size(x, tmp + [math.inf] * (len(self.full_shape)-len(tmp))), None)
-        assert max(global_max) >= max(self.full_shape[:self.global_dims]), f"device max allocation {max(self.full_shape[:self.global_dims])} exceeds global dim maximum {max(global_max)}"  # noqa: E501
-      for i in range(self.global_dims-1):
-        if i < len(global_max) and self.full_shape[i] > global_max[i]:
-          order = list(range(len(self.full_shape)))
-          order[i], order[self.global_dims-1] = order[self.global_dims-1], order[i]
-          self.reshape_and_permute(None, order)
-          if DEBUG >= 3: print("permuted global dim", order, "due to allocation exceeds global limit")
 
   def alias_buffer(self, op:LazyOp, i:int, pattern:List[int]) -> None:
     assert len(pattern) == len(self.sts[i].shape), f"must include a pattern for each shape {pattern} {self.sts[i].shape}"

@@ -107,7 +107,6 @@ class TestFloatUOps(TestUOps):
   def test_sqrt(self): self._test_uop_fxn(UnaryOps.SQRT, lambda a: math.sqrt(a) if a >= 0 else float('nan'))
 
   def test_add(self): self._test_bop_fxn(BinaryOps.ADD, lambda a,b: a+b)
-  def test_sub(self): self._test_bop_fxn(BinaryOps.SUB, lambda a,b: a-b)
   def test_mul(self): self._test_bop_fxn(BinaryOps.MUL, lambda a,b: a*b)
   def test_max(self): self._test_bop_fxn(BinaryOps.MAX, lambda a,b: max(a,b))
   def test_cmplt(self): self._test_bop_fxn(BinaryOps.CMPLT, lambda a,b: a<b)
@@ -119,7 +118,6 @@ class TestFloatUOps(TestUOps):
 class TestNonFloatUOps(TestUOps):
   def test_neg_int32(self): self._test_uop_fxn(UnaryOps.NEG, lambda a: -a, (dtypes.int32, ))
   def test_add_int32(self): self._test_bop_fxn(BinaryOps.ADD, lambda a,b: int(a)+int(b), (dtypes.int32, dtypes.int32))
-  def test_sub_int32(self): self._test_bop_fxn(BinaryOps.SUB, lambda a,b: int(a)-int(b), (dtypes.int32, dtypes.int32))
   def test_mul_int32(self): self._test_bop_fxn(BinaryOps.MUL, lambda a,b: int(a)*int(b), (dtypes.int32, dtypes.int32))
   @unittest.skipUnless(getenv("PTX"), "only ptx uses bitshifts")
   def test_shr_int32(self): self._test_bop_fxn(BinaryOps.SHR, lambda a,b: int(a)>>int(b), (dtypes.int32, dtypes.int32), no_b_neg=True)
@@ -136,22 +134,6 @@ class TestNonFloatUOps(TestUOps):
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "dtype not supported")
   def test_where_float16(self):
     self._test_top_fxn(TernaryOps.WHERE, lambda a,b,c: b if a!=0 else c, (dtypes.bool, dtypes.float16, dtypes.float16))
-
-  def test_neg_fold(self):
-    data0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (0, True))
-    data1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (1, False))
-    data2 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (2, False))
-    idx = UOp.const(dtypes.int, 0)
-    x = UOp(UOps.LOAD, dtypes.int, (data1, idx,))
-    y = UOp(UOps.LOAD, dtypes.int, (data2, idx,))
-
-    value = x+(-y)
-    uops = UOpGraph([UOp(UOps.STORE, None, (data0, idx, value))])
-    assert uops[-1].vin[2].arg is BinaryOps.SUB
-
-    value = -y+x
-    uops = UOpGraph([UOp(UOps.STORE, None, (data0, idx, value))])
-    assert uops[-1].vin[2].arg is BinaryOps.SUB
 
 class TestBoolUOps(TestUOps):
   def _test_uop_bool_fxn(self, op, fxn):
@@ -221,14 +203,14 @@ class TestExecALU(TestUOps):
   def test_overflow(self):
     self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.uint8, (250, 250)), 244)
     self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.uint8, (256, 0)), 0)
-    self.assertEqual(exec_alu(BinaryOps.SUB, dtypes.uint8, (0, 1)), 255)
-    self.assertEqual(exec_alu(BinaryOps.SUB, dtypes.uint8, (0, 1000)), 24)
+    self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.uint8, (0, -1)), 255)
+    self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.uint8, (0, -1000)), 24)
 
     self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.int8, (127, 0)), 127)
     self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.int8, (-128, 0)), -128)
-    self.assertEqual(exec_alu(BinaryOps.SUB, dtypes.int8, (-100, 100)), 56)
-    self.assertEqual(exec_alu(BinaryOps.SUB, dtypes.int8, (-1000, 0)), 24)
-    self.assertEqual(exec_alu(BinaryOps.SUB, dtypes.int8, (-130, 0)), 126)
+    self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.int8, (-100, -100)), 56)
+    self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.int8, (-1000, -0)), 24)
+    self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.int8, (-130, -0)), 126)
 
     self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.int8, (1, 1)), 2)
     self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.int8, (-128, 0)), -128)
@@ -244,7 +226,7 @@ class TestConstantFolding(unittest.TestCase):
     si = create_schedule([t.lazydata])
     assert len(si) == 1
     ji = lower_schedule_item(si[-1])
-    assert any(uop.uop is UOps.BITCAST for uop in ji.prg.p.uops), f"{[uop.uop for uop in ji.prg.p.uops]} does not contain bitcast"
+    assert any(uop.op is UOps.BITCAST for uop in ji.prg.p.uops), f"{[uop.op for uop in ji.prg.p.uops]} does not contain bitcast"
 
 class TestGatedStoreRewrite(unittest.TestCase):
   @unittest.skip("not yet implemented")
@@ -258,9 +240,9 @@ class TestGatedStoreRewrite(unittest.TestCase):
     gate = UOp(UOps.ALU, dtypes.bool, (gidx0, UOp.const(dtypes.int, 1)), arg=BinaryOps.CMPLT)
     uops = UOpGraph([UOp(UOps.STORE, None, (gmem, idx, value, gate))])
     if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
-    if_uop = next(u for u in uops if u.uop is UOps.IF)
-    endif = next(u for u in uops if u.uop is UOps.ENDIF)
-    assert endif.vin[0] is if_uop
+    if_uop = next(u for u in uops if u.op is UOps.IF)
+    endif = next(u for u in uops if u.op is UOps.ENDIF)
+    assert endif.src[0] is if_uop
     nested_uops = tuple(uops.uops[uops.uops.index(if_uop)+1:uops.uops.index(endif)])
     assert nested_uops == (gmem, gidx0, idx, value)
 
@@ -279,9 +261,9 @@ class TestGatedStoreRewrite(unittest.TestCase):
     outs.append(UOp(UOps.STORE, None, (gmem1, idx, value1)))
     uops = UOpGraph(outs)
     if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
-    if_uop = next(u for u in uops if u.uop is UOps.IF)
-    endif = next(u for u in uops if u.uop is UOps.ENDIF)
-    assert endif.vin[0] is if_uop
+    if_uop = next(u for u in uops if u.op is UOps.IF)
+    endif = next(u for u in uops if u.op is UOps.ENDIF)
+    assert endif.src[0] is if_uop
     nested_uops = tuple(uops.uops[uops.uops.index(if_uop)+1:uops.uops.index(endif)])
     assert nested_uops == (gmem0, value0)
 
