@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Union, Tuple, Any, List, Dict, Callable
-import functools, hashlib, math, operator, ctypes
+import functools, hashlib, math, operator, ctypes, struct
 from enum import Enum, auto
 from dataclasses import dataclass
 from tinygrad.helpers import prod, dedup
@@ -128,9 +128,16 @@ python_alu = {
   BinaryOps.MOD: lambda x,y: abs(int(x))%abs(int(y))*(1,-1)[x<0], BinaryOps.IDIV: lambda x, y: int(x/y) if y != 0 else x*math.inf,
   TernaryOps.WHERE: lambda x,y,z: y if x else z}
 
+def truncate_fp16(x):
+  try:
+    x = float(x)
+    struct.pack("@e", x)
+    return x
+  except OverflowError: return x * math.inf
+
 truncate: Dict[DType, Callable] = {dtypes.bool: bool,
-  # TODO: float16 and bfloat16?
-  dtypes.float32: lambda x: ctypes.c_float(x).value, dtypes.float64: lambda x: ctypes.c_double(x).value,
+  # TODO: bfloat16
+  dtypes.float16: truncate_fp16, dtypes.float32: lambda x: ctypes.c_float(x).value, dtypes.float64: lambda x: ctypes.c_double(x).value,
   dtypes.uint8: lambda x: ctypes.c_uint8(x).value, dtypes.uint16: lambda x: ctypes.c_uint16(x).value,
   dtypes.uint32: lambda x: ctypes.c_uint32(x).value, dtypes.uint64: lambda x: ctypes.c_uint64(x).value,
   dtypes.int8: lambda x: ctypes.c_int8(x).value, dtypes.int16: lambda x: ctypes.c_int16(x).value,
