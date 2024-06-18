@@ -1793,7 +1793,7 @@ __all__ = \
     'struct__cl_kernel', 'struct__cl_mem', 'struct__cl_name_version',
     'struct__cl_platform_id', 'struct__cl_program',
     'struct__cl_sampler', 'union__cl_image_desc_0']
-  opencl_status_codes = {}
+opencl_status_codes = {}
 opencl_status_codes[-1002] = "CL_INVALID_D3D10_DEVICE_KHR                         "
 opencl_status_codes[-1003] = "CL_INVALID_D3D10_RESOURCE_KHR                       "
 opencl_status_codes[-1004] = "CL_D3D10_RESOURCE_ALREADY_ACQUIRED_KHR              "

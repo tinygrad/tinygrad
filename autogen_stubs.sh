@@ -42,7 +42,7 @@ generate_opencl_error_codes(){
   sed -i 's/#define //' $file
 
   # Form dict of errors and clean whitespaces
-  sed -n -i '1i\  opencl_status_codes = {}
+  sed -n -i '1i\opencl_status_codes = {}
       { s/\([^,]*\)\s*\([-][0-9].*\)/opencl_status_codes[\2] = "\1"/; p }' $file 
   sed -n -i 's/\([^,]*\) *\(0x[a-zA-Z0-9].*\)/opencl_status_codes[\2] = "\1"/; p ' $file
   cat $file >> $BASE/opencl.py
