@@ -1,3 +1,4 @@
+# pylint: skip-file
 # a python uops emulator
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
