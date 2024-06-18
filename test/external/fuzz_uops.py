@@ -58,9 +58,9 @@ def find_all_toposorts(graph:DefaultDict[UOp, List[UOp]], in_degree:DefaultDict[
   def recurse_paths(path:List[UOp]):
     for v, d in in_degree.items():
       if d != 0 or v in visited: continue
-      if v.op is UOps.DEFINE_ACC and any(l not in path for l in v.vin): continue
+      if v.op is UOps.DEFINE_ACC and any(l not in path for l in v.src): continue
       for u in graph[v]: in_degree[u] -= 1
-      if v.op is UOps.DEFINE_ACC: path.insert(min(path.index(l) for l in v.vin), v)
+      if v.op is UOps.DEFINE_ACC: path.insert(min(path.index(l) for l in v.src), v)
       else: path.append(v)
       visited.add(v)
       recurse_paths(path)

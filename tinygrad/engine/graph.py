@@ -77,7 +77,7 @@ def log_lazybuffer(lb:'LazyBuffer', scheduled=False):
 
 def _tree(luop:Union[LazyOp,UOp], cycles, cnt, prefix=""):
   cnt[0] += 1
-  if len(src:=luop.vin if hasattr(luop,'vin')else luop.src) == 0:
+  if len(src:=luop.src if hasattr(luop,'vin')else luop.src) == 0:
     return [f"━━ {prefix}{luop.op.name} {luop.arg if luop.arg else ''}"]
   if (lid := id(luop)) in cycles and cycles[lid][1] > (tcnt := getenv("TREE_CYCLE_CNT", 5)) and tcnt >= 0:
     return [f"━⬆︎ goto {cycles[id(luop)][0]}: {(luop.op if hasattr(luop,'op')else luop.op).name}"]
@@ -97,5 +97,5 @@ def graph_uops(uops:List[UOp]):
   for u in uops:
     if u.op in {UOps.ENDRANGE, UOps.ENDIF}: continue
     G.add_node(uops.index(u), label=f"{str(u.op)[5:]}{(' '+str(u.arg)) if u.arg is not None else ''}\n{str(u.dtype)}", style="filled", fillcolor=colors.get(u.op, "#ffffff"))  # noqa: E501
-    for v in u.vin: G.add_edge(uops.index(v), uops.index(u))
+    for v in u.src: G.add_edge(uops.index(v), uops.index(u))
   save_graph(G, f'{GRAPHPATH}.uops', '-Grankdir=LR')

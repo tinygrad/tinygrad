@@ -242,7 +242,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
     if_uop = next(u for u in uops if u.op is UOps.IF)
     endif = next(u for u in uops if u.op is UOps.ENDIF)
-    assert endif.vin[0] is if_uop
+    assert endif.src[0] is if_uop
     nested_uops = tuple(uops.uops[uops.uops.index(if_uop)+1:uops.uops.index(endif)])
     assert nested_uops == (gmem, gidx0, idx, value)
 
@@ -263,7 +263,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
     if_uop = next(u for u in uops if u.op is UOps.IF)
     endif = next(u for u in uops if u.op is UOps.ENDIF)
-    assert endif.vin[0] is if_uop
+    assert endif.src[0] is if_uop
     nested_uops = tuple(uops.uops[uops.uops.index(if_uop)+1:uops.uops.index(endif)])
     assert nested_uops == (gmem0, value0)
 

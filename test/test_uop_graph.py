@@ -69,8 +69,8 @@ class TestUOpGraph(unittest.TestCase):
     out = g.uops[-1]
     self.assertEqual(out.op, UOps.ALU)
     self.assertEqual(out.arg, BinaryOps.ADD)
-    self.assertEqual(out.vin[1].op, UOps.CONST)
-    self.assertEqual(out.vin[1].arg, 6)
+    self.assertEqual(out.src[1].op, UOps.CONST)
+    self.assertEqual(out.src[1].arg, 6)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

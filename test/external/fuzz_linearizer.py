@@ -16,7 +16,7 @@ from tinygrad.ops import LazyOp, UnaryOps, BufferOps
 from test.helpers import is_dtype_supported
 
 def tuplize_uops(uops:List[UOp]) -> Tuple:
-  return tuple([(x.op, x.dtype, tuple(uops.index(x) for x in x.vin), x.arg) for x in uops])
+  return tuple([(x.op, x.dtype, tuple(uops.index(x) for x in x.src), x.arg) for x in uops])
 
 device = Device[Device.DEFAULT]
 

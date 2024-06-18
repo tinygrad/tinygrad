@@ -104,10 +104,10 @@ class CStyleLanguage(Renderer):
       c[prefix] += 1
       return ret
 
-    child_count = Counter(v for ru in uops for v in ru.vin)
+    child_count = Counter(v for ru in uops for v in ru.src)
 
     for u in uops:
-      uop,dtype,vin,args = u.op,u.dtype,u.vin,u.arg
+      uop,dtype,vin,args = u.op,u.dtype,u.src,u.arg
       # these four uops don't have output dtypes
       if uop is UOps.IF:
         kk(f"if ({r[vin[0]]}) {{")

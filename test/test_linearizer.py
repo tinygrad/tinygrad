@@ -246,12 +246,12 @@ class TestLinearizer(unittest.TestCase):
     k.hand_coded_optimizations()
     k.linearize()
     local_buf = [u for u in k.uops if u.op is UOps.DEFINE_LOCAL]
-    self.assertEqual(len(real_local_stores:=[u for u in k.uops if u.op is UOps.STORE and any([lb in u.vin for lb in local_buf])]), 3, \
+    self.assertEqual(len(real_local_stores:=[u for u in k.uops if u.op is UOps.STORE and any([lb in u.src for lb in local_buf])]), 3, \
       f"should have generated 3 BufferOps.STORE to the local buf but got {len(real_local_stores)}")
-    self.assertEqual(len(real_local_loads:=[u for u in k.uops if u.op is UOps.LOAD and any([lb in u.vin for lb in local_buf])]), 3, \
+    self.assertEqual(len(real_local_loads:=[u for u in k.uops if u.op is UOps.LOAD and any([lb in u.src for lb in local_buf])]), 3, \
       f"should have generated 3 BufferOps.LOAD to the local buf but got {len(real_local_loads)}")
-    self.assertEqual((real_local_stores[1].vin[1].op, real_local_stores[1].vin[1].arg), (UOps.CONST, 0))
-    self.assertEqual((real_local_loads[1].vin[1].op, real_local_loads[1].vin[1].arg), (UOps.CONST, 0))
+    self.assertEqual((real_local_stores[1].src[1].op, real_local_stores[1].src[1].arg), (UOps.CONST, 0))
+    self.assertEqual((real_local_loads[1].src[1].op, real_local_loads[1].src[1].arg), (UOps.CONST, 0))
     x = Tensor.randn(3,27,32).realize()
     helper_linearizer_ast(ast, [x], wanna_output=[x.numpy().std(axis=2, ddof=0).reshape(-1)])
 
@@ -262,7 +262,7 @@ class TestLinearizer(unittest.TestCase):
     k.upcast()
     k.linearize()
     define_globals = [u for u in k.uops if u.op is UOps.DEFINE_GLOBAL]
-    self.assertEqual(len([u for u in k.uops if u.op is UOps.LOAD and define_globals[1] in u.vin]), 7)
+    self.assertEqual(len([u for u in k.uops if u.op is UOps.LOAD and define_globals[1] in u.src]), 7)
     self.assertEqual(len([u for u in k.uops if u.op is UOps.ALU and u.arg is BinaryOps.ADD]), 25)
     opts = [[Opt(op=OptOps.UPCAST, axis=0, amt=2)], [Opt(op=OptOps.UPCAST, axis=0, amt=4)]]
     x = Tensor.randn(8,7).softmax().realize()
@@ -288,12 +288,12 @@ class TestLinearizer(unittest.TestCase):
     k = Linearizer(*ast)
     k.hand_coded_optimizations()
     k.linearize()
-    def get_recursive_children(x:UOp): return set.union(set(x.vin), *[get_recursive_children(v) for v in x.vin])
+    def get_recursive_children(x:UOp): return set.union(set(x.src), *[get_recursive_children(v) for v in x.src])
     loop = None
     for u in k.uops:
       if u.op is UOps.RANGE: loop = u
       elif loop is None: continue
-      elif u.op is UOps.ENDRANGE and loop in u.vin: loop = None
+      elif u.op is UOps.ENDRANGE and loop in u.src: loop = None
       else: self.assertIn(loop, get_recursive_children(u), f"Any uop within a loop should depend on the loop: {u}")
     x = Tensor.randn(3, 27, 32).realize()
     helper_linearizer_ast(ast, [x], wanna_output= \
@@ -377,7 +377,7 @@ class TestLinearizer(unittest.TestCase):
     lin.linearize()
 
     assert len(lin.uops.uops) <= 7, "too many uops"
-    a_bufs = [u.op for u in lin.uops.uops[-1].vin[2].vin]
+    a_bufs = [u.op for u in lin.uops.uops[-1].src[2].src]
     assert a_bufs == [UOps.LOAD, UOps.CONST]
 
   def test_upcast_cse(self):
@@ -405,7 +405,7 @@ class TestLinearizer(unittest.TestCase):
     stores = [u for u in k.uops if u.op is UOps.STORE]
     assert len(accs) == 0  # it's removed now
     assert len(stores) == 1
-    assert stores[0].vin[-1].dtype == dtypes.float.vec(4)
+    assert stores[0].src[-1].dtype == dtypes.float.vec(4)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
@@ -421,11 +421,11 @@ class TestLinearizer(unittest.TestCase):
     stores = [u for u in k.uops if u.op is UOps.STORE]
 
     # the first store is to lds and can be upcasted
-    assert accs[0].dtype == stores[0].vin[-1].dtype == dtypes.float.vec(4)
-    assert stores[0].vin[0].op is UOps.DEFINE_LOCAL
+    assert accs[0].dtype == stores[0].src[-1].dtype == dtypes.float.vec(4)
+    assert stores[0].src[0].op is UOps.DEFINE_LOCAL
     # the second store is to gds with no upcasts
-    assert accs[1].dtype == stores[1].vin[-1].dtype == dtypes.float
-    assert stores[1].vin[0].op is UOps.DEFINE_GLOBAL
+    assert accs[1].dtype == stores[1].src[-1].dtype == dtypes.float
+    assert stores[1].src[0].op is UOps.DEFINE_GLOBAL
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI is really slow here")
   def test_upcast_multireduce_nested_local_upcast(self):
@@ -572,7 +572,7 @@ class TestLinearizer(unittest.TestCase):
     k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4)]], apply_tc=True, atol=3e-2, rtol=1e-3)[-1]
     for u in k.uops:
       if u.op is UOps.WMMA:
-        assert u.vin[-1].vin[0].op != UOps.PHI
+        assert u.src[-1].src[0].op != UOps.PHI
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_unroll_casted_phi(self):
@@ -582,8 +582,8 @@ class TestLinearizer(unittest.TestCase):
     k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4)]], apply_tc=True, atol=3e-2, rtol=1e-3)[-1]
     for u in k.uops:
       if u.op is UOps.WMMA:
-        assert u.vin[-1].dtype == dtypes.float.vec(prod(tc.thread_local_sizes[2]))
-        assert u.vin[-1].vin[0].op != UOps.PHI
+        assert u.src[-1].dtype == dtypes.float.vec(prod(tc.thread_local_sizes[2]))
+        assert u.src[-1].src[0].op != UOps.PHI
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_unroll_casted_phi_with_children(self):
@@ -594,8 +594,8 @@ class TestLinearizer(unittest.TestCase):
     k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4)]], apply_tc=True, atol=3e-2, rtol=1e-3)[-1]
     for u in k.uops:
       if u.op is UOps.WMMA:
-        assert u.vin[-1].dtype == dtypes.float.vec(prod(tc.thread_local_sizes[2]))
-        assert u.vin[-1].vin[0].op != UOps.PHI
+        assert u.src[-1].dtype == dtypes.float.vec(prod(tc.thread_local_sizes[2]))
+        assert u.src[-1].src[0].op != UOps.PHI
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_simple_unroll_no_between_phi_dependencies(self):
@@ -605,9 +605,9 @@ class TestLinearizer(unittest.TestCase):
     # the uops graph is RANGE -> DEFINE_ACC -> 4x ALU -> 4x PHI -> ENDRANGE
     for u in k.uops:
       if u.op is UOps.PHI:
-        assert u.vin[1].op is UOps.ALU
+        assert u.src[1].op is UOps.ALU
       # children of PHI are placed after ENDRANGE
-      if any(x.op is UOps.PHI for x in u.vin):
+      if any(x.op is UOps.PHI for x in u.src):
         end_range = [i for i, x in enumerate(k.uops) if x.op is UOps.ENDRANGE][0]
         assert end_range < k.uops.uops.index(u)
 
@@ -708,7 +708,7 @@ class TestLinearizer(unittest.TestCase):
     out = x.matmul(y)
     k = helper_linearizer_opt(out)[-1]
     # check that the float4 cast collapses
-    store_vals = [u.vin[-1] for u in k.uops if u.op is UOps.STORE]
+    store_vals = [u.src[-1] for u in k.uops if u.op is UOps.STORE]
     for val in store_vals:
       assert val.dtype == dtypes.float.vec(4) and val.op is not UOps.CAST
 
@@ -717,7 +717,7 @@ class TestLinearizer(unittest.TestCase):
     x = Tensor.randn((4,3,6,6)).realize()
     out = x.flip((0,1)).contiguous()
     k = helper_linearizer_opt(out)[-1]
-    store_val = [u.vin[-1] for u in k.uops if u.op is UOps.STORE][0]
+    store_val = [u.src[-1] for u in k.uops if u.op is UOps.STORE][0]
     assert store_val.dtype == dtypes.float.vec(4) and store_val.op is not UOps.CAST
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
@@ -729,16 +729,16 @@ class TestLinearizer(unittest.TestCase):
     opt = [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUPTOP, 0, 8),
             Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 2)] # upcast accs in both reduces
     k = helper_linearizer_opt(out, opts=[opt])[-1]
-    def get_recursive(uop): return set.union(set(uop.vin), [uop], *[get_recursive(v) for v in uop.vin])
-    local_stores = [u for u in k.uops if u.op is UOps.STORE and any(x.op is UOps.DEFINE_LOCAL for x in get_recursive(u.vin[0]))]
-    global_stores = [u for u in k.uops if u.op is UOps.STORE and any(x.op is UOps.DEFINE_GLOBAL for x in get_recursive(u.vin[0]))]
+    def get_recursive(uop): return set.union(set(uop.src), [uop], *[get_recursive(v) for v in uop.src])
+    local_stores = [u for u in k.uops if u.op is UOps.STORE and any(x.op is UOps.DEFINE_LOCAL for x in get_recursive(u.src[0]))]
+    global_stores = [u for u in k.uops if u.op is UOps.STORE and any(x.op is UOps.DEFINE_GLOBAL for x in get_recursive(u.src[0]))]
     barrier = [u for u in k.uops if u.op is UOps.BARRIER][0]
     # check that the float4 cast collapses for all stores
     for store in local_stores+global_stores:
-      assert store.vin[-1].dtype == dtypes.float.vec(2) and store.vin[-1].op is not UOps.CAST
+      assert store.src[-1].dtype == dtypes.float.vec(2) and store.src[-1].op is not UOps.CAST
     # check the children's vins
-    assert barrier.vin == tuple(local_stores)
-    assert len([u for u in k.uops if u.op is UOps.IF and u.vin[-1] == barrier]) == 1
+    assert barrier.src == tuple(local_stores)
+    assert len([u for u in k.uops if u.op is UOps.IF and u.src[-1] == barrier]) == 1
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
@@ -750,11 +750,11 @@ class TestLinearizer(unittest.TestCase):
     stores = [u for u in k.uops if u.op is UOps.STORE]
 
     # the float4 value stores directly in lds and we skip upcast
-    assert stores[0].vin[-1].dtype == dtypes.float.vec(4)
-    assert stores[0].vin[-1].op is not UOps.CAST
+    assert stores[0].src[-1].dtype == dtypes.float.vec(4)
+    assert stores[0].src[-1].op is not UOps.CAST
 
     # the global store doesn't change
-    assert stores[1].vin[-1].dtype == dtypes.float
+    assert stores[1].src[-1].dtype == dtypes.float
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_skip_unmatching_upcasts(self):
@@ -765,7 +765,7 @@ class TestLinearizer(unittest.TestCase):
     ]
     k = helper_linearizer_ast(ast, [Tensor.empty(240*40).realize()], opts=[opt])[-1]
     out = [u for u in k.uops if u.op is UOps.STORE][0]
-    assert out.vin[-1].op is UOps.CAST and out.vin[-1].dtype == dtypes.float.vec(4)
+    assert out.src[-1].op is UOps.CAST and out.src[-1].dtype == dtypes.float.vec(4)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
@@ -776,14 +776,14 @@ class TestLinearizer(unittest.TestCase):
             Opt(op=OptOps.UPCAST, axis=1, amt=0), Opt(op=OptOps.UPCAST, axis=0, amt=2)]
     k = helper_linearizer_ast(ast, [Tensor.empty(8*32).realize()], opts=[opt])[-1]
     out = [u for u in k.uops if u.op is UOps.STORE][0]
-    assert out.vin[-1].op is UOps.CAST and out.vin[-1].dtype == dtypes.float.vec(2)
+    assert out.src[-1].op is UOps.CAST and out.src[-1].dtype == dtypes.float.vec(2)
 
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need backends that support float4")
 class TestFloat4(unittest.TestCase):
   @staticmethod
   def count_float4(k):
     return (len([uop for uop in k.uops if uop.op is UOps.LOAD and uop.dtype == dtypes.float.vec(4)]),
-            len([uop for uop in k.uops if uop.op is UOps.STORE and len(uop.vin) == 3 and uop.vin[2].dtype == dtypes.float.vec(4)]))
+            len([uop for uop in k.uops if uop.op is UOps.STORE and len(uop.src) == 3 and uop.src[2].dtype == dtypes.float.vec(4)]))
 
   # TODO: express opts below as auto opts
 
