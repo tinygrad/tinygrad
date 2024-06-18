@@ -41,10 +41,9 @@ generate_opencl_error_codes(){
   sed -i -n -E '/#define CL_BUILD_[SNEI][A-Z0-9_]*|[A-Z0-9_]*EXP|[A-Z0-9_]*END_INTEL/b;/#define \w*\s*0x40D[4-5]/p;/#define \w*\s*-[0-9]*/p' $file
 
   #Form dict
-  sed -n -i '1i\opencl_status_codes = {}
+  sed -n '1i\opencl_status_codes = {}
   { s/#define \([^,]*\)\s*\([-][0-9].*\)/opencl_status_codes[\2] = "\1"/};
-  { s/#define \([^,]*\)\s*\(0x40D[4|5].*\)/opencl_status_codes[\2] = "\1"/; p };' $file
-  cat $file >> $BASE/opencl.py
+  { s/#define \([^,]*\)\s*\(0x40D[4|5].*\)/opencl_status_codes[\2] = "\1"/; p };' $file >> $BASE/opencl.py
 }
 
 generate_opencl() {
