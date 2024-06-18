@@ -1,7 +1,6 @@
 import random
 from typing import Tuple
-from tqdm import trange
-from tinygrad.helpers import getenv, DEBUG, colored
+from tinygrad.helpers import getenv, DEBUG, colored, trange
 from tinygrad.shape.shapetracker import ShapeTracker
 from test.external.fuzz_shapetracker import shapetracker_ops
 from test.external.fuzz_shapetracker import do_permute, do_reshape_split_one, do_reshape_combine_two, do_flip, do_pad
