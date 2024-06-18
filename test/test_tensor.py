@@ -1,10 +1,11 @@
 import numpy as np
 import torch
-import unittest, copy, mmap, random
+import unittest, copy, mmap, random, math
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.helpers import getenv, temp, CI
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
+from test.helpers import is_dtype_supported
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -301,6 +302,23 @@ class TestTinygrad(unittest.TestCase):
       for _ in range(20):
         data = _generate_data(depth)
         np.testing.assert_allclose(Tensor(data).numpy(), np.array(data))
+
+  def test_tensor_list_special_values(self):
+    if is_dtype_supported(dtypes.float16):
+      data = [math.nan, -math.inf, 65504, 65519, 65519.999, 65520, 65520.1]
+      data = data + [-x for x in data]
+      np.testing.assert_allclose(Tensor(data, dtype=dtypes.float16).numpy(), np.array(data, dtype=np.float16))
+
+    # TODO: numpy changed this behavior in 2.0
+    # # uint32
+    # data = [1 << 33, 1 << 32, 1 << 32 - 1, 1]
+    # data = data + [-x for x in data]
+    # np.testing.assert_allclose(Tensor(data, dtype=dtypes.uint32).numpy(), np.array(data, dtype=np.uint32))
+
+    # # int32
+    # data = [1 << 33, 1 << 32, 1 << 32 - 1, 1]
+    # data = data + [-x for x in data]
+    # np.testing.assert_allclose(Tensor(data, dtype=dtypes.int32).numpy(), np.array(data, dtype=np.int32))
 
   def test_tensor_bytes(self):
     data = b"abc123"
