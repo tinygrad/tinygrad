@@ -1,6 +1,7 @@
 import sys
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
+from tinygrad.tensor import _to_np_dtype
 from tinygrad.engine.realize import Runner
 from tinygrad.dtype import DType
 from tinygrad.nn.state import get_parameters
@@ -26,9 +27,8 @@ def assert_jit_cache_len(fxn, expected_len):
 def is_dtype_supported(dtype: DType, device: str = Device.DEFAULT):
   if dtype == dtypes.bfloat16:
     # NOTE: this requires bf16 buffer support
-    return device in {"HSA", "AMD"} or (device in {"CUDA", "NV"} and not CI and not getenv("PTX"))
+    return device in {"AMD"} or (device in {"CUDA", "NV"} and not CI and not getenv("PTX"))
   if device in ["WEBGPU", "WEBGL"]: return dtype in [dtypes.float, dtypes.int32, dtypes.uint32]
-  if device == "CUDA" and getenv("PTX") and dtype in (dtypes.int8, dtypes.uint8): return False
   # for CI GPU and OSX, cl_khr_fp16 isn't supported
   # for CI LLVM, it segfaults because it can't link to the casting function
   # CUDACPU architecture is sm_35 but we need at least sm_70 to run fp16 ALUs
@@ -42,9 +42,9 @@ def is_dtype_supported(dtype: DType, device: str = Device.DEFAULT):
 
 def rand_for_dtype(dt:DType, size:int):
   if dtypes.is_unsigned(dt):
-    return np.random.randint(0, 100, size=size, dtype=dt.np)
+    return np.random.randint(0, 100, size=size, dtype=_to_np_dtype(dt))
   elif dtypes.is_int(dt):
-    return np.random.randint(-100, 100, size=size, dtype=dt.np)
+    return np.random.randint(-100, 100, size=size, dtype=_to_np_dtype(dt))
   elif dt == dtypes.bool:
     return np.random.choice([True, False], size=size)
-  return np.random.uniform(-10, 10, size=size).astype(dt.np)
+  return np.random.uniform(-10, 10, size=size).astype(_to_np_dtype(dt))

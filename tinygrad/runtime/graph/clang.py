@@ -16,7 +16,7 @@ class ClangGraph(GraphRunner):
 
     prgs = '\n'.join(dedup([cast(CompiledRunner, ji.prg).p.src for ji in jit_cache]))
     args = [f"{render_dtype(x.dtype)}* arg{i}" for i,x in enumerate(input_rawbuffers)]
-    args += [f"int {v.expr}" for v in var_vals]
+    args += sorted([f"int {v.expr}" for v in var_vals])
     code = ["void batched("+','.join(args)+") {"]
     for ji in jit_cache:
       args = []
@@ -35,4 +35,5 @@ class ClangGraph(GraphRunner):
     self.clprg = ClangProgram("batched", compiler.compile(prgs+"\n"+"\n".join(code))) # no point in caching the pointers
 
   def __call__(self, rawbufs: List[Buffer], var_vals: Dict[Variable, int], wait=False):
-    return cpu_time_execution(lambda: self.clprg(*[x._buf for x in rawbufs], *[x for x in var_vals.values()]), enable=wait)
+    return cpu_time_execution(
+    lambda: self.clprg(*[x._buf for x in rawbufs], *[x[1] for x in sorted(var_vals.items(), key=lambda x: x[0].expr)]), enable=wait)

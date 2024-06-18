@@ -21,7 +21,6 @@ def compare_weights_both(url):
 
 class TestTorchLoad(unittest.TestCase):
   # pytorch pkl format
-  @unittest.skip("this test is slow and takes 17s. TODO: fix")
   def test_load_enet(self): compare_weights_both("https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b0-355c32eb.pth")
   # pytorch zip format
   def test_load_enet_alt(self): compare_weights_both("https://download.pytorch.org/models/efficientnet_b0_rwightman-3dd342df.pth")
@@ -60,7 +59,7 @@ class TestRawDiskBuffer(unittest.TestCase):
     _test_bitcasted(t, dtypes.uint32, 0)
     # pi in float16 stored via int16
     t.bitcast(dtypes.uint16).assign(Tensor.full((128, 64), 0x4248, dtype=dtypes.uint16)).realize()
-    _test_bitcasted(t, dtypes.float16, 3.141)
+    _test_bitcasted(t, dtypes.float16, 3.140625)
     _test_bitcasted(t, dtypes.float32, 50.064727)
     _test_bitcasted(t, dtypes.uint16, 0x4248)
     _test_bitcasted(t, dtypes.uint32, 0x42484248)
@@ -283,6 +282,12 @@ class TestDiskTensor(unittest.TestCase):
     t = Tensor.empty(5, dtype=dtypes.int16, device=f"disk:{temp('range_1020')}")
     ret = t.to("CLANG").bitcast(dtypes.uint16) + 1
     assert ret.tolist() == [2827, 3341, 3855, 4369, 4883]
+
+  def test_bitcast_view(self):
+    with open(temp('range_1020'), "wb") as f: f.write(bytes(range(10, 24)))
+    t = Tensor.empty(3, dtype=dtypes.uint, device=f"disk:{temp('range_1020')}").shrink([(0, 2)])
+    ret = t.bitcast(dtypes.uint16).to("CLANG") + 1
+    assert ret.tolist() == [2827, 3341, 3855, 4369]
 
   def test_bf16_disk_write_read(self):
     t = Tensor([10000, -1, -1000, -10000, 20], dtype=dtypes.float32)

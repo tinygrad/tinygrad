@@ -7,11 +7,11 @@ from tinygrad.helpers import DEBUG, MULTIOUTPUT, colored, getenv
 from tinygrad.lazy import LazyBuffer
 from tinygrad.engine.schedule import _graph_schedule, _LBScheduleItem, ScheduleItem
 from tinygrad.ops import LoadOps
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Tensor, _to_np_dtype
 
 ctx_vars = { MULTIOUTPUT: (0, 1) }
 
-def fuzz_schedule(outs: List[LazyBuffer]):
+def fuzz_schedule(outs:List[LazyBuffer]):
   # find toposorts across all tunable params
   unique_ts: Dict[Tuple[LazyBuffer, ...], Tuple[Dict, Dict[LazyBuffer, _LBScheduleItem]]] = {}
   for combination in itertools.product(*ctx_vars.values()):
@@ -60,13 +60,13 @@ def fuzz_schedule(outs: List[LazyBuffer]):
       si = ScheduleItem(ps.ast, tuple(rawbufs[x] for x in (ps.outputs+ps.inputs) if x.size != 0))
       _exec_si(si, seed)
       for out in ps.outputs:
-        outbuf = np.frombuffer(rawbufs[out].as_buffer(), out.dtype.np)
-        try: np.testing.assert_allclose(outbuf, np.frombuffer(ground_truth[out], out.dtype.np), atol=1e-2, rtol=1e-2)
+        outbuf = np.frombuffer(rawbufs[out].as_buffer(), _to_np_dtype(out.dtype))
+        try: np.testing.assert_allclose(outbuf, np.frombuffer(ground_truth[out], _to_np_dtype(out.dtype)), atol=1e-2, rtol=1e-2)
         except Exception as e:
           print(f"FAILED FOR {out}")
           raise e
 
-def _exec_si(si: ScheduleItem, seed:int):
+def _exec_si(si:ScheduleItem, seed:int):
   ei = lower_schedule_item(si)
   if len(capturing): capturing[0].add(ei)
   if isinstance(ei.prg, CustomOp): Tensor._seed = seed

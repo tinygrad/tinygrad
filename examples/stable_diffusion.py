@@ -410,12 +410,7 @@ def get_pairs(word):
   """Return set of symbol pairs in a word.
   Word is represented as tuple of symbols (symbols being variable-length strings).
   """
-  pairs = set()
-  prev_char = word[0]
-  for char in word[1:]:
-    pairs.add((prev_char, char))
-    prev_char = char
-  return pairs
+  return set(zip(word, word[1:]))
 
 def whitespace_clean(text):
   text = re.sub(r'\s+', ' ', text)
@@ -510,7 +505,6 @@ class ClipTokenizer:
       bpe_tokens = bpe_tokens[:75]
     return [49406] + bpe_tokens + [49407] * (77 - len(bpe_tokens) - 1)
 
-
 def get_alphas_cumprod(beta_start=0.00085, beta_end=0.0120, n_training_steps=1000):
   betas = np.linspace(beta_start ** 0.5, beta_end ** 0.5, n_training_steps, dtype=np.float32) ** 2
   alphas = 1.0 - betas
@@ -582,7 +576,7 @@ class StableDiffusion:
 if __name__ == "__main__":
   default_prompt = "a horse sized cat eating a bagel"
   parser = argparse.ArgumentParser(description='Run Stable Diffusion', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-  parser.add_argument('--steps', type=int, default=5, help="Number of steps in diffusion")
+  parser.add_argument('--steps', type=int, default=10, help="Number of steps in diffusion")
   parser.add_argument('--prompt', type=str, default=default_prompt, help="Phrase to render")
   parser.add_argument('--out', type=str, default=Path(tempfile.gettempdir()) / "rendered.png", help="Output filename")
   parser.add_argument('--noshow', action='store_true', help="Don't show the image")
@@ -621,7 +615,7 @@ if __name__ == "__main__":
   alphas_prev = Tensor([1.0]).cat(alphas[:-1])
 
   # start with random noise
-  if args.seed is not None: Tensor._seed = args.seed
+  if args.seed is not None: Tensor.manual_seed(args.seed)
   latent = Tensor.randn(1,4,64,64)
 
   @TinyJit
@@ -653,5 +647,5 @@ if __name__ == "__main__":
   if args.prompt == default_prompt and args.steps == 5 and args.seed == 0 and args.guidance == 7.5:
     ref_image = Tensor(np.array(Image.open(Path(__file__).parent / "stable_diffusion_seed0.png")))
     distance = (((x - ref_image).cast(dtypes.float) / ref_image.max())**2).mean().item()
-    assert distance < 3e-4, f"validation failed with {distance=}"
+    assert distance < 3e-4, colored(f"validation failed with {distance=}", "red")
     print(colored(f"output validated with {distance=}", "green"))

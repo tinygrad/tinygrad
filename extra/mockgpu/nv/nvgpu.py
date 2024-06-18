@@ -100,11 +100,18 @@ class GPFIFO:
     gx, gy, gz = qmd.cta_raster_width, qmd.cta_raster_height, qmd.cta_raster_depth
     lx, ly, lz = qmd.cta_thread_dimension0, qmd.cta_thread_dimension1, qmd.cta_thread_dimension2
     gpuocelot_lib.ptx_run(ctypes.cast(prg_addr, ctypes.c_char_p), args_cnt+vals_cnt, (ctypes.c_void_p*len(cargs))(*cargs), lx, ly, lz, gx, gy, gz, 0)
+    if qmd.release0_enable:
+      rel0 = to_mv(qmd.release0_address_lower + (qmd.release0_address_upper << 32), 0x8).cast('Q')
+      rel0[0] = qmd.release0_payload_lower + (qmd.release0_payload_upper << 32)
+    if qmd.dependent_qmd0_enable:
+      if qmd.dependent_qmd0_action == 1: self.execute_qmd(qmd.dependent_qmd0_pointer << 8)
+      else: raise RuntimeError("unsupported dependent qmd action")
 
   def execute_cmd(self, cmd) -> SchedResult:
     if cmd == nv_gpu.NVC56F_SEM_EXECUTE: return self._exec_signal()
     elif cmd == nv_gpu.NVC6C0_LAUNCH_DMA: return self._exec_nvc6c0_dma()
     elif cmd == nv_gpu.NVC6B5_LAUNCH_DMA: return self._exec_nvc6b5_dma()
+    elif cmd == nv_gpu.NVC6C0_SEND_SIGNALING_PCAS2_B: return self._exec_pcas2()
     elif cmd == 0x0320: return self._exec_load_inline_qmd() # NVC6C0_LOAD_INLINE_QMD_DATA
     else: self.state[cmd] = self._next_dword() # just state update
     return SchedResult.CONT
@@ -114,7 +121,10 @@ class GPFIFO:
     val = self._state64_le(nv_gpu.NVC56F_SEM_PAYLOAD_LO)
     flags = self._next_dword()
     typ = (flags >> 0) & 0b111
-    if typ == 1: to_mv(signal, 8).cast('Q')[0] = val
+    timestamp = (flags & (1 << 25)) == (1 << 25)
+    if typ == 1:
+      to_mv(signal, 8).cast('Q')[0] = val
+      if timestamp: to_mv(signal + 8, 8).cast('Q')[0] = int(time.perf_counter() * 1e9)
     elif typ == 3:
       mval = to_mv(signal, 8).cast('Q')[0]
       return SchedResult.CONT if mval >= val else SchedResult.YIELD
@@ -144,12 +154,24 @@ class GPFIFO:
     ctypes.memmove(addr, cdata, sz)
 
   def _exec_nvc6b5_dma(self):
-    src = self._state64(nv_gpu.NVC6B5_OFFSET_IN_UPPER)
-    dst = self._state64(nv_gpu.NVC6B5_OFFSET_OUT_UPPER)
-    sz = self._state(nv_gpu.NVC6B5_LINE_LENGTH_IN)
     flags = self._next_dword()
-    assert flags == 0x182, f"unsupported flags in _exec_nvc6b5_dma: {flags}"
-    ctypes.memmove(dst, src, sz)
+    if (flags & 0b11) != 0:
+      src = self._state64(nv_gpu.NVC6B5_OFFSET_IN_UPPER)
+      dst = self._state64(nv_gpu.NVC6B5_OFFSET_OUT_UPPER)
+      sz = self._state(nv_gpu.NVC6B5_LINE_LENGTH_IN)
+      assert flags == 0x182, f"unsupported flags in _exec_nvc6b5_dma: {flags}"
+      ctypes.memmove(dst, src, sz)
+    elif ((flags >> 3) & 0b11) != 0:
+      src = to_mv(self._state64(nv_gpu.NVC6B5_SET_SEMAPHORE_A), 0x4).cast('I')
+      val = self._state(nv_gpu.NVC6B5_SET_SEMAPHORE_PAYLOAD)
+      src[0] = val
+    else: raise RuntimeError("unknown nvc6b5_dma flags")
+
+  def _exec_pcas2(self):
+    qmd_addr = self._state(nv_gpu.NVC6C0_SEND_PCAS_A) << 8
+    typ = self._next_dword()
+    if typ == 2 or typ == 9: # schedule
+      self.execute_qmd(qmd_addr)
 
 class NVGPU(VirtGPU):
   def __init__(self, gpuid):

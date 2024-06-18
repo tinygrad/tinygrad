@@ -1,67 +1,147 @@
 from __future__ import annotations
-import functools, itertools
-from typing import List, Set, Optional, Tuple, Any, Dict, DefaultDict, Callable, cast
+from typing import Iterator, Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable, Union, cast, TypeVar
+import functools, itertools, heapq, math
 from collections import defaultdict
-from tinygrad.helpers import DEBUG, flatten, prod
-from tinygrad.dtype import dtypes, DType
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, exec_alu
-from tinygrad.shape.symbolic import sint, Variable, Node, NumNode, MulNode, DivNode, SumNode
 from enum import Enum, auto
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from tinygrad.dtype import ConstType, dtypes, DType
+from tinygrad.shape.symbolic import sint, Variable
+from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, exec_alu
+from tinygrad.helpers import prod, DEBUG, getenv
 
-# bottom ones are asm only
+# the order of these UOps controls the order of the toposort
 class UOps(Enum):
-  LOOP = auto(); IF = auto(); ENDLOOP = auto(); ENDIF = auto(); SPECIAL = auto() # loops can be global, local, or other # noqa: E702
-  DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # this defines buffers # noqa: E702
-  LOAD = auto(); STORE = auto(); CONST = auto(); BARRIER = auto(); PHI = auto() # noqa: E702
-  ALU = auto(); WMMA = auto(); CAST = auto(); BITCAST = auto(); GEP = auto(); NOOP = auto() # noqa: E702
+  # ops that aren't rendered
+  SINK = auto(); VAR = auto() # noqa: E702
+  DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # noqa: E702
+  CONST = auto(); SPECIAL = auto() # noqa: E702
+  NOOP = auto(); UNMUL = auto(); GEP = auto() # noqa: E702
+  # math ops
+  CAST = auto(); BITCAST = auto() # noqa: E702
+  ALU = auto(); WMMA = auto() # noqa: E702
+  # memory/assignment ops
+  LOAD = auto(); STORE = auto(); PHI = auto() # noqa: E702
+  # control flow ops
+  BARRIER = auto(); IF = auto(); RANGE = auto() # noqa: E702
+  # these two are not graph nodes
+  ENDRANGE = auto(); ENDIF = auto() # noqa: E702
 
+def ufix(dtype: Optional[DType], x): return UOp.const(dtype, x) if not isinstance(x, UOp) else x
 @dataclass(eq=False)
 class UOp:
   uop: UOps
   dtype: Optional[DType] = None
   vin: Tuple[UOp, ...] = tuple()
   arg: Any = None
+  def tuple(self): return (self.uop, self.dtype, self.vin, self.arg)
+  def commutative(self) -> bool:
+    return self.uop is UOps.ALU and self.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR}
+  @functools.cached_property
+  def cmp_tuple(self):
+    # NOTE: this sort of DEFINE_VAR shouldn't have to be here. only for PTX
+    return (self.uop.value, (self.arg if self.uop is not UOps.DEFINE_VAR else self.arg.expr) if self.uop is not UOps.ALU else \
+            (type(self.uop), self.uop.value), self.dtype, self.vin)
+  def __lt__(self, x:UOp): return self.cmp_tuple < x.cmp_tuple
   def __repr__(self):
     return f"{str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.uop for x in self.vin]):32s} {self.arg}"
+  def cast(self, dtype=None): return UOp(UOps.CAST, dtype, (self,))
+  def name(self, name:Optional[str]): return UOp(UOps.VAR, vin=(self,), arg=name)
+  def __neg__(self): return UOp.alu(UnaryOps.NEG, self)
+  def __add__(self, x): return UOp.alu(BinaryOps.ADD, self, ufix(self.dtype, x))
+  def __radd__(self, x): return UOp.alu(BinaryOps.ADD, ufix(self.dtype, x), self)
+  def __sub__(self, x): return UOp.alu(BinaryOps.ADD, self, -ufix(self.dtype, x))
+  def __mul__(self, x): return UOp.alu(BinaryOps.MUL, self, ufix(self.dtype, x))
+  def __rmul__(self, x): return UOp.alu(BinaryOps.MUL, ufix(self.dtype, x), self)
+  def __floordiv__(self, x): return UOp.alu(BinaryOps.IDIV, self, ufix(self.dtype, x))
+  def __mod__(self, x): return UOp.alu(BinaryOps.MOD, self, ufix(self.dtype, x))
+  def lt(self, x): return UOp.alu(BinaryOps.CMPLT, self, ufix(self.dtype, x))
+  def ge(self, x): return -self.lt(x)
   @staticmethod
-  def const(dtype, val): return UOp(UOps.CONST, dtype, arg=dtypes.as_const(val, dtype))
+  def max(x, y): return UOp.alu(BinaryOps.MAX, x, y)
+  @staticmethod
+  def min(x, y): return -UOp.alu(BinaryOps.MAX, -x, -y)
+  @staticmethod
+  def const(dtype:Optional[DType], b:ConstType|Variable):
+    if isinstance(b, Variable): return UOp(UOps.DEFINE_VAR, dtype, (), b)
+    return UOp(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
+  @staticmethod
+  def alu(arg, *vin:UOp): return UOp(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else vin[-1].dtype, vin, arg)
+  @staticmethod
+  def load(*vin:UOp, dtype:Optional[DType]=None, **kwargs): return UOp(UOps.LOAD, dtype, tuple(vin)+tuple(kwargs.values()))
+  @staticmethod
+  def store(*vin:UOp, dtype:Optional[DType]=None, **kwargs): return UOp(UOps.STORE, dtype, tuple(vin)+tuple(kwargs.values()))
+  @staticmethod
+  def var(name: Optional[str]=None, dtype: Optional[DType]=None): return UOp(UOps.VAR, dtype=dtype, arg=name)
+  @staticmethod
+  def cvar(name: Optional[str]=None, dtype: Optional[DType]=None): return UOp(UOps.CONST, dtype=dtype).name(name)
+  @functools.cached_property
+  def parents(self) -> Set[UOp]: return set.union(set(self.vin), *[x.parents for x in self.vin])
+  @property  # parents with self
+  def sparents(self) -> Set[UOp]: return set([self]).union(self.parents)
+  def vars(self) -> Set[UOp]: return set([x for x in set.union(set([self]), self.parents) if x.uop is UOps.DEFINE_VAR])
 
 def uop_alu_resolve(u:UOp) -> sint:
   if u.uop is UOps.CONST: return u.arg
-  elif u.uop is UOps.DEFINE_VAR: return u.arg
-  elif u.uop is UOps.ALU and u.arg is BinaryOps.MUL: return uop_alu_resolve(u.vin[0]) * uop_alu_resolve(u.vin[1])
-  elif u.uop is UOps.ALU and u.arg is BinaryOps.ADD: return uop_alu_resolve(u.vin[0]) + uop_alu_resolve(u.vin[1])
-  else: raise RuntimeError(f"ALU resolve fail @ {u.uop}")
+  if u.uop is UOps.DEFINE_VAR: return u.arg
+  if u.uop is UOps.SPECIAL: return u.arg[2]-1
+  if u.uop is UOps.ALU and u.arg is BinaryOps.MUL: return uop_alu_resolve(u.vin[0]) * uop_alu_resolve(u.vin[1])
+  if u.uop is UOps.ALU and u.arg is BinaryOps.SHL: return uop_alu_resolve(u.vin[0]) * (2**cast(int, uop_alu_resolve(u.vin[1])))
+  if u.uop is UOps.ALU and u.arg is BinaryOps.ADD: return uop_alu_resolve(u.vin[0]) + uop_alu_resolve(u.vin[1])
+  raise RuntimeError(f"ALU resolve fail @ {u.uop}")
 
-def _match(uop:UOp, pattern:Dict[str, Any], store:Dict[str, UOp]) -> bool:
-  for k,v in pattern.items():
-    if k == "__name__":
-      if v in store and store[v] != uop: return False
-      store[v] = uop
-    elif k == "vin":
-      # only one if it's a tuple
-      # try all permutations if it's a list
-      # repeat if it's a dict
-      for vp in itertools.permutations(v) if isinstance(v, list) else ([v] if isinstance(v, tuple) else [(v,)*len(uop.vin)]):
-        if len(uop.vin) != len(vp): return False
-        new_store = store.copy()
-        if all(_match(uu, vv, new_store) for uu, vv in zip(uop.vin, vp)):
-          for k,v in new_store.items(): store[k] = v
-          return True
-      return False
-    elif k == "dtype":
-      if uop.__getattribute__(k) not in (v if isinstance(v, set) else set([v])): return False
-    else:
-      if uop.__getattribute__(k) != v: return False
-  return True
+# *** simplification logic ***
+
+@dataclass(frozen=True)
+class UPat:
+  uop: Optional[Union[UOps, Set[UOps]]] = None
+  arg: Any = None
+  vin: Optional[Union[Tuple[UPat, ...], List[UPat], UPat]] = None
+  name: Optional[str] = None
+  dtype: Optional[Union[DType, Set[DType]]] = None
+  allow_len: Set[int] = field(default_factory=set)
+
+  @staticmethod
+  def compile(u: UOp, name:Optional[str]=None) -> UPat:
+    if u.uop is UOps.VAR: return UPat(name=name or u.arg, dtype=u.dtype) if len(u.vin) == 0 else UPat.compile(u.vin[0], name or u.arg)
+    return UPat(u.uop, u.arg, (list if u.commutative() else tuple)([UPat.compile(vin) for vin in u.vin]) if u.vin != () else None, name, u.dtype)
+
+T = TypeVar("T")
+def __unmatch(m1:Union[T, Set[T]], m2:T) -> bool:
+  if isinstance(m1, set):
+    if m2 not in m1: return True
+  elif m2 != m1: return True
+  return False
+
+def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
+  if pat.name in store and store[pat.name] is not uop: return False
+  if pat.name is not None: store[pat.name] = uop
+  if pat.arg is not None and __unmatch(pat.arg, uop.arg): return False
+  if pat.dtype is not None and uop.dtype is not None and __unmatch(pat.dtype, uop.dtype): return False
+  if pat.uop is not None and __unmatch(pat.uop, uop.uop): return False
+  if pat.vin is None: return True
+  # only one if it's a tuple
+  # try all permutations if it's a list
+  # repeat if it's a UPat
+  for vp in itertools.permutations(pat.vin) if isinstance(pat.vin,list) else ([pat.vin] if isinstance(pat.vin,tuple) else [(pat.vin,)*len(uop.vin)]):
+    if len(uop.vin) != len(vp) and (len(uop.vin) not in pat.allow_len): return False
+    new_store = store.copy()
+    if all(_match(uu, vv, new_store) for uu, vv in zip(uop.vin, vp)):
+      store.update(new_store)
+      return True
+  return False
 
 class PatternMatcher:
-  def __init__(self, patterns:List[Tuple[Dict[str, Any], Any]]):
+  def __init__(self, patterns:List[Tuple[Union[UPat, UOp], Callable]]):
     self.patterns = patterns
-    self.pdict = defaultdict(list)
+    self.pdict: DefaultDict[Tuple[UOps, Any], List[Tuple[UPat, Callable]]] = defaultdict(list)
     # uop is required, arg is optional
-    for p,fxn in self.patterns: self.pdict[(p.get("uop"), p.get("arg", None))].append((p, fxn))
+    for p,fxn in self.patterns:
+      if isinstance(p, UOp): p = UPat.compile(p)
+      assert p.uop is not None
+      if isinstance(p.uop, set):
+        for uop in p.uop: self.pdict[(uop, p.arg)].append((p, fxn))
+      else:
+        self.pdict[(p.uop, p.arg)].append((p, fxn))
 
   def rewrite(self, uop:UOp) -> Optional[UOp]:
     for p,fxn in itertools.chain(self.pdict[(uop.uop, uop.arg)], self.pdict[(uop.uop, None)]):
@@ -69,331 +149,332 @@ class PatternMatcher:
       if _match(uop, p, store): return fxn(**store)
     return None
 
-  def rewrite_graph(self, uops: UOpGraph):
-    replace: Dict[UOp, UOp] = {}
-    seen: Set[UOp] = set()
-    for u in uops:
-      if u in seen: continue
-      seen.add(u)
-      for o,n in replace.items():
-        if o in u.vin and u is not n:
-          u.vin = tuple(n if x == o else x for x in u.vin)
-      if rew := self.rewrite(u): replace[u] = rew
+def sum_collapse(phi_input, loop, val1, val2):
+  for v1,v2 in [(val1, val2), (val2, val1)]:
+    if loop not in v1.parents:
+      loop_range = loop.vin[1]-loop.vin[0]
+      ret = v1*loop_range.cast(v1.dtype)
+      return UOp(UOps.PHI, phi_input.dtype, (phi_input, v2))+ret
+  return None
 
-    for o,n in replace.items():
-      queue = [n]
-      while queue:
-        if all([qq in uops.uops for qq in queue[-1].vin]):
-          new = uops.add_op(q:=queue.pop(), insert_before=max([0]+[uops.uops.index(vv) for vv in q.vin])+1)
-          if new != q:
-            for vv in uops.uops + queue: vv.vin = tuple(new if x is q else x for x in vv.vin)
-        else: queue.extend([qq for qq in queue[-1].vin if qq not in uops.uops])
-      if not any([o in u.vin for u in uops.uops[uops.uops.index(o):]]): uops.uops.remove(o)
+def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst):
+  if mval.arg >= 0 or loop_start.arg != 0:
+    # TODO: support and test this with other mvals and loop_starts
+    if DEBUG >= 1: print(f"WARNING, NOT FOLDING: mval:{mval.arg} loop_start:{loop_start.arg}")
+    return None
+  comprange = UOp.min(loop_end, UOp.max(UOp.alu(BinaryOps.IDIV, idx-compval-mval, mval) + (loop_end-loop_start), loop_start))
+  return UOp(UOps.UNMUL, multconst.dtype, (comprange.cast(multconst.dtype) * multconst, loop_end-loop_start))
 
+# this is symbolic 2.0
 constant_folder = PatternMatcher([
+  # arange loop folding (early)
+  (UPat(UOps.ALU, TernaryOps.WHERE, vin=(UPat(UOps.ALU, BinaryOps.CMPLT, vin=(
+    UPat(UOps.ALU, BinaryOps.ADD, vin=[UPat(name="idx"), UPat(UOps.ALU, BinaryOps.MUL,
+      vin=[UPat(UOps.CONST, name="mval"), UPat(UOps.RANGE, vin=(UPat(name="loop_start"), UPat(name="loop_end")))])]),
+      UPat(UOps.CONST, name="compval"))), UPat(UOps.CONST, name="multconst"), UPat(UOps.CONST, 0))), loop_collapse),
+  # sum collapse to mul (with possible GEP)
+  (UPat(UOps.PHI, vin=(UPat(UOps.DEFINE_ACC, name="phi_input", vin=(UPat(UOps.RANGE, name="loop"),)),
+      UPat(UOps.ALU, BinaryOps.ADD, vin=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
+  (UPat(UOps.PHI, vin=(UPat(UOps.GEP, name="phi_input",
+                            vin=(UPat(UOps.DEFINE_ACC, vin=(UPat(UOps.RANGE, name="loop"),)),)),
+      UPat(UOps.ALU, BinaryOps.ADD, vin=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
+  # deal with UNMUL
+  (UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c1"),
+                                                   UPat(UOps.UNMUL, vin=[UPat(UOps.CONST, name="c2"), UPat(name="v")])]),
+                                                   lambda c1,c2,v: v if c1.arg == c2.arg else None),
+  (UOp(UOps.UNMUL, vin=(UOp.const(None, 0).name('zero'), UOp.var())), lambda zero: zero),
+  (UOp(UOps.UNMUL).name('unmul').cast().name('root'), lambda root,unmul: UOp(UOps.UNMUL, root.dtype, (unmul.vin[0].cast(root.dtype), unmul.vin[1]))),
+  # max on special can go away (TODO: special should be variable, same thing applies)
+  (UOp.max(UOp.cvar('c'), UOp(UOps.SPECIAL).name('s')), lambda c,s: c if (s.arg[2]-1) <= c.arg else None),
   # const rules
-  ({"__name__": "root", "uop": UOps.GEP, "vin": ({"__name__": "c", "uop": UOps.CONST},)}, lambda root, c: UOp.const(root.dtype, c.arg)),
-  ({"__name__": "root", "uop": UOps.CAST, "vin": {"__name__": "c", "uop": UOps.CONST}}, lambda root, c: UOp.const(root.dtype, c.arg)),
-  # a phi without loops (len(vin)==2) is a noop
-  ({"uop": UOps.PHI, "vin": ({}, {"__name__": "x"})}, lambda x: x),
-  # x+-y -> x-y
-  ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": ({"__name__": "x"}, {"__name__": "my", "uop": UOps.ALU, "arg": UnaryOps.NEG})},
-    lambda x, my: UOp(UOps.ALU, x.dtype, (x, my.vin[0]), BinaryOps.SUB)),
+  (UPat(UOps.GEP, name="root", vin=(UPat(UOps.CONST, name="c"),)), lambda root, c: UOp.const(root.dtype, c.arg)),
+  (UPat(UOps.CAST, name="root", vin=UPat(UOps.CONST, name="c")), lambda root, c: UOp.const(root.dtype, c.arg)),
+  # a phi on a DEFINE_ACC without loops or a CONST is a noop. this is for correctness, not just speed
+  (UPat(UOps.PHI, vin=(UPat(UOps.DEFINE_ACC, name="acc"), UPat(name="acc"))), lambda acc: UOp.const(acc.dtype, acc.arg[0])),
+  (UPat(UOps.PHI, vin=(UPat(UOps.DEFINE_ACC, vin=tuple()), UPat(name="x"))), lambda x: x),
+  (UPat(UOps.PHI, vin=(UPat(UOps.CONST), UPat(name="x"))), lambda x: x),
+  # a DEFINE_ACC without inputs is a const + GEP on a const is the const
+  (UPat(UOps.DEFINE_ACC, name="root", vin=tuple()), lambda root: UOp.const(root.dtype, root.arg[0])),
+  (UPat(UOps.GEP, name="root", vin=(UPat(UOps.CONST, name="x"),)), lambda root,x: UOp.const(root.dtype, x.arg)),
+  # max -2147483648
+  (UOp.max(UOp.var('x'), UOp.const(dtypes.int, -2147483648)), lambda x: x),
+  # -(-x) -> x
+  (-(-UOp.var('x')), lambda x: x),
+  # -1*x -> -x
+  (-1*UOp.var('x'), lambda x: -x),
   # bool < False is always false, True < bool is always false
-  ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": ({}, {"__name__": "x", "uop": UOps.CONST, "dtype": dtypes.bool, "arg": False})}, lambda x: x),
-  ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": ({"__name__": "x", "uop": UOps.CONST, "dtype": dtypes.bool, "arg": True}, {})},
-    lambda x: UOp.const(dtypes.bool, False)),
+  (UOp.var().lt(UOp.const(dtypes.bool, False)), lambda: UOp.const(dtypes.bool, False)),
+  (UOp.const(dtypes.bool, True).lt(UOp.var()), lambda: UOp.const(dtypes.bool, False)),
   # a conditional with the same results either way is a noop, also fold const conditionals
-  ({"uop": UOps.ALU, "arg": TernaryOps.WHERE, "vin": ({}, {"__name__": "val"}, {"__name__": "val"})}, lambda val: val),
-  ({"uop": UOps.ALU, "arg": TernaryOps.WHERE, "vin": ({"__name__": "gate", "uop": UOps.CONST}, {"__name__": "c0"}, {"__name__": "c1"})},
-    lambda gate, c0, c1: c0 if gate.arg else c1),
+  (UOp.alu(TernaryOps.WHERE, UOp.var(), UOp.var("val"), UOp.var("val")), lambda val: val),
+  (UOp.alu(TernaryOps.WHERE, UOp.cvar('gate'), UOp.var('c0'), UOp.var('c1')), lambda gate, c0, c1: c0 if gate.arg else c1),
   # ** constant folding **
-  ({"__name__": "root", "uop": UOps.ALU, "vin": {"uop": UOps.CONST}},
-    lambda root: UOp.const(root.dtype, exec_alu(root.arg, root.dtype, [x.arg for x in root.vin]))),
+  (UPat(UOps.ALU, name="root", vin=UPat(UOps.CONST)), lambda root: UOp.const(root.dtype, exec_alu(root.arg, root.dtype, [x.arg for x in root.vin]))),
   # ** self folding **
-  ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"__name__": "x"}, {"uop": UOps.CONST, "arg": 0}]}, lambda x: x),   # x+0 -> x or 0+x -> x
-  ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{"__name__": "x"}, {"uop": UOps.CONST, "arg": 1}]}, lambda x: x),   # x*1 -> x or 1*x -> x
-  ({"uop": UOps.ALU, "arg": BinaryOps.SUB, "vin": ({"__name__": "x"}, {"uop": UOps.CONST, "arg": 0})}, lambda x: x),   # x-0 -> x
-  ({"uop": UOps.ALU, "arg": BinaryOps.DIV, "vin": ({"__name__": "x"}, {"uop": UOps.CONST, "arg": 1})}, lambda x: x),   # x/1 -> x
+  (UOp.var('x') + 0, lambda x: x),    # x+0 -> x
+  (UOp.var('x') - 0, lambda x: x),    # x-0 -> x
+  (UOp.var('x') * 1, lambda x: x),    # x*1 -> x
+  (UOp.var('x') // 1, lambda x: x),   # x/1 -> x
+  (UOp.var('x') // -1, lambda x: -x), # x/-1 -> -x
   # ** zero folding **
-  ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{}, {"__name__": "c", "uop": UOps.CONST, "arg": 0}]}, lambda c: c), # x*0 -> 0 or 0*x -> 0
-  ({"uop": UOps.ALU, "arg": BinaryOps.SUB, "vin": ({"__name__": "x"}, {"__name__": "x"})}, lambda x: UOp.const(x.dtype, 0)),   # x-x -> 0
+  #x*0 -> 0 or 0*x -> 0
+  #if x is nan it should render the nan value.
+  (UOp.var('x') * 0, lambda x: x if isinstance(x.arg, float) and math.isnan(x.arg) else UOp.const(x.dtype, 0)),
+  (UOp.var('x') - UOp.var('x'), lambda x: UOp.const(x.dtype, 0)),   # x-x -> 0
   # ** load/store folding **
-  ({"uop": UOps.STORE, "vin": ({"__name__": "buf"}, {"__name__": "idx"},
-                               {"uop": UOps.LOAD, "vin": ({"__name__": "buf"}, {"__name__": "idx"})})}, lambda buf, idx: UOp(UOps.NOOP)),
+  (UPat(UOps.STORE, vin=(UPat(name="buf"), UPat(name="idx"),
+                               UPat(UOps.LOAD, vin=(UPat(name="buf"), UPat(name="idx"))))), lambda buf, idx: UOp(UOps.NOOP)),
+  # ** two stage add/sub folding **
+  ((UOp.var('x') + UOp.cvar('c1')) + UOp.cvar('c2'), lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, [c1.arg, c2.arg]))),
+  ((UOp.var('x') - UOp.cvar('c1')) + UOp.cvar('c2'), lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, [c2.arg, -c1.arg]))),
+  # *** rules from symbolic ***
+  # two stage mul, (x*c1)*c2 = x*(c1*c2)
+  ((UOp.var("x") * UOp.cvar("c1")) * UOp.cvar("c2"), lambda x,c1,c2: x*UOp.const(x.dtype, exec_alu(BinaryOps.MUL, x.dtype, [c1.arg, c2.arg]))),
+  # x%1 -> 0
+  (UOp.var("x") % UOp.const(None, 1), lambda x: UOp.const(x.dtype, 0)),
+  # (x*c0)+(x*c1) -> x*(c0+c1)
+  (UOp.var("x") * UOp.cvar("c0") + UOp.var("x") * UOp.cvar("c1"), lambda x,c0,c1: x*exec_alu(BinaryOps.ADD, x.dtype, [c0.arg, c1.arg])),
+  # (x*c0)/c0 -> x
+  ((UOp.var("x") * UOp.cvar("c0")) // UOp.cvar("c0"), lambda x,c0: x if c0.arg != 0 else None),
+  # (x/c0)/c1 -> x/(c0*c1)
+  ((UOp.var("x") // UOp.cvar("c0")) // UOp.cvar("c1"), lambda x,c0,c1: x//UOp.const(x.dtype, exec_alu(BinaryOps.MUL, x.dtype, [c0.arg, c1.arg]))),
+  # c0 + x < c1 -> x < c1 - c0
+  ((UOp.cvar("c0") + UOp.var("x")).lt(UOp.cvar("c1")),
+    lambda x,c0,c1: UOp.lt(x, UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, [c1.arg, -c0.arg])))),
+  # (x+x*c0)-> x*(c0+1)
+  (UOp.var("x") + UOp.var("x") * UOp.cvar("c0"), lambda x,c0: x*UOp.const(x.dtype, c0.arg+1)),
   # TODO: can do the invert of this (flip alt/load) when we fix double ops
-  ({"uop": UOps.STORE, "vin": ({"__name__": "buf"}, {"__name__": "idx"}, {"uop": UOps.ALU, "arg": TernaryOps.WHERE,
-                       "vin": ({"__name__": "gate"}, {"__name__": "alt"}, {"uop": UOps.LOAD, "vin": ({"__name__": "buf"}, {"__name__": "idx"})})})},
-    lambda buf, idx, gate, alt: UOp(UOps.STORE, None, (buf, idx, alt, gate))),
+  (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp.alu(TernaryOps.WHERE, UOp.var("gate"), UOp.var("alt"), UOp.load(UOp.var("buf"), UOp.var("idx")))),
+   lambda buf, idx, gate, alt: UOp.store(buf, idx, alt, gate)),
+  # store float4/float2 directly (remove CAST/GEP)
+  (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp(UOps.CAST, vin=tuple(UOp(UOps.GEP, arg=i, vin=(UOp.var("val"),)) for i in range(4)))), UOp.store),
+  (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp(UOps.CAST, vin=tuple(UOp(UOps.GEP, arg=i, vin=(UOp.var("val"),)) for i in range(2)))), UOp.store),
+  # CAST-PHI-GEP -> PHI-CAST
+  (UPat(UOps.CAST, name="root", vin=tuple(UPat(UOps.PHI, vin=(UPat(UOps.GEP, i, vin=(UPat(name="val"),)), UPat(name=f"v{i}"))) for i in range(4))),
+    lambda root, val, v0, v1, v2, v3: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1, v2, v3))))),
+  (UPat(UOps.CAST, name="root", vin=tuple(UPat(UOps.PHI, vin=(UPat(UOps.GEP, i, vin=(UPat(name="val"),)), UPat(name=f"v{i}"))) for i in range(2))),
+    lambda root, val, v0, v1: UOp(UOps.PHI, root.dtype, (val, UOp(UOps.CAST, val.dtype, (v0, v1))))),
+  # NEG/CMPLT -> CMPLT
+  (UOp.lt(-UOp.var('x'), UOp.cvar('c', dtypes.int)), lambda c,x: UOp.lt(UOp.const(c.dtype, -c.arg), x)),
+  # cast NOOP (NOTE: it's str to deal with PtrDType)
+  (UPat(UOps.CAST, name="root"), lambda root: root.vin[0] if str(root.dtype) == str(root.vin[0].dtype) else None),
 ])
 
+# *** uop graph ***
+
 class UOpGraph:
-  def __init__(self, start_uops:Optional[List[UOp]]=None):
-    # list of uops
-    self.uops: List[UOp] = [] if start_uops is None else start_uops
+  def __init__(self, sinks:List[UOp]):
+    self.sinks: List[UOp] = sinks
+    # used by linearizer
+    self._uops: Optional[List[UOp]] = None
 
-    # global uop cache
-    self.saved_exprs: Dict[Tuple, UOp] = dict()
+  def __iter__(self) -> Iterator[UOp]: return iter(self.uops)
+  def __getitem__(self, index) -> UOp: return self.uops[index]
 
-  def __iter__(self): return iter(self.uops)
-
-  def vars(self) -> List[Variable]: return [x.arg for x in self.uops if x.uop is UOps.DEFINE_VAR]
+  def vars(self) -> List[Variable]: return sorted([x.arg for x in self.uops if x.uop is UOps.DEFINE_VAR], key=lambda v: v.expr)
   def globals(self) -> List[Tuple[int, bool]]: return [x.arg for x in self.uops if x.uop is UOps.DEFINE_GLOBAL]
+
+  @property
+  def uops(self):
+    if self._uops is None: self.linearize()
+    return self._uops
 
   def graph(self):
     from tinygrad.engine.graph import graph_uops
     graph_uops(self.uops)
 
   def print(self):
-    for u in self.uops:
-      print(f"{self.uops.index(u):4d} {str(u.uop):20s}: {str(u.dtype) if u.dtype is not None else '':25s} "
-            f"{str([self.uops.index(x) for x in u.vin]):32s} {u.arg}")
+    for i,u in enumerate(self):
+      print(f"{i:4d} {str(u.uop):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str([self.uops.index(x) for x in u.vin]):32s} {u.arg}")
 
-  def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None, insert_before=None, simplify=True) -> UOp:
-    return self.add_op(UOp(uop, dtype, vin, arg) if uop is not UOps.CONST else UOp.const(dtype, arg), insert_before, simplify)
+  def graph_rewrite(self, sink, pm):
+    # recursive rewrite
+    changed = getenv("UOPS_REWRITE", 1)
+    run_cnt = 0
+    while changed:
+      changed = 0
+      @functools.lru_cache
+      def rewrite(u:UOp) -> UOp:
+        nonlocal changed
+        recurse_cnt = 0
+        up = u
+        # locally recursively rewrite
+        while (rewritten := pm.rewrite(up)):
+          assert recurse_cnt < 100, f"recursive_rewrite looped {up} <--> {rewritten}"
+          up = rewritten
+          recurse_cnt += 1
+        changed += recurse_cnt
+        # NOTE: this changes UOp, so we have to delete caches
+        up.vin = tuple(rewrite(x) for x in up.vin)
+        if 'parents' in up.__dict__: delattr(up, 'parents')
+        if 'cmp_tuple' in up.__dict__: delattr(up, 'cmp_tuple')
+        # replace with cached nodes
+        return self.nodes.setdefault(up.tuple(), up)
+      sink = rewrite(sink)
+      run_cnt += 1
+      assert run_cnt < 100, "exceeded 100 rewrite loops!"
+    return sink
 
-  def add_op(self, ret:UOp, insert_before=None, simplify=True) -> UOp:
-    if simplify and (rewritten:=constant_folder.rewrite(ret)) is not None:
-      if rewritten in self.uops: return rewritten
-      ret = rewritten
-    key = (ret.uop, ret.dtype, ret.vin, ret.arg)
-    if insert_before is None: insert_before = len(self.uops)
-    # check if the cached expr is valid with the given insert place.
-    if (expr:=self.saved_exprs.get(key, None)) is not None and self.uops.index(expr) <= insert_before: return expr
-    self.uops.insert(insert_before, ret)
-    self.saved_exprs[key] = ret
-    return ret
+  def graph_dedup(self, sink):
+    # add nodes to graph in reverse BFS order
+    # dedup all nodes
+    # TODO: i feel like this BFS is written in a few places, possible to library it?
+    unprocessed_nodes = [sink]
+    early_in_degree: DefaultDict[UOp, int] = defaultdict(int)
+    children: DefaultDict[UOp, List[UOp]] = defaultdict(list)
+    all_nodes: Dict[UOp, None] = dict()
+    while len(unprocessed_nodes):
+      n = unprocessed_nodes.pop(0)
+      if n in all_nodes: continue
+      all_nodes[n] = None
+      for x in n.vin:
+        early_in_degree[n] += 1
+        children[x].append(n)
+      unprocessed_nodes += list(n.vin)
+    early_queue = [x for x in all_nodes if early_in_degree[x] == 0]
+    replace_nodes: Dict[UOp, UOp] = {}
+    while len(early_queue):
+      n = early_queue.pop(0)
+      if n in replace_nodes: continue
+      key = (n.uop, n.dtype, tuple(replace_nodes.get(x, x) for x in n.vin), n.arg)
+      if found:=self.nodes.get(key): replace_nodes[n] = found
+      else: replace_nodes[n] = self.nodes[key] = UOp(*key)
+      for x in children[n]:
+        early_in_degree[x] -= 1
+        if early_in_degree[x] == 0:
+          early_queue.append(x)
+    return replace_nodes.get(sink, sink)
 
-  def remove_childless(self, keep:Set[UOp]):
-    while 1:
-      has_child: Set[UOp] = set()
-      for ru in self.uops:
-        for vu in ru.vin:
-          has_child.add(vu)
-      nu: List[UOp] = [x for x in self.uops if x in has_child or x in keep]
-      if len(nu) == len(self.uops): break
-      if DEBUG >= 4: print(f"reduced UOp count from {len(self.uops)} to {len(nu)}")
-      self.uops = nu
-    self.saved_exprs = {k:v for k,v in self.saved_exprs.items() if v in nu}
+  def linearize(self, extra_pm:Optional[PatternMatcher]=None, type_verify=True):
+    # NOTE: relinearizering should be okay
+    #assert self._uops is None, "already linearized"
+    self.nodes: Dict[Tuple, UOp] = {}
 
-  # optional
-  def type_verify(self):
-    for u in self.uops:
-      uop, arg, vin, dtype = u.uop, u.arg, u.vin, u.dtype
-      if uop in {UOps.CONST, UOps.DEFINE_ACC}:
-        if uop is UOps.DEFINE_ACC: arg = arg[0]
-        assert dtype is not None and type(arg) is type(dtypes.as_const(arg, dtype)), f"type of {arg=} does not match {dtype}"
-      if uop is UOps.ALU:
-        if arg in UnaryOps:
-          assert dtype == vin[0].dtype, f"{arg} dtype mismatch {dtype=} != {vin[0].dtype=}"
-        elif arg in (BinaryOps.CMPLT, BinaryOps.CMPEQ):
-          assert dtype == dtypes.bool, f"{arg} output dtype mismatch {dtype=} != {dtypes.bool}"
-          assert vin[0].dtype == vin[1].dtype, f"{arg} dtype mismatch {dtype=} != {vin[0].dtype=} != {vin[1].dtype=}"
-        elif arg in BinaryOps:
-          assert dtype == vin[0].dtype == vin[1].dtype, f"{arg} dtype mismatch {dtype=} != {vin[0].dtype=} != {vin[1].dtype=}"
-        elif arg == TernaryOps.WHERE:
-          assert vin[0].dtype == dtypes.bool, f"{arg} selector dtype mismatch {vin[0].dtype=} != {dtypes.bool}"
-          assert dtype == vin[1].dtype == vin[2].dtype, f"{arg} choice dtype mismatch {dtype=} != {vin[1].dtype=} != {vin[2].dtype=}"
+    # dedup all nodes in graph
+    sink = self.graph_dedup(UOp(UOps.SINK, None, tuple(self.sinks)))
 
-  def get_recursive_children(self, x:UOp) -> Set[UOp]:
-    deps = set([x])
-    ssize = 0
-    while ssize != len(deps):
-      ssize = len(deps)
-      for u in self.uops:
-        if len(deps.intersection([x for x in u.vin if x.uop is not UOps.PHI])):
-          deps.add(u)
-    return deps
+    # do graph rewrite
+    sink = self.graph_rewrite(sink, constant_folder)
+    if extra_pm: sink = self.graph_rewrite(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
 
-  def add_ends(self):
-    for u in self.uops:
-      if u.uop is UOps.LOOP:
-        # add END of loops after the last thing that (recursively) depends on them
-        insert_before = self.uops.index(sorted(list(self.get_recursive_children(u)), key=self.uops.index)[-1])+1
-        self.add(UOps.ENDLOOP, None, (u,), insert_before=insert_before)
-      elif u.uop is UOps.IF:
-        # END any if statements at the end of the uops
-        self.add(UOps.ENDIF, None, (u,))
+    # filter nodes that don't link to a sink
+    # BFS toposort
+    graph: DefaultDict[UOp, List[UOp]] = defaultdict(list)
+    in_degree: DefaultDict[UOp, int] = defaultdict(int)
+    loops = []
+    ifs = []
+    nodes: Dict[UOp, None] = {}
+    def add_parents(u:UOp):
+      if u in nodes: return
+      nodes[u] = None
+      for x in u.vin:
+        add_parents(x)
+        in_degree[u] += 1
+        graph[x].append(u)
+      if u.uop is UOps.RANGE: loops.append(u)
+      if u.uop is UOps.IF: ifs.append(u)
+    sink = UOp(UOps.SINK, None, tuple(x for x in sink.vin if x.uop is not UOps.NOOP))
+    add_parents(sink)
 
-  def fix_loop_scope(self, get_recursive_parents:Callable[..., Set[UOp]]):
-    loop_stack: List[List[UOp]] = [[]]
-    # push uops upward out of loop if it does not depend on the loop
-    for u in self.uops:
-      if not loop_stack[-1]: loop_stack[-1].append(u)
-      elif u.uop is UOps.LOOP: loop_stack.append([u])
-      elif u.uop not in [UOps.CONST, UOps.ALU, UOps.CAST, UOps.LOAD]: loop_stack[-1].append(u)
-      else:
-        parents = get_recursive_parents(u, with_phi=True)
-        # don't push any local buffer because there might have STORE and BARRIER (not considered as parent) between DEFINE_LOCAL and here
-        if any(u.uop is UOps.DEFINE_LOCAL for u in parents): loop_stack[-1].append(u)
-        else:
-          for i in reversed(range(len(loop_stack))):
-            # check backwards and put the uop in the first encounter with some dependency
-            if any(x in parents for x in loop_stack[i]) or i == 0:
-              loop_stack[i].append(u)
-              break
-    self.uops = flatten(loop_stack)
-
-  def replace_op(self, old, new):
-    for v in self.uops: v.vin = tuple(new if x is old else x for x in v.vin)
-    self.uops.remove(old)
-
-  def simplify_phi_loops(self, get_recursive_parents):
-    def alu_opposite(arg, x, y):
-      if arg is BinaryOps.ADD: return x - y
-      elif arg is BinaryOps.MUL: return Node.__floordiv__(x, y, False)
-      else: raise RuntimeError("unhandled alu")
-    def to_symbolic(u: UOp):
-      if u.uop is UOps.CONST: return NumNode(int(u.arg))
-      elif u.uop in {UOps.LOOP, UOps.SPECIAL}:
-        if u not in seen_vars: seen_vars[u] = u.arg[1] if u.uop is UOps.SPECIAL else "loop{}".format(len(seen_vars))
-        return Variable(seen_vars[u], u.vin[0].arg, u.vin[1].arg-1) if u.uop is UOps.LOOP else Variable(seen_vars[u], 0, u.arg[2]-1)
-      elif u.uop is UOps.ALU and u.arg is BinaryOps.ADD: return to_symbolic(u.vin[0]) + to_symbolic(u.vin[1])
-      elif u.uop is UOps.ALU and u.arg is BinaryOps.MUL: return to_symbolic(u.vin[0]) * to_symbolic(u.vin[1])
-      else: raise RuntimeError("unhandled op: {}".format(u))
-    def loop_factor(with_loop: UOp, factored: Node, loop_op, round_up=False):
-      if with_loop == loop_op: return factored
-      elif with_loop.uop is UOps.ALU:
-        next_with_loop = next(v for v in with_loop.vin if v == loop_op or loop_op in get_recursive_parents(v))
-        non_loop = to_symbolic(next(v for v in with_loop.vin if v != next_with_loop and loop_op not in get_recursive_parents(v)))
-        if round_up and with_loop.arg is BinaryOps.MUL: factored = factored + (non_loop - 1)
-        return loop_factor(next_with_loop, alu_opposite(with_loop.arg, factored, non_loop), loop_op)
-    def const(x, insert_before=None): return self.add(UOps.CONST, dtypes.int32, tuple(), x, insert_before=insert_before)
-    def neg(x): return self.add(UOps.ALU, dtypes.int32, (x,), UnaryOps.NEG)
-    def max(x, y): return self.add(UOps.ALU, dtypes.int32, (x, y), BinaryOps.MAX)
-    def uop_alu_idx(a: UOp, b, op, dtype=dtypes.int32):
-      render_b: UOp = cast(UOp, (NumNode(b) if not isinstance(b, Node) else b).render(render_ops))
-      return self.add(UOps.ALU, dtype, (a, render_b), op)
-    seen_vars: Dict[UOp,str] = {}
-    render_ops = {Variable: lambda self, ops, _: next(op for op, name in seen_vars.items() if name == self.expr),
-                  NumNode: lambda self, ops, _: const(self.b),
-                  MulNode: lambda self, ops, _: uop_alu_idx(self.a.render(ops, self), self.b, BinaryOps.MUL),
-                  DivNode: lambda self, ops, _: uop_alu_idx(self.a.render(ops, self), self.b, BinaryOps.DIV),
-                  SumNode: lambda self, ops, _:
-                  functools.reduce(lambda a, b: uop_alu_idx(a, b, BinaryOps.ADD), self.nodes[1:], self.nodes[0].render(ops, self))}
-
-    allowed_ops = {UOps.CONST, UOps.SPECIAL, UOps.ALU, UOps.LOOP, UOps.DEFINE_ACC}
-    allowed_alus = {BinaryOps.MUL, BinaryOps.ADD, BinaryOps.CMPLT, TernaryOps.WHERE}
-    for loop_op in reversed([op for op in self.uops if op.uop is UOps.LOOP]):
-      phis = set([u for u in self.get_recursive_children(loop_op) if u.uop is UOps.PHI])
-      wheres = set([u for phi in phis for u in get_recursive_parents(phi) if u.arg == TernaryOps.WHERE])
-      if (any([u.uop is not UOps.CONST for u in loop_op.vin])
-        or any([u.uop not in allowed_ops or (u.uop is UOps.ALU and u.arg not in allowed_alus) for phi in phis for u in get_recursive_parents(phi)])
-        or any([where.vin[2].arg != 0 or where.vin[0].vin[1].uop is not UOps.CONST for where in wheres])
-        or any(len([op for op in get_recursive_parents(where) if op.uop is UOps.LOOP]) == 0 for where in wheres)): continue
-      if DEBUG >= 4 and (len(phis) > 0 or len(wheres) > 0): print("simplified {} PHI and {} WHERE in loop".format(len(phis), len(wheres)))
-      loop_length = loop_op.vin[1].arg - loop_op.vin[0].arg
-      for u in self.uops:
-        if u.arg is BinaryOps.ADD and len(wheres.intersection(get_recursive_parents(u))) and len(phis.intersection(self.get_recursive_children(u))):
-          u.vin = tuple([const(vin.arg*loop_length, insert_before=self.uops.index(u)) if vin.uop is UOps.CONST else vin for vin in list(u.vin)])
-      for where in sorted(wheres, key=lambda x: self.uops.index(x)):
-        comp_lt, comp_gt = where.vin[0].vin[0], where.vin[0].vin[1]
-        factored = loop_factor(comp_lt, NumNode(int(comp_gt.arg)), loop_op, round_up=(comp_gt.arg > 0))
-        final_value = factored - NumNode(loop_op.vin[0].arg) if (comp_gt.arg > 0) else NumNode(loop_op.vin[1].arg-1) - factored
-        self.uops, after_split_ops = self.uops[:(where_index:=self.uops.index(where))], self.uops[where_index:]
-        rendered = final_value.render(render_ops)
-        min_clamped = max(rendered, const(0)) if (final_value.min < 0) else rendered
-        max_clamped = neg(max(const(-1*loop_length), neg(min_clamped))) if (final_value.max > loop_length) else min_clamped
-        maybe_cast = self.add(UOps.CAST, where.dtype, (max_clamped,)) if where.dtype != dtypes.int32 else max_clamped
-        final_op = self.add(UOps.ALU, where.dtype, (maybe_cast, where.vin[1]), BinaryOps.MUL)
-        self.uops = self.uops + after_split_ops
-        self.replace_op(where, final_op)
-      for phi in phis:
-        self.replace_op(phi, phi.vin[1])
-        self.uops.remove((accumulator:=phi.vin[0]))
-        for alu_with_accum in [op for op in self.uops if accumulator in op.vin]:
-          self.replace_op(alu_with_accum, next(op for op in alu_with_accum.vin if op != accumulator))
-      get_recursive_parents.cache_clear()
-
-  def fix_to_store_directly(self):
-    replaced_stores: Dict[UOp,UOp] = {}
-    for u in self.uops:
-      if u.uop is not UOps.STORE or (val:=u.vin[-1]).uop is not UOps.CAST or cast(DType,val.dtype).count == 1: continue
-
-      vins = val.vin
-      while all(el.uop is UOps.PHI for el in vins): vins = tuple([el.vin[0] for el in vins])
-      if all(el.uop is UOps.GEP for el in vins) and len(set(el.vin[0] for el in vins)) == 1 and val.dtype == vins[0].vin[0].dtype:
-        # Check that accesses are in order.
-        if all(i==el.arg for i,el in enumerate(vins)):
-          replaced_stores[u] = vins[0].vin[0]
-
-    for prev,new in replaced_stores.items():
-      try: self.uops.remove(prev.vin[-1])  # remove the old upcast NOTE: the upcast's vins become childless now
-      except ValueError: pass  # already removed
-      self.uops[self.uops.index(prev)].vin = (prev.vin[0],prev.vin[1],new) # replace with the float4 value
-
-  def uops_optimization(self, get_recursive_parents):
-    for u in self.uops:
-      if u.uop is UOps.PHI and len(u.vin) == 3:
-        # if the parents of the PHI node don't have the LOOP in their parents, it can be folded
-        # TODO: ADD becomes a MUL, MAX can just become nothing
-        # NOTE: ADD -> MUL does not fold, this maintains original MULACC code path
-        if all(x.uop is not UOps.LOOP for x in get_recursive_parents(UOp(u.uop, u.dtype, u.vin[0:2], u.arg))) \
-          and u.vin[1].arg is BinaryOps.ADD and u.vin[1].vin[0].arg is not BinaryOps.MUL:
-          if DEBUG >= 4: print(f"removing PHI node {u}")
-          del self.saved_exprs[(u.uop, u.dtype, u.vin, u.arg)]
-          # NOTE: assuming u.vin[2].vin[1] and u.vin[2].vin[0] have the same dtype
-          loop_len = self.add(UOps.ALU, u.vin[2].vin[1].dtype, (u.vin[2].vin[1], u.vin[2].vin[0]), BinaryOps.SUB,
-                              insert_before=self.uops.index(u))
-          if loop_len.dtype != u.dtype: loop_len = self.add(UOps.CAST, u.dtype, (loop_len,),
-                                                            insert_before=self.uops.index(u))
-          new = self.add(UOps.ALU, u.dtype, (u.vin[1], loop_len,), BinaryOps.MUL, insert_before=self.uops.index(u))
-          self.replace_op(u, new)
-          return True
-
-  def optimize_loops(self):
-    # get PHI node loop scope, link anything using a DEFINE_ACC to the loop as a "parent"
-    acc_scope: DefaultDict[UOp, List[UOp]] = defaultdict(list)
-    for u in self.uops:
-      if u.uop is UOps.PHI: acc_scope[u.vin[0]] += u.vin[2:]
-
-    # graph helper functions
     @functools.lru_cache(None)
-    def get_recursive_parents(x:UOp, with_phi=False) -> Set[UOp]:
-      return set.union(set(x.vin), *[get_recursive_parents(p, with_phi) for p in x.vin], set(acc_scope[x]) if with_phi else set())
+    def get_recursive_children(x:UOp, end:UOps, include_self=False) -> Set[UOp]:
+      if x.uop is UOps.SINK: return set()
+      return set.union(set((x,)) if include_self else set(), *([get_recursive_children(u, end, True) for u in graph[x] if x.uop is not end]))
+    # scope children impact the toposort and END* insertion
+    end_for_uop = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.PHI, UOps.ENDRANGE)}
+    scope_children = {p:get_recursive_children(p, end_for_uop[p.uop][0]) for p in (loops+ifs)[::-1]}
 
-    # fix loop scope, push uops upward out of loop if it does not depend on the loop
-    self.fix_loop_scope(get_recursive_parents)
+    queue: List = []
+    def push(u):
+      priority = 0
+      # prefer uops that are loop children
+      for l, ss in scope_children.items():
+        if l.uop is UOps.RANGE and u in ss: priority -= l.arg[0]*1000 + l.arg[1]
+      heapq.heappush(queue, (priority, u))
 
-    # uops optimization
-    while self.uops_optimization(get_recursive_parents): pass
-    self.simplify_phi_loops(get_recursive_parents)
+    for u in nodes:
+      if in_degree[u] == 0: push(u)
 
-  def uoptimize(self):
-    self.optimize_loops()
+    if getenv("FUZZ_UOPS", 0):
+      from test.external.fuzz_uops import fuzz_uops
+      self.fuzz_paths = fuzz_uops(graph, in_degree.copy(), scope_children)
 
-    # (recursively) remove childless uops
-    self.remove_childless(set(x for x in self.uops if x.uop is UOps.STORE))
+    self._uops = []
+    while queue:
+      p,x = heapq.heappop(queue)
+      if DEBUG >= 7: print(p,x)
+      if x.uop is UOps.DEFINE_ACC and len(x.vin):
+        idx = min([self._uops.index(l) for l in x.vin])
+        self._uops.insert(idx, x)
+      else:
+        self._uops.append(x)
+      for u, ss in scope_children.items():
+        if x in ss:
+          ss.remove(x)
+          if len(ss) == 0: self._uops.append(UOp(end_for_uop[u.uop][1], None, (u,)))
+      for u in graph[x]:
+        in_degree[u] -= 1
+        if in_degree[u] == 0: push(u)
 
-    # store float4 upcasts directly if possible
-    self.fix_to_store_directly()
+    assert self._uops[-1].uop is UOps.SINK, f"didn't end with SINK, ended with {self._uops[-1]}"
+    self._uops = self._uops[:-1]
 
-    # add UOps.END*
-    self.add_ends()
+    if type_verify: self.type_verify()
 
-    # verify the uop types
-    self.type_verify()
+  # *** checker functions ***
 
-  def flops_mem(self) -> Tuple[sint, sint]:
+  def flops_mem(self, ignore_indexing=False) -> Tuple[sint, sint]:
     flops: sint = 0
     mem: sint = 0
     mults: sint = 1
     mult_stack = []
+    dont_count: Set[UOp] = set()
+    if ignore_indexing:
+      for u in self.uops:
+        if u.uop is UOps.LOAD:
+          dont_count = dont_count.union(u.vin[1].sparents)
+          if len(u.vin) > 3: dont_count = dont_count.union(u.vin[2].sparents)
+        elif u.uop is UOps.STORE:
+          dont_count = dont_count.union(u.vin[1].sparents)
+          if len(u.vin) > 3: dont_count = dont_count.union(u.vin[3].sparents)
     for u in self.uops:
-      if u.uop is UOps.LOOP:
+      if u.uop is UOps.RANGE:
         mult_stack.append(mults)
         mults *= uop_alu_resolve(u.vin[1])
-      elif u.uop is UOps.ENDLOOP:
+      elif u.uop is UOps.ENDRANGE:
         mults = mult_stack.pop(-1)
-      elif u.uop is UOps.ALU:
-        flops += mults
       elif u.uop is UOps.LOAD:
         assert u.dtype is not None
         mem += u.dtype.itemsize * mults
       elif u.uop is UOps.STORE:
         assert u.vin[2].dtype is not None
         mem += u.vin[2].dtype.itemsize * mults
-      elif u.uop is UOps.WMMA:
+      elif u.uop is UOps.ALU and u not in dont_count:
+        flops += mults * (2 if u.arg == TernaryOps.MULACC else 1)
+      elif u.uop is UOps.WMMA and u not in dont_count:
         assert u.arg[1] is not None
         flops += 2 * prod(u.arg[1]) // 32 * mults
     return flops, mem
+
+  def type_verify(self):
+    for u in self.uops:
+      uop, arg, vin, dtype = u.uop, u.arg, u.vin, u.dtype
+      if uop in {UOps.CONST, UOps.DEFINE_ACC}:
+        if uop is UOps.DEFINE_ACC: arg = arg[0]
+        assert dtype is not None and type(arg) is type(dtypes.as_const(arg, dtype)), f"type of {arg=} does not match {dtype}"
+      if uop in {UOps.CAST, UOps.BITCAST}: assert arg is None   # type is the output type, not an arg
+      if uop is UOps.ALU:
+        if arg in UnaryOps:
+          assert dtype == vin[0].dtype, f"{arg} dtype mismatch {dtype=} != {vin[0].dtype=}"
+        elif arg in (BinaryOps.CMPLT, BinaryOps.CMPNE):
+          assert dtype == dtypes.bool, f"{arg} output dtype mismatch {dtype=} != {dtypes.bool}"
+          assert vin[0].dtype == vin[1].dtype, f"{arg} dtype mismatch {dtype=} != {vin[0].dtype=} != {vin[1].dtype=}"
+        elif arg is BinaryOps.IDIV:
+          assert dtypes.is_int(vin[0].dtype) and dtypes.is_int(vin[1].dtype), \
+              f"input dtype mismatch {dtypes.int} != {vin[0].dtype=} != {vin[1].dtype=}"
+          assert dtypes.is_int(dtype), f"{arg} output dtype mismatch {dtype=} != {dtypes.int}"
+        elif arg in BinaryOps:
+          assert dtype == vin[0].dtype == vin[1].dtype, f"{arg} dtype mismatch {dtype=} != {vin[0].dtype=} != {vin[1].dtype=}"
+        elif arg == TernaryOps.WHERE:
+          assert vin[0].dtype == dtypes.bool, f"{arg} selector dtype mismatch {vin[0].dtype=} != {dtypes.bool}"
+          assert dtype == vin[1].dtype == vin[2].dtype, f"{arg} choice dtype mismatch {dtype=} != {vin[1].dtype=} != {vin[2].dtype=}"

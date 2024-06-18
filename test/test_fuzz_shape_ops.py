@@ -1,3 +1,4 @@
+from __future__ import annotations
 import unittest
 from math import prod
 
@@ -7,11 +8,11 @@ from hypothesis.extra import numpy as stn
 import numpy as np
 import torch
 from tinygrad import Tensor, Device
-from tinygrad.helpers import CI
+from tinygrad.helpers import CI, getenv
 
 
 settings.register_profile(__file__, settings.default,
-                          max_examples=100 if CI else 250, deadline=None)
+                          max_examples=100 if CI else 250, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 
 
 # torch wraparound for large numbers

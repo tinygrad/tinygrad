@@ -1,5 +1,6 @@
 import gzip
-from tinygrad import Tensor, fetch
+from tinygrad.tensor import Tensor
+from tinygrad.helpers import fetch
 
 def _fetch_mnist(file, offset): return Tensor(gzip.open(fetch("https://storage.googleapis.com/cvdf-datasets/mnist/"+file)).read()[offset:])
 def mnist():

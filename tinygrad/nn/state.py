@@ -1,9 +1,8 @@
 import os, json, pathlib, zipfile, pickle, tarfile, struct
-from tqdm import tqdm
 from typing import Dict, Union, List, Optional, Any, Tuple
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap, GlobalCounters
+from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap, GlobalCounters, tinytqdm
 from tinygrad.shape.view import strides_for_shape
 from tinygrad.multi import MultiLazyBuffer
 
@@ -12,11 +11,21 @@ safe_dtypes = {"BOOL":dtypes.bool, "I8":dtypes.int8, "U8":dtypes.uint8, "I16":dt
 inverse_safe_dtypes = {v:k for k,v in safe_dtypes.items()}
 
 def safe_load_metadata(fn:Union[Tensor,str]) -> Tuple[Tensor, int, Any]:
+  """
+  Loads a .safetensor file from disk, returning the data, metadata length, and metadata.
+  """
   t = fn if isinstance(fn, Tensor) else Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}")
   json_len = t[0:8].bitcast(dtypes.int64).item()
   return t, json_len, json.loads(t[8:8+json_len].numpy().tobytes())
 
 def safe_load(fn:Union[Tensor,str]) -> Dict[str, Tensor]:
+  """
+  Loads a .safetensor file from disk, returning the state_dict.
+
+  ```python
+  state_dict = nn.state.safe_load("test.safetensor")
+  ```
+  """
   t, json_len, metadata = safe_load_metadata(fn)
   ret = {}
   for k,v in metadata.items():
@@ -27,6 +36,14 @@ def safe_load(fn:Union[Tensor,str]) -> Dict[str, Tensor]:
   return ret
 
 def safe_save(tensors:Dict[str, Tensor], fn:str, metadata:Optional[Dict[str, Any]]=None):
+  """
+  Saves a state_dict to disk in a .safetensor file with optional metadata.
+
+  ```python
+  t = Tensor([1, 2, 3])
+  nn.state.safe_save({'t':t}, "test.safetensor")
+  ```
+  """
   headers, offset = {}, 0
   if metadata: headers['__metadata__'] = metadata
   for k,v in tensors.items():
@@ -44,6 +61,19 @@ def safe_save(tensors:Dict[str, Tensor], fn:str, metadata:Optional[Dict[str, Any
 
 from collections import OrderedDict
 def get_state_dict(obj, prefix:str='', tensor_type=Tensor) -> Dict[str, Tensor]:
+  """
+  Returns a state_dict of the object, with optional prefix.
+
+  ```python exec="true" source="above" session="tensor" result="python"
+  class Net:
+    def __init__(self):
+      self.l1 = nn.Linear(4, 5)
+      self.l2 = nn.Linear(5, 6)
+
+  net = Net()
+  print(nn.state.get_state_dict(net).keys())
+  ```
+  """
   if isinstance(obj, tensor_type): return {prefix.strip('.'):obj}
   if hasattr(obj, '_asdict'): return get_state_dict(obj._asdict(), prefix, tensor_type)  # namedtuple
   if isinstance(obj, OrderedDict): return get_state_dict(dict(obj), prefix, tensor_type)
@@ -54,16 +84,42 @@ def get_state_dict(obj, prefix:str='', tensor_type=Tensor) -> Dict[str, Tensor]:
   elif isinstance(obj, dict):
     for k,v in obj.items(): state_dict.update(get_state_dict(v, f"{prefix}{str(k)}.", tensor_type))
   return state_dict
-def get_parameters(obj) -> List[Tensor]: return list(get_state_dict(obj).values())
+def get_parameters(obj) -> List[Tensor]:
+  """
+  ```python exec="true" source="above" session="tensor" result="python"
+  class Net:
+    def __init__(self):
+      self.l1 = nn.Linear(4, 5)
+      self.l2 = nn.Linear(5, 6)
+
+  net = Net()
+  print(len(nn.state.get_parameters(net)))
+  ```
+  """
+  return list(get_state_dict(obj).values())
 
 def load_state_dict(model, state_dict:Dict[str, Tensor], strict=True, verbose=True, consume=False) -> None:
+  """
+  Loads a state_dict into a model.
+
+  ```python
+  class Net:
+    def __init__(self):
+      self.l1 = nn.Linear(4, 5)
+      self.l2 = nn.Linear(5, 6)
+
+  net = Net()
+  state_dict = nn.state.get_state_dict(net)
+  nn.state.load_state_dict(net, state_dict)
+  ```
+  """
   start_mem_used = GlobalCounters.mem_used
   with Timing("loaded weights in ", lambda et_ns: f", {(GlobalCounters.mem_used-start_mem_used)/1e9:.2f} GB loaded at {(GlobalCounters.mem_used-start_mem_used)/et_ns:.2f} GB/s"):  # noqa: E501
     model_state_dict = get_state_dict(model)
     if DEBUG >= 1 and len(state_dict) > len(model_state_dict):
       print("WARNING: unused weights in state_dict", sorted(list(state_dict.keys() - model_state_dict.keys())))
-    for k,v in (t := tqdm(model_state_dict.items(), disable=CI or not verbose)):
-      t.set_description(f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB, {k:50s}")
+    for k,v in (t := tinytqdm(model_state_dict.items(), disable=CI or not verbose)):
+      t.desc = f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB, {k:50s}: "
       if k not in state_dict and not strict:
         if DEBUG >= 1: print(f"WARNING: not loading {k}")
         continue
@@ -76,6 +132,13 @@ def load_state_dict(model, state_dict:Dict[str, Tensor], strict=True, verbose=Tr
 # torch support!
 
 def torch_load(fn:str) -> Dict[str, Tensor]:
+  """
+  Loads a torch .pth file from disk.
+
+  ```python
+  state_dict = nn.state.torch_load("test.pth")
+  ```
+  """
   t = Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}")
 
   offsets: Dict[Union[str, int], int] = {}
