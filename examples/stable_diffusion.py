@@ -8,8 +8,9 @@ from collections import namedtuple
 
 from PIL import Image
 import numpy as np
+from tqdm import tqdm
 from tinygrad import Device, GlobalCounters, dtypes, Tensor, TinyJit
-from tinygrad.helpers import Timing, Context, getenv, fetch, colored, tinytqdm
+from tinygrad.helpers import Timing, Context, getenv, fetch, colored
 from tinygrad.nn import Conv2d, Linear, GroupNorm, LayerNorm, Embedding
 from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict
 
@@ -622,7 +623,7 @@ if __name__ == "__main__":
 
   # this is diffusion
   with Context(BEAM=getenv("LATEBEAM")):
-    for index, timestep in (t:=tinytqdm(list(enumerate(timesteps))[::-1])):
+    for index, timestep in (t:=tqdm(list(enumerate(timesteps))[::-1])):
       GlobalCounters.reset()
       t.set_description("%3d %3d" % (index, timestep))
       with Timing("step in ", enabled=args.timing, on_exit=lambda _: f", using {GlobalCounters.mem_used/1e9:.2f} GB"):
