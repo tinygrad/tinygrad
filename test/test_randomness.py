@@ -4,7 +4,7 @@ from functools import partial
 import numpy as np
 import torch
 from tinygrad import nn, dtypes, Tensor, Device, TinyJit
-from tinygrad.helpers import THREEFRY, getenv
+from tinygrad.helpers import THREEFRY, getenv, CI
 from test.helpers import is_dtype_supported
 from hypothesis import given, settings, strategies as strat
 
@@ -177,9 +177,12 @@ class TestRandomness(unittest.TestCase):
 
     @TinyJit
     def sample_one(): return Tensor(w).multinomial(1, replacement=False).realize()
-    tiny_samples = [sample_one().item() for _ in range(1000)]
-    torch_samples = [torch.tensor(w).multinomial(1, replacement=False).item() for _ in range(1000)]
-    self.assertTrue(equal_distribution(lambda *_: Tensor(tiny_samples), lambda _: torch.tensor(torch_samples)))
+
+    # TODO: fix mockgpu issue
+    if not (CI and Device.DEFAULT == "AMD"):
+      tiny_samples = [sample_one().item() for _ in range(1000)]
+      torch_samples = [torch.tensor(w).multinomial(1, replacement=False).item() for _ in range(1000)]
+      self.assertTrue(equal_distribution(lambda *_: Tensor(tiny_samples), lambda _: torch.tensor(torch_samples)))
 
   def test_multinomial_counterexample(self):
     tiny_res = Tensor([0.3, 0.6, 0.1]).multinomial(2000, replacement=True)
