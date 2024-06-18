@@ -112,11 +112,7 @@ class TestDType(unittest.TestCase):
     dtypes = list(map(np.dtype, ["bool", "uint8", "int8", "int16", "int32", "int64", "float32", "float64"]))
     data = [1., 2., 0., 0.5, -1.5, 5.25]
     for dt in dtypes:
-      try:
-        arr = np.asarray(data, dtype=dt)
-      except OverflowError:
-        # TODO: this happens with numpy 2.0, update with proper behavior
-        continue
+      arr = np.asarray(data).astype(dt)
       tin = Tensor(arr).numpy()
       tor = torch.as_tensor(arr).detach().numpy()
       assert dt == tin.dtype == tor.dtype, f"dtype mismatch: expected={dt} | tinygrad={tin.dtype} | torch={tor.dtype}"
