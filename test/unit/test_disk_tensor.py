@@ -59,7 +59,7 @@ class TestRawDiskBuffer(unittest.TestCase):
     _test_bitcasted(t, dtypes.uint32, 0)
     # pi in float16 stored via int16
     t.bitcast(dtypes.uint16).assign(Tensor.full((128, 64), 0x4248, dtype=dtypes.uint16)).realize()
-    _test_bitcasted(t, dtypes.float16, 3.141)
+    _test_bitcasted(t, dtypes.float16, 3.140625)
     _test_bitcasted(t, dtypes.float32, 50.064727)
     _test_bitcasted(t, dtypes.uint16, 0x4248)
     _test_bitcasted(t, dtypes.uint32, 0x42484248)

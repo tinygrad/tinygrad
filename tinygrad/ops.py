@@ -120,7 +120,7 @@ python_alu = {
   UnaryOps.EXP2: hook_overflow(math.inf, lambda x: math.exp(x*math.log(2))),
   UnaryOps.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan,
   UnaryOps.SIN: lambda x: math.sin(x) if not math.isinf(x) else math.nan,
-  UnaryOps.RECIP: lambda x: 1/x if x != 0 else float('inf'),
+  UnaryOps.RECIP: lambda x: 1/x if x != 0 else math.copysign(math.inf, x),
   UnaryOps.NEG: lambda x: (not x) if isinstance(x, bool) else -x,
   BinaryOps.SHR: operator.rshift, BinaryOps.SHL: operator.lshift,
   BinaryOps.MUL: operator.mul, BinaryOps.ADD: operator.add, BinaryOps.SUB: operator.sub,
@@ -133,7 +133,7 @@ def truncate_fp16(x):
     x = float(x)
     struct.pack("@e", x)
     return x
-  except OverflowError: return x * math.inf
+  except OverflowError: return math.copysign(math.inf, x)
 
 truncate: Dict[DType, Callable] = {dtypes.bool: bool,
   # TODO: bfloat16
