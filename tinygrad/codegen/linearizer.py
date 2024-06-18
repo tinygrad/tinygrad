@@ -42,9 +42,10 @@ def get_grouped_dims(prefix:str, off:int, dims:Tuple[sint, ...], max_sizes:Optio
   if reverse_dims: size_dims = size_dims[::-1]
 
   # ensure that the initial dims initially fit the valid size axes
-  for size_idx, max_sz in [(i, sz) for i, sz in enumerate(max_sizes[:len(size_dims)]) if size_dims[i][0][2] > sz]:
+  for size_idx in range(min(len(max_sizes), len(size_dims))):
     # if the initial dim is too large, split the dim to separate size axes, if possible
-    dim_idx, dim, _ = size_dims[size_idx][0]
+    dim_idx, dim, dim_max = size_dims[size_idx][0]
+    if dim_max <= (max_sz:=max_sizes[size_idx]): continue
     assert isinstance(dim, int), "variable shape too large for size"
     for factor in range(2, int(dim**0.5)+1):
       if dim % factor == 0 and dim // factor <= max_sz:
@@ -55,7 +56,7 @@ def get_grouped_dims(prefix:str, off:int, dims:Tuple[sint, ...], max_sizes:Optio
   # compress the extra dims, collapsing them onto the left-most valid size axis
   cur_size_idx = 0
   while len(size_dims) > len(max_sizes):
-    if prod([dim_max for (_, _, dim_max) in size_dims[cur_size_idx]])*size_dims[cur_size_idx+1][0][2] < max_sizes[cur_size_idx]:
+    if prod([dim_max for (_, _, dim_max) in size_dims[cur_size_idx]])*size_dims[cur_size_idx+1][0][2] <= max_sizes[cur_size_idx]:
       size_dims = size_dims[:cur_size_idx] + [size_dims[cur_size_idx] + size_dims[cur_size_idx+1]] + size_dims[cur_size_idx+2:]
     elif cur_size_idx < len(max_sizes)-1: cur_size_idx += 1
     else: raise AssertionError(f"cannot fit dims in size: {dims=} {max_sizes=}")
