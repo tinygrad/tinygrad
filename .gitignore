@@ -53,9 +53,3 @@ weights
 *.lprof
 *.pkl
 site/
-.clang-format
-.tool-versions
-setup_extra.py
-test.py
-
-
