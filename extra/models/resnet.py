@@ -146,8 +146,9 @@ class ResNet:
         print("skipping fully connected layer")
         continue # Skip FC if transfer learning
 
+      if dat.shape == (): dat = dat.reshape(1)
       # TODO: remove or when #777 is merged
-      assert obj.shape == dat.shape or (obj.shape == (1,) and dat.shape == ()), (k, obj.shape, dat.shape)
+      assert obj.shape == dat.shape, (k, obj.shape, dat.shape)
       obj.assign(dat)
 
 ResNet18 = lambda num_classes=1000: ResNet(18, num_classes=num_classes)
@@ -156,3 +157,7 @@ ResNet50 = lambda num_classes=1000: ResNet(50, num_classes=num_classes)
 ResNet101 = lambda num_classes=1000: ResNet(101, num_classes=num_classes)
 ResNet152 = lambda num_classes=1000: ResNet(152, num_classes=num_classes)
 ResNeXt50_32X4D = lambda num_classes=1000: ResNet(50, num_classes=num_classes, groups=32, width_per_group=4)
+
+if __name__ == '__main__':
+  model = ResNeXt50_32X4D()
+  model.load_from_pretrained()
