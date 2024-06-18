@@ -179,6 +179,7 @@ class ClangRenderer(CStyleLanguage):
   device = "CLANG"
   supports_float4 = False
   has_local = False
+  global_max = None
 
   # language options
   buffer_suffix = " restrict"
@@ -220,6 +221,7 @@ class MetalRenderer(CStyleLanguage):
   float4 = "float4"
   uses_ptr_arithmetic = True
   code_for_workitem = {"g": lambda x: f"gid.{chr(120+x)}", "l": lambda x: f"lid.{chr(120+x)}"}
+  # uint3 used for gid/lid - TODO: this should probably be `ushort3 lid [[thread_position_in_threadgroup]]`
   extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
   type_map = {dtypes.bfloat16: "bfloat"}
   code_for_op = {**CStyleLanguage().code_for_op,
@@ -254,8 +256,8 @@ def _make_cuda_dtype(base_type, name, cnt):
 
 class CUDARenderer(CStyleLanguage):
   device = "CUDA"
-  global_max = [65535, 65535, 2147483647]
-  local_max = [64, 1024, 1024]
+  global_max = (2147483647, 65535, 65535)
+  local_max = (1024, 1024, 64)
   shared_max = 49152
   tensor_cores = [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(0,2)], thread_local_sizes=[[2,2,2],[2,2],[2,2]], thread_local_aliases=[ [[0],[0],[5],[-2],[0],[-1,1,2,-3],[3,4]], [[3],[4],[0],[0],[5],[-1,1,2,-2],[0]], [[-1],[1],[5],[-2],[2],[0],[3,4]] ], dtype_in=di, dtype_out=do) for (di, do) in ([(dtypes.half, dtypes.float), (dtypes.bfloat16, dtypes.float)])]  # noqa: E501
   def __init__(self, arch:str): self.tensor_cores = CUDARenderer.tensor_cores if int(arch[3:]) >= 80 else []
