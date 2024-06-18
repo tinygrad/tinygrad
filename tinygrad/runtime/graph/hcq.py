@@ -56,26 +56,27 @@ class HCQGraph(MultiGraphRunner):
     self.exec_ptrs: Dict[int, Tuple[Any, int]] = {}
     self.copy_to_devs: Dict[Compiled, Set[Compiled]] = {dev: set() for dev in self.devices}
 
-    # Schedule signals
+    # Schedule dependencies
     for j,ji in enumerate(self.jit_cache):
       if isinstance(ji.prg, CompiledRunner):
         deps = self.access_resources(ji.bufs[(outs:=ji.prg.p.outcount):], ji.bufs[:outs], (self.comp_signal[(dev:=ji.prg.device)], sig_val:=j+1))
         if (val:=self.comp_signal_val[dev]) > 0: deps = [x for x in deps if id(x[0]) != id(self.comp_signal[dev])] + [(self.comp_signal[dev], val)]
 
-        # Remove self-dependency for AMD or NV with only 1 same-queue dep, since NV chains 2+ kernels in this case, eliminating dep need.
+        # Remove self-dependency for AMD or NV with only 1 same-queue dep, since NV chains 2+ execs in this case, eliminating dep need.
         if (dname:=dev.dname.split(":", 1)[0]) == "AMD" or (dname == "NV" and len(deps) == 1 and id(deps[0][0]) == id(self.comp_signal[dev])):
           deps = [x for x in deps if id(x[0]) != id(self.comp_signal[dev])]
 
-        signal_scheduling[j] = (deps, None) # on compute kernels, we can skip signals by default, since no dependencies might be there.
         self.comp_signal_val[dev] = sig_val
       elif isinstance(ji.prg, BufferXfer):
         dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
         deps = self.access_resources([src], [dest], (self.copy_signal[Device[src.device]], sig_val:=j+1))
         deps = [x for x in deps if id(x[0]) != id(self.copy_signal[Device[src.device]])]
-        signal_scheduling[j] = (deps, j+1)
         self.copy_signal_val[Device[src.device]] = sig_val
         self.copy_to_devs[Device[dest.device]].add(Device[src.device])
-      for sig,val in deps: signal_scheduling[val - 1] = (signal_scheduling[val - 1][0], val) # set need output for signal, as it has deps
+
+      # When running compute, set up lazy signals, since no dependencies might be there. Copies always have signals to sync.
+      signal_scheduling[j] = (deps, None if isinstance(ji.prg, CompiledRunner) else j + 1)
+      for sig, val in deps: signal_scheduling[val - 1] = (signal_scheduling[val - 1][0], val) # set need output for signal, as it has deps.
 
     # Building hardware queues
     for dev in self.devices:
