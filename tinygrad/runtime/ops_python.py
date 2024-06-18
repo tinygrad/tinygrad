@@ -40,7 +40,7 @@ class PythonProgram:
       while i < len(self.uops):
         uop, dtype, idp, arg = self.uops[i]
         void_ops = {UOps.STORE, UOps.ENDRANGE, UOps.BARRIER, UOps.IF, UOps.ENDIF}
-        if uop is UOps.DEFINE_ACC: idp.clear()
+        if uop is UOps.DEFINE_ACC: idp = [idp[-1]]
         inp = [ul[v] for v in idp if self.uops[v][0] not in void_ops]
         dtp = [dl[v] for v in idp if self.uops[v][0] not in void_ops]
         if getenv("TRACE"): print(i, uop, dtype, arg, inp, dtp)
@@ -89,7 +89,7 @@ class PythonProgram:
         elif uop is UOps.CONST:
           ul[i] = [[arg] * warp_size for _ in range(dtype.count)] if dtype.count > 1 else [arg] * warp_size
         elif uop is UOps.DEFINE_ACC:
-          ul[i] = [[idp[-1]] * warp_size for _ in range(dtype.count)] if dtype.count > 1 else [idp[-1]] * warp_size
+          ul[i] = inp[0]
         elif uop is UOps.RANGE:
           if i not in ul: ul[i] = [inp[0][0]] * warp_size
           else:
