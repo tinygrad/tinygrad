@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import os, sys, io, pathlib, json, struct
-from tqdm import tqdm
 import numpy as np
 sys.path.insert(0, str(pathlib.Path(__file__).parents[1]))
 
@@ -16,7 +15,7 @@ from extra.onnx import get_run_onnx
 from tinygrad import Tensor, Device, GlobalCounters, dtypes
 from tinygrad.dtype import ImageDType
 from tinygrad.device import Buffer
-from tinygrad.helpers import partition, Context, fetch, getenv, DEBUG
+from tinygrad.helpers import partition, Context, fetch, getenv, DEBUG, tinytqdm
 from tinygrad.engine.realize import run_schedule, lower_schedule, ExecItem, CompiledRunner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule, memory_planner
 from tinygrad.ops import LoadOps
@@ -118,7 +117,7 @@ if __name__ == "__main__":
         assert not b.is_allocated(), "output should not be allocated"
     image_count = sum(isinstance(out.dtype, ImageDType) for si in schedule for out in si.outputs)
     print(f"**** compiling real kernels {image_count}/{len(schedule)} images ****")
-    eis = list(tqdm(lower_schedule(schedule), total=len(schedule)))
+    eis = list(tinytqdm(lower_schedule(schedule), total=len(schedule)))
 
   print("kernel count:", len(eis))
   assert len(eis) <= getenv("ALLOWED_KERNEL_COUNT", 0) or getenv("ALLOWED_KERNEL_COUNT", 0) == 0, "too many kernels!"
