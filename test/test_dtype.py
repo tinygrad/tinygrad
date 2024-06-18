@@ -544,7 +544,6 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([0, 1], dtype=dtypes.float32)).sum().dtype == dtypes.float32
     assert (Tensor([0, 1], dtype=dtypes.float64)).sum().dtype == dtypes.float64
 
-  @unittest.skipIf(Device.DEFAULT == "PYTHON", "TODO: support inf to half in PYTHON backend")
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need float16")
   def test_sum_acc_dtype(self):
     t = Tensor([40000, 40000], dtype=dtypes.float16)
