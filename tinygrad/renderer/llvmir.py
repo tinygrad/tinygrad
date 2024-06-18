@@ -101,21 +101,21 @@ class LLVMRenderer(Renderer):
       if not isinstance(dtype, PtrDType) and dtype == dtypes.int32: lvars[bufname] = bb[-1].sext(func.args[buf_index[bufname]], ir.IntType(32))
 
     for u in uops:
-      uop,dtype,vin,args = u.op,u.dtype,u.src,u.arg
+      uop,dtype,src,args = u.op,u.dtype,u.src,u.arg
       if uop is UOps.STORE:
-        element = cast(bb, lvars[vin[2]], vin[2].dtype, vin[0].dtype)
-        if len(vin) > 3:
-          with bb[-1].if_then(lvars[vin[3]]):
-            bb[-1].store(element, bb[-1].gep(lvars[vin[0]], [lvars[vin[1]]], inbounds=True))
+        element = cast(bb, lvars[src[2]], src[2].dtype, src[0].dtype)
+        if len(src) > 3:
+          with bb[-1].if_then(lvars[src[3]]):
+            bb[-1].store(element, bb[-1].gep(lvars[src[0]], [lvars[src[1]]], inbounds=True))
         else:
-          bb[-1].store(element, bb[-1].gep(lvars[vin[0]], [lvars[vin[1]]], inbounds=True))
+          bb[-1].store(element, bb[-1].gep(lvars[src[0]], [lvars[src[1]]], inbounds=True))
       elif uop is UOps.ENDRANGE:
         loop_entry_bb, phis = loop_blocks.pop()
-        idx_p1 = bb[-1].add(lvars[vin[0]], ir.Constant(ir.IntType(32), 1))
-        lvars[vin[0]].add_incoming(idx_p1, bb[-1].block)
+        idx_p1 = bb[-1].add(lvars[src[0]], ir.Constant(ir.IntType(32), 1))
+        lvars[src[0]].add_incoming(idx_p1, bb[-1].block)
         for n,phi in phis: phi.add_incoming(lvars[n], bb[-1].block)
         bb.append(ir.IRBuilder(func.append_basic_block(f"loop_exit_{len(loop_blocks)}")))
-        bb[-2].cbranch(bb[-2].icmp_unsigned("<", idx_p1, lvars[vin[0].src[1]]), loop_entry_bb, bb[-1].block)
+        bb[-2].cbranch(bb[-2].icmp_unsigned("<", idx_p1, lvars[src[0].src[1]]), loop_entry_bb, bb[-1].block)
       else:
         assert dtype is not None, f"None dtype for uop {uop}"
         if uop is UOps.RANGE:
@@ -130,28 +130,28 @@ class LLVMRenderer(Renderer):
             phis.append((rp, lvars[rp]))
 
           lvars[u] = bb[-1].phi(ir.IntType(32), name=f"loop{len(loop_blocks)}")
-          lvars[u].add_incoming(lvars[vin[0]], bb[-2].block)
+          lvars[u].add_incoming(lvars[src[0]], bb[-2].block)
           loop_blocks.append((bb[-1].block, phis))
         elif uop is UOps.DEFINE_ACC:
           lvars[u] = const(args[0], dtype)
           reduce_phis.append(u)
         elif uop is UOps.LOAD:
-          if len(vin) > 2:
-            aug_idx = bb[-1].select(lvars[vin[2]], lvars[vin[1]], ir.Constant(ir.IntType(32), 0))
-            val = bb[-1].load(bb[-1].gep(lvars[vin[0]], [aug_idx], inbounds=True))
-            val = bb[-1].select(lvars[vin[2]], val, lvars[vin[3]])
+          if len(src) > 2:
+            aug_idx = bb[-1].select(lvars[src[2]], lvars[src[1]], ir.Constant(ir.IntType(32), 0))
+            val = bb[-1].load(bb[-1].gep(lvars[src[0]], [aug_idx], inbounds=True))
+            val = bb[-1].select(lvars[src[2]], val, lvars[src[3]])
           else:
-            val = bb[-1].load(bb[-1].gep(lvars[vin[0]], [lvars[vin[1]]], inbounds=True))
+            val = bb[-1].load(bb[-1].gep(lvars[src[0]], [lvars[src[1]]], inbounds=True))
           lvars[u] = val
         elif uop is UOps.PHI:
-          lvars[u] = lvars[vin[1]]
+          lvars[u] = lvars[src[1]]
           # PHI UOps can link to other PHI Uops, backtrace this to DEFINE_ACC
-          backward = vin[0]
+          backward = src[0]
           while backward.op is UOps.PHI: backward = backward.src[0]
           lvars[backward] = lvars[u]
         elif uop is UOps.ALU:
-          lvars[u] = code_for_op[args](bb[-1], *[lvars[x] for x in vin], dtype if args not in (BinaryOps.CMPLT, BinaryOps.CMPNE) else vin[0].dtype)
-        elif uop in {UOps.CAST, UOps.BITCAST}: lvars[u] = cast(bb, lvars[vin[0]], vin[0].dtype, dtype, bitcast=uop is UOps.BITCAST)
+          lvars[u] = code_for_op[args](bb[-1], *[lvars[x] for x in src], dtype if args not in (BinaryOps.CMPLT, BinaryOps.CMPNE) else src[0].dtype)
+        elif uop in {UOps.CAST, UOps.BITCAST}: lvars[u] = cast(bb, lvars[src[0]], src[0].dtype, dtype, bitcast=uop is UOps.BITCAST)
         elif uop in {UOps.DEFINE_GLOBAL, UOps.DEFINE_VAR}: lvars[u] = func.args[buf_index[args]]
         elif uop is UOps.SPECIAL: lvars[u] = lvars[args.expr]
         elif uop is UOps.CONST: lvars[u] = const(args, dtype)
