@@ -1,11 +1,12 @@
 from __future__ import annotations
-from typing import List, Tuple, cast, Optional, Any, Dict
+from typing import List, Tuple, cast, Optional, Any, Dict, Final, DefaultDict
 import math, functools
 from dataclasses import replace
+from collections import defaultdict
 from tinygrad.codegen.kernel import LocalBuffer, Kernel
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.dtype import dtypes, PtrDType, ImageDType
-from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, BinaryOps, UnaryOps, MemBuffer
+from tinygrad.ops import BufferOps, LazyOp, TernaryOps, ReduceOps, BinaryOps, UnaryOps, MemBuffer, get_lazyop_info
 from tinygrad.codegen.uops import UOp, UOpGraph, UOps
 from tinygrad.renderer import Program
 from tinygrad.helpers import to_function_name, colored, DEBUG, getenv, prod
@@ -99,6 +100,7 @@ class Lowerer(Kernel):
       return UOp(UOps.REDUCE, x.dtype, (in_uops[0], UOp.const(x.dtype, get_reduce_acc(x))) + tuple(self.ridxs[i] for i in x.arg), op)
     return UOp.alu(x.op, *in_uops)
 
+  kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
   def linearize(self) -> Lowerer:
     global uop_graphed
     self.uop_cache: Dict[LazyOp, UOp] = {}
@@ -108,8 +110,13 @@ class Lowerer(Kernel):
                  (f"{len(self.outbufs)}_" if len(self.outbufs) > 1 else "_") + \
                  colored('_', 'BLACK').join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
     if DEBUG >= 4: print(self.name)
-    self.idxs = []
 
+    # name the function something unique
+    Lowerer.kernel_cnt[(function_name := to_function_name(self.name))] += 1
+    suffix = f"{'n'+str(Lowerer.kernel_cnt[function_name]-1)}" if Lowerer.kernel_cnt[function_name] > 1 else ""
+    self.name = self.name+colored(suffix, 'BLACK')
+
+    self.idxs = []
     # add a local buffer for multistage reduce.
     if self.group_for_reduces:
       for i in range(len(self.reduceops)):
@@ -181,4 +188,8 @@ class Lowerer(Kernel):
   def to_program(self) -> Program:
     self.linearize()
     src = self.opts.render(to_function_name(self.name), self.uops)
-    return Program(self.name, src, self.opts.device, self.global_size, self.local_size, self.uops, *self.uops.flops_mem())
+    info = get_lazyop_info(self.ast[0])
+    ops, mem = self.uops.flops_mem()
+    run_count = prod((self.global_size if self.global_size else []) + (self.local_size if self.local_size else []))
+    return Program(self.name, src, self.opts.device, self.global_size, self.local_size,
+                   self.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))
