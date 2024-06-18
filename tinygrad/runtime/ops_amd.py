@@ -487,8 +487,8 @@ class AMDAllocator(LRUAllocator):
         # if tt is not None: print(f"done req b_slot={b_slot}, completed in {(time.perf_counter_ns() - tt)*1e-6:6.2f} ms")
         free_bs.append(b_slot)
 
-    for b_slot in free_bs_order:
-      tt = gpu_copy_info[b_slot]
+    # for b_slot in free_bs_order:
+    #   tt = gpu_copy_info[b_slot]
       # if tt is not None: print(f"done req b_slot={b_slot}, completed in {(time.perf_counter_ns() - tt)*1e-6:6.2f} ms")
 
   def copyin(self, dest, src: memoryview):
