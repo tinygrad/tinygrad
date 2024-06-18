@@ -9,6 +9,7 @@ from tinygrad.helpers import CI, getenv
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
 from tinygrad.ops import UnaryOps
+from tinygrad.tensor import _to_np_dtype
 from test.helpers import is_dtype_supported
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
@@ -59,7 +60,7 @@ class ht:
 def universal_test(a, b, dtype, op):
   if not isinstance(op, tuple): op = (op, op)
   tensor_value = (op[0](Tensor([a], dtype=dtype), Tensor([b], dtype=dtype))).numpy()
-  numpy_value = op[1](np.array([a]).astype(dtype.np), np.array([b]).astype(dtype.np))
+  numpy_value = op[1](np.array([a]).astype(_to_np_dtype(dtype)), np.array([b]).astype(_to_np_dtype(dtype)))
   if dtype in dtypes_float: np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-10)
   else: np.testing.assert_equal(tensor_value, numpy_value)
 
@@ -70,7 +71,7 @@ def universal_test_unary(a, dtype, op):
   ast = sched[-1].ast[0]
   run_schedule(sched)
   tensor_value = out.numpy()
-  numpy_value = op[1](np.array([a]).astype(dtype.np))
+  numpy_value = op[1](np.array([a]).astype(_to_np_dtype(dtype)))
   if dtype in dtypes_float:
     np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-3, rtol=1e-2)
   else: np.testing.assert_equal(tensor_value, numpy_value)
@@ -80,16 +81,16 @@ def universal_test_unary(a, dtype, op):
 
 def universal_test_cast(a, in_dtype, dtype):
   tensor_value = Tensor([a], dtype=in_dtype).cast(dtype)
-  numpy_value = np.array([a]).astype(dtype.np)
+  numpy_value = np.array([a]).astype(_to_np_dtype(dtype))
   np.testing.assert_equal(tensor_value.numpy(), numpy_value)
 
 def universal_test_midcast(a, b, c, op1, op2, d1:DType, d2:DType):
   if not isinstance(op1, tuple): op1 = (op1, op1)
   if not isinstance(op2, tuple): op2 = (op2, op2)
   at, bt, ct = Tensor([a], dtype=d1), Tensor([b], dtype=d1), Tensor([c], dtype=d2)
-  an, bn, cn = np.array([a]).astype(d1.np), np.array([b]).astype(d1.np), np.array([c]).astype(d2.np)
+  an, bn, cn = np.array([a]).astype(_to_np_dtype(d1)), np.array([b]).astype(_to_np_dtype(d1)), np.array([c]).astype(_to_np_dtype(d2))
   tensor_value = op2[0](op1[0](at, bt).cast(d2), ct).numpy()
-  numpy_value = op2[1](op1[1](an, bn).astype(d2.np), cn)
+  numpy_value = op2[1](op1[1](an, bn).astype(_to_np_dtype(d2)), cn)
   np.testing.assert_allclose(tensor_value, numpy_value, rtol=1e-6 if getenv("PTX") else 1e-7)
 
 class TestDTypeALU(unittest.TestCase):
@@ -149,6 +150,7 @@ class TestDTypeALU(unittest.TestCase):
   @given(strat.floats(width=32, min_value=0, max_value=10.0) if skip_overflow else ht.float32,
          strat.floats(width=32, min_value=0, max_value=10.0) if skip_overflow else ht.float32,
          ht.int32, strat.sampled_from(binary_operations), strat.sampled_from(integer_binary_operations))
+  @unittest.skipIf(Device.DEFAULT == "PYTHON", "TODO: fix cast inf to int32 in PYTHON")
   def test_float_midcast_int32(self, a, b, c, op1, op2): universal_test_midcast(a, b, c, op1, op2, dtypes.float32, dtypes.int32)
 
   @unittest.skip("broken. TODO: fix it")

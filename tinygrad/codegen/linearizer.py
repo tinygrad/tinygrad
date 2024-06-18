@@ -3,26 +3,75 @@ from typing import List, Tuple, Any, Optional, cast, DefaultDict, Dict, Union, F
 import itertools, math, functools
 from collections import defaultdict
 
-from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, ConstType
+from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.helpers import colored, DEBUG, dedup, diskcache_put, prod, getenv, to_function_name, flatten
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ConstBuffer, MemBuffer, BufferOps, get_lazyop_info
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, create_lt_node
+from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, create_lt_node, sint
 from tinygrad.codegen.kernel import LocalBuffer, Kernel
 from tinygrad.renderer import Program
 
 from tinygrad.codegen.uops import UOps, UOp, UOpGraph
 
-def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0):
-  local_idxs = loop_local_idxs = [Variable(f"{prefix}{start_dim+i}", 0, s-1) for i,s in enumerate((prod(local_dims[:-(maxdim-1)]),) + local_dims[-(maxdim-1):] if len(local_dims) > maxdim else local_dims)]  # noqa: E501
-  if maxdim != 0 and len(local_dims) > maxdim:
-    dd = local_idxs[0]
-    nli = []
-    for s in local_dims[:-(maxdim-1)]:
-      nli.append(dd % s)
-      dd //= s
-    local_idxs = nli + local_idxs[-(maxdim-1):]
-  return local_idxs, [x for x in loop_local_idxs if not isinstance(x, NumNode)]
+def get_grouped_dims(prefix:str, off:int, dims:Tuple[sint, ...], max_sizes:Optional[Tuple[int, ...]], reverse_dims:bool=False):
+  """ Maps all global/local dims onto global/local sizes and returns the idxs, loop_idxs and sizes.
+
+  * If there are fewer dims than size, size will be padded with 1s to the length of max_sizes.
+  * If there are more dims than size, dims will be collapsed onto size starting from left-most (i.e. onto x, then y, then z).
+  * If the dim is too large for the size, the dim will be split between adjacent size axes space permitting, otherwise assert
+
+  Keyword arguments:
+  prefix -- the prefix to use for the size Variable names.
+  dims -- the global or local dims of the full shape.
+  max_sizes -- the maximum values for each size in (x, y, z) order.
+  reverse_dims -- reverse the order of the dims as they are mapped into size, i.e. if True, the right dim will go to the left size (.x).
+  """
+
+  # check the edge cases on max_sizes
+  if max_sizes is None: max_sizes = tuple([0xFFFFFFFFFFFFFFFF] * len(dims))
+  assert len(max_sizes) > 0 or len(dims) == 0, f"{prefix} dims should be empty because no size axes available"
+  if len(max_sizes) == 0: return [], [], None
+
+  # initialize the map of dims to size with a single dim in each size axis
+  # TODO: support sint properly
+  size_dims:List[List[Tuple[int, sint]]] = [[(dim_idx, dim)] for dim_idx, dim in enumerate(dims)]
+
+  # reverse the order of the dims to size map, if desired (currently for globals where smallest stride is on the right)
+  # TODO: remove reverse_dims, the mapping of dims to size for globals should be cosearched with memory layouts for optimal peformance
+  if reverse_dims: size_dims = size_dims[::-1]
+
+  # ensure that the initial dims initially fit the valid size axes
+  for size_idx, max_sz in [(i, sz) for i, sz in enumerate(max_sizes[:len(size_dims)]) if size_dims[i][0][1] > sz]:
+    # if the initial dim is too large, split the dim to separate size axes, if possible
+    dim_idx, dim_max = size_dims[size_idx][0]
+    assert isinstance(dim_max, int), "variable shape too large for size"
+    for factor in range(2, int(dim_max**0.5)+1):
+      if dim_max % factor == 0 and dim_max // factor <= max_sz:
+        size_dims = size_dims[:size_idx] + [[(dim_idx, dim_max//factor)], [(dim_idx, factor)]] + size_dims[size_idx+1:]
+        break
+    assert size_dims[size_idx][0][1] <= max_sz, f"dim at {size_idx} too large and non-factorable: {dim_max} > {max_sz}"
+
+  # compress the extra dims, collapsing them onto the left-most valid size axis
+  # for run_process_replay, collapse onto the right-most dim to compare the outputs.  TODO: remove
+  if reverse_dims: size_dims, max_sizes = size_dims[::-1], max_sizes[::-1]
+  cur_size_idx = 0
+  while len(size_dims) > len(max_sizes):
+    if prod([dim_max for (_, dim_max) in size_dims[cur_size_idx]])*size_dims[cur_size_idx+1][0][1] < max_sizes[cur_size_idx]:
+      size_dims = size_dims[:cur_size_idx] + [size_dims[cur_size_idx] + size_dims[cur_size_idx+1]] + size_dims[cur_size_idx+2:]
+    elif cur_size_idx < len(max_sizes)-1: cur_size_idx += 1
+    else: raise AssertionError(f"cannot fit dims in size: {dims=} {max_sizes=}")
+  if reverse_dims: size_dims, max_sizes = size_dims[::-1], max_sizes[::-1]
+
+  # construct the final dim idx variables from the the portions of the size variables
+  sizes, idxs = [prod([dim_max for (_, dim_max) in size_dim]) for size_dim in size_dims], [NumNode(0)] * len(dims)
+  size_vars = loop_idxs = [Variable(f"{prefix}{len(sizes)-1-(i+off) if reverse_dims else i+off}", 0, s-1) for i,s in enumerate(sizes)]
+  for size_idx, size_var in enumerate(size_vars):
+    for dim_idx, dim_max in size_dims[size_idx]:
+      idxs[dim_idx] += (size_var % dim_max) * (idxs[dim_idx].max+1)
+      size_var //= dim_max
+
+  # pad the final sizes array to the proper length if necessary
+  return idxs, [x for x in loop_idxs if not isinstance(x, NumNode)], sizes + [1]*(len(max_sizes)-len(sizes))
 
 def expand_idx(node:Node) -> Union[Variable, NumNode]: return next((v for v in node.vars() if v.expr.startswith("_uidx")), NumNode(0))
 def expand_idxs(nodes:Sequence[Node]) -> Tuple[Union[Variable, NumNode], ...]:
@@ -47,10 +96,6 @@ def expand_node(node:Node, idxs:Optional[Tuple[Union[Variable, NumNode], ...]]=N
 class Linearizer(Kernel):
   def uop_alu_idx(self, a:UOp, b, ops, ctx:Linearizer, op): return UOp.alu(op, a, (NumNode(b) if not isinstance(b, Node) else b).render(ops, ctx))
 
-  # NOTE: the consts have to be cached for deduping of downstream uops to work
-  def const(self, b:ConstType|Variable, dtype:DType=dtypes.int32) -> UOp:
-    return UOp(UOps.DEFINE_VAR, dtype, (), b) if isinstance(b, Variable) else UOp.const(dtype, b)
-
   def get_reduce_acc(self, reduceop:LazyOp):
     if reduceop.op is ReduceOps.SUM: return 0.0 if dtypes.is_float(reduceop.dtype) else 0
     if reduceop.op is ReduceOps.MAX:
@@ -60,9 +105,9 @@ class Linearizer(Kernel):
   # NOTE: once images are loaded, we uop them as their base float
   def get_base_dtype(self, dt:DType) -> DType: return dt.base if isinstance(dt, ImageDType) else dt
 
-  render_ops: Any = { Variable: lambda self, ops, ctx: ctx.loop_uops[self.expr], NumNode: lambda self, ops, ctx: ctx.const(self.b),
+  render_ops: Any = { Variable: lambda self, ops, ctx: ctx.loop_uops[self.expr], NumNode: lambda self, ops, ctx: UOp.const(dtypes.int, self.b),
                 MulNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.MUL),
-                DivNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.DIV),
+                DivNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.IDIV),
                 ModNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.MOD),
                 LtNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.CMPLT),
     SumNode: lambda self,ops,ctx:
@@ -102,16 +147,16 @@ class Linearizer(Kernel):
           self.load_cache[key] = UOp(UOps.DEFINE_ACC, localtype, loop_ctx, (self.get_reduce_acc(acc), i, acc_count))
           acc_count += 1
         elif this_const is not None:
-          self.load_cache[key] = self.const(this_const, localtype)
+          self.load_cache[key] = UOp.const(localtype, this_const)
           if valid.min == 0 and valid.max == 1:
             valid_rendered = valid.render(self.render_ops, self)
-            self.load_cache[key] = UOp.alu(TernaryOps.WHERE, valid_rendered, self.load_cache[key], self.const(invalid_value, localtype))
+            self.load_cache[key] = UOp.alu(TernaryOps.WHERE, valid_rendered, self.load_cache[key], UOp.const(localtype, invalid_value))
         elif isinstance(buf.dtype, ImageDType):
           buf_uop = self.buf_uops[i]
           assert buf_uop is not None, f"buffer {i} wasn't UOped"
           image_idx, valid = to_image_idx(buf.dtype.shape, idx, valid)
           rendered_idx = UOp(UOps.CAST, dtypes.int.vec(2), tuple(x.render(self.render_ops, self) for x in image_idx))
-          valid_tuple = (valid.render(self.render_ops, self), self.const(invalid_value, buf.dtype.base.vec(4))) if valid.min == 0 else tuple()
+          valid_tuple = (valid.render(self.render_ops, self), UOp.const(buf.dtype.base.vec(4), invalid_value)) if valid.min == 0 else tuple()
           self.load_cache[key] = UOp(UOps.LOAD, buf.dtype.base.vec(4),
                                                (buf_uop, rendered_idx) + valid_tuple + ((barrier,) if barrier else ()))
           if localtype == localtype.scalar():
@@ -120,14 +165,14 @@ class Linearizer(Kernel):
             out = UOp(UOps.GEP, localtype, (self.load_cache[key],), idx_small.max)
             for ix in range(idx_small.max, idx_small.min, -1):
               rvv = UOp(UOps.GEP, localtype, (self.load_cache[key],), ix-1)
-              sel = UOp.alu(BinaryOps.CMPLT, res, self.const(ix))
+              sel = UOp.alu(BinaryOps.CMPLT, res, UOp.const(dtypes.int, ix))
               out = UOp.alu(TernaryOps.WHERE, sel, rvv, out)
             self.load_cache[key] = out
         else:
           buf_uop = self.buf_uops[i]
           assert buf_uop is not None, f"buffer {i} wasn't UOped"
           rendered_idx = idx.render(self.render_ops, self)
-          valid_tuple = (valid.render(self.render_ops, self), self.const(invalid_value, localtype)) if valid.min == 0 else tuple()
+          valid_tuple = (valid.render(self.render_ops, self), UOp.const(localtype, invalid_value)) if valid.min == 0 else tuple()
           self.load_cache[key] = UOp(UOps.LOAD, localtype, (buf_uop, rendered_idx) + valid_tuple + ((barrier,) if barrier else ()))
       ret.append(UOp(UOps.GEP, localtype.scalar(), (self.load_cache[key],), rep_idx[dim]) if dim is not None else self.load_cache[key])
     return ret
@@ -171,8 +216,8 @@ class Linearizer(Kernel):
   # render loop
   def render_loop(self, xx:List[Variable], depth:int) -> Tuple[UOp, ...]:
     new_loops = {x.expr:UOp(UOps.RANGE, dtypes.int32, (
-      self.const(x.min) if isinstance(x.min, int) else cast(Node, x.min).render(self.render_ops, self),
-      self.const(x.max+1) if isinstance(x.max, int) else cast(Node, x.max+1).render(self.render_ops, self)), arg=(depth,i)) for i,x in enumerate(xx) if not isinstance(x, NumNode) and x.expr is not None}  # noqa: E501
+      UOp.const(dtypes.int, x.min) if isinstance(x.min, int) else cast(Node, x.min).render(self.render_ops, self),
+      UOp.const(dtypes.int, x.max+1) if isinstance(x.max, int) else cast(Node, x.max+1).render(self.render_ops, self)), arg=(depth,i)) for i,x in enumerate(xx) if not isinstance(x, NumNode) and x.expr is not None}  # noqa: E501
     self.loop_uops.update(new_loops)
     return tuple(new_loops.values())
 
@@ -261,7 +306,7 @@ class Linearizer(Kernel):
         global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs) if b in self.earlybufs})
 
       def gate_acc(r, idxs): return [
-        UOp.alu(TernaryOps.WHERE, valid.render(self.render_ops, self), acc, self.const(0, r.dtype)) if valid.min == 0 and valid.max == 1 else acc
+        UOp.alu(TernaryOps.WHERE, valid.render(self.render_ops, self), acc, UOp.const(r.dtype, 0)) if valid.min == 0 and valid.max == 1 else acc
         for valid, acc in zip(expand_node(self.sts[self.full_buf_index].expr_idxs(idxs)[1], expand_idxs(idxs)), accs[r])]
       local_accs = {r: gate_acc(r,global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for r in accs}
 
@@ -342,9 +387,6 @@ class Linearizer(Kernel):
     # global uop cache
     self.saved_exprs: Dict[Tuple, UOp] = dict()
 
-    # limit dims if we need to
-    if self.opts.global_max and self.opts.local_max: self.limit_dims_to_max(self.opts.global_max, self.opts.local_max)
-
     # uops
     self.buf_uops: List[Optional[UOp]] = [None]*len(self.bufs)
     self.loop_uops: Dict[str, UOp] = {}
@@ -383,25 +425,22 @@ class Linearizer(Kernel):
     self.name = self.name+colored(suffix, 'BLACK')
 
     # define indexes
-    global_idxs, loop_global_idxs = get_grouped_dims("gidx", 0, self.full_shape[:self.global_dims], 3 if self.opts.has_local else 0)
-    local_idxs, loop_local_idxs = get_grouped_dims("lidx", self.global_dims, self.full_shape[self.global_dims:self.first_reduce+self.group_for_reduces], 3 if self.opts.has_local else 0)  # noqa: E501
+    gl_dims = self.full_shape[:self.first_reduce+self.group_for_reduces]
+    global_idxs, loop_global_idxs, self.global_size = get_grouped_dims("idx" if self.dont_use_locals else "gidx", 0, gl_dims[:self.global_dims],
+                                                                       self.opts.global_max, self.opts.has_local)
+    local_idxs, loop_local_idxs, self.local_size = get_grouped_dims("lidx", self.global_dims, gl_dims[self.global_dims:],
+                                                                    self.opts.local_max if self.opts.has_local else (), False)
     upcast_idxs = [Variable(f"_uidx{i}", 0, s-1) for i, s in enumerate(self.output_shape[self.shape_len-self.upcasted:])]
     full_upcast_idxs = [Variable(f"_uidx{i}", 0, s-1) for i, s in enumerate(self.full_shape[self.shape_len-self.upcasted:])]
 
-    # set global/local size
-    self.global_size: Optional[List[int]] = None
-    self.local_size: Optional[List[int]] = None
-    if self.dont_use_locals:
-      self.global_size = [x.max+1 for x in loop_global_idxs][::-1]
-      self.loop_uops.update({x.expr:UOp(UOps.SPECIAL, dtypes.int32, (), (len(loop_global_idxs)-1-i, x.expr.replace("gidx", "idx"), x.max+1)) for i,x in enumerate(loop_global_idxs)})  # noqa: E501
-    elif self.opts.has_local:
-      self.global_size, self.local_size = [x.max+1 for x in loop_global_idxs][::-1], [x.max+1 for x in loop_local_idxs]
-      self.loop_uops.update({x.expr:UOp(UOps.SPECIAL, dtypes.int32, (), (len(loop_global_idxs)-1-i, x.expr, x.max+1)) for i,x in enumerate(loop_global_idxs)})  # noqa: E501
-      self.loop_uops.update({x.expr:UOp(UOps.SPECIAL, dtypes.int32, (), (i, x.expr, x.max+1)) for i,x in enumerate(loop_local_idxs)})
+    # render global and local as specials or a loop
+    if self.opts.has_local:
+      self.loop_uops.update({x.expr:UOp(UOps.SPECIAL, dtypes.int32, (), (i, x.expr, x.max+1)) for i,x in enumerate(loop_global_idxs)})
+      if not self.dont_use_locals:
+        self.loop_uops.update({x.expr:UOp(UOps.SPECIAL, dtypes.int32, (), (i, x.expr, x.max+1)) for i,x in enumerate(loop_local_idxs)})
     else:
+      self.global_size, self.local_size = None, None
       self.render_loop(loop_global_idxs+loop_local_idxs, 1)
-    if self.global_size is not None: self.global_size += [1]*(3-len(self.global_size))
-    if self.local_size is not None: self.local_size += [1]*(3-len(self.local_size))
 
     # define idxs for aliased buffers TODO: this doesn't belong in Kernel, but it can't exist in Block either (because of multireduce tensor cores)
     reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+self.group_for_reduces, self.shape_len-self.upcasted)]  # noqa: E501
@@ -486,7 +525,7 @@ class Linearizer(Kernel):
     self.linearize()
     info = get_lazyop_info(self.ast[0])
     src = self.opts.render(to_function_name(self.name), self.uops)
-    if getenv("RUN_PROCESS_REPLAY"): diskcache_put("process_replay", id(self), self)
+    if getenv("RUN_PROCESS_REPLAY"): diskcache_put("process_replay", id(self), (self, src))
     ops, mem = self.uops.flops_mem()
     run_count = prod((self.global_size if self.global_size else []) + (self.local_size if self.local_size else []))
     # NOTE: we use min here to ignore the indexing FLOPS

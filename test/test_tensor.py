@@ -1,10 +1,11 @@
 import numpy as np
 import torch
-import unittest, copy, mmap, random
+import unittest, copy, mmap, random, math
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.helpers import getenv, temp, CI
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
+from test.helpers import is_dtype_supported
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -204,12 +205,14 @@ class TestTinygrad(unittest.TestCase):
     assert Tensor.randn(1,1,1,1,1,1).numel() == 1
     assert Tensor([]).numel() == 0
     assert Tensor.randn(1,0,2,5).numel() == 0
+    assert Tensor(3).numel() == 1
 
   def test_len(self):
     assert len(torch.zeros(7)) == len(Tensor.zeros(7))
     assert len(torch.zeros(10,20)) == len(Tensor.zeros(10,20))
     assert len(torch.zeros(10,20)) == len(Tensor.zeros(10,20,30))
     assert len(torch.zeros(1).flatten()) == len(Tensor.zeros(1).flatten())
+    with self.assertRaises(TypeError): len(Tensor(3))
 
   def test_size(self):
     t1, t2 = torch.zeros(10,20), Tensor.zeros(10,20)
@@ -300,6 +303,30 @@ class TestTinygrad(unittest.TestCase):
         data = _generate_data(depth)
         np.testing.assert_allclose(Tensor(data).numpy(), np.array(data))
 
+  def test_tensor_list_special_values(self):
+    if is_dtype_supported(dtypes.float16):
+      data = [math.nan, -math.inf, 65504, 65519, 65519.999, 65520, 65520.1]
+      data = data + [-x for x in data]
+      np.testing.assert_allclose(Tensor(data, dtype=dtypes.float16).numpy(), np.array(data, dtype=np.float16))
+
+    # TODO: numpy changed this behavior in 2.0
+    # # uint32
+    # data = [1 << 33, 1 << 32, 1 << 32 - 1, 1]
+    # data = data + [-x for x in data]
+    # np.testing.assert_allclose(Tensor(data, dtype=dtypes.uint32).numpy(), np.array(data, dtype=np.uint32))
+
+    # # int32
+    # data = [1 << 33, 1 << 32, 1 << 32 - 1, 1]
+    # data = data + [-x for x in data]
+    # np.testing.assert_allclose(Tensor(data, dtype=dtypes.int32).numpy(), np.array(data, dtype=np.int32))
+
+  def test_tensor_bytes(self):
+    data = b"abc123"
+    t = Tensor(data)
+    assert t.dtype == dtypes.uint8
+    assert t.shape == (6,)
+    np.testing.assert_equal(t.numpy(), list(data))
+
   def test_tensor_copy(self):
     x = copy.deepcopy(Tensor.ones((3,3,3)))
     np.testing.assert_allclose(x.numpy(), np.ones((3,3,3)))
@@ -313,7 +340,7 @@ class TestTinygrad(unittest.TestCase):
   # Regression test for https://github.com/tinygrad/tinygrad/issues/1751
   def test_copy_from_numpy_unaligned(self):
     # 2**15 is the minimum for repro
-    arr = np.random.randn(2**15).astype(dtypes.float.np)
+    arr = np.random.randn(2**15).astype(np.float32)
     fn = temp('test_copy_from_numpy_unaligned')
     with open(fn, 'wb') as f: f.write(b't' + arr.tobytes())
     with open(fn, "a+b") as f: memview = memoryview(mmap.mmap(f.fileno(), arr.nbytes + 1))
