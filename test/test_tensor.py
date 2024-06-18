@@ -320,6 +320,14 @@ class TestTinygrad(unittest.TestCase):
     # data = data + [-x for x in data]
     # np.testing.assert_allclose(Tensor(data, dtype=dtypes.int32).numpy(), np.array(data, dtype=np.int32))
 
+  def test_tensor_list_ndarray(self):
+    data = [np.array([1, 2, 3]), np.array([1, 2, 3]), np.array([1, 2, 3])]
+    np.testing.assert_equal(Tensor(data).numpy(), np.array(data))
+    data = [np.array([1.0, 2.0, 3.0]), np.array([1, 2, 3]), np.array([1, 2, 3])]
+    np.testing.assert_equal(Tensor(data).numpy(), np.array(data))
+    data = [np.array(1.0), np.array(2.0), np.array(3.0)]
+    np.testing.assert_equal(Tensor(data).numpy(), np.array(data))
+
   def test_tensor_bytes(self):
     data = b"abc123"
     t = Tensor(data)
