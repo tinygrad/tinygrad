@@ -765,6 +765,7 @@ class Tensor:
     ```
     """
     new_shape = argfix(shape, *args)
+    if new_shape.count(-1) > 1: raise RuntimeError(f"only one dimension can be inferred using -1, getting {new_shape}")
     new_shape = tuple([-prod(self.shape) // prod(new_shape) if s == -1 else (s if s is not None else self.shape[i]) for i,s in enumerate(new_shape)])
     return F.Reshape.apply(self, shape=new_shape) if new_shape != self.shape else self
 
@@ -2367,7 +2368,8 @@ class Tensor:
     print(t.sub(Tensor([[2.0], [3.5]])).numpy())
     ```
     """
-    return F.Sub.apply(*self._broadcasted(x, reverse))
+    a, b = self._broadcasted(x, reverse)
+    return a + (-b)
 
   def mul(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
@@ -2704,8 +2706,8 @@ class Tensor:
     assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
     if is_causal: attn_mask = Tensor.ones(self.shape[-2], key.shape[-2], requires_grad=False, device=self.device).tril(0).cast(dtypes.bool)
     if attn_mask is not None and attn_mask.dtype == dtypes.bool: attn_mask = (attn_mask == 0).where(-float("inf"), 0)
-    qk = self @ key.transpose(-2,-1) / math.sqrt(self.shape[-1])
-    return ((qk+attn_mask) if attn_mask is not None else qk).softmax(-1).dropout(dropout_p) @ value
+    qk = self.matmul(key.transpose(-2,-1), acc_dtype=least_upper_dtype(self.dtype, key.dtype, dtypes.float32)) / math.sqrt(self.shape[-1])
+    return ((qk+attn_mask) if attn_mask is not None else qk).softmax(-1).cast(dtypes.default_float).dropout(dropout_p) @ value
 
   def binary_crossentropy(self, y:Tensor) -> Tensor:
     """
