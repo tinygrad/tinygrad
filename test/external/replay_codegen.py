@@ -1,7 +1,7 @@
 # compare kernels created by HEAD against master
 import difflib, pickle
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.helpers import colored, db_connection, VERSION, to_function_name, tinytqdm
+from tinygrad.helpers import colored, db_connection, VERSION, getenv, to_function_name, tinytqdm
 
 page_size = 100
 conn = db_connection()
@@ -16,10 +16,10 @@ for offset in tinytqdm(range(0, row_count, page_size)):
     good_src = k.opts.render(to_function_name(compare_k.name), k.linearize().uops)
     try: assert compare_src == good_src
     except AssertionError as e:
-      print("PROCESS REPLAY FAILED")
+      print("PROCESS REPLAY DETECTED CHANGE")
       print(compare_k.ast)
       print(compare_k.applied_opts)
       diff = list(difflib.unified_diff(good_src.splitlines(), compare_src.splitlines()))
       for line in diff:
         print(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
-      raise e
+      if getenv("ASSERT_PROCESS_REPLAY", 1): raise e
