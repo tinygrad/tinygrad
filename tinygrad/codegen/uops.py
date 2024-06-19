@@ -112,8 +112,8 @@ def __unmatch(m1:Union[T, Set[T], None], m2:Union[T, None]) -> bool:
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
   if pat.name in store and store[pat.name] is not uop: return False
   if pat.name is not None: store[pat.name] = uop
-  if __unmatch(pat.arg, uop.arg) or __unmatch(pat.op, uop.op) or __unmatch(pat.dtype, uop.dtype): return False
-  # if any(__unmatch(pp, uu) for pp,uu in [[x.arg, x.op, x.dtype]]): return False
+  # if __unmatch(pat.arg, uop.arg) or __unmatch(pat.op, uop.op) or __unmatch(pat.dtype, uop.dtype): return False
+  if any(__unmatch(pp, uu) for pp, uu in [[pat.arg, uop.arg], [pat.op, uop.op], [pat.dtype, uop.dtype]]): return False
   if pat.src is None: return True
   # only one if it's a tuple
   # try all permutations if it's a list
