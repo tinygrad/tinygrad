@@ -258,6 +258,9 @@ constant_folder = PatternMatcher([
   (UOp.lt(-UOp.var('x'), UOp.cvar('c', dtypes.int)), lambda c,x: UOp.lt(UOp.const(c.dtype, -c.arg), x)),
   # cast NOOP (NOTE: it's str to deal with PtrDType)
   (UPat(UOps.CAST, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
+  # fold gated LOAD/STORE
+  (UOp.load(UOp.var("buf"), UOp.var("idx"), UOp.const(dtypes.int, 1), UOp.cvar("var")), lambda buf,idx,var: UOp.load(buf, idx, dtype=var.dtype)),
+  (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp.var("val"), UOp.const(dtypes.int, 1)), lambda buf,idx,val: UOp.store(buf, idx, val)),
 ])
 
 # *** uop graph ***
