@@ -387,7 +387,7 @@ class UOpGraph:
     scope_children = {p:get_recursive_children(p, end_for_uop[p.op][0]) for p in (loops+ifs)[::-1]}
 
     queue: List[Tuple[int, UOp]] = []
-    def push(u):
+    def push(u: UOp):
       priority = 0
       # prefer uops that are loop children
       for l, ss in scope_children.items():
