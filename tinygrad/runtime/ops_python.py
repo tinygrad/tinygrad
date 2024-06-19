@@ -3,7 +3,7 @@
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
 from typing import Tuple, List, Optional, Any, Dict
-import pickle, base64, itertools, time, struct
+import pickle, copy, base64, itertools, time, struct
 from tinygrad.dtype import DType, dtypes, ImageDType
 from tinygrad.helpers import all_same, getenv, flatten
 from tinygrad.device import Compiled, Compiler, Allocator
@@ -41,7 +41,7 @@ class PythonProgram:
       while i < len(self.uops):
         uop, dtype, idp, arg = self.uops[i]
         void_ops = {UOps.STORE, UOps.ENDRANGE, UOps.BARRIER, UOps.IF, UOps.ENDIF}
-        if uop is UOps.DEFINE_ACC: idp = [idp[-1]]
+        if uop is UOps.DEFINE_ACC: idp = idp[-1:]
         inp = [ul[v] for v in idp if self.uops[v][0] not in void_ops]
         dtp = [dl[v] for v in idp if self.uops[v][0] not in void_ops]
         if getenv("TRACE"): print(i, uop, dtype, arg, inp, dtp)
@@ -90,7 +90,7 @@ class PythonProgram:
         elif uop is UOps.CONST:
           ul[i] = [[arg] * warp_size for _ in range(dtype.count)] if dtype.count > 1 else [arg] * warp_size
         elif uop is UOps.DEFINE_ACC:
-          ul[i] = [[inp[0][0][0]] * warp_size for _ in range(dtype.count)] if dtype.count > 1 else [inp[0][0]] * warp_size
+          ul[i] = copy.deepcopy(inp[0])
         elif uop is UOps.RANGE:
           if i not in ul: ul[i] = [inp[0][0]] * warp_size
           else:
