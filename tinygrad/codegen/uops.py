@@ -106,14 +106,14 @@ class UPat:
     return UPat(u.op, u.arg, (list if u.commutative() else tuple)([UPat.compile(src) for src in u.src]) if u.src != () else None, name, u.dtype)
 
 T = TypeVar("T")
-def __unmatch(m1:Union[T, Set[T], None], m2:T) -> bool:
+def __unmatch(m1:Union[T, Set[T], None], m2:Union[T, None]) -> bool:
   return (m1 is not None) and ((isinstance(m1, set) and m2 not in m1) or m2 != m1)
 
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
   if pat.name in store and store[pat.name] is not uop: return False
   if pat.name is not None: store[pat.name] = uop
   if __unmatch(pat.arg, uop.arg) or __unmatch(pat.op, uop.op): return False
-  if uop.dtype is not None and __unmatch(pat.dtype, uop.dtype): return False
+  if __unmatch(pat.dtype, uop.dtype): return False
   if pat.src is None: return True
   # only one if it's a tuple
   # try all permutations if it's a list
