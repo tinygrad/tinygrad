@@ -22,6 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       run_process_replay: ${{ steps.set-env.outputs.run_process_replay }}
+      assert_process_replay: ${{ steps.set-env.outputs.assert_process_replay }}
     timeout-minutes: 5
 
     steps:
@@ -37,6 +38,8 @@ jobs:
           echo "RUN_PROCESS_REPLAY=1" >> $GITHUB_OUTPUT
           if echo "$COMMIT_MESSAGE" | grep -q "\[no_assert\]"; then
             echo "ASSERT_PROCESS_REPLAY=0" >> $GITHUB_OUTPUT
+          else
+            echo "ASSERT_PROCESS_REPLAY=1" >> $GITHUB_OUTPUT
           fi
         else
           echo "RUN_PROCESS_REPLAY=0" >> $GITHUB_OUTPUT
@@ -291,6 +294,7 @@ jobs:
     needs: check_process_replay
     env:
       RUN_PROCESS_REPLAY: ${{ needs.check_process_replay.outputs.run_process_replay }}
+      ASSERT_PROCESS_REPLAY: ${{ needs.check_process_replay.outputs.assert_process_replay }}
     timeout-minutes: 20
 
     steps:
@@ -379,6 +383,7 @@ jobs:
     needs: check_process_replay
     env:
       RUN_PROCESS_REPLAY: ${{ needs.check_process_replay.outputs.run_process_replay }}
+      ASSERT_PROCESS_REPLAY: ${{ needs.check_process_replay.outputs.assert_process_replay }}
 
     name: Tests on (${{ matrix.backend }})
     runs-on: ubuntu-latest

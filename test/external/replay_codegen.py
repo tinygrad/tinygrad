@@ -3,6 +3,7 @@ import difflib, pickle
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.helpers import colored, db_connection, VERSION, getenv, to_function_name, tinytqdm
 
+print(getenv("ASSERT_PROCESS_REPLAY", 1))
 page_size = 100
 conn = db_connection()
 cur = conn.cursor()
