@@ -3,7 +3,7 @@
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
 from typing import Tuple, List, Optional, Any, Dict
-import pickle, copy, base64, itertools, time, struct
+import pickle, base64, itertools, time, struct
 from tinygrad.dtype import DType, dtypes, ImageDType
 from tinygrad.helpers import all_same, getenv, flatten
 from tinygrad.device import Compiled, Compiler, Allocator
@@ -90,7 +90,7 @@ class PythonProgram:
         elif uop is UOps.CONST:
           ul[i] = [[arg] * warp_size for _ in range(dtype.count)] if dtype.count > 1 else [arg] * warp_size
         elif uop is UOps.DEFINE_ACC:
-          ul[i] = [x[:] if type(x) == list else x for x in inp[0]]
+          ul[i] = [x[:] if isinstance(x, list) else x for x in inp[0]]
         elif uop is UOps.RANGE:
           if i not in ul: ul[i] = [inp[0][0]] * warp_size
           else:
