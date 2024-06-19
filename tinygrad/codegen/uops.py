@@ -173,9 +173,9 @@ constant_folder = PatternMatcher([
       src=[UPat(UOps.CONST, name="mval"), UPat(UOps.RANGE, src=(UPat(name="loop_start"), UPat(name="loop_end")))])]),
       UPat(UOps.CONST, name="compval"))), UPat(UOps.CONST, name="multconst"), UPat(UOps.CONST, 0))), loop_collapse),
   # sum collapse to mul (with possible GEP)
-  (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, name="phi_input", src=(UPat(UOps.RANGE, name="loop"), UPat(UOps.CONST))),
+  (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, name="phi_input", src=(UPat(UOps.CONST), UPat(UOps.RANGE, name="loop"))),
                        UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
-  (UPat(UOps.PHI, src=(UPat(UOps.GEP, name="phi_input", src=(UPat(UOps.DEFINE_ACC, src=(UPat(UOps.RANGE, name="loop"), UPat(UOps.CONST))),)),
+  (UPat(UOps.PHI, src=(UPat(UOps.GEP, name="phi_input", src=(UPat(UOps.DEFINE_ACC, src=(UPat(UOps.CONST), UPat(UOps.RANGE, name="loop"))),)),
                        UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
   # deal with UNMUL
   (UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c1"), UPat(UOps.UNMUL, src=[UPat(UOps.CONST, name="c2"), UPat(name="v")])]),
@@ -405,7 +405,7 @@ class UOpGraph:
     while queue:
       p,x = heapq.heappop(queue)
       if DEBUG >= 7: print(p,x)
-      if x.op is UOps.DEFINE_ACC and x.src[0].op is UOps.RANGE:
+      if x.op is UOps.DEFINE_ACC and len(x.src) > 1:
         idx = min([self._uops.index(l) for l in x.src if l.op is UOps.RANGE])
         self._uops.insert(idx, x)
       else:
@@ -462,7 +462,7 @@ class UOpGraph:
     for u in self.uops:
       uop, arg, src, dtype = u.op, u.arg, u.src, u.dtype
       if uop in {UOps.CONST, UOps.DEFINE_ACC}:
-        if uop is UOps.DEFINE_ACC: arg = src[-1].arg
+        if uop is UOps.DEFINE_ACC: arg = src[0].arg
         assert dtype is not None and type(arg) is type(dtypes.as_const(arg, dtype)), f"type of {arg=} does not match {dtype}"
       if uop in {UOps.CAST, UOps.BITCAST}: assert arg is None   # type is the output type, not an arg
       if uop is UOps.ALU:
