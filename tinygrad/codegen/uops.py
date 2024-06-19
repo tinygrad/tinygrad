@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Iterator, Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable, Union, cast, TypeVar
+from typing import Iterator, Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable, Union, cast
 import functools, itertools, heapq, math
 from collections import defaultdict
 from enum import Enum, auto
@@ -105,16 +105,11 @@ class UPat:
     if u.op is UOps.VAR: return UPat(name=name or u.arg, dtype=u.dtype) if len(u.src) == 0 else UPat.compile(u.src[0], name or u.arg)
     return UPat(u.op, u.arg, (list if u.commutative() else tuple)([UPat.compile(src) for src in u.src]) if u.src != () else None, name, u.dtype)
 
-T = TypeVar("T")
-def __unmatch(pp:Union[T, Set[T], None], uu:Union[T, None]) -> bool:
-  return (pp is not None) and ((isinstance(pp, set) and uu not in pp) or uu != pp)
-
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
   if pat.name in store and store[pat.name] is not uop: return False
   if pat.name is not None: store[pat.name] = uop
-  # if __unmatch(pat.arg, uop.arg) or __unmatch(pat.op, uop.op) or __unmatch(pat.dtype, uop.dtype): return False
   if any(((pp is not None) and ((isinstance(pp, set) and uu not in pp) or uu != pp))
-         for pp, uu in [[pat.arg, uop.arg], [pat.op, uop.op], [pat.dtype, uop.dtype]]): return False
+         for pp, uu in [[pat.arg, uop.arg, ], [pat.op, uop.op], [pat.dtype, uop.dtype]]): return False
   if pat.src is None: return True
   # only one if it's a tuple
   # try all permutations if it's a list
