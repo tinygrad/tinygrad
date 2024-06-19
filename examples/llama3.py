@@ -3,11 +3,10 @@ from typing import List
 import json, argparse, random, time
 import tiktoken
 from tiktoken.load import load_tiktoken_bpe
-from tqdm import tqdm
 from extra.models.llama import Transformer, convert_from_huggingface, fix_bf16
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
 from tinygrad import Tensor, dtypes, nn, Context, Device, GlobalCounters
-from tinygrad.helpers import Profiling, Timing, DEBUG, colored, fetch
+from tinygrad.helpers import Profiling, Timing, DEBUG, colored, fetch, tinytqdm
 
 class Tokenizer:
   pat_str = r"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"
@@ -38,7 +37,8 @@ class Tokenizer:
   def stop_tokens(self): return {self.special_tokens["<|end_of_text|>"], self.special_tokens["<|eot_id|>"]}
 
   def decode(self, toks): return self.model.decode(toks)
-  def encode(self, text, allow_special=False): return self.model.encode(text, allowed_special="all" if allow_special else set())
+  def encode(self, text, allow_special=False):
+    return self.model.encode(text, allowed_special="all" if allow_special else set(), disallowed_special=set())
 
 # **** helper functions ****
 def concat_weights(models, device=None):
@@ -196,7 +196,7 @@ def prefill(model, toks, start_pos=0):
     toks = toks[i:]
 
   # prefill the model
-  for tok in tqdm(toks):
+  for tok in tinytqdm(toks):
     GlobalCounters.reset()
     model(Tensor([[tok]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P).realize()
     start_pos += 1

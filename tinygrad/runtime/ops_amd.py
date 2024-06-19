@@ -73,7 +73,7 @@ class AMDCompiler(Compiler):
     super().__init__(f"compile_hip_{self.arch}")
   def compile(self, src:str) -> bytes:
     try: return compile_hip(src, self.arch)
-    except RuntimeError as e: raise CompileError(e)
+    except RuntimeError as e: raise CompileError(e) from e
 
 class HWQueue:
   def __init__(self): self.q, self.cmd_offsets = [], [0]
@@ -394,7 +394,7 @@ class AMDAllocator(LRUAllocator):
       if e.errno == errno.ENOMEM: raise MemoryError("Cannot allocate memory") from e
       else: raise
 
-  def _free(self, gpumem, options:BufferOptions): self.device._gpu_free(gpumem)
+  def _free(self, opaque, options:BufferOptions): self.device._gpu_free(opaque)
   #def as_buffer(self, src:Any) -> memoryview:
   #  self.device.synchronize()
   #  return to_mv(src.va_addr, src.size)
