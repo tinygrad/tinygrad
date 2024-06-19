@@ -2232,7 +2232,7 @@ class Tensor:
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).gelu().numpy())
     ```
     """
-    return 0.5 * self * (1 + (self * 0.7978845608 * (1 + 0.044715 * self * self)).tanh())
+    return 0.5 * self * (1 + (math.sqrt(2 / math.pi) * (self + 0.044715 * self ** 3)).tanh())
 
   def quick_gelu(self):
     """
