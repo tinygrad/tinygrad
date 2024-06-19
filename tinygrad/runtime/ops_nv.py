@@ -342,10 +342,10 @@ class NVAllocator(LRUAllocator):
     if options.host: return self.device._gpu_host_alloc(size)
     return self.device._gpu_alloc(size, map_to_cpu=options.cpu_access, huge_page=(size > (16 << 20)))
 
-  def _free(self, gpumem, options:BufferOptions):
+  def _free(self, opaque, options:BufferOptions):
     NVDevice.synchronize_system()
-    if options.host: self.device._gpu_host_free(gpumem)
-    else: self.device._gpu_free(gpumem)
+    if options.host: self.device._gpu_host_free(opaque)
+    else: self.device._gpu_free(opaque)
 
   def copyin(self, dest, src: memoryview):
     for i in range(0, src.nbytes, self.b[0].length):

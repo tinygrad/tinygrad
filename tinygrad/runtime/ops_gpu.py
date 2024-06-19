@@ -67,7 +67,7 @@ class CLAllocator(LRUAllocator):
                                         cl.cl_image_format(cl.CL_RGBA, {2: cl.CL_HALF_FLOAT, 4: cl.CL_FLOAT}[options.image.itemsize]),
                                         options.image.shape[1], options.image.shape[0], 0, None, status := ctypes.c_int32()), status)
     return checked(cl.clCreateBuffer(self.device.context, cl.CL_MEM_READ_WRITE, size, None, status := ctypes.c_int32()), status)
-  def _free(self, buf:ctypes._CData, options:BufferOptions): check(cl.clReleaseMemObject(buf))
+  def _free(self, opaque:ctypes._CData, options:BufferOptions): check(cl.clReleaseMemObject(opaque))
   def copyin(self, dest:ctypes._CData, src:memoryview):
     check(cl.clEnqueueWriteBuffer(self.device.queue, dest, False, 0, len(src)*src.itemsize, from_mv(src), 0, None, None))
     self.device.pending_copyin.append(src)    # NOTE: these can't be freed until the GPU actually executes this command
