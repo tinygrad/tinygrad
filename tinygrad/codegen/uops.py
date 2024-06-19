@@ -460,7 +460,7 @@ class UOpGraph:
     for u in self.uops:
       uop, arg, src, dtype = u.op, u.arg, u.src, u.dtype
       if uop in {UOps.CONST, UOps.DEFINE_ACC}:
-        if uop is UOps.DEFINE_ACC: arg = vin[-1].arg
+        if uop is UOps.DEFINE_ACC: arg = src[-1].arg
         assert dtype is not None and type(arg) is type(dtypes.as_const(arg, dtype)), f"type of {arg=} does not match {dtype}"
       if uop in {UOps.CAST, UOps.BITCAST}: assert arg is None   # type is the output type, not an arg
       if uop is UOps.ALU:
