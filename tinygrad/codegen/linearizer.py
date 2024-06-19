@@ -383,9 +383,6 @@ class Linearizer(Kernel):
     # save backups
     sts_backup, gfr_backup, upc_backup = self.sts[:], self.group_for_reduces, self.upcasted
 
-    # global uop cache
-    self.saved_exprs: Dict[Tuple, UOp] = dict()
-
     # uops
     self.buf_uops: List[Optional[UOp]] = [None]*len(self.bufs)
     self.loop_uops: Dict[str, UOp] = {}
