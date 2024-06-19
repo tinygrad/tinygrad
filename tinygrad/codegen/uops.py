@@ -141,7 +141,7 @@ class PatternMatcher:
         self.pdict[(p.op, p.arg)].append((p, fxn))
 
   @functools.lru_cache(None)
-  def recursive_rewrite(self, u:UOp) -> UOp:
+  def recursive_rewrite(self, u:UOp) -> Tuple[UOp, bool]:
     changed = False
     recurse_cnt = 0
     up = u
@@ -150,7 +150,6 @@ class PatternMatcher:
       assert recurse_cnt < 100, f"recursive_rewrite looped {up} <--> {rewritten}"
       up = rewritten
       changed = True
-    # NOTE: this changes UOp, so we have to delete caches
     if up.src:
       new_src, c = tuple(zip(*[self.recursive_rewrite(x) for x in up.src]))
       if any(c):
