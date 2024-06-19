@@ -1,9 +1,15 @@
 from __future__ import annotations
-import os, mmap, _posixshmem, io, ctypes
+import os, mmap, _posixshmem, io, ctypes, ctypes.util
 from typing import Optional
-from tinygrad.helpers import OSX
+from tinygrad.helpers import OSX, round_up, to_mv
 from tinygrad.device import Compiled, Allocator
 import tinygrad.runtime.autogen.uring as io_uring
+
+libc = ctypes.CDLL(ctypes.util.find_library("c"))
+libc.lseek.argtypes = [ctypes.c_int, ctypes.c_longlong, ctypes.c_int]
+libc.lseek.restype = ctypes.c_longlong
+libc.read.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_size_t]
+libc.read.restype = ctypes.c_longlong
 
 def check(status): assert status == 0
 
@@ -32,6 +38,45 @@ class DiskAllocator(Allocator):
         fo.readinto(dest)
     else:
       dest[:] = src._buf()
+
+  # def _copyout_sharded(self, src, size, _get_free_buf, seg_len=(2 << 20)):
+  #   fd_offset = src.offset - (minor_offset := src.offset % mmap.PAGESIZE)
+  #   processed_reqs_cnt, copied_in, next_read_offset, reqs, total_copy_size = 0, 0, 0, [], round_up(size + minor_offset, mmap.PAGESIZE)
+  #   fo = io.FileIO(self.device.fd, "a+b", closefd=False)
+  #   fo.seek(fd_offset)
+  #   while next_read_offset < total_copy_size or len(reqs) != processed_reqs_cnt:
+  #     if next_read_offset < total_copy_size and (copy_batch := _get_free_buf()) is not None:
+  #       bytes_to_read = min(seg_len, total_copy_size - next_read_offset)
+  #       fo.readinto(to_mv(copy_batch[0], bytes_to_read))
+  #       yield (copy_batch, copied_in, minor_offset, real_copy_size := min(bytes_to_read - minor_offset, size - copied_in))
+  #       next_read_offset += bytes_to_read
+  #       copied_in += real_copy_size
+  #       minor_offset = 0
+
+  def _copyout_sharded(self, src, size, _get_free_buf, seg_len=(2 << 20)):
+    cqe = ctypes.POINTER(io_uring.struct_io_uring_cqe)()
+    fd_offset = src.offset - (minor_offset := src.offset % mmap.PAGESIZE)
+    processed_reqs_cnt, copied_in, next_read_offset, reqs, total_copy_size = 0, 0, 0, [], round_up(size + minor_offset, mmap.PAGESIZE)
+    while next_read_offset < total_copy_size or len(reqs) != processed_reqs_cnt:
+      if next_read_offset < total_copy_size and (copy_batch := _get_free_buf()) is not None:
+        sqe = io_uring.io_uring_get_sqe(ctypes.byref(self.device.io_uring))
+        bytes_to_read = min(seg_len, total_copy_size - next_read_offset)
+
+        io_uring.io_uring_prep_rw(sqe, io_uring.IORING_OP_READ, self.device.fd, copy_batch[0], bytes_to_read, next_read_offset)
+        sqe.contents.user_data = len(reqs)
+        io_uring.io_uring_submit(ctypes.byref(self.device.io_uring))
+
+        reqs.append((copy_batch, copied_in, minor_offset, real_copy_size := min(bytes_to_read - minor_offset, size - copied_in)))
+        next_read_offset += bytes_to_read
+        copied_in += real_copy_size
+        minor_offset = 0
+
+      if io_uring._io_uring_get_cqe(ctypes.byref(self.device.io_uring), ctypes.byref(cqe), 0, 0, None) == 0:
+        assert cqe.contents.res >= 0, f"read from disk failed"
+        self.device.io_uring.cq.khead[0] = self.device.io_uring.cq.khead[0] + 1 # advance
+        processed_reqs_cnt += 1
+        yield reqs[cqe.contents.user_data]
+
   def offset(self, buf:DiskBuffer, size:int, offset:int): return DiskBuffer(buf.device, size, offset)
 
 class DiskDevice(Compiled):

@@ -8,7 +8,6 @@ from tinygrad.runtime.driver.hip_comgr import compile_hip
 import tinygrad.runtime.autogen.kfd as kfd
 import tinygrad.runtime.autogen.hsa as hsa
 import tinygrad.runtime.autogen.amd_gpu as amd_gpu
-import tinygrad.runtime.autogen.uring as io_uring
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401
 
 libc = ctypes.CDLL(ctypes.util.find_library("c"))
@@ -397,100 +396,6 @@ class AMDAllocator(LRUAllocator):
 
   def _free(self, opaque, options:BufferOptions): self.device._gpu_free(opaque)
 
-  def copy_from_fd2(self, dest, fd, offset, size, device=None):
-    PAGE_SIZE, BATCH_SIZE = (4 << 10), (8 << 20)
-
-    fo = io.FileIO(fd, "a+b", closefd=False)
-    fo.seek(offset - (minor_offset:=offset % PAGE_SIZE))
-    copied_in, total_copy_size = 0, round_up(size+minor_offset, PAGE_SIZE)
-    for i in range(0, total_copy_size, BATCH_SIZE):
-      local_size = min(BATCH_SIZE, total_copy_size-i)
-      copy_size = min(local_size-minor_offset, size-copied_in)
-      if copy_size == 0: break
-
-      self.b_next = (self.b_next + 1) % len(self.b)
-
-      AMDDevice._wait_signal(self.device.timeline_signal, self.b_timeline[self.b_next])
-      fo.readinto(to_mv(self.b[self.b_next].va_addr, local_size))
-      HWCopyQueue().wait(self.device.timeline_signal, self.device.timeline_value - 1) \
-                   .copy(dest.va_addr + copied_in, self.b[self.b_next].va_addr + minor_offset, copy_size) \
-                   .signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
-      self.b_timeline[self.b_next] = self.device.timeline_value
-      self.device.timeline_value += 1
-
-      copied_in += copy_size
-      minor_offset = 0 # only on the first
-  
-  def copy_from_fd(self, dest, fd, offset, size, device=None):
-    PAGE_SIZE, BATCH_SIZE = (4 << 10), (8 << 20)
-    fd_offset = offset - (minor_offset := offset % PAGE_SIZE)
-    total_copy_size = round_up(size + minor_offset, PAGE_SIZE)
-
-    next_read_offset = 0
-    copied_in = 0
-    cqe = ctypes.POINTER(io_uring.struct_io_uring_cqe)()
-
-    pending_reads = 0
-    gpu_copy_info = [None] * len(self.b)
-    free_bs = [i for i in range(len(self.b)) if self.b_timeline[i] <= self.device.timeline_signal.value]
-    free_bs_order = sorted([i for i in range(len(self.b)) if i not in free_bs], key=lambda x: self.b_timeline[x])
-    iovecs = (io_uring.struct_iovec * len(self.b))()
-    for i,b in enumerate(self.b): iovecs[i].iov_base = b.va_addr
-
-    while True:
-      if next_read_offset < total_copy_size and len(free_bs) > 0: # if we have something to read from disk
-        sqe = io_uring.io_uring_get_sqe(ctypes.byref(device.io_uring))
-        if sqe != 0: # and we have slot
-          b_slot = free_bs.pop(0)
-          iovecs[b_slot].iov_len = (bytes_to_read := min(BATCH_SIZE, total_copy_size - next_read_offset))
-
-          # print(fd, b_slot, fd_offset + next_read_offset, iovecs[b_slot].iov_len)
-          io_uring.io_uring_prep_rw(sqe, io_uring.IORING_OP_READV, fd, ctypes.addressof(iovecs[b_slot]), 1, fd_offset + next_read_offset)
-          sqe.contents.user_data = b_slot
-          io_uring.io_uring_submit(ctypes.byref(device.io_uring))
-          # print("sub", res)
-
-          real_copy_size = min(bytes_to_read - minor_offset, size - copied_in)
-          gpu_copy_info[b_slot] = (copied_in, minor_offset, real_copy_size, time.perf_counter_ns())
-          next_read_offset += bytes_to_read
-          copied_in += real_copy_size
-          minor_offset = 0
-          pending_reads += 1
-          # print(f"sent req {b_slot=}, off={fd_offset + next_read_offset}, read_from_fd={bytes_to_read}, gpu_copy_info={gpu_copy_info[b_slot]}")
-      
-      # Check if any had read
-      if io_uring._io_uring_get_cqe(ctypes.byref(device.io_uring), ctypes.byref(cqe), 0, 0, None) == 0:
-        rd_copied_in, rd_minor_offset, rd_copy_size, tt = gpu_copy_info[b_slot := cqe.contents.user_data]
-        # print(f"sent_to_gpu req read={cqe.contents.res} b_slot={cqe.contents.user_data}, completed in {(time.perf_counter_ns() - tt)*1e-6:6.2f} ms")
-        assert cqe.contents.res >= rd_copy_size + rd_minor_offset, f"cannot read from disk, {cqe.contents.res} != {rd_copy_size + rd_minor_offset}"
-        
-        # print(to_mv(self.b[b_slot].va_addr, 0x1000)[0])
-
-        gpu_copy_info[b_slot] = time.perf_counter_ns()
-        HWCopyQueue().wait(self.device.timeline_signal, self.device.timeline_value - 1) \
-                     .copy(dest.va_addr + rd_copied_in, self.b[b_slot].va_addr + rd_minor_offset, rd_copy_size) \
-                     .signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
-
-        self.b_timeline[b_slot] = self.device.timeline_value
-        self.device.timeline_value += 1
-
-        pending_reads -= 1
-        device.io_uring.cq.khead[0] = device.io_uring.cq.khead[0] + 1 # advance
-        free_bs_order.append(b_slot)
-        # free_bs.append(b_slot)
-
-      if next_read_offset >= total_copy_size and pending_reads == 0: break # done reading
-
-      if len(free_bs) == 0 and len(free_bs_order) > 0 and self.b_timeline[free_bs_order[0]] <= self.device.timeline_signal.value:
-        b_slot = free_bs_order.pop(0)
-        tt = gpu_copy_info[b_slot]
-        # if tt is not None: print(f"done req b_slot={b_slot}, completed in {(time.perf_counter_ns() - tt)*1e-6:6.2f} ms")
-        free_bs.append(b_slot)
-
-    # for b_slot in free_bs_order:
-    #   tt = gpu_copy_info[b_slot]
-      # if tt is not None: print(f"done req b_slot={b_slot}, completed in {(time.perf_counter_ns() - tt)*1e-6:6.2f} ms")
-
   def copyin(self, dest, src: memoryview):
     for i in range(0, src.nbytes, self.b[0].size):
       self.b_next = (self.b_next + 1) % len(self.b)
@@ -500,6 +405,20 @@ class AMDAllocator(LRUAllocator):
                    .copy(dest.va_addr+i, self.b[self.b_next].va_addr, lsize) \
                    .signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
       self.b_timeline[self.b_next] = self.device.timeline_value
+      self.device.timeline_value += 1
+
+  def copy_from_disk(self, dest, src, size, disk):
+    def _get_temp_buf():
+      if self.b_timeline[(self.b_next + 1) % len(self.b)] <= self.device.timeline_signal.value:
+        self.b_next = (self.b_next + 1) % len(self.b)
+        return (self.b[self.b_next].va_addr, self.b_next)
+      return None
+
+    for (batch_info, dst_off, src_off, copy_size) in disk.allocator._copyout_sharded(src, size, _get_temp_buf, seg_len=(2 << 20)):
+      HWCopyQueue().wait(self.device.timeline_signal, self.device.timeline_value - 1) \
+                   .copy(dest.va_addr + dst_off, batch_info[0] + src_off, copy_size) \
+                   .signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
+      self.b_timeline[batch_info[1]] = self.device.timeline_value
       self.device.timeline_value += 1
 
   def copyout(self, dest:memoryview, src):
