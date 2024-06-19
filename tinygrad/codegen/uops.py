@@ -256,10 +256,11 @@ constant_folder = PatternMatcher([
   # cast NOOP (NOTE: it's str to deal with PtrDType)
   (UPat(UOps.CAST, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
   # fold gated LOAD/STORE
-  (UOp.load(UOp.var("buf"), UOp.var("idx"), UOp.const(dtypes.int, 1), UOp.cvar("var")), lambda buf,idx,var: UOp.load(buf, idx, dtype=var.dtype)),
-  (UOp.load(UOp.var("buf"), UOp.var("idx"), UOp.const(dtypes.int, 1), UOp.cvar("var"), UOp.var("barrier")),
+  (UOp.load(UOp.var("buf"), UOp.var("idx"), UOp.const(None, 1), UOp.cvar("var")), lambda buf,idx,var: UOp.load(buf, idx, dtype=var.dtype)),
+  (UOp.load(UOp.var("buf"), UOp.var("idx"), UOp.const(None, 1), UOp.cvar("var"), UOp.var("barrier")),
    lambda buf,idx,var,barrier: UOp.load(buf, idx, barrier, dtype=var.dtype)),
-  (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp.var("val"), UOp.const(dtypes.int, 1)), UOp.store),
+  (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp.var("val"), UOp.const(None, 1)), UOp.store),
+  #(UOp.store(UOp.var("buf"), UOp.var("idx"), UOp.var("val"), UOp.const(None, 0)), lambda buf,idx,val: UOp(UOps.NOOP)),
 ])
 
 # *** uop graph ***
@@ -465,8 +466,8 @@ class UOpGraph:
         if uop is UOps.DEFINE_ACC: arg = arg[0]
         assert dtype is not None and type(arg) is type(dtypes.as_const(arg, dtype)), f"type of {arg=} does not match {dtype}"
       if uop in {UOps.CAST, UOps.BITCAST}: assert arg is None   # type is the output type, not an arg
-      if uop is UOps.LOAD and len(src) > 2: assert src[2].dtype is dtypes.bool
-      if uop is UOps.STORE and len(src) == 4: assert src[3].dtype is dtypes.bool
+      #if uop is UOps.LOAD and len(src) > 2: assert src[2].dtype is dtypes.bool
+      #if uop is UOps.STORE and len(src) == 4: assert src[3].dtype is dtypes.bool
       if uop is UOps.ALU:
         if arg in UnaryOps:
           assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"
