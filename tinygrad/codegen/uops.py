@@ -317,7 +317,7 @@ class UOpGraph:
       assert run_cnt < 100, "exceeded 100 rewrite loops!"
     return sink
 
-  def graph_dedup(self, sink:UOp):
+  def graph_dedup(self, sink: UOp):
     # add nodes to graph in reverse BFS order
     # dedup all nodes
     # TODO: i feel like this BFS is written in a few places, possible to library it?
