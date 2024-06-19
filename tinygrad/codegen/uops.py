@@ -27,13 +27,12 @@ class UOps(Enum):
   ENDRANGE = auto(); ENDIF = auto() # noqa: E702
 
 def ufix(dtype: Optional[DType], x): return UOp.const(dtype, x) if not isinstance(x, UOp) else x
-@dataclass(eq=False)
+@dataclass(eq=False, frozen=True)
 class UOp:
   op: UOps
   dtype: Optional[DType] = None
   src: Tuple[UOp, ...] = tuple()
   arg: Any = None
-  def tuple(self): return (self.op, self.dtype, self.src, self.arg)
   def commutative(self) -> bool:
     return self.op is UOps.ALU and self.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR}
   @functools.cached_property
@@ -141,7 +140,25 @@ class PatternMatcher:
       else:
         self.pdict[(p.op, p.arg)].append((p, fxn))
 
-  def rewrite(self, uop:UOp) -> Optional[UOp]:
+  @functools.lru_cache(None)
+  def recursive_rewrite(self, u:UOp) -> UOp:
+    changed = False
+    recurse_cnt = 0
+    up = u
+    # locally recursively rewrite
+    while (rewritten := self.rewrite_on_match(up)) is not None:
+      assert recurse_cnt < 100, f"recursive_rewrite looped {up} <--> {rewritten}"
+      up = rewritten
+      changed = True
+    # NOTE: this changes UOp, so we have to delete caches
+    if up.src:
+      new_src, c = tuple(zip(*[self.recursive_rewrite(x) for x in up.src]))
+      if any(c):
+        up = UOp(up.op, up.dtype, new_src, up.arg)
+        changed = True
+    return up, changed
+
+  def rewrite_on_match(self, uop:UOp) -> Optional[UOp]:
     for p,fxn in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
       store: Dict[str, UOp] = {}
       if _match(uop, p, store): return fxn(**store)
@@ -291,32 +308,12 @@ class UOpGraph:
     for i,u in enumerate(self):
       print(f"{i:4d} {str(u.op):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str([self.uops.index(x) for x in u.src]):32s} {u.arg}")
 
-  def graph_rewrite(self, sink:UOp, pm:PatternMatcher):
+  def graph_rewrite(self, sink, pm):
     # recursive rewrite
-    changed = getenv("UOPS_REWRITE", 1)
-    run_cnt = 0
+    changed = getenv("UOPS_REWRITE", True)
     while changed:
-      changed = 0
-      @functools.lru_cache
-      def rewrite(u:UOp) -> UOp:
-        nonlocal changed
-        recurse_cnt = 0
-        up = u
-        # locally recursively rewrite
-        while (rewritten := pm.rewrite(up)):
-          assert recurse_cnt < 100, f"recursive_rewrite looped {up} <--> {rewritten}"
-          up = rewritten
-          recurse_cnt += 1
-        changed += recurse_cnt
-        # NOTE: this changes UOp, so we have to delete caches
-        up.src = tuple(rewrite(x) for x in up.src)
-        if 'parents' in up.__dict__: delattr(up, 'parents')
-        if 'cmp_tuple' in up.__dict__: delattr(up, 'cmp_tuple')
-        # replace with cached nodes
-        return self.nodes.setdefault(up.tuple(), up)
-      sink = rewrite(sink)
-      run_cnt += 1
-      assert run_cnt < 100, "exceeded 100 rewrite loops!"
+      sink, changed = pm.recursive_rewrite(sink)
+    self.nodes[sink] = sink
     return sink
 
   def graph_dedup(self, sink:UOp):
