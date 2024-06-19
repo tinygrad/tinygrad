@@ -1,8 +1,8 @@
 import random
-from tqdm import tqdm
 from extra.optimization.helpers import load_worlds, ast_str_to_lin
 from tinygrad.engine.search import actions
 from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.helpers import tinytqdm
 
 tactions = set()
 def test_rebuild(lin):
@@ -20,7 +20,7 @@ if __name__ == "__main__":
   ast_strs = load_worlds(False, False, False)
   random.shuffle(ast_strs)
   ast_strs = ast_strs[:2000]
-  for ast_str in tqdm(ast_strs):
+  for ast_str in tinytqdm(ast_strs):
     lin = ast_str_to_lin(ast_str)
     #if not lin.apply_tensor_cores():
     lin.hand_coded_optimizations()

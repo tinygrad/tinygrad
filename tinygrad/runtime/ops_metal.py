@@ -23,7 +23,7 @@ class MetalCompiler(Compiler):
     options = Metal.MTLCompileOptions.new()
     options.setFastMathEnabled_(getenv("METAL_FAST_MATH"))
     try: library = unwrap2(self.device.device.newLibraryWithSource_options_error_(src, options, None))
-    except AssertionError as e: raise CompileError(e)
+    except AssertionError as e: raise CompileError(e) from e
     return library.libraryDataContents().bytes().tobytes()
 
 class MetalProgram:

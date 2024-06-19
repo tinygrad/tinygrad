@@ -22,6 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       run_process_replay: ${{ steps.set-env.outputs.run_process_replay }}
+      assert_process_replay: ${{ steps.set-env.outputs.assert_process_replay }}
     timeout-minutes: 5
 
     steps:
@@ -35,6 +36,11 @@ jobs:
         COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
         if { echo "$COMMIT_MESSAGE" | grep -q "\[run_process_replay\]" || [ "${{ github.event.inputs.run_process_replay }}" == "true" ] || echo "${{ github.event.pull_request.title }}" | grep -q "\[run_process_replay\]"; } && [ "$GITHUB_REF_NAME" != "master" ]; then
           echo "RUN_PROCESS_REPLAY=1" >> $GITHUB_OUTPUT
+          if echo "$COMMIT_MESSAGE" | grep -q "\[no_assert\]"; then
+            echo "ASSERT_PROCESS_REPLAY=0" >> $GITHUB_OUTPUT
+          else
+            echo "ASSERT_PROCESS_REPLAY=1" >> $GITHUB_OUTPUT
+          fi
         else
           echo "RUN_PROCESS_REPLAY=0" >> $GITHUB_OUTPUT
         fi
@@ -288,6 +294,7 @@ jobs:
     needs: check_process_replay
     env:
       RUN_PROCESS_REPLAY: ${{ needs.check_process_replay.outputs.run_process_replay }}
+      ASSERT_PROCESS_REPLAY: ${{ needs.check_process_replay.outputs.assert_process_replay }}
     timeout-minutes: 20
 
     steps:
@@ -376,6 +383,7 @@ jobs:
     needs: check_process_replay
     env:
       RUN_PROCESS_REPLAY: ${{ needs.check_process_replay.outputs.run_process_replay }}
+      ASSERT_PROCESS_REPLAY: ${{ needs.check_process_replay.outputs.assert_process_replay }}
 
     name: Tests on (${{ matrix.backend }})
     runs-on: ubuntu-latest
