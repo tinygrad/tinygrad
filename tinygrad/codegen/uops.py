@@ -260,6 +260,8 @@ constant_folder = PatternMatcher([
   (UPat(UOps.CAST, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
   # fold gated LOAD/STORE
   (UOp.load(UOp.var("buf"), UOp.var("idx"), UOp.const(dtypes.int, 1), UOp.cvar("var")), lambda buf,idx,var: UOp.load(buf, idx, dtype=var.dtype)),
+  (UOp.load(UOp.var("buf"), UOp.var("idx"), UOp.const(dtypes.int, 1), UOp.cvar("var"), UOp.var("barrier")),
+   lambda buf,idx,var,barrier: UOp.load(buf, idx, barrier, dtype=var.dtype)),
   (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp.var("val"), UOp.const(dtypes.int, 1)), lambda buf,idx,val: UOp.store(buf, idx, val)),
 ])
 
