@@ -799,7 +799,9 @@ class Tensor:
     print(t.permute(1, 0).numpy())
     ```
     """
-    return F.Permute.apply(self, order=argfix(order, *args))
+    order_arg = tuple(self._resolve_dim(x) for x in argfix(order, *args))
+    if sorted(order_arg) != list(range(self.ndim)): raise RuntimeError(f"order is not a valid permutation, getting {order_arg}")
+    return F.Permute.apply(self, order=order_arg)
 
   def flip(self, axis, *args) -> Tensor:
     """
