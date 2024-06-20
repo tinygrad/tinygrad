@@ -189,7 +189,7 @@ generate_io_uring() {
   clang2py \
     /usr/include/liburing.h \
     /usr/include/linux/io_uring.h \
-    -o $BASE/uring.py
+    -o $BASE/io_uring.py
 }
 
 if [ "$1" == "opencl" ]; then generate_opencl

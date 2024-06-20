@@ -3,13 +3,11 @@ import os, mmap, _posixshmem, io, ctypes, ctypes.util, platform
 from typing import Optional, Generator, Tuple, Callable
 from tinygrad.helpers import OSX, round_up
 from tinygrad.device import Compiled, Allocator
-import tinygrad.runtime.autogen.uring as io_uring
+import tinygrad.runtime.autogen.io_uring as io_uring
 
 libc = ctypes.CDLL(ctypes.util.find_library("c"))
 libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
 libc.mmap.restype = ctypes.c_void_p
-
-def check(status): assert status == 0
 
 class DiskBuffer:
   def __init__(self, device:DiskDevice, size:int, offset=0):
