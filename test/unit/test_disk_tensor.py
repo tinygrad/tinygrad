@@ -302,5 +302,43 @@ class TestDiskTensor(unittest.TestCase):
     ct = t.llvm_bf16_cast(dtypes.float)
     assert ct.numpy().tolist() == [9984., -1, -1000, -9984, 20]
 
+  @unittest.skipUnless(Device.DEFAULT in {"NV", "AMD"}, "only AMD and NV supports ")
+  def test_copy_from_disk(self):
+    if not hasattr(Device["DISK"], 'io_uring'): self.skipTest("os does not support io uring")
+
+    fn = pathlib.Path(temp("shco1"))
+    fn.unlink(missing_ok=True)
+    fn.write_bytes(bytes(range(256))*1024)
+
+    t = Tensor.empty(256*1024, device=f"disk:{temp('shco1')}", dtype=dtypes.uint8)
+    on_dev = t.to(Device.DEFAULT).realize()
+    np.testing.assert_equal(on_dev.numpy(), t.numpy())
+
+  @unittest.skipUnless(Device.DEFAULT in {"NV", "AMD"}, "only AMD and NV supports ")
+  def test_copy_from_disk_offset(self):
+    if not hasattr(Device["DISK"], 'io_uring'): self.skipTest("os does not support io uring")
+
+    fn = pathlib.Path(temp("shco2"))
+    fn.unlink(missing_ok=True)
+    fn.write_bytes(bytes(range(256))*1024)
+
+    for off in [314, 991, 2048, 4096]:
+      t = Tensor.empty(256*1024, device=f"disk:{temp('shco2')}", dtype=dtypes.uint8)[off:]
+      on_dev = t.to(Device.DEFAULT).realize()
+      np.testing.assert_equal(on_dev.numpy(), t.numpy())
+
+  @unittest.skipUnless(Device.DEFAULT in {"NV", "AMD"}, "only AMD and NV supports ")
+  def test_copy_from_disk_huge(self):
+    if not hasattr(Device["DISK"], 'io_uring'): self.skipTest("os does not support io uring")
+
+    fn = pathlib.Path(temp("shco2"))
+    fn.unlink(missing_ok=True)
+    fn.write_bytes(bytes(range(256))*1024*1024)
+
+    for off in [0, 551]:
+      t = Tensor.empty(256*1024*1024, device=f"disk:{temp('shco2')}", dtype=dtypes.uint8)[off:]
+      on_dev = t.to(Device.DEFAULT).realize()
+      np.testing.assert_equal(on_dev.numpy(), t.numpy())
+
 if __name__ == "__main__":
   unittest.main()

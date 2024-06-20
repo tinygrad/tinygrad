@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, ctypes, pathlib, re, fcntl, functools, mmap, struct, tempfile, hashlib, subprocess, time, array, io
+import os, ctypes, pathlib, re, fcntl, functools, mmap, struct, tempfile, hashlib, subprocess, time, array
 from typing import Tuple, List, Any, cast
 from dataclasses import dataclass
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, BufferOptions

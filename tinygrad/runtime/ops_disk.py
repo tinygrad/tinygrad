@@ -59,7 +59,7 @@ class DiskAllocator(Allocator):
 
       if (head:=self.device.io_uring.cq.khead[0]) != self.device.io_uring.cq.ktail[0]:
         cqe = self.device.io_uring.cq.cqes[head & self.device.io_uring.cq.kring_mask[0]]
-        assert cqe.res >= 0, f"read from disk failed"
+        assert cqe.res >= 0, f"read from disk failed, err: {cqe.res}"
         yield reqs[cqe.user_data]
         self.device.io_uring.cq.khead[0] = head + 1 # advance
         processed_reqs_cnt += 1
