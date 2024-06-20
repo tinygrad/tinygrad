@@ -1053,6 +1053,13 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,3,3,3)], lambda x: x[0:3, ..., 2:3])
     helper_test_op([(3,3,3,3)], lambda x: x[None, 0:3, ..., 0, None])
 
+  # this was the failure in llama early realizing freqs_cis
+  def test_double_slice(self):
+    helper_test_op([(4,4)], lambda x: x[:, 1:2][1:2])
+    helper_test_op([(4,4)], lambda x: x[1:3][1:2])
+    helper_test_op([(4,4)], lambda x: x[:, 1:2][0:1])
+    helper_test_op([(4,4)], lambda x: x[:, 1:2][:, 0:1])
+
   def test_pad2d(self):
     helper_test_op([(3,3,3,3)], lambda x: torch.nn.functional.pad(x, (1,2,3,4)), lambda x: x.pad2d(padding=(1,2,3,4)))
     helper_test_op([(3,3,3,3)], lambda x: torch.nn.functional.pad(x, (-1,2,-3,4)), lambda x: x.pad2d(padding=(-1,2,-3,4)))
@@ -1648,13 +1655,6 @@ class TestOps(unittest.TestCase):
 
   def test_matvec(self):
     helper_test_op([(1,128), (128,128)], lambda x,y: (x@y).relu())
-
-  # this was the failure in llama early realizing freqs_cis
-  def test_double_slice(self):
-    helper_test_op([(4,4)], lambda x: x[:, 1:2][1:2])
-    helper_test_op([(4,4)], lambda x: x[1:3][1:2])
-    helper_test_op([(4,4)], lambda x: x[:, 1:2][0:1])
-    helper_test_op([(4,4)], lambda x: x[:, 1:2][:, 0:1])
 
   @unittest.skip("this test is broken #862")
   def test_max_inf(self):
