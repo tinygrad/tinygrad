@@ -111,7 +111,7 @@ def __unmatch(m1:Union[T, Set[T]], m2:T) -> bool:
   elif m2 != m1: return True
   return False
 
-def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
+def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> Tuple[bool, Dict]:
   if pat.name in store and store[pat.name] is not uop: return False, store
   if pat.name is not None: store[pat.name] = uop
   if pat.op is not None and __unmatch(pat.op, uop.op):return False, store
@@ -140,7 +140,7 @@ def recursive_rewrite(pm: PatternMatcher, up:UOp) -> UOp:
     up = rewritten
     recurse_cnt += 1
   if up.src and (new_src := tuple(recursive_rewrite(pm, x) for x in up.src)) != up.src:
-      return UOp(up.op, up.dtype, new_src, up.arg)
+    return UOp(up.op, up.dtype, new_src, up.arg)
   return up
 
 @functools.lru_cache(None)
