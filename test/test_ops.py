@@ -1123,12 +1123,14 @@ class TestOps(unittest.TestCase):
     self.helper_test_exception([(3,4,5,6)], lambda x: x.permute((0,0,1,2,3)), lambda x: x.permute((0,0,1,2,3)), expected=RuntimeError)
 
   def test_reshape(self):
+    helper_test_op([(4,3,6,6)], lambda x: x.reshape((12,6,6)))
     helper_test_op([(4,3,6,6)], lambda x: x.reshape((-1,3,6,6)))
     helper_test_op([(4,3,6,6)], lambda x: x.reshape((-1,1,6,6)))
-    helper_test_op([()], lambda x: x.reshape([]))
-    helper_test_op([(1,)], lambda x: x.reshape([]))
-    helper_test_op([()], lambda x: x.reshape([1]))
-    helper_test_op([()], lambda x: x.reshape([1,1,1]))
+    helper_test_op([(4,3,6,6)], lambda x: x.reshape((4,3,6,6)), lambda x: x.reshape((None,None,6,6)))
+    helper_test_op([()], lambda x: x.reshape(()))
+    helper_test_op([(1,)], lambda x: x.reshape(()))
+    helper_test_op([()], lambda x: x.reshape((1,)))
+    helper_test_op([()], lambda x: x.reshape((1,1,1)))
     self.helper_test_exception([(3,4)], lambda x: x.reshape((-1,-1,2)), lambda x: x.reshape((-1,-1,2)), expected=RuntimeError)
     self.helper_test_exception([(3,4)], lambda x: x.reshape((-1,-1,-1,2)), lambda x: x.reshape((-1,-1,-1,2)), expected=RuntimeError)
 
