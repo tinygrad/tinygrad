@@ -643,9 +643,9 @@ try:
 except AttributeError:
     pass
 try:
-    _io_uring_get_cqe = _libraries['liburing.so'].__io_uring_get_cqe
-    _io_uring_get_cqe.restype = ctypes.c_int32
-    _io_uring_get_cqe.argtypes = [ctypes.POINTER(struct_io_uring), ctypes.POINTER(ctypes.POINTER(struct_io_uring_cqe)), ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(struct_c__SA___sigset_t)]
+    io_uring_get_cqe = _libraries['liburing.so'].__io_uring_get_cqe
+    io_uring_get_cqe.restype = ctypes.c_int32
+    io_uring_get_cqe.argtypes = [ctypes.POINTER(struct_io_uring), ctypes.POINTER(ctypes.POINTER(struct_io_uring_cqe)), ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(struct_c__SA___sigset_t)]
 except AttributeError:
     pass
 try:

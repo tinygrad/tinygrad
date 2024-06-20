@@ -381,7 +381,7 @@ class AMDAllocator(LRUAllocator):
   def __init__(self, device:AMDDevice):
     self.device = device
     # NOTE: KFD_IOC_ALLOC_MEM_FLAGS_GTT doesn't work here for readinto
-    self.b = [self.device._gpu_alloc(8 << 20, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, public=True) for _ in range(16)]
+    self.b = [self.device._gpu_alloc(SDMA_MAX_COPY_SIZE, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, public=True) for _ in range(1)]
     self.b_timeline = [0] * len(self.b)
     self.b_next = 0
     super().__init__()
@@ -397,6 +397,8 @@ class AMDAllocator(LRUAllocator):
   def _free(self, opaque, options:BufferOptions): self.device._gpu_free(opaque)
 
   def copyin(self, dest, src: memoryview):
+    self.device.synchronize()
+
     for i in range(0, src.nbytes, self.b[0].size):
       self.b_next = (self.b_next + 1) % len(self.b)
       AMDDevice._wait_signal(self.device.timeline_signal, self.b_timeline[self.b_next])
@@ -407,19 +409,28 @@ class AMDAllocator(LRUAllocator):
       self.b_timeline[self.b_next] = self.device.timeline_value
       self.device.timeline_value += 1
 
+    self.device.synchronize()
+
   def copy_from_disk(self, dest, src, size, disk):
+    self.device.synchronize()
+    
     def _get_temp_buf():
       if self.b_timeline[(self.b_next + 1) % len(self.b)] <= self.device.timeline_signal.value:
         self.b_next = (self.b_next + 1) % len(self.b)
         return (self.b[self.b_next].va_addr, self.b_next)
       return None
 
-    for (batch_info, dst_off, src_off, copy_size) in disk.allocator._copyout_sharded(src, size, _get_temp_buf, seg_len=(2 << 20)):
-      HWCopyQueue().wait(self.device.timeline_signal, self.device.timeline_value - 1) \
-                   .copy(dest.va_addr + dst_off, batch_info[0] + src_off, copy_size) \
+    for (batch_info, dst_off, src_off, copy_size) in disk.allocator._copyout_sharded(src, size, _get_temp_buf, seg_len=SDMA_MAX_COPY_SIZE):
+      # print(to_mv(batch_info[0], 0x1000)[0], dst_off, src_off, copy_size)
+
+      self.device.synchronize()
+      
+      HWCopyQueue().copy(dest.va_addr + dst_off, batch_info[0] + src_off, copy_size) \
                    .signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
-      self.b_timeline[batch_info[1]] = self.device.timeline_value
+      self.b_timeline[0] = self.device.timeline_value
       self.device.timeline_value += 1
+
+      self.device.synchronize()
 
   def copyout(self, dest:memoryview, src):
     self.device.synchronize()
@@ -431,6 +442,8 @@ class AMDAllocator(LRUAllocator):
       self.device.timeline_value += 1
 
       ctypes.memmove(from_mv(dest[i:]), self.b[0].va_addr, lsize)
+
+    self.device.synchronize()
 
   def transfer(self, dest, src, sz:int, src_dev:AMDDevice, dest_dev:AMDDevice):
     src_dev._gpu_map(dest)

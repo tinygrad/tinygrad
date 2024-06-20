@@ -4,12 +4,15 @@ from typing import Optional
 from tinygrad.helpers import OSX, round_up, to_mv
 from tinygrad.device import Compiled, Allocator
 import tinygrad.runtime.autogen.uring as io_uring
+import tinygrad.runtime.autogen.aio as aio
 
-libc = ctypes.CDLL(ctypes.util.find_library("c"))
-libc.lseek.argtypes = [ctypes.c_int, ctypes.c_longlong, ctypes.c_int]
-libc.lseek.restype = ctypes.c_longlong
-libc.read.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_size_t]
-libc.read.restype = ctypes.c_longlong
+# libc = ctypes.CDLL(ctypes.util.find_library("c"))
+# libc.lseek.argtypes = [ctypes.c_int, ctypes.c_longlong, ctypes.c_int]
+# libc.lseek.restype = ctypes.c_longlong
+# libc.read.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_size_t]
+# libc.read.restype = ctypes.c_longlong
+
+# print(libc.aio_read)
 
 def check(status): assert status == 0
 
@@ -39,30 +42,58 @@ class DiskAllocator(Allocator):
     else:
       dest[:] = src._buf()
 
-  # def _copyout_sharded(self, src, size, _get_free_buf, seg_len=(2 << 20)):
-  #   fd_offset = src.offset - (minor_offset := src.offset % mmap.PAGESIZE)
-  #   processed_reqs_cnt, copied_in, next_read_offset, reqs, total_copy_size = 0, 0, 0, [], round_up(size + minor_offset, mmap.PAGESIZE)
-  #   fo = io.FileIO(self.device.fd, "a+b", closefd=False)
-  #   fo.seek(fd_offset)
-  #   while next_read_offset < total_copy_size or len(reqs) != processed_reqs_cnt:
-  #     if next_read_offset < total_copy_size and (copy_batch := _get_free_buf()) is not None:
-  #       bytes_to_read = min(seg_len, total_copy_size - next_read_offset)
-  #       fo.readinto(to_mv(copy_batch[0], bytes_to_read))
-  #       yield (copy_batch, copied_in, minor_offset, real_copy_size := min(bytes_to_read - minor_offset, size - copied_in))
-  #       next_read_offset += bytes_to_read
-  #       copied_in += real_copy_size
-  #       minor_offset = 0
+  def _copyout_sharded44(self, src, size, _get_free_buf, seg_len=(2 << 20)):
+    fd_offset = src.offset - (minor_offset := src.offset % mmap.PAGESIZE)
+    processed_reqs_cnt, copied_in, next_read_offset, reqs, total_copy_size = 0, 0, 0, [], round_up(size + minor_offset, mmap.PAGESIZE)
+    fo = io.FileIO(self.device.fd, "a+b", closefd=False)
+    fo.seek(fd_offset)
+    while next_read_offset < total_copy_size or len(reqs) != processed_reqs_cnt:
+      if next_read_offset < total_copy_size and (copy_batch := _get_free_buf()) is not None:
+        bytes_to_read = min(seg_len, total_copy_size - next_read_offset)
+        fo.readinto(to_mv(copy_batch[0], bytes_to_read))
+        yield (copy_batch, copied_in, minor_offset, real_copy_size := min(bytes_to_read - minor_offset, size - copied_in))
+        next_read_offset += bytes_to_read
+        copied_in += real_copy_size
+        minor_offset = 0
 
-  def _copyout_sharded(self, src, size, _get_free_buf, seg_len=(2 << 20)):
+  def _copyout_sharded4(self, src, size, _get_free_buf, seg_len=(2 << 20)):
+    fd_offset = src.offset - (minor_offset := src.offset % mmap.PAGESIZE)
+    copied_in, next_read_offset, reqs, total_copy_size = 0, 0, [], round_up(size + minor_offset, mmap.PAGESIZE)
+    while next_read_offset < total_copy_size or len(reqs) > 0:
+      if next_read_offset < total_copy_size and (copy_batch := _get_free_buf()) is not None:
+        bytes_to_read = min(seg_len, total_copy_size - next_read_offset)
+        aiocb = aio.struct_aiocb(aio_fildes=self.device.fd, aio_offset=next_read_offset, aio_buf=copy_batch[0], aio_nbytes=bytes_to_read)
+        aio.aio_read(ctypes.byref(aiocb))
+
+        reqs.append((aiocb, copy_batch, copied_in, minor_offset, real_copy_size := min(bytes_to_read - minor_offset, size - copied_in)))
+        next_read_offset += bytes_to_read
+        copied_in += real_copy_size
+        minor_offset = 0
+
+      # print(len(reqs))
+      if len(reqs) > 0:
+        err = aio.aio_error(ctypes.byref(reqs[0][0]))
+        # print(err)
+        if err == 115: continue
+        rr = reqs.pop(0)[1:]
+        print(to_mv(rr[0][0], 0x1000)[83], hex(rr[0][0]), hex(rr[1]), hex(rr[2]), hex(rr[3]))
+        assert err == 0, "can't read this shit"
+        yield rr
+
+  def _copyout_sharded(self, src, size, _get_free_buf, seg_len):
+    cqe_t = ctypes.POINTER(io_uring.struct_io_uring_cqe)
     cqe = ctypes.POINTER(io_uring.struct_io_uring_cqe)()
+    cqes = (cqe_t * 1)()
     fd_offset = src.offset - (minor_offset := src.offset % mmap.PAGESIZE)
     processed_reqs_cnt, copied_in, next_read_offset, reqs, total_copy_size = 0, 0, 0, [], round_up(size + minor_offset, mmap.PAGESIZE)
     while next_read_offset < total_copy_size or len(reqs) != processed_reqs_cnt:
-      if next_read_offset < total_copy_size and (copy_batch := _get_free_buf()) is not None:
+      while next_read_offset < total_copy_size and (copy_batch := _get_free_buf()) is not None:
         sqe = io_uring.io_uring_get_sqe(ctypes.byref(self.device.io_uring))
         bytes_to_read = min(seg_len, total_copy_size - next_read_offset)
+        ctypes.memset(copy_batch[0], 0xff, bytes_to_read)
 
-        io_uring.io_uring_prep_rw(sqe, io_uring.IORING_OP_READ, self.device.fd, copy_batch[0], bytes_to_read, next_read_offset)
+        io_uring.io_uring_prep_rw(sqe, io_uring.IORING_OP_READ, self.device.fd, copy_batch[0], bytes_to_read, fd_offset + next_read_offset)
+        # print(fd_offset + next_read_offset, sqe.contents.off)
         sqe.contents.user_data = len(reqs)
         io_uring.io_uring_submit(ctypes.byref(self.device.io_uring))
 
@@ -71,11 +102,16 @@ class DiskAllocator(Allocator):
         copied_in += real_copy_size
         minor_offset = 0
 
-      if io_uring._io_uring_get_cqe(ctypes.byref(self.device.io_uring), ctypes.byref(cqe), 0, 0, None) == 0:
-        assert cqe.contents.res >= 0, f"read from disk failed"
+      if io_uring.io_uring_peek_batch_cqe(ctypes.byref(self.device.io_uring), cqes, 1) == 1:
+        cqe = cqes[0]
+
+        # print("shit, shit why??")
+        assert cqe.contents.res >= reqs[cqe.contents.user_data][3] + reqs[cqe.contents.user_data][2], f"read from disk failed"
+        print(cqe.contents.user_data, to_mv(reqs[cqe.contents.user_data][0][0], 0x1000)[83], hex(reqs[cqe.contents.user_data][0][0]), hex(reqs[cqe.contents.user_data][1]), hex(reqs[cqe.contents.user_data][2]), hex(reqs[cqe.contents.user_data][3]))
+        yield reqs[cqe.contents.user_data]
+        reqs[cqe.contents.user_data] = None
         self.device.io_uring.cq.khead[0] = self.device.io_uring.cq.khead[0] + 1 # advance
         processed_reqs_cnt += 1
-        yield reqs[cqe.contents.user_data]
 
   def offset(self, buf:DiskBuffer, size:int, offset:int): return DiskBuffer(buf.device, size, offset)
 
@@ -84,7 +120,7 @@ class DiskDevice(Compiled):
 
   def __init__(self, device:str):
     if DiskDevice.io_uring is None:
-      check(io_uring.io_uring_queue_init(0x1000, ctypes.byref(ring:=io_uring.struct_io_uring()), 0))
+      check(io_uring.io_uring_queue_init(4096, ctypes.byref(ring:=io_uring.struct_io_uring()), 0))
       DiskDevice.io_uring = ring
 
     self.size: Optional[int] = None
