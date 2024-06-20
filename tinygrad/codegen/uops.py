@@ -301,18 +301,17 @@ class UOpGraph:
     if not getenv("UOPS_REWRITE", 1):return sink
     old = None
     rc_cnt = 0
-    def rewrite(up:UOp) -> UOp:
+    def rewrite(u:UOp) -> UOp:
+      up = u
       if up in cache: return cache[up]
-      # while (rewritten := pm.rewrite(up)):
       for _ in range(100):
         rewritten = pm.rewrite(up)
         if rewritten is None:
           up = UOp(up.op, up.dtype, tuple(rewrite(x) for x in up.src), up.arg)
-          return cache.setdefault(self.nodes.setdefault(up.tuple(), up), up)
+          return cache.setdefault(u,self.nodes.setdefault(up.tuple(), up))
         up = rewritten
       assert  False, f"recursive_rewrite looped {up} <--> {rewritten}"
     while old!=sink:
-
       cache: Dict[UOp, UOp] = {}
       old,sink =sink, rewrite(sink)
       if (rc_cnt:=rc_cnt+1)>100: raise RuntimeError("exceeded 100 rewrite loops!")
