@@ -41,12 +41,13 @@ class DiskAllocator(Allocator):
     while next_read_offset < total_copy_size or len(reqs) != processed_reqs_cnt:
       if next_read_offset < total_copy_size and (copy_batch := _get_free_buf()) is not None:
         # Prepare sqe
-        sqe = self.device.io_uring.sq.sqes[index:=(tail:=self.device.io_uring.sq.ktail[0]) & self.device.io_uring.sq.kring_mask[0]]
+        sqe_index = (tail:=self.device.io_uring.sq.ktail[0]) & self.device.io_uring.sq.kring_mask[0]
+        sqe = self.device.io_uring.sq.sqes[sqe_index]
         sqe.opcode, sqe.fd, sqe.off = io_uring.IORING_OP_READ, self.device.fd, fd_offset + next_read_offset
         sqe.addr, sqe.len, sqe.user_data = copy_batch[0], min(seg_len, total_copy_size - next_read_offset), len(reqs)
 
         # Send sqe
-        self.device.io_uring.sq.array[index] = index
+        self.device.io_uring.sq.array[sqe_index] = sqe_index
         self.device.io_uring.sq.ktail[0] = tail + 1
         libc.syscall(426, DiskDevice.io_uring.ring_fd, 1, 1, (1 << 0)) # IORING_ENTER_GETEVENTS
 
