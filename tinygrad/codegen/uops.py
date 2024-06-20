@@ -58,10 +58,12 @@ class UOp:
   def max(self, x): return UOp.alu(BinaryOps.MAX, self, x)
   def min(self, x): return -UOp.alu(BinaryOps.MAX, -self, -x)
   @staticmethod
+  @functools.lru_cache(None)
   def const(dtype:Optional[DType], b:ConstType|Variable):
     if isinstance(b, Variable): return UOp(UOps.DEFINE_VAR, dtype, (), b)
     return UOp(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
   @staticmethod
+  @functools.lru_cache(None)
   def alu(arg, *src:UOp): return UOp(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else src[-1].dtype, src, arg)
   @staticmethod
   def load(*src:UOp, dtype:Optional[DType]=None, **kwargs): return UOp(UOps.LOAD, dtype, tuple(src)+tuple(kwargs.values()))
