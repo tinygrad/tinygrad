@@ -307,8 +307,8 @@ class UOpGraph:
           return cache.setdefault(u, self.nodes.setdefault(up.tuple(), up))
         up = rewritten
       raise RuntimeError(f"recursive_rewrite looped {up} <--> {rewritten}")
+    cache: Dict[UOp, UOp] = {}
     for _ in range(100):
-      cache: Dict[UOp, UOp] = {}
       if sink == (sink := rewrite(sink)): return sink
     raise RuntimeError("exceeded 100 rewrite loops!")
 
