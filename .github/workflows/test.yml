@@ -37,7 +37,6 @@ jobs:
         COMMIT_MESSAGE=$(printf '%q' "$RAW_COMMIT_MESSAGE")
         RAW_PR_TITLE="${{ github.event.pull_request.title }}"
         PR_TITLE=$(printf '%q' "$RAW_PR_TITLE")
-
         if { echo "$COMMIT_MESSAGE" | grep -q "\\[run_process_replay\\]" || \
              [ "${{ github.event.inputs.run_process_replay }}" == "true" ] || \
              echo "$PR_TITLE" | grep -q "\\[run_process_replay\\]"; } && [ "$GITHUB_REF_NAME" != "master" ]; then
