@@ -112,11 +112,11 @@ def __unmatch(m1:Union[T, Set[T]], m2:T) -> bool:
   return False
 
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
-  if pat.arg is not None and __unmatch(pat.arg, uop.arg):return False, store
-  if pat.op is not None and __unmatch(pat.op, uop.op):return False, store
   if pat.name in store and store[pat.name] is not uop: return False, store
   if pat.name is not None: store[pat.name] = uop
+  if pat.op is not None and __unmatch(pat.op, uop.op):return False, store
   if pat.dtype is not None and uop.dtype is not None and __unmatch(pat.dtype, uop.dtype): return False, store
+  if pat.arg is not None and __unmatch(pat.arg, uop.arg):return False, store
   if pat.src is None:return True, store
   # only one if it's a tuple
   # try all permutations if it's a list
@@ -162,9 +162,6 @@ class PatternMatcher:
         for uop in p.op: self.pdict[(uop, p.arg)].append((p, fxn))
       else:
         self.pdict[(p.op, p.arg)].append((p, fxn))
-    
-
-
 
 
 def sum_collapse(phi_input, loop, val1, val2):
