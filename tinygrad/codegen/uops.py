@@ -299,20 +299,17 @@ class UOpGraph:
   def graph_rewrite(self, sink:UOp, pm:PatternMatcher):
     # recursive rewrite
     if not getenv("UOPS_REWRITE", 1):return sink
-
     def rewrite(u:UOp) -> UOp:
-      up = u
-      if up in cache: return cache[up]
+      if (up:=u) in cache: return cache[up]
       for _ in range(100):
         if (rewritten := pm.rewrite(up)) is None:
           up = UOp(up.op, up.dtype, tuple(rewrite(x) for x in up.src), up.arg)
-          return cache.setdefault(u,self.nodes.setdefault(up.tuple(), up))
+          return cache.setdefault(u, self.nodes.setdefault(up.tuple(), up))
         up = rewritten
-      assert  False, f"recursive_rewrite looped {up} <--> {rewritten}"
+      raise RuntimeError(f"recursive_rewrite looped {up} <--> {rewritten}")
     for _ in range(100):
       cache: Dict[UOp, UOp] = {}
-      old,sink =sink, rewrite(sink)
-      if old == sink: return sink
+      if sink == (sink := rewrite(sink)): return sink
     raise RuntimeError("exceeded 100 rewrite loops!")
 
   def graph_dedup(self, sink:UOp):
