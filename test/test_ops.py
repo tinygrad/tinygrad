@@ -1122,9 +1122,9 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: x.reshape([]))
     helper_test_op([(1,)], lambda x: x.reshape([]))
     helper_test_op([()], lambda x: x.reshape([1]))
-    helper_test_op([()], lambda x: x.reshape([1, 1, 1]))
-    self.helper_test_exception([(3, 4)], lambda x: x.reshape((-1, -1, 2)), lambda x: x.reshape((-1, -1, 2)), expected=RuntimeError)
-    self.helper_test_exception([(3, 4)], lambda x: x.reshape((-1, -1, -1, 2)), lambda x: x.reshape((-1, -1, -1, 2)), expected=RuntimeError)
+    helper_test_op([()], lambda x: x.reshape([1,1,1]))
+    self.helper_test_exception([(3,4)], lambda x: x.reshape((-1,-1,2)), lambda x: x.reshape((-1,-1,2)), expected=RuntimeError)
+    self.helper_test_exception([(3,4)], lambda x: x.reshape((-1,-1,-1,2)), lambda x: x.reshape((-1,-1,-1,2)), expected=RuntimeError)
 
     with self.assertRaises(ValueError):
       x = Tensor.ones((4,3,6,6))
@@ -1139,7 +1139,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(4,3,6,6)], lambda x: x.flip((-1,)))
     helper_test_op([()], lambda x: x.flip(()))
     helper_test_op([(1,)], lambda x: x.flip(()))
-    helper_test_op([(4, 3, 6, 6)], lambda x: x.flip(()))
+    helper_test_op([(4,3,6,6)], lambda x: x.flip(()))
+    self.helper_test_exception([(3,4)], lambda x: x.flip((0,0)), lambda x: x.flip((0,0)), expected=RuntimeError)
+    self.helper_test_exception([(3,4)], lambda x: x.flip((1,1)), lambda x: x.flip((0,0)), expected=RuntimeError)
+    self.helper_test_exception([(3,4)], lambda x: x.flip((1,-1)), lambda x: x.flip((1,-1)), expected=RuntimeError)
 
   def test_squeeze(self):
     helper_test_op([(1,3,6,6)], lambda x: x.squeeze(0))
