@@ -44,6 +44,7 @@ class UOp:
   @functools.cached_property
   def hash(self): return hash(self.cmp_tuple)
   def __hash__(self): return self.hash
+  # def __eq__(self, x): return hash(self) == hash(x)
   def __lt__(self, x:UOp): return self.cmp_tuple < x.cmp_tuple
   def __repr__(self):
     return f"{str(self.op):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.op for x in self.src]):32s} {self.arg}"
@@ -146,7 +147,7 @@ class PatternMatcher:
       else:
         self.pdict[(p.op, p.arg)].append((p, fxn))
 
-  def rewrite(self, uop:UOp) -> Optional[UOp]:
+  def rewrite(self, uop:UOp)->Optional[UOp]:
     for p,fxn in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
       store: Dict[str, UOp] = {}
       if _match(uop, p, store): return fxn(**store)
@@ -297,8 +298,9 @@ class UOpGraph:
 
   def graph_rewrite(self, sink:UOp, pm:PatternMatcher):
     # recursive rewrite
-    changed = getenv("UOPS_REWRITE", 1)
-    run_cnt = 0
+    if not getenv("UOPS_REWRITE", 1):return sink
+    changed = 1
+    rc_cnt = 0
     while changed:
       changed = 0
       @functools.lru_cache
@@ -306,7 +308,6 @@ class UOpGraph:
         nonlocal changed
         recurse_cnt = 0
         up = u
-        # locally recursively rewrite
         while (rewritten := pm.rewrite(up)):
           assert recurse_cnt < 100, f"recursive_rewrite looped {up} <--> {rewritten}"
           up = rewritten
@@ -315,8 +316,7 @@ class UOpGraph:
         up = UOp(up.op, up.dtype, tuple(rewrite(x) for x in up.src), up.arg)
         return self.nodes.setdefault(up.tuple(), up)
       sink = rewrite(sink)
-      run_cnt += 1
-      assert run_cnt < 100, "exceeded 100 rewrite loops!"
+      if (rc_cnt:=rc_cnt+1)>100: raise RuntimeError("exceeded 100 rewrite loops!")
     return sink
 
   def graph_dedup(self, sink:UOp):
