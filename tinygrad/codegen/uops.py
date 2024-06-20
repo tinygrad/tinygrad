@@ -302,17 +302,13 @@ class UOpGraph:
     old = None
     rc_cnt = 0
     while old!=sink:
-      changed = 0
       @functools.lru_cache
       def rewrite(u:UOp) -> UOp:
-        nonlocal changed
         recurse_cnt = 0
         up = u
         while (rewritten := pm.rewrite(up)):
-          assert recurse_cnt < 100, f"recursive_rewrite looped {up} <--> {rewritten}"
           up = rewritten
-          recurse_cnt += 1
-        changed += recurse_cnt
+          assert (recurse_cnt:=recurse_cnt+1) < 100, f"recursive_rewrite looped {up} <--> {rewritten}"
         up = UOp(up.op, up.dtype, tuple(rewrite(x) for x in up.src), up.arg)
         return self.nodes.setdefault(up.tuple(), up)
       old,sink =sink, rewrite(sink)
