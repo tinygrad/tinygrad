@@ -375,7 +375,7 @@ def train_retinanet():
   print(f"Training on {GPUS}")
   for x in GPUS: Device[x]
   from extra.models import retinanet
-  from examples.mlperf.initializers import Conv2dNormal, Conv2dKaiming
+  from examples.mlperf.initializers import Conv2dNormal, Conv2dKaiming, Linear, Conv2dHeNormal
 
   prior_probability=0.01
   retinanet.Conv2dNormal = Conv2dNormal
@@ -405,7 +405,9 @@ def train_retinanet():
       # NOTE: this can be precomputed for static inference. we expand it here so it fuses
     batch_invstd = self.running_var.reshape(1, -1, 1, 1).expand(x.shape).add(self.eps).rsqrt()
 
-    return x.batchnorm(self.weight, self.bias, batch_mean, batch_invstd)
+    return x.batchnorm(self.weight, self.bias, batch_mean, batch_invstd).cast(dtypes.default_float)
+  resnet.Conv2d = Conv2dHeNormal
+  resnet.Linear = Linear
   resnet.BatchNorm = functools.partial(BatchNorm2d, eps=0.0)
   resnet.BatchNorm.__call__ = cust_call
   if not SYNCBN: resnet.BatchNorm = functools.partial(UnsyncedBatchNorm, num_devices=len(GPUS))
@@ -452,8 +454,8 @@ def train_retinanet():
     Tensor.training = True
     optimizer.zero_grad()
     b,r,c = model(normalize(X), True)
-    loss_reg = mdl_reg_loss(r, matched_idxs, boxes_temp)
-    loss_class = mdl_class_loss(c, matched_idxs, labels_temp)
+    loss_reg = mdl_reg_loss(r.cast(dtypes.float32), matched_idxs, boxes_temp)
+    loss_class = mdl_class_loss(c.cast(dtypes.float32), matched_idxs, labels_temp)
     loss = loss_reg+loss_class
     (loss*loss_scaler).backward()
     for t in optimizer.params: t.grad = t.grad.contiguous() / loss_scaler
@@ -480,7 +482,8 @@ def train_retinanet():
   def data_get_val(it):
     x, Y_idx, cookie = next(it)
     return x.shard(GPUS, axis=0), Y_idx, cookie
-
+  for k,v in get_state_dict(model).items():
+    print(k, v.dtype)
   for epoch in range(EPOCHS):
     print(colored(f'EPOCH {epoch}/{EPOCHS}:', 'cyan'))
     # **********TRAIN***************
