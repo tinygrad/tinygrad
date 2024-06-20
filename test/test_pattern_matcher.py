@@ -1,15 +1,10 @@
 import unittest
+from test.helpers import TestUOps
 from tinygrad.dtype import dtypes
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps
 from tinygrad.codegen.uops import UOpGraph, UOps, PatternMatcher, UOp, UPat
 
-class TestPatternMatcher(unittest.TestCase):
-  def assert_equiv_uops(self, uop1:UOp, uop2:UOp):
-    # NOTE: direct UOps __eq__ is comparing object reference, use this function to compare two uops
-    self.assertEqual(uop1.op, uop2.op)
-    self.assertEqual(uop1.dtype, uop2.dtype)
-    self.assertEqual(uop1.arg, uop2.arg)
-
+class TestPatternMatcher(TestUOps):
   def test_simple_match(self):
     matcher = PatternMatcher([(UPat(UOps.CONST, name="x", dtype=dtypes.float), lambda x: x)])
     c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
