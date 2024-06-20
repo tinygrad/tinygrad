@@ -12,7 +12,7 @@ from tinygrad.helpers import prod, DEBUG, getenv, flatten
 # the order of these UOps controls the order of the toposort
 class UOps(Enum):
   # ops that aren't rendered
-  SINK = auto(); VAR = auto() # noqa: E702
+  SINK = auto(); VAR = auto(); EXPAND = auto(); CONTRACT = auto() # noqa: E702
   DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # noqa: E702
   CONST = auto(); SPECIAL = auto() # noqa: E702
   NOOP = auto(); UNMUL = auto(); GEP = auto() # noqa: E702
@@ -164,7 +164,7 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst, rng):
   comprange = UOp.min(loop_end, UOp.max(UOp.alu(BinaryOps.IDIV, idx-compval-mval, mval) + (loop_end-loop_start), loop_start))
   return UOp(UOps.UNMUL, multconst.dtype, (comprange.cast(multconst.dtype) * multconst, loop_end-loop_start))
 
-def expand_nodes(parents, ranges:List[UOp], base):
+def expand_nodes(parents, expands:List[UOp], base):
   # get children and define_accs
   children = defaultdict(list)
   define_accs = []
@@ -176,7 +176,7 @@ def expand_nodes(parents, ranges:List[UOp], base):
 
   # get nodes on the path from root to the range node
   on_path: Dict[UOp, None] = {}
-  search = ranges[:]
+  search = expands[:]
   while len(search):
     t = search.pop(0)
     for cc in children[t]:
@@ -203,7 +203,7 @@ def expand_nodes(parents, ranges:List[UOp], base):
         search2.append(x)
 
   # should be unrolled
-  replacements = {r:[UOp.const(r.dtype, j) for j in range(r.src[0].arg, r.src[1].arg)] for r in ranges}
+  replacements = {r:r.src for r in expands}
 
   # get nodes on the path from root to the range node
   new_uops = []
@@ -220,22 +220,36 @@ def expand_nodes(parents, ranges:List[UOp], base):
 acc_number = 0
 def replace_reduce(root):
   global acc_number
-  expand_ranges = [x for x in root.src[2:] if x.arg[1] is True]
+  expands = [x for x in root.src[2:] if x.op is UOps.EXPAND]
 
-  if len(expand_ranges):
-    new_uops = expand_nodes(root.parents, expand_ranges, root.src[0])
+  if len(expands):
+    new_uops = expand_nodes(root.parents, expands, root.src[0])
   else:
     new_uops = [root.src[0]]
 
   # TODO: DEFINE_ACC should have a const input
-  acc = UOp(UOps.DEFINE_ACC, root.dtype, tuple(x for x in root.src[2:] if x not in expand_ranges), (root.src[1].arg, acc_number))
+  acc = UOp(UOps.DEFINE_ACC, root.dtype, tuple(x for x in root.src[2:] if x not in expands), (root.src[1].arg, acc_number))
   acc_number += 1
   ret = acc
   for xx in new_uops: ret = UOp.alu(root.arg, ret, xx)
   return UOp(UOps.PHI, ret.dtype, (acc, ret))
 
+def float4_expand_load(load, buf, idx, ex):
+  vec_load = UOp(UOps.LOAD, load.dtype.vec(4), (buf, idx))
+  return UOp(UOps.EXPAND, load.dtype, tuple(UOp(UOps.GEP, load.dtype, (vec_load,), i) for i in range(4)), ex.arg)
+
+def float4_contract_store(buf, idx, ex, var):
+  #new_var = UOp(UOps.CONTRACT, var.dtype, (var,), (ex.arg, UnaryOps.CAST))
+  #return UOp(UOps.STORE, None, (buf, idx, new_var))
+  pass
+
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
+  # float4 load
+  #(UOp(UOps.LOAD, src=(UOp.var("buf"),
+  #  UOp.var("idx")+UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex"))).name("load"), float4_expand_load),
+  #(UOp(UOps.STORE, src=(UOp.var("buf"),
+  #  UOp.var("idx")+UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex"), UOp.var("var"))), float4_contract_store),
   # replace REDUCE
   (UPat(UOps.REDUCE, name="root"), replace_reduce),
   # arange loop folding (early)
@@ -436,9 +450,9 @@ class UOpGraph:
 
     # do upcasts (after reduce unrolls and rewrites)
     all_parents = set([sink]).union(sink.parents)
-    expand_ranges = list(sorted(x for x in all_parents if x.op is UOps.RANGE and x.arg[1] is True))
-    if len(expand_ranges):
-      new_nodes = expand_nodes(all_parents, expand_ranges, sink)
+    expands = list(sorted(x for x in all_parents if x.op is UOps.EXPAND))
+    if len(expands):
+      new_nodes = expand_nodes(all_parents, expands, sink)
       sink = UOp(UOps.SINK, None, tuple(flatten([x.src for x in new_nodes])))  # merge the sinks
 
     # do graph rewrite (2)

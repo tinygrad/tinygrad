@@ -169,18 +169,23 @@ class Lowerer(Kernel):
       # all loops
       self.idxs = []
       for i,g in enumerate(self.full_shape[:self.first_reduce]):
-        self.idxs.append(UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), variable_to_uop(g)), (i, False, False)))
+        self.idxs.append(UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), variable_to_uop(g)), (i, False)))
       self.global_size, self.local_size = None, None
 
     # reduce loops
     for i,g in enumerate(self.full_shape[self.first_reduce+self.group_for_reduces:], start=self.first_reduce+self.group_for_reduces):
       unrolled, is_reduce = i >= (self.shape_len-self.upcasted), self.full_shape[i] != self.output_shape[i]
-      self.idxs.append(UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), variable_to_uop(g)), (i, unrolled, is_reduce)))
+      if unrolled:
+        assert isinstance(g, int), "needs to be int to unroll"
+        uop = UOp(UOps.EXPAND, dtypes.int32, tuple(UOp.const(dtypes.int32, j) for j in range(0, g)), i)
+      else:
+        uop = UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), variable_to_uop(g)), (i, is_reduce))
+      self.idxs.append(uop)
 
     # late indexes
     self.ridxs = self.idxs[:]
     for a in range(self.first_reduce, self.first_reduce+self.group_for_reduces):
-      self.ridxs[a] = UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), variable_to_uop(self.full_shape[a])), (1000+a, False, True))
+      self.ridxs[a] = UOp(UOps.RANGE, dtypes.int32, (UOp.const(dtypes.int32, 0), variable_to_uop(self.full_shape[a])), (1000+a, True))
 
     self.uops:UOpGraph = UOpGraph([self.to_uop(x) for x in modified_ast])
 
