@@ -349,7 +349,7 @@ class NVAllocator(LRUAllocator):
 
   def copy_from_disk(self, dest, src, size, disk):
     def _get_temp_buf():
-      if self.b_timeline[cur_b_next:=(self.b_next + 1) % len(self.b)] <= self.device.timeline_signal.value:
+      if self.b_timeline[cur_b_next:=(self.b_next + 1) % len(self.b)] <= self.device.timeline_signal[0]:
         self.b_timeline[cur_b_next], self.b_next = (1 << 64), cur_b_next
         return (self.b[cur_b_next].va_addr, cur_b_next)
       return None

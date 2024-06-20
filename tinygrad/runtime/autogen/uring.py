@@ -124,8 +124,6 @@ if ctypes.sizeof(ctypes.c_longdouble) == 16:
 else:
     c_long_double_t = ctypes.c_ubyte*16
 
-_libraries = {}
-_libraries['liburing.so'] = ctypes.CDLL('/lib/x86_64-linux-gnu/liburing.so')
 class FunctionFactoryStub:
     def __getattr__(self, _):
       return ctypes.CFUNCTYPE(lambda y:y)
@@ -135,6 +133,7 @@ class FunctionFactoryStub:
 # This is a non-working stub instead. 
 # You can either re-run clan2py with -l /path/to/library.so
 # Or manually fix this by comment the ctypes.CDLL loading
+_libraries = {}
 _libraries['FIXME_STUB'] = FunctionFactoryStub() #  ctypes.CDLL('FIXME_STUB')
 def string_cast(char_pointer, encoding='utf-8', errors='strict'):
     value = ctypes.cast(char_pointer, ctypes.c_char_p).value
@@ -321,19 +320,19 @@ struct_io_uring_probe._fields_ = [
 ]
 
 try:
-    io_uring_get_probe_ring = _libraries['liburing.so'].io_uring_get_probe_ring
+    io_uring_get_probe_ring = _libraries['FIXME_STUB'].io_uring_get_probe_ring
     io_uring_get_probe_ring.restype = ctypes.POINTER(struct_io_uring_probe)
     io_uring_get_probe_ring.argtypes = [ctypes.POINTER(struct_io_uring)]
 except AttributeError:
     pass
 try:
-    io_uring_get_probe = _libraries['liburing.so'].io_uring_get_probe
+    io_uring_get_probe = _libraries['FIXME_STUB'].io_uring_get_probe
     io_uring_get_probe.restype = ctypes.POINTER(struct_io_uring_probe)
     io_uring_get_probe.argtypes = []
 except AttributeError:
     pass
 try:
-    io_uring_free_probe = _libraries['liburing.so'].io_uring_free_probe
+    io_uring_free_probe = _libraries['FIXME_STUB'].io_uring_free_probe
     io_uring_free_probe.restype = None
     io_uring_free_probe.argtypes = [ctypes.POINTER(struct_io_uring_probe)]
 except AttributeError:
@@ -394,37 +393,37 @@ struct_io_uring_params._fields_ = [
 ]
 
 try:
-    io_uring_queue_init_params = _libraries['liburing.so'].io_uring_queue_init_params
+    io_uring_queue_init_params = _libraries['FIXME_STUB'].io_uring_queue_init_params
     io_uring_queue_init_params.restype = ctypes.c_int32
     io_uring_queue_init_params.argtypes = [ctypes.c_uint32, ctypes.POINTER(struct_io_uring), ctypes.POINTER(struct_io_uring_params)]
 except AttributeError:
     pass
 try:
-    io_uring_queue_init = _libraries['liburing.so'].io_uring_queue_init
+    io_uring_queue_init = _libraries['FIXME_STUB'].io_uring_queue_init
     io_uring_queue_init.restype = ctypes.c_int32
     io_uring_queue_init.argtypes = [ctypes.c_uint32, ctypes.POINTER(struct_io_uring), ctypes.c_uint32]
 except AttributeError:
     pass
 try:
-    io_uring_queue_mmap = _libraries['liburing.so'].io_uring_queue_mmap
+    io_uring_queue_mmap = _libraries['FIXME_STUB'].io_uring_queue_mmap
     io_uring_queue_mmap.restype = ctypes.c_int32
     io_uring_queue_mmap.argtypes = [ctypes.c_int32, ctypes.POINTER(struct_io_uring_params), ctypes.POINTER(struct_io_uring)]
 except AttributeError:
     pass
 try:
-    io_uring_ring_dontfork = _libraries['liburing.so'].io_uring_ring_dontfork
+    io_uring_ring_dontfork = _libraries['FIXME_STUB'].io_uring_ring_dontfork
     io_uring_ring_dontfork.restype = ctypes.c_int32
     io_uring_ring_dontfork.argtypes = [ctypes.POINTER(struct_io_uring)]
 except AttributeError:
     pass
 try:
-    io_uring_queue_exit = _libraries['liburing.so'].io_uring_queue_exit
+    io_uring_queue_exit = _libraries['FIXME_STUB'].io_uring_queue_exit
     io_uring_queue_exit.restype = None
     io_uring_queue_exit.argtypes = [ctypes.POINTER(struct_io_uring)]
 except AttributeError:
     pass
 try:
-    io_uring_peek_batch_cqe = _libraries['liburing.so'].io_uring_peek_batch_cqe
+    io_uring_peek_batch_cqe = _libraries['FIXME_STUB'].io_uring_peek_batch_cqe
     io_uring_peek_batch_cqe.restype = ctypes.c_uint32
     io_uring_peek_batch_cqe.argtypes = [ctypes.POINTER(struct_io_uring), ctypes.POINTER(ctypes.POINTER(struct_io_uring_cqe)), ctypes.c_uint32]
 except AttributeError:
@@ -447,31 +446,31 @@ struct_c__SA___sigset_t._fields_ = [
 ]
 
 try:
-    io_uring_wait_cqes = _libraries['liburing.so'].io_uring_wait_cqes
+    io_uring_wait_cqes = _libraries['FIXME_STUB'].io_uring_wait_cqes
     io_uring_wait_cqes.restype = ctypes.c_int32
     io_uring_wait_cqes.argtypes = [ctypes.POINTER(struct_io_uring), ctypes.POINTER(ctypes.POINTER(struct_io_uring_cqe)), ctypes.c_uint32, ctypes.POINTER(struct___kernel_timespec), ctypes.POINTER(struct_c__SA___sigset_t)]
 except AttributeError:
     pass
 try:
-    io_uring_wait_cqe_timeout = _libraries['liburing.so'].io_uring_wait_cqe_timeout
+    io_uring_wait_cqe_timeout = _libraries['FIXME_STUB'].io_uring_wait_cqe_timeout
     io_uring_wait_cqe_timeout.restype = ctypes.c_int32
     io_uring_wait_cqe_timeout.argtypes = [ctypes.POINTER(struct_io_uring), ctypes.POINTER(ctypes.POINTER(struct_io_uring_cqe)), ctypes.POINTER(struct___kernel_timespec)]
 except AttributeError:
     pass
 try:
-    io_uring_submit = _libraries['liburing.so'].io_uring_submit
+    io_uring_submit = _libraries['FIXME_STUB'].io_uring_submit
     io_uring_submit.restype = ctypes.c_int32
     io_uring_submit.argtypes = [ctypes.POINTER(struct_io_uring)]
 except AttributeError:
     pass
 try:
-    io_uring_submit_and_wait = _libraries['liburing.so'].io_uring_submit_and_wait
+    io_uring_submit_and_wait = _libraries['FIXME_STUB'].io_uring_submit_and_wait
     io_uring_submit_and_wait.restype = ctypes.c_int32
     io_uring_submit_and_wait.argtypes = [ctypes.POINTER(struct_io_uring), ctypes.c_uint32]
 except AttributeError:
     pass
 try:
-    io_uring_get_sqe = _libraries['liburing.so'].io_uring_get_sqe
+    io_uring_get_sqe = _libraries['FIXME_STUB'].io_uring_get_sqe
     io_uring_get_sqe.restype = ctypes.POINTER(struct_io_uring_sqe)
     io_uring_get_sqe.argtypes = [ctypes.POINTER(struct_io_uring)]
 except AttributeError:
@@ -486,91 +485,91 @@ struct_iovec._fields_ = [
 ]
 
 try:
-    io_uring_register_buffers = _libraries['liburing.so'].io_uring_register_buffers
+    io_uring_register_buffers = _libraries['FIXME_STUB'].io_uring_register_buffers
     io_uring_register_buffers.restype = ctypes.c_int32
     io_uring_register_buffers.argtypes = [ctypes.POINTER(struct_io_uring), ctypes.POINTER(struct_iovec), ctypes.c_uint32]
 except AttributeError:
     pass
 try:
-    io_uring_register_buffers_tags = _libraries['liburing.so'].io_uring_register_buffers_tags
+    io_uring_register_buffers_tags = _libraries['FIXME_STUB'].io_uring_register_buffers_tags
     io_uring_register_buffers_tags.restype = ctypes.c_int32
     io_uring_register_buffers_tags.argtypes = [ctypes.POINTER(struct_io_uring), ctypes.POINTER(struct_iovec), ctypes.POINTER(ctypes.c_uint64), ctypes.c_uint32]
 except AttributeError:
     pass
 try:
-    io_uring_register_buffers_update_tag = _libraries['liburing.so'].io_uring_register_buffers_update_tag
+    io_uring_register_buffers_update_tag = _libraries['FIXME_STUB'].io_uring_register_buffers_update_tag
     io_uring_register_buffers_update_tag.restype = ctypes.c_int32
     io_uring_register_buffers_update_tag.argtypes = [ctypes.POINTER(struct_io_uring), ctypes.c_uint32, ctypes.POINTER(struct_iovec), ctypes.POINTER(ctypes.c_uint64), ctypes.c_uint32]
 except AttributeError:
     pass
 try:
-    io_uring_unregister_buffers = _libraries['liburing.so'].io_uring_unregister_buffers
+    io_uring_unregister_buffers = _libraries['FIXME_STUB'].io_uring_unregister_buffers
     io_uring_unregister_buffers.restype = ctypes.c_int32
     io_uring_unregister_buffers.argtypes = [ctypes.POINTER(struct_io_uring)]
 except AttributeError:
     pass
 try:
-    io_uring_register_files = _libraries['liburing.so'].io_uring_register_files
+    io_uring_register_files = _libraries['FIXME_STUB'].io_uring_register_files
     io_uring_register_files.restype = ctypes.c_int32
     io_uring_register_files.argtypes = [ctypes.POINTER(struct_io_uring), ctypes.POINTER(ctypes.c_int32), ctypes.c_uint32]
 except AttributeError:
     pass
 try:
-    io_uring_register_files_tags = _libraries['liburing.so'].io_uring_register_files_tags
+    io_uring_register_files_tags = _libraries['FIXME_STUB'].io_uring_register_files_tags
     io_uring_register_files_tags.restype = ctypes.c_int32
     io_uring_register_files_tags.argtypes = [ctypes.POINTER(struct_io_uring), ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_uint64), ctypes.c_uint32]
 except AttributeError:
     pass
 try:
-    io_uring_register_files_update_tag = _libraries['liburing.so'].io_uring_register_files_update_tag
+    io_uring_register_files_update_tag = _libraries['FIXME_STUB'].io_uring_register_files_update_tag
     io_uring_register_files_update_tag.restype = ctypes.c_int32
     io_uring_register_files_update_tag.argtypes = [ctypes.POINTER(struct_io_uring), ctypes.c_uint32, ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_uint64), ctypes.c_uint32]
 except AttributeError:
     pass
 try:
-    io_uring_unregister_files = _libraries['liburing.so'].io_uring_unregister_files
+    io_uring_unregister_files = _libraries['FIXME_STUB'].io_uring_unregister_files
     io_uring_unregister_files.restype = ctypes.c_int32
     io_uring_unregister_files.argtypes = [ctypes.POINTER(struct_io_uring)]
 except AttributeError:
     pass
 try:
-    io_uring_register_files_update = _libraries['liburing.so'].io_uring_register_files_update
+    io_uring_register_files_update = _libraries['FIXME_STUB'].io_uring_register_files_update
     io_uring_register_files_update.restype = ctypes.c_int32
     io_uring_register_files_update.argtypes = [ctypes.POINTER(struct_io_uring), ctypes.c_uint32, ctypes.POINTER(ctypes.c_int32), ctypes.c_uint32]
 except AttributeError:
     pass
 try:
-    io_uring_register_eventfd = _libraries['liburing.so'].io_uring_register_eventfd
+    io_uring_register_eventfd = _libraries['FIXME_STUB'].io_uring_register_eventfd
     io_uring_register_eventfd.restype = ctypes.c_int32
     io_uring_register_eventfd.argtypes = [ctypes.POINTER(struct_io_uring), ctypes.c_int32]
 except AttributeError:
     pass
 try:
-    io_uring_register_eventfd_async = _libraries['liburing.so'].io_uring_register_eventfd_async
+    io_uring_register_eventfd_async = _libraries['FIXME_STUB'].io_uring_register_eventfd_async
     io_uring_register_eventfd_async.restype = ctypes.c_int32
     io_uring_register_eventfd_async.argtypes = [ctypes.POINTER(struct_io_uring), ctypes.c_int32]
 except AttributeError:
     pass
 try:
-    io_uring_unregister_eventfd = _libraries['liburing.so'].io_uring_unregister_eventfd
+    io_uring_unregister_eventfd = _libraries['FIXME_STUB'].io_uring_unregister_eventfd
     io_uring_unregister_eventfd.restype = ctypes.c_int32
     io_uring_unregister_eventfd.argtypes = [ctypes.POINTER(struct_io_uring)]
 except AttributeError:
     pass
 try:
-    io_uring_register_probe = _libraries['liburing.so'].io_uring_register_probe
+    io_uring_register_probe = _libraries['FIXME_STUB'].io_uring_register_probe
     io_uring_register_probe.restype = ctypes.c_int32
     io_uring_register_probe.argtypes = [ctypes.POINTER(struct_io_uring), ctypes.POINTER(struct_io_uring_probe), ctypes.c_uint32]
 except AttributeError:
     pass
 try:
-    io_uring_register_personality = _libraries['liburing.so'].io_uring_register_personality
+    io_uring_register_personality = _libraries['FIXME_STUB'].io_uring_register_personality
     io_uring_register_personality.restype = ctypes.c_int32
     io_uring_register_personality.argtypes = [ctypes.POINTER(struct_io_uring)]
 except AttributeError:
     pass
 try:
-    io_uring_unregister_personality = _libraries['liburing.so'].io_uring_unregister_personality
+    io_uring_unregister_personality = _libraries['FIXME_STUB'].io_uring_unregister_personality
     io_uring_unregister_personality.restype = ctypes.c_int32
     io_uring_unregister_personality.argtypes = [ctypes.POINTER(struct_io_uring), ctypes.c_int32]
 except AttributeError:
@@ -610,7 +609,7 @@ try:
 except AttributeError:
     pass
 try:
-    __io_uring_sqring_wait = _libraries['liburing.so'].__io_uring_sqring_wait
+    __io_uring_sqring_wait = _libraries['FIXME_STUB'].__io_uring_sqring_wait
     __io_uring_sqring_wait.restype = ctypes.c_int32
     __io_uring_sqring_wait.argtypes = [ctypes.POINTER(struct_io_uring)]
 except AttributeError:
@@ -625,27 +624,27 @@ struct_c__SA_cpu_set_t._fields_ = [
 ]
 
 try:
-    io_uring_register_iowq_aff = _libraries['liburing.so'].io_uring_register_iowq_aff
+    io_uring_register_iowq_aff = _libraries['FIXME_STUB'].io_uring_register_iowq_aff
     io_uring_register_iowq_aff.restype = ctypes.c_int32
     io_uring_register_iowq_aff.argtypes = [ctypes.POINTER(struct_io_uring), size_t, ctypes.POINTER(struct_c__SA_cpu_set_t)]
 except AttributeError:
     pass
 try:
-    io_uring_unregister_iowq_aff = _libraries['liburing.so'].io_uring_unregister_iowq_aff
+    io_uring_unregister_iowq_aff = _libraries['FIXME_STUB'].io_uring_unregister_iowq_aff
     io_uring_unregister_iowq_aff.restype = ctypes.c_int32
     io_uring_unregister_iowq_aff.argtypes = [ctypes.POINTER(struct_io_uring)]
 except AttributeError:
     pass
 try:
-    io_uring_register_iowq_max_workers = _libraries['liburing.so'].io_uring_register_iowq_max_workers
+    io_uring_register_iowq_max_workers = _libraries['FIXME_STUB'].io_uring_register_iowq_max_workers
     io_uring_register_iowq_max_workers.restype = ctypes.c_int32
     io_uring_register_iowq_max_workers.argtypes = [ctypes.POINTER(struct_io_uring), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError:
     pass
 try:
-    io_uring_get_cqe = _libraries['liburing.so'].__io_uring_get_cqe
-    io_uring_get_cqe.restype = ctypes.c_int32
-    io_uring_get_cqe.argtypes = [ctypes.POINTER(struct_io_uring), ctypes.POINTER(ctypes.POINTER(struct_io_uring_cqe)), ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(struct_c__SA___sigset_t)]
+    __io_uring_get_cqe = _libraries['FIXME_STUB'].__io_uring_get_cqe
+    __io_uring_get_cqe.restype = ctypes.c_int32
+    __io_uring_get_cqe.argtypes = [ctypes.POINTER(struct_io_uring), ctypes.POINTER(ctypes.POINTER(struct_io_uring_cqe)), ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(struct_c__SA___sigset_t)]
 except AttributeError:
     pass
 try:
@@ -1074,13 +1073,13 @@ except AttributeError:
     pass
 ssize_t = ctypes.c_int64
 try:
-    io_uring_mlock_size = _libraries['liburing.so'].io_uring_mlock_size
+    io_uring_mlock_size = _libraries['FIXME_STUB'].io_uring_mlock_size
     io_uring_mlock_size.restype = ssize_t
     io_uring_mlock_size.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError:
     pass
 try:
-    io_uring_mlock_size_params = _libraries['liburing.so'].io_uring_mlock_size_params
+    io_uring_mlock_size_params = _libraries['FIXME_STUB'].io_uring_mlock_size_params
     io_uring_mlock_size_params.restype = ssize_t
     io_uring_mlock_size_params.argtypes = [ctypes.c_uint32, ctypes.POINTER(struct_io_uring_params)]
 except AttributeError:

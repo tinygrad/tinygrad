@@ -4,7 +4,6 @@ from typing import Optional, Generator, Tuple, Callable
 from tinygrad.helpers import OSX, round_up
 from tinygrad.device import Compiled, Allocator
 import tinygrad.runtime.autogen.uring as io_uring
-import tinygrad.runtime.autogen.aio as aio
 
 libc = ctypes.CDLL(ctypes.util.find_library("c"))
 libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
