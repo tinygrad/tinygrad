@@ -185,7 +185,7 @@ generate_hsa() {
   python3 -c "import tinygrad.runtime.autogen.hsa"
 }
 
-generate_uring() {
+generate_io_uring() {
   clang2py \
     /usr/include/liburing.h \
     /usr/include/linux/io_uring.h \
@@ -200,7 +200,7 @@ elif [ "$1" == "hsa" ]; then generate_hsa
 elif [ "$1" == "kfd" ]; then generate_kfd
 elif [ "$1" == "nv" ]; then generate_nv
 elif [ "$1" == "amd" ]; then generate_amd
-elif [ "$1" == "uring" ]; then generate_uring
+elif [ "$1" == "io_uring" ]; then generate_io_uring
 elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_hsa; generate_kfd; generate_nv; generate_amd
 else echo "usage: $0 <type>"
 fi
