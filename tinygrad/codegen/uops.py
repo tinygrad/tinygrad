@@ -141,21 +141,18 @@ class PatternMatcher:
         self.pdict[(p.op, p.arg)].append((p, fxn))
 
   @functools.lru_cache(None)
-  def recursive_rewrite(self, u:UOp) -> Tuple[UOp, bool]:
-    changed = False
+  def recursive_rewrite(self, u:UOp) -> UOp:
     recurse_cnt = 0
     up = u
     # locally recursively rewrite
     while (rewritten := self.rewrite_on_match(up)) is not None:
       assert recurse_cnt < 100, f"recursive_rewrite looped {up} <--> {rewritten}"
       up = rewritten
-      changed = True
     if up.src:
-      new_src, c = tuple(zip(*[self.recursive_rewrite(x) for x in up.src]))
-      if any(c):
+      new_src = tuple(self.recursive_rewrite(x) for x in up.src)
+      if new_src != up.src:
         up = UOp(up.op, up.dtype, new_src, up.arg)
-        changed = True
-    return up, changed
+    return up
 
   def rewrite_on_match(self, uop:UOp) -> Optional[UOp]:
     for p,fxn in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
@@ -311,7 +308,9 @@ class UOpGraph:
     # recursive rewrite
     changed = getenv("UOPS_REWRITE", True)
     while changed:
-      sink, changed = pm.recursive_rewrite(sink)
+      rewritten = pm.recursive_rewrite(sink)
+      changed = sink != rewritten
+      sink = rewritten
     self.nodes[sink] = sink
     return sink
 
@@ -358,12 +357,12 @@ class UOpGraph:
     # BFS toposort
     graph: DefaultDict[UOp, List[UOp]] = defaultdict(list)
     in_degree: DefaultDict[UOp, int] = defaultdict(int)
-    loops:List[UOp] = []
-    ifs:List[UOp] = []
-    nodes: Dict[UOp, None] = {}
+    loops = []
+    ifs = []
+    nodes: Set[UOp] = set()
     def add_parents(u:UOp):
       if u in nodes: return
-      nodes[u] = None
+      nodes.add(u)
       for x in u.src:
         add_parents(x)
         in_degree[u] += 1
