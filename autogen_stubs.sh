@@ -190,6 +190,8 @@ generate_io_uring() {
     /usr/include/liburing.h \
     /usr/include/linux/io_uring.h \
     -o $BASE/io_uring.py
+
+  fixup $BASE/io_uring.py
 }
 
 if [ "$1" == "opencl" ]; then generate_opencl

@@ -1,3 +1,4 @@
+# mypy: ignore-errors
 # -*- coding: utf-8 -*-
 #
 # TARGET arch is: []
@@ -130,7 +131,7 @@ class FunctionFactoryStub:
 
 # libraries['FIXME_STUB'] explanation
 # As you did not list (-l libraryname.so) a library that exports this function
-# This is a non-working stub instead. 
+# This is a non-working stub instead.
 # You can either re-run clan2py with -l /path/to/library.so
 # Or manually fix this by comment the ctypes.CDLL loading
 _libraries = {}
