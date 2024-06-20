@@ -1053,6 +1053,13 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,3,3,3)], lambda x: x[0:3, ..., 2:3])
     helper_test_op([(3,3,3,3)], lambda x: x[None, 0:3, ..., 0, None])
 
+  # this was the failure in llama early realizing freqs_cis
+  def test_double_slice(self):
+    helper_test_op([(4,4)], lambda x: x[:, 1:2][1:2])
+    helper_test_op([(4,4)], lambda x: x[1:3][1:2])
+    helper_test_op([(4,4)], lambda x: x[:, 1:2][0:1])
+    helper_test_op([(4,4)], lambda x: x[:, 1:2][:, 0:1])
+
   def test_pad2d(self):
     helper_test_op([(3,3,3,3)], lambda x: torch.nn.functional.pad(x, (1,2,3,4)), lambda x: x.pad2d(padding=(1,2,3,4)))
     helper_test_op([(3,3,3,3)], lambda x: torch.nn.functional.pad(x, (-1,2,-3,4)), lambda x: x.pad2d(padding=(-1,2,-3,4)))
@@ -1112,19 +1119,27 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,3)], lambda x: x.T)
     helper_test_op([(3,3,3)], lambda x: x.transpose(1,2))
     helper_test_op([(3,3,3)], lambda x: x.transpose(0,2))
+
+  def test_permute(self):
     helper_test_op([(1,2,3,4)], lambda x: x.permute((3,0,2,1)))
     helper_test_op([(3,4,5,6)], lambda x: x.permute((3,2,1,0)))
+    helper_test_op([(3,4,5,6)], lambda x: x.permute((-2,-1,1,0)))
     helper_test_op([()], lambda x: x.permute(()))
+    self.helper_test_exception([(3,4,5,6)], lambda x: x.permute((0,2)), lambda x: x.permute((0,2)), expected=RuntimeError)
+    self.helper_test_exception([(3,4,5,6)], lambda x: x.permute((0,1,2,3,3,3)), lambda x: x.permute((0,1,2,3,3,3)), expected=RuntimeError)
+    self.helper_test_exception([(3,4,5,6)], lambda x: x.permute((0,0,1,2,3)), lambda x: x.permute((0,0,1,2,3)), expected=RuntimeError)
 
   def test_reshape(self):
+    helper_test_op([(4,3,6,6)], lambda x: x.reshape((12,6,6)))
     helper_test_op([(4,3,6,6)], lambda x: x.reshape((-1,3,6,6)))
     helper_test_op([(4,3,6,6)], lambda x: x.reshape((-1,1,6,6)))
-    helper_test_op([()], lambda x: x.reshape([]))
-    helper_test_op([(1,)], lambda x: x.reshape([]))
-    helper_test_op([()], lambda x: x.reshape([1]))
-    helper_test_op([()], lambda x: x.reshape([1, 1, 1]))
-    self.helper_test_exception([(3, 4)], lambda x: x.reshape((-1, -1, 2)), lambda x: x.reshape((-1, -1, 2)), expected=RuntimeError)
-    self.helper_test_exception([(3, 4)], lambda x: x.reshape((-1, -1, -1, 2)), lambda x: x.reshape((-1, -1, -1, 2)), expected=RuntimeError)
+    helper_test_op([(4,3,6,6)], lambda x: x.reshape((4,3,6,6)), lambda x: x.reshape((None,None,6,6)))
+    helper_test_op([()], lambda x: x.reshape(()))
+    helper_test_op([(1,)], lambda x: x.reshape(()))
+    helper_test_op([()], lambda x: x.reshape((1,)))
+    helper_test_op([()], lambda x: x.reshape((1,1,1)))
+    self.helper_test_exception([(3,4)], lambda x: x.reshape((-1,-1,2)), lambda x: x.reshape((-1,-1,2)), expected=RuntimeError)
+    self.helper_test_exception([(3,4)], lambda x: x.reshape((-1,-1,-1,2)), lambda x: x.reshape((-1,-1,-1,2)), expected=RuntimeError)
 
     with self.assertRaises(ValueError):
       x = Tensor.ones((4,3,6,6))
@@ -1139,7 +1154,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(4,3,6,6)], lambda x: x.flip((-1,)))
     helper_test_op([()], lambda x: x.flip(()))
     helper_test_op([(1,)], lambda x: x.flip(()))
-    helper_test_op([(4, 3, 6, 6)], lambda x: x.flip(()))
+    helper_test_op([(4,3,6,6)], lambda x: x.flip(()))
+    self.helper_test_exception([(3,4)], lambda x: x.flip((0,0)), lambda x: x.flip((0,0)), expected=RuntimeError)
+    self.helper_test_exception([(3,4)], lambda x: x.flip((1,1)), lambda x: x.flip((1,1)), expected=RuntimeError)
+    self.helper_test_exception([(3,4)], lambda x: x.flip((1,-1)), lambda x: x.flip((1,-1)), expected=RuntimeError)
 
   def test_squeeze(self):
     helper_test_op([(1,3,6,6)], lambda x: x.squeeze(0))
@@ -1637,13 +1655,6 @@ class TestOps(unittest.TestCase):
 
   def test_matvec(self):
     helper_test_op([(1,128), (128,128)], lambda x,y: (x@y).relu())
-
-  # this was the failure in llama early realizing freqs_cis
-  def test_double_slice(self):
-    helper_test_op([(4,4)], lambda x: x[:, 1:2][1:2])
-    helper_test_op([(4,4)], lambda x: x[1:3][1:2])
-    helper_test_op([(4,4)], lambda x: x[:, 1:2][0:1])
-    helper_test_op([(4,4)], lambda x: x[:, 1:2][:, 0:1])
 
   @unittest.skip("this test is broken #862")
   def test_max_inf(self):
