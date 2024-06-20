@@ -1431,10 +1431,3 @@ __all__ = \
     'union_io_uring_restriction_0', 'union_io_uring_sqe_0',
     'union_io_uring_sqe_1', 'union_io_uring_sqe_2',
     'union_io_uring_sqe_3', 'union_io_uring_sqe_4']
-
-def io_uring_prep_rw(sqe, op, fd, addr, len, off):
-  sqe.contents.opcode = op
-  sqe.contents.fd = fd
-  sqe.contents.off = off
-  sqe.contents.addr = addr
-  sqe.contents.len = len
