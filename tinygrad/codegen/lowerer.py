@@ -14,18 +14,19 @@ from tinygrad.helpers import to_function_name, colored, DEBUG, getenv, prod
 # TODO: this needs to be replaced, there shouldn't be variables in the shapetracker
 from tinygrad.shape.symbolic import Variable, NumNode, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode
 render_ops: Any = { NumNode: lambda self, ops, ctx: UOp.const(dtypes.int, self.b),
-                    MulNode: lambda self, ops, ctx: self.a.render(ops, ctx)*self.b,
-                    DivNode: lambda self, ops, ctx: self.a.render(ops, ctx)//self.b,
-                    ModNode: lambda self, ops, ctx: self.a.render(ops, ctx)%self.b,
-                    LtNode: lambda self, ops, ctx: self.a.render(ops, ctx).lt(self.b),
-  Variable: lambda self,ops,ctx: ctx[self] if self in ctx else UOp(UOps.DEFINE_VAR, dtypes.int32, (), self),
+                    MulNode: lambda self, ops, ctx: self.a.render(ops, ctx)*variable_to_uop(self.b, ctx),
+                    DivNode: lambda self, ops, ctx: self.a.render(ops, ctx)//variable_to_uop(self.b, ctx),
+                    ModNode: lambda self, ops, ctx: self.a.render(ops, ctx)%variable_to_uop(self.b, ctx),
+                    LtNode: lambda self, ops, ctx: self.a.render(ops, ctx).lt(variable_to_uop(self.b, ctx)),
+  Variable: lambda self,ops,ctx: ctx[self] if ctx is not None and self in ctx else UOp(UOps.DEFINE_VAR, dtypes.int32, (), self),
   SumNode: lambda self,ops,ctx: functools.reduce(lambda a,b: a+b.render(ops, ctx), self.nodes[1:], self.nodes[0].render(ops,ctx)),
   AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: a*b.render(ops, ctx), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
-def variable_to_uop(x) -> UOp:
+def variable_to_uop(x, ctx=None) -> UOp:
   if isinstance(x, int): return UOp.const(dtypes.int32, x)
-  return x.render(render_ops)
+  return x.render(render_ops, ctx)
 
+# TODO: enable this once UOps is ready to replace symbolic
 """
 def _uop_view(view:View, idxs:List[UOp], vexpr:UOp) -> Tuple[UOp, UOp]:
   # TODO: dtypes.realint
