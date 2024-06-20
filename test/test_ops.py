@@ -1141,7 +1141,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(1,)], lambda x: x.flip(()))
     helper_test_op([(4,3,6,6)], lambda x: x.flip(()))
     self.helper_test_exception([(3,4)], lambda x: x.flip((0,0)), lambda x: x.flip((0,0)), expected=RuntimeError)
-    self.helper_test_exception([(3,4)], lambda x: x.flip((1,1)), lambda x: x.flip((0,0)), expected=RuntimeError)
+    self.helper_test_exception([(3,4)], lambda x: x.flip((1,1)), lambda x: x.flip((1,1)), expected=RuntimeError)
     self.helper_test_exception([(3,4)], lambda x: x.flip((1,-1)), lambda x: x.flip((1,-1)), expected=RuntimeError)
 
   def test_squeeze(self):
