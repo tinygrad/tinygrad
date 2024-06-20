@@ -302,19 +302,18 @@ class UOpGraph:
     old = None
     rc_cnt = 0
     while old!=sink:
-      @functools.lru_cache
+      # @functools.lru_cache
       def rewrite(up:UOp) -> UOp:
-        recurse_cnt = 0
-        # while (rewritten := pm.rewrite(up)):
+        if up in cache: return cache[up]
         for _ in range(100):
           rewritten = pm.rewrite(up)
-          if rewritten is None: break
+          if rewritten is None:
+            up = UOp(up.op, up.dtype, tuple(rewrite(x) for x in up.src), up.arg)
+            return cache.setdefault(self.nodes.setdefault(up.tuple(), up), up)
           up = rewritten
-          assert (recurse_cnt:=recurse_cnt+1) < 100, f"recursive_rewrite looped {up} <--> {rewritten}"
-        up = UOp(up.op, up.dtype, tuple(rewrite(x) for x in up.src), up.arg)
-        return self.nodes.setdefault(up.tuple(), up)
+        assert  False, f"recursive_rewrite looped {up} <--> {rewritten}"
+      cache: Dict[UOp, UOp] = {}
       old,sink =sink, rewrite(sink)
-
       if (rc_cnt:=rc_cnt+1)>100: raise RuntimeError("exceeded 100 rewrite loops!")
     return sink
 
