@@ -2,7 +2,7 @@
 import unittest, random
 import numpy as np
 from tinygrad.codegen.kernel import KernelOptError
-from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.codegen.lowerer import Lowerer as Linearizer
 from tinygrad.engine.search import Opt, OptOps
 from tinygrad import Device, dtypes, Tensor
 from tinygrad.helpers import CI
