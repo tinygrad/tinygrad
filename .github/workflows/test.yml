@@ -41,9 +41,9 @@ jobs:
         echo "$COMMIT_MESSAGE"
         echo "$PR_TITLE"
 
-        if { echo "$COMMIT_MESSAGE" | grep -q "\[run_process_replay\]" || \
+        if { echo "$COMMIT_MESSAGE" | grep -q "\ \[run_process_replay\]\" || \
              [ "${{ github.event.inputs.run_process_replay }}" == "true" ] || \
-             echo "$PR_TITLE" | grep -q "\[run_process_replay\]"; } && [ "$GITHUB_REF_NAME" != "master" ]; then
+             echo "$PR_TITLE" | grep -q "\ \[run_process_replay\]\"; } && [ "$GITHUB_REF_NAME" != "master" ]; then
           echo "RUN_PROCESS_REPLAY=1" >> $GITHUB_OUTPUT
           echo "enabled process replay"
           if echo "$COMMIT_MESSAGE" | grep -q "\[no_assert\]"; then
