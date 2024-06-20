@@ -97,19 +97,18 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_fold_gated_load_local(self):
     glbl0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (0, True))
-    smem = UOp(UOps.DEFINE_LOCAL, PtrDType(dtypes.int), (), ("temp", 16))
-    idx0 = UOp.const(dtypes.int, 0)
-    idx1 = UOp.const(dtypes.int, 1)
-    st = UOp(UOps.STORE, None, (smem, idx0, UOp.const(dtypes.int, 2)))
+    smem = UOp(UOps.DEFINE_LOCAL, PtrDType(dtypes.int), (), ("temp", 1))
+    lidx = UOp(UOps.SPECIAL, dtypes.int, (), (0, "lidx1", 16))
+    st = UOp(UOps.STORE, None, (smem, lidx, UOp.load(glbl0, lidx, dtype=dtypes.int)))
     barrier = UOp(UOps.BARRIER, None, (st, ))
-    ld0 = UOp(UOps.LOAD, dtypes.int, (smem, idx0, UOp.const(dtypes.bool, False), UOp.const(dtypes.int, 2), barrier))
-    ld1 = UOp(UOps.LOAD, dtypes.int, (smem, idx1, UOp.const(dtypes.bool, True), UOp.const(dtypes.int, 3), barrier))
-    uops = UOpGraph([UOp(UOps.STORE, None, (glbl0, idx0, ld0+ld1))])
+    ld0 = UOp(UOps.LOAD, dtypes.int, (smem, lidx+1, UOp.const(dtypes.bool, False), UOp.const(dtypes.int, 2), barrier))
+    ld1 = UOp(UOps.LOAD, dtypes.int, (smem, lidx+2, UOp.const(dtypes.bool, True), UOp.const(dtypes.int, 3), barrier))
+    uops = UOpGraph([UOp(UOps.STORE, None, (glbl0, lidx, ld0+ld1))])
     ld0, ld1 = uops[-1].src[2].src
     # ld0 folds to the invalid value
     self.assert_equiv_uops(ld0, UOp.const(dtypes.int, 2))
     # ld1 folds to the valid value
-    self.assert_equiv_uops(ld1, UOp.load(smem, idx1, barrier, dtype=dtypes.int))
+    self.assert_equiv_uops(ld1, UOp.load(smem, lidx+2, barrier, dtype=dtypes.int))
 
   def test_fold_gated_store(self):
     glbl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (0, True))
@@ -119,6 +118,7 @@ class TestUOpGraph(unittest.TestCase):
     st0 = UOp(UOps.STORE, None, (glbl, idx0, val, UOp.const(dtypes.bool, False)))
     st1 = UOp(UOps.STORE, None, (glbl, idx1, val, UOp.const(dtypes.bool, True)))
     uops = UOpGraph([st0, st1])
+    # only the second store happens
     self.assertEqual(len(uops.uops), 4)
     self.assert_equiv_uops(uops[-1], UOp.store(glbl, idx1, val))
 
