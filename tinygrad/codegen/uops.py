@@ -299,9 +299,9 @@ class UOpGraph:
   def graph_rewrite(self, sink:UOp, pm:PatternMatcher):
     # recursive rewrite
     if not getenv("UOPS_REWRITE", 1):return sink
-    changed = 1
+    old = None
     rc_cnt = 0
-    while changed:
+    while old!=sink:
       changed = 0
       @functools.lru_cache
       def rewrite(u:UOp) -> UOp:
@@ -315,7 +315,8 @@ class UOpGraph:
         changed += recurse_cnt
         up = UOp(up.op, up.dtype, tuple(rewrite(x) for x in up.src), up.arg)
         return self.nodes.setdefault(up.tuple(), up)
-      sink = rewrite(sink)
+      old,sink =sink, rewrite(sink)
+
       if (rc_cnt:=rc_cnt+1)>100: raise RuntimeError("exceeded 100 rewrite loops!")
     return sink
 
