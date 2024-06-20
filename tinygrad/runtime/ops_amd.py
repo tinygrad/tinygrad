@@ -408,13 +408,10 @@ class AMDAllocator(LRUAllocator):
       self.device.timeline_value += 1
 
   def copy_from_disk(self, dest, src, size, disk):
-    self.device.synchronize()
-    
     def _get_temp_buf():
-      if self.b_timeline[(self.b_next + 1) % len(self.b)] <= self.device.timeline_signal.value:
-        self.b_next = (self.b_next + 1) % len(self.b)
-        self.b_timeline[self.b_next] = (1 << 64)
-        return (self.b[self.b_next].va_addr, self.b_next)
+      if self.b_timeline[cur_b_next:=(self.b_next + 1) % len(self.b)] <= self.device.timeline_signal.value:
+        self.b_timeline[cur_b_next], self.b_next = (1 << 64), cur_b_next
+        return (self.b[cur_b_next].va_addr, cur_b_next)
       return None
 
     for (batch_info, dst_off, src_off, copy_size) in disk.allocator._copyout_sharded(src, size, _get_temp_buf, seg_len=SDMA_MAX_COPY_SIZE):

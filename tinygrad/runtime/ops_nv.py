@@ -349,14 +349,13 @@ class NVAllocator(LRUAllocator):
 
   def copy_from_disk(self, dest, src, size, disk):
     def _get_temp_buf():
-      if self.b_timeline[(self.b_next + 1) % len(self.b)] <= self.device.timeline_signal.value:
-        self.b_next = (self.b_next + 1) % len(self.b)
-        return (self.b[self.b_next].va_addr, self.b_next)
+      if self.b_timeline[cur_b_next:=(self.b_next + 1) % len(self.b)] <= self.device.timeline_signal.value:
+        self.b_timeline[cur_b_next], self.b_next = (1 << 64), cur_b_next
+        return (self.b[cur_b_next].va_addr, cur_b_next)
       return None
 
     for (batch_info, dst_off, src_off, copy_size) in disk.allocator._copyout_sharded(src, size, _get_temp_buf, seg_len=(2 << 20)):
-      HWCopyQueue().wait(self.device.timeline_signal, self.device.timeline_value - 1) \
-                   .copy(dest.va_addr + dst_off, batch_info[0] + src_off, copy_size) \
+      HWCopyQueue().copy(dest.va_addr + dst_off, batch_info[0] + src_off, copy_size) \
                    .signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
       self.b_timeline[batch_info[1]] = self.device.timeline_value
       self.device.timeline_value += 1
