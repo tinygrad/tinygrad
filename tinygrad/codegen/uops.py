@@ -44,7 +44,6 @@ class UOp:
   @functools.cached_property
   def hash(self): return hash(self.cmp_tuple)
   def __hash__(self): return self.hash
-  # def __eq__(self, x): return hash(self) == hash(x)
   def __lt__(self, x:UOp): return self.cmp_tuple < x.cmp_tuple
   def __repr__(self):
     return f"{str(self.op):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.op for x in self.src]):32s} {self.arg}"
@@ -147,7 +146,7 @@ class PatternMatcher:
       else:
         self.pdict[(p.op, p.arg)].append((p, fxn))
 
-  def rewrite(self, uop:UOp)->Optional[UOp]:
+  def rewrite(self, uop:UOp) -> Optional[UOp]:
     for p,fxn in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
       store: Dict[str, UOp] = {}
       if _match(uop, p, store): return fxn(**store)
