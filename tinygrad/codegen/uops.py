@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, dtypes, DType
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, exec_alu
-from tinygrad.helpers import prod, DEBUG, getenv, flatten
+from tinygrad.helpers import prod, DEBUG, getenv, flatten, all_same
 
 # the order of these UOps controls the order of the toposort
 class UOps(Enum):
@@ -174,7 +174,7 @@ def expand_nodes(parents, expands:List[UOp], base):
     for x in p.src:
       children[x].append(p)
 
-  # get nodes on the path from root to the range node
+  # get nodes on the path from root to the expand node
   on_path: Dict[UOp, None] = {}
   search = expands[:]
   while len(search):
@@ -205,11 +205,22 @@ def expand_nodes(parents, expands:List[UOp], base):
   # should be unrolled
   replacements = {r:r.src for r in expands}
 
-  # get nodes on the path from root to the range node
+  # get nodes on the path from root to the expand node
   new_uops = []
   acc_number = 0
   for rp in itertools.product(*replacements.values()):
     replace = dict(zip(replacements.keys(), rp))
+
+    # terrible skip function. TODO: fix this!
+    rr = defaultdict(list)
+    for k,v in replace.items(): rr[k.arg].append(k.src.index(v))
+    should_skip = False
+    for m in rr.values():
+      if not all_same(m):
+        should_skip = True
+        break
+    if should_skip: continue
+
     for d in define_accs:
       replace[d] = UOp(d.op, d.dtype, d.src, d.arg + (acc_number,))
       acc_number += 1
@@ -246,8 +257,8 @@ def float4_contract_store(buf, idx, ex, var):
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
   # float4 load
-  #(UOp(UOps.LOAD, src=(UOp.var("buf"),
-  #  UOp.var("idx")+UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex"))).name("load"), float4_expand_load),
+  (UOp(UOps.LOAD, src=(UOp.var("buf"),
+    UOp.var("idx")+UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex"))).name("load"), float4_expand_load),
   #(UOp(UOps.STORE, src=(UOp.var("buf"),
   #  UOp.var("idx")+UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex"), UOp.var("var"))), float4_contract_store),
   # replace REDUCE
