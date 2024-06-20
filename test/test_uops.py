@@ -290,6 +290,24 @@ class TestLocalAccess(unittest.TestCase):
     sres = uop(uops, UOps.LOAD, dtypes.int32, (smem, ofs))
     self.assertEqual(_test_uops_result(dtypes.int32, uops, sres), 42)
 
+class TestGateFolding(unittest.TestCase):
+  def test_fold_load(self):
+    glbl0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (0, True))
+    glbl1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (1, False))
+    glbl2 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (2, False))
+    idx = UOp.const(dtypes.int, 0)
+    ld0 = UOp(UOps.LOAD, dtypes.int, (glbl1, idx, UOp.const(dtypes.bool, False), UOp.const(dtypes.int, 42)))
+    ld1 = UOp(UOps.LOAD, dtypes.int, (glbl2, idx, UOp.const(dtypes.bool, True), UOp.const(dtypes.int, 42)))
+    uops = UOpGraph([UOp(UOps.STORE, None, (glbl0, idx, ld0 + ld1))])
+    code = Device[Device.DEFAULT].renderer.render("test", uops)
+    if DEBUG >= 4: print(code)
+
+  def test_fold_load_local(self):
+    pass
+  def test_fold_store(self):
+    pass
+
+
 @unittest.skipUnless(Device.DEFAULT in {"CUDA"} and getenv("PTX"), "This only tests assembly backends")
 class TestAssembly(unittest.TestCase):
   def test_bitshift_left(self):
