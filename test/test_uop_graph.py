@@ -11,6 +11,8 @@ class TestUOpGraph(unittest.TestCase):
     self.assertEqual(uop1.op, uop2.op)
     self.assertEqual(uop1.dtype, uop2.dtype)
     self.assertEqual(uop1.arg, uop2.arg)
+    self.assertEqual(len(uop1.src), len(uop2.src))
+    for s1, s2 in zip(uop1.src, uop2.src): self.assert_equiv_uops(s1, s2)
 
   def test_add_constant_fold(self):
     c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
@@ -91,31 +93,34 @@ class TestUOpGraph(unittest.TestCase):
     # ld0 folds to the invalid value
     self.assert_equiv_uops(ld0, UOp.const(dtypes.int, 2))
     # ld1 folds to the valid value
-    self.assert_equiv_uops(ld1, UOp.load(glbl1, idx, dtype=dtypes.int))
+    self.assert_equiv_uops(ld1, UOp.load(glbl2, idx, dtype=dtypes.int))
 
   def test_fold_gated_load_local(self):
     glbl0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (0, True))
     smem = UOp(UOps.DEFINE_LOCAL, PtrDType(dtypes.int), (), ("temp", 16))
     idx0 = UOp.const(dtypes.int, 0)
     idx1 = UOp.const(dtypes.int, 1)
-    ld0 = UOp(UOps.LOAD, dtypes.int, (smem, idx0, UOp.const(dtypes.bool, False), UOp.const(dtypes.int, 2)))
-    ld1 = UOp(UOps.LOAD, dtypes.int, (smem, idx1, UOp.const(dtypes.bool, True), UOp.const(dtypes.int, 3)))
+    st = UOp(UOps.STORE, None, (smem, idx0, UOp.const(dtypes.int, 2)))
+    barrier = UOp(UOps.BARRIER, None, (st, ))
+    ld0 = UOp(UOps.LOAD, dtypes.int, (smem, idx0, UOp.const(dtypes.bool, False), UOp.const(dtypes.int, 2), barrier))
+    ld1 = UOp(UOps.LOAD, dtypes.int, (smem, idx1, UOp.const(dtypes.bool, True), UOp.const(dtypes.int, 3), barrier))
     uops = UOpGraph([UOp(UOps.STORE, None, (glbl0, idx0, ld0+ld1))])
     ld0, ld1 = uops[-1].src[2].src
     # ld0 folds to the invalid value
     self.assert_equiv_uops(ld0, UOp.const(dtypes.int, 2))
     # ld1 folds to the valid value
-    self.assert_equiv_uops(ld1, UOp.load(smem, idx1, dtype=dtypes.int))
+    self.assert_equiv_uops(ld1, UOp.load(smem, idx1, barrier, dtype=dtypes.int))
 
   def test_fold_gated_store(self):
     glbl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), (0, True))
-    idx = UOp.const(dtypes.int, 0)
+    idx0 = UOp.const(dtypes.int, 0)
+    idx1 = UOp.const(dtypes.int, 0)
     val = UOp.const(dtypes.int, 42)
-    st0 = UOp(UOps.STORE, None, (glbl, idx, val, UOp.const(dtypes.bool, False)))
-    st1 = UOp(UOps.STORE, None, (glbl, idx+1, val, UOp.const(dtypes.bool, True)))
+    st0 = UOp(UOps.STORE, None, (glbl, idx0, val, UOp.const(dtypes.bool, False)))
+    st1 = UOp(UOps.STORE, None, (glbl, idx1, val, UOp.const(dtypes.bool, True)))
     uops = UOpGraph([st0, st1])
     self.assertEqual(len(uops.uops), 4)
-    self.assert_equiv_uops(uops[-1], UOp.store(glbl, idx+1, val))
+    self.assert_equiv_uops(uops[-1], UOp.store(glbl, idx1, val))
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
