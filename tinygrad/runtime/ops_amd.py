@@ -416,7 +416,8 @@ class AMDAllocator(LRUAllocator):
       return None
 
     for (batch_info, dst_off, src_off, copy_size) in src.device.allocator._copyout_sharded(src, size, _get_temp_buf, seg_len=SDMA_MAX_COPY_SIZE):
-      HWCopyQueue().copy(dest.va_addr + dst_off, batch_info[0] + src_off, copy_size) \
+      HWCopyQueue().wait(self.device.timeline_signal, self.device.timeline_value - 1) \
+                   .copy(dest.va_addr + dst_off, batch_info[0] + src_off, copy_size) \
                    .signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
       self.b_timeline[batch_info[1]] = self.device.timeline_value
       self.device.timeline_value += 1

@@ -333,7 +333,7 @@ class NVProgram:
 class NVAllocator(LRUAllocator):
   def __init__(self, device:NVDevice):
     self.device = device
-    self.b = [self.device._gpu_host_alloc(2 << 20) for _ in range(16)]
+    self.b = [self.device._gpu_host_alloc(2 << 20) for _ in range(32)]
     self.b_timeline = [0] * len(self.b)
     self.b_next = 0
     super().__init__()
@@ -356,7 +356,8 @@ class NVAllocator(LRUAllocator):
       return None
 
     for (batch_info, dst_off, src_off, copy_size) in src.device.allocator._copyout_sharded(src, size, _get_temp_buf, seg_len=(2 << 20)):
-      HWCopyQueue().copy(dest.va_addr + dst_off, batch_info[0] + src_off, copy_size) \
+      HWCopyQueue().wait(self.device.timeline_signal, self.device.timeline_value - 1) \
+                   .copy(dest.va_addr + dst_off, batch_info[0] + src_off, copy_size) \
                    .signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
       self.b_timeline[batch_info[1]] = self.device.timeline_value
       self.device.timeline_value += 1
