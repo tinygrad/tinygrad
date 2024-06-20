@@ -1,19 +1,12 @@
 import unittest
+from test.helpers import TestUOps
 from tinygrad import dtypes, Variable
 from tinygrad.dtype import PtrDType
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps
 from tinygrad.codegen.uops import UOpGraph, UOps, UOp
 
-class TestUOpGraph(unittest.TestCase):
+class TestUOpGraph(TestUOps):
   # TODO: move to test.helpers
-  def assert_equiv_uops(self, uop1:UOp, uop2:UOp):
-    # NOTE: direct UOps __eq__ is comparing object reference, use this function to compare two uops
-    self.assertEqual(uop1.op, uop2.op)
-    self.assertEqual(uop1.dtype, uop2.dtype)
-    self.assertEqual(uop1.arg, uop2.arg)
-    self.assertEqual(len(uop1.src), len(uop2.src))
-    for s1, s2 in zip(uop1.src, uop2.src): self.assert_equiv_uops(s1, s2)
-
   def test_add_constant_fold(self):
     c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
     c2 = UOp(UOps.CONST, dtypes.float, arg=2.0)
