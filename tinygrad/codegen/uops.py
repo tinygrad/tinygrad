@@ -105,10 +105,11 @@ class UPat:
     if u.op is UOps.VAR: return UPat(name=name or u.arg, dtype=u.dtype) if len(u.src) == 0 else UPat.compile(u.src[0], name or u.arg)
     return UPat(u.op, u.arg, (list if u.commutative() else tuple)([UPat.compile(src) for src in u.src]) if u.src != () else None, name, u.dtype)
 
+def unmatch(p, u): return p is not None and (u not in p if isinstance(p, set) else u != p)
+
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
   if pat.name in store and store[pat.name] is not uop: return False
   if pat.name is not None: store[pat.name] = uop
-  def unmatch(p, u): return p is not None and (u not in p if isinstance(p, set) else u != p)
   if unmatch(pat.op, uop.op) or unmatch(pat.arg, uop.arg) or unmatch(pat.dtype, uop.dtype): return False
   if pat.src is None: return True
   # only one if it's a tuple
