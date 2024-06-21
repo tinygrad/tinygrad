@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Iterator, Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable, Union, cast
+from typing import Iterator, Optional, Tuple, Any, Dict, List, DefaultDict, Set, Callable, Union, cast, TypeVar
 import functools, itertools, heapq, math
 from collections import defaultdict
 from enum import Enum, auto
@@ -105,7 +105,8 @@ class UPat:
     if u.op is UOps.VAR: return UPat(name=name or u.arg, dtype=u.dtype) if len(u.src) == 0 else UPat.compile(u.src[0], name or u.arg)
     return UPat(u.op, u.arg, (list if u.commutative() else tuple)([UPat.compile(src) for src in u.src]) if u.src != () else None, name, u.dtype)
 
-def __unmatch(p, u): return p is not None and (u not in p if isinstance(p, set) else u != p)
+T = TypeVar("T")
+def __unmatch(p:Union[T, Set[Optional[T]]], u:T): return p is not None and (u not in p if isinstance(p, Set) else u != p)
 
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
   if pat.name in store and store[pat.name] is not uop: return False
