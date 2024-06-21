@@ -6,7 +6,7 @@ If you don't have a tinybox and you want one, see [tinygrad.org](https://tinygra
 
 ## Welcome
 
-Welcome to your tinybox! The tinybox is the universal system purpose-built for all AI infrastructure and workloads, from training to inference. The red box includes six 7900XTX GPUs, and the green box includes six 4090 GPUs. Whether you bought a red one or a green one, we want to you love it.
+Welcome to your tinybox! The tinybox is the universal system purpose-built for all AI infrastructure and workloads, from training to inference. The red box includes six 7900XTX GPUs, and the green box includes six 4090 GPUs. Whether you bought a red one or a green one, we want you to love it.
 
 We don't have a stupid cloud service, you don't have to create a tiny account to set it up, and we aren't tracking how you use the box. We're just happy you bought one. This petaflop is your petaflop.
 
