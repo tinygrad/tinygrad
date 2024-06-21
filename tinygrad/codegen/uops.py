@@ -27,7 +27,7 @@ class UOps(Enum):
   ENDRANGE = auto(); ENDIF = auto() # noqa: E702
 
 def ufix(dtype: Optional[DType], x): return UOp.const(dtype, x) if not isinstance(x, UOp) else x
-@dataclass(eq=False)
+@dataclass(eq=False, frozen=True)
 class UOp:
   op: UOps
   dtype: Optional[DType] = None
@@ -41,6 +41,9 @@ class UOp:
     # NOTE: this sort of DEFINE_VAR shouldn't have to be here. only for PTX
     return (self.op.value, (self.arg if self.op is not UOps.DEFINE_VAR else self.arg.expr) if self.op is not UOps.ALU else \
             (type(self.op), self.op.value), self.dtype, self.src)
+  @functools.cached_property
+  def hash(self): return hash(self.tuple)
+  def __hash__(self): return self.hash
   def __lt__(self, x:UOp): return self.cmp_tuple < x.cmp_tuple
   def __repr__(self):
     return f"{str(self.op):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.op for x in self.src]):32s} {self.arg}"
