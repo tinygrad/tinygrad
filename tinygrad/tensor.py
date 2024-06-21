@@ -902,7 +902,7 @@ class Tensor:
     # treat internal tuples and lists as Tensors and standardize indices to list type
     if isinstance(indices, list) and all_int(indices): indices = [Tensor(indices, self.device, requires_grad=False)]
     elif isinstance(indices, (tuple, list)):
-      indices = [Tensor(list(i), self.device, requires_grad=False) if isinstance(i, (tuple, list)) else i for i in indices]
+      indices = [Tensor(i, self.device, requires_grad=False) if isinstance(i, (tuple, list)) else i for i in indices]
     else: indices = [indices]
 
     # turn scalar Tensors into const val for int indexing if possible
