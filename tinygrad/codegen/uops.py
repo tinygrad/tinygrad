@@ -339,7 +339,8 @@ class UOpGraph:
       n = early_queue.pop(0)
       if n in replace_nodes: continue
       key = (n.op, n.dtype, tuple(replace_nodes.get(x, x) for x in n.src), n.arg)
-      replace_nodes[n] = self.nodes.setdefault(key, UOp(*key))
+      if found:=self.nodes.get(key): replace_nodes[n] = found
+      else: replace_nodes[n] = self.nodes[key] = UOp(*key)
       for x in children[n]:
         early_in_degree[x] -= 1
         if early_in_degree[x] == 0:
