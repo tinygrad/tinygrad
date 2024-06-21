@@ -163,6 +163,30 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst):
   comprange = UOp.min(loop_end, UOp.max(UOp.alu(BinaryOps.IDIV, idx-compval-mval, mval) + (loop_end-loop_start), loop_start))
   return UOp(UOps.UNMUL, multconst.dtype, (comprange.cast(multconst.dtype) * multconst, loop_end-loop_start))
 
+def _gate_deepest_parent(root:UOp, gate:UOp, if_uop:UOp): pass
+
+def _temp_toposort(root:UOp):
+  ret: List[UOp] = []
+  cache = set()
+  def dfs(x:UOp):
+    if x in cache: return
+    for v in x.src: dfs(v)
+    ret.append(x)
+  dfs(root)
+  return ret
+
+def gate_rewrite(root:UOp, gate:UOp) -> Optional[UOp]:
+  if getenv("GRAPH"):
+    from tinygrad.engine.graph import print_tree, graph_uops
+    print_tree(root)
+    graph_uops(_temp_toposort(root))
+  if_uop = UOp(UOps.IF, None, (gate, ))
+  # the STORE isn't gated
+  root.src = root.src[:3]
+  # the entire block is
+  _gate_deepest_parent(root, gate, if_uop)
+  return None
+
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
   # arange loop folding (early)
@@ -262,7 +286,7 @@ constant_folder = PatternMatcher([
   (UOp.load(UOp.var(), UOp.var(), UOp.const(None, 0), UOp.cvar("var"), UOp.var()), lambda var: var),
   (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp.var("val"), UOp.const(None, 1)), UOp.store),
   (UOp.store(UOp.var(), UOp.var(), UOp.var(), UOp.const(None, 0)), lambda: UOp(UOps.NOOP)),
-  (UOp.store(UOp.var(), UOp.var(), UOp.var(), UOp.var("gate")).name("root"), lambda root,gate: UOp(UOps.NOOP)),
+  (UOp.store(UOp.var(), UOp.var(), UOp.var(), UOp.var("gate")).name("root"), gate_rewrite),
 ])
 
 # *** uop graph ***
@@ -406,7 +430,7 @@ class UOpGraph:
       p,x = heapq.heappop(queue)
       if DEBUG >= 7: print(p,x)
       if x.op is UOps.DEFINE_ACC and len(x.src):
-        idx = min([self._uops.index(l) for l in x.src])
+        idx = min([self._uops.index(l) for l in x.src if l.op is UOps.RANGE])
         self._uops.insert(idx, x)
       else:
         self._uops.append(x)
