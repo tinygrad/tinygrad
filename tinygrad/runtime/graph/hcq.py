@@ -20,7 +20,8 @@ class HCQGraph(MultiGraphRunner):
     for ji in self.jit_cache:
       if not isinstance(ji.prg, CompiledRunner): continue
       kernargs_size[ji.prg.device] += round_up(ji.prg.clprg.kernargs_alloc_size, 16)
-    kernargs_ptrs: Dict[Compiled, int] = {dev:dev.allocator._alloc(sz, BufferOptions(cpu_access=True)).va_addr for dev,sz in kernargs_size.items()}
+    self.kernargs_bufs: Dict[Compiled, Any] = {dev:dev.allocator._alloc(sz, BufferOptions(cpu_access=True)) for dev,sz in kernargs_size.items()}
+    kernargs_ptrs: Dict[Compiled, int] = {dev:self.kernargs_bufs[dev].va_addr for dev,sz in kernargs_size.items()}
 
     # Fill initial arguments.
     self.kargs_addrs: Dict[int, int] = {}
@@ -146,3 +147,7 @@ class HCQGraph(MultiGraphRunner):
   def access_resources(self, read, write, new_dependency):
     deps = self._access_resources(read, write, new_dependency)
     return [(k, max(v for x, v in deps if id(x) == idk)) for idk, k in {id(x[0]): x[0] for x in deps}.items()]
+
+  def __del__(self):
+    self.devices[0].signals_pool += [self.kickoff_signal] + list(self.copy_signal.values()) + list(self.comp_signal.values())
+    for dev,buf in self.kernargs_bufs.items(): dev.allocator._free(buf, BufferOptions(cpu_access=True))
