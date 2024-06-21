@@ -319,21 +319,6 @@ class UOpGraph:
       run_cnt += 1
       assert run_cnt < 100, "exceeded 100 rewrite loops!"
     return sink
-
-    @functools.lru_cache
-    def traverse(_uop: UOp, parent: UOp, i):
-      for _i, src in enumerate(_uop.src):
-        traverse(src, _uop, _i)
-      rewritten = rewrite(_uop)
-      if rewritten:
-        if parent and len(parent.src) > 0:
-          src = list(parent.src)
-          src[i] = rewritten
-          parent.src = tuple(src)
-        traverse(rewritten, None, 0)
-
-    traverse(sink, None, 0)
-    return sink
   
   def graph_rewrite_bottomup_no_backtrack(self, sink: UOp, pm: PatternMatcher):
     @functools.lru_cache
