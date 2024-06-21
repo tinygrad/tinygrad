@@ -1042,7 +1042,7 @@ class TestOps(unittest.TestCase):
     with self.assertRaises(IndexError): a[1, 77, 77, 77] # IndexError: (finds too many indices before the out of bounds)
     with self.assertRaises(IndexError): a[1, 3] # IndexError: (out of bounds).
     with self.assertRaises(IndexError): a[1, -4]
-    with self.assertRaises(IndexError): a[..., ...] # IndexError: only single ellipsis
+    with self.assertRaisesRegex(IndexError, "single ellipsis"): a[..., ...] # IndexError: only single ellipsis
     with self.assertRaises(ValueError): a[::0, 1] # no 0 strides
     with self.assertRaises(IndexError): b[:] # slice cannot be applied to a 0-dim tensor
 
