@@ -378,13 +378,7 @@ class AMDProgram:
       return (self.device.timeline_signal.end_ts - self.device.timeline_signal.start_ts) / 1e8
 
 class AMDAllocator(HCQCompatAllocator):
-  def __init__(self, device:AMDDevice):
-    self.device = device
-    # NOTE: KFD_IOC_ALLOC_MEM_FLAGS_GTT doesn't work here for readinto
-    self.b = [self.device._gpu_alloc(SDMA_MAX_COPY_SIZE, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, public=True) for _ in range(16)]
-    self.b_timeline = [0] * len(self.b)
-    self.b_next = 0
-    super().__init__()
+  def __init__(self, device:AMDDevice): super().__init__(device, batch_size=SDMA_MAX_COPY_SIZE)
 
   def _alloc(self, size:int, options:BufferOptions):
     try:

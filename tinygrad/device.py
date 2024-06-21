@@ -195,10 +195,10 @@ class HCQCompatCompiled(Compiled):
     from tinygrad.runtime.graph.hcq import HCQGraph
     super().__init__(device, allocator, renderer, compiler, runtime, HCQGraph)
 
-class HCQCompatAllocator(LRUAllocator):
-  def __init__(self, device: HCQCompatCompiled, max_copy_size=(2 << 20)):
+class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
+  def __init__(self, device: HCQCompatCompiled, batch_size=(2 << 20)):
     self.device = device
-    self.b = [self._alloc(max((2 << 20), max_copy_size), BufferOptions(host=True)) for _ in range(32)]
+    self.b = [self._alloc(max((2 << 20), batch_size), BufferOptions(host=True)) for _ in range(32)]
     self.b_timeline = [0] * len(self.b)
     self.b_next = 0
     super().__init__()
