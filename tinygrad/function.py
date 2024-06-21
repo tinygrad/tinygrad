@@ -46,7 +46,7 @@ def _rintk(d: LazyBuffer) -> LazyBuffer:  # returns int32
 def _mla(x: LazyBuffer, y: LazyBuffer, z: LazyBuffer) -> LazyBuffer:
   return x.e(BinaryOps.MUL, y).e(BinaryOps.ADD, z)
 
-def _payne_hanek(d: LazyBuffer, d_base: LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
+def _payne_hanek(d: LazyBuffer, d_base: LazyBuffer, is_metal:bool = False) -> LazyBuffer:
   assert d.dtype in [dtypes.float64, dtypes.float32, dtypes.float16]
   dtype = d.dtype
   two_over_pi_f = [
@@ -94,7 +94,7 @@ def _payne_hanek(d: LazyBuffer, d_base: LazyBuffer) -> Tuple[LazyBuffer, LazyBuf
     assert cast_to is not None
     return d.cast(cast_to, True)
 
-  def _frexp(v: LazyBuffer) -> LazyBuffer:
+  def _frexp(v: LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
     # assert: v is not around zero.
     bits = _float_to_bits(v)
     exponent = bits.e(BinaryOps.SHR, bits.const(significand_bits)).e(BinaryOps.AND, bits.const(exponent_mask))
@@ -150,7 +150,7 @@ def _payne_hanek(d: LazyBuffer, d_base: LazyBuffer) -> Tuple[LazyBuffer, LazyBuf
   p = fr_map.e(TernaryOps.WHERE, p.e(BinaryOps.ADD, p.const(-0x4000000000000000)), p)
   q = fr_map.e(TernaryOps.WHERE, q.e(BinaryOps.ADD, q.const(1)), q)
 
-  d = p.cast(dtypes.float64)
+  d = p.cast(dtypes.float32 if is_metal else dtypes.float64)
   d = d.e(BinaryOps.MUL, d.const(3.4061215800865545e-19))
   r = d.cast(dtype)
 
@@ -168,7 +168,7 @@ def _payne_hanek(d: LazyBuffer, d_base: LazyBuffer) -> Tuple[LazyBuffer, LazyBuf
   r = lt_zero_map.e(TernaryOps.WHERE, r.e(UnaryOps.NEG), r)
   return r.cast(dtype)
 
-def _xsin_base(d: LazyBuffer) -> LazyBuffer:
+def _xsin_base(d: LazyBuffer, is_metal:bool=False) -> LazyBuffer:
   assert d.dtype == dtypes.float32 or d.dtype == dtypes.float64
   d =  d.e(BinaryOps.CMPNE, d.const(math.inf)).e(
     TernaryOps.WHERE, d.e(BinaryOps.CMPNE, d).e(
@@ -176,7 +176,7 @@ def _xsin_base(d: LazyBuffer) -> LazyBuffer:
       d.const(0.0),
       d.e(BinaryOps.CMPNE, d.const(-math.inf)).e(TernaryOps.WHERE, d, d.const(0.0))),
     d.const(0.0))
-  
+
   fp32_p = dtypes.float32 == d.dtype
   trig_range_lv1 = d.const(125.0 if fp32_p else 15.0)
   trig_range_lv2 = d.const(39000 if fp32_p else 1e+14)
@@ -203,9 +203,9 @@ def _xsin_base(d: LazyBuffer) -> LazyBuffer:
         _rintk(x.e(BinaryOps.MUL, d.const(m_1_pi))).cast(d.dtype) if fp32_p else _rintk(_mla(d, d.const(m_1_pi), qdh.e(UnaryOps.NEG))).cast(d.dtype)
       )
 
-  lv3_reduced_d = _payne_hanek(di, d)
+  lv3_reduced_d = _payne_hanek(di, d, is_metal=is_metal)
   lv3_q = __lv2q(lv3_reduced_d)
-  q: LazyBuffer = di.e(BinaryOps.CMPLT, trig_range_lv1).e(TernaryOps.WHERE, __lv1q(d), di.e(BinaryOps.CMPLT, trig_range_lv2).e(TernaryOps.WHERE, __lv2q(d), lv3_q))
+  q: LazyBuffer = di.e(BinaryOps.CMPLT, trig_range_lv1).e(TernaryOps.WHERE, __lv1q(d), di.e(BinaryOps.CMPLT, trig_range_lv2).e(TernaryOps.WHERE, __lv2q(d), lv3_q)) # noqa: E501
   def __lv1(x: LazyBuffer) -> LazyBuffer:
     if fp32_p:
       d = _mla(q, x.const(-3.1414794921875), x)
@@ -275,12 +275,12 @@ def _xsin_base(d: LazyBuffer) -> LazyBuffer:
     u = _mla(s, u.e(BinaryOps.MUL, d), d)
   return u
 
-def _xsin(x: LazyBuffer) -> LazyBuffer:
+def _xsin(x: LazyBuffer, is_metal: bool=False) -> LazyBuffer:
   return x.e(BinaryOps.CMPNE, x.const(math.inf)).e(
     TernaryOps.WHERE, x.e(BinaryOps.CMPNE, x).e(
       TernaryOps.WHERE,
       x.const(math.nan),
-      x.e(BinaryOps.CMPNE, x.const(-math.inf)).e(TernaryOps.WHERE, _xsin_base(x), x.const(math.nan))),
+      x.e(BinaryOps.CMPNE, x.const(-math.inf)).e(TernaryOps.WHERE, _xsin_base(x, is_metal=is_metal), x.const(math.nan))),
     x.const(math.nan))
 
 class Sin(Function):
@@ -288,13 +288,13 @@ class Sin(Function):
     self.x = x
     self.fast_approx = x.dtype in [dtypes.float32, dtypes.float64]
     if self.fast_approx:
-      return _xsin(x)
+      return _xsin(x, is_metal=self.device=="METAL")
     else:
       return x.e(UnaryOps.SIN)
 
   def backward(self, grad_output: LazyBuffer) -> LazyBuffer:
     k = self.x.const(math.pi / 2).e(BinaryOps.ADD, self.x.e(UnaryOps.NEG))
-    k = _xsin(k) if self.fast_approx else k.e(UnaryOps.SIN)
+    k = _xsin(k, is_metal=self.device=="METAL") if self.fast_approx else k.e(UnaryOps.SIN)
     return k.e(BinaryOps.MUL, grad_output)
 
 # NOTE: maximum(x, 0) behaves differently where x=0
