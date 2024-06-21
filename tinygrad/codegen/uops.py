@@ -320,6 +320,31 @@ class UOpGraph:
       assert run_cnt < 100, "exceeded 100 rewrite loops!"
     return sink
 
+  def graph_rewrite_bottomup(self, sink: UOp, pm: PatternMatcher):
+    @functools.lru_cache
+    def rewrite(_uop: UOp):
+      rewritten = None
+      _rewritten = pm.rewrite(_uop)
+      while _rewritten:
+        rewritten = _rewritten
+        _rewritten = pm.rewrite(rewritten)
+      return rewritten
+
+    @functools.lru_cache
+    def traverse(_uop: UOp, parent: UOp, i):
+      for _i, src in enumerate(_uop.src):
+        traverse(src, _uop, _i)
+      rewritten = rewrite(_uop)
+      if rewritten:
+        if parent and len(parent.src) > 0:
+          src = list(parent.src)
+          src[i] = rewritten
+          parent.src = tuple(src)
+        traverse(rewritten, None, 0)
+
+    traverse(sink, None, 0)
+    return sink
+
   def graph_dedup(self, sink:UOp):
     # add nodes to graph in reverse BFS order
     # dedup all nodes
@@ -359,8 +384,8 @@ class UOpGraph:
     sink = self.graph_dedup(UOp(UOps.SINK, None, tuple(self.sinks)))
 
     # do graph rewrite
-    sink = self.graph_rewrite(sink, constant_folder)
-    if extra_pm: sink = self.graph_rewrite(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
+    sink = self.graph_rewrite_bottomup(sink, constant_folder)
+    if extra_pm: sink = self.graph_rewrite_bottomup(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
 
     # filter nodes that don't link to a sink
     # BFS toposort
