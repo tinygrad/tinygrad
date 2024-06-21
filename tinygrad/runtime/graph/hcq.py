@@ -1,27 +1,23 @@
 import collections, array, time
 from typing import List, Any, Dict, cast, Optional, Tuple, Set
-from tinygrad.helpers import GraphException, round_up, to_mv
-from tinygrad.device import Buffer, BufferOptions, Compiled, Device
+from tinygrad.helpers import round_up, to_mv
+from tinygrad.device import Buffer, BufferOptions, HCQCompatCompiled, Device
 from tinygrad.shape.symbolic import Variable
 from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner
 from tinygrad.engine.jit import MultiGraphRunner
 
 class HCQGraph(MultiGraphRunner):
-  def __init__(self, device_t, comp_hcq_t, copy_hcq_t, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
+  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
     super().__init__(jit_cache, input_rawbuffers, var_vals)
-    self.device_t, self.comp_hcq_t, self.copy_hcq_t = device_t, comp_hcq_t, copy_hcq_t
-
-    # Check all jit items are compatible.
-    self.devices = list(set(cast(self.device_t, d) for ji in jit_cache for d in [Device[cast(Buffer, x).device] for x in ji.bufs])) #type: ignore
-    if any(not isinstance(d, self.device_t) for d in self.devices): raise GraphException
+    self.devices = list(set(cast(HCQCompatCompiled, d) for ji in jit_cache for d in [Device[cast(Buffer, x).device] for x in ji.bufs])) #type: ignore
 
     # Allocate kernel args.
-    kernargs_size: Dict[Compiled, int] = collections.defaultdict(int)
+    kernargs_size: Dict[HCQCompatCompiled, int] = collections.defaultdict(int)
     for ji in self.jit_cache:
       if not isinstance(ji.prg, CompiledRunner): continue
       kernargs_size[ji.prg.device] += round_up(ji.prg.clprg.kernargs_alloc_size, 16)
-    self.kernargs_bufs: Dict[Compiled, Any] = {dev:dev.allocator._alloc(sz, BufferOptions(cpu_access=True)) for dev,sz in kernargs_size.items()}
-    kernargs_ptrs: Dict[Compiled, int] = {dev:self.kernargs_bufs[dev].va_addr for dev,sz in kernargs_size.items()}
+    self.kernargs_bufs: Dict[HCQCompatCompiled, Any] = {d:d.allocator._alloc(sz, BufferOptions(cpu_access=True)) for d,sz in kernargs_size.items()}
+    kernargs_ptrs: Dict[HCQCompatCompiled, int] = {dev:self.kernargs_bufs[dev].va_addr for dev,sz in kernargs_size.items()}
 
     # Fill initial arguments.
     self.kargs_addrs: Dict[int, int] = {}
@@ -41,11 +37,11 @@ class HCQGraph(MultiGraphRunner):
       if ji.prg.device.dname.startswith("NV"): to_mv(self.kargs_addrs[j], 0x160).cast('I')[:] = array.array('I', ji.prg.clprg.constbuffer_0)
 
     # Build queues.
-    self.comp_queues: Dict[Compiled, Any] = collections.defaultdict(self.comp_hcq_t)
+    self.comp_queues: Dict[HCQCompatCompiled, Any] = {dev: dev.hw_compute_queue_t() for dev in self.devices}
     self.comp_signal = {dev: dev._get_signal(value=0) for dev in self.devices}
     self.comp_signal_val = {dev: 0 for dev in self.devices}
 
-    self.copy_queues: Dict[Compiled, Any] = collections.defaultdict(self.copy_hcq_t)
+    self.copy_queues: Dict[HCQCompatCompiled, Any] = {dev: dev.hw_copy_queue_t() for dev in self.devices}
     self.copy_signal = {dev: dev._get_signal(value=0) for dev in self.devices}
     self.copy_signal_val = {dev: 0 for dev in self.devices}
 
@@ -55,7 +51,7 @@ class HCQGraph(MultiGraphRunner):
 
     signal_scheduling: Dict[int, Tuple[List, Optional[int]]] = {}
     self.exec_ptrs: Dict[int, Tuple[Any, int]] = {}
-    self.copy_to_devs: Dict[Compiled, Set[Compiled]] = {dev: set() for dev in self.devices}
+    self.copy_to_devs: Dict[HCQCompatCompiled, Set[HCQCompatCompiled]] = {dev: set() for dev in self.devices}
 
     # Schedule dependencies
     for j,ji in enumerate(self.jit_cache):
