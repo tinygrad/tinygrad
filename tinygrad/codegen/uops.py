@@ -297,9 +297,9 @@ class UOpGraph:
 
   def graph_rewrite(self, sink:UOp, pm:PatternMatcher):
     # recursive rewrite
-    if not getenv("UOPS_REWRITE", 1):return sink
+    if not getenv("UOPS_REWRITE", 1): return sink
     def rewrite(u:UOp) -> UOp:
-      if (up:=u) in cache: return cache[up]
+      if (up := u) in cache: return cache[up]
       for _ in range(100):
         if (rewritten := pm.rewrite(up)) is None:
           up = UOp(up.op, up.dtype, tuple(rewrite(x) for x in up.src), up.arg)
