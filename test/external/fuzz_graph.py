@@ -1,7 +1,6 @@
 import random, ctypes
 import numpy as np
 from tinygrad.device import Buffer, Device
-from tinygrad.engine.realize import BufferXfer
 from tinygrad.helpers import Context, getenv, from_mv
 from tinygrad.dtype import dtypes
 from tinygrad.tensor import Tensor, _to_np_dtype
@@ -9,12 +8,14 @@ from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import ExecItem, BufferXfer, get_runner
 from tinygrad.engine.jit import apply_graph_to_jit
 
+BUF_LEN = getenv("BUF_LEN", 128)
+
 cached_prgs = {}
 def _gen_prg(device, inputs_cnt):
   if (device, inputs_cnt) in cached_prgs: return cached_prgs[(device, inputs_cnt)]
 
   with Context(DEBUG=0):
-    fst = [Tensor.randn(10, dtype=dtypes.int).realize() for i in range(inputs_cnt)]
+    fst = [Tensor.randn(BUF_LEN, dtype=dtypes.int).realize() for i in range(inputs_cnt)]
     s = fst[0]
     for i in range(1, inputs_cnt): s = s.xor(fst[i])
 
@@ -24,7 +25,7 @@ def _gen_prg(device, inputs_cnt):
   return prg
 
 def _alloc_rawbuffer(device, fill=False):
-  rawbuf = Buffer(device, 10, dtypes.int).ensure_allocated()
+  rawbuf = Buffer(device, BUF_LEN, dtypes.int).ensure_allocated()
   if fill:
     with Context(DEBUG=0):
       data = np.random.randint(-10000, 10000, size=rawbuf.size, dtype=_to_np_dtype(rawbuf.dtype))
@@ -48,19 +49,21 @@ def gen_graph():
   all_buffers = []
   jis = []
 
-  kernel_count = random.randint(2, getenv("MAX_KERNELS", 1024))
+  last_n_deps = getenv("LAST_N_DEPS", 0)
+
+  kernel_count = random.randint(2, getenv("MAX_KERNELS", 128))
   for i in range(kernel_count):
-    target_device_id = random.randint(0, getenv("MAX_DEVICES", 4) - 1)
+    target_device_id = random.randint(0, getenv("MAX_DEVICES", 6) - 1)
     target_device = f"{Device.DEFAULT}:{target_device_id}"
-    is_copy = random.randint(0, 10) < 2
+    is_copy = random.randint(0, 10) < 3
 
     if is_copy:
-      deps_pool = [buf for buf in all_buffers if buf.device != target_device]
+      deps_pool = [buf for buf in all_buffers[-last_n_deps:] if buf.device != target_device]
       if len(deps_pool) == 0: deps = []
       else: deps = random.sample(deps_pool, 1)
     else:
-      deps_pool = [buf for buf in all_buffers if buf.device == target_device]
-      deps_count = random.randint(0, getenv("MAX_DEPS_COUNT", len(deps_pool)))
+      deps_pool = [buf for buf in all_buffers[-last_n_deps:] if buf.device == target_device]
+      deps_count = random.randint(0, min(getenv("MAX_DEPS_COUNT", 6), len(deps_pool)))
       if deps_count == 0: deps = []
       else: deps = random.sample(deps_pool, deps_count)
 
@@ -100,7 +103,7 @@ def fuzz_graph(jis, all_buffers, input_buffers):
     max_split_points = len(jis) // 3
     split_points = random.randint(0, min(max_split_points, getenv("FUZZ_GRAPH_MAX_SPLITS", 8)))
     split = [0]
-    for i in range(split_points):
+    for i in range(split_points - 1):
       split.append(random.randint(split[-1] + 2, len(jis) - 2 * (max_split_points - i)))
     split.append(len(jis))
 
@@ -108,9 +111,10 @@ def fuzz_graph(jis, all_buffers, input_buffers):
     for sp in range(len(split)-1):
       graphed_jit += apply_graph_to_jit(jis[split[sp]:split[sp+1]], [], {})
 
-    test_bufs = run_jit(graphed_jit, input_buffers, all_buffers, {})
-    test_bufs_np = [np.frombuffer(x, _to_np_dtype(all_buffers[i].dtype)) for i,x in enumerate(test_bufs)]
-    for i in range(len(ground_thruth_bufs)): np.testing.assert_equal(ground_truth_np[i], test_bufs_np[i])
+    for _ in range(getenv("FUZZ_GRAPH_SPLIT_RETRY_RUNS", 4)):
+      test_bufs = run_jit(graphed_jit, input_buffers, all_buffers, {})
+      test_bufs_np = [np.frombuffer(x, _to_np_dtype(all_buffers[i].dtype)) for i,x in enumerate(test_bufs)]
+      for i in range(len(ground_thruth_bufs)): np.testing.assert_equal(ground_truth_np[i], test_bufs_np[i])
 
 if __name__ == "__main__":
   SEED = getenv("SEED", 42)
