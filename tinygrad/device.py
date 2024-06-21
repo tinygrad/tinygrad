@@ -3,7 +3,7 @@ import multiprocessing
 from dataclasses import dataclass
 from collections import defaultdict
 from typing import List, Optional, Dict, Tuple, Any
-import importlib, inspect, functools, pathlib, os, ctypes, array
+import importlib, inspect, functools, pathlib, os, ctypes
 from tinygrad.helpers import getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.renderer import Renderer
