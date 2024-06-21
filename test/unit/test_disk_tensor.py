@@ -3,7 +3,7 @@ import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import DType
 from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load
-from tinygrad.helpers import Timing, fetch, temp
+from tinygrad.helpers import Timing, fetch, temp, CI
 from test.helpers import is_dtype_supported
 
 def compare_weights_both(url):
@@ -301,6 +301,37 @@ class TestDiskTensor(unittest.TestCase):
     t = Tensor.empty(5, dtype=dtypes.bfloat16, device=f"disk:{temp('bf16')}")
     ct = t.llvm_bf16_cast(dtypes.float)
     assert ct.numpy().tolist() == [9984., -1, -1000, -9984, 20]
+
+  def test_copy_from_disk(self):
+    fn = pathlib.Path(temp("shco1"))
+    fn.unlink(missing_ok=True)
+    fn.write_bytes(bytes(range(256))*1024)
+
+    t = Tensor.empty(256*1024, device=f"disk:{temp('shco1')}", dtype=dtypes.uint8)
+    on_dev = t.to(Device.DEFAULT).realize()
+    np.testing.assert_equal(on_dev.numpy(), t.numpy())
+
+  def test_copy_from_disk_offset(self):
+    fn = pathlib.Path(temp("shco2"))
+    fn.unlink(missing_ok=True)
+    fn.write_bytes(bytes(range(256))*1024)
+
+    for off in [314, 991, 2048, 4096]:
+      t = Tensor.empty(256*1024, device=f"disk:{temp('shco2')}", dtype=dtypes.uint8)[off:]
+      on_dev = t.to(Device.DEFAULT).realize()
+      np.testing.assert_equal(on_dev.numpy(), t.numpy())
+
+  def test_copy_from_disk_huge(self):
+    if CI and not hasattr(Device["DISK"], 'io_uring'): self.skipTest("slow on ci without iouring")
+
+    fn = pathlib.Path(temp("shco3"))
+    fn.unlink(missing_ok=True)
+    fn.write_bytes(bytes(range(256))*1024*256)
+
+    for off in [0, 551]:
+      t = Tensor.empty(256*1024*256, device=f"disk:{temp('shco3')}", dtype=dtypes.uint8)[off:]
+      on_dev = t.to(Device.DEFAULT).realize()
+      np.testing.assert_equal(on_dev.numpy(), t.numpy())
 
 if __name__ == "__main__":
   unittest.main()
