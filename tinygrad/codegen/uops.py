@@ -262,6 +262,7 @@ constant_folder = PatternMatcher([
   (UOp.load(UOp.var(), UOp.var(), UOp.const(None, 0), UOp.cvar("var"), UOp.var()), lambda var: var),
   (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp.var("val"), UOp.const(None, 1)), UOp.store),
   (UOp.store(UOp.var(), UOp.var(), UOp.var(), UOp.const(None, 0)), lambda: UOp(UOps.NOOP)),
+  (UOp.store(UOp.var(), UOp.var(), UOp.var(), UOp.var("gate")).name("root"), lambda root,gate: UOp(UOps.NOOP)),
 ])
 
 # *** uop graph ***
