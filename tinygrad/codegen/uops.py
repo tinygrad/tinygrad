@@ -320,32 +320,6 @@ class UOpGraph:
       assert run_cnt < 100, "exceeded 100 rewrite loops!"
     return sink
 
-  # def graph_dedup(self, sink:UOp):
-  #   # add nodes to graph in reverse BFS order
-  #   # dedup all nodes
-  #   # TODO: i feel like this BFS is written in a few places, possible to library it?
-  #   unprocessed_nodes = [sink]
-  #   early_in_degree: Dict[UOp, int] = {}
-  #   children: DefaultDict[UOp, List[UOp]] = defaultdict(list)
-  #   while len(unprocessed_nodes):
-  #     n = unprocessed_nodes.pop(0)
-  #     if n in early_in_degree: continue
-  #     early_in_degree[n] = len(n.src)
-  #     for x in n.src: children[x].append(n)
-  #     unprocessed_nodes += list(n.src)
-  #   early_queue = [k for k, v in early_in_degree.items() if v == 0]
-  #   replace_nodes: Dict[UOp, UOp] = {}
-  #   while len(early_queue):
-  #     n = early_queue.pop(0)
-  #     if n in replace_nodes: continue
-  #     key = (n.op, n.dtype, tuple(replace_nodes.get(x, x) for x in n.src), n.arg)
-  #     if found:=self.nodes.get(key): replace_nodes[n] = found
-  #     else: replace_nodes[n] = self.nodes[key] = UOp(*key)
-  #     for x in children[n]:
-  #       early_in_degree[x] -= 1
-  #       if early_in_degree[x] == 0:
-  #         early_queue.append(x)
-  #   return replace_nodes.get(sink, sink)
   def graph_dedup(self, sink:UOp):
     replace: Dict[UOp, UOp] = {}
     def _dedup(x:UOp):
