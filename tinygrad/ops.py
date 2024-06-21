@@ -115,11 +115,34 @@ def hook_overflow(dv, fxn):
     except OverflowError: return dv
   return wfxn
 
+def fdlibm_sin(x):
+  S1 = -1.66666666666666324348e-01; S2 = 8.33333333332248946124e-03; S3 = -1.98412698298579493134e-04;
+  S4 = 2.75573137070700676789e-06;  S5 = -2.50507602534068634195e-08; S6 = 1.58969099521155010221e-10
+  ix = math.frexp(x)[1] - 1
+  # for |x| < 2**-27, generate inexact
+  if ix < -26: 
+    if int(x) == 0: return x
+  z = x * x; v = z * x; r = S2 + z * (S3 + z * (S4 + z * (S5 + z * S6)))
+  return x - (z * (-v * r) - v * S1)
+
+def log2(y):
+  if y < 0: return float('nan')
+  if y == 0: return float('-inf')
+  if math.isinf(y): return float('inf')
+  x, exp = math.frexp(y); x *= 2; exp -= 1
+  if x == 1: return exp
+  y = 0.5; ret = 0; n = 0
+  while n < 53:
+    x *= x
+    if x >= 2: x /= 2; ret += y
+    n += 1; y /= 2
+  return exp+ret
+
 python_alu = {
-  UnaryOps.LOG2: lambda x: math.log2(x) if x > 0 else -math.inf if x == 0 else math.nan,
+  UnaryOps.LOG2: log2,
   UnaryOps.EXP2: hook_overflow(math.inf, lambda x: 2**x),
   UnaryOps.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan,
-  UnaryOps.SIN: lambda x: math.sin(x) if not math.isinf(x) else math.nan,
+  UnaryOps.SIN: fdlibm_sin,
   UnaryOps.RECIP: lambda x: 1/x if x != 0 else math.copysign(math.inf, x),
   UnaryOps.NEG: lambda x: (not x) if isinstance(x, bool) else -x,
   BinaryOps.SHR: operator.rshift, BinaryOps.SHL: operator.lshift,
