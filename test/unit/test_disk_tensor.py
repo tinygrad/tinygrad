@@ -3,7 +3,7 @@ import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import DType
 from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load
-from tinygrad.helpers import Timing, fetch, temp
+from tinygrad.helpers import Timing, fetch, temp, CI
 from test.helpers import is_dtype_supported
 
 def compare_weights_both(url):
@@ -303,8 +303,6 @@ class TestDiskTensor(unittest.TestCase):
     assert ct.numpy().tolist() == [9984., -1, -1000, -9984, 20]
 
   def test_copy_from_disk(self):
-    if not hasattr(Device["DISK"], 'io_uring'): self.skipTest("os does not support io uring")
-
     fn = pathlib.Path(temp("shco1"))
     fn.unlink(missing_ok=True)
     fn.write_bytes(bytes(range(256))*1024)
@@ -314,8 +312,6 @@ class TestDiskTensor(unittest.TestCase):
     np.testing.assert_equal(on_dev.numpy(), t.numpy())
 
   def test_copy_from_disk_offset(self):
-    if not hasattr(Device["DISK"], 'io_uring'): self.skipTest("os does not support io uring")
-
     fn = pathlib.Path(temp("shco2"))
     fn.unlink(missing_ok=True)
     fn.write_bytes(bytes(range(256))*1024)
@@ -326,7 +322,7 @@ class TestDiskTensor(unittest.TestCase):
       np.testing.assert_equal(on_dev.numpy(), t.numpy())
 
   def test_copy_from_disk_huge(self):
-    if not hasattr(Device["DISK"], 'io_uring'): self.skipTest("os does not support io uring")
+    if CI and not hasattr(Device["DISK"], 'io_uring'): self.skipTest("slow on ci without iouring")
 
     fn = pathlib.Path(temp("shco3"))
     fn.unlink(missing_ok=True)
