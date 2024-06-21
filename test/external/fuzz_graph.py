@@ -11,7 +11,7 @@ from tinygrad.engine.jit import apply_graph_to_jit
 BUF_LEN = getenv("BUF_LEN", 128)
 
 cached_prgs = {}
-def _gen_prg(device, inputs_cnt):
+def gen_prg(device, inputs_cnt):
   if (device, inputs_cnt) in cached_prgs: return cached_prgs[(device, inputs_cnt)]
 
   with Context(DEBUG=0):
@@ -24,7 +24,7 @@ def _gen_prg(device, inputs_cnt):
   cached_prgs[(device, inputs_cnt)] = prg
   return prg
 
-def _alloc_rawbuffer(device, fill=False):
+def alloc_rawbuffer(device, fill=False):
   rawbuf = Buffer(device, BUF_LEN, dtypes.int).ensure_allocated()
   if fill:
     with Context(DEBUG=0):
@@ -32,15 +32,15 @@ def _alloc_rawbuffer(device, fill=False):
       rawbuf.copyin(Tensor(data).realize().lazydata.realized.as_buffer())
   return rawbuf
 
-def _gen_kernel_ji(device, deps):
+def gen_kernel_ji(device, deps):
   assert len(deps) >= 2
-  out = _alloc_rawbuffer(device)
-  prg = _gen_prg(device, len(deps))
+  out = alloc_rawbuffer(device)
+  prg = gen_prg(device, len(deps))
   return ExecItem(prg, [out] + deps)
 
-def _gen_copy_ji(device, deps):
+def gen_copy_ji(device, deps):
   assert len(deps) == 1
-  out = _alloc_rawbuffer(device)
+  out = alloc_rawbuffer(device)
   prg = BufferXfer(deps[0].nbytes, device, deps[0].device)
   return ExecItem(prg, [out] + deps)
 
@@ -68,14 +68,14 @@ def gen_graph():
       else: deps = random.sample(deps_pool, deps_count)
 
     if len(deps) == 0 or (not is_copy and len(deps) < 2):
-      buf = _alloc_rawbuffer(target_device, fill=True)
+      buf = alloc_rawbuffer(target_device, fill=True)
       input_buffers.append(buf)
       all_buffers.append(buf)
     elif is_copy:
-      jis.append(_gen_copy_ji(target_device, deps))
+      jis.append(gen_copy_ji(target_device, deps))
       all_buffers.append(jis[-1].bufs[0])
     else:
-      jis.append(_gen_kernel_ji(target_device, deps))
+      jis.append(gen_kernel_ji(target_device, deps))
       all_buffers.append(jis[-1].bufs[0])
 
   return jis, all_buffers, input_buffers
