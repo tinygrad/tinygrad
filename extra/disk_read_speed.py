@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os, ctypes, ctypes.util, io, mmap
+import os, ctypes, ctypes.util, io, mmap, pathlib
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.helpers import Timing, from_mv
 libc = ctypes.CDLL(ctypes.util.find_library("c"))
@@ -75,18 +75,17 @@ def read_to_gpu_pingpong(fd, sz, gpubuf):
 MAP_LOCKED = 0x2000
 MAP_HUGETLB = 0x40000
 
-from tinygrad.runtime.ops_hip import HIPDevice
-
 if __name__ == "__main__":
-  dev = Device["HIP"]
+  dev = Device[Device.DEFAULT]
 
-  warm = (Tensor.ones(1024, device="HIP").contiguous() + Tensor.ones(1024, device="HIP").contiguous()).realize()
+  warm = (Tensor.ones(1024, device=Device.DEFAULT).contiguous() + Tensor.ones(1024, device=Device.DEFAULT).contiguous()).realize()
   #fn = "/home/tiny/tinygrad/weights/rng"
-  fn = "/home/tiny/tinygrad/weights/LLaMA/7B/consolidated.00.pth"
+  fn = pathlib.Path(__file__).parents[1] / "weights/LLaMA-2/70B/consolidated.00.pth"
   sz = os.stat(fn).st_size
   t = Tensor.empty(sz, dtype=dtypes.uint8, device=f"disk:{fn}")
   with Timing("copy:  ", lambda x: f", {sz/x:.2f} GB/s"):
-    on_hip = t.to("HIP").realize()
+    on_dev = t.to(Device.DEFAULT).realize()
+
   exit(0)
 
   # 4GB of random numbers
