@@ -108,7 +108,7 @@ class UPat:
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
   if pat.name in store and store[pat.name] is not uop: return False
   if pat.name is not None: store[pat.name] = uop
-  def unmatch (p, u): return p is not None and (u not in p if isinstance(p, set) else u != p)
+  def unmatch(p, u): return p is not None and (u not in p if isinstance(p, set) else u != p)
   if unmatch(pat.op, uop.op) or unmatch(pat.arg, uop.arg) or unmatch(pat.dtype, uop.dtype): return False
   if pat.src is None: return True
   # only one if it's a tuple
