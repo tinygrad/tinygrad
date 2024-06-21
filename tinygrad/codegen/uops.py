@@ -245,24 +245,34 @@ def replace_reduce(root):
   for xx in new_uops: ret = UOp.alu(root.arg, ret, xx)
   return UOp(UOps.PHI, ret.dtype, (acc, ret))
 
+def replace_contract(root):
+  parents = root.parents
+  expands = [x for x in parents if x.op is UOps.EXPAND and root.arg == x.arg]
+  ret = expand_nodes(parents, expands, root.src[0])
+  return UOp(UOps.CAST, root.dtype.vec(len(expands[0].src)), tuple(ret))
+
+contractor = PatternMatcher([
+  # replace REDUCE
+  (UPat(UOps.REDUCE, name="root"), replace_reduce),
+  # replace CONTRACT
+  (UPat(UOps.CONTRACT, name="root"), replace_contract),
+])
+
 def float4_expand_load(load, buf, idx, ex):
   vec_load = UOp(UOps.LOAD, load.dtype.vec(4), (buf, idx))
   return UOp(UOps.EXPAND, load.dtype, tuple(UOp(UOps.GEP, load.dtype, (vec_load,), i) for i in range(4)), ex.arg)
 
 def float4_contract_store(buf, idx, ex, var):
-  #new_var = UOp(UOps.CONTRACT, var.dtype, (var,), (ex.arg, UnaryOps.CAST))
-  #return UOp(UOps.STORE, None, (buf, idx, new_var))
-  pass
+  new_var = UOp(UOps.CONTRACT, var.dtype, (var,), ex.arg)
+  return UOp(UOps.STORE, None, (buf, idx, new_var))
 
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
   # float4 load
   (UOp(UOps.LOAD, src=(UOp.var("buf"),
     UOp.var("idx")+UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex"))).name("load"), float4_expand_load),
-  #(UOp(UOps.STORE, src=(UOp.var("buf"),
-  #  UOp.var("idx")+UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex"), UOp.var("var"))), float4_contract_store),
-  # replace REDUCE
-  (UPat(UOps.REDUCE, name="root"), replace_reduce),
+  (UOp(UOps.STORE, src=(UOp.var("buf"),
+    UOp.var("idx")+UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex"), UOp.var("var"))), float4_contract_store),
   # arange loop folding (early)
   (UPat(UOps.ALU, TernaryOps.WHERE, src=(UPat(UOps.ALU, BinaryOps.CMPLT, src=(
     UPat(UOps.ALU, BinaryOps.ADD, src=[UPat(name="idx"), UPat(UOps.ALU, BinaryOps.MUL,
@@ -461,6 +471,9 @@ class UOpGraph:
     # do graph rewrite
     sink = self.graph_rewrite(sink, constant_folder)
     if extra_pm: sink = self.graph_rewrite(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
+
+    # do contracts/reduces
+    sink = self.graph_rewrite(sink, contractor)
 
     # do upcasts (after reduce unrolls and rewrites)
     all_parents = set([sink]).union(sink.parents)
