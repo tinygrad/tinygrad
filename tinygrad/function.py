@@ -274,6 +274,7 @@ def _xsin_base(d: LazyBuffer, is_metal:bool=False, fast:bool=False) -> LazyBuffe
   return u
 
 def _xsin(x: LazyBuffer, is_metal: bool=False, fast: bool=False) -> LazyBuffer:
+  if 0 in x.shape: return x
   return x.e(BinaryOps.CMPNE, x.const(math.inf)).e(
     TernaryOps.WHERE, x.e(BinaryOps.CMPNE, x).e(
       TernaryOps.WHERE,
