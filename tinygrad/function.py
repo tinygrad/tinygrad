@@ -170,6 +170,13 @@ def _payne_hanek(d: LazyBuffer, d_base: LazyBuffer) -> Tuple[LazyBuffer, LazyBuf
 
 def _xsin_base(d: LazyBuffer) -> LazyBuffer:
   assert d.dtype == dtypes.float32 or d.dtype == dtypes.float64
+  d =  d.e(BinaryOps.CMPNE, d.const(math.inf)).e(
+    TernaryOps.WHERE, d.e(BinaryOps.CMPNE, d).e(
+      TernaryOps.WHERE,
+      d.const(0.0),
+      d.e(BinaryOps.CMPNE, d.const(-math.inf)).e(TernaryOps.WHERE, d, d.const(0.0))),
+    d.const(0.0))
+  
   fp32_p = dtypes.float32 == d.dtype
   trig_range_lv1 = d.const(125.0 if fp32_p else 15.0)
   trig_range_lv2 = d.const(39000 if fp32_p else 1e+14)
