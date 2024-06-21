@@ -74,7 +74,7 @@ def _payne_hanek(d: LazyBuffer, d_base: LazyBuffer, is_metal:bool = False) -> La
     dtypes.float16: 0x1F,
   }[d.dtype]
   m1 = {
-    dtypes.float64: 0x800FFFFFFFFFFFFF,
+    dtypes.float64: 0x800FFFFF,
     dtypes.float32: 0x807FFFFF,
     dtypes.float16: 0x83FF
   }[d.dtype]
@@ -197,11 +197,11 @@ def _xsin_base(d: LazyBuffer, is_metal:bool=False) -> LazyBuffer:
   def __lv2q(x: LazyBuffer) -> LazyBuffer:
     if fp32_p:
       return __lv1q(x)
-    else:
-      assert qdh is not None
-      return (
-        _rintk(x.e(BinaryOps.MUL, d.const(m_1_pi))).cast(d.dtype) if fp32_p else _rintk(_mla(d, d.const(m_1_pi), qdh.e(UnaryOps.NEG))).cast(d.dtype)
-      )
+
+    assert qdh is not None
+    return (
+      _rintk(x.e(BinaryOps.MUL, d.const(m_1_pi))).cast(d.dtype) if fp32_p else _rintk(_mla(d, d.const(m_1_pi), qdh.e(UnaryOps.NEG))).cast(d.dtype)
+    )
 
   lv3_reduced_d = _payne_hanek(di, d, is_metal=is_metal)
   lv3_q = __lv2q(lv3_reduced_d)
@@ -211,11 +211,10 @@ def _xsin_base(d: LazyBuffer, is_metal:bool=False) -> LazyBuffer:
       d = _mla(q, x.const(-3.1414794921875), x)
       d = _mla(q, x.const(-0.00011315941810607910156), d)
       d = _mla(q, x.const(-1.9841872589410058936e-09), d)
-      return d
     else:
       d = _mla(q, x.const(-3.141592653589793116), x)
       d = _mla(q, x.const(1.2246467991473532072e-16), d)
-      return d
+    return d
 
   def __lv2(x: LazyBuffer) -> LazyBuffer:
     if fp32_p:
@@ -223,7 +222,6 @@ def _xsin_base(d: LazyBuffer, is_metal:bool=False) -> LazyBuffer:
       d = _mla(q, x.const(-0.00011315941810607910156), d)
       d = _mla(q, x.const(-1.9841872589410058936e-09), d)
       d = _mla(q, x.const(-1.2154201256553420762e-10), d)
-      return d
     else:
       assert qdh is not None
       d = _mla(qdh, x.const(-3.1415926218032836914), x)
@@ -233,7 +231,7 @@ def _xsin_base(d: LazyBuffer, is_metal:bool=False) -> LazyBuffer:
       d = _mla(qdh, x.const(-1.2246467864107188502e-16), d)
       d = _mla(q, x.const(-1.2246467864107188502e-16), d)
       d = _mla(qdh.e(BinaryOps.ADD, q), x.const(-1.2736634327021899816e-24), d)
-      return d
+    return d
 
   lv3_d = __lv2(lv3_reduced_d)
   d = di.e(BinaryOps.CMPLT, trig_range_lv1).e(TernaryOps.WHERE, __lv1(d), di.e(BinaryOps.CMPLT, trig_range_lv2).e(TernaryOps.WHERE, __lv2(d), lv3_d))
@@ -289,8 +287,8 @@ class Sin(Function):
     self.fast_approx = x.dtype in [dtypes.float32, dtypes.float64]
     if self.fast_approx:
       return _xsin(x, is_metal=self.device=="METAL")
-    else:
-      return x.e(UnaryOps.SIN)
+
+    return x.e(UnaryOps.SIN)
 
   def backward(self, grad_output: LazyBuffer) -> LazyBuffer:
     k = self.x.const(math.pi / 2).e(BinaryOps.ADD, self.x.e(UnaryOps.NEG))
