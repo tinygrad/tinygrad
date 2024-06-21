@@ -191,6 +191,10 @@ generate_io_uring() {
     /usr/include/linux/io_uring.h \
     -o $BASE/io_uring.py
 
+  # clang2py can't parse defines
+  sed -r '/^#define __NR_io_uring/ s/^#define __(NR_io_uring[^ ]+) (.*)$/\1 = \2/; t; d' /usr/include/asm-generic/unistd.h >> $BASE/io_uring.py # #define name val -> name = val
+  sed -r '/^#define\s/ s/^#define\s([^ \t]+)\s*(\(.*\)).*$/\1 = \2/; s/1U/1/g; t; d' /usr/include/linux/io_uring.h >> $BASE/io_uring.py # #define name val -> name = val
+
   fixup $BASE/io_uring.py
 }
 

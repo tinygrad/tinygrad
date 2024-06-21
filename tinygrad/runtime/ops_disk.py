@@ -53,7 +53,7 @@ class DiskAllocator(Allocator):
         # Send sqe
         DiskDevice.io_uring.sq.array[sqe_index] = sqe_index
         DiskDevice.io_uring.sq.ktail[0] = tail + 1
-        libc.syscall(426, DiskDevice.io_uring.ring_fd, 1, 1, (1 << 0)) # IORING_ENTER_GETEVENTS
+        libc.syscall(io_uring.NR_io_uring_enter, DiskDevice.io_uring.ring_fd, 1, 1, io_uring.IORING_ENTER_GETEVENTS)
 
         reqs.append((copy_batch, copied_in, minor_offset, real_copy_size:=min(sqe.len - minor_offset, size - copied_in)))
         next_read_offset += sqe.len
@@ -105,7 +105,7 @@ class DiskDevice(Compiled):
 
     if platform.system() != 'Linux': return
 
-    fd = libc.syscall(425, 4096, ctypes.byref(p:=io_uring.struct_io_uring_params()))
+    fd = libc.syscall(io_uring.NR_io_uring_setup, 4096, ctypes.byref(p:=io_uring.struct_io_uring_params()))
     if fd < 0: return
 
     sq_ptr = libc.mmap(0, p.sq_off.array + p.sq_entries * 4, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | MAP_POPULATE, fd, 0)
