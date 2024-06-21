@@ -256,9 +256,20 @@ def replace_contract(root:UOp):
   ret = expand_nodes(parents, expands, root.src[0])
   return UOp(UOps.CAST, cast(DType, root.dtype).vec(root.arg[1]), tuple(ret))
 
+def cast_reduce(cst):
+  if not all_same([(x.arg, x.src[1:]) for x in cst.src]): return None
+  fst_red = cst.src[0]
+  red = UOp(UOps.CAST, cst.dtype, tuple(x.src[0] for x in cst.src))
+  return UOp(UOps.REDUCE, red.dtype, (red,) + fst_red.src[1:], fst_red.arg)
+
 contractor = PatternMatcher([
-  (UPat(UOps.REDUCE, name="root"), replace_reduce),
   (UPat(UOps.CONTRACT, name="root"), replace_contract),
+  # CAST after REDUCEs -> one REDUCE
+  (UPat(UOps.CAST, name="cst", src=UPat(UOps.REDUCE)), cast_reduce),
+])
+
+reducer = PatternMatcher([
+  (UPat(UOps.REDUCE, name="root"), replace_reduce),
 ])
 
 def float4_expand_load(load, buf, ex, idx=UOp.const(dtypes.int, 0)):
@@ -485,6 +496,8 @@ class UOpGraph:
 
     # do contracts/reduces
     sink = self.graph_rewrite(sink, contractor)
+    #sink = self.graph_rewrite(sink, constant_folder)
+    sink = self.graph_rewrite(sink, reducer)
 
     # do upcasts (after reduce unrolls and rewrites)
     all_parents = set([sink]).union(sink.parents)
