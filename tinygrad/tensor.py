@@ -914,7 +914,7 @@ class Tensor:
     ellipsis_idx = [dim for dim, i in enumerate(indices) if i is Ellipsis]
     fill_idx = ellipsis_idx[0] if ellipsis_idx else len(indices)
     num_indices = len(indices) - len(ellipsis_idx) - sum(1 for i in indices if i is None)
-    indices[fill_idx:fill_idx+1] = [slice(None)] * (len(self.shape) - num_indices)
+    indices[fill_idx:fill_idx+1] = [slice(None)] * (self.ndim - num_indices)
 
     # use Dict[type, List[dimension]] to track elements in indices
     type_dim: DefaultDict[Union[type, None], List[int]] = defaultdict(list)
@@ -925,9 +925,9 @@ class Tensor:
     indices_filtered = [i for i in indices if i is not None]
     for dim,i in enumerate(indices_filtered): type_dim[type(i)].append(dim)
 
+    if len(ellipsis_idx) > 1: raise IndexError("indices can only have a single ellipsis ('...')")
     for index_type in type_dim:
       if index_type not in [None, int, slice, Tensor]: raise IndexError(f"{index_type=} not supported")
-    if len(ellipsis_idx) > 1: raise IndexError("indices can only have a single ellipsis ('...')")
     if num_indices > self.ndim: raise IndexError(f"too many {num_indices=} for {self.ndim=}")
 
     # 2. basic indexing, uses only movement ops (no copy)

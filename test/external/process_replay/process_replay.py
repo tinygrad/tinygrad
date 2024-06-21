@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # compare kernels created by HEAD against master
 import difflib, pickle
 from tinygrad.codegen.linearizer import Linearizer
