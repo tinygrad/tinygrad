@@ -9,8 +9,7 @@ from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, exec_alu
 from tinygrad.renderer import Program
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item
-from tinygrad.codegen.linearizer import UOps, UOp
-from tinygrad.codegen.uops import UOpGraph
+from tinygrad.codegen.uops import UOps, UOp, UOpGraph
 from test.helpers import is_dtype_supported
 
 def _uops_to_prg(uops_list, print=False):

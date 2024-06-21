@@ -6,7 +6,8 @@ from test.external.fuzz_linearizer import compare_linearizer
 
 from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError
 from tinygrad.codegen.lowerer import Lowerer as Linearizer
-from tinygrad.codegen.linearizer import UOp, UOps, expand_node, expand_idxs, get_grouped_dims
+from tinygrad.codegen.linearizer import expand_node, expand_idxs, get_grouped_dims
+from tinygrad.codegen.uops import UOp, UOps
 from tinygrad.device import Device, Buffer
 from tinygrad.ops import BinaryOps, BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, TernaryOps, ReduceOps, UnaryOps
 from tinygrad.renderer import TensorCore
