@@ -257,27 +257,33 @@ def replace_contract(root:UOp):
   return UOp(UOps.CAST, cast(DType, root.dtype).vec(root.arg[1]), tuple(ret))
 
 contractor = PatternMatcher([
-  # replace REDUCE
   (UPat(UOps.REDUCE, name="root"), replace_reduce),
-  # replace CONTRACT
   (UPat(UOps.CONTRACT, name="root"), replace_contract),
 ])
 
-def float4_expand_load(load, buf, idx, ex):
-  vec_load = UOp(UOps.LOAD, load.dtype.vec(4), (buf, idx))
-  return UOp(UOps.EXPAND, load.dtype, tuple(UOp(UOps.GEP, load.dtype, (vec_load,), i) for i in range(4)), ex.arg)
+def float4_expand_load(load, buf, ex, idx=UOp.const(dtypes.int, 0)):
+  vec_load = UOp(UOps.LOAD, load.dtype.vec(len(ex.src)), (buf, idx))
+  return UOp(UOps.EXPAND, load.dtype, tuple(UOp(UOps.GEP, load.dtype, (vec_load,), i) for i in range(len(ex.src))), ex.arg)
 
-def float4_contract_store(buf, idx, ex, var):
-  new_var = UOp(UOps.CONTRACT, var.dtype, (var,), (ex.arg, 4))
+def float4_contract_store(buf, ex, var, idx=UOp.const(dtypes.int, 0)):
+  new_var = UOp(UOps.CONTRACT, var.dtype, (var,), (ex.arg, len(ex.src)))
   return UOp(UOps.STORE, None, (buf, idx, new_var))
 
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
-  # float4 load
+  # float4 load/store
+  #(UOp(UOps.LOAD, src=(UOp.var("buf", dtype=PtrDType(dtypes.float)),
+  #  UOp.var("idx")+UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(2))).name("ex"))).name("load"), float4_expand_load),
   (UOp(UOps.LOAD, src=(UOp.var("buf", dtype=PtrDType(dtypes.float)),
     UOp.var("idx")+UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex"))).name("load"), float4_expand_load),
+  (UOp(UOps.LOAD, src=(UOp.var("buf", dtype=PtrDType(dtypes.float)),
+    UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex"))).name("load"), float4_expand_load),
+  #(UOp(UOps.STORE, src=(UOp.var("buf", dtype=PtrDType(dtypes.float)),
+  #  UOp.var("idx")+UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(2))).name("ex"), UOp.var("var"))), float4_contract_store),
   (UOp(UOps.STORE, src=(UOp.var("buf", dtype=PtrDType(dtypes.float)),
     UOp.var("idx")+UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex"), UOp.var("var"))), float4_contract_store),
+  (UOp(UOps.STORE, src=(UOp.var("buf", dtype=PtrDType(dtypes.float)),
+    UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex"), UOp.var("var"))), float4_contract_store),
   # arange loop folding (early)
   (UPat(UOps.ALU, TernaryOps.WHERE, src=(UPat(UOps.ALU, BinaryOps.CMPLT, src=(
     UPat(UOps.ALU, BinaryOps.ADD, src=[UPat(name="idx"), UPat(UOps.ALU, BinaryOps.MUL,
