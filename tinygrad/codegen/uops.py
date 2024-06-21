@@ -4,7 +4,7 @@ import functools, itertools, heapq, math
 from collections import defaultdict
 from enum import Enum, auto
 from dataclasses import dataclass, field
-from tinygrad.dtype import ConstType, dtypes, DType
+from tinygrad.dtype import ConstType, dtypes, DType, PtrDType
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, exec_alu
 from tinygrad.helpers import prod, DEBUG, getenv, flatten, all_same
@@ -233,6 +233,10 @@ def replace_reduce(root):
   global acc_number
   expands = [x for x in root.src[2:] if x.op is UOps.EXPAND]
 
+  # add other expands for float4. TODO: should be a faster way
+  expand_args = [x.arg for x in expands]
+  expands += [x for x in root.parents if x.op is UOps.EXPAND and x.arg in expand_args]
+
   if len(expands):
     new_uops = expand_nodes(root.parents, expands, root.src[0])
   else:
@@ -245,11 +249,12 @@ def replace_reduce(root):
   for xx in new_uops: ret = UOp.alu(root.arg, ret, xx)
   return UOp(UOps.PHI, ret.dtype, (acc, ret))
 
-def replace_contract(root):
+def replace_contract(root:UOp):
   parents = root.parents
-  expands = [x for x in parents if x.op is UOps.EXPAND and root.arg == x.arg]
+  expands: List[UOp] = [x for x in parents if x.op is UOps.EXPAND and x.arg == root.arg[0]]
+  assert all_same([root.arg[1]] + [len(x.src) for x in expands])
   ret = expand_nodes(parents, expands, root.src[0])
-  return UOp(UOps.CAST, root.dtype.vec(len(expands[0].src)), tuple(ret))
+  return UOp(UOps.CAST, cast(DType, root.dtype).vec(root.arg[1]), tuple(ret))
 
 contractor = PatternMatcher([
   # replace REDUCE
@@ -263,15 +268,15 @@ def float4_expand_load(load, buf, idx, ex):
   return UOp(UOps.EXPAND, load.dtype, tuple(UOp(UOps.GEP, load.dtype, (vec_load,), i) for i in range(4)), ex.arg)
 
 def float4_contract_store(buf, idx, ex, var):
-  new_var = UOp(UOps.CONTRACT, var.dtype, (var,), ex.arg)
+  new_var = UOp(UOps.CONTRACT, var.dtype, (var,), (ex.arg, 4))
   return UOp(UOps.STORE, None, (buf, idx, new_var))
 
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
   # float4 load
-  (UOp(UOps.LOAD, src=(UOp.var("buf"),
+  (UOp(UOps.LOAD, src=(UOp.var("buf", dtype=PtrDType(dtypes.float)),
     UOp.var("idx")+UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex"))).name("load"), float4_expand_load),
-  (UOp(UOps.STORE, src=(UOp.var("buf"),
+  (UOp(UOps.STORE, src=(UOp.var("buf", dtype=PtrDType(dtypes.float)),
     UOp.var("idx")+UOp(UOps.EXPAND, src=tuple(UOp.const(dtypes.int, i) for i in range(4))).name("ex"), UOp.var("var"))), float4_contract_store),
   # arange loop folding (early)
   (UPat(UOps.ALU, TernaryOps.WHERE, src=(UPat(UOps.ALU, BinaryOps.CMPLT, src=(
