@@ -267,6 +267,14 @@ constant_folder = PatternMatcher([
 
 # *** uop graph ***
 
+
+def bfs(sink:UOp, fn:Callable[[UOp], bool]):
+  queue = [sink]
+  while len(queue):
+    n = queue.pop(0)
+    if not fn(n): continue
+    queue += list(n.src)
+
 class UOpGraph:
   def __init__(self, sinks:List[UOp]):
     self.sinks: List[UOp] = sinks
@@ -320,32 +328,56 @@ class UOpGraph:
       assert run_cnt < 100, "exceeded 100 rewrite loops!"
     return sink
 
-  def graph_dedup(self, sink:UOp):
+  def graph_dedup(self, sink:UOp, pm:PatternMatcher):
     # add nodes to graph in reverse BFS order
     # dedup all nodes
     # TODO: i feel like this BFS is written in a few places, possible to library it?
-    unprocessed_nodes = [sink]
     early_in_degree: Dict[UOp, int] = {}
     children: DefaultDict[UOp, List[UOp]] = defaultdict(list)
-    while len(unprocessed_nodes):
-      n = unprocessed_nodes.pop(0)
-      if n in early_in_degree: continue
+    def search_new_nodes(n:UOp):
+      if n in early_in_degree: return False
       early_in_degree[n] = len(n.src)
       for x in n.src: children[x].append(n)
-      unprocessed_nodes += list(n.src)
+      return True
+    bfs(sink, search_new_nodes)
+      
     early_queue = [k for k, v in early_in_degree.items() if v == 0]
     replace_nodes: Dict[UOp, UOp] = {}
+
+
     while len(early_queue):
       n = early_queue.pop(0)
       if n in replace_nodes: continue
       key = (n.op, n.dtype, tuple(replace_nodes.get(x, x) for x in n.src), n.arg)
-      if found:=self.nodes.get(key): replace_nodes[n] = found
-      else: replace_nodes[n] = self.nodes[key] = UOp(*key)
+      if found := self.nodes.get(key): replace_nodes[n] = found
+      else:
+        newop = UOp(*key)
+        if rw := pm.rewrite(newop):
+          newop = rw
+          def search_new_nodes (n:UOp):
+            if n in early_in_degree: return False #is this a new node??
+            early_in_degree[n] = 0
+            for x in n.src:
+              if x not in replace_nodes:
+                children[x].append(n)
+                early_in_degree[n] += 1
+            if early_in_degree[n] == 0: early_queue.append(n)
+            return True
+          bfs(newop, search_new_nodes)
+
+          continue  
+
+        replace_nodes[n] = self.nodes[key] = UOp(*key)
+
       for x in children[n]:
         early_in_degree[x] -= 1
         if early_in_degree[x] == 0:
           early_queue.append(x)
     return replace_nodes.get(sink, sink)
+  
+      
+
+  # def topo(self, sink:UOp, pm: PatternMatcher):
 
   def linearize(self, extra_pm:Optional[PatternMatcher]=None, type_verify=True):
     # NOTE: relinearizering should be okay
@@ -353,10 +385,10 @@ class UOpGraph:
     self.nodes: Dict[Tuple, UOp] = {}
 
     # dedup all nodes in graph
-    sink = self.graph_dedup(UOp(UOps.SINK, None, tuple(self.sinks)))
+    sink = self.graph_dedup(UOp(UOps.SINK, None, tuple(self.sinks)), PatternMatcher(constant_folder.patterns))
 
     # do graph rewrite
-    sink = self.graph_rewrite(sink, constant_folder)
+    # sink = self.graph_rewrite(sink, constant_folder)
     if extra_pm: sink = self.graph_rewrite(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
 
     # filter nodes that don't link to a sink
