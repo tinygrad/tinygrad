@@ -208,8 +208,8 @@ class HCQCompatCompiled(Compiled):
   def _wait_signal(self, signal, value=0, timeout=10000): pass # waits for a signal value
 
   def _wrap_timeline_signal(self):
-    self.timeline_signal, self._shadow_timeline_signal = self._shadow_timeline_signal, self.timeline_signal
-    self.timeline_signal[0], self.timeline_value = 0, 1
+    self.timeline_signal, self._shadow_timeline_signal, self.timeline_value = self._shadow_timeline_signal, self.timeline_signal, 1
+    self._set_signal(self.timeline_signal, 0)
     cast(HCQCompatAllocator, self.allocator).b_timeline = [0] * len(cast(HCQCompatAllocator, self.allocator).b)
 
 class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
