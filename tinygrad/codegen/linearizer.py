@@ -532,7 +532,6 @@ class Linearizer(Kernel):
                    self.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))
 
 def time_lin(lin:Linearizer):
-  graph = UOpGraph(lin.uops.sinks)
   st = time.perf_counter_ns()
-  graph.linearize()
+  UOpGraph(lin.uops.sinks).linearize()
   return time.perf_counter_ns()-st
