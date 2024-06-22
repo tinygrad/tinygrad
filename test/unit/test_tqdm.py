@@ -2,7 +2,7 @@ import time, random, unittest
 from tqdm import tqdm
 from unittest.mock import patch
 from io import StringIO
-from tinygrad.helpers import tinytqdm
+from tinygrad.helpers import tqdm as tinytqdm
 from collections import namedtuple
 
 class TestProgressBar(unittest.TestCase):
