@@ -1,7 +1,6 @@
 from __future__ import annotations
 from typing import List, Tuple, Any, Optional, cast, DefaultDict, Dict, Union, Final, Iterator, Sequence
-import time
-import itertools, math, functools
+import itertools, math, functools, time
 from collections import defaultdict
 
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
@@ -521,8 +520,8 @@ class Linearizer(Kernel):
     return ret
 
   def to_program(self) -> Program:
-    info = get_lazyop_info(self.ast[0])
     self.linearize()
+    info = get_lazyop_info(self.ast[0])
     src = self.opts.render(to_function_name(self.name), self.uops)
     if getenv("RUN_PROCESS_REPLAY"): diskcache_put("process_replay", id(self), (self, src, time_lin(self)))
     ops, mem = self.uops.flops_mem()
