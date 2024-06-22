@@ -395,27 +395,6 @@ class AMDAllocator(LRUAllocator):
       else: raise
 
   def _free(self, opaque, options:BufferOptions): self.device._gpu_free(opaque)
-  #def as_buffer(self, src:Any) -> memoryview:
-  #  self.device.synchronize()
-  #  return to_mv(src.va_addr, src.size)
-
-  #def copy_from_fd(self, dest, fd, offset, size):
-  #  fo = io.FileIO(fd, "a+b", closefd=False)
-  #  fo.seek(offset - (minor_offset:=offset % PAGE_SIZE))
-  #  copied_in, total_copy_size = 0, round_up(size+minor_offset, PAGE_SIZE)
-  #  for i in range(0, size+minor_offset, self.b[0].size):
-  #    local_size = min(self.b[0].size, total_copy_size-i)
-  #    copy_size = min(local_size-minor_offset, size-copied_in)
-  #    if copy_size == 0: break
-
-  #    fo.readinto(to_mv(self.b[1].va_addr, local_size))
-  #    if i != 0: self.device._wait_signal(self.device.signal_sdma)
-  #    self.b = self.b[::-1]
-  #    self.device._submit_sdma(dest.va_addr+copied_in, self.b[0].va_addr+minor_offset, copy_size, completion_signal=self.device.signal_sdma)
-
-  #    copied_in += copy_size
-  #    minor_offset = 0 # only on the first
-  #  self.device._wait_signal(self.device.signal_sdma)
 
   def copyin(self, dest, src: memoryview):
     for i in range(0, src.nbytes, self.b[0].size):
@@ -426,6 +405,21 @@ class AMDAllocator(LRUAllocator):
                    .copy(dest.va_addr+i, self.b[self.b_next].va_addr, lsize) \
                    .signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
       self.b_timeline[self.b_next] = self.device.timeline_value
+      self.device.timeline_value += 1
+
+  def copy_from_disk(self, dest, src, size):
+    def _get_temp_buf():
+      # Check if the next buffer is safe to be used (its signal has passed) and reserve it.
+      if self.b_timeline[(self.b_next + 1) % len(self.b)] <= self.device.timeline_signal.value:
+        self.b_timeline[(self.b_next + 1) % len(self.b)], self.b_next = (1 << 64), (self.b_next + 1) % len(self.b)
+        return (self.b[self.b_next].va_addr, self.b_next)
+      return None
+
+    for (batch_info, dst_off, src_off, copy_size) in src.device.allocator._copyout_sharded(src, size, _get_temp_buf, seg_len=SDMA_MAX_COPY_SIZE):
+      HWCopyQueue().wait(self.device.timeline_signal, self.device.timeline_value - 1) \
+                   .copy(dest.va_addr + dst_off, batch_info[0] + src_off, copy_size) \
+                   .signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
+      self.b_timeline[batch_info[1]] = self.device.timeline_value
       self.device.timeline_value += 1
 
   def copyout(self, dest:memoryview, src):
