@@ -533,4 +533,4 @@ class Linearizer(Kernel):
 def time_lin(lin:Linearizer):
   st = time.perf_counter_ns()
   UOpGraph(lin.uops.sinks).linearize()
-  return time.perf_counter_ns()-st
+  return time.perf_counter_ns() - st
