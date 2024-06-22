@@ -192,6 +192,10 @@ class TestBottomupVsTopdownRewrite(TestUOps):
 
   def test_pattern_that_can_be_inlined(self):
     sa = self.setup_and_assert_uop_graph_equal
+
+    # Long list x + x + x + x
+    sa(lambda: UOp(UOps.CONST, dtypes.float, arg=2.0) + 2 + 2 + 2 + 2)
+
     sa(lambda: UOp(UOps.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
       UOp(UOps.CONST, dtypes.float, arg=1.0),
       UOp(UOps.CONST, dtypes.float, arg=2.0),
