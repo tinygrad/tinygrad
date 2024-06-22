@@ -196,16 +196,16 @@ class HCQCompatCompiled(Compiled):
     super().__init__(device, allocator, renderer, compiler, runtime, HCQGraph)
 
   @classmethod
-  def _read_signal(self, sig): pass # reads a value for a signal
+  def _read_signal(self, sig): raise NotImplementedError("need _read_signal") # reads a value for a signal
 
   @classmethod
-  def _set_signal(self, sig, value): pass # sets a value for a signal
+  def _set_signal(self, sig, value): raise NotImplementedError("need _set_signal") # sets a value for a signal
 
   @classmethod
-  def _get_signal(self, value=0, **kwargs): pass # allocates a new signal
+  def _get_signal(self, value=0, **kwargs): raise NotImplementedError("need _get_signal") # allocates a new signal
 
   @classmethod
-  def _wait_signal(self, signal, value=0, timeout=10000): pass # waits for a signal value
+  def _wait_signal(self, signal, value=0, timeout=10000): raise NotImplementedError("need _wait_signal") # waits for a signal value
 
   def _wrap_timeline_signal(self):
     self.timeline_signal, self._shadow_timeline_signal, self.timeline_value = self._shadow_timeline_signal, self.timeline_signal, 1
