@@ -1,9 +1,10 @@
 import unittest
-from test.helpers import TestUOps
+from typing import Callable
+from test.helpers import TestUOps, compare_uop_tree, print_uop_tree
 from tinygrad import dtypes, Variable
 from tinygrad.dtype import PtrDType
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps
-from tinygrad.codegen.uops import UOpGraph, UOps, UOp
+from tinygrad.codegen.uops import UOpGraph, UOps, UOp, constant_folder
 
 class TestUOpGraph(TestUOps):
   # TODO: move to test.helpers
@@ -114,6 +115,68 @@ class TestUOpGraph(TestUOps):
     # only the second store happens
     self.assertEqual(len(uops.uops), 4)
     self.assert_equiv_uops(uops[-1], UOp.store(glbl, idx1, val))
+
+def create_uop_linearize_and_compare_bottomup_topdown(uop_factory: Callable[[], UOp]):
+  def attach_sink_and_create_graph():
+    uop_output = uop_factory()
+    sink = UOp(UOps.SINK, None, (uop_output,))
+    graph = UOpGraph([uop_output])
+    graph.nodes = {}
+    return sink, graph
+  sink1, graph1 = attach_sink_and_create_graph()
+  sink2, graph2 = attach_sink_and_create_graph()
+  sink1_rewritten = graph1.graph_rewrite(sink1, constant_folder)
+  sink2_rewritten = graph2.graph_rewrite_bottomup_no_backtrack(sink2, constant_folder)
+  result, reason = compare_uop_tree(sink1_rewritten, sink2_rewritten)
+  reason_and_tree = reason + '\nUOp1 (topdown): \n' + print_uop_tree(sink1_rewritten, _print=False)
+  reason_and_tree += 'UOp2 (bottomup): \n' + print_uop_tree(sink2_rewritten, _print=False)
+  return result, reason_and_tree
+
+class TestBottomupVsTopdownRewrite(TestUOps):
+  def setup_and_assert(self, uop_factory: Callable[[], UOp]):
+    result, reason = create_uop_linearize_and_compare_bottomup_topdown(uop_factory)
+    self.assertTrue(result, reason)
+
+  def test_add_const(self):
+    self.setup_and_assert(lambda: UOp(UOps.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
+      UOp(UOps.CONST, dtypes.float, arg=1.0),
+      UOp(UOps.CONST, dtypes.float, arg=2.0),
+    )))
+
+  def test_nested_add(self):
+    self.setup_and_assert(lambda: UOp(UOps.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
+      UOp(UOps.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
+        UOp(UOps.CONST, dtypes.float, arg=1.0),
+        UOp(UOps.CONST, dtypes.float, arg=2.0),
+      )),
+      UOp(UOps.CONST, dtypes.float, arg=3.0),
+    )))
+  
+  @unittest.skip("Skip until patterns rule return node that cannot further be simplified")
+  def test_arange(self):
+    def factory():
+      const_0 = UOp(UOps.CONST, dtypes.float, (), 0.0)
+      const_neg_1 = UOp(UOps.CONST, dtypes.float, (), -1.0)
+      const_1 = UOp(UOps.CONST, dtypes.float, (), 1.0)
+      const_2 = UOp(UOps.CONST, dtypes.float, (), 2.0)
+      const_neg_2 = UOp(UOps.CONST, dtypes.float, (), -2.0)
+      const_3 = UOp(UOps.CONST, dtypes.float, (), 3.0)
+      _special = UOp(UOps.SPECIAL, dtypes.float, (), (0, 'gidx0', 4))
+      _global = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), (0, True))
+      _range = UOp(UOps.RANGE, dtypes.float, (const_0,const_2), (2, 0))
+      _acc = UOp(UOps.DEFINE_ACC, dtypes.float, (_range,), (0,0,0))
+      special_mul_one = UOp(UOps.ALU, dtypes.float, (_special, const_neg_1), BinaryOps.MUL) # rewrite
+      range_mul_one = UOp(UOps.ALU, dtypes.float, (_range, const_neg_1), BinaryOps.MUL) # rewrite
+      add_two_muls = UOp(UOps.ALU, dtypes.float, (special_mul_one, range_mul_one), BinaryOps.ADD) # rewrite
+      cmplt = UOp(UOps.ALU, dtypes.bool, (add_two_muls, const_neg_2), BinaryOps.CMPLT)
+      _where = UOp(UOps.ALU, dtypes.float, (cmplt, const_3, const_0), TernaryOps.WHERE)
+      add_where_acc = UOp(UOps.ALU, dtypes.float, (_where, _acc), BinaryOps.ADD)
+      phi = UOp(UOps.PHI, dtypes.float, (_acc, add_where_acc))
+      store = UOp(UOps.STORE, None, (_global, _special, phi))
+      return store
+    self.setup_and_assert(factory)  
+
+    
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
