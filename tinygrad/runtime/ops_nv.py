@@ -103,7 +103,7 @@ class HWQueue:
                (3 << 0) | (1 << 24)] # ACQUIRE | PAYLOAD_SIZE_64BIT
     return self._mark_command_end()
 
-  def timestamp(self, signal): return self.signal(signal, timestamp=True)
+  def timestamp(self, signal): return HWQueue.signal(self, signal, timestamp=True)
 
   def signal(self, signal, value=0, timestamp=False):
     self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(ctypes.addressof(from_mv(signal))), *nvdata64_le(value),
@@ -532,11 +532,11 @@ class NVDevice(HCQCompatCompiled):
 
     self.arch: str = "sm_89" if not MOCKGPU else "sm_35" # TODO: fix
 
-    self._cmdq_setup_compute_gpfifo()
-    self._cmdq_setup_dma_gpfifo()
-
     super().__init__(device, NVAllocator(self), NVRenderer(self.arch), CUDACompiler(self.arch) if MOCKGPU else NVCompiler(self.arch),
                      functools.partial(NVProgram, self), HWComputeQueue, HWCopyQueue, timeline_signals=[self._get_signal(), self._get_signal()])
+
+    self._cmdq_setup_compute_gpfifo()
+    self._cmdq_setup_dma_gpfifo()
 
     NVDevice.devices.append(self)
 

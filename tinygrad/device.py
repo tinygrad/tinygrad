@@ -220,7 +220,9 @@ class HCQCompatCompiled(Compiled):
     self.timeline_value: int = 1
     self.timeline_signal, self._shadow_timeline_signal = timeline_signals
     self.profile_records: List[Tuple[Any, Any, str, bool]] = []
-    if PROFILE: self._sync_gpu_to_cpu_time()
+    if PROFILE:
+      self._sync_gpu_to_cpu_time()
+      atexit.register(self._prof_process_events)
 
     from tinygrad.runtime.graph.hcq import HCQGraph
     super().__init__(device, allocator, renderer, compiler, runtime, HCQGraph)
@@ -246,7 +248,7 @@ class HCQCompatCompiled(Compiled):
       self.timeline_value += 1
       cpu_start_time = time.perf_counter_ns() / 1e3
       self._wait_signal(self.timeline_signal, self.timeline_value - 1)
-      return cpu_start_time, self.time_event_st.start_ts
+      return cpu_start_time, self._read_timestamp(self.time_event_st)
     self.cpu_start_time, self.gpu_start_time = _sync_queue(self.hw_compute_queue_t)
     self.copy_cpu_start_time, self.copy_gpu_start_time = _sync_queue(self.hw_copy_queue_t)
 
@@ -270,6 +272,7 @@ class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
     super().__init__()
 
   def copyin(self, dest, src: memoryview):
+    if PROFILE: self.device.hw_copy_queue_t().timestamp(st := self.device._get_signal()).submit(self.device)
     for i in range(0, src.nbytes, self.b[0].size):
       self.b_next = (self.b_next + 1) % len(self.b)
       self.device._wait_signal(self.device.timeline_signal, self.b_timeline[self.b_next])
@@ -280,7 +283,12 @@ class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
       self.b_timeline[self.b_next] = self.device.timeline_value
       self.device.timeline_value += 1
 
+    if PROFILE:
+      self.device.hw_copy_queue_t().timestamp(en := self.device._get_signal()).submit(self.device)
+      self.device.profile_records.append((st, en, f"CPU -> {self.device.dname}", True))
+
   def copy_from_disk(self, dest, src, size):
+    if PROFILE: self.device.hw_copy_queue_t().timestamp(st := self.device._get_signal()).submit(self.device)
     def _get_temp_buf():
       # Check if the next buffer is safe to be used (its signal has passed) and reserve it.
       if self.b_timeline[(self.b_next + 1) % len(self.b)] <= self.device._read_signal(self.device.timeline_signal):
@@ -295,8 +303,12 @@ class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
       self.b_timeline[batch_info[1]] = self.device.timeline_value
       self.device.timeline_value += 1
 
+    if PROFILE:
+      self.device.hw_copy_queue_t().timestamp(en := self.device._get_signal()).submit(self.device)
+      self.device.profile_records.append((st, en, f"DISK -> {self.device.dname}", True))
+
   def copyout(self, dest:memoryview, src):
-    self.device.synchronize()
+    if PROFILE: self.device.hw_copy_queue_t().timestamp(st := self.device._get_signal()).submit(self.device)
     for i in range(0, dest.nbytes, self.b[0].size):
       self.device.hw_copy_queue_t().wait(self.device.timeline_signal, self.device.timeline_value - 1) \
                                    .copy(self.b[0].va_addr, src.va_addr+i, lsize:=min(self.b[0].size, dest.nbytes-i)) \
@@ -306,13 +318,22 @@ class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
 
       ctypes.memmove(from_mv(dest[i:]), self.b[0].va_addr, lsize)
 
+    if PROFILE:
+      self.device.hw_copy_queue_t().timestamp(en := self.device._get_signal()).submit(self.device)
+      self.device.profile_records.append((st, en, f"{self.device.dname} -> CPU", True))
+
   def transfer(self, dest, src, sz: int, src_dev, dest_dev):
+    if PROFILE: src_dev.hw_copy_queue_t().timestamp(st := self.device._get_signal()).submit(src_dev)
     src_dev._gpu_map(dest)
-    self.device.hw_copy_queue_t().wait(src_dev.timeline_signal, src_dev.timeline_value - 1) \
-                                 .wait(dest_dev.timeline_signal, dest_dev.timeline_value - 1) \
-                                 .copy(dest.va_addr, src.va_addr, sz) \
-                                 .signal(src_dev.timeline_signal, src_dev.timeline_value).submit(src_dev)
-    self.device.hw_compute_queue_t().wait(src_dev.timeline_signal, src_dev.timeline_value).submit(dest_dev)
+    src_dev.hw_copy_queue_t().wait(src_dev.timeline_signal, src_dev.timeline_value - 1) \
+                             .wait(dest_dev.timeline_signal, dest_dev.timeline_value - 1) \
+                             .copy(dest.va_addr, src.va_addr, sz) \
+                             .signal(src_dev.timeline_signal, src_dev.timeline_value).submit(src_dev)
+    dest_dev.hw_compute_queue_t().wait(src_dev.timeline_signal, src_dev.timeline_value).submit(dest_dev)
     src_dev.timeline_value += 1
+
+    if PROFILE:
+      src_dev.hw_copy_queue_t().timestamp(en := self.device._get_signal()).submit(src_dev)
+      src_dev.profile_records.append((st, en, f"{src_dev.dname} -> {dest_dev.dname}", True))
 
   def offset(self, buf, size:int, offset:int): return type(buf)(base=buf.base + offset, va_addr=buf.va_addr + offset, length=size, size=size)
