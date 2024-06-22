@@ -196,7 +196,7 @@ class HCQCompatCompiled(Compiled):
     super().__init__(device, allocator, renderer, compiler, runtime, HCQGraph)
 
 class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
-  def __init__(self, device: HCQCompatCompiled, batch_size=(2 << 20)):
+  def __init__(self, device, batch_size=(2 << 20)):
     self.device = device
     self.b = [self._alloc(max((2 << 20), batch_size), BufferOptions(host=True)) for _ in range(32)]
     self.b_timeline = [0] * len(self.b)
@@ -240,7 +240,7 @@ class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
 
       ctypes.memmove(from_mv(dest[i:]), self.b[0].va_addr, lsize)
 
-  def transfer(self, dest, src, sz: int, src_dev: HCQCompatCompiled, dest_dev: HCQCompatCompiled):
+  def transfer(self, dest, src, sz: int, src_dev, dest_dev):
     src_dev._gpu_map(dest)
     self.device.hw_copy_queue_t().wait(src_dev.timeline_signal, src_dev.timeline_value - 1) \
                                  .wait(dest_dev.timeline_signal, dest_dev.timeline_value - 1) \
