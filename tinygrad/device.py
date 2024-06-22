@@ -2,7 +2,7 @@ from __future__ import annotations
 import multiprocessing
 from dataclasses import dataclass
 from collections import defaultdict
-from typing import List, Optional, Dict, Tuple, Any
+from typing import List, Optional, Dict, Tuple, Any, cast
 import importlib, inspect, functools, pathlib, os, ctypes
 from tinygrad.helpers import getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv
 from tinygrad.dtype import DType, ImageDType
@@ -187,13 +187,25 @@ class Compiled:
 # **************** for HCQ Compatible Devices ****************
 
 class HCQCompatCompiled(Compiled):
-  def __init__(self, device:str, allocator:Allocator, renderer:Optional[Renderer], compiler:Optional[Compiler], runtime, comp_queue_t, copy_queue_t):
-    assert hasattr(self, 'timeline_signal') and hasattr(self, 'timeline_value'), "Device implementation did not create timeline signal"
-
+  def __init__(self, device:str, allocator:Allocator, renderer:Renderer, compiler:Compiler, runtime, comp_queue_t, copy_queue_t, timeline_signals):
     self.hw_compute_queue_t, self.hw_copy_queue_t = comp_queue_t, copy_queue_t
+    self.timeline_value: int = 1
+    self.timeline_signal, self._shadow_timeline_signal = timeline_signals
 
     from tinygrad.runtime.graph.hcq import HCQGraph
     super().__init__(device, allocator, renderer, compiler, runtime, HCQGraph)
+
+  @classmethod
+  def _read_signal(self, sig): pass # reads value for a signal
+
+  @classmethod
+  def _set_signal(self, sig, value): pass # sets value for a signal
+
+  @classmethod
+  def _get_signal(self, value=0, **kwargs): pass # alloc a new signal
+
+  @classmethod
+  def _wait_signal(self, signal, value=0, timeout=10000): pass # waits for a signal value
 
 class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
   def __init__(self, device, batch_size=(2 << 20)):

@@ -436,9 +436,9 @@ class AMDDevice(HCQCompatCompiled):
   def _set_signal(self, sig, value): sig.value = value
 
   @classmethod
-  def _get_signal(self, value=0, sync_event=None) -> hsa.amd_signal_t:
+  def _get_signal(self, value=0, **kwargs) -> hsa.amd_signal_t:
     self._set_signal(ret := self.signals_pool.pop(), value)
-    if sync_event is not None:
+    if (sync_event:=kwargs.get('sync_event')) is not None:
       ret.event_mailbox_ptr = AMDDevice.event_page.va_addr + sync_event.event_slot_index*8
       ret.event_id = sync_event.event_id
     else: ret.event_mailbox_ptr = ret.event_id = 0
@@ -478,10 +478,6 @@ class AMDDevice(HCQCompatCompiled):
       self._gpu_map(AMDDevice.signals_page)
       self._gpu_map(AMDDevice.event_page)
       sync_event = kio.create_event(AMDDevice.kfd, auto_reset=1)
-
-    self.timeline_value: int = 1
-    self.timeline_signal = AMDDevice._get_signal(sync_event=sync_event)
-    self._shadow_timeline_signal = AMDDevice._get_signal(sync_event=kio.create_event(AMDDevice.kfd, auto_reset=1))
 
     self.kernargs = self._gpu_alloc(0x1000000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
     self.kernargs_ptr = self.kernargs.va_addr
@@ -527,7 +523,8 @@ class AMDDevice(HCQCompatCompiled):
     self.pm4_write_pointer = to_mv(self.pm4_queue.write_pointer_address, 8).cast("Q")
     self.pm4_doorbell = to_mv(self.doorbells + self.pm4_queue.doorbell_offset - self.doorbells_base, 8).cast("Q")
 
-    super().__init__(device, AMDAllocator(self), AMDRenderer(), AMDCompiler(self.arch), functools.partial(AMDProgram, self), HWPM4Queue, HWCopyQueue)
+    super().__init__(device, AMDAllocator(self), AMDRenderer(), AMDCompiler(self.arch), functools.partial(AMDProgram, self), HWPM4Queue, HWCopyQueue,
+      timeline_signals=[self._get_signal(sync_event=sync_event), self._get_signal(sync_event=kio.create_event(AMDDevice.kfd, auto_reset=1))])
 
   def synchronize(self):
     AMDDevice._wait_signal(self.timeline_signal, self.timeline_value - 1)
