@@ -260,7 +260,7 @@ class tqdm:
         yield item
         self.update(1)
     finally: self.update(close=True)
-  def set_description(self, desc:str): self.desc = desc
+  def set_description(self, desc:str): self.desc = desc + ": "
   def update(self, n:int=0, close:bool=False):
     self.n, self.i = self.n+n, self.i+1
     if (self.i % self.skip != 0 and not close) or self.dis: return
