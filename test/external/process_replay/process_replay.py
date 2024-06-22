@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 # compare kernels created by HEAD against master
-import difflib, pickle, time, shutil
-from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.codegen.uops import UOpGraph
+import difflib, pickle, shutil
+from tinygrad.codegen.linearizer import Linearizer, time_lin
 from tinygrad.helpers import colored, db_connection, VERSION, getenv, to_function_name, tinytqdm
 
 page_size = 100
@@ -12,17 +11,15 @@ row_count = cur.execute(f"select count(*) from 'process_replay_{VERSION}'").fetc
 for offset in tinytqdm(range(0, row_count, page_size)):
   cur.execute(f"SELECT val FROM 'process_replay_{VERSION}' LIMIT ? OFFSET ?", (page_size, offset))
   for row in cur.fetchall():
-    compare_k, compare_src, time_ns = pickle.loads(row[0])
+    compare_k, compare_src, time_baseline = pickle.loads(row[0])
     k = Linearizer(*compare_k.ast, opts=compare_k.opts)
     for opt in compare_k.applied_opts: k.apply_opt(opt)
 
     good_src = k.opts.render(to_function_name(compare_k.name), k.linearize().uops)
 
-    st = time.perf_counter_ns()
-    UOpGraph(k.uops.sinks).linearize()
-    t_diff = time.perf_counter_ns() - st
-    if (abs(t_diff-time_ns)/max(time_ns, 1e8) > 0.1):
-      info = colored(f"\rPerf: {time_ns*1e-6:6.2f} -> {t_diff*1e-6:6.2f} ms {compare_k.name}", "red" if t_diff > time_ns else "green")
+    time_ = time_lin(k)
+    if (time_-time_baseline)/max(time_baseline, 1e8) > 0.2:
+      info = f"\rPerf: {time_baseline*1e-6:6.2f} -> {time_*1e-6:6.2f} ms {compare_k.name}"
       print('\r'+' '*(shutil.get_terminal_size().columns) +info )
     try: assert compare_src == good_src
     except AssertionError as e:
