@@ -325,18 +325,15 @@ class UOpGraph:
     # dedup all nodes
     # TODO: i feel like this BFS is written in a few places, possible to library it?
     unprocessed_nodes = [sink]
-    early_in_degree: DefaultDict[UOp, int] = defaultdict(int)
+    early_in_degree: Dict[UOp, int] = {}
     children: DefaultDict[UOp, List[UOp]] = defaultdict(list)
-    all_nodes: Dict[UOp, None] = dict()
     while len(unprocessed_nodes):
       n = unprocessed_nodes.pop(0)
-      if n in all_nodes: continue
-      all_nodes[n] = None
-      for x in n.src:
-        early_in_degree[n] += 1
-        children[x].append(n)
+      if n in early_in_degree: continue
+      early_in_degree[n] = len(n.src)
+      for x in n.src: children[x].append(n)
       unprocessed_nodes += list(n.src)
-    early_queue = [x for x in all_nodes if early_in_degree[x] == 0]
+    early_queue = [k for k, v in early_in_degree.items() if v == 0]
     replace_nodes: Dict[UOp, UOp] = {}
     while len(early_queue):
       n = early_queue.pop(0)
