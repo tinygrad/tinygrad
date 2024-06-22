@@ -464,6 +464,18 @@ class TestTypeSpec(unittest.TestCase):
     assert X_data.gather(0, indices).dtype == X_data.dtype
     assert X_data.gather(1, indices).dtype == X_data.dtype
 
+  @given(strat.sampled_from(dtype_floats), strat.sampled_from(dtype_floats))
+  def test_attention_returns_same_dtype(self, data_dtype, default_float):
+    dtypes.default_float = default_float
+    query = Tensor.rand(32, 8, 128, 64, dtype=data_dtype)
+    key = Tensor.rand(32, 8, 128, 64, dtype=data_dtype)
+    value = Tensor.rand(32, 8, 128, 64, dtype=data_dtype)
+    mask = (Tensor.rand(32, 8, 128, 128) < 0.5)
+    assert query.scaled_dot_product_attention(key, value, is_causal=True).dtype == data_dtype
+    assert query.scaled_dot_product_attention(key, value, is_causal=True, dropout_p=0.3).dtype == data_dtype
+    assert query.scaled_dot_product_attention(key, value, is_causal=False).dtype == data_dtype
+    assert query.scaled_dot_product_attention(key, value, attn_mask=mask).dtype == data_dtype
+
 class TestTypePromotion(unittest.TestCase):
   @given(strat.sampled_from(core_dtypes))
   def test_self_promo_to_self(self, dtype):
