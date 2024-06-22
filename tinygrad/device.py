@@ -219,7 +219,7 @@ class HCQCompatCompiled(Compiled):
     self.hw_compute_queue_t, self.hw_copy_queue_t = comp_queue_t, copy_queue_t
     self.timeline_value: int = 1
     self.timeline_signal, self._shadow_timeline_signal = timeline_signals
-    self.profile_records: List[Tuple[Any, Any str, bool]] = []
+    self.profile_records: List[Tuple[Any, Any, str, bool]] = []
     if PROFILE: self._sync_gpu_to_cpu_time()
 
     from tinygrad.runtime.graph.hcq import HCQGraph
@@ -254,7 +254,7 @@ class HCQCompatCompiled(Compiled):
     for st, en, name, is_copy in self.profile_records:
       Profiler.add_event(name, self._gpu_time_to_cpu(st if st.__class__ is int else self._read_timestamp(st), is_copy),
         self._gpu_time_to_cpu(en if en.__class__ is int else self._read_timestamp(en), is_copy), self.dname, "DMA" if is_copy else "COMPUTE")
-      self.signals_pool += [st, en] # type: ignore
+      if st.__class__ is not int: self.signals_pool += [st, en] # type: ignore
     self.profile_records = []
 
   def _wrap_timeline_signal(self):

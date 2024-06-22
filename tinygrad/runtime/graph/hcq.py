@@ -66,7 +66,7 @@ class HCQGraph(MultiGraphRunner):
         self.comp_signal_val[dev] = sig_val
       elif isinstance(ji.prg, BufferXfer):
         dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
-        deps = self.access_resources([src], [dest], (self.copy_signal[Device[src.device]], sig_val:=j+1))
+        deps = self.access_resources([src], [dest], (self.copy_signal[dev:=Device[src.device]], sig_val:=j+1))
         deps = [x for x in deps if id(x[0]) != id(self.copy_signal[Device[src.device]])]
         self.copy_signal_val[Device[src.device]] = sig_val
         self.copy_to_devs[Device[dest.device]].add(Device[src.device])
@@ -74,7 +74,7 @@ class HCQGraph(MultiGraphRunner):
       # When running compute, set up lazy signals, since no dependencies might be there. Copies always have signals to sync.
       prof_signals = (dev._get_signal(), dev._get_signal(), dev) if PROFILE else None
       signal_sched[j] = (deps, None if isinstance(ji.prg, CompiledRunner) else j + 1, prof_signals)
-      for sig, val in deps: signal_sched[val - 1] = (signal_sched[val - 1][0], val) # set need output for signal, as it has deps.
+      for sig, val in deps: signal_sched[val - 1] = (signal_sched[val - 1][0], val, signal_sched[val - 1][2]) # set output signal, it has deps.
 
     # Building hardware queues
     for dev in self.devices:
@@ -110,6 +110,10 @@ class HCQGraph(MultiGraphRunner):
       self.comp_queues[dev].signal(dev.timeline_signal, dev.timeline_value)
       if hasattr(self.comp_queues[dev], 'bind'): self.comp_queues[dev].bind(dev)
       if hasattr(self.copy_queues[dev], 'bind') and self.copy_signal_val[dev] > 0: self.copy_queues[dev].bind(dev)
+
+    if PROFILE:
+      names = [(ji.prg.clprg.name if isinstance(ji.prg, CompiledRunner) else f"{ji.bufs[1].device} -> {ji.bufs[0].device}") for ji in self.jit_cache]
+      self.prof_records = [(dev, names[i], st, en, isinstance(self.jit_cache[i].prg, BufferXfer)) for i,(_,_,(st,en,dev)) in signal_sched.items()]
 
   def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False) -> Optional[float]:
     # Wait and restore signals
@@ -154,7 +158,7 @@ class HCQGraph(MultiGraphRunner):
     return [(k, max(v for x, v in deps if id(x) == idk)) for idk, k in {id(x[0]): x[0] for x in deps}.items()]
 
   def process_profile_events(self):
-    for dev, name, st, en, is_copy in self.prof_records: dev.profile_records += [dev._read_timestamp(st), dev._read_timestamp(en), name, is_copy]
+    for dev, name, st, en, is_copy in self.prof_records: dev.profile_records.append((dev._read_timestamp(st), dev._read_timestamp(en), name, is_copy))
 
   def __del__(self):
     if PROFILE and self.kickoff_value > 1: self.process_profile_events()
