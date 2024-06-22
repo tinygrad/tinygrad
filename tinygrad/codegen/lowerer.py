@@ -154,6 +154,10 @@ class Lowerer(Kernel):
       return LazyOp(op.op, tuple(fixup_ast(x) for x in op.src), arg)
     modified_ast = tuple(fixup_ast(x) for x in self.ast)
 
+    if DEBUG >= 5:
+      from tinygrad.engine.graph import print_tree
+      for a in modified_ast: print_tree(a)
+
     if self.opts.has_local:
       # define indexes
       global_idxs, loop_global_idxs = get_grouped_dims("gidx", 0, self.full_shape[:self.global_dims], 3 if self.opts.has_local else 0)

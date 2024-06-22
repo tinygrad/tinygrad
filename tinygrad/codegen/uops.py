@@ -234,7 +234,8 @@ def replace_reduce(root):
   expands = [x for x in root.src[2:] if x.op is UOps.EXPAND]
 
   # NOTE: this is making an assumption about root.src[1], i think root.src[1] should just be moved here
-  if len(expands) == 0: return root.src[0]
+  # never mind, this IF is entirely wrong. you have to check if there's no RANGEs or EXPANDs
+  #if len(expands) == 0: return root.src[0]
 
   # add other expands for float4. TODO: should be a faster way
   expand_args = [x.arg for x in expands]
@@ -260,6 +261,7 @@ def replace_contract(root:UOp):
   return UOp(UOps.CAST, cast(DType, root.dtype).vec(root.arg[1]), tuple(ret))
 
 def cast_reduce(cst):
+  if cst.dtype.scalar() == cst.dtype: return None  # not for normal CAST. TODO: the merging one shouldn't be CAST
   if not all_same([(x.arg, x.src[1:]) for x in cst.src]): return None
   fst_red = cst.src[0]
   red = UOp(UOps.CAST, cst.dtype, tuple(x.src[0] for x in cst.src))
