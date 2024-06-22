@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import List, Tuple, Any, Optional, cast, DefaultDict, Dict, Union, Final, Iterator, Sequence
+import time
 import itertools, math, functools
 from collections import defaultdict
 
@@ -520,10 +521,11 @@ class Linearizer(Kernel):
     return ret
 
   def to_program(self) -> Program:
-    self.linearize()
     info = get_lazyop_info(self.ast[0])
+    st = time.perf_counter_ns()
+    self.linearize()
     src = self.opts.render(to_function_name(self.name), self.uops)
-    if getenv("RUN_PROCESS_REPLAY"): diskcache_put("process_replay", id(self), (self, src))
+    if getenv("RUN_PROCESS_REPLAY"): diskcache_put("process_replay", id(self), (self, src, time.perf_counter_ns()-st))
     ops, mem = self.uops.flops_mem()
     run_count = prod((self.global_size if self.global_size else []) + (self.local_size if self.local_size else []))
     # NOTE: we use min here to ignore the indexing FLOPS
