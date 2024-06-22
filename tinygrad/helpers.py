@@ -251,7 +251,7 @@ def flat_mv(mv:memoryview): return mv if len(mv) == 0 else mv.cast("B", shape=(m
 
 class tqdm:
   def __init__(self, iterable=None, desc:str='', disable:bool=False, unit:str='it', unit_scale=False, total:int=-1, rate:int=100):
-    self.iter, self.desc, self.dis, self.unit, self.unit_scale, self.rate = iterable, desc, disable, unit, unit_scale, rate
+    self.iter, self.desc, self.dis, self.unit, self.unit_scale, self.rate = iterable, f"{desc}: " if desc else "", disable, unit, unit_scale, rate
     self.st, self.i, self.n, self.skip, self.t = time.perf_counter(), -1, 0, 1, len(iterable) if total==-1 else total
     self.update(0)
   def __iter__(self):
@@ -260,7 +260,7 @@ class tqdm:
         yield item
         self.update(1)
     finally: self.update(close=True)
-  def set_description(self, desc:str): self.desc = desc + ": "
+  def set_description(self, desc:str): self.desc = f"{desc}: " if desc else ""
   def update(self, n:int=0, close:bool=False):
     self.n, self.i = self.n+n, self.i+1
     if (self.i % self.skip != 0 and not close) or self.dis: return
