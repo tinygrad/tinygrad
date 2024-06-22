@@ -111,10 +111,6 @@ class HCQGraph(MultiGraphRunner):
       if hasattr(self.comp_queues[dev], 'bind'): self.comp_queues[dev].bind(dev)
       if hasattr(self.copy_queues[dev], 'bind') and self.copy_signal_val[dev] > 0: self.copy_queues[dev].bind(dev)
 
-    if PROFILE:
-      names = [ji.prg.clprg.name if isinstance(ji.prg, CompiledRunner) else f"{ji.bufs[1].device} -> {ji.bufs[0].device}" for ji in self.jit_cache]
-      self.prof_records = [(dev, names[i], st, en, isinstance(ji.prg, BufferXfer)) for i,(_,_,(st,en,dev)) in enumerate(signal_sched)]
-
   def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False) -> Optional[float]:
     # Wait and restore signals
     self.kickoff_value += 1
