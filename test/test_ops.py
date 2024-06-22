@@ -776,7 +776,14 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,4,5,6)], lambda x: x.sum(axis=(0,2)))
     helper_test_op([(3,4,5,6)], lambda x: x.sum(axis=(1,2)))
     helper_test_op([(3,4,5,6)], lambda x: x.sum(axis=1))
-    helper_test_op([()], lambda x: x.sum(), Tensor.sum)
+    helper_test_op([()], lambda x: x.sum())
+    helper_test_op([()], lambda x: x.sum(0))
+    helper_test_op([()], lambda x: x.sum(-1))
+    helper_test_op([()], lambda x: x.sum(()))
+    self.helper_test_exception([(3,4,5,6)], lambda x: x.sum(5), lambda x: x.sum(5), expected=IndexError)
+    self.helper_test_exception([()], lambda x: x.sum(1), lambda x: x.sum(1), expected=IndexError)
+    self.helper_test_exception([()], lambda x: x.sum((1,)), lambda x: x.sum((1,)), expected=IndexError)
+
   def test_sum_with_zeros_shape(self):
     helper_test_op([(4, 0)], lambda x: x.sum(axis=(0,)))
     helper_test_op([(4, 0)], lambda x: x.sum(axis=(1,)))
@@ -1039,10 +1046,10 @@ class TestOps(unittest.TestCase):
   def test_slice_errors(self):
     a = Tensor.ones(4, 3)
     b = Tensor(2)
-    with self.assertRaises(IndexError): a[1, 77, 77, 77] # IndexError: (finds too many indices before the out of bounds)
-    with self.assertRaises(IndexError): a[1, 3] # IndexError: (out of bounds).
-    with self.assertRaises(IndexError): a[1, -4]
-    with self.assertRaises(IndexError): a[..., ...] # IndexError: only single ellipsis
+    with self.assertRaisesRegex(IndexError, "too many"): a[1, 77, 77, 77] # IndexError: (finds too many indices before the out of bounds)
+    with self.assertRaisesRegex(IndexError, "out of bounds"): a[1, 3] # IndexError: (out of bounds).
+    with self.assertRaisesRegex(IndexError, "out of bounds"): a[1, -4]
+    with self.assertRaisesRegex(IndexError, "single ellipsis"): a[..., ...] # IndexError: only single ellipsis
     with self.assertRaises(ValueError): a[::0, 1] # no 0 strides
     with self.assertRaises(IndexError): b[:] # slice cannot be applied to a 0-dim tensor
 
