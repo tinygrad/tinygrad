@@ -50,7 +50,7 @@ class TestNV(unittest.TestCase):
 
   def test_kernargs_no_oob_access(self):
     kernargs_start = TestNV.d0._gpu_alloc((2 << 20), map_to_cpu=True).va_addr
-    kernargs = kernargs_start + ((2 << 20) - TestNV.d0_runner.clprg.kernargs_segment_size)
+    kernargs = kernargs_start + ((2 << 20) - TestNV.d0_runner.clprg.kernargs_alloc_size)
     to_mv(kernargs, 0x160).cast('I')[:] = array.array('I', TestNV.d0_runner.clprg.constbuffer_0)
     ctypes.memmove(kernargs + TestNV.d0_runner.clprg.kernargs_offset, TestNV.addr, len(TestNV.addr))
 

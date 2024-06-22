@@ -38,7 +38,7 @@ def get_linearizer(renderer:Renderer, ast:Tuple[LazyOp, ...]) -> Linearizer:
         if logkerns is not None and logkerns_level > 1: logkerns.writelines([f"{(lin.ast, lin.applied_opts)}\n" for (_,lin,_) in timed[1:]])
   # TODO: check the correctness inline once compare_linearizer is in core
   if logkerns is not None: logkerns.writelines([f"{(k.ast, k.applied_opts)}\n"])
-  if DEBUG >= 4: print((k.ast, k.applied_opts)) # print here to show final applied_opts for all kernels instead of just in beam_search
+  if DEBUG >= 5: print((k.ast, k.applied_opts)) # print here to show final applied_opts for all kernels instead of just in beam_search
   return k
 
 # **************** Runners ****************
@@ -101,8 +101,9 @@ class BufferCopy(Runner):
     else: name = f"{type(self).__name__[6:].lower()} {total_sz:8d}, {dest_device[:7]:>7s} <- {src_device[:7]:7s}"
     super().__init__(colored(name, "yellow"), dest_device, 0, total_sz)
   def copy(self, dest, src):
-    if src.device.startswith("DISK") and hasattr(dest.allocator, 'copy_from_fd') and src.nbytes >= 4096 and hasattr(src.allocator.device, 'fd'):
-      dest.allocator.copy_from_fd(dest._buf, src.allocator.device.fd, src._buf.offset, src.nbytes)
+    disk_supports_fast_copyout = src.device.startswith("DISK") and hasattr(src.allocator.device, 'io_uring') and hasattr(src.allocator.device, 'fd')
+    if src.device.startswith("DISK") and hasattr(dest.allocator, 'copy_from_disk') and disk_supports_fast_copyout and src.nbytes >= 4096:
+      dest.allocator.copy_from_disk(dest._buf, src._buf, src.nbytes)
     elif src.device.startswith("DISK") and hasattr(dest.allocator, 'as_buffer'):
       # fast(ish) path, uses readinto in diskbuffers
       src.allocator.copyout(dest.allocator.as_buffer(dest._buf), src._buf)

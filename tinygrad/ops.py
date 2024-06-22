@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Union, Tuple, Any, List, Dict, Callable
-import functools, hashlib, math, operator, ctypes
+import functools, hashlib, math, operator, ctypes, struct
 from enum import Enum, auto
 from dataclasses import dataclass
 from tinygrad.helpers import prod, dedup
@@ -14,10 +14,11 @@ from tinygrad.shape.shapetracker import ShapeTracker
 # NOTE: many GPUs don't have DIV, but UnaryOps.RECIP doesn't work for integer division
 class UnaryOps(Enum):
   """A -> A (elementwise)"""
-  EXP2 = auto(); LOG2 = auto(); CAST = auto(); BITCAST = auto(); SIN = auto(); SQRT = auto(); NEG = auto() # noqa: E702
+  EXP2 = auto(); LOG2 = auto(); CAST = auto(); BITCAST = auto(); SIN = auto(); SQRT = auto(); NEG = auto(); RECIP = auto() # noqa: E702
 class BinaryOps(Enum):
   """A + A -> A (elementwise)"""
-  ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); CMPEQ = auto(); XOR = auto() # noqa: E702
+  ADD = auto(); MUL = auto(); IDIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); CMPNE = auto(); XOR = auto() # noqa: E702
+  SHR = auto(); SHL = auto() # noqa: E702
 class TernaryOps(Enum):
   """A + A + A -> A (elementwise)"""
   WHERE = auto(); MULACC = auto() # noqa: E702
@@ -30,7 +31,7 @@ class LoadOps(Enum): EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS =
 Op = Union[UnaryOps, BinaryOps, ReduceOps, LoadOps, TernaryOps, BufferOps]
 
 # do not preserve f(0) = 0
-UNSAFE_PAD_OPS = {BinaryOps.DIV, BinaryOps.CMPEQ, UnaryOps.LOG2, UnaryOps.EXP2}
+UNSAFE_PAD_OPS = {UnaryOps.RECIP, UnaryOps.LOG2, UnaryOps.EXP2, BinaryOps.IDIV}
 
 @dataclass(frozen=True)
 class MemBuffer:
@@ -40,7 +41,7 @@ class MemBuffer:
 
 @dataclass(frozen=True)
 class ConstBuffer:
-  val: ConstType
+  val: ConstType | Variable
   dtype: DType
   st: ShapeTracker
 
@@ -61,7 +62,7 @@ class LazyOp:
   def dtype(self) -> DType:
     if self.op in BufferOps: return self.arg.dtype
     if self.op in [UnaryOps.CAST, UnaryOps.BITCAST]: return self.arg
-    return dtypes.bool if self.op in {BinaryOps.CMPLT, BinaryOps.CMPEQ} else self.src[-1].dtype
+    return dtypes.bool if self.op in {BinaryOps.CMPLT, BinaryOps.CMPNE} else self.src[-1].dtype
 
   @functools.cached_property
   def key(self) -> bytes:
@@ -73,8 +74,8 @@ class LazyOp:
   def lazyops(self) -> List[LazyOp]: return dedup([self] + [item for x in self.src for item in x.lazyops])
   def vars(self) -> List[Variable]:
     extract_vars = [x.arg.st.vars() for x in self.lazyops if x.op in BufferOps]
-    const_vars = [x.arg.val.unbind()[0] for x in self.lazyops if x.op is BufferOps.CONST and isinstance(x.arg.val, Variable)]
-    return sorted(set.union(*extract_vars, set(const_vars)), key=lambda x: str(x.expr))
+    const_vars = [x.arg.val for x in self.lazyops if x.op is BufferOps.CONST and isinstance(x.arg.val, Variable)]
+    return sorted(set.union(*extract_vars, set(const_vars)), key=lambda v: v.expr)
 
 # **************** independent FlopCounter ****************
 
@@ -116,18 +117,27 @@ def hook_overflow(dv, fxn):
 
 python_alu = {
   UnaryOps.LOG2: lambda x: math.log2(x) if x > 0 else -math.inf if x == 0 else math.nan,
-  UnaryOps.EXP2: hook_overflow(math.inf, lambda x: math.exp(x*math.log(2))),
-  UnaryOps.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan, UnaryOps.SIN: math.sin,
+  UnaryOps.EXP2: hook_overflow(math.inf, lambda x: 2**x),
+  UnaryOps.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan,
+  UnaryOps.SIN: lambda x: math.sin(x) if not math.isinf(x) else math.nan,
+  UnaryOps.RECIP: lambda x: 1/x if x != 0 else math.copysign(math.inf, x),
   UnaryOps.NEG: lambda x: (not x) if isinstance(x, bool) else -x,
-  BinaryOps.MUL: operator.mul, BinaryOps.ADD: operator.add, BinaryOps.SUB: operator.sub, BinaryOps.XOR: operator.xor,
-  BinaryOps.MAX: max, BinaryOps.CMPEQ: operator.eq, BinaryOps.CMPLT: operator.lt,
-  BinaryOps.MOD: lambda x,y: abs(int(x))%abs(int(y))*(1,-1)[x<0],
-  BinaryOps.DIV: lambda x,y: int(x/y) if isinstance(x, int) else (x/y if y != 0 else x*math.inf),
+  BinaryOps.SHR: operator.rshift, BinaryOps.SHL: operator.lshift,
+  BinaryOps.MUL: operator.mul, BinaryOps.ADD: operator.add,
+  BinaryOps.XOR: operator.xor, BinaryOps.MAX: max, BinaryOps.CMPNE: operator.ne, BinaryOps.CMPLT: operator.lt,
+  BinaryOps.MOD: lambda x,y: abs(int(x))%abs(int(y))*(1,-1)[x<0], BinaryOps.IDIV: lambda x, y: int(x/y) if y != 0 else x*math.inf,
   TernaryOps.WHERE: lambda x,y,z: y if x else z}
 
+def truncate_fp16(x):
+  try:
+    x = float(x)
+    struct.pack("@e", x)
+    return x
+  except OverflowError: return math.copysign(math.inf, x)
+
 truncate: Dict[DType, Callable] = {dtypes.bool: bool,
-  # TODO: float16 and bfloat16?
-  dtypes.float32: lambda x: ctypes.c_float(x).value, dtypes.float64: lambda x: ctypes.c_double(x).value,
+  # TODO: bfloat16
+  dtypes.float16: truncate_fp16, dtypes.float32: lambda x: ctypes.c_float(x).value, dtypes.float64: lambda x: ctypes.c_double(x).value,
   dtypes.uint8: lambda x: ctypes.c_uint8(x).value, dtypes.uint16: lambda x: ctypes.c_uint16(x).value,
   dtypes.uint32: lambda x: ctypes.c_uint32(x).value, dtypes.uint64: lambda x: ctypes.c_uint64(x).value,
   dtypes.int8: lambda x: ctypes.c_int8(x).value, dtypes.int16: lambda x: ctypes.c_int16(x).value,

@@ -28,7 +28,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.addr = struct.pack("QQ", TestHCQ.b.lazydata.buffer._buf.va_addr, TestHCQ.a.lazydata.buffer._buf.va_addr)
     TestHCQ.addr2 = struct.pack("QQ", TestHCQ.a.lazydata.buffer._buf.va_addr, TestHCQ.b.lazydata.buffer._buf.va_addr)
     TestHCQ.kernargs_off = TestHCQ.runner.clprg.kernargs_offset
-    TestHCQ.kernargs_size = TestHCQ.runner.clprg.kernargs_segment_size
+    TestHCQ.kernargs_size = TestHCQ.runner.clprg.kernargs_alloc_size
     ctypes.memmove(TestHCQ.d0.kernargs_ptr+TestHCQ.kernargs_off, TestHCQ.addr, len(TestHCQ.addr))
     ctypes.memmove(TestHCQ.d0.kernargs_ptr+TestHCQ.kernargs_size+TestHCQ.kernargs_off, TestHCQ.addr2, len(TestHCQ.addr2))
 
@@ -98,9 +98,9 @@ class TestHCQ(unittest.TestCase):
 
   def test_update_exec(self):
     q = TestHCQ.compute_queue()
-    exec_ptr = q.ptr()
+    exec_cmd_idx = len(q)
     q.exec(TestHCQ.runner.clprg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size)
-    q.update_exec(exec_ptr, (1,1,1), (1,1,1))
+    q.update_exec(exec_cmd_idx, (1,1,1), (1,1,1))
     q.signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
     TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1

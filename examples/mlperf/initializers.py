@@ -41,7 +41,7 @@ class LinearBert(nn.Linear):
     self.bias = Tensor.zeros(out_features, dtype=dtypes.float32) if bias else None
   
   def __call__(self, x:Tensor):
-    return x.linear(self.weight.cast(dtypes.default_float).transpose(), self.bias.cast(dtypes.default_float) if self.bias is not None else None)
+    return x.cast(dtypes.default_float).linear(self.weight.cast(dtypes.default_float).transpose(), self.bias.cast(dtypes.default_float) if self.bias is not None else None)
 
 class EmbeddingBert(nn.Embedding):
   def __init__(self, vocab_size:int, embed_size:int, std=0.02):

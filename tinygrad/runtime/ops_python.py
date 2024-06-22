@@ -1,3 +1,4 @@
+# pylint: disable=cell-var-from-loop
 # a python uops emulator
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
@@ -7,9 +8,9 @@ from tinygrad.dtype import DType, dtypes, ImageDType
 from tinygrad.helpers import all_same, getenv, flatten
 from tinygrad.device import Compiled, Compiler, Allocator
 from tinygrad.codegen.uops import UOpGraph, UOps
-from tinygrad.ops import BinaryOps, TernaryOps, exec_alu
+from tinygrad.ops import BinaryOps, TernaryOps, exec_alu, truncate
 from tinygrad.renderer import Renderer
-from tinygrad.renderer.cstyle import CUDARenderer, MetalRenderer, HIPRenderer
+from tinygrad.renderer.cstyle import CUDARenderer, MetalRenderer, AMDRenderer
 
 def _load(m, i):
   if i < 0 or i >= len(m): raise IndexError(f"load out of bounds, size is {len(m)} and access is {i}")
@@ -17,7 +18,7 @@ def _load(m, i):
 
 def load(inp, j=0):
   if len(inp) == 4: return [_load(m, x+j) if gate else default for m,x,gate,default in zip(*inp)]
-  else: return [_load(m, x+j) for m,x in zip(inp[0], inp[1])]
+  return [_load(m, x+j) for m,x in zip(inp[0], inp[1])]
 
 def _store(m, i, v):
   if i < 0 or i >= len(m): raise IndexError(f"store out of bounds, size is {len(m)}, access is {i}, value is {v}")
@@ -99,7 +100,7 @@ class PythonProgram:
               del ul[i]
               i = loop_ends[i] + 1
               continue
-        elif uop in {UOps.CAST, UOps.BITCAST}:
+        elif uop in (UOps.CAST, UOps.BITCAST):
           if dtype.count > 1: ul[i] = inp
           else:
             assert dtp[0].fmt and dtype.fmt
@@ -107,9 +108,12 @@ class PythonProgram:
             if uop is UOps.BITCAST: ul[i] = list(struct.unpack(unpack_format, struct.pack(pack_format, *inp[0])))
             else:
               casted = [dtypes.as_const(x, dtype) for x in inp[0]]
-              overflow_adjust = 2**(dtype.itemsize*8 - 1) if (dtypes.is_int(dtype) and not dtypes.is_unsigned(dtype)) else 0
-              overflow_fixed = [((x + overflow_adjust) % 2**(dtype.itemsize*8) - overflow_adjust) if dtypes.is_int(dtype) else x for x in casted]
-              ul[i] = list(struct.unpack(unpack_format, struct.pack(unpack_format, *overflow_fixed)))
+              if dtypes.is_int(dtype):
+                overflow_adjust = 2**(dtype.itemsize*8 - 1) if not dtypes.is_unsigned(dtype) else 0
+                casted = [((x + overflow_adjust) % 2**(dtype.itemsize*8) - overflow_adjust) for x in casted]
+              elif dtypes.is_float(dtype):
+                casted = [truncate.get(dtype, lambda dt: dt)(x) for x in casted]
+              ul[i] = list(struct.unpack(unpack_format, struct.pack(unpack_format, *casted)))
         elif uop is UOps.LOAD:
           if isinstance(dtp[0], ImageDType):
             assert dtype.count == 4
@@ -154,13 +158,13 @@ class PythonProgram:
             # (i, j), C, D (2 elements on 32 threads): row major same as A/B
             def c_map(lane, elem): return (elem + ((lane%2)*2) + ((lane//8)%2)*4, ((lane//2)%4) + (lane//16)*4)
             ul[i] = wmma_helper(32, 8, 2, 2, 2, a_b_elem, a_b_elem, c_map)
-          elif arg[5] == "HSA":
+          elif arg[5] == "AMD":
             # A (16 elements on 32 threads): col major, lane 16-32 == lane 0-15
             def a_elem(x, i, j, goff):
               assert x[i][goff+j] == x[i][goff+j+16], "warp elements not duplicated properly across lanes"
               return x[i][goff+j]
             # B (16 elements on 32 threads): row major, lane 16-32 == lane 0-15
-            def b_elem(x, i, j, goff): return a_elem(x, j, i, goff)
+            def b_elem(x, i, j, goff): return a_elem(x, j, i, goff)  # pylint: disable=arguments-out-of-order
             def c_map(lane, elem): return (lane%16, lane//16+elem*2) # (i, j), C, D (8 elements on 32 threads): row major
             ul[i] = wmma_helper(32, 16, 16, 16, 8, a_elem, b_elem, c_map)
           elif arg[5] == "CUDA":
@@ -174,7 +178,7 @@ class PythonProgram:
           else: raise NotImplementedError(f"unimplemented tensor core {arg}")
         elif uop is UOps.ALU:
           assert all_same([len(x) for x in inp]), f"{[len(x) for x in inp]} doesn't match on {arg}"
-          assert all_same([dtype] + dtp) or arg in {BinaryOps.CMPEQ, BinaryOps.CMPLT, TernaryOps.WHERE}, f"dtype mismatch on {arg}"
+          assert all_same([dtype] + dtp) or arg in {BinaryOps.CMPNE, BinaryOps.CMPLT, TernaryOps.WHERE}, f"dtype mismatch on {arg}"
           ul[i] = [exec_alu(arg, dtype, p) for p in zip(*inp)]
         assert i in ul, (uop, dtype, idp, arg)
         i += 1
@@ -184,11 +188,11 @@ class PythonRenderer(Renderer):
   device = "PYTHON"
   def __init__(self):
     if getenv("EMULATE_METAL"): self.device, self.tensor_cores = "METAL", MetalRenderer.tensor_cores
-    if getenv("EMULATE_HSA"): self.device, self.tensor_cores = "HSA", HIPRenderer.tensor_cores
+    if getenv("EMULATE_AMD"): self.device, self.tensor_cores = "AMD", AMDRenderer.tensor_cores
     if getenv("EMULATE_CUDA"): self.device, self.tensor_cores = "CUDA", CUDARenderer.tensor_cores
 
   def render(self, name:str, uops:UOpGraph) -> str:
-    lops = [(u.uop, u.dtype, [uops.uops.index(v) for v in u.vin], u.arg) for u in uops]
+    lops = [(u.op, u.dtype, [uops.uops.index(v) for v in u.src], u.arg) for u in uops]
     return base64.b64encode(pickle.dumps(lops)).decode()
 
 class PythonCompiler(Compiler):

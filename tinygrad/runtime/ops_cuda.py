@@ -7,7 +7,7 @@ from tinygrad.helpers import DEBUG, getenv, from_mv, to_char_p_p, init_c_var, in
 from tinygrad.device import Compiled, Compiler, CompileError, BufferOptions, LRUAllocator, MallocAllocator
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.renderer.assembly import PTXRenderer
-if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl  # noqa: F401
+if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl  # noqa: F401  # pylint: disable=unused-import
 
 def pretty_ptx(s):
   # all expressions match `<valid_before><expr><valid_after>` and replace it with `<valid_before>color(<expr>)<valid_after>`
@@ -119,9 +119,9 @@ class CUDAAllocator(LRUAllocator):
   def _alloc(self, size, options:BufferOptions):
     check(cuda.cuCtxSetCurrent(self.device.context))
     if options.host: return init_c_var(ctypes.c_void_p(), lambda x: check(cuda.cuMemHostAlloc(ctypes.byref(x), size, 0x01)))
-    else: return init_c_var(cuda.CUdeviceptr(), lambda x: check(cuda.cuMemAlloc_v2(ctypes.byref(x), size)))
+    return init_c_var(cuda.CUdeviceptr(), lambda x: check(cuda.cuMemAlloc_v2(ctypes.byref(x), size)))
   def _free(self, opaque, options:BufferOptions):
-    if options.host: return check(cuda.cuMemFreeHost(opaque))
+    if options.host: check(cuda.cuMemFreeHost(opaque))
     else: check(cuda.cuMemFree_v2(opaque))
   def copyin(self, dest, src:memoryview):
     check(cuda.cuCtxSetCurrent(self.device.context))

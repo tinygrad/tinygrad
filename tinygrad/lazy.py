@@ -22,7 +22,7 @@ def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Op]=
   if enable_cache: lazycache[cache_key] = ret
   return ret
 
-view_supported_devices = {"LLVM", "CLANG", "CUDA", "DISK"}
+view_supported_devices = {"LLVM", "CLANG", "CUDA", "NV", "AMD", "DISK"}
 class LazyBuffer:
   def __init__(self, device:str, st:ShapeTracker, dtype:DType,
                op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
@@ -97,9 +97,6 @@ class LazyBuffer:
     if self.device.startswith("DISK") and not bitcast: raise RuntimeError("attempted to cast disk buffer (bitcast only)")
     if self.is_unrealized_unmasked_const() and not bitcast:
       return create_lazybuffer(self.device, self.st, dtype, LoadOps.CONST, dtypes.as_const(self.base.arg, dtype))
-    # TODO: applying this makes gpt2 slower
-    if getenv("CAST_BEFORE_VIEW", 1) and dtype.itemsize <= self.dtype.itemsize and self != self.base:
-      return self.base.cast(dtype, bitcast)._view(self.st)
     new_shape = self.shape
     if bitcast and self.dtype.itemsize != dtype.itemsize:
       if not self.device.startswith("DISK"): raise RuntimeError("shape changing bitcast only supported on DISK right now")
@@ -107,6 +104,9 @@ class LazyBuffer:
       # https://pytorch.org/docs/stable/generated/torch.Tensor.view.html
       if not (new_shape[-1]*self.dtype.itemsize) % dtype.itemsize == 0: raise RuntimeError("unsupported size in bitcast")
       new_shape = new_shape[:-1] + ((new_shape[-1]*self.dtype.itemsize) // dtype.itemsize,)
+    elif getenv("CAST_BEFORE_VIEW", 1) and dtype.itemsize <= self.dtype.itemsize and self != self.base:
+      # TODO: applying this makes gpt2 slower
+      return self.base.cast(dtype, bitcast)._view(self.st)
     cast_op = UnaryOps.BITCAST if bitcast else UnaryOps.CAST
     return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), dtype, cast_op, dtype, (self,))
 
@@ -146,24 +146,22 @@ class LazyBuffer:
     if op is TernaryOps.WHERE: assert srcs[0].dtype == dtypes.bool, "TernaryOps.WHERE must have the first arg be bool"
     if op is UnaryOps.NEG: assert srcs[0].dtype != dtypes.bool, "UnaryOps.NEG does not accept dtype bool"
 
-    out_dtype = dtypes.bool if op in (BinaryOps.CMPLT, BinaryOps.CMPEQ) else srcs[-1].dtype
+    out_dtype = dtypes.bool if op in (BinaryOps.CMPLT, BinaryOps.CMPNE) else srcs[-1].dtype
 
     # const folding
     if op in python_alu and all(s.is_unrealized_unmasked_const() for s in srcs):
       return self.cast(out_dtype).const(exec_alu(op, out_dtype, [s.base.arg for s in srcs]))
     if op is UnaryOps.NEG and self.base.op is UnaryOps.NEG: return self.base.srcs[0]
-    if op in BinaryOps: x, y = self, in_srcs[0]
-    if op is BinaryOps.ADD:
-      if y.is_unrealized_unmasked_const() and y.base.arg == 0: return x # pylint: disable=possibly-used-before-assignment
-      if x.is_unrealized_unmasked_const() and x.base.arg == 0: return y # pylint: disable=possibly-used-before-assignment
-    if op is BinaryOps.SUB and y.is_unrealized_unmasked_const() and y.base.arg == 0: return x
-    if op is BinaryOps.MUL:
-      if x.is_unrealized_unmasked_const() and (val := x.base.arg) in (1, 0, -1):
-        return y if val == 1 else y.const(0) if val == 0 else y.e(UnaryOps.NEG)
-      if y.is_unrealized_unmasked_const() and (val := float(y.base.arg)) in (1, 0, -1):
-        return x if val == 1 else x.const(0) if val == 0 else x.e(UnaryOps.NEG)
-    if op is BinaryOps.DIV and dtypes.is_float(x.dtype) and y.is_unrealized_unmasked_const() and y.base.arg != 0:
-      return x.e(BinaryOps.MUL, x.const(1 / y.base.arg))
+    if op in BinaryOps:
+      x, y = self, in_srcs[0]
+      if op is BinaryOps.ADD:
+        if y.is_unrealized_unmasked_const() and y.base.arg == 0: return x
+        if x.is_unrealized_unmasked_const() and x.base.arg == 0: return y
+      if op is BinaryOps.MUL:
+        if x.is_unrealized_unmasked_const() and (val := x.base.arg) in (1, 0, -1):
+          return y if val == 1 else y.const(0) if val == 0 else y.e(UnaryOps.NEG)
+        if y.is_unrealized_unmasked_const() and (val := y.base.arg) in (1, 0, -1):
+          return x if val == 1 else x.const(0) if val == 0 else x.e(UnaryOps.NEG)
 
     return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), out_dtype, op, arg, tuple(srcs))
 
@@ -171,7 +169,7 @@ class LazyBuffer:
 
   def _reduce_op(self, op:ReduceOps, axis:Tuple[int, ...]) -> LazyBuffer:
     assert all(0 <= x < len(self.shape) for x in axis), f"axis args {axis} out of range for shape {self.shape}"
-    axis = tuple(x for x in axis if self.shape[x] != 1)
+    axis = tuple(sorted([x for x in axis if self.shape[x] != 1]))
     if len(axis) == 0: return self
     new_shape = tuple(1 if i in axis else s for i,s in enumerate(self.shape))
     return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), self.dtype, op, axis, (self,))
