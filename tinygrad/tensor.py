@@ -7,7 +7,7 @@ from collections import defaultdict
 import numpy as np
 
 from tinygrad.dtype import DType, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype
-from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, get_shape, fully_flatten
+from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, get_shape, fully_flatten, dedup
 from tinygrad.helpers import IMAGE, DEBUG, WINO, THREEFRY
 from tinygrad.lazy import LazyBuffer
 from tinygrad.multi import MultiLazyBuffer
@@ -766,9 +766,11 @@ class Tensor:
     print(t.reshape(2, 3).numpy())
     ```
     """
-    new_shape = argfix(shape, *args)
-    if new_shape.count(-1) > 1: raise RuntimeError(f"only one dimension can be inferred using -1, getting {new_shape}")
-    new_shape = tuple([-prod(self.shape) // prod(new_shape) if s == -1 else (s if s is not None else self.shape[i]) for i,s in enumerate(new_shape)])
+    # resolve None and args
+    new_shape = tuple([s if s is not None else self.shape[i] for i,s in enumerate(argfix(shape, *args))])
+    # resolve -1
+    if (c := new_shape.count(-1)) > 1: raise RuntimeError(f"only one dimension can be inferred using -1, getting {new_shape}")
+    elif c: new_shape = tuple([-prod(self.shape) // prod(new_shape) if s == -1 else s for s in new_shape])
     return F.Reshape.apply(self, shape=new_shape) if new_shape != self.shape else self
 
   def expand(self, shape, *args) -> Tensor:
@@ -799,7 +801,9 @@ class Tensor:
     print(t.permute(1, 0).numpy())
     ```
     """
-    return F.Permute.apply(self, order=argfix(order, *args))
+    order_arg = tuple(self._resolve_dim(x) for x in argfix(order, *args))
+    if sorted(order_arg) != list(range(self.ndim)): raise RuntimeError(f"order is not a valid permutation, getting {order_arg}")
+    return F.Permute.apply(self, order=order_arg)
 
   def flip(self, axis, *args) -> Tensor:
     """
@@ -817,7 +821,9 @@ class Tensor:
     print(t.flip((0, 1)).numpy())
     ```
     """
-    return F.Flip.apply(self, axis=[x if x >= 0 else x+len(self.shape) for x in argfix(axis, *args)])
+    axis_arg = tuple(self._resolve_dim(x) for x in argfix(axis, *args))
+    if len(axis_arg) != len(dedup(axis_arg)): raise RuntimeError(f"dim can appear at least once, getting {axis_arg}")
+    return F.Flip.apply(self, axis=axis_arg)
 
   def shrink(self, arg:Tuple[Optional[Tuple[sint, sint]], ...]) -> Tensor:
     """
@@ -896,7 +902,7 @@ class Tensor:
     # treat internal tuples and lists as Tensors and standardize indices to list type
     if isinstance(indices, list) and all_int(indices): indices = [Tensor(indices, self.device, requires_grad=False)]
     elif isinstance(indices, (tuple, list)):
-      indices = [Tensor(list(i), self.device, requires_grad=False) if isinstance(i, (tuple, list)) else i for i in indices]
+      indices = [Tensor(i, self.device, requires_grad=False) if isinstance(i, (tuple, list)) else i for i in indices]
     else: indices = [indices]
 
     # turn scalar Tensors into const val for int indexing if possible
@@ -908,7 +914,7 @@ class Tensor:
     ellipsis_idx = [dim for dim, i in enumerate(indices) if i is Ellipsis]
     fill_idx = ellipsis_idx[0] if ellipsis_idx else len(indices)
     num_indices = len(indices) - len(ellipsis_idx) - sum(1 for i in indices if i is None)
-    indices[fill_idx:fill_idx+1] = [slice(None)] * (len(self.shape) - num_indices)
+    indices[fill_idx:fill_idx+1] = [slice(None)] * (self.ndim - num_indices)
 
     # use Dict[type, List[dimension]] to track elements in indices
     type_dim: DefaultDict[Union[type, None], List[int]] = defaultdict(list)
@@ -919,9 +925,9 @@ class Tensor:
     indices_filtered = [i for i in indices if i is not None]
     for dim,i in enumerate(indices_filtered): type_dim[type(i)].append(dim)
 
+    if len(ellipsis_idx) > 1: raise IndexError("indices can only have a single ellipsis ('...')")
     for index_type in type_dim:
       if index_type not in [None, int, slice, Tensor]: raise IndexError(f"{index_type=} not supported")
-    if len(ellipsis_idx) > 1: raise IndexError("indices can only have a single ellipsis ('...')")
     if num_indices > self.ndim: raise IndexError(f"too many {num_indices=} for {self.ndim=}")
 
     # 2. basic indexing, uses only movement ops (no copy)
@@ -1255,16 +1261,16 @@ class Tensor:
 
   # ***** reduce ops *****
 
-  def _reduce(self, fxn:Type[Function], axis:Optional[Union[int, Tuple[int, ...]]]=None, keepdim=False) -> Tensor:
+  def _reduce(self, fxn:Type[Function], axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False) -> Tensor:
     if self.ndim == 0:
-      if axis is not None and axis not in [-1, 0]: raise IndexError(f"{axis=} out of range of [-1, 0]")
-      axis = None
+      if axis is not None and any(a not in [-1, 0] for a in fully_flatten([axis])): raise IndexError(f"{axis=} out of range of [-1, 0]")
+      axis = ()
     axis_: Tuple[int, ...] = tuple(range(len(self.shape))) if axis is None else ((axis,) if isinstance(axis, int) else tuple(axis))
     axis_ = tuple(self._resolve_dim(x) for x in axis_)
     ret = fxn.apply(self, axis=axis_)
     return ret if keepdim else ret.reshape(tuple(s for i,s in enumerate(self.shape) if i not in axis_))
 
-  def sum(self, axis=None, keepdim=False, acc_dtype:Optional[DType]=None):
+  def sum(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False, acc_dtype:Optional[DType]=None):
     """
     Sums the elements of the tensor along the specified axis or axes.
 
@@ -1291,7 +1297,7 @@ class Tensor:
     ret = self.cast(acc_dtype or sum_acc_dtype(self.dtype))._reduce(F.Sum, axis, keepdim)
     return ret.cast(self.dtype) if acc_dtype is None and self.dtype in (dtypes.float16, dtypes.bfloat16) else ret
 
-  def max(self, axis=None, keepdim=False):
+  def max(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False):
     """
     Returns the maximum value of the tensor along the specified axis or axes.
 
@@ -1314,7 +1320,7 @@ class Tensor:
     """
     return self._reduce(F.Max, axis, keepdim)
 
-  def min(self, axis=None, keepdim=False):
+  def min(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False):
     """
     Returns the minimum value of the tensor along the specified axis or axes.
 
@@ -1337,7 +1343,7 @@ class Tensor:
     """
     return -((-self).max(axis=axis, keepdim=keepdim))
 
-  def mean(self, axis=None, keepdim=False):
+  def mean(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False):
     """
     Returns the mean value of the tensor along the specified axis or axes.
 
@@ -1363,7 +1369,7 @@ class Tensor:
     numerator = self.cast(sum_acc_dtype(self.dtype)).sum(axis=axis, keepdim=keepdim)
     return numerator.div(prod([si for si, so in zip(self.shape, self.sum(axis=axis, keepdim=True).shape) if si != so])).cast(output_dtype)
 
-  def var(self, axis=None, keepdim=False, correction=1):
+  def var(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False, correction=1):
     """
     Returns the variance of the tensor along the specified axis or axes.
 
@@ -1389,7 +1395,7 @@ class Tensor:
     n = prod([si for si, so in zip(self.shape, squares.sum(axis=axis, keepdim=True).shape) if si != so])
     return squares.sum(axis=axis, keepdim=keepdim).div(max(0, n-correction))
 
-  def std(self, axis=None, keepdim=False, correction=1):
+  def std(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False, correction=1):
     """
     Returns the standard deviation of the tensor along the specified axis or axes.
 
@@ -1512,9 +1518,7 @@ class Tensor:
     print(t.argmax(axis=1).numpy()) # Returns the indices of the maximum values along axis 1.
     ```
     """
-    if axis is None:
-      idx = (self == self.max(axis)) * Tensor.arange(prod(self.shape)-1,-1,-1, requires_grad=False, device=self.device).reshape(self.shape)
-      return (prod(self.shape) - idx.max() - 1).cast(dtypes.int32)
+    if axis is None: return self.flatten().argmax(0)
     axis = self._resolve_dim(axis)
     m = self == self.max(axis=axis, keepdim=True)
     idx = m * Tensor.arange(self.shape[axis]-1,-1,-1, requires_grad=False, device=self.device).reshape(self.shape[axis], *[1]*(self.ndim-axis-1))
@@ -1619,8 +1623,9 @@ class Tensor:
     print(t.avg_pool2d().numpy())
     ```
     """
-    return self._pool(
-      make_pair(kernel_size), stride if stride is not None else kernel_size, dilation).mean(axis=tuple(range(0-len(make_pair(kernel_size)), 0)))
+    kernel_size = make_pair(kernel_size)
+    return self._pool(kernel_size, stride if stride is not None else kernel_size, dilation).mean(axis=tuple(range(-len(kernel_size), 0)))
+
   def max_pool2d(self, kernel_size=(2,2), stride=None, dilation=1):
     """
     Applies max pooling over a tensor.
@@ -1634,8 +1639,8 @@ class Tensor:
     print(t.max_pool2d().numpy())
     ```
     """
-    return self._pool(
-      make_pair(kernel_size), stride if stride is not None else kernel_size, dilation).max(axis=tuple(range(0-len(make_pair(kernel_size)), 0)))
+    kernel_size = make_pair(kernel_size)
+    return self._pool(kernel_size, stride if stride is not None else kernel_size, dilation).max(axis=tuple(range(-len(kernel_size), 0)))
 
   def conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0, acc_dtype:Optional[DType]=None) -> Tensor:
     """

@@ -325,18 +325,15 @@ class UOpGraph:
     # dedup all nodes
     # TODO: i feel like this BFS is written in a few places, possible to library it?
     unprocessed_nodes = [sink]
-    early_in_degree: DefaultDict[UOp, int] = defaultdict(int)
+    early_in_degree: Dict[UOp, int] = {}
     children: DefaultDict[UOp, List[UOp]] = defaultdict(list)
-    all_nodes: Dict[UOp, None] = dict()
     while len(unprocessed_nodes):
       n = unprocessed_nodes.pop(0)
-      if n in all_nodes: continue
-      all_nodes[n] = None
-      for x in n.src:
-        early_in_degree[n] += 1
-        children[x].append(n)
+      if n in early_in_degree: continue
+      early_in_degree[n] = len(n.src)
+      for x in n.src: children[x].append(n)
       unprocessed_nodes += list(n.src)
-    early_queue = [x for x in all_nodes if early_in_degree[x] == 0]
+    early_queue = [k for k, v in early_in_degree.items() if v == 0]
     replace_nodes: Dict[UOp, UOp] = {}
     while len(early_queue):
       n = early_queue.pop(0)
@@ -468,8 +465,8 @@ class UOpGraph:
         if uop is UOps.DEFINE_ACC: arg = arg[0]
         assert dtype is not None and type(arg) is type(dtypes.as_const(arg, dtype)), f"type of {arg=} does not match {dtype}"
       if uop in {UOps.CAST, UOps.BITCAST}: assert arg is None   # type is the output type, not an arg
-      if uop is UOps.LOAD and len(src) > 2 and src[2].op not in {UOps.IF, UOps.BARRIER}: assert src[2].dtype is dtypes.bool
-      if uop is UOps.STORE and len(src) == 4: assert src[3].dtype is dtypes.bool
+      if uop is UOps.LOAD and len(src) > 2 and src[2].op not in {UOps.IF, UOps.BARRIER}: assert src[2].dtype == dtypes.bool
+      if uop is UOps.STORE and len(src) == 4: assert src[3].dtype == dtypes.bool
       if uop is UOps.ALU:
         if arg in UnaryOps:
           assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"

@@ -4,7 +4,7 @@ from typing import List, Any, DefaultDict, Union
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LoadOps, BufferOps, TernaryOps, LazyOp
 from tinygrad.device import Device
 from tinygrad.helpers import GRAPHPATH, DEBUG, GlobalCounters, getenv
-from tinygrad.codegen.linearizer import UOps, UOp
+from tinygrad.codegen.uops import UOps, UOp
 from tinygrad.shape.symbolic import NumNode
 from tinygrad.lazy import LazyBuffer
 
