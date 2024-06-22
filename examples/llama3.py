@@ -6,7 +6,7 @@ from tiktoken.load import load_tiktoken_bpe
 from extra.models.llama import Transformer, convert_from_huggingface, fix_bf16
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
 from tinygrad import Tensor, dtypes, nn, Context, Device, GlobalCounters
-from tinygrad.helpers import Profiling, Timing, DEBUG, colored, fetch, tinytqdm
+from tinygrad.helpers import Profiling, Timing, DEBUG, colored, fetch, tqdm
 
 class Tokenizer:
   pat_str = r"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"
@@ -93,7 +93,7 @@ def NF4Linear(block_size):
     -1.0, -0.6961928009986877, -0.5250730514526367, -0.39491748809814453, -0.28444138169288635, -0.18477343022823334, -0.09105003625154495, 0.0,
     0.07958029955625534, 0.16093020141124725, 0.24611230194568634, 0.33791524171829224, 0.44070982933044434, 0.5626170039176941, 0.7229568362236023, 1.0,
   ]
-  CODE = Tensor.stack(*[Tensor(c) for c in _CODE])
+  CODE = Tensor.stack(*[Tensor(c, dtype=dtypes.float16) for c in _CODE])
   class _NF4Linear:
     def __init__(self, in_features, out_features, bias=False):
       assert not bias, "bias not supported"
@@ -196,7 +196,7 @@ def prefill(model, toks, start_pos=0):
     toks = toks[i:]
 
   # prefill the model
-  for tok in tinytqdm(toks):
+  for tok in tqdm(toks):
     GlobalCounters.reset()
     model(Tensor([[tok]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P).realize()
     start_pos += 1
