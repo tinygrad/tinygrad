@@ -2,7 +2,7 @@
 import numpy as np
 import unittest
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.lazy import LazyBuffer, ReduceOps
+from tinygrad.lazy import LazyBuffer, ReduceOps, LoadOps
 from tinygrad.engine.schedule import create_schedule
 
 class TestLazyBuffer(unittest.TestCase):
@@ -91,6 +91,27 @@ class TestReduceOp(unittest.TestCase):
     assert len(sched) == 2
     for s in sched:
       assert s.ast[0].src[0].op is ReduceOps.SUM
+
+class TestView(unittest.TestCase):
+  def test_all_masked_out(self):
+    # start with non CONST LoadOps
+    a = Tensor.rand(10, 10)
+    assert a.lazydata.base.op is not LoadOps.CONST
+
+    # all masked out, degrades to const 0
+    b = a.pad(((0, 10), None))[10:]
+    assert b.shape == (10, 10)
+    assert b.lazydata.base.op is LoadOps.CONST and b.lazydata.base.arg == 0
+
+    # mask out dim = 1 works too
+    b = a.pad((None, (0, 10)))[:, 10:]
+    assert b.shape == (10, 10)
+    assert b.lazydata.base.op is LoadOps.CONST and b.lazydata.base.arg == 0
+
+    # partial masked out does not degrade into CONST
+    b = a.pad(((0, 5), None))[5:]
+    assert b.shape == (10, 10)
+    assert b.lazydata.base.op is not LoadOps.CONST
 
 if __name__ == "__main__":
   unittest.main()

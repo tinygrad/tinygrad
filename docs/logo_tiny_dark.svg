@@ -1,18 +1,11 @@
-<svg viewBox="-10 -10 150 70" xmlns="http://www.w3.org/2000/svg" style="background-color: transparent;">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-10 -10 150 70" shape-rendering="crispEdges" fill="#fff">
   <!-- t -->
-  <rect x="10" y="0" width="10" height="40" fill="#ffffff" />
-  <rect x="0" y="10" width="30" height="10" fill="#ffffff" />
-  <rect x="10" y="30" width="20" height="10" fill="#ffffff" />
+  <polygon points="10,40 10,20 0,20 0,10 10,10 10,0 20,0 20,10 30,10 30,20 20,20 20,30 30,30 30,40" />
   <!-- i -->
-  <rect x="40" y="0" width="10" height="10" fill="#ffffff" />
-  <rect x="40" y="20" width="10" height="20" fill="#ffffff" />
+  <polygon points="40,40 40,20 50,20 50,40" />
+  <polygon points="40,10 40,0 50,0 50,10" />
   <!-- n -->
-  <rect x="60" y="10" width="10" height="30" fill="#ffffff" />
-  <rect x="60" y="10" width="20" height="10" fill="#ffffff" />
-  <rect x="80" y="20" width="10" height="20" fill="#ffffff" />
+  <polygon points="60,40 60,10 80,10 80,40 90,40 90,20 70,20 70,40" />
   <!-- y -->
-  <rect x="100" y="10" width="10" height="20" fill="#ffffff" />
-  <rect x="100" y="20" width="30" height="10" fill="#ffffff" />
-  <rect x="120" y="10" width="10" height="30" fill="#ffffff" />
-  <rect x="100" y="40" width="20" height="10" fill="#ffffff" />
+  <polygon points="100,50 100,40 130,40 130,10 120,10 120,20 110,20 110,10 100,10 100,30 120,30 120,50" />
 </svg>

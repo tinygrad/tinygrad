@@ -88,6 +88,7 @@ if __name__ == "__main__":
   optim_g = optim.Adam(get_parameters(generator),lr=0.0002, b1=0.5)  # 0.0002 for equilibrium!
   optim_d = optim.Adam(get_parameters(discriminator),lr=0.0002, b1=0.5)
   # training loop
+  Tensor.training = True
   for epoch in (t := trange(epochs)):
     loss_g, loss_d = 0.0, 0.0
     for _ in range(n_steps):

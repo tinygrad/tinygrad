@@ -5,7 +5,7 @@ from tinygrad import dtypes
 from tinygrad.helpers import BEAM, getenv
 from tinygrad.device import Device, Compiled
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.features.search import time_linearizer, beam_search, bufs_from_lin
+from tinygrad.engine.search import time_linearizer, beam_search, bufs_from_lin
 
 
 if __name__ == '__main__':
@@ -25,7 +25,7 @@ if __name__ == '__main__':
 
   for i, ast_str in enumerate(ast_strs):
     print(f"optimizing {i}/{len(ast_strs)}\nast={ast_str}")
-    lin = ast_str_to_lin(ast_str, opts=device.compiler.compiler_opts)
+    lin = ast_str_to_lin(ast_str, opts=device.renderer)
     rawbufs = bufs_from_lin(lin)
     lin = beam_search(lin, rawbufs, getenv("BEAM", 8), bool(getenv("BEAM_ESTIMATE", 1)))
 

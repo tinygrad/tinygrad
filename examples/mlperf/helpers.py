@@ -2,6 +2,8 @@ from collections import OrderedDict
 import unicodedata
 import numpy as np
 from tinygrad.nn import state
+from tinygrad.tensor import Tensor
+from tinygrad.helpers import getenv
 
 #
 # checkpointing utils
@@ -32,7 +34,7 @@ def load_training_state(model, optimizer, scheduler, state_dict):
 
 def gaussian_kernel(n, std):
   from scipy import signal
-  gaussian_1d = signal.gaussian(n, std)
+  gaussian_1d = signal.windows.gaussian(n, std)
   gaussian_2d = np.outer(gaussian_1d, gaussian_1d)
   gaussian_3d = np.outer(gaussian_2d, gaussian_1d)
   gaussian_3d = gaussian_3d.reshape(n, n, n)
@@ -190,3 +192,36 @@ def get_bert_qa_prediction(features, example, start_end_logits):
     orig_text = " ".join(orig_tokens)
     return _get_final_text(tok_text, orig_text)
   return "empty"
+
+def get_mlperf_bert_config():
+  """Config is BERT-large"""
+  return {
+    "attention_probs_dropout_prob": 0.1,
+    "hidden_dropout_prob": 0.1,
+    "hidden_size": 1024,
+    "intermediate_size": 4096,
+    "max_position_embeddings": 512,
+    "num_attention_heads": 16,
+    "num_hidden_layers": 24,
+    "type_vocab_size": 2,
+    "vocab_size": 30522
+  }
+
+def get_mlperf_bert_model(checkpoint_path:str):
+  from extra.models import bert
+  from examples.mlperf.initializers import LinearBert, EmbeddingBert, LayerNormBert
+
+  bert.Linear = LinearBert
+  bert.Embedding = EmbeddingBert 
+  bert.LayerNorm = LayerNormBert
+
+  from extra.models.bert import BertForPretraining
+  config = get_mlperf_bert_config()
+  if getenv("DISABLE_DROPOUT", 0):
+    config["hidden_dropout_prob"] = config["attention_probs_dropout_prob"] = 0.0
+  return BertForPretraining(**config).load_from_pretrained(checkpoint_path)
+
+def get_data_bert(GPUS:list[str], it):
+  data: dict[str, Tensor] = next(it)
+  for key in data.keys(): data[key].shard_(GPUS, axis=0)
+  return data

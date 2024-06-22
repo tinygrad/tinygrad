@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Set, Iterable, cast
 from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, NumNode, create_lt_node, create_ge_node, sint
-from tinygrad.shape.view import View
+from tinygrad.shape.view import View, strides_for_shape
 
 def _expr_view(view:View, idxs:List[Node], valid:Optional[Node]=None) -> Tuple[Node, Node]:
   assert len(idxs) == len(view.shape), f"need an idx for all dimensions {idxs} vs {view.shape}"
@@ -25,14 +25,20 @@ class ShapeTracker:
     return ret
 
   def invert(self, out_shape:Tuple[sint, ...]) -> Optional[ShapeTracker]:
-    ret = tuple(v.invert(s) for v,s in zip(self.views[::-1], [x.shape for x in self.views[::-1][1:]]+[out_shape]))
-    return ShapeTracker(cast(Tuple[View, ...], ret)).reshape(out_shape) if all(x is not None for x in ret) else None
+    inverted_views:List[View] = []
+    for v,s in zip(self.views[::-1], [x.shape for x in self.views[::-1][1:]]+[out_shape]):
+      if (inverted:= v.invert(s)) is None: return None
+      inverted_views.append(inverted)
+    return ShapeTracker(tuple(inverted_views)).reshape(out_shape)
 
   @staticmethod
   def from_shape(shape:Tuple[sint, ...]): return ShapeTracker((View.create(shape),))
 
   @property
   def contiguous(self) -> bool: return len(self.views) == 1 and self.views[0].contiguous
+
+  @property
+  def consecutive(self) -> bool: return len(self.views) == 1 and (v:=self.views[0]).mask is None and v.strides == strides_for_shape(v.shape)
 
   @property
   def shape(self) -> Tuple[sint, ...]: return self.views[-1].shape
@@ -89,6 +95,8 @@ class ShapeTracker:
         idxs.append((idx//acc)%d)
         acc *= d
       idx, valid = _expr_view(view, idxs[::-1], valid)
+    assert not isinstance(idx.min, int) or idx.min >= -2**31, f"idx.min too small. {idx=}, {idx.min=}"
+    assert not isinstance(idx.max, int) or idx.max < 2**31, f"idx.max too big. {idx=}, {idx.max=}"
     return idx, valid
 
   def axis_is_masked(self, axis:int) -> bool:

@@ -3,7 +3,7 @@ import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import DType
 from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load
-from tinygrad.helpers import Timing, fetch, temp
+from tinygrad.helpers import Timing, fetch, temp, CI
 from test.helpers import is_dtype_supported
 
 def compare_weights_both(url):
@@ -59,7 +59,7 @@ class TestRawDiskBuffer(unittest.TestCase):
     _test_bitcasted(t, dtypes.uint32, 0)
     # pi in float16 stored via int16
     t.bitcast(dtypes.uint16).assign(Tensor.full((128, 64), 0x4248, dtype=dtypes.uint16)).realize()
-    _test_bitcasted(t, dtypes.float16, 3.141)
+    _test_bitcasted(t, dtypes.float16, 3.140625)
     _test_bitcasted(t, dtypes.float32, 50.064727)
     _test_bitcasted(t, dtypes.uint16, 0x4248)
     _test_bitcasted(t, dtypes.uint32, 0x42484248)
@@ -213,6 +213,32 @@ class TestDiskTensor(unittest.TestCase):
     pathlib.Path(temp("dt1")).unlink(missing_ok=True)
     Tensor.empty(100, 100, device=f"disk:{temp('dt1')}")
 
+  def test_simple_read(self):
+    fn = pathlib.Path(temp("dt1"))
+    fn.unlink(missing_ok=True)
+    fn.write_bytes(bytes(range(256)))
+    t = Tensor.empty(16, 16, device=f"disk:{temp('dt1')}", dtype=dtypes.uint8)
+    out = t[1].to(Device.DEFAULT).tolist()
+    assert out == list(range(16, 32))
+
+  def test_simple_read_bitcast(self):
+    fn = pathlib.Path(temp("dt1"))
+    fn.unlink(missing_ok=True)
+    fn.write_bytes(bytes(range(256))*2)
+    t = Tensor.empty(16, 16*2, device=f"disk:{temp('dt1')}", dtype=dtypes.uint8)
+    out = t[1].bitcast(dtypes.uint16).to(Device.DEFAULT).tolist()
+    tout = [(x//256, x%256) for x in out]
+    assert tout == list([(x+1,x) for x in range(32,64,2)])
+
+  def test_simple_read_bitcast_alt(self):
+    fn = pathlib.Path(temp("dt1"))
+    fn.unlink(missing_ok=True)
+    fn.write_bytes(bytes(range(256))*2)
+    t = Tensor.empty(16, 16*2, device=f"disk:{temp('dt1')}", dtype=dtypes.uint8)
+    out = t.bitcast(dtypes.uint16)[1].to(Device.DEFAULT).tolist()
+    tout = [(x//256, x%256) for x in out]
+    assert tout == list([(x+1,x) for x in range(32,64,2)])
+
   def test_write_ones(self):
     pathlib.Path(temp("dt2")).unlink(missing_ok=True)
 
@@ -251,7 +277,18 @@ class TestDiskTensor(unittest.TestCase):
 
     np.testing.assert_array_equal(t.numpy(), np.array([3] * 10))
 
-  @unittest.skipIf(Device.DEFAULT == "RHIP", "no real HIP device exists in CI")
+  def test_bitcast(self):
+    with open(temp('range_1020'), "wb") as f: f.write(bytes(range(10,20)))
+    t = Tensor.empty(5, dtype=dtypes.int16, device=f"disk:{temp('range_1020')}")
+    ret = t.to("CLANG").bitcast(dtypes.uint16) + 1
+    assert ret.tolist() == [2827, 3341, 3855, 4369, 4883]
+
+  def test_bitcast_view(self):
+    with open(temp('range_1020'), "wb") as f: f.write(bytes(range(10, 24)))
+    t = Tensor.empty(3, dtype=dtypes.uint, device=f"disk:{temp('range_1020')}").shrink([(0, 2)])
+    ret = t.bitcast(dtypes.uint16).to("CLANG") + 1
+    assert ret.tolist() == [2827, 3341, 3855, 4369]
+
   def test_bf16_disk_write_read(self):
     t = Tensor([10000, -1, -1000, -10000, 20], dtype=dtypes.float32)
     t.to(f"disk:{temp('f32')}").realize()
@@ -261,8 +298,40 @@ class TestDiskTensor(unittest.TestCase):
     adat = b''.join([dat[i+2:i+4] for i in range(0, len(dat), 4)])
     with open(temp('bf16'), "wb") as f: f.write(adat)
 
-    t = Tensor.empty(5, dtype=dtypes.bfloat16, device=f"disk:{temp('bf16')}").llvm_bf16_cast(dtypes.float)
-    assert t.numpy().tolist() == [9984., -1, -1000, -9984, 20]
+    t = Tensor.empty(5, dtype=dtypes.bfloat16, device=f"disk:{temp('bf16')}")
+    ct = t.llvm_bf16_cast(dtypes.float)
+    assert ct.numpy().tolist() == [9984., -1, -1000, -9984, 20]
+
+  def test_copy_from_disk(self):
+    fn = pathlib.Path(temp("shco1"))
+    fn.unlink(missing_ok=True)
+    fn.write_bytes(bytes(range(256))*1024)
+
+    t = Tensor.empty(256*1024, device=f"disk:{temp('shco1')}", dtype=dtypes.uint8)
+    on_dev = t.to(Device.DEFAULT).realize()
+    np.testing.assert_equal(on_dev.numpy(), t.numpy())
+
+  def test_copy_from_disk_offset(self):
+    fn = pathlib.Path(temp("shco2"))
+    fn.unlink(missing_ok=True)
+    fn.write_bytes(bytes(range(256))*1024)
+
+    for off in [314, 991, 2048, 4096]:
+      t = Tensor.empty(256*1024, device=f"disk:{temp('shco2')}", dtype=dtypes.uint8)[off:]
+      on_dev = t.to(Device.DEFAULT).realize()
+      np.testing.assert_equal(on_dev.numpy(), t.numpy())
+
+  def test_copy_from_disk_huge(self):
+    if CI and not hasattr(Device["DISK"], 'io_uring'): self.skipTest("slow on ci without iouring")
+
+    fn = pathlib.Path(temp("shco3"))
+    fn.unlink(missing_ok=True)
+    fn.write_bytes(bytes(range(256))*1024*256)
+
+    for off in [0, 551]:
+      t = Tensor.empty(256*1024*256, device=f"disk:{temp('shco3')}", dtype=dtypes.uint8)[off:]
+      on_dev = t.to(Device.DEFAULT).realize()
+      np.testing.assert_equal(on_dev.numpy(), t.numpy())
 
 if __name__ == "__main__":
   unittest.main()

@@ -4,9 +4,21 @@ from typing import Tuple, TypeVar, List, Any, cast, Set
 import tinygrad.runtime.autogen.hip as hip
 from tinygrad.helpers import DEBUG, getenv, init_c_var
 from tinygrad.helpers import from_mv, round_up, to_mv, colored, init_c_struct_t
-from tinygrad.device import Compiled, LRUAllocator, BufferOptions, JITRunner, Device, Buffer, MallocAllocator, update_stats, Compiler, CompilerOptions
+from tinygrad.device import Compiled, LRUAllocator, BufferOptions, Runner, Device, Buffer, MallocAllocator, update_stats, Compiler, CompilerOptions
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.runtime.driver.hip_comgr import compile_hip
+from tinygrad.renderer.rdna import uops_to_rdna
+
+class RDNACompiler(Compiler):
+  linearizer_opts = LinearizerOptions("HIP", has_tensor_cores=True)
+  def __init__(self, arch:str):
+    self.arch = arch
+    super().__init__(f"compile_rdna_{self.arch}")
+  def render(self, name:str, uops) -> str: return uops_to_rdna(name, uops)
+  def compile(self, src:str) -> bytes:
+    ret = compile_hip(src, self.arch, True)
+    #with open("/tmp/out.so", "wb") as f: f.write(ret)
+    return ret
 
 class HIPCompiler(Compiler):
   compiler_opts = CompilerOptions("HIP", has_tensor_cores=True, shared_max=65536)
@@ -128,7 +140,7 @@ class HIPAllocator(LRUAllocator):
     hip_set_device(self.device.device)
     check(hip.hipMemcpyAsync(dest, src, sz, hip.hipMemcpyDeviceToDevice, None))
 
-class HIPSyncEvent(JITRunner):
+class HIPSyncEvent(Runner):
   def __init__(self, lb):
     self.lb, self.device, self.dname = lb, cast(HIPDevice, Device[lb.device]), lb.device
     super().__init__()
@@ -138,7 +150,7 @@ class HIPSyncEvent(JITRunner):
     check(hip.hipStreamWriteValue32(None, rawbufs[0]._buf, 1, 0))
     update_stats(colored("sync", "red"), 0, 0, {}, None, 1, jit, device=self.dname)
 
-class HIPWaitEvent(JITRunner):
+class HIPWaitEvent(Runner):
   def __init__(self, device):
     self.device, self.dname = cast(HIPDevice, Device[device]), device
     super().__init__()
@@ -169,8 +181,8 @@ class HIPDevice(Compiled):
     else:
       self.arch = init_c_var(hip.hipDeviceProp_t(), lambda x: check(hip.hipGetDeviceProperties(x, self.device))).gcnArchName.decode()
       from tinygrad.runtime.graph.hip import HIPGraph
-      super().__init__(device, HIPAllocator(self), HIPCompiler(self.arch),
-                      functools.partial(HIPProgram, self.device), HIPGraph)
+      super().__init__(device, HIPAllocator(self), RDNACompiler(self.arch) if getenv("RDNA") else HIPCompiler(self.arch),
+                       functools.partial(HIPProgram, self.device), HIPGraph)
   def synchronize(self):
     if getenv("HIPCPU"): return
     hip_set_device(self.device)

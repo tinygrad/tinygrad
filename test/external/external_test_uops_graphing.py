@@ -3,7 +3,7 @@ import unittest
 from tinygrad.tensor import Tensor
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.renderer.cstyle import OpenCLRenderer
-from tinygrad.features.graph import graph_uops
+from tinygrad.engine.graph import graph_uops
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.nn import Conv2d
 

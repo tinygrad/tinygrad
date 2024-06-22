@@ -1,6 +1,5 @@
 from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Union
 from dataclasses import dataclass
-import numpy as np  # TODO: remove numpy
 import functools
 from tinygrad.helpers import getenv
 
@@ -18,9 +17,6 @@ class DType:
     assert sz > 1 and self.count == 1, f"can't vectorize {self} with size {sz}"
     return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self.name]}{sz}", None, sz)
   def scalar(self): return DTYPES_DICT[self.name[:-len(str(self.count))]] if self.count > 1 else self
-  # TODO: someday this will be removed with the "remove numpy" project
-  @property
-  def np(self) -> Optional[type]: return np.dtype(self.fmt).type if self.fmt is not None else None
 
 # dependent typing?
 @dataclass(frozen=True, repr=False)
@@ -47,9 +43,13 @@ class dtypes:
   @staticmethod
   def is_unsigned(x: DType) -> bool: return x.scalar() in (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
   @staticmethod
-  def from_np(x: type) -> DType: return DTYPES_DICT[np.dtype(x).name]
-  @staticmethod  # NOTE: isinstance(True, int) is True in python
-  def from_py(x) -> DType: return dtypes.default_float if isinstance(x, float) else dtypes.bool if isinstance(x, bool) else dtypes.default_int
+  def from_py(x) -> DType:
+    if x.__class__ is float: return dtypes.default_float
+    if x.__class__ is int: return dtypes.default_int
+    if x.__class__ is bool: return dtypes.bool
+    # put this in the last is faster because there are more items than lists/tuples to check
+    if x.__class__ is list or x.__class__ is tuple: return max(dtypes.from_py(xi) for xi in x) if x else dtypes.default_float
+    raise RuntimeError(f"Could not infer dtype of {x} with type {type(x)}")
   @staticmethod
   def as_const(val: ConstType, dtype:DType): return int(val) if dtypes.is_int(dtype) else float(val) if dtypes.is_float(dtype) else bool(val)
   @staticmethod
@@ -105,3 +105,9 @@ def least_upper_float(dt:DType) -> DType: return dt if dtypes.is_float(dt) else 
 # HACK: staticmethods are not callable in 3.8 so we have to compare the class
 DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not (k.startswith(('__', 'default')) or v.__class__ is staticmethod)}
 INVERSE_DTYPES_DICT = {v.name:k for k,v in DTYPES_DICT.items()}
+
+def sum_acc_dtype(dt:DType):
+  # default acc dtype for sum
+  if dtypes.is_unsigned(dt): return least_upper_dtype(dt, dtypes.uint)
+  if dtypes.is_int(dt) or dt == dtypes.bool: return least_upper_dtype(dt, dtypes.int)
+  return least_upper_dtype(dt, dtypes.float)

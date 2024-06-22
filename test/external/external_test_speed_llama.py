@@ -5,6 +5,7 @@ from tinygrad.tensor import Tensor
 from tinygrad import Device
 from tinygrad.nn.state import get_state_dict
 from tinygrad.device import Allocator
+from tinygrad.engine.realize import method_cache
 from tinygrad.helpers import Profiling
 
 class FakeProgram:
@@ -31,7 +32,7 @@ class TestLLaMASpeed(unittest.TestCase):
     print("assigned empty tensors, doing warmup")
 
     def run_llama(st, empty_method_cache=True):
-      if empty_method_cache: Device[Device.DEFAULT].get_runner.cache_clear()
+      if empty_method_cache: method_cache.clear()
       tms = [time.perf_counter()]
       for i in range(5):
         model(Tensor([[1,2,3,4]]), i).realize()

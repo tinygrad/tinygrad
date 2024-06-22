@@ -1,6 +1,10 @@
 import unittest
-from tinygrad import Tensor, Device
+from tinygrad import Tensor
 from tinygrad.engine.schedule import create_schedule
+from tinygrad.engine.realize import lower_schedule_item
+from tinygrad.codegen.uops import UOpGraph, UOps, UOp
+from tinygrad.ops import BinaryOps, TernaryOps
+from tinygrad.dtype import dtypes
 
 # TODO: can copy this in here when we remove it
 #from tinygrad.ops import get_lazyop_info
@@ -12,8 +16,8 @@ from tinygrad.engine.schedule import create_schedule
 
 def get_stats(x:Tensor):
   si = create_schedule([x.lazydata])[-1]
-  runner = Device[Device.DEFAULT].get_runner(*si.ast)
-  return runner.op_estimate, runner.mem_estimate
+  ei = lower_schedule_item(si)
+  return ei.prg.op_estimate, ei.prg.mem_estimate
 
 class TestUOpsStats(unittest.TestCase):
   def test_simple_add(self):
@@ -48,6 +52,30 @@ class TestUOpsStats(unittest.TestCase):
     assert expected_ops <= ops and ops <= expected_ops * 1.2
     # NOTE: it's hard to assert on the memory here, all depends on caching
     assert required_mem <= mem
+
+  #MULACC should have the same stats as MUL + ADD
+  def test_mulacc(self):
+    globl = UOp(UOps.DEFINE_GLOBAL, dtypes.int, tuple())
+    o1 = UOp(UOps.CONST, dtypes.int, tuple(), 1)
+    o2 = UOp(UOps.CONST, dtypes.int, tuple(), 2)
+    u1 = UOp(UOps.LOAD, dtypes.int, (globl, o1))
+    u2 = UOp(UOps.LOAD, dtypes.int, (globl, o2))
+    u3 = UOp(UOps.CONST, dtypes.int, tuple(), 3)
+    u4 = UOp(UOps.ALU, dtypes.int, (u1,u2), BinaryOps.MUL)
+    u5 = UOp(UOps.ALU, dtypes.int, (u4,u3), BinaryOps.ADD)
+    uops = UOpGraph([u5])
+
+    globl = UOp(UOps.DEFINE_GLOBAL, dtypes.int, tuple())
+    o1 = UOp(UOps.CONST, dtypes.int, tuple(), 1)
+    o2 = UOp(UOps.CONST, dtypes.int, tuple(), 2)
+    u1 = UOp(UOps.LOAD, dtypes.int, (globl, o1))
+    u2 = UOp(UOps.LOAD, dtypes.int, (globl, o2))
+    u3 = UOp(UOps.CONST, dtypes.int, tuple(), 3)
+    u4 = UOp(UOps.ALU, dtypes.int, (u1,u2,u3), TernaryOps.MULACC)
+    uops_fma = UOpGraph([u4])
+
+    self.assertEqual(uops.flops_mem(), uops_fma.flops_mem())
+
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

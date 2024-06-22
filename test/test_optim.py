@@ -1,9 +1,10 @@
 import numpy as np
 import torch
 import unittest
-from tinygrad import Tensor, Device
+from tinygrad import Tensor, Device, dtypes
 from tinygrad.nn.optim import Adam, SGD, AdamW
 from tinygrad.helpers import CI
+from test.helpers import is_dtype_supported
 
 np.random.seed(1337)
 x_init = np.random.randn(1,4).astype(np.float32)
@@ -40,8 +41,13 @@ def step(tensor, optim, steps=1, teeny=False, **kwargs):
     optim.step()
   return net.x.detach().numpy(), net.W.detach().numpy()
 
-@unittest.skipIf(CI and Device.DEFAULT == "CUDA", "slow")
+@unittest.skipIf(CI and Device.DEFAULT in {"CUDA", "NV"}, "slow")
 class TestOptim(unittest.TestCase):
+  def setUp(self):
+    self.old_training = Tensor.training
+    Tensor.training = True
+  def tearDown(self):
+    Tensor.training = self.old_training
 
   def _test_optim(self, tinygrad_optim, torch_optim, steps, opts, atol, rtol):
     for x,y in zip(step(Tensor, tinygrad_optim, steps, **opts),
@@ -104,6 +110,27 @@ class TestOptim(unittest.TestCase):
         losses.append(loss.numpy())
 
       np.testing.assert_allclose(losses[0], losses[1], atol=1e-4, rtol=0)
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  def test_mixed_precision(self):
+    old_default_float, dtypes.default_float = dtypes.default_float, dtypes.half
+    # weight update would overflow without upcasting
+    self._test_sgd(10, {'lr': 1e10}, 1e-6, 3e-4)
+    self._test_adam(1, {'lr': 1e10}, 1e-4, 1e-4)
+    self._test_adamw(1, {'lr': 1e10}, 1e-4, 1e-4)
+    dtypes.default_float = old_default_float
+
+  def test_assert_tensor_train(self):
+    t = Tensor.ones((1,1), requires_grad=True)
+    optimizer = Adam([t])
+    optimizer.zero_grad()
+    old_state = Tensor.training
+    t.sum().backward()
+    Tensor.training = False
+    self.assertRaises(AssertionError, optimizer.step)
+    Tensor.training = True
+    optimizer.step()
+    Tensor.training = old_state
 
 if __name__ == '__main__':
   unittest.main()

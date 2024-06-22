@@ -5,15 +5,19 @@ from collections import defaultdict
 from extra.optimization.helpers import load_worlds, ast_str_to_lin
 
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.codegen.linearizer import Linearizer, UOp
-from tinygrad.codegen.kernel import Opt
-from tinygrad.features.search import get_linearizer_actions, bufs_from_lin
-from tinygrad.features.graph import print_tree
+from tinygrad.tensor import _to_np_dtype
+from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.codegen.uops import UOp
+from tinygrad.codegen.kernel import Opt, OptOps
+from tinygrad.engine.search import get_linearizer_actions, bufs_from_lin
+from tinygrad.engine.graph import print_tree
+from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import getenv, from_mv, prod, colored, Context, DEBUG
 from tinygrad.ops import LazyOp, UnaryOps, BufferOps
+from test.helpers import is_dtype_supported
 
 def tuplize_uops(uops:List[UOp]) -> Tuple:
-  return tuple([(x.uop, x.dtype, tuple(uops.index(x) for x in x.vin), x.arg) for x in uops])
+  return tuple([(x.op, x.dtype, tuple(uops.index(x) for x in x.src), x.arg) for x in uops])
 
 device = Device[Device.DEFAULT]
 
@@ -28,13 +32,15 @@ def get_fuzz_rawbufs(lin):
   with Context(DEBUG=0):
     for rawbuf in rawbufs[1:]:
       if dtypes.is_unsigned(rawbuf.dtype):
-        data = np.random.randint(0, 100, size=rawbuf.size, dtype=rawbuf.dtype.np)
+        data = np.random.randint(0, 100, size=rawbuf.size, dtype=_to_np_dtype(rawbuf.dtype))
       elif dtypes.is_int(rawbuf.dtype):
-        data = np.random.randint(-100, 100, size=rawbuf.size, dtype=rawbuf.dtype.np)
+        data = np.random.randint(-100, 100, size=rawbuf.size, dtype=_to_np_dtype(rawbuf.dtype))
       elif rawbuf.dtype == dtypes.bool:
         data = np.random.choice([True, False], size=rawbuf.size)
+      elif rawbuf.dtype == dtypes.half:
+        data = np.random.uniform(-1, 1, size=rawbuf.size).astype(dtype=_to_np_dtype(rawbuf.dtype))
       else:
-        data = np.random.uniform(-10, 10, size=rawbuf.size).astype(dtype=rawbuf.dtype.np)
+        data = np.random.uniform(-10, 10, size=rawbuf.size).astype(dtype=_to_np_dtype(rawbuf.dtype))
       rawbuf.copyin(Tensor(data).realize().lazydata.realized.as_buffer())
   return rawbufs
 
@@ -53,13 +59,13 @@ def run_linearizer(lin: Linearizer, rawbufs=None, var_vals=None):
 
   # TODO: images needs required_optimization
   try:
-    prg = device.to_program(lin)
+    prg = CompiledRunner(lin.to_program())
   except Exception:
     traceback.print_exc()
     return "COMPILE_ERROR"
 
   try:
-    prg(rawbufs, var_vals, wait=True, do_update_stats=False)
+    prg(rawbufs, var_vals, wait=True)
   except Exception:
     traceback.print_exc()
     return "EXEC_ERROR"
@@ -88,7 +94,7 @@ def compare_linearizer(lin: Linearizer, rawbufs=None, var_vals=None, ground_trut
     unoptimized.required_optimizations()
     if run_linearizer(unoptimized, rawbufs, var_vals) != "PASS":
       return ("BASELINE_ERROR", rawbufs, var_vals, ground_truth,)
-    ground_truth = np.frombuffer(rawbufs[0].as_buffer(), rawbufs[0].dtype.np).copy()
+    ground_truth = np.frombuffer(rawbufs[0].as_buffer(), _to_np_dtype(rawbufs[0].dtype)).copy()
 
   rawbufs[0] = get_fuzz_rawbuf_like(rawbufs[0], zero=True) # get a new output buffer
   if (run_msg := run_linearizer(lin, rawbufs, var_vals)) != "PASS":
@@ -96,7 +102,7 @@ def compare_linearizer(lin: Linearizer, rawbufs=None, var_vals=None, ground_trut
 
   try:
     if not has_bf16:
-      result = np.frombuffer(rawbufs[0].as_buffer(), rawbufs[0].dtype.np)
+      result = np.frombuffer(rawbufs[0].as_buffer(), _to_np_dtype(rawbufs[0].dtype))
       np.testing.assert_allclose(result, ground_truth, rtol=rtol, atol=atol)
   except AssertionError as e:
     if DEBUG >= 2:
@@ -111,7 +117,7 @@ def compare_linearizer(lin: Linearizer, rawbufs=None, var_vals=None, ground_trut
 
   return ("PASS", rawbufs, var_vals, ground_truth,)
 
-def fuzz_linearizer(lin: Linearizer):
+def fuzz_linearizer(lin: Linearizer, rtol=1e-2, atol=1e-2):
   SEED = getenv("SEED", 42)
   random.seed(SEED)
   np.random.seed(SEED)
@@ -137,11 +143,15 @@ def fuzz_linearizer(lin: Linearizer):
     next_lins = []
     for lin in last_lins:
       actions = get_linearizer_actions(lin, include_0=False)
-      if FUZZ_ALL_ACTIONS: print(f"testing {lin.applied_opts=} with {len(actions)} actions")
       if not actions: continue
+      if depth == 0 and getenv("FUZZ_REQUIRE_TC", 0):
+        tc_acts = {i: k for k in actions.values() if k.applied_opts[0].op == OptOps.TC}
+        if len(tc_acts) == 0: return failures
+        else: actions = tc_acts
 
       test_lins = list(actions.values())
-      if not FUZZ_ALL_ACTIONS: test_lins = [random.choice(test_lins)]
+      if FUZZ_ALL_ACTIONS: print(f"testing {lin.applied_opts=} with {len(actions)} actions")
+      else: test_lins = [random.choice(test_lins)]
 
       for test_lin in test_lins:
         if not FUZZ_ALL_ACTIONS and test_lin.applied_opts: print(f"applied opts: {test_lin.applied_opts}")
@@ -153,7 +163,7 @@ def fuzz_linearizer(lin: Linearizer):
 
         if not FUZZ_ALL_ACTIONS: print(test_lin.colored_shape())
 
-        (msg, rawbufs, var_vals, ground_truth) = compare_linearizer(test_lin, rawbufs, var_vals, ground_truth)
+        (msg, rawbufs, var_vals, ground_truth) = compare_linearizer(test_lin, rawbufs, var_vals, ground_truth, rtol=rtol, atol=atol)
         if msg != "PASS":
           print(test_lin.ast)
           print(test_lin.applied_opts)
@@ -178,6 +188,8 @@ if __name__ == "__main__":
   parser.add_argument("--ast", type=str, default=None, help="the ast for the kernel to be optimized")
   parser.add_argument("--file", type=str, default=None, help="a file containing asts to be optimized, one per line")
   parser.add_argument("--expected-failures", type=int, default=0, help="the number of expected failed kernels")
+  parser.add_argument("--rtol", type=float, default=1e-2, help="relative tolerance for numerical comparison")
+  parser.add_argument("--atol", type=float, default=1e-2, help="absolute tolerance for numerical comparison")
   args = parser.parse_args()
 
   if args.ast is not None:
@@ -202,11 +214,15 @@ if __name__ == "__main__":
     if ast in seen_ast_strs: continue
     seen_ast_strs.add(ast)
 
+    lin = ast_str_to_lin(ast)
+    if not all(is_dtype_supported(buf.dtype) for buf in lin.bufs):
+      print("skipping kernel due to not supported dtype")
+      continue
+
     print(f"testing ast {i}")
     tested += 1
-    lin = ast_str_to_lin(ast)
 
-    fuzz_failures = fuzz_linearizer(lin)
+    fuzz_failures = fuzz_linearizer(lin, rtol=args.rtol, atol=args.atol)
     if fuzz_failures: failed_ids.append(i)
     for k, v in fuzz_failures.items():
       for f in v:

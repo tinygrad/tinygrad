@@ -1,6 +1,7 @@
 import unittest
 from PIL import Image
-from tinygrad.helpers import Context, ContextVar, merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, get_contraction
+from tinygrad.helpers import Context, ContextVar
+from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, get_contraction, get_shape
 from tinygrad.shape.symbolic import Variable, NumNode
 
 VARIABLE = ContextVar("VARIABLE", 0)
@@ -141,18 +142,24 @@ class TestRoundUp(unittest.TestCase):
     self.assertEqual(round_up(232, 24984), 24984)
     self.assertEqual(round_up(24984, 232), 25056)
 
+@unittest.skip("no fetch tests because they need internet")
 class TestFetch(unittest.TestCase):
   def test_fetch_bad_http(self):
-    self.assertRaises(Exception, fetch, 'http://www.google.com/404')
+    self.assertRaises(Exception, fetch, 'http://www.google.com/404', allow_caching=False)
 
   def test_fetch_small(self):
     assert(len(fetch('https://google.com', allow_caching=False).read_bytes())>0)
 
-  @unittest.skip("test is flaky")
   def test_fetch_img(self):
-    img = fetch("https://media.istockphoto.com/photos/hen-picture-id831791190", allow_caching=False)
+    img = fetch("https://avatars.githubusercontent.com/u/132956020", allow_caching=False)
     with Image.open(img) as pimg:
-      assert pimg.size == (705, 1024)
+      assert pimg.size == (77, 77), pimg.size
+
+  def test_fetch_subdir(self):
+    img = fetch("https://avatars.githubusercontent.com/u/132956020", allow_caching=False, subdir="images")
+    with Image.open(img) as pimg:
+      assert pimg.size == (77, 77), pimg.size
+    assert img.parent.name == "images"
 
 class TestFullyFlatten(unittest.TestCase):
   def test_fully_flatten(self):
@@ -239,6 +246,18 @@ class TestGetContraction(unittest.TestCase):
 
     r = get_contraction((1,1,1,1), (1,1,1,1))
     self.assertEqual(r, [[], [], [], [0,1,2,3]])
+
+class TestGetShape(unittest.TestCase):
+  def test_get_shape(self):
+    assert get_shape(2) == ()
+    assert get_shape([]) == (0,)
+    assert get_shape([[]]) == (1, 0)
+    assert get_shape([[1, 2]]) == (1, 2)
+    assert get_shape([[1, 2], (3, 4)]) == (2, 2)
+
+  def test_inhomogeneous_shape(self):
+    with self.assertRaises(ValueError): get_shape([[], [1]])
+    with self.assertRaises(ValueError): get_shape([[1, [2]], [1]])
 
 if __name__ == '__main__':
   unittest.main()

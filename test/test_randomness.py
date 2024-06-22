@@ -3,12 +3,12 @@ from functools import partial
 
 import numpy as np
 import torch
-from tinygrad import nn, dtypes, Tensor, Device
-from tinygrad.helpers import THREEFRY
+from tinygrad import nn, dtypes, Tensor, Device, TinyJit
+from tinygrad.helpers import THREEFRY, getenv, CI
 from test.helpers import is_dtype_supported
 from hypothesis import given, settings, strategies as strat
 
-settings.register_profile("my_profile", max_examples=200, deadline=None)
+settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
 
 # https://gist.github.com/devries/11405101
@@ -104,8 +104,7 @@ class TestRandomness(unittest.TestCase):
     self.assertTrue(equal_distribution(Tensor.randn, torch.randn, lambda x: np.random.randn(*x)))
 
   @given(strat.sampled_from([dtypes.float, dtypes.float16, dtypes.bfloat16]))
-  @unittest.skipIf(Device.DEFAULT=="RHIP", "float16 broken in HIP CI")
-  @unittest.skipIf(Device.DEFAULT=="HSA", "bfloat16 local buffer broken in HSA")
+  @unittest.skipIf(Device.DEFAULT in ["HSA", "AMD"], "bfloat16 local buffer broken in HSA")
   def test_randn_finite(self, default_float):
     if not is_dtype_supported(default_float): return
     old_default_float = dtypes.default_float
@@ -122,7 +121,11 @@ class TestRandomness(unittest.TestCase):
   def test_randint(self):
     self.assertFalse(normal_test(Tensor.randint))
     self.assertTrue(equal_distribution(partial(Tensor.randint, low=-2, high=5), numpy_func=lambda x: np.random.randint(low=-2, high=5, size=x)))
-    self.assertTrue(Tensor.randint(1,device="CLANG").device=="CLANG")
+    self.assertTrue(Tensor.randint(1, device="CLANG").device=="CLANG")
+    # check types of args
+    with self.assertRaises(TypeError): Tensor.randint((3, 4), low=0.1, high=3)
+    with self.assertRaises(TypeError): Tensor.randint((3, 4), low=0, high=3.5)
+    with self.assertRaises(TypeError): Tensor.randint((3, 4), low=0, high=3, dtype=dtypes.float32)
 
   def test_normal(self):
     self.assertTrue(normal_test(Tensor.normal))
@@ -171,9 +174,15 @@ class TestRandomness(unittest.TestCase):
     # no-replacement isn't supported, unless taking only one sample
     w = [0.1, 0.9]
     self.assertRaises(AssertionError, lambda: Tensor(w).multinomial(100, replacement=False))
-    tiny_samples = [Tensor(w).multinomial(1, replacement=False).numpy().item() for _ in range(1000)]
-    torch_samples = [torch.tensor(w).multinomial(1, replacement=False).item() for _ in range(1000)]
-    self.assertTrue(equal_distribution(lambda *_: Tensor(tiny_samples), lambda _: torch.tensor(torch_samples)))
+
+    @TinyJit
+    def sample_one(): return Tensor(w).multinomial(1, replacement=False).realize()
+
+    # TODO: fix mockgpu issue
+    if not (CI and Device.DEFAULT == "AMD"):
+      tiny_samples = [sample_one().item() for _ in range(1000)]
+      torch_samples = [torch.tensor(w).multinomial(1, replacement=False).item() for _ in range(1000)]
+      self.assertTrue(equal_distribution(lambda *_: Tensor(tiny_samples), lambda _: torch.tensor(torch_samples)))
 
   def test_multinomial_counterexample(self):
     tiny_res = Tensor([0.3, 0.6, 0.1]).multinomial(2000, replacement=True)

@@ -1,77 +1,124 @@
-import os, mmap, _posixshmem, io, functools
-from typing import Dict, List, Any
-from tinygrad.dtype import DType, dtypes
-from tinygrad.helpers import prod, OSX
-from tinygrad.device import Compiled, Allocator, JITRunner, Buffer
-from tinygrad.ops import UnaryOps, LazyOp, BufferOps
-from tinygrad.shape.view import strides_for_shape
+from __future__ import annotations
+import os, mmap, _posixshmem, io, ctypes, ctypes.util, platform
+from typing import Optional, Generator, Tuple, Callable, List
+from tinygrad.helpers import OSX, round_up
+from tinygrad.device import Compiled, Allocator
+import tinygrad.runtime.autogen.io_uring as io_uring
 
-class UnderlyingDiskBuffer:
-  def __init__(self, fd, mem): self.fd, self.mem = fd, mem
-  def __del__(self):
-    if self.fd is not None: os.close(self.fd)
+libc = ctypes.CDLL(ctypes.util.find_library("c"))
+libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
+libc.mmap.restype = ctypes.c_void_p
 
 class DiskBuffer:
-  def __init__(self, ud:UnderlyingDiskBuffer, size:int, dtype:DType=dtypes.uint8, offset=0):
-    self.ud, self.size, self.dtype, self.offset = ud, size, dtype, offset
-  def __repr__(self): return f"<DiskBuffer size={self.size} dtype={self.dtype} offset={self.offset}>"
-  def _buf(self) -> memoryview: return memoryview(self.ud.mem)[self.offset:self.offset+self.size*self.dtype.itemsize]
+  def __init__(self, device:DiskDevice, size:int, offset=0):
+    self.device, self.size, self.offset = device, size, offset
+  def __repr__(self): return f"<DiskBuffer size={self.size} offset={self.offset}>"
+  def _buf(self) -> memoryview:
+    assert self.device.mem is not None, "DiskBuffer wasn't opened"
+    return memoryview(self.device.mem)[self.offset:self.offset+self.size]
 
 MAP_LOCKED, MAP_POPULATE = 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000)
 class DiskAllocator(Allocator):
-  def __init__(self, device:str): self.device = device
+  def __init__(self, device:DiskDevice): self.device = device
   def _alloc(self, size:int, options):
-    if self.device.startswith("shm:"):
-      fd = _posixshmem.shm_open("/"+self.device[4:].lstrip("/"), os.O_RDWR, 0o600)
-      mem = mmap.mmap(fd, size, mmap.MAP_SHARED | MAP_POPULATE | MAP_LOCKED)
-      os.close(fd)
-      fd = None
-    else:
-      try: fd = os.open(self.device, os.O_RDWR|os.O_CREAT|(0 if OSX else os.O_DIRECT))
-      except OSError: fd = os.open(self.device, os.O_RDWR|os.O_CREAT)
-      if os.fstat(fd).st_size < size: os.ftruncate(fd, size)
-      mem = mmap.mmap(fd, size)
-    if (hp := getattr(mmap, "MADV_HUGEPAGE", None)) is not None: mem.madvise(hp) # type: ignore
-    return DiskBuffer(UnderlyingDiskBuffer(fd, mem), size)
+    self.device._might_open(size)
+    return DiskBuffer(self.device, size)
+  def _free(self, opaque, options): self.device._might_close()
   def as_buffer(self, src:DiskBuffer): return src._buf()
   def copyin(self, dest:DiskBuffer, src:memoryview): dest._buf()[:] = src
   def copyout(self, dest:memoryview, src:DiskBuffer):
-    if OSX and src.ud.fd is not None:
+    if OSX and hasattr(self.device, 'fd'):
       # OSX doesn't seem great at mmap, this is faster
-      with io.FileIO(src.ud.fd, "a+b", closefd=False) as fo:
+      with io.FileIO(self.device.fd, "a+b", closefd=False) as fo:
         fo.seek(src.offset)
         fo.readinto(dest)
     else:
       dest[:] = src._buf()
 
-class DiskRunner(JITRunner):
-  def __init__(self, ast:LazyOp):
-    # two ASTs are allowed here.
-    assert ast.op is BufferOps.STORE, "output of AST must be store"
-    assert ast.arg.st.contiguous, "shapetracker must be contiguous"
-    # TODO: there shouldn't actually be casts here, bitcasts should fold into the load
-    if ast.src[0].op is UnaryOps.CAST:
-      top_src = ast.src[0].src[0]
-      assert ast.src[0].arg[1], "disk only supports bitcasts, not normal casts"
-      self.new_dtype = ast.src[0].arg[0]
-    else:
-      top_src = ast.src[0]
-      self.new_dtype = top_src.arg.dtype
-    assert top_src.op is BufferOps.LOAD, "top of AST must be load"
-    assert len(top_src.arg.st.views) == 1, "shapetracker must have 1 view"
-    view = top_src.arg.st.views[0]
-    assert view.mask is None, "view cannot have a mask"
-    assert strides_for_shape(view.shape) == view.strides, "disk tensors don't support strides"
-    self.new_size = prod(view.shape)
-    self.new_offset = view.offset * top_src.arg.dtype.itemsize
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Any, int], wait=False, jit=False):
-    assert len(rawbufs) == 2
-    src = rawbufs[1]._buf
-    rawbufs[0].allocate(DiskBuffer(src.ud, self.new_size, self.new_dtype, offset=src.offset+self.new_offset))
+  def _copyout_sharded(self, src:DiskBuffer, size:int, _get_free_buf:Callable, seg_len:int) -> Generator[Tuple[int, int, int, int], None, None]:
+    assert hasattr(DiskDevice, 'io_uring'), "function requires io uring support"
+
+    fd_offset = src.offset - (minor_offset := src.offset % mmap.PAGESIZE)
+    processed_reqs_cnt, copied_in, next_read_offset, total_copy_size = 0, 0, 0, round_up(size + minor_offset, mmap.PAGESIZE)
+    reqs: List[Tuple[int, int, int, int]] = []
+
+    while next_read_offset < total_copy_size or len(reqs) != processed_reqs_cnt:
+      if next_read_offset < total_copy_size and (copy_batch := _get_free_buf()) is not None:
+        # Prepare sqe
+        sqe_index = (tail:=DiskDevice.io_uring.sq.ktail[0]) & DiskDevice.io_uring.sq.kring_mask[0]
+        sqe = DiskDevice.io_uring.sq.sqes[sqe_index]
+        sqe.opcode, sqe.fd, sqe.off = io_uring.IORING_OP_READ, self.device.fd, fd_offset + next_read_offset
+        sqe.addr, sqe.len, sqe.user_data = copy_batch[0], min(seg_len, total_copy_size - next_read_offset), len(reqs)
+
+        # Send sqe
+        DiskDevice.io_uring.sq.array[sqe_index] = sqe_index
+        DiskDevice.io_uring.sq.ktail[0] = tail + 1
+        libc.syscall(io_uring.NR_io_uring_enter, DiskDevice.io_uring.ring_fd, 1, 1, io_uring.IORING_ENTER_GETEVENTS)
+
+        reqs.append((copy_batch, copied_in, minor_offset, real_copy_size:=min(sqe.len - minor_offset, size - copied_in)))
+        next_read_offset += sqe.len
+        copied_in += real_copy_size
+        minor_offset = 0
+
+      if (head:=DiskDevice.io_uring.cq.khead[0]) != DiskDevice.io_uring.cq.ktail[0]:
+        cqe = DiskDevice.io_uring.cq.cqes[head & DiskDevice.io_uring.cq.kring_mask[0]]
+        assert cqe.res >= 0, f"read from disk failed, err: {cqe.res}"
+        yield reqs[cqe.user_data]
+        DiskDevice.io_uring.cq.khead[0] = head + 1 # advance
+        processed_reqs_cnt += 1
+
+  def offset(self, buf:DiskBuffer, size:int, offset:int): return DiskBuffer(buf.device, size, offset)
 
 class DiskDevice(Compiled):
-  def __init__(self, device:str): super().__init__(device, DiskAllocator(device[len("disk:"):]), None, None)
-  @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
-  def get_runner(self, *ast:LazyOp):
-    assert len(ast) == 1, "DiskRunner doesn't support multioutput kernels."
-    return DiskRunner(ast[0])
+  _tried_io_uring_init = False
+
+  def __init__(self, device:str):
+    if not DiskDevice._tried_io_uring_init: self._iouring_setup()
+
+    self.size: Optional[int] = None
+    self.count = 0
+    super().__init__(device, DiskAllocator(self), None, None, None)
+  def _might_open(self, size):
+    self.count += 1
+    assert self.size is None or size <= self.size, f"can't reopen Disk tensor with larger size, opened with {self.size}, tried to open with {size}"
+    if self.size is not None: return
+    filename = self.dname[len("disk:"):]
+    self.size = size
+
+    if filename.startswith("shm:"):
+      fd = _posixshmem.shm_open("/"+filename[4:].lstrip("/"), os.O_RDWR, 0o600)
+      self.mem = mmap.mmap(fd, self.size, mmap.MAP_SHARED | MAP_POPULATE | MAP_LOCKED)
+      os.close(fd)
+    else:
+      try: self.fd = os.open(filename, os.O_RDWR|os.O_CREAT|(0 if OSX else os.O_DIRECT))
+      except OSError: self.fd = os.open(filename, os.O_RDWR|os.O_CREAT)
+      if os.fstat(self.fd).st_size < self.size: os.ftruncate(self.fd, self.size)
+      self.mem = mmap.mmap(self.fd, self.size)
+    if (hp := getattr(mmap, "MADV_HUGEPAGE", None)) is not None: self.mem.madvise(hp) # type: ignore
+  def _might_close(self):
+    self.count -= 1
+    if self.count == 0:
+      if hasattr(self, 'fd'): os.close(self.fd)
+      self.size = None
+  def _iouring_setup(self):
+    DiskDevice._tried_io_uring_init = True
+
+    if platform.system() != 'Linux': return
+
+    fd = libc.syscall(io_uring.NR_io_uring_setup, 4096, ctypes.byref(p:=io_uring.struct_io_uring_params()))
+    if fd < 0: return
+
+    sq_ptr = libc.mmap(0, p.sq_off.array + p.sq_entries * 4, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | MAP_POPULATE, fd, 0)
+    cq_ptr = libc.mmap(0, p.cq_off.cqes + p.cq_entries * ctypes.sizeof(io_uring.struct_io_uring_cqe),
+                       mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | MAP_POPULATE, fd, io_uring.IORING_OFF_CQ_RING)
+    sqes = libc.mmap(0, p.sq_entries * ctypes.sizeof(io_uring.struct_io_uring_sqe),
+                     mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | MAP_POPULATE, fd, io_uring.IORING_OFF_SQES)
+
+    def u32ptr(val): return ctypes.cast(val, ctypes.POINTER(ctypes.c_uint32))
+    sqdesc = io_uring.struct_io_uring_sq(khead=u32ptr(sq_ptr+p.sq_off.head), ktail=u32ptr(sq_ptr+p.sq_off.tail), array=u32ptr(sq_ptr+p.sq_off.array),
+      kring_mask=u32ptr(sq_ptr+p.sq_off.ring_mask), sqes=ctypes.cast(sqes, ctypes.POINTER(io_uring.struct_io_uring_sqe)))
+
+    cqdesc = io_uring.struct_io_uring_cq(khead=u32ptr(cq_ptr+p.cq_off.head), ktail=u32ptr(cq_ptr+p.cq_off.tail),
+      kring_mask=u32ptr(sq_ptr+p.cq_off.ring_mask), cqes=ctypes.cast(cq_ptr+p.cq_off.cqes, ctypes.POINTER(io_uring.struct_io_uring_cqe)))
+
+    DiskDevice.io_uring = io_uring.struct_io_uring(ring_fd=fd, sq=sqdesc, cq=cqdesc) # type: ignore

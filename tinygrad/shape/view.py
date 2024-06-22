@@ -3,7 +3,7 @@ import functools, operator, itertools, math
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Set, cast
 from tinygrad.helpers import prod, all_int, argsort
-from tinygrad.shape.symbolic import Node, NumNode, Variable, sint
+from tinygrad.shape.symbolic import Node, NumNode, Variable, sint, sym_infer
 
 @functools.lru_cache(maxsize=None)
 def canonicalize_strides(shape:Tuple[sint, ...], strides:Tuple[sint, ...]) -> Tuple[sint, ...]:
@@ -12,24 +12,26 @@ def canonicalize_strides(shape:Tuple[sint, ...], strides:Tuple[sint, ...]) -> Tu
 @functools.lru_cache(maxsize=None)
 def strides_for_shape(shape:Tuple[sint, ...]) -> Tuple[sint, ...]:
   if not shape: return ()
-  strides = tuple(itertools.accumulate(reversed(shape[1:]), operator.mul, initial=1))
-  return canonicalize_strides(shape, strides[::-1])
+  strides = tuple(itertools.accumulate(reversed(shape[1:]), operator.mul, initial=1))[::-1]
+  return canonicalize_strides(shape, strides)
 
 @functools.lru_cache(maxsize=None)
 def _merge_dims(shape:Tuple[int, ...], strides:Tuple[int, ...], mask:Optional[Tuple[Tuple[int, int], ...]]=None) -> Tuple[Tuple[int, int, int], ...]:
-  # merge contiguous subparts or zero strided dims. ret = List[(merged_dims, stride, merged dims w/o zero stride), ...]
-  if not shape: return tuple()
-  assert len(shape) == len(strides)
+  # merge contiguous sub-parts or zero strided dims. ret = Tuple[(merged_size, stride, merged size w/o zero stride), ...]
+  if not shape: return ()
+  assert len(shape) == len(strides) and (mask is None or len(shape) == len(mask))
   ret = [(shape[0], strides[0], shape[0] if strides[0] else 0)]
-  # wrt merging zero strided dimensions
-  merging = strides[0] == 0 and (mask[0][1] - mask[0][0] == 1 if mask else shape[0] == 1)
-  for i, (sh, st) in enumerate(zip(shape[1:], strides[1:]), start=1):
-    if sh == 1: continue
-    if merging or ret[-1][1] == sh * st: # mergeable
-      ret[-1] = (ret[-1][0] * sh, st, (sh if merging else ret[-1][2] * sh) if st else 0)
-    else: ret.append((sh, st, sh if st else 0)) # begin new
-    # merging ends with either non-zero strided dim or zero strided dim with mask range > 1
-    merging = st == 0 and (mask[i][1] - mask[i][0] == 1 if mask else sh == 1)
+  # merge this dim to next dim if size is 1
+  merging = (mask[0][1] - mask[0][0] == 1) if mask is not None else shape[0] == 1
+  for i, (s, st) in enumerate(zip(shape[1:], strides[1:]), start=1):
+    last_s, last_st, last_pre_expand_s = ret[-1]
+    # always merge 1
+    if s == 1: continue
+    # merge last dim with this dim if merging or strides matched
+    if merging or last_st == s * st: ret[-1] = (last_s * s, st, (s if merging else last_pre_expand_s * s) if st else 0)
+    else: ret.append((s, st, s if st else 0))
+    # merge this dim to next dim if size is 1
+    merging = (mask[i][1] - mask[i][0] == 1) if mask is not None else s == 1
   return tuple(ret)
 
 @functools.lru_cache(maxsize=None)
@@ -52,7 +54,8 @@ def _reshape_mask(view: View, new_shape:Tuple[sint, ...]) -> Tuple[Optional[Tupl
         if mask[1] - mask[0] < 1: return ((0, 0),) * len(new_shape), False # invalid mask
 
       else: # mask can only be splitted if reshape doesn't cut across the mask.
-        if ((l % next_stride != 0 or r % next_stride != 0) and l // next_stride != (r - 1) // next_stride): return view.mask, True
+        if (((l % next_stride != 0 or r % next_stride != 0) and l // next_stride != (r - 1) // next_stride)
+            or old_dim % next_stride != 0): return view.mask, True
         new_mask.append((l % next_stride // curr_stride, (r - 1) % next_stride // curr_stride + 1))
         curr_stride, new_dim = next_stride,  next(r_new_shape, 1) # need to get mask for next dimension
 
@@ -95,9 +98,10 @@ class View:
   @functools.lru_cache(maxsize=None)
   def create(shape:Tuple[sint, ...], strides:Optional[Tuple[sint, ...]]=None, offset:sint=0, mask:Optional[Tuple[Tuple[sint, sint], ...]]=None):
     strides = canonicalize_strides(shape, strides) if strides else strides_for_shape(shape)
+    # canonicalize 0 in shape
+    if 0 in shape: return View(shape, (0,) * len(shape), offset=0, mask=None, contiguous=True)
     # canonicalize empty mask
     if mask is not None and all(m == (0,s) for m,s in zip(mask, shape)): mask = None
-    contiguous = offset == 0 and mask is None and strides == strides_for_shape(shape)
     # if any dimension has size >1, but is masked such that only one index in the dimension is unmasked
     # then its stride can also be set to 0, albeit with a corresponding adjustment required to the offset
     # TODO: assert comparison with LtNode to avoid mis-using symbolic
@@ -106,6 +110,7 @@ class View:
         strides, offset, mask = (0,) * len(shape), 0, ((0,0),) * len(shape)
       offset += sum((strides[i] * mask[i][0]) if e else 0 for i, e in enumerate(elim))
       strides = tuple(0 if e else st for st,e in zip(strides, elim))
+    contiguous = offset == 0 and mask is None and strides == strides_for_shape(shape)
     return View(shape, strides, offset, mask, contiguous)
 
   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
@@ -265,7 +270,7 @@ class View:
       assert 0 in new_shape, f"cannot reshape 0 size to {new_shape}"
       return View.create(new_shape)
     # check for the same size
-    if all_int(self.shape):
+    if (self_all_int := all_int(self.shape)):
       assert all(isinstance(s, (int, Variable)) for s in new_shape), f"{self.shape=} -> {new_shape=} contains non (int, Variable) dim"
       if prod(self.shape) != prod([s if isinstance(s, int) else cast(Variable,s).val for s in new_shape]):
         raise ValueError(f"size mismatched, can't reshape {self.shape=} -> {new_shape=}")
@@ -274,6 +279,18 @@ class View:
 
     # after the asserts, it's okay to check contiguous
     if self.contiguous: return View.create(new_shape)
+
+    # if it's not contiguous and new shape is symbolic, check if it's directly replaceable
+    if self_all_int and not all_int(new_shape):
+      if len(self.shape) != len(new_shape): raise ValueError(f"cannot symbolic reshape non-contiguous {self} -> {new_shape}")
+      for si, so in zip(self.shape, new_shape):
+        if isinstance(so, int):
+          if si != so: raise ValueError(f"cannot symbolic reshape non-contiguous {self} -> {new_shape}")
+        else:
+          var_vals = {v: v.unbind()[1] for v in so.vars()}
+          if si != sym_infer(so, var_vals): raise ValueError(f"cannot symbolic reshape non-contiguous {self} -> {new_shape}")
+      # all dimensions matched, return the new view directly
+      return View(new_shape, self.strides, self.offset, self.mask, self.contiguous)
 
     strides, r_new_shape = [], reversed(new_shape)
     for merged_dim, new_stride, real_dim in reversed(_merge_dims(self.shape, self.strides, self.mask)):

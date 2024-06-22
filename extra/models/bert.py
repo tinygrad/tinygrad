@@ -1,8 +1,14 @@
-from tinygrad.tensor import Tensor
-from tinygrad.nn import Linear, LayerNorm, Embedding
-from tinygrad.helpers import fetch, get_child
+import re, os
 from pathlib import Path
+from tinygrad.tensor import Tensor, cast
+from tinygrad import nn, dtypes
+from tinygrad.helpers import fetch, get_child
+from tinygrad.nn.state import get_parameters
 
+# allow for monkeypatching
+Embedding = nn.Embedding
+Linear = nn.Linear
+LayerNorm = nn.LayerNorm
 
 class BertForQuestionAnswering:
   def __init__(self, hidden_size=1024, intermediate_size=4096, max_position_embeddings=512, num_attention_heads=16, num_hidden_layers=24, type_vocab_size=2, vocab_size=30522, attention_probs_dropout_prob=0.1, hidden_dropout_prob=0.1):
@@ -31,7 +37,130 @@ class BertForQuestionAnswering:
     start_logits = start_logits.reshape(-1, 1)
     end_logits = end_logits.reshape(-1, 1)
 
-    return Tensor.stack([start_logits, end_logits])
+    return Tensor.stack(start_logits, end_logits)
+
+class BertForPretraining:
+  def __init__(self, hidden_size:int=1024, intermediate_size:int=4096, max_position_embeddings:int=512, num_attention_heads:int=16, num_hidden_layers:int=24, type_vocab_size:int=2, vocab_size:int=30522, attention_probs_dropout_prob:float=0.1, hidden_dropout_prob:float=0.1):
+    """Default is BERT-large"""
+    self.bert = Bert(hidden_size, intermediate_size, max_position_embeddings, num_attention_heads, num_hidden_layers, type_vocab_size, vocab_size, attention_probs_dropout_prob, hidden_dropout_prob)
+    self.cls = BertPreTrainingHeads(hidden_size, vocab_size, self.bert.embeddings.word_embeddings.weight)
+  
+  def __call__(self, input_ids:Tensor, attention_mask:Tensor, masked_lm_positions:Tensor, token_type_ids:Tensor):
+    output = self.bert(input_ids, attention_mask, token_type_ids)
+    return self.cls(output, masked_lm_positions)
+  
+  def loss(self, prediction_logits:Tensor, seq_relationship_logits:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
+    # Reference has residual on denominator: https://github.com/mlcommons/training/blob/master/language_model/tensorflow/bert/run_pretraining.py#L315
+    def sparse_categorical_crossentropy(predictions:Tensor, labels:Tensor, ignore_index=-1):
+      log_probs, loss_mask = predictions.log_softmax(), (labels != ignore_index)
+      y_counter = Tensor.arange(predictions.shape[-1], requires_grad=False, device=predictions.device).unsqueeze(0).expand(labels.numel(), predictions.shape[-1])
+      y = ((y_counter == labels.flatten().reshape(-1, 1)) * loss_mask.reshape(-1, 1)).reshape(*labels.shape, predictions.shape[-1])
+      return -((log_probs * y).sum()) / (loss_mask.sum() + 1e-5) # Small constant to avoid division by zero
+
+    masked_lm_loss = sparse_categorical_crossentropy(prediction_logits, masked_lm_ids, ignore_index=masked_lm_weights)
+    next_sentence_loss = seq_relationship_logits.binary_crossentropy_logits(next_sentence_labels)
+    return masked_lm_loss + next_sentence_loss
+  
+  def accuracy(self, prediction_logits:Tensor, seq_relationship_logits:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
+
+    valid = masked_lm_ids != 0
+    masked_lm_predictions = prediction_logits.log_softmax().argmax(-1)
+    masked_lm_accuracy = (masked_lm_predictions == masked_lm_ids) * valid
+    masked_lm_loss = prediction_logits.sparse_categorical_crossentropy(masked_lm_ids, ignore_index=masked_lm_weights)
+
+    seq_relationship_predictions = seq_relationship_logits.log_softmax().argmax(-1)
+    seq_relationship_accuracy = (seq_relationship_predictions == next_sentence_labels)
+    next_sentence_loss = seq_relationship_logits.binary_crossentropy_logits(next_sentence_labels)
+
+    return masked_lm_accuracy.sum() / valid.sum(), seq_relationship_accuracy.mean(), masked_lm_loss, next_sentence_loss
+  
+  def load_from_pretrained(self, tf_weight_path:str=Path(__file__).parent.parent / "datasets" / "wiki"):
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' # Mute tf flag info
+    # load from tensorflow
+    import tensorflow as tf
+    import numpy as np
+
+    state_dict = {}
+    for name, _ in tf.train.list_variables(str(tf_weight_path)):
+      state_dict[name] = tf.train.load_variable(str(tf_weight_path), name)
+
+    for k, v in state_dict.items():
+      m = k.split("/")
+      if any(n in ["adam_v", "adam_m", "global_step", "LAMB", "LAMB_1", "beta1_power", "beta2_power"] for n in m):
+        continue
+
+      pointer = self
+      n = m[-1] # this is just to stop python from complaining about possibly unbound local variable
+      for i, n in enumerate(m):
+        if re.fullmatch(r'[A-Za-z]+_\d+', n):
+          l = re.split(r'_(\d+)', n)[:-1]
+        else:
+          l = [n]
+        if l[0] in ["kernel", "gamma", "output_weights"]:
+          pointer = getattr(pointer, "weight")
+        elif l[0] in ["output_bias", "beta"]:
+          pointer = getattr(pointer, "bias")
+        elif l[0] == "pooler":
+          pointer = getattr(getattr(self, "cls"), "pooler")
+        else:
+          pointer = getattr(pointer, l[0])
+        if len(l) == 2: # layers
+          pointer = pointer[int(l[1])]
+      if n[-11:] == "_embeddings":
+        pointer = getattr(pointer, "weight")
+      elif n == "kernel":
+        v = np.transpose(v)
+      cast(Tensor, pointer).assign(v).realize()
+
+    params = get_parameters(self)
+    count = 0
+    for p in params:
+      param_count = 1
+      for s in p.shape:
+        param_count *= s
+      count += param_count
+    print(f"Total parameters: {count / 1000 / 1000}M")
+    return self
+
+class BertPreTrainingHeads:
+  def __init__(self, hidden_size:int, vocab_size:int, embeddings_weight:Tensor):
+    self.predictions = BertLMPredictionHead(hidden_size, vocab_size, embeddings_weight)
+    self.pooler = BertPooler(hidden_size)
+    self.seq_relationship = Linear(hidden_size, 2)
+
+  def __call__(self, sequence_output:Tensor, masked_lm_positions:Tensor):
+    prediction_logits = self.predictions(gather(sequence_output, masked_lm_positions))
+    seq_relationship_logits = self.seq_relationship(self.pooler(sequence_output))
+    return prediction_logits, seq_relationship_logits
+
+class BertLMPredictionHead:
+  def __init__(self, hidden_size:int, vocab_size:int, embeddings_weight:Tensor):
+    self.transform = BertPredictionHeadTransform(hidden_size)
+    self.embedding_weight = embeddings_weight
+    self.bias = Tensor.zeros(vocab_size, dtype=dtypes.float32)
+
+  def __call__(self, hidden_states:Tensor):
+    return self.transform(hidden_states) @ self.embedding_weight.T + self.bias
+
+class BertPredictionHeadTransform:
+  def __init__(self, hidden_size:int):
+    self.dense = Linear(hidden_size, hidden_size)
+    self.LayerNorm = LayerNorm(hidden_size, eps=1e-12)
+
+  def __call__(self, hidden_states:Tensor):
+   return self.LayerNorm(gelu(self.dense(hidden_states)))
+
+class BertPooler:
+  def __init__(self, hidden_size:int):
+    self.dense = Linear(hidden_size, hidden_size)
+
+  def __call__(self, hidden_states:Tensor):
+    return self.dense(hidden_states[:, 0]).tanh()
+
+def gather(prediction_logits:Tensor, masked_lm_positions:Tensor):
+  counter = Tensor.arange(prediction_logits.shape[1], device=prediction_logits.device, requires_grad=False).reshape(1, 1, prediction_logits.shape[1]).expand(*masked_lm_positions.shape, prediction_logits.shape[1])
+  onehot = counter == masked_lm_positions.unsqueeze(2).expand(*masked_lm_positions.shape, prediction_logits.shape[1])
+  return onehot @ prediction_logits
 
 class Bert:
   def __init__(self, hidden_size, intermediate_size, max_position_embeddings, num_attention_heads, num_hidden_layers, type_vocab_size, vocab_size, attention_probs_dropout_prob, hidden_dropout_prob):
@@ -102,6 +231,9 @@ class BertOutput:
     hidden_states = self.LayerNorm(hidden_states + input_tensor)
     return hidden_states
 
+def gelu(x):
+  return x * 0.5 * (1.0 + erf(x / 1.41421))
+
 # approximation of the error function
 def erf(x):
   t = (1 + 0.3275911 * x.abs()).reciprocal()
@@ -114,7 +246,7 @@ class BertIntermediate:
   def __call__(self, hidden_states):
     x = self.dense(hidden_states)
     # tinygrad gelu is openai gelu but we need the original bert gelu
-    return x * 0.5 * (1.0 + erf(x / 1.41421))
+    return gelu(x)
 
 class BertAttention:
   def __init__(self, hidden_size, num_attention_heads, attention_probs_dropout_prob, hidden_dropout_prob):

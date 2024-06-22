@@ -31,7 +31,7 @@ class Synthesizer:
     y_lengths = Tensor.maximum(w_ceil.sum([1, 2]), 1).cast(dtypes.int64)
     return self.generate(g, logs_p, m_p, max_len, max_y_length_estimate_scale, noise_scale, w_ceil, x, x_mask, y_lengths, pad_length)
   def generate(self, g, logs_p, m_p, max_len, max_y_length_estimate_scale, noise_scale, w_ceil, x, x_mask, y_lengths, pad_length):
-    max_y_length = y_lengths.max().numpy() if max_y_length_estimate_scale is None else max(15, x.shape[-1]) * max_y_length_estimate_scale
+    max_y_length = y_lengths.max().item() if max_y_length_estimate_scale is None else max(15, x.shape[-1]) * max_y_length_estimate_scale
     y_mask = sequence_mask(y_lengths, max_y_length).unsqueeze(1).cast(x_mask.dtype)
     attn_mask = x_mask.unsqueeze(2) * y_mask.unsqueeze(-1)
     attn = generate_path(w_ceil, attn_mask)
@@ -487,16 +487,16 @@ def split(tensor, split_sizes, dim=0):  # if split_sizes is an integer, convert 
     slice_range = [(start, start + size) if j == dim else None for j in range(len(tensor.shape))]
     slices.append(slice_range)
     start += size
-  return [tensor.slice(s) for s in slices]
+  return [tensor._slice(s) for s in slices]
 def gather(x, indices, axis):
-  indices = (indices < 0).where(indices + x.shape[axis], indices).transpose(ax1=axis, ax2=0)
+  indices = (indices < 0).where(indices + x.shape[axis], indices).transpose(0, axis)
   permute_args = list(range(x.ndim))
   permute_args[0], permute_args[axis] = permute_args[axis], permute_args[0]
   permute_args.append(permute_args.pop(0))
   x = x.permute(*permute_args)
   reshape_arg = [1] * x.ndim + [x.shape[-1]]
   return ((indices.unsqueeze(indices.ndim).expand(*indices.shape, x.shape[-1]) ==
-           Tensor.arange(x.shape[-1]).reshape(*reshape_arg).expand(*indices.shape, x.shape[-1])) * x).sum(indices.ndim).transpose(ax1=0, ax2=axis)
+           Tensor.arange(x.shape[-1]).reshape(*reshape_arg).expand(*indices.shape, x.shape[-1])) * x).sum(indices.ndim).transpose(0, axis)
 
 def norm_except_dim(v, dim):
   if dim == -1: return np.linalg.norm(v)

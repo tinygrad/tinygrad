@@ -1,5 +1,6 @@
 import csv, pathlib, time, numpy as np
 from os import getenv
+from tinygrad.device import CompileError
 import torch
 torch.set_num_threads(1)
 import onnx
@@ -16,6 +17,7 @@ MODELS = {
   "efficientnet": "https://github.com/onnx/models/raw/main/validated/vision/classification/efficientnet-lite4/model/efficientnet-lite4-11.onnx",
   "shufflenet": "https://github.com/onnx/models/raw/main/validated/vision/classification/shufflenet/model/shufflenet-9.onnx",
   "commavq": "https://huggingface.co/commaai/commavq-gpt2m/resolve/main/gpt2m.onnx",
+  "dm": "https://github.com/commaai/openpilot/raw/ba7f840a06dbc8ae3c45b3b4976c88a21895aed0/selfdrive/modeld/models/dmonitoring_model.onnx",
 
   # broken in torch MPS
   # "zfnet": "https://github.com/onnx/models/raw/main/archive/vision/classification/zfnet-512/model/zfnet512-9.onnx",
@@ -59,18 +61,22 @@ def benchmark_model(m, devices, validate_outs=False):
 
   # print input names
   if DEBUG >= 2: print([inp.name for inp in onnx_model.graph.input if inp.name not in excluded])
-
   for device in devices:
-    Device.DEFAULT = device
-    inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
-    tinygrad_model = get_run_onnx(onnx_model)
-    benchmark(m, f"tinygrad_{device.lower()}_jitless", lambda: {k:v.numpy() for k,v in tinygrad_model(inputs).items()})
+    try:
+      Device.DEFAULT = device
+      inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
+      tinygrad_model = get_run_onnx(onnx_model)
+      benchmark(m, f"tinygrad_{device.lower()}_jitless", lambda: {k:v.numpy() for k,v in tinygrad_model(inputs).items()})
 
-    from tinygrad.engine.jit import TinyJit
-    tinygrad_jitted_model = TinyJit(lambda **kwargs: {k:v.realize() for k,v in tinygrad_model(kwargs).items()})
-    for _ in range(3): {k:v.numpy() for k,v in tinygrad_jitted_model(**inputs).items()}
-    benchmark(m, f"tinygrad_{device.lower()}_jit", lambda: {k:v.numpy() for k,v in tinygrad_jitted_model(**inputs).items()}) # noqa: F821
-    del inputs, tinygrad_model, tinygrad_jitted_model
+      from tinygrad.engine.jit import TinyJit
+      tinygrad_jitted_model = TinyJit(lambda **kwargs: {k:v.realize() for k,v in tinygrad_model(kwargs).items()})
+      for _ in range(3): {k:v.numpy() for k,v in tinygrad_jitted_model(**inputs).items()}
+      benchmark(m, f"tinygrad_{device.lower()}_jit", lambda: {k:v.numpy() for k,v in tinygrad_jitted_model(**inputs).items()}) # noqa: F821
+      del inputs, tinygrad_model, tinygrad_jitted_model
+    except CompileError as e:
+      # METAL fails with buffer count limit
+      if m == "dm" and device == "METAL": return
+      raise e
 
   # convert model to torch
   try:
