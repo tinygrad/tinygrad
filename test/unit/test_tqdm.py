@@ -1,9 +1,9 @@
 import time, random, unittest
-from tqdm import tqdm
 from unittest.mock import patch
 from io import StringIO
-from tinygrad.helpers import tinytqdm
 from collections import namedtuple
+from tqdm import tqdm
+from tinygrad.helpers import tqdm as tinytqdm, trange as tinytrange
 
 class TestProgressBar(unittest.TestCase):
   def _compare_bars(self, bar1, bar2, cmp_prog=False):
@@ -31,6 +31,7 @@ class TestProgressBar(unittest.TestCase):
 
     diff = sum([1 for c1, c2 in zip(prog1, prog2) if c1 == c2]) # allow 1 char diff (due to tqdm special chars)
     self.assertTrue(not cmp_prog or diff <= 1)
+
   @patch('sys.stderr', new_callable=StringIO)
   @patch('shutil.get_terminal_size')
   def test_tqdm_output_iter(self, mock_terminal_size, mock_stderr):
@@ -55,6 +56,31 @@ class TestProgressBar(unittest.TestCase):
       elapsed = total/iters_per_sec if n>0 else 0
       tqdm_output = tqdm.format_meter(n=total, total=total, elapsed=elapsed, ncols=ncols, prefix="Test")
       self._compare_bars(tinytqdm_output, tqdm_output)
+
+  @patch('sys.stderr', new_callable=StringIO)
+  @patch('shutil.get_terminal_size')
+  def test_trange_output_iter(self, mock_terminal_size, mock_stderr):
+    for _ in range(5):
+      total, ncols = random.randint(5, 30), random.randint(80, 240)
+      mock_terminal_size.return_value = namedtuple(field_names='columns', typename='terminal_size')(ncols)
+      mock_stderr.truncate(0)
+
+      # compare bars at each iteration (only when tinytqdm bar has been updated)
+      for n in (bar := tinytrange(total, desc="Test: ")):
+        time.sleep(0.01)
+        if bar.i % bar.skip != 0: continue
+        tiny_output = mock_stderr.getvalue().split("\r")[-1].rstrip()
+        iters_per_sec = float(tiny_output.split("it/s")[-2].split(" ")[-1]) if n>0 else 0
+        elapsed = n/iters_per_sec if n>0 else 0
+        tqdm_output = tqdm.format_meter(n=n, total=total, elapsed=elapsed, ncols=ncols, prefix="Test")
+        self._compare_bars(tiny_output, tqdm_output)
+
+      # compare final bars
+      tiny_output = mock_stderr.getvalue().split("\r")[-1].rstrip()
+      iters_per_sec = float(tiny_output.split("it/s")[-2].split(" ")[-1]) if n>0 else 0
+      elapsed = total/iters_per_sec if n>0 else 0
+      tqdm_output = tqdm.format_meter(n=total, total=total, elapsed=elapsed, ncols=ncols, prefix="Test")
+      self._compare_bars(tiny_output, tqdm_output)
 
   @patch('sys.stderr', new_callable=StringIO)
   @patch('shutil.get_terminal_size')
