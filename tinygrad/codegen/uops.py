@@ -233,6 +233,9 @@ def replace_reduce(root):
   global acc_number
   expands = [x for x in root.src[2:] if x.op is UOps.EXPAND]
 
+  # NOTE: this is making an assumption about root.src[1], i think root.src[1] should just be moved here
+  if len(expands) == 0: return root.src[0]
+
   # add other expands for float4. TODO: should be a faster way
   expand_args = [x.arg for x in expands]
   expands += [x for x in root.parents if x.op is UOps.EXPAND and x.arg in expand_args]
@@ -496,7 +499,6 @@ class UOpGraph:
 
     # do contracts/reduces
     sink = self.graph_rewrite(sink, contractor)
-    #sink = self.graph_rewrite(sink, constant_folder)
     sink = self.graph_rewrite(sink, reducer)
 
     # do upcasts (after reduce unrolls and rewrites)
