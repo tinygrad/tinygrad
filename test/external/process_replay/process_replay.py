@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # compare kernels created by HEAD against master
-import difflib, pickle
-import time
+import difflib, pickle, time, shutil
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.helpers import colored, db_connection, VERSION, getenv, to_function_name, tinytqdm
 
@@ -19,7 +18,8 @@ for offset in tinytqdm(range(0, row_count, page_size)):
     good_src = k.opts.render(to_function_name(compare_k.name), k.linearize().uops)
     t_diff = time.perf_counter_ns() - st
     if (abs(t_diff-time_ns)/max(time_ns, 1e8) > 0.1):
-      print(colored(f"\rPerf: {time_ns*1e-6:6.2f} -> {t_diff*1e-6:6.2f} ns {compare_k.name}", "red" if t_diff > time_ns else "green"))
+      info = colored(f"\rPerf: {time_ns*1e-6:6.2f} -> {t_diff*1e-6:6.2f} ms {compare_k.name}", "red" if t_diff > time_ns else "green")
+      print('\r'+' '*(shutil.get_terminal_size().columns) +info )
     try: assert compare_src == good_src
     except AssertionError as e:
       print("PROCESS REPLAY DETECTED CHANGE")
