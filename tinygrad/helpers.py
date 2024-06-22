@@ -260,6 +260,7 @@ class tqdm:
         yield item
         self.update(1)
     finally: self.update(close=True)
+  def set_description(self, desc:str): self.desc = desc
   def update(self, n:int=0, close:bool=False):
     self.n, self.i = self.n+n, self.i+1
     if (self.i % self.skip != 0 and not close) or self.dis: return
@@ -276,3 +277,6 @@ class tqdm:
     sz = max(term-5-len(suf)-len(self.desc), 1)
     bar = f'\r{self.desc}{round(100*prog):3}%|{"█"*round(sz*prog)}{" "*(sz-round(sz*prog))}{suf}' if self.t else f'\r{self.desc}{suf}{" "*term}'
     print(bar[:term+1],flush=True,end='\n'*close,file=sys.stderr)
+
+class trange(tqdm):
+  def __init__(self, n:int, **kwargs): super().__init__(iterable=range(n), total=n, **kwargs)
