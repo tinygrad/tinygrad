@@ -321,7 +321,6 @@ class UOpGraph:
     return sink
 
   def graph_dedup(self, sink:UOp):
-    # raise Exception("graph_dedup")
     # add nodes to graph in reverse BFS order
     # dedup all nodes
     # TODO: i feel like this BFS is written in a few places, possible to library it?
