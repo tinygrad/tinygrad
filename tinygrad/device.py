@@ -196,23 +196,27 @@ class HCQCompatCompiled(Compiled):
     super().__init__(device, allocator, renderer, compiler, runtime, HCQGraph)
 
   @classmethod
-  def _read_signal(self, sig): pass # reads value for a signal
+  def _read_signal(self, sig): pass # reads a value for a signal
 
   @classmethod
-  def _set_signal(self, sig, value): pass # sets value for a signal
+  def _set_signal(self, sig, value): pass # sets a value for a signal
 
   @classmethod
-  def _get_signal(self, value=0, **kwargs): pass # alloc a new signal
+  def _get_signal(self, value=0, **kwargs): pass # allocates a new signal
 
   @classmethod
   def _wait_signal(self, signal, value=0, timeout=10000): pass # waits for a signal value
 
+  def _wrap_timeline_signal(self):
+    self.timeline_signal, self._shadow_timeline_signal = self._shadow_timeline_signal, self.timeline_signal
+    self.timeline_signal[0], self.timeline_value = 0, 1
+    cast(HCQCompatAllocator, self.allocator).b_timeline = [0] * len(cast(HCQCompatAllocator, self.allocator).b)
+
 class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
-  def __init__(self, device, batch_size=(2 << 20)):
+  def __init__(self, device, batch_size=(2 << 20), batch_cnt=32):
     self.device = device
-    self.b = [self._alloc(max((2 << 20), batch_size), BufferOptions(host=True)) for _ in range(32)]
-    self.b_timeline = [0] * len(self.b)
-    self.b_next = 0
+    self.b = [self._alloc(batch_size, BufferOptions(host=True)) for _ in range(batch_cnt)]
+    self.b_timeline, self.b_next = [0] * len(self.b), 0
     super().__init__()
 
   def copyin(self, dest, src: memoryview):

@@ -531,7 +531,4 @@ class AMDDevice(HCQCompatCompiled):
 
     # reset kernargs
     self.kernargs_ptr = self.kernargs.va_addr
-    if self.timeline_value > (1 << 31):
-      self.timeline_signal, self._shadow_timeline_signal = self._shadow_timeline_signal, self.timeline_signal
-      self.timeline_signal.value, self.timeline_value = 0, 1
-      cast(AMDAllocator, self.allocator).b_timeline = [0] * len(cast(AMDAllocator, self.allocator).b)
+    if self.timeline_value > (1 << 31): self._wrap_timeline_signal()

@@ -539,10 +539,7 @@ class NVDevice(HCQCompatCompiled):
     NVDevice._wait_signal(self.timeline_signal, self.timeline_value - 1)
     self.cmdq_wptr = 0
 
-    if self.timeline_value > (1 << 63):
-      self.timeline_signal, self._shadow_timeline_signal = self._shadow_timeline_signal, self.timeline_signal
-      self.timeline_signal[0], self.timeline_value = 0, 1
-      cast(NVAllocator, self.allocator).b_timeline = [0] * len(cast(NVAllocator, self.allocator).b)
+    if self.timeline_value > (1 << 63): self._wrap_timeline_signal()
 
   @classmethod
   def _read_signal(self, sig): return sig[0]
