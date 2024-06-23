@@ -222,7 +222,7 @@ class HCQCompatCompiled(Compiled):
   @classmethod
   def _wait_signal(self, signal, value=0, timeout=10000): raise NotImplementedError("need _wait_signal") # waits for a signal value
 
-  def _gpu2cpu_time(self):  raise NotImplementedError("need _gpu2cpu_time")
+  def _gpu2cpu_time(self): raise NotImplementedError("need _gpu2cpu_time")
 
   def _prof_setup(self):
     self.profile_logger = ProfileLogger()
@@ -289,6 +289,8 @@ class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
         self.device.timeline_value += 1
 
   def copyout(self, dest:memoryview, src):
+    self.device.synchronize()
+
     with hcq_profile(self.device, self.device.hw_copy_queue_t, desc=f"{self.device.dname} -> CPU", enabled=PROFILE):
       for i in range(0, dest.nbytes, self.b[0].size):
         self.device.hw_copy_queue_t().wait(self.device.timeline_signal, self.device.timeline_value - 1) \
