@@ -76,7 +76,11 @@ class MultiLazyBuffer:
     return MultiLazyBuffer([lb if lb.is_unrealized_unmasked_const() else lb.contiguous() for lb in sharded_lbs], axis)
 
   def copy_to_device(self, device:str) -> LazyBuffer:
-    if self.axis is None: return self.lbs[self.real.index(True)].copy_to_device(device)
+    if self.axis is None:
+      # if we already have a copy on the device, return that
+      for lb in self.real_lbs:
+        if lb.device == device: return lb
+      return self.lbs[self.real.index(True)].copy_to_device(device)
     sz = self.lbs[0].shape[self.axis]
     llbs = []
     for i,lb in enumerate([lb.copy_to_device(device) for lb in self.real_lbs]):
