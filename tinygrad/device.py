@@ -188,7 +188,7 @@ class Compiled:
 
 @contextlib.contextmanager
 def hcq_profile(dev, queue_type, enabled, desc=None):
-  st, en = (dev._get_signal(), dev._get_signal()) if enabled else None
+  st, en = (dev._get_signal(), dev._get_signal()) if enabled else (None, None)
   queue_type().timestamp(st).submit(dev)
   try: yield (st, en)
   finally:
