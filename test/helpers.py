@@ -8,7 +8,7 @@ from tinygrad.dtype import DType
 from tinygrad.nn.state import get_parameters
 from tinygrad.helpers import Context, CI, OSX, getenv
 from typing import Callable, List, Optional
-from tinygrad.codegen.uops import UOpGraph, UOps, UOp, constant_folder
+from tinygrad.codegen.uops import UOpGraph, UOps, UOp, constant_folder, PatternMatcher, UPat
 from collections import defaultdict
 
 def derandomize_model(model):
@@ -154,6 +154,24 @@ def create_uop_linearize_and_compare_bottomup_topdown(uop_factory: Callable[[], 
   reason_and_tree += 'UOp2 (bottomup): \n' + print_uop_tree(uop2_rewritten, _print=False)
   return result, reason_and_tree
 
+def create_compare_old_pattern_topdown_vs_new_pattern_bottomup(
+  old_pattern_matcher: PatternMatcher, 
+  new_pattern_matcher: PatternMatcher, 
+  uop_factory: Callable[[], UOp]
+):
+  def create_graph():
+    uop_output = uop_factory()
+    graph = UOpGraph([uop_output])
+    graph.nodes = {}
+    return uop_output, graph
+  old_uop, old_graph = create_graph()
+  old_uop_rewritten = old_graph.graph_rewrite(old_uop, old_pattern_matcher)
+  new_uop, new_graph = create_graph()
+  new_uop_rewritten = new_graph.graph_rewrite_bottomup_no_backtrack(new_uop, new_pattern_matcher)
+  result, reason = compare_uop_tree(old_uop_rewritten, new_uop_rewritten)
+  reason_and_tree = reason + '\nUOp1 (topdown, old patterns): \n' + print_uop_tree(old_uop_rewritten, _print=False)
+  reason_and_tree += 'UOp2 (bottomup, new Patterns): \n' + print_uop_tree(new_uop_rewritten, _print=False)
+  return result, reason_and_tree
 
 class TestUOps(unittest.TestCase):
   def setup_and_assert_uop_graph_equal(self, uop_factory: Callable[[], UOp]):
@@ -168,3 +186,14 @@ class TestUOps(unittest.TestCase):
     self.assertEqual(len(uop1.src), len(uop2.src))
     for s1, s2 in zip(uop1.src, uop2.src): self.assert_equiv_uops(s1, s2)
 
+  def setup_and_assert_old_pattern_topdown_vs_new_pattern_bottomup(
+      self, 
+      old_pattern_matcher: PatternMatcher, 
+      new_pattern_matcher: PatternMatcher, 
+      uop_factory: Callable[[], UOp]):
+    result, reason = create_compare_old_pattern_topdown_vs_new_pattern_bottomup(
+      old_pattern_matcher,
+      new_pattern_matcher,
+      uop_factory
+    )
+    self.assertTrue(result, reason)

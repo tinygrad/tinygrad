@@ -4,7 +4,7 @@ from test.helpers import TestUOps, compare_uop_tree, print_uop_tree
 from tinygrad import dtypes, Variable
 from tinygrad.dtype import PtrDType
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps
-from tinygrad.codegen.uops import UOpGraph, UOps, UOp, constant_folder
+from tinygrad.codegen.uops import UOpGraph, UOps, UOp, constant_folder, UPat, sum_collapse, PatternMatcher, exec_alu
 
 class TestUOpGraph(TestUOps):
   # TODO: move to test.helpers
@@ -264,6 +264,55 @@ class TestBottomupVsTopdownRewrite(TestUOps):
     sa(lambda: UOp.store(UOp.var("buf"), UOp.var("idx"), UOp.var("val"), UOp.const(None, 1)))
     sa(lambda: UOp.store(UOp.var(), UOp.var(), UOp.var(), UOp.const(None, 0)))
 
+class TestPatternRewriteOldVsNew(TestUOps):
+  def test_sum_collapse(self):
+    old_pattern_matcher = constant_folder
+    new_pattern_matcher = PatternMatcher([
+        (UPat(UOps.PHI, src=(
+        UPat(UOps.DEFINE_ACC, name="phi_input", src=(
+          UPat(UOps.RANGE, name="loop"),
+        )),
+        UPat(UOps.ALU, BinaryOps.ADD, src=(
+          UPat(name="val1"), 
+          UPat(name="val2")
+        )))),
+        sum_collapse),
+          (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, name="acc"), UPat(name="acc"))), lambda acc: UOp.const(acc.dtype, acc.arg[0])),
+      (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, src=tuple()), UPat(name="x"))), lambda x: x),
+      (UPat(UOps.PHI, src=(UPat(UOps.CONST), UPat(name="x"))), lambda x: x),
+      (UPat(UOps.ALU, name="root", src=UPat(UOps.CONST)), lambda root: UOp.const(root.dtype, exec_alu(root.arg, root.dtype, [x.arg for x in root.src]))),
+      (UOp.var('x') + 0, lambda x: x),    # x+0 -> x
+      (UPat(UOps.CAST, name="root", src=UPat(UOps.CONST, name="c")), lambda root, c: UOp.const(root.dtype, c.arg)),
+    ])
+    def uop_factory():
+      global_buffer0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=(0, True))
+      global_buffer1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=(0, False))
+      const_0 = UOp(UOps.CONST, dtypes.float, (), 0.0)
+      const_1 = UOp(UOps.CONST, dtypes.float, (), 1.0)
+
+      loop = UOp(UOps.RANGE, dtypes.float, (
+          UOp(UOps.CONST, dtypes.int, arg=0),
+          UOp(UOps.CONST, dtypes.int, arg=10)
+      ), (2.0,0.0))
+      acc = UOp(UOps.DEFINE_ACC, dtypes.float, (loop,), (0.0,0.0,0.0))
+      alu = UOp(UOps.ALU, dtypes.float, (
+          UOp(UOps.LOAD, dtypes.float, (global_buffer1, const_0)),
+          acc,
+        ), BinaryOps.ADD)
+      phi = UOp(UOps.PHI, dtypes.float, (
+          acc,
+          alu,
+      ))
+      store = UOp(UOps.STORE, None, (global_buffer0, const_1, phi))
+      return store
+
+    self.setup_and_assert_old_pattern_topdown_vs_new_pattern_bottomup(
+      old_pattern_matcher,
+      new_pattern_matcher,
+      uop_factory
+    )
+
+  
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
