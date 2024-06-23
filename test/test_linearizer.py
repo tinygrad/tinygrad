@@ -1,4 +1,4 @@
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Union
 import numpy as np
 import unittest
 from dataclasses import replace
@@ -20,13 +20,14 @@ from tinygrad.engine.graph import print_tree
 from tinygrad.helpers import DEBUG, prod, Context, getenv, CI
 from tinygrad.dtype import DType, dtypes
 
-def helper_realized_ast(r:Tensor):
-  s = create_schedule([r.lazydata])
+def helper_realized_ast(r:Union[Tensor, List[Tensor]]):
+  if isinstance(r, Tensor): r = [r]
+  s = create_schedule([x.lazydata for x in r])
   run_schedule(s[:-1])  # run all kernels except the last one
   # now all input LazyBuffers buffers in s[-1] should be realized
   # allocate an output buffer
-  output_buffer = Buffer((out:=s[-1].outputs[0]).device, out.size, out.dtype).allocate()
-  return s[-1].ast[0], [output_buffer] + list(s[-1].inputs)
+  output_buffers = [Buffer((out).device, out.size, out.dtype).allocate() for out in s[-1].outputs]
+  return s[-1].ast, output_buffers+list(s[-1].inputs)
 
 def helper_tc_allclose(n:int, m:int, k:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_opt:int=0):
   a, b = Tensor.rand(m, k, dtype=dtype_in), Tensor.rand(k, n, dtype=dtype_in)
@@ -528,7 +529,7 @@ class TestLinearizer(unittest.TestCase):
         c = a.conv2d(b, padding=1, acc_dtype=tc.dtype_out)
         realized_ast, real_bufs = helper_realized_ast(c)
 
-        k = Linearizer(realized_ast)
+        k = Linearizer(*realized_ast)
         k.apply_tensor_cores(1, axis=axis, tc_opt=2)
         k.linearize()
         assert len([uop for uop in k.uops if uop.op is UOps.WMMA]) > 0, "tensor core not triggered"
@@ -545,7 +546,7 @@ class TestLinearizer(unittest.TestCase):
 
       # check that get_linearizer_actions produces all 9 options
       from tinygrad.engine.search import get_linearizer_actions
-      tc_actions = [k for i, k in get_linearizer_actions(Linearizer(realized_ast), False).items() if k.applied_opts[0].op == OptOps.TC]
+      tc_actions = [k for i, k in get_linearizer_actions(Linearizer(*realized_ast), False).items() if k.applied_opts[0].op == OptOps.TC]
       assert len(tc_actions) == 9, f"get_linearizer_actions should contain 9 possible TC actions, only got {len(tc_actions)}"
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
@@ -989,9 +990,9 @@ def helper_linearizer_ast(ast:Tuple[LazyOp, ...], inputs:List[Tensor], *args, **
   outbufs = [Buffer(inbufs[-1].device, out.arg.st.size, out.arg.dtype).allocate() for out in ast]
   return _helper_linearizer_opt_ast(ast, outbufs+inbufs, *args, **kwargs)
 
-def helper_linearizer_opt(r:Tensor, *args, **kwargs):
+def helper_linearizer_opt(r:Tensor|List[Tensor], *args, **kwargs):
   realized_ast, real_bufs = helper_realized_ast(r)
-  return _helper_linearizer_opt_ast((realized_ast, ), real_bufs, *args, **kwargs)
+  return _helper_linearizer_opt_ast(realized_ast, real_bufs, *args, **kwargs)
 
 def _helper_linearizer_opt_ast(realized_ast:Tuple[LazyOp, ...], real_bufs:List[Buffer], opts=[],
                                apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[], wanna_output=[]) -> List[Linearizer]:
@@ -1369,7 +1370,7 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 2, 2)],
     ]
     for x in invalid_opts:
-      k = Linearizer(realized_ast)
+      k = Linearizer(*realized_ast)
       with self.assertRaises(AssertionError):
         assert k.apply_tensor_cores(use_tensor_cores=1, extra_opts=x), "no valid tensor core" # for METAL in runners
 
