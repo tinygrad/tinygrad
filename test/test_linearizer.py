@@ -964,9 +964,7 @@ class TestHandCodedOpts(unittest.TestCase):
     layer_2 = Tensor.cat(layer_1.unsqueeze(0), Tensor.rand(6, 7, 4))
     layer_3 = Tensor.cat(layer_2.unsqueeze(0), Tensor.rand(6, 7, 7, 4))
 
-    s = create_schedule([layer_3.lazydata])[-1]
-    k = Linearizer(*s.ast)
-    k.hand_coded_optimizations()
+    k = helper_linearizer_opt(layer_3)[-1]
     assert len(k.bufs) == 5  # make sure all ops are done in one kernel
     # check that we don't do too many upcasts
     assert prod(k.full_shape[k.shape_len-k.upcasted:k.shape_len]) <= 49
@@ -1380,7 +1378,7 @@ class TestKernelOpts(unittest.TestCase):
     with self.assertRaises(KernelOptError):
       k.apply_opt(Opt(OptOps.TC, 0, 1))
 
-  @unittest.skip("TODO: update TC tests")
+  @unittest.skip("parallel tensor cores")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_invalid_fused_tensor_core(self):
     Tensor.manual_seed(1552)
@@ -1429,7 +1427,7 @@ class TestKernelOpts(unittest.TestCase):
         # [Opt(OptOps.GROUP, 0, 2)] # doesn't work because group_for_reduce dims become early locals (conflicting with TC)
       ], apply_tc=True, atol=atol, rtol=rtol)
 
-  @unittest.skip("TODO: update TC tests")
+  @unittest.skip("parallel tensor cores")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_fused_tensor_core_simple(self):
     N = 64
@@ -1441,7 +1439,7 @@ class TestKernelOpts(unittest.TestCase):
       r1 = c.matmul(d, acc_dtype=tc.dtype_out)
       check_fused_tc_opt(tc, r0, r1, [a, b, c, d])
 
-  @unittest.skip("TODO: update TC tests")
+  @unittest.skip("parallel tensor cores")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_fused_tensor_core_permuted(self):
     N = 64
@@ -1577,7 +1575,6 @@ class TestKernelOpts(unittest.TestCase):
     helper_linearizer_ast(ast((0, ), (1, 17)), [x], opts=opts, wanna_output=[(x.numpy()-x.numpy().sum(axis=0,keepdims=True)).sum(0)])
     helper_linearizer_ast(ast((1, ), (17, 1)), [x], opts=opts, wanna_output=[(x.numpy()-x.numpy().sum(axis=1,keepdims=True)).sum(1)])
 
-    # pad reduce axis TODO: broken
     unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
     expected = (x.numpy()-x.numpy().sum(axis=0,keepdims=True)).sum(0)
     helper_linearizer_ast(ast((0, ), (1, 17)), [x], opts=[[Opt(OptOps.PADTO, 1, 32)]], wanna_output=[expected])
