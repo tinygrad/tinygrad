@@ -1717,16 +1717,16 @@ class Tensor:
     print(t.conv_transpose2d(w).numpy())
     ```
     """
-    HW, trailing = weight.shape[2:], list(range(3, len(weight.shape)+1))
-    x, w = self, weight.unflatten(0, (groups, -1)).permute(0,2,1,*trailing).flip(trailing)
-    stride = make_pair(stride, len(HW))
+    x, w = self, weight.unflatten(0, (groups, -1)).transpose(1, 2).flip(*range(3, len(weight.shape)+1))
+    HW = weight.shape[2:]
+    stride, dilation, padding, output_padding = [make_pair(x, len(HW)) for x in (stride, dilation, padding, output_padding)]
     if any(s>1 for s in stride):
+      # handle strides: (k) -> reshape -> (k,1) -> pad -> (k,s) -> reshape -> (k*s) -> shrink (k-(s-1))
       x = x.reshape(None, None, *flatten((k,1) for k in x.shape[2:]))
       x = x.pad((None, None, *flatten((None,(0,s-1)) for s in stride)))
       x = x.reshape(None, None, *[k*s for k,s in zip(x.shape[2::2], stride)])
       x = x.shrink((None, None, *[(0,k-(s-1)) for k,s in zip(x.shape[2:], stride)]))
-    padding = flatten((((k-1)*d-p,(k-1)*d-p+op) for k,d,p,op in reversed(list(
-      zip(HW, make_pair(dilation, len(HW)), make_pair(padding, len(HW)), make_pair(output_padding, len(HW)))))))
+    padding = flatten((((k-1)*d-p,(k-1)*d-p+op) for k,d,p,op in reversed(list(zip(HW, dilation, padding, output_padding)))))
     return x.conv2d(w.flatten(end_dim=1), groups=groups, bias=bias, dilation=dilation, padding=padding)
 
   def dot(self, w:Tensor, acc_dtype:Optional[DType]=None) -> Tensor:
@@ -1795,36 +1795,60 @@ class Tensor:
     return fix(ret) + fix(base_add)
 
   @staticmethod
-  def _tri(r:sint, c:sint, k:int=0, **kwargs) -> Tensor:
-    assert all_int((r,c)), "does not support symbolic"
-    if r == 0: return Tensor.zeros((r, c), **kwargs)
-    return Tensor.arange(r, **kwargs).unsqueeze(1).expand(r,c) <= Tensor.arange(-k, c-k, **kwargs).unsqueeze(0).expand(r,c)
-  def triu(self, k:int=0) -> Tensor:
+  def _tri(r:sint, c:sint, diagonal:int=0, **kwargs) -> Tensor:
+    assert isinstance(r, int) and isinstance(c, int), f"does not support symbolic, getting {r=}, {c=}"
+    if r == 0 or c == 0 or diagonal >= c: return Tensor.zeros(r,c,**kwargs)
+    if r+diagonal <= 0: return Tensor.ones(r,c,**kwargs)
+    s = r+c-1
+    # build a (s, s) upper triangle
+    t = Tensor.ones(s,s,**kwargs).pad((None,(0,s))).flatten().shrink(((0,s*(2*s-1)),)).reshape(s,-1).shrink((None,(0,s)))
+    return t[:r,-diagonal:c-diagonal] if diagonal <= 0 else t[diagonal:r+diagonal,:c]
+
+  def triu(self, diagonal:int=0) -> Tensor:
     """
     Returns the upper triangular part of the tensor, the other elements are set to 0.
 
+    The argument `diagonal` determines which diagonal is on the boundary. `diagonal = 0` means the main diagonal.
+    Positive `diagonal` means above the main diagonal, and negative `diagonal` means below the main diagonal.
+
     ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[1, 2, 3], [4, 5, 6]])
+    t = Tensor([[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]])
     print(t.numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t.triu(k=1).numpy())
+    print(t.triu(diagonal=0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.triu(diagonal=1).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.triu(diagonal=-1).numpy())
     ```
     """
-    return Tensor._tri(self.shape[-2], self.shape[-1], k=k, device=self.device).where(self, 0).cast(self.dtype)
-  def tril(self, k:int=0) -> Tensor:
+    return Tensor._tri(self.shape[-2], self.shape[-1], diagonal=diagonal, device=self.device, dtype=dtypes.bool).where(self, 0).cast(self.dtype)
+
+  def tril(self, diagonal:int=0) -> Tensor:
     """
     Returns the lower triangular part of the tensor, the other elements are set to 0.
 
+    The argument `diagonal` determines which diagonal is on the boundary. `diagonal = 0` means the main diagonal.
+    Positive `diagonal` means above the main diagonal, and negative `diagonal` means below the main diagonal.
+
     ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[1, 2, 3], [4, 5, 6]])
+    t = Tensor([[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]])
     print(t.numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t.tril().numpy())
+    print(t.tril(diagonal=0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.tril(diagonal=1).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.tril(diagonal=-1).numpy())
     ```
     """
-    return Tensor._tri(self.shape[-2], self.shape[-1], k=k+1, device=self.device).where(0, self).cast(self.dtype)
+    return Tensor._tri(self.shape[-2], self.shape[-1], diagonal=diagonal+1, device=self.device, dtype=dtypes.bool).where(0, self).cast(self.dtype)
 
   # ***** unary ops *****
 
@@ -2713,7 +2737,7 @@ class Tensor:
     if is_causal: attn_mask = Tensor.ones(self.shape[-2], key.shape[-2], requires_grad=False, device=self.device).tril(0).cast(dtypes.bool)
     if attn_mask is not None and attn_mask.dtype == dtypes.bool: attn_mask = (attn_mask == 0).where(-float("inf"), 0)
     qk = self.matmul(key.transpose(-2,-1), acc_dtype=least_upper_dtype(self.dtype, key.dtype, dtypes.float32)) / math.sqrt(self.shape[-1])
-    return ((qk+attn_mask) if attn_mask is not None else qk).softmax(-1).cast(dtypes.default_float).dropout(dropout_p) @ value
+    return ((qk+attn_mask) if attn_mask is not None else qk).softmax(-1).cast(self.dtype).dropout(dropout_p) @ value
 
   def binary_crossentropy(self, y:Tensor) -> Tensor:
     """

@@ -63,7 +63,7 @@ class TestBEAM(unittest.TestCase):
     assert GlobalCounters.kernel_count == kernel_count + 1
     k_beam_0 = capturing[0].captured
     capturing.clear()
-    assert k_beam_0[-1].prg.p.src != k_beam_1[-1].prg.p.src
+    self.assertNotEqual(k_beam_0[-1].prg.p.src, k_beam_1[-1].prg.p.src)
 
   def test_get_linearizer_actions(self):
     from test.test_linearizer import helper_realized_ast
@@ -71,7 +71,7 @@ class TestBEAM(unittest.TestCase):
     b = Tensor.rand(3)
     realized_ast, _ = helper_realized_ast(a @ b)
     from tinygrad.engine.search import get_linearizer_actions
-    lins = get_linearizer_actions(Linearizer(realized_ast), False).values()
+    lins = get_linearizer_actions(Linearizer(*realized_ast), False).values()
 
     # ensure amt=0 are not duplicated
     if Opt(OptOps.UPCAST, 0, 0) in actions:

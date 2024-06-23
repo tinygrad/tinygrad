@@ -298,7 +298,15 @@ class TestOps(unittest.TestCase):
   def test_tril(self):
     helper_test_op([(3,3)], lambda x: x.tril())
     helper_test_op([(3,3)], lambda x: x.tril(1))
+    helper_test_op([(3,3)], lambda x: x.tril(2))
     helper_test_op([(3,3)], lambda x: x.tril(-1))
+    helper_test_op([(3,3)], lambda x: x.tril(-2))
+    helper_test_op([(4,5)], lambda x: x.tril(4))
+    helper_test_op([(4,5)], lambda x: x.tril(5))
+    helper_test_op([(4,5)], lambda x: x.tril(6))
+    helper_test_op([(4,5)], lambda x: x.tril(-4))
+    helper_test_op([(4,5)], lambda x: x.tril(-5))
+    helper_test_op([(4,5)], lambda x: x.tril(-6))
     helper_test_op([(5,3,3)], lambda x: x.tril())
     helper_test_op([(5,0,3)], lambda x: x.tril())
     helper_test_op([(5,3,3)], lambda x: x.tril(1))
@@ -306,7 +314,15 @@ class TestOps(unittest.TestCase):
   def test_triu(self):
     helper_test_op([(3,3)], lambda x: x.triu())
     helper_test_op([(3,3)], lambda x: x.triu(1))
+    helper_test_op([(3,3)], lambda x: x.triu(2))
     helper_test_op([(3,3)], lambda x: x.triu(-1))
+    helper_test_op([(3,3)], lambda x: x.triu(-2))
+    helper_test_op([(4,5)], lambda x: x.triu(4))
+    helper_test_op([(4,5)], lambda x: x.triu(5))
+    helper_test_op([(4,5)], lambda x: x.triu(6))
+    helper_test_op([(4,5)], lambda x: x.triu(-4))
+    helper_test_op([(4,5)], lambda x: x.triu(-5))
+    helper_test_op([(4,5)], lambda x: x.triu(-6))
     helper_test_op([(5,3,3)], lambda x: x.triu())
     helper_test_op([(5,0,3)], lambda x: x.triu())
     helper_test_op([(5,3,3)], lambda x: x.triu(1))
@@ -329,6 +345,8 @@ class TestOps(unittest.TestCase):
 
   def test_tiny_add(self):
     helper_test_op([(3), (3)], lambda x,y: x+y, Tensor.add, forward_only=True)
+  def test_tiny_mul(self):
+    helper_test_op([(64), (64)], lambda x,y: x*y, Tensor.mul, forward_only=True)
 
   def test_add(self):
     helper_test_op([(45,68), (45,68)], lambda x,y: x+y, Tensor.add)

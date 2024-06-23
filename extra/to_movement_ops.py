@@ -4,7 +4,7 @@ from collections import defaultdict
 from typing import List, Tuple, DefaultDict
 from extra.optimization.helpers import load_worlds, ast_str_to_ast
 from tinygrad.ops import BufferOps, LazyOp
-from tinygrad.helpers import prod, tinytqdm
+from tinygrad.helpers import prod, tqdm
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import sym_infer, Node
 
@@ -142,7 +142,7 @@ def test_rebuild_bufferop_st(ast:LazyOp):
 
 if __name__ == "__main__":
   ast_strs = load_worlds(False, False, True)[:2000]
-  for ast_str in tinytqdm(ast_strs):
+  for ast_str in tqdm(ast_strs):
     for ast in ast_str_to_ast(ast_str):
       test_rebuild_bufferop_st(ast)
 

@@ -1,9 +1,8 @@
 # model based off https://towardsdatascience.com/going-beyond-99-mnist-handwritten-digits-recognition-cfff96337392
 from typing import List, Callable
 from tinygrad import Tensor, TinyJit, nn, GlobalCounters
-from tinygrad.helpers import getenv, colored
+from tinygrad.helpers import getenv, colored, trange
 from tinygrad.nn.datasets import mnist
-from tqdm import trange
 
 class Model:
   def __init__(self):
@@ -20,9 +19,6 @@ class Model:
 
 if __name__ == "__main__":
   X_train, Y_train, X_test, Y_test = mnist()
-
-  # TODO: remove this when HIP is fixed
-  X_train, X_test = X_train.float(), X_test.float()
 
   model = Model()
   opt = nn.optim.Adam(nn.state.get_parameters(model))

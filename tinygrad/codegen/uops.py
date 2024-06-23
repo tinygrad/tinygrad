@@ -56,10 +56,8 @@ class UOp:
   def __mod__(self, x): return UOp.alu(BinaryOps.MOD, self, ufix(self.dtype, x))
   def lt(self, x): return UOp.alu(BinaryOps.CMPLT, self, ufix(self.dtype, x))
   def ge(self, x): return -self.lt(x)
-  @staticmethod
-  def max(x, y): return UOp.alu(BinaryOps.MAX, x, y)
-  @staticmethod
-  def min(x, y): return -UOp.alu(BinaryOps.MAX, -x, -y)
+  def max(self, x): return UOp.alu(BinaryOps.MAX, self, x)
+  def min(self, x): return -UOp.alu(BinaryOps.MAX, -self, -x)
   @staticmethod
   def const(dtype:Optional[DType], b:ConstType|Variable):
     if isinstance(b, Variable): return UOp(UOps.DEFINE_VAR, dtype, (), b)
@@ -214,6 +212,7 @@ constant_folder = PatternMatcher([
   (UOp.var('x') * 1, lambda x: x),    # x*1 -> x
   (UOp.var('x') // 1, lambda x: x),   # x/1 -> x
   (UOp.var('x') // -1, lambda x: -x), # x/-1 -> -x
+  (UOp.var('x', dtype=dtypes.bool).max(UOp.const(dtypes.bool, False)), lambda x: x),  # max(x, False) -> x
   # ** zero folding **
   #x*0 -> 0 or 0*x -> 0
   #if x is nan it should render the nan value.
