@@ -153,6 +153,8 @@ class ProfileLogger:
 
   def __init__(self): self.events, ProfileLogger.writers = [], ProfileLogger.writers + 1
 
+  def add_event(self, ev_name, ev_start, ev_end, actor, subactor=None): self.events += [(ev_name, ev_start, ev_end, actor, subactor)]
+
   def __del__(self):
     for name,st,et,actor_name,subactor_name in self.events:
       if actor_name not in self.actors:
@@ -169,7 +171,7 @@ class ProfileLogger:
     ProfileLogger.writers -= 1
     if ProfileLogger.writers == 0:
       with open(self.path, "w") as f: f.write(json.dumps({"traceEvents": self.mjson}))
-      print(f"Saved profile to {self.path}. Use https://ui.perfetto.dev/#!/viewer to open it.")
+      print(f"Saved profile to {self.path}. Use https://ui.perfetto.dev/ to open it.")
 
 # *** universal database cache ***
 
