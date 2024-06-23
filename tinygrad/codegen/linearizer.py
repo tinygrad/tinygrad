@@ -209,6 +209,7 @@ class Linearizer(Kernel):
                       tuple(x.render(self.render_ops, self) for x in image_idx))
       else:
         rendered_idx = idx.render(self.render_ops, self)
+      # TODO: let UPat check this once it's fast
       if valid.min == 1: stores.append(UOp(UOps.STORE, None, (buf_uop, rendered_idx, var)))
       else: stores.append(UOp(UOps.STORE, None, (buf_uop, rendered_idx, var, valid.render(self.render_ops, self))))
     return stores
@@ -384,9 +385,6 @@ class Linearizer(Kernel):
     # save backups
     sts_backup, gfr_backup, upc_backup = self.sts[:], self.group_for_reduces, self.upcasted
 
-    # global uop cache
-    self.saved_exprs: Dict[Tuple, UOp] = dict()
-
     # uops
     self.buf_uops: List[Optional[UOp]] = [None]*len(self.bufs)
     self.loop_uops: Dict[str, UOp] = {}
@@ -517,7 +515,7 @@ class Linearizer(Kernel):
       for off in range(len(acc)):
         if input_acc[off] != acc[off]:
           acc[off] = UOp(UOps.PHI, input_acc[off].dtype, (input_acc[off], acc[off]))
-    else: ret = [UOp.alu(x.op, *vin) for vin in zip(*values)]
+    else: ret = [UOp.alu(x.op, *src) for src in zip(*values)]
     cache[x] = ret
     return ret
 

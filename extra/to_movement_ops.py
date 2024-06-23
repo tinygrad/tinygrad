@@ -1,11 +1,10 @@
-from tqdm import tqdm
 import itertools
 from enum import Enum, auto
 from collections import defaultdict
 from typing import List, Tuple, DefaultDict
 from extra.optimization.helpers import load_worlds, ast_str_to_ast
 from tinygrad.ops import BufferOps, LazyOp
-from tinygrad.helpers import prod
+from tinygrad.helpers import prod, tqdm
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import sym_infer, Node
 

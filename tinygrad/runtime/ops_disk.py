@@ -1,8 +1,13 @@
 from __future__ import annotations
-import os, mmap, _posixshmem, io
-from typing import Optional
-from tinygrad.helpers import OSX
+import os, mmap, _posixshmem, io, ctypes, ctypes.util, platform
+from typing import Optional, Generator, Tuple, Callable, List
+from tinygrad.helpers import OSX, round_up
 from tinygrad.device import Compiled, Allocator
+import tinygrad.runtime.autogen.io_uring as io_uring
+
+libc = ctypes.CDLL(ctypes.util.find_library("c"))
+libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
+libc.mmap.restype = ctypes.c_void_p
 
 class DiskBuffer:
   def __init__(self, device:DiskDevice, size:int, offset=0):
@@ -18,7 +23,7 @@ class DiskAllocator(Allocator):
   def _alloc(self, size:int, options):
     self.device._might_open(size)
     return DiskBuffer(self.device, size)
-  def _free(self, buf, options): self.device._might_close()
+  def _free(self, opaque, options): self.device._might_close()
   def as_buffer(self, src:DiskBuffer): return src._buf()
   def copyin(self, dest:DiskBuffer, src:memoryview): dest._buf()[:] = src
   def copyout(self, dest:memoryview, src:DiskBuffer):
@@ -29,10 +34,47 @@ class DiskAllocator(Allocator):
         fo.readinto(dest)
     else:
       dest[:] = src._buf()
+
+  def _copyout_sharded(self, src:DiskBuffer, size:int, _get_free_buf:Callable, seg_len:int) -> Generator[Tuple[int, int, int, int], None, None]:
+    assert hasattr(DiskDevice, 'io_uring'), "function requires io uring support"
+
+    fd_offset = src.offset - (minor_offset := src.offset % mmap.PAGESIZE)
+    processed_reqs_cnt, copied_in, next_read_offset, total_copy_size = 0, 0, 0, round_up(size + minor_offset, mmap.PAGESIZE)
+    reqs: List[Tuple[int, int, int, int]] = []
+
+    while next_read_offset < total_copy_size or len(reqs) != processed_reqs_cnt:
+      if next_read_offset < total_copy_size and (copy_batch := _get_free_buf()) is not None:
+        # Prepare sqe
+        sqe_index = (tail:=DiskDevice.io_uring.sq.ktail[0]) & DiskDevice.io_uring.sq.kring_mask[0]
+        sqe = DiskDevice.io_uring.sq.sqes[sqe_index]
+        sqe.opcode, sqe.fd, sqe.off = io_uring.IORING_OP_READ, self.device.fd, fd_offset + next_read_offset
+        sqe.addr, sqe.len, sqe.user_data = copy_batch[0], min(seg_len, total_copy_size - next_read_offset), len(reqs)
+
+        # Send sqe
+        DiskDevice.io_uring.sq.array[sqe_index] = sqe_index
+        DiskDevice.io_uring.sq.ktail[0] = tail + 1
+        libc.syscall(io_uring.NR_io_uring_enter, DiskDevice.io_uring.ring_fd, 1, 1, io_uring.IORING_ENTER_GETEVENTS)
+
+        reqs.append((copy_batch, copied_in, minor_offset, real_copy_size:=min(sqe.len - minor_offset, size - copied_in)))
+        next_read_offset += sqe.len
+        copied_in += real_copy_size
+        minor_offset = 0
+
+      if (head:=DiskDevice.io_uring.cq.khead[0]) != DiskDevice.io_uring.cq.ktail[0]:
+        cqe = DiskDevice.io_uring.cq.cqes[head & DiskDevice.io_uring.cq.kring_mask[0]]
+        assert cqe.res >= 0, f"read from disk failed, err: {cqe.res}"
+        yield reqs[cqe.user_data]
+        DiskDevice.io_uring.cq.khead[0] = head + 1 # advance
+        processed_reqs_cnt += 1
+
   def offset(self, buf:DiskBuffer, size:int, offset:int): return DiskBuffer(buf.device, size, offset)
 
 class DiskDevice(Compiled):
+  _tried_io_uring_init = False
+
   def __init__(self, device:str):
+    if not DiskDevice._tried_io_uring_init: self._iouring_setup()
+
     self.size: Optional[int] = None
     self.count = 0
     super().__init__(device, DiskAllocator(self), None, None, None)
@@ -58,3 +100,25 @@ class DiskDevice(Compiled):
     if self.count == 0:
       if hasattr(self, 'fd'): os.close(self.fd)
       self.size = None
+  def _iouring_setup(self):
+    DiskDevice._tried_io_uring_init = True
+
+    if platform.system() != 'Linux': return
+
+    fd = libc.syscall(io_uring.NR_io_uring_setup, 4096, ctypes.byref(p:=io_uring.struct_io_uring_params()))
+    if fd < 0: return
+
+    sq_ptr = libc.mmap(0, p.sq_off.array + p.sq_entries * 4, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | MAP_POPULATE, fd, 0)
+    cq_ptr = libc.mmap(0, p.cq_off.cqes + p.cq_entries * ctypes.sizeof(io_uring.struct_io_uring_cqe),
+                       mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | MAP_POPULATE, fd, io_uring.IORING_OFF_CQ_RING)
+    sqes = libc.mmap(0, p.sq_entries * ctypes.sizeof(io_uring.struct_io_uring_sqe),
+                     mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | MAP_POPULATE, fd, io_uring.IORING_OFF_SQES)
+
+    def u32ptr(val): return ctypes.cast(val, ctypes.POINTER(ctypes.c_uint32))
+    sqdesc = io_uring.struct_io_uring_sq(khead=u32ptr(sq_ptr+p.sq_off.head), ktail=u32ptr(sq_ptr+p.sq_off.tail), array=u32ptr(sq_ptr+p.sq_off.array),
+      kring_mask=u32ptr(sq_ptr+p.sq_off.ring_mask), sqes=ctypes.cast(sqes, ctypes.POINTER(io_uring.struct_io_uring_sqe)))
+
+    cqdesc = io_uring.struct_io_uring_cq(khead=u32ptr(cq_ptr+p.cq_off.head), ktail=u32ptr(cq_ptr+p.cq_off.tail),
+      kring_mask=u32ptr(sq_ptr+p.cq_off.ring_mask), cqes=ctypes.cast(cq_ptr+p.cq_off.cqes, ctypes.POINTER(io_uring.struct_io_uring_cqe)))
+
+    DiskDevice.io_uring = io_uring.struct_io_uring(ring_fd=fd, sq=sqdesc, cq=cqdesc) # type: ignore

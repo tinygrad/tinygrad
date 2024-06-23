@@ -2,10 +2,9 @@ from typing import DefaultDict, Dict, List, Union, Optional, cast, Callable
 import struct, math
 from collections import defaultdict
 from tinygrad.helpers import DEBUG
-from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op
 from tinygrad.dtype import dtypes, DType, PtrDType, ConstType
-from tinygrad.codegen.uops import UOpGraph, PatternMatcher, UPat
+from tinygrad.codegen.uops import UOps, UOp, UOpGraph, PatternMatcher, UPat
 from tinygrad.renderer import Renderer, TensorCore
 
 def render_val(x, dtype):
@@ -131,37 +130,37 @@ class PTXRenderer(Renderer):
       return ret
 
     for u in uops:
-      uop,dtype,vin,args = u.op,u.dtype,u.src,u.arg
+      uop,dtype,src,args = u.op,u.dtype,u.src,u.arg
       if uop is UOps.IF:
-        assert vin[0].dtype is not None
-        kk(*self.render_bra(f"IF_{r[vin[0]][1:]}_{cast(List, uops._uops).index(u)}", _cast(r[vin[0]], dtypes.bool, vin[0].dtype, u=u, pred=True)))
+        assert src[0].dtype is not None
+        kk(*self.render_bra(f"IF_{r[src[0]][1:]}_{cast(List, uops._uops).index(u)}", _cast(r[src[0]], dtypes.bool, src[0].dtype, u=u, pred=True)))
       elif uop is UOps.BARRIER and self.barrier: kk(self.barrier)
       elif uop is UOps.ENDRANGE:
-        kk(self.asm_for_op[BinaryOps.ADD](r[vin[0]], r[vin[0]], "1", dtypes.int, self.types[dtypes.int]),
-            self.asm_for_op[BinaryOps.CMPLT](pred:=ssa("pred", dtype="pred"), r[vin[0]], r[vin[0].src[1]], dtypes.int, self.types[dtypes.int]))
-        kk(*self.render_bra(f"LOOP_{r[vin[0]][1:]}", pred))
+        kk(self.asm_for_op[BinaryOps.ADD](r[src[0]], r[src[0]], "1", dtypes.int, self.types[dtypes.int]),
+            self.asm_for_op[BinaryOps.CMPLT](pred:=ssa("pred", dtype="pred"), r[src[0]], r[src[0].src[1]], dtypes.int, self.types[dtypes.int]))
+        kk(*self.render_bra(f"LOOP_{r[src[0]][1:]}", pred))
       elif uop is UOps.ENDIF:
-        kk(f"IF_{r[vin[0].src[0]][1:]}_{cast(List, uops._uops).index(vin[0])}:")
+        kk(f"IF_{r[src[0].src[0]][1:]}_{cast(List, uops._uops).index(src[0])}:")
       elif uop is UOps.STORE:
-        assert vin[0].dtype is not None and vin[2].dtype is not None
-        assert vin[0].dtype == dtypes.int64, "store isn't int64"
-        assert vin[1].op is UOps.CONST, f"store isn't const {u}"
-        mem_type = '.shared' if vin[0].op is UOps.DEFINE_LOCAL or any(x.op is UOps.DEFINE_LOCAL for x in vin[0].parents) else '.global'
-        if vin[2].dtype.count > 1:
-          kk((f"@{r[vin[3]]} " if len(vin)>3 else "") + \
-              f"st{mem_type}.v{vin[2].dtype.count}.{self.mem_types[vin[2].dtype.scalar()]} [{r[vin[0]]}+{vin[1].arg}], {{{', '.join(r[vin[2]])}}};")
+        assert src[0].dtype is not None and src[2].dtype is not None
+        assert src[0].dtype == dtypes.int64, "store isn't int64"
+        assert src[1].op is UOps.CONST, f"store isn't const {u}"
+        mem_type = '.shared' if src[0].op is UOps.DEFINE_LOCAL or any(x.op is UOps.DEFINE_LOCAL for x in src[0].parents) else '.global'
+        if src[2].dtype.count > 1:
+          kk((f"@{r[src[3]]} " if len(src)>3 else "") + \
+              f"st{mem_type}.v{src[2].dtype.count}.{self.mem_types[src[2].dtype.scalar()]} [{r[src[0]]}+{src[1].arg}], {{{', '.join(r[src[2]])}}};")
         else:
-          kk(*self.render_store(r[vin[0]], r[vin[2]], vin[2].dtype, gate=r[vin[3]] if len(vin)>3 else None, ss=mem_type, offset=vin[1].arg))
+          kk(*self.render_store(r[src[0]], r[src[2]], src[2].dtype, gate=r[src[3]] if len(src)>3 else None, ss=mem_type, offset=src[1].arg))
       else:
         assert dtype is not None, f"None dtype for uop {uop}"
-        if uop is UOps.RANGE: kk(*self.render_loop(loop:=ssa('ridx', u), r[vin[0]], "LOOP_"+loop[1:]))
+        if uop is UOps.RANGE: kk(*self.render_loop(loop:=ssa('ridx', u), r[src[0]], "LOOP_"+loop[1:]))
         elif uop is UOps.ALU:
-          assert vin[0].dtype is not None
+          assert src[0].dtype is not None
           if args is BinaryOps.CMPLT or args is BinaryOps.CMPNE:
             # pass in the other dtype here
-            kk(self.asm_for_op[args](ssa("alu", u), *[r[x] for x in vin], vin[0].dtype, self.types[vin[0].dtype]))
+            kk(self.asm_for_op[args](ssa("alu", u), *[r[x] for x in src], src[0].dtype, self.types[src[0].dtype]))
           else:
-            kk(self.asm_for_op[args](ssa("alu", u), *[r[x] for x in vin], dtype, self.types[dtype]))
+            kk(self.asm_for_op[args](ssa("alu", u), *[r[x] for x in src], dtype, self.types[dtype]))
         elif uop is UOps.DEFINE_ACC:
           if dtype.count > 1:
             r[u] = [ssa('acc', dtype=self.types[dtype.scalar()]) for _ in range(dtype.count)]
@@ -175,30 +174,30 @@ class PTXRenderer(Renderer):
         elif uop is UOps.CONST:
           if dtype.count > 1: r[u] = [const(args, dtype.scalar(), mov=True) for _ in range(dtype.count)]
           else: r[u] = const(args, dtype, mov=True)
-        elif uop is UOps.GEP: r[u] = r[vin[0]][u.arg]
+        elif uop is UOps.GEP: r[u] = r[src[0]][u.arg]
         elif uop is UOps.LOAD:
-          assert vin[0].dtype == dtypes.int64, "load isn't int64"
-          assert vin[1].op is UOps.CONST, f"load isn't const {u}"
-          mem_type = '.shared' if vin[0].op is UOps.DEFINE_LOCAL or any(x.op is UOps.DEFINE_LOCAL for x in vin[0].parents) else '.global'
+          assert src[0].dtype == dtypes.int64, "load isn't int64"
+          assert src[1].op is UOps.CONST, f"load isn't const {u}"
+          mem_type = '.shared' if src[0].op is UOps.DEFINE_LOCAL or any(x.op is UOps.DEFINE_LOCAL for x in src[0].parents) else '.global'
           if dtype.count > 1:
             r[u] = [ssa('val', dtype=self.types[dtype.scalar()]) for _ in range(dtype.count)]
-            if(len(vin)>3):
+            if(len(src)>3):
               for v in r[u]: kk(f"mov.{self.mem_types[dtype.scalar()]} {v}, {render_val(0, dtype.scalar())};")
-            kk((f"@{r[vin[2]]}"if len(vin) > 3 else "")
-              + f" ld{mem_type}.v{dtype.count}.{self.mem_types[dtype.scalar()]} {{{', '.join(r[u])}}}, [{r[vin[0]]}+{vin[1].arg}];")
+            kk((f"@{r[src[2]]}"if len(src) > 3 else "")
+              + f" ld{mem_type}.v{dtype.count}.{self.mem_types[dtype.scalar()]} {{{', '.join(r[u])}}}, [{r[src[0]]}+{src[1].arg}];")
           else:
-            kk(*self.render_load(r[vin[0]], ssa('val', u), dtype, gate=r[vin[2]] if len(vin) > 3 else None,
-                                alt=r[vin[3]] if len(vin) > 3 else None, ss=mem_type, offset=vin[1].arg))
+            kk(*self.render_load(r[src[0]], ssa('val', u), dtype, gate=r[src[2]] if len(src) > 3 else None,
+                                alt=r[src[3]] if len(src) > 3 else None, ss=mem_type, offset=src[1].arg))
         elif uop is UOps.PHI:
           if dtype.count > 1:
-            for x0, x1 in zip(r[vin[0]], r[vin[1]]): kk(f"mov.b{self.types[dtype.scalar()][1:]} {x0}, {x1};")
+            for x0, x1 in zip(r[src[0]], r[src[1]]): kk(f"mov.b{self.types[dtype.scalar()][1:]} {x0}, {x1};")
           else:
-            kk(f"mov.b{self.types[dtype][1:]} {r[vin[0]]}, {r[vin[1]]};")
-          r[u] = r[vin[0]]
+            kk(f"mov.b{self.types[dtype][1:]} {r[src[0]]}, {r[src[1]]};")
+          r[u] = r[src[0]]
         elif uop in {UOps.CAST, UOps.BITCAST}:
-          assert vin[0].dtype is not None
-          if dtype.count>1: r[u] = [r[x] for x in vin] # type: ignore
-          else: _cast(r[vin[0]], dtype, vin[0].dtype, bitcast=uop is UOps.BITCAST, u=u)
+          assert src[0].dtype is not None
+          if dtype.count>1: r[u] = [r[x] for x in src] # type: ignore
+          else: _cast(r[src[0]], dtype, src[0].dtype, bitcast=uop is UOps.BITCAST, u=u)
         elif uop is UOps.DEFINE_LOCAL:
           # TODO: we should sum these, and fetch 0xC000 from somewhere
           assert args[1]*dtype.itemsize <= 0xC000, "too large local"
@@ -214,13 +213,13 @@ class PTXRenderer(Renderer):
           kk(*self.render_load(nm, ssa('dat', u, self.types[dt]), dt, ss=".param"))
         elif uop is UOps.WMMA:
           wmma = []
-          for vv in vin[:2]:
+          for vv in src[:2]:
             for i in range(0, len(r[vv]), 2):
               wmma.append(ssa("wmma", dtype="b32"))
               kk(f'mov.b32 {wmma[-1]}, {{{", ".join(r[vv][i:i+2])}}};')
           r[u] = [ssa("wmma", dtype=self.types[dtype.scalar()]) for _ in range(dtype.count)]
           kk(f'mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32\
-            {{{", ".join(r[u])}}}, {{{", ".join(wmma[:4])}}}, {{{", ".join(wmma[4:])}}}, {{{", ".join(r[vin[2]])}}};')
+            {{{", ".join(r[u])}}}, {{{", ".join(wmma[:4])}}}, {{{", ".join(wmma[4:])}}}, {{{", ".join(r[src[2]])}}};')
         else: raise NotImplementedError(f"no code for {uop}")
 
     return self.render_kernel(kernel, name, bufs, c.items())

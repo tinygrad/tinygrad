@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import os, sys, io, pathlib, json, struct
-from tqdm import tqdm
 import numpy as np
 sys.path.insert(0, str(pathlib.Path(__file__).parents[1]))
 
@@ -16,7 +15,7 @@ from extra.onnx import get_run_onnx
 from tinygrad import Tensor, Device, GlobalCounters, dtypes
 from tinygrad.dtype import ImageDType
 from tinygrad.device import Buffer
-from tinygrad.helpers import partition, Context, fetch, getenv, DEBUG
+from tinygrad.helpers import partition, Context, fetch, getenv, DEBUG, tqdm
 from tinygrad.engine.realize import run_schedule, lower_schedule, ExecItem, CompiledRunner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule, memory_planner
 from tinygrad.ops import LoadOps

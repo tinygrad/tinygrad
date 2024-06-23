@@ -1,8 +1,8 @@
 from __future__ import annotations
 import os, ctypes, pathlib, re, fcntl, functools, mmap, struct, tempfile, hashlib, subprocess, time, array
-from typing import Tuple, List, Any, cast
+from typing import Tuple, List, Any
 from dataclasses import dataclass
-from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, BufferOptions
+from tinygrad.device import HCQCompatCompiled, HCQCompatAllocator, Compiler, CompileError, BufferOptions
 from tinygrad.helpers import getenv, from_mv, mv_address, init_c_struct_t, to_mv, round_up, to_char_p_p, DEBUG, prod
 from tinygrad.renderer.cstyle import NVRenderer
 from tinygrad.runtime.ops_cuda import check as cuda_check, _get_bytes, CUDACompiler
@@ -330,55 +330,17 @@ class NVProgram:
       self.device._wait_signal(self.device.timeline_signal, self.device.timeline_value - 1)
       return (self.device.time_event_en[1] - self.device.time_event_st[1]) / 1e9
 
-class NVAllocator(LRUAllocator):
-  def __init__(self, device:NVDevice):
-    self.device = device
-    self.b = [self.device._gpu_host_alloc(2 << 20) for _ in range(16)]
-    self.b_timeline = [0] * len(self.b)
-    self.b_next = 0
-    super().__init__()
+class NVAllocator(HCQCompatAllocator):
+  def __init__(self, device:NVDevice): super().__init__(device)
 
   def _alloc(self, size:int, options:BufferOptions):
     if options.host: return self.device._gpu_host_alloc(size)
     return self.device._gpu_alloc(size, map_to_cpu=options.cpu_access, huge_page=(size > (16 << 20)))
 
-  def _free(self, gpumem, options:BufferOptions):
-    NVDevice.synchronize_system()
-    if options.host: self.device._gpu_host_free(gpumem)
-    else: self.device._gpu_free(gpumem)
-
-  def copyin(self, dest, src: memoryview):
-    for i in range(0, src.nbytes, self.b[0].length):
-      self.b_next = (self.b_next + 1) % len(self.b)
-      NVDevice._wait_signal(self.device.timeline_signal, self.b_timeline[self.b_next])
-      ctypes.memmove(self.b[self.b_next].va_addr, from_mv(src[i:]), lsize:=min(self.b[self.b_next].length, src.nbytes-i))
-      HWCopyQueue().wait(self.device.timeline_signal, self.device.timeline_value - 1) \
-                   .copy(dest.va_addr+i, self.b[self.b_next].va_addr, lsize) \
-                   .signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
-      self.b_timeline[self.b_next] = self.device.timeline_value
-      self.device.timeline_value += 1
-
-  def copyout(self, dest:memoryview, src):
-    NVDevice.synchronize_system()
-    for i in range(0, dest.nbytes, self.b[0].length):
-      HWCopyQueue().wait(self.device.timeline_signal, self.device.timeline_value - 1) \
-                   .copy(self.b[0].va_addr, src.va_addr+i, lsize:=min(self.b[0].length, dest.nbytes-i)) \
-                   .signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
-      NVDevice._wait_signal(self.device.timeline_signal, self.device.timeline_value)
-      self.device.timeline_value += 1
-
-      ctypes.memmove(from_mv(dest[i:]), self.b[0].va_addr, lsize)
-
-  def transfer(self, dest, src, sz:int, src_dev=None, dest_dev=None):
-    src_dev._gpu_map(dest)
-    HWCopyQueue().wait(src_dev.timeline_signal, src_dev.timeline_value - 1) \
-                 .wait(dest_dev.timeline_signal, dest_dev.timeline_value - 1) \
-                 .copy(dest.va_addr, src.va_addr, sz) \
-                 .signal(src_dev.timeline_signal, src_dev.timeline_value).submit(src_dev)
-    HWComputeQueue().wait(src_dev.timeline_signal, src_dev.timeline_value).submit(dest_dev)
-    src_dev.timeline_value += 1
-
-  def offset(self, buf, size:int, offset:int): return type(buf)(base=buf.base + offset, va_addr=buf.va_addr + offset, length=size)
+  def _free(self, opaque, options:BufferOptions):
+    self.device.synchronize()
+    if options.host: self.device._gpu_host_free(opaque)
+    else: self.device._gpu_free(opaque)
 
 @dataclass
 class GPFifo:
@@ -389,7 +351,7 @@ class GPFifo:
   put_value: int = 0
 
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
-class NVDevice(Compiled):
+class NVDevice(HCQCompatCompiled):
   root = None
   fd_ctl: int = -1
   fd_uvm: int = -1
@@ -473,7 +435,7 @@ class NVDevice(Compiled):
 
     # NOTE: va_addr is set to make rawbufs compatable with AMD.
     return uvm.map_external_allocation(self.fd_uvm, base=va_base, length=size, rmCtrlFd=self.fd_ctl, hClient=self.root, hMemory=mem_handle,
-                                       gpuAttributesCount=1, perGpuAttributes=gpu_attrs, va_addr=va_base)
+                                       gpuAttributesCount=1, perGpuAttributes=gpu_attrs, va_addr=va_base, size=size)
 
   def _gpu_map(self, mem):
     if self.gpu_uuid in getattr(mem, "mapped_gpu_ids", []): return
@@ -554,8 +516,6 @@ class NVDevice(Compiled):
     en_fifo_params = nv_gpu.NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS(bEnable=1)
     rm_control(self.fd_ctl, nv_gpu.NVA06C_CTRL_CMD_GPFIFO_SCHEDULE, self.root, channel_group, en_fifo_params)
 
-    self.timeline_value: int = 1
-    self.timeline_signal, self._shadow_timeline_signal = NVDevice._get_signal(), NVDevice._get_signal()
     self.time_event_st, self.time_event_en = NVDevice._get_signal(), NVDevice._get_signal()
 
     self.cmdq_page: nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS = self._gpu_alloc(0x200000, map_to_cpu=True, huge_page=True)
@@ -567,9 +527,8 @@ class NVDevice(Compiled):
 
     self.arch: str = "sm_89" if not MOCKGPU else "sm_35" # TODO: fix
 
-    from tinygrad.runtime.graph.hcq import HCQGraph
     super().__init__(device, NVAllocator(self), NVRenderer(self.arch), CUDACompiler(self.arch) if MOCKGPU else NVCompiler(self.arch),
-                     functools.partial(NVProgram, self), functools.partial(HCQGraph, NVDevice, HWComputeQueue, HWCopyQueue))
+                     functools.partial(NVProgram, self), HWComputeQueue, HWCopyQueue, timeline_signals=[self._get_signal(), self._get_signal()])
 
     self._cmdq_setup_compute_gpfifo()
     self._cmdq_setup_dma_gpfifo()
@@ -580,20 +539,16 @@ class NVDevice(Compiled):
     NVDevice._wait_signal(self.timeline_signal, self.timeline_value - 1)
     self.cmdq_wptr = 0
 
-    if self.timeline_value > (1 << 63):
-      self.timeline_signal, self._shadow_timeline_signal = self._shadow_timeline_signal, self.timeline_signal
-      self.timeline_signal[0], self.timeline_value = 0, 1
-      cast(NVAllocator, self.allocator).b_timeline = [0] * len(cast(NVAllocator, self.allocator).b)
+    if self.timeline_value > (1 << 63): self._wrap_timeline_signal()
 
-  @staticmethod
-  def synchronize_system():
-    for d in NVDevice.devices: d.synchronize()
+  @classmethod
+  def _read_signal(self, sig): return sig[0]
 
   @classmethod
   def _set_signal(self, sig, value): sig[0] = value
 
   @classmethod
-  def _get_signal(self, value=0) -> memoryview:
+  def _get_signal(self, value=0, **kwargs) -> memoryview:
     self._set_signal(sig := self.signals_pool.pop(), value)
     return sig
 

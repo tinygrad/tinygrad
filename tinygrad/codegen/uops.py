@@ -56,24 +56,22 @@ class UOp:
   def __mod__(self, x): return UOp.alu(BinaryOps.MOD, self, ufix(self.dtype, x))
   def lt(self, x): return UOp.alu(BinaryOps.CMPLT, self, ufix(self.dtype, x))
   def ge(self, x): return -self.lt(x)
-  @staticmethod
-  def max(x, y): return UOp.alu(BinaryOps.MAX, x, y)
-  @staticmethod
-  def min(x, y): return -UOp.alu(BinaryOps.MAX, -x, -y)
+  def max(self, x): return UOp.alu(BinaryOps.MAX, self, x)
+  def min(self, x): return -UOp.alu(BinaryOps.MAX, -self, -x)
   @staticmethod
   def const(dtype:Optional[DType], b:ConstType|Variable):
     if isinstance(b, Variable): return UOp(UOps.DEFINE_VAR, dtype, (), b)
     return UOp(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
   @staticmethod
-  def alu(arg, *vin:UOp): return UOp(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else vin[-1].dtype, vin, arg)
+  def alu(arg, *src:UOp): return UOp(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else src[-1].dtype, src, arg)
   @staticmethod
-  def load(*vin:UOp, dtype:Optional[DType]=None, **kwargs): return UOp(UOps.LOAD, dtype, tuple(vin)+tuple(kwargs.values()))
+  def load(*src:UOp, dtype:Optional[DType]=None, **kwargs): return UOp(UOps.LOAD, dtype, tuple(src)+tuple(kwargs.values()))
   @staticmethod
-  def store(*vin:UOp, dtype:Optional[DType]=None, **kwargs): return UOp(UOps.STORE, dtype, tuple(vin)+tuple(kwargs.values()))
+  def store(*src:UOp, **kwargs): return UOp(UOps.STORE, None, tuple(src)+tuple(kwargs.values()))
   @staticmethod
-  def var(name: Optional[str]=None, dtype: Optional[DType]=None): return UOp(UOps.VAR, dtype=dtype, arg=name)
+  def var(name:Optional[str]=None, dtype:Optional[DType]=None): return UOp(UOps.VAR, dtype=dtype, arg=name)
   @staticmethod
-  def cvar(name: Optional[str]=None, dtype: Optional[DType]=None): return UOp(UOps.CONST, dtype=dtype).name(name)
+  def cvar(name:Optional[str]=None, dtype:Optional[DType]=None): return UOp(UOps.CONST, dtype=dtype).name(name)
   @functools.cached_property
   def parents(self) -> Set[UOp]: return set.union(set(self.src), *[x.parents for x in self.src])
   @property  # parents with self
@@ -103,7 +101,7 @@ class UPat:
   @staticmethod
   def compile(u: UOp, name:Optional[str]=None) -> UPat:
     if u.op is UOps.VAR: return UPat(name=name or u.arg, dtype=u.dtype) if len(u.src) == 0 else UPat.compile(u.src[0], name or u.arg)
-    return UPat(u.op, u.arg, (list if u.commutative() else tuple)([UPat.compile(vin) for vin in u.src]) if u.src != () else None, name, u.dtype)
+    return UPat(u.op, u.arg, (list if u.commutative() else tuple)([UPat.compile(src) for src in u.src]) if u.src != () else None, name, u.dtype)
 
 T = TypeVar("T")
 def __unmatch(m1:Union[T, Set[T]], m2:T) -> bool:
@@ -174,14 +172,12 @@ constant_folder = PatternMatcher([
       UPat(UOps.CONST, name="compval"))), UPat(UOps.CONST, name="multconst"), UPat(UOps.CONST, 0))), loop_collapse),
   # sum collapse to mul (with possible GEP)
   (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, name="phi_input", src=(UPat(UOps.RANGE, name="loop"),)),
-      UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
-  (UPat(UOps.PHI, src=(UPat(UOps.GEP, name="phi_input",
-                            src=(UPat(UOps.DEFINE_ACC, src=(UPat(UOps.RANGE, name="loop"),)),)),
-      UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
+                       UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
+  (UPat(UOps.PHI, src=(UPat(UOps.GEP, name="phi_input", src=(UPat(UOps.DEFINE_ACC, src=(UPat(UOps.RANGE, name="loop"),)),)),
+                       UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
   # deal with UNMUL
-  (UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c1"),
-                                                   UPat(UOps.UNMUL, src=[UPat(UOps.CONST, name="c2"), UPat(name="v")])]),
-                                                   lambda c1,c2,v: v if c1.arg == c2.arg else None),
+  (UPat(UOps.ALU, BinaryOps.MUL, [UPat(UOps.CONST, name="c1"), UPat(UOps.UNMUL, src=[UPat(UOps.CONST, name="c2"), UPat(name="v")])]),
+   lambda c1,c2,v: v if c1.arg == c2.arg else None),
   (UOp(UOps.UNMUL, src=(UOp.const(None, 0).name('zero'), UOp.var())), lambda zero: zero),
   (UOp(UOps.UNMUL).name('unmul').cast().name('root'), lambda root,unmul: UOp(UOps.UNMUL, root.dtype, (unmul.src[0].cast(root.dtype), unmul.src[1]))),
   # max on special can go away (TODO: special should be variable, same thing applies)
@@ -216,14 +212,14 @@ constant_folder = PatternMatcher([
   (UOp.var('x') * 1, lambda x: x),    # x*1 -> x
   (UOp.var('x') // 1, lambda x: x),   # x/1 -> x
   (UOp.var('x') // -1, lambda x: -x), # x/-1 -> -x
+  (UOp.var('x', dtype=dtypes.bool).max(UOp.const(dtypes.bool, False)), lambda x: x),  # max(x, False) -> x
   # ** zero folding **
   #x*0 -> 0 or 0*x -> 0
   #if x is nan it should render the nan value.
   (UOp.var('x') * 0, lambda x: x if isinstance(x.arg, float) and math.isnan(x.arg) else UOp.const(x.dtype, 0)),
   (UOp.var('x') - UOp.var('x'), lambda x: UOp.const(x.dtype, 0)),   # x-x -> 0
   # ** load/store folding **
-  (UPat(UOps.STORE, src=(UPat(name="buf"), UPat(name="idx"),
-                               UPat(UOps.LOAD, src=(UPat(name="buf"), UPat(name="idx"))))), lambda buf, idx: UOp(UOps.NOOP)),
+  (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp.load(UOp.var("buf"), UOp.var("idx"))), lambda buf,idx:UOp(UOps.NOOP)),
   # ** two stage add/sub folding **
   ((UOp.var('x') + UOp.cvar('c1')) + UOp.cvar('c2'), lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, [c1.arg, c2.arg]))),
   ((UOp.var('x') - UOp.cvar('c1')) + UOp.cvar('c2'), lambda x,c1,c2: x+UOp.const(x.dtype, exec_alu(BinaryOps.ADD, x.dtype, [c2.arg, -c1.arg]))),
@@ -258,6 +254,14 @@ constant_folder = PatternMatcher([
   (UOp.lt(-UOp.var('x'), UOp.cvar('c', dtypes.int)), lambda c,x: UOp.lt(UOp.const(c.dtype, -c.arg), x)),
   # cast NOOP (NOTE: it's str to deal with PtrDType)
   (UPat(UOps.CAST, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
+  # fold gated LOAD/STORE
+  (UOp.load(UOp.var("buf"), UOp.var("idx"), UOp.const(None, 1), UOp.cvar("var")), lambda buf,idx,var: UOp.load(buf, idx, dtype=var.dtype)),
+  (UOp.load(UOp.var("buf"), UOp.var("idx"), UOp.const(None, 1), UOp.cvar("var"), UOp.var("barrier")),
+   lambda buf,idx,var,barrier: UOp.load(buf, idx, barrier, dtype=var.dtype)),
+  (UOp.load(UOp.var(), UOp.var(), UOp.const(None, 0), UOp.cvar("var")), lambda var: var),
+  (UOp.load(UOp.var(), UOp.var(), UOp.const(None, 0), UOp.cvar("var"), UOp.var()), lambda var: var),
+  (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp.var("val"), UOp.const(None, 1)), UOp.store),
+  (UOp.store(UOp.var(), UOp.var(), UOp.var(), UOp.const(None, 0)), lambda: UOp(UOps.NOOP)),
 ])
 
 # *** uop graph ***
@@ -287,7 +291,7 @@ class UOpGraph:
     for i,u in enumerate(self):
       print(f"{i:4d} {str(u.op):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str([self.uops.index(x) for x in u.src]):32s} {u.arg}")
 
-  def graph_rewrite(self, sink, pm):
+  def graph_rewrite(self, sink:UOp, pm:PatternMatcher):
     # recursive rewrite
     changed = getenv("UOPS_REWRITE", 1)
     run_cnt = 0
@@ -315,23 +319,20 @@ class UOpGraph:
       assert run_cnt < 100, "exceeded 100 rewrite loops!"
     return sink
 
-  def graph_dedup(self, sink):
+  def graph_dedup(self, sink:UOp):
     # add nodes to graph in reverse BFS order
     # dedup all nodes
     # TODO: i feel like this BFS is written in a few places, possible to library it?
     unprocessed_nodes = [sink]
-    early_in_degree: DefaultDict[UOp, int] = defaultdict(int)
+    early_in_degree: Dict[UOp, int] = {}
     children: DefaultDict[UOp, List[UOp]] = defaultdict(list)
-    all_nodes: Dict[UOp, None] = dict()
     while len(unprocessed_nodes):
       n = unprocessed_nodes.pop(0)
-      if n in all_nodes: continue
-      all_nodes[n] = None
-      for x in n.src:
-        early_in_degree[n] += 1
-        children[x].append(n)
+      if n in early_in_degree: continue
+      early_in_degree[n] = len(n.src)
+      for x in n.src: children[x].append(n)
       unprocessed_nodes += list(n.src)
-    early_queue = [x for x in all_nodes if early_in_degree[x] == 0]
+    early_queue = [k for k, v in early_in_degree.items() if v == 0]
     replace_nodes: Dict[UOp, UOp] = {}
     while len(early_queue):
       n = early_queue.pop(0)
@@ -361,8 +362,8 @@ class UOpGraph:
     # BFS toposort
     graph: DefaultDict[UOp, List[UOp]] = defaultdict(list)
     in_degree: DefaultDict[UOp, int] = defaultdict(int)
-    loops = []
-    ifs = []
+    loops:List[UOp] = []
+    ifs:List[UOp] = []
     nodes: Dict[UOp, None] = {}
     def add_parents(u:UOp):
       if u in nodes: return
@@ -384,8 +385,8 @@ class UOpGraph:
     end_for_uop = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.PHI, UOps.ENDRANGE)}
     scope_children = {p:get_recursive_children(p, end_for_uop[p.op][0]) for p in (loops+ifs)[::-1]}
 
-    queue: List = []
-    def push(u):
+    queue:List[Tuple[int, UOp]] = []
+    def push(u:UOp):
       priority = 0
       # prefer uops that are loop children
       for l, ss in scope_children.items():
@@ -458,23 +459,25 @@ class UOpGraph:
 
   def type_verify(self):
     for u in self.uops:
-      uop, arg, vin, dtype = u.op, u.arg, u.src, u.dtype
+      uop, arg, src, dtype = u.op, u.arg, u.src, u.dtype
       if uop in {UOps.CONST, UOps.DEFINE_ACC}:
         if uop is UOps.DEFINE_ACC: arg = arg[0]
         assert dtype is not None and type(arg) is type(dtypes.as_const(arg, dtype)), f"type of {arg=} does not match {dtype}"
       if uop in {UOps.CAST, UOps.BITCAST}: assert arg is None   # type is the output type, not an arg
+      if uop is UOps.LOAD and len(src) > 2 and src[2].op not in {UOps.IF, UOps.BARRIER}: assert src[2].dtype == dtypes.bool
+      if uop is UOps.STORE and len(src) == 4: assert src[3].dtype == dtypes.bool
       if uop is UOps.ALU:
         if arg in UnaryOps:
-          assert dtype == vin[0].dtype, f"{arg} dtype mismatch {dtype=} != {vin[0].dtype=}"
+          assert dtype == src[0].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=}"
         elif arg in (BinaryOps.CMPLT, BinaryOps.CMPNE):
           assert dtype == dtypes.bool, f"{arg} output dtype mismatch {dtype=} != {dtypes.bool}"
-          assert vin[0].dtype == vin[1].dtype, f"{arg} dtype mismatch {dtype=} != {vin[0].dtype=} != {vin[1].dtype=}"
+          assert src[0].dtype == src[1].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=} != {src[1].dtype=}"
         elif arg is BinaryOps.IDIV:
-          assert dtypes.is_int(vin[0].dtype) and dtypes.is_int(vin[1].dtype), \
-              f"input dtype mismatch {dtypes.int} != {vin[0].dtype=} != {vin[1].dtype=}"
+          assert dtypes.is_int(src[0].dtype) and dtypes.is_int(src[1].dtype), \
+              f"input dtype mismatch {dtypes.int} != {src[0].dtype=} != {src[1].dtype=}"
           assert dtypes.is_int(dtype), f"{arg} output dtype mismatch {dtype=} != {dtypes.int}"
         elif arg in BinaryOps:
-          assert dtype == vin[0].dtype == vin[1].dtype, f"{arg} dtype mismatch {dtype=} != {vin[0].dtype=} != {vin[1].dtype=}"
+          assert dtype == src[0].dtype == src[1].dtype, f"{arg} dtype mismatch {dtype=} != {src[0].dtype=} != {src[1].dtype=}"
         elif arg == TernaryOps.WHERE:
-          assert vin[0].dtype == dtypes.bool, f"{arg} selector dtype mismatch {vin[0].dtype=} != {dtypes.bool}"
-          assert dtype == vin[1].dtype == vin[2].dtype, f"{arg} choice dtype mismatch {dtype=} != {vin[1].dtype=} != {vin[2].dtype=}"
+          assert src[0].dtype == dtypes.bool, f"{arg} selector dtype mismatch {src[0].dtype=} != {dtypes.bool}"
+          assert dtype == src[1].dtype == src[2].dtype, f"{arg} choice dtype mismatch {dtype=} != {src[1].dtype=} != {src[2].dtype=}"

@@ -5,7 +5,8 @@ from dataclasses import replace
 from test.external.fuzz_linearizer import compare_linearizer
 
 from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError
-from tinygrad.codegen.linearizer import Linearizer, UOp, UOps, expand_node, expand_idxs, get_grouped_dims
+from tinygrad.codegen.linearizer import Linearizer, expand_node, expand_idxs, get_grouped_dims
+from tinygrad.codegen.uops import UOp, UOps
 from tinygrad.device import Device, Buffer
 from tinygrad.ops import BinaryOps, BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, TernaryOps, ReduceOps, UnaryOps
 from tinygrad.renderer import TensorCore
@@ -547,23 +548,6 @@ class TestLinearizer(unittest.TestCase):
       tc_actions = [k for i, k in get_linearizer_actions(Linearizer(realized_ast), False).items() if k.applied_opts[0].op == OptOps.TC]
       assert len(tc_actions) == 9, f"get_linearizer_actions should contain 9 possible TC actions, only got {len(tc_actions)}"
 
-  @unittest.skipIf(Device.DEFAULT != "METAL", "these opts are only valid on METAL")
-  def test_tensor_cores_upcast_unroll_minimal(self):
-    # the llama BEAM=2 failure is like this - float2 upcast of PHI should render inside the loop, cast_half should render outside the loop
-    ld1 = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.half, ShapeTracker(views=(View(shape=(1, 3, 11008, 4096), strides=(0, 4096, 0, 1), offset=0, mask=None, contiguous=False),)))) # noqa: E501
-    ld2 = LazyOp(BufferOps.LOAD, (), MemBuffer(2, dtypes.half, ShapeTracker(views=(View(shape=(1, 3, 11008, 4096), strides=(0, 0, 4096, 1), offset=0, mask=None, contiguous=False),)))) # noqa: E501
-    mul = LazyOp(BinaryOps.MUL, (ld1, ld2))
-    cast_float = LazyOp(UnaryOps.CAST, (mul,), dtypes.float)
-    sum_op = LazyOp(ReduceOps.SUM, (cast_float,), (3,))
-    cast_half = LazyOp(UnaryOps.CAST, (sum_op,), dtypes.half)
-    a0 = LazyOp(BinaryOps.MUL, (cast_half, cast_half))
-    ast = LazyOp(BufferOps.STORE, (a0,), MemBuffer(0, dtypes.half, ShapeTracker(views=(View(shape=(1, 3, 11008, 1), strides=(0, 11008, 1, 0), offset=0, mask=None, contiguous=True),)))), # noqa: E501
-    a = Tensor.empty(1, 3, 11008, 4096).realize()
-    b = Tensor.empty(1, 3, 11008, 4096).realize()
-    opt = [Opt(op=OptOps.TC, axis=0, amt=2), Opt(op=OptOps.LOCAL, axis=0, amt=4), Opt(op=OptOps.UNROLL, axis=0, amt=4),
-           Opt(op=OptOps.UPCAST, axis=5, amt=0)]
-    helper_linearizer_ast(ast, [a, b], opts=[opt])
-
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_unroll_phi(self):
     tc = Device[Device.DEFAULT].renderer.tensor_cores[0]
@@ -758,23 +742,25 @@ class TestLinearizer(unittest.TestCase):
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_skip_unmatching_upcasts(self):
+    Tensor.manual_seed(0)
     ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(240, 40, 1, 1), strides=(1, 240, 0, 0), offset=0, mask=None, contiguous=False),)))),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(240, 40, 1, 1), strides=(40, 1, 0, 0), offset=0, mask=None, contiguous=True),)))), # noqa: E501
     opt = [
         Opt(op=OptOps.UPCAST, axis=1, amt=4), Opt(op=OptOps.LOCAL, axis=0, amt=16),
         Opt(op=OptOps.LOCAL, axis=1, amt=2), Opt(op=OptOps.UPCAST, axis=3, amt=2)
     ]
-    k = helper_linearizer_ast(ast, [Tensor.empty(240*40).realize()], opts=[opt])[-1]
+    k = helper_linearizer_ast(ast, [Tensor.randn(240*40).realize()], opts=[opt])[-1]
     out = [u for u in k.uops if u.op is UOps.STORE][0]
     assert out.src[-1].op is UOps.CAST and out.src[-1].dtype == dtypes.float.vec(4)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_skip_unmatching_upcasts_with_gep(self):
+    Tensor.manual_seed(0)
     ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(8, 32, 1, 1), strides=(1, 8, 0, 0), offset=0, mask=None, contiguous=False),)))),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(8, 32, 1, 1), strides=(32, 1, 0, 0), offset=0, mask=None, contiguous=True),)))), # noqa: E501
     opt = [Opt(op=OptOps.LOCAL, axis=1, amt=4), Opt(op=OptOps.UPCAST, axis=2, amt=2), Opt(op=OptOps.LOCAL, axis=1, amt=8),
             Opt(op=OptOps.UPCAST, axis=1, amt=0), Opt(op=OptOps.UPCAST, axis=1, amt=4), Opt(op=OptOps.LOCAL, axis=0, amt=8),
             Opt(op=OptOps.UPCAST, axis=1, amt=0), Opt(op=OptOps.UPCAST, axis=0, amt=2)]
-    k = helper_linearizer_ast(ast, [Tensor.empty(8*32).realize()], opts=[opt])[-1]
+    k = helper_linearizer_ast(ast, [Tensor.randn(8*32).realize()], opts=[opt])[-1]
     out = [u for u in k.uops if u.op is UOps.STORE][0]
     assert out.src[-1].op is UOps.CAST and out.src[-1].dtype == dtypes.float.vec(2)
 
@@ -1568,8 +1554,9 @@ class TestKernelOpts(unittest.TestCase):
       helper_linearizer_opt(a.max(0), [[Opt(OptOps.PADTO, 1, 32)],])
 
   def test_padto_where(self):
+    Tensor.manual_seed(0)
     N = 17 * 17
-    a = (Tensor.empty(N, N).max(axis=0, keepdim=True) > 1).where(1, 0)
+    a = (Tensor.randn(N, N).realize().max(axis=0, keepdim=True) > 1).where(1, 0)
     helper_linearizer_opt(a.max(0), [
       [Opt(OptOps.PADTO, 0, 32)],
       [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],

@@ -1,8 +1,8 @@
 import random
-from tqdm import tqdm
 from extra.optimization.helpers import load_worlds, ast_str_to_lin
 from tinygrad.engine.search import actions
 from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.helpers import tqdm
 
 tactions = set()
 def test_rebuild(lin):
