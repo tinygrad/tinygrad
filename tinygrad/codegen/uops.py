@@ -149,7 +149,7 @@ class PatternMatcher:
   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
   def recursive_rewrite(self: PatternMatcher, up:UOp) -> UOp:
     recurse_cnt = 0
-    while (rewritten := self.rewrite_on_match(up)) is not None:
+    while (rewritten := self.rewrite(up)) is not None:
       assert recurse_cnt < 100, f"recursive_rewrite looped {up} <--> {rewritten}"
       up = rewritten
       recurse_cnt += 1
@@ -157,7 +157,7 @@ class PatternMatcher:
       return UOp(up.op, up.dtype, new_src, up.arg)
     return up
 
-  def rewrite_on_match(self, uop:UOp) -> Optional[UOp]:
+  def rewrite(self, uop:UOp) -> Optional[UOp]:
     for p,fxn in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
       store: Dict[str, UOp] = {}
       if _match(uop, p, store): return fxn(**store)
