@@ -1,7 +1,7 @@
 import collections, array, time
 from typing import List, Any, Dict, cast, Optional, Tuple, Set
 from tinygrad.helpers import round_up, to_mv, PROFILE
-from tinygrad.device import Buffer, BufferOptions, Compiled, Device, Profiler
+from tinygrad.device import Buffer, BufferOptions, Compiled, Device
 from tinygrad.shape.symbolic import Variable
 from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner
 from tinygrad.engine.jit import MultiGraphRunner
@@ -158,7 +158,7 @@ class HCQGraph(MultiGraphRunner):
     return [(k, max(v for x, v in deps if id(x) == idk)) for idk, k in {id(x[0]): x[0] for x in deps}.items()]
 
   def process_profile_events(self):
-    for dev, name, st, en, is_copy in self.prof_records: dev.profile_records.append((dev._read_timestamp(st), dev._read_timestamp(en), name, is_copy))
+    for dev, name, st, en, is_copy in self.prof_records: dev.raw_prof_records += [(dev._read_timestamp(st), dev._read_timestamp(en), name, is_copy)]
 
   def __del__(self):
     if PROFILE and self.kickoff_value > 1: self.process_profile_events()
