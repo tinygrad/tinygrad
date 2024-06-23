@@ -17,6 +17,8 @@ class TestConvShapetracker(unittest.TestCase):
     assert len(sched) == 1, f"conv should only have one kernel, getting {len(sched)}"
     for st in [x.arg.st for x in sched[0].ast[0].lazyops if x.op is BufferOps.LOAD]:
       assert len(st.views) == 1
+   def test_mergeability:
+     pass
 
 if __name__ == '__main__':
   unittest.main()
