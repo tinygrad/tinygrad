@@ -627,12 +627,13 @@ class TestLinearizer(unittest.TestCase):
     _assert_grouped_dims("gidx", (2,3,4,5,), (32,16,16,), True, [20,3,2])
     _assert_grouped_dims("gidx", (Variable("start_pos",1,2),3,4,5,), (32,16,16,), True, [20,3,Variable("start_pos",1,2)])
 
-    # TODO: support sint collapse
-    # _assert_grouped_dims("gidx", (Variable("start_pos",1,2),3,4,5,), (16,16,16,), False, [Variable("start_pos",1,2)*3,4,5])
-
     # collapse on left-most available axis (the left most is too small)
     _assert_grouped_dims("gidx", (2,3,4,5,), (4,16,16,), False, [2,12,5])
     _assert_grouped_dims("gidx", (2,3,4,5,), (16,16,16,), True, [5,12,2])
+
+    # TODO: support sint collapse
+    with self.assertRaises(RuntimeError):
+      _assert_grouped_dims("gidx", (Variable("start_pos",1,2),3,4,5,), (16,16,16,), False, [Variable("start_pos",1,2)*3,4,5])
 
     # dim too large and not factorable
     with self.assertRaises(AssertionError):
