@@ -298,7 +298,9 @@ class TestOps(unittest.TestCase):
   def test_tril(self):
     helper_test_op([(3,3)], lambda x: x.tril())
     helper_test_op([(3,3)], lambda x: x.tril(1))
+    helper_test_op([(3,3)], lambda x: x.tril(2))
     helper_test_op([(3,3)], lambda x: x.tril(-1))
+    helper_test_op([(3,3)], lambda x: x.tril(-2))
     helper_test_op([(5,3,3)], lambda x: x.tril())
     helper_test_op([(5,0,3)], lambda x: x.tril())
     helper_test_op([(5,3,3)], lambda x: x.tril(1))
@@ -306,7 +308,9 @@ class TestOps(unittest.TestCase):
   def test_triu(self):
     helper_test_op([(3,3)], lambda x: x.triu())
     helper_test_op([(3,3)], lambda x: x.triu(1))
+    helper_test_op([(3,3)], lambda x: x.triu(2))
     helper_test_op([(3,3)], lambda x: x.triu(-1))
+    helper_test_op([(3,3)], lambda x: x.triu(-2))
     helper_test_op([(5,3,3)], lambda x: x.triu())
     helper_test_op([(5,0,3)], lambda x: x.triu())
     helper_test_op([(5,3,3)], lambda x: x.triu(1))
