@@ -27,12 +27,13 @@ class UOps(Enum):
   ENDRANGE = auto(); ENDIF = auto() # noqa: E702
 
 def ufix(dtype: Optional[DType], x): return UOp.const(dtype, x) if not isinstance(x, UOp) else x
-@dataclass(eq=False, frozen=True)
+@dataclass(eq=False)
 class UOp:
   op: UOps
   dtype: Optional[DType] = None
   src: Tuple[UOp, ...] = tuple()
   arg: Any = None
+  def tuple(self): return (self.op, self.dtype, self.src, self.arg)
   def commutative(self) -> bool:
     return self.op is UOps.ALU and self.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR}
   @functools.cached_property
@@ -58,12 +59,10 @@ class UOp:
   def max(self, x): return UOp.alu(BinaryOps.MAX, self, x)
   def min(self, x): return -UOp.alu(BinaryOps.MAX, -self, -x)
   @staticmethod
-  @functools.lru_cache(None)
   def const(dtype:Optional[DType], b:ConstType|Variable):
     if isinstance(b, Variable): return UOp(UOps.DEFINE_VAR, dtype, (), b)
     return UOp(UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
   @staticmethod
-  @functools.lru_cache(None)
   def alu(arg, *src:UOp): return UOp(UOps.ALU, dtypes.bool if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else src[-1].dtype, src, arg)
   @staticmethod
   def load(*src:UOp, dtype:Optional[DType]=None, **kwargs): return UOp(UOps.LOAD, dtype, tuple(src)+tuple(kwargs.values()))
@@ -111,27 +110,23 @@ def __unmatch(m1:Union[T, Set[T]], m2:T) -> bool:
   elif m2 != m1: return True
   return False
 
-def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> Tuple[bool, Dict]:
-  if pat.name in store and store[pat.name] is not uop: return False, store
+def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
+  if pat.name in store and store[pat.name] is not uop: return False
   if pat.name is not None: store[pat.name] = uop
-  if pat.op is not None and __unmatch(pat.op, uop.op):return False, store
-  if pat.dtype is not None and uop.dtype is not None and __unmatch(pat.dtype, uop.dtype): return False, store
-  if pat.arg is not None and __unmatch(pat.arg, uop.arg):return False, store
-  if pat.src is None:return True, store
+  if pat.arg is not None and __unmatch(pat.arg, uop.arg): return False
+  if pat.dtype is not None and uop.dtype is not None and __unmatch(pat.dtype, uop.dtype): return False
+  if pat.op is not None and __unmatch(pat.op, uop.op): return False
+  if pat.src is None: return True
   # only one if it's a tuple
   # try all permutations if it's a list
   # repeat if it's a UPat
   for vp in itertools.permutations(pat.src) if isinstance(pat.src,list) else ([pat.src] if isinstance(pat.src,tuple) else [(pat.src,)*len(uop.src)]):
-    if len(uop.src) != len(vp) and (len(uop.src) not in pat.allow_len): return False, store
+    if len(uop.src) != len(vp) and (len(uop.src) not in pat.allow_len): return False
     new_store = store.copy()
-    for uu, vv in zip(uop.src, vp):
-      res, new_store = _match(uu, vv, new_store)
-      if not res: break
-    else:
+    if all(_match(uu, vv, new_store) for uu, vv in zip(uop.src, vp)):
       store.update(new_store)
-      return True, store
-  return False, store
-
+      return True
+  return False
 
 class PatternMatcher:
   def __init__(self, patterns:List[Tuple[Union[UPat, UOp], Callable]]):
@@ -146,21 +141,10 @@ class PatternMatcher:
       else:
         self.pdict[(p.op, p.arg)].append((p, fxn))
 
-  @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
-  def recursive_rewrite(self: PatternMatcher, up:UOp) -> UOp:
-    recurse_cnt = 0
-    while (rewritten := self.rewrite_on_match(up)) is not None:
-      assert recurse_cnt < 100, f"recursive_rewrite looped {up} <--> {rewritten}"
-      up = rewritten
-      recurse_cnt += 1
-    if up.src and (new_src := tuple(self.recursive_rewrite(x) for x in up.src)) != up.src:
-      return UOp(up.op, up.dtype, new_src, up.arg)
-    return up
-
-  def rewrite_on_match(self, uop:UOp) -> Optional[UOp]:
+  def rewrite(self, uop:UOp) -> Optional[UOp]:
     for p,fxn in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
-      res, store = _match(uop, p, {})
-      if res: return fxn(**store)
+      store: Dict[str, UOp] = {}
+      if _match(uop, p, store): return fxn(**store)
     return None
 
 def sum_collapse(phi_input, loop, val1, val2):
@@ -307,13 +291,32 @@ class UOpGraph:
     for i,u in enumerate(self):
       print(f"{i:4d} {str(u.op):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str([self.uops.index(x) for x in u.src]):32s} {u.arg}")
 
-  def graph_rewrite(self, sink, pm):
-    changed = getenv("UOPS_REWRITE", True)
+  def graph_rewrite(self, sink:UOp, pm:PatternMatcher):
+    # recursive rewrite
+    changed = getenv("UOPS_REWRITE", 1)
+    run_cnt = 0
     while changed:
-      rewritten = pm.recursive_rewrite(sink)
-      changed = sink != rewritten
-      sink = rewritten
-    self.nodes[sink] = sink
+      changed = 0
+      @functools.lru_cache
+      def rewrite(u:UOp) -> UOp:
+        nonlocal changed
+        recurse_cnt = 0
+        up = u
+        # locally recursively rewrite
+        while (rewritten := pm.rewrite(up)):
+          assert recurse_cnt < 100, f"recursive_rewrite looped {up} <--> {rewritten}"
+          up = rewritten
+          recurse_cnt += 1
+        changed += recurse_cnt
+        # NOTE: this changes UOp, so we have to delete caches
+        up.src = tuple(rewrite(x) for x in up.src)
+        if 'parents' in up.__dict__: delattr(up, 'parents')
+        if 'cmp_tuple' in up.__dict__: delattr(up, 'cmp_tuple')
+        # replace with cached nodes
+        return self.nodes.setdefault(up.tuple(), up)
+      sink = rewrite(sink)
+      run_cnt += 1
+      assert run_cnt < 100, "exceeded 100 rewrite loops!"
     return sink
 
   def graph_dedup(self, sink:UOp):
@@ -359,12 +362,12 @@ class UOpGraph:
     # BFS toposort
     graph: DefaultDict[UOp, List[UOp]] = defaultdict(list)
     in_degree: DefaultDict[UOp, int] = defaultdict(int)
-    loops = []
-    ifs = []
-    nodes: Set[UOp] = set()
+    loops:List[UOp] = []
+    ifs:List[UOp] = []
+    nodes: Dict[UOp, None] = {}
     def add_parents(u:UOp):
       if u in nodes: return
-      nodes.add(u)
+      nodes[u] = None
       for x in u.src:
         add_parents(x)
         in_degree[u] += 1
