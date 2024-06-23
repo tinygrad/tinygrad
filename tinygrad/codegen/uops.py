@@ -264,12 +264,7 @@ constant_folder = PatternMatcher([
   (UOp.store(UOp.var(), UOp.var(), UOp.var(), UOp.const(None, 0)), lambda: UOp(UOps.NOOP)),
 ])
 
-def _gate_deepest_parent(root:UOp, if_uop:UOp):
-  ts = _temp_toposort2(root)
-  deepest = sorted(ts.items(), key=lambda x:x[1]).pop()[0]
-  deepest.src = deepest.src + (if_uop, )
-
-def _temp_toposort2(root:UOp):
+def _temp_toposort(root:UOp):
   ret: Dict[UOp, int] = {}
   cache = set()
   def dfs(x:UOp, depth):
@@ -280,28 +275,17 @@ def _temp_toposort2(root:UOp):
   dfs(root, 0)
   return ret
 
-def _temp_toposort(root:UOp):
-  ret: List[UOp] = []
-  cache = set()
-  def dfs(x:UOp):
-    if x in cache: return
-    cache.add(x)
-    for v in x.src: dfs(v)
-    ret.append(x)
-  dfs(root)
-  return ret
-
-def gate_rewrite(root:UOp, gate:UOp, exprs:Dict[UOp, UOp]) -> Optional[UOp]:
-  if getenv("GRAPHME"):
-    from tinygrad.engine.graph import print_tree, graph_uops
-    print_tree(root)
-    graph_uops(_temp_toposort(root))
+def gate_rewrite(root:UOp, gate:UOp, exprs:Dict[UOp, UOp]):
+  if getenv("GRAPHROOT"):
+    from tinygrad.engine.graph import graph_uops
+    graph_uops(list(_temp_toposort(root)))
   if gate not in exprs: exprs[gate] = UOp(UOps.IF, None, (gate, ))
   # the STORE isn't gated
-  #root.src = root.src[:3]
+  root.src = root.src[:3]
   # the entire block is
-  #_gate_deepest_parent(root, exprs[gate])
-  return None
+  ts = _temp_toposort(root)
+  deepest = sorted(ts.items(), key=lambda x:x[1]).pop()[0]
+  deepest.src = deepest.src + (exprs[gate], )
 
 if_rewrite = PatternMatcher([
   (UOp.store(UOp.var(), UOp.var(), UOp.var(), UOp.var("gate")).name("root"), gate_rewrite),
