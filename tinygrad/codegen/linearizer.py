@@ -94,15 +94,16 @@ def expand_node(node:Node, idxs:Optional[Tuple[Union[Variable, NumNode], ...]]=N
   return [node.substitute({k:v for k,v in zip(idxs, (NumNode(x) for x in rep)) if isinstance(k, Variable)}) for rep in iter_idxs(idxs)]
 
 def variable_to_uop(x, ctx=None) -> UOp:
-  if isinstance(x, int): return UOp.const(dtypes.int32, x)
+  if isinstance(x, int): return UOp.const(dtypes.int, x)
   return x.render(render_ops, ctx)
 
 render_ops: Dict[Type, Callable[..., UOp]]  = {
-    Variable: lambda self, ops, ctx: ctx[self.expr], NumNode: lambda self, ops, ctx: UOp.const(dtypes.int, self.b),
-    MulNode: lambda self, ops, ctx: self.a.render(ops, ctx)*variable_to_uop(self.b, ctx),
-    DivNode: lambda self, ops, ctx: self.a.render(ops, ctx)//variable_to_uop(self.b, ctx),
-    ModNode: lambda self, ops, ctx: self.a.render(ops, ctx)%variable_to_uop(self.b, ctx),
-    LtNode: lambda self, ops, ctx: UOp.lt(self.a.render(ops, ctx), variable_to_uop(self.b, ctx)),
+  NumNode: lambda self, ops, ctx: UOp.const(dtypes.int, self.b),
+  Variable: lambda self, ops, ctx: ctx[self.expr] if self.expr in ctx else UOp(UOps.DEFINE_VAR, dtypes.int, (), self),
+  MulNode: lambda self, ops, ctx: self.a.render(ops, ctx)*variable_to_uop(self.b, ctx),
+  DivNode: lambda self, ops, ctx: self.a.render(ops, ctx)//variable_to_uop(self.b, ctx),
+  ModNode: lambda self, ops, ctx: self.a.render(ops, ctx)%variable_to_uop(self.b, ctx),
+  LtNode: lambda self, ops, ctx: UOp.lt(self.a.render(ops, ctx), variable_to_uop(self.b, ctx)),
   SumNode: lambda self,ops,ctx: functools.reduce(lambda a,b: a+variable_to_uop(b, ctx), self.nodes[1:], self.nodes[0].render(ops,ctx)),
   AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: a*variable_to_uop(b, ctx), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
@@ -396,10 +397,6 @@ class Linearizer(Kernel):
         self.buf_uops[i] = UOp(UOps.DEFINE_GLOBAL,
                                          buf.dtype if isinstance(buf.dtype, ImageDType) else PtrDType(buf.dtype), (),
                                          (buf.idx, any(buf.idx == x.idx for x in self.outbufs)))
-    # add var vals
-    for i,var in enumerate(self.vars):
-      assert var.expr is not None
-      self.loop_uops[var.expr] = UOp(UOps.DEFINE_VAR, dtypes.int32, (), var)
     # define local buffers
     for aliases in self.local_alias.values():
       for lb in aliases.values(): self.buf_uops[self.bufs.index(lb)] = UOp(UOps.DEFINE_LOCAL, PtrDType(lb.dtype),
