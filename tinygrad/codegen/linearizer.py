@@ -210,7 +210,10 @@ class Linearizer(Kernel):
       else:
         rendered_idx = idx.render(self.render_ops, self)
       # TODO: let UPat check this once it's fast
-      if valid.min == 1: stores.append(UOp(UOps.STORE, None, (buf_uop, rendered_idx, var)))
+      if hasattr(self, "if_cond"):
+        assert valid.min == 1, "todo"
+        stores.append(UOp(UOps.STORE, None, (buf_uop, rendered_idx, var, self.if_cond)))
+      elif valid.min == 1: stores.append(UOp(UOps.STORE, None, (buf_uop, rendered_idx, var)))
       else: stores.append(UOp(UOps.STORE, None, (buf_uop, rendered_idx, var, valid.render(self.render_ops, self))))
     return stores
 
@@ -325,8 +328,8 @@ class Linearizer(Kernel):
       if self.opts.has_local:
         fake_idxs = [NumNode(0)]*len(self.sts[-1].shape)
         fake_idxs[self.global_dims+self.local_dims:self.global_dims+len(local_idxs)] = local_idxs[self.local_dims:]
-        if_cond: UOp = create_lt_node(self.sts[-1].expr_idxs(fake_idxs)[0], 1).render(self.render_ops, self)
-        barrier = UOp(UOps.IF, None, (if_cond, barrier))
+        self.if_cond = create_lt_node(self.sts[-1].expr_idxs(fake_idxs)[0], 1).render(self.render_ops, self)
+        #barrier = UOp(UOps.IF, None, (self.if_cond, barrier))
 
       # create new late reduce local loops and replace local_idxs that have been used
       end_local_idxs = [Variable(f"tidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce and i not in self.upcast_in_mid_reduce_axes else 0) for i in range(0, self.first_reduce+self.group_for_reduces)]  # noqa: E501
