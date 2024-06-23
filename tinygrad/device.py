@@ -222,15 +222,17 @@ class HCQCompatCompiled(Compiled):
   @classmethod
   def _wait_signal(self, signal, value=0, timeout=10000): raise NotImplementedError("need _wait_signal") # waits for a signal value
 
+  def _gpu2cpu_time(self):  raise NotImplementedError("need _gpu2cpu_time")
+
   def _prof_setup(self):
     self.profile_logger = ProfileLogger()
 
     def _sync_queue(q_t):
-      q_t().timestamp(self.time_event_st).signal(self.timeline_signal, self.timeline_value).submit(self)
+      q_t().timestamp(self.timeline_signal).signal(self.timeline_signal, self.timeline_value).submit(self)
       self.timeline_value += 1
       cpu_start_time = time.perf_counter_ns() / 1e3
       self._wait_signal(self.timeline_signal, self.timeline_value - 1)
-      return cpu_start_time, self._read_timestamp(self.time_event_st)
+      return cpu_start_time, self._read_timestamp(self.timeline_signal)
     self.cpu_start_time, self.gpu_start_time = _sync_queue(self.hw_compute_queue_t)
     self.copy_cpu_start_time, self.copy_gpu_start_time = _sync_queue(self.hw_copy_queue_t)
 
@@ -238,7 +240,7 @@ class HCQCompatCompiled(Compiled):
 
   def _prof_process_events(self):
     self.raw_prof_records += [(self._read_timestamp(st), self._read_timestamp(en), name, is_cp) for st, en, name, is_cp in self.sig_prof_records]
-    for st, en, _, _ in self.sig_prof_records: self.signals_pool += [st, en]
+    for st, en, _, _ in self.sig_prof_records: self.signals_pool += [st, en] # type: ignore
     self.sig_prof_records = []
 
   def _prof_finalize(self):

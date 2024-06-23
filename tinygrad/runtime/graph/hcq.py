@@ -49,7 +49,7 @@ class HCQGraph(MultiGraphRunner):
     self.kickoff_value = 0
     self.graph_timeline = {dev: 0 for dev in self.devices}
 
-    signal_sched: Dict[int, Tuple[List, Optional[int]], Optional[Tuple]] = {} # Dict[ji_idx, (deps, output sigval, (prof_st_sig, prof_en_sig))]
+    signal_sched: Dict[int, Tuple[List, Optional[int], Optional[Tuple]]] = {} # Dict[ji_idx, (deps, output sigval, (prof_st_sig, prof_en_sig))]
     self.exec_ptrs: Dict[int, Tuple[Any, int]] = {}
     self.copy_to_devs: Dict[Compiled, Set[Compiled]] = {dev: set() for dev in self.devices}
 
@@ -83,7 +83,7 @@ class HCQGraph(MultiGraphRunner):
 
     for j,ji in enumerate(self.jit_cache):
       deps, signal_value, prof_signals = signal_sched[j]
-      enqueue_queue = self.comp_queues[ji.prg.device] if isinstance(ji.prg, CompiledRunner) else self.copy_queues[Device[ji.bufs[1].device]]
+      enqueue_queue = self.copy_queues[Device[ji.bufs[1].device]] if isinstance(ji.prg, BufferXfer) else self.comp_queues[ji.prg.device] #type:ignore
 
       # Encode waits and start profile timestamp (if needed).
       for sig, val in deps: enqueue_queue.wait(sig, val)
