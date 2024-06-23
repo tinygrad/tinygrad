@@ -187,13 +187,13 @@ class Compiled:
 # **************** for HCQ Compatible Devices ****************
 
 @contextlib.contextmanager
-def hcq_profile(dev, queue_type, enabled, desc=None):
+def hcq_profile(dev, queue_type, enabled, desc):
   st, en = (dev._get_signal(), dev._get_signal()) if enabled else (None, None)
   if enabled: queue_type().timestamp(st).submit(dev)
   try: yield (st, en)
   finally:
-    if enabled: dev.hw_copy_queue_t().timestamp(en).submit(dev)
-    if enabled and PROFILE: dev.sig_prof_records.append((st, en, desc, queue_type.__class__ is dev.hw_copy_queue_t))
+    if enabled: queue_type().timestamp(en).submit(dev)
+    if enabled and PROFILE: dev.sig_prof_records.append((st, en, desc, queue_type is dev.hw_copy_queue_t))
 
 class HCQCompatCompiled(Compiled):
   def __init__(self, device:str, allocator:Allocator, renderer:Renderer, compiler:Compiler, runtime, comp_queue_t, copy_queue_t, timeline_signals):
@@ -202,10 +202,7 @@ class HCQCompatCompiled(Compiled):
     self.timeline_signal, self._shadow_timeline_signal = timeline_signals
     self.sig_prof_records: List[Tuple[Any, Any, str, bool]] = []
     self.raw_prof_records: List[Tuple[int, int, str, bool]] = []
-    if PROFILE:
-      self.profile_logger = ProfileLogger()
-      self._sync_gpu_to_cpu_time()
-      atexit.register(self._finalize_prof)
+    if PROFILE: self._prof_setup()
 
     from tinygrad.runtime.graph.hcq import HCQGraph
     super().__init__(device, allocator, renderer, compiler, runtime, HCQGraph)
@@ -225,9 +222,11 @@ class HCQCompatCompiled(Compiled):
   @classmethod
   def _wait_signal(self, signal, value=0, timeout=10000): raise NotImplementedError("need _wait_signal") # waits for a signal value
 
-  def _sync_gpu_to_cpu_time(self):
-    def _sync_queue(qtype):
-      qtype().timestamp(self.time_event_st).signal(self.timeline_signal, self.timeline_value).submit(self)
+  def _prof_setup(self):
+    self.profile_logger = ProfileLogger()
+
+    def _sync_queue(q_t):
+      q_t().timestamp(self.time_event_st).signal(self.timeline_signal, self.timeline_value).submit(self)
       self.timeline_value += 1
       cpu_start_time = time.perf_counter_ns() / 1e3
       self._wait_signal(self.timeline_signal, self.timeline_value - 1)
@@ -235,15 +234,16 @@ class HCQCompatCompiled(Compiled):
     self.cpu_start_time, self.gpu_start_time = _sync_queue(self.hw_compute_queue_t)
     self.copy_cpu_start_time, self.copy_gpu_start_time = _sync_queue(self.hw_copy_queue_t)
 
+    atexit.register(self._prof_finalize)
+
   def _prof_process_events(self):
-    self.raw_prof_records += [(self._read_timestamp(st), self._read_timestamp(en), name, is_copy) for st, en, name, is_copy in self.sig_prof_records]
+    self.raw_prof_records += [(self._read_timestamp(st), self._read_timestamp(en), name, is_cp) for st, en, name, is_cp in self.sig_prof_records]
     for st, en, _, _ in self.sig_prof_records: self.signals_pool += [st, en]
     self.sig_prof_records = []
 
-  def _finalize_prof(self):
-    for st, en, name, is_copy in self.raw_prof_records:
-      self.profile_logger.events += [(name, self._gpu_time_to_cpu(st, is_copy), self._gpu_time_to_cpu(en, is_copy), self.dname,
-                                      "DMA" if is_copy else "COMPUTE")]
+  def _prof_finalize(self):
+    for st, en, name, is_cp in self.raw_prof_records:
+      self.profile_logger.events += [(name, self._gpu2cpu_time(st, is_cp), self._gpu2cpu_time(en, is_cp), self.dname, ["COMPUTE", "DMA"][is_cp])]
     del self.profile_logger
 
   def _wrap_timeline_signal(self):

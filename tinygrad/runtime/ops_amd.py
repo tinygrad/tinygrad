@@ -540,9 +540,9 @@ class AMDDevice(HCQCompatCompiled):
     super().__init__(device, AMDAllocator(self), AMDRenderer(), AMDCompiler(self.arch), functools.partial(AMDProgram, self), HWPM4Queue, HWCopyQueue,
       timeline_signals=[self._get_signal(sync_event=sync_event), self._get_signal(sync_event=kio.create_event(AMDDevice.kfd, auto_reset=1))])
 
-  def _gpu_time_to_cpu(self, gpu_sig_time, is_copy):
-    if is_copy: return self.copy_cpu_start_time + (gpu_sig_time - self.copy_gpu_start_time) / 1e2
-    return self.cpu_start_time + (gpu_sig_time - self.gpu_start_time) / 1e2
+  def _gpu2cpu_time(self, gpu_time, is_copy):
+    if is_copy: return self.copy_cpu_start_time + (gpu_time - self.copy_gpu_start_time) / 1e2
+    return self.cpu_start_time + (gpu_time - self.gpu_start_time) / 1e2
 
   def synchronize(self):
     AMDDevice._wait_signal(self.timeline_signal, self.timeline_value - 1)

@@ -124,7 +124,8 @@ class HCQGraph(MultiGraphRunner):
       dev._set_signal(self.copy_signal[dev], 0)
     self.devices[0]._set_signal(self.kickoff_signal, self.kickoff_value)
 
-    if PROFILE and self.kickoff_value > 1: self.process_profile_events()
+    if PROFILE and self.kickoff_value > 1:
+      for dev, desc, st, en, is_cp in self.prof_records: dev.raw_prof_records += [(dev._read_timestamp(st), dev._read_timestamp(en), desc, is_cp)]
 
     # Update rawbuffers
     for (j,i),input_idx in self.input_replace.items(): self.ji_args_bufs[j][i] = input_rawbuffers[input_idx]._buf.va_addr
@@ -157,12 +158,10 @@ class HCQGraph(MultiGraphRunner):
     deps = self._access_resources(read, write, new_dependency)
     return [(k, max(v for x, v in deps if id(x) == idk)) for idk, k in {id(x[0]): x[0] for x in deps}.items()]
 
-  def process_profile_events(self):
-    for dev, name, st, en, is_copy in self.prof_records: dev.raw_prof_records += [(dev._read_timestamp(st), dev._read_timestamp(en), name, is_copy)]
-
   def __del__(self):
-    if PROFILE and self.kickoff_value > 1: self.process_profile_events()
+    # Graph is destructed. No need to keep signals any more, so return them as part of profiling.
+    if PROFILE and self.kickoff_value > 1:
+      for dev, desc, st, en, is_cp in self.prof_records: dev.sig_prof_records += [(st, en, desc, is_cp)]
 
     self.devices[0].signals_pool += [self.kickoff_signal] + list(self.copy_signal.values()) + list(self.comp_signal.values()) # type: ignore
-    for dev, _, st, en, _ in self.prof_records: dev.signals_pool += [st, en] # type: ignore
     for dev, buf in self.kernargs_bufs.items(): dev.allocator._free(buf, BufferOptions(cpu_access=True))

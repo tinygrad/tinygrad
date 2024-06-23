@@ -151,9 +151,7 @@ class ProfileLogger:
   subactors: Dict[Tuple[str, str], int] = {}
   path = getenv("PROFILE_OUTPUT_FILE", temp("tinygrad_profile.json"))
 
-  def __init__(self):
-    ProfileLogger.writers += 1
-    self.events = []
+  def __init__(self): self.events, ProfileLogger.writers = [], ProfileLogger.writers + 1
 
   def __del__(self):
     for name,st,et,actor_name,subactor_name in self.events:

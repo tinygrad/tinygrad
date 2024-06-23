@@ -561,7 +561,7 @@ class NVDevice(HCQCompatCompiled):
       if signal[0] >= value: return
     raise RuntimeError(f"wait_result: {timeout} ms TIMEOUT!")
 
-  def _gpu_time_to_cpu(self, gpu_sig_time, is_copy): return self.cpu_start_time + (gpu_sig_time - self.gpu_start_time) / 1e3
+  def _gpu2cpu_time(self, gpu_time, is_copy): return self.cpu_start_time + (gpu_time - self.gpu_start_time) / 1e3
 
   def synchronize(self):
     NVDevice._wait_signal(self.timeline_signal, self.timeline_value - 1)
