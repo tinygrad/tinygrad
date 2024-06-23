@@ -1796,9 +1796,12 @@ class Tensor:
 
   @staticmethod
   def _tri(r:sint, c:sint, diagonal:int=0, **kwargs) -> Tensor:
-    assert all_int((r,c)), "does not support symbolic"
-    if r == 0: return Tensor.zeros((r, c), **kwargs)
-    return Tensor.arange(r, **kwargs).unsqueeze(1).expand(r,c) <= Tensor.arange(-diagonal, c-diagonal, **kwargs).unsqueeze(0).expand(r,c)
+    assert isinstance(r, int) and isinstance(c, int), f"does not support symbolic, getting {r=}, {c=}"
+    if r == 0 or c == 0: return Tensor.zeros(r,c, **kwargs)
+    s = r+c-1
+    # build a (s+1, s) upper triangle
+    t = Tensor.ones(s+1,s,**kwargs).pad((None,(0,s))).flatten().shrink(((0,(s+1)*(2*s-1)),)).reshape(s+1,-1).shrink((None,(0,s)))
+    return t[:r,-diagonal:c-diagonal] if diagonal <= 0 else t[diagonal:r+diagonal,:c]
 
   def triu(self, diagonal:int=0) -> Tensor:
     """
@@ -1821,7 +1824,7 @@ class Tensor:
     print(t.triu(diagonal=-1).numpy())
     ```
     """
-    return Tensor._tri(self.shape[-2], self.shape[-1], diagonal=diagonal, device=self.device).where(self, 0).cast(self.dtype)
+    return Tensor._tri(self.shape[-2], self.shape[-1], diagonal=diagonal, device=self.device, dtype=dtypes.bool).where(self, 0).cast(self.dtype)
 
   def tril(self, diagonal:int=0) -> Tensor:
     """
@@ -1844,7 +1847,7 @@ class Tensor:
     print(t.tril(diagonal=-1).numpy())
     ```
     """
-    return Tensor._tri(self.shape[-2], self.shape[-1], diagonal=diagonal+1, device=self.device).where(0, self).cast(self.dtype)
+    return Tensor._tri(self.shape[-2], self.shape[-1], diagonal=diagonal+1, device=self.device, dtype=dtypes.bool).where(0, self).cast(self.dtype)
 
   # ***** unary ops *****
 

@@ -31,7 +31,7 @@ def check_schedule(t:Union[Tensor, List[Tensor]], allowed:int, to_prerealize:Opt
     for i, s in enumerate(sched):
       print("kernel", i+1)
       for op in s.ast: print_tree(op)
-  if len(sched) != allowed: raise KernelCountException()
+  if len(sched) != allowed: raise KernelCountException(f"{len(sched)=} != {allowed}")
   # test the (non loadops) ops linearize
   for s in sched:
     if s.ast[0].op in LoadOps: continue
@@ -797,7 +797,7 @@ class TestSchedule(unittest.TestCase):
   def test_scaled_dot_product_attention_causal_fusion(self):
     x, y, z, m = (Tensor.empty(32, 8, 16, 16) for _ in range(4))
     out = Tensor.scaled_dot_product_attention(x, y, z, attn_mask=m, is_causal=True)
-    check_schedule(out, 7)
+    check_schedule(out, 6)
 
   def test_adam_step_fusion(self):
     with Tensor.train():
