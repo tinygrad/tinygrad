@@ -85,19 +85,8 @@ def _dfmul_f2_f_f(x: LazyBuffer, y: LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]
   xl = x.e(BinaryOps.ADD, x.e(UnaryOps.NEG))
   yl = y.e(BinaryOps.ADD, y.e(UnaryOps.NEG))
   rx = x.e(BinaryOps.MUL, y)
-  ry = x.e(BinaryOps.MUL, y).e(
-    BinaryOps.ADD,
-    rx.e(UnaryOps.NEG)
-  ).e(
-    BinaryOps.ADD,
-    xl.e(BinaryOps.MUL, y)
-  ).e(
-    BinaryOps.ADD,
-    x.e(BinaryOps.MUL, yl)
-  ).e(
-    BinaryOps.ADD,
-    xl.e(BinaryOps.MUL, yl)
-  )
+  # ry = xh * yh - rx + xl * yh + xh * yl + xl * yl
+  ry = x.e(BinaryOps.MUL, y).e(BinaryOps.ADD, rx.e(UnaryOps.NEG)).e(BinaryOps.ADD, xl.e(BinaryOps.MUL, y)).e(BinaryOps.ADD,x.e(BinaryOps.MUL, yl)).e(BinaryOps.ADD, xl.e(BinaryOps.MUL, yl)) # noqa: E501
   return rx, ry
 
 def _dfadd2_f2_f_f2(x: LazyBuffer, y_x: LazyBuffer, y_y: LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
@@ -120,40 +109,34 @@ def _ldexp3k(d:LazyBuffer, e:LazyBuffer) -> LazyBuffer:
   e = e.cast(cast_map[d.dtype])
   m1 = d.cast(cast_map[d.dtype], True)
   m2 = e.e(BinaryOps.SHL, e.const(_significand_bits(d.dtype)))
+
   return m1.e(BinaryOps.ADD, m2).cast(d.dtype, True)
+def _pow2if(q: LazyBuffer):
+  if q.dtype == dtypes.int32:
+    return q.e(BinaryOps.ADD, q.const(127)).e(BinaryOps.SHL, q.const(23)).cast(dtypes.float32, True)
+  if q.dtype == dtypes.int64:
+    return q.e(BinaryOps.ADD, q.const(1023)).e(BinaryOps.SHL, q.const(52)).cast(dtypes.float64, True)
+  assert q.dtype in (dtypes.int32, dtypes.int64), f"_pow2if: {q.dtype} is not implemented."
+  return None
+
+def _ldexp2kf(d: LazyBuffer, e: LazyBuffer) -> LazyBuffer:
+  assert d.dtype in (dtypes.float32, dtypes.float64)
+  assert e.dtype in (dtypes.int32, dtypes.int64)
+  return d.e(BinaryOps.MUL, _pow2if(e.e(BinaryOps.SHR, e.const(1)))).e(BinaryOps.MUL, _pow2if(e.e(BinaryOps.ADD, e.e(BinaryOps.SHR, e.const(1)).e(UnaryOps.NEG)))) # noqa: E501
 
 def _payne_hanek(d: LazyBuffer, d_base: LazyBuffer, is_metal:bool = False) -> LazyBuffer:
   assert d.dtype in [dtypes.float64, dtypes.float32, dtypes.float16]
   dtype = d.dtype
-  two_over_pi_f = [
-    0x00000000,
-    0x28be60db,
-    0x9391054a,
-    0x7f09d5f4,
-    0x7d4d3770,
-    0x36d8a566,
-    0x4f10e410
-  ]
+  two_over_pi_f = [0x00000000,0x28be60db,0x9391054a,0x7f09d5f4,0x7d4d3770,0x36d8a566,0x4f10e410] # noqa: E501
   significand_bits = _significand_bits(d.dtype)
   exponent_mask = _exponent_mask(d.dtype)
   exponent_bias = _exponent_bias(d.dtype)
-  m1 = {
-    dtypes.float64: 0x800FFFFF,
-    dtypes.float32: 0x807FFFFF,
-    dtypes.float16: 0x83FF
-  }[d.dtype]
-  m2 = {
-    dtypes.float64: 0x3FE0000000000000,
-    dtypes.float32: 0x3F000000,
-    dtypes.float16: 0x3C00,
-  }[d.dtype]
-
+  m1 = {dtypes.float64: 0x800FFFFF, dtypes.float32: 0x807FFFFF, dtypes.float16: 0x83FF}[d.dtype] # noqa: E501
+  m2 = {dtypes.float64: 0x3FE0000000000000, dtypes.float32: 0x3F000000, dtypes.float16: 0x3C00}[d.dtype] # noqa: E501
   def _frexp(v: LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
-    # assert: v >= 15.0
     bits = _float_to_bits(v)
     exponent = bits.e(BinaryOps.SHR, bits.const(significand_bits)).e(BinaryOps.AND, bits.const(exponent_mask))
     exponent_zero = exponent.e(BinaryOps.CMPNE, exponent.const(0.0))
-
     result_f = _bits_to_float(bits.e(BinaryOps.AND, bits.const(m1)).e(BinaryOps.OR, bits.const(m2)))
     value = exponent_zero.e(TernaryOps.WHERE, result_f, v)
     exp = exponent.e(BinaryOps.ADD, exponent.const(-exponent_bias))
@@ -346,16 +329,7 @@ def _xexp2_base(d: LazyBuffer) -> LazyBuffer:
     u = _mla(u, s, d.const(0.2402264476e+0))
     u = _mla(u, s, d.const(0.6931471825e+0))
     u = _mla(u, s, d.const(0.1000000000e+1))
-  q_zero_map = q.cast(d.dtype).e(BinaryOps.CMPNE, d.const(0))
-  q_neg_map = q.cast(d.dtype).e(BinaryOps.CMPLT, d.const(0))
-  def _ldexp2k(u, k) -> LazyBuffer: # u * 2^k for k>=1
-    shift = q_zero_map.e(TernaryOps.WHERE, k, k.const(1))
-    shift = shift.e(BinaryOps.MUL, q_neg_map.e(TernaryOps.WHERE, shift.const(-1), shift.const(1)))
-    shift = shift.e(BinaryOps.ADD, shift.const(-1.0))
-    p = q.const(2).e(BinaryOps.SHL, shift).cast(u.dtype)
-    p = q_neg_map.e(TernaryOps.WHERE, p.e(UnaryOps.RECIP), p)
-    return u.e(BinaryOps.MUL, p)
-  u = q_zero_map.e(TernaryOps.WHERE, _ldexp2k(u, q), u)
+  u = _ldexp2kf(u, q)
   upper = 1024 if fp64_p else 128
   lower = -2000 if fp64_p else -150
   u = d.e(BinaryOps.CMPNE, d.const(upper)).e(TernaryOps.WHERE, u, d.const(math.inf))
