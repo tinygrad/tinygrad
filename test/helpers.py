@@ -7,8 +7,9 @@ from tinygrad.engine.realize import Runner
 from tinygrad.dtype import DType
 from tinygrad.nn.state import get_parameters
 from tinygrad.helpers import Context, CI, OSX, getenv
-from typing import Callable
+from typing import Callable, List, Optional
 from tinygrad.codegen.uops import UOpGraph, UOps, UOp, constant_folder
+from collections import defaultdict
 
 def derandomize_model(model):
   with Context(GRAPH=0):
@@ -52,9 +53,51 @@ def rand_for_dtype(dt:DType, size:int):
     return np.random.choice([True, False], size=size)
   return np.random.uniform(-10, 10, size=size).astype(_to_np_dtype(dt))
 
-def print_uop_tree(uop: UOp, node_visit_counter = None, _print=True):
+class NodeVisitCounter:
+  def __init__(self) -> None:
+    self.counter = defaultdict(int)
+
+  def __getitem__(self, key: UOp) -> int:
+    return self.counter[key]
+
+  def __setitem__(self, key: UOp, value: int) -> None:
+    self.counter[key] = value
+  
+  @property
+  def total(self):
+    return sum(self.counter.values())
+
+  def __repr__(self):
+    display = "Visit Counter\n"
+    for k,v in self.counter.items():
+      display += f"   {k.op}: {v}\n"
+    display += f"Total: {self.total}\n"
+    return display
+
+
+  def colored_count(self, uop: UOp) -> str:
+    count = self[uop]
+    if count == 0: return ""
+    if count < 5: return f"\033[32m<{count}>\033[0m"
+    if count < 10: return f"\033[33m<{count}>\033[0m"
+    return f"\033[31m<{count}>\033[0m"
+
+
+def print_uop_tree(uop: UOp, node_visit_counter: Optional[NodeVisitCounter] = None, _print=True) -> str:
+  """
+  Args:
+    uop (UOp): the uop to print
+    node_visit_counter (NodeVisitCounter): the node visit counter to use
+    _print (bool): whether to print the result to screen
+  """
   printable = ''
-  def recursively_print(uop: UOp, depth=0, has_siblings=False, last_in_siblings=False, parents_branch = []):
+  def recursively_print(uop: UOp, depth=0, has_siblings=False, last_in_siblings=False, parents_branch: List[bool] = []):
+    """
+    Args:
+      has_siblings (bool): whether the current node has more than one child
+      last_in_siblings (bool): whether the current node is the last child of its parent
+      parents_branch (List[bool]): whether the current line should display a branch symbol ┃ at the earlier depth position for the boolean index position
+    """
     nonlocal printable
     uop_name = f"{uop.op}"
     uop_name += f" {uop.arg}"
