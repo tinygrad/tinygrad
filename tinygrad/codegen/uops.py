@@ -132,23 +132,6 @@ def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> Tuple[bool, Dict]:
       return True, store
   return False, store
 
-@functools.lru_cache(None)
-def recursive_rewrite(pm: PatternMatcher, up:UOp) -> UOp:
-  recurse_cnt = 0
-  while (rewritten := rewrite_on_match(pm, up)) is not None:
-    assert recurse_cnt < 100, f"recursive_rewrite looped {up} <--> {rewritten}"
-    up = rewritten
-    recurse_cnt += 1
-  if up.src and (new_src := tuple(recursive_rewrite(pm, x) for x in up.src)) != up.src:
-    return UOp(up.op, up.dtype, new_src, up.arg)
-  return up
-
-@functools.lru_cache(None)
-def rewrite_on_match(pm, uop:UOp) -> Optional[UOp]:
-  for p,fxn in itertools.chain(pm.pdict[(uop.op, uop.arg)], pm.pdict[(uop.op, None)]):
-    res, store = _match(uop, p, {})
-    if res: return fxn(**store)
-  return None
 
 class PatternMatcher:
   def __init__(self, patterns:List[Tuple[Union[UPat, UOp], Callable]]):
@@ -163,6 +146,22 @@ class PatternMatcher:
       else:
         self.pdict[(p.op, p.arg)].append((p, fxn))
 
+  @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
+  def recursive_rewrite(self: PatternMatcher, up:UOp) -> UOp:
+    recurse_cnt = 0
+    while (rewritten := self.rewrite_on_match(up)) is not None:
+      assert recurse_cnt < 100, f"recursive_rewrite looped {up} <--> {rewritten}"
+      up = rewritten
+      recurse_cnt += 1
+    if up.src and (new_src := tuple(self.recursive_rewrite(x) for x in up.src)) != up.src:
+      return UOp(up.op, up.dtype, new_src, up.arg)
+    return up
+
+  def rewrite_on_match(self, uop:UOp) -> Optional[UOp]:
+    for p,fxn in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
+      res, store = _match(uop, p, {})
+      if res: return fxn(**store)
+    return None
 
 def sum_collapse(phi_input, loop, val1, val2):
   for v1,v2 in [(val1, val2), (val2, val1)]:
@@ -311,7 +310,7 @@ class UOpGraph:
   def graph_rewrite(self, sink, pm):
     changed = getenv("UOPS_REWRITE", True)
     while changed:
-      rewritten = recursive_rewrite(pm, sink)
+      rewritten = pm.recursive_rewrite(sink)
       changed = sink != rewritten
       sink = rewritten
     self.nodes[sink] = sink
