@@ -122,7 +122,7 @@ class HCQGraph(MultiGraphRunner):
     self.devices[0]._set_signal(self.kickoff_signal, self.kickoff_value)
 
     if PROFILE and self.kickoff_value > 1:
-      for _,_,(st,en,dev,desc,is_cp) in self.signal_sched.values():
+      for _,_,(st,en,dev,desc,is_cp) in self.signal_sched.values(): #type: ignore
         dev.raw_prof_records += [(dev._read_timestamp(st), dev._read_timestamp(en), desc, is_cp)]
 
     # Update rawbuffers
@@ -159,7 +159,7 @@ class HCQGraph(MultiGraphRunner):
   def __del__(self):
     # Graph is destructed. No need to keep signals any more, so return them as part of profiling.
     if PROFILE and self.kickoff_value > 1:
-      for _,_,(st,en,dev,desc,is_cp) in self.signal_sched.values(): dev.sig_prof_records += [(st, en, desc, is_cp)]
+      for _,_,(st,en,dev,desc,is_cp) in self.signal_sched.values(): dev.sig_prof_records += [(st, en, desc, is_cp)] #type: ignore
 
     self.devices[0].signals_pool += [self.kickoff_signal] + list(self.copy_signal.values()) + list(self.comp_signal.values()) # type: ignore
     for dev, buf in self.kernargs_bufs.items(): dev.allocator._free(buf, BufferOptions(cpu_access=True))
