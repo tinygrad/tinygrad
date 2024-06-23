@@ -608,29 +608,44 @@ class TestLinearizer(unittest.TestCase):
         assert loop_idxs[i].expr.startswith(prefix), f"loop_idxs[{i}] must start with {prefix}"
         assert loop_idxs[i].max+1 == sizes[i], f"loop_idxs[{i}] should have max {sizes[i]-1}"
 
+    # pad sizes with ones if necessary
     _assert_grouped_dims("gidx", (2,), (16,16,16,), False, [2,1,1])
     _assert_grouped_dims("gidx", (2,3), (16,16,16,), False, [2,3,1])
+
+    # check reverse dims
     _assert_grouped_dims("gidx", (2,3), (16,16,16,), True, [3,2,1])
     _assert_grouped_dims("gidx", (2,3,4,), (16,16,16,), False, [2,3,4])
-    _assert_grouped_dims("gidx", (2,3,4,5,), (16,16,16,), False, [6,4,5]) # collapse on onto the left most axis
-    _assert_grouped_dims("gidx", (2,3,4,5,), (4,16,16,), False, [2,12,5]) # collapse on left-most available axis (the left most is too small)
-    _assert_grouped_dims("gidx", (2,3,4,5,), (32,16,16,), True, [20,3,2]) # collapse on onto the left most axis
-    _assert_grouped_dims("gidx", (2,3,4,5,), (16,16,16,), True, [5,12,2]) # collapse on left-most available axis (the left most is too small)
+
+    # test splitting globals
     _assert_grouped_dims("gidx", (64,3,4,), (16,16,16,), False, [16,12,4])
     _assert_grouped_dims("gidx", (64,3,4,), (16,4,16,), False, [16,4,12])
     _assert_grouped_dims("gidx", (64,3,4,), (16,16,16,), True, [12,16,4])
     _assert_grouped_dims("gidx", (128,3,4,), (16,4,256,), False, [16,4,24])
 
-    with self.assertRaises(AssertionError): # dim too large and not factorable
-      get_grouped_dims("gidx", 0, (23,), (16,16,16,), False,)
+    # collapse on onto the left most axis
+    _assert_grouped_dims("gidx", (2,3,4,5,), (16,16,16,), False, [6,4,5])
+    _assert_grouped_dims("gidx", (2,3,4,5,), (32,16,16,), True, [20,3,2])
+    _assert_grouped_dims("gidx", (Variable("start_pos",1,2),3,4,5,), (32,16,16,), True, [20,3,Variable("start_pos",1,2)])
 
-    with self.assertRaises(AssertionError): # dim too large and not factorable
+    # TODO: support sint collapse
+    # _assert_grouped_dims("gidx", (Variable("start_pos",1,2),3,4,5,), (16,16,16,), False, [Variable("start_pos",1,2)*3,4,5])
+
+    # collapse on left-most available axis (the left most is too small)
+    _assert_grouped_dims("gidx", (2,3,4,5,), (4,16,16,), False, [2,12,5])
+    _assert_grouped_dims("gidx", (2,3,4,5,), (16,16,16,), True, [5,12,2])
+
+    # dim too large and not factorable
+    with self.assertRaises(AssertionError):
+      get_grouped_dims("gidx", 0, (23,), (16,16,16,), False,)
+    with self.assertRaises(AssertionError):
       get_grouped_dims("gidx", 0, (128,3,4), (16,4,23,), False,)
 
-    with self.assertRaises(AssertionError): # too large for sizes
+    # too large for sizes
+    with self.assertRaises(AssertionError):
       get_grouped_dims("gidx", 0, (2,3,4,5,6), (16,16,16,), False,)
 
-    with self.assertRaises(AssertionError): # variable too large
+    # variable too large
+    with self.assertRaises(AssertionError):
       get_grouped_dims("gidx", 0, (Variable("start_pos", 0, 16),3,4), (16,16,16,), False,)
 
   def test_sum_collapse(self):
