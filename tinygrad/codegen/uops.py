@@ -285,7 +285,7 @@ def gate_rewrite(root:UOp, gate:UOp, exprs:Dict[UOp, UOp]):
   # the entire block is
   ts = _temp_toposort(root)
   deepest = sorted(ts.items(), key=lambda x:x[1]).pop()[0]
-  deepest.src = deepest.src + (exprs[gate], )
+  if deepest.op is not UOps.IF: deepest.src = deepest.src + (exprs[gate], )
 
 if_rewrite = PatternMatcher([
   (UOp.store(UOp.var(), UOp.var(), UOp.var(), UOp.var("gate")).name("root"), gate_rewrite),
