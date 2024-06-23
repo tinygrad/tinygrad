@@ -141,10 +141,10 @@ class PatternMatcher:
       else:
         self.pdict[(p.op, p.arg)].append((p, fxn))
 
-  def rewrite(self, uop:UOp) -> Optional[UOp]:
+  def rewrite(self, uop:UOp, ctx={}) -> Optional[UOp]:
     for p,fxn in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
       store: Dict[str, UOp] = {}
-      if _match(uop, p, store): return fxn(**store)
+      if _match(uop, p, store): return fxn(**store, **ctx)
     return None
 
 def sum_collapse(phi_input, loop, val1, val2):
@@ -162,44 +162,6 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst):
     return None
   comprange = UOp.min(loop_end, UOp.max(UOp.alu(BinaryOps.IDIV, idx-compval-mval, mval) + (loop_end-loop_start), loop_start))
   return UOp(UOps.UNMUL, multconst.dtype, (comprange.cast(multconst.dtype) * multconst, loop_end-loop_start))
-
-def _gate_deepest_parent(root:UOp, gate:UOp, if_uop:UOp):
-  if_uop = UOp(UOps.IF, None, (gate, ))
-  ts = _temp_toposort2(root)
-  deepest = sorted(ts.items(), key=lambda x:x[1]).pop()[0]
-  deepest.src = deepest.src + (if_uop, )
-
-def _temp_toposort2(root:UOp):
-  ret: Dict[UOp, int] = {}
-  cache = set()
-  def dfs(x:UOp, depth):
-    if x in cache: return
-    for v in x.src: dfs(v, depth+1)
-    ret[x] = depth
-  dfs(root, 0)
-  return ret
-
-def _temp_toposort(root:UOp):
-  ret: List[UOp] = []
-  cache = set()
-  def dfs(x:UOp):
-    if x in cache: return
-    for v in x.src: dfs(v)
-    ret.append(x)
-  dfs(root)
-  return ret
-
-def gate_rewrite(root:UOp, gate:UOp) -> Optional[UOp]:
-  if getenv("GRAPHME"):
-    from tinygrad.engine.graph import print_tree, graph_uops
-    print_tree(root)
-    graph_uops(_temp_toposort(root))
-  if_uop = UOp(UOps.IF, None, (gate, ))
-  # the STORE isn't gated
-  root.src = root.src[:3]
-  # the entire block is
-  _gate_deepest_parent(root, gate, if_uop)
-  return None
 
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
@@ -300,6 +262,46 @@ constant_folder = PatternMatcher([
   (UOp.load(UOp.var(), UOp.var(), UOp.const(None, 0), UOp.cvar("var"), UOp.var()), lambda var: var),
   (UOp.store(UOp.var("buf"), UOp.var("idx"), UOp.var("val"), UOp.const(None, 1)), UOp.store),
   (UOp.store(UOp.var(), UOp.var(), UOp.var(), UOp.const(None, 0)), lambda: UOp(UOps.NOOP)),
+])
+
+def _gate_deepest_parent(root:UOp, if_uop:UOp):
+  ts = _temp_toposort2(root)
+  deepest = sorted(ts.items(), key=lambda x:x[1]).pop()[0]
+  deepest.src = deepest.src + (if_uop, )
+
+def _temp_toposort2(root:UOp):
+  ret: Dict[UOp, int] = {}
+  cache = set()
+  def dfs(x:UOp, depth):
+    if x in cache: return
+    for v in x.src: dfs(v, depth+1)
+    ret[x] = depth
+  dfs(root, 0)
+  return ret
+
+def _temp_toposort(root:UOp):
+  ret: List[UOp] = []
+  cache = set()
+  def dfs(x:UOp):
+    if x in cache: return
+    for v in x.src: dfs(v)
+    ret.append(x)
+  dfs(root)
+  return ret
+
+def gate_rewrite(root:UOp, gate:UOp, exprs:Dict[UOp, UOp]) -> Optional[UOp]:
+  if getenv("GRAPHME"):
+    from tinygrad.engine.graph import print_tree, graph_uops
+    print_tree(root)
+    graph_uops(_temp_toposort(root))
+  if gate not in exprs: exprs[gate] = UOp(UOps.IF, None, (gate, ))
+  # the STORE isn't gated
+  root.src = root.src[:3]
+  # the entire block is
+  _gate_deepest_parent(root, exprs[gate])
+  return None
+
+if_rewrite = PatternMatcher([
   (UOp.store(UOp.var(), UOp.var(), UOp.var(), UOp.var("gate")).name("root"), gate_rewrite),
 ])
 
@@ -330,7 +332,7 @@ class UOpGraph:
     for i,u in enumerate(self):
       print(f"{i:4d} {str(u.op):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str([self.uops.index(x) for x in u.src]):32s} {u.arg}")
 
-  def graph_rewrite(self, sink:UOp, pm:PatternMatcher):
+  def graph_rewrite(self, sink:UOp, pm:PatternMatcher, ctx={}):
     # recursive rewrite
     changed = getenv("UOPS_REWRITE", 1)
     run_cnt = 0
@@ -342,7 +344,7 @@ class UOpGraph:
         recurse_cnt = 0
         up = u
         # locally recursively rewrite
-        while (rewritten := pm.rewrite(up)):
+        while (rewritten := pm.rewrite(up, ctx)):
           assert recurse_cnt < 100, f"recursive_rewrite looped {up} <--> {rewritten}"
           up = rewritten
           recurse_cnt += 1
@@ -396,6 +398,9 @@ class UOpGraph:
     # do graph rewrite
     sink = self.graph_rewrite(sink, constant_folder)
     if extra_pm: sink = self.graph_rewrite(sink, PatternMatcher(constant_folder.patterns+extra_pm.patterns))
+
+    # rewrite gated LOAD/STOREs as IF blocks
+    sink = self.graph_rewrite(sink, if_rewrite, ctx={"exprs": {}})
 
     # filter nodes that don't link to a sink
     # BFS toposort
