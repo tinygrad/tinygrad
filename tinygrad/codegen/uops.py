@@ -141,10 +141,10 @@ class PatternMatcher:
       else:
         self.pdict[(p.op, p.arg)].append((p, fxn))
 
-  def rewrite(self, uop:UOp, ctx={}) -> Optional[UOp]:
+  def rewrite(self, uop:UOp, ctx=None) -> Optional[UOp]:
     for p,fxn in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
       store: Dict[str, UOp] = {}
-      if _match(uop, p, store): return fxn(**store, **ctx)
+      if _match(uop, p, store): return fxn(**store, **(ctx or {}))
     return None
 
 def sum_collapse(phi_input, loop, val1, val2):
@@ -274,6 +274,7 @@ def _temp_toposort2(root:UOp):
   cache = set()
   def dfs(x:UOp, depth):
     if x in cache: return
+    cache.add(x)
     for v in x.src: dfs(v, depth+1)
     ret[x] = depth
   dfs(root, 0)
@@ -284,6 +285,7 @@ def _temp_toposort(root:UOp):
   cache = set()
   def dfs(x:UOp):
     if x in cache: return
+    cache.add(x)
     for v in x.src: dfs(v)
     ret.append(x)
   dfs(root)
@@ -296,9 +298,9 @@ def gate_rewrite(root:UOp, gate:UOp, exprs:Dict[UOp, UOp]) -> Optional[UOp]:
     graph_uops(_temp_toposort(root))
   if gate not in exprs: exprs[gate] = UOp(UOps.IF, None, (gate, ))
   # the STORE isn't gated
-  root.src = root.src[:3]
+  #root.src = root.src[:3]
   # the entire block is
-  _gate_deepest_parent(root, exprs[gate])
+  #_gate_deepest_parent(root, exprs[gate])
   return None
 
 if_rewrite = PatternMatcher([
@@ -332,7 +334,7 @@ class UOpGraph:
     for i,u in enumerate(self):
       print(f"{i:4d} {str(u.op):20s}: {str(u.dtype) if u.dtype is not None else '':25s} " f"{str([self.uops.index(x) for x in u.src]):32s} {u.arg}")
 
-  def graph_rewrite(self, sink:UOp, pm:PatternMatcher, ctx={}):
+  def graph_rewrite(self, sink:UOp, pm:PatternMatcher, ctx=None):
     # recursive rewrite
     changed = getenv("UOPS_REWRITE", 1)
     run_cnt = 0
@@ -450,7 +452,7 @@ class UOpGraph:
       if DEBUG >= 7: print(p,x)
       if len(x.src) and x.src[-1].op is UOps.IF: x.src = tuple(x.src[:-1])
       if x.op is UOps.DEFINE_ACC and len(x.src):
-        idx = min([self._uops.index(l) for l in x.src if l.op is UOps.RANGE])
+        idx = min([self._uops.index(l) for l in x.src])
         self._uops.insert(idx, x)
       else:
         self._uops.append(x)
