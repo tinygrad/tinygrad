@@ -113,19 +113,6 @@ def _ilogb2k(d:LazyBuffer) -> LazyBuffer:
   dint = d.cast({dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}[d.dtype], True)
   return dint.e(BinaryOps.SHR, dint.const(significand_bits)).e(BinaryOps.AND, dint.const(exponent_mask)).e(BinaryOps.ADD, dint.const(-exponent_bias))
 
-def _pow2if(q: LazyBuffer):
-  if q.dtype == dtypes.int32:
-    return q.e(BinaryOps.ADD, q.const(127)).e(BinaryOps.SHL, q.const(23)).cast(dtypes.float32, True)
-  if q.dtype == dtypes.int64:
-    return q.e(BinaryOps.ADD, q.const(1023)).e(BinaryOps.SHL, q.const(52)).cast(dtypes.float64, True)
-  assert q.dtype in (dtypes.int32, dtypes.int64), f"_pow2if: {q.dtype} is not implemented."
-  return None
-
-def _ldexp2kf(d: LazyBuffer, e: LazyBuffer) -> LazyBuffer:
-  assert d.dtype in (dtypes.float32, dtypes.float64)
-  assert e.dtype in (dtypes.int32, dtypes.int64)
-  return d.e(BinaryOps.MUL, _pow2if(e.e(BinaryOps.SHR, e.const(1)))).e(BinaryOps.MUL, _pow2if(e.e(BinaryOps.ADD, e.e(BinaryOps.SHR, e.const(1)).e(UnaryOps.NEG)))) # noqa: E501
-
 def _ldexp3k(d:LazyBuffer, e:LazyBuffer) -> LazyBuffer:
   assert d.dtype in (dtypes.float16, dtypes.float32, dtypes.float64)
   assert e.dtype in (dtypes.float16, dtypes.float32, dtypes.float64)
@@ -359,7 +346,16 @@ def _xexp2_base(d: LazyBuffer) -> LazyBuffer:
     u = _mla(u, s, d.const(0.2402264476e+0))
     u = _mla(u, s, d.const(0.6931471825e+0))
     u = _mla(u, s, d.const(0.1000000000e+1))
-  u = _ldexp2kf(u, q)
+  q_zero_map = q.cast(d.dtype).e(BinaryOps.CMPNE, d.const(0))
+  q_neg_map = q.cast(d.dtype).e(BinaryOps.CMPLT, d.const(0))
+  def _ldexp2k(u, k) -> LazyBuffer: # u * 2^k for k>=1
+    shift = q_zero_map.e(TernaryOps.WHERE, k, k.const(1))
+    shift = shift.e(BinaryOps.MUL, q_neg_map.e(TernaryOps.WHERE, shift.const(-1), shift.const(1)))
+    shift = shift.e(BinaryOps.ADD, shift.const(-1.0))
+    p = q.const(2).e(BinaryOps.SHL, shift).cast(u.dtype)
+    p = q_neg_map.e(TernaryOps.WHERE, p.e(UnaryOps.RECIP), p)
+    return u.e(BinaryOps.MUL, p)
+  u = q_zero_map.e(TernaryOps.WHERE, _ldexp2k(u, q), u)
   upper = 1024 if fp64_p else 128
   lower = -2000 if fp64_p else -150
   u = d.e(BinaryOps.CMPNE, d.const(upper)).e(TernaryOps.WHERE, u, d.const(math.inf))
