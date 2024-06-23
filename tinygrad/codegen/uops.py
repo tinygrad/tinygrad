@@ -461,8 +461,9 @@ class UOpGraph:
   def type_verify(self):
     for u in self.uops:
       uop, arg, src, dtype = u.op, u.arg, u.src, u.dtype
-      if uop in {UOps.CONST, UOps.DEFINE_ACC}:
-        if uop is UOps.DEFINE_ACC: arg = src[0].arg
+      if uop is UOps.DEFINE_ACC:
+        assert dtype is not None and src[0].dtype is dtype.scalar(), f"type of {src[0]=} must be a scalar of {dtype}"
+      if uop is UOps.CONST:
         assert dtype is not None and type(arg) is type(dtypes.as_const(arg, dtype)), f"type of {arg=} does not match {dtype}"
       if uop in {UOps.CAST, UOps.BITCAST}: assert arg is None   # type is the output type, not an arg
       if uop is UOps.LOAD and len(src) > 2 and src[2].op not in {UOps.IF, UOps.BARRIER}: assert src[2].dtype == dtypes.bool
