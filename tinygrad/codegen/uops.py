@@ -163,7 +163,21 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst):
   comprange = UOp.min(loop_end, UOp.max(UOp.alu(BinaryOps.IDIV, idx-compval-mval, mval) + (loop_end-loop_start), loop_start))
   return UOp(UOps.UNMUL, multconst.dtype, (comprange.cast(multconst.dtype) * multconst, loop_end-loop_start))
 
-def _gate_deepest_parent(root:UOp, gate:UOp, if_uop:UOp): pass
+def _gate_deepest_parent(root:UOp, gate:UOp, if_uop:UOp):
+  if_uop = UOp(UOps.IF, None, (gate, ))
+  ts = _temp_toposort2(root)
+  deepest = sorted(ts.items(), key=lambda x:x[1]).pop()[0]
+  deepest.src = deepest.src + (if_uop, )
+
+def _temp_toposort2(root:UOp):
+  ret: Dict[UOp, int] = {}
+  cache = set()
+  def dfs(x:UOp, depth):
+    if x in cache: return
+    for v in x.src: dfs(v, depth+1)
+    ret[x] = depth
+  dfs(root, 0)
+  return ret
 
 def _temp_toposort(root:UOp):
   ret: List[UOp] = []
@@ -429,6 +443,7 @@ class UOpGraph:
     while queue:
       p,x = heapq.heappop(queue)
       if DEBUG >= 7: print(p,x)
+      if len(x.src) and x.src[-1].op is UOps.IF: x.src = tuple(x.src[:-1])
       if x.op is UOps.DEFINE_ACC and len(x.src):
         idx = min([self._uops.index(l) for l in x.src if l.op is UOps.RANGE])
         self._uops.insert(idx, x)
