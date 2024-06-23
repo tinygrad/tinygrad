@@ -110,9 +110,9 @@ def __unmatch(m1:Union[T, Set[T]], m2:T) -> bool: return m2 not in m1 if isinsta
 
 def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
   if pat.name is not None and store.setdefault(pat.name, uop) is not uop: return False
-  if pat.arg is not None and __unmatch(pat.arg, uop.arg): return False
+  if pat.op is not None and __unmatch(pat.op, uop.op):return False
   if pat.dtype is not None and uop.dtype is not None and __unmatch(pat.dtype, uop.dtype): return False
-  if pat.op is not None and __unmatch(pat.op, uop.op): return False
+  if pat.arg is not None and __unmatch(pat.arg, uop.arg):return False
   if pat.src is None: return True
   # only one if it's a tuple
   # try all permutations if it's a list
@@ -120,7 +120,9 @@ def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
   for vp in itertools.permutations(pat.src) if isinstance(pat.src,list) else ([pat.src] if isinstance(pat.src,tuple) else [(pat.src,)*len(uop.src)]):
     if len(uop.src) != len(vp) and (len(uop.src) not in pat.allow_len): return False
     new_store = store.copy()
-    if all(_match(uu, vv, new_store) for uu, vv in zip(uop.src, vp)):
+    for uu, vv in zip(uop.src, vp):
+      if not _match(uu, vv, new_store): break
+    else:
       store.update(new_store)
       return True
   return False
