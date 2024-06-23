@@ -373,19 +373,17 @@ def _xexp2(d: LazyBuffer) -> LazyBuffer:
   d = _lazy_map_numbers(d, d.const(math.inf), d.const(0.0), d.const(math.nan), _xexp2_base(x))
   return d
 
-def _xlog2(d: LazyBuffer) -> LazyBuffer:
+def _xlog2_base(d: LazyBuffer, denormal: bool) -> LazyBuffer:
   if 0 in d.shape: return d
-  FLT_MIN = d.const(1.0)
   fp64_p = d.dtype == dtypes.float64
 
-  o = d.e(BinaryOps.CMPLT, FLT_MIN)
-  d = o.e(TernaryOps.WHERE, d.e(BinaryOps.MUL, d.const(2 ** 32)), d)
-  d = o.e(TernaryOps.WHERE, d.e(BinaryOps.MUL, d.const(2 ** 32)), d)
+  d = d.e(BinaryOps.MUL, d.const(2 ** 32)) if denormal else d
+  d = d.e(BinaryOps.MUL, d.const(2 ** 32)) if denormal else d
 
   e = _ilogb2k(d.e(BinaryOps.MUL, d.const(1.0 / 0.75))).cast(d.dtype)
   m = _ldexp3k(d, e.e(UnaryOps.NEG))
 
-  e = o.e(TernaryOps.WHERE, e.e(BinaryOps.ADD, e.const(-64)), e)
+  e = e.e(BinaryOps.ADD, e.const(-64)) if denormal else e
   x = m.e(BinaryOps.ADD, m.const(-1.0)).e(BinaryOps.MUL, m.e(BinaryOps.ADD, m.const(1.0)).e(UnaryOps.RECIP))
   x2 = x.e(BinaryOps.MUL, x)
 
@@ -415,6 +413,8 @@ def _xlog2(d: LazyBuffer) -> LazyBuffer:
   r = nan_map2.e(TernaryOps.WHERE, r.const(math.nan), r)
   r = zero_map.e(TernaryOps.WHERE, r, r.const(-math.inf))
   return r
+
+def _xlog2(d: LazyBuffer) -> LazyBuffer: return d.e(BinaryOps.CMPLT, d.const(1.0)).e(TernaryOps.WHERE, _xlog2_base(d, True), _xlog2_base(d, False)) # noqa: E501
 
 # ************* unary ops *************
 class Sin(Function):
