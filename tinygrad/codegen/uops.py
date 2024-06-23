@@ -27,12 +27,13 @@ class UOps(Enum):
   ENDRANGE = auto(); ENDIF = auto() # noqa: E702
 
 def ufix(dtype: Optional[DType], x): return UOp.const(dtype, x) if not isinstance(x, UOp) else x
-@dataclass(eq=False, frozen=True)
+@dataclass(eq=False)
 class UOp:
   op: UOps
   dtype: Optional[DType] = None
   src: Tuple[UOp, ...] = tuple()
   arg: Any = None
+  def tuple(self): return (self.op, self.dtype, self.src, self.arg)
   def commutative(self) -> bool:
     return self.op is UOps.ALU and self.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR}
   @functools.cached_property
@@ -111,26 +112,25 @@ def __unmatch(m1:Union[T, Set[T]], m2:T) -> bool:
   elif m2 != m1: return True
   return False
 
-def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> Tuple[bool, Dict]:
-  if pat.name in store and store[pat.name] is not uop: return False, store
+def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> bool:
+  if pat.name in store and store[pat.name] is not uop: return False
   if pat.name is not None: store[pat.name] = uop
-  if pat.op is not None and __unmatch(pat.op, uop.op):return False, store
-  if pat.dtype is not None and uop.dtype is not None and __unmatch(pat.dtype, uop.dtype): return False, store
-  if pat.arg is not None and __unmatch(pat.arg, uop.arg):return False, store
-  if pat.src is None:return True, store
+  if pat.op is not None and __unmatch(pat.op, uop.op):return False
+  if pat.dtype is not None and uop.dtype is not None and __unmatch(pat.dtype, uop.dtype): return False
+  if pat.arg is not None and __unmatch(pat.arg, uop.arg):return False
+  if pat.src is None:return True
   # only one if it's a tuple
   # try all permutations if it's a list
   # repeat if it's a UPat
   for vp in itertools.permutations(pat.src) if isinstance(pat.src,list) else ([pat.src] if isinstance(pat.src,tuple) else [(pat.src,)*len(uop.src)]):
-    if len(uop.src) != len(vp) and (len(uop.src) not in pat.allow_len): return False, store
+    if len(uop.src) != len(vp) and (len(uop.src) not in pat.allow_len): return False
     new_store = store.copy()
     for uu, vv in zip(uop.src, vp):
-      res, new_store = _match(uu, vv, new_store)
-      if not res: break
+      if not _match(uu, vv, new_store): break
     else:
       store.update(new_store)
-      return True, store
-  return False, store
+      return True
+  return False
 
 
 class PatternMatcher:
@@ -159,8 +159,8 @@ class PatternMatcher:
 
   def rewrite_on_match(self, uop:UOp) -> Optional[UOp]:
     for p,fxn in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
-      res, store = _match(uop, p, {})
-      if res: return fxn(**store)
+      store: Dict[str, UOp] = {}
+      if _match(uop, p, store): return fxn(**store)
     return None
 
 def sum_collapse(phi_input, loop, val1, val2):
@@ -359,8 +359,8 @@ class UOpGraph:
     # BFS toposort
     graph: DefaultDict[UOp, List[UOp]] = defaultdict(list)
     in_degree: DefaultDict[UOp, int] = defaultdict(int)
-    loops = []
-    ifs = []
+    loops:List[UOp] = []
+    ifs:List[UOp] = []
     nodes: Set[UOp] = set()
     def add_parents(u:UOp):
       if u in nodes: return
