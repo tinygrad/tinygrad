@@ -176,7 +176,7 @@ def _temp_toposort(root:UOp):
   return ret
 
 def gate_rewrite(root:UOp, gate:UOp) -> Optional[UOp]:
-  if getenv("GRAPH"):
+  if getenv("GRAPHME"):
     from tinygrad.engine.graph import print_tree, graph_uops
     print_tree(root)
     graph_uops(_temp_toposort(root))
