@@ -222,7 +222,7 @@ class HCQCompatCompiled(Compiled):
   @classmethod
   def _wait_signal(self, signal, value=0, timeout=10000): raise NotImplementedError("need _wait_signal") # waits for a signal value
 
-  def _gpu2cpu_time(self): raise NotImplementedError("need _gpu2cpu_time")
+  def _gpu2cpu_time(self, gpu_time, is_copy): raise NotImplementedError("need _gpu2cpu_time")
 
   def _prof_setup(self):
     self.profile_logger = ProfileLogger()
