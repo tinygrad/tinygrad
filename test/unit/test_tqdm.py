@@ -41,7 +41,7 @@ class TestProgressBar(unittest.TestCase):
       mock_stderr.truncate(0)
 
       # compare bars at each iteration (only when tinytqdm bar has been updated)
-      for n in (bar := tinytqdm(range(total), desc="Test: ")):
+      for n in (bar := tinytqdm(range(total), desc="Test")):
         time.sleep(0.01)
         if bar.i % bar.skip != 0: continue
         tinytqdm_output = mock_stderr.getvalue().split("\r")[-1].rstrip()
@@ -59,6 +59,34 @@ class TestProgressBar(unittest.TestCase):
 
   @patch('sys.stderr', new_callable=StringIO)
   @patch('shutil.get_terminal_size')
+  def test_set_description(self, mock_terminal_size, mock_stderr):
+    for _ in range(10):
+      total, ncols = random.randint(5, 30), random.randint(80, 240)
+      mock_terminal_size.return_value = namedtuple(field_names='columns', typename='terminal_size')(ncols)
+      mock_stderr.truncate(0)
+
+      expected_prefix = "Test"
+      # compare bars at each iteration (only when tinytqdm bar has been updated)
+      for i,n in enumerate(bar := tinytqdm(range(total), desc="Test")):
+        time.sleep(0.01)
+        if bar.i % bar.skip != 0: continue
+        tinytqdm_output = mock_stderr.getvalue().split("\r")[-1].rstrip()
+        iters_per_sec = float(tinytqdm_output.split("it/s")[-2].split(" ")[-1]) if n>0 else 0
+        elapsed = n/iters_per_sec if n>0 else 0
+        tqdm_output = tqdm.format_meter(n=n, total=total, elapsed=elapsed, ncols=ncols, prefix=expected_prefix)
+        expected_prefix = desc = f"Test {i}" if i % 2 == 0 else ""
+        bar.set_description(desc)
+        self._compare_bars(tinytqdm_output, tqdm_output)
+
+      # compare final bars
+      tinytqdm_output = mock_stderr.getvalue().split("\r")[-1].rstrip()
+      iters_per_sec = float(tinytqdm_output.split("it/s")[-2].split(" ")[-1]) if n>0 else 0
+      elapsed = total/iters_per_sec if n>0 else 0
+      tqdm_output = tqdm.format_meter(n=total, total=total, elapsed=elapsed, ncols=ncols, prefix=expected_prefix)
+      self._compare_bars(tinytqdm_output, tqdm_output)
+
+  @patch('sys.stderr', new_callable=StringIO)
+  @patch('shutil.get_terminal_size')
   def test_trange_output_iter(self, mock_terminal_size, mock_stderr):
     for _ in range(5):
       total, ncols = random.randint(5, 30), random.randint(80, 240)
@@ -66,7 +94,7 @@ class TestProgressBar(unittest.TestCase):
       mock_stderr.truncate(0)
 
       # compare bars at each iteration (only when tinytqdm bar has been updated)
-      for n in (bar := tinytrange(total, desc="Test: ")):
+      for n in (bar := tinytrange(total, desc="Test")):
         time.sleep(0.01)
         if bar.i % bar.skip != 0: continue
         tiny_output = mock_stderr.getvalue().split("\r")[-1].rstrip()
@@ -91,7 +119,7 @@ class TestProgressBar(unittest.TestCase):
       mock_stderr.truncate(0)
 
       # compare bars at each iteration (only when tinytqdm bar has been updated)
-      bar = tinytqdm(total=total, desc="Test: ")
+      bar = tinytqdm(total=total, desc="Test")
       n = 0
       while n < total:
         time.sleep(0.01)
@@ -116,7 +144,7 @@ class TestProgressBar(unittest.TestCase):
       mock_stderr.truncate(0)
 
       # compare bars at each iteration (only when tinytqdm bar has been updated)
-      bar = tinytqdm(total=0, desc="Test: ")
+      bar = tinytqdm(total=0, desc="Test")
       n = 0
       while n < total:
         time.sleep(0.01)
