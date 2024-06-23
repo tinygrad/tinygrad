@@ -1717,7 +1717,7 @@ class Tensor:
     print(t.conv_transpose2d(w).numpy())
     ```
     """
-    x, w = self, weight.unflatten(0, (groups, -1)).transpose(1, 2).flip(list(range(3, len(weight.shape)+1)))
+    x, w = self, weight.unflatten(0, (groups, -1)).transpose(1, 2).flip(*range(3, len(weight.shape)+1))
     HW = weight.shape[2:]
     stride, dilation, padding, output_padding = [make_pair(x, len(HW)) for x in (stride, dilation, padding, output_padding)]
     if any(s>1 for s in stride):
