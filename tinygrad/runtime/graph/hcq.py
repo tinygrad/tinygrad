@@ -66,7 +66,7 @@ class HCQGraph(MultiGraphRunner):
         self.comp_signal_val[dev] = sig_val
       elif isinstance(ji.prg, BufferXfer):
         dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
-        deps = self.access_resources([src], [dest], (self.copy_signal[dev:=Device[src.device]], sig_val:=j+1))
+        deps = self.access_resources([src], [dest], (self.copy_signal[(dev:=Device[src.device])], sig_val:=j+1))
         deps = [x for x in deps if id(x[0]) != id(self.copy_signal[Device[src.device]])]
         self.copy_signal_val[Device[src.device]] = sig_val
         self.copy_to_devs[Device[dest.device]].add(Device[src.device])

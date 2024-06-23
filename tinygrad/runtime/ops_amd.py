@@ -381,7 +381,7 @@ class AMDProgram:
     self.device.timeline_value += 1
     self.device.kernargs_ptr += self.kernargs_alloc_size
 
-    if PROFILE: self.device.profile_records.append((sig_st, sig_en, self.name, False))
+    if PROFILE: self.device.sig_prof_records.append((sig_st, sig_en, self.name, False))
     if wait:
       self.device._wait_signal(self.device.timeline_signal, self.device.timeline_value - 1)
       return (sig_en.start_ts - sig_st.start_ts) / 1e8
