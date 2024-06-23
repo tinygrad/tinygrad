@@ -661,8 +661,7 @@ class TestLinearizer(unittest.TestCase):
     def helper(t, max_ops=0):
       sched = create_schedule([t.lazydata])
       assert len(sched) == 1
-      k = Linearizer(*sched[0].ast)
-      k.hand_coded_optimizations()
+      k = helper_linearizer_ast(sched[0].ast, [t])[-1]
       uops = list(k.linearize().uops)
       # ignore kernel optimized IF statements for now
       if if_op:=next((u for u in uops if u.op is UOps.IF), None):
@@ -986,7 +985,7 @@ class TestHandCodedOpts(unittest.TestCase):
     assert k.upcasted == 1
 
 def helper_linearizer_ast(ast:Tuple[LazyOp, ...], inputs:List[Tensor], *args, **kwargs):
-  inbufs = [x.lazydata.buffer for x in inputs]
+  inbufs = [x.lazydata.buffer.ensure_allocated() for x in inputs]
   outbufs = [Buffer(inbufs[-1].device, out.arg.st.size, out.arg.dtype).allocate() for out in ast]
   return _helper_linearizer_opt_ast(ast, outbufs+inbufs, *args, **kwargs)
 
