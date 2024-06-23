@@ -189,11 +189,11 @@ class Compiled:
 @contextlib.contextmanager
 def hcq_profile(dev, queue_type, enabled, desc=None):
   st, en = (dev._get_signal(), dev._get_signal()) if enabled else (None, None)
-  queue_type().timestamp(st).submit(dev)
+  if enabled: queue_type().timestamp(st).submit(dev)
   try: yield (st, en)
   finally:
-    dev.hw_copy_queue_t().timestamp(en).submit(dev)
-    if PROFILE: dev.sig_prof_records.append((st, en, desc, queue_type.__class__ is dev.hw_copy_queue_t))
+    if enabled: dev.hw_copy_queue_t().timestamp(en).submit(dev)
+    if enabled and PROFILE: dev.sig_prof_records.append((st, en, desc, queue_type.__class__ is dev.hw_copy_queue_t))
 
 class HCQCompatCompiled(Compiled):
   def __init__(self, device:str, allocator:Allocator, renderer:Renderer, compiler:Compiler, runtime, comp_queue_t, copy_queue_t, timeline_signals):
@@ -214,7 +214,7 @@ class HCQCompatCompiled(Compiled):
   def _read_signal(self, sig): raise NotImplementedError("need _read_signal") # reads a value for a signal
 
   @classmethod
-  def _read_timestamp(self, signal): raise NotImplementedError("need _read_timestamp") # reads a timestamp for a signal
+  def _read_timestamp(self, sig): raise NotImplementedError("need _read_timestamp") # reads a timestamp for a signal
 
   @classmethod
   def _set_signal(self, sig, value): raise NotImplementedError("need _set_signal") # sets a value for a signal
@@ -237,6 +237,7 @@ class HCQCompatCompiled(Compiled):
 
   def _prof_process_events(self):
     self.raw_prof_records += [(self._read_timestamp(st), self._read_timestamp(en), name, is_copy) for st, en, name, is_copy in self.sig_prof_records]
+    for st, en, _, _ in self.sig_prof_records: self.signals_pool += [st, en]
     self.sig_prof_records = []
 
   def _finalize_prof(self):
