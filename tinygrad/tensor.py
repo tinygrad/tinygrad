@@ -1797,10 +1797,11 @@ class Tensor:
   @staticmethod
   def _tri(r:sint, c:sint, diagonal:int=0, **kwargs) -> Tensor:
     assert isinstance(r, int) and isinstance(c, int), f"does not support symbolic, getting {r=}, {c=}"
-    if r == 0 or c == 0: return Tensor.zeros(r,c, **kwargs)
+    if r == 0 or c == 0 or diagonal >= c: return Tensor.zeros(r,c,**kwargs)
+    if r+diagonal <= 0: return Tensor.ones(r,c,**kwargs)
     s = r+c-1
-    # build a (s+1, s) upper triangle
-    t = Tensor.ones(s+1,s,**kwargs).pad((None,(0,s))).flatten().shrink(((0,(s+1)*(2*s-1)),)).reshape(s+1,-1).shrink((None,(0,s)))
+    # build a (s, s) upper triangle
+    t = Tensor.ones(s,s,**kwargs).pad((None,(0,s))).flatten().shrink(((0,s*(2*s-1)),)).reshape(s,-1).shrink((None,(0,s)))
     return t[:r,-diagonal:c-diagonal] if diagonal <= 0 else t[diagonal:r+diagonal,:c]
 
   def triu(self, diagonal:int=0) -> Tensor:
