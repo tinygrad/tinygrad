@@ -97,19 +97,18 @@ def compare_uop_tree(uop1: UOp, uop2: UOp):
   return recursively_compare(uop1, uop2)
 
 def create_uop_linearize_and_compare_bottomup_topdown(uop_factory: Callable[[], UOp]):
-  def attach_sink_and_create_graph():
+  def create_graph():
     uop_output = uop_factory()
-    sink = UOp(UOps.SINK, None, (uop_output,))
     graph = UOpGraph([uop_output])
     graph.nodes = {}
-    return sink, graph
-  sink1, graph1 = attach_sink_and_create_graph()
-  sink2, graph2 = attach_sink_and_create_graph()
-  sink1_rewritten = graph1.graph_rewrite(sink1, constant_folder)
-  sink2_rewritten = graph2.graph_rewrite_bottomup_no_backtrack(sink2, constant_folder)
-  result, reason = compare_uop_tree(sink1_rewritten, sink2_rewritten)
-  reason_and_tree = reason + '\nUOp1 (topdown): \n' + print_uop_tree(sink1_rewritten, _print=False)
-  reason_and_tree += 'UOp2 (bottomup): \n' + print_uop_tree(sink2_rewritten, _print=False)
+    return uop_output, graph
+  uop1, graph1 = create_graph()
+  uop2, graph2 = create_graph()
+  uop1_rewritten = graph1.graph_rewrite(uop1, constant_folder)
+  uop2_rewritten = graph2.graph_rewrite_bottomup_no_backtrack(uop2, constant_folder)
+  result, reason = compare_uop_tree(uop1_rewritten, uop2_rewritten)
+  reason_and_tree = reason + '\nUOp1 (topdown): \n' + print_uop_tree(uop1_rewritten, _print=False)
+  reason_and_tree += 'UOp2 (bottomup): \n' + print_uop_tree(uop2_rewritten, _print=False)
   return result, reason_and_tree
 
 
