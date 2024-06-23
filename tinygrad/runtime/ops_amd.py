@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Tuple, List, Any
 import os, fcntl, ctypes, ctypes.util, functools, re, pathlib, mmap, struct, errno, subprocess, time, array
 from tinygrad.device import HCQCompatCompiled, HCQCompatAllocator, Compiler, CompileError, BufferOptions
-from tinygrad.helpers import getenv, init_c_struct_t, to_mv, round_up, DEBUG
+from tinygrad.helpers import getenv, init_c_struct_t, to_mv, round_up, DEBUG, PROFILE
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.runtime.driver.hip_comgr import compile_hip
 import tinygrad.runtime.autogen.kfd as kfd
@@ -49,7 +49,7 @@ def ioctls_from_header():
   return type("KIO", (object, ), fxns)
 kio = ioctls_from_header()
 
-SIGNAL_SIZE, SIGNAL_COUNT = ctypes.sizeof(hsa.amd_signal_t), 16384
+SIGNAL_SIZE, SIGNAL_COUNT = ctypes.sizeof(hsa.amd_signal_t), 65536
 SIGNAL_VALUE_OFFSET = getattr(hsa.amd_signal_t, 'value').offset
 
 regBIF_BX_PF1_GPU_HDP_FLUSH_REQ = 0x0106
@@ -170,8 +170,9 @@ class HWPM4Queue(HWQueue):
       amd_gpu.PACKET3_RELEASE_MEM_DATA_SEL(mem_data_sel) | amd_gpu.PACKET3_RELEASE_MEM_INT_SEL(mem_int_sel) | amd_gpu.PACKET3_RELEASE_MEM_DST_SEL(0),
       address & 0xffffffff, address >> 32, value & 0xffffffff, value >> 32, cst]
 
-  def timestamp(self, addr):
-    self._release_mem(CACHE_FLUSH_AND_INV_TS_EVENT, mem_data_sel=3, mem_int_sel=0, address=addr)
+  def timestamp(self, sig):
+    self._release_mem(CACHE_FLUSH_AND_INV_TS_EVENT, mem_data_sel=3, mem_int_sel=0,
+                      address=ctypes.addressof(sig) + getattr(hsa.amd_signal_t, 'start_ts').offset)
     return self._mark_command_end()
 
   def signal(self, signal:hsa.amd_signal_t, value=0):
@@ -270,6 +271,11 @@ class HWCopyQueue(HWQueue):
     if value is not None: self.q[self.cmd_offsets[cmd_idx] + 3] = value
     return self
 
+  def timestamp(self, sig: hsa.amd_signal_t):
+    self._q([amd_gpu.SDMA_OP_TIMESTAMP | amd_gpu.SDMA_PKT_TIMESTAMP_GET_HEADER_SUB_OP(amd_gpu.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL),
+             *data64_le(ctypes.addressof(sig) + getattr(hsa.amd_signal_t, 'start_ts').offset)])
+    return self._mark_command_end()
+
   def submit(self, device:AMDDevice):
     read_ptr = device.sdma_read_pointer[0]
     if (device.sdma_doorbell_value-read_ptr) > device.sdma_ring.size: raise RuntimeError("SDMA queue overrun")
@@ -364,18 +370,21 @@ class AMDProgram:
     for i in range(len(args)): args_st.__setattr__(f'f{i}', args[i].va_addr)
     for i in range(len(vals)): args_st.__setattr__(f'v{i}', vals[i])
 
+    sig_st, sig_en = (self.device._get_signal(), self.device._get_signal()) if PROFILE else (self.device.time_event_st, self.device.time_event_en)
+
     q = HWPM4Queue()
     q.wait(self.device.timeline_signal, self.device.timeline_value - 1).memory_barrier()
-    if wait: q.timestamp(ctypes.addressof(self.device.timeline_signal) + getattr(hsa.amd_signal_t, 'start_ts').offset)
+    if wait or PROFILE: q.timestamp(sig_st)
     q.exec(self, self.device.kernargs_ptr, global_size, local_size)
-    if wait: q.timestamp(ctypes.addressof(self.device.timeline_signal) + getattr(hsa.amd_signal_t, 'end_ts').offset)
+    if wait or PROFILE: q.timestamp(sig_en)
     q.signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
     self.device.timeline_value += 1
     self.device.kernargs_ptr += self.kernargs_alloc_size
 
+    if PROFILE: self.device.sig_prof_records.append((sig_st, sig_en, self.name, False))
     if wait:
       self.device._wait_signal(self.device.timeline_signal, self.device.timeline_value - 1)
-      return (self.device.timeline_signal.end_ts - self.device.timeline_signal.start_ts) / 1e8
+      return (sig_en.start_ts - sig_st.start_ts) / 1e8
 
 class AMDAllocator(HCQCompatAllocator):
   def __init__(self, device:AMDDevice): super().__init__(device, batch_size=SDMA_MAX_COPY_SIZE)
@@ -433,6 +442,9 @@ class AMDDevice(HCQCompatCompiled):
   def _read_signal(self, sig): return sig.value
 
   @classmethod
+  def _read_timestamp(self, sig): return sig.start_ts
+
+  @classmethod
   def _set_signal(self, sig, value): sig.value = value
 
   @classmethod
@@ -478,6 +490,8 @@ class AMDDevice(HCQCompatCompiled):
       self._gpu_map(AMDDevice.signals_page)
       self._gpu_map(AMDDevice.event_page)
       sync_event = kio.create_event(AMDDevice.kfd, auto_reset=1)
+
+    self.time_event_st, self.time_event_en = AMDDevice._get_signal(), AMDDevice._get_signal()
 
     self.kernargs = self._gpu_alloc(0x1000000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
     self.kernargs_ptr = self.kernargs.va_addr
@@ -526,9 +540,14 @@ class AMDDevice(HCQCompatCompiled):
     super().__init__(device, AMDAllocator(self), AMDRenderer(), AMDCompiler(self.arch), functools.partial(AMDProgram, self), HWPM4Queue, HWCopyQueue,
       timeline_signals=[self._get_signal(sync_event=sync_event), self._get_signal(sync_event=kio.create_event(AMDDevice.kfd, auto_reset=1))])
 
+  def _gpu2cpu_time(self, gpu_time, is_copy):
+    if is_copy: return self.copy_cpu_start_time + (gpu_time - self.copy_gpu_start_time) / 1e2
+    return self.cpu_start_time + (gpu_time - self.gpu_start_time) / 1e2
+
   def synchronize(self):
     AMDDevice._wait_signal(self.timeline_signal, self.timeline_value - 1)
 
     # reset kernargs
     self.kernargs_ptr = self.kernargs.va_addr
     if self.timeline_value > (1 << 31): self._wrap_timeline_signal()
+    if PROFILE: self._prof_process_events()

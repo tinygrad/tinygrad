@@ -1,9 +1,8 @@
 # model based off https://towardsdatascience.com/going-beyond-99-mnist-handwritten-digits-recognition-cfff96337392
 from typing import List, Callable
 from tinygrad import Tensor, TinyJit, nn, GlobalCounters, Device
-from tinygrad.helpers import getenv, colored
-from extra.datasets import fetch_mnist
-from tqdm import trange
+from tinygrad.helpers import getenv, colored, trange
+from tinygrad.nn.datasets import mnist
 
 GPUS = [f'{Device.DEFAULT}:{i}' for i in range(getenv("GPUS", 2))]
 
@@ -21,7 +20,7 @@ class Model:
   def __call__(self, x:Tensor) -> Tensor: return x.sequential(self.layers)
 
 if __name__ == "__main__":
-  X_train, Y_train, X_test, Y_test = fetch_mnist(tensors=True)
+  X_train, Y_train, X_test, Y_test = mnist()
   # we shard the test data on axis 0
   X_test.shard_(GPUS, axis=0)
   Y_test.shard_(GPUS, axis=0)
