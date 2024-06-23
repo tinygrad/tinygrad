@@ -155,21 +155,44 @@ def sum_collapse(phi_input, loop, val1, val2):
       return UOp(UOps.PHI, phi_input.dtype, (phi_input, v2))+ret
   return None
 
-def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst):
-  if mval.arg >= 0 or loop_start.arg != 0:
-    # TODO: support and test this with other mvals and loop_starts
-    if DEBUG >= 1: print(f"WARNING, NOT FOLDING: mval:{mval.arg} loop_start:{loop_start.arg}")
-    return None
-  comprange = UOp.min(loop_end, UOp.max(UOp.alu(BinaryOps.IDIV, idx-compval-mval, mval) + (loop_end-loop_start), loop_start))
-  return UOp(UOps.UNMUL, multconst.dtype, (comprange.cast(multconst.dtype) * multconst, loop_end-loop_start))
+def loop_collapse(negate=False):
+  def _loop_collapse(loop_start, loop_end, compval, idx, multconst,  mval=None):
+    if negate:
+      mval = UOp(UOps.CONST, dtypes.float, arg=-1.0)
+    if mval.arg >= 0 or loop_start.arg != 0:
+      # TODO: support and test this with other mvals and loop_starts
+      if DEBUG >= 1: print(f"WARNING, NOT FOLDING: mval:{mval.arg} loop_start:{loop_start.arg}")
+      return None
+    comprange = UOp.min(loop_end, UOp.max(UOp.alu(BinaryOps.IDIV, idx-compval-mval, mval) + (loop_end-loop_start), loop_start))
+    return UOp(UOps.UNMUL, multconst.dtype, (comprange.cast(multconst.dtype) * multconst, loop_end-loop_start))
+  return _loop_collapse
 
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
   # arange loop folding (early)
   (UPat(UOps.ALU, TernaryOps.WHERE, src=(UPat(UOps.ALU, BinaryOps.CMPLT, src=(
-    UPat(UOps.ALU, BinaryOps.ADD, src=[UPat(name="idx"), UPat(UOps.ALU, BinaryOps.MUL,
-      src=[UPat(UOps.CONST, name="mval"), UPat(UOps.RANGE, src=(UPat(name="loop_start"), UPat(name="loop_end")))])]),
-      UPat(UOps.CONST, name="compval"))), UPat(UOps.CONST, name="multconst"), UPat(UOps.CONST, 0))), loop_collapse),
+    UPat(UOps.ALU, BinaryOps.ADD, src=[
+      UPat(name="idx"), 
+      UPat(UOps.ALU, BinaryOps.MUL, src=[
+        UPat(UOps.CONST, name="mval"), 
+        UPat(UOps.RANGE, src=(
+          UPat(name="loop_start"), 
+          UPat(name="loop_end")
+        ))
+      ])
+    ]),
+    UPat(UOps.CONST, name="compval"))), UPat(UOps.CONST, name="multconst"), UPat(UOps.CONST, 0))), loop_collapse(negate=False)),
+  (UPat(UOps.ALU, TernaryOps.WHERE, src=(UPat(UOps.ALU, BinaryOps.CMPLT, src=(
+    UPat(UOps.ALU, BinaryOps.ADD, src=[
+      UPat(name="idx"), 
+      UPat(UOps.ALU, UnaryOps.NEG, src=[
+        UPat(UOps.RANGE, src=(
+          UPat(name="loop_start"), 
+          UPat(name="loop_end")
+        ))
+      ])
+    ]),
+    UPat(UOps.CONST, name="compval"))), UPat(UOps.CONST, name="multconst"), UPat(UOps.CONST, 0))), loop_collapse(negate=True)),  
   # sum collapse to mul (with possible GEP)
   (UPat(UOps.PHI, src=(UPat(UOps.DEFINE_ACC, name="phi_input", src=(UPat(UOps.RANGE, name="loop"),)),
                        UPat(UOps.ALU, BinaryOps.ADD, src=(UPat(name="val1"), UPat(name="val2"))))), sum_collapse),
@@ -320,13 +343,18 @@ class UOpGraph:
     return sink
   
   def graph_rewrite_bottomup_no_backtrack(self, sink: UOp, pm: PatternMatcher):
+    sink = UOp(UOps.SINK, None, (sink,))
     @functools.lru_cache
     def rewrite(_uop: UOp):
       rewritten = None
       _rewritten = pm.rewrite(_uop)
       while _rewritten:
+        # Top level node may satisfy some further patterns
         rewritten = _rewritten
         _rewritten = pm.rewrite(rewritten)
+      if rewritten:
+        # Non-top level nodes may satisfy further patterns
+        return self.graph_rewrite_bottomup_no_backtrack(rewritten, pm)
       return rewritten
 
     nodes = []
@@ -344,7 +372,7 @@ class UOpGraph:
           src = list(parent.src)
           src[i] = rewritten
           parent.src = tuple(src)
-    return sink
+    return sink.src[0]
 
   def graph_dedup(self, sink:UOp):
     # add nodes to graph in reverse BFS order

@@ -166,7 +166,6 @@ class TestUOpGraph(TestUOps):
 
 
 class TestBottomupVsTopdownRewrite(TestUOps):  
-  @unittest.skip("Until pattern is rewritten")
   def test_arange(self):
     def factory():
       const_0 = UOp(UOps.CONST, dtypes.float, (), 0.0)
@@ -264,6 +263,7 @@ class TestBottomupVsTopdownRewrite(TestUOps):
     sa(lambda: UOp.load(UOp.var(), UOp.var(), UOp.const(None, 0), UOp.cvar("var"), UOp.var()))
     sa(lambda: UOp.store(UOp.var("buf"), UOp.var("idx"), UOp.var("val"), UOp.const(None, 1)))
     sa(lambda: UOp.store(UOp.var(), UOp.var(), UOp.var(), UOp.const(None, 0)))
+
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
