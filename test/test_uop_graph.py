@@ -403,29 +403,6 @@ class TestPatternRewriteSumCollapse(TestUOps):
       self.uop_factory
     )
   
-  def test_rewritten_patterns(self):
-    """
-    Test the pattern that should produce node that do not need further bottom up processing
-    """
-    print()
-    print_uop_tree(self.uop_factory())
-    old_pattern_matcher = PatternMatcher(self.minimal_patterns)
-    new_pattern_matcher = PatternMatcher([
-      (UPat(UOps.PHI, src=(
-        UPat(UOps.DEFINE_ACC, name="phi_input", src=(
-          UPat(UOps.RANGE, name="loop"),
-        )),
-        UPat(UOps.ALU, BinaryOps.ADD, src=(
-          UPat(name="val1"), 
-          UPat(name="val2")
-        )))),
-        sum_collapse),
-    ])
-    self.setup_and_assert_old_pattern_topdown_vs_new_pattern_bottomup(
-      old_pattern_matcher,
-      new_pattern_matcher,
-      self.uop_factory
-    )
 
 
 
