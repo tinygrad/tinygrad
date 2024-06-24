@@ -163,6 +163,7 @@ def verify_lazyop(*ast:LazyOp):
         children[s][op] = None
         in_degree[op] += 1
   queue = deque(op for out in ast for op in out.lazyops if in_degree[op] == 0)
+  for op in queue: assert op.op in BufferOps
   while queue:
     op = queue.popleft()
     for x in children[op]:
