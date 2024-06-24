@@ -1,6 +1,6 @@
 from __future__ import annotations
 from collections import defaultdict, deque
-from typing import DefaultDict, Deque, Union, Tuple, Any, List, Dict, Callable
+from typing import DefaultDict, Union, Tuple, Any, List, Dict, Callable
 import functools, hashlib, math, operator, ctypes, struct
 from enum import Enum, auto
 from dataclasses import dataclass
@@ -78,11 +78,6 @@ class LazyOp:
     const_vars = [x.arg.val for x in self.lazyops if x.op is BufferOps.CONST and isinstance(x.arg.val, Variable)]
     return sorted(set.union(*extract_vars, set(const_vars)), key=lambda v: v.expr)
 
-  def __add__(self, other:LazyOp): return LazyOp(BinaryOps.ADD, (self, other))
-  def __neg__(self): return LazyOp(UnaryOps.NEG, (self, ))
-  def __sub__(self, other:LazyOp): return LazyOp(BinaryOps.ADD, (self, -other))
-  def __mul__(self, other:LazyOp): return LazyOp(BinaryOps.MUL, (self, other))
-
 # **************** independent FlopCounter ****************
 
 @dataclass
@@ -155,25 +150,23 @@ def verify_lazyop(*ast:LazyOp):
   children: DefaultDict[LazyOp, Dict[LazyOp, None]] = defaultdict(dict)
   in_degree: DefaultDict[LazyOp, int] = defaultdict(int)
   for i, out in enumerate(ast):
-    assert out.arg.idx == i
-    assert out.op is BufferOps.STORE
-    assert out.arg.st.size == ast[-1].arg.st.size
+    assert out.arg.idx == i, f"unexpected output buffer idx {out.arg.idx} != {i}"
+    assert out.op is BufferOps.STORE, f"kernels must have stores as the output, got {out.op}"
+    assert out.arg.st.size == ast[-1].arg.st.size, f"outputs must have the same size, got {out.arg.st.size}"
     for op in out.lazyops:
       for s in op.src:
         children[s][op] = None
         in_degree[op] += 1
-  q: Deque[Tuple[LazyOp, ShapeTracker]] = deque((op, op.arg.st) for out in ast for op in out.lazyops if in_degree[op] == 0)
+  q = deque((op, op.arg.st) for out in ast for op in out.lazyops if in_degree[op] == 0)
   sts: Dict[LazyOp, ShapeTracker] = {}
   while q:
     op, st = q.popleft()
+    if op.op in ReduceOps:
+      new_shape = tuple(1 if i in op.arg else s for i,s in enumerate(st.shape))
+      st = ShapeTracker.from_shape(new_shape)
+    else:
+      for x in op.src: assert sts[x].shape == st.shape, f"found implicit movement op {sts[x].shape}, got {st.shape}"
     sts[op] = st
-    if op.op not in ReduceOps:
-      for x in op.src:
-        assert sts[x].shape == st.shape
     for x in children[op]:
       in_degree[x] -= 1
-      if in_degree[x] == 0:
-        if x.op in ReduceOps:
-          new_shape = tuple(1 if i in x.arg else s for i,s in enumerate(st.shape))
-          st = ShapeTracker.from_shape(new_shape)
-        q.append((x, st))
+      if in_degree[x] == 0: q.append((x, st))
