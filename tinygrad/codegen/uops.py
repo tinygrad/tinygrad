@@ -379,6 +379,7 @@ class UOpGraph:
     nodes = []
     @functools.lru_cache
     def traverse(_uop: UOp, parent: UOp, i):
+      if _uop.op is UOps.CONST: return
       for _i, src in enumerate(_uop.src):
         traverse(src, _uop, _i)
       nodes.append((_uop, parent, i))
