@@ -162,15 +162,18 @@ def verify_lazyop(*ast:LazyOp):
       for s in op.src:
         children[s][op] = None
         in_degree[op] += 1
-  queue = deque(op for out in ast for op in out.lazyops if in_degree[op] == 0)
-  for op in queue: assert op.op in BufferOps
-  while queue:
-    op = queue.popleft()
+  q: Deque[Tuple[LazyOp, ShapeTracker]] = deque((op, op.arg.st) for out in ast for op in out.lazyops if in_degree[op] == 0)
+  sts: Dict[LazyOp, ShapeTracker] = {}
+  while q:
+    op, st = q.popleft()
+    sts[op] = st
+    if op.op not in ReduceOps:
+      for x in op.src:
+        assert sts[x].shape == st.shape
     for x in children[op]:
       in_degree[x] -= 1
       if in_degree[x] == 0:
         if x.op in ReduceOps:
-          #new_shape = tuple(1 if i in x.arg else s for i,s in enumerate(st.shape))
-          #st = ShapeTracker.from_shape(new_shape)
-          pass
-        queue.append(x)
+          new_shape = tuple(1 if i in x.arg else s for i,s in enumerate(st.shape))
+          st = ShapeTracker.from_shape(new_shape)
+        q.append((x, st))

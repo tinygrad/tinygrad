@@ -2,7 +2,7 @@ from typing import List, Dict, Optional, cast, Generator, Tuple
 import time
 from dataclasses import dataclass, replace
 from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int
-from tinygrad.ops import BufferOps, LoadOps, LazyOp, verify_lazyop
+from tinygrad.ops import BufferOps, LoadOps, LazyOp
 from tinygrad.device import Device, Buffer
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.renderer import Renderer, Program
@@ -16,7 +16,6 @@ def get_linearizer(renderer:Renderer, ast:Tuple[LazyOp, ...]) -> Linearizer:
   if DEBUG >= 3:
     from tinygrad.engine.graph import print_tree
     for op in ast: print_tree(op)
-  verify_lazyop(*ast)
   k = Linearizer(*ast, opts=renderer)
   k.required_optimizations()
   if not NOOPT:

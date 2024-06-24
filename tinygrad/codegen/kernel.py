@@ -2,7 +2,7 @@ from __future__ import annotations
 from collections import defaultdict
 import itertools
 from typing import DefaultDict, NamedTuple, Optional, List, Tuple, cast, Dict, Union
-from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, UNSAFE_PAD_OPS
+from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, UNSAFE_PAD_OPS, verify_lazyop
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore
 from tinygrad.dtype import dtypes, ImageDType, DType
@@ -54,8 +54,7 @@ class LocalBuffer(NamedTuple):
 class Kernel:
   def __init__(self, *ast:LazyOp, opts:Optional[Renderer]=None):
     self.opts = opts if opts is not None else Device[Device.DEFAULT].renderer
-    assert all(op.op is BufferOps.STORE for op in ast), f"kernels must have stores as the output, got {ast}"
-    assert len(set(op.arg.st.size for op in ast)) == 1, f"all outbufs should have the same size, got {[op.arg.st for op in ast]}"
+    verify_lazyop(*ast)
     self.ast = ast
     self.lazyops = flatten([op.lazyops for op in self.ast])
 

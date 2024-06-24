@@ -4,15 +4,9 @@ from tinygrad.codegen.linearizer import Linearizer
 #from tinygrad.codegen.lowerer import Lowerer
 from tinygrad.engine.graph import print_tree
 from tinygrad.helpers import DEBUG
-from tinygrad.ops import BinaryOps, BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, TernaryOps, ReduceOps, UnaryOps, verify_lazyop
-from tinygrad.shape.shapetracker import ShapeTracker, View
-from tinygrad import dtypes, Tensor
-
-class LazyOp(LazyOp):
-  def __add__(self, other:LazyOp): return LazyOp(BinaryOps.ADD, (self, other))
-  def __neg__(self): return LazyOp(UnaryOps.NEG, (self, ))
-  def __sub__(self, other:LazyOp): return LazyOp(BinaryOps.ADD, (self, -other))
-  def __mul__(self, other:LazyOp): return LazyOp(BinaryOps.MUL, (self, other))
+from tinygrad.ops import BufferOps, MemBuffer, LazyOp, verify_lazyop
+from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad import dtypes
 
 def lower(*ast:LazyOp):
   if DEBUG >= 3:
