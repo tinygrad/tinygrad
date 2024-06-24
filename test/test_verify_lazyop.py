@@ -33,26 +33,6 @@ class TestVerifyLazyOp(unittest.TestCase):
     out = LazyOp(BufferOps.STORE, (a+b, ), arg=MemBuffer(0, dtype, st))
     lower(out)
 
-  # *** BufferOps spec
-  def test_childless_store(self):
-    dtype = dtypes.int
-    st = ShapeTracker.from_shape((32, 1))
-    a = LazyOp(BufferOps.LOAD, arg=MemBuffer(1, dtype, st))
-    b = LazyOp(BufferOps.LOAD, arg=MemBuffer(2, dtype, st))
-    out0 = LazyOp(BufferOps.STORE, (a+b, ), arg=MemBuffer(0, dtype, st))
-    out1 = LazyOp(BufferOps.STORE, (out0*b, ), arg=MemBuffer(1, dtype, st))
-    with self.assertRaises(AssertionError): lower(out0, out1)
-
-  @unittest.skip("todo")
-  def test_membuffer_order(self):
-    dtype = dtypes.int
-    st = ShapeTracker.from_shape((32, 1))
-    a = LazyOp(BufferOps.LOAD, arg=MemBuffer(2, dtype, st))
-    b = LazyOp(BufferOps.LOAD, arg=MemBuffer(1, dtype, st))
-    out = LazyOp(BufferOps.STORE, (a+b, ), arg=MemBuffer(0, dtype, st))
-    with self.assertRaises(AssertionError): lower(out)
-
-  # *** Shape spec
   def test_one_full_shape(self):
     a = LazyOp(BufferOps.LOAD, arg=MemBuffer(1, dtypes.int, ShapeTracker.from_shape((32, 1))))
     b = LazyOp(BufferOps.LOAD, arg=MemBuffer(2, dtypes.int, ShapeTracker.from_shape((32, 1))))

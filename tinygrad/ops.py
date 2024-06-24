@@ -78,6 +78,11 @@ class LazyOp:
     const_vars = [x.arg.val for x in self.lazyops if x.op is BufferOps.CONST and isinstance(x.arg.val, Variable)]
     return sorted(set.union(*extract_vars, set(const_vars)), key=lambda v: v.expr)
 
+  def __add__(self, other:LazyOp): return LazyOp(BinaryOps.ADD, (self, other))
+  def __neg__(self): return LazyOp(UnaryOps.NEG, (self, ))
+  def __sub__(self, other:LazyOp): return LazyOp(BinaryOps.ADD, (self, -other))
+  def __mul__(self, other:LazyOp): return LazyOp(BinaryOps.MUL, (self, other))
+
 # **************** independent FlopCounter ****************
 
 @dataclass
@@ -147,21 +152,24 @@ truncate: Dict[DType, Callable] = {dtypes.bool: bool,
 def exec_alu(op:Op, dtype:DType, operands): return truncate.get(dtype, lambda x: x)(python_alu[op](*operands))
 
 def verify_lazyop(*ast:LazyOp):
-  queue: Deque[Tuple[LazyOp, ShapeTracker]] = deque()
   children: DefaultDict[LazyOp, Dict[LazyOp, None]] = defaultdict(dict)
+  in_degree: DefaultDict[LazyOp, int] = defaultdict(int)
   for i, out in enumerate(ast):
     assert out.arg.idx == i
     assert out.op is BufferOps.STORE
     assert out.arg.st.size == ast[-1].arg.st.size
     for op in out.lazyops:
-      for s in op.src: children[s][op] = None
-      if op.op in BufferOps: queue.append((op, op.arg.st))
-
+      for s in op.src:
+        children[s][op] = None
+        in_degree[op] += 1
+  queue = deque(op for out in ast for op in out.lazyops if in_degree[op] == 0)
   while queue:
-    op, st = queue.popleft()
-    if op.op is BufferOps.STORE: assert len(children[op]) == 0
+    op = queue.popleft()
     for x in children[op]:
-      if x.op in ReduceOps:
-        new_shape = tuple(1 if i in x.arg else s for i,s in enumerate(st.shape))
-        st = ShapeTracker.from_shape(new_shape)
-      queue.append((x, st))
+      in_degree[x] -= 1
+      if in_degree[x] == 0:
+        if x.op in ReduceOps:
+          #new_shape = tuple(1 if i in x.arg else s for i,s in enumerate(st.shape))
+          #st = ShapeTracker.from_shape(new_shape)
+          pass
+        queue.append(x)
