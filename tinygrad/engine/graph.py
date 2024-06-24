@@ -4,7 +4,7 @@ from typing import List, Any, DefaultDict, Union
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LoadOps, BufferOps, TernaryOps, LazyOp
 from tinygrad.device import Device
 from tinygrad.helpers import GRAPHPATH, DEBUG, GlobalCounters, getenv
-from tinygrad.codegen.uops import UOps, UOp
+from tinygrad.codegen.uops import UOps, UOp, UPat
 from tinygrad.shape.symbolic import NumNode
 from tinygrad.lazy import LazyBuffer
 
@@ -86,7 +86,7 @@ def _tree(luop:Union[LazyOp,UOp], cycles, cnt, prefix=""):
   for c in childs[:-1]: lines += [f" ┣{c[0]}"] + [f" ┃{l}" for l in c[1:]]
   return lines + [" ┗"+childs[-1][0]] + ["  "+l for l in childs[-1][1:]]
 
-def print_tree(luop:Union[LazyOp,UOp]): print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(luop, {}, [-1]))]))
+def print_tree(luop:Union[LazyOp, UOp, UPat]): print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(luop, {}, [-1]))]))
 
 def graph_uops(uops:List[UOp]):
   colors = {UOps.ALU: "#ffffc0", UOps.LOAD: "#ffc0c0", UOps.STORE: "#c0ffc0", UOps.SPECIAL: "#c0c0ff", UOps.CONST: "#e0e0e0",
