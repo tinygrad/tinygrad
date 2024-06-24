@@ -18,7 +18,7 @@ for offset in tqdm(range(0, row_count, page_size)):
     time_ = time_lin(k)
     try:
       assert compare_src == good_src, "PROCESS REPLAY DETECTED CHANGE"
-      assert (time_-time_baseline)/max(time_baseline, 1e8) < 0.2, f"TIME REPLAY DETECTED CHANGE {time_baseline} ->{time_}"
+      assert (time_-time_baseline)/max(time_baseline, .1) < 0.1, f"TIME REPLAY DETECTED CHANGE {time_baseline} ->{time_}"
     except AssertionError as e:
       print(e.args[0])
       print(compare_k.ast)

@@ -530,4 +530,4 @@ class Linearizer(Kernel):
     return Program(self.name, src, self.opts.device, self.global_size, self.local_size,
                    self.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))
 
-def time_lin(lin:Linearizer): return timeit(UOpGraph(lin.uops.sinks).linearize())
+def time_lin(lin:Linearizer): return timeit(UOpGraph(lin.uops.sinks).linearize)
