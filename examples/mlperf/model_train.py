@@ -496,7 +496,7 @@ def train_bert():
       MLLOGGER.event(key='start_warmup_step', value=0)
       MLLOGGER.event(key='opt_learning_rate_trainnig_steps', value=config["TRAIN_STEPS"])
       MLLOGGER.event(key=mllog_constants.GRADIENT_ACCUMULATION_STEPS, value=1)
-      MLLOGGER.event(key=mllog_constants.EVAL_SAMPLES, value=10000)
+      MLLOGGER.event(key=mllog_constants.EVAL_SAMPLES, value=config["EVAL_BS"] * config["MAX_EVAL_STEPS"])
       MLLOGGER.event(key=mllog_constants.TRAIN_SAMPLES, value=config["GLOBAL_BATCH_SIZE"] * config["TRAIN_STEPS"])
 
   # ** resume from checkpointing **
