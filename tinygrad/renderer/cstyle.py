@@ -190,8 +190,7 @@ class AMXRenderer(ClangRenderer):
   device = "AMX"
 
   def render_store(self, buf_name: str, buf_dtype: DType, var_name: str, var_dtype: DType, idx: str, local=False) -> str:
-    if var_name.startswith("__mma"):
-      return var_name.replace("acc", f"{buf_name}[{idx}]") + ";"
+    if var_name.startswith("__mma"): return var_name.replace("acc", f"{buf_name}[{idx}]") + ";"
     return super().render_store(buf_name, buf_dtype, var_name, var_dtype, idx, local)
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
@@ -200,20 +199,19 @@ class AMXRenderer(ClangRenderer):
       '#define AMX(op, gpr, btf) __asm(".word (0x201000+(%0 << 5)+0%1-((0%1>>4)*6))" : : "i"(op), "r"((unsigned long long)(gpr)+(btf)) : "memory")',
     ]
     for _, _, dtype, amx, full_shape in set([uop.arg for uop in uops if uop.op is UOps.MMA]):
-      amx_op = 12 if dtype is dtypes.float else 10
       M, N, K, a, _ = full_shape
       prefix.append(
         f"""void __mma_{K}_{a}_{a}_{dtype.name}(const {dtype.name}* restrict data1, const {dtype.name}* restrict data2, {dtype.name}* restrict data0) {{
-  AMX_SET(0); // set
+  AMX_SET(0);
   for(int ridx0=0; ridx0<{K}; ridx0++){{
-    AMX(0, data2, 1ull<<62 | ridx0*{dtype.itemsize}*{M * a}); AMX(1, data1, 1ull<<62 | ridx0*{dtype.itemsize}*{N * a}); // ldx, ldy
-    AMX({amx_op}, 0, 0ull); AMX({amx_op}, 0, 1ull<<20 | 64<<10); AMX({amx_op}, 0, 2ull<<20 | 64); AMX({amx_op}, 0, 3ull<<20 | 64<<10 | 64); // fma
+    AMX(0, data2, 1ull<<62 | ridx0*{dtype.itemsize}*{M * a}); AMX(1, data1, 1ull<<62 | ridx0*{dtype.itemsize}*{N * a});
+    AMX({(amx_op:=12)}, 0, 0ull); AMX({amx_op}, 0, 1ull<<20 | 64<<10); AMX({amx_op}, 0, 2ull<<20 | 64); AMX({amx_op}, 0, 3ull<<20 | 64<<10 | 64);
   }}
   for(int ridx1 = 0; ridx1<{(amx // 2)}; ridx1++){{
-    AMX(5, data0, 1ull<<62 | (ridx1*{dtype.itemsize}ull)<<56   | ridx1*{dtype.itemsize}*{N * a}); // stz
-    AMX(5, data0, 1ull<<62 | (ridx1*{dtype.itemsize}ull+2)<<56 | ridx1*{dtype.itemsize}*{N * a}+{(amx // 2)}*{dtype.itemsize}*{N * a}); // stz
+    AMX(5, data0, 1ull<<62 | (ridx1*{dtype.itemsize}ull)<<56   | ridx1*{dtype.itemsize}*{N * a});
+    AMX(5, data0, 1ull<<62 | (ridx1*{dtype.itemsize}ull+2)<<56 | ridx1*{dtype.itemsize}*{N * a}+{(amx // 2)}*{dtype.itemsize}*{N * a});
   }}
-  AMX_SET(1); // clr
+  AMX_SET(1);
 }}""",
       )
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
