@@ -1,5 +1,6 @@
 from __future__ import annotations
-from typing import Union, Tuple, Any, List, Dict, Callable
+from collections import defaultdict, deque
+from typing import DefaultDict, Deque, Union, Tuple, Any, List, Dict, Callable
 import functools, hashlib, math, operator, ctypes, struct
 from enum import Enum, auto
 from dataclasses import dataclass
@@ -144,3 +145,23 @@ truncate: Dict[DType, Callable] = {dtypes.bool: bool,
   dtypes.int32: lambda x: ctypes.c_int32(x).value, dtypes.int64: lambda x: ctypes.c_int64(x).value,}
 
 def exec_alu(op:Op, dtype:DType, operands): return truncate.get(dtype, lambda x: x)(python_alu[op](*operands))
+
+def verify_lazyop(*ast:LazyOp):
+  queue: Deque[Tuple[LazyOp, ShapeTracker]] = deque()
+  children: DefaultDict[LazyOp, Dict[LazyOp, None]] = defaultdict(dict)
+  for i, out in enumerate(ast):
+    assert out.arg.idx == i
+    assert out.op is BufferOps.STORE
+    assert out.arg.st.size == ast[-1].arg.st.size
+    for op in out.lazyops:
+      for s in op.src: children[s][op] = None
+      if op.op in BufferOps: queue.append((op, op.arg.st))
+
+  while queue:
+    op, st = queue.popleft()
+    if op.op is BufferOps.STORE: assert len(children[op]) == 0
+    for x in children[op]:
+      if x.op in ReduceOps:
+        new_shape = tuple(1 if i in x.arg else s for i,s in enumerate(st.shape))
+        st = ShapeTracker.from_shape(new_shape)
+      queue.append((x, st))
