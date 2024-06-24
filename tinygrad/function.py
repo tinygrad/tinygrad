@@ -79,18 +79,24 @@ def _lazy_map_numbers(x: LazyBuffer, inf: LazyBuffer, _inf: LazyBuffer, nan: Laz
   """replace inf -> inf, -inf -> _inf, nan -> nan, otherwise -> ratio"""
   return x.e(BinaryOps.CMPNE, x.const(math.inf)).e(TernaryOps.WHERE, x.e(BinaryOps.CMPNE, x).e(TernaryOps.WHERE, nan, x.e(BinaryOps.CMPNE, x.const(-math.inf)).e(TernaryOps.WHERE, ratio, _inf)), inf) # noqa: E501
 
-def _dfmul_f2_f_f(x: LazyBuffer, y: LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
-  xl = x.e(BinaryOps.ADD, x.e(UnaryOps.NEG))
-  yl = y.e(BinaryOps.ADD, y.e(UnaryOps.NEG))
-  rx = x.e(BinaryOps.MUL, y)
-  # ry = xh * yh - rx + xl * yh + xh * yl + xl * yl
-  ry = x.e(BinaryOps.MUL, y).e(BinaryOps.ADD, rx.e(UnaryOps.NEG)).e(BinaryOps.ADD, xl.e(BinaryOps.MUL, y)).e(BinaryOps.ADD,x.e(BinaryOps.MUL, yl)).e(BinaryOps.ADD, xl.e(BinaryOps.MUL, yl)) # noqa: E501
+def _dfadd2_f2_f2_f2(xx: LazyBuffer, xy: LazyBuffer, yx: LazyBuffer, yy: LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
+  rx = xx.e(BinaryOps.ADD, yx)
+  v = rx.e(BinaryOps.ADD, xx.e(UnaryOps.NEG))
+  ry = xx.e(BinaryOps.ADD, rx.e(BinaryOps.ADD, v.e(UnaryOps.NEG)).e(UnaryOps.NEG)).e(BinaryOps.ADD, yx.e(BinaryOps.ADD, v.e(UnaryOps.NEG)))
+  ry = xy.e(BinaryOps.ADD, yy)
   return rx, ry
 
-def _dfadd2_f2_f_f2(x: LazyBuffer, y_x: LazyBuffer, y_y: LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
-  r_x = x.e(BinaryOps.ADD, y_x)
-  r_y = x.e(BinaryOps.ADD, r_x.e(UnaryOps.NEG)).e(BinaryOps.ADD, y_x).e(BinaryOps.ADD, y_y)
-  return r_x, r_y
+def _dfmul2_f2_f2_f2(xx: LazyBuffer, xy: LazyBuffer, yx: LazyBuffer, yy: LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
+  rx = xx.e(BinaryOps.MUL, yx)
+  ry = xx.e(BinaryOps.MUL, yx).e(BinaryOps.ADD, rx.e(UnaryOps.NEG)).e(BinaryOps.ADD, xx.e(BinaryOps.MUL, yy)).e(BinaryOps.ADD, xy.e(BinaryOps.MUL, yx)) # noqa: E501
+  return rx, ry
+
+def _dfdiv_f2_f2_f2(nx: LazyBuffer, ny: LazyBuffer, dx: LazyBuffer, dy: LazyBuffer) -> Tuple[LazyBuffer, LazyBuffer]:
+  t = dx.e(UnaryOps.RECIP)
+  qx = nx.e(BinaryOps.MUL, t)
+  u = qx.e(UnaryOps.NEG).e(BinaryOps.ADD, nx.e(BinaryOps.MUL, t)).e(BinaryOps.ADD, qx.e(BinaryOps.MUL, dx.const(1).e(BinaryOps.ADD, dx.e(BinaryOps.MUL, t).e(UnaryOps.NEG)))) # noqa: E501
+  qy = t.e(BinaryOps.MUL, ny.e(BinaryOps.ADD, qx.e(BinaryOps.MUL, dy).e(UnaryOps.NEG))).e(BinaryOps.ADD, u)
+  return qx, qy
 
 def _ilogb2k(d:LazyBuffer) -> LazyBuffer:
   assert d.dtype in [dtypes.float64, dtypes.float32, dtypes.float16]
@@ -342,17 +348,16 @@ def _xlog2_base(d: LazyBuffer, denormal: bool) -> LazyBuffer:
   if 0 in d.shape: return d
   fp64_p = d.dtype == dtypes.float64
 
-  d = d.e(BinaryOps.MUL, d.const(2 ** 32)) if denormal else d
-  d = d.e(BinaryOps.MUL, d.const(2 ** 32)) if denormal else d
+  for _ in range(2):
+    d = d.e(BinaryOps.MUL, d.const(2 ** 32)) if denormal else d
 
   e = _ilogb2k(d.e(BinaryOps.MUL, d.const(1.0 / 0.75))).cast(d.dtype)
   m = _ldexp3k(d, e.e(UnaryOps.NEG))
-
   e = e.e(BinaryOps.ADD, e.const(-64)) if denormal else e
-  x = m.e(BinaryOps.ADD, m.const(-1.0)).e(BinaryOps.MUL, m.e(BinaryOps.ADD, m.const(1.0)).e(UnaryOps.RECIP))
-  x2 = x.e(BinaryOps.MUL, x)
 
-  if fp64_p:
+  if fp64_p: # 3.5 ULP
+    x = m.e(BinaryOps.ADD, m.const(-1.0)).e(BinaryOps.MUL, m.e(BinaryOps.ADD, m.const(1.0)).e(UnaryOps.RECIP))
+    x2 = x.e(BinaryOps.MUL, x)
     t = x.const(0.2211941750456081490e+0)
     t = _mla(t, x2, t.const(0.2200768693152277689e+0))
     t = _mla(t, x2, t.const(0.2623708057488514656e+0))
@@ -360,13 +365,18 @@ def _xlog2_base(d: LazyBuffer, denormal: bool) -> LazyBuffer:
     t = _mla(t, x2, t.const(0.4121985945485324709e+0))
     t = _mla(t, x2, t.const(0.5770780162997058982e+0))
     t = _mla(t, x2, t.const(0.96179669392608091449))
-    s_hi, s_lo = _dfadd2_f2_f_f2(e, *_dfmul_f2_f_f(t.const(2.885390081777926774), x))
+    s_hi, s_lo = _dfadd2_f2_f2_f2(e, e.const(0),*_dfmul2_f2_f2_f2(t.const(2.885390081777926774), t.const(0), x, x.const(0)))
     r = _mla(t, x.e(BinaryOps.MUL, x2), s_hi.e(BinaryOps.ADD, s_lo))
-  else:
-    t = d.const(0.4374088347e+0)
-    t = _mla(t, x2, t.const(0.5764843822e+0))
-    t = _mla(t, x2, t.const(0.9618024230e+0))
-    r = _mla(x.e(BinaryOps.MUL, x2), t, _mla(x, t.const(0.2885390043e+1), e))
+  else: # 1.0 ULP
+    # (m-1)/(m+1)
+    xx, xy = _dfdiv_f2_f2_f2(*_dfadd2_f2_f2_f2(m.const(-1), m.const(0), m, m.const(0)), *_dfadd2_f2_f2_f2(m.const(1), m.const(0), m, m.const(0)))
+    x2 = xx.e(BinaryOps.MUL, xx)
+    t = d.const(0.4374550283e+0)
+    t = _mla(t, x2, t.const(0.5764790177e+0))
+    t = _mla(t, x2, t.const(0.9618012905120))
+    sx, sy = _dfadd2_f2_f2_f2(e, e.const(0), *_dfmul2_f2_f2_f2(xx, xy, xx.const(2.8853900432586669922), xy.const(3.2734474483568488616e-08)))
+    sx, sy = _dfadd2_f2_f2_f2(sx, sy, x2.const(0), x2.e(BinaryOps.MUL, xx).e(BinaryOps.MUL, t))
+    r = sx.e(BinaryOps.ADD, sy)
 
   isinf_map = d.e(BinaryOps.CMPNE, d.const(math.inf))
   nan_map1 = d.e(BinaryOps.CMPLT, d.const(0.0))
@@ -379,7 +389,10 @@ def _xlog2_base(d: LazyBuffer, denormal: bool) -> LazyBuffer:
   r = zero_map.e(TernaryOps.WHERE, r, r.const(-math.inf))
   return r
 
-def _xlog2(d: LazyBuffer) -> LazyBuffer: return d.e(BinaryOps.CMPLT, d.const(1.0)).e(TernaryOps.WHERE, _xlog2_base(d, True), _xlog2_base(d, False)) # noqa: E501
+def _xlog2(d: LazyBuffer) -> LazyBuffer:
+  FLT_MIN = d.const(1e-6 if d.dtype == dtypes.float16 else 1e-4) # [TODO] are they optimal?
+  out = d.e(BinaryOps.CMPLT, FLT_MIN).e(TernaryOps.WHERE, _xlog2_base(d, True), _xlog2_base(d, False))
+  return d.e(BinaryOps.CMPNE, d.const(0.0)).e(TernaryOps.WHERE, out, d.const(-math.inf))
 
 # ************* unary ops *************
 class Sin(Function):
@@ -409,7 +422,7 @@ class Relu(Function):
 class Log(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
-    fast_approx = x.dtype in [dtypes.float32, dtypes.float64]
+    fast_approx = x.dtype in [dtypes.float16, dtypes.float32, dtypes.float64]
     x = _xlog2(x) if fast_approx else x.e(UnaryOps.LOG2)
     return x.e(BinaryOps.MUL, x.const(math.log(2)))
 
