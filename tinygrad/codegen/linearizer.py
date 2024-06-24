@@ -1,10 +1,10 @@
 from __future__ import annotations
 from typing import List, Tuple, Any, Optional, cast, DefaultDict, Dict, Union, Final, Iterator, Sequence
-import itertools, math, functools, time
+import itertools, math, functools
 from collections import defaultdict
 
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
-from tinygrad.helpers import colored, DEBUG, dedup, diskcache_put, prod, getenv, to_function_name, flatten
+from tinygrad.helpers import colored, DEBUG, dedup, diskcache_put, prod, getenv, to_function_name, flatten, timeit
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ConstBuffer, MemBuffer, BufferOps, get_lazyop_info
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, create_lt_node, sint
@@ -530,7 +530,4 @@ class Linearizer(Kernel):
     return Program(self.name, src, self.opts.device, self.global_size, self.local_size,
                    self.uops, min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count))
 
-def time_lin(lin:Linearizer):
-  st = time.perf_counter_ns()
-  UOpGraph(lin.uops.sinks).linearize()
-  return time.perf_counter_ns() - st
+def time_lin(lin:Linearizer): return timeit(UOpGraph(lin.uops.sinks).linearize())
