@@ -3,7 +3,7 @@ from tinygrad.helpers import getenv
 from tinygrad import dtypes, Tensor
 dtype_in = dtypes.half if getenv("HALF") else dtypes.bfloat16 if getenv("BFLOAT16") else dtypes.float
 acc_dtype = dtypes.half if getenv("ACC_HALF") else dtypes.bfloat16 if getenv("ACC_BFLOAT16") else None
-N = getenv("N", 1024)
+N = getenv("N", 4096)
 M = getenv("M", N)
 K = getenv("K", N)
 CNT = getenv("CNT", 10)
@@ -16,7 +16,7 @@ if __name__ == "__main__":
     if i > 0 and getenv("RAND", 0) != 0:
       a, b = Tensor.rand(M, K, dtype=dtype_in).realize(), Tensor.rand(K, N, dtype=dtype_in).realize()
     c = a.matmul(b, acc_dtype=acc_dtype).realize()
-  comp = a.numpy().astype(np.float32).T @ b.numpy().astype(np.float32)
+  comp = a.numpy().astype(np.float32) @ b.numpy().astype(np.float32)
   nc = c.numpy()
   try:
     np.testing.assert_allclose(nc, comp, atol=ATOL, rtol=RTOL)
