@@ -6,7 +6,7 @@ from tinygrad.dtype import PtrDType
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps
 from tinygrad.codegen.uops import UOpGraph, UOps, UOp, constant_folder
 
-def factory():
+def arange():
   const_0 = UOp(UOps.CONST, dtypes.float, (), 0.0)
   const_neg_1 = UOp(UOps.CONST, dtypes.float, (), -1.0)
   const_1 = UOp(UOps.CONST, dtypes.float, (), 1.0)
@@ -27,8 +27,32 @@ def factory():
   store = UOp(UOps.STORE, None, (_global, _special, phi))
   return store
 
-def run(mode):
-  print(f"Running with {mode}")
+def sum_collapse():
+  global_buffer0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=(0, True))
+  global_buffer1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=(0, False))
+  const_0 = UOp(UOps.CONST, dtypes.float, (), 0.0)
+  const_1 = UOp(UOps.CONST, dtypes.float, (), 1.0)
+  const_2 = UOp(UOps.CONST, dtypes.float, (), 2.0)
+  const_42 = UOp(UOps.CONST, dtypes.float32, (), 42.0)
+
+  loop = UOp(UOps.RANGE, dtypes.float, (
+      UOp(UOps.CONST, dtypes.int, arg=0),
+      UOp(UOps.CONST, dtypes.int, arg=10)
+  ), (2.0,0.0))
+  acc = UOp(UOps.DEFINE_ACC, dtypes.float, (loop,), (0.0,0.0,0.0))
+  alu = UOp(UOps.ALU, dtypes.float, (
+      UOp(UOps.LOAD, dtypes.float, (global_buffer1, const_0)),
+      acc,
+    ), BinaryOps.ADD)
+  phi = UOp(UOps.PHI, dtypes.float, (
+      acc,
+      alu,
+  ))
+  store = UOp(UOps.STORE, None, (global_buffer0, const_1, phi))
+  return store
+
+def run(mode, factory):
+  print(f"Running with {mode} for {factory.__name__}")
   counter = NodeVisitCounter()
   uop = factory()
   g = UOpGraph([uop])
@@ -41,5 +65,7 @@ def run(mode):
   print_uop_tree(rewritten, counter)
 
 
-run('bottomup')
-run('topdown')
+run('bottomup', arange)
+run('topdown', arange)
+run('bottomup', sum_collapse)
+run('topdown', sum_collapse)
