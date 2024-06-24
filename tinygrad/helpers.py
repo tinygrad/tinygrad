@@ -1,7 +1,6 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string, ctypes
-import itertools, urllib.request, subprocess
-from tqdm import tqdm
+import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string, ctypes, sys
+import itertools, urllib.request, subprocess, shutil, math, json
 from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Sequence
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
@@ -56,6 +55,12 @@ def get_child(obj, key):
     else: obj = getattr(obj, k)
   return obj
 
+def get_shape(x) -> Tuple[int, ...]:
+  if not isinstance(x, (list, tuple)): return ()
+  subs = [get_shape(xi) for xi in x]
+  if not all_same([sub for sub in subs]): raise ValueError(f"inhomogeneous shape from {x}")
+  return (len(subs),) + (subs[0] if subs else ())
+
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
 def get_contraction(old_shape:Tuple[sint, ...], new_shape:Tuple[sint, ...]) -> Optional[List[List[int]]]:
   acc_old, acc_new = list(itertools.accumulate(old_shape, operator.mul)), list(itertools.accumulate(new_shape, operator.mul))
@@ -98,7 +103,7 @@ class ContextVar:
 DEBUG, IMAGE, BEAM, NOOPT, JIT = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0), ContextVar("JIT", 1)
 WINO, THREEFRY, CACHECOLLECTING = ContextVar("WINO", 0), ContextVar("THREEFRY", 0), ContextVar("CACHECOLLECTING", 1)
 GRAPH, GRAPHPATH, SAVE_SCHEDULE, RING = ContextVar("GRAPH", 0), getenv("GRAPHPATH", "/tmp/net"), ContextVar("SAVE_SCHEDULE", 0), ContextVar("RING", 1)
-MULTIOUTPUT = ContextVar("MULTIOUTPUT", 1)
+MULTIOUTPUT, PROFILE = ContextVar("MULTIOUTPUT", 1), ContextVar("PROFILE", 0)
 
 # **************** global state Counters ****************
 
@@ -138,6 +143,34 @@ class Profiling(contextlib.ContextDecorator):
         print(f"n:{num_calls:8d}  tm:{tottime*self.time_scale:7.2f}ms  tot:{cumtime*self.time_scale:7.2f}ms",
               colored(_format_fcn(fcn), "yellow") + " "*(50-len(_format_fcn(fcn))),
               colored(f"<- {(scallers[0][1][2]/tottime)*100:3.0f}% {_format_fcn(scallers[0][0])}", "BLACK") if len(scallers) else '')
+
+class ProfileLogger:
+  writers: int = 0
+  mjson: List[Dict] = []
+  actors: Dict[str, int] = {}
+  subactors: Dict[Tuple[str, str], int] = {}
+  path = getenv("PROFILE_OUTPUT_FILE", temp("tinygrad_profile.json"))
+
+  def __init__(self): self.events, ProfileLogger.writers = [], ProfileLogger.writers + 1
+
+  def add_event(self, ev_name, ev_start, ev_end, actor, subactor=None): self.events += [(ev_name, ev_start, ev_end, actor, subactor)]
+
+  def __del__(self):
+    for name,st,et,actor_name,subactor_name in self.events:
+      if actor_name not in self.actors:
+        self.actors[actor_name] = (pid:=len(self.actors))
+        self.mjson.append({"name": "process_name", "ph": "M", "pid": pid, "args": {"name": actor_name}})
+
+      if (subactor_key:=(actor_name,subactor_name)) not in self.subactors:
+        self.subactors[subactor_key] = (tid:=len(self.subactors))
+        self.mjson.append({"name": "thread_name", "ph": "M", "pid": self.actors[actor_name], "tid":tid, "args": {"name": subactor_name}})
+
+      self.mjson.append({"name": name, "ph": "X", "pid": self.actors[actor_name], "tid": self.subactors.get(subactor_key, -1), "ts":st, "dur":et-st})
+
+    ProfileLogger.writers -= 1
+    if ProfileLogger.writers == 0:
+      with open(self.path, "w") as f: f.write(json.dumps({"traceEvents": self.mjson}))
+      print(f"Saved profile to {self.path}. Use https://ui.perfetto.dev/ to open it.")
 
 # *** universal database cache ***
 
@@ -197,18 +230,21 @@ def diskcache(func):
 
 # *** http support ***
 
-def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, allow_caching=not getenv("DISABLE_HTTP_CACHE")) -> pathlib.Path:
+def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, subdir:Optional[str]=None,
+          allow_caching=not getenv("DISABLE_HTTP_CACHE")) -> pathlib.Path:
   if url.startswith(("/", ".")): return pathlib.Path(url)
-  fp = pathlib.Path(name) if name is not None and (isinstance(name, pathlib.Path) or '/' in name) else pathlib.Path(_cache_dir) / "tinygrad" / "downloads" / (name if name else hashlib.md5(url.encode('utf-8')).hexdigest())  # noqa: E501
+  if name is not None and (isinstance(name, pathlib.Path) or '/' in name): fp = pathlib.Path(name)
+  else: fp = pathlib.Path(_cache_dir) / "tinygrad" / "downloads" / (subdir or "") / (name if name else hashlib.md5(url.encode('utf-8')).hexdigest())
   if not fp.is_file() or not allow_caching:
     with urllib.request.urlopen(url, timeout=10) as r:
       assert r.status == 200
       total_length = int(r.headers.get('content-length', 0))
-      progress_bar = tqdm(total=total_length, unit='B', unit_scale=True, desc=url)
+      progress_bar = tqdm(total=total_length, unit='B', unit_scale=True, desc=f"{url}: ")
       (path := fp.parent).mkdir(parents=True, exist_ok=True)
       with tempfile.NamedTemporaryFile(dir=path, delete=False) as f:
         while chunk := r.read(16384): progress_bar.update(f.write(chunk))
         f.close()
+        progress_bar.update(close=True)
         if (file_size:=os.stat(f.name).st_size) < total_length: raise RuntimeError(f"fetch size incomplete, {file_size} < {total_length}")
         pathlib.Path(f.name).rename(fp)
   return fp
@@ -231,6 +267,7 @@ def cpu_objdump(lib):
 def from_mv(mv:memoryview, to_type=ctypes.c_char):
   return ctypes.cast(ctypes.addressof(to_type.from_buffer(mv)), ctypes.POINTER(to_type * len(mv))).contents
 def to_mv(ptr, sz) -> memoryview: return memoryview(ctypes.cast(ptr, ctypes.POINTER(ctypes.c_uint8 * sz)).contents).cast("B")
+def mv_address(mv:memoryview): return ctypes.addressof(ctypes.c_char.from_buffer(mv))
 def to_char_p_p(options: List[bytes], to_type=ctypes.c_char): return (ctypes.POINTER(to_type) * len(options))(*[ctypes.cast(ctypes.create_string_buffer(o), ctypes.POINTER(to_type)) for o in options])  # noqa: E501
 @functools.lru_cache(maxsize=None)
 def init_c_struct_t(fields: Tuple[Tuple[str, ctypes._SimpleCData], ...]):
@@ -239,3 +276,35 @@ def init_c_struct_t(fields: Tuple[Tuple[str, ctypes._SimpleCData], ...]):
   return CStruct
 def init_c_var(ctypes_var, creat_cb): return (creat_cb(ctypes_var), ctypes_var)[1]
 def flat_mv(mv:memoryview): return mv if len(mv) == 0 else mv.cast("B", shape=(mv.nbytes,))
+
+class tqdm:
+  def __init__(self, iterable=None, desc:str='', disable:bool=False, unit:str='it', unit_scale=False, total:int=-1, rate:int=100):
+    self.iter, self.desc, self.dis, self.unit, self.unit_scale, self.rate = iterable, f"{desc}: " if desc else "", disable, unit, unit_scale, rate
+    self.st, self.i, self.n, self.skip, self.t = time.perf_counter(), -1, 0, 1, len(iterable) if total==-1 else total
+    self.update(0)
+  def __iter__(self):
+    try:
+      for item in self.iter:
+        yield item
+        self.update(1)
+    finally: self.update(close=True)
+  def set_description(self, desc:str): self.desc = f"{desc}: " if desc else ""
+  def update(self, n:int=0, close:bool=False):
+    self.n, self.i = self.n+n, self.i+1
+    if (self.i % self.skip != 0 and not close) or self.dis: return
+    prog, dur, term = self.n/self.t if self.t else -1, time.perf_counter()-self.st, shutil.get_terminal_size().columns
+    if self.i/dur > self.rate and self.i: self.skip = max(int(self.i/dur)//self.rate,1) if self.i else 1
+    def fmt(t): return ':'.join([f'{x:02d}' for x in divmod(int(t), 60)]) if t!=-1 else '?'
+    def scl(x): return x/1000**int(math.log(x,1000))
+    def fn(x): return (f"{scl(x):.{3-math.ceil(math.log10(scl(x)))}f}"[:4]+(f"{[' ','k','M','G','T','P'][int(math.log(x,1000))]}") if x else '0.00')
+    if self.t: unit_text = f"{fn(self.n)}/{fn(self.t)}" if self.unit_scale else f"{self.n}/{self.t}"
+    else: unit_text = f"{fn(self.n)}{self.unit}" if self.unit_scale else f"{self.n}{self.unit}"
+    it_text = f"{fn(self.n/dur)}" if self.n and self.unit_scale else f"{self.n/dur:5.2f}" if self.n else "?"
+    if self.t: suf = f'| {unit_text} [{fmt(dur)}<{fmt(dur/self.n*self.t-dur if self.n else -1)}, {it_text}{self.unit}/s]'
+    else: suf = f'{unit_text} [{fmt(dur)}, {it_text}{self.unit}/s]'
+    sz = max(term-5-len(suf)-len(self.desc), 1)
+    bar = f'\r{self.desc}{round(100*prog):3}%|{"█"*round(sz*prog)}{" "*(sz-round(sz*prog))}{suf}' if self.t else f'\r{self.desc}{suf}{" "*term}'
+    print(bar[:term+1],flush=True,end='\n'*close,file=sys.stderr)
+
+class trange(tqdm):
+  def __init__(self, n:int, **kwargs): super().__init__(iterable=range(n), total=n, **kwargs)

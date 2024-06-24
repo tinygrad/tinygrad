@@ -17,7 +17,8 @@ if __name__ == "__main__":
     with Timing("***** model schedule in "):
       sched = out.schedule()
 
-  with Profiling(PROFILE):
+  # snakeviz /tmp/schedule.prof
+  with Profiling(PROFILE, fn="/tmp/schedule.prof"):
     with Timing("***** model lower in "):
       eis = list(lower_schedule(sched))
 

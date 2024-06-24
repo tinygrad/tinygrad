@@ -8,7 +8,7 @@ from tinygrad.device import Device, Buffer
 from tinygrad.ops import LazyOp, LoadOps, BufferOps, ReduceOps, BinaryOps, MemBuffer, ConstBuffer
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import Context, GlobalCounters, getenv
+from tinygrad.helpers import Context, GlobalCounters
 from tinygrad.engine.realize import capturing
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
@@ -19,7 +19,7 @@ class TestTimeLinearizer(unittest.TestCase):
     out = Buffer(Device.DEFAULT, si.outputs[0].size, si.outputs[0].dtype).allocate()
     memops = {x.arg.idx:x.arg.st.real_size() for x in si.ast[0].lazyops if x.op is BufferOps.LOAD}
     rawbufs = [out] + [Buffer(Device.DEFAULT, memops[i], x.dtype).allocate() for i,x in enumerate(si.inputs, start=len(si.outputs))]
-    tm = time_linearizer(Linearizer(*si.ast), rawbufs, allow_test_size=False, cnt=10)
+    tm = time_linearizer(Linearizer(*si.ast), rawbufs, allow_test_size=False, cnt=10, disable_cache=True)
     assert tm > 0 and tm != float('inf')
 
   def test_bufs_from_lin(self):
@@ -43,7 +43,6 @@ class TestTimeLinearizer(unittest.TestCase):
     time_linearizer(lin, bufs, allow_test_size=False, cnt=2, disable_cache=True, clear_l2=True)
     assert GlobalCounters.kernel_count == kernel_count, "kernel count was incremented by time_linearizer"
 
-@unittest.skipIf(getenv("RUN_PROCESS_REPLAY"), "TODO: run process replay for BEAM=2")
 class TestBEAM(unittest.TestCase):
   def test_dynamic_beam(self):
     # TODO: make this infra globally usable
@@ -64,7 +63,7 @@ class TestBEAM(unittest.TestCase):
     assert GlobalCounters.kernel_count == kernel_count + 1
     k_beam_0 = capturing[0].captured
     capturing.clear()
-    assert k_beam_0[-1].prg.p.src != k_beam_1[-1].prg.p.src
+    self.assertNotEqual(k_beam_0[-1].prg.p.src, k_beam_1[-1].prg.p.src)
 
   def test_get_linearizer_actions(self):
     from test.test_linearizer import helper_realized_ast
@@ -72,7 +71,7 @@ class TestBEAM(unittest.TestCase):
     b = Tensor.rand(3)
     realized_ast, _ = helper_realized_ast(a @ b)
     from tinygrad.engine.search import get_linearizer_actions
-    lins = get_linearizer_actions(Linearizer(realized_ast), False).values()
+    lins = get_linearizer_actions(Linearizer(*realized_ast), False).values()
 
     # ensure amt=0 are not duplicated
     if Opt(OptOps.UPCAST, 0, 0) in actions:

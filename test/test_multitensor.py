@@ -1,13 +1,12 @@
 import unittest, functools, random
 from typing import List
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes
-from tinygrad.ops import LoadOps, ReduceOps
+from tinygrad.ops import LoadOps, ReduceOps, BufferOps, BinaryOps
 from tinygrad.helpers import CI, getenv, prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import lower_schedule, BufferCopy, CompiledRunner
 from tinygrad.multi import all_reduce, MultiLazyBuffer
-from random import randint
 import numpy as np
 from hypothesis import given, strategies as strat, settings
 from test.helpers import is_dtype_supported
@@ -15,11 +14,15 @@ from test.helpers import is_dtype_supported
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
 
-d_zero = f"{Device.DEFAULT}:0"
-d0, d1 = f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2"
-d2, d3 = f"{Device.DEFAULT}:3", f"{Device.DEFAULT}:4"
-devices_2 = (d0, d1)
-devices_3 = (d0, d1, d2)
+d0 = f"{Device.DEFAULT}:0"
+d1 = f"{Device.DEFAULT}:1"
+d2 = f"{Device.DEFAULT}:2"
+d3 = f"{Device.DEFAULT}:3"
+d4 = f"{Device.DEFAULT}:4"
+d5 = f"{Device.DEFAULT}:5"
+devices_2 = (d1, d2)
+devices_3 = (d1, d2, d3)
+devices_4 = (d1, d2, d3, d4)
 N = 128
 
 # shard_x is "data parallel"
@@ -27,30 +30,35 @@ N = 128
 
 def _test_allreduce(t:Tensor):
   aa = (t[0:64] + t[64:128] + t[128:192] + t[192:256]).repeat([4,1]).realize()
-  ts = t.shard(tuple([d0, d1, d2, d3]), 0).realize()
+  ts = t.shard(devices_4, 0).realize()
   b = Tensor(MultiLazyBuffer(all_reduce(ReduceOps.SUM, ts.lazydata.lbs), 0))
   b.realize()
   return aa, b
 
-@unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
+@unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"), "no GPU CI")
 class TestMultiTensor(unittest.TestCase):
   def test_to(self):
     X = Tensor.ones(256).contiguous().realize()
-    X.to_((d0, d1))
+    X.to_(devices_2)
     for lb in X.lazydata.lbs:
       assert lb.shape == (256,)
     (X + X).realize()
 
   def test_shard(self):
     X = Tensor.ones(256).contiguous().realize()
-    X.shard_((d0, d1), 0)
+    X.shard_(devices_2, 0)
     for lb in X.lazydata.lbs:
       assert lb.shape == (128,)
     (X + X).realize()
 
+  def test_sharded_arange(self):
+    sharded_arange = Tensor.arange(1000).shard(devices_2, 0)
+    sharded_arange.realize()
+    np.testing.assert_equal(sharded_arange.numpy(), np.arange(1000))
+
   def test_shard_no_recompile(self):
     X = Tensor.ones(256).contiguous().realize()
-    X.shard_((d0, d1), 0)
+    X.shard_(devices_2, 0)
     out = (X + X)
     sched = create_schedule(out.lazydata.lbs)
     names = []
@@ -61,56 +69,56 @@ class TestMultiTensor(unittest.TestCase):
 
   def test_sharded_memory(self):
     # Buffer may be stuck in track_cross_buffer
-    for x in (d_zero, d0, d1, d2, d3): Device[x].synchronize()
+    for x in (d0, d1, d2, d3, d4): Device[x].synchronize()
     mem_base = GlobalCounters.mem_used
 
     X = Tensor.ones(256).contiguous().realize()
     assert GlobalCounters.mem_used-mem_base== X.dtype.itemsize * 256, GlobalCounters.mem_used-mem_base
-    X.shard_((d0, d1, d2, d3)).realize()
-    for x in (d_zero, d0, d1, d2, d3): Device[x].synchronize()
+    X.shard_(devices_4).realize()
+    for x in (d0, d1, d2, d3, d4): Device[x].synchronize()
     assert GlobalCounters.mem_used-mem_base == X.dtype.itemsize * 256 * 4, GlobalCounters.mem_used-mem_base
 
     X = Tensor.ones(256).contiguous().realize()
     assert GlobalCounters.mem_used-mem_base == X.dtype.itemsize * 256, GlobalCounters.mem_used-mem_base
-    X.shard_((d0, d1, d2, d3), axis=0).realize()
-    for x in (d_zero, d0, d1, d2, d3): Device[x].synchronize()
+    X.shard_(devices_4, axis=0).realize()
+    for x in (d0, d1, d2, d3, d4): Device[x].synchronize()
     assert GlobalCounters.mem_used-mem_base == X.dtype.itemsize * 256, GlobalCounters.mem_used-mem_base
 
     X = Tensor.ones(256).realize()
     assert GlobalCounters.mem_used-mem_base == 0
-    X.shard_((d0, d1, d2, d3)).realize()
+    X.shard_(devices_4).realize()
     assert GlobalCounters.mem_used-mem_base == 0
 
     X = Tensor.ones(256).realize()
     assert GlobalCounters.mem_used-mem_base == 0
-    X.shard_((d0, d1, d2, d3), axis=0).realize()
+    X.shard_(devices_4, axis=0).realize()
     assert GlobalCounters.mem_used-mem_base == 0
 
   def test_shard_same_device(self):
     X = Tensor.ones(256).contiguous().realize()
-    X.shard_((d0, X.device), 0)
+    X.shard_((d1, X.device), 0)
     (X + X).realize()
 
   def test_shard_plus_one_sum(self):
     X = Tensor.ones(256).contiguous().realize()
-    X.shard_([d0, d1], 0)
+    X.shard_((d1, d2), 0)
     (X + 1).sum().realize()
 
-  def test_shard_plus_one_sum_d_zero(self):
+  def test_shard_plus_one_sum_d0(self):
     X = Tensor.ones(256).contiguous().realize()
-    X.shard_([d_zero, d1], 0)
+    X.shard_((d0, d2), 0)
     (X + 1).sum().realize()
 
   def test_numpy(self):
     X = Tensor.ones(256)
-    X.shard_((d0, d1), 0)
+    X.shard_((d1, d2), 0)
     np.testing.assert_allclose(X.numpy(), 1)
 
   def _test_simple_add_axis(self, shard_x, shard_w):
     X = Tensor.ones(256).contiguous().realize()
     W = Tensor.ones(256).contiguous().realize()
-    X.shard_((d0, d1), shard_x)
-    W.shard_((d0, d1), shard_w)
+    X.shard_((d1, d2), shard_x)
+    W.shard_((d1, d2), shard_w)
     O = X + W
     np.testing.assert_allclose(O.numpy(), 2)
 
@@ -122,8 +130,8 @@ class TestMultiTensor(unittest.TestCase):
   def test_four_add(self):
     X = Tensor.ones(256, 256).contiguous().realize()
     W = Tensor.ones(256, 256).contiguous().realize()
-    X.shard_((d0, d1, d2, d3), 1)
-    W.shard_((d0, d1, d2, d3), None)
+    X.shard_(devices_4, 1)
+    W.shard_(devices_4, None)
     O = X + W
     np.testing.assert_allclose(O.numpy(), 2)
 
@@ -148,7 +156,7 @@ class TestMultiTensor(unittest.TestCase):
       a,b = _test_allreduce(Tensor.rand(256, 256))
       np.testing.assert_almost_equal(a.numpy(), b.numpy(), decimal=5)
 
-  @unittest.skipIf(Device.DEFAULT in {"NV", "AMD"}, "not supported in HCQ #4817")
+  @unittest.skipIf(Device.DEFAULT in ("NV", "AMD"), "not supported in HCQ #4817")
   def test_copy_jit(self):
     @TinyJit
     def copy_tensor(x:Tensor): return (x.to(f"{x.device.split(':')[0]}:1") + 1)
@@ -157,7 +165,7 @@ class TestMultiTensor(unittest.TestCase):
       x = copy_tensor(t)
       np.testing.assert_equal((t+1).numpy(), x.numpy())
 
-  @unittest.skipIf(Device.DEFAULT in {"NV", "AMD"}, "not supported in HCQ #4817")
+  @unittest.skipIf(Device.DEFAULT in ("NV", "AMD"), "not supported in HCQ #4817")
   def test_allreduce_naive_jit(self):
     with Context(RING=0):
       jit_allreduce = TinyJit(_test_allreduce)
@@ -165,7 +173,7 @@ class TestMultiTensor(unittest.TestCase):
         a,b = jit_allreduce(Tensor.rand(256, 256))
         np.testing.assert_almost_equal(a.numpy(), b.numpy(), decimal=5)
 
-  @unittest.skipIf(Device.DEFAULT in {"NV", "AMD"}, "not supported in HCQ #4817")
+  @unittest.skipIf(Device.DEFAULT in ("NV", "AMD"), "not supported in HCQ #4817")
   def test_allreduce_ring_jit(self):
     with Context(RING=2):
       jit_allreduce = TinyJit(_test_allreduce)
@@ -178,7 +186,8 @@ class TestMultiTensor(unittest.TestCase):
     random.seed(41)
     for it in range(100):
       for n in range(2, 4+1):
-        t = Tensor.rand(tuple([(n if i == 0 else 1) * randint(1, 10) for i in range(randint(1, 4))])).shard_(tuple([d0, d1, d2, d3][:n]), 0)
+        shape = tuple([(n if i == 0 else 1) * random.randint(1, 10) for i in range(random.randint(1, 4))])
+        t = Tensor.rand(shape).shard_(tuple([d0, d1, d2, d3][:n]), 0)
         with Context(RING=0):
           a = Tensor(MultiLazyBuffer(all_reduce(ReduceOps.SUM, t.lazydata.lbs), 0))
         with Context(RING=2):
@@ -225,24 +234,24 @@ class TestMultiTensor(unittest.TestCase):
 
   def test_conv_data_shard(self):
     conv = nn.Conv2d(3, 16, 3, bias=False)
-    for p in get_parameters(conv): p.shard_((d0, d1))
-    fake_image = Tensor.rand((2, 3, 32, 32)).shard((d0, d1), axis=0)
+    for p in get_parameters(conv): p.shard_(devices_2)
+    fake_image = Tensor.rand((2, 3, 32, 32)).shard(devices_2, axis=0)
     out = conv(fake_image)
     out.numpy()
 
   def test_conv_bias_data_shard(self):
     conv = nn.Conv2d(3, 16, 3)
-    for p in get_parameters(conv): p.shard_((d0, d1))
-    fake_image = Tensor.rand((2, 3, 32, 32)).shard((d0, d1), axis=0)
+    for p in get_parameters(conv): p.shard_(devices_2)
+    fake_image = Tensor.rand((2, 3, 32, 32)).shard(devices_2, axis=0)
     out = conv(fake_image)
     out.numpy()
 
   def test_backprop_conv(self):
     with Tensor.train():
       conv = nn.Conv2d(3, 16, 3)
-      for p in get_parameters(conv): p.shard_((d0, d1))
+      for p in get_parameters(conv): p.shard_(devices_2)
       optim = nn.optim.Adam(get_parameters(conv))
-      fake_image = Tensor.rand((2, 3, 32, 32)).shard((d0, d1), axis=0)
+      fake_image = Tensor.rand((2, 3, 32, 32)).shard(devices_2, axis=0)
       out = conv(fake_image)
       optim.zero_grad()
       out.mean().backward()
@@ -253,7 +262,7 @@ class TestMultiTensor(unittest.TestCase):
   def test_lr_scheduler_OneCycleLR(self):
     from extra.lr_scheduler import OneCycleLR
     conv = nn.Conv2d(3, 16, 3)
-    for p in get_parameters(conv): p.shard_((d0, d1))
+    for p in get_parameters(conv): p.shard_(devices_2)
     optim = nn.optim.SGD(get_parameters(conv))
     lr_sched = OneCycleLR(optim, max_lr=0.1, pct_start=0.1, div_factor=100, final_div_factor=0.1, total_steps=10)
     lr_sched.step()
@@ -266,8 +275,8 @@ class TestMultiTensor(unittest.TestCase):
     z = layer(x)
 
     layer_sharded = nn.Embedding(vocab_size, embed_size)
-    layer_sharded.weight.replace(layer.weight.shard((d0, d1), axis=1)).realize()
-    x_sharded = x.shard((d0, d1), axis=None)
+    layer_sharded.weight.replace(layer.weight.shard(devices_2, axis=1)).realize()
+    x_sharded = x.shard(devices_2, axis=None)
     z_shard = layer_sharded(x_sharded)
 
     np.testing.assert_allclose(z.numpy(), z_shard.numpy(), atol=1e-6, rtol=1e-6)
@@ -282,32 +291,32 @@ class TestMultiTensor(unittest.TestCase):
 
     # for norm layers, the correct way to shard weights is duplication
     layer_norm_sharded = RMSNorm(embed_size)
-    layer_norm_sharded.weight.shard_((d0, d1), axis=None).realize()
+    layer_norm_sharded.weight.shard_(devices_2, axis=None).realize()
 
     # if x is being sharded, then all-reduce is involved
-    x_sharded = x.shard((d0, d1), axis=2).realize()
+    x_sharded = x.shard(devices_2, axis=2).realize()
     y_shard = layer_norm_sharded(x_sharded).realize()
     np.testing.assert_allclose(y.numpy(), y_shard.numpy(), atol=1e-6, rtol=1e-6)
 
     # if x is being duplicated, then the operations remain inside each GPU
     # which is the common case
-    x_sharded = x.shard((d0, d1), axis=None).realize()
+    x_sharded = x.shard(devices_2, axis=None).realize()
     y_shard = layer_norm_sharded(x_sharded).realize()
     np.testing.assert_allclose(y.numpy(), y_shard.numpy(), atol=1e-6, rtol=1e-6)
 
   # NOTE: this is failing on LLVM CI, no idea why. Works locally.
-  @unittest.skipIf(CI and Device.DEFAULT in {"CUDA", "NV", "LLVM"}, "slow")
+  @unittest.skipIf(CI and Device.DEFAULT in ("CUDA", "NV", "LLVM"), "slow")
   def test_data_parallel_resnet(self):
     import sys, pathlib
     sys.path.append((pathlib.Path(__file__).parent.parent / "extra" / "models").as_posix())
     from resnet import ResNet18
 
     fake_image = Tensor.rand((2, 3, 224, 224))
-    fake_image_sharded = fake_image.shard((d0, d1), axis=0)
+    fake_image_sharded = fake_image.shard(devices_2, axis=0)
     m = ResNet18()
     m.load_from_pretrained()
     real_output = m(fake_image).log_softmax().numpy()
-    for p in get_parameters(m): p.shard_((d0, d1)).realize()
+    for p in get_parameters(m): p.shard_(devices_2).realize()
     GlobalCounters.reset()
     shard_output = m(fake_image_sharded).log_softmax().realize()
     assert shard_output.lazydata.lbs[0].shape == (1, 1000)
@@ -315,7 +324,7 @@ class TestMultiTensor(unittest.TestCase):
     shard_output_np = shard_output.numpy()
     np.testing.assert_allclose(real_output, shard_output_np, atol=1e-6, rtol=1e-6)
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"CUDA", "NV"}, "slow")
+  @unittest.skipIf(CI and Device.DEFAULT in ("CUDA", "NV"), "slow")
   def test_data_parallel_resnet_train_step(self):
     import sys, pathlib
     sys.path.append((pathlib.Path(__file__).parent.parent / "extra" / "models").as_posix())
@@ -323,9 +332,9 @@ class TestMultiTensor(unittest.TestCase):
     from tinygrad.nn.optim import LARS
 
     fake_image = Tensor.rand((2, 3, 224, 224))
-    fake_image_sharded = fake_image.shard((d0, d1), axis=0)
+    fake_image_sharded = fake_image.shard(devices_2, axis=0)
     labels = Tensor.randint(2, low=0, high=1000)
-    labels_sharded = labels.shard((d0, d1), axis=0)
+    labels_sharded = labels.shard(devices_2, axis=0)
 
     m = ResNet18()
     optimizer = LARS(get_parameters(m), 0.1)  # set requires_grad for all params
@@ -336,7 +345,7 @@ class TestMultiTensor(unittest.TestCase):
     output.backward()
     grad = m.conv1.weight.grad.numpy()
 
-    for p in get_parameters(m): p.shard_((d0, d1)).realize()
+    for p in get_parameters(m): p.shard_(devices_2).realize()
     GlobalCounters.reset()
     optimizer.zero_grad()
     shard_output = m(fake_image_sharded).sparse_categorical_crossentropy(labels_sharded, label_smoothing=0.1)
@@ -354,8 +363,8 @@ class TestMultiTensor(unittest.TestCase):
     for _ in range(5):
       a = Tensor.ones(256).contiguous().realize()
       b = Tensor.ones(256).contiguous().realize()
-      a.shard_((d0, d1))
-      b.shard_((d0, d1))
+      a.shard_(devices_2)
+      b.shard_(devices_2)
       c = jf(a, b)
       np.testing.assert_allclose(c.numpy(), a.numpy()+b.numpy(), atol=1e-4, rtol=1e-5)
     assert len(jf.jit_cache) > 0
@@ -365,8 +374,8 @@ class TestMultiTensor(unittest.TestCase):
     def jf() -> Tensor:
       a = Tensor.ones(256).contiguous().realize()
       b = Tensor.ones(256).contiguous().realize()
-      a.shard_((d0, d1))
-      b.shard_((d0, d1))
+      a.shard_(devices_2)
+      b.shard_(devices_2)
       return (a + b).realize()
 
     for _ in range(5):
@@ -424,15 +433,22 @@ class TestMultiTensor(unittest.TestCase):
       np.testing.assert_equal(X.expand((4, 4, 257)).numpy(), np.tile(n, (1, 4, 1)))
       np.testing.assert_equal(X.permute((0, 2, 1)).numpy(), np.transpose(n, (0, 2, 1)))
 
+  def test_uneven_multiple_zeros(self):
+    for data in ([1, 2, 3, 4], [1, 2, 3], [1, 2], [1], []):
+      for N in (1, 2, 3, 4):
+        devices = tuple(f"{Device.DEFAULT}:{i}" for i in range(N))
+        # make sure something is computed on each device
+        X = ((Tensor(data).shard(devices, axis=0) + 1).realize() - 1).realize()
+        np.testing.assert_equal(X.numpy(), data)
+
   def test_bn_ast_on_devices(self):
-    devices = (d0, d1, d2, d3)
-    t = Tensor.empty((16, 64, 112, 112)).shard(devices, axis=0)
+    t = Tensor.empty((16, 64, 112, 112)).shard(devices_4, axis=0)
     bn = nn.BatchNorm2d(64)
-    for p in get_parameters(bn): p.shard_(devices).realize()
+    for p in get_parameters(bn): p.shard_(devices_4).realize()
 
     out = bn(t)
-    scheds = [sched for sched in create_schedule(out.lazydata.lbs) if sched.outputs[0].device in devices and sched.ast[0].op is not LoadOps.COPY]
-    assert set(out.device for sched in scheds for out in sched.outputs) == set(devices), "should have ast on each shard device"
+    scheds = [sched for sched in create_schedule(out.lazydata.lbs) if sched.outputs[0].device in devices_4 and sched.ast[0].op is not LoadOps.COPY]
+    assert set(out.device for sched in scheds for out in sched.outputs) == set(devices_4), "should have ast on each shard device"
     asts = [sched.ast for sched in scheds]
     assert len(asts)
     # test case to show that ast can be different on devices
@@ -442,9 +458,7 @@ class TestMultiTensor(unittest.TestCase):
     #   print(f"{i} {ast}")
 
   def test_reshape_on_axis(self):
-    devices = (d0, d1, d2)
-
-    t0 = Tensor.rand((26, 15, 7)).shard(devices, axis=1)
+    t0 = Tensor.rand((26, 15, 7)).shard(devices_3, axis=1)
 
     # test split and rejoin to the right
     t1 = t0.reshape((26, 3, 5, 7))
@@ -477,8 +491,7 @@ class TestMultiTensor(unittest.TestCase):
       t0.reshape((26*15,7))
 
   def test_reshape_on_axis_uneven(self):
-    devices = (d0, d1, d2)
-    t0 = Tensor.rand((4, 8, 15)).shard(devices, axis=1)
+    t0 = Tensor.rand((4, 8, 15)).shard(devices_3, axis=1)
 
     # no split axis if uneven
     with self.assertRaises((AssertionError, ValueError)):
@@ -490,22 +503,69 @@ class TestMultiTensor(unittest.TestCase):
     assert t1.lazydata.axis == 2
 
   def test_mlb_assign_change_axis(self):
-    devices = (d0, d1)
-
-    t_none = Tensor.zeros((16, 16)).shard(devices).contiguous().realize()
-    t_zero = Tensor.ones((16, 16)).shard(devices, axis=0)
+    t_none = Tensor.zeros((16, 16)).shard(devices_2).contiguous().realize()
+    t_zero = Tensor.ones((16, 16)).shard(devices_2, axis=0)
     with self.assertRaises(AssertionError):
       # don't allow assigns that change axes
       t_none.assign(t_zero)
 
   def test_dropout_on_shard(self):
-    Tensor.training = True
-    X = Tensor.ones(256).to(devices_2)
-    output = X.dropout(0.5)
-    output.numpy()
-    Tensor.training = False
+    with Tensor.train():
+      X = Tensor.ones(256).to(devices_2)
+      output = X.dropout(0.5).numpy()
+      unique, counts = np.unique(output, return_counts=True)
+      assert set(unique) == {0, 2}, unique
+      assert 100 < counts[0] < 156, counts[0]
 
-@unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
+  def test_broadcast_const(self):
+    for axis in (None, 0, 1):
+      t = Tensor.zeros(16, 16).contiguous().shard(devices_4, axis).realize()
+      t = t + 1
+      for si in t.schedule():
+        ast = si.ast[0]
+        assert ast.op is BufferOps.STORE
+        assert ast.src[0].op is BinaryOps.ADD
+        assert ast.src[0].src[0].op is BufferOps.LOAD and ast.src[0].src[0]
+        assert ast.src[0].src[1].op is BufferOps.CONST and ast.src[0].src[1].arg.val == 1
+      t = 2 * t
+      for si in t.schedule():
+        ast = si.ast[0]
+        assert ast.op is BufferOps.STORE
+        assert ast.src[0].op is BinaryOps.MUL
+        assert ast.src[0].src[0].op is BufferOps.CONST and ast.src[0].src[0].arg.val == 2
+        assert ast.src[0].src[1].op is BufferOps.LOAD
+      t = t + t.full_like(3)
+      for si in t.schedule():
+        ast = si.ast[0]
+        assert ast.op is BufferOps.STORE
+        assert ast.src[0].op is BinaryOps.ADD
+        assert ast.src[0].src[0].op is BufferOps.LOAD
+        assert ast.src[0].src[1].op is BufferOps.CONST and ast.src[0].src[1].arg.val == 3
+
+@unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"), "no GPU CI")
+class TestHandleData(unittest.TestCase):
+  def test_copied_to_device(self):
+    device = (d0, d1, d2, d3)
+    t = Tensor([1, 2, 3, 4]).shard(device).realize()
+    not_covered = t.to(d5)
+    sched = create_schedule([not_covered.lazydata])
+    assert len(sched) == 1
+    # setup again because create_schedule has side effect
+    t = Tensor([1, 2, 3, 4]).shard(device).realize()
+    not_covered = t.to(d5)
+    assert not_covered.realize().tolist() == [1, 2, 3, 4]
+
+    for d in device:
+      t = Tensor([1, 2, 3, 4]).shard(device).realize()
+      covered = t.to(d)
+      sched = create_schedule([covered.lazydata])
+      assert len(sched) == 0
+      # setup again because create_schedule has side effect
+      t = Tensor([1, 2, 3, 4]).shard(device).realize()
+      covered = t.to(d)
+      assert covered.realize().tolist() == [1, 2, 3, 4]
+
+@unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"), "no GPU CI")
 class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
   # shrink a multitensor on sharded axis
   def test_shrink_bad_args(self):
@@ -633,6 +693,8 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
     expected = np.arange(64).reshape((8,8)) + np.array([[0,0,1,1,2,2,3,3] for _ in range(8)]).T
     np.testing.assert_allclose(output.numpy(), expected)
 
+@unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"), "no GPU CI")
+class TestBatchNorm(unittest.TestCase):
   def test_unsynced_backprop_conv_bn(self):
     with Tensor.train():
       from extra.lr_scheduler import OneCycleLR

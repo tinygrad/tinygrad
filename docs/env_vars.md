@@ -33,7 +33,8 @@ Variable | Possible Value(s) | Description
 DEBUG               | [1-6]      | enable debugging output, with 4 you get operations, timings, speed, generated code and more
 GPU                 | [1]        | enable the GPU backend
 CUDA                | [1]        | enable CUDA backend
-HSA                 | [1]        | enable HSA backend
+AMD                 | [1]        | enable AMD backend
+NV                  | [1]        | enable NV backend
 METAL               | [1]        | enable Metal backend (for Mac M1 and after)
 METAL_XCODE         | [1]        | enable Metal using macOS Xcode SDK
 CLANG               | [1]        | enable Clang backend
@@ -46,3 +47,4 @@ DEFAULT_FLOAT       | [HALF, ...]| specify the default float dtype (FLOAT32, HAL
 IMAGE               | [1-2]      | enable 2d specific optimizations
 FLOAT16             | [1]        | use float16 for images instead of float32
 PTX                 | [1]        | enable the specialized [PTX](https://docs.nvidia.com/cuda/parallel-thread-execution/) assembler for Nvidia GPUs. If not set, defaults to generic CUDA codegen backend.
+PROFILE             | [1]        | enable output of [perfetto](https://ui.perfetto.dev/) compatible profile. This feature is supported in NV and AMD backends.

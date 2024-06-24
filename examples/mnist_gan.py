@@ -1,11 +1,10 @@
 from pathlib import Path
 import numpy as np
-from tqdm import trange
 import torch
 from torchvision.utils import make_grid, save_image
 from tinygrad.nn.state import get_parameters
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import getenv
+from tinygrad.helpers import trange
 from tinygrad.nn import optim
 from extra.datasets import fetch_mnist
 

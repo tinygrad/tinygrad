@@ -2,9 +2,9 @@ from __future__ import annotations
 import multiprocessing
 from dataclasses import dataclass
 from collections import defaultdict
-from typing import List, Optional, Dict, Tuple, Any
-import importlib, inspect, functools, pathlib, os, ctypes
-from tinygrad.helpers import getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv
+from typing import List, Optional, Dict, Tuple, Any, cast
+import importlib, inspect, functools, pathlib, os, ctypes, atexit, time, contextlib
+from tinygrad.helpers import getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, ProfileLogger, PROFILE
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.renderer import Renderer
 
@@ -19,16 +19,17 @@ class _Device:
   def __getitem__(self, ix:str) -> Compiled: return self.__get_canonicalized_item(self.canonicalize(ix))
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def __get_canonicalized_item(self, ix:str) -> Compiled:
-    if DEBUG >= 1: print(f"opening device {ix} from pid:{os.getpid()}")
     assert ((cpn:=multiprocessing.current_process().name) == "MainProcess") or ix.split(":")[0] in ["DISK", "NPY"], \
       f"can only open device {ix} from parent, not {cpn}"
     x = ix.split(":")[0].upper()
-    return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._devices][0](ix)  # noqa: E501
+    ret = [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._devices][0](ix)  # noqa: E501
+    if DEBUG >= 1: print(f"opened device {ix} from pid:{os.getpid()}")
+    return ret
   @functools.cached_property
   def DEFAULT(self) -> str:
     device_from_env: Optional[str] = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._devices, None)   # type: ignore
     if device_from_env: return device_from_env
-    for device in ["METAL", "HSA", "CUDA", "GPU", "CLANG", "LLVM"]:
+    for device in ["METAL", "AMD", "CUDA", "GPU", "CLANG", "LLVM"]:
       try:
         if self[device]:
           os.environ[device] = "1"   # we set this in environment for spawned children
@@ -182,3 +183,133 @@ class Compiled:
     self.dname, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler if compiler else Compiler(), runtime, graph
     self.renderer = renderer if renderer else Renderer()
   def synchronize(self): pass  # override this in your device
+
+# **************** for HCQ Compatible Devices ****************
+
+@contextlib.contextmanager
+def hcq_profile(dev, queue_type, enabled, desc):
+  st, en = (dev._get_signal(), dev._get_signal()) if enabled else (None, None)
+  if enabled: queue_type().timestamp(st).submit(dev)
+  try: yield (st, en)
+  finally:
+    if enabled: queue_type().timestamp(en).submit(dev)
+    if enabled and PROFILE: dev.sig_prof_records.append((st, en, desc, queue_type is dev.hw_copy_queue_t))
+
+class HCQCompatCompiled(Compiled):
+  def __init__(self, device:str, allocator:Allocator, renderer:Renderer, compiler:Compiler, runtime, comp_queue_t, copy_queue_t, timeline_signals):
+    self.hw_compute_queue_t, self.hw_copy_queue_t = comp_queue_t, copy_queue_t
+    self.timeline_value: int = 1
+    self.timeline_signal, self._shadow_timeline_signal = timeline_signals
+    self.sig_prof_records: List[Tuple[Any, Any, str, bool]] = []
+    self.raw_prof_records: List[Tuple[int, int, str, bool]] = []
+    if PROFILE: self._prof_setup()
+
+    from tinygrad.runtime.graph.hcq import HCQGraph
+    super().__init__(device, allocator, renderer, compiler, runtime, HCQGraph)
+
+  @classmethod
+  def _read_signal(self, sig): raise NotImplementedError("need _read_signal") # reads a value for a signal
+
+  @classmethod
+  def _read_timestamp(self, sig): raise NotImplementedError("need _read_timestamp") # reads a timestamp for a signal
+
+  @classmethod
+  def _set_signal(self, sig, value): raise NotImplementedError("need _set_signal") # sets a value for a signal
+
+  @classmethod
+  def _get_signal(self, value=0, **kwargs): raise NotImplementedError("need _get_signal") # allocates a new signal
+
+  @classmethod
+  def _wait_signal(self, signal, value=0, timeout=10000): raise NotImplementedError("need _wait_signal") # waits for a signal value
+
+  def _gpu2cpu_time(self, gpu_time, is_copy): raise NotImplementedError("need _gpu2cpu_time")
+
+  def _prof_setup(self):
+    self.profile_logger = ProfileLogger()
+
+    def _sync_queue(q_t):
+      q_t().timestamp(self.timeline_signal).signal(self.timeline_signal, self.timeline_value).submit(self)
+      self.timeline_value += 1
+      cpu_start_time = time.perf_counter_ns() / 1e3
+      self._wait_signal(self.timeline_signal, self.timeline_value - 1)
+      return cpu_start_time, self._read_timestamp(self.timeline_signal)
+    self.cpu_start_time, self.gpu_start_time = _sync_queue(self.hw_compute_queue_t)
+    self.copy_cpu_start_time, self.copy_gpu_start_time = _sync_queue(self.hw_copy_queue_t)
+
+    atexit.register(self._prof_finalize)
+
+  def _prof_process_events(self):
+    self.raw_prof_records += [(self._read_timestamp(st), self._read_timestamp(en), name, is_cp) for st, en, name, is_cp in self.sig_prof_records]
+    for st, en, _, _ in self.sig_prof_records: self.signals_pool += [st, en] # type: ignore
+    self.sig_prof_records = []
+
+  def _prof_finalize(self):
+    for st, en, name, is_cp in self.raw_prof_records:
+      self.profile_logger.events += [(name, self._gpu2cpu_time(st, is_cp), self._gpu2cpu_time(en, is_cp), self.dname, ["COMPUTE", "DMA"][is_cp])]
+    del self.profile_logger
+
+  def _wrap_timeline_signal(self):
+    self.timeline_signal, self._shadow_timeline_signal, self.timeline_value = self._shadow_timeline_signal, self.timeline_signal, 1
+    self._set_signal(self.timeline_signal, 0)
+    cast(HCQCompatAllocator, self.allocator).b_timeline = [0] * len(cast(HCQCompatAllocator, self.allocator).b)
+
+class HCQCompatAllocator(LRUAllocator): # pylint: disable=abstract-method
+  def __init__(self, device, batch_size=(2 << 20), batch_cnt=32):
+    self.device = device
+    self.b = [self._alloc(batch_size, BufferOptions(host=True)) for _ in range(batch_cnt)]
+    self.b_timeline, self.b_next = [0] * len(self.b), 0
+    super().__init__()
+
+  def copyin(self, dest, src: memoryview):
+    with hcq_profile(self.device, self.device.hw_copy_queue_t, desc=f"CPU -> {self.device.dname}", enabled=PROFILE):
+      for i in range(0, src.nbytes, self.b[0].size):
+        self.b_next = (self.b_next + 1) % len(self.b)
+        self.device._wait_signal(self.device.timeline_signal, self.b_timeline[self.b_next])
+        ctypes.memmove(self.b[self.b_next].va_addr, from_mv(src[i:]), lsize:=min(self.b[self.b_next].size, src.nbytes-i))
+        self.device.hw_copy_queue_t().wait(self.device.timeline_signal, self.device.timeline_value - 1) \
+                                     .copy(dest.va_addr+i, self.b[self.b_next].va_addr, lsize) \
+                                     .signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
+        self.b_timeline[self.b_next] = self.device.timeline_value
+        self.device.timeline_value += 1
+
+  def copy_from_disk(self, dest, src, size):
+    def _get_temp_buf():
+      # Check if the next buffer is safe to be used (its signal has passed) and reserve it.
+      if self.b_timeline[(self.b_next + 1) % len(self.b)] <= self.device._read_signal(self.device.timeline_signal):
+        self.b_timeline[(self.b_next + 1) % len(self.b)], self.b_next = (1 << 64), (self.b_next + 1) % len(self.b)
+        return (self.b[self.b_next].va_addr, self.b_next)
+      return None
+
+    with hcq_profile(self.device, self.device.hw_copy_queue_t, desc=f"DISK -> {self.device.dname}", enabled=PROFILE):
+      for (batch_info, dst_off, src_off, copy_size) in src.device.allocator._copyout_sharded(src, size, _get_temp_buf, seg_len=self.b[0].size):
+        self.device.hw_copy_queue_t().wait(self.device.timeline_signal, self.device.timeline_value - 1) \
+                                     .copy(dest.va_addr + dst_off, batch_info[0] + src_off, copy_size) \
+                                     .signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
+        self.b_timeline[batch_info[1]] = self.device.timeline_value
+        self.device.timeline_value += 1
+
+  def copyout(self, dest:memoryview, src):
+    self.device.synchronize()
+
+    with hcq_profile(self.device, self.device.hw_copy_queue_t, desc=f"{self.device.dname} -> CPU", enabled=PROFILE):
+      for i in range(0, dest.nbytes, self.b[0].size):
+        self.device.hw_copy_queue_t().wait(self.device.timeline_signal, self.device.timeline_value - 1) \
+                                     .copy(self.b[0].va_addr, src.va_addr+i, lsize:=min(self.b[0].size, dest.nbytes-i)) \
+                                     .signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
+        self.device._wait_signal(self.device.timeline_signal, self.device.timeline_value)
+        self.device.timeline_value += 1
+
+        ctypes.memmove(from_mv(dest[i:]), self.b[0].va_addr, lsize)
+
+  def transfer(self, dest, src, sz: int, src_dev, dest_dev):
+    src_dev._gpu_map(dest)
+
+    with hcq_profile(self.device, self.device.hw_copy_queue_t, desc=f"{src_dev.dname} -> {dest_dev.dname}", enabled=PROFILE):
+      src_dev.hw_copy_queue_t().wait(src_dev.timeline_signal, src_dev.timeline_value - 1) \
+                               .wait(dest_dev.timeline_signal, dest_dev.timeline_value - 1) \
+                               .copy(dest.va_addr, src.va_addr, sz) \
+                               .signal(src_dev.timeline_signal, src_dev.timeline_value).submit(src_dev)
+      dest_dev.hw_compute_queue_t().wait(src_dev.timeline_signal, src_dev.timeline_value).submit(dest_dev)
+      src_dev.timeline_value += 1
+
+  def offset(self, buf, size:int, offset:int): return type(buf)(base=buf.base + offset, va_addr=buf.va_addr + offset, length=size, size=size)

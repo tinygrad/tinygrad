@@ -3,7 +3,7 @@ import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import DType
 from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load
-from tinygrad.helpers import Timing, fetch, temp
+from tinygrad.helpers import Timing, fetch, temp, CI
 from test.helpers import is_dtype_supported
 
 def compare_weights_both(url):
@@ -21,7 +21,6 @@ def compare_weights_both(url):
 
 class TestTorchLoad(unittest.TestCase):
   # pytorch pkl format
-  @unittest.skip("this test is slow and takes 17s. TODO: fix")
   def test_load_enet(self): compare_weights_both("https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b0-355c32eb.pth")
   # pytorch zip format
   def test_load_enet_alt(self): compare_weights_both("https://download.pytorch.org/models/efficientnet_b0_rwightman-3dd342df.pth")
@@ -60,7 +59,7 @@ class TestRawDiskBuffer(unittest.TestCase):
     _test_bitcasted(t, dtypes.uint32, 0)
     # pi in float16 stored via int16
     t.bitcast(dtypes.uint16).assign(Tensor.full((128, 64), 0x4248, dtype=dtypes.uint16)).realize()
-    _test_bitcasted(t, dtypes.float16, 3.141)
+    _test_bitcasted(t, dtypes.float16, 3.140625)
     _test_bitcasted(t, dtypes.float32, 50.064727)
     _test_bitcasted(t, dtypes.uint16, 0x4248)
     _test_bitcasted(t, dtypes.uint32, 0x42484248)
@@ -284,6 +283,12 @@ class TestDiskTensor(unittest.TestCase):
     ret = t.to("CLANG").bitcast(dtypes.uint16) + 1
     assert ret.tolist() == [2827, 3341, 3855, 4369, 4883]
 
+  def test_bitcast_view(self):
+    with open(temp('range_1020'), "wb") as f: f.write(bytes(range(10, 24)))
+    t = Tensor.empty(3, dtype=dtypes.uint, device=f"disk:{temp('range_1020')}").shrink([(0, 2)])
+    ret = t.bitcast(dtypes.uint16).to("CLANG") + 1
+    assert ret.tolist() == [2827, 3341, 3855, 4369]
+
   def test_bf16_disk_write_read(self):
     t = Tensor([10000, -1, -1000, -10000, 20], dtype=dtypes.float32)
     t.to(f"disk:{temp('f32')}").realize()
@@ -296,6 +301,37 @@ class TestDiskTensor(unittest.TestCase):
     t = Tensor.empty(5, dtype=dtypes.bfloat16, device=f"disk:{temp('bf16')}")
     ct = t.llvm_bf16_cast(dtypes.float)
     assert ct.numpy().tolist() == [9984., -1, -1000, -9984, 20]
+
+  def test_copy_from_disk(self):
+    fn = pathlib.Path(temp("shco1"))
+    fn.unlink(missing_ok=True)
+    fn.write_bytes(bytes(range(256))*1024)
+
+    t = Tensor.empty(256*1024, device=f"disk:{temp('shco1')}", dtype=dtypes.uint8)
+    on_dev = t.to(Device.DEFAULT).realize()
+    np.testing.assert_equal(on_dev.numpy(), t.numpy())
+
+  def test_copy_from_disk_offset(self):
+    fn = pathlib.Path(temp("shco2"))
+    fn.unlink(missing_ok=True)
+    fn.write_bytes(bytes(range(256))*1024)
+
+    for off in [314, 991, 2048, 4096]:
+      t = Tensor.empty(256*1024, device=f"disk:{temp('shco2')}", dtype=dtypes.uint8)[off:]
+      on_dev = t.to(Device.DEFAULT).realize()
+      np.testing.assert_equal(on_dev.numpy(), t.numpy())
+
+  def test_copy_from_disk_huge(self):
+    if CI and not hasattr(Device["DISK"], 'io_uring'): self.skipTest("slow on ci without iouring")
+
+    fn = pathlib.Path(temp("shco3"))
+    fn.unlink(missing_ok=True)
+    fn.write_bytes(bytes(range(256))*1024*256)
+
+    for off in [0, 551]:
+      t = Tensor.empty(256*1024*256, device=f"disk:{temp('shco3')}", dtype=dtypes.uint8)[off:]
+      on_dev = t.to(Device.DEFAULT).realize()
+      np.testing.assert_equal(on_dev.numpy(), t.numpy())
 
 if __name__ == "__main__":
   unittest.main()

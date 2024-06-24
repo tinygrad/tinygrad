@@ -13,7 +13,7 @@ from tinygrad.nn.state import safe_load, load_state_dict
 #The upsampling class has been taken from this pull request https://github.com/tinygrad/tinygrad/pull/784 by dc-dc-dc. Now 2(?) models use upsampling. (retinet and this)
 
 #Pre processing image functions.
-def compute_transform(image, new_shape=(640, 640), auto=False, scaleFill=False, scaleup=True, stride=32):
+def compute_transform(image, new_shape=(640, 640), auto=False, scaleFill=False, scaleup=True, stride=32) -> Tensor:
   shape = image.shape[:2]  # current shape [height, width]
   new_shape = (new_shape, new_shape) if isinstance(new_shape, int) else new_shape
   r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
@@ -28,15 +28,15 @@ def compute_transform(image, new_shape=(640, 640), auto=False, scaleFill=False, 
   top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
   left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
   image = cv2.copyMakeBorder(image, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(114, 114, 114))
-  return image
+  return Tensor(image)
 
 def preprocess(im, imgsz=640, model_stride=32, model_pt=True):
   same_shapes = all(x.shape == im[0].shape for x in im)
   auto = same_shapes and model_pt
-  im = Tensor([compute_transform(x, new_shape=imgsz, auto=auto, stride=model_stride) for x in im])
-  im = Tensor.stack(*im) if im.shape[0] > 1 else im
+  im = [compute_transform(x, new_shape=imgsz, auto=auto, stride=model_stride) for x in im]
+  im = Tensor.stack(*im) if len(im) > 1 else im[0].unsqueeze(0)
   im = im[..., ::-1].permute(0, 3, 1, 2)  # BGR to RGB, BHWC to BCHW, (n, 3, h, w)
-  im /= 255  # 0 - 255 to 0.0 - 1.0
+  im = im / 255.0  # 0 - 255 to 0.0 - 1.0
   return im
 
 # Post Processing functions
@@ -407,7 +407,7 @@ if __name__ == '__main__':
     sys.exit(1)
   pre_processed_image = preprocess(image)
 
-  # Different YOLOv8 variants use different w , r, and d multiples. For a list , refer to this yaml file (the scales section) https://github.com/ultralytics/ultralytics/blob/main/ultralytics/models/v8/yolov8.yaml
+  # Different YOLOv8 variants use different w , r, and d multiples. For a list , refer to this yaml file (the scales section) https://github.com/ultralytics/ultralytics/blob/main/ultralytics/cfg/models/v8/yolov8.yaml
   depth, width, ratio = get_variant_multiples(yolo_variant)
   yolo_infer = YOLOv8(w=width, r=ratio, d=depth, num_classes=80)
 
