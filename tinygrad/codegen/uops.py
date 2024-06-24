@@ -253,7 +253,7 @@ def replace_reduce(root):
     new_uops = [root.src[0]]
 
   # TODO: DEFINE_ACC should have a const input
-  const = UOp.const(root.dtype, get_reduce_acc(root.arg, root.dtype))
+  const = UOp.const(root.dtype.scalar(), get_reduce_acc(root.arg, root.dtype.scalar()))
   acc = UOp(UOps.DEFINE_ACC, root.dtype, (const,) + tuple(x for x in root.src[1:] if x not in expands), (acc_number,))
   acc_number += 1
   ret = acc
