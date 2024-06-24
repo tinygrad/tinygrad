@@ -106,6 +106,7 @@ class TestLinearizerFailures(unittest.TestCase):
     helper_test_lin(Linearizer(ast), opts, failed_platforms=[])
 
   # both kernels are correct from a code standpoint, but generate different results due to precision errors (switching to float results in output matches)
+  @unittest.skip("AST has implicit movement ops")
   def test_failure_13(self):
     ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=ReduceOps.SUM,
                                                                                src=(LazyOp(op=BinaryOps.MUL, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(2, 1, 384, 51864), strides=(51864, 0, 0, 1), offset=0, mask=None, contiguous=False),)))), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.half, st=ShapeTracker(views=(View(shape=(2, 1, 384, 51864), strides=(0, 0, 1, 384), offset=0, mask=None, contiguous=False),))))), arg=None),),
