@@ -124,7 +124,7 @@ def _ldexp2kf(d: LazyBuffer, e: LazyBuffer) -> LazyBuffer:
   assert e.dtype in (dtypes.int32, dtypes.int64)
   return d.e(BinaryOps.MUL, _pow2if(e.e(BinaryOps.SHR, e.const(1)))).e(BinaryOps.MUL, _pow2if(e.e(BinaryOps.ADD, e.e(BinaryOps.SHR, e.const(1)).e(UnaryOps.NEG)))) # noqa: E501
 
-def _payne_hanek(d: LazyBuffer, d_base: LazyBuffer, is_metal:bool = False) -> LazyBuffer:
+def _payne_hanek(d: LazyBuffer, d_base: LazyBuffer) -> LazyBuffer:
   assert d.dtype in [dtypes.float64, dtypes.float32, dtypes.float16]
   dtype = d.dtype
   two_over_pi_f = [0x00000000,0x28be60db,0x9391054a,0x7f09d5f4,0x7d4d3770,0x36d8a566,0x4f10e410] # noqa: E501
@@ -186,7 +186,7 @@ def _payne_hanek(d: LazyBuffer, d_base: LazyBuffer, is_metal:bool = False) -> La
   p = fr_map.e(TernaryOps.WHERE, p.e(BinaryOps.ADD, p.const(-0x4000000000000000)), p)
   q = fr_map.e(TernaryOps.WHERE, q.e(BinaryOps.ADD, q.const(1)), q)
 
-  d = p.cast(dtypes.float32 if is_metal else dtypes.float64)
+  d = p.cast(d.dtype)
   d = d.e(BinaryOps.MUL, d.const(3.4061215800865545e-19))
   r = d.cast(dtype)
 
@@ -205,7 +205,7 @@ def _payne_hanek(d: LazyBuffer, d_base: LazyBuffer, is_metal:bool = False) -> La
   return r.cast(dtype)
 
 ## **** approxs for sin/exp2/log2 ******
-def _xsin_base(d: LazyBuffer, is_metal:bool=False, fast:bool=False) -> LazyBuffer:
+def _xsin_base(d: LazyBuffer, fast:bool=False) -> LazyBuffer:
   assert d.dtype in [dtypes.float64, dtypes.float32, dtypes.float16]
   d = _lazy_map_numbers(d, d.const(0.0), d.const(0.0), d.const(0.0), d)
 
@@ -234,7 +234,7 @@ def _xsin_base(d: LazyBuffer, is_metal:bool=False, fast:bool=False) -> LazyBuffe
       _rintk(x.e(BinaryOps.MUL, d.const(m_1_pi))).cast(d.dtype) if fp32_p else _rintk(_mla(d, d.const(m_1_pi), qdh.e(UnaryOps.NEG))).cast(d.dtype)
     )
 
-  lv3_reduced_d = _payne_hanek(di, d, is_metal=is_metal)
+  lv3_reduced_d = _payne_hanek(di, d)
   lv3_q = __lv2q(d) if fast else __lv2q(lv3_reduced_d)
   q: LazyBuffer = di.e(BinaryOps.CMPLT, trig_range_lv1).e(TernaryOps.WHERE, __lv1q(d), di.e(BinaryOps.CMPLT, trig_range_lv2).e(TernaryOps.WHERE, __lv2q(d), lv3_q)) # noqa: E501
   def __lv1(x: LazyBuffer) -> LazyBuffer:
@@ -300,9 +300,9 @@ def _xsin_base(d: LazyBuffer, is_metal:bool=False, fast:bool=False) -> LazyBuffe
     u = _mla(s, u.e(BinaryOps.MUL, d), d)
   return u
 
-def _xsin(x: LazyBuffer, is_metal: bool=False, fast: bool=False) -> LazyBuffer:
+def _xsin(x: LazyBuffer, fast: bool=False) -> LazyBuffer:
   if 0 in x.shape: return x
-  return _lazy_map_numbers(x, x.const(math.nan), x.const(math.nan), x.const(math.nan), _xsin_base(x, is_metal=is_metal, fast=fast))
+  return _lazy_map_numbers(x, x.const(math.nan), x.const(math.nan), x.const(math.nan), _xsin_base(x, fast=fast))
 
 def _xexp2_base(d: LazyBuffer) -> LazyBuffer:
   fp64_p = d.dtype == dtypes.float64
@@ -393,13 +393,13 @@ class Sin(Function):
     self.fast = fast or self.device in ["PTX", "NV", "CUDA"]
     self.fast_approx = x.dtype in [dtypes.float32, dtypes.float64]
     if self.fast_approx:
-      return _xsin(x, is_metal=self.device=="METAL", fast=self.fast)
+      return _xsin(x, fast=self.fast)
 
     return x.e(UnaryOps.SIN)
 
   def backward(self, grad_output: LazyBuffer) -> LazyBuffer:
     k = self.x.const(math.pi / 2).e(BinaryOps.ADD, self.x.e(UnaryOps.NEG))
-    k = _xsin(k, is_metal=self.device=="METAL", fast=self.fast) if self.fast_approx else k.e(UnaryOps.SIN)
+    k = _xsin(k, fast=self.fast) if self.fast_approx else k.e(UnaryOps.SIN)
     return k.e(BinaryOps.MUL, grad_output)
 
 # NOTE: maximum(x, 0) behaves differently where x=0
