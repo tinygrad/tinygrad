@@ -534,6 +534,12 @@ class TestMultiTensor(unittest.TestCase):
         assert ast.src[0].src[0].op is BufferOps.LOAD
         assert ast.src[0].src[1].op is BufferOps.CONST and ast.src[0].src[1].arg.val == 3
 
+  def test_shard_memory(self):
+    devices = (d0, d1, d2, d3)
+    t = Tensor.zeros(16, 16).contiguous()
+    t.shard_(devices, axis=0)
+    assert all([lb is lb.base and lb.buffer.base.size == 4 * 16 for lb in t.lazydata.lbs])
+
 @unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"), "no GPU CI")
 class TestHandleData(unittest.TestCase):
   def test_copied_to_device(self):
