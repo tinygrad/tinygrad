@@ -3,7 +3,7 @@ import os, ctypes, pathlib, re, fcntl, functools, mmap, struct, tempfile, hashli
 from typing import Tuple, List, Any
 from dataclasses import dataclass
 from tinygrad.device import HCQCompatCompiled, HCQCompatAllocator, Compiler, CompileError, BufferOptions
-from tinygrad.helpers import getenv, from_mv, mv_address, init_c_struct_t, to_mv, round_up, to_char_p_p, DEBUG, prod
+from tinygrad.helpers import getenv, from_mv, mv_address, init_c_struct_t, to_mv, round_up, to_char_p_p, DEBUG, prod, PROFILE
 from tinygrad.renderer.cstyle import NVRenderer
 from tinygrad.runtime.ops_cuda import check as cuda_check, _get_bytes, CUDACompiler
 import tinygrad.runtime.autogen.cuda as cuda
@@ -103,9 +103,11 @@ class HWQueue:
                (3 << 0) | (1 << 24)] # ACQUIRE | PAYLOAD_SIZE_64BIT
     return self._mark_command_end()
 
+  def timestamp(self, signal): return HWQueue.signal(self, signal, timestamp=True)
+
   def signal(self, signal, value=0, timestamp=False):
     self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *nvdata64_le(ctypes.addressof(from_mv(signal))), *nvdata64_le(value),
-            (1 << 0) | (1 << 20) | (1 << 24) | ((1 << 25) if timestamp else 0)] # RELEASE | RELEASE_WFI | PAYLOAD_SIZE_64BIT | RELEASE_TIMESTAMP
+               (1 << 0) | (1 << 20) | (1 << 24) | ((1 << 25) if timestamp else 0)] # RELEASE | RELEASE_WFI | PAYLOAD_SIZE_64BIT | RELEASE_TIMESTAMP
     self.q += [nvmethod(0, nv_gpu.NVC56F_NON_STALL_INTERRUPT, 1), 0x0]
     return self._mark_command_end()
 
@@ -316,19 +318,22 @@ class NVProgram:
     if MOCKGPU: self.constbuffer_0[0:2] = [len(args), len(vals)]
     kernargs = [arg_half for arg in args for arg_half in nvdata64_le(arg.base)] + [val for val in vals]
 
+    sig_st, sig_en = (self.device._get_signal(), self.device._get_signal()) if PROFILE else (self.device.time_event_st, self.device.time_event_en)
+
     queue = HWComputeQueue()
     queue.wait(self.device.timeline_signal, self.device.timeline_value - 1)
-    if wait: queue.signal(self.device.time_event_st, timestamp=True)
+    if wait or PROFILE: queue.timestamp(sig_st)
     queue.copy_from_cpu(self.device.kernargs_ptr, self.constbuffer_0 + kernargs)
     queue.exec(self, self.device.kernargs_ptr, global_size, local_size)
-    if wait: queue.signal(self.device.time_event_en, timestamp=True)
+    if wait or PROFILE: queue.timestamp(sig_en)
     queue.signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
     self.device.timeline_value += 1
     self.device.kernargs_ptr += self.kernargs_alloc_size
 
+    if PROFILE: self.device.sig_prof_records.append((sig_st, sig_en, self.name, False))
     if wait:
       self.device._wait_signal(self.device.timeline_signal, self.device.timeline_value - 1)
-      return (self.device.time_event_en[1] - self.device.time_event_st[1]) / 1e9
+      return (sig_en[1] - sig_st[1]) / 1e9
 
 class NVAllocator(HCQCompatAllocator):
   def __init__(self, device:NVDevice): super().__init__(device)
@@ -498,7 +503,7 @@ class NVDevice(HCQCompatCompiled):
       uvm.enable_peer_access(self.fd_uvm, gpuUuidA=nv_gpu.struct_nv_uuid(uuid=self.gpu_uuid), gpuUuidB=nv_gpu.struct_nv_uuid(uuid=dev.gpu_uuid))
 
     if NVDevice.signals_page is None:
-      NVDevice.signals_page = self._gpu_system_alloc(0x10000, map_to_cpu=True)
+      NVDevice.signals_page = self._gpu_system_alloc(16 * 65536, map_to_cpu=True)
       NVDevice.signals_pool = [to_mv(self.signals_page.base + off, 16).cast("Q") for off in range(0, NVDevice.signals_page.length, 16)]
     else: self._gpu_map(NVDevice.signals_page)
 
@@ -535,14 +540,11 @@ class NVDevice(HCQCompatCompiled):
 
     NVDevice.devices.append(self)
 
-  def synchronize(self):
-    NVDevice._wait_signal(self.timeline_signal, self.timeline_value - 1)
-    self.cmdq_wptr = 0
-
-    if self.timeline_value > (1 << 63): self._wrap_timeline_signal()
-
   @classmethod
   def _read_signal(self, sig): return sig[0]
+
+  @classmethod
+  def _read_timestamp(self, sig): return sig[1]
 
   @classmethod
   def _set_signal(self, sig, value): sig[0] = value
@@ -558,6 +560,15 @@ class NVDevice(HCQCompatCompiled):
     while time.time() * 1000 - start_time < timeout:
       if signal[0] >= value: return
     raise RuntimeError(f"wait_result: {timeout} ms TIMEOUT!")
+
+  def _gpu2cpu_time(self, gpu_time, is_copy): return self.cpu_start_time + (gpu_time - self.gpu_start_time) / 1e3
+
+  def synchronize(self):
+    NVDevice._wait_signal(self.timeline_signal, self.timeline_value - 1)
+    self.cmdq_wptr = 0
+
+    if self.timeline_value > (1 << 63): self._wrap_timeline_signal()
+    if PROFILE: self._prof_process_events()
 
   def _new_gpu_fifo(self, gpfifo_area, ctxshare, channel_group, offset=0, entries=0x400) -> GPFifo:
     notifier = self._gpu_system_alloc(48 << 20)
